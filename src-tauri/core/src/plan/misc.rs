@@ -15,7 +15,10 @@
 //! 5 label    [5, x, y]                              (unten links; Kurz-Tag setzt der Aufrufer)
 //! 1 polygon  [1, x0, y0 … x3, y3]                   (unsichtbares Pick-Band)
 //! ```
-//! Ansicht ([176]): `view_marker_sized` → `[3, 4 circle [4, cx, cy, r], 3 triangle, 1 polygon]`.
+//! L-Marke ([176], `SectionMarkerStyle::LAngle`): `section_polyline_styled(.., LAngle)` → je Ende zwei kräftige Linien
+//! (langer Schenkel längs der Linie nach innen, kurzer in Blickrichtung), Label, an Knicken Knickstücke; keine Linie dazwischen,
+//! kein Dreieck, Pick-Band je Segment.
+//! Ansicht ([176]): `view_marker_sized` → `[n, 3 triangle (flach), 5 label, 1 polygon]`, kein Kreis.
 //!
 //! ## Linienende
 //! `end_mark(x, y, dx, dy, art, mm, massstab)` → `[verkuerzung, n, Eintrag × n]` (leer = nichts):
@@ -28,6 +31,7 @@
 
 use crate::jsmath::hypot2;
 use crate::jsnum::round;
+use crate::model::SectionMarkerStyle;
 use std::collections::HashSet;
 
 const FOOTPRINT_Z_TOL: f64 = 0.6;
@@ -39,10 +43,12 @@ const SECTION_HEAD_LEN_MM: f64 = 3.5;
 const SECTION_HEAD_HALF_MM: f64 = 1.3;
 const SECTION_LABEL_MM: f64 = 3.5;
 const SECTION_PICK_HALF: f64 = 0.3;
-/// [176] Ansichtsmarker: Kreis Ø 8 mm, Pfeilspitze 3.5 mm lang und 3.2 mm breit.
-pub const VIEW_MARKER_R_MM: f64 = 4.0;
-const VIEW_MARKER_TIP_MM: f64 = 3.5;
-const VIEW_MARKER_HALF_MM: f64 = 1.6;
+/// [176] L-Marke: langer Schenkel längs der Linie, kurzer in Blickrichtung.
+const L_LONG_MM: f64 = 12.0;
+const L_SHORT_MM: f64 = 6.0;
+/// [176] Ansichtsmarker: flaches gefülltes Dreieck, Basis 6 mm, Höhe 3 mm in Blickrichtung.
+const VIEW_MARKER_HEIGHT_MM: f64 = 3.0;
+const VIEW_MARKER_HALF_MM: f64 = 3.0;
 const ARROW_ASPECT: f64 = 0.32;
 
 /// Ganzzahl-Schlüssel für die Quantisierung; NaN/∞ bekommen feste Platzhalter (wie ihre Textform in JS).
@@ -162,6 +168,15 @@ pub fn section_line_sized(p0x: f64, p0y: f64, p1x: f64, p1y: f64, sign: f64, mm:
 /// Stücke (6 mm) auf beiden Seiten; Schenkel/Dreieck/Beschriftung an den Enden gehören zum ersten bzw. letzten
 /// Segment; je Segment ein Pick-Band. Mit zwei Punkten identisch zur geraden Linie. Segmente unter 1 µm entfallen.
 pub fn section_polyline_sized(pts: &[(f64, f64)], sign: f64, mm: f64, label_w: f64) -> Vec<f64> {
+    section_polyline_styled(pts, sign, mm, label_w, SectionMarkerStyle::Arrow)
+}
+
+/// [176] Wie [`section_polyline_sized`] mit Markentyp: `Arrow` = bisher; `LAngle` = an jedem Ende ein L (langer Schenkel
+/// 12 mm längs der Linie nach innen, kurzer 6 mm in Blickrichtung, beide kräftig), keine Linie dazwischen und kein Dreieck;
+/// die Beschriftung steht waagrecht neben dem Ende des kurzen Schenkels, ausserhalb der Linie. An Knicken die
+/// Knickstücke wie beim Pfeil.
+pub fn section_polyline_styled(pts: &[(f64, f64)], sign: f64, mm: f64, label_w: f64, style: SectionMarkerStyle) -> Vec<f64> {
+    let l_angle = style == SectionMarkerStyle::LAngle;
     if pts.len() < 2 || !pts.iter().all(|p| p.0.is_finite() && p.1.is_finite()) || ![sign, mm, label_w].iter().all(|x| x.is_finite()) || !(mm > 0.0) {
         return Vec::new();
     }
@@ -194,12 +209,33 @@ pub fn section_polyline_sized(pts: &[(f64, f64)], sign: f64, mm: f64, label_w: f
         let len = hypot2(b.0 - a.0, b.1 - a.1);
         let ps = (if i == 0 { SECTION_END_PIECE_MM } else { SECTION_BEND_PIECE_MM } * mm).min(len / 3.0);
         let pe = (if i == segs - 1 { SECTION_END_PIECE_MM } else { SECTION_BEND_PIECE_MM } * mm).min(len / 3.0);
+        if l_angle {
+            // Langer Schenkel am Ende (12 mm), Knickstücke (6 mm) an den Knicken; dazwischen nichts.
+            let (ps, pe) = ((if i == 0 { L_LONG_MM } else { SECTION_BEND_PIECE_MM } * mm).min(len / 3.0), (if i == segs - 1 { L_LONG_MM } else { SECTION_BEND_PIECE_MM } * mm).min(len / 3.0));
+            line(&mut o, &mut n, 1.0, a, (a.0 + ux * ps, a.1 + uy * ps));
+            line(&mut o, &mut n, 1.0, (b.0 - ux * pe, b.1 - uy * pe), b);
+            continue;
+        }
         line(&mut o, &mut n, 1.0, a, (a.0 + ux * ps, a.1 + uy * ps));
         line(&mut o, &mut n, 0.0, (a.0 + ux * ps, a.1 + uy * ps), (b.0 - ux * pe, b.1 - uy * pe));
         line(&mut o, &mut n, 1.0, (b.0 - ux * pe, b.1 - uy * pe), b);
     }
+    if l_angle {
+        let short = L_SHORT_MM * mm;
+        for (end, (ux, uy), outward) in [(pts[0], dirs[0], -1.0), (pts[segs], dirs[segs - 1], 1.0)] {
+            let (bnx, bny) = (-uy * sign, ux * sign);
+            let tip = (end.0 + bnx * short, end.1 + bny * short);
+            line(&mut o, &mut n, 1.0, end, tip);
+            // Beschriftung neben dem Ende des kurzen Schenkels, nach aussen (längs der Linie, vom Ende weg).
+            let (ox, oy) = (ux * outward, uy * outward);
+            let reach = mm * 1.0 + ox.abs() * label_w / 2.0 + oy.abs() * label_h / 2.0;
+            let (cx, cy) = (tip.0 + ox * reach, tip.1 + oy * reach);
+            o.extend([5.0, cx - label_w / 2.0, cy - label_h / 2.0]);
+            n += 1;
+        }
+    }
     let (head_l, head_hw) = (SECTION_HEAD_LEN_MM * mm, SECTION_HEAD_HALF_MM * mm);
-    for (end, (ux, uy)) in [(pts[0], dirs[0]), (pts[segs], dirs[segs - 1])] {
+    for (end, (ux, uy)) in if l_angle { vec![] } else { vec![(pts[0], dirs[0]), (pts[segs], dirs[segs - 1])] } {
         let (bnx, bny) = (-uy * sign, ux * sign);
         let tip = (end.0 + bnx * leg, end.1 + bny * leg);
         line(&mut o, &mut n, 1.0, end, tip);
@@ -225,12 +261,14 @@ pub fn section_polyline_sized(pts: &[(f64, f64)], sign: f64, mm: f64, label_w: f
     out
 }
 
-/// [176] Ansichtsmarker (eigenes Symbol statt Schnittlinie): Kreis (Ø 8 mm Papier) in der Mitte der Ansichtslinie
-/// `p0`–`p1`, daran ein gefülltes Dreieck in Blickrichtung (`sign` wie bei der Schnittlinie). `mm` = Modell-Meter je
-/// Papier-mm. Ergebnis `[n, Eintrag × n]` mit `4 circle [4, cx, cy, r]`, `3 triangle` und `1 polygon` (Pick-Band);
-/// die Bezeichnung setzt der Aufrufer. Leer bei zu kurzer Linie oder Unsinn.
-pub fn view_marker_sized(p0x: f64, p0y: f64, p1x: f64, p1y: f64, sign: f64, mm: f64) -> Vec<f64> {
-    if ![p0x, p0y, p1x, p1y, sign, mm].iter().all(|x| x.is_finite()) || !(mm > 0.0) {
+/// [176] Ansichtsmarker (eigenes Symbol statt Schnittlinie): nur ein flaches gefülltes Dreieck (Basis 6 mm, Höhe 3 mm
+/// Papier) in Blickrichtung (`sign` wie bei der Schnittlinie) mit der Basis in der Mitte der Ansichtslinie `p0`–`p1`,
+/// dahinter (auf der dem Blick abgewandten Seite) waagrecht die Bezeichnung (Breite `label_w`, Schrift
+/// `SECTION_LABEL_MM · mm`). `mm` = Modell-Meter je Papier-mm. Ergebnis `[n, Eintrag × n]` mit `3 triangle`,
+/// `5 label [5, x, y]` (unten links) und `1 polygon` (Pick-Band über Dreieck und Text). Kein Kreis, keine Linie.
+/// Leer bei zu kurzer Linie oder Unsinn.
+pub fn view_marker_sized(p0x: f64, p0y: f64, p1x: f64, p1y: f64, sign: f64, mm: f64, label_w: f64) -> Vec<f64> {
+    if ![p0x, p0y, p1x, p1y, sign, mm, label_w].iter().all(|x| x.is_finite()) || !(mm > 0.0) {
         return Vec::new();
     }
     let (ax, ay) = (p1x - p0x, p1y - p0y);
@@ -241,15 +279,21 @@ pub fn view_marker_sized(p0x: f64, p0y: f64, p1x: f64, p1y: f64, sign: f64, mm: 
     let (ux, uy) = (ax / len, ay / len);
     let (bnx, bny) = (-uy * sign, ux * sign);
     let (cx, cy) = ((p0x + p1x) / 2.0, (p0y + p1y) / 2.0);
-    let r = VIEW_MARKER_R_MM * mm;
-    let (tip_l, hw) = (VIEW_MARKER_TIP_MM * mm, VIEW_MARKER_HALF_MM * mm);
-    let base = (cx + bnx * r, cy + bny * r);
-    let tip = (base.0 + bnx * tip_l, base.1 + bny * tip_l);
-    let mut o = vec![4.0, cx, cy, r];
-    o.extend([3.0, tip.0, tip.1, base.0 + ux * hw, base.1 + uy * hw, base.0 - ux * hw, base.1 - uy * hw]);
-    let back = (cx - bnx * r, cy - bny * r);
+    let (tip_l, hw) = (VIEW_MARKER_HEIGHT_MM * mm, VIEW_MARKER_HALF_MM * mm);
+    let tip = (cx + bnx * tip_l, cy + bny * tip_l);
+    let mut o = vec![3.0, tip.0, tip.1, cx + ux * hw, cy + uy * hw, cx - ux * hw, cy - uy * hw];
+    // Bezeichnung hinter der Basis (gegen die Blickrichtung): Mitte im Abstand 1 mm + halbe Kastenausdehnung.
+    let label_h = SECTION_LABEL_MM * mm * 0.75;
+    let ext = bnx.abs() * label_w / 2.0 + bny.abs() * label_h / 2.0;
+    let reach = mm * 1.0 + ext;
+    let (lx, ly) = (cx - bnx * reach, cy - bny * reach);
+    o.extend([5.0, lx - label_w / 2.0, ly - label_h / 2.0]);
+    // Pick-Band: orientiertes Rechteck von der Rückseite des Textes bis zur Spitze, breit genug für Dreieck und Text.
+    let back_d = reach + ext;
+    let half_u = hw.max(ux.abs() * label_w / 2.0 + uy.abs() * label_h / 2.0);
+    let back = (cx - bnx * back_d, cy - bny * back_d);
     o.push(1.0);
-    o.extend([back.0 + ux * r, back.1 + uy * r, tip.0 + ux * r, tip.1 + uy * r, tip.0 - ux * r, tip.1 - uy * r, back.0 - ux * r, back.1 - uy * r]);
+    o.extend([back.0 + ux * half_u, back.1 + uy * half_u, tip.0 + ux * half_u, tip.1 + uy * half_u, tip.0 - ux * half_u, tip.1 - uy * half_u, back.0 - ux * half_u, back.1 - uy * half_u]);
     let mut out = vec![3.0];
     out.extend(o);
     out
@@ -347,16 +391,64 @@ mod tests {
         assert_eq!(f[0], 10.0);
     }
 
-    /// [176] Ansichtsmarker: Kreis Ø 8 mm in der Linienmitte, Dreieck in Blickrichtung, kein Linienstück.
+    /// [176] Ansichtsmarker: nur flaches Dreieck (Basis 6 mm, Höhe 3 mm) in Blickrichtung, Bezeichnung dahinter, Pick-Band.
     #[test]
-    fn ansichtsmarker_kreis_dreieck_pick() {
-        let f = view_marker_sized(0.0, 0.0, 10.0, 0.0, 1.0, 0.2);
+    fn ansichtsmarker_dreieck_label_pick() {
+        let f = view_marker_sized(0.0, 0.0, 10.0, 0.0, 1.0, 0.2, 1.0);
+        // Dreieck, Label, Pick (kein Kreis).
         assert_eq!(f[0], 3.0);
-        assert_eq!(f[1..5], [4.0, 5.0, 0.0, 0.8]);
-        // Dreieck: Spitze 0.8 + 0.7 m in +y (Blickrichtung bei sign 1).
-        assert!((f[6] - 5.0).abs() < 1e-12 && (f[7] - 1.5).abs() < 1e-12);
-        assert!(view_marker_sized(0.0, 0.0, 0.0, 0.0, 1.0, 0.2).is_empty());
-        assert!(view_marker_sized(f64::NAN, 0.0, 1.0, 0.0, 1.0, 0.2).is_empty());
+        assert_eq!(f[1], 3.0);
+        // Spitze: Mitte (5, 0) + 3 mm · 0.2 in +y; Basis ± 3 mm · 0.2 längs der Linie.
+        let near = |x: &[f64], y: &[f64]| x.iter().zip(y).all(|(a, b)| (a - b).abs() < 1e-9);
+        assert!(near(&f[2..8], &[5.0, 0.6, 5.6, 0.0, 4.4, 0.0]), "{:?}", &f[2..8]);
+        // Label hinter der Basis (y < 0), waagrecht um x = 5 zentriert, ohne das Dreieck zu berühren.
+        assert_eq!(f[8], 5.0);
+        let label_h = 3.5 * 0.2 * 0.75;
+        assert!((f[9] - 4.5).abs() < 1e-9 && f[10] + 0.0 < 0.0 && f[10] + label_h <= -0.2 + 1e-9, "{:?}", &f[8..11]);
+        assert_eq!(f[11], 1.0);
+        assert!(view_marker_sized(0.0, 0.0, 0.0, 0.0, 1.0, 0.2, 1.0).is_empty());
+        assert!(view_marker_sized(f64::NAN, 0.0, 1.0, 0.0, 1.0, 0.2, 1.0).is_empty());
+    }
+
+    /// [176] L-Marke: je Ende zwei kräftige Linien (12 mm längs der Linie nach innen, 6 mm in Blickrichtung), keine
+    /// dünne Linie, kein Dreieck; Label ausserhalb neben dem kurzen Schenkel; Pick-Band je Segment.
+    #[test]
+    fn l_marke_zwei_schenkel_je_ende_ohne_linie() {
+        let f = section_polyline_styled(&[(0.0, 0.0), (10.0, 0.0)], 1.0, 0.2, 1.0, SectionMarkerStyle::LAngle);
+        // 2 × (langer + kurzer Schenkel + Label) + 1 Pick = 7
+        assert_eq!(f[0], 7.0);
+        let near = |x: &[f64], y: &[f64]| x.iter().zip(y).all(|(a, b)| (a - b).abs() < 1e-9);
+        assert!(near(&f[1..7], &[2.0, 1.0, 0.0, 0.0, 2.4, 0.0]), "lang links");
+        assert!(near(&f[7..13], &[2.0, 1.0, 7.6, 0.0, 10.0, 0.0]), "lang rechts");
+        assert!(near(&f[13..19], &[2.0, 1.0, 0.0, 0.0, 0.0, 1.2]), "kurz links");
+        // Label links: ausserhalb (x < 0) auf Höhe des kurzen Schenkels (y ≈ 1.2).
+        assert_eq!(f[19], 5.0);
+        assert!(f[20] + 1.0 < 0.0 && (f[21] + 3.5 * 0.2 * 0.75 / 2.0 - 1.2).abs() < 1e-9, "{:?}", &f[19..22]);
+        // Weder dünne Linie (art 0) noch Dreieck (3).
+        let mut i = 1;
+        for _ in 0..7 {
+            match f[i] {
+                2.0 => {
+                    assert_eq!(f[i + 1], 1.0);
+                    i += 6;
+                }
+                5.0 => i += 3,
+                1.0 => i += 9,
+                t => panic!("unerwarteter Eintrag {t}"),
+            }
+        }
+        // Pfeil unverändert.
+        assert_eq!(section_polyline_styled(&[(0.0, 0.0), (10.0, 0.0)], 1.0, 0.2, 1.0, SectionMarkerStyle::Arrow), section_line_sized(0.0, 0.0, 10.0, 0.0, 1.0, 0.2, 1.0));
+    }
+
+    /// [176] L-Marke mit Knick: Knickstücke (6 mm) bleiben, Schenkel nur an den Enden.
+    #[test]
+    fn l_marke_geknickt_behaelt_knickstuecke() {
+        let f = section_polyline_styled(&[(0.0, 0.0), (10.0, 0.0), (10.0, 8.0)], 1.0, 0.2, 1.0, SectionMarkerStyle::LAngle);
+        // 4 Endstücke/Knickstücke je Segment 2 = 4, 2 kurze Schenkel, 2 Label, 2 Pick = 10
+        assert_eq!(f[0], 10.0);
+        let near = |x: &[f64], y: &[f64]| x.iter().zip(y).all(|(a, b)| (a - b).abs() < 1e-9);
+        assert!(near(&f[7..13], &[2.0, 1.0, 8.8, 0.0, 10.0, 0.0]));
     }
 
     /// [176] Fixe Papiergrösse: Schenkel 8 mm, Endstück 12 mm; Ansicht ohne kräftige Endstücke.

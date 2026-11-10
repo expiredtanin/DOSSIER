@@ -1847,6 +1847,11 @@ pub struct DrawingLevel {
     #[serde(rename = "bendPoints", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub bend_points: Option<Vec<Vec2>>,
+    /// [176] Schnittmarke im Grundriss: "arrow" (Pfeil mit Dreieck, Basis) oder "lAngle" (nur ein L je Ende). Fehlt ⇒ die
+    /// Vorgabe der Modelldarstellung (`sectionMarks.style`), sonst Pfeil. Nur Schnitt.
+    #[serde(rename = "markerStyle", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub marker_style: Option<SectionMarkerStyle>,
     /// Blickrichtung relativ zur Schnittlinie (nur Schnitt/Ansicht).
     #[serde(rename = "directionSign", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional, type = "1 | -1")]
@@ -2076,9 +2081,40 @@ pub struct ModelViewOption {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub elevation: Option<ModelViewElevation>,
+    /// [176] Schnittmarken im Grundriss.
+    #[serde(rename = "sectionMarks", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub section_marks: Option<ModelViewSectionMarks>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
+}
+
+/// [176] Schnittmarken in der Modelldarstellung (fehlt ⇒ Pfeil).
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct ModelViewSectionMarks {
+    /// Markentyp der Schnitte (die Ebene geht vor; Basis: Pfeil).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub style: Option<SectionMarkerStyle>,
+    #[serde(flatten)]
+    #[ts(skip)]
+    pub extra: Extra,
+}
+
+/// [176] Markentyp einer Schnittlinie im Grundriss: Pfeil (kräftige Endstücke, dünne Linie, Schenkel mit Dreieck)
+/// oder nur ein L an jedem Ende (langer Schenkel längs der Linie, kurzer in Blickrichtung, keine Linie dazwischen).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+pub enum SectionMarkerStyle {
+    #[default]
+    #[serde(rename = "arrow")]
+    Arrow,
+    #[serde(rename = "lAngle")]
+    LAngle,
+    #[serde(other)]
+    #[ts(skip)]
+    Unknown,
 }
 
 /// [173] Türen in der Modelldarstellung (fehlt ⇒ wie Basis).

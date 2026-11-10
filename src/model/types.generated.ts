@@ -1100,6 +1100,11 @@ export type DrawingLevel = {
    * folgt weiter der Verbindung der Endpunkte.
    */
   bendPoints?: Array<Vec2>;
+  /**
+   * [176] Schnittmarke im Grundriss: "arrow" (Pfeil mit Dreieck, Basis) oder "lAngle" (nur ein L je Ende). Fehlt ⇒ die
+   * Vorgabe der Modelldarstellung (`sectionMarks.style`), sonst Pfeil. Nur Schnitt.
+   */
+  markerStyle?: SectionMarkerStyle;
   /** Blickrichtung relativ zur Schnittlinie (nur Schnitt/Ansicht). */
   directionSign?: 1 | -1;
   /**
@@ -2051,6 +2056,8 @@ export type ModelViewOption = {
   columns?: ModelViewColumns;
   /** [173] Ansicht (Fassade). */
   elevation?: ModelViewElevation;
+  /** [176] Schnittmarken im Grundriss. */
+  sectionMarks?: ModelViewSectionMarks;
 };
 
 /** [173] Dächer in der Modelldarstellung (fehlt ⇒ wie Basis). */
@@ -2061,6 +2068,12 @@ export type ModelViewRoofs = {
   overhead?: boolean;
   /** Ansichtsschraffur und Muster der Eindeckung in der Dachaufsicht (Basis: ja). */
   viewHatch?: boolean;
+};
+
+/** [176] Schnittmarken in der Modelldarstellung (fehlt ⇒ Pfeil). */
+export type ModelViewSectionMarks = {
+  /** Markentyp der Schnitte (die Ebene geht vor; Basis: Pfeil). */
+  style?: SectionMarkerStyle;
 };
 
 /** [173] Gelände in der Modelldarstellung. */
@@ -3192,6 +3205,12 @@ export type SashDef = {
   /** Anschlag/Bandseite (nur öffenbare Flügel). */
   hingeSide?: "left" | "right";
 };
+
+/**
+ * [176] Markentyp einer Schnittlinie im Grundriss: Pfeil (kräftige Endstücke, dünne Linie, Schenkel mit Dreieck)
+ * oder nur ein L an jedem Ende (langer Schenkel längs der Linie, kurzer in Blickrichtung, keine Linie dazwischen).
+ */
+export type SectionMarkerStyle = "arrow" | "lAngle";
 
 /**
  * Sequenz-Regel: fasst mehrere Unterregeln zusammen und wendet sie geordnet an.
