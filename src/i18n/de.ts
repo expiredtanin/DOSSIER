@@ -2071,6 +2071,7 @@ export const de = {
   "cmd.align.distY": "senkrecht verteilen",
   "cmd.explode.label": "Auflösen",
   "cmd.dimdetach.label": "Bemassung lösen",
+  "cmd.dimtextreset.label": "Text zurücksetzen",
   "cmd.autodim.label": "Aussenbemassung",
   "cmd.scale.label": "Skalieren",
   "cmd.scale.base": "Basispunkt:",

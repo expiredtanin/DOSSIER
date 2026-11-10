@@ -285,6 +285,8 @@ export interface PanelHostValue {
   onSetDetailRefSheetLabel: (drawingId: string, sheetLabel: string) => void;
   /** „Bemassung lösen" ([38]): Bezüge der Bemassung entfernen, Punkte bleiben. */
   onDetachDimension: (drawingId: string) => void;
+  /** „Text zurücksetzen" ([172]): Masszahlen der Bemassung zurück auf die Vorgabe (mittig). */
+  onResetDimensionText: (drawingId: string) => void;
   onSetHatchPlacement: (
     drawingId: string,
     patch: { angleDeg?: number | null; scale?: number | null; origin?: Vec2 | null },

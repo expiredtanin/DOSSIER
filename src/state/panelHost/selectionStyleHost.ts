@@ -180,6 +180,16 @@ export function buildSelectionStyleHost(c: FlatHostOpts) {
     onSetDashScale: (drawingId, scale) =>
       setProject(opsMutation((p) => patchItem(p, "drawings2d", drawingId, { dashScale: scale }))),
     onDetachDimension: (drawingId) => setProject(cmdMutation({ cmd: "dimdetach", ids: [drawingId] })),
+    onResetDimensionText: (drawingId) =>
+      setProject(
+        opsMutation((p) =>
+          patchItem(p, "drawings2d", drawingId, (d) => {
+            if (d.geom.shape !== "dimension") return d;
+            const { textOffsetsMm: _drop, ...geom } = d.geom;
+            return { ...d, geom };
+          }),
+        ),
+      ),
     onSetDetailRefLabel: (drawingId, label) =>
       setProject(
         opsMutation((p) =>

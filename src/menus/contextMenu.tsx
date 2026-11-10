@@ -120,6 +120,9 @@ export interface MenuActions {
   /** Gewählte Bemassungen mit Bezügen ([38]); ab 1 erscheint „Bemassung lösen". */
   attachedDimensionCount?: number;
   detachDimensions?: () => void;
+  /** [172] Gewählte Bemassungen mit verschobener Masszahl und „Text zurücksetzen". */
+  movedDimensionTextCount?: number;
+  resetDimensionTexts?: () => void;
 }
 
 /**
@@ -385,6 +388,11 @@ function planMenuItems(
     a.attachedDimensionCount && a.detachDimensions
       ? [{ label: t("cmd.dimdetach.label"), icon: <MenuIcon name="link_off" />, onClick: a.detachDimensions }]
       : [];
+  // „Text zurücksetzen" ([172]) — nur wenn eine Masszahl von der Vorgabe (mittig) abweicht.
+  const dimTextResetItems: ContextMenuItem[] =
+    a.movedDimensionTextCount && a.resetDimensionTexts
+      ? [{ label: t("cmd.dimtextreset.label"), icon: <MenuIcon name="format_align_center" />, onClick: a.resetDimensionTexts }]
+      : [];
 
   // Boolean-Einträge (Vereinigen/Subtrahieren/Schneiden) auf die 2D-Auswahl.
   // Aktiv ab 2 geschlossenen Flächen; sonst deaktiviert mit erklärendem Tooltip.
@@ -462,6 +470,8 @@ function planMenuItems(
       ...(layerItems.length ? [{ divider: true } as ContextMenuItem] : []),
       ...noPrintItems,
       ...dimDetachItems,
+    ...dimTextResetItems,
+      ...dimTextResetItems,
       ...(noPrintItems.length ? [{ divider: true } as ContextMenuItem] : []),
       {
         label: t("ctx.fitSelection"),
@@ -496,6 +506,7 @@ function planMenuItems(
     ...(layerItems.length ? [{ divider: true } as ContextMenuItem] : []),
     ...noPrintItems,
     ...dimDetachItems,
+    ...dimTextResetItems,
     ...(noPrintItems.length ? [{ divider: true } as ContextMenuItem] : []),
     ...booleanItems,
     { divider: true },

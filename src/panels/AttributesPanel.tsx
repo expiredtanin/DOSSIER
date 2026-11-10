@@ -51,7 +51,7 @@ import { StairSection } from "./objectInfo/StairSection";
 import { RoomSection } from "./objectInfo/RoomSection";
 import { ExtrudedSolidSection, ColumnSection } from "./objectInfo/SolidSections";
 import { SectionLineSection } from "./objectInfo/SectionLineSection";
-import { DetailRefSection, DimRefsSection } from "./objectInfo/RefSections";
+import { DetailRefSection, DimRefsSection, DimTextSection } from "./objectInfo/RefSections";
 import { SurfacePatternPlacement } from "./SurfacePatternPlacement";
 
 /** UI-Zustand des 3-Optionen-Quellen-Dropdowns (nicht 1:1 das Modell-Feld:
@@ -869,6 +869,7 @@ export function AttributesPanel() {
       {sel.column && <ColumnSection column={sel.column} host={host} />}
       {sel.detailRef && <DetailRefSection detailRef={sel.detailRef} drawingId={sel.id} host={host} />}
       {sel.dimRefs && <DimRefsSection refs={sel.dimRefs} drawingId={sel.id} host={host} />}
+      {sel.dimTextMoved && <DimTextSection drawingId={sel.id} host={host} />}
     </div>
   );
 }

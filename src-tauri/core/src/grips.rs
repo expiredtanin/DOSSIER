@@ -113,6 +113,8 @@ pub struct Request {
     delta: [N; 2],
     /// Punkttyp der Polylinie (`vertexType`: "corner" | "arc" | "spline").
     vertex_type: Option<String>,
+    /// [172] Freie Lage ohne Einrasten (gehaltene Alt-Taste), bisher nur beim Masszahl-Griff.
+    free: bool,
 }
 
 impl Request {
@@ -211,8 +213,8 @@ pub fn run(lk: &Lookup, req: &Request) -> Result<GripResult, String> {
             }
             let f: Box<dyn Fn(&Value, bool) -> Option<Value>> = match op {
                 "moveGrip" => {
-                    let (index, (x, y), scale) = (r.n("index"), r.p("pt"), r.n("scale"));
-                    Box::new(move |e, wall| if wall { Some(wall_grip(e, index, x, y)) } else { drawing_grip(e, index, x, y, scale) })
+                    let (index, (x, y), scale, free) = (r.n("index"), r.p("pt"), r.n("scale"), r.free);
+                    Box::new(move |e, wall| if wall { Some(wall_grip(e, index, x, y)) } else { drawing_grip(e, index, x, y, scale, free) })
                 }
                 "moveBy" => {
                     let (dx, dy) = r.p("delta");
@@ -488,8 +490,26 @@ fn dim_height(g: &Value, scale: f64) -> f64 {
     mm_to_model(num_or(field(g, "textHeightMm"), DIM_TEXT_HEIGHT_MM), scale)
 }
 
+/// [172] Einrast-Stellen der Masszahl eines Segments der Länge `len` (Modell-Meter, Schrifthöhe `h`) als (entlang,
+/// quer) ab der Mitte über dem Massstrich: Mitte (Vorgabe), innen links/rechts (Zahl bündig an der Hilfslinie),
+/// aussen links/rechts, eine Zeile über bzw. unter der Linie. Nächste Stelle zu (`along`, `perp`); passt die Zahl
+/// nicht zwischen die Hilfslinien, entfallen Mitte und innen. Mitte = (0, 0) = Vorgabe (läuft über `dim_auto_offsets`).
+fn dim_text_slot(len: f64, h: f64, along: f64, perp: f64) -> (f64, f64) {
+    use crate::plan::drawings::{dim_text_below, dim_text_pad, dim_text_row, dim_text_width};
+    let (w, pad, row) = (dim_text_width(len, h), dim_text_pad(h), dim_text_row(h));
+    let fits = w + 2.0 * pad <= len;
+    let (inner, outer) = (len / 2.0 - w / 2.0 - pad, len / 2.0 + w / 2.0 + pad);
+    let mut slots = vec![(-outer, 0.0), (outer, 0.0), (0.0, row), (0.0, dim_text_below(h))];
+    if fits {
+        slots.extend([(0.0, 0.0), (-inner, 0.0), (inner, 0.0)]);
+    }
+    let d2 = |s: &(f64, f64)| (s.0 - along) * (s.0 - along) + (s.1 - perp) * (s.1 - perp);
+    // `min_by` mit NaN: erste Stelle (links aussen) bleibt dann stehen.
+    slots.into_iter().min_by(|p, q| d2(p).partial_cmp(&d2(q)).unwrap_or(std::cmp::Ordering::Equal)).unwrap_or((0.0, 0.0))
+}
+
 /// Griff `index` einer 2D-Zeichnung auf (x, y) (`moveGrip`); `None` = keine Änderung.
-fn drawing_grip(d: &Value, index: f64, x: f64, y: f64, scale: f64) -> Option<Value> {
+fn drawing_grip(d: &Value, index: f64, x: f64, y: f64, scale: f64, free: bool) -> Option<Value> {
     let g = field(d, "geom")?;
     let p = pt(x, y);
     let set = |k: &str, v: Value| Some(with_geom(d, with(g, k, v)));
@@ -564,20 +584,19 @@ fn drawing_grip(d: &Value, index: f64, x: f64, y: f64, scale: f64) -> Option<Val
                 let (nx, ny) = (-dy / len, dx / len);
                 return set("offset", js_num((x - a.0) * nx + (y - a.1) * ny));
             }
-            // Masszahl-Griff: nur die Zahl des Segments, rastet nahe der Standardlage ein.
+            // Masszahl-Griff ([172]): nur die Zahl des Segments; rastet an festen Stellen ein (Mitte, innen links/
+            // rechts, aussen links/rechts, über/unter der Linie), frei nur mit gehaltener Alt-Taste.
             let seg = index - n as f64 - 1.0;
             if seg < 0.0 || seg >= n as f64 - 1.0 {
                 return None;
             }
             let k = index_in(seg, n)?;
             let h = dim_height(g, scale);
-            let (base, read, up) = dim_frame(xy(&pts[k]), xy(&pts[k + 1]), num_of(field(g, "offset")), h);
+            let (a, b) = (xy(&pts[k]), xy(&pts[k + 1]));
+            let (base, read, up) = dim_frame(a, b, num_of(field(g, "offset")), h);
             let (vx, vy) = (x - base.0, y - base.1);
-            let snap = h * 0.5;
-            let along = vx * read.0 + vy * read.1;
-            let perp = vx * up.0 + vy * up.1;
-            let along = if along.abs() < snap { 0.0 } else { along };
-            let perp = if perp.abs() < snap { 0.0 } else { perp };
+            let (along, perp) = (vx * read.0 + vy * read.1, vx * up.0 + vy * up.1);
+            let (along, perp) = if free { (along, perp) } else { dim_text_slot(hypot2(b.0 - a.0, b.1 - a.1), h, along, perp) };
             let mut next = Map::new();
             next.insert("along".into(), js_num(model_to_mm(along, scale)));
             next.insert("perp".into(), js_num(model_to_mm(perp, scale)));
@@ -1202,11 +1221,14 @@ pub fn drawing_vertices(g: &Value, scale: f64) -> Option<Vec<(f64, f64)>> {
             out.push(((a.0 + b.0) / 2.0 + nx, (a.1 + b.1) / 2.0 + ny));
             let h = dim_height(g, scale);
             let offs = arr(field(g, "textOffsetsMm"));
+            // [172] Ohne gespeicherte Abweichung steht der Griff dort, wo der Plan die Zahl zeichnet.
+            let auto = crate::plan::drawings::dim_auto_offsets(&out[..n].iter().map(|q| crate::model::Vec2 { x: q.0, y: q.1 }).collect::<Vec<_>>(), h);
             for i in 0..n.saturating_sub(1) {
-                let (along, perp) = match offs.get(i) {
-                    Some(o) if truthy(Some(o)) => (mm_to_model(num_of(field(o, "along")), scale), mm_to_model(num_of(field(o, "perp")), scale)),
+                let stored = match offs.get(i) {
+                    Some(o) if truthy(Some(o)) => (num_of(field(o, "along")), num_of(field(o, "perp"))),
                     _ => (0.0, 0.0),
                 };
+                let (along, perp) = if stored.0 != 0.0 || stored.1 != 0.0 { (mm_to_model(stored.0, scale), mm_to_model(stored.1, scale)) } else { auto.get(i).copied().unwrap_or((0.0, 0.0)) };
                 out.push(dim_text_pos(out[i], out[i + 1], offset, h, along, perp));
             }
             out
@@ -1454,12 +1476,12 @@ mod tests {
         let v = drawing_vertices(&pl(true)["geom"], 100.0).unwrap();
         assert_eq!(v.len(), 4 + 4 + 3);
         assert_eq!(v[9], (2.0, 1.0));
-        let r = drawing_grip(&pl(true), 9.0, 3.0, 1.5, 100.0).unwrap();
+        let r = drawing_grip(&pl(true), 9.0, 3.0, 1.5, 100.0, false).unwrap();
         assert_eq!((r["geom"]["holes"][0][1]["x"].as_f64(), r["geom"]["holes"][0][1]["y"].as_f64()), (Some(3.0), Some(1.5)));
         assert_eq!(r["geom"]["pts"].as_array().unwrap().len(), 4);
-        assert!(drawing_grip(&pl(true), 11.0, 0.0, 0.0, 100.0).is_none());
+        assert!(drawing_grip(&pl(true), 11.0, 0.0, 0.0, 100.0, false).is_none());
         // Bestehende Indizes bleiben: Bogen-Griff 4..8.
-        assert!(drawing_grip(&pl(true), 5.0, 2.0, -1.0, 100.0).unwrap()["geom"]["bulge"].is_array());
+        assert!(drawing_grip(&pl(true), 5.0, 2.0, -1.0, 100.0, false).unwrap()["geom"]["bulge"].is_array());
     }
 
     #[test]
@@ -1473,5 +1495,20 @@ mod tests {
         assert_eq!(e[0].3, (0.0, -1.0));
         let text = json!({"shape": "text", "at": {"x": 0, "y": 0}, "width": 2});
         assert!(drawing_vertices(&text, 100.0).is_none());
+    }
+
+    /// [172] Masszahl-Griff: rastet an festen Stellen ein, Mitte nur wenn die Zahl zwischen die Hilfslinien passt.
+    #[test]
+    fn masszahl_rastet_ein() {
+        let h = 0.25;
+        let w = crate::plan::drawings::dim_text_width(4.0, h);
+        let pad = crate::plan::drawings::dim_text_pad(h);
+        assert_eq!(dim_text_slot(4.0, h, 0.05, 0.02), (0.0, 0.0));
+        assert_eq!(dim_text_slot(4.0, h, 1.7, 0.0), (2.0 - w / 2.0 - pad, 0.0));
+        assert_eq!(dim_text_slot(4.0, h, 5.0, 0.1), (2.0 + w / 2.0 + pad, 0.0));
+        assert_eq!(dim_text_slot(4.0, h, -5.0, 0.0), (-(2.0 + w / 2.0 + pad), 0.0));
+        assert_eq!(dim_text_slot(4.0, h, 0.0, -1.0), (0.0, -1.95 * h));
+        // 0.3 m: Mitte entfällt (wäre die Vorgabe „aussen").
+        assert_ne!(dim_text_slot(0.3, h, 0.0, 0.0), (0.0, 0.0));
     }
 }

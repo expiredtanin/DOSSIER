@@ -71,9 +71,10 @@ export function AppContextMenu(props: {
     isolateSelectionLayers,
     toggleSelectionNoPrint,
     detachDimensions,
+    resetDimensionTexts,
   } = props.selCmds;
   const project = useStore((s) => s.project);
-  const { selectionAllLocked, selectionLayerCodes, selectionAllNoPrint, attachedDimensionIds } = selectionMenuState(
+  const { selectionAllLocked, selectionLayerCodes, selectionAllNoPrint, attachedDimensionIds, movedDimTextIds } = selectionMenuState(
     project,
     selection,
     true,
@@ -123,6 +124,8 @@ export function AppContextMenu(props: {
         toggleSelectionNoPrint,
         attachedDimensionCount: attachedDimensionIds.length,
         detachDimensions,
+        movedDimensionTextCount: movedDimTextIds.length,
+        resetDimensionTexts,
         bringToFront: () => reorderDrawings(selection.drawings, "front"),
         bringForward: () => reorderDrawings(selection.drawings, "forward"),
         sendBackward: () => reorderDrawings(selection.drawings, "backward"),

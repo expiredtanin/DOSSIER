@@ -526,6 +526,8 @@ export interface SelectionInfo {
    * `geom.shape === "dimension"` mit Bezügen.
    */
   dimRefs?: (DimRef | null)[];
+  /** [172] Bemassung mit verschobener Masszahl (Abweichung von „mittig"): „Text zurücksetzen". */
+  dimTextMoved?: boolean;
 }
 
 /**

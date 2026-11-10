@@ -47,6 +47,21 @@ export function DimRefsSection({
 }
 
 
+// ── Masszahl ([172]) ─────────────────────────────────────────────────────────
+// Vorgabe: mittig über dem Massstrich; eine verschobene Zahl lässt sich dorthin zurücksetzen.
+export function DimTextSection({ drawingId, host }: { drawingId: string; host: ReturnType<typeof usePanelHost> }) {
+  return (
+    <>
+      <div className="objinfo-sep" />
+      <div className="objinfo-field">
+        <button type="button" className="objinfo-btn" onClick={() => host.onResetDimensionText(drawingId)}>
+          {t("cmd.dimtextreset.label")}
+        </button>
+      </div>
+    </>
+  );
+}
+
 // ── Detail-/Schnitt-Verweis-Attribut-Abschnitt ──────────────────────────────
 // Bezeichner (obere Zeile) + Blattverknüpfung (Dropdown der Project.layouts,
 // „kein Verweis" löst sie); ohne Verknüpfung zusätzlich ein manueller
