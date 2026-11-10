@@ -171,11 +171,20 @@ for (const where of ["Grundriss", "Layout-Blatt"] as const) {
     // Zurück zur Auswahl wie im Grundriss (Werkzeug „Auswahl").
     await page.getByRole("button", { name: "Auswahl", exact: true }).click();
     await blurFocus(page);
+    // Echter Endpunkt der ersten Linie (über ihren Griff): der Klick kann am Raster einrasten, je nach
+    // eingepasstem Zoom ein bis zwei Pixel neben der geklickten Stelle.
+    const mid1 = at(0.3, 0.15);
+    await page.mouse.click(mid1.x, mid1.y);
+    await expect(page.locator(".plan-grip")).toHaveCount(2);
+    const g1 = await gripCenters(page);
+    const end1 = g1.reduce((b, p) => (Math.hypot(p.x - end.x, p.y - end.y) < Math.hypot(b.x - end.x, b.y - end.y) ? p : b));
+    expect(Math.hypot(end1.x - end.x, end1.y - end.y)).toBeLessThan(3);
+    await page.keyboard.press("Escape");
     const mid2 = at(0.45, 0.225);
     await page.mouse.click(mid2.x, mid2.y);
     await expect(page.locator(".plan-grip")).toHaveCount(2);
     const g = await gripCenters(page);
-    expect(Math.min(...g.map((p) => Math.hypot(p.x - end.x, p.y - end.y)))).toBeLessThan(1);
+    expect(Math.min(...g.map((p) => Math.hypot(p.x - end1.x, p.y - end1.y)))).toBeLessThan(1);
     const m = await modelOf(page, end);
     // Sheet: Papier 1:1 in Metern (Ursprung oben links → y negativ), Grundriss: beliebig.
     if (where === "Layout-Blatt") expect(m.y).toBeLessThan(0);
