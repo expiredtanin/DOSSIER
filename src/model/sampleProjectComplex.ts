@@ -580,7 +580,8 @@ function annotations(): Drawing2D[] {
     shape: "text", at: P(4, -4.5), text: "Hebeschiebetür, Schwelle rollstuhlgängig ≤ 25 mm", height: 0.25, angle: 0,
     leaderTarget: P(8.5, -0.1), leaderBendPoints: [P(7.5, -2.8)],
   }, { endMarks: { end: "arrow", sizeMm: 2 } });
-  add("detailref-1", "eg", "50", { shape: "detailref", at: P(-1.4, -1.6), label: "1", sheetLayoutId: "lay-501", sheetLabel: "501" });
+  // [157] Detailverweis ausserhalb der Massketten (vorher „Detail und Situation“ auf Masskette/Höhenkote).
+  add("detailref-1", "eg", "50", { shape: "detailref", at: P(-9, -2.6), label: "1", sheetLayoutId: "lay-501", sheetLabel: "501" });
   add("massstab-eg", "eg", "50", { shape: "scalebar", at: P(-14, -19), segmentLength: 1, segments: 5 });
   // Revisionswolke (Bögen nach aussen: negativer Bulge bei Gegenuhrzeigersinn).
   const cloud = [...arcPts(P(12.6, 0), 1.9, -Math.PI, Math.PI, 18).slice(0, 18)].map((q) => P(q.x, r3(q.y * 0.6)));

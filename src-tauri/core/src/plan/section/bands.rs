@@ -25,6 +25,25 @@ pub(super) fn arc_chord_opening(wall: &Wall, o: &Opening) -> Option<(Wall, Openi
     Some((vw, vo))
 }
 
+/// [157] Wie [`arc_chord_opening`], aber für die Schnittebene durch `p0` in Richtung `u`: das gerade Einbauteil
+/// liegt tangential am Bogen dort, wo die Ebene die Wandachse trifft (nicht auf der Sehne, die um die Pfeilhöhe
+/// neben der geschnittenen Wand liegt: Fenster sassen im Schnitt neben dem Wandschnitt, nur Umriss sichtbar).
+/// Die Lage in der Öffnung (Bogenlänge ab Laibung) bleibt. `None`: Ebene trifft die Achse in der Öffnung nicht.
+pub(super) fn arc_cut_opening(wall: &Wall, o: &Opening, p0: (f64, f64), u: (f64, f64)) -> Option<(Wall, Opening)> {
+    let a = crate::wall_arc::WallArc::of_wall(wall)?;
+    let axis = a.length();
+    let from = max(0.0, min(o.position, axis));
+    let to = max(from, min(o.position + o.width, axis));
+    let mid = (from + to) / 2.0;
+    let line = crate::joins::Line { point: kernel2d::Vec2::new(p0.0, p0.1), dir: kernel2d::Vec2::new(u.0, u.1) };
+    let s = a.line_hits(0.0, &line).into_iter().filter(|s| *s >= from && *s <= to).min_by(|x, y| (x - mid).abs().total_cmp(&(y - mid).abs()))?;
+    let (pc, t) = (a.point(s, 0.0), a.tangent(s));
+    let (d0, d1) = (s - from, to - s);
+    let vw = Wall { start: Vec2 { x: pc.x - t.x * d0, y: pc.y - t.y * d0 }, end: Vec2 { x: pc.x + t.x * d1, y: pc.y + t.y * d1 }, bulge: None, ..wall.clone() };
+    let vo = Opening { position: 0.0, width: to - from, ..o.clone() };
+    Some((vw, vo))
+}
+
 pub(super) fn opening_interval(w: &Wall, o: &Opening) -> Option<(f64, f64)> {
     let axis = hypot2(w.end.x - w.start.x, w.end.y - w.start.y);
     let from = max(0.0, min(o.position, axis));

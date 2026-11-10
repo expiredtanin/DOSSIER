@@ -1024,8 +1024,22 @@ pub fn plan_section_lines(c: &Ctx, out: &mut Vec<Primitive>) {
     }
     let h = SECTION_LABEL_MM * k;
     // Kandidaten (Vielfache der Schrifthöhe): vor der Spitze, weiter hinaus entlang der Linie bzw. des Pfeils.
-    // [157] Weiter hinaus (5–6 Schrifthöhen) für Marken hinter Massketten und Böschung.
-    const STEPS: [(f64, f64); 17] = [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (2.0, 0.0), (1.0, 1.0), (0.0, 2.0), (3.0, 0.0), (2.0, 1.0), (1.0, 2.0), (4.0, 0.0), (0.0, 3.0), (3.0, 2.0), (5.0, 0.0), (5.0, 1.0), (6.0, 0.0), (6.0, 1.0), (-1.0, 0.0)];
+    // [157] Nach Abstand zur Marke sortiert (die Beschriftung bleibt so nah wie möglich; vorher kamen z. B. (4, 0)
+    // und (5, 0) vor (1, 3)), auch zur Gegenseite der Blickrichtung (leicht benachteiligt), bis 6 Schrifthöhen
+    // hinaus für Marken hinter Massketten und Böschung.
+    let mut steps: Vec<(f64, f64)> = Vec::new();
+    for out_i in -1..=6 {
+        for bn_i in -2..=4 {
+            let (so, sb) = (out_i as f64, bn_i as f64);
+            let d = so.hypot(sb);
+            if d <= 6.0 && !(bn_i < 0 && out_i != 0 && d > 3.0) {
+                steps.push((so, sb));
+            }
+        }
+    }
+    let cost = |&(so, sb): &(f64, f64)| so.hypot(sb) + if sb < 0.0 || so < 0.0 { 0.5 } else { 0.0 };
+    steps.sort_by(|a, b| cost(a).total_cmp(&cost(b)).then(a.0.total_cmp(&b.0).reverse()).then(a.1.total_cmp(&b.1).reverse()));
+    let steps = &steps;
     for (at, tag, bn, outward) in labels {
         let w = crate::text_layout::text_width_em(&tag, false) * h;
         let rect = |a: Vec2| -> Vec<[f64; 2]> {
@@ -1033,8 +1047,8 @@ pub fn plan_section_lines(c: &Ctx, out: &mut Vec<Primitive>) {
             vec![[a.x - pad, a.y - pad], [a.x + w + pad, a.y - pad], [a.x + w + pad, a.y + 0.75 * h + pad], [a.x - pad, a.y + 0.75 * h + pad]]
         };
         let cand = |(s_out, s_bn): (f64, f64)| v2(at.x + (outward.x * s_out + bn.x * s_bn) * h, at.y + (outward.y * s_out + bn.y * s_bn) * h);
-        let best = STEPS.iter().map(|&st| cand(st)).find(|&a| !obst.hits_convex(&rect(a))).unwrap_or_else(|| {
-            STEPS
+        let best = steps.iter().map(|&st| cand(st)).find(|&a| !obst.hits_convex(&rect(a))).unwrap_or_else(|| {
+            steps
                 .iter()
                 .map(|&st| cand(st))
                 .map(|a| (a, obst.overlap(v2(a.x + w / 2.0, a.y + 0.375 * h), w / 2.0, 0.375 * h)))
@@ -1486,6 +1500,9 @@ mod tests {
                 continue;
             }
             n += 1;
+            // [157] Beschriftung bleibt nah an ihrer Marke (höchstens 6 Schrifthöhen von einem Linienende).
+            let near = [v2(10.5, 4.0), v2(29.5, 4.0)].iter().map(|e| (at.x - e.x).hypot(at.y - e.y)).fold(f64::INFINITY, f64::min);
+            assert!(near <= 6.0 * height_m + 1.0, "{text} {near:.2} m von der Marke");
             let w = crate::text_layout::text_width_em(text, false) * height_m;
             let flat = [at.x, at.y, at.x + w, at.y, at.x + w, at.y + 0.75 * height_m, at.x, at.y + 0.75 * height_m];
             for (a, b) in &pit_lines {

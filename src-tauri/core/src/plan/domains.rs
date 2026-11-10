@@ -991,7 +991,9 @@ fn fit_room_stamp(doc: &RichTextDoc, number: Option<&str>, extra: Vec<StampLine>
     if pt > ROOM_STAMP_MIN_PT {
         steps.extend([(vec![None], ROOM_STAMP_MIN_PT), (vec![Some(&plain)], ROOM_STAMP_MIN_PT), (wrapped, ROOM_STAMP_MIN_PT)]);
     }
-    for free in [true, false] {
+    // [157] Zeilen gehen nicht für Ausweichen verloren: erst alle Zeilen frei, dann alle Zeilen mit geringster
+    // Überdeckung (der Block rückt im Raum), erst wenn das Rechteck im Raum nirgends passt, entfallen Zeilen.
+    for (free, drop_lines) in [(true, false), (false, false), (true, true), (false, true)] {
         for (variants, pt) in &steps {
             for &variant in variants {
                 let mut e = extra.clone();
@@ -999,7 +1001,7 @@ fn fit_room_stamp(doc: &RichTextDoc, number: Option<&str>, extra: Vec<StampLine>
                     if let Some(q) = at(variant.unwrap_or(doc), &e, *pt, free) {
                         return (e, *pt, variant.cloned(), Some(q));
                     }
-                    if e.pop().is_none() {
+                    if !drop_lines || e.pop().is_none() {
                         break;
                     }
                 }
@@ -1998,17 +2000,20 @@ mod tests {
         let (ww, _) = stamp_size_m(&doc_from_text("WMWM"), &[], ROOM_STAMP_PT, 100.0);
         assert!(wi < 0.6 * ww, "{wi} {ww}");
         assert_eq!(abbreviate("Treppenhaus", 5).as_deref(), Some("Trep."));
-        // [140] Teil 6: Frei liegt nur ein niedriger Stempel (neben der Treppe), überdeckt passt alles an den Pol:
-        // erst Zeilen weglassen, dann Schrift verkleinern — bevor Überdeckung in Kauf genommen wird.
+        // [157] Frei liegt nur ein niedriger Stempel (neben der Treppe), überdeckt passt alles an den Pol: die
+        // Zeilen bleiben (der Stempel verliert keine Zeile durch Ausweichen), erst Schrift/Umbruch frei, dann Überdeckung.
         let pole = Vec2 { x: 0.0, y: 0.0 };
         let side = Vec2 { x: 3.0, y: 0.0 };
-        let (_, h_name) = stamp_size_m(&name, &[], ROOM_STAMP_PT, 100.0);
-        let (_, h_one) = stamp_size_m(&name, &extra()[..1], ROOM_STAMP_PT, 100.0);
         let narrow = move |h_free: f64| move |_w: f64, h: f64, free: bool| if free { (h <= h_free).then_some(side) } else { Some(pole) };
-        let (e, pt, _, at) = fit_room_stamp(&name, None, extra(), ROOM_STAMP_PT, 100.0, &narrow(h_one + 1e-9));
-        assert_eq!((e.len(), pt, at), (1, ROOM_STAMP_PT, Some(side)), "ohne Nutzungszeile frei");
-        let (e, pt, _, at) = fit_room_stamp(&name, None, extra(), ROOM_STAMP_PT, 100.0, &narrow(h_name - 1e-6));
-        assert!(pt < ROOM_STAMP_PT && at == Some(side), "kleinere Schrift frei: {} {:?} {}", pt, at, e.len());
+        let (_, h_small) = stamp_size_m(&name, &extra(), ROOM_STAMP_MIN_PT, 100.0);
+        // Frei liegt der ganze Stempel erst in kleinerer Schrift: dort, mit allen Zeilen (keine Zeile fällt weg).
+        for h_free in [h_small + 1e-9, h_small * 1.2] {
+            let (e, pt, _, at) = fit_room_stamp(&name, None, extra(), ROOM_STAMP_PT, 100.0, &narrow(h_free));
+            assert!(pt < ROOM_STAMP_PT && at == Some(side) && e.len() == 2, "kleinere Schrift frei: {pt} {at:?} {}", e.len());
+        }
+        // Auch 2 mm mit allen Zeilen zu hoch: ganzer Stempel an den Pol mit Überdeckung, statt Zeilen zu verlieren.
+        let (e, pt, _, at) = fit_room_stamp(&name, None, extra(), ROOM_STAMP_PT, 100.0, &narrow(h_small * 0.5));
+        assert_eq!((e.len(), pt, at), (2, ROOM_STAMP_PT, Some(pole)), "alle Zeilen, notfalls mit Überdeckung");
         let (e, pt, _, at) = fit_room_stamp(&name, None, extra(), ROOM_STAMP_PT, 100.0, &narrow(0.0));
         assert_eq!((e.len(), pt, at), (2, ROOM_STAMP_PT, Some(pole)), "nirgends frei: ganzer Stempel mit Überdeckung");
         assert_eq!(abbreviate("Bad", 5).as_deref(), Some("Bad"));
