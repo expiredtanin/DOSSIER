@@ -36,38 +36,65 @@ describe("Bemassung: Griffe der Masszahl", () => {
     expect(p.y).toBeCloseTo(base.y + 2, 9);
   });
 
-  const drag = (d: Drawing2D, pt: { x: number; y: number }) => {
+  const drag = (d: Drawing2D, pt: { x: number; y: number }, free = false) => {
     const p = { drawings2d: [d], walls: [] } as unknown as Project;
-    const res = documentFor(p).gripOps({ op: "moveGrip", drawingId: "m", wallId: null, index: d.geom.shape === "dimension" ? d.geom.pts.length + 1 : 0, pt: [pt.x, pt.y], scale: 50 });
+    const res = documentFor(p).gripOps({ op: "moveGrip", drawingId: "m", wallId: null, index: d.geom.shape === "dimension" ? d.geom.pts.length + 1 : 0, pt: [pt.x, pt.y], scale: 50, ...(free ? { free: true } : {}) });
     const e = res.ops[0] as unknown as { entity: Drawing2D };
     return (e.entity.geom as { textOffsetsMm: { along: number; perp: number }[] }).textOffsetsMm[0];
   };
 
-  it("nahe der Standardlage rastet BEIDES auf 0 ein", () => {
+  it("nahe der Mitte rastet BEIDES auf 0 ein (Vorgabe)", () => {
     const base = drawingVertices(dim([A, B], 0), 50)[3];
     expect(drag(dim([A, B], 0), { x: base.x + H * 0.2, y: base.y - H * 0.2 })).toEqual({ along: 0, perp: 0 });
   });
 
-  it("die Achsen rasten UNABHÄNGIG ein (seitlich verschoben, Höhe exakt Standard)", () => {
+  it("rastet an festen Stellen ein: innen, aussen, eine Zeile über/unter der Linie", () => {
     const base = drawingVertices(dim([A, B], 0), 50)[3];
-    const o = drag(dim([A, B], 0), { x: base.x + 1.5, y: base.y + H * 0.1 });
-    expect(o.along).toBeCloseTo(30, 9);
-    expect(o.perp).toBe(0);
+    const at = (dx: number, dy = 0) => drag(dim([A, B], 0), { x: base.x + dx, y: base.y + dy });
+    // Segment 4 m, Zahl „4.00" ~ 0.4 m breit: innen bündig vor der Hilfslinie, aussen dahinter.
+    const inner = at(1.5);
+    const outer = at(2.6);
+    expect(inner.perp).toBe(0);
+    expect(outer.perp).toBe(0);
+    expect(inner.along).toBeGreaterThan(0);
+    expect(outer.along).toBeGreaterThan(inner.along);
+    expect(outer.along * (50 / 1000)).toBeGreaterThan(2); // Mitte der Zahl hinter der Hilfslinie
+    expect(at(-1.5).along).toBeCloseTo(-inner.along, 9);
+    expect(at(-2.6).along).toBeCloseTo(-outer.along, 9);
+    // Leicht schief gezogen: trotzdem genau eine Stelle (kein Zwischenwert).
+    expect(at(2.5, 0.05)).toEqual(outer);
+    const up = at(0.1, 0.3);
+    const down = at(0.1, -0.3);
+    expect(up).toEqual({ along: 0, perp: 5.4 });
+    expect(down).toEqual({ along: 0, perp: -7.8 });
   });
 
-  it("ausserhalb des Fangbereichs bleibt der gezogene Wert erhalten", () => {
+  it("mit gehaltener Taste (free) bleibt die gezogene Position erhalten", () => {
     const base = drawingVertices(dim([A, B], 0), 50)[3];
-    const o = drag(dim([A, B], 0), { x: base.x + 0.8, y: base.y + 0.6 });
+    const o = drag(dim([A, B], 0), { x: base.x + 0.8, y: base.y + 0.6 }, true);
     expect(o.along).toBeCloseTo(16, 9);
     expect(o.perp).toBeCloseTo(12, 9);
   });
 
-  it("Rundreise: gezogene Position → Versatz → Griff liegt wieder am Punkt", () => {
+  it("Rundreise (frei): gezogene Position → Versatz → Griff liegt wieder am Punkt", () => {
     const pt = { x: 3.1, y: 1.4 };
-    const o = drag(dim([A, B], 0.5), pt);
+    const o = drag(dim([A, B], 0.5), pt, true);
     const back = drawingVertices(dim([A, B], 0.5, [o]), 50)[3];
     expect(back.x).toBeCloseTo(pt.x, 9);
     expect(back.y).toBeCloseTo(pt.y, 9);
+  });
+
+  it("Rundreise (eingerastet): Griff liegt auf der Einrast-Stelle", () => {
+    const base = drawingVertices(dim([A, B], 0), 50)[3];
+    const o = drag(dim([A, B], 0), { x: base.x + 2.6, y: base.y });
+    const back = drawingVertices(dim([A, B], 0, [o]), 50)[3];
+    expect(back.x).toBeGreaterThan(base.x + 2);
+    expect(back.y).toBeCloseTo(base.y, 9);
+  });
+
+  it("Zu schmales Segment: Griff steht dort, wo die Zahl nach aussen gewichen ist", () => {
+    const short = drawingVertices(dim([A, { x: 0.3, y: 0 }], 0), 50);
+    expect(short[3].x).toBeLessThan(0);
   });
 });
 

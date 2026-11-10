@@ -19,7 +19,7 @@ type P = [number, number];
 
 /** Eine Griff-Änderung für den Kern (`grips.rs::run`); Zahlen dürfen NaN/±∞ sein (Marken). */
 export type GripRequest =
-  | { op: "moveGrip"; drawingId: string | null; wallId: string | null; index: number; pt: P; scale: number }
+  | { op: "moveGrip"; drawingId: string | null; wallId: string | null; index: number; pt: P; scale: number; free?: boolean }
   | { op: "moveBy"; drawingId: string | null; wallId: string | null; delta: P }
   | { op: "moveEdge"; drawingId: string | null; wallId: string | null; a: number; b: number; delta: P }
   | { op: "resize"; kind: string; id: string; w: number; h: number; fx: number; fy: number }

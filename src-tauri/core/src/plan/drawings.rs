@@ -796,6 +796,7 @@ fn emit_inner(c: &Ctx, d: &Drawing2D, attrs: Attrs, geom: &Drawing2DGeom, greyed
                 };
                 dimension_round(&mut em, pts, *offset, *k, &st);
             }
+            let auto = if kind.is_none() && arc_center.is_none() { dim_auto_offsets(pts, mm(text_height_mm.unwrap_or(DIM_TEXT_HEIGHT_MM))) } else { Vec::new() };
             for i in 0..(if kind.is_some() { 0 } else { pts.len().saturating_sub(1) }) {
                 let st = DimStyle {
                     gap: mm(gap_mm.unwrap_or(DIM_GAP_MM)),
@@ -805,8 +806,11 @@ fn emit_inner(c: &Ctx, d: &Drawing2D, attrs: Attrs, geom: &Drawing2DGeom, greyed
                     line_weight: line_weight_mm.unwrap_or(em.weight),
                     ext_weight: ext_weight_mm.unwrap_or(em.weight),
                     tick_weight: tick_weight_mm.unwrap_or(em.weight * 2.0),
-                    text_offset: match text_offsets_mm.as_ref().and_then(|l| l.get(i)) {
+                    // [172] Gespeicherte Abweichung gilt (auch frei verschobene Texte alter Projekte); sonst die Vorgabe
+                    // „mittig, nötigenfalls aussen".
+                    text_offset: match text_offsets_mm.as_ref().and_then(|l| l.get(i)).filter(|o| o.along != 0.0 || o.perp != 0.0) {
                         Some(o) => (mm(o.along), mm(o.perp)),
+                        None if arc_center.is_none() => auto.get(i).copied().unwrap_or((0.0, 0.0)),
                         None => (0.0, 0.0),
                     },
                 };
@@ -987,6 +991,75 @@ pub fn dim_text_frame(a: Vec2, b: Vec2, offset: f64, text_height: f64) -> (Vec2,
     (v(mid.x + up.x * text_height * 0.6, mid.y + up.y * text_height * 0.6), read, up, angle)
 }
 
+/// [172] Textanfang so, dass die Zahl `s` (Schrifthöhe `h`) um `mid` zentriert steht: Texte hängen an ihrem Anfang
+/// (linke Grundlinie), die Masszahl aber soll mittig über dem Massstrich stehen.
+fn centered(mid: Vec2, read: Vec2, s: &str, h: f64) -> Vec2 {
+    let w = crate::text_layout::text_width_em(s, false) * h;
+    v(mid.x - read.x * w / 2.0, mid.y - read.y * w / 2.0)
+}
+
+/// Breite der Masszahl eines Segments der Länge `len` (Modell-Meter bei Schrifthöhe `h`).
+pub fn dim_text_width(len: f64, h: f64) -> f64 {
+    crate::text_layout::text_width_em(&to_fixed(len, 2), false) * h
+}
+
+/// Luft zwischen Masszahl und Hilfslinie bzw. Nachbarzahl (Modell-Meter bei Schrifthöhe `h`).
+pub fn dim_text_pad(h: f64) -> f64 {
+    0.4 * h
+}
+
+/// Versatz der Masszahl um eine Zeile nach oben für „über der Linie" (Modell-Meter bei Schrifthöhe `h`): Versalhöhe
+/// 0.75 h plus Abstand 0.6 h. Unter der Linie ([`dim_text_below`]) liegt die Oberkante der Zahl im selben Abstand darunter.
+pub fn dim_text_row(h: f64) -> f64 {
+    1.35 * h
+}
+
+/// Versatz der Masszahl „unter der Linie" (negativ, quer zur Leserichtung).
+pub fn dim_text_below(h: f64) -> f64 {
+    -1.95 * h
+}
+
+/// [172] Vorgabe-Lage der Masszahlen einer Kette: je Segment (entlang, quer) in der Leserichtung relativ zur
+/// Mitte über dem Massstrich (Modell-Meter). Passt die Zahl zwischen die Hilfslinien, ist es (0, 0); sonst
+/// rückt sie nach aussen (links vom Segment, rechts davon, bei mittleren Segmenten auf die Seite des längeren
+/// Nachbarn), auf die erste Seite ohne Überdeckung, notfalls eine Zeile höher. Für Plan und Griffe gleich.
+pub fn dim_auto_offsets(pts: &[Vec2], h: f64) -> Vec<(f64, f64)> {
+    let n = pts.len().saturating_sub(1);
+    let mut out = vec![(0.0, 0.0); n];
+    if n == 0 || !(h.is_finite() && h > 0.0) || pts.iter().any(|q| !(q.x.is_finite() && q.y.is_finite())) {
+        return out;
+    }
+    let lens: Vec<f64> = (0..n).map(|i| hypot2(pts[i + 1].x - pts[i].x, pts[i + 1].y - pts[i].y)).collect();
+    let starts: Vec<f64> = lens.iter().scan(0.0, |acc, l| { let s = *acc; *acc += l; Some(s) }).collect();
+    let widths: Vec<f64> = lens.iter().map(|l| dim_text_width(*l, h)).collect();
+    let pad = dim_text_pad(h);
+    let fits: Vec<bool> = (0..n).map(|i| widths[i] + 2.0 * pad <= lens[i]).collect();
+    // Belegte Streifen entlang der Kette: passende Zahlen in der Mitte ihres Segments.
+    let mut taken: Vec<(f64, f64)> = (0..n).filter(|i| fits[*i]).map(|i| (starts[i] + lens[i] / 2.0 - widths[i] / 2.0, starts[i] + lens[i] / 2.0 + widths[i] / 2.0)).collect();
+    let free = |c: f64, w: f64, taken: &[(f64, f64)]| taken.iter().all(|(a, b)| c + w / 2.0 + pad <= *a || c - w / 2.0 - pad >= *b);
+    for i in 0..n {
+        if fits[i] || lens[i] < 1e-6 {
+            continue;
+        }
+        let w = widths[i];
+        let left = starts[i] - pad - w / 2.0;
+        let right = starts[i] + lens[i] + pad + w / 2.0;
+        let prefer_left = if i == 0 { true } else if i == n - 1 { false } else { lens[i - 1] >= lens[i + 1] };
+        let order = if prefer_left { [left, right] } else { [right, left] };
+        let (centre, row) = match order.iter().find(|c| free(**c, w, &taken)) {
+            Some(c) => (*c, 0.0),
+            None => (order[0], dim_text_row(h)),
+        };
+        taken.push((centre - w / 2.0, centre + w / 2.0));
+        // Entlang a→b in die Leserichtung umrechnen (der Text liest nie kopfüber).
+        let (_, read, _, _) = dim_text_frame(pts[i], pts[i + 1], 0.0, h);
+        let u = v((pts[i + 1].x - pts[i].x) / lens[i], (pts[i + 1].y - pts[i].y) / lens[i]);
+        let s = if read.x * u.x + read.y * u.y >= 0.0 { 1.0 } else { -1.0 };
+        out[i] = (s * (centre - starts[i] - lens[i] / 2.0), row);
+    }
+    out
+}
+
 /// Ein Mass-Segment (SIA 400 B.5.3): Masshilfslinien, Masslinie, Massstriche, Masszahl.
 fn dimension_segment(em: &mut Em, a: Vec2, b: Vec2, offset: f64, st: &DimStyle) {
     let (dx, dy) = (b.x - a.x, b.y - a.y);
@@ -1014,7 +1087,9 @@ fn dimension_segment(em: &mut Em, a: Vec2, b: Vec2, offset: f64, st: &DimStyle) 
     let (base, read, up, angle) = dim_text_frame(a, b, offset, st.text_height);
     let (along, perp) = st.text_offset;
     let at = v(base.x + read.x * along + up.x * perp, base.y + read.y * along + up.y * perp);
-    let p = text(at, to_fixed(line_len, 2), st.text_height, angle, em.color, em.greyed, Some(em.id));
+    let label = to_fixed(line_len, 2);
+    let at = centered(at, read, &label, st.text_height);
+    let p = text(at, label, st.text_height, angle, em.color, em.greyed, Some(em.id));
     em.sink.push(p, 0);
 }
 
@@ -1155,6 +1230,8 @@ fn dimension_round(em: &mut Em, pts: &[Vec2], offset: f64, kind: DimKind, st: &D
         }
         let up = v(-jsnum::sin(a), jsnum::cos(a));
         let q = v(at.x + up.x * st.text_height * 0.6, at.y + up.y * st.text_height * 0.6);
+        // [172] Mittig über dem Ankerpunkt, nicht mit dem Anfang daran hängend.
+        let q = centered(q, v(jsnum::cos(a), jsnum::sin(a)), &s, st.text_height);
         let pr = text(q, s, st.text_height, a, em.color, em.greyed, Some(em.id));
         em.sink.push(pr, 0);
     };
@@ -1255,7 +1332,9 @@ fn arc_dimension_segment(em: &mut Em, c: Vec2, a: Vec2, b: Vec2, offset: f64, st
     let base = at(tm, rm + sign * st.text_height * 0.6);
     let (along, perp) = st.text_offset;
     let pos = v(base.x + read.x * along + up.x * perp, base.y + read.y * along + up.y * perp);
-    let p = text(pos, to_fixed(r * d.abs(), 2), st.text_height, angle, em.color, em.greyed, Some(em.id));
+    let label = to_fixed(r * d.abs(), 2);
+    let pos = centered(pos, read, &label, st.text_height);
+    let p = text(pos, label, st.text_height, angle, em.color, em.greyed, Some(em.id));
     em.sink.push(p, 0);
 }
 
@@ -2175,6 +2254,92 @@ mod tests {
             }
             o => panic!("{o:?}"),
         }
+    }
+
+    /// [172] Masszahlen einer waagrechten Kette: (Text, Mitte der Zahl; y = Grundlinie) in Emissionsreihenfolge.
+    fn dim_texts(out: &[Primitive]) -> Vec<(String, Vec2)> {
+        out.iter()
+            .filter_map(|pr| match pr {
+                Primitive::DrawingText { text, at, height_m, .. } => Some((text.clone(), v(at.x + super::dim_text_width(text.parse().unwrap(), *height_m) / 2.0, at.y))),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// [172] Vorgabe: jede Zahl mittig über ihrem Segment, im festen Abstand (0.6 Schrifthöhe) über der Linie.
+    #[test]
+    fn masszahl_mittig_je_segment() {
+        let p = project(serde_json::json!({}));
+        let out = render(&p, drawing(serde_json::json!({"shape": "dimension", "pts": [{"x": 0, "y": 0}, {"x": 3, "y": 0}, {"x": 7, "y": 0}], "offset": 1.0})), 100.0);
+        let t = dim_texts(&out);
+        assert_eq!(t.len(), 2);
+        let h = 0.25;
+        assert!((t[0].1.x - 1.5).abs() < 1e-9 && (t[1].1.x - 5.0).abs() < 1e-9, "{t:?}");
+        // Ketten-Offset 1 m nach links der Richtung (+y), Zahl 0.6 h darüber.
+        assert!((t[0].1.y - (1.0 + 0.6 * h)).abs() < 1e-9, "{t:?}");
+    }
+
+    /// [172] Zu schmales Segment: Zahl nach aussen; erstes links, letztes rechts, mittleres zum längeren Nachbarn.
+    #[test]
+    fn masszahl_weicht_bei_platzmangel_aus() {
+        let p = project(serde_json::json!({}));
+        let pts = |xs: &[f64]| serde_json::Value::Array(xs.iter().map(|x| serde_json::json!({"x": x, "y": 0})).collect());
+        // Erstes (0.3 m) und letztes (0.3 m) Segment sind zu schmal.
+        let out = render(&p, drawing(serde_json::json!({"shape": "dimension", "pts": pts(&[0.0, 0.3, 4.3, 4.6]), "offset": 1.0})), 100.0);
+        let t = dim_texts(&out);
+        assert_eq!(t.len(), 3);
+        assert!(t[0].1.x < 0.0, "erstes Segment links hinaus: {t:?}");
+        assert!((t[1].1.x - 2.3).abs() < 1e-9, "langes Segment mittig: {t:?}");
+        assert!(t[2].1.x > 4.6, "letztes Segment rechts hinaus: {t:?}");
+        // Mittleres schmales Segment (zwischen 0.3 und 5 m): wandert zum längeren Nachbarn, ohne dessen Zahl zu berühren.
+        let out = render(&p, drawing(serde_json::json!({"shape": "dimension", "pts": pts(&[0.0, 2.0, 2.3, 7.3]), "offset": 1.0})), 100.0);
+        let t = dim_texts(&out);
+        let w = |s: &str| super::dim_text_width(s.parse().unwrap(), 0.25);
+        assert!(t[1].1.x > 2.3, "nach rechts zum längeren Nachbarn: {t:?}");
+        assert!(t[1].1.x - w("0.30") / 2.0 >= 2.3 - 1e-9 || t[1].1.x < 2.3, "{t:?}");
+        let (mid_r, nb_l) = (t[1].1.x + w("0.30") / 2.0, t[2].1.x - w("5.00") / 2.0);
+        assert!(mid_r <= nb_l + 1e-9, "überdeckt Nachbarzahl: {t:?}");
+    }
+
+    /// [172] Radius-, Durchmesser- und Bogenlängenmass: Masszahl mittig über ihrem Ankerpunkt (nicht mit dem Anfang daran hängend).
+    #[test]
+    fn rundmass_masszahl_mittig() {
+        let p = project(serde_json::json!({}));
+        let mid_of = |geom: serde_json::Value| -> (String, Vec2) {
+            let out = render(&p, drawing(geom), 100.0);
+            out.iter()
+                .find_map(|pr| match pr {
+                    Primitive::DrawingText { text, at, height_m, angle, .. } => {
+                        let w = crate::text_layout::text_width_em(text, false) * height_m;
+                        Some((text.clone(), v(at.x + angle.cos() * w / 2.0, at.y + angle.sin() * w / 2.0)))
+                    }
+                    _ => None,
+                })
+                .expect("Text")
+        };
+        let h = 0.25;
+        let (t, m) = mid_of(serde_json::json!({"shape": "dimension", "kind": "radius", "pts": [{"x": 0, "y": 0}, {"x": 2, "y": 0}], "offset": 0.0}));
+        assert_eq!(t, "R 2.00");
+        assert!((m.x - 1.0).abs() < 1e-9 && (m.y - 0.6 * h).abs() < 1e-9, "{m:?}");
+        let (t, m) = mid_of(serde_json::json!({"shape": "dimension", "kind": "diameter", "pts": [{"x": 0, "y": 0}, {"x": 2, "y": 0}], "offset": 0.0}));
+        assert_eq!(t, "\u{d8} 4.00");
+        assert!((m.x - 0.0).abs() < 1e-9, "{m:?}");
+        let (t, m) = mid_of(serde_json::json!({"shape": "dimension", "kind": "arc", "pts": [{"x": 0, "y": 0}, {"x": 2, "y": 0}, {"x": 0, "y": 2}], "offset": 0.5}));
+        assert!(t.starts_with("L "));
+        // Anker (Bogenmitte) liegt auf der Diagonale; die Zahl steht quer dazu zentriert: Mitte ⟂ Verbindung zum Mittelpunkt.
+        assert!((m.x - m.y).abs() < 0.2 * h + 1e-9, "{m:?}");
+    }
+
+    /// [172] Gespeicherte Abweichung (frei verschobener Text alter Projekte) bleibt, wo sie ist; (0,0) = Vorgabe.
+    #[test]
+    fn masszahl_gespeicherte_abweichung_bleibt() {
+        let p = project(serde_json::json!({}));
+        let g = |offs: serde_json::Value| serde_json::json!({"shape": "dimension", "pts": [{"x": 0, "y": 0}, {"x": 0.3, "y": 0}], "offset": 0.0, "textOffsetsMm": offs});
+        let moved = dim_texts(&render(&p, drawing(g(serde_json::json!([{"along": 2.0, "perp": 3.0}]))), 100.0));
+        // 2 mm / 3 mm Papier bei 1:100 = 0.2 m / 0.3 m, ab der Mitte (0.15, 0.15).
+        assert!((moved[0].1.x - 0.35).abs() < 1e-9 && (moved[0].1.y - (0.15 + 0.3)).abs() < 1e-9, "{moved:?}");
+        let auto = dim_texts(&render(&p, drawing(g(serde_json::json!([{"along": 0, "perp": 0}]))), 100.0));
+        assert!(auto[0].1.x < 0.0, "Vorgabe weicht aus: {auto:?}");
     }
 
     /// [T2] Bogenmass: Viertelkreis r 2 → Masszahl π (Bogenlänge), Masslinie auf r 2.5, radiale Hilfslinien.

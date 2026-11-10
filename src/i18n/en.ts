@@ -2127,6 +2127,7 @@ export const en: Record<TranslationKey, string> = {
   "cmd.align.distY": "Distribute vertically",
   "cmd.explode.label": "Explode",
   "cmd.dimdetach.label": "Detach dimension",
+  "cmd.dimtextreset.label": "Reset text",
   "cmd.autodim.label": "Exterior dimensions",
   "cmd.scale.label": "Scale",
   "cmd.scale.base": "Base point:",

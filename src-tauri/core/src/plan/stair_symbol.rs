@@ -433,8 +433,11 @@ pub fn plan_stair_clipped(params: &[f64], total_rise: f64, cut_rise: f64, lw_mm:
     }
 
     // 5. Lauflinie und Pfeil (Flügel als ein Zug über die Spitze: die Ecke schliesst spitz).
+    // [155] Lauflinie wie die Tritte: vor der Bruchlinie ausgezogen, dahinter gestrichelt; der Pfeil bleibt ausgezogen.
     for w in geo.run_line.windows(2) {
-        o.line(CLS_RUN, w[0], w[1], w_tread, false);
+        for (a, b, dashed) in lay.split(w[0], w[1], &[]) {
+            o.line(CLS_RUN, a, b, w_tread, dashed);
+        }
     }
     let (h1, tip, h2) = geo.arrow.head;
     if filled_arrow {
@@ -585,7 +588,8 @@ mod tests {
         assert_eq!(n(CLS_TREAD), 15);
         assert_eq!(n(CLS_OUTLINE), 6);
         assert_eq!(n(CLS_BREAK), 5);
-        assert_eq!((n(CLS_RUN), n(CLS_ARROW)), (1, 2));
+        // Schnitthöhe 1.0 m liegt in der Treppe: Lauflinie vor der Bruchlinie ausgezogen, dahinter gestrichelt
+        assert_eq!((n(CLS_RUN), n(CLS_ARROW)), (2, 2));
     }
 
     /// Alle Linien (cls, gestrichelt, a, b, Stärke).
@@ -687,7 +691,7 @@ mod tests {
         let x_break = 5.5 * 3.0 / 16.0;
         let b = plan_stair(&straight(), 2.8, 1.0, 0.25, false, 0.0, 3, false);
         for (cls, dashed, a, e, _) in lines_w(&b) {
-            if cls == CLS_RUN || cls == CLS_ARROW || cls == CLS_BREAK {
+            if cls == CLS_ARROW || cls == CLS_BREAK {
                 assert!(!dashed);
                 continue;
             }
@@ -746,7 +750,7 @@ mod tests {
     fn pfeil_schliesst_an_der_spitze() {
         let l = lines_w(&plan_stair(&straight(), 2.8, 1.0, 0.25, false, 0.0, 0, false));
         let a: Vec<_> = l.iter().filter(|x| x.0 == CLS_ARROW).collect();
-        let run = l.iter().find(|x| x.0 == CLS_RUN).unwrap();
+        let run = l.iter().filter(|x| x.0 == CLS_RUN).last().unwrap();
         assert_eq!(a[0].3, a[1].2);
         assert_eq!(run.3, a[0].3);
     }

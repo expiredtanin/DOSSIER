@@ -58,7 +58,11 @@ export function selectionMenuState(project: Project, selection: Selection, withL
     const g = project.drawings2d.find((d) => d.id === id)?.geom;
     return g?.shape === "dimension" && !!g.refs?.some(Boolean);
   });
-  return { selectionAllLocked, selectionLayerCodes, selectionAllNoPrint, attachedDimensionIds };
+  const movedDimTextIds = selection.drawings.filter((id) => {
+    const g = project.drawings2d.find((d) => d.id === id)?.geom;
+    return g?.shape === "dimension" && !!g.textOffsetsMm?.some((o) => o.along !== 0 || o.perp !== 0);
+  });
+  return { selectionAllLocked, selectionLayerCodes, selectionAllNoPrint, attachedDimensionIds, movedDimTextIds };
 }
 
 export function useSelectionCommands(opts: {
@@ -275,6 +279,19 @@ export function useSelectionCommands(opts: {
     if (attachedDimensionIds.length) applyChange((p) => cmdMutation({ cmd: "dimdetach", ids: attachedDimensionIds }).toOps(p));
   };
 
+  // „Text zurücksetzen" ([172]): Masszahlen der gewählten Bemassungen zurück auf die Vorgabe (mittig).
+  const resetDimensionTexts = () => {
+    const { movedDimTextIds } = menuState();
+    if (!movedDimTextIds.length) return;
+    applyChange((p) =>
+      patchItems(p, "drawings2d", movedDimTextIds, (d) => {
+        if (d.geom.shape !== "dimension") return d;
+        const { textOffsetsMm: _drop, ...geom } = d.geom;
+        return { ...d, geom };
+      }),
+    );
+  };
+
   // Ctrl/Cmd+G / Ctrl/Cmd+Shift+G = Gruppieren/Auflösen (Vectorworks-artig,
   // s. state/groupActions.ts). `applyGroupSelection` setzt nach dem Gruppieren/
   // Auflösen alle betroffenen Auswahl-Kanäle auf einen Schlag.
@@ -370,6 +387,7 @@ export function useSelectionCommands(opts: {
     isolateSelectionLayers,
     toggleSelectionNoPrint,
     detachDimensions,
+    resetDimensionTexts,
     onEnterGroup,
     onLeaveGroup,
     onSegmentCut,

@@ -115,6 +115,7 @@ export function useGripEditing(opts: {
     index: number,
     pt: Vec2,
     scaleDenominator?: number,
+    free?: boolean,
   ) => void;
   moveRoomEdge: (id: string, aIndex: number, bIndex: number, delta: Vec2) => void;
   moveCeilingEdge: (id: string, aIndex: number, bIndex: number, delta: Vec2) => void;
@@ -555,6 +556,8 @@ export function useGripEditing(opts: {
   // Letzter roher Cursor des laufenden Vertex-Drags (für die Lock-Auflösung beim
   // Tippen, wenn gerade kein Move-Event kommt). Plus der gezogene Griff-Index.
   const gripDragInfoRef = useRef<{ index: number; raw: Vec2 } | null>(null);
+  /** [172] Alt gehalten beim Ziehen: Masszahl frei statt an festen Stellen einrastend. */
+  const gripFreeRef = useRef(false);
   // AUSSTEHENDER Vertex-Zug eines Polylinien-Elements: Während des Ziehens wird das
   // PROJEKT NICHT verändert (sonst rechnet jede Mausbewegung den ganzen Plan neu —
   // bei Katasterdaten Sekunden); nur eine Vorschau (`gripPreviewShapes`) wird
@@ -920,7 +923,7 @@ export function useGripEditing(opts: {
           return;
         }
       }
-      moveGripOf(dId, wId, local, pt, scaleDenominator);
+      moveGripOf(dId, wId, local, pt, scaleDenominator, gripFreeRef.current);
     }
   };
 
@@ -1274,6 +1277,16 @@ export function useGripEditing(opts: {
         applyGrip(index, pt);
         setDraft({ preview: gripPreviewShapes(), vertices: [], snap: null, hud: hudFor(index, pt) });
         return;
+      }
+      // [172] Masszahl-Griff: der Kern rastet an festen Stellen ein (Alt = frei); Objektfang würde das stören.
+      gripFreeRef.current = !!mods.alt;
+      if (owner?.drawingId) {
+        const od = project.drawings2d.find((x) => x.id === owner.drawingId);
+        if (od?.geom.shape === "dimension" && !od.geom.kind && owner.localIndex > od.geom.pts.length) {
+          applyGrip(index, raw);
+          setDraft({ preview: gripPreviewShapes(), vertices: [], snap: null, hud: hudFor(index, raw) });
+          return;
+        }
       }
       // Snap gegen das Projekt OHNE das gerade gezogene Element (sonst fängt der
       // Punkt an sich selbst); Bezug ist der feste Nachbar-Griff, nicht der

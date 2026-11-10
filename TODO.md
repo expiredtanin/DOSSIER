@@ -104,7 +104,7 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   10.11. auch Ellipsenbögen, Länge numerisch),
   Kreise ohne (geschlossen), DXF/DWG ohne Phase je Objekt,
   Metal-Chunks verketten nur über das Ketten-Flag, React-SVG-Ansicht ohne Phase. · M
-- ◐ **[155]** Treppensymbol. Raumstempel weichen den neuen Linien nicht aus; Lauflinie über Bruchlinie ausgezogen;
+- ◐ **[155]** Treppensymbol. (10.11.) Lauflinie hinter der Bruchlinie gestrichelt wie die Tritte (Pfeil bleibt ausgezogen); Raumstempel weichen allen Treppen-Linien aus (`stamp_obstacles_with` nimmt `d.stairs` ganz, Test `stempel_weichen_den_treppenlinien_aus`). Offen:
   Absturzsicherung nur im Grundriss (kein Geländer-Bauteil in 3D/IFC); Ende eines freien Lochrings ohne Gehrung;
   dichtes Belagsmuster in 1:100. · M
 - ◐ **[156]** Bodenbelag-Muster massstabsgerecht. Möbel nur als Blöcke/Körper (geschlossene 2D-Formen der Kategorie
@@ -159,6 +159,13 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
 - ◐ **[81]** Automatische Aussenbemassung (`auto_dimensions`). (9.11.) Schiefe Ketten kreuzen den Grundriss nicht mehr
   (sonst vor alles im Streifen hinausgerückt), getrennte Gebäude eigene Seitenketten (`south2` …), Erker-Facetten ohne
   Stufe. Offen: schiefe Kette kann eine achsparallele Kette kreuzen; Radius von Bogenwänden nicht automatisch. · S
+- ◐ **[172]** Masszahl der Bemassung „snappy" und mittig. (10.11.) Vorgabe: Zahl wirklich mittig (bisher hing sie mit ihrem Anfang an der Segmentmitte, jetzt
+  um die Breite halbiert zurückgesetzt, auch Bogenlänge) über jedem Segment im festen Abstand (Grundlinie 0.6 Schrifthöhe); passt sie nicht zwischen die Hilfslinien, weicht sie nach aussen (erstes Segment links, letztes rechts,
+  mittlere zum längeren Nachbarn, bei Überdeckung eine Zeile höher) — `dim_auto_offsets` in `plan/drawings.rs`, gilt für
+  manuelle und automatische Bemassung, Griff steht an derselben Stelle. Masszahl-Griff rastet an Mitte · innen links/rechts ·
+  aussen links/rechts · über/unter der Linie ein, frei mit gehaltener Alt-Taste (`grips.rs::dim_text_slot`; Objektfang
+  entfällt beim Ziehen). Gespeichert bleibt `textOffsetsMm` (kein neues Feld); (0,0) = Vorgabe, frei verschobene Texte alter
+  Projekte bleiben stehen. „Text zurücksetzen" in Objekt-Info und Kontextmenü. DXF/DWG-Export setzt die Textposition der DIMENSION an die ausgewichene Lage (`plan/dxf.rs`, 10.11.). Radius-/Durchmesser-/Bogenlängenmass: Zahl mittig über dem Ankerpunkt; Offen: kein Einrast-Griff für Rundmasse (Griff sitzt noch an der Kettenmitte); in der App nicht geklickt. · S
 - ◐ **[154]** Bauteile aus Zeichnung erkennen (Befehl `erkennen`). Stösse von Bogenwänden, schräg anstossende Enden,
   Treppen/Decken, Fenster über der Schnitthöhe (5 von 6 fehlenden Öffnungen im Musterhaus komplex), Wanddurchbruch
   mit Schwellen-Rechteck wird Fenster, Schiebetüren in Bogenwänden, Blöcke. · L

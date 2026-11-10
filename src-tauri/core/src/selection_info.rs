@@ -1273,6 +1273,9 @@ fn drawing_selection(root: &Map<String, Value>, d: &Value) -> J {
     let is_image = str_of(field(g, "shape")) == Some("image");
     // Assoziative Bemassung ([38]): Bezug je Punkt (`null` = frei) für die Objekt-Info.
     let dim_refs = if str_of(field(g, "shape")) == Some("dimension") { field(g, "refs").filter(|r| r.is_array()).cloned() } else { None };
+    // [172] Verschobene Masszahl (Abweichung von der Vorgabe „mittig"): Objekt-Info bietet „Text zurücksetzen".
+    let dim_text_moved = str_of(field(g, "shape")) == Some("dimension")
+        && arr(field(g, "textOffsetsMm")).iter().any(|o| num_of(field(o, "along")) != 0.0 || num_of(field(o, "perp")) != 0.0);
     let detail = (str_of(field(g, "shape")) == Some("detailref")).then(|| {
         let layouts = J::arr(arr(root.get("layouts")).iter().map(|l| O::default().raw("id", l, "id").raw("name", l, "name").done()));
         O::default().raw("label", g, "label").raw("sheetLayoutId", g, "sheetLayoutId").raw("sheetLabel", g, "sheetLabel").v("availableLayouts", layouts).done()
@@ -1306,6 +1309,7 @@ fn drawing_selection(root: &Map<String, Value>, d: &Value) -> J {
         .v("bbox", bbox_value(geom_bbox(g)))
         .o("detailRef", detail)
         .o("dimRefs", dim_refs)
+        .o("dimTextMoved", dim_text_moved.then_some(Value::Bool(true)))
         .done()
 }
 
