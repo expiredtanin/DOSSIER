@@ -9,8 +9,10 @@ import { computeSection, generateSectionPlan } from "../plan/toSection";
 import { generateElevationPlan } from "../plan/toElevation";
 import { de } from "../i18n/de";
 import { en } from "../i18n/en";
+import { standardModelViews } from "../model/standards";
 import {
   addModelViewOps,
+  adoptModelViewOps,
   currentModelViewId,
   deleteModelViewOps,
   duplicateModelViewOps,
@@ -129,5 +131,21 @@ describe("modelViews", () => {
     e = applyOps(e, setModelViewOptionOps(e, "mv1", "elevation", "shadows", true));
     e = applyOps(e, selectModelViewOps(e, "ansicht-sued", "mv1"));
     expect(elev(e)).toBe(elev(sampleProject));
+  });
+
+  it("[173] Etappe 3: Vorlagen aus den Standards übernehmen; wirken auf Raumstempel und Treppe", () => {
+    const lib = standardModelViews(sampleProject);
+    expect(lib.map((m) => m.id)).toEqual(["std-mv-wettbewerb-200", "std-mv-baueingabe-100", "std-mv-ausfuehrung-50", "std-mv-rohbau"]);
+    let p = applyOps(sampleProject, adoptModelViewOps(sampleProject, lib[2]!));
+    expect(p.modelViewOptions?.map((m) => m.id)).toEqual(["std-mv-ausfuehrung-50"]);
+    expect(adoptModelViewOps(p, lib[2]!)).toEqual([]);
+    expect(standardModelViews(p).map((m) => m.id)).not.toContain("std-mv-ausfuehrung-50");
+    const codes = new Set(p.layers.flatMap(function all(c): string[] {
+      return [c.code, ...(c.children ?? []).flatMap(all)];
+    }));
+    const stepNumbers = (q: Project) => generatePlan(q, "eg", codes, undefined, "fein", false, false, true, 50).primitives.filter((x) => x.kind === "drawingText" && /^\d+$/.test(x.text)).length;
+    const heute = stepNumbers(p);
+    p = applyOps(p, selectModelViewOps(p, "eg", "std-mv-ausfuehrung-50"));
+    expect(stepNumbers(p)).toBeGreaterThan(heute);
   });
 });

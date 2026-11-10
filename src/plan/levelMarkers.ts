@@ -3,16 +3,20 @@
 // Gebäudes (First/OK Dach), links neben der Zeichnung mit einer kurzen
 // Bezugslinie zur Geometrie. Symbol = dieselbe SIA-400-Kote wie das 2D-Element
 // `kote`; gerechnet im Kern (`plan/drawings.rs::level_markers`, Abfrage `levelMarkers`).
-// Abschaltbar je Ebene (`DrawingLevel.levelMarks`).
+// Abschaltbar je Ebene (`DrawingLevel.levelMarks`) oder über die Modelldarstellung ([173]).
 
 import type { DrawingLevel, Project } from "../model/types";
 import type { Primitive } from "./generatePlan";
 import { documentFor } from "../core/document";
 import { decodePlanBuf } from "./planBuf";
 
-/** Ob eine Ebene automatische Koten trägt (Default an). */
-export function levelMarksEnabled(level: DrawingLevel): boolean {
-  return level.levelMarks !== false;
+/**
+ * Ob eine Ebene automatische Koten trägt: Ebene > [173] Modelldarstellung der Ebene (`dimensions.levelMarks`,
+ * Rangfolge wie Kern `model_view::Options::level_marks`) > an.
+ */
+export function levelMarksEnabled(level: DrawingLevel, project?: Pick<Project, "modelViewOptions">): boolean {
+  const mv = level.modelViewOptionId ? project?.modelViewOptions?.find((m) => m.id === level.modelViewOptionId) : undefined;
+  return level.levelMarks ?? mv?.dimensions?.levelMarks ?? true;
 }
 
 /**

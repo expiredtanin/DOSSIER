@@ -25,4 +25,12 @@ describe("levelMarkerPrimitives", () => {
     expect(levelMarksEnabled(lv)).toBe(true);
     expect(levelMarksEnabled({ ...lv, levelMarks: false })).toBe(false);
   });
+
+  it("[173] Modelldarstellung der Ebene schaltet sie aus; die Ebene geht vor", () => {
+    const lv = { ...sampleProject.drawingLevels.find((l) => l.kind === "section")!, modelViewOptionId: "mv" };
+    const p = { modelViewOptions: [{ id: "mv", name: "Wettbewerb", dimensions: { levelMarks: false } }] };
+    expect(levelMarksEnabled(lv)).toBe(true);
+    expect(levelMarksEnabled(lv, p)).toBe(false);
+    expect(levelMarksEnabled({ ...lv, levelMarks: true }, p)).toBe(true);
+  });
 });

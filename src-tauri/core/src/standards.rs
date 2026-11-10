@@ -284,6 +284,50 @@ pub fn view_templates() -> Vec<Value> {
     ]
 }
 
+/// [173] Stufen der Modelldarstellung als Vorlagen (≙ Archicad „Modelldarstellung"): Wettbewerb 1:200 (Wände als
+/// Fläche, Räume mit Name und Fläche ohne Nummer, nur das Gesamtmass, ohne Koten), Baueingabe 1:100 (SIA-Kategorie,
+/// alle Ketten), Ausführung 1:50 (fein: alle Schichten, Schwellen, Stufennummern, Raumhöhe und Belag) und
+/// Rohbau/Statik (nur die tragenden Schichten, ohne Ausbau). Jede nicht genannte Option bleibt „wie Basis".
+pub fn model_views() -> Vec<Value> {
+    vec![
+        json!({"id": "std-mv-wettbewerb-200", "name": "Wettbewerb 1:200", "baseDetail": "mittel",
+               "doors": {"frame": false, "threshold": "off"},
+               "windows": {"sill": false, "sashFrames": false, "lintelLine": false},
+               "stairs": {"aboveCut": "off", "handrail": "off", "stepNumbers": false},
+               "walls": {"layers": "simplified", "reveals": false},
+               "slabs": {"floorFinish": "off", "viewHatch": false},
+               "roofs": {"viewHatch": false},
+               "columns": {"cutFill": "solid"},
+               "elevation": {"materialHatch": false, "shadows": true},
+               "roomStamps": {"number": false, "area": true, "usage": false, "height": false, "finish": false, "divider": false},
+               "dimensions": {"chains": "total", "levelMarks": false}}),
+        json!({"id": "std-mv-baueingabe-100", "name": "Baueingabe 1:100", "baseDetail": "mittel",
+               "doors": {"threshold": "off"},
+               "stairs": {"stepNumbers": false},
+               "walls": {"layers": "simplified"},
+               "slabs": {"floorFinish": "wet"},
+               "roomStamps": {"number": true, "area": true, "usage": true},
+               "dimensions": {"chains": "all", "levelMarks": true}}),
+        json!({"id": "std-mv-ausfuehrung-50", "name": "Ausführung 1:50", "baseDetail": "fein",
+               "doors": {"leaf": "rect", "threshold": "all"},
+               "windows": {"sill": true, "sashFrames": true, "lintelLine": true},
+               "stairs": {"handrail": "double", "startMark": true, "stepNumbers": true},
+               "walls": {"layers": "all"},
+               "slabs": {"floorFinish": "all", "layers": "all"},
+               "roomStamps": {"number": true, "area": true, "height": true, "finish": true, "divider": true},
+               "dimensions": {"chains": "all", "levelMarks": true}}),
+        json!({"id": "std-mv-rohbau", "name": "Rohbau/Statik", "baseDetail": "mittel",
+               "doors": {"frame": false, "swingArc": false, "threshold": "off", "sectionDetail": false},
+               "windows": {"sill": false, "sashFrames": false, "sectionDetail": false},
+               "stairs": {"walkLine": false, "arrow": false, "handrail": "off", "stepNumbers": false},
+               "walls": {"layers": "core", "reveals": false},
+               "slabs": {"floorFinish": "off", "layers": "core"},
+               "roofs": {"layers": "core"},
+               "roomStamps": {"area": false, "usage": false, "finish": false},
+               "dimensions": {"chains": "all", "levelMarks": true}}),
+    ]
+}
+
 /// [100] Symbole (2D-Blöcke): Deckenleuchte als Kreis mit Diagonalkreuz (Elektro-Sinnbild), Ø 30 cm,
 /// für den Deckenspiegel (Kategorie „Leuchten“, [`light_category`]).
 pub fn block_defs() -> Vec<Value> {
@@ -323,6 +367,7 @@ pub fn library() -> Vec<(&'static str, Vec<Value>)> {
         ("viewTemplates", view_templates()),
         ("blockDefs", block_defs()),
         ("overrideRules", override_rules()),
+        ("modelViewOptions", model_views()),
     ]
 }
 
@@ -420,6 +465,10 @@ fn managed(key: &str) -> &'static [&'static str] {
         ],
         "blockDefs" => &["geom2d"],
         "overrideRules" => &["condition", "conditions", "actions"],
+        // [173] Stufen der Modelldarstellung: Basis und alle Abschnitte.
+        "modelViewOptions" => &[
+            "baseDetail", "doors", "windows", "stairs", "walls", "slabs", "roofs", "columns", "elevation", "site", "sectionMarks", "roomStamps", "dimensions",
+        ],
         _ => &["layers"],
     }
 }

@@ -2085,9 +2085,86 @@ pub struct ModelViewOption {
     #[serde(rename = "sectionMarks", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub section_marks: Option<ModelViewSectionMarks>,
+    /// [173] Raumstempel: welche Zeilen (die Einstellung am Stempel geht vor).
+    #[serde(rename = "roomStamps", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub room_stamps: Option<ModelViewRoomStamps>,
+    /// [173] Bemassung: Massketten der automatischen Aussenbemassung, Höhenkoten.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub dimensions: Option<ModelViewDimensions>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
+}
+
+/// [173] Raumstempel in der Modelldarstellung (fehlt ⇒ wie Basis). Die Einstellung am Raumstempel geht vor
+/// (Bodenfläche und SIA-Kategorie sind dort immer gesetzt, Belag und Trennlinie, wenn gewählt); die Stufe
+/// bestimmt die übrigen Zeilen und die Räume ohne eigenen Stempel.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct ModelViewRoomStamps {
+    /// Raumnummer (Basis: ja; der Stempel liefert nur den Text).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub number: Option<bool>,
+    /// Bodenfläche (Basis: ja).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub area: Option<bool>,
+    /// SIA-416-Kategorie (Basis: nein).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub usage: Option<bool>,
+    /// Lichte Raumhöhe (Basis: nein).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub height: Option<bool>,
+    /// Bodenbelag (Basis: nein).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub finish: Option<bool>,
+    /// Trennlinie unter dem Namen (Basis: nein; nur bei Räumen mit Stempel).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub divider: Option<bool>,
+    #[serde(flatten)]
+    #[ts(skip)]
+    pub extra: Extra,
+}
+
+/// [173] Bemassung in der Modelldarstellung (fehlt ⇒ wie Basis). Wirkt auf die Ketten der automatischen
+/// Aussenbemassung (`autodim-…`) und auf die Höhenkoten; eigene Massketten bleiben.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct ModelViewDimensions {
+    /// Massketten der Aussenbemassung (Basis: alle).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub chains: Option<ModelViewDimChains>,
+    /// Höhenkoten: 2D-Koten im Plan und die automatischen Koten in Schnitt/Ansicht (die Ebene geht vor; Basis: ja).
+    #[serde(rename = "levelMarks", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub level_marks: Option<bool>,
+    #[serde(flatten)]
+    #[ts(skip)]
+    pub extra: Extra,
+}
+
+/// [173] Ketten der automatischen Aussenbemassung: alle, ohne die Öffnungskette (Vor-/Rücksprünge und
+/// Gesamtmass) oder nur das Gesamtmass.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+pub enum ModelViewDimChains {
+    #[default]
+    #[serde(rename = "all")]
+    All,
+    #[serde(rename = "outer")]
+    Outer,
+    #[serde(rename = "total")]
+    Total,
+    #[serde(other)]
+    #[ts(skip)]
+    Unknown,
 }
 
 /// [176] Schnittmarken in der Modelldarstellung (fehlt ⇒ Pfeil).
@@ -2244,6 +2321,10 @@ pub struct ModelViewStairs {
     #[serde(rename = "startMark", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub start_mark: Option<bool>,
+    /// [173] Stufennummern im Grundriss (Basis: nein).
+    #[serde(rename = "stepNumbers", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub step_numbers: Option<bool>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,

@@ -1,12 +1,14 @@
 // Ressourcen-Tab „Modelldarstellung" ([173]): eigene Stufen der Darstellung anlegen, duplizieren, umbenennen,
 // löschen und je Bauteilart einstellen (jede Option „wie Basis" oder ein Wert). Die eingebauten Stufen
-// grob/mittel/fein stehen oben (nur lesend, duplizierbar). Logik und Ops: `state/modelViews.ts`; Handler aus
+// grob/mittel/fein stehen oben (nur lesend, duplizierbar); darunter die mitgelieferten Vorlagen, die dem Projekt
+// fehlen (Kern `standards.rs::model_views`; „+" übernimmt sie mit Standard-Kennung). Logik und Ops: `state/modelViews.ts`; Handler aus
 // der App, ein Aufruf = ein Undo-Schritt. Wirkung und Rangfolge: Kern `plan/model_view.rs`.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ModelViewOption, Project } from "../../model/types";
 import type { DetailLevel } from "../../model/viewTypes";
 import { t } from "../../i18n";
+import { standardModelViews } from "../../core";
 import type { TranslationKey } from "../../i18n/de";
 import {
   BUILTIN_MODEL_VIEWS,
@@ -23,6 +25,8 @@ export interface ModelViewHandlers {
   onAddModelView?: () => void;
   /** Kopie (auch einer eingebauten Stufe: wird zur eigenen mit deren Basis). */
   onDuplicateModelView?: (id: string) => void;
+  /** Vorlage aus der Bibliothek ins Projekt übernehmen (Standard-Kennung bleibt). */
+  onAdoptModelView?: (mv: ModelViewOption) => void;
   onRenameModelView?: (id: string, name: string) => void;
   onDeleteModelView?: (id: string) => void;
   /** `null` = Detailgrad der Ansicht. */
@@ -31,7 +35,7 @@ export interface ModelViewHandlers {
   onSetModelViewOption?: (id: string, section: ModelViewSection, key: string, value: string | number | boolean | null) => void;
 }
 
-const SECTIONS: ModelViewSection[] = ["doors", "windows", "stairs", "walls", "slabs", "roofs", "columns", "elevation", "site", "sectionMarks"];
+const SECTIONS: ModelViewSection[] = ["doors", "windows", "stairs", "walls", "slabs", "roofs", "columns", "elevation", "site", "sectionMarks", "roomStamps", "dimensions"];
 
 /** Anzeige eines Auswahlwerts (Zahlen mit Einheit, Rest übersetzt). */
 function valueLabel(f: ModelViewField, v: string | number): string {
@@ -70,12 +74,19 @@ function ModelViewDetail({ mv, h }: { mv: ModelViewOption; h: ModelViewHandlers 
   return (
     <div className="res-detail" data-testid="model-view-detail">
       <FieldRow label={t("resources.modelViews.name")}>
-        <input className="res-input" aria-label={t("resources.modelViews.name")} value={mv.name} onChange={(e) => h.onRenameModelView?.(mv.id, e.target.value)} />
+        <input
+          className="res-input"
+          aria-label={t("resources.modelViews.name")}
+          value={mv.name}
+          readOnly={!h.onRenameModelView}
+          onChange={(e) => h.onRenameModelView?.(mv.id, e.target.value)}
+        />
       </FieldRow>
       <FieldRow label={t("resources.modelViews.base")}>
         <select
           className="res-input"
           aria-label={t("resources.modelViews.base")}
+          disabled={!h.onSetModelViewBase}
           value={mv.baseDetail ?? ""}
           onChange={(e) => h.onSetModelViewBase?.(mv.id, e.target.value === "" ? null : (e.target.value as DetailLevel))}
         >
@@ -90,6 +101,7 @@ function ModelViewDetail({ mv, h }: { mv: ModelViewOption; h: ModelViewHandlers 
       {SECTIONS.map((s) => (
         <div key={s} className="res-mv-section" data-testid={`model-view-section-${s}`}>
           <div className="res-hint">{t(`resources.modelViews.section.${s}`)}</div>
+          {s === "roomStamps" && <div className="res-hint">{t("resources.modelViews.stampHint")}</div>}
           {MODEL_VIEW_FIELDS.filter((f) => f.section === s).map((f) => (
             <OptionRow key={f.key} mv={mv} f={f} h={h} />
           ))}
@@ -101,6 +113,8 @@ function ModelViewDetail({ mv, h }: { mv: ModelViewOption; h: ModelViewHandlers 
 
 export function ModelViewsTab({ project, handlers }: { project: Project; handlers: ModelViewHandlers }) {
   const list = project.modelViewOptions ?? [];
+  // [173] Mitgelieferte Stufen, die dem Projekt fehlen (nur lesend; übernehmen = ins Projekt kopieren).
+  const library = useMemo(() => standardModelViews(project), [project]);
   const [selectedId, setSelectedId] = useState<string>("mittel");
   // Neue bzw. duplizierte Stufe gleich auswählen (die Liste wächst um sie).
   const prevIds = useRef(list.map((m) => m.id));
@@ -110,7 +124,8 @@ export function ModelViewsTab({ project, handlers }: { project: Project; handler
     if (added) setSelectedId(added.id);
   }, [list]);
   const selected = list.find((x) => x.id === selectedId);
-  const activeId = selected ? selected.id : isBuiltinModelView(selectedId) ? selectedId : "mittel";
+  const template = selected ? undefined : library.find((x) => x.id === selectedId);
+  const activeId = selected ? selected.id : template ? template.id : isBuiltinModelView(selectedId) ? selectedId : "mittel";
   const row = (id: string, name: string, own: boolean) => (
     <div
       key={id}
@@ -149,6 +164,38 @@ export function ModelViewsTab({ project, handlers }: { project: Project; handler
         <div className="res-md-list">
           {BUILTIN_MODEL_VIEWS.map((d) => row(d, t(`topbar.detail.${d}`), false))}
           {list.map((m) => row(m.id, m.name, true))}
+          {library.length > 0 && <div className="res-hint">{t("resources.modelViews.library")}</div>}
+          {library.map((m) => (
+            <div
+              key={m.id}
+              role="button"
+              tabIndex={0}
+              data-testid="model-view-template"
+              className={`res-md-row${activeId === m.id ? " active" : ""}`}
+              style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}
+              onClick={() => setSelectedId(m.id)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") setSelectedId(m.id);
+              }}
+            >
+              <span className="res-md-row-name" style={{ flex: 1, opacity: 0.75 }}>
+                {m.name}
+              </span>
+              <button
+                type="button"
+                className="res-layer-btn"
+                title={t("resources.modelViews.adopt")}
+                data-testid="model-view-adopt"
+                disabled={!handlers.onAdoptModelView}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handlers.onAdoptModelView?.(m);
+                }}
+              >
+                +
+              </button>
+            </div>
+          ))}
           <div className="res-md-listfoot">
             <button className="res-add" data-testid="model-view-add" onClick={() => handlers.onAddModelView?.()} disabled={!handlers.onAddModelView}>
               <span className="res-add-plus">+</span> {t("resources.modelViews.add")}
@@ -156,7 +203,16 @@ export function ModelViewsTab({ project, handlers }: { project: Project; handler
           </div>
         </div>
         <div className="res-md-detail">
-          {selected ? <ModelViewDetail key={selected.id} mv={selected} h={handlers} /> : <div className="res-md-empty">{t("resources.modelViews.builtin")}</div>}
+          {selected ? (
+            <ModelViewDetail key={selected.id} mv={selected} h={handlers} />
+          ) : template ? (
+            <>
+              <div className="res-hint">{t("resources.modelViews.libraryRow")}</div>
+              <ModelViewDetail key={template.id} mv={template} h={{}} />
+            </>
+          ) : (
+            <div className="res-md-empty">{t("resources.modelViews.builtin")}</div>
+          )}
         </div>
       </div>
     </div>

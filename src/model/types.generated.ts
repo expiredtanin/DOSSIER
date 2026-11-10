@@ -1996,6 +1996,25 @@ export type ModelViewColumns = {
 /** [173] Geschnittene Stütze: Schraffur des Baustoffs, schwarz oder leer. */
 export type ModelViewCutFill = "material" | "solid" | "empty";
 
+/**
+ * [173] Ketten der automatischen Aussenbemassung: alle, ohne die Öffnungskette (Vor-/Rücksprünge und
+ * Gesamtmass) oder nur das Gesamtmass.
+ */
+export type ModelViewDimChains = "all" | "outer" | "total";
+
+/**
+ * [173] Bemassung in der Modelldarstellung (fehlt ⇒ wie Basis). Wirkt auf die Ketten der automatischen
+ * Aussenbemassung (`autodim-…`) und auf die Höhenkoten; eigene Massketten bleiben.
+ */
+export type ModelViewDimensions = {
+  /** Massketten der Aussenbemassung (Basis: alle). */
+  chains?: ModelViewDimChains;
+  /**
+   * Höhenkoten: 2D-Koten im Plan und die automatischen Koten in Schnitt/Ansicht (die Ebene geht vor; Basis: ja).
+   */
+  levelMarks?: boolean;
+};
+
 /** [173] Türen in der Modelldarstellung (fehlt ⇒ wie Basis). */
 export type ModelViewDoors = {
   /** Sturzlinie im Grundriss (Element und Türtyp gehen vor). */
@@ -2058,6 +2077,10 @@ export type ModelViewOption = {
   elevation?: ModelViewElevation;
   /** [176] Schnittmarken im Grundriss. */
   sectionMarks?: ModelViewSectionMarks;
+  /** [173] Raumstempel: welche Zeilen (die Einstellung am Stempel geht vor). */
+  roomStamps?: ModelViewRoomStamps;
+  /** [173] Bemassung: Massketten der automatischen Aussenbemassung, Höhenkoten. */
+  dimensions?: ModelViewDimensions;
 };
 
 /** [173] Dächer in der Modelldarstellung (fehlt ⇒ wie Basis). */
@@ -2068,6 +2091,26 @@ export type ModelViewRoofs = {
   overhead?: boolean;
   /** Ansichtsschraffur und Muster der Eindeckung in der Dachaufsicht (Basis: ja). */
   viewHatch?: boolean;
+};
+
+/**
+ * [173] Raumstempel in der Modelldarstellung (fehlt ⇒ wie Basis). Die Einstellung am Raumstempel geht vor
+ * (Bodenfläche und SIA-Kategorie sind dort immer gesetzt, Belag und Trennlinie, wenn gewählt); die Stufe
+ * bestimmt die übrigen Zeilen und die Räume ohne eigenen Stempel.
+ */
+export type ModelViewRoomStamps = {
+  /** Raumnummer (Basis: ja; der Stempel liefert nur den Text). */
+  number?: boolean;
+  /** Bodenfläche (Basis: ja). */
+  area?: boolean;
+  /** SIA-416-Kategorie (Basis: nein). */
+  usage?: boolean;
+  /** Lichte Raumhöhe (Basis: nein). */
+  height?: boolean;
+  /** Bodenbelag (Basis: nein). */
+  finish?: boolean;
+  /** Trennlinie unter dem Namen (Basis: nein; nur bei Räumen mit Stempel). */
+  divider?: boolean;
 };
 
 /** [176] Schnittmarken in der Modelldarstellung (fehlt ⇒ Pfeil). */
@@ -2122,6 +2165,8 @@ export type ModelViewStairs = {
   runEndMm?: number;
   /** Antrittspunkt am Anfang der Lauflinie (Basis: nein). */
   startMark?: boolean;
+  /** [173] Stufennummern im Grundriss (Basis: nein). */
+  stepNumbers?: boolean;
 };
 
 /** [173] Schwelle der Türen im Grundriss. */

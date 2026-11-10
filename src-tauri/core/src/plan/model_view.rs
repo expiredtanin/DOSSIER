@@ -16,6 +16,9 @@
 //! von Wänden, Decken, Dächern; Tür-/Fensterdetail; Bodenaufbau; Treppen hinter dem Schnitt, Handlauf),
 //! Decken/Dächer/Stützen im Grundriss, Ansicht (Schatten, Materialschraffur, Fensterteilung), Schwelle und
 //! Sturzlinie der Fenster im Grundriss, „nur Kern" als echte Kerndicke, 3D (Handlauf, Öffnungsdetail).
+//! Etappe 3: Raumstempel-Zeilen ([`StampOpts`], der Stempel geht vor), Bemassung (Ketten der automatischen
+//! Aussenbemassung, Höhenkoten; [`DimOpts`]), Stufennummern der Treppe, Bibliothek mitgelieferter Stufen
+//! (`standards.rs::model_views`, „Standards laden").
 
 use super::style::{simplify_thin_layers, Detail, THIN_LAYER_PAPER_MM};
 use crate::model::*;
@@ -160,6 +163,72 @@ pub struct StairOpts {
     pub run_end_mm: f64,
     /// Antrittspunkt am Anfang der Lauflinie.
     pub start_mark: bool,
+    /// Stufennummern im Grundriss.
+    pub step_numbers: bool,
+}
+
+/// Raumstempel: Zeilen nach der Stufe (`None` = wie Basis). Rangfolge in [`StampOpts::line`].
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct StampOpts {
+    pub number: Option<bool>,
+    pub area: Option<bool>,
+    pub usage: Option<bool>,
+    pub height: Option<bool>,
+    pub finish: Option<bool>,
+    pub divider: Option<bool>,
+}
+
+impl StampOpts {
+    /// Eine Zeile: Einstellung am Stempel > Stufe > Basis.
+    pub fn line(stamp: Option<bool>, mv: Option<bool>, base: bool) -> bool {
+        stamp.or(mv).unwrap_or(base)
+    }
+    /// Raumnummer zeigen (der Stempel liefert nur den Text): Stufe > ja.
+    pub fn show_number(&self) -> bool {
+        self.number.unwrap_or(true)
+    }
+}
+
+/// Ketten der automatischen Aussenbemassung.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DimChains {
+    All,
+    /// Ohne die Öffnungskette (und ohne Bogenmass-Ketten, die Leibungen tragen).
+    Outer,
+    /// Nur das Gesamtmass.
+    Total,
+}
+
+/// Bemassung.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DimOpts {
+    pub chains: DimChains,
+    /// Höhenkoten der Modelldarstellung (die Ebene geht vor, s. [`Options::level_marks`]).
+    pub level_marks_mv: Option<bool>,
+}
+
+impl DimOpts {
+    /// Zeigt der Plan diese Zeichnung? Ketten der automatischen Aussenbemassung (`autodim-<Ebene>-<Seite>-<Kette>`,
+    /// Bogenmass `autodim-<Ebene>-arc-<Wand>`) nach [`DimChains`], 2D-Koten nach den Höhenkoten (Basis: alles).
+    pub fn shows(&self, d: &Drawing2D) -> bool {
+        match &d.geom {
+            Drawing2DGeom::Kote { .. } => self.level_marks_mv != Some(false),
+            Drawing2DGeom::Dimension { .. } if self.chains != DimChains::All => match autodim_chain(d) {
+                Some(chain) => chain == "total" || (self.chains == DimChains::Outer && chain == "steps"),
+                None => true,
+            },
+            _ => true,
+        }
+    }
+}
+
+/// Kette einer automatischen Aussenbemassung (`openings`, `steps`, `total`, `arc`); `None` = eigene Bemassung.
+pub fn autodim_chain(d: &Drawing2D) -> Option<&str> {
+    let rest = d.id.strip_prefix("autodim-")?.strip_prefix(d.level_id.as_str())?.strip_prefix('-')?;
+    if rest.starts_with("arc-") {
+        return Some("arc");
+    }
+    rest.rsplit_once('-').map(|(_, c)| c).filter(|c| matches!(*c, "openings" | "steps" | "total"))
 }
 
 /// Wände.
@@ -242,6 +311,10 @@ pub struct Options {
     pub terrain_mv: Option<bool>,
     /// [176] Markentyp der Schnitte laut Modelldarstellung (die Ebene geht vor, s. [`Options::section_marker`]).
     pub section_marker_mv: Option<SectionMarkerStyle>,
+    /// Raumstempel.
+    pub stamp: StampOpts,
+    /// Bemassung.
+    pub dims: DimOpts,
 }
 
 impl Options {
@@ -260,6 +333,10 @@ impl Options {
     /// [176] Schnittmarke: Ebene > Modelldarstellung > Pfeil.
     pub fn section_marker(&self, level: Option<SectionMarkerStyle>) -> SectionMarkerStyle {
         level.filter(|s| *s != SectionMarkerStyle::Unknown).or(self.section_marker_mv).unwrap_or(SectionMarkerStyle::Arrow)
+    }
+    /// Automatische Höhenkoten in Schnitt/Ansicht: Ebene > Modelldarstellung > an.
+    pub fn level_marks(&self, level: Option<bool>) -> bool {
+        level.or(self.dims.level_marks_mv).unwrap_or(true)
     }
     /// Schlagschatten der Ansicht: Ebene > Modelldarstellung > aus.
     pub fn shadows(&self, level: Option<bool>) -> bool {
@@ -374,6 +451,7 @@ pub fn resolve(mv: Option<&ModelViewOption>, detail: Detail, scale: f64) -> Opti
             run_start_mm: s.and_then(|s| s.run_start_mm).filter(|v| v.is_finite() && *v >= 0.0).unwrap_or(0.0),
             run_end_mm: s.and_then(|s| s.run_end_mm).filter(|v| v.is_finite() && *v >= 0.0).unwrap_or(0.0),
             start_mark: s.and_then(|s| s.start_mark).unwrap_or(false),
+            step_numbers: s.and_then(|s| s.step_numbers).unwrap_or(false),
         },
         wall: WallOpts {
             layers: layer_mode(wl.and_then(|w| w.layers)),
@@ -402,6 +480,18 @@ pub fn resolve(mv: Option<&ModelViewOption>, detail: Detail, scale: f64) -> Opti
         floor_finish_mv: mv.and_then(|m| m.slabs.as_ref()).and_then(|s| s.floor_finish).filter(|f| *f != FloorFinishDisplay::Unknown),
         terrain_mv: mv.and_then(|m| m.site.as_ref()).and_then(|s| s.terrain),
         section_marker_mv: mv.and_then(|m| m.section_marks.as_ref()).and_then(|s| s.style).filter(|s| *s != SectionMarkerStyle::Unknown),
+        stamp: mv.and_then(|m| m.room_stamps.as_ref()).map_or_else(StampOpts::default, |r| StampOpts { number: r.number, area: r.area, usage: r.usage, height: r.height, finish: r.finish, divider: r.divider }),
+        dims: {
+            let d = mv.and_then(|m| m.dimensions.as_ref());
+            DimOpts {
+                chains: match d.and_then(|d| d.chains) {
+                    Some(ModelViewDimChains::Outer) => DimChains::Outer,
+                    Some(ModelViewDimChains::Total) => DimChains::Total,
+                    _ => DimChains::All,
+                },
+                level_marks_mv: d.and_then(|d| d.level_marks),
+            }
+        },
     }
 }
 
@@ -430,3 +520,6 @@ mod tests;
 #[cfg(test)]
 #[path = "model_view_tests2.rs"]
 mod tests2;
+#[cfg(test)]
+#[path = "model_view_tests3.rs"]
+mod tests3;

@@ -11,6 +11,7 @@ import type { DetailLevel } from "../model/viewTypes";
 import type { ModelViewHandlers } from "../ui/resourceManager/ModelViewsTab";
 import {
   addModelViewOps,
+  adoptModelViewOps,
   deleteModelViewOps,
   duplicateModelViewOps,
   isBuiltinModelView,
@@ -37,6 +38,7 @@ export function modelViewHandlers(applyChange: ApplyChange, detail: () => Detail
       if (src === undefined) return;
       applyChange((q) => duplicateModelViewOps(q, id, uniqueId("mv"), uniqueModelViewName(q.modelViewOptions, t("resources.modelViews.copyOf", { name: src }))));
     },
+    onAdoptModelView: (mv) => applyChange((p) => adoptModelViewOps(p, mv)),
     onRenameModelView: (id, name) => applyChange((p) => renameModelViewOps(p, id, name), `mv-name-${id}`),
     onDeleteModelView: (id) => applyChange((p) => deleteModelViewOps(p, id)),
     onSetModelViewBase: (id, base) => applyChange((p) => setModelViewBaseOps(p, id, base ?? undefined)),
