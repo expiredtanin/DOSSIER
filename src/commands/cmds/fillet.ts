@@ -6,7 +6,8 @@
 //      wird gewählt; ein einzelnes `line`-Element hat keine eigene Ecke)
 //   2) „Radius:"       → Punkt (Abstand von der Ecke) ODER getippte Zahl → commit
 //   Wände ([113]): trifft der erste Klick keine Ecke, aber eine Wand, folgt „Zweite Wand“ (Zahl =
-//   Radius, Vorgabe 0 = L-Ecke am Achsschnittpunkt; Radius nur bei geraden Wänden → Bogenwand).
+//   Radius, Vorgabe 0 = L-Ecke am Achsschnittpunkt; mit Radius → Bogenwand tangential dazwischen, auch an
+//   Bogenwänden).
 //
 // Die Verrundung wird als ECHTES Bogen-Segment gespeichert (`bulge`, s.
 // `geometry/bulge.ts`), nicht mehr tesselliert — editierbar wie jeder andere
@@ -58,7 +59,7 @@ interface FilletDone extends CommandState {
 }
 /**
  * Wände ([113]): erste Wand getroffen (statt einer Polylinien-Ecke), jetzt die zweite wählen. Beide
- * werden bis zum Achsschnittpunkt gestutzt/verlängert (L-Ecke); mit Radius > 0 (nur gerade Wände)
+ * werden bis zum Achsschnittpunkt gestutzt/verlängert (L-Ecke); mit Radius > 0 (gerade und Bogenwände)
  * schliesst eine Bogenwand tangential an.
  */
 interface FilletWall2 extends CommandState {
@@ -103,7 +104,7 @@ export const filletCommand: Command = {
       if (!hit) {
         const wall = cmdQuery<{ hit: string | null }>(ctx.project, { q: "pickWall", level: ctx.level.id, pt: pair(input.point) }).hit;
         if (!wall) return [s, { draft: null }]; // daneben geklickt → aktiv bleiben
-        const w2: FilletWall2 = { phase: "wall2", wall, p1: input.point, lastPoint: input.point };
+        const w2: FilletWall2 = { phase: "wall2", wall, p1: input.point, lastPoint: null };
         return [w2, { draft: { preview: [], vertices: [input.point] } }];
       }
       const next: FilletRadius = { phase: "radius", hit, radius: DEFAULT_RADIUS, lastPoint: input.point };

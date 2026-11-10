@@ -7,6 +7,10 @@
 //
 // Anders als Fillet braucht Chamfer KEINE Bogen-Tessellierung — die Fasung
 // ist von Natur aus gerade, also ein exaktes (nicht approximiertes) Ergebnis.
+//   Wände ([113]): trifft der erste Klick keine Ecke, aber eine Wand, folgt „Zweite Wand" (Zahl =
+//   Distanz, Vorgabe 0 = L-Ecke am Achsschnittpunkt): beide Wände enden im Abstand vor dem Schnittpunkt
+//   (bei Bogenwänden als Bogenlänge), eine gerade Wand (Kopie der ersten) verbindet die Enden. Rechnung
+//   im Kern (`cmd_wall_edit.rs`, `chamfer`).
 
 import { cmdMutation } from "../../core";
 import type {
@@ -21,6 +25,7 @@ import type {
 } from "../types";
 import { cornerPreview, pickCorner } from "./cornerHit";
 import type { CornerHit } from "./cornerHit";
+import { cmdQuery, decodeShapes, pair } from "../../tools/coreCmd";
 
 const DEFAULT_DISTANCE = 0.1; // m — Startwert, bis der Nutzer per Maus/Tab einen eigenen setzt
 const EPS = 1e-6;
@@ -47,7 +52,21 @@ interface ChamferDistance extends CommandState {
 interface ChamferDone extends CommandState {
   phase: "done";
 }
-type ChamferState = ChamferPick | ChamferDistance | ChamferDone;
+/** Wände: erste Wand getroffen (statt einer Polylinien-Ecke), jetzt die zweite wählen. */
+interface ChamferWall2 extends CommandState {
+  phase: "wall2";
+  wall: string;
+  p1: Vec2;
+}
+type ChamferState = ChamferPick | ChamferDistance | ChamferDone | ChamferWall2;
+
+/** Fasen-Distanz an Wänden (0 = scharfe L-Ecke), bleibt über Aufrufe. */
+let wallDistance = 0;
+
+function wallDraft(ctx: CommandContext, s: ChamferWall2, point: Vec2): ToolDraft {
+  const r = cmdQuery<{ hit: boolean; shapes: number[] }>(ctx.project, { q: "chamferWalls", level: ctx.level.id, id: s.wall, p1: pair(s.p1), pt: pair(point), d: wallDistance });
+  return { preview: decodeShapes(r.shapes), vertices: [s.p1], hud: { at: point, text: `D: ${wallDistance.toFixed(3)}m${r.hit ? "" : " ✗"}` } };
+}
 
 const finish = (): [CommandState, CommandResult] => [
   { phase: "done", lastPoint: null } as ChamferDone,
@@ -57,9 +76,11 @@ const finish = (): [CommandState, CommandResult] => [
 export const chamferCommand: Command = {
   name: "chamfer",
   labelKey: "cmd.chamfer.label",
-  prompt: (s) =>
-    (s as ChamferState).phase === "distance" ? "cmd.chamfer.distance" : "cmd.chamfer.pick",
-  accepts: (s) => ((s as ChamferState).phase === "distance" ? ["point", "number"] : ["point"]),
+  prompt: (s) => {
+    const ph = (s as ChamferState).phase;
+    return ph === "distance" ? "cmd.chamfer.distance" : ph === "wall2" ? "cmd.chamfer.wall2" : "cmd.chamfer.pick";
+  },
+  accepts: (s) => ((s as ChamferState).phase === "distance" || (s as ChamferState).phase === "wall2" ? ["point", "number"] : ["point"]),
   options: () => [],
   fields: (s) => ((s as ChamferState).phase === "distance" ? DISTANCE_FIELDS : []),
 
@@ -71,7 +92,12 @@ export const chamferCommand: Command = {
     if (s.phase === "pick") {
       if (input.kind !== "point") return [s, { draft: null }];
       const { hit, preview } = pickCorner(ctx.project, ctx.level.id, input.point, "chamfer", DEFAULT_DISTANCE);
-      if (!hit) return [s, { draft: null }]; // daneben geklickt → aktiv bleiben
+      if (!hit) {
+        const wall = cmdQuery<{ hit: string | null }>(ctx.project, { q: "pickWall", level: ctx.level.id, pt: pair(input.point) }).hit;
+        if (!wall) return [s, { draft: null }]; // daneben geklickt → aktiv bleiben
+        const w2: ChamferWall2 = { phase: "wall2", wall, p1: input.point, lastPoint: null };
+        return [w2, { draft: { preview: [], vertices: [input.point] } }];
+      }
       const next: ChamferDistance = {
         phase: "distance",
         hit,
@@ -79,6 +105,19 @@ export const chamferCommand: Command = {
         lastPoint: input.point,
       };
       return [next, { draft: chamferDraft(hit, preview, next.distance, input.point) }];
+    }
+    if (s.phase === "wall2") {
+      if (input.kind === "number") {
+        wallDistance = Math.max(0, input.value);
+        return [s, { draft: null }];
+      }
+      if (input.kind !== "point") return [s, { draft: null }];
+      const id2 = cmdQuery<{ hit: string | null }>(ctx.project, { q: "pickWall", level: ctx.level.id, pt: pair(input.point) }).hit;
+      if (!id2 || id2 === s.wall) return [s, { draft: null }];
+      return [
+        { phase: "done", lastPoint: null } as ChamferDone,
+        { draft: null, done: true, commit: cmdMutation({ cmd: "chamferWalls", id: s.wall, p1: pair(s.p1), id2, p2: pair(input.point), d: wallDistance }) },
+      ];
     }
     // phase === "distance"
     let d = s.distance;
@@ -98,6 +137,7 @@ export const chamferCommand: Command = {
       if (!hit) return [s, { draft: null }];
       return [s, { draft: chamferDraft(hit, preview, DEFAULT_DISTANCE, point) }];
     }
+    if (s.phase === "wall2") return [s, { draft: wallDraft(ctx, s, point) }];
     if (s.phase !== "distance") return [s, { draft: null }];
     const d = Math.max(0, dist(s.hit.corner, point));
     const ns: ChamferDistance = { ...s, distance: d };

@@ -5,7 +5,8 @@
 //! Übersetzung Zeichnung ↔ Kurve, die Auswahl und die Elemente des Ergebnisses.
 //!
 //! Wände ([113]): Trim, Extend, Bruch, Offset und Join nehmen auch Wände (gerade und Bogen); dazu Teilen
-//! (`splitAt`/`splitInter`) und Verrunden zweier Wände (`filletWalls`). Die Wand-Rechnung steht in
+//! (`splitAt`/`splitInter`), Verrunden und Fasen zweier Wände (`filletWalls`, `chamferWalls`). 2D-Kurven
+//! werden auch an Wänden gestutzt/verlängert (Achse bzw. Option „Fläche"). Die Wand-Rechnung steht in
 //! `cmd_wall_edit.rs`; hier nur Treffer (Wände zählen mit, Abstand zum Wandkörper) und Verteilung.
 //!
 //! Rechnung auf der rohen Projekt-Wurzel (Attribute der Quelle bleiben samt Schlüsselreihenfolge;
@@ -277,15 +278,19 @@ fn patch_geom(root: &Map<String, Value>, id: &str, g: Value) -> Vec<Op> {
 // ── Trim ─────────────────────────────────────────────────────────────────────
 
 /// Schneider des Trims: alle anderen Kurven der Ebene des Ziels (Bögen zählen mit).
-fn trim_rest(root: &Map<String, Value>, target: &Value, at: P) -> Option<(Curve, Vec<k::BulgePolyline>)> {
+fn trim_rest(root: &Map<String, Value>, p: &Project, target: &Value, at: P, face: bool) -> Option<(Curve, Vec<k::BulgePolyline>)> {
     let c = curve(geom(target), Take::Curve)?;
     let (tid, level) = (id_of(target), level_of(target));
-    let cutters: Vec<k::BulgePolyline> = drawings(root)
+    let mut cutters: Vec<k::BulgePolyline> = drawings(root)
         .iter()
         .filter(|d| id_of(d) != tid && level_of(d) == level && level.is_some())
         .filter_map(|d| curve(geom(d), Take::Curve))
         .map(|c| k::BulgePolyline { bulge: c.bulge_nums(), pts: c.pts, closed: c.closed })
         .collect();
+    // Wände des Geschosses schneiden mit ([113]): Achse bzw. (Option „Fläche") Aussenflächen.
+    if let Some(l) = level {
+        cutters.extend(wall_edit::wall_cutters(p, l, face).into_iter().map(|(a, b, bv)| k::BulgePolyline { pts: vec![a, b], bulge: vec![bv], closed: false }));
+    }
     let rest = k::trim_polyline_with_bulge(&c.pts, &c.bulge_nums(), c.closed, &cutters, at);
     Some((c, rest))
 }
@@ -295,9 +300,9 @@ fn same_chain(a: &k::BulgePolyline, b: &Curve) -> bool {
 }
 
 /// Trim: das getroffene Stück von Zeichnung `id` entfällt, die Reste ersetzen sie (hinten angehängt).
-pub fn trim_ops(root: &Map<String, Value>, id: &str, at: P, ids: &mut IdGen) -> Vec<Op> {
+pub fn trim_ops(root: &Map<String, Value>, p: &Project, id: &str, at: P, face: bool, ids: &mut IdGen) -> Vec<Op> {
     let Some(target) = find(root, id) else { return vec![] };
-    let Some((c, rest)) = trim_rest(root, target, at) else { return vec![] };
+    let Some((c, rest)) = trim_rest(root, p, target, at, face) else { return vec![] };
     if rest.len() == 1 && same_chain(&rest[0], &c) {
         return vec![];
     }
@@ -320,7 +325,7 @@ pub fn trim_preview(root: &Map<String, Value>, p: &Project, level: &str, at: P, 
         }
         return true;
     }
-    let Some((_, rest)) = trim_rest(root, target, at) else { return true };
+    let Some((_, rest)) = trim_rest(root, p, target, at, face) else { return true };
     for r in rest.iter().filter(|r| r.pts.len() >= 2) {
         let pts = if real(&r.bulge) { chain_of(&hit_edges(&Curve::of_pts(r.pts.clone(), r.closed, Some(&r.bulge)))) } else { r.pts.clone() };
         if pts.len() == 2 && !r.closed {
@@ -363,8 +368,12 @@ fn extend_cutters(root: &Map<String, Value>, target: &Value) -> Vec<k::Polyline>
     out
 }
 
-/// Verlängert das dem Punkt nähere Ende bis zum nächsten Schneider (Bogen-Ende: gleicher Kreis).
-fn extend_curve(c: &Curve, cutters: &[k::Polyline], at: P) -> Option<Curve> {
+/// Verlängerung bis zur nächsten Wand ([113]): Zuwachs, neuer Endpunkt, neuer Bulge des Endstücks.
+type WallReach<'a> = &'a dyn Fn(P, P, Option<f64>, bool) -> Option<(f64, P, Option<f64>)>;
+
+/// Verlängert das dem Punkt nähere Ende bis zum nächsten Schneider (Bogen-Ende: gleicher Kreis); `walls`
+/// liefert die Verlängerung bis zur nächsten Wand, die nähere gewinnt.
+fn extend_curve(c: &Curve, cutters: &[k::Polyline], at: P, walls: WallReach) -> Option<Curve> {
     let n = c.pts.len();
     if n < 2 {
         return None;
@@ -376,8 +385,37 @@ fn extend_curve(c: &Curve, cutters: &[k::Polyline], at: P) -> Option<Curve> {
     let bv = num_or(c.bulge.as_ref().and_then(|b| b.get(seg)), 0.0);
     let mut next = c.clone();
     next.closed = false;
-    if bv.abs() > EPS_BULGE {
-        let (p, b) = k::extend_bulge_segment(c.pts[seg], c.pts[seg + 1], bv, !start, cutters)?;
+    let (sa, sb) = (c.pts[seg], c.pts[seg + 1]);
+    let arc = bv.abs() > EPS_BULGE;
+    let wall = walls(sa, sb, arc.then_some(bv), start);
+    // Zuwachs der Verlängerung an 2D-Schneidern entlang des Endstücks (Gerade: Abstand; Bogen: Bogenlänge).
+    let grow = |p: P| -> f64 {
+        wall_edit::Axis::new(sa, sb, arc.then_some(bv)).map_or(f64::INFINITY, |ax| {
+            let s = ax.local(p).0;
+            if start {
+                -s
+            } else {
+                s - ax.len
+            }
+        })
+    };
+    let kern = if arc { k::extend_bulge_segment(sa, sb, bv, !start, cutters) } else { k::extend_segment(c.pts[if start { 1 } else { n - 2 }], c.pts[if start { 0 } else { n - 1 }], "end", cutters).map(|(_, b)| (b, 0.0)) };
+    if let Some((_, p, nb)) = wall.filter(|w| kern.map_or(true, |(kp, _)| w.0 < grow(kp))) {
+        let (pi, bi) = if start { (0, 0) } else { (n - 1, n - 2) };
+        next.raw[pi] = ptv(p);
+        next.pts[pi] = p;
+        if arc {
+            let mut bulge = c.bulge.clone().unwrap_or_else(|| vec![Value::from(0); n - 1]);
+            if bi >= bulge.len() {
+                bulge.resize(bi + 1, Value::Null);
+            }
+            bulge[bi] = js_num(nb.unwrap_or(0.0));
+            next.bulge = Some(bulge);
+        }
+        return Some(next);
+    }
+    if arc {
+        let (p, b) = kern?;
         let mut bulge = c.bulge.clone().unwrap_or_else(|| vec![Value::from(0); n - 1]);
         let (pi, bi) = if start { (0, 0) } else { (n - 1, n - 2) };
         next.raw[pi] = ptv(p);
@@ -389,18 +427,23 @@ fn extend_curve(c: &Curve, cutters: &[k::Polyline], at: P) -> Option<Curve> {
         next.bulge = Some(bulge);
         return Some(next);
     }
-    let (ia, ib) = if start { (1, 0) } else { (n - 2, n - 1) };
-    let (_, b) = k::extend_segment(c.pts[ia], c.pts[ib], "end", cutters)?;
+    let ib = if start { 0 } else { n - 1 };
+    let (b, _) = kern?;
     next.raw[ib] = ptv(b);
     next.pts[ib] = b;
     Some(next)
 }
 
-/// Extend: die Kurve `id` am Ende nahe `at` bis zum nächsten Schneider verlängern.
-pub fn extend_ops(root: &Map<String, Value>, id: &str, at: P) -> Vec<Op> {
+/// Verlängerung einer Zeichnung bis zu den Wänden ihrer Ebene.
+fn wall_reach<'a>(p: &'a Project, target: &'a Value, face: bool) -> impl Fn(P, P, Option<f64>, bool) -> Option<(f64, P, Option<f64>)> + 'a {
+    move |a, b, bulge, start| wall_edit::extend_to_walls(p, level_of(target)?, a, b, bulge, start, face)
+}
+
+/// Extend: die Kurve `id` am Ende nahe `at` bis zum nächsten Schneider (2D oder Wand) verlängern.
+pub fn extend_ops(root: &Map<String, Value>, p: &Project, id: &str, at: P, face: bool) -> Vec<Op> {
     let Some(target) = find(root, id) else { return vec![] };
     let Some(c) = curve(geom(target), Take::Open) else { return vec![] };
-    let Some(next) = extend_curve(&c, &extend_cutters(root, target), at) else { return vec![] };
+    let Some(next) = extend_curve(&c, &extend_cutters(root, target), at, &wall_reach(p, target, face)) else { return vec![] };
     let g = if next.raw.len() == 2 && shape(geom(target)) == "line" && !next.has_bulge() {
         chain_geom(next.raw, Value::Bool(false), None)
     } else {
@@ -426,7 +469,7 @@ pub fn extend_preview(root: &Map<String, Value>, p: &Project, level: &str, at: P
         return true;
     }
     let Some(c) = curve(geom(target), Take::Open) else { return true };
-    let Some(next) = extend_curve(&c, &extend_cutters(root, target), at) else { return true };
+    let Some(next) = extend_curve(&c, &extend_cutters(root, target), at, &wall_reach(p, target, face)) else { return true };
     let pts = if next.has_bulge() { chain_of(&hit_edges(&next)) } else { next.pts.clone() };
     out.poly_open(&tuples(&pts));
     true
@@ -939,8 +982,8 @@ pub fn ops(root: &Map<String, Value>, p: &Project, v: &Value) -> Option<Vec<Op>>
         }
     }
     Some(match cmd {
-        "trim" => trim_ops(root, s_arg(v, "id"), p_arg(v, "pt"), &mut ids),
-        "extend" => extend_ops(root, s_arg(v, "id"), p_arg(v, "pt")),
+        "trim" => trim_ops(root, p, s_arg(v, "id"), p_arg(v, "pt"), truthy(v.get("face")), &mut ids),
+        "extend" => extend_ops(root, p, s_arg(v, "id"), p_arg(v, "pt"), truthy(v.get("face"))),
         "fillet" => fillet_ops(root, s_arg(v, "id"), n_arg(v, "index"), n_arg(v, "r")),
         "chamfer" => chamfer_ops(root, s_arg(v, "id"), n_arg(v, "index"), n_arg(v, "d")),
         "break" => break_ops(root, s_arg(v, "id"), p_arg(v, "p1"), p_arg(v, "p2"), &mut ids),
@@ -970,6 +1013,7 @@ fn wall_edit_of<'a>(p: &'a Project, w: &'a Wall, v: &Value) -> Option<Option<wal
         "splitInter" => wall_edit::split_at_intersections(p, w),
         "offset" => wall_edit::offset(w, n_arg(v, "d")),
         "filletWalls" => wall_edit::find_wall(p, s_arg(v, "id2")).and_then(|w2| wall_edit::fillet(w, p_arg(v, "p1"), w2, p_arg(v, "p2"), n_arg(v, "r"))),
+        "chamferWalls" => wall_edit::find_wall(p, s_arg(v, "id2")).and_then(|w2| wall_edit::chamfer(w, p_arg(v, "p1"), w2, p_arg(v, "p2"), n_arg(v, "d"))),
         _ => return None,
     })
 }
@@ -1026,9 +1070,10 @@ pub fn query(root: &Map<String, Value>, p: &Project, v: &Value) -> Result<Value,
             json!({ "hit": true, "sign": sign, "shapes": shapes(s) })
         }
         "pickWall" => json!({ "hit": json!(wall_edit::pick_wall(p, level, at).map(|w| w.0.id.as_str())) }),
-        "filletWalls" => {
+        "filletWalls" | "chamferWalls" => {
             let e = match (wall_edit::find_wall(p, s_arg(v, "id")), wall_edit::pick_wall(p, level, at)) {
-                (Some(w1), Some((w2, _))) => wall_edit::fillet(w1, p_arg(v, "p1"), w2, at, n_arg(v, "r")),
+                (Some(w1), Some((w2, _))) if q == "filletWalls" => wall_edit::fillet(w1, p_arg(v, "p1"), w2, at, n_arg(v, "r")),
+                (Some(w1), Some((w2, _))) => wall_edit::chamfer(w1, p_arg(v, "p1"), w2, at, n_arg(v, "d")),
                 _ => None,
             };
             if let Some(e) = &e {
@@ -1092,7 +1137,7 @@ mod tests {
     #[test]
     fn trim_schneidet_das_getroffene_stueck_weg() {
         let r = root(json!({"drawings2d": [line("a", (0.0, 0.0), (10.0, 0.0)), line("b", (5.0, -1.0), (5.0, 1.0))]}));
-        let ops = trim_ops(&r, "a", P::new(8.0, 0.0), &mut IdGen::new("s"));
+        let ops = trim_ops(&r, &typed(&r), "a", P::new(8.0, 0.0), false, &mut IdGen::new("s"));
         assert_eq!(ops.len(), 2);
         let items = &ops[1].to_json()["items"];
         assert_eq!(items[0]["geom"], json!({"shape": "line", "a": {"x": 0, "y": 0}, "b": {"x": 5, "y": 0}}));
@@ -1102,7 +1147,7 @@ mod tests {
     #[test]
     fn extend_bis_zum_schneider() {
         let r = root(json!({"drawings2d": [line("a", (0.0, 0.0), (4.0, 0.0)), line("b", (5.0, -1.0), (5.0, 1.0))]}));
-        let ops = extend_ops(&r, "a", P::new(3.9, 0.0));
+        let ops = extend_ops(&r, &typed(&r), "a", P::new(3.9, 0.0), false);
         assert_eq!(ops[0].to_json()["entity"]["geom"]["b"], json!({"x": 5, "y": 0}));
     }
 
@@ -1169,6 +1214,66 @@ mod tests {
         let o = super::ops(&r, &p, &json!({"cmd": "offset", "id": "a", "d": -1.0, "stamp": "s"})).unwrap();
         assert_eq!(o[0].to_json()["items"][0]["start"], json!({"x": 0, "y": -1}));
         let pv = query(&r, &p, &json!({"q": "filletWalls", "level": "L", "id": "a", "p1": [2.0, 0.0], "pt": [6.0, 2.0], "r": 0.5})).unwrap();
+        assert_eq!(pv["hit"], true);
+    }
+
+    /// [113] 2D-Kurven an Wänden stutzen/verlängern: Grenze Achse bzw. (Option „Fläche") Aussenflächen.
+    #[test]
+    fn kurven_an_waenden_stutzen_und_verlaengern() {
+        let w = |id: &str, a: (f64, f64), b: (f64, f64), bulge: Option<f64>| {
+            let mut v = json!({"id": id, "type": "wall", "floorId": "L", "start": {"x": a.0, "y": a.1}, "end": {"x": b.0, "y": b.1}, "wallTypeId": "t", "height": 2.5});
+            if let Some(b) = bulge {
+                v["bulge"] = json!(b);
+            }
+            v
+        };
+        let mk = |walls: Value, drs: Value| root(json!({"wallTypes": [{"id": "t", "layers": [{"thickness": 0.2}]}], "walls": walls, "drawings2d": drs, "openings": []}));
+        let geom_of = |ops: &[Op]| -> Value {
+            let j = ops.iter().map(|o| o.to_json()).find(|o| o["kind"] == "add" || o["kind"] == "replace").expect("Ergebnis");
+            if j["kind"] == "add" { j["items"][0]["geom"].clone() } else { j["entity"]["geom"].clone() }
+        };
+        // Trim: Linie quer durch eine gerade Wand, oberen Teil anklicken.
+        let r = mk(json!([w("a", (-5.0, 0.0), (5.0, 0.0), None)]), json!([line("l", (2.0, -3.0), (2.0, 3.0))]));
+        let p = typed(&r);
+        let ops = trim_ops(&r, &p, "l", P::new(2.0, 2.0), false, &mut IdGen::new("s"));
+        assert_eq!(geom_of(&ops)["b"], json!({"x": 2, "y": 0}));
+        let ops = trim_ops(&r, &p, "l", P::new(2.0, 2.0), true, &mut IdGen::new("s"));
+        assert!((geom_of(&ops)["b"]["y"].as_f64().unwrap() - 0.1).abs() < 1e-9);
+        // Vorschau über die Anfrage trifft die Linie (nicht die Wand) und zeigt den Rest.
+        let pv = query(&r, &p, &json!({"q": "trim", "level": "L", "pt": [2.0, 2.0]})).unwrap();
+        assert_eq!(pv["hit"], true);
+        assert!(!pv["shapes"].as_array().unwrap().is_empty());
+        // Extend: Linie unterhalb bis an die Achse bzw. die Fläche.
+        let r = mk(json!([w("a", (-5.0, 0.0), (5.0, 0.0), None)]), json!([line("l", (2.0, -3.0), (2.0, -1.0))]));
+        let p = typed(&r);
+        let g = geom_of(&extend_ops(&r, &p, "l", P::new(2.0, -1.1), false));
+        assert_eq!(g["b"], json!({"x": 2, "y": 0}));
+        let g = geom_of(&extend_ops(&r, &p, "l", P::new(2.0, -1.1), true));
+        assert!((g["b"]["y"].as_f64().unwrap() + 0.1).abs() < 1e-9);
+        // Extend an eine Bogenwand (Halbkreis R 5 oben): Linie x = 3 bis (3,4).
+        let r = mk(json!([w("a", (-5.0, 0.0), (5.0, 0.0), Some(1.0))]), json!([line("l", (3.0, 0.0), (3.0, 1.0))]));
+        let p = typed(&r);
+        let g = geom_of(&extend_ops(&r, &p, "l", P::new(3.0, 0.9), false));
+        assert!((g["b"]["x"].as_f64().unwrap() - 3.0).abs() < 1e-9 && (g["b"]["y"].as_f64().unwrap() - 4.0).abs() < 1e-9);
+        // Polylinien-Bogen (Viertelkreis R 3 um (0,0), (3,0)→(0,3)) rückwärts an die Wand y = −1.
+        let arc = json!({"id": "pa", "type": "drawing2d", "levelId": "L", "geom": {"shape": "polyline", "pts": [{"x": 3, "y": 0}, {"x": 0, "y": 3}], "bulge": [-(std::f64::consts::PI / 8.0).tan()], "closed": false}});
+        let r = mk(json!([w("a", (-5.0, -1.0), (5.0, -1.0), None)]), json!([arc]));
+        let p = typed(&r);
+        let g = geom_of(&extend_ops(&r, &p, "pa", P::new(3.0, 0.1), false));
+        let s0 = (g["pts"][0]["x"].as_f64().unwrap(), g["pts"][0]["y"].as_f64().unwrap());
+        assert!((s0.0 - 8f64.sqrt()).abs() < 1e-9 && (s0.1 + 1.0).abs() < 1e-9, "{s0:?}");
+        assert!(g["bulge"][0].as_f64().unwrap() < -(std::f64::consts::PI / 8.0).tan(), "Bogen wächst auf demselben Kreis");
+        // Trim einer Linie an einer Bogenwand: Teil ausserhalb des Kreises weg.
+        let r = mk(json!([w("a", (-5.0, 0.0), (5.0, 0.0), Some(1.0))]), json!([line("l", (3.0, 1.0), (3.0, 7.0))]));
+        let p = typed(&r);
+        let g = geom_of(&trim_ops(&r, &p, "l", P::new(3.0, 6.0), false, &mut IdGen::new("s")));
+        assert!((g["b"]["y"].as_f64().unwrap() - 4.0).abs() < 1e-9);
+        // Fasen zweier Wände über die Anfrage.
+        let r = mk(json!([w("a", (0.0, 0.0), (4.0, 0.0), None), w("b", (6.0, 5.0), (6.0, -2.0), None)]), json!([]));
+        let p = typed(&r);
+        let o = super::ops(&r, &p, &json!({"cmd": "chamferWalls", "id": "a", "p1": [2.0, 0.0], "id2": "b", "p2": [6.0, 3.0], "d": 1.0, "stamp": "s"})).unwrap();
+        assert_eq!(o[0].to_json()["entity"]["end"], json!({"x": 5, "y": 0}));
+        let pv = query(&r, &p, &json!({"q": "chamferWalls", "level": "L", "id": "a", "p1": [2.0, 0.0], "pt": [6.0, 3.0], "d": 1.0})).unwrap();
         assert_eq!(pv["hit"], true);
     }
 }

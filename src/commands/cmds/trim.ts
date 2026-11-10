@@ -14,7 +14,8 @@
 // Vorschau rechnet der Kern (`src-tauri/core/src/cmd_edit.rs`, [K4] S3); hier nur
 // der Zustandsautomat. Wände (gerade und Bogen, [113]) gehen genauso: Klick auf den wegzuschneidenden
 // Teil; Schneider sind die anderen Wände (Achse/Fläche), 2D-Kurven und Achsraster. Sowohl Ziel-Kurve
-// als auch Schneider dürfen Bogen-Segmente (bulge) tragen.
+// als auch Schneider dürfen Bogen-Segmente (bulge) tragen. 2D-Kurven werden auch an Wänden gestutzt
+// (Achse bzw. Option „Fläche", gerade und Bogenwände).
 //
 // Bezeichner englisch, Kommentare/UI deutsch (CONVENTIONS.md).
 

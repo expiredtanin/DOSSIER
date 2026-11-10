@@ -12,6 +12,7 @@ import { breakCommand } from "./break";
 import { filletCommand } from "./fillet";
 import { joinCommand } from "./join";
 import { offsetCommand } from "./offset";
+import { chamferCommand } from "./chamfer";
 
 const level = sampleProject.drawingLevels.find((l) => l.kind === "floor")!;
 const wt = sampleProject.wallTypes[0].id;
@@ -28,7 +29,9 @@ const wall = (id: string, a: [number, number], b: [number, number], bulge?: numb
 });
 const opening = (id: string, host: string, position: number): Opening =>
   ({ id, type: "opening", hostWallId: host, categoryCode: "21", kind: "window", position, width: 1, height: 1.2, sillHeight: 0.9 }) as Opening;
-const proj = (walls: Wall[], openings: Opening[] = []): Project => ({ ...sampleProject, walls, openings, drawings2d: [], rooms: [], ceilings: [], stairs: [] });
+const proj = (walls: Wall[], openings: Opening[] = [], drawings2d: Project["drawings2d"] = []): Project => ({ ...sampleProject, walls, openings, drawings2d, rooms: [], ceilings: [], stairs: [] });
+const line2d = (id: string, a: [number, number], b: [number, number]) =>
+  ({ id, type: "drawing2d", levelId: level.id, categoryCode: "20", geom: { shape: "line", a: { x: a[0], y: a[1] }, b: { x: b[0], y: b[1] } } }) as Project["drawings2d"][number];
 
 function run(cmd: Command, p: Project, inputs: CmdInput[], wallIds: string[] = []): Project {
   const ctx: CommandContext = {
@@ -119,5 +122,52 @@ describe("Wand-Editierbefehle ([113])", () => {
     const o = run(offsetCommand, proj([wall("a", [0, 0], [4, 0])]), [{ kind: "number", value: 2 }], ["a"]);
     expect(o.walls).toHaveLength(2);
     expect(Math.abs(o.walls[1].start.y)).toBeCloseTo(2, 9);
+  });
+  it("Verrunden mit Radius an einer Bogenwand: tangentiale Bogenwand, Öffnung bleibt", () => {
+    // Halbkreis R 5 um (0,0) oben herum, Gerade x = 3 nach oben; Schnitt (3,4).
+    const p = proj([wall("a", [-5, 0], [5, 0], 1), wall("b", [3, -2], [3, 8])], [opening("o", "a", 1)]);
+    const out = run(filletCommand, p, [pt(-4, 3), { kind: "number", value: 1 }, pt(3, 7)]);
+    run(filletCommand, p, [pt(-4, 3), { kind: "number", value: 0 }]);
+    expect(out.walls).toHaveLength(3);
+    const cy = Math.sqrt(32);
+    expect(byId(out, "a").end.x).toBeCloseTo(10 / 6, 9);
+    expect(byId(out, "a").end.y).toBeCloseTo((5 * cy) / 6, 9);
+    expect(byId(out, "b").start).toMatchObject({ x: 3 });
+    expect(byId(out, "b").start.y).toBeCloseTo(cy, 9);
+    const f = out.walls.find((w) => w.id !== "a" && w.id !== "b")!;
+    expect(f.bulge).toBeTruthy();
+    expect(out.openings![0]).toMatchObject({ hostWallId: "a", position: 1 });
+  });
+
+  it("Fasen zweier Wände: gerade Wand zwischen den Enden, Distanz getippt", () => {
+    const p = proj([wall("a", [0, 0], [4, 0]), wall("b", [6, 5], [6, -2])]);
+    const out = run(chamferCommand, p, [pt(2, 0), { kind: "number", value: 1 }, pt(6, 3)]);
+    run(chamferCommand, p, [pt(2, 0), { kind: "number", value: 0 }]);
+    expect(byId(out, "a").end).toEqual({ x: 5, y: 0 });
+    expect(byId(out, "b").end).toEqual({ x: 6, y: 1 });
+    const f = out.walls.find((w) => w.id !== "a" && w.id !== "b")!;
+    expect(f.start).toEqual({ x: 5, y: 0 });
+    expect(f.end).toEqual({ x: 6, y: 1 });
+    expect(f.bulge).toBeUndefined();
+    expect(f.wallTypeId).toBe(wt);
+  });
+
+  it("Verketten gegenläufiger Wände: Tür behält Weltlage, Aufschlag und Scharnier gekehrt", () => {
+    const door = { ...opening("d", "b", 1), kind: "door", swing: "left", hinge: "start" } as Opening;
+    const p = proj([wall("a", [0, 0], [4, 0]), wall("b", [10, 0], [4, 0])], [door]);
+    const j = run(joinCommand, p, [], ["a", "b"]);
+    expect(j.walls).toHaveLength(1);
+    expect(j.walls[0].end).toEqual({ x: 10, y: 0 });
+    expect(j.openings![0]).toMatchObject({ hostWallId: "a", position: 8, swing: "right", hinge: "end" });
+  });
+
+  it("2D-Linien an Wänden stutzen und verlängern", () => {
+    const p = proj([wall("a", [-5, 0], [5, 0])], [], [line2d("l", [2, -3], [2, 3])]);
+    const t = run(trimCommand, p, [pt(2, 2)]);
+    expect(t.walls).toHaveLength(1);
+    expect(t.drawings2d).toHaveLength(1);
+    expect((t.drawings2d[0].geom as { b: { x: number; y: number } }).b).toEqual({ x: 2, y: 0 });
+    const e = run(extendCommand, proj([wall("a", [-5, 0], [5, 0])], [], [line2d("l", [2, -3], [2, -1])]), [pt(2, -1.1)]);
+    expect((e.drawings2d[0].geom as { b: { x: number; y: number } }).b).toEqual({ x: 2, y: 0 });
   });
 });

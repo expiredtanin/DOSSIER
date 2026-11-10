@@ -2137,6 +2137,7 @@ export const de = {
   "cmd.chamfer.label": "Fasen",
   "cmd.chamfer.pick": "Ecke wählen:",
   "cmd.chamfer.distance": "Distanz:",
+  "cmd.chamfer.wall2": "Zweite Wand wählen (Zahl = Distanz):",
   // Multiline: Basislinie + N-1 parallele Kopien in einer Geste (baut auf Offset auf).
   "cmd.multiline.label": "Parallellinien",
   "cmd.multiline.start": "Startpunkt:",

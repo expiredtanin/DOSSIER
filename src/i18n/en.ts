@@ -2125,6 +2125,7 @@ export const en: Record<TranslationKey, string> = {
   "cmd.chamfer.label": "Chamfer",
   "cmd.chamfer.pick": "Select corner:",
   "cmd.chamfer.distance": "Distance:",
+  "cmd.chamfer.wall2": "Select second wall (number = distance):",
   // Multiline: base line + N-1 parallel copies in one gesture (builds on Offset).
   "cmd.multiline.label": "Parallel lines",
   "cmd.multiline.start": "Start point:",

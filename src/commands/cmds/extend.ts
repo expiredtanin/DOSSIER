@@ -11,7 +11,8 @@
 //   • Wiederholend, bis Esc/Enter.
 //
 // Wände ([113], gerade und Bogen) verlängert der Kern bis zur nächsten Wandachse/-fläche, 2D-Kurve
-// oder Rasterachse (Bogenwände auf demselben Kreis).
+// oder Rasterachse (Bogenwände auf demselben Kreis). 2D-Kurven reichen umgekehrt auch bis an Wände
+// (Achse bzw. Option „Fläche"; die nähere Grenze gewinnt).
 //
 // Geschlossene Formen (rect, geschlossene polyline) und reine Punktformen
 // (circle/arc/text) sind nicht extend-fähig — ein geschlossener Ring hat kein

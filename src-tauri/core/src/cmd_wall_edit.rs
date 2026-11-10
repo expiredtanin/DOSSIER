@@ -1,7 +1,9 @@
 //! Editier-Befehle für Wände, gerade und gebogen ([113], Anschluss an `cmd_edit.rs`): dieselben Befehle
 //! wie für 2D-Zeichnungen — Trim, Extend, Bruch/Teilen (am Punkt, an den Schnittpunkten), Verketten
-//! (kollinear bzw. auf demselben Kreis), Verrunden zweier Wände (L-Ecke am Achsschnittpunkt, mit Radius
-//! eine Bogenwand dazwischen) und Offset (parallele Kopie).
+//! (kollinear bzw. auf demselben Kreis, auch gegenläufig), Verrunden zweier Wände (L-Ecke am
+//! Achsschnittpunkt, mit Radius eine tangentiale Bogenwand dazwischen — gerade und Bogenwände), Fasen
+//! (gerade Wand dazwischen) und Offset (parallele Kopie). Dazu die Wände als Grenzen für Trim/Extend von
+//! 2D-Kurven (`wall_cutters`, `extend_to_walls`).
 //!
 //! Gerechnet wird auf der Achse in ihrem Parameter `s` (Meter entlang der Achse, bei Bogenwänden
 //! Bogenlänge; [`Axis::local`] liefert `s` auch über die Enden hinaus). Jede Änderung beschreibt sich als
@@ -290,19 +292,8 @@ fn drawing_bounds(d: &Drawing2D, out: &mut Vec<Bound>) {
 pub fn bounds(p: &Project, target: &Wall, face: bool) -> Vec<Bound> {
     let level = target.floor_id.as_str();
     let mut out = Vec::new();
-    for w in walls(p) {
-        if w.id == target.id || w.floor_id != level {
-            continue;
-        }
-        let Some(ax) = Axis::of(w) else { continue };
-        let (lo, hi) = faces(p, w);
-        let ext = (hi - lo) / 2.0;
-        if face && hi - lo > 1e-9 {
-            out.push(wall_bound(&ax, lo, ext));
-            out.push(wall_bound(&ax, hi, ext));
-        } else {
-            out.push(wall_bound(&ax, 0.0, ext));
-        }
+    for (ax, n, ext) in wall_lines(p, level, Some(&target.id), face) {
+        out.push(wall_bound(&ax, n, ext));
     }
     for d in &p.drawings2d {
         if d.level_id == level || (matches!(d.geom, Drawing2DGeom::Grid { .. }) && crate::grid::visible_on(d, level)) {
@@ -310,6 +301,53 @@ pub fn bounds(p: &Project, target: &Wall, face: bool) -> Vec<Bound> {
         }
     }
     out
+}
+
+/// Grenzlinien der Wände eines Geschosses (ohne `skip`): Achse bzw. (`face`) beide Aussenflächen, als
+/// (Achse, Querlage `n`, Überstand an beiden Enden = halbe Dicke).
+fn wall_lines(p: &Project, level: &str, skip: Option<&str>, face: bool) -> Vec<(Axis, f64, f64)> {
+    let mut out = Vec::new();
+    for w in walls(p) {
+        if Some(w.id.as_str()) == skip || w.floor_id != level {
+            continue;
+        }
+        let Some(ax) = Axis::of(w) else { continue };
+        let (lo, hi) = faces(p, w);
+        let ext = (hi - lo) / 2.0;
+        if face && hi - lo > 1e-9 {
+            out.push((ax.clone(), lo, ext));
+            out.push((ax, hi, ext));
+        } else {
+            out.push((ax, 0.0, ext));
+        }
+    }
+    out
+}
+
+/// Wände des Geschosses als Schneider für 2D-Kurven (Trim, [113]): je Grenzlinie Start, Ende und
+/// Polylinien-Bulge (`0` = gerade).
+pub fn wall_cutters(p: &Project, level: &str, face: bool) -> Vec<(P, P, f64)> {
+    wall_lines(p, level, None, face)
+        .into_iter()
+        .filter_map(|(ax, n, ext)| {
+            let (_, _, bulge) = ax.piece(-ext, ax.len + ext)?;
+            let (a, b) = (ax.point(-ext, n), ax.point(ax.len + ext, n));
+            (fin(a) && fin(b)).then_some((a, b, bulge.unwrap_or(0.0)))
+        })
+        .collect()
+}
+
+/// Verlängerung einer 2D-Kurve an Wänden (Extend, [113]): Endstück `a → b` (Bulge wie Polylinien) bis
+/// zur nächsten Wand-Grenzlinie vor dem Start (`at_start`) bzw. hinter dem Ende. Ergebnis: Zuwachs
+/// (Meter entlang des Stücks), neuer Endpunkt, neuer Bulge des Endstücks (`None` = gerade).
+pub fn extend_to_walls(p: &Project, level: &str, a: P, b: P, bulge: Option<f64>, at_start: bool, face: bool) -> Option<(f64, P, Option<f64>)> {
+    let ax = Axis::new(a, b, bulge)?;
+    let bs: Vec<Bound> = wall_lines(p, level, None, face).iter().map(|(w, n, ext)| wall_bound(w, *n, *ext)).collect();
+    let c = cuts(&ax, &bs);
+    let len = ax.len;
+    let (s0, s1) = if at_start { (c.iter().copied().filter(|x| *x < -EPS_S).last()?, len) } else { (0.0, c.iter().copied().find(|x| *x > len + EPS_S)?) };
+    let (na, nb, nbulge) = ax.piece(s0, s1)?;
+    Some(if at_start { (-s0, na, nbulge) } else { (s1 - len, nb, nbulge) })
 }
 
 /// Sortierte, entdoppelte Schnitt-Parameter der Achse mit allen Grenzen.
@@ -404,6 +442,9 @@ struct Remap {
     ax: Axis,
     targets: Vec<Target>,
     follow_ends: bool,
+    /// Gegenläufig verkettet: `ax` ist die gekehrte alte Achse, Lagen der alten Wand werden gespiegelt
+    /// (`s ↦ len − s`), Türen kehren Aufschlag und Scharnier.
+    rev: bool,
 }
 
 impl Remap {
@@ -428,7 +469,8 @@ fn opening_ops(root: &Map<String, Value>, p: &Project, maps: &[Remap]) -> Vec<Op
     let mut gone = Vec::new();
     for o in p.openings.iter().flatten() {
         let Some(m) = maps.iter().find(|m| m.old == o.host_wall_id) else { continue };
-        let (pos, width) = (o.position, o.width);
+        let width = o.width;
+        let pos = if m.rev { m.len - o.position - width } else { o.position };
         let c = pos + width / 2.0;
         let t = m.containing(c);
         let Some(t) = t.filter(|t| width <= t.s1 - t.s0 + EPS_S) else {
@@ -437,16 +479,34 @@ fn opening_ops(root: &Map<String, Value>, p: &Project, maps: &[Remap]) -> Vec<Op
         };
         let np = (pos - t.s0).min(t.s1 - t.s0 - width).max(0.0);
         let same_host = o.host_wall_id == t.id;
-        if same_host && (np - pos).abs() < 1e-12 {
+        if same_host && (np - pos).abs() < 1e-12 && !m.rev {
             continue;
         }
         let Some(ro) = raw(root, "openings", &o.id) else { continue };
-        ops.push(Op::Replace { collection: "openings".into(), entity: with_all(ro, vec![("hostWallId", Value::String(t.id.clone())), ("position", js_num(np))]) });
+        let mut f = vec![("hostWallId", Value::String(t.id.clone())), ("position", js_num(np))];
+        if m.rev {
+            f.extend(reversed_door(ro));
+        }
+        ops.push(Op::Replace { collection: "openings".into(), entity: with_all(ro, f) });
     }
     if !gone.is_empty() {
         ops.push(Op::Remove { collection: "openings".into(), ids: gone });
     }
     ops
+}
+
+/// Tür an einer gekehrten Wand: Aufschlag (Seite der Achse) und Scharnier (Start/Ende) wechseln, damit
+/// sie in der Welt gleich bleibt (fehlend = links bzw. Start).
+fn reversed_door(o: &Value) -> Vec<(&'static str, Value)> {
+    let door = field(o, "kind").and_then(Value::as_str) == Some("door") || field(o, "swing").is_some();
+    if !door {
+        return vec![];
+    }
+    let s = |k: &str| field(o, k).and_then(Value::as_str).unwrap_or("");
+    vec![
+        ("swing", Value::String(if s("swing") == "right" { "left" } else { "right" }.into())),
+        ("hinge", Value::String(if s("hinge") == "end" { "start" } else { "end" }.into())),
+    ]
 }
 
 /// Bezüge der Bemassung auf umgebaute Wände umschreiben ([38]).
@@ -464,6 +524,7 @@ fn dim_ops(root: &Map<String, Value>, p: &Project, maps: &[Remap]) -> Vec<Op> {
                 match r.feature {
                     DimFeature::Wall => {
                         let Some(t) = r.t else { continue };
+                        let t = if m.rev { 1.0 - t } else { t };
                         let s = t * m.len;
                         let hit = if m.follow_ends && t == 0.0 {
                             m.first().map(|x| (x, 0.0))
@@ -538,7 +599,7 @@ pub fn commit(root: &Map<String, Value>, pr: &Project, e: &Edit, ids: &mut IdGen
         if targets.is_empty() {
             ops.push(Op::Remove { collection: "walls".into(), ids: vec![old.to_string()] });
         }
-        maps.push(Remap { old: old.to_string(), len: p.ax.len, ax: p.ax.clone(), targets, follow_ends: p.follow_ends });
+        maps.push(Remap { old: old.to_string(), len: p.ax.len, ax: p.ax.clone(), targets, follow_ends: p.follow_ends, rev: false });
     }
     for n in &e.extra {
         let Some(src) = raw(root, "walls", &n.src.id) else { continue };
@@ -694,25 +755,156 @@ fn keep(ax: &Axis, s_x: f64, s_c: f64) -> Option<(f64, f64)> {
     ax.piece(r.0, r.1).map(|_| r)
 }
 
-/// Verrunden zweier Wände: beide bis zum Achsschnittpunkt (nächst den Klicks) stutzen bzw. verlängern
-/// (L-Ecke); mit Radius `r > 0` (nur gerade Wände) enden sie an den Tangentenpunkten und eine
-/// Bogenwand (Kopie der ersten Wand) schliesst tangential an.
-pub fn fillet<'a>(w1: &'a Wall, p1: P, w2: &'a Wall, p2: P, r: f64) -> Option<Edit<'a>> {
+/// Ecke zweier Wände: Pläne beider Wände, Achsschnittpunkt (nächst den Klicks) und die behaltenen
+/// Bereiche bis dorthin (Seite des jeweiligen Klicks).
+struct WallCorner<'a> {
+    a: Plan<'a>,
+    b: Plan<'a>,
+    x: P,
+    ka: (f64, f64),
+    kb: (f64, f64),
+}
+
+impl WallCorner<'_> {
+    /// Behält Wand a den Bereich ab ihrem Start (Ecke am Ende)?
+    fn toward_a(&self) -> bool {
+        self.ka.0 == 0.0
+    }
+    fn toward_b(&self) -> bool {
+        self.kb.0 == 0.0
+    }
+    /// Achsparameter der Ecke auf a bzw. b.
+    fn sx(&self) -> (f64, f64) {
+        (if self.toward_a() { self.ka.1 } else { self.ka.0 }, if self.toward_b() { self.kb.1 } else { self.kb.0 })
+    }
+    /// Beide Wände enden bei `sa`/`sb` (Parameter der eigenen Achse); eine Seite darf ganz entfallen.
+    fn cut_to(&mut self, sa: f64, sb: f64) {
+        let ra = if self.toward_a() { (0.0, sa) } else { (sa, self.a.ax.len) };
+        let rb = if self.toward_b() { (0.0, sb) } else { (sb, self.b.ax.len) };
+        self.a.pieces.push(ra);
+        self.b.pieces.push(rb);
+        self.a.pieces.retain(|(s0, s1)| s1 - s0 >= MIN_LEN);
+        self.b.pieces.retain(|(s0, s1)| s1 - s0 >= MIN_LEN);
+    }
+    /// Verbindungswand von a nach b in Laufrichtung der Kette (a → Verbindung → b bzw. umgekehrt).
+    fn link(&self, ta: P, tb: P) -> (P, P) {
+        if self.toward_a() {
+            (ta, tb)
+        } else {
+            (tb, ta)
+        }
+    }
+}
+
+fn wall_corner<'a>(w1: &'a Wall, p1: P, w2: &'a Wall, p2: P) -> Option<WallCorner<'a>> {
     if w1.id == w2.id {
         return None;
     }
-    let (mut a, mut b) = (plan(w1, true)?, plan(w2, true)?);
+    let (a, b) = (plan(w1, true)?, plan(w2, true)?);
     let x = carrier_hits(&a.ax, &b.ax).into_iter().filter(|x| fin(*x)).min_by(|x, y| (dist(*x, p1) + dist(*x, p2)).total_cmp(&(dist(*y, p1) + dist(*y, p2))))?;
     let (ka, kb) = (keep(&a.ax, a.ax.local(x).0, a.ax.local(p1).0)?, keep(&b.ax, b.ax.local(x).0, b.ax.local(p2).0)?);
+    Some(WallCorner { a, b, x, ka, kb })
+}
+
+/// Träger einer um `d` versetzten Achse: Gerade (Punkt, Richtung) oder Kreis (Mitte, Radius).
+enum Carrier {
+    Line(P, P),
+    Circle(P, f64),
+}
+
+fn carrier(ax: &Axis, d: f64) -> Option<Carrier> {
+    match &ax.arc {
+        None => Some(Carrier::Line(ax.point(0.0, d), ax.u)),
+        Some(w) => {
+            let r = w.radius_at(d);
+            (r > 1e-9).then_some(Carrier::Circle(w.center, r))
+        }
+    }
+}
+
+fn carrier_cross(a: &Carrier, b: &Carrier) -> Vec<P> {
+    match (a, b) {
+        (Carrier::Line(p, u), Carrier::Line(q, v)) => kernel2d::line_intersect(*p, *u, *q, *v).into_iter().collect(),
+        (Carrier::Line(p, u), Carrier::Circle(c, r)) | (Carrier::Circle(c, r), Carrier::Line(p, u)) => circle_line(*c, *r, &Line { point: *p, dir: *u }),
+        (Carrier::Circle(c1, r1), Carrier::Circle(c2, r2)) => circle_circle(*c1, *r1, *c2, *r2),
+    }
+}
+
+/// Fusspunkt von `c` auf der Achse (Gerade bzw. Kreis).
+fn foot(ax: &Axis, c: P) -> Option<P> {
+    match &ax.arc {
+        None => {
+            let t = (c.x - ax.a.x) * ax.u.x + (c.y - ax.a.y) * ax.u.y;
+            Some(P::new(ax.a.x + ax.u.x * t, ax.a.y + ax.u.y * t))
+        }
+        Some(w) => {
+            let d = dist(c, w.center);
+            (d > 1e-12).then(|| P::new(w.center.x + (c.x - w.center.x) / d * w.r, w.center.y + (c.y - w.center.y) / d * w.r))
+        }
+    }
+}
+
+/// Verrundung mit Bogenwand(en) ([113]): Mittelpunkt des Kreises mit Radius `r`, der beide Träger
+/// berührt und dessen Berührpunkte in den behaltenen Bereichen liegen (nächst der Ecke); Ergebnis
+/// Mitte und die Parameter der Berührpunkte auf a und b.
+fn arc_fillet(k: &WallCorner, r: f64) -> Option<(P, f64, f64)> {
+    let (sxa, sxb) = k.sx();
+    let inside = |ax: &Axis, toward: bool, sx: f64, s: f64| {
+        if toward {
+            s <= sx + EPS_S && (ax.arc.is_none() || s >= -EPS_S)
+        } else {
+            s >= sx - EPS_S && (ax.arc.is_none() || s <= ax.len + EPS_S)
+        }
+    };
+    let mut best: Option<(f64, P, f64, f64)> = None;
+    for da in [r, -r] {
+        for db in [r, -r] {
+            let (Some(ca), Some(cb)) = (carrier(&k.a.ax, da), carrier(&k.b.ax, db)) else { continue };
+            for c in carrier_cross(&ca, &cb).into_iter().filter(|c| fin(*c)) {
+                let (Some(ta), Some(tb)) = (foot(&k.a.ax, c), foot(&k.b.ax, c)) else { continue };
+                let (sa, sb) = (k.a.ax.local(ta).0, k.b.ax.local(tb).0);
+                if !(inside(&k.a.ax, k.toward_a(), sxa, sa) && inside(&k.b.ax, k.toward_b(), sxb, sb)) {
+                    continue;
+                }
+                let score = (sxa - sa).abs() + (sxb - sb).abs();
+                if best.map_or(true, |b| score < b.0) {
+                    best = Some((score, c, sa, sb));
+                }
+            }
+        }
+    }
+    best.map(|b| (b.1, b.2, b.3))
+}
+
+/// Verrunden zweier Wände: beide bis zum Achsschnittpunkt (nächst den Klicks) stutzen bzw. verlängern
+/// (L-Ecke); mit Radius `r > 0` enden sie an den Tangentenpunkten und eine Bogenwand (Kopie der ersten
+/// Wand) schliesst tangential an — auch zwischen Bogenwänden bzw. Bogen und Gerade.
+pub fn fillet<'a>(w1: &'a Wall, p1: P, w2: &'a Wall, p2: P, r: f64) -> Option<Edit<'a>> {
+    let mut k = wall_corner(w1, p1, w2, p2)?;
     let r = if r.is_finite() { r.max(0.0) } else { 0.0 };
     if r < 1e-6 {
-        a.pieces.push(ka);
-        b.pieces.push(kb);
-        return Some(Edit { plans: vec![a, b], extra: vec![] });
+        k.a.pieces.push(k.ka);
+        k.b.pieces.push(k.kb);
+        return Some(Edit { plans: vec![k.a, k.b], extra: vec![] });
     }
-    if a.ax.arc.is_some() || b.ax.arc.is_some() {
-        return None;
+    if k.a.ax.arc.is_some() || k.b.ax.arc.is_some() {
+        let (c, sa, sb) = arc_fillet(&k, r)?;
+        let (ta, tb) = (k.a.ax.point(sa, 0.0), k.b.ax.point(sb, 0.0));
+        // Scheitel: der Kreispunkt auf der Seite der Ecke.
+        let m = P::new((ta.x + tb.x) / 2.0 - c.x, (ta.y + tb.y) / 2.0 - c.y);
+        let ml = m.x.hypot(m.y);
+        let dir = if ml > 1e-9 { P::new(m.x / ml, m.y / ml) } else { let d = dist(ta, tb).max(1e-12); P::new(-(tb.y - ta.y) / d, (tb.x - ta.x) / d) };
+        let ap = [P::new(c.x + dir.x * r, c.y + dir.y * r), P::new(c.x - dir.x * r, c.y - dir.y * r)];
+        let apex = if dist(ap[0], k.x) <= dist(ap[1], k.x) { ap[0] } else { ap[1] };
+        let (s, e) = k.link(ta, tb);
+        let bulge = crate::bulge::from_sagitta_point(s.x, s.y, e.x, e.y, apex.x, apex.y);
+        if !(bulge.is_finite() && bulge.abs() > 1e-9) {
+            return None;
+        }
+        k.cut_to(sa, sb);
+        return Some(Edit { plans: vec![k.a, k.b], extra: vec![NewWall { src: w1, a: s, b: e, bulge: Some(bulge) }] });
     }
+    let WallCorner { mut a, mut b, x, ka, kb } = k;
     let toward_a = ka.0 == 0.0;
     let toward_b = kb.0 == 0.0;
     let far_a = if toward_a { a.ax.a } else { a.ax.b };
@@ -740,33 +932,68 @@ pub fn fillet<'a>(w1: &'a Wall, p1: P, w2: &'a Wall, p2: P, r: f64) -> Option<Ed
     Some(Edit { plans: vec![a, b], extra: vec![NewWall { src: w1, a: s, b: e, bulge: Some(bulge) }] })
 }
 
-/// Verketten: gewählte Wände desselben Geschosses und Wandtyps, die mit der ersten kollinear (gleiche
-/// Laufrichtung) bzw. auf demselben Kreis (gleicher Drehsinn) liegen, werden eine Wand über die
-/// Gesamtspanne (Lücken werden geschlossen). Die erste behält id und Attribute.
+/// Fasen zweier Wände ([113]): beide enden im Abstand `d` (entlang der Achse, bei Bogenwänden
+/// Bogenlänge) vor dem Achsschnittpunkt; eine gerade Wand (Kopie der ersten) verbindet die Enden.
+/// `d = 0` ergibt die L-Ecke wie Verrunden ohne Radius.
+pub fn chamfer<'a>(w1: &'a Wall, p1: P, w2: &'a Wall, p2: P, d: f64) -> Option<Edit<'a>> {
+    let mut k = wall_corner(w1, p1, w2, p2)?;
+    let d = if d.is_finite() { d.max(0.0) } else { 0.0 };
+    if d < 1e-6 {
+        k.a.pieces.push(k.ka);
+        k.b.pieces.push(k.kb);
+        return Some(Edit { plans: vec![k.a, k.b], extra: vec![] });
+    }
+    let (sxa, sxb) = k.sx();
+    let sa = if k.toward_a() { sxa - d } else { sxa + d };
+    let sb = if k.toward_b() { sxb - d } else { sxb + d };
+    // Das Fasen-Ende muss auf der behaltenen Wand liegen (sonst ginge sie ganz verloren).
+    let ok = |ax: &Axis, toward: bool, s: f64| if toward { s >= -EPS_S } else { s <= ax.len + EPS_S };
+    if !(ok(&k.a.ax, k.toward_a(), sa) && ok(&k.b.ax, k.toward_b(), sb)) {
+        return None;
+    }
+    let (ta, tb) = (k.a.ax.point(sa, 0.0), k.b.ax.point(sb, 0.0));
+    if dist(ta, tb) < MIN_LEN {
+        return None;
+    }
+    let (s, e) = k.link(ta, tb);
+    k.cut_to(sa, sb);
+    Some(Edit { plans: vec![k.a, k.b], extra: vec![NewWall { src: w1, a: s, b: e, bulge: None }] })
+}
+
+/// Verketten: gewählte Wände desselben Geschosses und Wandtyps, die mit der ersten kollinear bzw. auf
+/// demselben Kreis liegen, werden eine Wand über die Gesamtspanne (Lücken werden geschlossen). Die erste
+/// behält id, Attribute und Laufrichtung (damit die Schichtseite); gegenläufige Partner werden gekehrt —
+/// ihre Öffnungen behalten die Weltlage, Türen kehren Aufschlag und Scharnier.
 pub fn join_ops(root: &Map<String, Value>, pr: &Project, ids_sel: &[String]) -> Vec<Op> {
     let sel: Vec<&Wall> = walls(pr).iter().filter(|w| editable(w) && ids_sel.iter().any(|x| *x == w.id)).collect();
     let Some((first, rest)) = sel.split_first() else { return vec![] };
     let Some(ax) = Axis::of(first) else { return vec![] };
     let Some(first_raw) = raw(root, "walls", &first.id) else { return vec![] };
     // Lage jeder Partnerwand auf der ersten Achse: Versatz ihres Starts.
-    let mut members: Vec<(&Wall, Axis, f64)> = Vec::new();
+    let mut members: Vec<(&Wall, Axis, f64, bool)> = Vec::new();
     for w in rest {
         let Some(bx) = Axis::of(w) else { continue };
         if w.floor_id != first.floor_id || w.wall_type_id != first.wall_type_id {
             continue;
         }
-        let ok = match (&ax.arc, &bx.arc) {
+        // Gleichläufig oder gegenläufig (dann mit gekehrter Achse).
+        let same = match (&ax.arc, &bx.arc) {
             (None, None) => {
                 let (_, n0) = ax.local(bx.a);
                 let (_, n1) = ax.local(bx.b);
-                n0.abs() < EPS_GEO && n1.abs() < EPS_GEO && bx.u.x * ax.u.x + bx.u.y * ax.u.y > 0.0
+                (n0.abs() < EPS_GEO && n1.abs() < EPS_GEO).then(|| bx.u.x * ax.u.x + bx.u.y * ax.u.y > 0.0)
             }
-            (Some(v), Some(u)) => dist(v.center, u.center) < EPS_GEO && (v.r - u.r).abs() < EPS_GEO && v.sweep.signum() == u.sweep.signum(),
-            _ => false,
+            (Some(v), Some(u)) => (dist(v.center, u.center) < EPS_GEO && (v.r - u.r).abs() < EPS_GEO).then(|| v.sweep.signum() == u.sweep.signum()),
+            _ => None,
         };
-        if ok {
-            members.push((w, bx.clone(), ax.local(bx.a).0));
-        }
+        let Some(same) = same else { continue };
+        let bx = if same {
+            bx
+        } else {
+            let Some(r) = Axis::new(bx.b, bx.a, w.bulge.map(|b| -b)) else { continue };
+            r
+        };
+        members.push((w, bx.clone(), ax.local(bx.a).0, !same));
     }
     if members.is_empty() {
         return vec![];
@@ -777,9 +1004,9 @@ pub fn join_ops(root: &Map<String, Value>, pr: &Project, ids_sel: &[String]) -> 
     let new_id = first.id.clone();
     let mut ops = vec![Op::Replace { collection: "walls".into(), entity: with_all(first_raw, geom_fields(a, b, bulge)) }];
     ops.push(Op::Remove { collection: "walls".into(), ids: members.iter().map(|m| m.0.id.clone()).collect() });
-    let mut maps = vec![Remap { old: new_id.clone(), len: ax.len, ax: ax.clone(), targets: vec![Target { id: new_id.clone(), s0: lo, s1: hi }], follow_ends: false }];
-    for (w, bx, off) in &members {
-        maps.push(Remap { old: w.id.clone(), len: bx.len, ax: bx.clone(), targets: vec![Target { id: new_id.clone(), s0: lo - off, s1: hi - off }], follow_ends: false });
+    let mut maps = vec![Remap { old: new_id.clone(), len: ax.len, ax: ax.clone(), targets: vec![Target { id: new_id.clone(), s0: lo, s1: hi }], follow_ends: false, rev: false }];
+    for (w, bx, off, rev) in &members {
+        maps.push(Remap { old: w.id.clone(), len: bx.len, ax: bx.clone(), targets: vec![Target { id: new_id.clone(), s0: lo - off, s1: hi - off }], follow_ends: false, rev: *rev });
     }
     ops.extend(opening_ops(root, pr, &maps));
     ops.extend(dim_ops(root, pr, &maps));
@@ -976,8 +1203,8 @@ mod tests {
         let g = &arr(n.get("drawings2d"))[0]["geom"];
         assert_eq!(g["refs"][1]["id"], "a");
         assert!(close(xy_of(&g["pts"][1]), (10.0, 0.0)));
-        // Gegenläufig: nicht verketten.
-        let r2 = project(vec![wall("a", (0.0, 0.0), (4.0, 0.0), None), wall("b", (10.0, 0.0), (4.0, 0.0), None)], vec![], vec![]);
+        // Gegenläufig, aber nicht kollinear: nicht verketten.
+        let r2 = project(vec![wall("a", (0.0, 0.0), (4.0, 0.0), None), wall("b", (10.0, 0.5), (4.0, 0.5), None)], vec![], vec![]);
         assert!(join_ops(&r2, &typed(&r2), &["a".into(), "b".into()]).is_empty());
         // Zwei Viertelbögen desselben Kreises (um (0,0), unten herum) → Halbkreis.
         let t = (PI / 8.0).tan();
@@ -1049,5 +1276,123 @@ mod tests {
         let pr = typed(&r);
         let n = commit_edit(&r, &pr, trim(&pr, find_wall(&pr, "a").unwrap(), P::new(1.0, 0.0), false));
         assert!(close(xy_of(&w_of(&n, "a")["start"]), (3.0, 0.0)));
+    }
+
+    /// Halbkreis-Bogenwand um (0,0), R 5, von (−5,0) über (0,5) nach (5,0); Gerade b bei x = 3 nach oben.
+    fn arc_line_case() -> Map<String, Value> {
+        project(vec![wall("a", (-5.0, 0.0), (5.0, 0.0), Some(1.0)), wall("b", (3.0, -2.0), (3.0, 8.0), None)], vec![opening("o", "a", 1.0, 1.0)], vec![])
+    }
+
+    #[test]
+    fn verrunden_mit_radius_bogen_und_gerade() {
+        let r = arc_line_case();
+        let pr = typed(&r);
+        let (a, b) = (find_wall(&pr, "a").unwrap(), find_wall(&pr, "b").unwrap());
+        // Klick auf a links oben (Teil bis zum Schnitt (3,4) bleibt), auf b oberhalb des Schnitts.
+        let n = commit_edit(&r, &pr, fillet(a, P::new(-4.0, 3.0), b, P::new(3.0, 7.0), 1.0));
+        // Verrundungskreis: ausserhalb des Kreises (Abstand 6) und links von b (x = 2) → Mitte (2, √32).
+        let c = (2.0, 32f64.sqrt());
+        let ta = (5.0 * c.0 / 6.0, 5.0 * c.1 / 6.0);
+        let tb = (3.0, c.1);
+        let wa = w_of(&n, "a");
+        assert!(close(xy_of(&wa["start"]), (-5.0, 0.0)));
+        assert!(close(xy_of(&wa["end"]), ta), "{:?}", wa["end"]);
+        assert!(wa["bulge"].as_f64().unwrap() > 0.0, "Bogenwand bleibt auf demselben Kreis");
+        assert!(close(xy_of(&w_of(&n, "b")["start"]), tb));
+        let f = arr(n.get("walls")).iter().find(|w| w["id"] == "wall-s-1").expect("Bogenwand dazwischen");
+        assert!(close(xy_of(&f["start"]), ta) && close(xy_of(&f["end"]), tb));
+        let np = typed(&n);
+        let ax = Axis::of(find_wall(&np, "wall-s-1").unwrap()).unwrap();
+        let fa = ax.arc.expect("Bogen");
+        assert!(close((fa.center.x, fa.center.y), c) && (fa.r - 1.0).abs() < 1e-9);
+        let m = ax.point(ax.len / 2.0, 0.0);
+        assert!(dist(m, P::new(3.0, 4.0)) < dist(P::new(2.0 * c.0 - m.x, 2.0 * c.1 - m.y), P::new(3.0, 4.0)), "Bogen auf der Seite der Ecke");
+        // Tangential: Richtung der Bogenwand am Start = Richtung von a am Ende.
+        let axa = Axis::of(find_wall(&np, "a").unwrap()).unwrap();
+        let (t1, t2) = (axa.arc.unwrap().tangent(axa.len), fa.tangent(0.0));
+        assert!((t1.x - t2.x).abs() < 1e-6 && (t1.y - t2.y).abs() < 1e-6);
+        // Öffnung (Lage ab Start, Start unverändert) bleibt.
+        assert_eq!(arr(n.get("openings"))[0]["position"], json!(1.0));
+        assert_eq!(arr(n.get("openings"))[0]["hostWallId"], "a");
+    }
+
+    #[test]
+    fn verrunden_mit_radius_zwei_bogenwaende() {
+        // Zwei Halbkreise R 5 um (0,0) und (8,0), oben herum; Schnitt bei (4,3).
+        let r = project(vec![wall("a", (-5.0, 0.0), (5.0, 0.0), Some(1.0)), wall("b", (3.0, 0.0), (13.0, 0.0), Some(1.0))], vec![], vec![]);
+        let pr = typed(&r);
+        let (a, b) = (find_wall(&pr, "a").unwrap(), find_wall(&pr, "b").unwrap());
+        let e = fillet(a, P::new(-3.0, 4.0), b, P::new(11.0, 4.0), 1.0).expect("Verrundung");
+        let n = commit_edit(&r, &pr, Some(e));
+        // Verrundungskreis aussen an beiden: Mitte (4, √(36−16)).
+        let c = (4.0, 20f64.sqrt());
+        let np = typed(&n);
+        let fa = Axis::of(find_wall(&np, "wall-s-1").unwrap()).unwrap().arc.unwrap();
+        assert!(close((fa.center.x, fa.center.y), c), "{:?}", fa.center);
+        assert!(close(xy_of(&w_of(&n, "a")["end"]), (5.0 * c.0 / 6.0, 5.0 * c.1 / 6.0)));
+        assert!(close(xy_of(&w_of(&n, "b")["start"]), (8.0 + 5.0 * (c.0 - 8.0) / 6.0, 5.0 * c.1 / 6.0)));
+    }
+
+    #[test]
+    fn fasen_gerade_und_bogen() {
+        let r = project(vec![wall("a", (0.0, 0.0), (4.0, 0.0), None), wall("b", (6.0, 5.0), (6.0, -2.0), None)], vec![opening("o", "b", 1.0, 1.0)], vec![]);
+        let pr = typed(&r);
+        let (a, b) = (find_wall(&pr, "a").unwrap(), find_wall(&pr, "b").unwrap());
+        let n = commit_edit(&r, &pr, chamfer(a, P::new(2.0, 0.0), b, P::new(6.0, 3.0), 1.0));
+        assert!(close(xy_of(&w_of(&n, "a")["end"]), (5.0, 0.0)));
+        assert!(close(xy_of(&w_of(&n, "b")["end"]), (6.0, 1.0)));
+        let f = arr(n.get("walls")).iter().find(|w| w["id"] == "wall-s-1").expect("Fasenwand");
+        assert!(close(xy_of(&f["start"]), (5.0, 0.0)) && close(xy_of(&f["end"]), (6.0, 1.0)));
+        assert!(f.get("bulge").is_none());
+        assert_eq!(arr(n.get("openings"))[0]["position"], json!(1.0));
+        // Distanz 0 = L-Ecke wie Verrunden ohne Radius.
+        let n = commit_edit(&r, &pr, chamfer(a, P::new(2.0, 0.0), b, P::new(6.0, 3.0), 0.0));
+        assert!(close(xy_of(&w_of(&n, "a")["end"]), (6.0, 0.0)));
+        assert_eq!(arr(n.get("walls")).len(), 2);
+        // Bogen: Distanz als Bogenlänge ab dem Schnittpunkt (3,4).
+        let r = arc_line_case();
+        let pr = typed(&r);
+        let (a, b) = (find_wall(&pr, "a").unwrap(), find_wall(&pr, "b").unwrap());
+        let n = commit_edit(&r, &pr, chamfer(a, P::new(-4.0, 3.0), b, P::new(3.0, 7.0), 1.0));
+        let ang = 4f64.atan2(3.0) + 1.0 / 5.0;
+        assert!(close(xy_of(&w_of(&n, "a")["end"]), (5.0 * ang.cos(), 5.0 * ang.sin())));
+        assert!(close(xy_of(&w_of(&n, "b")["start"]), (3.0, 5.0)));
+        let f = arr(n.get("walls")).iter().find(|w| w["id"] == "wall-s-1").unwrap();
+        assert!(f.get("bulge").is_none(), "Fase ist gerade, auch von einer Bogenwand");
+        assert_eq!(arr(n.get("openings"))[0]["hostWallId"], "a");
+    }
+
+    #[test]
+    fn verketten_gegenlaeufig_kehrt_oeffnungen() {
+        let mut door = opening("d", "b", 1.0, 1.0);
+        door["kind"] = json!("door");
+        door["swing"] = json!("left");
+        door["hinge"] = json!("start");
+        let r = project(
+            vec![wall("a", (0.0, 0.0), (4.0, 0.0), None), wall("b", (10.0, 0.0), (4.0, 0.0), None)],
+            vec![door],
+            vec![dim("m", json!([{"id": "b", "feature": "wall", "t": 0.0}, {"id": "a", "feature": "wall", "t": 0.0}]), json!([{"x": 10, "y": 0}, {"x": 0, "y": 0}]))],
+        );
+        let n = apply(&r, join_ops(&r, &typed(&r), &["a".into(), "b".into()]));
+        assert_eq!(arr(n.get("walls")).len(), 1);
+        assert!(close(xy_of(&w_of(&n, "a")["end"]), (10.0, 0.0)));
+        // Tür lag bei x 8..9 (ab (10,0) rückwärts 1..2) → Lage 8 auf a, Aufschlag/Scharnier gekehrt.
+        let o = &arr(n.get("openings"))[0];
+        assert_eq!(o["hostWallId"], "a");
+        assert!((o["position"].as_f64().unwrap() - 8.0).abs() < 1e-9);
+        assert_eq!((&o["swing"], &o["hinge"]), (&json!("right"), &json!("end")));
+        // Bemassung auf b's Start (10,0) zeigt jetzt auf a's Ende.
+        let g = &arr(n.get("drawings2d"))[0]["geom"];
+        assert_eq!(g["refs"][0]["id"], "a");
+        assert!((g["refs"][0]["t"].as_f64().unwrap() - 1.0).abs() < 1e-9);
+        assert!(close(xy_of(&g["pts"][0]), (10.0, 0.0)));
+        // Bogen: zweiter Viertelbogen gegenläufig (gleicher Kreis, umgekehrter Drehsinn).
+        let t = (PI / 8.0).tan();
+        let r3 = project(vec![wall("a", (-5.0, 0.0), (0.0, -5.0), Some(-t)), wall("b", (5.0, 0.0), (0.0, -5.0), Some(t))], vec![], vec![]);
+        let n = apply(&r3, join_ops(&r3, &typed(&r3), &["a".into(), "b".into()]));
+        assert_eq!(arr(n.get("walls")).len(), 1);
+        let a = w_of(&n, "a");
+        assert!(close(xy_of(&a["end"]), (5.0, 0.0)));
+        assert!((a["bulge"].as_f64().unwrap() + 1.0).abs() < 1e-9);
     }
 }
