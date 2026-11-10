@@ -1,10 +1,10 @@
-meshes [44]
-meshes[].color [3] x44
-meshes[].indices [36] x42
+meshes [47]
+meshes[].color [3] x47
+meshes[].indices [36] x45
 meshes[].indices [540]
 meshes[].indices [60]
 meshes[].positions [120]
-meshes[].positions [24] x42
+meshes[].positions [24] x45
 meshes[].positions [360]
 roofLayers [2]
 roofLayers[].color [3] x2
@@ -28,4 +28,4 @@ walls[].start [2] x59
 walls[].startCut [4] x47
 walls[].topDrop [2] x6
 walls[].topPlane [3] x6
-hash d9b519437e8b0665
+hash a131fee4170591f5

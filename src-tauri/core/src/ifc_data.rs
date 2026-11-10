@@ -545,7 +545,7 @@ fn fill_params(p: &Project, o: &Opening) -> FillParams {
     let is_door = o.kind == ElementKind::Door;
     let dt = if is_door { p.door_type(o) } else { None };
     let wt = if is_door { None } else { p.window_type(o) };
-    FillParams {
+    let mut fp = FillParams {
         frame_depth: dt.map_or(wt.and_then(|t| t.frame_depth), |t| t.frame_depth),
         inset: dt.map_or(wt.and_then(|t| t.inset_from_face), |t| t.inset_from_face).or_else(|| crate::opening_detail::default_frame_inset(p, o)),
         inset_outside: match (dt, wt) {
@@ -585,7 +585,43 @@ fn fill_params(p: &Project, o: &Opening) -> FillParams {
         transom_height: dt.and_then(|t| t.transom_height).unwrap_or(0.0),
         glazed: dt.is_some_and(|t| t.leaf_style == DoorTypeLeafStyle::Glas),
         glazing_ratio: dt.and_then(|t| t.glazing_ratio),
+    };
+    // [105] Türzarge mit Profil: Rahmenlage quer = Profil in der Wand (Zarge über die ganze Leibung,
+    // Blockrahmen nach Typ); das Blatt sitzt dann wie im 3D im Falz der Aufschlagseite.
+    if let Some((lo, hi)) = door_frame_extent(p, o) {
+        fp.frame_depth = Some(hi - lo);
+        fp.inset = Some(lo);
+        fp.inset_outside = true;
     }
+    fp
+}
+
+/// Querlage `(lo, hi)` ab der Aussenfläche der Zarge/des Rahmens einer Tür mit Profil ([105]), ohne
+/// Bekleidung und Spiegel vor den Wandflächen; `None` ohne Profil oder ganz vor der Wand (Blendrahmen).
+fn door_frame_extent(p: &Project, o: &Opening) -> Option<(f64, f64)> {
+    use crate::opening_detail as od;
+    let df = od::door_frame_of(p, o)?;
+    let wall = p.walls.iter().find(|w| w.id == o.host_wall_id)?;
+    let total = p.wall_thickness(wall, 0.2);
+    if !(total > 1e-6) {
+        return None;
+    }
+    let innen = od::aufschlag_innen(o);
+    let (mut d0, mut d1) = (f64::INFINITY, f64::NEG_INFINITY);
+    for (part, poly) in od::door_frame_profile(&df, total, innen) {
+        if part == od::FramePart::Casing {
+            continue;
+        }
+        for q in poly {
+            let d = q[1].max(0.0).min(total);
+            d0 = d0.min(d);
+            d1 = d1.max(d);
+        }
+    }
+    if !(d1 - d0 > 1e-3) {
+        return None;
+    }
+    Some(if innen { (total - d1, total - d0) } else { (d0, d1) })
 }
 
 /// FILL schreiben: Wandachse, Achs-Intervall und Höhen der Öffnung, Querausdehnung der Wand
@@ -1891,6 +1927,25 @@ mod tests {
         p.door_types = Some(vec![DoorType { leaf_count: 1.0, ..dt(DoorTypeKind::Tasche) }]);
         let x = fill_params(&p, &o);
         assert_eq!((x.door_kind, x.leaf_count, x.hinge_at_start), (1.0, 1.0, false));
+    }
+
+    /// [105] Zarge (Profil über die ganze Leibung) und Blockrahmen: Rahmenlage der Füllung aus dem Profil,
+    /// damit IFC das Blatt wie das 3D im Falz der Aufschlagseite trägt.
+    #[test]
+    fn tuer_zarge_rahmenlage_aus_dem_profil() {
+        let mut p = Project::default();
+        p.wall_types.push(WallType { id: "iw".into(), layers: vec![Layer { thickness: 0.15, ..Default::default() }], ..Default::default() });
+        p.walls.push(Wall { id: "W".into(), wall_type_id: "iw".into(), end: Vec2 { x: 5.0, y: 0.0 }, height: 2.6, ..Default::default() });
+        p.door_types = Some(vec![DoorType { id: "dt".into(), frame_kind: Some(DoorTypeFrameKind::Zarge), frame_width: Some(0.06), ..Default::default() }]);
+        let x = fill_params(&p, &opening(ElementKind::Door, Some("dt")));
+        assert_eq!((x.frame_depth, x.inset, x.inset_outside), (Some(0.15), Some(0.0), true));
+        p.door_types = Some(vec![DoorType { id: "dt".into(), frame_kind: Some(DoorTypeFrameKind::Blockrahmen), frame_depth: Some(0.08), inset_face: Some(DoorTypeInsetFace::Innen), inset_from_face: Some(0.02), ..Default::default() }]);
+        let x = fill_params(&p, &opening(ElementKind::Door, Some("dt")));
+        let (d, i) = (x.frame_depth.unwrap(), x.inset.unwrap());
+        assert!((d - 0.08).abs() < 1e-12 && (i - 0.05).abs() < 1e-12 && x.inset_outside, "{d} {i}");
+        // Hebeschiebetür behält das Rahmenband des Typs.
+        p.door_types = Some(vec![DoorType { id: "dt".into(), kind: DoorTypeKind::Hebeschiebe, frame_depth: Some(0.16), ..Default::default() }]);
+        assert_eq!(fill_params(&p, &opening(ElementKind::Door, Some("dt"))).frame_depth, Some(0.16));
     }
 
     #[test]

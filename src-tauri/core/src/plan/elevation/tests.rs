@@ -433,8 +433,11 @@ fn zargenspiegel_in_der_ansicht() {
         }
         q
     };
+    // [105] Zarge (Vorgabe): Bekleidung 2 cm über die Rohbaukante; Blockrahmen in der Leibung.
     let plain = frame_w(&door(None));
-    assert!((plain - o1.width).abs() < 1e-6, "{plain}");
+    assert!((plain - o1.width - 0.04).abs() < 1e-6, "{plain}");
+    let block = frame_w(&door(Some(DoorTypeFrameKind::Blockrahmen)));
+    assert!((block - o1.width).abs() < 1e-6, "{block}");
     let zarge = frame_w(&door(Some(DoorTypeFrameKind::Umfassungszarge)));
     assert!((zarge - o1.width - 0.1).abs() < 1e-6, "{zarge}");
     p.openings = None;

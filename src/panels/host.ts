@@ -469,6 +469,12 @@ export interface PanelHostValue {
   onSetOpeningDoorType: (doorType: "normal" | "wandoeffnung") => void;
   /** Setzt die Sturzlinien-Darstellung der Tür. */
   onSetOpeningLintelLines: (lintelLines: "keine" | "innen" | "aussen" | "beide") => void;
+  /** Darstellung ([105]/[95]): Sturzlinien-Linientyp, Fenster-Öffnungslinien, Aufschlagbogen; `undefined` = wie Typ. */
+  onSetOpeningDisplay: (patch: {
+    lintelLineStyle?: "gestrichelt" | "punktiert" | "durchgehend" | "keine";
+    sashSymbols?: boolean;
+    planSwingArcs?: boolean;
+  }) => void;
   /** Übersteuert die Detailstufe dieser Öffnung; `undefined` = Ansichts-Detailstufe gilt. */
   onSetOpeningDetailLevel: (detailLevel: DetailLevel | undefined) => void;
   /** Dach-/Deckenfenster ([103]): Lage in der Wirtsfläche (Mittelpunkt im Grundriss, Drehung). */

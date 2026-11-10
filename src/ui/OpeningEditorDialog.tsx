@@ -708,6 +708,22 @@ function FluegelPanel({
           />
         </>
       )}
+      {/* [95] Brüstungsfeld unten (unter einem Riegel), Einteilung wie das Oberlicht. */}
+      <NumField
+        label={t("oed.f.bottomPanelHeight")}
+        value={wt.bottomPanelHeight ?? 0}
+        min={0}
+        onCommit={(n) => patchWt({ bottomPanelHeight: n || undefined })}
+      />
+      {(wt.bottomPanelHeight ?? 0) > 0 && (
+        <NumField
+          label={t("oed.f.bottomPanelFields")}
+          value={Math.max(1, (wt.bottomSashes ?? []).filter((s) => s.kind === "fluegel").length)}
+          step={1}
+          min={1}
+          onCommit={(n) => patchWt({ bottomSashes: transomSashes(Math.max(1, Math.min(6, Math.round(n))), "fest") })}
+        />
+      )}
       <NumField
         label={t("oed.f.mullionRows")}
         value={wt.mullionRows ?? 1}

@@ -121,6 +121,7 @@ fn window_cut(p: &Project, wall: &Wall, o: &Opening, c: &CrossSection) -> Result
         inset_inner: t.inset_face == Some(WindowTypeInsetFace::Innen),
         inset_mid: t.inset_face == Some(WindowTypeInsetFace::Mitte),
         frame_width_end: f64::NAN,
+        swing: Vec::new(),
     });
     // [105] Rahmen-Detail: Lage/Tiefe übersteuert, Breite oben/unten, Anschlussprofile.
     let det = crate::opening_detail::frame_of(p, o).filter(|f| f.detailed);

@@ -629,15 +629,16 @@ fn tuer_hat_getrennte_koerper_mit_stilen_und_operation() {
     check_structure(&ifc);
     let door = first_line(&ifc, "IFCDOOR");
     assert!(door.contains(".DOOR.,.SINGLE_SWING_LEFT.,$);"), "{door}");
-    // Sechs Körper (Zarge 3, Kämpfer, Oberlicht-Glas, Blatt) in EINER Darstellung, je ein
-    // IfcStyledItem, drei Stile (Rahmen, Blatt, Glas).
-    assert_eq!(count(&ifc, "IFCSTYLEDITEM"), 6);
+    // Zwölf Körper in EINER Darstellung, je ein IfcStyledItem, drei Stile (Rahmen, Blatt, Glas): Zarge und
+    // Kämpfer je Querband (vor dem Blatt 2 Pfosten + Sturz + Kämpfer; im Blattband [105] um den Falz
+    // ausgespart: 4 Pfostenstücke + Sturz + Kämpfer), Oberlicht-Glas, Blatt.
+    assert_eq!(count(&ifc, "IFCSTYLEDITEM"), 12);
     assert_eq!(count(&ifc, "IFCSURFACESTYLE"), 3);
     assert_eq!(count(&ifc, "IFCSURFACESTYLERENDERING"), 3);
     assert!(ifc.contains("IFCSURFACESTYLE('Glas',.BOTH.,"));
     assert!(ifc.contains("IFCSURFACESTYLERENDERING(#"));
-    let shapes = ifc.lines().filter(|l| l.contains("IFCSHAPEREPRESENTATION") && l.contains("'SweptSolid'") && l.matches('#').count() == 8).count();
-    assert!(shapes >= 1, "Darstellung mit 6 Körpern fehlt");
+    let shapes = ifc.lines().filter(|l| l.contains("IFCSHAPEREPRESENTATION") && l.contains("'SweptSolid'") && l.matches('#').count() == 14).count();
+    assert!(shapes >= 1, "Darstellung mit 12 Körpern fehlt");
     // Füllungs-Placement mit Richtung (0,1,0) relativ zur Öffnung; Ursprung lokal.
     assert!(ifc.contains("IFCCARTESIANPOINT((1.45,0.0,0.0))"));
 }

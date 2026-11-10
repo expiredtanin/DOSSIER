@@ -135,6 +135,9 @@ export function buildElementAttributesHost(c: FlatHostOpts) {
     onSetOpeningLintelLines: (lintelLines) => {
       if (selection?.kind === "opening") updateOpening(selection.id, { lintelLines });
     },
+    onSetOpeningDisplay: (patch) => {
+      if (selection?.kind === "opening") updateOpening(selection.id, patch);
+    },
     onSetOpeningHost: (patch) => {
       if (selection?.kind === "opening") updateOpening(selection.id, patch);
     },

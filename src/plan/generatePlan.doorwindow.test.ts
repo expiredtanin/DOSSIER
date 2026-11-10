@@ -142,20 +142,27 @@ describe("generatePlan — Tür-/Fenstertyp-Rahmenband (opening-frame)", () => {
       ],
       { doorTypes: [doorType], windowTypes: [windowType] },
     );
-    // Tür: ein geschlossenes Rechteck aus 4 Kanten. Fenster: KEIN Band (sonst
-    // doppeltes, verschachteltes Rechteck über dem windowSymbol-Rahmen).
-    expect(linesOfClass(p, "opening-frame", "T1").length).toBe(4);
+    // [105] Drehtür: KEIN Rahmenband quer über die Öffnung mehr, der Blockrahmen steht als Profil mit
+    // Falz an beiden Leibungen. Fenster: KEIN Band (windowSymbol zeichnet den Rahmen).
+    expect(linesOfClass(p, "opening-frame", "T1").length).toBe(0);
     expect(linesOfClass(p, "opening-frame", "F1").length).toBe(0);
+    const profiles = generatePlan(p, "eg", visible, undefined, "mittel").primitives.filter((pr) => pr.kind === "polygon" && pr.openingId === "T1" && (pr as { stroke?: string }).stroke !== "none");
+    expect(profiles.length).toBeGreaterThanOrEqual(2);
+    // Schiebetür behält das Rahmenband (Rechteck aus 4 Kanten).
+    const slide = project([{ ...baseDoor, typeId: "dt-s" }], { doorTypes: [{ ...doorType, id: "dt-s", kind: "schiebe" }] });
+    expect(linesOfClass(slide, "opening-frame", "T1").length).toBe(4);
   });
 
   it("Blockrahmen-Tür zeichnet eine kräftigere Linie als eine Zargen-Tür", () => {
-    const zargeDoor: DoorType = { ...doorType, id: "dt-zarge", frameKind: "zarge" };
+    // Rahmenband nur noch bei Schiebetüren ([105]: Drehtüren mit Profil an den Leibungen).
+    const blockDoor: DoorType = { ...doorType, kind: "schiebe" };
+    const zargeDoor: DoorType = { ...blockDoor, id: "dt-zarge", frameKind: "zarge" };
     const p = project(
       [
         { ...baseDoor, id: "T1", typeId: "dt1" },
         { ...baseDoor, id: "T2", position: 3.0, typeId: "dt-zarge" },
       ],
-      { doorTypes: [doorType, zargeDoor] },
+      { doorTypes: [blockDoor, zargeDoor] },
     );
     const blockWeight = linesOfClass(p, "opening-frame", "T1")[0].weightMm;
     const zargeWeight = linesOfClass(p, "opening-frame", "T2")[0].weightMm;
@@ -203,6 +210,7 @@ describe("generatePlan — Schichteinzug (insetFromFace/insetFace)", () => {
     // Am Tür-Zargenband geprüft (das Fenster nutzt jetzt windowSymbol statt Band).
     const insetDoor: DoorType = {
       ...doorType,
+      kind: "schiebe",
       id: "dt-inset",
       frameKind: "zarge",
       insetFromFace: 0.05,

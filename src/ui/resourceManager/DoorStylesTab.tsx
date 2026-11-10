@@ -172,6 +172,17 @@ export function DoorStylesTab({
               />
             </FieldRow>
           )}
+          {/* [105] Linientyp der Sturzlinien im Grundriss. */}
+          <FieldRow label={t("objinfo.opening.lintelLineStyle")}>
+            <SelectField
+              value={door.lintelLineStyle ?? "gestrichelt"}
+              onChange={(lintelLineStyle) => patch({ lintelLineStyle: lintelLineStyle === "gestrichelt" ? undefined : lintelLineStyle })}
+              options={(["gestrichelt", "punktiert", "durchgehend", "keine"] as const).map((v) => ({
+                value: v,
+                label: t(`objinfo.opening.lintelLineStyle.${v}`),
+              }))}
+            />
+          </FieldRow>
           <FieldRow label={t("resources.field.transomHeight")}>
             <NumberField
               value={door.transomHeight ?? 0}

@@ -114,16 +114,23 @@ fn write_opening(w: &mut FlatWriter, p: &Project, op: &Opening) {
             ]);
         }
         let transom = wt.transom_sashes.as_deref().unwrap_or(&[]);
-        w.num(transom.len() as f64);
-        for s in transom {
-            w.nums(&[
-                if s.kind == SashDefKind::Fluegel { 0.0 } else { 1.0 },
-                flag(s.auto_width == Some(false)),
-                opt(s.width),
-                opt(s.post_width),
-                opening_kind_code(s.opening),
-                flag(s.hinge_side != Some(SashDefHingeSide::Right)),
-            ]);
+        let bottom = wt.bottom_sashes.as_deref().unwrap_or(&[]);
+        for (k, list) in [transom, bottom].into_iter().enumerate() {
+            if k == 1 {
+                // [95] Brüstungsfeld: Höhe bis Riegelmitte, dann seine Einteilung.
+                w.num(wt.bottom_panel_height.filter(|v| v.is_finite()).unwrap_or(0.0));
+            }
+            w.num(list.len() as f64);
+            for s in list {
+                w.nums(&[
+                    if s.kind == SashDefKind::Fluegel { 0.0 } else { 1.0 },
+                    flag(s.auto_width == Some(false)),
+                    opt(s.width),
+                    opt(s.post_width),
+                    opening_kind_code(s.opening),
+                    flag(s.hinge_side != Some(SashDefHingeSide::Right)),
+                ]);
+            }
         }
         return;
     }

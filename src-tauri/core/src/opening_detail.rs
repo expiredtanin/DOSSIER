@@ -521,7 +521,7 @@ pub struct DoorFrame {
     pub steel: bool,
 }
 
-/// Zarge der Tür, wenn ihre Art eine eigene Zeichnung hat (Zarge alt bleibt beim bisherigen Pfad).
+/// Zarge der Tür, wenn ihre Art eine eigene Zeichnung hat (Zarge/Blockrahmen nur bei Dreh-/Pendeltüren).
 pub fn door_frame_of(p: &Project, o: &Opening) -> Option<DoorFrame> {
     if o.kind != ElementKind::Door {
         return None;
@@ -531,8 +531,12 @@ pub fn door_frame_of(p: &Project, o: &Opening) -> Option<DoorFrame> {
         return None;
     }
     let kind = o.door_frame_kind.or(t.frame_kind).unwrap_or_default();
-    // Zarge und Blockrahmen behalten das bisherige Rahmenband ([94]).
-    if matches!(kind, DoorTypeFrameKind::Zarge | DoorTypeFrameKind::Blockrahmen | DoorTypeFrameKind::Unknown) {
+    if kind == DoorTypeFrameKind::Unknown {
+        return None;
+    }
+    // Zarge und Blockrahmen: Profil mit Falz für Dreh-/Pendeltüren (Blatt im Falz der Aufschlagseite);
+    // Schiebe-, Hebeschiebe- und Taschentüren behalten das bisherige Rahmenband ([94]).
+    if matches!(kind, DoorTypeFrameKind::Zarge | DoorTypeFrameKind::Blockrahmen) && !matches!(t.kind, DoorTypeKind::Dreh | DoorTypeKind::Pendel | DoorTypeKind::Unknown) {
         return None;
     }
     let (a, b) = (t.door_frame.as_ref(), o.door_frame.as_ref());
@@ -598,6 +602,14 @@ pub fn door_frame_profile(f: &DoorFrame, total: f64, aufschlag_innen: bool) -> V
     let rect = |x0: f64, x1: f64, d0: f64, d1: f64| vec![[x0, d0], [x1, d0], [x1, d1], [x0, d1]];
     let mut out = Vec::new();
     match f.kind {
+        DoorTypeFrameKind::Zarge => {
+            // Holzzarge über die ganze Leibung, Falz auf der Aufschlagseite, Bekleidung (Umgriff) auf beiden
+            // Wandflächen wie im 3D bisher (2 cm über die Rohbaukante, 13 mm stark, Falz frei).
+            let (ov, ct) = (0.02, 0.013);
+            out.push((FramePart::Frame, vec![[0.0, 0.0], [fw - fzw, 0.0], [fw - fzw, fzd], [fw, fzd], [fw, t], [0.0, t]]));
+            out.push((FramePart::Casing, rect(-ov, fw - fzw, -ct, 0.0)));
+            out.push((FramePart::Casing, rect(-ov, fw, t, t + ct)));
+        }
         DoorTypeFrameKind::Umfassungszarge => {
             let c = ZARGE_GAP;
             let path = [[-f.spiegel, 0.0], [c, 0.0], [c, fzd], [c + fzw, fzd], [c + fzw, t], [-f.spiegel, t]];
@@ -823,7 +835,12 @@ mod tests {
                 assert!(!r.is_empty(), "{k:?}");
             }
         }
+        // [105] Zarge und Blockrahmen: eigenes Profil mit Falz für Dreh-/Pendeltüren, sonst das Rahmenband.
         p.door_types = Some(vec![mk(DoorTypeFrameKind::Zarge)]);
+        assert_eq!(door_frame_of(&p, &o).map(|f| f.kind), Some(DoorTypeFrameKind::Zarge));
+        p.door_types = Some(vec![DoorType { kind: DoorTypeKind::Hebeschiebe, ..mk(DoorTypeFrameKind::Zarge) }]);
+        assert!(door_frame_of(&p, &o).is_none());
+        p.door_types = Some(vec![DoorType { kind: DoorTypeKind::Schiebe, ..mk(DoorTypeFrameKind::Blockrahmen) }]);
         assert!(door_frame_of(&p, &o).is_none());
         // Umfassungszarge: Spiegel beidseitig über die Wandflächen hinaus.
         p.door_types = Some(vec![mk(DoorTypeFrameKind::Umfassungszarge)]);
@@ -835,6 +852,36 @@ mod tests {
         p.door_types = Some(vec![mk(DoorTypeFrameKind::Futter)]);
         let prof = door_frame_profile(&door_frame_of(&p, &o).unwrap(), 0.3, false);
         assert_eq!(prof.iter().filter(|(k, _)| *k == FramePart::Casing).count(), 2);
+    }
+
+    /// [105] Klassische Zarge (umfassend, Bekleidung beidseitig) und Blockrahmen: Falz auf der
+    /// Aufschlagseite, das Blatt liegt darin — nach innen wie nach aussen aufgehend.
+    #[test]
+    fn zarge_und_blockrahmen_blatt_im_falz_der_aufschlagseite() {
+        let mut p = Project::default();
+        let o_in = Opening { kind: ElementKind::Door, type_id: Some("d".into()), ..Default::default() };
+        let o_out = Opening { opening_dir: Some(OpeningOpeningDir::Out), ..o_in.clone() };
+        assert!(aufschlag_innen(&o_in) && !aufschlag_innen(&o_out));
+        // Zarge: Rahmen über die ganze Wanddicke, Falz 1.5 × 4 cm an der Aufschlagfläche (d = 0).
+        p.door_types = Some(vec![DoorType { id: "d".into(), frame_kind: Some(DoorTypeFrameKind::Zarge), frame_width: Some(0.06), ..Default::default() }]);
+        let f = door_frame_of(&p, &o_in).unwrap();
+        assert!(!f.steel);
+        let prof = door_frame_profile(&f, 0.15, true);
+        let (_, frame) = prof.iter().find(|(k, _)| *k == FramePart::Frame).unwrap();
+        let (dmin, dmax) = frame.iter().fold((f64::MAX, f64::MIN), |(a, b), q| (a.min(q[1]), b.max(q[1])));
+        assert!(dmin.abs() < 1e-12 && (dmax - 0.15).abs() < 1e-12);
+        assert!((profile_clear_x(&prof) - 0.06).abs() < 1e-12);
+        assert!(frame.iter().any(|q| (q[0] - 0.045).abs() < 1e-12 && (q[1] - 0.04).abs() < 1e-12), "Falzecke");
+        assert_eq!(prof.iter().filter(|(k, _)| *k == FramePart::Casing).count(), 2);
+        assert_eq!(leaf_band(&f, 0.15, true), (0.0, 0.04));
+        // Blockrahmen mittig (8 cm in 30 cm): Blatt auf der Aufschlagseite des Rahmens, je nach Richtung.
+        p.door_types = Some(vec![DoorType { id: "d".into(), frame_kind: Some(DoorTypeFrameKind::Blockrahmen), frame_width: Some(0.07), frame_depth: Some(0.08), inset_face: Some(DoorTypeInsetFace::Mitte), ..Default::default() }]);
+        let f = door_frame_of(&p, &o_in).unwrap();
+        let (a0, a1) = leaf_band(&f, 0.3, true);
+        let (b0, b1) = leaf_band(&f, 0.3, false);
+        // Aufschlag-Koordinaten: ab der jeweiligen Aufschlagfläche bis an die Rahmenfläche 11 cm.
+        assert!((a0 - 0.11).abs() < 1e-12 && (a1 - 0.15).abs() < 1e-12);
+        assert!((b0 - 0.11).abs() < 1e-12 && (b1 - 0.15).abs() < 1e-12);
     }
 
     /// Projekt: Aussenwand (Putz, Dämmung, Backstein, Putz) mit einer Öffnung des Typs `t`.

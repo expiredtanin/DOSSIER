@@ -1197,10 +1197,10 @@ describe("VW-fein-Öffnungsdetails: Fensterbank, DIN-Symbole, verschachtelte Fl�
       for (const mesh of meshes) for (let i = 2; i < mesh.positions.length; i += 3) m = Math.max(m, mesh.positions[i]);
       return m;
     };
-    // Vollblatt (glatt): genau EIN Blatt-Panel, bis unter den Sturz (2.0 − fw).
+    // Vollblatt (glatt): genau EIN Blatt-Panel, bis in den Falz der Zarge (2.0 − fw + 1.5 cm Falz, [105]).
     const solid = projectToModel3d(doorProject(baseDoor)).meshes.filter(isLeaf);
     expect(solid.length).toBe(1);
-    expect(zTop(solid)).toBeCloseTo(2.0 - 0.06, 6);
+    expect(zTop(solid)).toBeCloseTo(2.0 - 0.06 + 0.015, 6);
     // Auch bei grob vorhanden (Füllung ist kein „fein"-Detail).
     expect(projectToModel3d(doorProject(baseDoor), { detail: "grob" }).meshes.filter(isLeaf).length).toBe(1);
     // Teilverglasung (glas, glazingRatio 0.4): Blatt nur im unteren 60%-Rest.
@@ -1208,7 +1208,7 @@ describe("VW-fein-Öffnungsdetails: Fensterbank, DIN-Symbole, verschachtelte Fl�
       doorProject({ ...baseDoor, id: "door-leaf-glas", leafStyle: "glas", glazingRatio: 0.4 }),
     ).meshes.filter(isLeaf);
     expect(glazed.length).toBe(1);
-    const fieldTop = 2.0 - 0.06;
+    const fieldTop = 2.0 - 0.06 + 0.015; // [105] bis in den Falz
     expect(zTop(glazed)).toBeCloseTo(fieldTop - 0.4 * fieldTop, 6);
     // Ganzglastür (glazingRatio 1): kein blinder Rest -> kein Blatt.
     expect(
@@ -1313,13 +1313,13 @@ describe("VW-fein-Öffnungsdetails: Fensterbank, DIN-Symbole, verschachtelte Fl�
     });
     const frames = (frameKind: "zarge" | "blockrahmen"): number =>
       projectToModel3d(doorProject(frameKind)).meshes.filter(isFrame).length;
-    // Zarge: Basis-Rahmen (2 Pfosten + Sturz, kein threshold) + 2 Wandseiten × 3
-    // Bekleidungs-Riegel = 3 + 6 = 9. Blockrahmen: nur Basis = 3.
-    expect(frames("blockrahmen")).toBe(3);
-    expect(frames("zarge")).toBe(9);
-    // Umgriff nur mittel/fein, nicht grob.
+    // [105] Profil mit Falz an beiden Leibungen und am Sturz (je 2 Quader: Rahmen vor/im Falz) —
+    // Blockrahmen 3 × 2 = 6; Zarge zusätzlich die Bekleidung (Umgriff) auf beiden Wandseiten: 6 + 6 = 12.
+    expect(frames("blockrahmen")).toBe(6);
+    expect(frames("zarge")).toBe(12);
+    // Zarge/Umgriff nur mittel/fein, nicht grob.
     expect(projectToModel3d(doorProject("zarge"), { detail: "grob" }).meshes.filter(isFrame).length).toBe(0);
-    expect(projectToModel3d(doorProject("zarge"), { detail: "mittel" }).meshes.filter(isFrame).length).toBe(9);
+    expect(projectToModel3d(doorProject("zarge"), { detail: "mittel" }).meshes.filter(isFrame).length).toBe(12);
   });
 
   it("Echtes Schwellenprofil: nur Tür mit `threshold`, eigenes SILL_RGB-Band über die Wanddicke", () => {

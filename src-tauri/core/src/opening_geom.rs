@@ -205,6 +205,9 @@ pub struct WindowSpec {
     pub inset_mid: bool,
     /// Rahmenbreite an der Leibung beim Wandende ([105]); NaN = wie `frame_width`.
     pub frame_width_end: f64,
+    /// Aufschlagbogen je Flügel ([95], gleich lang wie `sashes` oder leer): 0 keiner, 1 Band am Anfang,
+    /// 2 Band am Ende.
+    pub swing: Vec<f64>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -222,6 +225,8 @@ pub struct WindowSymbol {
     pub sash_frames: Vec<Vec<V>>,
     pub meeting_marks: Vec<Vec<V>>,
     pub jamb_marks: Vec<Vec<V>>,
+    /// Aufschlag der Drehflügel nach innen ([95]): Band, geschlossenes Ende, offenes Ende (90°), Radius.
+    pub swing_arcs: Vec<(V, V, V, f64)>,
 }
 
 fn or_zero(x: f64) -> f64 {
@@ -349,6 +354,16 @@ pub fn window_symbol(
             let clear_to = to - fw;
             if clear_to - clear_from <= 1e-6 {
                 continue;
+            }
+            // [95] Aufschlagbogen zur Innenseite (hohe Versätze) ab der Rahmen-Innenfläche.
+            if let Some(&code) = spec.swing.get(si).filter(|_| spec.swing.len() == spec.sashes.len()) {
+                if code == 1.0 || code == 2.0 {
+                    let (h_u, c_u) = if code == 1.0 { (clear_from, clear_to) } else { (clear_to, clear_from) };
+                    let hinge = add(along(js, je, h_u), scale(n, frame_outer_n));
+                    let closed = add(along(js, je, c_u), scale(n, frame_outer_n));
+                    let r = clear_to - clear_from;
+                    sym.swing_arcs.push((hinge, closed, add(hinge, scale(n, r)), r));
+                }
             }
             if !fein {
                 continue;

@@ -22,6 +22,9 @@
 pub const DEFAULT_FRAME_WIDTH: f64 = 0.06;
 pub const DEFAULT_FRAME_DEPTH: f64 = 0.07;
 pub const DOOR_LEAF_THICK: f64 = 0.04;
+/// Falzbreite der Zarge/des Rahmens: so weit greift das Türblatt seitlich und oben über die lichte Kante
+/// (wie `opening_detail::door_frame_of` im Kern, Vorgabe 15 mm).
+pub const DOOR_FALZ_WIDTH: f64 = 0.015;
 /// Glaspaket-Dicke je Scheibenzahl (1, 2, 3).
 pub const GLASS_PACKAGE_THICKNESS: [f64; 3] = [0.006, 0.024, 0.036];
 /// Glasanteil des Türblatts, wenn der Typ keinen angibt.
@@ -329,29 +332,54 @@ pub fn fill_geometry(p: &FillParams) -> FillGeometry {
         return FillGeometry { origin, u: door_u, kind: None, parts: Vec::new() };
     }
 
-    // Zarge: Pfosten links/rechts über die ganze Höhe und Sturz (keine Schwelle).
-    add(0, p.from, a_in0, b0, b1, 0.0, h);
-    add(0, a_in1, p.to, b0, b1, 0.0, h);
-    add(0, a_in0, a_in1, b0, b1, h - fw, h);
+    // Blatt im Falz ([105], Dreh-/Pendeltür): Blattfläche bündig mit der Rahmenfläche der Aufschlagseite,
+    // seitlich und oben um die Falzbreite in den Rahmen (dort ausgespart); Schiebetüren mittig wie bisher.
+    let swing = matches!(p.door_kind, DoorKind::Swing | DoorKind::DoubleSwing);
+    let lt = js_min(DOOR_LEAF_THICK, b1 - b0);
+    let (l0, l1) = if !swing {
+        (b_mid - lt / 2.0, b_mid + lt / 2.0)
+    } else if p.swing_sign * p.dir_sign > 0.0 {
+        (b1 - lt, b1)
+    } else {
+        (b0, b0 + lt)
+    };
+    let falz = if swing { js_min(DOOR_FALZ_WIDTH, fw / 2.0) } else { 0.0 };
+    // Rahmen-Querbänder: im Blattband um den Falz schmaler, sonst volle Breite.
+    let bands: Vec<(f64, f64, f64)> = if falz > 0.0 { vec![(b0, l0, 0.0), (l0, l1, falz), (l1, b1, 0.0)] } else { vec![(b0, b1, 0.0)] };
 
-    // Oberlicht: fester Glasstreifen über einem Kämpfer (Riegel in Rahmenbreite) innerhalb der Öffnungshöhe.
+    // Zarge: Pfosten links/rechts über die ganze Höhe und Sturz (keine Schwelle); im Blattband bis zur
+    // Blatt-Oberkante um den Falz schmaler, Sturz/Kämpfer dort um den Falz höher.
     let th = p.transom_height;
     let has_transom = th > MIN_DIM && th < h - fw - 0.5;
     let leaf_top = if has_transom { h - fw - th - fw } else { h - fw };
+    for &(c0, c1, f) in &bands {
+        if f > 0.0 {
+            add(0, p.from, a_in0 - f, c0, c1, 0.0, leaf_top + f);
+            add(0, a_in1 + f, p.to, c0, c1, 0.0, leaf_top + f);
+            add(0, p.from, a_in0, c0, c1, leaf_top + f, h);
+            add(0, a_in1, p.to, c0, c1, leaf_top + f, h);
+        } else {
+            add(0, p.from, a_in0, c0, c1, 0.0, h);
+            add(0, a_in1, p.to, c0, c1, 0.0, h);
+        }
+        add(0, a_in0, a_in1, c0, c1, if has_transom { h - fw } else { h - fw + f }, h);
+        // Oberlicht: Kämpfer (Riegel in Rahmenbreite) innerhalb der Öffnungshöhe.
+        if has_transom {
+            add(0, a_in0, a_in1, c0, c1, leaf_top + f, leaf_top + fw);
+        }
+    }
     if has_transom {
-        add(0, a_in0, a_in1, b0, b1, leaf_top, leaf_top + fw);
         let gt = js_min(GLASS_PACKAGE_THICKNESS[1], b1 - b0);
         add(2, a_in0, a_in1, b_mid - gt / 2.0, b_mid + gt / 2.0, leaf_top + fw, h - fw);
     }
 
-    // Türblatt/-blätter im lichten Mass der Zarge, mittig in der Rahmentiefe.
-    let lt = js_min(DOOR_LEAF_THICK, b1 - b0);
-    let l0 = b_mid - lt / 2.0;
-    let l1 = b_mid + lt / 2.0;
+    // Türblatt/-blätter im lichten Mass der Zarge (plus Falz), in der Rahmentiefe auf der Aufschlagseite.
+    let leaf_top = leaf_top + falz;
+    let l_mid = (l0 + l1) / 2.0;
     let leaf_spans: Vec<(f64, f64)> = if p.leaf_count >= 2.0 {
-        vec![(a_in0, (a_in0 + a_in1) / 2.0), ((a_in0 + a_in1) / 2.0, a_in1)]
+        vec![(a_in0 - falz, (a_in0 + a_in1) / 2.0), ((a_in0 + a_in1) / 2.0, a_in1 + falz)]
     } else {
-        vec![(a_in0, a_in1)]
+        vec![(a_in0 - falz, a_in1 + falz)]
     };
     let ratio = js_min(0.9, js_max(0.05, p.glazing_ratio.unwrap_or(DEFAULT_GLAZING_RATIO)));
     for (x0, x1) in leaf_spans {
@@ -372,7 +400,7 @@ pub fn fill_geometry(p: &FillParams) -> FillGeometry {
         add(1, x0, px0, l0, l1, pz0, pz1);
         add(1, px1, x1, l0, l1, pz0, pz1);
         let gt = js_min(GLASS_PACKAGE_THICKNESS[1], lt * 0.6);
-        add(2, px0, px1, b_mid - gt / 2.0, b_mid + gt / 2.0, pz0, pz1);
+        add(2, px0, px1, l_mid - gt / 2.0, l_mid + gt / 2.0, pz0, pz1);
     }
 
     // OperationType: Blattzahl und Scharnierseite. IFC blickt von der Aufschlagseite (+Y des Füllungssystems)
@@ -524,12 +552,24 @@ mod tests {
     #[test]
     fn tuer_zarge_blatt_glas_oberlicht() {
         let g = fill_geometry(&door());
-        assert_eq!(role(&g, 0).len(), 3);
+        // [105] Rahmen (7 cm an der Aussenfläche −0.2) in zwei Querbändern: vor dem Blatt voll, im Blattband
+        // (Aufschlag nach +Y: an der Rahmenfläche −0.13) um den Falz ausgespart.
+        assert_eq!(role(&g, 0).len(), 3 + 5);
         let leaf = role(&g, 1);
         assert_eq!(leaf.len(), 1);
         let lb = bbox(&leaf[0].pts);
-        assert!(close(lb.y1 - lb.y0, DOOR_LEAF_THICK) && close(lb.x1 - lb.x0, 1.0 - 2.0 * DEFAULT_FRAME_WIDTH));
-        assert!(leaf[0].z_rel == 0.0 && close(leaf[0].depth, 2.1 - DEFAULT_FRAME_WIDTH));
+        let f = DOOR_FALZ_WIDTH;
+        assert!(close(lb.y1 - lb.y0, DOOR_LEAF_THICK) && close(lb.x1 - lb.x0, 1.0 - 2.0 * DEFAULT_FRAME_WIDTH + 2.0 * f));
+        assert!(close(lb.y1, -0.2 + DEFAULT_FRAME_DEPTH), "Blattfläche bündig mit der Rahmenfläche der Aufschlagseite");
+        assert!(leaf[0].z_rel == 0.0 && close(leaf[0].depth, 2.1 - DEFAULT_FRAME_WIDTH + f));
+        // Rahmen + Blatt füllen den Querschnitt ohne Überlappung (Volumen = Rahmenring + lichtes Blatt).
+        let frame_vol = volume(&role(&g, 0));
+        let ring = (2.0 * DEFAULT_FRAME_WIDTH * 2.1 + (1.0 - 2.0 * DEFAULT_FRAME_WIDTH) * DEFAULT_FRAME_WIDTH) * DEFAULT_FRAME_DEPTH;
+        let falz_vol = (2.0 * f * (2.1 - DEFAULT_FRAME_WIDTH + f) + (1.0 - 2.0 * DEFAULT_FRAME_WIDTH) * f) * DOOR_LEAF_THICK;
+        assert!(close(frame_vol, ring - falz_vol), "{frame_vol} {}", ring - falz_vol);
+        // Nach aussen aufgehend: Blatt an der anderen Rahmenfläche.
+        let g = fill_geometry(&FillParams { dir_sign: -1.0, ..door() });
+        assert!(close(bbox(&role(&g, 1)[0].pts).y0, -0.2));
         assert!(role(&g, 2).is_empty());
         // Zweiflügelig.
         let g = fill_geometry(&FillParams { leaf_count: 2.0, ..door() });
@@ -539,7 +579,7 @@ mod tests {
         let glass = role(&g, 2);
         assert_eq!(glass.len(), 1);
         let gb = bbox(&glass[0].pts);
-        let (lw, lh) = (1.0 - 2.0 * DEFAULT_FRAME_WIDTH, 2.1 - DEFAULT_FRAME_WIDTH);
+        let (lw, lh) = (1.0 - 2.0 * DEFAULT_FRAME_WIDTH + 2.0 * f, 2.1 - DEFAULT_FRAME_WIDTH + f);
         assert!(close((gb.x1 - gb.x0) * glass[0].depth / (lw * lh), 0.36));
         let leaf = role(&g, 1);
         assert_eq!(leaf.len(), 4);
@@ -549,7 +589,7 @@ mod tests {
         let glass = role(&g, 2);
         assert!(close(glass[0].depth, 0.4) && close(glass[0].z_rel + glass[0].depth, 2.1 - DEFAULT_FRAME_WIDTH));
         let leaf = role(&g, 1)[0];
-        assert!(close(leaf.z_rel + leaf.depth, 2.1 - DEFAULT_FRAME_WIDTH - 0.4 - DEFAULT_FRAME_WIDTH));
+        assert!(close(leaf.z_rel + leaf.depth, 2.1 - DEFAULT_FRAME_WIDTH - 0.4 - DEFAULT_FRAME_WIDTH + f));
         // Reine Wandöffnung.
         let g = fill_geometry(&FillParams { door_kind: DoorKind::WallOpening, ..door() });
         assert!(g.kind.is_none() && g.parts.is_empty());
