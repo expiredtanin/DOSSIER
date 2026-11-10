@@ -113,7 +113,8 @@ pub struct Request {
     delta: [N; 2],
     /// Punkttyp der Polylinie (`vertexType`: "corner" | "arc" | "spline").
     vertex_type: Option<String>,
-    /// [172] Freie Lage ohne Einrasten (gehaltene Alt-Taste), bisher nur beim Masszahl-Griff.
+    /// Modifikator gehalten: Masszahl-Griff frei ohne Einrasten ([172], Alt), Scheitel-Griff einer Bogenwand mit
+    /// festem Mittelpunkt statt festen Endpunkten ([T2], Shift) — die Hülle setzt es je nach Griff.
     free: bool,
 }
 
@@ -214,7 +215,7 @@ pub fn run(lk: &Lookup, req: &Request) -> Result<GripResult, String> {
             let f: Box<dyn Fn(&Value, bool) -> Option<Value>> = match op {
                 "moveGrip" => {
                     let (index, (x, y), scale, free) = (r.n("index"), r.p("pt"), r.n("scale"), r.free);
-                    Box::new(move |e, wall| if wall { Some(wall_grip(e, index, x, y)) } else { drawing_grip(e, index, x, y, scale, free) })
+                    Box::new(move |e, wall| if wall { Some(wall_grip(e, index, x, y, free)) } else { drawing_grip(e, index, x, y, scale, free) })
                 }
                 "moveBy" => {
                     let (dx, dy) = r.p("delta");
@@ -400,10 +401,19 @@ pub fn run(lk: &Lookup, req: &Request) -> Result<GripResult, String> {
 
 // ── Wand ─────────────────────────────────────────────────────────────────────
 
-fn wall_grip(w: &Value, index: f64, x: f64, y: f64) -> Value {
+fn wall_grip(w: &Value, index: f64, x: f64, y: f64, fixed_center: bool) -> Value {
     // Bogenwand ([T2]): Griff 2 = Bogenscheitel; der Bogen geht durch den gezogenen Punkt.
     if index == 2.0 {
         let (s, e) = (xy(field(w, "start").unwrap_or(&Value::Null)), xy(field(w, "end").unwrap_or(&Value::Null)));
+        // Mit festem Mittelpunkt (Shift): Radius = Abstand zum Mittelpunkt, Öffnungswinkel bleibt, die Enden wandern radial.
+        if fixed_center {
+            if let Some(b) = field(w, "bulge").and_then(Value::as_f64).filter(|b| crate::wall_arc::is_arc_bulge(Some(*b))) {
+                return match crate::grip_drag::arc_wall_radius_fixed_center(s, e, b, (x, y)) {
+                    Some((ns, ne)) => with_all(w, vec![("start", pt(ns.0, ns.1)), ("end", pt(ne.0, ne.1))]),
+                    None => w.clone(),
+                };
+            }
+        }
         let b = crate::bulge::from_sagitta_point(s.0, s.1, e.0, e.1, x, y);
         return with_opt(w, vec![("bulge", (b.is_finite() && b.abs() > 1e-9).then(|| js_num(b)))]);
     }
@@ -1432,6 +1442,20 @@ mod tests {
         assert!((en.0 - a0.center.x).hypot(en.1 - a0.center.y) - a0.r < 1e-9);
         let res = run(&Lookup::plain(&r), &rq(json!({"op": "moveGrip", "wallId": "w", "index": 2, "pt": [2, 0]}))).unwrap();
         assert!(res.ops[0].to_json()["entity"].get("bulge").is_none());
+    }
+
+    /// [T2] Scheitel-Griff mit gehaltenem Modifikator (`free`): fester Mittelpunkt, Enden wandern radial.
+    #[test]
+    fn bogenwand_scheitel_fester_mittelpunkt() {
+        let r = root(json!({"walls": [{"id": "w", "start": {"x": 0, "y": 0}, "end": {"x": 4, "y": 0}, "bulge": 1.0}]}));
+        let res = run(&Lookup::plain(&r), &rq(json!({"op": "moveGrip", "wallId": "w", "index": 2, "pt": [2, 3], "free": true}))).unwrap();
+        let e = res.ops[0].to_json()["entity"].clone();
+        let (s, en) = (xy(&e["start"]), xy(&e["end"]));
+        assert!((s.0 + 1.0).abs() < 1e-9 && s.1.abs() < 1e-9 && (en.0 - 5.0).abs() < 1e-9 && e["bulge"].as_f64() == Some(1.0), "{e}");
+        // Ohne Modifikator bleiben die Endpunkte fest.
+        let res = run(&Lookup::plain(&r), &rq(json!({"op": "moveGrip", "wallId": "w", "index": 2, "pt": [2, 3]}))).unwrap();
+        let e = res.ops[0].to_json()["entity"].clone();
+        assert_eq!(xy(&e["start"]), (0.0, 0.0));
     }
 
     /// [172] Masszahl-Griff eines Radius-/Durchmesser-/Bogenmasses: Lage an der Zahl, rastet ein, Alt = frei.

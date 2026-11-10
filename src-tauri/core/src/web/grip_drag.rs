@@ -47,6 +47,17 @@ pub fn grip_arc_wall_target(sx: f64, sy: f64, ex: f64, ey: f64, bulge: f64, inde
     }
 }
 
+/// [T2] Scheitel-Griff einer Bogenwand (`grip_drag::arc_wall_radius_target`): `fixed_center` = Radius mit festem
+/// Mittelpunkt (Shift), `radius` NaN = Cursor `(rx, ry)`. `[x, y, radius]`, bei Unsinn leer.
+#[wasm_bindgen]
+#[allow(clippy::too_many_arguments)]
+pub fn grip_arc_wall_radius(sx: f64, sy: f64, ex: f64, ey: f64, bulge: f64, fixed_center: bool, radius: f64, rx: f64, ry: f64) -> Vec<f64> {
+    match gd::arc_wall_radius_target((sx, sy), (ex, ey), bulge, fixed_center, opt(radius), (rx, ry)) {
+        Some((p, r)) => vec![p.0, p.1, r],
+        None => Vec::new(),
+    }
+}
+
 /// Shift-Achsen-Lock (`grip_drag::axis_lock`): Ursprung `(ox, oy)` NaN = noch keiner; `ring` = Punkte des
 /// Elements (leer = keine Polygon-Nachbarn), `index` = gezogener Punkt darin. `[x, y]`.
 #[wasm_bindgen]

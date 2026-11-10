@@ -16,6 +16,7 @@ import { openEdges, polylineEdgeGrips, ringEdges } from "../core";
 import {
   coincidentGripPoints,
   excavationGripPoints,
+  gripArcWallRadius,
   gripArcWallTarget,
   gripAxisLock,
   gripEdgeTarget,
@@ -594,7 +595,15 @@ export function useGripEditing(opts: {
     const wall = owner?.wallId ? project.walls.find((x) => x.id === owner.wallId) : undefined;
     return wall && wall.bulge && (owner?.localIndex === 0 || owner?.localIndex === 1) ? { wall, end: owner.localIndex } : null;
   };
+  // [T2] Scheitel-Griff einer Bogenwand: Tab-Feld ist der Radius (Shift = fester Mittelpunkt statt fester Endpunkte).
+  const arcWallApex = (index: number): Wall | null => {
+    const owner = gripOwners[index];
+    const wall = owner?.wallId ? project.walls.find((x) => x.id === owner.wallId) : undefined;
+    return wall && wall.bulge && owner?.localIndex === 2 ? wall : null;
+  };
   const gripEditPoint = (anchor: Vec2, locks: GripLocks, raw: Vec2, index?: number): Vec2 => {
+    const apex = index != null ? arcWallApex(index) : null;
+    if (apex) return gripArcWallRadius(apex, gripFreeRef.current, locks.length, raw)?.pt ?? raw;
     const arc = index != null ? arcWallEnd(index) : null;
     return (arc && gripArcWallTarget(arc.wall, arc.end, locks.length, raw)?.pt) ?? gripPolarPoint(anchor, locks, raw);
   };
@@ -604,6 +613,11 @@ export function useGripEditing(opts: {
     const ge = gripEdit;
     const info = gripDragInfoRef.current;
     if (!ge || !info) return [];
+    const apex = arcWallApex(info.index);
+    if (apex) {
+      const live = gripArcWallRadius(apex, gripFreeRef.current, undefined, info.raw)?.radius ?? 0;
+      return [{ id: "length", labelKey: "cmd.field.radius", value: ge.locks.length ?? live, locked: ge.locks.length != null, active: true }];
+    }
     const arc = arcWallEnd(info.index);
     if (arc) {
       const live = gripArcWallTarget(arc.wall, arc.end, undefined, info.raw)?.arcLength ?? 0;
@@ -688,7 +702,14 @@ export function useGripEditing(opts: {
     if (!anchor) return; // ohne Anker keine polare Eingabe möglich
     const wallDir = openingWallDir();
     const arcEnd = arcWallEnd(info.index);
+    const apex = arcWallApex(info.index);
     setGripEdit((prev) => {
+      if (apex) {
+        // Bogenwand-Scheitel ([T2]): nur das Radiusfeld, eingefroren auf dem aktuellen Radius.
+        if (prev) return prev;
+        const radius = gripArcWallRadius(apex, gripFreeRef.current, undefined, grips[info.index])?.radius;
+        return radius != null ? { anchor, active: "length", locks: { length: radius } } : prev;
+      }
       if (arcEnd) {
         // Bogenwand ([T2]): nur das Längenfeld (Bogenlänge), eingefroren auf der aktuellen Länge.
         if (prev) return prev;
@@ -727,7 +748,7 @@ export function useGripEditing(opts: {
     const info = gripDragInfoRef.current;
     if (!ge || !info) return;
     const locks = { ...ge.locks, [ge.active]: value };
-    const next = ge.active === "length" && !arcWallEnd(info.index) ? "angle" : "length";
+    const next = ge.active === "length" && !arcWallEnd(info.index) && !arcWallApex(info.index) ? "angle" : "length";
     setGripEdit({ ...ge, locks, active: next });
     // Zielpunkt mit dem frischen Lock anwenden (live, ohne Maus-Bewegung).
     const pt = gripEditPoint(ge.anchor, locks, info.raw, info.index);
@@ -1098,7 +1119,10 @@ export function useGripEditing(opts: {
     // Bogenwand ([T2]): Länge = Bogenlänge der Wand mit dem Endpunkt am Cursor.
     const arc = arcWallEnd(index);
     const arcLength = arc ? gripArcWallTarget(arc.wall, arc.end, undefined, pt)?.arcLength : undefined;
-    return { at: pt, length: arcLength ?? length, angleDeg };
+    // Scheitel einer Bogenwand: Länge = Radius der Wand mit dem Scheitel am Cursor.
+    const apex = arcWallApex(index);
+    const radius = apex ? gripArcWallRadius(apex, gripFreeRef.current, undefined, pt)?.radius : undefined;
+    return { at: pt, length: radius ?? arcLength ?? length, angleDeg };
   };
   // Dasselbe für einen gezogenen Kanten-Griff: freie Kanten zeigen Länge+Winkel
   // (wie ein Punkt-Griff), geführte Kanten nur EINEN Wert (Abstand entlang der
@@ -1270,6 +1294,16 @@ export function useGripEditing(opts: {
       // also nutzlos für „entlang der bestehenden Kante weiterziehen". Der Lock
       // dominiert (kein Snap), damit die Endkoordinate garantiert eine Achse
       // trifft — identisch zum bisherigen Ortho-Verhalten.
+      // [T2] Scheitel einer Bogenwand: Shift = Radius mit festem Mittelpunkt (Kern, `free` im Zug), kein Achsen-Lock.
+      const apexWall = arcWallApex(index);
+      if (apexWall) {
+        gripFreeRef.current = !!mods.shift;
+        if (mods.shift) {
+          applyGrip(index, raw);
+          setDraft({ preview: gripPreviewShapes(), vertices: [], snap: null, hud: hudFor(index, raw) });
+          return;
+        }
+      }
       if (mods.shift && anchor) {
         const origin = gripOriginRef.current;
         const ring = origin ? resolvePolygonRing(index) : null;
@@ -1279,7 +1313,7 @@ export function useGripEditing(opts: {
         return;
       }
       // [172] Masszahl-Griff: der Kern rastet an festen Stellen ein (Alt = frei); Objektfang würde das stören.
-      gripFreeRef.current = !!mods.alt;
+      gripFreeRef.current = !apexWall && !!mods.alt;
       if (owner?.drawingId) {
         const od = project.drawings2d.find((x) => x.id === owner.drawingId);
         if (od?.geom.shape === "dimension" && owner.localIndex > od.geom.pts.length) {

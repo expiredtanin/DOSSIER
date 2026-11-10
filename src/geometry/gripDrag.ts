@@ -52,6 +52,16 @@ export function gripArcWallTarget(w: Pick<Wall, "start" | "end" | "bulge">, inde
 }
 
 /**
+ * [T2] Scheitel-Griff einer Bogenwand: Zielpunkt und Radius der Wand danach. `fixedCenter` (Shift) = Radius um den
+ * festen Mittelpunkt (Enden wandern radial), sonst Endpunkte fest. `radius` = getippter Radius, sonst folgt der
+ * Punkt dem Cursor `raw`. `null` bei Unsinn (z. B. Radius unter der halben Sehne).
+ */
+export function gripArcWallRadius(w: Pick<Wall, "start" | "end" | "bulge">, fixedCenter: boolean, radius: number | undefined, raw: Vec2): { pt: Vec2; radius: number } | null {
+  const f = core().grip_arc_wall_radius(w.start.x, w.start.y, w.end.x, w.end.y, w.bulge ?? 0, fixedCenter, radius ?? NaN, raw.x, raw.y);
+  return f.length >= 3 ? { pt: v(f), radius: f[2] } : null;
+}
+
+/**
  * Shift-Achsen-Lock eines Punkt-Griffs: Welt-H/V durch den Nachbar-Griff `anchor`, bei einem Vielecks-
  * Eckpunkt (`ring` = Punkte des Elements, `index` darin, `origin` = Lage vor dem Zug) zusätzlich die Flucht
  * der beiden fixen Nachbarkanten. Die nächstliegende Achse gewinnt.
