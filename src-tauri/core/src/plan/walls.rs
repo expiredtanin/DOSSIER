@@ -226,7 +226,7 @@ fn core_band(thick: &[f64], total: f64, ref_off: f64, cuts: &WallCuts, k: usize)
     (vec![t], t, lo + t / 2.0, WallCuts { layer_cuts, span_cutouts: Vec::new(), ..cuts.clone() })
 }
 
-fn thin_targets(thick: &[f64], simplify: bool, scale: f64, thin_mm: f64) -> Vec<usize> {
+pub(super) fn thin_targets(thick: &[f64], simplify: bool, scale: f64, thin_mm: f64) -> Vec<usize> {
     let n = thick.len();
     let ident: Vec<usize> = (0..n).collect();
     if !simplify {

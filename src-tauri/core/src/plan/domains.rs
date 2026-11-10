@@ -586,6 +586,106 @@ fn roof_seen_from_above(p: &Project, roof: &Roof, geo: &crate::roof::RoofGeometr
     p.roof_base_elevation(roof) + max(0.0, geo.ridge_height) <= cut_z + 1e-6
 }
 
+/// Teil des ebenen 3D-Polygons `poly` mit z ≥ `z` (`above`) bzw. z ≤ `z` (Sutherland–Hodgman).
+fn clip_z(poly: &[[f64; 3]], z: f64, above: bool) -> Vec<[f64; 3]> {
+    let inside = |q: &[f64; 3]| if above { q[2] >= z } else { q[2] <= z };
+    let n = poly.len();
+    let mut out = Vec::with_capacity(n + 2);
+    for i in 0..n {
+        let (a, b) = (poly[i], poly[(i + 1) % n]);
+        let (ia, ib) = (inside(&a), inside(&b));
+        if ia {
+            out.push(a);
+        }
+        if ia != ib {
+            let t = (z - a[2]) / (b[2] - a[2]);
+            out.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, z]);
+        }
+    }
+    out
+}
+
+/// [173] Geschnittenes Dach im Grundriss: je Dachfläche der Streifen, den die Schnittebene `cut_z` aus einer
+/// Schichtlage schneidet (Lage = Dachfläche um die Normale nach innen versetzt, wie
+/// `model3d::emit_roof_cut_layers`; die Punkte x der Oberfläche mit Tiefe s = (x_z − cut_z)/n_z in der Lage,
+/// verschoben um −s·n). Schichten nach der Stufe: alle, vereinfacht (dünne gehen in der Nachbarschicht auf,
+/// wie bei Wänden) oder nur die tragende ([`super::model_view::core_layer`]); ab 1:100 schwarz
+/// (`solid_cut`) eine Fläche. Dachfenster und verschnittene Dächer/Gauben bleiben unberücksichtigt.
+fn roof_cut(c: &Ctx, roof: &Roof, cut_z: f64, stroke: &str, greyed: Option<bool>, out: &mut Vec<Primitive>) {
+    use super::model_view::LayerMode;
+    let p = c.p;
+    let layers: Vec<Layer> = p.roof_layers(roof).into_iter().filter(|l| l.thickness.is_finite() && l.thickness > 1e-6).collect();
+    if layers.is_empty() || !cut_z.is_finite() {
+        return;
+    }
+    let geo = crate::roof::roof_geometry(&roof.params(), p.roof_base_elevation(roof));
+    let thick: Vec<f64> = layers.iter().map(|l| l.thickness).collect();
+    let mut d0 = Vec::with_capacity(thick.len());
+    let mut acc = 0.0;
+    for t in &thick {
+        d0.push(acc);
+        acc += t;
+    }
+    let o = c.mv();
+    let black = c.solid_cut();
+    // Bereiche (Schicht von..bis, Stil-Schicht).
+    let ranges: Vec<(usize, usize, usize)> = match (o.roof.layers, black) {
+        (LayerMode::Core, _) => match super::model_view::core_layer(p, &layers) {
+            Some(k) => vec![(k, k + 1, k)],
+            None => return,
+        },
+        (_, true) => vec![(0, layers.len(), 0)],
+        (mode, false) => {
+            let target = super::walls::thin_targets(&thick, o.simplify_thin_in(mode, c.a.scale), c.a.scale, o.wall.thin_mm);
+            let mut r: Vec<(usize, usize, usize)> = Vec::new();
+            for (i, &t) in target.iter().enumerate() {
+                match r.last_mut() {
+                    Some(last) if last.2 == t => last.1 = i + 1,
+                    _ => r.push((i, i + 1, t)),
+                }
+            }
+            r
+        }
+    };
+    let category = c.cat(&roof.category_code);
+    let lw = resolve_stroke_weight(None, None, category, category.map_or(WALL_FALLBACK_MM, |k| k.lw));
+    for plane in &geo.planes {
+        if plane.len() < 3 {
+            continue;
+        }
+        let n = crate::model3d::plane_normal_up(plane);
+        if !(n[2] > 1e-6) || n.iter().any(|v| !v.is_finite()) {
+            continue;
+        }
+        // Schraffur längs der Traufe der Dachfläche.
+        let angle = crate::jsnum::atan2(n[0], -n[1]).to_degrees();
+        for &(a, b, s) in &ranges {
+            let (lo, hi) = (cut_z + d0[a] * n[2], cut_z + (d0[b - 1] + thick[b - 1]) * n[2]);
+            let strip = clip_z(&clip_z(plane, lo, true), hi, false);
+            if strip.len() < 3 {
+                continue;
+            }
+            let pts: Vec<Vec2> = strip
+                .iter()
+                .map(|x| {
+                    let d = (x[2] - cut_z) / n[2];
+                    Vec2 { x: x[0] - d * n[0], y: x[1] - d * n[1] }
+                })
+                .collect();
+            let (fill, hatch) = if black {
+                (HATCH_INK.to_string(), no_hatch())
+            } else {
+                let k = p.component_or_fallback(&layers[s].component_id);
+                match resolve_hatch(p, &k.hatch_id, Some(angle), resolve_foreground(k, None, category, None), None) {
+                    Some(h) => (resolve_background(k, None, category, None).unwrap_or(if h.pattern == HatchPattern::Solid { HATCH_INK } else { HATCH_PAPER }).to_string(), h),
+                    None => (HATCH_PAPER.to_string(), no_hatch()),
+                }
+            };
+            out.push(polygon(pts, &fill, stroke, lw, hatch, greyed, None, Pick::Roof(&roof.id)));
+        }
+    }
+}
+
 fn roofs(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) {
     let p = c.p;
     let cut_z = super::extras::cut_z(p, &c.a.floor);
@@ -617,6 +717,9 @@ fn roofs(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) {
         let dash = if roof.floor_id == c.a.floor && zone == super::view_range::Zone::Above { None } else { range.restyle_dash(zone) };
         for q in &geo.eaves {
             bounds.acc(q[0], q[1]);
+        }
+        if zone == super::view_range::Zone::Cut && roof.floor_id == c.a.floor {
+            roof_cut(c, roof, cut_z, stroke, greyed, out);
         }
         // [173] Dachrand, First und Grate über der Schnitthöhe nach der Modelldarstellung (Basis: strichpunktiert).
         if overhead.is_some() && !c.mv().roof.overhead {

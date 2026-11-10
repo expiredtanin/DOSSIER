@@ -231,12 +231,17 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   Formen (vorher um eine halbe Stufe bzw. 15 % der letzten eingerückt, `kernel2d::stair_geometry`; der Grundriss verlängert sie
   in `stair_symbol::run_line_to_edges`, 3D/IFC unverändert), Stufen-Optionen Versatz Anfang/Ende (Papier-mm) und
   Antrittspunkt; Detailgrad-/Stufenwahl der Werkzeugleiste jetzt auch in Schnitt und Ansicht; Tests
-  `plan/model_view_tests2.rs`, e2e Schnitt-Fall. Goldens: nur Grundrisse mit Treppen (Lauflinie) neu, Schnitt/Ansicht gleich. Offen: der 3D-Viewer übergibt
-  keine Stufe (nur Kern/Fassade); Schwelle ohne Vorgabe „an" bei Hebeschiebetür (Basis aus, damit Pläne ohne Stufe gleich
-  bleiben — Wert „nur Hebeschiebetüren" wählbar); Schichten der Stützen im Schnitt, Dachschichten im Grundriss;
-  Fensterteilung im 3D; Etappe 3: Stufen-Bibliothek in Standards/Vorlagen, Stempel/Bemassung nach Stufe, Stufennummern
-  der Treppe; „nur Kern" bei Dächern zeigt im Musterhaus komplex nur eine dünne Linie (tragende Schicht des
-  Dachaufbaus nach [33]-Regel prüfen). Nicht in der Tauri-App/auf dem Mac geprüft. · M
+  `plan/model_view_tests2.rs`, e2e Schnitt-Fall. Goldens: nur Grundrisse mit Treppen (Lauflinie) neu, Schnitt/Ansicht gleich.
+  10.11. (Reste): „nur Kern" bei Steildach/Holzständerwand war nur die 15-mm-Beplankung — [33] `layer_positions`: eine nur
+  aus dem Baustoff tragende Schicht unter 3 cm (`MIN_CORE_THICKNESS`) zählt nicht; ohne andere tragende Schicht gilt die
+  dickste Konstruktionsschicht (nie Eindeckung/Bekleidung, Luft, Folie, Putz, Belag), ausdrücklich als tragend markierte
+  Schichten immer (wirkt auch auf [33]-Kriterium „Lage"). Geschnittene Dächer im Grundriss neu mit Schichtstreifen je
+  Dachfläche nach Stufe (alle/vereinfacht/nur Kern, ab 1:100 schwarz; `domains.rs::roof_cut`). Offen: der 3D-Viewer übergibt
+  keine Stufe (nur Kern/Fassade; die Stufen-Abfrage rechnet ohne den inkrementellen Cache, im Viewer zu teuer); Schwelle ohne Vorgabe „an" bei Hebeschiebetür (Basis aus, damit Pläne ohne Stufe gleich
+  bleiben — Wert „nur Hebeschiebetüren" wählbar); Stützen haben im Modell keine Schichten (ein Bauteil) — „Schichten der
+  Stützen" erst mit Stützen-Aufbau (Bekleidung/Brandschutz); Dachschnitt im Grundriss ohne Dachfenster-Löcher und ohne
+  Verschneidung (Kehlen, Gauben); Fensterteilung im 3D; Etappe 3: Stufen-Bibliothek in Standards/Vorlagen, Stempel/Bemassung
+  nach Stufe, Stufennummern der Treppe. Nicht in der Tauri-App/auf dem Mac geprüft. · M
 - ◐ **[33]** Objektstile mit Rangfolge (Override-Regeln). „Ausblenden“ lässt Elemente im Grundriss anwählbar/fangbar;
   Schlagschatten und Gelände nicht über Regeln steuerbar; Linienstil auf Polygon-Umrissen (Wand-Umriss, Decken)
   ohne Wirkung; Linienstil-Aktion in der Ansicht ohne Wirkung; Öffnungen selbst ausblenden nicht möglich. · M
