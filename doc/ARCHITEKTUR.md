@@ -274,7 +274,9 @@ Beispiel: Die Plan-Ansicht zeigt das Erdgeschoss im Massstab 1:100.
 
 Runde Formen (Stütze, Bogenwand, Bogen-Umrisse) reisen im Puffer als Vielecke; die Ausgaben erkennen die Bögen
 darin (`plan/arc_fit.rs`) und schreiben Kreise, SVG-`A`-Pfade bzw. DXF-Bulges, der Bildschirm tesselliert sie fein
-nach ([169]).
+nach ([169]). Ebenso Ellipsenbögen (schräg gesehene Rund-/Rundbogenfenster in der Ansicht: SVG-`A` mit zwei Radien,
+DXF ELLIPSE), verrauschte Ringe (auf mm gerundete Umrisse, Versatz) stückweise als Ausgleichskreise, und
+Schraffur-Ränder als Polylinien mit Bulges (HATCH).
 
 Bildschirm, SVG, PDF und DXF lesen also denselben Plan-Puffer. Was in einem Ausgabeweg anders aussieht
 als in einem anderen, ist fast immer ein Fehler im jeweiligen Leser, nicht in der Plan-Erzeugung.

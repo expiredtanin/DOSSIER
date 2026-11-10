@@ -117,6 +117,7 @@ pub(super) fn wall_input(w: &RWall) -> render3d::WallInput {
         cut: None,
         start_cut: w.start_cut.map(f32s4),
         end_cut: w.end_cut.map(f32s4),
+        arc_center: None,
     }
 }
 

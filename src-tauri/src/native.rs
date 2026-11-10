@@ -352,6 +352,7 @@ fn demo_walls() -> Vec<WallInput> {
         cut: None,
         start_cut: None,
         end_cut: None,
+        arc_center: None,
         top_drop: [0.0, 0.0],
         top_plane: None,
     };

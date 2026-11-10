@@ -164,6 +164,11 @@ export interface RWall {
    */
   startCut?: [number, number, number, number];
   endCut?: [number, number, number, number];
+  /**
+   * [169] Sehnen-Teilkörper einer Bogenwand: Bogen-Mittelpunkt (Grundriss) — render3d schattiert den Mantel
+   * glatt (radiale Normalen, `WallInput.arcCenter`).
+   */
+  arcCenter?: [number, number];
 }
 
 /** Eine extrudierte Deckenplatte: geschlossener Grundriss-Umriss + Z-Ausdehnung. */

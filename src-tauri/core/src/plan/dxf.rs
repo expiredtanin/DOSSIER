@@ -48,6 +48,10 @@ const REC_SHEET_INSERT: f64 = 22.0;
 const REC_LINE_ENDS: f64 = 23.0;
 /// [169] LWPOLYLINE mit Bulges: `[Ebene, geschlossen, n, n × (x, y, bulge)]`.
 const REC_POLYLINE_BULGE: f64 = 24.0;
+/// [169] HATCH mit Bögen im Rand (Randpunkte mit Bulge), fileio Satz 25.
+const REC_HATCH_BULGE: f64 = 25.0;
+/// [169] Ellipsenbogen (schräg gesehenes Rundbogenfenster), fileio Satz 26.
+const REC_ELLIPSE: f64 = 26.0;
 
 /// Sammel-Ebenen für Primitive ohne eigene Kategorie.
 const LAYER_HATCH: &str = "HATCH";
@@ -271,12 +275,32 @@ impl Flat {
     }
 
     /// [169] Zug mit erkannten Bögen ([`crate::plan::arc_fit`]): ganzer Kreis als CIRCLE, sonst LWPOLYLINE mit
-    /// Bulges; ohne Bogen `false` (der Aufrufer schreibt den Zug wie bisher).
+    /// Bulges, mit Ellipsenbögen LWPOLYLINE-Stücke und ELLIPSE; ohne Bogen `false` (der Aufrufer schreibt den
+    /// Zug wie bisher).
     fn add_curve(&mut self, b: &mut Buf, layer: &str, pts: &[V2], closed: bool) -> bool {
         use crate::plan::arc_fit;
         let Some(shape) = arc_fit::fit(pts, closed, arc_fit::TOL) else { return false };
         if let arc_fit::Shape::Circle { c, r, .. } = shape {
             self.add_circle(b, layer, c, r);
+            return true;
+        }
+        if let Some(pieces) = arc_fit::pieces(&shape) {
+            let l = self.layer(layer);
+            for pc in pieces {
+                match pc {
+                    arc_fit::Piece::Poly(v, bulge) => {
+                        b.counts[K_POLY] += 1;
+                        self.push(b, &[REC_POLYLINE_BULGE, l, 0.0, v.len() as f64]);
+                        for (p, g) in v.iter().zip(&bulge) {
+                            self.push(b, &[p.x, p.y, *g]);
+                        }
+                    }
+                    arc_fit::Piece::Ellipse { c, major, ratio, t0, t1 } => {
+                        b.counts[K_ARC] += 1;
+                        self.push(b, &[REC_ELLIPSE, l, c.x, c.y, major.x, major.y, ratio, t0, t1]);
+                    }
+                }
+            }
             return true;
         }
         let Some((v, bulge)) = arc_fit::bulges(&shape) else { return false };
@@ -316,15 +340,28 @@ impl Flat {
         b.counts[K_HATCH] += 1;
         let (families, dashes): (&[(f64, f64)], &[f64]) = if solid { (&[], &[]) } else { (families, dashes) };
         let l = self.layer(layer);
-        self.push(b, &[REC_HATCH, l, if solid { 0.0 } else { 1.0 }, rgb.unwrap_or(-1.0), dashes.len() as f64]);
+        // [169] Rand mit erkannten Bögen (Kreis, Bogenwand, Erker): Polylinien-Rand mit Bulges.
+        let arcs = crate::plan::arc_fit::ring_bulges(pts, crate::plan::arc_fit::TOL);
+        let rec = if arcs.is_some() { REC_HATCH_BULGE } else { REC_HATCH };
+        self.push(b, &[rec, l, if solid { 0.0 } else { 1.0 }, rgb.unwrap_or(-1.0), dashes.len() as f64]);
         self.push(b, dashes);
         self.push(b, &[families.len() as f64]);
         for f in families {
             self.push(b, &[f.0, f.1]);
         }
-        self.push(b, &[pts.len() as f64]);
-        for p in pts {
-            self.push(b, &[p.x, p.y]);
+        match arcs {
+            Some((v, bulge)) => {
+                self.push(b, &[v.len() as f64]);
+                for (p, g) in v.iter().zip(&bulge) {
+                    self.push(b, &[p.x, p.y, *g]);
+                }
+            }
+            None => {
+                self.push(b, &[pts.len() as f64]);
+                for p in pts {
+                    self.push(b, &[p.x, p.y]);
+                }
+            }
         }
     }
 

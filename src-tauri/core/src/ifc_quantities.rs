@@ -356,6 +356,7 @@ mod tests {
             start_cut: None,
             end_cut: None,
             joint: [false; 2],
+            arc_center: None,
         }
     }
 

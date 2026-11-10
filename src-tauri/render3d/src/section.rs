@@ -1271,7 +1271,7 @@ mod tests {
     fn l_wall_scene() -> (Vec<WallInput>, Vec<SlabInput>) {
         let color = [0.8, 0.8, 0.8];
         let walls = vec![
-            WallInput {
+            WallInput { arc_center: None,
             top_drop: [0.0, 0.0],
             top_plane: None,
                 start: [0.0, 0.0],
@@ -1289,7 +1289,7 @@ mod tests {
                 start_cut: None,
                 end_cut: None,
             },
-            WallInput {
+            WallInput { arc_center: None,
             top_drop: [0.0, 0.0],
             top_plane: None,
                 start: [0.0, 3.0],
@@ -1368,7 +1368,7 @@ mod tests {
     /// also weggeschnitten) darf die Rueckwand dahinter NICHT verdecken.
     #[test]
     fn wand_vor_der_ebene_verdeckt_nichts_dahinter() {
-        let mk = |start: [f32; 2], end: [f32; 2]| WallInput {
+        let mk = |start: [f32; 2], end: [f32; 2]| WallInput { arc_center: None,
             top_drop: [0.0, 0.0],
             top_plane: None,
             start,
@@ -1590,7 +1590,7 @@ mod tests {
     /// entlang der Achse [1.5, 2.5] (1 m breit), Bruestung 1.0 m, Fensterhoehe
     /// 1.0 m (Sturz beginnt also bei 2.0, Wand-Oberkante bei 2.5 -> 0.5 m Sturz).
     fn wall_with_window() -> WallInput {
-        WallInput {
+        WallInput { arc_center: None,
             top_drop: [0.0, 0.0],
             top_plane: None,
             start: [0.0, 0.0],
@@ -1707,7 +1707,7 @@ mod tests {
         // achse (0,0)->(4,0) steht dabei u-parallel -> Elevations-Fall, siehe
         // Moduldoc "Oeffnungen").
         let w0 = wall_with_window();
-        let w1 = WallInput {
+        let w1 = WallInput { arc_center: None,
             top_drop: [0.0, 0.0],
             top_plane: None,
             start: [2.0, 1.0],
@@ -1829,7 +1829,7 @@ mod tests {
     /// UNBEEINFLUSST von einer gleichzeitig geschnittenen Wand.
     #[test]
     fn cut_section_mit_wand_und_dach_liefert_beide_cut_polygone() {
-        let wall = WallInput {
+        let wall = WallInput { arc_center: None,
             top_drop: [0.0, 0.0],
             top_plane: None,
             start: [2.0, -1.0],

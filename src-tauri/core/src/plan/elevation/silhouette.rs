@@ -157,6 +157,12 @@ pub(super) fn elevation_edges(p: &Project, faces: &[Face], openings: &[ProjOpeni
             let next = mesh_groups.len() as u32;
             h.smooth = *mesh_groups.entry(f.id.as_str()).or_insert(arc_ids.len() as u32 + round_cols.len() as u32 + 1 + next);
         }
+        // [169] Dächer: senkrechte Stirnflächen eines gekrümmten Rands (Erker-Flachdach als Vieleck) ohne Fugen, eine
+        // Gruppe je Dach; Dachflächen bleiben ungeglättet (flache Grate unter dem Knickwinkel bleiben Kanten).
+        if f.role == Role::Roof && !f.id.is_empty() && f.normal[1].abs() < 1e-9 {
+            let next = mesh_groups.len() as u32;
+            h.smooth = *mesh_groups.entry(f.id.as_str()).or_insert(arc_ids.len() as u32 + round_cols.len() as u32 + 1 + next);
+        }
         // [152] Importierte Netze: Facetten innerhalb des Knickwinkels glätten (eine Gruppe je Netz), offene beidseitig.
         if f.role == Role::Mesh {
             let next = mesh_groups.len() as u32;

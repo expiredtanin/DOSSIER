@@ -79,7 +79,7 @@ Herkunft, kein Wegweiser.
 | `pick.rs` | räumlicher Index für Auswahl und Picken |
 | `svg.rs` | Plan-SVG (CLI, Goldens, Vorschau) |
 | `print_svg.rs` | Druck-SVG in Papier-mm für Layout-Blätter |
-| `arc_fit.rs` | Bögen in Vielecken/Linienzügen erkennen ([169]): Kreis/`A`-Pfad (SVG), Bulges (DXF), feine Tessellierung (Bildschirm) |
+| `arc_fit.rs` | Bögen in Vielecken/Linienzügen erkennen ([169]): Kreis-, Ellipsen- und Ausgleichskreisbögen; Kreis/`A`-Pfad (SVG), Bulges bzw. ELLIPSE (DXF, auch HATCH-Ränder), feine Tessellierung (Bildschirm) |
 | `dxf.rs` | DXF/DWG-Sammler; die Datei schreibt `src-tauri/fileio/src/export.rs` |
 | `text.rs` | Texte der Ausgaben (Raumstempel, Einzeltexte) |
 
