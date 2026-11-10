@@ -17,7 +17,7 @@ import { t } from "../i18n/translate";
 import { legendPlan, legendPrintSvg } from "./legendSvg";
 import { categoryLayerGroups, enablePdfLayers, type PdfLayers } from "./pdfLayers";
 import { generatePlan, type Plan } from "../plan/generatePlan";
-import { snapshotMono, snapshotOverrideRuleIds, viewportLevelPlan } from "../plan/viewportPlan";
+import { snapshotMono, snapshotOverrideRuleIds, snapshotTemplate, viewportLevelPlan } from "../plan/viewportPlan";
 import { planToPrintSvg } from "./planToPrintSvg";
 import { drawTablesPdf, sheetTables } from "./sheetTable";
 import { collectVisibleCodes } from "../model/types";
@@ -171,7 +171,8 @@ async function renderPage(
       // Geschoss/Zeichnung, Schnitt oder Ansicht ([115]) — wie ViewportPlanSvg, im Druck-Modus.
       // [33] Override-Regeln des Ausschnitts bzw. seiner verknüpften Ansichtsvorlage (wie am Bildschirm).
       const ruleIds = snapshotOverrideRuleIds(project, snap);
-      const planOf = (visible: Set<string>) => viewportLevelPlan(project, snap.activeLevelId, visible, snap.detail, scaleN, true, snapshotMono(project, snap), ruleIds);
+      const template = snapshotTemplate(project, snap);
+      const planOf = (visible: Set<string>) => viewportLevelPlan(project, snap.activeLevelId, visible, snap.detail, scaleN, true, snapshotMono(project, snap), ruleIds, template);
       const draw = async (plan: Plan, transparent: boolean, bounds?: Plan["bounds"]) => {
         const print = planToPrintSvg(plan, { scaleDenominator: scaleN, pageWidthMm: vp.widthMm, pageHeightMm: vp.heightMm, transparent, bounds });
         await doc.svg(print.svg, { x: vp.xMm, y: vp.yMm, width: vp.widthMm, height: vp.heightMm });

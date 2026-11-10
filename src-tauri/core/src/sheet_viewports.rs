@@ -7,9 +7,10 @@
 //! auf das Rechteck geklippt. Die Blatt-Ebene rechnet in Papier-Metern (Ursprung oben links,
 //! Papier-y nach unten = −y, s. `sheetMmToModel`).
 
-use crate::model::{DetailLevel, DrawingLevel, DrawingLevelKind, Layout, LayoutViewport, Project, ViewSnapshot};
+use crate::model::{DetailLevel, DrawingLevel, DrawingLevelKind, Layout, LayoutViewport, Project, ViewSnapshot, ViewTemplate};
 use crate::plan::domains::{plan_domains_buf, PlanArgs};
 use crate::plan::style::Detail;
+use std::borrow::Cow;
 use std::collections::HashSet;
 
 /// Ein platzierter Viewport mit aufgelöstem Ausschnitt.
@@ -62,6 +63,14 @@ fn detail_of(d: DetailLevel) -> Detail {
     }
 }
 
+fn detail_name(d: DetailLevel) -> &'static str {
+    match d {
+        DetailLevel::Grob => "grob",
+        DetailLevel::Fein => "fein",
+        _ => "mittel",
+    }
+}
+
 /// [140] Tusche (Schwarz-Weiss) im Viewport: Standard wie in der App; Farbe nur, wenn die Ansichtsvorlage
 /// des Ausschnitts ausdrücklich `mono: false` setzt (z. B. „Präsentation" farbig gewählt).
 pub fn snapshot_mono(p: &Project, snap: &ViewSnapshot) -> bool {
@@ -77,6 +86,38 @@ pub fn snapshot_rule_ids(p: &Project, snap: &ViewSnapshot) -> Option<HashSet<Str
     let tpl = snap.template_id.as_deref().filter(|_| snap.template_linked == Some(true)).and_then(|id| p.view_templates.iter().flatten().find(|t| t.id == id));
     let ids = tpl.and_then(|t| t.enabled_override_rule_ids.as_ref()).or(snap.enabled_override_rule_ids.as_ref())?;
     Some(ids.iter().cloned().collect())
+}
+
+/// [34] Verknüpfte Ansichtsvorlage des Ausschnitts (`templateLinked`); „einmal angewendet“ hat die Werte
+/// schon in den Ausschnitt kopiert und wirkt hier nicht weiter.
+pub fn snapshot_template<'a>(p: &'a Project, snap: &ViewSnapshot) -> Option<&'a ViewTemplate> {
+    snap.template_id.as_deref().filter(|_| snap.template_linked == Some(true)).and_then(|id| p.view_templates.iter().flatten().find(|t| t.id == id))
+}
+
+/// [34] Die Ebene mit den Ebenen-Feldern der Vorlage (Schnitthöhe, Ansichtsbereich, Schatten, verdeckte Kanten,
+/// Skizzenstil, Schnittflächen schraffiert, Bodenbelag, Gelände); was die Vorlage nicht setzt, bleibt
+/// (`TEMPLATE_LEVEL_KEYS` in `src/plan/viewTemplate.ts`).
+pub fn level_with_template(l: &DrawingLevel, t: &ViewTemplate) -> DrawingLevel {
+    let mut l = l.clone();
+    macro_rules! take {
+        ($($f:ident),*) => { $(if t.$f.is_some() { l.$f = t.$f.clone(); })* };
+    }
+    take!(cut_height, view_top, view_bottom, view_depth, shadows, hidden_lines, sketch, cut_hatch, floor_finish, show_terrain);
+    l
+}
+
+/// [34] Das Projekt, wie es die verknüpfte Vorlage des Ausschnitts für dessen Ebene sieht: Ebenen-Felder
+/// der Vorlage und ihre Strichstärken-Skalierung. Ohne verknüpfte Vorlage unverändert (geliehen).
+pub fn snapshot_project<'a>(p: &'a Project, snap: &ViewSnapshot) -> Cow<'a, Project> {
+    let Some(t) = snapshot_template(p, snap) else { return Cow::Borrowed(p) };
+    let mut q = p.clone();
+    for l in q.drawing_levels.iter_mut().filter(|l| l.id == snap.active_level_id) {
+        *l = level_with_template(l, t);
+    }
+    if t.scale_line_weights.is_some() {
+        q.scale_line_weights = t.scale_line_weights;
+    }
+    Cow::Owned(q)
 }
 
 /// Plan-Argumente eines Viewports (wie `ViewportPlanSvg`: projektglobal, nicht für den Druck).
@@ -139,6 +180,8 @@ pub fn viewport_maps(p: &Project, layout: &Layout) -> Vec<VpMap> {
 /// Plan-Puffer des Inhalts eines Ausschnitts beim Massstab 1:`scale` (Grundriss bzw. Schnitt/Ansicht wie
 /// im Viewport). `shadows` übersteuert den Schatten der Ansicht (Präsentationsplan [66]: Vorlage vor dem Anwenden).
 pub fn snapshot_buf(p: &Project, snap: &ViewSnapshot, scale: f64, shadows: Option<bool>) -> Option<Vec<u8>> {
+    let tp = snapshot_project(p, snap);
+    let p = tp.as_ref();
     match p.drawing_levels.iter().find(|l| l.id == snap.active_level_id) {
         Some(l) if matches!(l.kind, DrawingLevelKind::Section | DrawingLevelKind::Elevation) => match shadows {
             Some(s) => section_view_buf(p, &DrawingLevel { shadows: Some(s), ..l.clone() }, snap, scale),
@@ -184,6 +227,8 @@ fn section_view_buf(p: &Project, level: &DrawingLevel, snap: &ViewSnapshot, scal
         "level": serde_json::to_value(level).ok()?,
         "hiddenLines": level.hidden_lines.unwrap_or(false),
         "scale": scale,
+        // Detailgrad des Ausschnitts (bzw. seiner Vorlage, vom Anwenden schon eingetragen) auch im Schnitt.
+        "detail": detail_name(snap.detail),
         "hasVis": true,
         "invisible": invisible,
         "rules": args.rules.as_ref().map(|r| r.iter().cloned().collect::<Vec<_>>()),
@@ -503,6 +548,77 @@ pub(crate) mod tests {
         assert!(!direct.walls.is_empty() && !direct.ceilings.is_empty(), "Wände und Untersicht im Viewport");
         let b = crate::plan::buf::View::parse(&maps[0].buf).unwrap().bounds().unwrap();
         assert!(b[2] - b[0] > 9.9 && b[3] - b[1] > 5.9, "Ausmass der Decke: {b:?}");
+    }
+
+    /// [34] Verknüpfte Ansichtsvorlage am Ausschnitt: ihre Ebenen-Felder wirken im Schnitt- und Ansicht-Viewport
+    /// genau, als stünden sie an der Ebene selbst (verdeckte Kanten, Schnittflächen schraffiert, Skizzenstil,
+    /// Schatten, Strichstärken nach Massstab); nicht verknüpft („einmal angewendet“) wirkt sie nicht nach.
+    #[test]
+    fn schnitt_und_ansicht_viewport_folgen_der_vorlage() {
+        let base: serde_json::Value = serde_json::from_str(include_str!("../tests/fixtures/sample_project.json")).unwrap();
+        let buf_of = |v: &serde_json::Value, level: &str, scale: f64, linked: bool, tpl: Option<serde_json::Value>| -> Vec<u8> {
+            let mut v = v.clone();
+            let mut snap = serde_json::json!({"id": "s", "name": "S", "viewType": "grundriss", "view3d": "iso", "scaleDenominator": scale, "detail": "mittel",
+                "activeLevelId": level, "layerVisibility": {"00": true, "01": true, "05": true, "20": true, "30": true, "31": true, "40": true, "35": true, "50": true, "60": true, "90": true, "99": true}, "drawingVisibility": {}});
+            if let Some(t) = tpl {
+                let mut t = t;
+                t["id"] = "t".into();
+                t["name"] = "T".into();
+                v["viewTemplates"] = serde_json::json!([t]);
+                snap["templateId"] = "t".into();
+                snap["templateLinked"] = linked.into();
+            }
+            v["viewSnapshots"] = serde_json::json!([snap]);
+            let p: Project = serde_json::from_value(v).unwrap();
+            snapshot_buf(&p, &p.view_snapshots.as_ref().unwrap()[0], scale, None).expect("Puffer")
+        };
+        // (Feld, Wert, Ebene, Massstab)
+        let cases = [
+            ("hiddenLines", serde_json::json!(true), "schnitt-a", 100.0),
+            ("cutHatch", serde_json::json!(true), "schnitt-a", 100.0),
+            ("sketch", serde_json::json!(true), "schnitt-a", 100.0),
+            ("sketch", serde_json::json!(true), "ansicht-sued", 100.0),
+            ("shadows", serde_json::json!(false), "ansicht-sued", 100.0),
+            ("hiddenLines", serde_json::json!(true), "ansicht-sued", 100.0),
+        ];
+        for (field, value, level, scale) in cases {
+            let ctx = format!("{field}={value} in {level}");
+            let plain = buf_of(&base, level, scale, false, None);
+            let mut on_level = base.clone();
+            for l in on_level["drawingLevels"].as_array_mut().unwrap().iter_mut().filter(|l| l["id"] == level) {
+                l[field] = value.clone();
+            }
+            let want = buf_of(&on_level, level, scale, false, None);
+            assert_ne!(want, plain, "{ctx}: Feld wirkt an der Ebene");
+            let mut t = serde_json::Map::new();
+            t.insert(field.into(), value.clone());
+            let tpl = serde_json::Value::Object(t);
+            assert_eq!(buf_of(&base, level, scale, true, Some(tpl.clone())), want, "{ctx}: verknüpfte Vorlage = Feld an der Ebene");
+            assert_eq!(buf_of(&base, level, scale, false, Some(tpl)), plain, "{ctx}: nicht verknüpft wirkt nicht nach");
+        }
+        // Strichstärken nach Massstab: Projekt-Option, in der Vorlage verknüpft pro Ausschnitt.
+        let mut scaled = base.clone();
+        scaled["scaleLineWeights"] = true.into();
+        for level in ["schnitt-a", "ansicht-sued"] {
+            let plain = buf_of(&base, level, 200.0, false, None);
+            let want = buf_of(&scaled, level, 200.0, false, None);
+            assert_ne!(want, plain, "{level}: Strichstärken nach Massstab wirken");
+            assert_eq!(buf_of(&base, level, 200.0, true, Some(serde_json::json!({"scaleLineWeights": true}))), want, "{level}: Vorlage skaliert die Strichstärken");
+        }
+    }
+
+    /// [34] Der Detailgrad des Ausschnitts gilt auch im Schnitt-Viewport (vorher nur im Grundriss).
+    #[test]
+    fn schnitt_viewport_folgt_dem_detailgrad() {
+        let base: serde_json::Value = serde_json::from_str(include_str!("../tests/fixtures/sample_project.json")).unwrap();
+        let buf_of = |detail: &str| {
+            let mut v = base.clone();
+            v["viewSnapshots"] = serde_json::json!([{"id": "s", "name": "S", "viewType": "grundriss", "view3d": "iso", "scaleDenominator": 50, "detail": detail,
+                "activeLevelId": "schnitt-a", "layerVisibility": {"20": true, "30": true, "31": true, "35": true, "40": true}, "drawingVisibility": {}}]);
+            let p: Project = serde_json::from_value(v).unwrap();
+            snapshot_buf(&p, &p.view_snapshots.as_ref().unwrap()[0], 50.0, None).expect("Puffer")
+        };
+        assert_ne!(buf_of("fein"), buf_of("grob"), "Detail fein und grob unterscheiden sich im Schnitt");
     }
 
     #[test]

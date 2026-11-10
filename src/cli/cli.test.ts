@@ -155,6 +155,55 @@ describe("dossier-cli", () => {
     expect(readFileSync(stp, "utf8").startsWith("ISO-10303-21;")).toBe(true);
   }, 60_000);
 
+  // [34] `--template` gilt für Grundriss, Schnitt und Ansicht vollständig: Ebenen-Felder, Detailgrad, Massstab,
+  // Tusche/Farbe, ausgeblendete Kategorien; ohne Flag die an der Ebene verknüpfte Vorlage.
+  it("[34] Ansichtsvorlage in plan, section und elevation", async () => {
+    const section = sampleProject.drawingLevels.find((l) => l.kind === "section")!;
+    const elevation = sampleProject.drawingLevels.find((l) => l.kind === "elevation")!;
+    const tpls = [
+      { id: "t-verdeckt", name: "Verdeckt", hiddenLines: true, cutHatch: true },
+      { id: "t-skizze", name: "Skizze", sketch: true },
+      { id: "t-fein", name: "Fein 1:50", detail: "fein" as const, scaleDenominator: 50 },
+      { id: "t-farbe", name: "Farbig", mono: false },
+      { id: "t-ohne-wand", name: "Ohne Wände", layerVisibility: { "20": false } },
+    ];
+    const tf = join(dir, "vorlagen.obp");
+    writeFileSync(tf, serializeProject({ ...sampleProject, viewTemplates: tpls }));
+    const svg = async (args: string[], name: string, proj = tf) => {
+      const out = join(dir, `${name}.svg`);
+      expect(await run([proj, ...args, "--out", out])).toBe(0);
+      return readFileSync(out, "utf8");
+    };
+    const plain = { section: await svg(["section", section.name], "v-s"), elevation: await svg(["elevation", elevation.name], "v-a"), plan: await svg(["plan"], "v-p") };
+    // Ebenen-Felder: im Schnitt (verdeckte Kanten, Schraffur) und in Schnitt und Ansicht (Skizzenstil).
+    expect(await svg(["section", section.name, "--template", "Verdeckt"], "v-s1")).not.toBe(plain.section);
+    expect(await svg(["section", section.name, "--template", "t-skizze"], "v-s2")).not.toBe(plain.section);
+    expect(await svg(["elevation", elevation.name, "--template", "Skizze"], "v-a1")).not.toBe(plain.elevation);
+    // Detailgrad und Massstab der Vorlage; ein ausdrückliches --scale geht vor.
+    const fein = await svg(["section", section.name, "--template", "Fein 1:50"], "v-s3");
+    expect(fein).not.toBe(plain.section);
+    expect(await svg(["section", section.name, "--template", "Fein 1:50", "--scale", "100"], "v-s4")).not.toBe(fein);
+    expect(await svg(["plan", "--template", "Fein 1:50"], "v-p1")).not.toBe(plain.plan);
+    // Farbe statt Tusche; ausgeblendete Kategorie.
+    const farbig = await svg(["elevation", elevation.name, "--template", "Farbig"], "v-a2");
+    expect(farbig).not.toBe(plain.elevation);
+    expect(farbig).toBe(await svg(["elevation", elevation.name, "--color"], "v-a3"));
+    const ohne = await svg(["plan", "--template", "Ohne Wände"], "v-p2");
+    expect(ohne).not.toBe(plain.plan);
+    expect(ohne.length).toBeLessThan(plain.plan.length);
+    // Ohne Flag: die an der Ebene verknüpfte Vorlage.
+    const linked = join(dir, "vorlagen-verknuepft.obp");
+    writeFileSync(
+      linked,
+      serializeProject({
+        ...sampleProject,
+        viewTemplates: tpls,
+        drawingLevels: sampleProject.drawingLevels.map((l) => (l.id === section.id ? { ...l, templateId: "t-fein", templateLinked: true } : l)),
+      }),
+    );
+    expect(await svg(["section", section.name], "v-s5", linked)).toBe(fein);
+  }, 120_000);
+
   it("unbekannter Befehl und fehlende Datei geben Fehlercode", async () => {
     expect(await call("gibtsnicht")).toBe(2);
     expect(await run([])).toBe(2);

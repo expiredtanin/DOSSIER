@@ -25,7 +25,7 @@ import type {
   Project,
   Vec2,
 } from "../model/types";
-import { createTable, PX_PER_M, sheetTables, TABLE_SOURCES, snapshotMono, snapshotOverrideRuleIds, tableSourceLabel, viewportLevelPlan } from "../core";
+import { createTable, PX_PER_M, sheetTables, TABLE_SOURCES, snapshotMono, snapshotOverrideRuleIds, snapshotTemplate, tableSourceLabel, viewportLevelPlan } from "../core";
 import type { TableOut } from "../core";
 import { SheetTableHud } from "./SheetTableHud";
 import { planToPrintSvg } from "../export/planToPrintSvg";
@@ -89,7 +89,7 @@ export function ViewportPlanSvg({
     // Massstab ZUERST: er geht in die Plan-Erzeugung ein (Bemassung in Papier-mm, s. model/dimension.ts).
     const scaleN = resolveViewportScale(viewport, snap);
     // Geschoss/Zeichnung wie bisher; Schnitt/Ansicht über die abgeleitete Projektion ([115], Schnitt asynchron).
-    void viewportLevelPlan(project, snap.activeLevelId, codes, snap.detail, scaleN, false, snapshotMono(project, snap), snapshotOverrideRuleIds(project, snap))
+    void viewportLevelPlan(project, snap.activeLevelId, codes, snap.detail, scaleN, false, snapshotMono(project, snap), snapshotOverrideRuleIds(project, snap), snapshotTemplate(project, snap))
       .then((plan) => {
         if (disposed) return;
         const print = planToPrintSvg(plan, {

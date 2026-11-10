@@ -21,7 +21,7 @@ export { initCore } from "../engine/coreWasm";
 export { applyOps, validateProject, validateOps } from "./ops";
 export { projectWarnings } from "./ops";
 export type { CoreOp } from "./ops";
-export type { Project, DrawingLevel } from "../model/types";
+export type { Project, DrawingLevel, ViewTemplate } from "../model/types";
 export { computeKennzahlen, checkRoomProgram, solidVolume } from "../analysis/kennzahlen";
 export type { Kennzahlen, ProgramCheck } from "../analysis/kennzahlen";
 export { compareRoomProgram, layoutRoomProgram, DEFAULT_PROGRAM_TOLERANCE } from "../analysis/roomProgram";

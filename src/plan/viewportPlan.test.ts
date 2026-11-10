@@ -3,7 +3,8 @@ import { describe, expect, it } from "vitest";
 import { buildComplexSampleProject } from "../model/sampleProjectComplex";
 import { collectVisibleCodes } from "../model/types";
 import { generatePlan } from "./generatePlan";
-import { snapshotMono, snapshotOverrideRuleIds, viewportLevelPlan } from "./viewportPlan";
+import type { DrawingLevel, ViewTemplate } from "../model/types";
+import { snapshotMono, snapshotOverrideRuleIds, snapshotTemplate, viewportLevelPlan } from "./viewportPlan";
 
 const p = buildComplexSampleProject();
 const codes = collectVisibleCodes(p.layers);
@@ -147,5 +148,45 @@ describe("viewportLevelPlan: Override-Regeln des Ausschnitts ([33])", () => {
     expect(snapshotOverrideRuleIds(r, { templateId: "t", templateLinked: true, enabledOverrideRuleIds: ["b"] })).toEqual(["a"]);
     expect(snapshotOverrideRuleIds(r, { templateId: "t", templateLinked: false, enabledOverrideRuleIds: ["b"] })).toEqual(["b"]);
     expect(snapshotOverrideRuleIds(r, { templateId: "leer", templateLinked: true, enabledOverrideRuleIds: [] })).toEqual([]);
+  });
+});
+
+// [34] Verknüpfte Ansichtsvorlage des Ausschnitts: ihre Felder gelten auf dem Blatt für Schnitt, Ansicht und
+// Grundriss, als stünden sie an der Ebene selbst (Kern-Gegenstück: `sheet_viewports`-Tests).
+describe("viewportLevelPlan: Ansichtsvorlage ([34])", () => {
+  const json = async (q: typeof p, level: string, tpl?: ViewTemplate, scale = 100, detail: "grob" | "mittel" | "fein" = "mittel") => {
+    const plan = await viewportLevelPlan(q, level, codes, detail, scale, false, true, undefined, tpl);
+    return JSON.stringify(plan.primitives);
+  };
+  const withLevel = (level: string, patch: Partial<DrawingLevel>) => ({ ...p, drawingLevels: p.drawingLevels.map((l) => (l.id === level ? { ...l, ...patch } : l)) });
+  const cases: [string, Partial<ViewTemplate>][] = [
+    ["schnitt-a", { hiddenLines: true }],
+    ["schnitt-a", { cutHatch: true }],
+    ["schnitt-a", { sketch: true }],
+    ["ansicht-sued", { sketch: true }],
+    ["ansicht-sued", { shadows: false }],
+    ["ansicht-sued", { hiddenLines: true }],
+    ["eg", { cutHeight: 0.4 }],
+  ];
+  it.each(cases)("%s: Vorlage %j = Feld an der Ebene", async (level, fields) => {
+    const tpl: ViewTemplate = { id: "vt", name: "V", ...fields };
+    const plain = await json(p, level);
+    const want = await json(withLevel(level, fields as Partial<DrawingLevel>), level);
+    expect(want).not.toBe(plain);
+    expect(await json({ ...p, viewTemplates: [tpl] }, level, tpl)).toBe(want);
+    expect(snapshotTemplate({ viewTemplates: [tpl] }, { templateId: "vt", templateLinked: true })).toBe(tpl);
+    expect(snapshotTemplate({ viewTemplates: [tpl] }, { templateId: "vt", templateLinked: false })).toBeUndefined();
+  });
+
+  it("Detailgrad und Strichstärken nach Massstab der Vorlage gelten im Schnitt und in der Ansicht", async () => {
+    const fein: ViewTemplate = { id: "vt", name: "V", detail: "fein" };
+    expect(await json(p, "schnitt-a", fein, 50, "grob")).toBe(await json(p, "schnitt-a", undefined, 50, "fein"));
+    // Das Beispielprojekt skaliert die Strichstärken; die Vorlage dieses Ausschnitts schaltet das ab.
+    const fest: ViewTemplate = { id: "vt", name: "V", scaleLineWeights: false };
+    for (const level of ["schnitt-a", "ansicht-sued"]) {
+      const want = await json({ ...p, scaleLineWeights: false }, level, undefined, 200);
+      expect(want).not.toBe(await json(p, level, undefined, 200));
+      expect(await json(p, level, fest, 200)).toBe(want);
+    }
   });
 });

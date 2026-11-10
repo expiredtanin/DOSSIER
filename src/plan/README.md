@@ -13,7 +13,8 @@ Fassaden, die den Kern fragen, und die Leser der Plan-Puffer. Die Hülle importi
 | `generatePlan/layerSig.ts` | Signatur der stilrelevanten Ebenen-Eigenschaften (Cache-Schlüssel) |
 | `toSection.ts` | `computeSection()` (Körper-Netze über truck), `generateSectionPlan()` (Abfrage `sectionPlan`) |
 | `toElevation.ts` | `generateElevationPlan()` (Abfrage `elevationPlan`) |
-| `viewportPlan.ts` | Inhalt eines Layout-Viewports: Plan der Ebene, auf die sein Ausschnitt zeigt |
+| `viewportPlan.ts` | Inhalt eines Layout-Viewports: Plan der Ebene, auf die sein Ausschnitt zeigt (mit verknüpfter Ansichtsvorlage) |
+| `viewTemplate.ts` | [34] Ansichtsvorlage → Projekt/Anzeigewerte für Viewport und CLI (`projectWithTemplate`, `templateDisplay`) |
 | `levelMarkers.ts` | automatische Höhenkoten in Schnitt und Ansicht |
 | `presentationSheet.ts` | Präsentationsplan mit einem Klick (`[66]`) |
 | `openingPreview.ts` | Vorschau im Fenster-/Tür-Dialog |
