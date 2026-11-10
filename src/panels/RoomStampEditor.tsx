@@ -165,7 +165,7 @@ export function RoomStampEditor({ value, onApply, onCancel }: RoomStampEditorPro
             </label>
             <AlignToggle
               value={draft.floorAreaAlign}
-              fallback="center"
+              fallback="left"
               disabled={!draft.showFloorArea}
               label={`${t("roomStamp.showFloorArea")} — ${t("text.group")}`}
               onChange={(floorAreaAlign) => patch({ floorAreaAlign })}
@@ -213,11 +213,18 @@ export function RoomStampEditor({ value, onApply, onCancel }: RoomStampEditorPro
             </label>
             <AlignToggle
               value={draft.usageAlign}
-              fallback="center"
+              fallback="left"
               disabled={!draft.showUsage}
               label={`${t("roomStamp.showUsage")} — ${t("text.group")}`}
               onChange={(usageAlign) => patch({ usageAlign })}
             />
+          </div>
+
+          <div className="roomstamp-row">
+            <label className="roomstamp-check">
+              <input type="checkbox" checked={draft.showDivider === true} onChange={(e) => patch({ showDivider: e.target.checked ? true : undefined })} />
+              <span>{t("roomStamp.showDivider")}</span>
+            </label>
           </div>
 
           <div className="roomstamp-row">

@@ -766,20 +766,24 @@ pub fn doc_from_text(text: &str) -> RichTextDoc {
     }
 }
 
-/// `roomStampToDoc`: Zeile 1 = Nummer (klein) + Name (fett), Zeile 2 optional (kursiv).
+/// `roomStampToDoc` ([177], Archicad-Zonenstempel): Zeile 1 = Name (gross, fett), optional Zeile 2 (kursiv),
+/// darunter die Raumnummer (klein). Ausrichtung je Absatz (Vorgabe links).
 pub fn room_stamp_to_doc(s: &RoomStamp) -> RichTextDoc {
-    let mut line1 = Vec::new();
-    let number = js_trim(s.number.as_deref().unwrap_or(""));
-    if !number.is_empty() {
-        line1.push(run(format!("{number} "), Marks { size_pt: Some(NUMBER_PT), ..Default::default() }));
-    }
-    line1.push(run(s.name.clone(), Marks { bold: Some(true), size_pt: Some(NAME_PT), ..Default::default() }));
-    let mut paragraphs = vec![Paragraph { runs: line1, align: s.name_align, ..Default::default() }];
+    let mut paragraphs = vec![Paragraph { runs: vec![run(s.name.clone(), Marks { bold: Some(true), size_pt: Some(NAME_PT), ..Default::default() })], align: s.name_align, ..Default::default() }];
     let line2 = js_trim(s.name_line2.as_deref().unwrap_or(""));
     if !line2.is_empty() {
         paragraphs.push(Paragraph { runs: vec![run(line2.into(), Marks { italic: Some(true), size_pt: Some(LINE2_PT), ..Default::default() })], align: s.line2_align, ..Default::default() });
     }
+    let number = js_trim(s.number.as_deref().unwrap_or(""));
+    if !number.is_empty() {
+        paragraphs.push(Paragraph { runs: vec![run(number.into(), Marks { size_pt: Some(NUMBER_PT), ..Default::default() })], align: s.name_align, ..Default::default() });
+    }
     RichTextDoc { version: 1.0, paragraphs, ..Default::default() }
+}
+
+/// [177] Anzahl Namens-Absätze (Name und Zeile 2) im Stempel-Dokument: darunter sitzt die Trennlinie.
+fn room_stamp_name_paragraphs(s: &RoomStamp) -> usize {
+    1 + usize::from(!js_trim(s.name_line2.as_deref().unwrap_or("")).is_empty())
 }
 
 /// `formatStampArea`.
@@ -801,13 +805,13 @@ pub fn room_stamp_extra_lines(s: &RoomStamp, net_area: f64, sia: SiaCategory) ->
     let mut lines = Vec::new();
     if s.show_floor_area {
         let prefix = s.floor_area_prefix.as_deref().unwrap_or("");
-        lines.push(StampLine { text: format!("{prefix}{} m²", format_stamp_area(net_area, s.rounding_step)), align: s.floor_area_align.unwrap_or(Align::Center) });
+        lines.push(StampLine { text: format!("{prefix}{} m²", format_stamp_area(net_area, s.rounding_step)), align: s.floor_area_align.unwrap_or(Align::Left) });
     }
     if s.show_usage {
-        lines.push(StampLine { text: format!("{} · {}", sia_key(sia), sia_label(sia)), align: s.usage_align.unwrap_or(Align::Center) });
+        lines.push(StampLine { text: format!("{} · {}", sia_key(sia), sia_label(sia)), align: s.usage_align.unwrap_or(Align::Left) });
     }
     if let Some(o) = s.occupancy {
-        lines.push(StampLine { text: format!("{} Pers.", js_number(o)), align: Align::Center });
+        lines.push(StampLine { text: format!("{} Pers.", js_number(o)), align: Align::Left });
     }
     lines
 }
@@ -1149,10 +1153,8 @@ fn rooms(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds, obstacles: &sup
             Some(s) if small => (room_stamp_to_doc(s), room_stamp_extra_lines(&RoomStamp { show_usage: false, occupancy: None, ..s.clone() }, res.net, room.sia_category)),
             Some(s) => (room_stamp_to_doc(s), room_stamp_extra_lines(s, res.net, room.sia_category)),
             None => {
-                let mut lines = vec![StampLine { text: format!("{} m²", to_fixed(res.net, 2)), align: Align::Center }];
-                if !small {
-                    lines.push(StampLine { text: format!("{} · {}", sia_key(room.sia_category), sia_label(room.sia_category)), align: Align::Center });
-                }
+                // [177] Ohne Stempel-Einstellungen: Name, Fläche, linksbündig; die SIA-Kategorie ist Attribut des Raums.
+                let lines = vec![StampLine { text: format!("{} m²", to_fixed(res.net, 2)), align: Align::Left }];
                 (room.stamp_doc.clone().unwrap_or_else(|| doc_from_text(&room.name)), lines)
             }
         };
@@ -1164,7 +1166,7 @@ fn rooms(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds, obstacles: &sup
         if !overview && !small && room.stamp.as_ref().and_then(|s| s.show_finish) == Some(true) {
             let label = crate::room_book::finish_label(c.p, room.floor_finish.as_deref());
             if !label.is_empty() {
-                extra_lines.push(StampLine { text: label, align: Align::Center });
+                extra_lines.push(StampLine { text: label, align: Align::Left });
             }
         }
         let candidates = if room.stamp_anchor.is_some() { vec![at] } else { stamp_candidates(&pts, pole) };
@@ -1175,10 +1177,32 @@ fn rooms(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds, obstacles: &sup
         let number = room.stamp.as_ref().and_then(|s| s.number.clone());
         let (extra_lines, base_pt, name, placed) = fit_room_stamp(&doc, number.as_deref(), extra_lines, if small { ROOM_STAMP_SMALL_PT } else { ROOM_STAMP_PT }, c.a.scale, &place);
         let at = placed.unwrap_or(at);
+        let name_replaced = name.clone();
         let doc = name.unwrap_or(doc);
+        // [177] Trennlinie unter dem Namen (Einstellung am Stempel, Vorgabe aus), nur im unveränderten Block.
+        if let (Some(s), None, false, false) = (&room.stamp, &name_replaced, overview, small) {
+            if s.show_divider == Some(true) {
+                let rows: Vec<(&str, crate::text_layout::LineAlign)> = extra_lines.iter().map(|l| (l.text.as_str(), crate::text_layout::LineAlign::of(Some(l.align)))).collect();
+                let placed = crate::text_layout::stamp_block(&doc, &rows, base_pt, PT_MM, "#000000", 0.0);
+                let np = room_stamp_name_paragraphs(s);
+                if placed.len() > np {
+                    let (w, _) = crate::text_layout::stamp_block_size(&doc, &rows, base_pt, PT_MM);
+                    let k = c.a.scale / 1000.0;
+                    let next = &placed[np];
+                    let fs = next.line.tspans.first().map_or(0.0, |t| t.font_size);
+                    // Mitte zwischen Grundlinie des Namens und Oberkante der nächsten Zeile.
+                    // Modell-y zeigt nach oben, die Blockzeilen wachsen nach unten.
+                    let y = at.y - (placed[np - 1].y + (next.y - placed[np - 1].y - 0.7 * fs).max(0.0) / 2.0 + 0.15 * fs) * k;
+                    out.push(line(Vec2 { x: at.x - w / 2.0 * k, y }, Vec2 { x: at.x + w / 2.0 * k, y }, "void", DIVIDER_MM, Some(None), text_color, greyed));
+                }
+            }
+        }
         out.push(Primitive::Text { at, doc, extra_lines, base_pt, color: text_color.into(), room_id: Some(room.id.clone()), greyed, opacity: None });
     }
 }
+
+/// [177] Strichstärke der Trennlinie im Raumstempel (Papier-mm).
+const DIVIDER_MM: f64 = 0.13;
 
 /// [140] Gezeichnete Lage der Raumstempel ohne eigenen Anker (Geschoss `floor`, sichtbare Ebenen `show`,
 /// Massstab 1:`scale`, Detail „mittel"): dieselbe Einpassung wie im Grundriss (`rooms`, weicht Hindernissen aus).
@@ -1737,7 +1761,56 @@ mod tests {
         PlanArgs::parse(detail, &t).unwrap()
     }
 
-    /// [140] Raumstempel ab 1:200 kleiner (7 pt) und ohne SIA-Zeile; bis 1:100 10 pt mit zwei Zusatzzeilen.
+    /// [177] Archicad-Zonenstempel: Name (gross, fett), darunter Nummer, darunter Fläche, alles linksbündig;
+    /// SIA-Kategorie nur auf Wunsch; Trennlinie nur auf Wunsch.
+    #[test]
+    fn raumstempel_archicad_aufbau() {
+        let p = sample();
+        let run = |s: Option<RoomStamp>| {
+            let mut q = p.clone();
+            for r in q.rooms.as_mut().unwrap() {
+                r.stamp = s.clone().map(|s| RoomStamp { name: r.name.clone(), ..s });
+            }
+            let t = serde_json::json!({ "floor": "eg", "show": ["20", "60"], "grey": [], "scale": 100 }).to_string();
+            let d = plan_domains(&q, &PlanArgs::parse(1.0, &t).unwrap()).unwrap();
+            let text = d.rooms.iter().find_map(|q| match q { Primitive::Text { doc, extra_lines, .. } => Some((doc.clone(), extra_lines.clone())), _ => None }).unwrap();
+            let lines = d.rooms.iter().filter(|q| matches!(q, Primitive::Line { cls, .. } if cls == "void")).count();
+            (text, lines)
+        };
+        let base = RoomStamp { number: Some("E.03".into()), show_floor_area: true, ..Default::default() };
+        let ((doc, extra), lines) = run(Some(base.clone()));
+        let paras: Vec<String> = doc.paragraphs.iter().map(|p| p.runs.iter().map(|r| r.text.clone()).collect::<String>()).collect();
+        assert_eq!(paras.len(), 2);
+        assert_eq!(paras[1], "E.03", "Nummer unter dem Namen");
+        assert!(doc.paragraphs.iter().all(|p| p.align.is_none() || p.align == Some(Align::Left)));
+        assert_eq!(extra.len(), 1);
+        assert!(extra[0].text.ends_with(" m²") && extra[0].align == Align::Left, "{extra:?}");
+        assert!(extra.iter().all(|l| !l.text.contains('·')), "keine SIA-Kategorie im Stempel");
+        assert_eq!(lines, 0, "keine Trennlinie");
+        // Ohne Stempel: Fläche links, keine Kategorie.
+        let ((_, extra), _) = run(None);
+        assert!(extra.iter().all(|l| l.align == Align::Left && !l.text.contains('·')));
+        // Kategorie nur eingeschaltet.
+        let ((_, extra), _) = run(Some(RoomStamp { show_usage: true, ..base.clone() }));
+        assert_eq!(extra.len(), 2);
+        assert!(extra[1].text.contains('·') && extra[1].align == Align::Left);
+        // Trennlinie eingeschaltet: je Raum eine Linie.
+        let (_, with) = run(Some(RoomStamp { show_divider: Some(true), ..base }));
+        assert_eq!(with, 1, "eine Linie je Raum (ein Raum sichtbar)");
+        // Die Linie liegt zwischen Namen und Nummer (Modell-y nach oben: unter dem Namen = kleineres y).
+        let mut q = p.clone();
+        for r in q.rooms.as_mut().unwrap() {
+            r.stamp = Some(RoomStamp { name: r.name.clone(), show_divider: Some(true), number: Some("E.03".into()), show_floor_area: true, ..Default::default() });
+        }
+        let t = serde_json::json!({ "floor": "eg", "show": ["20", "60"], "grey": [], "scale": 100 }).to_string();
+        let d = plan_domains(&q, &PlanArgs::parse(1.0, &t).unwrap()).unwrap();
+        let at = d.rooms.iter().find_map(|q| match q { Primitive::Text { at, .. } => Some(*at), _ => None }).unwrap();
+        let ly = d.rooms.iter().find_map(|q| match q { Primitive::Line { a, .. } => Some(a.y), _ => None }).unwrap();
+        // Name 12 pt: Grundlinie 3.53 mm Papier über dem Blockmittelpunkt; Nummer 1.06 mm darunter (1:100 → ×0.1 m).
+        assert!(ly < at.y + 0.353 && ly > at.y - 0.106, "{ly} {}", at.y);
+    }
+
+    /// [140] Raumstempel ab 1:200 kleiner (7 pt); bis 1:100 10 pt mit der Flächenzeile.
     #[test]
     fn raumstempel_je_massstab() {
         let p = sample();
@@ -1746,7 +1819,8 @@ mod tests {
             let r = plan_domains(&p, &PlanArgs::parse(1.0, &t).unwrap()).unwrap();
             r.rooms.iter().find_map(|q| match q { Primitive::Text { base_pt, extra_lines, .. } => Some((*base_pt, extra_lines.len())), _ => None }).unwrap()
         };
-        assert_eq!(stamp(100.0), (ROOM_STAMP_PT, 2));
+        // [177] Ohne Stempel-Einstellungen nur die Fläche: die SIA-Kategorie ist Attribut des Raums, nicht des Stempels.
+        assert_eq!(stamp(100.0), (ROOM_STAMP_PT, 1));
         assert_eq!(stamp(200.0), (ROOM_STAMP_SMALL_PT, 1));
         // [140] 1:500 (mittel → automatisch grob): nur der Name; Stempel in Tinte. „Wohnen" ist in 7 pt
         // (Inter-Metrik 3.9 em ≈ 9.7 mm) breiter als der 9.3 mm breite Raum → 2 mm Schrift.
@@ -1815,7 +1889,7 @@ mod tests {
         // Name mit eigener Grösse (12 pt fett) schrumpft nicht mit der Schrift: in 2 mm ohne Auszeichnung.
         let s = RoomStamp { number: Some("E.03".into()), name: "Wohnen/Essen".into(), ..Default::default() };
         let (_, _, d, _) = fit_room_stamp(&room_stamp_to_doc(&s), None, vec![], ROOM_STAMP_PT, 100.0, &room(3.0, 2.0));
-        assert_eq!(crate::text_layout::plain_text(&d.unwrap()).replace('\n', ""), "E.03 Wohnen/Essen", "ohne Auszeichnung, ggf. umbrochen");
+        assert_eq!(crate::text_layout::plain_text(&d.unwrap()).replace('\n', ""), "Wohnen/EssenE.03", "ohne Auszeichnung, ggf. umbrochen");
         // Schmale Zeichen passen besser als breite (echte Metrik statt fester Zeichenbreite).
         let (wi, _) = stamp_size_m(&doc_from_text("Lift"), &[], ROOM_STAMP_PT, 100.0);
         let (ww, _) = stamp_size_m(&doc_from_text("WMWM"), &[], ROOM_STAMP_PT, 100.0);
@@ -1840,7 +1914,7 @@ mod tests {
         assert_eq!(abbreviate("Wohnen/Essen/Küche", 14).as_deref(), Some("Woh./Ess./Küc."));
         assert_eq!(abbreviate("Wohnen/Essen/Küche", 13), None, "darunter wäre ein Wort unter 3 Buchstaben");
         assert_eq!(abbreviate("Treppenhaus", 3), None);
-        assert_eq!(abbreviate("E.03 Wohnen/Essen/Küche", 20).map(|t| t.starts_with("E.03 ")), Some(true));
+        assert_eq!(abbreviate("Wohnen/Essen/Küche\nE.03", 20).map(|t| t.ends_with("\nE.03")), Some(true));
         assert_eq!(abbreviate("Abstellraum Keller", 40).as_deref(), Some("Abstellraum Keller"));
     }
 
@@ -1855,18 +1929,18 @@ mod tests {
         let (_, _, d, _) = fit_room_stamp(&doc, Some("E.03"), vec![], ROOM_STAMP_PT, 100.0, &room(50.0, 50.0));
         assert!(d.is_none(), "genug Platz: unverändert");
         // (a) Zu schmal für eine Zeile, aber hoch genug für zwei: Umbruch an einem Trenner, volle Schrift, kein Kürzen.
-        let (w1, _) = stamp_size_m(&doc_from_text("E.03 Wohnen/Essen/Küche"), &[], ROOM_STAMP_PT, 100.0);
-        let (w2, h2) = stamp_size_m(&doc_from_text("E.03 Wohnen/\nEssen/Küche"), &[], ROOM_STAMP_PT, 100.0);
+        let (w1, _) = stamp_size_m(&doc_from_text("Wohnen/Essen/Küche\nE.03"), &[], ROOM_STAMP_PT, 100.0);
+        let (w2, h2) = stamp_size_m(&doc_from_text("Wohnen/\nEssen/Küche\nE.03"), &[], ROOM_STAMP_PT, 100.0);
         assert!(w2 < w1);
         let (e, pt, d, at) = fit_room_stamp(&doc, Some("E.03"), vec![], ROOM_STAMP_PT, 100.0, &room(w2.max(w1 * 0.8), h2 + 1.0));
         let t = plain_of(d).unwrap();
-        assert!(at.is_some() && pt == ROOM_STAMP_PT && e.is_empty() && t.lines().count() == 2, "{t:?} {pt}");
-        assert_eq!(t.replace('\n', "").replace(' ', ""), "E.03Wohnen/Essen/Küche");
+        assert!(at.is_some() && pt == ROOM_STAMP_PT && e.is_empty() && t.lines().count() == 3, "{t:?} {pt}");
+        assert_eq!(t.replace('\n', "").replace(' ', ""), "Wohnen/Essen/KücheE.03");
         // (b) Nur in 2 mm breit genug, einzeilig: kleinere Schrift, Name vollständig.
-        let (wmin, hmin) = stamp_size_m(&doc_from_text("E.03 Wohnen/Essen/Küche"), &[], ROOM_STAMP_MIN_PT, 100.0);
+        let (wmin, hmin) = stamp_size_m(&doc_from_text("Wohnen/Essen/Küche\nE.03"), &[], ROOM_STAMP_MIN_PT, 100.0);
         let (_, pt, d, at) = fit_room_stamp(&doc, Some("E.03"), vec![], ROOM_STAMP_PT, 100.0, &room(wmin + 1e-6, hmin + 1e-6));
         assert!(at.is_some() && pt < ROOM_STAMP_PT, "{pt}");
-        assert_eq!(plain_of(d).unwrap().replace('\n', ""), "E.03 Wohnen/Essen/Küche", "nicht gekürzt");
+        assert_eq!(plain_of(d).unwrap().replace('\n', ""), "Wohnen/Essen/KücheE.03", "nicht gekürzt");
         // (c) Auch 2 mm umbrochen zu gross: nur die Raumnummer.
         let (wn, hn) = stamp_size_m(&doc_from_text("E.03"), &[], ROOM_STAMP_MIN_PT, 100.0);
         let (e, pt, d, at) = fit_room_stamp(&doc, Some("E.03"), vec![], ROOM_STAMP_PT, 100.0, &room(wn + 1e-6, hn + 1e-6));
@@ -1945,7 +2019,7 @@ mod tests {
         }
         assert!(!o.is_empty());
         assert!(o.clearance(at, w / 2.0, h / 2.0) > 0.0, "frei: {at:?}");
-        assert_eq!(extra.len(), 2, "Stempel bleibt vollständig");
+        assert_eq!(extra.len(), 1, "Stempel bleibt vollständig");
         // Eigener Anker: bleibt, auch auf dem Hindernis.
         p.rooms.as_mut().unwrap().iter_mut().find(|r| r.id == id).unwrap().stamp_anchor = Some(pole);
         assert_eq!(stamp(&p).0, pole);
@@ -2262,7 +2336,7 @@ mod tests {
         let rooms = serde_json::to_value(&r.rooms).unwrap();
         assert_eq!(rooms[1]["kind"], "text");
         assert_eq!(rooms[1]["extraLines"][0]["text"], "17.01 m²");
-        assert_eq!(rooms[1]["extraLines"][1]["text"], "HNF · Hauptnutzfläche");
+        assert_eq!(rooms[1]["extraLines"].as_array().unwrap().len(), 1, "[177] ohne SIA-Kategorie");
         assert!(r.bounds.is_some());
     }
 
@@ -2888,8 +2962,8 @@ mod tests {
         let s = RoomStamp { name: "Bad".into(), show_floor_area: false, show_usage: false, occupancy: Some(1e21), ..Default::default() };
         assert_eq!(room_stamp_extra_lines(&s, 1.0, SiaCategory::VF)[0].text, "1e+21 Pers.");
         let d = room_stamp_to_doc(&RoomStamp { number: Some("  2 ".into()), name: "Bad".into(), name_line2: Some("  ".into()), ..Default::default() });
-        assert_eq!(d.paragraphs.len(), 1);
-        assert_eq!(d.paragraphs[0].runs[0].text, "2 ");
+        assert_eq!(d.paragraphs.len(), 2);
+        assert_eq!(d.paragraphs[1].runs[0].text, "2");
     }
 
     fn stamp(name: &str) -> RoomStamp {
@@ -2901,10 +2975,11 @@ mod tests {
         assert_eq!(room_stamp_to_doc(&stamp("Bad")).paragraphs.len(), 1);
         assert_eq!(room_stamp_to_doc(&RoomStamp { name_line2: Some("WC".into()), ..stamp("Bad") }).paragraphs.len(), 2);
         let d = room_stamp_to_doc(&RoomStamp { number: Some("1.01".into()), ..stamp("Bad") });
-        assert_eq!(d.paragraphs[0].runs.len(), 2);
-        assert_eq!(d.paragraphs[0].runs[0].text, "1.01 ");
-        assert_eq!(d.paragraphs[0].runs[1].text, "Bad");
-        assert_eq!(d.paragraphs[0].runs[1].marks.bold, Some(true));
+        // [177] Name (fett) in Zeile 1, Nummer in einer eigenen Zeile darunter.
+        assert_eq!(d.paragraphs.len(), 2);
+        assert_eq!(d.paragraphs[0].runs[0].text, "Bad");
+        assert_eq!(d.paragraphs[0].runs[0].marks.bold, Some(true));
+        assert_eq!(d.paragraphs[1].runs[0].text, "1.01");
     }
 
     #[test]
@@ -2919,7 +2994,7 @@ mod tests {
         let o = room_stamp_extra_lines(&RoomStamp { occupancy: Some(4.0), ..off.clone() }, 12.345, SiaCategory::HNF);
         assert_eq!(o.len(), 1);
         assert_eq!(o[0].text, "4 Pers.");
-        assert_eq!(o[0].align, Align::Center);
+        assert_eq!(o[0].align, Align::Left);
         assert_eq!(format_stamp_area(12.345, None), "12.35");
         assert_eq!(format_stamp_area(12.0, None), "12.00");
         // [171] Stellen nach dem Rundungsschritt: „16.0 m²" neben „3.9 m²", nicht „16 m²".

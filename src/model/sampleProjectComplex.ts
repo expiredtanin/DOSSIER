@@ -659,7 +659,7 @@ function addRooms(p: Project): Project {
     const ops = withDocument(p, (d) => d.cmdOps({ cmd: "room", at: [at.x, at.y], ctx: { level, floorHeight: lvl?.floorHeight ?? null, cat: "60", wallType: "" }, stamp: `raum${nr}` }));
     const made = ops.find((o) => o.kind === "add" && o.collection === "rooms");
     if (!made || made.kind !== "add") throw new Error(`Musterhaus komplex: Raum ${nr} nicht erkannt`);
-    const stamp: RoomStamp = { number: nr, name, showFloorArea: true, showUsage: true, roundingStep: 0.1 };
+    const stamp: RoomStamp = { number: nr, name, showFloorArea: true, showUsage: false, roundingStep: 0.1 };
     const room = { ...(made.items[0] as unknown as Room), id: `raum-${nr}`, name, siaCategory: sia, stamp, stampDoc: textDoc([{ text: nr }, { text: name, bold: true }], "center") };
     p = applyOps(p, [{ kind: "add", collection: "rooms", items: [room as unknown as { id: string }] }]);
   }
