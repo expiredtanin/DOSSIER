@@ -172,4 +172,21 @@ mod tests {
         let r = region_at(&p, "L", (0.1, 0.1)).unwrap().outer;
         assert!((area(&r) - std::f64::consts::PI).abs() < 0.01, "{}", area(&r));
     }
+
+    /// [77] Spline (geschlossen) als Begrenzung: tesselliert wie beim Fang.
+    #[test]
+    fn spline_als_rand() {
+        let pts: Vec<_> = [(0.0, 0.0), (2.0, 0.0), (2.0, 2.0), (0.0, 2.0)].iter().map(|p| serde_json::json!({"x": p.0, "y": p.1})).collect();
+        let p = project(serde_json::json!([{"id": "s", "levelId": "L", "categoryCode": "20", "geom": {"shape": "spline", "pts": pts, "closed": true}}]));
+        let r = region_at(&p, "L", (1.0, 1.0)).unwrap().outer;
+        assert!(area(&r) > 3.5 && area(&r) < 7.0, "{}", area(&r));
+        // Offene Spline + Linie schliessen eine Fläche.
+        let pts: Vec<_> = [(0.0, 0.0), (1.0, 1.0), (2.0, 0.0)].iter().map(|p| serde_json::json!({"x": p.0, "y": p.1})).collect();
+        let p = project(serde_json::json!([
+            {"id": "s", "levelId": "L", "categoryCode": "20", "geom": {"shape": "spline", "pts": pts, "closed": false}},
+            line("l", (0.0, 0.0), (2.0, 0.0))
+        ]));
+        let r = region_at(&p, "L", (1.0, 0.3)).unwrap().outer;
+        assert!(area(&r) > 0.8 && area(&r) < 2.0, "{}", area(&r));
+    }
 }

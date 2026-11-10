@@ -76,6 +76,14 @@ impl Xf {
         }
     }
 
+    /// Längenfaktor der Abbildung (nur Skalieren ≠ 1).
+    pub fn scale_k(&self) -> f64 {
+        match *self {
+            Xf::Scale { f, .. } => f,
+            _ => 1.0,
+        }
+    }
+
     /// Verschiebung um `(dx, dy)` (wie `p => ({x: p.x + dx, y: p.y + dy})`).
     pub fn translate(dx: f64, dy: f64) -> Xf {
         Xf::Move { vx: dx, vy: dy }
@@ -315,11 +323,23 @@ fn surface_host(o: &Value) -> Option<(&'static str, &str)> {
 /// gespiegelt aufschlägt (Händigkeit wechselt). Das Scharnier bleibt am selben Pfosten (Start ↦ Start).
 fn mv_wall_opening(o: &Value, xf: &Xf) -> Value {
     let door = field(o, "kind").and_then(Value::as_str) == Some("door") || field(o, "swing").is_some();
-    if !(door && xf.reverses()) {
-        return o.clone();
+    let mut v = o.clone();
+    // Skalieren ([133]): Lage entlang der Wand und Breite wachsen mit dem Faktor mit.
+    let k = xf.scale_k();
+    if k != 1.0 {
+        let mut f = Vec::new();
+        for key in ["position", "width"] {
+            if let Some(x) = field(o, key).and_then(Value::as_f64) {
+                f.push((key, js_num(x * k)));
+            }
+        }
+        v = with_all(&v, f);
     }
-    let right = field(o, "swing").and_then(Value::as_str) == Some("right");
-    with(o, "swing", Value::String(if right { "left" } else { "right" }.into()))
+    if door && xf.reverses() {
+        let right = field(o, "swing").and_then(Value::as_str) == Some("right");
+        v = with(&v, "swing", Value::String(if right { "left" } else { "right" }.into()));
+    }
+    v
 }
 
 /// Wirtswand einer Wandöffnung (leer bei Dach-/Deckenöffnungen).
@@ -780,7 +800,7 @@ pub fn transform_result(root: &Map<String, Value>, p: &Project, req: &TransformR
         let walls = Ids::of(sel.wall_ids.iter().map(String::as_str));
         patch("walls", &|w| walls.has(w) && !locked(w), &|w| mv_wall(w, &xf));
         // Gespiegelte Wände ([134]): Türen ihrer Öffnungen schlagen gespiegelt auf.
-        if xf.reverses() {
+        if xf.reverses() || xf.scale_k() != 1.0 {
             let mirrored: std::collections::HashSet<&str> =
                 list(root, "walls").iter().filter(|w| walls.has(w) && !locked(w)).filter_map(|w| id_of(w)).collect();
             if !mirrored.is_empty() {
@@ -1439,6 +1459,24 @@ mod tests {
         assert_eq!(items[0]["hostRoofId"], json!(new_roof));
         assert_ne!(items[0]["id"], json!("o1"));
         assert_eq!(items[0]["hostPoint"], json!({"x":11,"y":2}));
+    }
+
+    /// [133] Skalieren (Kopie und Original) skaliert Lage und Breite der Wandöffnungen mit.
+    #[test]
+    fn skalieren_skaliert_oeffnungen() {
+        let r = root(json!({
+            "walls":[{"id":"w","start":{"x":1,"y":0},"end":{"x":6,"y":0}}],
+            "openings":[{"id":"d","hostWallId":"w","kind":"door","position":1,"width":0.9}]}));
+        let run = |mode: &str| {
+            let req: TransformReq = serde_json::from_value(json!({"sel":{"wallIds":["w"]},"op":"scale","pts":[[0,0],[1,0],[2,0]],"mode":mode,"count":1,"stamp":"s"})).unwrap();
+            transform_ops(&r, &Project::default(), &req).iter().map(|o| o.to_json()).collect::<Vec<_>>()
+        };
+        let ops = run("copy");
+        let o = ops.iter().find(|o| o["kind"] == "add" && o["collection"] == "openings").unwrap()["items"][0].clone();
+        assert_eq!((o["position"].as_f64(), o["width"].as_f64()), (Some(2.0), Some(1.8)));
+        let ops = run("move");
+        let o = ops.iter().find(|o| o["kind"] == "replace" && o["collection"] == "openings").unwrap()["entity"].clone();
+        assert_eq!((o["position"].as_f64(), o["width"].as_f64()), (Some(2.0), Some(1.8)));
     }
 
     /// [134] Wandöffnungen werden mit ihrer Wand kopiert (Kopie, Reihe, gespiegelte Kopie): neue ids,

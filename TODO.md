@@ -45,7 +45,9 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
 ## Grundriss
 
 - ◐ **[133]** Musterhaus komplex: Rest. Skalieren-Kopie lässt `position`/Breite unverändert; Vollflächen-/Bildschraffur
-  und Schraffur-Löcher beim Ausbreiten fehlen (`src/export/planToSvgString.ts`, Kern `plan/svg.rs`). · S
+  und Schraffur-Löcher beim Ausbreiten fehlen (`src/export/planToSvgString.ts`, Kern `plan/svg.rs`; wegen paralleler
+  Arbeit an `svg.rs` (Bögen) am 10.11. nicht angefasst). (10.11.: Skalieren skaliert `position`/`width` der Wandöffnungen
+  bei Kopie und Original, Test `skalieren_skaliert_oeffnungen`.) · S
 - ◐ **[140]** Plandarstellung. (9.11.: Stempel in Tusche ohne farbige Auszeichnung, eigene Stempel ab 1:200
   verkleinert, IFC-Räume ohne festen Anker, Schatten-Reihenfolge geprüft; Rest der Liste war schon erledigt.)
   Offen: Fang-Punkt des Stempels rechnet mit Detail „mittel“; Deckenspiegel-Stempel ohne Hindernisse; Mac-Gegenprobe
@@ -120,10 +122,12 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
 - ◐ **[26]** Dächer über beliebige Grundrisse (`core/src/roof*.rs`). Kante im Grundriss hervorheben und Kanten-/
   Hof-Griffe (PlanView); Mansarde mit Hof und verschieden geneigten Kanten (zweite Schicht nicht geschlossen);
   Schattenwurf nimmt die Hülle der Dachfläche. · M
-- ◐ **[137]** Alles Sichtbare anwählbar. Nicht anwählbar: Punktwolken, Baurechts-Hüllkörper, Schnittbox (Hilfsdarstellung);
-  Höhenkoten im Schnitt; Geschosse als Auswahl-Art; Achsraster im Blatt nicht verschiebbar; Texte im 3D nur anwählbar,
+- ◐ **[137]** Alles Sichtbare anwählbar. (10.11. bewusst nicht anwählbar, mit Begründung: Punktwolken sind kein
+  Modellelement (Sitzungszustand, Millionen Punkte) — Ausblenden/Entfernen im Lage-Panel („Punktwolken"); Baurechts-Hüllkörper
+  ist Anzeige-Option der Baurecht-Einstellungen (`showEnvelope`), im Plan über die Pseudo-Auswahl `site`/`siteRules` erreichbar,
+  im 3D nur Schalter; eine Schnittbox gibt es (noch) nicht.) Nicht anwählbar: Höhenkoten im Schnitt; Geschosse als Auswahl-Art; Achsraster im Blatt nicht verschiebbar; Texte im 3D nur anwählbar,
   nicht gezeichnet; Klick auf Griff an der Stelle des letzten Klicks schaltet statt zu bewaffnen. · M
-- ◐ **[77]** Zauberstab (Befehl `wand`). In der App nicht geklickt; Splines ohne. · S
+- ◐ **[77]** Zauberstab (Befehl `wand`). In der App nicht geklickt. (10.11.: Splines sind schon Begrenzung — der Fang-Sammler `snap_model` tesselliert sie; Test `spline_als_rand`.) · S
 - ◐ **[81]** Automatische Aussenbemassung (`auto_dimensions`). (9.11.) Schiefe Ketten kreuzen den Grundriss nicht mehr
   (sonst vor alles im Streifen hinausgerückt), getrennte Gebäude eigene Seitenketten (`south2` …), Erker-Facetten ohne
   Stufe. Offen: schiefe Kette kann eine achsparallele Kette kreuzen; Radius von Bogenwänden nicht automatisch. · S
