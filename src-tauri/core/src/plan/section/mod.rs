@@ -27,6 +27,7 @@ mod projection;
 mod primitives;
 mod openings;
 mod query;
+pub mod unfold;
 
 use input::*;
 pub use bands::*;
@@ -52,6 +53,8 @@ mod abzug_faelle;
 mod wand_an_dach;
 #[cfg(test)]
 mod mesh_tests;
+#[cfg(test)]
+mod unfold_tests;
 
 /// Tinte der Schnitt-Poché-Umrisslinie (dunkles Grau).
 const SECTION_INK: &str = "#1f242c";
@@ -113,6 +116,8 @@ impl Plane {
 pub struct LevelSpec {
     pub kind: String,
     pub line: Option<[Vec2; 2]>,
+    /// [176] Knickpunkte zwischen `line[0]` und `line[1]` (geknickter Schnitt, s. `unfold.rs`); leer = gerade.
+    pub bends: Vec<Vec2>,
     pub direction_sign: Option<f64>,
     pub depth: Option<f64>,
     pub shadows: bool,
@@ -134,6 +139,7 @@ impl LevelSpec {
         LevelSpec {
             kind: v.get("kind").and_then(|k| k.as_str()).unwrap_or_default().to_string(),
             line,
+            bends: v.get("bendPoints").and_then(|b| b.as_array()).map(|a| a.iter().filter_map(pt).collect()).unwrap_or_default(),
             direction_sign: num("directionSign"),
             depth: num("depth"),
             shadows: v.get("shadows").and_then(|b| b.as_bool()).unwrap_or(false),
@@ -526,6 +532,15 @@ pub fn read_bodies(buf: &[f64]) -> Option<Vec<BodyMesh>> {
 
 /// `computeSection` (ohne den asynchronen Teil: die Körper-Netze kommen fertig aus TS).
 pub fn compute_section(p: &Project, level: &LevelSpec, bodies: &[BodyMesh]) -> Result<Option<Output>, String> {
+    // [176] Geknickter Schnitt: je Segment, aneinander abgewickelt.
+    match unfold::segments(level) {
+        Some(segs) => unfold::compute_unfolded(p, &segs, bodies),
+        None => compute_plane(p, level, bodies, None),
+    }
+}
+
+/// Schnitt an einer geraden Ebene; mit `strip` ([176]) auf den Streifen eines Segments begrenzt (lokale u).
+fn compute_plane(p: &Project, level: &LevelSpec, bodies: &[BodyMesh], strip: Option<&unfold::Strip>) -> Result<Option<Output>, String> {
     let Some(plane) = level.plane() else { return Ok(None) };
     let walls_r = model3d::emit_walls_with(p, false, false)?;
     let mut slabs_r = model3d::emit_slabs(p);
@@ -578,11 +593,20 @@ pub fn compute_section(p: &Project, level: &LevelSpec, bodies: &[BodyMesh]) -> R
     let (terrain_meshes, meshes): (Vec<_>, Vec<_>) = crate::mesh_view::meshes(p).into_iter().partition(|m| crate::mesh_view::is_terrain(m.mesh));
     let mut mesh_lines = Vec::new();
     append_mesh_sections(&mut cuts, &mut mesh_lines, &meshes, base, u);
+    // [176] Segment eines geknickten Schnitts: Schnittflächen auf den Streifen (sie verdecken nur dort).
+    if let Some(s) = strip {
+        let mut part = Output { cuts, mesh_lines, ..Output::default() };
+        unfold::clip_output(&mut part, s);
+        (cuts, mesh_lines) = (part.cuts, part.mesh_lines);
+    }
     // Projektion hinter der Ebene exakt ([G4]); die Schnittflächen verdecken, was hinter ihnen liegt.
-    let (mut visible, hidden) = projection_edges(p, &plane, &walls_r, &wi, &slabs_r, &bodies, &meshes, &cuts, level.hidden_lines, level.depth);
+    let (mut visible, hidden) = projection_edges(p, &plane, &walls_r, &wi, &slabs_r, &bodies, &meshes, &cuts, level.hidden_lines, level.depth, strip.map_or(&[][..], |s| &s.half[..]));
     shaped_projection(&mut visible, p, &walls_r, &plane);
     let meshes = meshes.iter().map(|m| MeshMeta { id: m.mesh.id.clone(), name: m.mesh.name.clone(), category: m.mesh.category_code.clone() }).collect();
     let mut out = Output { cuts, visible, hidden, profiles: Vec::new(), earth: Vec::new(), terrain_id: None, meshes, mesh_lines };
     append_terrain_profiles(&mut out, p, base, u, &terrain_meshes);
+    if let Some(s) = strip {
+        unfold::clip_output(&mut out, s);
+    }
     Ok(Some(out))
 }

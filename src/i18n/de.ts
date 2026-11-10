@@ -1907,6 +1907,7 @@ export const de = {
   "cmd.sectionline.label": "Schnittlinie",
   "cmd.sectionline.start": "Schnitt-Startpunkt:",
   "cmd.sectionline.end": "Schnitt-Endpunkt:",
+  "cmd.sectionline.next": "Knickpunkt oder Endpunkt (Enter/Doppelklick beendet):",
   "cmd.sectionline.kind.section": "Schnitt",
   "cmd.sectionline.kind.elevation": "Ansicht",
   "cmd.sectionline.newSection": "Schnitt {letter}",

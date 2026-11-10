@@ -13,7 +13,10 @@ function commitLine(p: Project, a: Vec2, b: Vec2, kind: "section" | "elevation")
   let s = sectionLineCommand.init();
   [s] = sectionLineCommand.onInput(s, { kind: "option", id: kind }, ctx);
   [s] = sectionLineCommand.onInput(s, { kind: "point", point: a }, ctx);
-  const [, res] = sectionLineCommand.onInput(s, { kind: "point", point: b }, ctx);
+  let res;
+  [s, res] = sectionLineCommand.onInput(s, { kind: "point", point: b }, ctx);
+  // [176] Schnitt: weitere Klicks wären Knicke, Enter beendet.
+  if (!res.commit) [, res] = sectionLineCommand.onConfirm(s, ctx);
   const ops = res.commit!.toOps(p);
   return ops.length ? applyOps(p, ops) : p;
 }
@@ -111,5 +114,32 @@ describe("sectionline — Name der neuen Ebene", () => {
       { id: "s1", name: "Schnitt A", kind: "section", visible: true, locked: false, linePoints: [{ x: 0, y: 0 }, { x: 1, y: 0 }] },
     ]);
     expect(nextLevelName(p1, "section")).toContain("B");
+  });
+});
+
+describe("sectionline — geknickter Schnitt [176]", () => {
+  it("weitere Klicks werden Knickpunkte, Enter beendet; Doppelklick-Punkt zählt nicht doppelt", () => {
+    const p = projectWith([{ id: "eg", name: "EG", kind: "floor", visible: true, locked: false }]);
+    const ctx = { project: p, level: { id: "eg", kind: "floor" }, defaultCategoryCode: "20", activeWallTypeId: "", selection: { wallIds: [], drawingId: null } } as unknown as CommandContext;
+    let s = sectionLineCommand.init();
+    [s] = sectionLineCommand.onInput(s, { kind: "point", point: { x: 0, y: 0 } }, ctx);
+    let res;
+    [s, res] = sectionLineCommand.onInput(s, { kind: "point", point: { x: 6, y: 0 } }, ctx);
+    expect(res.commit).toBeUndefined();
+    expect(sectionLineCommand.prompt(s)).toBe("cmd.sectionline.next");
+    [s] = sectionLineCommand.onInput(s, { kind: "point", point: { x: 6, y: 10 } }, ctx);
+    [s] = sectionLineCommand.onInput(s, { kind: "point", point: { x: 6, y: 10 } }, ctx);
+    [, res] = sectionLineCommand.onConfirm(s, ctx);
+    const out = applyOps(p, res.commit!.toOps(p));
+    const lv = out.drawingLevels.at(-1)!;
+    expect(lv.kind).toBe("section");
+    expect(lv.linePoints).toEqual([{ x: 0, y: 0 }, { x: 6, y: 10 }]);
+    expect(lv.bendPoints).toEqual([{ x: 6, y: 0 }]);
+  });
+
+  it("Ansicht bleibt bei zwei Klicks", () => {
+    const p = projectWith([{ id: "eg", name: "EG", kind: "floor", visible: true, locked: false }]);
+    const out = commitLine(p, a, b, "elevation");
+    expect(out.drawingLevels.at(-1)!.bendPoints).toBeUndefined();
   });
 });

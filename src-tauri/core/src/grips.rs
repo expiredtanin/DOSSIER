@@ -259,6 +259,11 @@ pub fn run(lk: &Lookup, req: &Request) -> Result<GripResult, String> {
         }
         // [68] Baugrube: Umriss-Ecke ziehen; der Index hinter der letzten Ecke ist der Sohlen-Griff
         // (Lage = Schwerpunkt, y um die Sohlenhöhe versetzt: Ziehen setzt `bottom` = y − Schwerpunkt-y).
+        // [176] Schnittlinie: Griff 0 = Anfang, letzter = Ende, dazwischen die Knickpunkte (`bendPoints`).
+        "sectionLineGrip" => {
+            let (index, (x, y)) = (r.n("index"), r.p("pt"));
+            patch("drawingLevels", r.s("id"), &|e| section_line_grip(e, index, x, y)).into()
+        }
         "excavationGrip" => {
             let (index, (x, y)) = (r.n("index"), r.p("pt"));
             patch("context", r.s("id"), &|e| {
@@ -432,6 +437,23 @@ fn wall_grip(w: &Value, index: f64, x: f64, y: f64, fixed_center: bool, arc_leng
         }
     }
     with(w, if index == 0.0 { "start" } else { "end" }, pt(x, y))
+}
+
+/// [176] Griff einer Schnitt-/Ansichtslinie ziehen: Index 0 = `linePoints[0]`, 1…n = `bendPoints`,
+/// n + 1 = `linePoints[1]` (Reihenfolge entlang der Linie).
+fn section_line_grip(e: &Value, index: f64, x: f64, y: f64) -> Option<Value> {
+    let line = field(e, "linePoints")?.as_array()?;
+    if line.len() < 2 {
+        return None;
+    }
+    let bends: &[Value] = field(e, "bendPoints").and_then(Value::as_array).map_or(&[], Vec::as_slice);
+    let n = bends.len();
+    let i = index_in(index, n + 2)?;
+    if i == 0 || i == n + 1 {
+        let k = if i == 0 { 0.0 } else { 1.0 };
+        return Some(with(e, "linePoints", replace_at(line, k, &pt(x, y))));
+    }
+    Some(with(e, "bendPoints", replace_at(bends, (i - 1) as f64, &pt(x, y))))
 }
 
 fn wall_moved(w: &Value, dx: f64, dy: f64) -> Value {
@@ -1544,6 +1566,27 @@ mod tests {
         let e = ent(json!({"op": "excavationGrip", "id": "bg", "index": 4, "pt": [2, -1]}));
         assert_eq!(e["bottom"], json!(-3));
         assert_eq!(e["outline"][2], json!({"x": 4, "y": 4}));
+    }
+
+    /// [176] Schnittlinie: Endpunkte und Knickpunkte als Griffe.
+    #[test]
+    fn schnittlinie_griffe() {
+        let lv = json!({"id": "s", "kind": "section", "linePoints": [{"x": 0, "y": 0}, {"x": 6, "y": 10}], "bendPoints": [{"x": 6, "y": 0}], "directionSign": 1});
+        let r = root(json!({"drawingLevels": [lv]}));
+        let ent = |v: Value| run(&Lookup::plain(&r), &rq(v)).unwrap().ops.first().map(|o| o.to_json()["entity"].clone());
+        let e = ent(json!({"op": "sectionLineGrip", "id": "s", "index": 1, "pt": [7, -1]})).unwrap();
+        assert_eq!(e["bendPoints"], json!([{"x": 7, "y": -1}]));
+        assert_eq!(e["linePoints"][1], json!({"x": 6, "y": 10}));
+        let e = ent(json!({"op": "sectionLineGrip", "id": "s", "index": 2, "pt": [5, 9]})).unwrap();
+        assert_eq!(e["linePoints"][1], json!({"x": 5, "y": 9}));
+        let e = ent(json!({"op": "sectionLineGrip", "id": "s", "index": 0, "pt": [1, 1]})).unwrap();
+        assert_eq!(e["linePoints"][0], json!({"x": 1, "y": 1}));
+        assert!(ent(json!({"op": "sectionLineGrip", "id": "s", "index": 3, "pt": [1, 1]})).is_none());
+        // Gerade Linie (ohne Knicke): Index 1 = Ende.
+        let r2 = root(json!({"drawingLevels": [{"id": "g", "kind": "section", "linePoints": [{"x": 0, "y": 0}, {"x": 5, "y": 0}]}]}));
+        let res = run(&Lookup::plain(&r2), &rq(json!({"op": "sectionLineGrip", "id": "g", "index": 1, "pt": [4, 2]}))).unwrap();
+        assert_eq!(entity(&res)["linePoints"][1], json!({"x": 4, "y": 2}));
+        assert!(entity(&res).get("bendPoints").is_none());
     }
 
     #[test]

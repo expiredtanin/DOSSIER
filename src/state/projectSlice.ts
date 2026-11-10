@@ -386,6 +386,8 @@ export interface ProjectSlice {
   moveCeilingGrip: (ceilingId: string, index: number, pt: Vec2) => void;
   /** [68] Baugrube: Umriss-Ecke ziehen (Index = Ecke; Index = Eckenzahl: Sohlenhöhe). */
   moveExcavationGrip: (id: string, index: number, pt: Vec2) => void;
+  /** [176] Griff einer Schnittlinie: 0 = Anfang, dann die Knickpunkte, zuletzt das Ende. */
+  moveSectionLineGrip: (id: string, index: number, pt: Vec2) => void;
   moveExcavationEdge: (id: string, aIndex: number, bIndex: number, delta: Vec2) => void;
   /** Verschiebt eine Decke (ganzer Umriss) um `delta`. */
   moveCeilingBy: (ceilingId: string, delta: Vec2) => void;
@@ -1240,6 +1242,7 @@ export function createProjectSlice(
       applyGrip({ op: "ceilingGrip", id: ceilingId, index, pt: gripPt(pt) }, `moveCeilingGrip:${ceilingId}:${index}`),
 
     moveExcavationGrip: (id, index, pt) => applyGrip({ op: "excavationGrip", id, index, pt: gripPt(pt) }, `moveExcavationGrip:${id}:${index}`),
+    moveSectionLineGrip: (id, index, pt) => applyGrip({ op: "sectionLineGrip", id, index, pt: gripPt(pt) }, `moveSectionLineGrip:${id}:${index}`),
 
     moveExcavationEdge: (id, aIndex, bIndex, delta) =>
       applyGrip({ op: "excavationEdge", id, a: aIndex, b: bIndex, delta: gripPt(delta) }, `moveExcavationEdge:${id}:${aIndex}:${bIndex}`),

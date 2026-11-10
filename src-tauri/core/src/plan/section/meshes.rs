@@ -154,7 +154,7 @@ fn upper_edge(ring: &[[f64; 2]]) -> Vec<Vec<[f64; 2]>> {
 }
 
 /// `clipLineToU`.
-fn clip_line_to_u(pts: &[[f64; 2]], lo: f64, hi: f64) -> Vec<Vec<[f64; 2]>> {
+pub(super) fn clip_line_to_u(pts: &[[f64; 2]], lo: f64, hi: f64) -> Vec<Vec<[f64; 2]>> {
     let mut out = Vec::new();
     let mut cur: Vec<[f64; 2]> = Vec::new();
     fn flush(cur: &mut Vec<[f64; 2]>, out: &mut Vec<Vec<[f64; 2]>>) {

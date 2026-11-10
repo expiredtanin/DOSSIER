@@ -1896,6 +1896,7 @@ export const en: Record<TranslationKey, string> = {
   "cmd.sectionline.label": "Section line",
   "cmd.sectionline.start": "Section start point:",
   "cmd.sectionline.end": "Section end point:",
+  "cmd.sectionline.next": "Bend point or end point (Enter/double-click finishes):",
   "cmd.sectionline.kind.section": "Section",
   "cmd.sectionline.kind.elevation": "Elevation",
   "cmd.sectionline.newSection": "Section {letter}",

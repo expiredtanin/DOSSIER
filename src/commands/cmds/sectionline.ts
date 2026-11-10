@@ -5,7 +5,9 @@
 //
 // Schritte:
 //   1) „Schnitt-Startpunkt:" → Punkt
-//   2) „Schnitt-Endpunkt:"   → Live-Linie + Richtungspfeil; Klick committet.
+//   2) „Schnitt-Endpunkt:"   → Live-Linie + Richtungspfeil; Klick committet (Ansicht).
+//      Schnitt ([176]): jeder weitere Klick setzt einen Knickpunkt (geknickter Schnitt), Enter/Doppelklick
+//      beendet mit dem letzten Punkt als Ende (`bendPoints` = die Punkte dazwischen).
 //
 // Ziel-Ebene (im Commit bestimmt): existiert GENAU EINE Ebene der gewählten Art
 // OHNE gesetzte Linie (frisch angelegter Platzhalter), wird deren Linie gesetzt;
@@ -41,12 +43,13 @@ const KIND_IDS = new Set(KIND_OPTIONS.map((o) => o.id));
  * Vorschau: Schnittlinie + Richtungspfeil (Kern, `cmd_solid.rs`: vom Mittelpunkt entlang der
  * Blicknormalen, zwei Flügel) + Länge im HUD.
  */
-function lineDraft(ctx: CommandContext, a: Vec2, cursor: Vec2 | null): ToolDraft {
-  if (!cursor) return { preview: [{ kind: "poly", pts: [a] }], vertices: [a] };
-  const draft: ToolDraft = { preview: createPreview(ctx, { cmd: "sectionline" }, [a, cursor]).shapes, vertices: [a] };
+function lineDraft(ctx: CommandContext, pts: Vec2[], cursor: Vec2 | null): ToolDraft {
+  if (!cursor) return { preview: [{ kind: "poly", pts }], vertices: pts };
+  const last = pts[pts.length - 1];
+  const draft: ToolDraft = { preview: createPreview(ctx, { cmd: "sectionline" }, [...pts, cursor]).shapes, vertices: pts };
   draft.hud = {
     at: cursor,
-    text: `${Math.hypot(cursor.x - a.x, cursor.y - a.y).toFixed(2)} m`,
+    text: `${Math.hypot(cursor.x - last.x, cursor.y - last.y).toFixed(2)} m`,
   };
   return draft;
 }
@@ -55,9 +58,9 @@ function lineDraft(ctx: CommandContext, a: Vec2, cursor: Vec2 | null): ToolDraft
  * Commit (Kern): Linie [a, b] auf die EINE Ebene der Art ohne Linie, sonst eine neue Ebene (Name aus der
  * Vorlage, Buchstaben A, B, … nach Anzahl der Ebenen dieser Art); zu kurze Linien (< 0.1 m) → nichts.
  */
-function lineMutation(ctx: CommandContext, a: Vec2, b: Vec2, kind: LineKind) {
+function lineMutation(ctx: CommandContext, a: Vec2, b: Vec2, kind: LineKind, bends: Vec2[] = []) {
   const key = kind === "section" ? "cmd.sectionline.newSection" : "cmd.sectionline.newElevation";
-  return createMutation(ctx, { cmd: "sectionline", a, b, kind, name: t(key, { letter: "\u0001" }) });
+  return createMutation(ctx, { cmd: "sectionline", a, b, kind, name: t(key, { letter: "\u0001" }), ...(bends.length ? { bends } : {}) });
 }
 
 interface LineIdle extends CommandState {
@@ -67,6 +70,8 @@ interface LineIdle extends CommandState {
 interface LineEnd extends CommandState {
   phase: "end";
   a: Vec2;
+  /** [176] Weitere Klicks (Schnitt): Knickpunkte, der letzte wird beim Beenden das Ende. */
+  pts: Vec2[];
   cursor: Vec2 | null;
   kind: LineKind;
 }
@@ -85,7 +90,11 @@ function makeCommand(name: string, startKind: LineKind): Command {
     // auf freien Zeichnungsebenen nutzbar bleiben; die Prüfung übernimmt der
     // Grundriss-Kontext (keine harte Sperre nötig).
     floorOnly: true,
-    prompt: (s) => ((s as LineState).phase === "end" ? "cmd.sectionline.end" : "cmd.sectionline.start"),
+    prompt: (s) => {
+      const st = s as LineState;
+      if (st.phase !== "end") return "cmd.sectionline.start";
+      return st.kind === "section" && st.pts.length > 0 ? "cmd.sectionline.next" : "cmd.sectionline.end";
+    },
     accepts: () => ["point", "option"],
     options: () => KIND_OPTIONS,
     init: (): LineIdle => ({ phase: "start", kind: startKind, lastPoint: null }),
@@ -95,28 +104,36 @@ function makeCommand(name: string, startKind: LineKind): Command {
       if (input.kind === "option" && KIND_IDS.has(input.id)) {
         const ns = { ...s, kind: input.id as LineKind } as LineState;
         const draft =
-          ns.phase === "end" ? lineDraft(ctx, ns.a, ns.cursor) : null;
+          ns.phase === "end" ? lineDraft(ctx, [ns.a, ...ns.pts], ns.cursor) : null;
         return [ns, { draft }];
       }
       if (input.kind !== "point") {
         return [
           s,
-          { draft: s.phase === "end" ? lineDraft(ctx, s.a, s.cursor) : null },
+          { draft: s.phase === "end" ? lineDraft(ctx, [s.a, ...s.pts], s.cursor) : null },
         ];
       }
       if (s.phase !== "end") {
         const ns: LineEnd = {
           phase: "end",
           a: input.point,
+          pts: [],
           cursor: input.point,
           kind: s.kind,
           lastPoint: input.point,
         };
-        return [ns, { draft: lineDraft(ctx, input.point, input.point) }];
+        return [ns, { draft: lineDraft(ctx, [input.point], input.point) }];
       }
       const a = s.a;
       const b = input.point;
       const kind = s.kind;
+      if (kind === "section") {
+        // [176] Schnitt: Punkt anhängen (Knick); derselbe Punkt nochmals (Doppelklick) ändert nichts.
+        const last = s.pts.length ? s.pts[s.pts.length - 1] : a;
+        if (Math.hypot(b.x - last.x, b.y - last.y) < 1e-6) return [s, { draft: lineDraft(ctx, [a, ...s.pts], s.cursor) }];
+        const ns: LineEnd = { ...s, pts: [...s.pts, b], cursor: b, lastPoint: b };
+        return [ns, { draft: lineDraft(ctx, [a, ...ns.pts], b) }];
+      }
       return [
         { phase: "start", kind, lastPoint: null } as LineIdle,
         { draft: null, done: true, commit: lineMutation(ctx, a, b, kind) },
@@ -127,10 +144,21 @@ function makeCommand(name: string, startKind: LineKind): Command {
       const s = state as LineState;
       if (s.phase !== "end") return [s, { draft: null }];
       const ns: LineEnd = { ...s, cursor: point };
-      return [ns, { draft: lineDraft(ctx, s.a, point) }];
+      return [ns, { draft: lineDraft(ctx, [s.a, ...s.pts], point) }];
     },
 
-    onConfirm: (state): [CommandState, CommandResult] => idle((state as LineState).kind),
+    // [176] Enter/Doppelklick: geknickten Schnitt mit dem letzten Punkt als Ende setzen.
+    onConfirm: (state, ctx): [CommandState, CommandResult] => {
+      const s = state as LineState;
+      if (s.phase === "end" && s.pts.length > 0) {
+        const b = s.pts[s.pts.length - 1];
+        return [
+          { phase: "start", kind: s.kind, lastPoint: null } as LineIdle,
+          { draft: null, done: true, commit: lineMutation(ctx, s.a, b, s.kind, s.pts.slice(0, -1)) },
+        ];
+      }
+      return idle(s.kind);
+    },
     onCancel: (state): [CommandState, CommandResult] => idle((state as LineState).kind),
   };
 }
