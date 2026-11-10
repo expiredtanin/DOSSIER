@@ -802,16 +802,18 @@ pub(super) fn stamp_size_m(doc: &RichTextDoc, extra: &[StampLine], pt: f64, scal
 /// [140] Raumstempel einpassen. `place(breite, höhe)` sucht eine Lage im Raum, an der das Rechteck des
 /// Stempels ganz im Raumumriss liegt (auch L-förmige Räume, `room_area::rect_in_ring`), und gibt sie zurück.
 /// Passt der Stempel (Breite aus der Schriftmetrik, Höhe aus den Zeilen) bei `pt` nirgends, entfallen erst
-/// die Nutzungszeile, dann die Flächenzeile (Zusatzzeilen von hinten), danach sinkt die Schrift auf 2 mm
-/// Papier (je Schrift zuerst der Name mit, dann ohne eigene Schriftgrössen; mit kleinerer Schrift dürfen
-/// Zusatzzeilen wieder dazu), zuletzt wird der Name gekürzt. Ergebnis: Zusatzzeilen,
-/// Schriftgrösse (pt), Ersatz für den Namen (`Some`: ohne Auszeichnungen bzw. gekürzt, „Trep.") und die
-/// Lage (`None`: passt nirgends, der Aufrufer behält seinen Anker).
+/// die Nutzungszeile, dann die Flächenzeile (Zusatzzeilen von hinten). Danach, je Stufe mit allen Zusatzzeilen
+/// neu ([171]): der Name auf zwei Zeilen umbrochen (an `/`, `-`, Leerzeichen; die schmalste Teilung zuerst),
+/// dann die Schrift auf 2 mm Papier (je Schrift zuerst der Name mit, dann ohne eigene Schriftgrössen, dann
+/// umbrochen). Passt auch das nicht, zeigt der Stempel nur die Raumnummer (`number`), erst zuletzt wird der
+/// Name gekürzt (`abbreviate`: nur Wortenden, je Wort mindestens 3 Buchstaben und Punkt). Ergebnis:
+/// Zusatzzeilen, Schriftgrösse (pt), Ersatz für den Namen (`Some`: ohne Auszeichnungen, umbrochen, Nummer
+/// oder gekürzt, „Trep.") und die Lage (`None`: passt nirgends, der Aufrufer behält seinen Anker).
 ///
 /// `place(breite, höhe, frei)`: mit `frei` nur Lagen ohne Überdeckung anderen Planinhalts ([140] Teil 6).
-/// Zuerst sucht die ganze Reihenfolge (ohne Kürzen) eine freie Lage — weniger Zeilen und kleinere Schrift
-/// gehen vor Überdeckung; erst wenn keine Stufe frei liegt, dieselbe Reihenfolge mit Überdeckung.
-fn fit_room_stamp(doc: &RichTextDoc, extra: Vec<StampLine>, pt: f64, scale: f64, place: &dyn Fn(f64, f64, bool) -> Option<Vec2>) -> (Vec<StampLine>, f64, Option<RichTextDoc>, Option<Vec2>) {
+/// Zuerst sucht die ganze Reihenfolge (ohne Nummer/Kürzen) eine freie Lage — weniger Zeilen und kleinere
+/// Schrift gehen vor Überdeckung; erst wenn keine Stufe frei liegt, dieselbe Reihenfolge mit Überdeckung.
+fn fit_room_stamp(doc: &RichTextDoc, number: Option<&str>, extra: Vec<StampLine>, pt: f64, scale: f64, place: &dyn Fn(f64, f64, bool) -> Option<Vec2>) -> (Vec<StampLine>, f64, Option<RichTextDoc>, Option<Vec2>) {
     if !(scale > 0.0) || !scale.is_finite() {
         return (extra, pt, None, None);
     }
@@ -823,32 +825,72 @@ fn fit_room_stamp(doc: &RichTextDoc, extra: Vec<StampLine>, pt: f64, scale: f64,
     // Name mit eigenen Schriftgrössen (Stempel: Name 12 pt fett) schrumpft nicht mit `pt`: dann ohne
     // Auszeichnungen in der Grundschrift (Ersatz `Some`).
     let plain = doc_from_text(&text);
-    let mut steps: Vec<(Option<&RichTextDoc>, f64)> = vec![(None, pt), (Some(&plain), pt)];
+    // Umbrüche, schmalste Teilung zuerst.
+    let mut wraps: Vec<RichTextDoc> = wrap_variants(&text).iter().map(|t| doc_from_text(t)).collect();
+    let width = |d: &RichTextDoc| stamp_size_m(d, &[], ROOM_STAMP_MIN_PT, scale).0;
+    wraps.sort_by(|a, b| width(a).total_cmp(&width(b)));
+    let wrapped: Vec<Option<&RichTextDoc>> = wraps.iter().map(Some).collect();
+    let mut steps: Vec<(Vec<Option<&RichTextDoc>>, f64)> = vec![(vec![None], pt), (vec![Some(&plain)], pt), (wrapped.clone(), pt)];
     if pt > ROOM_STAMP_MIN_PT {
-        steps.extend([(None, ROOM_STAMP_MIN_PT), (Some(&plain), ROOM_STAMP_MIN_PT)]);
+        steps.extend([(vec![None], ROOM_STAMP_MIN_PT), (vec![Some(&plain)], ROOM_STAMP_MIN_PT), (wrapped, ROOM_STAMP_MIN_PT)]);
     }
     for free in [true, false] {
-        for &(variant, pt) in &steps {
-            let mut e = extra.clone();
-            loop {
-                if let Some(q) = at(variant.unwrap_or(doc), &e, pt, free) {
-                    return (e, pt, variant.cloned(), Some(q));
-                }
-                if e.pop().is_none() {
-                    break;
+        for (variants, pt) in &steps {
+            for &variant in variants {
+                let mut e = extra.clone();
+                loop {
+                    if let Some(q) = at(variant.unwrap_or(doc), &e, *pt, free) {
+                        return (e, *pt, variant.cloned(), Some(q));
+                    }
+                    if e.pop().is_none() {
+                        break;
+                    }
                 }
             }
         }
     }
     let pt = pt.min(ROOM_STAMP_MIN_PT);
-    let longest = text.split('\n').map(|l| l.chars().count()).max().unwrap_or(0);
-    for n in (2..longest).rev() {
-        let d = doc_from_text(&abbreviate(&text, n));
+    if let Some(n) = number.map(str::trim).filter(|n| !n.is_empty()) {
+        let d = doc_from_text(n);
         if let Some(q) = at(&d, &[], pt, false) {
             return (Vec::new(), pt, Some(d), Some(q));
         }
     }
-    (Vec::new(), pt, Some(doc_from_text(&abbreviate(&text, 2))), None)
+    let longest = text.split('\n').map(|l| l.chars().count()).max().unwrap_or(0);
+    let mut shortest = None;
+    for n in (2..longest).rev() {
+        let Some(t) = abbreviate(&text, n) else { continue };
+        let d = doc_from_text(&t);
+        if let Some(q) = at(&d, &[], pt, false) {
+            return (Vec::new(), pt, Some(d), Some(q));
+        }
+        shortest = Some(d);
+    }
+    (Vec::new(), pt, Some(shortest.unwrap_or(plain)), None)
+}
+
+/// [171] Namen auf zwei Zeilen umbrochen: die längste Zeile an jedem Trenner geteilt (nach `/` und `-`
+/// bleibt das Zeichen am Zeilenende, ein Leerzeichen entfällt). Eine Zeile ohne Trenner gibt keine Variante.
+fn wrap_variants(text: &str) -> Vec<String> {
+    let lines: Vec<&str> = text.split('\n').collect();
+    let Some((li, line)) = lines.iter().enumerate().max_by_key(|(i, l)| (l.chars().count(), std::cmp::Reverse(*i))) else { return Vec::new() };
+    let chars: Vec<char> = line.chars().collect();
+    let mut out = Vec::new();
+    for (i, ch) in chars.iter().enumerate() {
+        let (cut, skip) = match ch {
+            '/' | '-' => (i + 1, 0),
+            ' ' => (i, 1),
+            _ => continue,
+        };
+        let (a, b): (String, String) = (chars[..cut].iter().collect(), chars[cut + skip..].iter().collect());
+        if a.trim().is_empty() || b.trim().is_empty() {
+            continue;
+        }
+        let mut ls: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
+        ls.splice(li..=li, [a, b]);
+        out.push(ls.join("\n"));
+    }
+    out
 }
 
 /// [140] Lagen für einen Raumstempel ohne eigenen Anker: zuerst der Pol der Unzugänglichkeit, dann Punkte
@@ -882,19 +924,22 @@ fn ring_bounds(ring: &[[f64; 2]]) -> [f64; 4] {
     ring.iter().fold([f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY], |b, q| [b[0].min(q[0]), b[1].min(q[1]), b[2].max(q[0]), b[3].max(q[1])])
 }
 
-/// Namenszeilen auf höchstens `n` Zeichen kürzen. Einzelne Wörter: `n − 1` Zeichen und Punkt, Leerzeichen am
-/// Schnitt weg. Zeilen aus mehreren Wörtern (Trenner Leerzeichen, `/`, `-`) kürzen die Wörter der Reihe nach
-/// (jeweils das längste um ein Zeichen, mit Punkt, nicht unter 3 Zeichen; kurze Wörter von höchstens 4 Zeichen
-/// bleiben) — „Wohnen/Essen/Küche" wird „Wohn./Ess./Küc." statt „Wohnen/Essen." ([171]: kein Wort fällt weg).
-fn abbreviate(text: &str, n: usize) -> String {
-    text.split('\n').map(|l| abbreviate_line(l, n)).collect::<Vec<_>>().join("\n")
+/// Namenszeilen auf höchstens `n` Zeichen kürzen, nur am Ende eines Wortes und mit sinnvollen Längen
+/// ([171]): ein gekürztes Wort zeigt mindestens 3 Buchstaben und einen Punkt. Einzelne Wörter: `n − 1`
+/// Zeichen und Punkt, Leerzeichen am Schnitt weg. Zeilen aus mehreren Wörtern (Trenner Leerzeichen, `/`,
+/// `-`) kürzen die Wörter der Reihe nach (jeweils das längste um ein Zeichen; kurze Wörter von höchstens
+/// 4 Zeichen bleiben) — „Wohnen/Essen/Küche" wird bei Platz „Wohn./Ess./Küche", nie „Wo./Es.". `None`:
+/// so kurz geht es nicht mehr sinnvoll.
+fn abbreviate(text: &str, n: usize) -> Option<String> {
+    text.split('\n').map(|l| abbreviate_line(l, n)).collect::<Option<Vec<_>>>().map(|v| v.join("\n"))
 }
 
-fn abbreviate_line(l: &str, n: usize) -> String {
+fn abbreviate_line(l: &str, n: usize) -> Option<String> {
     if l.chars().count() <= n {
-        return l.to_string();
+        return Some(l.to_string());
     }
-    let chop = |l: &str| format!("{}.", l.chars().take(n.saturating_sub(1).max(1)).collect::<String>().trim_end());
+    // Mindestens 3 Buchstaben und ein Punkt.
+    let chop = |l: &str| (n >= 4).then(|| format!("{}.", l.chars().take(n - 1).collect::<String>().trim_end()));
     // Wörter und Trenner abwechselnd: (Text, ist_Trenner).
     let mut parts: Vec<(String, bool)> = Vec::new();
     for ch in l.chars() {
@@ -914,14 +959,18 @@ fn abbreviate_line(l: &str, n: usize) -> String {
     let shown = |i: usize, keep: &[usize]| if keep[i] == full[i] { full[i] } else { keep[i] + 1 };
     let total = |keep: &[usize]| (0..parts.len()).map(|i| if parts[i].1 { full[i] } else { shown(i, keep) }).sum::<usize>();
     while total(&keep) > n {
-        let Some(&i) = words.iter().filter(|&&i| full[i] > 4 && shown(i, &keep) > 3).max_by_key(|&&i| (shown(i, &keep), keep[i] == full[i], std::cmp::Reverse(i))) else { return chop(l) };
-        keep[i] = if keep[i] == full[i] { full[i] - 2 } else { keep[i] - 1 };
+        // Kürzbar: nach dem Schritt bleiben mindestens 3 Buchstaben.
+        let next = |i: usize, keep: &[usize]| if keep[i] == full[i] { full[i].saturating_sub(2) } else { keep[i] - 1 };
+        let i = *words.iter().filter(|&&i| full[i] > 4 && next(i, &keep) >= 3).max_by_key(|&&i| (shown(i, &keep), keep[i] == full[i], std::cmp::Reverse(i)))?;
+        keep[i] = next(i, &keep);
     }
-    parts
-        .iter()
-        .enumerate()
-        .map(|(i, (t, sep))| if *sep || keep[i] == full[i] { t.clone() } else { format!("{}.", t.chars().take(keep[i]).collect::<String>()) })
-        .collect()
+    Some(
+        parts
+            .iter()
+            .enumerate()
+            .map(|(i, (t, sep))| if *sep || keep[i] == full[i] { t.clone() } else { format!("{}.", t.chars().take(keep[i]).collect::<String>()) })
+            .collect(),
+    )
 }
 
 /// [140] Hindernisse für Raumstempel aus den schon erzeugten Domänen: Treppen (alle Striche), Türschwenk-Bögen,
@@ -1073,7 +1122,8 @@ fn rooms(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds, obstacles: &sup
         let obst = if room.stamp_anchor.is_some() { Default::default() } else { obstacles.within(ring_bounds(&pts)) };
         let clear = STAMP_CLEAR_MM * c.a.scale / 1000.0;
         let place = |w: f64, h: f64, free: bool| place_stamp(&pts, &candidates, &obst, clear, w, h, free);
-        let (extra_lines, base_pt, name, placed) = fit_room_stamp(&doc, extra_lines, if small { ROOM_STAMP_SMALL_PT } else { ROOM_STAMP_PT }, c.a.scale, &place);
+        let number = room.stamp.as_ref().and_then(|s| s.number.clone());
+        let (extra_lines, base_pt, name, placed) = fit_room_stamp(&doc, number.as_deref(), extra_lines, if small { ROOM_STAMP_SMALL_PT } else { ROOM_STAMP_PT }, c.a.scale, &place);
         let at = placed.unwrap_or(at);
         let doc = name.unwrap_or(doc);
         out.push(Primitive::Text { at, doc, extra_lines, base_pt, color: text_color.into(), room_id: Some(room.id.clone()), greyed, opacity: None });
@@ -1682,31 +1732,31 @@ mod tests {
         let extra = || vec![StampLine { text: "4.6 m²".into(), align: Align::Center }, StampLine { text: "NNF · Nebennutzfläche".into(), align: Align::Center }];
         let name = doc_from_text("E.04 Bad");
         let room = |w: f64, h: f64| move |sw: f64, sh: f64, _free: bool| (sw <= w && sh <= h).then_some(Vec2 { x: 0.0, y: 0.0 });
-        let (e, pt, d, _) = fit_room_stamp(&name, extra(), ROOM_STAMP_PT, 100.0, &room(6.0, 4.0));
+        let (e, pt, d, _) = fit_room_stamp(&name, None, extra(), ROOM_STAMP_PT, 100.0, &room(6.0, 4.0));
         assert_eq!((e.len(), pt, d.is_none()), (2, ROOM_STAMP_PT, true));
-        let (e, pt, _, _) = fit_room_stamp(&name, extra(), ROOM_STAMP_PT, 100.0, &room(1.8, 2.4));
+        let (e, pt, _, _) = fit_room_stamp(&name, None, extra(), ROOM_STAMP_PT, 100.0, &room(1.8, 2.4));
         assert_eq!((e.len(), pt), (1, ROOM_STAMP_PT), "ohne Nutzung");
-        let (e, pt, _, _) = fit_room_stamp(&name, extra(), ROOM_STAMP_PT, 100.0, &room(1.8, 0.6));
+        let (e, pt, _, _) = fit_room_stamp(&name, None, extra(), ROOM_STAMP_PT, 100.0, &room(1.8, 0.6));
         assert_eq!((e.len(), pt), (0, ROOM_STAMP_PT), "nur der Name");
-        let (e, pt, d, at) = fit_room_stamp(&name, extra(), ROOM_STAMP_PT, 100.0, &room(1.2, 0.8));
+        let (e, pt, d, at) = fit_room_stamp(&name, None, extra(), ROOM_STAMP_PT, 100.0, &room(1.2, 0.8));
         // In 2 mm passt die Flächenzeile wieder dazu.
         assert_eq!((e.len(), d.is_none(), at.is_some()), (1, true, true));
         assert!((pt * PT_MM - 2.0).abs() < 1e-9, "2 mm Papier");
         // 1:500, „Treppenhaus" in 3 m: auch 2 mm (1 m Schrift) zu breit → gekürzt, so dass es passt.
-        let (_, _, d, _) = fit_room_stamp(&doc_from_text("Treppenhaus"), vec![], ROOM_STAMP_SMALL_PT, 500.0, &room(3.0, 4.0));
+        let (_, _, d, _) = fit_room_stamp(&doc_from_text("Treppenhaus"), None, vec![], ROOM_STAMP_SMALL_PT, 500.0, &room(3.0, 4.0));
         let t = crate::text_layout::plain_text(&d.unwrap());
         assert!(t.ends_with('.') && t.len() >= 4 && t.len() <= 7, "{t}");
         let (w, _) = stamp_size_m(&doc_from_text(&t), &[], ROOM_STAMP_MIN_PT, 500.0);
         assert!(w <= 3.0, "{w}");
         // Name mit eigener Grösse (12 pt fett) schrumpft nicht mit der Schrift: in 2 mm ohne Auszeichnung.
         let s = RoomStamp { number: Some("E.03".into()), name: "Wohnen/Essen".into(), ..Default::default() };
-        let (_, _, d, _) = fit_room_stamp(&room_stamp_to_doc(&s), vec![], ROOM_STAMP_PT, 100.0, &room(3.0, 2.0));
-        assert_eq!(crate::text_layout::plain_text(&d.unwrap()), "E.03 Wohnen/Essen");
+        let (_, _, d, _) = fit_room_stamp(&room_stamp_to_doc(&s), None, vec![], ROOM_STAMP_PT, 100.0, &room(3.0, 2.0));
+        assert_eq!(crate::text_layout::plain_text(&d.unwrap()).replace('\n', ""), "E.03 Wohnen/Essen", "ohne Auszeichnung, ggf. umbrochen");
         // Schmale Zeichen passen besser als breite (echte Metrik statt fester Zeichenbreite).
         let (wi, _) = stamp_size_m(&doc_from_text("Lift"), &[], ROOM_STAMP_PT, 100.0);
         let (ww, _) = stamp_size_m(&doc_from_text("WMWM"), &[], ROOM_STAMP_PT, 100.0);
         assert!(wi < 0.6 * ww, "{wi} {ww}");
-        assert_eq!(abbreviate("Treppenhaus", 5), "Trep.");
+        assert_eq!(abbreviate("Treppenhaus", 5).as_deref(), Some("Trep."));
         // [140] Teil 6: Frei liegt nur ein niedriger Stempel (neben der Treppe), überdeckt passt alles an den Pol:
         // erst Zeilen weglassen, dann Schrift verkleinern — bevor Überdeckung in Kauf genommen wird.
         let pole = Vec2 { x: 0.0, y: 0.0 };
@@ -1714,20 +1764,57 @@ mod tests {
         let (_, h_name) = stamp_size_m(&name, &[], ROOM_STAMP_PT, 100.0);
         let (_, h_one) = stamp_size_m(&name, &extra()[..1], ROOM_STAMP_PT, 100.0);
         let narrow = move |h_free: f64| move |_w: f64, h: f64, free: bool| if free { (h <= h_free).then_some(side) } else { Some(pole) };
-        let (e, pt, _, at) = fit_room_stamp(&name, extra(), ROOM_STAMP_PT, 100.0, &narrow(h_one + 1e-9));
+        let (e, pt, _, at) = fit_room_stamp(&name, None, extra(), ROOM_STAMP_PT, 100.0, &narrow(h_one + 1e-9));
         assert_eq!((e.len(), pt, at), (1, ROOM_STAMP_PT, Some(side)), "ohne Nutzungszeile frei");
-        let (e, pt, _, at) = fit_room_stamp(&name, extra(), ROOM_STAMP_PT, 100.0, &narrow(h_name - 1e-6));
+        let (e, pt, _, at) = fit_room_stamp(&name, None, extra(), ROOM_STAMP_PT, 100.0, &narrow(h_name - 1e-6));
         assert!(pt < ROOM_STAMP_PT && at == Some(side), "kleinere Schrift frei: {} {:?} {}", pt, at, e.len());
-        let (e, pt, _, at) = fit_room_stamp(&name, extra(), ROOM_STAMP_PT, 100.0, &narrow(0.0));
+        let (e, pt, _, at) = fit_room_stamp(&name, None, extra(), ROOM_STAMP_PT, 100.0, &narrow(0.0));
         assert_eq!((e.len(), pt, at), (2, ROOM_STAMP_PT, Some(pole)), "nirgends frei: ganzer Stempel mit Überdeckung");
-        assert_eq!(abbreviate("Bad", 5), "Bad");
-        // [171] Mehrere Wörter: alle bleiben sichtbar, die Wörter werden gekürzt (nicht der Schluss abgeschnitten).
-        let a = abbreviate("Wohnen/Essen/Küche", 13);
-        let w: Vec<&str> = a.split('/').collect();
-        assert!(a.chars().count() <= 13 && w.len() == 3 && w[0].starts_with("Wo") && w[1].starts_with("Es") && w[2].starts_with("Kü"), "{a}");
-        assert!(abbreviate("Wohnen/Essen/Küche", 16).starts_with("Wohn."), "genug Platz: längere Wörter");
-        assert!(abbreviate("E.03 Wohnen/Essen/Küche", 17).starts_with("E.03 "));
-        assert_eq!(abbreviate("Abstellraum Keller", 40), "Abstellraum Keller");
+        assert_eq!(abbreviate("Bad", 5).as_deref(), Some("Bad"));
+        // [171] Mehrere Wörter: alle bleiben sichtbar, nur Wortenden fallen weg, je Wort mindestens 3 Buchstaben + Punkt.
+        assert_eq!(abbreviate("Wohnen/Essen/Küche", 16).as_deref(), Some("Wohn./Ess./Küche"));
+        assert_eq!(abbreviate("Wohnen/Essen/Küche", 14).as_deref(), Some("Woh./Ess./Küc."));
+        assert_eq!(abbreviate("Wohnen/Essen/Küche", 13), None, "darunter wäre ein Wort unter 3 Buchstaben");
+        assert_eq!(abbreviate("Treppenhaus", 3), None);
+        assert_eq!(abbreviate("E.03 Wohnen/Essen/Küche", 20).map(|t| t.starts_with("E.03 ")), Some(true));
+        assert_eq!(abbreviate("Abstellraum Keller", 40).as_deref(), Some("Abstellraum Keller"));
+    }
+
+    /// [171] Platzmangel: erst auf zwei Zeilen umbrechen, dann Schrift bis 2 mm, dann nur die Raumnummer,
+    /// erst zuletzt Wortenden kürzen.
+    #[test]
+    fn raumstempel_platzmangel_reihenfolge() {
+        let s = RoomStamp { number: Some("E.03".into()), name: "Wohnen/Essen/Küche".into(), ..Default::default() };
+        let doc = room_stamp_to_doc(&s);
+        let plain_of = |d: Option<RichTextDoc>| d.map(|d| crate::text_layout::plain_text(&d));
+        let room = |w: f64, h: f64| move |sw: f64, sh: f64, _free: bool| (sw <= w && sh <= h).then_some(Vec2 { x: 0.0, y: 0.0 });
+        let (_, _, d, _) = fit_room_stamp(&doc, Some("E.03"), vec![], ROOM_STAMP_PT, 100.0, &room(50.0, 50.0));
+        assert!(d.is_none(), "genug Platz: unverändert");
+        // (a) Zu schmal für eine Zeile, aber hoch genug für zwei: Umbruch an einem Trenner, volle Schrift, kein Kürzen.
+        let (w1, _) = stamp_size_m(&doc_from_text("E.03 Wohnen/Essen/Küche"), &[], ROOM_STAMP_PT, 100.0);
+        let (w2, h2) = stamp_size_m(&doc_from_text("E.03 Wohnen/\nEssen/Küche"), &[], ROOM_STAMP_PT, 100.0);
+        assert!(w2 < w1);
+        let (e, pt, d, at) = fit_room_stamp(&doc, Some("E.03"), vec![], ROOM_STAMP_PT, 100.0, &room(w2.max(w1 * 0.8), h2 + 1.0));
+        let t = plain_of(d).unwrap();
+        assert!(at.is_some() && pt == ROOM_STAMP_PT && e.is_empty() && t.lines().count() == 2, "{t:?} {pt}");
+        assert_eq!(t.replace('\n', "").replace(' ', ""), "E.03Wohnen/Essen/Küche");
+        // (b) Nur in 2 mm breit genug, einzeilig: kleinere Schrift, Name vollständig.
+        let (wmin, hmin) = stamp_size_m(&doc_from_text("E.03 Wohnen/Essen/Küche"), &[], ROOM_STAMP_MIN_PT, 100.0);
+        let (_, pt, d, at) = fit_room_stamp(&doc, Some("E.03"), vec![], ROOM_STAMP_PT, 100.0, &room(wmin + 1e-6, hmin + 1e-6));
+        assert!(at.is_some() && pt < ROOM_STAMP_PT, "{pt}");
+        assert_eq!(plain_of(d).unwrap().replace('\n', ""), "E.03 Wohnen/Essen/Küche", "nicht gekürzt");
+        // (c) Auch 2 mm umbrochen zu gross: nur die Raumnummer.
+        let (wn, hn) = stamp_size_m(&doc_from_text("E.03"), &[], ROOM_STAMP_MIN_PT, 100.0);
+        let (e, pt, d, at) = fit_room_stamp(&doc, Some("E.03"), vec![], ROOM_STAMP_PT, 100.0, &room(wn + 1e-6, hn + 1e-6));
+        assert!(at.is_some() && e.is_empty() && pt < ROOM_STAMP_PT);
+        assert_eq!(plain_of(d).as_deref(), Some("E.03"));
+        // (d) Ohne Nummer: gekürzt an Wortenden, mindestens 3 Buchstaben + Punkt je Wort.
+        let nm = room_stamp_to_doc(&RoomStamp { name: "Wohnen/Essen/Küche".into(), ..Default::default() });
+        let (w14, h14) = stamp_size_m(&doc_from_text("Woh./Ess./Küc."), &[], ROOM_STAMP_MIN_PT, 500.0);
+        let (_, _, d, at) = fit_room_stamp(&nm, None, vec![], ROOM_STAMP_PT, 500.0, &room(w14 + 1e-6, h14 + 1e-6));
+        let t = plain_of(d).unwrap();
+        assert!(at.is_some(), "{t}");
+        assert!(t.split('/').all(|w| w.trim_end_matches('.').chars().count() >= 3) && t.contains('.'), "{t}");
     }
 
     /// [140] L-förmiger Raum ohne eigenen Anker: Stempel im Raum (Pol der Unzugänglichkeit), nicht am
