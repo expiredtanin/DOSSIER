@@ -649,6 +649,8 @@ export type DoorType = {
    * gezeichnet. 0/fehlt ⇒ kein eigener Sturz (bisher).
    */
   lintelHeight?: number;
+  /** Linientyp der Sturzlinien im Grundriss ([105]); fehlt ⇒ gestrichelt. */
+  lintelLineStyle?: LintelLineStyle;
   /**
    * Rahmen-Detail ([105]): Blendrahmen je Seite, Flügelrahmen, Pfosten/Kämpfer, Zusatzprofile,
    * Anschlag je Seite. Fehlt ⇒ wie bisher (`frameWidth`, `rebateDepth`).
@@ -1909,6 +1911,11 @@ export type LineStyleOverride = {
   weight?: number;
 };
 
+/**
+ * Linientyp der Sturzlinien einer Tür im Grundriss ([105]; Strichmuster in Papier-mm wie [153]).
+ */
+export type LintelLineStyle = "gestrichelt" | "punktiert" | "durchgehend" | "keine";
+
 /** Zeichen-Marks eines Runs. Alle optional; fehlend = „nicht gesetzt". */
 export type Marks = {
   bold?: boolean;
@@ -2070,6 +2077,14 @@ export type Opening = {
    *   "beide" → beide Linien (Default wenn nicht gesetzt)
    */
   lintelLines?: "keine" | "innen" | "aussen" | "beide";
+  /** Linientyp der Sturzlinien im Grundriss ([105]); fehlt ⇒ wie Türtyp, sonst gestrichelt. */
+  lintelLineStyle?: LintelLineStyle;
+  /** Fenster: Öffnungslinien in der Ansicht ein/aus (übersteuert den Fenstertyp, [95]). */
+  sashSymbols?: boolean;
+  /**
+   * Fenster: Aufschlagbogen der Drehflügel im Grundriss ein/aus (übersteuert den Fenstertyp, [95]).
+   */
+  planSwingArcs?: boolean;
   /**
    * Referenz auf einen Bauteil-Typ (Bibliothek): {@link DoorType} bei
    * `kind: "door"`, {@link WindowType} bei `kind: "window"`. Fehlt sie, gilt
@@ -3832,6 +3847,20 @@ export type WindowType = {
    * {@link sashes}, je Feld fest oder öffenbar (meist Kipp). Fehlt ⇒ ein festes Feld (bisher).
    */
   transomSashes?: Array<SashDef>;
+  /**
+   * Brüstungsfeld unten ([95]): Höhe ab Öffnungs-Unterkante bis Mitte des Riegels (Meter), darunter
+   * ein festes Feld. 0/fehlt ⇒ keins (bisher).
+   */
+  bottomPanelHeight?: number;
+  /**
+   * Einteilung des Brüstungsfelds (Pfosten/Riegel wie {@link transomSashes}, je Feld fest oder
+   * öffenbar). Fehlt ⇒ ein festes Glasfeld.
+   */
+  bottomSashes?: Array<SashDef>;
+  /** Öffnungslinien der Flügel in der Ansicht (Dreh-/Kipp-Dreiecke, [95]). Fehlt ⇒ an. */
+  sashSymbols?: boolean;
+  /** Aufschlagbogen der Drehflügel im Grundriss (zur Innenseite, [95]). Fehlt ⇒ aus. */
+  planSwingArcs?: boolean;
   /**
    * Auf-/Untersicht-Andeutung im Grundriss (mittel/fein): eine Referenzlinie an
    * der gewählten Fläche(n) — sinnvoll, wenn die Öffnung die Schnittebene NICHT

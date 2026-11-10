@@ -131,6 +131,8 @@ pub(super) fn collect_openings(p: &Project, frame: &[f64; 9]) -> Vec<ProjOpening
                         _ if op.hinge.is_some_and(|s| s != OpeningHinge::Start) => 4.0,
                         _ => 1.0,
                     },
+                    // Hebeschiebetür: festes Feld auf der Bandseite (2 Anfang, 6 Ende).
+                    Some(DoorTypeKind::Hebeschiebe) if op.hinge.is_some_and(|s| s == OpeningHinge::End) => 6.0,
                     Some(DoorTypeKind::Hebeschiebe) => 2.0,
                     Some(DoorTypeKind::Pendel) => 3.0,
                     _ => 0.0,
@@ -163,6 +165,9 @@ pub(super) fn collect_openings(p: &Project, frame: &[f64; 9]) -> Vec<ProjOpening
                 let k = b.len() - 13 - 3;
                 b[k] = 0.0;
             }
+            // [95] Brüstungsfeld unten und Öffnungslinien ein/aus (Öffnung vor Typ).
+            b.push(wt.and_then(|t| t.bottom_panel_height).unwrap_or(f64::NAN));
+            b.push(if !door && op.sash_symbols.or(wt.and_then(|t| t.sash_symbols)) == Some(false) { 1.0 } else { 0.0 });
             let mullion = det.as_ref().map_or(f64::NAN, |f| f.mullion_width);
             // Flügel: (pfosten, postWidth, autoWidth, width, opening, hingeLeft).
             let mut sashes: Vec<[f64; 6]> = Vec::new();
@@ -204,6 +209,18 @@ pub(super) fn collect_openings(p: &Project, frame: &[f64; 9]) -> Vec<ProjOpening
             let transom = if door { &[][..] } else { wt.and_then(|t| t.transom_sashes.as_deref()).unwrap_or(&[]) };
             b.push(transom.len() as f64);
             for s in transom {
+                b.extend([
+                    if s.kind == SashDefKind::Pfosten { 1.0 } else { 0.0 },
+                    s.post_width.unwrap_or(f64::NAN),
+                    if s.auto_width == Some(false) { 0.0 } else { 1.0 },
+                    s.width.unwrap_or(f64::NAN),
+                    s.opening.map_or(0.0, sash_kind),
+                    if s.hinge_side.unwrap_or(SashDefHingeSide::Left) == SashDefHingeSide::Left { 1.0 } else { 0.0 },
+                ]);
+            }
+            let bottom = if door { &[][..] } else { wt.and_then(|t| t.bottom_sashes.as_deref()).unwrap_or(&[]) };
+            b.push(bottom.len() as f64);
+            for s in bottom {
                 b.extend([
                     if s.kind == SashDefKind::Pfosten { 1.0 } else { 0.0 },
                     s.post_width.unwrap_or(f64::NAN),

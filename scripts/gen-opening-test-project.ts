@@ -115,7 +115,7 @@ doorTypes.push(
 walls.push(wall("IW2", "iw", 0, 12, 8, 12), wall("AW3", "aw", 0, 16, 10, 16));
 const extraDoors: [string, string, number, Partial<Opening>][] = [
   ["T-Z-in", "d-zarge", 0.6, { openingDir: "in" }],
-  ["T-Z-out", "d-zarge", 2.6, { openingDir: "out" }],
+  ["T-Z-out", "d-zarge", 2.6, { openingDir: "out", lintelLineStyle: "punktiert" }],
   ["T-B-in", "d-block-aussen", 4.6, { openingDir: "in" }],
   ["T-B-out", "d-block-aussen", 6.6, { openingDir: "out", swing: "right" }],
 ];
@@ -123,6 +123,15 @@ for (const [id, typeId, pos, extra] of extraDoors) {
   openings.push({ id, type: "opening", hostWallId: "IW2", categoryCode: "21", kind: "door", typeId, position: pos, width: 0.9, height: 2.05, sillHeight: 0, swing: "left", detailLevel: "fein", ...extra } as Opening);
   levels.push(section(`S-${id}`, pos + 0.45, 11, 13));
 }
+// [95] Fenster mit Brüstungsfeld unter einem Riegel (zwei feste Felder), Aufschlagbogen im Grundriss.
+windowTypes.push(winBase("w-bruestung", "F Brüstungsfeld, Aufschlagbogen", undefined, {
+  wingCount: 2,
+  bottomPanelHeight: 0.5,
+  bottomSashes: [{ kind: "fluegel", autoWidth: true, opening: "fest" }, { kind: "pfosten", postWidth: 0.06 }, { kind: "fluegel", autoWidth: true, opening: "fest" }],
+  planSwingArcs: true,
+  defaultSillHeight: 0.3,
+}));
+openings.push({ id: "FBR", type: "opening", hostWallId: "AW3", categoryCode: "21", kind: "window", typeId: "w-bruestung", position: 8.0, width: 1.4, height: 1.9, sillHeight: 0.3, detailLevel: "fein" } as Opening);
 openings.push({ id: "HS1", type: "opening", hostWallId: "AW3", categoryCode: "21", kind: "door", typeId: "d-hs", position: 1, width: 2.4, height: 2.3, sillHeight: 0, detailLevel: "fein" } as Opening);
 openings.push({ id: "HS2", type: "opening", hostWallId: "AW3", categoryCode: "21", kind: "door", typeId: "d-hs", position: 5, width: 2.4, height: 2.3, sillHeight: 0, hinge: "end", detailLevel: "fein" } as Opening);
 levels.push({ id: "a-hs-aussen", name: "Ansicht-HS-Aussen", kind: "elevation", visible: true, locked: false, linePoints: [{ x: 0, y: 18 }, { x: 10, y: 18 }], directionSign: -1, levelMarks: false } as DrawingLevel);

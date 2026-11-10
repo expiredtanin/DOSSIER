@@ -228,6 +228,11 @@ export interface OpeningInfo {
   doorType?: "normal" | "wandoeffnung";
   /** Nur Tür: Sturzlinien (keine/innen/aussen/beide). Fehlt → "beide". */
   lintelLines?: "keine" | "innen" | "aussen" | "beide";
+  /** Nur Tür: Linientyp der Sturzlinien ([105]). Fehlt → wie Türtyp (gestrichelt). */
+  lintelLineStyle?: "gestrichelt" | "punktiert" | "durchgehend" | "keine";
+  /** Nur Fenster: Öffnungslinien in der Ansicht / Aufschlagbogen im Grundriss ([95]); fehlt → wie Typ. */
+  sashSymbols?: boolean;
+  planSwingArcs?: boolean;
   /** Zugewiesener Tür-/Fenstertyp (Bibliothek, `Opening.typeId`) oder undefined. */
   typeId?: string;
   /** Per-Element-Übersteuerung der Detailstufe; fehlt → Ansichts-Detailstufe gilt. */

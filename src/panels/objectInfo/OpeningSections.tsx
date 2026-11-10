@@ -153,6 +153,17 @@ export function OpeningSection({
             fallbackWeight={OPENING_LINE_DEFAULT_WEIGHT}
             onChange={host.onSetOpeningSillLineStyle}
           />
+          {/* [95] Öffnungslinien der Flügel: Ansicht (Dreh-/Kipp-Dreiecke) und Grundriss (Aufschlagbogen). */}
+          <TriStateField
+            label={t("objinfo.opening.sashSymbols")}
+            value={opening.sashSymbols}
+            onChange={(v) => host.onSetOpeningDisplay({ sashSymbols: v })}
+          />
+          <TriStateField
+            label={t("objinfo.opening.planSwingArcs")}
+            value={opening.planSwingArcs}
+            onChange={(v) => host.onSetOpeningDisplay({ planSwingArcs: v })}
+          />
         </>
       )}
 
@@ -186,6 +197,27 @@ export function OpeningSection({
                 { value: "beide", label: t("objinfo.opening.lintelLines.beide") },
               ]}
               title={t("objinfo.opening.lintelLines")}
+              width={130}
+            />
+          </div>
+          {/* [105] Linientyp der Sturzlinien (Strichmuster in Papier-mm wie [153]); leer = wie Türtyp. */}
+          <div className="objinfo-field">
+            <span className="objinfo-flabel">{t("objinfo.opening.lintelLineStyle")}</span>
+            <Dropdown
+              value={opening.lintelLineStyle ?? ""}
+              onChange={(v) =>
+                host.onSetOpeningDisplay({
+                  lintelLineStyle: v === "" ? undefined : (v as "gestrichelt" | "punktiert" | "durchgehend" | "keine"),
+                })
+              }
+              options={[
+                { value: "", label: t("objinfo.opening.fromType") },
+                { value: "gestrichelt", label: t("objinfo.opening.lintelLineStyle.gestrichelt") },
+                { value: "punktiert", label: t("objinfo.opening.lintelLineStyle.punktiert") },
+                { value: "durchgehend", label: t("objinfo.opening.lintelLineStyle.durchgehend") },
+                { value: "keine", label: t("objinfo.opening.lintelLineStyle.keine") },
+              ]}
+              title={t("objinfo.opening.lintelLineStyle")}
               width={130}
             />
           </div>
@@ -392,6 +424,26 @@ function LineStyleRow({
         title={t("objinfo.lineWeight")}
       />
       <span className="objinfo-unit">mm</span>
+    </div>
+  );
+}
+
+/** Ja/Nein mit „wie Typ“ (fehlt) — für Übersteuerungen an der Öffnung ([95]). */
+function TriStateField({ label, value, onChange }: { label: string; value: boolean | undefined; onChange: (v: boolean | undefined) => void }) {
+  return (
+    <div className="objinfo-field">
+      <span className="objinfo-flabel">{label}</span>
+      <Dropdown
+        value={value === undefined ? "" : value ? "an" : "aus"}
+        onChange={(v) => onChange(v === "" ? undefined : v === "an")}
+        options={[
+          { value: "", label: t("objinfo.opening.fromType") },
+          { value: "an", label: t("objinfo.opening.on") },
+          { value: "aus", label: t("objinfo.opening.off") },
+        ]}
+        title={label}
+        width={130}
+      />
     </div>
   );
 }

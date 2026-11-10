@@ -140,6 +140,16 @@ fn plan_opening_inner(buf: &[f64]) -> Option<Vec<f64>> {
     let (hinge_x, hinge_off) = (r.num().unwrap_or(f64::NAN), r.num().unwrap_or(f64::NAN));
     // Blattdicke (fein): Blatt im Falz als Rechteck statt Strich; NaN = Strich.
     let leaf_thick = r.num().unwrap_or(f64::NAN);
+    // [105] Strichcode der Sturzlinien (1 gestrichelt, 0 durchgehend, 3 punktiert, −1 keine).
+    let lintel_dash = r.num().unwrap_or(1.0);
+    let lintel = if lintel_dash < 0.0 { 0 } else { lintel };
+    let lintel_dash = if lintel_dash.is_finite() && lintel_dash >= 0.0 { lintel_dash } else { 1.0 };
+    // [95] Aufschlagbogen der Fensterflügel: je Flügel 0/1 (Band Anfang)/2 (Band Ende).
+    let n_arcs = r.count().unwrap_or(0);
+    let mut swing_codes = Vec::with_capacity(n_arcs.min(64));
+    for _ in 0..n_arcs.min(64) {
+        swing_codes.push(r.num().unwrap_or(0.0));
+    }
     if ![sx, sy, ex, ey, total, ref_off, position, width].iter().all(|x| x.is_finite()) {
         return None;
     }
@@ -234,11 +244,11 @@ fn plan_opening_inner(buf: &[f64]) -> Option<Vec<f64>> {
             let line = |off: f64| (add(jamb_start, scale(wn, off)), add(jamb_end, scale(wn, off)));
             if lintel == 1 || lintel == 3 {
                 let (a, b) = line(outer_off);
-                o.line(C_LINTEL, hair, 1.0, 1.0, a, b);
+                o.line(C_LINTEL, hair, 1.0, lintel_dash, a, b);
             }
             if lintel == 2 || lintel == 3 {
                 let (a, b) = line(inner_off);
-                o.line(C_LINTEL, hair, 1.0, 1.0, a, b);
+                o.line(C_LINTEL, hair, 1.0, lintel_dash, a, b);
             }
         }
         return Some(finish(o));
@@ -254,6 +264,7 @@ fn plan_opening_inner(buf: &[f64]) -> Option<Vec<f64>> {
             inset_inner: win_inset_side == 1.0,
             inset_mid: win_inset_side == 2.0,
             frame_width_end,
+            swing: swing_codes,
         })
     } else {
         None
@@ -300,6 +311,12 @@ fn plan_opening_inner(buf: &[f64]) -> Option<Vec<f64>> {
         }
         for (a, b) in &sym.glass_lines {
             o.line(C_GLASS, super::style::GLASS_LINE_MM, 0.0, 0.0, *a, *b);
+        }
+        // [95] Aufschlagbogen der Drehflügel (wählbar am Fenstertyp/an der Öffnung).
+        for &(hinge, closed_end, open_end, radius) in &sym.swing_arcs {
+            o.line(C_SASH, hair, 4.0, 0.0, hinge, open_end);
+            let (from, to) = short_arc(&DoorLeaf { hinge, open_end, closed_end, radius });
+            o.arc(hair, hinge, from, to, radius);
         }
         if detail == Detail::Fein {
             if let Some((js, je)) = opening_jambs(&w, position, width) {
@@ -941,6 +958,40 @@ mod tests {
             let (a, bb) = (sub(from, c), sub(to, c));
             assert!(a.x * bb.y - a.y * bb.x > 0.0, "gegen den Uhrzeigersinn, kurz (dir {dir})");
         }
+    }
+
+    /// [105] Linientyp der Sturzlinien aus dem Anhang: punktiert (3), durchgehend (0), keine (−1).
+    #[test]
+    fn sturzlinien_linientyp_waehlbar() {
+        let lintels = |code: f64| {
+            let mut b = input(true, 1.0, false, &[]);
+            b.extend([NAN, NAN, NAN, NAN, code]);
+            lines(&plan_opening(&b)).into_iter().filter(|l| l.0 == C_LINTEL).map(|l| l.1).collect::<Vec<_>>()
+        };
+        assert_eq!(lintels(1.0), vec![1.0, 1.0]);
+        assert_eq!(lintels(3.0), vec![3.0, 3.0]);
+        assert_eq!(lintels(0.0), vec![0.0, 0.0]);
+        assert!(lintels(-1.0).is_empty());
+        // Ohne Anhang wie bisher gestrichelt.
+        let b = input(true, 1.0, false, &[]);
+        assert!(lines(&plan_opening(&b)).iter().filter(|l| l.0 == C_LINTEL).all(|l| l.1 == 1.0));
+    }
+
+    /// [95] Aufschlagbogen der Fensterflügel: je Drehflügel ein Strich + Bogen zur Innenseite.
+    #[test]
+    fn fensterfluegel_aufschlagbogen() {
+        let wing = [0.0, 1.0, NAN, NAN, 1.0];
+        let arcs = |codes: &[f64]| {
+            let mut b = input(false, 1.0, true, &[wing, wing]);
+            b.extend([NAN, NAN, NAN, NAN, 1.0, codes.len() as f64]);
+            b.extend(codes);
+            tags(&plan_opening(&b)).iter().filter(|t| **t == 3.0).count()
+        };
+        assert_eq!(arcs(&[]), 0);
+        assert_eq!(arcs(&[1.0, 2.0]), 2);
+        assert_eq!(arcs(&[1.0, 0.0]), 1);
+        // Falsche Länge: nichts.
+        assert_eq!(arcs(&[1.0]), 0);
     }
 
     /// [105] Pfosten mit eigener Breite: ein Rahmenblock über die Pfostenbreite (statt zwei Anschläge).

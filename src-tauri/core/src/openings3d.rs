@@ -161,6 +161,9 @@ pub struct WindowTypeIn {
     pub shading: Option<[f64; 3]>,
     /// Einteilung des Oberlichts (Pfosten/Riegel, [95]); leer ⇒ ein festes Feld.
     pub transom_sashes: Vec<SashIn>,
+    /// Brüstungsfeld unten ([95]): Höhe ab Öffnungs-UK bis Riegelmitte (0 = keins) und Einteilung.
+    pub bottom_height: f64,
+    pub bottom_sashes: Vec<SashIn>,
     /// Kasten im Sturz (verdeckt, kein Quader) statt vorgesetzt.
     pub shading_sturz: bool,
     /// Führungsschienen in der Leibung (Kasten im Sturz, nicht Markise).
@@ -472,6 +475,8 @@ struct FrameParams<'a> {
     glazed_fraction: f64,
     sashes: std::borrow::Cow<'a, [SashIn]>,
     transom_sashes: &'a [SashIn],
+    bottom_height: f64,
+    bottom_sashes: &'a [SashIn],
     half_thickness: f64,
     draw_sill: bool,
     draw_interior_sill: bool,
@@ -526,6 +531,8 @@ fn resolve_frame(o: &OpeningIn) -> Option<FrameParams<'_>> {
             glazed_fraction: jmax(0.05, jmin(1.0, or(d.glazing_ratio, 1.0))),
             sashes: std::borrow::Cow::Borrowed(&[]),
             transom_sashes: &[],
+            bottom_height: 0.0,
+            bottom_sashes: &[],
             half_thickness: half,
             draw_sill: false,
             draw_interior_sill: false,
@@ -575,6 +582,8 @@ fn resolve_frame(o: &OpeningIn) -> Option<FrameParams<'_>> {
                 glazed_fraction: 1.0,
                 sashes,
                 transom_sashes: &w.transom_sashes,
+                bottom_height: if w.bottom_height > EPS { w.bottom_height } else { 0.0 },
+                bottom_sashes: &w.bottom_sashes,
                 half_thickness: half,
                 draw_sill: w.sill_board != SillBoard::None && w.sill_board != SillBoard::Inner,
                 draw_interior_sill: w.sill_board == SillBoard::Inner || w.sill_board == SillBoard::Both,
@@ -700,7 +709,7 @@ fn frame_meshes(em: &mut Emitter, o: &OpeningIn, p: &FrameParams, detail: Detail
     }
     let sash_from = rf0 + fl;
     let sash_to = rt0 - fr;
-    let sash_bottom = rb0 + if p.has_sill { fb } else { 0.0 };
+    let mut sash_bottom = rb0 + if p.has_sill { fb } else { 0.0 };
     let mut sash_top = rtop0 - ft;
     // Oberlicht-Band (über dem Riegel) für dessen Einteilung.
     let mut transom_band: Option<(f64, f64)> = None;
@@ -710,9 +719,17 @@ fn frame_meshes(em: &mut Emitter, o: &OpeningIn, p: &FrameParams, detail: Detail
         transom_band = Some((split_z + tw / 2.0, sash_top));
         sash_top = split_z - tw / 2.0;
     }
-    // Pfosten im Oberlicht (mittel/fein).
-    if let (true, Some((tb, tt))) = (sashes_on, transom_band) {
-        for (s, cf, ct) in sash_spans(p.transom_sashes, sash_from, sash_to) {
+    // Brüstungsfeld unter dem Riegel ([95]).
+    let mut bottom_band: Option<(f64, f64)> = None;
+    if let Some(split_z) = bottom_split(zb0, p.bottom_height, sash_bottom, sash_top, tw) {
+        em.axis_box(sash_from, sash_to, split_z - tw / 2.0, split_z + tw / 2.0, p.n_min, p.n_max, Part::Frame);
+        bottom_band = Some((sash_bottom, split_z - tw / 2.0));
+        sash_bottom = split_z + tw / 2.0;
+    }
+    // Pfosten im Oberlicht und im Brüstungsfeld (mittel/fein).
+    for (list, band) in [(p.transom_sashes, transom_band), (p.bottom_sashes, bottom_band)] {
+        let (true, Some((tb, tt))) = (sashes_on, band) else { continue };
+        for (s, cf, ct) in sash_spans(list, sash_from, sash_to) {
             if s.kind == SashKind::Post {
                 em.axis_box(cf, ct, tb, tt, p.n_min, p.n_max, Part::Frame);
             }
@@ -762,6 +779,9 @@ fn frame_meshes(em: &mut Emitter, o: &OpeningIn, p: &FrameParams, detail: Detail
     let mut bands: Vec<(&[SashIn], f64, f64)> = vec![(&p.sashes, sash_bottom, sash_top)];
     if let Some((tb, tt)) = transom_band {
         bands.push((p.transom_sashes, tb, tt));
+    }
+    if let Some((bb, bt)) = bottom_band {
+        bands.push((p.bottom_sashes, bb, bt));
     }
     for (band_sashes, band_bottom, band_top) in bands {
         if sashes_on && !band_sashes.is_empty() && sash_to - sash_from > EPS && band_top - band_bottom > EPS {
@@ -885,6 +905,13 @@ fn glass_panes(em: &mut Emitter, o: &OpeningIn, p: &FrameParams) {
     };
     let frac = jmax(0.05, jmin(1.0, p.glazed_fraction));
     let glazed_bottom = |b: f64, t: f64| t - frac * (t - b);
+    // Brüstungsfeld ([95]): eigene Scheibe unter dem Riegel, das Hauptfeld beginnt darüber.
+    let mut sash_bottom = sash_bottom;
+    let tw = dd.map_or(fw, |d| dv(d.transom_width, fw));
+    if let Some(split_z) = bottom_split(o.z_bottom, p.bottom_height, sash_bottom, sash_top_full, tw) {
+        push(em, sash_bottom, split_z - tw / 2.0);
+        sash_bottom = split_z + tw / 2.0;
+    }
     if p.transom_height > EPS {
         let split_z = clamp_range(o.z_top - p.transom_height, sash_bottom, sash_top_full);
         let main_top = split_z - fw / 2.0;
@@ -895,6 +922,13 @@ fn glass_panes(em: &mut Emitter, o: &OpeningIn, p: &FrameParams) {
     } else if p.glazed {
         push(em, glazed_bottom(sash_bottom, sash_top_full), sash_top_full);
     }
+}
+
+/// Riegelmitte des Brüstungsfelds ([95]) zwischen `bottom` und `top`; `None`, wenn keins gesetzt ist oder
+/// es das Flügelfeld (mind. 10 cm) bzw. sich selbst (mind. 2 cm) nicht mehr zuliesse.
+fn bottom_split(z_bottom: f64, height: f64, bottom: f64, top: f64, tw: f64) -> Option<f64> {
+    let z = z_bottom + height;
+    (height > EPS && z - tw / 2.0 > bottom + 0.02 && z + tw / 2.0 < top - 0.1).then_some(z)
 }
 
 /// Türblatt im Hauptfeld (Vollblatt bzw. blinder Rest unter der Teilverglasung, `doorLeafPanels`).
@@ -1118,7 +1152,8 @@ pub fn wall_mesh_passes(w: &WallIn, detail: Detail) -> [Vec<BoxMesh>; 3] {
 //           BandEnde`
 //     Fenster: `glazingPanes, mullionRows, mullionCols, sillBoard (0 aussen/fehlt, 1 keine,
 //           2 innen, 3 beide), Rollladen (0/1), Breite, Höhe, Tiefe, imSturz, Schienen, Flügelzahl-Default,
-//           Öffnungsart-Default, nFlügel, Flügel…, nOberlicht, Flügel… ([95])`
+//           Öffnungsart-Default, nFlügel, Flügel…, nOberlicht, Flügel… ([95]), Brüstungsfeld-Höhe,
+//           nBrüstung, Flügel…`
 //     Flügel = `Art (0 Flügel, 1 Pfosten, 2 andere), festeBreite, width, postWidth, Öffnungsart,
 //           BandLinks`
 //   Öffnungsart: 0 fehlt, 1 dreh, 2 kipp, 3 drehkipp, 4 fest, 5 schiebe, 6 andere. NaN = fehlt.
@@ -1189,6 +1224,8 @@ fn decode_type(r: &mut Reader, door: bool) -> Option<TypeIn> {
         let default_opening = opening_kind(r.num()?);
         let sashes = decode_sashes(r)?;
         let transom_sashes = decode_sashes(r)?;
+        let bottom_height = r.num()?;
+        let bottom_sashes = decode_sashes(r)?;
         KindIn::Window(WindowTypeIn {
             glazing_panes,
             mullion_rows,
@@ -1196,6 +1233,8 @@ fn decode_type(r: &mut Reader, door: bool) -> Option<TypeIn> {
             sill_board,
             sashes,
             transom_sashes,
+            bottom_height,
+            bottom_sashes,
             default_wing_count,
             default_opening,
             shading: if create { Some(shading_box) } else { None },
@@ -1327,6 +1366,8 @@ mod tests {
                 sill_board: sill,
                 sashes: vec![],
                 transom_sashes: vec![],
+                bottom_height: 0.0,
+                bottom_sashes: vec![],
                 default_wing_count: 1.0,
                 default_opening: SashOpening::TurnTilt,
                 shading: None,
@@ -1563,6 +1604,29 @@ mod tests {
             w.shading_rails = true;
         }
         assert_eq!(n(&parts(&ty, Detail::Fine), Part::Shading), 2, "im Sturz: nur zwei Führungsschienen");
+    }
+
+    /// [95] Brüstungsfeld: Riegel (ein Rahmenquader) und eigene Scheibe darunter; Pfosten im Feld.
+    #[test]
+    fn bruestungsfeld_mit_riegel() {
+        let count = |ty: &TypeIn, part: Part| opening_meshes(&[wall(op(false, Some(ty.clone())))], Detail::Fine).iter().filter(|m| m.part == part).count();
+        let mut ty = window_type(SillBoard::None);
+        let (frames, glass) = (count(&ty, Part::Frame), count(&ty, Part::Glass));
+        if let KindIn::Window(w) = &mut ty.kind {
+            w.bottom_height = 0.4;
+        }
+        assert_eq!(count(&ty, Part::Frame), frames + 1, "Riegel");
+        assert!(count(&ty, Part::Glass) > glass, "Scheibe im Brüstungsfeld");
+        let sash = |kind: SashKind| SashIn { kind, fixed_width: false, width: f64::NAN, post_width: f64::NAN, opening: SashOpening::Fixed, hinge_left: true };
+        if let KindIn::Window(w) = &mut ty.kind {
+            w.bottom_sashes = vec![sash(SashKind::Sash), sash(SashKind::Post), sash(SashKind::Sash)];
+        }
+        assert_eq!(count(&ty, Part::Frame), frames + 2, "Riegel + Pfosten");
+        // Zu hoch für das Flügelfeld: nichts.
+        if let KindIn::Window(w) = &mut ty.kind {
+            w.bottom_height = 1.25;
+        }
+        assert_eq!(count(&ty, Part::Frame), frames);
     }
 
     /// [95] Oberlicht-Einteilung (Pfosten + Kippflügel) und Türarten in 3D.

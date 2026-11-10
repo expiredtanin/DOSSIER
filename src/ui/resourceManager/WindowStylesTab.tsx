@@ -184,6 +184,35 @@ export function WindowStylesTab({
               </option>
             </select>
           </FieldRow>
+          {/* [95] Brüstungsfeld unten (Höhe bis Riegelmitte) und Öffnungslinien. */}
+          <FieldRow label={t("oed.f.bottomPanelHeight")}>
+            <NumberField
+              value={win.bottomPanelHeight ?? 0}
+              onChange={(bottomPanelHeight) => patch({ bottomPanelHeight: bottomPanelHeight || undefined })}
+              step={0.01}
+              min={0}
+            />
+          </FieldRow>
+          <FieldRow label={t("objinfo.opening.sashSymbols")}>
+            <SelectField
+              value={win.sashSymbols === false ? "aus" : "an"}
+              onChange={(v) => patch({ sashSymbols: v === "aus" ? false : undefined })}
+              options={[
+                { value: "an", label: t("objinfo.opening.on") },
+                { value: "aus", label: t("objinfo.opening.off") },
+              ]}
+            />
+          </FieldRow>
+          <FieldRow label={t("objinfo.opening.planSwingArcs")}>
+            <SelectField
+              value={win.planSwingArcs ? "an" : "aus"}
+              onChange={(v) => patch({ planSwingArcs: v === "an" ? true : undefined })}
+              options={[
+                { value: "an", label: t("objinfo.opening.on") },
+                { value: "aus", label: t("objinfo.opening.off") },
+              ]}
+            />
+          </FieldRow>
           <FieldRow label={t("resources.field.transomHeight")}>
             <NumberField
               value={win.transomHeight ?? 0}

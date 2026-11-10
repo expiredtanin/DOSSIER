@@ -982,6 +982,10 @@ pub struct DoorType {
     #[serde(rename = "lintelHeight", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub lintel_height: Option<f64>,
+    /// Linientyp der Sturzlinien im Grundriss ([105]); fehlt ⇒ gestrichelt.
+    #[serde(rename = "lintelLineStyle", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub lintel_line_style: Option<LintelLineStyle>,
     /// Rahmen-Detail ([105]): Blendrahmen je Seite, Flügelrahmen, Pfosten/Kämpfer, Zusatzprofile,
     /// Anschlag je Seite. Fehlt ⇒ wie bisher (`frameWidth`, `rebateDepth`).
     #[serde(rename = "frameDetail", default, skip_serializing_if = "Option::is_none")]
@@ -1314,6 +1318,24 @@ pub struct WindowType {
     #[serde(rename = "transomSashes", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub transom_sashes: Option<Vec<SashDef>>,
+    /// Brüstungsfeld unten ([95]): Höhe ab Öffnungs-Unterkante bis Mitte des Riegels (Meter), darunter
+    /// ein festes Feld. 0/fehlt ⇒ keins (bisher).
+    #[serde(rename = "bottomPanelHeight", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub bottom_panel_height: Option<f64>,
+    /// Einteilung des Brüstungsfelds (Pfosten/Riegel wie {@link transomSashes}, je Feld fest oder
+    /// öffenbar). Fehlt ⇒ ein festes Glasfeld.
+    #[serde(rename = "bottomSashes", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub bottom_sashes: Option<Vec<SashDef>>,
+    /// Öffnungslinien der Flügel in der Ansicht (Dreh-/Kipp-Dreiecke, [95]). Fehlt ⇒ an.
+    #[serde(rename = "sashSymbols", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub sash_symbols: Option<bool>,
+    /// Aufschlagbogen der Drehflügel im Grundriss (zur Innenseite, [95]). Fehlt ⇒ aus.
+    #[serde(rename = "planSwingArcs", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub plan_swing_arcs: Option<bool>,
     /// Auf-/Untersicht-Andeutung im Grundriss (mittel/fein): eine Referenzlinie an
     /// der gewählten Fläche(n) — sinnvoll, wenn die Öffnung die Schnittebene NICHT
     /// regulär durchschneidet (z. B. bodentiefes Fenster oder hoch sitzendes
@@ -2855,6 +2877,23 @@ pub enum OpeningHinge {
     Unknown,
 }
 
+/// Linientyp der Sturzlinien einer Tür im Grundriss ([105]; Strichmuster in Papier-mm wie [153]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+pub enum LintelLineStyle {
+    #[default]
+    #[serde(rename = "gestrichelt")]
+    Gestrichelt,
+    #[serde(rename = "punktiert")]
+    Punktiert,
+    #[serde(rename = "durchgehend")]
+    Durchgehend,
+    #[serde(rename = "keine")]
+    Keine,
+    #[serde(other)]
+    #[ts(skip)]
+    Unknown,
+}
+
 /// Schwenkrichtung der Tür relativ zur Wandachse.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
 pub enum SwingSide {
@@ -3084,6 +3123,18 @@ pub struct Opening {
     #[serde(rename = "lintelLines", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional, inline)]
     pub lintel_lines: Option<OpeningLintelLines>,
+    /// Linientyp der Sturzlinien im Grundriss ([105]); fehlt ⇒ wie Türtyp, sonst gestrichelt.
+    #[serde(rename = "lintelLineStyle", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub lintel_line_style: Option<LintelLineStyle>,
+    /// Fenster: Öffnungslinien in der Ansicht ein/aus (übersteuert den Fenstertyp, [95]).
+    #[serde(rename = "sashSymbols", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub sash_symbols: Option<bool>,
+    /// Fenster: Aufschlagbogen der Drehflügel im Grundriss ein/aus (übersteuert den Fenstertyp, [95]).
+    #[serde(rename = "planSwingArcs", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub plan_swing_arcs: Option<bool>,
     /// Referenz auf einen Bauteil-Typ (Bibliothek): {@link DoorType} bei
     /// `kind: "door"`, {@link WindowType} bei `kind: "window"`. Fehlt sie, gilt
     /// das heutige Inline-Verhalten (rückwärtskompatibel). Typ-Defaults liefern

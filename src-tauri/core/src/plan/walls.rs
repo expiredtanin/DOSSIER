@@ -642,6 +642,27 @@ fn opening_symbol(c: &Ctx, out: &mut Vec<Primitive>, w: &Wall, o: &Opening, colo
     // Blattdicke (nur fein: Blatt als Rechteck).
     b.push(det.as_ref().filter(|f| wt.is_some() && (f.sides.right - f.sides.left).abs() > 1e-9).map_or(f64::NAN, |f| f.sides.right));
     b.extend(hinge.map_or([f64::NAN; 3], |(x, off, t)| [x, off, if detail == Detail::Fein { t } else { f64::NAN }]));
+    // [105] Linientyp der Sturzlinien (Öffnung vor Türtyp): Strichcode wie `dash_of`, −1 = keine.
+    b.push(match o.lintel_line_style.or(dt.and_then(|t| t.lintel_line_style)) {
+        Some(LintelLineStyle::Durchgehend) => 0.0,
+        Some(LintelLineStyle::Punktiert) => 3.0,
+        Some(LintelLineStyle::Keine) => -1.0,
+        _ => 1.0,
+    });
+    // [95] Aufschlagbogen der Drehflügel (Fenster, Öffnung vor Typ): je Flügel 0 keiner, 1 Band am Anfang,
+    // 2 Band am Ende.
+    let arcs = wt.is_some_and(|t| o.plan_swing_arcs.or(t.plan_swing_arcs) == Some(true));
+    b.push(if arcs { sash_list.len() as f64 } else { 0.0 });
+    if arcs {
+        for s in &sash_list {
+            let turn = s.kind == SashDefKind::Fluegel && matches!(s.opening, Some(OpeningKind::Dreh | OpeningKind::Drehkipp));
+            b.push(match (turn, s.hinge_side) {
+                (false, _) => 0.0,
+                (true, Some(SashDefHingeSide::Right)) => 2.0,
+                _ => 1.0,
+            });
+        }
+    }
     let f = crate::plan::openings::plan_opening(&b);
     if f.is_empty() {
         return Ok(());
