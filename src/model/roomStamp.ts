@@ -12,9 +12,8 @@ import type { Align } from "../text/richText";
 export function defaultRoomStamp(room: Room): RoomStamp {
   return {
     name: room.name,
-    showFloorArea: true,
-    // [177] Die SIA-416-Kategorie ist ein Attribut des Raums, nicht Teil des Stempels (nur auf Wunsch).
-    showUsage: false,
+    // [173] Fläche und SIA-Kategorie bleiben offen („wie Modelldarstellung“; Basis: Fläche ja, Kategorie nein —
+    // [177] die Kategorie ist ein Attribut des Raums, nicht Teil des Stempels).
   };
 }
 

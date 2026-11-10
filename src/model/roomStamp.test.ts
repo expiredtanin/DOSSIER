@@ -25,8 +25,8 @@ describe("defaultRoomStamp", () => {
   it("leitet Name/Flags aus dem Raum ab", () => {
     const stamp = defaultRoomStamp(makeRoom());
     expect(stamp.name).toBe("Wohnen");
-    expect(stamp.showFloorArea).toBe(true);
-    expect(stamp.showUsage).toBe(false);
+    expect(stamp.showFloorArea).toBeUndefined();
+    expect(stamp.showUsage).toBeUndefined();
     expect(stamp.number).toBeUndefined();
   });
 });

@@ -906,12 +906,17 @@ pub fn format_stamp_area(area: f64, step: Option<f64>) -> String {
 
 /// `roomStampExtraLines`.
 pub fn room_stamp_extra_lines(s: &RoomStamp, net_area: f64, sia: SiaCategory) -> Vec<StampLine> {
+    room_stamp_extra_lines_mv(s, net_area, sia, &StampOpts::default())
+}
+
+/// [173] Wie `room_stamp_extra_lines`, Fläche/Kategorie: Stempel (falls gesetzt) > Stufe > Basis (Fläche ja, Kategorie nein).
+pub fn room_stamp_extra_lines_mv(s: &RoomStamp, net_area: f64, sia: SiaCategory, st: &StampOpts) -> Vec<StampLine> {
     let mut lines = Vec::new();
-    if s.show_floor_area {
+    if StampOpts::line(s.show_floor_area, st.area, true) {
         let prefix = s.floor_area_prefix.as_deref().unwrap_or("");
         lines.push(StampLine { text: format!("{prefix}{} m²", format_stamp_area(net_area, s.rounding_step)), align: s.floor_area_align.unwrap_or(Align::Left) });
     }
-    if s.show_usage {
+    if StampOpts::line(s.show_usage, st.usage, false) {
         lines.push(StampLine { text: format!("{} · {}", sia_key(sia), sia_label(sia)), align: s.usage_align.unwrap_or(Align::Left) });
     }
     if let Some(o) = s.occupancy {
@@ -1260,8 +1265,8 @@ fn rooms(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds, obstacles: &sup
         let (doc, extra_lines) = match stamp.as_deref() {
             _ if overview => (doc_from_text(room.stamp.as_ref().map_or(&room.name, |s| &s.name)), vec![]),
             // [140] ab 1:200 auch eigene Stempel ohne Nutzungs-/Personenzeile.
-            Some(s) if small => (room_stamp_to_doc(s), room_stamp_extra_lines(&RoomStamp { show_usage: false, occupancy: None, ..s.clone() }, res.net, room.sia_category)),
-            Some(s) => (room_stamp_to_doc(s), room_stamp_extra_lines(s, res.net, room.sia_category)),
+            Some(s) if small => (room_stamp_to_doc(s), room_stamp_extra_lines_mv(&RoomStamp { show_usage: Some(false), occupancy: None, ..s.clone() }, res.net, room.sia_category, st)),
+            Some(s) => (room_stamp_to_doc(s), room_stamp_extra_lines_mv(s, res.net, room.sia_category, st)),
             None => {
                 // [177] Ohne Stempel-Einstellungen: Name, Fläche, linksbündig; die SIA-Kategorie ist Attribut des Raums.
                 // [173] Fläche und SIA-Kategorie nach der Stufe (Basis: Fläche ja, Kategorie nein).
@@ -1903,7 +1908,7 @@ mod tests {
             let lines = d.rooms.iter().filter(|q| matches!(q, Primitive::Line { cls, .. } if cls == "void")).count();
             (text, lines)
         };
-        let base = RoomStamp { number: Some("E.03".into()), show_floor_area: true, ..Default::default() };
+        let base = RoomStamp { number: Some("E.03".into()), show_floor_area: Some(true), ..Default::default() };
         let ((doc, extra), lines) = run(Some(base.clone()));
         let paras: Vec<String> = doc.paragraphs.iter().map(|p| p.runs.iter().map(|r| r.text.clone()).collect::<String>()).collect();
         assert_eq!(paras.len(), 2);
@@ -1917,7 +1922,7 @@ mod tests {
         let ((_, extra), _) = run(None);
         assert!(extra.iter().all(|l| l.align == Align::Left && !l.text.contains('·')));
         // Kategorie nur eingeschaltet.
-        let ((_, extra), _) = run(Some(RoomStamp { show_usage: true, ..base.clone() }));
+        let ((_, extra), _) = run(Some(RoomStamp { show_usage: Some(true), ..base.clone() }));
         assert_eq!(extra.len(), 2);
         assert!(extra[1].text.contains('·') && extra[1].align == Align::Left);
         // Trennlinie eingeschaltet: je Raum eine Linie.
@@ -1926,7 +1931,7 @@ mod tests {
         // Die Linie liegt zwischen Namen und Nummer (Modell-y nach oben: unter dem Namen = kleineres y).
         let mut q = p.clone();
         for r in q.rooms.as_mut().unwrap() {
-            r.stamp = Some(RoomStamp { name: r.name.clone(), show_divider: Some(true), number: Some("E.03".into()), show_floor_area: true, ..Default::default() });
+            r.stamp = Some(RoomStamp { name: r.name.clone(), show_divider: Some(true), number: Some("E.03".into()), show_floor_area: Some(true), ..Default::default() });
         }
         let t = serde_json::json!({ "floor": "eg", "show": ["20", "60"], "grey": [], "scale": 100 }).to_string();
         let d = plan_domains(&q, &PlanArgs::parse(1.0, &t).unwrap()).unwrap();
@@ -1957,7 +1962,7 @@ mod tests {
         // Eigener Stempel ab 1:200 ohne Nutzungszeile.
         let mut q = p.clone();
         for r in q.rooms.as_mut().unwrap() {
-            r.stamp = Some(RoomStamp { name: r.name.clone(), show_floor_area: true, show_usage: true, occupancy: Some(3.0), ..Default::default() });
+            r.stamp = Some(RoomStamp { name: r.name.clone(), show_floor_area: Some(true), show_usage: Some(true), occupancy: Some(3.0), ..Default::default() });
         }
         let lines = |scale: f64| {
             let t = serde_json::json!({ "floor": "eg", "show": ["20", "60"], "grey": [], "scale": scale }).to_string();
@@ -2931,7 +2936,7 @@ mod tests {
         p.components.push(Component { id: "par".into(), name: "Parkett Eiche".into(), ..Default::default() });
         let r = &mut p.rooms.as_mut().unwrap()[0];
         r.floor_finish = Some("par".into());
-        r.stamp = Some(RoomStamp { name: "Wohnen".into(), show_floor_area: true, ..Default::default() });
+        r.stamp = Some(RoomStamp { name: "Wohnen".into(), show_floor_area: Some(true), ..Default::default() });
         let (floor, cat) = (r.floor_id.clone(), r.category_code.clone());
         let lines = |p: &Project| {
             let t = serde_json::json!({ "floor": floor, "show": [cat], "grey": [], "scale": 50 }).to_string();
@@ -3088,7 +3093,7 @@ mod tests {
         assert_eq!(format_stamp_area(17.0125, None), "17.01");
         assert_eq!(format_stamp_area(17.26, Some(0.5)), "17.5");
         assert_eq!(format_stamp_area(17.26, Some(0.1)), "17.3");
-        let s = RoomStamp { name: "Bad".into(), show_floor_area: false, show_usage: false, occupancy: Some(1e21), ..Default::default() };
+        let s = RoomStamp { name: "Bad".into(), show_floor_area: Some(false), show_usage: Some(false), occupancy: Some(1e21), ..Default::default() };
         assert_eq!(room_stamp_extra_lines(&s, 1.0, SiaCategory::VF)[0].text, "1e+21 Pers.");
         let d = room_stamp_to_doc(&RoomStamp { number: Some("  2 ".into()), name: "Bad".into(), name_line2: Some("  ".into()), ..Default::default() });
         assert_eq!(d.paragraphs.len(), 2);
@@ -3096,7 +3101,7 @@ mod tests {
     }
 
     fn stamp(name: &str) -> RoomStamp {
-        RoomStamp { name: name.into(), show_floor_area: true, show_usage: true, ..Default::default() }
+        RoomStamp { name: name.into(), show_floor_area: Some(true), show_usage: Some(true), ..Default::default() }
     }
 
     #[test]
@@ -3116,9 +3121,9 @@ mod tests {
         let l = room_stamp_extra_lines(&RoomStamp { floor_area_prefix: Some("BF ".into()), ..stamp("Bad") }, 12.345, SiaCategory::HNF);
         assert_eq!(l[0].text, "BF 12.35 m²");
         assert_eq!(l[1].text, "HNF · Hauptnutzfläche");
-        let off = RoomStamp { show_floor_area: false, show_usage: false, ..stamp("Bad") };
+        let off = RoomStamp { show_floor_area: Some(false), show_usage: Some(false), ..stamp("Bad") };
         assert!(room_stamp_extra_lines(&off, 12.345, SiaCategory::HNF).is_empty());
-        let r = room_stamp_extra_lines(&RoomStamp { show_usage: false, rounding_step: Some(0.5), ..stamp("Bad") }, 12.34, SiaCategory::HNF);
+        let r = room_stamp_extra_lines(&RoomStamp { show_usage: Some(false), rounding_step: Some(0.5), ..stamp("Bad") }, 12.34, SiaCategory::HNF);
         assert_eq!(r[0].text, "12.5 m²");
         let o = room_stamp_extra_lines(&RoomStamp { occupancy: Some(4.0), ..off.clone() }, 12.345, SiaCategory::HNF);
         assert_eq!(o.len(), 1);

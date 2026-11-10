@@ -2320,6 +2320,14 @@ body {
   shape-rendering: geometricPrecision;
 }
 
+/* Einfüge-Griff (Mitte eines Schnittlinien-Segments, Ziehen fügt einen Knick ein): kleine, gefüllte Raute. */
+.plan-svg .plan-grip.plan-grip-insert {
+  fill: var(--accent);
+  stroke: var(--sheet);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+
 /* Bezier-Hilfslinien (Anker → Kontrollpunkt-Griff): dünn, gestrichelt, deutlich
    zurückhaltender als der Kurven-Umriss selbst — reine Steuerungshilfe. */
 .plan-svg .plan-grip-line {

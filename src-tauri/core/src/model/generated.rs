@@ -4048,17 +4048,19 @@ pub struct RoomStamp {
     #[serde(rename = "nameLine2", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub name_line2: Option<String>,
-    /// Bodenfläche anzeigen (Live-Zeile).
-    #[serde(rename = "showFloorArea")]
-    pub show_floor_area: bool,
+    /// Bodenfläche anzeigen (Live-Zeile). [173] Fehlt: wie die Modelldarstellung (Basis: ja); gesetzt geht vor.
+    #[serde(rename = "showFloorArea", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub show_floor_area: Option<bool>,
     /// Präfix vor der Bodenfläche, z. B. "BF " (Default leer).
     #[serde(rename = "floorAreaPrefix", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub floor_area_prefix: Option<String>,
     /// SIA-416-Kategorie (HNF/… · Bezeichnung) im Stempel anzeigen (Live-Zeile). [177]: Vorgabe aus, die
-    /// Kategorie ist ein Attribut des Raums.
-    #[serde(rename = "showUsage")]
-    pub show_usage: bool,
+    /// Kategorie ist ein Attribut des Raums. [173] Fehlt: wie die Modelldarstellung (Basis: nein); gesetzt geht vor.
+    #[serde(rename = "showUsage", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub show_usage: Option<bool>,
     /// Ausrichtung der Namenszeile (Zeile 1). Fehlt sie, gilt „links".
     #[serde(rename = "nameAlign", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]

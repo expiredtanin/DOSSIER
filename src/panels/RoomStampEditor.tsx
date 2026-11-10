@@ -69,6 +69,20 @@ function AlignToggle({
   );
 }
 
+/** [173] Dreifach-Wahl: fehlt = wie Modelldarstellung (Stufe), sonst an/aus am Stempel. */
+function TriState({ value, onChange }: { value: boolean | undefined; onChange: (v: boolean | undefined) => void }) {
+  return (
+    <select
+      value={value === undefined ? "" : value ? "1" : "0"}
+      onChange={(e) => onChange(e.target.value === "" ? undefined : e.target.value === "1")}
+    >
+      <option value="">{t("roomStamp.asModelView")}</option>
+      <option value="1">{t("roomStamp.on")}</option>
+      <option value="0">{t("roomStamp.off")}</option>
+    </select>
+  );
+}
+
 export function RoomStampEditor({ value, onApply, onCancel }: RoomStampEditorProps) {
   const [draft, setDraft] = useState<RoomStamp>(value);
 
@@ -156,17 +170,13 @@ export function RoomStampEditor({ value, onApply, onCancel }: RoomStampEditorPro
 
           <div className="roomstamp-row">
             <label className="roomstamp-check">
-              <input
-                type="checkbox"
-                checked={draft.showFloorArea}
-                onChange={(e) => patch({ showFloorArea: e.target.checked })}
-              />
               <span>{t("roomStamp.showFloorArea")}</span>
+              <TriState value={draft.showFloorArea} onChange={(showFloorArea) => patch({ showFloorArea })} />
             </label>
             <AlignToggle
               value={draft.floorAreaAlign}
               fallback="left"
-              disabled={!draft.showFloorArea}
+              disabled={draft.showFloorArea === false}
               label={`${t("roomStamp.showFloorArea")} — ${t("text.group")}`}
               onChange={(floorAreaAlign) => patch({ floorAreaAlign })}
             />
@@ -178,7 +188,7 @@ export function RoomStampEditor({ value, onApply, onCancel }: RoomStampEditorPro
               type="text"
               className="roomstamp-input"
               value={draft.floorAreaPrefix ?? ""}
-              disabled={!draft.showFloorArea}
+              disabled={draft.showFloorArea === false}
               onChange={(e) => patch({ floorAreaPrefix: e.target.value })}
             />
           </label>
@@ -188,7 +198,7 @@ export function RoomStampEditor({ value, onApply, onCancel }: RoomStampEditorPro
             <select
               className="roomstamp-input"
               value={draft.roundingStep ?? ""}
-              disabled={!draft.showFloorArea}
+              disabled={draft.showFloorArea === false}
               onChange={(e) => {
                 const v = e.target.value;
                 patch({ roundingStep: v === "" ? undefined : Number(v) });
@@ -204,17 +214,13 @@ export function RoomStampEditor({ value, onApply, onCancel }: RoomStampEditorPro
 
           <div className="roomstamp-row">
             <label className="roomstamp-check">
-              <input
-                type="checkbox"
-                checked={draft.showUsage}
-                onChange={(e) => patch({ showUsage: e.target.checked })}
-              />
               <span>{t("roomStamp.showUsage")}</span>
+              <TriState value={draft.showUsage} onChange={(showUsage) => patch({ showUsage })} />
             </label>
             <AlignToggle
               value={draft.usageAlign}
               fallback="left"
-              disabled={!draft.showUsage}
+              disabled={draft.showUsage === false}
               label={`${t("roomStamp.showUsage")} — ${t("text.group")}`}
               onChange={(usageAlign) => patch({ usageAlign })}
             />

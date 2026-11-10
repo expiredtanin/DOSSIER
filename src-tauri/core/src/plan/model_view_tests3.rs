@@ -100,7 +100,7 @@ fn step_texts(d: &DomainPrims) -> Vec<String> {
 #[test]
 fn leere_abschnitte_wie_heute() {
     let mut p = with_drawings(sample());
-    let r2 = Room { id: "R2".into(), stamp: Some(RoomStamp { name: "Bad".into(), number: Some("E.02".into()), show_floor_area: true, show_finish: Some(true), ..Default::default() }), ..p.rooms.as_ref().unwrap()[0].clone() };
+    let r2 = Room { id: "R2".into(), stamp: Some(RoomStamp { name: "Bad".into(), number: Some("E.02".into()), show_floor_area: Some(true), show_finish: Some(true), ..Default::default() }), ..p.rooms.as_ref().unwrap()[0].clone() };
     p.rooms.as_mut().unwrap().push(r2);
     for scale in [50.0, 100.0, 200.0] {
         let heute = buf(&p, scale);
@@ -129,7 +129,7 @@ fn raumstempel_ohne_stempel_nach_stufe() {
 #[test]
 fn raumstempel_einstellung_am_stempel_geht_vor() {
     let mut p = sample();
-    p.rooms.as_mut().unwrap()[0].stamp = Some(RoomStamp { name: "Wohnen".into(), number: Some("E.01".into()), show_floor_area: true, show_divider: Some(false), ..Default::default() });
+    p.rooms.as_mut().unwrap()[0].stamp = Some(RoomStamp { name: "Wohnen".into(), number: Some("E.01".into()), show_floor_area: Some(true), show_divider: Some(false), ..Default::default() });
     let heute = plan(&p, 100.0);
     assert!(stamp_text(&heute).contains("E.01"));
     assert_eq!(dividers(&heute), 0);
@@ -146,6 +146,28 @@ fn raumstempel_einstellung_am_stempel_geht_vor() {
     let q = with_mv(p.clone(), serde_json::json!({"roomStamps": {"divider": true}}));
     assert_eq!(dividers(&plan(&q, 100.0)), 1);
     assert_eq!(dividers(&plan(&p, 100.0)), 0, "ohne Stufe keine Trennlinie");
+}
+
+#[test]
+fn raumstempel_flaeche_kategorie_stufe_steuert_wenn_stempel_offen() {
+    let mut p = sample();
+    p.rooms.as_mut().unwrap()[0].stamp = Some(RoomStamp { name: "Wohnen".into(), ..Default::default() });
+    // Stempel ohne Wahl, ohne Stufe: Basis (Fläche ja, Kategorie nein) — wie ein Stempel mit dem alten Standard.
+    let l = stamp_lines(&plan(&p, 100.0));
+    assert_eq!(l.len(), 1, "{l:?}");
+    assert!(l[0].ends_with(" m²"), "{l:?}");
+    // Die Stufe steuert Fläche und Kategorie.
+    let q = with_mv(p.clone(), serde_json::json!({"roomStamps": {"area": false, "usage": true}}));
+    let l = stamp_lines(&plan(&q, 100.0));
+    assert_eq!(l.len(), 1, "{l:?}");
+    assert!(l[0].starts_with("HNF · "), "{l:?}");
+    // Der Stempel geht vor, wo er gesetzt ist.
+    p.rooms.as_mut().unwrap()[0].stamp.as_mut().unwrap().show_floor_area = Some(true);
+    p.rooms.as_mut().unwrap()[0].stamp.as_mut().unwrap().show_usage = Some(false);
+    let q = with_mv(p.clone(), serde_json::json!({"roomStamps": {"area": false, "usage": true}}));
+    let l = stamp_lines(&plan(&q, 100.0));
+    assert_eq!(l.len(), 1, "{l:?}");
+    assert!(l[0].ends_with(" m²"), "{l:?}");
 }
 
 #[test]
@@ -184,6 +206,37 @@ fn stufennummern_nach_stufe() {
     let q = with_mv(p.clone(), serde_json::json!({"stairs": {"stepNumbers": true, "aboveCut": "off"}}));
     let m = step_texts(&plan(&q, 50.0));
     assert!(!m.is_empty() && m.len() < n.len(), "{} < {}", m.len(), n.len());
+}
+
+#[test]
+fn stufennummern_beruehren_die_pfeilspitze_nicht() {
+    let p = sample();
+    let q = with_mv(p.clone(), serde_json::json!({"stairs": {"stepNumbers": true}}));
+    let d = plan(&q, 50.0);
+    // Pfeilspitze (Linien `stair-arrow`, gefüllte Spitze) gegen die Kästen der Nummern.
+    let mut arrows: Vec<[f64; 4]> = Vec::new();
+    for pr in &d.stairs {
+        match pr {
+            Primitive::Line { a, b, cls, .. } if cls == "stair-arrow" => arrows.push([a.x.min(b.x), a.y.min(b.y), a.x.max(b.x), a.y.max(b.y)]),
+            Primitive::Polygon { pts, fill, .. } if fill != "none" && pts.len() == 3 => {
+                arrows.push([pts.iter().map(|q| q.x).fold(f64::INFINITY, f64::min), pts.iter().map(|q| q.y).fold(f64::INFINITY, f64::min), pts.iter().map(|q| q.x).fold(f64::NEG_INFINITY, f64::max), pts.iter().map(|q| q.y).fold(f64::NEG_INFINITY, f64::max)])
+            }
+            _ => {}
+        }
+    }
+    assert!(!arrows.is_empty(), "Pfeil vorhanden");
+    let mut n = 0;
+    for pr in &d.stairs {
+        if let Primitive::DrawingText { at, text, height_m, .. } = pr {
+            n += 1;
+            let w = crate::text_layout::text_width_em(text, false) * height_m;
+            for b in &arrows {
+                let hit = at.x < b[2] && at.x + w > b[0] && at.y < b[3] && at.y + 0.7 * height_m > b[1];
+                assert!(!hit, "Nummer {text} berührt die Pfeilspitze");
+            }
+        }
+    }
+    assert!(n >= 10, "Nummern bleiben (bis auf höchstens eine): {n}");
 }
 
 #[test]

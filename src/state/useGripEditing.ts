@@ -182,10 +182,11 @@ export function useGripEditing(opts: {
     ? project.drawingLevels.find((l) => l.id === selectedSectionLineId && l.linePoints)
     : undefined;
   // Dahinter je Segment ein Mittel-Griff: Ziehen fügt dort einen Knick ein (Index = Punktzahl + Segment).
-  const sectionLineGrips = (l: NonNullable<typeof selectedSectionLine>): Vec2[] => {
+  const sectionLineGrips = (l: NonNullable<typeof selectedSectionLine>): (Vec2 & { insert?: boolean })[] => {
     if (!l.linePoints) return [];
     const pts = [l.linePoints[0], ...(l.bendPoints ?? []), l.linePoints[1]];
-    const mids = pts.slice(1).map((q, i) => ({ x: (pts[i].x + q.x) / 2, y: (pts[i].y + q.y) / 2 }));
+    // `insert`: Mittel-Griffe zeichnet die Plan-Ansicht als kleine Raute (anders als die Eck-Griffe).
+    const mids = pts.slice(1).map((q, i) => ({ x: (pts[i].x + q.x) / 2, y: (pts[i].y + q.y) / 2, insert: true }));
     return [...pts, ...mids];
   };
   /** Laufender Zug an einer Schnittlinie: gemeinsamer Undo-Schlüssel, bei Mittel-Griff der eingefügte Knick. */

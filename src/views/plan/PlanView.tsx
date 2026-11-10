@@ -1098,6 +1098,18 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
             (visibleGripIndices(grips!, toScreen, view, meet) ?? grips!.map((_, i) => i)).map((i) => {
               const s = toLocal(grips![i]);
               const size = (4.5 * gripK(meet)) / meet;
+              // Einfüge-Griff (Mitte eines Schnitt-Segments): kleine Raute, eigene Optik gegenüber den Eck-Griffen.
+              if ((grips![i] as { insert?: boolean }).insert) {
+                const d = size * 0.9;
+                return (
+                  <polygon
+                    key={`grip-${i}`}
+                    className="plan-grip plan-grip-insert"
+                    points={`${s.x},${s.y - d} ${s.x + d},${s.y} ${s.x},${s.y + d} ${s.x - d},${s.y}`}
+                    pointerEvents="none"
+                  />
+                );
+              }
               return (
                 <circle
                   key={`grip-${i}`}

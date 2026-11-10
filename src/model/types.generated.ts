@@ -3180,15 +3180,17 @@ export type RoomStamp = {
   name: string;
   /** Raumname Zeile 2 (in Listen mit `name` zu einem Namen zusammengezogen). */
   nameLine2?: string;
-  /** Bodenfläche anzeigen (Live-Zeile). */
-  showFloorArea: boolean;
+  /**
+   * Bodenfläche anzeigen (Live-Zeile). [173] Fehlt: wie die Modelldarstellung (Basis: ja); gesetzt geht vor.
+   */
+  showFloorArea?: boolean;
   /** Präfix vor der Bodenfläche, z. B. "BF " (Default leer). */
   floorAreaPrefix?: string;
   /**
    * SIA-416-Kategorie (HNF/… · Bezeichnung) im Stempel anzeigen (Live-Zeile). [177]: Vorgabe aus, die
-   * Kategorie ist ein Attribut des Raums.
+   * Kategorie ist ein Attribut des Raums. [173] Fehlt: wie die Modelldarstellung (Basis: nein); gesetzt geht vor.
    */
-  showUsage: boolean;
+  showUsage?: boolean;
   /** Ausrichtung der Namenszeile (Zeile 1). Fehlt sie, gilt „links". */
   nameAlign?: Align;
   /** Ausrichtung der zweiten Namenszeile. Fehlt sie, gilt „links". */

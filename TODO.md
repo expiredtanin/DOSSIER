@@ -145,7 +145,7 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   nach dem Ziehen entfallen Knicke auf einem Nachbarpunkt/der Geraden auch im Modell (`sectionLineTidy`, 5 mm bzw. 6 Bildschirm-Pixel); je Aktion ein Undo-Schritt
   (gemeinsamer coalesceKey). Grundriss-Unterlage im Schnitt (`plan/underlay.rs` `underlay_for_level`) folgt den Knicken (je Segment
   abgewickelt, an den Winkelhalbierenden zugeschnitten, `unfold::clip_plan_prims`). Offen: 3D-Live-Schnitt folgt der
-  Endpunkt-Verbindung; Mittel-Griffe sehen aus wie Eckgriffe; optionale dünne Ansichtsebene; Mac-/Tauri-Ansicht nicht geprüft.
+  Endpunkt-Verbindung; Mittel-Griffe jetzt als kleine gefüllte Raute (10.11., `.plan-grip-insert`); optionale dünne Ansichtsebene; Mac-/Tauri-Ansicht nicht geprüft.
   L-Marke (10.11., Wunsch Maintainer): Markentyp
   `DrawingLevel.markerStyle` ("arrow" Basis | "lAngle") mit Vorgabe `ModelViewOption.sectionMarks.style` (Ebene > Modelldarstellung >
   Pfeil; `Options::section_marker`); L = je Ende kräftiger langer Schenkel (12 mm) längs der Linie nach innen + kurzer (6 mm) in
@@ -281,8 +281,10 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   den Standards („Standards laden"/„aktualisieren", Ressourcen-Tab: Vorlagen übernehmen); Tests
   `plan/model_view_tests3.rs`, Goldens unverändert (komplex EG/DG weichen schon auf dem Stand 1b9e01b ab, nicht von hier). Offen: 3D-Viewer übergibt weiter keine Stufe (Cache, s. o.);
   Stufen einzeln zwischen Projekten austauschen (kein Ressourcen-Import, nur Projektvorlagen); Stempel-Schalter
-  Fläche/SIA-Kategorie sind am Stempel immer gesetzt (bool) — die Stufe wirkt dort nur auf Räume ohne Stempel;
-  Fang-Punkte der Stempel (`room_stamp_spots`) rechnen ohne Stufe. Nicht in der Tauri-App/auf dem Mac geprüft. · M
+  Fläche/SIA-Kategorie am Stempel sind jetzt optional (10.11.; fehlend = wie Stufe, gesetzt geht vor; Editor: Dreifach-Wahl
+  „wie Modelldarstellung/an/aus", neue Stempel lassen sie offen; bestehende Projekte tragen die Werte ausdrücklich und
+  sehen gleich aus, ohne Stufe ändert sich nichts); Stufennummer unter der Pfeilspitze der Lauflinie wird seitlich versetzt
+  oder entfällt; Fang-Punkte der Stempel (`room_stamp_spots`) rechnen ohne Stufe. Nicht in der Tauri-App/auf dem Mac geprüft. · M
 - ◐ **[33]** Objektstile mit Rangfolge (Override-Regeln). „Ausblenden“ lässt Elemente im Grundriss anwählbar/fangbar;
   Schlagschatten und Gelände nicht über Regeln steuerbar; Linienstil auf Polygon-Umrissen (Wand-Umriss, Decken)
   ohne Wirkung; Linienstil-Aktion in der Ansicht ohne Wirkung; Öffnungen selbst ausblenden nicht möglich. · M

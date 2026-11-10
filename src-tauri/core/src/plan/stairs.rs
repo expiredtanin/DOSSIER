@@ -181,7 +181,8 @@ pub fn plan_stairs(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) {
         let f = crate::plan::stair_symbol::plan_stair_run(&params, zt - zb, cut_height, lw, s.arrow_style == Some(StairArrowStyle::Filled), s.center_column.unwrap_or(0.0), railing_code(p, s), double, &[], &run_opts(&opts, c.a.scale));
         emit(out, &f, &stroke, greyed, &s.id, &opts);
         if let (true, Some(geo)) = (opts.step_numbers, &geo) {
-            step_numbers(out, geo, cut_height, &opts, c.a.scale, &stroke, greyed);
+            let avoid = arrow_boxes(&out[out_start..]);
+            step_numbers(out, geo, cut_height, &opts, c.a.scale, &stroke, greyed, &avoid);
         }
         if let Some(d) = range.restyle_dash(zone) {
             super::view_range::restyle(out, out_start, d);
@@ -195,7 +196,20 @@ const STEP_NUMBER_MM: f64 = 1.8;
 
 /// [173] Stufennummern (Modelldarstellung, Basis aus): je Tritt die Nummer ab Antritt (1, 2, …) in der Mitte des
 /// Tritts; Tritte ganz über der Schnitthöhe nur, wenn die Stufe sie zeigt (`above_cut`).
-fn step_numbers(out: &mut Vec<Primitive>, geo: &kernel2d::StairGeometry, cut_height: f64, opts: &super::model_view::StairOpts, scale: f64, stroke: &str, greyed: Option<bool>) {
+/// [173] Umrisse (xmin, ymin, xmax, ymax) der Pfeilspitze der Lauflinie (Linien `stair-arrow` und gefüllte Spitze).
+fn arrow_boxes(prims: &[Primitive]) -> Vec<[f64; 4]> {
+    let bb = |pts: &[Vec2]| pts.iter().fold([f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY], |b, q| [b[0].min(q.x), b[1].min(q.y), b[2].max(q.x), b[3].max(q.y)]);
+    prims
+        .iter()
+        .filter_map(|q| match q {
+            Primitive::Line { a, b, cls, .. } if cls == "stair-arrow" => Some(bb(&[*a, *b])),
+            Primitive::Polygon { pts, fill, stair_id: Some(_), .. } if fill != "none" && pts.len() == 3 => Some(bb(pts)),
+            _ => None,
+        })
+        .collect()
+}
+
+fn step_numbers(out: &mut Vec<Primitive>, geo: &kernel2d::StairGeometry, cut_height: f64, opts: &super::model_view::StairOpts, scale: f64, stroke: &str, greyed: Option<bool>, avoid: &[[f64; 4]]) {
     let h = STEP_NUMBER_MM * scale / 1000.0;
     if !(h.is_finite() && h > 0.0) {
         return;
@@ -208,6 +222,23 @@ fn step_numbers(out: &mut Vec<Primitive>, geo: &kernel2d::StairGeometry, cut_hei
         let (cx, cy) = t.pts.iter().fold((0.0, 0.0), |(x, y), q| (x + q.x / n, y + q.y / n));
         let text = (k + 1).to_string();
         let w = crate::text_layout::text_width_em(&text, false) * h;
+        // Nummer, die die Pfeilspitze der Lauflinie berührt: seitlich (entlang der Trittkante) versetzen, im Tritt
+        // bleibend; passt keine Stelle, entfällt sie.
+        let hits = |x: f64, y: f64| avoid.iter().any(|b| x - w / 2.0 < b[2] + 0.3 * h && x + w / 2.0 > b[0] - 0.3 * h && y - 0.35 * h < b[3] + 0.3 * h && y + 0.65 * h > b[1] - 0.3 * h);
+        let (mut cx, mut cy) = (cx, cy);
+        if hits(cx, cy) {
+            let (ex, ey) = (t.pts[1].x - t.pts[0].x, t.pts[1].y - t.pts[0].y);
+            let el = ex.hypot(ey);
+            let ring: Vec<[f64; 2]> = t.pts.iter().map(|q| [q.x, q.y]).collect();
+            let spot = (2..=8).flat_map(|m| [1.0, -1.0].map(|sg| sg * m as f64 * 0.5 * h)).find_map(|d| {
+                let (x, y) = (cx + ex / el * d, cy + ey / el * d);
+                (el > 1e-9 && !hits(x, y) && crate::surface_pattern::point_in([x, y], &ring)).then_some((x, y))
+            });
+            match spot {
+                Some((x, y)) => (cx, cy) = (x, y),
+                None => continue,
+            }
+        }
         out.push(Primitive::DrawingText {
             at: v2(cx - w / 2.0, cy - 0.35 * h),
             text,
