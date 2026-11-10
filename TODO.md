@@ -224,8 +224,14 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   (nur im Bearbeiten-Dialog). · M
 - ◐ **[95]** Fenster/Türen: mehr Bauarten. Hebeschiebetür-Bandseite in der Ansicht; Brüstungs-/Riegel-Einteilung unten
   (nur Oberlicht). · S
-- ◐ **[105]** Fenster/Türen: Rahmen-Detail, Anschlag je Seite, Zargen. Türblatt im 3D mittig statt im Falz; Grundriss-Türblatt
-  an der Wandachse; Pfosten-Breite wirkt nur im 3D; Ressourcen-Tabs ohne die neuen Felder. · M
+- ◐ **[105]** Fenster/Türen: Rahmen-Detail, Anschlag je Seite, Zargen. (10.11.) Zarge (Vorgabe) und Blockrahmen bei Dreh-/
+  Pendeltüren mit eigenem Profil (`opening_detail::door_frame_of`): Zarge über die ganze Leibung, Falz 1.5 × 4 cm auf der
+  Aufschlagseite, Bekleidung beidseitig; Blockrahmen nach Typlage hinter dem Maueranschlag. Blatt im Falz der Aufschlagseite in
+  Grundriss (Drehpunkt an der Falzkante, fein als Rechteck mit Blattdicke), Schnitt, Ansicht, 3D und IFC (`fileio`
+  `fill_geometry`: Blatt bündig mit der Rahmenfläche, Rahmen im Blattband um den Falz ausgespart). Das schmale Rahmenband quer
+  über die Öffnung entfällt bei Drehtüren (bleibt bei Schiebetüren); nach aussen aufgehende Türen mit Viertel- statt
+  Dreiviertelbogen. Offen: Pendeltür ohne eigenes Profil (liegt ebenfalls im Falz); nicht in der Tauri-App/auf dem Mac
+  (Metal, 3D-Bild) angesehen. · S
 - ◐ **[106]** Schichteinzug je Wandschicht. Plantabelle (`sheet_table.rs`) ohne Leibungsspalten; Stufen-Fläche der
   Nachbarschicht beim Rücksprung nicht gezählt; Dachfenster ohne Schichteinzug; Schnitt parallel zur Wand durch
   Formöffnungs-Leibungen; 3D ohne Schichten zeigt an Leibungen keinen Rücksprung. · M

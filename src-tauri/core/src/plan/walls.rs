@@ -514,9 +514,9 @@ fn opening_symbol(c: &Ctx, out: &mut Vec<Primitive>, w: &Wall, o: &Opening, colo
         use crate::opening_detail as od;
         let innen = od::aufschlag_innen(o);
         let clear = od::profile_clear_x(&od::door_frame_profile(df, total, innen));
-        let (d0, _) = od::leaf_band(df, total, innen);
+        let (d0, d1) = od::leaf_band(df, total, innen);
         let off = ref_off - total / 2.0 + if innen { total - d0 } else { d0 };
-        ((clear - df.falz_width).max(0.0), off)
+        ((clear - df.falz_width).max(0.0), off, (d1 - d0).abs())
     });
     let (o_pos, o_wid) = if ext_l + ext_r > 1e-6 && o.width - ext_l - ext_r > 0.05 { (o.position + ext_l, o.width - ext_l - ext_r) } else { (o.position, o.width) };
     let mut b: Vec<f64> = vec![w.start.x, w.start.y, w.end.x, w.end.y, total, ref_off, o_pos, o_wid, b01(door), detail_code];
@@ -597,7 +597,11 @@ fn opening_symbol(c: &Ctx, out: &mut Vec<Primitive>, w: &Wall, o: &Opening, colo
     b.push(o.sill_line_style.as_ref().and_then(|l| l.weight).unwrap_or(SYMBOL_LINE_MM));
     // Details ([94]): Anschlag, Fensterbank, Storenkasten.
     // Anschlag: je Seite verschieden ⇒ zeichnet `opening_detail_plan`.
-    let rebate_sides = det.as_ref().map(|f| f.rebate).filter(|r| (r.left - r.right).abs() > 1e-9 || dframe.is_some());
+    // Mit Zargen-Profil (auch Blockrahmen hinter dem Maueranschlag, [105]) immer dort.
+    let rebate_sides = match dframe {
+        Some(_) => crate::opening_detail::frame_of(p, o).map(|f| f.rebate),
+        None => det.as_ref().map(|f| f.rebate).filter(|r| (r.left - r.right).abs() > 1e-9),
+    };
     b.push(match (&det, rebate_sides) {
         (_, Some(_)) => 0.0,
         (Some(f), None) => f.rebate.left,
@@ -634,9 +638,10 @@ fn opening_symbol(c: &Ctx, out: &mut Vec<Primitive>, w: &Wall, o: &Opening, colo
             b01(s.opening.is_some_and(|k| k != OpeningKind::Fest)),
         ]);
     }
-    // [105] Anhang: Rahmenbreite rechts (Fenster), Drehpunkt des Türblatts im Falz (Einzug, Versatz).
+    // [105] Anhang: Rahmenbreite rechts (Fenster), Drehpunkt des Türblatts im Falz (Einzug, Versatz) und
+    // Blattdicke (nur fein: Blatt als Rechteck).
     b.push(det.as_ref().filter(|f| wt.is_some() && (f.sides.right - f.sides.left).abs() > 1e-9).map_or(f64::NAN, |f| f.sides.right));
-    b.extend(hinge.map_or([f64::NAN; 2], |(x, off)| [x, off]));
+    b.extend(hinge.map_or([f64::NAN; 3], |(x, off, t)| [x, off, if detail == Detail::Fein { t } else { f64::NAN }]));
     let f = crate::plan::openings::plan_opening(&b);
     if f.is_empty() {
         return Ok(());

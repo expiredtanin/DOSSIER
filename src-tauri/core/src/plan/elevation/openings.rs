@@ -158,8 +158,8 @@ pub(super) fn collect_openings(p: &Project, frame: &[f64; 9]) -> Vec<ProjOpening
                 Some(bd) => b.extend([bd.leaf, bd.leaf]),
                 None => b.extend([nan; 2]),
             }
-            if band.is_some() {
-                // Zargen ohne Wandnase: der Anschlag gehört zur Zarge.
+            if dframe.as_ref().is_some_and(|d| d.kind != DoorTypeFrameKind::Blockrahmen) {
+                // Zargen ohne Wandnase: der Anschlag gehört zur Zarge (Blockrahmen sitzt hinter dem Maueranschlag).
                 let k = b.len() - 13 - 3;
                 b[k] = 0.0;
             }

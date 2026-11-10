@@ -105,5 +105,29 @@ levels.push(section("S-DF", 19.2, -1, 7));
 levels.push({ id: "a-dach", name: "Ansicht-Dach-Sued", kind: "elevation", visible: true, locked: false, linePoints: [{ x: 15, y: -3 }, { x: 23, y: -3 }], directionSign: 1, levelMarks: false } as DrawingLevel);
 levels.push({ id: "a-aussen", name: "Ansicht-Aussen", kind: "elevation", visible: true, locked: false, linePoints: [{ x: 0, y: -2 }, { x: 15, y: -2 }], directionSign: 1, levelMarks: false } as DrawingLevel);
 
+// [105] Klassische Zarge/Blockrahmen (Rahmenband): Blatt im Falz auf der Aufschlagseite, nach innen
+// und nach aussen aufgehend; [95] Hebeschiebetür (Bandseite = festes Feld) in einer Aussenwand.
+doorTypes.push(
+  { id: "d-zarge", name: "Tür Zarge", kind: "dreh", leafCount: 1, leafStyle: "glatt", frameThickness: 0.05, frameKind: "zarge", frameWidth: 0.06, defaultWidth: 0.9, defaultHeight: 2.05 },
+  { id: "d-block-aussen", name: "Tür Blockrahmen aussen", kind: "dreh", leafCount: 1, leafStyle: "glatt", frameThickness: 0.05, frameKind: "blockrahmen", frameWidth: 0.07, frameDepth: 0.08, defaultWidth: 0.9, defaultHeight: 2.05 },
+  { id: "d-hs", name: "Hebeschiebetür", kind: "hebeschiebe", leafCount: 2, leafStyle: "glas", frameThickness: 0.08, frameWidth: 0.08, frameDepth: 0.16, insetFace: "aussen", insetFromFace: 0.18, defaultWidth: 2.4, defaultHeight: 2.3 },
+);
+walls.push(wall("IW2", "iw", 0, 12, 8, 12), wall("AW3", "aw", 0, 16, 10, 16));
+const extraDoors: [string, string, number, Partial<Opening>][] = [
+  ["T-Z-in", "d-zarge", 0.6, { openingDir: "in" }],
+  ["T-Z-out", "d-zarge", 2.6, { openingDir: "out" }],
+  ["T-B-in", "d-block-aussen", 4.6, { openingDir: "in" }],
+  ["T-B-out", "d-block-aussen", 6.6, { openingDir: "out", swing: "right" }],
+];
+for (const [id, typeId, pos, extra] of extraDoors) {
+  openings.push({ id, type: "opening", hostWallId: "IW2", categoryCode: "21", kind: "door", typeId, position: pos, width: 0.9, height: 2.05, sillHeight: 0, swing: "left", detailLevel: "fein", ...extra } as Opening);
+  levels.push(section(`S-${id}`, pos + 0.45, 11, 13));
+}
+openings.push({ id: "HS1", type: "opening", hostWallId: "AW3", categoryCode: "21", kind: "door", typeId: "d-hs", position: 1, width: 2.4, height: 2.3, sillHeight: 0, detailLevel: "fein" } as Opening);
+openings.push({ id: "HS2", type: "opening", hostWallId: "AW3", categoryCode: "21", kind: "door", typeId: "d-hs", position: 5, width: 2.4, height: 2.3, sillHeight: 0, hinge: "end", detailLevel: "fein" } as Opening);
+levels.push({ id: "a-hs-aussen", name: "Ansicht-HS-Aussen", kind: "elevation", visible: true, locked: false, linePoints: [{ x: 0, y: 18 }, { x: 10, y: 18 }], directionSign: -1, levelMarks: false } as DrawingLevel);
+levels.push({ id: "a-hs-innen", name: "Ansicht-HS-Innen", kind: "elevation", visible: true, locked: false, linePoints: [{ x: 0, y: 14 }, { x: 10, y: 14 }], directionSign: 1, levelMarks: false } as DrawingLevel);
+levels.push({ id: "a-iw2", name: "Ansicht-IW2", kind: "elevation", visible: true, locked: false, linePoints: [{ x: 0, y: 11 }, { x: 8, y: 11 }], directionSign: 1, levelMarks: false } as DrawingLevel);
+
 const project = { ...emptyProject, id: "opening-details", name: "Fenster/Tür-Details", drawingLevels: levels, walls, openings, windowTypes, doorTypes, roofs } as unknown as Project;
 writeFileSync(process.argv[2] ?? "opening-details.obp", JSON.stringify(project, null, 1));

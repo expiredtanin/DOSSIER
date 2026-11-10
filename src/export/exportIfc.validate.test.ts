@@ -358,9 +358,10 @@ print(json.dumps({"n": len(c), "solids": len(body.Items), "volume": us.get_volum
     expect(d.filled).toBe(1);
     // Wand entlang +Y: n = (−1, 0); swing links/innen → Aufschlag −X; Scharnier am Ende, zweiflügelig → DOUBLE_DOOR_SINGLE_SWING.
     expect(d.op).toBe("DOUBLE_DOOR_SINGLE_SWING");
-    // Rahmen: 3 Teile; Blätter: 2 × (4 Rahmenteile) mit Stil „Türblatt"; Glas: 2.
+    // Rahmen: Zarge über die Wanddicke in zwei Querbändern ([105]: 3 Teile vor dem Blatt, 5 im Blattband um
+    // den Falz ausgespart); Blätter: 2 × (4 Rahmenteile) mit Stil „Türblatt"; Glas: 2.
     const roles = d.items.map((i) => i.styles[0]);
-    expect(roles.filter((r) => r === "Rahmen").length).toBe(3);
+    expect(roles.filter((r) => r === "Rahmen").length).toBe(8);
     expect(roles.filter((r) => r === "Türblatt").length).toBe(8);
     expect(roles.filter((r) => r === "Glas").length).toBe(2);
     // Lage: Achse y 2…3.6 (Öffnung ab 1 m), quer zur Wand (x) innerhalb der Wanddicke 2.8…3.2, Boden z = 0.
@@ -370,8 +371,8 @@ print(json.dumps({"n": len(c), "solids": len(body.Items), "volume": us.get_volum
     expect(d.bbox[1]).toBeLessThanOrEqual(3.2 + 1e-6);
     expect(d.bbox[4]).toBeCloseTo(0, 6);
     expect(d.bbox[5]).toBeCloseTo(2.1, 6);
-    // Glasanteil je Blatt = 50 % der Blattfläche (Blatt 0.74 × 2.04 je Flügel).
-    const leafArea = 0.74 * (2.1 - 0.06);
+    // Glasanteil je Blatt = 50 % der Blattfläche (Blatt 0.755 × 2.055 je Flügel, je 1.5 cm im Falz).
+    const leafArea = (0.74 + 0.015) * (2.1 - 0.06 + 0.015);
     const glassVol = d.items.filter((i) => i.styles[0] === "Glas").reduce((a, i) => a + i.volume, 0);
     expect(glassVol).toBeCloseTo(2 * leafArea * 0.5 * 0.024, 6);
   });

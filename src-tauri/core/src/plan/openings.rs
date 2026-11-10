@@ -138,6 +138,8 @@ fn plan_opening_inner(buf: &[f64]) -> Option<Vec<f64>> {
     // Versatz quer zur Achse; NaN = an der Wandachse).
     let frame_width_end = r.num().unwrap_or(f64::NAN);
     let (hinge_x, hinge_off) = (r.num().unwrap_or(f64::NAN), r.num().unwrap_or(f64::NAN));
+    // Blattdicke (fein): Blatt im Falz als Rechteck statt Strich; NaN = Strich.
+    let leaf_thick = r.num().unwrap_or(f64::NAN);
     if ![sx, sy, ex, ey, total, ref_off, position, width].iter().all(|x| x.is_finite()) {
         return None;
     }
@@ -188,8 +190,19 @@ fn plan_opening_inner(buf: &[f64]) -> Option<Vec<f64>> {
             };
             for leaf in leaves(&door) {
                 o.line(C_LEAF, hair, 0.0, 0.0, leaf.hinge, leaf.open_end);
+                if falz && leaf_thick > 1e-4 && leaf_thick < leaf.radius / 2.0 {
+                    // Blattdicke: von der Aufschlagfläche (Drehpunkt) zur Gegenseite, quer zum offenen Blatt.
+                    let t = leaf_thickness_dir(&leaf);
+                    let (a, b) = (add(leaf.hinge, scale(t, leaf_thick)), add(leaf.open_end, scale(t, leaf_thick)));
+                    o.line(C_LEAF, hair, 0.0, 0.0, leaf.open_end, b);
+                    o.line(C_LEAF, hair, 0.0, 0.0, b, a);
+                    o.line(C_LEAF, hair, 0.0, 0.0, a, leaf.hinge);
+                }
                 if !overview {
-                    o.arc(hair, leaf.hinge, leaf.closed_end, leaf.open_end, leaf.radius);
+                    // Bögen laufen gegen den Uhrzeigersinn von `from` nach `to`: kurzen Bogen wählen
+                    // (nach aussen aufgehende Türen sonst mit Dreiviertelkreis).
+                    let (from, to) = short_arc(&leaf);
+                    o.arc(hair, leaf.hinge, from, to, leaf.radius);
                 }
             }
             if door_kind == 3 {
@@ -198,9 +211,7 @@ fn plan_opening_inner(buf: &[f64]) -> Option<Vec<f64>> {
                 for leaf in leaves(&other) {
                     o.line(C_LEAF, hair, 0.0, 3.0, leaf.hinge, leaf.open_end);
                     if !overview {
-                        // Bögen laufen gegen den Uhrzeigersinn von `from` nach `to`: kurzen Bogen wählen.
-                        let (a, b) = (sub(leaf.closed_end, leaf.hinge), sub(leaf.open_end, leaf.hinge));
-                        let (from, to) = if a.x * b.y - a.y * b.x >= 0.0 { (leaf.closed_end, leaf.open_end) } else { (leaf.open_end, leaf.closed_end) };
+                        let (from, to) = short_arc(&leaf);
                         o.arc(hair, leaf.hinge, from, to, leaf.radius);
                     }
                 }
@@ -476,6 +487,30 @@ fn lift_slide(o: &mut Out, js: V, je: V, n: V, lo: f64, hi: f64, hinge_end: bool
     let an = inner.1 + gap.max(0.04);
     let (from, to) = if hinge_end { (wd * 0.15, wd * 0.6) } else { (wd * 0.85, wd * 0.4) };
     arrow(o, add(along(js, je, from), scale(n, an)), add(along(js, je, to), scale(n, an)), n, hair);
+}
+
+/// Endpunkte des Aufschlagbogens gegen den Uhrzeigersinn (der kurze Bogen zwischen zu und offen).
+fn short_arc(leaf: &DoorLeaf) -> (V, V) {
+    let (a, b) = (sub(leaf.closed_end, leaf.hinge), sub(leaf.open_end, leaf.hinge));
+    if a.x * b.y - a.y * b.x >= 0.0 {
+        (leaf.closed_end, leaf.open_end)
+    } else {
+        (leaf.open_end, leaf.closed_end)
+    }
+}
+
+/// Richtung der Blattdicke am offenen Blatt: quer zum Blatt, zur geschlossenen Lage hin (das Blatt
+/// dreht um seine Aufschlagfläche; geschlossen liegt die Dicke in der Wand, offen zur Öffnung hin).
+fn leaf_thickness_dir(leaf: &DoorLeaf) -> V {
+    let d = sub(leaf.open_end, leaf.hinge);
+    let l = hypot2(d.x, d.y).max(1e-12);
+    let perp = v(-d.y / l, d.x / l);
+    let c = sub(leaf.closed_end, leaf.hinge);
+    if perp.x * c.x + perp.y * c.y >= 0.0 {
+        perp
+    } else {
+        scale(perp, -1.0)
+    }
 }
 
 fn finish(o: Out) -> Vec<f64> {
@@ -866,6 +901,46 @@ mod tests {
         b.extend([NAN, 0.012, 0.15]);
         let (cx, cy, r) = arc(&plan_opening(&b));
         assert!((cx - 1.012).abs() < 1e-9 && (cy.abs() - 0.15).abs() < 1e-9 && (r - 0.876).abs() < 1e-9, "{cx} {cy} {r}");
+    }
+
+    /// [105] Fein mit Blattdicke: Blatt im Falz als Rechteck (Strich + drei Kanten), Dicke quer zum
+    /// offenen Blatt zur Öffnung hin; ohne Falz bleibt der Strich.
+    #[test]
+    fn tuerblatt_fein_als_rechteck_mit_dicke() {
+        let mut b = input(true, 2.0, false, &[]);
+        let leaf_lines = |f: &[f64]| lines(f).into_iter().filter(|l| l.0 == C_LEAF).collect::<Vec<_>>();
+        assert_eq!(leaf_lines(&plan_opening(&b)).len(), 1);
+        b.extend([NAN, 0.045, 0.15, 0.04]);
+        let l = leaf_lines(&plan_opening(&b));
+        assert_eq!(l.len(), 4, "{l:?}");
+        // Offenes Blatt steht quer zur Wand am Drehpunkt x = 1.045; Dicke nach +x (zur Öffnung hin).
+        let xs: Vec<f64> = l.iter().flat_map(|q| [q.2, q.4]).collect();
+        assert!(xs.iter().all(|x| *x > 1.045 - 1e-9 && *x < 1.085 + 1e-9), "{xs:?}");
+        assert!(xs.iter().any(|x| (x - 1.085).abs() < 1e-9));
+    }
+
+    /// Nach aussen aufgehende Tür: Bogen gegen den Uhrzeigersinn über den kurzen Weg (Viertelkreis).
+    #[test]
+    fn aufschlagbogen_nach_aussen_ist_viertelkreis() {
+        for dir in [0.0, 1.0] {
+            let mut b = input(true, 1.0, false, &[]);
+            b[11] = dir;
+            let f = plan_opening(&b);
+            let (mut i, mut arc) = (1, None);
+            for _ in 0..f[0] as usize {
+                match f[i] as i64 {
+                    1 => i += 5 + 2 * f[i + 4] as usize,
+                    3 => {
+                        arc = Some((v(f[i + 2], f[i + 3]), v(f[i + 4], f[i + 5]), v(f[i + 6], f[i + 7])));
+                        i += 9;
+                    }
+                    _ => i += 9,
+                }
+            }
+            let (c, from, to) = arc.unwrap();
+            let (a, bb) = (sub(from, c), sub(to, c));
+            assert!(a.x * bb.y - a.y * bb.x > 0.0, "gegen den Uhrzeigersinn, kurz (dir {dir})");
+        }
     }
 
     /// [105] Pfosten mit eigener Breite: ein Rahmenblock über die Pfostenbreite (statt zwei Anschläge).
