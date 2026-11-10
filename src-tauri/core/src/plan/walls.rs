@@ -306,7 +306,8 @@ fn wall_poche(c: &Ctx, out: &mut Vec<Primitive>, e: &EffWall, gaps: &[(f64, f64)
         }
         let (mut hatch, fill) = apply_ov(li, layer_style(p, w, wt, target.get(li).copied().unwrap_or(li), category, angle)?);
         if bend.is_none() {
-            anchor_band_pattern(&mut hatch, w, cuts, thick.get(li).copied().unwrap_or(0.0));
+            let lo = ref_off - total / 2.0 + thick.iter().take(li).sum::<f64>();
+            anchor_band_pattern(&mut hatch, w, cuts, thick.get(li).copied().unwrap_or(0.0), lo);
         }
         styles.insert(li, (hatch.clone(), fill.clone()));
         Ok((hatch, fill))
@@ -401,7 +402,13 @@ fn wall_poche(c: &Ctx, out: &mut Vec<Primitive>, e: &EffWall, gaps: &[(f64, f64)
 /// spiegelt die eine Wand auf die andere: die Läufe gehen an der Schnittlinie ineinander über (vorher
 /// endeten sie dort gezackt). Gleich orientierte Enden (Anfang an Anfang) drehen das Muster der einen
 /// Wand um 180° (`pattern_flip`).
-fn anchor_band_pattern(h: &mut HatchRender, w: &Wall, cuts: &WallCuts, layer_t: f64) {
+///
+/// [171] Der Ankerpunkt liegt an der Schichtfläche, auf der die oberen Bögen/Spitzen des Musters sitzen
+/// (Seite der Wandnormalen — gegen die Laufrichtung gedreht oder bei `pattern_flip` die andere): die Gehrung schneidet jede Schicht dort durch
+/// die Mitte eines Bogens bzw. einer Spitze, an der Gegenseite fast durch die Mitte eines unteren Bogens
+/// (Dämmschlange: Dicke ≈ 4.5 Teilungen) — die beiden Wände bilden an der Ecke eine ganze, gefaltete
+/// Schlaufe statt versetzter Schenkel. `layer_lo`: Querversatz der unteren Schichtfläche zur Wandachse.
+fn anchor_band_pattern(h: &mut HatchRender, w: &Wall, cuts: &WallCuts, layer_t: f64, layer_lo: f64) {
     use crate::hatch::Pattern as P;
     let pat = match h.pattern {
         HatchPattern::Insulation => P::Insulation,
@@ -424,11 +431,28 @@ fn anchor_band_pattern(h: &mut HatchRender, w: &Wall, cuts: &WallCuts, layer_t: 
     if cuts.pattern_flip {
         h.angle += 180.0;
     }
-    let anchor = |x: &joins::Line| v2(x.point.x, x.point.y);
+    // Normale m = links der Laufrichtung; die oberen Bögen sitzen bei +v = m (gedreht: −m).
+    let m = v2(-dy / l, dx / l);
+    let up = (u.x * dx + u.y * dy > 0.0) != cuts.pattern_flip;
+    let face = if up { layer_lo + layer_t } else { layer_lo };
+    let anchor = |x: &joins::Line| {
+        let c = v2(x.dir.x, x.dir.y);
+        let cl = c.x.hypot(c.y);
+        let cm = (c.x * m.x + c.y * m.y) / if cl > 1e-12 { cl } else { 1.0 };
+        let o = (x.point.x - w.start.x) * m.x + (x.point.y - w.start.y) * m.y;
+        // Punkt der Schnittlinie auf der Schichtfläche (nicht fast parallel zur Wand, sonst der Linienpunkt).
+        if cl > 1e-12 && cm.abs() > 0.05 {
+            let t = (face - o) / (cm * cl);
+            v2(x.point.x + c.x * t, x.point.y + c.y * t)
+        } else {
+            v2(x.point.x, x.point.y)
+        }
+    };
     match (&cuts.start_cut, &cuts.end_cut) {
         (Some(s), Some(e)) => {
-            h.origin = Some(anchor(s));
-            let xe = ((e.point.x - s.point.x) * u.x + (e.point.y - s.point.y) * u.y).abs();
+            let (a0, a1) = (anchor(s), anchor(e));
+            h.origin = Some(a0);
+            let xe = ((a1.x - a0.x) * u.x + (a1.y - a0.y) * u.y).abs();
             let k = xe / (xe / period).round().max(1.0) / period;
             let scale = if h.scale > 1e-6 { h.scale } else { 1.0 };
             // Nur kleine Streckung, und nur wo die Teilung linear mit der Skala geht.
