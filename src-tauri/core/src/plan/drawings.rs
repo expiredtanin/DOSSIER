@@ -1230,6 +1230,8 @@ fn dimension_round(em: &mut Em, pts: &[Vec2], offset: f64, kind: DimKind, st: &D
         }
         let up = v(-jsnum::sin(a), jsnum::cos(a));
         let q = v(at.x + up.x * st.text_height * 0.6, at.y + up.y * st.text_height * 0.6);
+        // [172] Mittig über dem Ankerpunkt, nicht mit dem Anfang daran hängend.
+        let q = centered(q, v(jsnum::cos(a), jsnum::sin(a)), &s, st.text_height);
         let pr = text(q, s, st.text_height, a, em.color, em.greyed, Some(em.id));
         em.sink.push(pr, 0);
     };
@@ -2297,6 +2299,35 @@ mod tests {
         assert!(t[1].1.x - w("0.30") / 2.0 >= 2.3 - 1e-9 || t[1].1.x < 2.3, "{t:?}");
         let (mid_r, nb_l) = (t[1].1.x + w("0.30") / 2.0, t[2].1.x - w("5.00") / 2.0);
         assert!(mid_r <= nb_l + 1e-9, "überdeckt Nachbarzahl: {t:?}");
+    }
+
+    /// [172] Radius-, Durchmesser- und Bogenlängenmass: Masszahl mittig über ihrem Ankerpunkt (nicht mit dem Anfang daran hängend).
+    #[test]
+    fn rundmass_masszahl_mittig() {
+        let p = project(serde_json::json!({}));
+        let mid_of = |geom: serde_json::Value| -> (String, Vec2) {
+            let out = render(&p, drawing(geom), 100.0);
+            out.iter()
+                .find_map(|pr| match pr {
+                    Primitive::DrawingText { text, at, height_m, angle, .. } => {
+                        let w = crate::text_layout::text_width_em(text, false) * height_m;
+                        Some((text.clone(), v(at.x + angle.cos() * w / 2.0, at.y + angle.sin() * w / 2.0)))
+                    }
+                    _ => None,
+                })
+                .expect("Text")
+        };
+        let h = 0.25;
+        let (t, m) = mid_of(serde_json::json!({"shape": "dimension", "kind": "radius", "pts": [{"x": 0, "y": 0}, {"x": 2, "y": 0}], "offset": 0.0}));
+        assert_eq!(t, "R 2.00");
+        assert!((m.x - 1.0).abs() < 1e-9 && (m.y - 0.6 * h).abs() < 1e-9, "{m:?}");
+        let (t, m) = mid_of(serde_json::json!({"shape": "dimension", "kind": "diameter", "pts": [{"x": 0, "y": 0}, {"x": 2, "y": 0}], "offset": 0.0}));
+        assert_eq!(t, "\u{d8} 4.00");
+        assert!((m.x - 0.0).abs() < 1e-9, "{m:?}");
+        let (t, m) = mid_of(serde_json::json!({"shape": "dimension", "kind": "arc", "pts": [{"x": 0, "y": 0}, {"x": 2, "y": 0}, {"x": 0, "y": 2}], "offset": 0.5}));
+        assert!(t.starts_with("L "));
+        // Anker (Bogenmitte) liegt auf der Diagonale; die Zahl steht quer dazu zentriert: Mitte ⟂ Verbindung zum Mittelpunkt.
+        assert!((m.x - m.y).abs() < 0.2 * h + 1e-9, "{m:?}");
     }
 
     /// [172] Gespeicherte Abweichung (frei verschobener Text alter Projekte) bleibt, wo sie ist; (0,0) = Vorgabe.
