@@ -561,6 +561,55 @@ fn rundbogen_im_schnitt() {
     assert!(!ys.is_empty() && ys.iter().all(|y| *y < want + 5e-3), "kein Sturz/Kasten über dem Bogen: {ys:?}");
 }
 
+/// [171] Rundfenster, Schnitt genau am Rand seines Rechtecks (Musterhaus komplex, Schnitt B-B im DG): die Wand
+/// ist dort ganz (Sehne 0), statt eines leeren Rechteck-Lochs ohne Fenster.
+#[test]
+fn rundfenster_schnitt_am_rand_ohne_loch() {
+    let mut p = sample_flush();
+    for o in p.openings.iter_mut().flatten().filter(|o| o.id == "O1") {
+        o.shape = Some(OpeningShape::Rund);
+        o.height = o.width;
+    }
+    let o1 = p.openings.as_deref().unwrap().iter().find(|o| o.id == "O1").unwrap().clone();
+    let w1 = p.walls.iter().find(|w| w.id == o1.host_wall_id).unwrap().clone();
+    let (u, n) = axis_frame(&w1);
+    let (zb, zt) = opening_extent(&p, &w1, &o1);
+    for m in [o1.position, o1.position + o1.width, o1.position + 1e-5] {
+        let c = (w1.start.x + u.0 * m, w1.start.y + u.1 * m);
+        let l = LevelSpec { kind: "section".into(), line: Some([Vec2 { x: c.0 - n.0 * 3.0, y: c.1 - n.1 * 3.0 }, Vec2 { x: c.0 + n.0 * 3.0, y: c.1 + n.1 * 3.0 }]), ..Default::default() };
+        let out = compute_section(&p, &l, &[]).unwrap().unwrap();
+        let mut iv: Vec<(f64, f64)> = out.cuts.iter().filter(|c| c.kind == Kind::Wall && c.source_id.as_deref() == Some("W1")).map(|c| c.pts.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), q| (l.min(q[1]), h.max(q[1])))).collect();
+        iv.sort_by(|a, b| a.0.total_cmp(&b.0));
+        // Die Wandbänder decken die ganze Fensterhöhe ohne Lücke.
+        let mut reach = zb;
+        for (lo, hi) in &iv {
+            if *lo <= reach + 1e-3 {
+                reach = reach.max(*hi);
+            }
+        }
+        assert!(reach >= zt, "Wand bei {m}: Lücke über {reach} ({zb}..{zt}) {iv:?}");
+    }
+}
+
+/// [171] Innenwand des EG ohne Wand darüber (einfaches Musterhaus, W9): sie endet unter der tragenden Platte und
+/// sticht nicht durch Trittschalldämmung und Unterlagsboden des OG.
+#[test]
+fn wand_von_unten_sticht_nicht_durch_den_bodenaufbau() {
+    let p = sample();
+    let out = compute_section(&p, &level(&p, "schnitt-a"), &[]).unwrap().unwrap();
+    let w9_top = out.cuts.iter().filter(|c| c.kind == Kind::Wall && c.source_id.as_deref() == Some("W9")).flat_map(|c| c.pts.iter().map(|q| q[1])).fold(f64::NEG_INFINITY, f64::max);
+    let slab_bottom = out.cuts.iter().filter(|c| c.kind == Kind::Slab && c.component_id.as_deref() == Some("concrete")).flat_map(|c| c.pts.iter().map(|q| q[1])).fold(f64::INFINITY, f64::min);
+    assert!(w9_top.is_finite() && slab_bottom.is_finite());
+    assert!(w9_top <= slab_bottom + 1e-6, "W9 bis {w9_top}, Platte ab {slab_bottom}");
+    // Der Bodenaufbau über W9 bleibt durchgehend (ein Band je Schicht über die Wand hinweg).
+    let (u0, u1) = out.cuts.iter().filter(|c| c.kind == Kind::Wall && c.source_id.as_deref() == Some("W9")).flat_map(|c| c.pts.iter().map(|q| q[0])).fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), x| (l.min(x), h.max(x)));
+    let over = out.cuts.iter().filter(|c| c.kind == Kind::Slab && c.component_id.as_deref() == Some("screed")).any(|c| {
+        let (l, h) = c.pts.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), q| (l.min(q[0]), h.max(q[0])));
+        l < u0 - 0.01 && h > u1 + 0.01
+    });
+    assert!(over, "Unterlagsboden ohne Unterbruch über W9");
+}
+
 /// [T2]/[G3]/[106] Bogenwand: Rundbogen-Fenster im Schnitt (Wand bis an den Bogen) und Schichteinzug
 /// am Sturz (Sehne zwischen den Laibungen).
 #[test]
@@ -907,3 +956,4 @@ fn puffer_hat_zwei_gruppen() {
     let none = section_plan_buf(&p, &[0.0, 0.0], r#"{"level":{"kind":"section"}}"#).unwrap();
     assert!(crate::plan::buf::decode(&none).unwrap().1.is_empty());
 }
+

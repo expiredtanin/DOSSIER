@@ -16,6 +16,21 @@ describe("viewportLevelPlan", () => {
     expect(plan.bounds.maxY - plan.bounds.minY).toBeGreaterThan(8);
   });
 
+  // [171] Höhenkoten neben dem Gebäude, nicht links vom ganzen Geländeschnitt (Musterhaus komplex: ~15 m weiter).
+  it("Schnitt: Höhenkoten nahe beim Gebäude, nicht links vom Gelände", async () => {
+    const plan = await viewportLevelPlan(p, "schnitt-a", codes, "mittel", 100);
+    const xsOf = (q: (typeof plan.primitives)[number]): number[] =>
+      q.kind === "polygon" ? q.pts.map((v) => v.x) : q.kind === "line" ? [q.a.x, q.b.x] : [];
+    const terrainX = Math.min(...plan.primitives.filter((q) => q.kind === "line" && q.cls === "section-terrain").flatMap(xsOf));
+    const wallX = Math.min(...plan.primitives.filter((q) => q.kind === "polygon" && q.wallId).flatMap(xsOf));
+    const leaders = plan.primitives.filter((q) => q.kind === "line" && q.cls === "section-level-leader");
+    expect(leaders.length).toBeGreaterThan(2);
+    const markX = Math.min(...leaders.flatMap(xsOf));
+    expect(terrainX).toBeLessThan(wallX - 8);
+    expect(markX).toBeGreaterThan(terrainX + 2);
+    expect(markX).toBeLessThan(wallX);
+  });
+
   it("Ansicht: Fassade", async () => {
     const plan = await viewportLevelPlan(p, "ansicht-sued", codes, "mittel", 100);
     expect(plan.primitives.length).toBeGreaterThan(100);

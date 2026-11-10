@@ -671,6 +671,8 @@ pub(super) fn apply_wall_termination(bands: Vec<Cut>, walls: &[Option<&Wall>]) -
     if slab_bands.is_empty() {
         return bands;
     }
+    // [171] Lage aller Platten- und Wandbänder (für Wände ohne `sliceTermination`, s. `end_below_floor_buildup`).
+    let bands_meta: Vec<(Kind, [f64; 4], Option<f64>, Option<String>)> = bands.iter().map(|b| (b.kind, bbox(&b.pts), b.join_priority, b.source_id.clone())).collect();
     let mut out = Vec::with_capacity(bands.len());
     for b in bands {
         if b.kind != Kind::Wall {
@@ -679,7 +681,7 @@ pub(super) fn apply_wall_termination(bands: Vec<Cut>, walls: &[Option<&Wall>]) -
         }
         let term = walls.get(b.index).copied().flatten().and_then(|w| w.slice_termination);
         let (Some(term @ (SliceTermination::Below | SliceTermination::Above)), Some(jp)) = (term, b.join_priority) else {
-            out.push(b);
+            out.extend(end_below_floor_buildup(b, &bands_meta));
             continue;
         };
         let wb = bbox(&b.pts);
@@ -709,6 +711,36 @@ pub(super) fn apply_wall_termination(bands: Vec<Cut>, walls: &[Option<&Wall>]) -
         }
     }
     out
+}
+
+/// [171] Wand von unten ohne Wand darüber (einfaches Musterhaus: Innenwand EG bis OK Fertigboden OG): sie endet
+/// unter der tragenden Platte, die sie dominiert, statt mit ihrem Rest durch Trittschalldämmung und Unterlagsboden
+/// zu stechen. Nur wenn der Rest über der Platte (< 0.5 m) ganz im Plattenaufbau liegt und keine andere Wand darauf
+/// steht (sonst bleibt der Stoss wie bisher: Wand darüber, Aufbau stösst an).
+fn end_below_floor_buildup(b: Cut, meta: &[(Kind, [f64; 4], Option<f64>, Option<String>)]) -> Vec<Cut> {
+    const EPS: f64 = 1e-6;
+    let (Some(jp), true) = (b.join_priority, b.pts.len() >= 3) else { return vec![b] };
+    let wb = bbox(&b.pts);
+    let covers_u = |r: &[f64; 4]| r[0] <= wb[0] + EPS && r[1] >= wb[1] - EPS;
+    // Unterste dominierende Platte, die die Wand ganz quert und knapp unter der Wandkrone endet (bei dünnen
+    // Putzschichten dominiert auch der Unterlagsboden; die Wand endet trotzdem unter der Rohdecke).
+    let Some(slab) = meta
+        .iter()
+        .filter(|(k, r, p, _)| *k == Kind::Slab && p.is_some_and(|q| q > jp) && covers_u(r) && r[2] > wb[2] + EPS && r[3] < wb[3] - EPS && wb[3] - r[3] < 0.5)
+        .map(|m| m.1)
+        .min_by(|a, b| a[2].total_cmp(&b[2]))
+    else {
+        return vec![b];
+    };
+    let stack_top = meta.iter().filter(|(k, r, _, _)| *k == Kind::Slab && covers_u(r) && r[2] >= slab[3] - 1e-4 && r[2] < wb[3]).map(|m| m.1[3]).fold(slab[3], f64::max);
+    if wb[3] > stack_top + 1e-4 {
+        return vec![b];
+    }
+    let wall_above = meta.iter().any(|(k, r, _, src)| *k == Kind::Wall && *src != b.source_id && r[0] < wb[1] - EPS && r[1] > wb[0] + EPS && r[2] >= slab[3] - 1e-4 && r[2] <= wb[3] + 1e-4);
+    if wall_above {
+        return vec![b];
+    }
+    clip_band(b, [wb[0], wb[1], wb[2], slab[2]])
 }
 
 /// Band auf das Rechteck `[u0, u1, v0, v1]` beschnitten; ein Band mit Anschlag-Nase ([94], kein

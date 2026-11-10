@@ -30,9 +30,11 @@ pub(super) fn shaped_wall_cuts(cuts: &mut [Cut], p: &Project, walls_r: &[RWall],
         }
         let (rx, ry) = (base.0 - wall.start.x, base.1 - wall.start.y);
         let along = (rx * u.1 - ry * u.0) / den;
-        if along <= from + 1e-4 || along >= to - 1e-4 {
+        // [171] Auch genau am Rand des Rechtecks (Sehne fast 0): sonst bliebe dort das Rechteck-Loch ohne Fenster.
+        if along < from - 1e-4 || along > to + 1e-4 {
             continue;
         }
+        let along = along.clamp(from, to);
         let (zb, zt) = opening_extent(p, wall, o);
         let Some(poly) = crate::opening_shape::opening_outline(o, to - from, zt - zb) else { continue };
         let Some((lo, hi)) = crate::opening_shape::v_range(&poly, along - from) else { continue };

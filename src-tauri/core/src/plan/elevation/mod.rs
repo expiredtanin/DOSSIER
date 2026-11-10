@@ -132,6 +132,14 @@ enum Pending {
     Item { depth: f64, rank: Option<f64>, prim: Primitive },
 }
 
+/// [171] Reicht das umgebende Rechteck der Fläche bis auf 0.3 m an `c` (die Wandfläche um ein Loch kommt in
+/// Stücken, keines muss die Mitte des Lochs umschliessen)?
+fn face_contains_bbox(f: &Face, c: Pt) -> bool {
+    const NEAR: f64 = 0.3;
+    let (lo, hi) = f.pts.iter().fold(([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]), |(l, h), q| ([l[0].min(q[0]), l[1].min(q[1])], [h[0].max(q[0]), h[1].max(q[1])]));
+    c[0] >= lo[0] - NEAR && c[0] <= hi[0] + NEAR && c[1] >= lo[1] - NEAR && c[1] <= hi[1] + NEAR
+}
+
 fn outline_line(a: Pt, b: Pt) -> Primitive {
     line(v2(a[0], a[1]), v2(b[0], b[1]), "elevation-outline", EDGE_MM, EDGE_INK)
 }
@@ -223,8 +231,32 @@ pub fn elevation_primitives_with(p: &Project, level: &LevelSpec, shadows: bool, 
     faces.retain(|f| !f.ov.as_ref().is_some_and(|o| o.hide));
 
     // Ansichtsfarbe und -schraffur ([100]) der sichtbaren Bauteilseite.
-    let (pattern_lines, pattern_styles) = surface_patterns(p, &mut faces, &frame, scale, mono);
+    let (mut pattern_lines, mut pattern_styles) = surface_patterns(p, &mut faces, &frame, scale, mono);
     let mut openings = collect_openings(p, &frame);
+    // [171] Formöffnung: Fassaden-Schraffur auch auf den Füllstücken zwischen Umriss und Rechteck-Loch der Wand
+    // (sonst bleibt um ein Rundfenster ein ungemustertes Quadrat).
+    {
+        let mut extra: Vec<Face> = Vec::new();
+        for op in &openings {
+            let Some((_, _, fills, wid)) = &op.shape else { continue };
+            let host = faces.iter().filter(|f| f.role == Role::Wall && f.id == *wid && !f.ov.as_ref().is_some_and(|o| o.hide)).filter(|f| op.pts.iter().any(|q| face_contains_bbox(f, *q))).min_by(|a, b| a.depth_min.total_cmp(&b.depth_min));
+            let Some(host) = host else { continue };
+            // Dazu ein Band um die Öffnung: das Loch ist um den Einzug der Dämmung ([168]) grösser als der Umriss.
+            const BAND: f64 = 0.06;
+            let b = op.pts.iter().fold([f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY], |b, q| [b[0].min(q[0]), b[1].min(q[1]), b[2].max(q[0]), b[3].max(q[1])]);
+            let rect = |x0: f64, y0: f64, x1: f64, y1: f64| vec![[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
+            let band = [rect(b[0] - BAND, b[1] - BAND, b[2] + BAND, b[1]), rect(b[0] - BAND, b[3], b[2] + BAND, b[3] + BAND), rect(b[0] - BAND, b[1], b[0], b[3]), rect(b[2], b[1], b[2] + BAND, b[3])];
+            for q in fills.iter().filter(|q| q.len() >= 3).chain(band.iter()) {
+                extra.push(Face { pts: q.clone(), pd: vec![host.depth; q.len()], depth: host.depth, depth_min: host.depth_min, depth_max: host.depth_max, role: Role::Wall, id: host.id.clone(), fill: host.fill, normal: host.normal, ov: host.ov.clone(), two_sided: false, curved_slab: false });
+            }
+        }
+        if !extra.is_empty() {
+            let (lines, styles) = surface_patterns(p, &mut extra, &frame, scale, mono);
+            let k0 = pattern_styles.len();
+            pattern_styles.extend(styles);
+            pattern_lines.extend(lines.into_iter().map(|(a, b, d, paint, k)| (a, b, d, paint, k + k0)));
+        }
+    }
     if !hidden_walls.is_empty() {
         let host = |id: &str| p.openings.as_deref().unwrap_or(&[]).iter().find(|o| o.id == id).map(|o| o.host_wall_id.as_str());
         openings.retain(|op| !host(&op.id).is_some_and(|w| hidden_walls.contains(w)));
@@ -244,8 +276,10 @@ pub fn elevation_primitives_with(p: &Project, level: &LevelSpec, shadows: bool, 
         }
     }
     for op in &openings {
-        occ.extend([op.depth, 4.0]);
-        for q in &op.pts {
+        // [171] Formöffnung verdeckt nur in ihrem Umriss (Fassaden-Schraffur bis an den Rahmen des Rundfensters).
+        let pts: &[Pt] = op.shape.as_ref().map_or(&op.pts[..], |(o, _, _, _)| &o[..]);
+        occ.extend([op.depth, pts.len() as f64]);
+        for q in pts {
             occ.extend(q);
         }
     }
@@ -314,7 +348,23 @@ pub fn elevation_primitives_with(p: &Project, level: &LevelSpec, shadows: bool, 
     }
     // Kanten exakt ([G4]): Umriss, Knicke und Silhouetten der Flächen, verdeckt durch Flächen und
     // Öffnungen davor; Facetten-Fugen der Bogenwände ([T2]) fallen über die Glättungsgruppe weg.
-    let edges = elevation_edges(p, &faces, &openings, &frame, level.hidden_lines);
+    let mut edges = elevation_edges(p, &faces, &openings, &frame, level.hidden_lines);
+    // [171] Formöffnung: die Wand trägt im Modell das Rechteck-Loch; seine Kanten (Quadrat um ein Rundfenster)
+    // entfallen, den Umriss zeichnet der Rahmen (wie `section::shaped_projection` im Schnitt).
+    for op in openings.iter().filter(|op| op.shape.is_some()) {
+        let b = op.pts.iter().fold([f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY], |b, q| [b[0].min(q[0]), b[1].min(q[1]), b[2].max(q[0]), b[3].max(q[1])]);
+        // Das Loch kann um den Einzug der Dämmung über den Rahmen ([168]) grösser sein als die Öffnung.
+        const TOL: f64 = 1e-3;
+        const REVEAL: f64 = 0.12;
+        let near = |a: f64, b: f64| (a - b).abs() < TOL;
+        let inside = |q: Pt| q[0] > b[0] - REVEAL && q[0] < b[2] + REVEAL && q[1] > b[1] - REVEAL && q[1] < b[3] + REVEAL;
+        let rim_u = |x: f64| x <= b[0] + TOL || x >= b[2] - TOL;
+        let rim_v = |y: f64| y <= b[1] + TOL || y >= b[3] - TOL;
+        edges.retain(|e| {
+            let side = (near(e.a[0], e.b[0]) && rim_u(e.a[0])) || (near(e.a[1], e.b[1]) && rim_v(e.a[1]));
+            !(side && inside(e.a) && inside(e.b))
+        });
+    }
     for (a, b, depth, paint, k) in pattern_lines {
         pending.push(Pending::Line { a, b, depth, style: Some(k), paint: Some(paint) });
     }
@@ -427,9 +477,18 @@ pub fn elevation_primitives_with(p: &Project, level: &LevelSpec, shadows: bool, 
         // Formöffnung: das Rechteck-Loch der Wand ausserhalb des Umrisses in Wandfarbe schliessen.
         if let Some((_, _, fills, wid)) = &op.shape {
             let wall_fill = faces.iter().find(|f| f.role == Role::Wall && f.id == *wid).map_or("#ffffff".to_string(), face_fill);
+            // [171] Knapp hinter der Wandfläche: die Fassaden-Schraffur der Wand (Musterlinien knapp vor ihr) läuft
+            // über die Füllung bis an den Rahmen, statt im Rechteck des Lochs auszusetzen.
+            let face_depth = faces
+                .iter()
+                .filter(|f| f.role == Role::Wall && f.id == *wid)
+                .filter(|f| op.pts.iter().any(|q| face_contains_bbox(f, *q)))
+                .map(|f| f.depth_min)
+                .fold(f64::INFINITY, f64::min);
+            let fill_depth = if face_depth.is_finite() { (face_depth + EPS * 10.0).min(d + EPS * 10.0).max(face_depth + EPS) } else { d + EPS * 10.0 };
             for q in fills {
                 let pts = to_vec(q);
-                items.push(Item { depth: d + EPS * 10.0, seq, rank: None, prim: polygon(pts, &wall_fill, "none", 0.0, no_hatch()) });
+                items.push(Item { depth: fill_depth, seq, rank: None, prim: polygon(pts, &wall_fill, "none", 0.0, no_hatch()) });
                 seq += 1;
             }
         }
