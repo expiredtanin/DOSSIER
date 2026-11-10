@@ -243,7 +243,7 @@ struct GroupArgs {
 pub fn run_bin(p: &Project, name: &str, args: &[f64], text: &str) -> Result<Vec<u8>, String> {
     use crate::plan::{domains, drawings};
     match (name, args.len()) {
-        ("planDomains", 1) => crate::plan::domains::plan_domains_buf(p, &crate::plan::domains::PlanArgs::parse(args[0], text)?),
+        ("planDomains", 1) => crate::plan::domains::plan_domains_buf(p, &crate::plan::domains::PlanArgs::parse_in(p, args[0], text)?),
         // Export-Sammler ([K4], [B5], [C11]): flacher Puffer für `fileio` (Byte-Hülle `export_flat.rs`).
         ("ifcExportData", 4) => {
             let opt = crate::ifc_data::IfcOptions { now: args[0], ifc2x3: args[1] != 0.0, ebkph: args[2] != 0.0, layer_codes: args[3] != 0.0, iso: text.to_string() };
@@ -284,7 +284,7 @@ pub fn run_bin(p: &Project, name: &str, args: &[f64], text: &str) -> Result<Vec<
         }
         // Grundriss-Unterlage unter Schnitt/Ansicht: `planDomains`-Argumente + `level`, `minY`.
         ("planUnderlay", 1) => {
-            let a = domains::PlanArgs::parse(args[0], text)?;
+            let a = domains::PlanArgs::parse_in(p, args[0], text)?;
             let (line, sign, min_y) = crate::plan::underlay::parse_args(text)?;
             let bytes = domains::plan_domains_buf(p, &a)?;
             let prims = crate::plan::buf::View::parse(&bytes).and_then(|v| v.prims()).ok_or("planUnderlay: Plan-Puffer unlesbar")?;
@@ -305,20 +305,22 @@ pub fn run_bin(p: &Project, name: &str, args: &[f64], text: &str) -> Result<Vec<
 pub fn run_bin_doc(d: &mut crate::document::Document, name: &str, args: &[f64], text: &str) -> Result<Vec<u8>, String> {
     let model_err = |e: String| format!("Projekt passt nicht zum Kern-Modell: {e}");
     if name == "planDomains" && args.len() == 1 {
-        let a = crate::plan::domains::PlanArgs::parse(args[0], text)?;
+        let mut a = crate::plan::domains::PlanArgs::parse(args[0], text)?;
         // Schlüssel der Zeichnungs-Stücke, die der Aufrufer schon hat (`"have": [k…]`).
         let have: std::collections::HashSet<u64> = serde_json::from_str::<serde_json::Value>(text)
             .ok()
             .and_then(|v| v.get("have").and_then(|h| h.as_array()).map(|h| h.iter().filter_map(|k| k.as_f64()).filter(|k| *k >= 0.0 && k.fract() == 0.0).map(|k| k as u64).collect()))
             .unwrap_or_default();
         let (p, revs, cache) = d.project_cached().map_err(model_err)?;
+        a.apply_model_view(p);
         return crate::plan::domains::plan_domains_cached(p, revs, cache, &a, &have).map(|o| o.encode());
     }
     if name == "planUnderlay" && args.len() == 1 {
         // Der Grundriss kommt aus den Plan-Caches (wie `generatePlan` desselben Geschosses).
-        let a = crate::plan::domains::PlanArgs::parse(args[0], text)?;
+        let mut a = crate::plan::domains::PlanArgs::parse(args[0], text)?;
         let (line, sign, min_y) = crate::plan::underlay::parse_args(text)?;
         let (p, revs, cache) = d.project_cached().map_err(model_err)?;
+        a.apply_model_view(p);
         let out = crate::plan::domains::plan_domains_cached(p, revs, cache, &a, &Default::default())?;
         let prims = crate::plan::underlay::plan_out_primitives(&out)?;
         return Ok(crate::plan::underlay::underlay_buf(&crate::plan::underlay::underlay_primitives(line, sign, prims, min_y)));

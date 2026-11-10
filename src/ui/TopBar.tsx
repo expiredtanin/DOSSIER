@@ -28,6 +28,7 @@ import {
   toggleMark,
 } from "../text/richText";
 import type { DetailLevel, RenderMode, View3d, ViewType } from "../model/viewTypes";
+import type { ModelViewChoice } from "../state/modelViews";
 import type {
   Align,
   BoolMark,
@@ -1029,6 +1030,10 @@ export interface ViewRibbonTabProps {
   detail: DetailLevel;
   onDetail: (d: DetailLevel) => void;
   detailEnabled: boolean;
+  /** [173] Modelldarstellungen (eingebaute Stufen + eigene) und die Wahl der aktiven Ansicht. */
+  modelViews?: ModelViewChoice[];
+  modelViewId?: string;
+  onModelView?: (id: string) => void;
   scaleDenominator: number;
   onApplyScale: (n: number) => void;
   /** Plan-Zoom aktiv; der Live-Massstab kommt aus `state/liveScaleStore` (nicht als Prop, [121]). */
@@ -1107,6 +1112,9 @@ export const ViewRibbonTab = memo(function ViewRibbonTab({
   detail,
   onDetail,
   detailEnabled,
+  modelViews,
+  modelViewId,
+  onModelView,
   scaleDenominator,
   onApplyScale,
   zoomEnabled,
@@ -1245,9 +1253,9 @@ export const ViewRibbonTab = memo(function ViewRibbonTab({
         <label className="tb-field tb-field-row">
           <span className="tb-label">{t("topbar.detail")}</span>
           <Dropdown
-            value={detail}
+            value={modelViewId ?? detail}
             disabled={!detailEnabled}
-            onChange={(v) => onDetail(v as DetailLevel)}
+            onChange={(v) => (onModelView ? onModelView(v) : onDetail(v as DetailLevel))}
             title={
               detailEnabled
                 ? t("topbar.detail.hint")
@@ -1257,6 +1265,8 @@ export const ViewRibbonTab = memo(function ViewRibbonTab({
               { value: "grob", label: t("topbar.detail.grob") },
               { value: "mittel", label: t("topbar.detail.mittel") },
               { value: "fein", label: t("topbar.detail.fein") },
+              // [173] Eigene Stufen (Ressourcen „Modelldarstellung").
+              ...(modelViews ?? []).filter((c) => !c.builtin).map((c) => ({ value: c.id, label: c.name ?? c.id })),
             ]}
           />
         </label>

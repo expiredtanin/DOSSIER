@@ -219,7 +219,9 @@ Beispiel: Die Plan-Ansicht zeigt das Erdgeschoss im Massstab 1:100.
    `plan_domains_cached()` in `src-tauri/core/src/plan/domains.rs` aufruft. Die Caches dazu liegen in
    `plan/cache.rs`: unveränderte Domänen und Zeichnungs-Stücke werden fertig geschrieben übernommen.
 5. `PlanArgs::parse()` liest die Argumente, `Ctx::new()` bündelt Projekt, Argumente und
-   Ansichtsbereich (`plan/view_range.rs`: Schnitthöhe, Ober- und Unterkante der Sicht).
+   Ansichtsbereich (`plan/view_range.rs`: Schnitthöhe, Ober- und Unterkante der Sicht). Dazu löst
+   `Ctx::new()` die **Modelldarstellung** auf (`plan/model_view.rs`, [173], s. 3.5); `apply_model_view()`
+   setzt vorher den Basis-Detailgrad der gewählten Stufe.
 6. Die **Domänen** werden der Reihe nach erzeugt (`domains_before()`, dann die Zeichnungen, dann
    `domains_after()`). Jede Domäne filtert die Elemente des Geschosses, wertet Override-Regeln aus
    (`plan/overrides.rs`), löst den Stil auf (`plan/style.rs`) und schreibt fertige `Primitive`
@@ -283,6 +285,36 @@ als in einem anderen, ist fast immer ein Fehler im jeweiligen Leser, nicht in de
 
 `src/views/plan/PlanView.tsx` legt über die GPU-Fläche eine SVG-Ebene für Auswahl, Griffe, Fang und
 Text-Bearbeitung (Zeiger, Picken, Zoom, Renderer-Anbindung und Hervorhebung liegen als Hooks in `planView/usePlan*.ts`). Läuft kein GPU-Weg, zeichnet dieselbe Ebene den ganzen Plan (Rückfall, `?gl=0`).
+
+### 3.5 Modelldarstellung: wer bestimmt, wie ein Bauteil aussieht ([173])
+
+Wie Archicads „Modelldarstellung" (Model View Options): eine **Stufe** ist ein Basis-Detailgrad plus
+Optionen je Bauteilart (Türen, Fenster, Treppen, Wände, Decken/Böden, Gelände). Die Stufen „grob",
+„mittel", „fein" sind eingebaut und haben keine Optionen; eigene Stufen stehen in
+`Project.modelViewOptions` (Ressourcen-Tab „Modelldarstellung"). Jede Option fehlt ⇒ „wie Basis":
+dann zeichnet der Detailgrad exakt wie ohne Modelldarstellung (Test `standardstufen_wie_heute`).
+
+**Welche Stufe gilt:** ausdrücklich angefragt (Plan-Argument `modelView`, Blatt-Ausschnitt
+`ViewSnapshot.modelViewOptionId`), sonst das Feld `modelViewOptionId` der Ebene. Die Ebene setzen die
+Werkzeugleiste (Detailgrad-Wahl = Liste der Stufen) und die Ansichtsvorlage (Ebenen-Feld wie
+`cutHatch`); die CLI wählt mit `--model-view <Name>`.
+
+**Rangfolge je Option** (hoch → tief):
+
+1. **Element-Einstellung** (z. B. `Opening.lintelLineStyle`, `swingAngle`, `sashSymbols`,
+   `planSwingArcs`; `Opening.detailLevel` ersetzt nur die Basis des Elements),
+2. **Typ-Einstellung** (Tür-/Fenstertyp: `lintelLineStyle`, `sashSymbols`, `planSwingArcs`),
+3. **Modelldarstellung der Ansicht** (`plan/model_view.rs`: `resolve()` → `Options`, je Bauteil
+   `DoorOpts`, `WindowOpts`, `StairOpts`, `WallOpts`; `Ctx::mv()`),
+4. **Basis-Detailgrad** (grob/mittel/fein samt Massstabsregeln wie `simplify_thin_layers`, `solid_cut`).
+
+Ebenen-Felder, die selbst Darstellung sind (`cutHatch`, `floorFinish`, `showTerrain`), gehen der
+Modelldarstellung vor, wenn sie gesetzt sind. Angebunden (Etappe 1): Türen und Fenster
+(`plan/walls.rs::opening_symbol`, `plan/openings.rs`; Fenster-Öffnungslinien auch in der Ansicht,
+`plan/elevation/openings.rs`), Treppen (`plan/stairs.rs`, filtert das Symbol nach Linienklasse — das
+Symbol selbst in `stair_symbol.rs` bleibt unberührt), Wandschichten und Schichteinzug
+(`plan/walls.rs::layer_targets`), Schnittflächen, Bodenbelag und Gelände. Übrige Bauteile und der
+Schnitt folgen in Etappe 2 (TODO [173]).
 
 ---
 
@@ -477,7 +509,8 @@ schreibt `src-tauri/src/atomic_save.rs` die Datei absturzsicher.
 | **Override-Regel** | Grafische Regel mit Bedingungen (Ebene, Name, Bauteilart, Schicht, Massstab) und Aktionen (ausblenden, Farbe, Schraffur, Strich). Die oberste passende Regel gewinnt je Feld. | `Project.overrideRules`, `plan/overrides.rs` (`effective()`, `effective_layer()`) |
 | **Ansichtsvorlage** | Bündel von Ansichts-Einstellungen (Detail, Massstab, Kategorien, Override-Regeln, Schwarz-Weiss), anwendbar auf Ebenen und Ausschnitte, einmalig oder verknüpft. | `Project.viewTemplates`, `src/state/viewTemplates.ts` |
 | **Ausschnitt** (`ViewSnapshot`) | Gespeicherte Ansicht, z. B. als Viewport auf einem Layout-Blatt. | `Project.viewSnapshots`, `sheet_viewports.rs` |
-| **Detailgrad** | „grob", „mittel", „fein". „mittel" wird ab 1:200 automatisch wie „grob" gezeichnet. | `effective_detail()` in `plan/domains.rs` |
+| **Detailgrad** | „grob", „mittel", „fein". „mittel" wird ab 1:200 automatisch wie „grob" gezeichnet. Basis jeder Modelldarstellung. | `effective_detail()` in `plan/domains.rs` |
+| **Modelldarstellung** | Stufe der Darstellung (≙ Archicad „Model View Options"): Basis-Detailgrad plus Optionen je Bauteilart; „grob/mittel/fein" eingebaut, eigene Stufen im Projekt. Rangfolge Element > Typ > Modelldarstellung > Basis (Abschnitt 3.5). | `Project.modelViewOptions`, `plan/model_view.rs`, `src/state/modelViews.ts` |
 | **Abzugskörper** | Körper, der aus Wänden, Decken und Stützen ausgeschnitten wird (Durchbruch, Nische). | `voids.rs`, `subtract_voids()` in `plan/extras.rs` |
 | **Kompakte Linien-Unterlage** | Linien einfacher 2D-Zeichnungen (z. B. Kataster) entstehen erst bei Bedarf, gruppiert je Kategorie. | `underlay_groups()` in `plan/drawings.rs` |
 | **Chunk** | Stück eines Plans, das die GPU getrennt kompiliert und nur bei Änderung neu baut. | `src/plan/glPlan/glPlanChunks.ts`, `render2d/src/chunks.rs` |

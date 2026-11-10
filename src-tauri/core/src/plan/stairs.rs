@@ -62,14 +62,35 @@ fn stair_line(a: Vec2, b: Vec2, cls: &str, weight_mm: f64, dash: Option<Option<V
     }
 }
 
-/// Symbol-Puffer (`stair_symbol.rs`) als Primitive.
-fn emit(out: &mut Vec<Primitive>, f: &[f64], stroke: &str, greyed: Option<bool>, id: &str) {
+/// [173] Ob ein Eintrag des Symbol-Puffers nach der Modelldarstellung entfällt: Lauflinie, Pfeil (Linien und
+/// gefüllte Spitze), Bruchlinie, Handlauf, Stufen über der Schnitthöhe (gestrichelt).
+fn dropped(o: &super::model_view::StairOpts, f: &[f64], i: usize) -> bool {
+    match f[i] as i64 {
+        1 => !o.arrow && f[i + 1] > 0.0 && f[i + 2] != 0.0,
+        2 => {
+            let cls = f[i + 1];
+            (cls == 3.0 && !o.walk_line) || (cls == 4.0 && !o.arrow) || (cls == 2.0 && !o.break_line) || (cls == 5.0 && o.handrail.is_none()) || (f[i + 3] != 0.0 && !o.above_cut)
+        }
+        _ => f[i + 2] != 0.0 && !o.above_cut,
+    }
+}
+
+/// Symbol-Puffer (`stair_symbol.rs`) als Primitive; `opts`: Modelldarstellung ([173]).
+fn emit(out: &mut Vec<Primitive>, f: &[f64], stroke: &str, greyed: Option<bool>, id: &str, opts: &super::model_view::StairOpts) {
     if f.is_empty() {
         return;
     }
     let n = f[0] as usize;
     let mut i = 1;
     for _ in 0..n {
+        if dropped(opts, f, i) {
+            i += match f[i] as i64 {
+                1 => 4 + 2 * f[i + 3] as usize,
+                2 => 8,
+                _ => 10,
+            };
+            continue;
+        }
         match f[i] as i64 {
             1 => {
                 let count = f[i + 3] as usize;
@@ -131,8 +152,9 @@ pub fn plan_stairs(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) {
     let p = c.p;
     let cut_height = p.floor(&c.a.floor).and_then(|f| f.cut_height).unwrap_or(1.0);
     let range = super::view_range::ViewRange::of(p, &c.a.floor);
-    // [151] Handlauf-Doppellinie ab 1:50 bzw. Detailstufe fein.
-    let double = c.a.scale <= 50.0 || c.a.detail == Detail::Fein;
+    // [151] Handlauf-Doppellinie ab 1:50 bzw. Detailstufe fein; [173] Modelldarstellung: aus/einfach/doppelt.
+    let opts = c.mv().stair.clone();
+    let double = opts.handrail.unwrap_or(c.a.scale <= 50.0 || c.a.detail == Detail::Fein);
     for s in p.stairs.as_deref().unwrap_or(&[]).iter().filter(|s| s.floor_id == c.a.floor && c.vis(&s.category_code, &s.id)) {
         let greyed = Some(c.greyed(&s.category_code));
         let ov = c.overrides(Some("stair"), &s.category_code, Some(&stair_label(s)));
@@ -157,18 +179,18 @@ pub fn plan_stairs(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) {
             }
         }
         let f = crate::plan::stair_symbol::plan_stair(&params, zt - zb, cut_height, lw, s.arrow_style == Some(StairArrowStyle::Filled), s.center_column.unwrap_or(0.0), railing_code(p, s), double);
-        emit(out, &f, &stroke, greyed, &s.id);
+        emit(out, &f, &stroke, greyed, &s.id, &opts);
         if let Some(d) = range.restyle_dash(zone) {
             super::view_range::restyle(out, out_start, d);
         }
     }
-    arriving(c, out, double);
+    arriving(c, out, double, &opts);
 }
 
 /// [155] Treppen tieferer Geschosse, die auf diesem Geschoss ankommen: durch das Loch der Decke, auf der
 /// das Geschoss steht, von oben gesehen (ausgezogen, auf das Loch beschnitten), dazu die Absturzsicherung
 /// an den freien Lochrändern (nicht unter Wänden, nicht am Austritt der Treppe).
-fn arriving(c: &Ctx, out: &mut Vec<Primitive>, double: bool) {
+fn arriving(c: &Ctx, out: &mut Vec<Primitive>, double: bool, opts: &super::model_view::StairOpts) {
     use crate::stair_rail::P;
     let p = c.p;
     let Some(floor) = p.floor(&c.a.floor) else { return };
@@ -217,7 +239,7 @@ fn arriving(c: &Ctx, out: &mut Vec<Primitive>, double: bool) {
         let stroke = ov.color.as_deref().or(s.color.as_deref()).unwrap_or(POCHE_STROKE).to_string();
         // ganz unter der Schnittebene: alles ausgezogen, keine Bruchlinie
         let f = crate::plan::stair_symbol::plan_stair_clipped(&params, zt - zb, zt - zb + 1.0, lw, s.arrow_style == Some(StairArrowStyle::Filled), 0.0, railing_code(p, s), double, &own);
-        emit(out, &f, &stroke, greyed, &s.id);
+        emit(out, &f, &stroke, greyed, &s.id, opts);
         // Austrittskante: Hinterkante des obersten Tritts.
         let Some(last) = geo.treads.iter().filter(|t| t.pts.len() >= 4).max_by(|a, b| a.top_rise.total_cmp(&b.top_rise)) else { continue };
         let arrival = if sp.shape == "spiral" { (last.pts[3], last.pts[2]) } else { (last.pts[1], last.pts[2]) };

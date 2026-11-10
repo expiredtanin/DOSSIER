@@ -38,6 +38,8 @@ export function snapshotPatch(t: ViewTemplate, s: ViewSnapshot): Partial<ViewSna
   if (t.scaleDenominator !== undefined) out.scaleDenominator = t.scaleDenominator;
   if (t.layerVisibility) out.layerVisibility = { ...s.layerVisibility, ...t.layerVisibility };
   if (t.enabledOverrideRuleIds) out.enabledOverrideRuleIds = [...t.enabledOverrideRuleIds];
+  // [173] Modelldarstellung (Blatt-Viewports, Kern `sheet_viewports::viewport_args`).
+  if (t.modelViewOptionId !== undefined) out.modelViewOptionId = t.modelViewOptionId;
   return out;
 }
 

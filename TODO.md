@@ -181,6 +181,19 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   selbst folgt weiter über den Anzeigezustand der aktiven Ansicht (`syncUi`; manuelle Abweichung bleibt möglich); der
   Detailgrad hat in der Ansicht (Fassade) keine Wirkung; `showTerrain`/`floorFinish` wirken nur im Grundriss; nicht in
   der Tauri-App geprüft. · S
+- ◐ **[173]** Modelldarstellung (≙ Archicad „Model View Options"), Wunsch Maintainer: grob/mittel/fein als wählbare und
+  eigene Stufen mit Einfluss auf alle Bauteile. Etappe 1 (10.11.): `Project.modelViewOptions` (Basis-Detailgrad +
+  Abschnitte Türen/Fenster/Treppen/Wände/Decken-Böden/Gelände, jede Option „wie Basis" = heute), Wahl über
+  `DrawingLevel.modelViewOptionId` (Werkzeugleiste: Detailgrad-Liste = Stufen; Ansichtsvorlage als Ebenen-Feld),
+  `ViewSnapshot.modelViewOptionId` (Kern-Blattpuffer), CLI `--model-view`. Kern `plan/model_view.rs` (Rangfolge Element >
+  Typ > Stufe > Basis, ARCHITEKTUR 3.5): Türen (Sturz, Winkel, Bogen, Zarge, Blatt), Fenster (Flügelrahmen, Bank,
+  Aufschlagbögen; Öffnungslinien in der Ansicht), Treppen (Lauflinie, Pfeil, Bruchlinie, über Schnitt, Handlauf),
+  Wände (alle/vereinfacht/Kern, Schwelle mm, Schichteinzug), Schnittflächen, Bodenbelag, Gelände; Ressourcen-Tab
+  „Modelldarstellung". Etappe 2: Schnitt (Schichten `section::merge_thin_cuts`, Tür-/Fensterdetail), Deckenaufbau,
+  Dächer, Stützen, Schatten der Ansicht, 3D (`detail` in `projectToModel3d`), Schwelle (fehlt im Grundriss), Sturzlinie
+  Fenster, „nur Kern" als echte Kerndicke statt Kern-Material über die ganze Wand; App-Blattansicht nimmt die
+  Ausschnitt-eigene Stufe noch nicht (nur Vorlage/Ebene). Etappe 3: Stufen-Bibliothek in Standards/Vorlagen,
+  Stempel/Bemassung nach Stufe, Stufennummern der Treppe. Nicht in der Tauri-App/auf dem Mac geprüft. · M
 - ◐ **[33]** Objektstile mit Rangfolge (Override-Regeln). „Ausblenden“ lässt Elemente im Grundriss anwählbar/fangbar;
   Schlagschatten und Gelände nicht über Regeln steuerbar; Linienstil auf Polygon-Umrissen (Wand-Umriss, Decken)
   ohne Wirkung; Linienstil-Aktion in der Ansicht ohne Wirkung; Öffnungen selbst ausblenden nicht möglich. · M

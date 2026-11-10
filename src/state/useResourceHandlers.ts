@@ -17,6 +17,7 @@ import type { useDialogState } from "./useDialogState";
 import type { useProjectActions } from "./useProjectActions";
 import type { useTopBarState } from "./useTopBarState";
 import { useViewTemplateHandlers } from "./useViewTemplateHandlers";
+import { modelViewHandlers } from "./useModelViewHandlers";
 
 type TopBar = ReturnType<typeof useTopBarState>;
 type Dialogs = ReturnType<typeof useDialogState>;
@@ -132,6 +133,8 @@ export function useResourceHandlers(opts: {
   // Handler-Bündel für das schwebende Ressourcen-Fenster (ResourceManager).
   const resourceHandlers: ResourceManagerHandlers = {
     ...viewTemplateHandlers,
+    // [173] Modelldarstellung (neue Stufe über dem Detailgrad der Anzeige).
+    ...modelViewHandlers(applyChange, () => detail),
     onPatchComponent: patchComponent,
     onPatchWallType: patchWallType,
     onAddWallType: addWallType,

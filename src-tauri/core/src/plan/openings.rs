@@ -150,6 +150,9 @@ fn plan_opening_inner(buf: &[f64]) -> Option<Vec<f64>> {
     for _ in 0..n_arcs.min(64) {
         swing_codes.push(r.num().unwrap_or(0.0));
     }
+    // [173] Anhang (optional, Modelldarstellung): Flügelrahmen, Fensterbank (0/1; fehlt = nur „fein").
+    let sash_frames = r.num().filter(|x| x.is_finite()).map_or(detail == Detail::Fein, |x| x != 0.0);
+    let sill_boards = r.num().filter(|x| x.is_finite()).map_or(detail == Detail::Fein, |x| x != 0.0);
     if ![sx, sy, ex, ey, total, ref_off, position, width].iter().all(|x| x.is_finite()) {
         return None;
     }
@@ -298,8 +301,10 @@ fn plan_opening_inner(buf: &[f64]) -> Option<Vec<f64>> {
         for (a, b) in &sym.mullion_lines {
             o.line(C_MULLION, sash_w, 4.0, 0.0, *a, *b);
         }
-        if detail == Detail::Fein {
-            for pts in &sym.sash_frames {
+        // [173] Flügelrahmen auch in „mittel" (Modelldarstellung): Geometrie wie im feinen Symbol.
+        let fine_frames = if sash_frames && detail == Detail::Mittel { window_symbol(&w, position, width, glass_alt, spec.as_ref(), wing_count, Detail::Fein).map(|s| s.sash_frames) } else { None };
+        if sash_frames {
+            for pts in fine_frames.as_ref().unwrap_or(&sym.sash_frames) {
                 o.ring(C_SASH, sash_w, 4.0, pts);
             }
         }
@@ -318,14 +323,14 @@ fn plan_opening_inner(buf: &[f64]) -> Option<Vec<f64>> {
             let (from, to) = short_arc(&DoorLeaf { hinge, open_end, closed_end, radius });
             o.arc(hair, hinge, from, to, radius);
         }
-        if detail == Detail::Fein {
+        if detail == Detail::Fein || sill_boards {
             if let Some((js, je)) = opening_jambs(&w, position, width) {
                 let outer_n = f_lo;
                 let (ov, proj) = (0.03, 0.04);
                 let s0 = along(js, je, -ov);
                 let s1 = along(je, js, -ov);
                 // Fensterbank aussen (fehlt/aussen/beide): von der Rahmen-Vorderkante bis vor die Aussenfläche.
-                if sill_board == 0 || sill_board == 3 || sill_board == 4 {
+                if sill_boards && (sill_board == 0 || sill_board == 3 || sill_board == 4) {
                     let far = min(outer_n, ref_off - total / 2.0) - proj;
                     let b0 = add(s0, scale(wn, outer_n));
                     let b1 = add(s1, scale(wn, outer_n));
@@ -336,7 +341,7 @@ fn plan_opening_inner(buf: &[f64]) -> Option<Vec<f64>> {
                     }
                 }
                 // Fensterbank innen (innen/beide): von der Rahmen-Hinterkante bis vor die Innenfläche.
-                if sill_board == 2 || sill_board == 3 {
+                if sill_boards && (sill_board == 2 || sill_board == 3) {
                     let far = max(f_hi, ref_off + total / 2.0) + 0.02;
                     let b0 = add(s0, scale(wn, f_hi));
                     let b1 = add(s1, scale(wn, f_hi));
@@ -346,9 +351,11 @@ fn plan_opening_inner(buf: &[f64]) -> Option<Vec<f64>> {
                         o.line(C_SILL, hair, 1.0, 0.0, a, b);
                     }
                 }
-                let reveal = 0.06;
-                for jamb in [js, je] {
-                    o.line(C_WINDOW_FRAME, hair, 1.0, 0.0, add(jamb, scale(wn, reveal)), add(jamb, scale(wn, -reveal)));
+                if detail == Detail::Fein {
+                    let reveal = 0.06;
+                    for jamb in [js, je] {
+                        o.line(C_WINDOW_FRAME, hair, 1.0, 0.0, add(jamb, scale(wn, reveal)), add(jamb, scale(wn, -reveal)));
+                    }
                 }
             }
         }

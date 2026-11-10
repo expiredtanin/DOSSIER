@@ -1930,6 +1930,11 @@ pub struct DrawingLevel {
     #[serde(rename = "templateLinked", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub template_linked: Option<bool>,
+    /// [173] Modelldarstellung (`Project.modelViewOptions`, Id einer eigenen Stufe oder „grob"/„mittel"/„fein").
+    /// Fehlt ⇒ der Detailgrad allein bestimmt die Darstellung (heutiges Verhalten).
+    #[serde(rename = "modelViewOptionId", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub model_view_option_id: Option<String>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -2010,6 +2015,240 @@ pub struct ViewTemplate {
     #[serde(rename = "viewDepth", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub view_depth: Option<f64>,
+    /// [173] Modelldarstellung (`Project.modelViewOptions`, Id einer eigenen Stufe oder „grob"/„mittel"/„fein").
+    /// Fehlt ⇒ der Detailgrad allein bestimmt die Darstellung (heutiges Verhalten).
+    #[serde(rename = "modelViewOptionId", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub model_view_option_id: Option<String>,
+    #[serde(flatten)]
+    #[ts(skip)]
+    pub extra: Extra,
+}
+
+/// [173] Modelldarstellung (≙ Archicad „Modelldarstellung"/Model View Options): eine benannte Stufe der
+/// Darstellung über einem Basis-Detailgrad, mit Optionen je Bauteilart. Jede Option fehlt ⇒ „wie Basis":
+/// dann zeichnet der Detailgrad wie bisher. Rangfolge: Element-Einstellung > Typ-Einstellung > Modelldarstellung
+/// der Ansicht > Basis-Detailgrad (Kern `plan/model_view.rs`).
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct ModelViewOption {
+    pub id: String,
+    pub name: String,
+    /// Basis-Detailgrad; fehlt ⇒ der gewählte Detailgrad der Ansicht.
+    #[serde(rename = "baseDetail", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub base_detail: Option<DetailLevel>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub doors: Option<ModelViewDoors>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub windows: Option<ModelViewWindows>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub stairs: Option<ModelViewStairs>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub walls: Option<ModelViewWalls>,
+    /// Decken und Böden.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub slabs: Option<ModelViewSlabs>,
+    /// Gelände.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub site: Option<ModelViewSite>,
+    #[serde(flatten)]
+    #[ts(skip)]
+    pub extra: Extra,
+}
+
+/// [173] Türen in der Modelldarstellung (fehlt ⇒ wie Basis).
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct ModelViewDoors {
+    /// Sturzlinie im Grundriss (Element und Türtyp gehen vor).
+    #[serde(rename = "lintelLineStyle", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub lintel_line_style: Option<LintelLineStyle>,
+    /// Öffnungswinkel des Türblatts in Grad, solange die Tür keinen eigenen hat (Basis 90°).
+    #[serde(rename = "swingAngle", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub swing_angle: Option<f64>,
+    /// Aufschlagbogen zeichnen (Basis: ja, ausser in der Übersicht ab 1:500).
+    #[serde(rename = "swingArc", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub swing_arc: Option<bool>,
+    /// Zarge/Rahmen zeichnen (Basis: ja).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub frame: Option<bool>,
+    /// Türblatt als Linie oder als Rechteck mit Blattdicke (Basis: Rechteck nur „fein").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub leaf: Option<ModelViewLeaf>,
+    #[serde(flatten)]
+    #[ts(skip)]
+    pub extra: Extra,
+}
+
+/// [173] Türblatt im Grundriss.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+pub enum ModelViewLeaf {
+    #[default]
+    #[serde(rename = "line")]
+    Line,
+    #[serde(rename = "rect")]
+    Rect,
+    #[serde(other)]
+    #[ts(skip)]
+    Unknown,
+}
+
+/// [173] Fenster in der Modelldarstellung (fehlt ⇒ wie Basis).
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct ModelViewWindows {
+    /// Öffnungslinien (Dreh-/Kipp-Dreiecke) in der Ansicht (Element und Fenstertyp gehen vor; Basis: ja).
+    #[serde(rename = "sashSymbols", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub sash_symbols: Option<bool>,
+    /// Aufschlagbögen der Drehflügel im Grundriss (Element und Fenstertyp gehen vor; Basis: nein).
+    #[serde(rename = "planSwingArcs", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub plan_swing_arcs: Option<bool>,
+    /// Fensterbank (innen/aussen nach Typ) im Grundriss (Basis: nur „fein").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub sill: Option<bool>,
+    /// Flügelrahmen im Grundriss (Basis: nur „fein").
+    #[serde(rename = "sashFrames", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub sash_frames: Option<bool>,
+    #[serde(flatten)]
+    #[ts(skip)]
+    pub extra: Extra,
+}
+
+/// [173] Treppen in der Modelldarstellung (fehlt ⇒ wie Basis).
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct ModelViewStairs {
+    /// Lauflinie (Basis: ja).
+    #[serde(rename = "walkLine", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub walk_line: Option<bool>,
+    /// Pfeil der Lauflinie (Basis: ja).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub arrow: Option<bool>,
+    /// Bruchlinie an der Schnitthöhe (Basis: ja).
+    #[serde(rename = "breakLine", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub break_line: Option<bool>,
+    /// Stufen über der Schnitthöhe (Basis: gestrichelt).
+    #[serde(rename = "aboveCut", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub above_cut: Option<ModelViewAboveCut>,
+    /// Handlauf (Basis: doppelt ab 1:50 bzw. „fein", sonst einfach; nur wo der Treppentyp einen hat).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub handrail: Option<ModelViewHandrail>,
+    #[serde(flatten)]
+    #[ts(skip)]
+    pub extra: Extra,
+}
+
+/// [173] Darstellung der Stufen über der Schnitthöhe.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+pub enum ModelViewAboveCut {
+    #[default]
+    #[serde(rename = "dashed")]
+    Dashed,
+    #[serde(rename = "off")]
+    Off,
+    #[serde(other)]
+    #[ts(skip)]
+    Unknown,
+}
+
+/// [173] Handlauf im Grundriss: aus, einfache Linie (Achse) oder doppelte (Rohrkanten).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+pub enum ModelViewHandrail {
+    #[default]
+    #[serde(rename = "off")]
+    Off,
+    #[serde(rename = "single")]
+    Single,
+    #[serde(rename = "double")]
+    Double,
+    #[serde(other)]
+    #[ts(skip)]
+    Unknown,
+}
+
+/// [173] Wände in der Modelldarstellung (fehlt ⇒ wie Basis).
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct ModelViewWalls {
+    /// Schichten: alle, vereinfacht (dünne Schichten zusammengefasst) oder nur das Kern-Material als eine
+    /// Fläche (Basis: vereinfacht ab 1:50 ausser „fein").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub layers: Option<ModelViewLayers>,
+    /// Dünne Schichten zusammenfassen unter dieser Papierdicke in mm (Basis 0.5).
+    #[serde(rename = "thinLayerMm", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub thin_layer_mm: Option<f64>,
+    /// Schichteinzug an Leibungen zeigen (Basis: ja).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub reveals: Option<bool>,
+    /// Schnittflächen ab 1:100 schraffiert statt schwarz (die Ebene geht vor; Basis: schwarz).
+    #[serde(rename = "cutHatch", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub cut_hatch: Option<bool>,
+    #[serde(flatten)]
+    #[ts(skip)]
+    pub extra: Extra,
+}
+
+/// [173] Wandschichten im Grundriss.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+pub enum ModelViewLayers {
+    #[default]
+    #[serde(rename = "all")]
+    All,
+    #[serde(rename = "simplified")]
+    Simplified,
+    #[serde(rename = "core")]
+    Core,
+    #[serde(other)]
+    #[ts(skip)]
+    Unknown,
+}
+
+/// [173] Decken und Böden in der Modelldarstellung.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct ModelViewSlabs {
+    /// Bodenbelag-Muster im Grundriss (die Ebene geht vor; Basis: automatisch).
+    #[serde(rename = "floorFinish", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub floor_finish: Option<FloorFinishDisplay>,
+    #[serde(flatten)]
+    #[ts(skip)]
+    pub extra: Extra,
+}
+
+/// [173] Gelände in der Modelldarstellung.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct ModelViewSite {
+    /// Gelände, Höhenlinien und Baugruben im Grundriss (die Ebene geht vor; Basis: automatisch).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub terrain: Option<bool>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -4557,6 +4796,11 @@ pub struct ViewSnapshot {
     #[serde(rename = "templateLinked", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub template_linked: Option<bool>,
+    /// [173] Modelldarstellung (`Project.modelViewOptions`, Id einer eigenen Stufe oder „grob"/„mittel"/„fein").
+    /// Fehlt ⇒ der Detailgrad allein bestimmt die Darstellung (heutiges Verhalten).
+    #[serde(rename = "modelViewOptionId", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub model_view_option_id: Option<String>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -5284,6 +5528,12 @@ pub struct Project {
     #[serde(rename = "viewTemplates", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub view_templates: Option<Vec<ViewTemplate>>,
+    /// [173] Modelldarstellungen: eigene Stufen der Darstellung (wie Archicads „Modelldarstellung"), je
+    /// Bauteilart wählbare Optionen über einem Basis-Detailgrad. Die Stufen „grob", „mittel", „fein" sind
+    /// eingebaut und stehen nicht in der Liste. Optional: Alt-Projekte ohne Feld bleiben gültig.
+    #[serde(rename = "modelViewOptions", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub model_view_options: Option<Vec<ModelViewOption>>,
     /// Layout-Blätter (DOSSIER A3) — Druck-/Plan-Blätter mit platzierten Viewports
     /// (siehe {@link Layout}). Optional, damit bestehende Projekte/Tests ohne
     /// `layouts` gültig bleiben (Default: leer behandeln). Gehört ins Dokument.
@@ -6122,6 +6372,12 @@ impl Project {
             "viewTemplates" => {
                 self.view_templates = match v {
                     Some(v) => <Option<Vec<ViewTemplate>>>::deserialize(v).map_err(|e| e.to_string())?,
+                    None => Default::default(),
+                };
+            }
+            "modelViewOptions" => {
+                self.model_view_options = match v {
+                    Some(v) => <Option<Vec<ModelViewOption>>>::deserialize(v).map_err(|e| e.to_string())?,
                     None => Default::default(),
                 };
             }

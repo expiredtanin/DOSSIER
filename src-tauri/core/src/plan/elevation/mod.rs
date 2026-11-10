@@ -224,7 +224,10 @@ pub fn elevation_primitives_with(p: &Project, level: &LevelSpec, shadows: bool, 
 
     // Ansichtsfarbe und -schraffur ([100]) der sichtbaren Bauteilseite.
     let (pattern_lines, pattern_styles) = surface_patterns(p, &mut faces, &frame, scale, mono);
-    let mut openings = collect_openings(p, &frame);
+    // [173] Öffnungslinien der Fenster nach der Modelldarstellung der Ebene (Element und Typ gehen vor).
+    let mv = level.model_view.as_deref().and_then(|id| crate::plan::model_view::find(p, id));
+    let win = crate::plan::model_view::resolve(mv, crate::plan::style::Detail::Mittel, scale).window;
+    let mut openings = collect_openings(p, &frame, &win);
     if !hidden_walls.is_empty() {
         let host = |id: &str| p.openings.as_deref().unwrap_or(&[]).iter().find(|o| o.id == id).map(|o| o.host_wall_id.as_str());
         openings.retain(|op| !host(&op.id).is_some_and(|w| hidden_walls.contains(w)));

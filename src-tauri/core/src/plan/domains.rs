@@ -57,6 +57,9 @@ pub struct PlanArgs {
     /// [33] Eingeschaltete Override-Regeln (ids) eines Ausschnitts/einer Ansichtsvorlage (Blatt-Viewport);
     /// `None` = Schalter `enabled` der Regeln im Projekt.
     pub rules: Option<HashSet<String>>,
+    /// [173] Ausdrücklich angefragte Modelldarstellung (Id einer eigenen oder eingebauten Stufe); `None` =
+    /// die der Ebene (`DrawingLevel.modelViewOptionId`), sonst nur der Detailgrad (`plan/model_view.rs`).
+    pub model_view: Option<String>,
 }
 
 /// [140] Ab diesem Massstab (1:N) zeichnet der Detailgrad „mittel" wie „grob".
@@ -101,7 +104,26 @@ impl PlanArgs {
             sun_when: v.get("sunWhen").and_then(|b| b.as_f64()),
             auto_coarse,
             rules: v.get("rules").and_then(|a| a.as_array()).map(|a| a.iter().filter_map(|s| s.as_str().map(String::from)).collect()),
+            model_view: v.get("modelView").and_then(|m| m.as_str()).filter(|m| !m.is_empty()).map(String::from),
         })
+    }
+
+    /// [173] Wie [`PlanArgs::parse`], dazu der Basis-Detailgrad der wirksamen Modelldarstellung (angefragt
+    /// oder an der Ebene): er ersetzt den angefragten Detailgrad (eingebaute Stufe bzw. `baseDetail`).
+    pub fn parse_in(p: &Project, detail: f64, text: &str) -> Result<PlanArgs, String> {
+        let mut a = Self::parse(detail, text)?;
+        a.apply_model_view(p);
+        Ok(a)
+    }
+
+    /// [173] Basis-Detailgrad der wirksamen Modelldarstellung übernehmen (ohne Modelldarstellung unverändert).
+    pub fn apply_model_view(&mut self, p: &Project) {
+        let base = super::model_view::selected_id(p, &self.floor, self.model_view.as_deref()).and_then(|id| super::model_view::base_of(p, id));
+        if let Some(d) = base {
+            let (detail, auto_coarse) = effective_detail(d, self.scale);
+            self.detail = detail;
+            self.auto_coarse = auto_coarse;
+        }
     }
 }
 
@@ -113,6 +135,10 @@ pub struct Ctx<'a> {
     cats: HashMap<&'a str, &'a LayerCategory>,
     /// [33] Von einer Regel „Ausblenden“ ausgeblendete Elemente (`overrides::hidden_elements`).
     hidden: HashSet<String>,
+    /// [173] Wirksame eigene Modelldarstellung (`None`: eingebaute Stufe bzw. nur der Detailgrad).
+    mv_sel: Option<&'a ModelViewOption>,
+    /// [173] Aufgelöste Darstellungsoptionen (Modelldarstellung über dem Detailgrad).
+    mv: super::model_view::Options,
 }
 
 impl<'a> Ctx<'a> {
@@ -122,7 +148,23 @@ impl<'a> Ctx<'a> {
             cats.insert(c.code.as_str(), c);
         }
         let hidden = overrides::hidden_elements(p, overrides::RuleView::at(a.scale, a.rules.as_ref()).view("plan"));
-        Ctx { p, a, cats, hidden }
+        let mv_sel = super::model_view::selected_id(p, &a.floor, a.model_view.as_deref()).and_then(|id| super::model_view::find(p, id));
+        let mv = super::model_view::resolve(mv_sel, a.detail, a.scale);
+        Ctx { p, a, cats, hidden, mv_sel, mv }
+    }
+
+    /// [173] Aufgelöste Darstellungsoptionen dieser Plan-Erzeugung (`plan/model_view.rs`).
+    pub fn mv(&self) -> &super::model_view::Options {
+        &self.mv
+    }
+
+    /// [173] Optionen für ein Element mit eigenem Detailgrad (Modelldarstellung bleibt, Basis wechselt).
+    pub fn mv_for(&self, detail: Detail) -> std::borrow::Cow<'_, super::model_view::Options> {
+        if detail == self.mv.detail {
+            std::borrow::Cow::Borrowed(&self.mv)
+        } else {
+            std::borrow::Cow::Owned(super::model_view::resolve(self.mv_sel, detail, self.a.scale))
+        }
     }
 
     pub fn shown(&self, code: &str) -> bool {
@@ -141,7 +183,8 @@ impl<'a> Ctx<'a> {
 
     /// [140] Schnittflächen dieser Ebene schwarz (`style::solid_cut`; Feld `cutHatch` der Ebene).
     pub fn solid_cut(&self) -> bool {
-        let cut_hatch = self.p.floor(&self.a.floor).and_then(|l| l.cut_hatch).unwrap_or(false);
+        // [173] Ebene > Modelldarstellung > schwarz.
+        let cut_hatch = self.mv.cut_hatch(self.p.floor(&self.a.floor).and_then(|l| l.cut_hatch));
         solid_cut(self.a.detail, self.a.scale, cut_hatch)
     }
 
@@ -353,7 +396,8 @@ fn floor_finishes(c: &Ctx, rooms: &[Primitive], out: &mut Vec<Primitive>) {
     if p.floor(&c.a.floor).is_none_or(|l| l.kind != DrawingLevelKind::Floor) {
         return;
     }
-    let setting = p.floor(&c.a.floor).and_then(|l| l.floor_finish);
+    // [173] Ebene > Modelldarstellung > automatisch.
+    let setting = c.mv().floor_finish(p.floor(&c.a.floor).and_then(|l| l.floor_finish));
     let mode = ff::show(setting, c.a.detail, c.a.scale);
     let ceilings: Vec<&Ceiling> = {
         let base = p.floor(&c.a.floor).and_then(|f| f.base_elevation).unwrap_or(0.0);
@@ -1053,7 +1097,7 @@ pub fn room_stamp_spots(p: &Project, floor: &str, show: &HashSet<String>, scale:
         return out;
     }
     let (detail, auto_coarse) = effective_detail(Detail::Mittel, scale);
-    let a = PlanArgs { floor: floor.to_string(), detail, show: show.clone(), grey: HashSet::new(), reference_lines: false, global: true, scale, for_print: false, compact: false, mono: false, sun_when: None, auto_coarse, rules: None };
+    let a = PlanArgs { floor: floor.to_string(), detail, show: show.clone(), grey: HashSet::new(), reference_lines: false, global: true, scale, for_print: false, compact: false, mono: false, sun_when: None, auto_coarse, rules: None, model_view: None };
     let Ok(d) = plan_domains(p, &a) else { return out };
     for q in &d.rooms {
         if let Primitive::Text { at, room_id: Some(id), .. } = q {

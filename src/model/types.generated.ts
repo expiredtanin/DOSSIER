@@ -1181,6 +1181,11 @@ export type DrawingLevel = {
    * `true` ⇒ die Ansicht folgt der Vorlage (Änderungen an der Vorlage wirken); sonst nur einmal angewendet.
    */
   templateLinked?: boolean;
+  /**
+   * [173] Modelldarstellung (`Project.modelViewOptions`, Id einer eigenen Stufe oder „grob"/„mittel"/„fein").
+   * Fehlt ⇒ der Detailgrad allein bestimmt die Darstellung (heutiges Verhalten).
+   */
+  modelViewOptionId?: string;
 };
 
 /**
@@ -1965,6 +1970,112 @@ export type MasterLayout = {
   customHeightMm?: number;
 };
 
+/** [173] Darstellung der Stufen über der Schnitthöhe. */
+export type ModelViewAboveCut = "dashed" | "off";
+
+/** [173] Türen in der Modelldarstellung (fehlt ⇒ wie Basis). */
+export type ModelViewDoors = {
+  /** Sturzlinie im Grundriss (Element und Türtyp gehen vor). */
+  lintelLineStyle?: LintelLineStyle;
+  /** Öffnungswinkel des Türblatts in Grad, solange die Tür keinen eigenen hat (Basis 90°). */
+  swingAngle?: number;
+  /** Aufschlagbogen zeichnen (Basis: ja, ausser in der Übersicht ab 1:500). */
+  swingArc?: boolean;
+  /** Zarge/Rahmen zeichnen (Basis: ja). */
+  frame?: boolean;
+  /** Türblatt als Linie oder als Rechteck mit Blattdicke (Basis: Rechteck nur „fein"). */
+  leaf?: ModelViewLeaf;
+};
+
+/** [173] Handlauf im Grundriss: aus, einfache Linie (Achse) oder doppelte (Rohrkanten). */
+export type ModelViewHandrail = "off" | "single" | "double";
+
+/** [173] Wandschichten im Grundriss. */
+export type ModelViewLayers = "all" | "simplified" | "core";
+
+/** [173] Türblatt im Grundriss. */
+export type ModelViewLeaf = "line" | "rect";
+
+/**
+ * [173] Modelldarstellung (≙ Archicad „Modelldarstellung"/Model View Options): eine benannte Stufe der
+ * Darstellung über einem Basis-Detailgrad, mit Optionen je Bauteilart. Jede Option fehlt ⇒ „wie Basis":
+ * dann zeichnet der Detailgrad wie bisher. Rangfolge: Element-Einstellung > Typ-Einstellung > Modelldarstellung
+ * der Ansicht > Basis-Detailgrad (Kern `plan/model_view.rs`).
+ */
+export type ModelViewOption = {
+  id: string;
+  name: string;
+  /** Basis-Detailgrad; fehlt ⇒ der gewählte Detailgrad der Ansicht. */
+  baseDetail?: DetailLevel;
+  doors?: ModelViewDoors;
+  windows?: ModelViewWindows;
+  stairs?: ModelViewStairs;
+  walls?: ModelViewWalls;
+  /** Decken und Böden. */
+  slabs?: ModelViewSlabs;
+  /** Gelände. */
+  site?: ModelViewSite;
+};
+
+/** [173] Gelände in der Modelldarstellung. */
+export type ModelViewSite = {
+  /** Gelände, Höhenlinien und Baugruben im Grundriss (die Ebene geht vor; Basis: automatisch). */
+  terrain?: boolean;
+};
+
+/** [173] Decken und Böden in der Modelldarstellung. */
+export type ModelViewSlabs = {
+  /** Bodenbelag-Muster im Grundriss (die Ebene geht vor; Basis: automatisch). */
+  floorFinish?: FloorFinishDisplay;
+};
+
+/** [173] Treppen in der Modelldarstellung (fehlt ⇒ wie Basis). */
+export type ModelViewStairs = {
+  /** Lauflinie (Basis: ja). */
+  walkLine?: boolean;
+  /** Pfeil der Lauflinie (Basis: ja). */
+  arrow?: boolean;
+  /** Bruchlinie an der Schnitthöhe (Basis: ja). */
+  breakLine?: boolean;
+  /** Stufen über der Schnitthöhe (Basis: gestrichelt). */
+  aboveCut?: ModelViewAboveCut;
+  /**
+   * Handlauf (Basis: doppelt ab 1:50 bzw. „fein", sonst einfach; nur wo der Treppentyp einen hat).
+   */
+  handrail?: ModelViewHandrail;
+};
+
+/** [173] Wände in der Modelldarstellung (fehlt ⇒ wie Basis). */
+export type ModelViewWalls = {
+  /**
+   * Schichten: alle, vereinfacht (dünne Schichten zusammengefasst) oder nur das Kern-Material als eine
+   * Fläche (Basis: vereinfacht ab 1:50 ausser „fein").
+   */
+  layers?: ModelViewLayers;
+  /** Dünne Schichten zusammenfassen unter dieser Papierdicke in mm (Basis 0.5). */
+  thinLayerMm?: number;
+  /** Schichteinzug an Leibungen zeigen (Basis: ja). */
+  reveals?: boolean;
+  /** Schnittflächen ab 1:100 schraffiert statt schwarz (die Ebene geht vor; Basis: schwarz). */
+  cutHatch?: boolean;
+};
+
+/** [173] Fenster in der Modelldarstellung (fehlt ⇒ wie Basis). */
+export type ModelViewWindows = {
+  /**
+   * Öffnungslinien (Dreh-/Kipp-Dreiecke) in der Ansicht (Element und Fenstertyp gehen vor; Basis: ja).
+   */
+  sashSymbols?: boolean;
+  /**
+   * Aufschlagbögen der Drehflügel im Grundriss (Element und Fenstertyp gehen vor; Basis: nein).
+   */
+  planSwingArcs?: boolean;
+  /** Fensterbank (innen/aussen nach Typ) im Grundriss (Basis: nur „fein"). */
+  sill?: boolean;
+  /** Flügelrahmen im Grundriss (Basis: nur „fein"). */
+  sashFrames?: boolean;
+};
+
 /**
  * Modul-Regel: teilt eine Referenzspanne in proportionale Felder auf.
  * Typischer Anwendungsfall: Tragwerks-Joche (z. B. 6 m-Module in einem Bauteil).
@@ -2558,6 +2669,12 @@ export type Project = {
   viewSnapshotFolders?: Array<ViewSnapshotFolder>;
   /** Ansichtsvorlagen ([34]). Optional: Alt-Projekte ohne Feld bleiben gültig. */
   viewTemplates?: Array<ViewTemplate>;
+  /**
+   * [173] Modelldarstellungen: eigene Stufen der Darstellung (wie Archicads „Modelldarstellung"), je
+   * Bauteilart wählbare Optionen über einem Basis-Detailgrad. Die Stufen „grob", „mittel", „fein" sind
+   * eingebaut und stehen nicht in der Liste. Optional: Alt-Projekte ohne Feld bleiben gültig.
+   */
+  modelViewOptions?: Array<ModelViewOption>;
   /**
    * Layout-Blätter (DOSSIER A3) — Druck-/Plan-Blätter mit platzierten Viewports
    * (siehe {@link Layout}). Optional, damit bestehende Projekte/Tests ohne
@@ -3530,6 +3647,11 @@ export type ViewSnapshot = {
   templateId?: string;
   /** `true` ⇒ der Ausschnitt folgt der Vorlage. */
   templateLinked?: boolean;
+  /**
+   * [173] Modelldarstellung (`Project.modelViewOptions`, Id einer eigenen Stufe oder „grob"/„mittel"/„fein").
+   * Fehlt ⇒ der Detailgrad allein bestimmt die Darstellung (heutiges Verhalten).
+   */
+  modelViewOptionId?: string;
 };
 
 /**
@@ -3586,6 +3708,11 @@ export type ViewTemplate = {
   viewBottom?: number;
   /** Ansichtsbereich: darunter sichtbar bis ([36]). */
   viewDepth?: number;
+  /**
+   * [173] Modelldarstellung (`Project.modelViewOptions`, Id einer eigenen Stufe oder „grob"/„mittel"/„fein").
+   * Fehlt ⇒ der Detailgrad allein bestimmt die Darstellung (heutiges Verhalten).
+   */
+  modelViewOptionId?: string;
 };
 
 /** Ansichtstyp eines Geschosses (wie in App). */
