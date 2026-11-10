@@ -253,24 +253,40 @@ fn nearest_sweep(d: f64, old: f64, tau: f64) -> f64 {
     if (ccw - old).abs() <= (cw - old).abs() { ccw } else { cw }
 }
 
-/// [T2] Zielpunkt eines Endpunkt-Griffs der Bogenwand samt Bogenlänge der Wand danach: mit `length` (Tab)
-/// der Punkt dieser Bogenlänge vom festen Ende ([`arc_wall_point_at_length`]), sonst der auf den Kreis
-/// projizierte Cursor `raw`. `None` bei Unsinn.
+/// [T2] Endpunkt-Griff der Bogenwand: neue Wand `(Start, Ende, Bulge)`. Mit `length` (Tab, Bogenlänge ab dem
+/// festen Ende, auch über den Halbkreis hinaus) legt der Cursor `raw` nur die SEITE fest ([`arc_length_sweep`]), der
+/// Öffnungswinkel ist dann genau `length / r` — nicht die nächstliegende von zwei Lösungen mit gleichem Endpunkt.
+/// Ohne `length` der auf den Kreis projizierte Cursor ([`arc_wall_endpoint`]). `None` bei Unsinn.
+pub fn arc_wall_resize(s: P, e: P, bulge: f64, index: usize, length: Option<f64>, raw: P) -> Option<(P, P, f64)> {
+    let Some(l) = length else { return arc_wall_endpoint(s, e, bulge, index, raw) };
+    let a = crate::wall_arc::WallArc::of(kernel2d::Vec2::new(s.0, s.1), kernel2d::Vec2::new(e.0, e.1), Some(bulge))?;
+    let (th, sweep) = arc_length_sweep(&a, index, l, raw)?;
+    let (c, r) = ((a.center.x, a.center.y), a.r);
+    let at = (c.0 + r * jsnum::cos(th), c.1 + r * jsnum::sin(th));
+    let nb = -jsnum::tan(sweep / 4.0);
+    nb.is_finite().then(|| if index == 0 { (at, e, nb) } else { (s, at, nb) })
+}
+
+/// [T2] Zielpunkt eines Endpunkt-Griffs der Bogenwand samt Bogenlänge der Wand danach (s. [`arc_wall_resize`]).
 pub fn arc_wall_grip_target(s: P, e: P, bulge: f64, index: usize, length: Option<f64>, raw: P) -> Option<(P, f64)> {
-    let p = match length {
-        Some(l) => arc_wall_point_at_length(s, e, bulge, index, l, raw)?,
-        None => raw,
-    };
-    let (ns, ne, nb) = arc_wall_endpoint(s, e, bulge, index, p)?;
+    let (ns, ne, nb) = arc_wall_resize(s, e, bulge, index, length, raw)?;
     let a = crate::wall_arc::WallArc::of(kernel2d::Vec2::new(ns.0, ns.1), kernel2d::Vec2::new(ne.0, ne.1), Some(nb))?;
     Some((if index == 0 { ns } else { ne }, a.length()))
 }
 
 /// [T2] Bogenlängen-Eingabe (Tab) am Endpunkt einer Bogenwand: der Punkt, der `length` (Bogenlänge,
-/// Meter) vom festen Ende entfernt auf dem Kreis liegt, auf der Seite des Cursors `raw` (am Fixpunkt:
-/// Laufrichtung des bisherigen Bogens). `None` bei Unsinn oder `length` ≤ 0 bzw. ≥ Vollkreis.
+/// Meter) vom festen Ende entfernt auf dem Kreis liegt, auf der Seite des Cursors `raw`. `None` bei Unsinn
+/// oder `length` ≤ 0 bzw. ≥ Vollkreis.
 pub fn arc_wall_point_at_length(s: P, e: P, bulge: f64, index: usize, length: f64, raw: P) -> Option<P> {
     let a = crate::wall_arc::WallArc::of(kernel2d::Vec2::new(s.0, s.1), kernel2d::Vec2::new(e.0, e.1), Some(bulge))?;
+    let (th, _) = arc_length_sweep(&a, index, length, raw)?;
+    Some((a.center.x + a.r * jsnum::cos(th), a.center.y + a.r * jsnum::sin(th)))
+}
+
+/// Winkel des bewegten Endpunkts und neuer vorzeichenbehafteter Öffnungswinkel für die Bogenlänge `length`
+/// vom festen Ende. Seite eindeutig aus dem Cursor: Vorzeichen des Winkels Cursor − festes Ende (in (−π, π]);
+/// genau auf dem festen Ende oder gegenüber (|d| ≈ 0) gilt die bisherige Laufrichtung.
+fn arc_length_sweep(a: &crate::wall_arc::WallArc, index: usize, length: f64, raw: P) -> Option<(f64, f64)> {
     let (c, r) = ((a.center.x, a.center.y), a.r);
     let tau = 2.0 * PI;
     if !(length.is_finite() && length > 0.0 && length / r < tau - 1e-6) {
@@ -285,8 +301,9 @@ pub fn arc_wall_point_at_length(s: P, e: P, bulge: f64, index: usize, length: f6
         }
         None => run_dir,
     };
-    let ang = fixed_angle + side * length / r;
-    Some((c.0 + r * jsnum::cos(ang), c.1 + r * jsnum::sin(ang)))
+    let th = fixed_angle + side * length / r;
+    // Start bewegt: Öffnungswinkel läuft von th zum festen Ende (Gegenrichtung), Ende bewegt: vom festen Start zu th.
+    Some((th, if index == 0 { -side } else { side } * length / r))
 }
 
 /// [T2] Radius-Griff (Scheitel) einer Bogenwand mit festem Mittelpunkt: der Mittelpunkt und der Öffnungswinkel
@@ -755,6 +772,29 @@ mod tests {
         assert!((a.length() - 1.0).abs() < 1e-9, "{}", a.length());
         assert!(arc_wall_point_at_length(s, e, 1.0, 1, -1.0, (0.0, 0.0)).is_none());
         assert!(arc_wall_point_at_length(s, e, 1.0, 1, 100.0, (0.0, 0.0)).is_none());
+    }
+
+    /// [T2] Bogenlänge über dem Halbkreis: die Seite kommt aus dem Cursor, der Öffnungswinkel ist genau l / r.
+    #[test]
+    fn bogenwand_bogenlaenge_ueber_halbkreis() {
+        let (s, e) = ((0.0, 0.0), (4.0, 0.0)); // Halbkreis r = 2
+        let l = 1.5 * PI * 2.0; // 270°
+        for (raw, side) in [((3.0, 3.0), -1.0), ((3.0, -3.0), 1.0)] {
+            let (ns, ne, nb) = arc_wall_resize(s, e, 1.0, 1, Some(l), raw).unwrap();
+            let a = crate::wall_arc::WallArc::of(kernel2d::Vec2::new(ns.0, ns.1), kernel2d::Vec2::new(ne.0, ne.1), Some(nb)).unwrap();
+            assert!(close(ns, s) && (a.length() - l).abs() < 1e-9, "{} {raw:?}", a.length());
+            assert!((a.center.x - 2.0).abs() < 1e-9 && a.center.y.abs() < 1e-9 && (a.r - 2.0).abs() < 1e-9);
+            assert!((a.sweep - side * 1.5 * PI).abs() < 1e-9, "{} {raw:?}", a.sweep);
+        }
+        // Start bewegt, gleiche Länge: das Ende bleibt, die Länge stimmt.
+        let (ns, ne, nb) = arc_wall_resize(s, e, 1.0, 0, Some(l), (1.0, 3.0)).unwrap();
+        let a = crate::wall_arc::WallArc::of(kernel2d::Vec2::new(ns.0, ns.1), kernel2d::Vec2::new(ne.0, ne.1), Some(nb)).unwrap();
+        assert!(close(ne, e) && (a.length() - l).abs() < 1e-9 && a.sweep.abs() > PI, "{}", a.sweep);
+        // Dieselbe Länge, anderer Cursor-Seite → gespiegelte Wand (eindeutig, nicht „die nächstliegende“).
+        let (_, e1, _) = arc_wall_resize(s, e, 1.0, 1, Some(l), (3.0, 3.0)).unwrap();
+        let (_, e2, _) = arc_wall_resize(s, e, 1.0, 1, Some(l), (3.0, -3.0)).unwrap();
+        assert!(close(e1, (2.0, -2.0)) && close(e2, (2.0, 2.0)), "{e1:?} {e2:?}");
+        assert!(arc_wall_resize(s, e, 1.0, 1, Some(4.0 * PI), (3.0, 3.0)).is_none());
     }
 
     #[test]

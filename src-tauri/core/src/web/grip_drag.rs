@@ -47,6 +47,18 @@ pub fn grip_arc_wall_target(sx: f64, sy: f64, ex: f64, ey: f64, bulge: f64, inde
     }
 }
 
+/// [T2] Endpunkt-Griff einer Bogenwand (`grip_drag::arc_wall_resize`): die ganze Wand danach
+/// `[sx, sy, ex, ey, bulge]`; `length` NaN = Cursor `(rx, ry)` auf den Kreis projiziert. Bei Unsinn leer.
+#[wasm_bindgen]
+#[allow(clippy::too_many_arguments)]
+pub fn grip_arc_wall_resize(sx: f64, sy: f64, ex: f64, ey: f64, bulge: f64, index: f64, length: f64, rx: f64, ry: f64) -> Vec<f64> {
+    let i = if index == 0.0 { 0 } else if index == 1.0 { 1 } else { return Vec::new() };
+    match gd::arc_wall_resize((sx, sy), (ex, ey), bulge, i, opt(length), (rx, ry)) {
+        Some((s, e, b)) => vec![s.0, s.1, e.0, e.1, b],
+        None => Vec::new(),
+    }
+}
+
 /// [T2] Scheitel-Griff einer Bogenwand (`grip_drag::arc_wall_radius_target`): `fixed_center` = Radius mit festem
 /// Mittelpunkt (Shift), `radius` NaN = Cursor `(rx, ry)`. `[x, y, radius]`, bei Unsinn leer.
 #[wasm_bindgen]

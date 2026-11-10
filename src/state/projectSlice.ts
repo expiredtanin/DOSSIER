@@ -244,8 +244,13 @@ export interface ProjectSlice {
     pt: Vec2,
     /** Papier-Massstab (1:N), nur für den Masszahl-Griff der Bemassung. */
     scaleDenominator?: number,
-    /** [172] Masszahl-Griff ohne Einrasten (Alt gehalten). */
+    /**
+     * Modifikator gehalten: Masszahl-Griff ohne Einrasten ([172], Alt) bzw. Scheitel-Griff einer Bogenwand mit
+     * festem Mittelpunkt ([T2], Shift).
+     */
     free?: boolean,
+    /** [T2] Getippte Bogenlänge (Tab) beim Endpunkt-Griff einer Bogenwand, auch über dem Halbkreis. */
+    arcLength?: number,
   ) => void;
   moveElementByOf: (
     drawingId: string | null,
@@ -1145,9 +1150,9 @@ export function createProjectSlice(
     // Diese Aktionen laufen AD-HOC bei jedem Maus-Move-Schritt eines Drags
     // (kein Draft/Commit-Muster wie bei den Zeichenwerkzeugen) — daher mit
     // coalesceKey, damit EIN Drag EINEN Undo-Schritt erzeugt statt vieler.
-    moveGripOf: (drawingId, wallId, index, pt, scaleDenominator = DEFAULT_SCALE_DENOMINATOR, free) =>
+    moveGripOf: (drawingId, wallId, index, pt, scaleDenominator = DEFAULT_SCALE_DENOMINATOR, free, arcLength) =>
       applyGrip(
-        { op: "moveGrip", drawingId, wallId, index, pt: gripPt(pt), scale: scaleDenominator, ...(free ? { free: true } : {}) },
+        { op: "moveGrip", drawingId, wallId, index, pt: gripPt(pt), scale: scaleDenominator, ...(free ? { free: true } : {}), ...(arcLength != null ? { arcLength } : {}) },
         `moveGripOf:${drawingId ?? ""}:${wallId ?? ""}:${index}`,
       ),
 

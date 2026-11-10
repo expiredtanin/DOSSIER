@@ -108,6 +108,8 @@ pub struct Request {
     h: N,
     fx: N,
     fy: N,
+    /// [T2] Getippte Bogenlänge (Tab) beim Endpunkt-Griff einer Bogenwand; fehlt = NaN = Cursor.
+    arc_length: N,
     thickness: N,
     pt: [N; 2],
     delta: [N; 2],
@@ -130,6 +132,7 @@ impl Request {
             "h" => self.h.0,
             "fx" => self.fx.0,
             "fy" => self.fy.0,
+            "arcLength" => self.arc_length.0,
             _ => self.thickness.0,
         }
     }
@@ -214,8 +217,8 @@ pub fn run(lk: &Lookup, req: &Request) -> Result<GripResult, String> {
             }
             let f: Box<dyn Fn(&Value, bool) -> Option<Value>> = match op {
                 "moveGrip" => {
-                    let (index, (x, y), scale, free) = (r.n("index"), r.p("pt"), r.n("scale"), r.free);
-                    Box::new(move |e, wall| if wall { Some(wall_grip(e, index, x, y, free)) } else { drawing_grip(e, index, x, y, scale, free) })
+                    let (index, (x, y), scale, free, arc_length) = (r.n("index"), r.p("pt"), r.n("scale"), r.free, r.n("arcLength"));
+                    Box::new(move |e, wall| if wall { Some(wall_grip(e, index, x, y, free, arc_length)) } else { drawing_grip(e, index, x, y, scale, free) })
                 }
                 "moveBy" => {
                     let (dx, dy) = r.p("delta");
@@ -401,7 +404,7 @@ pub fn run(lk: &Lookup, req: &Request) -> Result<GripResult, String> {
 
 // ── Wand ─────────────────────────────────────────────────────────────────────
 
-fn wall_grip(w: &Value, index: f64, x: f64, y: f64, fixed_center: bool) -> Value {
+fn wall_grip(w: &Value, index: f64, x: f64, y: f64, fixed_center: bool, arc_length: f64) -> Value {
     // Bogenwand ([T2]): Griff 2 = Bogenscheitel; der Bogen geht durch den gezogenen Punkt.
     if index == 2.0 {
         let (s, e) = (xy(field(w, "start").unwrap_or(&Value::Null)), xy(field(w, "end").unwrap_or(&Value::Null)));
@@ -422,7 +425,7 @@ fn wall_grip(w: &Value, index: f64, x: f64, y: f64, fixed_center: bool) -> Value
     if index == 0.0 || index == 1.0 {
         let (s, e) = (xy(field(w, "start").unwrap_or(&Value::Null)), xy(field(w, "end").unwrap_or(&Value::Null)));
         if let Some(b) = field(w, "bulge").and_then(Value::as_f64).filter(|b| crate::wall_arc::is_arc_bulge(Some(*b))) {
-            return match crate::grip_drag::arc_wall_endpoint(s, e, b, index as usize, (x, y)) {
+            return match crate::grip_drag::arc_wall_resize(s, e, b, index as usize, Some(arc_length).filter(|l| l.is_finite()), (x, y)) {
                 Some((ns, ne, nb)) => with_all(w, vec![("start", pt(ns.0, ns.1)), ("end", pt(ne.0, ne.1)), ("bulge", js_num(nb))]),
                 None => w.clone(),
             };
@@ -1456,6 +1459,18 @@ mod tests {
         let res = run(&Lookup::plain(&r), &rq(json!({"op": "moveGrip", "wallId": "w", "index": 2, "pt": [2, 3]}))).unwrap();
         let e = res.ops[0].to_json()["entity"].clone();
         assert_eq!(xy(&e["start"]), (0.0, 0.0));
+    }
+
+    /// [T2] Endpunkt-Griff mit getippter Bogenlänge über dem Halbkreis: Öffnungswinkel l / r, Seite vom Cursor.
+    #[test]
+    fn bogenwand_endpunkt_bogenlaenge_ueber_halbkreis() {
+        let r = root(json!({"walls": [{"id": "w", "start": {"x": 0, "y": 0}, "end": {"x": 4, "y": 0}, "bulge": 1.0}]}));
+        let l = 3.0 * std::f64::consts::PI; // 270° bei r = 2
+        let res = run(&Lookup::plain(&r), &rq(json!({"op": "moveGrip", "wallId": "w", "index": 1, "pt": [2, -2], "arcLength": l}))).unwrap();
+        let e = res.ops[0].to_json()["entity"].clone();
+        let (s, en) = (xy(&e["start"]), xy(&e["end"]));
+        let a = crate::wall_arc::WallArc::of(kernel2d::Vec2::new(s.0, s.1), kernel2d::Vec2::new(en.0, en.1), e["bulge"].as_f64()).unwrap();
+        assert!((a.length() - l).abs() < 1e-9 && a.sweep.abs() > std::f64::consts::PI, "{} {e}", a.length());
     }
 
     /// [172] Masszahl-Griff eines Radius-/Durchmesser-/Bogenmasses: Lage an der Zahl, rastet ein, Alt = frei.

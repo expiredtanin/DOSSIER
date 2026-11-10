@@ -17,6 +17,7 @@ import {
   coincidentGripPoints,
   excavationGripPoints,
   gripArcWallRadius,
+  gripArcWallResize,
   gripArcWallTarget,
   gripAxisLock,
   gripEdgeTarget,
@@ -117,6 +118,7 @@ export function useGripEditing(opts: {
     pt: Vec2,
     scaleDenominator?: number,
     free?: boolean,
+    arcLength?: number,
   ) => void;
   moveRoomEdge: (id: string, aIndex: number, bIndex: number, delta: Vec2) => void;
   moveCeilingEdge: (id: string, aIndex: number, bIndex: number, delta: Vec2) => void;
@@ -566,7 +568,7 @@ export function useGripEditing(opts: {
   const pendingGripRef = useRef<{ drawingId: string; localIndex: number; flat: number; pt: Vec2 } | null>(null);
   // Dasselbe für das Verschieben eines ganzen 2D-Elements (Gesamt-Delta) und für
   // Kanten-Griffe von Polylinien (Ziel-Delta): bis zum Loslassen nur Vorschau.
-  const pendingWallGripRef = useRef<{ wallId: string; localIndex: number; flat: number; pt: Vec2 } | null>(null);
+  const pendingWallGripRef = useRef<{ wallId: string; localIndex: number; flat: number; pt: Vec2; arcLength?: number } | null>(null);
   const pendingAreaGripRef = useRef<{ kind: "room" | "ceiling" | "excavation"; id: string; index: number; flat: number; pt: Vec2 } | null>(null);
   const pendingAreaMoveRef = useRef<{ kind: "ceiling" | "room" | "stair"; id: string; total: Vec2 } | null>(null);
   const pendingWallMoveRef = useRef<{ wallId: string; total: Vec2 } | null>(null);
@@ -763,6 +765,9 @@ export function useGripEditing(opts: {
     const at0 = gripOpeningPos0Ref.current;
     if (op && !op.locked && host?.bulge && at0 && length != null) {
       slideOpening(op.id, { position: openingTypedPosition(at0.position, length, anchor, pt, at0.dir) }, `slideOpening:${op.id}`);
+    } else if (length != null && arcWallEnd(index)) {
+      // Bogenwand-Ende ([T2]): der rohe Cursor legt nur die Seite fest, die Länge der Kern (auch über dem Halbkreis).
+      applyGrip(index, gripDragInfoRef.current?.raw ?? pt, length);
     } else applyGrip(index, pt);
   };
 
@@ -868,7 +873,7 @@ export function useGripEditing(opts: {
 
   // Editier-Dispatch: bei gewählter Decke auf die Decken-Aktionen umleiten, sonst
   // auf die Wand/2D-Aktionen. So teilen Plan- UND 3D-Griffe denselben Pfad.
-  const applyGrip = (index: number, pt: Vec2) => {
+  const applyGrip = (index: number, pt: Vec2, arcLength?: number) => {
     // Öffnung: den gezogenen Punkt auf die Wandachse projizieren → neue
     // `position` (Abstand des ersten Pfostens vom Wand-Start), sodass die
     // Öffnung entlang der Wand gleitet. Griff sitzt in der Öffnungsmitte, daher
@@ -940,11 +945,11 @@ export function useGripEditing(opts: {
       if (wId && !dId && local <= 1) {
         const w = project.walls.find((x) => x.id === wId);
         if (w && !w.locked) {
-          pendingWallGripRef.current = { wallId: wId, localIndex: local, flat: index, pt };
+          pendingWallGripRef.current = { wallId: wId, localIndex: local, flat: index, pt, arcLength };
           return;
         }
       }
-      moveGripOf(dId, wId, local, pt, scaleDenominator, gripFreeRef.current);
+      moveGripOf(dId, wId, local, pt, scaleDenominator, gripFreeRef.current, arcLength);
     }
   };
 
@@ -967,13 +972,20 @@ export function useGripEditing(opts: {
       if (!w) return [];
       const wt = project.wallTypes.find((t) => t.id === w.wallTypeId);
       const th = wt ? wallTypeThickness(wt) : 0.2;
-      const a = pw.localIndex === 0 ? pw.pt : w.start;
-      const b = pw.localIndex === 0 ? w.end : pw.pt;
-      // Bogenwand: der Bogen behält seinen Öffnungswinkel (Bulge), Vorschau als Band samt Achse.
+      let a = pw.localIndex === 0 ? pw.pt : w.start;
+      let b = pw.localIndex === 0 ? w.end : pw.pt;
+      // Bogenwand ([T2]): der Endpunkt läuft auf dem Kreis, der Bulge folgt (Kern `gripArcWallResize`);
+      // Vorschau als Band samt Achse.
       if (w.bulge) {
-        const arc = wallArcBand(a, b, w.bulge, th);
+        const nw = pw.localIndex <= 1 ? gripArcWallResize(w, pw.localIndex as 0 | 1, pw.arcLength, pw.pt) : null;
+        if (nw) {
+          a = nw.start;
+          b = nw.end;
+        }
+        const bulge = nw?.bulge ?? w.bulge;
+        const arc = wallArcBand(a, b, bulge, th);
         if (arc) return [{ kind: "poly", pts: arc.band, closed: true }, { kind: "poly", pts: arc.axis, closed: false }];
-        return [{ kind: "poly", pts: bulgeArcPoints(a, b, w.bulge), closed: false }];
+        return [{ kind: "poly", pts: bulgeArcPoints(a, b, bulge), closed: false }];
       }
       return [
         { kind: "poly", pts: wallCorners(a, b, th), closed: true },
@@ -1006,7 +1018,7 @@ export function useGripEditing(opts: {
     }
     const pw = pendingWallGripRef.current;
     pendingWallGripRef.current = null;
-    if (pw) moveGripOf(null, pw.wallId, pw.localIndex, pw.pt, scaleDenominator);
+    if (pw) moveGripOf(null, pw.wallId, pw.localIndex, pw.pt, scaleDenominator, undefined, pw.arcLength);
     const pend = pendingGripRef.current;
     pendingGripRef.current = null;
     if (pend) moveGripOf(pend.drawingId, null, pend.localIndex, pend.pt, scaleDenominator);
