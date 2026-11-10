@@ -71,7 +71,7 @@ use acadrust::entities::{
 use acadrust::tables::{BlockRecord, LineType, LineTypeElement, TextStyle};
 use acadrust::types::Handle;
 use acadrust::{
-    Arc, CadDocument, Circle, Color, DwgWriter, DxfVersion, DxfWriter, EntityType, Layer, Line,
+    Arc, CadDocument, Circle, Color, DwgWriter, DxfVersion, DxfWriter, Ellipse, EntityType, Layer, Line,
     LineWeight, LwPolyline, Text, Vector2, Vector3,
 };
 
@@ -111,6 +111,12 @@ pub const REC_LINE_ENDS: f64 = 23.0;
 /// [169] LWPOLYLINE mit Bögen: `[Ebene, geschlossen, n, n × (x, y, bulge)]` (Bulge = tan(Winkel/4), positiv
 /// gegen den Uhrzeiger; Kern `plan/arc_fit.rs`).
 pub const REC_POLYLINE_BULGE: f64 = 24.0;
+/// [169] HATCH mit Bögen im Rand: wie [`REC_HATCH`], Randpunkte als `n × (x, y, bulge)` (Polylinien-Rand mit
+/// Bulges, Kern `plan/arc_fit.rs::ring_bulges`).
+pub const REC_HATCH_BULGE: f64 = 25.0;
+/// [169] Ellipsenbogen: `[Ebene, Mitte x, y, Hauptachse x, y, Verhältnis, Startparameter, Endparameter]`
+/// (Parameter gegen den Uhrzeiger, Bogenmass; Kern `plan/arc_fit.rs::pieces`).
+pub const REC_ELLIPSE: f64 = 26.0;
 
 /// DXF-Ausgabeversion (s. Kopf).
 pub const DXF_VERSION: DxfVersion = DxfVersion::AC1032;
@@ -226,8 +232,9 @@ const MAX_HATCH_FAMILIES: usize = 8;
 const MAX_HATCH_DASHES: usize = 16;
 
 /// HATCH aus Rand und Muster. `families` = (Winkel in rad, Linienabstand in m); `dashes` = Strichmuster
-/// in m (an, aus, …), leer = durchgezogen. Leere Schar-Liste = Vollfüllung.
-fn make_hatch(pts: &[f64], solid: bool, families: &[(f64, f64)], dashes: &[f64]) -> Hatch {
+/// in m (an, aus, …), leer = durchgezogen. Leere Schar-Liste = Vollfüllung. `stride` = Zahlen je Randpunkt
+/// (2: x, y; 3: x, y, bulge).
+fn make_hatch(pts: &[f64], stride: usize, solid: bool, families: &[(f64, f64)], dashes: &[f64]) -> Hatch {
     let mut hatch = if solid {
         Hatch::solid()
     } else {
@@ -247,17 +254,18 @@ fn make_hatch(pts: &[f64], solid: bool, families: &[(f64, f64)], dashes: &[f64])
         h.pattern_type = HatchPatternType::Custom;
         h
     };
-    add_outer_boundary(&mut hatch, pts);
+    add_outer_boundary(&mut hatch, pts, stride);
     hatch
 }
 
-/// Äusserer Rand als geschlossene Polylinien-Kante.
-fn add_outer_boundary(hatch: &mut Hatch, pts: &[f64]) {
+/// Äusserer Rand als geschlossene Polylinien-Kante; `stride` 3 = mit Bulges (Bögen, [169]).
+fn add_outer_boundary(hatch: &mut Hatch, pts: &[f64], stride: usize) {
     let mut path = BoundaryPath::with_flags(BoundaryPathFlags::from_bits(1 | 2)); // äusserer Rand, Polylinie
-    path.add_edge(BoundaryEdge::Polyline(PolylineEdge::new(
-        pts.chunks_exact(2).map(|p| Vector2::new(p[0], p[1])).collect(),
-        true,
-    )));
+    let mut edge = PolylineEdge::new(Vec::new(), true);
+    for p in pts.chunks_exact(stride) {
+        edge.add_vertex(Vector2::new(p[0], p[1]), if stride >= 3 { p[2] } else { 0.0 });
+    }
+    path.add_edge(BoundaryEdge::Polyline(edge));
     hatch.add_path(path);
 }
 
@@ -274,7 +282,7 @@ fn make_gradient_hatch(pts: &[f64], rgb1: u32, rgb2: u32, angle: f64, radial: bo
     g.add_color(0.0, layer_color(rgb1 as f64));
     g.add_color(1.0, layer_color(rgb2 as f64));
     hatch.gradient_color = g;
-    add_outer_boundary(&mut hatch, pts);
+    add_outer_boundary(&mut hatch, pts, 2);
     hatch
 }
 
@@ -679,7 +687,17 @@ pub fn build_document(flat: &[f64], strings: &str) -> Result<CadDocument, String
                 }
                 EntityType::Text(t)
             })
-        } else if tag == REC_HATCH {
+        } else if tag == REC_ELLIPSE {
+            let v = r.take(7)?;
+            let major = v[2].hypot(v[3]);
+            (all_finite(v) && major > 1e-9 && v[4] > 1e-6 && v[4] <= 1.0 && (v[6] - v[5]).abs() > 1e-9).then(|| {
+                let mut e = Ellipse::from_center_axes(Vector3::new(v[0], v[1], 0.0), Vector3::new(v[2], v[3], 0.0), v[4]);
+                e.start_parameter = v[5];
+                e.end_parameter = v[6];
+                EntityType::Ellipse(e)
+            })
+        } else if tag == REC_HATCH || tag == REC_HATCH_BULGE {
+            let stride = if tag == REC_HATCH_BULGE { 3 } else { 2 };
             let mode = r.f()?;
             let rgb = r.f()?;
             let n_dash = r.idx()?;
@@ -693,11 +711,11 @@ pub fn build_document(flat: &[f64], strings: &str) -> Result<CadDocument, String
             }
             let fam = r.take(n_fam.checked_mul(2).ok_or("Überlauf")?)?;
             let n = r.idx()?;
-            let pts = r.take(n.checked_mul(2).ok_or("Überlauf")?)?;
+            let pts = r.take(n.checked_mul(stride).ok_or("Überlauf")?)?;
             let solid = mode == 0.0;
             let families: Vec<(f64, f64)> = fam.chunks_exact(2).map(|f| (f[0], f[1])).collect();
             // Muster nur mit endlichen, positiven Abständen und Strichen (sonst rechnet CAD ins Leere).
-            let valid = n >= 3
+            let valid = n >= if stride == 3 { 2 } else { 3 }
                 && all_finite(pts)
                 && (solid
                     || (!families.is_empty()
@@ -705,7 +723,7 @@ pub fn build_document(flat: &[f64], strings: &str) -> Result<CadDocument, String
                         && dashes.iter().all(|d| d.is_finite() && *d >= 0.0)
                         && (dashes.is_empty() || dashes.iter().sum::<f64>() > 1e-9)));
             valid.then(|| {
-                let mut h = make_hatch(pts, solid, &families, dashes);
+                let mut h = make_hatch(pts, stride, solid, &families, dashes);
                 if rgb.is_finite() && (0.0..=16_777_215.0).contains(&rgb) {
                     h.common.color = layer_color(rgb);
                 }
@@ -781,7 +799,7 @@ pub fn build_document(flat: &[f64], strings: &str) -> Result<CadDocument, String
             e.common_mut().layer = layer;
             // Linientyp nur auf Linien-artigen Entitäten (Schraffur/Text/Block tragen ihn nicht).
             if !cur_ltype.is_empty()
-                && matches!(e, EntityType::Line(_) | EntityType::LwPolyline(_) | EntityType::Arc(_) | EntityType::Circle(_))
+                && matches!(e, EntityType::Line(_) | EntityType::LwPolyline(_) | EntityType::Arc(_) | EntityType::Circle(_) | EntityType::Ellipse(_))
             {
                 e.common_mut().linetype = cur_ltype.clone();
             }
@@ -1104,6 +1122,59 @@ mod tests {
         let bs: Vec<f64> = pl.vertices.iter().map(|v| v.bulge).collect();
         assert!((bs[0] - b).abs() < 1e-9 && bs[1] == 0.0 && (bs[2] + b).abs() < 1e-9 && bs[3] == 0.0, "{bs:?}");
         assert!(export_dxf(&[FLAT_VERSION, REC_LAYER, 0.0, -1.0, 25.0, REC_POLYLINE_BULGE, 0.0, 0.0, 2.0, 0.0, 0.0], "a").is_err());
+    }
+
+    /// [169] HATCH mit Bögen im Rand (Kreis als zwei Halbkreise, Band mit Bulges): Bulges bleiben in DXF und DWG
+    /// erhalten; zu wenige Punkte oder NaN → keine Schraffur.
+    #[test]
+    fn schraffur_rand_mit_bulges() {
+        let mut flat = vec![FLAT_VERSION, REC_LAYER, 0.0, -1.0, 25.0];
+        // Vollfüllung, Kreis r = 0.5 um (2, 3): zwei Ecken, Bulge 1.
+        flat.extend([REC_HATCH_BULGE, 0.0, 0.0, -1.0, 0.0, 0.0, 2.0, 2.5, 3.0, 1.0, 1.5, 3.0, 1.0]);
+        // Muster (eine Schar), Band mit Bogen: vier Ecken.
+        let b = (std::f64::consts::PI / 8.0).tan();
+        flat.extend([REC_HATCH_BULGE, 0.0, 1.0, -1.0, 0.0, 1.0, 0.0, 0.1, 4.0, 5.0, 0.0, b, 0.0, 5.0, 0.0, 0.0, 4.7, -b, 4.7, 0.0, 0.0]);
+        // Unsinn: eine Ecke, NaN.
+        flat.extend([REC_HATCH_BULGE, 0.0, 0.0, -1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0]);
+        flat.extend([REC_HATCH_BULGE, 0.0, 0.0, -1.0, 0.0, 0.0, 2.0, 0.0, f64::NAN, 1.0, 1.0, 0.0, 1.0]);
+        let bulges = |doc: &CadDocument| -> Vec<Vec<f64>> {
+            doc.entities()
+                .filter_map(|e| if let EntityType::Hatch(h) = e { Some(h.clone()) } else { None })
+                .map(|h| match &h.paths[0].edges[0] {
+                    BoundaryEdge::Polyline(p) => p.vertices.iter().map(|v| v.z).collect(),
+                    e => panic!("Randkante {e:?}"),
+                })
+                .collect()
+        };
+        let text = String::from_utf8(export_dxf(&flat, "a").unwrap()).unwrap();
+        assert!(text.lines().map(str::trim).collect::<Vec<_>>().windows(2).any(|w| w[0] == "42" && w[1].starts_with('1')), "Bulge-Gruppe 42");
+        for doc in [read_dxf(text.into_bytes()), read_dwg(export_dwg(&flat, "a").unwrap())] {
+            let bs = bulges(&doc);
+            assert_eq!(bs.len(), 2, "{bs:?}");
+            assert_eq!(bs[0], vec![1.0, 1.0]);
+            assert!((bs[1][0] - b).abs() < 1e-9 && (bs[1][2] + b).abs() < 1e-9, "{bs:?}");
+        }
+    }
+
+    /// [169] ELLIPSE (Ellipsenbogen eines schräg gesehenen Rundbogenfensters): Mitte, Hauptachse, Verhältnis und
+    /// Parameter bleiben in DXF und DWG erhalten; Unsinn (Verhältnis > 1, Nullachse) entfällt.
+    #[test]
+    fn ellipsenbogen() {
+        let h = std::f64::consts::FRAC_PI_2;
+        let mut flat = vec![FLAT_VERSION, REC_LAYER, 0.0, -1.0, 25.0];
+        flat.extend([REC_ELLIPSE, 0.0, 3.46, 2.0, 0.0, 0.6, 0.766, -h, h]);
+        flat.extend([REC_ELLIPSE, 0.0, 0.0, 0.0, 1.0, 0.0, 1.5, 0.0, 1.0]);
+        flat.extend([REC_ELLIPSE, 0.0, 0.0, 0.0, 0.0, 0.0, 0.5, 0.0, 1.0]);
+        let text = String::from_utf8(export_dxf(&flat, "a").unwrap()).unwrap();
+        assert_eq!(text.lines().map(str::trim).filter(|l| *l == "ELLIPSE").count(), 1);
+        for doc in [read_dxf(text.into_bytes()), read_dwg(export_dwg(&flat, "a").unwrap())] {
+            let es: Vec<Ellipse> = doc.entities().filter_map(|e| if let EntityType::Ellipse(x) = e { Some(x.clone()) } else { None }).collect();
+            assert_eq!(es.len(), 1);
+            let e = &es[0];
+            assert!((e.center.x - 3.46).abs() < 1e-9 && (e.major_axis.y - 0.6).abs() < 1e-9 && (e.minor_axis_ratio - 0.766).abs() < 1e-9);
+            assert!((e.start_parameter + h).abs() < 1e-9 && (e.end_parameter - h).abs() < 1e-9, "{e:?}");
+        }
+        assert!(export_dxf(&[FLAT_VERSION, REC_LAYER, 0.0, -1.0, 25.0, REC_ELLIPSE, 0.0, 1.0, 2.0], "a").is_err());
     }
 
     #[test]

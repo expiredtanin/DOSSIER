@@ -202,6 +202,11 @@ pub struct WallInput {
     pub start_cut: Option<[f32; 4]>,
     #[serde(default, rename = "endCut")]
     pub end_cut: Option<[f32; 4]>,
+    /// [169] Sehnen-Teilkörper einer Bogenwand: Mittelpunkt des Bogens (Grundriss-Meter). Die Mantelflächen
+    /// (Normale höchstens [`crate::mesh::ARC_CREASE_DEG`] von der Radialen) tragen dann die radiale Normale je
+    /// Ecke — glatt schattiert wie die runde Stütze, ohne Facetten; Stirnen, Laibungen, Deckel bleiben kantig.
+    #[serde(default, rename = "arcCenter", skip_serializing_if = "Option::is_none")]
+    pub arc_center: Option<[f32; 2]>,
 }
 
 /// Ein rechteckiges Loch (Fenster/Tuer) in EINEM Wandkoerper. Siehe

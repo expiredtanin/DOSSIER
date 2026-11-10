@@ -161,8 +161,28 @@ pub(super) fn projection_edges(p: &Project, plane: &Plane, walls_r: &[RWall], wi
     for (ri, roof) in p.roofs.as_deref().unwrap_or(&[]).iter().enumerate() {
         owners.push((Kind::Roof, ri));
         let owner = owners.len() as u32 - 1;
+        // [169] Senkrechte Stirnflächen eines gekrümmten Dachrands (Erker) bilden eine Glättungsgruppe; die
+        // Dachflächen bleiben ungeglättet.
+        let first = faces.len();
+        let roof_group = group;
+        group += 1;
+        let fascia_smooth = |faces: &mut Vec<hlr::Face>| {
+            for f in &mut faces[first..] {
+                // Newell-Normale in Ansichtskoordinaten (u, Höhe, Tiefe): senkrecht = ohne Höhenanteil.
+                let n = f.pts.len();
+                let nm = (0..n).fold([0.0f64; 3], |m, k| {
+                    let (a, b) = (f.pts[k], f.pts[(k + 1) % n]);
+                    [m[0] + (a[1] - b[1]) * (a[2] + b[2]), m[1] + (a[2] - b[2]) * (a[0] + b[0]), m[2] + (a[0] - b[0]) * (a[1] + b[1])]
+                });
+                let l = crate::jsmath::hypot(&nm);
+                if l > 1e-12 && nm[1].abs() < 1e-9 * l {
+                    f.smooth = roof_group;
+                }
+            }
+        };
         if let Some(solids) = crate::roof_assembly::roof_solids(p, ri) {
             model_tris(&mut faces, &solids.skin.positions, &mut solids.skin.indices.iter().map(|&i| i as usize), owner, 0, &mut push);
+            fascia_smooth(&mut faces);
             continue;
         }
         // Dachhaut ohne Dicke: beidseitig.
@@ -176,6 +196,7 @@ pub(super) fn projection_edges(p: &Project, plane: &Plane, walls_r: &[RWall], wi
                 push(&mut faces, &w, [0.0; 3], owner, 0, true);
             }
         }
+        fascia_smooth(&mut faces);
     }
     for b in bodies {
         owners.push((Kind::Body, b.index));

@@ -77,3 +77,41 @@ fn bogenwand_kanten_als_boegen() {
     let bulges: Vec<f64> = (0..n).map(|k| f.nums[i + 4 + 3 * k + 2]).collect();
     assert!(bulges.iter().any(|b| (b.abs() - (std::f64::consts::PI / 8.0).tan()).abs() < 1e-6), "{bulges:?}");
 }
+
+/// Schraffuren mit Bögen im Rand (fileio Satz 25) aus dem flachen DXF-Puffer: je Treffer die Bulges.
+fn hatch_bulges(nums: &[f64]) -> Vec<Vec<f64>> {
+    let mut out = Vec::new();
+    for i in 0..nums.len() {
+        if nums[i] != 25.0 || i + 5 >= nums.len() || !(nums[i + 2] == 0.0 || nums[i + 2] == 1.0) {
+            continue;
+        }
+        let nd = nums[i + 4];
+        if !(nd >= 0.0 && nd <= 16.0 && nd.fract() == 0.0) {
+            continue;
+        }
+        let f = i + 5 + nd as usize;
+        let Some(&nf) = nums.get(f) else { continue };
+        if !(nf >= 0.0 && nf <= 8.0 && nf.fract() == 0.0) {
+            continue;
+        }
+        let at = f + 1 + 2 * nf as usize;
+        let Some(&n) = nums.get(at) else { continue };
+        if !(n >= 2.0 && n.fract() == 0.0) || at + 1 + 3 * n as usize > nums.len() {
+            continue;
+        }
+        out.push((0..n as usize).map(|k| nums[at + 1 + 3 * k + 2]).collect());
+    }
+    out
+}
+
+/// [169] DXF/DWG: Schraffur der runden Stütze mit Bögen im Rand (Kreis als zwei Halbkreise) statt 48-Eck. Die
+/// Bogenwand schraffiert polar ([T2]) und schreibt dafür Polylinien, keine HATCH.
+#[test]
+fn schraffur_raender_mit_boegen() {
+    let p = project(2.6);
+    let b = buf(&p, 50.0);
+    let o = super::dxf::DxfOptions { scale: 50.0, include_hatches: true, dim_cm: false, paper_layout: false, bounds: [-1.0, -1.0, 9.0, 5.0], default_font: "Arial".into(), floor: "eg".into(), table_labels: String::new() };
+    let f = super::dxf::collect(&mut parts(&b), &p, &o).unwrap();
+    let hs = hatch_bulges(&f.nums);
+    assert_eq!(hs, vec![vec![1.0, 1.0]]);
+}

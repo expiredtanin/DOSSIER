@@ -51,6 +51,9 @@ pub struct RWall {
     /// keine sichtbare Stirnfläche (Ansicht).
     #[serde(skip)]
     pub joint: [bool; 2],
+    /// [169] Sehnen-Teilkörper einer Bogenwand: Mittelpunkt des Bogens (render3d `arcCenter`, glatt schattiert).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub arc_center: Option<[f64; 2]>,
 }
 
 /// Textur-Karten-URLs der Bauteile in der Reihenfolge des ersten Auftretens: Wandtypen, dann
@@ -721,6 +724,7 @@ pub(crate) fn wall_pieces(p: &Project, maps: &[String], wall: &Wall, ctx: &Floor
                     let j = arc.map_or([false; 2], |a| [inner_joint(&a, wall, &keep, piece.start), inner_joint(&a, wall, &keep, piece.end)]);
                     [j[0] || piece.joint[0], j[1] || piece.joint[1]]
                 },
+                arc_center: arc.map(|a| [a.center.x, a.center.y]),
             });
         }
         if let (Some(a), false) = (arc, pocket_cuts.is_empty()) {

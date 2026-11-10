@@ -18,7 +18,7 @@ fn l_wall_scene() -> (Vec<WallInput>, Vec<SlabInput>) {
         // liegt fuer diese Blickrichtung parallel zur Achse -> Elevations-Fall,
         // siehe section.rs-Moduldoc "Oeffnungen"). Fenster von Y=1.0 bis 2.0,
         // Bruestung 0.8 m, Fensterhoehe 1.0 m (Sturz ab Y-Hoehe 1.8).
-        WallInput {
+        WallInput { arc_center: None,
             top_drop: [0.0, 0.0],
             top_plane: None,
             start: [0.0, 0.0],
@@ -41,7 +41,7 @@ fn l_wall_scene() -> (Vec<WallInput>, Vec<SlabInput>) {
             start_cut: None,
             end_cut: None,
         },
-        WallInput {
+        WallInput { arc_center: None,
             top_drop: [0.0, 0.0],
             top_plane: None,
             start: [0.0, 3.0],
@@ -64,7 +64,7 @@ fn l_wall_scene() -> (Vec<WallInput>, Vec<SlabInput>) {
         // Grundriss-Y-Bereich des Fensters (1.2..1.8, sicher innerhalb 1.0..2.0)
         // -- demonstriert den Durchblick: sichtbar im Fensterband (Hoehe
         // 0.8..1.8), verdeckt darueber/darunter.
-        WallInput {
+        WallInput { arc_center: None,
             top_drop: [0.0, 0.0],
             top_plane: None,
             start: [1.5, 1.2],

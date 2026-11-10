@@ -368,6 +368,47 @@ fn formoeffnung_und_dachfenster_in_der_ansicht() {
     assert!(first_df > last_roof, "Dachfenster vor der Dachfläche gezeichnet");
 }
 
+/// [169] Rundbogen- und Rundfenster in einer Wand schräg zur Ansicht (40°): die Projektion ist eine Ellipse mit
+/// waagrechter Halbachse r · cos 40°. Die Bogenerkennung der Ausgaben findet sie als Ellipsenbogen (SVG `A` mit
+/// zwei Radien, DXF ELLIPSE); senkrecht zur Ansicht bleibt es ein Kreisbogen.
+#[test]
+fn schraeges_rundbogenfenster_als_ellipse() {
+    use crate::plan::arc_fit::{fit, Seg, Shape, TOL};
+    let mut p = sample();
+    for o in p.openings.iter_mut().flatten().filter(|o| o.id == "O1") {
+        o.shape = Some(OpeningShape::Rundbogen);
+    }
+    let ell_of = |prims: &[Primitive]| -> Vec<(f64, f64)> {
+        prims
+            .iter()
+            .filter_map(|pr| if let Primitive::Polygon { pts, opening_id: Some(o), .. } = pr { (o == "O1").then_some(pts) } else { None })
+            .filter_map(|pts| {
+                let v: Vec<crate::hatch::V2> = pts.iter().map(|q| crate::hatch::V2 { x: q.x, y: q.y }).collect();
+                match fit(&v, true, TOL)? {
+                    Shape::Path { segs, .. } => segs.iter().find_map(|g| match *g {
+                        Seg::Ell { rx, ry, .. } => Some((rx, ry)),
+                        Seg::Arc { r, .. } => Some((r, r)),
+                        _ => None,
+                    }),
+                    Shape::Circle { r, .. } => Some((r, r)),
+                }
+            })
+            .collect()
+    };
+    let view = |line: [Vec2; 2]| {
+        let level = LevelSpec { kind: "elevation".into(), line: Some(line), direction_sign: Some(1.0), ..Default::default() };
+        elevation_primitives(&p, &level, false, false, &Visibility::default(), 50.0).unwrap().unwrap().0
+    };
+    // Gerade von vorn: Kreisbögen (rx = ry).
+    let front = ell_of(&view([Vec2 { x: -1.0, y: -2.0 }, Vec2 { x: 6.0, y: -2.0 }]));
+    assert!(!front.is_empty() && front.iter().all(|(rx, ry)| (rx - ry).abs() < 1e-6), "{front:?}");
+    // Schräg: Ellipsenbögen mit rx / ry = cos 40°.
+    let a = 40f64.to_radians();
+    let oblique = ell_of(&view([Vec2 { x: 2.0, y: -6.0 }, Vec2 { x: 2.0 + 8.0 * a.cos(), y: -6.0 + 8.0 * a.sin() }]));
+    assert!(!oblique.is_empty(), "kein Bogen erkannt");
+    assert!(oblique.iter().all(|(rx, ry)| (rx / ry - a.cos()).abs() < 1e-6), "{oblique:?}");
+}
+
 /// [105] Umfassungszarge in der Ansicht: Spiegel über die Rohbaukante hinaus (Rahmen breiter als
 /// die Öffnung), Blatt um die Zarge eingerückt.
 #[test]
@@ -524,6 +565,45 @@ fn flachdach_zeigt_stirn_in_der_ansicht() {
         for z in [lo, hi] {
             assert!(lines.iter().any(|(a, b)| (a.y - z).abs() < 1e-6 && (b.y - z).abs() < 1e-6 && (a.x - b.x).abs() > 7.9), "{id}: Kante bei {z} fehlt");
         }
+    }
+}
+
+/// [169] Flachdach mit gekrümmtem Rand (Erker als Vieleck): die Stirn zeigt in der Ansicht keine senkrechten
+/// Fugen an den Facetten, nur ihre Ober- und Unterkante und die echten Ecken.
+#[test]
+fn dachstirn_bogen_ohne_facettenfugen() {
+    let mut outline = vec![serde_json::json!({"x": 0, "y": 8}), serde_json::json!({"x": 0, "y": 0}), serde_json::json!({"x": 2, "y": 0})];
+    for k in 1..12 {
+        let t = std::f64::consts::PI * (1.0 + k as f64 / 12.0);
+        outline.push(serde_json::json!({"x": 5.0 + 3.0 * t.cos(), "y": 3.0 * t.sin()}));
+    }
+    outline.extend([serde_json::json!({"x": 8, "y": 0}), serde_json::json!({"x": 10, "y": 0}), serde_json::json!({"x": 10, "y": 8})]);
+    let p = proj132(
+        serde_json::json!([{"id": "R", "type": "roof", "floorId": "F", "categoryCode": "35", "outline": outline,
+            "shape": "flach", "pitchDeg": 0, "overhang": 0, "ridgeAxis": "x", "baseElevation": 3.0, "thickness": 0.4}]),
+        serde_json::json!([]),
+    );
+    let prims = view132(&p, "s");
+    // Ansichts-x = Welt-x + 2: Bogen von 4 bis 10; innen keine senkrechten Fugen.
+    let inner: Vec<f64> = outline_lines(&prims).iter().filter(|(a, b)| (a.x - b.x).abs() < 1e-6 && a.x > 4.2 && a.x < 9.8).map(|(a, _)| a.x).collect();
+    assert!(inner.is_empty(), "Facetten-Fugen: {inner:?}");
+    // Ober- und Unterkante der Stirn bleiben.
+    let lines = outline_lines(&prims);
+    let (lo, hi) = prims.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), q| match q {
+        Primitive::Polygon { pts, roof_id: Some(_), .. } => pts.iter().fold((lo, hi), |(lo, hi), v| (lo.min(v.y), hi.max(v.y))),
+        _ => (lo, hi),
+    });
+    assert!((hi - lo - 0.4).abs() < 1e-6, "{lo}..{hi}");
+    for z in [lo, hi] {
+        let mut segs: Vec<(f64, f64)> = lines.iter().filter(|(a, b)| (a.y - z).abs() < 1e-6 && (b.y - z).abs() < 1e-6).map(|(a, b)| (a.x.min(b.x), a.x.max(b.x))).collect();
+        segs.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let mut reach = 4.0;
+        for (x0, x1) in &segs {
+            if *x0 <= reach + 1e-6 {
+                reach = reach.max(*x1);
+            }
+        }
+        assert!(reach >= 10.0 - 1e-6, "Kante bei {z} endet bei {reach}: {segs:?}");
     }
 }
 

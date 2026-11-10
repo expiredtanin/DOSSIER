@@ -73,7 +73,7 @@ mod tests {
 
     /// Bequemer Bau einer achsparallelen Wand entlang +X.
     fn wall_x(len: f32, thickness: f32, height: f32) -> WallInput {
-        WallInput {
+        WallInput { arc_center: None,
             top_drop: [0.0, 0.0],
             top_plane: None,
             start: [0.0, 0.0],
@@ -308,7 +308,7 @@ mod tests {
     fn mehrere_waende_addieren_sich() {
         let mesh = build_walls_mesh(&[
             wall_x(3.0, 0.2, 2.5),
-            WallInput {
+            WallInput { arc_center: None,
             top_drop: [0.0, 0.0],
             top_plane: None,
                 start: [3.0, 0.0],
@@ -394,7 +394,7 @@ mod tests {
     #[test]
     fn diagonale_wand_hat_gleiche_zaehlung() {
         // Auch nicht-achsparallele Waende extrudieren korrekt (nur andere Ecken).
-        let w = WallInput {
+        let w = WallInput { arc_center: None,
             top_drop: [0.0, 0.0],
             top_plane: None,
             start: [0.0, 0.0],
@@ -423,7 +423,7 @@ mod tests {
     #[test]
     fn degenerierte_wand_erzeugt_nichts() {
         // Start == Ende -> keine Richtung -> uebersprungen (kein Absturz).
-        let w = WallInput {
+        let w = WallInput { arc_center: None,
             top_drop: [0.0, 0.0],
             top_plane: None,
             start: [1.0, 1.0],
@@ -644,7 +644,7 @@ mod tests {
         // anderen ueber den Knoten hinaus); MIT Gehrung muessen alle Vertices IM
         // Eckbereich exakt auf der 45-Grad-Gehrungslinie |x| == |z| liegen —
         // weder darueber hinaus (Ueberstand) noch darunter (Spalt).
-        let a = WallInput {
+        let a = WallInput { arc_center: None,
             top_drop: [0.0, 0.0],
             top_plane: None,
             start: [0.0, 0.0],
@@ -662,7 +662,7 @@ mod tests {
             start_cut: None,
             end_cut: None,
         };
-        let b = WallInput {
+        let b = WallInput { arc_center: None,
             top_drop: [0.0, 0.0],
             top_plane: None,
             start: [0.0, 0.0],
@@ -729,7 +729,7 @@ mod tests {
         // Drei Wandenden treffen sich im selben Knoten (T-Stoss) -> gemaess
         // Moduldoc/`joins.ts` bewusst NICHT gehrt (mehrdeutig), alle drei bleiben
         // rechtwinklig. Regressions-Absicherung: keine Panik, stabile Zaehlung.
-        let mk = |s: [f32; 2], e: [f32; 2]| WallInput {
+        let mk = |s: [f32; 2], e: [f32; 2]| WallInput { arc_center: None,
             top_drop: [0.0, 0.0],
             top_plane: None,
             start: s,
@@ -765,7 +765,7 @@ mod tests {
         // beide Geschosse zusammen liefern exakt dieselbe Gehrung wie ein
         // einzelnes Geschoss fuer sich (Vertex-Zaehlung + Eck-Vertices je
         // Geschoss weiterhin auf der 45-Grad-Linie relativ zu SEINER Basis).
-        let mk = |s: [f32; 2], e: [f32; 2], base: f32| WallInput {
+        let mk = |s: [f32; 2], e: [f32; 2], base: f32| WallInput { arc_center: None,
             top_drop: [0.0, 0.0],
             top_plane: None,
             start: s,
@@ -861,7 +861,7 @@ mod tests {
                 WallLayer { thickness: 0.15, color: [0.6, 0.3, 0.2] },
             ])
         };
-        let a = WallInput {
+        let a = WallInput { arc_center: None,
             top_drop: [0.0, 0.0],
             top_plane: None,
             start: [0.0, 0.0],

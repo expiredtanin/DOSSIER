@@ -100,6 +100,45 @@ pub fn extrude_wall(mesh: &mut Mesh, wall: &WallInput) {
 /// Sturz) zerlegt, mit `layers` zusaetzlich in Schicht-Baender quer zur
 /// Dicke — siehe Moduldoc.
 pub(crate) fn extrude_wall_with_miters(mesh: &mut Mesh, wall: &WallInput, miters: WallMiters) {
+    let first = mesh.vertex_count();
+    extrude_wall_flat(mesh, wall, miters);
+    if let Some(c) = wall.arc_center {
+        smooth_arc_normals(mesh, first, c);
+    }
+}
+
+/// [169] Knickwinkel (Grad) der glatten Bogenwand: wie die runde Stütze (Kern `model3d/columns.rs`).
+pub const ARC_CREASE_DEG: f32 = 30.0;
+
+/// [169] Bogenwand glatt schattieren: Ecken ab `first` mit waagrechter Normale, die hoechstens
+/// [`ARC_CREASE_DEG`] von der Radialen um `c` (Grundriss, Welt x/z) abweicht, bekommen die radiale Normale
+/// (aussen bzw. innen nach ihrer Flaechennormale). Nachbar-Sehnen treffen sich so mit derselben Normale —
+/// keine Facetten; Stirnen, Laibungen, Deckel und Boden bleiben kantig.
+fn smooth_arc_normals(mesh: &mut Mesh, first: usize, c: Point2) {
+    let cos = ARC_CREASE_DEG.to_radians().cos();
+    let count = mesh.vertex_count();
+    for v in first..count {
+        let o = v * FLOATS_PER_VERTEX;
+        let (px, pz) = (mesh.verts[o], mesh.verts[o + 2]);
+        let (nx, ny, nz) = (mesh.verts[o + 3], mesh.verts[o + 4], mesh.verts[o + 5]);
+        let (rx, rz) = (px - c[0], pz - c[1]);
+        let rl = (rx * rx + rz * rz).sqrt();
+        let nl = (nx * nx + nz * nz).sqrt();
+        if !(rl > 1e-6) || !(nl > 1e-6) || ny.abs() > 1e-3 * nl.max(1e-3) {
+            continue;
+        }
+        let d = (nx * rx + nz * rz) / (nl * rl);
+        if d.abs() < cos {
+            continue;
+        }
+        let s = d.signum() / rl;
+        mesh.verts[o + 3] = rx * s;
+        mesh.verts[o + 4] = 0.0;
+        mesh.verts[o + 5] = rz * s;
+    }
+}
+
+fn extrude_wall_flat(mesh: &mut Mesh, wall: &WallInput, miters: WallMiters) {
     let n = left_normal(wall.start, wall.end);
     // Degenerierte Wand (Start == Ende) ueberspringen.
     if n == [0.0, 0.0] {
@@ -1793,6 +1832,51 @@ mod tests {
         // Erstes emittiertes Dreieck (Vorderseite a,b,c) — dritter Vertex (c).
         let base = 2 * FLOATS_PER_VERTEX;
         assert_eq!(&mesh.verts[base..base + 3], &[2.0, 4.0, -3.0]);
+    }
+
+    /// [169] Bogenwand aus zwei Sehnen-Teilwänden (r = 4 um den Ursprung, je 7.5°): mit `arcCenter` tragen die
+    /// Mantelecken die radiale Normale (an der gemeinsamen Fuge beider Teile dieselbe), Deckel und Stirnen
+    /// bleiben kantig; ohne `arcCenter` je Sehne die flache Normale.
+    #[test]
+    fn bogenwand_glatt_schattiert() {
+        let p = |deg: f32| [4.0 * deg.to_radians().cos(), 4.0 * deg.to_radians().sin()];
+        let wall = |a: f32, b: f32, c: Option<[f32; 2]>| -> WallInput {
+            let mut w: WallInput = serde_json::from_str(r#"{"start":[0,0],"end":[1,0],"thickness":0.2,"height":2.5}"#).unwrap();
+            w.start = p(a);
+            w.end = p(b);
+            w.arc_center = c;
+            w
+        };
+        let normals_at = |m: &Mesh, q: [f32; 2], r: f32| -> Vec<[f32; 3]> {
+            (0..m.vertex_count())
+                .filter_map(|v| {
+                    let o = v * FLOATS_PER_VERTEX;
+                    let x = &m.verts[o..o + 6];
+                    let rr = (x[0] * x[0] + x[2] * x[2]).sqrt();
+                    ((x[0] * q[1] - x[2] * q[0]).abs() < 1e-4 && (rr - r).abs() < 1e-3 && x[1] > 0.1 && x[4].abs() < 0.5 && (x[3] * q[0] + x[5] * q[1]).abs() > 0.5).then_some([x[3], x[4], x[5]])
+                })
+                .collect()
+        };
+        let smooth = build_walls_mesh(&[wall(0.0, 7.5, Some([0.0, 0.0])), wall(7.5, 15.0, Some([0.0, 0.0]))]);
+        let flat = build_walls_mesh(&[wall(0.0, 7.5, None), wall(7.5, 15.0, None)]);
+        // Fuge bei 7.5° auf der Aussenseite (r ≈ 4.1): alle Normalen radial nach aussen.
+        let j = p(7.5);
+        let dir = [j[0] / 4.0, j[1] / 4.0];
+        let ns = normals_at(&smooth, dir, 4.1);
+        assert!(ns.len() >= 2, "{ns:?}");
+        assert!(ns.iter().all(|n| (n[0] - dir[0]).abs() < 1e-5 && n[1] == 0.0 && (n[2] - dir[1]).abs() < 1e-5), "{ns:?}");
+        let nf = normals_at(&flat, dir, 4.1);
+        assert!(nf.iter().any(|n| (n[0] - dir[0]).abs() > 1e-3), "flach: {nf:?}");
+        // Deckel bleibt waagrecht, Geometrie unverändert.
+        assert!((0..smooth.vertex_count()).any(|v| smooth.verts[v * FLOATS_PER_VERTEX + 4] == 1.0));
+        assert_eq!(smooth.vertex_count(), flat.vertex_count());
+        for v in 0..smooth.vertex_count() {
+            let o = v * FLOATS_PER_VERTEX;
+            assert_eq!(smooth.verts[o..o + 3], flat.verts[o..o + 3]);
+        }
+        // JSON: `arcCenter` gelesen, ohne Feld `None`.
+        let w: WallInput = serde_json::from_str(r#"{"start":[0,0],"end":[1,0],"thickness":0.2,"height":2.5,"arcCenter":[1,2]}"#).unwrap();
+        assert_eq!(w.arc_center, Some([1.0, 2.0]));
     }
 
     /// [T4] Zwei Dreiecke mit 10°-Knick, Kante NICHT geteilt (eigene Punkte gleicher Lage): glatt mit
