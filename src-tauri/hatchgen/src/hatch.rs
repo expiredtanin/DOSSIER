@@ -608,7 +608,7 @@ fn band_curve(poly: &[V2], b: &Band, vc: f64, margin: f64, dx: f64, f: impl Fn(f
 /// äussere Tangente verbinden. Obere Bögen sitzen bei `k·P`, untere bei `(k+½)·P`, alle im gleichen
 /// Drehsinn durchlaufen: benachbarte Bögen berühren sich, die Schenkel laufen schräg zurück und kreuzen
 /// sich kurz über der Unterkante (Spiralfeder von der Seite; Vorlage des Maintainers).
-/// Teilung `P` = [`INSULATION_PITCH`] · Dicke · scale. Bögen in Schritten ≤ 5° (so auch DXF-Polylinien).
+/// Teilung `P` = [`INSULATION_PITCH`] · Dicke · scale. Bögen mit Sehnenfehler ≤ [`ARC_SAGITTA_M`] (so auch DXF-Polylinien).
 fn insulation_runs(poly: &[V2], hatch: &Hatch, scale: f64) -> Vec<Run> {
     let Some(b) = band_frame(poly, hatch, scale) else { return Vec::new() };
     let mut runs = Vec::new();
@@ -644,8 +644,15 @@ pub fn band_period(pattern: Pattern, t: f64, scale: f64) -> Option<f64> {
 pub const INSULATION_PITCH: f64 = 0.22;
 /// Abstand der Bögen von den Schichtkanten, Anteil der Dicke (≈ halbe Musterlinie in 1:50).
 const INSULATION_INSET: f64 = 0.008;
-/// Grösster Winkelschritt der Bögen.
-const ARC_STEP_RAD: f64 = 5.0 * PI / 180.0;
+/// [171] Grösster Sehnenfehler der Bögen (Modell-m): 0.5 mm ≙ 0.05 mm Papier bei 1:10, bei 1:50 nur 0.01 mm.
+/// Die kleinen Schlaufen (Radius meist < 3 cm) brauchen so nur 8–12 Punkte je Bogen statt 36 bei festen 5°.
+const ARC_SAGITTA_M: f64 = 0.0005;
+
+/// Winkelschritt eines Bogens vom Radius `r` mit Sehnenfehler ≤ [`ARC_SAGITTA_M`] (höchstens 60°).
+fn arc_step(r: f64) -> f64 {
+    let c = (1.0 - ARC_SAGITTA_M / r).clamp(-1.0, 1.0);
+    (2.0 * c.acos()).clamp(1e-3, PI / 3.0)
+}
 
 /// Eine Dämmschlange im Band (Mitte `vc`, halbe Höhe `h`, Teilung `p`), geclippt. Läuft in −u:
 /// oberer Bogen k im Uhrzeigersinn (links → über die Kante → rechts), Schenkel „/" hinab zum unteren
@@ -661,8 +668,9 @@ fn insulation_snake(poly: &[V2], b: &Band, vc: f64, h: f64, p: f64) -> Vec<Run> 
     let g = jsnum::atan2(p / 2.0, vt - vb);
     let (top_from, top_sweep) = (PI + g, PI + 2.0 * g);
     let (bot_from, bot_sweep) = (-g, PI - 2.0 * g);
-    let n_top = (top_sweep / ARC_STEP_RAD).ceil().max(1.0) as usize;
-    let n_bot = (bot_sweep / ARC_STEP_RAD).ceil().max(1.0) as usize;
+    let step = arc_step(r);
+    let n_top = (top_sweep / step).ceil().max(1.0) as usize;
+    let n_bot = (bot_sweep / step).ceil().max(1.0) as usize;
     let k0 = ((b.u0 - b.ua) / p).floor() - 1.0;
     let mut k = ((b.u1 - b.ua) / p).ceil() + 1.0;
     let mut pts = Vec::new();
@@ -1258,8 +1266,10 @@ mod tests {
         // Bogen liegt an der Kante (knapp innen).
         let (lo, hi) = extent(&runs, |q| q.y);
         assert!(lo > 0.0 && lo < 0.003 && hi < t && hi > t - 0.003, "{lo}..{hi}");
-        // Segmente: Bogenschritte (Sehne ≤ 2r·sin 2.5°) oder lange Schenkel; Schenkel laufen zurück.
-        let chord = 2.0 * r * (2.5f64).to_radians().sin() * 1.001;
+        // Segmente: Bogenschritte (Sehnenfehler ≤ ARC_SAGITTA_M) oder lange Schenkel; Schenkel laufen zurück.
+        let chord = 2.0 * r * (arc_step(r) / 2.0).sin() * 1.001;
+        let per_arc = (PI / arc_step(r)).ceil() as usize;
+        assert!(pts.len() <= (2.0 / p).ceil() as usize * (2 * per_arc + 6), "zu viele Punkte: {}", pts.len());
         let mut legs: usize = 0;
         for w in pts.windows(2) {
             let len = ((w[1].x - w[0].x).powi(2) + (w[1].y - w[0].y).powi(2)).sqrt();

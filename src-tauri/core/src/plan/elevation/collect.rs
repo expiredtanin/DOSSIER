@@ -294,7 +294,12 @@ pub(super) fn extend_wall_corners(p: &Project, rwalls: &mut [RWall], u: (f64, f6
     for (i, id) in ids.iter().enumerate() {
         by_wall.entry(id.as_str()).or_default().push(i);
     }
-    let close = |a: [f64; 2], v: Vec2| (a[0] - v.x).abs() < 1e-6 && (a[1] - v.y).abs() < 1e-6;
+    // [171] Teilkörper einer Wand (unter dem Dach je Schichtlage quer versetzt) beginnen auf der Querlinie durch
+    // den Wandanfang, nicht genau in ihm: alle verlängern, die dort liegen.
+    let close = |a: [f64; 2], v: Vec2, ax: (f64, f64), ht: f64| {
+        let (rx, ry) = (a[0] - v.x, a[1] - v.y);
+        (rx * ax.0 + ry * ax.1).abs() < 1e-6 && (rx * -ax.1 + ry * ax.0).abs() <= ht + 1e-6
+    };
     for (k, w) in p.walls.iter().enumerate() {
         let e_start = ext[1 + 2 * k];
         let e_end = ext[2 + 2 * k];
@@ -311,9 +316,11 @@ pub(super) fn extend_wall_corners(p: &Project, rwalls: &mut [RWall], u: (f64, f6
         if (ux * u.0 + uz * u.1).abs() < 0.35 {
             continue;
         }
+        let ht = p.wall_type(w).map_or(0.2, |t| t.layers.iter().fold(0.0, |s, l| s + l.thickness)) / 2.0;
         if e_start > EPS {
             // [141] Kollineare Stossfuge (`joint`): die Nachbarwand setzt fort, nicht verlängern.
-            if let Some(&i) = pieces.iter().find(|&&i| close(rwalls[i].start, w.start) && !rwalls[i].joint[0]) {
+            let hit: Vec<usize> = pieces.iter().copied().filter(|&i| close(rwalls[i].start, w.start, (ux, uz), ht) && !rwalls[i].joint[0]).collect();
+            for i in hit {
                 let s = rwalls[i].start;
                 rwalls[i].start = [s[0] - ux * e_start, s[1] - uz * e_start];
                 // Ebene Oberkante bezieht sich auf den Anfang ([G2]).
@@ -323,7 +330,8 @@ pub(super) fn extend_wall_corners(p: &Project, rwalls: &mut [RWall], u: (f64, f6
             }
         }
         if e_end > EPS {
-            if let Some(&i) = pieces.iter().find(|&&i| close(rwalls[i].end, w.end) && !rwalls[i].joint[1]) {
+            let hit: Vec<usize> = pieces.iter().copied().filter(|&i| close(rwalls[i].end, w.end, (ux, uz), ht) && !rwalls[i].joint[1]).collect();
+            for i in hit {
                 let e = rwalls[i].end;
                 rwalls[i].end = [e[0] + ux * e_end, e[1] + uz * e_end];
             }

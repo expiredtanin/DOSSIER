@@ -719,7 +719,7 @@ mod tests {
     fn schwarze_flaeche_mit_haarstrich() {
         // [157] Dunkle deckende Fläche ohne Strich: Haarstrich in der Füllfarbe (keine helle Fuge im PDF).
         let a = poly_node(&[("points", "0,0 1,0 1,1".to_string())], "#0f0f0f", "none", 0.0);
-        assert!(a.contains(&("stroke", "#0f0f0f".to_string())) && a.contains(&("stroke-width", "0.05".to_string())), "{a:?}");
+        assert!(a.contains(&("stroke", "#0f0f0f".to_string())) && a.contains(&("stroke-width", "0.12".to_string())), "{a:?}");
         let b = poly_node(&[("points", "0,0 1,0 1,1".to_string())], "#ffffff", "none", 0.0);
         assert!(b.contains(&("stroke", "none".to_string())), "{b:?}");
         let c = poly_node(&[("points", "0,0 1,0 1,1".to_string())], "#0f0f0f", "#222", 0.35);
