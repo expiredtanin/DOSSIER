@@ -372,14 +372,15 @@ fn to_hatch(h: &super::prim::HatchRender) -> crate::hatch::Hatch {
 /// Schichtmuster (Dämmschlange, Zickzack) zweier Wände auf Gehrung: jeder Lauf, der an der
 /// Gehrungslinie endet, setzt sich in der Nachbarwand am selben Punkt fort (kein gezacktes Ende).
 /// Verschiedene Winkel und Orientierungen (Ende an Anfang, Anfang an Ende, Anfang an Anfang, Ende an
-/// Ende).
+/// Ende). [175] Nur für Winkel ausserhalb 50°–130° (sehr spitz/stumpf), dort bleibt es bei der Gehrungslinie;
+/// sonst gehört das Eckquadrat einer Wand (`daemm_muster_an_ecken_gehoeren_einer_wand`).
 #[test]
 fn daemm_muster_gehen_an_der_gehrung_ineinander_ueber() {
     // Gleich orientierte Enden (Fall 2, 3) nur mit symmetrischem Wandtyp (sonst trifft die Dämmung
     // der einen Wand auf den Backstein der anderen).
     let cases = [("aw", HatchPattern::Insulation, [0, 1].as_slice()), ("aw2", HatchPattern::InsulationHard, &[0, 1]), ("dw", HatchPattern::Insulation, &[0, 1, 2, 3]), ("dw2", HatchPattern::InsulationHard, &[0, 1, 2, 3])];
     for (t, pat, flips) in cases {
-        for deg in [90.0, 135.0, 60.0, 110.0] {
+        for deg in [135.0, 150.0] {
             for &flip in flips {
                 let mut p = base();
                 let c = (4.0, 0.0);
@@ -753,11 +754,14 @@ fn stuetze_unter_der_schnitthoehe() {
     assert!((len - (0.3 * 4.0 - 0.15)).abs() < 1e-6, "sichtbare Kanten {len}");
 }
 
-/// [171] Geschlossener Wandring (Holzständerbau-Schicht „Dämmung weich" 23.85 cm, beide Enden jeder Wand
-/// mit Gehrung): an jeder Gehrung setzen sich die Läufe der beiden Wände glatt fort — Lauf-Enden treffen sich
-/// und die Schenkel gehen gespiegelt ineinander über (kein Knick, keine versetzte Phase).
+/// [175] Geschlossener Wandring (Holzständerbau-Schicht „Dämmung weich" 23.85 cm / Hartschaum, beide Enden
+/// jeder Wand mit Gehrung): das Eckquadrat der Dämmschicht gehört EINER Wand (der längeren, bei Gleichstand
+/// der zuerst gezeichneten) — ihr Muster läuft gerade bis zur Aussenkante durch; die andere endet stumpf an
+/// der Quadratgrenze. Die Flächen bleiben (Vereinigung = Ring, keine Überlappung); kein Muster-Lauf endet
+/// auf der Gehrungslinie im Quadrat (vorher geschachtelte, geknickte Schenkel), jeder Lauf-Punkt im Quadrat
+/// liegt in der Besitzerwand.
 #[test]
-fn daemm_muster_im_wandring_gehen_glatt_ineinander_ueber() {
+fn daemm_muster_im_wandring_eckquadrat_gehoert_einer_wand() {
     for (pat, comp) in [(HatchPattern::Insulation, "insulation"), (HatchPattern::InsulationHard, "xps")] {
         for (w, d) in [(15.0, 10.0), (7.3, 4.1), (5.0, 5.0)] {
             let mut p = base();
@@ -776,51 +780,121 @@ fn daemm_muster_im_wandring_gehen_glatt_ineinander_ueber() {
                 })
                 .collect();
             assert_eq!(bands.len(), 4, "{what}");
-            for i in 0..4 {
-                let (a, b) = (&bands[i], &bands[(i + 1) % 4]);
-                let shared: Vec<Vec2> = a.0.iter().copied().filter(|x| b.0.iter().any(|y| (x.x - y.x).hypot(x.y - y.y) < 1e-9)).collect();
-                assert_eq!(shared.len(), 2, "{what}: Gehrungskante {i}");
-                let (m0, m1) = (shared[0], shared[1]);
-                let ml = (m1.x - m0.x).hypot(m1.y - m0.y);
-                let m = Vec2 { x: (m1.x - m0.x) / ml, y: (m1.y - m0.y) / ml };
-                // Lauf-Enden auf der Gehrung samt Richtung des ersten Segments (vom Ende ins Band).
-                let ends = |bd: &(Vec<Vec2>, super::prim::HatchRender)| -> Vec<(Vec2, Vec2)> {
-                    let poly: Vec<crate::hatch::V2> = bd.0.iter().map(|q| crate::hatch::V2 { x: q.x, y: q.y }).collect();
-                    let mut out = Vec::new();
-                    for r in crate::hatch::build_hatch_runs(&poly, &to_hatch(&bd.1)) {
-                        for (e, nb) in [(r[0], r[1]), (r[r.len() - 1], r[r.len() - 2])] {
-                            let e = Vec2 { x: e.x, y: e.y };
-                            if dist_seg(e, m0, m1) < 1e-9 && (e.x - m0.x).hypot(e.y - m0.y) > 1e-6 && (e.x - m1.x).hypot(e.y - m1.y) > 1e-6 {
-                                let (dx, dy) = (nb.x - e.x, nb.y - e.y);
-                                let l = dx.hypot(dy).max(1e-30);
-                                out.push((e, Vec2 { x: dx / l, y: dy / l }));
-                            }
+            // Flächen unverändert: Ring zwischen den Schichtflächen (aussen 2.4 cm Putz ab Mitte − 13.75 cm, innen 12.5 cm).
+            let polys: Vec<Vec<Vec2>> = bands.iter().map(|b| b.0.clone()).collect();
+            let (ov, _) = overlap(&polys);
+            assert!(ov.abs() < 1e-6, "{what}: Überlappung {ov}");
+            let (lo, hi) = (-0.1375 + 0.024, -0.1375 + 0.024 + 0.2385);
+            let ring = (w - 2.0 * lo) * (d - 2.0 * lo) - (w - 2.0 * hi) * (d - 2.0 * hi);
+            let sum: f64 = polys.iter().map(|q| area(q)).sum();
+            assert!((sum - ring).abs() < 1e-6, "{what}: Fläche {sum} ≠ {ring}");
+            let runs_of = |bd: &(Vec<Vec2>, super::prim::HatchRender)| {
+                let poly: Vec<crate::hatch::V2> = bd.0.iter().map(|q| crate::hatch::V2 { x: q.x, y: q.y }).collect();
+                crate::hatch::build_hatch_runs(&poly, &to_hatch(&bd.1))
+            };
+            // Wand i: Anfang pts[i]; Ecke k liegt am Anfang von Wand k (Ende von Wand k−1).
+            let mut owned = [0usize; 4];
+            for k in 0..4 {
+                let c = Vec2 { x: pts[k].0, y: pts[k].1 };
+                let inward = Vec2 { x: if c.x < w / 2.0 { 1.0 } else { -1.0 }, y: if c.y < d / 2.0 { 1.0 } else { -1.0 } };
+                let (x0, x1) = (c.x - inward.x * -lo, c.x + inward.x * -(-hi));
+                let (xa, xb) = (x0.min(x1), x0.max(x1));
+                let (y0, y1) = (c.y - inward.y * -lo, c.y + inward.y * -(-hi));
+                let (ya, yb) = (y0.min(y1), y0.max(y1));
+                let sq = vec![Vec2 { x: xa, y: ya }, Vec2 { x: xb, y: ya }, Vec2 { x: xb, y: yb }, Vec2 { x: xa, y: yb }];
+                let side = (xb - xa) * (yb - ya);
+                assert!((side - 0.2385 * 0.2385).abs() < 1e-9, "{what}: Quadrat {side}");
+                let (prev, next) = ((k + 3) % 4, k);
+                let cover = |i: usize| -> f64 {
+                    let x = crate::polygon_bool::intersection(&[to_poly(&polys[i])], &[to_poly(&sq)]);
+                    x.iter().map(|pl| ring_area(&pl[0])).sum()
+                };
+                let (cp, cn) = (cover(prev), cover(next));
+                let (own, other) = if cp > cn { (prev, next) } else { (next, prev) };
+                assert!((cp.max(cn) - side).abs() < 1e-6 && cp.min(cn) < 1e-6, "{what}: Ecke {k}: Quadrat {side} nicht ganz bei einer Wand ({cp}, {cn})");
+                owned[own] += 1;
+                // Längere Wand deckt (Wände 0/2 sind w lang, 1/3 d lang), bei Gleichstand die zuerst gezeichnete.
+                let long_of = |i: usize| if i % 2 == 0 { w } else { d };
+                let want = if long_of(prev) > long_of(next) + 1e-9 { prev } else if long_of(next) > long_of(prev) + 1e-9 { next } else { prev.min(next) };
+                assert_eq!(own, want, "{what}: Ecke {k}: Besitzer");
+                // Läufe: kein Punkt der weichenden Wand im Quadratinneren, kein Lauf-Ende auf der Gehrung im Quadrat.
+                let shrink = 1e-4;
+                let in_sq = |q: &crate::hatch::V2| q.x > xa + shrink && q.x < xb - shrink && q.y > ya + shrink && q.y < yb - shrink;
+                for r in runs_of(&bands[other]) {
+                    assert!(!r.iter().any(in_sq), "{what}: Ecke {k}: Muster der weichenden Wand im Eckquadrat");
+                }
+                // Gehrung: Diagonale des Quadrats (Innenecke ↔ Aussenecke).
+                let (i0, o0) = (Vec2 { x: c.x + inward.x * hi, y: c.y + inward.y * hi }, Vec2 { x: c.x + inward.x * lo, y: c.y + inward.y * lo });
+                let mut n_in = 0;
+                for r in runs_of(&bands[own]) {
+                    for e in [r[0], r[r.len() - 1]] {
+                        let e = Vec2 { x: e.x, y: e.y };
+                        let on_diag = dist_seg(e, i0, o0) < 1e-6 && (e.x - i0.x).hypot(e.y - i0.y) > 1e-3 && (e.x - o0.x).hypot(e.y - o0.y) > 1e-3;
+                        assert!(!on_diag, "{what}: Ecke {k}: Lauf endet auf der Gehrung bei {e:?}");
+                    }
+                    // Punkte entlang der Läufe (Zickzack-Segmente laufen ohne Stützpunkt durch das Quadrat).
+                    for seg in r.windows(2) {
+                        for f in 0..=10 {
+                            let f = f as f64 / 10.0;
+                            let q = crate::hatch::V2 { x: seg[0].x + (seg[1].x - seg[0].x) * f, y: seg[0].y + (seg[1].y - seg[0].y) * f };
+                            n_in += usize::from(in_sq(&q));
                         }
                     }
-                    out
-                };
-                // [171] Die Gehrung geht an der Innenseite der Schicht durch den Scheitel eines oberen Bogens bzw. einer
-                // Spitze (Phase am Schichtrand, nicht an der Wandfläche): ein Lauf-Punkt liegt dicht an der Innenecke.
-                let centre = Vec2 { x: w / 2.0, y: d / 2.0 };
-                let inner = if (m0.x - centre.x).hypot(m0.y - centre.y) < (m1.x - centre.x).hypot(m1.y - centre.y) { m0 } else { m1 };
-                for bd in [a, b] {
-                    let poly: Vec<crate::hatch::V2> = bd.0.iter().map(|q| crate::hatch::V2 { x: q.x, y: q.y }).collect();
-                    let near = crate::hatch::build_hatch_runs(&poly, &to_hatch(&bd.1)).iter().flatten().map(|q| (q.x - inner.x).hypot(q.y - inner.y)).fold(f64::INFINITY, f64::min);
-                    assert!(near < 4e-3, "{what}: Gehrung {i}: Innenecke {inner:?} nicht am Scheitel (Abstand {near})");
                 }
-                let (ea, eb) = (ends(a), ends(b));
-                assert!(!ea.is_empty(), "{what}: Muster erreicht die Gehrung {i}");
-                assert_eq!(ea.len(), eb.len(), "{what}: Gehrung {i}: Lauf-Enden {} / {}", ea.len(), eb.len());
-                for (q, ta) in &ea {
-                    // Gegenstück: Ende nahe (Teilung der Wände weicht je nach Wandlänge um bis 3 % ab) mit gespiegelter Richtung —
-                    // an der Kreuzung zweier Schenkel liegen zwei Enden am selben Punkt.
-                    let ok = eb.iter().any(|(r, tb)| {
-                        let dot = tb.x * m.x + tb.y * m.y;
-                        let refl = Vec2 { x: 2.0 * dot * m.x - tb.x, y: 2.0 * dot * m.y - tb.y };
-                        (q.x - r.x).hypot(q.y - r.y) < 6e-3 && (refl.x - ta.x).hypot(refl.y - ta.y) < 5e-2
-                    });
-                    assert!(ok, "{what}: Gehrung {i}: Lauf bei {q:?} ohne gespiegelte Fortsetzung ({ta:?})");
+                assert!(n_in > 0, "{what}: Ecke {k}: Muster der Besitzerwand läuft durch das Eckquadrat");
+            }
+            assert!(owned.iter().all(|n| *n <= 2), "{what}: {owned:?}");
+        }
+    }
+}
+
+/// [175] Zwei Wände mit Dämm-Muster auf Gehrung (90°, 60°, 110°, 70°; vier Orientierungen): die längere deckt
+/// das Eckquadrat (ihr Band bekommt den Eckpunkt `q` als fünfte Ecke), die andere endet stumpf; die Flächen
+/// bleiben ein Körper ohne Überlappung und Lücke.
+#[test]
+fn daemm_muster_an_ecken_gehoeren_einer_wand() {
+    for (t, pat) in [("dw", HatchPattern::Insulation), ("dw2", HatchPattern::InsulationHard)] {
+        for deg in [90.0, 60.0, 110.0, 70.0] {
+            for flip in 0..4 {
+                let mut p = base();
+                let c = (4.0, 0.0);
+                let far = polar(c, 3.3, deg);
+                match flip {
+                    0 => {
+                        add_wall(&mut p, t, (0.0, 0.0), c);
+                        add_wall(&mut p, t, c, far);
+                    }
+                    1 => {
+                        add_wall(&mut p, t, c, (0.0, 0.0));
+                        add_wall(&mut p, t, far, c);
+                    }
+                    2 => {
+                        add_wall(&mut p, t, c, (0.0, 0.0));
+                        add_wall(&mut p, t, c, far);
+                    }
+                    _ => {
+                        add_wall(&mut p, t, (0.0, 0.0), c);
+                        add_wall(&mut p, t, far, c);
+                    }
                 }
+                let what = format!("{t} {deg}° Fall {flip}");
+                let ps = prims(&p);
+                let bands: Vec<(String, Vec<Vec2>)> = ps
+                    .iter()
+                    .filter_map(|q| match q {
+                        Primitive::Polygon { pts, hatch, wall_id: Some(w), .. } if hatch.pattern == pat => Some((w.clone(), pts.clone())),
+                        _ => None,
+                    })
+                    .collect();
+                assert_eq!(bands.len(), 2, "{what}");
+                // W1 ist 4.0 m lang, W2 3.3 m: W1 deckt das Eckquadrat.
+                let n_of = |id: &str| bands.iter().find(|b| b.0 == id).map_or(0, |b| b.1.len());
+                assert_eq!((n_of("W1"), n_of("W2")), (5, 4), "{what}: Ecken Besitzer/weichende Wand");
+                let polys = filled(&ps);
+                let (ov, u) = overlap(&polys);
+                assert!(ov.abs() < 1e-6, "{what}: Überlappung {ov}");
+                assert_eq!(u.len(), 1, "{what}: ein Körper");
+                assert_eq!(holes(&u), 0, "{what}: ohne Loch");
             }
         }
     }

@@ -136,8 +136,12 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   „Wo./Ess./Küc.“; `fit_room_stamp`/`abbreviate`); Reststrich rechts am Rundfenster (Ansicht West) — Lochkanten im
   Band um den Rahmen entfallen (`drop_hole_edges`). Holzwand-Ecke DG 1:50 (10.11.): die Musterphase sitzt jetzt an der
   Schichtfläche statt an der Wandfläche (`anchor_band_pattern`), die Gehrung geht an der Innenseite durch einen ganzen Bogen
-  bzw. eine Spitze, beide Wände bilden dort eine gefaltete Schlaufe. Weiter offen: die Schenkel an der Gehrung bleiben
-  Winkel (Spiegelbild, ein Knick je Schenkel, rund 5 je Ecke bei 24 cm Dämmung) — Spiegelprinzip, nicht behoben;
+  bzw. eine Spitze, beide Wände bilden dort eine gefaltete Schlaufe. Eckquadrat (10.11., Dämmschlange/Zickzack/Welle an
+  Gehrungen zweier gleich geschichteter Wände, Winkel 50°–130°): das Quadrat der Schicht gehört der längeren Wand
+  (Gleichstand: zuerst gezeichnet) — ihr Muster läuft gerade bis zur Aussenkante durch, die andere endet stumpf an
+  der Quadratgrenze; Muster in beiden Wänden an der jeweiligen Endlinie verankert (`corner_square`,
+  `WallCuts::pattern_corner`), Flächen unverändert (nur die Polygone der Schicht tauschen die Ecke). Spitzere/stumpfere
+  Winkel, Bogenwände: bisher (Spiegelung an der Gehrung). Weiter offen:
   Ansicht Ost: Schatten-Keile neben dem Erker mit Lücken je Geschoss und Strichreste am Erker. Nicht in der Tauri-App/auf dem Mac
   angesehen. · M
 - ◐ **[142]** Schatten in zwei Richtungen. Schatten nur im Geschoss nächst ±0.00; Decken/Dächer werfen keinen eigenen

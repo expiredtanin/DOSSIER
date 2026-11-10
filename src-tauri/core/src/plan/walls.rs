@@ -299,18 +299,20 @@ fn wall_poche(c: &Ctx, out: &mut Vec<Primitive>, e: &EffWall, gaps: &[(f64, f64)
             || oa.is_some_and(|o| o.outline == Some(false))
             || ob.is_some_and(|o| o.outline == Some(false))
     };
-    let mut styles: HashMap<usize, (HatchRender, String)> = HashMap::new();
-    let mut style_of = |li: usize| -> Result<(HatchRender, String), String> {
+    // Stil der Schicht und ob ihr gerichtetes Muster an den Wandenden verankert wurde ([175]).
+    let mut styles: HashMap<usize, (HatchRender, String, bool)> = HashMap::new();
+    let mut style_of = |li: usize| -> Result<(HatchRender, String, bool), String> {
         if let Some(s) = styles.get(&li) {
             return Ok(s.clone());
         }
         let (mut hatch, fill) = apply_ov(li, layer_style(p, w, wt, target.get(li).copied().unwrap_or(li), category, angle)?);
+        let mut directed = false;
         if bend.is_none() {
             let lo = ref_off - total / 2.0 + thick.iter().take(li).sum::<f64>();
-            anchor_band_pattern(&mut hatch, w, cuts, thick.get(li).copied().unwrap_or(0.0), lo);
+            directed = anchor_band_pattern(&mut hatch, w, cuts, thick.get(li).copied().unwrap_or(0.0), lo);
         }
-        styles.insert(li, (hatch.clone(), fill.clone()));
-        Ok((hatch, fill))
+        styles.insert(li, (hatch.clone(), fill.clone(), directed));
+        Ok((hatch, fill, directed))
     };
     let n = f[0] as usize;
     let mut i = 1;
@@ -335,7 +337,13 @@ fn wall_poche(c: &Ctx, out: &mut Vec<Primitive>, e: &EffWall, gaps: &[(f64, f64)
                 continue;
             }
             if art == 2.0 {
-                let (hatch, fill) = style_of(li)?;
+                let (hatch, fill, directed) = style_of(li)?;
+                let mut pts = pts;
+                if directed {
+                    // [175] Eckquadrat der Dämmschicht einer Wand zuschlagen (Fläche insgesamt unverändert).
+                    let lo = ref_off - total / 2.0 + thick.iter().take(li).sum::<f64>();
+                    apply_corner_squares(&mut pts, w, cuts, thick.get(li).copied().unwrap_or(0.0), lo);
+                }
                 out.push(wall_polygon(pts, &fill, "none", 0.0, hatch, greyed, Some(no_stroke), Some(&w.id), None));
             } else {
                 let fill = if art == 1.0 { HATCH_INK } else { "none" };
@@ -408,26 +416,30 @@ fn wall_poche(c: &Ctx, out: &mut Vec<Primitive>, e: &EffWall, gaps: &[(f64, f64)
 /// die Mitte eines Bogens bzw. einer Spitze, an der Gegenseite fast durch die Mitte eines unteren Bogens
 /// (Dämmschlange: Dicke ≈ 4.5 Teilungen) — die beiden Wände bilden an der Ecke eine ganze, gefaltete
 /// Schlaufe statt versetzter Schenkel. `layer_lo`: Querversatz der unteren Schichtfläche zur Wandachse.
-fn anchor_band_pattern(h: &mut HatchRender, w: &Wall, cuts: &WallCuts, layer_t: f64, layer_lo: f64) {
+///
+/// [175] Mit `pattern_corner` (Gehrung zweier gleich geschichteter Wände) sitzt der Anker stattdessen auf der
+/// Grenze des Eckquadrats (`corner_square`): das Muster endet dort an einer Spitze/einem Bogenscheitel, ohne Knick.
+/// `true`, wenn das Muster gerichtet ist und verankert wurde.
+fn anchor_band_pattern(h: &mut HatchRender, w: &Wall, cuts: &WallCuts, layer_t: f64, layer_lo: f64) -> bool {
     use crate::hatch::Pattern as P;
     let pat = match h.pattern {
         HatchPattern::Insulation => P::Insulation,
         HatchPattern::InsulationHard => P::InsulationHard,
         HatchPattern::InsulationWave => P::InsulationWave,
         HatchPattern::Timber => P::Timber,
-        _ => return,
+        _ => return false,
     };
     if h.polar.is_some() || h.kind.is_some_and(|k| k != HatchStyleKind::Vector) || h.lines == Some(HatchStyleLines::Random) {
-        return;
+        return false;
     }
     let rot = -h.angle * std::f64::consts::PI / 180.0;
     let u = v2(crate::jsnum::cos(rot), crate::jsnum::sin(rot));
     let (dx, dy) = (w.end.x - w.start.x, w.end.y - w.start.y);
     let l = dx.hypot(dy);
     if !(l > 1e-9) || (u.x * dy - u.y * dx).abs() / l > 1e-6 {
-        return;
+        return false;
     }
-    let Some(period) = crate::hatch::band_period(pat, layer_t, h.scale) else { return };
+    let Some(period) = crate::hatch::band_period(pat, layer_t, h.scale) else { return false };
     if cuts.pattern_flip {
         h.angle += 180.0;
     }
@@ -448,9 +460,11 @@ fn anchor_band_pattern(h: &mut HatchRender, w: &Wall, cuts: &WallCuts, layer_t: 
             v2(x.point.x, x.point.y)
         }
     };
+    // [175] Mit Eckquadrat endet das Muster an dessen Grenze (Querlinie durch den Eckpunkt) statt an der Gehrung.
+    let end_line = |idx: usize, x: &joins::Line| corner_square(w, cuts, idx, layer_lo, layer_t).map_or(*x, |sq| joins::Line { point: sq.q, dir: sq.end_dir });
     match (&cuts.start_cut, &cuts.end_cut) {
         (Some(s), Some(e)) => {
-            let (a0, a1) = (anchor(s), anchor(e));
+            let (a0, a1) = (anchor(&end_line(0, s)), anchor(&end_line(1, e)));
             h.origin = Some(a0);
             let xe = ((a1.x - a0.x) * u.x + (a1.y - a0.y) * u.y).abs();
             let k = xe / (xe / period).round().max(1.0) / period;
@@ -460,8 +474,99 @@ fn anchor_band_pattern(h: &mut HatchRender, w: &Wall, cuts: &WallCuts, layer_t: 
                 h.scale = scale * k;
             }
         }
-        (Some(x), None) | (None, Some(x)) => h.origin = Some(anchor(x)),
+        (Some(x), None) => h.origin = Some(anchor(&end_line(0, x))),
+        (None, Some(x)) => h.origin = Some(anchor(&end_line(1, x))),
         (None, None) => {}
+    }
+    true
+}
+
+/// [175] Eckquadrat einer Schicht an einem Wandende mit Gehrung (`WallCuts::pattern_corner`): `q` ist der
+/// Eckpunkt des Quadrats auf der Seite der weichenden Wand, `end_dir` die Richtung der Grenzlinie durch `q`
+/// (parallel zur anderen Wand). `pivot` = Gehrungspunkt der Schichtfläche, an dem die Besitzerwand über
+/// `q` weiterläuft bzw. den die weichende Wand durch `q` ersetzt; `other` = der andere Gehrungspunkt.
+type KV = kernel2d::Vec2;
+fn k2(x: f64, y: f64) -> KV {
+    KV { x, y }
+}
+
+struct CornerSquare {
+    q: KV,
+    end_dir: KV,
+    owner: bool,
+    pivot: KV,
+    other: KV,
+}
+
+fn corner_square(w: &Wall, cuts: &WallCuts, idx: usize, layer_lo: f64, layer_t: f64) -> Option<CornerSquare> {
+    let pc = cuts.pattern_corner[idx]?;
+    let cut = if idx == 0 { cuts.start_cut } else { cuts.end_cut }?;
+    let (dx, dy) = (w.end.x - w.start.x, w.end.y - w.start.y);
+    let l = dx.hypot(dy);
+    if !(l > 1e-9) || !(layer_t > 1e-9) {
+        return None;
+    }
+    let u = k2(dx / l, dy / l);
+    let m = k2(-u.y, u.x);
+    let cl = cut.dir.x.hypot(cut.dir.y);
+    let cm = (cut.dir.x * m.x + cut.dir.y * m.y) / cl.max(1e-12);
+    if cm.abs() < 0.05 {
+        return None;
+    }
+    let o0 = (cut.point.x - w.start.x) * m.x + (cut.point.y - w.start.y) * m.y;
+    let on_face = |s: f64| {
+        let t = (s - o0) / (cm * cl);
+        k2(cut.point.x + cut.dir.x * t, cut.point.y + cut.dir.y * t)
+    };
+    let (p_lo, p_hi) = (on_face(layer_lo), on_face(layer_lo + layer_t));
+    let md = k2(p_hi.x - p_lo.x, p_hi.y - p_lo.y);
+    let ml = md.x.hypot(md.y);
+    let d = pc.other_dir;
+    let cross = |a: KV, b: KV| a.x * b.y - a.y * b.x;
+    let cu = cross(u, d);
+    if !(ml > 1e-9) || cu.abs() < 0.5 {
+        return None;
+    }
+    // Wandrichtung vom Knoten weg; die weichende Wand liegt auf der Seite ihrer Richtung zur Gehrungskante.
+    let out_w = if idx == 0 { u } else { k2(-u.x, -u.y) };
+    let side = |q: KV| cross(md, k2(q.x - p_lo.x, q.y - p_lo.y));
+    let yield_sign = cross(md, if pc.owner { d } else { out_w });
+    // Besitzer: Linie der Wand durch einen Gehrungspunkt, weichende Wand: Linie der anderen durch den zweiten.
+    let (q, pivot, other) = if pc.owner {
+        let q1 = k2(p_lo.x + u.x * cross(k2(p_hi.x - p_lo.x, p_hi.y - p_lo.y), d) / cu, p_lo.y + u.y * cross(k2(p_hi.x - p_lo.x, p_hi.y - p_lo.y), d) / cu);
+        let q2 = k2(p_hi.x + u.x * cross(k2(p_lo.x - p_hi.x, p_lo.y - p_hi.y), d) / cu, p_hi.y + u.y * cross(k2(p_lo.x - p_hi.x, p_lo.y - p_hi.y), d) / cu);
+        if side(q1) * yield_sign > 0.0 { (q1, p_lo, p_hi) } else { (q2, p_hi, p_lo) }
+    } else {
+        let q1 = k2(p_hi.x + u.x * cross(k2(p_lo.x - p_hi.x, p_lo.y - p_hi.y), d) / cu, p_hi.y + u.y * cross(k2(p_lo.x - p_hi.x, p_lo.y - p_hi.y), d) / cu);
+        let q2 = k2(p_lo.x + u.x * cross(k2(p_hi.x - p_lo.x, p_hi.y - p_lo.y), d) / cu, p_lo.y + u.y * cross(k2(p_hi.x - p_lo.x, p_hi.y - p_lo.y), d) / cu);
+        if side(q1) * yield_sign > 0.0 { (q1, p_hi, p_lo) } else { (q2, p_lo, p_hi) }
+    };
+    if (q.x - pivot.x).hypot(q.y - pivot.y) > 1.5 * ml {
+        return None;
+    }
+    Some(CornerSquare { q, end_dir: d, owner: pc.owner, pivot, other })
+}
+
+/// [175] Polygon einer Schicht mit gerichtetem Muster an den Gehrungs-Enden: die Besitzerwand läuft bis zur
+/// Aussenkante des Eckquadrats (Eckpunkt `q` zwischen den Gehrungspunkten), die weichende endet an dessen
+/// Grenze (ein Gehrungspunkt wird durch `q` ersetzt). Beide Flächen zusammen bleiben die alten.
+fn apply_corner_squares(pts: &mut Vec<Vec2>, w: &Wall, cuts: &WallCuts, layer_t: f64, layer_lo: f64) {
+    for idx in 0..2 {
+        let Some(sq) = corner_square(w, cuts, idx, layer_lo, layer_t) else { continue };
+        let find = |pts: &[Vec2], x: KV| pts.iter().position(|q| (q.x - x.x).hypot(q.y - x.y) < 1e-6);
+        let (Some(i), Some(j)) = (find(pts, sq.pivot), find(pts, sq.other)) else { continue };
+        let n = pts.len();
+        if sq.owner {
+            // pivot → q → other, wenn beide benachbart sind
+            if (i + 1) % n == j {
+                pts.insert(i + 1, v2(sq.q.x, sq.q.y));
+            } else if (j + 1) % n == i {
+                pts.insert(j + 1, v2(sq.q.x, sq.q.y));
+                // Reihenfolge other, q, pivot
+            }
+        } else if (i + 1) % n == j || (j + 1) % n == i {
+            pts[i] = v2(sq.q.x, sq.q.y);
+        }
     }
 }
 
@@ -1327,7 +1432,7 @@ fn unroll_cuts(u: &mut Unroll, c: &WallCuts, lo: f64, hi: f64) -> WallCuts {
         start_side: lc.start_side.iter().map(|l| one(l, 0.0)).collect(),
         end_side: lc.end_side.iter().map(|l| one(l, len)).collect(),
     });
-    WallCuts { start_cut, end_cut, layer_cuts, span_cutouts: c.span_cutouts.clone(), start_cut2, end_cut2, covered: c.covered, collinear: c.collinear, at_column: c.at_column, pattern_flip: false, column_carves: Vec::new() }
+    WallCuts { start_cut, end_cut, layer_cuts, span_cutouts: c.span_cutouts.clone(), start_cut2, end_cut2, covered: c.covered, collinear: c.collinear, at_column: c.at_column, pattern_flip: false, pattern_corner: Default::default(), column_carves: Vec::new() }
 }
 
 fn kv(p: Vec2) -> kernel2d::Vec2 {

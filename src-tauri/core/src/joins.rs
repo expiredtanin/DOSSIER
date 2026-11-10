@@ -123,11 +123,22 @@ pub struct WallCuts {
     /// Muster an der Schnittlinie spiegelbildlich ineinander über. Über die Ketten verbundener Wände
     /// zweifarbig verteilt (bei ungerader Masche gewinnt die erste Zuordnung).
     pub pattern_flip: bool,
+    /// [175] Gerichtete Schichtmuster am Eckquadrat einer Gehrung (Anfang/Ende): eine der beiden Wände deckt
+    /// das Quadrat der Schicht mit durchlaufendem Muster, die andere endet stumpf an dessen Grenze.
+    pub pattern_corner: [Option<PatternCorner>; 2],
     /// [141] Prioritärere Stützen (oder gleiches Bauteil), die den Wandkörper überlappen: Grundriss-Kontur
     /// (konvex) und Höhenbereich `[z_unten, z_oben]`. Das 3D (`model3d::carve_at_columns`) spart sie aus den
     /// Wandkörpern aus — runde Stütze an der Kontur, Wand durch/breiter als die Stütze, Stütze kürzer als die
     /// Wand. Nur 3D/Schnitt/Ansicht/IFC; der Grundriss beschneidet seine Flächen selbst.
     pub column_carves: Vec<(Vec<Vec2>, [f64; 2])>,
+}
+
+/// [175] Rolle einer Wand an einer Gehrung für gerichtete Schichtmuster: `owner` deckt das Eckquadrat der
+/// Schicht; `other_dir` = Einheitsrichtung der anderen Wand vom Knoten weg.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PatternCorner {
+    pub owner: bool,
+    pub other_dir: Vec2,
 }
 
 /// Eine benötigte Angabe fehlt: Wandtyp oder Bauteil der Wand mit diesem Index ist unbekannt
@@ -389,6 +400,44 @@ fn assign_pattern_flip(result: &mut [WallCuts]) {
     }
 }
 
+/// [175] Gehrung zweier gerader Wände mit gleicher Schichtfolge (von der Innenseite der Ecke gezählt) und
+/// einem Winkel von 50° bis 130°: die längere Wand (bei Gleichstand die zuerst gezeichnete) deckt das
+/// Eckquadrat jeder Schicht (`WallCuts::pattern_corner`). Sonst bleibt es bei der Gehrungslinie.
+fn assign_pattern_corner(walls: &[JoinWall], a: WallEnd, b: WallEnd, result: &mut [WallCuts]) {
+    let (wa, wb) = (&walls[a.wall], &walls[b.wall]);
+    if is_arc(wa) || is_arc(wb) {
+        return;
+    }
+    let out_dir = |w: &JoinWall, e: End| {
+        let u = dir_of(w);
+        if e == End::Start { u } else { scale(u, -1.0) }
+    };
+    let (da, db) = (out_dir(wa, a.end), out_dir(wb, b.end));
+    let c = dot(da, db);
+    if !(-0.64..=0.64).contains(&c) {
+        return;
+    }
+    // Schichtdicken von der Innenseite der Ecke aus (Schicht 0 liegt rechts der Laufrichtung).
+    let from_inner = |w: &JoinWall, other: Vec2| -> Option<Vec<f64>> {
+        let mut t: Vec<f64> = w.layers.as_deref()?.iter().map(|l| l.thickness).collect();
+        if dot(left_normal(dir_of(w)), other) > 0.0 {
+            t.reverse();
+        }
+        Some(t)
+    };
+    let (Some(ta), Some(tb)) = (from_inner(wa, db), from_inner(wb, da)) else { return };
+    if ta.is_empty() || ta.len() != tb.len() || ta.iter().zip(&tb).any(|(x, y)| (x - y).abs() > 1e-9) {
+        return;
+    }
+    let (la, lb) = (len(sub(wa.end, wa.start)), len(sub(wb.end, wb.start)));
+    let a_owns = la > lb + 1e-9 || ((la - lb).abs() <= 1e-9 && a.wall < b.wall);
+    let set = |result: &mut [WallCuts], we: WallEnd, owner: bool, other_dir: Vec2| {
+        result[we.wall].pattern_corner[if we.end == End::Start { 0 } else { 1 }] = Some(PatternCorner { owner, other_dir });
+    };
+    set(result, a, a_owns, db);
+    set(result, b, !a_owns, da);
+}
+
 /// Berechnet für jede Wand (Index = Eingabe-Reihenfolge) die Gehrungs-/Anschluss-Schnittlinien.
 /// `walls` ist die bereits gefilterte Wandmenge (z. B. ein Geschoss).
 pub fn compute_joins(walls: &[JoinWall]) -> Result<Vec<WallCuts>, JoinError> {
@@ -425,6 +474,7 @@ pub fn compute_joins(walls: &[JoinWall]) -> Result<Vec<WallCuts>, JoinError> {
             2 => {
                 if let Some(cut) = miter_line(walls, ends[0].wall, ends[0].end, ends[1].wall)? {
                     set_pair(&mut result, ends[0], ends[1], cut);
+                    assign_pattern_corner(walls, ends[0], ends[1], &mut result);
                 }
             }
             3.. => apply_node(walls, ends, &mut result)?,
@@ -1644,7 +1694,9 @@ mod tests {
     fn cuts_hin_und_zurueck() {
         let lay = || vec![layer(0.02, 0, 10.0), layer(0.15, 1, 50.0), layer(0.015, 0, 10.0)];
         let w = vec![wall((0.0, 0.0), (10.0, 0.0), lay()), wall((4.0, 0.0), (4.0, 3.0), lay()), wall((10.0, 0.0), (10.0, 5.0), lay())];
-        for c in compute_joins(&w).unwrap() {
+        for mut c in compute_joins(&w).unwrap() {
+            // [175] Wie `pattern_flip` nur für den Grundriss im Kern, nicht Teil der Kodierung.
+            c.pattern_corner = Default::default();
             let mut buf = vec![];
             encode_cuts(&mut buf, &c);
             let mut r = crate::flat_read::Reader::new(&buf);
