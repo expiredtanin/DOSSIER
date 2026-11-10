@@ -181,8 +181,17 @@ export function useGripEditing(opts: {
   const selectedSectionLine = modelEditable && selectedSectionLineId
     ? project.drawingLevels.find((l) => l.id === selectedSectionLineId && l.linePoints)
     : undefined;
-  const sectionLineGrips = (l: NonNullable<typeof selectedSectionLine>): Vec2[] =>
-    l.linePoints ? [l.linePoints[0], ...(l.bendPoints ?? []), l.linePoints[1]] : [];
+  // Dahinter je Segment ein Mittel-Griff: Ziehen fügt dort einen Knick ein (Index = Punktzahl + Segment).
+  const sectionLineGrips = (l: NonNullable<typeof selectedSectionLine>): Vec2[] => {
+    if (!l.linePoints) return [];
+    const pts = [l.linePoints[0], ...(l.bendPoints ?? []), l.linePoints[1]];
+    const mids = pts.slice(1).map((q, i) => ({ x: (pts[i].x + q.x) / 2, y: (pts[i].y + q.y) / 2 }));
+    return [...pts, ...mids];
+  };
+  /** Laufender Zug an einer Schnittlinie: gemeinsamer Undo-Schlüssel, bei Mittel-Griff der eingefügte Knick. */
+  /** Pixel je Meter beim letzten Zug (Aufräum-Toleranz). */
+  const sectionPxRef = useRef(0);
+  const sectionDragRef = useRef<{ id: string; key: string; midIndex: number; bendIndex: number } | null>(null);
   // Mit gezeigter Beschriftung dazu ihr Griff (`labelOffset`, s. `treeGrips.ts`).
   const treeGrips = (tr: NonNullable<typeof selectedTree>): Vec2[] => treeGripPoints(tr, scaleDenominator);
   const selectedRoomId = single(selection, "rooms");
@@ -324,7 +333,8 @@ export function useGripEditing(opts: {
     }
     if (selectedSectionLine && effectiveDrawingIds.length === 0 && selectedWallIds.length === 0) {
       const pts = sectionLineGrips(selectedSectionLine);
-      pts.forEach((_, i) => { gripOwners.push({ localIndex: i }); gripOwnerRange.push([0, pts.length - 1]); });
+      const nCorner = (selectedSectionLine.bendPoints?.length ?? 0) + 2;
+      pts.forEach((_, i) => { gripOwners.push({ localIndex: i }); gripOwnerRange.push(i < nCorner ? [0, nCorner - 1] : [nCorner, pts.length - 1]); });
       return pts;
     }
     // [68] Baugrube: Umriss-Ecken + Sohlen-Griff (Lage: Schwerpunkt, y um die Sohlenhöhe versetzt).
@@ -925,7 +935,25 @@ export function useGripEditing(opts: {
     }
     // [176] Schnittlinie: Endpunkt bzw. Knickpunkt live, ein Undo-Schritt je Zug (Kern `grips.rs`).
     if (selectedSectionLine && effectiveDrawingIds.length === 0 && selectedWallIds.length === 0) {
-      storeState().moveSectionLineGrip(selectedSectionLine.id, index, pt);
+      const l = selectedSectionLine;
+      const nCorner = (l.bendPoints?.length ?? 0) + 2;
+      let drag = sectionDragRef.current;
+      if (!drag || drag.id !== l.id) {
+        drag = { id: l.id, key: `sectionLineDrag:${l.id}:${Date.now()}`, midIndex: -1, bendIndex: -1 };
+        sectionDragRef.current = drag;
+      }
+      if (drag.midIndex === index) {
+        // Mittel-Griff, Knick schon eingefügt: er folgt dem Zeiger (Index zählt gegen die alte Punktzahl).
+        storeState().moveSectionLineGrip(l.id, drag.bendIndex, pt, drag.key);
+      } else if (index < nCorner) {
+        storeState().moveSectionLineGrip(l.id, index, pt, drag.key);
+      } else {
+        // Erster Zug an einem Mittel-Griff: Knick in dieses Segment einfügen (Griff-Index des Knicks = Segment + 1).
+        const seg = index - nCorner;
+        drag.midIndex = index;
+        drag.bendIndex = seg + 1;
+        storeState().insertSectionBend(l.id, seg, pt, drag.key);
+      }
       return;
     }
     // [68] Baugrube: Sohlen-Griff sofort (Höhe), Ecken als Vorschau bis zum Setzen.
@@ -1166,7 +1194,15 @@ export function useGripEditing(opts: {
   // Aufräumen nach Abschluss/Verwerfen eines Griff- ODER Kanten-Drags (geteilt
   // von onGripEnd/onGripCancel/onEdgeEnd/onEdgeCancel — nie beide gleichzeitig
   // aktiv, ein gemeinsames Aufräumen ist daher unschädlich und einfacher).
+  // [176] Nach einem Zug an einer Schnittlinie: Knicke auf einem Nachbarpunkt / auf der Geraden entfernen
+  // (gleicher Undo-Schritt wie der Zug).
+  const tidySectionDrag = () => {
+    const drag = sectionDragRef.current;
+    // Zeiger-Genauigkeit: ca. 6 Pixel der Ansicht.
+    if (drag) storeState().tidySectionLine(drag.id, drag.key, sectionPxRef.current > 0 ? 6 / sectionPxRef.current : undefined);
+  };
   const endEditing = () => {
+    sectionDragRef.current = null;
     setDraft(null);
     edgeAppliedDeltaRef.current = null; // Kanten-Drag beendet → Anker zurücksetzen
     moveCoincidentRef.current = null; // Körper-Koinzidenz-Gruppe verwerfen
@@ -1262,6 +1298,7 @@ export function useGripEditing(opts: {
 
   const gripHandlers = {
     onGripMove: (index: number, raw: Vec2, pxPerMeter: number, mods: ToolMods) => {
+      sectionPxRef.current = pxPerMeter;
       // Schnitt/Ansicht: Höhen-Griff (Wand-Oberkante, Fenster Ober-/Unterkante).
       if (!modelEditable && sheet) {
         const g = sheetHeightGrips[index];
@@ -1286,6 +1323,7 @@ export function useGripEditing(opts: {
       // AKTUELLE — hier noch unveränderte — Position als Flucht-Bezugspunkt
       // verankern (s. Kommentar an gripOriginRef).
       if (gripDragInfoRef.current === null) {
+        sectionDragRef.current = null; // [176] neuer Zug: eigener Undo-Schlüssel, kein eingefügter Knick
         gripOriginRef.current = grips[index];
         const op0 = selectedOpeningId ? (project.openings ?? []).find((o) => o.id === selectedOpeningId) : undefined;
         const dir0 = op0 ? openingWallDir() : null;
@@ -1517,6 +1555,7 @@ export function useGripEditing(opts: {
     onGripEnd: () => {
       commitPendingGrip();
       commitPendingBody();
+      tidySectionDrag();
       endEditing();
     },
     // Bewaffneten Punkt-Griff verwerfen (Escape): exakt auf `origin`
@@ -1530,7 +1569,10 @@ export function useGripEditing(opts: {
         pendingGripRef.current = null;
         pendingWallGripRef.current = null;
         pendingAreaGripRef.current = null;
-      } else applyGrip(index, origin);
+      } else if (sectionDragRef.current) {
+        applyGrip(index, origin);
+        tidySectionDrag();
+      } else if (!selectedSectionLine) applyGrip(index, origin);
       endEditing();
     },
     onEdgeEnd: () => {

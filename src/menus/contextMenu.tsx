@@ -86,6 +86,10 @@ export interface MenuActions {
    * anderes selektiert ist; dann entfallen die beiden Einträge.
    */
   selectedPolyline: { id: string; pts: Vec2[]; closed: boolean; bulge?: number[] } | null;
+  /** [176] Einzeln gewählte Schnittlinie: Anfang, Knickpunkte, Ende (für „Knick einfügen/löschen"). */
+  selectedSectionLine?: { id: string; pts: Vec2[] } | null;
+  insertSectionBend?: (id: string, seg: number, pt: Vec2) => void;
+  deleteSectionBend?: (id: string, index: number) => void;
   /** Ob eine Element-Stil-Zwischenablage gefüllt ist (aktiviert „Einfügen"). */
   hasDrawingStyleClipboard: boolean;
   /** Kopiert das Aussehen des ERSTEN gewählten 2D-Elements. */
@@ -314,6 +318,23 @@ function planMenuItems(
       typeItem("arc", "ctx.vertexType.arc", "radio_button_unchecked"),
       typeItem("spline", "ctx.vertexType.spline", "gesture"),
     );
+  }
+  // [176] Schnittlinie: Knick am Klick einfügen bzw. den getroffenen Knick löschen (Anfang/Ende nicht).
+  const sec = a.selectedSectionLine;
+  const secTarget = sec ? nearestPolylineTarget({ pts: sec.pts, closed: false }, model, toleranceFor({ pts: sec.pts, closed: false })) : null;
+  if (sec && secTarget?.kind === "segment" && a.insertSectionBend) {
+    pointItems.push({
+      label: t("ctx.insertBend"),
+      icon: <MenuIcon name="add_circle" />,
+      onClick: () => a.insertSectionBend?.(sec.id, secTarget.segIndex, secTarget.at),
+    });
+  }
+  if (sec && secTarget?.kind === "vertex" && secTarget.index > 0 && secTarget.index < sec.pts.length - 1 && a.deleteSectionBend) {
+    pointItems.push({
+      label: t("ctx.deleteBend"),
+      icon: <MenuIcon name="do_not_disturb_on" />,
+      onClick: () => a.deleteSectionBend?.(sec.id, secTarget.index),
+    });
   }
   // Eigenschaften übertragen — dasselbe Muster wie im Ebenen-Menü, nur für
   // 2D-Elemente. Kopieren ab einem gewählten Element, Einfügen sobald etwas

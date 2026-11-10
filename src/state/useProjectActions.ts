@@ -126,6 +126,8 @@ export function useProjectActions(
   const setCustomPaletteVisible = useStore((s) => s.setCustomPaletteVisible);
   const setBuiltinPaletteVisible = useStore((s) => s.setBuiltinPaletteVisible);
   const insertDrawingPoint = useStore((s) => s.insertDrawingPoint);
+  const insertSectionBend = useStore((s) => s.insertSectionBend);
+  const deleteSectionBend = useStore((s) => s.deleteSectionBend);
   const deleteDrawingPoint = useStore((s) => s.deleteDrawingPoint);
   const setPolylineVertexType = useStore((s) => s.setPolylineVertexType);
   // Wandstile: immutable Patch eines Wandtyps (z. B. Schichtfugen-Stile). Kein
@@ -444,6 +446,8 @@ export function useProjectActions(
     setCustomPaletteVisible,
     setBuiltinPaletteVisible,
     insertDrawingPoint,
+    insertSectionBend,
+    deleteSectionBend,
     deleteDrawingPoint,
     setPolylineVertexType,
     patchWallType,

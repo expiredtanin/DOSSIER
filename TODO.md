@@ -140,9 +140,12 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   (`plan/section/unfold.rs`): je Segment eigene Ebene, Schnittflächen auf den u-Bereich, Projektion an den Winkelhalbierenden
   der Knicke zugeschnitten, Teilbilder aneinander (u = abgewickelte Länge), dünne Knicklinie (0.13 mm) je Knick; Öffnungen,
   Achsen je Segment geschnitten, Bäume nach Mitte zugeordnet. Werkzeug: Schnitt nimmt weitere Klicks als Knicke, Enter/Doppelklick
-  beendet (Ansicht weiter zwei Klicks); Griffe an Anfang, Knicken, Ende (`grips.rs` `sectionLineGrip`). Offen: Grundriss-Unterlage
-  im Schnitt (`underlay.rs`) und 3D-Live-Schnitt folgen der Endpunkt-Verbindung; Knick einfügen/löschen am bestehenden Schnitt
-  (nur Ziehen); optionale dünne Ansichtsebene; Mac-/Tauri-Ansicht nicht geprüft.
+  beendet (Ansicht weiter zwei Klicks); Griffe an Anfang, Knicken, Ende (`grips.rs` `sectionLineGrip`). Knick einfügen/löschen (10.11.):
+  Mittel-Griff je Segment (Ziehen fügt den Knick ein, `sectionBendInsert`), Kontextmenü „Knick einfügen/löschen" (`sectionBendDelete`),
+  nach dem Ziehen entfallen Knicke auf einem Nachbarpunkt/der Geraden auch im Modell (`sectionLineTidy`, 5 mm bzw. 6 Bildschirm-Pixel); je Aktion ein Undo-Schritt
+  (gemeinsamer coalesceKey). Grundriss-Unterlage im Schnitt (`plan/underlay.rs` `underlay_for_level`) folgt den Knicken (je Segment
+  abgewickelt, an den Winkelhalbierenden zugeschnitten, `unfold::clip_plan_prims`). Offen: 3D-Live-Schnitt folgt der
+  Endpunkt-Verbindung; Mittel-Griffe sehen aus wie Eckgriffe; optionale dünne Ansichtsebene; Mac-/Tauri-Ansicht nicht geprüft.
   L-Marke (10.11., Wunsch Maintainer): Markentyp
   `DrawingLevel.markerStyle` ("arrow" Basis | "lAngle") mit Vorgabe `ModelViewOption.sectionMarks.style` (Ebene > Modelldarstellung >
   Pfeil; `Options::section_marker`); L = je Ende kräftiger langer Schenkel (12 mm) längs der Linie nach innen + kurzer (6 mm) in

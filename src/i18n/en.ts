@@ -1025,6 +1025,8 @@ export const en: Record<TranslationKey, string> = {
   "ctx.print": "Print",
   "ctx.insertPoint": "Insert point",
   "ctx.deletePoint": "Delete point",
+  "ctx.insertBend": "Insert bend",
+  "ctx.deleteBend": "Delete bend",
   "ctx.vertexType.corner": "Corner point",
   "ctx.vertexType.arc": "Arc point",
   "ctx.vertexType.spline": "Spline point",

@@ -1030,6 +1030,8 @@ export const de = {
   "ctx.print": "Drucken",
   "ctx.insertPoint": "Punkt einfügen",
   "ctx.deletePoint": "Punkt löschen",
+  "ctx.insertBend": "Knick einfügen",
+  "ctx.deleteBend": "Knick löschen",
   "ctx.vertexType.corner": "Eckpunkt",
   "ctx.vertexType.arc": "Bogenpunkt",
   "ctx.vertexType.spline": "Splinepunkt",
