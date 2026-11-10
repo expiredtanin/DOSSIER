@@ -1282,7 +1282,7 @@ export function useGripEditing(opts: {
       gripFreeRef.current = !!mods.alt;
       if (owner?.drawingId) {
         const od = project.drawings2d.find((x) => x.id === owner.drawingId);
-        if (od?.geom.shape === "dimension" && !od.geom.kind && owner.localIndex > od.geom.pts.length) {
+        if (od?.geom.shape === "dimension" && owner.localIndex > od.geom.pts.length) {
           applyGrip(index, raw);
           setDraft({ preview: gripPreviewShapes(), vertices: [], snap: null, hud: hudFor(index, raw) });
           return;

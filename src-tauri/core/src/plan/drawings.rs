@@ -792,7 +792,8 @@ fn emit_inner(c: &Ctx, d: &Drawing2D, attrs: Attrs, geom: &Drawing2DGeom, greyed
                     line_weight: line_weight_mm.unwrap_or(em.weight),
                     ext_weight: ext_weight_mm.unwrap_or(em.weight),
                     tick_weight: tick_weight_mm.unwrap_or(em.weight * 2.0),
-                    text_offset: (0.0, 0.0),
+                    // [172] Masszahl-Griff: gespeicherter Versatz (Papier-mm) wie bei linearen Massen.
+                    text_offset: text_offsets_mm.as_ref().and_then(|l| l.first()).map_or((0.0, 0.0), |o| (mm(o.along), mm(o.perp))),
                 };
                 dimension_round(&mut em, pts, *offset, *k, &st);
             }
@@ -989,6 +990,41 @@ pub fn dim_text_frame(a: Vec2, b: Vec2, offset: f64, text_height: f64) -> (Vec2,
     let read = v(jsnum::cos(angle), jsnum::sin(angle));
     let up = v(-jsnum::sin(angle), jsnum::cos(angle));
     (v(mid.x + up.x * text_height * 0.6, mid.y + up.y * text_height * 0.6), read, up, angle)
+}
+
+/// [172] Lage der Masszahl eines Radius-/Durchmesser-/Bogenlängenmasses: `at` = Ankerpunkt auf der Masslinie
+/// (Radius: Mitte der Strecke, Durchmesser: Mittelpunkt, Bogen: Bogenmitte auf der Masslinie), `angle` = Leserichtung
+/// (nie kopfüber), `len` = Länge der Masslinie (für die Einrast-Stellen des Masszahl-Griffs), `text` = die Zahl.
+pub struct RoundLabel {
+    pub at: Vec2,
+    pub angle: f64,
+    pub len: f64,
+    pub text: String,
+}
+
+pub fn round_label(kind: DimKind, pts: &[Vec2], offset: f64) -> Option<RoundLabel> {
+    let (&c, &p) = (pts.first()?, pts.get(1)?);
+    let r = hypot2(p.x - c.x, p.y - c.y);
+    if !(r > 1e-6) {
+        return None;
+    }
+    let upright = |a: f64| if jsnum::cos(a) < 0.0 { a + std::f64::consts::PI } else { a };
+    let ang = jsnum::atan2(p.y - c.y, p.x - c.x);
+    Some(match kind {
+        DimKind::Radius => RoundLabel { at: v((c.x + p.x) / 2.0, (c.y + p.y) / 2.0), angle: upright(ang), len: r, text: format!("R {}", to_fixed(r, 2)) },
+        DimKind::Diameter => RoundLabel { at: c, angle: upright(ang), len: 2.0 * r, text: format!("\u{d8} {}", to_fixed(2.0 * r, 2)) },
+        DimKind::Arc => {
+            let p1 = *pts.get(2)?;
+            let a1 = jsnum::atan2(p1.y - c.y, p1.x - c.x);
+            let sweep = (a1 - ang).rem_euclid(std::f64::consts::TAU);
+            let rr = r + offset;
+            if !(rr > 1e-6) || !(sweep > 1e-9) {
+                return None;
+            }
+            let am = ang + sweep / 2.0;
+            RoundLabel { at: v(c.x + jsnum::cos(am) * rr, c.y + jsnum::sin(am) * rr), angle: upright(am + std::f64::consts::FRAC_PI_2), len: rr * sweep, text: format!("L {}", to_fixed(r * sweep, 2)) }
+        }
+    })
 }
 
 /// [172] Textanfang so, dass die Zahl `s` (Schrifthöhe `h`) um `mid` zentriert steht: Texte hängen an ihrem Anfang
@@ -1223,16 +1259,15 @@ fn dimension_round(em: &mut Em, pts: &[Vec2], offset: f64, kind: DimKind, st: &D
         let h = st.tick_len / 2.0;
         em.line(v(q.x - dx * h, q.y - dy * h), v(q.x + dx * h, q.y + dy * h), st.tick_weight, None, 0);
     };
-    let label = |em: &mut Em, at: Vec2, ang: f64, s: String| {
-        let mut a = ang;
-        if jsnum::cos(a) < 0.0 {
-            a += std::f64::consts::PI;
-        }
-        let up = v(-jsnum::sin(a), jsnum::cos(a));
-        let q = v(at.x + up.x * st.text_height * 0.6, at.y + up.y * st.text_height * 0.6);
-        // [172] Mittig über dem Ankerpunkt, nicht mit dem Anfang daran hängend.
-        let q = centered(q, v(jsnum::cos(a), jsnum::sin(a)), &s, st.text_height);
-        let pr = text(q, s, st.text_height, a, em.color, em.greyed, Some(em.id));
+    // [172] Masszahl: Anker, Winkel und Text aus `round_label`, dazu der Versatz (entlang, quer) des Einrast-Griffs.
+    let label = |em: &mut Em| {
+        let Some(l) = round_label(kind, pts, offset) else { return };
+        let (read, up) = (v(jsnum::cos(l.angle), jsnum::sin(l.angle)), v(-jsnum::sin(l.angle), jsnum::cos(l.angle)));
+        let (al, pe) = st.text_offset;
+        let q = v(l.at.x + up.x * (st.text_height * 0.6 + pe) + read.x * al, l.at.y + up.y * (st.text_height * 0.6 + pe) + read.y * al);
+        // Mittig über dem Ankerpunkt, nicht mit dem Anfang daran hängend.
+        let q = centered(q, read, &l.text, st.text_height);
+        let pr = text(q, l.text, st.text_height, l.angle, em.color, em.greyed, Some(em.id));
         em.sink.push(pr, 0);
     };
     let (dash, dref) = (em.dash.clone(), em.dash_ref);
@@ -1242,15 +1277,14 @@ fn dimension_round(em: &mut Em, pts: &[Vec2], offset: f64, kind: DimKind, st: &D
             em.line(c, p, st.line_weight, dash, dref);
             tick(em, p, ux, uy);
             tick(em, c, ux, uy);
-            let mid = v((c.x + p.x) / 2.0, (c.y + p.y) / 2.0);
-            label(em, mid, jsnum::atan2(uy, ux), format!("R {}", to_fixed(r, 2)));
+            label(em);
         }
         DimKind::Diameter => {
             let q = v(c.x - ux * r, c.y - uy * r);
             em.line(q, p, st.line_weight, dash, dref);
             tick(em, p, ux, uy);
             tick(em, q, ux, uy);
-            label(em, c, jsnum::atan2(uy, ux), format!("\u{d8} {}", to_fixed(2.0 * r, 2)));
+            label(em);
         }
         DimKind::Arc => {
             let Some(&p1) = pts.get(2) else { return };
@@ -1271,9 +1305,7 @@ fn dimension_round(em: &mut Em, pts: &[Vec2], offset: f64, kind: DimKind, st: &D
                 Primitive::DrawingArc { center: c, r: rr, a0, a1: a0 + sweep, stroke: em.color.into(), weight_mm: st.line_weight, dash: Some(dash.map(|x| x.to_vec())), drawing_id: Some(em.id.into()), greyed: Some(em.greyed), opacity: None },
                 if dash.is_some() { dref } else { 0 },
             );
-            let am = a0 + sweep / 2.0;
-            let at = v(c.x + jsnum::cos(am) * rr, c.y + jsnum::sin(am) * rr);
-            label(em, at, am + std::f64::consts::FRAC_PI_2, format!("L {}", to_fixed(r * sweep, 2)));
+            label(em);
         }
     }
 }
@@ -2328,6 +2360,18 @@ mod tests {
         assert!(t.starts_with("L "));
         // Anker (Bogenmitte) liegt auf der Diagonale; die Zahl steht quer dazu zentriert: Mitte ⟂ Verbindung zum Mittelpunkt.
         assert!((m.x - m.y).abs() < 0.2 * h + 1e-9, "{m:?}");
+    }
+
+    /// [172] Rundmass: gespeicherter Masszahl-Versatz (Papier-mm) verschiebt die Zahl in Leserichtung und quer.
+    #[test]
+    fn rundmass_masszahl_versatz() {
+        let p = project(serde_json::json!({}));
+        let at = |offs: serde_json::Value| -> Vec2 {
+            let g = serde_json::json!({"shape": "dimension", "kind": "radius", "pts": [{"x": 0, "y": 0}, {"x": 2, "y": 0}], "offset": 0.0, "textOffsetsMm": offs});
+            render(&p, drawing(g), 100.0).iter().find_map(|pr| if let Primitive::DrawingText { at, .. } = pr { Some(*at) } else { None }).expect("Text")
+        };
+        let (a, b) = (at(serde_json::json!([])), at(serde_json::json!([{"along": 3.0, "perp": 2.0}])));
+        assert!((b.x - a.x - 0.3).abs() < 1e-9 && (b.y - a.y - 0.2).abs() < 1e-9, "{a:?} {b:?}");
     }
 
     /// [172] Gespeicherte Abweichung (frei verschobener Text alter Projekte) bleibt, wo sie ist; (0,0) = Vorgabe.

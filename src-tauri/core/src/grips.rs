@@ -490,13 +490,44 @@ fn dim_height(g: &Value, scale: f64) -> f64 {
     mm_to_model(num_or(field(g, "textHeightMm"), DIM_TEXT_HEIGHT_MM), scale)
 }
 
+/// [172] Masszahl eines Radius-/Durchmesser-/Bogenlängenmasses: (Art, Rahmen). Mitte der Zahl bei Versatz 0 =
+/// Anker + Querachse · 0.6 h; Leserichtung/Querachse wie im Plan (`plan::drawings::round_label`).
+fn round_dim_label(g: &Value) -> Option<(crate::plan::drawings::RoundLabel, (f64, f64), (f64, f64))> {
+    use crate::model::DimKind;
+    let kind = match field(g, "kind").and_then(Value::as_str)? {
+        "radius" => DimKind::Radius,
+        "diameter" => DimKind::Diameter,
+        "arc" => DimKind::Arc,
+        _ => return None,
+    };
+    let pts: Vec<crate::model::Vec2> = arr(field(g, "pts")).iter().map(|q| xy(q)).map(|q| crate::model::Vec2 { x: q.0, y: q.1 }).collect();
+    let l = crate::plan::drawings::round_label(kind, &pts, num_of(field(g, "offset")))?;
+    let (read, up) = ((jsnum::cos(l.angle), jsnum::sin(l.angle)), (-jsnum::sin(l.angle), jsnum::cos(l.angle)));
+    Some((l, read, up))
+}
+
+/// [172] Lage des Masszahl-Griffs eines Rundmasses (Modell-Meter), samt gespeichertem Versatz.
+fn round_dim_text_grip(g: &Value, scale: f64) -> Option<(f64, f64)> {
+    let (l, read, up) = round_dim_label(g)?;
+    let h = dim_height(g, scale);
+    let o = arr(field(g, "textOffsetsMm")).first().cloned().unwrap_or(Value::Null);
+    let (along, perp) = (mm_to_model(num_or(field(&o, "along"), 0.0), scale), mm_to_model(num_or(field(&o, "perp"), 0.0), scale));
+    let q = (l.at.x + up.0 * (0.6 * h + perp) + read.0 * along, l.at.y + up.1 * (0.6 * h + perp) + read.1 * along);
+    (q.0.is_finite() && q.1.is_finite()).then_some(q)
+}
+
 /// [172] Einrast-Stellen der Masszahl eines Segments der Länge `len` (Modell-Meter, Schrifthöhe `h`) als (entlang,
 /// quer) ab der Mitte über dem Massstrich: Mitte (Vorgabe), innen links/rechts (Zahl bündig an der Hilfslinie),
 /// aussen links/rechts, eine Zeile über bzw. unter der Linie. Nächste Stelle zu (`along`, `perp`); passt die Zahl
 /// nicht zwischen die Hilfslinien, entfallen Mitte und innen. Mitte = (0, 0) = Vorgabe (läuft über `dim_auto_offsets`).
 fn dim_text_slot(len: f64, h: f64, along: f64, perp: f64) -> (f64, f64) {
-    use crate::plan::drawings::{dim_text_below, dim_text_pad, dim_text_row, dim_text_width};
-    let (w, pad, row) = (dim_text_width(len, h), dim_text_pad(h), dim_text_row(h));
+    dim_text_slot_w(len, crate::plan::drawings::dim_text_width(len, h), h, along, perp)
+}
+
+/// Wie [`dim_text_slot`] mit gegebener Breite `w` der Zahl (Rundmasse tragen ein Präfix: „R 2.00“).
+fn dim_text_slot_w(len: f64, w: f64, h: f64, along: f64, perp: f64) -> (f64, f64) {
+    use crate::plan::drawings::{dim_text_below, dim_text_pad, dim_text_row};
+    let (pad, row) = (dim_text_pad(h), dim_text_row(h));
     let fits = w + 2.0 * pad <= len;
     let (inner, outer) = (len / 2.0 - w / 2.0 - pad, len / 2.0 + w / 2.0 + pad);
     let mut slots = vec![(-outer, 0.0), (outer, 0.0), (0.0, row), (0.0, dim_text_below(h))];
@@ -565,6 +596,17 @@ fn drawing_grip(d: &Value, index: f64, x: f64, y: f64, scale: f64, free: bool) -
                 let q = pt(c.0 + (x - c.0) * r / l, c.1 + (y - c.1) * r / l);
                 let ng = with(g, "pts", replace_at(pts, index, &q));
                 return Some(with_geom(d, crate::dim_assoc::without_ref(&ng, index_in(index, n))));
+            }
+            // Masszahl-Griff eines Rundmasses ([172]): rastet wie bei linearen Massen ein (Alt = frei).
+            if matches!(field(g, "kind").and_then(Value::as_str), Some("radius" | "diameter" | "arc")) && index == n as f64 + 1.0 {
+                let (l, read, up) = round_dim_label(g)?;
+                let h = dim_height(g, scale);
+                let (vx, vy) = (x - l.at.x, y - l.at.y);
+                let (along, perp) = (vx * read.0 + vy * read.1, vx * up.0 + vy * up.1 - 0.6 * h);
+                let w = crate::text_layout::text_width_em(&l.text, false) * h;
+                let (along, perp) = if free { (along, perp) } else { dim_text_slot_w(l.len, w, h, along, perp) };
+                let next = serde_json::json!({"along": js_num(model_to_mm(along, scale)), "perp": js_num(model_to_mm(perp, scale))});
+                return set("textOffsetsMm", Value::Array(vec![next]));
             }
             if index < n as f64 {
                 // Von Hand gezogener Punkt ist frei ([38]).
@@ -1219,6 +1261,11 @@ pub fn drawing_vertices(g: &Value, scale: f64) -> Option<Vec<(f64, f64)>> {
             let offset = num_of(field(g, "offset"));
             let (nx, ny) = ((-dy / len) * offset, (dx / len) * offset);
             out.push(((a.0 + b.0) / 2.0 + nx, (a.1 + b.1) / 2.0 + ny));
+            // Rundmass ([172]): ein Masszahl-Griff an der Zahl selbst.
+            if let Some(q) = round_dim_text_grip(g, scale) {
+                out.push(q);
+                return Some(out);
+            }
             let h = dim_height(g, scale);
             let offs = arr(field(g, "textOffsetsMm"));
             // [172] Ohne gespeicherte Abweichung steht der Griff dort, wo der Plan die Zahl zeichnet.
@@ -1385,6 +1432,49 @@ mod tests {
         assert!((en.0 - a0.center.x).hypot(en.1 - a0.center.y) - a0.r < 1e-9);
         let res = run(&Lookup::plain(&r), &rq(json!({"op": "moveGrip", "wallId": "w", "index": 2, "pt": [2, 0]}))).unwrap();
         assert!(res.ops[0].to_json()["entity"].get("bulge").is_none());
+    }
+
+    /// [172] Masszahl-Griff eines Radius-/Durchmesser-/Bogenmasses: Lage an der Zahl, rastet ein, Alt = frei.
+    #[test]
+    fn rundmass_masszahl_griff_rastet_ein() {
+        let h = 0.25;
+        let mk = |kind: &str, pts: Value| json!({"id": "d", "level": "L", "geom": {"shape": "dimension", "kind": kind, "pts": pts, "offset": 0.0}});
+        // Radius 2: Zahl mittig über der Strecke, Griff genau dort (Index = n + 1).
+        let d = mk("radius", json!([{"x": 0, "y": 0}, {"x": 2, "y": 0}]));
+        let v = drawing_vertices(d.get("geom").unwrap(), 100.0).unwrap();
+        assert_eq!(v.len(), 4, "{v:?}");
+        assert!((v[3].0 - 1.0).abs() < 1e-9 && (v[3].1 - 0.6 * h).abs() < 1e-9, "{:?}", v[3]);
+        let r = root(json!({"drawings2d": [d]}));
+        let run_at = |x: f64, y: f64, free: bool| {
+            let res = run(&Lookup::plain(&r), &rq(json!({"op": "moveGrip", "drawingId": "d", "index": 3, "pt": [x, y], "scale": 100, "free": free}))).unwrap();
+            let o = entity(&res)["geom"]["textOffsetsMm"][0].clone();
+            (o["along"].as_f64().unwrap(), o["perp"].as_f64().unwrap())
+        };
+        // Nahe der Mitte: Vorgabe (0, 0).
+        assert_eq!(run_at(1.05, 0.17, false), (0.0, 0.0));
+        // Deutlich darüber: eine Zeile höher (1.35 h = 3.375 mm Papier bei 1:100 und h = 2.5 mm).
+        let (al, pe) = run_at(1.0, 0.15 + 0.4, false);
+        assert!(al.abs() < 1e-9 && (pe - 3.375).abs() < 1e-6, "{al} {pe}");
+        // Weit rechts: aussen rechts, bündig neben dem Strecken-Ende.
+        let (al, pe) = run_at(4.0, 0.15, false);
+        assert!(al > 0.0 && pe == 0.0, "{al} {pe}");
+        // Alt: frei, ohne Einrasten.
+        let (al, pe) = run_at(1.3, 0.35, true);
+        assert!((al - 3.0).abs() < 1e-6 && (pe - 2.0).abs() < 1e-6, "{al} {pe}");
+        // Griff steht danach an der verschobenen Zahl.
+        let moved = json!({"id": "d", "level": "L", "geom": {"shape": "dimension", "kind": "radius", "pts": [{"x": 0, "y": 0}, {"x": 2, "y": 0}], "offset": 0.0, "textOffsetsMm": [{"along": 3, "perp": 2}]}});
+        let v = drawing_vertices(moved.get("geom").unwrap(), 100.0).unwrap();
+        assert!((v[3].0 - 1.3).abs() < 1e-9 && (v[3].1 - 0.35).abs() < 1e-9, "{:?}", v[3]);
+        // Durchmesser: Anker im Mittelpunkt; Bogenlänge: genau ein Text-Griff (Index 4).
+        let dm = mk("diameter", json!([{"x": 0, "y": 0}, {"x": 2, "y": 0}]));
+        let v = drawing_vertices(dm.get("geom").unwrap(), 100.0).unwrap();
+        assert!(v[3].0.abs() < 1e-9, "{v:?}");
+        let ar = mk("arc", json!([{"x": 0, "y": 0}, {"x": 2, "y": 0}, {"x": 0, "y": 2}]));
+        let v = drawing_vertices(ar.get("geom").unwrap(), 100.0).unwrap();
+        assert_eq!(v.len(), 5, "{v:?}");
+        let r = root(json!({"drawings2d": [ar]}));
+        let res = run(&Lookup::plain(&r), &rq(json!({"op": "moveGrip", "drawingId": "d", "index": 4, "pt": [1.4, 1.4], "scale": 100}))).unwrap();
+        assert!(entity(&res)["geom"]["textOffsetsMm"][0].is_object());
     }
 
     /// [T2] Bogenlängen-/Radiusmass: Randpunkte-Griffe bleiben auf dem Kreis um den Mittelpunkt.
