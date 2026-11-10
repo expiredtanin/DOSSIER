@@ -1844,6 +1844,32 @@ mod tests {
         }
     }
 
+    /// [155] Treppen-Linien (Lauflinie, gestrichelt wie ausgezogen, Pfeil, Tritte, Bruchlinie) sind Hindernisse der Raumstempel.
+    #[test]
+    fn stempel_weichen_den_treppenlinien_aus() {
+        let p = sample();
+        let t = serde_json::json!({ "floor": "eg", "show": ["20", "21", "30", "40", "50", "60"], "grey": [], "scale": 100 }).to_string();
+        let a = PlanArgs::parse(1.0, &t).unwrap();
+        let c = Ctx::new(&p, &a);
+        let d = plan_domains(&p, &a).unwrap();
+        let o = stamp_obstacles(&c, &d);
+        let mut seen = std::collections::BTreeSet::new();
+        for q in &d.stairs {
+            if let Primitive::Line { a, b, cls, .. } = q {
+                if matches!(cls.as_str(), "stair-run" | "stair-arrow" | "stair-tread" | "stair-break") {
+                    seen.insert(cls.clone());
+                    let m = Vec2 { x: (a.x + b.x) / 2.0, y: (a.y + b.y) / 2.0 };
+                    assert_eq!(o.clearance(m, 0.001, 0.001), 0.0, "{cls}");
+                }
+            }
+        }
+        assert!(seen.contains("stair-run") && seen.contains("stair-arrow"), "{seen:?}");
+        // Lauflinie: Schnitthöhe liegt in der Treppe, also ein ausgezogenes und ein gestricheltes Stück; Pfeil ausgezogen.
+        let dashed = |cls: &str| d.stairs.iter().filter(|q| matches!(q, Primitive::Line { cls: c, dash: Some(Some(_)), .. } if c == cls)).count();
+        assert!(dashed("stair-run") >= 1, "Lauflinie hinter der Bruchlinie gestrichelt");
+        assert_eq!(dashed("stair-arrow"), 0);
+    }
+
     /// [140] Schatten der Sonnenstudie liegt unter Bemassung, Texten und Raumstempeln: im Plan-Puffer (Quelle
     /// für Bildschirm, Druck-SVG/PDF und CLI-SVG) kommen alle Schattenflächen vor der ersten Zeichnung, dem
     /// ersten Stempel und jedem Raum — in Tusche und farbig.

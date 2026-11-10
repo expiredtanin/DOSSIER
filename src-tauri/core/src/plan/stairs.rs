@@ -101,7 +101,7 @@ fn emit(out: &mut Vec<Primitive>, f: &[f64], stroke: &str, greyed: Option<bool>,
             }
             2 => {
                 let cls = LINE_CLS.get(f[i + 1] as usize).copied().unwrap_or("");
-                let dash = (cls == "stair-tread" || cls == "stair-handrail" || cls == "stair-outline").then(|| (f[i + 3] != 0.0).then(|| TREAD_DASH.to_vec()));
+                let dash = (cls == "stair-tread" || cls == "stair-handrail" || cls == "stair-outline" || cls == "stair-run").then(|| (f[i + 3] != 0.0).then(|| TREAD_DASH.to_vec()));
                 out.push(stair_line(v2(f[i + 4], f[i + 5]), v2(f[i + 6], f[i + 7]), cls, f[i + 2], dash, stroke, greyed, id));
                 i += 8;
             }
