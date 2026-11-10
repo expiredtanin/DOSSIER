@@ -42,6 +42,16 @@ export function gripPolarPoint(anchor: Vec2, locks: GripLocks, raw: Vec2): Vec2 
 }
 
 /**
+ * [T2] Endpunkt-Griff einer Bogenwand (`index` 0 = Start, 1 = Ende): Zielpunkt auf dem Kreis (Mittelpunkt und
+ * Radius bleiben) und die Bogenlänge der Wand danach. `length` = getippte Bogenlänge ab dem festen Ende,
+ * sonst folgt der Punkt dem Cursor `raw`. `null` bei Unsinn.
+ */
+export function gripArcWallTarget(w: Pick<Wall, "start" | "end" | "bulge">, index: 0 | 1, length: number | undefined, raw: Vec2): { pt: Vec2; arcLength: number } | null {
+  const f = core().grip_arc_wall_target(w.start.x, w.start.y, w.end.x, w.end.y, w.bulge ?? 0, index, length ?? NaN, raw.x, raw.y);
+  return f.length >= 3 ? { pt: v(f), arcLength: f[2] } : null;
+}
+
+/**
  * Shift-Achsen-Lock eines Punkt-Griffs: Welt-H/V durch den Nachbar-Griff `anchor`, bei einem Vielecks-
  * Eckpunkt (`ring` = Punkte des Elements, `index` darin, `origin` = Lage vor dem Zug) zusätzlich die Flucht
  * der beiden fixen Nachbarkanten. Die nächstliegende Achse gewinnt.

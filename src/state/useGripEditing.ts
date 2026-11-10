@@ -8,7 +8,7 @@
 import { useRef, useState, type RefObject } from "react";
 import { useEventBundle, useSameData } from "./useEvent";
 import { leftNormal, normalize, scale, sub, wallCorners } from "../model/geometry";
-import type { Ceiling, Drawing2D, EdgeGrip, Excavation, Project, Room, Vec2 } from "../model/types";
+import type { Ceiling, Drawing2D, EdgeGrip, Excavation, Project, Room, Vec2, Wall } from "../model/types";
 import { wallTypeThickness } from "../model/types";
 import { bulgeArcPoints, drawingVertices, surfaceOpeningGripPatch, surfaceOpeningGrips, surfaceOpeningInfo, wallArcBand } from "../core";
 import { gripDrawingIdsFor } from "./gripLimits";
@@ -16,6 +16,7 @@ import { openEdges, polylineEdgeGrips, ringEdges } from "../core";
 import {
   coincidentGripPoints,
   excavationGripPoints,
+  gripArcWallTarget,
   gripAxisLock,
   gripEdgeTarget,
   gripPolar,
@@ -583,13 +584,28 @@ export function useGripEditing(opts: {
   const gripOpeningPos0Ref = useRef<{ position: number; dir: Vec2 } | null>(null);
 
   // Endpunkt aus Anker + (gelockten/Live-)Länge/Winkel (Kern `gripPolarPoint`) — wie lineEndFromFields.
-  const gripEditPoint = gripPolarPoint;
+  // [T2] Endpunkt-Griff einer Bogenwand: der Punkt folgt dem Kreis, die getippte Länge ist die Bogenlänge
+  // ab dem festen Ende (kein Winkel-Feld).
+  const arcWallEnd = (index: number): { wall: Wall; end: 0 | 1 } | null => {
+    const owner = gripOwners[index];
+    const wall = owner?.wallId ? project.walls.find((x) => x.id === owner.wallId) : undefined;
+    return wall && wall.bulge && (owner?.localIndex === 0 || owner?.localIndex === 1) ? { wall, end: owner.localIndex } : null;
+  };
+  const gripEditPoint = (anchor: Vec2, locks: GripLocks, raw: Vec2, index?: number): Vec2 => {
+    const arc = index != null ? arcWallEnd(index) : null;
+    return (arc && gripArcWallTarget(arc.wall, arc.end, locks.length, raw)?.pt) ?? gripPolarPoint(anchor, locks, raw);
+  };
 
   // Felder fürs Befehlsfeld während des Vertex-Drags (Live ODER gelockt).
   const gripEditFields = (): GripEditFieldsState[] => {
     const ge = gripEdit;
     const info = gripDragInfoRef.current;
     if (!ge || !info) return [];
+    const arc = arcWallEnd(info.index);
+    if (arc) {
+      const live = gripArcWallTarget(arc.wall, arc.end, undefined, info.raw)?.arcLength ?? 0;
+      return [{ id: "length", labelKey: "cmd.field.length", value: ge.locks.length ?? live, locked: ge.locks.length != null, active: true }];
+    }
     return polarFields(ge, gripPolar(ge.anchor, info.raw));
   };
 
@@ -668,7 +684,14 @@ export function useGripEditing(opts: {
     const anchor = resolveGripAnchor(info.index);
     if (!anchor) return; // ohne Anker keine polare Eingabe möglich
     const wallDir = openingWallDir();
+    const arcEnd = arcWallEnd(info.index);
     setGripEdit((prev) => {
+      if (arcEnd) {
+        // Bogenwand ([T2]): nur das Längenfeld (Bogenlänge), eingefroren auf der aktuellen Länge.
+        if (prev) return prev;
+        const length = gripArcWallTarget(arcEnd.wall, arcEnd.end, undefined, grips[info.index])?.arcLength;
+        return length != null ? { anchor, active: "length", locks: { length } } : prev;
+      }
       if (!prev && wallDir) {
         // Öffnung ([144]): Richtung = Wandrichtung (bzw. Gegenrichtung, je nach bisherigem Zug), damit
         // die getippte Länge genau die Strecke entlang der Wand ist.
@@ -701,10 +724,10 @@ export function useGripEditing(opts: {
     const info = gripDragInfoRef.current;
     if (!ge || !info) return;
     const locks = { ...ge.locks, [ge.active]: value };
-    const next = ge.active === "length" ? "angle" : "length";
+    const next = ge.active === "length" && !arcWallEnd(info.index) ? "angle" : "length";
     setGripEdit({ ...ge, locks, active: next });
     // Zielpunkt mit dem frischen Lock anwenden (live, ohne Maus-Bewegung).
-    const pt = gripEditPoint(ge.anchor, locks, info.raw);
+    const pt = gripEditPoint(ge.anchor, locks, info.raw, info.index);
     applyGripEdit(info.index, pt, ge.anchor, locks.length);
   };
 
@@ -1069,7 +1092,10 @@ export function useGripEditing(opts: {
     const anchor = resolveGripAnchor(index);
     if (!anchor) return undefined;
     const { length, angleDeg } = gripPolar(anchor, pt);
-    return { at: pt, length, angleDeg };
+    // Bogenwand ([T2]): Länge = Bogenlänge der Wand mit dem Endpunkt am Cursor.
+    const arc = arcWallEnd(index);
+    const arcLength = arc ? gripArcWallTarget(arc.wall, arc.end, undefined, pt)?.arcLength : undefined;
+    return { at: pt, length: arcLength ?? length, angleDeg };
   };
   // Dasselbe für einen gezogenen Kanten-Griff: freie Kanten zeigen Länge+Winkel
   // (wie ein Punkt-Griff), geführte Kanten nur EINEN Wert (Abstand entlang der
@@ -1216,7 +1242,7 @@ export function useGripEditing(opts: {
       const ge = gripEditRef.current;
       gripDragInfoRef.current = { index, raw };
       if (ge && (ge.locks.length != null || ge.locks.angle != null)) {
-        const pt = gripEditPoint(ge.anchor, ge.locks, raw);
+        const pt = gripEditPoint(ge.anchor, ge.locks, raw, index);
         applyGripEdit(index, pt, ge.anchor, ge.locks.length);
         setDraft({ preview: gripPreviewShapes(), vertices: [], snap: null, hud: hudFor(index, pt) });
         return;

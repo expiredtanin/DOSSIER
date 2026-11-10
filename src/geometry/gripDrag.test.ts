@@ -2,6 +2,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  gripArcWallTarget,
   coincidentGripPoints,
   gripAxisLock,
   gripEdgeTarget,
@@ -78,5 +79,21 @@ describe("Griff-Zug (Kern)", () => {
     const corners = [{ x: 0, y: 0 }, { x: 4, y: 0 }];
     const groups = [[{ x: 4.03, y: 0 }, { x: 4, y: 3 }], [], [{ x: 0, y: 0.04 }]];
     expect(coincidentGripPoints(corners, groups)).toEqual([{ group: 2, index: 0 }, { group: 0, index: 0 }]);
+  });
+});
+
+describe("[T2] Bogenwand-Endpunkt-Griff", () => {
+  const wall = { start: { x: 0, y: 0 }, end: { x: 4, y: 0 }, bulge: 1 };
+  it("projiziert den Cursor auf den Kreis und meldet die Bogenlänge", () => {
+    const r = gripArcWallTarget(wall, 1, undefined, { x: 2, y: 7 });
+    expect(r?.pt.x).toBeCloseTo(2, 9);
+    expect(r?.pt.y).toBeCloseTo(2, 9);
+    expect(r?.arcLength).toBeCloseTo(Math.PI, 9);
+  });
+  it("getippte Bogenlänge ab dem festen Ende", () => {
+    const r = gripArcWallTarget(wall, 1, Math.PI, { x: 3, y: 3 });
+    expect(r?.pt.x).toBeCloseTo(2, 9);
+    expect(r?.pt.y).toBeCloseTo(2, 9);
+    expect(gripArcWallTarget(wall, 1, -1, { x: 3, y: 3 })).toBeNull();
   });
 });

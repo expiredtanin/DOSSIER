@@ -35,6 +35,18 @@ pub fn grip_polar_point(ax: f64, ay: f64, length: f64, angle: f64, rx: f64, ry: 
     vec![p.0, p.1]
 }
 
+/// [T2] Endpunkt-Griff einer Bogenwand (`grip_drag::arc_wall_grip_target`): `index` 0/1, `length` NaN = Cursor
+/// `(rx, ry)` auf den Kreis projiziert. `[x, y, bogenlänge]`, bei Unsinn leer.
+#[wasm_bindgen]
+#[allow(clippy::too_many_arguments)]
+pub fn grip_arc_wall_target(sx: f64, sy: f64, ex: f64, ey: f64, bulge: f64, index: f64, length: f64, rx: f64, ry: f64) -> Vec<f64> {
+    let i = if index == 0.0 { 0 } else if index == 1.0 { 1 } else { return Vec::new() };
+    match gd::arc_wall_grip_target((sx, sy), (ex, ey), bulge, i, opt(length), (rx, ry)) {
+        Some((p, l)) => vec![p.0, p.1, l],
+        None => Vec::new(),
+    }
+}
+
 /// Shift-Achsen-Lock (`grip_drag::axis_lock`): Ursprung `(ox, oy)` NaN = noch keiner; `ring` = Punkte des
 /// Elements (leer = keine Polygon-Nachbarn), `index` = gezogener Punkt darin. `[x, y]`.
 #[wasm_bindgen]

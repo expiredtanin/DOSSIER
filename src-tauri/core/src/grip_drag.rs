@@ -220,6 +220,75 @@ pub fn opening_wall_grip(ws: P, we: P, bulge: f64, position: f64, width: f64) ->
     add(ws, scale(normalize(sub(we, ws)), position + width / 2.0))
 }
 
+/// [T2] Endpunkt einer Bogenwand entlang des Kreises ziehen: Mittelpunkt und Achsradius bleiben, das
+/// andere Ende bleibt stehen. `index` 0 = Start, 1 = Ende; `target` wird auf den Kreis projiziert, der
+/// Öffnungswinkel zwischen den zwei möglichen Bögen so gewählt, dass er dem bisherigen am nächsten
+/// liegt (stetig beim Ziehen). Ergebnis `(neuer Start, neues Ende, neuer Bulge)`; `None` bei Unsinn,
+/// Ziel im Mittelpunkt oder ohne Bogen.
+pub fn arc_wall_endpoint(s: P, e: P, bulge: f64, index: usize, target: P) -> Option<(P, P, f64)> {
+    let a = crate::wall_arc::WallArc::of(kernel2d::Vec2::new(s.0, s.1), kernel2d::Vec2::new(e.0, e.1), Some(bulge))?;
+    let (c, r) = ((a.center.x, a.center.y), a.r);
+    let th = arc_angle_of(c, target)?;
+    let (a1, tau) = (a.a0 + a.sweep, 2.0 * PI);
+    // Fester Winkel F und Richtung: Start bewegt → Sweep läuft von th nach a1; Ende bewegt → von a0 nach th.
+    let sweep = if index == 0 { nearest_sweep(a1 - th, a.sweep, tau) } else { nearest_sweep(th - a.a0, a.sweep, tau) };
+    if sweep.abs() < 1e-6 || sweep.abs() > tau - 1e-6 {
+        return None;
+    }
+    let at = |ang: f64| (c.0 + r * jsnum::cos(ang), c.1 + r * jsnum::sin(ang));
+    let (ns, ne) = if index == 0 { (at(th), e) } else { (s, at(th)) };
+    let nb = -jsnum::tan(sweep / 4.0);
+    (nb.is_finite()).then_some((ns, ne, nb))
+}
+
+fn arc_angle_of(c: P, p: P) -> Option<f64> {
+    let (dx, dy) = (p.0 - c.0, p.1 - c.1);
+    (dx.is_finite() && dy.is_finite() && hypot2(dx, dy) > 1e-9).then(|| jsnum::atan2(dy, dx))
+}
+
+/// Von den zwei Bögen mit Winkel `d` (mod 2π) — `d` in (0, 2π) CCW bzw. `d − 2π` CW — der dem `old` nächste.
+fn nearest_sweep(d: f64, old: f64, tau: f64) -> f64 {
+    let m = ((d % tau) + tau) % tau;
+    let (ccw, cw) = (m, m - tau);
+    if (ccw - old).abs() <= (cw - old).abs() { ccw } else { cw }
+}
+
+/// [T2] Zielpunkt eines Endpunkt-Griffs der Bogenwand samt Bogenlänge der Wand danach: mit `length` (Tab)
+/// der Punkt dieser Bogenlänge vom festen Ende ([`arc_wall_point_at_length`]), sonst der auf den Kreis
+/// projizierte Cursor `raw`. `None` bei Unsinn.
+pub fn arc_wall_grip_target(s: P, e: P, bulge: f64, index: usize, length: Option<f64>, raw: P) -> Option<(P, f64)> {
+    let p = match length {
+        Some(l) => arc_wall_point_at_length(s, e, bulge, index, l, raw)?,
+        None => raw,
+    };
+    let (ns, ne, nb) = arc_wall_endpoint(s, e, bulge, index, p)?;
+    let a = crate::wall_arc::WallArc::of(kernel2d::Vec2::new(ns.0, ns.1), kernel2d::Vec2::new(ne.0, ne.1), Some(nb))?;
+    Some((if index == 0 { ns } else { ne }, a.length()))
+}
+
+/// [T2] Bogenlängen-Eingabe (Tab) am Endpunkt einer Bogenwand: der Punkt, der `length` (Bogenlänge,
+/// Meter) vom festen Ende entfernt auf dem Kreis liegt, auf der Seite des Cursors `raw` (am Fixpunkt:
+/// Laufrichtung des bisherigen Bogens). `None` bei Unsinn oder `length` ≤ 0 bzw. ≥ Vollkreis.
+pub fn arc_wall_point_at_length(s: P, e: P, bulge: f64, index: usize, length: f64, raw: P) -> Option<P> {
+    let a = crate::wall_arc::WallArc::of(kernel2d::Vec2::new(s.0, s.1), kernel2d::Vec2::new(e.0, e.1), Some(bulge))?;
+    let (c, r) = ((a.center.x, a.center.y), a.r);
+    let tau = 2.0 * PI;
+    if !(length.is_finite() && length > 0.0 && length / r < tau - 1e-6) {
+        return None;
+    }
+    let (fixed_angle, run_dir) = if index == 0 { (a.a0 + a.sweep, -a.sigma()) } else { (a.a0, a.sigma()) };
+    let side = match arc_angle_of(c, raw) {
+        Some(t) => {
+            let mut d = (t - fixed_angle) % tau;
+            if d > PI { d -= tau } else if d <= -PI { d += tau }
+            if d.abs() < 1e-9 { run_dir } else { d.signum() }
+        }
+        None => run_dir,
+    };
+    let ang = fixed_angle + side * length / r;
+    Some((c.0 + r * jsnum::cos(ang), c.1 + r * jsnum::sin(ang)))
+}
+
 /// Öffnung im Schnitt-Blatt waagrecht ziehen: Blatt-Delta `du` (gesamt, entlang der Schnitt-Achse `u_axis`)
 /// → neue `position` (geklemmt) und das dazu passende, tatsächlich wirksame Blatt-Delta. `None`, wenn die
 /// Wand fast quer zur Schnittlinie steht (|u · Wandrichtung| < 0.15). Bogenwand ([144], `bulge`):
@@ -591,6 +660,59 @@ mod tests {
         // Unsinn: keine Bewegung, kein Panic.
         assert_eq!(opening_slide_sheet(s, e, 1.0, (f64::NAN, 0.0), p0, w, 1.0), None);
         assert_eq!(opening_slide_sheet(s, e, 1.0, (1.0, 0.0), p0, 100.0, 1.0), None);
+    }
+
+    /// [T2] Endpunkt einer Bogenwand folgt dem Kreis (Mittelpunkt/Radius bleiben), Bogenlänge per Eingabe.
+    #[test]
+    fn bogenwand_endpunkt_auf_dem_kreis() {
+        // Halbkreis über (0,0)–(4,0), bulge 1: Mitte (2,0), r = 2, Scheitel (2,2).
+        let (s, e) = ((0.0, 0.0), (4.0, 0.0));
+        let (ns, ne, nb) = arc_wall_endpoint(s, e, 1.0, 1, (2.0, 5.0)).unwrap();
+        assert!(close(ns, s) && close(ne, (2.0, 2.0)), "{ne:?}");
+        // Viertelkreis (Scheitel links der Sehne = Uhrzeigersinn): tan(π/8).
+        assert!((nb - (std::f64::consts::FRAC_PI_8).tan()).abs() < 1e-9, "{nb}");
+        let a = crate::wall_arc::WallArc::of(kernel2d::Vec2::new(ns.0, ns.1), kernel2d::Vec2::new(ne.0, ne.1), Some(nb)).unwrap();
+        assert!((a.center.x - 2.0).abs() < 1e-9 && a.center.y.abs() < 1e-9 && (a.r - 2.0).abs() < 1e-9);
+        // Start bewegt: Ende bleibt, Kreis bleibt.
+        let (ns, ne, nb) = arc_wall_endpoint(s, e, 1.0, 0, (2.0, 9.0)).unwrap();
+        assert!(close(ne, e) && close(ns, (2.0, 2.0)), "{ns:?}");
+        let a = crate::wall_arc::WallArc::of(kernel2d::Vec2::new(ns.0, ns.1), kernel2d::Vec2::new(ne.0, ne.1), Some(nb)).unwrap();
+        assert!((a.center.x - 2.0).abs() < 1e-9 && (a.r - 2.0).abs() < 1e-9);
+        // Unsinn: Mittelpunkt, NaN, Fixpunkt (Sweep 0).
+        assert!(arc_wall_endpoint(s, e, 1.0, 1, (2.0, 0.0)).is_none());
+        assert!(arc_wall_endpoint(s, e, 1.0, 1, (f64::NAN, 0.0)).is_none());
+        assert!(arc_wall_endpoint(s, e, 1.0, 1, (-2.0, 0.0)).is_none());
+        assert!(arc_wall_endpoint(s, e, 0.0, 1, (1.0, 1.0)).is_none());
+    }
+
+    #[test]
+    fn bogenwand_bogenlaenge_eingabe() {
+        let (s, e) = ((0.0, 0.0), (4.0, 0.0));
+        // Ende: Bogenlänge π (Viertelkreis r = 2) ab dem Start, Cursor oben rechts → Scheitel (2, 2).
+        let p = arc_wall_point_at_length(s, e, 1.0, 1, std::f64::consts::PI, (3.0, 3.0)).unwrap();
+        assert!(close(p, (2.0, 2.0)), "{p:?}");
+        // Nach dem Anwenden hat die Wand genau diese Bogenlänge.
+        let (ns, ne, nb) = arc_wall_endpoint(s, e, 1.0, 1, p).unwrap();
+        let a = crate::wall_arc::WallArc::of(kernel2d::Vec2::new(ns.0, ns.1), kernel2d::Vec2::new(ne.0, ne.1), Some(nb)).unwrap();
+        assert!((a.length() - std::f64::consts::PI).abs() < 1e-9);
+        // Start bewegt: Länge 1 vom Ende aus.
+        let p = arc_wall_point_at_length(s, e, 1.0, 0, 1.0, (1.0, 1.0)).unwrap();
+        assert!(((p.0 - 2.0).hypot(p.1) - 2.0).abs() < 1e-9 && p.1 > 0.0);
+        let (ns, ne, nb) = arc_wall_endpoint(s, e, 1.0, 0, p).unwrap();
+        let a = crate::wall_arc::WallArc::of(kernel2d::Vec2::new(ns.0, ns.1), kernel2d::Vec2::new(ne.0, ne.1), Some(nb)).unwrap();
+        assert!((a.length() - 1.0).abs() < 1e-9, "{}", a.length());
+        assert!(arc_wall_point_at_length(s, e, 1.0, 1, -1.0, (0.0, 0.0)).is_none());
+        assert!(arc_wall_point_at_length(s, e, 1.0, 1, 100.0, (0.0, 0.0)).is_none());
+    }
+
+    #[test]
+    fn bogenwand_griff_ziel() {
+        let (s, e) = ((0.0, 0.0), (4.0, 0.0));
+        let (p, l) = arc_wall_grip_target(s, e, 1.0, 1, Some(std::f64::consts::PI), (3.0, 3.0)).unwrap();
+        assert!(close(p, (2.0, 2.0)) && (l - std::f64::consts::PI).abs() < 1e-9);
+        let (p, l) = arc_wall_grip_target(s, e, 1.0, 1, None, (2.0, 7.0)).unwrap();
+        assert!(close(p, (2.0, 2.0)) && (l - std::f64::consts::PI).abs() < 1e-9);
+        assert!(arc_wall_grip_target(s, e, 1.0, 1, Some(f64::NAN), (2.0, 7.0)).is_none());
     }
 
     #[test]

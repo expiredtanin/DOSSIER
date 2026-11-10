@@ -405,6 +405,17 @@ fn wall_grip(w: &Value, index: f64, x: f64, y: f64) -> Value {
         let b = crate::bulge::from_sagitta_point(s.0, s.1, e.0, e.1, x, y);
         return with_opt(w, vec![("bulge", (b.is_finite() && b.abs() > 1e-9).then(|| js_num(b)))]);
     }
+    // Endpunkt einer Bogenwand ([T2]): der Punkt folgt dem Kreis (Mittelpunkt und Radius bleiben, das
+    // andere Ende steht), der Bulge passt sich an.
+    if index == 0.0 || index == 1.0 {
+        let (s, e) = (xy(field(w, "start").unwrap_or(&Value::Null)), xy(field(w, "end").unwrap_or(&Value::Null)));
+        if let Some(b) = field(w, "bulge").and_then(Value::as_f64).filter(|b| crate::wall_arc::is_arc_bulge(Some(*b))) {
+            return match crate::grip_drag::arc_wall_endpoint(s, e, b, index as usize, (x, y)) {
+                Some((ns, ne, nb)) => with_all(w, vec![("start", pt(ns.0, ns.1)), ("end", pt(ne.0, ne.1)), ("bulge", js_num(nb))]),
+                None => w.clone(),
+            };
+        }
+    }
     with(w, if index == 0.0 { "start" } else { "end" }, pt(x, y))
 }
 
@@ -521,6 +532,20 @@ fn drawing_grip(d: &Value, index: f64, x: f64, y: f64, scale: f64) -> Option<Val
         "dimension" => {
             let pts = arr(field(g, "pts"));
             let n = pts.len();
+            // Radius-/Durchmesser-/Bogenlängen-Mass ([T2]): Randpunkte bleiben auf dem Kreis um den Mittelpunkt
+            // (Radius = bisheriger Abstand des ersten Randpunkts), nur die Lage auf dem Kreis ändert sich.
+            let round = matches!(field(g, "kind").and_then(Value::as_str), Some("radius" | "diameter" | "arc")) && n >= 2;
+            if round && index >= 1.0 && index < n as f64 {
+                let (c, rim) = (xy(&pts[0]), xy(&pts[1]));
+                let r = hypot2(rim.0 - c.0, rim.1 - c.1);
+                let l = hypot2(x - c.0, y - c.1);
+                if !(l > 1e-9 && r.is_finite()) {
+                    return None;
+                }
+                let q = pt(c.0 + (x - c.0) * r / l, c.1 + (y - c.1) * r / l);
+                let ng = with(g, "pts", replace_at(pts, index, &q));
+                return Some(with_geom(d, crate::dim_assoc::without_ref(&ng, index_in(index, n))));
+            }
             if index < n as f64 {
                 // Von Hand gezogener Punkt ist frei ([38]).
                 let ng = with(g, "pts", replace_at(pts, index, &p));
@@ -1328,10 +1353,30 @@ mod tests {
         let res = run(&Lookup::plain(&r), &rq(json!({"op": "moveGrip", "wallId": "w", "index": 2, "pt": [2, 2]}))).unwrap();
         let e = res.ops[0].to_json()["entity"].clone();
         assert!((e["bulge"].as_f64().unwrap() - 1.0).abs() < 1e-12, "{e}");
+        // Endpunkt-Griff: entlang des Kreises (Mittelpunkt/Radius bleiben), nicht frei.
         let res = run(&Lookup::plain(&r), &rq(json!({"op": "moveGrip", "wallId": "w", "index": 1, "pt": [5, 0]}))).unwrap();
-        assert_eq!(res.ops[0].to_json()["entity"]["bulge"], json!(0.5));
+        let e = res.ops[0].to_json()["entity"].clone();
+        let (s, en) = (xy(&e["start"]), xy(&e["end"]));
+        let a = crate::wall_arc::WallArc::of(kernel2d::Vec2::new(s.0, s.1), kernel2d::Vec2::new(en.0, en.1), e["bulge"].as_f64()).unwrap();
+        let a0 = crate::wall_arc::WallArc::of(kernel2d::Vec2::new(0.0, 0.0), kernel2d::Vec2::new(4.0, 0.0), Some(0.5)).unwrap();
+        assert!(s == (0.0, 0.0) && (a.center.x - a0.center.x).abs() < 1e-9 && (a.center.y - a0.center.y).abs() < 1e-9 && (a.r - a0.r).abs() < 1e-9, "{e}");
+        assert!((en.0 - a0.center.x).hypot(en.1 - a0.center.y) - a0.r < 1e-9);
         let res = run(&Lookup::plain(&r), &rq(json!({"op": "moveGrip", "wallId": "w", "index": 2, "pt": [2, 0]}))).unwrap();
         assert!(res.ops[0].to_json()["entity"].get("bulge").is_none());
+    }
+
+    /// [T2] Bogenlängen-/Radiusmass: Randpunkte-Griffe bleiben auf dem Kreis um den Mittelpunkt.
+    #[test]
+    fn bogenmass_griff_auf_dem_kreis() {
+        let d = json!({"id": "d", "level": "L", "geom": {"shape": "dimension", "kind": "arc", "pts": [{"x": 0, "y": 0}, {"x": 2, "y": 0}, {"x": 0, "y": 2}], "offset": 0.5}});
+        let r = root(json!({"drawings2d": [d]}));
+        let res = run(&Lookup::plain(&r), &rq(json!({"op": "moveGrip", "drawingId": "d", "index": 2, "pt": [-6, 0], "scale": 100}))).unwrap();
+        let p = &res.ops[0].to_json()["entity"]["geom"]["pts"][2];
+        assert!((p["x"].as_f64().unwrap() + 2.0).abs() < 1e-9 && p["y"].as_f64().unwrap().abs() < 1e-9, "{p}");
+        // Mittelpunkt bleibt frei.
+        let res = run(&Lookup::plain(&r), &rq(json!({"op": "moveGrip", "drawingId": "d", "index": 0, "pt": [1, 1], "scale": 100}))).unwrap();
+        let p = &res.ops[0].to_json()["entity"]["geom"]["pts"][0];
+        assert_eq!((p["x"].as_f64(), p["y"].as_f64()), (Some(1.0), Some(1.0)));
     }
 
     /// [68] Baugrube: Ecke, Kante und Sohlen-Griff (Index hinter der letzten Ecke).
