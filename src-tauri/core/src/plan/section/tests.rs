@@ -957,3 +957,42 @@ fn puffer_hat_zwei_gruppen() {
     assert!(crate::plan::buf::decode(&none).unwrap().1.is_empty());
 }
 
+
+/// [157] Fenster in der Bogenwand: der Rahmen sitzt im Schnitt in der geschnittenen Wand (Öffnung tangential am
+/// Bogen an der Schnittstelle; vorher auf der Sehne, um die Pfeilhöhe neben der Wand: nur der Umriss lag im Schnitt).
+#[test]
+fn fenster_in_bogenwand_sitzt_in_der_wand() {
+    let mut p = sample_flush();
+    p.walls.iter_mut().find(|w| w.id == "W1").unwrap().bulge = Some(-0.3);
+    let o1 = p.openings.as_deref().unwrap().iter().find(|o| o.id == "O1").unwrap().clone();
+    let w1 = p.walls.iter().find(|w| w.id == "W1").unwrap().clone();
+    let a = crate::wall_arc::WallArc::of_wall(&w1).unwrap();
+    // Schnitt nahe der Laibung, wo die Sehne am weitesten vom Bogen weg liegt.
+    let m = o1.position + o1.width * 0.15;
+    let (c, n) = (a.point(m, 0.0), a.normal(m));
+    let l = LevelSpec { kind: "section".into(), line: Some([Vec2 { x: c.x - n.x * 3.0, y: c.y - n.y * 3.0 }, Vec2 { x: c.x + n.x * 3.0, y: c.y + n.y * 3.0 }]), ..Default::default() };
+    let out = compute_section(&p, &l, &[]).unwrap().unwrap();
+    let wall_u: Vec<[f64; 2]> = out
+        .cuts
+        .iter()
+        .filter(|c| c.kind == Kind::Wall && c.source_id.as_deref() == Some("W1"))
+        .map(|c| {
+            let b = bbox(&c.pts);
+            [b[0], b[1]]
+        })
+        .collect();
+    let (u0, u1) = (wall_u.iter().map(|b| b[0]).fold(f64::INFINITY, f64::min), wall_u.iter().map(|b| b[1]).fold(f64::NEG_INFINITY, f64::max));
+    assert!(u1 > u0, "Wandschnitt fehlt");
+    let prims = section_opening_primitives(&p, &l, &Visibility::default()).unwrap();
+    let mut n_frame = 0;
+    for pr in &prims {
+        if let Primitive::Polygon { pts, opening_id: Some(id), fill, .. } = pr {
+            if id == "O1" && fill == "#ffffff" {
+                n_frame += 1;
+                let (f0, f1) = (pts.iter().map(|q| q.x).fold(f64::INFINITY, f64::min), pts.iter().map(|q| q.x).fold(f64::NEG_INFINITY, f64::max));
+                assert!(f0 >= u0 - 1e-3 && f1 <= u1 + 1e-3, "Rahmen {f0}..{f1} ausserhalb des Wandschnitts {u0}..{u1}");
+            }
+        }
+    }
+    assert!(n_frame > 0, "Rahmenteile im Schnitt fehlen");
+}

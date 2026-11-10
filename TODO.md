@@ -120,11 +120,15 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
 - ◐ **[158]** Raumbuch. Keine IfcCovering-Bauteile (nur Pset-Texte); Wandoberfläche nicht je Wandseite, keine Sockel-/
   Leibungsflächen; lichte Höhe ohne Dachschrägen; Belagsmuster am ersten Umrisspunkt ausgerichtet; Belag im 3D und
   im Deckenspiegel nicht nach Raum. · M
-- ◐ **[157]** Plan-Review Musterhaus komplex (Schweizer Praxis). Offene Befunde: Marken von Ansichten Nord/West bzw.
-  Süd/Ost treffen sich im 1:500 an den Ecken; „B-B“ steht bis 2.5 m neben seiner Marke; „Detail und Situation“ auf
-  Masskette/Höhenkote; Raumstempel verlieren beim Ausweichen die Nutzungszeile; Achsblasen ab 1:200 über Höhenkoten;
-  Bogenwand-Fenster im Schnitt 1:50 nur Umriss; Höhenkoten im CLI-Schnitt zu weit links (10.11. [171]: neben dem
-  Gebauten statt links vom Gelände, Carport/Körper zählen weiter mit). · M
+- ◐ **[157]** Plan-Review Musterhaus komplex (Schweizer Praxis). Stand 10.11. (CLI-SVG `--hatch`, Chromium, nur Linux):
+  behoben: Raumstempel verlieren beim Ausweichen keine Zeile mehr (erst frei, dann mit geringster Überdeckung, Zeilen
+  entfallen nur noch, wenn das Rechteck im Raum nirgends passt; `fit_room_stamp`); Schnitt-/Ansichtsbeschriftung („B-B“)
+  nach Abstand zur Marke gesucht, auch auf der Gegenseite der Blickrichtung (`plan_section_lines`); „Detail und Situation“
+  (Detailverweis im Beispielprojekt) von Masskette/Höhenkote weg; Achsblasen weichen auch den Höhenkoten (Kote-Zeichnungen)
+  aus; Höhenkoten im CLI-Schnitt stehen neben dem Gebauten (schon [171], geprüft); Fenster in Bogenwänden sitzen im Schnitt
+  tangential in der geschnittenen Wand statt auf der Sehne (`arc_cut_opening`). Offen: Marken von Ansichten Nord/West bzw.
+  Süd/Ost treffen sich im 1:500 an den Ecken (Ansichtsmarker macht [176]); Kontrolle der Bogenwand-Fenster im Schnitt
+  1:50 nur im Test, nicht in der App; Achsblasen-Ausweichen gegen Texte/Detailverweise nicht geprüft. · M
 - ◐ **[176]** Schnitt-/Ansichtsmarken im Grundriss nach SIA-Praxis (10.11.): kräftige Endstücke (12 mm, 0.5 mm) mit dünner
   Strich-Punkt-Linie dazwischen, an jedem Ende Schenkel (8 mm) in Blickrichtung mit gefülltem Dreieck, Beschriftung 3.5 mm
   waagrecht vor der Spitze; alles fest in Papier-mm (vorher Massstab-abhängig, √-Faktor ab 1:200); Ansicht: ganze Linie dünn,

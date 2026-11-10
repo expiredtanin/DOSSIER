@@ -889,9 +889,9 @@ fn emit_inner(c: &Ctx, d: &Drawing2D, attrs: Attrs, geom: &Drawing2DGeom, greyed
             if let Some(spec) = crate::grid::Spec::of(geom) {
                 // [140] Achsen enden an der Gebäudegrundfläche (alle Geschosse vereinigt).
                 let house = super::context::building_rings(p);
-                // [157] Blasen nicht auf den Massketten des Geschosses.
+                // [157] Blasen nicht auf den Massketten und Höhenkoten des Geschosses.
                 let mut dims = super::stamp_place::Obstacles::default();
-                for q in prims_where(c, |g| matches!(g, Drawing2DGeom::Dimension { .. })) {
+                for q in prims_where(c, |g| matches!(g, Drawing2DGeom::Dimension { .. } | Drawing2DGeom::Kote { .. })) {
                     dims.add_prim(&q);
                 }
                 emit_grid(&mut em, &spec, crate::grid::bubble_diameter(*bubble_mm, scale), &house, &dims);
