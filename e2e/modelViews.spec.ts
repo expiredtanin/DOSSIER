@@ -18,9 +18,12 @@ test("Modelldarstellung: eigene Stufe mit Sturzlinie „keine“ ändert den Gru
   await page.getByRole("option", { name: /Ressourcen/ }).click();
   await page.getByRole("tab", { name: "Modelldarstellung" }).click();
   const rows = page.getByTestId("model-view-row");
-  await expect(rows).toHaveCount(3);
+  // 3 eingebaute + die mitgelieferten Standard-Stufen ([173] Etappe 3): Zahl nicht fest annehmen.
+  await expect(rows.first()).toBeVisible();
+  const n0 = await rows.count();
+  expect(n0).toBeGreaterThanOrEqual(3);
   await page.getByTestId("model-view-add").click();
-  await expect(rows).toHaveCount(4);
+  await expect(rows).toHaveCount(n0 + 1);
   const detail = page.getByTestId("model-view-detail");
   await detail.getByRole("textbox", { name: "Name" }).fill("Werkplan ohne Sturz");
   await page.getByTestId("model-view-opt-doors-lintelLineStyle").selectOption("keine");
