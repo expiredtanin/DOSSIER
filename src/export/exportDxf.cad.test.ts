@@ -186,13 +186,14 @@ describe.skipIf(!hasEzdxf)("Fachplaner-Export gegen ezdxf", { timeout: 60_000 },
     expect(noFont.r.fonts.DOSSIER).toBe("Arial");
   });
 
-  it("Raumstempel: Name und Fläche als zentrierte TEXTe im Massstab (Punkt → Meter)", () => {
+  it("Raumstempel: Name und Fläche als linksbündige TEXTe im Massstab (Punkt → Meter)", () => {
     const r = read();
-    const stamps = r.entities.filter((e) => e.type === "TEXT" && e.halign === 1);
+    // [177] Stempel sind linksbündig (halign 0), der Block liegt um den Stempelpunkt.
+    const stamps = r.entities.filter((e) => e.type === "TEXT" && e.halign === 0 && /m²/.test(e.text as string));
     expect(stamps.length).toBeGreaterThan(0);
     const texts = stamps.map((e) => e.text as string);
     expect(texts.some((t) => /m²/.test(t))).toBe(true);
-    for (const s of stamps) expect(s.height as number).toBeGreaterThan(0.2); // 10 pt bei 1:100 ≈ 0.35 m
+    for (const s of stamps) expect(s.height as number).toBeGreaterThan(0.2); // 0.8 × 10 pt bei 1:100 ≈ 0.28 m
   });
 
   it("Papierbereich: Layout mit Ansichtsfenster im Planmassstab", () => {

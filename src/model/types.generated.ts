@@ -3047,15 +3047,18 @@ export type RoomStamp = {
   showFloorArea: boolean;
   /** Präfix vor der Bodenfläche, z. B. "BF " (Default leer). */
   floorAreaPrefix?: string;
-  /** Nutzung (HNF/… · Bezeichnung) anzeigen (Live-Zeile). */
+  /**
+   * SIA-416-Kategorie (HNF/… · Bezeichnung) im Stempel anzeigen (Live-Zeile). [177]: Vorgabe aus, die
+   * Kategorie ist ein Attribut des Raums.
+   */
   showUsage: boolean;
   /** Ausrichtung der Namenszeile (Zeile 1). Fehlt sie, gilt „links". */
   nameAlign?: Align;
   /** Ausrichtung der zweiten Namenszeile. Fehlt sie, gilt „links". */
   line2Align?: Align;
-  /** Ausrichtung der Bodenflächen-Zeile. Fehlt sie, gilt „zentriert" (Alt-Verhalten). */
+  /** Ausrichtung der Bodenflächen-Zeile. Fehlt sie, gilt „links" ([177], Archicad-Stil). */
   floorAreaAlign?: Align;
-  /** Ausrichtung der Nutzungs-Zeile. Fehlt sie, gilt „zentriert" (Alt-Verhalten). */
+  /** Ausrichtung der Nutzungs-Zeile. Fehlt sie, gilt „links" ([177], Archicad-Stil). */
   usageAlign?: Align;
   /**
    * Personenzahl (Live-Zeile), z. B. für Nutzungsauflagen. Fehlt/undefined:
@@ -3070,6 +3073,8 @@ export type RoomStamp = {
   roundingStep?: number;
   /** [158] Bodenbelag des Raums als Zeile anzeigen (Live-Zeile). Fehlt/false: keine Belagszeile. */
   showFinish?: boolean;
+  /** [177] Trennlinie unter dem Namen anzeigen. Fehlt/false: keine Linie. */
+  showDivider?: boolean;
 };
 
 /** [158] Nutzung eines Raums (Raumbuch). Nassräume: Bad, WC, Dusche, Waschküche. */

@@ -3774,7 +3774,8 @@ pub struct RoomStamp {
     #[serde(rename = "floorAreaPrefix", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub floor_area_prefix: Option<String>,
-    /// Nutzung (HNF/… · Bezeichnung) anzeigen (Live-Zeile).
+    /// SIA-416-Kategorie (HNF/… · Bezeichnung) im Stempel anzeigen (Live-Zeile). [177]: Vorgabe aus, die
+    /// Kategorie ist ein Attribut des Raums.
     #[serde(rename = "showUsage")]
     pub show_usage: bool,
     /// Ausrichtung der Namenszeile (Zeile 1). Fehlt sie, gilt „links".
@@ -3785,11 +3786,11 @@ pub struct RoomStamp {
     #[serde(rename = "line2Align", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub line2_align: Option<Align>,
-    /// Ausrichtung der Bodenflächen-Zeile. Fehlt sie, gilt „zentriert" (Alt-Verhalten).
+    /// Ausrichtung der Bodenflächen-Zeile. Fehlt sie, gilt „links" ([177], Archicad-Stil).
     #[serde(rename = "floorAreaAlign", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub floor_area_align: Option<Align>,
-    /// Ausrichtung der Nutzungs-Zeile. Fehlt sie, gilt „zentriert" (Alt-Verhalten).
+    /// Ausrichtung der Nutzungs-Zeile. Fehlt sie, gilt „links" ([177], Archicad-Stil).
     #[serde(rename = "usageAlign", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub usage_align: Option<Align>,
@@ -3808,6 +3809,10 @@ pub struct RoomStamp {
     #[serde(rename = "showFinish", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub show_finish: Option<bool>,
+    /// [177] Trennlinie unter dem Namen anzeigen. Fehlt/false: keine Linie.
+    #[serde(rename = "showDivider", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub show_divider: Option<bool>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,

@@ -52,6 +52,13 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   verkleinert, IFC-Räume ohne festen Anker, Schatten-Reihenfolge geprüft; Rest der Liste war schon erledigt.)
   Offen: Fang-Punkt des Stempels rechnet mit Detail „mittel“; Deckenspiegel-Stempel ohne Hindernisse; Mac-Gegenprobe
   (Kern `plan/domains.rs`, `plan/extras.rs`). · S
+- ◐ **[177]** Raumstempel im Archicad-Stil (10.11., Wunsch Maintainer). Standard jetzt linksbündig (Block um den Stempelpunkt,
+  Zeilen links im Block), Aufbau Name (gross, fett) · Nummer (eigene Zeile darunter) · Fläche; die SIA-416-Kategorie steht
+  nicht mehr im Stempel (Attribut des Raums; nur mit „SIA-Kategorie anzeigen“ = `showUsage`, neue Stempel Vorgabe aus), neue
+  Option `showDivider` (Trennlinie unter dem Namen); Ausrichtung je Zeile bleibt wählbar. Bestehende Stempel mit
+  `showUsage: true` behalten die Zeile, fehlende Ausrichtungen gelten jetzt als links. Offen: Mac-Gegenprobe (Metal/native
+  Ansicht) (Kern `plan/domains.rs`, `src/panels/RoomStampEditor.tsx`). · S
+
 - ◐ **[141]** Wandecken. 9.11.: Wand und Stütze überlappen nicht mehr — runde Stütze an der Kontur, Wand durch
   bzw. breiter als die Stütze, Stütze kürzer als die Wand (3D: `model3d::carve_at_columns`, Streifen an den
   Konturkanten; Grundriss: `wall_columns::carve_walls_under_columns`, Stütze unter der Schnitthöhe als Ansichtskante),

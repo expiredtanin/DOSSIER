@@ -6,14 +6,15 @@ import type { Room, RoomStamp } from "./types";
 import type { Align } from "../text/richText";
 
 /**
- * Standard-Stempel aus einem Raum ableiten: Name = Raum-Name, Bodenfläche und
- * Nutzung angezeigt. Nummer/Zeile 2 bleiben leer (frei ergänzbar).
+ * Standard-Stempel aus einem Raum ableiten (Archicad-Stil, linksbündig): Name = Raum-Name, Bodenfläche
+ * angezeigt, SIA-Kategorie nicht. Nummer/Zeile 2 bleiben leer (frei ergänzbar).
  */
 export function defaultRoomStamp(room: Room): RoomStamp {
   return {
     name: room.name,
     showFloorArea: true,
-    showUsage: true,
+    // [177] Die SIA-416-Kategorie ist ein Attribut des Raums, nicht Teil des Stempels (nur auf Wunsch).
+    showUsage: false,
   };
 }
 
