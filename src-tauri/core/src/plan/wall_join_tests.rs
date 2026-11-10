@@ -752,3 +752,76 @@ fn stuetze_unter_der_schnitthoehe() {
     let len: f64 = views.iter().map(|(a, b)| (a.x - b.x).hypot(a.y - b.y)).sum();
     assert!((len - (0.3 * 4.0 - 0.15)).abs() < 1e-6, "sichtbare Kanten {len}");
 }
+
+/// [171] Geschlossener Wandring (Holzständerbau-Schicht „Dämmung weich" 23.85 cm, beide Enden jeder Wand
+/// mit Gehrung): an jeder Gehrung setzen sich die Läufe der beiden Wände glatt fort — Lauf-Enden treffen sich
+/// und die Schenkel gehen gespiegelt ineinander über (kein Knick, keine versetzte Phase).
+#[test]
+fn daemm_muster_im_wandring_gehen_glatt_ineinander_ueber() {
+    for (pat, comp) in [(HatchPattern::Insulation, "insulation"), (HatchPattern::InsulationHard, "xps")] {
+        for (w, d) in [(15.0, 10.0), (7.3, 4.1), (5.0, 5.0)] {
+            let mut p = base();
+            p.wall_types.push(WallType { id: "hw".into(), layers: vec![layer("render-ext", 0.024), layer(comp, 0.2385), layer("render-int", 0.0125)], ..Default::default() });
+            let pts = [(0.0, 0.0), (w, 0.0), (w, d), (0.0, d)];
+            for i in 0..4 {
+                add_wall(&mut p, "hw", pts[i], pts[(i + 1) % 4]);
+            }
+            let what = format!("{pat:?} {w}x{d}");
+            let ps = prims(&p);
+            let bands: Vec<(Vec<Vec2>, super::prim::HatchRender)> = ps
+                .iter()
+                .filter_map(|q| match q {
+                    Primitive::Polygon { pts, hatch, wall_id: Some(_), .. } if hatch.pattern == pat => Some((pts.clone(), hatch.clone())),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(bands.len(), 4, "{what}");
+            for i in 0..4 {
+                let (a, b) = (&bands[i], &bands[(i + 1) % 4]);
+                let shared: Vec<Vec2> = a.0.iter().copied().filter(|x| b.0.iter().any(|y| (x.x - y.x).hypot(x.y - y.y) < 1e-9)).collect();
+                assert_eq!(shared.len(), 2, "{what}: Gehrungskante {i}");
+                let (m0, m1) = (shared[0], shared[1]);
+                let ml = (m1.x - m0.x).hypot(m1.y - m0.y);
+                let m = Vec2 { x: (m1.x - m0.x) / ml, y: (m1.y - m0.y) / ml };
+                // Lauf-Enden auf der Gehrung samt Richtung des ersten Segments (vom Ende ins Band).
+                let ends = |bd: &(Vec<Vec2>, super::prim::HatchRender)| -> Vec<(Vec2, Vec2)> {
+                    let poly: Vec<crate::hatch::V2> = bd.0.iter().map(|q| crate::hatch::V2 { x: q.x, y: q.y }).collect();
+                    let mut out = Vec::new();
+                    for r in crate::hatch::build_hatch_runs(&poly, &to_hatch(&bd.1)) {
+                        for (e, nb) in [(r[0], r[1]), (r[r.len() - 1], r[r.len() - 2])] {
+                            let e = Vec2 { x: e.x, y: e.y };
+                            if dist_seg(e, m0, m1) < 1e-9 && (e.x - m0.x).hypot(e.y - m0.y) > 1e-6 && (e.x - m1.x).hypot(e.y - m1.y) > 1e-6 {
+                                let (dx, dy) = (nb.x - e.x, nb.y - e.y);
+                                let l = dx.hypot(dy).max(1e-30);
+                                out.push((e, Vec2 { x: dx / l, y: dy / l }));
+                            }
+                        }
+                    }
+                    out
+                };
+                // [171] Die Gehrung geht an der Innenseite der Schicht durch den Scheitel eines oberen Bogens bzw. einer
+                // Spitze (Phase am Schichtrand, nicht an der Wandfläche): ein Lauf-Punkt liegt dicht an der Innenecke.
+                let centre = Vec2 { x: w / 2.0, y: d / 2.0 };
+                let inner = if (m0.x - centre.x).hypot(m0.y - centre.y) < (m1.x - centre.x).hypot(m1.y - centre.y) { m0 } else { m1 };
+                for bd in [a, b] {
+                    let poly: Vec<crate::hatch::V2> = bd.0.iter().map(|q| crate::hatch::V2 { x: q.x, y: q.y }).collect();
+                    let near = crate::hatch::build_hatch_runs(&poly, &to_hatch(&bd.1)).iter().flatten().map(|q| (q.x - inner.x).hypot(q.y - inner.y)).fold(f64::INFINITY, f64::min);
+                    assert!(near < 4e-3, "{what}: Gehrung {i}: Innenecke {inner:?} nicht am Scheitel (Abstand {near})");
+                }
+                let (ea, eb) = (ends(a), ends(b));
+                assert!(!ea.is_empty(), "{what}: Muster erreicht die Gehrung {i}");
+                assert_eq!(ea.len(), eb.len(), "{what}: Gehrung {i}: Lauf-Enden {} / {}", ea.len(), eb.len());
+                for (q, ta) in &ea {
+                    // Gegenstück: Ende nahe (Teilung der Wände weicht je nach Wandlänge um bis 3 % ab) mit gespiegelter Richtung —
+                    // an der Kreuzung zweier Schenkel liegen zwei Enden am selben Punkt.
+                    let ok = eb.iter().any(|(r, tb)| {
+                        let dot = tb.x * m.x + tb.y * m.y;
+                        let refl = Vec2 { x: 2.0 * dot * m.x - tb.x, y: 2.0 * dot * m.y - tb.y };
+                        (q.x - r.x).hypot(q.y - r.y) < 6e-3 && (refl.x - ta.x).hypot(refl.y - ta.y) < 5e-2
+                    });
+                    assert!(ok, "{what}: Gehrung {i}: Lauf bei {q:?} ohne gespiegelte Fortsetzung ({ta:?})");
+                }
+            }
+        }
+    }
+}
