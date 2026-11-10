@@ -167,8 +167,8 @@ pub fn plan_stairs(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) {
         }
         let out_start = out.len();
         let params = s.encode();
-        if let Some(sp) = crate::stair::decode_params(&params).filter(|_| (zt - zb).is_finite()) {
-            let geo = kernel2d::stair_geometry(&sp, zt - zb);
+        let geo = crate::stair::decode_params(&params).filter(|_| (zt - zb).is_finite()).map(|sp| kernel2d::stair_geometry(&sp, zt - zb));
+        if let Some(geo) = &geo {
             for t in &geo.treads {
                 for q in &t.pts {
                     bounds.acc(q.x, q.y);
@@ -180,11 +180,48 @@ pub fn plan_stairs(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) {
         }
         let f = crate::plan::stair_symbol::plan_stair_run(&params, zt - zb, cut_height, lw, s.arrow_style == Some(StairArrowStyle::Filled), s.center_column.unwrap_or(0.0), railing_code(p, s), double, &[], &run_opts(&opts, c.a.scale));
         emit(out, &f, &stroke, greyed, &s.id, &opts);
+        if let (true, Some(geo)) = (opts.step_numbers, &geo) {
+            step_numbers(out, geo, cut_height, &opts, c.a.scale, &stroke, greyed);
+        }
         if let Some(d) = range.restyle_dash(zone) {
             super::view_range::restyle(out, out_start, d);
         }
     }
     arriving(c, out, double, &opts);
+}
+
+/// [173] Höhe der Stufennummern (Papier-mm).
+const STEP_NUMBER_MM: f64 = 1.8;
+
+/// [173] Stufennummern (Modelldarstellung, Basis aus): je Tritt die Nummer ab Antritt (1, 2, …) in der Mitte des
+/// Tritts; Tritte ganz über der Schnitthöhe nur, wenn die Stufe sie zeigt (`above_cut`).
+fn step_numbers(out: &mut Vec<Primitive>, geo: &kernel2d::StairGeometry, cut_height: f64, opts: &super::model_view::StairOpts, scale: f64, stroke: &str, greyed: Option<bool>) {
+    let h = STEP_NUMBER_MM * scale / 1000.0;
+    if !(h.is_finite() && h > 0.0) {
+        return;
+    }
+    for (k, t) in geo.treads.iter().enumerate() {
+        if t.pts.len() < 3 || (!opts.above_cut && t.base_rise > cut_height + 1e-6) {
+            continue;
+        }
+        let n = t.pts.len() as f64;
+        let (cx, cy) = t.pts.iter().fold((0.0, 0.0), |(x, y), q| (x + q.x / n, y + q.y / n));
+        let text = (k + 1).to_string();
+        let w = crate::text_layout::text_width_em(&text, false) * h;
+        out.push(Primitive::DrawingText {
+            at: v2(cx - w / 2.0, cy - 0.35 * h),
+            text,
+            height_m: h,
+            angle: 0.0,
+            color: stroke.to_string(),
+            marks: None,
+            wrap_width: None,
+            doc: None,
+            drawing_id: None,
+            greyed,
+            opacity: None,
+        });
+    }
 }
 
 /// [173] Lauflinie nach der Modelldarstellung: Versatz (Papier-mm → Meter bei 1:`scale`) und Antrittspunkt

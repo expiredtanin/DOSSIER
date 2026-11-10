@@ -271,8 +271,15 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   keine Stufe (nur Kern/Fassade; die Stufen-Abfrage rechnet ohne den inkrementellen Cache, im Viewer zu teuer); Schwelle ohne Vorgabe „an" bei Hebeschiebetür (Basis aus, damit Pläne ohne Stufe gleich
   bleiben — Wert „nur Hebeschiebetüren" wählbar); Stützen haben im Modell keine Schichten (ein Bauteil) — „Schichten der
   Stützen" erst mit Stützen-Aufbau (Bekleidung/Brandschutz); Dachschnitt im Grundriss ohne Dachfenster-Löcher und ohne
-  Verschneidung (Kehlen, Gauben); Fensterteilung im 3D; Etappe 3: Stufen-Bibliothek in Standards/Vorlagen, Stempel/Bemassung
-  nach Stufe, Stufennummern der Treppe. Nicht in der Tauri-App/auf dem Mac geprüft. · M
+  Verschneidung (Kehlen, Gauben); Fensterteilung im 3D. Etappe 3 (10.11.): Raumstempel-Zeilen nach Stufe (Nummer, Fläche,
+  SIA-Kategorie, lichte Höhe, Belag, Trennlinie; Stempel > Stufe > Basis), Bemassung (Ketten der automatischen
+  Aussenbemassung alle/ohne Öffnungen/nur Gesamtmass, Höhenkoten im Plan und in Schnitt/Ansicht, Ebene geht vor),
+  Stufennummern der Treppe, mitgelieferte Stufen Wettbewerb 1:200/Baueingabe 1:100/Ausführung 1:50/Rohbau-Statik in
+  den Standards („Standards laden"/„aktualisieren", Ressourcen-Tab: Vorlagen übernehmen); Tests
+  `plan/model_view_tests3.rs`, Goldens unverändert (komplex EG/DG weichen schon auf dem Stand 1b9e01b ab, nicht von hier). Offen: 3D-Viewer übergibt weiter keine Stufe (Cache, s. o.);
+  Stufen einzeln zwischen Projekten austauschen (kein Ressourcen-Import, nur Projektvorlagen); Stempel-Schalter
+  Fläche/SIA-Kategorie sind am Stempel immer gesetzt (bool) — die Stufe wirkt dort nur auf Räume ohne Stempel;
+  Fang-Punkte der Stempel (`room_stamp_spots`) rechnen ohne Stufe. Nicht in der Tauri-App/auf dem Mac geprüft. · M
 - ◐ **[33]** Objektstile mit Rangfolge (Override-Regeln). „Ausblenden“ lässt Elemente im Grundriss anwählbar/fangbar;
   Schlagschatten und Gelände nicht über Regeln steuerbar; Linienstil auf Polygon-Umrissen (Wand-Umriss, Decken)
   ohne Wirkung; Linienstil-Aktion in der Ansicht ohne Wirkung; Öffnungen selbst ausblenden nicht möglich. · M

@@ -253,10 +253,13 @@ fn section_view_buf(p: &Project, level: &DrawingLevel, snap: &ViewSnapshot, scal
         return None;
     }
     let mut b = rv.bounds().unwrap_or([0.0, 0.0, 1.0, 1.0]);
+    // Automatische Koten: Ebene > [173] Modelldarstellung (Ausschnitt, sonst Ebene) > an.
+    let mv_id = crate::plan::model_view::selected_id(p, &level.id, args.model_view.as_deref());
+    let marks_on = crate::plan::model_view::for_view(p, mv_id, crate::plan::style::Detail::Mittel, scale).level_marks(level.level_marks);
     let own_buf = plan_domains_buf(p, &PlanArgs { global: false, ..args }).ok()?;
     let ov = crate::plan::buf::View::parse(&own_buf)?;
     let own = ov.prims().unwrap_or_default();
-    let marks = if level.level_marks != Some(false) { crate::plan::drawings::level_markers(p, b) } else { Vec::new() };
+    let marks = if marks_on { crate::plan::drawings::level_markers(p, b) } else { Vec::new() };
     let mut grow = |x: f64, y: f64| {
         b = [b[0].min(x), b[1].min(y), b[2].max(x), b[3].max(y)];
     };

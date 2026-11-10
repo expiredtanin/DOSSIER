@@ -1642,8 +1642,10 @@ fn d_sign(d: &Drawing2D) -> f64 {
     }
 }
 
+/// [173] Dazu die Bemassung der Modelldarstellung: Ketten der automatischen Aussenbemassung und Höhenkoten
+/// (`model_view::DimOpts::shows`).
 fn on_floor(c: &Ctx, d: &Drawing2D) -> bool {
-    crate::grid::visible_on(d, &c.a.floor) && !(c.a.for_print && d.no_print == Some(true))
+    crate::grid::visible_on(d, &c.a.floor) && !(c.a.for_print && d.no_print == Some(true)) && c.mv().dims.shows(d)
 }
 
 /// Domäne „2D-Zeichnungen" von `planDomains`: alle gezeichneten Zeichnungen des Geschosses in

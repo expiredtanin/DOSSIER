@@ -2,10 +2,11 @@
 //
 // Eine Modelldarstellung (`Project.modelViewOptions`) ist eine benannte Stufe über einem Basis-Detailgrad,
 // mit Optionen je Bauteilart (Türen, Fenster, Treppen, Wände, Decken/Böden, Dächer, Stützen, Ansicht,
-// Gelände; Grundriss, Schnitt, Ansicht und 3D). Jede Option fehlt ⇒
+// Gelände, Raumstempel, Bemassung; Grundriss, Schnitt, Ansicht und 3D). Jede Option fehlt ⇒
 // „wie Basis". Die Stufen „grob", „mittel", „fein" sind eingebaut (nicht in der Liste, nicht änderbar).
 // Die Ansicht wählt ihre Modelldarstellung über das Feld `modelViewOptionId` der Ebene (Werkzeugleiste,
-// Ansichtsvorlage); Ausschnitte tragen ein eigenes Feld (Blatt-Viewports). Rangfolge und Auflösung: Kern
+// Ansichtsvorlage); Ausschnitte tragen ein eigenes Feld (Blatt-Viewports). Mitgelieferte Vorlagen (Wettbewerb,
+// Baueingabe, Ausführung, Rohbau) kommen aus den Standards des Kerns (`standardModelViews`, `adoptModelViewOps`). Rangfolge und Auflösung: Kern
 // `plan/model_view.rs`. Alles liefert Ops (`applyChange`); eine Änderung = ein Undo-Schritt.
 
 import { addItems, findItem, itemsOf, patchItem, removeItems } from "../core";
@@ -21,7 +22,19 @@ export function isBuiltinModelView(id: string | undefined | null): id is DetailL
 }
 
 /** Abschnitte je Bauteilart. */
-export type ModelViewSection = "doors" | "windows" | "stairs" | "walls" | "slabs" | "roofs" | "columns" | "elevation" | "site" | "sectionMarks";
+export type ModelViewSection =
+  | "doors"
+  | "windows"
+  | "stairs"
+  | "walls"
+  | "slabs"
+  | "roofs"
+  | "columns"
+  | "elevation"
+  | "site"
+  | "sectionMarks"
+  | "roomStamps"
+  | "dimensions";
 
 /** Ein Eintrag der Auswahl (Werkzeugleiste, Vorlage): eingebaute Stufen zuerst, dann die eigenen. */
 export interface ModelViewChoice {
@@ -75,6 +88,15 @@ export function newModelView(id: string, name: string, baseDetail: DetailLevel =
 
 export function addModelViewOps(mv: ModelViewOption): CoreOp[] {
   return addItems("modelViewOptions", [mv]);
+}
+
+/**
+ * Vorlage aus der Bibliothek (`standardModelViews`) ins Projekt übernehmen: mit ihrer Standard-Kennung, damit
+ * „Standards aktualisieren" sie später abgleicht; schon vorhanden (gleiche id) ⇒ keine Ops.
+ */
+export function adoptModelViewOps(p: Project, mv: ModelViewOption): CoreOp[] {
+  if (findItem(p, "modelViewOptions", mv.id)) return [];
+  return addModelViewOps(JSON.parse(JSON.stringify(mv)) as ModelViewOption);
 }
 
 /** Kopie direkt hinter dem Original; eine eingebaute Stufe wird zur eigenen mit ihrer Basis. */
@@ -164,6 +186,7 @@ export const MODEL_VIEW_FIELDS: readonly ModelViewField[] = [
   { section: "stairs", key: "runStartMm", values: [0, 1, 2, 3, 5] },
   { section: "stairs", key: "runEndMm", values: [0, 1, 2, 3, 5] },
   { section: "stairs", key: "startMark", values: "bool" },
+  { section: "stairs", key: "stepNumbers", values: "bool" },
   { section: "walls", key: "layers", values: ["all", "simplified", "core"] },
   { section: "walls", key: "thinLayerMm", values: [0.25, 0.5, 0.75, 1] },
   { section: "walls", key: "reveals", values: "bool" },
@@ -181,6 +204,14 @@ export const MODEL_VIEW_FIELDS: readonly ModelViewField[] = [
   { section: "elevation", key: "materialHatch", values: "bool" },
   { section: "site", key: "terrain", values: "bool" },
   { section: "sectionMarks", key: "style", values: ["arrow", "lAngle"] },
+  { section: "roomStamps", key: "number", values: "bool" },
+  { section: "roomStamps", key: "area", values: "bool" },
+  { section: "roomStamps", key: "usage", values: "bool" },
+  { section: "roomStamps", key: "height", values: "bool" },
+  { section: "roomStamps", key: "finish", values: "bool" },
+  { section: "roomStamps", key: "divider", values: "bool" },
+  { section: "dimensions", key: "chains", values: ["all", "outer", "total"] },
+  { section: "dimensions", key: "levelMarks", values: "bool" },
 ];
 
 /** Auswahlwert eines Feldes als Text (`""` = wie Basis); Gegenstück: {@link parseFieldValue}. */

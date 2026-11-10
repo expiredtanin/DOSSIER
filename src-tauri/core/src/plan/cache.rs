@@ -37,7 +37,8 @@ pub const NOT_FOR_DRAWINGS: &[&str] = &[
     "viewSnapshots",
     "viewSnapshotFolders",
     "viewTemplates",
-    // [173] Modelldarstellungen wirken nur auf Bauteile, nicht auf 2D-Zeichnungen.
+    // [173] Modelldarstellungen zeichnen 2D-Zeichnungen nicht anders; was sie ausblenden (Ketten der
+    // Aussenbemassung, Koten), fehlt in der Folge der Stücke und ändert deren Schlüssel.
     "modelViewOptions",
     "roomProgram",
     "roomProgramTolerance",

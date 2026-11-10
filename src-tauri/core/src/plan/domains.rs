@@ -8,6 +8,7 @@
 
 use super::overrides::{self, js_trim, Actions, Subject};
 use super::prim::{HatchRender, Primitive, StampLine};
+use super::model_view::StampOpts;
 use super::style::*;
 use crate::js_fmt::{js_number, to_fixed};
 use crate::jsnum::{max, min, round};
@@ -1252,14 +1253,25 @@ fn rooms(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds, obstacles: &sup
         // [140] Raumstempel in Tinte (Druck ohne Schwarz-Weiss); Farbe nur aus einer Darstellungsregel
         // oder aus den Auszeichnungen des Stempel-Texts.
         let text_color = ov.color.as_deref().unwrap_or(MONO_INK);
-        let (doc, extra_lines) = match &room.stamp {
+        // [173] Zeilen nach der Modelldarstellung: die Einstellung am Stempel geht vor (`StampOpts::line`); die
+        // Raumnummer zeigt die Stufe (Basis ja), der Stempel liefert nur den Text.
+        let st = &c.mv().stamp;
+        let stamp: Option<std::borrow::Cow<RoomStamp>> = room.stamp.as_ref().map(|s| if st.show_number() { std::borrow::Cow::Borrowed(s) } else { std::borrow::Cow::Owned(RoomStamp { number: None, ..s.clone() }) });
+        let (doc, extra_lines) = match stamp.as_deref() {
             _ if overview => (doc_from_text(room.stamp.as_ref().map_or(&room.name, |s| &s.name)), vec![]),
             // [140] ab 1:200 auch eigene Stempel ohne Nutzungs-/Personenzeile.
             Some(s) if small => (room_stamp_to_doc(s), room_stamp_extra_lines(&RoomStamp { show_usage: false, occupancy: None, ..s.clone() }, res.net, room.sia_category)),
             Some(s) => (room_stamp_to_doc(s), room_stamp_extra_lines(s, res.net, room.sia_category)),
             None => {
                 // [177] Ohne Stempel-Einstellungen: Name, Fläche, linksbündig; die SIA-Kategorie ist Attribut des Raums.
-                let lines = vec![StampLine { text: format!("{} m²", to_fixed(res.net, 2)), align: Align::Left }];
+                // [173] Fläche und SIA-Kategorie nach der Stufe (Basis: Fläche ja, Kategorie nein).
+                let mut lines = Vec::new();
+                if StampOpts::line(None, st.area, true) {
+                    lines.push(StampLine { text: format!("{} m²", to_fixed(res.net, 2)), align: Align::Left });
+                }
+                if StampOpts::line(None, st.usage, false) {
+                    lines.push(StampLine { text: format!("{} · {}", sia_key(room.sia_category), sia_label(room.sia_category)), align: Align::Left });
+                }
                 (room.stamp_doc.clone().unwrap_or_else(|| doc_from_text(&room.name)), lines)
             }
         };
@@ -1268,7 +1280,16 @@ fn rooms(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds, obstacles: &sup
         let doc = if small && !overview { scale_doc_pt(doc, ROOM_STAMP_SMALL_PT / ROOM_STAMP_PT) } else { doc };
         // [158] Belagszeile (Einstellung am Stempel, Vorgabe aus): Bodenbelag des Raums.
         let mut extra_lines = extra_lines;
-        if !overview && !small && room.stamp.as_ref().and_then(|s| s.show_finish) == Some(true) {
+        // [173] Lichte Höhe nach der Stufe (Basis nein; auch ab 1:200, wenn die Stufe sie verlangt).
+        if !overview && StampOpts::line(None, st.height, false) {
+            extra_lines.push(StampLine { text: format!("LH {} m", to_fixed(crate::room_book::clear_height(c.p, room), 2)), align: Align::Left });
+        }
+        // Belag: Stempel (nicht ab 1:200) > Stufe > nein.
+        let finish = match room.stamp.as_ref().and_then(|s| s.show_finish) {
+            Some(v) => v && !small,
+            None => StampOpts::line(None, st.finish, false),
+        };
+        if !overview && finish {
             let label = crate::room_book::finish_label(c.p, room.floor_finish.as_deref());
             if !label.is_empty() {
                 extra_lines.push(StampLine { text: label, align: Align::Left });
@@ -1279,14 +1300,14 @@ fn rooms(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds, obstacles: &sup
         let obst = if room.stamp_anchor.is_some() { Default::default() } else { obstacles.within(ring_bounds(&pts)) };
         let clear = STAMP_CLEAR_MM * c.a.scale / 1000.0;
         let place = |w: f64, h: f64, free: bool| place_stamp(&pts, &candidates, &obst, clear, w, h, free);
-        let number = room.stamp.as_ref().and_then(|s| s.number.clone());
+        let number = stamp.as_deref().and_then(|s| s.number.clone());
         let (extra_lines, base_pt, name, placed) = fit_room_stamp(&doc, number.as_deref(), extra_lines, if small { ROOM_STAMP_SMALL_PT } else { ROOM_STAMP_PT }, c.a.scale, &place);
         let at = placed.unwrap_or(at);
         let name_replaced = name.clone();
         let doc = name.unwrap_or(doc);
         // [177] Trennlinie unter dem Namen (Einstellung am Stempel, Vorgabe aus), nur im unveränderten Block.
-        if let (Some(s), None, false, false) = (&room.stamp, &name_replaced, overview, small) {
-            if s.show_divider == Some(true) {
+        if let (Some(s), None, false, false) = (stamp.as_deref(), &name_replaced, overview, small) {
+            if StampOpts::line(s.show_divider, st.divider, false) {
                 let rows: Vec<(&str, crate::text_layout::LineAlign)> = extra_lines.iter().map(|l| (l.text.as_str(), crate::text_layout::LineAlign::of(Some(l.align)))).collect();
                 let placed = crate::text_layout::stamp_block(&doc, &rows, base_pt, PT_MM, "#000000", 0.0);
                 let np = room_stamp_name_paragraphs(s);

@@ -3,7 +3,7 @@
 // Linientypen nach SIA 400 / ISO 128 und Standard-Aufbauten. Hier nur dünne Fassaden: der Kern liefert die
 // Ops, die fehlende Einträge anhängen (gleiche id oder gleicher Name gilt als vorhanden).
 
-import type { LayerFunction, OverrideRule, Project } from "./types";
+import type { LayerFunction, ModelViewOption, OverrideRule, Project } from "./types";
 import type { CoreOp } from "../core/ops";
 import { applyOps } from "../core/ops";
 import { addedItems } from "../core/opsBuild";
@@ -32,10 +32,12 @@ export interface StandardsMergeCounts {
   blockDefs: number;
   /** [33] Override-Bausteine (z. B. „Deckenaufbau weiss"), ausgeschaltet. */
   overrideRules: number;
+  /** [173] Stufen der Modelldarstellung (Wettbewerb, Baueingabe, Ausführung, Rohbau). */
+  modelViewOptions: number;
 }
 
 export function standardsMergeCounts(ops: readonly CoreOp[]): StandardsMergeCounts {
-  const out: StandardsMergeCounts = { lineStyles: 0, hatches: 0, components: 0, wallTypes: 0, ceilingTypes: 0, roofTypes: 0, viewTemplates: 0, blockDefs: 0, overrideRules: 0 };
+  const out: StandardsMergeCounts = { lineStyles: 0, hatches: 0, components: 0, wallTypes: 0, ceilingTypes: 0, roofTypes: 0, viewTemplates: 0, blockDefs: 0, overrideRules: 0, modelViewOptions: 0 };
   for (const op of ops) {
     const key = op.kind === "add" ? op.collection : op.kind === "setField" ? op.key : null;
     const n = op.kind === "add" ? op.items.length : op.kind === "setField" && Array.isArray(op.value) ? op.value.length : 0;
@@ -52,6 +54,14 @@ export function standardOverrideRules(project: Project): OverrideRule[] {
   const present = (project.overrideRules ?? []).filter((r) => r.id.startsWith("std-or-"));
   const missing = addedItems(standardsMergeOps(project), "overrideRules") as OverrideRule[];
   return [...present, ...missing];
+}
+
+/**
+ * [173] Mitgelieferte Stufen der Modelldarstellung, die dem Projekt noch fehlen (Vorlagen im Ressourcen-Tab;
+ * „Standards laden" hängt sie ebenfalls an). Bibliothek: Kern `standards.rs::model_views`.
+ */
+export function standardModelViews(project: Project): ModelViewOption[] {
+  return addedItems(standardsMergeOps(project), "modelViewOptions") as ModelViewOption[];
 }
 
 /** Ein Standard-Eintrag des Projekts, der von der heutigen Bibliothek abweicht („Standards aktualisieren"). */

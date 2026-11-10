@@ -338,6 +338,27 @@ Symbol selbst in `stair_symbol.rs` bleibt unberührt), Wandschichten und Schicht
   nach der Basis der Stufe, „Handlauf aus" ohne Handläufe; rechnet ohne den inkrementellen Cache. Der
   3D-Viewer übergibt noch keine Stufe.
 
+Etappe 3:
+
+- **Raumstempel** (`domains.rs::rooms`, `model_view::StampOpts`): Zeilen Nummer, Fläche, SIA-Kategorie, lichte Höhe
+  (`room_book::clear_height`, „LH 2.50 m"), Belag, Trennlinie. Rangfolge **Stempel > Stufe > Basis**: am Stempel sind
+  Fläche und SIA-Kategorie immer gesetzt (Schalter), Belag und Trennlinie, wenn gewählt; die Nummer liefert der Stempel
+  nur als Text, ob sie erscheint, bestimmt die Stufe (Basis ja). Räume ohne Stempel: alle Zeilen nach der Stufe
+  (Basis: nur Fläche). Ab 1:200 bleiben die Stempel-Zeilen gekürzt wie bisher; was die Stufe ausdrücklich verlangt
+  (Höhe, Belag), erscheint auch dort.
+- **Bemassung** (`model_view::DimOpts`, angewandt in `drawings.rs::on_floor`, damit gilt es für Zeichnen, Stücke,
+  Stempel-Hindernisse und die eigenen 2D-Elemente von Schnitt/Ansicht gleich): Ketten der automatischen
+  Aussenbemassung nach der Id (`autodim-<Ebene>-<Seite>-<openings|steps|total>`, Bogen `…-arc-<Wand>`; alle / ohne
+  Öffnungen / nur Gesamtmass), eigene Massketten bleiben. Höhenkoten: 2D-Koten im Plan und die automatischen Koten in
+  Schnitt/Ansicht (Ebene `levelMarks` > Stufe > an; Kern `sheet_viewports`, TS `levelMarksEnabled(level, project)`).
+- **Treppe:** Stufennummern je Tritt ab Antritt (`stairs.rs::step_numbers`, 1.8 mm Papier; Tritte über der
+  Schnitthöhe nur, wenn die Stufe sie zeigt). Basis aus.
+- **Bibliothek:** mitgelieferte Stufen Wettbewerb 1:200, Baueingabe 1:100, Ausführung 1:50, Rohbau/Statik in den
+  Standards (`standards.rs::model_views`, Kennung `std-mv-…`): „Standards laden" hängt sie an, „Standards
+  aktualisieren" gleicht Basis und Abschnitte ab; der Ressourcen-Tab zeigt fehlende als Vorlagen (lesend,
+  „+" übernimmt, TS `standardModelViews`/`adoptModelViewOps`). Stufen zwischen Projekten austauschen geht nur über
+  Projektvorlagen (ganzes Projekt) — ein Import einzelner Ressourcen fehlt.
+
 ---
 
 ## 4. Schnitt
