@@ -22,7 +22,26 @@ export function levelMarksEnabled(level: DrawingLevel): boolean {
 export function levelMarkerPrimitives(
   project: Project,
   bounds: { minX: number; minY: number; maxX: number; maxY: number },
+  primitives?: readonly Primitive[],
 ): Primitive[] {
   if (!(bounds.maxX > bounds.minX) || !(bounds.maxY > bounds.minY)) return [];
-  return decodePlanBuf(documentFor(project).queryBin("levelMarkers", [bounds.minX, bounds.minY, bounds.maxX, bounds.maxY])).prims;
+  const minX = primitives ? Math.max(bounds.minX, builtMinX(project, primitives)) : bounds.minX;
+  return decodePlanBuf(documentFor(project).queryBin("levelMarkers", [minX < bounds.maxX ? minX : bounds.minX, bounds.minY, bounds.maxX, bounds.maxY])).prims;
+}
+
+// [171] Gelände (Schnittfläche, Profil- und Grundlinie) zählt nicht zur Lage der Koten: sie stehen neben dem
+// Gebauten (Haus, Carport, Körper), nicht links vom ganzen Geländeschnitt (Musterhaus komplex: ~15 m weiter).
+const TERRAIN_CLS = new Set(["section-terrain", "elevation-terrain", "section-ground", "elevation-ground"]);
+
+function builtMinX(project: Project, primitives: readonly Primitive[]): number {
+  const site = new Set((project.context ?? []).filter((c) => c.type === "terrainMesh" || c.type === "excavation" || c.type === "contourSet").map((c) => c.id));
+  let minX = Infinity;
+  for (const q of primitives) {
+    if (q.kind === "line") {
+      if (!TERRAIN_CLS.has(q.cls)) minX = Math.min(minX, q.a.x, q.b.x);
+    } else if (q.kind === "polygon") {
+      if (!(q.contextObjectId && site.has(q.contextObjectId))) for (const v of q.pts) minX = Math.min(minX, v.x);
+    }
+  }
+  return minX;
 }

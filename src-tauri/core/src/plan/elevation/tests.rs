@@ -409,6 +409,66 @@ fn schraeges_rundbogenfenster_als_ellipse() {
     assert!(oblique.iter().all(|(rx, ry)| (rx / ry - a.cos()).abs() < 1e-6), "{oblique:?}");
 }
 
+/// [171] Rundfenster (Ochsenauge, Musterhaus komplex West/Ost): kein Quadrat um den Kreis — die Kanten des
+/// Rechteck-Lochs der Wand entfallen, die Fassaden-Schraffur reicht bis an den Rahmen.
+#[test]
+fn rundfenster_ohne_rechteck_in_der_ansicht() {
+    let mut p = sample();
+    for o in p.openings.iter_mut().flatten().filter(|o| o.id == "O1") {
+        o.shape = Some(OpeningShape::Rund);
+        o.height = o.width;
+    }
+    let l = p.drawing_levels.iter().find(|l| l.id == "ansicht-sued").unwrap();
+    let level = LevelSpec::from_json(&serde_json::to_value(l).unwrap());
+    let (prims, _) = elevation_primitives(&p, &level, false, false, &Visibility::default(), 100.0).unwrap().unwrap();
+    let bb = prims.iter().filter_map(|pr| if let Primitive::Polygon { pts, opening_id: Some(o), .. } = pr { (o == "O1").then_some(pts) } else { None }).fold([f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY], |b, pts| pts.iter().fold(b, |b, q| [b[0].min(q.x), b[1].min(q.y), b[2].max(q.x), b[3].max(q.y)]));
+    assert!(bb[2] > bb[0]);
+    let tol = 0.02;
+    let near = |a: f64, b: f64| (a - b).abs() < tol;
+    let square: Vec<_> = prims
+        .iter()
+        .filter_map(|pr| if let Primitive::Line { a, b, cls, .. } = pr { (cls == "elevation-outline").then_some((a, b)) } else { None })
+        .filter(|(a, b)| {
+            let inside = |q: &Vec2| q.x > bb[0] - tol && q.x < bb[2] + tol && q.y > bb[1] - tol && q.y < bb[3] + tol;
+            let side = (near(a.x, b.x) && (near(a.x, bb[0]) || near(a.x, bb[2]))) || (near(a.y, b.y) && (near(a.y, bb[1]) || near(a.y, bb[3])));
+            inside(a) && inside(b) && side && (a.x - b.x).abs() + (a.y - b.y).abs() > 0.05
+        })
+        .collect();
+    assert!(square.is_empty(), "Rechteck um das Rundfenster: {square:?}");
+    // [171] Auch kurze Reststücke der Lochkanten (Strich neben dem Rahmen): im Band von 0.12 m um das Fenster
+    // liegt keine Umrisslinie, ausser dem Rahmen selbst.
+    let band = 0.12;
+    let stubs: Vec<_> = prims
+        .iter()
+        .filter_map(|pr| if let Primitive::Line { a, b, cls, .. } = pr { (cls == "elevation-outline").then_some((a, b)) } else { None })
+        .filter(|(a, b)| {
+            let inside = |q: &Vec2| q.x > bb[0] - band && q.x < bb[2] + band && q.y > bb[1] - band && q.y < bb[3] + band;
+            inside(a) && inside(b)
+        })
+        .collect();
+    assert!(stubs.is_empty(), "Reststrich am Rundfenster: {stubs:?}");
+}
+
+/// [171] Strich rechts am Rundfenster (Ansicht West): ein Reststück der Lochkante im Band (Einzug der Dämmung)
+/// ausserhalb des Umrisses entfällt, Kanten der Wand weiter weg bleiben.
+#[test]
+fn lochkanten_im_band_der_formoeffnung() {
+    use super::silhouette::EdgeSeg;
+    let e = |a: Pt, b: Pt| EdgeSeg { a, b, hidden: false, owner: 1 };
+    let b = [14.45, 6.75, 15.55, 7.9];
+    let mut edges = vec![
+        e([15.55, 7.7], [15.6, 7.7]),     // Strich im Band rechts: weg
+        e([15.6, 6.8], [15.6, 7.8]),      // Lochkante im Band: weg
+        e([14.45, 6.75], [15.55, 6.75]),  // Seite auf dem Umriss: weg
+        e([15.55, 7.7], [16.5, 7.7]),     // Wandkante, reicht weit hinaus: bleibt
+        e([10.0, 7.7], [11.0, 7.7]),      // woanders: bleibt
+        e([15.0, 7.0], [15.2, 7.1]),      // im Umriss, quer: bleibt (Rahmen/Verdecker entscheiden)
+    ];
+    drop_hole_edges(&mut edges, b);
+    let left: Vec<_> = edges.iter().map(|e| (e.a, e.b)).collect();
+    assert_eq!(left, vec![([15.55, 7.7], [16.5, 7.7]), ([10.0, 7.7], [11.0, 7.7]), ([15.0, 7.0], [15.2, 7.1])]);
+}
+
 /// [105] Umfassungszarge in der Ansicht: Spiegel über die Rohbaukante hinaus (Rahmen breiter als
 /// die Öffnung), Blatt um die Zarge eingerückt.
 #[test]
@@ -839,3 +899,21 @@ fn baustein_ansicht_ohne_materialschraffur() {
     assert!(super::super::overrides::effective_layer(p.override_rules.as_deref(), &s, rv.view("section")).fill_color.is_none());
     assert!(super::super::overrides::effective_layer(p.override_rules.as_deref(), &s, rv.view("plan")).fill_color.is_none());
 }
+
+/// [171] Einfaches Musterhaus, Ansicht Süd: die OG-Wände unter dem Satteldach (Teilkörper je Schichtlage, quer
+/// versetzt) werden an den Ecken verlängert wie im EG — keine zurückspringenden Eckstreifen mit Fuge und Schatten.
+#[test]
+fn ecken_der_wand_unter_dem_dach_ohne_fuge() {
+    let p = sample();
+    let l = p.drawing_levels.iter().find(|l| l.id == "ansicht-sued").unwrap();
+    let level = LevelSpec::from_json(&serde_json::to_value(l).unwrap());
+    let (prims, _) = elevation_primitives(&p, &level, false, true, &Visibility::default(), 100.0).unwrap().unwrap();
+    // u = x + 1 (Ansichtslinie ab x = −1): Wandachse der Ecken bei u = 1 bzw. 6, Aussenfläche bei 0.8275 / 6.1725.
+    let seams: Vec<_> = prims
+        .iter()
+        .filter_map(|q| if let Primitive::Line { a, b, cls, .. } = q { (cls == "elevation-outline").then_some((a, b)) } else { None })
+        .filter(|(a, b)| (a.x - b.x).abs() < 1e-6 && ((a.x - 1.0).abs() < 1e-3 || (a.x - 6.0).abs() < 1e-3) && a.y.min(b.y) >= 2.6 - 1e-6)
+        .collect();
+    assert!(seams.is_empty(), "Fugen an den OG-Ecken: {seams:?}");
+}
+

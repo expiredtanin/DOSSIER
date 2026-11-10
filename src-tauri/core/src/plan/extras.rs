@@ -102,7 +102,11 @@ pub fn sun_shadow(p: &Project, floor: &str, when_ms: Option<f64>, out: &mut Vec<
     let (lat, lon) = project_lat_lon(p);
     let sun = crate::sun::sun_position(lat, lon, t);
     let with_ground = ground_floor_id(p) == Some(floor);
-    for poly in crate::sun::shadow_polygons_plan(p, sun, cut_z(p, floor), with_ground) {
+    // [171] Flächen unter der Unterkante des Ansichtsbereichs (samt „darunter sichtbar bis“) zeigt der
+    // Grundriss nicht — auch ihren Schatten nicht.
+    let range = super::view_range::ViewRange::of(p, floor);
+    let min_top = range.bottom.map_or(f64::NEG_INFINITY, |b| b - range.depth);
+    for poly in crate::sun::shadow_polygons_plan_in(p, sun, cut_z(p, floor), min_top, with_ground) {
         for r in crate::sun::without_holes(&poly) {
             let mut q = flat_polygon(ring_pts(&r), SUN_SHADOW_FILL, SUN_SHADOW_OPACITY);
             if let Primitive::Polygon { context_object_id, .. } = &mut q {
