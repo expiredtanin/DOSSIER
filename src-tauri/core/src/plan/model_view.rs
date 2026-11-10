@@ -240,6 +240,8 @@ pub struct Options {
     pub elevation: ElevOpts,
     pub floor_finish_mv: Option<FloorFinishDisplay>,
     pub terrain_mv: Option<bool>,
+    /// [176] Markentyp der Schnitte laut Modelldarstellung (die Ebene geht vor, s. [`Options::section_marker`]).
+    pub section_marker_mv: Option<SectionMarkerStyle>,
 }
 
 impl Options {
@@ -254,6 +256,10 @@ impl Options {
     /// Gelände: Ebene > Modelldarstellung > automatisch (`None`).
     pub fn terrain(&self, level: Option<bool>) -> Option<bool> {
         level.or(self.terrain_mv)
+    }
+    /// [176] Schnittmarke: Ebene > Modelldarstellung > Pfeil.
+    pub fn section_marker(&self, level: Option<SectionMarkerStyle>) -> SectionMarkerStyle {
+        level.filter(|s| *s != SectionMarkerStyle::Unknown).or(self.section_marker_mv).unwrap_or(SectionMarkerStyle::Arrow)
     }
     /// Schlagschatten der Ansicht: Ebene > Modelldarstellung > aus.
     pub fn shadows(&self, level: Option<bool>) -> bool {
@@ -395,6 +401,7 @@ pub fn resolve(mv: Option<&ModelViewOption>, detail: Detail, scale: f64) -> Opti
         elevation: ElevOpts { shadows_mv: el.and_then(|e| e.shadows), material_hatch: el.and_then(|e| e.material_hatch).unwrap_or(true) },
         floor_finish_mv: mv.and_then(|m| m.slabs.as_ref()).and_then(|s| s.floor_finish).filter(|f| *f != FloorFinishDisplay::Unknown),
         terrain_mv: mv.and_then(|m| m.site.as_ref()).and_then(|s| s.terrain),
+        section_marker_mv: mv.and_then(|m| m.section_marks.as_ref()).and_then(|s| s.style).filter(|s| *s != SectionMarkerStyle::Unknown),
     }
 }
 

@@ -129,10 +129,15 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   Strich-Punkt-Linie dazwischen, an jedem Ende Schenkel (8 mm) in Blickrichtung mit gefülltem Dreieck, Beschriftung 3.5 mm
   waagrecht vor der Spitze; alles fest in Papier-mm (vorher Massstab-abhängig, √-Faktor ab 1:200); Ansicht: ganze Linie dünn,
   nur Schenkel + Dreieck kräftig. Kern `plan/misc.rs` (`section_line_sized`) + `plan/context.rs`, gleicher Pfad für Bildschirm/Druck/CLI.
-  Rest (10.11.): Ansichtsmarker als eigenes Symbol (Kreis Ø 8 mm, 0.25 mm, gefülltes Dreieck in Blickrichtung, Bezeichnung
-  im Kreis, `misc.rs` `view_marker_sized`, keine Linie mehr); Modell `DrawingLevel.bendPoints` (optional, Knickpunkte zwischen
+  Rest (10.11.): Ansichtsmarker als eigenes Symbol (nur flaches gefülltes Dreieck, Basis 6 mm, Höhe 3 mm in Blickrichtung, Bezeichnung
+  waagrecht dahinter, kein Kreis, keine Linie, `misc.rs` `view_marker_sized`, Pick-Band über Dreieck+Text); Modell `DrawingLevel.bendPoints` (optional, Knickpunkte zwischen
   `linePoints[0]`/`[1]`, altes 2-Punkt-Format liest weiter, verschiebt mit Georeferenz) und Darstellung im Grundriss
-  (`section_polyline_sized`: kräftige 6-mm-Stücke an jedem Knick). Offen: Schnitt-Abwicklung geknickter Schnitte (Ableitung
+  (`section_polyline_sized`: kräftige 6-mm-Stücke an jedem Knick). L-Marke (10.11., Wunsch Maintainer): Markentyp
+  `DrawingLevel.markerStyle` ("arrow" Basis | "lAngle") mit Vorgabe `ModelViewOption.sectionMarks.style` (Ebene > Modelldarstellung >
+  Pfeil; `Options::section_marker`); L = je Ende kräftiger langer Schenkel (12 mm) längs der Linie nach innen + kurzer (6 mm) in
+  Blickrichtung, keine Linie dazwischen, kein Dreieck, Bezeichnung waagrecht aussen neben dem kurzen Schenkel, Knickstücke bleiben
+  (`misc.rs` `section_polyline_styled`, `context.rs` `plan_section_lines`); Auswahl in Objekt-Info (Schnitt) und Ressourcen-Tab
+  Modelldarstellung („Schnittmarken"). Goldens: nur die Ansichtsmarker ändern sich. Offen: Schnitt-Abwicklung geknickter Schnitte (Ableitung
   folgt noch der Endpunkt-Verbindung), Werkzeug/Griffe für Knickpunkte, optionale dünne Ansichtsebene, Mac-/Tauri-Ansicht. · M
 - ◐ **[171]** Plan-Review Runde 2 (10.11., beide Musterhäuser, CLI-SVG `--hatch` in Chromium, nur Linux). Behoben (Kern,
   Test je Fix): Sonnenschatten auf Flächen unter dem Ansichtsbereich (grauer Fleck über dem Carport im OG/DG,

@@ -21,7 +21,7 @@ export function isBuiltinModelView(id: string | undefined | null): id is DetailL
 }
 
 /** Abschnitte je Bauteilart. */
-export type ModelViewSection = "doors" | "windows" | "stairs" | "walls" | "slabs" | "roofs" | "columns" | "elevation" | "site";
+export type ModelViewSection = "doors" | "windows" | "stairs" | "walls" | "slabs" | "roofs" | "columns" | "elevation" | "site" | "sectionMarks";
 
 /** Ein Eintrag der Auswahl (Werkzeugleiste, Vorlage): eingebaute Stufen zuerst, dann die eigenen. */
 export interface ModelViewChoice {
@@ -180,6 +180,7 @@ export const MODEL_VIEW_FIELDS: readonly ModelViewField[] = [
   { section: "elevation", key: "shadows", values: "bool" },
   { section: "elevation", key: "materialHatch", values: "bool" },
   { section: "site", key: "terrain", values: "bool" },
+  { section: "sectionMarks", key: "style", values: ["arrow", "lAngle"] },
 ];
 
 /** Auswahlwert eines Feldes als Text (`""` = wie Basis); Gegenstück: {@link parseFieldValue}. */

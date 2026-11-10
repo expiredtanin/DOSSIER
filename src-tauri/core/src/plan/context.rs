@@ -20,8 +20,6 @@ const SECTION_LINE_MARK_MM: f64 = 0.5;
 const SECTION_LINE_DASH: [f64; 4] = super::line_pattern::SECTION_LINE;
 /// [176] Beschriftungshöhe in Papier-mm (Modell-Meter = mm · Massstab/1000).
 const SECTION_LABEL_MM: f64 = 3.5;
-const VIEW_MARKER_RING_MM: f64 = 0.25;
-const VIEW_MARKER_MIN_FONT_MM: f64 = 2.4;
 
 fn v2(x: f64, y: f64) -> Vec2 {
     Vec2 { x, y }
@@ -833,41 +831,20 @@ pub fn section_label_tag(name: &str) -> String {
     }
 }
 
-/// [176] Ansichtsmarker als eigenes Symbol: Kreis (Ø 8 mm Papier, 0.25 mm) in der Mitte der Ansichtslinie, gefülltes
-/// Dreieck in Blickrichtung, Bezeichnung waagrecht im Kreis (verkleinert, wenn nötig) bzw. rechts daneben; Pick-Band
-/// über dem ganzen Symbol. Keine durchgehende Linie.
+/// [176] Ansichtsmarker als eigenes Symbol: nur ein flaches gefülltes Dreieck in Blickrichtung (kein Kreis, keine Linie),
+/// die Bezeichnung waagrecht dahinter (auf der dem Blick abgewandten Seite); Pick-Band über Dreieck und Text.
 #[allow(clippy::too_many_arguments)]
 fn view_marker(c: &Ctx, level: &DrawingLevel, p0: Vec2, p1: Vec2, sign: f64, k: f64, tag: &str, greyed: Option<bool>, obst: &mut super::stamp_place::Obstacles, out: &mut Vec<Primitive>) {
     let _ = c;
-    let f = crate::plan::misc::view_marker_sized(p0.x, p0.y, p1.x, p1.y, sign, k);
+    let h = SECTION_LABEL_MM * k;
+    let w = crate::text_layout::text_width_em(tag, false) * h;
+    let f = crate::plan::misc::view_marker_sized(p0.x, p0.y, p1.x, p1.y, sign, k, w);
     if f.is_empty() {
         return;
     }
-    let (mut i, mut center, mut r) = (1, v2(0.0, 0.0), 0.0);
+    let mut i = 1;
     for _ in 0..f[0] as usize {
-        if f[i] == 4.0 {
-            center = v2(f[i + 1], f[i + 2]);
-            r = f[i + 3];
-            for (from, to) in [(v2(center.x + r, center.y), v2(center.x - r, center.y)), (v2(center.x - r, center.y), v2(center.x + r, center.y))] {
-                let arc = Primitive::Arc {
-                    center,
-                    from,
-                    to,
-                    r,
-                    cls: "section-line".into(),
-                    weight_mm: VIEW_MARKER_RING_MM,
-                    dash: None,
-                    color: Some(SECTION_LINE_INK.into()),
-                    opening_id: None,
-                    stair_id: None,
-                    greyed,
-                    opacity: None,
-                };
-                obst.add_prim(&arc);
-                out.push(arc);
-            }
-            i += 4;
-        } else if f[i] == 3.0 {
+        if f[i] == 3.0 {
             let pts: Vec<Vec2> = (0..3).map(|j| v2(f[i + 1 + 2 * j], f[i + 2 + 2 * j])).collect();
             let ring: Vec<[f64; 2]> = pts.iter().map(|q| [q.x, q.y]).collect();
             obst.area(ring);
@@ -877,41 +854,33 @@ fn view_marker(c: &Ctx, level: &DrawingLevel, p0: Vec2, p1: Vec2, sign: f64, k: 
             }
             out.push(tri);
             i += 7;
+        } else if f[i] == 5.0 {
+            let at = v2(f[i + 1], f[i + 2]);
+            i += 3;
+            if !(w > 0.0) {
+                continue;
+            }
+            let pad = 0.1 * h;
+            obst.area(vec![[at.x - pad, at.y - pad], [at.x + w + pad, at.y - pad], [at.x + w + pad, at.y + 0.75 * h + pad], [at.x - pad, at.y + 0.75 * h + pad]]);
+            out.push(Primitive::DrawingText {
+                at,
+                text: tag.to_string(),
+                height_m: h,
+                angle: 0.0,
+                color: SECTION_LINE_INK.into(),
+                marks: None,
+                wrap_width: None,
+                doc: None,
+                drawing_id: None,
+                greyed,
+                opacity: None,
+            });
         } else {
             let pts = (0..4).map(|j| v2(f[i + 1 + 2 * j], f[i + 2 + 2 * j])).collect();
             out.push(pick_band(pts, None, Some(&level.id)));
             i += 9;
         }
     }
-    // Bezeichnung: im Kreis, solange sie mit mindestens 2.4 mm Schrift in 1.6 · r passt, sonst rechts neben dem Kreis.
-    let w_em = crate::text_layout::text_width_em(tag, false);
-    if !(w_em > 0.0) {
-        return;
-    }
-    let inner_mm = 1.6 * r / k;
-    let font_mm = SECTION_LABEL_MM.min(inner_mm / w_em);
-    let (h, at) = if font_mm >= VIEW_MARKER_MIN_FONT_MM {
-        let h = font_mm * k;
-        (h, v2(center.x - w_em * h / 2.0, center.y - 0.375 * h))
-    } else {
-        let h = SECTION_LABEL_MM * k;
-        (h, v2(center.x + r + k, center.y - 0.375 * h))
-    };
-    let (w, pad) = (w_em * h, 0.1 * h);
-    obst.area(vec![[at.x - pad, at.y - pad], [at.x + w + pad, at.y - pad], [at.x + w + pad, at.y + 0.75 * h + pad], [at.x - pad, at.y + 0.75 * h + pad]]);
-    out.push(Primitive::DrawingText {
-        at,
-        text: tag.to_string(),
-        height_m: h,
-        angle: 0.0,
-        color: SECTION_LINE_INK.into(),
-        marks: None,
-        wrap_width: None,
-        doc: None,
-        drawing_id: None,
-        greyed,
-        opacity: None,
-    });
 }
 
 /// Schnittführungs-Symbole aller Schnitt-/Ansichtsebenen mit Linie (`addSectionLines`).
@@ -948,7 +917,7 @@ pub fn plan_section_lines(c: &Ctx, out: &mut Vec<Primitive>) {
         let mut path: Vec<(f64, f64)> = vec![(p0.x, p0.y)];
         path.extend(level.bend_points.iter().flatten().map(|q| (q.x, q.y)));
         path.push((p1.x, p1.y));
-        let f = crate::plan::misc::section_polyline_sized(&path, sign, k, label_w);
+        let f = crate::plan::misc::section_polyline_styled(&path, sign, k, label_w, c.mv().section_marker(level.marker_style));
         if f.is_empty() {
             continue;
         }
@@ -1155,10 +1124,10 @@ mod tests {
         assert!(d.bounds.is_some_and(|b| b[3] >= top - 1e-9), "{:?} < {top}", d.bounds);
     }
 
-    /// [176] Ansichtsmarker: Kreis (Ø 8 mm Papier) mit gefülltem Dreieck in Blickrichtung und Bezeichnung im Kreis,
-    /// keine durchgehende Linie; Pick-Band trägt die Ebenen-ID.
+    /// [176] Ansichtsmarker: nur flaches gefülltes Dreieck (Basis 6 mm, Höhe 3 mm) in Blickrichtung, Bezeichnung waagrecht
+    /// dahinter (gegen den Blick), kein Kreis, keine Linie; Pick-Band trägt die Ebenen-ID.
     #[test]
-    fn ansichtsmarker_ist_kreis_mit_pfeil_und_bezeichnung() {
+    fn ansichtsmarker_ist_dreieck_mit_bezeichnung() {
         let p = Project {
             drawing_levels: vec![serde_json::from_value(serde_json::json!({ "id": "n", "name": "Ansicht Süd", "kind": "elevation", "visible": true, "locked": false,
                 "linePoints": [{ "x": 0.0, "y": -2.0 }, { "x": 10.0, "y": -2.0 }] })).unwrap()],
@@ -1167,18 +1136,49 @@ mod tests {
         let a = super::super::domains::PlanArgs::parse(1.0, r#"{"show": ["90"], "scale": 100, "global": true}"#).unwrap();
         let mut out = Vec::new();
         plan_section_lines(&Ctx::new(&p, &a), &mut out);
-        assert!(!out.iter().any(|q| matches!(q, Primitive::Line { .. })), "keine Linie");
-        let arcs: Vec<f64> = out.iter().filter_map(|q| match q { Primitive::Arc { r, center, .. } => { assert!((center.x - 5.0).abs() < 1e-9 && (center.y + 2.0).abs() < 1e-9); Some(*r) } _ => None }).collect();
-        assert_eq!(arcs.len(), 2);
-        assert!((arcs[0] - 0.4).abs() < 1e-9, "Ø 8 mm bei 1:100 = r 0.4 m, ist {}", arcs[0]);
+        assert!(!out.iter().any(|q| matches!(q, Primitive::Line { .. } | Primitive::Arc { .. })), "keine Linie, kein Kreis");
         let tri = out.iter().find_map(|q| match q { Primitive::Polygon { pts, fill, .. } if fill != "none" => Some(pts.clone()), _ => None }).unwrap();
-        // Blickrichtung +y (Linie von links nach rechts, Vorzeichen 1): Spitze oberhalb des Kreises.
-        assert!(tri[0].y > -2.0 + 0.4, "{tri:?}");
+        // Blickrichtung +y (Linie von links nach rechts, Vorzeichen 1): Spitze 3 mm · 100 = 0.3 m über der Linie, Basis 0.6 m breit.
+        assert!((tri[0].y - (-2.0 + 0.3)).abs() < 1e-9 && (tri[0].x - 5.0).abs() < 1e-9, "{tri:?}");
+        assert!(((tri[1].x - tri[2].x).abs() - 0.6).abs() < 1e-9, "{tri:?}");
         assert!(out.iter().any(|q| matches!(q, Primitive::Polygon { section_line_id: Some(id), .. } if id == "n")));
         let t = out.iter().find_map(|q| match q { Primitive::DrawingText { at, text, height_m, .. } => Some((*at, text.clone(), *height_m)), _ => None }).unwrap();
         assert_eq!(t.1, "Süd");
+        // Text hinter der Basis (unterhalb der Linie), waagrecht um die Mitte, ohne das Dreieck zu überlappen.
         let w = crate::text_layout::text_width_em("Süd", false) * t.2;
-        assert!(t.0.x > 5.0 - 0.4 && t.0.x + w < 5.0 + 0.4, "Text im Kreis: {t:?}");
+        assert!(t.0.y + 0.75 * t.2 < -2.0 && ((t.0.x + w / 2.0) - 5.0).abs() < 1e-9, "{t:?}");
+    }
+
+    /// [176] Schnittmarke als L: Ebenenfeld `markerStyle` bzw. Vorgabe der Modelldarstellung (`sectionMarks.style`);
+    /// Ebene > Modelldarstellung > Pfeil. L: keine dünne Linie, kein Dreieck.
+    #[test]
+    fn schnittmarke_als_l_nach_ebene_und_modelldarstellung() {
+        let mk = |style: Option<&str>| -> Project {
+            let mut lv = serde_json::json!({ "id": "s", "name": "Schnitt A-A", "kind": "section", "visible": true, "locked": false,
+                "linePoints": [{ "x": 0.0, "y": 0.0 }, { "x": 10.0, "y": 0.0 }] });
+            if let Some(st) = style {
+                lv["markerStyle"] = st.into();
+            }
+            let mut p = Project { drawing_levels: vec![serde_json::from_value(lv).unwrap()], ..Default::default() };
+            p.model_view_options = Some(vec![serde_json::from_value(serde_json::json!({ "id": "m", "name": "M", "sectionMarks": { "style": "lAngle" } })).unwrap()]);
+            p
+        };
+        let run = |p: &Project, mv: bool| {
+            let a = super::super::domains::PlanArgs::parse(1.0, &format!(r#"{{"show": ["90"], "scale": 100, "global": true{}}}"#, if mv { r#", "modelView": "m""# } else { "" })).unwrap();
+            let mut out = Vec::new();
+            plan_section_lines(&Ctx::new(p, &a), &mut out);
+            out
+        };
+        let is_l = |out: &[Primitive]| !out.iter().any(|q| matches!(q, Primitive::Line { dash: Some(_), .. })) && !out.iter().any(|q| matches!(q, Primitive::Polygon { fill, .. } if fill != "none"));
+        let heavy = |out: &[Primitive]| out.iter().filter(|q| matches!(q, Primitive::Line { weight_mm, .. } if *weight_mm > 0.4)).count();
+        assert!(!is_l(&run(&mk(None), false)), "Basis = Pfeil");
+        assert!(!is_l(&run(&mk(None), false)));
+        let l = run(&mk(Some("lAngle")), false);
+        assert!(is_l(&l));
+        assert_eq!(heavy(&l), 4, "je Ende zwei Schenkel");
+        assert_eq!(l.iter().filter(|q| matches!(q, Primitive::DrawingText { .. })).count(), 2);
+        assert!(is_l(&run(&mk(None), true)), "Vorgabe der Modelldarstellung");
+        assert!(!is_l(&run(&mk(Some("arrow")), true)), "Ebene geht vor");
     }
 
     /// [176] Geknickter Schnitt: Knickpunkte aus `bendPoints` erscheinen als kräftige Stücke im Grundriss; ohne

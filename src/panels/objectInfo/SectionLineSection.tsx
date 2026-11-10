@@ -127,6 +127,24 @@ export function SectionLineSection({
         />
       </div>
 
+      {/* [176] Schnittmarke im Grundriss: leer = Vorgabe der Modelldarstellung (sonst Pfeil). */}
+      {level.kind === "section" && (
+        <div className="objinfo-field">
+          <span className="objinfo-flabel">{t("objinfo.sectionLine.marker")}</span>
+          <Dropdown
+            value={level.markerStyle ?? ""}
+            onChange={(v) => host.onSetSectionLinePatch({ markerStyle: v === "arrow" || v === "lAngle" ? v : undefined })}
+            options={[
+              { value: "", label: t("objinfo.sectionLine.marker.model") },
+              { value: "arrow", label: t("resources.modelViews.val.arrow") },
+              { value: "lAngle", label: t("resources.modelViews.val.lAngle") },
+            ]}
+            title={t("objinfo.sectionLine.marker")}
+            width={150}
+          />
+        </div>
+      )}
+
       {/* Verdeckte Kanten (gestrichelt) — Default aus (blasses Liniengewirr). */}
       <div className="objinfo-field">
         <span className="objinfo-flabel">{t("objinfo.sectionLine.hiddenLines")}</span>
