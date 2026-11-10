@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="-1.96125 0 8.9225 7.4725" width="89.225mm" height="74.725mm">
-<rect x="-1.96125" y="0" width="8.9225" height="7.4725" fill="#ffffff"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-1.82287 0 8.64575 7.1725" width="86.4575mm" height="71.725mm">
+<rect x="-1.82287" y="0" width="8.64575" height="7.1725" fill="#ffffff"/>
 <g stroke-linecap="butt" stroke-linejoin="miter" stroke-miterlimit="4">
 <polygon points="0,4.6725 5,4.6725 5,0.6725 0,0.6725" fill="none" stroke="none" stroke-width="0"/>
 <polygon points="0.1725,4.5 4.8275,4.5 4.8275,0.845 0.1725,0.845" fill="#6b728000" stroke="#6b7280" stroke-width="0.002"/>
@@ -39,25 +39,21 @@
 <line x1="3.7" y1="4.16583" x2="3.7" y2="3.09917" stroke="#1a1a1a" stroke-width="0.01"/>
 <line x1="3.7" y1="3.09917" x2="3.7" y2="1.1045" stroke="#1a1a1a" stroke-width="0.01" stroke-dasharray="0.2 0.1" stroke-dashoffset="0.00267"/>
 <polyline points="3.579,1.3245 3.7,1.1045 3.821,1.3245" fill="none" stroke="#1a1a1a" stroke-width="0.01"/>
-<line x1="-1" y1="2.6725" x2="6" y2="2.6725" stroke="#1f242c" stroke-width="0.018" stroke-dasharray="0.6 0.15 0.04 0.15" stroke-dashoffset="0.09"/>
-<polyline points="-1,2.9725 -1,2.3725 -1,1.7725" fill="none" stroke="#1f242c" stroke-width="0.025"/>
-<line x1="-1" y1="1.7725" x2="-0.85" y2="2.0125" stroke="#1f242c" stroke-width="0.025"/>
-<line x1="-1" y1="1.7725" x2="-1.15" y2="2.0125" stroke="#1f242c" stroke-width="0.025"/>
-<polyline points="6,2.9725 6,2.3725 6,1.7725" fill="none" stroke="#1f242c" stroke-width="0.025"/>
-<line x1="6" y1="1.7725" x2="6.15" y2="2.0125" stroke="#1f242c" stroke-width="0.025"/>
-<line x1="6" y1="1.7725" x2="5.85" y2="2.0125" stroke="#1f242c" stroke-width="0.025"/>
+<line x1="0.2" y1="2.6725" x2="4.8" y2="2.6725" stroke="#1f242c" stroke-width="0.018" stroke-dasharray="0.6 0.15 0.04 0.15" stroke-dashoffset="0.35"/>
+<polyline points="-1,1.8725 -1,2.6725 0.2,2.6725" fill="none" stroke="#1f242c" stroke-width="0.05"/>
+<polygon points="-1,1.8725 -0.87,2.2225 -1.13,2.2225" fill="#1f242c" stroke="#1f242c" stroke-width="0.012"/>
+<polyline points="4.8,2.6725 6,2.6725 6,1.8725" fill="none" stroke="#1f242c" stroke-width="0.05"/>
+<polygon points="6,1.8725 6.13,2.2225 5.87,2.2225" fill="#1f242c" stroke="#1f242c" stroke-width="0.012"/>
 <polygon points="-1,2.3725 6,2.3725 6,2.9725 -1,2.9725" fill="none" stroke="none" stroke-width="0"/>
 <line x1="-1" y1="6.6725" x2="6" y2="6.6725" stroke="#1f242c" stroke-width="0.018" stroke-dasharray="0.6 0.15 0.04 0.15" stroke-dashoffset="0.09"/>
-<polyline points="-1,6.9725 -1,6.3725 -1,5.7725" fill="none" stroke="#1f242c" stroke-width="0.025"/>
-<line x1="-1" y1="5.7725" x2="-0.85" y2="6.0125" stroke="#1f242c" stroke-width="0.025"/>
-<line x1="-1" y1="5.7725" x2="-1.15" y2="6.0125" stroke="#1f242c" stroke-width="0.025"/>
-<polyline points="6,6.9725 6,6.3725 6,5.7725" fill="none" stroke="#1f242c" stroke-width="0.025"/>
-<line x1="6" y1="5.7725" x2="6.15" y2="6.0125" stroke="#1f242c" stroke-width="0.025"/>
-<line x1="6" y1="5.7725" x2="5.85" y2="6.0125" stroke="#1f242c" stroke-width="0.025"/>
+<line x1="-1" y1="6.6725" x2="-1" y2="5.8725" stroke="#1f242c" stroke-width="0.05"/>
+<polygon points="-1,5.8725 -0.87,6.2225 -1.13,6.2225" fill="#1f242c" stroke="#1f242c" stroke-width="0.012"/>
+<line x1="6" y1="6.6725" x2="6" y2="5.8725" stroke="#1f242c" stroke-width="0.05"/>
+<polygon points="6,5.8725 6.13,6.2225 5.87,6.2225" fill="#1f242c" stroke="#1f242c" stroke-width="0.012"/>
 <polygon points="-1,6.3725 6,6.3725 6,6.9725 -1,6.9725" fill="none" stroke="none" stroke-width="0"/>
-<text x="-1.1725" y="1.5925" font-size="0.5" fill="#1f242c" font-family="sans-serif" transform="rotate(0 -1.1725 1.5925)">A</text>
-<text x="5.8275" y="1.5925" font-size="0.5" fill="#1f242c" font-family="sans-serif" transform="rotate(0 5.8275 1.5925)">A</text>
-<text x="-1.46125" y="5.5925" font-size="0.5" fill="#1f242c" font-family="sans-serif" transform="rotate(0 -1.46125 5.5925)">Süd</text>
-<text x="5.53875" y="5.5925" font-size="0.5" fill="#1f242c" font-family="sans-serif" transform="rotate(0 5.53875 5.5925)">Süd</text>
+<text x="-1.12075" y="1.7725" font-size="0.35" fill="#1f242c" font-family="sans-serif" transform="rotate(0 -1.12075 1.7725)">A</text>
+<text x="5.87925" y="1.7725" font-size="0.35" fill="#1f242c" font-family="sans-serif" transform="rotate(0 5.87925 1.7725)">A</text>
+<text x="-1.32287" y="5.7725" font-size="0.35" fill="#1f242c" font-family="sans-serif" transform="rotate(0 -1.32287 5.7725)">Süd</text>
+<text x="5.67713" y="5.7725" font-size="0.35" fill="#1f242c" font-family="sans-serif" transform="rotate(0 5.67713 5.7725)">Süd</text>
 </g>
 </svg>

@@ -15,9 +15,11 @@ const CONTEXT_LINE_MM: f64 = 0.1;
 const SECTION_LINE_CATEGORY: &str = "90";
 const SECTION_LINE_INK: &str = "#1f242c";
 const SECTION_LINE_MM: f64 = 0.18;
-const SECTION_LINE_MARK_MM: f64 = 0.25;
+/// [176] Kräftige Endstücke und Blickrichtungs-Schenkel.
+const SECTION_LINE_MARK_MM: f64 = 0.5;
 const SECTION_LINE_DASH: [f64; 4] = super::line_pattern::SECTION_LINE;
-const SECTION_LABEL_H: f64 = 0.5;
+/// [176] Beschriftungshöhe in Papier-mm (Modell-Meter = mm · Massstab/1000).
+const SECTION_LABEL_MM: f64 = 3.5;
 
 fn v2(x: f64, y: f64) -> Vec2 {
     Vec2 { x, y }
@@ -840,10 +842,9 @@ pub fn plan_section_lines(c: &Ctx, out: &mut Vec<Primitive>) {
         return;
     }
     let greyed = Some(c.greyed(SECTION_LINE_CATEGORY));
-    // [157] Marken und Beschriftung in Papiergrösse (bei 1:100 wie bisher 6 mm Marke, 5 mm Schrift); kleiner als
-    // 1:100 (Situation 1:200/1:500) auf dem Papier mit (100/n)^0.5 kleiner, sonst stehen die Marken ineinander.
+    // [176] Marken und Beschriftung in fester Papiergrösse, unabhängig vom Massstab (k = Modell-Meter je Papier-mm).
     let n = if c.a.scale.is_finite() && c.a.scale > 0.0 { c.a.scale } else { 100.0 };
-    let k = if n <= 100.0 { n / 100.0 } else { (n / 100.0).sqrt() };
+    let k = n / 1000.0;
     // [157] Beschriftungen zuletzt: sie weichen Masszahlen, Texten, Achsblasen, allen Linien und Marken der
     // Schnittführungen und den schon gesetzten Beschriftungen aus.
     let mut labels: Vec<(Vec2, String, Vec2, Vec2)> = Vec::new();
@@ -854,9 +855,9 @@ pub fn plan_section_lines(c: &Ctx, out: &mut Vec<Primitive>) {
         }
         let Some([p0, p1]) = level.line_points else { continue };
         let tag = section_label_tag(&level.name);
-        let label_w = crate::text_layout::text_width_em(&tag, false) * SECTION_LABEL_H * k;
+        let label_w = crate::text_layout::text_width_em(&tag, false) * SECTION_LABEL_MM * k;
         let sign = level.direction_sign.unwrap_or(1.0);
-        let f = crate::plan::misc::section_line_sized(p0.x, p0.y, p1.x, p1.y, sign, k, label_w);
+        let f = crate::plan::misc::section_line_sized(p0.x, p0.y, p1.x, p1.y, sign, k, label_w, matches!(level.kind, DrawingLevelKind::Elevation));
         if f.is_empty() {
             continue;
         }
@@ -888,6 +889,14 @@ pub fn plan_section_lines(c: &Ctx, out: &mut Vec<Primitive>) {
                 obst.add_prim(&line);
                 out.push(line);
                 i += 6;
+            } else if f[i] == 3.0 {
+                let pts = (0..3).map(|j| v2(f[i + 1 + 2 * j], f[i + 2 + 2 * j])).collect();
+                let mut tri = pick_band(pts, None, None);
+                if let Primitive::Polygon { fill, .. } = &mut tri {
+                    *fill = SECTION_LINE_INK.into();
+                }
+                out.push(tri);
+                i += 7;
             } else if f[i] == 5.0 {
                 let outward = if end_no == 0 { v2(-ux, -uy) } else { v2(ux, uy) };
                 end_no += 1;
@@ -917,7 +926,7 @@ pub fn plan_section_lines(c: &Ctx, out: &mut Vec<Primitive>) {
             obst.add_prim(q);
         }
     }
-    let h = SECTION_LABEL_H * k;
+    let h = SECTION_LABEL_MM * k;
     // Kandidaten (Vielfache der Schrifthöhe): vor der Spitze, weiter hinaus entlang der Linie bzw. des Pfeils.
     // [157] Weiter hinaus (5–6 Schrifthöhen) für Marken hinter Massketten und Böschung.
     const STEPS: [(f64, f64); 17] = [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (2.0, 0.0), (1.0, 1.0), (0.0, 2.0), (3.0, 0.0), (2.0, 1.0), (1.0, 2.0), (4.0, 0.0), (0.0, 3.0), (3.0, 2.0), (5.0, 0.0), (5.0, 1.0), (6.0, 0.0), (6.0, 1.0), (-1.0, 0.0)];
@@ -1003,7 +1012,7 @@ mod tests {
         assert_eq!(top_context(&out, -30.0, 0.0), None);
     }
 
-    /// [157] Schnitt-/Ansichtsmarken in Papiergrösse (1:50 wie 1:100, 1:500 um √5 kleiner statt 1/5), die
+    /// [157]/[176] Schnitt-/Ansichtsmarken in fester Papiergrösse (8 mm Schenkel in jedem Massstab), die
     /// Beschriftung steht vor der Pfeilspitze (auch bei senkrechtem Pfeil nicht auf dem Pfeil, „Nord“ oben) und
     /// zählt zum Ausmass des Plans (oben nicht abgeschnitten).
     #[test]
@@ -1022,10 +1031,10 @@ mod tests {
         };
         let marks = |out: &[Primitive]| -> Vec<(Vec2, Vec2)> { out.iter().filter_map(|q| match q { Primitive::Line { a, b, dash: None, .. } => Some((*a, *b)), _ => None }).collect() };
         let len = |m: &[(Vec2, Vec2)]| m.iter().map(|(a, b)| (b.x - a.x).hypot(b.y - a.y)).fold(0.0, f64::max);
-        // 1:50 gleich gross auf dem Papier (halb im Modell), 1:500 auf dem Papier um (1/5)^0.5 kleiner.
+        // [176] Auf dem Papier überall gleich gross (8 mm Schenkel): im Modell proportional zum Massstab.
         let (m50, m100, m500) = (marks(&run(50.0)), marks(&run(100.0)), marks(&run(500.0)));
         assert!((len(&m50) / len(&m100) - 0.5).abs() < 1e-9, "{} {}", len(&m50), len(&m100));
-        assert!((len(&m500) / len(&m100) - 5.0f64.sqrt()).abs() < 1e-9, "{} {}", len(&m100), len(&m500));
+        assert!((len(&m500) / len(&m100) - 5.0).abs() < 1e-9, "{} {}", len(&m100), len(&m500));
         for scale in [100.0, 500.0] {
             let out = run(scale);
             let m = marks(&out);

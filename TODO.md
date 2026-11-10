@@ -118,6 +118,12 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   Masskette/Höhenkote; Raumstempel verlieren beim Ausweichen die Nutzungszeile; Achsblasen ab 1:200 über Höhenkoten;
   Bogenwand-Fenster im Schnitt 1:50 nur Umriss; Höhenkoten im CLI-Schnitt zu weit links (10.11. [171]: neben dem
   Gebauten statt links vom Gelände, Carport/Körper zählen weiter mit). · M
+- ◐ **[176]** Schnitt-/Ansichtsmarken im Grundriss nach SIA-Praxis (10.11.): kräftige Endstücke (12 mm, 0.5 mm) mit dünner
+  Strich-Punkt-Linie dazwischen, an jedem Ende Schenkel (8 mm) in Blickrichtung mit gefülltem Dreieck, Beschriftung 3.5 mm
+  waagrecht vor der Spitze; alles fest in Papier-mm (vorher Massstab-abhängig, √-Faktor ab 1:200); Ansicht: ganze Linie dünn,
+  nur Schenkel + Dreieck kräftig. Kern `plan/misc.rs` (`section_line_sized`) + `plan/context.rs`, gleicher Pfad für Bildschirm/Druck/CLI.
+  Offen: Knicke bei geknickten Schnitten (Modell kennt nur `linePoints: [2]`), Ansichtsmarker als Kreis mit Bezeichnung,
+  Mac-/Tauri-Ansicht. · M
 - ◐ **[171]** Plan-Review Runde 2 (10.11., beide Musterhäuser, CLI-SVG `--hatch` in Chromium, nur Linux). Behoben (Kern,
   Test je Fix): Sonnenschatten auf Flächen unter dem Ansichtsbereich (grauer Fleck über dem Carport im OG/DG,
   `sun::shadow_polygons_plan_in`); Flächenzeile nach Rundungsschritt („16.0 m²“ statt „16 m²“); Schnitt genau am Rand

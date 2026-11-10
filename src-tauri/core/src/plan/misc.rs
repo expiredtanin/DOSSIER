@@ -10,7 +10,8 @@
 //! `section_line(p0x, p0y, p1x, p1y, vorzeichen)` → `[n, Eintrag × n]` in Zeichenreihenfolge (leer
 //! bei zu kurzer Linie):
 //! ```text
-//! 2 line     [2, art (0 Hauptlinie | 1 Marke), ax, ay, bx, by]
+//! 2 line     [2, art (0 dünn Strich-Punkt | 1 kräftig: Endstück/Schenkel), ax, ay, bx, by]
+//! 3 triangle  [3, x0, y0, x1, y1, x2, y2]           (gefüllte Pfeilspitze, [176])
 //! 5 label    [5, x, y]                              (unten links; Kurz-Tag setzt der Aufrufer)
 //! 1 polygon  [1, x0, y0 … x3, y3]                   (unsichtbares Pick-Band)
 //! ```
@@ -29,9 +30,13 @@ use crate::jsnum::round;
 use std::collections::HashSet;
 
 const FOOTPRINT_Z_TOL: f64 = 0.6;
-const SECTION_MARK_LEN: f64 = 0.6;
+// [176] Papier-mm
+const SECTION_END_PIECE_MM: f64 = 12.0;
+const SECTION_LEG_MM: f64 = 8.0;
+const SECTION_HEAD_LEN_MM: f64 = 3.5;
+const SECTION_HEAD_HALF_MM: f64 = 1.3;
+const SECTION_LABEL_MM: f64 = 3.5;
 const SECTION_PICK_HALF: f64 = 0.3;
-const SECTION_LABEL_H: f64 = 0.5;
 const ARROW_ASPECT: f64 = 0.32;
 
 /// Ganzzahl-Schlüssel für die Quantisierung; NaN/∞ bekommen feste Platzhalter (wie ihre Textform in JS).
@@ -135,18 +140,21 @@ pub fn bbox(positions: &[f64]) -> Vec<f64> {
 }
 
 pub fn section_line(p0x: f64, p0y: f64, p1x: f64, p1y: f64, sign: f64) -> Vec<f64> {
-    section_line_sized(p0x, p0y, p1x, p1y, sign, 1.0, SECTION_LABEL_H * 1.5)
+    section_line_sized(p0x, p0y, p1x, p1y, sign, 0.1, SECTION_LABEL_MM * 0.1 * 1.5, false)
 }
 
-/// [157] Wie [`section_line`], Marken × `k` (Papiergrösse: Massstab/100) und die Beschriftung (Breite
-/// `label_w`, Schrift `SECTION_LABEL_H · k`, Ankerpunkt unten links) mit ihrem Kasten vor der Pfeilspitze —
-/// in Pfeilrichtung abgesetzt, so dass sie den Pfeil in keiner Richtung überdeckt.
-pub fn section_line_sized(p0x: f64, p0y: f64, p1x: f64, p1y: f64, sign: f64, k: f64, label_w: f64) -> Vec<f64> {
-    if ![p0x, p0y, p1x, p1y, sign, k, label_w].iter().all(|x| x.is_finite()) || !(k > 0.0) {
+/// [176] Schnitt-/Ansichtsmarke in fester Papiergrösse: `mm` = Modell-Meter je Papier-mm (Massstab/1000),
+/// Beschriftung (Breite `label_w`, Schrift `SECTION_LABEL_MM · mm`, Ankerpunkt unten links) mit ihrem Kasten vor
+/// der Pfeilspitze, in Pfeilrichtung abgesetzt. Schnitt (`view = false`): kräftige Endstücke (Art 1) längs der Linie,
+/// dazwischen dünn (Art 0); an jedem Ende ein kräftiger Schenkel in Blickrichtung mit gefülltem Dreieck (Eintrag 3).
+/// Ansicht (`view = true`): ganze Linie dünn, nur Schenkel + Dreieck kräftig.
+#[allow(clippy::too_many_arguments)]
+pub fn section_line_sized(p0x: f64, p0y: f64, p1x: f64, p1y: f64, sign: f64, mm: f64, label_w: f64, view: bool) -> Vec<f64> {
+    if ![p0x, p0y, p1x, p1y, sign, mm, label_w].iter().all(|x| x.is_finite()) || !(mm > 0.0) {
         return Vec::new();
     }
-    let mark = SECTION_MARK_LEN * k;
-    let label_h = SECTION_LABEL_H * k * 0.75;
+    let leg = SECTION_LEG_MM * mm;
+    let label_h = SECTION_LABEL_MM * mm * 0.75;
     let (ax, ay) = (p1x - p0x, p1y - p0y);
     let len = hypot2(ax, ay);
     if len < 1e-6 {
@@ -161,24 +169,30 @@ pub fn section_line_sized(p0x: f64, p0y: f64, p1x: f64, p1y: f64, sign: f64, k: 
         o.extend([2.0, art, a.0, a.1, b.0, b.1]);
         *n += 1;
     };
-    line(&mut o, &mut n, 0.0, (p0x, p0y), (p1x, p1y));
-    let half = mark / 2.0;
+    // Endstück: höchstens ein Drittel der Linie, damit bei kurzen Schnitten noch ein dünnes Stück bleibt.
+    let piece = if view { 0.0 } else { (SECTION_END_PIECE_MM * mm).min(len / 3.0) };
+    if piece > 0.0 {
+        line(&mut o, &mut n, 1.0, (p0x, p0y), (p0x + ux * piece, p0y + uy * piece));
+        line(&mut o, &mut n, 0.0, (p0x + ux * piece, p0y + uy * piece), (p1x - ux * piece, p1y - uy * piece));
+        line(&mut o, &mut n, 1.0, (p1x - ux * piece, p1y - uy * piece), (p1x, p1y));
+    } else {
+        line(&mut o, &mut n, 0.0, (p0x, p0y), (p1x, p1y));
+    }
+    let (head_l, head_hw) = (SECTION_HEAD_LEN_MM * mm, SECTION_HEAD_HALF_MM * mm);
     for end in [(p0x, p0y), (p1x, p1y)] {
-        line(&mut o, &mut n, 1.0, (end.0 - nx * half, end.1 - ny * half), (end.0 + nx * half, end.1 + ny * half));
-        let base = (end.0 + bnx * half, end.1 + bny * half);
-        let tip = (base.0 + bnx * mark, base.1 + bny * mark);
-        let wing_back = (tip.0 - bnx * mark * 0.4, tip.1 - bny * mark * 0.4);
-        let w = mark * 0.25;
-        line(&mut o, &mut n, 1.0, base, tip);
-        line(&mut o, &mut n, 1.0, tip, (wing_back.0 + ux * w, wing_back.1 + uy * w));
-        line(&mut o, &mut n, 1.0, tip, (wing_back.0 - ux * w, wing_back.1 - uy * w));
+        let tip = (end.0 + bnx * leg, end.1 + bny * leg);
+        line(&mut o, &mut n, 1.0, end, tip);
+        let hb = (tip.0 - bnx * head_l, tip.1 - bny * head_l);
+        o.extend([3.0, tip.0, tip.1, hb.0 + ux * head_hw, hb.1 + uy * head_hw, hb.0 - ux * head_hw, hb.1 - uy * head_hw]);
+        n += 1;
         // Kastenmitte vor der Spitze: Abstand + halbe Ausdehnung des Kastens in Pfeilrichtung.
-        let reach = mark * 0.3 + bnx.abs() * label_w / 2.0 + bny.abs() * label_h / 2.0;
+        let reach = mm * 1.0 + bnx.abs() * label_w / 2.0 + bny.abs() * label_h / 2.0;
         let (cx, cy) = (tip.0 + bnx * reach, tip.1 + bny * reach);
         o.extend([5.0, cx - label_w / 2.0, cy - label_h / 2.0]);
         n += 1;
     }
-    let (ox, oy) = (nx * SECTION_PICK_HALF, ny * SECTION_PICK_HALF);
+    let ph = SECTION_PICK_HALF.max(1.2 * mm);
+    let (ox, oy) = (nx * ph, ny * ph);
     o.push(1.0);
     o.extend([p0x + ox, p0y + oy, p1x + ox, p1y + oy, p1x - ox, p1y - oy, p0x - ox, p0y - oy]);
     n += 1;
@@ -275,8 +289,24 @@ mod tests {
     #[test]
     fn schnittlinie_hat_hauptlinie_marken_label_und_pickband() {
         let f = section_line(0.0, 0.0, 4.0, 0.0, 1.0);
-        // 1 Hauptlinie + 2 × (Querstrich + 3 Pfeillinien + Label) + Pick = 12
-        assert_eq!(f[0], 12.0);
+        // 3 Linienstücke + 2 × (Schenkel + Dreieck + Label) + Pick = 10
+        assert_eq!(f[0], 10.0);
+    }
+
+    /// [176] Fixe Papiergrösse: Schenkel 8 mm, Endstück 12 mm; Ansicht ohne kräftige Endstücke.
+    #[test]
+    fn schnittlinie_papiermm_endstuecke_und_ansicht() {
+        let f = section_line_sized(0.0, 0.0, 10.0, 0.0, 1.0, 0.2, 1.0, false);
+        // Endstück 1: art 1 von (0,0) bis 12 mm · 0.2 = 2.4 m; Mitte dünn; Schenkel 8 mm · 0.2 = 1.6 m in Blickrichtung (+y bei sign 1: n = (0,1)).
+        let near = |x: &[f64], y: &[f64]| x.iter().zip(y).all(|(a, b)| (a - b).abs() < 1e-9);
+        assert!(near(&f[1..7], &[2.0, 1.0, 0.0, 0.0, 2.4, 0.0]));
+        assert!(near(&f[7..13], &[2.0, 0.0, 2.4, 0.0, 7.6, 0.0]));
+        let leg = &f[19..25];
+        assert_eq!(leg[1], 1.0);
+        assert!((leg[5] - 1.6).abs() < 1e-12 && leg[4].abs() < 1e-12, "{leg:?}");
+        let v = section_line_sized(0.0, 0.0, 10.0, 0.0, 1.0, 0.2, 1.0, true);
+        assert_eq!(v[0], 8.0, "1 Linie + 2 × (Schenkel, Dreieck, Label) + Pick");
+        assert_eq!(&v[1..7], &[2.0, 0.0, 0.0, 0.0, 10.0, 0.0]);
     }
 
     #[test]
