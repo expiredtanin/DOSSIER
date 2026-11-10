@@ -10,4 +10,4 @@ rect 1
 svg 1
 text 72
 tspan 18
-hash fe3ac92f79a05b2a
+hash b2e3449dc7032be6
