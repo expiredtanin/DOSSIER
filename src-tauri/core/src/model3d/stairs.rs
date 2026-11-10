@@ -111,15 +111,15 @@ pub fn stair_flight_meshes(p: &Project) -> Vec<(usize, crate::mesh3d::Mesh)> {
 const VIEW_RAIL_HALF: f64 = 0.004;
 
 /// [157] Für die Ansichtskanten im Schnitt: Wangen der Wangentreppen aus geraden Läufen und Handlauf/Pfosten
-/// aller Treppen mit Geländer, je Treppe (Index in `p.stairs`). Modell [x, y, Höhe].
-pub fn stair_view_meshes(p: &Project) -> Vec<(usize, crate::mesh3d::Mesh)> {
+/// aller Treppen mit Geländer, je Treppe (Index in `p.stairs`; [173] `true` = Handlauf/Pfosten). Modell [x, y, Höhe].
+pub fn stair_view_meshes(p: &Project) -> Vec<(usize, crate::mesh3d::Mesh, bool)> {
     let mut out = Vec::new();
     let flights = |s: &Stair| matches!(s.shape, StairShape::Straight | StairShape::L | StairShape::U | StairShape::StraightLanding);
     if let Some((stairs, buf)) = stair_input(p, |s, st| st.is_some_and(|t| t.structure == StairTypeStructure::Wange) && flights(s)) {
-        out.extend(crate::stairs3d::stringers(&buf).into_iter().filter_map(|m| stairs.get(m.src).map(|&(si, _)| (si, m))));
+        out.extend(crate::stairs3d::stringers(&buf).into_iter().filter_map(|m| stairs.get(m.src).map(|&(si, _)| (si, m, false))));
     }
     if let Some((stairs, buf)) = stair_input(p, |s, st| s.shape != StairShape::Unknown && st.and_then(|t| t.railing).is_some_and(|r| r != StairTypeRailing::Keine)) {
-        out.extend(crate::stairs3d::railings_with(&buf, VIEW_RAIL_HALF).into_iter().filter_map(|m| stairs.get(m.src).map(|&(si, _)| (si, m))));
+        out.extend(crate::stairs3d::railings_with(&buf, VIEW_RAIL_HALF).into_iter().filter_map(|m| stairs.get(m.src).map(|&(si, _)| (si, m, true))));
     }
     out
 }

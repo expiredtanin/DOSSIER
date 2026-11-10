@@ -207,10 +207,14 @@ pub(super) fn projection_edges(p: &Project, plane: &Plane, walls_r: &[RWall], wi
     }
     // [157] Wangen und Geländer der Treppen (im Schnitt sonst nur Tritte und Setzstufen): Ansichtskanten mit
     // Verdeckung, Besitzer = eine Stufe derselben Treppe.
-    for (si, m) in model3d::stair_view_meshes(p) {
+    let mut rail_owners: HashSet<u32> = HashSet::new();
+    for (si, m, rail) in model3d::stair_view_meshes(p) {
         let Some(i) = slabs_r.iter().position(|s| matches!(s.source, SlabSource::Stair { index } if index == si)) else { continue };
         owners.push((Kind::Slab, i));
         let owner = owners.len() as u32 - 1;
+        if rail {
+            rail_owners.insert(owner);
+        }
         model_tris(&mut faces, &m.positions, &mut m.indices.iter().map(|&k| k as usize), owner, group, &mut push);
         group += 1;
     }
@@ -244,7 +248,14 @@ pub(super) fn projection_edges(p: &Project, plane: &Plane, walls_r: &[RWall], wi
     let (mut visible, mut hidden) = (Vec::new(), Vec::new());
     for sg in hlr::hidden_lines(&faces, &opts) {
         let (kind, index) = owners[sg.owner as usize];
-        let e = Edge { kind, index, a: sg.a, b: sg.b };
+        let stair = if rail_owners.contains(&sg.owner) {
+            StairPart::Rail
+        } else if kind == Kind::Slab && slabs_r.get(index).is_some_and(|s| matches!(s.source, SlabSource::Stair { .. })) {
+            StairPart::Body
+        } else {
+            StairPart::None
+        };
+        let e = Edge { kind, index, a: sg.a, b: sg.b, stair };
         if sg.hidden {
             hidden.push(e);
         } else {

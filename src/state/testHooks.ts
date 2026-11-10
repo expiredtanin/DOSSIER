@@ -5,7 +5,7 @@
 import { core, coreEpoch, coreReady } from "../engine/coreWasm";
 import { getState } from "./appStore";
 import { storeDocument } from "./historySlice";
-import { generatePlan } from "../core";
+import { computeSection, generatePlan, generateSectionPlan } from "../core";
 
 declare global {
   interface Window {
@@ -35,6 +35,8 @@ declare global {
       planLines: (cls: string) => number;
       /** [173] Modelldarstellung der aktiven Ebene (Feld `modelViewOptionId`). */
       modelView: () => string | undefined;
+      /** [173] Schnitt der aktiven Ebene (1:50, Detailgrad der Anzeige): Zahl der Wand-Schnittflächen und ihre Fläche (m²). */
+      sectionWalls: () => Promise<{ n: number; area: number }>;
     };
   }
 }
@@ -79,6 +81,15 @@ export function installTestHooks(): void {
       return generatePlan(s.project, s.activeLevelId, codes, undefined, s.detail, false, false, true, 50).primitives.filter((q) => q.kind === "line" && q.cls === cls).length;
     },
     modelView: () => getState().project.drawingLevels.find((l) => l.id === getState().activeLevelId)?.modelViewOptionId,
+    sectionWalls: async () => {
+      const s = getState();
+      const level = s.project.drawingLevels.find((l) => l.id === s.activeLevelId);
+      const out = level ? await computeSection(s.project, level) : null;
+      if (!out) return { n: 0, area: 0 };
+      const polys = generateSectionPlan(out, false, { scaleDenominator: 50, detail: s.detail }).primitives.filter((q) => q.kind === "polygon" && !!q.wallId);
+      const area = (pts: { x: number; y: number }[]) => Math.abs(pts.reduce((a, p, i) => a + p.x * pts[(i + 1) % pts.length].y - pts[(i + 1) % pts.length].x * p.y, 0)) / 2;
+      return { n: polys.length, area: polys.reduce((a, q) => a + (q.kind === "polygon" ? area(q.pts) : 0), 0) };
+    },
     selected: () => ({ drawings: [...getState().selection.drawings], groups: [...getState().selection.groups], all: JSON.stringify(getState().selection) }),
   };
 }

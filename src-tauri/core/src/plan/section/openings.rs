@@ -102,7 +102,7 @@ pub(crate) fn sashes_of_window_type(wt: &WindowType) -> Vec<crate::opening_geom:
     (0..n).map(|_| crate::opening_geom::Sash { post: false, auto_width: true, width: f64::NAN, post_width: f64::NAN, operable }).collect()
 }
 
-fn window_cut(p: &Project, wall: &Wall, o: &Opening, c: &CrossSection) -> Result<Vec<Primitive>, String> {
+fn window_cut(p: &Project, wall: &Wall, o: &Opening, c: &CrossSection, detail: bool) -> Result<Vec<Primitive>, String> {
     let wt = p.window_type(o);
     let fw = max(0.02, wt.and_then(|t| t.frame_width).unwrap_or(DEFAULT_FRAME_WIDTH));
     let (_, n) = axis_frame(wall);
@@ -170,8 +170,21 @@ fn window_cut(p: &Project, wall: &Wall, o: &Opening, c: &CrossSection) -> Result
     let fwv = min(fw, h / 3.0);
     let (sp, sh) = det.as_ref().map_or((0.0, 0.0), |f| (min(f.sill_profile, h / 4.0), min(f.shading_profile, h / 4.0)));
     let (fwb, fwt) = det.as_ref().map_or((fwv, fwv), |f| (min(max(0.02, f.sides.bottom), h / 3.0), min(max(0.02, f.sides.top), h / 3.0)));
-    let (zb0, zt0) = (c.z_bottom + sp, c.z_top - sh);
     let mut out = vec![opening_poly(rect(c.u_at(c.face_min), c.u_at(c.face_max), c.z_bottom, c.z_top), false, &o.id)];
+    // [173] Ohne Detail (Modelldarstellung): Rahmen oben/unten und eine Glaslinie, kein Sturz, keine
+    // Fensterbank, kein Kämpfer, keine Storen.
+    if !detail {
+        out.push(opening_poly(rect(u0, u1, c.z_bottom, c.z_bottom + fwv), true, &o.id));
+        out.push(opening_poly(rect(u0, u1, c.z_top - fwv, c.z_top), true, &o.id));
+        let u = (u0 + u1) / 2.0;
+        let mut l = line(v2(u, c.z_bottom + fwv), v2(u, c.z_top - fwv), "section-window-glass", GLASS_MM, OPENING_INK);
+        if let Primitive::Line { opening_id, .. } = &mut l {
+            *opening_id = Some(o.id.clone());
+        }
+        out.push(l);
+        return Ok(out);
+    }
+    let (zb0, zt0) = (c.z_bottom + sp, c.z_top - sh);
     out.push(opening_poly(rect(u0, u1, zb0, zb0 + fwb), true, &o.id));
     out.push(opening_poly(rect(u0, u1, zt0 - fwt, zt0), true, &o.id));
     // Fensterbank- und Storen-Anschlussprofil.
@@ -269,8 +282,17 @@ fn lintel_cut(out: &mut Vec<Primitive>, o: &Opening, c: &CrossSection, height: O
     out.push(pr);
 }
 
-fn door_cut(p: &Project, o: &Opening, c: &CrossSection) -> Vec<Primitive> {
+fn door_cut(p: &Project, o: &Opening, c: &CrossSection, detail: bool) -> Vec<Primitive> {
     let mut out = vec![opening_poly(rect(c.u_at(c.face_min), c.u_at(c.face_max), c.z_bottom, c.z_top), false, &o.id)];
+    // [173] Ohne Detail (Modelldarstellung): nur das Blatt in der Wandmitte (Wandöffnung: nur die Lücke).
+    if !detail {
+        let kind = p.door_type(o).map(|t| t.kind);
+        if o.door_type != Some(OpeningDoorType::Wandoeffnung) && kind != Some(DoorTypeKind::Wandoeffnung) {
+            let mid = (c.face_min + c.face_max) / 2.0;
+            out.push(opening_poly(rect(c.u_at(mid - DOOR_LEAF_THICKNESS / 2.0), c.u_at(mid + DOOR_LEAF_THICKNESS / 2.0), c.z_bottom + 0.01, c.z_top), true, &o.id));
+        }
+        return out;
+    }
     if !crate::opening_shape::is_shaped(o) {
         lintel_cut(&mut out, o, c, p.door_type(o).and_then(|t| t.lintel_height), 0.0);
     }
@@ -336,6 +358,12 @@ fn door_frame_cut(out: &mut Vec<Primitive>, o: &Opening, c: &CrossSection, df: &
 
 /// `sectionOpeningPrimitives`.
 pub fn section_opening_primitives(p: &Project, level: &LevelSpec, vis: &Visibility) -> Result<Vec<Primitive>, String> {
+    section_opening_primitives_mv(p, level, vis, true, true)
+}
+
+/// [173] Wie [`section_opening_primitives`] mit dem Detail der Modelldarstellung: `doors`/`windows` = Zarge,
+/// Sturz, Kämpfer, Fensterbank und Storen zeigen (sonst nur Blatt bzw. Rahmen und Glas).
+pub fn section_opening_primitives_mv(p: &Project, level: &LevelSpec, vis: &Visibility, doors: bool, windows: bool) -> Result<Vec<Primitive>, String> {
     let Some(plane) = level.plane() else { return Ok(Vec::new()) };
     if level.kind != "section" {
         return Ok(Vec::new());
@@ -375,7 +403,7 @@ pub fn section_opening_primitives(p: &Project, level: &LevelSpec, vis: &Visibili
             None => (wall, o),
         };
         let Some(c) = cross_section(p, wall, o, p0, u)? else { continue };
-        let prims = if o.kind == ElementKind::Window { window_cut(p, wall, o, &c)? } else { door_cut(p, o, &c) };
+        let prims = if o.kind == ElementKind::Window { window_cut(p, wall, o, &c, windows)? } else { door_cut(p, o, &c, doors) };
         let greyed = vis.greyed(&o.category_code);
         for pr in prims {
             out.push(if greyed { pr.with_greyed(true) } else { pr });

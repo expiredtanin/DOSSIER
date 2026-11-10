@@ -326,15 +326,112 @@ pub fn plan_stair(params: &[f64], total_rise: f64, cut_rise: f64, lw_mm: f64, fi
     plan_stair_clipped(params, total_rise, cut_rise, lw_mm, filled_arrow, column_r, railing, double, &[])
 }
 
+/// [173] Lauflinie: Versatz an Anfang und Ende (Meter, entlang der Linie) und Antrittspunkt (Halbmesser in
+/// Metern; `None` = ohne). Vorgabe: die Linie läuft von der Antritts- bis zur Austrittskante.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct RunOpts {
+    pub start: f64,
+    pub end: f64,
+    pub start_mark: Option<f64>,
+}
+
+/// [173] Schnittparameter des Strahls `a + t·d` mit der Geraden durch `c`–`e` (`None` = parallel).
+fn ray_line(a: Vec2, d: Vec2, c: Vec2, e: Vec2) -> Option<f64> {
+    let s = sub(e, c);
+    let den = cross(d, s);
+    if den.abs() < 1e-12 {
+        return None;
+    }
+    Some(cross(sub(c, a), s) / den)
+}
+
+/// [173] Lauflinie von der Antrittskante (Vorderkante der ersten Stufe) bis zur Austrittskante (Hinterkante
+/// der letzten): die Geometrie (`kernel2d::stair_geometry`) rückt sie um eine halbe Stufe bzw. 15 % der letzten
+/// Stufe ein; hier auf die Kanten verlängert, dann um `run.start`/`run.end` gekürzt und der Pfeil neu gesetzt.
+fn run_line_to_edges(geo: &mut StairGeometry, spiral: bool, run: &RunOpts) {
+    let n = geo.run_line.len();
+    if n < 2 || geo.treads.is_empty() {
+        return;
+    }
+    let (first_rl, last_rl) = (geo.run_line[0], geo.run_line[n - 1]);
+    let up = len(sub(geo.arrow.head.1, last_rl)) <= len(sub(geo.arrow.head.1, first_rl));
+    let first = geo.treads.iter().filter(|t| t.pts.len() >= 4).min_by_key(|t| t.index);
+    let last = geo.treads.iter().filter(|t| t.pts.len() >= 4).max_by_key(|t| t.index);
+    let (Some(first), Some(last)) = (first, last) else { return };
+    let front = |q: &[Vec2]| if spiral { (q[0], q[1]) } else { (q[3], q[0]) };
+    let back = |q: &[Vec2]| if spiral { (q[3], q[2]) } else { (q[1], q[2]) };
+    let extend = |p: Vec2, from: Vec2, edge: (Vec2, Vec2)| -> Vec2 {
+        let d = sub(p, from);
+        let l = len(d);
+        if !(l > 1e-9) {
+            return p;
+        }
+        let d = mul(d, 1.0 / l);
+        match ray_line(p, d, edge.0, edge.1) {
+            // Nur nach vorn und höchstens eine Stufe weit (sonst stimmt die Kante nicht).
+            Some(t) if t.is_finite() && t >= -1e-9 && t < 1.0 => add(p, mul(d, t.max(0.0))),
+            _ => p,
+        }
+    };
+    let mut rl = geo.run_line.clone();
+    rl[0] = extend(rl[0], rl[1], front(&first.pts));
+    rl[n - 1] = extend(rl[n - 1], rl[n - 2], back(&last.pts));
+    // Versatz: von beiden Enden entlang der Linie kürzen (nur wenn genug Länge bleibt).
+    let total: f64 = rl.windows(2).map(|w| len(sub(w[1], w[0]))).sum();
+    let (s0, s1) = (run.start.max(0.0), run.end.max(0.0));
+    if s0 + s1 > 0.0 && s0 + s1 < total - 1e-3 {
+        rl = trim_start(&rl, s0);
+        rl.reverse();
+        rl = trim_start(&rl, s1);
+        rl.reverse();
+    }
+    let m = rl.len();
+    let tip = if up { rl[m - 1] } else { rl[0] };
+    let from = if up { rl[m - 2] } else { rl[1] };
+    let d = sub(tip, from);
+    let l = len(d);
+    if l > 1e-9 {
+        let dir = mul(d, 1.0 / l);
+        let nn = Vec2::new(-dir.y, dir.x);
+        let s = 0.22_f64;
+        let back_pt = add(tip, mul(dir, -s));
+        geo.arrow.head = (add(back_pt, mul(nn, s * 0.55)), tip, add(back_pt, mul(nn, -s * 0.55)));
+        geo.arrow.shaft = (rl[0], rl[m - 1]);
+    }
+    geo.run_line = rl;
+}
+
+/// Linienzug ab der Länge `s` (vom Anfang her gekürzt).
+fn trim_start(pts: &[Vec2], s: f64) -> Vec<Vec2> {
+    let mut rest = s;
+    for i in 0..pts.len() - 1 {
+        let l = len(sub(pts[i + 1], pts[i]));
+        if rest < l - 1e-12 {
+            let mut out = vec![lerp(pts[i], pts[i + 1], rest / l)];
+            out.extend_from_slice(&pts[i + 1..]);
+            return out;
+        }
+        rest -= l;
+    }
+    pts[pts.len() - 2..].to_vec()
+}
+
+
 /// Wie [`plan_stair`]; `clip` nicht leer: nur die Teile innerhalb dieser Ringe (Treppe des unteren
 /// Geschosses durch das Deckenloch gesehen, [155]), ohne Pick-Fläche und Säule.
 #[allow(clippy::too_many_arguments)]
 pub fn plan_stair_clipped(params: &[f64], total_rise: f64, cut_rise: f64, lw_mm: f64, filled_arrow: bool, column_r: f64, railing: u8, double: bool, clip: &[Vec<P>]) -> Vec<f64> {
+    plan_stair_run(params, total_rise, cut_rise, lw_mm, filled_arrow, column_r, railing, double, clip, &RunOpts::default())
+}
+
+/// [`plan_stair_clipped`] mit Lauflinien-Optionen ([173] Modelldarstellung: Versatz, Antrittspunkt).
+#[allow(clippy::too_many_arguments)]
+pub fn plan_stair_run(params: &[f64], total_rise: f64, cut_rise: f64, lw_mm: f64, filled_arrow: bool, column_r: f64, railing: u8, double: bool, clip: &[Vec<P>], run: &RunOpts) -> Vec<f64> {
     let Some(p) = decode_params(params) else { return Vec::new() };
     if !(total_rise.is_finite() && cut_rise.is_finite() && lw_mm.is_finite()) {
         return Vec::new();
     }
-    let geo = stair_geometry(&p, total_rise);
+    let mut geo = stair_geometry(&p, total_rise);
     let outline = stair_outline(&p);
     let spiral = p.shape == "spiral";
     let center = outline.spiral.as_ref().map(|s| s.arcs[0].0);
@@ -433,6 +530,12 @@ pub fn plan_stair_clipped(params: &[f64], total_rise: f64, cut_rise: f64, lw_mm:
     }
 
     // 5. Lauflinie und Pfeil (Flügel als ein Zug über die Spitze: die Ecke schliesst spitz).
+    // [173] Von der Antritts- bis zur Austrittskante, Versatz und Antrittspunkt nach der Modelldarstellung.
+    run_line_to_edges(&mut geo, spiral, run);
+    if let (Some(r), Some(a)) = (run.start_mark.filter(|r| *r > 0.0 && r.is_finite()), geo.run_line.first().copied()) {
+        let pts: Vec<Vec2> = (0..16).map(|k| { let t = std::f64::consts::TAU * k as f64 / 16.0; Vec2::new(a.x + r * jsnum::cos(t), a.y + r * jsnum::sin(t)) }).collect();
+        o.items.push(Item::Polygon { pts, stroke_mm: w_tread, filled: true });
+    }
     // [155] Lauflinie wie die Tritte: vor der Bruchlinie ausgezogen, dahinter gestrichelt; der Pfeil bleibt ausgezogen.
     for w in geo.run_line.windows(2) {
         for (a, b, dashed) in lay.split(w[0], w[1], &[]) {
@@ -858,6 +961,35 @@ mod tests {
     }
 
     /// [151] Formen mit Geländer: gerade, L, U, U mit Mittellauf, gerade mit Podest, Wendel (21er-Puffer).
+    /// [173] Lauflinie von der Antritts- bis zur Austrittskante in allen Formen; Versatz kürzt sie entlang der
+    /// Linie, der Pfeil sitzt am neuen Ende; Antrittspunkt als gefüllter Kreis.
+    #[test]
+    fn lauflinie_von_kante_zu_kante_mit_versatz() {
+        for (name, p) in forms() {
+            let sp = decode_params(&p).unwrap();
+            let spiral = sp.shape == "spiral";
+            let raw = stair_geometry(&sp, 2.8);
+            let mut g = stair_geometry(&sp, 2.8);
+            run_line_to_edges(&mut g, spiral, &RunOpts::default());
+            let first = g.treads.iter().min_by_key(|t| t.index).unwrap();
+            let last = g.treads.iter().max_by_key(|t| t.index).unwrap();
+            let (fe, be) = if spiral { ((first.pts[0], first.pts[1]), (last.pts[3], last.pts[2])) } else { ((first.pts[3], first.pts[0]), (last.pts[1], last.pts[2])) };
+            let n = g.run_line.len();
+            assert!(dist_seg(g.run_line[0], fe.0, fe.1) < 1e-6, "{name}: Anfang auf der Antrittskante");
+            assert!(dist_seg(g.run_line[n - 1], be.0, be.1) < 1e-6, "{name}: Ende auf der Austrittskante");
+            let l = |rl: &[Vec2]| rl.windows(2).map(|w| len(sub(w[1], w[0]))).sum::<f64>();
+            assert!(l(&g.run_line) >= l(&raw.run_line) - 1e-9, "{name}: nicht kürzer als vorher");
+            assert!(len(sub(g.arrow.head.1, g.run_line[n - 1])) < 1e-9, "{name}: Pfeil am Ende");
+            let mut h = stair_geometry(&sp, 2.8);
+            run_line_to_edges(&mut h, spiral, &RunOpts { start: 0.1, end: 0.2, start_mark: None });
+            assert!((l(&g.run_line) - l(&h.run_line) - 0.3).abs() < 1e-6, "{name}: Versatz 0.1 + 0.2");
+            assert!(len(sub(h.arrow.head.1, h.run_line[h.run_line.len() - 1])) < 1e-9);
+        }
+        let with = plan_stair_run(&straight(), 2.8, 1.0, 0.25, false, 0.0, 0, false, &[], &RunOpts { start_mark: Some(0.04), ..Default::default() });
+        let without = plan_stair(&straight(), 2.8, 1.0, 0.25, false, 0.0, 0, false);
+        assert_eq!(tags(&with).iter().filter(|x| **x == 1.0).count(), tags(&without).iter().filter(|x| **x == 1.0).count() + 1, "Antrittspunkt");
+    }
+
     fn forms() -> Vec<(&'static str, Vec<f64>)> {
         let mut v = vec![("gerade", straight())];
         let l = vec![1.0, 0.0, 0.0, 1.0, 0.0, 2.0, 1.5, 1.0, NAN, NAN, NAN, NAN, 1.0, 16.0, NAN, 0.0];

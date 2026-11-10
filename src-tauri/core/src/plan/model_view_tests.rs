@@ -78,7 +78,7 @@ fn standardstufen_wie_heute() {
             let q = with_mv(p.clone(), mv(serde_json::json!({"baseDetail": detail})));
             assert_eq!(heute, buf(&q, 1.0, scale, select()), "eigene leere Stufe {id} 1:{scale}");
             // leere Abschnitte sind ebenfalls „wie Basis"
-            let q = with_mv(p.clone(), mv(serde_json::json!({"doors": {}, "windows": {}, "stairs": {}, "walls": {}, "slabs": {}, "site": {}})));
+            let q = with_mv(p.clone(), mv(serde_json::json!({"doors": {}, "windows": {}, "stairs": {}, "walls": {}, "slabs": {}, "site": {}, "roofs": {}, "columns": {}, "elevation": {}})));
             assert_eq!(heute, buf(&q, code, scale, select()), "leere Abschnitte {id} 1:{scale}");
         }
     }
@@ -91,7 +91,7 @@ fn aufloesung_je_option_basis() {
     assert_eq!(o.door.swing_angle(None), None);
     assert!(o.door.frame && !o.door.leaf_rect && o.door.swing_arc.is_none());
     assert!(!o.window.sill && !o.window.sash_frames && o.window.sash_symbols(None, None) && !o.window.plan_swing_arcs(None, None));
-    assert_eq!(o.stair, StairOpts { walk_line: true, arrow: true, break_line: true, above_cut: true, handrail: Some(false) });
+    assert_eq!(o.stair, StairOpts { walk_line: true, arrow: true, break_line: true, above_cut: true, handrail: Some(false), section_beyond: true, run_start_mm: 0.0, run_end_mm: 0.0, start_mark: false });
     assert_eq!(o.wall.layers, LayerMode::Simplified { force: false });
     assert_eq!(o.wall.thin_mm, THIN_LAYER_PAPER_MM);
     assert!(o.wall.reveals && !o.cut_hatch(None) && o.floor_finish(None).is_none() && o.terrain(None).is_none());
@@ -116,7 +116,7 @@ fn aufloesung_je_option_eigene_stufe() {
     assert_eq!(o.door.swing_arc, Some(false));
     assert!(!o.door.frame && o.door.leaf_rect);
     assert!(!o.window.sash_symbols(None, None) && o.window.plan_swing_arcs(None, None) && o.window.sill && o.window.sash_frames);
-    assert_eq!(o.stair, StairOpts { walk_line: false, arrow: false, break_line: false, above_cut: false, handrail: None });
+    assert_eq!(o.stair, StairOpts { walk_line: false, arrow: false, break_line: false, above_cut: false, handrail: None, section_beyond: true, run_start_mm: 0.0, run_end_mm: 0.0, start_mark: false });
     assert_eq!(o.wall.layers, LayerMode::Core);
     assert_eq!(o.wall.thin_mm, 0.8);
     assert!(!o.wall.reveals && o.cut_hatch(None));

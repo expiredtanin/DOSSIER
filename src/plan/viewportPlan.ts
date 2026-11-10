@@ -62,10 +62,19 @@ export async function viewportLevelPlan(
   /** [34] Verknüpfte Ansichtsvorlage des Ausschnitts: ihre Ebenen-Felder (verdeckte Kanten, Schnittflächen
    * schraffiert, Schatten, Skizzenstil …) und Detailgrad gelten für diesen Viewport (Kern: `sheet_viewports::snapshot_project`). */
   template?: ViewTemplate | null,
+  /** [173] Modelldarstellung des Ausschnitts (`ViewSnapshot.modelViewOptionId`): geht der Ebene und der
+   * Vorlage vor (Kern: `sheet_viewports::viewport_args`, Schnitt/Ansicht über `modelView`). */
+  modelViewOptionId?: string | null,
 ): Promise<Plan> {
-  if (!template) return levelPlan(project, levelId, visibleCodes, detail, scaleDenominator, forPrint, mono, overrideRuleIds);
-  const tp = projectWithTemplate(project, levelId, template);
-  return withDocument(tp, () => levelPlan(tp, levelId, visibleCodes, template.detail ?? detail, scaleDenominator, forPrint, mono, overrideRuleIds));
+  if (!template && !modelViewOptionId) return levelPlan(project, levelId, visibleCodes, detail, scaleDenominator, forPrint, mono, overrideRuleIds);
+  let tp = template ? projectWithTemplate(project, levelId, template) : project;
+  if (modelViewOptionId) tp = projectWithModelView(tp, levelId, modelViewOptionId);
+  return withDocument(tp, () => levelPlan(tp, levelId, visibleCodes, template?.detail ?? detail, scaleDenominator, forPrint, mono, overrideRuleIds));
+}
+
+/** [173] Das Projekt mit der Modelldarstellung `id` an der Ebene `levelId` (wie die Vorlage ein Ebenen-Feld). */
+export function projectWithModelView(project: Project, levelId: string, id: string): Project {
+  return { ...project, drawingLevels: project.drawingLevels.map((l) => (l.id === levelId ? { ...l, modelViewOptionId: id } : l)) };
 }
 
 async function levelPlan(

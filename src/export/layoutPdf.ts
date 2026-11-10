@@ -172,7 +172,7 @@ async function renderPage(
       // [33] Override-Regeln des Ausschnitts bzw. seiner verknüpften Ansichtsvorlage (wie am Bildschirm).
       const ruleIds = snapshotOverrideRuleIds(project, snap);
       const template = snapshotTemplate(project, snap);
-      const planOf = (visible: Set<string>) => viewportLevelPlan(project, snap.activeLevelId, visible, snap.detail, scaleN, true, snapshotMono(project, snap), ruleIds, template);
+      const planOf = (visible: Set<string>) => viewportLevelPlan(project, snap.activeLevelId, visible, snap.detail, scaleN, true, snapshotMono(project, snap), ruleIds, template, snap.modelViewOptionId);
       const draw = async (plan: Plan, transparent: boolean, bounds?: Plan["bounds"]) => {
         const print = planToPrintSvg(plan, { scaleDenominator: scaleN, pageWidthMm: vp.widthMm, pageHeightMm: vp.heightMm, transparent, bounds });
         await doc.svg(print.svg, { x: vp.xMm, y: vp.yMm, width: vp.widthMm, height: vp.heightMm });

@@ -1973,6 +1973,18 @@ export type MasterLayout = {
 /** [173] Darstellung der Stufen über der Schnitthöhe. */
 export type ModelViewAboveCut = "dashed" | "off";
 
+/** [173] Bodenaufbau im Schnitt. */
+export type ModelViewBuildUp = "show" | "merged";
+
+/** [173] Stützen in der Modelldarstellung (fehlt ⇒ wie Basis). */
+export type ModelViewColumns = {
+  /** Schnittfläche im Grundriss und Schnitt (Basis: Schraffur, ab 1:100 schwarz). */
+  cutFill?: ModelViewCutFill;
+};
+
+/** [173] Geschnittene Stütze: Schraffur des Baustoffs, schwarz oder leer. */
+export type ModelViewCutFill = "material" | "solid" | "empty";
+
 /** [173] Türen in der Modelldarstellung (fehlt ⇒ wie Basis). */
 export type ModelViewDoors = {
   /** Sturzlinie im Grundriss (Element und Türtyp gehen vor). */
@@ -1985,6 +1997,18 @@ export type ModelViewDoors = {
   frame?: boolean;
   /** Türblatt als Linie oder als Rechteck mit Blattdicke (Basis: Rechteck nur „fein"). */
   leaf?: ModelViewLeaf;
+  /** Schwelle im Grundriss: aus, nur Hebeschiebetüren oder alle Türen (Basis: aus). */
+  threshold?: ModelViewThreshold;
+  /** Zarge, Blatt und Sturz im Schnitt (Basis: ja; nein = nur das Blatt). */
+  sectionDetail?: boolean;
+};
+
+/** [173] Ansicht (Fassade) in der Modelldarstellung (fehlt ⇒ wie Basis). */
+export type ModelViewElevation = {
+  /** Schlagschatten (die Ebene geht vor; Basis: aus). */
+  shadows?: boolean;
+  /** Ansichtsschraffur der Baustoffe (Basis: ja). */
+  materialHatch?: boolean;
 };
 
 /** [173] Handlauf im Grundriss: aus, einfache Linie (Achse) oder doppelte (Rohrkanten). */
@@ -2015,6 +2039,22 @@ export type ModelViewOption = {
   slabs?: ModelViewSlabs;
   /** Gelände. */
   site?: ModelViewSite;
+  /** [173] Dächer. */
+  roofs?: ModelViewRoofs;
+  /** [173] Stützen. */
+  columns?: ModelViewColumns;
+  /** [173] Ansicht (Fassade). */
+  elevation?: ModelViewElevation;
+};
+
+/** [173] Dächer in der Modelldarstellung (fehlt ⇒ wie Basis). */
+export type ModelViewRoofs = {
+  /** Schichten im Schnitt (Basis: vereinfacht ab 1:75 ausser „fein"). */
+  layers?: ModelViewLayers;
+  /** Dachrand, First und Grate über der Schnitthöhe (strichpunktiert) im Grundriss (Basis: ja). */
+  overhead?: boolean;
+  /** Ansichtsschraffur und Muster der Eindeckung in der Dachaufsicht (Basis: ja). */
+  viewHatch?: boolean;
 };
 
 /** [173] Gelände in der Modelldarstellung. */
@@ -2027,6 +2067,18 @@ export type ModelViewSite = {
 export type ModelViewSlabs = {
   /** Bodenbelag-Muster im Grundriss (die Ebene geht vor; Basis: automatisch). */
   floorFinish?: FloorFinishDisplay;
+  /**
+   * Schichten im Schnitt: alle, vereinfacht oder nur die tragende Schicht (Basis: vereinfacht ab 1:75 ausser „fein").
+   */
+  layers?: ModelViewLayers;
+  /**
+   * Bodenaufbau (Schichten über der tragenden) im Schnitt: zeigen oder zu einer Fläche zusammenfassen (Basis: zeigen).
+   */
+  buildUp?: ModelViewBuildUp;
+  /** Umriss der Decken im Grundriss (Basis: ja). */
+  outline?: boolean;
+  /** Ansichtsschraffur der Decken im Grundriss (Basis: ja ausser „grob"). */
+  viewHatch?: boolean;
 };
 
 /** [173] Treppen in der Modelldarstellung (fehlt ⇒ wie Basis). */
@@ -2043,7 +2095,18 @@ export type ModelViewStairs = {
    * Handlauf (Basis: doppelt ab 1:50 bzw. „fein", sonst einfach; nur wo der Treppentyp einen hat).
    */
   handrail?: ModelViewHandrail;
+  /** Treppen hinter der Schnittebene (Stufen, Wangen, Geländer) im Schnitt (Basis: ja). */
+  sectionBeyond?: boolean;
+  /** Versatz der Lauflinie am Anfang in Papier-mm (Basis 0: ab der Antrittskante). */
+  runStartMm?: number;
+  /** Versatz der Lauflinie am Ende in Papier-mm (Basis 0: bis zur Austrittskante). */
+  runEndMm?: number;
+  /** Antrittspunkt am Anfang der Lauflinie (Basis: nein). */
+  startMark?: boolean;
 };
+
+/** [173] Schwelle der Türen im Grundriss. */
+export type ModelViewThreshold = "off" | "liftSlide" | "all";
 
 /** [173] Wände in der Modelldarstellung (fehlt ⇒ wie Basis). */
 export type ModelViewWalls = {
@@ -2074,6 +2137,16 @@ export type ModelViewWindows = {
   sill?: boolean;
   /** Flügelrahmen im Grundriss (Basis: nur „fein"). */
   sashFrames?: boolean;
+  /**
+   * Sturzlinie im Grundriss (gestrichelt an den Wandflächen; Element-Linientyp geht vor; Basis: nein).
+   */
+  lintelLine?: boolean;
+  /**
+   * Rahmen, Kämpfer, Sturz, Fensterbank und Storen im Schnitt (Basis: ja; nein = Rahmen und Glas).
+   */
+  sectionDetail?: boolean;
+  /** Fensterteilung (Flügel, Sprossen, Kämpfer) in der Ansicht (Basis: ja). */
+  elevationDivision?: boolean;
 };
 
 /**

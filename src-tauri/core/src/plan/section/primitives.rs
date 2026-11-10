@@ -92,18 +92,27 @@ pub(super) fn ring_bbox(r: &[[f64; 2]]) -> [f64; 4] {
 /// [140] Dämmschichten (Dämmschlange, Zickzack, Welle) unter der gemeinsamen Schwelle (`style::is_thin_layer`, 0.5 mm Papier) ab 1:75
 /// ohne Muster (nur Füllung und feine Fuge): die Schlange einer 3–4 cm Trittschalldämmung wäre in 1:100 ein
 /// dichter Zickzack-Balken. 1:50 (und `scale` 0) zeichnet sie immer.
-pub fn plain_thin_insulation(mut cuts: Vec<Cut>, scale: f64) -> Vec<Cut> {
+pub fn plain_thin_insulation(cuts: Vec<Cut>, scale: f64) -> Vec<Cut> {
     if !simplify_thin_layers(Detail::Mittel, scale) {
         return cuts;
     }
-    for c in &mut cuts {
+    plain_thin_insulation_by(cuts, scale, THIN_LAYER_PAPER_MM, &|_| true)
+}
+
+/// [173] [`plain_thin_insulation`] nur für Flächen mit `allow` (Schichtmodus der Modelldarstellung) und der
+/// Schwelle `thin_mm` (Papier-mm).
+fn plain_thin_insulation_by(mut cuts: Vec<Cut>, scale: f64, thin_mm: f64, allow: &dyn Fn(&Cut) -> bool) -> Vec<Cut> {
+    if !(scale.is_finite() && scale > 0.0) {
+        return cuts;
+    }
+    for c in cuts.iter_mut().filter(|c| allow(c)) {
         let Some(h) = c.hatch.as_mut() else { continue };
         if !matches!(h.pattern, HatchPattern::Insulation | HatchPattern::InsulationHard | HatchPattern::InsulationWave) || h.kind.is_some() {
             continue;
         }
         let half = ring_len(&c.pts) / 2.0;
         let thick = if half > 0.0 { ring_area(&c.pts) / half } else { 0.0 };
-        if is_thin_layer(thick, scale) {
+        if thin_at(thick, scale, thin_mm) {
             h.pattern = HatchPattern::None;
         }
     }
@@ -118,10 +127,24 @@ pub fn merge_thin_cuts(cuts: &[Cut], scale: f64) -> Vec<Cut> {
     if !simplify_thin_layers(Detail::Mittel, scale) {
         return cuts.to_vec();
     }
+    merge_thin_cuts_by(cuts, scale, THIN_LAYER_PAPER_MM, &|_| true)
+}
+
+/// Dünn bei 1:`scale` unter `thin_mm` Papier (wie `style::is_thin_layer` mit eigener Schwelle).
+fn thin_at(thickness_m: f64, scale: f64, thin_mm: f64) -> bool {
+    !(thickness_m * 1000.0 / scale >= thin_mm)
+}
+
+/// [173] [`merge_thin_cuts`] nur für Flächen mit `allow` (Schichtmodus der Modelldarstellung) und der
+/// Schwelle `thin_mm` (Papier-mm).
+fn merge_thin_cuts_by(cuts: &[Cut], scale: f64, thin_mm: f64, allow: &dyn Fn(&Cut) -> bool) -> Vec<Cut> {
+    if !(scale.is_finite() && scale > 0.0) {
+        return cuts.to_vec();
+    }
     let n = cuts.len();
-    let mergeable = |c: &Cut| matches!(c.kind, Kind::Wall | Kind::Slab | Kind::Roof) && c.stair_id.is_none() && c.pts.len() >= 3;
+    let mergeable = |c: &Cut| matches!(c.kind, Kind::Wall | Kind::Slab | Kind::Roof) && c.stair_id.is_none() && c.pts.len() >= 3 && allow(c);
     let thick: Vec<f64> = cuts.iter().map(|c| { let half = ring_len(&c.pts) / 2.0; if half > 0.0 { ring_area(&c.pts) / half } else { 0.0 } }).collect();
-    let thin: Vec<bool> = (0..n).map(|i| mergeable(&cuts[i]) && thick[i] > 0.0 && is_thin_layer(thick[i], scale)).collect();
+    let thin: Vec<bool> = (0..n).map(|i| mergeable(&cuts[i]) && thick[i] > 0.0 && thin_at(thick[i], scale, thin_mm)).collect();
     if !thin.iter().any(|t| *t) {
         return cuts.to_vec();
     }
@@ -268,9 +291,106 @@ fn loose_cut(cp: &Cut, loose: &HashSet<String>) -> bool {
 /// [33] Overrides (`rules.ov`) haben Vorrang vor beidem: Füllung, Schraffur und Umriss der Regel.
 #[allow(clippy::too_many_arguments)]
 pub fn section_primitives_at(out: &Output, mono: bool, hidden_lines: bool, vis: &Visibility, scale: f64, detail: Detail, cut_hatch: bool, rules: &CutRules) -> (Vec<Primitive>, [f64; 4]) {
+    section_primitives_mv(out, mono, hidden_lines, vis, scale, detail, cut_hatch, rules, None)
+}
+
+/// [173] Modelldarstellung im Schnitt: aufgelöste Optionen und je Schnittfläche (Index wie `Output::cuts`)
+/// ihre Lage zur tragenden Schicht des Bauteils ("above"/"structure"/"below", `overrides::layer_positions`),
+/// dazu die Stützen (ids).
+pub struct SectionMv<'a> {
+    pub o: &'a crate::plan::model_view::Options,
+    pub layer_pos: Vec<Option<&'static str>>,
+    pub columns: HashSet<String>,
+}
+
+impl<'a> SectionMv<'a> {
+    pub fn of(p: &Project, out: &Output, o: &'a crate::plan::model_view::Options) -> SectionMv<'a> {
+        let mut memo: HashMap<(Kind, String), (Vec<Layer>, Vec<&'static str>)> = HashMap::new();
+        let layer_pos = out
+            .cuts
+            .iter()
+            .map(|c| {
+                let src = c.source_id.as_deref().filter(|_| c.stair_id.is_none() && matches!(c.kind, Kind::Wall | Kind::Slab | Kind::Roof))?;
+                let key = (c.kind, src.to_string());
+                if !memo.contains_key(&key) {
+                    let layers: Vec<Layer> = match c.kind {
+                        Kind::Wall => p.walls.iter().find(|w| w.id == src).map(|w| p.wall_type_or_fallback(w).layers.clone())?,
+                        Kind::Slab => {
+                            let ce = p.ceilings.as_deref().unwrap_or(&[]).iter().find(|x| x.id == src)?;
+                            model3d::ceiling_type_ref(p, ce).map_or(Project::fallback_layers(), |t| t.2).to_vec()
+                        }
+                        _ => p.roofs.as_deref().unwrap_or(&[]).iter().find(|x| x.id == src).map(|r| p.roof_layers(r))?,
+                    };
+                    let pos = crate::plan::overrides::layer_positions(p, &layers);
+                    memo.insert(key.clone(), (layers, pos));
+                }
+                let (layers, pos) = memo.get(&key)?;
+                let li = c.layer_index.or_else(|| if layers.len() == 1 { Some(0) } else { c.component_id.as_deref().and_then(|id| layers.iter().position(|l| l.component_id == id)) })?;
+                pos.get(li).copied()
+            })
+            .collect();
+        let columns = p.columns.as_deref().unwrap_or(&[]).iter().map(|c| c.id.clone()).collect();
+        SectionMv { o, layer_pos, columns }
+    }
+
+    fn mode(&self, k: Kind) -> Option<crate::plan::model_view::LayerMode> {
+        match k {
+            Kind::Wall => Some(self.o.wall.layers),
+            Kind::Slab => Some(self.o.slab.layers),
+            Kind::Roof => Some(self.o.roof.layers),
+            _ => None,
+        }
+    }
+}
+
+/// [173] Bodenaufbau (Deckenschichten über der tragenden, `above`) je Decke zu einer Fläche vereinigen; Stil
+/// der dicksten Schicht. Flächen mit Loch bleiben einzeln (mit diesem Stil).
+fn merge_build_up(cuts: Vec<Cut>, above: &[bool]) -> Vec<Cut> {
+    let n = cuts.len();
+    let mut done = vec![false; n];
+    let mut out = Vec::with_capacity(n);
+    for i in 0..n {
+        if done[i] {
+            continue;
+        }
+        if !above[i] || cuts[i].source_id.is_none() {
+            out.push(cuts[i].clone());
+            continue;
+        }
+        let members: Vec<usize> = (i..n).filter(|&j| above[j] && !done[j] && cuts[j].source_id == cuts[i].source_id && cuts[j].ov == cuts[i].ov).collect();
+        for &j in &members {
+            done[j] = true;
+        }
+        if members.len() == 1 {
+            out.push(cuts[i].clone());
+            continue;
+        }
+        let thick = |c: &Cut| {
+            let half = ring_len(&c.pts) / 2.0;
+            if half > 0.0 { ring_area(&c.pts) / half } else { 0.0 }
+        };
+        let t = members.iter().copied().max_by(|&a, &b| thick(&cuts[a]).total_cmp(&thick(&cuts[b])).then(b.cmp(&a))).unwrap_or(i);
+        let polys: Vec<crate::flat::Polygon> = members.iter().map(|&j| vec![cuts[j].pts.clone()]).collect();
+        let u = crate::polygon_bool::union(&polys);
+        if !u.is_empty() && u.iter().all(|poly| poly.len() == 1) {
+            for poly in u {
+                out.push(Cut { pts: poly.into_iter().next().unwrap_or_default(), nse: None, ..cuts[t].clone() });
+            }
+        } else {
+            out.extend(members.iter().map(|&j| Cut { fill: cuts[t].fill.clone(), hatch: cuts[t].hatch.clone(), ..cuts[j].clone() }));
+        }
+    }
+    out
+}
+
+/// [`section_primitives_at`] mit der Modelldarstellung `mv` ([173]; `None` = Basis, wie bisher): Schichten
+/// je Bauteilart (alle, vereinfacht, nur die tragende), Bodenaufbau als eine Fläche, Stützen-Füllung,
+/// Treppen hinter dem Schnitt und ihr Handlauf.
+#[allow(clippy::too_many_arguments)]
+pub fn section_primitives_mv(out: &Output, mono: bool, hidden_lines: bool, vis: &Visibility, scale: f64, detail: Detail, cut_hatch: bool, rules: &CutRules, mv: Option<&SectionMv>) -> (Vec<Primitive>, [f64; 4]) {
+    use crate::plan::model_view::{CutFill, LayerMode};
     let loose = &rules.loose;
     let black = solid_cut(detail, scale, cut_hatch);
-    let thin_scale = if simplify_thin_layers(detail, scale) && !black { scale } else { 0.0 };
     let with_ov: Vec<Cut>;
     let cuts: &[Cut] = if rules.ov.is_empty() {
         &out.cuts
@@ -278,7 +398,30 @@ pub fn section_primitives_at(out: &Output, mono: bool, hidden_lines: bool, vis: 
         with_ov = out.cuts.iter().zip(rules.ov.iter().chain(std::iter::repeat(&None))).map(|(c, o)| Cut { ov: o.clone(), ..c.clone() }).collect();
         &with_ov
     };
-    let merged = merge_override_groups(plain_thin_insulation(merge_thin_cuts(cuts, thin_scale), thin_scale));
+    let merged = match mv {
+        None => {
+            let thin_scale = if simplify_thin_layers(detail, scale) && !black { scale } else { 0.0 };
+            merge_override_groups(plain_thin_insulation(merge_thin_cuts(cuts, thin_scale), thin_scale))
+        }
+        Some(m) => {
+            let pos = |i: usize| m.layer_pos.get(i).copied().flatten();
+            // „Nur Kern": Schichten ausser der tragenden entfallen (Flächen ohne bekannte Schicht bleiben).
+            let keep: Vec<usize> = (0..cuts.len()).filter(|&i| !(m.mode(cuts[i].kind) == Some(LayerMode::Core) && pos(i).is_some_and(|s| s != "structure"))).collect();
+            let kept: Vec<Cut> = keep.iter().map(|&i| cuts[i].clone()).collect();
+            let kept = if m.o.slab.build_up_merged && !black {
+                let above: Vec<bool> = keep.iter().map(|&i| cuts[i].kind == Kind::Slab && pos(i) == Some("above")).collect();
+                merge_build_up(kept, &above)
+            } else {
+                kept
+            };
+            let simplify = |k: Kind| m.mode(k).is_some_and(|md| m.o.simplify_thin_in(md, scale));
+            let any = [Kind::Wall, Kind::Slab, Kind::Roof].into_iter().any(simplify);
+            let thin_scale = if any && !black { scale } else { 0.0 };
+            let allow = |c: &Cut| simplify(c.kind);
+            merge_override_groups(plain_thin_insulation_by(merge_thin_cuts_by(&kept, thin_scale, m.o.wall.thin_mm, &allow), thin_scale, m.o.wall.thin_mm, &allow))
+        }
+    };
+    let column_fill = |cp: &Cut| mv.and_then(|m| m.o.column_fill.filter(|_| cp.kind == Kind::Slab && cp.source_id.as_ref().is_some_and(|s| m.columns.contains(s))));
     let mut prims = Vec::new();
     let mut acc = Acc::new();
     let shown = |code: &str| vis.visible(code) && vis.render(code);
@@ -329,10 +472,18 @@ pub fn section_primitives_at(out: &Output, mono: bool, hidden_lines: bool, vis: 
         let ov = cp.ov.as_ref();
         // Ohne Override: schwarz ab 1:100 (ausser lose Schüttungen). Mit Override, der Füllung oder Schraffur
         // setzt, gilt die Regel ([33]); eine Regel, die nur den Umriss setzt, lässt die Fläche schwarz.
-        let base_black = black && !loose_cut(cp, loose);
+        // [173] Stütze nach der Modelldarstellung: Schraffur (nie schwarz), schwarz oder leer.
+        let cf = column_fill(cp);
+        let base_black = match cf {
+            Some(CutFill::Solid) => true,
+            Some(_) => false,
+            None => black && !loose_cut(cp, loose),
+        };
         let black = base_black && !ov.is_some_and(|o| o.styles());
         let (mut fill, mut hatch) = if black {
             (HATCH_INK.to_string(), no_hatch())
+        } else if cf == Some(CutFill::Empty) {
+            (HATCH_PAPER.to_string(), no_hatch())
         } else if mono {
             let mono_fill = if solid { HATCH_INK } else { HATCH_PAPER };
             let mono_hatch = if !solid && hatch.pattern != HatchPattern::None { HatchRender { color: SECTION_INK.into(), ..hatch } } else { hatch };
@@ -428,8 +579,14 @@ pub fn section_primitives_at(out: &Output, mono: bool, hidden_lines: bool, vis: 
             prims.push(l);
         }
     }
+    // [173] Treppen hinter dem Schnitt und ihr Handlauf nach der Modelldarstellung.
+    let stair_shown = |e: &Edge| match (e.stair, mv) {
+        (StairPart::None, _) | (_, None) => true,
+        (StairPart::Body, Some(m)) => m.o.stair.section_beyond,
+        (StairPart::Rail, Some(m)) => m.o.stair.section_beyond && m.o.stair.handrail.is_some(),
+    };
     // [152] Importierte Netze: Kanten nur, wenn die Kategorie gezeigt wird; Linien nach den Regeln des Netzes.
-    let mesh_shown = |e: &Edge| e.kind != Kind::Mesh || out.meshes.get(e.index).and_then(|m| m.category.as_deref()).is_none_or(shown);
+    let mesh_shown = |e: &Edge| stair_shown(e) && (e.kind != Kind::Mesh || out.meshes.get(e.index).and_then(|m| m.category.as_deref()).is_none_or(shown));
     let mesh_style = |e: &Edge, l: &mut Primitive| {
         if e.kind == Kind::Mesh {
             if let Some(s) = rules.mesh.get(&e.index) {
@@ -460,7 +617,7 @@ pub fn section_primitives_at(out: &Output, mono: bool, hidden_lines: bool, vis: 
     // [152] Offene Schnittlinien importierter Netze (Flächen ohne Dicke, nicht-mannigfaltige Netze): schwer
     // wie der Umriss der geschnittenen Masse.
     for (k, pts) in &out.mesh_lines {
-        let e = Edge { kind: Kind::Mesh, index: *k, a: [0.0; 2], b: [0.0; 2] };
+        let e = Edge { kind: Kind::Mesh, index: *k, a: [0.0; 2], b: [0.0; 2], stair: StairPart::None };
         if !mesh_shown(&e) {
             continue;
         }

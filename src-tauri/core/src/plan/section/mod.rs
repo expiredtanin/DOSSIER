@@ -445,6 +445,20 @@ pub struct Edge {
     pub index: usize,
     pub a: [f64; 2],
     pub b: [f64; 2],
+    /// [173] Treppenteil der Kante (Modelldarstellung: Treppen hinter dem Schnitt, Handlauf).
+    pub stair: StairPart,
+}
+
+/// [173] Treppenteil einer Projektionskante im Schnitt.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum StairPart {
+    /// Kein Treppenteil.
+    #[default]
+    None,
+    /// Stufen, Laufplatte, Wangen.
+    Body,
+    /// Handlauf und Pfosten.
+    Rail,
 }
 
 /// Geländelinie.

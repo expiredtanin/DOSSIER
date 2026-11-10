@@ -289,7 +289,7 @@ Text-Bearbeitung (Zeiger, Picken, Zoom, Renderer-Anbindung und Hervorhebung lieg
 ### 3.5 Modelldarstellung: wer bestimmt, wie ein Bauteil aussieht ([173])
 
 Wie Archicads „Modelldarstellung" (Model View Options): eine **Stufe** ist ein Basis-Detailgrad plus
-Optionen je Bauteilart (Türen, Fenster, Treppen, Wände, Decken/Böden, Gelände). Die Stufen „grob",
+Optionen je Bauteilart (Türen, Fenster, Treppen, Wände, Decken/Böden, Dächer, Stützen, Ansicht, Gelände). Die Stufen „grob",
 „mittel", „fein" sind eingebaut und haben keine Optionen; eigene Stufen stehen in
 `Project.modelViewOptions` (Ressourcen-Tab „Modelldarstellung"). Jede Option fehlt ⇒ „wie Basis":
 dann zeichnet der Detailgrad exakt wie ohne Modelldarstellung (Test `standardstufen_wie_heute`).
@@ -308,13 +308,33 @@ Werkzeugleiste (Detailgrad-Wahl = Liste der Stufen) und die Ansichtsvorlage (Ebe
    `DoorOpts`, `WindowOpts`, `StairOpts`, `WallOpts`; `Ctx::mv()`),
 4. **Basis-Detailgrad** (grob/mittel/fein samt Massstabsregeln wie `simplify_thin_layers`, `solid_cut`).
 
-Ebenen-Felder, die selbst Darstellung sind (`cutHatch`, `floorFinish`, `showTerrain`), gehen der
+Ebenen-Felder, die selbst Darstellung sind (`cutHatch`, `floorFinish`, `showTerrain`, `shadows`), gehen der
 Modelldarstellung vor, wenn sie gesetzt sind. Angebunden (Etappe 1): Türen und Fenster
 (`plan/walls.rs::opening_symbol`, `plan/openings.rs`; Fenster-Öffnungslinien auch in der Ansicht,
 `plan/elevation/openings.rs`), Treppen (`plan/stairs.rs`, filtert das Symbol nach Linienklasse — das
 Symbol selbst in `stair_symbol.rs` bleibt unberührt), Wandschichten und Schichteinzug
-(`plan/walls.rs::layer_targets`), Schnittflächen, Bodenbelag und Gelände. Übrige Bauteile und der
-Schnitt folgen in Etappe 2 (TODO [173]).
+(`plan/walls.rs::layer_targets`), Schnittflächen, Bodenbelag und Gelände. Etappe 2:
+
+- **Grundriss:** „nur Kern" zeichnet die tragende Schicht (`model_view::core_layer`, wie [33]
+  `layer_positions`) in ihrer echten Lage und Dicke (`walls.rs::core_band`); Schwelle der Türen und
+  Sturzlinie der Fenster (`walls.rs::opening_extras`, beide Basis aus); Decken (Umriss,
+  Ansichtsschraffur), Dächer (Rand über dem Schnitt, Schraffur der Aufsicht), Stützen (Schnittfläche
+  Schraffur/schwarz/leer) in `plan/domains.rs`.
+- **Schnitt:** `section_plan_buf` löst die Stufe auf (`model_view::for_view`; angefragt über `modelView`,
+  sonst `LevelSpec.model_view`) und zeichnet über `section_primitives_mv` (`SectionMv`: Lage jeder
+  Schnittfläche zur tragenden Schicht): Schichten je Bauteilart (Wände, Decken, Dächer: alle/vereinfacht/
+  nur Kern), Bodenaufbau als eine Fläche, Stützen-Füllung, Treppen hinter dem Schnitt und Handlauf
+  (Projektionskanten tragen `Edge::stair`). Tür-/Fensterdetail: `section_opening_primitives_mv`. Der
+  Schnitt-Cache bleibt stufenunabhängig (alles nach `compute_section`).
+- **Treppen:** die Lauflinie läuft im Grundriss von der Antritts- bis zur Austrittskante
+  (`stair_symbol::run_line_to_edges`; die Geometrie in `kernel2d` bleibt eingerückt); die Stufe setzt Versatz
+  an Anfang/Ende (Papier-mm) und den Antrittspunkt (`RunOpts`).
+- **Ansicht:** Schatten (Ebene > Stufe > aus; Abfrage-Argument 2 = „nicht gesetzt"), Materialschraffur,
+  Fensterteilung (`plan/elevation/mod.rs`).
+- **Blatt:** Ausschnitt-Stufe vor Ebene und Vorlage (Kern `sheet_viewports`, App `viewportLevelPlan`).
+- **3D:** `model3dParts` mit `text = {"modelView": id}` (TS `Model3dOptions.modelView`): Öffnungsdetail
+  nach der Basis der Stufe, „Handlauf aus" ohne Handläufe; rechnet ohne den inkrementellen Cache. Der
+  3D-Viewer übergibt noch keine Stufe.
 
 ---
 

@@ -82,7 +82,13 @@ pub fn section_plan_buf(p: &Project, args: &[f64], text: &str) -> Result<Vec<u8>
     };
     let hidden = v.get("hiddenLines").and_then(|b| b.as_bool()).unwrap_or(false);
     let detail = Detail::parse(v.get("detail").and_then(|d| d.as_str()).unwrap_or("mittel"));
-    let (mut prims, bounds) = section_primitives_at(&out, mono, hidden, &vis, scale, detail, level.cut_hatch, &CutRules::of(p, &out, rv));
+    // [173] Modelldarstellung: ausdrücklich angefragt (Blatt-Ausschnitt), sonst die der Ebene; ihre Basis
+    // ersetzt den Detailgrad. Ohne Wahl wie bisher.
+    let mv_id = v.get("modelView").and_then(|m| m.as_str()).filter(|m| !m.is_empty()).or(level.model_view.as_deref());
+    let mvo = mv_id.map(|id| crate::plan::model_view::for_view(p, Some(id), detail, scale));
+    let smv = mvo.as_ref().map(|o| SectionMv::of(p, &out, o));
+    let detail = mvo.as_ref().map_or(detail, |o| o.detail);
+    let (mut prims, bounds) = section_primitives_mv(&out, mono, hidden, &vis, scale, detail, level.cut_hatch, &CutRules::of(p, &out, rv), smv.as_ref());
     w.post = crate::plan::extras::sketch_post(Some(level.sketch), scale);
     // Strichstärken nach Massstab ([32]) wie im Grundriss.
     crate::plan::extras::scale_line_weights(p, scale, &mut prims);
@@ -93,7 +99,8 @@ pub fn section_plan_buf(p: &Project, args: &[f64], text: &str) -> Result<Vec<u8>
     trees.extend(prims);
     let prims = trees;
     w.group(&prims);
-    let mut ops = if openings { section_opening_primitives(p, &level, &vis)? } else { Vec::new() };
+    let (door_detail, window_detail) = mvo.as_ref().map_or((true, true), |o| (o.door.section_detail, o.window.section_detail));
+    let mut ops = if openings { section_opening_primitives_mv(p, &level, &vis, door_detail, window_detail)? } else { Vec::new() };
     crate::plan::extras::scale_line_weights(p, scale, &mut ops);
     w.group(&ops);
     // Achsraster ([112]): Achsen quer zur Schnittebene.

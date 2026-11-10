@@ -161,6 +161,11 @@ export interface Model3dOptions {
    * Abzugskörper wandern mit dem getroffenen Bauteil.
    */
   explode?: number;
+  /**
+   * [173] Modelldarstellung (Id, eingebaut oder `Project.modelViewOptions`): ihre Basis bestimmt das
+   * Öffnungsdetail, „Handlauf aus" lässt die Handläufe weg. Rechnet ohne den inkrementellen Kern-Cache.
+   */
+  modelView?: string;
 }
 
 /** Das volle 3D-Modell: Wände (mit Öffnungen) + Deckenplatten + Kontext-Meshes. */
@@ -173,7 +178,11 @@ export function projectToModel3d(project: Project, opts: Model3dOptions = {}): R
   const args = [layered ? 1 : 0, DETAIL_CODE[detail] ?? 3, opts.forSection ? 1 : 0, voids ? 1 : 0, explode];
   // Ohne Explosion inkrementell ([58]): nur geänderte Wände reisen aus dem Kern und werden gelesen.
   const doc = documentFor(project);
-  const parts = explode > 0 ? doc.query<Model3dParts>("model3dParts", args) : doc.model3dParts<Model3dParts>(args);
+  const parts = opts.modelView
+    ? doc.query<Model3dParts>("model3dParts", args, JSON.stringify({ modelView: opts.modelView }))
+    : explode > 0
+      ? doc.query<Model3dParts>("model3dParts", args)
+      : doc.model3dParts<Model3dParts>(args);
   // Die truck-Körper (asynchron, mit Cache) kommen zwischen Kontext-Meshes und Stützen.
   const meshes: RMesh[] = [...parts.contextMeshes];
   for (const m of emitExtrudedSolids(project, parts.floorOffsets)) meshes.push(m);
