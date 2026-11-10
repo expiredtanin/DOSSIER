@@ -216,14 +216,23 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   Abschnitte Türen/Fenster/Treppen/Wände/Decken-Böden/Gelände, jede Option „wie Basis" = heute), Wahl über
   `DrawingLevel.modelViewOptionId` (Werkzeugleiste: Detailgrad-Liste = Stufen; Ansichtsvorlage als Ebenen-Feld),
   `ViewSnapshot.modelViewOptionId` (Kern-Blattpuffer), CLI `--model-view`. Kern `plan/model_view.rs` (Rangfolge Element >
-  Typ > Stufe > Basis, ARCHITEKTUR 3.5): Türen (Sturz, Winkel, Bogen, Zarge, Blatt), Fenster (Flügelrahmen, Bank,
-  Aufschlagbögen; Öffnungslinien in der Ansicht), Treppen (Lauflinie, Pfeil, Bruchlinie, über Schnitt, Handlauf),
-  Wände (alle/vereinfacht/Kern, Schwelle mm, Schichteinzug), Schnittflächen, Bodenbelag, Gelände; Ressourcen-Tab
-  „Modelldarstellung". Etappe 2: Schnitt (Schichten `section::merge_thin_cuts`, Tür-/Fensterdetail), Deckenaufbau,
-  Dächer, Stützen, Schatten der Ansicht, 3D (`detail` in `projectToModel3d`), Schwelle (fehlt im Grundriss), Sturzlinie
-  Fenster, „nur Kern" als echte Kerndicke statt Kern-Material über die ganze Wand; App-Blattansicht nimmt die
-  Ausschnitt-eigene Stufe noch nicht (nur Vorlage/Ebene). Etappe 3: Stufen-Bibliothek in Standards/Vorlagen,
-  Stempel/Bemassung nach Stufe, Stufennummern der Treppe. Nicht in der Tauri-App/auf dem Mac geprüft. · M
+  Typ > Stufe > Basis, ARCHITEKTUR 3.5). Etappe 2 (10.11.): Schnitt (Schichten je Wände/Decken/Dächer alle/vereinfacht/
+  nur Kern, Bodenaufbau als eine Fläche, Tür-/Fensterdetail, Treppen hinter dem Schnitt und Handlauf, Stützen-Füllung;
+  `section_primitives_mv`), Grundriss (Decken Umriss/Ansichtsschraffur, Dachrand über Schnitt und Dachaufsicht-Schraffur,
+  Stützen Schraffur/schwarz/leer, Schwelle aus/Hebeschiebetür/alle, Sturzlinie der Fenster, „nur Kern" = tragende Schicht
+  in echter Dicke), Ansicht (Schatten Ebene > Stufe > aus, Materialschraffur, Fensterteilung), Blatt-Ausschnitt-Stufe
+  auch in der App (`viewportLevelPlan`), TS `levelArg` gibt die Stufe an Schnitt/Ansicht weiter (fehlte in Etappe 1),
+  3D über `model3dParts`-Text (`Model3dOptions.modelView`: Öffnungsdetail nach Basis, Handlauf aus); Ressourcen-Tab mit
+  Abschnitten Dächer/Stützen/Ansicht; Lauflinie (Wunsch Maintainer) neu von der Antritts- bis zur Austrittskante in allen
+  Formen (vorher um eine halbe Stufe bzw. 15 % der letzten eingerückt, `kernel2d::stair_geometry`; der Grundriss verlängert sie
+  in `stair_symbol::run_line_to_edges`, 3D/IFC unverändert), Stufen-Optionen Versatz Anfang/Ende (Papier-mm) und
+  Antrittspunkt; Detailgrad-/Stufenwahl der Werkzeugleiste jetzt auch in Schnitt und Ansicht; Tests
+  `plan/model_view_tests2.rs`, e2e Schnitt-Fall. Goldens: nur Grundrisse mit Treppen (Lauflinie) neu, Schnitt/Ansicht gleich. Offen: der 3D-Viewer übergibt
+  keine Stufe (nur Kern/Fassade); Schwelle ohne Vorgabe „an" bei Hebeschiebetür (Basis aus, damit Pläne ohne Stufe gleich
+  bleiben — Wert „nur Hebeschiebetüren" wählbar); Schichten der Stützen im Schnitt, Dachschichten im Grundriss;
+  Fensterteilung im 3D; Etappe 3: Stufen-Bibliothek in Standards/Vorlagen, Stempel/Bemassung nach Stufe, Stufennummern
+  der Treppe; „nur Kern" bei Dächern zeigt im Musterhaus komplex nur eine dünne Linie (tragende Schicht des
+  Dachaufbaus nach [33]-Regel prüfen). Nicht in der Tauri-App/auf dem Mac geprüft. · M
 - ◐ **[33]** Objektstile mit Rangfolge (Override-Regeln). „Ausblenden“ lässt Elemente im Grundriss anwählbar/fangbar;
   Schlagschatten und Gelände nicht über Regeln steuerbar; Linienstil auf Polygon-Umrissen (Wand-Umriss, Decken)
   ohne Wirkung; Linienstil-Aktion in der Ansicht ohne Wirkung; Öffnungen selbst ausblenden nicht möglich. · M

@@ -2058,6 +2058,18 @@ pub struct ModelViewOption {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub site: Option<ModelViewSite>,
+    /// [173] Dächer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub roofs: Option<ModelViewRoofs>,
+    /// [173] Stützen.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub columns: Option<ModelViewColumns>,
+    /// [173] Ansicht (Fassade).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub elevation: Option<ModelViewElevation>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -2087,6 +2099,14 @@ pub struct ModelViewDoors {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub leaf: Option<ModelViewLeaf>,
+    /// Schwelle im Grundriss: aus, nur Hebeschiebetüren oder alle Türen (Basis: aus).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub threshold: Option<ModelViewThreshold>,
+    /// Zarge, Blatt und Sturz im Schnitt (Basis: ja; nein = nur das Blatt).
+    #[serde(rename = "sectionDetail", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub section_detail: Option<bool>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -2125,6 +2145,18 @@ pub struct ModelViewWindows {
     #[serde(rename = "sashFrames", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub sash_frames: Option<bool>,
+    /// Sturzlinie im Grundriss (gestrichelt an den Wandflächen; Element-Linientyp geht vor; Basis: nein).
+    #[serde(rename = "lintelLine", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub lintel_line: Option<bool>,
+    /// Rahmen, Kämpfer, Sturz, Fensterbank und Storen im Schnitt (Basis: ja; nein = Rahmen und Glas).
+    #[serde(rename = "sectionDetail", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub section_detail: Option<bool>,
+    /// Fensterteilung (Flügel, Sprossen, Kämpfer) in der Ansicht (Basis: ja).
+    #[serde(rename = "elevationDivision", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub elevation_division: Option<bool>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -2154,6 +2186,22 @@ pub struct ModelViewStairs {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub handrail: Option<ModelViewHandrail>,
+    /// Treppen hinter der Schnittebene (Stufen, Wangen, Geländer) im Schnitt (Basis: ja).
+    #[serde(rename = "sectionBeyond", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub section_beyond: Option<bool>,
+    /// Versatz der Lauflinie am Anfang in Papier-mm (Basis 0: ab der Antrittskante).
+    #[serde(rename = "runStartMm", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub run_start_mm: Option<f64>,
+    /// Versatz der Lauflinie am Ende in Papier-mm (Basis 0: bis zur Austrittskante).
+    #[serde(rename = "runEndMm", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub run_end_mm: Option<f64>,
+    /// Antrittspunkt am Anfang der Lauflinie (Basis: nein).
+    #[serde(rename = "startMark", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub start_mark: Option<bool>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -2236,6 +2284,116 @@ pub struct ModelViewSlabs {
     #[serde(rename = "floorFinish", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub floor_finish: Option<FloorFinishDisplay>,
+    /// Schichten im Schnitt: alle, vereinfacht oder nur die tragende Schicht (Basis: vereinfacht ab 1:75 ausser „fein").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub layers: Option<ModelViewLayers>,
+    /// Bodenaufbau (Schichten über der tragenden) im Schnitt: zeigen oder zu einer Fläche zusammenfassen (Basis: zeigen).
+    #[serde(rename = "buildUp", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub build_up: Option<ModelViewBuildUp>,
+    /// Umriss der Decken im Grundriss (Basis: ja).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub outline: Option<bool>,
+    /// Ansichtsschraffur der Decken im Grundriss (Basis: ja ausser „grob").
+    #[serde(rename = "viewHatch", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub view_hatch: Option<bool>,
+    #[serde(flatten)]
+    #[ts(skip)]
+    pub extra: Extra,
+}
+
+/// [173] Schwelle der Türen im Grundriss.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+pub enum ModelViewThreshold {
+    #[default]
+    #[serde(rename = "off")]
+    Off,
+    #[serde(rename = "liftSlide")]
+    LiftSlide,
+    #[serde(rename = "all")]
+    All,
+    #[serde(other)]
+    #[ts(skip)]
+    Unknown,
+}
+
+/// [173] Bodenaufbau im Schnitt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+pub enum ModelViewBuildUp {
+    #[default]
+    #[serde(rename = "show")]
+    Show,
+    #[serde(rename = "merged")]
+    Merged,
+    #[serde(other)]
+    #[ts(skip)]
+    Unknown,
+}
+
+/// [173] Dächer in der Modelldarstellung (fehlt ⇒ wie Basis).
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct ModelViewRoofs {
+    /// Schichten im Schnitt (Basis: vereinfacht ab 1:75 ausser „fein").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub layers: Option<ModelViewLayers>,
+    /// Dachrand, First und Grate über der Schnitthöhe (strichpunktiert) im Grundriss (Basis: ja).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub overhead: Option<bool>,
+    /// Ansichtsschraffur und Muster der Eindeckung in der Dachaufsicht (Basis: ja).
+    #[serde(rename = "viewHatch", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub view_hatch: Option<bool>,
+    #[serde(flatten)]
+    #[ts(skip)]
+    pub extra: Extra,
+}
+
+/// [173] Geschnittene Stütze: Schraffur des Baustoffs, schwarz oder leer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+pub enum ModelViewCutFill {
+    #[default]
+    #[serde(rename = "material")]
+    Material,
+    #[serde(rename = "solid")]
+    Solid,
+    #[serde(rename = "empty")]
+    Empty,
+    #[serde(other)]
+    #[ts(skip)]
+    Unknown,
+}
+
+/// [173] Stützen in der Modelldarstellung (fehlt ⇒ wie Basis).
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct ModelViewColumns {
+    /// Schnittfläche im Grundriss und Schnitt (Basis: Schraffur, ab 1:100 schwarz).
+    #[serde(rename = "cutFill", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub cut_fill: Option<ModelViewCutFill>,
+    #[serde(flatten)]
+    #[ts(skip)]
+    pub extra: Extra,
+}
+
+/// [173] Ansicht (Fassade) in der Modelldarstellung (fehlt ⇒ wie Basis).
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct ModelViewElevation {
+    /// Schlagschatten (die Ebene geht vor; Basis: aus).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub shadows: Option<bool>,
+    /// Ansichtsschraffur der Baustoffe (Basis: ja).
+    #[serde(rename = "materialHatch", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub material_hatch: Option<bool>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,

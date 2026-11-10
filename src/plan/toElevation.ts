@@ -13,7 +13,7 @@ import type { CategoryDisplayResolver, Plan } from "./generatePlan";
 
 /** Optionen des Ansichts-Generators. */
 export interface ElevationOptions {
-  /** Schlagschatten zeichnen (Default aus `level.shadows`). */
+  /** Schlagschatten zeichnen (Default aus `level.shadows`, sonst [173] aus der Modelldarstellung der Ebene, sonst aus). */
   shadows?: boolean;
   /** Schwarz-Weiss-Modus (neutralisierte Füllungen). */
   mono?: boolean;
@@ -35,13 +35,14 @@ export interface ElevationOptions {
  */
 export function generateElevationPlan(project: Project, level: DrawingLevel, opts: ElevationOptions = {}): Plan | null {
   if (!hasLine(level)) return null;
-  const shadows = opts.shadows ?? level.shadows ?? false;
+  // Schatten: 1 an, 0 aus, 2 = nicht gesetzt (der Kern nimmt die Modelldarstellung der Ebene, sonst aus).
+  const shadows = opts.shadows ?? level.shadows;
   const text = JSON.stringify({
     level: levelArg(level),
     ...(opts.overrideRuleIds ? { rules: [...opts.overrideRuleIds] } : {}),
     ...visibilityArgs(project, opts.visibleCodes, opts.categoryDisplay),
   });
-  const buf = decodePlanBuf(documentFor(project).queryBin("elevationPlan", [opts.mono ? 1 : 0, shadows ? 1 : 0, opts.scaleDenominator ?? 100], text));
+  const buf = decodePlanBuf(documentFor(project).queryBin("elevationPlan", [opts.mono ? 1 : 0, shadows === undefined || shadows === null ? 2 : shadows ? 1 : 0, opts.scaleDenominator ?? 100], text));
   if (buf.groups.length === 0) return null;
   const b = buf.bounds ?? [0, 0, 1, 1];
   return lazyPlan(

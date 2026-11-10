@@ -114,6 +114,9 @@ export function levelArg(level: DrawingLevel) {
     hiddenLines: level.hiddenLines,
     sketch: level.sketch,
     cutHatch: level.cutHatch,
+    // [173] Modelldarstellung der Ebene (Schnitt: Schichten, Öffnungsdetail, Treppen; Ansicht: Schatten,
+    // Materialschraffur, Fenster).
+    modelViewOptionId: level.modelViewOptionId,
   };
 }
 

@@ -192,7 +192,8 @@ export function useTopBarElements(opts: {
         onModelView={ev.onModelView}
         // Detailgrad wirkt im Grundriss UND in der 3D-Sicht
         // (projectToModel3d bekommt `detail` durchgereicht).
-        detailEnabled={planActive || viewType === "perspektive"}
+        // [173] auch Schnitt und Ansicht: die Modelldarstellung wirkt dort (Schichten, Öffnungen, Schatten …).
+        detailEnabled={planActive || viewType === "perspektive" || (viewType === "grundriss" && (activeLevel.kind === "section" || activeLevel.kind === "elevation"))}
         scaleDenominator={scaleDenominator}
         onApplyScale={ev.applyScale}
         zoomEnabled={planActive}
@@ -238,6 +239,7 @@ export function useTopBarElements(opts: {
       textTarget,
       textStyles,
       activeLevel.modelViewOptionId,
+      activeLevel.kind,
       modelViewOptions,
     ],
   );

@@ -178,13 +178,20 @@ pub fn plan_stairs(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) {
                 bounds.acc(q.x, q.y);
             }
         }
-        let f = crate::plan::stair_symbol::plan_stair(&params, zt - zb, cut_height, lw, s.arrow_style == Some(StairArrowStyle::Filled), s.center_column.unwrap_or(0.0), railing_code(p, s), double);
+        let f = crate::plan::stair_symbol::plan_stair_run(&params, zt - zb, cut_height, lw, s.arrow_style == Some(StairArrowStyle::Filled), s.center_column.unwrap_or(0.0), railing_code(p, s), double, &[], &run_opts(&opts, c.a.scale));
         emit(out, &f, &stroke, greyed, &s.id, &opts);
         if let Some(d) = range.restyle_dash(zone) {
             super::view_range::restyle(out, out_start, d);
         }
     }
     arriving(c, out, double, &opts);
+}
+
+/// [173] Lauflinie nach der Modelldarstellung: Versatz (Papier-mm → Meter bei 1:`scale`) und Antrittspunkt
+/// (Halbmesser 0.75 mm Papier, nur mit Lauflinie).
+fn run_opts(o: &super::model_view::StairOpts, scale: f64) -> crate::plan::stair_symbol::RunOpts {
+    let m = |mm: f64| if scale.is_finite() && scale > 0.0 { mm * scale / 1000.0 } else { 0.0 };
+    crate::plan::stair_symbol::RunOpts { start: m(o.run_start_mm), end: m(o.run_end_mm), start_mark: (o.start_mark && o.walk_line).then(|| m(0.75)).filter(|r| *r > 0.0) }
 }
 
 /// [155] Treppen tieferer Geschosse, die auf diesem Geschoss ankommen: durch das Loch der Decke, auf der
@@ -238,7 +245,7 @@ fn arriving(c: &Ctx, out: &mut Vec<Primitive>, double: bool, opts: &super::model
         let lw = ov.lineweight.unwrap_or_else(|| c.cat(&s.category_code).map_or(WALL_FALLBACK_MM, |k| k.lw));
         let stroke = ov.color.as_deref().or(s.color.as_deref()).unwrap_or(POCHE_STROKE).to_string();
         // ganz unter der Schnittebene: alles ausgezogen, keine Bruchlinie
-        let f = crate::plan::stair_symbol::plan_stair_clipped(&params, zt - zb, zt - zb + 1.0, lw, s.arrow_style == Some(StairArrowStyle::Filled), 0.0, railing_code(p, s), double, &own);
+        let f = crate::plan::stair_symbol::plan_stair_run(&params, zt - zb, zt - zb + 1.0, lw, s.arrow_style == Some(StairArrowStyle::Filled), 0.0, railing_code(p, s), double, &own, &run_opts(opts, c.a.scale));
         emit(out, &f, &stroke, greyed, &s.id, opts);
         // Austrittskante: Hinterkante des obersten Tritts.
         let Some(last) = geo.treads.iter().filter(|t| t.pts.len() >= 4).max_by(|a, b| a.top_rise.total_cmp(&b.top_rise)) else { continue };

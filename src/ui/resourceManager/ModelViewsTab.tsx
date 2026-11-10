@@ -31,7 +31,7 @@ export interface ModelViewHandlers {
   onSetModelViewOption?: (id: string, section: ModelViewSection, key: string, value: string | number | boolean | null) => void;
 }
 
-const SECTIONS: ModelViewSection[] = ["doors", "windows", "stairs", "walls", "slabs", "site"];
+const SECTIONS: ModelViewSection[] = ["doors", "windows", "stairs", "walls", "slabs", "roofs", "columns", "elevation", "site"];
 
 /** Anzeige eines Auswahlwerts (Zahlen mit Einheit, Rest übersetzt). */
 function valueLabel(f: ModelViewField, v: string | number): string {

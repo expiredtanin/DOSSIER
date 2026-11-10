@@ -544,7 +544,8 @@ fn ceilings(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) -> Result<()
         // [155] Eigene Decke über der Schnittebene: nur der strichpunktierte Umriss, die Fläche deckt nicht
         // (sonst verschwänden Bodenbelag und Treppen darunter ausser im Deckenloch); Regeln wirken weiter.
         let overhead = ce.floor_id == c.a.floor && zone == super::view_range::Zone::Above;
-        let hatch = match (c.a.detail != Detail::Grob && !overhead, comp, view_hatch_id.filter(|s| !s.is_empty())) {
+        // [173] Ansichtsschraffur nach der Modelldarstellung (Basis: ausser „grob").
+        let hatch = match (c.mv().slab.view_hatch && !overhead, comp, view_hatch_id.filter(|s| !s.is_empty())) {
             (true, Some(k), Some(id)) => resolve_hatch_or_none(p, id, None, resolve_foreground(k, ce.foreground.as_deref(), category, ce.foreground_source)),
             _ => no_hatch(),
         };
@@ -561,7 +562,7 @@ fn ceilings(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) -> Result<()
         let bridges = (!merged.bridge_edges.is_empty()).then(|| merged.bridge_edges.iter().map(|&k| k as f64).collect());
         out.push(polygon(ring, &fill, "none", 0.0, hatch, Some(greyed), bridges, Pick::Ceiling(&ce.id)));
         let w = lw * c.a.detail.layer_factor();
-        let outline = lov.as_ref().and_then(|o| o.outline) != Some(false);
+        let outline = lov.as_ref().and_then(|o| o.outline).unwrap_or(c.mv().slab.outline);
         for [a, b] in ceiling_outline_lines(&merged.ring, &merged.bridge_edges, &fps).into_iter().filter(|_| outline) {
             out.push(line(pv(a), pv(b), "ceiling-outline", w, Some(Some(OVERHEAD_DASH.to_vec())), stroke, Some(greyed)));
         }
@@ -617,6 +618,11 @@ fn roofs(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) {
         for q in &geo.eaves {
             bounds.acc(q[0], q[1]);
         }
+        // [173] Dachrand, First und Grate über der Schnitthöhe nach der Modelldarstellung (Basis: strichpunktiert).
+        if overhead.is_some() && !c.mv().roof.overhead {
+            continue;
+        }
+        let from_above = from_above && c.mv().roof.view_hatch;
         // Ansichts-Schraffur der äussersten Schicht (Eindeckung); Fehler → ohne.
         let layers = p.roof_layers(roof);
         let view_hatch = layers
@@ -1231,10 +1237,24 @@ pub(super) fn columns(c: &Ctx, out: &mut Vec<Primitive>) {
                 hatch = h;
             }
         }
-        // [140] Geschnittene Stütze ab 1:100 schwarz ohne Schraffur (`style::solid_cut`).
-        if zone == super::view_range::Zone::Cut && c.solid_cut() {
-            fill = HATCH_INK.to_string();
-            hatch = no_hatch();
+        // [140] Geschnittene Stütze ab 1:100 schwarz ohne Schraffur (`style::solid_cut`); [173] die
+        // Modelldarstellung wählt Schraffur, schwarz oder leer.
+        use super::model_view::CutFill;
+        match c.mv().column_fill {
+            Some(CutFill::Material) => {}
+            Some(CutFill::Solid) => {
+                fill = HATCH_INK.to_string();
+                hatch = no_hatch();
+            }
+            Some(CutFill::Empty) => {
+                fill = HATCH_PAPER.to_string();
+                hatch = no_hatch();
+            }
+            None if zone == super::view_range::Zone::Cut && c.solid_cut() => {
+                fill = HATCH_INK.to_string();
+                hatch = no_hatch();
+            }
+            None => {}
         }
         let fp = crate::model3d::column_footprint(col);
         // [141] Nach Schnitthöhe: eine Stütze ganz unter (oder über) der Schnittebene ist nicht geschnitten —

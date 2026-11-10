@@ -233,6 +233,8 @@ fn section_view_buf(p: &Project, level: &DrawingLevel, snap: &ViewSnapshot, scal
         "scale": scale,
         // Detailgrad des Ausschnitts (bzw. seiner Vorlage, vom Anwenden schon eingetragen) auch im Schnitt.
         "detail": detail_name(snap.detail),
+        // [173] Modelldarstellung des Ausschnitts (sonst die der Ebene).
+        "modelView": args.model_view,
         "hasVis": true,
         "invisible": invisible,
         "rules": args.rules.as_ref().map(|r| r.iter().cloned().collect::<Vec<_>>()),
@@ -241,7 +243,8 @@ fn section_view_buf(p: &Project, level: &DrawingLevel, snap: &ViewSnapshot, scal
     let raw = if level.kind == DrawingLevelKind::Section {
         crate::plan::section::section_plan_buf(p, &[f64::from(u8::from(mono)), 1.0, 0.0], &text)
     } else {
-        crate::plan::elevation::elevation_plan_buf(p, &[f64::from(u8::from(mono)), if level.shadows.unwrap_or(false) { 1.0 } else { 0.0 }, scale], &text)
+        // Schatten: Ebene, sonst [173] die Modelldarstellung (2 = nicht gesetzt).
+        crate::plan::elevation::elevation_plan_buf(p, &[f64::from(u8::from(mono)), level.shadows.map_or(2.0, |s| if s { 1.0 } else { 0.0 }), scale], &text)
     }
     .ok()?;
     let rv = crate::plan::buf::View::parse(&raw)?;

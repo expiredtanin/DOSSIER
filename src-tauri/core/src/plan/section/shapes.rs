@@ -122,7 +122,7 @@ pub(super) fn shaped_projection(visible: &mut Vec<Edge>, p: &Project, walls_r: &
             }
             let x = e.a[0];
             if hi > zt + TOL {
-                split.push(Edge { kind: e.kind, index: e.index, a: [x, zt], b: [x, hi] });
+                split.push(Edge { kind: e.kind, index: e.index, a: [x, zt], b: [x, hi], stair: e.stair });
             }
             // Rest unten (oder leer: Länge 0 wird unten entfernt).
             (e.a, e.b) = ([x, lo], [x, lo.max(zb.min(hi))]);
@@ -134,7 +134,7 @@ pub(super) fn shaped_projection(visible: &mut Vec<Edge>, p: &Project, walls_r: &
         let near = if depth(at(mid, faces[0])) <= depth(at(mid, faces[1])) { faces[0] } else { faces[1] };
         let pts: Vec<[f64; 2]> = poly.iter().map(|q| [uu(at(from + q[0], near)), zb + q[1]]).collect();
         for i in 0..pts.len() {
-            visible.push(Edge { kind: Kind::Wall, index: owners[0], a: pts[i], b: pts[(i + 1) % pts.len()] });
+            visible.push(Edge { kind: Kind::Wall, index: owners[0], a: pts[i], b: pts[(i + 1) % pts.len()], stair: StairPart::None });
         }
     }
 }

@@ -5,6 +5,10 @@ import { applyOps } from "../core/ops";
 import { sampleProject } from "../model/sampleProject";
 import type { Project } from "../model/types";
 import { generatePlan } from "../plan/generatePlan";
+import { computeSection, generateSectionPlan } from "../plan/toSection";
+import { generateElevationPlan } from "../plan/toElevation";
+import { de } from "../i18n/de";
+import { en } from "../i18n/en";
 import {
   addModelViewOps,
   currentModelViewId,
@@ -92,5 +96,38 @@ describe("modelViews", () => {
     expect(lintels(p)).toBe(heute);
     p = applyOps(p, selectModelViewOps(p, "eg", "mv1"));
     expect(lintels(p)).toBe(0);
+  });
+
+  it("[173] Etappe 2: jede Option und jeder Wert hat einen Text (de, en)", () => {
+    for (const f of MODEL_VIEW_FIELDS) {
+      const keys = [`resources.modelViews.section.${f.section}`, `resources.modelViews.opt.${f.section}.${f.key}`];
+      if (Array.isArray(f.values) && typeof f.values[0] === "string") keys.push(...f.values.map((v) => `resources.modelViews.val.${v}`));
+      for (const k of keys) {
+        expect(de, k).toHaveProperty([k]);
+        expect(en, k).toHaveProperty([k]);
+      }
+    }
+  });
+
+  it("[173] Etappe 2: Schnitt und Ansicht folgen der Stufe der Ebene; ohne Stufe wie heute", async () => {
+    const wallPolys = async (p: Project) => {
+      const out = await computeSection(p, p.drawingLevels.find((l) => l.id === "schnitt-a")!);
+      return generateSectionPlan(out!, false, { scaleDenominator: 50 }).primitives.filter((q) => q.kind === "polygon" && !!q.wallId).length;
+    };
+    const heute = await wallPolys(sampleProject);
+    let p = withMv();
+    p = applyOps(p, setModelViewOptionOps(p, "mv1", "walls", "layers", "core"));
+    expect(await wallPolys(p)).toBe(heute);
+    p = applyOps(p, selectModelViewOps(p, "schnitt-a", "mv1"));
+    expect(await wallPolys(p)).toBeLessThan(heute);
+    // Ansicht: Schatten aus der Stufe, solange die Ebene keinen Wert setzt (Musterhaus: Ebene mit Schatten).
+    const noShadow = (q: Project): Project => ({ ...q, drawingLevels: q.drawingLevels.map((l) => (l.id === "ansicht-sued" ? { ...l, shadows: undefined } : l)) });
+    const elev = (q: Project) => JSON.stringify(generateElevationPlan(q, q.drawingLevels.find((l) => l.id === "ansicht-sued")!)?.primitives.length);
+    const ohne = elev(noShadow(sampleProject));
+    expect(ohne).not.toBe(elev(sampleProject));
+    let e = noShadow(withMv());
+    e = applyOps(e, setModelViewOptionOps(e, "mv1", "elevation", "shadows", true));
+    e = applyOps(e, selectModelViewOps(e, "ansicht-sued", "mv1"));
+    expect(elev(e)).toBe(elev(sampleProject));
   });
 });

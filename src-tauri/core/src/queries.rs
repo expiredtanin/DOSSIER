@@ -15,7 +15,8 @@ pub fn run_doc(d: &mut crate::document::Document, name: &str, args: &[f64], text
     // `model3dPartsDelta`: wie `model3dParts` (ohne Explosion), `args[5]` = Laufnummer der letzten Antwort
     // des Aufrufers (0 = alles), Antwort als Änderung (`model3d_cache::write_delta`).
     let delta = (name == "model3dPartsDelta").then(|| args.get(5).copied().filter(|m| m.is_finite() && *m >= 0.0).unwrap_or(0.0) as u64);
-    if (name == "model3dParts" || delta.is_some()) && args.len() >= 3 && !explode {
+    // [173] Mit Modelldarstellung (`text`) ohne den Cache (eigene Teile, s. `model3d_mv`).
+    if (name == "model3dParts" || delta.is_some()) && args.len() >= 3 && !explode && model3d_mv_id(text).is_none() {
         let voids = args.get(3).is_some_and(|v| *v != 0.0);
         let out = d.model3d_parts(args[0] != 0.0, args[1], args[2] != 0.0, voids, delta)?;
         if voids {
@@ -38,6 +39,28 @@ fn with_void_cuts(mut parts: String, cuts: &crate::solid_specs::VoidCuts) -> Res
     parts.push_str(&json(cuts)?);
     parts.push('}');
     Ok(parts)
+}
+
+/// [173] Modelldarstellung des 3D-Modells: `text` = `{"modelView": id}` (sonst keine).
+fn model3d_mv_id(text: &str) -> Option<String> {
+    let t = text.trim();
+    if !t.starts_with('{') {
+        return None;
+    }
+    serde_json::from_str::<serde_json::Value>(t).ok()?.get("modelView")?.as_str().filter(|s| !s.is_empty()).map(String::from)
+}
+
+/// [173] 3D nach der Modelldarstellung: Öffnungsdetail nach ihrer Basis (sonst `detail`, 0 grob … 2 fein),
+/// Handlauf aus, wenn sie ihn ausschaltet. (Detailcode, Handlauf)
+fn model3d_mv(p: &Project, text: &str, detail: f64) -> (f64, bool) {
+    let Some(id) = model3d_mv_id(text) else { return (detail, true) };
+    let base = crate::plan::model_view::base_of(p, &id).map_or(detail, |d| match d {
+        crate::plan::style::Detail::Grob => 0.0,
+        crate::plan::style::Detail::Mittel => 1.0,
+        crate::plan::style::Detail::Fein => 2.0,
+    });
+    let o = crate::plan::model_view::for_view(p, Some(&id), crate::plan::style::Detail::Fein, 50.0);
+    (base, o.stair.handrail.is_some())
 }
 
 /// Führt die Abfrage `name` aus. `args`: Zahlen, `text`: ein Text (z. B. eine id).
@@ -103,7 +126,11 @@ pub fn run(p: &Project, name: &str, args: &[f64], text: &str) -> Result<String, 
                 }
                 return Ok(v.to_string());
             }
-            let parts = model3d::parts(p, args[0] != 0.0, args[1], args[2] != 0.0)?;
+            let (detail, rails) = model3d_mv(p, text, args[1]);
+            let mut parts = model3d::parts(p, args[0] != 0.0, detail, args[2] != 0.0)?;
+            if !rails {
+                parts.stair_railings.clear();
+            }
             if args.get(3).is_some_and(|v| *v != 0.0) {
                 let cuts = crate::solid_specs::void_cuts(p, &parts.walls, &parts.slabs);
                 return with_void_cuts(json(&parts)?, &cuts);

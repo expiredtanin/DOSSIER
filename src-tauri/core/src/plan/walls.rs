@@ -208,17 +208,22 @@ pub fn thin_layer_targets(thick: &[f64], detail: Detail, scale: f64) -> Vec<usiz
     thin_targets(thick, simplify_thin_layers(detail, scale), scale, THIN_LAYER_PAPER_MM)
 }
 
-/// [173] Ziel-Schichten nach der Modelldarstellung (`plan/model_view.rs`): alle, vereinfacht (Schwelle
-/// `thin_mm`) oder nur das Kern-Material (alle Schichten zeigen auf die tragende Schicht).
-fn layer_targets(c: &Ctx, layers: &[Layer], thick: &[f64]) -> Vec<usize> {
+/// [173] Ziel-Schichten nach der Modelldarstellung (`plan/model_view.rs`): alle oder vereinfacht (Schwelle
+/// `thin_mm`); „nur Kern" zeichnet `wall_poche` mit der tragenden Schicht allein ([`core_band`]).
+fn layer_targets(c: &Ctx, thick: &[f64]) -> Vec<usize> {
     let o = c.mv();
-    if o.wall.layers == super::model_view::LayerMode::Core && !layers.is_empty() {
-        let structure = |i: &usize| super::overrides::layer_function(c.p, &layers[*i]) == Some(LayerFunction::Structure);
-        let thickest = |a: &usize, b: &usize| thick[*a].total_cmp(&thick[*b]).then(b.cmp(a));
-        let core = (0..layers.len()).filter(structure).max_by(thickest).or_else(|| (0..layers.len()).max_by(thickest)).unwrap_or(0);
-        return vec![core; layers.len()];
-    }
     thin_targets(thick, o.simplify_thin(c.a.scale), c.a.scale, o.wall.thin_mm)
+}
+
+/// [173] „Nur Kern": die tragende Schicht `k` als einschichtige Wand in ihrer echten Lage und Dicke —
+/// Schichtdicken, Gesamtdicke, Referenzversatz und Schnittlinien (je Schicht nur die des Kerns; die
+/// Putz-Aussparungen von Durchgangswänden entfallen mit den äusseren Schichten).
+fn core_band(thick: &[f64], total: f64, ref_off: f64, cuts: &WallCuts, k: usize) -> (Vec<f64>, f64, f64, WallCuts) {
+    let t = thick[k];
+    let lo = ref_off - total / 2.0 + thick[..k].iter().sum::<f64>();
+    let pick = |v: &Vec<Option<joins::Line>>| vec![v.get(k).copied().flatten()];
+    let layer_cuts = cuts.layer_cuts.as_ref().map(|lc| joins::LayerCuts { start: pick(&lc.start), end: pick(&lc.end), start_side: pick(&lc.start_side), end_side: pick(&lc.end_side) });
+    (vec![t], t, lo + t / 2.0, WallCuts { layer_cuts, span_cutouts: Vec::new(), ..cuts.clone() })
 }
 
 fn thin_targets(thick: &[f64], simplify: bool, scale: f64, thin_mm: f64) -> Vec<usize> {
@@ -270,8 +275,15 @@ fn wall_poche(c: &Ctx, out: &mut Vec<Primitive>, e: &EffWall, gaps: &[(f64, f64)
     // [140] Ab 1:100 (und „grob") schwarze Sammelfläche mit Umriss, ohne Schichten (`style::solid_cut`) —
     // [33] ausser eine Regel stylt eine Schicht: dann Schichten, die übrigen schwarz ohne Fugen dazwischen.
     let layered_solid = solid && lov.iter().any(|a| a.styles());
-    let f = crate::plan::wall_poche::wall_poche(&encode_wall_poche(w, &thick, total, ref_off, gaps, cuts, solid && !layered_solid, view_only, reveals));
-    let target = layer_targets(c, &wt.layers, &thick);
+    // [173] „Nur Kern": nur die tragende Schicht in ihrer echten Dicke (übrige Schichten entfallen).
+    let core = (!view_only && wt.layers.len() > 1 && c.mv().wall.layers == super::model_view::LayerMode::Core).then(|| super::model_view::core_layer(p, &wt.layers)).flatten();
+    let (f, target, thick) = match core {
+        Some(k) => {
+            let (th, tot, ro, cc) = core_band(&thick, total, ref_off, cuts, k);
+            (crate::plan::wall_poche::wall_poche(&encode_wall_poche(w, &th, tot, ro, gaps, &cc, solid && !layered_solid, view_only, &[])), vec![k], th)
+        }
+        None => (crate::plan::wall_poche::wall_poche(&encode_wall_poche(w, &thick, total, ref_off, gaps, cuts, solid && !layered_solid, view_only, reveals)), layer_targets(c, &thick), thick),
+    };
     if f.is_empty() {
         return Ok(false);
     }
@@ -349,7 +361,7 @@ fn wall_poche(c: &Ctx, out: &mut Vec<Primitive>, e: &EffWall, gaps: &[(f64, f64)
             let b = v2(f[i + 5], f[i + 6]);
             i += 7;
             // [140] Fuge zwischen zusammengefassten Schichten bzw. quer über eine dünne Schicht entfällt.
-            let merged = |k: usize| target.get(k).is_some_and(|t| *t != k);
+            let merged = |k: usize| core.is_none() && target.get(k).is_some_and(|t| *t != k);
             if (art == 1.0 && target.get(li).is_some() && target.get(li) == target.get(li + 1)) || (art == 0.0 && merged(li)) {
                 continue;
             }
@@ -778,8 +790,54 @@ fn opening_symbol(c: &Ctx, out: &mut Vec<Primitive>, w: &Wall, o: &Opening, colo
             i += 9;
         }
     }
+    opening_extras(out, w, o, &mo, (total, ref_off, o_pos, o_wid), dt, wt.is_some(), stroke, greyed);
     let ctx = DetailCtx { stroke: frame_color, weight: frame_weight, greyed, detail, wall_line };
     opening_detail_plan(c, out, w, o, &ctx, rebate_sides, (ext_l, ext_r), dframe.as_ref().filter(|_| mo.door.frame))
+}
+
+/// [173] Schwelle der Tür und Sturzlinie des Fensters im Grundriss nach der Modelldarstellung (beide Basis:
+/// aus). Schwelle: schmales Rechteck quer in der Öffnung (Hebeschiebetür: über die Gleiszone, sonst 5 cm in
+/// der Wandmitte); Sturzlinie: an beiden Wandflächen zwischen den Leibungen (Linientyp des Elements, sonst
+/// gestrichelt; `lintelLines` der Öffnung wählt die Seiten wie bei Türen).
+#[allow(clippy::too_many_arguments)]
+fn opening_extras(out: &mut Vec<Primitive>, w: &Wall, o: &Opening, mo: &super::model_view::Options, (total, ref_off, pos, width): (f64, f64, f64, f64), dt: Option<&DoorType>, window: bool, stroke: &str, greyed: bool) {
+    use crate::opening_geom as og;
+    let lift_slide = dt.is_some_and(|t| t.kind == DoorTypeKind::Hebeschiebe);
+    let threshold = o.kind == ElementKind::Door && mo.door.threshold.at(lift_slide) && !dt.is_some_and(|t| t.kind == DoorTypeKind::Wandoeffnung) && o.door_type != Some(OpeningDoorType::Wandoeffnung);
+    let lintel = window && mo.window.lintel_line && o.lintel_line_style != Some(LintelLineStyle::Keine);
+    if !threshold && !lintel {
+        return;
+    }
+    let wr = og::WallRef { start: og::v(w.start.x, w.start.y), end: og::v(w.end.x, w.end.y), total, ref_off };
+    let Some((js, je)) = og::opening_jambs(&wr, pos, width) else { return };
+    let (_, n) = wr.frame();
+    let at = |q: og::V, off: f64| v2(q.x + n.x * off, q.y + n.y * off);
+    let id = Some(o.id.as_str());
+    if threshold {
+        let half = if lift_slide { crate::jsnum::max(0.12, dt.and_then(|t| t.frame_width).unwrap_or(0.0)).min(total) / 2.0 } else { 0.025f64.min(total / 2.0) };
+        let q = [at(js, ref_off - half), at(je, ref_off - half), at(je, ref_off + half), at(js, ref_off + half)];
+        for i in 0..4 {
+            out.push(mk_line(q[i], q[(i + 1) % 4], "door-threshold", SYMBOL_LINE_MM, None, Some(stroke), greyed, id));
+        }
+    }
+    if lintel {
+        let dash = match o.lintel_line_style {
+            Some(LintelLineStyle::Durchgehend) => None,
+            Some(LintelLineStyle::Punktiert) => dash_of(3.0),
+            _ => dash_of(1.0),
+        };
+        let sides = match o.lintel_lines.unwrap_or(OpeningLintelLines::Beide) {
+            OpeningLintelLines::Keine => [false, false],
+            OpeningLintelLines::Aussen => [true, false],
+            OpeningLintelLines::Innen => [false, true],
+            _ => [true, true],
+        };
+        for (k, off) in [ref_off - total / 2.0, ref_off + total / 2.0].into_iter().enumerate() {
+            if sides[k] {
+                out.push(mk_line(at(js, off), at(je, off), "window-lintel", SYMBOL_LINE_MM, Some(dash.clone()), Some(stroke), greyed, id));
+            }
+        }
+    }
 }
 
 /// Stil der Detail-Zeichnung einer Öffnung.

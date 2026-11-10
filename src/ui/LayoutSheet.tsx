@@ -89,7 +89,7 @@ export function ViewportPlanSvg({
     // Massstab ZUERST: er geht in die Plan-Erzeugung ein (Bemassung in Papier-mm, s. model/dimension.ts).
     const scaleN = resolveViewportScale(viewport, snap);
     // Geschoss/Zeichnung wie bisher; Schnitt/Ansicht über die abgeleitete Projektion ([115], Schnitt asynchron).
-    void viewportLevelPlan(project, snap.activeLevelId, codes, snap.detail, scaleN, false, snapshotMono(project, snap), snapshotOverrideRuleIds(project, snap), snapshotTemplate(project, snap))
+    void viewportLevelPlan(project, snap.activeLevelId, codes, snap.detail, scaleN, false, snapshotMono(project, snap), snapshotOverrideRuleIds(project, snap), snapshotTemplate(project, snap), snap.modelViewOptionId)
       .then((plan) => {
         if (disposed) return;
         const print = planToPrintSvg(plan, {

@@ -1,7 +1,8 @@
 // [173] Modelldarstellung (≙ Archicad „Modelldarstellung") — reine Logik ohne React/Store.
 //
 // Eine Modelldarstellung (`Project.modelViewOptions`) ist eine benannte Stufe über einem Basis-Detailgrad,
-// mit Optionen je Bauteilart (Türen, Fenster, Treppen, Wände, Decken/Böden, Gelände). Jede Option fehlt ⇒
+// mit Optionen je Bauteilart (Türen, Fenster, Treppen, Wände, Decken/Böden, Dächer, Stützen, Ansicht,
+// Gelände; Grundriss, Schnitt, Ansicht und 3D). Jede Option fehlt ⇒
 // „wie Basis". Die Stufen „grob", „mittel", „fein" sind eingebaut (nicht in der Liste, nicht änderbar).
 // Die Ansicht wählt ihre Modelldarstellung über das Feld `modelViewOptionId` der Ebene (Werkzeugleiste,
 // Ansichtsvorlage); Ausschnitte tragen ein eigenes Feld (Blatt-Viewports). Rangfolge und Auflösung: Kern
@@ -20,7 +21,7 @@ export function isBuiltinModelView(id: string | undefined | null): id is DetailL
 }
 
 /** Abschnitte je Bauteilart. */
-export type ModelViewSection = "doors" | "windows" | "stairs" | "walls" | "slabs" | "site";
+export type ModelViewSection = "doors" | "windows" | "stairs" | "walls" | "slabs" | "roofs" | "columns" | "elevation" | "site";
 
 /** Ein Eintrag der Auswahl (Werkzeugleiste, Vorlage): eingebaute Stufen zuerst, dann die eigenen. */
 export interface ModelViewChoice {
@@ -145,20 +146,39 @@ export const MODEL_VIEW_FIELDS: readonly ModelViewField[] = [
   { section: "doors", key: "swingArc", values: "bool" },
   { section: "doors", key: "frame", values: "bool" },
   { section: "doors", key: "leaf", values: ["line", "rect"] },
+  { section: "doors", key: "threshold", values: ["off", "liftSlide", "all"] },
+  { section: "doors", key: "sectionDetail", values: "bool" },
   { section: "windows", key: "sashSymbols", values: "bool" },
   { section: "windows", key: "planSwingArcs", values: "bool" },
   { section: "windows", key: "sill", values: "bool" },
   { section: "windows", key: "sashFrames", values: "bool" },
+  { section: "windows", key: "lintelLine", values: "bool" },
+  { section: "windows", key: "sectionDetail", values: "bool" },
+  { section: "windows", key: "elevationDivision", values: "bool" },
   { section: "stairs", key: "walkLine", values: "bool" },
   { section: "stairs", key: "arrow", values: "bool" },
   { section: "stairs", key: "breakLine", values: "bool" },
   { section: "stairs", key: "aboveCut", values: ["dashed", "off"] },
   { section: "stairs", key: "handrail", values: ["off", "single", "double"] },
+  { section: "stairs", key: "sectionBeyond", values: "bool" },
+  { section: "stairs", key: "runStartMm", values: [0, 1, 2, 3, 5] },
+  { section: "stairs", key: "runEndMm", values: [0, 1, 2, 3, 5] },
+  { section: "stairs", key: "startMark", values: "bool" },
   { section: "walls", key: "layers", values: ["all", "simplified", "core"] },
   { section: "walls", key: "thinLayerMm", values: [0.25, 0.5, 0.75, 1] },
   { section: "walls", key: "reveals", values: "bool" },
   { section: "walls", key: "cutHatch", values: "bool" },
   { section: "slabs", key: "floorFinish", values: ["off", "wet", "all"] },
+  { section: "slabs", key: "layers", values: ["all", "simplified", "core"] },
+  { section: "slabs", key: "buildUp", values: ["show", "merged"] },
+  { section: "slabs", key: "outline", values: "bool" },
+  { section: "slabs", key: "viewHatch", values: "bool" },
+  { section: "roofs", key: "layers", values: ["all", "simplified", "core"] },
+  { section: "roofs", key: "overhead", values: "bool" },
+  { section: "roofs", key: "viewHatch", values: "bool" },
+  { section: "columns", key: "cutFill", values: ["material", "solid", "empty"] },
+  { section: "elevation", key: "shadows", values: "bool" },
+  { section: "elevation", key: "materialHatch", values: "bool" },
   { section: "site", key: "terrain", values: "bool" },
 ];
 

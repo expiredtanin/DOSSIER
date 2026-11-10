@@ -255,9 +255,16 @@ pub fn elevation_primitives_with(p: &Project, level: &LevelSpec, shadows: bool, 
     // Ansichtsfarbe und -schraffur ([100]) der sichtbaren Bauteilseite.
     let (mut pattern_lines, mut pattern_styles) = surface_patterns(p, &mut faces, &frame, scale, mono);
     // [173] Öffnungslinien der Fenster nach der Modelldarstellung der Ebene (Element und Typ gehen vor).
-    let mv = level.model_view.as_deref().and_then(|id| crate::plan::model_view::find(p, id));
-    let win = crate::plan::model_view::resolve(mv, crate::plan::style::Detail::Mittel, scale).window;
-    let mut openings = collect_openings(p, &frame, &win);
+    let mvo = crate::plan::model_view::for_view(p, level.model_view.as_deref(), crate::plan::style::Detail::Mittel, scale);
+    let win = &mvo.window;
+    let mut openings = collect_openings(p, &frame, win);
+    // [173] Fensterteilung (Flügel, Sprossen, Kämpfer) nach der Modelldarstellung.
+    if !win.elevation_division {
+        for op in openings.iter_mut().filter(|op| p.openings.as_deref().unwrap_or(&[]).iter().any(|o| o.id == op.id && o.kind != ElementKind::Door)) {
+            op.divisions.clear();
+            op.sash_rects.clear();
+        }
+    }
     // [171] Formöffnung: Fassaden-Schraffur auch auf den Füllstücken zwischen Umriss und Rechteck-Loch der Wand
     // (sonst bleibt um ein Rundfenster ein ungemustertes Quadrat).
     {
@@ -281,6 +288,10 @@ pub fn elevation_primitives_with(p: &Project, level: &LevelSpec, shadows: bool, 
             pattern_styles.extend(styles);
             pattern_lines.extend(lines.into_iter().map(|(a, b, d, paint, k)| (a, b, d, paint, k + k0)));
         }
+    }
+    // [173] Ansichtsschraffur der Baustoffe nach der Modelldarstellung.
+    if !mvo.elevation.material_hatch {
+        pattern_lines.clear();
     }
     if !hidden_walls.is_empty() {
         let host = |id: &str| p.openings.as_deref().unwrap_or(&[]).iter().find(|o| o.id == id).map(|o| o.host_wall_id.as_str());
@@ -694,7 +705,14 @@ pub fn elevation_plan_buf(p: &Project, args: &[f64], text: &str) -> Result<Vec<u
     let level = LevelSpec::from_json(v.get("level").unwrap_or(&serde_json::Value::Null));
     let vis = Visibility::from_json(&v);
     let mono = args.first().is_some_and(|&x| x != 0.0);
-    let shadows = args.get(1).is_some_and(|&x| x != 0.0);
+    // Schatten: 0 aus, 1 an, 2 = nicht gesetzt ([173] Modelldarstellung der Ebene, sonst aus).
+    let shadows_arg = args.get(1).copied().unwrap_or(0.0);
+    let mut level = level;
+    // [173] Ausdrücklich angefragte Modelldarstellung (Blatt-Ausschnitt) vor der der Ebene.
+    if let Some(m) = v.get("modelView").and_then(|m| m.as_str()).filter(|m| !m.is_empty()) {
+        level.model_view = Some(m.to_string());
+    }
+    let shadows = if shadows_arg == 2.0 { crate::plan::model_view::for_view(p, level.model_view.as_deref(), crate::plan::style::Detail::Mittel, 100.0).shadows(None) } else { shadows_arg != 0.0 };
     // Massstab für die Ausdünnung der Ansichtsschraffur (fehlt er: 1:100).
     let scale = args.get(2).copied().filter(|s| s.is_finite() && *s > 0.0).unwrap_or(100.0);
     let mut w = crate::plan::buf::Writer::new(true);
