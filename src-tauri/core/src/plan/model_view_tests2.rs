@@ -344,3 +344,77 @@ fn lauflinie_versatz_und_antrittspunkt() {
     assert!((l0 - l1 - 0.25).abs() < 1e-6, "Versatz ({l0} → {l1})");
     assert_eq!(n1, n0 + 1, "Antrittspunkt");
 }
+
+/// Sample mit dem Standard-Steildach (Holz gedämmt) auf RF1 und den Standard-Baustoffen.
+fn with_std_roof(mut p: Project) -> Project {
+    for v in crate::standards::components() {
+        let c: Component = serde_json::from_value(v).unwrap();
+        if !p.components.iter().any(|x| x.id == c.id) {
+            p.components.push(c);
+        }
+    }
+    let rt: RoofType = serde_json::from_value(crate::standards::roof_types()[0].clone()).unwrap();
+    p.roofs.as_mut().unwrap()[0].roof_type_id = Some(rt.id.clone());
+    p.roof_types.get_or_insert_with(Vec::new).push(rt);
+    p
+}
+
+/// [173] „Nur Kern" beim Steildach in Holz: die Sparrenlage (Mineralwolle 22 cm), nicht die 15-mm-Beplankung.
+#[test]
+fn schnitt_dach_nur_kern_ist_sparrenlage() {
+    let p = with_std_roof(sample());
+    let roof_area = |p: &Project| -> f64 { section(p, 50.0, "mittel").iter().map(|q| match q { Primitive::Polygon { pts, fill, roof_id: Some(_), .. } if fill != "none" => area(pts), _ => 0.0 }).sum() };
+    let mut a = with_mv(p.clone(), serde_json::json!({"roofs": {"layers": "all"}}));
+    let mut k = with_mv(p.clone(), serde_json::json!({"roofs": {"layers": "core"}}));
+    set_level_mv(&mut a, "schnitt-a", "mv");
+    set_level_mv(&mut k, "schnitt-a", "mv");
+    let (aa, ak) = (roof_area(&a), roof_area(&k));
+    assert!(aa > 0.0 && ak > 0.0);
+    // Kern 0.22 von 0.4075 m Gesamtdicke (die Beplankung allein wäre 0.015).
+    let r = ak / aa;
+    assert!(r > 0.4 && r < 0.65, "Kernanteil {r}");
+}
+
+/// [173] Geschnittenes Dach im Grundriss: Schichten nach der Stufe (alle, vereinfacht, nur Kern); der Kern
+/// liegt in der Dachfläche als Streifen der Breite Schichtdicke / sin(Neigung).
+#[test]
+fn grundriss_dach_geschnitten_schichten() {
+    let mut p = sample();
+    {
+        let r = &mut p.roofs.as_mut().unwrap()[0];
+        r.roof_type_id = Some("roof-warm".into());
+        // Traufe 0.6 m unter der Schnitthöhe des OG (2.6 + 1.0): das Dach ist geschnitten.
+        r.base_elevation = Some(3.0);
+    }
+    let cut_polys = |p: &Project, scale: f64| -> Vec<(String, f64)> {
+        plan(p, "og", 1.0, scale)
+            .roofs
+            .iter()
+            .filter_map(|q| match q {
+                Primitive::Polygon { pts, fill, roof_id: Some(_), .. } if fill != "none" => Some((fill.clone(), area(pts))),
+                _ => None,
+            })
+            .collect()
+    };
+    let base = cut_polys(&p, 50.0);
+    assert!(!base.is_empty(), "geschnittenes Dach zeigt Schnittflächen");
+    let stage = |layers: &str| {
+        let mut q = with_mv(p.clone(), serde_json::json!({"roofs": {"layers": layers}}));
+        set_level_mv(&mut q, "og", "mv");
+        cut_polys(&q, 50.0)
+    };
+    let all = stage("all");
+    let core = stage("core");
+    let planes = 2;
+    assert_eq!(all.len(), 3 * planes, "alle Schichten je Dachfläche");
+    assert_eq!(core.len(), planes, "nur Kern: eine Fläche je Dachfläche");
+    // Kern = Dämmung 22 cm, Neigung 30°: Streifen 0.22 / sin 30° = 0.44 m breit, 4 m + 2 × 0.4 Vordach lang.
+    let a: f64 = core.iter().map(|c| c.1).sum();
+    let want = 2.0 * 0.22 / 0.5 * 5.8;
+    assert!((a - want).abs() < 0.1 * want, "Kernfläche {a} ≈ {want}");
+    // Vereinfacht in 1:50 (Basis „mittel"): der Innenputz (0.25 mm Papier) geht in der Dämmung auf.
+    assert!(base.len() < all.len(), "{} < {}", base.len(), all.len());
+    // Dach ganz über der Schnittebene: keine Schnittflächen.
+    p.roofs.as_mut().unwrap()[0].base_elevation = None;
+    assert!(cut_polys(&p, 50.0).is_empty());
+}

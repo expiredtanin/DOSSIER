@@ -316,7 +316,9 @@ Symbol selbst in `stair_symbol.rs` bleibt unberührt), Wandschichten und Schicht
 (`plan/walls.rs::layer_targets`), Schnittflächen, Bodenbelag und Gelände. Etappe 2:
 
 - **Grundriss:** „nur Kern" zeichnet die tragende Schicht (`model_view::core_layer`, wie [33]
-  `layer_positions`) in ihrer echten Lage und Dicke (`walls.rs::core_band`); Schwelle der Türen und
+  `layer_positions`; Holzrahmenbau: eine Beplankung unter 3 cm ist nicht der Kern, dann die dickste
+  Konstruktionsschicht, `overrides::MIN_CORE_THICKNESS`) in ihrer echten Lage und Dicke (`walls.rs::core_band`);
+  geschnittene Dächer als Schichtstreifen je Dachfläche nach Stufe (`domains.rs::roof_cut`); Schwelle der Türen und
   Sturzlinie der Fenster (`walls.rs::opening_extras`, beide Basis aus); Decken (Umriss,
   Ansichtsschraffur), Dächer (Rand über dem Schnitt, Schraffur der Aufsicht), Stützen (Schnittfläche
   Schraffur/schwarz/leer) in `plan/domains.rs`.

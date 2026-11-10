@@ -414,19 +414,39 @@ pub fn component_functions(p: &Project) -> std::collections::BTreeMap<&str, Opti
     p.components.iter().map(|c| (c.id.as_str(), crate::standards::layer_function_of_category(crate::standards::material_category(c)).and_then(function_key))).collect()
 }
 
+/// [173] Mindestdicke (m) einer nur aus dem Baustoff als tragend erkannten Schicht, s. [`layer_positions`].
+pub const MIN_CORE_THICKNESS: f64 = 0.03;
+
 /// [33] Lage jeder Schicht zur tragenden Schicht: Schichten liegen aussen/oben → innen/unten; die tragende
 /// ist die mit Funktion „tragend“ und dem höchsten Verschneidungs-Rang (Gleichstand: die dickere), ohne
 /// tragende die mit dem höchsten Rang. Davor "above", danach "below".
+///
+/// [173] Holzrahmenbau: Eine nur aus dem Baustoff abgeleitete tragende Schicht unter [`MIN_CORE_THICKNESS`]
+/// (Beplankung, OSB) ist nicht der Kern — die Sparren/Ständer liegen in der Gefachschicht. Gibt es dann keine
+/// andere tragende Schicht, gilt die dickste Konstruktionsschicht (nie Eindeckung/Bekleidung, Luft, Folie,
+/// Putz, Belag). Ausdrücklich als tragend markierte Schichten (`Layer.function`) gelten immer.
 pub fn layer_positions(p: &Project, layers: &[Layer]) -> Vec<&'static str> {
+    let func = |i: usize| layer_function(p, &layers[i]);
+    let explicit = |i: usize| layers[i].function == Some(LayerFunction::Structure);
+    let thin_derived = |i: usize| !explicit(i) && func(i) == Some(LayerFunction::Structure) && layers[i].thickness < MIN_CORE_THICKNESS;
     let rank = |i: usize| {
         let l = &layers[i];
-        let st = layer_function(p, l) == Some(LayerFunction::Structure);
+        let st = func(i) == Some(LayerFunction::Structure) && !thin_derived(i);
         (st, p.component_or_fallback(&l.component_id).join_priority, l.thickness)
     };
-    let core = (0..layers.len()).max_by(|&a, &b| {
-        let (x, y) = (rank(a), rank(b));
-        x.0.cmp(&y.0).then(x.1.total_cmp(&y.1)).then(x.2.total_cmp(&y.2)).then(b.cmp(&a))
-    });
+    let n = layers.len();
+    let by_rank = |a: &usize, b: &usize| {
+        let (x, y) = (rank(*a), rank(*b));
+        x.0.cmp(&y.0).then(x.1.total_cmp(&y.1)).then(x.2.total_cmp(&y.2)).then(b.cmp(a))
+    };
+    let has_structure = (0..n).any(|i| rank(i).0);
+    let frame = !has_structure && (0..n).any(thin_derived);
+    let construction = |i: usize| !matches!(func(i), Some(LayerFunction::Membrane | LayerFunction::Air | LayerFunction::Cladding | LayerFunction::Plaster | LayerFunction::Finish));
+    let core = if frame {
+        (0..n).filter(|&i| construction(i)).max_by(|&a, &b| layers[a].thickness.total_cmp(&layers[b].thickness).then(b.cmp(&a))).or_else(|| (0..n).max_by(by_rank))
+    } else {
+        (0..n).max_by(by_rank)
+    };
     (0..layers.len())
         .map(|i| match core {
             Some(c) if i < c => "above",
@@ -639,6 +659,21 @@ mod tests {
         assert_eq!(layer_function(&p, &own), Some(crate::model::LayerFunction::Finish));
         // Ohne tragenden Baustoff: höchster Rang (Estrich vor Dämmung).
         assert_eq!(layer_positions(&p, &[l("std-c-zementestrich", 0.05), l("std-c-eps", 0.1)]), ["structure", "below"]);
+        // [173] Holzrahmenbau (Standard-Steildach, Holzständerwand): die dünne Beplankung (Holzwerkstoff < 3 cm)
+        // ist nicht die tragende Schicht, sondern die dickste Konstruktionsschicht (Sparren-/Ständerlage mit
+        // Dämmung) — nie Eindeckung, Luft oder Folie.
+        let steildach = [l("std-c-tonziegel", 0.04), l("std-c-luft", 0.06), l("std-c-holzfaser", 0.06), l("std-c-mineralwolle", 0.22), l("std-c-holzwerkstoff", 0.015), l("std-c-gipskarton", 0.0125)];
+        assert_eq!(layer_positions(&p, &steildach), ["above", "above", "above", "structure", "below", "below"]);
+        let luft_dick = [l("std-c-luft", 0.4), l("std-c-sperrschicht", 0.3), l("std-c-holzfaser", 0.06), l("std-c-holzwerkstoff", 0.015)];
+        assert_eq!(layer_positions(&p, &luft_dick)[2], "structure", "Luft und Folie nie tragend");
+        // Als tragend markierte Schicht geht vor, auch dünn.
+        let mut marked = steildach.clone();
+        marked[4].function = Some(crate::model::LayerFunction::Structure);
+        assert_eq!(layer_positions(&p, &marked)[4], "structure");
+        // Massive Schicht ab 3 cm bleibt tragend, auch wenn die Dämmung dicker ist.
+        assert_eq!(layer_positions(&p, &[l("std-c-eps", 0.3), l("std-c-backstein", 0.12)]), ["above", "structure"]);
+        assert_eq!(layer_positions(&p, &[l("std-c-kies", 0.06), l("std-c-xps", 0.18), l("std-c-stahlbeton", 0.22)])[2], "structure");
+        assert_eq!(layer_positions(&p, &[l("std-c-trapezblech", 0.04), l("std-c-holz", 0.16)])[1], "structure");
         // Ohne aktive Regel: Schnellpfad, lauter leere Aktionen.
         assert!(layer_actions(&p, RuleView::default(), "slab", "30", None, &deck).iter().all(|a| !a.any()));
         p.override_rules = Some(crate::standards::override_rules().into_iter().map(|v| serde_json::from_value(v).unwrap()).collect());
