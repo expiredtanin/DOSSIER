@@ -12,6 +12,7 @@
 use super::prim::Primitive;
 use crate::jsmath::hypot2;
 use crate::jsnum::{atan2, max, min};
+use super::section::LevelSpec;
 use crate::model::Vec2;
 
 /// Abstand (Meter) zwischen tiefster Schnitt-/Ansichtskante und Grundriss-Oberkante.
@@ -147,14 +148,38 @@ fn as_reference(pr: Primitive) -> Primitive {
 /// bei `section_min_y` liegt (`planUnderlayPrimitives`): gedimmt, ohne Auswahl-Ids, dazu die
 /// Schnittlinie. Ohne gültige Linie leer.
 pub fn underlay_primitives(line: Option<[Vec2; 2]>, direction_sign: Option<f64>, plan: impl IntoIterator<Item = Primitive>, section_min_y: f64) -> Vec<Primitive> {
+    underlay_for_level(&LevelSpec { line, direction_sign, ..Default::default() }, plan, section_min_y)
+}
+
+/// Wie [`underlay_primitives`] für eine ganze Schnittebene; mit Knickpunkten ([176]) je Segment mit dessen
+/// Ebene abgebildet, auf den Streifen zugeschnitten und abgewickelt (wie der Schnitt selbst).
+pub fn underlay_for_level(level: &LevelSpec, plan: impl IntoIterator<Item = Primitive>, section_min_y: f64) -> Vec<Primitive> {
+    let (line, direction_sign) = (level.line, level.direction_sign);
     let Some(line) = line else { return vec![] };
     let Some(base) = section_map(line, direction_sign) else { return vec![] };
     let mut mapped = Vec::new();
     let mut top = f64::NEG_INFINITY;
-    for pr in plan {
-        let Some(q) = map_primitive(&base, pr) else { continue };
-        max_y(&q, &mut top);
-        mapped.push(q);
+    let bent = super::section::unfold::segments(level);
+    let plan: Vec<Primitive> = plan.into_iter().collect();
+    match &bent {
+        None => {
+            for pr in plan {
+                let Some(q) = map_primitive(&base, pr) else { continue };
+                max_y(&q, &mut top);
+                mapped.push(q);
+            }
+        }
+        Some(segs) => {
+            for (seg, strip) in segs {
+                let (Some(l), Some(strip)) = (seg.line, strip) else { continue };
+                let Some(m) = section_map(l, direction_sign) else { continue };
+                let part: Vec<Primitive> = plan.iter().cloned().filter_map(|pr| map_primitive(&m, pr)).collect();
+                for q in super::section::unfold::clip_plan_prims(part, strip) {
+                    max_y(&q, &mut top);
+                    mapped.push(q);
+                }
+            }
+        }
     }
     // Die Schnittlinie (w = 0) liegt immer mit in der Unterlage.
     if 0.0 > top {
@@ -165,7 +190,11 @@ pub fn underlay_primitives(line: Option<[Vec2; 2]>, direction_sign: Option<f64>,
     let shift_map = SectionMap { p0: o, u: Vec2 { x: 1.0, y: 0.0 }, n: Vec2 { x: 0.0, y: 1.0 }, theta: 0.0, dy: shift };
     let mut out: Vec<Primitive> = mapped.into_iter().filter_map(|q| map_primitive(&shift_map, q)).map(as_reference).collect();
     let [l0, l1] = line;
-    let len = hypot2(l1.x - l0.x, l1.y - l0.y);
+    // Länge der (abgewickelten) Linie: Summe der Segmente.
+    let len = match &bent {
+        Some(segs) => segs.iter().filter_map(|(s, _)| s.line).map(|[a, b]| hypot2(b.x - a.x, b.y - a.y)).sum(),
+        None => hypot2(l1.x - l0.x, l1.y - l0.y),
+    };
     out.push(Primitive::Line {
         a: Vec2 { x: 0.0, y: shift },
         b: Vec2 { x: len, y: shift },
@@ -206,11 +235,11 @@ pub fn plan_out_primitives(out: &super::domains::PlanOut) -> Result<Vec<Primitiv
 
 /// Argumente aus dem Abfrage-Text: die `planDomains`-Argumente des Geschosses plus `level` (Schnitt/
 /// Ansicht) und `minY` (tiefste Kante des Schnitts).
-pub fn parse_args(text: &str) -> Result<(Option<[Vec2; 2]>, Option<f64>, f64), String> {
+pub fn parse_args(text: &str) -> Result<(super::section::LevelSpec, f64), String> {
     let v: serde_json::Value = serde_json::from_str(text).map_err(|e| format!("planUnderlay: {e}"))?;
     let level = super::section::LevelSpec::from_json(v.get("level").unwrap_or(&serde_json::Value::Null));
     let min_y = v.get("minY").and_then(|x| x.as_f64()).ok_or("planUnderlay: minY fehlt")?;
-    Ok((level.line, level.direction_sign, min_y))
+    Ok((level, min_y))
 }
 
 /// Plan-Puffer (eine Gruppe) der Unterlage.
@@ -310,5 +339,24 @@ mod tests {
         assert_eq!((wall_id, *greyed), (&None, Some(true)));
         // Blick nach −x: θ = −90°, das Muster dreht um +90°.
         assert!((hatch.angle - 100.0).abs() < 1e-9, "{}", hatch.angle);
+    }
+
+    /// [176] Geknickte Schnittlinie: die Unterlage folgt den Segmenten (je Segment abgewickelt, nichts doppelt).
+    #[test]
+    fn geknickte_linie_wickelt_die_unterlage_ab() {
+        let lv = LevelSpec { line: Some([v(0.0, 0.0), v(6.0, 6.0)]), bends: vec![v(6.0, 0.0)], direction_sign: Some(1.0), ..Default::default() };
+        // Ein Strich im ersten Streifen (u = 1, Tiefe 2), einer im zweiten (u = 3 ab Knick, Tiefe −2).
+        let plan = vec![line(v(1.0, 2.0), v(1.0, 2.5)), line(v(8.0, 3.0), v(8.0, 3.5))];
+        let out = underlay_for_level(&lv, plan.clone(), 0.0);
+        let xs: Vec<f64> = out.iter().filter_map(|q| if let Primitive::Line { a, cls, .. } = q { (cls == "t").then_some(a.x) } else { None }).collect();
+        assert_eq!(xs.len(), 2, "jeder Strich genau einmal: {xs:?}");
+        assert!((xs[0] - 1.0).abs() < 1e-9 && (xs[1] - 9.0).abs() < 1e-9, "{xs:?}");
+        // Abgewickelte Linie = Summe der Segmente (6 + 6).
+        let Primitive::Line { a, b, cls, .. } = out.last().unwrap() else { panic!() };
+        assert_eq!(cls, "section-underlay-line");
+        assert!((b.x - a.x - 12.0).abs() < 1e-9);
+        // Ohne Knick bleibt alles beim Alten.
+        let gerade = LevelSpec { bends: vec![], ..lv };
+        assert_eq!(underlay_for_level(&gerade, plan.clone(), 0.0).len(), underlay_primitives(gerade.line, Some(1.0), plan, 0.0).len());
     }
 }

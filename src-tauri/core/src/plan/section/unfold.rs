@@ -315,6 +315,97 @@ pub fn clip_prims(prims: Vec<Primitive>, s: Option<&Strip>) -> Vec<Primitive> {
     out
 }
 
+/// [176] Grundriss-Unterlage: Primitive eines Segments in dessen Ansichtskoordinaten (x = u, y = Tiefe hinter
+/// der Ebene) auf den ganzen Streifen schneiden (u-Bereich und Winkelhalbierende) und in die Abwicklung
+/// schieben. Flächen und Linien geometrisch, alles andere nach Anker.
+pub fn clip_plan_prims(prims: Vec<Primitive>, s: &Strip) -> Vec<Primitive> {
+    let g = |h: &[f64; 3], x: f64, y: f64| h[0] * x + h[1] * y - h[2];
+    let mut out = Vec::with_capacity(prims.len());
+    for mut q in prims {
+        let keep = match &mut q {
+            Primitive::Polygon { pts, no_stroke_edges, .. } => {
+                let p2: Vec<[f64; 2]> = pts.iter().map(|p| [p.x, p.y]).collect();
+                match clip_poly_u(&p2, no_stroke_edges.as_deref(), s.lo, s.hi) {
+                    Some((mut cur, nse)) => {
+                        let mut flags = vec![false; cur.len()];
+                        for &k in nse.as_deref().unwrap_or(&[]) {
+                            if let Some(f) = flags.get_mut(k as usize) {
+                                *f = true;
+                            }
+                        }
+                        for h in &s.half {
+                            if cur.iter().all(|q| g(h, q[0], q[1]) <= 0.0) {
+                                continue;
+                            }
+                            (cur, flags) = clip_ring(&cur, &flags, &|q| g(h, q[0], q[1]), &|a, b, t| lerp2(a, b, t), true);
+                            if cur.len() < 3 {
+                                break;
+                            }
+                        }
+                        if cur.len() < 3 {
+                            false
+                        } else {
+                            let nse: Vec<f64> = flags.iter().enumerate().filter(|(_, f)| **f).map(|(i, _)| i as f64).collect();
+                            *pts = cur.into_iter().map(|p| Vec2 { x: p[0], y: p[1] }).collect();
+                            *no_stroke_edges = (!nse.is_empty()).then_some(nse);
+                            true
+                        }
+                    }
+                    None => false,
+                }
+            }
+            Primitive::Line { a, b, .. } => match clip_line_to_u(&[[a.x, a.y], [b.x, b.y]], s.lo, s.hi).first() {
+                Some(l) if l.len() == 2 => {
+                    let (mut p, mut r) = (l[0], l[1]);
+                    let mut ok = true;
+                    for h in &s.half {
+                        let (gp, gr) = (g(h, p[0], p[1]), g(h, r[0], r[1]));
+                        if gp > 0.0 && gr > 0.0 {
+                            ok = false;
+                            break;
+                        }
+                        if gp > 0.0 {
+                            p = lerp2(&p, &r, gp / (gp - gr));
+                        } else if gr > 0.0 {
+                            r = lerp2(&p, &r, gp / (gp - gr));
+                        }
+                    }
+                    if ok {
+                        *a = Vec2 { x: p[0], y: p[1] };
+                        *b = Vec2 { x: r[0], y: r[1] };
+                    }
+                    ok
+                }
+                _ => false,
+            },
+            other => {
+                let (u, w) = anchor_pt(other);
+                u >= s.lo - 1e-9 && u <= s.hi + 1e-9 && s.half.iter().all(|h| g(h, u, w) <= 1e-9)
+            }
+        };
+        if keep {
+            shift_prim(&mut q, s.offset);
+            out.push(q);
+        }
+    }
+    out
+}
+
+/// Anker (x, y) eines Primitivs.
+fn anchor_pt(q: &Primitive) -> (f64, f64) {
+    match q {
+        Primitive::Polygon { pts, .. } => {
+            let n = pts.len().max(1) as f64;
+            (pts.iter().map(|p| p.x).sum::<f64>() / n, pts.iter().map(|p| p.y).sum::<f64>() / n)
+        }
+        Primitive::Line { a, b, .. } => (0.5 * (a.x + b.x), 0.5 * (a.y + b.y)),
+        Primitive::Arc { center, .. } | Primitive::DrawingCircle { center, .. } | Primitive::DrawingArc { center, .. } => (center.x, center.y),
+        Primitive::Text { at, .. } | Primitive::DrawingText { at, .. } => (at.x, at.y),
+        Primitive::DrawingTextPath { path_pts, .. } => path_pts.first().map_or((0.0, 0.0), |p| (p.x, p.y)),
+        Primitive::DrawingImage { min, max, .. } => (0.5 * (min.x + max.x), 0.5 * (min.y + max.y)),
+    }
+}
+
 /// Ganze Gruppe (z. B. ein Baum) behalten, wenn ihre Mitte im Streifen liegt; verschoben.
 pub fn keep_group(prims: Vec<Primitive>, s: Option<&Strip>) -> Vec<Primitive> {
     let Some(s) = s else { return prims };

@@ -110,6 +110,8 @@ pub struct Request {
     fy: N,
     /// [T2] Getippte Bogenlänge (Tab) beim Endpunkt-Griff einer Bogenwand; fehlt = NaN = Cursor.
     arc_length: N,
+    /// [176] Aufräum-Abstand (m) für `sectionLineTidy` (Zeiger-Genauigkeit der Ansicht); fehlt = NaN = 5 mm.
+    tol: N,
     thickness: N,
     pt: [N; 2],
     delta: [N; 2],
@@ -133,6 +135,7 @@ impl Request {
             "fx" => self.fx.0,
             "fy" => self.fy.0,
             "arcLength" => self.arc_length.0,
+            "tol" => self.tol.0,
             _ => self.thickness.0,
         }
     }
@@ -263,6 +266,22 @@ pub fn run(lk: &Lookup, req: &Request) -> Result<GripResult, String> {
         "sectionLineGrip" => {
             let (index, (x, y)) = (r.n("index"), r.p("pt"));
             patch("drawingLevels", r.s("id"), &|e| section_line_grip(e, index, x, y)).into()
+        }
+        // [176] Knick einfügen (Mittel-Griff von Segment `seg` gezogen), löschen (Kontextmenü am Knick-Griff,
+        // `index` wie bei `sectionLineGrip`) bzw. aufräumen (nach dem Ziehen: Knicke auf einem Nachbarpunkt
+        // oder auf der Geraden zwischen den Nachbarn entfallen).
+        "sectionBendInsert" => {
+            let (seg, (x, y)) = (r.n("seg"), r.p("pt"));
+            patch("drawingLevels", r.s("id"), &|e| section_bend_edit(e, SectionBendEdit::Insert(seg, x, y))).into()
+        }
+        "sectionBendDelete" => {
+            let index = r.n("index");
+            patch("drawingLevels", r.s("id"), &|e| section_bend_edit(e, SectionBendEdit::Delete(index))).into()
+        }
+        "sectionLineTidy" => {
+            let tol = r.n("tol");
+            let tol = if tol.is_finite() { tol.clamp(BEND_TIDY_M, 1.0) } else { BEND_TIDY_M };
+            patch("drawingLevels", r.s("id"), &|e| section_bend_edit(e, SectionBendEdit::Tidy(tol))).into()
         }
         "excavationGrip" => {
             let (index, (x, y)) = (r.n("index"), r.p("pt"));
@@ -454,6 +473,72 @@ fn section_line_grip(e: &Value, index: f64, x: f64, y: f64) -> Option<Value> {
         return Some(with(e, "linePoints", replace_at(line, k, &pt(x, y))));
     }
     Some(with(e, "bendPoints", replace_at(bends, (i - 1) as f64, &pt(x, y))))
+}
+
+enum SectionBendEdit {
+    Insert(f64, f64, f64),
+    Delete(f64),
+    Tidy(f64),
+}
+
+/// Mindest-Abstand (m), unter dem ein Knick als auf dem Nachbarpunkt bzw. der Geraden zwischen den Nachbarn gilt
+/// (die Hülle gibt beim Ziehen die Zeiger-Genauigkeit der Ansicht mit, `tol`).
+const BEND_TIDY_M: f64 = 0.005;
+
+/// [176] Knickpunkte einer Schnittlinie ändern; `None`, wenn nichts zu tun ist.
+fn section_bend_edit(e: &Value, edit: SectionBendEdit) -> Option<Value> {
+    let line = field(e, "linePoints")?.as_array()?;
+    if line.len() < 2 {
+        return None;
+    }
+    let mut bends: Vec<Value> = field(e, "bendPoints").and_then(Value::as_array).cloned().unwrap_or_default();
+    match edit {
+        SectionBendEdit::Insert(seg, x, y) => {
+            let j = index_in(seg, bends.len() + 1)?;
+            if !(x.is_finite() && y.is_finite()) {
+                return None;
+            }
+            bends.insert(j, pt(x, y));
+        }
+        SectionBendEdit::Delete(index) => {
+            let i = index_in(index, bends.len() + 2)?;
+            if i == 0 || i == bends.len() + 1 {
+                return None;
+            }
+            bends.remove(i - 1);
+        }
+        SectionBendEdit::Tidy(tol) => {
+            let before = bends.len();
+            loop {
+                let mut pts: Vec<(f64, f64)> = vec![xy(&line[0])];
+                pts.extend(bends.iter().map(xy));
+                pts.push(xy(&line[1]));
+                // Knick i (Punkt i+1) mit den Nachbarn i und i+2.
+                let bad = (0..bends.len()).find(|&i| {
+                    let (a, b, c) = (pts[i], pts[i + 1], pts[i + 2]);
+                    let (dx, dy) = (c.0 - a.0, c.1 - a.1);
+                    let len2 = dx * dx + dy * dy;
+                    let t = if len2 > 0.0 { ((b.0 - a.0) * dx + (b.1 - a.1) * dy) / len2 } else { 0.0 };
+                    let (qx, qy) = (a.0 + t.clamp(0.0, 1.0) * dx, a.1 + t.clamp(0.0, 1.0) * dy);
+                    (b.0 - qx).hypot(b.1 - qy) < tol
+                });
+                match bad {
+                    Some(i) => {
+                        bends.remove(i);
+                    }
+                    None => break,
+                }
+            }
+            if bends.len() == before {
+                return None;
+            }
+        }
+    }
+    if bends.is_empty() {
+        // Ohne Knicke fällt das Feld weg (altes 2-Punkt-Format).
+        return Some(with_opt(e, vec![("bendPoints", None)]));
+    }
+    Some(with(e, "bendPoints", Value::Array(bends)))
 }
 
 fn wall_moved(w: &Value, dx: f64, dy: f64) -> Value {
@@ -1587,6 +1672,44 @@ mod tests {
         let res = run(&Lookup::plain(&r2), &rq(json!({"op": "sectionLineGrip", "id": "g", "index": 1, "pt": [4, 2]}))).unwrap();
         assert_eq!(entity(&res)["linePoints"][1], json!({"x": 4, "y": 2}));
         assert!(entity(&res).get("bendPoints").is_none());
+    }
+
+    /// [176] Knick einfügen / löschen / aufräumen am bestehenden Schnitt.
+    #[test]
+    fn schnittlinie_knick_einfuegen_loeschen_aufraeumen() {
+        let lv = json!({"id": "s", "kind": "section", "linePoints": [{"x": 0, "y": 0}, {"x": 6, "y": 10}], "bendPoints": [{"x": 6, "y": 0}]});
+        let gerade = json!({"id": "g", "kind": "section", "linePoints": [{"x": 0, "y": 0}, {"x": 10, "y": 0}]});
+        let r = root(json!({"drawingLevels": [lv, gerade]}));
+        let ent = |v: Value| run(&Lookup::plain(&r), &rq(v)).unwrap().ops.first().map(|o| o.to_json()["entity"].clone());
+        // Gerade Linie: Segment 0 → erster Knick.
+        let e = ent(json!({"op": "sectionBendInsert", "id": "g", "seg": 0, "pt": [5, 3]})).unwrap();
+        assert_eq!(e["bendPoints"], json!([{"x": 5, "y": 3}]));
+        // Mit Knick: Segment 1 (zwischen Knick und Ende) → Knick an Stelle 1, Reihenfolge bleibt.
+        let e = ent(json!({"op": "sectionBendInsert", "id": "s", "seg": 1, "pt": [7, 4]})).unwrap();
+        assert_eq!(e["bendPoints"], json!([{"x": 6, "y": 0}, {"x": 7, "y": 4}]));
+        let e = ent(json!({"op": "sectionBendInsert", "id": "s", "seg": 0, "pt": [3, -1]})).unwrap();
+        assert_eq!(e["bendPoints"], json!([{"x": 3, "y": -1}, {"x": 6, "y": 0}]));
+        assert!(ent(json!({"op": "sectionBendInsert", "id": "s", "seg": 2, "pt": [1, 1]})).is_none());
+        // Löschen: Knick-Griff 1; Anfang/Ende lassen sich nicht löschen; ohne Knicke fällt das Feld weg.
+        let e = ent(json!({"op": "sectionBendDelete", "id": "s", "index": 1})).unwrap();
+        assert!(e.get("bendPoints").is_none());
+        assert!(ent(json!({"op": "sectionBendDelete", "id": "s", "index": 0})).is_none());
+        assert!(ent(json!({"op": "sectionBendDelete", "id": "s", "index": 2})).is_none());
+        // Aufräumen: Knick auf der Geraden bzw. auf dem Nachbarpunkt entfällt, ein echter Knick bleibt.
+        let r2 = root(json!({"drawingLevels": [
+            {"id": "a", "kind": "section", "linePoints": [{"x": 0, "y": 0}, {"x": 10, "y": 0}], "bendPoints": [{"x": 5, "y": 0.001}]},
+            {"id": "b", "kind": "section", "linePoints": [{"x": 0, "y": 0}, {"x": 10, "y": 0}], "bendPoints": [{"x": 0, "y": 0}, {"x": 5, "y": 3}]},
+            {"id": "c", "kind": "section", "linePoints": [{"x": 0, "y": 0}, {"x": 10, "y": 0}], "bendPoints": [{"x": 5, "y": 3}]},
+            {"id": "d", "kind": "section", "linePoints": [{"x": 0, "y": 0}, {"x": 10, "y": 0}], "bendPoints": [{"x": 5, "y": 0.02}]}
+        ]}));
+        let tidy = |id: &str| run(&Lookup::plain(&r2), &rq(json!({"op": "sectionLineTidy", "id": id}))).unwrap().ops.first().map(|o| o.to_json()["entity"].clone());
+        // Mit Ansichts-Toleranz (3 cm) entfällt auch ein Knick, der nur 2 cm neben der Geraden liegt (ohne: bleibt).
+        assert!(tidy("d").is_none());
+        let grob = run(&Lookup::plain(&r2), &rq(json!({"op": "sectionLineTidy", "id": "d", "tol": 0.03}))).unwrap().ops.first().map(|o| o.to_json()["entity"].clone());
+        assert!(grob.unwrap().get("bendPoints").is_none());
+        assert!(tidy("a").unwrap().get("bendPoints").is_none());
+        assert_eq!(tidy("b").unwrap()["bendPoints"], json!([{"x": 5, "y": 3}]));
+        assert!(tidy("c").is_none());
     }
 
     #[test]

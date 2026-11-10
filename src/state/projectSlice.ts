@@ -387,7 +387,13 @@ export interface ProjectSlice {
   /** [68] Baugrube: Umriss-Ecke ziehen (Index = Ecke; Index = Eckenzahl: Sohlenhöhe). */
   moveExcavationGrip: (id: string, index: number, pt: Vec2) => void;
   /** [176] Griff einer Schnittlinie: 0 = Anfang, dann die Knickpunkte, zuletzt das Ende. */
-  moveSectionLineGrip: (id: string, index: number, pt: Vec2) => void;
+  moveSectionLineGrip: (id: string, index: number, pt: Vec2, coalesceKey?: string) => void;
+  /** [176] Knick in Segment `seg` (Mittel-Griff) einfügen; `coalesceKey` fasst den anschliessenden Zug zusammen. */
+  insertSectionBend: (id: string, seg: number, pt: Vec2, coalesceKey?: string) => void;
+  /** [176] Knick löschen (`index` wie bei {@link moveSectionLineGrip}; Anfang/Ende lassen sich nicht löschen). */
+  deleteSectionBend: (id: string, index: number) => void;
+  /** [176] Nach dem Ziehen: Knicke auf einem Nachbarpunkt oder auf der Geraden entfernen. */
+  tidySectionLine: (id: string, coalesceKey?: string, tol?: number) => void;
   moveExcavationEdge: (id: string, aIndex: number, bIndex: number, delta: Vec2) => void;
   /** Verschiebt eine Decke (ganzer Umriss) um `delta`. */
   moveCeilingBy: (ceilingId: string, delta: Vec2) => void;
@@ -1242,7 +1248,11 @@ export function createProjectSlice(
       applyGrip({ op: "ceilingGrip", id: ceilingId, index, pt: gripPt(pt) }, `moveCeilingGrip:${ceilingId}:${index}`),
 
     moveExcavationGrip: (id, index, pt) => applyGrip({ op: "excavationGrip", id, index, pt: gripPt(pt) }, `moveExcavationGrip:${id}:${index}`),
-    moveSectionLineGrip: (id, index, pt) => applyGrip({ op: "sectionLineGrip", id, index, pt: gripPt(pt) }, `moveSectionLineGrip:${id}:${index}`),
+    moveSectionLineGrip: (id, index, pt, coalesceKey) =>
+      applyGrip({ op: "sectionLineGrip", id, index, pt: gripPt(pt) }, coalesceKey ?? `moveSectionLineGrip:${id}:${index}`),
+    insertSectionBend: (id, seg, pt, coalesceKey) => applyGrip({ op: "sectionBendInsert", id, seg, pt: gripPt(pt) }, coalesceKey),
+    deleteSectionBend: (id, index) => applyGrip({ op: "sectionBendDelete", id, index }),
+    tidySectionLine: (id, coalesceKey, tol) => applyGrip({ op: "sectionLineTidy", id, ...(tol != null ? { tol } : {}) }, coalesceKey),
 
     moveExcavationEdge: (id, aIndex, bIndex, delta) =>
       applyGrip({ op: "excavationEdge", id, a: aIndex, b: bIndex, delta: gripPt(delta) }, `moveExcavationEdge:${id}:${aIndex}:${bIndex}`),

@@ -57,6 +57,8 @@ export function AppContextMenu(props: {
     deleteLevel,
     reorderDrawings,
     insertDrawingPoint,
+    insertSectionBend,
+    deleteSectionBend,
     deleteDrawingPoint,
     setPolylineVertexType,
     reorderDrawingLevels,
@@ -139,6 +141,14 @@ export function AppContextMenu(props: {
             ? { id: d.id, pts: d.geom.pts, closed: d.geom.closed, bulge: d.geom.bulge }
             : null;
         })(),
+        // [176] Geknickte Schnittlinie: Knick einfügen/löschen am gewählten Schnitt.
+        selectedSectionLine: (() => {
+          if (selection.sectionLines.length !== 1) return null;
+          const l = project.drawingLevels.find((x) => x.id === selection.sectionLines[0] && x.linePoints);
+          return l?.linePoints ? { id: l.id, pts: [l.linePoints[0], ...(l.bendPoints ?? []), l.linePoints[1]] } : null;
+        })(),
+        insertSectionBend,
+        deleteSectionBend,
         insertPolylinePoint: insertDrawingPoint,
         deletePolylinePoint: deleteDrawingPoint,
         setPolylineVertexType,
