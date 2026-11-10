@@ -737,7 +737,10 @@ pub fn format_stamp_area(area: f64, step: Option<f64>) -> String {
     match step {
         Some(st) if st > 0.0 => {
             let rounded = round(area / st) * st;
-            js_number(round(rounded * 100.0) / 100.0)
+            // [171] So viele Stellen wie der Schritt (0.1 → 1, 0.25 → 2, 1 → 0; höchstens 2): gleich breite
+            // Flächenzeilen im Plan („16.0 m²“ statt „16 m²“ neben „3.9 m²“).
+            let decimals = [1.0, 10.0].iter().position(|&k: &f64| (st * k - round(st * k)).abs() < 1e-9).unwrap_or(2);
+            to_fixed(round(rounded * 100.0) / 100.0, decimals)
         }
         _ => to_fixed(area, 2),
     }
@@ -2701,7 +2704,11 @@ mod tests {
         assert_eq!(o[0].align, Align::Center);
         assert_eq!(format_stamp_area(12.345, None), "12.35");
         assert_eq!(format_stamp_area(12.0, None), "12.00");
-        assert_eq!(format_stamp_area(12.24, Some(0.5)), "12");
+        // [171] Stellen nach dem Rundungsschritt: „16.0 m²" neben „3.9 m²", nicht „16 m²".
+        assert_eq!(format_stamp_area(12.24, Some(0.5)), "12.0");
+        assert_eq!(format_stamp_area(16.02, Some(0.1)), "16.0");
+        assert_eq!(format_stamp_area(16.02, Some(0.25)), "16.00");
+        assert_eq!(format_stamp_area(16.02, Some(0.05)), "16.00");
         assert_eq!(format_stamp_area(12.26, Some(0.5)), "12.5");
         assert_eq!(format_stamp_area(12.3, Some(0.1)), "12.3");
         assert_eq!(format_stamp_area(12.34, Some(1.0)), "12");

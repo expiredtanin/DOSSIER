@@ -116,7 +116,23 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
 - ◐ **[157]** Plan-Review Musterhaus komplex (Schweizer Praxis). Offene Befunde: Marken von Ansichten Nord/West bzw.
   Süd/Ost treffen sich im 1:500 an den Ecken; „B-B“ steht bis 2.5 m neben seiner Marke; „Detail und Situation“ auf
   Masskette/Höhenkote; Raumstempel verlieren beim Ausweichen die Nutzungszeile; Achsblasen ab 1:200 über Höhenkoten;
-  Bogenwand-Fenster im Schnitt 1:50 nur Umriss; Höhenkoten im CLI-Schnitt zu weit links. · M
+  Bogenwand-Fenster im Schnitt 1:50 nur Umriss; Höhenkoten im CLI-Schnitt zu weit links (10.11. [171]: neben dem
+  Gebauten statt links vom Gelände, Carport/Körper zählen weiter mit). · M
+- ◐ **[171]** Plan-Review Runde 2 (10.11., beide Musterhäuser, CLI-SVG `--hatch` in Chromium, nur Linux). Behoben (Kern,
+  Test je Fix): Sonnenschatten auf Flächen unter dem Ansichtsbereich (grauer Fleck über dem Carport im OG/DG,
+  `sun::shadow_polygons_plan_in`); Flächenzeile nach Rundungsschritt („16.0 m²“ statt „16 m²“); Schnitt genau am Rand
+  eines Rundfensters ohne Rechteck-Loch (B-B, DG West); Wand von unten ohne Wand darüber endet unter der Rohdecke,
+  Bodenaufbau läuft durch (`bands::end_below_floor_buildup`; einfaches Musterhaus W9, komplex OG/UG-Innenwände);
+  Rundfenster in der Ansicht ohne Quadrat, Fassadenmuster bis an den Rahmen; OG-Ecken unter dem Dach in der Ansicht
+  verlängert (keine Eckstreifen mit Fuge/Schatten, einfaches Musterhaus); Höhenkoten im Schnitt/in der Ansicht neben
+  dem Gebauten (`levelMarkerPrimitives` mit Primitiven). Offen: Raumstempel „Wohnen“ (einfaches Musterhaus) liegt auf
+  Zwischenwand W9 und Schnittlinie A (Anker/Raumumriss in den Daten); Revisionswolken-Text und „▽-2.71“ auf der
+  Bemassung Süd (Daten); Höhenlinien-Beschriftung („-2.7“) knapp an Masszahlen; kleiner Strich rechts am Rundfenster
+  (Ansicht West); Ansicht Ost: Schatten-Keile neben dem Erker mit Lücken je Geschoss, Strichreste am Erker;
+  1:500: Kürzung „Wohnen/Essen.“ unterschlägt „Küche“; Holzwand-Ecke DG 1:50: Dämmschlaufen überlappen in der
+  Ecke, Dämm-Polylinien mit ~60 000 Punkten (DG 1:50 SVG 14 MB); Raumstempel ohne Maske über Schnittlinie (einfaches
+  Musterhaus); 1:100-Schnitt: Schichtfugen als graue Linien in der schwarzen Fläche. Nicht in der Tauri-App/auf dem Mac
+  angesehen. · M
 - ◐ **[142]** Schatten in zwei Richtungen. Schatten nur im Geschoss nächst ±0.00; Decken/Dächer werfen keinen eigenen
   Schatten (Auskragungen, Balkone); Wandöffnungen lassen kein Licht durch; Dach-/Kronenschatten als konvexe Hülle
   (`sun.rs`, Kern `plan/`). · M

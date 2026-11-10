@@ -946,7 +946,7 @@ fn collect(p: &Project, k: [f64; 2], cut: Option<f64>, ground: Option<&Ground>) 
 /// Vereinigter Boden-Schatten aller Wände, Körper, Stützen, Decken, Dächer und Bäume des Projekts
 /// (leer bei Nacht); mit `cut` wie [`shadow_polygons_plan`] im Geschoss am Gelände.
 pub fn shadow_polygons_project(p: &Project, sun: SunPosition, cut: Option<f64>) -> Vec<Polygon> {
-    shadow_plan(p, sun, cut, true)
+    shadow_plan(p, sun, cut, f64::NEG_INFINITY, true)
 }
 
 /// [142] Schatten im Grundriss mit Schnitthöhe `cut`: auf den sichtbaren Flächen im Freien — Decken,
@@ -954,15 +954,24 @@ pub fn shadow_polygons_project(p: &Project, sun: SunPosition, cut: Option<f64>) 
 /// am Gelände) auf dem Gelände bzw. ±0.00. Flächen unter einer höheren Decke oder einem Dach (Innenräume,
 /// unter Balkonen) und unter einer höheren sichtbaren Fläche zeigen keinen Schatten.
 pub fn shadow_polygons_plan(p: &Project, sun: SunPosition, cut: f64, with_ground: bool) -> Vec<Polygon> {
-    shadow_plan(p, sun, Some(cut), with_ground)
+    shadow_plan(p, sun, Some(cut), f64::NEG_INFINITY, with_ground)
 }
 
-fn shadow_plan(p: &Project, sun: SunPosition, cut: Option<f64>, with_ground: bool) -> Vec<Polygon> {
+/// Wie [`shadow_polygons_plan`], Empfänger nur mit Oberkante ab `min_top` ([171]: Unterkante des
+/// Ansichtsbereichs; tiefere Flächen zeigt der Grundriss nicht, ihr Schatten schwebte ohne Fläche).
+pub fn shadow_polygons_plan_in(p: &Project, sun: SunPosition, cut: f64, min_top: f64, with_ground: bool) -> Vec<Polygon> {
+    shadow_plan(p, sun, Some(cut), min_top, with_ground)
+}
+
+fn shadow_plan(p: &Project, sun: SunPosition, cut: Option<f64>, min_top: f64, with_ground: bool) -> Vec<Polygon> {
     let Some(k) = shadow_shift(sun) else { return vec![] };
     // [142] Mit Geländenetz fällt der Schatten aufs Gelände (inkl. Baugruben), sonst auf ±0.00.
     let site = shadow_terrain(p);
     let ground = site.as_deref().map(Ground::of_site);
-    let (casters, covers, recvs) = collect(p, k, cut, ground.as_ref());
+    let (casters, covers, mut recvs) = collect(p, k, cut, ground.as_ref());
+    if !min_top.is_nan() {
+        recvs.retain(|r| r.top >= min_top - 0.05);
+    }
     let mask = |above: f64| -> Vec<Polygon> {
         covers.iter().filter(|c| c.bottom > above + LEVEL_EPS).map(|c| c.region.clone()).chain(recvs.iter().filter(|r| r.top > above + LEVEL_EPS).map(|r| r.region.clone())).collect()
     };
@@ -1339,6 +1348,19 @@ mod terrain_tests {
         assert!(!shaded(&eg, 1.0, 3.0) && shaded(&eg, 1.0, 5.0) && shaded(&eg, 1.0, 7.5) && !shaded(&eg, 1.0, 8.5));
         // Schnitt unter der Terrasse fängt auf ihr nichts; Flächen sind dort keine Empfänger.
         assert!(shadow_polygons_plan(&p, sun, 1.0, false).is_empty());
+    }
+
+    /// [171] Empfänger unter der Unterkante des Ansichtsbereichs (der Grundriss zeigt sie nicht, z. B. das
+    /// Carport-Dach im OG des Musterhauses komplex) tragen keinen Schatten: sonst schwebt ein grauer Fleck.
+    #[test]
+    fn schatten_nicht_auf_flaechen_unter_dem_ansichtsbereich() {
+        let sun = SunPosition { azimuth: 180.0, elevation: 45.0 };
+        let solid = serde_json::json!([{"id": "s", "type": "extrudedSolid", "levelId": "eg", "points": rect(0.0, 0.0, 2.0, 2.0), "height": 6.0}]);
+        let p = project_json(serde_json::json!({ "drawingLevels": levels(), "extrudedSolids": solid, "ceilings": [slab("t", "eg", rect(0.0, 2.0, 2.0, 4.0))] }));
+        // Terrasse OK 3.0: mit Unterkante 3.0 sichtbar, mit Unterkante 3.5 nicht.
+        assert!((area(&shadow_polygons_plan_in(&p, sun, 4.0, 3.0, false)) - 4.0).abs() < 1e-6);
+        assert!(shadow_polygons_plan_in(&p, sun, 4.0, 3.5, false).is_empty());
+        assert!((area(&shadow_polygons_plan_in(&p, sun, 4.0, f64::NEG_INFINITY, false)) - 4.0).abs() < 1e-6);
     }
 
     /// Nicht endliche Werte und Nacht: leer, ohne Panik.
