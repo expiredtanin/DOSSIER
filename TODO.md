@@ -127,11 +127,14 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   verlängert (keine Eckstreifen mit Fuge/Schatten, einfaches Musterhaus); Höhenkoten im Schnitt/in der Ansicht neben
   dem Gebauten (`levelMarkerPrimitives` mit Primitiven). Offen: Raumstempel „Wohnen“ (einfaches Musterhaus) liegt auf
   Zwischenwand W9 und Schnittlinie A (Anker/Raumumriss in den Daten); Revisionswolken-Text und „▽-2.71“ auf der
-  Bemassung Süd (Daten); Höhenlinien-Beschriftung („-2.7“) knapp an Masszahlen; kleiner Strich rechts am Rundfenster
-  (Ansicht West); Ansicht Ost: Schatten-Keile neben dem Erker mit Lücken je Geschoss, Strichreste am Erker;
-  1:500: Kürzung „Wohnen/Essen.“ unterschlägt „Küche“; Holzwand-Ecke DG 1:50: Dämmschlaufen überlappen in der
-  Ecke, Dämm-Polylinien mit ~60 000 Punkten (DG 1:50 SVG 14 MB); Raumstempel ohne Maske über Schnittlinie (einfaches
-  Musterhaus); 1:100-Schnitt: Schichtfugen als graue Linien in der schwarzen Fläche. Nicht in der Tauri-App/auf dem Mac
+  Bemassung Süd (Daten); Höhenlinien-Beschriftung („-2.7“) knapp an Masszahlen; Raumstempel ohne Maske über
+  Schnittlinie (einfaches Musterhaus). Nachtrag 10.11. (Reste): Dämm-Polylinien mit Sehnenfehler ≤ 0.5 mm Modell
+  (≙ 0.05 mm Papier ab 1:10) statt festen 5° (DG 1:50 komplex 14 MB → 2.6 MB); Haarstrich gegen Fugen
+  `SEAM_MM` 0.05 → 0.12 (graue Schichtfugen in der schwarzen Schnittfläche 1:100 bei Zoom ≥ 12 px/mm); Stempel-Kürzung
+  nach Wörtern („Wo./Ess./Küc.“ statt „Wohnen/Essen.“); Reststrich rechts am Rundfenster (Ansicht West) — Lochkanten im
+  Band um den Rahmen entfallen (`drop_hole_edges`). Weiter offen: Holzwand-Ecke DG 1:50: die Dämmschlaufen beider
+  Wände treffen sich an der Gehrung versetzt (Schenkel-Knicke, keine Spiegelung; Phase/Gehrung `anchor_band_pattern`);
+  Ansicht Ost: Schatten-Keile neben dem Erker mit Lücken je Geschoss und Strichreste am Erker. Nicht in der Tauri-App/auf dem Mac
   angesehen. · M
 - ◐ **[142]** Schatten in zwei Richtungen. Schatten nur im Geschoss nächst ±0.00; Decken/Dächer werfen keinen eigenen
   Schatten (Auskragungen, Balkone); Wandöffnungen lassen kein Licht durch; Dach-/Kronenschatten als konvexe Hülle

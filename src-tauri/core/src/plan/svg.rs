@@ -159,8 +159,10 @@ fn op_json(v: &Value) -> String {
     op(greyed, v.get("opacity").map(|o| o.as_f64().unwrap_or(f64::NAN)))
 }
 
-/// [157] Haarstrich (Papier-mm) gegen die Fuge zwischen aneinanderstossenden dunklen Flächen.
-pub(crate) const SEAM_MM: f64 = 0.05;
+/// [157] Haarstrich (Papier-mm) gegen die Fuge zwischen aneinanderstossenden dunklen Flächen. [171] 0.12 statt
+/// 0.05: ab etwa 12 px/mm (Zoom in Chromium, Vorschau) blieb bei 0.05 mm (0.6 px) eine helle Haarlinie zwischen den
+/// Schichten der schwarzen Schnittfläche (1:100); 0.12 mm deckt sie, die Fläche wächst nur um 0.06 mm.
+pub(crate) const SEAM_MM: f64 = 0.12;
 
 /// [157] Deckend dunkle Füllfarbe (`#rgb`, `#rrggbb`, `#rrggbbff`; jeder Kanal ≤ 0x40), die zwischen zwei
 /// Flächen eine helle Haarfuge zeigt (Chromium/PDF glätten aneinanderstossende Flächen einzeln): solche
@@ -602,8 +604,8 @@ mod tests {
         let svg = plan_svg(&mut parts, &o).unwrap();
         let polys: Vec<&str> = svg.lines().filter(|l| l.starts_with("<polygon")).collect();
         assert_eq!(polys.len(), 4, "{svg}");
-        assert!(polys[0].contains("fill=\"#0f0f0f\" stroke=\"#0f0f0f\" stroke-width=\"0.005\""), "{}", polys[0]);
-        assert!(polys[1].contains("fill=\"#111111\" stroke=\"#111111\" stroke-width=\"0.005\""), "Kantenlauf-Fläche: {}", polys[1]);
+        assert!(polys[0].contains("fill=\"#0f0f0f\" stroke=\"#0f0f0f\" stroke-width=\"0.012\""), "{}", polys[0]);
+        assert!(polys[1].contains("fill=\"#111111\" stroke=\"#111111\" stroke-width=\"0.012\""), "Kantenlauf-Fläche: {}", polys[1]);
         assert!(polys[2].contains("stroke=\"none\""), "weiss: {}", polys[2]);
         assert!(polys[3].contains("stroke=\"none\""), "durchscheinend: {}", polys[3]);
         assert!(seam_fill("#000") && seam_fill("#1a1a1aff") && !seam_fill("#6e6e6e") && !seam_fill("none") && !seam_fill("#00000080"));

@@ -882,12 +882,46 @@ fn ring_bounds(ring: &[[f64; 2]]) -> [f64; 4] {
     ring.iter().fold([f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY], |b, q| [b[0].min(q[0]), b[1].min(q[1]), b[2].max(q[0]), b[3].max(q[1])])
 }
 
-/// Namenszeilen auf `n` Zeichen kürzen (n − 1 Zeichen und Punkt), Leerzeichen am Schnitt weg.
+/// Namenszeilen auf höchstens `n` Zeichen kürzen. Einzelne Wörter: `n − 1` Zeichen und Punkt, Leerzeichen am
+/// Schnitt weg. Zeilen aus mehreren Wörtern (Trenner Leerzeichen, `/`, `-`) kürzen die Wörter der Reihe nach
+/// (jeweils das längste um ein Zeichen, mit Punkt, nicht unter 3 Zeichen; kurze Wörter von höchstens 4 Zeichen
+/// bleiben) — „Wohnen/Essen/Küche" wird „Wohn./Ess./Küc." statt „Wohnen/Essen." ([171]: kein Wort fällt weg).
 fn abbreviate(text: &str, n: usize) -> String {
-    text.split('\n')
-        .map(|l| if l.chars().count() <= n { l.to_string() } else { format!("{}.", l.chars().take(n.saturating_sub(1).max(1)).collect::<String>().trim_end()) })
-        .collect::<Vec<_>>()
-        .join("\n")
+    text.split('\n').map(|l| abbreviate_line(l, n)).collect::<Vec<_>>().join("\n")
+}
+
+fn abbreviate_line(l: &str, n: usize) -> String {
+    if l.chars().count() <= n {
+        return l.to_string();
+    }
+    let chop = |l: &str| format!("{}.", l.chars().take(n.saturating_sub(1).max(1)).collect::<String>().trim_end());
+    // Wörter und Trenner abwechselnd: (Text, ist_Trenner).
+    let mut parts: Vec<(String, bool)> = Vec::new();
+    for ch in l.chars() {
+        let sep = matches!(ch, ' ' | '/' | '-');
+        match parts.last_mut() {
+            Some((t, s)) if *s == sep && !sep => t.push(ch),
+            _ => parts.push((ch.to_string(), sep)),
+        }
+    }
+    let words: Vec<usize> = (0..parts.len()).filter(|&i| !parts[i].1).collect();
+    if words.len() < 2 {
+        return chop(l);
+    }
+    // Behaltene Zeichen je Wort; ein gekürztes Wort zeigt `keep` Zeichen und einen Punkt.
+    let full: Vec<usize> = parts.iter().map(|(t, _)| t.chars().count()).collect();
+    let mut keep = full.clone();
+    let shown = |i: usize, keep: &[usize]| if keep[i] == full[i] { full[i] } else { keep[i] + 1 };
+    let total = |keep: &[usize]| (0..parts.len()).map(|i| if parts[i].1 { full[i] } else { shown(i, keep) }).sum::<usize>();
+    while total(&keep) > n {
+        let Some(&i) = words.iter().filter(|&&i| full[i] > 4 && shown(i, &keep) > 3).max_by_key(|&&i| (shown(i, &keep), keep[i] == full[i], std::cmp::Reverse(i))) else { return chop(l) };
+        keep[i] = if keep[i] == full[i] { full[i] - 2 } else { keep[i] - 1 };
+    }
+    parts
+        .iter()
+        .enumerate()
+        .map(|(i, (t, sep))| if *sep || keep[i] == full[i] { t.clone() } else { format!("{}.", t.chars().take(keep[i]).collect::<String>()) })
+        .collect()
 }
 
 /// [140] Hindernisse für Raumstempel aus den schon erzeugten Domänen: Treppen (alle Striche), Türschwenk-Bögen,
@@ -1687,6 +1721,13 @@ mod tests {
         let (e, pt, _, at) = fit_room_stamp(&name, extra(), ROOM_STAMP_PT, 100.0, &narrow(0.0));
         assert_eq!((e.len(), pt, at), (2, ROOM_STAMP_PT, Some(pole)), "nirgends frei: ganzer Stempel mit Überdeckung");
         assert_eq!(abbreviate("Bad", 5), "Bad");
+        // [171] Mehrere Wörter: alle bleiben sichtbar, die Wörter werden gekürzt (nicht der Schluss abgeschnitten).
+        let a = abbreviate("Wohnen/Essen/Küche", 13);
+        let w: Vec<&str> = a.split('/').collect();
+        assert!(a.chars().count() <= 13 && w.len() == 3 && w[0].starts_with("Wo") && w[1].starts_with("Es") && w[2].starts_with("Kü"), "{a}");
+        assert!(abbreviate("Wohnen/Essen/Küche", 16).starts_with("Wohn."), "genug Platz: längere Wörter");
+        assert!(abbreviate("E.03 Wohnen/Essen/Küche", 17).starts_with("E.03 "));
+        assert_eq!(abbreviate("Abstellraum Keller", 40), "Abstellraum Keller");
     }
 
     /// [140] L-förmiger Raum ohne eigenen Anker: Stempel im Raum (Pol der Unzugänglichkeit), nicht am

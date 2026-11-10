@@ -435,6 +435,38 @@ fn rundfenster_ohne_rechteck_in_der_ansicht() {
         })
         .collect();
     assert!(square.is_empty(), "Rechteck um das Rundfenster: {square:?}");
+    // [171] Auch kurze Reststücke der Lochkanten (Strich neben dem Rahmen): im Band von 0.12 m um das Fenster
+    // liegt keine Umrisslinie, ausser dem Rahmen selbst.
+    let band = 0.12;
+    let stubs: Vec<_> = prims
+        .iter()
+        .filter_map(|pr| if let Primitive::Line { a, b, cls, .. } = pr { (cls == "elevation-outline").then_some((a, b)) } else { None })
+        .filter(|(a, b)| {
+            let inside = |q: &Vec2| q.x > bb[0] - band && q.x < bb[2] + band && q.y > bb[1] - band && q.y < bb[3] + band;
+            inside(a) && inside(b)
+        })
+        .collect();
+    assert!(stubs.is_empty(), "Reststrich am Rundfenster: {stubs:?}");
+}
+
+/// [171] Strich rechts am Rundfenster (Ansicht West): ein Reststück der Lochkante im Band (Einzug der Dämmung)
+/// ausserhalb des Umrisses entfällt, Kanten der Wand weiter weg bleiben.
+#[test]
+fn lochkanten_im_band_der_formoeffnung() {
+    use super::silhouette::EdgeSeg;
+    let e = |a: Pt, b: Pt| EdgeSeg { a, b, hidden: false, owner: 1 };
+    let b = [14.45, 6.75, 15.55, 7.9];
+    let mut edges = vec![
+        e([15.55, 7.7], [15.6, 7.7]),     // Strich im Band rechts: weg
+        e([15.6, 6.8], [15.6, 7.8]),      // Lochkante im Band: weg
+        e([14.45, 6.75], [15.55, 6.75]),  // Seite auf dem Umriss: weg
+        e([15.55, 7.7], [16.5, 7.7]),     // Wandkante, reicht weit hinaus: bleibt
+        e([10.0, 7.7], [11.0, 7.7]),      // woanders: bleibt
+        e([15.0, 7.0], [15.2, 7.1]),      // im Umriss, quer: bleibt (Rahmen/Verdecker entscheiden)
+    ];
+    drop_hole_edges(&mut edges, b);
+    let left: Vec<_> = edges.iter().map(|e| (e.a, e.b)).collect();
+    assert_eq!(left, vec![([15.55, 7.7], [16.5, 7.7]), ([10.0, 7.7], [11.0, 7.7]), ([15.0, 7.0], [15.2, 7.1])]);
 }
 
 /// [105] Umfassungszarge in der Ansicht: Spiegel über die Rohbaukante hinaus (Rahmen breiter als

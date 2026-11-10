@@ -8,4 +8,4 @@ polyline 17
 rect 1
 svg 1
 text 3
-hash 0ac408ec72d00b90
+hash c94d4102e772735b

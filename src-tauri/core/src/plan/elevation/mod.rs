@@ -140,6 +140,28 @@ fn face_contains_bbox(f: &Face, c: Pt) -> bool {
     c[0] >= lo[0] - NEAR && c[0] <= hi[0] + NEAR && c[1] >= lo[1] - NEAR && c[1] <= hi[1] + NEAR
 }
 
+/// [171] Kanten des Rechteck-Lochs einer Formöffnung (`b` = Umriss `[x0, y0, x1, y1]` des Rahmens) entfernen: die
+/// Seiten auf dem Rand des Umrisses (Quadrat um ein Rundfenster) und Reststücke im Band um den Umriss (das Loch
+/// ist um den Einzug der Dämmung ([168]) grösser als die Öffnung; die Füllstücke decken nur bis an den Umriss —
+/// dort blieb ein kurzer Strich rechts am Rundfenster stehen).
+fn drop_hole_edges(edges: &mut Vec<silhouette::EdgeSeg>, b: [f64; 4]) {
+    const TOL: f64 = 1e-3;
+    const REVEAL: f64 = 0.12;
+    let near = |a: f64, b: f64| (a - b).abs() < TOL;
+    let inside = |q: Pt| q[0] > b[0] - REVEAL && q[0] < b[2] + REVEAL && q[1] > b[1] - REVEAL && q[1] < b[3] + REVEAL;
+    let rim_u = |x: f64| x <= b[0] + TOL || x >= b[2] - TOL;
+    let rim_v = |y: f64| y <= b[1] + TOL || y >= b[3] - TOL;
+    edges.retain(|e| {
+        let side = (near(e.a[0], e.b[0]) && rim_u(e.a[0])) || (near(e.a[1], e.b[1]) && rim_v(e.a[1]));
+        // Ganz im Band ausserhalb einer Seite des Umrisses.
+        let band = (e.a[0] >= b[2] - TOL && e.b[0] >= b[2] - TOL)
+            || (e.a[0] <= b[0] + TOL && e.b[0] <= b[0] + TOL)
+            || (e.a[1] >= b[3] - TOL && e.b[1] >= b[3] - TOL)
+            || (e.a[1] <= b[1] + TOL && e.b[1] <= b[1] + TOL);
+        !((side || band) && inside(e.a) && inside(e.b))
+    });
+}
+
 fn outline_line(a: Pt, b: Pt) -> Primitive {
     line(v2(a[0], a[1]), v2(b[0], b[1]), "elevation-outline", EDGE_MM, EDGE_INK)
 }
@@ -353,17 +375,7 @@ pub fn elevation_primitives_with(p: &Project, level: &LevelSpec, shadows: bool, 
     // entfallen, den Umriss zeichnet der Rahmen (wie `section::shaped_projection` im Schnitt).
     for op in openings.iter().filter(|op| op.shape.is_some()) {
         let b = op.pts.iter().fold([f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY], |b, q| [b[0].min(q[0]), b[1].min(q[1]), b[2].max(q[0]), b[3].max(q[1])]);
-        // Das Loch kann um den Einzug der Dämmung über den Rahmen ([168]) grösser sein als die Öffnung.
-        const TOL: f64 = 1e-3;
-        const REVEAL: f64 = 0.12;
-        let near = |a: f64, b: f64| (a - b).abs() < TOL;
-        let inside = |q: Pt| q[0] > b[0] - REVEAL && q[0] < b[2] + REVEAL && q[1] > b[1] - REVEAL && q[1] < b[3] + REVEAL;
-        let rim_u = |x: f64| x <= b[0] + TOL || x >= b[2] - TOL;
-        let rim_v = |y: f64| y <= b[1] + TOL || y >= b[3] - TOL;
-        edges.retain(|e| {
-            let side = (near(e.a[0], e.b[0]) && rim_u(e.a[0])) || (near(e.a[1], e.b[1]) && rim_v(e.a[1]));
-            !(side && inside(e.a) && inside(e.b))
-        });
+        drop_hole_edges(&mut edges, b);
     }
     for (a, b, depth, paint, k) in pattern_lines {
         pending.push(Pending::Line { a, b, depth, style: Some(k), paint: Some(paint) });
