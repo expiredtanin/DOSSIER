@@ -13,6 +13,7 @@ import { memo } from "react";
 import type { ViewSnapshot } from "./model/types";
 import { useStore } from "./state/appStore";
 import { tabTitle, type ViewTab, type ViewTabsState } from "./state/viewTabs";
+import { isSelectionMode, useView3dFilter } from "./state/view3dFilter";
 import { t } from "./i18n";
 
 /** Handler-Bündel der Reiterleiste (Host-Handler in state/usePanelHostBase.ts). */
@@ -33,11 +34,15 @@ export const DrawingTabs = memo(function DrawingTabs({ handlers }: { handlers: V
   const { tabs, onActivate, onNew, onClose, autoName } = handlers;
   const liveLevelId = useStore((s) => s.activeLevelId);
   const liveIs3d = useStore((s) => s.viewType === "perspektive");
+  // [185] „Auswahl in 3D zeigen": 3D-Reiter heissen „3D · Auswahl".
+  const selection3d = isSelectionMode(useView3dFilter());
   // 3D-Reiter heissen „3D · Geschoss" (der aktive liest die Live-Ansicht).
   const title = (tab: ViewTab) =>
-    tabTitle(tab, snapshots, (tb) =>
-      tb.id === tabs.activeId ? autoName(liveIs3d ? liveLevelId : undefined, liveIs3d) : autoName(tb.state?.activeLevelId, tb.state?.viewType === "perspektive"),
-    );
+    tabTitle(tab, snapshots, (tb) => {
+      const is3d = tb.id === tabs.activeId ? liveIs3d : tb.state?.viewType === "perspektive";
+      if (is3d && selection3d) return t("tabs.3dSelection");
+      return tb.id === tabs.activeId ? autoName(liveIs3d ? liveLevelId : undefined, liveIs3d) : autoName(tb.state?.activeLevelId, tb.state?.viewType === "perspektive");
+    });
   const closable = tabs.tabs.length > 1;
 
   return (

@@ -44,6 +44,21 @@ impl Owner {
     }
 }
 
+/// [185] Element-Auswahl im 3D (rein UI, nicht im Projekt): „Auswahl in 3D zeigen" (`only`, `None` = alle) und
+/// temporär ausgeblendete Elemente (`hide`). Wirkt wie eine ausgeblendete Klasse: fehlt in Teilen und Pick.
+#[derive(Debug, Clone, Default)]
+pub struct ElementSelection {
+    pub only: Option<HashSet<String>>,
+    pub hide: HashSet<String>,
+}
+
+impl ElementSelection {
+    /// Keine Einschränkung.
+    pub fn is_empty(&self) -> bool {
+        self.only.is_none() && self.hide.is_empty()
+    }
+}
+
 /// Ausgeblendete Klassen und die ids der Elemente darauf.
 #[derive(Debug, Clone, Default)]
 pub struct ClassFilter {
@@ -59,14 +74,29 @@ impl ClassFilter {
 
     /// Ebenen-Baum des Projekts plus die Codes `extra` (Darstellungsmodus des Aufrufers).
     pub fn new(p: &Project, extra: &[String]) -> ClassFilter {
+        ClassFilter::with_elements(p, extra, &ElementSelection::default())
+    }
+
+    /// Wie [`Self::new`], dazu die Element-Auswahl `sel` ([185]): nur `only` zeigen, `hide` ausblenden.
+    pub fn with_elements(p: &Project, extra: &[String], sel: &ElementSelection) -> ClassFilter {
         let mut codes: HashSet<String> = hidden_category_codes(&p.layers).into_iter().map(String::from).collect();
         codes.extend(extra.iter().cloned());
         let mut ids = HashSet::new();
-        if codes.is_empty() {
+        if codes.is_empty() && sel.is_empty() {
             return ClassFilter { codes, ids };
         }
+        // Gewählte Öffnungen bringen ihren Wirt mit (eine Öffnung ohne Wand gibt es im 3D nicht).
+        let only: Option<HashSet<&str>> = sel.only.as_ref().map(|o| {
+            let mut s: HashSet<&str> = o.iter().map(String::as_str).collect();
+            for op in p.openings.as_deref().unwrap_or(&[]) {
+                if o.contains(&op.id) {
+                    s.insert(op.host_wall_id.as_str());
+                }
+            }
+            s
+        });
         let mut add = |code: &str, id: &str| {
-            if codes.contains(code) {
+            if codes.contains(code) || sel.hide.contains(id) || only.as_ref().is_some_and(|o| !o.contains(id)) {
                 ids.insert(id.to_owned());
             }
         };
@@ -97,31 +127,33 @@ impl ClassFilter {
         for d in &p.drawings2d {
             add(&d.category_code, &d.id);
         }
-        // Öffnungen nach den Wirten (Wand, Dach, Decke), die jetzt schon in `ids` stehen.
+        // Öffnungen nach den Wirten (Wand, Dach, Decke), die jetzt schon in `ids` stehen; mit `only` zeigt
+        // ein gewählter Wirt seine Öffnungen.
         let hidden_openings: Vec<String> = p
             .openings
             .as_deref()
             .unwrap_or(&[])
             .iter()
-            .filter(|o| codes.contains(&o.category_code) || ids.contains(&o.host_wall_id))
+            .filter(|o| codes.contains(&o.category_code) || sel.hide.contains(&o.id) || ids.contains(&o.host_wall_id))
             .map(|o| o.id.clone())
             .collect();
         ids.extend(hidden_openings);
         ClassFilter { codes, ids }
     }
 
-    /// `text` der 3D-Abfragen: `{"hide": [codes], …}` (fehlt/kein JSON: nur der Ebenen-Baum).
+    /// `text` der 3D-Abfragen: `{"hide": [codes], "only": [ids], "hideIds": [ids], …}` (fehlt/kein JSON:
+    /// nur der Ebenen-Baum; `only` fehlt/`null` = alle Elemente, [185]).
     pub fn from_text(p: &Project, text: &str) -> ClassFilter {
         let t = text.trim();
-        let extra: Vec<String> = if t.starts_with('{') {
-            serde_json::from_str::<serde_json::Value>(t)
-                .ok()
-                .and_then(|v| v.get("hide").and_then(|a| a.as_array()).map(|a| a.iter().filter_map(|s| s.as_str().map(String::from)).collect()))
-                .unwrap_or_default()
-        } else {
-            Vec::new()
+        let v = if t.starts_with('{') { serde_json::from_str::<serde_json::Value>(t).ok() } else { None };
+        let list = |key: &str| -> Option<Vec<String>> {
+            v.as_ref()
+                .and_then(|v| v.get(key))
+                .and_then(|a| a.as_array())
+                .map(|a| a.iter().filter_map(|s| s.as_str().map(String::from)).collect())
         };
-        ClassFilter::new(p, &extra)
+        let sel = ElementSelection { only: list("only").map(|o| o.into_iter().collect()), hide: list("hideIds").unwrap_or_default().into_iter().collect() };
+        ClassFilter::with_elements(p, &list("hide").unwrap_or_default(), &sel)
     }
 
     /// Kein Element ausgeblendet.
@@ -245,6 +277,62 @@ mod tests {
         let stair = parts.slabs.iter().filter(|s| s.ceiling_id == "s1").count() + parts.stair_railings.len();
         let lines = crate::explode3d::drawing_line_verts_filtered(p, gap, f).len();
         [col, tree, stair, lines]
+    }
+
+    /// [185] Element-Auswahl: `only` zeigt nur die genannten Elemente, `hideIds` blendet sie aus — in Teilen und Pick.
+    #[test]
+    fn element_auswahl_only_und_hide_ids() {
+        let p = project(&[]);
+        let ids = ["k1", "T1", "s1", "L"];
+        for gap in [0.0, 2.0] {
+            for (k, id) in ids.into_iter().enumerate() {
+                for (text, shown) in [(format!(r#"{{"only":["{id}"]}}"#), true), (format!(r#"{{"hideIds":["{id}"]}}"#), false)] {
+                    let f = ClassFilter::from_text(&p, &text);
+                    let got = counts(&p, &f, gap);
+                    for (i, n) in got.iter().enumerate() {
+                        // `only`: nur das genannte Element da; `hideIds`: nur das genannte fehlt.
+                        assert_eq!(*n > 0, (i == k) == shown, "{text}, Abstand {gap}: {got:?}");
+                    }
+                    let mut g = crate::explode3d::pick_geometry(&p, gap).unwrap();
+                    f.retain_pick(&mut g);
+                    let picks = [g.columns.len(), g.trees.len(), g.stairs.len() + g.stair_meshes.len(), g.drawings.len()];
+                    for (i, n) in picks.iter().enumerate() {
+                        assert_eq!(*n > 0, (i == k) == shown, "Pick {text}, Abstand {gap}: {picks:?}");
+                    }
+                }
+            }
+        }
+        // Leere Auswahl `only: []` zeigt nichts, `only: null` alles.
+        assert!(counts(&p, &ClassFilter::from_text(&p, r#"{"only":[]}"#), 0.0).iter().all(|&n| n == 0));
+        assert!(counts(&p, &ClassFilter::from_text(&p, r#"{"only":null}"#), 0.0).iter().all(|&n| n > 0));
+    }
+
+    /// [185] Gewählte Wand zeigt ihre Öffnungen; gewählte Öffnung bringt ihren Wirt mit; ausgeblendete Wand nimmt sie mit.
+    #[test]
+    fn element_auswahl_oeffnungen_folgen_dem_wirt() {
+        let mut p = project(&[]);
+        let mut v = serde_json::to_value(&p).unwrap();
+        v["walls"] = serde_json::json!([
+            {"id": "w1", "type": "wall", "floorId": "EG", "categoryCode": "20", "start": {"x": 0, "y": 0}, "end": {"x": 5, "y": 0}, "wallTypeId": "aw", "height": 2.8},
+            {"id": "w2", "type": "wall", "floorId": "EG", "categoryCode": "20", "start": {"x": 0, "y": 4}, "end": {"x": 5, "y": 4}, "wallTypeId": "aw", "height": 2.8}]);
+        v["wallTypes"] = serde_json::json!([{"id": "aw", "name": "AW", "layers": [{"componentId": "c", "thickness": 0.2}]}]);
+        v["openings"] = serde_json::json!([{"id": "o1", "type": "opening", "kind": "window", "hostWallId": "w1", "categoryCode": "40", "position": 2.0, "width": 1.0, "height": 1.2, "sillHeight": 0.9}]);
+        p = match serde_json::from_value(v) {
+            Ok(p) => p,
+            Err(e) => panic!("Projekt: {e}"),
+        };
+        let f = ClassFilter::from_text(&p, r#"{"only":["w1"]}"#);
+        assert!(!f.hides("w1") && !f.hides("o1") && f.hides("w2") && f.hides("k1"));
+        let f = ClassFilter::from_text(&p, r#"{"only":["o1"]}"#);
+        assert!(!f.hides("w1") && !f.hides("o1") && f.hides("w2"));
+        let f = ClassFilter::from_text(&p, r#"{"hideIds":["w1"]}"#);
+        assert!(f.hides("w1") && f.hides("o1") && !f.hides("w2"));
+        let f = ClassFilter::from_text(&p, r#"{"hideIds":["o1"]}"#);
+        assert!(!f.hides("w1") && f.hides("o1"));
+        let mut g = crate::explode3d::pick_geometry(&p, 0.0).unwrap();
+        ClassFilter::from_text(&p, r#"{"only":["w2"]}"#).retain_pick(&mut g);
+        assert!(g.walls.iter().all(|w| w.wall_id == "w2") && !g.walls.is_empty());
+        assert!(g.openings.is_empty() && g.columns.is_empty());
     }
 
     /// Jede Klasse einzeln aus (Ebenen-Baum bzw. `hide`): nur ihr Teil fehlt im 3D (auch in der Explosion) und im Pick.

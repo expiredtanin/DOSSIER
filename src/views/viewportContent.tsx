@@ -42,6 +42,7 @@ import { clashHighlightLines } from "../analysis/clash";
 import { useClashSession } from "../panels/clashSession";
 import { applyGroupDimmingToPlan } from "../state/groupActions";
 import { useStore } from "../state/appStore";
+import { planFitKey } from "../state/viewTabs";
 import { PlanView } from "./plan/PlanView";
 import type {
   GripHandlers,
@@ -872,6 +873,7 @@ function LevelPlanView({
         describePick={describePick}
         onPickHint={setPickHint}
         resetKey={`${level.id}#${projectEpoch}`}
+        fitKey={planFitKey(level, projectEpoch)}
         onCursor={onCursor}
         onScale={onScale}
         selection={selection}

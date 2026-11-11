@@ -223,6 +223,11 @@ export interface PlanViewProps {
    */
   resetKey?: string;
   /**
+   * [185] Schlüssel nur für das Einpassen (fehlt: `resetKey`). Geschosse teilen sich einen (`planFitKey`): der
+   * Geschosswechsel behält Zoom und Ausschnitt exakt, Pick-Zyklus u. ä. folgen weiter `resetKey`.
+   */
+  fitKey?: string;
+  /**
    * Meldet die Cursor-Position in Modell-Koordinaten (Meter) nach oben, bzw.
    * `null`, wenn der Zeiger die Fläche verlässt. Optional — ohne Callback
    * verhält sich die Ansicht wie zuvor.

@@ -17,6 +17,7 @@ import { t } from "../i18n";
 import { getState, type RootState } from "./appStore";
 import { openMeshFileDialog } from "./meshImportStore";
 import { openPointCloudFileDialog } from "./pointCloudStore";
+import { hideSelectionIn3d, showSelectionIn3d, stepActiveFloor } from "./tabNavigation";
 import type { useDialogState } from "./useDialogState";
 import type { useProjectFileActions } from "./useProjectFileActions";
 import type { useTopBarState } from "./useTopBarState";
@@ -156,6 +157,9 @@ export function useNativeMenu(opts: {
       onViewType: setViewType,
       onView3d: setView3d,
       onReferenceLines: setReferenceLines,
+      onFloorStep: stepActiveFloor,
+      onShowSelection3d: showSelectionIn3d,
+      onHideSelection3d: hideSelectionIn3d,
       onToggleResources: () => toggleResources(),
       onOpenSettings: () => openSettings(),
       onOpenPanel: (panelId) => setLayout((l) => revealPanel(l, panelId)),

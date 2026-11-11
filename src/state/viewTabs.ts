@@ -223,6 +223,52 @@ export function switchViewKind(
   return openNew(stored, noCamera({ ...live, viewType: want, activeLevelId: levelId }));
 }
 
+/**
+ * [185] Nächstes Geschoss über (`dir` = +1, Cmd/Ctrl+6) bzw. unter (−1, Cmd/Ctrl+5) dem aktiven, nach Höhe
+ * (`baseElevation`, gleich hoch: Reihenfolge der Liste). `null` am obersten/untersten Geschoss oder wenn die aktive
+ * Ebene kein Geschoss ist.
+ */
+export function adjacentFloorId(
+  levels: readonly Pick<DrawingLevel, "id" | "kind" | "baseElevation">[],
+  activeId: string,
+  dir: 1 | -1,
+): string | null {
+  const floors = levels
+    .map((l, i) => ({ l, i }))
+    .filter(({ l }) => l.kind === "floor")
+    .sort((a, b) => (a.l.baseElevation ?? 0) - (b.l.baseElevation ?? 0) || a.i - b.i)
+    .map(({ l }) => l.id);
+  const at = floors.indexOf(activeId);
+  if (at < 0) return null;
+  return floors[at + dir] ?? null;
+}
+
+/**
+ * [185] Cmd/Ctrl+5 (`dir` −1) bzw. Cmd/Ctrl+6 (+1): im Grundriss- oder 3D-Reiter ein Geschoss tiefer/höher, im
+ * selben Reiter (Art, Zoom und Ausschnitt bleiben). Sonst (Schnitt, Ansicht, Zeichnung; oberstes/unterstes
+ * Geschoss) `null`.
+ */
+export function stepFloor(
+  s: ViewTabsState,
+  live: ViewSnapshotState,
+  levels: readonly Pick<DrawingLevel, "id" | "kind" | "baseElevation">[],
+  dir: 1 | -1,
+): TabNav | null {
+  const kind = tabKindOf(live, levels);
+  if (kind !== "plan" && kind !== "3d") return null;
+  const id = adjacentFloorId(levels, live.activeLevelId, dir);
+  return id ? navigateToLevel(s, live, levels, id) : null;
+}
+
+/**
+ * [185] Schlüssel, bei dessen Wechsel die Plan-Ansicht neu einpasst. Geschosse teilen sich einen: der Wechsel in ein
+ * anderes Geschoss im selben Reiter behält Zoom und Ausschnitt exakt (wie Archicad); Schnitt, Ansicht, Zeichnung und
+ * ein neu geladenes Projekt (`epoch`) passen ein.
+ */
+export function planFitKey(level: Pick<DrawingLevel, "id" | "kind">, epoch: number): string {
+  return `${level.kind === "floor" ? "floors" : `level:${level.id}`}#${epoch}`;
+}
+
 /** Verbindet den aktiven Reiter mit einem Ausschnitt (Klick im Panel / Speichern). */
 export function linkActiveTab(s: ViewTabsState, snapshotId: string): ViewTabsState {
   return {

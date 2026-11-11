@@ -55,6 +55,12 @@ export interface NativeAppMenuHandlers {
   onViewType: (v: ViewType) => void;
   onView3d: (v: View3d) => void;
   onReferenceLines: (v: boolean) => void;
+  /** [185] Geschoss tiefer (−1, Cmd+5) / höher (+1, Cmd+6) im Grundriss-/3D-Reiter. */
+  onFloorStep?: (dir: 1 | -1) => void;
+  /** [185] Auswahl in 3D zeigen (Cmd+3; ohne Auswahl alles). */
+  onShowSelection3d?: () => void;
+  /** [185] Auswahl im 3D ausblenden (Cmd+4). */
+  onHideSelection3d?: () => void;
 
   onToggleResources: () => void;
   onOpenSettings: () => void;
@@ -341,6 +347,28 @@ export function useNativeAppMenu(
           ...view3dItems,
           await PredefinedMenuItem.new({ item: "Separator" }),
           referenceLinesItem,
+          // [185] Navigation wie Archicad (dieselben Kürzel laufen im Browser über `useViewNavigationShortcuts`).
+          await PredefinedMenuItem.new({ item: "Separator" }),
+          await MenuItem.new({
+            text: t("menu.view.floorDown"),
+            accelerator: "CmdOrCtrl+5",
+            action: () => handlersRef.current.onFloorStep?.(-1),
+          }),
+          await MenuItem.new({
+            text: t("menu.view.floorUp"),
+            accelerator: "CmdOrCtrl+6",
+            action: () => handlersRef.current.onFloorStep?.(1),
+          }),
+          await MenuItem.new({
+            text: t("menu.view.showSelection3d"),
+            accelerator: "CmdOrCtrl+3",
+            action: () => handlersRef.current.onShowSelection3d?.(),
+          }),
+          await MenuItem.new({
+            text: t("menu.view.hideSelection3d"),
+            accelerator: "CmdOrCtrl+4",
+            action: () => handlersRef.current.onHideSelection3d?.(),
+          }),
         ],
       });
 

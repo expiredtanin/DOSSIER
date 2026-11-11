@@ -6,12 +6,15 @@ import type { ViewType } from "../model/viewTypes";
 import { sheetLevelOf } from "../model/layoutModel";
 import { getState } from "./appStore";
 import type { ViewSnapshotState } from "./viewSnapshots";
-import { getViewStateBridge, getViewTabs, navigateToLevel, setViewTabs, switchViewKind, type TabNav } from "./viewTabs";
+import { getViewStateBridge, getViewTabs, navigateToLevel, setViewTabs, stepFloor, switchViewKind, type TabNav } from "./viewTabs";
+import { getView3dFilter, hideSelection3d, selectionIds3d, setView3dFilter, showSelection3d } from "./view3dFilter";
+import { clearKinds } from "./selection";
 
-function run(nav: (live: ViewSnapshotState) => TabNav): void {
+function run(nav: (live: ViewSnapshotState) => TabNav | null): void {
   const bridge = getViewStateBridge();
   if (!bridge) return;
   const r = nav(bridge.live());
+  if (!r) return;
   setViewTabs(r.next);
   if (r.setLevel) {
     // Gleicher Reiter: nur das Geschoss wechselt, die Art (Grundriss/3D) bleibt.
@@ -38,4 +41,27 @@ export function switchViewType(want: ViewType): void {
 export function openLayoutTab(layoutId: string): void {
   const sheet = sheetLevelOf(getState().project, layoutId);
   if (sheet) openLevel(sheet.id);
+}
+
+/** [185] Cmd/Ctrl+5 (−1) bzw. Cmd/Ctrl+6 (+1): im Grundriss-/3D-Reiter ein Geschoss tiefer/höher (Zoom bleibt). */
+export function stepActiveFloor(dir: 1 | -1): void {
+  run((live) => stepFloor(getViewTabs(), live, getState().project.drawingLevels, dir));
+}
+
+/**
+ * [185] Cmd/Ctrl+3 „Auswahl in 3D zeigen": mit Auswahl zeigt der 3D-Reiter nur diese (Titel „3D · Auswahl"), ohne
+ * Auswahl wieder alles; wechselt in den 3D-Reiter bzw. öffnet ihn, die Kamera passt sich ein.
+ */
+export function showSelectionIn3d(): void {
+  setView3dFilter(showSelection3d(getView3dFilter(), selectionIds3d(getState().selection)));
+  switchViewType("perspektive");
+}
+
+/** [185] Cmd/Ctrl+4: gewählte Elemente im 3D temporär ausblenden (nicht anwählbar, kein Undo-Schritt); Auswahl leeren. */
+export function hideSelectionIn3d(): void {
+  const st = getState();
+  const ids = selectionIds3d(st.selection);
+  if (!ids.length) return;
+  setView3dFilter(hideSelection3d(getView3dFilter(), ids));
+  st.setSelection(clearKinds("walls", "ceilings", "openings", "stairs", "solids", "columns", "roofs", "contextObjects", "trees", "drawings", "groups"));
 }

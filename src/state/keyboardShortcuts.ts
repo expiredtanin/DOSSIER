@@ -48,7 +48,11 @@ export type ShortcutId =
   | "toolCeiling"
   | "toolWindow"
   | "toolDoor"
-  | "toolRoom";
+  | "toolRoom"
+  | "floorDown"
+  | "floorUp"
+  | "showSelection3d"
+  | "hideSelection3d";
 
 export type ShortcutCategory =
   | "general"
@@ -57,7 +61,8 @@ export type ShortcutCategory =
   | "boolean"
   | "transform"
   | "group"
-  | "tools";
+  | "tools"
+  | "navigation";
 
 export interface ShortcutDef {
   id: ShortcutId;
@@ -204,6 +209,11 @@ export const SHORTCUT_DEFS: ShortcutDef[] = [
     defaultCombo: "0",
     bareKeyOnly: true,
   },
+  // [185] Navigation wie Archicad.
+  { id: "floorDown", category: "navigation", labelKey: "shortcut.floorDown", defaultCombo: "mod+5" },
+  { id: "floorUp", category: "navigation", labelKey: "shortcut.floorUp", defaultCombo: "mod+6" },
+  { id: "showSelection3d", category: "navigation", labelKey: "shortcut.showSelection3d", defaultCombo: "mod+3" },
+  { id: "hideSelection3d", category: "navigation", labelKey: "shortcut.hideSelection3d", defaultCombo: "mod+4" },
 ];
 
 const DEFS_BY_ID = new Map<ShortcutId, ShortcutDef>(SHORTCUT_DEFS.map((d) => [d.id, d]));

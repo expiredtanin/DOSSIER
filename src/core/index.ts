@@ -263,5 +263,7 @@ export {
 } from "../plan/toWalls3d";
 export type { Model3dPart } from "../plan/toWalls3d";
 export { hiddenClassCodes } from "../plan/toWalls3d";
+export { filter3d } from "../plan/toWalls3d";
+export type { Filter3d, Hide3d } from "../plan/toWalls3d";
 
 export * from "./extra";
