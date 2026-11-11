@@ -321,7 +321,7 @@ impl MeshLineStyle {
     fn apply(&self, l: &mut Primitive) {
         if let Primitive::Line { color, weight_mm, dash, .. } = l {
             if let Some(c) = &self.color {
-                *color = Some(c.clone());
+                *color = Some(c.clone().into());
             }
             if let Some(w) = self.weight {
                 *weight_mm = w;

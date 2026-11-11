@@ -55,7 +55,7 @@ impl SurfOv {
     pub(super) fn restyle(&self, mut l: Primitive) -> Primitive {
         if let Primitive::Line { color, weight_mm, dash, .. } = &mut l {
             if let Some(c) = &self.color {
-                *color = Some(c.clone());
+                *color = Some(c.clone().into());
             }
             if let Some(w) = self.lineweight {
                 *weight_mm = w;

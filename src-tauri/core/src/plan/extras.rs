@@ -59,7 +59,7 @@ fn flat_polygon(pts: Vec<Vec2>, fill: &str, opacity: f64) -> Primitive {
         fill: fill.into(),
         stroke: "none".into(),
         stroke_width_mm: 0.0,
-        hatch: no_hatch(),
+        hatch: Box::new(no_hatch()),
         greyed: None,
         opacity: Some(opacity),
         no_stroke_edges: None,
@@ -844,7 +844,7 @@ mod tests {
         solid.color = "#123456".into();
         let mut p = flat_polygon(vec![], "#abcdef", 1.0);
         if let Primitive::Polygon { hatch, stroke, .. } = &mut p {
-            *hatch = solid;
+            *hatch = Box::new(solid);
             *stroke = "#ff0000".into();
         }
         post.apply(&mut p);
@@ -886,7 +886,7 @@ mod tests {
         let mut p = flat_polygon(vec![], "#3c3c3c", 0.0);
         if let Primitive::Polygon { stroke, hatch, .. } = &mut p {
             *stroke = "none".into();
-            *hatch = HatchRender { pattern: HatchPattern::Diagonal, color: "#808080".into(), ..no_hatch() };
+            *hatch = Box::new(HatchRender { pattern: HatchPattern::Diagonal, color: "#808080".into(), ..no_hatch() });
         }
         post.apply(&mut p);
         match &p {
@@ -900,7 +900,7 @@ mod tests {
         let mut q = flat_polygon(vec![], "#e8dcc0", 0.0);
         if let Primitive::Polygon { stroke, hatch, .. } = &mut q {
             *stroke = "#b06030".into();
-            *hatch = HatchRender { pattern: HatchPattern::Diagonal, color: "#c04020".into(), ..no_hatch() };
+            *hatch = Box::new(HatchRender { pattern: HatchPattern::Diagonal, color: "#c04020".into(), ..no_hatch() });
         }
         post.apply(&mut q);
         match &q {

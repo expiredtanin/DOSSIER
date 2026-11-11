@@ -10,7 +10,7 @@ pub(crate) fn polygon(pts: Vec<Vec2>, fill: &str, stroke: &str, w: f64, hatch: H
         fill: fill.into(),
         stroke: stroke.into(),
         stroke_width_mm: w,
-        hatch,
+        hatch: Box::new(hatch),
         greyed: None,
         opacity: None,
         no_stroke_edges: None,
@@ -566,7 +566,7 @@ pub fn section_primitives_mv(out: &Output, mono: bool, hidden_lines: bool, vis: 
             if let Some((a, _)) = tov.filter(|_| !pr.natural) {
                 if let Primitive::Line { color, weight_mm, dash, .. } = &mut l {
                     if let Some(c) = &a.color {
-                        *color = Some(c.clone());
+                        *color = Some(c.clone().into());
                     }
                     if let Some(w) = a.lineweight.filter(|w| w.is_finite() && *w >= 0.0) {
                         *weight_mm = w;

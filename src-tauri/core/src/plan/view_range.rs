@@ -121,7 +121,7 @@ pub fn restyle(prims: &mut Vec<Primitive>, from: usize, dash: &[f64]) {
                                 dash: Some(Some(dash.to_vec())),
                                 zigzag: None,
                                 motif: None,
-                                color: Some(stroke.clone()),
+                                color: Some(stroke.clone().into()),
                                 drawing_id: None,
                                 opening_id: None,
                                 stair_id: None,
@@ -134,7 +134,7 @@ pub fn restyle(prims: &mut Vec<Primitive>, from: usize, dash: &[f64]) {
                 *fill = "none".into();
                 *stroke = "none".into();
                 *stroke_width_mm = 0.0;
-                *hatch = no_hatch();
+                *hatch = Box::new(no_hatch());
                 prims.push(q);
             }
             Primitive::Line { dash: d, .. } | Primitive::Arc { dash: d, .. } => {
@@ -221,7 +221,7 @@ mod tests {
             fill: "#fff".into(),
             stroke: "#000".into(),
             stroke_width_mm: 0.2,
-            hatch: no_hatch(),
+            hatch: Box::new(no_hatch()),
             greyed: None,
             opacity: None,
             no_stroke_edges: Some(vec![3.0]),

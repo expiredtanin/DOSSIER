@@ -823,7 +823,7 @@ mod tests {
             fill: "#fff".into(),
             stroke: "#123456".into(),
             stroke_width_mm: 0.5,
-            hatch: crate::plan::style::no_hatch(),
+            hatch: Box::new(crate::plan::style::no_hatch()),
             greyed: None,
             opacity: None,
             no_stroke_edges: Some(vec![3.0]),

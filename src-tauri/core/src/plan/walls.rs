@@ -173,7 +173,7 @@ fn wall_polygon(pts: Vec<Vec2>, fill: &str, stroke: &str, w: f64, hatch: HatchRe
         fill: fill.into(),
         stroke: stroke.into(),
         stroke_width_mm: w,
-        hatch,
+        hatch: Box::new(hatch),
         greyed: Some(greyed),
         opacity: None,
         no_stroke_edges,
@@ -193,7 +193,7 @@ fn wall_polygon(pts: Vec<Vec2>, fill: &str, stroke: &str, w: f64, hatch: HatchRe
 
 #[allow(clippy::too_many_arguments)]
 fn mk_line(a: Vec2, b: Vec2, cls: &str, w: f64, dash: super::prim::Dash, color: Option<&str>, greyed: bool, opening_id: Option<&str>) -> Primitive {
-    Primitive::Line { a, b, cls: cls.into(), weight_mm: w, dash, zigzag: None, motif: None, color: color.map(String::from), drawing_id: None, opening_id: opening_id.map(String::from), stair_id: None, greyed: Some(greyed), opacity: None }
+    Primitive::Line { a, b, cls: cls.into(), weight_mm: w, dash, zigzag: None, motif: None, color: color.map(|c| c.to_string().into()), drawing_id: None, opening_id: opening_id.map(String::from), stair_id: None, greyed: Some(greyed), opacity: None }
 }
 
 fn v2(x: f64, y: f64) -> Vec2 {
@@ -1419,7 +1419,7 @@ fn cut_pockets(prims: &mut Vec<Primitive>, from: usize, wp: &WallPockets) {
                             let mut o = prim.clone();
                             if let Primitive::Polygon { fill, hatch, .. } = &mut o {
                                 *fill = "none".into();
-                                *hatch = no_hatch();
+                                *hatch = Box::new(no_hatch());
                             }
                             prims.push(o);
                         }
@@ -1979,7 +1979,7 @@ pub(crate) mod tests {
             let polys: Vec<(&Vec<Vec2>, &HatchRender)> = prims
                 .iter()
                 .filter_map(|q| match q {
-                    Primitive::Polygon { pts, hatch, wall_id: Some(_), fill, .. } if fill != "none" => Some((pts, hatch)),
+                    Primitive::Polygon { pts, hatch, wall_id: Some(_), fill, .. } if fill != "none" => Some((pts, &**hatch)),
                     _ => None,
                 })
                 .collect();

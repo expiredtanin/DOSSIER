@@ -330,7 +330,7 @@ mod tests {
         use super::super::prim::HatchRender;
         let mut hatch: HatchRender = super::super::style::no_hatch();
         hatch.angle = 10.0;
-        let poly = Primitive::Polygon { pts: vec![v(0.0, 0.0), v(1.0, 0.0), v(1.0, 1.0)], fill: "#fff".into(), stroke: "#000".into(), stroke_width_mm: 0.2, hatch, greyed: None, opacity: None, no_stroke_edges: None, wall_id: Some("W".into()), drawing_id: None, ceiling_id: None, opening_id: None, stair_id: None, room_id: None, extruded_solid_id: None, context_object_id: None, column_id: None, roof_id: None, section_line_id: None };
+        let poly = Primitive::Polygon { pts: vec![v(0.0, 0.0), v(1.0, 0.0), v(1.0, 1.0)], fill: "#fff".into(), stroke: "#000".into(), stroke_width_mm: 0.2, hatch: Box::new(hatch), greyed: None, opacity: None, no_stroke_edges: None, wall_id: Some("W".into()), drawing_id: None, ceiling_id: None, opening_id: None, stair_id: None, room_id: None, extruded_solid_id: None, context_object_id: None, column_id: None, roof_id: None, section_line_id: None };
         let img = Primitive::DrawingImage { min: v(0.0, 0.0), max: v(1.0, 1.0), src: "x".into(), opacity: 1.0, drawing_id: None, greyed: None };
         // Linie entlang +y → Drehung um 90°.
         let out = underlay_primitives(Some([v(0.0, 0.0), v(0.0, 5.0)]), None, vec![poly, img], 0.0);

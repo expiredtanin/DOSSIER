@@ -4,6 +4,78 @@
 
 use crate::model::*;
 use serde::{Deserialize, Deserializer, Serialize};
+use std::sync::Arc;
+
+/// Geteilte Zeichenkette (Klasse, Farbe): Clone = Zähler statt Kopie. Serde wie `String`, vergleichbar mit `str`.
+#[derive(Clone, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct Sstr(Arc<str>);
+
+impl Sstr {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+impl std::ops::Deref for Sstr {
+    type Target = str;
+    fn deref(&self) -> &str {
+        &self.0
+    }
+}
+impl std::fmt::Debug for Sstr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(&*self.0, f)
+    }
+}
+impl std::fmt::Display for Sstr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(&*self.0, f)
+    }
+}
+impl From<&str> for Sstr {
+    fn from(s: &str) -> Self {
+        Sstr(Arc::from(s))
+    }
+}
+impl From<&String> for Sstr {
+    fn from(s: &String) -> Self {
+        Sstr(Arc::from(s.as_str()))
+    }
+}
+impl From<String> for Sstr {
+    fn from(s: String) -> Self {
+        Sstr(Arc::from(s))
+    }
+}
+impl From<Sstr> for String {
+    fn from(s: Sstr) -> String {
+        s.0.to_string()
+    }
+}
+impl PartialEq<str> for Sstr {
+    fn eq(&self, o: &str) -> bool {
+        &*self.0 == o
+    }
+}
+impl PartialEq<&str> for Sstr {
+    fn eq(&self, o: &&str) -> bool {
+        &*self.0 == *o
+    }
+}
+impl PartialEq<String> for Sstr {
+    fn eq(&self, o: &String) -> bool {
+        &*self.0 == o.as_str()
+    }
+}
+impl Serialize for Sstr {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(&self.0)
+    }
+}
+impl<'de> Deserialize<'de> for Sstr {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        String::deserialize(d).map(Sstr::from)
+    }
+}
 
 /// Aufgelöste Schraffur eines Polygons (`HatchRender`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -64,7 +136,7 @@ pub enum Primitive {
         fill: String,
         stroke: String,
         stroke_width_mm: f64,
-        hatch: HatchRender,
+        hatch: Box<HatchRender>,
         #[serde(skip_serializing_if = "Option::is_none")]
         greyed: Option<bool>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -98,7 +170,7 @@ pub enum Primitive {
     Line {
         a: Vec2,
         b: Vec2,
-        cls: String,
+        cls: Sstr,
         weight_mm: f64,
         #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "de_dash")]
         dash: Dash,
@@ -107,7 +179,7 @@ pub enum Primitive {
         #[serde(skip_serializing_if = "Option::is_none")]
         motif: Option<LineStyleMotif>,
         #[serde(skip_serializing_if = "Option::is_none")]
-        color: Option<String>,
+        color: Option<Sstr>,
         #[serde(skip_serializing_if = "Option::is_none")]
         drawing_id: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -125,13 +197,13 @@ pub enum Primitive {
         from: Vec2,
         to: Vec2,
         r: f64,
-        cls: String,
+        cls: Sstr,
         weight_mm: f64,
         #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "de_dash")]
         dash: Dash,
         /// Strichfarbe (sonst die der Klasse), z. B. Umriss einer Bogenwand ([T2]).
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        color: Option<String>,
+        color: Option<Sstr>,
         #[serde(skip_serializing_if = "Option::is_none")]
         opening_id: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -271,7 +343,7 @@ mod tests {
 
     #[test]
     fn polygon_tragt_kind_und_camel_case() {
-        let p = Primitive::Polygon { pts: vec![], fill: "#fff".into(), stroke: "#000".into(), stroke_width_mm: 0.2, hatch: no_hatch(), greyed: None, opacity: None, no_stroke_edges: None, wall_id: Some("w".into()), drawing_id: None, ceiling_id: None, opening_id: None, stair_id: None, room_id: None, extruded_solid_id: None, context_object_id: None, column_id: None, roof_id: None, section_line_id: None };
+        let p = Primitive::Polygon { pts: vec![], fill: "#fff".into(), stroke: "#000".into(), stroke_width_mm: 0.2, hatch: Box::new(no_hatch()), greyed: None, opacity: None, no_stroke_edges: None, wall_id: Some("w".into()), drawing_id: None, ceiling_id: None, opening_id: None, stair_id: None, room_id: None, extruded_solid_id: None, context_object_id: None, column_id: None, roof_id: None, section_line_id: None };
         let s = serde_json::to_string(&p).unwrap();
         assert!(s.contains("\"kind\":\"polygon\"") && s.contains("strokeWidthMm") && s.contains("\"wallId\":\"w\""));
     }

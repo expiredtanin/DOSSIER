@@ -82,7 +82,7 @@ fn view_line(a: [f64; 2], b: [f64; 2], dash: Option<&[f64]>, greyed: bool, ov: O
         w = o.weight.unwrap_or(w);
         d = o.dash.clone().or(d);
     }
-    Primitive::Line { a: Vec2 { x: a[0], y: a[1] }, b: Vec2 { x: b[0], y: b[1] }, cls: "mesh-view".into(), weight_mm: w, dash: d, zigzag: None, motif: None, color: Some(color), drawing_id: None, opening_id: None, stair_id: None, greyed: Some(greyed), opacity: None }
+    Primitive::Line { a: Vec2 { x: a[0], y: a[1] }, b: Vec2 { x: b[0], y: b[1] }, cls: "mesh-view".into(), weight_mm: w, dash: d, zigzag: None, motif: None, color: Some(color.into()), drawing_id: None, opening_id: None, stair_id: None, greyed: Some(greyed), opacity: None }
 }
 
 /// Verdecker-Fläche (nur Verdecker, beidseitig) in Ansichtstiefe `depth` (Schnitthöhe − z).
