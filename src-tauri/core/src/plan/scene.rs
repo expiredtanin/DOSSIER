@@ -414,7 +414,17 @@ impl Builder {
                 if closed {
                     let mut p = pts;
                     p.pop();
-                    self.s.outlines.push(SStroke { pts: smooth(p, true), color: col, width_mm: src.weight, dash, z, width_screen: false });
+                    let p = smooth(p, true);
+                    // [153] Geschlossener gestrichelter Zug: Muster auf ganze Wiederholungen über den Umfang gestreckt.
+                    let dash = match dash {
+                        SDash::List(l) if !l.is_empty() => {
+                            let n = p.len();
+                            let len: f64 = (0..n).map(|i| crate::jsmath::hypot2(p[(i + 1) % n].x - p[i].x, p[(i + 1) % n].y - p[i].y)).sum();
+                            SDash::List(super::line_pattern::fit_closed(&l, len / crate::gpu_compile::LINE_DASH_MM_TO_M))
+                        }
+                        d => d,
+                    };
+                    self.s.outlines.push(SStroke { pts: p, color: col, width_mm: src.weight, dash, z, width_screen: false });
                 } else {
                     self.s.polylines.push(SStroke { pts: smooth(pts, false), color: col, width_mm: src.weight, dash, z, width_screen: false });
                 }

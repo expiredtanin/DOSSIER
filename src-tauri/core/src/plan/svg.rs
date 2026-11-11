@@ -246,6 +246,8 @@ fn circle_dash_attr(part: &Part, rec: &crate::plan::buf::Rec, circ_m: f64, mm_to
 struct DashRun {
     /// Attribute ohne Geometrie (Farbe, Breite, Muster, Deckkraft).
     key: String,
+    /// Das `stroke-dasharray`-Attribut (samt Kappe) darin, für den geschlossenen Zug ersetzbar.
+    dash_attr: String,
     /// Muster in Papier-mm.
     dash: Vec<f64>,
     pts: Vec<V2>,
@@ -256,10 +258,22 @@ struct DashRun {
 /// Schreibt einen Zug als `<line>`/`<polyline>` mit der Musterphase ([`super::line_pattern::phase`]):
 /// beide Enden möglichst auf einem Strich, Phase über die Ecken.
 fn flush_dash_run(run: Option<DashRun>, out: &mut [String], mm_to_m: f64, xs: &dyn Fn(f64) -> String, ys: &dyn Fn(f64) -> String, top: f64) {
-    let Some(r) = run else { return };
+    let Some(mut r) = run else { return };
+    // [153] Geschlossener Zug (Rechteck, Vieleck, Ellipse): Muster über den Gesamtumfang auf ganze
+    // Wiederholungen gestreckt, Naht schliesst, Phase läuft über die Ecken.
+    let closed = r.pts.len() > 3 && (r.pts[0].x - r.pts[r.pts.len() - 1].x).abs() < 1e-9 && (r.pts[0].y - r.pts[r.pts.len() - 1].y).abs() < 1e-9;
+    if closed {
+        r.pts.pop();
+    }
     // [169] Bögen im Zug als `A`; Phase über die Länge mit Bögen.
-    let (g, len) = shape_el(&r.pts, false, xs, ys, top);
-    let ph = if mm_to_m > 0.0 { super::line_pattern::phase(len / mm_to_m, &r.dash) } else { 0.0 };
+    let (g, len) = shape_el(&r.pts, closed, xs, ys, top);
+    if closed && mm_to_m > 0.0 {
+        let fit = super::line_pattern::fit_closed(&r.dash, len / mm_to_m);
+        let cap = if fit.iter().any(|v| *v == 0.0) { " stroke-linecap=\"round\"" } else { "" };
+        let attr = format!(" stroke-dasharray=\"{}\"{cap}", fit.iter().map(|v| num(v * mm_to_m)).collect::<Vec<_>>().join(" "));
+        r.key = r.key.replacen(&r.dash_attr, &attr, 1);
+    }
+    let ph = if closed || !(mm_to_m > 0.0) { 0.0 } else { super::line_pattern::phase(len / mm_to_m, &r.dash) };
     let off = if ph > 1e-9 { format!(" stroke-dashoffset=\"{}\"", num(ph * mm_to_m)) } else { String::new() };
     out[r.slot] = if g.starts_with("line ") { format!("<{g}{}{off}/>", r.key) } else { format!("<{g} fill=\"none\"{}{off}/>", r.key) };
 }
@@ -427,7 +441,7 @@ pub fn plan_svg(parts: &mut [Part], o: &SvgOptions) -> Option<String> {
                         } else {
                             flush_dash_run(run.take(), &mut out, mm_to_m, &xs, &ys, top);
                             out.push(String::new());
-                            run = Some(DashRun { key, dash: pat, pts: vec![a, b], slot: out.len() - 1 });
+                            run = Some(DashRun { key, dash_attr: dash.clone(), dash: pat, pts: vec![a, b], slot: out.len() - 1 });
                         }
                         continue;
                     }

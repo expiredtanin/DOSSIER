@@ -154,8 +154,14 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   der Szene), Bildschirm-Szene (`scene.rs`), DXF/DWG (eigener Linientyp je Radius `…_R<mm>`) und React-SVG-Ansicht
   (`dashVb.ts`: Phase für Linien/Bögen/Zug, Ring gestreckt). DXF/DWG kennen keine Musterphase je Objekt (Muster beginnt am
   Entitätsanfang; Linientyp-Skalierung nur über Gruppe 48, die das flache Format nicht trägt) — Linien/Bögen bleiben dort
-  ohne Phase, begründet. Offen: Metal-Chunks verketten nur über das Ketten-Flag; geschlossene Polylinien/Ellipsen ohne
-  Streckung; nur im Linux-Container geprüft. · M
+  ohne Phase, begründet. (11.11.) Geschlossene Züge (Rechtecke, Vielecke, Raum-/Decken-Umrisse, tessellierte Ellipsen:
+  aneinander anschliessende Linien, Ende = Anfang) strecken das Muster wie Kreise über den Gesamtumfang
+  (`fit_closed`; Phase läuft über die Ecken): Plan-SVG (`flush_dash_run`), Druck-SVG (`flush_dash`), Szene (`flush`),
+  React-SVG (`DrawingRunShape`, `sceneToPrintSvg.ts`); DXF/DWG: ein geschlossener LWPOLYLINE-Satz mit Flag
+  „Muster durchlaufend" (plinegen, Gruppe 70 Bit 128; Satz-Flag 3) und Linientyp `…_U<mm>` je Umfang. Tests
+  `gestricheltes_rechteck_schliesst_an_der_naht`, `gestricheltes_rechteck_dxf_plinegen`,
+  `closed_linientyp_mit_ganzen_wiederholungen`. Offen: Metal-Chunks verketten nur über das Ketten-Flag (nicht mit
+  Metal geprüft); nur im Linux-Container geprüft. · M
 - ◐ **[155]** Treppensymbol. (10.11.) Lauflinie hinter der Bruchlinie gestrichelt wie die Tritte (Pfeil bleibt ausgezogen); Raumstempel weichen allen Treppen-Linien aus (`stamp_obstacles_with` nimmt `d.stairs` ganz, Test `stempel_weichen_den_treppenlinien_aus`). (11.11.)
   Freier Lochring ohne Wand und Austritt: geschlossener Zug mit Gehrung an der Naht (`offset_polyline` erkennt geschlossene
   Züge, 3D-Rohr ohne Deckel; Test `freier_ring_ist_geschlossen_mit_gehrung`); offene Enden stehen rechtwinklig. (11.11.)
@@ -273,7 +279,7 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   ist Anzeige-Option der Baurecht-Einstellungen (`showEnvelope`), im Plan über die Pseudo-Auswahl `site`/`siteRules` erreichbar,
   im 3D nur Schalter; eine Schnittbox gibt es (noch) nicht.) Nicht anwählbar: Höhenkoten im Schnitt; Geschosse als Auswahl-Art; Achsraster im Blatt nicht verschiebbar; Texte im 3D nur anwählbar,
   nicht gezeichnet; Klick auf Griff an der Stelle des letzten Klicks schaltet statt zu bewaffnen. · M
-- ◐ **[77]** Zauberstab (Befehl `wand`). In der App nicht geklickt. (10.11.: Splines sind schon Begrenzung — der Fang-Sammler `snap_model` tesselliert sie; Test `spline_als_rand`.) · S
+- ◐ **[77]** Zauberstab (Befehl `wand`). (11.11.) e2e `e2e/wand.spec.ts` (Rechteck zeichnen, Zauberstab in die Mitte → neuer Verlaufsschritt, Undo/Redo; Klick ins Leere legt nichts an) – Chromium headless, nicht in der Tauri-App geklickt. (10.11.: Splines sind schon Begrenzung — der Fang-Sammler `snap_model` tesselliert sie; Test `spline_als_rand`.) · S
 - ◐ **[81]** Automatische Aussenbemassung (`auto_dimensions`). (9.11.) Schiefe Ketten kreuzen den Grundriss nicht mehr
   (sonst vor alles im Streifen hinausgerückt), getrennte Gebäude eigene Seitenketten (`south2` …), Erker-Facetten ohne
   Stufe. (11.11.) Schiefe Ketten rücken hinaus, bis

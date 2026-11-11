@@ -64,6 +64,10 @@ fn dash_attr(d: &[f64]) -> String {
     d.iter().map(|v| r3(*v)).collect::<Vec<_>>().join(" ")
 }
 
+fn same_pt_mm(a: V2, b: V2) -> bool {
+    (a.x - b.x).abs() < 1e-9 && (a.y - b.y).abs() < 1e-9
+}
+
 /// Anweisungsliste.
 struct Out {
     recs: Vec<String>,
@@ -114,10 +118,19 @@ impl Out {
 
     /// Schreibt den laufenden gestrichelten Zug ([`super::line_pattern::phase`]: Enden auf einem Strich).
     fn flush_dash(&mut self) {
-        let Some(((color, pen, dash, o), pts)) = self.dash_run.take() else { return };
+        let Some(((color, pen, mut dash, o), mut pts)) = self.dash_run.take() else { return };
         let pen_mm: f64 = pen.parse().unwrap_or(0.0);
+        // [153] Geschlossener Zug (Rechteck, Vieleck, Ellipse): ein Zug ohne Doppelpunkt, Muster über den
+        // Gesamtumfang auf ganze Wiederholungen gestreckt (Naht schliesst, Phase läuft über die Ecken).
+        let closed = pts.len() > 3 && same_pt_mm(pts[0], pts[pts.len() - 1]);
+        if closed {
+            pts.pop();
+        }
         // [169] Bögen im Zug als Pfad mit `A`; Phase über die Länge mit Bögen.
-        let (gtag, geo, len) = geo_mm(&pts, false, self.tol);
+        let (gtag, geo, len) = geo_mm(&pts, closed, self.tol);
+        if closed {
+            dash = super::line_pattern::fit_closed(&dash, len);
+        }
         let tag = if pts.len() == 2 { "line" } else { gtag };
         let mut attrs = if pts.len() == 2 {
             line_attrs(pts[0], pts[1], &color, pen_mm, Some(&dash))
@@ -127,7 +140,7 @@ impl Out {
             push_dash(&mut a, Some(&dash));
             a
         };
-        let ph = super::line_pattern::phase(len, &dash);
+        let ph = if closed { 0.0 } else { super::line_pattern::phase(len, &dash) };
         if ph > 1e-9 {
             attrs.push(("stroke-dashoffset", r3(ph)));
         }

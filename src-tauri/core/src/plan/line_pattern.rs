@@ -339,6 +339,87 @@ mod tests {
         assert!((reps - reps.round()).abs() < 1e-6 && reps.round() >= 1.0, "Szene: {d:?} {reps}");
     }
 
+    /// [153] Gestricheltes Rechteck aus vier Linien: EIN geschlossener Zug, Muster über den Gesamtumfang auf ganze
+    /// Wiederholungen gestreckt (Naht schliesst, keine Phase) in Plan-SVG, Druck-SVG und Bildschirm-Szene.
+    #[test]
+    fn gestricheltes_rechteck_schliesst_an_der_naht() {
+        use crate::model::Vec2;
+        use crate::plan::buf::Writer;
+        use crate::plan::line_ends::LineEnds;
+        use crate::plan::print_svg::{print_svg_ops, PrintOptions};
+        use crate::plan::prim::Primitive;
+        use crate::plan::svg::{plan_svg, SvgOptions};
+        let rect = |w: &mut Writer, k: f64, x: f64, y: f64| {
+            let c = [(0.0, 0.0), (13.0, 0.0), (13.0, 9.0), (0.0, 9.0), (0.0, 0.0)];
+            for i in 0..4 {
+                let (a, b) = (c[i], c[i + 1]);
+                w.push(&Primitive::Line { a: Vec2 { x: x + a.0 * k, y: y + a.1 * k }, b: Vec2 { x: x + b.0 * k, y: y + b.1 * k }, cls: "".into(), weight_mm: 0.18, dash: Some(Some(HIDDEN.to_vec())), zigzag: None, motif: None, color: Some("#000".into()), drawing_id: None, opening_id: None, stair_id: None, greyed: None, opacity: None });
+            }
+        };
+        let perim_mm = 44.0;
+        let whole = |d: &[f64]| {
+            let reps = perim_mm / d.iter().sum::<f64>();
+            (reps - reps.round()).abs() < 1e-2 && reps.round() >= 1.0
+        };
+        for n in [50.0, 100.0, 200.0] {
+            let k = mm_to_m(n);
+            let mut w = Writer::new(false);
+            let g = w.begin_group();
+            rect(&mut w, k, 5.0 * k, 5.0 * k);
+            w.end_group(g);
+            let bytes = w.finish();
+            let o = SvgOptions { scale_denominator: n, margin_m: 0.0, min_x: 0.0, min_y: 0.0, max_x: 40.0 * k, max_y: 40.0 * k, hatch: false, line_ends: LineEnds::default() };
+            let svg = plan_svg(&mut parts(&bytes), &o).unwrap();
+            let els: Vec<&str> = svg.lines().filter(|l| l.contains("stroke-dasharray")).collect();
+            assert_eq!(els.len(), 1, "ein Zug: {svg}");
+            assert!(els[0].starts_with("<polygon"), "{}", els[0]);
+            let d: Vec<f64> = attr(els[0], "stroke-dasharray").unwrap().split(' ').map(|x| x.parse::<f64>().unwrap() / k).collect();
+            assert!(whole(&d), "Plan-SVG 1:{n}: {d:?}");
+            assert!(attr(els[0], "stroke-dashoffset").is_none());
+            let po = PrintOptions { scale_denominator: n, page_w: 100.0, page_h: 100.0, bounds: [0.0, 0.0, 40.0 * k, 40.0 * k] };
+            let ops = print_svg_ops(&mut parts(&bytes), &po).unwrap();
+            let rec: Vec<&str> = ops.split('\u{1e}').map(|r| r.split('\u{1f}').collect::<Vec<_>>()).find(|f| f.contains(&"polygon")).unwrap();
+            let i = rec.iter().position(|x| *x == "stroke-dasharray").unwrap();
+            let d: Vec<f64> = rec[i + 1].split(' ').map(|x| x.parse().unwrap()).collect();
+            assert!(whole(&d), "Druck-SVG 1:{n}: {d:?}");
+            assert!(!rec.contains(&"stroke-dashoffset"));
+        }
+        // Bildschirm-Szene (Bezug 1:100, Papier-mm × 0.1 = Meter).
+        let mut w = Writer::new(false);
+        let g = w.begin_group();
+        rect(&mut w, 0.1, 1.0, 1.0);
+        w.end_group(g);
+        let bytes = w.finish();
+        let sc = crate::plan::scene::build_scene(&mut parts(&bytes), &[]).unwrap();
+        let pl = sc.outlines.iter().find(|o| matches!(o.dash, crate::plan::scene::SDash::List(_))).expect("geschlossener Zug");
+        let crate::plan::scene::SDash::List(d) = &pl.dash else { unreachable!() };
+        assert!(whole(d), "Szene: {d:?}");
+    }
+
+    /// [153] DXF/DWG: gestricheltes Rechteck = EINE geschlossene LWPOLYLINE mit „Muster durchlaufend" (plinegen),
+    /// Linientyp auf ganze Wiederholungen über den Umfang gestreckt.
+    #[test]
+    fn gestricheltes_rechteck_dxf_plinegen() {
+        use crate::model::{Project, Vec2};
+        use crate::plan::buf::Writer;
+        use crate::plan::dxf::{collect, DxfOptions};
+        use crate::plan::prim::Primitive;
+        let mut w = Writer::new(false);
+        let g = w.begin_group();
+        let c = [(0.0, 0.0), (6.5, 0.0), (6.5, 4.5), (0.0, 4.5), (0.0, 0.0)];
+        for i in 0..4 {
+            let (a, b) = (c[i], c[i + 1]);
+            w.push(&Primitive::Line { a: Vec2 { x: a.0, y: a.1 }, b: Vec2 { x: b.0, y: b.1 }, cls: "".into(), weight_mm: 0.18, dash: Some(Some(HIDDEN.to_vec())), zigzag: None, motif: None, color: Some("#000".into()), drawing_id: None, opening_id: None, stair_id: None, greyed: None, opacity: None });
+        }
+        w.end_group(g);
+        let bytes = w.finish();
+        let o = DxfOptions { scale: 100.0, include_hatches: false, dim_cm: false, paper_layout: false, bounds: [0.0, 0.0, 10.0, 10.0], default_font: "Arial".into(), floor: String::new(), table_labels: String::new() };
+        let f = collect(&mut parts(&bytes), &Project::default(), &o).unwrap();
+        let i = f.nums.windows(4).position(|v| v[0] == 3.0 && v[2] == 3.0 && v[3] == 4.0).expect("geschlossene LWPOLYLINE mit Flag plinegen");
+        assert_eq!(f.model[1], 1, "genau eine LWPOLYLINE: {i}");
+        assert_eq!(f.model[0], 0, "keine Einzel-Linien");
+    }
+
     /// Gleiche Werte wie `render2d::tessellate::tests::musterphase_enden_auf_strich` (Shader-Spiegel).
     #[test]
     fn phase_wie_render2d() {
