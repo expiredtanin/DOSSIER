@@ -114,15 +114,16 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   eigene Vorschau; Raumstempel setzt ohne Klemmung (nichts zu zeigen). · S
 - ◐ **[146]** Linienenden/-ecken. Druck-SVG achtet seit 9.11. auf `noStrokeEdges` (offene Kantenzüge, Test
   `ungestrichene_kante_ohne_strich`); Nähen in Metal-Chunks nur innerhalb eines Chunks (Kern `plan/line_ends.rs`, `render2d`). · M
-- ◐ **[150]** Gelände im Grundriss am Gebäude. Raumstempel ausserhalb ihres Raums sind kein Hindernis für
-  Höhenlinien-Beschriftungen; Beschriftungen an Bündeln fehlen statt versetzt zu werden. · S
 - ◐ **[153]** Strichmuster in Papier-mm. Bögen mit Phase seit 9.11. ([169]: Plan-/Druck-SVG, PDF, Bogen-Shader; seit
   10.11. auch Ellipsenbögen, Länge numerisch),
   Kreise ohne (geschlossen), DXF/DWG ohne Phase je Objekt,
   Metal-Chunks verketten nur über das Ketten-Flag, React-SVG-Ansicht ohne Phase. · M
-- ◐ **[155]** Treppensymbol. (10.11.) Lauflinie hinter der Bruchlinie gestrichelt wie die Tritte (Pfeil bleibt ausgezogen); Raumstempel weichen allen Treppen-Linien aus (`stamp_obstacles_with` nimmt `d.stairs` ganz, Test `stempel_weichen_den_treppenlinien_aus`). Offen:
-  Absturzsicherung nur im Grundriss (kein Geländer-Bauteil in 3D/IFC); Ende eines freien Lochrings ohne Gehrung;
-  dichtes Belagsmuster in 1:100. · M
+- ◐ **[155]** Treppensymbol. (10.11.) Lauflinie hinter der Bruchlinie gestrichelt wie die Tritte (Pfeil bleibt ausgezogen); Raumstempel weichen allen Treppen-Linien aus (`stamp_obstacles_with` nimmt `d.stairs` ganz, Test `stempel_weichen_den_treppenlinien_aus`). (11.11.)
+  Absturzsicherung am Deckenloch auch in 3D (Körper aus Pfosten, Handlauf, Stäben, `stairs3d::guard_mesh`; Lage aus dem
+  gemeinsamen `stair_guard.rs`, gleiche Quelle wie der Grundriss; Teil der Treppen-Handläufe, pickbar mit der Treppe) und im
+  IFC (eigenes IfcRailing GUARDRAIL an der IfcStair, Länge als Basismenge; Wire-Format STAIR: `n_rails` statt `has_rail`). Offen:
+  Ende eines freien Lochrings ohne Gehrung; dichtes Belagsmuster in 1:100; im Explosionsbild steht die Sicherung beim
+  Geschoss der Treppe statt der Decke; 3D-Darstellung nur als Zahlen/Golden geprüft (Metal nur macOS). · M
 - ◐ **[156]** Bodenbelag-Muster massstabsgerecht. Möbel nur als Blöcke/Körper (geschlossene 2D-Formen der Kategorie
   „Möbel“ sparen nicht aus); Deckenspiegel-Untersicht unverändert (alte Ausdünnung). Nassraum nach Name ist durch
   [158] ersetzt. · S
@@ -570,3 +571,7 @@ exakte Durchdringung, [61] Zuordnung per Hand, [63] Profil je Kante, [70] Fläch
   `src/views/plan/planView/`), `plan/elevation.rs` → Ordner `plan/elevation/`, `ObjectInfoPanel.tsx` 2847 → rund 370
   Zeilen (Abschnitte in `src/panels/objectInfo/`); Liste in `doc/ARCHITEKTUR.md` Abschnitt 13. Rust-Testzahl gleich;
   Plan-Ansicht nur im Browser-Test (Chromium/e2e) geprüft, nicht in der Tauri-App
+- [150] Gelände im Grundriss am Gebäude (11.11.): Raumstempel ausserhalb ihres Raums (eigener Anker im Gelände) sind
+  Hindernis der Höhenlinien-Beschriftungen (Räume werden vor dem Kontext gesetzt, `outside_stamps`); Beschriftungen an
+  dichten Bündeln fehlen nicht mehr, sondern rücken entlang der Linie auf freie Stellen (Abschnitt, dann ganze Linie, erst
+  zuletzt auf dem Bündel; `contour_prims`)

@@ -12,11 +12,6 @@ use crate::model::*;
 const LINE_CLS: [&str; 7] = ["stair-outline", "stair-tread", "stair-break", "stair-run", "stair-arrow", "stair-handrail", "stair-guard"];
 /// Strichmuster der verdeckten Tritte.
 const TREAD_DASH: [f64; 2] = super::line_pattern::HIDDEN;
-/// [155] Achse der Absturzsicherung: so weit vom Lochrand auf die Decke gerückt wie der Handlauf von der
-/// Treppenkante (Rohr ganz auf der Decke).
-const GUARD_INSET: f64 = crate::stair_rail::RAIL_INSET;
-/// [155] Lochrand am Austritt: bis zu diesem Abstand von der Austrittskante keine Absturzsicherung.
-const ARRIVAL_TOL: f64 = 0.15;
 
 /// `stairLabel` (für `object_name`).
 pub fn stair_label(s: &Stair) -> String {
@@ -264,118 +259,29 @@ fn run_opts(o: &super::model_view::StairOpts, scale: f64) -> crate::plan::stair_
 
 /// [155] Treppen tieferer Geschosse, die auf diesem Geschoss ankommen: durch das Loch der Decke, auf der
 /// das Geschoss steht, von oben gesehen (ausgezogen, auf das Loch beschnitten), dazu die Absturzsicherung
-/// an den freien Lochrändern (nicht unter Wänden, nicht am Austritt der Treppe).
+/// an den freien Lochrändern (nicht unter Wänden, nicht am Austritt der Treppe; Lage: [`crate::stair_guard`]).
 fn arriving(c: &Ctx, out: &mut Vec<Primitive>, double: bool, opts: &super::model_view::StairOpts) {
-    use crate::stair_rail::P;
     let p = c.p;
-    let Some(floor) = p.floor(&c.a.floor) else { return };
-    // [157] Nur Geschoss-Grundrisse (nicht die 2D-Ebene eines Schnitts/einer Ansicht, Bezugshöhe sonst 0).
-    if floor.kind != DrawingLevelKind::Floor {
-        return;
-    }
-    let base = floor.base_elevation.unwrap_or(0.0);
-    // Löcher der Decken unter dem Geschossboden (Oberkante wie bei den Bodenbelägen).
-    let holes: Vec<Vec<P>> = p
-        .ceilings
-        .as_deref()
-        .unwrap_or(&[])
-        .iter()
-        .filter(|ce| {
-            let top = p.ceiling_vertical_extent(ce).1;
-            top >= base - 0.3 && top <= base + 0.05
-        })
-        .flat_map(|ce| crate::opening_shape::ceiling_hole_rings(p, ce))
-        .map(|h| h.iter().map(|q| [q.x, q.y]).collect::<Vec<P>>())
-        .filter(|h| h.len() >= 3 && h.iter().all(|q| q[0].is_finite() && q[1].is_finite()))
-        .collect();
-    if holes.is_empty() {
-        return;
-    }
-    let mut fps: Option<Vec<super::wall_poche::WallFootprint>> = None;
-    for s in p.stairs.as_deref().unwrap_or(&[]).iter().filter(|s| s.floor_id != c.a.floor && c.vis(&s.category_code, &s.id)) {
-        let (zb, zt) = p.stair_vertical_extent(s);
-        if !((zt - base).abs() <= 0.05 && zb < base - 1e-6 && (zt - zb).is_finite()) {
-            continue;
-        }
-        let params = s.encode();
-        let Some(sp) = crate::stair::decode_params(&params) else { continue };
-        let geo = kernel2d::stair_geometry(&sp, zt - zb);
-        let centroid = |t: &kernel2d::TreadRect| {
-            let n = t.pts.len().max(1) as f64;
-            [t.pts.iter().map(|q| q.x).sum::<f64>() / n, t.pts.iter().map(|q| q.y).sum::<f64>() / n]
-        };
-        let own: Vec<Vec<P>> = holes.iter().filter(|h| geo.treads.iter().any(|t| crate::surface_pattern::point_in(centroid(t), h))).cloned().collect();
-        if own.is_empty() {
-            continue;
-        }
+    let arrivals = crate::stair_guard::arrivals(p, &c.a.floor, &|s| c.vis(&s.category_code, &s.id), &|| super::domains::wall_footprints(c));
+    for a in arrivals {
+        let s = &p.stairs.as_deref().unwrap_or(&[])[a.stair];
         let greyed = Some(c.greyed(&s.category_code));
         let ov = c.overrides(Some("stair"), &s.category_code, Some(&stair_label(s)));
         let lw = ov.lineweight.unwrap_or_else(|| c.cat(&s.category_code).map_or(WALL_FALLBACK_MM, |k| k.lw));
         let stroke = ov.color.as_deref().or(s.color.as_deref()).unwrap_or(POCHE_STROKE).to_string();
         // ganz unter der Schnittebene: alles ausgezogen, keine Bruchlinie
-        let f = crate::plan::stair_symbol::plan_stair_run(&params, zt - zb, zt - zb + 1.0, lw, s.arrow_style == Some(StairArrowStyle::Filled), 0.0, railing_code(p, s), double, &own, &run_opts(opts, c.a.scale));
+        let f = crate::plan::stair_symbol::plan_stair_run(&a.params, a.rise, a.rise + 1.0, lw, s.arrow_style == Some(StairArrowStyle::Filled), 0.0, railing_code(p, s), double, &a.rings, &run_opts(opts, c.a.scale));
         emit(out, &f, &stroke, greyed, &s.id, opts);
-        // Austrittskante: Hinterkante des obersten Tritts.
-        let Some(last) = geo.treads.iter().filter(|t| t.pts.len() >= 4).max_by(|a, b| a.top_rise.total_cmp(&b.top_rise)) else { continue };
-        let arrival = if sp.shape == "spiral" { (last.pts[3], last.pts[2]) } else { (last.pts[1], last.pts[2]) };
-        let fps = fps.get_or_insert_with(|| super::domains::wall_footprints(c));
-        for ring in &own {
-            for pts in guard_chains(ring, fps, ([arrival.0.x, arrival.0.y], [arrival.1.x, arrival.1.y])) {
-                let area: f64 = (0..ring.len()).map(|i| ring[i][0] * ring[(i + 1) % ring.len()][1] - ring[(i + 1) % ring.len()][0] * ring[i][1]).sum();
-                // nach aussen (auf die Decke): rechts der Ringrichtung bei Gegenuhrzeigersinn
-                let d = if area > 0.0 { -GUARD_INSET } else { GUARD_INSET };
-                let axis = crate::stair_rail::offset_polyline(&pts, d);
-                let r = crate::stair_rail::RAIL_THICK / 2.0;
-                let lines = if double { vec![crate::stair_rail::offset_polyline(&axis, r), crate::stair_rail::offset_polyline(&axis, -r)] } else { vec![axis] };
-                for l in lines {
-                    for w in l.windows(2) {
-                        out.push(stair_line(v2(w[0][0], w[0][1]), v2(w[1][0], w[1][1]), LINE_CLS[6], crate::plan::stair_symbol::HANDRAIL_MM, None, &stroke, greyed, &s.id));
-                    }
+        for axis in &a.axes {
+            let r = crate::stair_rail::RAIL_THICK / 2.0;
+            let lines = if double { vec![crate::stair_rail::offset_polyline(axis, r), crate::stair_rail::offset_polyline(axis, -r)] } else { vec![axis.clone()] };
+            for l in lines {
+                for w in l.windows(2) {
+                    out.push(stair_line(v2(w[0][0], w[0][1]), v2(w[1][0], w[1][1]), LINE_CLS[6], crate::plan::stair_symbol::HANDRAIL_MM, None, &stroke, greyed, &s.id));
                 }
             }
         }
     }
-}
-
-/// [155] Freie Lochränder als Züge in Ringrichtung: ohne Stücke unter Wänden und ohne die Austrittskante.
-fn guard_chains(ring: &[[f64; 2]], fps: &[super::wall_poche::WallFootprint], arrival: ([f64; 2], [f64; 2])) -> Vec<Vec<[f64; 2]>> {
-    let near = |a: [f64; 2], b: [f64; 2]| (a[0] - b[0]).abs() < 1e-7 && (a[1] - b[1]).abs() < 1e-7;
-    let mut pieces: Vec<[[f64; 2]; 2]> = Vec::new();
-    for [a, b] in super::wall_poche::ceiling_outline_lines(ring, &[], fps) {
-        // Teil, der an der Austrittskante liegt (beide Enden der Kante nahe der Geraden a–b), entfällt.
-        let d = [b[0] - a[0], b[1] - a[1]];
-        let l = d[0].hypot(d[1]);
-        if !(l > 1e-9) {
-            continue;
-        }
-        let u = [d[0] / l, d[1] / l];
-        let off = |q: [f64; 2]| ((q[0] - a[0]) * u[1] - (q[1] - a[1]) * u[0]).abs();
-        let t = |q: [f64; 2]| ((q[0] - a[0]) * u[0] + (q[1] - a[1]) * u[1]) / l;
-        let mut keep = vec![(0.0, 1.0)];
-        if off(arrival.0) < ARRIVAL_TOL && off(arrival.1) < ARRIVAL_TOL {
-            let pad = ARRIVAL_TOL / l;
-            let (t0, t1) = (t(arrival.0).min(t(arrival.1)) - pad, t(arrival.0).max(t(arrival.1)) + pad);
-            keep = [(0.0, t0.min(1.0)), (t1.max(0.0), 1.0)].into_iter().filter(|(x, y)| (y - x) * l > 1e-6).collect();
-        }
-        for (t0, t1) in keep {
-            pieces.push([[a[0] + d[0] * t0, a[1] + d[1] * t0], [a[0] + d[0] * t1, a[1] + d[1] * t1]]);
-        }
-    }
-    // aneinanderhängende Stücke zu Zügen
-    let mut chains: Vec<Vec<[f64; 2]>> = Vec::new();
-    for [a, b] in pieces {
-        match chains.last_mut() {
-            Some(ch) if ch.last().is_some_and(|q| near(*q, a)) => ch.push(b),
-            _ => chains.push(vec![a, b]),
-        }
-    }
-    // letzter Zug schliesst an den ersten an
-    if chains.len() >= 2 && near(*chains.last().unwrap().last().unwrap(), chains[0][0]) {
-        let mut last = chains.pop().unwrap();
-        last.extend(chains[0].iter().skip(1).copied());
-        chains[0] = last;
-    }
-    chains
 }
 
 #[cfg(test)]

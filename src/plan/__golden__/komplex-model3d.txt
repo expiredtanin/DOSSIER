@@ -1,6 +1,8 @@
-meshes [1954]
-meshes[].color [3] x1954
+meshes [1957]
+meshes[].color [3] x1957
 meshes[].indices [108] x6
+meshes[].indices [11376]
+meshes[].indices [12888]
 meshes[].indices [144] x55
 meshes[].indices [156642]
 meshes[].indices [1584]
@@ -12,6 +14,7 @@ meshes[].indices [396]
 meshes[].indices [564]
 meshes[].indices [60] x9
 meshes[].indices [72]
+meshes[].indices [7632]
 meshes[].indices [84] x2
 meshes[].indices [9288]
 meshes[].indices [96] x6
@@ -26,7 +29,10 @@ meshes[].positions [264]
 meshes[].positions [288] x7
 meshes[].positions [306] x3
 meshes[].positions [324] x6
+meshes[].positions [4128]
 meshes[].positions [4746]
+meshes[].positions [6096]
+meshes[].positions [6972]
 meshes[].positions [72] x2
 meshes[].positions [78837]
 meshes[].positions [78] x55
@@ -41,24 +47,24 @@ roofLayers[].polygon[] [3] x281
 slabs [70]
 slabs[].color [3] x70
 slabs[].outline [12]
+slabs[].outline [14] x5
 slabs[].outline [21] x4
-slabs[].outline [22] x5
 slabs[].outline [24]
-slabs[].outline [41] x5
+slabs[].outline [33] x5
 slabs[].outline [4] x49
-slabs[].outline [55] x5
-slabs[].outline[] [2] x906
-walls [1492]
+slabs[].outline [51] x5
+slabs[].outline[] [2] x806
+walls [1489]
 walls[].arcCenter [2] x832
-walls[].color [3] x1492
-walls[].end [2] x1492
-walls[].endCut [4] x1105
-walls[].holes [1] x90
+walls[].color [3] x1489
+walls[].end [2] x1489
+walls[].endCut [4] x1162
+walls[].holes [1] x84
 walls[].holes [2] x25
 walls[].holes [3] x14
-walls[].layers [0] x1492
-walls[].start [2] x1492
-walls[].startCut [4] x1107
-walls[].topDrop [2] x115
-walls[].topPlane [3] x271
-hash d213e50f1373f98b
+walls[].layers [0] x1489
+walls[].start [2] x1489
+walls[].startCut [4] x1164
+walls[].topDrop [2] x103
+walls[].topPlane [3] x259
+hash 9acaf7b7c01c66a3

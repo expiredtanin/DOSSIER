@@ -811,9 +811,14 @@ fn stair_with_parts(b: &mut B) {
     b.pts(&SQUARE);
     b.n(&[0.0, 1.3]);
     b.no_psets();
-    b.n(&[1.0]);
+    // zwei Geländer: Handlauf und [155] Absturzsicherung
+    b.n(&[2.0]);
     b.str("Handlauf");
     b.str("HANDRAIL");
+    b.no_psets();
+    b.mesh_tetra();
+    b.str("Absturzsicherung");
+    b.str("GUARDRAIL");
     b.no_psets();
     b.mesh_tetra();
     b.n(&[1.0]);
@@ -832,7 +837,8 @@ fn treppe_mit_laeufen_podest_und_gelaender() {
     check_structure(&ifc);
     assert_eq!(count(&ifc, "IFCSTAIR"), 1);
     assert_eq!(count(&ifc, "IFCSTAIRFLIGHT"), 2);
-    assert_eq!(count(&ifc, "IFCRAILING"), 1);
+    assert_eq!(count(&ifc, "IFCRAILING"), 2);
+    assert!(ifc.contains(".GUARDRAIL.") && ifc.contains(".HANDRAIL."));
     assert_eq!(count(&ifc, "IFCSLAB"), 1);
     assert!(ifc.contains(".LANDING.);"), "Podest als IfcSlab(LANDING)");
     assert_eq!(count(&ifc, "IFCCOLUMN"), 1, "Spindel als IfcColumn");
@@ -845,13 +851,13 @@ fn treppe_mit_laeufen_podest_und_gelaender() {
     assert_eq!(count(&ifc, "IFCELEMENTQUANTITY"), 4);
     assert!(ifc.contains("IFCQUANTITYAREA('SoffitArea',$,$,7.5,$)"), "Dossier_Qto_… als Menge");
     assert_eq!(count(&ifc, "IFCPROPERTYSINGLEVALUE"), 0);
-    let agg = ifc.lines().find(|l| l.contains("IFCRELAGGREGATES(") && l.matches('#').count() == 8).expect("Aggregation der Treppe");
+    let agg = ifc.lines().find(|l| l.contains("IFCRELAGGREGATES(") && l.matches('#').count() == 9).expect("Aggregation der Treppe");
     assert!(agg.contains(",#"), "{agg}");
     let contained = first_line(&ifc, "IFCRELCONTAINEDINSPATIALSTRUCTURE");
     assert_eq!(contained.matches('#').count(), 4, "nur die Treppe (Nummer, Owner, Treppe, Gebäude): {contained}");
     // Läufe als Prismen, Geländer als Dreiecks-Netz.
     assert_eq!(count(&ifc, "IFCEXTRUDEDAREASOLID"), 6); // 2 Läufe × 2 Prismen + Podest + Spindel
-    assert_eq!(count(&ifc, "IFCTRIANGULATEDFACESET"), 1);
+    assert_eq!(count(&ifc, "IFCTRIANGULATEDFACESET"), 2);
     // Ohne Teile: Ersatzkörper (Fussabdruck) wie vorher.
     let fallback = build(&b).unwrap();
     assert_eq!(count(&fallback, "IFCSTAIRFLIGHT"), 0);
@@ -1125,7 +1131,7 @@ fn ifc2x3_fenster_stil_klassifikation_zone_treppe() {
     // Treppenlauf: NumberOfRiser… ohne PredefinedType.
     assert!(first_line(&ifc, "IFCSTAIRFLIGHT").ends_with(",7,7,0.1857,0.28);"), "{}", first_line(&ifc, "IFCSTAIRFLIGHT"));
     assert_eq!(count(&ifc, "IFCTRIANGULATEDFACESET"), 0);
-    assert_eq!(count(&ifc, "IFCFACETEDBREP"), 2); // Dach + Geländer (Mesh dicht? s. mesh_tetra: closed = 1)
+    assert_eq!(count(&ifc, "IFCFACETEDBREP"), 3); // Dach + zwei Geländer (Handlauf, Absturzsicherung)
 }
 
 #[test]

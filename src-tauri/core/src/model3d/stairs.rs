@@ -126,9 +126,35 @@ pub fn stair_view_meshes(p: &Project) -> Vec<(usize, crate::mesh3d::Mesh, bool)>
 
 /// Handlauf und Pfosten der Treppen (`emitStairRailings`); bei Wendeltreppen als Schraubensweep, bei
 /// Podesttreppen (L, U, gerade mit Podest) über die Podeste ([151]).
-pub fn emit_stair_railings(p: &Project) -> Vec<RMesh> {
+pub fn emit_stair_handrails(p: &Project) -> Vec<RMesh> {
     match stair_input(p, |s, st| s.shape != StairShape::Unknown && st.and_then(|t| t.railing).is_some_and(|r| r != StairTypeRailing::Keine)) {
         Some((_, buf)) => meshes_of(crate::stairs3d::railings(&buf), rail_rgb()),
         None => vec![],
     }
+}
+
+/// Alle Wandumrisse eines Geschosses (Wände stehen der Absturzsicherung im Weg).
+pub fn wall_footprints_of_floor(p: &Project, floor: &str) -> Vec<crate::plan::wall_poche::WallFootprint> {
+    crate::plan::domains::wall_footprints_of(p, floor, |_| true)
+}
+
+/// [155] Absturzsicherung am Deckenloch ankommender Treppen (Lage: [`crate::stair_guard`]) als Körper je Treppe
+/// (Index in `p.stairs`), Modell [x, y, Höhe]; alle Wände des Geschosses stehen der Sicherung im Weg.
+pub fn stair_guard_meshes(p: &Project) -> Vec<(usize, crate::mesh3d::Mesh)> {
+    let mut out: Vec<(usize, crate::mesh3d::Mesh)> = Vec::new();
+    for f in p.drawing_levels.iter().filter(|f| f.kind == DrawingLevelKind::Floor) {
+        for a in crate::stair_guard::arrivals(p, &f.id, &|_| true, &|| wall_footprints_of_floor(p, &f.id)) {
+            if let Some(m) = crate::stairs3d::guard_mesh(&a.axes, a.z, a.stair) {
+                out.push((a.stair, m));
+            }
+        }
+    }
+    out
+}
+
+/// Handlauf, Pfosten und Absturzsicherung der Treppen (`emitStairRailings`).
+pub fn emit_stair_railings(p: &Project) -> Vec<RMesh> {
+    let mut out = emit_stair_handrails(p);
+    out.extend(meshes_of(stair_guard_meshes(p).into_iter().map(|(_, m)| m).collect(), rail_rgb()));
+    out
 }

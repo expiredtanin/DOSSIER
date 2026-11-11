@@ -738,6 +738,52 @@ pub fn railings_with(buf: &[f64], half: f64) -> Vec<Mesh> {
     out
 }
 
+/// Stababstand der Füllung der Absturzsicherung (lichtes Mass ≤ 12 cm) und Pfostenabstand.
+const GUARD_BALUSTER_GAP: f64 = 0.11;
+const GUARD_POST_GAP: f64 = 1.2;
+
+/// [155] Körper der Absturzsicherung am Deckenloch über den Achsen aus [`crate::stair_guard`] (Standhöhe `z`):
+/// Pfosten an den Ecken und im Abstand, Handlauf in [`crate::stair_rail::RAIL_HEIGHT`], Stäbe als Füllung —
+/// dieselben Rohrquerschnitte wie das Treppengeländer. Ein Netz (Quelle `src`), leer ohne Achsen.
+pub fn guard_mesh(axes: &[Vec<P>], z: f64, src: usize) -> Option<Mesh> {
+    let h = crate::stair_rail::RAIL_HEIGHT;
+    let half = RAIL_THICK / 2.0;
+    let mut tubes: Vec<(Vec<f64>, Vec<u32>)> = Vec::new();
+    for axis in axes {
+        if axis.len() < 2 || axis.iter().any(|q| !q[0].is_finite() || !q[1].is_finite()) {
+            continue;
+        }
+        let top: Vec<V3> = axis.iter().map(|q| [q[0], q[1], z + h]).collect();
+        tubes.extend(tube_along(&top, half));
+        let post_at = |q: P, r: f64, z1: f64, tubes: &mut Vec<(Vec<f64>, Vec<u32>)>| tubes.extend(tube_along(&[[q[0], q[1], z], [q[0], q[1], z1]], r));
+        for (i, w) in axis.windows(2).enumerate() {
+            let len = hypot2(w[1][0] - w[0][0], w[1][1] - w[0][1]);
+            if len < EPS {
+                continue;
+            }
+            let at = |t: f64| [w[0][0] + (w[1][0] - w[0][0]) * t, w[0][1] + (w[1][1] - w[0][1]) * t];
+            let n_post = (len / GUARD_POST_GAP).ceil().max(1.0) as usize;
+            for k in 0..n_post + usize::from(i + 2 == axis.len()) {
+                post_at(at(k as f64 / n_post as f64), half * 0.75, z + h, &mut tubes);
+            }
+            let n_bal = (len / GUARD_BALUSTER_GAP).round().max(1.0) as usize;
+            for k in 1..n_bal {
+                let t = k as f64 / n_bal as f64;
+                if (t * n_post as f64).fract().min(1.0 - (t * n_post as f64).fract()) * len / n_post as f64 > 0.04 {
+                    post_at(at(t), 0.006, z + h - half, &mut tubes);
+                }
+            }
+        }
+    }
+    let mut positions: Vec<f64> = Vec::new();
+    let mut indices: Vec<u32> = Vec::new();
+    for (p, i) in tubes {
+        let base = (positions.len() / 3) as u32;
+        positions.extend(p);
+        indices.extend(i.into_iter().map(|k| k + base));
+    }
+    (!indices.is_empty()).then_some(Mesh { src, positions, indices })
+}
 
 #[cfg(test)]
 mod tests {
