@@ -568,6 +568,7 @@ fn ceiling_selection(root: &Map<String, Value>, c: &Value) -> Result<J, String> 
         .v("singleLayer", Value::Bool(arr(field(wt, "layers")).len() <= 1))
         .v("isExternal", Value::Bool(field(c, "isExternal").and_then(Value::as_bool).unwrap_or(false)))
         .v("loadBearing", Value::Bool(field(c, "loadBearing").and_then(Value::as_bool).unwrap_or(false)))
+        .v("edgeAtOutline", Value::Bool(field(c, "edgeAtOutline").and_then(Value::as_bool).unwrap_or(false)))
         .n("area", area)
         .n("volume", area * thickness)
         .v("ceilingTypes", type_choices(root, "ceilingTypes"))

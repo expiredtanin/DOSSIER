@@ -22,6 +22,7 @@ use crate::jsnum::round;
 
 // Teile der 3D-Ableitung ([162] aus einer Datei aufgeteilt).
 mod ceilings;
+mod bearing;
 mod columns;
 mod walls;
 mod openings;

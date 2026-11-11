@@ -221,6 +221,13 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
 
 ## Schnitt und Ansicht
 
+- ◐ **[178]** Deckenauflager an Aussenwänden (11.11., Wunsch Maintainer). Decke endet an der Aussenkante des Kerns
+  ([33] `layer_positions`), Aussendämmung/Putz laufen an der Stirn durch — abgeleitet, Umriss bleibt
+  (`model3d/bearing.rs`: Platten-Umriss minus Aussenschicht-Streifen, wo vor der Wand keine Decke liegt → `emit_slabs`
+  für 3D/Schnitt/Ansicht und `floor_context` für die 3D-Wandbänder). Schalter je Decke `Ceiling.edgeAtOutline`
+  (Objekt-Info „Auflager bis Kern“, aus = wie Umriss). Offen: Deckenkante im Grundriss folgt noch dem Umriss;
+  Bogenwände unverändert; Platte ohne Wand in gleicher Höhe (UG-Decke über Lichtschacht/kurzer Fundamentwand im
+  Musterhaus komplex) bleibt bis Umriss; nicht in der Tauri-App/auf dem Mac geprüft. · S
 - ◐ **[G4]** Exakte Sichtbarkeit (HLR, Kern `hlr.rs`). Füllungen der Ansicht bleiben Maler-Ordnung (bei Gauben liegt
   eine Füllung über einer verdeckten Kante); Durchdringungslinien sich schneidender Körper fehlen; Gelände/
   Kontext-Netze nicht in der Projektion. · XL

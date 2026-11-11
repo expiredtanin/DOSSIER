@@ -591,6 +591,8 @@ export const de = {
   "objinfo.ceiling.buildup": "Aufbau",
   "objinfo.ceiling.thickness": "Dicke",
   "objinfo.ceiling.preset": "Deckenaufbau",
+  "objinfo.ceiling.bearingCore": "Auflager bis Kern",
+  "objinfo.ceiling.bearingCoreHint": "An mehrschichtigen Aussenwänden endet die Decke an der Aussenkante der tragenden Schicht; Dämmung und Putz laufen davor durch. Aus: Decke bis an den Umriss.",
   "objinfo.ceiling.refFloor": "Referenzgeschoss",
   "objinfo.ceiling.top": "Oberkante (OK)",
   "objinfo.ceiling.bottom": "Unterkante (UK)",
