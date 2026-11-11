@@ -142,6 +142,7 @@ export function toCommandSelection(sel: Selection): CommandSelection {
     roomIds: sel.rooms,
     openingIds: sel.openings,
     treeIds: sel.trees,
+    contextIds: sel.contextObjects,
   };
 }
 
@@ -162,7 +163,8 @@ export function hasTransformable(sel: Selection): boolean {
     sel.stairs.length > 0 ||
     sel.rooms.length > 0 ||
     sel.openings.length > 0 ||
-    sel.trees.length > 0
+    sel.trees.length > 0 ||
+    sel.contextObjects.length > 0
   );
 }
 

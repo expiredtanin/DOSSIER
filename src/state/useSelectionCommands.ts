@@ -145,8 +145,14 @@ export function useSelectionCommands(opts: {
     const ctxids = new Set(selection.contextObjects);
     // [149] Bäume (gesperrte bleiben).
     const treeids = new Set(selection.trees.filter((id) => !(project.trees ?? []).find((t) => t.id === id)?.locked));
+    // [193] Abgeleitete Lage-Darstellung (Schatten, Baurecht) ist kein Element: Entf blendet sie aus
+    // (`show: false`; über die Lage-Panels wieder einschaltbar).
+    const siteHide: ReturnType<typeof fieldOps> = [];
+    if (selection.site.includes("sunStudy") && project.sunStudy?.show) siteHide.push(...fieldOps(project, "sunStudy", { ...project.sunStudy, show: false }));
+    if (selection.site.includes("siteRules") && project.siteRules && project.siteRules.show !== false) siteHide.push(...fieldOps(project, "siteRules", { ...project.siteRules, show: false }));
     setProject(
       opsMutation((p) => [
+        ...siteHide,
         ...removeItems(p, "drawings2d", dids),
         ...removeItems(p, "walls", wids),
         ...removeItems(p, "ceilings", cids),

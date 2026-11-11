@@ -10,6 +10,7 @@
 //
 // Extrahiert aus App.tsx. Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
+import { selectAllIds, selectAllHasAny } from "./selectAll";
 import { useEffect, useRef } from "react";
 import type { RefObject } from "react";
 import type { ToolId } from "../tools/types";
@@ -288,74 +289,9 @@ export function useSelectAllAndDeleteShortcut(opts: {
       if (matchesShortcut(e, "selectAll", shortcutOverrides)) {
         // Projekt beim Tastendruck aus dem Store ([121]: App abonniert es nicht mehr).
         const project = getState().project;
-        const wallIds = project.walls
-          .filter((w) => w.floorId === activeLevelId)
-          .map((w) => w.id);
-        const wallIdSet = new Set(wallIds);
-        const drawingIds = project.drawings2d
-          .filter((d) => d.levelId === activeLevelId)
-          .map((d) => d.id);
-        const ceilingIds = (project.ceilings ?? [])
-          .filter((c) => c.floorId === activeLevelId)
-          .map((c) => c.id);
-        // Öffnungen haben kein eigenes floorId (das Geschoss ergibt sich aus
-        // der Wirtswand) — über die bereits geschossgefilterten Wand-Ids.
-        // Dachfenster/Deckenöffnungen ([103]): über das Dach bzw. die Decke des Geschosses.
-        const roofIdSet = new Set((project.roofs ?? []).filter((r) => r.floorId === activeLevelId).map((r) => r.id));
-        const ceilingIdSet = new Set(ceilingIds);
-        const openingIds = (project.openings ?? [])
-          .filter((o) => wallIdSet.has(o.hostWallId) || (!!o.hostRoofId && roofIdSet.has(o.hostRoofId)) || (!!o.hostCeilingId && ceilingIdSet.has(o.hostCeilingId)))
-          .map((o) => o.id);
-        const stairIds = (project.stairs ?? [])
-          .filter((s) => s.floorId === activeLevelId)
-          .map((s) => s.id);
-        const roomIds = (project.rooms ?? [])
-          .filter((r) => r.floorId === activeLevelId)
-          .map((r) => r.id);
-        const extrudedSolidIds = (project.extrudedSolids ?? [])
-          .filter((s) => s.levelId === activeLevelId)
-          .map((s) => s.id);
-        const columnIds = (project.columns ?? [])
-          .filter((c) => c.floorId === activeLevelId)
-          .map((c) => c.id);
-        const roofIds = (project.roofs ?? [])
-          .filter((r) => r.floorId === activeLevelId)
-          .map((r) => r.id);
-        // Schnittführungs-Symbole sind projektweit (kein floorId-Bezug — sie
-        // werden auf JEDEM Grundriss gezeichnet, s. plan/context.rs im Kern,
-        // plan_section_lines), anders als die übrigen, geschossgefilterten Kanäle.
-        const sectionLineIds = project.drawingLevels
-          .filter((l) => (l.kind === "section" || l.kind === "elevation") && l.linePoints)
-          .map((l) => l.id);
-        // Kontext-Objekte (importierte Gebäude/Terrain) sind ebenfalls
-        // projektweit, aber bewusst NICHT Teil von „Alles auswählen" — anders
-        // als Schnittlinien sind sie Hintergrund-/Referenzgeometrie, kein
-        // Geschossinhalt; ein versehentliches Löschen wäre riskanter als
-        // hilfreich. Bleibt daher unverändert (kein Clear, kein Select).
-        if (
-          wallIds.length ||
-          drawingIds.length ||
-          ceilingIds.length ||
-          openingIds.length ||
-          stairIds.length ||
-          roomIds.length ||
-          extrudedSolidIds.length ||
-          columnIds.length ||
-          roofIds.length ||
-          sectionLineIds.length
-        ) {
-          setSelection({
-            walls: wallIds,
-            drawings: drawingIds,
-            ceilings: ceilingIds,
-            openings: openingIds,
-            stairs: stairIds,
-            rooms: roomIds,
-            solids: extrudedSolidIds,
-            columns: columnIds,
-            roofs: roofIds,
-            sectionLines: sectionLineIds,
-          });
+        const ids = selectAllIds(project, activeLevelId);
+        if (selectAllHasAny(ids)) {
+          setSelection(ids);
           e.preventDefault();
         }
         return;

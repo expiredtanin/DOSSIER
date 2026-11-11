@@ -287,6 +287,58 @@ fn mv_tree(t: &Value, xf: &Xf) -> Value {
     with(t, "position", pt(n.0, n.1))
 }
 
+/// [193] Gelände-/Umgebungs-Element (`Project.context`): alle x/y abbilden, z bleibt. Netze (`importedMesh`,
+/// `terrainMesh`): Positionen (x,y,z flach), bei Spiegelung Dreiecks-Umlauf umkehren; Höhenlinien: Punkte
+/// (eine wahre Kurve `curve` fällt weg, ausser bei reiner Verschiebung); Baugrube: Umriss; Luftbild: Rahmen.
+fn mv_context(e: &Value, xf: &Xf) -> Value {
+    let kind = field(e, "type").and_then(Value::as_str).unwrap_or("");
+    match kind {
+        "importedMesh" | "terrainMesh" => {
+            let src = arr(field(e, "positions"));
+            let mut out = Vec::with_capacity(src.len());
+            for c in src.chunks(3) {
+                if c.len() < 3 {
+                    out.extend(c.iter().cloned());
+                    continue;
+                }
+                let (x, y) = xf.apply(num_of(Some(&c[0])), num_of(Some(&c[1])));
+                out.extend([js_num(x), js_num(y), c[2].clone()]);
+            }
+            let mut f = vec![("positions", Value::Array(out))];
+            if xf.reverses() {
+                let idx: Vec<Value> = arr(field(e, "indices")).chunks(3).flat_map(|t| if t.len() == 3 { vec![t[0].clone(), t[2].clone(), t[1].clone()] } else { t.to_vec() }).collect();
+                f.push(("indices", Value::Array(idx)));
+            }
+            with_all(e, f)
+        }
+        "contourSet" => {
+            let translate = matches!(xf, Xf::Move { .. });
+            let cs: Vec<Value> = arr(field(e, "contours"))
+                .iter()
+                .map(|c| {
+                    let c = with(c, "pts", xf.pts(field(c, "pts")));
+                    match field(&c, "curve") {
+                        Some(cv) if translate => {
+                            let n = xf.apply(num_of(field(cv, "cx")), num_of(field(cv, "cy")));
+                            with(&c, "curve", with_all(cv, vec![("cx", js_num(n.0)), ("cy", js_num(n.1))]))
+                        }
+                        Some(_) => with_opt(&c, vec![("curve", None)]),
+                        None => c,
+                    }
+                })
+                .collect();
+            with(e, "contours", Value::Array(cs))
+        }
+        "excavation" => with(e, "outline", xf.pts(field(e, "outline"))),
+        "image" => {
+            let (a, b) = (xy(field(e, "min").unwrap_or(&Value::Null)), xy(field(e, "max").unwrap_or(&Value::Null)));
+            let (p, q) = (xf.apply(a.0, a.1), xf.apply(b.0, b.1));
+            with_all(e, vec![("min", pt(jsnum::min(p.0, q.0), jsnum::min(p.1, q.1))), ("max", pt(jsnum::max(p.0, q.0), jsnum::max(p.1, q.1)))])
+        }
+        _ => e.clone(),
+    }
+}
+
 fn mv_ceiling(c: &Value, xf: &Xf) -> Value {
     let mut f = vec![("outline", xf.pts(field(c, "outline")))];
     if truthy(field(c, "openings")) {
@@ -567,6 +619,8 @@ pub struct Sel {
     pub opening_ids: Option<Vec<String>>,
     /// [149] Gewählte Bäume.
     pub tree_ids: Option<Vec<String>>,
+    /// [193] Gewählte Gelände-/Umgebungs-Elemente (`Project.context`).
+    pub context_ids: Option<Vec<String>>,
 }
 
 fn nonempty(s: &Option<String>) -> Option<&str> {
@@ -622,6 +676,7 @@ enum Kind {
     Stair,
     Room,
     Tree,
+    Context,
 }
 
 /// Dächer nur bei Verschieben/Skalieren (der Umriss ist an die Weltachsen gebunden, der First folgt
@@ -657,6 +712,7 @@ fn gather<'a>(root: &'a Map<String, Value>, sel: &Sel, op: &str, ignore_lock: bo
     each("stairs", Ids::opt(&sel.stair_ids), Kind::Stair);
     each("rooms", Ids::opt(&sel.room_ids), Kind::Room);
     each("trees", Ids::opt(&sel.tree_ids), Kind::Tree);
+    each("context", Ids::opt(&sel.context_ids), Kind::Context);
     out
 }
 
@@ -835,6 +891,10 @@ pub fn transform_result(root: &Map<String, Value>, p: &Project, req: &TransformR
         if !trees.is_empty() {
             patch("trees", &|t| trees.has(t) && !locked(t), &|t| mv_tree(t, &xf));
         }
+        let ctx = Ids::opt(&sel.context_ids);
+        if !ctx.is_empty() {
+            patch("context", &|c| ctx.has(c), &|c| mv_context(c, &xf));
+        }
         // Öffnungen in bewegten Dächern/Decken ([103]) folgen ihrem Wirt.
         let hosts: std::collections::HashSet<&str> =
             items.iter().filter(|(k, _)| matches!(k, Kind::Roof | Kind::Ceiling)).filter_map(|(_, e)| id_of(e)).collect();
@@ -850,7 +910,7 @@ pub fn transform_result(root: &Map<String, Value>, p: &Project, req: &TransformR
 
     // Kopien (Kopie/Reihe/Verteilen bzw. gespiegelte Kopie).
     let mut ids = IdGen::new(&req.stamp);
-    let mut new: [Vec<Value>; 9] = Default::default();
+    let mut new: [Vec<Value>; 10] = Default::default();
     let mut new_openings = Vec::new();
     for t in copy_ts(op, &req.mode, req.count.0) {
         let xf = Xf::of(op, &pts, t);
@@ -866,6 +926,7 @@ pub fn transform_result(root: &Map<String, Value>, p: &Project, req: &TransformR
                 Kind::Stair => "ST",
                 Kind::Room => "RM",
                 Kind::Tree => "tree",
+                Kind::Context => "ctx",
             })
             .collect();
         let new_ids: Vec<String> = prefixes.iter().map(|p| ids.next(p)).collect();
@@ -891,6 +952,7 @@ pub fn transform_result(root: &Map<String, Value>, p: &Project, req: &TransformR
                 Kind::Stair => (6, mv_stair(e, &xf, k_at(t))),
                 Kind::Room => (7, mv_room(e, &xf)),
                 Kind::Tree => (8, mv_tree(e, &xf)),
+                Kind::Context => (9, mv_context(e, &xf)),
             };
             new[slot].push(with(&v, "id", Value::String(new_id.clone())));
         }
@@ -912,7 +974,7 @@ pub fn transform_result(root: &Map<String, Value>, p: &Project, req: &TransformR
             }
         }
     }
-    let keys = ["walls", "drawings2d", "extrudedSolids", "columns", "ceilings", "roofs", "stairs", "rooms", "trees"];
+    let keys = ["walls", "drawings2d", "extrudedSolids", "columns", "ceilings", "roofs", "stairs", "rooms", "trees", "context"];
     for (key, items) in keys.iter().zip(new) {
         ops.extend(add(key, items));
     }
@@ -1228,6 +1290,27 @@ fn item_preview(p: &Project, kind: Kind, e: &Value, xf: &Xf, out: &mut Pending) 
             let ring: Vec<(f64, f64)> = crate::tree::circle([c.0, c.1], d / 2.0, 24).into_iter().map(|q| (q[0], q[1])).collect();
             s.poly(&ring);
         }
+        Kind::Context => {
+            // [193] Baugrube: Umriss; Netze, Höhenlinien, Bild: Rahmen der abgebildeten Punkte.
+            let pts: Vec<(f64, f64)> = match field(e, "type").and_then(Value::as_str) {
+                Some("excavation") => pts_of(field(e, "outline")),
+                Some("importedMesh" | "terrainMesh") => arr(field(e, "positions")).chunks(3).filter(|c| c.len() == 3).map(|c| (num_of(Some(&c[0])), num_of(Some(&c[1])))).collect(),
+                Some("contourSet") => arr(field(e, "contours")).iter().flat_map(|c| pts_of(field(c, "pts"))).collect(),
+                Some("image") => {
+                    let (a, b) = (xy(field(e, "min").unwrap_or(&Value::Null)), xy(field(e, "max").unwrap_or(&Value::Null)));
+                    vec![a, (b.0, a.1), b, (a.0, b.1)]
+                }
+                _ => vec![],
+            };
+            let mapped_pts = mapped(&pts, xf);
+            if field(e, "type").and_then(Value::as_str) == Some("excavation") {
+                s.poly(&mapped_pts);
+            } else if !mapped_pts.is_empty() {
+                let (x0, x1) = mapped_pts.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |a, p| (a.0.min(p.0), a.1.max(p.0)));
+                let (y0, y1) = mapped_pts.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |a, p| (a.0.min(p.1), a.1.max(p.1)));
+                s.poly(&[(x0, y0), (x1, y0), (x1, y1), (x0, y1)]);
+            }
+        }
         Kind::Drawing => {
             let at = s.buf.len();
             out.drawings.push((at, with_geom(e, mv_geom(field(e, "geom").unwrap_or(&Value::Null), xf))));
@@ -1405,6 +1488,32 @@ mod tests {
         assert_eq!(ops[0]["collection"], "trees");
         assert_eq!(ops[0]["items"][0]["id"], "tree-s-1");
         assert_eq!(ops[0]["items"][0]["position"], json!({"x":4,"y":3}));
+    }
+
+    /// [193] Gelände-/Umgebungs-Elemente verschieben: Baugrube (Umriss), Höhenlinien, Gelände-Netz (z bleibt), Spiegeln kehrt den Netz-Umlauf um.
+    #[test]
+    fn kontext_verschieben() {
+        let r = root(json!({"context":[
+            {"id":"bg","type":"excavation","bottom":-2,"outline":[{"x":0,"y":0},{"x":4,"y":0},{"x":4,"y":4}]},
+            {"id":"hl","type":"contourSet","contours":[{"z":5,"pts":[{"x":1,"y":1},{"x":2,"y":1}],"closed":false}]},
+            {"id":"tm","type":"terrainMesh","positions":[0,0,7, 1,0,8, 0,1,9],"indices":[0,1,2]},
+            {"id":"x","type":"excavation","outline":[{"x":0,"y":0}]}]}));
+        let run = |op: &str, pts: Value| {
+            let req: TransformReq = serde_json::from_value(json!({"sel":{"wallIds":[],"contextIds":["bg","hl","tm"]},"op":op,"pts":pts,"mode":"move","count":1,"stamp":"s"})).unwrap();
+            transform_ops(&r, &Project::default(), &req).iter().map(|o| o.to_json()).collect::<Vec<_>>()
+        };
+        let ops = run("move", json!([[0, 0], [3, 1]]));
+        assert_eq!(ops.len(), 3, "{ops:?}");
+        assert!(ops.iter().all(|o| o["collection"] == "context"));
+        assert_eq!(ops[0]["entity"]["outline"][1], json!({"x":7,"y":1}));
+        assert_eq!(ops[0]["entity"]["bottom"], json!(-2));
+        assert_eq!(ops[1]["entity"]["contours"][0]["pts"][0], json!({"x":4,"y":2}));
+        assert_eq!(ops[2]["entity"]["positions"], json!([3, 1, 7, 4, 1, 8, 3, 2, 9]));
+        assert_eq!(ops[2]["entity"]["indices"], json!([0, 1, 2]));
+        // Spiegeln an der x-Achse: y wechselt das Vorzeichen, Dreiecke laufen rückwärts.
+        let ops = run("mirror", json!([[0, 0], [1, 0]]));
+        assert_eq!(ops[2]["entity"]["positions"], json!([0, 0, 7, 1, 0, 8, 0, -1, 9]));
+        assert_eq!(ops[2]["entity"]["indices"], json!([0, 2, 1]));
     }
 
     /// [T2] Bogenwand: Verschieben/Drehen behalten den Bulge, Spiegeln kehrt ihn um.

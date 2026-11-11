@@ -55,6 +55,8 @@ export interface TransformSelection {
   openingIds?: string[];
   /** [149] Gewählte Bäume (Stammmitte wird transformiert). */
   treeIds?: string[];
+  /** [193] Gewählte Gelände-/Umgebungs-Elemente (alle Punkte x/y werden abgebildet). */
+  contextIds?: string[];
 }
 
 /** Auswahl (Befehlskontext) → TransformSelection (gleiche Form, alle Elementarten). */
@@ -71,6 +73,7 @@ export function toTransformSel(sel: CommandSelection): TransformSelection {
     roomIds: sel.roomIds,
     openingIds: sel.openingIds,
     treeIds: sel.treeIds,
+    contextIds: sel.contextIds,
   };
 }
 
@@ -91,7 +94,8 @@ export function hasTransformSelection(sel: CommandSelection, op?: string): boole
     (sel.roofIds?.length ?? 0) > 0 ||
     (sel.stairIds?.length ?? 0) > 0 ||
     (sel.roomIds?.length ?? 0) > 0 ||
-    (sel.treeIds?.length ?? 0) > 0
+    (sel.treeIds?.length ?? 0) > 0 ||
+    (sel.contextIds?.length ?? 0) > 0
   );
 }
 

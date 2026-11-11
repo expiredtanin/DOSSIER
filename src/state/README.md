@@ -68,7 +68,7 @@ in `ProjectSync`.
 | `tabNavigation.ts` | Navigator/Grundriss-/3D-Knöpfe/Layouts wählen den passenden Reiter (`openLevel`, `switchViewType`, `openLayoutTab`, [182]) |
 | `view3dFilter.ts` | 3D-Element-Filter ([185], rein UI): „Auswahl in 3D zeigen" (Cmd/Ctrl+3) und temporär ausgeblendete Elemente (Cmd/Ctrl+4); Geschoss-Kürzel Cmd/Ctrl+5/6 in `tabNavigation.ts` |
 | `groupActions.ts` | Gruppen erzeugen, auflösen, betreten |
-| `exportScope.ts`, `objectLock.ts` | Export „nur Auswahl"; Objekt-Sperre |
+| `exportScope.ts`, `objectLock.ts`, `selectAll.ts`, `contextHeight.ts` | Export „nur Auswahl"; Objekt-Sperre; Cmd+A-Auswahl (reine Funktion); Höhenversatz von Gelände-Elementen |
 | `autosave.ts`, `projectStore.ts`, `recentProjects.ts`, `startupGuard.ts` | Autosave und Wiederherstellen, IndexedDB, zuletzt geöffnet, Start-Protokoll |
 | `aiAccess.ts` | KI-Zugriff auf das offene Projekt (`[9]`) |
 
