@@ -51,6 +51,7 @@ function OptionRow({ mv, f, h }: { mv: ModelViewOption; f: ModelViewField; h: Mo
       <select
         className="res-input"
         aria-label={label}
+        title={f.detailChoice ? t("resources.modelViews.tip.sectionDetail") : undefined}
         data-testid={`model-view-opt-${f.section}-${f.key}`}
         value={fieldValue(mv, f)}
         disabled={!h.onSetModelViewOption}
@@ -59,10 +60,16 @@ function OptionRow({ mv, f, h }: { mv: ModelViewOption; f: ModelViewField; h: Mo
           h.onSetModelViewOption?.(mv.id, f.section, f.key, v === undefined ? null : (v as string | number | boolean));
         }}
       >
-        <option value="">{t("resources.modelViews.asBase")}</option>
+        <option value="">{t(f.detailChoice ? "resources.modelViews.asDetail" : "resources.modelViews.asBase")}</option>
         {values.map((v) => (
           <option key={String(v)} value={String(v)}>
-            {f.values === "bool" ? t(v === "true" ? "resources.modelViews.on" : "resources.modelViews.off") : valueLabel(f, v)}
+            {f.values === "bool"
+              ? t(
+                  f.detailChoice
+                    ? v === "true" ? "resources.modelViews.detail.full" : "resources.modelViews.detail.simple"
+                    : v === "true" ? "resources.modelViews.on" : "resources.modelViews.off",
+                )
+              : valueLabel(f, v)}
           </option>
         ))}
       </select>

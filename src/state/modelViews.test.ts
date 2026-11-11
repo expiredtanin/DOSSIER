@@ -127,7 +127,8 @@ describe("modelViews", () => {
     const elev = (q: Project) => JSON.stringify(generateElevationPlan(q, q.drawingLevels.find((l) => l.id === "ansicht-sued")!)?.primitives.length);
     const ohne = elev(noShadow(sampleProject));
     expect(ohne).not.toBe(elev(sampleProject));
-    let e = noShadow(withMv());
+    // [184] Basis „mittel" wie der Massstab des Musterhauses (fein zeichnet in der Ansicht zusätzlich die Fensterbank).
+    let e = noShadow(applyOps(sampleProject, addModelViewOps(newModelView("mv1", "Werkplan", "mittel"))));
     e = applyOps(e, setModelViewOptionOps(e, "mv1", "elevation", "shadows", true));
     e = applyOps(e, selectModelViewOps(e, "ansicht-sued", "mv1"));
     expect(elev(e)).toBe(elev(sampleProject));

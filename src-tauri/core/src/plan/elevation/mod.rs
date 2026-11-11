@@ -311,13 +311,40 @@ pub fn elevation_primitives_with(p: &Project, level: &LevelSpec, shadows: bool, 
         let all = p.openings.as_deref().unwrap_or(&[]);
         openings.retain(|op| all.iter().find(|o| o.id == op.id).is_none_or(|o| shown(&o.category_code) && host_shown(o)));
     }
-    // [173] Fensterteilung (Flügel, Sprossen, Kämpfer) nach der Modelldarstellung.
-    // [184] Ohne ausdrückliche Wahl folgt sie dem Detailgrad der Öffnung wie Grundriss und Schnitt (grob/vereinfacht: keine).
+    // [184] Darstellung der Öffnungen nach Detailgrad, EINE Auflösung wie Grundriss und Schnitt (`opening_detail`):
+    // grob = nur Öffnungsumriss mit Glas-/Blattfläche (kein Rahmen, keine Teilung, keine Laibung, keine Bank);
+    // mittel = Rahmen, Teilung und Laibungsschatten, aber ohne Fensterbank; fein = volles Profil.
+    // Die Fensterteilung (Flügel, Sprossen, Kämpfer) folgt sonst dem Detailgrad (grob: keine) oder `elevationDivision`.
     for op in openings.iter_mut() {
-        let Some(o) = p.openings.as_deref().unwrap_or(&[]).iter().find(|o| o.id == op.id && o.kind != ElementKind::Door) else { continue };
-        if !win.elevation_division.unwrap_or_else(|| mvo.opening_detail(false, o.detail_level) != crate::plan::style::Detail::Grob) {
+        let Some(o) = p.openings.as_deref().unwrap_or(&[]).iter().find(|o| o.id == op.id) else { continue };
+        let door = o.kind == ElementKind::Door;
+        op.look = mvo.opening_detail(door, o.detail_level);
+        if !door && !win.elevation_division.unwrap_or(op.look != crate::plan::style::Detail::Grob) {
             op.divisions.clear();
             op.sash_rects.clear();
+        }
+        if op.look != crate::plan::style::Detail::Fein {
+            op.sill.clear();
+        }
+        if op.look == crate::plan::style::Detail::Grob {
+            op.divisions.clear();
+            op.sash_rects.clear();
+            op.symbol.clear();
+            op.frame = None;
+            if op.shape.is_none() {
+                // Glas und Blatt ersetzt die Füllung des Umrisses.
+                op.glass_only = !op.glass.is_empty();
+                op.glass.clear();
+                op.door_leaf.clear();
+            }
+        }
+        // [184] Storenkasten in der Ansicht nur mit `windows.shadingBox` (Basis aus, wie Grundriss und Schnitt).
+        if !door && win.shading_box && op.shape.is_none() {
+            let sh = p.window_type(o).and_then(|t| t.shading.as_ref()).filter(|s| s.create);
+            let h = sh.map_or(0.0, |s| s.r#box.height.max(0.0));
+            if h > 1e-4 {
+                op.shading = Some([op.pts[3], op.pts[2], [op.pts[2][0], op.pts[2][1] + h], [op.pts[3][0], op.pts[3][1] + h]]);
+            }
         }
     }
     // [171] Formöffnung: Fassaden-Schraffur auch auf den Füllstücken zwischen Umriss und Rechteck-Loch der Wand
@@ -644,7 +671,18 @@ pub fn elevation_primitives_with(p: &Project, level: &LevelSpec, shadows: bool, 
         let glass_fill = ov.as_ref().and_then(|o| o.fill.as_deref()).unwrap_or(if mono { GLASS_FILL_MONO } else { GLASS_FILL_COLOR });
         let leaf_fill = ov.as_ref().and_then(|o| o.fill.as_deref()).unwrap_or(if mono { "#ffffff" } else { DOOR_LEAF_FILL_COLOR });
         let frame_pts = op.shape.as_ref().map_or(op.frame.as_ref().map_or(&op.pts[..], |f| &f[..]), |(o, _, _, _)| &o[..]);
-        push(poly_prim(to_vec(frame_pts), if mono { "#ffffff" } else { FRAME_FILL_COLOR }, ink, frame_mm, id));
+        // [184] Grob: der Umriss trägt selbst die Glas- bzw. Blattfläche (kein Rahmen).
+        let outline_fill = if op.look == crate::plan::style::Detail::Grob && op.shape.is_none() {
+            if op.glass_only { glass_fill } else { leaf_fill }
+        } else if mono {
+            "#ffffff"
+        } else {
+            FRAME_FILL_COLOR
+        };
+        push(poly_prim(to_vec(frame_pts), outline_fill, ink, frame_mm, id));
+        if let Some(b) = &op.shading {
+            push(poly_prim(to_vec(b), if mono { "#ffffff" } else { FRAME_FILL_COLOR }, ink, edge_mm, id));
+        }
         if let Some((_, g, _, _)) = &op.shape {
             push(poly_prim(to_vec(g), glass_fill, ink, edge_mm, id));
         }
@@ -660,7 +698,7 @@ pub fn elevation_primitives_with(p: &Project, level: &LevelSpec, shadows: bool, 
         for r in &op.door_leaf {
             push(poly_prim(to_vec(r), leaf_fill, ink, edge_mm, id));
         }
-        if shadows && op.shape.is_none() {
+        if shadows && op.shape.is_none() && op.look != crate::plan::style::Detail::Grob {
             let q = &op.pts;
             let lerp = |a: Pt, b: Pt, t: f64| -> Pt { [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t] };
             let quad_at = |fa: f64, fz: f64| lerp(lerp(q[0], q[1], fa), lerp(q[3], q[2], fa), fz);

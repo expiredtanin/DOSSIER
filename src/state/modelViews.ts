@@ -160,6 +160,8 @@ export interface ModelViewField {
   key: string;
   /** Werte als Liste (Auswahl) oder `"bool"`/`"number"`. */
   values: readonly (string | number)[] | "bool" | "number";
+  /** [184] Dreifach-Wahl „Wie Detailgrad / Voll / Vereinfacht" statt „wie Basis / an / aus" (Beschriftung + Tooltip). */
+  detailChoice?: boolean;
 }
 
 export const MODEL_VIEW_FIELDS: readonly ModelViewField[] = [
@@ -169,7 +171,7 @@ export const MODEL_VIEW_FIELDS: readonly ModelViewField[] = [
   { section: "doors", key: "frame", values: "bool" },
   { section: "doors", key: "leaf", values: ["line", "rect"] },
   { section: "doors", key: "threshold", values: ["off", "liftSlide", "all"] },
-  { section: "doors", key: "sectionDetail", values: "bool" },
+  { section: "doors", key: "sectionDetail", values: "bool", detailChoice: true },
   { section: "windows", key: "sashSymbols", values: "bool" },
   { section: "windows", key: "planSwingArcs", values: "bool" },
   { section: "windows", key: "sill", values: "bool" },
@@ -177,7 +179,7 @@ export const MODEL_VIEW_FIELDS: readonly ModelViewField[] = [
   { section: "windows", key: "simplified", values: "bool" },
   { section: "windows", key: "shadingBox", values: "bool" },
   { section: "windows", key: "lintelLine", values: "bool" },
-  { section: "windows", key: "sectionDetail", values: "bool" },
+  { section: "windows", key: "sectionDetail", values: "bool", detailChoice: true },
   { section: "windows", key: "elevationDivision", values: "bool" },
   { section: "stairs", key: "walkLine", values: "bool" },
   { section: "stairs", key: "arrow", values: "bool" },

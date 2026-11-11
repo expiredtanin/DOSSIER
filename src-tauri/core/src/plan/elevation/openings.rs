@@ -18,6 +18,12 @@ pub(super) struct ProjOpening {
     pub(super) shape: Option<(Vec<Pt>, Vec<Pt>, Vec<Vec<Pt>>, String)>,
     /// [105] Rahmen-Umriss, wenn er über die Rohbauöffnung hinausgeht (Zargenspiegel, Bekleidung).
     pub(super) frame: Option<[Pt; 4]>,
+    /// [184] Detailgrad der Darstellung (Element > Modelldarstellung > Massstab; `mod.rs` setzt ihn nach dem Sammeln).
+    pub(super) look: crate::plan::style::Detail,
+    /// [184] Storenkasten über der Öffnung (nur mit `windows.shadingBox`).
+    pub(super) shading: Option<[Pt; 4]>,
+    /// [184] Grob: Umriss füllt mit Glas (statt Türblatt), weil die Öffnung verglast war.
+    pub(super) glass_only: bool,
 }
 
 /// Türzarge in der Ansicht ([105]) von der sichtbaren Seite: `outer` = über die Rohbaukante hinaus
@@ -289,7 +295,7 @@ pub(super) fn collect_openings(p: &Project, frame: &[f64; 9], win: &crate::plan:
         if shape.is_some() {
             // Formöffnung ([G3]): ohne Flügel-/Sprossenteilung, Türblatt und Symbole (Rechteck-Raster).
             let round = p.openings.as_deref().unwrap_or(&[]).iter().any(|o| o.id == ids[k] && !crate::opening_shape::has_flat_bottom(o));
-            out.push(ProjOpening { pts, depth, glass: Vec::new(), door_leaf: Vec::new(), divisions: Vec::new(), sash_rects: Vec::new(), sill: if round { Vec::new() } else { sill }, symbol: Vec::new(), id: ids[k].to_string(), shape, frame: None });
+            out.push(ProjOpening { pts, depth, glass: Vec::new(), door_leaf: Vec::new(), divisions: Vec::new(), sash_rects: Vec::new(), sill: if round { Vec::new() } else { sill }, symbol: Vec::new(), id: ids[k].to_string(), shape, frame: None, look: crate::plan::style::Detail::Fein, shading: None, glass_only: false });
             continue;
         }
         let mut sash_rects = sash_rects;
@@ -307,7 +313,7 @@ pub(super) fn collect_openings(p: &Project, frame: &[f64; 9], win: &crate::plan:
                 sash_rects.push(r(bd.clear / w, 1.0 - bd.clear / w, 1.0 - bd.clear / h));
             }
         }
-        out.push(ProjOpening { pts, depth, glass, door_leaf, divisions, sash_rects, sill, symbol, id: ids[k].to_string(), shape, frame: pts_frame });
+        out.push(ProjOpening { pts, depth, glass, door_leaf, divisions, sash_rects, sill, symbol, id: ids[k].to_string(), shape, frame: pts_frame, look: crate::plan::style::Detail::Fein, shading: None, glass_only: false });
     }
     surface_openings(p, frame, &mut out);
     out
@@ -346,6 +352,6 @@ pub(super) fn surface_openings(p: &Project, frame: &[f64; 9], out: &mut Vec<Proj
         });
         let depth = plane_depth.map_or(own, |d| d.min(own));
         let glass = if o.kind == ElementKind::Window { vec![quad(fw).0] } else { Vec::new() };
-        out.push(ProjOpening { pts, depth, glass, door_leaf: Vec::new(), divisions: Vec::new(), sash_rects: Vec::new(), sill: Vec::new(), symbol: Vec::new(), id: o.id.clone(), shape: None, frame: None });
+        out.push(ProjOpening { pts, depth, glass, door_leaf: Vec::new(), divisions: Vec::new(), sash_rects: Vec::new(), sill: Vec::new(), symbol: Vec::new(), id: o.id.clone(), shape: None, frame: None, look: crate::plan::style::Detail::Fein, shading: None, glass_only: false });
     }
 }
