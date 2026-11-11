@@ -89,6 +89,7 @@ pub fn section_plan_buf(p: &Project, args: &[f64], text: &str) -> Result<Vec<u8>
     };
     let hidden = v.get("hiddenLines").and_then(|b| b.as_bool()).unwrap_or(false);
     let detail = Detail::parse(v.get("detail").and_then(|d| d.as_str()).unwrap_or("mittel"));
+    let detail_arg = detail;
     // [173] Modelldarstellung: ausdrücklich angefragt (Blatt-Ausschnitt), sonst die der Ebene; ihre Basis
     // ersetzt den Detailgrad. Ohne Wahl wie bisher.
     let mv_id = v.get("modelView").and_then(|m| m.as_str()).filter(|m| !m.is_empty()).or(level.model_view.as_deref());
@@ -110,11 +111,12 @@ pub fn section_plan_buf(p: &Project, args: &[f64], text: &str) -> Result<Vec<u8>
     trees.extend(unfold::bend_lines(&level, bounds));
     let prims = trees;
     w.group(&prims);
-    let (door_detail, window_detail) = mvo.as_ref().map_or((true, true), |o| (o.door.section_detail, o.window.section_detail));
+    // [184] Öffnungen wie im Grundriss: Detailgrad aus Stufe bzw. Massstab (mittel ab 1:200 grob).
+    let open_mv = crate::plan::model_view::for_view_scaled(p, mv_id, detail_arg, scale);
     let mut ops = Vec::new();
     if openings {
         for (l, s) in &parts {
-            ops.extend(unfold::clip_prims(section_opening_primitives_mv(p, l, &vis, door_detail, window_detail)?, s.as_ref()));
+            ops.extend(unfold::clip_prims(section_opening_primitives_mv(p, l, &vis, &open_mv)?, s.as_ref()));
         }
     }
     crate::plan::extras::scale_line_weights(p, scale, &mut ops);

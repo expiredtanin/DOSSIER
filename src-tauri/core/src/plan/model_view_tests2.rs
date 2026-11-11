@@ -160,7 +160,7 @@ fn schnitt_oeffnungsdetail() {
         t.lintel_height = Some(0.2);
         t.sill_board = Some(WindowTypeSillBoard::Beide);
     }
-    let ops = |p: &Project| count(&section(p, 50.0, "mittel"), |q| matches!(q, Primitive::Polygon { opening_id: Some(_), .. } | Primitive::Line { opening_id: Some(_), .. }));
+    let ops = |p: &Project| count(&section(p, 50.0, "fein"), |q| matches!(q, Primitive::Polygon { opening_id: Some(_), .. } | Primitive::Line { opening_id: Some(_), .. }));
     let n0 = ops(&p);
     let mut q = with_mv(p.clone(), serde_json::json!({"windows": {"sectionDetail": false}, "doors": {"sectionDetail": false}}));
     set_level_mv(&mut q, "schnitt-a", "mv");
@@ -417,4 +417,46 @@ fn grundriss_dach_geschnitten_schichten() {
     // Dach ganz über der Schnittebene: keine Schnittflächen.
     p.roofs.as_mut().unwrap()[0].base_elevation = None;
     assert!(cut_polys(&p, 50.0).is_empty());
+}
+
+/// [184] (Profil-Flächen, Linien) der geschnittenen Öffnung O1 im Schnitt.
+fn o1_parts(p: &Project, scale: f64, detail: &str) -> (usize, usize) {
+    let s = section(p, scale, detail);
+    let profiles = count(&s, |q| matches!(q, Primitive::Polygon { opening_id: Some(id), fill, .. } if id == "O1" && fill != "none"));
+    let lines = count(&s, |q| matches!(q, Primitive::Line { opening_id: Some(id), .. } if id == "O1"));
+    (profiles, lines)
+}
+
+#[test]
+fn schnitt_fenster_stufen_wie_grundriss() {
+    let mut p = through_window(sample());
+    for t in p.window_types.iter_mut().flatten() {
+        t.lintel_height = Some(0.2);
+        t.sill_board = Some(WindowTypeSillBoard::Beide);
+    }
+    // 1:200 mittel gilt wie im Grundriss als grob: nur ein Strich, kein Profil.
+    assert_eq!(o1_parts(&p, 200.0, "mittel"), (0, 1), "1:200 grob: ein Mittelstrich");
+    assert_eq!(o1_parts(&p, 50.0, "grob"), (0, 1));
+    // Mittel: einfacher Rahmen + Glaslinie + Fensterbank als Fläche; fein: volles Profil (mehr Flächen: Sturz).
+    let (mp, ml) = o1_parts(&p, 50.0, "mittel");
+    let (fp, fl) = o1_parts(&p, 50.0, "fein");
+    assert!(mp >= 2 && ml == 1, "mittel: Rahmen {mp}, Linien {ml}");
+    assert!(fp > mp && fl >= 1, "fein: Profil {fp} > mittel {mp}");
+    // Stufe mit „Vereinfacht" macht auch bei 1:50 fein einen Strich.
+    let mut q = with_mv(p.clone(), serde_json::json!({"baseDetail": "fein", "windows": {"simplified": true}}));
+    set_level_mv(&mut q, "schnitt-a", "mv");
+    assert_eq!(o1_parts(&q, 50.0, "fein"), (0, 1), "simplified: grob");
+}
+
+#[test]
+fn schnitt_storenkasten_nur_mit_option() {
+    let mut p = through_window(sample());
+    for t in p.window_types.iter_mut().flatten() {
+        t.shading = Some(serde_json::from_value(serde_json::json!({"create": true, "mount": "vorgesetzt", "box": {"width": 1.0, "height": 0.2, "depth": 0.15}})).unwrap());
+    }
+    let n = |p: &Project| o1_parts(p, 50.0, "fein").0;
+    let n0 = n(&p);
+    let mut q = with_mv(p.clone(), serde_json::json!({"baseDetail": "fein", "windows": {"shadingBox": true}}));
+    set_level_mv(&mut q, "schnitt-a", "mv");
+    assert!(n(&q) > n0, "Storenkasten nur mit Option ({} > {n0})", n(&q));
 }

@@ -266,7 +266,7 @@ pub fn elevation_primitives_with(p: &Project, level: &LevelSpec, shadows: bool, 
     // Ansichtsfarbe und -schraffur ([100]) der sichtbaren Bauteilseite.
     let (mut pattern_lines, mut pattern_styles) = surface_patterns(p, &mut faces, &frame, scale, mono);
     // [173] Öffnungslinien der Fenster nach der Modelldarstellung der Ebene (Element und Typ gehen vor).
-    let mvo = crate::plan::model_view::for_view(p, level.model_view.as_deref(), crate::plan::style::Detail::Mittel, scale);
+    let mvo = crate::plan::model_view::for_view_scaled(p, level.model_view.as_deref(), crate::plan::style::Detail::Mittel, scale);
     let win = &mvo.window;
     let mut openings = collect_openings(p, &frame, win);
     // [180] Öffnungen nach ihrer Klasse und der ihres Wirts (Wand, Dach): ausgeblendet ⇒ ohne Öffnung.
@@ -281,8 +281,10 @@ pub fn elevation_primitives_with(p: &Project, level: &LevelSpec, shadows: bool, 
         openings.retain(|op| all.iter().find(|o| o.id == op.id).is_none_or(|o| shown(&o.category_code) && host_shown(o)));
     }
     // [173] Fensterteilung (Flügel, Sprossen, Kämpfer) nach der Modelldarstellung.
-    if !win.elevation_division {
-        for op in openings.iter_mut().filter(|op| p.openings.as_deref().unwrap_or(&[]).iter().any(|o| o.id == op.id && o.kind != ElementKind::Door)) {
+    // [184] Ohne ausdrückliche Wahl folgt sie dem Detailgrad der Öffnung wie Grundriss und Schnitt (grob/vereinfacht: keine).
+    for op in openings.iter_mut() {
+        let Some(o) = p.openings.as_deref().unwrap_or(&[]).iter().find(|o| o.id == op.id && o.kind != ElementKind::Door) else { continue };
+        if !win.elevation_division.unwrap_or_else(|| mvo.opening_detail(false, o.detail_level) != crate::plan::style::Detail::Grob) {
             op.divisions.clear();
             op.sash_rects.clear();
         }
