@@ -14,6 +14,7 @@ import {
   openingSheetSlide,
   openingTypedPosition,
   sheetHeightDrag,
+  snapSheetHeight,
   wallGripPoints,
 } from "./gripDrag";
 
@@ -44,10 +45,17 @@ describe("Griff-Zug (Kern)", () => {
     expect(gripEdgeTarget(free, { x: 3.2, y: 1.4 }, { shift: true })).toEqual({ x: 3.2, y: 1 });
   });
 
-  it("Höhen-Griffe: Patch je Art", () => {
-    expect(sheetHeightDrag("wallTop", { base: 3, top: 5.6, bottom: 3 }, 5.7349, false)).toEqual({ top: 5.73, bottom: 3, patch: { height: 2.73 } });
-    const r = sheetHeightDrag("openingBottom", { base: 0, top: 2.1, bottom: 0.9 }, 0.6, false);
-    expect(r.patch).toEqual({ sillHeight: 0.6, height: 1.5 });
+  it("Höhen-Griffe: Vorschau je Art, Fang", () => {
+    expect(sheetHeightDrag("wallTop", { base: 3, top: 5.6, bottom: 3 }, 5.7349, false)).toEqual({ top: 5.73, bottom: 3 });
+    expect(sheetHeightDrag("openingBottom", { base: 0, top: 2.1, bottom: 0.9 }, 0.6, false)).toEqual({ top: 2.1, bottom: 0.6 });
+    // Decke: OK schiebt die Platte, bei gebundener UK ändert sie die Dicke; UK ändert die Dicke.
+    const slab = { base: 0, top: 2.6, bottom: 2.35 };
+    expect(sheetHeightDrag("ceilingTop", slab, 2.8, false)).toEqual({ top: 2.8, bottom: 2.55 });
+    expect(sheetHeightDrag("ceilingTop", { ...slab, bottomFixed: true }, 2.8, false)).toEqual({ top: 2.8, bottom: 2.35 });
+    expect(sheetHeightDrag("ceilingBottom", slab, 2.2, false)).toEqual({ top: 2.6, bottom: 2.2 });
+    expect(sheetHeightDrag("wallBottom", { base: 0, top: 2.6, bottom: 0 }, -0.5, false)).toEqual({ top: 2.6, bottom: -0.5 });
+    expect(snapSheetHeight(2.63, [0, 2.6, 3], 0.05)).toBe(2.6);
+    expect(snapSheetHeight(2.8, [0, 2.6, 3], 0.05)).toBe(2.8);
   });
 
   it("Öffnung entlang der Wand und im Schnitt", () => {

@@ -8,7 +8,7 @@
 //!   Nachbarkanten ([`axis_lock`]);
 //! - Kanten-Griff: geführte Kante (nur entlang der Aussennormale, Raster/Geometrie-Snap) bzw. freie Kante
 //!   (Ortho, Raster), mit oder ohne gelockte Felder ([`edge_target`]);
-//! - Höhen-Griffe im Schnitt (Wand-Oberkante, Fenster Ober-/Unterkante, [`sheet_height`]);
+//! - Höhen-Griffe im Schnitt ([187], Wand, Öffnung, Decke: `crate::sheet_height`);
 //! - Öffnung entlang der Wirtswand ([`opening_slide_sheet`]; der Griff-Zug selbst: `crate::opening_slide`), Griff-Lagen von
 //!   Öffnung, Treppe, Bogenwand und Baugrube;
 //! - koinzidente Ecken anderer gewählter Elemente beim Körper-Verschieben ([`coincident`]).
@@ -169,45 +169,6 @@ pub fn edge_target(edge: Edge, raw: P, d: EdgeDrive) -> P {
         offset = jsnum::round(offset / gs) * gs;
     }
     add(anchor, scale(edge.normal, offset))
-}
-
-/// Art eines Höhen-Griffs im Schnitt/in der Ansicht.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum HeightGrip {
-    WallTop,
-    OpeningTop,
-    OpeningBottom,
-}
-
-/// Ergebnis eines Höhen-Griff-Zugs: neue Ober-/Unterkante im Blatt und die Werte fürs Bauteil
-/// (Wand/Öffnung `height`; Fenster-Unterkante zusätzlich `sill_height`), auf mm gerundet.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct HeightDrag {
-    pub top: f64,
-    pub bottom: f64,
-    pub height: f64,
-    pub sill_height: Option<f64>,
-}
-
-/// Höhen-Griff auf die Blatt-Höhe `y` ziehen (1-cm-Raster, `free` = Strg ohne Raster). `base` = Geschoss-
-/// Höhe, `top`/`bottom` = heutige Ober-/Unterkante im Blatt. Mindestmasse: Wand 0.30 m, Öffnung 0.20 m.
-pub fn sheet_height(kind: HeightGrip, base: f64, top: f64, bottom: f64, y: f64, free: bool) -> HeightDrag {
-    let v = if free { y } else { jsnum::round(y * 100.0) / 100.0 };
-    let mm = |x: f64| jsnum::round(x * 1000.0) / 1000.0;
-    match kind {
-        HeightGrip::WallTop => {
-            let t = jsnum::max(base + 0.3, v);
-            HeightDrag { top: t, bottom, height: mm(t - base), sill_height: None }
-        }
-        HeightGrip::OpeningTop => {
-            let t = jsnum::max(bottom + 0.2, v);
-            HeightDrag { top: t, bottom, height: mm(t - bottom), sill_height: None }
-        }
-        HeightGrip::OpeningBottom => {
-            let b = jsnum::min(top - 0.2, jsnum::max(base, v));
-            HeightDrag { top, bottom: b, height: mm(top - b), sill_height: Some(mm(b - base)) }
-        }
-    }
 }
 
 /// Mittelpunkt-Griff einer Öffnung (Breite `width`, `position` = Abstand des ersten Pfostens) auf der Wandachse.
@@ -664,27 +625,6 @@ mod tests {
         assert!(close(p, (3.0, 1.0)));
         let p = edge_target(e, (3.2, 1.4), EdgeDrive { locked: true, length: Some(2.0), angle: Some(0.0), ..Default::default() });
         assert!(close(p, (3.0, 1.0)));
-    }
-
-    #[test]
-    fn hoehen_griffe() {
-        // Wand: 1-cm-Raster, Mindesthöhe 0.30 über dem Geschoss.
-        let r = sheet_height(HeightGrip::WallTop, 3.0, 5.6, 3.0, 5.7349, false);
-        assert_eq!((r.top, r.height, r.sill_height), (5.73, 2.73, None));
-        let r = sheet_height(HeightGrip::WallTop, 3.0, 5.6, 3.0, 2.0, false);
-        assert_eq!(r.height, 0.3);
-        // Strg: ohne Raster.
-        assert_eq!(sheet_height(HeightGrip::WallTop, 0.0, 2.0, 0.0, 2.3456, true).height, 2.346);
-        // Fenster oben: Mindesthöhe 0.20 über der Unterkante.
-        let r = sheet_height(HeightGrip::OpeningTop, 0.0, 2.1, 0.9, 0.5, false);
-        assert_eq!((r.top, r.height), (1.1, 0.2));
-        // Fenster unten: zwischen Geschoss und Oberkante − 0.20, Oberkante bleibt.
-        let r = sheet_height(HeightGrip::OpeningBottom, 0.0, 2.1, 0.9, 0.6, false);
-        assert_eq!((r.bottom, r.top, r.sill_height, r.height), (0.6, 2.1, Some(0.6), 1.5));
-        let r = sheet_height(HeightGrip::OpeningBottom, 0.0, 2.1, 0.9, -1.0, false);
-        assert_eq!(r.sill_height, Some(0.0));
-        let r = sheet_height(HeightGrip::OpeningBottom, 0.0, 2.1, 0.9, 3.0, false);
-        assert_eq!(r.height, 0.2);
     }
 
     #[test]

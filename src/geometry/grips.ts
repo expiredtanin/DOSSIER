@@ -13,6 +13,7 @@ import { core } from "../engine/coreWasm";
 import { toMarkedJson } from "../core/ops";
 import { DEFAULT_SCALE_DENOMINATOR } from "../model/dimension";
 import { textFrameCorners } from "../text/textFrame";
+import type { SheetHeightKind } from "./gripDrag";
 
 /** Punkt als `[x, y]` (Anfragen an den Kern). */
 type P = [number, number];
@@ -50,6 +51,8 @@ export type GripRequest =
   | { op: "insertPoint"; id: string; seg: number; pt: P }
   | { op: "deletePoint"; id: string; index: number }
   | { op: "vertexType"; id: string; index: number; vertexType: "corner" | "arc" | "spline" }
+  // [187] Höhen-Griff im Schnitt/in der Ansicht: Kante `kind` auf die Blatt-Höhe `a` (absolutes Z) ziehen (Kern `sheet_height.rs`).
+  | { op: "sheetHeight"; kind: SheetHeightKind; id: string; a: number; free?: boolean; newId: string; newName: string }
   | { op: "wallThickness" | "ceilingThickness"; id: string; thickness: number; newId: string; newName: string }
   // [144] Wandöffnung gleiten lassen (Kern `opening_slide`): Griff-Zug nach `pt` bzw. Position `a` ab Wandanfang.
   | { op: "openingSlide"; id: string; pt: P }

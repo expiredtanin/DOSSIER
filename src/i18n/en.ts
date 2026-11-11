@@ -2308,6 +2308,8 @@ export const en: Record<TranslationKey, string> = {
   "edit.cutSegment.label": "Delete segment",
   // Tab field cycle (precision input): ordered numeric fields per step.
   "cmd.field.length": "Length",
+  "cmd.field.level": "Level",
+  "grip.sheetHeight": "Level {z} m · height {d} m",
   "cmd.field.angle": "Angle",
   "cmd.field.width": "Width",
   "cmd.field.height": "Height",

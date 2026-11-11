@@ -384,6 +384,7 @@ export function useProjectActions(
   const moveCeilingEdge = useStore((s) => s.moveCeilingEdge);
   const updateCeiling = useStore((s) => s.updateCeiling);
   const setCeilingThickness = useStore((s) => s.setCeilingThickness);
+  const sheetHeightGrip = useStore((s) => s.sheetHeightGrip);
   const updateStair = useStore((s) => s.updateStair);
   const moveStairBy = useStore((s) => s.moveStairBy);
   const dragStairParam = useStore((s) => s.dragStairParam);
@@ -508,6 +509,7 @@ export function useProjectActions(
     moveCeilingEdge,
     updateCeiling,
     setCeilingThickness,
+    sheetHeightGrip,
     updateStair,
     moveStairBy,
     dragStairParam,

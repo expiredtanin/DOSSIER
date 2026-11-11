@@ -2,7 +2,7 @@
 //! Puffer `[x0, y0, …]`; NaN = „fehlt" (ungelockter Wert, kein Snap, kein Zentrum). Kaputte Puffer ergeben
 //! ein leeres Ergebnis.
 
-use crate::grip_drag::{self as gd, Edge, EdgeDrive, HeightGrip, P};
+use crate::grip_drag::{self as gd, Edge, EdgeDrive, P};
 use wasm_bindgen::prelude::wasm_bindgen;
 
 fn opt(v: f64) -> Option<f64> {
@@ -108,18 +108,23 @@ pub fn grip_edge_target(
     vec![p.0, p.1]
 }
 
-/// Höhen-Griff im Schnitt (`kind` 0 Wand-Oberkante, 1 Öffnung oben, 2 Öffnung unten): `[oben, unten, höhe,
-/// brüstung]` (Brüstung NaN, wenn sie sich nicht ändert); `[]` bei unbekannter Art.
+/// Höhen-Griff im Schnitt ([187], `sheet_height::Kind`: 0 Wand OK, 1 Öffnung oben, 2 Öffnung unten, 3 Wand UK, 4 Decke OK
+/// (Platte wandert), 5 Decke OK bei gebundener UK, 6 Decke UK): neue `[oben, unten]` im Blatt; `[]` bei unbekannter Art
+/// oder Unsinn (NaN).
 #[wasm_bindgen]
 pub fn grip_sheet_height(kind: u32, base: f64, top: f64, bottom: f64, y: f64, free: bool) -> Vec<f64> {
-    let k = match kind {
-        0 => HeightGrip::WallTop,
-        1 => HeightGrip::OpeningTop,
-        2 => HeightGrip::OpeningBottom,
-        _ => return vec![],
-    };
-    let r = gd::sheet_height(k, base, top, bottom, y, free);
-    vec![r.top, r.bottom, r.height, r.sill_height.unwrap_or(f64::NAN)]
+    let Some(k) = crate::sheet_height::Kind::from_index(kind) else { return vec![] };
+    if ![base, top, bottom, y].iter().all(|v| v.is_finite()) {
+        return vec![];
+    }
+    let (t, b) = crate::sheet_height::drag(k, base, top, bottom, y, free);
+    vec![t, b]
+}
+
+/// Fang einer Blatt-Höhe `y` auf die nächste Kote aus `levels` innerhalb `tol` (Meter): die Kote, sonst `y`.
+#[wasm_bindgen]
+pub fn grip_snap_height(y: f64, levels: &[f64], tol: f64) -> f64 {
+    crate::sheet_height::snap_level(y, levels, tol)
 }
 
 /// Mittelpunkt-Griff einer Öffnung auf der Wandachse `s → e`: `[x, y]`.

@@ -63,7 +63,7 @@ import { reorderByIds } from "../model/reorder";
 import { transformMutation } from "../tools/transform";
 import type { CopyMode, TransformOp, TransformSelection } from "../tools/transform";
 import { uniqueId } from "../tools/types";
-import { gripPt, type GripRequest, type RingKind } from "../core";
+import { gripPt, type GripRequest, type RingKind, type SheetHeightKind } from "../core";
 import { DEFAULT_SCALE_DENOMINATOR } from "../model/dimension";
 import { DEFAULT_PRESETS, type TextStylePreset } from "../text/richText";
 import { t } from "../i18n";
@@ -420,6 +420,8 @@ export interface ProjectSlice {
   ) => void;
   /** Setzt die Gesamtdicke einer Decke (thickness-Übersteuerung, Meter). */
   setCeilingThickness: (ceilingId: string, thickness: number) => void;
+  /** [187] Höhen-Griff im Schnitt/in der Ansicht: Kante `kind` des Bauteils `id` auf die Blatt-Höhe `y` (absolutes Z) ziehen. */
+  sheetHeightGrip: (kind: SheetHeightKind, id: string, y: number, free?: boolean) => void;
 
   // ── Öffnungs-Editieren (Object-Info-Panel) ────────────────────────────────
   /** Generischer immutabler Patch auf eine Öffnung (per ID). */
@@ -1308,6 +1310,17 @@ export function createProjectSlice(
         thickness,
         newId: `ct-${Date.now()}`,
         newName: t("default.ceilingTypeSingle", { thickness: thickness.toFixed(2) }),
+      }),
+
+    sheetHeightGrip: (kind, id, y, free) =>
+      applyGrip({
+        op: "sheetHeight",
+        kind,
+        id,
+        a: y,
+        free: !!free,
+        newId: `ct-${Date.now()}`,
+        newName: t("default.ceilingTypeSingle", { thickness: "{t}" }), // {t} setzt der Kern ein
       }),
 
     // ── Öffnungs-Editieren ────────────────────────────────────────────────

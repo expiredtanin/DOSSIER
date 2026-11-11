@@ -463,6 +463,9 @@ pub fn run(lk: &Lookup, req: &Request) -> Result<GripResult, String> {
             }
             vec![replace("drawings2d", with_geom(d, with_all(g, fields)))].into()
         }
+        // [187] Höhen-Griff im Schnitt/in der Ansicht: `kind` = wallTop | wallBottom | openingTop | openingBottom |
+        // ceilingTop | ceilingBottom, `a` = Blatt-Höhe (absolutes Z), `free` ohne 1-cm-Raster (`sheet_height.rs`).
+        "sheetHeight" => crate::sheet_height::ops(lk, r.s("kind").unwrap_or(""), r.s("id").unwrap_or(""), r.n("a"), r.free, r.s("newId").unwrap_or(""), &req.new_name).into(),
         "wallThickness" => wall_thickness(root, r.s("id").unwrap_or(""), r.n("thickness"), r.s("newId").unwrap_or(""), req.new_name.clone()).into(),
         "ceilingThickness" => ceiling_thickness(root, r.s("id").unwrap_or(""), r.n("thickness"), r.s("newId").unwrap_or(""), req.new_name.clone()).into(),
         // [144] Wandöffnung gleiten lassen: Griff-Zug nach `pt` bzw. Objekt-Info-Position `a` (ab
@@ -1561,7 +1564,7 @@ fn wall_thickness(root: &Map<String, Value>, wall_id: &str, thickness: f64, new_
 
 /// Dicke einer einschichtigen Decke (`setCeilingThickness`), analog zur Wand; der geteilte
 /// Alt-Wandtyp (`Ceiling.wallTypeId`) wird nie verändert.
-fn ceiling_thickness(root: &Map<String, Value>, ceiling_id: &str, thickness: f64, new_id: &str, new_name: Value) -> Vec<Op> {
+pub(crate) fn ceiling_thickness(root: &Map<String, Value>, ceiling_id: &str, thickness: f64, new_id: &str, new_name: Value) -> Vec<Op> {
     if !thickness.is_finite() || thickness <= 0.0 {
         return vec![];
     }
