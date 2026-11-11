@@ -85,6 +85,20 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   gedämpft (render3d hat nur `set_ghost` für die Hülle); natives Mac-3D-Fenster bekommt nur den Ebenen-Baum, nicht
   den Darstellungsmodus; Datei-Exporte (OBJ/glTF/IFC/STEP) bleiben vollständig; kein e2e (3D-Pick headless unzuverlässig);
   nicht in der Tauri-App/auf dem Mac geprüft. · M
+- ◐ **[190]** Verbinden wie Archicad + Kürzel (12.11., Wunsch Maintainer). Umgesetzt (12.11.): Cmd/Ctrl+J („join") schliesst bei
+  gewählten Wänden auch Ecken: nicht parallele gerade Wände eines Geschosses, deren Enden bis 0.5 m (bzw. 2 × Wanddicke)
+  vom Achsschnittpunkt liegen (Lücke oder Überstand), werden dort verlängert/gekürzt (L-Ecke, beide Enden); Ende nahe einer
+  anderen Wand, deren Achse im Innern getroffen wird, ergibt einen T-Stoss (nur dieses Ende rückt). Mehr als zwei Wände: alle
+  Paare, nahe Paare zuerst, jedes Ende höchstens einmal; kollinear wie bisher zusammengefasst (dann nicht noch einmal
+  angefasst). Gehrung/Anschluss aus `joins.rs`; Öffnungen und Bemassung führt `cmd_wall_edit::commit` nach (wie Trim/Extend:
+  Öffnungen bleiben im Plan stehen, [188]), ein Undo-Schritt; ohne Wirkung Hinweis `cmd.join.nothing`. Kern
+  `cmd_wall_edit.rs::connect_ops`; Tests `verbinden_*`; e2e `wallJoin190.spec.ts`. Das Tastenkürzel reagiert jetzt auch bei
+  reiner Wandauswahl. Neue umbelegbare Kürzel (Einstellungen): Cmd+D Duplizieren (Kopie 0.5 m versetzt, danach gewählt),
+  Cmd+L Sperren/Entsperren, Cmd+Shift+H Ebenen der Auswahl ausblenden, Cmd+Shift+A alle Ebenen einblenden, Cmd+0 alles
+  einpassen, Cmd+Shift+F auf Auswahl einpassen (ohne Plan: 3D-Kamera); alle im nativen Menü (`state/selectionActions.ts`).
+  Offen: Bogenwände werden nicht verbunden; T-Stoss nur bis zur Achse (nicht Fläche); „Auswahl ausblenden" im Grundriss
+  schaltet Ebenen (persistent, undo-bar), nicht einzelne Elemente temporär; kein Cmd+E/F2 (keine Funktion dahinter);
+  nicht in der Tauri-App geprüft. · S
 - ○ **[189]** Panels neu ordnen + Einstellungsdialog (12.11., Maintainer): Attribute-Panel unten links nur Gestaltung (Stift, Füllung, Linienstil, Schraffur); BIM-/Bauteil-Infos (Typ, Schichten, Masse, Kennwerte, IFC/Psets, Material …) in die Objekt-Info. Taste T bei Auswahl öffnet direkt den Einstellungsdialog des Objekts (wie Archicad Cmd+T), v. a. für Fenster/Türen, deren Einstellungen heute nur über das Attribute-Panel erreichbar sind. · M
 - ○ **[187]** Griffe im Schnitt/in der Ansicht (12.11., Maintainer): angewählte Elemente haben dort kaum Fasspunkte (Decken, Gelände, Dächer …). Wie Archicad: Decke OK/UK (Höhe/Dicke), Wand OK (Höhe), Öffnung Brüstung/Sturz, Dach Traufe/First bzw. Neigung, Treppe An-/Austritt, Gelände-Profilpunkte (falls Modell es erlaubt); ein Undo-Schritt je Zug, Fang + Tab-Eingabe wie im Grundriss. · L
 - ○ **[186]** Schatten (12.11., Maintainer): (1) 3D-Schatten stellenweise unscharf (Shadow-Map-Auflösung/Frustum zu gross, Filter) → Frustum auf Gebäude fitten bzw. Kaskaden, schärferer PCF; (2) Grundriss-Schatten fehlt unmittelbar am Haus (Lücke zwischen Fassade und Schatten; vermutlich Werfer ab ±0.00 statt ab Wandfuss/Gelände) → Schatten beginnt an der Fassade. Opus. · M

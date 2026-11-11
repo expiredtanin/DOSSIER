@@ -47,6 +47,25 @@ describe("SHORTCUT_DEFS", () => {
   });
 });
 
+describe("[190] Archicad-Kürzel", () => {
+  const combo = (id: string) => SHORTCUT_DEFS.find((d) => d.id === id)?.defaultCombo;
+  it("belegt die neuen Kürzel ohne Kollision mit Werkzeug-Ziffern und Buchstaben", () => {
+    expect(combo("duplicate")).toBe("mod+d");
+    expect(combo("toggleLock")).toBe("mod+l");
+    expect(combo("fitAll")).toBe("mod+0");
+    expect(combo("fitSelection")).toBe("mod+shift+f");
+    expect(combo("hideSelectionLayers")).toBe("mod+shift+h");
+    expect(combo("showAllLayers")).toBe("mod+shift+a");
+    // Kein Kürzel doppelt (auch nicht gegen m/s/d/q und 1–0).
+    const all = SHORTCUT_DEFS.map((d) => d.defaultCombo);
+    expect(new Set(all).size).toBe(all.length);
+    // Cmd+D (Duplizieren) und d (Drehen) sind verschiedene Kombinationen.
+    expect(matchesShortcut(key("d"), "duplicate", {})).toBe(false);
+    expect(matchesShortcut(key("d", { metaKey: true }), "duplicate", {})).toBe(true);
+    expect(matchesShortcut(key("d", { metaKey: true }), "transformRotate", {})).toBe(false);
+  });
+});
+
 describe("comboMatches", () => {
   it("erkennt Ctrl/Cmd+Z (mod+z)", () => {
     expect(comboMatches(key("z", { ctrlKey: true }), "mod+z")).toBe(true);

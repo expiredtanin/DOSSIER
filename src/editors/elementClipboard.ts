@@ -186,6 +186,11 @@ export function pasteElementClipboard(
   activeLevelId: string,
 ): { ops: CoreOp[]; pastedIds: PastedIds } {
   const ops = documentFor(project).cmdOps({ cmd: "paste", clip, levelId: activeLevelId, stamp: uniqueStamp() });
+  return { ops, pastedIds: addedIds(ops) };
+}
+
+/** Neue ids je Bauteil-Art aus den `add`-Ops (Einfügen, Duplizieren). */
+export function addedIds(ops: readonly CoreOp[]): PastedIds {
   const pastedIds: PastedIds = {
     wallIds: [],
     drawingIds: [],
@@ -202,7 +207,7 @@ export function pasteElementClipboard(
     const key = op.kind === "add" ? PASTED_KEY[op.collection] : undefined;
     if (op.kind === "add" && key) for (const e of op.items) pastedIds[key].push((e as { id: string }).id);
   }
-  return { ops, pastedIds };
+  return pastedIds;
 }
 
 export { EMPTY_CLIPBOARD };

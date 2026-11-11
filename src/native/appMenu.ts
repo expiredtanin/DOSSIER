@@ -17,6 +17,7 @@ import { isTauriRuntime } from "./projectFile";
 import { t } from "../i18n";
 import { APP_VERSION } from "../ui/TopBar";
 import type { View3d, ViewType } from "../model/viewTypes";
+import type { SelectionActionId } from "../state/selectionActions";
 
 /** Alle Aktionen, die die native Menüleiste auslösen kann. */
 export interface NativeAppMenuHandlers {
@@ -61,6 +62,8 @@ export interface NativeAppMenuHandlers {
   onShowSelection3d?: () => void;
   /** [185] Auswahl im 3D ausblenden (Cmd+4). */
   onHideSelection3d?: () => void;
+  /** [190] Auswahl-Aktionen mit Kürzel (Cmd+D/J/L, Cmd+0, Cmd+Shift+F/H/A), s. `state/selectionActions.ts`. */
+  onSelectionAction?: (id: SelectionActionId) => void;
 
   onToggleResources: () => void;
   onOpenSettings: () => void;
@@ -274,6 +277,22 @@ export function useNativeAppMenu(
           redoItem,
           await PredefinedMenuItem.new({ item: "Separator" }),
           deleteItem,
+          // [190] Archicad-Kürzel (dieselben laufen im Browser über `useSelectionActionShortcuts`).
+          await MenuItem.new({
+            text: t("menu.edit.duplicate"),
+            accelerator: "CmdOrCtrl+D",
+            action: () => handlersRef.current.onSelectionAction?.("duplicate"),
+          }),
+          await MenuItem.new({
+            text: t("menu.edit.join"),
+            accelerator: "CmdOrCtrl+J",
+            action: () => handlersRef.current.onSelectionAction?.("join"),
+          }),
+          await MenuItem.new({
+            text: t("menu.edit.toggleLock"),
+            accelerator: "CmdOrCtrl+L",
+            action: () => handlersRef.current.onSelectionAction?.("toggleLock"),
+          }),
           await PredefinedMenuItem.new({ item: "Separator" }),
           await MenuItem.new({
             text: t("menu.native.move"),
@@ -368,6 +387,28 @@ export function useNativeAppMenu(
             text: t("menu.view.hideSelection3d"),
             accelerator: "CmdOrCtrl+4",
             action: () => handlersRef.current.onHideSelection3d?.(),
+          }),
+          // [190] Einpassen und Ebenen ein-/ausblenden.
+          await PredefinedMenuItem.new({ item: "Separator" }),
+          await MenuItem.new({
+            text: t("menu.view.fitAll"),
+            accelerator: "CmdOrCtrl+0",
+            action: () => handlersRef.current.onSelectionAction?.("fitAll"),
+          }),
+          await MenuItem.new({
+            text: t("menu.view.fitSelection"),
+            accelerator: "CmdOrCtrl+Shift+F",
+            action: () => handlersRef.current.onSelectionAction?.("fitSelection"),
+          }),
+          await MenuItem.new({
+            text: t("menu.view.hideSelectionLayers"),
+            accelerator: "CmdOrCtrl+Shift+H",
+            action: () => handlersRef.current.onSelectionAction?.("hideLayers"),
+          }),
+          await MenuItem.new({
+            text: t("menu.view.showAllLayers"),
+            accelerator: "CmdOrCtrl+Shift+A",
+            action: () => handlersRef.current.onSelectionAction?.("showAllLayers"),
           }),
         ],
       });

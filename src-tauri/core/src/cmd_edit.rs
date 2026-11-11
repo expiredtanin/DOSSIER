@@ -990,7 +990,19 @@ pub fn ops(root: &Map<String, Value>, p: &Project, v: &Value) -> Option<Vec<Op>>
         "offset" => offset_ops(root, s_arg(v, "id"), n_arg(v, "d"), &mut ids),
         "join" => {
             let mut ops = join_ops(root, &list("ids"), &mut ids);
-            ops.extend(wall_edit::join_ops(root, p, &list("ids")));
+            let walls = wall_edit::join_ops(root, p, &list("ids"));
+            // Schon kollinear verkettete Wände nicht noch einmal anfassen.
+            let touched: Vec<String> = walls
+                .iter()
+                .flat_map(|o| match o {
+                    Op::Replace { collection, entity } if collection == "walls" => id_of(entity).map(String::from).into_iter().collect(),
+                    Op::Remove { collection, ids } if collection == "walls" => ids.clone(),
+                    _ => vec![],
+                })
+                .collect();
+            ops.extend(walls);
+            // [190] Ecken und T-Stösse: Enden bis zum Achsschnittpunkt verlängern/kürzen.
+            ops.extend(wall_edit::connect_ops(root, p, &list("ids"), &touched));
             ops
         }
         "splitAt" => break_ops(root, s_arg(v, "id"), p_arg(v, "pt"), p_arg(v, "pt"), &mut ids),

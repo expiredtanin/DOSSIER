@@ -397,6 +397,7 @@ export function useSplitJoinShortcut(
   runSplit: (ids: string[]) => void,
   setSelection: (patch: Partial<Selection>) => void,
   overrides: ShortcutOverrides,
+  selectedWallIds: string[] = [],
 ): void {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -405,7 +406,8 @@ export function useSplitJoinShortcut(
       const isJoin = !isSplit && matchesShortcut(e, "join", overrides);
       if (!isSplit && !isJoin) return;
       const ids = selectedDrawingIds;
-      if (ids.length === 0) return; // nur 2D-Auswahl bedient; Wände → no-op
+      // Teilen: nur 2D-Auswahl. Verbinden ([190]): auch gewählte Wände (Ecken/T-Stösse schliessen).
+      if (isSplit ? ids.length === 0 : ids.length + selectedWallIds.length === 0) return;
       e.preventDefault();
 
       if (isSplit) {
@@ -420,7 +422,7 @@ export function useSplitJoinShortcut(
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedDrawingIds, engine, overrides]);
+  }, [selectedDrawingIds, selectedWallIds, engine, overrides]);
 }
 
 /**
@@ -664,6 +666,59 @@ export function useViewNavigationShortcuts(overrides: ShortcutOverrides): void {
             : matchesShortcut(e, "hideSelection3d", overrides)
               ? hideSelectionIn3d
               : null;
+      if (!fn) return;
+      e.preventDefault();
+      fn();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [overrides]);
+}
+
+/**
+ * [190] Auswahl-Aktionen mit Archicad-Kürzeln: Cmd/Ctrl+D = Duplizieren (Kopie mit Versatz), Cmd/Ctrl+L =
+ * Sperren/Entsperren, Cmd/Ctrl+Shift+H = Ebenen der Auswahl ausblenden, Cmd/Ctrl+Shift+A = alle Ebenen
+ * einblenden. Die Aktionen selbst liegen in `useSelectionCommands` (auch vom Kontextmenü gebraucht).
+ */
+export function useSelectionActionShortcuts(
+  actions: { duplicate: () => void; toggleLock: () => void; hideLayers: () => void; showAllLayers: () => void },
+  overrides: ShortcutOverrides,
+): void {
+  const ref = useRef(actions);
+  ref.current = actions;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (isEditableTarget(e)) return;
+      const fn = matchesShortcut(e, "duplicate", overrides)
+        ? ref.current.duplicate
+        : matchesShortcut(e, "toggleLock", overrides)
+          ? ref.current.toggleLock
+          : matchesShortcut(e, "hideSelectionLayers", overrides)
+            ? ref.current.hideLayers
+            : matchesShortcut(e, "showAllLayers", overrides)
+              ? ref.current.showAllLayers
+              : null;
+      if (!fn) return;
+      e.preventDefault();
+      fn();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [overrides]);
+}
+
+/** [190] Cmd/Ctrl+0 = alles einpassen, Cmd/Ctrl+Shift+F = auf Auswahl einpassen (Plan; im 3D-Reiter die Kamera). */
+export function useFitShortcuts(fitAll: () => void, fitSelection: () => void, overrides: ShortcutOverrides): void {
+  const ref = useRef({ fitAll, fitSelection });
+  ref.current = { fitAll, fitSelection };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (isEditableTarget(e) && !(e.target as HTMLElement).classList.contains("cmdline-input")) return;
+      const fn = matchesShortcut(e, "fitAll", overrides)
+        ? ref.current.fitAll
+        : matchesShortcut(e, "fitSelection", overrides)
+          ? ref.current.fitSelection
+          : null;
       if (!fn) return;
       e.preventDefault();
       fn();
