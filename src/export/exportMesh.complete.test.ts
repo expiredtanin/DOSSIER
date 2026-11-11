@@ -42,7 +42,7 @@ const CUBE_IDX = [0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4, 1, 2, 6,
 function withContext(base: Project): Project {
   const imported: ImportedMesh = {
     id: "IM1",
-    type: "importedMesh",
+    type: "importedMesh", categoryCode: "10",
     name: "Nachbar",
     color: "#ff0000",
     positions: CUBE_POS.map((v, i) => (i % 3 === 0 ? v + 20 : v)),
@@ -50,7 +50,7 @@ function withContext(base: Project): Project {
   };
   const terrain: TerrainMesh = {
     id: "TM1",
-    type: "terrainMesh",
+    type: "terrainMesh", categoryCode: "02",
     name: "Gelände",
     positions: [-5, -5, 0, 25, -5, 0, 25, 25, 0, -5, 25, 0],
     indices: [0, 1, 2, 0, 2, 3],

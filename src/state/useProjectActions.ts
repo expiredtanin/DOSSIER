@@ -353,8 +353,6 @@ export function useProjectActions(
     const pts = contextObjectsBounds(objs as ContextObject[]);
     if (pts) planViewRef.current?.fitBounds(pts);
   };
-  const removeContextObject = useStore((s) => s.removeContextObject);
-  const removeContextObjects = useStore((s) => s.removeContextObjects);
   const generateTerrain = useStore((s) => s.generateTerrain);
   const patchContextObject = useStore((s) => s.patchContextObject);
   const moveGripOf = useStore((s) => s.moveGripOf);
@@ -475,8 +473,6 @@ export function useProjectActions(
     addContextObjects,
     addContextObjectsAndFit,
     fitToContextObjects,
-    removeContextObject,
-    removeContextObjects,
     generateTerrain,
     patchContextObject,
     moveGripOf,

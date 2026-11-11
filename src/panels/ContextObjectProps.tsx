@@ -1,8 +1,7 @@
-// Einstellungen eines Kontext-Objekts (importiertes Mesh, Gelände, Baugrube) — gemeinsam für die Liste im
-// Panel „Gelände & Kontext" und die Objekt-Info ([137]: ein angeklicktes Gelände bzw. eine Baugrube zeigt
-// dort dieselben Felder). Gelände zusätzlich: Sichtbarkeit seiner Kategorie und Glättung (aus den
-// Höhenlinien neu erzeugt, ein Undo-Schritt). [137] Dazu: dieses Netz einzeln ausblenden (`hidden`) und
-// Raster-Gelände (swissALTI3D, ohne Höhenlinien) additiv nachglätten.
+// Einstellungen eines Gelände-/Umgebungs-Elements (Netzkörper, Gelände, Baugrube) in der Objekt-Info ([137]:
+// ein angeklicktes Gelände bzw. eine Baugrube zeigt dort ihre Felder). Gelände zusätzlich: Sichtbarkeit seiner
+// Klasse und Glättung (aus den Höhenlinien neu erzeugt, ein Undo-Schritt); Raster-Gelände (swissALTI3D, ohne
+// Höhenlinien) additiv nachglätten. [181] Sichtbarkeit nur über die Klasse — kein Einzel-Ausblenden, keine Import-Liste.
 //
 // Bezeichner englisch, UI-Text/Kommentare deutsch. Alle sichtbaren Texte über t(...).
 
@@ -76,15 +75,6 @@ export function ContextObjectProps({ obj, quantities }: { obj: ContextObject; qu
     // [T4] Glatt oder kantig schattieren, Knickwinkel je Mesh (Vorgabe 30°).
     return (
       <div className="site-props">
-        <label className="site-check" title={t("site.mesh.visible.hint")}>
-          <input
-            type="checkbox"
-            data-testid="imported-mesh-visible"
-            checked={obj.hidden !== true}
-            onChange={(e) => host.onPatchContextObject(obj.id, { hidden: e.target.checked ? undefined : true }, `site-${obj.id}-hidden`)}
-          />
-          {t("site.mesh.visible")}
-        </label>
         <label className="site-check">
           <input
             type="checkbox"
@@ -101,19 +91,10 @@ export function ContextObjectProps({ obj, quantities }: { obj: ContextObject; qu
   }
 
   if (obj.type === "terrainMesh") {
-    const cat = obj.categoryCode ? flattenCategories(project.layers).find((c) => c.code === obj.categoryCode) : undefined;
+    const cat = flattenCategories(project.layers).find((c) => c.code === obj.categoryCode);
     const hasSource = (project.context ?? []).some((o) => o.type === "contourSet");
     return (
       <div className="site-props">
-        <label className="site-check" title={t("site.terrain.meshVisible.hint")}>
-          <input
-            type="checkbox"
-            data-testid="terrain-mesh-visible"
-            checked={obj.hidden !== true}
-            onChange={(e) => host.onPatchContextObject(obj.id, { hidden: e.target.checked ? undefined : true }, `site-${obj.id}-hidden`)}
-          />
-          {t("site.terrain.meshVisible")}
-        </label>
         {cat && (
           <label className="site-check" title={t("site.terrain.visible.hint", { name: `${cat.code} ${cat.name}` })}>
             <input type="checkbox" data-testid="terrain-visible" checked={cat.visible} onChange={() => host.onToggleCategory(cat.code)} />

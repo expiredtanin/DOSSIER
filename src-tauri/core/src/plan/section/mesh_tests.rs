@@ -4,7 +4,7 @@ use super::*;
 use crate::mesh_view::tests::{barrel, cube, prism};
 
 fn mesh(id: &str, (positions, indices): (Vec<f64>, Vec<f64>)) -> ContextObject {
-    ContextObject::ImportedMesh(ImportedMesh { id: id.into(), name: format!("Netz {id}"), category_code: Some("10".into()), positions, indices, ..Default::default() })
+    ContextObject::ImportedMesh(ImportedMesh { id: id.into(), name: format!("Netz {id}"), category_code: "10".into(), positions, indices, ..Default::default() })
 }
 
 /// Schnitt längs x bei y = 0 ab x = −5 (u = x + 5), Blick nach +y (hinter der Ebene: y > 0).
@@ -38,12 +38,6 @@ fn wuerfel_netz_geschnitten() {
     let vis = Visibility { has_vis: true, invisible: ["10".to_string()].into(), ..Default::default() };
     let (prims, _) = section_primitives_at(&o, false, false, &vis, 100.0, Detail::Mittel, false, &CutRules::default());
     assert!(!prims.iter().any(|q| matches!(q, Primitive::Polygon { context_object_id: Some(_), .. })));
-    // Einzeln ausgeblendet ([137]): weg.
-    let mut q = p.clone();
-    if let Some(ContextObject::ImportedMesh(m)) = q.context.as_mut().and_then(|c| c.first_mut()) {
-        m.hidden = Some(true);
-    }
-    assert!(mesh_cuts(&compute_section(&q, &lv(false), &[]).unwrap().unwrap()).is_empty());
 }
 
 #[test]
@@ -168,21 +162,18 @@ fn netz_override_fuellung_und_ausblenden() {
     assert!(mesh_cuts(&compute_section(&q, &lv(false), &[]).unwrap().unwrap()).is_empty());
 }
 
-/// [152] IFC-Gelände (Netz „Gelaende" der Klasse IfcSite, 1 m dicke Platte) als Geländelinie mit Erdreich statt als
-/// geschnittener Körper; ein Netz ohne Gelände-Merkmal bleibt Körper.
+/// [152]/[181] Geschlossenes Gelände-Netz (z. B. IFC-Gelände als 1 m dicke Platte, beim Import zum Gelände-Element
+/// geworden): im Schnitt Geländelinie (nur Oberkante) mit Erdreich statt geschnittener Körper; ein Netzkörper gleicher
+/// Form bleibt Körper — entscheidend ist die Elementart, nicht Name oder Herkunft.
 #[test]
-fn ifc_gelaende_als_gelaendelinie() {
-    let terrain = |name: &str, layer: Option<&str>| {
-        let (positions, indices) = cube(-4.0, 7.0, -3.0, 3.0, -1.0, 0.0);
-        ContextObject::ImportedMesh(ImportedMesh { id: "g".into(), name: name.into(), layer: layer.map(String::from), category_code: Some("10".into()), positions, indices, ..Default::default() })
-    };
-    for (name, layer) in [("Gelaende", Some("IfcSite")), ("Terrain", None), ("Site (3)", Some("IfcSite")), ("Gelände 1", Some("IfcGeographicElement"))] {
-        let p = with(vec![terrain(name, layer), mesh("w", cube(1.0, 3.0, -1.0, 2.0, 0.0, 2.5))]);
-        let ContextObject::ImportedMesh(g) = &p.context.as_ref().unwrap()[0] else { unreachable!() };
-        assert!(crate::mesh_view::is_terrain(g), "{name}");
+fn geschlossenes_gelaende_als_gelaendelinie() {
+    let (positions, indices) = cube(-4.0, 7.0, -3.0, 3.0, -1.0, 0.0);
+    let terrain = ContextObject::TerrainMesh(TerrainMesh { id: "g".into(), name: "Site".into(), category_code: "02".into(), positions: positions.clone(), indices: indices.clone(), ..Default::default() });
+    {
+        let p = with(vec![terrain, mesh("w", cube(1.0, 3.0, -1.0, 2.0, 0.0, 2.5))]);
         let o = compute_section(&p, &lv(false), &[]).unwrap().unwrap();
         let c = mesh_cuts(&o);
-        assert_eq!(c.len(), 1, "nur der Würfel als Schnittfläche ({name})");
+        assert_eq!(c.len(), 1, "nur der Würfel als Schnittfläche");
         assert_eq!(c[0].source_id.as_deref(), Some("w"));
         // Geländelinie = Oberkante z = 0 über die ganze Breite (u 1 … 12), kein Unterrand.
         let len: f64 = o.profiles.iter().flat_map(|pr| pr.pts.windows(2)).map(|w| (w[1][0] - w[0][0]).hypot(w[1][1] - w[0][1])).sum();
@@ -195,8 +186,8 @@ fn ifc_gelaende_als_gelaendelinie() {
         let (prims, _) = section_primitives_at(&o, false, false, &Visibility::default(), 100.0, Detail::Mittel, false, &CutRules::default());
         assert!(prims.iter().any(|q| matches!(q, Primitive::Line { cls, .. } if cls == "section-terrain")));
     }
-    // Gewöhnliches Netz gleicher Form: Körper.
-    let p = with(vec![terrain("Bodenplatte", Some("IfcSlab"))]);
+    // Netzkörper gleicher Form (auch mit Namen „Gelände"): Körper.
+    let p = with(vec![ContextObject::ImportedMesh(ImportedMesh { id: "g".into(), name: "Gelände".into(), category_code: "10".into(), positions, indices, ..Default::default() })]);
     let o = compute_section(&p, &lv(false), &[]).unwrap().unwrap();
     assert_eq!(mesh_cuts(&o).len(), 1);
     assert!(o.profiles.is_empty());

@@ -24,7 +24,7 @@ Kern; hier stehen Eingabe und Darstellung. Zustand über den Store (`src/state`)
 | `DrawingLevelsPanel.tsx`, `LayersPanel.tsx`, `ElementTreePanel.tsx` | Zeichnungsebenen, Ebenen, Baum Geschoss → Bauteilklasse → Element |
 | `LayoutsPanel.tsx`, `PublishSection.tsx`, `ViewSnapshotsPanel.tsx` | Layouts als Baum, Publikationssätze (`[79]`), gespeicherte Ansichten |
 | `RoomBalancePanel.tsx` | Flächenbilanz mit den Abschnitten `AreaTableSection.tsx`, `KennzahlenSection.tsx`, `ProgramCompareSection.tsx`, `ElementScheduleSection.tsx`, `OpeningScheduleSection.tsx`, `RoomBookSection.tsx`; Stempel-Editor `RoomStampEditor.tsx` |
-| `SitePanel.tsx` | Gelände und Kontext, mit `SiteRulesSection.tsx` (Baurecht), `SunStudySection.tsx` (Schatten) und `PointCloudSection.tsx` |
+| `SitePanel.tsx` | Aktionen zu Gelände und Lage (Import, Gelände erzeugen, Baugrube; keine Import-Liste, [181]), mit `SiteRulesSection.tsx` (Baurecht), `SunStudySection.tsx` (Schatten) und `PointCloudSection.tsx` |
 | `BcfPanel.tsx`, `ClashPanel.tsx` | BCF-Themen und Kollisionsliste; Sitzungszustand in `bcfSession.ts` und `clashSession.ts` |
 | `HistoryPanel.tsx` | Undo-Verlauf mit Sprung auf einen Schritt |
 

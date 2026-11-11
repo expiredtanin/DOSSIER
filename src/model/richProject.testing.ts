@@ -77,15 +77,15 @@ export function richProject(): Project {
       ...(i % 3 === 0 ? { hatchOrigin: { x: 1, y: 1 }, hatchSource: "layer" as const, weightMm: 0.5, fillColor: "#eeeeee" } : {}),
     })),
     context: [
-      { type: "importedMesh", id: "c1", name: "Nachbar", layer: "L", categoryCode: "95", color: "#aabbcc", ifcGlobalId: "2O2Fr$t4X7Zf8NOew3FLOH", positions: [0, 0, 0, 1, 0, 0, 0, 1, 0], indices: [0, 1, 2] },
+      { type: "importedMesh", id: "c1", name: "Nachbar", categoryCode: "95", source: "L", color: "#aabbcc", ifcGlobalId: "2O2Fr$t4X7Zf8NOew3FLOH", positions: [0, 0, 0, 1, 0, 0, 0, 1, 0], indices: [0, 1, 2] },
       {
-        type: "contourSet", id: "c2", name: "Höhenlinien", contours: [
+        type: "contourSet", categoryCode: "02", id: "c2", name: "Höhenlinien", contours: [
           { z: 400, pts: [{ x: 0, y: 0 }, { x: 5, y: 1 }], closed: false, layer: "HL", filled: true },
           { z: 401, pts: [], closed: false, curve: { kind: "arc", cx: 0, cy: 0, r: 2, a0: 0, a1: 1 } },
         ],
       },
-      { type: "terrainMesh", id: "c3", name: "Gelände", positions: [0, 0, 0, 1, 0, 0, 0, 1, 0], indices: [0, 1, 2], vertexColors: [1, 0, 0, 0, 1, 0, 0, 0, 1] },
-      { type: "image", id: "c4", name: "Luftbild", src: "data:image/png;base64,AAAA", min: { x: 0, y: 0 }, max: { x: 10, y: 10 }, opacity: 0.7, drape: true, filters: { saturation: 0.5, grayscale: 1 } },
+      { type: "terrainMesh", categoryCode: "02", id: "c3", name: "Gelände", positions: [0, 0, 0, 1, 0, 0, 0, 1, 0], indices: [0, 1, 2], vertexColors: [1, 0, 0, 0, 1, 0, 0, 0, 1] },
+      { type: "image", categoryCode: "03", id: "c4", name: "Luftbild", src: "data:image/png;base64,AAAA", min: { x: 0, y: 0 }, max: { x: 10, y: 10 }, opacity: 0.7, drape: true, filters: { saturation: 0.5, grayscale: 1 } },
     ],
     extrudedSolids: [
       { id: "x1", type: "extrudedSolid", levelId: lvl, points: [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }], height: 2, baseOffset: 0.1, operation: "subtract", taper: 0.1, cornerRadius: 0.05, chamfer: 0.02 },

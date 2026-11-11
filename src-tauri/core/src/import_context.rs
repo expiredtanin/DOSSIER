@@ -141,13 +141,24 @@ pub fn color_of(v: Option<&Value>) -> Option<Vec<f64>> {
     v?.as_array().map(|a| a.iter().map(|x| x.as_f64().unwrap_or(f64::NAN)).collect())
 }
 
-fn mesh_value(id: String, name: String, layer: &str, color: Option<String>, extra: Option<(&str, &str)>, positions: Vec<Value>, indices: Vec<Value>) -> Value {
+/// Netzkörper (`importedMesh`, Klasse „10 Situation") mit Herkunft `source` (nur Auskunft, [181]).
+fn mesh_value(id: String, name: String, source: &str, color: Option<String>, extra: Option<(&str, &str)>, positions: Vec<Value>, indices: Vec<Value>) -> Value {
+    element_value("importedMesh", GENERIC_IMPORT_CODE, id, name, source, color, extra, positions, indices)
+}
+
+/// [181] Klasse der importierten Gelände-Elemente (wie „Gelände erzeugen“).
+pub const TERRAIN_CODE: &str = "02";
+
+#[allow(clippy::too_many_arguments)]
+fn element_value(kind: &str, code: &str, id: String, name: String, source: &str, color: Option<String>, extra: Option<(&str, &str)>, positions: Vec<Value>, indices: Vec<Value>) -> Value {
     let mut o = Map::new();
     o.insert("id".into(), id.into());
-    o.insert("type".into(), "importedMesh".into());
+    o.insert("type".into(), kind.into());
     o.insert("name".into(), name.into());
-    o.insert("layer".into(), layer.into());
-    o.insert("categoryCode".into(), GENERIC_IMPORT_CODE.into());
+    o.insert("categoryCode".into(), code.into());
+    if !source.is_empty() {
+        o.insert("source".into(), source.into());
+    }
     if let Some(c) = color {
         o.insert("color".into(), c.into());
     }
@@ -289,11 +300,34 @@ pub fn classification_suffix(list: &[Value]) -> String {
     format!(" [{}]", parts.join(" "))
 }
 
-/// Gruppierung: `"product"`, `"class"` oder `"auto"` (nach [`MAX_SINGLE`]).
+/// [152]/[181] Gelände in einer IFC-Datei: Klasse `IfcSite` oder Name mit „Gelände"/„Terrain" (z. B. ein
+/// `IfcGeographicElement` „Terrain"). Wird beim Import ein Gelände-Element; danach zählt nur die Elementart.
+pub fn is_ifc_terrain(class: &str, name: Option<&str>) -> bool {
+    let name = name.unwrap_or("").to_lowercase();
+    class.eq_ignore_ascii_case("IfcSite") || name.contains("ifcsite") || ["gelände", "gelaende", "terrain"].iter().any(|k| name.contains(k))
+}
+
+/// Gruppierung: `"product"`, `"class"` oder `"auto"` (nach [`MAX_SINGLE`]). Gelände ([`is_ifc_terrain`]) wird je
+/// Bauteil ein Gelände-Element (`terrainMesh`, Klasse „02"), alles andere Netzkörper.
 pub fn ifc_meshes(products: &[IfcProduct], file_name: &str, group: &str, shift: [f64; 2], now: f64) -> Vec<Value> {
     let base = base_name(file_name, "IFC");
     let stamp = stamp36(now);
     let d = [shift[0], shift[1], 0.0];
+    let (terrain, rest): (Vec<&IfcProduct>, Vec<&IfcProduct>) = products.iter().partition(|p| is_ifc_terrain(&p.ifc_class, p.name.as_deref()));
+    let mut out: Vec<Value> = terrain
+        .iter()
+        .map(|p| {
+            let (pos, idx) = arrays(std::iter::once((p.positions, p.indices)), d);
+            let gid = (!p.global_id.is_empty()).then_some(("ifcGlobalId", p.global_id.as_str()));
+            let name = p.name.as_deref().filter(|n| !n.is_empty()).unwrap_or("Gelände").to_string();
+            element_value("terrainMesh", TERRAIN_CODE, format!("imported-ifc-{stamp}-{}", next_seq()), name, &format!("IFC {}", p.ifc_class), None, gid, pos, idx)
+        })
+        .collect();
+    out.extend(ifc_body_meshes(&rest, &base, group, d, &stamp));
+    out
+}
+
+fn ifc_body_meshes(products: &[&IfcProduct], base: &str, group: &str, d: [f64; 3], stamp: &str) -> Vec<Value> {
     let per_product = group == "product" || (group != "class" && products.len() <= MAX_SINGLE);
     if per_product {
         return products
@@ -310,7 +344,7 @@ pub fn ifc_meshes(products: &[IfcProduct], file_name: &str, group: &str, shift: 
                 mesh_value(
                     format!("imported-ifc-{stamp}-{}", next_seq()),
                     label + &classification_suffix(&p.classifications),
-                    &p.ifc_class,
+                    &format!("IFC {}", p.ifc_class),
                     color_hex(p.color.as_deref()),
                     gid,
                     pos,
@@ -327,7 +361,7 @@ pub fn ifc_meshes(products: &[IfcProduct], file_name: &str, group: &str, shift: 
             let color = if colors.len() == 1 { colors.into_iter().next().filter(|c| !c.is_empty()) } else { None };
             let label = [first.storey.as_deref(), Some(first.ifc_class.as_str())].into_iter().flatten().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" ");
             let (pos, idx) = arrays(g.iter().map(|&i| (products[i].positions, products[i].indices)), d);
-            mesh_value(format!("imported-ifc-{stamp}-{}", next_seq()), format!("{base}: {label} ({})", g.len()), &first.ifc_class, color, None, pos, idx)
+            mesh_value(format!("imported-ifc-{stamp}-{}", next_seq()), format!("{base}: {label} ({})", g.len()), &format!("IFC {}", first.ifc_class), color, None, pos, idx)
         })
         .collect()
 }
@@ -478,7 +512,7 @@ pub fn mesh_shift(objects: &[MeshObject], placement: &str, origin: Option<[f64; 
     }
 }
 
-/// Objekte → Kontext-Meshes (`layer` = Gruppe, sonst Dateiname); `group`: `"object"`, `"merge"`, `"auto"`.
+/// Objekte → Netzkörper (Herkunft `source` = Gruppe, sonst Dateiname); `group`: `"object"`, `"merge"`, `"auto"`.
 pub fn mesh_objects_to_meshes(objects: &[MeshObject], file_name: &str, placement: &str, origin: Option<[f64; 2]>, group: &str, now: f64) -> Vec<Value> {
     let base = base_name(file_name, "Mesh");
     let d = mesh_shift(objects, placement, origin);
@@ -553,6 +587,7 @@ pub fn step_meshes(bodies: &[(Vec<f32>, Vec<f64>)], file_name: &str, now: f64) -
             o.insert("type".into(), "importedMesh".into());
             o.insert("name".into(), if n > 1 { format!("{base} ({}/{n})", i + 1) } else { base.clone() }.into());
             o.insert("categoryCode".into(), GENERIC_IMPORT_CODE.into());
+            o.insert("source".into(), format!("STEP {file_name}").into());
             o.insert("positions".into(), Value::Array(pos.iter().map(|&x| js_num(x.to_string().parse().unwrap_or(f64::from(x)))).collect()));
             o.insert("indices".into(), Value::Array(idx.iter().map(|&k| js_num(k)).collect()));
             Value::Object(o)
@@ -583,6 +618,7 @@ mod step_tests {
         assert_eq!(m[1]["name"], "haus (2/2)");
         assert_eq!(m[0]["categoryCode"], "10");
         assert!(m[0].get("layer").is_none());
+        assert_eq!(m[0]["source"], "STEP haus.stp");
         assert_eq!(m[0]["positions"][0], json!(0.1));
         assert_eq!(m[1]["indices"], json!([0, 1, 2]));
         assert!(m[0]["id"].as_str().unwrap().starts_with("imported-step-"));

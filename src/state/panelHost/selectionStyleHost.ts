@@ -342,6 +342,10 @@ export function buildSelectionStyleHost(c: FlatHostOpts) {
         case "column":
           applyChange((p) => patchItem(p, "columns", id, { categoryCode: code }));
           break;
+        // [181] Gelände-/Umgebungs-Elemente (Netzkörper, Gelände, Höhenlinien, Luftbild, Baugrube) wie jedes Element.
+        case "contextObject":
+          applyChange((p) => patchItem(p, "context", id, { categoryCode: code }));
+          break;
         default: break; // extrudedSolid/door: keine Kategorie am Element
       }
     },

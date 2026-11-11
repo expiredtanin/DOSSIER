@@ -134,7 +134,7 @@ pub(super) fn face_overrides(p: &Project, faces: &mut [Face], v: RuleView) {
             Role::Mesh => p.context.as_deref().unwrap_or(&[]).iter().find_map(|c| match c {
                 ContextObject::ImportedMesh(m) if m.id == id => Some(m),
                 _ => None,
-            }).and_then(|m| surf_ov(p, v, super::super::section::MESH_KIND, m.category_code.as_deref().unwrap_or(""), Some(&m.name), &[], None)),
+            }).and_then(|m| surf_ov(p, v, super::super::section::MESH_KIND, &m.category_code, Some(&m.name), &[], None)),
         };
         memo.insert(key, o.clone());
         f.ov = o;

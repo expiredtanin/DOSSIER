@@ -90,6 +90,7 @@ fn ops_neue_zeichnung_mit_layer_kategorien() {
     assert_eq!(drawings[4]["geom"], json!({"shape": "text", "at": {"x": 5, "y": 6}, "text": "Wohnen", "height": 0.25, "angle": 0}));
     assert_eq!(ops[2]["collection"], json!("context"));
     assert!(ops[2]["items"][0].get("layer").is_none());
+    assert_eq!(ops[2]["items"][0]["categoryCode"], json!("10"));
     // Kategorien: „Import x" mit A, B; dazu „05 Kontext" mit „10 Situation".
     let layers = &ops[3]["value"];
     assert_eq!(layers[2]["name"], json!("Import x"));
@@ -182,7 +183,9 @@ fn ifc_meshes_farbe_und_globalid() {
     assert_eq!(m[0]["color"], json!("#ff8000"));
     assert_eq!(m[0]["ifcGlobalId"], json!("2O2Fr$t4X7Zf8NOew3FLOH"));
     assert_eq!(m[0]["name"], json!("EG: Wand"));
-    assert_eq!(m[0]["layer"], json!("IfcWall"));
+    assert!(m[0].get("layer").is_none());
+    assert_eq!(m[0]["source"], json!("IFC IfcWall"));
+    assert_eq!(m[0]["type"], json!("importedMesh"));
     let n = ifc_meshes(&[product(None, "")], "x.ifc", "product", [0.0, 0.0], 0.0);
     assert!(n[0].get("color").is_none() && n[0].get("ifcGlobalId").is_none());
     // Zusammengelegt: gemeinsame Farbe nur, wenn alle gleich; Indizes versetzt.
@@ -194,6 +197,18 @@ fn ifc_meshes_farbe_und_globalid() {
     assert_eq!(g[0]["positions"][0], json!(10));
     let h = ifc_meshes(&[product(red(), "a"), product(Some(vec![0.0, 0.0, 1.0, 1.0]), "b")], "x.ifc", "class", [0.0, 0.0], 0.0);
     assert!(h[0].get("color").is_none());
+    // [181] Gelände (IfcSite, IfcGeographicElement „Terrain") wird beim Import ein Gelände-Element (Klasse „02"),
+    // unabhängig davon, ob je Bauteil oder je Klasse zusammengelegt wird.
+    let site = |class: &str, name: &str| IfcProduct { ifc_class: class.into(), name: Some(name.into()), ..product(None, "s") };
+    for group in ["product", "class"] {
+        let t = ifc_meshes(&[site("IfcSite", "Site"), site("IfcGeographicElement", "Gelände Süd"), product(None, "w")], "x.ifc", group, [0.0, 0.0], 0.0);
+        let types: Vec<&str> = t.iter().map(|m| m["type"].as_str().unwrap()).collect();
+        assert_eq!(types.iter().filter(|&&k| k == "terrainMesh").count(), 2, "{group}: {types:?}");
+        let g = t.iter().find(|m| m["type"] == "terrainMesh").unwrap();
+        assert_eq!(g["categoryCode"], json!("02"));
+        assert!(g["source"].as_str().unwrap().starts_with("IFC "));
+        assert!(t.iter().any(|m| m["type"] == "importedMesh" && m["categoryCode"] == "10"));
+    }
     assert_eq!(classification_suffix(&[]), "");
     assert_eq!(classification_suffix(&[json!({"system": "", "code": "214", "name": null})]), " [214]");
 }
@@ -216,7 +231,8 @@ fn meshes_mitte_und_gruppen() {
     let obj = |g: &str, x: f64| MeshObject { name: String::new(), group: g.into(), color: Some(vec![1.0, 0.5, 0.0, 1.0]), positions: vec![x, 0.0, 1.0, x + 2.0, 2.0, 3.0], indices: vec![0.0, 1.0, 0.0] };
     let m = mesh_objects_to_meshes(&[obj("", 0.0), obj("g", 10.0)], "haus.obj", "center", None, "auto", 0.0);
     assert_eq!(m[0]["name"], json!("haus 1"));
-    assert_eq!(m[0]["layer"], json!("haus"));
+    assert!(m[0].get("layer").is_none());
+    assert_eq!(m[0]["source"], json!("haus"));
     assert_eq!(m[0]["color"], json!("#ff8000"));
     assert_eq!(m[0]["positions"], json!([-6, -1, 0, -4, 1, 2]));
     let m = mesh_objects_to_meshes(&[obj("g", 0.0), obj("g", 10.0)], "haus.obj", "original", None, "merge", 0.0);

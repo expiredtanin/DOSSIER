@@ -5764,9 +5764,9 @@ pub struct Project {
     pub rooms: Option<Vec<Room>>,
     /// Freie 2D-Zeichengeometrie (Line/Polyline/Rect/Circle/Arc/Text).
     pub drawings2d: Vec<Drawing2D>,
-    /// Kontext-Schicht: importierte/abgeleitete „dumme" Geometrie (Meshes,
-    /// Konturen, Gelände-TIN) — NICHT semantisch. Optional, damit bestehende
-    /// Projekte/Tests ohne `context` gültig bleiben (Default: leer behandeln).
+    /// [181] Gelände- und Umgebungs-Elemente (Gelände, Höhenlinien, Netzkörper wie Nachbargebäude, Luftbilder,
+    /// Baugruben): normale Elemente mit Klasse (`categoryCode`), unabhängig von ihrer Herkunft; s.
+    /// {@link ContextObject}. Fehlt das Feld, gilt die Liste als leer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub context: Option<Vec<ContextObject>>,
@@ -6104,17 +6104,15 @@ pub struct SequenceRule {
 pub struct ImportedMesh {
     pub id: String,
     pub name: String,
-    /// Ursprünglicher DXF-Layer-Name (für spätere Kategorisierung).
+    /// [181] Klasse/Ebene (Grafik-Kategorie, s. {@link LayerCategory}): steuert Sichtbarkeit, Grau und
+    /// Sperren wie bei jedem anderen Element. Pflicht; Importe setzen sie (`model/contextCategories.ts`).
+    #[serde(rename = "categoryCode")]
+    pub category_code: String,
+    /// [181] Herkunft (z. B. „swissBUILDINGS3D", „IFC IfcSite", „DXF-Layer Haus") — nur Auskunft in der
+    /// Objekt-Info, ohne jede Wirkung auf Darstellung oder Sichtbarkeit (die steuert allein `categoryCode`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
-    pub layer: Option<String>,
-    /// Grafik-Kategorie-Code (s. {@link LayerCategory}, `model/contextCategories.ts`)
-    /// — steuert Sichtbarkeit/Grau/Sperren wie bei jedem anderen Bauteil (Ebenen-
-    /// Panel). Fehlt er (ältere Importe vor dieser Erweiterung), bleibt das Objekt
-    /// IMMER sichtbar (Rückwärtskompatibilität), s. `plan/context.rs` im Kern.
-    #[serde(rename = "categoryCode", default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub category_code: Option<String>,
+    pub source: Option<String>,
     /// Farbe aus der Quelldatei (`#rrggbb`, z. B. IFC-Oberflächenstil/Material); fehlt sie, gilt die Kontext-Grundfarbe.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -6131,11 +6129,6 @@ pub struct ImportedMesh {
     #[serde(rename = "creaseAngle", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub crease_angle: Option<f64>,
-    /// [137] Nur dieses Netz ausblenden (Grundriss, Schnitt, Ansicht, 3D, Pick); die Kategorie bleibt
-    /// davon unberührt. Fehlt/false = sichtbar.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub hidden: Option<bool>,
     pub positions: Vec<f64>,
     pub indices: Vec<f64>,
     #[serde(flatten)]
@@ -6204,14 +6197,15 @@ pub struct Contour {
 pub struct ContourSet {
     pub id: String,
     pub name: String,
-    /// Ursprünglicher DXF-Layer-Name (für spätere Kategorisierung).
+    /// [181] Klasse/Ebene (Grafik-Kategorie, s. {@link LayerCategory}): steuert Sichtbarkeit, Grau und
+    /// Sperren wie bei jedem anderen Element. Pflicht; Importe setzen sie (`model/contextCategories.ts`).
+    #[serde(rename = "categoryCode")]
+    pub category_code: String,
+    /// [181] Herkunft (z. B. „swissBUILDINGS3D", „IFC IfcSite", „DXF-Layer Haus") — nur Auskunft in der
+    /// Objekt-Info, ohne jede Wirkung auf Darstellung oder Sichtbarkeit (die steuert allein `categoryCode`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
-    pub layer: Option<String>,
-    /// Grafik-Kategorie-Code, s. {@link ImportedMesh.categoryCode}.
-    #[serde(rename = "categoryCode", default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub category_code: Option<String>,
+    pub source: Option<String>,
     pub contours: Vec<Contour>,
     #[serde(flatten)]
     #[ts(skip)]
@@ -6220,20 +6214,22 @@ pub struct ContourSet {
 
 /// Ein TIN-Geländemodell, abgeleitet aus Konturen (Delaunay über (x,y), Z aus der
 /// jeweiligen Kontur-Höhe). `positions` = flaches (x,y,z…)-Array in Metern,
-/// `indices` = Dreiecks-Indizes. Gelände ist NICHT semantisch (Kontext-Schicht).
+/// `indices` = Dreiecks-Indizes. Gelände-Element ([181]): aus Höhenlinien erzeugt oder importiert (swissALTI3D,
+/// IFC-Gelände), danach unabhängig von der Quelle.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
 #[serde(default)]
 pub struct TerrainMesh {
     pub id: String,
     pub name: String,
-    /// Ebenen-/Gruppierungsname (SitePanel), z. B. „Terrain". Optional.
+    /// [181] Klasse/Ebene (Grafik-Kategorie, s. {@link LayerCategory}): steuert Sichtbarkeit, Grau und
+    /// Sperren wie bei jedem anderen Element. Pflicht; Importe setzen sie (`model/contextCategories.ts`).
+    #[serde(rename = "categoryCode")]
+    pub category_code: String,
+    /// [181] Herkunft (z. B. „swissBUILDINGS3D", „IFC IfcSite", „DXF-Layer Haus") — nur Auskunft in der
+    /// Objekt-Info, ohne jede Wirkung auf Darstellung oder Sichtbarkeit (die steuert allein `categoryCode`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
-    pub layer: Option<String>,
-    /// Grafik-Kategorie-Code, s. {@link ImportedMesh.categoryCode}.
-    #[serde(rename = "categoryCode", default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub category_code: Option<String>,
+    pub source: Option<String>,
     pub positions: Vec<f64>,
     pub indices: Vec<f64>,
     /// Optionale Pro-Vertex-Albedo (flach `[r,g,b, …]`, 0..1) — ein Wert je
@@ -6265,11 +6261,6 @@ pub struct TerrainMesh {
     #[serde(rename = "sourceId", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub source_id: Option<String>,
-    /// [137] Nur dieses Netz ausblenden (Grundriss, Schnitt, Ansicht, 3D, Pick); die Kategorie bleibt
-    /// davon unberührt. Fehlt/false = sichtbar.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub hidden: Option<bool>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -6285,12 +6276,10 @@ pub struct TerrainMesh {
 pub struct Excavation {
     pub id: String,
     pub name: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub layer: Option<String>,
-    #[serde(rename = "categoryCode", default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub category_code: Option<String>,
+    /// [181] Klasse/Ebene (Grafik-Kategorie, s. {@link LayerCategory}): steuert Sichtbarkeit, Grau und
+    /// Sperren wie bei jedem anderen Element. Pflicht; Importe setzen sie (`model/contextCategories.ts`).
+    #[serde(rename = "categoryCode")]
+    pub category_code: String,
     pub outline: Vec<Vec2>,
     pub bottom: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -6356,14 +6345,15 @@ pub struct ContextImageFilters {
 pub struct ContextImage {
     pub id: String,
     pub name: String,
-    /// Ebenen-/Gruppierungsname (SitePanel), z. B. „Luftbild". Optional.
+    /// [181] Klasse/Ebene (Grafik-Kategorie, s. {@link LayerCategory}): steuert Sichtbarkeit, Grau und
+    /// Sperren wie bei jedem anderen Element. Pflicht; Importe setzen sie (`model/contextCategories.ts`).
+    #[serde(rename = "categoryCode")]
+    pub category_code: String,
+    /// [181] Herkunft (z. B. „swissBUILDINGS3D", „IFC IfcSite", „DXF-Layer Haus") — nur Auskunft in der
+    /// Objekt-Info, ohne jede Wirkung auf Darstellung oder Sichtbarkeit (die steuert allein `categoryCode`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
-    pub layer: Option<String>,
-    /// Grafik-Kategorie-Code, s. {@link ImportedMesh.categoryCode}.
-    #[serde(rename = "categoryCode", default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub category_code: Option<String>,
+    pub source: Option<String>,
     /// Bildquelle als Data-URL (PNG/JPEG).
     pub src: String,
     /// Modell-Meter Bounding-Box (das Bild füllt [min..max] planar von oben).

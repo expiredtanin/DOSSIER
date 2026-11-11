@@ -4932,54 +4932,7 @@ body {
   background: var(--line);
   margin: 2px 0;
 }
-.site-panel .site-empty {
-  color: var(--ink-2);
-  padding: 8px 4px;
-  line-height: 1.4;
-}
-.site-panel .site-group {
-  margin-bottom: 6px;
-}
-.site-panel .site-group-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 6px;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--ink-2);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-.site-panel .site-group-name {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.site-panel .site-group-count {
-  flex: 0 0 auto;
-  color: var(--muted);
-  font-weight: 400;
-}
-.site-panel .site-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.site-panel .site-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 6px;
-  border-radius: 5px;
-}
-/* [T6]/[68] Felder von Gelände und Baugrube unter der Zeile. */
+/* [T6]/[68] Felder von Gelände und Baugrube (Objekt-Info). */
 .site-panel .site-props {
   flex: 1 0 100%;
   display: grid;
@@ -5005,33 +4958,6 @@ body {
   align-items: center;
   gap: 3px;
   font-size: 11px;
-}
-.site-panel .site-row:hover {
-  background: var(--accent-dim);
-}
-.site-panel .site-row-selected {
-  background: var(--accent-dim);
-  outline: 1px solid var(--accent);
-}
-.site-panel .site-name {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.site-panel .site-badge {
-  flex: 0 0 auto;
-  font-size: 10px;
-  padding: 1px 6px;
-  border-radius: 8px;
-  background: var(--panel-2);
-  color: var(--ink-2);
-  border: 1px solid var(--line);
-}
-.site-panel .site-badge-terrainMesh {
-  color: var(--accent);
-  border-color: var(--accent-border);
 }
 .site-panel .site-remove {
   flex: 0 0 auto;

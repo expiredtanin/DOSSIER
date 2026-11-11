@@ -97,21 +97,27 @@ export function clipMeshToBbox(
 }
 
 /** Sichtbarer Ebenen-/Gruppierungsname der importierten Gebäude (SitePanel). */
-export const BUILDING_LAYER = "Gebäude";
+/** [181] Herkunft der importierten Gebäude (nur Auskunft in der Objekt-Info, ohne Wirkung). */
+export const BUILDINGS_SOURCE = "swissBUILDINGS3D";
+
+/** DXF-Layer eines geparsten Netzes (aus `source` „DXF-Layer …", s. Kern `import_drawing::mesh_values`), sonst "". */
+export function dxfLayerOf(m: ImportedMesh): string {
+  return m.source?.startsWith("DXF-Layer ") ? m.source.slice("DXF-Layer ".length) : "";
+}
 
 /**
  * Zerlegt ein Mesh in seine räumlich ZUSAMMENHÄNGENDEN Komponenten (Union-Find
  * über verschweisste Vertices, `weldMm`) — je Komponente ein eigenes {@link ImportedMesh}.
  * So wird eine swissBUILDINGS3D-Kachel in EINZELNE, getrennt anwähl-/löschbare
- * Gebäude aufgeteilt. Jede Komponente bekommt eine eigene Id + fortlaufenden Namen
- * + `layer`. Die Zerlegung rechnet der Kern (`core/src/geo_mesh.rs`); rein (kein Netzwerk).
+ * Gebäude aufgeteilt. Jede Komponente bekommt eine eigene Id + fortlaufenden Namen,
+ * Klasse und Herkunft. Die Zerlegung rechnet der Kern (`core/src/geo_mesh.rs`); rein (kein Netzwerk).
  */
 export function splitMeshComponents(mesh: ImportedMesh, weldMm = 1): ImportedMesh[] {
   const vcount = Math.floor(mesh.positions.length / 3);
   if (vcount < 3 || mesh.indices.length < 3) return mesh.indices.length >= 3 ? [mesh] : [];
   const defaults = {
-    layer: mesh.layer ?? BUILDING_LAYER,
-    categoryCode: mesh.categoryCode ?? GEO_CATEGORY_DEFS.building.code,
+    categoryCode: mesh.categoryCode || GEO_CATEGORY_DEFS.building.code,
+    source: mesh.source ?? BUILDINGS_SOURCE,
   };
   const r = core().geo_mesh_split(Float64Array.from(mesh.positions), Float64Array.from(mesh.indices), weldMm);
   if (r.length === 0) return [{ ...mesh, ...defaults }];
@@ -276,7 +282,7 @@ export async function fetchBuildings3d(
       const roofRaw: ImportedMesh[] = [];
       const bodyRaw: ImportedMesh[] = [];
       for (const m of rawMeshes) {
-        ((m.layer ?? "").toLowerCase() === "roof" ? roofRaw : bodyRaw).push(m);
+        (dxfLayerOf(m).toLowerCase() === "roof" ? roofRaw : bodyRaw).push(m);
       }
       for (const [group, isRoof] of [
         [bodyRaw, false],
@@ -293,16 +299,9 @@ export async function fetchBuildings3d(
         for (const b of splitMeshComponents(clipped)) {
           meshes.push({
             ...stripOverhangSoffits(b),
+            // [181] Normale Elemente: Klasse „12 Gebäude" bzw. „31 Dächer", Herkunft nur als Auskunft.
             categoryCode: isRoof ? IMPORTED_ROOF_CATEGORY.code : GEO_CATEGORY_DEFS.building.code,
-            // `.layer` (kosmetischer SitePanel-Gruppierungs-String, s.
-            // SitePanel.tsx::layerOf/groupByLayer) explizit setzen — sonst
-            // trägt er den rohen DXF-Layernamen aus dwgParser.ts ("Wall"/
-            // "Floor"/"Roof") weiter, den `splitMeshComponents`s Fallback
-            // `mesh.layer ?? BUILDING_LAYER` NICHT ersetzt (nur bei leerem
-            // `.layer`, nicht bei einem bereits vorhandenen Wert). Ohne diesen
-            // Fix zerfällt die SitePanel-Gruppierung eines v3-Imports in
-            // „Wall"/„Floor"/„Roof" statt „Gebäude"/„Dächer".
-            layer: isRoof ? IMPORTED_ROOF_CATEGORY.name : BUILDING_LAYER,
+            source: BUILDINGS_SOURCE,
           });
         }
       }

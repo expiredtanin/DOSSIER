@@ -27,7 +27,7 @@ function terrain(): TerrainMesh {
       const a = j * n + i;
       indices.push(a, a + 1, a + n, a + 1, a + n + 1, a + n);
     }
-  return { id: "t1", type: "terrainMesh", name: "Gelände", positions, indices };
+  return { id: "t1", type: "terrainMesh", categoryCode: "02", name: "Gelände", positions, indices };
 }
 
 describe("Schnitt: Gelände und freie Körper", () => {

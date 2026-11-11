@@ -12,14 +12,14 @@ function project(): Project {
     context: [
       {
         id: "t",
-        type: "terrainMesh",
+        type: "terrainMesh", categoryCode: "02",
         name: "Gelände",
         positions: [-50, -50, 0, 50, -50, 0, 50, 50, 0, -50, 50, 0],
         indices: [0, 1, 2, 0, 2, 3],
       },
       {
         id: "bg",
-        type: "excavation",
+        type: "excavation", categoryCode: "07",
         name: "Baugrube",
         outline: [
           { x: -5, y: -5 },
@@ -70,6 +70,7 @@ describe("[68] Arbeitsraum, Verbau, Überlagerung", () => {
     id,
     type: "excavation" as const,
     name: id,
+    categoryCode: "07",
     outline: [{ x: -5 + dx, y: -5 }, { x: 5 + dx, y: -5 }, { x: 5 + dx, y: 5 }, { x: -5 + dx, y: 5 }],
     bottom: -3,
     slope: 45,

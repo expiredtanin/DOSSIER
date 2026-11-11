@@ -59,7 +59,7 @@ fn bbox_corners(positions: &[f64]) -> Option<Vec<Vec2>> {
     (b.len() == 4).then(|| vec![v2(b[0], b[1]), v2(b[2], b[1]), v2(b[2], b[3]), v2(b[0], b[3])])
 }
 
-/// Kontext-Schicht (`addContextContours`). Objekte ohne Kategorie bleiben immer sichtbar. Die
+/// Gelände- und Umgebungs-Elemente (`Project.context`, [181]); sichtbar nach ihrer Klasse. Die
 /// Höhenlinien-Beschriftungen weichen den Zeichnungen des Geschosses aus (`drawings::stamp_obstacle_prims`).
 pub fn plan_context(c: &Ctx, out: &mut Vec<Primitive>) {
     plan_context_with(c, out, c.drawn_obstacles());
@@ -80,21 +80,12 @@ pub fn plan_context_with(c: &Ctx, out: &mut Vec<Primitive>, drawing_obstacles: &
         if meshes_done && matches!(obj, ContextObject::ImportedMesh(_)) {
             continue;
         }
-        let code = match obj {
-            ContextObject::ImportedMesh(m) => m.category_code.as_deref(),
-            ContextObject::ContourSet(s) => s.category_code.as_deref(),
-            ContextObject::TerrainMesh(t) => t.category_code.as_deref(),
-            ContextObject::Image(i) => i.category_code.as_deref(),
-            ContextObject::Excavation(e) => e.category_code.as_deref(),
-        };
-        if code.is_some_and(|k| !c.shown(k)) {
+        // [181] Sichtbarkeit allein über die Klasse (kein „ohne Kategorie immer sichtbar", kein Einzel-Ausblenden).
+        let code = Some(obj.category_code());
+        if !c.shown(obj.category_code()) {
             continue;
         }
         if matches!(obj, ContextObject::TerrainMesh(_) | ContextObject::ContourSet(_) | ContextObject::Excavation(_)) && !terrain_shown(c) {
-            continue;
-        }
-        // [137] Einzeln ausgeblendetes Gelände bzw. importiertes Netz (Kategorie bleibt sichtbar).
-        if matches!(obj, ContextObject::TerrainMesh(t) if t.hidden == Some(true)) || matches!(obj, ContextObject::ImportedMesh(m) if m.hidden == Some(true)) {
             continue;
         }
         // [33] Gelände und Höhenlinien über Regeln (Bauteilart „Gelände“): Ausblenden, Linie (Farbe, Stärke, Linienstil).
@@ -171,7 +162,7 @@ pub fn plan_context_with(c: &Ctx, out: &mut Vec<Primitive>, drawing_obstacles: &
 /// [157] Sohle und Böschungsoberkante der Baugruben, die dieser Grundriss zeigt (Gelände sichtbar, Kategorie
 /// der Baugrube gezeigt), als Strecken — Hindernisse der Aussenbemassung und der Schnittmarken-Beschriftung.
 pub(super) fn excavation_segments(c: &Ctx) -> Vec<([f64; 2], [f64; 2])> {
-    let pits: Vec<&Excavation> = crate::excavation::excavations(c.p).into_iter().filter(|e| e.category_code.as_deref().is_none_or(|k| c.shown(k))).collect();
+    let pits: Vec<&Excavation> = crate::excavation::excavations(c.p).into_iter().filter(|e| c.shown(&e.category_code)).collect();
     if pits.is_empty() || !terrain_shown(c) {
         return Vec::new();
     }
@@ -977,7 +968,7 @@ pub fn plan_section_lines(c: &Ctx, out: &mut Vec<Primitive>) {
     if !excavation_segments(c).is_empty() {
         let house = terrain_footprint(c.p, &c.a.floor);
         let (mut pit, mut bands) = (Vec::new(), Vec::new());
-        for e in crate::excavation::excavations(c.p).into_iter().filter(|e| e.category_code.as_deref().is_none_or(|k| c.shown(k))) {
+        for e in crate::excavation::excavations(c.p).into_iter().filter(|e| c.shown(&e.category_code)) {
             excavation_lines(c, e, &mut pit, &mut bands, &house);
         }
         for q in &pit {
@@ -1057,23 +1048,25 @@ mod tests {
             id: "t".into(),
             positions: vec![0.0, 0.0, 0.0, 60.0, 0.0, 6.0, 60.0, 40.0, 6.0, 0.0, 40.0, 0.0],
             indices: vec![0.0, 1.0, 2.0, 0.0, 2.0, 3.0],
-            category_code: Some("02".into()),
+            category_code: "02".into(),
             ..Default::default()
         };
         let pit = Excavation {
             id: "bg".into(),
+            category_code: "02".into(),
             outline: vec![v2(20.0, 15.0), v2(30.0, 15.0), v2(30.0, 25.0), v2(20.0, 25.0)],
             bottom: 1.0,
             ..Default::default()
         };
         let cs = ContourSet {
             id: "hl".into(),
+            category_code: "02".into(),
             contours: vec![Contour { z: 0.0, pts: vec![v2(-20.0, -5.0), v2(80.0, 50.0)], ..Default::default() }],
             ..Default::default()
         };
         // Reihenfolge wie im Musterhaus komplex: Höhenlinien, Baugrube, dann das daraus erzeugte Gelände.
         let p = Project { context: Some(vec![ContextObject::ContourSet(cs), ContextObject::Excavation(pit), ContextObject::TerrainMesh(t)]), ..Default::default() };
-        let a = super::super::domains::PlanArgs::parse(1.0, r#"{"show": ["02"], "scale": 100}"#).unwrap();
+        let a = super::super::domains::PlanArgs::parse(1.0, r#"{"show": ["02", "02"], "scale": 100}"#).unwrap();
         let mut out = Vec::new();
         plan_context(&Ctx::new(&p, &a), &mut out);
         assert_eq!(top_context(&out, 25.0, 20.0).as_deref(), Some("bg"), "Sohle");
@@ -1096,7 +1089,7 @@ mod tests {
         // Pfeil nach unten (Ansicht Nord, oben im Plan) und nach links/rechts.
         let p = Project { drawing_levels: vec![level("Ansicht Nord", [10.0, 20.0], [0.0, 20.0]), level("Ansicht West", [-5.0, 10.0], [-5.0, 0.0]), level("Ansicht Ost", [15.0, 0.0], [15.0, 10.0]), level("Schnitt A-A", [0.0, 5.0], [60.0, 5.0])], ..Default::default() };
         let run = |scale: f64| {
-            let a = super::super::domains::PlanArgs::parse(1.0, &format!(r#"{{"show": ["90"], "scale": {scale}, "global": true}}"#)).unwrap();
+            let a = super::super::domains::PlanArgs::parse(1.0, &format!(r#"{{"show": ["02", "90"], "scale": {scale}, "global": true}}"#)).unwrap();
             let mut out = Vec::new();
             plan_section_lines(&Ctx::new(&p, &a), &mut out);
             out
@@ -1125,7 +1118,7 @@ mod tests {
             }
         }
         // Ausmass des Plans umfasst die Beschriftung der Ansicht Nord (über y = 20).
-        let a = super::super::domains::PlanArgs::parse(1.0, r#"{"show": ["90"], "scale": 100, "global": true}"#).unwrap();
+        let a = super::super::domains::PlanArgs::parse(1.0, r#"{"show": ["02", "90"], "scale": 100, "global": true}"#).unwrap();
         let d = super::super::domains::plan_domains(&p, &a).unwrap();
         let top = out_top(&run(100.0));
         assert!(d.bounds.is_some_and(|b| b[3] >= top - 1e-9), "{:?} < {top}", d.bounds);
@@ -1140,7 +1133,7 @@ mod tests {
                 "linePoints": [{ "x": 0.0, "y": -2.0 }, { "x": 10.0, "y": -2.0 }] })).unwrap()],
             ..Default::default()
         };
-        let a = super::super::domains::PlanArgs::parse(1.0, r#"{"show": ["90"], "scale": 100, "global": true}"#).unwrap();
+        let a = super::super::domains::PlanArgs::parse(1.0, r#"{"show": ["02", "90"], "scale": 100, "global": true}"#).unwrap();
         let mut out = Vec::new();
         plan_section_lines(&Ctx::new(&p, &a), &mut out);
         assert!(!out.iter().any(|q| matches!(q, Primitive::Line { .. } | Primitive::Arc { .. })), "keine Linie, kein Kreis");
@@ -1171,7 +1164,7 @@ mod tests {
             p
         };
         let run = |p: &Project, mv: bool| {
-            let a = super::super::domains::PlanArgs::parse(1.0, &format!(r#"{{"show": ["90"], "scale": 100, "global": true{}}}"#, if mv { r#", "modelView": "m""# } else { "" })).unwrap();
+            let a = super::super::domains::PlanArgs::parse(1.0, &format!(r#"{{"show": ["02", "90"], "scale": 100, "global": true{}}}"#, if mv { r#", "modelView": "m""# } else { "" })).unwrap();
             let mut out = Vec::new();
             plan_section_lines(&Ctx::new(p, &a), &mut out);
             out
@@ -1200,7 +1193,7 @@ mod tests {
             }
         };
         let run = |p: &Project| {
-            let a = super::super::domains::PlanArgs::parse(1.0, r#"{"show": ["90"], "scale": 100, "global": true}"#).unwrap();
+            let a = super::super::domains::PlanArgs::parse(1.0, r#"{"show": ["02", "90"], "scale": 100, "global": true}"#).unwrap();
             let mut out = Vec::new();
             plan_section_lines(&Ctx::new(p, &a), &mut out);
             out
@@ -1236,7 +1229,7 @@ mod tests {
                 .collect()
         };
         let run = |p: &Project, scale: f64| {
-            let a = super::super::domains::PlanArgs::parse(1.0, &format!(r#"{{"floor": "eg", "show": ["90", "80"], "scale": {scale}}}"#)).unwrap();
+            let a = super::super::domains::PlanArgs::parse(1.0, &format!(r#"{{"floor": "eg", "show": ["02", "90", "80"], "scale": {scale}}}"#)).unwrap();
             let mut out = Vec::new();
             plan_section_lines(&Ctx::new(p, &a), &mut out);
             out
@@ -1291,7 +1284,7 @@ mod tests {
         assert!(outside(v2(4.0, 4.0), v2(5.0, 4.0), &rings).is_empty());
         assert_eq!(outside(v2(20.0, 4.0), v2(25.0, 4.0), &rings).len(), 1);
         // Im Plan: Gelände z = x/10, Haus aus vier Wänden 12..18 × 0..10 → keine Höhenlinie bei x = 15 im Haus.
-        let t = TerrainMesh { id: "t".into(), positions: vec![0.0, 0.0, 0.0, 30.0, 0.0, 3.0, 30.0, 10.0, 3.0, 0.0, 10.0, 0.0], indices: vec![0.0, 1.0, 2.0, 0.0, 2.0, 3.0], contour_interval: Some(0.5), ..Default::default() };
+        let t = TerrainMesh { id: "t".into(), category_code: "02".into(), positions: vec![0.0, 0.0, 0.0, 30.0, 0.0, 3.0, 30.0, 10.0, 3.0, 0.0, 10.0, 0.0], indices: vec![0.0, 1.0, 2.0, 0.0, 2.0, 3.0], contour_interval: Some(0.5), ..Default::default() };
         let mut v: serde_json::Value = serde_json::from_str(include_str!("../../tests/fixtures/sample_project.json")).unwrap();
         let wall = |id: &str, a: [f64; 2], b: [f64; 2]| serde_json::json!({"id": id, "type": "wall", "floorId": v["drawingLevels"][0]["id"], "categoryCode": "20", "wallTypeId": v["walls"][0]["wallTypeId"], "start": {"x": a[0], "y": a[1]}, "end": {"x": b[0], "y": b[1]}, "height": 3});
         let walls = serde_json::json!([wall("a", [12.0, -2.0], [18.0, -2.0]), wall("b", [18.0, -2.0], [18.0, 12.0]), wall("c", [18.0, 12.0], [12.0, 12.0]), wall("d", [12.0, 12.0], [12.0, -2.0])]);
@@ -1299,7 +1292,7 @@ mod tests {
         v["openings"] = serde_json::json!([]);
         let mut p: Project = serde_json::from_value(v).unwrap();
         p.context = Some(vec![ContextObject::TerrainMesh(t)]);
-        let a = super::super::domains::PlanArgs::parse(1.0, r#"{"scale": 100}"#).unwrap();
+        let a = super::super::domains::PlanArgs::parse(1.0, r#"{"show": ["02"], "scale": 100}"#).unwrap();
         let mut out = Vec::new();
         plan_context(&Ctx::new(&p, &a), &mut out);
         let lines: Vec<(Vec2, Vec2)> = out.iter().filter_map(|q| match q { Primitive::Line { a, b, color: Some(c), .. } if c == TERRAIN_INK => Some((*a, *b)), _ => None }).collect();
@@ -1327,13 +1320,14 @@ mod tests {
         // x 0..10 flach (z = 0.1 x), x 10..11 steil (z 1 → 11).
         let t = TerrainMesh {
             id: "t".into(),
+            category_code: "02".into(),
             positions: vec![0.0, 0.0, 0.0, 10.0, 0.0, 1.0, 10.0, 10.0, 1.0, 0.0, 10.0, 0.0, 11.0, 0.0, 11.0, 11.0, 10.0, 11.0],
             indices: vec![0.0, 1.0, 2.0, 0.0, 2.0, 3.0, 1.0, 4.0, 5.0, 1.0, 5.0, 2.0],
             contour_interval: Some(0.1),
             ..Default::default()
         };
         let p = Project { context: Some(vec![ContextObject::TerrainMesh(t)]), ..Default::default() };
-        let a = super::super::domains::PlanArgs::parse(1.0, r#"{"scale": 100}"#).unwrap();
+        let a = super::super::domains::PlanArgs::parse(1.0, r#"{"show": ["02"], "scale": 100}"#).unwrap();
         let mut out = Vec::new();
         plan_context(&Ctx::new(&p, &a), &mut out);
         let xs: Vec<f64> = out.iter().filter_map(|q| match q { Primitive::Line { a, b, color: Some(c), .. } if c == TERRAIN_INK && (a.x - b.x).abs() < 1e-9 => Some(a.x), _ => None }).collect();
@@ -1353,18 +1347,19 @@ mod tests {
             id: "t".into(),
             positions: vec![0.0, 0.0, 0.0, 60.0, 0.0, 6.0, 60.0, 40.0, 6.0, 0.0, 40.0, 0.0],
             indices: vec![0.0, 1.0, 2.0, 0.0, 2.0, 3.0],
-            category_code: Some("02".into()),
+            category_code: "02".into(),
             contour_interval: Some(1.0),
             ..Default::default()
         };
         let pit = Excavation {
             id: "bg".into(),
+            category_code: "02".into(),
             outline: vec![v2(20.0, 15.0), v2(30.0, 15.0), v2(30.0, 25.0), v2(20.0, 25.0)],
             bottom: 1.0,
             ..Default::default()
         };
         let p = Project { context: Some(vec![ContextObject::TerrainMesh(t), ContextObject::Excavation(pit)]), ..Default::default() };
-        let a = super::super::domains::PlanArgs::parse(1.0, r#"{"show": ["02"], "scale": 100}"#).unwrap();
+        let a = super::super::domains::PlanArgs::parse(1.0, r#"{"show": ["02", "02"], "scale": 100}"#).unwrap();
         let mut out = Vec::new();
         plan_context(&Ctx::new(&p, &a), &mut out);
         let w = |m: f64| out.iter().filter(|q| matches!(q, Primitive::Line { weight_mm, color: Some(c), .. } if *weight_mm == m && c == TERRAIN_INK)).count();
@@ -1418,9 +1413,9 @@ mod tests {
             ["o1", "og", 30.0, 20.0, 38.0, 20.0]
         ]));
         // Gelände z = y/10 über 40 × 30 m: Höhenlinien waagrecht je 1 m, Zähllinien je 5 m (z = 0.5, 1.0 …).
-        let t = TerrainMesh { id: "t".into(), positions: vec![0.0, 0.0, 0.0, 40.0, 0.0, 0.0, 40.0, 30.0, 3.0, 0.0, 30.0, 3.0], indices: vec![0.0, 1.0, 2.0, 0.0, 2.0, 3.0], contour_interval: Some(0.1), ..Default::default() };
+        let t = TerrainMesh { id: "t".into(), category_code: "02".into(), positions: vec![0.0, 0.0, 0.0, 40.0, 0.0, 0.0, 40.0, 30.0, 3.0, 0.0, 30.0, 3.0], indices: vec![0.0, 1.0, 2.0, 0.0, 2.0, 3.0], contour_interval: Some(0.1), ..Default::default() };
         p.context = Some(vec![ContextObject::TerrainMesh(t)]);
-        let a = super::super::domains::PlanArgs::parse(1.0, r#"{"floor": "eg", "scale": 100}"#).unwrap();
+        let a = super::super::domains::PlanArgs::parse(1.0, r#"{"show": ["02"], "floor": "eg", "scale": 100}"#).unwrap();
         let mut out = Vec::new();
         plan_context(&Ctx::new(&p, &a), &mut out);
         let lines: Vec<(Vec2, Vec2)> = out.iter().filter_map(|q| match q { Primitive::Line { a, b, color: Some(c), .. } if c == TERRAIN_INK => Some((*a, *b)), _ => None }).collect();
@@ -1452,9 +1447,9 @@ mod tests {
             ["a1", "eg", 18.5, 8.0, 18.5, 12.0], ["a2", "eg", 18.5, 12.0, 21.5, 12.0], ["a3", "eg", 21.5, 12.0, 21.5, 8.0]
         ]));
         // Grube mit Arbeitsraum: Nordrand bei y = 10 läuft durch den Anbau.
-        let pit = Excavation { id: "bg".into(), outline: vec![v2(12.0, -2.0), v2(28.0, -2.0), v2(28.0, 10.0), v2(12.0, 10.0)], bottom: -3.0, ..Default::default() };
+        let pit = Excavation { id: "bg".into(), category_code: "02".into(), outline: vec![v2(12.0, -2.0), v2(28.0, -2.0), v2(28.0, 10.0), v2(12.0, 10.0)], bottom: -3.0, ..Default::default() };
         p.context = Some(vec![ContextObject::Excavation(pit)]);
-        let a = super::super::domains::PlanArgs::parse(1.0, r#"{"floor": "eg", "scale": 100}"#).unwrap();
+        let a = super::super::domains::PlanArgs::parse(1.0, r#"{"show": ["02"], "floor": "eg", "scale": 100}"#).unwrap();
         let mut out = Vec::new();
         plan_context(&Ctx::new(&p, &a), &mut out);
         let sohle: Vec<(Vec2, Vec2)> = out.iter().filter_map(|q| match q { Primitive::Line { a, b, color: Some(c), weight_mm, .. } if c == EXCAVATION_INK && (*weight_mm - 0.25).abs() < 1e-9 => Some((*a, *b)), _ => None }).collect();
@@ -1472,13 +1467,13 @@ mod tests {
     #[test]
     fn schnittmarke_nicht_auf_der_boeschung() {
         let mut p = sample_with_walls(serde_json::json!([["h1", "eg", 14.0, 0.0, 26.0, 0.0]]));
-        let t = TerrainMesh { id: "t".into(), positions: vec![0.0, -10.0, 0.0, 40.0, -10.0, 0.0, 40.0, 30.0, 0.0, 0.0, 30.0, 0.0], indices: vec![0.0, 1.0, 2.0, 0.0, 2.0, 3.0], ..Default::default() };
-        let pit = Excavation { id: "bg".into(), outline: vec![v2(12.0, -2.0), v2(28.0, -2.0), v2(28.0, 10.0), v2(12.0, 10.0)], bottom: -3.0, slope: Some(45.0), ..Default::default() };
+        let t = TerrainMesh { id: "t".into(), category_code: "02".into(), positions: vec![0.0, -10.0, 0.0, 40.0, -10.0, 0.0, 40.0, 30.0, 0.0, 0.0, 30.0, 0.0], indices: vec![0.0, 1.0, 2.0, 0.0, 2.0, 3.0], ..Default::default() };
+        let pit = Excavation { id: "bg".into(), category_code: "02".into(), outline: vec![v2(12.0, -2.0), v2(28.0, -2.0), v2(28.0, 10.0), v2(12.0, 10.0)], bottom: -3.0, slope: Some(45.0), ..Default::default() };
         p.context = Some(vec![ContextObject::TerrainMesh(t), ContextObject::Excavation(pit)]);
         // Schnittlinie mit den Enden in der West- und Ostböschung.
         p.drawing_levels.push(serde_json::from_value(serde_json::json!({ "id": "s", "name": "Schnitt B-B", "kind": "section", "visible": true, "locked": false,
             "linePoints": [{ "x": 10.5, "y": 4.0 }, { "x": 29.5, "y": 4.0 }] })).unwrap());
-        let a = super::super::domains::PlanArgs::parse(1.0, r#"{"floor": "eg", "show": ["90", "80", "02"], "scale": 100}"#).unwrap();
+        let a = super::super::domains::PlanArgs::parse(1.0, r#"{"floor": "eg", "show": ["02", "90", "80", "02"], "scale": 100}"#).unwrap();
         let c = Ctx::new(&p, &a);
         let mut out = Vec::new();
         plan_section_lines(&c, &mut out);
@@ -1516,15 +1511,15 @@ mod tests {
         let mut p = sample_with_walls(serde_json::json!([
             ["h1", "eg", 14.0, 0.0, 26.0, 0.0], ["h2", "eg", 26.0, 0.0, 26.0, 8.0], ["h3", "eg", 26.0, 8.0, 14.0, 8.0], ["h4", "eg", 14.0, 8.0, 14.0, 0.0]
         ]));
-        let t = TerrainMesh { id: "t".into(), positions: vec![0.0, -10.0, 0.0, 40.0, -10.0, 0.0, 40.0, 30.0, 0.0, 0.0, 30.0, 0.0], indices: vec![0.0, 1.0, 2.0, 0.0, 2.0, 3.0], ..Default::default() };
+        let t = TerrainMesh { id: "t".into(), category_code: "02".into(), positions: vec![0.0, -10.0, 0.0, 40.0, -10.0, 0.0, 40.0, 30.0, 0.0, 0.0, 30.0, 0.0], indices: vec![0.0, 1.0, 2.0, 0.0, 2.0, 3.0], ..Default::default() };
         // Sohle 2 m ausserhalb, 3 m tief, 45°: Böschungsoberkante West bei x ≈ 9.
-        let pit = Excavation { id: "bg".into(), outline: vec![v2(12.0, -2.0), v2(28.0, -2.0), v2(28.0, 10.0), v2(12.0, 10.0)], bottom: -3.0, slope: Some(45.0), ..Default::default() };
+        let pit = Excavation { id: "bg".into(), category_code: "02".into(), outline: vec![v2(12.0, -2.0), v2(28.0, -2.0), v2(28.0, 10.0), v2(12.0, 10.0)], bottom: -3.0, slope: Some(45.0), ..Default::default() };
         p.context = Some(vec![ContextObject::TerrainMesh(t), ContextObject::Excavation(pit)]);
         let dim = |id: &str, off: f64| serde_json::from_value::<Drawing2D>(serde_json::json!({"id": id, "type": "drawing2d", "levelId": "eg", "categoryCode": "20", "geom": {"shape": "dimension", "pts": [{"x": 13.8, "y": 0}, {"x": 13.8, "y": 8}], "offset": off}})).unwrap();
         p.drawings2d = vec![dim("autodim-eg-west-openings", 1.0), dim("autodim-eg-west-total", 2.4), dim("eigene", 1.5)];
         // Masslinien (senkrecht, über die ganze Kette) je Zeichnung.
         let lines = |p: &Project| -> Vec<(String, f64)> {
-            let a = super::super::domains::PlanArgs::parse(1.0, r#"{"floor": "eg", "scale": 100, "show": ["20"]}"#).unwrap();
+            let a = super::super::domains::PlanArgs::parse(1.0, r#"{"floor": "eg", "scale": 100, "show": ["02", "20"]}"#).unwrap();
             let mut out = Vec::new();
             for q in super::super::drawings::stamp_obstacle_prims(&Ctx::new(p, &a)) {
                 if let Primitive::Line { a, b, drawing_id: Some(id), .. } = q {
@@ -1552,12 +1547,12 @@ mod tests {
     #[test]
     fn gelaende_nur_im_erdgeschoss() {
         let mut p = sample_with_walls(serde_json::json!([["h1", "eg", 14.0, 0.0, 26.0, 0.0]]));
-        let t = TerrainMesh { id: "t".into(), positions: vec![0.0, 0.0, 0.0, 40.0, 0.0, 0.0, 40.0, 30.0, 3.0, 0.0, 30.0, 3.0], indices: vec![0.0, 1.0, 2.0, 0.0, 2.0, 3.0], contour_interval: Some(0.1), ..Default::default() };
-        let pit = Excavation { id: "bg".into(), outline: vec![v2(12.0, -2.0), v2(28.0, -2.0), v2(28.0, 10.0), v2(12.0, 10.0)], bottom: -3.0, ..Default::default() };
-        let cs = ContourSet { id: "hl".into(), contours: vec![Contour { pts: vec![v2(0.0, 20.0), v2(40.0, 20.0)], ..Default::default() }], ..Default::default() };
+        let t = TerrainMesh { id: "t".into(), category_code: "02".into(), positions: vec![0.0, 0.0, 0.0, 40.0, 0.0, 0.0, 40.0, 30.0, 3.0, 0.0, 30.0, 3.0], indices: vec![0.0, 1.0, 2.0, 0.0, 2.0, 3.0], contour_interval: Some(0.1), ..Default::default() };
+        let pit = Excavation { id: "bg".into(), category_code: "02".into(), outline: vec![v2(12.0, -2.0), v2(28.0, -2.0), v2(28.0, 10.0), v2(12.0, 10.0)], bottom: -3.0, ..Default::default() };
+        let cs = ContourSet { id: "hl".into(), category_code: "02".into(), contours: vec![Contour { pts: vec![v2(0.0, 20.0), v2(40.0, 20.0)], ..Default::default() }], ..Default::default() };
         p.context = Some(vec![ContextObject::TerrainMesh(t), ContextObject::Excavation(pit), ContextObject::ContourSet(cs)]);
         let count = |p: &Project, floor: &str, scale: f64| {
-            let a = super::super::domains::PlanArgs::parse(1.0, &format!(r#"{{"floor": "{floor}", "scale": {scale}}}"#)).unwrap();
+            let a = super::super::domains::PlanArgs::parse(1.0, &format!(r#"{{"show": ["02"], "floor": "{floor}", "scale": {scale}}}"#)).unwrap();
             let mut out = Vec::new();
             plan_context(&Ctx::new(p, &a), &mut out);
             out.iter().filter(|q| matches!(q, Primitive::Line { color: Some(c), .. } if c == TERRAIN_INK || c == EXCAVATION_INK || c == CONTEXT_LINE_COLOR)).count()
@@ -1575,10 +1570,10 @@ mod tests {
     /// Böschungsoberkante oder Böschungsschraffur (vorher „-2.5“/„-2.2“ in der Böschung, Musterhaus komplex EG).
     #[test]
     fn hoehenkoten_nicht_auf_der_baugrube() {
-        let t = TerrainMesh { id: "t".into(), positions: vec![0.0, 0.0, 0.0, 60.0, 0.0, 6.0, 60.0, 40.0, 6.0, 0.0, 40.0, 0.0], indices: vec![0.0, 1.0, 2.0, 0.0, 2.0, 3.0], contour_interval: Some(0.1), ..Default::default() };
-        let pit = Excavation { id: "bg".into(), outline: vec![v2(20.0, 5.0), v2(40.0, 5.0), v2(40.0, 35.0), v2(20.0, 35.0)], bottom: 0.5, ..Default::default() };
+        let t = TerrainMesh { id: "t".into(), category_code: "02".into(), positions: vec![0.0, 0.0, 0.0, 60.0, 0.0, 6.0, 60.0, 40.0, 6.0, 0.0, 40.0, 0.0], indices: vec![0.0, 1.0, 2.0, 0.0, 2.0, 3.0], contour_interval: Some(0.1), ..Default::default() };
+        let pit = Excavation { id: "bg".into(), category_code: "02".into(), outline: vec![v2(20.0, 5.0), v2(40.0, 5.0), v2(40.0, 35.0), v2(20.0, 35.0)], bottom: 0.5, ..Default::default() };
         let p = Project { context: Some(vec![ContextObject::Excavation(pit), ContextObject::TerrainMesh(t)]), ..Default::default() };
-        let a = super::super::domains::PlanArgs::parse(1.0, r#"{"show": ["02"], "scale": 100}"#).unwrap();
+        let a = super::super::domains::PlanArgs::parse(1.0, r#"{"show": ["02", "02"], "scale": 100}"#).unwrap();
         let mut out = Vec::new();
         plan_context(&Ctx::new(&p, &a), &mut out);
         let pit_lines: Vec<(Vec2, Vec2)> = out.iter().filter_map(|q| match q { Primitive::Line { a, b, color: Some(c), .. } if c == EXCAVATION_INK => Some((*a, *b)), _ => None }).collect();
@@ -1601,10 +1596,10 @@ mod tests {
     #[test]
     fn hoehenlinien_beschriftungen_kollisionsfrei() {
         // Steil: z = 4·y über 40 × 10 m → Zähllinien (z = 0.5 k) alle 0.125 m = 1.25 mm Papier.
-        let t = TerrainMesh { id: "t".into(), positions: vec![0.0, 0.0, 0.0, 40.0, 0.0, 0.0, 40.0, 10.0, 40.0, 0.0, 10.0, 40.0], indices: vec![0.0, 1.0, 2.0, 0.0, 2.0, 3.0], contour_interval: Some(0.1), ..Default::default() };
+        let t = TerrainMesh { id: "t".into(), category_code: "02".into(), positions: vec![0.0, 0.0, 0.0, 40.0, 0.0, 0.0, 40.0, 10.0, 40.0, 0.0, 10.0, 40.0], indices: vec![0.0, 1.0, 2.0, 0.0, 2.0, 3.0], contour_interval: Some(0.1), ..Default::default() };
         let dim: Drawing2D = serde_json::from_value(serde_json::json!({ "id": "d", "type": "drawing2d", "levelId": "eg", "categoryCode": "80", "geom": { "shape": "dimension", "pts": [{ "x": 2.0, "y": 5.0 }, { "x": 38.0, "y": 5.0 }], "offset": 0.0 } })).unwrap();
         let p = Project { context: Some(vec![ContextObject::TerrainMesh(t)]), drawings2d: vec![dim], ..Default::default() };
-        let a = super::super::domains::PlanArgs::parse(1.0, r#"{"floor": "eg", "show": ["80"], "scale": 100}"#).unwrap();
+        let a = super::super::domains::PlanArgs::parse(1.0, r#"{"floor": "eg", "show": ["02", "80"], "scale": 100}"#).unwrap();
         let c = Ctx::new(&p, &a);
         let mut out = Vec::new();
         plan_context(&c, &mut out);
@@ -1649,11 +1644,11 @@ mod tests {
     /// Speicher), nach einem anderen Massstab und ohne Speicher (`contour_prims`).
     #[test]
     fn hoehenlinien_aus_dem_zwischenspeicher_wie_neu() {
-        let t = TerrainMesh { id: "t".into(), positions: vec![0.0, 0.0, 0.0, 40.0, 0.0, 2.0, 40.0, 30.0, 9.0, 0.0, 30.0, 4.0, 20.0, 15.0, 7.5], indices: vec![0.0, 1.0, 4.0, 1.0, 2.0, 4.0, 2.0, 3.0, 4.0, 3.0, 0.0, 4.0], contour_interval: Some(0.1), ..Default::default() };
+        let t = TerrainMesh { id: "t".into(), category_code: "02".into(), positions: vec![0.0, 0.0, 0.0, 40.0, 0.0, 2.0, 40.0, 30.0, 9.0, 0.0, 30.0, 4.0, 20.0, 15.0, 7.5], indices: vec![0.0, 1.0, 4.0, 1.0, 2.0, 4.0, 2.0, 3.0, 4.0, 3.0, 0.0, 4.0], contour_interval: Some(0.1), ..Default::default() };
         let mut p = sample_with_walls(serde_json::json!([["w1", "eg", 5, 5, 15, 5], ["w2", "eg", 15, 5, 15, 12], ["w3", "eg", 15, 12, 5, 12], ["w4", "eg", 5, 12, 5, 5]]));
         p.context = Some(vec![ContextObject::TerrainMesh(t.clone())]);
         let run = |scale: f64| {
-            let a = super::super::domains::PlanArgs::parse(1.0, &format!(r#"{{"floor": "eg", "show": ["80"], "scale": {scale}}}"#)).unwrap();
+            let a = super::super::domains::PlanArgs::parse(1.0, &format!(r#"{{"floor": "eg", "show": ["02", "80"], "scale": {scale}}}"#)).unwrap();
             let c = Ctx::new(&p, &a);
             let mut out = Vec::new();
             plan_context(&c, &mut out);

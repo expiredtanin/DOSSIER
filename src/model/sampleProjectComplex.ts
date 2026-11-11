@@ -812,12 +812,12 @@ export function buildComplexSampleProject(): Project {
     drawings2d: [...cadastre(), ...annotations()],
     context: [
       {
-        type: "contourSet", id: "hoehenlinien", name: "Höhenlinien (Vermessung)", layer: "Terrain", categoryCode: "14",
+        type: "contourSet", id: "hoehenlinien", name: "Höhenlinien (Vermessung)", categoryCode: "14", source: "Vermessung (fiktiv)",
         contours: CONTOUR_Z.map((z) => ({ z, pts: contourAt(z), closed: false, layer: isMainContour(z) ? "HL-Haupt" : "HL" })),
       },
       {
         // Baugrube: Böschung 60° (Ost 50°), Nordkante (Hang) mit Rühlwand gesichert, Sohle unter der Bodenplatte.
-        type: "excavation", id: "baugrube", name: "Baugrube Haupthaus", layer: "Terrain", categoryCode: "07",
+        type: "excavation", id: "baugrube", name: "Baugrube Haupthaus", categoryCode: "07",
         // Umriss = Gebäude-Grundfläche UG (mit Erker), Arbeitsraum 0.8 m; Neigungen in Grad.
         outline: rect(-HA, -HA, 17.2, 10 + HA), bottom: -3.35, slope: 60, fillSlope: 33.7,
         edgeSlopes: [60, 50, 90, 60], edgeShoring: [false, false, true, false], workingSpace: 0.8,

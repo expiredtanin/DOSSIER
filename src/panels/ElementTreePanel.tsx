@@ -14,9 +14,14 @@
 // die Plan-Ansicht ein. Auf-/zuklappbare Geschoss- und Klassen-Knoten, ein
 // Textfilter oben durchsucht Name/Typ/Klasse.
 //
+// [181] Gelände- und Umgebungs-Elemente (Gelände, Höhenlinien, Netzkörper wie Nachbargebäude, Luftbilder,
+// Baugruben) stehen als eigener Knoten „Gelände & Umgebung" daneben — wie alle anderen Elemente wähl- und
+// zoombar, unabhängig davon, woher sie kommen.
+//
 // Bezeichner englisch, UI-Text/Kommentare deutsch (CONVENTIONS.md).
 
 import { useMemo, useState } from "react";
+import type { ContextObject } from "../model/types";
 import { useStore } from "../state/appStore";
 import { usePanelHost } from "./host";
 import type { ScheduleKind, ScheduleRow } from "./host";
@@ -46,6 +51,12 @@ const CLASS_LABEL_KEY: Record<Exclude<ScheduleKind, "Tür">, string> = {
   Treppe: "elements.kind.stair",
   Extrusion: "elements.kind.extrusion",
 };
+
+/** Arten der Gelände-/Umgebungs-Elemente in Anzeigereihenfolge (Label wie in der Objekt-Info). */
+const SITE_ORDER: ContextObject["type"][] = ["terrainMesh", "contourSet", "excavation", "importedMesh", "image"];
+
+/** Sammelknoten der Gelände-/Umgebungs-Elemente (Schlüssel für das Auf-/Zuklappen). */
+const SITE_KEY = "::site";
 
 /** Kurzform einer ID für die Anzeige (voller Wert bleibt im Tooltip). */
 function shortId(id: string): string {
@@ -113,6 +124,13 @@ export function ElementTreePanel() {
   const q = query.trim().toLowerCase();
   const searching = q.length > 0;
 
+  // [181] Gelände-/Umgebungs-Elemente, nach Suchtext gefiltert (Name, Art, Id).
+  const siteItems = useMemo(() => {
+    const all = project.context ?? [];
+    if (!searching) return all;
+    return all.filter((o) => `${o.name} ${t(`objinfo.contextObject.type.${o.type}`)} ${o.id}`.toLowerCase().includes(q));
+  }, [project.context, q, searching]);
+
   const visibleRows = useMemo(() => {
     if (!searching) return allRows;
     return allRows.filter((r) =>
@@ -144,7 +162,7 @@ export function ElementTreePanel() {
     host.onSelectScheduleRow(row.kind, row.id, row.floorId, { zoom });
   };
 
-  if (allRows.length === 0) {
+  if (allRows.length === 0 && (project.context ?? []).length === 0) {
     return (
       <section className="nav-group">
         <header className="nav-group-head">
@@ -183,7 +201,7 @@ export function ElementTreePanel() {
         />
       </div>
 
-      {floorGroups.length === 0 ? (
+      {floorGroups.length === 0 && siteItems.length === 0 ? (
         <div style={{ padding: "10px 10px", fontSize: 12, color: "var(--muted)" }}>
           {t("elements.noMatch")}
         </div>
@@ -261,6 +279,57 @@ export function ElementTreePanel() {
             </div>
           );
         })
+      )}
+      {siteItems.length > 0 && (
+        <div className="level-cat" data-testid="elements-site">
+          <header className="level-cat-head" onClick={() => toggleFloor(SITE_KEY)}>
+            <span className={`level-cat-chevron${searching || !collapsedFloors.has(SITE_KEY) ? " open" : ""}`} aria-hidden="true">
+              ▸
+            </span>
+            <span className="level-cat-title">{t("elements.site")}</span>
+            <span style={{ fontSize: 10, color: "var(--muted)" }}>{siteItems.length}</span>
+          </header>
+          {(searching || !collapsedFloors.has(SITE_KEY)) && (
+            <div className="nav-list">
+              {SITE_ORDER.map((kind) => {
+                const items = siteItems.filter((o) => o.type === kind);
+                if (items.length === 0) return null;
+                const classKey = `${SITE_KEY}::${kind}`;
+                const classOpen = searching || !collapsedClasses.has(classKey);
+                return (
+                  <div key={classKey}>
+                    <header className="level-cat-head" style={{ paddingLeft: 20, minHeight: 20 }} onClick={() => toggleClass(classKey)}>
+                      <span className={`level-cat-chevron${classOpen ? " open" : ""}`} aria-hidden="true">
+                        ▸
+                      </span>
+                      <span className="level-cat-title" style={{ fontSize: 9 }}>
+                        {t(`objinfo.contextObject.type.${kind}`)}
+                      </span>
+                      <span style={{ fontSize: 10, color: "var(--muted)" }}>{items.length}</span>
+                    </header>
+                    {classOpen && (
+                      <div className="nav-list">
+                        {items.map((o) => (
+                          <div
+                            key={o.id}
+                            className="nav-row"
+                            style={{ paddingLeft: 34 }}
+                            title={o.id}
+                            onClick={(e) => host.onSelectSiteElement(o.id, { zoom: e.shiftKey })}
+                            onDoubleClick={() => host.onSelectSiteElement(o.id, { zoom: true })}
+                          >
+                            <span className="nav-label">{o.name}</span>
+                            <span className="nav-elev">{o.categoryCode}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
       )}
     </section>
   );

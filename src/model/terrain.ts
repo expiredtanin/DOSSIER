@@ -15,9 +15,6 @@ import { TERRAIN_CATEGORY } from "./contextCategories";
 
 let terrainSeq = 0;
 
-/** Sichtbarer Ebenen-/Gruppierungsname des Geländes (SitePanel). */
-export const TERRAIN_LAYER = "Terrain";
-
 /**
  * Erzeugt ein Gelände aus Konturen (Rust-Kern, `terrain.rs`): Konturen verdichtet und als Bruchkanten
  * erzwungen (constrained Delaunay), flache Dreiecke behoben, adaptiv geglättet ohne Überschwingen.
@@ -124,14 +121,14 @@ export function terrainMeshFromGrid(grid: TerrainGrid): TerrainMesh {
   }
 
   if (positions.length < 9 || indices.length < 3) {
-    return { id, type: "terrainMesh", name, categoryCode: TERRAIN_CATEGORY.code, positions: [], indices: [] };
+    return { id, type: "terrainMesh", name, categoryCode: TERRAIN_CATEGORY.code, source: "swissALTI3D", positions: [], indices: [] };
   }
   return {
     id,
     type: "terrainMesh",
     name,
-    layer: TERRAIN_LAYER,
     categoryCode: TERRAIN_CATEGORY.code,
+    source: "swissALTI3D",
     positions,
     indices,
     contourInterval: 1,

@@ -603,14 +603,7 @@ pub fn extra_bounds(p: &Project, extra: &[(Primitive, u32)], shown: impl Fn(&str
         }
     }
     for obj in p.context.as_deref().unwrap_or(&[]) {
-        let code = match obj {
-            ContextObject::ImportedMesh(m) => m.category_code.as_deref(),
-            ContextObject::ContourSet(s) => s.category_code.as_deref(),
-            ContextObject::TerrainMesh(t) => t.category_code.as_deref(),
-            ContextObject::Image(i) => i.category_code.as_deref(),
-            ContextObject::Excavation(e) => e.category_code.as_deref(),
-        };
-        if code.is_some_and(|k| !shown(k)) {
+        if !shown(obj.category_code()) {
             continue;
         }
         match obj {

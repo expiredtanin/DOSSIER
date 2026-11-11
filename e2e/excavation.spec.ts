@@ -1,5 +1,5 @@
 // [143] Baugrube erstellen wie ein Nutzer (Mac-Befund 5.11.: „Die Baugrube lässt sich gar nicht erstellen"):
-// Befehl/Panel-Knopf, Umriss tippen, Enter. Geprüft: Hinweis (Toast), Eintrag im Panel „Gelände", Linien der
+// Befehl/Panel-Knopf, Umriss tippen, Enter. Geprüft: Hinweis (Toast), Eintrag im Elemente-Panel ([181]), Linien der
 // Baugrube im Grundriss (Farbe EXCAVATION_INK, `plan/context.rs`), Schnitt mit Gelände, Rückgängig entfernt sie.
 // Ursachen vorher: Kategorie „02 Gelände" (in Grundrissen oft ausgeblendet → Baugrube unsichtbar), Sohle immer
 // −0.30 (las eine Liste `floors`, die es nicht gibt), ohne Gelände stilles Nichts.
@@ -8,7 +8,8 @@ import { blurFocus, commandInput, discardIfAsked, expect, fileMenu, openTab, sho
 
 const ink = (page: Page) => page.locator('svg.plan-svg [stroke="#1f242c"]').count();
 const toast = (page: Page) => page.locator(".toast-message");
-const sitePanel = (page: Page) => page.locator(".site-panel");
+// [181] Die Baugrube ist ein normales Element: sie steht im Elemente-Panel unter „Gelände & Umgebung".
+const siteElements = (page: Page) => page.getByTestId("elements-site");
 
 async function drawExcavation(page: Page, pts: string[]): Promise<void> {
   await commandInput(page).focus();
@@ -39,14 +40,15 @@ test("Musterhaus komplex: Baugrube per Panel-Knopf im Ausschnitt EG 1:100, sicht
   await drawExcavation(page, ["-25,-10", "-12,-10", "-12,0", "-25,0"]);
 
   await expect(toast(page).filter({ hasText: /Baugrube angelegt: Sohle −3\.00 m/ })).toBeVisible();
-  await expect(sitePanel(page)).toContainText("Baugrube 2");
+  await openTab(page, "Elemente");
+  await expect(siteElements(page)).toContainText("Baugrube 2");
   // Im Erdgeschoss-Grundriss sichtbar (Gelände „02" ist dort ausgeblendet, die Baugrube „07" nicht).
   await expect.poll(() => ink(page)).toBeGreaterThan(before);
 
   // Rückgängig: weg aus Panel und Plan.
   await blurFocus(page);
   await page.keyboard.press("Control+z");
-  await expect(sitePanel(page)).not.toContainText("Baugrube 2");
+  await expect(siteElements(page)).not.toContainText("Baugrube 2");
   await expect.poll(() => ink(page)).toBe(before);
 });
 
@@ -75,7 +77,7 @@ test("Leeres Projekt mit Gelände in m ü. M.: Gelände erzeugen, Baugrube, ±0.
     const y = -30 + i * 5;
     contours.push({ z: 500 + i, pts: [-40, -20, 0, 20, 40].map((x) => ({ x, y: y + x * 0.02 })), closed: false, layer: "HL" });
   }
-  json.context = [{ type: "contourSet", id: "hl", name: "Höhenlinien", layer: "Terrain", categoryCode: "14", contours }];
+  json.context = [{ type: "contourSet", id: "hl", name: "Höhenlinien", categoryCode: "14", contours }];
   json.name = "Hang";
   const chooser = page.waitForEvent("filechooser");
   await fileMenu(page, "Projekt öffnen");
@@ -90,11 +92,15 @@ test("Leeres Projekt mit Gelände in m ü. M.: Gelände erzeugen, Baugrube, ±0.
   await page.getByRole("button", { name: "Baugrube zeichnen" }).click();
   await drawExcavation(page, ["-6,-5", "6,5"]); // 2 Punkte = Rechteck
   await expect(toast(page).filter({ hasText: /±0\.00 = 50\d\.\d\d m ü\. M\. angenommen/ })).toBeVisible();
-  await expect(sitePanel(page)).toContainText("Baugrube 1");
-  await expect(sitePanel(page)).toContainText(/Abtrag [1-9]/);
+  // [181] Im Elemente-Panel wählen, Mengen in der Objekt-Info.
+  await openTab(page, "Elemente");
+  await siteElements(page).getByText("Baugrube 1").click();
+  await openTab(page, "Objekt-Info");
+  await expect(page.locator(".objinfo-panel").first()).toContainText(/Abtrag [1-9]/);
   await expect.poll(() => ink(page)).toBeGreaterThan(before);
 
   await blurFocus(page);
   await page.keyboard.press("Control+z");
-  await expect(sitePanel(page)).not.toContainText("Baugrube 1");
+  await openTab(page, "Elemente");
+  await expect(siteElements(page)).not.toContainText("Baugrube 1");
 });

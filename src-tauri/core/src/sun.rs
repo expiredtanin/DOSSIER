@@ -1067,7 +1067,7 @@ fn is_tree_category(p: &Project, code: &str) -> bool {
 
 /// Gelände für den Schattenwurf: erstes sichtbares Geländenetz des Kontexts (inkl. Baugruben).
 fn shadow_terrain(p: &Project) -> Option<std::rc::Rc<crate::excavation::SiteTerrain>> {
-    let t = crate::excavation::terrains(p).into_iter().find(|t| t.hidden != Some(true))?;
+    let t = crate::excavation::terrains(p).into_iter().next()?;
     let st = crate::excavation::site_terrain(p, t);
     (!st.current().tris.is_empty()).then_some(st)
 }

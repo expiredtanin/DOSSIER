@@ -133,7 +133,7 @@ describe("translateProject", () => {
       context: [
         {
           id: "CTX1",
-          type: "importedMesh",
+          type: "importedMesh", categoryCode: "10",
           name: "Test",
           positions: [0, 0, 5, 2, 3, 7],
           indices: [0, 1, 0],
@@ -152,7 +152,7 @@ describe("translateProject", () => {
       context: [
         {
           id: "CS1",
-          type: "contourSet",
+          type: "contourSet", categoryCode: "02",
           name: "Höhenlinien",
           contours: [
             {

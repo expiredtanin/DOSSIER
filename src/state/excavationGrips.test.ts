@@ -8,7 +8,7 @@ import { excavationGripPoints } from "../core";
 
 const pit: Excavation = {
   id: "bg",
-  type: "excavation",
+  type: "excavation", categoryCode: "07",
   name: "Baugrube",
   outline: [{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 4 }, { x: 0, y: 4 }],
   bottom: -2,

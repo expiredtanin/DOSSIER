@@ -45,7 +45,7 @@ mod tests {
     #[test]
     fn importiertes_netz_mit_farbe_und_ifc_id() {
         let raw: Value = serde_json::from_str(
-            r##"{"type":"importedMesh","id":"m","name":"Wand","color":"#aabbcc","ifcGlobalId":"2O2Fr$t4X7Zf8NOew3FLOH",
+            r##"{"type":"importedMesh","id":"m","name":"Wand","categoryCode":"10","source":"IFC IfcWall","color":"#aabbcc","ifcGlobalId":"2O2Fr$t4X7Zf8NOew3FLOH",
                  "positions":[0,0,0],"indices":[0,0,0]}"##,
         )
         .unwrap();

@@ -143,13 +143,13 @@ pub fn info(m: &ImportedMesh) -> Option<Rc<MeshInfo>> {
     i
 }
 
-/// Die gezeichneten Netze: nicht einzeln ausgeblendet ([137]), mit mindestens einem gültigen Dreieck.
+/// Die gezeichneten Netze: mit mindestens einem gültigen Dreieck.
 /// Kategorie-Sichtbarkeit prüft der Aufrufer (UI-Zustand).
 pub fn meshes(p: &Project) -> Vec<MeshRef<'_>> {
     let mut out = Vec::new();
     for (index, obj) in p.context.as_deref().unwrap_or(&[]).iter().enumerate() {
         let ContextObject::ImportedMesh(m) = obj else { continue };
-        if m.hidden == Some(true) || m.positions.len() < 9 || m.indices.len() < 3 {
+        if m.positions.len() < 9 || m.indices.len() < 3 {
             continue;
         }
         if let Some(info) = info(m) {
@@ -157,13 +157,6 @@ pub fn meshes(p: &Project) -> Vec<MeshRef<'_>> {
         }
     }
     out
-}
-
-/// [152] Gelände aus einem IFC-Import (Klasse `IfcSite` im Layer bzw. Namen, oder Name mit „Gelände"/„Terrain",
-/// z. B. ein `IfcGeographicElement` „Terrain"): im Schnitt Geländelinie statt Körper.
-pub fn is_terrain(m: &ImportedMesh) -> bool {
-    let (name, layer) = (m.name.to_lowercase(), m.layer.as_deref().unwrap_or("").to_lowercase());
-    layer == "ifcsite" || name.contains("ifcsite") || ["gelände", "gelaende", "terrain"].iter().any(|k| name.contains(k))
 }
 
 /// Linienzüge ungerichtet aneinanderhängen (Netze mit wechselnder Orientierung): was sich schliesst,

@@ -110,7 +110,7 @@ pub(super) fn append_mesh_sections(cuts: &mut Vec<Cut>, lines: &mut Vec<(usize, 
             c.fill = Some(BODY_FILL.into());
             c.nse = nse;
             c.source_id = Some(m.mesh.id.clone());
-            c.category = m.mesh.category_code.clone();
+            c.category = Some(m.mesh.category_code.clone());
             cuts.push(c);
         }
         lines.extend(open.into_iter().map(|l| (k, l)));
@@ -190,10 +190,10 @@ pub(super) fn clip_line_to_u(pts: &[[f64; 2]], lo: f64, hi: f64) -> Vec<Vec<[f64
 }
 
 /// `appendTerrainProfiles`.
-/// [152] Dazu IFC-Gelände-Netze (`mesh_view::is_terrain`): Oberkante ihres Ebenenschnitts (offene Züge ganz).
-pub(super) fn append_terrain_profiles(out: &mut Output, p: &Project, base: (f64, f64), u: (f64, f64), terrain_meshes: &[crate::mesh_view::MeshRef]) {
+/// [152]/[181] Geschlossene Gelände-Netze (z. B. IFC-Gelände als Platte): von ihren Schnittringen nur die Oberkante.
+pub(super) fn append_terrain_profiles(out: &mut Output, p: &Project, base: (f64, f64), u: (f64, f64)) {
     let terrains: Vec<&TerrainMesh> = p.context.as_deref().unwrap_or(&[]).iter().filter_map(|c| if let ContextObject::TerrainMesh(t) = c { Some(t) } else { None }).collect();
-    if terrains.is_empty() && terrain_meshes.is_empty() {
+    if terrains.is_empty() {
         return;
     }
     let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
@@ -209,55 +209,54 @@ pub(super) fn append_terrain_profiles(out: &mut Output, p: &Project, base: (f64,
     }
     let range = lo.is_finite().then_some((lo, hi));
     for t in terrains {
-        // [137] Einzeln ausgeblendetes Gelände.
-        if t.positions.len() < 9 || t.hidden == Some(true) {
+        if t.positions.len() < 9 {
             continue;
         }
         out.terrain_id.get_or_insert_with(|| t.id.clone());
         // [T6] Gelände samt Baugruben, Höhen im Modellbezug; das gewachsene Terrain gestrichelt dazu.
         let st = crate::excavation::site_terrain(p, t);
-        let mut meshes = vec![(st.current().to_flat(-st.datum), false)];
+        let mut meshes: Vec<((Vec<f64>, Vec<f64>), bool)> = vec![(st.current().to_flat(-st.datum), false)];
         if st.modified.is_some() {
             meshes.push((st.orig.to_flat(-st.datum), true));
         }
+        // [152]/[181] Geschlossenes Gelände-Netz (z. B. IFC-Gelände als Platte): das rohe Netz schneiden und von den
+        // Schnittringen nur die Oberkante nehmen (die Fläche als TIN gelesen hätte Ober- und Unterseite).
+        if st.modified.is_none() && is_closed(&t.indices) {
+            meshes = vec![((t.positions.chunks(3).flat_map(|q| [q[0], q[1], q[2] - st.datum]).collect(), t.indices.clone()), false)];
+        }
         for ((pos, idx), natural) in meshes {
-            let (_, lines) = cut_mesh(&pos, &idx, base, u);
+            let (rings, mut lines) = cut_mesh(&pos, &idx, base, u);
+            for poly in rings_to_polygons(&rings) {
+                lines.extend(upper_edge(&poly[0]));
+            }
             for line in lines {
                 let parts = match range {
                     Some((lo, hi)) => clip_line_to_u(&line, lo - TERRAIN_MARGIN, hi + TERRAIN_MARGIN),
                     None => vec![line],
                 };
                 for pts in parts {
-                    out.profiles.push(Profile { category: t.category_code.clone(), pts, natural });
+                    out.profiles.push(Profile { category: Some(t.category_code.clone()), pts, natural });
                 }
             }
         }
     }
-    for m in terrain_meshes {
-        let (lo, hi) = mesh_depth_range(m, base, u);
-        if !(lo < 0.0 && hi > 0.0) {
-            continue;
-        }
-        let (rings, open) = crate::mesh_view::cut(m, &[0.0, base.0, base.1, u.0, u.1]);
-        let mut lines = open;
-        for poly in rings_to_polygons(&rings) {
-            lines.extend(upper_edge(&poly[0]));
-        }
-        if lines.is_empty() {
-            continue;
-        }
-        out.terrain_id.get_or_insert_with(|| m.mesh.id.clone());
-        for line in lines {
-            let parts = match range {
-                Some((lo, hi)) => clip_line_to_u(&line, lo - TERRAIN_MARGIN, hi + TERRAIN_MARGIN),
-                None => vec![line],
-            };
-            for pts in parts {
-                out.profiles.push(Profile { category: m.mesh.category_code.clone(), pts, natural: false });
-            }
+    append_earth(out, p, base, u);
+}
+
+/// Geschlossenes Dreiecksnetz: jede Kante gehört zu genau zwei Dreiecken.
+fn is_closed(indices: &[f64]) -> bool {
+    if indices.len() < 12 {
+        return false;
+    }
+    let mut edges: std::collections::HashMap<(u32, u32), u32> = std::collections::HashMap::new();
+    for t in indices.chunks_exact(3) {
+        let v = [t[0] as u32, t[1] as u32, t[2] as u32];
+        for k in 0..3 {
+            let (a, b) = (v[k], v[(k + 1) % 3]);
+            *edges.entry((a.min(b), a.max(b))).or_default() += 1;
         }
     }
-    append_earth(out, p, base, u);
+    edges.values().all(|&n| n == 2)
 }
 
 /// Tiefe des Erdreich-Bands unter der Geländelinie (m), wenn das Gelände keine `earthDepth` trägt.

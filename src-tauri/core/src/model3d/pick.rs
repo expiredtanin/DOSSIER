@@ -189,15 +189,10 @@ pub fn pick_geometry(p: &Project) -> Result<PickGeometry, String> {
     let stairs = pick_stairs(p);
     // Kontext-Meshes: rohe Welt-Dreiecke, Modell (x, y, z) → Welt (x, z, −y).
     let mut context_meshes = Vec::new();
-    // [137] Was im 3D nicht gezeichnet wird (Kategorie aus, Gelände einzeln aus), fängt auch keinen Klick.
+    // [137] Was im 3D nicht gezeichnet wird (Klasse aus), fängt auch keinen Klick.
     let hidden = hidden_category_codes(&p.layers);
     for obj in p.context.as_deref().unwrap_or(&[]) {
-        let code = match obj {
-            ContextObject::TerrainMesh(m) => m.category_code.as_deref(),
-            ContextObject::ImportedMesh(m) => m.category_code.as_deref(),
-            _ => None,
-        };
-        if code.is_some_and(|c| hidden.contains(c)) || matches!(obj, ContextObject::TerrainMesh(m) if m.hidden == Some(true)) || matches!(obj, ContextObject::ImportedMesh(m) if m.hidden == Some(true)) {
+        if hidden.contains(obj.category_code()) {
             continue;
         }
         let (pos, idx, id) = match obj {

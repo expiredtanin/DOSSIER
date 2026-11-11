@@ -556,6 +556,8 @@ export interface DetailRefInfo {
  */
 export interface ContextObjectInfo {
   objType: ContextObject["type"];
+  /** [181] Herkunft (z. B. „swissBUILDINGS3D"), nur Auskunft. */
+  source?: string;
   /** Reale LV95-Koordinate des Bbox-Mittelpunkts, falls `Project.geoAnchor`
    *  gesetzt ist (sonst `undefined` — kein Bezug bekannt). */
   lv95Center?: { e: number; n: number };

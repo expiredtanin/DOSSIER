@@ -38,6 +38,7 @@ describe("deriveSelection — Kontext-Objekt-Luftbild (ContextImage)", () => {
         id: "IMG1",
         type: "image",
         name: "Luftbild",
+        categoryCode: "03",
         src: "data:image/jpeg;base64,AAAA",
         min: { x: 0, y: 0 },
         max: { x: 10, y: 10 },
@@ -54,7 +55,7 @@ describe("deriveSelection — Kontext-Objekt-Luftbild (ContextImage)", () => {
 
   it("opacity fällt auf 1 zurück, wenn das Bild keine eigene Deckkraft trägt", () => {
     const project = projectWith([
-      { id: "IMG1", type: "image", name: "Luftbild", src: "x", min: { x: 0, y: 0 }, max: { x: 1, y: 1 } },
+      { id: "IMG1", type: "image", name: "Luftbild", categoryCode: "03", src: "x", min: { x: 0, y: 0 }, max: { x: 1, y: 1 } },
     ]);
     const sel = deriveSelection(project, { contextObjects: ["IMG1"] });
     expect(sel?.opacity).toBe(1);
@@ -63,11 +64,22 @@ describe("deriveSelection — Kontext-Objekt-Luftbild (ContextImage)", () => {
 
   it("isImage bleibt false/undefined für ein Nicht-Bild-Kontext-Objekt (z. B. importiertes Mesh)", () => {
     const project = projectWith([
-      { id: "M1", type: "importedMesh", name: "Haus", positions: [0, 0, 0, 1, 0, 0, 0, 1, 0], indices: [0, 1, 2] },
+      { id: "M1", type: "importedMesh", categoryCode: "10", name: "Haus", positions: [0, 0, 0, 1, 0, 0, 0, 1, 0], indices: [0, 1, 2] },
     ]);
     const sel = deriveSelection(project, { contextObjects: ["M1"] });
     expect(sel?.isImage).toBeFalsy();
     expect(sel?.opacity).toBeUndefined();
     expect(sel?.imageFilters).toBeUndefined();
+  });
+
+  it("[181] Klasse und Herkunft wie bei jedem Element (Klasse im Kopf änderbar, Farbe der Klasse)", () => {
+    const project = projectWith([
+      { id: "B1", type: "importedMesh", name: "Haus", categoryCode: "12", source: "swissBUILDINGS3D", positions: [0, 0, 0, 1, 0, 0, 0, 1, 0], indices: [0, 1, 2] },
+    ]);
+    project.layers = [{ code: "12", name: "Gebäude", color: "#123456", lw: 0.25, visible: true } as Project["layers"][number]];
+    const sel = deriveSelection(project, { contextObjects: ["B1"] });
+    expect(sel?.categoryCode).toBe("12");
+    expect(sel?.color).toBe("#123456");
+    expect(sel?.contextObject?.source).toBe("swissBUILDINGS3D");
   });
 });

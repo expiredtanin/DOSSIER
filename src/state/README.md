@@ -20,7 +20,7 @@ geänderten Listen sind neu ([121]).
 | `selectionSlice.ts`, `selection.ts` | Auswahl als ein Wert (`Selection`, je Element-Art eine Menge) |
 | `viewSlice.ts` | Darstellung ohne Modell: aktive Ebene, Massstab, Detailgrad, Schwarz-Weiss … |
 | `layoutSlice.ts` | Panel-Layout (Docks, Tabs, schwebende Fenster) |
-| `siteSlice.ts`, `notifySlice.ts` | Kontext-Objekte; Kurzmeldungen (`notify()`) |
+| `siteSlice.ts`, `notifySlice.ts` | Gelände-/Umgebungs-Elemente (`project.context`, [181]); Kurzmeldungen (`notify()`) |
 | `busyStore.ts`, `cursorStore.ts`, `liveScaleStore.ts` | hochfrequente oder globale Werte ausserhalb von React-State |
 
 ## Verdrahtung (aus `App.tsx` herausgelöst)

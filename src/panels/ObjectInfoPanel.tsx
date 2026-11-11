@@ -330,8 +330,8 @@ export function ObjectInfoPanel() {
           )}
         </>
       )}
-      {/* Kontext-Objekt (importiertes Gebäude/Terrain/Konturen): reale LV95-
-          Koordinate des Bbox-Mittelpunkts — direkt sichtbar, ob/wohin
+      {/* Gelände-/Umgebungs-Element (Netzkörper, Gelände, Höhenlinien …): Art, Herkunft (nur Auskunft, [181]),
+          Einstellungen und reale LV95-Koordinate des Bbox-Mittelpunkts — direkt sichtbar, ob/wohin
           georeferenziert importiert wurde (Nutzer-Wunsch zum Prüfen). */}
       {sel.contextObject && (
         <>
@@ -341,6 +341,12 @@ export function ObjectInfoPanel() {
             <span className="objinfo-flabel">{t("objinfo.contextObject.type")}</span>
             <span className="objinfo-fval">{t(`objinfo.contextObject.type.${sel.contextObject.objType}`)}</span>
           </div>
+          {sel.contextObject.source && (
+            <div className="objinfo-field">
+              <span className="objinfo-flabel">{t("objinfo.contextObject.source")}</span>
+              <span className="objinfo-fval" data-testid="context-source">{sel.contextObject.source}</span>
+            </div>
+          )}
           {ctxObj && (
             <div className="site-panel objinfo-site">
               <ContextObjectProps obj={ctxObj} quantities={quantities} />
