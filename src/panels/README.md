@@ -20,6 +20,7 @@ Kern; hier stehen Eingabe und Darstellung. Zustand über den Store (`src/state`)
 | Datei | Inhalt |
 |---|---|
 | `ToolsPanel.tsx`, `AttributesPanel.tsx`, `ObjectInfoPanel.tsx` | Werkzeug-Palette, Attribute, Objekt-Info der Auswahl (`ContextObjectProps.tsx`, `UValueRow.tsx`, `SurfacePatternPlacement.tsx` sind Teile davon) |
+| `objectSettings/` | Fenster „Objekteinstellungen" ([195], Taste T): `ObjectSettingsPanel` (schwebendes Panel `object-settings`) zeigt Bereich Objekt = `ObjectInfoPanel` und Darstellung = `AttributesPanel` (dieselben Komponenten, keine Doppelspur); `areas.ts` = Bereichs-Zuordnung, `areaState.ts` = gewählter Bereich |
 | `objectInfo/*.tsx` | Abschnitte je Element-Art (`WallSection`, `CeilingSection`, `RoofSections`, `OpeningSections`, `StairSection`, `RoomSection`, `SolidSections`, `SectionLineSection`, `RefSections`, `TreeSection`), gemeinsame Felder (`fields.tsx`) und Info-Blöcke (`InfoBlocks.tsx`); `ObjectInfoPanel` zeigt sie als einklappbare Gruppen (`InfoGroups.tsx`, `InfoGroup.tsx`, Zustand `infoGroupState.ts`); `groups.ts` hält die Zuordnung (Attribute = nur Gestaltung, Objekt-Info = Bauteil/BIM) und das Ziel der Taste T (`[189]`) |
 | `DrawingLevelsPanel.tsx`, `LayersPanel.tsx`, `ElementTreePanel.tsx` | Zeichnungsebenen, Ebenen, Baum Geschoss → Bauteilklasse → Element |
 | `LayoutsPanel.tsx`, `PublishSection.tsx`, `ViewSnapshotsPanel.tsx` | Layouts als Baum, Publikationssätze (`[79]`), gespeicherte Ansichten |

@@ -26,9 +26,10 @@
 // Label→Wert-Grid. Bezeichner englisch, UI-Text/Kommentare deutsch (CONVENTIONS.md).
 // Alle sichtbaren Texte über t(...).
 
-import { Fragment } from "react";
+import { Fragment, useMemo } from "react";
 import { useSelectionInfo } from "../state/useSelectionInfo";
 import { useStore } from "../state/appStore";
+import { selectionAppearance } from "../state/mixedValues";
 import { attrGroups } from "./objectInfo/groups";
 import type { ReactNode } from "react";
 import { t } from "../i18n";
@@ -67,6 +68,9 @@ export function AttributesPanel() {
   const host = usePanelHost();
   const project = useStore((s) => s.project);
   const sel = useSelectionInfo();
+  const selection = useStore((s) => s.selection);
+  // [195] Mehrfachauswahl: gemeinsamer Wert, bei Abweichung leeres Feld.
+  const appearance = useMemo(() => selectionAppearance(project, selection), [project, selection]);
 
   // Leerzustand: Hinweis. (Typ des neuen Bauteils und Schnittlinie liegen seit [189] in der Objekt-Info.)
   if (sel === null) {
@@ -244,6 +248,7 @@ export function AttributesPanel() {
             onColorChange={host.onSetSelectionColor}
             onPenChange={host.onSetSelectionColorPen}
           />
+          {appearance.color.mixed && <span className="attr-mixed" data-mixed="color">{t("objsettings.mixed")}</span>}
         </span>
 
         {/* Strichstärke (mm): Wand/Decke/Drawing2D mit Nach-Ebene/Nach-Bauteil/
@@ -269,7 +274,8 @@ export function AttributesPanel() {
                 min={0}
                 disabled={!weightEditable || !!sel.colorPenId}
                 list="attr-pen-weights"
-                value={sel.colorPenId ? resolvePenWeight(project, sel.colorPenId) : sel.weightMm}
+                value={appearance.weightMm.mixed ? "" : sel.colorPenId ? resolvePenWeight(project, sel.colorPenId) : sel.weightMm}
+                placeholder={appearance.weightMm.mixed ? t("objsettings.mixed") : undefined}
                 onChange={(e) => {
                   const v = Number(e.target.value);
                   if (Number.isFinite(v)) host.onSetSelectionWeight(v);

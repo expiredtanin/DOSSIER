@@ -364,6 +364,10 @@ export const de = {
   "nav.tools": "Werkzeuge",
   "nav.attributes": "Attribute",
   "nav.objectInfo": "Objekt-Info",
+  "nav.objectSettings": "Objekteinstellungen",
+  "objsettings.area.object": "Objekt",
+  "objsettings.area.appearance": "Darstellung",
+  "objsettings.mixed": "gemischt",
 
   // Attribute-Palette (AttributesPanel)
   "attr.title": "Attribute",

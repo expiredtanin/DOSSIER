@@ -362,6 +362,10 @@ export const en: Record<TranslationKey, string> = {
   "nav.tools": "Tools",
   "nav.attributes": "Attributes",
   "nav.objectInfo": "Object Info",
+  "nav.objectSettings": "Object Settings",
+  "objsettings.area.object": "Object",
+  "objsettings.area.appearance": "Appearance",
+  "objsettings.mixed": "mixed",
 
   // Attribute-Palette (AttributesPanel)
   "attr.title": "Attributes",

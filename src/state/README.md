@@ -48,7 +48,7 @@ in `ProjectSync`.
 | `useDormerNotice.ts` | Gauben-Hinweis (in `ProjectSync`, abonniert nur Dächer und Projekt-Id) |
 | `useMouseSelectionHandlers.ts` | Auswahl und Kontextmenü aus Grundriss und 3D |
 | `useKeyboardShortcuts.ts`, `keyboardShortcuts.ts`, `commandKeys.ts` | Tastenkürzel, Esc/Enter laufender Befehle |
-| `objectSettings.ts` | Taste T / Menü „Objekteinstellungen…" ([189]): Öffnungs-Dialog oder Abschnitt der Objekt-Info |
+| `objectSettings.ts` | Taste T / Menü „Objekteinstellungen…" ([195]): öffnet das schwebende Fenster `object-settings` und klappt den passenden Abschnitt der Objekt-Info auf; `mixedValues.ts`: gemeinsamer Wert über die Mehrfachauswahl (abweichend = leer) |
 | `useDisplayResolvers.ts` | sichtbar, gedimmt, gesperrt je Ebene und Kategorie |
 | `useTextTarget.ts`, `useSectionLineState.ts`, `useStatusBarInfo.ts` | Text-Ziel der Formatierleiste; Schnittlinie, 3D-Live-Schnitt; Status-Leiste (je mit schmalen Selektoren) |
 | `usePanelHostBase.ts`, `panelHost/` | Host-Wert für die Panels: Zusammenbau aus Teil-Bauern je Bereich (`toolsHost`, `selectionStyleHost`, `elementAttributesHost`, `siteHost`, `viewSnapshotsHost` + `viewState`, `layoutsHost`); `stableHost.ts` hält die Identität fest (Handler als Trampoline), solange sich kein Wert-Feld ändert. Projekt und Objekt-Info kommen beim Bau aus dem Store; die Fassung hinter den Trampolinen wird bei geändertem Projekt/Auswahl erst beim Aufruf neu gebaut |

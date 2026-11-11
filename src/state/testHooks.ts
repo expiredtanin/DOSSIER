@@ -56,6 +56,8 @@ declare global {
       viewCamera: () => { levelId: string; center: { x: number; y: number } | null; pxPerMeter: number | null; scale: number };
       /** [192] Sichtbare Ebenen-Codes und Zahl der Plan-Primitive (gesamt / mit Wand-Bezug) der aktiven Ebene. */
       layerView: () => { wallId: string; visible: string[]; prims: number; wallPrims: number };
+      /** [195] Strichstärke-Override der Wände (id → mm), nur gesetzte. */
+      wallWeights: () => Record<string, number>;
       /** [185] 3D-Element-Filter (Store) und die Wand-ids des 3D-Modells bzw. der Pick-Geometrie mit ihm. */
       view3d: () => { only: string[] | null; hidden: string[]; walls: string[]; pickWalls: string[] };
     };
@@ -93,6 +95,7 @@ export function installTestHooks(): void {
         openings: (p.openings ?? []).map((o) => ({ id: o.id, sillHeight: o.sillHeight, height: o.height })),
       };
     },
+    wallWeights: () => Object.fromEntries(getState().project.walls.flatMap((w) => (w.strokeWeight === undefined ? [] : [[w.id, w.strokeWeight]]))),
     select: (patch) => getState().setSelection(patch),
     dimPts: (id) => {
       const g = getState().project.drawings2d.find((d) => d.id === id)?.geom;
