@@ -859,6 +859,92 @@ fn roof_body_faces(planes: &[Vec<[f64; 3]>], eaves_z: f64) -> Vec<Face> {
     out
 }
 
+/// Höchste Bogenlänge (m) einer Sehne im Grundriss der Bogenwand-Teile zwischen Öffnungen.
+const ARC_PIECE: f64 = 0.25;
+
+/// [142] Lichtdurchlässige Lücken einer Wand: je Öffnung `[u0, u1, z0, z1]` (entlang der Achse ab Wandanfang,
+/// absolute Höhe), über die volle Wanddicke — Fenster (auch verglast) und Türen lassen Licht durch. Formöffnungen
+/// ([G3]) als senkrechte Streifen mit der kleinsten Höhe des Umrisses im Streifen (eher zu wenig Licht als zu viel).
+fn wall_gaps(os: &[&crate::model::Opening], axis: f64, zb: f64, zt: f64) -> Vec<[f64; 4]> {
+    const MIN_GAP: f64 = 1e-4;
+    let mut out = Vec::new();
+    for o in os {
+        let (pos, w, h) = (o.position, o.width, o.height);
+        if ![pos, w, h, o.sill_height, axis, zb, zt].iter().all(|v| v.is_finite()) {
+            continue;
+        }
+        let from = pos.min(axis).max(0.0);
+        let to = (pos + w).min(axis).max(from);
+        let ob = zb + o.sill_height.max(0.0);
+        let ot = zt.min(ob + h);
+        if to - from < MIN_GAP || !(ot - ob > MIN_GAP) {
+            continue;
+        }
+        let Some(shape) = crate::opening_shape::opening_outline(o, w, h) else {
+            out.push([from, to, ob, ot]);
+            continue;
+        };
+        let n = (w / 0.15).ceil().clamp(4.0, 16.0) as usize;
+        let eps = 1e-6 * w;
+        for i in 0..n {
+            let (ua, ub) = (w * i as f64 / n as f64, w * (i + 1) as f64 / n as f64);
+            let (Some(ra), Some(rb)) = (crate::opening_shape::v_range(&shape, ua + eps), crate::opening_shape::v_range(&shape, ub - eps)) else { continue };
+            let (lo, hi) = (ob + ra.0.max(rb.0), ot.min(ob + ra.1.min(rb.1)));
+            let (u0, u1) = ((pos + ua).clamp(from, to), (pos + ub).clamp(from, to));
+            if u1 - u0 >= MIN_GAP && hi - lo > MIN_GAP {
+                out.push([u0, u1, lo, hi]);
+            }
+        }
+    }
+    out
+}
+
+/// [142] Wand mit Öffnungen als Prismen: die Achse wird an allen Laibungen geteilt; je Abschnitt bleibt die Höhe
+/// `zb..zt` ohne die Lücken (Brüstung, Sturz, volle Pfeiler zwischen den Öffnungen). Die Vereinigung der Teile ist
+/// genau die Wand ohne die Öffnungsquader, ihr Schatten also der Wandschatten mit dem Licht durch die Öffnungen.
+/// `fp(a, b)` = Grundriss des Wandstücks zwischen den Achsmassen `a` und `b`.
+fn wall_pieces(gaps: &[[f64; 4]], axis: f64, zb: f64, zt: f64, fp: impl Fn(f64, f64) -> Ring) -> Vec<Prism> {
+    let mut cuts: Vec<f64> = vec![0.0, axis];
+    cuts.extend(gaps.iter().flat_map(|g| [g[0], g[1]]));
+    cuts.sort_by(f64::total_cmp);
+    cuts.dedup_by(|b, a| (*b - *a).abs() < 1e-6);
+    // Abschnitte mit gleichen Vollstücken zusammengefasst.
+    let mut segs: Vec<(f64, f64, Vec<(f64, f64)>)> = Vec::new();
+    for c in cuts.windows(2) {
+        let (a, b) = (c[0], c[1]);
+        if b - a < 1e-6 {
+            continue;
+        }
+        let m = 0.5 * (a + b);
+        let mut holes: Vec<(f64, f64)> = gaps.iter().filter(|g| g[0] < m && m < g[1]).map(|g| (g[2], g[3])).collect();
+        holes.sort_by(|x, y| x.0.total_cmp(&y.0));
+        let mut solid = Vec::new();
+        let mut z = zb;
+        for (h0, h1) in holes {
+            if h0 > z + 1e-6 {
+                solid.push((z, h0.min(zt)));
+            }
+            z = z.max(h1);
+        }
+        if zt > z + 1e-6 {
+            solid.push((z, zt));
+        }
+        match segs.last_mut() {
+            Some(last) if last.2 == solid && (last.1 - a).abs() < 1e-9 => last.1 = b,
+            _ => segs.push((a, b, solid)),
+        }
+    }
+    let mut out = Vec::new();
+    for (a, b, solid) in segs {
+        for (z0, z1) in solid {
+            if z1 - z0 > 1e-6 {
+                out.push(Prism { footprint: fp(a, b), z_bottom: z0, z_top: z1 });
+            }
+        }
+    }
+    out
+}
+
 /// Werfer, Abdeckungen und (mit Schnitthöhe `cut`) Empfänger des Projekts.
 fn collect(p: &Project, k: [f64; 2], cut: Option<f64>, ground: Option<&Ground>) -> (Casters, Vec<Cover>, Vec<Recv>) {
     let gz = |x: f64, y: f64| ground.and_then(|g| g.z(x, y)).unwrap_or(GROUND_Z);
@@ -875,11 +961,29 @@ fn collect(p: &Project, k: [f64; 2], cut: Option<f64>, ground: Option<&Ground>) 
             recvs.push(Recv { region, plane, top });
         }
     };
+    let openings = p.openings_by_wall();
     for w in &p.walls {
         let (z_bottom, z_top) = p.wall_vertical_extent(w);
+        let thick = p.wall_thickness(w, 0.2);
+        let gaps = openings.get(w.id.as_str()).map_or_else(Vec::new, |os| wall_gaps(os, crate::wall_arc::axis_length(w), z_bottom, z_top));
         // Bogenwand ([T2]): Kreisringsektor als Prisma.
-        if let Some(footprint) = crate::wall_arc::arc_footprint(w, p.wall_thickness(w, 0.2)) {
-            prisms.push((Prism { footprint, z_bottom, z_top }, vec![]));
+        if let Some(arc) = crate::wall_arc::WallArc::of_wall(w) {
+            if gaps.is_empty() {
+                if let Some(footprint) = crate::wall_arc::arc_footprint(w, thick) {
+                    prisms.push((Prism { footprint, z_bottom, z_top }, vec![]));
+                }
+                continue;
+            }
+            let h = thick / 2.0;
+            let fp = |a: f64, b: f64| -> Ring {
+                let n = ((b - a) / ARC_PIECE).ceil().clamp(1.0, 256.0) as usize;
+                let at = |i: usize, off: f64| {
+                    let q = arc.point(a + (b - a) * i as f64 / n as f64, off);
+                    [q.x, q.y]
+                };
+                (0..=n).map(|i| at(i, h)).chain((0..=n).rev().map(|i| at(i, -h))).collect()
+            };
+            prisms.extend(wall_pieces(&gaps, arc.length(), z_bottom, z_top, fp).into_iter().map(|pr| (pr, vec![])));
             continue;
         }
         let (dx, dy) = (w.end.x - w.start.x, w.end.y - w.start.y);
@@ -887,10 +991,19 @@ fn collect(p: &Project, k: [f64; 2], cut: Option<f64>, ground: Option<&Ground>) 
         if len < 1e-9 {
             continue;
         }
-        let t = p.wall_thickness(w, 0.2) / 2.0;
-        let (nx, ny) = ((-dy / len) * t, (dx / len) * t);
-        let footprint = vec![[w.start.x + nx, w.start.y + ny], [w.end.x + nx, w.end.y + ny], [w.end.x - nx, w.end.y - ny], [w.start.x - nx, w.start.y - ny]];
-        prisms.push((Prism { footprint, z_bottom, z_top }, vec![]));
+        let t = thick / 2.0;
+        let (ux, uy) = (dx / len, dy / len);
+        let (nx, ny) = (-uy * t, ux * t);
+        let fp = |a: f64, b: f64| -> Ring {
+            let (s, e) = ([w.start.x + ux * a, w.start.y + uy * a], [w.start.x + ux * b, w.start.y + uy * b]);
+            vec![[s[0] + nx, s[1] + ny], [e[0] + nx, e[1] + ny], [e[0] - nx, e[1] - ny], [s[0] - nx, s[1] - ny]]
+        };
+        if gaps.is_empty() {
+            let footprint = vec![[w.start.x + nx, w.start.y + ny], [w.end.x + nx, w.end.y + ny], [w.end.x - nx, w.end.y - ny], [w.start.x - nx, w.start.y - ny]];
+            prisms.push((Prism { footprint, z_bottom, z_top }, vec![]));
+            continue;
+        }
+        prisms.extend(wall_pieces(&gaps, len, z_bottom, z_top, fp).into_iter().map(|pr| (pr, vec![])));
     }
     for s in p.extruded_solids.as_deref().unwrap_or(&[]) {
         if s.operation.as_deref() == Some("subtract") {
@@ -1530,6 +1643,89 @@ mod terrain_tests {
         let p = project_json(serde_json::json!({ "drawingLevels": levels(), "ceilings": [slab("t", "eg", rect(0.0, 2.0, f64::MAX, 4.0))] }));
         let _ = shadow_polygons_plan(&p, SunPosition { azimuth: 180.0, elevation: 45.0 }, f64::NAN, true);
         assert!(shadow_polygons_plan(&p, SunPosition { azimuth: 180.0, elevation: -5.0 }, 4.0, true).is_empty());
+    }
+
+    fn wall6(extra: serde_json::Value) -> Project {
+        let mut v = serde_json::json!({
+            "walls": [{"id": "w", "type": "wall", "floorId": "eg", "categoryCode": "20", "start": {"x": 0, "y": 0}, "end": {"x": 6, "y": 0}, "wallTypeId": "t", "height": 3.0}]
+        });
+        for (k, val) in extra.as_object().unwrap() {
+            v[k] = val.clone();
+        }
+        project_json(v)
+    }
+
+    fn opening(kind: &str, pos: f64, width: f64, sill: f64, height: f64) -> serde_json::Value {
+        serde_json::json!({"id": "f", "type": "opening", "hostWallId": "w", "categoryCode": "21", "kind": kind, "position": pos, "width": width, "height": height, "sillHeight": sill})
+    }
+
+    /// [142] Fenster lässt Licht durch: Wand 6 × 0.2 × 3 m, Fenster x 2..4, z 1..2, Sonne 45° aus Süden.
+    /// Durch die Öffnung kommt nur, was die ganze Wanddicke durchquert: Lichtfleck x 2..4, y 1.1..1.9.
+    #[test]
+    fn fenster_laesst_licht_durch() {
+        let sun = SunPosition { azimuth: 180.0, elevation: 45.0 };
+        let full = shadow_polygons_project(&wall6(serde_json::json!({})), sun, None);
+        assert!((area(&full) - 6.0 * 3.2).abs() < 1e-6, "{}", area(&full));
+        let p = wall6(serde_json::json!({ "openings": [opening("window", 2.0, 2.0, 1.0, 1.0)] }));
+        let sh = shadow_polygons_project(&p, sun, None);
+        assert!((area(&sh) - (6.0 * 3.2 - 2.0 * 0.8)).abs() < 1e-6, "{}", area(&sh));
+        assert!(!shaded(&sh, 3.0, 1.5), "Lichtfleck hinter dem Fenster");
+        assert!(shaded(&sh, 3.0, 0.9) && shaded(&sh, 3.0, 2.1) && shaded(&sh, 1.0, 1.5) && shaded(&sh, 5.0, 1.5));
+        // Tür (Brüstung 0, bis 2 m): Lichtfleck y −0.1..1.9 (auch die Schwelle in der Wanddicke ist frei).
+        let sh = shadow_polygons_project(&wall6(serde_json::json!({ "openings": [opening("door", 2.0, 1.0, 0.0, 2.0)] })), sun, None);
+        assert!(!shaded(&sh, 2.5, 1.0) && shaded(&sh, 2.5, 2.5) && shaded(&sh, 1.5, 1.0));
+        assert!((area(&sh) - (6.0 * 3.2 - 1.0 * 2.0)).abs() < 1e-6, "{}", area(&sh));
+        // Rundfenster: Lichtfleck kleiner als beim Rechteck, aber vorhanden.
+        let mut round = opening("window", 2.0, 2.0, 1.0, 1.0);
+        round["shape"] = serde_json::json!("rund");
+        let sh = shadow_polygons_project(&wall6(serde_json::json!({ "openings": [round] })), sun, None);
+        let lit = 6.0 * 3.2 - area(&sh);
+        assert!(lit > 0.3 && lit < 1.6 - 1e-3, "{lit}");
+        assert!(!shaded(&sh, 3.0, 1.5));
+        // Auf ebenem Geländenetz (abgetastet) derselbe Lichtfleck.
+        let p = wall6(serde_json::json!({ "openings": [opening("window", 2.0, 2.0, 1.0, 1.0)] }));
+        let tin = plane_tin(0.0, 0.0);
+        let g = Ground::new(&tin, 0.0);
+        let k = shadow_shift(sun).unwrap();
+        let (c, _, _) = collect(&p, k, None, Some(&g));
+        let on = terrain_shadow(&c, k, &g, 0x0ff7);
+        assert!(!shaded(&on, 3.0, 1.5) && shaded(&on, 3.0, 0.9) && shaded(&on, 3.0, 2.1));
+        assert!((area(&on) - (6.0 * 3.2 - 2.0 * 0.8)).abs() < 1e-3, "{}", area(&on));
+    }
+
+    /// [142] Der Plan-Schatten-Schlüssel ([179]) ändert sich mit der Öffnung: Fenster verschoben ⇒ neuer Schatten.
+    #[test]
+    fn schatten_cache_kennt_oeffnungen() {
+        let sun = SunPosition { azimuth: 180.0, elevation: 45.0 };
+        let a = shadow_polygons_plan(&wall6(serde_json::json!({ "openings": [opening("window", 1.0, 1.0, 1.0, 1.0)] })), sun, 1.0, true);
+        let b = shadow_polygons_plan(&wall6(serde_json::json!({ "openings": [opening("window", 4.0, 1.0, 1.0, 1.0)] })), sun, 1.0, true);
+        assert!(!shaded(&a, 1.5, 1.5) && shaded(&a, 4.5, 1.5));
+        assert!(shaded(&b, 1.5, 1.5) && !shaded(&b, 4.5, 1.5));
+    }
+
+    /// [142] Bogenwand mit Fenster: auch dort eine Lücke im Schatten.
+    #[test]
+    fn bogenwand_mit_fenster() {
+        let sun = SunPosition { azimuth: 180.0, elevation: 45.0 };
+        let walls = serde_json::json!([{"id": "w", "type": "wall", "floorId": "eg", "categoryCode": "20", "start": {"x": 0, "y": 0}, "end": {"x": 6, "y": 0}, "bulge": -0.1, "wallTypeId": "t", "height": 3.0}]);
+        let full = shadow_polygons_project(&project_json(serde_json::json!({ "walls": walls })), sun, None);
+        let sh = shadow_polygons_project(&project_json(serde_json::json!({ "walls": walls, "openings": [opening("window", 2.5, 1.5, 1.0, 1.0)] })), sun, None);
+        let lit = area(&full) - area(&sh);
+        assert!(lit > 0.9 && lit < 1.5 * 0.8 + 0.05, "{} {}", area(&full), area(&sh));
+    }
+
+    /// [142] Vordach (Decke, 2 m auskragend, ohne Stützen) wirft Schatten; im EG-Grundriss bleibt der Boden unter
+    /// dem Vordach hell (abgedeckt), sichtbar ist der Schatten jenseits der Vorderkante.
+    #[test]
+    fn vordach_wirft_schatten() {
+        let sun = SunPosition { azimuth: 270.0, elevation: 45.0 };
+        let p = project_json(serde_json::json!({ "drawingLevels": levels(), "ceilings": [slab("v", "eg", rect(0.0, 0.0, 4.0, 2.0))] }));
+        let (zb, zt) = p.ceiling_vertical_extent(&p.ceilings.as_ref().unwrap()[0]);
+        let raw = shadow_polygons_project(&p, sun, None);
+        assert!((area(&raw) - 2.0 * (4.0 + zt - zb)).abs() < 1e-6, "{}", area(&raw));
+        let plan = shadow_polygons_plan(&p, sun, 1.0, true);
+        assert!((area(&plan) - 2.0 * zt).abs() < 1e-6, "{}", area(&plan));
+        assert!(!shaded(&plan, 2.0, 1.0) && shaded(&plan, 4.0 + zt - 0.1, 1.0) && !shaded(&plan, 4.0 + zt + 0.1, 1.0));
     }
 
     /// [148] Flachdach auf L-Umriss wirft einen L-förmigen Schatten (nicht Bounding-Box, nicht konvexe

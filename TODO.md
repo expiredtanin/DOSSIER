@@ -234,9 +234,14 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   Winkel, Bogenwände: bisher (Spiegelung an der Gehrung). Weiter offen:
   Ansicht Ost: Schatten-Keile neben dem Erker mit Lücken je Geschoss und Strichreste am Erker. Nicht in der Tauri-App/auf dem Mac
   angesehen. · M
-- ◐ **[142]** Schatten in zwei Richtungen. Schatten nur im Geschoss nächst ±0.00; Decken/Dächer werfen keinen eigenen
-  Schatten (Auskragungen, Balkone); Wandöffnungen lassen kein Licht durch; Dach-/Kronenschatten als konvexe Hülle
-  (`sun.rs`, Kern `plan/`). · M
+- ◐ **[142]** Sonnenschatten im Grundriss (`sun.rs`, Kern `plan/extras.rs`, Klasse 08). Stand 11.11.: Decken/Balkone/Vordächer
+  und Dächer werfen eigenen Schatten (Dächer in echter Form, nicht-konvex; Tests `vordach_wirft_schatten`,
+  `nichtkonvexes_dach`, `flachdach_l_schatten`, war schon gebaut, TODO-Text veraltet). Neu: Wandöffnungen lassen Licht durch
+  — Wand mit Öffnungen als Prismen ohne die Öffnungsquader (`wall_pieces`/`wall_gaps`, gerade und Bogenwände; Glas zählt
+  als Lücke; Formöffnungen als Streifen mit kleinster Höhe), Teile gehen in den Schatten-Schlüssel ([179]) ein. Im Musterhaus
+  komplex kaum sichtbar (Licht durch Fenster fällt meist ins abgedeckte Innere). Offen: Kronen bleiben konvexe Hülle (Form der
+  Krone selbst ist konvex); Schatten aufs Gelände tieferer Terrassen nur über Decken/Dächer als Empfänger; nicht in der
+  Tauri-App angesehen. · M
 - ◐ **[64]+[59]** Sonnenstand/Schatten. Schatten im 3D (`render3d`, Shadow-Mapping) ist gebaut, aber nicht auf Metal
   und nicht in der App angesehen; mehrere Kaskaden erst bei grossen Lageplänen. · S
 - ◐ **[149]** Baum als eigenes Objekt. Auswahlrechteck, Gruppen, Art-Beschriftung (`species`/`showLabel`) und Beschriftungs-Griff sind gebaut (11.11. geprüft, TODO-Text war veraltet). Offen: Beschriftung weicht nicht aus; Schnitt durch die Krone zeigt die ganze Silhouette; Fuss am
