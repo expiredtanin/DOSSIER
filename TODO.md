@@ -85,6 +85,7 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   gedämpft (render3d hat nur `set_ghost` für die Hülle); natives Mac-3D-Fenster bekommt nur den Ebenen-Baum, nicht
   den Darstellungsmodus; Datei-Exporte (OBJ/glTF/IFC/STEP) bleiben vollständig; kein e2e (3D-Pick headless unzuverlässig);
   nicht in der Tauri-App/auf dem Mac geprüft. · M
+- ○ **[186]** Schatten (12.11., Maintainer): (1) 3D-Schatten stellenweise unscharf (Shadow-Map-Auflösung/Frustum zu gross, Filter) → Frustum auf Gebäude fitten bzw. Kaskaden, schärferer PCF; (2) Grundriss-Schatten fehlt unmittelbar am Haus (Lücke zwischen Fassade und Schatten; vermutlich Werfer ab ±0.00 statt ab Wandfuss/Gelände) → Schatten beginnt an der Fassade. Opus. · M
 - ○ **[185]** Navigation wie Archicad (12.11., Wunsch Maintainer): Grundriss-Geschosswechsel behält Zoom/Ausschnitt exakt; Cmd+5 Geschoss runter, Cmd+6 hoch; Cmd+3 mit Auswahl (aus Grundriss/Schnitt/3D) → 3D-Tab nur mit der Auswahl (Tab-Titel „3D · Auswahl“), ohne Auswahl → wieder alles; Cmd+4 blendet gewählte Objekte im 3D temporär aus (zurück mit Cmd+3). Sonnet. · M
 - ◐ **[133]** Musterhaus komplex: Rest. Skalieren-Kopie lässt `position`/Breite unverändert (10.11.: Skalieren skaliert
   `position`/`width` der Wandöffnungen bei Kopie und Original, Test `skalieren_skaliert_oeffnungen`). 11.11.: Schraffur-
