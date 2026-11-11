@@ -13,7 +13,7 @@ import type { Plan } from "../../core";
 import { materializeUnderlay } from "../../core";
 import type { Project } from "../../model/types";
 import { planSceneBin } from "../../core";
-import { projectToModel3d, TRUCK_MESH_READY_EVENT } from "../../core";
+import { projectToModel3d } from "../../core";
 
 /** Sammel-Fenster: Modelländerungen werden gebündelt gepusht (nicht je Frame). */
 const DEBOUNCE_MS = 200;
@@ -77,6 +77,9 @@ export function pushNativeScene(plan: Plan): void {
   }, DEBOUNCE_MS);
 }
 
+/** Letzter Explosionsabstand (Vorgabe für Aufrufe ohne `explode`). */
+let lastExplode = 0;
+
 /**
  * Debounced: das 3D-Modell des Projekts (alle Geschosse, gestapelt) — Wände mit
  * Öffnungs-Teilquadern plus Deckenplatten — ans native 3D-Fenster schieben.
@@ -88,7 +91,6 @@ export function pushNativeWalls(
   explode = lastExplode,
 ): void {
   if (!isTauri()) return;
-  lastProject = project;
   lastExplode = explode;
   clearTimeout(wallsTimer);
   wallsTimer = setTimeout(async () => {
@@ -97,16 +99,4 @@ export function pushNativeWalls(
   }, DEBOUNCE_MS);
 }
 
-/** Letztes an {@link pushNativeWalls} übergebenes Projekt (für den Re-Push unten). */
-let lastProject: Project | null = null;
-/** Letzter Explosionsabstand (Re-Push nach truck-Ergebnis behält ihn). */
-let lastExplode = 0;
 
-// truck-Extrusionen (s. toWalls3d.ts emitExtrudedSolids) laden WASM asynchron;
-// ohne diesen Re-Push nach Abschluss bliebe eine fertige Extrusion im nativen
-// Fenster unsichtbar, weil `pushNativeWalls` nur bei Projektänderungen läuft.
-if (typeof window !== "undefined") {
-  window.addEventListener(TRUCK_MESH_READY_EVENT, () => {
-    if (lastProject) pushNativeWalls(lastProject);
-  });
-}

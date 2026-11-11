@@ -1026,8 +1026,8 @@ fn solid_selection(root: &Map<String, Value>, s: &Value) -> J {
         .n("chamfer", num_or(field(s, "chamfer"), 0.0))
         .o("brepLabel", brep.map(|b| nn(field(b, "label")).cloned().unwrap_or_else(|| "B-Rep".into())))
         .n("area", polygon_area(field(s, "points")))
-        // Platzhalter: `spec` (B-Rep für truck) setzt die TS-Fassade ein.
-        .v("spec", Value::Null)
+        // Platzhalter: `props` (Kennwerte aus dem Kern-Netz, Abfrage `solidProps`) setzt die TS-Fassade ein.
+        .v("props", Value::Null)
         .v("subtract", Value::Bool(subtract))
         .v("canSubtract", Value::Bool(brep.is_none() && taper < 1e-6))
         .n("baseOffset", num_or(field(s, "baseOffset"), 0.0))

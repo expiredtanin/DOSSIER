@@ -25,7 +25,7 @@ function isWasmTrap(e: unknown): boolean {
  * Ruft eine WASM-Funktion abgesichert auf (lessons-bimcraft [14]): nach einem Panic ist die
  * Modul-Instanz unbrauchbar (Rust-Zustand verwaist) — sie wird verworfen, neu instanziiert und
  * der Aufruf EINMAL wiederholt. Scheitert auch das, kommt eine klare Fehlermeldung statt des
- * rohen Traps; der Aufrufer fällt auf Prisma/Platzhalter zurück (so tun es voids3d/extrusions).
+ * rohen Traps; der Aufrufer überspringt den Körper (so tut es die Kollisionsprüfung).
  * Normale Rust-Fehler (`JsError`, z. B. „Boolean fehlgeschlagen") laufen unverändert durch.
  */
 export async function guarded<T>(call: (m: any) => T): Promise<T> {
@@ -46,34 +46,7 @@ export async function guarded<T>(call: (m: any) => T): Promise<T> {
   }
 }
 
-export interface ExtrudedMesh {
-  positions: number[];
-  indices: number[];
-}
-
-/** `taper` 0 (Prisma, Default) … 1 (Spitze/Kegel-Pyramide) — linear zum
- *  Profil-Schwerpunkt skaliert. */
-export async function extrudePolygon(
-  points: number[],
-  height: number,
-  taper = 0,
-): Promise<ExtrudedMesh> {
-  const json = await guarded((m) => m.extrude_polygon(JSON.stringify({ points, height, taper })));
-  return JSON.parse(json) as ExtrudedMesh;
-}
-
-export async function extrudeCircle(
-  cx: number,
-  cy: number,
-  r: number,
-  height: number,
-  taper = 0,
-): Promise<ExtrudedMesh> {
-  const json = await guarded((m) => m.extrude_circle(JSON.stringify({ cx, cy, r, height, taper })));
-  return JSON.parse(json) as ExtrudedMesh;
-}
-
-// ── B-Rep-Körper (truck 0.6): Spezifikation → Mesh / STEP ────────────────────
+// ── B-Rep-Körper (truck 0.6): Spezifikation → STEP, Kennwerte, Kollision ────
 
 /** Ein Loft-Schnitt: Höhe + geschlossener Ring [x0,y0,x1,y1,…]. */
 export interface LoftSectionSpec {
@@ -121,11 +94,6 @@ export type SolidSpec =
   | { kind: "transform"; m: number[]; solid: SolidSpec }
   /** Fertiges Dreiecks-Mesh: nur Kennwerte, Kollision, Mesh-Booleans (kein STEP-Export). */
   | { kind: "mesh"; positions: number[]; indices: number[] };
-
-/** Tesselliert einen B-Rep-Körper (Sehnenabweichung `tol` Meter). */
-export async function buildSolidMesh(spec: SolidSpec, tol = 0.01): Promise<ExtrudedMesh> {
-  return JSON.parse(await guarded((m) => m.build_solid_mesh(JSON.stringify({ spec, tol })))) as ExtrudedMesh;
-}
 
 /** Kennwerte eines Körpers (Meter / m² / m³). */
 export interface SolidProps {

@@ -96,7 +96,21 @@ pub fn extruded_solid_spec(solid: &Value, floor_z: f64) -> Option<Value> {
             ),
         ]));
     }
-    None
+    // [115] Volle Verjüngung: Pyramide über dem Profil (Spitze über dem Punkt-Schwerpunkt) als Netz.
+    let n = pts.len();
+    let ccw = (0..n).map(|i| pts[i].0 * pts[(i + 1) % n].1 - pts[(i + 1) % n].0 * pts[i].1).sum::<f64>() >= 0.0;
+    let ring: Vec<V> = if ccw { pts.clone() } else { pts.iter().rev().copied().collect() };
+    let (cx, cy) = (ring.iter().fold(0.0, |a, p| a + p.0) / n as f64, ring.iter().fold(0.0, |a, p| a + p.1) / n as f64);
+    let mut pos: Vec<f64> = ring.iter().flat_map(|p| [p.0, p.1, base_z]).collect();
+    pos.extend([cx, cy, base_z + height]);
+    let mut idx: Vec<usize> = Vec::new();
+    for t in crate::solid_bool::ear_clip(&ring.iter().map(|p| [p.0, p.1]).collect::<Vec<_>>()) {
+        idx.extend([t[0], t[2], t[1]]);
+    }
+    for i in 0..n {
+        idx.extend([i, (i + 1) % n, n]);
+    }
+    Some(obj(vec![("kind", s("mesh")), ("positions", Value::Array(pos.into_iter().map(js_num).collect())), ("indices", Value::Array(idx.into_iter().map(|i| json!(i)).collect()))]))
 }
 
 // ═════════════════════════════════════════════════════════════════════════════

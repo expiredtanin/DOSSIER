@@ -1,11 +1,10 @@
-// [137] Alles Sichtbare anwählbar im 3D: freie Körper (Prisma aus dem Kern, truck-Netz sobald geladen),
+// [137] Alles Sichtbare anwählbar im 3D: freie Körper (Netz aus dem Kern, [115]),
 // Stützen lagerichtig (x, Höhe, y wie die Darstellung), Hervorhebung beider, Gelände einzeln ausgeblendet.
 
-import { describe, expect, it, afterEach } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { Project, TerrainMesh } from "../model/types";
 import { sampleProject } from "../model/sampleProject";
-import { pickGeometry, selectionHighlightLines } from "./toWalls3d";
-import { __setTruckMeshForTest } from "./toWalls3d/extrusions";
+import { pickGeometry, projectToModel3d, projectToModel3dParts, selectionHighlightLines } from "./toWalls3d";
 import { pickNearest, type Ray } from "../viewport/raycast3d";
 
 const base: Project = {
@@ -32,8 +31,6 @@ const pick = (p: Project, ray: Ray) => {
   return pickNearest(ray, g.walls, g.slabs, g.openings, g.stairs, g.roofs, g.contextMeshes, g.drawings, g.columns, g.solids);
 };
 
-afterEach(() => __setTruckMeshForTest("s1", null));
-
 describe("[137] 3D-Pick freie Körper und Stützen", () => {
   it("freier Körper: Prisma über dem Umriss, Abzugskörper nicht; Treffer von oben auf OK", () => {
     const g = pickGeometry(base);
@@ -46,18 +43,25 @@ describe("[137] 3D-Pick freie Körper und Stützen", () => {
     expect(pick(base, down(40.5, 0.3))).toBeNull();
   });
 
-  it("geladenes truck-Netz ersetzt die Prisma-Näherung (z. B. Pyramide statt Quader)", () => {
-    // Pyramide über demselben Umriss, Spitze bei (31, 3.5) auf 4.6 m (Modell x, y, z).
-    __setTruckMeshForTest("s1", {
-      positions: [30, 2, 3.1, 32, 2, 3.1, 32, 5, 3.1, 30, 5, 3.1, 31, 3.5, 4.6],
-      indices: [0, 1, 4, 1, 2, 4, 2, 3, 4, 3, 0, 4, 0, 2, 1, 0, 3, 2],
-      kind: "extrusion",
-      color: [1, 1, 1],
-    } as never);
-    const hit = pick(base, down(30.1, 2.1));
+  it("[115] Kern-Netz statt Prisma-Näherung (Verjüngung 1 = Pyramide), synchron ohne truck", () => {
+    const pyr = { ...base, extrudedSolids: [{ ...base.extrudedSolids![0], taper: 0.999 }] } as Project;
+    const hit = pick(pyr, down(30.1, 2.1));
     expect(hit?.id).toBe("s1");
-    // Am Rand der Pyramide nahe der UK statt auf der Prisma-OK.
+    // Am Rand der Pyramide nahe der UK (3.1) statt auf der Prisma-OK (4.6).
     expect(50 - hit!.t).toBeLessThan(3.3);
+  });
+
+  it("[115] 3D-Modell und Teile enthalten die freien Körper als Kern-Netz, Klasse aus ⇒ weg", () => {
+    const m = projectToModel3d(base);
+    const solidMeshes = m.meshes.filter((x) => x.color[0] === 0.85 && x.color[1] === 0.55);
+    expect(solidMeshes.length).toBe(1);
+    const zs = solidMeshes[0].positions.filter((_, i) => i % 3 === 2);
+    expect(Math.min(...zs)).toBeCloseTo(3.1, 9);
+    expect(Math.max(...zs)).toBeCloseTo(4.6, 9);
+    const parts = projectToModel3dParts(base)!;
+    expect(parts.find((p) => p.id === "solids")?.meshes?.length).toBe(1);
+    const hidden = projectToModel3dParts(base, { hide: ["20"] })!;
+    expect(hidden.find((p) => p.id === "solids")?.meshes ?? []).toEqual([]);
   });
 
   it("Stütze lagerichtig: Welt-z = +y (wie gezeichnet), nicht gespiegelt", () => {

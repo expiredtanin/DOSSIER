@@ -175,6 +175,7 @@ export type QueryName =
   | "scheduleRows"
   | "scheduleCsv"
   | "pickGeometry"
+  | "solidProps"
   | "explodeOffsets"
   | "model3dParts"
   | "model3dPartsDelta"

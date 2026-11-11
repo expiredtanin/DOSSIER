@@ -341,9 +341,14 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   der Fang die Schnitt-Primitive (Körper-Schnittflächen/Kanten sind dort drin, nicht geprüft in der App). 11.11.: Körper-Netze
   rechnet der Kern selbst (`solid_mesh.rs`, Tessellierung der B-Rep-Beschreibung, Booleans über Manifold; Entscheid in
   `doc/ARCHITEKTUR.md`): Ansicht (Flächen mit Körper-Id, Verdeckung, Klasse), Blatt-Viewports (Schnitt + Ansicht, Fang) und
-  CLI zeigen freie Körper; `computeSection` baut keine truck-Netze mehr. Offen: 3D nimmt weiter truck (könnte die Kern-Netze
-  nehmen); Kreis-Körper mit leeren `points` (Brunnen im Musterhaus komplex) baut der Kern seit [G1] (truck/3D nicht geprüft);
-  3D-Ausschnitt im Viewport; nicht in der Tauri-App geprüft. · S
+  CLI zeigen freie Körper; `computeSection` baut keine truck-Netze mehr. 11.11.: EINE Quelle — auch 3D-Bild, Pick, Explosion,
+  Abzugskörper an Wänden/Decken und die Kennwerte der Objekt-Info nehmen die Kern-Netze (`model3d/solids.rs`, Teil
+  `solidMeshes` mit `Owner::Solid` für den Klassen-Filter; `solid_specs::void_meshes`; `solid_mesh::solid_props`); fürs 3D
+  ≥ 48 Facetten je Vollkreis (Fugen unter dem 15°-Kantenwinkel, glatt schattiert), Farbe/Textur aus `componentId`; volle
+  Verjüngung ergibt jetzt eine Pyramide (Netz-Spezifikation, auch Grundriss/STEP). TS-truck-Pfad (`toWalls3d/extrusions.ts`,
+  `TRUCK_MESH_READY_EVENT`, truck-Booleans in `voids3d.ts`) entfernt; truck bleibt für STEP und Kollision (Begründung in
+  `doc/ARCHITEKTUR.md`). Ein OBJ-/glTF-Export existiert nicht. Offen: 3D-Hervorhebung eines Körpers bleibt das Prisma über
+  dem Umriss (`highlight3d.rs`); 3D-Ausschnitt im Viewport; nicht in der Tauri-App und nicht mit Metal geprüft. · S
 - ◐ **[36]** View Range (`plan/view_range.rs`). Dach/Decke über/unter Schnitt verfeinern, Raum/Fenster eigenständig,
   Tiefe nur ganzes Bauteil (kein Clip an der Ebene). 11.11.: Öffnung ganz unter der Schnittebene schliesst die Wand auch
   ohne eigenen Bereich (Symbol gepunktet, `walls.rs`). · M

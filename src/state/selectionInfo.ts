@@ -9,13 +9,11 @@
 // den TATSÄCHLICH gezeichneten Wert, nicht nur das (oft leere) Override-Feld.
 //
 // [K4] S3: gerechnet wird im Rust-Kern (`src-tauri/core/src/selection_info.rs`, Wurzel-Abfrage
-// `selectionInfo` auf dem Projekt-Dokument); hier stehen der Kontrakt (Typen) und die Fassade. Der
-// B-Rep-Körper einer Extrusion (`spec`) kommt aus TS (`extrudedSolidSpec`, truck-Pipeline).
+// `selectionInfo` auf dem Projekt-Dokument); hier stehen der Kontrakt (Typen) und die Fassade. Die
+// Kennwerte eines Körpers (`props`) kommen aus seinem Kern-Netz (Abfrage `solidProps`, [115]).
 //
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
-import { extrudedSolidSpec } from "../core";
-import type { SolidSpec } from "../engine/truckSolid";
 import { documentFor } from "../core/document";
 import { EMPTY_SELECTION, mergeSelection, single } from "./selection";
 import type { Selection } from "./selection";
@@ -338,6 +336,17 @@ export interface RoomInfo {
   floorName: string;
 }
 
+/** [115] Kennwerte eines freien Körpers aus seinem Kern-Netz (`solid_mesh::solid_props`, Modell-Meter, z = Höhe). */
+export interface SolidProps {
+  volume: number;
+  area: number;
+  centroid: [number, number, number];
+  /** Wasserdicht (geschlossenes, orientiertes Netz). */
+  closed: boolean;
+  min: [number, number, number];
+  max: [number, number, number];
+}
+
 /**
  * Extrusions-spezifische Attribute für das Object-Info-Panel (nur bei Auswahl
  * genau eines extrudierten Körpers, truck-Integration, gesetzt).
@@ -363,8 +372,8 @@ export interface ExtrudedSolidInfo {
   baseOffset: number;
   /** [G1] Bauteil der Schnittfläche (Füllung/SIA-Schraffur in Grundriss und Schnitt); "" = keins. */
   componentId: string;
-  /** B-Rep-Beschreibung (Weltkoordinaten) für Kennwerte — `null`, wenn truck keine hat. */
-  spec: SolidSpec | null;
+  /** [115] Kennwerte aus dem Kern-Netz (Volumen, Oberfläche, Schwerpunkt) — `null` ohne Netz und bei Abzugskörpern. */
+  props: SolidProps | null;
   /** Geschoss, dessen `baseElevation` die UK des Körpers bestimmt. */
   floorId: string;
   floorName: string;
@@ -614,9 +623,7 @@ export function deriveSelection(project: Project, selection: Partial<Selection>)
     return null;
   }
   if (info?.extrudedSolid) {
-    const s = (project.extrudedSolids ?? []).find((x) => x.id === info!.id);
-    const floor = s && project.drawingLevels.find((z) => z.id === s.levelId);
-    info.extrudedSolid.spec = s && s.operation !== "subtract" ? extrudedSolidSpec(s, floor?.baseElevation ?? 0) : null;
+    info.extrudedSolid.props = info.extrudedSolid.subtract ? null : documentFor(project).query<SolidProps | null>("solidProps", [], info.id);
   }
   return info;
 }

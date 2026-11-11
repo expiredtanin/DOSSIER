@@ -131,7 +131,7 @@ flowchart TB
 | `render2d` | Plan-Anzeige | `src/engine/pkg` |
 | `render3d` | 3D-Anzeige, analytischer Prismen-Schnitt (auch vom Kern genutzt) | `src/engine/pkg3d` |
 | `fileio` | Dateiformate: DXF/DWG (acadrust), IFC, PDF, Meshes, Punktwolken, Tabellen | `src/engine/pkgFileIo` |
-| `trucksolid` | B-Rep-Körper über truck: Booleans, STEP, Kennwerte, Kollision | `src/engine/pkgTruck` |
+| `trucksolid` | B-Rep-Körper über truck: Booleans, STEP, Kollision | `src/engine/pkgTruck` |
 | `src` (Tauri-App) | Fenster, Menü, atomares Speichern, Dateisperre, native Metal-Fläche | keines |
 
 Die WASM-Pakete sind nicht im Repository. Sie werden mit den `build:*`-Skripten aus `package.json`
@@ -149,8 +149,15 @@ brauchen die Körper (`extrudedSolids`) synchron und ohne TS. Darum tesselliert 
 selbst (`src-tauri/core/src/solid_mesh.rs`: dieselbe `SolidSpec` aus `cmd_solid::extruded_solid_spec`, die truck
 bekommt): alle Arten der Beschreibung sind einfache Extrusionen, Lofts, Rotations- und Grundkörper, gekrümmte
 Flächen als Facetten (5 mm Sehnenabweichung); Booleans und Löcher über Manifold. Verworfen: die TS-Netze als
-Dokument-Cache in den Kern zu reichen (asynchron, fehlt in CLI und PDF, zweite Wahrheit). truck bleibt für das
-3D-Bild (exakte Rundungen), STEP, Kennwerte und Kollision; das 3D könnte später ebenfalls die Kern-Netze nehmen.
+Dokument-Cache in den Kern zu reichen (asynchron, fehlt in CLI und PDF, zweite Wahrheit). Seit 11.11. nimmt
+auch das 3D die Kern-Netze (eine Quelle, s. Abschnitt 6): Bild, Pick, Explosion, Abzugskörper an Wänden/Decken
+und die Kennwerte in der Objekt-Info (`solid_mesh::solid_props`, Abfrage `solidProps`; truck rechnete sie aus
+derselben Facettierung). Fürs 3D facettiert der Kern Rundungen feiner (mindestens 48 Facetten je Vollkreis,
+Schritt ≤ 7.5°, `body_mesh_3d`), damit die Facettenfugen unter dem Knickwinkel der Kantenlinien von render3d
+(15°) bleiben: gezeichnet werden nur echte Kanten, die Flächen sind glatt schattiert (30°). truck bleibt für
+STEP (exakte B-Rep-Flächen) und die Kollisionsprüfung: diese prüft auch importierte Netze, die oft offen oder
+nicht mannigfaltig sind (Manifold lehnt sie ab), und liefert Durchdringungslinien für Marker und Zoom; die
+Kern-Netze wären dort nicht gleichwertig.
 Seit [G1] zeichnet auch der Grundriss alle freien Körper aus diesen Netzen (wie importierte Netze, `plan/mesh_plan.rs`:
 waagrechter Ebenenschnitt als Poché, Aufsicht/Überkopf über `hlr`), und Abzugskörper beliebiger Form sparen im
 Grundriss über Ebenenschnitt bzw. Grundriss im Plattenband aus (`plan/extras.rs::subtract_voids`, Manifold-Band +
@@ -411,7 +418,7 @@ alle Klassen aus ⇒ Grundriss jedes Geschosses, Schnitte, Ansichten leer; jede 
 | 3D: Dächer, Stützen, Bäume, Läufe, Geländer, Absturzsicherung, Kontext | Element über `RMesh.owner`/`RRoofLayer.owner` | `classes.rs::Owner` |
 | 3D: Öffnungs-Einbauteile | Öffnung (+ Wirt); je Wand gemeinsam gerechnet, darum Filter auf die Eingabe | `model3d_cache.rs` (Varianten), `openings.rs::emit_opening_meshes_with` |
 | 3D: 2D-Spuren, Flächenmuster, Pick | Element | `drawings.rs`, `surface_pattern3d.rs`, `ClassFilter::retain_pick` |
-| 3D: freie Körper (truck) | Element (`ExtrudedSolid.categoryCode`) | TS `toWalls3d/extrusions.ts` |
+| 3D: freie Körper (Kern-Netz) | Element (`ExtrudedSolid.categoryCode`) | Kern `model3d/solids.rs` (`Owner::Solid`) |
 | 3D: Sonnenschatten, zulässige Hülle | `08 Schatten`, `01 Vermessung` | TS `Wasm3DViewport.tsx`, `useWasm3dRenderer.ts` |
 
 Ausgeblendete Klassen wirken VOR der Sichtbarkeitsrechnung: im Schnitt (`compute_section_vis`) ohne Schnittband,
@@ -491,9 +498,12 @@ Offen: Bauzonen sind kein eigener Planinhalt (nur Baurecht-Einstellungen); „gr
    entfernte Teile an render3d (`set_parts()` in `src-tauri/render3d/src/web.rs`). Dort baut
    `scene.rs` die Szene aus Teilen, `mesh.rs` extrudiert Wände und Platten zu Dreiecksnetzen,
    `gpu.rs` zeichnet.
-5. Was truck braucht (freie Körper mit B-Rep, Abzugskörper beliebiger Form), rechnet für das 3D die TS-Seite
-   asynchron über `src/engine/truckSolid.ts` (`src/plan/toWalls3d/extrusions.ts`,
-   `src/plan/toWalls3d/voids3d.ts`).
+5. Freie Körper (`extrudedSolids`) und Abzugskörper rechnet der Kern synchron ([115]): `model3d/solids.rs`
+   (`emit_solids`, Teil `solidMeshes`, Netz aus `solid_mesh::body_mesh_3d`, Farbe/Textur aus `componentId`,
+   Herkunft `Owner::Solid` für den Klassen-Filter [180], mit der Explosion angehoben), Pick-Dreiecke in
+   `model3d/pick.rs::pick_solids`, Wände/Decken „Bauteil − Abzugskörper" über Manifold
+   (`solid_specs::void_meshes`, Teil `voidMeshes`, eingesetzt in `src/plan/toWalls3d/voids3d.ts`). Kein truck im
+   3D mehr; truck (`src/engine/truckSolid.ts`) bleibt für STEP-Export und Kollisionsprüfung.
 6. Headless-Bilder (nur macOS, braucht Metal): `dossier-cli … model3d --out m.json`, dann
    `render_png` (siehe `CLAUDE.md`, „Ergebnis ansehen").
 

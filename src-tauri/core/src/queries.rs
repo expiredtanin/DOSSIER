@@ -22,7 +22,7 @@ pub fn run_doc(d: &mut crate::document::Document, name: &str, args: &[f64], text
         if voids {
             let p = d.project()?;
             let cuts = crate::solid_specs::void_cuts(p, &out.parts.walls, &out.parts.slabs);
-            return with_void_cuts(out.json, &cuts);
+            return with_void_meshes(out.json, &crate::solid_specs::void_meshes(&cuts, &out.parts.walls, &out.parts.slabs));
         }
         return Ok(out.json);
     }
@@ -30,12 +30,12 @@ pub fn run_doc(d: &mut crate::document::Document, name: &str, args: &[f64], text
     run(p, name, args, text)
 }
 
-/// Das JSON-Objekt der Teile um `voidCuts` ergänzen (hinten angefügt statt über `serde_json::Value`).
-fn with_void_cuts(mut parts: String, cuts: &crate::solid_specs::VoidCuts) -> Result<String, String> {
+/// Das JSON-Objekt der Teile um `voidMeshes` ergänzen (hinten angefügt statt über `serde_json::Value`).
+fn with_void_meshes(mut parts: String, cuts: &crate::solid_specs::VoidMeshes) -> Result<String, String> {
     if parts.pop() != Some('}') {
         return Err("model3dParts: kein JSON-Objekt".into());
     }
-    parts.push_str(",\"voidCuts\":");
+    parts.push_str(",\"voidMeshes\":");
     parts.push_str(&json(cuts)?);
     parts.push('}');
     Ok(parts)
@@ -116,10 +116,12 @@ pub fn run(p: &Project, name: &str, args: &[f64], text: &str) -> Result<String, 
             model3d::ClassFilter::from_text(p, text).retain_pick(&mut g);
             json(&g)
         }
+        // [115] Kennwerte eines freien Körpers (`text` = id) aus seinem Kern-Netz; `null` ohne Netz.
+        ("solidProps", _) => json(&crate::solid_mesh::solid_props(p, text)),
         ("modelJson", _) => crate::model::to_value_typed_only(p).map(|v| v.to_string()).map_err(|e| e.to_string()),
-        // Mit Abzugskörpern (`args[3]` ≠ 0) zusätzlich `voidCuts`: die getroffenen Wände/Decken als
-        // truck-Spezifikationen (`solid_specs.rs`).
-        // `args[4]`: Explosionsabstand ([65], `explode3d.rs`; > 0 zusätzlich `floorOffsets`, Abzugskörper wandern mit).
+        // Mit Abzugskörpern (`args[3]` ≠ 0) zusätzlich `voidMeshes`: die getroffenen Wände/Decken als
+        // Netze „Bauteil − Körper" (`solid_specs::void_meshes`, Manifold).
+        // `args[4]`: Explosionsabstand ([65], `explode3d.rs`; Körper und Abzugskörper wandern mit dem Geschoss).
         // [180] Ohne die Teile ausgeblendeter Klassen (`text` = `{"hide": [codes], "modelView": …}`).
         ("model3dParts", n) if n >= 3 => {
             let explode = args.get(4).copied().filter(|g| g.is_finite() && *g > 0.0);
@@ -127,9 +129,9 @@ pub fn run(p: &Project, name: &str, args: &[f64], text: &str) -> Result<String, 
             if let Some(gap) = explode {
                 let parts = crate::explode3d::parts_filtered(p, args[0] != 0.0, args[1], args[2] != 0.0, gap, &filter)?;
                 let mut v = serde_json::to_value(&parts).map_err(|e| e.to_string())?;
-                v["floorOffsets"] = serde_json::to_value(crate::explode3d::floor_offsets(p, gap)).map_err(|e| e.to_string())?;
                 if args.get(3).is_some_and(|v| *v != 0.0) {
-                    v["voidCuts"] = serde_json::to_value(crate::explode3d::void_cuts(p, &parts, gap)).map_err(|e| e.to_string())?;
+                    let cuts = crate::explode3d::void_cuts(p, &parts, gap);
+                    v["voidMeshes"] = serde_json::to_value(crate::solid_specs::void_meshes(&cuts, &parts.walls, &parts.slabs)).map_err(|e| e.to_string())?;
                 }
                 return Ok(v.to_string());
             }
@@ -140,7 +142,7 @@ pub fn run(p: &Project, name: &str, args: &[f64], text: &str) -> Result<String, 
             }
             if args.get(3).is_some_and(|v| *v != 0.0) {
                 let cuts = crate::solid_specs::void_cuts(p, &parts.walls, &parts.slabs);
-                return with_void_cuts(json(&parts)?, &cuts);
+                return with_void_meshes(json(&parts)?, &crate::solid_specs::void_meshes(&cuts, &parts.walls, &parts.slabs));
             }
             json(&parts)
         }

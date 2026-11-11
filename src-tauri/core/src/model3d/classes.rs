@@ -22,6 +22,8 @@ pub enum Owner {
     Tree(usize),
     Stair(usize),
     Context(usize),
+    /// [115] Index in `Project::extruded_solids`.
+    Solid(usize),
 }
 
 impl Owner {
@@ -37,6 +39,7 @@ impl Owner {
             Owner::Tree(i) => at(&p.trees, i).map(|e| e.id.as_str()),
             Owner::Stair(i) => at(&p.stairs, i).map(|e| e.id.as_str()),
             Owner::Context(i) => at(&p.context, i).map(|e| e.id()),
+            Owner::Solid(i) => at(&p.extruded_solids, i).map(|e| e.id.as_str()),
         }
     }
 }
@@ -152,7 +155,7 @@ impl ClassFilter {
             return;
         }
         parts.slabs.retain(|s| !self.hides(&s.ceiling_id));
-        for list in [&mut parts.context_meshes, &mut parts.column_meshes, &mut parts.stair_meshes, &mut parts.stair_railings, &mut parts.roof_meshes] {
+        for list in [&mut parts.context_meshes, &mut parts.solid_meshes, &mut parts.column_meshes, &mut parts.stair_meshes, &mut parts.stair_railings, &mut parts.roof_meshes] {
             list.retain(|m| self.keep_owner(p, m.owner));
         }
         parts.roof_layers.retain(|l| self.keep_owner(p, l.owner));
@@ -195,6 +198,7 @@ pub fn parts_filtered(p: &Project, layered: bool, detail: f64, for_section: bool
         walls: emit_walls(p, layered)?,
         slabs,
         context_meshes: emit_context_meshes(p),
+        solid_meshes: emit_solids(p),
         column_meshes: {
             let mut m = emit_columns(p);
             m.extend(emit_trees(p));

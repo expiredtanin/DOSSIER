@@ -72,10 +72,16 @@ fn ccw(mut r: Vec<[f64; 2]>) -> Vec<[f64; 2]> {
     r
 }
 
-/// Facetten eines Kreises vom Radius `r` für die Sehnenabweichung [`TOL`] (Vielfaches von 4, 12…128).
-fn segments(r: f64) -> usize {
+/// Mindestzahl Facetten je Vollkreis für Grundriss, Schnitt und Ansicht (5 mm Sehnenabweichung genügen dort).
+const MIN_SEG_PLAN: usize = 12;
+/// Mindestzahl Facetten je Vollkreis im 3D-Bild: Schritt ≤ 7.5° (wie runde Stützen), damit die Facettenfugen
+/// unter dem Knickwinkel der Kantenlinien von render3d (15°) bleiben und nur echte Kanten gezeichnet werden.
+pub const MIN_SEG_3D: usize = 48;
+
+/// Facetten eines Kreises vom Radius `r` für die Sehnenabweichung [`TOL`] (Vielfaches von 4, `min`…128).
+fn segments(r: f64, min: usize) -> usize {
     let n = if r > TOL { (PI / (1.0 - TOL / r).acos()).ceil() } else { 12.0 };
-    let n = (n as usize).clamp(12, 128);
+    let n = (n as usize).clamp(min, 128.max(min));
     n.div_ceil(4) * 4
 }
 
@@ -100,7 +106,7 @@ fn chamfer_ring(ring: &[[f64; 2]], d: f64) -> Vec<[f64; 2]> {
 
 /// Ecken mit Kreisbögen vom Radius `radius` verrunden (wie truck `rounded_ring_wire`: je Ecke auf die halbe
 /// kürzere Nachbarkante begrenzt, fast gestreckte Ecken bleiben scharf), Bögen als Facetten.
-fn round_ring(ring: &[[f64; 2]], radius: f64) -> Vec<[f64; 2]> {
+fn round_ring(ring: &[[f64; 2]], radius: f64, min_seg: usize) -> Vec<[f64; 2]> {
     let n = ring.len();
     let mut out = Vec::new();
     for i in 0..n {
@@ -132,7 +138,7 @@ fn round_ring(ring: &[[f64; 2]], radius: f64) -> Vec<[f64; 2]> {
         while a1 - a0 < -PI {
             a1 += 2.0 * PI;
         }
-        let k = ((segments(r) as f64) * (a1 - a0).abs() / (2.0 * PI)).ceil().max(1.0) as usize;
+        let k = ((segments(r, min_seg) as f64) * (a1 - a0).abs() / (2.0 * PI)).ceil().max(1.0) as usize;
         for j in 0..=k {
             let ang = a0 + (a1 - a0) * j as f64 / k as f64;
             out.push([c[0] + r * ang.cos(), c[1] + r * ang.sin()]);
@@ -286,6 +292,12 @@ fn affine(m: &Mesh, f: &dyn Fn(P3) -> P3) -> Mesh {
 
 /// Körper einer B-Rep-Beschreibung (`SolidSpec`, Felder wie `trucksolid::brep::SolidSpec`).
 pub fn spec_solid(spec: &Value, depth: usize) -> Option<Solid> {
+    spec_solid_q(spec, depth, MIN_SEG_PLAN)
+}
+
+/// Wie [`spec_solid`] mit `min_seg` Facetten je Vollkreis mindestens ([`MIN_SEG_3D`] fürs 3D-Bild).
+pub fn spec_solid_q(spec: &Value, depth: usize, min_seg: usize) -> Option<Solid> {
+    let segments = |r: f64| segments(r, min_seg);
     if depth > 64 {
         return None;
     }
@@ -301,7 +313,7 @@ pub fn spec_solid(spec: &Value, depth: usize) -> Option<Solid> {
             }
             let cr = num_or(spec, "cornerRadius", 0.0);
             if cr > 1e-6 {
-                outer = round_ring(&outer, cr);
+                outer = round_ring(&outer, cr, min_seg);
             }
             let body = solid(&tube(&[ring_at(&outer, z0), ring_at(&outer, z0 + h)], false))?;
             let e = 1e-3;
@@ -415,7 +427,7 @@ pub fn spec_solid(spec: &Value, depth: usize) -> Option<Solid> {
         }
         "translate" => {
             let v = vec3(spec, "v")?;
-            let inner = spec_solid(spec.get("solid")?, depth + 1)?.to_mesh_raw();
+            let inner = spec_solid_q(spec.get("solid")?, depth + 1, min_seg)?.to_mesh_raw();
             solid(&affine(&inner, &|q| [q[0] + v[0], q[1] + v[1], q[2] + v[2]]))
         }
         "transform" => {
@@ -423,14 +435,14 @@ pub fn spec_solid(spec: &Value, depth: usize) -> Option<Solid> {
             if m.len() != 12 {
                 return None;
             }
-            let inner = spec_solid(spec.get("solid")?, depth + 1)?.to_mesh_raw();
+            let inner = spec_solid_q(spec.get("solid")?, depth + 1, min_seg)?.to_mesh_raw();
             solid(&affine(&inner, &|q| {
                 [m[0] * q[0] + m[1] * q[1] + m[2] * q[2] + m[3], m[4] * q[0] + m[5] * q[1] + m[6] * q[2] + m[7], m[8] * q[0] + m[9] * q[1] + m[10] * q[2] + m[11]]
             }))
         }
         "boolean" => {
-            let a = spec_solid(spec.get("a")?, depth + 1)?;
-            let b = spec_solid(spec.get("b")?, depth + 1)?;
+            let a = spec_solid_q(spec.get("a")?, depth + 1, min_seg)?;
+            let b = spec_solid_q(spec.get("b")?, depth + 1, min_seg)?;
             match spec.get("op")?.as_str()? {
                 "union" => a.union(&b).ok(),
                 "difference" => a.difference(&b).ok(),
@@ -444,7 +456,12 @@ pub fn spec_solid(spec: &Value, depth: usize) -> Option<Solid> {
 
 /// Netz einer B-Rep-Beschreibung (geschlossen, aussen orientiert); unbaubar oder leer ⇒ `None`.
 pub fn spec_mesh(spec: &Value) -> Option<Mesh> {
-    let m = spec_solid(spec, 0)?.to_mesh_raw();
+    spec_mesh_q(spec, MIN_SEG_PLAN)
+}
+
+/// Wie [`spec_mesh`] mit `min_seg` Facetten je Vollkreis mindestens.
+pub fn spec_mesh_q(spec: &Value, min_seg: usize) -> Option<Mesh> {
+    let m = spec_solid_q(spec, 0, min_seg)?.to_mesh_raw();
     (!m.is_empty()).then_some(m)
 }
 
@@ -454,12 +471,62 @@ fn is_prism_void(s: &crate::model::ExtrudedSolid) -> bool {
     s.operation.as_deref() == Some("subtract") && s.brep.is_none() && s.taper.unwrap_or(0.0) < 1e-6 && s.points.len() >= 3 && s.height > 0.0
 }
 
-/// Netz eines Körpers mit UK auf seinem Geschoss (gemerkt nach Inhalt).
+/// Netz eines Körpers mit UK auf seinem Geschoss (gemerkt nach Inhalt), für Grundriss, Schnitt und Ansicht.
 pub fn body_mesh(p: &Project, s: &crate::model::ExtrudedSolid) -> Option<std::rc::Rc<Option<Mesh>>> {
+    body_mesh_q(p, s, MIN_SEG_PLAN)
+}
+
+/// [115] Netz eines Körpers fürs 3D (Viewer, Pick, Explosion, Kennwerte): dieselbe Beschreibung, Rundungen
+/// feiner facettiert ([`MIN_SEG_3D`]).
+pub fn body_mesh_3d(p: &Project, s: &crate::model::ExtrudedSolid) -> Option<std::rc::Rc<Option<Mesh>>> {
+    body_mesh_q(p, s, MIN_SEG_3D)
+}
+
+fn body_mesh_q(p: &Project, s: &crate::model::ExtrudedSolid, min_seg: usize) -> Option<std::rc::Rc<Option<Mesh>>> {
     let floor_z = if s.level_id.is_empty() { 0.0 } else { p.floor(&s.level_id).map_or(0.0, |f| f.base_elevation.unwrap_or(0.0)) };
     let v = serde_json::to_value(s).ok()?;
-    let hash = crate::solid_bool::ContentHash::default().json(&v).f64(floor_z).finish();
-    Some(crate::solid_bool::cached(&format!("body-mesh:{}", s.id), hash, || crate::cmd_solid::extruded_solid_spec(&v, floor_z).and_then(|spec| spec_mesh(&spec))))
+    let hash = crate::solid_bool::ContentHash::default().json(&v).f64(floor_z).u64(min_seg as u64).finish();
+    let key = if min_seg == MIN_SEG_PLAN { format!("body-mesh:{}", s.id) } else { format!("body-mesh-{min_seg}:{}", s.id) };
+    Some(crate::solid_bool::cached(&key, hash, || crate::cmd_solid::extruded_solid_spec(&v, floor_z).and_then(|spec| spec_mesh_q(&spec, min_seg))))
+}
+
+/// Kennwerte eines freien Körpers aus seinem 3D-Netz ([`body_mesh_3d`], Manifold): Volumen (m³), Oberfläche (m²),
+/// Volumen-Schwerpunkt und Hüllquader (Modell-Meter, z = Höhe). Ersetzt die Kennwerte über truck (gleiche
+/// Facettierung, 5 mm Sehnenabweichung); `None` ohne Netz.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SolidProps {
+    pub volume: f64,
+    pub area: f64,
+    pub centroid: [f64; 3],
+    pub min: [f64; 3],
+    pub max: [f64; 3],
+    pub closed: bool,
+}
+
+pub fn solid_props(p: &Project, id: &str) -> Option<SolidProps> {
+    let s = p.extruded_solids.as_deref()?.iter().find(|s| s.id == id)?;
+    let m = body_mesh_3d(p, s)?;
+    let m = m.as_ref().as_ref()?;
+    mesh_props(m)
+}
+
+/// Volumen, Oberfläche, Schwerpunkt und Hüllquader eines Netzes (Divergenzsatz über Tetraeder zum Ursprung).
+pub fn mesh_props(m: &Mesh) -> Option<SolidProps> {
+    let (min, max) = m.bounds()?;
+    let at = |i: u32| -> P3 { let i = i as usize * 3; [m.positions[i], m.positions[i + 1], m.positions[i + 2]] };
+    let (mut vol, mut area, mut c) = (0.0, 0.0, [0.0; 3]);
+    for t in m.indices.chunks_exact(3) {
+        let (a, b, d) = (at(t[0]), at(t[1]), at(t[2]));
+        let v6 = dot(a, cross(b, d));
+        vol += v6;
+        for k in 0..3 {
+            c[k] += v6 * (a[k] + b[k] + d[k]);
+        }
+        let n = cross([b[0] - a[0], b[1] - a[1], b[2] - a[2]], [d[0] - a[0], d[1] - a[1], d[2] - a[2]]);
+        area += dot(n, n).sqrt() / 2.0;
+    }
+    let centroid = if vol.abs() > 1e-15 { [c[0] / (4.0 * vol), c[1] / (4.0 * vol), c[2] / (4.0 * vol)] } else { [(min[0] + max[0]) / 2.0, (min[1] + max[1]) / 2.0, (min[2] + max[2]) / 2.0] };
+    Some(SolidProps { volume: vol.abs() / 6.0, area, centroid, min, max, closed: m.is_closed() })
 }
 
 /// Die Netze der freien Körper für Schnitt und Ansicht (Index in `extrudedSolids` + Netz). Senkrechte

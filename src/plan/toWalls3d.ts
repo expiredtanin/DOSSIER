@@ -37,8 +37,8 @@
 // gemeinsame Serde-Vokabular (`RWall`/`RSlab`/`RMesh`/…) und die Farb-/
 // Schraffur-/Material-Auflösung leben in `toWalls3d/shared.ts`; jede
 // Bauteil-Domäne (Wand-Bänder, Decken, Öffnungen, Treppen, Dächer, Stützen,
-// truck-Extrusionen, freie 2D-Geometrie) hat ihre eigene Datei unter
-// `toWalls3d/` — siehe dort für die konkrete Emissions-Logik je Bauteil.
+// freie Körper, freie 2D-Geometrie) rechnet der Kern (`src-tauri/core/src/model3d/`);
+// `toWalls3d/` hält nur noch das gemeinsame Vokabular und die Abzugskörper-Netze.
 
 import type { Project, Vec2 } from "../model/types";
 import { collectVisibleCodes, flattenCategories } from "../model/types";
@@ -54,13 +54,11 @@ import {
   type RVec2,
   type RWall,
 } from "./toWalls3d/shared";
-import { emitExtrudedSolids, truckSolidPickTris, TRUCK_MESH_READY_EVENT } from "./toWalls3d/extrusions";
-import { applyVoids3d, type VoidCuts } from "./toWalls3d/voids3d";
+import { applyVoidMeshes, type VoidMeshes } from "./toWalls3d/voids3d";
 
 // Re-Export des gemeinsamen Vokabulars — externe Konsumenten (viewport/,
 // export/, toSection.ts, nativeSync.ts, …) importieren weiterhin
 // ausschliesslich von hier, unverändert zur Zeit vor dem Domänen-Split.
-export { TRUCK_MESH_READY_EVENT };
 export type { RVec2, RRgb, RWall, RSlab, RModel3d };
 
 /**
@@ -90,8 +88,8 @@ export function classFilterText(hide?: readonly string[], extra?: Record<string,
 }
 
 /**
- * [180] Ausgeblendete Klassen-Codes (Ebenen-Baum samt Elternklassen, dazu `hide`) — für die TS-seitigen
- * 3D-Teile (truck-Körper); alles andere filtert der Kern.
+ * [180] Ausgeblendete Klassen-Codes (Ebenen-Baum samt Elternklassen, dazu `hide`) — für die 3D-Zutaten, die
+ * nicht aus dem Kern-Modell kommen (Schatten, Baurechts-Hülle); die Teile filtert der Kern.
  */
 export function hiddenClassCodes(project: Project, hide?: readonly string[]): Set<string> {
   const out = new Set(hide ?? []);
@@ -177,7 +175,7 @@ export interface Model3dOptions {
   /** Schnitt-Eingabe: Treppen immer als Tritt-Prismen (s. `emitStairs` `forSection`). */
   forSection?: boolean;
   /**
-   * 3D-Viewer: Abzugskörper per truck-Boolean von Wänden/Decken abziehen (s.
+   * 3D-Viewer: Abzugskörper von Wänden/Decken abziehen (Kern-Netze über Manifold, s.
    * `toWalls3d/voids3d.ts`). Schnitt/Ansicht/Export behandeln Abzugskörper selbst.
    */
   voids?: boolean;
@@ -204,17 +202,17 @@ export interface Model3dOptions {
 export function projectToModel3d(project: Project, opts: Model3dOptions = {}): RModel3d {
   const layered = opts.layeredWalls ?? true;
   const detail = opts.detail ?? "fein";
-  // Mit `voids` liefert der Kern zusätzlich die getroffenen Wände/Decken als truck-Spezifikationen.
+  // Mit `voids` liefert der Kern zusätzlich die getroffenen Wände/Decken als Netze „Bauteil − Körper".
   const explode = explodeGap(opts.explode);
-  const voids = !!opts.voids && typeof window !== "undefined";
+  const voids = !!opts.voids;
   const args = [layered ? 1 : 0, DETAIL_CODE[detail] ?? 3, opts.forSection ? 1 : 0, voids ? 1 : 0, explode];
   // Ohne Explosion inkrementell ([58]): nur geänderte Wände reisen aus dem Kern und werden gelesen.
   const doc = documentFor(project);
   const text = classFilterText(opts.hide, opts.modelView ? { modelView: opts.modelView } : undefined);
   const parts = opts.modelView || explode > 0 ? doc.query<Model3dParts>("model3dParts", args, text) : doc.model3dParts<Model3dParts>(args, text);
-  // Die truck-Körper (asynchron, mit Cache) kommen zwischen Kontext-Meshes und Stützen.
+  // [115] Freie Körper als Kern-Netze (`model3d/solids.rs`) zwischen Kontext-Meshes und Stützen.
   const meshes: RMesh[] = [...parts.contextMeshes];
-  for (const m of emitExtrudedSolids(project, parts.floorOffsets, hiddenClassCodes(project, opts.hide))) meshes.push(m);
+  for (const m of parts.solidMeshes) meshes.push(m);
   for (const m of parts.columnMeshes) meshes.push(m);
   for (const m of parts.openingMeshes) meshes.push(m);
   for (const m of parts.stairMeshes) meshes.push(m);
@@ -229,7 +227,7 @@ export function projectToModel3d(project: Project, opts: Model3dOptions = {}): R
     meshes,
     roofLayers: parts.roofLayers,
   };
-  if (parts.voidCuts) applyVoids3d(model, parts.voidCuts);
+  if (parts.voidMeshes) applyVoidMeshes(model, parts.voidMeshes);
   return model;
 }
 
@@ -247,15 +245,6 @@ export interface Model3dPart {
   roofLayers?: RModel3d["roofLayers"];
 }
 
-/** Stabile Nummer je Objekt (truck-Ergebnis der Abzugskörper) für die Teil-id. */
-const objectIds = new WeakMap<object, number>();
-let nextObjectId = 1;
-function objectId(o: object): number {
-  let id = objectIds.get(o);
-  if (id === undefined) objectIds.set(o, (id = nextObjectId++));
-  return id;
-}
-
 /**
  * Das 3D-Modell wie {@link projectToModel3d} (gleiche Wände, Decken, Meshes — nur anders gruppiert), aber
  * in Teilen ([58]): je Wand-Eintrag des Kern-Caches (`w…`) und je Öffnungs-Eintrag (`o…`) ein
@@ -265,28 +254,16 @@ export function projectToModel3dParts(project: Project, opts: Model3dOptions = {
   const layered = opts.layeredWalls ?? true;
   const detail = opts.detail ?? "fein";
   if (explodeGap(opts.explode) > 0) return null;
-  const voids = !!opts.voids && typeof window !== "undefined";
+  const voids = !!opts.voids;
   const args = [layered ? 1 : 0, DETAIL_CODE[detail] ?? 3, opts.forSection ? 1 : 0, voids ? 1 : 0, 0];
   const { parts, keyed } = documentFor(project).model3dPartsKeyed<Model3dParts>(args, classFilterText(opts.hide));
   const wallEntries = keyed.wallEntries as (readonly [number, RWall[]])[];
   const openingEntries = keyed.openingEntries as (readonly [number, RMesh[][]])[];
-  // Abzugskörper wie im vollen Modell (gleiche Reihenfolge, gleicher truck-Cache); danach zuordnen,
-  // welche Wand/Decke durch welches Netz ersetzt wurde (Netze in Index-Reihenfolge der Schnitte).
-  const vm: RModel3d = { walls: parts.walls, slabs: parts.slabs, meshes: [], roofLayers: [] };
-  const wallMesh = new Map<number, RMesh>();
-  const slabMeshes: RMesh[] = [];
-  if (parts.voidCuts) {
-    applyVoids3d(vm, parts.voidCuts);
-    const keptW = new Set(vm.walls);
-    const keptS = new Set(vm.slabs);
-    let mi = 0;
-    for (const i of parts.voidCuts.walls.map(([i]) => i).sort((a, b) => a - b)) {
-      if (!keptW.has(parts.walls[i])) wallMesh.set(i, vm.meshes[mi++]);
-    }
-    for (const i of parts.voidCuts.slabs.map(([i]) => i).sort((a, b) => a - b)) {
-      if (!keptS.has(parts.slabs[i])) slabMeshes.push(vm.meshes[mi++]);
-    }
-  }
+  // Abzugskörper ([115], Kern-Netze): Wand/Decke durch ihr Netz ersetzen; der Inhalts-Schlüssel geht in die Teil-id.
+  const wallMesh = new Map((parts.voidMeshes?.walls ?? []).map(([i, key, m]) => [i, [key, m] as const]));
+  const slabCut = new Set((parts.voidMeshes?.slabs ?? []).map(([i]) => i));
+  const slabMeshes = (parts.voidMeshes?.slabs ?? []).map(([, , m]) => m);
+  const slabs = slabCut.size ? parts.slabs.filter((_, i) => !slabCut.has(i)) : parts.slabs;
   const ns = `${coreEpoch()}.`;
   const out: Model3dPart[] = [];
   let at = 0;
@@ -299,8 +276,8 @@ export function projectToModel3dParts(project: Project, opts: Model3dOptions = {
     for (let i = start; i < at; i++) {
       const m = wallMesh.get(i);
       if (m) {
-        meshes.push(m);
-        cut += `.${i - start}m${objectId(m)}`;
+        meshes.push(m[1]);
+        cut += `.${i - start}m${m[0]}`;
       } else walls.push(parts.walls[i]);
     }
     out.push(cut ? { id: `w${ns}${k}${cut}`, fixed: true, walls, meshes } : { id: `w${ns}${k}`, fixed: true, walls });
@@ -310,9 +287,9 @@ export function projectToModel3dParts(project: Project, opts: Model3dOptions = {
     if (meshes.length) out.push({ id: `o${ns}${k}`, fixed: true, meshes });
   }
   const rest = (id: string, p: Omit<Model3dPart, "id" | "fixed">) => out.push({ id, fixed: false, ...p });
-  rest("slabs", { slabs: vm.slabs, meshes: slabMeshes });
+  rest("slabs", { slabs, meshes: slabMeshes });
   rest("context", { meshes: parts.contextMeshes });
-  rest("extrusions", { meshes: emitExtrudedSolids(project, parts.floorOffsets, hiddenClassCodes(project, opts.hide)) });
+  rest("solids", { meshes: parts.solidMeshes });
   rest("columns", { meshes: parts.columnMeshes });
   rest("openingTail", { meshes: keyed.openingTail as RMesh[] });
   rest("stairs", { meshes: [...parts.stairMeshes, ...parts.stairRailings] });
@@ -331,10 +308,10 @@ interface Model3dParts {
   stairRailings: RMesh[];
   roofMeshes: RMesh[];
   roofLayers: RModel3d["roofLayers"];
-  /** Nur mit Abzugskörpern: (Index im Modell, Bauteil − Körper) je getroffene Wand/Decke. */
-  voidCuts?: VoidCuts;
-  /** Nur mit Explosion: Versatz (m) je Geschoss-id (für die truck-Extrusionen). */
-  floorOffsets?: Record<string, number>;
+  /** [115] Freie Körper (ohne Abzugskörper) als Kern-Netze, Klassen gefiltert, mit der Explosion angehoben. */
+  solidMeshes: RMesh[];
+  /** Nur mit Abzugskörpern: (Index im Modell, Schlüssel, Netz „Bauteil − Körper") je getroffene Wand/Decke. */
+  voidMeshes?: VoidMeshes;
 }
 
 /** Explosionsabstand bereinigt: endlich und > 0, sonst 0 (= aus). */
@@ -377,16 +354,8 @@ export function pickGeometry(
   /** [149] Bäume (Stamm + Krone). */
   trees: PickTreeMesh[];
 } {
-  const g = documentFor(project).query("pickGeometry", [explodeGap(explode)], classFilterText(hide)) as ReturnType<typeof pickGeometry>;
-  // [137] Freie Körper: das geladene truck-Netz (Loft, Rotation, Verjüngung, Rundung) statt der Prisma-Näherung des Kerns.
-  const gap = explodeGap(explode);
-  const offsets = gap > 0 ? explodeFloorOffsets(project, gap) : undefined;
-  const levelOf = new Map((project.extrudedSolids ?? []).map((s) => [s.id, s.levelId]));
-  g.solids = (g.solids ?? []).map((s) => {
-    const tris = truckSolidPickTris(s.solidId, offsets?.[levelOf.get(s.solidId) ?? ""] ?? 0);
-    return tris ? { ...s, tris } : s;
-  });
-  return g;
+  // [137]/[115] Freie Körper als Dreiecke ihres Kern-Netzes (dasselbe wie im Bild, mit der Explosion angehoben).
+  return documentFor(project).query("pickGeometry", [explodeGap(explode)], classFilterText(hide)) as ReturnType<typeof pickGeometry>;
 }
 
 /**

@@ -4520,9 +4520,9 @@ pub struct ExtrudedSolidBrep {
 
 // ── Extrudierter Körper (truck-Integration, docs/design/truck-plan.md) ─────
 // Ein per `extrude`-Befehl aus einem geschlossenen 2D-Profil (Polylinie-Ring/
-// Rechteck) erzeugter 3D-Körper. Die eigentliche B-Rep-Extrusion (truck-WASM,
-// `engine/truckSolid.ts`) läuft NICHT hier, sondern asynchron in
-// `toWalls3d.ts` (emitExtrudedSolids) — dieser Typ hält nur die Rohdaten.
+// Rechteck) erzeugter 3D-Körper. Die Beschreibung baut `cmd_solid::extruded_solid_spec`, das Netz
+// für Grundriss, Schnitt, Ansicht und 3D `solid_mesh.rs` ([115]), STEP truck — dieser Typ hält nur
+// die Rohdaten.
 
 /// Ein extrudierter Körper: geschlossenes Profil (Modell-Meter) + Höhe.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
@@ -4540,7 +4540,7 @@ pub struct ExtrudedSolid {
     /// Geschlossenes Profil in der XY-Ebene (Grundriss), ≥3 Punkte. Bei einem
     /// Kreis-Profil (`circle` gesetzt) eine Tessellierung des Kreises (48-Eck) —
     /// für 2D-Footprint/Auswahl/bbox/Verschieben; die 3D-Extrusion nutzt in dem
-    /// Fall stattdessen `circle` (echte runde truck-Extrusion, `extrudeCircle`).
+    /// Fall stattdessen `circle` (Zylinder bzw. Kegel, `solid_mesh.rs`).
     pub points: Vec<Vec2>,
     /// Extrusionshöhe in Metern (> 0), nach +Z ab der Geschoss-UK.
     pub height: f64,
@@ -4550,7 +4550,7 @@ pub struct ExtrudedSolid {
     pub base_offset: Option<f64>,
     /// Boolesche Rolle im Gebäude: "subtract" = Abzugskörper (Aussparung/Durchbruch/Nische).
     /// Er zieht sich von allen Wänden, Decken und Stützen ab, die er durchdringt — in 3D
-    /// (truck-Boolean), im Grundriss und im Schnitt; selbst wird er nur als Umriss gezeigt.
+    /// (Manifold-Boolean im Kern), im Grundriss und im Schnitt; selbst wird er nur als Umriss gezeigt.
     /// Fehlt = normaler Körper.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional, type = "\"subtract\"")]
@@ -4561,8 +4561,8 @@ pub struct ExtrudedSolid {
     #[ts(optional)]
     pub site_projection: Option<bool>,
     /// Gesetzt, wenn das Profil ein Kreis ist (aus einem `Drawing2D` mit
-    /// `shape:"circle"`) — `points` bleibt die Tessellierung, `toWalls3d.ts`
-    /// (emitExtrudedSolids) nutzt `circle` für die runde 3D-Extrusion.
+    /// `shape:"circle"`) — `points` bleibt die Tessellierung, der Kern
+    /// (`solid_mesh.rs`) nutzt `circle` für den runden Körper.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional, inline)]
     pub circle: Option<ExtrudedSolidCircle>,

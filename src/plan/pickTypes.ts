@@ -112,8 +112,7 @@ export interface PickTreeMesh {
 
 /**
  * [137] Freier Körper (`extrudedSolids`, Loft/Rotation/Abzug/B-Rep) für den Raycast: WORLD-Dreiecke
- * (x, Höhe, y). Der Kern liefert das Prisma über dem Umriss; sobald das truck-Netz geladen ist, ersetzt
- * `pickGeometry` (plan/toWalls3d.ts) es durch dessen Dreiecke.
+ * (x, Höhe, y) des Kern-Netzes ([115], dasselbe wie im 3D-Bild; ohne Netz das Prisma über dem Umriss).
  */
 export interface PickSolidMesh {
   tris: ReadonlyArray<readonly [Vec3, Vec3, Vec3]>;

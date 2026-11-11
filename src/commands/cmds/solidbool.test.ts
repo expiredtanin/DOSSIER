@@ -38,8 +38,12 @@ describe("combineSolids", () => {
     expect(i.height).toBe(2);
   });
 
-  it("Durchschnitt ohne Überlappung und Pyramiden als Operand ergeben null", () => {
+  it("Durchschnitt ohne Überlappung ergibt null", () => {
     expect(combineSolids(sampleProject, a, box("c", 10, 10, 12, 12, 1), "intersection")).toBeNull();
-    expect(combineSolids(sampleProject, { ...a, taper: 1 }, b, "union")).toBeNull();
+  });
+
+  it("[115] Pyramide (volle Verjüngung) ist als Netz ein gültiger Operand", () => {
+    const u = combineSolids(sampleProject, { ...a, taper: 1 }, b, "union");
+    expect(u?.brep?.spec).toMatchObject({ kind: "boolean", op: "union", a: { kind: "mesh" } });
   });
 });
