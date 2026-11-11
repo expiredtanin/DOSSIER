@@ -276,7 +276,7 @@ pub fn roof_types() -> Vec<Value> {
 pub fn view_templates() -> Vec<Value> {
     vec![
         json!({"id": "std-vt-praesentation", "name": "Präsentation", "detail": "mittel", "mono": true, "shadows": true, "hiddenLines": false,
-               "layerVisibility": {"90": false, "99": false}}),
+               "layerVisibility": {"90": false, "91": false, "99": false}}),
         json!({"id": "std-vt-eingabe-100", "name": "Eingabeplan 1:100", "detail": "mittel", "scaleDenominator": 100, "mono": true, "shadows": false,
                "layerVisibility": {"99": false}}),
         json!({"id": "std-vt-ausfuehrung-50", "name": "Ausführungsplan 1:50", "detail": "fein", "scaleDenominator": 50, "mono": true, "shadows": false,
@@ -347,13 +347,49 @@ pub fn light_category() -> Value {
     json!({"code": LIGHT_CATEGORY_CODE, "name": "Leuchten", "color": "#1a1a1a", "lw": 0.18, "visible": true, "locked": false})
 }
 
+// ── [180] Klassen der abgeleiteten Darstellung ────────────────────────────────
+//
+// Alles Sichtbare liegt auf einer Klasse (Vorgabe Maintainer): was nicht zu einem Element gehört (Schatten,
+// Schnittmarken, automatische Koten) oder als Element von einem Befehl erzeugt wird (Aussenbemassung), bekommt
+// eine Standard-Klasse. Sichtbarkeit über den gewöhnlichen Mechanismus (Klassen-Sichtbarkeit, Darstellungsmodus,
+// Ebenen-Kombination). Fehlt die Klasse im Projekt (vor „Standards laden"), bleibt die Darstellung sichtbar
+// (wie [66] Baurecht unter „01"), sonst gäbe es keinen Schalter dafür.
+
+/// Schlagschatten: Sonnenschatten im Grundriss (Schattenstudie), Schlagschatten in der Ansicht.
+pub const SHADOW_CATEGORY: &str = "08";
+/// Automatische Aussenbemassung (Befehl `autodim`, Elemente `autodim-…`; je Element änderbar).
+pub const AUTO_DIM_CATEGORY: &str = "81";
+/// Automatische Höhenkoten in Schnitt und Ansicht (`levelMarkers`).
+pub const LEVEL_MARK_CATEGORY: &str = "82";
+/// Schnitt- und Ansichtsmarken im Grundriss (Schnittführung mit Pfeilen und Beschriftung).
+pub const SECTION_MARK_CATEGORY: &str = "91";
+
+/// Die Klassen der abgeleiteten Darstellung (Code, Name, Farbe, Strichstärke).
+pub const DERIVED_CATEGORIES: [(&str, &str, &str, f64); 4] = [
+    (SHADOW_CATEGORY, "Schatten", "#707078", 0.13),
+    (AUTO_DIM_CATEGORY, "Auto-Bemassung", "#303038", 0.13),
+    (LEVEL_MARK_CATEGORY, "Höhenkoten", "#1a1a1a", 0.13),
+    (SECTION_MARK_CATEGORY, "Schnittmarken", "#1a1a1a", 0.18),
+];
+
+pub fn derived_categories() -> Vec<Value> {
+    DERIVED_CATEGORIES.iter().map(|(code, name, color, lw)| json!({"code": code, "name": name, "color": color, "lw": lw, "visible": true, "locked": false})).collect()
+}
+
+/// [180] Abgeleitete Darstellung der Klasse `code` sichtbar? `shown(code)` (Klasse eingeblendet), oder die Klasse
+/// fehlt im Projekt.
+pub fn derived_visible(p: &crate::model::Project, code: &str, shown: impl Fn(&str) -> bool) -> bool {
+    shown(code) || p.layer_category(code).is_none()
+}
+
+/// Gibt es im Kategorie-Baum schon den Code oder den Namen `name` (klein)?
+fn has_category(layers: &[Value], code: &str, name: &str) -> bool {
+    layers.iter().any(|l| l["code"].as_str() == Some(code) || name_key(l).as_deref() == Some(name) || l["children"].as_array().is_some_and(|c| has_category(c, code, name)))
+}
+
 /// Gibt es im Kategorie-Baum schon den Code oder den Namen der Leuchten-Kategorie?
 fn has_light_category(layers: &[Value]) -> bool {
-    layers.iter().any(|l| {
-        l["code"].as_str() == Some(LIGHT_CATEGORY_CODE)
-            || name_key(l).as_deref() == Some("leuchten")
-            || l["children"].as_array().is_some_and(|c| has_light_category(c))
-    })
+    has_category(layers, LIGHT_CATEGORY_CODE, "leuchten")
 }
 
 pub fn library() -> Vec<(&'static str, Vec<Value>)> {
@@ -427,10 +463,18 @@ fn merge_plan(root: &Map<String, Value>) -> (Vec<Value>, HashMap<String, String>
         }
     }
     // Kategorie „Leuchten“ (Kategorien haben keine id: ganze Liste setzen, ein Undo-Schritt).
+    // [180] Dazu die Klassen der abgeleiteten Darstellung.
     let layers = root.get("layers").and_then(Value::as_array).cloned().unwrap_or_default();
+    let mut all = layers.clone();
     if !has_light_category(&layers) {
-        let mut all = layers;
         all.push(light_category());
+    }
+    for (c, d) in DERIVED_CATEGORIES.iter().zip(derived_categories()) {
+        if !has_category(&layers, c.0, &c.1.to_lowercase()) {
+            all.push(d);
+        }
+    }
+    if all.len() != layers.len() {
         ops.push(json!({"kind": "setField", "key": "layers", "value": all}));
     }
     (ops, ids)
@@ -792,11 +836,32 @@ mod tests {
         let mut own = empty_root();
         own.insert("layers".into(), json!([{"code": "20", "name": "Wände", "color": "#000", "lw": 0.35, "visible": true, "locked": false,
             "children": [{"code": "28", "name": "Leuchten", "color": "#000", "lw": 0.13, "visible": true, "locked": false}]}]));
-        assert!(!merge_ops(&own).iter().any(|o| o["key"] == "layers"));
+        let op = merge_ops(&own).into_iter().find(|o| o["key"] == "layers").unwrap();
+        assert!(!op["value"].as_array().unwrap().iter().any(|l| l["code"] == "65"), "keine zweite Leuchten-Kategorie");
         // Andere Kategorien bleiben, die neue kommt ans Ende.
         own.insert("layers".into(), json!([{"code": "20", "name": "Wände", "color": "#000", "lw": 0.35, "visible": true, "locked": false}]));
         let op = merge_ops(&own).into_iter().find(|o| o["key"] == "layers").unwrap();
-        assert_eq!(op["value"].as_array().unwrap().iter().map(|l| l["code"].as_str().unwrap()).collect::<Vec<_>>(), ["20", "65"]);
+        assert_eq!(op["value"].as_array().unwrap().iter().map(|l| l["code"].as_str().unwrap()).collect::<Vec<_>>(), ["20", "65", "08", "81", "82", "91"]);
+    }
+
+    /// [180] Klassen der abgeleiteten Darstellung: „Standards laden" legt sie an, einmal; vorhandene (Code oder Name) bleiben.
+    #[test]
+    fn klassen_der_abgeleiteten_darstellung() {
+        let r = apply(&empty_root(), &merge_ops(&empty_root()));
+        let p: Project = serde_json::from_value(Value::Object(r.clone())).unwrap();
+        for (code, name, ..) in DERIVED_CATEGORIES {
+            assert!(p.layers.iter().any(|l| l.code == code && l.name == name), "{name}");
+        }
+        assert!(merge_ops(&r).is_empty(), "zweites Laden ergänzt nichts");
+        let mut own = empty_root();
+        own.insert("layers".into(), json!([{"code": "77", "name": "schatten", "color": "#000", "lw": 0.13, "visible": true, "locked": false}]));
+        let op = merge_ops(&own).into_iter().find(|o| o["key"] == "layers").unwrap();
+        let codes: Vec<&str> = op["value"].as_array().unwrap().iter().map(|l| l["code"].as_str().unwrap()).collect();
+        assert_eq!(codes, ["77", "65", "81", "82", "91"]);
+        // Sichtbar, solange die Klasse fehlt; sonst nach der Klassen-Sichtbarkeit.
+        assert!(derived_visible(&p, SHADOW_CATEGORY, |c| c == SHADOW_CATEGORY));
+        assert!(!derived_visible(&p, SHADOW_CATEGORY, |_| false));
+        assert!(derived_visible(&Project::default(), SHADOW_CATEGORY, |_| false));
     }
 
     #[test]

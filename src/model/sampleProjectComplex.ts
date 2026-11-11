@@ -484,9 +484,9 @@ const columns: NonNullable<Project["columns"]> = [
 
 const extrudedSolids: NonNullable<Project["extrudedSolids"]> = [
   // Abzugskörper: Durchreiche Küche ↔ Atelier in der EG-Innenwand x = 6.
-  { id: "void-durchreiche", type: "extrudedSolid", levelId: "eg", points: rect(5.8, 6.6, 6.2, 7.8), height: 0.6, baseOffset: 1.0, operation: "subtract" },
+  { id: "void-durchreiche", type: "extrudedSolid", levelId: "eg", categoryCode: "20", points: rect(5.8, 6.6, 6.2, 7.8), height: 0.6, baseOffset: 1.0, operation: "subtract" },
   // Freier Körper: runder Brunnentrog im Garten (Kreisprofil, Fase).
-  { id: "koerper-brunnen", type: "extrudedSolid", levelId: "ug", points: [], circle: { center: P(4.5, -6.5), r: 0.7 }, height: 0.6, baseOffset: -0.1, chamfer: 0.03 },
+  { id: "koerper-brunnen", type: "extrudedSolid", levelId: "ug", categoryCode: "20", points: [], circle: { center: P(4.5, -6.5), r: 0.7 }, height: 0.6, baseOffset: -0.1, chamfer: 0.03 },
 ];
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -872,6 +872,7 @@ export function buildComplexSampleProject(): Project {
   p = addRooms(p);
 
   // Aussenbemassung (Massketten je Fassade) in UG, EG, OG.
+  // [180] Die Ketten landen auf der Klasse „81 Auto-Bemassung" (Befehl `autodim`), nicht auf der aktiven.
   for (const f of ["ug", "eg", "og"]) p = runCmd(p, f, "autodim", {}, "80").project;
   return p;
 }

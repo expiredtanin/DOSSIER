@@ -586,7 +586,14 @@ pub fn section_primitives_mv(out: &Output, mono: bool, hidden_lines: bool, vis: 
         (StairPart::Rail, Some(m)) => m.o.stair.section_beyond && m.o.stair.handrail.is_some(),
     };
     // [152] Importierte Netze: Kanten nur, wenn die Kategorie gezeigt wird; Linien nach den Regeln des Netzes.
-    let mesh_shown = |e: &Edge| stair_shown(e) && (e.kind != Kind::Mesh || out.meshes.get(e.index).and_then(|m| m.category.as_deref()).is_none_or(shown));
+    // [180] Projektionskanten der übrigen Bauteile nach deren Klasse.
+    let mesh_shown = |e: &Edge| {
+        stair_shown(e)
+            && match e.kind {
+                Kind::Mesh => out.meshes.get(e.index).and_then(|m| m.category.as_deref()).is_none_or(shown),
+                _ => out.edge_cats.get(&(e.kind, e.index)).is_none_or(|c| shown(c)),
+            }
+    };
     let mesh_style = |e: &Edge, l: &mut Primitive| {
         if e.kind == Kind::Mesh {
             if let Some(s) = rules.mesh.get(&e.index) {

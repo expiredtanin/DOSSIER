@@ -361,6 +361,44 @@ Etappe 3:
   „+" übernimmt, TS `standardModelViews`/`adoptModelViewOps`). Stufen zwischen Projekten austauschen geht nur über
   Projektvorlagen (ganzes Projekt) — ein Import einzelner Ressourcen fehlt.
 
+### 3.6 Alles Sichtbare auf einer Klasse ([180])
+
+Regel (CLAUDE.md, „Konventionen"): jedes Primitive in Grundriss, Schnitt und Ansicht gehört zu einer Klasse
+(`categoryCode`) und verschwindet mit ihr — über den einen Mechanismus Klassen-Sichtbarkeit/Darstellungsmodus
+(Grundriss `show`/`grey`, Schnitt/Ansicht `invisible`/`norender`/`grey`, Ebenen-Kombinationen und Vorlagen setzen
+dieselben Codes). Was kein eigenes Element hat, liegt auf einer **Standard-Klasse der abgeleiteten Darstellung**
+(`standards.rs::DERIVED_CATEGORIES`, TS `src/model/derivedCategories.ts`; „Standards laden" und neue Projekte legen
+sie an): `08 Schatten`, `81 Auto-Bemassung`, `82 Höhenkoten`, `91 Schnittmarken`. Fehlt eine davon im Projekt,
+bleibt die Darstellung sichtbar (`standards::derived_visible`, `Ctx::derived_shown`; wie Baurecht unter `01`).
+Prüfung: `plan/derived_class_tests.rs` (Fixture) und `src/plan/derivedCategories.test.ts` (beide Musterhäuser:
+alle Klassen aus ⇒ Grundriss jedes Geschosses, Schnitte, Ansichten leer; jede abgeleitete Klasse einzeln).
+
+| Darstellung | Klasse | Wo |
+|---|---|---|
+| Sonnenschatten Grundriss | `08 Schatten` | `domains.rs::extras_of` |
+| Schlagschatten Ansicht (auch Fenster-Laibungen) | `08 Schatten` (+ Regel „Schatten" [33]) | `elevation/mod.rs` |
+| Baurecht (Parzelle, Baubereich, Verstösse) | `01 Vermessung` | `extras_of` ([66]) |
+| Automatische Aussenbemassung | Element, Standard `81 Auto-Bemassung` (je Kette änderbar) | `cmd_draw.rs::autodim_ops` |
+| Höhenkoten 2D (Element `kote`) | Element | `drawings.rs` |
+| Automatische Höhenkoten Schnitt/Ansicht | `82 Höhenkoten` (+ Ebene/Modelldarstellung) | `levelMarksEnabled` (TS), `sheet_viewports.rs` |
+| Schnitt-/Ansichtsmarken im Grundriss | `91 Schnittmarken` (früher `90`) | `context.rs::plan_section_lines` |
+| Achsraster, Achsblasen (Grundriss, Schnitt, Ansicht) | Element (Raster) | `drawings.rs`, `grid_view.rs::grid_prims_in` |
+| Nordpfeil, Massstabsbalken, Revisionswolke, Texte | Element | `drawings.rs` |
+| Plankopf | Blatt-Element (Layout), nicht im Plan | `LayoutSheet` |
+| Raumstempel, Bodenbelag | Raum | `domains.rs::rooms`, `floor_finishes` |
+| Treppe: Lauflinie, Stufennummern, Absturzsicherung; Ansicht | Treppe | `stairs.rs`; Ansicht über `ceil_cat` |
+| Deckenkanten, Untersichten | Decke | `domains.rs::ceilings` |
+| Storenkasten, Fenster/Türen (auch Ansicht, mit Wirt) | Öffnung (+ Wand/Dach) | `walls.rs`; `elevation/mod.rs` |
+| Körper, Abzugskörper (Grundriss, Schnitt) | Element (`ExtrudedSolid.categoryCode`, neu) | `domains.rs::solids`, Schnitt `edge_cats` |
+| Projektionskanten im Schnitt | Bauteil hinter der Ebene | `section/mod.rs::edge_categories` |
+| Dach-Ansichtsmuster | Dach (nur mit sichtbaren Flächen) | `elevation/patterns.rs` |
+| Höhenlinien + Beschriftung, Gelände, Baugrube, Netze, Luftbild, Bäume | Element ([181]) | `context.rs`, `trees.rs` |
+| Kontext-Unterlagen (DXF/PDF) | Element (2D-Zeichnung) | `drawings.rs` |
+| Grundlinie Schnitt/Ansicht | keine eigene: entfällt, wenn nichts gezeichnet ist | `section/primitives.rs`, `elevation/mod.rs` |
+
+Offen: Bauzonen sind kein eigener Planinhalt (nur Baurecht-Einstellungen); 3D (render3d-Teile) nicht geprüft; ausgeblendete
+Bauteile verdecken im Schnitt weiter die Projektion dahinter.
+
 ---
 
 ## 4. Schnitt

@@ -370,6 +370,9 @@ export const sampleProject: Project = {
   layers: [
     { code: "00", name: "Raster", color: "#1a1a1a", lw: 0.13, visible: true, locked: false },
     { code: "01", name: "Vermessung", color: "#4a4a4a", lw: 0.18, visible: true, locked: false },
+    // [180] Klassen der abgeleiteten Darstellung (wie „Standards laden", Kern `standards.rs`): Schatten,
+    // Auto-Bemassung, automatische Höhenkoten in Schnitt/Ansicht, Schnitt-/Ansichtsmarken.
+    { code: "08", name: "Schatten", color: "#707078", lw: 0.13, visible: true, locked: false },
     // "05 Kontext" bündelt Bestand/Umgebung (manuell gezeichnet ODER importiert,
     // s. `contextCategories.ts::CONTEXT_PARENT_CATEGORY`) als Kinder statt als
     // gleichrangige Top-Level-Einträge (Nutzer-Wunsch 2026-08-31).
@@ -409,7 +412,10 @@ export const sampleProject: Project = {
     { code: "35", name: "Träger", color: "#0a0a0a", lw: 0.25, visible: true, locked: false },
     { code: "50", name: "Text", color: "#1a1a1a", lw: 0.13, visible: true, locked: false },
     { code: "60", name: "Räume", color: "#4a4a4a", lw: 0.13, visible: true, locked: false },
+    { code: "81", name: "Auto-Bemassung", color: "#303038", lw: 0.13, visible: true, locked: false },
+    { code: "82", name: "Höhenkoten", color: "#1a1a1a", lw: 0.13, visible: true, locked: false },
     { code: "90", name: "Referenzen", color: "#1a1a1a", lw: 0.13, visible: true, locked: false },
+    { code: "91", name: "Schnittmarken", color: "#1a1a1a", lw: 0.18, visible: true, locked: false },
     { code: "99", name: "Konstruktion", color: "#404040", lw: 0.13, visible: true, locked: false },
   ],
   // [140] Strichstärken folgen dem Massstab (neue Projekte; bestehende behalten ihre Einstellung).

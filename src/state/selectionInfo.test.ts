@@ -53,7 +53,7 @@ describe("deriveSelection (Kern)", () => {
     const p = base();
     const lvl = p.drawingLevels[0].id;
     p.extrudedSolids = [
-      { id: "x", type: "extrudedSolid", levelId: lvl, points: [{ x: 0, y: 0 }, { x: 2, y: 0 }, { x: 2, y: 3 }], height: 2 },
+      { id: "x", type: "extrudedSolid", categoryCode: "20", levelId: lvl, points: [{ x: 0, y: 0 }, { x: 2, y: 0 }, { x: 2, y: 3 }], height: 2 },
     ];
     const sel = deriveSelection(p, { solids: ["x"] })!;
     expect(sel.extrudedSolid!.area).toBeCloseTo(3, 12);

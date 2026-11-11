@@ -17,6 +17,7 @@
 //                                                  Override-Regel ein (auch Standard-Baustein, z. B. --rule "Deckenaufbau weiss") [33];
 //                                                  das Massstab-Kriterium einer Regel (ab/bis 1:n) gilt nach --scale;
 //                                                  --model-view <Name> wählt eine Modelldarstellung (eigene Stufe oder grob/mittel/fein) [173]
+//                                                  --hide <Code|Name,…> blendet Klassen aus (z. B. --hide "Schatten,Auto-Bemassung") [180]
 //   dossier-cli <projekt.obp> ifc [--ebkph] [--ebenen]   (IFC mit eBKP-H-Hauptgruppen bzw. Modell-Ebenen als Klassifikation)
 //                                                  --schema 4|2x3: IFC4 (Standard) oder IFC2x3 (Coordination View 2.0)
 //   dossier-cli <projekt.obp> dxf [--binary] [--scale 100] [--dim-unit cm] [--layout]|dwg|ifc|step|obj|stl|glb|gltf|schedule [--openings|--elements|--rooms] [--format json|csv|svg|pdf]|kennzahlen [--sia416] [--ivhb] [--format json|csv|svg|pdf] [--agsf m2] [--gruenflaeche m2] [--agf-basis gf|ngf|nf] [--untergeschosse]|raumprogramm [--import tabelle] [--sheet name|nr] [--mode replace|append] [--tolerance %] [--generate] [--format json|csv|svg|pdf] [--save projekt.obp]|sun [--level EG] [--out datei]
@@ -235,6 +236,20 @@ function templateView(project: Project, levelId: string, args: Args, allCodes: S
   const tpl = templateFor(project, levelId, args);
   const d = templateDisplay(tpl);
   const hidden = new Set(d.hiddenCodes);
+  // [180] --hide <Code|Name,…>: Klassen ausblenden (z. B. --hide "Schatten,Auto-Bemassung").
+  for (const w of (args.flags.get("hide") ?? "").split(",").map((x) => x.trim().toLowerCase()).filter(Boolean)) {
+    const find = (ls: Project["layers"]): string | undefined => {
+      for (const l of ls) {
+        if (l.code.toLowerCase() === w || l.name.toLowerCase() === w) return l.code;
+        const c = l.children ? find(l.children) : undefined;
+        if (c) return c;
+      }
+      return undefined;
+    };
+    const code = find(project.layers);
+    if (!code) fail(`Klasse nicht gefunden: ${w}`);
+    hidden.add(code);
+  }
   return {
     tpl,
     detail: d.detail,

@@ -3,7 +3,7 @@ import type { ExtrudedSolid } from "../model/types";
 import { extrudedSolidSpec, needsBrepPath } from "./extrudedSolidSpec";
 
 const sq = [{ x: 0, y: 0 }, { x: 2, y: 0 }, { x: 2, y: 2 }, { x: 0, y: 2 }];
-const base: ExtrudedSolid = { id: "e1", type: "extrudedSolid", levelId: "eg", points: sq, height: 3 };
+const base: ExtrudedSolid = { id: "e1", type: "extrudedSolid", categoryCode: "20", levelId: "eg", points: sq, height: 3 };
 
 describe("extrudedSolidSpec", () => {
   it("Prisma ohne Besonderheiten bleibt auf dem alten Pfad", () => {

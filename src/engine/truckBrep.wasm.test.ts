@@ -46,7 +46,7 @@ const volume = (m: { positions: number[]; indices: number[] }): number => {
 const build = (spec: unknown, tol = 0.01) => JSON.parse(mod.build_solid_mesh(JSON.stringify({ spec, tol })));
 
 const box = (id: string, x0: number, y0: number, x1: number, y1: number, h: number): ExtrudedSolid => ({
-  id, type: "extrudedSolid", levelId: "eg", height: h,
+  id, type: "extrudedSolid", categoryCode: "20", levelId: "eg", height: h,
   points: [{ x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 }],
 });
 

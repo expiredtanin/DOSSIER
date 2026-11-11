@@ -231,6 +231,7 @@ pub(super) fn merge_output(acc: &mut Option<Output>, o: Output) {
     a.profiles.extend(o.profiles);
     a.earth.extend(o.earth);
     a.mesh_lines.extend(o.mesh_lines);
+    a.edge_cats.extend(o.edge_cats);
     if a.terrain_id.is_none() {
         a.terrain_id = o.terrain_id;
     }

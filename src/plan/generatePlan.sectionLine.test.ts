@@ -4,7 +4,7 @@
  * (cls "section-line"), Endmarken + ein unsichtbares Pick-Band (Polygon mit
  * `sectionLineId`). Ebenen OHNE Linie erzeugen nichts.
  *
- * Sichtbarkeit läuft über die feste Kategorie "90" (Referenzen) — NICHT über
+ * Sichtbarkeit läuft über die Standard-Klasse "91" (Schnittmarken, [180]; früher "90" Referenzen) — NICHT über
  * das eigene `visible`-Flag der Schnitt-/Ansichtsebene (Nutzer-Feedback: "das
  * sollten Elemente sein, die sich auf einer Ebene befinden und nur damit
  * ein-/ausgeblendet werden"). Das Flag ist daher für dieses Symbol wirkungslos.
@@ -15,7 +15,7 @@ import { generatePlan } from "./generatePlan";
 import type { CategoryDisplayResolver } from "./generatePlan";
 import type { DrawingLevel, Project } from "../model/types";
 
-const visible = new Set(["20", "35", "90"]);
+const visible = new Set(["20", "35", "90", "91"]);
 
 function baseProject(levels: DrawingLevel[]): Project {
   return {
@@ -26,7 +26,10 @@ function baseProject(levels: DrawingLevel[]): Project {
     components: [],
     wallTypes: [],
     drawingLevels: levels,
-    layers: [{ code: "20", name: "Wände", color: "#333", lw: 0.18, visible: true, locked: false }],
+    layers: [
+      { code: "20", name: "Wände", color: "#333", lw: 0.18, visible: true, locked: false },
+      { code: "91", name: "Schnittmarken", color: "#1a1a1a", lw: 0.18, visible: true, locked: false },
+    ],
     walls: [],
     openings: [],
     ceilings: [],
@@ -106,7 +109,7 @@ describe("generatePlan — Schnittführungs-Symbol", () => {
     expect(prims.some((pr) => pr.kind === "line" && pr.cls === "section-line")).toBe(false);
   });
 
-  it("zeichnet TROTZDEM, auch wenn die Schnittebene selbst visible=false trägt (nur Kategorie '90' zählt)", () => {
+  it("zeichnet TROTZDEM, auch wenn die Schnittebene selbst visible=false trägt (nur die Klasse '91' zählt)", () => {
     const p = baseProject([
       floor,
       {
@@ -123,7 +126,7 @@ describe("generatePlan — Schnittführungs-Symbol", () => {
     expect(prims.some((pr) => pr.kind === "polygon" && pr.sectionLineId === "s-hidden")).toBe(true);
   });
 
-  it("zeichnet NICHTS, wenn Kategorie '90' NICHT sichtbar ist (visibleCodes ohne '90')", () => {
+  it("zeichnet NICHTS, wenn die Klasse '91' NICHT sichtbar ist (visibleCodes ohne '91')", () => {
     const p = baseProject([
       floor,
       {
@@ -136,11 +139,11 @@ describe("generatePlan — Schnittführungs-Symbol", () => {
         directionSign: 1,
       },
     ]);
-    const prims = generatePlan(p, "eg", new Set(["20", "35"])).primitives;
+    const prims = generatePlan(p, "eg", new Set(["20", "35", "90"])).primitives;
     expect(prims.some((pr) => pr.kind === "polygon" && pr.sectionLineId === "s-cat")).toBe(false);
   });
 
-  it("dimmt (greyed), wenn categoryDisplay('90') greyed liefert", () => {
+  it("dimmt (greyed), wenn categoryDisplay('91') greyed liefert", () => {
     const p = baseProject([
       floor,
       {
@@ -154,7 +157,7 @@ describe("generatePlan — Schnittführungs-Symbol", () => {
       },
     ]);
     const categoryDisplay: CategoryDisplayResolver = (code) =>
-      code === "90" ? { render: true, greyed: true, locked: false } : { render: true, greyed: false, locked: false };
+      code === "91" ? { render: true, greyed: true, locked: false } : { render: true, greyed: false, locked: false };
     const prims = generatePlan(p, "eg", visible, categoryDisplay).primitives;
     const line = prims.find((pr) => pr.kind === "line" && pr.cls === "section-line") as
       | { greyed?: boolean }

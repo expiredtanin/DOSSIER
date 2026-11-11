@@ -9,7 +9,7 @@ const sq = (x0: number, y0: number, x1: number, y1: number): Pair[] => [[x0, y0]
 const area = (r: Pair[]) => Math.abs(r.reduce((s, p, i) => s + p[0] * r[(i + 1) % r.length][1] - r[(i + 1) % r.length][0] * p[1], 0) / 2);
 
 function withVoid(p: Project, v: Partial<ExtrudedSolid>): Project {
-  const solid: ExtrudedSolid = { id: "void1", type: "extrudedSolid", levelId: p.walls[0].floorId, operation: "subtract", height: 2, points: [], ...v };
+  const solid: ExtrudedSolid = { id: "void1", type: "extrudedSolid", categoryCode: "20", levelId: p.walls[0].floorId, operation: "subtract", height: 2, points: [], ...v };
   return { ...p, extrudedSolids: [...(p.extrudedSolids ?? []), solid] };
 }
 

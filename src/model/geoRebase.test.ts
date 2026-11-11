@@ -92,7 +92,7 @@ describe("translateProject", () => {
   it("Extrusion: points + Kreis-Mitte verschieben sich", () => {
     const solid: ExtrudedSolid = {
       id: "EX1",
-      type: "extrudedSolid",
+      type: "extrudedSolid", categoryCode: "20",
       levelId: "eg",
       points: [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }],
       height: 1,

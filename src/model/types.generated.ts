@@ -1288,6 +1288,10 @@ export type ExtrudedSolid = {
   /** Geschoss, dessen `baseElevation` die UK des Körpers bestimmt. */
   levelId: string;
   /**
+   * [180] Klasse (Ebene/Kategorie) wie bei jedem Bauteil: Sichtbarkeit in Grundriss, Schnitt und Ansicht.
+   */
+  categoryCode: string;
+  /**
    * Geschlossenes Profil in der XY-Ebene (Grundriss), ≥3 Punkte. Bei einem
    * Kreis-Profil (`circle` gesetzt) eine Tessellierung des Kreises (48-Eck) —
    * für 2D-Footprint/Auswahl/bbox/Verschieben; die 3D-Extrusion nutzt in dem

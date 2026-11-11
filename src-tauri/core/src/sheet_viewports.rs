@@ -252,7 +252,9 @@ fn section_view_buf(p: &Project, level: &DrawingLevel, snap: &ViewSnapshot, scal
     let mut b = rv.bounds().unwrap_or([0.0, 0.0, 1.0, 1.0]);
     // Automatische Koten: Ebene > [173] Modelldarstellung (Ausschnitt, sonst Ebene) > an.
     let mv_id = crate::plan::model_view::selected_id(p, &level.id, args.model_view.as_deref());
-    let marks_on = crate::plan::model_view::for_view(p, mv_id, crate::plan::style::Detail::Mittel, scale).level_marks(level.level_marks);
+    // [180] … und nur mit sichtbarer Klasse „Höhenkoten".
+    let marks_on = crate::plan::model_view::for_view(p, mv_id, crate::plan::style::Detail::Mittel, scale).level_marks(level.level_marks)
+        && crate::standards::derived_visible(p, crate::standards::LEVEL_MARK_CATEGORY, |k| args.show.contains(k));
     let own_buf = plan_domains_buf(p, &PlanArgs { global: false, ..args }).ok()?;
     let ov = crate::plan::buf::View::parse(&own_buf)?;
     let own = ov.prims().unwrap_or_default();

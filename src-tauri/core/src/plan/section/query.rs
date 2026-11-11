@@ -118,7 +118,7 @@ pub fn section_plan_buf(p: &Project, args: &[f64], text: &str) -> Result<Vec<u8>
         .flat_map(|(l, s)| {
             let off = s.as_ref().map_or(0.0, |s| s.offset);
             let b = if off == 0.0 { bounds } else { [bounds[0] - off, bounds[1], bounds[2] - off, bounds[3]] };
-            unfold::clip_prims(crate::plan::grid_view::grid_prims(p, l, b, scale), s.as_ref())
+            unfold::clip_prims(crate::plan::grid_view::grid_prims_in(p, l, b, scale, &vis), s.as_ref())
         })
         .collect();
     if !grid.is_empty() {

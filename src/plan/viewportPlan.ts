@@ -103,7 +103,7 @@ async function levelPlan(
   }
   if (!raw || raw.primitives.length === 0) return EMPTY;
   const own = generatePlan(project, level.id, visibleCodes, undefined, detail, false, mono, false, scaleDenominator, forPrint, false, overrideRuleIds);
-  const marks = levelMarksEnabled(level, project) ? levelMarkerPrimitives(project, raw.bounds, raw.primitives) : [];
+  const marks = levelMarksEnabled(level, project, (c) => visibleCodes.has(c)) ? levelMarkerPrimitives(project, raw.bounds, raw.primitives) : [];
   const b = { ...raw.bounds };
   const grow = (x: number, y: number) => {
     b.minX = Math.min(b.minX, x);

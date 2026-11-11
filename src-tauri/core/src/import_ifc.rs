@@ -25,6 +25,8 @@ const COLUMN_CATEGORY: &str = "50";
 const ROOM_CATEGORY: &str = "60";
 const ROOF_CATEGORY: &str = "35";
 const STAIR_CATEGORY: &str = "40";
+/// [180] Träger (Extrusionskörper) wie „35 Träger" der Musterprojekte.
+const BEAM_CATEGORY: &str = "35";
 const ROOM_COLOR: &str = "#6b7280";
 const SIA: [&str; 6] = ["HNF", "NNF", "VF", "FF", "KGF", "AGF"];
 const LEVEL_TOL: f64 = 0.005;
@@ -957,7 +959,7 @@ fn elements_ops(root: &Map<String, Value>, meta: &Value, products: &[IfcProduct]
     for b in &el.beams {
         let (fid, base, _) = floor_of(&mut ctx, b.info.storey, b.z0);
         let mut v = json!({
-            "id": ctx.new_id("solid"), "type": "extrudedSolid", "levelId": fid,
+            "id": ctx.new_id("solid"), "type": "extrudedSolid", "levelId": fid, "categoryCode": BEAM_CATEGORY,
             "points": b.outline.iter().map(|&p| mv(p)).collect::<Vec<_>>(), "height": js_num(round(b.z1 - b.z0, 1e-6)),
         });
         let off = anchor_offset(b.z0, base);

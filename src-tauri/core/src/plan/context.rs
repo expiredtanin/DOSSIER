@@ -12,7 +12,8 @@ use crate::model::*;
 const CONTEXT_LINE_COLOR: &str = "#9aa3ad";
 const CONTEXT_LINE_MM: f64 = 0.1;
 /// Kategorie der Schnittführungs-Symbole (Referenzen).
-const SECTION_LINE_CATEGORY: &str = "90";
+/// [180] Schnitt-/Ansichtsmarken liegen auf der Standard-Klasse „Schnittmarken" (früher „90 Referenzen").
+const SECTION_LINE_CATEGORY: &str = crate::standards::SECTION_MARK_CATEGORY;
 const SECTION_LINE_INK: &str = "#1f242c";
 const SECTION_LINE_MM: f64 = 0.18;
 /// [176] Kräftige Endstücke und Blickrichtungs-Schenkel.
@@ -878,7 +879,7 @@ fn view_marker(c: &Ctx, level: &DrawingLevel, p0: Vec2, p1: Vec2, sign: f64, k: 
 
 /// Schnittführungs-Symbole aller Schnitt-/Ansichtsebenen mit Linie (`addSectionLines`).
 pub fn plan_section_lines(c: &Ctx, out: &mut Vec<Primitive>) {
-    if !c.shown(SECTION_LINE_CATEGORY) {
+    if !c.derived_shown(SECTION_LINE_CATEGORY) {
         return;
     }
     // Auf freien Zeichnungsebenen (Blätter wie „Raumprogramm", Detail) gehören die Symbole nicht hin:

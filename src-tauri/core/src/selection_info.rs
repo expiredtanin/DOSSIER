@@ -1031,7 +1031,8 @@ fn solid_selection(root: &Map<String, Value>, s: &Value) -> J {
     O::default()
         .s("kind", "extrudedSolid")
         .raw("id", s, "id")
-        .s("categoryCode", "")
+        // [180] Klasse wie jedes Bauteil (im Kopf der Objekt-Info änderbar).
+        .s("categoryCode", str_of(field(s, "categoryCode")).unwrap_or(""))
         .raw("floorId", s, "levelId")
         .s("color", EXTRUSION_COLOR)
         .n("weightMm", WALL_FALLBACK_MM)

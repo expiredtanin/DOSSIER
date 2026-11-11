@@ -96,7 +96,7 @@ function fixtureProject(): Project {
   const extrudedSolids: ExtrudedSolid[] = [
     {
       id: "E1",
-      type: "extrudedSolid",
+      type: "extrudedSolid", categoryCode: "20",
       levelId: "eg",
       points: [
         { x: 0, y: 0 },
