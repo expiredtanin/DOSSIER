@@ -3,6 +3,7 @@
 //! `section_plan_buf()` (`query.rs`).
 
 use super::*;
+use crate::plan::model_view::{Options, SectionLook};
 
 const OPENING_INK: &str = "#1f242c";
 const FRAME_MM: f64 = 0.25;
@@ -102,7 +103,8 @@ pub(crate) fn sashes_of_window_type(wt: &WindowType) -> Vec<crate::opening_geom:
     (0..n).map(|_| crate::opening_geom::Sash { post: false, auto_width: true, width: f64::NAN, post_width: f64::NAN, operable }).collect()
 }
 
-fn window_cut(p: &Project, wall: &Wall, o: &Opening, c: &CrossSection, detail: bool) -> Result<Vec<Primitive>, String> {
+fn window_cut(p: &Project, wall: &Wall, o: &Opening, c: &CrossSection, look: SectionLook, shading_box: bool) -> Result<Vec<Primitive>, String> {
+    let full = look == SectionLook::Full;
     let wt = p.window_type(o);
     let fw = max(0.02, wt.and_then(|t| t.frame_width).unwrap_or(DEFAULT_FRAME_WIDTH));
     let (_, n) = axis_frame(wall);
@@ -171,9 +173,20 @@ fn window_cut(p: &Project, wall: &Wall, o: &Opening, c: &CrossSection, detail: b
     let (sp, sh) = det.as_ref().map_or((0.0, 0.0), |f| (min(f.sill_profile, h / 4.0), min(f.shading_profile, h / 4.0)));
     let (fwb, fwt) = det.as_ref().map_or((fwv, fwv), |f| (min(max(0.02, f.sides.bottom), h / 3.0), min(max(0.02, f.sides.top), h / 3.0)));
     let mut out = vec![opening_poly(rect(c.u_at(c.face_min), c.u_at(c.face_max), c.z_bottom, c.z_top), false, &o.id)];
-    // [173] Ohne Detail (Modelldarstellung): Rahmen oben/unten und eine Glaslinie, kein Sturz, keine
-    // Fensterbank, kein Kämpfer, keine Storen.
-    if !detail {
+    // [184] Grob: Leibungen offen (Wandschnitt) und ein Strich in der Rahmenmitte, kein Profil, kein Sturz,
+    // keine Fensterbank, keine Storen: nur der Strich.
+    if look == SectionLook::Line {
+        let u = (u0 + u1) / 2.0;
+        let mut l = line(v2(u, c.z_bottom), v2(u, c.z_top), "section-window-glass", GLASS_MM, OPENING_INK);
+        if let Primitive::Line { opening_id, .. } = &mut l {
+            *opening_id = Some(o.id.clone());
+        }
+        out.push(l);
+        return Ok(out);
+    }
+    // [184] Mittel: einfacher Rahmen (Rechteck oben/unten) und eine Glaslinie; Fensterbank als einfache Fläche,
+    // kein Sturz, kein Kämpfer.
+    if !full {
         out.push(opening_poly(rect(u0, u1, c.z_bottom, c.z_bottom + fwv), true, &o.id));
         out.push(opening_poly(rect(u0, u1, c.z_top - fwv, c.z_top), true, &o.id));
         let u = (u0 + u1) / 2.0;
@@ -182,6 +195,7 @@ fn window_cut(p: &Project, wall: &Wall, o: &Opening, c: &CrossSection, detail: b
             *opening_id = Some(o.id.clone());
         }
         out.push(l);
+        sill_and_shading(&mut out, p, o, c, (f_min, f_max), look, shading_box);
         return Ok(out);
     }
     let (zb0, zt0) = (c.z_bottom + sp, c.z_top - sh);
@@ -225,43 +239,62 @@ fn window_cut(p: &Project, wall: &Wall, o: &Opening, c: &CrossSection, detail: b
         }
     }
     if let Some(t) = wt {
-        // Formöffnung ([G3]): kein Sturz-Querschnitt, kein Storenkasten (Bogen/Schräge statt Sturz).
-        let shaped = crate::opening_shape::is_shaped(o);
-        let shading = t.shading.as_ref().filter(|s| s.create && !shaped);
-        let sturz_box = shading.filter(|s| s.mount == Some(WindowShadingMount::Sturz)).map_or(0.0, |s| max(0.0, s.r#box.depth));
-        if !shaped {
-            lintel_cut(&mut out, o, c, t.lintel_height, sturz_box);
+        // Formöffnung ([G3]): kein Sturz-Querschnitt (Bogen/Schräge statt Sturz).
+        if !crate::opening_shape::is_shaped(o) {
+            lintel_cut(&mut out, o, c, t.lintel_height, sturz_box_depth(t, o, shading_box));
         }
-        // Fensterbänke nur bei ausdrücklicher Wahl (bisherige Schnitte bleiben gleich).
-        let zb = c.z_bottom;
+    }
+    sill_and_shading(&mut out, p, o, c, (f_min, f_max), look, shading_box);
+    Ok(out)
+}
+
+/// Tiefe des Storenkastens im Sturz (ab der Aussenfläche in die Wand), 0 = keiner (Option "Storenkasten" aus,
+/// Formöffnung oder Kasten vorgesetzt).
+fn sturz_box_depth(t: &WindowType, o: &Opening, shading_box: bool) -> f64 {
+    let shading = t.shading.as_ref().filter(|s| s.create && shading_box && !crate::opening_shape::is_shaped(o));
+    shading.filter(|s| s.mount == Some(WindowShadingMount::Sturz)).map_or(0.0, |s| max(0.0, s.r#box.depth))
+}
+
+/// Fensterbaenke und Storenkasten im Schnitt. Fensterbaenke nur bei ausdruecklicher Wahl am Typ: fein mit Gefaelle,
+/// sonst als einfache Flaeche. Der Storenkasten nur mit der Option "Storenkasten" der Modelldarstellung (Basis aus,
+/// wie im Grundriss, [184]).
+fn sill_and_shading(out: &mut Vec<Primitive>, p: &Project, o: &Opening, c: &CrossSection, frame: (f64, f64), look: SectionLook, shading_box: bool) {
+    let (f_min, f_max) = frame;
+    let Some(t) = p.window_type(o) else { return };
+    let zb = c.z_bottom;
+    // Grob: keine Fensterbank (Wandschnitt genuegt).
+    if look != SectionLook::Line {
         if matches!(t.sill_board, Some(WindowTypeSillBoard::Aussen | WindowTypeSillBoard::Beide)) {
-            // Aussen: mit Gefälle, bis 4 cm vor die Aussenfläche.
+            // Aussen: bis 4 cm vor die Aussenfläche, fein mit Gefälle.
             let out_s = min(f_min, c.face_min) - 0.04;
-            let pts = vec![v2(c.u_at(f_min), zb), v2(c.u_at(out_s), zb - 0.015), v2(c.u_at(out_s), zb - 0.045), v2(c.u_at(f_min), zb - 0.03)];
+            let pts = if look == SectionLook::Full {
+                vec![v2(c.u_at(f_min), zb), v2(c.u_at(out_s), zb - 0.015), v2(c.u_at(out_s), zb - 0.045), v2(c.u_at(f_min), zb - 0.03)]
+            } else {
+                rect(c.u_at(f_min), c.u_at(out_s), zb - 0.03, zb)
+            };
             out.push(opening_poly(pts, true, &o.id));
         }
         if matches!(t.sill_board, Some(WindowTypeSillBoard::Innen | WindowTypeSillBoard::Beide)) {
             let in_s = max(f_max, c.face_max) + 0.02;
             out.push(opening_poly(rect(c.u_at(f_max), c.u_at(in_s), zb - 0.025, zb), true, &o.id));
         }
-        if let Some(sh) = shading {
-            let h = max(0.0, sh.r#box.height);
-            let d = max(0.0, sh.r#box.depth);
-            if h > 1e-4 && d > 1e-4 {
-                // Im Sturz: ab der Aussenfläche in die Wand; vorgesetzt: vor der Rahmen-Vorderkante.
-                let (s0, s1) = if sturz_box > 0.0 { (c.face_min, c.face_min + d) } else { (f_min - d, f_min) };
-                out.push(opening_poly(rect(c.u_at(s0), c.u_at(s1), c.z_top, c.z_top + h), true, &o.id));
-                // Lamellen-/Rollpaket im Kasten.
-                let m = min(0.02, d / 4.0);
-                let mut pack = polygon(rect(c.u_at(s0 + m), c.u_at(s1 - m), c.z_top + m, c.z_top + h * 0.6), SHADING_PACK_FILL, OPENING_INK, crate::plan::style::SYMBOL_LINE_MM, no_hatch_base());
-                if let Primitive::Polygon { opening_id, .. } = &mut pack {
-                    *opening_id = Some(o.id.clone());
-                }
-                out.push(pack);
-            }
-        }
     }
-    Ok(out)
+    let Some(sh) = t.shading.as_ref().filter(|s| s.create && shading_box && !crate::opening_shape::is_shaped(o)) else { return };
+    let sturz = sh.mount == Some(WindowShadingMount::Sturz);
+    let h = max(0.0, sh.r#box.height);
+    let d = max(0.0, sh.r#box.depth);
+    if h > 1e-4 && d > 1e-4 {
+        // Im Sturz: ab der Aussenfläche in die Wand; vorgesetzt: vor der Rahmen-Vorderkante.
+        let (s0, s1) = if sturz { (c.face_min, c.face_min + d) } else { (f_min - d, f_min) };
+        out.push(opening_poly(rect(c.u_at(s0), c.u_at(s1), c.z_top, c.z_top + h), true, &o.id));
+        // Lamellen-/Rollpaket im Kasten.
+        let m = min(0.02, d / 4.0);
+        let mut pack = polygon(rect(c.u_at(s0 + m), c.u_at(s1 - m), c.z_top + m, c.z_top + h * 0.6), SHADING_PACK_FILL, OPENING_INK, crate::plan::style::SYMBOL_LINE_MM, no_hatch_base());
+        if let Primitive::Polygon { opening_id, .. } = &mut pack {
+            *opening_id = Some(o.id.clone());
+        }
+        out.push(pack);
+    }
 }
 
 /// Sturz im Schnitt ([94]): eigener Querschnitt über der Öffnung (Beton grau), neben einem
@@ -282,14 +315,23 @@ fn lintel_cut(out: &mut Vec<Primitive>, o: &Opening, c: &CrossSection, height: O
     out.push(pr);
 }
 
-fn door_cut(p: &Project, o: &Opening, c: &CrossSection, detail: bool) -> Vec<Primitive> {
+fn door_cut(p: &Project, o: &Opening, c: &CrossSection, look: SectionLook) -> Vec<Primitive> {
     let mut out = vec![opening_poly(rect(c.u_at(c.face_min), c.u_at(c.face_max), c.z_bottom, c.z_top), false, &o.id)];
-    // [173] Ohne Detail (Modelldarstellung): nur das Blatt in der Wandmitte (Wandöffnung: nur die Lücke).
-    if !detail {
+    // [184] Ohne Detail (Modelldarstellung): grob das Blatt als Linie, mittel als Fläche, beide in der Wandmitte
+    // (Wandöffnung: nur die Lücke).
+    if look != SectionLook::Full {
         let kind = p.door_type(o).map(|t| t.kind);
         if o.door_type != Some(OpeningDoorType::Wandoeffnung) && kind != Some(DoorTypeKind::Wandoeffnung) {
             let mid = (c.face_min + c.face_max) / 2.0;
-            out.push(opening_poly(rect(c.u_at(mid - DOOR_LEAF_THICKNESS / 2.0), c.u_at(mid + DOOR_LEAF_THICKNESS / 2.0), c.z_bottom + 0.01, c.z_top), true, &o.id));
+            if look == SectionLook::Line {
+                let mut l = line(v2(c.u_at(mid), c.z_bottom), v2(c.u_at(mid), c.z_top), "section-window-glass", GLASS_MM, OPENING_INK);
+                if let Primitive::Line { opening_id, .. } = &mut l {
+                    *opening_id = Some(o.id.clone());
+                }
+                out.push(l);
+            } else {
+                out.push(opening_poly(rect(c.u_at(mid - DOOR_LEAF_THICKNESS / 2.0), c.u_at(mid + DOOR_LEAF_THICKNESS / 2.0), c.z_bottom + 0.01, c.z_top), true, &o.id));
+            }
         }
         return out;
     }
@@ -357,13 +399,17 @@ fn door_frame_cut(out: &mut Vec<Primitive>, o: &Opening, c: &CrossSection, df: &
 }
 
 /// `sectionOpeningPrimitives`.
+#[cfg(test)]
 pub fn section_opening_primitives(p: &Project, level: &LevelSpec, vis: &Visibility) -> Result<Vec<Primitive>, String> {
-    section_opening_primitives_mv(p, level, vis, true, true)
+    let mut o = crate::plan::model_view::resolve(None, crate::plan::style::Detail::Fein, 50.0);
+    o.window.shading_box = true;
+    section_opening_primitives_mv(p, level, vis, &o)
 }
 
-/// [173] Wie [`section_opening_primitives`] mit dem Detail der Modelldarstellung: `doors`/`windows` = Zarge,
-/// Sturz, Kämpfer, Fensterbank und Storen zeigen (sonst nur Blatt bzw. Rahmen und Glas).
-pub fn section_opening_primitives_mv(p: &Project, level: &LevelSpec, vis: &Visibility, doors: bool, windows: bool) -> Result<Vec<Primitive>, String> {
+/// [173]/[184] Geschnittene Öffnungen nach der Modelldarstellung `mv` (Detailgrad wie im Grundriss, Rangfolge Element >
+/// Stufe > Basis, EINE Auflösung `Options::section_look`): grob Linie, mittel einfacher Rahmen, fein volles Profil;
+/// Storenkasten nach `windows.shadingBox`.
+pub fn section_opening_primitives_mv(p: &Project, level: &LevelSpec, vis: &Visibility, mv: &Options) -> Result<Vec<Primitive>, String> {
     let Some(plane) = level.plane() else { return Ok(Vec::new()) };
     if level.kind != "section" {
         return Ok(Vec::new());
@@ -403,7 +449,7 @@ pub fn section_opening_primitives_mv(p: &Project, level: &LevelSpec, vis: &Visib
             None => (wall, o),
         };
         let Some(c) = cross_section(p, wall, o, p0, u)? else { continue };
-        let prims = if o.kind == ElementKind::Window { window_cut(p, wall, o, &c, windows)? } else { door_cut(p, o, &c, doors) };
+        let prims = if o.kind == ElementKind::Window { window_cut(p, wall, o, &c, mv.section_look(false, o.detail_level), mv.window.shading_box)? } else { door_cut(p, o, &c, mv.section_look(true, o.detail_level)) };
         let greyed = vis.greyed(&o.category_code);
         for pr in prims {
             out.push(if greyed { pr.with_greyed(true) } else { pr });

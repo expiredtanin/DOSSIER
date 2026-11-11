@@ -641,7 +641,7 @@ fn opening_symbol(c: &Ctx, out: &mut Vec<Primitive>, w: &Wall, o: &Opening, colo
     // [173] Modelldarstellung (bei eigenem Detailgrad der Öffnung über deren Basis).
     let mo = c.mv_for(detail);
     // [173] Fenster „vereinfacht" (3 Linien): wie grob, auch bei mittel/fein.
-    let detail = if !door && mo.window.simplified { Detail::Grob } else { detail };
+    let detail = mo.opening_detail(door, None);
     let detail_code = match detail {
         // [140] Übersicht (1:500 und kleiner): Türen ohne Aufschlag-Bogen (ausser die Modelldarstellung will ihn).
         Detail::Grob if c.a.scale >= super::domains::OVERVIEW_FROM && mo.door.swing_arc != Some(true) => -1.0,
@@ -1159,12 +1159,7 @@ pub fn plan_walls(c: &Ctx, reference_lines: bool, out: &mut Vec<Primitive>, boun
             let ov = c.overrides(Some("opening"), &o.category_code, Some(&opening_label(o)));
             let olw = ov.lineweight.unwrap_or_else(|| c.cat(&o.category_code).map_or(LAYER_LINE_MM, |k| k.lw));
             let color = ov.color.as_deref().or(o.color.as_deref());
-            let detail = match o.detail_level {
-                Some(DetailLevel::Grob) => Detail::Grob,
-                Some(DetailLevel::Mittel) => Detail::Mittel,
-                Some(DetailLevel::Fein) => Detail::Fein,
-                _ => c.a.detail,
-            };
+            let detail = c.mv().element_detail(o.detail_level);
             let wall_line = (e.color.as_deref().unwrap_or(POCHE_STROKE), lw * c.a.detail.outline_factor());
             let mut tmp = Vec::new();
             opening_symbol(c, &mut tmp, wv, o, color, c.greyed(&o.category_code), detail, olw, wall_line)?;
