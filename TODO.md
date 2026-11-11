@@ -73,8 +73,18 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   (`compute_section_vis`: Schnittbänder, Körper, Netze, HLR-Flächen), Schnitt-Cache mit den ausgeblendeten Klassen im
   Schlüssel; Ansicht: ausgeblendete Dächer kappen keine Wände mehr (`cull_under_roofs`); grau verdeckt weiter. Tests
   `section/tests.rs` (`ausgeblendete_klasse_verdeckt_nicht`, `schnitt_cache_kennt_ausgeblendete_klassen`); Golden
-  Schnitt A komplex (Carport-Dachlinie ohne Lücken bei Klasse 25 aus). Offen: 3D (render3d-Teile, Pick) filtert nur
-  Kontext-Netze nach Klasse (`p.layers`), Wände/Decken/Dächer/Stützen nicht; nicht in der Tauri-App/auf dem Mac geprüft. · M
+  Schnitt A komplex (Carport-Dachlinie ohne Lücken bei Klasse 25 aus).
+  3D (11.11.): jedes Teil kennt sein Element (`RMesh`/`RRoofLayer.owner`, Wände/Decken/Treppen über ihre id), Filter
+  `model3d::ClassFilter` (Ebenen-Baum samt Elternklassen, dazu `hide` = was der Darstellungsmodus nicht zeichnet) NACH
+  dem Cache: Wände, Öffnungen (auch mit dem Wirt), Decken, Dächer, Stützen, Bäume, Treppen samt Geländer, Kontext,
+  2D-Spuren, Flächenmuster, truck-Körper fehlen in Viewer, Explosion, Pick und `model3dParts` (CLI `model3d`);
+  `layers` zählt im 3D-Cache nicht als globale Änderung, Teil-Updates halten ausgeblendete Einträge (`wallKeep`/
+  `openingKeep`), Öffnungs-Varianten je Wand gemerkt; Schatten im 3D nach `08`, zulässige Hülle nach `01`. Tests
+  `model3d/classes.rs`, `model3d_cache.rs::class_filter_without_rebuild`, `src/plan/toWalls3d.classes.test.ts`.
+  Offen: grau im 3D noch nicht
+  gedämpft (render3d hat nur `set_ghost` für die Hülle); natives Mac-3D-Fenster bekommt nur den Ebenen-Baum, nicht
+  den Darstellungsmodus; Datei-Exporte (OBJ/glTF/IFC/STEP) bleiben vollständig; kein e2e (3D-Pick headless unzuverlässig);
+  nicht in der Tauri-App/auf dem Mac geprüft. · M
 - ◐ **[133]** Musterhaus komplex: Rest. Skalieren-Kopie lässt `position`/Breite unverändert; Vollflächen-/Bildschraffur
   und Schraffur-Löcher beim Ausbreiten fehlen (`src/export/planToSvgString.ts`, Kern `plan/svg.rs`; wegen paralleler
   Arbeit an `svg.rs` (Bögen) am 10.11. nicht angefasst). (10.11.: Skalieren skaliert `position`/`width` der Wandöffnungen

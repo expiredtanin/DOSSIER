@@ -33,7 +33,7 @@
 //   dossier-cli <projekt.obp> erkennen [--level EG] [--source ebene] [--out neu.obp]
 //                                                  [154] Bauteile aus 2D-Zeichnung erkennen (Wände, Öffnungen, Räume
 //                                                  ins Geschoss); Bericht als JSON. Z. B. convert plan.dxf p.obp --cmd "erkennen --out e.obp"
-//   dossier-cli <projekt.obp> model3d [--explode 3] [--out modell.json]   3D-Modell fürs Headless-Rendern (render_png)
+//   dossier-cli <projekt.obp> model3d [--explode 3] [--hide …] [--out modell.json]   3D-Modell fürs Headless-Rendern (render_png)
 //   dossier-cli pointcloud-info <datei.las|laz|e57|ply|xyz|pts> [--voxel 0.05] [--max 2000000]
 //                                                  Punktwolke lesen ([B9]) und Bericht als JSON (ohne Projekt)
 //   dossier-cli pdf-info <datei.pdf> [--page 1]    Vektor-PDF lesen ([76]): Seiten, Pfade, Texte, BBox (pt) als JSON
@@ -231,12 +231,9 @@ function templateFor(project: Project, levelId: string, args: Args): ViewTemplat
   return linkedViewTemplate(project, project.drawingLevels.find((l) => l.id === levelId));
 }
 
-/** Darstellung einer Ebene nach Vorlage und Aufruf: ausdrückliche Optionen (`--scale`, `--color`) gehen vor. */
-function templateView(project: Project, levelId: string, args: Args, allCodes: Set<string>) {
-  const tpl = templateFor(project, levelId, args);
-  const d = templateDisplay(tpl);
-  const hidden = new Set(d.hiddenCodes);
-  // [180] --hide <Code|Name,…>: Klassen ausblenden (z. B. --hide "Schatten,Auto-Bemassung").
+/** [180] --hide <Code|Name,…>: Klassen ausblenden (z. B. --hide "Schatten,Auto-Bemassung"); Codes. */
+function hideFlagCodes(project: Project, args: Args): string[] {
+  const out: string[] = [];
   for (const w of (args.flags.get("hide") ?? "").split(",").map((x) => x.trim().toLowerCase()).filter(Boolean)) {
     const find = (ls: Project["layers"]): string | undefined => {
       for (const l of ls) {
@@ -248,8 +245,17 @@ function templateView(project: Project, levelId: string, args: Args, allCodes: S
     };
     const code = find(project.layers);
     if (!code) fail(`Klasse nicht gefunden: ${w}`);
-    hidden.add(code);
+    out.push(code);
   }
+  return out;
+}
+
+/** Darstellung einer Ebene nach Vorlage und Aufruf: ausdrückliche Optionen (`--scale`, `--color`) gehen vor. */
+function templateView(project: Project, levelId: string, args: Args, allCodes: Set<string>) {
+  const tpl = templateFor(project, levelId, args);
+  const d = templateDisplay(tpl);
+  const hidden = new Set(d.hiddenCodes);
+  for (const code of hideFlagCodes(project, args)) hidden.add(code);
   return {
     tpl,
     detail: d.detail,
@@ -977,8 +983,8 @@ async function execute(project: Project, file: string, command: string, rest: st
       await serveStdio(file);
       return 0;
     case "model3d":
-      // `--explode <m>`: Explosionsaxonometrie ([65]), Geschosse um Index × Abstand angehoben.
-      out(args, JSON.stringify(projectToModel3d(project, { explode: Number(args.flags.get("explode") ?? 0) || 0 })), `${project.name || "projekt"}.model3d.json`);
+      // `--explode <m>`: Explosionsaxonometrie ([65]), Geschosse um Index × Abstand angehoben. `--hide`: Klassen aus ([180]).
+      out(args, JSON.stringify(projectToModel3d(project, { explode: Number(args.flags.get("explode") ?? 0) || 0, hide: hideFlagCodes(project, args) })), `${project.name || "projekt"}.model3d.json`);
       return 0;
     case "bench": {
       const runs = Number(args.flags.get("runs") ?? 10);

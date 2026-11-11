@@ -85,8 +85,10 @@ fn stair_slabs(stairs: &[(usize, &Stair)], slabs: Vec<crate::stairs3d::Slab>) ->
         .collect()
 }
 
-fn meshes_of(meshes: Vec<crate::mesh3d::Mesh>, color: Rgb) -> Vec<RMesh> {
+/// `owner`: Treppe (Index in `p.stairs`) eines Netzes aus seinem `src` ([180] Klassen-Filter).
+fn meshes_of(meshes: Vec<crate::mesh3d::Mesh>, color: Rgb, owner: impl Fn(usize) -> Option<usize>) -> Vec<RMesh> {
     meshes.into_iter().map(|m| RMesh {
+                    owner: owner(m.src).map_or(Owner::None, Owner::Stair),
                     crease_angle: None, positions: m.positions, indices: m.indices, kind: "extrusion", color, vertex_colors: None, material_index: None }).collect()
 }
 
@@ -94,7 +96,7 @@ fn meshes_of(meshes: Vec<crate::mesh3d::Mesh>, color: Rgb) -> Vec<RMesh> {
 /// von Wendeltreppen (`emitStairMeshes`).
 pub fn emit_stair_meshes(p: &Project) -> Vec<RMesh> {
     match stair_input(p, |s, st| st.is_some_and(|t| t.structure == StairTypeStructure::Beton) && s.shape != StairShape::Unknown) {
-        Some((_, buf)) => meshes_of(crate::stairs3d::slab_meshes(&buf), stair_rgb()),
+        Some((stairs, buf)) => meshes_of(crate::stairs3d::slab_meshes(&buf), stair_rgb(), |i| stairs.get(i).map(|s| s.0)),
         None => vec![],
     }
 }
@@ -129,7 +131,7 @@ pub fn stair_view_meshes(p: &Project) -> Vec<(usize, crate::mesh3d::Mesh, bool)>
 /// Podesttreppen (L, U, gerade mit Podest) über die Podeste ([151]).
 pub fn emit_stair_handrails(p: &Project) -> Vec<RMesh> {
     match stair_input(p, |s, st| s.shape != StairShape::Unknown && st.and_then(|t| t.railing).is_some_and(|r| r != StairTypeRailing::Keine)) {
-        Some((_, buf)) => meshes_of(crate::stairs3d::railings(&buf), rail_rgb()),
+        Some((stairs, buf)) => meshes_of(crate::stairs3d::railings(&buf), rail_rgb(), |i| stairs.get(i).map(|s| s.0)),
         None => vec![],
     }
 }
@@ -162,12 +164,19 @@ pub fn stair_guard_meshes_by_floor(p: &Project) -> Vec<(usize, String, crate::me
 
 /// Absturzsicherungen, die auf dem Geschoss `floor_id` stehen (Körper wie in [`emit_stair_railings`]).
 pub fn emit_stair_guards_on(p: &Project, floor_id: &str) -> Vec<RMesh> {
-    meshes_of(stair_guard_meshes_by_floor(p).into_iter().filter(|(_, f, _)| f == floor_id).map(|(_, _, m)| m).collect(), rail_rgb())
+    guard_meshes(stair_guard_meshes_by_floor(p).into_iter().filter(|(_, f, _)| f == floor_id).map(|(si, _, m)| (si, m)).collect())
 }
 
 /// Handlauf, Pfosten und Absturzsicherung der Treppen (`emitStairRailings`).
 pub fn emit_stair_railings(p: &Project) -> Vec<RMesh> {
     let mut out = emit_stair_handrails(p);
-    out.extend(meshes_of(stair_guard_meshes(p).into_iter().map(|(_, m)| m).collect(), rail_rgb()));
+    out.extend(guard_meshes(stair_guard_meshes(p)));
     out
+}
+
+/// Absturzsicherungen je Treppe (Index in `p.stairs`) als `RMesh`.
+fn guard_meshes(v: Vec<(usize, crate::mesh3d::Mesh)>) -> Vec<RMesh> {
+    let owners: Vec<usize> = v.iter().map(|(si, _)| *si).collect();
+    let meshes = v.into_iter().enumerate().map(|(k, (_, m))| crate::mesh3d::Mesh { src: k, ..m }).collect();
+    meshes_of(meshes, rail_rgb(), |k| owners.get(k).copied())
 }

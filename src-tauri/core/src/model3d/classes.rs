@@ -1,0 +1,270 @@
+//! [180] Klassen im 3D: jedes 3D-Teil gehört zum Element, aus dem es stammt, und verschwindet mit dessen
+//! Klasse (`categoryCode`). Ausgeblendet ist eine Klasse, wenn sie selbst oder eine Elternklasse im
+//! Ebenen-Baum aus ist (`LayerCategory.visible`; Ebenen-Kombinationen und Vorlagen setzen dieselben
+//! Schalter) oder der Aufrufer sie nicht zeichnet (`norender` des Darstellungsmodus, `text` =
+//! `{"hide": [codes]}`). Gefiltert wird beim Ausgeben, nicht beim Rechnen: Der 3D-Cache bleibt
+//! klassenunabhängig (`model3d_cache.rs`), Umschalten rechnet keine Wand neu.
+//!
+//! Öffnungs-Einbauteile werden je Wand gemeinsam gerechnet (ohne Zuordnung zur Öffnung): dort wirkt der
+//! Filter auf die Eingabe (nur sichtbare Öffnungen, [`ClassFilter::keep_opening`]); das Loch in der Wand
+//! bleibt. Eine Öffnung verschwindet auch mit ihrem Wirt (Wand, Dach, Decke), wie in der Ansicht.
+
+use super::*;
+use std::collections::HashSet;
+
+/// Herkunft eines `RMesh`/`RRoofLayer` (nur im Kern, nicht serialisiert): Index in der Element-Liste.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Owner {
+    #[default]
+    None,
+    Roof(usize),
+    Column(usize),
+    Tree(usize),
+    Stair(usize),
+    Context(usize),
+}
+
+impl Owner {
+    /// Element-id der Herkunft.
+    pub fn id<'a>(&self, p: &'a Project) -> Option<&'a str> {
+        fn at<T>(v: &Option<Vec<T>>, i: usize) -> Option<&T> {
+            v.as_deref().and_then(|v| v.get(i))
+        }
+        match *self {
+            Owner::None => None,
+            Owner::Roof(i) => at(&p.roofs, i).map(|e| e.id.as_str()),
+            Owner::Column(i) => at(&p.columns, i).map(|e| e.id.as_str()),
+            Owner::Tree(i) => at(&p.trees, i).map(|e| e.id.as_str()),
+            Owner::Stair(i) => at(&p.stairs, i).map(|e| e.id.as_str()),
+            Owner::Context(i) => at(&p.context, i).map(|e| e.id()),
+        }
+    }
+}
+
+/// Ausgeblendete Klassen und die ids der Elemente darauf.
+#[derive(Debug, Clone, Default)]
+pub struct ClassFilter {
+    codes: HashSet<String>,
+    ids: HashSet<String>,
+}
+
+impl ClassFilter {
+    /// Nichts ausgeblendet.
+    pub fn none() -> ClassFilter {
+        ClassFilter::default()
+    }
+
+    /// Ebenen-Baum des Projekts plus die Codes `extra` (Darstellungsmodus des Aufrufers).
+    pub fn new(p: &Project, extra: &[String]) -> ClassFilter {
+        let mut codes: HashSet<String> = hidden_category_codes(&p.layers).into_iter().map(String::from).collect();
+        codes.extend(extra.iter().cloned());
+        let mut ids = HashSet::new();
+        if codes.is_empty() {
+            return ClassFilter { codes, ids };
+        }
+        let mut add = |code: &str, id: &str| {
+            if codes.contains(code) {
+                ids.insert(id.to_owned());
+            }
+        };
+        for w in &p.walls {
+            add(&w.category_code, &w.id);
+        }
+        for c in p.ceilings.as_deref().unwrap_or(&[]) {
+            add(&c.category_code, &c.id);
+        }
+        for r in p.roofs.as_deref().unwrap_or(&[]) {
+            add(&r.category_code, &r.id);
+        }
+        for s in p.stairs.as_deref().unwrap_or(&[]) {
+            add(&s.category_code, &s.id);
+        }
+        for c in p.columns.as_deref().unwrap_or(&[]) {
+            add(&c.category_code, &c.id);
+        }
+        for t in p.trees.as_deref().unwrap_or(&[]) {
+            add(&t.category_code, &t.id);
+        }
+        for s in p.extruded_solids.as_deref().unwrap_or(&[]) {
+            add(&s.category_code, &s.id);
+        }
+        for c in p.context.as_deref().unwrap_or(&[]) {
+            add(c.category_code(), c.id());
+        }
+        for d in &p.drawings2d {
+            add(&d.category_code, &d.id);
+        }
+        // Öffnungen nach den Wirten (Wand, Dach, Decke), die jetzt schon in `ids` stehen.
+        let hidden_openings: Vec<String> = p
+            .openings
+            .as_deref()
+            .unwrap_or(&[])
+            .iter()
+            .filter(|o| codes.contains(&o.category_code) || ids.contains(&o.host_wall_id))
+            .map(|o| o.id.clone())
+            .collect();
+        ids.extend(hidden_openings);
+        ClassFilter { codes, ids }
+    }
+
+    /// `text` der 3D-Abfragen: `{"hide": [codes], …}` (fehlt/kein JSON: nur der Ebenen-Baum).
+    pub fn from_text(p: &Project, text: &str) -> ClassFilter {
+        let t = text.trim();
+        let extra: Vec<String> = if t.starts_with('{') {
+            serde_json::from_str::<serde_json::Value>(t)
+                .ok()
+                .and_then(|v| v.get("hide").and_then(|a| a.as_array()).map(|a| a.iter().filter_map(|s| s.as_str().map(String::from)).collect()))
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        ClassFilter::new(p, &extra)
+    }
+
+    /// Kein Element ausgeblendet.
+    pub fn is_empty(&self) -> bool {
+        self.ids.is_empty()
+    }
+
+    /// Klasse `code` ausgeblendet.
+    pub fn hides_code(&self, code: &str) -> bool {
+        self.codes.contains(code)
+    }
+
+    /// Element `id` ausgeblendet.
+    pub fn hides(&self, id: &str) -> bool {
+        self.ids.contains(id)
+    }
+
+    /// Öffnung sichtbar (eigene Klasse und Wirt).
+    pub fn keep_opening(&self, o: &Opening) -> bool {
+        !self.ids.contains(&o.id)
+    }
+
+    /// Teil mit Herkunft `o` (Index in den Listen von `p`) sichtbar.
+    pub fn keep_owner(&self, p: &Project, o: Owner) -> bool {
+        o.id(p).is_none_or(|id| !self.ids.contains(id))
+    }
+
+    /// Teile ohne die Wand-/Öffnungs-Einbauteile filtern (die filtert der Aufrufer, s. Modulkopf).
+    pub fn retain_rest(&self, p: &Project, parts: &mut Parts) {
+        if self.is_empty() {
+            return;
+        }
+        parts.slabs.retain(|s| !self.hides(&s.ceiling_id));
+        for list in [&mut parts.context_meshes, &mut parts.column_meshes, &mut parts.stair_meshes, &mut parts.stair_railings, &mut parts.roof_meshes] {
+            list.retain(|m| self.keep_owner(p, m.owner));
+        }
+        parts.roof_layers.retain(|l| self.keep_owner(p, l.owner));
+    }
+
+    /// Wandkörper filtern.
+    pub fn retain_walls(&self, parts: &mut Parts) {
+        if !self.is_empty() {
+            parts.walls.retain(|w| !self.hides(&w.wall_id));
+        }
+    }
+
+    /// Pick-Geometrie: ausgeblendete Elemente sind nicht anwählbar.
+    pub fn retain_pick(&self, g: &mut PickGeometry) {
+        if self.is_empty() {
+            return;
+        }
+        let k = |id: &str| !self.ids.contains(id);
+        g.walls.retain(|w| k(&w.wall_id));
+        g.slabs.retain(|s| k(&s.ceiling_id));
+        g.openings.retain(|o| k(&o.opening_id));
+        g.stairs.retain(|s| k(&s.stair_id));
+        g.roofs.retain(|r| k(&r.roof_id));
+        g.context_meshes.retain(|c| k(&c.context_object_id));
+        g.columns.retain(|c| k(&c.column_id));
+        g.solids.retain(|s| k(&s.solid_id));
+        g.opening_meshes.retain(|o| k(&o.opening_id));
+        g.drawings.retain(|d| k(&d.drawing_id));
+        g.stair_meshes.retain(|s| k(&s.stair_id));
+        g.drawing_meshes.retain(|d| k(&d.drawing_id));
+        g.trees.retain(|t| k(&t.tree_id));
+    }
+}
+
+/// Wie [`parts`], ohne die Teile ausgeblendeter Klassen.
+pub fn parts_filtered(p: &Project, layered: bool, detail: f64, for_section: bool, f: &ClassFilter) -> Result<Parts, String> {
+    let mut slabs = emit_slabs(p);
+    slabs.extend(emit_stairs(p, for_section));
+    let mut out = Parts {
+        walls: emit_walls(p, layered)?,
+        slabs,
+        context_meshes: emit_context_meshes(p),
+        column_meshes: {
+            let mut m = emit_columns(p);
+            m.extend(emit_trees(p));
+            m
+        },
+        opening_meshes: emit_opening_meshes_with(p, detail, &|o| f.keep_opening(o)),
+        stair_meshes: emit_stair_meshes(p),
+        stair_railings: emit_stair_railings(p),
+        roof_meshes: emit_roofs(p, None)?,
+        roof_layers: emit_roof_cut_layers(p)?,
+    };
+    f.retain_walls(&mut out);
+    f.retain_rest(p, &mut out);
+    Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Stütze (25), Baum (13), Treppe mit Geländer (35) und eine Linie (60) auf zwei Geschossen.
+    fn project(hidden: &[&str]) -> Project {
+        let layers: Vec<serde_json::Value> = ["25", "13", "35", "60"].iter().map(|c| serde_json::json!({"code": c, "name": c, "color": "#000000", "visible": !hidden.contains(c)})).collect();
+        serde_json::from_value(serde_json::json!({
+            "id": "p", "name": "t", "lineStyles": [], "hatches": [], "components": [], "wallTypes": [], "layers": layers, "openings": [], "walls": [],
+            "drawingLevels": [
+                {"id": "EG", "name": "EG", "kind": "floor", "visible": true, "locked": false, "floorHeight": 3.0, "baseElevation": 0.0},
+                {"id": "OG", "name": "OG", "kind": "floor", "visible": true, "locked": false, "floorHeight": 3.0, "baseElevation": 3.0}],
+            "columns": [{"id": "k1", "type": "column", "floorId": "OG", "categoryCode": "25", "position": {"x": 2, "y": 3}, "profile": {"kind": "rect", "width": 0.3, "depth": 0.3}, "rotation": 0, "height": 2.5}],
+            "trees": [{"id": "T1", "type": "tree", "floorId": "EG", "categoryCode": "13", "position": {"x": 20, "y": 5}, "trunkDiameter": 0.4, "crownDiameter": 6.0, "crownBase": 3.0, "height": 12.0}],
+            "stairTypes": [{"id": "t", "name": "T", "structure": "massiv", "closedRisers": false, "treadThickness": 0.04, "railing": "beide", "defaultWidth": 1.0}],
+            "stairs": [{"id": "s1", "type": "stair", "floorId": "EG", "categoryCode": "35", "shape": "straight", "start": {"x": 0, "y": 0}, "dir": {"x": 1, "y": 0},
+                "runLength": 3.0, "width": 1.0, "stepCount": 16, "totalRise": 2.8, "typeId": "t"}],
+            "drawings2d": [{"id": "L", "type": "drawing2d", "levelId": "EG", "categoryCode": "60", "geom": {"shape": "line", "a": {"x": 0, "y": 0}, "b": {"x": 5, "y": 0}}}]
+        }))
+        .unwrap()
+    }
+
+    /// Teile je Klasse: Stütze, Baum, Treppe (Tritte + Geländer), Linie.
+    fn counts(p: &Project, f: &ClassFilter, gap: f64) -> [usize; 4] {
+        let parts = crate::explode3d::parts_filtered(p, true, 2.0, false, gap, f).unwrap();
+        let col = parts.column_meshes.iter().filter(|m| matches!(m.owner, Owner::Column(_))).count();
+        let tree = parts.column_meshes.iter().filter(|m| matches!(m.owner, Owner::Tree(_))).count();
+        let stair = parts.slabs.iter().filter(|s| s.ceiling_id == "s1").count() + parts.stair_railings.len();
+        let lines = crate::explode3d::drawing_line_verts_filtered(p, gap, f).len();
+        [col, tree, stair, lines]
+    }
+
+    /// Jede Klasse einzeln aus (Ebenen-Baum bzw. `hide`): nur ihr Teil fehlt im 3D (auch in der Explosion) und im Pick.
+    #[test]
+    fn klasse_aus_teil_fehlt_in_parts_und_pick() {
+        let p = project(&[]);
+        for gap in [0.0, 2.0] {
+            let all = counts(&p, &ClassFilter::from_text(&p, ""), gap);
+            assert!(all.iter().all(|&n| n > 0), "{all:?}");
+            for (k, code) in ["25", "13", "35", "60"].into_iter().enumerate() {
+                for (q, text) in [(project(&[code]), String::new()), (p.clone(), format!(r#"{{"hide":["{code}"]}}"#))] {
+                    let f = ClassFilter::from_text(&q, &text);
+                    let got = counts(&q, &f, gap);
+                    for (i, n) in got.iter().enumerate() {
+                        assert_eq!(*n == 0, i == k, "Klasse {code} aus, Abstand {gap}: {got:?}");
+                    }
+                    let mut g = crate::explode3d::pick_geometry(&q, gap).unwrap();
+                    f.retain_pick(&mut g);
+                    let picks = [g.columns.len(), g.trees.len(), g.stairs.len() + g.stair_meshes.len(), g.drawings.len()];
+                    for (i, n) in picks.iter().enumerate() {
+                        assert_eq!(*n == 0, i == k, "Pick, Klasse {code} aus, Abstand {gap}: {picks:?}");
+                    }
+                }
+            }
+        }
+    }
+}

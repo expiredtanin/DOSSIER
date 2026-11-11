@@ -59,8 +59,12 @@ export interface IfcFlatInput {
 interface Model3dDelta {
   mark: number;
   wallKeys: number[];
+  /** [180] Einträge ausgeblendeter Klassen: behalten, nicht zeigen (fehlt = keine). */
+  wallKeep?: number[];
   wallNew: [number, unknown[]][];
   openingKeys: number[];
+  /** [180] Wie `wallKeep`. */
+  openingKeep?: number[];
   openingNew: [number, unknown[], unknown[], unknown[], unknown[], unknown[]][];
   openingTail: unknown[];
   [rest: string]: unknown;
@@ -94,6 +98,11 @@ function assembleModel3dDelta(
     for (const x of e) walls.push(x);
     wallMap.set(k, e);
   }
+  for (const k of r.wallKeep ?? []) {
+    const e = wallNew.get(k) ?? cache?.walls.get(k);
+    if (!e) return null;
+    wallMap.set(k, e);
+  }
   const openNew = new Map(r.openingNew.map(([k, ...lists]) => [k, lists] as const));
   const openMap = new Map<number, unknown[][]>();
   const entries: unknown[][][] = [];
@@ -103,10 +112,15 @@ function assembleModel3dDelta(
     entries.push(e);
     openMap.set(k, e);
   }
+  for (const k of r.openingKeep ?? []) {
+    const e = openNew.get(k) ?? cache?.openings.get(k);
+    if (!e) return null;
+    openMap.set(k, e);
+  }
   const openingMeshes: unknown[] = [];
   for (let l = 0; l < 5; l++) for (const e of entries) for (const x of e[l]) openingMeshes.push(x);
   for (const x of r.openingTail) openingMeshes.push(x);
-  const { mark, wallKeys: _wk, wallNew: _wn, openingKeys: _ok, openingNew: _on, openingTail, ...rest } = r;
+  const { mark, wallKeys: _wk, wallKeep: _wp, wallNew: _wn, openingKeys: _ok, openingKeep: _op, openingNew: _on, openingTail, ...rest } = r;
   // Einträge mit Laufnummer zusätzlich, für den 3D-Viewer (Teil-Updates, `toWalls3d.projectToModel3dParts`).
   const keyed: Model3dKeyed = {
     wallEntries: r.wallKeys.map((k) => [k, wallMap.get(k)!] as const),
@@ -256,17 +270,20 @@ export class ProjectDocument {
    * gelesenen Einträgen. Ergebnis wie `query("model3dParts", args)`. Die Einträge werden zwischen den
    * Ergebnissen geteilt — nicht verändern.
    */
-  model3dParts<T>(args: number[]): T {
-    return this.model3dPartsKeyed<T>(args).parts;
+  model3dParts<T>(args: number[], text = ""): T {
+    return this.model3dPartsKeyed<T>(args, text).parts;
   }
 
-  /** Wie {@link model3dParts}, dazu die Einträge mit Laufnummer (3D-Viewer, Teil-Updates [58]). */
-  model3dPartsKeyed<T>(args: number[]): { parts: T; keyed: Model3dKeyed } {
+  /**
+   * Wie {@link model3dParts}, dazu die Einträge mit Laufnummer (3D-Viewer, Teil-Updates [58]). `text`: Klassen-Filter
+   * `{"hide": [codes]}` ([180]); Einträge ausgeblendeter Klassen bleiben gehalten (Umschalten schickt nichts neu).
+   */
+  model3dPartsKeyed<T>(args: number[], text = ""): { parts: T; keyed: Model3dKeyed } {
     const a = [0, 0, 0, 0, 0].map((d, i) => args[i] ?? d);
     const key = a.join(",");
     let cache = this.m3d.get(key);
     for (let attempt = 0; attempt < 2; attempt++) {
-      const r = JSON.parse(this.queryJson("model3dPartsDelta", [...a, cache?.mark ?? 0])) as Model3dDelta;
+      const r = JSON.parse(this.queryJson("model3dPartsDelta", [...a, cache?.mark ?? 0], text)) as Model3dDelta;
       const out = assembleModel3dDelta(r, cache);
       if (out) {
         this.m3d.delete(key);
@@ -344,9 +361,9 @@ export class ProjectDocument {
     return ui ? core().doc_serialize_with_ui(this.handle, JSON.stringify(ui)) : core().doc_serialize(this.handle);
   }
 
-  /** Boden-Spuren der 2D-Zeichnungen als LineList-Vertices `[px, py, pz, r, g, b]`. */
-  drawingLineVerts(explode = 0): Float32Array {
-    return this.handle ? core().doc_drawing_line_verts(this.handle, explode) : new Float32Array(0);
+  /** Boden-Spuren der 2D-Zeichnungen als LineList-Vertices `[px, py, pz, r, g, b]`; `hide` = Klassen-Filter ([180]). */
+  drawingLineVerts(explode = 0, hide = ""): Float32Array {
+    return this.handle ? core().doc_drawing_line_verts(this.handle, explode, hide) : new Float32Array(0);
   }
 
   /** Zulässige Hülle im 3D ([63]) für render3d `set_ghost`; leer ohne Baurecht oder `siteRules.show3d`. */
@@ -355,8 +372,8 @@ export class ProjectDocument {
   }
 
   /** Ansichtsschraffur auf den Flächen (Wände, Decken, Dächer) für render3d `set_pattern_lines`. */
-  surfacePatternLines(explode = 0): Float32Array {
-    return this.handle ? core().doc_surface_pattern_lines(this.handle, explode) : new Float32Array(0);
+  surfacePatternLines(explode = 0, hide = ""): Float32Array {
+    return this.handle ? core().doc_surface_pattern_lines(this.handle, explode, hide) : new Float32Array(0);
   }
 
   /** Das Dokument als JSON-Text (Test, Export). */

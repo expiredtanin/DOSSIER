@@ -18,7 +18,7 @@ pub fn run_doc(d: &mut crate::document::Document, name: &str, args: &[f64], text
     // [173] Mit Modelldarstellung (`text`) ohne den Cache (eigene Teile, s. `model3d_mv`).
     if (name == "model3dParts" || delta.is_some()) && args.len() >= 3 && !explode && model3d_mv_id(text).is_none() {
         let voids = args.get(3).is_some_and(|v| *v != 0.0);
-        let out = d.model3d_parts(args[0] != 0.0, args[1], args[2] != 0.0, voids, delta)?;
+        let out = d.model3d_parts_with(args[0] != 0.0, args[1], args[2] != 0.0, voids, delta, text)?;
         if voids {
             let p = d.project()?;
             let cuts = crate::solid_specs::void_cuts(p, &out.parts.walls, &out.parts.slabs);
@@ -110,15 +110,22 @@ pub fn run(p: &Project, name: &str, args: &[f64], text: &str) -> Result<String, 
         // `args[0]`: Explosionsabstand ([65], fehlt/0 = aus).
         // Versatz je Geschoss-id ([65]; `args[0]` = Abstand, ≤ 0 = leer): 3D-Griffe und Arbeitsebene.
         ("explodeOffsets", _) => json(&crate::explode3d::floor_offsets(p, args.first().copied().unwrap_or(0.0))),
-        ("pickGeometry", _) => json(&crate::explode3d::pick_geometry(p, args.first().copied().unwrap_or(0.0))?),
+        // [180] Ohne die Elemente ausgeblendeter Klassen (`text` = `{"hide": [codes]}`, s. `model3d::ClassFilter`).
+        ("pickGeometry", _) => {
+            let mut g = crate::explode3d::pick_geometry(p, args.first().copied().unwrap_or(0.0))?;
+            model3d::ClassFilter::from_text(p, text).retain_pick(&mut g);
+            json(&g)
+        }
         ("modelJson", _) => crate::model::to_value_typed_only(p).map(|v| v.to_string()).map_err(|e| e.to_string()),
         // Mit Abzugskörpern (`args[3]` ≠ 0) zusätzlich `voidCuts`: die getroffenen Wände/Decken als
         // truck-Spezifikationen (`solid_specs.rs`).
         // `args[4]`: Explosionsabstand ([65], `explode3d.rs`; > 0 zusätzlich `floorOffsets`, Abzugskörper wandern mit).
+        // [180] Ohne die Teile ausgeblendeter Klassen (`text` = `{"hide": [codes], "modelView": …}`).
         ("model3dParts", n) if n >= 3 => {
             let explode = args.get(4).copied().filter(|g| g.is_finite() && *g > 0.0);
+            let filter = model3d::ClassFilter::from_text(p, text);
             if let Some(gap) = explode {
-                let parts = crate::explode3d::parts(p, args[0] != 0.0, args[1], args[2] != 0.0, gap)?;
+                let parts = crate::explode3d::parts_filtered(p, args[0] != 0.0, args[1], args[2] != 0.0, gap, &filter)?;
                 let mut v = serde_json::to_value(&parts).map_err(|e| e.to_string())?;
                 v["floorOffsets"] = serde_json::to_value(crate::explode3d::floor_offsets(p, gap)).map_err(|e| e.to_string())?;
                 if args.get(3).is_some_and(|v| *v != 0.0) {
@@ -127,7 +134,7 @@ pub fn run(p: &Project, name: &str, args: &[f64], text: &str) -> Result<String, 
                 return Ok(v.to_string());
             }
             let (detail, rails) = model3d_mv(p, text, args[1]);
-            let mut parts = model3d::parts(p, args[0] != 0.0, detail, args[2] != 0.0)?;
+            let mut parts = model3d::parts_filtered(p, args[0] != 0.0, detail, args[2] != 0.0, &filter)?;
             if !rails {
                 parts.stair_railings.clear();
             }

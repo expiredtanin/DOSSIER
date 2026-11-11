@@ -143,7 +143,7 @@ pub fn column_slabs(p: &Project) -> Vec<RSlab> {
 /// Stützen als Prisma-Meshes (`emitColumns`).
 pub fn emit_columns(p: &Project) -> Vec<RMesh> {
     let mut out = Vec::new();
-    for col in p.columns.as_deref().unwrap_or(&[]) {
+    for (ci, col) in p.columns.as_deref().unwrap_or(&[]).iter().enumerate() {
         if col.height <= 0.0 {
             continue;
         }
@@ -155,7 +155,7 @@ pub fn emit_columns(p: &Project) -> Vec<RMesh> {
             .map_or(COLUMN_RGB, |c| hex_to_rgb(&c.color, COLUMN_RGB));
         // [169] Runde Stütze glatt schattiert (Mantel ohne Facetten), eckige kantig.
         let crease_angle = matches!(col.profile, ColumnProfile::Round { .. }).then_some(COLUMN_CREASE_DEG);
-        out.push(RMesh { crease_angle, positions, indices, kind: "extrusion", color, vertex_colors: None, material_index: None });
+        out.push(RMesh { crease_angle, positions, indices, kind: "extrusion", color, vertex_colors: None, material_index: None, owner: Owner::Column(ci) });
     }
     out
 }
@@ -168,9 +168,9 @@ pub fn emit_trees(p: &Project) -> Vec<RMesh> {
     for (i, g) in crate::tree::geoms(p) {
         let (trunk_rgb, crown_rgb) = crate::tree::colors(&trees[i]);
         let (positions, indices) = g.trunk_mesh(8);
-        out.push(RMesh { crease_angle: None, positions, indices, kind: "extrusion", color: trunk_rgb, vertex_colors: None, material_index: None });
+        out.push(RMesh { crease_angle: None, positions, indices, kind: "extrusion", color: trunk_rgb, vertex_colors: None, material_index: None, owner: Owner::Tree(i) });
         let (positions, indices) = g.crown_mesh(8, 12);
-        out.push(RMesh { crease_angle: None, positions, indices, kind: "extrusion", color: crown_rgb, vertex_colors: None, material_index: None });
+        out.push(RMesh { crease_angle: None, positions, indices, kind: "extrusion", color: crown_rgb, vertex_colors: None, material_index: None, owner: Owner::Tree(i) });
     }
     out
 }

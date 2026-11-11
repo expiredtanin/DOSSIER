@@ -15,11 +15,14 @@ export interface Sun3d {
   elevation: number;
 }
 
-/** Sonne fürs 3D; `active=false` ohne Studie, mit ausgeschaltetem Schalter oder ungültiger Zeit. */
-export function sun3dFor(project: Project): Sun3d {
+/**
+ * Sonne fürs 3D; `active=false` ohne Studie, mit ausgeschaltetem Schalter oder ungültiger Zeit, oder wenn die
+ * Klasse `08 Schatten` ausgeblendet ist (`shadowsShown`, [180]).
+ */
+export function sun3dFor(project: Project, shadowsShown = true): Sun3d {
   const study = project.sunStudy;
   const off: Sun3d = { active: false, azimuth: 0, elevation: 0 };
-  if (!study || !(study.shadows3d ?? study.show)) return off;
+  if (!shadowsShown || !study || !(study.shadows3d ?? study.show)) return off;
   const when = new Date(study.when);
   if (!Number.isFinite(when.getTime())) return off;
   const { lat, lon } = projectLatLon(project);

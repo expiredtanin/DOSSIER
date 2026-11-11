@@ -44,6 +44,8 @@ export function emitExtrudedSolids(
   project: Project,
   /** Explosionsaxonometrie ([65]): Versatz (m) je Geschoss-id; der Cache bleibt unverschoben. */
   floorOffsets?: Record<string, number>,
+  /** [180] Ausgeblendete Klassen: deren Körper fehlen (Cache bleibt). */
+  hiddenCodes?: ReadonlySet<string>,
 ): RMesh[] {
   if (typeof window === "undefined") return [];
   const out: RMesh[] = [];
@@ -58,6 +60,7 @@ export function emitExtrudedSolids(
     if (solid.points.length < 3 || solid.height <= 0) continue;
     // Abzugskörper sind kein Material (sie wirken über `voids3d.ts`).
     if (solid.operation === "subtract") continue;
+    if (hiddenCodes?.has(solid.categoryCode)) continue;
     const signature = extrudedSolidSignature(solid);
     let entry = truckMeshCache.get(solid.id);
     if (!entry || entry.signature !== signature) {

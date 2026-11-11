@@ -10,15 +10,21 @@
 //! - Je Wand (Schlüssel: Element-Stand der Wand, `Revs::items`): gültig bei gleichen Element-Ständen der
 //!   gehosteten Öffnungen und — für die Körper — gleichen Schnittlinien aus der Verschneidung.
 //!
-//! Ergebnis inhaltlich und als JSON Byte für Byte gleich wie [`model3d::parts`] (Test unten).
+//! Ergebnis inhaltlich und als JSON Byte für Byte gleich wie [`model3d::parts_filtered`] (Test unten).
+//!
+//! [180] Klassen: Der Cache ist klassenunabhängig (`layers` zählt nicht als globale Änderung), gefiltert
+//! wird beim Ausgeben ([`ClassFilter`]): Wände ausgeblendeter Klassen fallen weg; Öffnungs-Einbauteile
+//! einer Wand mit teils ausgeblendeten Öffnungen kommen aus einer Variante nur mit den sichtbaren (je
+//! Eintrag gemerkt, Umschalten rechnet sie nicht noch einmal).
 
 use crate::joins::{JoinWall, WallCuts};
 use crate::model::{Opening, Project};
-use crate::model3d::{self, Parts, RMesh, RWall, WallOpeningMeshes};
+use crate::model3d::{self, ClassFilter, Parts, RMesh, RWall, WallOpeningMeshes};
 use std::collections::HashMap;
 
 /// Felder, die das 3D-Modell nicht lesen oder die der Cache selbst je Element verfolgt.
-const NOT_GLOBAL: &[&str] = &["walls", "openings", "drawings2d", "viewSnapshots", "viewSnapshotFolders", "viewTemplates"];
+/// `layers` (Klassen-Baum): nur der Filter beim Ausgeben liest ihn ([180]).
+const NOT_GLOBAL: &[&str] = &["walls", "openings", "drawings2d", "viewSnapshots", "viewSnapshotFolders", "viewTemplates", "layers"];
 
 /// Laufnummern der Einträge, über alle Dokumente eindeutig: TS hält die gelieferten Einträge unter
 /// dieser Nummer ([`Model3dCache::parts`] mit `delta`).
@@ -49,6 +55,22 @@ struct OpenEntry {
     meshes: WallOpeningMeshes,
     /// Je Liste (3 Durchgänge, Zargen, Formöffnungen) JSON ohne Klammern.
     json: [String; 5],
+    /// [180] Varianten nur mit einem Teil der Öffnungen (Maske je gehostete Öffnung, `true` = sichtbar).
+    variants: Vec<(Vec<bool>, OpenVariant)>,
+}
+
+#[derive(Debug)]
+struct OpenVariant {
+    serial: u64,
+    meshes: WallOpeningMeshes,
+    json: [String; 5],
+}
+
+/// Höchstens so viele Varianten je Wand (älteste fällt weg).
+const MAX_VARIANTS: usize = 4;
+
+fn opening_json(m: &WallOpeningMeshes) -> [String; 5] {
+    [&m.passes[0], &m.passes[1], &m.passes[2], &m.zargen, &m.shaped].map(|v| inner_json(v))
 }
 
 #[derive(Debug)]
@@ -74,6 +96,8 @@ pub struct Model3dCache {
     openings: Vec<(u64, HashMap<u64, OpenEntry>)>,
     /// Statistik (Tests): Wände/Öffnungs-Wände, die im letzten Aufruf neu gerechnet wurden.
     pub last_rebuilt: (usize, usize),
+    /// [180] Statistik (Tests): im letzten Aufruf neu gerechnete Öffnungs-Varianten (Klassen-Filter).
+    pub last_variants: usize,
 }
 
 /// Ergebnis: die Teile (Wände/Öffnungen nur mit `structs`) und das JSON wie `serde_json::to_string(&parts)`.
@@ -151,6 +175,7 @@ impl Model3dCache {
         for_section: bool,
         structs: bool,
         delta: Option<u64>,
+        filter: &ClassFilter,
     ) -> Result<CachedParts, String> {
         self.validate(p, revs);
         let openings = p.openings.as_deref().unwrap_or(&[]);
@@ -228,7 +253,7 @@ impl Model3dCache {
         let mut arc_meshes: Option<Vec<RMesh>> = None;
         if arcs {
             self.openings[slot].1.clear();
-            arc_meshes = Some(model3d::emit_opening_meshes(p, detail));
+            arc_meshes = Some(model3d::emit_opening_meshes_with(p, detail, &|o| filter.keep_opening(o)));
         } else {
             let mut old_open = std::mem::take(&mut self.openings[slot].1);
             for (wi, wall) in p.walls.iter().enumerate() {
@@ -240,12 +265,13 @@ impl Model3dCache {
                         rebuilt.1 += 1;
                         let refs: Vec<&Opening> = hosted(&wall.id).iter().map(|&i| &openings[i]).collect();
                         let meshes = model3d::wall_opening_meshes(p, wall, &refs, detail);
-                        let json = [&meshes.passes[0], &meshes.passes[1], &meshes.passes[2], &meshes.zargen, &meshes.shaped].map(|v| inner_json(v));
+                        let json = opening_json(&meshes);
                         OpenEntry {
                             serial: next_serial(),
                             openings: os,
                             meshes,
                             json,
+                            variants: Vec::new(),
                         }
                     }
                 };
@@ -253,6 +279,32 @@ impl Model3dCache {
             }
         }
         self.last_rebuilt = rebuilt;
+        // [180] Öffnungs-Varianten der Wände mit teils ausgeblendeten Öffnungen (Maske je gehostete Öffnung).
+        let masks: Vec<Vec<bool>> = if arcs {
+            Vec::new()
+        } else {
+            p.walls.iter().map(|w| hosted(&w.id).iter().map(|&i| filter.keep_opening(&openings[i])).collect()).collect()
+        };
+        let mut variants_built = 0;
+        for (wi, wall) in p.walls.iter().enumerate() {
+            let Some(mask) = masks.get(wi) else { break };
+            if mask.iter().all(|&b| b) || !mask.iter().any(|&b| b) {
+                continue;
+            }
+            let Some(e) = open_fresh.get_mut(&wall_stamps[wi]) else { continue };
+            if e.variants.iter().any(|(m, _)| m == mask) {
+                continue;
+            }
+            variants_built += 1;
+            let refs: Vec<&Opening> = hosted(&wall.id).iter().zip(mask).filter(|(_, &k)| k).map(|(&i, _)| &openings[i]).collect();
+            let meshes = model3d::wall_opening_meshes(p, wall, &refs, detail);
+            let json = opening_json(&meshes);
+            if e.variants.len() >= MAX_VARIANTS {
+                e.variants.remove(0);
+            }
+            e.variants.push((mask.clone(), OpenVariant { serial: next_serial(), meshes, json }));
+        }
+        self.last_variants = variants_built;
 
         let mut slabs = model3d::emit_slabs(p);
         slabs.extend(model3d::emit_stairs(p, for_section));
@@ -267,10 +319,42 @@ impl Model3dCache {
             roof_meshes: model3d::emit_roofs(p, None)?,
             roof_layers: model3d::emit_roof_cut_layers(p)?,
         };
+        filter.retain_rest(p, &mut parts);
         // JSON in einem Zug (wie `serde_json::to_string(&parts)`): Bruchstücke sammeln, dann einmal kopieren.
-        let wall_entries: Vec<&WallEntry> = wall_stamps.iter().map(|s| &fresh[s]).collect();
-        let open_entries: Vec<&OpenEntry> = if arcs { Vec::new() } else { wall_stamps.iter().map(|s| &open_fresh[s]).collect() };
-        let surface = if arcs { Vec::new() } else { model3d::surface_window_meshes(p) };
+        // [180] Ausgeblendete Einträge bleiben beim Aufrufer (`keep`), damit Einblenden nichts neu schickt.
+        let mut wall_entries: Vec<&WallEntry> = Vec::with_capacity(p.walls.len());
+        let mut wall_keep: Vec<&WallEntry> = Vec::new();
+        for (wi, s) in wall_stamps.iter().enumerate() {
+            if filter.hides(&p.walls[wi].id) {
+                wall_keep.push(&fresh[s]);
+            } else {
+                wall_entries.push(&fresh[s]);
+            }
+        }
+        let mut open_entries: Vec<OpenOut> = Vec::new();
+        let mut open_keep: Vec<OpenOut> = Vec::new();
+        if !arcs {
+            for (wi, s) in wall_stamps.iter().enumerate() {
+                let e = &open_fresh[s];
+                let base = OpenOut { serial: e.serial, json: &e.json, meshes: &e.meshes };
+                let mask = &masks[wi];
+                let shown = mask.iter().filter(|&&b| b).count();
+                if shown == mask.len() {
+                    open_entries.push(base);
+                } else {
+                    open_keep.push(base);
+                }
+                for (m, v) in &e.variants {
+                    let out = OpenOut { serial: v.serial, json: &v.json, meshes: &v.meshes };
+                    if m == mask && shown > 0 {
+                        open_entries.push(out);
+                    } else {
+                        open_keep.push(out);
+                    }
+                }
+            }
+        }
+        let surface = if arcs { Vec::new() } else { model3d::surface_window_meshes_with(p, &|o| filter.keep_opening(o)) };
         let opening_tail = match &arc_meshes {
             Some(m) => inner_json(m),
             None => inner_json(&surface),
@@ -286,7 +370,13 @@ impl Model3dCache {
         ];
         let mut json = String::new();
         if let Some(mark) = delta {
-            json = write_delta(mark, &wall_entries, &open_entries, &opening_tail, &rest);
+            fn w<'a>(v: &[&'a WallEntry]) -> Vec<(u64, &'a str)> {
+                v.iter().map(|e| (e.serial, e.json.as_str())).collect()
+            }
+            fn o<'a>(v: &[OpenOut<'a>]) -> Vec<(u64, &'a [String; 5])> {
+                v.iter().map(|e| (e.serial, e.json)).collect()
+            }
+            json = write_delta(mark, [&w(&wall_entries), &w(&wall_keep)], [&o(&open_entries), &o(&open_keep)], &opening_tail, &rest);
         } else {
             let walls_frag = wall_entries.iter().map(|e| e.json.as_str());
             let opening_frags = (0..5).flat_map(|k| open_entries.iter().map(move |e| e.json[k].as_str())).chain([opening_tail.as_str()]);
@@ -317,13 +407,13 @@ impl Model3dCache {
             parts.opening_meshes = match arc_meshes {
                 Some(m) => m,
                 None => {
-                    let mut v = model3d::assemble_opening_meshes(open_entries.iter().map(|e| e.meshes.clone()).collect());
+                    let mut v = model3d::assemble_opening_meshes(open_entries.iter().map(|e| WallOpeningMeshes::clone(e.meshes)).collect());
                     v.extend(surface);
                     v
                 }
             };
         }
-        drop((wall_entries, open_entries));
+        drop((wall_entries, wall_keep, open_entries, open_keep));
         self.walls[layered as usize] = fresh;
         if !arcs {
             self.openings[slot].1 = open_fresh;
@@ -332,44 +422,64 @@ impl Model3dCache {
     }
 }
 
+/// Ein ausgegebener Öffnungs-Eintrag (Grundfall oder [180] Variante).
+#[derive(Clone, Copy)]
+struct OpenOut<'a> {
+    serial: u64,
+    json: &'a [String; 5],
+    meshes: &'a WallOpeningMeshes,
+}
+
 /// Änderungs-JSON ([58], TS `ProjectDocument.model3dParts`): statt `walls`/`openingMeshes` die Laufnummern
 /// je Wand (`wallKeys`, `openingKeys`, Modell-Reihenfolge) und nur die Einträge mit Laufnummer > `mark`
 /// ausgeschrieben (`wallNew`: `[nr, [Körper…]]`, `openingNew`: `[nr, 3 Durchgänge, Zargen, Formöffnungen]`);
 /// `openingTail` = Dach-/Deckenfenster (bzw. alles bei Bogenwänden), `mark` = Stand für die nächste Frage.
-/// Gültig nur, wenn der Aufrufer die Einträge ≤ `mark` aus seiner letzten Antwort hat (sonst `mark` 0).
-fn write_delta(mark: u64, walls: &[&WallEntry], openings: &[&OpenEntry], opening_tail: &str, rest: &[String; 7]) -> String {
+/// [180] `wallKeep`/`openingKeep` (nur wenn nicht leer): Einträge ausgeblendeter Klassen, die der Aufrufer
+/// behält, aber nicht zeigt (je `[gezeigt, behalten]` übergeben). Gültig nur, wenn der Aufrufer die Einträge
+/// ≤ `mark` aus seiner letzten Antwort hat (sonst `mark` 0).
+fn write_delta(mark: u64, walls: [&[(u64, &str)]; 2], openings: [&[(u64, &[String; 5])]; 2], opening_tail: &str, rest: &[String; 7]) -> String {
     use std::fmt::Write;
     let fresh = |serial: u64| mark == 0 || serial > mark || mark > current_serial();
-    let cap = walls.iter().filter(|e| fresh(e.serial)).map(|e| e.json.len() + 32).sum::<usize>()
+    let cap = walls.iter().flat_map(|v| v.iter()).filter(|e| fresh(e.0)).map(|e| e.1.len() + 32).sum::<usize>()
         + openings
             .iter()
-            .filter(|e| fresh(e.serial))
-            .map(|e| e.json.iter().map(|j| j.len() + 4).sum::<usize>() + 32)
+            .flat_map(|v| v.iter())
+            .filter(|e| fresh(e.0))
+            .map(|e| e.1.iter().map(|j| j.len() + 4).sum::<usize>() + 32)
             .sum::<usize>()
-        + (walls.len() + openings.len()) * 12
+        + (walls[0].len() + walls[1].len() + openings[0].len() + openings[1].len()) * 12
         + opening_tail.len()
         + rest.iter().map(String::len).sum::<usize>()
         + 512;
     let mut out = String::with_capacity(cap);
-    let _ = write!(out, "{{\"mark\":{},\"wallKeys\":[", current_serial());
-    for (i, e) in walls.iter().enumerate() {
-        let _ = write!(out, "{}{}", if i > 0 { "," } else { "" }, e.serial);
+    let keys = |out: &mut String, name: &str, serials: &mut dyn Iterator<Item = u64>| {
+        let _ = write!(out, "\"{name}\":[");
+        for (i, s) in serials.enumerate() {
+            let _ = write!(out, "{}{}", if i > 0 { "," } else { "" }, s);
+        }
+        out.push_str("],");
+    };
+    let _ = write!(out, "{{\"mark\":{},", current_serial());
+    keys(&mut out, "wallKeys", &mut walls[0].iter().map(|e| e.0));
+    if !walls[1].is_empty() {
+        keys(&mut out, "wallKeep", &mut walls[1].iter().map(|e| e.0));
     }
-    out.push_str("],\"wallNew\":[");
+    out.push_str("\"wallNew\":[");
     let mut first = true;
-    for e in walls.iter().filter(|e| fresh(e.serial)) {
-        let _ = write!(out, "{}[{},[{}]]", if first { "" } else { "," }, e.serial, e.json);
+    for e in walls.iter().flat_map(|v| v.iter()).filter(|e| fresh(e.0)) {
+        let _ = write!(out, "{}[{},[{}]]", if first { "" } else { "," }, e.0, e.1);
         first = false;
     }
-    out.push_str("],\"openingKeys\":[");
-    for (i, e) in openings.iter().enumerate() {
-        let _ = write!(out, "{}{}", if i > 0 { "," } else { "" }, e.serial);
+    out.push_str("],");
+    keys(&mut out, "openingKeys", &mut openings[0].iter().map(|e| e.0));
+    if !openings[1].is_empty() {
+        keys(&mut out, "openingKeep", &mut openings[1].iter().map(|e| e.0));
     }
-    out.push_str("],\"openingNew\":[");
+    out.push_str("\"openingNew\":[");
     let mut first = true;
-    for e in openings.iter().filter(|e| fresh(e.serial)) {
-        let _ = write!(out, "{}[{}", if first { "" } else { "," }, e.serial);
-        for j in &e.json {
+    for e in openings.iter().flat_map(|v| v.iter()).filter(|e| fresh(e.0)) {
+        let _ = write!(out, "{}[{}", if first { "" } else { "," }, e.0);
+        for j in e.1 {
             let _ = write!(out, ",[{j}]");
         }
         out.push(']');
@@ -403,15 +513,20 @@ mod tests {
 
     /// Inkrementell (Cache des Dokuments) = voll (`queries::run` auf einer Kopie), Byte für Byte.
     fn check(d: &mut Document, clients: &mut [Client; 4], step: &str) {
+        check_with(d, clients, step, "");
+    }
+
+    /// Wie [`check`] mit `text` der Abfrage ([180] Klassen-Filter `{"hide": [...]}`).
+    fn check_with(d: &mut Document, clients: &mut [Client; 4], step: &str, text: &str) {
         let p = d.project().unwrap().clone();
         for (a, c) in ARGS.iter().zip(clients.iter_mut()) {
-            let inc = crate::queries::run_doc(d, "model3dParts", a, "").unwrap();
-            let full = crate::queries::run(&p, "model3dParts", a, "").unwrap();
+            let inc = crate::queries::run_doc(d, "model3dParts", a, text).unwrap();
+            let full = crate::queries::run(&p, "model3dParts", a, text).unwrap();
             assert!(inc == full, "{step}: model3dParts {a:?} weicht ab ({} / {} Zeichen)", inc.len(), full.len());
             // Änderungs-Antwort wie in TS (`ProjectDocument.model3dParts`) zusammengesetzt = voll.
             let mut da = a.to_vec();
             da.push(c.mark as f64);
-            let delta = crate::queries::run_doc(d, "model3dPartsDelta", &da, "").unwrap();
+            let delta = crate::queries::run_doc(d, "model3dPartsDelta", &da, text).unwrap();
             let got = c.apply(&delta);
             let want: Value = serde_json::from_str(&full).unwrap();
             assert!(got == want, "{step}: model3dPartsDelta {a:?} weicht ab");
@@ -439,10 +554,19 @@ mod tests {
                 walls.extend(e.iter().cloned());
                 nw.insert(k, e);
             }
+            // [180] Ausgeblendete Einträge behalten (wie TS `assembleModel3dDelta`), nicht zeigen.
+            for k in r.get("wallKeep").and_then(Value::as_array).into_iter().flatten().map(key) {
+                let e = wn.remove(&k).or_else(|| self.walls.remove(&k)).expect("behaltener Wand-Eintrag fehlt");
+                nw.insert(k, e);
+            }
             let mut no = std::collections::HashMap::new();
             let keys: Vec<u64> = r["openingKeys"].as_array().unwrap().iter().map(key).collect();
             for &k in &keys {
                 let e = on.remove(&k).or_else(|| self.openings.remove(&k)).expect("Öffnungs-Eintrag fehlt");
+                no.insert(k, e);
+            }
+            for k in r.get("openingKeep").and_then(Value::as_array).into_iter().flatten().map(key) {
+                let e = on.remove(&k).or_else(|| self.openings.remove(&k)).expect("behaltener Öffnungs-Eintrag fehlt");
                 no.insert(k, e);
             }
             let mut meshes = Vec::new();
@@ -582,6 +706,66 @@ mod tests {
         }
         // Jede Art kam vor (sonst prüft die Folge weniger als gedacht).
         assert!(kinds.iter().all(|&k| k > 0), "{kinds:?}");
+    }
+
+    /// [180] Klassen ein-/ausblenden (über `hide` und über den Ebenen-Baum): ausgeblendete Wände, Öffnungen,
+    /// Decken, Dächer, Treppen fehlen, inkrementell = voll = Änderungs-Antwort, und keine Wand wird neu
+    /// gerechnet; Öffnungs-Varianten (teils ausgeblendete Öffnungen einer Wand) nur beim ersten Mal.
+    #[test]
+    fn class_filter_without_rebuild() {
+        let mut d = sample();
+        let mut clients: [Client; 4] = Default::default();
+        // Tür D1 auf eigene Klasse: Wand W1 hat dann eine sichtbare (O1) und eine ausgeblendete Öffnung.
+        let mut o = list(&d, "openings").into_iter().find(|o| o["id"] == "D1").unwrap();
+        o["categoryCode"] = json!("22");
+        d.commit(vec![Op::Replace { collection: "openings".into(), entity: o }], None, 0.0, false).unwrap();
+        check_with(&mut d, &mut clients, "alles sichtbar", "");
+        let parts = |d: &mut Document, text: &str| -> Value { serde_json::from_str(&crate::queries::run_doc(d, "model3dParts", &[1.0, 2.0, 0.0, 0.0, 0.0], text).unwrap()).unwrap() };
+        let len = |v: &Value, k: &str| v[k].as_array().map_or(0, Vec::len);
+        let all = parts(&mut d, "");
+        let (walls, openings, roofs) = (len(&all, "walls"), len(&all, "openingMeshes"), len(&all, "roofMeshes"));
+        assert!(walls > 0 && openings > 0 && roofs > 0 && len(&all, "slabs") > 0);
+        let doors = r#"{"hide":["22"]}"#;
+        for (step, text) in [
+            ("Türen aus", doors),
+            ("Wände aus", r#"{"hide":["20"]}"#),
+            ("Decke, Dach, Treppe aus", r#"{"hide":["30","31","40"]}"#),
+            ("alles sichtbar", ""),
+            ("Türen wieder aus", doors),
+        ] {
+            check_with(&mut d, &mut clients, step, text);
+            d.model3d_parts_with(true, 2.0, false, false, None, text).unwrap();
+            assert_eq!(d.model3d_rebuilt(), (0, 0), "{step}");
+            assert_eq!(d.model3d_variants(), 0, "{step}: Variante schon gemerkt");
+        }
+        let v = parts(&mut d, doors);
+        assert_eq!(len(&v, "walls"), walls);
+        assert!(len(&v, "openingMeshes") < openings && len(&v, "openingMeshes") > 0, "nur die Tür fehlt");
+        let v = parts(&mut d, r#"{"hide":["20"]}"#);
+        assert_eq!((len(&v, "walls"), len(&v, "openingMeshes")), (0, 0), "Öffnungen gehen mit der Wand");
+        assert_eq!(len(&v, "roofMeshes"), roofs);
+        let v = parts(&mut d, r#"{"hide":["30","31","40"]}"#);
+        assert_eq!((len(&v, "slabs"), len(&v, "roofMeshes"), len(&v, "roofLayers"), len(&v, "stairMeshes"), len(&v, "stairRailings")), (0, 0, 0, 0, 0));
+        assert_eq!(len(&v, "walls"), walls);
+        // Ebenen-Baum (Ebenen-Panel, Kombinationen, Vorlagen): Dach aus — ohne Neuberechnung der Wände.
+        let mut layers = d.root()["layers"].clone();
+        for c in layers.as_array_mut().unwrap() {
+            if c["code"] == "31" {
+                c["visible"] = json!(false);
+            }
+        }
+        d.commit(vec![Op::SetField { key: "layers".into(), value: Some(layers), at: None }], None, 1.0, false).unwrap();
+        check_with(&mut d, &mut clients, "Dach-Klasse aus", "");
+        d.model3d_parts(true, 2.0, false, false, None).unwrap();
+        assert_eq!(d.model3d_rebuilt(), (0, 0));
+        let v = parts(&mut d, "");
+        assert_eq!((len(&v, "roofMeshes"), len(&v, "roofLayers")), (0, 0));
+        let pick: Value = serde_json::from_str(&crate::queries::run_doc(&mut d, "pickGeometry", &[0.0], "").unwrap()).unwrap();
+        assert_eq!(len(&pick, "roofs"), 0, "ausgeblendetes Dach nicht anwählbar");
+        assert!(len(&pick, "walls") > 0);
+        let pick: Value = serde_json::from_str(&crate::queries::run_doc(&mut d, "pickGeometry", &[0.0], doors).unwrap()).unwrap();
+        assert!(pick["openings"].as_array().unwrap().iter().all(|o| o["openingId"] != "D1"));
+        assert!(pick["openings"].as_array().unwrap().iter().any(|o| o["openingId"] == "O1"));
     }
 
     /// Eine Wandhöhe ändern: nur diese Wand (Körper und Einbauteile) wird neu gerechnet.

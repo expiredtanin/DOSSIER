@@ -45,7 +45,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Project, Wall, Drawing2D, Ceiling, Roof, Vec2 } from "../model/types";
 import { roofBaseElevation, roofGeometry, verticalExtents } from "../core";
-import { projectToModel3d, pickGeometry, draftWorldLines, explodeFloorOffsets, TRUCK_MESH_READY_EVENT } from "../core";
+import { projectToModel3d, pickGeometry, draftWorldLines, explodeFloorOffsets, hiddenClassCodes, TRUCK_MESH_READY_EVENT } from "../core";
 import type { DetailLevel, RenderMode, View3d } from "../model/viewTypes";
 import type { ToolDraft } from "../tools/types";
 import { hudSegments, type HudFieldsState } from "../tools/hudFormat";
@@ -309,11 +309,11 @@ function computeGripsAt(
  * müssen auf dieselbe Distanz/dasselbe Ziel kommen, damit der Orbit-Zustand
  * (hier) nahtlos an die exakte Praeset-Kamera (dort) anschliesst.
  */
-function fitTargetDist(project: Project): {
+function fitTargetDist(project: Project, hide?: readonly string[]): {
   target: [number, number, number];
   dist: number;
 } {
-  const model = projectToModel3d(project);
+  const model = projectToModel3d(project, { hide });
   let minX = Infinity;
   let minY = Infinity;
   let minZ = Infinity;
@@ -416,6 +416,7 @@ export function Wasm3DViewport({
   hudFields = null,
   onGrip3dEditTab,
   onGrip3dEditCancel,
+  hiddenCodes,
 }: {
   project: Project;
   /** Kanonischer Blickwinkel (Oberleiste) — s. Datei-Kommentar. */
@@ -525,6 +526,12 @@ export function Wasm3DViewport({
    * (`App.tsx::cancelGrip3dEdit`, ruft `undo()`) — diese Komponente selbst
    * beendet danach zusätzlich ihren lokalen Drag-Zustand (`endGripDrag`). */
   onGrip3dEditCancel?: () => void;
+  /**
+   * [180] Klassen, die der Darstellungsmodus des Ebenen-Panels nicht zeichnet (`categoryDisplay(code).render`
+   * falsch). Die im Ebenen-Baum ausgeschalteten blendet der Kern ohnehin aus (Ebenen-Kombinationen, Vorlagen);
+   * beides fehlt im Modell und ist nicht anwählbar.
+   */
+  hiddenCodes?: readonly string[];
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   // Pick-Callback in einem Ref spiegeln, damit der (einmal registrierte)
@@ -592,6 +599,11 @@ export function Wasm3DViewport({
   const explode = explodeOn ? explodeGap : 0;
   const explodeRef = useRef(explode);
   explodeRef.current = explode;
+  // [180] Ausgeblendete Klassen: Inhalt statt Identität als Abhängigkeit (der Aufrufer baut die Liste je Render).
+  const hiddenKey = (hiddenCodes ?? []).join("\u0001");
+  const hide = useMemo(() => (hiddenKey ? hiddenKey.split("\u0001") : []), [hiddenKey]);
+  const hideRef = useRef(hide);
+  hideRef.current = hide;
   // Versatz je Geschoss ([65]) für Griffe und gezogene Höhen (Modell bleibt unversetzt).
   const floorOffsets = useMemo(() => explodeFloorOffsets(project, explode), [project, explode]);
   const floorOffsetsRef = useRef(floorOffsets);
@@ -643,9 +655,9 @@ export function Wasm3DViewport({
   // Snapshot) — nur das `view3d`-Effekt unten springt aktiv auf ein Praeset.
   useEffect(() => {
     if (!ready) return;
-    updateModel(project, detail, explode);
+    updateModel(project, detail, explode, hide);
     redrawRef.current();
-  }, [ready, project, detail, explode, updateModel]);
+  }, [ready, project, detail, explode, hide, updateModel]);
 
   // Punktwolken abgleichen (neu/umgestellt/entfernt) und neu zeichnen, wenn sich etwas tat.
   useEffect(() => {
@@ -670,7 +682,7 @@ export function Wasm3DViewport({
   useEffect(() => {
     if (!ready) return;
     const onMeshReady = () => {
-      updateModel(projectRef.current, detailRef.current, explodeRef.current);
+      updateModel(projectRef.current, detailRef.current, explodeRef.current, hideRef.current);
       redrawRef.current();
     };
     window.addEventListener(TRUCK_MESH_READY_EVENT, onMeshReady);
@@ -688,7 +700,7 @@ export function Wasm3DViewport({
     // Ziel + Abstand kommen aus Rust (Modell UND sichtbare Punktwolken, dieselbe Rechnung wie das
     // Preset selbst); nur ältere WASM-Builds fallen auf die TS-Spiegelung zurück.
     const fit = viewFit();
-    const { target, dist } = fit ?? fitTargetDist(projectRef.current);
+    const { target, dist } = fit ?? fitTargetDist(projectRef.current, hideRef.current);
     // Alle Presets ausser `perspective` sind orthografisch (front/top/side/iso, wie
     // die Rust-Seite `preset_camera`) → die freie Kamera bleibt danach ebenfalls
     // ortho („locked iso"). Die Bildhöhe liest der Orbit aus der Rust-Preset-Kamera, damit der
@@ -778,7 +790,10 @@ export function Wasm3DViewport({
   // Sonne + Schatten im 3D ([64]) aus der Sonnenstudie: der Zeitregler im Lage-Panel ändert
   // `sunStudy.when`, hier wird neu gesetzt und gezeichnet. Der Schlüssel hält Modelländerungen ohne
   // neue Sonne draussen; die Schattentextur rendert die Engine selbst nur nach einer Änderung neu.
-  const sun3d = sun3dFor(project);
+  // Schatten im 3D liegen wie im Grundriss auf `08 Schatten` ([180]).
+  const layers = project.layers;
+  const shadowsShown = useMemo(() => !hiddenClassCodes({ layers } as Project, hide).has("08"), [layers, hide]);
+  const sun3d = sun3dFor(project, shadowsShown);
   const sunKey = sun3dKey(sun3d);
   const sun3dRef = useRef(sun3d);
   sun3dRef.current = sun3d;
@@ -1425,6 +1440,7 @@ export function Wasm3DViewport({
       const { walls, slabs, openings, stairs, roofs, contextMeshes, drawings, columns, solids, openingMeshes, stairMeshes, drawingMeshes, trees } = pickGeometry(
         projectRef.current,
         explodeRef.current,
+        hideRef.current,
       );
       // Erweiterter Pick inkl. Öffnungen (Fenster/Türen) + Treppen + Kontext-
       // Meshes + freie 2D-Zeichnungen (Linie/Polylinie/Rechteck, s.

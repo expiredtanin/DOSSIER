@@ -41,6 +41,7 @@
 // `toWalls3d/` — siehe dort für die konkrete Emissions-Logik je Bauteil.
 
 import type { Project, Vec2 } from "../model/types";
+import { collectVisibleCodes, flattenCategories } from "../model/types";
 import type { DetailLevel } from "../model/viewTypes";
 import { documentFor } from "../core/document";
 import { coreEpoch } from "../engine/coreWasm";
@@ -72,8 +73,31 @@ export function emitDrawingLineVerts(
   project: Project,
   /** Explosionsabstand ([65]): Spuren heben sich mit ihrem Geschoss; 0 = aus. */
   explode = 0,
+  /** [180] Zusätzlich ausgeblendete Klassen (Darstellungsmodus), s. {@link Model3dOptions.hide}. */
+  hide?: readonly string[],
 ): Float32Array {
-  return documentFor(project).drawingLineVerts(explodeGap(explode));
+  return documentFor(project).drawingLineVerts(explodeGap(explode), classFilterText(hide));
+}
+
+/**
+ * [180] Klassen-Filter der 3D-Abfragen (Kern `model3d::ClassFilter`): der Kern blendet die Klassen aus, die im
+ * Ebenen-Baum aus sind (Ebenen-Panel, Kombinationen, Vorlagen); `hide` ergänzt die, die der Darstellungsmodus
+ * nicht zeichnet (`categoryDisplay(code).render === false`).
+ */
+export function classFilterText(hide?: readonly string[], extra?: Record<string, unknown>): string {
+  const h = hide && hide.length ? { hide } : {};
+  return hide?.length || extra ? JSON.stringify({ ...extra, ...h }) : "";
+}
+
+/**
+ * [180] Ausgeblendete Klassen-Codes (Ebenen-Baum samt Elternklassen, dazu `hide`) — für die TS-seitigen
+ * 3D-Teile (truck-Körper); alles andere filtert der Kern.
+ */
+export function hiddenClassCodes(project: Project, hide?: readonly string[]): Set<string> {
+  const out = new Set(hide ?? []);
+  const visible = collectVisibleCodes(project.layers ?? []);
+  for (const c of flattenCategories(project.layers ?? [])) if (!visible.has(c.code)) out.add(c.code);
+  return out;
 }
 
 /**
@@ -93,8 +117,10 @@ export function emitSurfacePatternLines(
   project: Project,
   /** Explosionsabstand ([65]): Linien heben sich mit dem Geschoss ihres Bauteils; 0 = aus. */
   explode = 0,
+  /** [180] Zusätzlich ausgeblendete Klassen, s. {@link Model3dOptions.hide}. */
+  hide?: readonly string[],
 ): Float32Array {
-  return documentFor(project).surfacePatternLines(explodeGap(explode));
+  return documentFor(project).surfacePatternLines(explodeGap(explode), classFilterText(hide));
 }
 
 /**
@@ -166,6 +192,12 @@ export interface Model3dOptions {
    * Öffnungsdetail, „Handlauf aus" lässt die Handläufe weg. Rechnet ohne den inkrementellen Kern-Cache.
    */
   modelView?: string;
+  /**
+   * [180] Klassen, die zusätzlich zum Ebenen-Baum nicht gezeichnet werden (Darstellungsmodus des Ebenen-Panels).
+   * Ausgeblendete Klassen fehlen im Modell, in der Pick-Geometrie und im Export der Ansicht (Kern filtert nach dem
+   * Cache, Umschalten rechnet keine Wand neu).
+   */
+  hide?: readonly string[];
 }
 
 /** Das volle 3D-Modell: Wände (mit Öffnungen) + Deckenplatten + Kontext-Meshes. */
@@ -178,14 +210,11 @@ export function projectToModel3d(project: Project, opts: Model3dOptions = {}): R
   const args = [layered ? 1 : 0, DETAIL_CODE[detail] ?? 3, opts.forSection ? 1 : 0, voids ? 1 : 0, explode];
   // Ohne Explosion inkrementell ([58]): nur geänderte Wände reisen aus dem Kern und werden gelesen.
   const doc = documentFor(project);
-  const parts = opts.modelView
-    ? doc.query<Model3dParts>("model3dParts", args, JSON.stringify({ modelView: opts.modelView }))
-    : explode > 0
-      ? doc.query<Model3dParts>("model3dParts", args)
-      : doc.model3dParts<Model3dParts>(args);
+  const text = classFilterText(opts.hide, opts.modelView ? { modelView: opts.modelView } : undefined);
+  const parts = opts.modelView || explode > 0 ? doc.query<Model3dParts>("model3dParts", args, text) : doc.model3dParts<Model3dParts>(args, text);
   // Die truck-Körper (asynchron, mit Cache) kommen zwischen Kontext-Meshes und Stützen.
   const meshes: RMesh[] = [...parts.contextMeshes];
-  for (const m of emitExtrudedSolids(project, parts.floorOffsets)) meshes.push(m);
+  for (const m of emitExtrudedSolids(project, parts.floorOffsets, hiddenClassCodes(project, opts.hide))) meshes.push(m);
   for (const m of parts.columnMeshes) meshes.push(m);
   for (const m of parts.openingMeshes) meshes.push(m);
   for (const m of parts.stairMeshes) meshes.push(m);
@@ -238,7 +267,7 @@ export function projectToModel3dParts(project: Project, opts: Model3dOptions = {
   if (explodeGap(opts.explode) > 0) return null;
   const voids = !!opts.voids && typeof window !== "undefined";
   const args = [layered ? 1 : 0, DETAIL_CODE[detail] ?? 3, opts.forSection ? 1 : 0, voids ? 1 : 0, 0];
-  const { parts, keyed } = documentFor(project).model3dPartsKeyed<Model3dParts>(args);
+  const { parts, keyed } = documentFor(project).model3dPartsKeyed<Model3dParts>(args, classFilterText(opts.hide));
   const wallEntries = keyed.wallEntries as (readonly [number, RWall[]])[];
   const openingEntries = keyed.openingEntries as (readonly [number, RMesh[][]])[];
   // Abzugskörper wie im vollen Modell (gleiche Reihenfolge, gleicher truck-Cache); danach zuordnen,
@@ -283,7 +312,7 @@ export function projectToModel3dParts(project: Project, opts: Model3dOptions = {
   const rest = (id: string, p: Omit<Model3dPart, "id" | "fixed">) => out.push({ id, fixed: false, ...p });
   rest("slabs", { slabs: vm.slabs, meshes: slabMeshes });
   rest("context", { meshes: parts.contextMeshes });
-  rest("extrusions", { meshes: emitExtrudedSolids(project, parts.floorOffsets) });
+  rest("extrusions", { meshes: emitExtrudedSolids(project, parts.floorOffsets, hiddenClassCodes(project, opts.hide)) });
   rest("columns", { meshes: parts.columnMeshes });
   rest("openingTail", { meshes: keyed.openingTail as RMesh[] });
   rest("stairs", { meshes: [...parts.stairMeshes, ...parts.stairRailings] });
@@ -330,6 +359,8 @@ export function pickGeometry(
   project: Project,
   /** Explosionsabstand ([65]) wie bei {@link projectToModel3d}; 0 = aus. */
   explode = 0,
+  /** [180] Zusätzlich ausgeblendete Klassen (nicht anwählbar), s. {@link Model3dOptions.hide}. */
+  hide?: readonly string[],
 ): {
   walls: RWall[];
   slabs: RSlab[];
@@ -346,7 +377,7 @@ export function pickGeometry(
   /** [149] Bäume (Stamm + Krone). */
   trees: PickTreeMesh[];
 } {
-  const g = documentFor(project).query("pickGeometry", [explodeGap(explode)]) as ReturnType<typeof pickGeometry>;
+  const g = documentFor(project).query("pickGeometry", [explodeGap(explode)], classFilterText(hide)) as ReturnType<typeof pickGeometry>;
   // [137] Freie Körper: das geladene truck-Netz (Loft, Rotation, Verjüngung, Rundung) statt der Prisma-Näherung des Kerns.
   const gap = explodeGap(explode);
   const offsets = gap > 0 ? explodeFloorOffsets(project, gap) : undefined;

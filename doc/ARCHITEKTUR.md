@@ -395,13 +395,25 @@ alle Klassen aus ⇒ Grundriss jedes Geschosses, Schnitte, Ansichten leer; jede 
 | Höhenlinien + Beschriftung, Gelände, Baugrube, Netze, Luftbild, Bäume | Element ([181]) | `context.rs`, `trees.rs` |
 | Kontext-Unterlagen (DXF/PDF) | Element (2D-Zeichnung) | `drawings.rs` |
 | Grundlinie Schnitt/Ansicht | keine eigene: entfällt, wenn nichts gezeichnet ist | `section/primitives.rs`, `elevation/mod.rs` |
+| 3D: Wände, Decken, Treppen (Platten) | Element über `wallId`/`ceilingId` | `model3d/classes.rs::ClassFilter` |
+| 3D: Dächer, Stützen, Bäume, Läufe, Geländer, Absturzsicherung, Kontext | Element über `RMesh.owner`/`RRoofLayer.owner` | `classes.rs::Owner` |
+| 3D: Öffnungs-Einbauteile | Öffnung (+ Wirt); je Wand gemeinsam gerechnet, darum Filter auf die Eingabe | `model3d_cache.rs` (Varianten), `openings.rs::emit_opening_meshes_with` |
+| 3D: 2D-Spuren, Flächenmuster, Pick | Element | `drawings.rs`, `surface_pattern3d.rs`, `ClassFilter::retain_pick` |
+| 3D: freie Körper (truck) | Element (`ExtrudedSolid.categoryCode`) | TS `toWalls3d/extrusions.ts` |
+| 3D: Sonnenschatten, zulässige Hülle | `08 Schatten`, `01 Vermessung` | TS `Wasm3DViewport.tsx`, `useWasm3dRenderer.ts` |
 
 Ausgeblendete Klassen wirken VOR der Sichtbarkeitsrechnung: im Schnitt (`compute_section_vis`) ohne Schnittband,
 Dominanz, Projektion und Verdeckung (Cache-Schlüssel mit den Klassen), in der Ansicht vor Maler-Ordnung, Schatten und
 `cull_under_roofs`; graue Klassen verdecken weiter.
 
-Offen: Bauzonen sind kein eigener Planinhalt (nur Baurecht-Einstellungen); 3D (render3d-Teile, Pick) blendet nur
-Kontext-Netze nach Klasse aus.
+**3D** ([180]): Der Kern filtert nach dem Ebenen-Baum (Ebenen-Panel, Kombinationen, Vorlagen); was der Darstellungsmodus
+zusätzlich nicht zeichnet, schickt die Hülle als `{"hide": [codes]}` (`toWalls3d.ts::classFilterText`, Abfragen
+`model3dParts`, `model3dPartsDelta`, `pickGeometry`, `doc_drawing_line_verts`, `doc_surface_pattern_lines`). Gefiltert wird
+nach dem 3D-Cache: `layers` ist dort keine globale Änderung, Teil-Updates halten Einträge ausgeblendeter Klassen
+(`wallKeep`/`openingKeep`), Umschalten rechnet keine Wand neu.
+
+Offen: Bauzonen sind kein eigener Planinhalt (nur Baurecht-Einstellungen); „grau" im 3D nicht gedämpft (render3d kann es nicht, nur `set_ghost` für die Hülle); Datei-Exporte
+(OBJ/glTF/IFC/STEP) bleiben vollständig.
 
 ---
 

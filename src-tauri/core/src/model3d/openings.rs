@@ -174,18 +174,24 @@ fn write_opening(w: &mut FlatWriter, p: &Project, op: &Opening) {
 /// Bogenwände ([T2]): je Wand auf der abgewickelten Ersatzwand gerechnet und die Ecken gebogen — die
 /// Einbauteile bleiben gerade (Sehne zwischen den Laibungen), ihre Enden sitzen radial in der Laibung.
 pub fn emit_opening_meshes(p: &Project, detail: f64) -> Vec<RMesh> {
+    emit_opening_meshes_with(p, detail, &|_| true)
+}
+
+/// Wie [`emit_opening_meshes`], nur für die Öffnungen mit `keep` ([180] Klassen-Filter: die Teile einer
+/// Wand werden gemeinsam gerechnet, darum wirkt der Filter auf die Eingabe).
+pub fn emit_opening_meshes_with(p: &Project, detail: f64, keep: &dyn Fn(&Opening) -> bool) -> Vec<RMesh> {
     let arcs: Vec<usize> = p.walls.iter().enumerate().filter(|(_, w)| crate::wall_arc::WallArc::of_wall(w).is_some()).map(|(i, _)| i).collect();
     if arcs.is_empty() {
-        return emit_opening_meshes_plain(p, detail);
+        return emit_opening_meshes_plain(p, detail, keep);
     }
     let mut q = p.clone();
     let arc_ids: std::collections::HashSet<&str> = arcs.iter().map(|&i| p.walls[i].id.as_str()).collect();
-    q.openings = p.openings.as_ref().map(|v| v.iter().filter(|o| !arc_ids.contains(o.host_wall_id.as_str())).cloned().collect());
-    let mut out = emit_opening_meshes_plain(&q, detail);
+    q.openings = p.openings.as_ref().map(|v| v.iter().filter(|o| keep(o) && !arc_ids.contains(o.host_wall_id.as_str())).cloned().collect());
+    let mut out = emit_opening_meshes_plain(&q, detail, &|_| true);
     for &i in &arcs {
         let Some((arc, v)) = crate::wall_arc::unrolled_wall(&p.walls[i]) else { continue };
         q.walls = vec![v];
-        let own: Vec<Opening> = p.openings.as_deref().unwrap_or(&[]).iter().filter(|o| o.host_wall_id == p.walls[i].id).cloned().collect();
+        let own: Vec<Opening> = p.openings.as_deref().unwrap_or(&[]).iter().filter(|o| o.host_wall_id == p.walls[i].id && keep(o)).cloned().collect();
         // [106] Öffnungen mit Schichteinzug liegen gerade auf der Sehne über `reveal_zone` (wie die
         // Teilwand mit dem Loch, `wall_arc::chord_walls`); die übrigen werden gebogen.
         let zone = |o: &Opening| -> Option<(f64, f64)> {
@@ -195,7 +201,7 @@ pub fn emit_opening_meshes(p: &Project, detail: f64) -> Vec<RMesh> {
         };
         let (zoned, bent): (Vec<Opening>, Vec<Opening>) = own.into_iter().partition(|o| zone(o).is_some());
         q.openings = Some(bent);
-        for mut m in emit_opening_meshes_plain(&q, detail) {
+        for mut m in emit_opening_meshes_plain(&q, detail, &|_| true) {
             for c in m.positions.chunks_exact_mut(3) {
                 let w = arc.point(c[0], c[1]);
                 c[0] = w.x;
@@ -207,7 +213,7 @@ pub fn emit_opening_meshes(p: &Project, detail: f64) -> Vec<RMesh> {
             let Some((sa, sb)) = zone(&o) else { continue };
             let (pa, u, chord) = crate::wall_arc::chord_of(&arc, sa, sb);
             q.openings = Some(vec![o]);
-            for mut m in emit_opening_meshes_plain(&q, detail) {
+            for mut m in emit_opening_meshes_plain(&q, detail, &|_| true) {
                 for c in m.positions.chunks_exact_mut(3) {
                     let t = (c[0] - sa) / (sb - sa) * chord;
                     let (x, y) = (pa.x + u.x * t - u.y * c[1], pa.y + u.y * t + u.x * c[1]);
@@ -221,11 +227,14 @@ pub fn emit_opening_meshes(p: &Project, detail: f64) -> Vec<RMesh> {
     out
 }
 
-fn emit_opening_meshes_plain(p: &Project, detail: f64) -> Vec<RMesh> {
-    let by_wall = p.openings_by_wall();
+fn emit_opening_meshes_plain(p: &Project, detail: f64, keep: &dyn Fn(&Opening) -> bool) -> Vec<RMesh> {
+    let mut by_wall = p.openings_by_wall();
+    for v in by_wall.values_mut() {
+        v.retain(|o| keep(o));
+    }
     let per: Vec<WallOpeningMeshes> = p.walls.iter().map(|wall| wall_opening_meshes(p, wall, by_wall.get(wall.id.as_str()).map_or(&[][..], |v| v.as_slice()), detail)).collect();
     let mut out = assemble_opening_meshes(per);
-    out.extend(surface_window_meshes(p));
+    out.extend(surface_window_meshes_with(p, keep));
     out
 }
 
@@ -239,7 +248,7 @@ pub(crate) struct WallOpeningMeshes {
 }
 
 /// Reihenfolge des ganzen Modells: alle Wände je Durchgang, dann alle Zargen, dann alle Formöffnungen
-/// (ohne die Dach-/Deckenfenster, s. [`surface_window_meshes`]).
+/// (ohne die Dach-/Deckenfenster, s. [`surface_window_meshes_with`]).
 pub(crate) fn assemble_opening_meshes(per: Vec<WallOpeningMeshes>) -> Vec<RMesh> {
     let mut lists: [Vec<RMesh>; 5] = Default::default();
     for m in per {
@@ -251,10 +260,10 @@ pub(crate) fn assemble_opening_meshes(per: Vec<WallOpeningMeshes>) -> Vec<RMesh>
     lists.into_iter().flatten().collect()
 }
 
-/// Dach-/Deckenfenster ([103]).
-pub(crate) fn surface_window_meshes(p: &Project) -> Vec<RMesh> {
+/// Dach-/Deckenfenster ([103]) der Öffnungen mit `keep` ([180] Klassen-Filter).
+pub(crate) fn surface_window_meshes_with(p: &Project, keep: &dyn Fn(&Opening) -> bool) -> Vec<RMesh> {
     let mut out = Vec::new();
-    for op in p.openings.as_deref().unwrap_or(&[]) {
+    for op in p.openings.as_deref().unwrap_or(&[]).iter().filter(|o| keep(o)) {
         if let Some(f) = crate::opening_shape::host_frame(p, op) {
             for (part, positions) in crate::opening_shape::surface_window_boxes(p, op, &f) {
                 out.push(box_mesh(positions, PART_RGB[part as usize]));
@@ -335,6 +344,7 @@ fn box_meshes_of_flat(buf: &[f64]) -> Vec<RMesh> {
             color: PART_RGB.get(part).copied().unwrap_or(PART_RGB[1]),
             vertex_colors: None,
             material_index: None,
+            owner: Owner::None,
         });
         i += 25;
     }
@@ -342,7 +352,7 @@ fn box_meshes_of_flat(buf: &[f64]) -> Vec<RMesh> {
 }
 
 fn box_mesh(positions: [f64; 24], color: Rgb) -> RMesh {
-    RMesh { crease_angle: None, positions: positions.to_vec(), indices: OPENING_BOX_TRIS.to_vec(), kind: "extrusion", color, vertex_colors: None, material_index: None }
+    RMesh { crease_angle: None, positions: positions.to_vec(), indices: OPENING_BOX_TRIS.to_vec(), kind: "extrusion", color, vertex_colors: None, material_index: None, owner: Owner::None }
 }
 
 /// Schichten einer Wand für die Füllkörper einer Formöffnung ([G3]): Dicke (auf `total` skaliert)
@@ -513,7 +523,7 @@ fn door_frame_boxes(out: &mut Vec<RMesh>, wall: &Wall, wr: &WallRef, op: &Openin
             ];
             for b in boxes.into_iter().flatten() {
                 out.push(RMesh {
-                    crease_angle: None, positions: b.to_vec(), indices: OPENING_BOX_TRIS.to_vec(), kind: "extrusion", color: rgb, vertex_colors: None, material_index: None });
+                    crease_angle: None, positions: b.to_vec(), indices: OPENING_BOX_TRIS.to_vec(), kind: "extrusion", color: rgb, vertex_colors: None, material_index: None, owner: Owner::None });
             }
         }
     }
