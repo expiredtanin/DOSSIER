@@ -226,6 +226,7 @@ pub fn elevation_primitives_with(p: &Project, level: &LevelSpec, shadows: bool, 
     faces.extend(collect_column_faces(p, &frame));
     faces.extend(collect_mesh_faces(p, &frame));
     faces.extend(collect_body_faces(p, &frame));
+    faces.extend(collect_shoring_faces(p, &frame));
     // Ansichtsbereich ([36]): Bauteile, deren nächster Punkt weiter als `depth` hinter der Ansichtsebene
     // liegt, entfallen ganz (samt ihren Öffnungen, s. unten).
     let far = level.depth.filter(|d| *d > 0.0).map(|d| (d, drop_far_faces(&mut faces, d)));
@@ -253,8 +254,15 @@ pub fn elevation_primitives_with(p: &Project, level: &LevelSpec, shadows: bool, 
     }
     let mut mesh_cat: HashMap<&str, &str> = HashMap::new();
     for c in p.context.as_deref().unwrap_or(&[]) {
-        if let ContextObject::ImportedMesh(m) = c {
-            mesh_cat.entry(m.id.as_str()).or_insert(m.category_code.as_str());
+        match c {
+            ContextObject::ImportedMesh(m) => {
+                mesh_cat.entry(m.id.as_str()).or_insert(m.category_code.as_str());
+            }
+            // [68] Verbauwand der Baugrube: Klasse der Baugrube.
+            ContextObject::Excavation(e) => {
+                mesh_cat.entry(e.id.as_str()).or_insert(e.category_code.as_str());
+            }
+            _ => {}
         }
     }
     // [180] Freie Körper mit ihrer Klasse.

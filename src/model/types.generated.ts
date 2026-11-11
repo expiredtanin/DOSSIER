@@ -1279,6 +1279,15 @@ export type Excavation = {
    * [68] Senkrechter Verbau (Spundwand) je Kante (wie `edgeSlopes`): keine Böschung, Wand steht senkrecht.
    */
   edgeShoring?: Array<boolean>;
+  /**
+   * [68] Art des Verbaus auf den verbauten Kanten: `sheetPile` (Spundwand, Vorgabe), `soldierPile` (Rühlwand),
+   * `borePile` (Bohrpfahlwand). Bestimmt Vorgabe-Dicke und Schraffur im Schnitt und Grundriss.
+   */
+  shoringKind?: string;
+  /** [68] Dicke der Verbauwand in m (nach aussen von der Sohlkante); fehlt = Vorgabe der Art. */
+  shoringThickness?: number;
+  /** [68] Einbindetiefe der Verbauwand unter die Sohle in m; fehlt = 1 m. */
+  shoringEmbed?: number;
 };
 
 /** Ein extrudierter Körper: geschlossenes Profil (Modell-Meter) + Höhe. */

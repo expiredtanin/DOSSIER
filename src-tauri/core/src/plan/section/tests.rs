@@ -861,6 +861,120 @@ fn gelaende_mit_baugrube_im_schnitt() {
     assert!(!f.is_empty() && f.iter().all(|q| q.natural == Some(0.0) && q.designed.is_some_and(|z| (z + 2.0).abs() < 1e-6)));
 }
 
+/// [68] Verbau im Schnitt: verbaute Kanten werden zu geschnittenen Wänden mit Dicke und Schraffur der Verbauart,
+/// das Erdreich-Band spart sie aus; Klasse der Baugrube steuert die Sichtbarkeit.
+#[test]
+fn verbauwand_im_schnitt() {
+    let mut p = sample();
+    let flat = TerrainMesh {
+        id: "t".into(),
+        positions: vec![-50.0, -50.0, 0.0, 50.0, -50.0, 0.0, 50.0, 50.0, 0.0, -50.0, 50.0, 0.0],
+        indices: vec![0.0, 1.0, 2.0, 0.0, 2.0, 3.0],
+        category_code: "02".into(),
+        ..Default::default()
+    };
+    let pit = Excavation {
+        id: "bg".into(),
+        category_code: "07".into(),
+        outline: vec![Vec2 { x: -1.0, y: -1.0 }, Vec2 { x: 6.0, y: -1.0 }, Vec2 { x: 6.0, y: 5.0 }, Vec2 { x: -1.0, y: 5.0 }],
+        bottom: -2.0,
+        edge_shoring: Some(vec![true; 4]),
+        shoring_kind: Some("borePile".into()),
+        shoring_thickness: Some(0.5),
+        ..Default::default()
+    };
+    p.context = Some(vec![ContextObject::TerrainMesh(flat), ContextObject::Excavation(pit)]);
+    let out = compute_section(&p, &level(&p, "schnitt-a"), &[]).unwrap().unwrap();
+    assert!(!out.shoring.is_empty(), "Verbauwand geschnitten");
+    for w in &out.shoring {
+        let zs: Vec<f64> = w.ring.iter().map(|q| q[1]).collect();
+        let (lo, hi) = (zs.iter().cloned().fold(f64::INFINITY, f64::min), zs.iter().cloned().fold(f64::NEG_INFINITY, f64::max));
+        assert!((lo + 3.0).abs() < 1e-6 && hi.abs() < 1e-6, "Sohle −2 minus Einbindung 1, Oberkante Gelände 0: {lo} {hi}");
+        assert!(w.ring[1][0] - w.ring[0][0] >= 0.5 - 1e-6, "mindestens die Wanddicke");
+        assert_eq!(w.category, "07");
+    }
+    let (prims, _) = section_primitives(&out, false, false, &Visibility::default());
+    assert!(prims.iter().any(|q| matches!(q, Primitive::Polygon { hatch, context_object_id: Some(id), .. } if id == "bg" && hatch.pattern != HatchPattern::None)));
+    // Das Erdreich-Band lässt die Wand aus.
+    let wall_area: f64 = out.shoring.iter().map(|w| (w.ring[1][0] - w.ring[0][0]) * (w.ring[3][1] - w.ring[0][1])).sum();
+    assert!(wall_area > 1.0);
+    // Klasse aus: keine Wand.
+    let vis = Visibility { has_vis: true, invisible: ["07".to_string()].into_iter().collect(), ..Default::default() };
+    let (prims2, _) = section_primitives(&out, false, false, &vis);
+    assert!(!prims2.iter().any(|q| matches!(q, Primitive::Polygon { context_object_id: Some(id), .. } if id == "bg")));
+    // Ohne die Wand kein Loch im Erdreich-Band: die Fläche wächst um (mindestens) die Wandfläche.
+    let earth_area = |pr: &[Primitive]| -> f64 {
+        pr.iter()
+            .filter_map(|q| match q {
+                Primitive::Polygon { pts, hatch, .. } if hatch.pattern == HatchPattern::Earth => Some((0..pts.len()).map(|i| pts[i].x * pts[(i + 1) % pts.len()].y - pts[(i + 1) % pts.len()].x * pts[i].y).sum::<f64>().abs() / 2.0),
+                _ => None,
+            })
+            .sum()
+    };
+    assert!(earth_area(&prims2) > earth_area(&prims) + 0.5, "{} {} {wall_area}", earth_area(&prims2), earth_area(&prims));
+}
+
+/// [68] Verbau in der Ansicht: Wandflächen der Baugrube (Pick = Baugrube), Klasse steuert sie.
+#[test]
+fn verbauwand_in_der_ansicht() {
+    let (p, _) = shoring_site();
+    let lv = level(&p, "ansicht-sued");
+    let run = |vis: &Visibility| super::super::elevation::elevation_primitives(&p, &lv, false, false, vis, 100.0).unwrap().unwrap().0;
+    let has = |ep: &[Primitive]| ep.iter().any(|q| matches!(q, Primitive::Polygon { context_object_id: Some(id), .. } if id == "bg"));
+    assert!(has(&run(&Visibility::default())), "Verbau in der Ansicht");
+    let vis = Visibility { has_vis: true, invisible: ["07".to_string()].into_iter().collect(), ..Default::default() };
+    assert!(!has(&run(&vis)), "Klasse aus: kein Verbau");
+}
+
+fn shoring_site() -> (Project, Excavation) {
+    let mut p = sample();
+    let flat = TerrainMesh {
+        id: "t".into(),
+        positions: vec![-50.0, -50.0, 0.0, 50.0, -50.0, 0.0, 50.0, 50.0, 0.0, -50.0, 50.0, 0.0],
+        indices: vec![0.0, 1.0, 2.0, 0.0, 2.0, 3.0],
+        category_code: "02".into(),
+        ..Default::default()
+    };
+    let pit = Excavation {
+        id: "bg".into(),
+        category_code: "07".into(),
+        outline: vec![Vec2 { x: -1.0, y: -1.0 }, Vec2 { x: 6.0, y: -1.0 }, Vec2 { x: 6.0, y: 5.0 }, Vec2 { x: -1.0, y: 5.0 }],
+        bottom: -2.0,
+        edge_shoring: Some(vec![true; 4]),
+        ..Default::default()
+    };
+    p.context = Some(vec![ContextObject::TerrainMesh(flat), ContextObject::Excavation(pit.clone())]);
+    (p, pit)
+}
+
+/// [68] Einbindetiefe als Feld: `shoringEmbed` ersetzt die Vorgabe von 1 m.
+#[test]
+fn verbauwand_einbindetiefe_feld() {
+    let mut p = sample();
+    let flat = TerrainMesh {
+        id: "t".into(),
+        positions: vec![-50.0, -50.0, 0.0, 50.0, -50.0, 0.0, 50.0, 50.0, 0.0, -50.0, 50.0, 0.0],
+        indices: vec![0.0, 1.0, 2.0, 0.0, 2.0, 3.0],
+        category_code: "02".into(),
+        ..Default::default()
+    };
+    let pit = Excavation {
+        id: "bg".into(),
+        outline: vec![Vec2 { x: -1.0, y: -1.0 }, Vec2 { x: 6.0, y: -1.0 }, Vec2 { x: 6.0, y: 5.0 }, Vec2 { x: -1.0, y: 5.0 }],
+        bottom: -2.0,
+        edge_shoring: Some(vec![true; 4]),
+        shoring_embed: Some(2.5),
+        ..Default::default()
+    };
+    p.context = Some(vec![ContextObject::TerrainMesh(flat), ContextObject::Excavation(pit)]);
+    let out = compute_section(&p, &level(&p, "schnitt-a"), &[]).unwrap().unwrap();
+    assert!(!out.shoring.is_empty());
+    for w in &out.shoring {
+        let lo = w.ring.iter().map(|q| q[1]).fold(f64::INFINITY, f64::min);
+        assert!((lo + 4.5).abs() < 1e-6, "{lo}");
+    }
+}
+
 fn ov_rule(conds: serde_json::Value, actions: serde_json::Value) -> OverrideRule {
     let c = conds.as_array().unwrap();
     serde_json::from_value(serde_json::json!({"id": "r", "name": "r", "enabled": true, "condition": c[0], "conditions": c[1..].to_vec(), "actions": actions})).unwrap()

@@ -36,6 +36,12 @@ pub struct ExSpec {
     pub cut_tan: Vec<f64>,
     /// Kante mit senkrechtem Verbau (Spundwand): keine Böschung, keine Schraffur.
     pub shored: Vec<bool>,
+    /// [68] Art des Verbaus (`sheetPile`, `soldierPile`, `borePile`) und Wanddicke in m.
+    pub shore_kind: &'static str,
+    pub shore_t: f64,
+    /// [68] Umriss vor dem Arbeitsraum (Gebäude-Grundfläche, gegen den Uhrzeigersinn) und Arbeitsraum in m.
+    pub base: Vec<P2>,
+    pub ws: f64,
     pub fill_tan: f64,
     pub berm_w: f64,
     pub berm_h: f64,
@@ -117,9 +123,12 @@ impl ExSpec {
         }
         // Arbeitsraum: Sohle um `workingSpace` nach aussen (Gehrung, höchstens 4× so weit an spitzen Ecken).
         let ws = e.working_space.filter(|v| v.is_finite() && *v > 0.0).unwrap_or(0.0);
+        let base = ring.clone();
         if ws > 0.0 {
             ring = offset_ring(&ring, ws);
         }
+        let (shore_kind, default_t) = shoring_kind(e.shoring_kind.as_deref());
+        let shore_t = e.shoring_thickness.filter(|v| v.is_finite() && *v > 0.0).unwrap_or(default_t);
         let bw = e.berm_width.filter(|v| v.is_finite() && *v > 0.0).unwrap_or(0.0);
         let bh = e.berm_height.filter(|v| v.is_finite() && *v > 0.0).unwrap_or(0.0);
         Some(ExSpec {
@@ -127,6 +136,10 @@ impl ExSpec {
             bottom: e.bottom + dz,
             cut_tan,
             shored,
+            shore_kind,
+            shore_t,
+            base,
+            ws,
             fill_tan: tan_deg(e.fill_slope.filter(|s| s.is_finite() && *s > 0.0).unwrap_or(DEFAULT_FILL_SLOPE)),
             berm_w: if bh > 0.0 { bw } else { 0.0 },
             berm_h: if bw > 0.0 { bh } else { 0.0 },
@@ -214,6 +227,190 @@ impl ExSpec {
         }
         r
     }
+}
+
+// ── Verbau ([68]) ────────────────────────────────────────────────────────────
+
+/// Einbindetiefe der Verbauwand unter die Sohle (m).
+pub const SHORING_EMBED: f64 = 1.0;
+
+/// Einbindetiefe der Baugrube (Feld `shoringEmbed`, Vorgabe [`SHORING_EMBED`]).
+pub fn shoring_embed(e: &Excavation) -> f64 {
+    e.shoring_embed.filter(|v| v.is_finite() && *v >= 0.0).unwrap_or(SHORING_EMBED)
+}
+
+/// Art des Verbaus und ihre Vorgabe-Dicke (m); Unbekanntes = Spundwand.
+pub fn shoring_kind(k: Option<&str>) -> (&'static str, f64) {
+    match k {
+        Some("soldierPile") => ("soldierPile", 0.3),
+        Some("borePile") => ("borePile", 0.6),
+        _ => ("sheetPile", 0.2),
+    }
+}
+
+/// Schraffur-Id der Verbauart (SIA: Stahl, Holz, Beton).
+pub fn shoring_hatch_id(kind: &str) -> &'static str {
+    match kind {
+        "soldierPile" => "std-h-holz",
+        "borePile" => "std-h-beton",
+        _ => "std-h-stahl-detail",
+    }
+}
+
+impl ExSpec {
+    /// Wandbänder der verbauten Kanten: Vierecke von der Sohlkante um die Wanddicke nach aussen (Gehrung an den
+    /// Ecken, wie der Arbeitsraum). Index der Kante, Viereck.
+    pub fn shoring_quads(&self) -> Vec<(usize, Vec<P2>)> {
+        if !self.shored.iter().any(|b| *b) || !(self.shore_t > 0.0) {
+            return Vec::new();
+        }
+        let n = self.ring.len();
+        let off = offset_ring(&self.ring, self.shore_t);
+        (0..n).filter(|i| self.shored[*i]).map(|i| (i, vec![self.ring[i], self.ring[(i + 1) % n], off[(i + 1) % n], off[i]])).collect()
+    }
+}
+
+/// [68] Verbauwand einer Baugrube als geschlossene Prismen (Modellbezug, Höhen = Gelände − Höhenbezug) für 3D, Ansicht
+/// und Pick: je verbauter Kante ein Körper von Sohle − Einbindetiefe bis zum gewachsenen Gelände.
+#[derive(Clone, Debug)]
+pub struct ShoringSolid {
+    pub excavation_id: String,
+    pub kind: &'static str,
+    /// x, y, z je Ecke.
+    pub pos: Vec<f64>,
+    pub idx: Vec<u32>,
+}
+
+/// Verbauwände aller Baugruben des Projekts, ein [`ShoringSolid`] je Baugrube mit Verbau.
+pub fn shoring_solids(p: &Project) -> Vec<ShoringSolid> {
+    let mut out: Vec<ShoringSolid> = Vec::new();
+    for t in terrains(p) {
+        if t.positions.len() < 9 {
+            continue;
+        }
+        let st = site_terrain(p, t);
+        let idx = st.index_orig();
+        for (id, spec, _) in &st.items {
+            if out.iter().any(|s| &s.excavation_id == id) {
+                continue;
+            }
+            let Some(e) = excavations(p).into_iter().find(|e| e.id == *id) else { continue };
+            let quads = spec.shoring_quads();
+            if quads.is_empty() {
+                continue;
+            }
+            let z_bottom = e.bottom - shoring_embed(e);
+            let mut s = ShoringSolid { excavation_id: id.clone(), kind: spec.shore_kind, pos: Vec::new(), idx: Vec::new() };
+            for (_, mut quad) in quads {
+                if signed_area(&quad) < 0.0 {
+                    quad.reverse();
+                }
+                let tops: Vec<Option<f64>> = quad.iter().map(|q| idx.z_at(q[0], q[1]).map(|z| (z - st.datum).max(e.bottom))).collect();
+                if tops.iter().any(Option::is_none) || tops.iter().flatten().all(|z| *z <= e.bottom + 1e-3) {
+                    continue;
+                }
+                let b = s.pos.len() as u32 / 3;
+                for q in &quad {
+                    s.pos.extend([q[0], q[1], z_bottom]);
+                }
+                for (q, z) in quad.iter().zip(&tops) {
+                    s.pos.extend([q[0], q[1], z.unwrap_or(e.bottom)]);
+                }
+                // Unterseite, Oberseite, vier Seiten (aussen, gegen den Uhrzeigersinn).
+                s.idx.extend([b, b + 2, b + 1, b, b + 3, b + 2, b + 4, b + 5, b + 6, b + 4, b + 6, b + 7]);
+                for i in 0..4u32 {
+                    let j = (i + 1) % 4;
+                    s.idx.extend([b + i, b + j, b + 4 + j, b + i, b + 4 + j, b + 4 + i]);
+                }
+            }
+            if !s.idx.is_empty() {
+                out.push(s);
+            }
+        }
+    }
+    out
+}
+
+/// Prüfung des Arbeitsraums an den Ecken des Umrisses ([68]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct WsCheck {
+    /// Verlangte Breite (m).
+    pub required: f64,
+    /// Kleinster Abstand zwischen Gebäude-Umriss und Sohle (m), 0 bei Überschneidung.
+    pub min_width: f64,
+    pub ok: bool,
+    /// Stellen, an denen die Breite fehlt (Ecken der Sohle bzw. des Umrisses, Selbstüberschneidungen).
+    pub spots: Vec<P2>,
+}
+
+fn seg_cross(a: P2, b: P2, c: P2, d: P2) -> Option<P2> {
+    let (r, s) = ([b[0] - a[0], b[1] - a[1]], [d[0] - c[0], d[1] - c[1]]);
+    let den = r[0] * s[1] - r[1] * s[0];
+    if den.abs() < 1e-12 {
+        return None;
+    }
+    let q = [c[0] - a[0], c[1] - a[1]];
+    let t = (q[0] * s[1] - q[1] * s[0]) / den;
+    let u = (q[0] * r[1] - q[1] * r[0]) / den;
+    (t > 1e-9 && t < 1.0 - 1e-9 && u > 1e-9 && u < 1.0 - 1e-9).then(|| [a[0] + t * r[0], a[1] + t * r[1]])
+}
+
+fn ring_dist(p: P2, r: &[P2]) -> f64 {
+    let n = r.len();
+    (0..n).map(|i| seg_dist(p, r[i], r[(i + 1) % n])).fold(f64::INFINITY, f64::min)
+}
+
+/// Arbeitsraum an konkaven und spitzen Ecken: Die Sohle ist der um `ws` versetzte Gebäude-Umriss. In engen Nischen
+/// (< 2·ws) kreuzen sich die versetzten Kanten, an spitzen Ecken kappt die Gehrung bei 4·ws — dort fehlt Breite.
+/// `None` ohne Arbeitsraum.
+pub fn working_space_check(spec: &ExSpec) -> Option<WsCheck> {
+    if !(spec.ws > 0.0) {
+        return None;
+    }
+    let (base, sole) = (&spec.base, &spec.ring);
+    let mut spots: Vec<P2> = Vec::new();
+    let mut min_w = f64::INFINITY;
+    // Ecken der Sohle zum Umriss (innen = Verletzung) und Ecken des Umrisses zur Sohle (aussen = Verletzung).
+    for &v in sole {
+        let w = if point_in_ring(v, base) { 0.0 } else { ring_dist(v, base) };
+        if w < spec.ws - 1e-6 {
+            spots.push(v);
+        }
+        min_w = min_w.min(w);
+    }
+    for &v in base {
+        let w = if point_in_ring(v, sole) { ring_dist(v, sole) } else { 0.0 };
+        if w < spec.ws - 1e-6 {
+            spots.push(v);
+        }
+        min_w = min_w.min(w);
+    }
+    // Selbstüberschneidung der Sohle (zu enge Nische) und Kreuzung mit dem Umriss.
+    let (n, m) = (sole.len(), base.len());
+    for i in 0..n {
+        for j in i + 2..n {
+            if i == 0 && j == n - 1 {
+                continue;
+            }
+            if let Some(x) = seg_cross(sole[i], sole[(i + 1) % n], sole[j], sole[(j + 1) % n]) {
+                spots.push(x);
+            }
+        }
+        for j in 0..m {
+            if let Some(x) = seg_cross(sole[i], sole[(i + 1) % n], base[j], base[(j + 1) % m]) {
+                spots.push(x);
+                min_w = 0.0;
+            }
+        }
+    }
+    let mut uniq: Vec<P2> = Vec::new();
+    for s in spots {
+        if !uniq.iter().any(|u| (u[0] - s[0]).hypot(u[1] - s[1]) < 1e-3) {
+            uniq.push(s);
+        }
+    }
+    let min_width = if min_w.is_finite() { min_w } else { spec.ws };
+    Some(WsCheck { required: spec.ws, min_width, ok: uniq.is_empty(), spots: uniq })
 }
 
 /// Regelmässiges Raster über einem Rechteck (Knoten).
@@ -412,7 +609,7 @@ pub struct Volumes {
 /// je Probe geht der Höhenunterschied einer Baugrube an sie allein — die Summe ist die Vereinigung.
 /// Integriert über ein Raster der Weite ≤ `h` (Mittelpunkte, höchstens ~1.5 Mio. Proben).
 /// `footprint`: Gebäude-Grundfläche (Ringe); Abtrag darin zählt nicht zur Hinterfüllung.
-/// Sohlenfläche = Fläche des Umrisses ohne die der vorherigen Baugruben (Überlappung per Raster).
+/// Sohlenfläche = Fläche des Umrisses ohne die der vorherigen Baugruben (exakt, Polygon-Booleans).
 pub fn volumes_union(orig: &Tin, specs: &[&ExSpec], h: f64, footprint: &[Vec<P2>]) -> Vec<Volumes> {
     if specs.is_empty() {
         return Vec::new();
@@ -431,12 +628,7 @@ pub fn volumes_union(orig: &Tin, specs: &[&ExSpec], h: f64, footprint: &[Vec<P2>
     let (nx, ny) = (((w / h).ceil() as usize).max(1), ((hh / h).ceil() as usize).max(1));
     let (hx, hy) = (w / nx as f64, hh / ny as f64);
     let cell = hx * hy;
-    let boxes: Vec<[f64; 4]> = specs.iter().map(|e| e.bbox()).collect();
-    let overlaps: Vec<bool> = (0..specs.len())
-        .map(|k| (0..k).any(|j| boxes[j][0] < boxes[k][2] && boxes[k][0] < boxes[j][2] && boxes[j][1] < boxes[k][3] && boxes[k][1] < boxes[j][3]))
-        .collect();
-    let mut out: Vec<Volumes> = specs.iter().map(|e| Volumes { bottom_area: signed_area(&e.ring).abs(), ..Default::default() }).collect();
-    let mut shared = vec![0.0; specs.len()];
+    let mut out: Vec<Volumes> = specs.iter().map(|_| Volumes::default()).collect();
     for j in 0..ny {
         for i in 0..nx {
             let p = [reg[0] + (i as f64 + 0.5) * hx, reg[1] + (j as f64 + 0.5) * hy];
@@ -444,9 +636,6 @@ pub fn volumes_union(orig: &Tin, specs: &[&ExSpec], h: f64, footprint: &[Vec<P2>
             let mut cur = t;
             let outside_fp = !footprint.iter().any(|f| point_in_ring(p, f));
             for (k, ex) in specs.iter().enumerate() {
-                if overlaps[k] && p[0] >= boxes[k][0] && p[0] <= boxes[k][2] && p[1] >= boxes[k][1] && p[1] <= boxes[k][3] && point_in_ring(p, &ex.ring) && (0..k).any(|q| point_in_ring(p, &specs[q].ring)) {
-                    shared[k] += cell;
-                }
                 let next = ex.apply(cur, p);
                 let dz = cur - next;
                 if dz > 0.0 {
@@ -461,8 +650,11 @@ pub fn volumes_union(orig: &Tin, specs: &[&ExSpec], h: f64, footprint: &[Vec<P2>
             }
         }
     }
-    for (v, s) in out.iter_mut().zip(shared) {
-        v.bottom_area = (v.bottom_area - s).max(0.0);
+    // Sohlenfläche exakt: Fläche des Umrisses ohne die der vorherigen Baugruben (Polygon-Booleans, [68]).
+    for (k, v) in out.iter_mut().enumerate() {
+        let prev: Vec<crate::flat::Polygon> = specs[..k].iter().map(|e| vec![e.ring.clone()]).collect();
+        let left = crate::polygon_bool::difference(&[vec![specs[k].ring.clone()]], &prev);
+        v.bottom_area = left.iter().flat_map(|poly| poly.iter().map(|r| signed_area(r))).sum::<f64>().max(0.0);
     }
     out
 }
@@ -615,6 +807,12 @@ pub struct ExQty {
     pub cut: f64,
     pub fill: f64,
     pub backfill: f64,
+    /// [68] Arbeitsraum: verlangte Breite, kleinster Abstand Umriss–Sohle, eingehalten? Ohne Arbeitsraum 0 / 0 / true.
+    pub working_space: f64,
+    pub working_space_min: f64,
+    pub working_space_ok: bool,
+    /// Stellen mit fehlender Breite (Modell-x/y).
+    pub working_space_spots: Vec<[f64; 2]>,
 }
 
 pub fn quantities(p: &Project) -> Vec<ExQty> {
@@ -631,9 +829,22 @@ pub fn quantities(p: &Project) -> Vec<ExQty> {
         let (x0, x1) = specs.iter().flat_map(|s| s.ring.iter().map(|q| q[0])).fold((f64::INFINITY, f64::NEG_INFINITY), |a, x| (a.0.min(x), a.1.max(x)));
         let h = ((x1 - x0).max(1.0) / 400.0).clamp(0.02, 0.5);
         let vols = volumes_union(&st.orig, &specs, h, &fp);
-        for ((id, ..), v) in hits.iter().zip(vols) {
+        for ((id, spec, _), v) in hits.iter().zip(vols) {
             let Some(e) = excavations(p).into_iter().find(|e| e.id == *id) else { continue };
-            done.push(ExQty { id: e.id.clone(), name: e.name.clone(), bottom: e.bottom, bottom_area: v.bottom_area, cut: v.cut, fill: v.fill, backfill: v.backfill });
+            let ws = working_space_check(spec);
+            done.push(ExQty {
+                id: e.id.clone(),
+                name: e.name.clone(),
+                bottom: e.bottom,
+                bottom_area: v.bottom_area,
+                cut: v.cut,
+                fill: v.fill,
+                backfill: v.backfill,
+                working_space: ws.as_ref().map_or(0.0, |w| w.required),
+                working_space_min: ws.as_ref().map_or(0.0, |w| w.min_width),
+                working_space_ok: ws.as_ref().is_none_or(|w| w.ok),
+                working_space_spots: ws.map_or_else(Vec::new, |w| w.spots),
+            });
         }
     }
     // Reihenfolge wie im Modell.
@@ -915,6 +1126,67 @@ mod tests {
         let u = volumes_union(&t, &[&sa, &sc], 0.1, &[]);
         let sum = u[0].cut + u[1].cut;
         assert!(sum < single.cut + sep.cut - 1.0 && sum > single.cut, "{sum}");
+    }
+
+    #[test]
+    fn sohlenflaeche_ueberlappung_exakt() {
+        // Zwei 10 × 10-Gruben, die zweite um 6 m versetzt: gemeinsam 4 × 10, also bleiben 60 m² (exakt, nicht gerastert).
+        let t = flat(0.0, 50.0);
+        let sa = ExSpec::of(&square(5.0, -3.0), 0.0).unwrap();
+        let mut c = square(5.0, -3.0);
+        for q in &mut c.outline {
+            q.x += 6.0 + 0.0123;
+        }
+        let sc = ExSpec::of(&c, 0.0).unwrap();
+        let u = volumes_union(&t, &[&sa, &sc], 0.5, &[]);
+        assert!((u[0].bottom_area - 100.0).abs() < 1e-6, "{}", u[0].bottom_area);
+        assert!((u[1].bottom_area - (100.0 - 10.0 * (5.0 - (1.0 + 0.0123)))).abs() < 1e-6, "{}", u[1].bottom_area);
+        // Vollständig überdeckt: 0.
+        let same = volumes_union(&t, &[&sa, &sa], 0.5, &[]);
+        assert!(same[1].bottom_area.abs() < 1e-6);
+    }
+
+    #[test]
+    fn arbeitsraum_ecken_und_nischen() {
+        let v = |x: f64, y: f64| Vec2 { x, y };
+        let pit = |pts: Vec<Vec2>, ws: f64| Excavation { id: "bg".into(), outline: pts, bottom: -3.0, working_space: Some(ws), ..Default::default() };
+        // Rechteck und L-Form (konkave Ecke): Breite eingehalten.
+        let l = pit(vec![v(0.0, 0.0), v(10.0, 0.0), v(10.0, 4.0), v(4.0, 4.0), v(4.0, 10.0), v(0.0, 10.0)], 1.0);
+        let c = working_space_check(&ExSpec::of(&l, 0.0).unwrap()).unwrap();
+        assert!(c.ok && c.spots.is_empty() && (c.min_width - 1.0).abs() < 1e-6, "{c:?}");
+        // Schmale Nische (1 m < 2 · 1 m Arbeitsraum): die versetzten Kanten kreuzen sich, Stelle gemeldet.
+        let u = pit(vec![v(0.0, 0.0), v(10.0, 0.0), v(10.0, 10.0), v(5.5, 10.0), v(5.5, 3.0), v(4.5, 3.0), v(4.5, 10.0), v(0.0, 10.0)], 1.0);
+        let c = working_space_check(&ExSpec::of(&u, 0.0).unwrap()).unwrap();
+        assert!(!c.ok && !c.spots.is_empty(), "{c:?}");
+        // Breite Nische (3 m): in Ordnung.
+        let w = pit(vec![v(0.0, 0.0), v(10.0, 0.0), v(10.0, 10.0), v(6.5, 10.0), v(6.5, 3.0), v(3.5, 3.0), v(3.5, 10.0), v(0.0, 10.0)], 1.0);
+        assert!(working_space_check(&ExSpec::of(&w, 0.0).unwrap()).unwrap().ok);
+        // Sehr spitze Ecke: Gehrung wird gekappt, dort fehlt Breite.
+        let spike = pit(vec![v(0.0, 0.0), v(20.0, 0.5), v(0.0, 1.0)], 1.0);
+        assert!(!working_space_check(&ExSpec::of(&spike, 0.0).unwrap()).unwrap().ok);
+        // Ohne Arbeitsraum keine Prüfung.
+        assert!(working_space_check(&ExSpec::of(&square(5.0, -3.0), 0.0).unwrap()).is_none());
+    }
+
+    #[test]
+    fn verbau_baender_und_arten() {
+        let mut e = square(5.0, -3.0);
+        e.edge_shoring = Some(vec![true, false, false, false]);
+        let spec = ExSpec::of(&e, 0.0).unwrap();
+        assert_eq!((spec.shore_kind, spec.shore_t), ("sheetPile", 0.2));
+        let q = spec.shoring_quads();
+        assert_eq!(q.len(), 1);
+        // 10 m × 0.2 m plus die Gehrungsdreiecke an den Enden.
+        assert!((signed_area(&q[0].1).abs() - 2.04).abs() < 1e-9, "{}", signed_area(&q[0].1));
+        // Band liegt ausserhalb der Sohle.
+        assert!(q[0].1.iter().skip(2).all(|p| !point_in_ring(*p, &spec.ring)));
+        e.shoring_kind = Some("borePile".into());
+        e.shoring_thickness = Some(0.9);
+        let spec = ExSpec::of(&e, 0.0).unwrap();
+        assert_eq!((spec.shore_kind, spec.shore_t), ("borePile", 0.9));
+        assert_eq!(shoring_hatch_id(spec.shore_kind), "std-h-beton");
+        // Ohne Verbau keine Bänder.
+        assert!(ExSpec::of(&square(5.0, -3.0), 0.0).unwrap().shoring_quads().is_empty());
     }
 
     #[test]

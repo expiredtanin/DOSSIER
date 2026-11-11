@@ -130,6 +130,18 @@ pub(super) fn collect_mesh_faces(p: &Project, frame: &[f64; 9]) -> Vec<Face> {
     out
 }
 
+/// [68] Verbauwände der Baugruben als Netz-Flächen (Role::Mesh, id = Baugrube): Farbe der Verbauart wie im 3D,
+/// Verdeckung wie jedes Netz über die exakte Sichtbarkeit.
+pub(super) fn collect_shoring_faces(p: &Project, frame: &[f64; 9]) -> Vec<Face> {
+    let mut out = Vec::new();
+    for s in crate::excavation::shoring_solids(p) {
+        let idx: Vec<f64> = s.idx.iter().map(|&i| i as f64).collect();
+        let Some(info) = crate::mesh_view::analyze(&s.pos, &idx) else { continue };
+        mesh_faces(frame, &s.pos, &info, Role::Mesh, &s.excavation_id, model3d::shoring_rgb(s.kind), &mut out);
+    }
+    out
+}
+
 /// [115] Freie Körper (`extrudedSolids`, Netze aus dem Kern, `solid_mesh.rs`) wie importierte Netze; Abzugskörper
 /// sind kein Material und fehlen.
 pub(super) fn collect_body_faces(p: &Project, frame: &[f64; 9]) -> Vec<Face> {

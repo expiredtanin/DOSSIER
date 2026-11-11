@@ -432,7 +432,18 @@ pub fn section_primitives_mv(out: &Output, mono: bool, hidden_lines: bool, vis: 
     let tov = rules.terrain.as_ref();
     let terrain_shown = out.profiles.iter().all(|pr| pr.category.as_deref().is_none_or(shown)) && !tov.is_some_and(|(a, _)| a.hidden());
     if terrain_shown {
-        for (ring, hatch) in &out.earth {
+        // [68] Sichtbare Verbauwände stehen im Erdreich: das Band lässt sie aus.
+        let walls: Vec<crate::flat::Polygon> = out.shoring.iter().filter(|w| shown(&w.category)).map(|w| vec![w.ring.clone()]).collect();
+        let earth: Vec<(Vec<[f64; 2]>, &HatchRender)> = if walls.is_empty() {
+            out.earth.iter().map(|(r, h)| (r.clone(), h)).collect()
+        } else {
+            out.earth
+                .iter()
+                .flat_map(|(r, h)| crate::polygon_bool::difference(&[vec![r.clone()]], &walls).into_iter().filter_map(move |poly| poly.into_iter().next().filter(|o| o.len() >= 3).map(|o| (o, h))))
+                .collect()
+        };
+        for (ring, hatch) in &earth {
+            let hatch: &HatchRender = hatch;
             let hatch = match tov.and_then(|(_, l)| l.hatch.as_deref()) {
                 Some("none") => no_hatch(),
                 Some("material") | None => hatch.clone(),
@@ -449,6 +460,18 @@ pub fn section_primitives_mv(out: &Output, mono: bool, hidden_lines: bool, vis: 
     }
     // [157] Verdeckte Kanten kommen hier hinein (unter die Schnittflächen, die sie verdecken).
     let cut_start = prims.len();
+    // [68] Verbauwände der Baugruben (Klasse der Baugrube), mit Schraffur der Verbauart; Pick wählt die Baugrube.
+    for w in out.shoring.iter().filter(|w| shown(&w.category)) {
+        let hatch = if mono { HatchRender { color: SECTION_INK.into(), ..w.hatch.clone() } } else { w.hatch.clone() };
+        let mut pr = polygon(w.ring.iter().map(|q| v2(q[0], q[1])).collect(), HATCH_PAPER, SECTION_INK, SECTION_JOINT_MM, hatch);
+        if let Primitive::Polygon { context_object_id, greyed, .. } = &mut pr {
+            *context_object_id = Some(w.excavation_id.clone());
+            *greyed = Some(vis.greyed(&w.category));
+        }
+        w.ring.iter().for_each(|q| acc.add(q[0], q[1]));
+        cut_rings.push(vec![w.ring.clone()]);
+        prims.push(pr);
+    }
     for cp in &merged {
         if cp.pts.len() < 3 {
             continue;

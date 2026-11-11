@@ -249,7 +249,76 @@ pub(super) fn append_terrain_profiles(out: &mut Output, p: &Project, base: (f64,
             }
         }
     }
+    append_shoring(out, p, base, u, range);
     append_earth(out, p, base, u);
+}
+
+/// [68] Verbauwände der Baugruben im Schnitt: das Wandband jeder verbauten Sohlkante (Dicke nach aussen) wird mit
+/// der Schnittebene geschnitten; oben das gewachsene Gelände, unten Sohle minus Einbindetiefe. Bänder ausserhalb
+/// der Schnittweite fallen weg.
+fn append_shoring(out: &mut Output, p: &Project, base: (f64, f64), u: (f64, f64), range: Option<(f64, f64)>) {
+    let mut done: Vec<String> = Vec::new();
+    for t in crate::excavation::terrains(p) {
+        if t.positions.len() < 9 {
+            continue;
+        }
+        let st = crate::excavation::site_terrain(p, t);
+        let idx = st.index_orig();
+        for (id, spec, _) in &st.items {
+            if done.contains(id) {
+                continue;
+            }
+            let Some(e) = crate::excavation::excavations(p).into_iter().find(|e| e.id == *id) else { continue };
+            let quads = spec.shoring_quads();
+            if quads.is_empty() {
+                continue;
+            }
+            done.push(id.clone());
+            let hatch_id = crate::excavation::shoring_hatch_id(spec.shore_kind);
+            let hatch = crate::plan::style::resolve_hatch(p, hatch_id, None, None, None)
+                .unwrap_or(HatchRender { pattern: HatchPattern::Diagonal, scale: 1.0, angle: 45.0, color: HATCH_INK.into(), line_weight: 0.1, ..no_hatch_base() });
+            let z_bottom = e.bottom - crate::excavation::shoring_embed(e);
+            for (_, quad) in quads {
+                // Schnitt der Geraden base + s·u mit dem Viereck: erster und letzter Durchgang.
+                let mut ss: Vec<f64> = Vec::new();
+                for i in 0..quad.len() {
+                    let (a, b) = (quad[i], quad[(i + 1) % quad.len()]);
+                    let (ex, ey) = (b[0] - a[0], b[1] - a[1]);
+                    let den = u.0 * ey - u.1 * ex;
+                    if den.abs() < 1e-12 {
+                        continue;
+                    }
+                    let (wx, wy) = (a[0] - base.0, a[1] - base.1);
+                    let s_ = (wx * ey - wy * ex) / den;
+                    let t_ = (wx * u.1 - wy * u.0) / den;
+                    if (0.0..1.0).contains(&t_) {
+                        ss.push(s_);
+                    }
+                }
+                ss.sort_by(|a, b| a.total_cmp(b));
+                let (Some(&s0), Some(&s1)) = (ss.first(), ss.last()) else { continue };
+                if s1 - s0 < 1e-6 {
+                    continue;
+                }
+                if let Some((lo, hi)) = range {
+                    if s1 < lo - TERRAIN_MARGIN || s0 > hi + TERRAIN_MARGIN {
+                        continue;
+                    }
+                }
+                let top = |s: f64| idx.z_at(base.0 + u.0 * s, base.1 + u.1 * s).map(|z| z - st.datum);
+                let (Some(z0), Some(z1)) = (top(s0), top(s1)) else { continue };
+                if z0.max(z1) <= e.bottom + 1e-3 {
+                    continue;
+                }
+                out.shoring.push(ShoringCut {
+                    ring: vec![[s0, z_bottom], [s1, z_bottom], [s1, z1.max(e.bottom)], [s0, z0.max(e.bottom)]],
+                    hatch: hatch.clone(),
+                    category: e.category_code.clone(),
+                    excavation_id: e.id.clone(),
+                });
+            }
+        }
+    }
 }
 
 /// Geschlossenes Dreiecksnetz: jede Kante gehört zu genau zwei Dreiecken.
@@ -291,6 +360,7 @@ fn append_earth(out: &mut Output, p: &Project, base: (f64, f64), u: (f64, f64)) 
         return;
     }
     let mut band = crate::polygon_bool::union(&band);
+    // [68] Die Verbauwände lässt erst `section_primitives` aus, und nur die sichtbaren (ausgeblendete Klasse = kein Loch).
     // Gebäude-Inneres: Abschnitte der Schnittlinie in der Grundfläche.
     let mut holes: Vec<crate::flat::Polygon> = Vec::new();
     for poly in crate::site_rules::building_footprint(p) {
