@@ -102,7 +102,7 @@ pub fn section_plan_buf(p: &Project, args: &[f64], text: &str) -> Result<Vec<u8>
     // [149] Bäume hinter der Schnittebene: transparente Silhouette unter dem Schnitt (Bauteile verdecken sie).
     // [176] Geknickter Schnitt: Bäume, Öffnungen und Achsen je Segment, auf den Streifen geschnitten und abgewickelt.
     let parts = unfold::parts(&level);
-    let mut trees: Vec<Primitive> = parts.iter().flat_map(|(l, s)| crate::plan::trees::view_trees(p, l, &vis, None).into_iter().flat_map(move |(_, t)| unfold::keep_group(t, s.as_ref()))).collect();
+    let mut trees: Vec<Primitive> = parts.iter().flat_map(|(l, s)| crate::plan::trees::view_trees(p, l, &vis, None, Some(mono)).into_iter().flat_map(move |(_, t)| unfold::keep_group(t, s.as_ref()))).collect();
     let bounds = crate::plan::trees::union_bounds(bounds, &trees);
     crate::plan::extras::scale_line_weights(p, scale, &mut trees);
     trees.extend(prims);

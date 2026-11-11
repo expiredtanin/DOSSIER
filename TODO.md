@@ -248,8 +248,7 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   Tauri-App angesehen. · M
 - ◐ **[64]+[59]** Sonnenstand/Schatten. Schatten im 3D (`render3d`, Shadow-Mapping) ist gebaut, aber nicht auf Metal
   und nicht in der App angesehen; mehrere Kaskaden erst bei grossen Lageplänen. · S
-- ◐ **[149]** Baum als eigenes Objekt. Auswahlrechteck, Gruppen, Art-Beschriftung (`species`/`showLabel`) und Beschriftungs-Griff sind gebaut (11.11. geprüft, TODO-Text war veraltet). Offen: Beschriftung weicht nicht aus; Schnitt durch die Krone zeigt die ganze Silhouette; Fuss am
-  Gelände der Stammmitte (Hang). · M
+- ◐ **[149]** Baum als eigenes Objekt (11.11.): Auswahlrechteck, Gruppen, Art-Beschriftung (`species`/`showLabel`), Beschriftungs-Griff; Beschriftung weicht aus (`plan/trees.rs::plan_tree_labels`, nach allem anderen Inhalt: Masse, Stempel, Höhenlinien-Beschriftungen, Wände, Kronen/Beschriftungen anderer Bäume; Lagen: neben dem Stamm, rechts/links/über/unter der Krone; mit Griff verschobene bleiben); Schnitt durch die Krone zeigt Kronen-/Stammquerschnitt (Sehne, Schnittstärke 0.35, `TreeGeom::cut_silhouette`), Teile vor der Ebene entfallen, dahinter die Silhouette (Ansicht unverändert); Fuss am Gelände der Stammmitte in 3D/Schnitt/Ansicht war schon über `tree::bases`, neu reicht die Stamm-Unterkante (`foot`) am Hang bis zum tiefsten Stammrand. Offen: Ansicht ohne Schnitt-Logik (Baum vor der Ansichtslinie wird ganz gezeigt); Schnittfläche der Krone ohne Schraffur. · S
 - ◐ **[148]** Flach-/Pultdach auf beliebigem Umriss (`roof_geometry`). Pult mit Höfen (Höfe ignoriert); Pult auf
   schiefem Umriss neigt nur entlang x/y (`ridgeAxis`); Dachfenster-Laibung genau auf einer Fuge doppelt. Attika
   (11.11.): Dachfelder `parapetHeight`/`parapetWidth`/`parapetComponentId` am Flachdach (`roof_parapet.rs`; 3D-Ringkörper in

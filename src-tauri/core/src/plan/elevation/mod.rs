@@ -395,7 +395,7 @@ pub fn elevation_primitives_with(p: &Project, level: &LevelSpec, shadows: bool, 
         pending.push(Pending::Item { depth: f.depth, rank: Some(paint_rank(f.role)), prim });
     }
     // [149] Bäume: Silhouette (Krone gefüllt, Stamm) in der Maler-Reihenfolge; Bauteile davor verdecken sie.
-    for (depth, tree) in super::trees::view_trees(p, level, vis, Some(super::trees::view_crown_fill(mono))) {
+    for (depth, tree) in super::trees::view_trees(p, level, vis, Some(super::trees::view_crown_fill(mono)), None) {
         for prim in tree {
             if let Primitive::Polygon { pts, .. } = &prim {
                 for q in pts {

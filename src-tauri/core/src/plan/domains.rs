@@ -1203,8 +1203,13 @@ fn drawing_obstacles(c: &Ctx) -> super::stamp_place::Obstacles {
 
 /// Hindernisse der Raumstempel: `drawn` (Zeichnungen) und die Domänen.
 fn stamp_obstacles_with(d: &DomainPrims, drawn: super::stamp_place::Obstacles) -> super::stamp_place::Obstacles {
+    obstacles_with(d, drawn, true)
+}
+
+/// Wie [`stamp_obstacles_with`]; `with_trees` = false lässt die Planzeichen der Bäume weg (Baum-Beschriftungen).
+fn obstacles_with(d: &DomainPrims, drawn: super::stamp_place::Obstacles, with_trees: bool) -> super::stamp_place::Obstacles {
     let mut o = drawn;
-    for q in d.stairs.iter().chain(&d.columns) {
+    for q in d.stairs.iter().chain(&d.columns).filter(|q| with_trees || !super::trees::is_symbol_part(q)) {
         o.add_prim(q);
     }
     for q in &d.walls {
@@ -1697,6 +1702,23 @@ fn domains_after(c: &Ctx, out: &mut DomainPrims, bounds: &mut Bounds) {
             o.area(r);
         }
         super::context::plan_context_with(c, &mut out.context, &o);
+    }
+    // [149] Art-Beschriftungen der Bäume zuletzt: sie weichen dem gesamten übrigen Inhalt aus.
+    if c.p.trees.as_deref().is_some_and(|t| t.iter().any(|t| t.show_label == Some(true))) {
+        let mut o = obstacles_with(out, drawing_obstacles(c), false);
+        for q in &out.walls {
+            if matches!(q, Primitive::Polygon { wall_id: Some(_), .. }) {
+                o.add_prim(q);
+            }
+        }
+        for q in &out.rooms {
+            let Primitive::Text { at, doc, extra_lines, base_pt, room_id: Some(_), .. } = q else { continue };
+            let (w, h) = stamp_size_m(doc, extra_lines, *base_pt, c.a.scale);
+            if w.is_finite() && h.is_finite() {
+                o.area(vec![[at.x - w / 2.0, at.y - h / 2.0], [at.x + w / 2.0, at.y - h / 2.0], [at.x + w / 2.0, at.y + h / 2.0], [at.x - w / 2.0, at.y + h / 2.0]]);
+            }
+        }
+        super::trees::plan_tree_labels(c, &o, &mut out.columns);
     }
     // [156] Bodenbelag nach den Raumstempeln (spart sie aus), zuunterst in der Gruppe der Decken.
     let mut finish = Vec::new();

@@ -27,6 +27,10 @@ const VIEW_CROWN_MM: f64 = 0.18;
 const VIEW_TRUNK_MM: f64 = 0.13;
 /// Füllung der Krone in der farbigen Ansicht (Tusche: weiss).
 const VIEW_CROWN_FILL: &str = "#e3ead9";
+/// Strichstärke der Schnittflächen (Krone, Stamm) im Schnitt und deren Füllung (farbig).
+const VIEW_CUT_MM: f64 = 0.35;
+const VIEW_CROWN_CUT_FILL: &str = "#c4d2b0";
+const VIEW_TRUNK_CUT_FILL: &str = "#b8a78f";
 /// Füllung des Stamms in der farbigen Ansicht.
 const VIEW_TRUNK_FILL: &str = "#d8cbb8";
 
@@ -127,9 +131,91 @@ pub(super) fn plan_trees(c: &Ctx, out: &mut Vec<Primitive>) {
         }
         let greyed = Some(c.greyed(&t.category_code));
         out.extend(tree_symbol(t, &g, c.cat(&t.category_code), greyed));
-        if let Some(l) = tree_label(t, &g, c.a.scale, greyed) {
-            out.push(l);
+    }
+}
+
+/// [149] Ist `q` ein Planzeichen eines Baums (Kronenlinien, Kreuz, Pick-Fläche)? Der Stamm-Kreis zählt nicht dazu.
+pub(super) fn is_symbol_part(q: &Primitive) -> bool {
+    match q {
+        Primitive::Line { cls, .. } => cls == "tree-crown" || cls == "tree-remove",
+        Primitive::Polygon { context_object_id: Some(id), .. } => id.starts_with(TREE_PICK_PREFIX),
+        _ => false,
+    }
+}
+
+/// [149] Art-Beschriftungen der Bäume dieses Geschosses (`showLabel`), nach allem anderen Planinhalt gesetzt: Sie
+/// weichen `obst` (Masse, Stempel, Höhenlinien-Beschriftungen, Wände, Stützen, Treppen …, ohne Baum-Planzeichen),
+/// den Kronen anderer Bäume und den schon gesetzten Beschriftungen aus. Reihenfolge der Lagen: rechts neben dem
+/// Stamm (wie bisher), dann rechts, links, über und unter der Krone; die erste mit Luft (0.5 mm Papier) gewinnt,
+/// sonst die freieste. Mit Griff verschobene Beschriftungen (`labelOffset`) bleiben, wo der Mensch sie hingelegt hat.
+pub(super) fn plan_tree_labels(c: &Ctx, obst: &super::stamp_place::Obstacles, out: &mut Vec<Primitive>) {
+    use super::stamp_place::Obstacles;
+    let p = c.p;
+    let Some(trees) = p.trees.as_deref() else { return };
+    let scale = c.a.scale;
+    if !(scale > 0.0) || !scale.is_finite() || trees.iter().all(|t| t.floor_id != c.a.floor || t.show_label != Some(true)) {
+        return;
+    }
+    // Sichtbare Bäume dieses Geschosses mit Kronenring (Hindernis für die Beschriftungen anderer Bäume).
+    let items: Vec<(&Tree, TreeGeom, Obstacles)> = crate::tree::geoms(p)
+        .into_iter()
+        .filter_map(|(i, g)| {
+            let t = &trees[i];
+            if t.floor_id != c.a.floor || !c.vis(&t.category_code, &t.id) {
+                return None;
+            }
+            let mut o = Obstacles::default();
+            let ring = crown_outline(g.c, g.crown_r, t.foliage);
+            for k in 0..ring.len() {
+                o.seg(ring[k], ring[(k + 1) % ring.len()]);
+            }
+            Some((t, g, o))
+        })
+        .collect();
+    let mm = scale / 1000.0;
+    let (gap, clear_min) = (1.0 * mm, 0.5 * mm);
+    let mut placed = Obstacles::default();
+    for (n, (t, g, _)) in items.iter().enumerate() {
+        let greyed = Some(c.greyed(&t.category_code));
+        let Some(label) = tree_label(t, g, scale, greyed) else { continue };
+        let Primitive::Text { at, doc, .. } = &label else { continue };
+        let (w, h) = crate::text_layout::stamp_block_size(doc, &[], label_pt(scale), crate::text_layout::PT_TO_MM * mm);
+        let (hw, hh) = (w / 2.0 + 0.3 * mm, h / 2.0 + 0.3 * mm);
+        let mut spot = *at;
+        if t.label_offset.is_none() {
+            let (cx, cy, r) = (g.c[0], g.c[1], g.crown_r);
+            let cands = [*at, v(cx + r + gap + hw, cy), v(cx - r - gap - hw, cy), v(cx, cy + r + gap + hh), v(cx, cy - r - gap - hh)];
+            // Nur Kronen naher Bäume zählen.
+            let reach = r + w + h;
+            let near: Vec<&Obstacles> = items.iter().enumerate().filter(|(m, (_, o, _))| *m != n && (o.c[0] - cx).hypot(o.c[1] - cy) < reach + o.crown_r).map(|(_, (_, _, k))| k).collect();
+            let free = |q: Vec2| -> f64 {
+                let mut d = obst.clearance(q, hw, hh).min(placed.clearance(q, hw, hh));
+                for k in &near {
+                    d = d.min(k.clearance(q, hw, hh));
+                }
+                d
+            };
+            let mut best: Option<(f64, Vec2)> = None;
+            for q in cands {
+                let d = free(q);
+                if d >= clear_min {
+                    best = Some((d, q));
+                    break;
+                }
+                if best.is_none_or(|(b, _)| d > b) {
+                    best = Some((d, q));
+                }
+            }
+            if let Some((_, q)) = best {
+                spot = q;
+            }
         }
+        placed.area(vec![[spot.x - hw, spot.y - hh], [spot.x + hw, spot.y - hh], [spot.x + hw, spot.y + hh], [spot.x - hw, spot.y + hh]]);
+        let mut label = label;
+        if let Primitive::Text { at, .. } = &mut label {
+            *at = spot;
+        }
+        out.push(label);
     }
 }
 
@@ -184,8 +270,11 @@ pub fn tree_symbol(t: &Tree, g: &TreeGeom, cat: Option<&LayerCategory>, greyed: 
 
 /// Bäume in Schnitt/Ansicht: je Baum (Tiefe der Stammmitte, Silhouette: Krone + Stamm). Nur Bäume vor der
 /// Blickrichtung (Mitte höchstens einen Kronenradius vor der Ebene) und innerhalb der Ansichtstiefe.
-/// `fill`: Kronenfüllung (`None` = transparent).
-pub fn view_trees(p: &Project, level: &LevelSpec, vis: &Visibility, fill: Option<&str>) -> Vec<(f64, Vec<Primitive>)> {
+/// `fill`: Kronenfüllung (`None` = transparent). `cut`: Schnitt (`Some(mono)`) statt Ansicht — Bäume, die die
+/// Ebene trifft, erscheinen geschnitten: Kronen- und Stammquerschnitt mit Schnittstärke, davor liegende Teile
+/// entfallen (Mitte vor der Ebene: nur der Querschnitt als Umriss des Teils dahinter), Teile dahinter bleiben als
+/// Silhouette.
+pub fn view_trees(p: &Project, level: &LevelSpec, vis: &Visibility, fill: Option<&str>, cut: Option<bool>) -> Vec<(f64, Vec<Primitive>)> {
     let Some(trees) = p.trees.as_deref().filter(|t| !t.is_empty()) else { return vec![] };
     let Some(plane) = level.plane() else { return vec![] };
     let [nx, _, nz] = plane.normal;
@@ -215,10 +304,24 @@ pub fn view_trees(p: &Project, level: &LevelSpec, vis: &Visibility, fill: Option
         let to = |r: &[[f64; 2]]| r.iter().map(|q| v(q[0], q[1])).collect::<Vec<Vec2>>();
         let stroke = t.color.as_deref().filter(|c| !c.is_empty()).unwrap_or(VIEW_INK);
         let trunk_fill = fill.map(|f| if f == "#ffffff" { f } else { VIEW_TRUNK_FILL });
-        let prims = vec![
-            poly(to(&trunk), trunk_fill.unwrap_or("none"), stroke, VIEW_TRUNK_MM, pick.clone(), greyed),
-            poly(to(&crown), fill.unwrap_or("none"), stroke, VIEW_CROWN_MM, pick, greyed),
-        ];
+        let mut prims = Vec::new();
+        // Stamm und Krone hinter der Ebene (Mitte hinter bzw. auf der Ebene) als ganze Silhouette; im Schnitt
+        // entfällt, was vor der Ebene liegt.
+        if cut.is_none() || depth >= 0.0 {
+            prims.push(poly(to(&trunk), trunk_fill.unwrap_or("none"), stroke, VIEW_TRUNK_MM, pick.clone(), greyed));
+        }
+        if cut.is_none() || depth >= 0.0 {
+            prims.push(poly(to(&crown), fill.unwrap_or("none"), stroke, VIEW_CROWN_MM, pick.clone(), greyed));
+        }
+        if let Some(mono) = cut {
+            let (cc, ct) = g.cut_silhouette(s, depth, 24);
+            if let Some(t) = ct {
+                prims.push(poly(to(&t), if mono { "none" } else { VIEW_TRUNK_CUT_FILL }, stroke, VIEW_CUT_MM, pick.clone(), greyed));
+            }
+            if let Some(c) = cc {
+                prims.push(poly(to(&c), if mono { "none" } else { VIEW_CROWN_CUT_FILL }, stroke, VIEW_CUT_MM, pick, greyed));
+            }
+        }
         out.push((depth, prims));
     }
     out
@@ -256,12 +359,20 @@ mod tests {
             "id": "p", "name": "P", "lineStyles": [], "hatches": [], "components": [], "wallTypes": [],
             "drawingLevels": [
                 {"id": "eg", "name": "EG", "kind": "floor", "visible": true, "locked": false, "floorHeight": 3.0, "cutHeight": 1.0, "baseElevation": 0},
-                {"id": "an", "name": "Ansicht Süd", "kind": "elevation", "visible": true, "locked": false, "floorHeight": 3.0, "linePoints": [{"x": -20, "y": -10}, {"x": 20, "y": -10}]}
+                {"id": "an", "name": "Ansicht Süd", "kind": "elevation", "visible": true, "locked": false, "floorHeight": 3.0, "linePoints": [{"x": -20, "y": -10}, {"x": 20, "y": -10}]},
+                {"id": "sc", "name": "Schnitt A", "kind": "section", "visible": true, "locked": false, "floorHeight": 3.0, "linePoints": [{"x": -20, "y": 0}, {"x": 20, "y": 0}]}
             ],
             "layers": [{"code": "13", "name": "Bäume", "color": "#000000", "lw": 0.13, "visible": true, "locked": false}],
             "walls": [], "openings": [], "drawings2d": [], "trees": trees
         }))
         .unwrap()
+    }
+
+    /// Ohne den Schnitt A (dessen Linie sonst im Grundriss liegt).
+    fn plan_project(trees: serde_json::Value) -> Project {
+        let mut p = project(trees);
+        p.drawing_levels.retain(|l| l.id != "sc");
+        p
     }
 
     fn tree(id: &str, x: f64, status: &str, foliage: &str) -> serde_json::Value {
@@ -282,9 +393,9 @@ mod tests {
         let mut t = tree("a", 0.0, "new", "deciduous");
         t["species"] = serde_json::json!("Quercus robur");
         let texts = |p: &Project| plan(p, &["13"]).into_iter().filter(|q| matches!(q, Primitive::Text { .. })).collect::<Vec<_>>();
-        assert!(texts(&project(serde_json::json!([t.clone()]))).is_empty(), "ohne showLabel keine Beschriftung");
+        assert!(texts(&plan_project(serde_json::json!([t.clone()]))).is_empty(), "ohne showLabel keine Beschriftung");
         t["showLabel"] = serde_json::json!(true);
-        let got = texts(&project(serde_json::json!([t.clone()])));
+        let got = texts(&plan_project(serde_json::json!([t.clone()])));
         assert_eq!(got.len(), 1);
         let Primitive::Text { at, doc, base_pt, color, room_id, .. } = &got[0] else { unreachable!() };
         assert_eq!(crate::text_layout::plain_text(doc), "Quercus robur");
@@ -297,17 +408,17 @@ mod tests {
         let half_w = at.x - 0.3;
         assert!(half_w > 0.0);
         t["labelOffset"] = serde_json::json!({"x": -2.0, "y": 3.0});
-        let got = texts(&project(serde_json::json!([t.clone()])));
+        let got = texts(&plan_project(serde_json::json!([t.clone()])));
         let Primitive::Text { at: moved, .. } = &got[0] else { unreachable!() };
         assert!((moved.y - 3.0).abs() < 1e-9 && (moved.x - (-2.0 + half_w)).abs() < 1e-9, "{moved:?}");
         t.as_object_mut().unwrap().remove("labelOffset");
         t["species"] = serde_json::json!("  ");
-        assert!(texts(&project(serde_json::json!([t]))).is_empty(), "ohne Art keine Beschriftung");
+        assert!(texts(&plan_project(serde_json::json!([t]))).is_empty(), "ohne Art keine Beschriftung");
     }
 
     #[test]
     fn planzeichen_nach_bestand_und_laub() {
-        let p = project(serde_json::json!([tree("a", 0.0, "existing", "deciduous"), tree("b", 10.0, "new", "conifer"), tree("c", 20.0, "remove", "deciduous")]));
+        let p = plan_project(serde_json::json!([tree("a", 0.0, "existing", "deciduous"), tree("b", 10.0, "new", "conifer"), tree("c", 20.0, "remove", "deciduous")]));
         let prims = plan(&p, &["13"]);
         let pick = |id: &str| prims.iter().filter(|q| matches!(q, Primitive::Polygon { context_object_id: Some(c), .. } if *c == pick_id(id))).count();
         assert_eq!((pick("a"), pick("b"), pick("c")), (1, 1, 1));
@@ -348,5 +459,91 @@ mod tests {
             }
             assert!((hi - lo - 6.0).abs() < 1e-6 && (zl - 3.0).abs() < 1e-9 && (zh - 12.0).abs() < 1e-9, "{lo} {hi} {zl} {zh}");
         }
+    }
+
+    fn tree_at(id: &str, x: f64, y: f64) -> serde_json::Value {
+        let mut t = tree(id, x, "existing", "deciduous");
+        t["position"] = serde_json::json!({"x": x, "y": y});
+        t
+    }
+
+    /// Polygone mit Pick-Id und Strichstärke aus `view_trees` im Schnitt A (Linie y = 0, Blick nach +y).
+    fn section_polys(p: &Project, id: &str) -> Vec<(f64, Vec<Vec2>)> {
+        let l = p.drawing_levels.iter().find(|l| l.id == "sc").unwrap();
+        let level = LevelSpec::from_json(&serde_json::to_value(l).unwrap());
+        view_trees(p, &level, &Visibility::default(), None, Some(false))
+            .into_iter()
+            .flat_map(|(_, ps)| ps)
+            .filter_map(|q| match q {
+                Primitive::Polygon { pts, stroke_width_mm, context_object_id: Some(c), .. } if c == pick_id(id) => Some((stroke_width_mm, pts)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// [149] Schnitt durch die Krone: trifft die Ebene den Baum, entsteht ein Querschnitt (Sehne) mit Schnittstärke;
+    /// vor der Ebene entfällt der Rest, dahinter bleibt die ganze Silhouette.
+    #[test]
+    fn schnitt_durch_die_krone() {
+        let width = |pts: &[Vec2]| pts.iter().map(|q| q.x).fold(f64::NEG_INFINITY, f64::max) - pts.iter().map(|q| q.x).fold(f64::INFINITY, f64::min);
+        let p = project(serde_json::json!([tree_at("mitte", 0.0, 0.0), tree_at("vorn", 10.0, -2.0), tree_at("hinten", 20.0, 1.0), tree_at("weit", 30.0, 2.9), tree_at("frei", 40.0, -4.0)]));
+        // Mitte auf der Ebene: Sehne = ganze Krone (6 m, Kugel), Stamm 0.4 m; dazu die ganze Silhouette dahinter.
+        let m = section_polys(&p, "mitte");
+        assert_eq!(m.len(), 4, "Stamm + Krone dahinter, Stamm + Krone geschnitten");
+        let cut: Vec<_> = m.iter().filter(|(w, _)| (*w - VIEW_CUT_MM).abs() < 1e-9).collect();
+        assert_eq!(cut.len(), 2);
+        assert!(cut.iter().any(|(_, pts)| (width(pts) - 6.0).abs() < 1e-6) && cut.iter().any(|(_, pts)| (width(pts) - 0.4).abs() < 1e-6));
+        // Mitte 2 m vor der Ebene: nur der Querschnitt (Sehne 2 sqrt(9 - 4)), kein Stamm, keine Silhouette.
+        let v = section_polys(&p, "vorn");
+        assert_eq!(v.len(), 1);
+        assert!((width(&v[0].1) - 2.0 * 5f64.sqrt()).abs() < 0.05, "{}", width(&v[0].1));
+        assert!((v[0].0 - VIEW_CUT_MM).abs() < 1e-9);
+        // Mitte 1 m hinter der Ebene: Silhouette + Sehne (2 sqrt(9 - 1)), Stamm ganz dahinter, nicht geschnitten.
+        let h = section_polys(&p, "hinten");
+        assert_eq!(h.len(), 3);
+        assert!(h.iter().any(|(w, pts)| (*w - VIEW_CUT_MM).abs() < 1e-9 && (width(pts) - 2.0 * 8f64.sqrt()).abs() < 0.05));
+        assert!(h.iter().any(|(w, pts)| (*w - VIEW_CROWN_MM).abs() < 1e-9 && (width(pts) - 6.0).abs() < 1e-6));
+        // Krone knapp berührt (Abstand 2.9 < 3): Silhouette, Stamm und kleine Sehne; Baum 4 m vor der Ebene: nichts.
+        assert_eq!(section_polys(&p, "weit").len(), 3);
+        assert!(section_polys(&p, "frei").is_empty());
+        // Ansicht unverändert: ganze Silhouette, keine Schnittstärke.
+        let l = p.drawing_levels.iter().find(|l| l.id == "an").unwrap();
+        let level = LevelSpec::from_json(&serde_json::to_value(l).unwrap());
+        let ps = view_trees(&p, &level, &Visibility::default(), None, None);
+        assert!(ps.iter().flat_map(|(_, ps)| ps).all(|q| !matches!(q, Primitive::Polygon { stroke_width_mm, .. } if *stroke_width_mm == VIEW_CUT_MM)));
+    }
+
+    /// [149] Art-Beschriftung weicht aus: ohne Hindernis rechts neben dem Stamm (wie bisher); ein Nachbarstamm oder
+    /// eine andere Beschriftung schiebt sie an die nächste freie Lage.
+    #[test]
+    fn beschriftung_weicht_hindernissen_aus() {
+        let labelled = |x: f64, y: f64, id: &str, name: &str| {
+            let mut t = tree_at(id, x, y);
+            t["species"] = serde_json::json!(name);
+            t["showLabel"] = serde_json::json!(true);
+            t
+        };
+        let texts = |p: &Project| -> Vec<(Vec2, f64)> {
+            plan(p, &["13", "20"])
+                .into_iter()
+                .filter_map(|q| match q {
+                    Primitive::Text { at, doc, base_pt, .. } => Some((at, crate::text_layout::stamp_block_size(&doc, &[], base_pt, crate::text_layout::PT_TO_MM / 1000.0).0)),
+                    _ => None,
+                })
+                .collect()
+        };
+        let free = texts(&plan_project(serde_json::json!([labelled(0.0, 0.0, "a", "Quercus robur")])));
+        assert_eq!(free.len(), 1);
+        assert!(free[0].0.x > 0.2 && free[0].0.y.abs() < 1e-9, "{:?}", free[0].0);
+        // Zwei beschriftete Bäume nebeneinander: die Beschriftungen überlappen nicht.
+        let two = texts(&plan_project(serde_json::json!([labelled(0.0, 0.0, "a", "Quercus robur"), labelled(2.0, 0.0, "b", "Acer platanoides")])));
+        assert_eq!(two.len(), 2);
+        let ov = |a: &(Vec2, f64), b: &(Vec2, f64)| (a.0.x - b.0.x).abs() < (a.1 + b.1) / 2.0 && (a.0.y - b.0.y).abs() < 0.3;
+        assert!(!ov(&two[0], &two[1]), "{two:?}");
+        // Nachbarstamm (x = 1.2, r 0.2) rechts neben dem Stamm: die Beschriftung liegt nicht darauf.
+        let b = texts(&plan_project(serde_json::json!([labelled(0.0, 0.0, "a", "Quercus robur"), tree_at("n", 1.2, 0.0)])));
+        assert_eq!(b.len(), 1);
+        let hw = free[0].1 / 2.0;
+        assert!(b[0].0.x + hw < 1.0 || b[0].0.x - hw > 1.4 || b[0].0.y.abs() > 0.5, "Label auf dem Nachbarstamm: {:?}", b[0].0);
     }
 }
