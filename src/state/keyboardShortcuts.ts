@@ -59,7 +59,8 @@ export type ShortcutId =
   | "hideSelectionLayers"
   | "showAllLayers"
   | "fitAll"
-  | "fitSelection";
+  | "fitSelection"
+  | "isolateLayer";
 
 export type ShortcutCategory =
   | "general"
@@ -230,6 +231,8 @@ export const SHORTCUT_DEFS: ShortcutDef[] = [
   { id: "showAllLayers", category: "navigation", labelKey: "shortcut.showAllLayers", defaultCombo: "mod+shift+a" },
   { id: "fitAll", category: "navigation", labelKey: "shortcut.fitAll", defaultCombo: "mod+0" },
   { id: "fitSelection", category: "navigation", labelKey: "shortcut.fitSelection", defaultCombo: "mod+shift+f" },
+  // [192] Ebenen schnell schalten (Cmd/Ctrl+Shift+I ist der Boolean-Schnitt, daher L = Layer).
+  { id: "isolateLayer", category: "navigation", labelKey: "shortcut.isolateLayer", defaultCombo: "mod+shift+l" },
 ];
 
 const DEFS_BY_ID = new Map<ShortcutId, ShortcutDef>(SHORTCUT_DEFS.map((d) => [d.id, d]));

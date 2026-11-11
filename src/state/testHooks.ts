@@ -41,6 +41,8 @@ declare global {
       sectionWalls: () => Promise<{ n: number; area: number }>;
       /** [185] Darstellungszustand der Plan-Ansicht: aktive Ebene, Bildmitte (Modell-m), Zoom (px/m), Massstab. */
       viewCamera: () => { levelId: string; center: { x: number; y: number } | null; pxPerMeter: number | null; scale: number };
+      /** [192] Sichtbare Ebenen-Codes und Zahl der Plan-Primitive (gesamt / mit Wand-Bezug) der aktiven Ebene. */
+      layerView: () => { wallId: string; visible: string[]; prims: number; wallPrims: number };
       /** [185] 3D-Element-Filter (Store) und die Wand-ids des 3D-Modells bzw. der Pick-Geometrie mit ihm. */
       view3d: () => { only: string[] | null; hidden: string[]; walls: string[]; pickWalls: string[] };
     };
@@ -116,6 +118,19 @@ export function installTestHooks(): void {
         walls: uniq(projectToModel3d(p, { hide }).walls.map((w) => w.wallId)),
         pickWalls: uniq(pickGeometry(p, 0, hide).walls.map((w) => w.wallId)),
       };
+    },
+    layerView: () => {
+      const s = getState();
+      const vis: string[] = [];
+      const walk = (cs: { code: string; visible: boolean; children?: unknown[] }[]): void => {
+        for (const c of cs) {
+          if (c.visible) vis.push(c.code);
+          walk((c.children ?? []) as { code: string; visible: boolean; children?: unknown[] }[]);
+        }
+      };
+      walk(s.project.layers);
+      const prims = generatePlan(s.project, s.activeLevelId, new Set(vis), undefined, s.detail, false, false, true, 50).primitives;
+      return { wallId: s.project.walls.find((w) => w.floorId === s.activeLevelId)?.id ?? s.project.walls[0]?.id ?? "", visible: vis.sort(), prims: prims.length, wallPrims: prims.filter((q) => !!(q as { wallId?: string }).wallId).length };
     },
     selected: () => ({ drawings: [...getState().selection.drawings], groups: [...getState().selection.groups], all: JSON.stringify(getState().selection) }),
   };

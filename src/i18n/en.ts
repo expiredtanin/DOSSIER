@@ -1051,6 +1051,9 @@ export const en: Record<TranslationKey, string> = {
   "ctx.copyProps": "Copy properties",
   "ctx.pasteProps": "Paste properties",
   "ctx.pasteProps.disabled": "Clipboard empty — first use “Copy properties”.",
+  "ctx.layer.isolate": "Show only this layer",
+  "ctx.layer.hide": "Hide this layer",
+  "ctx.layer.showAll": "Show all layers",
   "ctx.hideLayer": "Hide layer: {name}",
   "ctx.hideLayer.n": "Hide {n} layers",
   "ctx.isolateLayer": "Show only layer: {name}",
@@ -3074,6 +3077,7 @@ export const en: Record<TranslationKey, string> = {
   "shortcut.showAllLayers": "Show all layers",
   "shortcut.fitAll": "Fit all",
   "shortcut.fitSelection": "Fit to selection",
+  "shortcut.isolateLayer": "Isolate layer of selection",
 
   "settings.section.update": "Update",
   "settings.update.autoCheck": "Check for updates automatically",

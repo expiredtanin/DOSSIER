@@ -11,7 +11,7 @@
 import { useMemo } from "react";
 import type { Drawing2D, DrawingLevel, Project, Vec2 } from "../model/types";
 import type { Selection } from "./selection";
-import { addItems, cmdMutation, fieldOps, opsMutation, patchItems, removeItems } from "../core";
+import { addItems, cmdMutation, opsMutation, patchItems, removeItems } from "../core";
 import type { ToolId } from "../tools/types";
 import type { DrawingStyle } from "../editors/matchProps";
 import { applyDrawingStyleOps, readDrawingStyle } from "../editors/matchProps";
@@ -25,7 +25,8 @@ import { addedIds, type PastedIds } from "../editors/elementClipboard";
 import { containingGroupId, EMPTY_MEMBERSHIP } from "./groupActions";
 import type { GroupMembership, MemberKind } from "./groupActions";
 import { isLocked, lockMembersOps } from "./objectLock";
-import { isolateCategories, selectionCategoryCodes, setCategoriesVisible } from "./selectionLayers";
+import { selectionCategoryCodes } from "./selectionLayers";
+import { hideLayerCodes, isolateLayerCodes, showAllLayerCodes } from "./layerIsolate";
 import type { ShortcutOverrides } from "./keyboardShortcuts";
 import {
   useBooleanOpsShortcut,
@@ -256,15 +257,11 @@ export function useSelectionCommands(opts: {
   // Ebene(n) der Auswahl ausblenden / isolieren (Kontextmenü). Die Codes rechnet das offene Menü
   // (`selectionMenuState`) bzw. der Handler beim Aufruf — bei Kataster-Importen (~10^5 Zeichnungen)
   // nicht bei jedem Render.
-  const hideSelectionLayers = () => {
-    const { selectionLayerCodes } = menuState(true);
-    if (selectionLayerCodes.length === 0) return;
-    const codes = new Set(selectionLayerCodes);
-    applyChange((p) => fieldOps(p, "layers", setCategoriesVisible(p.layers, codes, false)));
-  };
-  // [190] Alle Ebenen wieder einblenden (Cmd/Ctrl+Shift+A, Gegenstück zu „Ebenen der Auswahl ausblenden").
-  const showAllLayers = () =>
-    applyChange((p) => fieldOps(p, "layers", setCategoriesVisible(p.layers, new Set(p.layers.map((l) => l.code)), true)));
+  // [192] Gemerkter Zustand für „Alle einblenden" und Elternklassen: `layerIsolate.ts`.
+  const hideSelectionLayers = () => hideLayerCodes(menuState(true).selectionLayerCodes);
+  const isolateSelectionLayers = () => isolateLayerCodes(menuState(true).selectionLayerCodes);
+  // [190]/[192] Alle Ebenen einblenden (stellt den Zustand vor dem Isolieren wieder her).
+  const showAllLayers = showAllLayerCodes;
   // [190] Cmd/Ctrl+D: gewählte Elemente duplizieren — Kopie mit Versatz (0.5 m rechts/unten), die Kopie ist danach gewählt.
   const duplicateSelection = () => {
     if (!hasTransformable(selection)) return;
@@ -275,12 +272,6 @@ export function useSelectionCommands(opts: {
       return ops;
     });
     if (out.ids) setSelection(fromIdLists(out.ids));
-  };
-  const isolateSelectionLayers = () => {
-    const { selectionLayerCodes } = menuState(true);
-    if (selectionLayerCodes.length === 0) return;
-    const codes = new Set(selectionLayerCodes);
-    applyChange((p) => fieldOps(p, "layers", isolateCategories(p.layers, codes)));
   };
 
   // „Nicht drucken"/„Drucken" (Kontextmenü) — nur `Drawing2D` kennt
