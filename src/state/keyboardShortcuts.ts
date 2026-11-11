@@ -52,7 +52,9 @@ export type ShortcutId =
   | "floorDown"
   | "floorUp"
   | "showSelection3d"
-  | "hideSelection3d";
+  | "hideSelection3d"
+  | "isolateLayer"
+  | "showAllLayers";
 
 export type ShortcutCategory =
   | "general"
@@ -214,6 +216,9 @@ export const SHORTCUT_DEFS: ShortcutDef[] = [
   { id: "floorUp", category: "navigation", labelKey: "shortcut.floorUp", defaultCombo: "mod+6" },
   { id: "showSelection3d", category: "navigation", labelKey: "shortcut.showSelection3d", defaultCombo: "mod+3" },
   { id: "hideSelection3d", category: "navigation", labelKey: "shortcut.hideSelection3d", defaultCombo: "mod+4" },
+  // [192] Ebenen schnell schalten (Cmd/Ctrl+Shift+I ist der Boolean-Schnitt, daher L = Layer).
+  { id: "isolateLayer", category: "navigation", labelKey: "shortcut.isolateLayer", defaultCombo: "mod+shift+l" },
+  { id: "showAllLayers", category: "navigation", labelKey: "shortcut.showAllLayers", defaultCombo: "mod+shift+e" },
 ];
 
 const DEFS_BY_ID = new Map<ShortcutId, ShortcutDef>(SHORTCUT_DEFS.map((d) => [d.id, d]));

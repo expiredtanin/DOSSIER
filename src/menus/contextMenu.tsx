@@ -116,6 +116,11 @@ export interface MenuActions {
   hideSelectionLayers: () => void;
   /** Zeigt NUR die Ebene(n) der aktuellen Auswahl, alle übrigen werden ausgeblendet. */
   isolateSelectionLayers: () => void;
+  /** [192] Ebenen-Menü im Panel: genau diese Ebene zeigen / ausblenden. */
+  isolateLayer: (code: string) => void;
+  hideLayer: (code: string) => void;
+  /** [192] Alle Ebenen einblenden (stellt den Zustand vor dem Isolieren wieder her). */
+  showAllLayers: () => void;
   /**
    * Sind ALLE aktuell gewählten 2D-Zeichnungen bereits `noPrint`? Bestimmt
    * Label/Icon von „Nicht drucken"/„Drucken" — nur `Drawing2D` kennt das
@@ -164,6 +169,22 @@ function layerMenuItems(code: string, a: MenuActions): ContextMenuItem[] {
       label: t("ctx.layerSettings"),
       icon: <MenuIcon name="settings" />,
       onClick: () => a.openLayerEditor(code),
+    },
+    { divider: true },
+    {
+      label: t("ctx.layer.isolate"),
+      icon: <MenuIcon name="filter_alt" />,
+      onClick: () => a.isolateLayer(code),
+    },
+    {
+      label: t("ctx.layer.hide"),
+      icon: <MenuIcon name="visibility_off" />,
+      onClick: () => a.hideLayer(code),
+    },
+    {
+      label: t("ctx.layer.showAll"),
+      icon: <MenuIcon name="visibility" />,
+      onClick: a.showAllLayers,
     },
     { divider: true },
     {
@@ -407,6 +428,11 @@ function planMenuItems(
     a.selectionLayerNames.length === 1
       ? t(key, { name: a.selectionLayerNames[0] })
       : t(`${key}.n` as "ctx.hideLayer.n", { n: a.selectionLayerNames.length });
+  const showAllItem: ContextMenuItem = {
+    label: t("ctx.layer.showAll"),
+    icon: <MenuIcon name="visibility" />,
+    onClick: a.showAllLayers,
+  };
   const layerItems: ContextMenuItem[] =
     a.selectionLayerNames.length >= 1
       ? [
@@ -420,8 +446,9 @@ function planMenuItems(
             icon: <MenuIcon name="filter_alt" />,
             onClick: a.isolateSelectionLayers,
           },
+          showAllItem,
         ]
-      : [];
+      : [showAllItem];
 
   // Nicht drucken/Drucken — nur für die 2D-Auswahl (`Drawing2D.noPrint`).
   const noPrintItems: ContextMenuItem[] =

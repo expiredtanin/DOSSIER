@@ -32,6 +32,7 @@ import {
 import type { ElementClipboard, ElementSelectionIds, PastedIds } from "../editors/elementClipboard";
 import { parseClipboardText, serializeClipboardText } from "../editors/elementClipboardSerialize";
 import { matchesShortcut, type ShortcutId, type ShortcutOverrides } from "./keyboardShortcuts";
+import { isolateSelectionLayerCodes, showAllLayerCodes } from "./layerIsolate";
 import { hideSelectionIn3d, showSelectionIn3d, stepActiveFloor } from "./tabNavigation";
 
 const isEditableTarget = (e: KeyboardEvent): boolean => {
@@ -663,7 +664,11 @@ export function useViewNavigationShortcuts(overrides: ShortcutOverrides): void {
             ? showSelectionIn3d
             : matchesShortcut(e, "hideSelection3d", overrides)
               ? hideSelectionIn3d
-              : null;
+              : matchesShortcut(e, "isolateLayer", overrides)
+                ? isolateSelectionLayerCodes
+                : matchesShortcut(e, "showAllLayers", overrides)
+                  ? showAllLayerCodes
+                  : null;
       if (!fn) return;
       e.preventDefault();
       fn();

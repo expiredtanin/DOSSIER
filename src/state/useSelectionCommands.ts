@@ -11,7 +11,7 @@
 import { useMemo } from "react";
 import type { Drawing2D, DrawingLevel, Project, Vec2 } from "../model/types";
 import type { Selection } from "./selection";
-import { addItems, cmdMutation, fieldOps, opsMutation, patchItems, removeItems } from "../core";
+import { addItems, cmdMutation, opsMutation, patchItems, removeItems } from "../core";
 import type { ToolId } from "../tools/types";
 import type { DrawingStyle } from "../editors/matchProps";
 import { applyDrawingStyleOps, readDrawingStyle } from "../editors/matchProps";
@@ -22,7 +22,8 @@ import { clearKinds, fromIdLists, hasTransformable, isEmpty, toMembership } from
 import { containingGroupId, EMPTY_MEMBERSHIP } from "./groupActions";
 import type { GroupMembership, MemberKind } from "./groupActions";
 import { isLocked, lockMembersOps } from "./objectLock";
-import { isolateCategories, selectionCategoryCodes, setCategoriesVisible } from "./selectionLayers";
+import { selectionCategoryCodes } from "./selectionLayers";
+import { hideLayerCodes, isolateLayerCodes } from "./layerIsolate";
 import type { ShortcutOverrides } from "./keyboardShortcuts";
 import {
   useBooleanOpsShortcut,
@@ -252,18 +253,9 @@ export function useSelectionCommands(opts: {
   // Ebene(n) der Auswahl ausblenden / isolieren (Kontextmenü). Die Codes rechnet das offene Menü
   // (`selectionMenuState`) bzw. der Handler beim Aufruf — bei Kataster-Importen (~10^5 Zeichnungen)
   // nicht bei jedem Render.
-  const hideSelectionLayers = () => {
-    const { selectionLayerCodes } = menuState(true);
-    if (selectionLayerCodes.length === 0) return;
-    const codes = new Set(selectionLayerCodes);
-    applyChange((p) => fieldOps(p, "layers", setCategoriesVisible(p.layers, codes, false)));
-  };
-  const isolateSelectionLayers = () => {
-    const { selectionLayerCodes } = menuState(true);
-    if (selectionLayerCodes.length === 0) return;
-    const codes = new Set(selectionLayerCodes);
-    applyChange((p) => fieldOps(p, "layers", isolateCategories(p.layers, codes)));
-  };
+  // [192] Gemerkter Zustand für „Alle einblenden" und Elternklassen: `layerIsolate.ts`.
+  const hideSelectionLayers = () => hideLayerCodes(menuState(true).selectionLayerCodes);
+  const isolateSelectionLayers = () => isolateLayerCodes(menuState(true).selectionLayerCodes);
 
   // „Nicht drucken"/„Drucken" (Kontextmenü) — nur `Drawing2D` kennt
   // `noPrint` (Nutzer-Wunsch „Kein 'nicht druckend'-Flag im Modell"), daher

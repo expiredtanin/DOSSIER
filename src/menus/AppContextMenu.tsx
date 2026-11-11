@@ -12,6 +12,7 @@ import type { PlanViewHandle } from "../views/plan/PlanView";
 import { countClosedAreas, differenceDrawings, intersectionDrawings, unionDrawings } from "../editors/booleanOps";
 import { categoryNames } from "../state/selectionLayers";
 import type { useProjectActions } from "../state/useProjectActions";
+import { hideLayerCodes, isolateLayerCodes, showAllLayerCodes } from "../state/layerIsolate";
 import { selectionMenuState, type useSelectionCommands } from "../state/useSelectionCommands";
 import type { useSelectionState } from "../state/useSelectionState";
 import { buildMenuItems, menuTitle, type MenuState } from "./contextMenu";
@@ -125,6 +126,9 @@ export function AppContextMenu(props: {
         selectionLayerNames: categoryNames(project.layers, selectionLayerCodes),
         hideSelectionLayers,
         isolateSelectionLayers,
+        isolateLayer: (code) => isolateLayerCodes([code]),
+        hideLayer: (code) => hideLayerCodes([code]),
+        showAllLayers: showAllLayerCodes,
         selectionAllNoPrint: !!selectionAllNoPrint,
         toggleSelectionNoPrint,
         attachedDimensionCount: attachedDimensionIds.length,
