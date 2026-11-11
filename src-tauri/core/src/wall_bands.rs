@@ -200,6 +200,11 @@ pub struct FloorContext {
 }
 
 impl FloorContext {
+    /// Die Decken (Eingabe) — der 3D-Cache ([58]) vergleicht sie: der Deckenrand [178] hängt von den Wänden ab.
+    pub fn ceiling_inputs(&self) -> Vec<CeilingIn> {
+        self.ceilings.iter().map(|c| c.0.clone()).collect()
+    }
+
     pub fn new(ceilings: Vec<CeilingIn>, roofs: Vec<RoofIn>) -> Self {
         FloorContext {
             ceilings: ceilings

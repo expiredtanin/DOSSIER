@@ -65,6 +65,9 @@ pub struct Model3dCache {
     sig: Option<(u64, u64)>,
     maps: Vec<String>,
     joins: HashMap<String, JoinEntry>,
+    /// [178] Decken-Eingabe je Geschoss (je `layered`) beim letzten Aufruf: Der Deckenrand hängt von den Wänden
+    /// ab; ändert er sich, werden die Wände des Geschosses neu gerechnet.
+    ceilings: [HashMap<String, Vec<crate::wall_bands::CeilingIn>>; 2],
     /// Je `layered` (0/1): Wand-Stand → Körper.
     walls: [HashMap<u64, WallEntry>; 2],
     /// Je Detailgrad (Bits): Wand-Stand → Einbauteile.
@@ -164,6 +167,23 @@ impl Model3dCache {
         // Wandkörper.
         let joins = self.joins(p);
         let mut contexts: HashMap<&str, crate::wall_bands::FloorContext> = HashMap::new();
+        // [178] Geschoss-Kontexte vorab (Deckenrand aus den Wänden): geänderte Decken-Eingabe → Geschoss neu.
+        let mut ctx_changed: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        if layered {
+            let mut prev = std::mem::take(&mut self.ceilings[1]);
+            for wall in &p.walls {
+                if contexts.contains_key(wall.floor_id.as_str()) {
+                    continue;
+                }
+                let ctx = model3d::floor_context_with(p, &wall.floor_id, true, Some(&joins));
+                let inputs = ctx.ceiling_inputs();
+                if prev.remove(&wall.floor_id).as_ref() != Some(&inputs) {
+                    ctx_changed.insert(wall.floor_id.as_str());
+                }
+                self.ceilings[1].insert(wall.floor_id.clone(), inputs);
+                contexts.insert(wall.floor_id.as_str(), ctx);
+            }
+        }
         let mut old = std::mem::take(&mut self.walls[layered as usize]);
         let mut fresh: HashMap<u64, WallEntry> = HashMap::with_capacity(p.walls.len());
         let mut rebuilt = (0, 0);
@@ -172,10 +192,10 @@ impl Model3dCache {
             let os: Vec<u64> = hosted(&wall.id).iter().map(|&i| opening_stamps[i]).collect();
             let cuts = joins.get(&wall.id).map_or_else(WallCuts::default, |c| if layered { c.clone() } else { model3d::section_cuts(c) });
             let e = match old.remove(&stamp) {
-                Some(e) if e.openings == os && e.cuts == cuts => e,
+                Some(e) if e.openings == os && e.cuts == cuts && !ctx_changed.contains(wall.floor_id.as_str()) => e,
                 _ => {
                     rebuilt.0 += 1;
-                    let ctx = contexts.entry(wall.floor_id.as_str()).or_insert_with(|| model3d::floor_context(p, &wall.floor_id, layered));
+                    let ctx = contexts.entry(wall.floor_id.as_str()).or_insert_with(|| model3d::floor_context_with(p, &wall.floor_id, layered, Some(&joins)));
                     let refs: Vec<&Opening> = hosted(&wall.id).iter().map(|&i| &openings[i]).collect();
                     let mut pieces = Vec::new();
                     model3d::wall_pieces(p, &self.maps, wall, ctx, &refs, cuts.clone(), layered, true, &mut pieces);

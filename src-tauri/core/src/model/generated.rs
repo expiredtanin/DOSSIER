@@ -3035,6 +3035,12 @@ pub struct Ceiling {
     #[serde(rename = "loadBearing", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub load_bearing: Option<bool>,
+    /// [178] Deckenrand an Aussenwänden: `true` = Platte bis an den Umriss (über die Aussenschichten der
+    /// Wand); fehlt/`false` = Auflager bis Aussenkante der tragenden Schicht, Aussendämmung/Putz laufen
+    /// an der Deckenstirn durch.
+    #[serde(rename = "edgeAtOutline", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub edge_at_outline: Option<bool>,
     /// Geschlossener Umriss im Grundriss (Meter). Der Schlusspunkt wird NICHT
     /// dupliziert (die letzte Kante läuft von outline[n-1] zu outline[0]).
     pub outline: Vec<Vec2>,

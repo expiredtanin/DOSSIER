@@ -30,21 +30,30 @@ const hole: { x: number; y: number }[] = [
   { x: 2, y: 2.5 },
 ]; // 1x1, vollständig innerhalb des 5x4-Umrisses
 
+// [178] Platte hier „wie Deckenumriss" (sonst endet sie an der Aussenkante Backstein, 7.5 mm innerhalb).
+const base: Project = { ...sampleProject, ceilings: sampleProject.ceilings!.map((c) => ({ ...c, edgeAtOutline: true })) };
+
 function projectWithHole(): Project {
   return {
-    ...sampleProject,
-    ceilings: sampleProject.ceilings!.map((c) => (c.id === "C1" ? { ...c, openings: [hole] } : c)),
+    ...base,
+    ceilings: base.ceilings!.map((c) => (c.id === "C1" ? { ...c, openings: [hole] } : c)),
   };
 }
 
 describe("emitSlabs (via pickGeometry) — Decken-Aussparungen", () => {
   it("ohne openings: Slab-Outline unverändert (Regression)", () => {
-    const slabs = pickGeometry(sampleProject).slabs.filter((s) => s.ceilingId === "C1");
+    const slabs = pickGeometry(base).slabs.filter((s) => s.ceilingId === "C1");
     expect(slabs.length).toBe(3); // 3 Schichten
     for (const s of slabs) {
       expect(s.outline.length).toBe(4);
       expect(ringArea(s.outline)).toBeCloseTo(20, 2);
     }
+  });
+
+  it("[178] Auflager bis Kern: Platte endet an der Aussenkante Backstein (Umriss je Seite 7.5 mm kleiner)", () => {
+    const slabs = pickGeometry(sampleProject).slabs.filter((s) => s.ceilingId === "C1");
+    expect(slabs.length).toBe(3);
+    for (const s of slabs) expect(ringArea(s.outline)).toBeCloseTo((5 - 0.015) * (4 - 0.015), 4);
   });
 
   it("mit einem 1x1-Loch: jede Schicht bekommt denselben erweiterten Ring (mehr Vertices, Fläche = Aussen - Loch)", () => {

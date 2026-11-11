@@ -574,20 +574,29 @@ pub(crate) fn floor_join_cuts(jw: &[JoinWall], finite: bool) -> Vec<WallCuts> {
 }
 
 pub(crate) fn floor_context(p: &Project, floor_id: &str, with_ceilings: bool) -> FloorContext {
+    floor_context_with(p, floor_id, with_ceilings, None)
+}
+
+/// Wie [`floor_context`]; `joins`: schon gerechnete Schnittlinien je Wand-id (für den Deckenrand [178]).
+pub(crate) fn floor_context_with(p: &Project, floor_id: &str, with_ceilings: bool, joins: Option<&HashMap<String, WallCuts>>) -> FloorContext {
+    let only = |c: &Ceiling| with_ceilings && c.floor_id == floor_id && c.outline.len() >= 3;
+    // [178] Platte bis Aussenkante Kern: die Aussenschicht-Bänder der Aussenwand liegen ausserhalb und laufen durch.
+    let bearing = if with_ceilings { super::bearing::bearing_outlines(p, only, joins) } else { Vec::new() };
     let ceilings: Vec<CeilingIn> = p
         .ceilings
         .as_deref()
         .unwrap_or(&[])
         .iter()
-        .filter(|c| with_ceilings && c.floor_id == floor_id && c.outline.len() >= 3)
-        .map(|c| {
+        .enumerate()
+        .filter(|(_, c)| only(c))
+        .flat_map(|(ci, c)| {
             let (z_bottom, z_top) = p.ceiling_vertical_extent(c);
-            CeilingIn {
-                z_bottom,
-                z_top,
-                outline: c.outline.iter().map(|v| kv(*v)).collect(),
-                layers: ceiling_layers(p, c).map(|ls| ls.iter().map(|l| (l.thickness, p.component(&l.component_id).map(|k| k.join_priority))).collect()),
-            }
+            let layers: Option<Vec<(f64, Option<f64>)>> = ceiling_layers(p, c).map(|ls| ls.iter().map(|l| (l.thickness, p.component(&l.component_id).map(|k| k.join_priority))).collect());
+            let outlines: Vec<Vec<KVec>> = match bearing.get(ci).cloned().flatten() {
+                Some(polys) => polys.iter().map(|poly| poly[0].iter().map(|q| KVec::new(q[0], q[1])).collect()).collect(),
+                None => vec![c.outline.iter().map(|v| kv(*v)).collect()],
+            };
+            outlines.into_iter().map(move |outline| CeilingIn { z_bottom, z_top, outline, layers: layers.clone() })
         })
         .collect();
     let roofs: Vec<RoofIn> = p
@@ -636,7 +645,7 @@ pub fn emit_walls_with(p: &Project, layered: bool, pockets: bool) -> Result<Vec<
     let by_wall = p.openings_by_wall();
     for wall in &p.walls {
         // Schnitt-Eingabe: nur die Dächer ([G2]); Decken rechnet der Schnitt selbst (Dominanz).
-        let ctx = contexts.entry(wall.floor_id.as_str()).or_insert_with(|| floor_context(p, &wall.floor_id, layered));
+        let ctx = contexts.entry(wall.floor_id.as_str()).or_insert_with(|| floor_context_with(p, &wall.floor_id, layered, Some(&joins)));
         let openings = by_wall.get(wall.id.as_str()).map_or(&[][..], |v| v.as_slice());
         let cuts = joins.get(&wall.id).map_or_else(WallCuts::default, |c| if layered { c.clone() } else { section_cuts(c) });
         wall_pieces(p, &maps, wall, ctx, openings, cuts, layered, pockets, &mut out);

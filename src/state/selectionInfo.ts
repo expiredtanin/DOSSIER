@@ -172,6 +172,8 @@ export interface CeilingInfo {
   /** Aussenbauteil / tragend ([97]/[98]). */
   isExternal: boolean;
   loadBearing: boolean;
+  /** [178] Platte bis an den Umriss statt Auflager bis Aussenkante Kern der Aussenwand. */
+  edgeAtOutline: boolean;
   /** Aktuelle Gesamtdicke (Meter). */
   thickness: number;
   /** Ob der aktuelle Aufbau-Typ einschichtig ist (1 Schicht). */

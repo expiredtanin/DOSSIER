@@ -82,6 +82,12 @@ export type Ceiling = {
   /** Tragend (IFC `LoadBearing`); fehlt = nicht angegeben. */
   loadBearing?: boolean;
   /**
+   * [178] Deckenrand an Aussenwänden: `true` = Platte bis an den Umriss (über die Aussenschichten der
+   * Wand); fehlt/`false` = Auflager bis Aussenkante der tragenden Schicht, Aussendämmung/Putz laufen
+   * an der Deckenstirn durch.
+   */
+  edgeAtOutline?: boolean;
+  /**
    * Geschlossener Umriss im Grundriss (Meter). Der Schlusspunkt wird NICHT
    * dupliziert (die letzte Kante läuft von outline[n-1] zu outline[0]).
    */

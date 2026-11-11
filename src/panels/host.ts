@@ -419,6 +419,8 @@ export interface PanelHostValue {
   onSetWallRoofAttach: (attach: "auto" | "on" | "off") => void;
   /** Aussenbauteil/tragend der gewählten Wand bzw. Decke ([97]/[98]); `false` = Feld weg. */
   onSetBuildingFlags: (flags: { isExternal?: boolean; loadBearing?: boolean }) => void;
+  /** [178] Deckenrand der gewählten Decke: `true` = bis an den Umriss, `false` = Auflager bis Kern (Standard). */
+  onSetCeilingEdgeAtOutline?: (edgeAtOutline: boolean) => void;
   /** Ansichtsschraffur ([100]) an der gewählten Wand bzw. am gewählten Dach drehen/versetzen. */
   onSetSurfacePatternPlacement?: (patch: { surfacePatternAngle?: number; surfacePatternOffset?: { x: number; y: number } }) => void;
   /** Weist der Wand einen Wandtyp-Preset (mehrschichtiger Aufbau) zu. */

@@ -591,6 +591,8 @@ export const en: Record<TranslationKey, string> = {
   "objinfo.ceiling.buildup": "Build-up",
   "objinfo.ceiling.thickness": "Thickness",
   "objinfo.ceiling.preset": "Ceiling style",
+  "objinfo.ceiling.bearingCore": "Bearing to core",
+  "objinfo.ceiling.bearingCoreHint": "At multi-layer exterior walls the slab ends at the outer face of the load-bearing layer; insulation and render run past it. Off: slab up to its outline.",
   "objinfo.ceiling.refFloor": "Reference floor",
   "objinfo.ceiling.top": "Top (OK)",
   "objinfo.ceiling.bottom": "Bottom (UK)",

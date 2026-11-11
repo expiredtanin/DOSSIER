@@ -29,25 +29,34 @@ pub fn emit_slabs(p: &Project) -> Vec<RSlab> {
     let mut layers_of: Vec<Option<&[Layer]>> = Vec::new();
     let mut w = FlatWriter::new();
     let count = w.slot();
+    // [178] Auflager an Aussenwänden: Platte bis Aussenkante Kern (abgeleiteter Umriss, Modell unverändert).
+    let bearing = super::bearing::ceiling_bearing_outlines(p);
+    let v2 = |r: &[[f64; 2]]| -> Vec<Vec2> { r.iter().map(|q| Vec2 { x: q[0], y: q[1] }).collect() };
     for (ci, c) in p.ceilings.as_deref().unwrap_or(&[]).iter().enumerate() {
         if c.outline.len() < 3 {
             continue;
         }
         let (z_bottom, z_top) = p.ceiling_vertical_extent(c);
         let layers = ceiling_layers(p, c);
-        w.ring(&c.outline);
         // Aussparungen inkl. der Deckenöffnungen ([103]).
         let openings = crate::opening_shape::ceiling_hole_rings(p, c);
-        w.num(openings.len() as f64);
-        for o in &openings {
-            w.ring(o);
+        let parts: Vec<(Vec<Vec2>, Vec<Vec<Vec2>>)> = match bearing.get(ci).cloned().flatten() {
+            Some(polys) => polys.iter().map(|poly| (v2(&poly[0]), poly[1..].iter().map(|h| v2(h)).chain(openings.iter().cloned()).collect())).collect(),
+            None => vec![(c.outline.clone(), openings)],
+        };
+        for (outline, holes) in parts {
+            w.ring(&outline);
+            w.num(holes.len() as f64);
+            for o in &holes {
+                w.ring(o);
+            }
+            w.num(z_bottom).num(z_top).num(layers.map_or(0, |l| l.len()) as f64);
+            for l in layers.unwrap_or(&[]) {
+                w.num(l.thickness);
+            }
+            ceilings.push((ci, c));
+            layers_of.push(layers);
         }
-        w.num(z_bottom).num(z_top).num(layers.map_or(0, |l| l.len()) as f64);
-        for l in layers.unwrap_or(&[]) {
-            w.num(l.thickness);
-        }
-        ceilings.push((ci, c));
-        layers_of.push(layers);
     }
     if ceilings.is_empty() {
         return vec![];

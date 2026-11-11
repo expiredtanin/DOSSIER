@@ -42,6 +42,9 @@ export function buildElementAttributesHost(c: FlatHostOpts) {
       if (selection?.kind === "wall") updateWall(selection.id, patch);
       else if (selection?.kind === "ceiling") updateCeiling(selection.id, patch);
     },
+    onSetCeilingEdgeAtOutline: (edgeAtOutline) => {
+      if (selection?.kind === "ceiling") updateCeiling(selection.id, { edgeAtOutline: edgeAtOutline || undefined });
+    },
     onSetWallType: (wallTypeId) => {
       if (selection?.kind === "wall")
         updateWall(selection.id, { wallTypeId });

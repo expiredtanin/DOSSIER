@@ -90,6 +90,17 @@ export function CeilingSection({
       </div>
       <UValueRow project={storeProject} kind="ceiling" typeId={ceiling.typeId} />
 
+      {/* [178] Deckenrand an Aussenwänden: Auflager bis Aussenkante Kern (Standard) oder wie Umriss. */}
+      <div className="objinfo-field" title={t("objinfo.ceiling.bearingCoreHint")}>
+        <span className="objinfo-flabel">{t("objinfo.ceiling.bearingCore")}</span>
+        <input
+          type="checkbox"
+          data-testid="objinfo-ceiling-bearingCore"
+          checked={!ceiling.edgeAtOutline}
+          onChange={(e) => host.onSetCeilingEdgeAtOutline?.(!e.target.checked)}
+        />
+      </div>
+
       {/* Fläche + Volumen (read-only). */}
       <div className="objinfo-field">
         <span className="objinfo-flabel">{t("objinfo.ceiling.area")}</span>
