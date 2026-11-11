@@ -1643,9 +1643,9 @@ mod tests {
     /// rücken entlang der Linie auf freie Stellen, statt zu fehlen; keine liegt auf dem Hindernis.
     #[test]
     fn hoehenlinien_beschriftung_rueckt_vom_hindernis_weg() {
-        let t = TerrainMesh { id: "t".into(), positions: vec![0.0, 0.0, 0.0, 40.0, 0.0, 0.0, 40.0, 10.0, 40.0, 0.0, 10.0, 40.0], indices: vec![0.0, 1.0, 2.0, 0.0, 2.0, 3.0], contour_interval: Some(0.1), ..Default::default() };
+        let t = TerrainMesh { id: "t".into(), category_code: "02".into(), positions: vec![0.0, 0.0, 0.0, 40.0, 0.0, 0.0, 40.0, 10.0, 40.0, 0.0, 10.0, 40.0], indices: vec![0.0, 1.0, 2.0, 0.0, 2.0, 3.0], contour_interval: Some(0.1), ..Default::default() };
         let p = Project { context: Some(vec![ContextObject::TerrainMesh(t)]), ..Default::default() };
-        let a = super::super::domains::PlanArgs::parse(1.0, r#"{"floor": "eg", "scale": 100}"#).unwrap();
+        let a = super::super::domains::PlanArgs::parse(1.0, r#"{"floor": "eg", "show": ["02"], "scale": 100}"#).unwrap();
         let c = Ctx::new(&p, &a);
         let run = |o: &super::super::stamp_place::Obstacles| {
             let mut out = Vec::new();
