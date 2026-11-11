@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { sampleProject } from "../model/sampleProject";
 import type { Layout, Project, Room } from "../model/types";
 import { areaReportToCsv, parseAreaReportCsv } from "./areaReport";
-import { buildRoomBookReport, roomBook, usageLabel } from "./roomBook";
+import { buildRoomBookReport, hasSlope, roomBook, usageLabel } from "./roomBook";
 import { sheetTables, tableLabels } from "./sheetTable";
 import { t } from "../i18n/translate";
 
@@ -45,6 +45,22 @@ describe("Raumbuch ([158])", () => {
     const ceil = b.quantities.find((q) => q.surface === "ceiling" && q.finish === "Weissputz")!;
     expect(ceil.rooms).toBe(2);
     expect(ceil.area).toBeCloseTo(w.area + 4, 9);
+  });
+
+  it("Wandseiten, Leibungen, Sockel und Höhenbereiche ([158])", () => {
+    const w = roomBook(p).rows[0]!;
+    expect(w.skirting).toBeGreaterThan(0);
+    expect(w.skirting).toBeLessThanOrEqual(w.perimeter);
+    expect(w.wallSides.reduce((a, s) => a + s.length, 0)).toBeCloseTo(w.perimeter, 6);
+    expect(w.wallSides.reduce((a, s) => a + s.area, 0)).toBeCloseTo(w.wallArea, 6);
+    expect(w.revealArea).toBeGreaterThanOrEqual(0);
+    // Ohne Dach: überall die lichte Höhe, alles im obersten Höhenbereich.
+    expect(w.heightMin).toBeCloseTo(w.clearHeight, 9);
+    expect(hasSlope(w)).toBe(false);
+    expect(w.areaUnder1 + w.area1To15 + w.areaOver15).toBeCloseTo(w.area, 6);
+    const rep = buildRoomBookReport(p);
+    expect(rep.sections[0]!.columns).toContain(t("roomBook.col.skirting"));
+    expect(rep.sections[0]!.rows[0]!.cells.length).toBe(rep.sections[0]!.columns.length);
   });
 
   it("Bericht: Raumbuch und Mengen, CSV-Rundreise", () => {

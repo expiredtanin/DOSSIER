@@ -5,7 +5,7 @@
 
 import { useMemo } from "react";
 import { t } from "../i18n";
-import { areaReportToCsv, buildAreaReportPdf, buildRoomBookReport, roomBook, usageLabel } from "../core";
+import { areaReportToCsv, buildAreaReportPdf, buildRoomBookReport, hasSlope, roomBook, usageLabel } from "../core";
 import { downloadCsv } from "./downloadFile";
 import { useStore } from "../state/appStore";
 
@@ -15,6 +15,7 @@ export function RoomBookSection() {
   const project = useStore((s) => s.project);
   const notify = useStore((s) => s.notify);
   const book = useMemo(() => roomBook(project), [project]);
+  const sloped = book.rows.some(hasSlope);
   const stem = `${project.name || "projekt"}-raumbuch`;
 
   const exportPdf = () => {
@@ -56,7 +57,17 @@ export function RoomBookSection() {
                 <th>{t("roomBook.col.wallFinish")}</th>
                 <th>{t("roomBook.col.ceilingFinish")}</th>
                 <th className="num">{t("roomBook.col.clearHeight")}</th>
+                {sloped && (
+                  <>
+                    <th className="num">{t("roomBook.col.heightMin")}</th>
+                    <th className="num">{t("roomBook.col.heightMean")}</th>
+                    <th className="num">{t("roomBook.col.areaUnder1")}</th>
+                    <th className="num">{t("roomBook.col.area1To15")}</th>
+                  </>
+                )}
                 <th className="num">{t("roomBook.col.wallArea")}</th>
+                <th className="num">{t("roomBook.col.reveals")}</th>
+                <th className="num">{t("roomBook.col.skirting")}</th>
               </tr>
             </thead>
             <tbody>
@@ -71,7 +82,17 @@ export function RoomBookSection() {
                   <td>{r.wallFinish}</td>
                   <td>{r.ceilingFinish}</td>
                   <td className="num">{m2(r.clearHeight)}</td>
+                  {sloped && (
+                    <>
+                      <td className="num">{m2(r.heightMin)}</td>
+                      <td className="num">{m2(r.heightMean)}</td>
+                      <td className="num">{m2(r.areaUnder1)}</td>
+                      <td className="num">{m2(r.area1To15)}</td>
+                    </>
+                  )}
                   <td className="num">{m2(r.wallArea)}</td>
+                  <td className="num">{m2(r.revealArea)}</td>
+                  <td className="num">{m2(r.skirting)}</td>
                 </tr>
               ))}
             </tbody>

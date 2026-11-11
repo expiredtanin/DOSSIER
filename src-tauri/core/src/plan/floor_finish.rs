@@ -104,16 +104,36 @@ pub fn own_finish_rooms<'a>(c: &Ctx<'a>) -> Vec<(&'a Room, &'a Component, Vec<P>
         .collect()
 }
 
-/// [158] Belagsmuster eines Raums: Muster des Materials auf dem Raumumriss (Ursprung erster Punkt,
-/// Ausrichtung am Plan), ausgedünnt wie der Deckenbelag; dazu die Strichstärke.
+/// [158] Ausrichtung des Belagsmusters: an der längsten Raumkante. Ursprung = Anfang dieser Kante,
+/// Drehung = Kantenrichtung auf ±45° gefaltet (achsparallele Räume behalten die Plan-Ausrichtung);
+/// entartete Umrisse: erster Punkt, keine Drehung. Räume haben keinen eigenen Bezugspunkt
+/// (`stampAnchor` ist nur die Lage des Stempels).
+pub fn pattern_frame(ring: &[P]) -> (P, f64) {
+    let mut best: Option<(f64, P, f64)> = None;
+    for i in 0..ring.len() {
+        let (a, b) = (ring[i], ring[(i + 1) % ring.len()]);
+        let len = (b[0] - a[0]).hypot(b[1] - a[1]);
+        if len.is_finite() && len > 1e-9 && best.map_or(true, |(l, _, _)| len > l + 1e-9) {
+            let deg = (b[1] - a[1]).atan2(b[0] - a[0]).to_degrees();
+            best = Some((len, a, deg - 90.0 * (deg / 90.0).round()));
+        }
+    }
+    match best {
+        Some((_, a, deg)) => (a, deg),
+        None => (ring.first().copied().unwrap_or([0.0, 0.0]), 0.0),
+    }
+}
+
+/// [158] Belagsmuster eines Raums: Muster des Materials auf dem Raumumriss (nach der längsten
+/// Raumkante ausgerichtet, [`pattern_frame`]), ausgedünnt wie der Deckenbelag; dazu die Strichstärke.
 pub fn room_segments(comp: &Component, ring: &[P], scale: f64) -> Option<(Vec<(P, P)>, f64)> {
     let pat = comp.surface_pattern.as_ref()?;
-    let spec = crate::surface_pattern::spec_of(pat, 0.0)?;
-    let segs = crate::surface_pattern::segments(ring, &spec, *ring.first()?, thinning_scale(scale));
+    let (origin, deg) = pattern_frame(ring);
+    let spec = crate::surface_pattern::spec_of(pat, deg)?;
+    let segs = crate::surface_pattern::segments(ring, &spec, origin, thinning_scale(scale));
     Some((segs, weight(pat.weight_mm)))
 }
 
-/// Umrisse der Nassräume des Geschosses.
 pub fn wet_rooms(c: &Ctx) -> Vec<Vec<P>> {
     c.p.rooms.as_deref().unwrap_or(&[]).iter().filter(|r| r.floor_id == c.a.floor && r.boundary.len() >= 3 && is_wet_room(r)).map(|r| r.boundary.iter().map(|v| [v.x, v.y]).collect()).collect()
 }
@@ -207,6 +227,7 @@ pub fn clip_inside_any(segs: &[(P, P)], polys: &[Vec<P>]) -> Vec<(P, P)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::{SurfacePattern, SurfacePatternDirection, SurfacePatternKind};
 
     #[test]
     fn darstellung_je_massstab_und_einstellung() {
@@ -233,5 +254,30 @@ mod tests {
     fn huelle_konvex() {
         let h = convex_hull(vec![[0.0, 0.0], [1.0, 0.0], [0.5, 0.2], [1.0, 1.0], [0.0, 1.0], [0.5, 0.5]]);
         assert_eq!(h.len(), 4);
+    }
+
+    #[test]
+    fn muster_an_laengster_raumkante() {
+        // Achsparalleler Raum: keine Drehung, Ursprung am Anfang der längsten Kante (zweite: 5 m).
+        let r = [[0.0, 0.0], [2.0, 0.0], [2.0, 5.0], [0.0, 5.0]];
+        assert_eq!(pattern_frame(&r), ([2.0, 0.0], 0.0));
+        // Um 30° gedrehter Raum 6 × 3: Drehung = 30°, Ursprung = Anfang der Längskante.
+        let (c, s) = (30f64.to_radians().cos(), 30f64.to_radians().sin());
+        let rot = |x: f64, y: f64| [x * c - y * s + 1.0, x * s + y * c + 2.0];
+        let ring = [rot(0.0, 0.0), rot(6.0, 0.0), rot(6.0, 3.0), rot(0.0, 3.0)];
+        let (o, deg) = pattern_frame(&ring);
+        assert!((deg - 30.0).abs() < 1e-9 && o == ring[0], "{o:?} {deg}");
+        // Längskante rückwärts (180°): auf achsparallel gefaltet.
+        assert_eq!(pattern_frame(&[[6.0, 0.0], [0.0, 0.0], [0.0, 3.0], [6.0, 3.0]]).1, 0.0);
+        assert_eq!(pattern_frame(&[]), ([0.0, 0.0], 0.0));
+        // Dielen („horizontal") laufen in der gedrehten Stube parallel zur Längskante.
+        let comp = Component { surface_pattern: Some(SurfacePattern { kind: SurfacePatternKind::Lines, direction: Some(SurfacePatternDirection::Horizontal), spacing: 0.5, ..Default::default() }), ..Default::default() };
+        let (segs, _) = room_segments(&comp, &ring, 50.0).unwrap();
+        assert!(!segs.is_empty());
+        for (a, b) in segs {
+            let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+            let cross = (dx * s - dy * c).abs() / dx.hypot(dy);
+            assert!(cross < 1e-6, "{cross}");
+        }
     }
 }

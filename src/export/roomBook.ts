@@ -19,8 +19,15 @@ export interface RoomBookRow {
   /** Nettofläche (m²) = Boden- und Deckenfläche. */
   area: number;
   perimeter: number;
-  /** Lichte Höhe (m) aus den Decken, sonst Geschosshöhe. */
+  /** Lichte Höhe (m) an der höchsten Stelle: aus den Decken, sonst Geschosshöhe. */
   clearHeight: number;
+  /** Kleinste und mittlere lichte Höhe unter Dachschrägen (m). */
+  heightMin: number;
+  heightMean: number;
+  /** Fläche (m²) nach SIA-416-Höhenbereichen: < 1.0 m, 1.0–1.5 m, ≥ 1.5 m lichte Höhe. */
+  areaUnder1: number;
+  area1To15: number;
+  areaOver15: number;
   /** Nutzungs-Kennung, leer ohne Angabe. */
   usage: RoomUsage | "";
   wet: boolean;
@@ -32,7 +39,26 @@ export interface RoomBookRow {
   /** Wandfläche netto: Umfang × lichte Höhe − Öffnungen (m²). */
   wallArea: number;
   openingArea: number;
+  /** Wandoberflächen je Wandseite (Raumseite der Wand), Höhe = lichte Höhe. */
+  wallSides: WallSide[];
+  /** Leibungsflächen aller Öffnungen am Raum (m²). */
+  revealArea: number;
+  /** Sockellänge: Umfang minus Türbreiten (m). */
+  skirting: number;
 }
+
+/** Wandseite am Raum (`wallId` leer = Umrisskante ohne Wand). */
+export interface WallSide {
+  wallId: string;
+  length: number;
+  gross: number;
+  openings: number;
+  area: number;
+  reveals: number;
+}
+
+/** Hat der Raum Flächen unter 1.5 m lichter Höhe (Dachschräge)? */
+export const hasSlope = (r: RoomBookRow): boolean => r.areaUnder1 + r.area1To15 > 1e-9;
 
 /** Menge einer Oberfläche je Material/Freitext. */
 export interface FinishQty {
@@ -75,11 +101,17 @@ function roomSection(rows: RoomBookRow[]): ReportSection {
       t("roomBook.col.ceilingFinish"),
       t("roomBook.col.buildUp"),
       t("roomBook.col.clearHeight"),
+      t("roomBook.col.heightMin"),
+      t("roomBook.col.heightMean"),
+      t("roomBook.col.areaUnder1"),
+      t("roomBook.col.area1To15"),
       t("roomBook.col.wallArea"),
+      t("roomBook.col.reveals"),
+      t("roomBook.col.skirting"),
     ],
-    widths: [1.2, 1, 2.4, 1.2, 1.6, 2.4, 2.4, 2.4, 3, 1.2, 1.3],
+    widths: [1.2, 1, 2.4, 1.2, 1.6, 2.4, 2.4, 2.4, 3, 1.2, 1.2, 1.2, 1.2, 1.2, 1.3, 1.2, 1.2],
     rows: rows.map((r) => ({
-      cells: [r.floor, r.number, r.name, num(r.area, 2), usageLabel(r.usage), r.floorFinish, r.wallFinish, r.ceilingFinish, r.floorBuildUp, num(r.clearHeight, 2), num(r.wallArea, 2)],
+      cells: [r.floor, r.number, r.name, num(r.area, 2), usageLabel(r.usage), r.floorFinish, r.wallFinish, r.ceilingFinish, r.floorBuildUp, num(r.clearHeight, 2), num(r.heightMin, 2), num(r.heightMean, 2), num(r.areaUnder1, 2), num(r.area1To15, 2), num(r.wallArea, 2), num(r.revealArea, 2), num(r.skirting, 2)],
     })),
   };
 }
