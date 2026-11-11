@@ -107,13 +107,14 @@ fn crosses_fascia(q: &[[f64; 3]; 4], a: (f64, f64), b: (f64, f64), z: f64) -> bo
 /// Betrachter) durch ein Dach läuft, sind verdeckt. Ganz verdeckte Flächen entfallen (Oberseiten,
 /// Laibungen und Stirnen innen unter dem Dach); bei senkrechten Kanten wird die Fläche auf die Höhe
 /// gekappt, ab der das Dach sie verdeckt (Traufe vor der Wand). Ersetzt keine HLR ([G4]).
-pub(super) fn cull_under_roofs(p: &Project, frame: &[f64; 9], walls: &[RWall], faces: &mut Vec<Face>) {
+/// `shown`: Klasse sichtbar ([180]: Dächer ausgeblendeter Klassen verdecken nichts).
+pub(super) fn cull_under_roofs(p: &Project, frame: &[f64; 9], walls: &[RWall], faces: &mut Vec<Face>, shown: &dyn Fn(&str) -> bool) {
     let affected: std::collections::HashSet<&str> = walls.iter().filter(|w| w.top_plane.is_some() || w.joint != [false; 2]).map(|w| w.wall_id.as_str()).collect();
     if affected.is_empty() {
         return;
     }
     // Dachgeometrie je Dach einmal (früher je Dach für alle anderen erneut: quadratisch).
-    let roofs = p.roofs.as_deref().unwrap_or(&[]);
+    let roofs: Vec<&Roof> = p.roofs.as_deref().unwrap_or(&[]).iter().filter(|r| shown(&r.category_code)).collect();
     let geos: Vec<crate::roof::RoofGeometry> = roofs.iter().map(|r| crate::roof::roof_geometry(&r.params(), p.roof_base_elevation(r))).collect();
     let xy_bounds = |planes: &[Vec<[f64; 3]>]| {
         let mut b = [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY];

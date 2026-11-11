@@ -996,3 +996,45 @@ fn fenster_in_bogenwand_sitzt_in_der_wand() {
     }
     assert!(n_frame > 0, "Rahmenteile im Schnitt fehlen");
 }
+
+/// [180] Ausgeblendete Klassen nehmen an der Verdeckung nicht teil: Eine Wand (Klasse 77) vor einer Rückwand
+/// (Klasse 78), beide hinter der Schnittebene. Sichtbar oder grau verdeckt sie einen Teil der Rückwandkanten;
+/// ausgeblendet (`invisible` bzw. `norender`) erscheint die Rückwand vollständig, wie ohne die Wand.
+#[test]
+fn ausgeblendete_klasse_verdeckt_nicht() {
+    let mut p = sample();
+    let w1 = p.walls.iter().find(|w| w.id == "W1").unwrap().clone();
+    let wall = |id: &str, cat: &str, x0: f64, x1: f64, y: f64| Wall { id: id.into(), category_code: cat.into(), start: Vec2 { x: x0, y }, end: Vec2 { x: x1, y }, ..w1.clone() };
+    p.walls.push(wall("RUECK", "78", 0.0, 10.0, 50.0));
+    p.walls.push(wall("VORN", "77", 4.0, 6.0, 45.0));
+    let l = LevelSpec { kind: "section".into(), line: Some([Vec2 { x: -5.0, y: 40.0 }, Vec2 { x: 15.0, y: 40.0 }]), ..Default::default() };
+    let back = |out: &Output| -> f64 { out.visible.iter().filter(|e| out.edge_cats.get(&(e.kind, e.index)).map(String::as_str) == Some("78")).map(|e| hypot2(e.b[0] - e.a[0], e.b[1] - e.a[1])).sum() };
+    let back_len = |vis: &Visibility| back(&compute_section_vis(&p, &l, &[], vis).unwrap().unwrap());
+    let set = |c: &str| -> HashSet<String> { [c.to_string()].into() };
+    let full = {
+        let mut q = p.clone();
+        q.walls.retain(|w| w.id != "VORN");
+        back(&compute_section(&q, &l, &[]).unwrap().unwrap())
+    };
+    let shown = back_len(&Visibility::default());
+    assert!(full > 0.0 && shown < full - 1.0, "Vorderwand verdeckt: {shown} < {full}");
+    let off = back_len(&Visibility { has_vis: true, invisible: set("77"), ..Default::default() });
+    assert!((off - full).abs() < 1e-6, "ausgeblendet: Rückwand vollständig ({off} = {full})");
+    let norender = back_len(&Visibility { has_display: true, norender: set("77"), ..Default::default() });
+    assert!((norender - full).abs() < 1e-6, "nicht gerendert: {norender} = {full}");
+    let grey = back_len(&Visibility { has_display: true, grey: set("77"), ..Default::default() });
+    assert!((grey - shown).abs() < 1e-6, "grau verdeckt weiter: {grey} = {shown}");
+}
+
+/// [180] Der Schnitt-Cache unterscheidet die ausgeblendeten Klassen (gleicher Aufrufer-Schlüssel).
+#[test]
+fn schnitt_cache_kennt_ausgeblendete_klassen() {
+    let p = sample();
+    let l = p.drawing_levels.iter().find(|l| l.id == "schnitt-a").unwrap();
+    let run = |invisible: &[&str]| section_plan_buf(&p, &[0.0, 0.0, 4711.0], &serde_json::json!({ "level": serde_json::to_value(l).unwrap(), "hasVis": true, "invisible": invisible }).to_string()).unwrap();
+    let all = run(&[]);
+    let off = run(&["31"]);
+    assert_ne!(all, off, "Dach aus ergibt einen anderen Schnitt");
+    assert_eq!(run(&[]), all);
+    assert_eq!(run(&["31"]), off);
+}

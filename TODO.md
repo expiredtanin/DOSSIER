@@ -68,9 +68,13 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   Objekt-Info änderbar); Schnitt: Projektionskanten und Raster nach Klasse; Ansicht: Klassen wirken auch ohne
   Darstellungsmodus (Blatt-Ausschnitte zeigten ausgeblendete Klassen), Öffnungen (samt Wirt), Treppen, Raster, Dachmuster
   nach Klasse (Nebenwirkung: kein doppeltes Ziegelraster mehr auf dem Hauptdach, Golden Ansicht Süd); CLI `--hide`;
-  Tooltip im Ebenen-Panel (de/en). Tests `plan/derived_class_tests.rs`, `src/plan/derivedCategories.test.ts`. Offen:
-  ausgeblendete Bauteile verdecken im Schnitt weiter die Projektion dahinter (Lücken); 3D nicht nach Klassen geprüft;
-  nicht in der Tauri-App/auf dem Mac geprüft. · M
+  Tooltip im Ebenen-Panel (de/en). Tests `plan/derived_class_tests.rs`, `src/plan/derivedCategories.test.ts`. Nachtrag (11.11.):
+  ausgeblendete Klassen (`invisible`/`norender`) nehmen im Schnitt an Dominanz und Verdeckung nicht mehr teil
+  (`compute_section_vis`: Schnittbänder, Körper, Netze, HLR-Flächen), Schnitt-Cache mit den ausgeblendeten Klassen im
+  Schlüssel; Ansicht: ausgeblendete Dächer kappen keine Wände mehr (`cull_under_roofs`); grau verdeckt weiter. Tests
+  `section/tests.rs` (`ausgeblendete_klasse_verdeckt_nicht`, `schnitt_cache_kennt_ausgeblendete_klassen`); Golden
+  Schnitt A komplex (Carport-Dachlinie ohne Lücken bei Klasse 25 aus). Offen: 3D (render3d-Teile, Pick) filtert nur
+  Kontext-Netze nach Klasse (`p.layers`), Wände/Decken/Dächer/Stützen nicht; nicht in der Tauri-App/auf dem Mac geprüft. · M
 - ◐ **[133]** Musterhaus komplex: Rest. Skalieren-Kopie lässt `position`/Breite unverändert; Vollflächen-/Bildschraffur
   und Schraffur-Löcher beim Ausbreiten fehlen (`src/export/planToSvgString.ts`, Kern `plan/svg.rs`; wegen paralleler
   Arbeit an `svg.rs` (Bögen) am 10.11. nicht angefasst). (10.11.: Skalieren skaliert `position`/`width` der Wandöffnungen

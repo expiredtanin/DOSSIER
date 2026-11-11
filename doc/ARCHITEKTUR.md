@@ -396,8 +396,12 @@ alle Klassen aus ⇒ Grundriss jedes Geschosses, Schnitte, Ansichten leer; jede 
 | Kontext-Unterlagen (DXF/PDF) | Element (2D-Zeichnung) | `drawings.rs` |
 | Grundlinie Schnitt/Ansicht | keine eigene: entfällt, wenn nichts gezeichnet ist | `section/primitives.rs`, `elevation/mod.rs` |
 
-Offen: Bauzonen sind kein eigener Planinhalt (nur Baurecht-Einstellungen); 3D (render3d-Teile) nicht geprüft; ausgeblendete
-Bauteile verdecken im Schnitt weiter die Projektion dahinter.
+Ausgeblendete Klassen wirken VOR der Sichtbarkeitsrechnung: im Schnitt (`compute_section_vis`) ohne Schnittband,
+Dominanz, Projektion und Verdeckung (Cache-Schlüssel mit den Klassen), in der Ansicht vor Maler-Ordnung, Schatten und
+`cull_under_roofs`; graue Klassen verdecken weiter.
+
+Offen: Bauzonen sind kein eigener Planinhalt (nur Baurecht-Einstellungen); 3D (render3d-Teile, Pick) blendet nur
+Kontext-Netze nach Klasse aus.
 
 ---
 

@@ -196,7 +196,7 @@ pub fn elevation_primitives_with(p: &Project, level: &LevelSpec, shadows: bool, 
         f.depth_max += SLAB_BEHIND_WALL;
         f.pd.iter_mut().for_each(|d| *d += SLAB_BEHIND_WALL);
     }
-    cull_under_roofs(p, &frame, &walls, &mut faces);
+    cull_under_roofs(p, &frame, &walls, &mut faces, &|c| vis.visible(c) && vis.render(c));
     faces.extend(collect_roof_faces(p, &frame, &walls)?);
     faces.extend(collect_column_faces(p, &frame));
     faces.extend(collect_mesh_faces(p, &frame));

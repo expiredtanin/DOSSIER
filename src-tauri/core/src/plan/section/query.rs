@@ -11,7 +11,7 @@ thread_local! {
     static CACHE: std::cell::RefCell<Vec<((f64, u64), std::rc::Rc<Output>)>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
-/// Schlüssel: (Schlüssel des Aufrufers, [33] Kennung der ausgeblendeten Elemente, 0 = keine).
+/// Schlüssel: (Schlüssel des Aufrufers, [33] Kennung der ausgeblendeten Elemente und [180] Klassen, 0 = keine).
 fn cache_get(key: (f64, u64)) -> Option<std::rc::Rc<Output>> {
     if !(key.0 > 0.0) {
         return None;
@@ -60,21 +60,27 @@ pub fn section_plan_buf(p: &Project, args: &[f64], text: &str) -> Result<Vec<u8>
     let hidden_ids = crate::plan::overrides::hidden_elements(p, rv);
     let filtered = (!hidden_ids.is_empty()).then(|| without_elements(p, &hidden_ids));
     let p = filtered.as_ref().unwrap_or(p);
+    // [180] Ausgeblendete Klassen gehören in den Schlüssel: sie nehmen an der Verdeckung nicht teil, der Schnitt
+    // hängt also an ihnen (graue nicht).
     let hkey = {
         let mut ids: Vec<&String> = hidden_ids.iter().collect();
         ids.sort();
-        ids.iter().flat_map(|s| s.bytes().chain([0u8])).fold(if ids.is_empty() { 0 } else { 0xcbf2_9ce4_8422_2325u64 }, |h, b| (h ^ b as u64).wrapping_mul(0x0000_0100_0000_01b3))
+        let mut codes: Vec<&String> = vis.hidden_codes().collect();
+        codes.sort();
+        codes.dedup();
+        let empty = ids.is_empty() && codes.is_empty();
+        ids.iter().flat_map(|s| s.bytes().chain([0u8])).chain([1u8]).chain(codes.iter().flat_map(|s| s.bytes().chain([0u8]))).fold(if empty { 0 } else { 0xcbf2_9ce4_8422_2325u64 }, |h, b| (h ^ b as u64).wrapping_mul(0x0000_0100_0000_01b3))
     };
     let key = (key, hkey);
     let mut w = crate::plan::buf::Writer::new(true);
     // Der Schnitt selbst hängt nur am Projektstand, an der Ebene und den Körpern (= ein Aufruf von
-    // `computeSection` in TS, Schlüssel `key`); Schwarz-Weiss, Sichtbarkeit und verdeckte Kanten nur an
-    // der Darstellung. Darum die zuletzt berechneten Schnitte merken (Umschalten ohne Neurechnen).
+    // `computeSection` in TS, Schlüssel `key`) und an den ausgeblendeten Klassen (`hkey`); Schwarz-Weiss, graue
+    // Klassen und verdeckte Kanten nur an der Darstellung. Darum die zuletzt berechneten Schnitte merken (Umschalten ohne Neurechnen).
     let out = match cache_get(key) {
         Some(o) => o,
         None => {
             let bodies = read_bodies(args.get(3..).unwrap_or(&[])).ok_or("Schnitt: Körper-Netze unlesbar")?;
-            let Some(o) = compute_section(p, &level, &bodies)? else { return Ok(w.finish()) };
+            let Some(o) = compute_section_vis(p, &level, &bodies, &vis)? else { return Ok(w.finish()) };
             let o = std::rc::Rc::new(o);
             cache_put(key, o.clone());
             o
