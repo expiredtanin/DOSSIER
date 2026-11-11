@@ -315,9 +315,16 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   (Objekt-Info „Auflager bis Kern“, aus = wie Umriss). Offen: Deckenkante im Grundriss folgt noch dem Umriss;
   Bogenwände unverändert; Platte ohne Wand in gleicher Höhe (UG-Decke über Lichtschacht/kurzer Fundamentwand im
   Musterhaus komplex) bleibt bis Umriss; nicht in der Tauri-App/auf dem Mac geprüft. · S
-- ◐ **[G4]** Exakte Sichtbarkeit (HLR, Kern `hlr.rs`). Füllungen der Ansicht bleiben Maler-Ordnung (bei Gauben liegt
-  eine Füllung über einer verdeckten Kante); Durchdringungslinien sich schneidender Körper fehlen; Gelände/
-  Kontext-Netze nicht in der Projektion. · XL
+- ◐ **[G4]** Exakte Sichtbarkeit (HLR, Kern `hlr.rs`). 11.11.: Füllungen der Ansicht aus der exakten Sichtbarkeit
+  (`hlr_fill.rs`: je Fläche Umriss minus die näheren Teile der anderen, Halbebene der Tiefendifferenz, i_overlay;
+  ganz verdeckte Flächen entfallen), Ansichtsschraffur auf die sichtbaren Teile ihrer Fläche beschnitten (Dachraster
+  lief über die Gauben), Schlagschatten nur auf sichtbaren Wandteilen (Fugen der Erker-Facetten); Durchdringungslinien
+  zugewandter Flächen verschiedener Bauteile (`hlr::intersection_edges`, Raster-Vorauswahl; Kamin/Körper ↔ Dach/Wand,
+  Erker ↔ Fassade). Tests `kamin_hinter_dachmitte_fuellung_wie_kanten`, `koerper_durch_wand_zeigt_durchdringungslinie`;
+  8×8-Wächter ~0.3 s, 16×16 ~4 s (release, Linux). Offen: Gelände als Flächen in der Projektion (bleibt Silhouette +
+  Maske, [T6]); Durchdringungslinien im Projektionsteil des Schnitts (`section/projection.rs` vergibt keine Körper);
+  Öffnungen bleiben Maler-Ordnung; über 20 000 Flächen (grosse Netze) weiter Maler-Ordnung; Ortgang der Sattelgaube
+  zeigt nur die äussere Dachschicht ([G5]); nicht in der Tauri-App/auf dem Mac geprüft. · XL
 - ◐ **[G6]** Allgemeine Polygon-Dominanz im Schnitt. 3D-Live-Schnitt (`render3d/section_boolean.rs`) rechnet nur
   Rechtecke, Ring mit Loch bleibt unbeschnitten; dort fehlt auch der Schraffur-Deckel von Abzugskörpern (aus [G8]). · M
 - ◐ **[G1]** Ebenenschnitt beliebiger Körper (`plan/mesh_plan.rs::plan_bodies`, `plan/extras.rs`). 11.11.: Grundriss aller

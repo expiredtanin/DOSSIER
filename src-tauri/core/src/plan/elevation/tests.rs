@@ -598,7 +598,8 @@ fn ansicht_gross_schnell() {
     let t0 = std::time::Instant::now();
     let (prims, _) = elevation_primitives(&p, &level, true, false, &Visibility::default(), 100.0).unwrap().unwrap();
     let ms = t0.elapsed().as_secs_f64() * 1e3;
-    assert!(prims.len() > 1000);
+    // [G4] Ganz verdeckte Flächen (und Schatten darauf) entfallen: früher ~2000 Primitive übereinander gemalt.
+    assert!(prims.len() > 200, "{}", prims.len());
     // Schranke gegen einen Rückfall um Grössenordnungen, nicht gegen Rauschen: parallele Builds/Agents
     // lasten die Maschine aus (unter Last bis ~15 s im Debug-Build gemessen).
     let limit = if cfg!(debug_assertions) { 40_000.0 } else { 20_000.0 };
@@ -958,5 +959,73 @@ fn ecken_der_wand_unter_dem_dach_ohne_fuge() {
         .filter(|(a, b)| (a.x - b.x).abs() < 1e-6 && ((a.x - 1.0).abs() < 1e-3 || (a.x - 6.0).abs() < 1e-3) && a.y.min(b.y) >= 2.6 - 1e-6)
         .collect();
     assert!(seams.is_empty(), "Fugen an den OG-Ecken: {seams:?}");
+}
+
+/// Zuletzt gemalte Fläche, die den Punkt `q` enthält.
+fn top_at(prims: &[Primitive], q: [f64; 2]) -> Option<&Primitive> {
+    prims.iter().rev().find(|p| match p {
+        Primitive::Polygon { pts, fill, .. } if fill != "none" => {
+            let mut inside = false;
+            let n = pts.len();
+            for i in 0..n {
+                let (a, b) = (pts[i], pts[(i + n - 1) % n]);
+                if (a.y > q[1]) != (b.y > q[1]) && q[0] < a.x + (b.x - a.x) * (q[1] - a.y) / (b.y - a.y) {
+                    inside = !inside;
+                }
+            }
+            inside
+        }
+        _ => false,
+    })
+}
+
+/// [G4] Kamin durch das Dach, hinter der Mitte der Dachfläche: seine Füllung liegt oben, wo seine Kanten sichtbar
+/// sind (die Maler-Reihenfolge nach Mitteltiefe malte die Dachfläche darüber — wie bei Gauben), und wo er aus der
+/// Dachfläche tritt, zeigt die Ansicht die Durchdringungslinie.
+#[test]
+fn kamin_hinter_dachmitte_fuellung_wie_kanten() {
+    let mut p = proj132(
+        serde_json::json!([{"id": "R", "type": "roof", "floorId": "F", "categoryCode": "35", "color": "#aa0000",
+            "outline": [{"x": 0, "y": 0}, {"x": 10, "y": 0}, {"x": 10, "y": 12}, {"x": 0, "y": 12}],
+            "shape": "sattel", "pitchDeg": 40, "overhang": 0, "ridgeAxis": "x", "baseElevation": 3.0, "thickness": 0.3}]),
+        serde_json::json!([]),
+    );
+    let pt = |x: f64, y: f64| Vec2 { x, y };
+    p.extruded_solids = Some(vec![ExtrudedSolid { id: "k".into(), category_code: "50".into(), points: vec![pt(4.5, 4.5), pt(5.5, 4.5), pt(5.5, 5.5), pt(4.5, 5.5)], height: 10.0, ..Default::default() }]);
+    let prims = view132(&p, "s");
+    // Ansichts-u = x + 2: Kamin u 6.5…7.5, Vorderseite in Tiefe 7.5 (Mitte der Dachfläche: 6). Er tritt bei
+    // 3 + 4.5·tan 40° ≈ 6.78 aus der Dachfläche; darüber bis zum First (≈ 8.03) war er übermalt.
+    let z = 3.0 + 4.5 * 40f64.to_radians().tan();
+    for v in [z + 0.2, 7.9, 9.0] {
+        let top = top_at(&prims, [7.0, v]);
+        assert!(matches!(top, Some(Primitive::Polygon { extruded_solid_id: Some(id), .. }) if id == "k"), "{v}: Kamin übermalt: {top:?}");
+    }
+    // Daneben und darunter die Dachfläche.
+    for q in [[5.0, 7.0], [7.0, z - 0.2]] {
+        assert!(matches!(top_at(&prims, q), Some(Primitive::Polygon { roof_id: Some(_), .. })), "{q:?}");
+    }
+    // Durchdringungslinie Kamin ↔ Dach über die Breite des Kamins.
+    let meet = outline_lines(&prims).iter().any(|(a, b)| (a.y - z).abs() < 1e-3 && (b.y - z).abs() < 1e-3 && (a.x.min(b.x) - 6.5).abs() < 1e-3 && (a.x.max(b.x) - 7.5).abs() < 1e-3);
+    assert!(meet, "Durchdringungslinie fehlt");
+}
+
+/// [G4] Durchdringungslinien: ein über Eck gestellter Körper steckt in der Wand; wo seine zugewandten Seiten in die
+/// Wandfläche eintauchen, zeigt die Ansicht senkrechte Kanten (früher fehlten sie, die Ecken liegen in der Wand).
+#[test]
+fn koerper_durch_wand_zeigt_durchdringungslinie() {
+    let level = LevelSpec { kind: "elevation".into(), line: Some([Vec2 { x: -5.0, y: -1.0 }, Vec2 { x: 8.0, y: -1.0 }]), direction_sign: Some(1.0), ..Default::default() };
+    let pt = |x: f64, y: f64| Vec2 { x, y };
+    // Wand x −1…5 bei y = 3; Raute um (2, 3) mit Halbdiagonale 0.5: die seitlichen Ecken liegen in der Wand.
+    let p = Project {
+        walls: vec![Wall { id: "w".into(), start: pt(-1.0, 3.0), end: pt(5.0, 3.0), height: 3.0, category_code: "20".into(), ..Default::default() }],
+        extruded_solids: Some(vec![ExtrudedSolid { id: "k".into(), category_code: "50".into(), points: vec![pt(2.0, 2.5), pt(2.5, 3.0), pt(2.0, 3.5), pt(1.5, 3.0)], height: 2.0, ..Default::default() }]),
+        ..Default::default()
+    };
+    let (prims, _) = elevation_primitives(&p, &level, false, false, &Visibility::default(), 100.0).unwrap().unwrap();
+    // u = x + 5: Raute u 6.5…7.5, vordere Ecke bei 7.0. Durchdringung je zwischen Ecke und Seite.
+    let verticals: Vec<f64> = outline_lines(&prims).iter().filter(|(a, b)| (a.x - b.x).abs() < 1e-6 && a.y.min(b.y).abs() < 1e-6 && (a.y.max(b.y) - 2.0).abs() < 1e-6).map(|(a, _)| a.x).collect();
+    assert!(verticals.iter().any(|&u| u > 6.5 + 1e-3 && u < 7.0 - 1e-3) && verticals.iter().any(|&u| u > 7.0 + 1e-3 && u < 7.5 - 1e-3), "Durchdringung fehlt: {verticals:?}");
+    // Die seitlichen Ecken der Raute liegen in der Wand (verdeckt).
+    assert!(!verticals.iter().any(|&u| (u - 6.5).abs() < 1e-6 || (u - 7.5).abs() < 1e-6), "{verticals:?}");
 }
 

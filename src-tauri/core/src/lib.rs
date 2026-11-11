@@ -72,6 +72,7 @@ pub mod model3d_cache;
 pub mod explode3d;
 pub mod style;
 pub mod hlr;
+pub mod hlr_fill;
 pub mod voids;
 pub mod curves;
 pub mod skeleton;

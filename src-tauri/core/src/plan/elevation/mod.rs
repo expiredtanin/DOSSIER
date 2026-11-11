@@ -130,7 +130,8 @@ enum Pending {
     /// `style`: Index in die Ansichtsschraffur-Stile (Strichstärke, Farbe); ohne = Kante.
     /// `paint`: Tiefe für die Maler-Reihenfolge, wenn sie von der Verdeckungstiefe abweicht (Muster-
     /// linien liegen knapp vor IHRER Fläche, auch wo sie tiefer liegen als deren Mittel).
-    Line { a: Pt, b: Pt, depth: f64, style: Option<usize>, paint: Option<f64> },
+    /// `own`: [G4] Flächen, auf deren sichtbare Teile die Linie beschnitten wird (dann verdecken nur noch Öffnungen).
+    Line { a: Pt, b: Pt, depth: f64, style: Option<usize>, paint: Option<f64>, own: Option<Rc<[usize]>> },
     Item { depth: f64, rank: Option<f64>, prim: Primitive },
 }
 
@@ -162,6 +163,28 @@ fn drop_hole_edges(edges: &mut Vec<silhouette::EdgeSeg>, b: [f64; 4]) {
             || (e.a[1] <= b[1] + TOL && e.b[1] <= b[1] + TOL);
         !((side || band) && inside(e.a) && inside(e.b))
     });
+}
+
+/// Höchstens so viele Flächen rechnen die Füllungen exakt ([G4]); darüber (Netze mit sehr vielen Dreiecken)
+/// bleibt es bei der Maler-Reihenfolge.
+const FILL_EXACT_MAX: usize = 20_000;
+
+/// [G4] Sichtbare Teile der gezeichneten Flächen (`hlr_fill`): `None` = ganz sichtbar, sonst die Teilpolygone.
+fn visible_fills(faces: &[Face], needed: &[bool]) -> Vec<Option<Vec<crate::flat::Polygon>>> {
+    if needed.iter().filter(|n| **n).count() > FILL_EXACT_MAX {
+        return vec![None; faces.len()];
+    }
+    let pts: Vec<Vec<[f64; 3]>> = faces
+        .iter()
+        .zip(needed)
+        .map(|(f, n)| {
+            if !*n {
+                return Vec::new();
+            }
+            if f.pd.len() == f.pts.len() { f.pts.iter().zip(&f.pd).map(|(q, d)| [q[0], q[1], *d]).collect() } else { f.pts.iter().map(|q| [q[0], q[1], f.depth]).collect() }
+        })
+        .collect();
+    crate::hlr_fill::visible_regions(&pts, 1e-5)
 }
 
 fn outline_line(a: Pt, b: Pt) -> Primitive {
@@ -308,7 +331,7 @@ pub fn elevation_primitives_with(p: &Project, level: &LevelSpec, shadows: bool, 
             let (lines, styles) = surface_patterns(p, &mut extra, &frame, scale, mono);
             let k0 = pattern_styles.len();
             pattern_styles.extend(styles);
-            pattern_lines.extend(lines.into_iter().map(|(a, b, d, paint, k)| (a, b, d, paint, k + k0)));
+            pattern_lines.extend(lines.into_iter().map(|(a, b, d, paint, k, _)| (a, b, d, paint, k + k0, None)));
         }
     }
     // [173] Ansichtsschraffur der Baustoffe nach der Modelldarstellung.
@@ -362,37 +385,47 @@ pub fn elevation_primitives_with(p: &Project, level: &LevelSpec, shadows: bool, 
     let nb = crate::roof_assembly::neighbors_rc(p);
     let assembled: std::collections::HashSet<&str> = p.roofs.as_deref().unwrap_or(&[]).iter().enumerate().filter(|(i, _)| crate::roof_assembly::is_assembled_with(p, *i, &nb)).map(|(_, r)| r.id.as_str()).collect();
     let needed = mesh_faces_needed(&faces);
-    for (f, _) in faces.iter().zip(&needed).filter(|(_, n)| **n) {
-        let pts: Vec<Vec2> = f
-            .pts
-            .iter()
-            .map(|q| {
-                acc.add(q[0], q[1]);
-                v2(q[0], q[1])
-            })
-            .collect();
-        let is_roof = f.role == Role::Roof;
-        // Verschnittene Dächer ([G5]) kommen teils als Dreiecke: ein Hauch Kontur in der Füllfarbe deckt
-        // die Haarfugen zwischen ihnen.
-        let fill = face_fill(f);
-        // [152] Importierte Netze ebenso (Dreiecke).
-        let seam = (is_roof && assembled.contains(f.id.as_str())) || f.role.is_mesh();
-        let hatch = f.ov.as_ref().and_then(|o| o.hatch.clone()).unwrap_or_else(no_hatch);
-        let mut prim = if seam { polygon(pts, &fill, &fill, 0.15, hatch) } else { polygon(pts, &fill, "none", 0.0, hatch) };
-        if let Primitive::Polygon { greyed: g, wall_id, ceiling_id, roof_id, column_id, context_object_id, extruded_solid_id, .. } = &mut prim {
-            *g = Some(greyed(f));
-            if !f.id.is_empty() {
-                match f.role {
-                    Role::Wall => *wall_id = Some(f.id.clone()),
-                    Role::Slab => *ceiling_id = Some(f.id.clone()),
-                    Role::Roof => *roof_id = Some(f.id.clone()),
-                    Role::Column => *column_id = Some(f.id.clone()),
-                    Role::Mesh => *context_object_id = Some(f.id.clone()),
-                    Role::Body => *extruded_solid_id = Some(f.id.clone()),
+    // [G4] Füllungen aus der exakten Sichtbarkeit: je Fläche die sichtbaren Teile (wie die Kanten), damit keine
+    // Füllung über einer verdeckten Kante liegt (Maler-Reihenfolge nach Mitteltiefe irrte bei Gauben, die vor der
+    // Dachfläche, aber hinter deren Mitte liegen). Sehr viele Netz-Dreiecke: weiter Maler-Reihenfolge.
+    let regions = visible_fills(&faces, &needed);
+    for (fi, f) in faces.iter().enumerate().filter(|(i, _)| needed[*i]) {
+        for q in &f.pts {
+            acc.add(q[0], q[1]);
+        }
+        let rings: Vec<Vec<Vec2>> = match regions.get(fi).and_then(|r| r.as_ref()) {
+            None => vec![f.pts.iter().map(|q| v2(q[0], q[1])).collect()],
+            Some(polys) => polys
+                .iter()
+                .map(|poly| if poly.len() > 1 { crate::voids::keyhole(poly).0 } else { poly[0].clone() })
+                .filter(|r| r.len() >= 3)
+                .map(|r| r.iter().map(|q| v2(q[0], q[1])).collect())
+                .collect(),
+        };
+        for pts in rings {
+            let is_roof = f.role == Role::Roof;
+            // Verschnittene Dächer ([G5]) kommen teils als Dreiecke: ein Hauch Kontur in der Füllfarbe deckt
+            // die Haarfugen zwischen ihnen.
+            let fill = face_fill(f);
+            // [152] Importierte Netze ebenso (Dreiecke).
+            let seam = (is_roof && assembled.contains(f.id.as_str())) || f.role.is_mesh();
+            let hatch = f.ov.as_ref().and_then(|o| o.hatch.clone()).unwrap_or_else(no_hatch);
+            let mut prim = if seam { polygon(pts, &fill, &fill, 0.15, hatch) } else { polygon(pts, &fill, "none", 0.0, hatch) };
+            if let Primitive::Polygon { greyed: g, wall_id, ceiling_id, roof_id, column_id, context_object_id, extruded_solid_id, .. } = &mut prim {
+                *g = Some(greyed(f));
+                if !f.id.is_empty() {
+                    match f.role {
+                        Role::Wall => *wall_id = Some(f.id.clone()),
+                        Role::Slab => *ceiling_id = Some(f.id.clone()),
+                        Role::Roof => *roof_id = Some(f.id.clone()),
+                        Role::Column => *column_id = Some(f.id.clone()),
+                        Role::Mesh => *context_object_id = Some(f.id.clone()),
+                        Role::Body => *extruded_solid_id = Some(f.id.clone()),
+                    }
                 }
             }
+            pending.push(Pending::Item { depth: f.depth, rank: Some(paint_rank(f.role)), prim });
         }
-        pending.push(Pending::Item { depth: f.depth, rank: Some(paint_rank(f.role)), prim });
     }
     // [149] Bäume: Silhouette (Krone gefüllt, Stamm) in der Maler-Reihenfolge; Bauteile davor verdecken sie.
     for (depth, tree) in super::trees::view_trees(p, level, vis, Some(super::trees::view_crown_fill(mono)), None) {
@@ -414,39 +447,64 @@ pub fn elevation_primitives_with(p: &Project, level: &LevelSpec, shadows: bool, 
         let b = op.pts.iter().fold([f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY], |b, q| [b[0].min(q[0]), b[1].min(q[1]), b[2].max(q[0]), b[3].max(q[1])]);
         drop_hole_edges(&mut edges, b);
     }
-    for (a, b, depth, paint, k) in pattern_lines {
-        pending.push(Pending::Line { a, b, depth, style: Some(k), paint: Some(paint) });
+    for (a, b, depth, paint, k, own) in pattern_lines {
+        // [G4] Auf die sichtbaren Teile der eigenen Fläche(n) beschnitten.
+        match own {
+            Some(own) => {
+                let polys: Vec<crate::flat::Polygon> = own.iter().filter(|&&fi| fi < faces.len()).flat_map(|&fi| match regions.get(fi).and_then(|r| r.as_ref()) {
+                    Some(v) => v.clone(),
+                    None => vec![vec![faces[fi].pts.clone()]],
+                }).collect();
+                let refs: Vec<&crate::flat::Polygon> = polys.iter().collect();
+                for (sa, sb) in crate::hlr_fill::clip_segment_to(a, b, &refs) {
+                    pending.push(Pending::Line { a: sa, b: sb, depth, style: Some(k), paint: Some(paint), own: Some(own.clone()) });
+                }
+            }
+            None => pending.push(Pending::Line { a, b, depth, style: Some(k), paint: Some(paint), own: None }),
+        }
     }
-    // Linien gebündelt gegen die Verdecker clippen (`flushPending`).
+    // Linien gebündelt gegen die Verdecker clippen (`flushPending`); auf ihre Fläche beschnittene ([G4]) nur noch
+    // gegen die Öffnungen.
     {
-        let mut q = vec![0.0];
+        let mut occ_open = vec![openings.len() as f64];
+        for op in &openings {
+            let pts: &[Pt] = op.shape.as_ref().map_or(&op.pts[..], |(o, _, _, _)| &o[..]);
+            occ_open.extend([op.depth, pts.len() as f64]);
+            for q in pts {
+                occ_open.extend(q);
+            }
+        }
+        let (mut qa, mut qb) = (vec![0.0], vec![0.0]);
         for pd in &pending {
-            if let Pending::Line { a, b, depth, .. } = pd {
+            if let Pending::Line { a, b, depth, own, .. } = pd {
+                let q = if own.is_some() { &mut qb } else { &mut qa };
                 q.extend([a[0], a[1], b[0], b[1], *depth]);
                 q[0] += 1.0;
             }
         }
-        let r = crate::plan::elevation_geom::clip_segments(&occ, &q);
-        let mut i = 1;
+        let ra = crate::plan::elevation_geom::clip_segments(&occ, &qa);
+        let rb = crate::plan::elevation_geom::clip_segments(&occ_open, &qb);
+        let (mut ia, mut ib) = (1, 1);
         for pd in pending {
             match pd {
                 Pending::Item { depth, rank, prim } => {
                     items.push(Item { depth, seq, rank, prim });
                     seq += 1;
                 }
-                Pending::Line { a, b, depth, style, paint } => {
+                Pending::Line { a, b, depth, style, paint, own } => {
+                    let (r, i) = if own.is_some() { (&rb, &mut ib) } else { (&ra, &mut ia) };
                     let c = if r.is_empty() {
                         1
                     } else {
-                        i += 1;
-                        r[i - 1] as usize
+                        *i += 1;
+                        r[*i - 1] as usize
                     };
                     for _ in 0..c {
                         let (sa, sb) = if r.is_empty() {
                             (a, b)
                         } else {
-                            let s = ([r[i], r[i + 1]], [r[i + 2], r[i + 3]]);
-                            i += 4;
+                            let s = ([r[*i], r[*i + 1]], [r[*i + 2], r[*i + 3]]);
+                            *i += 4;
                             s
                         };
                         acc.add(sa[0], sa[1]);
@@ -481,7 +539,29 @@ pub fn elevation_primitives_with(p: &Project, level: &LevelSpec, shadows: bool, 
         q
     };
     if shadows {
-        let wall_faces: Vec<&Face> = faces.iter().filter(|f| f.role == Role::Wall).collect();
+        // [G4] Schatten nur auf den sichtbaren Teilen der Wände: auf verdeckten Teilen lagen sie unter den Flächen
+        // davor und schienen durch deren Fugen (Facetten des Erkers).
+        let mut cut: Vec<Face> = Vec::new();
+        let mut wall_faces: Vec<&Face> = Vec::new();
+        for (fi, f) in faces.iter().enumerate().filter(|(_, f)| f.role == Role::Wall) {
+            match regions.get(fi).and_then(|r| r.as_ref()) {
+                None => wall_faces.push(f),
+                Some(polys) => {
+                    let pts3: Vec<[f64; 3]> = f.pts.iter().zip(&f.pd).map(|(q, d)| [q[0], q[1], *d]).collect();
+                    let Some(pl) = crate::hlr_fill::plane(&pts3) else { continue };
+                    for poly in polys {
+                        let ring = if poly.len() > 1 { crate::voids::keyhole(poly).0 } else { poly[0].clone() };
+                        if ring.len() < 3 {
+                            continue;
+                        }
+                        let pd: Vec<f64> = ring.iter().map(|q| pl[0] + pl[1] * q[0] + pl[2] * q[1]).collect();
+                        let (dmin, dmax) = pd.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), d| (a.min(*d), b.max(*d)));
+                        cut.push(Face { pts: ring, pd, depth: f.depth, depth_min: dmin, depth_max: dmax, role: f.role, id: f.id.clone(), fill: f.fill, normal: f.normal, ov: f.ov.clone(), two_sided: f.two_sided, curved_slab: f.curved_slab });
+                    }
+                }
+            }
+        }
+        wall_faces.extend(cut.iter());
         let mut casters: Vec<&Face> = faces.iter().filter(|f| f.role == Role::Slab).collect();
         casters.extend(faces.iter().filter(|f| f.role == Role::Roof));
         // [157] Teil 4: Absätze unter 0.2 mm Papier glätten.
@@ -610,7 +690,7 @@ pub fn elevation_primitives_with(p: &Project, level: &LevelSpec, shadows: bool, 
         a.seq.cmp(&b.seq)
     });
     let mut prims: Vec<Primitive> = items.into_iter().map(|it| it.prim).collect();
-    // Exakt sichtbare Kanten liegen über allen Füllungen (die Füllungen bleiben Maler-Ordnung).
+    // Exakt sichtbare Kanten liegen über allen Füllungen (Füllungen: sichtbare Teile, `visible_fills`).
     let silhouette = Silhouette::of(&faces);
     for e in &edges {
         acc.add(e.a[0], e.a[1]);
