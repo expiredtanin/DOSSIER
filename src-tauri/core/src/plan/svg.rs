@@ -2,13 +2,13 @@
 //! MCP und Referenzbild-Tests, direkt aus den Abschnitten eines zusammengesetzten Plans
 //! ([`crate::plan::parts`]). Koordinaten in Metern (Y nach oben → SVG gespiegelt), Strichstärken
 //! aus Papier-mm über den Massstab; Schraffur-Muster werden nur mit `hatch` ausgebreitet (sonst nur Grundfüllung),
-//! Bilder und Textpfade fehlen — gedacht für Kontrolle und Diffs, nicht für Druck. Byte-gleich zur
+//! Vollflächen-Schraffur (Füllung) und Bild-Schraffur (`<pattern>`) nur mit `hatch`, Textpfade fehlen — gedacht für Kontrolle und Diffs, nicht für Druck. Byte-gleich zur
 //! TS-Fassung (Zahlen wie `String(Math.round(v·1e5)/1e5)`, Texte aus dem Text-JSON des Puffers).
 
 use crate::js_fmt::js_number;
 use crate::hatch::{self, Pattern, V2};
 use crate::jsnum;
-use crate::plan::print_svg::{hatch_dash_paper, quantize_pen};
+use crate::plan::print_svg::{hatch_dash_paper, hatch_runs, image_tile, quantize_pen};
 use crate::plan::buf::{whole, F_COLOR, F_DASH_LIST, F_GREYED, F_OPACITY, T_ARC, T_CIRCLE, T_DRAWING_ARC, T_DRAWING_TEXT, T_LINE, T_POLYGON, T_TEXT};
 use crate::plan::line_ends::LineEnds;
 use crate::plan::parts::Part;
@@ -262,6 +262,9 @@ pub fn plan_svg(parts: &mut [Part], o: &SvgOptions) -> Option<String> {
     let ys = |y: f64| num(top - y);
     let mut out: Vec<String> = Vec::new();
     let mut stitch = Stitcher::default();
+    // [133] Muster der Bild-Schraffuren (je Bild einmal).
+    let mut defs: Vec<String> = Vec::new();
+    let mut patterns: HashMap<String, String> = HashMap::new();
     // [153] Gestrichelte Linien, die aneinander anschliessen, als EIN Zug (Phase über die Ecken).
     let mut run: Option<DashRun> = None;
     for part in parts.iter_mut() {
@@ -298,8 +301,15 @@ pub fn plan_svg(parts: &mut [Part], o: &SvgOptions) -> Option<String> {
                     // nachtesselierten Ring beschnitten (endet am Bogen, nicht an der Sehne).
                     let (geo, _) = shape_el(&pts, true, &xs, &ys, top);
                     let hatch_pts = if geo.starts_with("polygon") { pts.clone() } else { arc_fit::refine(&pts, true, arc_fit::TOL, &arc_fit::fine_segments).unwrap_or_else(|| pts.clone()) };
-                    let fill = esc(part.str(f[0]).unwrap_or(""));
+                    let mut fill = esc(part.str(f[0]).unwrap_or(""));
                     let stroke = esc(part.str(f[1]).unwrap_or(""));
+                    // [133] Schraffur-Eintrag der Fläche; Vollfläche füllt in Schraffurfarbe (wie Druck/PDF).
+                    let hent = if o.hatch && f[3] >= 0.0 { Some(hatches.get(whole(f[3])?)?.clone()) } else { None };
+                    if let Some((_, h, color)) = &hent {
+                        if h.pattern == Pattern::Solid && h.kind != hatch::HatchKind::Image {
+                            fill = if *color >= 0 { esc(&part.view.string(*color as usize)?) } else { "#000".into() };
+                        }
+                    }
                     // Nicht gestrichene Kanten (Stossfugen, Lücken an Anschlüssen): Fläche ohne Strich,
                     // die übrigen Kanten als offener Pfad — wie der GPU-Pfad (`stroke_polygon_outline`).
                     let nse: Vec<usize> = match rec.nse {
@@ -328,29 +338,50 @@ pub fn plan_svg(parts: &mut [Part], o: &SvgOptions) -> Option<String> {
                             op(greyed, opacity(4))
                         ));
                     }
+                    // [133] Bild-Schraffur: gekacheltes `<pattern>` über die Fläche (wie Druck/PDF), Umriss darüber.
+                    if let Some((json, h, _)) = &hent {
+                        if h.kind == hatch::HatchKind::Image && *json >= 0 {
+                            let j: Value = serde_json::from_str(&part.view.string(*json as usize)?).unwrap_or(Value::Null);
+                            if let Some(img) = j.get("image").filter(|v| v.is_object()) {
+                                let key = img.to_string();
+                                let id = match patterns.get(&key) {
+                                    Some(id) => id.clone(),
+                                    None => {
+                                        let id = format!("imgpat-{}", patterns.len());
+                                        let (tw, th, rot) = image_tile(img);
+                                        let (tw, th) = (num(tw * mm_to_m), num(th * mm_to_m));
+                                        let tf = if rot != 0.0 { format!(" patternTransform=\"rotate({})\"", num(rot)) } else { String::new() };
+                                        defs.push(format!(
+                                            "<pattern id=\"{id}\" patternUnits=\"userSpaceOnUse\" width=\"{tw}\" height=\"{th}\"{tf}><image href=\"{}\" x=\"0\" y=\"0\" width=\"{tw}\" height=\"{th}\" preserveAspectRatio=\"none\"/></pattern>",
+                                            esc(jstr(img, "src").unwrap_or(""))
+                                        ));
+                                        patterns.insert(key, id.clone());
+                                        id
+                                    }
+                                };
+                                out.push(format!("<{geo} fill=\"url(#{id})\" stroke=\"none\"{}/>", op(greyed, opacity(4))));
+                                if nse.is_empty() && stroke != "none" && !stroke.is_empty() && f[2] > 0.0 {
+                                    out.push(format!("<{geo} fill=\"none\" stroke=\"{stroke}\" stroke-width=\"{}\"{}/>", num(f[2] * mm_to_m), op(greyed, opacity(4))));
+                                }
+                            }
+                        }
+                    }
                     // [140] Schraffur auch bei Kantenläufen (Wandschichten mit offenen Kanten).
-                    if o.hatch && f[3] >= 0.0 {
-                        let (_, h, color) = hatches.get(whole(f[3])?)?.clone();
-                        if h.pattern != Pattern::None && h.pattern != Pattern::Solid && h.kind != hatch::HatchKind::Image {
-                            let hc = if color >= 0 { esc(&part.view.string(color as usize)?) } else { "#000".into() };
+                    if let Some((_, h, color)) = &hent {
+                        if h.pattern != Pattern::None && h.pattern != Pattern::Solid && h.kind == hatch::HatchKind::Vector {
+                            let hc = if *color >= 0 { esc(&part.view.string(*color as usize)?) } else { "#000".into() };
                             let k = 1000.0 / n;
                             let pen = num(quantize_pen(h.line_weight) * mm_to_m);
-                            let dash = hatch_dash_paper(&h, k);
+                            let dash = hatch_dash_paper(h, k);
                             let da = if dash.is_empty() {
                                 String::new()
                             } else {
                                 let cap = if dash.iter().any(|v| *v == 0.0) { " stroke-linecap=\"round\"" } else { "" };
                                 format!(" stroke-dasharray=\"{}\"{cap}", dash.iter().map(|v| num(v * mm_to_m)).collect::<Vec<_>>().join(" "))
                             };
-                            let mut runs: Vec<Vec<V2>> = Vec::new();
-                            if h.random {
-                                runs.extend(hatch::build_random_hatch_runs(&hatch_pts, &h, None).into_iter().filter(|r| r.len() >= 2).map(|r| vec![r[0], r[r.len() - 1]]));
-                            } else {
-                                // [166] Alle Vektor-Schraffuren aus dem Kern-Generator wie Szene/PDF (Winkel-Lesart
-                                // der SVG-Kachel, polare Schraffur der Bogenwand).
-                                runs.extend(hatch::build_hatch_runs(&hatch_pts, &h));
-                            }
-                            for run in runs {
+                            // [166] Alle Vektor-Schraffuren aus dem Kern-Generator wie Szene/PDF/Druck-SVG (Winkel-Lesart
+                            // der SVG-Kachel, polare Schraffur der Bogenwand); [133] Löcher: Ring mit Brücke, even-odd.
+                            for run in hatch_runs(&hatch_pts, h) {
                                 match run.len() {
                                     0 | 1 => {}
                                     2 => out.push(format!(
@@ -495,7 +526,7 @@ pub fn plan_svg(parts: &mut [Part], o: &SvgOptions) -> Option<String> {
     stitch.finish(&mut out, &xs, &ys, top);
     out.retain(|s| !s.is_empty());
     Some(format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"{} 0 {} {}\" width=\"{}mm\" height=\"{}mm\">\n<rect x=\"{}\" y=\"0\" width=\"{}\" height=\"{}\" fill=\"#ffffff\"/>\n<g {}>\n{}\n</g>\n</svg>\n",
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"{} 0 {} {}\" width=\"{}mm\" height=\"{}mm\">\n<rect x=\"{}\" y=\"0\" width=\"{}\" height=\"{}\" fill=\"#ffffff\"/>\n{}<g {}>\n{}\n</g>\n</svg>\n",
         num(x0),
         num(w),
         num(h),
@@ -504,6 +535,7 @@ pub fn plan_svg(parts: &mut [Part], o: &SvgOptions) -> Option<String> {
         num(x0),
         num(w),
         num(h),
+        if defs.is_empty() { String::new() } else { format!("<defs>{}</defs>\n", defs.concat()) },
         o.line_ends.svg_attrs(),
         out.join("\n")
     ))
