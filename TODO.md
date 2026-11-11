@@ -122,8 +122,9 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   Absturzsicherung am Deckenloch auch in 3D (Körper aus Pfosten, Handlauf, Stäben, `stairs3d::guard_mesh`; Lage aus dem
   gemeinsamen `stair_guard.rs`, gleiche Quelle wie der Grundriss; Teil der Treppen-Handläufe, pickbar mit der Treppe) und im
   IFC (eigenes IfcRailing GUARDRAIL an der IfcStair, Länge als Basismenge; Wire-Format STAIR: `n_rails` statt `has_rail`). Offen:
-  Ende eines freien Lochrings ohne Gehrung; dichtes Belagsmuster in 1:100; im Explosionsbild steht die Sicherung beim
-  Geschoss der Treppe statt der Decke; 3D-Darstellung nur als Zahlen/Golden geprüft (Metal nur macOS). · M
+  Ende eines freien Lochrings ohne Gehrung; dichtes Belagsmuster in 1:100; 3D-Darstellung nur als Zahlen/Golden
+  geprüft (Metal nur macOS). (11.11.) Im Explosionsbild folgt die Sicherung dem Geschoss der Decke mit dem Loch, Handläufe
+  der Treppe (`explode3d::parts`/`pick_geometry`, `emit_stair_guards_on`, `pick_stair_railings_split`). · M
 - ◐ **[156]** Bodenbelag-Muster massstabsgerecht. Möbel nur als Blöcke/Körper (geschlossene 2D-Formen der Kategorie
   „Möbel“ sparen nicht aus); Deckenspiegel-Untersicht unverändert (alte Ausdünnung). Nassraum nach Name ist durch
   [158] ersetzt. · S
@@ -132,9 +133,11 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   Wandoberflächen je Wandseite (`wall_sides`, Raumseite der Wand abzüglich Öffnungen), Leibungsflächen und Sockellänge
   (Umfang − Türbreiten) in Zeile und Panel/Bericht; Belagsmuster im Plan an der längsten Raumkante ausgerichtet
   (`floor_finish::pattern_frame`; Räume haben keinen eigenen Bezugspunkt). Offen: keine IfcCovering-Bauteile (nur
-  Pset-Texte); Bogenwände liefern keine Wandseite (Kante läuft unter „ohne Wand“); Wandfläche unter Schrägen rechnet
-  weiter mit der vollen lichten Höhe; Blatt-Tabelle (`sheet_table.rs`) ohne die neuen Spalten; Belag im 3D und im
-  Deckenspiegel nicht nach Raum. · M
+  Pset-Texte); Bogenwände liefern keine Wandseite (Kante läuft unter „ohne Wand“); Belag im 3D und im
+  Deckenspiegel nicht nach Raum. (11.11.) Wandfläche unter Schrägen = mittlere Dachunterkante-Höhe entlang der Wandseite
+  (Stützstellen alle ~10 cm, `room_book::edge_mean_height`; `wall_area` = Summe der Wandseiten); Blatt-Tabelle
+  (`sheet_table.rs`) mit den Spalten Höhe min/Ø, Fläche < 1.0 / 1.0–1.5 m (nur wenn ein Raum eine Schräge hat),
+  Leibungen, Sockel (wählbar). · M
 - ◐ **[157]** Plan-Review Musterhaus komplex (Schweizer Praxis). Stand 10.11. (CLI-SVG `--hatch`, Chromium, nur Linux):
   behoben: Raumstempel verlieren beim Ausweichen keine Zeile mehr (erst frei, dann mit geringster Überdeckung, Zeilen
   entfallen nur noch, wenn das Rechteck im Raum nirgends passt; `fit_room_stamp`); Schnitt-/Ansichtsbeschriftung („B-B“)
@@ -315,7 +318,8 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   Schlagschatten und Gelände nicht über Regeln steuerbar; Linienstil auf Polygon-Umrissen (Wand-Umriss, Decken)
   ohne Wirkung; Linienstil-Aktion in der Ansicht ohne Wirkung; Öffnungen selbst ausblenden nicht möglich. · M
 - ◐ **[65]** Explosionsaxonometrie (`explode3d.rs`). Abzugskörper (truck-Booleans) werden bei reiner Abstandsänderung neu
-  gerechnet (Cache ohne Abstand fehlt). · S
+  gerechnet (Cache ohne Abstand fehlt). (11.11.) Absturzsicherung ([155]) wandert mit dem Geschoss der Decke mit dem
+  Loch, nicht mit dem der Treppe. · S
 - ◐ **[67]** Skizzenstil (`plan/sketch.rs`). Kompakte Linien-Unterlage (grosse DXF-Unterlagen), Bögen und Kreise bleiben
   exakt; keine Intensitäts-Einstellung; keine Hand-Schraffur. · S
 - ◐ **[152]** Importierte Netze in Schnitt, Ansicht, Grundriss (`core/src/mesh_view.rs`). Der Archiv-Eintrag nennt keinen

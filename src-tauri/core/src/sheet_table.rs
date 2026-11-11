@@ -107,10 +107,19 @@ const ROOM_BOOK: &[Col] = &[
     c("ceilingFinish", "roomBook.col.ceilingFinish", 2.4, false, true),
     c("buildUp", "roomBook.col.buildUp", 3.0, false, false),
     c("clearHeight", "roomBook.col.clearHeight", 1.2, true, false),
+    c("heightMin", "roomBook.col.heightMin", 1.2, true, true),
+    c("heightMean", "roomBook.col.heightMean", 1.2, true, true),
+    c("areaUnder1", "roomBook.col.areaUnder1", 1.3, true, true),
+    c("area1To15", "roomBook.col.area1To15", 1.3, true, true),
     c("wallArea", "roomBook.col.wallArea", 1.3, true, false),
+    c("reveals", "roomBook.col.reveals", 1.2, true, false),
+    c("skirting", "roomBook.col.skirting", 1.2, true, false),
     c("perimeter", "roomBook.col.perimeter", 1.2, true, false),
     c("wet", "roomBook.col.wet", 1.0, false, false),
 ];
+
+/// [158] Raumbuch-Spalten, die nur erscheinen, wenn ein Raum eine Dachschräge hat.
+const SLOPE_COLS: &[&str] = &["heightMin", "heightMean", "areaUnder1", "area1To15"];
 
 /// Schlüssel der Werttexte (Art, aussen/innen, Aufschlag …).
 pub const VALUE_KEYS: &[&str] = &[
@@ -190,6 +199,8 @@ fn opt(s: &Option<String>) -> Cell {
 
 struct Data {
     rows: Vec<Vec<Cell>>,
+    /// Raumbuch: mindestens ein Raum hat eine Dachschräge; ohne fallen die Spalten der Höhenbereiche weg.
+    sloped: bool,
     /// Letzte Zeile ist eine Summenzeile.
     total_last: bool,
 }
@@ -233,7 +244,7 @@ fn openings_data(p: &Project, filter: Option<&str>, lb: &Labels) -> Data {
             ]
         })
         .collect();
-    Data { rows, total_last: false }
+    Data { rows, sloped: false, total_last: false }
 }
 
 fn areas_data(p: &Project, lb: &Labels) -> Data {
@@ -243,7 +254,7 @@ fn areas_data(p: &Project, lb: &Labels) -> Data {
     };
     let mut rows: Vec<Vec<Cell>> = t.levels.iter().map(|r| row(r, r.name.clone())).collect();
     rows.push(row(&t.total, lb.get("sheetTable.v.total")));
-    Data { rows, total_last: true }
+    Data { rows, sloped: false, total_last: true }
 }
 
 fn rooms_data(p: &Project) -> Data {
@@ -253,7 +264,7 @@ fn rooms_data(p: &Project) -> Data {
         .iter()
         .map(|r| vec![txt(r.name.clone()), opt(&r.group), num(r.target_count as f64, 0), num(r.target_area, 2), num(r.soll, 2), num(r.ist, 2), num(r.diff, 2), Cell::Num { n: r.diff_pct.map(|v| v * 100.0), d: 1 }])
         .collect();
-    Data { rows, total_last: false }
+    Data { rows, sloped: false, total_last: false }
 }
 
 fn elements_data(p: &Project, lb: &Labels) -> Data {
@@ -283,7 +294,7 @@ fn elements_data(p: &Project, lb: &Labels) -> Data {
             ]
         })
         .collect();
-    Data { rows, total_last: false }
+    Data { rows, sloped: false, total_last: false }
 }
 
 fn data_of(p: &Project, t: &LayoutTable, lb: &Labels) -> Data {
@@ -299,7 +310,9 @@ fn data_of(p: &Project, t: &LayoutTable, lb: &Labels) -> Data {
 
 /// [158] Raumbuch: eine Zeile je Raum (Reihenfolge wie `room_book`).
 fn room_book_data(p: &Project, lb: &Labels) -> Data {
-    let rows = crate::room_book::room_book(p)
+    let book = crate::room_book::room_book(p);
+    let sloped = book.rows.iter().any(|r| r.area_under_1 + r.area_1_to_15 > 1e-9);
+    let rows = book
         .rows
         .into_iter()
         .map(|r| {
@@ -314,13 +327,19 @@ fn room_book_data(p: &Project, lb: &Labels) -> Data {
                 txt(r.ceiling_finish),
                 txt(r.floor_build_up),
                 num(r.clear_height, 2),
+                num(r.height_min, 2),
+                num(r.height_mean, 2),
+                num(r.area_under_1, 2),
+                num(r.area_1_to_15, 2),
                 num(r.wall_area, 2),
+                num(r.reveal_area, 2),
+                num(r.skirting, 2),
                 num(r.perimeter, 2),
                 txt(if r.wet { lb.get("roomBook.wet") } else { String::new() }),
             ]
         })
         .collect();
-    Data { rows, total_last: false }
+    Data { rows, sloped, total_last: false }
 }
 
 /// [68] Erdarbeiten je Baugrube (m³ gegen das gewachsene Terrain) mit Summenzeile.
@@ -332,7 +351,7 @@ fn earthworks_data(p: &Project, lb: &Labels) -> Data {
         let s = |f: fn(&crate::excavation::ExQty) -> f64| q.iter().map(f).sum::<f64>();
         rows.push(vec![txt(lb.get("sheetTable.v.total")), num(f64::NAN, 2), num(s(|e| e.bottom_area), 1), num(s(|e| e.cut), 1), num(s(|e| e.fill), 1), num(s(|e| e.backfill), 1)]);
     }
-    Data { rows, total_last }
+    Data { rows, sloped: false, total_last }
 }
 
 /// Gewählte Spalten als Indizes in den Katalog (unbekannte Kennungen fallen weg; leer ⇒ Standard).
@@ -464,8 +483,14 @@ pub fn render(p: &Project, layout: &Layout, lb: &Labels) -> Vec<TableOut> {
         let head = chain_head(tables, i);
         let src = &tables[head];
         let data = cache.entry(head).or_insert_with(|| data_of(p, src, lb));
-        let idx = column_indices(src);
         let cat = catalog(src.source);
+        let mut idx = column_indices(src);
+        if src.source == LayoutTableSource::RoomBook && !data.sloped {
+            let keep: Vec<usize> = idx.iter().copied().filter(|&k| !SLOPE_COLS.contains(&cat[k].id)).collect();
+            if !keep.is_empty() {
+                idx = keep;
+            }
+        }
         let (family, size, body_bold, italic) = font_of(p, t);
         let rh = row_height(t, size);
         let has_head = t.header.unwrap_or(true);
@@ -696,8 +721,32 @@ mod tests {
         for s in ["Boden", "EG", "0.01", "Wohnen", "20.00", "WOHN", "Parkett", "Abrieb"] {
             assert!(tx.contains(&s.to_string()), "{s}: {tx:?}");
         }
-        assert_eq!(catalog_json()["sources"]["roomBook"].as_array().unwrap().iter().filter(|c| c["default"] == true).count(), 8);
+        assert_eq!(catalog_json()["sources"]["roomBook"].as_array().unwrap().iter().filter(|c| c["default"] == true).count(), 12);
         assert_eq!(serde_json::to_value(LayoutTableSource::RoomBook).unwrap(), "roomBook");
+    }
+
+    /// [158] Neue Raumbuch-Spalten: Leibungen/Sockel immer, Höhenbereiche nur mit Dachschräge.
+    #[test]
+    fn raumbuch_spalten_schraege_leibung_sockel() {
+        let mut t = table("rb", None);
+        t.source = LayoutTableSource::RoomBook;
+        t.columns = Some(vec!["name".into(), "heightMin".into(), "areaUnder1".into(), "reveals".into(), "skirting".into()]);
+        let mut p = project(0, vec![t]);
+        let sq = vec![Vec2 { x: 0.0, y: 0.0 }, Vec2 { x: 4.0, y: 0.0 }, Vec2 { x: 4.0, y: 4.0 }, Vec2 { x: 0.0, y: 4.0 }];
+        p.rooms = Some(vec![Room { id: "r".into(), floor_id: "eg".into(), name: "Studio".into(), boundary: sq, ..Default::default() }]);
+        let lb = Labels::parse(&json!({"roomBook.col.heightMin": "HMIN", "roomBook.col.reveals": "LEIB", "roomBook.col.skirting": "SOCK"}));
+        let tx = texts(&render(&p, &p.layouts.as_ref().unwrap()[0], &lb)[0]);
+        assert!(tx.contains(&"LEIB".to_string()) && tx.contains(&"SOCK".to_string()), "{tx:?}");
+        assert!(!tx.contains(&"HMIN".to_string()), "ohne Schräge keine Höhenbereiche: {tx:?}");
+        assert!(tx.contains(&"16.00".to_string()), "Sockel = Umfang: {tx:?}");
+        // Mit Dach: Spalte erscheint, Fläche < 1.0 m ist > 0.
+        p.drawing_levels.iter_mut().for_each(|l| l.floor_height = Some(3.0));
+        let roof: Roof = serde_json::from_value(json!({ "id": "d", "type": "roof", "floorId": "eg", "categoryCode": "50",
+            "outline": [{"x": 0, "y": 0}, {"x": 4, "y": 0}, {"x": 4, "y": 4}, {"x": 0, "y": 4}],
+            "shape": "sattel", "pitchDeg": 45.0, "thickness": 0.0, "baseElevation": 0.0 })).unwrap();
+        p.roofs = Some(vec![roof]);
+        let tx = texts(&render(&p, &p.layouts.as_ref().unwrap()[0], &lb)[0]);
+        assert!(tx.contains(&"HMIN".to_string()), "{tx:?}");
     }
 
     #[test]

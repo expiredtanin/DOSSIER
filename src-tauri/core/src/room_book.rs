@@ -2,8 +2,8 @@
 //!
 //! Je Raum eine Zeile mit Geschoss, Nummer, Name, Fläche, Nutzung (Nassraum abgeleitet), Bodenbelag,
 //! Wand- und Deckenoberfläche (Bauteil-Material über seine Kennung oder Freitext) und Bodenaufbau.
-//! Mengen: Bodenfläche = Deckenfläche = Raumfläche (netto); Wandfläche netto = Umfang × lichte Höhe −
-//! Öffnungen in den Wänden am Raum. Lichte Höhe aus den Decken über/unter dem Raum (Oberkante der Decke
+//! Mengen: Bodenfläche = Deckenfläche = Raumfläche (netto); Wandfläche netto = Umfang × lichte Höhe (unter
+//! Dachschrägen die mittlere Höhe je Wandseite) − Öffnungen in den Wänden am Raum. Lichte Höhe aus den Decken über/unter dem Raum (Oberkante der Decke
 //! am Boden bis Unterkante der Decke darüber), sonst Geschosshöhe.
 //! Die Tabelle wird im Kern gerechnet; CSV/PDF und Blatt-Tabelle formatieren dieselben Zeilen.
 
@@ -240,7 +240,7 @@ pub struct WallSide {
     pub wall_id: String,
     /// Länge der anliegenden Wandseite (m).
     pub length: f64,
-    /// Fläche brutto = Länge × lichte Höhe (m²).
+    /// Fläche brutto = Länge × mittlere Höhe entlang der Seite (unter Schrägen < lichte Höhe) (m²).
     pub gross: f64,
     /// Öffnungen in diesem Abschnitt (m²).
     pub openings: f64,
@@ -252,20 +252,27 @@ pub struct WallSide {
 
 /// Wandseiten eines Raums: je Wand die Länge der Umrisskanten, die auf ihrer Fläche liegen (Kante
 /// parallel zur Wandachse, im Abstand Wanddicke/2 ± 8 cm), mit den Öffnungen des Abschnitts.
-pub fn wall_sides(p: &Project, r: &Room, height: f64) -> Vec<WallSide> {
+///
+/// Unter Dachschrägen (`roofs`) zählt die mittlere Höhe entlang der Wandseite statt der vollen lichten
+/// Höhe `height`: Stützstellen alle ~10 cm entlang des Kantenstücks, je Stelle die Dachunterkante über
+/// dem Boden (höchstens `height`), s. [`edge_mean_height`].
+pub fn wall_sides(p: &Project, r: &Room, height: f64, roofs: Option<&RoofPlanes>) -> Vec<WallSide> {
     let b = &r.boundary;
+    let floor_z = clear_range(p, r).0;
+    let mean_h = |a: [f64; 2], c: [f64; 2]| edge_mean_height(r, roofs, floor_z, height, a, c);
     let openings = room_openings(p, r);
     let mut sides: Vec<WallSide> = Vec::new();
-    let mut add = |wall_id: &str, length: f64, ops: &[&(&Opening, &Wall)], thick: f64| {
+    let mut add = |wall_id: &str, length: f64, gross: f64, ops: &[&(&Opening, &Wall)], thick: f64| {
         let open: f64 = ops.iter().map(|(o, _)| o.width * o.height).sum();
         let reveals: f64 = ops.iter().map(|(o, _)| (if o.kind == ElementKind::Door { 2.0 * o.height + o.width } else { 2.0 * (o.height + o.width) }) * thick).sum();
         match sides.iter_mut().find(|s| s.wall_id == wall_id) {
             Some(s) => {
                 s.length += length;
+                s.gross += gross;
                 s.openings += open;
                 s.reveals += reveals;
             }
-            None => sides.push(WallSide { wall_id: wall_id.to_string(), length, gross: 0.0, openings: open, area: 0.0, reveals }),
+            None => sides.push(WallSide { wall_id: wall_id.to_string(), length, gross, openings: open, area: 0.0, reveals }),
         }
     };
     for i in 0..b.len() {
@@ -299,20 +306,59 @@ pub fn wall_sides(p: &Project, r: &Room, height: f64) -> Vec<WallSide> {
                 continue;
             }
             let ops: Vec<&(&Opening, &Wall)> = openings.iter().filter(|(o, ow)| ow.id == w.id && o.position + o.width / 2.0 >= lo && o.position + o.width / 2.0 <= hi).collect();
-            add(&w.id, hi - lo, &ops, thick);
+            let at = |sv: f64| {
+                let t = (sv - s0) / (s1 - s0);
+                [a.x + t * ex, a.y + t * ey]
+            };
+            let (pa, pb) = (at(lo), at(hi));
+            add(&w.id, hi - lo, (hi - lo) * mean_h(pa, pb), &ops, thick);
             covered.push((lo, hi));
         }
         // Rest der Kante ohne Wand (Überlappungen mehrerer Wände nicht doppelt zählen).
         let cov: f64 = covered.iter().map(|(a, b)| b - a).sum::<f64>().min(elen);
         if elen - cov > 1e-6 {
-            add("", elen - cov, &[], 0.0);
+            add("", elen - cov, (elen - cov) * mean_h([a.x, a.y], [c.x, c.y]), &[], 0.0);
         }
     }
     for s in &mut sides {
-        s.gross = s.length * height;
         s.area = (s.gross - s.openings).max(0.0);
     }
     sides
+}
+
+/// Mittlere Höhe (m) einer Wandseite von `a` nach `c`: an Stützstellen (alle ~10 cm, höchstens 200) die
+/// Dachunterkante über `floor_z`, begrenzt auf `0..=top`. Ohne Dach oder ausserhalb der Dachflächen `top`.
+/// Die Stellen sitzen 1 cm im Raum, damit Kanten genau auf dem Dachrand nicht aus der Fläche fallen.
+fn edge_mean_height(r: &Room, roofs: Option<&RoofPlanes>, floor_z: f64, top: f64, a: [f64; 2], c: [f64; 2]) -> f64 {
+    use crate::opening_schedule::in_ring;
+    let Some(roofs) = roofs.filter(|x| x.floor_id == r.floor_id && !x.roofs.is_empty()) else { return top };
+    let (dx, dy) = (c[0] - a[0], c[1] - a[1]);
+    let len = dx.hypot(dy);
+    if !(len > 1e-9) || !len.is_finite() {
+        return top;
+    }
+    let n = ((len / 0.1).ceil() as usize).clamp(1, 200);
+    let (nx, ny) = (-dy / len * 0.01, dx / len * 0.01);
+    let mut sum = 0.0;
+    for i in 0..n {
+        let t = (i as f64 + 0.5) / n as f64;
+        let (mut x, mut y) = (a[0] + t * dx, a[1] + t * dy);
+        if in_ring(x + nx, y + ny, &r.boundary) {
+            x += nx;
+            y += ny;
+        } else if in_ring(x - nx, y - ny, &r.boundary) {
+            x -= nx;
+            y -= ny;
+        }
+        let mut h = top;
+        for (planes, thick) in &roofs.roofs {
+            if let Some(u) = crate::roof::roof_underside_at(planes, *thick, x, y) {
+                h = h.min((u - floor_z).max(0.0));
+            }
+        }
+        sum += h;
+    }
+    sum / n as f64
 }
 
 /// Sockellänge: Umfang minus Türbreiten am Raum.
@@ -357,10 +403,10 @@ pub struct RoomBookRow {
     pub wall_finish: String,
     pub ceiling_finish: String,
     pub floor_build_up: String,
-    /// Wandfläche netto: Umfang × lichte Höhe − Öffnungen (m²).
+    /// Wandfläche netto: Summe der Wandseiten (Länge × mittlere Höhe − Öffnungen) (m²).
     pub wall_area: f64,
     pub opening_area: f64,
-    /// Wandoberflächen je Wandseite (Raumseite), Höhe = lichte Höhe.
+    /// Wandoberflächen je Wandseite (Raumseite), Höhe = mittlere Höhe entlang der Seite.
     pub wall_sides: Vec<WallSide>,
     /// Leibungsflächen aller Öffnungen am Raum (m²).
     pub reveal_area: f64,
@@ -431,7 +477,7 @@ pub fn room_book(p: &Project) -> RoomBook {
             roofs.push(roof_planes(p, &r.floor_id));
         }
         let hb = height_bands(p, r, roofs.iter().find(|x| x.floor_id == r.floor_id).unwrap(), area);
-        let sides = wall_sides(p, r, h);
+        let sides = wall_sides(p, r, h, roofs.iter().find(|x| x.floor_id == r.floor_id));
         let number = r.stamp.as_ref().and_then(|s| s.number.as_deref()).map(str::trim).unwrap_or("").to_string();
         rows.push(RoomBookRow {
             id: r.id.clone(),
@@ -453,7 +499,7 @@ pub fn room_book(p: &Project) -> RoomBook {
             wall_finish: finish_label(p, r.wall_finish.as_deref()),
             ceiling_finish: finish_label(p, r.ceiling_finish.as_deref()),
             floor_build_up: r.floor_build_up.as_deref().map(str::trim).unwrap_or("").to_string(),
-            wall_area: (perimeter * h - open).max(0.0),
+            wall_area: sides.iter().map(|s| s.area).sum(),
             opening_area: open,
             reveal_area: sides.iter().map(|s| s.reveals).sum(),
             skirting: skirting_length(p, r, perimeter),
@@ -669,6 +715,24 @@ mod tests {
         assert!((w.skirting - (2.0 * (2.7 + 3.7) - 0.9)).abs() < 1e-9);
         let bad = b.rows.iter().find(|r| r.id == "r2").unwrap();
         assert!((bad.skirting - (2.0 * (2.7 + 2.0) - 0.9)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn wandflaeche_unter_schraege_mittlere_hoehe() {
+        let mut p = roof_project(Some(0.0));
+        p.wall_types = vec![WallType { id: "wt".into(), name: "W".into(), layers: vec![Layer { thickness: 0.3, ..Default::default() }], ..Default::default() }];
+        let wall = |id: &str, a: Vec2, b: Vec2| Wall { id: id.into(), floor_id: "dg".into(), start: a, end: b, wall_type_id: "wt".into(), height: 3.0, ..Default::default() };
+        p.walls = vec![wall("s", v(-1.0, -0.15), v(5.0, -0.15)), wall("w", v(-0.15, -1.0), v(-0.15, 5.0))];
+        let r = &room_book(&p).rows[0];
+        let full = 3.0;
+        // Beide Wandseiten laufen quer bzw. längs zum First: mindestens eine liegt klar unter der vollen Höhe.
+        let gross: f64 = r.wall_sides.iter().map(|s| s.gross).sum();
+        assert!(gross < r.perimeter * full - 2.0, "{} < {}", gross, r.perimeter * full);
+        for s in r.wall_sides.iter().filter(|s| !s.wall_id.is_empty()) {
+            assert!(s.gross <= s.length * full + 1e-9 && s.gross > 0.0 || s.gross.abs() < 0.2, "{s:?}");
+        }
+        assert!((r.wall_sides.iter().map(|s| s.area).sum::<f64>() - r.wall_area).abs() < 1e-9);
+        assert!(r.wall_area < r.perimeter * full - 2.0);
     }
 
     #[test]

@@ -274,6 +274,20 @@ pub fn pick_geometry(p: &Project) -> Result<PickGeometry, String> {
 
 /// [137] Handläufe und Pfosten der Treppen als Welt-Dreiecke je Treppe (wie [`emit_stair_railings`]).
 pub fn pick_stair_railings(p: &Project) -> Vec<PickStairMesh> {
+    let (mut out, guards) = pick_stair_railings_split(p);
+    for (_, g) in guards {
+        match out.iter_mut().find(|o| o.stair_id == g.stair_id) {
+            Some(o) => o.tris.extend(g.tris),
+            None => out.push(g),
+        }
+    }
+    out.retain(|o| !o.tris.is_empty());
+    out
+}
+
+/// Handläufe je Treppe und, getrennt, die Absturzsicherungen mit der Geschoss-id der Decke mit dem Loch
+/// (Explosionsbild: Sicherung folgt dem Geschoss der Decke, nicht dem der Treppe).
+pub fn pick_stair_railings_split(p: &Project) -> (Vec<PickStairMesh>, Vec<(String, PickStairMesh)>) {
     let (stairs, buf) = stair_input(p, |s, st| s.shape != StairShape::Unknown && st.and_then(|t| t.railing).is_some_and(|r| r != StairTypeRailing::Keine)).unwrap_or_default();
     let mut out: Vec<PickStairMesh> = Vec::new();
     for m in crate::stairs3d::railings(&buf) {
@@ -284,17 +298,17 @@ pub fn pick_stair_railings(p: &Project) -> Vec<PickStairMesh> {
             None => out.push(PickStairMesh { tris, stair_id: stair.id.clone() }),
         }
     }
-    // [155] Absturzsicherung gehört zur Treppe, die darin ankommt.
-    for (si, m) in stair_guard_meshes(p) {
+    // [155] Absturzsicherung gehört zur Treppe, die darin ankommt (pickbar mit ihr), steht aber auf dem Geschoss der Decke.
+    let mut guards: Vec<(String, PickStairMesh)> = Vec::new();
+    for (si, floor, m) in stair_guard_meshes_by_floor(p) {
         let Some(stair) = p.stairs.as_deref().and_then(|v| v.get(si)) else { continue };
         let tris = extrusion_tris(&m.positions, &m.indices);
-        match out.iter_mut().find(|o| o.stair_id == stair.id) {
-            Some(o) => o.tris.extend(tris),
-            None => out.push(PickStairMesh { tris, stair_id: stair.id.clone() }),
+        if !tris.is_empty() {
+            guards.push((floor, PickStairMesh { tris, stair_id: stair.id.clone() }));
         }
     }
     out.retain(|o| !o.tris.is_empty());
-    out
+    (out, guards)
 }
 
 /// [137] Kreis, Bogen, Ellipse und Text (im 3D nicht als Linie gezeichnet, z. B. Bäume und Symbole) als flache
