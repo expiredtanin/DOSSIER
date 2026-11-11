@@ -449,6 +449,18 @@ pub fn section_primitives_mv(out: &Output, mono: bool, hidden_lines: bool, vis: 
     }
     // [157] Verdeckte Kanten kommen hier hinein (unter die Schnittflächen, die sie verdecken).
     let cut_start = prims.len();
+    // [68] Verbauwände der Baugruben (Klasse der Baugrube), mit Schraffur der Verbauart; Pick wählt die Baugrube.
+    for w in out.shoring.iter().filter(|w| shown(&w.category)) {
+        let hatch = if mono { HatchRender { color: SECTION_INK.into(), ..w.hatch.clone() } } else { w.hatch.clone() };
+        let mut pr = polygon(w.ring.iter().map(|q| v2(q[0], q[1])).collect(), HATCH_PAPER, SECTION_INK, SECTION_JOINT_MM, hatch);
+        if let Primitive::Polygon { context_object_id, greyed, .. } = &mut pr {
+            *context_object_id = Some(w.excavation_id.clone());
+            *greyed = Some(vis.greyed(&w.category));
+        }
+        w.ring.iter().for_each(|q| acc.add(q[0], q[1]));
+        cut_rings.push(vec![w.ring.clone()]);
+        prims.push(pr);
+    }
     for cp in &merged {
         if cp.pts.len() < 3 {
             continue;

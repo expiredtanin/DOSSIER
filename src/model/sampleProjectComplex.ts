@@ -822,7 +822,7 @@ export function buildComplexSampleProject(): Project {
         type: "excavation", id: "baugrube", name: "Baugrube Haupthaus", categoryCode: "07",
         // Umriss = Gebäude-Grundfläche UG (mit Erker), Arbeitsraum 0.8 m; Neigungen in Grad.
         outline: rect(-HA, -HA, 17.2, 10 + HA), bottom: -3.35, slope: 60, fillSlope: 33.7,
-        edgeSlopes: [60, 50, 90, 60], edgeShoring: [false, false, true, false], workingSpace: 0.8,
+        edgeSlopes: [60, 50, 90, 60], edgeShoring: [false, false, true, false], shoringKind: "soldierPile", workingSpace: 0.8,
       },
     ],
     roomProgram: [

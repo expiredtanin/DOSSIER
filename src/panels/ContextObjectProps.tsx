@@ -50,6 +50,11 @@ function ExcavationQty({ q }: { q: ExcavationQuantity | undefined }) {
   return (
     <div className="site-qty">
       {t("site.excavation.qty", { cut: fmt1(q.cut), fill: fmt1(q.fill), backfill: fmt1(q.backfill) })}
+      {q.workingSpace > 0 && !q.workingSpaceOk && (
+        <div className="site-warn" role="alert" data-testid="excavation-ws-warning">
+          {t("site.excavation.workingSpaceWarn", { min: q.workingSpaceMin.toFixed(2), need: q.workingSpace.toFixed(2), n: q.workingSpaceSpots.length })}
+        </div>
+      )}
     </div>
   );
 }
@@ -182,6 +187,23 @@ export function ContextObjectProps({ obj, quantities }: { obj: ContextObject; qu
             ))}
           </span>
         </div>
+        {obj.edgeShoring?.some(Boolean) && (
+          <>
+            <label className="site-prop">
+              <span>{t("site.excavation.shoringKind")}</span>
+              <select
+                data-testid="excavation-shoring-kind"
+                value={obj.shoringKind ?? "sheetPile"}
+                onChange={(e) => host.onPatchContextObject(obj.id, { shoringKind: e.target.value }, `site-${obj.id}-shoringKind`)}
+              >
+                <option value="sheetPile">{t("site.excavation.shoringKind.sheetPile")}</option>
+                <option value="soldierPile">{t("site.excavation.shoringKind.soldierPile")}</option>
+                <option value="borePile">{t("site.excavation.shoringKind.borePile")}</option>
+              </select>
+            </label>
+            <NumField label={t("site.excavation.shoringThickness")} value={obj.shoringThickness} step={0.05} min={0.05} placeholder={obj.shoringKind === "borePile" ? "0.6" : obj.shoringKind === "soldierPile" ? "0.3" : "0.2"} onChange={patch("shoringThickness")} />
+          </>
+        )}
         <ExcavationQty q={quantities.find((x) => x.id === obj.id)} />
       </div>
     );

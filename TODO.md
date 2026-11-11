@@ -434,9 +434,13 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
 - ◐ **[T6]** Glattes Gelände aus Höhenlinien (`terrain.rs`). Natural-Neighbour/Clough-Tocher statt Hermite-Teilung;
   Erdreich-Band nicht „bis zur Planunterkante“; Glättung ohne Kantenerhalt; Baugrube ist eigene Kategorie und
   bleibt beim Ausblenden von „02“ stehen; gespeicherte Ansichten übernehmen beim Öffnen ihre `layerVisibility`. · L
-- ◐ **[68]** Baugrube/Geländebearbeitung (Kontext-Objekt `excavation`). Verbau als echte Wand im Schnitt mit Dicke/
-  Schraffur; Überlappung der Sohlenfläche nur gerastert; Arbeitsraum an konkaven Ecken ohne Prüfung; IVHB-Terrain
-  nach kantonalem Recht. · M
+- ◐ **[68]** Baugrube/Geländebearbeitung (Kontext-Objekt `excavation`). (11.11.) Verbau ist jetzt eine echte Wand:
+  Modellfelder `shoringKind` (Spundwand/Rühlwand/Bohrpfahlwand) und `shoringThickness` (Vorgabe 0.2/0.3/0.6 m), im
+  Schnitt geschnittene Fläche mit Schraffur der Art (Stahl/Holz/Beton), unten Sohle − 1 m Einbindung, Erdreich-Band
+  spart sie aus; im Grundriss Wandband an der Kante (Klasse der Baugrube, Pick = Baugrube); Sohlenfläche bei
+  überlappenden Gruben exakt (i_overlay); Arbeitsraum-Prüfung `working_space_check` (enge Nischen, gekappte Gehrung):
+  rotes Kreuz im Plan, Warnung im Panel. Offen: Einbindetiefe fest 1 m (kein Feld), Verbau je Kante nur eine Art,
+  Verbau noch nicht in Ansicht/3D; nicht in der App angesehen; IVHB-Terrain nach kantonalem Recht. · M
 - ◐ **[143]** Baugrube erstellen. (9.11.) DXF/DWG-Höhenlinien werden beim Import erkannt (Layer-Name Höhenlinie/HL/
   Contour/Kote …, Erhebung Gruppe 38, 3D-Polylinien mit konstantem Z, sonst Höhentexte nahe der Linie) und als
   `contourSet` „02 Gelände“ statt als 2D-Zeichnung übernommen: Kern `import_terrain.rs`, Option „Höhenlinien als Gelände
