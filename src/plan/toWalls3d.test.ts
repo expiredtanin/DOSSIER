@@ -132,9 +132,9 @@ describe("selectionHighlightLines — Kontext-Objekte", () => {
     expect(lines.length).toBe(0);
   });
 
-  it("ein Kontext-Objekt -> Bounding-Box-Umriss (12 Kanten)", () => {
+  it("ein Kontext-Netz -> seine Feature-/Randkanten ([115]: ein Dreieck = 3 Kanten statt Hüllquader)", () => {
     const lines = selectionHighlightLines(withContext, [], [], RGB, [], [], [], ["CTX1"]);
-    expect(lines.length).toBe(12 * VERTICES_PER_EDGE * FLOATS_PER_VERTEX);
+    expect(lines.length).toBe(3 * VERTICES_PER_EDGE * FLOATS_PER_VERTEX);
     expect(lines[3]).toBeCloseTo(RGB[0], 6);
     expect(lines[5]).toBeCloseTo(RGB[2], 6);
   });
