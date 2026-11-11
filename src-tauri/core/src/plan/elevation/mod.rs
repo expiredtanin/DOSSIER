@@ -64,6 +64,8 @@ const SYMBOL_INK: &str = "#7d858f";
 const ROOF_RGB_FALLBACK: [f64; 3] = [0.72, 0.45, 0.36];
 /// [152] Kontext-Grau importierter Netze ohne eigene Farbe (wie `model3d::IMPORTED_RGB`).
 const IMPORTED_RGB: [f64; 3] = [159.0 / 255.0, 166.0 / 255.0, 174.0 / 255.0];
+/// [115] Freie Körper: Farbe wie im 3D (`EXTRUSION_RGB` in `toWalls3d/extrusions.ts`).
+const BODY_RGB: [f64; 3] = [0.85, 0.55, 0.25];
 const EPS: f64 = 1e-6;
 const HIDDEN_INK: &str = "#8a929c";
 const HIDDEN_MM: f64 = 0.13;
@@ -200,6 +202,7 @@ pub fn elevation_primitives_with(p: &Project, level: &LevelSpec, shadows: bool, 
     faces.extend(collect_roof_faces(p, &frame, &walls)?);
     faces.extend(collect_column_faces(p, &frame));
     faces.extend(collect_mesh_faces(p, &frame));
+    faces.extend(collect_body_faces(p, &frame));
     // Ansichtsbereich ([36]): Bauteile, deren nächster Punkt weiter als `depth` hinter der Ansichtsebene
     // liegt, entfallen ganz (samt ihren Öffnungen, s. unten).
     let far = level.depth.filter(|d| *d > 0.0).map(|d| (d, drop_far_faces(&mut faces, d)));
@@ -231,6 +234,11 @@ pub fn elevation_primitives_with(p: &Project, level: &LevelSpec, shadows: bool, 
             mesh_cat.entry(m.id.as_str()).or_insert(m.category_code.as_str());
         }
     }
+    // [180] Freie Körper mit ihrer Klasse.
+    let mut body_cat: HashMap<&str, &str> = HashMap::new();
+    for b in p.extruded_solids.as_deref().unwrap_or(&[]) {
+        body_cat.entry(b.id.as_str()).or_insert(b.category_code.as_str());
+    }
     let category = |f: &Face| -> Option<&str> {
         if f.id.is_empty() {
             return None;
@@ -241,6 +249,7 @@ pub fn elevation_primitives_with(p: &Project, level: &LevelSpec, shadows: bool, 
             Role::Roof => roof_cat.get(f.id.as_str()).copied(),
             Role::Column => col_cat.get(f.id.as_str()).copied(),
             Role::Mesh => mesh_cat.get(f.id.as_str()).copied(),
+            Role::Body => body_cat.get(f.id.as_str()).copied(),
         }
     };
     // [180] Klassen-Sichtbarkeit und Darstellungsmodus wirken je für sich (früher nur beide zusammen: ein Blatt-
@@ -367,10 +376,10 @@ pub fn elevation_primitives_with(p: &Project, level: &LevelSpec, shadows: bool, 
         // die Haarfugen zwischen ihnen.
         let fill = face_fill(f);
         // [152] Importierte Netze ebenso (Dreiecke).
-        let seam = (is_roof && assembled.contains(f.id.as_str())) || f.role == Role::Mesh;
+        let seam = (is_roof && assembled.contains(f.id.as_str())) || f.role.is_mesh();
         let hatch = f.ov.as_ref().and_then(|o| o.hatch.clone()).unwrap_or_else(no_hatch);
         let mut prim = if seam { polygon(pts, &fill, &fill, 0.15, hatch) } else { polygon(pts, &fill, "none", 0.0, hatch) };
-        if let Primitive::Polygon { greyed: g, wall_id, ceiling_id, roof_id, column_id, context_object_id, .. } = &mut prim {
+        if let Primitive::Polygon { greyed: g, wall_id, ceiling_id, roof_id, column_id, context_object_id, extruded_solid_id, .. } = &mut prim {
             *g = Some(greyed(f));
             if !f.id.is_empty() {
                 match f.role {
@@ -379,6 +388,7 @@ pub fn elevation_primitives_with(p: &Project, level: &LevelSpec, shadows: bool, 
                     Role::Roof => *roof_id = Some(f.id.clone()),
                     Role::Column => *column_id = Some(f.id.clone()),
                     Role::Mesh => *context_object_id = Some(f.id.clone()),
+                    Role::Body => *extruded_solid_id = Some(f.id.clone()),
                 }
             }
         }

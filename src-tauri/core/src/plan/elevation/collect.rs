@@ -70,7 +70,7 @@ pub(super) fn project_faces(frame: &[f64; 9], walls: &[RWall], slabs: &[RSlab], 
         };
         let (id, fill) = match role {
             Role::Wall => (walls[f.src].wall_id.clone(), walls[f.src].color),
-            Role::Slab | Role::Column | Role::Mesh => (slabs[f.src].ceiling_id.clone(), slabs[f.src].color),
+            Role::Slab | Role::Column | Role::Mesh | Role::Body => (slabs[f.src].ceiling_id.clone(), slabs[f.src].color),
             Role::Roof => (roofs[f.src].id.clone(), roofs[f.src].fill),
         };
         let pts = f.pts.iter().map(|q| [q.0, q.1]).collect();
@@ -122,71 +122,87 @@ pub(super) fn collect_column_faces(p: &Project, frame: &[f64; 9]) -> Vec<Face> {
 /// Netze nur die zugewandten Dreiecke, offene beidseitig (Normale zum Betrachter). Farbe aus dem Import,
 /// sonst Kontext-Grau wie im 3D.
 pub(super) fn collect_mesh_faces(p: &Project, frame: &[f64; 9]) -> Vec<Face> {
-    let (o, n, u) = ([frame[0], frame[1], frame[2]], [frame[3], frame[4], frame[5]], [frame[6], frame[7], frame[8]]);
-    let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-    // Modell [x, y, z] → Welt [x, Höhe, y].
-    let world = |q: [f64; 3]| [q[0], q[2], q[1]];
     let mut out = Vec::new();
     for m in crate::mesh_view::meshes(p) {
-        let b = &m.info.bbox;
-        // Tiefe der Hüllbox: ganz vor der Ebene (Tiefe ≤ 0) entfällt.
-        let far = [(b[0], b[1]), (b[3], b[1]), (b[0], b[4]), (b[3], b[4])].iter().map(|&(x, y)| dot([x - o[0], 0.0, y - o[2]], n)).fold(f64::NEG_INFINITY, f64::max);
-        if !(far > EPS) {
-            continue;
-        }
         let fill = m.mesh.color.as_deref().map_or(IMPORTED_RGB, |c| hex_to_rgb(c, IMPORTED_RGB));
-        let pos = &m.mesh.positions;
-        let pt = |i: u32| world([pos[3 * i as usize], pos[3 * i as usize + 1], pos[3 * i as usize + 2]]);
-        // Zugewandte Dreiecke derselben Ebene werden zu Polygonen vereinigt (weniger Flächen für Maler und
-        // Sichtbarkeit; Wände und Platten aus zwei bis wenigen Dreiecken werden eine Fläche).
-        let mut groups: Vec<((i64, i64, i64, i64), Vec<Face>)> = Vec::new();
-        let mut slot: HashMap<(i64, i64, i64, i64), usize> = HashMap::new();
-        for t in &m.info.tris {
-            let w = [pt(t[0]), pt(t[1]), pt(t[2])];
-            let (e1, e2) = ([w[1][0] - w[0][0], w[1][1] - w[0][1], w[1][2] - w[0][2]], [w[2][0] - w[0][0], w[2][1] - w[0][1], w[2][2] - w[0][2]]);
-            // Achsentausch spiegelt: Kreuzprodukt umkehren, damit die Normale aussen bleibt.
-            let c = [-(e1[1] * e2[2] - e1[2] * e2[1]), -(e1[2] * e2[0] - e1[0] * e2[2]), -(e1[0] * e2[1] - e1[1] * e2[0])];
-            let l = hypot(&c);
-            if !(l > 1e-15) {
-                continue;
-            }
-            let mut normal = [c[0] / l, c[1] / l, c[2] / l];
-            if m.info.flip {
-                normal = [-normal[0], -normal[1], -normal[2]];
-            }
-            let facing = dot(n, normal);
-            if m.info.closed && facing >= -1e-9 {
-                continue;
-            }
-            if !m.info.closed && facing > 0.0 {
-                normal = [-normal[0], -normal[1], -normal[2]];
-            }
-            let mut pts = Vec::with_capacity(3);
-            let mut pd = Vec::with_capacity(3);
-            for q in w {
-                let r = [q[0] - o[0], q[1] - o[1], q[2] - o[2]];
-                pts.push([dot(r, u), q[1]]);
-                pd.push(dot(r, n));
-            }
-            let depth = (pd[0] + pd[1] + pd[2]) / 3.0;
-            if depth <= EPS {
-                continue;
-            }
-            let (dmin, dmax) = (pd.iter().copied().fold(f64::INFINITY, f64::min), pd.iter().copied().fold(f64::NEG_INFINITY, f64::max));
-            let key = ((normal[0] * 1e4).round() as i64, (normal[1] * 1e4).round() as i64, (normal[2] * 1e4).round() as i64, (dot(normal, w[0]) * 1e3).round() as i64);
-            let k = *slot.entry(key).or_insert_with(|| {
-                groups.push((key, Vec::new()));
-                groups.len() - 1
-            });
-            groups[k].1.push(Face { pts, pd, depth, depth_min: dmin, depth_max: dmax, role: Role::Mesh, id: m.mesh.id.clone(), fill, normal, ov: None, two_sided: !m.info.closed, curved_slab: false });
-        }
-        for (_, tris) in groups {
-            merge_coplanar(tris, &mut out);
-        }
+        mesh_faces(frame, &m.mesh.positions, &m.info, Role::Mesh, &m.mesh.id, fill, &mut out);
     }
     out
 }
 
+/// [115] Freie Körper (`extrudedSolids`, Netze aus dem Kern, `solid_mesh.rs`) wie importierte Netze; Abzugskörper
+/// sind kein Material und fehlen.
+pub(super) fn collect_body_faces(p: &Project, frame: &[f64; 9]) -> Vec<Face> {
+    let solids = p.extruded_solids.as_deref().unwrap_or(&[]);
+    let mut out = Vec::new();
+    for b in crate::solid_mesh::body_meshes(p) {
+        let Some(s) = solids.get(b.index).filter(|s| s.operation.as_deref() != Some("subtract")) else { continue };
+        let Some(info) = crate::mesh_view::analyze(&b.positions, &b.indices) else { continue };
+        mesh_faces(frame, &b.positions, &info, Role::Body, &s.id, BODY_RGB, &mut out);
+    }
+    out
+}
+
+/// Zugewandte Dreiecke eines Netzes (Modell [x, y, z]) als Ansichtsflächen, je Ebene vereinigt.
+fn mesh_faces(frame: &[f64; 9], pos: &[f64], info: &crate::mesh_view::MeshInfo, role: Role, id: &str, fill: [f64; 3], out: &mut Vec<Face>) {
+    let (o, n, u) = ([frame[0], frame[1], frame[2]], [frame[3], frame[4], frame[5]], [frame[6], frame[7], frame[8]]);
+    let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    // Modell [x, y, z] → Welt [x, Höhe, y].
+    let world = |q: [f64; 3]| [q[0], q[2], q[1]];
+    let b = &info.bbox;
+    // Tiefe der Hüllbox: ganz vor der Ebene (Tiefe ≤ 0) entfällt.
+    let far = [(b[0], b[1]), (b[3], b[1]), (b[0], b[4]), (b[3], b[4])].iter().map(|&(x, y)| dot([x - o[0], 0.0, y - o[2]], n)).fold(f64::NEG_INFINITY, f64::max);
+    if !(far > EPS) {
+        return;
+    }
+    let pt = |i: u32| world([pos[3 * i as usize], pos[3 * i as usize + 1], pos[3 * i as usize + 2]]);
+    // Zugewandte Dreiecke derselben Ebene werden zu Polygonen vereinigt (weniger Flächen für Maler und
+    // Sichtbarkeit; Wände und Platten aus zwei bis wenigen Dreiecken werden eine Fläche).
+    let mut groups: Vec<((i64, i64, i64, i64), Vec<Face>)> = Vec::new();
+    let mut slot: HashMap<(i64, i64, i64, i64), usize> = HashMap::new();
+    for t in &info.tris {
+        let w = [pt(t[0]), pt(t[1]), pt(t[2])];
+        let (e1, e2) = ([w[1][0] - w[0][0], w[1][1] - w[0][1], w[1][2] - w[0][2]], [w[2][0] - w[0][0], w[2][1] - w[0][1], w[2][2] - w[0][2]]);
+        // Achsentausch spiegelt: Kreuzprodukt umkehren, damit die Normale aussen bleibt.
+        let c = [-(e1[1] * e2[2] - e1[2] * e2[1]), -(e1[2] * e2[0] - e1[0] * e2[2]), -(e1[0] * e2[1] - e1[1] * e2[0])];
+        let l = hypot(&c);
+        if !(l > 1e-15) {
+            continue;
+        }
+        let mut normal = [c[0] / l, c[1] / l, c[2] / l];
+        if info.flip {
+            normal = [-normal[0], -normal[1], -normal[2]];
+        }
+        let facing = dot(n, normal);
+        if info.closed && facing >= -1e-9 {
+            continue;
+        }
+        if !info.closed && facing > 0.0 {
+            normal = [-normal[0], -normal[1], -normal[2]];
+        }
+        let mut pts = Vec::with_capacity(3);
+        let mut pd = Vec::with_capacity(3);
+        for q in w {
+            let r = [q[0] - o[0], q[1] - o[1], q[2] - o[2]];
+            pts.push([dot(r, u), q[1]]);
+            pd.push(dot(r, n));
+        }
+        let depth = (pd[0] + pd[1] + pd[2]) / 3.0;
+        if depth <= EPS {
+            continue;
+        }
+        let (dmin, dmax) = (pd.iter().copied().fold(f64::INFINITY, f64::min), pd.iter().copied().fold(f64::NEG_INFINITY, f64::max));
+        let key = ((normal[0] * 1e4).round() as i64, (normal[1] * 1e4).round() as i64, (normal[2] * 1e4).round() as i64, (dot(normal, w[0]) * 1e3).round() as i64);
+        let k = *slot.entry(key).or_insert_with(|| {
+            groups.push((key, Vec::new()));
+            groups.len() - 1
+        });
+        groups[k].1.push(Face { pts, pd, depth, depth_min: dmin, depth_max: dmax, role, id: id.to_string(), fill, normal, ov: None, two_sided: !info.closed, curved_slab: false });
+    }
+    for (_, tris) in groups {
+        merge_coplanar(tris, out);
+    }
+}
 
 /// `collectRoofFaces`.
 pub(super) fn collect_roof_faces(p: &Project, frame: &[f64; 9], walls: &[RWall]) -> Result<Vec<Face>, String> {

@@ -17,7 +17,7 @@ pub(super) enum Silhouette {
 
 impl Silhouette {
     pub(super) fn of(faces: &[Face]) -> Silhouette {
-        if faces.len() <= SILHOUETTE_EXACT_MAX && !faces.iter().any(|f| f.role == Role::Mesh) {
+        if faces.len() <= SILHOUETTE_EXACT_MAX && !faces.iter().any(|f| f.role.is_mesh()) {
             return Silhouette::Rings(silhouette_rings(faces));
         }
         let (mut x0, mut y0, mut x1, mut y1) = (f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
@@ -164,7 +164,7 @@ pub(super) fn elevation_edges(p: &Project, faces: &[Face], openings: &[ProjOpeni
             h.smooth = *mesh_groups.entry(f.id.as_str()).or_insert(arc_ids.len() as u32 + round_cols.len() as u32 + 1 + next);
         }
         // [152] Importierte Netze: Facetten innerhalb des Knickwinkels glätten (eine Gruppe je Netz), offene beidseitig.
-        if f.role == Role::Mesh {
+        if f.role.is_mesh() {
             let next = mesh_groups.len() as u32;
             h.smooth = *mesh_groups.entry(f.id.as_str()).or_insert(arc_ids.len() as u32 + round_cols.len() as u32 + 1 + next);
             h.two_sided = f.two_sided;

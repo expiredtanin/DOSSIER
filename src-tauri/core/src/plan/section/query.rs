@@ -40,7 +40,7 @@ fn cache_put(key: (f64, u64), o: std::rc::Rc<Output>) {
     });
 }
 
-/// Abfrage `sectionPlan`: `args` = `[mono, openings, key, bodies…]` (Körper s. [`read_bodies`]; `key` > 0
+/// Abfrage `sectionPlan`: `args` = `[mono, openings, key]` (`key` > 0
 /// = Schlüssel des vorbereiteten Schnitts, s. Cache unten, 0 = immer rechnen),
 /// `text` = `{"level": {...}, "hiddenLines", "hasVis", "invisible", "hasDisplay", "norender", "grey"}`.
 /// Puffer: Gruppe 0 Schnitt, Gruppe 1 geschnittene Öffnungen; Ausmass ohne die Öffnungen.
@@ -73,13 +73,14 @@ pub fn section_plan_buf(p: &Project, args: &[f64], text: &str) -> Result<Vec<u8>
     };
     let key = (key, hkey);
     let mut w = crate::plan::buf::Writer::new(true);
-    // Der Schnitt selbst hängt nur am Projektstand, an der Ebene und den Körpern (= ein Aufruf von
+    // Der Schnitt selbst hängt nur am Projektstand und an der Ebene (= ein Aufruf von
     // `computeSection` in TS, Schlüssel `key`) und an den ausgeblendeten Klassen (`hkey`); Schwarz-Weiss, graue
     // Klassen und verdeckte Kanten nur an der Darstellung. Darum die zuletzt berechneten Schnitte merken (Umschalten ohne Neurechnen).
     let out = match cache_get(key) {
         Some(o) => o,
         None => {
-            let bodies = read_bodies(args.get(3..).unwrap_or(&[])).ok_or("Schnitt: Körper-Netze unlesbar")?;
+            // [115] Körper-Netze aus dem Kern (`solid_mesh.rs`), nicht mehr aus TS.
+            let bodies = crate::solid_mesh::body_meshes(p);
             let Some(o) = compute_section_vis(p, &level, &bodies, &vis)? else { return Ok(w.finish()) };
             let o = std::rc::Rc::new(o);
             cache_put(key, o.clone());

@@ -73,6 +73,46 @@ fn importierte_netze_in_der_ansicht() {
     assert!(r.is_none_or(|(prims, _)| !prims.iter().any(|x| matches!(x, Primitive::Polygon { context_object_id: Some(_), .. })) && lines(&prims).is_empty()));
 }
 
+/// [115] Freie Körper in der Ansicht (Netz aus dem Kern): Flächen mit Körper-Id, Kanten sichtbar, die Wand
+/// dahinter verdeckt; Klasse aus ⇒ weg (verdeckt dann auch nichts mehr).
+#[test]
+fn freie_koerper_in_der_ansicht() {
+    let level = LevelSpec { kind: "elevation".into(), line: Some([Vec2 { x: -5.0, y: -1.0 }, Vec2 { x: 8.0, y: -1.0 }]), direction_sign: Some(1.0), ..Default::default() };
+    let pt = |x: f64, y: f64| Vec2 { x, y };
+    // Wand x −1…5 bei y = 3 (3 m hoch), davor ein Quader 0…2 × 0…1, 2 m hoch, Klasse „50".
+    let mut p = Project {
+        walls: vec![Wall { id: "w".into(), start: pt(-1.0, 3.0), end: pt(5.0, 3.0), height: 3.0, category_code: "20".into(), ..Default::default() }],
+        extruded_solids: Some(vec![ExtrudedSolid { id: "k".into(), category_code: "50".into(), points: vec![pt(0.0, 0.0), pt(2.0, 0.0), pt(2.0, 1.0), pt(0.0, 1.0)], height: 2.0, ..Default::default() }]),
+        ..Default::default()
+    };
+    let lines = |prims: &[Primitive]| -> Vec<([f64; 2], [f64; 2])> {
+        prims.iter().filter_map(|q| match q {
+            Primitive::Line { a, b, cls, .. } if cls == "elevation-outline" => Some(([a.x, a.y], [b.x, b.y])),
+            _ => None,
+        }).collect()
+    };
+    // u = x + 5: Quader u 5…7, Wand u 4…10.
+    let (prims, _) = elevation_primitives(&p, &level, false, false, &Visibility::default(), 100.0).unwrap().unwrap();
+    assert!(prims.iter().any(|q| matches!(q, Primitive::Polygon { extruded_solid_id: Some(id), .. } if id == "k")), "Körperfläche mit Pick-Id");
+    let l = lines(&prims);
+    let on = |x: f64, y0: f64, y1: f64| l.iter().any(|(a, b)| (a[0] - x).abs() < 1e-6 && (b[0] - x).abs() < 1e-6 && (a[1].min(b[1]) - y0).abs() < 1e-6 && (a[1].max(b[1]) - y1).abs() < 1e-6);
+    assert!(on(5.0, 0.0, 2.0) && on(7.0, 0.0, 2.0), "senkrechte Quaderkanten: {l:?}");
+    assert!(l.iter().any(|(a, b)| (a[1] - 2.0).abs() < 1e-6 && (b[1] - 2.0).abs() < 1e-6 && (a[0].min(b[0]) - 5.0).abs() < 1e-6 && (a[0].max(b[0]) - 7.0).abs() < 1e-6), "Oberkante des Quaders");
+    // Die Wand-Unterkante (Höhe 0) ist hinter dem Quader verdeckt: kein Stück zwischen u 5 und 7.
+    let hidden_part = l.iter().any(|(a, b)| a[1].abs() < 1e-6 && b[1].abs() < 1e-6 && a[0].min(b[0]) < 7.0 - 1e-6 && a[0].max(b[0]) > 5.0 + 1e-6 && !((a[0] - 5.0).abs() < 1e-6 && (b[0] - 7.0).abs() < 1e-6 || (a[0] - 7.0).abs() < 1e-6 && (b[0] - 5.0).abs() < 1e-6));
+    assert!(!hidden_part, "Wandkante hinter dem Quader verdeckt: {l:?}");
+    // Klasse „50" aus: kein Körper, die Wandfläche liegt wieder frei (keine Quaderkanten).
+    let vis = Visibility { has_vis: true, has_display: true, invisible: ["50".to_string()].into(), ..Default::default() };
+    let (prims, _) = elevation_primitives(&p, &level, false, false, &vis, 100.0).unwrap().unwrap();
+    assert!(!prims.iter().any(|q| matches!(q, Primitive::Polygon { extruded_solid_id: Some(_), .. })));
+    let l = lines(&prims);
+    assert!(!l.iter().any(|(a, b)| (a[0] - 7.0).abs() < 1e-6 && (b[0] - 7.0).abs() < 1e-6), "{l:?}");
+    // Abzugskörper sind kein Material: nicht gezeichnet.
+    p.extruded_solids.as_mut().unwrap()[0].operation = Some("subtract".into());
+    let (prims, _) = elevation_primitives(&p, &level, false, false, &Visibility::default(), 100.0).unwrap().unwrap();
+    assert!(!prims.iter().any(|q| matches!(q, Primitive::Polygon { extruded_solid_id: Some(_), .. })));
+}
+
 /// [152] Ganz verdeckte Netz-Flächen entfallen (Maler-Liste), teilweise sichtbare bleiben; die Kanten bleiben exakt.
 #[test]
 fn verdeckte_netzflaechen_entfallen() {

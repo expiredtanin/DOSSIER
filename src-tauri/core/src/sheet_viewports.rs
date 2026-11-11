@@ -212,13 +212,16 @@ fn candidate_codes(p: &Project) -> HashSet<String> {
     codes.extend(p.openings.iter().flatten().map(|e| e.category_code.clone()));
     // [181] Gelände- und Umgebungs-Elemente tragen ihre Klasse wie jedes Bauteil.
     codes.extend(p.context.iter().flatten().map(|c| c.category_code().to_string()));
+    // [115] Freie Körper und Stützen ebenso.
+    codes.extend(p.extruded_solids.iter().flatten().map(|e| e.category_code.clone()));
+    codes.extend(p.columns.iter().flatten().map(|e| e.category_code.clone()));
     codes
 }
 
 /// [115] Inhalt eines Schnitt-/Ansicht-Viewports wie `viewportLevelPlan` (`plan/viewportPlan.ts`):
 /// abgeleitete Projektion (Schnitt mit geschnittenen Öffnungen bzw. Ansicht), automatische Koten und
-/// die eigenen 2D-Elemente der Ebene; Ausmass wie dort. Freie Körper (`extrudedSolids`, truck-Netze aus
-/// TS) fehlen im Schnitt — der Kern hat sie hier nicht.
+/// die eigenen 2D-Elemente der Ebene; Ausmass wie dort. Freie Körper (`extrudedSolids`) rechnet der Kern
+/// selbst (`solid_mesh.rs`), im Schnitt wie in der Ansicht.
 fn section_view_buf(p: &Project, level: &DrawingLevel, snap: &ViewSnapshot, scale: f64) -> Option<Vec<u8>> {
     use crate::plan::prim::Primitive;
     let mono = snapshot_mono(p, snap);
@@ -457,6 +460,45 @@ pub(crate) mod tests {
         // Abbildung wie im Grundriss: Modell-Punkt (u, z) → Blatt.
         let (x, y) = maps[0].to_mm(maps[0].cx, maps[0].cy);
         assert!((x - 95.0).abs() < 1e-9 && (y - 70.0).abs() < 1e-9);
+    }
+
+    /// [115] Freie Körper erscheinen in Schnitt- und Ansicht-Viewports (Netz aus dem Kern) — und fangen dort.
+    #[test]
+    fn freie_koerper_im_schnitt_und_ansicht_viewport() {
+        let mut v = json();
+        v["drawingLevels"].as_array_mut().unwrap().extend([
+            serde_json::json!({"id": "q", "name": "Q", "kind": "section", "visible": true, "locked": false, "linePoints": [{"x": 2, "y": -2}, {"x": 2, "y": 10}], "directionSign": 1, "levelMarks": false}),
+            serde_json::json!({"id": "a", "name": "A", "kind": "elevation", "visible": true, "locked": false, "linePoints": [{"x": -1, "y": -3}, {"x": 11, "y": -3}], "directionSign": 1, "levelMarks": false}),
+        ]);
+        v["layers"].as_array_mut().unwrap().push(serde_json::json!({"code": "50", "name": "K", "color": "#000", "lw": 0.5, "visible": true, "locked": false}));
+        // Quader 1…3 × 1…2, 4 m hoch (die Schnittlinie x = 2 geht durch ihn).
+        v["extrudedSolids"] = serde_json::json!([{"id": "K", "type": "extrudedSolid", "levelId": "eg", "categoryCode": "50", "points": [{"x": 1, "y": 1}, {"x": 3, "y": 1}, {"x": 3, "y": 2}, {"x": 1, "y": 2}], "height": 4.0}]);
+        let snap = |id: &str, lv: &str, k: bool| serde_json::json!({"id": id, "name": id, "viewType": "grundriss", "view3d": "iso", "scaleDenominator": 100, "detail": "mittel", "activeLevelId": lv, "layerVisibility": {"20": true, "50": k}, "drawingVisibility": {}});
+        v["viewSnapshots"].as_array_mut().unwrap().extend([snap("sq", "q", true), snap("sa", "a", true), snap("sx", "a", false)]);
+        v["layouts"][0]["viewports"] = serde_json::json!([
+            {"id": "vq", "snapshotId": "sq", "xMm": 20, "yMm": 20, "widthMm": 150, "heightMm": 100},
+            {"id": "va", "snapshotId": "sa", "xMm": 200, "yMm": 20, "widthMm": 150, "heightMm": 100}
+        ]);
+        let p: Project = serde_json::from_value(v).unwrap();
+        let has_body = |id: &str| {
+            let s = p.view_snapshots.as_ref().unwrap().iter().find(|s| s.id == id).unwrap();
+            // Ohne Inhalt (nur der ausgeblendete Körper) kein Puffer.
+            let Some(buf) = snapshot_buf(&p, s, 100.0, None) else { return false };
+            let prims = crate::plan::buf::View::parse(&buf).unwrap().prims().unwrap();
+            prims.iter().any(|q| matches!(q, crate::plan::prim::Primitive::Polygon { extruded_solid_id: Some(k), .. } if k == "K"))
+        };
+        assert!(has_body("sq"), "Schnitt-Viewport zeigt den geschnittenen Körper");
+        assert!(has_body("sa"), "Ansicht-Viewport zeigt den Körper");
+        assert!(!has_body("sx"), "Klasse im Ausschnitt aus");
+        // Fang: die 4 m hohe Körperkante (0.04 Papier-Meter) in beiden Viewports.
+        let l = layout_of_level(&p, "sh").unwrap();
+        let maps = viewport_maps(&p, l);
+        let segs = viewport_snap_segments(&p, l);
+        for m in &maps {
+            let c = m.sheet_clip();
+            let inside = |s: &[f64; 4]| s[0].min(s[2]) >= c[0] - 1e-12 && s[0].max(s[2]) <= c[2] + 1e-12;
+            assert!(segs.iter().filter(|s| inside(s)).any(|s| (s[0] - s[2]).abs() < 1e-9 && ((s[1] - s[3]).abs() - 0.04).abs() < 1e-6), "Körperkante fängt in {}", m.level);
+        }
     }
 
     /// [140] Viewports zeichnen in Tusche wie die App; Farbe nur über die Vorlage (`mono: false`).

@@ -1,31 +1,28 @@
 // Schnitt aus dem Kern ([K3c]): die Abfrage `sectionPlan` (`src-tauri/core/src/plan/section/`) rechnet
 // den Schnitt auf dem Projekt-Dokument — Prismen-Schnitt (render3d `cut_section`), Besitzer, Schicht-Bänder,
-// Stil, Dominanz, Treppen, Abzugskörper, Gelände, Tiefe, geschnittene Fenster/Türen — und liefert den
-// Plan-Puffer v2 samt Pick-Ids (lazy gelesen wie `generatePlan`). TS reicht nur die Ebene, die
-// Sichtbarkeit (UI-Zustand) und die asynchron gebauten truck-Körper hinein. Einheiten: Meter; u entlang
+// Stil, Dominanz, Treppen, Abzugskörper, freie Körper ([115], Netze aus dem Kern `solid_mesh.rs`), Gelände,
+// Tiefe, geschnittene Fenster/Türen — und liefert den Plan-Puffer v2 samt Pick-Ids (lazy gelesen wie
+// `generatePlan`). TS reicht nur die Ebene und die Sichtbarkeit (UI-Zustand) hinein. Einheiten: Meter; u entlang
 // der Ebene (Blickrichtungs-RECHTS), v = absolute Höhe.
 
 import type { DetailLevel, DrawingLevel, Project, Vec2 } from "../model/types";
-import { flattenCategories, getFloor } from "../model/types";
+import { flattenCategories } from "../model/types";
 import { withDocument } from "../core/document";
-import { buildSolidMesh } from "../engine/truckSolid";
-import { extrudedSolidSpec } from "./extrudedSolidSpec";
 import { decodePlanBuf } from "./planBuf";
 import { lazyPlan } from "./planLazy";
 import { lineEndsCode } from "../model/lineEnds";
 import type { CategoryDisplayResolver, Plan } from "./generatePlan";
 
-/** Vorbereitete Eingabe eines Schnitts: Projekt, Ebene und die truck-Körper (flach). */
+/** Vorbereitete Eingabe eines Schnitts: Projekt, Ebene und der Schlüssel für den Schnitt-Cache des Kerns. */
 export interface SectionOutput {
   project: Project;
   level: DrawingLevel;
-  /** `[mono, openings, key, n, (index, nPos, pos…, nIdx, idx…) × n]`: Platz für die zwei Schalter, der
-   *  Schlüssel dieses Schnitts (der Kern merkt sich die zuletzt berechneten, Umschalten von Darstellung
-   *  oder Sichtbarkeit rechnet nicht neu), dann die geschnittenen freien Körper. */
-  bodies: Float64Array;
+  /** `[mono, openings, key]`: Platz für die zwei Schalter und der Schlüssel dieses Schnitts (der Kern merkt
+   *  sich die zuletzt berechneten, Umschalten von Darstellung oder Sichtbarkeit rechnet nicht neu). */
+  args: Float64Array;
 }
 
-/** Schlüssel der vorbereiteten Schnitte (s. `SectionOutput.bodies`). */
+/** Schlüssel der vorbereiteten Schnitte (s. `SectionOutput.args`). */
 let sectionKey = 0;
 
 /** Ob die Ebene eine gültige Schnittlinie trägt (wie `sectionPlaneFromLevel`). */
@@ -35,52 +32,21 @@ export function hasLine(level: DrawingLevel): boolean {
   return Math.hypot(line[1].x - line[0].x, line[1].y - line[0].y) >= 1e-9;
 }
 
-/** Ob ein Körper als Abzugskörper wirkt (s. `voids.ts`). */
-function isVoid(s: NonNullable<Project["extrudedSolids"]>[number]): boolean {
-  return s.operation === "subtract" && !s.brep && (s.taper ?? 0) < 1e-6 && s.points.length >= 3 && s.height > 0;
-}
-
 /**
- * Bereitet den Schnitt der Ebene vor: baut die Netze der freien Körper (truck, asynchron, mit
- * Cache). `null`, wenn die Ebene keine gültige Schnittlinie trägt.
+ * Bereitet den Schnitt der Ebene vor (neuer Cache-Schlüssel). `null`, wenn die Ebene keine gültige
+ * Schnittlinie trägt. Asynchron geblieben für die Aufrufer; die Körper-Netze rechnet seit [115] der Kern.
  */
 export async function computeSection(project: Project, level: DrawingLevel): Promise<SectionOutput | null> {
   if (!hasLine(level)) return null;
-  const bodies: number[] = [0, 0, ++sectionKey, 0];
-  const solids = project.extrudedSolids ?? [];
-  for (let index = 0; index < solids.length; index++) {
-    const solid = solids[index];
-    // Senkrechte Prismen-Abzugskörper rechnet der Kern selbst; alle übrigen Abzugskörper ([G1]) kommen
-    // als Netz mit und werden im Kern aus den Schnittflächen ausgespart.
-    if (isVoid(solid)) continue;
-    let baseZ = 0;
-    try {
-      baseZ = solid.levelId ? (getFloor(project, solid.levelId).baseElevation ?? 0) : 0;
-    } catch {
-      baseZ = 0;
-    }
-    const spec = extrudedSolidSpec(solid, baseZ);
-    if (!spec) continue;
-    let mesh: { positions: ArrayLike<number>; indices: ArrayLike<number> };
-    try {
-      mesh = await buildSolidMesh(spec, 0.01);
-    } catch {
-      continue; // Körper nicht baubar → im Schnitt weglassen, wie im 3D
-    }
-    bodies.push(index, mesh.positions.length);
-    for (let i = 0; i < mesh.positions.length; i++) bodies.push(mesh.positions[i]);
-    bodies.push(mesh.indices.length);
-    for (let i = 0; i < mesh.indices.length; i++) bodies.push(mesh.indices[i]);
-    bodies[3]++;
-  }
-  return { project, level, bodies: Float64Array.from(bodies) };
+  return { project, level, args: Float64Array.of(0, 0, ++sectionKey) };
 }
 
 /** Kategorie-Codes, die Schnitt/Ansicht prüfen. */
 function candidateCodes(project: Project): Set<string> {
   const codes = new Set<string>();
   for (const c of flattenCategories(project.layers)) codes.add(c.code);
-  for (const list of [project.walls, project.ceilings, project.roofs, project.stairs, project.openings]) {
+  // [115] Freie Körper und Stützen tragen ihre Klasse wie jedes Bauteil.
+  for (const list of [project.walls, project.ceilings, project.roofs, project.stairs, project.openings, project.extrudedSolids, project.columns]) {
     for (const e of list ?? []) codes.add(e.categoryCode);
   }
   for (const c of project.context ?? []) if (c.type === "terrainMesh" && c.categoryCode !== undefined) codes.add(c.categoryCode);
@@ -151,11 +117,11 @@ export function generateSectionPlan(
     ...(opts.overrideRuleIds ? { rules: [...opts.overrideRuleIds] } : {}),
     ...visibilityArgs(project, opts.visibleCodes, opts.categoryDisplay),
   });
-  const args = output.bodies.slice();
+  const args = output.args.slice();
   args[0] = mono ? 1 : 0;
   args[1] = opts.openings ? 1 : 0;
-  // `output` kann von einem älteren Stand stammen (Schnitt-Körper asynchron gerechnet, inzwischen
-  // geändert): dann rechnet ein eigenes, kurzlebiges Dokument dieses Stands ([122]).
+  // `output` kann von einem älteren Stand stammen (inzwischen geändert): dann rechnet ein eigenes,
+  // kurzlebiges Dokument dieses Stands ([122]).
   const buf = decodePlanBuf(withDocument(project, (d) => d.queryBin("sectionPlan", args, text)));
   if (buf.groups.length === 0) return { primitives: [], bounds: { minX: 0, minY: 0, maxX: 1, maxY: 1 } };
   const b = buf.bounds ?? [0, 0, 1, 1];

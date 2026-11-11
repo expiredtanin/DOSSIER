@@ -83,6 +83,7 @@ pub mod ifc_stairs;
 pub mod ifc_data;
 pub mod mesh_data;
 pub mod solid_bool;
+pub mod solid_mesh;
 pub mod dormer;
 pub mod roof_assembly;
 pub mod groups;
