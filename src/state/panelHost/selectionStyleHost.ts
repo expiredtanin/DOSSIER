@@ -346,7 +346,11 @@ export function buildSelectionStyleHost(c: FlatHostOpts) {
         case "contextObject":
           applyChange((p) => patchItem(p, "context", id, { categoryCode: code }));
           break;
-        default: break; // extrudedSolid/door: keine Kategorie am Element
+        // [180] Körper (Extrusion, B-Rep, Abzugskörper) tragen eine Klasse wie jedes Bauteil.
+        case "extrudedSolid":
+          applyChange((p) => patchItem(p, "extrudedSolids", id, { categoryCode: code }));
+          break;
+        default: break; // door: keine Kategorie am Element
       }
     },
     onSetSelectionLevel: (levelId) => {

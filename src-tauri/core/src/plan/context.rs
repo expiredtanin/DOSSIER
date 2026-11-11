@@ -12,7 +12,8 @@ use crate::model::*;
 const CONTEXT_LINE_COLOR: &str = "#9aa3ad";
 const CONTEXT_LINE_MM: f64 = 0.1;
 /// Kategorie der Schnittführungs-Symbole (Referenzen).
-const SECTION_LINE_CATEGORY: &str = "90";
+/// [180] Schnitt-/Ansichtsmarken liegen auf der Standard-Klasse „Schnittmarken" (früher „90 Referenzen").
+const SECTION_LINE_CATEGORY: &str = crate::standards::SECTION_MARK_CATEGORY;
 const SECTION_LINE_INK: &str = "#1f242c";
 const SECTION_LINE_MM: f64 = 0.18;
 /// [176] Kräftige Endstücke und Blickrichtungs-Schenkel.
@@ -878,7 +879,7 @@ fn view_marker(c: &Ctx, level: &DrawingLevel, p0: Vec2, p1: Vec2, sign: f64, k: 
 
 /// Schnittführungs-Symbole aller Schnitt-/Ansichtsebenen mit Linie (`addSectionLines`).
 pub fn plan_section_lines(c: &Ctx, out: &mut Vec<Primitive>) {
-    if !c.shown(SECTION_LINE_CATEGORY) {
+    if !c.derived_shown(SECTION_LINE_CATEGORY) {
         return;
     }
     // Auf freien Zeichnungsebenen (Blätter wie „Raumprogramm", Detail) gehören die Symbole nicht hin:
@@ -1643,9 +1644,9 @@ mod tests {
     /// rücken entlang der Linie auf freie Stellen, statt zu fehlen; keine liegt auf dem Hindernis.
     #[test]
     fn hoehenlinien_beschriftung_rueckt_vom_hindernis_weg() {
-        let t = TerrainMesh { id: "t".into(), positions: vec![0.0, 0.0, 0.0, 40.0, 0.0, 0.0, 40.0, 10.0, 40.0, 0.0, 10.0, 40.0], indices: vec![0.0, 1.0, 2.0, 0.0, 2.0, 3.0], contour_interval: Some(0.1), ..Default::default() };
+        let t = TerrainMesh { id: "t".into(), positions: vec![0.0, 0.0, 0.0, 40.0, 0.0, 0.0, 40.0, 10.0, 40.0, 0.0, 10.0, 40.0], indices: vec![0.0, 1.0, 2.0, 0.0, 2.0, 3.0], contour_interval: Some(0.1), category_code: "02".into(), ..Default::default() };
         let p = Project { context: Some(vec![ContextObject::TerrainMesh(t)]), ..Default::default() };
-        let a = super::super::domains::PlanArgs::parse(1.0, r#"{"floor": "eg", "scale": 100}"#).unwrap();
+        let a = super::super::domains::PlanArgs::parse(1.0, r#"{"floor": "eg", "show": ["02"], "scale": 100}"#).unwrap();
         let c = Ctx::new(&p, &a);
         let run = |o: &super::super::stamp_place::Obstacles| {
             let mut out = Vec::new();

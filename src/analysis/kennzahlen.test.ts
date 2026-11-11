@@ -9,7 +9,7 @@ const sq = (x: number, y: number, s: number) => [
 
 describe("solidVolume", () => {
   it("Prisma, Kegelstumpf (taper) und Kreis", () => {
-    const base = { id: "s", type: "extrudedSolid" as const, levelId: "eg", points: sq(0, 0, 2), height: 3 };
+    const base = { id: "s", type: "extrudedSolid" as const, categoryCode: "20", levelId: "eg", points: sq(0, 0, 2), height: 3 };
     expect(solidVolume(base)).toBeCloseTo(12, 9);
     expect(solidVolume({ ...base, taper: 1 })).toBeCloseTo(4, 9); // Pyramide = A·h/3
     const r = { ...base, circle: { center: { x: 0, y: 0 }, r: 1 } };
@@ -34,8 +34,8 @@ describe("computeKennzahlen", () => {
     const p: Project = {
       ...sampleProject,
       extrudedSolids: [
-        { id: "a", type: "extrudedSolid", levelId: sampleProject.drawingLevels[0].id, points: sq(0, 0, 10), height: 3 } as never,
-        { id: "b", type: "extrudedSolid", levelId: sampleProject.drawingLevels[0].id, points: sq(0, 0, 1), height: 3, operation: "subtract" } as never,
+        { id: "a", type: "extrudedSolid", categoryCode: "20", levelId: sampleProject.drawingLevels[0].id, points: sq(0, 0, 10), height: 3 } as never,
+        { id: "b", type: "extrudedSolid", categoryCode: "20", levelId: sampleProject.drawingLevels[0].id, points: sq(0, 0, 1), height: 3, operation: "subtract" } as never,
       ],
     };
     const k = computeKennzahlen(p);

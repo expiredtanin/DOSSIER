@@ -3,7 +3,7 @@
 //! oben (bzw. unten bei „nur Anfang"). Hängt als eigene Gruppe hinter dem Schnitt/der Ansicht.
 
 use super::prim::Primitive;
-use super::section::{LevelSpec, Plane};
+use super::section::{LevelSpec, Plane, Visibility};
 use crate::grid::{bubble_diameter, section_axes, Spec};
 use crate::model::{Drawing2DGeom, GridBubbles, Project, Vec2};
 
@@ -21,10 +21,19 @@ fn v2(x: f64, y: f64) -> Vec2 {
 /// Achslinien und Blasen für eine Ebene; `bounds` = Ausmass des Schnitts/der Ansicht (x0, y0, x1, y1),
 /// `scale` = Massstabsnenner. Leer ohne Raster oder ohne Ebene.
 pub fn grid_prims(p: &Project, level: &LevelSpec, bounds: [f64; 4], scale: f64) -> Vec<Primitive> {
+    grid_prims_in(p, level, bounds, scale, &Visibility::default())
+}
+
+/// [180] Wie [`grid_prims`], nur Raster, deren Klasse sichtbar ist (`vis`); gedimmte Klasse ⇒ gedimmt.
+pub fn grid_prims_in(p: &Project, level: &LevelSpec, bounds: [f64; 4], scale: f64, vis: &Visibility) -> Vec<Primitive> {
     let Some(plane) = level.plane() else { return Vec::new() };
     let mut out = Vec::new();
     for d in &p.drawings2d {
         let Drawing2DGeom::Grid { bubble_mm, bubbles, .. } = &d.geom else { continue };
+        if !(vis.visible(&d.category_code) && vis.render(&d.category_code)) {
+            continue;
+        }
+        let greyed = vis.has_display && vis.greyed(&d.category_code);
         let Some(spec) = Spec::of(&d.geom) else { continue };
         // [137] Achsen, Blasen und Beschriftung tragen die Raster-Id: im Schnitt/in der Ansicht anwählbar.
         let id = Some(d.id.clone());
@@ -32,6 +41,9 @@ pub fn grid_prims(p: &Project, level: &LevelSpec, bounds: [f64; 4], scale: f64) 
             match &mut q {
                 Primitive::Line { drawing_id, .. } | Primitive::DrawingCircle { drawing_id, .. } | Primitive::DrawingText { drawing_id, .. } => *drawing_id = id.clone(),
                 _ => {}
+            }
+            if greyed {
+                q = q.with_greyed(true);
             }
             q
         }));

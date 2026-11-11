@@ -1219,9 +1219,14 @@ fn autodim_scale(v: &Value) -> f64 {
 }
 
 fn autodim_ops(root: &Map<String, Value>, p: &Project, v: &Value, ctx: &Ctx) -> Vec<Op> {
-    let dims = auto_dims(root, p, ctx, "autodim", autodim_scale(v));
+    let mut dims = auto_dims(root, p, ctx, "autodim", autodim_scale(v));
     if dims.is_empty() {
         return Vec::new();
+    }
+    // [180] Eigene Klasse „Auto-Bemassung" (ohne sie im Projekt: die aktive Klasse); je Kette änderbar.
+    let cat = crate::cmd_create::category_or(p, crate::standards::AUTO_DIM_CATEGORY, ctx);
+    for d in &mut dims {
+        d["categoryCode"] = cat.clone();
     }
     let own = format!("autodim-{}-", ctx.level);
     let old: Vec<&str> = arr(root.get("drawings2d")).iter().filter_map(id_of).filter(|id| id.starts_with(&own)).collect();

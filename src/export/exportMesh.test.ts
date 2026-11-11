@@ -81,7 +81,7 @@ function projectWithPolygonExtrusion(pts: { x: number; y: number }[], height = 2
   const p = baseProject();
   const solid: ExtrudedSolid = {
     id: "E1",
-    type: "extrudedSolid",
+    type: "extrudedSolid", categoryCode: "20",
     levelId: "eg",
     points: pts,
     height,
@@ -134,7 +134,7 @@ function fixtureProject(): Project {
   const extrudedSolids: ExtrudedSolid[] = [
     {
       id: "E1",
-      type: "extrudedSolid",
+      type: "extrudedSolid", categoryCode: "20",
       levelId: "eg",
       points: [
         { x: 0, y: 0 },

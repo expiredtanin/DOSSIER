@@ -50,7 +50,7 @@ describe("Schnitt: Gelände und freie Körper", () => {
     // Kugel mitten auf der Schnittebene: Position aus der Schnittlinie des Beispiels
     const [px, , pz] = (await import("./toSection")).sectionPlaneFromLevel(section)!.point;
     const sphere: ExtrudedSolid = {
-      id: "ball", type: "extrudedSolid", levelId: floor.id, height: 2,
+      id: "ball", type: "extrudedSolid", categoryCode: "20", levelId: floor.id, height: 2,
       points: [{ x: px - 1, y: pz - 1 }, { x: px + 1, y: pz - 1 }, { x: px + 1, y: pz + 1 }, { x: px - 1, y: pz + 1 }],
       brep: { spec: { kind: "sphere", center: [px, pz, 1], r: 1 }, origin: { x: px - 1, y: pz - 1 } },
     };
@@ -67,7 +67,7 @@ describe("Schnitt: Gelände und freie Körper", () => {
     const cy = (a.y + b.y) / 2;
     const r = 2;
     const ball: ExtrudedSolid = {
-      id: "void-ball", type: "extrudedSolid", levelId: floor.id, height: 2 * r, operation: "subtract",
+      id: "void-ball", type: "extrudedSolid", categoryCode: "20", levelId: floor.id, height: 2 * r, operation: "subtract",
       points: [{ x: cx - r, y: cy - r }, { x: cx + r, y: cy - r }, { x: cx + r, y: cy + r }, { x: cx - r, y: cy + r }],
       brep: { spec: { kind: "sphere", center: [cx, cy, 1], r }, origin: { x: cx - r, y: cy - r } },
     };

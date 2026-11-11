@@ -1138,8 +1138,10 @@ function SectionPlanView({
   // Automatische Höhenkoten links neben der Zeichnung (abschaltbar je Ebene).
   const marks = useMemo(
     () =>
-      rawPlan && levelMarksEnabled(level, project) ? levelMarkerPrimitives(project, rawPlan.bounds, rawPlan.primitives) : [],
-    [rawPlan, level, project],
+      rawPlan && levelMarksEnabled(level, project, (c) => visibleCodes.has(c) && categoryDisplay(c).render)
+        ? levelMarkerPrimitives(project, rawPlan.bounds, rawPlan.primitives)
+        : [],
+    [rawPlan, level, project, visibleCodes, categoryDisplay],
   );
   const withOverlay = useMemo(() => {
     if (!rawPlan) return rawPlan;

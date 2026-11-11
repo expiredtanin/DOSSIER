@@ -20,8 +20,8 @@ const base: Project = {
     { id: "k1", type: "column", floorId: "eg", categoryCode: "25", position: { x: 20, y: 3 }, profile: { kind: "rect", width: 0.4, depth: 0.4 }, rotation: 0, height: 2.5 },
   ],
   extrudedSolids: [
-    { id: "s1", type: "extrudedSolid", levelId: "og", points: [{ x: 30, y: 2 }, { x: 32, y: 2 }, { x: 32, y: 5 }, { x: 30, y: 5 }], height: 1.5, baseOffset: 0.5 },
-    { id: "v1", type: "extrudedSolid", levelId: "eg", points: [{ x: 40, y: 0 }, { x: 41, y: 0 }, { x: 41, y: 1 }], height: 1, operation: "subtract" },
+    { id: "s1", type: "extrudedSolid", categoryCode: "20", levelId: "og", points: [{ x: 30, y: 2 }, { x: 32, y: 2 }, { x: 32, y: 5 }, { x: 30, y: 5 }], height: 1.5, baseOffset: 0.5 },
+    { id: "v1", type: "extrudedSolid", categoryCode: "20", levelId: "eg", points: [{ x: 40, y: 0 }, { x: 41, y: 0 }, { x: 41, y: 1 }], height: 1, operation: "subtract" },
   ],
 } as Project;
 

@@ -203,6 +203,12 @@ impl<'a> Ctx<'a> {
         self.a.show.contains(code)
     }
 
+    /// [180] Abgeleitete Darstellung auf einer Standard-Klasse (`standards::DERIVED_CATEGORIES`): eingeblendet, oder
+    /// die Klasse fehlt im Projekt.
+    pub fn derived_shown(&self, code: &str) -> bool {
+        self.shown(code) || !self.cats.contains_key(code)
+    }
+
     /// [33] Element sichtbar: Kategorie eingeblendet und keine Regel „Ausblenden“ trifft es.
     pub fn vis(&self, code: &str, id: &str) -> bool {
         self.shown(code) && !self.hidden.contains(id)
@@ -1537,7 +1543,9 @@ pub(super) fn columns(c: &Ctx, out: &mut Vec<Primitive>) {
 fn solids(c: &Ctx, out: &mut Vec<Primitive>) {
     let range = super::view_range::ViewRange::of(c.p, &c.a.floor);
     let base = c.p.floor(&c.a.floor).and_then(|f| f.base_elevation).unwrap_or(0.0);
-    for s in c.p.extruded_solids.as_deref().unwrap_or(&[]).iter().filter(|s| s.level_id == c.a.floor) {
+    // [180] Körper und Abzugskörper liegen wie jedes Bauteil auf ihrer Klasse (die Aussparung wirkt unabhängig davon).
+    for s in c.p.extruded_solids.as_deref().unwrap_or(&[]).iter().filter(|s| s.level_id == c.a.floor && c.vis(&s.category_code, &s.id)) {
+        let greyed = c.greyed(&s.category_code).then_some(true);
         let subtract = s.operation.as_deref() == Some("subtract");
         let zb = base + s.base_offset.unwrap_or(0.0);
         let zone = if subtract { super::view_range::Zone::Cut } else { range.classify(zb, zb + s.height) };
@@ -1546,9 +1554,9 @@ fn solids(c: &Ctx, out: &mut Vec<Primitive>) {
         }
         let out_start = out.len();
         if s.operation.as_deref() == Some("subtract") {
-            out.push(polygon(s.points.clone(), "none", "none", 0.0, no_hatch(), None, None, Pick::Solid(&s.id)));
+            out.push(polygon(s.points.clone(), "none", "none", 0.0, no_hatch(), greyed, None, Pick::Solid(&s.id)));
             let n = s.points.len();
-            let seg = |a: Vec2, b: Vec2, dash: Option<Vec<f64>>| line(a, b, "void", SYMBOL_HAIRLINE_MM, Some(dash), EXTRUSION_STROKE, None);
+            let seg = |a: Vec2, b: Vec2, dash: Option<Vec<f64>>| line(a, b, "void", SYMBOL_HAIRLINE_MM, Some(dash), EXTRUSION_STROKE, greyed);
             for i in 0..n {
                 out.push(seg(s.points[i], s.points[(i + 1) % n], Some(vec![2.0, 1.0])));
             }
@@ -1557,12 +1565,12 @@ fn solids(c: &Ctx, out: &mut Vec<Primitive>) {
                 out.push(seg(s.points[1], s.points[3], None));
             }
         } else {
-            out.push(polygon(s.points.clone(), "none", EXTRUSION_STROKE, SYMBOL_HAIRLINE_MM, no_hatch(), None, None, Pick::Solid(&s.id)));
+            out.push(polygon(s.points.clone(), "none", EXTRUSION_STROKE, SYMBOL_HAIRLINE_MM, no_hatch(), greyed, None, Pick::Solid(&s.id)));
             // [G1] Schnittfläche auf Schnitthöhe (Poché); der Umriss darunter bleibt als Projektion.
             if zone == super::view_range::Zone::Cut {
                 if let Some(ring) = body_cut_ring(s, zb, range.cut) {
                     let (fill, hatch) = if c.solid_cut() { (HATCH_INK, no_hatch()) } else { (super::section::BODY_FILL, super::section::section_hatch()) };
-                    out.push(polygon(ring, fill, POCHE_STROKE, WALL_FALLBACK_MM, hatch, None, None, Pick::Solid(&s.id)));
+                    out.push(polygon(ring, fill, POCHE_STROKE, WALL_FALLBACK_MM, hatch, greyed, None, Pick::Solid(&s.id)));
                 }
             }
         }
@@ -1741,8 +1749,10 @@ pub fn plan_domains_buf(p: &Project, a: &PlanArgs) -> Result<Vec<u8>, String> {
 fn extras_of(p: &Project, a: &PlanArgs) -> (Vec<(Primitive, u32)>, Vec<Primitive>) {
     if a.global {
         // [66] Baurecht (Parzelle, Baubereich, Verstösse) gehört zur Vermessung: ausgeblendete Kategorie „01" ⇒ ohne.
-        let site = !(p.flat_categories().iter().any(|c| c.code == super::extras::SITE_CATEGORY) && !a.show.contains(super::extras::SITE_CATEGORY));
-        super::extras::site_and_shadow(p, &a.floor, a.sun_when, a.scale, site)
+        let site = crate::standards::derived_visible(p, super::extras::SITE_CATEGORY, |k| a.show.contains(k));
+        // [180] Sonnenschatten auf der Klasse „Schatten".
+        let sun_when = a.sun_when.filter(|_| crate::standards::derived_visible(p, crate::standards::SHADOW_CATEGORY, |k| a.show.contains(k)));
+        super::extras::site_and_shadow(p, &a.floor, sun_when, a.scale, site)
     } else {
         (Vec::new(), Vec::new())
     }
@@ -2593,6 +2603,7 @@ mod tests {
         let mk = |id: &str, off: f64, h: f64| ExtrudedSolid {
             id: id.into(),
             level_id: "eg".into(),
+            category_code: "20".into(),
             points: vec![Vec2 { x: 0.0, y: 0.0 }, Vec2 { x: 1.0, y: 0.0 }, Vec2 { x: 1.0, y: 1.0 }, Vec2 { x: 0.0, y: 1.0 }],
             height: h,
             base_offset: Some(off),
@@ -3344,6 +3355,7 @@ mod tests {
         let mk = |id: &str, off: f64, h: f64, taper: Option<f64>, op: Option<&str>| ExtrudedSolid {
             id: id.into(),
             level_id: "eg".into(),
+            category_code: "20".into(),
             points: vec![Vec2 { x: 20.0, y: 0.0 }, Vec2 { x: 22.0, y: 0.0 }, Vec2 { x: 22.0, y: 2.0 }, Vec2 { x: 20.0, y: 2.0 }],
             height: h,
             base_offset: Some(off),

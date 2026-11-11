@@ -491,6 +491,35 @@ pub struct Output {
     pub meshes: Vec<MeshMeta>,
     /// [152] Offene Schnittlinien importierter Netze (offene/nicht-mannigfaltige Netze): Netz-Index, Linienzug.
     pub mesh_lines: Vec<(usize, Vec<[f64; 2]>)>,
+    /// [180] Klasse der Bauteile hinter den Projektionskanten (`Edge::kind`, `Edge::index`; Netze über `meshes`).
+    pub edge_cats: HashMap<(Kind, usize), String>,
+}
+
+/// [180] Klassen der Projektions-Besitzer: Wände (Index in `walls_r`), Platten (Decken, Treppen, Stützen; Index in
+/// `slabs_r`), Dächer, Körper (Index in `extrudedSolids`).
+fn edge_categories(p: &Project, walls: &[Option<&Wall>], slabs: &[bands::SlabOwner]) -> HashMap<(Kind, usize), String> {
+    let mut m = HashMap::new();
+    for (i, w) in walls.iter().enumerate() {
+        if let Some(w) = w {
+            m.insert((Kind::Wall, i), w.category_code.clone());
+        }
+    }
+    for (i, s) in slabs.iter().enumerate() {
+        let code = match s {
+            bands::SlabOwner::Ceiling(c, _) => &c.category_code,
+            bands::SlabOwner::Stair(st) => &st.category_code,
+            bands::SlabOwner::Column(c) => &c.category_code,
+            bands::SlabOwner::None => continue,
+        };
+        m.insert((Kind::Slab, i), code.clone());
+    }
+    for (i, r) in p.roofs.as_deref().unwrap_or(&[]).iter().enumerate() {
+        m.insert((Kind::Roof, i), r.category_code.clone());
+    }
+    for (i, b) in p.extruded_solids.as_deref().unwrap_or(&[]).iter().enumerate() {
+        m.insert((Kind::Body, i), b.category_code.clone());
+    }
+    m
 }
 
 /// [152] Ein importiertes Netz im Schnitt.
@@ -577,6 +606,7 @@ fn compute_plane(p: &Project, level: &LevelSpec, bodies: &[BodyMesh], strip: Opt
         .collect();
     let walls: Vec<Option<&Wall>> = owners.iter().zip(&virt).map(|(o, v)| v.as_ref().or(*o)).collect();
     let slabs = slab_owners(p, &slabs_r);
+    let edge_cats = edge_categories(p, &walls, &slabs);
     let cuts = attach_cut_styles(cuts, p, &plane, &walls, &slabs)?;
     let cuts = merge_monolith_cuts(cuts, &slabs_r, &stair_flight_sections(p, plane.base(), plane.u_model()));
     let base = plane.base();
@@ -603,7 +633,7 @@ fn compute_plane(p: &Project, level: &LevelSpec, bodies: &[BodyMesh], strip: Opt
     let (mut visible, hidden) = projection_edges(p, &plane, &walls_r, &wi, &slabs_r, &bodies, &meshes, &cuts, level.hidden_lines, level.depth, strip.map_or(&[][..], |s| &s.half[..]));
     shaped_projection(&mut visible, p, &walls_r, &plane);
     let meshes = meshes.iter().map(|m| MeshMeta { id: m.mesh.id.clone(), name: m.mesh.name.clone(), category: Some(m.mesh.category_code.clone()) }).collect();
-    let mut out = Output { cuts, visible, hidden, profiles: Vec::new(), earth: Vec::new(), terrain_id: None, meshes, mesh_lines };
+    let mut out = Output { cuts, visible, hidden, profiles: Vec::new(), earth: Vec::new(), terrain_id: None, meshes, mesh_lines, edge_cats };
     append_terrain_profiles(&mut out, p, base, u);
     if let Some(s) = strip {
         unfold::clip_output(&mut out, s);

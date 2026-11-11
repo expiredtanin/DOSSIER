@@ -343,7 +343,7 @@ describe("commitTransform — ExtrudedSolid mit Kreis-Profil (REGRESSION: circle
   function circleSolid(id: string): ExtrudedSolid {
     return {
       id,
-      type: "extrudedSolid",
+      type: "extrudedSolid", categoryCode: "20",
       levelId: "eg",
       points: [{ x: -1, y: 0 }, { x: 0, y: 1 }, { x: 1, y: 0 }, { x: 0, y: -1 }], // grobe Tessellierung
       height: 2,
@@ -499,7 +499,7 @@ describe("transformPreview — Vorschau für alle 2D-Formen (Kern, Plan-Primitiv
 
 describe("commitTransform — B-Rep-Körper (Spezifikation als transform gewickelt)", () => {
   const body = {
-    id: "b", type: "extrudedSolid", points: [{ x: 0, y: 0 }, { x: 2, y: 0 }, { x: 2, y: 1 }, { x: 0, y: 1 }], height: 3,
+    id: "b", type: "extrudedSolid", categoryCode: "20", points: [{ x: 0, y: 0 }, { x: 2, y: 0 }, { x: 2, y: 1 }, { x: 0, y: 1 }], height: 3,
     brep: { spec: { kind: "cuboid", min: [0, 0, 0], max: [2, 1, 3] }, origin: { x: 0, y: 0 } },
   } as unknown as ExtrudedSolid;
   const p = { ...project([]), extrudedSolids: [body] } as Project;

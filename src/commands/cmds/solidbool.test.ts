@@ -13,7 +13,7 @@ function combineSolids(project: typeof sampleProject, a: ExtrudedSolid, b: Extru
 
 const box = (id: string, x0: number, y0: number, x1: number, y1: number, h: number): ExtrudedSolid => ({
   id,
-  type: "extrudedSolid",
+  type: "extrudedSolid", categoryCode: "20",
   levelId: "eg",
   points: [{ x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 }],
   height: h,

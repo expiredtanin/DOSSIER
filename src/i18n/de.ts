@@ -986,6 +986,10 @@ export const de = {
   "nav.show": "Einblenden",
   "nav.categoryVisible": "{name} sichtbar",
   "nav.categorySelect": "{name} als aktive Ebene wählen (Zeichen-Ziel)",
+  "nav.categoryDerived.08": "Abgeleitete Darstellung: Sonnenschatten im Grundriss, Schlagschatten in der Ansicht",
+  "nav.categoryDerived.81": "Abgeleitete Darstellung: automatische Aussenbemassung (je Kette änderbar)",
+  "nav.categoryDerived.82": "Abgeleitete Darstellung: automatische Höhenkoten in Schnitt und Ansicht",
+  "nav.categoryDerived.91": "Abgeleitete Darstellung: Schnitt- und Ansichtsmarken im Grundriss",
   "nav.categorySettings": "Ebeneneinstellungen für {name}",
   "nav.drawingLevelsWindow": "Zeichnungsebenen als eigenes Fenster öffnen",
 

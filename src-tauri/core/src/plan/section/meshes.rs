@@ -68,6 +68,8 @@ pub(super) fn append_body_sections(cuts: &mut Vec<Cut>, p: &Project, bodies: &[&
             c.fill = Some(BODY_FILL.into());
             c.nse = nse;
             c.source_id = solids.get(b.index).map(|s| s.id.clone());
+            // [180] Klasse des Körpers (Sichtbarkeit, Darstellungsmodus).
+            c.category = solids.get(b.index).map(|s| s.category_code.clone());
             cuts.push(c);
         }
     }

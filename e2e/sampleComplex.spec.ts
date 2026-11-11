@@ -39,6 +39,8 @@ test("Musterhaus komplex: Geschosse, Ansichten und Blätter ohne Konsolenfehler"
   const dl = await pending;
   const bytes = await readFile((await dl.path())!);
   expect(bytes.subarray(0, 5).toString()).toBe("%PDF-");
-  expect(bytes.length).toBeGreaterThan(100_000);
+  // [180] Seit Schatten, Schnittmarken usw. auf ihrer Klasse liegen, stehen sie nur noch in deren PDF-Ebene statt in
+  // jeder (≈ 86 kB statt > 100 kB).
+  expect(bytes.length).toBeGreaterThan(60_000);
   if (shots) await writeFile(`${shots}/baueingabe.pdf`, bytes);
 });

@@ -79,6 +79,10 @@ pub(super) fn surface_patterns(p: &Project, faces: &mut [Face], frame: &[f64; 9]
     }
     // Dachflächen: äusserste Schicht (Eindeckung).
     for roof in p.roofs.as_deref().unwrap_or(&[]) {
+        // [180] Nur Dächer mit sichtbaren Flächen (ausgeblendete Klasse, Regel oder Ansichtsbereich ⇒ ohne Muster).
+        if !faces.iter().any(|f| f.role == Role::Roof && f.id == roof.id) {
+            continue;
+        }
         let Some(comp) = p.roof_layers(roof).first().filter(|l| !l.component_id.is_empty()).and_then(|l| p.component(&l.component_id)) else { continue };
         if !mono && roof.color.as_deref().is_none_or(|c| c.is_empty()) {
             if let Some(c) = comp.elevation_color.as_deref().filter(|c| !c.trim().is_empty()) {

@@ -981,6 +981,10 @@ export const en: Record<TranslationKey, string> = {
   "nav.show": "Show",
   "nav.categoryVisible": "{name} visible",
   "nav.categorySelect": "Make {name} the active layer (drawing target)",
+  "nav.categoryDerived.08": "Derived display: sun shadows in plans, cast shadows in elevations",
+  "nav.categoryDerived.81": "Derived display: automatic exterior dimensions (each chain can be reassigned)",
+  "nav.categoryDerived.82": "Derived display: automatic level marks in sections and elevations",
+  "nav.categoryDerived.91": "Derived display: section and elevation marks in plans",
   "nav.categorySettings": "Layer settings for {name}",
   "nav.drawingLevelsWindow": "Open drawing levels as its own window",
 

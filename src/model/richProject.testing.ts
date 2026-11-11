@@ -88,8 +88,8 @@ export function richProject(): Project {
       { type: "image", categoryCode: "03", id: "c4", name: "Luftbild", src: "data:image/png;base64,AAAA", min: { x: 0, y: 0 }, max: { x: 10, y: 10 }, opacity: 0.7, drape: true, filters: { saturation: 0.5, grayscale: 1 } },
     ],
     extrudedSolids: [
-      { id: "x1", type: "extrudedSolid", levelId: lvl, points: [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }], height: 2, baseOffset: 0.1, operation: "subtract", taper: 0.1, cornerRadius: 0.05, chamfer: 0.02 },
-      { id: "x2", type: "extrudedSolid", levelId: lvl, points: [], height: 1, circle: { center: { x: 3, y: 3 }, r: 0.4 }, brep: { spec: { kind: "box", w: 1, nested: { a: [1, 2] } }, origin: { x: 0, y: 0 }, label: "Quader" } },
+      { id: "x1", type: "extrudedSolid", categoryCode: "20", levelId: lvl, points: [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }], height: 2, baseOffset: 0.1, operation: "subtract", taper: 0.1, cornerRadius: 0.05, chamfer: 0.02 },
+      { id: "x2", type: "extrudedSolid", categoryCode: "20", levelId: lvl, points: [], height: 1, circle: { center: { x: 3, y: 3 }, r: 0.4 }, brep: { spec: { kind: "box", w: 1, nested: { a: [1, 2] } }, origin: { x: 0, y: 0 }, label: "Quader" } },
     ],
     columns: [
       {

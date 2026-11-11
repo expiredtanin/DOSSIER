@@ -213,6 +213,10 @@ pub fn elevation_primitives_with(p: &Project, level: &LevelSpec, shadows: bool, 
     for c in p.ceilings.as_deref().unwrap_or(&[]) {
         ceil_cat.entry(c.id.as_str()).or_insert(c.category_code.as_str());
     }
+    // [180] Treppen kommen als Platten (Tritte, Läufe) mit der Treppen-Id.
+    for st in p.stairs.as_deref().unwrap_or(&[]) {
+        ceil_cat.entry(st.id.as_str()).or_insert(st.category_code.as_str());
+    }
     let mut roof_cat: HashMap<&str, &str> = HashMap::new();
     for r in p.roofs.as_deref().unwrap_or(&[]) {
         roof_cat.entry(r.id.as_str()).or_insert(r.category_code.as_str());
@@ -239,9 +243,9 @@ pub fn elevation_primitives_with(p: &Project, level: &LevelSpec, shadows: bool, 
             Role::Mesh => mesh_cat.get(f.id.as_str()).copied(),
         }
     };
-    if vis.has_vis && vis.has_display {
-        faces.retain(|f| category(f).is_none_or(|c| vis.visible(c) && vis.render(c)));
-    }
+    // [180] Klassen-Sichtbarkeit und Darstellungsmodus wirken je für sich (früher nur beide zusammen: ein Blatt-
+    // Ausschnitt mit ausgeblendeter Klasse zeigte sie in der Ansicht trotzdem).
+    faces.retain(|f| category(f).is_none_or(|c| vis.visible(c) && vis.render(c)));
     let greyed = |f: &Face| vis.has_display && category(f).is_some_and(|c| vis.greyed(c));
     // [33] Override-Regeln: ausgeblendete Bauteile entfallen wie ausgeblendete Kategorien (verdecken nichts),
     // Wände samt ihren Öffnungen.
@@ -256,6 +260,17 @@ pub fn elevation_primitives_with(p: &Project, level: &LevelSpec, shadows: bool, 
     let mvo = crate::plan::model_view::for_view(p, level.model_view.as_deref(), crate::plan::style::Detail::Mittel, scale);
     let win = &mvo.window;
     let mut openings = collect_openings(p, &frame, win);
+    // [180] Öffnungen nach ihrer Klasse und der ihres Wirts (Wand, Dach): ausgeblendet ⇒ ohne Öffnung.
+    {
+        let shown = |c: &str| vis.visible(c) && vis.render(c);
+        let host_shown = |o: &Opening| {
+            let wall = (!o.host_wall_id.is_empty()).then(|| wall_cat.get(o.host_wall_id.as_str()).copied()).flatten();
+            let roof = o.host_roof_id.as_deref().and_then(|r| roof_cat.get(r).copied());
+            wall.is_none_or(shown) && roof.is_none_or(shown)
+        };
+        let all = p.openings.as_deref().unwrap_or(&[]);
+        openings.retain(|op| all.iter().find(|o| o.id == op.id).is_none_or(|o| shown(&o.category_code) && host_shown(o)));
+    }
     // [173] Fensterteilung (Flügel, Sprossen, Kämpfer) nach der Modelldarstellung.
     if !win.elevation_division {
         for op in openings.iter_mut().filter(|op| p.openings.as_deref().unwrap_or(&[]).iter().any(|o| o.id == op.id && o.kind != ElementKind::Door)) {
@@ -439,6 +454,8 @@ pub fn elevation_primitives_with(p: &Project, level: &LevelSpec, shadows: bool, 
     }
 
     // [33] Schlagschatten über Regeln (Bauteilart „Schatten“): Ausblenden, Füllung, Linie (Umriss).
+    // [180] Schlagschatten liegen auf der Klasse „Schatten" (fehlt sie im Projekt, gilt sie als sichtbar).
+    let shadows = shadows && vis.visible(crate::standards::SHADOW_CATEGORY) && vis.render(crate::standards::SHADOW_CATEGORY);
     let sov = if shadows { super::overrides::shadow_override(p, rv) } else { None };
     let shadows = shadows && !sov.as_ref().is_some_and(|(a, _)| a.hidden());
     let shadow_style = |mut q: Primitive| -> Primitive {
@@ -721,7 +738,7 @@ pub fn elevation_plan_buf(p: &Project, args: &[f64], text: &str) -> Result<Vec<u
         super::extras::scale_line_weights(p, scale, &mut prims);
         w.group(&prims);
         // Achsraster ([112]): Achsen quer zur Blickebene.
-        let grid = super::grid_view::grid_prims(p, &level, bounds, scale);
+        let grid = super::grid_view::grid_prims_in(p, &level, bounds, scale, &vis);
         if !grid.is_empty() {
             w.group(&grid);
         }

@@ -3,20 +3,28 @@
 // Gebäudes (First/OK Dach), links neben der Zeichnung mit einer kurzen
 // Bezugslinie zur Geometrie. Symbol = dieselbe SIA-400-Kote wie das 2D-Element
 // `kote`; gerechnet im Kern (`plan/drawings.rs::level_markers`, Abfrage `levelMarkers`).
-// Abschaltbar je Ebene (`DrawingLevel.levelMarks`) oder über die Modelldarstellung ([173]).
+// Abschaltbar je Ebene (`DrawingLevel.levelMarks`), über die Modelldarstellung ([173]) oder die Klasse
+// „Höhenkoten" ([180]).
 
 import type { DrawingLevel, Project } from "../model/types";
 import type { Primitive } from "./generatePlan";
 import { documentFor } from "../core/document";
 import { decodePlanBuf } from "./planBuf";
+import { derivedVisible, LEVEL_MARK_CATEGORY } from "../model/derivedCategories";
 
 /**
  * Ob eine Ebene automatische Koten trägt: Ebene > [173] Modelldarstellung der Ebene (`dimensions.levelMarks`,
  * Rangfolge wie Kern `model_view::Options::level_marks`) > an.
  */
-export function levelMarksEnabled(level: DrawingLevel, project?: Pick<Project, "modelViewOptions">): boolean {
+export function levelMarksEnabled(
+  level: DrawingLevel,
+  project?: Pick<Project, "modelViewOptions"> & Partial<Pick<Project, "layers">>,
+  shown?: (code: string) => boolean,
+): boolean {
   const mv = level.modelViewOptionId ? project?.modelViewOptions?.find((m) => m.id === level.modelViewOptionId) : undefined;
-  return level.levelMarks ?? mv?.dimensions?.levelMarks ?? true;
+  const on = level.levelMarks ?? mv?.dimensions?.levelMarks ?? true;
+  // [180] Die Koten liegen auf der Klasse „Höhenkoten": ausgeblendet ⇒ ohne (`shown`: sichtbar und gezeichnet).
+  return on && (!shown || !project?.layers || derivedVisible(project.layers, LEVEL_MARK_CATEGORY, shown));
 }
 
 /**

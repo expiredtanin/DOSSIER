@@ -60,7 +60,17 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   `doc/ARCHITEKTUR.md` Abschnitt 8. Geprüft: Rust/vitest/e2e, Musterhaus komplex mit Nachbarnetzen Grundriss 1:200/Schnitt/
   Ansicht per CLI vor/nach byte-gleich. Offen: Linien des Standort-Imports (OSM/swisstopo-Umrisse) bleiben je Klasse ein
   `contourSet` statt einzelner 2D-Zeichnungen; Tag-Namen `importedMesh`/`terrainMesh` historisch; Mac-Gegenprobe. · L
-- ○ **[180]** Alles Sichtbare auf Ebene/Klasse (11.11., Vorgabe Maintainer): jedes Primitive in Plan/Schnitt/Ansicht (auch abgeleitete: Schatten, Auto-Masse, Koten, Schnitt-/Ansichtsmarken, Raster, Nordpfeil, Stempel, Gelände) hat eine Klasse/Ebene und verschwindet mit ihr; Audit + Test, der Primitives ohne Zuordnung meldet. Regel in CLAUDE.md. · M
+- ◐ **[180]** Alles Sichtbare auf Ebene/Klasse (11.11., Vorgabe Maintainer). Umgesetzt (11.11.): Audit-Tabelle in
+  `doc/ARCHITEKTUR.md` 3.6; Standard-Klassen der abgeleiteten Darstellung `08 Schatten` (Sonnenschatten Grundriss,
+  Schlagschatten Ansicht), `81 Auto-Bemassung` (Befehl `autodim`, je Kette änderbar), `82 Höhenkoten` (automatische
+  Koten Schnitt/Ansicht), `91 Schnittmarken` (statt `90`) in `standards.rs` („Standards laden", neue Projekte,
+  Musterprojekte; fehlt die Klasse ⇒ sichtbar); Körper/Abzugskörper mit Pflicht-Klasse (`ExtrudedSolid.categoryCode`,
+  Objekt-Info änderbar); Schnitt: Projektionskanten und Raster nach Klasse; Ansicht: Klassen wirken auch ohne
+  Darstellungsmodus (Blatt-Ausschnitte zeigten ausgeblendete Klassen), Öffnungen (samt Wirt), Treppen, Raster, Dachmuster
+  nach Klasse (Nebenwirkung: kein doppeltes Ziegelraster mehr auf dem Hauptdach, Golden Ansicht Süd); CLI `--hide`;
+  Tooltip im Ebenen-Panel (de/en). Tests `plan/derived_class_tests.rs`, `src/plan/derivedCategories.test.ts`. Offen:
+  ausgeblendete Bauteile verdecken im Schnitt weiter die Projektion dahinter (Lücken); 3D nicht nach Klassen geprüft;
+  nicht in der Tauri-App/auf dem Mac geprüft. · M
 - ◐ **[133]** Musterhaus komplex: Rest. Skalieren-Kopie lässt `position`/Breite unverändert; Vollflächen-/Bildschraffur
   und Schraffur-Löcher beim Ausbreiten fehlen (`src/export/planToSvgString.ts`, Kern `plan/svg.rs`; wegen paralleler
   Arbeit an `svg.rs` (Bögen) am 10.11. nicht angefasst). (10.11.: Skalieren skaliert `position`/`width` der Wandöffnungen

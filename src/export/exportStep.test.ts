@@ -74,7 +74,7 @@ describe("STEP-Export Ende-zu-Ende (truck-WASM)", () => {
     const p = {
       ...sampleProject,
       extrudedSolids: [{
-        id: "v", type: "extrudedSolid" as const, levelId: w.floorId, operation: "subtract" as const, height: 0.8, baseOffset: 0.5,
+        id: "v", type: "extrudedSolid" as const, categoryCode: "20", levelId: w.floorId, operation: "subtract" as const, height: 0.8, baseOffset: 0.5,
         points: [{ x: mx - 0.3, y: my - 1 }, { x: mx + 0.3, y: my - 1 }, { x: mx + 0.3, y: my + 1 }, { x: mx - 0.3, y: my + 1 }],
       }],
     };

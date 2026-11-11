@@ -30,6 +30,7 @@ import type { LayerCategory } from "./host";
 import type { DisplayMode } from "./types";
 import { DisplayModeSelect } from "./DisplayModeSelect";
 import { t } from "../i18n";
+import { DERIVED_CATEGORY_CODES } from "../model/derivedCategories";
 
 /** Inhalt des Panels „Ebenen". */
 export function LayersPanel() {
@@ -129,7 +130,11 @@ function CategoryRow({
         style={style}
         onClick={() => onSelect(category.code)}
         onContextMenu={(e) => onContext(category.code, e)}
-        title={t("nav.categorySelect", { name: category.name })}
+        title={
+          DERIVED_CATEGORY_CODES.includes(category.code)
+            ? `${t("nav.categorySelect", { name: category.name })}\n${t(`nav.categoryDerived.${category.code}`)}`
+            : t("nav.categorySelect", { name: category.name })
+        }
       >
         <button
           className={`eye${category.visible ? " is-on" : ""}`}
