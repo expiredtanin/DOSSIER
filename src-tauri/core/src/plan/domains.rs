@@ -823,6 +823,13 @@ fn roofs(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) {
                 out.push(line(pts[i], pts[(i + 1) % n], "roof-eaves", ROOF_EAVES_MM, overhead.clone(), stroke, greyed));
             }
         }
+        // Attika ([148]): Innenkante des Ringkörpers (Aussenkante = Traufe).
+        if let Some(pp) = crate::roof_parapet::parapet(roof, &geo) {
+            let n = pp.inner.len();
+            for i in 0..n {
+                out.push(line(pv(pp.inner[i]), pv(pp.inner[(i + 1) % n]), "roof-parapet", ROOF_EAVES_MM, overhead.clone(), stroke, greyed));
+            }
+        }
         for l in &geo.ridges {
             out.push(line(pv(l[0]), pv(l[1]), "roof-ridge", ROOF_RIDGE_MM, overhead.clone(), stroke, greyed));
         }

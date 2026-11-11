@@ -16,6 +16,7 @@ pub mod flat_write;
 pub mod polygon_bool;
 pub mod roof;
 pub mod roof_skeleton;
+pub mod roof_parapet;
 pub mod flat_read;
 pub mod sun;
 pub mod tree;

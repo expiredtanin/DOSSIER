@@ -148,6 +148,18 @@ pub(super) fn append_roof_sections(cuts: &mut Vec<Cut>, p: &Project, plane: &Pla
     let (ux, uy) = plane.u_model();
     let nb = crate::roof_assembly::neighbors_rc(p);
     for (index, roof) in roofs.iter().enumerate() {
+        // Attika ([148]): geschnittener Ringkörper, Schraffur des Bauteils.
+        if let Some(pp) = crate::roof_parapet::parapet(roof, &crate::roof::roof_geometry(&roof.params(), p.roof_base_elevation(roof))) {
+            let hatch = roof.parapet_component_id.as_deref().and_then(|id| p.component(id)).and_then(|comp| resolve_hatch(p, &comp.hatch_id, None, None, None));
+            for pts in crate::roof_assembly::section_rings(&crate::roof_parapet::mesh(&pp), (bx, by), (ux, uy)) {
+                let mut c = Cut::new(Kind::Roof, index, pts);
+                if let Some(h) = &hatch {
+                    c.fill = Some(poche_fill(h.pattern).to_string());
+                    c.hatch = Some(h.clone());
+                }
+                cuts.push(c);
+            }
+        }
         // Verschnittene Dächer und Gauben ([G5]): Schnitt durch die Körper je Schicht.
         if let Some(solids) = crate::roof_assembly::roof_solids_with(p, index, &nb) {
             let rl = p.roof_layers(roof);

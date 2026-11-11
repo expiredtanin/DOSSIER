@@ -214,8 +214,12 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
 - ◐ **[149]** Baum als eigenes Objekt. Auswahlrechteck, Gruppen, Art-Beschriftung (`species`/`showLabel`) und Beschriftungs-Griff sind gebaut (11.11. geprüft, TODO-Text war veraltet). Offen: Beschriftung weicht nicht aus; Schnitt durch die Krone zeigt die ganze Silhouette; Fuss am
   Gelände der Stammmitte (Hang). · M
 - ◐ **[148]** Flach-/Pultdach auf beliebigem Umriss (`roof_geometry`). Pult mit Höfen (Höfe ignoriert); Pult auf
-  schiefem Umriss neigt nur entlang x/y (`ridgeAxis`); Attika/Gefälle fehlen im Modell; Dachfenster-Laibung genau auf
-  einer Fuge doppelt. · M
+  schiefem Umriss neigt nur entlang x/y (`ridgeAxis`); Dachfenster-Laibung genau auf einer Fuge doppelt. Attika
+  (11.11.): Dachfelder `parapetHeight`/`parapetWidth`/`parapetComponentId` am Flachdach (`roof_parapet.rs`; 3D-Ringkörper in
+  `emit_roofs`, Schnitt mit Bauteil-Schraffur, Ansicht, Grundriss-Innenkante `roof-parapet` auf der Dach-Ebene, Objekt-Info;
+  Musterhaus komplex: Erker). Offen: Gefälle der Dachhaut (nur Darstellung im Schnitt); Attika bei Pult, an Höfen und bei
+  verschnittenen Dächern; Live-Schnitt im 3D (`roofCutLayers`) ohne Attika; Ansicht orientiert Aussenflächen am
+  Dachschwerpunkt (konkave Umrisse), Attika in Dachfarbe statt Bauteilfarbe. · M
 - ◐ **[26]** Dächer über beliebige Grundrisse (`core/src/roof*.rs`). Kante im Grundriss hervorheben und Kanten-/
   Hof-Griffe (PlanView); Mansarde mit Hof und verschieden geneigten Kanten (zweite Schicht nicht geschlossen);
   Schattenwurf nimmt die Hülle der Dachfläche. · M

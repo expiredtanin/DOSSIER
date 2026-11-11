@@ -253,7 +253,8 @@ pub(super) fn collect_roof_faces(p: &Project, frame: &[f64; 9], walls: &[RWall])
                     })
                     .map(|q| q.to_vec());
                 // Ohne Wände bis ans Dach zusätzlich die Giebeldreiecke ([132]: Stirnen immer).
-                if floors.contains(roof.floor_id.as_str()) { fascia.collect() } else { g.gables.iter().cloned().chain(fascia).collect::<Vec<_>>() }
+                let parapet = crate::roof_parapet::parapet(roof, &g).map(|pp| crate::roof_parapet::view_faces(&pp)).unwrap_or_default();
+                if floors.contains(roof.floor_id.as_str()) { fascia.chain(parapet).collect() } else { g.gables.iter().cloned().chain(fascia).chain(parapet).collect::<Vec<_>>() }
             };
             roofs.push(RoofIn { id: roof.id.clone(), fill, planes: crate::roof_assembly::planar_faces(&solids.top, &front(&solids.top)), gables });
             let wall_comp = solids.parts.iter().find(|pt| pt.role == crate::roof_assembly::Role::DormerWall && pt.layer == 0).and_then(|pt| p.component(&pt.component_id));
@@ -269,7 +270,8 @@ pub(super) fn collect_roof_faces(p: &Project, frame: &[f64; 9], walls: &[RWall])
         // in der Ansicht auf der Kante).
         let total: f64 = p.roof_layers(roof).iter().map(|l| l.thickness.max(0.0)).sum();
         let fascia = fascia_quads(&g.planes, total).into_iter().map(|q| q.to_vec());
-        let gables = if floors.contains(roof.floor_id.as_str()) { fascia.collect() } else { g.gables.iter().cloned().chain(fascia).collect() };
+        let parapet = crate::roof_parapet::parapet(roof, &g).map(|pp| crate::roof_parapet::view_faces(&pp)).unwrap_or_default();
+        let gables = if floors.contains(roof.floor_id.as_str()) { fascia.chain(parapet).collect() } else { g.gables.iter().cloned().chain(fascia).chain(parapet).collect() };
         roofs.push(RoofIn { id: roof.id.clone(), fill, planes: g.planes.clone(), gables });
     }
     Ok(project_faces(frame, &[], &[], &roofs))

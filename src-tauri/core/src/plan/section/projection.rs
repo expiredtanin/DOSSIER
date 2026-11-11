@@ -190,7 +190,8 @@ pub(super) fn projection_edges(p: &Project, plane: &Plane, walls_r: &[RWall], wi
         // Stirnflächen der Ränder ([132]): Flachdächer zeigen sonst hinter dem Schnitt nur eine Linie.
         let total: f64 = p.roof_layers(roof).iter().map(|l| l.thickness.max(0.0)).sum();
         let fascia: Vec<Vec<[f64; 3]>> = crate::plan::elevation::fascia_quads(&g.planes, total).into_iter().map(|q| q.to_vec()).collect();
-        for poly in g.planes.iter().chain(&g.gables).chain(&fascia) {
+        let parapet = crate::roof_parapet::parapet(roof, &g).map(|pp| crate::roof_parapet::view_faces(&pp)).unwrap_or_default();
+        for poly in g.planes.iter().chain(&g.gables).chain(&fascia).chain(&parapet) {
             let w: Vec<[f64; 3]> = poly.iter().map(|q| [q[0], q[2], q[1]]).collect();
             if w.len() >= 3 {
                 push(&mut faces, &w, [0.0; 3], owner, 0, true);

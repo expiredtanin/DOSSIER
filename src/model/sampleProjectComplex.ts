@@ -442,6 +442,8 @@ const roofs: NonNullable<Project["roofs"]> = [
   {
     id: "dach-erker", type: "roof", floorId: "og", categoryCode: "31", outline: [P(15 + HA, 5 - 2.2), ...arcPts(ERKER_C, 2 + HA + 0.15, -Math.PI / 2 + 0.09, Math.PI / 2 - 0.09, 14), P(15 + HA, 5 + 2.2)],
     shape: "flach", pitchDeg: 0, overhang: 0, ridgeAxis: "x", thickness: 0.46, roofTypeId: "mk-rt-flach",
+    // Attika ([148]): Betonbrüstung 50 cm über der Dachhaut.
+    parapetHeight: 0.5, parapetWidth: 0.2, parapetComponentId: "std-c-stahlbeton",
   },
   {
     id: "dach-carport", type: "roof", floorId: "eg", categoryCode: "31", outline: rect(-6.6, 10.6, -0.9, 16.2),

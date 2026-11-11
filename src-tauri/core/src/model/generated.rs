@@ -3308,6 +3308,19 @@ pub struct Roof {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub dormers: Option<Vec<Dormer>>,
+    /// Attika ([148]): Höhe über der Dachhaut (Meter) am Rand eines Flachdachs, umlaufend auf dem Dachumriss
+    /// (mit Überstand). Fehlt oder 0 ⇒ keine Attika. Wirkt nur bei Flachdach.
+    #[serde(rename = "parapetHeight", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub parapet_height: Option<f64>,
+    /// Attika: Breite (Meter, nach innen vom Dachrand); fehlt ⇒ 0.2.
+    #[serde(rename = "parapetWidth", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub parapet_width: Option<f64>,
+    /// Attika: Bauteil/Material (Farbe, Schnittschraffur); fehlt ⇒ Wandfarbe ohne Schraffur.
+    #[serde(rename = "parapetComponentId", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub parapet_component_id: Option<String>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
