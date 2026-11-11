@@ -945,6 +945,39 @@ fn wall_pieces(gaps: &[[f64; 4]], axis: f64, zb: f64, zt: f64, fp: impl Fn(f64, 
     out
 }
 
+/// [186] Höchster Abstand (m) zwischen Wand-Unterkante und Gelände, den ein Sockel/Fundament überbrückt.
+const PLINTH_MAX: f64 = 1.0;
+
+/// [186] Unterkante einer Wand als Schattenwerfer: Steht sie höchstens [`PLINTH_MAX`] über dem Gelände (an
+/// ihrer dem Gelände nächsten Stelle), reicht sie bis zum tiefsten Gelände unter ihrem Grundriss — Sockel bzw.
+/// Fundament. Sonst begänne ihr Schatten erst um (Wandfuss − Gelände) · cot(Sonnenhöhe) vor der Fassade.
+/// Auskragende Wände (höher über dem Gelände) bleiben, wie sie sind.
+fn plinth_bottom(fp: &[[f64; 2]], z_bottom: f64, z_top: f64, gz: &impl Fn(f64, f64) -> f64) -> f64 {
+    if fp.len() < 3 || !z_bottom.is_finite() || !(z_top > z_bottom) {
+        return z_bottom;
+    }
+    let (pts, _) = sample_ring(fp);
+    let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+    for q in pts.iter().take(4096) {
+        let g = gz(q[0], q[1]);
+        if g.is_finite() {
+            lo = lo.min(g);
+            hi = hi.max(g);
+        }
+    }
+    if lo < z_bottom && z_bottom - hi <= PLINTH_MAX { lo } else { z_bottom }
+}
+
+/// [186] Gebäudehülle: Vereinigung der Wand-Grundrisse mit gefüllten Löchern (Räume, Höfe zählen zum Innern;
+/// ein Hof ist ohnehin nicht abgedeckt).
+fn filled_envelope(walls: &[Polygon]) -> Vec<Polygon> {
+    if walls.is_empty() {
+        return Vec::new();
+    }
+    let outer: Vec<Polygon> = polygon_bool::union(walls).into_iter().filter_map(|p| p.into_iter().next()).filter(|r| r.len() >= 3).map(|r| vec![r]).collect();
+    polygon_bool::union(&outer)
+}
+
 /// Werfer, Abdeckungen und (mit Schnitthöhe `cut`) Empfänger des Projekts.
 fn collect(p: &Project, k: [f64; 2], cut: Option<f64>, ground: Option<&Ground>) -> (Casters, Vec<Cover>, Vec<Recv>) {
     let gz = |x: f64, y: f64| ground.and_then(|g| g.z(x, y)).unwrap_or(GROUND_Z);
@@ -962,14 +995,23 @@ fn collect(p: &Project, k: [f64; 2], cut: Option<f64>, ground: Option<&Ground>) 
         }
     };
     let openings = p.openings_by_wall();
+    // [186] Grundrisse der im Schnitt liegenden Wände: daraus die Gebäudehülle ([`filled_envelope`]).
+    let mut cut_walls: Vec<Polygon> = Vec::new();
     for w in &p.walls {
-        let (z_bottom, z_top) = p.wall_vertical_extent(w);
+        let (z_wall, z_top) = p.wall_vertical_extent(w);
         let thick = p.wall_thickness(w, 0.2);
-        let gaps = openings.get(w.id.as_str()).map_or_else(Vec::new, |os| wall_gaps(os, crate::wall_arc::axis_length(w), z_bottom, z_top));
+        // Öffnungen (Brüstung) ab der Wand-Unterkante, der Werfer ab dem Sockel ([`plinth_bottom`]).
+        let gaps = openings.get(w.id.as_str()).map_or_else(Vec::new, |os| wall_gaps(os, crate::wall_arc::axis_length(w), z_wall, z_top));
+        let in_cut = cut.is_some_and(|c| z_wall <= c + 1e-9 && c < z_top);
         // Bogenwand ([T2]): Kreisringsektor als Prisma.
         if let Some(arc) = crate::wall_arc::WallArc::of_wall(w) {
+            let whole = crate::wall_arc::arc_footprint(w, thick);
+            if in_cut {
+                cut_walls.extend(whole.iter().map(|r| vec![r.clone()]));
+            }
+            let z_bottom = whole.as_ref().map_or(z_wall, |r| plinth_bottom(r, z_wall, z_top, &gz));
             if gaps.is_empty() {
-                if let Some(footprint) = crate::wall_arc::arc_footprint(w, thick) {
+                if let Some(footprint) = whole {
                     prisms.push((Prism { footprint, z_bottom, z_top }, vec![]));
                 }
                 continue;
@@ -998,8 +1040,12 @@ fn collect(p: &Project, k: [f64; 2], cut: Option<f64>, ground: Option<&Ground>) 
             let (s, e) = ([w.start.x + ux * a, w.start.y + uy * a], [w.start.x + ux * b, w.start.y + uy * b]);
             vec![[s[0] + nx, s[1] + ny], [e[0] + nx, e[1] + ny], [e[0] - nx, e[1] - ny], [s[0] - nx, s[1] - ny]]
         };
+        let footprint = vec![[w.start.x + nx, w.start.y + ny], [w.end.x + nx, w.end.y + ny], [w.end.x - nx, w.end.y - ny], [w.start.x - nx, w.start.y - ny]];
+        if in_cut {
+            cut_walls.push(vec![footprint.clone()]);
+        }
+        let z_bottom = plinth_bottom(&footprint, z_wall, z_top, &gz);
         if gaps.is_empty() {
-            let footprint = vec![[w.start.x + nx, w.start.y + ny], [w.end.x + nx, w.end.y + ny], [w.end.x - nx, w.end.y - ny], [w.start.x - nx, w.start.y - ny]];
             prisms.push((Prism { footprint, z_bottom, z_top }, vec![]));
             continue;
         }
@@ -1073,6 +1119,17 @@ fn collect(p: &Project, k: [f64; 2], cut: Option<f64>, ground: Option<&Ground>) 
                 receive(vec![f.iter().map(|q| [q[0], q[1]]).collect()], pl, top);
             }
         }
+    }
+    // [186] Abgedeckt (kein Schatten darunter) ist nur das Gebäudeinnere: Decken und Dächer innerhalb der Hülle
+    // der geschnittenen Wände. Unter Dachvorsprüngen, Balkonen und Vordächern im Freien gilt der echte Schatten
+    // der Werfer — er schliesst an die Fassade an statt erst jenseits der Traufe zu beginnen.
+    if cut.is_some() {
+        let env = filled_envelope(&cut_walls);
+        covers = if env.is_empty() {
+            Vec::new()
+        } else {
+            covers.into_iter().flat_map(|c| polygon_bool::intersection(&[c.region], &env).into_iter().map(move |region| Cover { region: oriented(region), bottom: c.bottom })).filter(|c| !c.region.is_empty()).collect()
+        };
     }
     // [142] Bäume (2D-Kreise der Ebene „Bäume", Code 13): Stamm + Krone. [149] Steht ein Baum-Objekt am selben
     // Ort (Stamm nahe der Kreismitte), zählt nur das Objekt — sonst fiele der Schatten doppelt.
@@ -1541,11 +1598,12 @@ mod terrain_tests {
         assert!(shaded(&on, -4.0, 20.5) && !shaded(&on, -4.0, 19.0), "Plattenschatten nur ausserhalb der Platte");
         // Fläche: Körper + Band bis 7 (2 × 7) und Plattenschatten jenseits ihrer Kante (12 × 1).
         assert!((area(&on) - 26.0).abs() < 0.05, "{}", area(&on));
-        // Decke über dem Schnitt (OG, OK 6): fängt nichts, deckt das Gelände darunter ab (kein Schatten im
-        // Innern) und wirft ihren Schatten jenseits der Kante.
+        // Decke über dem Schnitt (OG, OK 6) ohne Wände (im Freien, [186]): fängt nichts, wirft ihren Schatten
+        // (Unterkante ≈ 5.75 → ab y ≈ 8.25 bis 26); darunter hell, wo die Sonne unter der Kante durchscheint.
         let p2 = project_json(serde_json::json!({ "drawingLevels": levels(), "extrudedSolids": solid, "ceilings": [slab("c", "og", rect(-5.0, 2.5, 7.0, 20.0))] }));
         let on2 = shadow_polygons_project(&p2, sun, Some(1.0));
-        assert!(shaded(&on2, 1.0, 2.2) && !shaded(&on2, 1.0, 5.0) && shaded(&on2, 0.0, 25.0) && !shaded(&on2, 0.0, 26.5));
+        assert!(shaded(&on2, 1.0, 2.2) && shaded(&on2, 1.0, 5.0) && !shaded(&on2, 4.0, 5.0) && shaded(&on2, 4.0, 12.0));
+        assert!(shaded(&on2, 0.0, 25.0) && !shaded(&on2, 0.0, 26.5));
         // Platte endet bei y = 5: Strahl ist dort noch über der Platte (z = 3) und geht bis zum Boden.
         let p3 = project_json(serde_json::json!({ "drawingLevels": levels(), "extrudedSolids": solid, "ceilings": [slab("c", "t", rect(-5.0, 2.5, 7.0, 5.0))] }));
         let on3 = shadow_polygons_project(&p3, sun, Some(1.0));
@@ -1617,9 +1675,10 @@ mod terrain_tests {
         let p_low = project_json(serde_json::json!({ "drawingLevels": levels(), "extrudedSolids": low, "ceilings": [slab("t", "eg", rect(0.0, 2.0, 2.0, 4.0))] }));
         let og = shadow_polygons_plan(&p_low, sun, 4.0, false);
         assert!((area(&og) - 2.0).abs() < 1e-6 && shaded(&og, 1.0, 2.5) && !shaded(&og, 1.0, 3.5), "{}", area(&og));
-        // EG-Plan (Schnitt 1.0, mit Gelände): unter der Terrasse kein Schatten, dahinter schon.
+        // EG-Plan (Schnitt 1.0, mit Gelände): unter der Terrasse (im Freien, ohne Wände) der echte Schatten des
+        // Turms, lückenlos ab seiner Nordkante ([186]); dahinter ebenso.
         let eg = shadow_polygons_plan(&p, sun, 1.0, true);
-        assert!(!shaded(&eg, 1.0, 3.0) && shaded(&eg, 1.0, 5.0) && shaded(&eg, 1.0, 7.5) && !shaded(&eg, 1.0, 8.5));
+        assert!(shaded(&eg, 1.0, 2.01) && shaded(&eg, 1.0, 3.0) && shaded(&eg, 1.0, 5.0) && shaded(&eg, 1.0, 7.5) && !shaded(&eg, 1.0, 8.5));
         // Schnitt unter der Terrasse fängt auf ihr nichts; Flächen sind dort keine Empfänger.
         assert!(shadow_polygons_plan(&p, sun, 1.0, false).is_empty());
     }
@@ -1714,8 +1773,9 @@ mod terrain_tests {
         assert!(lit > 0.9 && lit < 1.5 * 0.8 + 0.05, "{} {}", area(&full), area(&sh));
     }
 
-    /// [142] Vordach (Decke, 2 m auskragend, ohne Stützen) wirft Schatten; im EG-Grundriss bleibt der Boden unter
-    /// dem Vordach hell (abgedeckt), sichtbar ist der Schatten jenseits der Vorderkante.
+    /// [142] Vordach (Decke, 2 m auskragend, ohne Stützen) wirft Schatten. [186] Im EG-Grundriss gilt darunter
+    /// (im Freien) der echte Schatten: hell, wo die Sonne unter der Kante durchscheint, dann bis jenseits der
+    /// Vorderkante beschattet — wie ohne Schnitt.
     #[test]
     fn vordach_wirft_schatten() {
         let sun = SunPosition { azimuth: 270.0, elevation: 45.0 };
@@ -1724,8 +1784,68 @@ mod terrain_tests {
         let raw = shadow_polygons_project(&p, sun, None);
         assert!((area(&raw) - 2.0 * (4.0 + zt - zb)).abs() < 1e-6, "{}", area(&raw));
         let plan = shadow_polygons_plan(&p, sun, 1.0, true);
-        assert!((area(&plan) - 2.0 * zt).abs() < 1e-6, "{}", area(&plan));
-        assert!(!shaded(&plan, 2.0, 1.0) && shaded(&plan, 4.0 + zt - 0.1, 1.0) && !shaded(&plan, 4.0 + zt + 0.1, 1.0));
+        assert!((area(&plan) - area(&raw)).abs() < 1e-6, "{}", area(&plan));
+        assert!(!shaded(&plan, zb - 0.1, 1.0) && shaded(&plan, zb + 0.1, 1.0));
+        assert!(shaded(&plan, 4.0 + zt - 0.1, 1.0) && !shaded(&plan, 4.0 + zt + 0.1, 1.0));
+    }
+
+    fn wall_json(id: &str, a: [f64; 2], b: [f64; 2], extra: serde_json::Value) -> serde_json::Value {
+        let mut w = serde_json::json!({"id": id, "type": "wall", "floorId": "eg", "categoryCode": "20", "start": {"x": a[0], "y": a[1]}, "end": {"x": b[0], "y": b[1]}, "wallTypeId": "t", "height": 3.0});
+        for (k, val) in extra.as_object().unwrap() {
+            w[k] = val.clone();
+        }
+        w
+    }
+
+    /// Ebenes Gelände (Kontext-Netz) auf Höhe `z` über [−50, 50]².
+    fn flat_terrain(z: f64) -> serde_json::Value {
+        serde_json::json!([{"id": "g", "type": "terrainMesh", "name": "Gelände", "categoryCode": "02",
+            "positions": [-50, -50, z, 50, -50, z, 50, 50, z, -50, 50, z], "indices": [0, 1, 2, 0, 2, 3]}])
+    }
+
+    /// Liegt der Schatten auf der ganzen Länge x ∈ [`x0`, `x1`] höchstens 0.5 mm vor der Fassade y = `y0`?
+    fn touches(polys: &[Polygon], y0: f64, x0: f64, x1: f64) -> bool {
+        (0..=20).all(|i| shaded(polys, x0 + (x1 - x0) * i as f64 / 20.0, y0 + 5e-4))
+    }
+
+    /// [186] Wand auf ±0.00 über ebenem Gelände 0.5 m tiefer, Sonne 45° aus Süden: der Schatten beginnt an der
+    /// Wandaussenkante (Sockel bis aufs Gelände), nicht 0.5 m davor. Eine Auskragung (2 m über dem Gelände)
+    /// bleibt frei schwebend: ihr Schatten beginnt erst jenseits.
+    #[test]
+    fn schatten_schliesst_an_die_wand_an() {
+        let sun = SunPosition { azimuth: 180.0, elevation: 45.0 };
+        let p = project_json(serde_json::json!({ "walls": [wall_json("w", [0.0, 0.0], [6.0, 0.0], serde_json::json!({}))], "context": flat_terrain(-0.5) }));
+        for sh in [shadow_polygons_plan(&p, sun, 1.0, true), shadow_polygons_project(&p, sun, None)] {
+            assert!(touches(&sh, 0.1, 0.5, 5.5), "Lücke zwischen Wand und Schatten");
+            assert!(shaded(&sh, 3.0, 0.3) && shaded(&sh, 3.0, 3.4) && !shaded(&sh, 3.0, 3.7));
+        }
+        // Auskragung: Unterkante 1.5 über ±0.00 (2 m über dem Gelände) → kein Sockel.
+        let high = serde_json::json!({"bottom": {"mode": "custom", "z": 1.5}, "top": {"mode": "custom", "z": 3.0}});
+        let p = project_json(serde_json::json!({ "walls": [wall_json("w", [0.0, 0.0], [6.0, 0.0], high)], "context": flat_terrain(-0.5) }));
+        let sh = shadow_polygons_plan(&p, sun, 1.0, true);
+        assert!(!shaded(&sh, 3.0, 0.5) && shaded(&sh, 3.0, 2.5), "Auskragung schwebt");
+    }
+
+    /// [186] Haus mit Flachdach und 0.6 m Dachvorsprung, Sonne 45° aus Süden, EG-Grundriss: auf der Schattenseite
+    /// (Norden) liegt der Schatten unter dem Vorsprung direkt an der Fassade (vorher abgedeckt → Lücke von der
+    /// Breite des Vorsprungs); auf der Sonnenseite unter dem Vorsprung hell; im Innern kein Schatten.
+    #[test]
+    fn schatten_unter_dem_dachvorsprung_an_der_fassade() {
+        let sun = SunPosition { azimuth: 180.0, elevation: 45.0 };
+        let e = serde_json::json!({});
+        let walls = serde_json::json!([
+            wall_json("s", [0.0, 0.0], [6.0, 0.0], e.clone()), wall_json("o", [6.0, 0.0], [6.0, 4.0], e.clone()),
+            wall_json("n", [6.0, 4.0], [0.0, 4.0], e.clone()), wall_json("w", [0.0, 4.0], [0.0, 0.0], e)
+        ]);
+        let roof = serde_json::json!([{"id": "r", "type": "roof", "floorId": "eg", "categoryCode": "31", "outline": rect(-0.1, -0.1, 6.1, 4.1), "shape": "flach", "pitchDeg": 0, "overhang": 0.6, "ridgeAxis": "x", "baseElevation": 3.0, "thickness": 0.3}]);
+        for ctx in [serde_json::json!([]), flat_terrain(0.0)] {
+            let p = project_json(serde_json::json!({ "walls": walls, "roofs": roof, "context": ctx }));
+            let sh = shadow_polygons_plan(&p, sun, 1.0, true);
+            assert!(touches(&sh, 4.1, 0.5, 5.5), "Schatten beginnt an der Nordfassade");
+            assert!(shaded(&sh, 3.0, 4.15) && shaded(&sh, 3.0, 4.6) && shaded(&sh, 3.0, 5.0), "unter dem Vorsprung beschattet");
+            assert!(!shaded(&sh, 3.0, -0.3), "Sonnenseite unter dem Vorsprung hell");
+            assert!(!shaded(&sh, 3.0, 2.0), "Inneres abgedeckt");
+        }
     }
 
     /// [148] Flachdach auf L-Umriss wirft einen L-förmigen Schatten (nicht Bounding-Box, nicht konvexe

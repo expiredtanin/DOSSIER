@@ -116,6 +116,10 @@ struct Part {
     /// Schatten ([64]): Ausdehnung der eigenen Bauteile (ohne Gelände/Importe) und des ganzen Netzes, world.
     shadow_focus: Option<Bounds3>,
     shadow_all: Option<Bounds3>,
+    /// [186] Ausdehnung der Wände und Decken (Kern der Gebäude-Kaskade) und je eigenes Netz (ohne
+    /// Gelände/Importe) seine Ausdehnung, world.
+    shadow_core: Option<Bounds3>,
+    shadow_meshes: Vec<Bounds3>,
 }
 
 /// Eine Kante im Index: Lage (erster Beitrag), Normalen aller angrenzenden Dreiecke, Entscheid.
@@ -177,12 +181,21 @@ impl Scene {
         self.bounds
     }
 
-    /// Ausdehnung für das Licht-Frustum der Schatten ([64], `shadow::light_view_proj`): (Fokus, alles).
-    /// Fokus = eigene Bauteile ohne Gelände und Importe; fehlen sie, das ganze Modell.
-    pub fn shadow_bounds(&self) -> Option<(Bounds3, Bounds3)> {
+    /// Ausdehnungen für die Licht-Frusta der Schatten ([64], [186], `shadow::cascades`). Fokus = eigene
+    /// Bauteile ohne Gelände und Importe (fehlen sie, das ganze Modell); Kern = das Gebäude: Wände und
+    /// Decken samt allen eigenen Netzen, deren Grundriss den ihren (plus [`CORE_MARGIN`]) berührt — Dach,
+    /// Öffnungen, Treppen, Anbauten; abseits stehende Bäume oder Körper nicht. Ohne Wände/Decken = Fokus.
+    pub fn shadow_bounds(&self) -> Option<crate::shadow::ShadowBounds> {
         let all = self.parts.values().fold(None, |acc, p| merge_bounds(acc, p.shadow_all))?;
         let focus = self.parts.values().fold(None, |acc, p| merge_bounds(acc, p.shadow_focus)).unwrap_or(all);
-        Some((focus, all))
+        let core = match self.parts.values().fold(None, |acc, p| merge_bounds(acc, p.shadow_core)) {
+            Some(walls) => {
+                let near = |b: &Bounds3| [0, 2].iter().all(|&i| b.0[i] <= walls.1[i] + CORE_MARGIN && b.1[i] >= walls.0[i] - CORE_MARGIN);
+                self.parts.values().flat_map(|p| p.shadow_meshes.iter()).filter(|b| near(b)).fold(Some(walls), |acc, b| merge_bounds(acc, Some(*b))).unwrap_or(walls)
+            }
+            None => focus,
+        };
+        Some(crate::shadow::ShadowBounds { core, focus, all })
     }
 
     /// Gelände-Dreiecke aller Teile (Luftbild-Überlagerung).
@@ -275,6 +288,8 @@ impl Scene {
                     bounds,
                     shadow_focus: None,
                     shadow_all: None,
+                    shadow_core: None,
+                    shadow_meshes: Vec::new(),
                 },
             );
         }
@@ -487,12 +502,16 @@ fn build_part_mesh(p: &mut Part) {
         fill(&mesh, &mut layers, -1.0);
     }
     focus = merge_bounds(focus, crate::shadow::verts_bounds(&mesh.verts, 0));
+    p.shadow_core = focus;
+    p.shadow_meshes.clear();
     for m in &p.input.meshes {
         let from = mesh.vertex_count();
         append_context_mesh(&mut mesh, m);
         fill(&mesh, &mut layers, m.material_index.map(|i| i as f32).unwrap_or(-1.0));
         if !matches!(m.kind, MeshKind::Terrain | MeshKind::Imported) {
-            focus = merge_bounds(focus, crate::shadow::verts_bounds(&mesh.verts, from));
+            let b = crate::shadow::verts_bounds(&mesh.verts, from);
+            p.shadow_meshes.extend(b);
+            focus = merge_bounds(focus, b);
         }
     }
     p.shadow_focus = focus;
@@ -501,6 +520,9 @@ fn build_part_mesh(p: &mut Part) {
     p.layers = layers;
     p.caps = caps;
 }
+
+/// [186] Seitlicher Abstand (m), bis zu dem ein eigenes Netz noch zum Gebäude zählt (Dachvorsprung, Vordach).
+pub const CORE_MARGIN: f32 = 1.5;
 
 /// Ausdehnung eines Teils (wie `web::model_bounds`: Wand-Achsen, Decken-Umrisse, Mesh-Punkte).
 pub fn part_bounds(p: &PartInput) -> Option<Bounds3> {
@@ -824,14 +846,35 @@ mod tests {
         .unwrap();
         let mut s = Scene::new();
         s.set_model(PartInput { walls: vec![wall([0.0, 0.0], [6.0, 0.0], 0.0)], slabs: Vec::new(), meshes: vec![terrain.clone(), roof()], roof_layers: Vec::new() });
-        let (focus, all) = s.shadow_bounds().expect("Ausdehnung");
+        let b = s.shadow_bounds().expect("Ausdehnung");
+        let (focus, all) = (b.focus, b.all);
         assert!(focus.0[0] > -1.0 && focus.1[0] < 7.0, "Fokus ohne Gelände: {focus:?}");
         assert!(focus.1[1] >= 6.9, "Dach im Fokus: {focus:?}");
         assert!(all.0[0] <= -500.0 && all.1[0] >= 500.0, "Tiefe über alles: {all:?}");
-        // Nur Gelände: Fokus = alles.
-        s.set_model(PartInput { walls: Vec::new(), slabs: Vec::new(), meshes: vec![terrain], roof_layers: Vec::new() });
-        let (focus, all) = s.shadow_bounds().unwrap();
-        assert_eq!(focus, all);
+        assert_eq!(b.core, focus, "Dach gehört zum Gebäude");
+        // Nur Gelände: Fokus = Kern = alles.
+        s.set_model(PartInput { walls: Vec::new(), slabs: Vec::new(), meshes: vec![terrain.clone()], roof_layers: Vec::new() });
+        let b = s.shadow_bounds().unwrap();
+        assert_eq!(b.focus, b.all);
+        assert_eq!(b.core, b.all);
+        // [186] Baum 40 m vom Haus: im Fokus (Kaskade 1), nicht im Gebäude (Kaskade 0); Dach und ein
+        // Vordach 1 m vor der Wand gehören zum Gebäude.
+        let tree: MeshInput = serde_json::from_str(r#"{"positions":[40,20,0, 42,20,0, 41,22,9],"indices":[0,1,2],"kind":"extrusion"}"#).unwrap();
+        let canopy: MeshInput = serde_json::from_str(r#"{"positions":[0,-1,2.5, 6,-1,2.5, 6,0,2.5],"indices":[0,1,2],"kind":"extrusion"}"#).unwrap();
+        s.apply(PartsUpdate {
+            reset: true,
+            remove: Vec::new(),
+            upsert: vec![
+                PartEntry::new("haus", PartInput { walls: vec![wall([0.0, 0.0], [6.0, 0.0], 0.0)], meshes: vec![terrain, roof()], ..Default::default() }),
+                PartEntry::new("baum", PartInput { meshes: vec![tree], ..Default::default() }),
+                PartEntry::new("vordach", PartInput { meshes: vec![canopy], ..Default::default() }),
+            ],
+        });
+        let b = s.shadow_bounds().unwrap();
+        assert!(b.focus.1[0] >= 42.0 && b.focus.1[2] >= 22.0, "Baum im Fokus: {:?}", b.focus);
+        assert!(b.core.1[0] < 7.0 && b.core.1[2] < 5.0, "Baum nicht im Gebäude: {:?}", b.core);
+        assert!(b.core.1[1] >= 6.9 && b.core.0[2] <= -0.99, "Dach und Vordach im Gebäude: {:?}", b.core);
+        assert!(crate::shadow::far_cascade_needed(&b));
         s.set_model(PartInput::default());
         assert!(s.shadow_bounds().is_none());
     }

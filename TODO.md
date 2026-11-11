@@ -89,8 +89,6 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
 - ○ **[192]** Ebenen/Klassen schnell schalten (12.11., Maintainer): Rechtsklick im Ebenen-Panel „Nur diese Ebene anzeigen“, „Diese ausblenden“, „Alle einblenden“; Rechtsklick auf Objekt (Plan/Schnitt/3D) „Ebene des Objekts isolieren/ausblenden“, „Alle Ebenen einblenden“ (stellt Zustand vor dem Isolieren wieder her); optional Kürzel. Sonnet. · S
 - ○ **[191]** Runde Decken/Dächer (12.11., Maintainer-Screenshot Erker 3D): Decken-/Dachumrisse sind Polygone (Beispiel: `arcPts(…, 14)`) → facettierte Kanten; Bogenwände ohne Deckenauflager [178] → Decke ragt durch die runde Wand (Flackern/Linien). Umsetzen: Bögen im Umriss (Bulge je Kante wie Wände) für Decken/Dächer/Räume oder Ableitung aus angrenzenden Bogenwänden, feine Tessellierung + weiche Normalen im 3D, echte Bögen in Plan/Schnitt/Export; [178] auch an Bogenwänden; Beispielprojekt auf echte Bögen umstellen. Opus. · L
 - ○ **[187]** Griffe im Schnitt/in der Ansicht (12.11., Maintainer): angewählte Elemente haben dort kaum Fasspunkte (Decken, Gelände, Dächer …). Wie Archicad: Decke OK/UK (Höhe/Dicke), Wand OK (Höhe), Öffnung Brüstung/Sturz, Dach Traufe/First bzw. Neigung, Treppe An-/Austritt, Gelände-Profilpunkte (falls Modell es erlaubt); ein Undo-Schritt je Zug, Fang + Tab-Eingabe wie im Grundriss. · L
-- ○ **[186]** Schatten (12.11., Maintainer): (1) 3D-Schatten stellenweise unscharf (Shadow-Map-Auflösung/Frustum zu gross, Filter) → Frustum auf Gebäude fitten bzw. Kaskaden, schärferer PCF; (2) Grundriss-Schatten fehlt unmittelbar am Haus (Lücke zwischen Fassade und Schatten; vermutlich Werfer ab ±0.00 statt ab Wandfuss/Gelände) → Schatten beginnt an der Fassade. Opus. · M
-- ◐ **[185]** Navigation wie Archicad (12.11., Wunsch Maintainer). Umgesetzt (12.11.): Geschosswechsel im Grundriss
   (Navigator, Kürzel, Ebenen-Panel) behält Zoom und Ausschnitt exakt — Geschosse teilen sich den Einpass-Schlüssel
   (`viewTabs.ts::planFitKey`, `PlanView` `fitKey`; Schnitt/Ansicht/Zeichnung/neues Projekt passen weiter ein).
   Cmd/Ctrl+5 Geschoss tiefer, Cmd/Ctrl+6 höher im Grundriss- und 3D-Reiter (`stepFloor`/`adjacentFloorId`, nach
@@ -104,6 +102,23 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   (`element_auswahl_*`), `viewTabs.test.ts`, `view3dFilter.test.ts`, `toWalls3d.classes.test.ts`, e2e
   `navigation185.spec.ts`. Offen: natives Mac-3D-Fenster kennt den Element-Filter nicht; Ebenen-Panel-Wechsel nicht
   einzeln e2e geprüft; nicht in der Tauri-App/auf dem Mac geprüft (Menü-Kürzel vs. Browser-Kürzel). · M
+- ◐ **[186]** Schatten (12.11., Maintainer). (2) Grundriss: Lücke zwischen Fassade und Schatten kam von der Abdeckung —
+  Dachvorsprung (Musterhaus komplex: Traufe 0.6 m, Ortgang 0.35 m), Carport-, Anbau-Dach galten als „abgedeckt“, darunter
+  wurde der Schatten weggeschnitten. Neu deckt nur ab, was innerhalb der Hülle der geschnittenen Wände liegt
+  (`sun.rs::filled_envelope`, Decken/Dächer ∩ Hülle); im Freien (Vorsprung, Balkon, Vordach, Carport) gilt der echte
+  Schatten. Dazu Sockel: Wände bis 1 m über dem Gelände werfen ab dem Gelände (`plinth_bottom`), Auskragungen nicht.
+  Beides steckt in Werfern/Abdeckungen und damit im Schatten-Schlüssel ([179]). Tests `schatten_schliesst_an_die_wand_an`,
+  `schatten_unter_dem_dachvorsprung_an_der_fassade`, angepasst `vordach_wirft_schatten`/`schatten_auf_tiefere_platte`/
+  `schatten_auf_tieferem_dach_im_og_plan`, TS `analysis/sun.test.ts` (Musterhaus EG), `generatePlan.sunShadow.test.ts`
+  (Beispielhaus OG: Balkon unter dem Vorsprung jetzt beschattet). Goldens: komplex EG 1:100/1:50. (1) 3D: zwei Kaskaden
+  (`render3d/shadow.rs::cascades`): 0 eng aufs Gebäude (Wände/Decken + berührende Netze), in der Nahsicht auf den
+  sichtbaren Ausschnitt (`view_region`/`view_box`, Raster + Hysterese, Tiefenpass nur beim Wechsel); 1 über alle eigenen
+  Bauteile (nur wenn nötig). Kaskade 0 4096 Texel (vorher 2048 über alles): Musterhaus ≈ 8 mm/Texel, Erker-Nahsicht
+  ≈ 4 mm (vorher ≈ 16 mm); Fenster auf Texel-Raster gerastet, in 0.5-m-Stufen. Im Linux-Container mit `render_png`
+  (Software-Vulkan) vorher/nachher angesehen: Schatten unter der Erker-Attika und in der Leibung jetzt scharf statt
+  verwaschen. Offen: auf dem Mac (Metal, App/WebGPU) nicht angesehen; Speicher Schattentexturen 64 MB (+16 MB Kaskade 1);
+  PCF unverändert (3×3). · M
+- ○ **[185]** Navigation wie Archicad (12.11., Wunsch Maintainer): Grundriss-Geschosswechsel behält Zoom/Ausschnitt exakt; Cmd+5 Geschoss runter, Cmd+6 hoch; Cmd+3 mit Auswahl (aus Grundriss/Schnitt/3D) → 3D-Tab nur mit der Auswahl (Tab-Titel „3D · Auswahl“), ohne Auswahl → wieder alles; Cmd+4 blendet gewählte Objekte im 3D temporär aus (zurück mit Cmd+3). Sonnet. · M
 - ◐ **[133]** Musterhaus komplex: Rest. Skalieren-Kopie lässt `position`/Breite unverändert (10.11.: Skalieren skaliert
   `position`/`width` der Wandöffnungen bei Kopie und Original, Test `skalieren_skaliert_oeffnungen`). 11.11.: Schraffur-
   Ausbreiten: Vollfläche füllt in Schraffurfarbe, Bild-Schraffur als `<pattern>`/`<image>` (CLI `--hatch`; Druck/PDF hatte
@@ -272,7 +287,7 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   Krone selbst ist konvex); Schatten aufs Gelände tieferer Terrassen nur über Decken/Dächer als Empfänger; nicht in der
   Tauri-App angesehen. · M
 - ◐ **[64]+[59]** Sonnenstand/Schatten. Schatten im 3D (`render3d`, Shadow-Mapping) ist gebaut, aber nicht auf Metal
-  und nicht in der App angesehen; mehrere Kaskaden erst bei grossen Lageplänen. · S
+  und nicht in der App angesehen; zwei Kaskaden + Nahsicht seit [186]. · S
 - ◐ **[149]** Baum als eigenes Objekt (11.11.): Auswahlrechteck, Gruppen, Art-Beschriftung (`species`/`showLabel`), Beschriftungs-Griff; Beschriftung weicht aus (`plan/trees.rs::plan_tree_labels`, nach allem anderen Inhalt: Masse, Stempel, Höhenlinien-Beschriftungen, Wände, Kronen/Beschriftungen anderer Bäume; Lagen: neben dem Stamm, rechts/links/über/unter der Krone; mit Griff verschobene bleiben); Schnitt durch die Krone zeigt Kronen-/Stammquerschnitt (Sehne, Schnittstärke 0.35, `TreeGeom::cut_silhouette`), Teile vor der Ebene entfallen, dahinter die Silhouette (Ansicht unverändert); Fuss am Gelände der Stammmitte in 3D/Schnitt/Ansicht war schon über `tree::bases`, neu reicht die Stamm-Unterkante (`foot`) am Hang bis zum tiefsten Stammrand. Offen: Ansicht ohne Schnitt-Logik (Baum vor der Ansichtslinie wird ganz gezeigt); Schnittfläche der Krone ohne Schraffur. · S
 - ◐ **[148]** Flach-/Pultdach auf beliebigem Umriss (`roof_geometry`). Pult mit Höfen (Höfe ignoriert); Pult auf
   schiefem Umriss neigt nur entlang x/y (`ridgeAxis`); Dachfenster-Laibung genau auf einer Fuge doppelt. Attika

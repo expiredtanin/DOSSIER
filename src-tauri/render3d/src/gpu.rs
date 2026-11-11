@@ -23,7 +23,7 @@ use crate::section_fill::{
     build_cut_cap_lines, build_cut_caps, CAP_FLOATS_PER_VERTEX, CUT_LINE_FLOATS_PER_VERTEX,
 };
 use crate::shaders::{CAP_WGSL, GHOST_WGSL, GRID_WGSL, MESH_AERIAL_WGSL, MESH_TEXTURED_WGSL, MESH_WGSL, SHADOW_WGSL};
-use crate::shadow::{caster_indices, light_view_proj, texel_world_size, DEFAULT_SHADOW_MAP_SIZE};
+use crate::shadow::{caster_indices, cascades, far_map_size, texel_world_size, DEFAULT_SHADOW_MAP_SIZE};
 use crate::types::{
     Camera, MeshInput, RoofLayerInput, SlabInput, WallInput,
     FLOATS_PER_VERTEX, TEXTURED_FLOATS_PER_VERTEX,
@@ -148,6 +148,10 @@ struct Globals {
     light_view_proj: [f32; 16],
     /// Schatten: x = an (1)/aus (0), y = Normalen-Verschiebung (m), z = PCF-Schritt (UV), w = Tiefen-Bias.
     shadow: [f32; 4],
+    /// [186] Kaskade 1 (alle eigenen Bauteile, grober): Licht-Matrix und Werte wie `shadow`
+    /// (x = Kaskade benutzt). Kaskade 0 (`light_view_proj`/`shadow`) passt eng aufs Gebaeude.
+    light_view_proj_far: [f32; 16],
+    shadow_far: [f32; 4],
 }
 
 /// Uniform des Schatten-Tiefenpasses, 1:1 zu `ShadowGlobals` in `SHADOW_WGSL`.
@@ -179,6 +183,8 @@ impl Default for Globals {
             section_plane: [0.0, 0.0, 1.0, 0.0],
             light_view_proj: crate::math::identity(),
             shadow: [0.0; 4],
+            light_view_proj_far: crate::math::identity(),
+            shadow_far: [0.0; 4],
         }
     }
 }
@@ -365,12 +371,14 @@ fn create_shadow_view(device: &wgpu::Device, size: u32) -> wgpu::TextureView {
     tex.create_view(&wgpu::TextureViewDescriptor::default())
 }
 
-/// Bind-Group 0 aller Pipelines: Globals-Uniform + Schattentextur + Vergleichs-Sampler.
+/// Bind-Group 0 aller Pipelines: Globals-Uniform + Schattentexturen (Kaskade 0 und 1, [186]) +
+/// Vergleichs-Sampler.
 fn create_globals_bind_group(
     device: &wgpu::Device,
     layout: &wgpu::BindGroupLayout,
     uniform: &wgpu::Buffer,
     shadow_view: &wgpu::TextureView,
+    shadow_view_far: &wgpu::TextureView,
     shadow_sampler: &wgpu::Sampler,
 ) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -380,6 +388,7 @@ fn create_globals_bind_group(
             wgpu::BindGroupEntry { binding: 0, resource: uniform.as_entire_binding() },
             wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(shadow_view) },
             wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(shadow_sampler) },
+            wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(shadow_view_far) },
         ],
     })
 }
@@ -482,8 +491,18 @@ pub struct Renderer {
     shadow_bind_group: wgpu::BindGroup,
     shadow_view: wgpu::TextureView,
     shadow_sampler: wgpu::Sampler,
-    /// Kantenlaenge der angelegten Schattentextur und die gewuenschte (Option, Standard 2048).
-    shadow_alloc: u32,
+    /// [186] Kaskade 1 (grob): Uniform, Bind-Group, Textur; `shadow_far_on` = im letzten Pass benutzt.
+    shadow_uniform_far: wgpu::Buffer,
+    shadow_bind_group_far: wgpu::BindGroup,
+    shadow_view_far: wgpu::TextureView,
+    shadow_far_on: bool,
+    /// Licht-Matrizen des letzten Tiefenpasses (Kaskade 0, 1): neuer Pass nur, wenn sie wechseln.
+    shadow_last: Option<([f32; 16], [f32; 16])>,
+    /// Box der Nahsicht-Kaskade im letzten Frame (Hysterese, `shadow::view_box`).
+    shadow_view_box: Option<crate::math::Bounds3>,
+    /// Kantenlaenge der angelegten Schattentexturen (Kaskade 0, 1) und die gewuenschte fuer
+    /// Kaskade 0 (Option, Standard `DEFAULT_SHADOW_MAP_SIZE`; Kaskade 1 `shadow::far_map_size`).
+    shadow_alloc: (u32, u32),
     shadow_size: u32,
     /// Richtung ZUR Sonne (world) oder None (keine Sonnenstudie / Nacht) und der Schalter.
     sun: Option<[f32; 3]>,
@@ -604,6 +623,17 @@ impl Renderer {
                         binding: 2,
                         visibility: wgpu::ShaderStages::FRAGMENT,
                         ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
+                        count: None,
+                    },
+                    // [186] Schattentextur der Kaskade 1 (grob, alle eigenen Bauteile).
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Depth,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
                         count: None,
                     },
                 ],
@@ -1194,6 +1224,7 @@ impl Renderer {
         // Schatten ([64]): Platzhalter-Textur 1x1 bis zum ersten Einschalten, Vergleichs-Sampler
         // (LessEqual: Fragment-Tiefe <= gespeicherte -> besonnt; linear = 2x2-PCF je Abtastung).
         let shadow_view = create_shadow_view(device, 1);
+        let shadow_view_far = create_shadow_view(device, 1);
         let shadow_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("shadow.sampler"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
@@ -1205,7 +1236,7 @@ impl Renderer {
             compare: Some(wgpu::CompareFunction::LessEqual),
             ..Default::default()
         });
-        let bind_group = create_globals_bind_group(device, &bind_group_layout, &uniform, &shadow_view, &shadow_sampler);
+        let bind_group = create_globals_bind_group(device, &bind_group_layout, &uniform, &shadow_view, &shadow_view_far, &shadow_sampler);
 
         // Schatten-Tiefenpass: eigenes Uniform (Licht-Matrix + Schnitt), nur Positionen des
         // Haupt-Mesh-Layouts, kein Farbziel, kein Culling (doppelseitige/duenne Teile werfen auch),
@@ -1233,6 +1264,18 @@ impl Renderer {
             label: Some("shadow.bind"),
             layout: &shadow_layout,
             entries: &[wgpu::BindGroupEntry { binding: 0, resource: shadow_uniform.as_entire_binding() }],
+        });
+        // [186] Kaskade 1: eigenes Uniform (Licht-Matrix), gleiche Pipeline.
+        let shadow_uniform_far = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("shadow.globals.far"),
+            size: std::mem::size_of::<ShadowGlobals>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let shadow_bind_group_far = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("shadow.bind.far"),
+            layout: &shadow_layout,
+            entries: &[wgpu::BindGroupEntry { binding: 0, resource: shadow_uniform_far.as_entire_binding() }],
         });
         let shadow_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("shadow.wgsl"),
@@ -1315,7 +1358,13 @@ impl Renderer {
             shadow_bind_group,
             shadow_view,
             shadow_sampler,
-            shadow_alloc: 1,
+            shadow_uniform_far,
+            shadow_bind_group_far,
+            shadow_view_far,
+            shadow_far_on: false,
+            shadow_last: None,
+            shadow_view_box: None,
+            shadow_alloc: (1, 1),
             shadow_size: DEFAULT_SHADOW_MAP_SIZE,
             sun: None,
             shadows_on: false,
@@ -1466,8 +1515,8 @@ impl Renderer {
         };
     }
 
-    /// Kantenlaenge der Schattentextur (Option, Standard 2048; geklemmt 256…8192 und aufs
-    /// Geraete-Limit beim Anlegen).
+    /// Kantenlaenge der Schattentextur der Kaskade 0 (Option, Standard `DEFAULT_SHADOW_MAP_SIZE`;
+    /// geklemmt 256…8192 und aufs Geraete-Limit beim Anlegen).
     pub fn set_shadow_map_size(&mut self, size: u32) {
         let s = size.clamp(256, 8192);
         if s != self.shadow_size {
@@ -1913,73 +1962,112 @@ impl Renderer {
         self.texture_uploaded = true;
     }
 
-    /// Schatten vorbereiten ([64]): setzt `globals.shadow`/`light_view_proj`, legt die Schattentextur
-    /// bei Bedarf in voller Groesse an und schreibt das Uniform des Tiefenpasses. `true` = in diesem
-    /// Frame einen Tiefenpass rendern (nur nach einer Aenderung, nicht je Kamera-Frame).
-    fn prepare_shadows(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) -> bool {
+    /// Schatten vorbereiten ([64]): setzt `globals.shadow*`/`light_view_proj*`, legt die Schattentexturen
+    /// bei Bedarf in voller Groesse an und schreibt die Uniforms der Tiefenpaesse. `true` = in diesem
+    /// Frame die Tiefenpaesse rendern (nur nach einer Aenderung, nicht je Kamera-Frame). [186] Zwei
+    /// Kaskaden (`shadow::cascades`): 0 eng aufs Gebaeude, 1 ueber alle eigenen Bauteile — diese nur,
+    /// wenn sie deutlich mehr umfasst.
+    fn prepare_shadows(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, camera: &Camera, aspect: f32) -> bool {
         self.globals.shadow = [0.0; 4];
+        self.globals.shadow_far = [0.0; 4];
         if !self.shadows_active() {
             return false;
         }
-        let (Some(sun), Some((focus, all))) = (self.sun, self.scene.shadow_bounds()) else {
+        let (Some(sun), Some(bounds)) = (self.sun, self.scene.shadow_bounds()) else {
             return false;
         };
-        let Some(light) = light_view_proj(sun, focus, all) else {
+        let max = device.limits().max_texture_dimension_2d.max(1);
+        let size = self.shadow_size.min(max).max(1);
+        // Nahsicht: Kaskade 0 auf den sichtbaren Teil des Gebaeudes, Kaskade 1 fuer den Rest.
+        let view = crate::shadow::view_box(self.shadow_view_box, bounds.core, crate::shadow::view_region(camera, aspect));
+        self.shadow_view_box = view;
+        let far_on = view.is_some() || crate::shadow::far_cascade_needed(&bounds);
+        // Kaskade 1 nur angelegt, wenn benutzt (sonst 1x1-Platzhalter).
+        let size_far = if far_on { far_map_size(size).min(max).max(1) } else { 1 };
+        let Some([light, light_far]) = cascades(sun, &bounds, view, size, size_far.max(256)) else {
             return false;
         };
-        let size = self.shadow_size.min(device.limits().max_texture_dimension_2d).max(1);
-        if self.shadow_alloc != size {
-            self.shadow_view = create_shadow_view(device, size);
-            self.shadow_alloc = size;
+        if self.shadow_alloc != (size, size_far) {
+            if self.shadow_alloc.0 != size {
+                self.shadow_view = create_shadow_view(device, size);
+            }
+            if self.shadow_alloc.1 != size_far {
+                self.shadow_view_far = create_shadow_view(device, size_far);
+            }
+            self.shadow_alloc = (size, size_far);
             self.bind_group = create_globals_bind_group(
                 device,
                 &self.bind_group_layout,
                 &self.uniform,
                 &self.shadow_view,
+                &self.shadow_view_far,
                 &self.shadow_sampler,
             );
             self.shadow_dirty = true;
         }
         // Normalen-Verschiebung ≈ 1.5 Texel, Tiefen-Bias ≈ 2 cm im Licht-NDC.
-        let texel = texel_world_size(&light, size);
-        let depth_range = 1.0 / light[10].abs().max(1e-9);
+        let params = |m: &crate::math::Mat4, sz: u32| {
+            let texel = texel_world_size(m, sz);
+            let depth_range = 1.0 / m[10].abs().max(1e-9);
+            [1.0, texel * 1.5, 1.0 / sz as f32, 0.02 / depth_range]
+        };
         self.globals.light_view_proj = light;
-        self.globals.shadow = [1.0, texel * 1.5, 1.0 / size as f32, 0.02 / depth_range];
+        self.globals.shadow = params(&light, size);
+        self.globals.light_view_proj_far = light_far;
+        if far_on {
+            self.globals.shadow_far = params(&light_far, size_far);
+        }
+        // Anderes Licht-Frustum (Nahsicht-Box gewechselt) = neuer Tiefenpass; sonst nicht je Kamera-Frame.
+        if far_on != self.shadow_far_on || self.shadow_last != Some((light, light_far)) {
+            self.shadow_far_on = far_on;
+            self.shadow_last = Some((light, light_far));
+            self.shadow_dirty = true;
+        }
         if !self.shadow_dirty {
             return false;
         }
         let sg = ShadowGlobals { light_view_proj: light, section_plane: self.globals.section_plane, mode: self.globals.mode };
         queue.write_buffer(&self.shadow_uniform, 0, bytemuck::bytes_of(&sg));
+        if far_on {
+            let sg = ShadowGlobals { light_view_proj: light_far, ..sg };
+            queue.write_buffer(&self.shadow_uniform_far, 0, bytemuck::bytes_of(&sg));
+        }
         self.shadow_dirty = false;
         self.shadow_passes += 1;
         true
     }
 
-    /// Rendert die schattenwerfenden Dreiecke aller Klumpen in die Schattentextur.
+    /// Rendert die schattenwerfenden Dreiecke aller Klumpen in die Schattentextur(en).
     fn encode_shadow_pass(&self, encoder: &mut wgpu::CommandEncoder) {
-        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("shadow.pass"),
-            color_attachments: &[],
-            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                view: &self.shadow_view,
-                depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0), store: wgpu::StoreOp::Store }),
-                stencil_ops: None,
-            }),
-            timestamp_writes: None,
-            occlusion_query_set: None,
-            multiview_mask: None,
-        });
-        pass.set_pipeline(&self.shadow_pipeline);
-        pass.set_bind_group(0, &self.shadow_bind_group, &[]);
-        for c in &self.chunks {
-            let Some(m) = &c.mesh else { continue };
-            if c.caster_count == 0 {
-                continue;
+        let mut targets = vec![(&self.shadow_view, &self.shadow_bind_group)];
+        if self.shadow_far_on {
+            targets.push((&self.shadow_view_far, &self.shadow_bind_group_far));
+        }
+        for (view, bind) in targets {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("shadow.pass"),
+                color_attachments: &[],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view,
+                    depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0), store: wgpu::StoreOp::Store }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            pass.set_pipeline(&self.shadow_pipeline);
+            pass.set_bind_group(0, bind, &[]);
+            for c in &self.chunks {
+                let Some(m) = &c.mesh else { continue };
+                if c.caster_count == 0 {
+                    continue;
+                }
+                pass.set_vertex_buffer(0, m.vbo.slice(..));
+                let ibo = c.caster_ibo.as_ref().unwrap_or(&m.ibo);
+                pass.set_index_buffer(ibo.slice(..), wgpu::IndexFormat::Uint32);
+                pass.draw_indexed(0..c.caster_count, 0, 0..1);
             }
-            pass.set_vertex_buffer(0, m.vbo.slice(..));
-            let ibo = c.caster_ibo.as_ref().unwrap_or(&m.ibo);
-            pass.set_index_buffer(ibo.slice(..), wgpu::IndexFormat::Uint32);
-            pass.draw_indexed(0..c.caster_count, 0, 0..1);
         }
     }
 
@@ -2064,7 +2152,7 @@ impl Renderer {
         // `mode.z` = Anzahl gueltiger Textur-Array-Ebenen (Klemmung im Textur-Shader).
         self.globals.mode[2] = self.material_layer_count as f32;
         // Schatten ([64]): Tiefenpass nur bei Aenderung (Sonne, Geometrie, Schnitt, Groesse).
-        let shadow_pass = self.prepare_shadows(device, queue);
+        let shadow_pass = self.prepare_shadows(device, queue, camera, aspect);
         queue.write_buffer(&self.uniform, 0, bytemuck::bytes_of(&self.globals));
 
         // Prozedurale Schachbrett-Textur einmalig hochladen (lazy, weil `new` keine
