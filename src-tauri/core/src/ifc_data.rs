@@ -1627,16 +1627,14 @@ fn w_stair(f: &mut Flat, structure: f64, id: &str, predefined: &str, footprint: 
         f.nums(&[l.z_rel, l.depth]);
         w_psets(f, &qto("Qto_SlabBaseQuantities", l.quantities.clone()));
     }
-    match &parts.rail {
-        Some(r) => {
-            let (n, pre) = (f.str("Handlauf"), f.str("HANDRAIL"));
-            f.nums(&[1.0, n, pre]);
-            w_psets(f, &qto("Qto_RailingBaseQuantities", r.quantities.clone()));
-            w_mesh(f, &r.mesh.positions, &r.mesh.indices, false);
-        }
-        None => {
-            f.num(0.0);
-        }
+    // Geländer: Anzahl, dann je Geländer (Handlauf der Treppe, [155] Absturzsicherung am Deckenloch).
+    let rails: Vec<(&str, &str, &crate::ifc_stairs::Rail)> = parts.rail.iter().map(|r| ("Handlauf", "HANDRAIL", r)).chain(parts.guard.iter().map(|r| ("Absturzsicherung", "GUARDRAIL", r))).collect();
+    f.num(rails.len() as f64);
+    for (name, predefined, r) in rails {
+        let (n, pre) = (f.str(name), f.str(predefined));
+        f.nums(&[n, pre]);
+        w_psets(f, &qto("Qto_RailingBaseQuantities", r.quantities.clone()));
+        w_mesh(f, &r.mesh.positions, &r.mesh.indices, false);
     }
     match &parts.column {
         Some(c) => {

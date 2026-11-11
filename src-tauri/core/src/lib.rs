@@ -41,6 +41,7 @@ pub mod js_fmt;
 pub use dossier_hatch::jsmath;
 pub mod stairs3d;
 pub mod stair_rail;
+pub mod stair_guard;
 pub mod mesh3d;
 pub mod mesh_repair;
 pub mod ceilings3d;

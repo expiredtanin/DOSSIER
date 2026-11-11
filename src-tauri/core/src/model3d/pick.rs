@@ -274,10 +274,19 @@ pub fn pick_geometry(p: &Project) -> Result<PickGeometry, String> {
 
 /// [137] Handläufe und Pfosten der Treppen als Welt-Dreiecke je Treppe (wie [`emit_stair_railings`]).
 pub fn pick_stair_railings(p: &Project) -> Vec<PickStairMesh> {
-    let Some((stairs, buf)) = stair_input(p, |s, st| s.shape != StairShape::Unknown && st.and_then(|t| t.railing).is_some_and(|r| r != StairTypeRailing::Keine)) else { return vec![] };
+    let (stairs, buf) = stair_input(p, |s, st| s.shape != StairShape::Unknown && st.and_then(|t| t.railing).is_some_and(|r| r != StairTypeRailing::Keine)).unwrap_or_default();
     let mut out: Vec<PickStairMesh> = Vec::new();
     for m in crate::stairs3d::railings(&buf) {
         let Some(&(_, stair)) = stairs.get(m.src) else { continue };
+        let tris = extrusion_tris(&m.positions, &m.indices);
+        match out.iter_mut().find(|o| o.stair_id == stair.id) {
+            Some(o) => o.tris.extend(tris),
+            None => out.push(PickStairMesh { tris, stair_id: stair.id.clone() }),
+        }
+    }
+    // [155] Absturzsicherung gehört zur Treppe, die darin ankommt.
+    for (si, m) in stair_guard_meshes(p) {
+        let Some(stair) = p.stairs.as_deref().and_then(|v| v.get(si)) else { continue };
         let tris = extrusion_tris(&m.positions, &m.indices);
         match out.iter_mut().find(|o| o.stair_id == stair.id) {
             Some(o) => o.tris.extend(tris),

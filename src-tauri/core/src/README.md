@@ -53,7 +53,7 @@ Neues Modul: `<modul>.rs` und `mod` in `lib.rs`, Bindungen in `web/<modul>.rs` u
 | `joins.rs` | Wandknoten: Gehrung, T-Stoss, Kreuzung, je Schicht nach Priorität (`compute_joins()`) |
 | `wall_arc.rs` | Bogenwände |
 | `roof.rs`, `roof_skeleton.rs`, `skeleton.rs`, `roof_assembly.rs`, `dormer.rs` | Dächer (Straight Skeleton), Dach an Dach, Gauben |
-| `stair.rs`, `stair_rail.rs` | Treppen-Geometrie, Handlauf |
+| `stair.rs`, `stair_rail.rs`, `stair_guard.rs` | Treppen-Geometrie, Handlauf, Absturzsicherung am Deckenloch (Grundriss, 3D, IFC) |
 | `opening_geom.rs`, `opening_shape.rs`, `opening_detail.rs`, `opening_presets.rs`, `opening_preview.rs`, `opening_slide.rs` | Öffnungen: Symbol, Formen, Rahmen, Vorlagen, Vorschau, Verschieben in der Wand |
 | `room_area.rs`, `room_boundary.rs` | Raumflächen nach SIA 416; Raum-Erkennung aus Wänden |
 | `polygon_bool.rs`, `polygon_holes.rs`, `bulge.rs`, `curves.rs`, `delaunay.rs` | 2D-Booleans (i_overlay), Löcher, Bögen, Kurven, Triangulierung |

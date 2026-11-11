@@ -77,6 +77,8 @@ pub struct StairParts {
     /// Podeste (IfcSlab LANDING), unteres zuerst; U mit Mittellauf: zwei.
     pub landings: Vec<Landing>,
     pub rail: Option<Rail>,
+    /// [155] Absturzsicherung am Deckenloch, in dem die Treppe ankommt (IfcRailing GUARDRAIL).
+    pub guard: Option<Rail>,
     /// Mittelsäule (Spindel) einer Wendel: Prisma + Stützen-Basismengen.
     pub column: Option<Landing>,
 }
@@ -377,13 +379,25 @@ pub fn stair_parts(one: &Project, stair: &Stair, base: f64) -> StairParts {
         })
         .collect();
 
-    let rail_meshes = model3d::emit_stair_railings(one);
+    let rail_meshes = model3d::emit_stair_handrails(one);
     let rail = (!rail_meshes.is_empty()).then(|| {
         let (positions, indices) = concat(&rail_meshes);
         let sides = if one.stair_type(stair).and_then(|t| t.railing) == Some(StairTypeRailing::Beide) { 2.0 } else { 1.0 };
         Rail { mesh: ifc_mesh(positions, &indices, base), quantities: railing_quantities(walk_length(stair, rise) * sides) }
     });
-    StairParts { flights, landings, rail, column }
+    let guard_meshes = model3d::stair_guard_meshes(one);
+    let guard = (!guard_meshes.is_empty()).then(|| {
+        let (mut positions, mut indices) = (Vec::new(), Vec::new());
+        for (_, m) in &guard_meshes {
+            let off = (positions.len() / 3) as u32;
+            positions.extend_from_slice(&m.positions);
+            indices.extend(m.indices.iter().map(|k| k + off));
+        }
+        // Länge der Achsen aller Löcher, in denen die Treppe ankommt
+        let length: f64 = one.drawing_levels.iter().map(|f| crate::stair_guard::arrivals(one, &f.id, &|_| true, &|| model3d::wall_footprints_of_floor(one, &f.id)).iter().map(|a| crate::stair_guard::axes_length(&a.axes)).sum::<f64>()).sum();
+        Rail { mesh: ifc_mesh(positions, &indices, base), quantities: railing_quantities(length) }
+    });
+    StairParts { flights, landings, rail, guard, column }
 }
 
 #[cfg(test)]

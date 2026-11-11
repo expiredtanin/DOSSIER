@@ -662,50 +662,56 @@ fn contour_prims(c: &Ctx, st: &crate::excavation::SiteTerrain, iv: f64, every: i
             if hi < lo {
                 continue;
             }
-            let mut cands: Vec<f64> = Vec::new();
-            let mut s = lo;
-            while s <= hi + 1e-12 && cands.len() < 20_000 {
-                cands.push(s);
-                s += step;
-            }
-            cands.sort_by(|a, b| (a - target).abs().total_cmp(&(b - target).abs()));
-            let mut best: Option<(usize, f64, [f64; 2], [f64; 2])> = None;
-            for s in cands {
-                if mine.iter().any(|m| {
-                    let d = (s - m).abs();
-                    (if l.closed { d.min(len - d) } else { d }) < spacing / 2.5
-                }) {
-                    continue;
+            // [150] Erst im Abschnitt auf einer wenig gekreuzten Stelle, sonst entlang der Linie verschoben (ganze
+            // Linie, nächste Stelle zur Zielmitte zuerst), erst zuletzt auf dem Bündel — statt ganz ohne Beschriftung.
+            let whole = if l.closed { (0.0, len) } else { (reserve, len - reserve) };
+            let search = |lo: f64, hi: f64, max_x: usize| -> Option<(usize, f64, [f64; 2], [f64; 2])> {
+                let mut cands: Vec<f64> = Vec::new();
+                let mut s = lo;
+                while s <= hi + 1e-12 && cands.len() < 20_000 {
+                    cands.push(s);
+                    s += step;
                 }
-                let (a, b) = (l.at(s - hw), l.at(s + hw));
-                let cl = (b[0] - a[0]).hypot(b[1] - a[1]);
-                if !(cl > 1.6 * hw) || l.bend(s - hw, s + hw) > 0.3 * text_h {
-                    continue;
+                cands.sort_by(|a, b| (a - target).abs().total_cmp(&(b - target).abs()));
+                let mut best: Option<(usize, f64, [f64; 2], [f64; 2])> = None;
+                for s in cands {
+                    if mine.iter().any(|m| {
+                        let d = (s - m).abs();
+                        (if l.closed { d.min(len - d) } else { d }) < spacing / 2.5
+                    }) {
+                        continue;
+                    }
+                    let (a, b) = (l.at(s - hw), l.at(s + hw));
+                    let cl = (b[0] - a[0]).hypot(b[1] - a[1]);
+                    if !(cl > 1.6 * hw) || l.bend(s - hw, s + hw) > 0.3 * text_h {
+                        continue;
+                    }
+                    let u = [(b[0] - a[0]) / cl, (b[1] - a[1]) / cl];
+                    let m = [(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0];
+                    let padded = rot_rect(m, u, hw + pad_house, hv + pad_house);
+                    if in_house(&padded) || obst_grid.hits_convex(&padded) {
+                        continue;
+                    }
+                    let grown = rot_rect(m, u, hw + pad_label, hv + pad_label / 2.0);
+                    // [159] Rechteck zuerst (getrennte Rechtecke überlappen nicht).
+                    let gb = super::stamp_place::ring_bbox(&grown);
+                    if placed.iter().any(|(r, rb)| rb[2] >= gb[0] && rb[0] <= gb[2] && rb[3] >= gb[1] && rb[1] <= gb[3] && super::stamp_place::convex_overlap(r, &grown)) {
+                        continue;
+                    }
+                    let x = grid.crossings(&rot_rect(m, u, hw, hv), li);
+                    if x > max_x {
+                        continue;
+                    }
+                    if best.as_ref().is_none_or(|b| x < b.0) {
+                        best = Some((x, s, m, u));
+                    }
+                    if x == 0 {
+                        break;
+                    }
                 }
-                let u = [(b[0] - a[0]) / cl, (b[1] - a[1]) / cl];
-                let m = [(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0];
-                let padded = rot_rect(m, u, hw + pad_house, hv + pad_house);
-                if in_house(&padded) || obst_grid.hits_convex(&padded) {
-                    continue;
-                }
-                let grown = rot_rect(m, u, hw + pad_label, hv + pad_label / 2.0);
-                // [159] Rechteck zuerst (getrennte Rechtecke überlappen nicht).
-                let gb = super::stamp_place::ring_bbox(&grown);
-                if placed.iter().any(|(r, rb)| rb[2] >= gb[0] && rb[0] <= gb[2] && rb[3] >= gb[1] && rb[1] <= gb[3] && super::stamp_place::convex_overlap(r, &grown)) {
-                    continue;
-                }
-                let x = grid.crossings(&rot_rect(m, u, hw, hv), li);
-                // Auf einem Bündel (Stützmauer, Baugrubenwand): lieber keine Beschriftung.
-                if x > 1 {
-                    continue;
-                }
-                if best.as_ref().is_none_or(|b| x < b.0) {
-                    best = Some((x, s, m, u));
-                }
-                if x == 0 {
-                    break;
-                }
-            }
+                best
+            };
+            let best = search(lo, hi, 1).or_else(|| search(whole.0, whole.1, 1)).or_else(|| search(lo, hi, usize::MAX));
             let Some((_, s, m, u)) = best else { continue };
             mine.push(s);
             let r = rot_rect(m, u, hw, hv);
@@ -1634,6 +1640,31 @@ mod tests {
         for (t, r) in &labels {
             assert!(!o.hits_convex(r), "Beschriftung {t} auf der Bemassung");
         }
+    }
+
+    /// [150] Hindernis (z. B. Raumstempel ausserhalb seines Raums) auf einem Teil der Linien: die Beschriftungen
+    /// rücken entlang der Linie auf freie Stellen, statt zu fehlen; keine liegt auf dem Hindernis.
+    #[test]
+    fn hoehenlinien_beschriftung_rueckt_vom_hindernis_weg() {
+        let t = TerrainMesh { id: "t".into(), positions: vec![0.0, 0.0, 0.0, 40.0, 0.0, 0.0, 40.0, 10.0, 40.0, 0.0, 10.0, 40.0], indices: vec![0.0, 1.0, 2.0, 0.0, 2.0, 3.0], contour_interval: Some(0.1), ..Default::default() };
+        let p = Project { context: Some(vec![ContextObject::TerrainMesh(t)]), ..Default::default() };
+        let a = super::super::domains::PlanArgs::parse(1.0, r#"{"floor": "eg", "scale": 100}"#).unwrap();
+        let c = Ctx::new(&p, &a);
+        let run = |o: &super::super::stamp_place::Obstacles| {
+            let mut out = Vec::new();
+            plan_context_with(&c, &mut out, o);
+            out.iter().filter_map(label_rect).collect::<Vec<_>>()
+        };
+        let free = run(&super::super::stamp_place::Obstacles::default());
+        assert!(free.len() >= 6, "{}", free.len());
+        // Stempel-Rechteck mitten auf dem Gelände (4 × 8 m): keine Beschriftung darauf, aber auch nicht weniger.
+        let mut o = super::super::stamp_place::Obstacles::default();
+        o.area(vec![[16.0, 1.0], [24.0, 1.0], [24.0, 9.0], [16.0, 9.0]]);
+        let moved = run(&o);
+        for (t, r) in &moved {
+            assert!(!o.hits_convex(r), "Beschriftung {t} auf dem Stempel");
+        }
+        assert!(moved.len() >= free.len(), "Beschriftungen fehlen: {} statt {}", moved.len(), free.len());
     }
 
     #[test]

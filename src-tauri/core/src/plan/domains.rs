@@ -356,11 +356,16 @@ pub(super) fn resolve_hatch_or_none(p: &Project, hatch_id: &str, wall_angle_deg:
 
 /// Footprints der gezeichneten Wände dieses Geschosses (`buildWallFootprints`).
 pub fn wall_footprints(c: &Ctx) -> Vec<WallFootprint> {
-    c.p.walls
+    wall_footprints_of(c.p, &c.a.floor, |w| c.vis(&w.category_code, &w.id))
+}
+
+/// Wandumrisse eines Geschosses (`keep` wählt die Wände vor; 3D: alle).
+pub fn wall_footprints_of(p: &Project, floor: &str, keep: impl Fn(&Wall) -> bool) -> Vec<WallFootprint> {
+    p.walls
         .iter()
-        .filter(|w| w.floor_id == c.a.floor && c.vis(&w.category_code, &w.id))
+        .filter(|w| w.floor_id == floor && keep(w))
         .map(|w| {
-            let t = c.p.wall_thickness(w, 0.2);
+            let t = p.wall_thickness(w, 0.2);
             let ref_off = crate::joins::reference_offset(crate::model3d::wall_reference(w), t);
             wall_footprint([w.start.x, w.start.y], [w.end.x, w.end.y], t, ref_off)
         })
@@ -1658,20 +1663,45 @@ fn domains_after(c: &Ctx, out: &mut DomainPrims, bounds: &mut Bounds) {
                 _ => {}
             }
         }
-        let mut o = drawn.clone();
+    }
+    // Räume vor dem Kontext: Stempel ausserhalb ihres Raums (eigener Anker im Gelände) sind Hindernisse der
+    // Höhenlinien-Beschriftungen; Stempel im Raum liegen im Fussabdruck, wo keine Beschriftung steht.
+    let obstacles = stamp_obstacles_with(out, drawn.clone());
+    rooms(c, &mut out.rooms, bounds, &obstacles);
+    if c.a.global {
+        let mut o = drawn;
         for q in out.sections.iter().filter(|q| matches!(q, Primitive::DrawingText { .. })) {
             o.add_prim(q);
         }
+        for r in outside_stamps(c, &out.rooms) {
+            o.area(r);
+        }
         super::context::plan_context_with(c, &mut out.context, &o);
     }
-    let obstacles = stamp_obstacles_with(out, drawn);
-    rooms(c, &mut out.rooms, bounds, &obstacles);
     // [156] Bodenbelag nach den Raumstempeln (spart sie aus), zuunterst in der Gruppe der Decken.
     let mut finish = Vec::new();
     floor_finishes(c, &out.rooms, &mut finish);
     if !finish.is_empty() {
         out.ceilings.splice(0..0, finish);
     }
+}
+
+/// [150] Rechtecke der Raumstempel, deren Mitte ausserhalb ihres Raums liegt (eigener Anker im Gelände).
+fn outside_stamps(c: &Ctx, rooms: &[Primitive]) -> Vec<Vec<[f64; 2]>> {
+    let mut out = Vec::new();
+    for q in rooms {
+        let Primitive::Text { at, doc, extra_lines, base_pt, room_id: Some(id), .. } = q else { continue };
+        let Some(room) = c.p.rooms.as_deref().unwrap_or(&[]).iter().find(|r| &r.id == id) else { continue };
+        let ring: Vec<[f64; 2]> = room.boundary.iter().map(|v| [v.x, v.y]).collect();
+        if ring.len() < 3 || crate::surface_pattern::point_in([at.x, at.y], &ring) {
+            continue;
+        }
+        let (w, h) = stamp_size_m(doc, extra_lines, *base_pt, c.a.scale);
+        if w.is_finite() && h.is_finite() {
+            out.push(vec![[at.x - w / 2.0, at.y - h / 2.0], [at.x + w / 2.0, at.y - h / 2.0], [at.x + w / 2.0, at.y + h / 2.0], [at.x - w / 2.0, at.y + h / 2.0]]);
+        }
+    }
+    out
 }
 
 /// Reihenfolge der Gruppen im Plan-Puffer der Abfrage `planDomains`: Schatten und Baurecht
@@ -3086,6 +3116,22 @@ mod tests {
         let t = serde_json::json!({ "floor": "schnitt-a", "show": ["30", "40"], "grey": [], "scale": 50 }).to_string();
         let st = plan_domains(&q, &PlanArgs::parse(1.0, &t).unwrap()).unwrap().stairs;
         assert!(st.iter().all(|x| !matches!(x, Primitive::Line { stair_id, .. } if stair_id.as_deref() == Some("ST1"))), "{st:?}");
+    }
+
+    /// [150] Nur der Stempel mit Anker ausserhalb seines Raums wird Hindernis der Höhenlinien-Beschriftungen.
+    #[test]
+    fn stempel_ausserhalb_des_raums_ist_hindernis() {
+        let mut p = sample();
+        let t = serde_json::json!({ "floor": "eg", "show": ["20", "21", "30", "40", "50", "60"], "grey": [], "scale": 100 }).to_string();
+        let a = PlanArgs::parse(1.0, &t).unwrap();
+        let rooms = |p: &Project| plan_domains(p, &a).unwrap().rooms;
+        let idx = p.rooms.as_ref().unwrap().iter().position(|r| r.floor_id == "eg" && r.boundary.len() >= 3).unwrap();
+        assert!(outside_stamps(&Ctx::new(&p, &a), &rooms(&p)).is_empty(), "Stempel im Raum: kein Hindernis");
+        p.rooms.as_mut().unwrap()[idx].stamp_anchor = Some(Vec2 { x: -30.0, y: -30.0 });
+        let r = rooms(&p);
+        let out = outside_stamps(&Ctx::new(&p, &a), &r);
+        assert_eq!(out.len(), 1);
+        assert!(out[0].iter().all(|q| (q[0] + 30.0).abs() < 5.0 && (q[1] + 30.0).abs() < 5.0), "{out:?}");
     }
 
     #[test]
