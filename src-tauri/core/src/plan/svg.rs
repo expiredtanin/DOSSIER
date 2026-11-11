@@ -227,6 +227,21 @@ fn arc_dash_offset(part: &Part, rec: &crate::plan::buf::Rec, len_m: f64, mm_to_m
     }
 }
 
+/// [153] `stroke-dasharray` eines gestrichelten Vollkreises vom Umfang `circ_m`: Muster auf ganze Wiederholungen
+/// gestreckt ([`super::line_pattern::fit_closed`]), damit es an der Naht schliesst; `None` ohne Strichliste.
+fn circle_dash_attr(part: &Part, rec: &crate::plan::buf::Rec, circ_m: f64, mm_to_m: f64) -> Option<String> {
+    if rec.flags & F_DASH_LIST == 0 || !(mm_to_m > 0.0) {
+        return None;
+    }
+    let d = rec.dash.and_then(|(o, n)| part.view.pool(o, n))?;
+    if d.is_empty() {
+        return None;
+    }
+    let fit = super::line_pattern::fit_closed(&d, circ_m / mm_to_m);
+    let cap = if fit.iter().any(|v| *v == 0.0) { " stroke-linecap=\"round\"" } else { "" };
+    Some(format!(" stroke-dasharray=\"{}\"{cap}", fit.iter().map(|v| num(v * mm_to_m)).collect::<Vec<_>>().join(" ")))
+}
+
 /// Gestrichelter Zug aus aneinander anschliessenden Linien gleicher Darstellung ([153]).
 struct DashRun {
     /// Attribute ohne Geometrie (Farbe, Breite, Muster, Deckkraft).
@@ -459,7 +474,7 @@ pub fn plan_svg(parts: &mut [Part], o: &SvgOptions) -> Option<String> {
                 T_CIRCLE => {
                     let fill = esc(part.str(f[0]).unwrap_or(""));
                     let stroke = esc(part.str(f[1]).unwrap_or(""));
-                    let dash = dash_attr(part)?;
+                    let dash = circle_dash_attr(part, &rec, f[6] * PI * 2.0, mm_to_m).map_or_else(|| dash_attr(part), Some)?;
                     out.push(format!(
                         "<circle cx=\"{}\" cy=\"{}\" r=\"{}\" fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"{}\"{dash}{}/>",
                         xs(f[4]),

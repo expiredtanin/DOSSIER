@@ -625,7 +625,13 @@ pub fn build_scene(parts: &mut [Part], greyed_ranges: &[(usize, usize)]) -> Opti
                         pts.push(v2(c.x + r * jsnum::cos(t), c.y + r * jsnum::sin(t)));
                         k += 1.0;
                     }
-                    let dash = dash_of(part, &rec)?;
+                    let mut dash = dash_of(part, &rec)?;
+                    // [153] Vollkreis: Muster auf ganze Wiederholungen über den Umfang gestreckt, die Naht schliesst
+                    // (Bildschirm-Bezug wie render2d: Papier-mm × `LINE_DASH_MM_TO_M` = Meter).
+                    if let (true, SDash::List(l)) = (circle, &dash) {
+                        let len: f64 = pts.windows(2).map(|q| crate::jsmath::hypot2(q[1].x - q[0].x, q[1].y - q[0].y)).sum();
+                        dash = SDash::List(super::line_pattern::fit_closed(l, len / crate::gpu_compile::LINE_DASH_MM_TO_M));
+                    }
                     let z = b.z();
                     b.s.polylines.push(SStroke { pts, color: col, width_mm: w, dash, z, width_screen: false });
                 }

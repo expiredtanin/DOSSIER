@@ -149,9 +149,13 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
 - ◐ **[146]** Linienenden/-ecken. Druck-SVG achtet seit 9.11. auf `noStrokeEdges` (offene Kantenzüge, Test
   `ungestrichene_kante_ohne_strich`); Nähen in Metal-Chunks nur innerhalb eines Chunks (Kern `plan/line_ends.rs`, `render2d`). · M
 - ◐ **[153]** Strichmuster in Papier-mm. Bögen mit Phase seit 9.11. ([169]: Plan-/Druck-SVG, PDF, Bogen-Shader; seit
-  10.11. auch Ellipsenbögen, Länge numerisch),
-  Kreise ohne (geschlossen), DXF/DWG ohne Phase je Objekt,
-  Metal-Chunks verketten nur über das Ketten-Flag, React-SVG-Ansicht ohne Phase. · M
+  10.11. auch Ellipsenbögen, Länge numerisch). (11.11.) Vollkreise: Muster auf ganze Wiederholungen über den Umfang
+  gestreckt (`line_pattern::fit_closed`, Naht schliesst) in Plan-SVG, Druck-SVG/PDF (`sceneToPrintSvg.ts` für Ringzüge
+  der Szene), Bildschirm-Szene (`scene.rs`), DXF/DWG (eigener Linientyp je Radius `…_R<mm>`) und React-SVG-Ansicht
+  (`dashVb.ts`: Phase für Linien/Bögen/Zug, Ring gestreckt). DXF/DWG kennen keine Musterphase je Objekt (Muster beginnt am
+  Entitätsanfang; Linientyp-Skalierung nur über Gruppe 48, die das flache Format nicht trägt) — Linien/Bögen bleiben dort
+  ohne Phase, begründet. Offen: Metal-Chunks verketten nur über das Ketten-Flag; geschlossene Polylinien/Ellipsen ohne
+  Streckung; nur im Linux-Container geprüft. · M
 - ◐ **[155]** Treppensymbol. (10.11.) Lauflinie hinter der Bruchlinie gestrichelt wie die Tritte (Pfeil bleibt ausgezogen); Raumstempel weichen allen Treppen-Linien aus (`stamp_obstacles_with` nimmt `d.stairs` ganz, Test `stempel_weichen_den_treppenlinien_aus`). (11.11.)
   Freier Lochring ohne Wand und Austritt: geschlossener Zug mit Gehrung an der Naht (`offset_polyline` erkennt geschlossene
   Züge, 3D-Rohr ohne Deckel; Test `freier_ring_ist_geschlossen_mit_gehrung`); offene Enden stehen rechtwinklig. (11.11.)

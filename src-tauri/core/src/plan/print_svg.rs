@@ -534,7 +534,9 @@ fn entry(out: &mut Out, view: &View, i: usize, hatches: &[(i32, Hatch, i32)], m:
                 ("stroke", s(f[1])?),
                 ("stroke-width", js_number(quantize_pen(f[2]))),
             ];
-            push_dash(&mut attrs, dash(&rec)?.as_deref());
+            // [153] Vollkreis: Muster auf ganze Wiederholungen über den Umfang gestreckt (Naht schliesst).
+            let dd = dash(&rec)?.map(|d| super::line_pattern::fit_closed(&d, f[6] * k * PI * 2.0));
+            push_dash(&mut attrs, dd.as_deref());
             let o = opacity_of(greyed, obj(3));
             if !o.is_empty() {
                 attrs.push(("opacity", o));

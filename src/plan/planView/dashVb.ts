@@ -5,6 +5,7 @@
 
 import { PX_PER_M } from "./geometry";
 import { DASH_MM_TO_M } from "../glPlan/glPlanHatch";
+import { core } from "../../engine/coreWasm";
 
 /** CSS-Variable am Plan-SVG: CSS-px je viewBox-Einheit (meet), für Muster unter `non-scaling-stroke`. */
 export const PLAN_DASH_VAR = "--plan-dash-k";
@@ -43,4 +44,38 @@ export function dashArrayCss(vb: readonly number[], nonScaling: boolean): string
   if (!vb.length) return undefined;
   const r = (v: number) => Math.round(v * 1e4) / 1e4;
   return vb.map((v) => (nonScaling ? `calc(var(${PLAN_DASH_VAR}, 1) * ${r(v)}px)` : `${r(v)}`)).join(" ");
+}
+
+/** viewBox-Einheiten je Papier-mm im Plot-Massstab 1:`plotN` (ohne gültiges N: 1:100). */
+function vbPerMm(plotN: number): number {
+  const n = Number.isFinite(plotN) && plotN > 0 ? plotN : 100;
+  return (n / 1000) * PX_PER_M;
+}
+
+/**
+ * [153] Musterphase (viewBox-Einheiten) eines gestrichelten Zugs der Länge `lenVb`: Kern
+ * `plan::line_pattern::phase`, beide Enden möglichst auf einem Strich — gleich wie Plan-/Druck-SVG und Bildschirm.
+ */
+export function lineDashOffsetVb(dash: readonly number[], plotN: number, lenVb: number): number {
+  if (!dash.length || !(lenVb > 0) || !Number.isFinite(lenVb)) return 0;
+  const k = vbPerMm(plotN);
+  const ph = core().line_dash_phase(lenVb / k, Float64Array.from(dash));
+  return Number.isFinite(ph) ? ph * k : 0;
+}
+
+/**
+ * [153] Muster (viewBox-Einheiten) eines Rings der Länge `lenVb` (Vollkreis als Zug, Ende = Anfang) auf ganze
+ * Wiederholungen gestreckt: die Naht schliesst (Kern `fit_closed`).
+ */
+export function ringDashVb(dash: readonly number[], plotN: number, lenVb: number): number[] {
+  if (!dash.length || !(lenVb > 0) || !Number.isFinite(lenVb)) return lineDashVb(dash, plotN);
+  const k = vbPerMm(plotN);
+  return lineDashVb(Array.from(core().line_dash_fit_closed(lenVb / k, Float64Array.from(dash))), plotN);
+}
+
+/** `stroke-dashoffset` als CSS-Wert (wie [`dashArrayCss`]); `undefined` ohne Phase. */
+export function dashOffsetCss(vb: number, nonScaling: boolean): string | undefined {
+  if (!(vb > 1e-9)) return undefined;
+  const r = Math.round(vb * 1e4) / 1e4;
+  return nonScaling ? `calc(var(${PLAN_DASH_VAR}, 1) * ${r}px)` : `${r}`;
 }

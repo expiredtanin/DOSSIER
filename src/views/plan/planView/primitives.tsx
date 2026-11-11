@@ -13,7 +13,7 @@ import { quantizePen } from "../../../export/sceneToPrintSvg";
 import { buildHatchRuns, buildRandomHatchRuns, zigzagPoints, motifPoints, DASH_MM_TO_M } from "../../../core";
 import { dashHasDot } from "../../../core";
 import { HAIRLINE_PX, PX_PER_M, mmToPx, printStrokeVb, visibleEdgeRuns } from "../../../core";
-import { dashArrayCss, fitDashToPeriod, hatchDashVb, lineDashVb } from "../../../core";
+import { dashArrayCss, dashOffsetCss, fitDashToPeriod, hatchDashVb, lineDashOffsetVb, lineDashVb, ringDashVb } from "../../../core";
 
 /** Basis-Kachelmaß (viewBox-Einheiten) einer Bild-Schraffur bei scaleX/scaleY = 1. */
 const IMG_TILE_VB = 40;
@@ -400,7 +400,12 @@ export function DrawingRunShape({
       : mmToPx(run.weightMm);
   const vfx = print ? undefined : ("non-scaling-stroke" as const);
   // Linientyp in Papier-mm im Plot-Massstab: fest im Modell-Raum (Bildschirm = Druckansicht).
-  const dashStr = run.dash && run.dash.length ? dashArrayCss(lineDashVb(run.dash, paperScale ?? 100), !print) : undefined;
+  // Musterphase ([153]): Länge des Zugs in viewBox-Einheiten; Vollkreis (Ende = Anfang) mit ganzen Wiederholungen.
+  const runLen = (v: { x: number; y: number }[]): number => {
+    let l = 0;
+    for (let i = 0; i + 1 < v.length + (run.closed ? 1 : 0); i++) l += Math.hypot(v[(i + 1) % v.length].x - v[i].x, v[(i + 1) % v.length].y - v[i].y);
+    return l;
+  };
   // Zickzack-/Custom-Motiv-Lauf: im MODELL-Raum tessellieren (Papier-mm →
   // Modell-Meter via DASH_MM_TO_M), dann toScreen. Sonst die Roh-Stützpunkte.
   const modelPts = run.zigzag
@@ -413,7 +418,17 @@ export function DrawingRunShape({
     : run.motif
       ? motifPoints(run.pts[0], run.pts[run.pts.length - 1], run.motif, DASH_MM_TO_M)
       : run.pts;
-  const pts = modelPts.map(toScreen).map((s) => `${s.x},${s.y}`).join(" ");
+  const scrPts = modelPts.map(toScreen);
+  const pts = scrPts.map((s) => `${s.x},${s.y}`).join(" ");
+  const plotN = paperScale ?? 100;
+  const ring =
+    !run.closed && scrPts.length >= 8 && Math.hypot(scrPts[scrPts.length - 1].x - scrPts[0].x, scrPts[scrPts.length - 1].y - scrPts[0].y) < 1e-6;
+  const dashStr =
+    run.dash && run.dash.length
+      ? dashArrayCss(ring ? ringDashVb(run.dash, plotN, runLen(scrPts)) : lineDashVb(run.dash, plotN), !print)
+      : undefined;
+  const dashOff = run.dash && run.dash.length && !ring ? dashOffsetCss(lineDashOffsetVb(run.dash, plotN, runLen(scrPts)), !print) : undefined;
+  const dashSt = dashStr ? { strokeDasharray: dashStr, ...(dashOff ? { strokeDashoffset: dashOff } : {}) } : undefined;
   // Punktmuster (dash enthält eine 0): runde Kappe, damit die 0-Längen-Segmente
   // als Dots erscheinen (Punktlinie / Strich-Punkt).
   const cap = dashHasDot(run.dash) ? ("round" as const) : undefined;
@@ -425,7 +440,7 @@ export function DrawingRunShape({
       fill="none"
       stroke={stroke}
       strokeWidth={sw}
-      style={dashStr ? { strokeDasharray: dashStr } : undefined}
+      style={dashSt}
       strokeLinecap={cap}
       vectorEffect={vfx}
     />
@@ -436,7 +451,7 @@ export function DrawingRunShape({
       fill="none"
       stroke={stroke}
       strokeWidth={sw}
-      style={dashStr ? { strokeDasharray: dashStr } : undefined}
+      style={dashSt}
       strokeLinecap={cap}
       vectorEffect={vfx}
     />
@@ -512,9 +527,18 @@ export function renderPrimitive(
   // sonst wie bisher in Bildschirm-px (non-scaling).
   // Linientypen in Papier-mm im Plot-Massstab: fest im Modell-Raum, auch unter non-scaling-stroke
   // (über die meet-Variable am SVG) — der Rhythmus gleicht bei jedem Zoom der Druckansicht.
-  const dashOf = (dash: number[] | null | undefined): { strokeDasharray: string } | undefined => {
+  const dashOf = (dash: number[] | null | undefined, lenVb?: number): { strokeDasharray: string; strokeDashoffset?: string } | undefined => {
     if (!dash || !dash.length) return undefined;
     const css = dashArrayCss(lineDashVb(dash, paperScale ?? 100), !print);
+    if (!css) return undefined;
+    // [153] Musterphase des Zugs (Linie, Bogen): beide Enden möglichst auf einem Strich.
+    const off = lenVb ? dashOffsetCss(lineDashOffsetVb(dash, paperScale ?? 100, lenVb), !print) : undefined;
+    return { strokeDasharray: css, ...(off ? { strokeDashoffset: off } : {}) };
+  };
+  // [153] Vollkreis: Muster auf ganze Wiederholungen über den Umfang gestreckt (Naht schliesst), ohne Phase.
+  const ringStyle = (dash: number[] | null | undefined, lenVb: number): { strokeDasharray: string } | undefined => {
+    if (!dash || !dash.length) return undefined;
+    const css = dashArrayCss(ringDashVb(dash, paperScale ?? 100, lenVb), !print);
     return css ? { strokeDasharray: css } : undefined;
   };
   switch (p.kind) {
@@ -673,7 +697,7 @@ export function renderPrimitive(
           className={p.cls}
           stroke={p.color}
           strokeWidth={weight(p.weightMm)}
-          style={dashOf(p.dash)}
+          style={dashOf(p.dash, Math.hypot(b.x - a.x, b.y - a.y))}
           strokeLinecap={dashHasDot(p.dash) ? "round" : undefined}
           vectorEffect={vfx}
         />
@@ -696,7 +720,7 @@ export function renderPrimitive(
           d={d}
           className={p.cls}
           strokeWidth={weight(p.weightMm)}
-          style={dashOf(p.dash)}
+          style={dashOf(p.dash, r * Math.min(Math.PI, Math.abs(Math.atan2(cross, v1.x * v2.x + v1.y * v2.y))))}
           strokeLinecap={dashHasDot(p.dash) ? "round" : undefined}
           vectorEffect={vfx}
         />
@@ -895,7 +919,8 @@ export function renderPrimitive(
           fill={p.fill}
           stroke={p.stroke}
           strokeWidth={weight(p.weightMm)}
-          style={dashOf(p.dash)}
+          style={ringStyle(p.dash, 2 * Math.PI * r)}
+          strokeLinecap={dashHasDot(p.dash) ? "round" : undefined}
           vectorEffect={vfx}
         />
       );
@@ -923,7 +948,7 @@ export function renderPrimitive(
           fill="none"
           stroke={p.stroke}
           strokeWidth={weight(p.weightMm)}
-          style={dashOf(p.dash)}
+          style={dashOf(p.dash, rPx * sweep)}
           strokeLinecap={dashHasDot(p.dash) ? "round" : undefined}
           vectorEffect={vfx}
         />

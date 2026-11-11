@@ -15,6 +15,18 @@ pub fn line_dash_phase(len_mm: f64, dash_mm: &[f64]) -> f64 {
     }
 }
 
+/// [153] Strichmuster eines geschlossenen Zugs der Länge `len` (gleiche Einheit wie `dash_mm`, Papier-mm),
+/// auf ganze Wiederholungen gestreckt (Kern `fit_closed`); bei Unsinn unverändert, nie Panic.
+#[wasm_bindgen]
+pub fn line_dash_fit_closed(len_mm: f64, dash_mm: &[f64]) -> Vec<f64> {
+    let d = crate::plan::line_pattern::fit_closed(dash_mm, len_mm);
+    if d.iter().all(|v| v.is_finite()) {
+        d
+    } else {
+        dash_mm.to_vec()
+    }
+}
+
 /// [169] SVG-Pfad (`d`) eines Zugs in Papier-mm (`[x0, y0, x1, y1, …]`, Y nach unten) mit erkannten Bögen
 /// (`crate::plan::arc_fit`): Kreis bzw. Strecken und `A`-Befehle; leer, wenn kein Bogen erkannt wurde oder
 /// die Eingabe Unsinn ist (dann bleibt `polygon`/`polyline`). `tol` = Toleranz in mm.

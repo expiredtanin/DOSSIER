@@ -301,12 +301,31 @@ function appendStroke(
   if (dash && dash.length) {
     // Strichmuster ist bereits in Papier-mm definiert (siehe `toRenderScene.ts`:
     // „unveraendert durchgereicht"), also direkt uebernehmen.
-    el.setAttribute("stroke-dasharray", dash.map((d) => round(d)).join(" "));
+    const mm = pts.map((p) => map(p));
+    // [153] Vollkreis (Zug, dessen Ende am Anfang liegt): Muster auf ganze Wiederholungen gestreckt, die Naht
+    // schliesst; keine Phase noetig.
+    const ring = closed || isRing(mm);
+    const useDash = !closed && ring ? ringDash(mm, dash) : dash;
+    el.setAttribute("stroke-dasharray", useDash.map((d) => round(d)).join(" "));
     // Punkte (Strich 0) brauchen runde Enden, sonst unsichtbar ([96]).
-    if (dash.some((d) => d === 0)) el.setAttribute("stroke-linecap", "round");
-    setDashOffset(el, pts.map((p) => map(p)), closed, dash);
+    if (useDash.some((d) => d === 0)) el.setAttribute("stroke-linecap", "round");
+    if (closed || !ring) setDashOffset(el, mm, closed, dash);
   }
   svg.appendChild(el);
+}
+
+/** Offener Zug mit Ende auf dem Anfang (tesselierter Vollkreis der Szene, mindestens 8 Punkte). */
+function isRing(ptsMm: [number, number][]): boolean {
+  const n = ptsMm.length;
+  if (n < 8) return false;
+  return Math.hypot(ptsMm[n - 1][0] - ptsMm[0][0], ptsMm[n - 1][1] - ptsMm[0][1]) < 1e-6;
+}
+
+/** [153] Muster des Rings auf ganze Wiederholungen über seine Länge gestreckt (Kern `plan::line_pattern::fit_closed`). */
+function ringDash(ptsMm: [number, number][], dash: number[]): number[] {
+  let len = 0;
+  for (let i = 0; i + 1 < ptsMm.length; i++) len += Math.hypot(ptsMm[i + 1][0] - ptsMm[i][0], ptsMm[i + 1][1] - ptsMm[i][1]);
+  return Array.from(core().line_dash_fit_closed(len, Float64Array.from(dash)));
 }
 
 /**

@@ -84,4 +84,19 @@ describe("Druck-SVG: Kreise und Bögen", () => {
     const arc = paths.find((p) => p.attrs.has("stroke-dasharray"))!;
     expect(arc.attrs.get("stroke-dashoffset")).toBeDefined();
   });
+
+  it("Vollkreis: Muster auf ganze Wiederholungen über den Umfang, ohne Phase", () => {
+    for (const n of [50, 100, 200]) {
+      const r = (7.3 * n) / 1000; // 7.3 mm Radius auf dem Papier
+      const pts: [number, number][] = [];
+      for (let i = 0; i <= 96; i++) pts.push([r * Math.cos((2 * Math.PI * i) / 96), r * Math.sin((2 * Math.PI * i) / 96)]);
+      const sc = { fills: [], outlines: [], polylines: [{ pts, color: [0, 0, 0, 1], widthMm: 0.18, dash: [2, 1], z: 0, widthScreen: false }], arcs: [], lines: [], texts: [], images: [], bounds: { minX: -r, minY: -r, maxX: r, maxY: r } } as unknown as RScene;
+      const svg = sceneToPrintSvg(sc, { scaleDenominator: n, pageWidthMm: 100, pageHeightMm: 100 }).svg as unknown as FakeEl;
+      const el = svg.children.find((c) => c.tag !== "defs" && c.attrs.has("stroke-dasharray"))!;
+      const d = el.attrs.get("stroke-dasharray")!.split(" ").map(Number);
+      const reps = (2 * Math.PI * 7.3) / (d[0] + d[1]);
+      expect(Math.abs(reps - Math.round(reps))).toBeLessThan(0.02);
+      expect(el.attrs.has("stroke-dashoffset")).toBe(false);
+    }
+  });
 });

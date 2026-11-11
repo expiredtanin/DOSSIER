@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { dashArrayCss, fitDashToPeriod, hatchDashVb, lineDashVb } from "./dashVb";
+import { dashArrayCss, dashOffsetCss, fitDashToPeriod, hatchDashVb, lineDashOffsetVb, lineDashVb, ringDashVb } from "./dashVb";
 import { PX_PER_M } from "./geometry";
 
 describe("Strichmuster im Modell-Raum (SVG-Pfad)", () => {
@@ -26,5 +26,16 @@ describe("Strichmuster im Modell-Raum (SVG-Pfad)", () => {
     const f = fitDashToPeriod([3, 2], 8);
     expect(f[0] + f[1]).toBeCloseTo(8 / 2, 9);
     expect(fitDashToPeriod([], 8)).toEqual([]);
+  });
+
+  it("[153] Phase in viewBox-Einheiten = Kern-Phase in Papier-mm, Ring mit ganzen Wiederholungen", () => {
+    // 10 mm lang bei 1:100 mit [2, 1]: Phase 0.5 mm (Kern `phase`).
+    const k = (100 / 1000) * PX_PER_M;
+    expect(lineDashOffsetVb([2, 1], 100, 10 * k)).toBeCloseTo(0.5 * k, 6);
+    expect(lineDashOffsetVb([2, 1], 100, 0)).toBe(0);
+    expect(dashOffsetCss(0, true)).toBeUndefined();
+    expect(dashOffsetCss(3, false)).toBe("3");
+    const ring = ringDashVb([2, 1], 100, 31.4 * k);
+    expect((ring[0] + ring[1]) * 10).toBeCloseTo(31.4 * k, 6);
   });
 });

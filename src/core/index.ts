@@ -204,7 +204,7 @@ export {
   viewForScale,
   visibleEdgeRuns,
 } from "../plan/planView/geometry";
-export { PLAN_DASH_VAR, dashArrayCss, fitDashToPeriod, hatchDashVb, lineDashVb } from "../plan/planView/dashVb";
+export { PLAN_DASH_VAR, dashArrayCss, dashOffsetCss, fitDashToPeriod, hatchDashVb, lineDashOffsetVb, lineDashVb, ringDashVb } from "../plan/planView/dashVb";
 
 export {
   type ClientMap,

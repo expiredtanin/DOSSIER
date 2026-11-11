@@ -897,6 +897,24 @@ impl Ctx<'_> {
         }
     }
 
+    /// [153] Linientyp eines gestrichelten Vollkreises vom Radius `r` (Modell-Meter): Muster auf ganze
+    /// Wiederholungen über den Umfang gestreckt, eigener Linientyp je Radius (`…_R<mm>`). DXF/DWG kennen keine
+    /// Musterphase je Objekt (das Muster beginnt am Entitätsanfang); so schliesst die Naht des Kreises trotzdem.
+    fn ltype_of_circle(&mut self, dash: &[f64], r: f64) -> f64 {
+        let k = self.o.scale / 1000.0;
+        if dash.is_empty() || !(k > 0.0) || !(r > 0.0) {
+            return self.ltype_of(dash);
+        }
+        let fit = crate::plan::line_pattern::fit_closed(dash, std::f64::consts::TAU * r / k);
+        match dash_to_ltype_meters(&fit, self.o.scale) {
+            Some(el) => {
+                let name = format!("{}_R{}", ltype_name_for(dash, &self.project.line_styles), jsnum::round(r * 1000.0));
+                self.flat.add_linetype(&name, &el)
+            }
+            None => -1.0,
+        }
+    }
+
     fn style_of(&mut self, s: Option<&TextStyleIn>) -> f64 {
         let (family, bold, italic) = match s {
             Some(s) => (s.family.clone(), s.bold, s.italic),
@@ -940,7 +958,7 @@ impl Ctx<'_> {
                 }
             }
             Prim::Circle { center, r, dash } => {
-                let lt = self.ltype_of(dash);
+                let lt = self.ltype_of_circle(dash, *r);
                 self.flat.set_pen(b, lt);
                 self.flat.add_circle(b, layer, *center, *r);
             }
@@ -1666,6 +1684,24 @@ mod tests {
         let st = |name: &str, kind: Option<LineStyleKind>| LineStyle { name: name.into(), dash: Some(vec![3.0, 1.0]), kind, ..Default::default() };
         assert_eq!(ltype_name_for(&[3.0, 1.0], &[st(" Strichlinie ", None)]), "Strichlinie");
         assert_eq!(ltype_name_for(&[3.0, 1.0], &[st("Zz", Some(LineStyleKind::Zigzag)), st("  ", None)]), "DOSSIER_STRICH_3_1");
+    }
+
+    /// [153] Gestrichelter Vollkreis: eigener Linientyp je Radius, Muster auf ganze Wiederholungen über den Umfang.
+    #[test]
+    fn kreis_linientyp_mit_ganzen_wiederholungen() {
+        let project = Project::default();
+        let o = DxfOptions { scale: 100.0, include_hatches: false, dim_cm: false, paper_layout: false, bounds: [0.0; 4], default_font: "Arial".into(), floor: String::new(), table_labels: String::new() };
+        let mut cx = Ctx { project: &project, o: &o, flat: Flat::new() };
+        let a = cx.ltype_of_circle(&[2.0, 1.0], 0.73);
+        let b = cx.ltype_of_circle(&[2.0, 1.0], 0.73);
+        let c = cx.ltype_of_circle(&[2.0, 1.0], 1.5);
+        assert!(a >= 0.0 && a == b && c != a, "{a} {b} {c}");
+        assert_eq!(cx.ltype_of_circle(&[], 1.0), -1.0);
+        // Elemente des ersten Linientyps: Summe × Wiederholungen = Umfang (Modell-Meter).
+        let el = cx.flat.root.windows(3).position(|w| w[0] == REC_LTYPE).map(|i| &cx.flat.root[i + 3..i + 5]).unwrap();
+        let total = el[0].abs() + el[1].abs();
+        let reps = std::f64::consts::TAU * 0.73 / total;
+        assert!((reps - reps.round()).abs() < 1e-6 && reps.round() >= 1.0, "{el:?} {reps}");
     }
 
     #[test]

@@ -107,6 +107,21 @@ pub fn phase(len: f64, dash: &[f64]) -> f64 {
     best_p
 }
 
+/// Muster für einen **geschlossenen** Zug der Länge `len` (gleiche Einheit wie `dash`, Kreis: Umfang): auf
+/// ganze Wiederholungen gestreckt, so dass es an der Naht nahtlos schliesst (Strich läuft über den Anfang
+/// weiter, keine halbe Lücke). Ungerade Muster werden verdoppelt ([`cycle`]); Wiederholungen = gerundet,
+/// mindestens 1. Ohne gültiges Muster oder Länge unverändert.
+pub fn fit_closed(dash: &[f64], len: f64) -> Vec<f64> {
+    let Some(cyc) = cycle(dash) else { return dash.to_vec() };
+    let total: f64 = cyc.iter().sum();
+    if !(len > 0.0) || !len.is_finite() {
+        return dash.to_vec();
+    }
+    let n = (len / total).round().max(1.0);
+    let k = len / (n * total);
+    cyc.iter().map(|v| v * k).collect()
+}
+
 /// Phase in Papier-mm für einen Zug der Modell-Länge `len_m` bei 1:`scale_n` (Muster in Papier-mm).
 pub fn phase_mm(len_m: f64, dash_mm: &[f64], scale_n: f64) -> f64 {
     let k = mm_to_m(scale_n);
@@ -156,6 +171,24 @@ mod tests {
         assert_eq!(cycle(&[3.0]), Some(vec![3.0, 3.0]));
         assert_eq!(cycle(&[0.0, 0.0]), None);
         assert_eq!(cycle(&[]), None);
+    }
+
+    #[test]
+    fn geschlossener_zug_hat_ganze_wiederholungen() {
+        // Umfang 31.4 mm, Muster 3 mm: 10 Wiederholungen à 3.14 mm.
+        let d = fit_closed(&HIDDEN, 31.4);
+        assert_eq!(d.len(), 2);
+        assert!((d.iter().sum::<f64>() * 10.0 - 31.4).abs() < 1e-9, "{d:?}");
+        assert!((d[0] / d[1] - 2.0).abs() < 1e-9, "Verhältnis bleibt");
+        // Kürzer als ein Muster: genau eine Wiederholung.
+        let d = fit_closed(&HIDDEN, 1.0);
+        assert!((d.iter().sum::<f64>() - 1.0).abs() < 1e-9);
+        // Ungerade Länge wird verdoppelt, Punkte bleiben Punkte.
+        assert_eq!(fit_closed(&[3.0], 12.0).len(), 2);
+        assert_eq!(fit_closed(&DOTTED, 10.0)[0], 0.0);
+        // Unsinn: unverändert.
+        assert_eq!(fit_closed(&HIDDEN, f64::NAN), HIDDEN.to_vec());
+        assert_eq!(fit_closed(&[], 5.0), Vec::<f64>::new());
     }
 
     #[test]
@@ -253,6 +286,57 @@ mod tests {
         // Zug 60 mm lang: Phase setzt beide Enden auf einen Strich.
         let p = pieces(60.0, &OVERHEAD, offsets[0].1);
         assert!(p.first().unwrap().0 < 1e-9 && p.last().is_some_and(|q| (q.1 - 60.0).abs() < 1e-9), "{p:?}");
+    }
+
+    /// [153] Gestrichelter Vollkreis: Plan-SVG, Druck-SVG und Bildschirm-Szene strecken das Muster auf ganze
+    /// Wiederholungen über den Umfang (Naht schliesst), in jedem Massstab.
+    #[test]
+    fn gestrichelter_kreis_schliesst_an_der_naht() {
+        use crate::model::Vec2;
+        use crate::plan::buf::Writer;
+        use crate::plan::line_ends::LineEnds;
+        use crate::plan::print_svg::{print_svg_ops, PrintOptions};
+        use crate::plan::prim::Primitive;
+        use crate::plan::svg::{plan_svg, SvgOptions};
+        for n in [50.0, 100.0, 200.0] {
+            let k = mm_to_m(n);
+            let r_mm = 7.3; // Umfang 45.87 mm, Muster 3 mm
+            let circ_mm = std::f64::consts::TAU * r_mm;
+            let mut w = Writer::new(false);
+            let g = w.begin_group();
+            w.push(&Primitive::DrawingCircle { center: Vec2 { x: 20.0 * k, y: 20.0 * k }, r: r_mm * k, fill: "none".into(), stroke: "#000".into(), weight_mm: 0.18, dash: Some(Some(HIDDEN.to_vec())), drawing_id: None, greyed: None, opacity: None });
+            w.end_group(g);
+            let bytes = w.finish();
+            let whole = |d: &[f64]| {
+                let reps = circ_mm / d.iter().sum::<f64>();
+                (reps - reps.round()).abs() < 1e-3 && reps.round() >= 1.0
+            };
+            let o = SvgOptions { scale_denominator: n, margin_m: 0.0, min_x: 0.0, min_y: 0.0, max_x: 40.0 * k, max_y: 40.0 * k, hatch: false, line_ends: LineEnds::default() };
+            let svg = plan_svg(&mut parts(&bytes), &o).unwrap();
+            let el = svg.lines().find(|l| l.starts_with("<circle")).unwrap();
+            let d: Vec<f64> = attr(el, "stroke-dasharray").unwrap().split(' ').map(|x| x.parse::<f64>().unwrap() / k).collect();
+            assert!(whole(&d), "Plan-SVG 1:{n}: {d:?}");
+            assert!(attr(el, "stroke-dashoffset").is_none(), "Kreis ohne Phase");
+            let po = PrintOptions { scale_denominator: n, page_w: 100.0, page_h: 100.0, bounds: [0.0, 0.0, 40.0 * k, 40.0 * k] };
+            let ops = print_svg_ops(&mut parts(&bytes), &po).unwrap();
+            let rec: Vec<&str> = ops.split('\u{1e}').map(|r| r.split('\u{1f}').collect::<Vec<_>>()).find(|f| f.contains(&"circle")).unwrap();
+            let i = rec.iter().position(|x| *x == "stroke-dasharray").unwrap();
+            let d: Vec<f64> = rec[i + 1].split(' ').map(|x| x.parse().unwrap()).collect();
+            assert!(whole(&d), "Druck-SVG 1:{n}: {d:?}");
+        }
+        // Bildschirm-Szene (Bezug 1:100, Papier-mm × 0.1 = Meter).
+        let r = 0.73; // 7.3 mm × 0.1
+        let mut w = Writer::new(false);
+        let g = w.begin_group();
+        w.push(&Primitive::DrawingCircle { center: Vec2 { x: 2.0, y: 2.0 }, r, fill: "none".into(), stroke: "#000".into(), weight_mm: 0.18, dash: Some(Some(HIDDEN.to_vec())), drawing_id: None, greyed: None, opacity: None });
+        w.end_group(g);
+        let bytes = w.finish();
+        let sc = crate::plan::scene::build_scene(&mut parts(&bytes), &[]).unwrap();
+        let pl = &sc.polylines[0];
+        let crate::plan::scene::SDash::List(d) = &pl.dash else { panic!("Strichliste erwartet") };
+        let len: f64 = pl.pts.windows(2).map(|q| ((q[1].x - q[0].x).powi(2) + (q[1].y - q[0].y).powi(2)).sqrt()).sum::<f64>() / 0.1;
+        let reps = len / d.iter().sum::<f64>();
+        assert!((reps - reps.round()).abs() < 1e-6 && reps.round() >= 1.0, "Szene: {d:?} {reps}");
     }
 
     /// Gleiche Werte wie `render2d::tessellate::tests::musterphase_enden_auf_strich` (Shader-Spiegel).
