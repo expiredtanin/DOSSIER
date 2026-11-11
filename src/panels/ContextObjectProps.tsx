@@ -11,7 +11,8 @@ import { useStore } from "../state/appStore";
 import type { ContextObject } from "../model/types";
 import { flattenCategories } from "../model/types";
 import { resmoothGridTerrain } from "../model/terrain";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import { contourHeightPatch, heightOffsetPatch } from "../state/contextHeight";
 import type { ExcavationQuantity } from "../core";
 
 /** Zahl-Eingabe für ein Feld eines Kontext-Objekts (leer = Standard, ungültig = keine Änderung). */
@@ -64,8 +65,70 @@ const SMOOTH_LEVELS = [0, 1, 2, 3] as const;
 /** [137] Zusätzliche Glättungs-Durchgänge für Raster-Gelände. */
 const RESMOOTH_PASSES = [1, 2, 4] as const;
 
+
+/** [193] Höhenversatz (alle Höhen um dz) und, bei Höhenlinien, die Höhe je Linie. */
+function HeightFields({ obj }: { obj: ContextObject }) {
+  const host = usePanelHost();
+  const [dz, setDz] = useState("");
+  if (obj.type === "image") return null;
+  const apply = () => {
+    const patch = dz.trim() === "" ? null : heightOffsetPatch(obj, Number(dz.replace(",", ".")));
+    if (patch) host.onPatchContextObject(obj.id, patch);
+    setDz("");
+  };
+  return (
+    <>
+      <label className="site-prop" title={t("site.heightOffset.hint")}>
+        <span>{t("site.heightOffset")}</span>
+        <input
+          type="text"
+          inputMode="decimal"
+          data-testid="context-height-offset"
+          placeholder="0.00"
+          value={dz}
+          onChange={(e) => setDz(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && apply()}
+          onBlur={apply}
+        />
+      </label>
+      {obj.type === "contourSet" && (
+        <div className="site-prop" data-testid="contour-heights" style={{ display: "block", maxHeight: 180, overflowY: "auto" }}>
+          <span>{t("site.contours", { n: obj.contours.length })}</span>
+          {obj.contours.map((c, i) => (
+            <label key={i} style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <span style={{ flex: 1 }}>{`${i + 1} · ${t("site.contour.points", { n: c.pts.length })}`}</span>
+              <input
+                type="number"
+                step={0.5}
+                style={{ width: 90 }}
+                data-testid={`contour-z-${i}`}
+                value={c.z}
+                onChange={(e) => {
+                  const patch = e.target.value.trim() === "" ? null : contourHeightPatch(obj, i, Number(e.target.value));
+                  if (patch) host.onPatchContextObject(obj.id, patch, `site-${obj.id}-contourZ-${i}`);
+                }}
+              />
+            </label>
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
 /** Felder eines Kontext-Objekts; `null` für Arten ohne eigene Einstellungen (Höhenlinien, Luftbild). */
 export function ContextObjectProps({ obj, quantities }: { obj: ContextObject; quantities: readonly ExcavationQuantity[] }) {
+  return (
+    <>
+      <KindFields obj={obj} quantities={quantities} />
+      <div className="site-props">
+        <HeightFields obj={obj} />
+      </div>
+    </>
+  );
+}
+
+function KindFields({ obj, quantities }: { obj: ContextObject; quantities: readonly ExcavationQuantity[] }) {
   const host = usePanelHost();
   const project = useStore((s) => s.project);
   const notify = useStore((s) => s.notify);

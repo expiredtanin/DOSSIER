@@ -88,6 +88,8 @@ export interface CommandSelection {
   openingIds?: string[];
   /** [149] Gewählte Bäume (Verschieben/Kopieren/Spiegeln/Drehen: Stammmitte). */
   treeIds?: string[];
+  /** [193] Gewählte Gelände-/Umgebungs-Elemente (`Project.context`: Gelände, Höhenlinien, Baugrube, Netze, Bilder). */
+  contextIds?: string[];
 }
 
 /** Live-Kontext, den ein Befehl bei jedem Schritt erhält (analog ToolContext). */

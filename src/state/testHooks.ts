@@ -39,6 +39,12 @@ declare global {
       modelView: () => string | undefined;
       /** [173] Schnitt der aktiven Ebene (1:50, Detailgrad der Anzeige): Zahl der Wand-Schnittflächen und ihre Fläche (m²). */
       sectionWalls: () => Promise<{ n: number; area: number }>;
+      /** [193] Gelände-/Umgebungs-Elemente (Art, Id, bei der Baugrube die erste Umrissecke). */
+      context: () => { id: string; type: string; first?: { x: number; y: number } }[];
+      /** [193] Gefüllte Flächen (Füllfarbe gesetzt) im Grundriss der aktiven Ebene (alle Kategorien, 1:100); bei 0 ist nichts Gefülltes mehr zu sehen. */
+      planFills: () => number;
+      /** [193] Höhe (z) des ersten Gelände-Netz-Punkts. */
+      terrainZ: () => number;
       /** [185] Darstellungszustand der Plan-Ansicht: aktive Ebene, Bildmitte (Modell-m), Zoom (px/m), Massstab. */
       viewCamera: () => { levelId: string; center: { x: number; y: number } | null; pxPerMeter: number | null; scale: number };
       /** [192] Sichtbare Ebenen-Codes und Zahl der Plan-Primitive (gesamt / mit Wand-Bezug) der aktiven Ebene. */
@@ -87,6 +93,24 @@ export function installTestHooks(): void {
       };
       walk(s.project.layers);
       return generatePlan(s.project, s.activeLevelId, codes, undefined, s.detail, false, false, true, 50).primitives.filter((q) => q.kind === "line" && q.cls === cls).length;
+    },
+    context: () =>
+      (getState().project.context ?? []).map((c) => ({ id: c.id, type: c.type, first: c.type === "excavation" ? c.outline[0] : undefined })),
+    planFills: () => {
+      const s = getState();
+      const codes = new Set<string>();
+      const walk = (cs: { code: string; children?: unknown[] }[]): void => {
+        for (const c of cs) {
+          codes.add(c.code);
+          walk((c.children ?? []) as { code: string; children?: unknown[] }[]);
+        }
+      };
+      walk(s.project.layers);
+      return generatePlan(s.project, s.activeLevelId, codes, undefined, s.detail, false, false, true, 100).primitives.filter((q) => q.kind === "polygon" && q.fill && q.fill !== "none").length;
+    },
+    terrainZ: () => {
+      const t = (getState().project.context ?? []).find((c) => c.type === "terrainMesh");
+      return t && t.type === "terrainMesh" ? t.positions[2] : NaN;
     },
     modelView: () => getState().project.drawingLevels.find((l) => l.id === getState().activeLevelId)?.modelViewOptionId,
     sectionWalls: async () => {

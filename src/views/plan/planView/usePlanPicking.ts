@@ -255,9 +255,12 @@ export function usePlanPicking(inp: UsePlanPickingArgs) {
 
   // [137] Getroffene Lage-Darstellung: Quelle `"sunStudy"`/`"siteRules"` (Baurechtslinie vor Schatten) oder null.
   const pickSiteAt = (clientX: number, clientY: number): string | null => {
-    const ids = contextIdsAt(clientX, clientY).filter((id) => id.startsWith("@") && !id.startsWith(TREE_PICK));
-    const id = ids.find((x) => x === "@siteRules") ?? ids[0];
-    return id ? id.slice(1) : null;
+    const all = contextIdsAt(clientX, clientY).filter((id) => !id.startsWith(TREE_PICK));
+    // [193] Liegt ein Kontext-Element (Baugrube, Netz) über der Schattenfläche, gehört der Klick ihm — sonst wäre
+    // die Baugrube unter dem Schatten des Hauses nicht anzuwählen. Die Baurechtslinie (unsichtbares Band) gewinnt immer.
+    if (all.includes("@siteRules")) return "siteRules";
+    const top = all[0];
+    return top && top.startsWith("@") ? top.slice(1) : null;
   };
 
   // [149] Getroffener Baum (oberste Kronenfläche) oder null.
