@@ -3,10 +3,11 @@
 //! als Rohre (`railings`). Die Treppengeometrie selbst kommt aus `kernel2d` (`stair_geometry`); TS sammelt aus
 //! dem `Project` nur Parameter, Höhen und Tragart und färbt die Ergebnisse ein.
 //!
-//! Eingabe (je Treppe 30 Zahlen, davor die Anzahl): die 22 Treppen-Parameter (s. [`crate::stair`]),
+//! Eingabe (je Treppe 36 Zahlen, davor die Anzahl): die 22 Treppen-Parameter (s. [`crate::stair`]),
 //! `zUnten, zOben, tragart (0 massiv, 1 beton, 2 offen: Wange/aufgesattelt/Spindel),
 //! trittdicke, nase, geschlosseneSetzstufen (0/1), gelaender (0 keine, 1 links, 2 rechts, 3 beide),
-//! saeulenRadius (0 keine; nur Wendel)`.
+//! saeulenRadius (0 keine; nur Wendel), [T3] handlaufProfil (0 rund, 1 rechteck, 2 flach), handlaufBreite,
+//! handlaufHoehe, pfostenProfil, pfostenBreite, pfostenTiefe (fehlend = NaN = Standard)`.
 //!
 //! Ausgabe Slabs: `[n, (treppe, monolith 0/1, zUnten, zOben, nPkt, x, y …)…]`; Ausgabe Meshes
 //! (Laufplatte, Geländer): `[n, (treppe, nPos, nIdx, positionen…, indizes…)…]`. `treppe` ist der
@@ -43,6 +44,8 @@ struct StairIn {
     closed_risers: bool,
     railing: u8,
     column_radius: f64,
+    /// [T3] Handlauf- und Pfostenprofil.
+    rail: RailSpec,
 }
 
 impl StairIn {
@@ -66,6 +69,7 @@ fn decode(buf: &[f64]) -> Option<Vec<Option<StairIn>>> {
         }
         let (z_bottom, z_top, structure, tread_thickness, nosing, closed, railing, column) =
             (r.num()?, r.num()?, r.num()?, r.num()?, r.num()?, r.num()?, r.num()?, r.num()?);
+        let (rail_profile, rail_w, rail_h, post_profile, post_w, post_d) = (r.num()?, r.num()?, r.num()?, r.num()?, r.num()?, r.num()?);
         // Eine unbrauchbare Treppe fällt einzeln weg (Index bleibt erhalten).
         let valid = [z_bottom, z_top, tread_thickness, nosing].iter().all(|v| v.is_finite());
         out.push(match (valid, decode_params(&p)) {
@@ -79,6 +83,7 @@ fn decode(buf: &[f64]) -> Option<Vec<Option<StairIn>>> {
                 closed_risers: closed != 0.0,
                 railing: railing.clamp(0.0, 3.0) as u8,
                 column_radius: if column.is_finite() && column > 0.0 { column.min(5.0) } else { 0.0 },
+                rail: RailSpec::decode([rail_profile, rail_w, rail_h, post_profile, post_w, post_d]),
             }),
             _ => None,
         });
@@ -519,13 +524,131 @@ type V3 = [f64; 3];
 /// Ecken des runden Handlauf-Profils.
 const TUBE_SEGMENTS: usize = 12;
 
-/// Rohr (Kreisprofil, Radius `radius`) entlang eines Polygonzugs, mit Deckeln; geschlossenes,
-/// nach aussen orientiertes Netz. Profil-Ebene je Punkt senkrecht zur gemittelten Tangente; die
-/// Profil-Lage wird mitgeführt (Doppelspiegelung, ohne Verdrillen). `None` bei < 2 Punkten oder
-/// entarteten (zu kurzen/NaN-) Segmenten.
+/// [T3] Querschnitt eines Handlaufs oder Pfostens: Punkte (quer, hoch) gegen den Uhrzeigersinn um die Achse.
+type Section = Vec<[f64; 2]>;
+
+fn round_section(radius: f64) -> Section {
+    (0..TUBE_SEGMENTS)
+        .map(|k| {
+            let a = std::f64::consts::TAU * k as f64 / TUBE_SEGMENTS as f64;
+            [crate::jsnum::cos(a) * radius, crate::jsnum::sin(a) * radius]
+        })
+        .collect()
+}
+
+fn rect_section(w: f64, h: f64) -> Section {
+    let (a, b) = (w / 2.0, h / 2.0);
+    vec![[a, -b], [a, b], [-a, b], [-a, -b]]
+}
+
+/// [T3] Profile von Handlauf und Pfosten einer Treppe (Mass in Metern); [`RailSpec::default`] = heutiges Rundrohr.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RailSpec {
+    rail: (u8, f64, f64),
+    post: (u8, f64, f64),
+}
+
+impl Default for RailSpec {
+    fn default() -> Self {
+        RailSpec { rail: (0, RAIL_THICK, RAIL_THICK), post: (0, RAIL_THICK * 0.75, RAIL_THICK * 0.75) }
+    }
+}
+
+impl RailSpec {
+    /// Aus `[profil, breite, höhe, pfostenProfil, pfostenBreite, pfostenTiefe]`; fehlend/unsinnig = Standard.
+    pub fn decode(v: [f64; 6]) -> Self {
+        let kind = |x: f64| if x == 1.0 { 1 } else if x == 2.0 { 2 } else { 0 };
+        let dim = |x: f64, d: f64| if x.is_finite() && x > 0.0 { x.clamp(0.002, 0.5) } else { d };
+        let (rk, pk) = (kind(v[0]), kind(v[3]));
+        let rw = dim(v[1], RAIL_THICK);
+        let pw = dim(v[4], if pk == 2 { 0.04 } else { RAIL_THICK * 0.75 });
+        RailSpec {
+            rail: (rk, rw, dim(v[2], if rk == 2 { 0.01 } else { RAIL_THICK })),
+            post: (pk, pw, dim(v[5], if pk == 2 { 0.01 } else { RAIL_THICK * 0.75 })),
+        }
+    }
+
+    /// Dünne Rundrohre für die Ansichtskanten im Schnitt ([`railings_with`]).
+    fn thin(half: f64) -> Self {
+        RailSpec { rail: (0, half * 2.0, half * 2.0), post: (0, half * 1.5, half * 1.5) }
+    }
+
+    fn section((k, w, h): (u8, f64, f64)) -> Section {
+        if k == 0 { round_section(w / 2.0) } else { rect_section(w, h) }
+    }
+
+    fn rail_section(&self) -> Section {
+        Self::section(self.rail)
+    }
+
+    fn post_section(&self) -> Section {
+        Self::section(self.post)
+    }
+
+    fn area((k, w, h): (u8, f64, f64)) -> f64 {
+        if k == 0 { std::f64::consts::PI * w * w / 4.0 } else { w * h }
+    }
+
+    /// Halbe Handlaufbreite (m): Abstand der Kanten der Doppellinie im Grundriss.
+    pub fn rail_half_width(&self) -> f64 {
+        self.rail.1 / 2.0
+    }
+
+    /// Querschnittsfläche des Handlaufs (m²), für die IFC-Basismengen.
+    pub fn rail_area(&self) -> f64 {
+        Self::area(self.rail)
+    }
+}
+
+/// Richtung (waagrecht, Einheit) des Handlaufzugs bei `q`: Segment mit dem kleinsten Grundrissabstand.
+fn path_dir(path: &[V3], q: P) -> Option<V3> {
+    let mut best: Option<(f64, V3)> = None;
+    for w in path.windows(2) {
+        let d = [w[1][0] - w[0][0], w[1][1] - w[0][1]];
+        let l2 = d[0] * d[0] + d[1] * d[1];
+        if !(l2 > 1e-12) {
+            continue;
+        }
+        let t = (((q[0] - w[0][0]) * d[0] + (q[1] - w[0][1]) * d[1]) / l2).clamp(0.0, 1.0);
+        let dist = hypot2(w[0][0] + d[0] * t - q[0], w[0][1] + d[1] * t - q[1]);
+        if best.map_or(true, |(b, _)| dist < b) {
+            let l = l2.sqrt();
+            best = Some((dist, [d[0] / l, d[1] / l, 0.0]));
+        }
+    }
+    best.map(|b| b.1)
+}
+
+/// Querachse eines eckigen Handlaufprofils: waagrecht quer zum ersten Segment (Breite waagrecht, Höhe senkrecht).
+/// Rundprofile brauchen keine (und behalten so ihre Netze bit-genau).
+fn rail_across(kind: u8, path: &[V3]) -> Option<V3> {
+    if kind == 0 {
+        return None;
+    }
+    let w = path.windows(2).next()?;
+    let (dx, dy) = (w[1][0] - w[0][0], w[1][1] - w[0][1]);
+    let l = hypot2(dx, dy);
+    (l > 1e-9).then(|| [-dy / l, dx / l, 0.0])
+}
+
+/// Rohr mit Kreisprofil: [`sweep`] mit rundem Querschnitt.
+#[cfg(test)]
 fn tube_along(path: &[V3], radius: f64) -> Option<(Vec<f64>, Vec<u32>)> {
+    if !(radius > 0.0) {
+        return None;
+    }
+    sweep(path, &round_section(radius), None)
+}
+
+/// Körper (beliebiger konvexer Querschnitt `section`) entlang eines Polygonzugs, mit Deckeln; geschlossenes,
+/// nach aussen orientiertes Netz. Profil-Ebene je Punkt senkrecht zur gemittelten Tangente; die
+/// Profil-Lage wird mitgeführt (Doppelspiegelung, ohne Verdrillen). Die erste Profilachse liegt zu Beginn
+/// in `start_normal` (auf die Profil-Ebene projiziert); ohne sie senkrecht (für Rundprofile ohne Belang). `None` bei < 2
+/// Punkten oder entarteten (zu kurzen/NaN-) Segmenten.
+fn sweep(path: &[V3], section: &Section, start_normal: Option<V3>) -> Option<(Vec<f64>, Vec<u32>)> {
     let n = path.len();
-    if n < 2 || !(radius > 0.0) {
+    let m = section.len();
+    if n < 2 || m < 3 {
         return None;
     }
     let sub = |a: V3, b: V3| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -544,11 +667,28 @@ fn tube_along(path: &[V3], radius: f64) -> Option<(Vec<f64>, Vec<u32>)> {
             (None, None) => [0.0, 0.0, 1.0],
         })
         .collect();
+    // [155] Geschlossener Zug (Anfang = Ende): Gehrung an der Naht, keine Deckel.
+    let closed = n >= 4 && hypot(&sub(path[0], path[n - 1])) < 1e-9;
+    let mut tangents = tangents;
+    if closed {
+        let (a, b) = (seg[n - 2], seg[0]);
+        if let Some(t) = unit([a[0] + b[0], a[1] + b[1], a[2] + b[2]]) {
+            tangents[0] = t;
+            tangents[n - 1] = t;
+        }
+    }
     // Start-Normale: quer zur Tangente, möglichst waagrecht.
     let t0 = tangents[0];
     let up: V3 = if t0[2].abs() > 0.98 { [1.0, 0.0, 0.0] } else { [0.0, 0.0, 1.0] };
     let mut normal = unit(cross(cross(t0, up), t0))?;
-    let mut positions = Vec::with_capacity(3 * (n * TUBE_SEGMENTS + 2));
+    if let Some(sn) = start_normal {
+        // gewünschte Querachse, senkrecht zur Tangente gestellt
+        let d = dot(sn, t0);
+        if let Some(u) = unit(sub(sn, t0.map(|x| x * d))) {
+            normal = u;
+        }
+    }
+    let mut positions = Vec::with_capacity(3 * (n * m + 2));
     for i in 0..n {
         if i > 0 {
             // Doppelspiegelung (Wang et al. 2008): rotationsminimierende Rahmen.
@@ -562,9 +702,7 @@ fn tube_along(path: &[V3], radius: f64) -> Option<(Vec<f64>, Vec<u32>)> {
             normal = unit(normal)?;
         }
         let bi = cross(tangents[i], normal);
-        for k in 0..TUBE_SEGMENTS {
-            let a = std::f64::consts::TAU * k as f64 / TUBE_SEGMENTS as f64;
-            let (c, s) = (crate::jsnum::cos(a) * radius, crate::jsnum::sin(a) * radius);
+        for &[c, s] in section {
             for d in 0..3 {
                 positions.push(path[i][d] + normal[d] * c + bi[d] * s);
             }
@@ -576,19 +714,21 @@ fn tube_along(path: &[V3], radius: f64) -> Option<(Vec<f64>, Vec<u32>)> {
     for d in 0..3 {
         positions.push(path[n - 1][d]);
     }
-    let m = TUBE_SEGMENTS as u32;
+    let m = m as u32;
     let ring = |i: usize, k: u32| i as u32 * m + k % m;
-    let (c0, c1) = ((n * TUBE_SEGMENTS) as u32, (n * TUBE_SEGMENTS) as u32 + 1);
-    let mut indices = Vec::with_capacity(6 * TUBE_SEGMENTS * n);
+    let (c0, c1) = ((n * section.len()) as u32, (n * section.len()) as u32 + 1);
+    let mut indices = Vec::with_capacity(6 * section.len() * n);
     for i in 0..n - 1 {
         for k in 0..m {
             let (a, b, c, d) = (ring(i, k), ring(i, k + 1), ring(i + 1, k + 1), ring(i + 1, k));
             indices.extend([a, b, c, a, c, d]);
         }
     }
-    for k in 0..m {
-        indices.extend([c0, ring(0, k + 1), ring(0, k)]);
-        indices.extend([c1, ring(n - 1, k), ring(n - 1, k + 1)]);
+    if !closed {
+        for k in 0..m {
+            indices.extend([c0, ring(0, k + 1), ring(0, k)]);
+            indices.extend([c1, ring(n - 1, k), ring(n - 1, k + 1)]);
+        }
     }
     Some((positions, indices))
 }
@@ -660,18 +800,20 @@ pub fn stringers(buf: &[f64]) -> Vec<Mesh> {
     out
 }
 
-fn railings_of(s: &StairIn, idx: usize, half: f64, out: &mut Vec<Mesh>) {
+fn railings_of(s: &StairIn, idx: usize, thin: Option<f64>, out: &mut Vec<Mesh>) {
     if s.railing == 0 {
         return;
     }
     let Some((geo, _)) = geometry_of(s) else { return };
     let z0 = s.z_bottom;
+    let spec = thin.map_or(s.rail, RailSpec::thin);
+    let (rail_sec, post_sec) = (spec.rail_section(), spec.post_section());
     let mut tubes: Vec<(Vec<f64>, Vec<u32>)> = Vec::new();
     for rail in crate::stair_rail::rails(&s.params, &geo, s.railing) {
         let path: Vec<V3> = rail.path.iter().map(|q| [q[0], q[1], q[2] + z0]).collect();
-        tubes.extend(tube_along(&path, half));
+        tubes.extend(sweep(&path, &rail_sec, rail_across(spec.rail.0, &path)));
         for (p, z) in &rail.posts {
-            tubes.extend(tube_along(&[[p[0], p[1], z0 + z], [p[0], p[1], z0 + z + crate::stair_rail::RAIL_HEIGHT]], half * 0.75));
+            tubes.extend(sweep(&[[p[0], p[1], z0 + z], [p[0], p[1], z0 + z + crate::stair_rail::RAIL_HEIGHT]], &post_sec, path_dir(&path, *p)));
         }
     }
     if s.spiral() {
@@ -722,17 +864,22 @@ pub fn slab_meshes(buf: &[f64]) -> Vec<Mesh> {
 }
 
 pub fn railings(buf: &[f64]) -> Vec<Mesh> {
-    railings_with(buf, RAIL_THICK / 2.0)
+    railings_in(buf, None)
 }
 
 /// [157] Wie [`railings`] mit Rohr-Halbmesser `half` (Schnitt: dünn, damit Handlauf und Pfosten als je eine
 /// Linie erscheinen statt als Doppellinie im Rohrabstand).
 pub fn railings_with(buf: &[f64], half: f64) -> Vec<Mesh> {
+    railings_in(buf, Some(half))
+}
+
+/// `thin`: Rohr-Halbmesser statt des Profils der Treppe ([`railings_with`]).
+fn railings_in(buf: &[f64], thin: Option<f64>) -> Vec<Mesh> {
     let mut out = Vec::new();
     let Some(stairs) = decode(buf) else { return out };
     for (i, s) in stairs.iter().enumerate() {
         if let Some(s) = s {
-            railings_of(s, i, half, &mut out);
+            railings_of(s, i, thin, &mut out);
         }
     }
     out
@@ -745,32 +892,35 @@ const GUARD_POST_GAP: f64 = 1.2;
 /// [155] Körper der Absturzsicherung am Deckenloch über den Achsen aus [`crate::stair_guard`] (Standhöhe `z`):
 /// Pfosten an den Ecken und im Abstand, Handlauf in [`crate::stair_rail::RAIL_HEIGHT`], Stäbe als Füllung —
 /// dieselben Rohrquerschnitte wie das Treppengeländer. Ein Netz (Quelle `src`), leer ohne Achsen.
-pub fn guard_mesh(axes: &[Vec<P>], z: f64, src: usize) -> Option<Mesh> {
+pub fn guard_mesh(axes: &[Vec<P>], z: f64, src: usize, spec: &RailSpec) -> Option<Mesh> {
     let h = crate::stair_rail::RAIL_HEIGHT;
     let half = RAIL_THICK / 2.0;
+    let (rail_sec, post_sec) = (spec.rail_section(), spec.post_section());
     let mut tubes: Vec<(Vec<f64>, Vec<u32>)> = Vec::new();
     for axis in axes {
         if axis.len() < 2 || axis.iter().any(|q| !q[0].is_finite() || !q[1].is_finite()) {
             continue;
         }
         let top: Vec<V3> = axis.iter().map(|q| [q[0], q[1], z + h]).collect();
-        tubes.extend(tube_along(&top, half));
-        let post_at = |q: P, r: f64, z1: f64, tubes: &mut Vec<(Vec<f64>, Vec<u32>)>| tubes.extend(tube_along(&[[q[0], q[1], z], [q[0], q[1], z1]], r));
+        tubes.extend(sweep(&top, &rail_sec, rail_across(spec.rail.0, &top)));
+        let post_at = |q: P, sec: &Section, dir: Option<V3>, z1: f64, tubes: &mut Vec<(Vec<f64>, Vec<u32>)>| tubes.extend(sweep(&[[q[0], q[1], z], [q[0], q[1], z1]], sec, dir));
+        let bal_sec = round_section(0.006);
         for (i, w) in axis.windows(2).enumerate() {
             let len = hypot2(w[1][0] - w[0][0], w[1][1] - w[0][1]);
             if len < EPS {
                 continue;
             }
             let at = |t: f64| [w[0][0] + (w[1][0] - w[0][0]) * t, w[0][1] + (w[1][1] - w[0][1]) * t];
+            let dir = Some([(w[1][0] - w[0][0]) / len, (w[1][1] - w[0][1]) / len, 0.0]);
             let n_post = (len / GUARD_POST_GAP).ceil().max(1.0) as usize;
-            for k in 0..n_post + usize::from(i + 2 == axis.len()) {
-                post_at(at(k as f64 / n_post as f64), half * 0.75, z + h, &mut tubes);
+            for k in 0..n_post + usize::from(i + 2 == axis.len() && !crate::stair_rail::is_closed(axis)) {
+                post_at(at(k as f64 / n_post as f64), &post_sec, dir, z + h, &mut tubes);
             }
             let n_bal = (len / GUARD_BALUSTER_GAP).round().max(1.0) as usize;
             for k in 1..n_bal {
                 let t = k as f64 / n_bal as f64;
                 if (t * n_post as f64).fract().min(1.0 - (t * n_post as f64).fract()) * len / n_post as f64 > 0.04 {
-                    post_at(at(t), 0.006, z + h - half, &mut tubes);
+                    post_at(at(t), &bal_sec, None, z + h - half, &mut tubes);
                 }
             }
         }
@@ -796,7 +946,7 @@ mod tests {
             1.0, // eine Treppe
             0.0, 0.0, 0.0, 1.0, 0.0, 3.0, nan, nan, nan, nan, nan, nan, 1.0, 10.0, nan, 0.0, // Parameter
             nan, nan, nan, nan, nan, nan,
-            0.0, 2.8, structure, 0.04, nosing, closed, railing, 0.0,
+            0.0, 2.8, structure, 0.04, nosing, closed, railing, 0.0, f64::NAN, f64::NAN, f64::NAN, f64::NAN, f64::NAN, f64::NAN,
         ]
     }
 
@@ -845,7 +995,7 @@ mod tests {
         vec![
             1.0, 1.0, 0.0, 0.0, 1.0, 0.0, 2.0, 1.5, turn, nan, nan, nan, nan, 1.0, 10.0, nan, 0.0,
             nan, nan, nan, nan, nan, nan,
-            0.0, 2.8, 0.0, 0.04, 0.0, 0.0, railing, 0.0,
+            0.0, 2.8, 0.0, 0.04, 0.0, 0.0, railing, 0.0, f64::NAN, f64::NAN, f64::NAN, f64::NAN, f64::NAN, f64::NAN,
         ]
     }
 
@@ -882,7 +1032,7 @@ mod tests {
         let s = stairs[0].as_ref().unwrap();
         let (geo, _) = geometry_of(s).unwrap();
         let mut out = Vec::new();
-        railings_of(s, 0, RAIL_THICK / 2.0, &mut out);
+        railings_of(s, 0, None, &mut out);
         let rail = &out[0];
         // Podesthöhe: Oberkante Podest + 0.9 kommt als Ebene im Handlauf vor
         let z_land = geo.treads.iter().find(|t| t.index > 2).unwrap().base_rise + RAIL_HEIGHT;
@@ -948,7 +1098,7 @@ mod tests {
         let l = vec![
             1.0, 1.0, 0.0, 0.0, 1.0, 0.0, 2.0, 1.5, 1.0, nan, nan, nan, nan, 1.0, 10.0, nan, 0.0, // L
             nan, nan, nan, nan, nan, nan,
-            0.0, 2.8, 0.0, 0.04, 0.0, 0.0, 0.0, 0.0,
+            0.0, 2.8, 0.0, 0.04, 0.0, 0.0, 0.0, 0.0, f64::NAN, f64::NAN, f64::NAN, f64::NAN, f64::NAN, f64::NAN,
         ];
         let s = slabs(&l, false);
         assert!(s.len() >= 10);
@@ -959,7 +1109,7 @@ mod tests {
         let w = vec![
             1.0, 2.0, 1.0, 0.0, 1.0, 0.0, 1.0, nan, nan, 0.0, 0.0, 1.5, 270.0, 1.0, 12.0, nan, 0.0, // Wendel
             nan, nan, nan, nan, nan, nan,
-            0.0, 2.8, 2.0, 0.04, 0.0, 0.0, 3.0, 0.0,
+            0.0, 2.8, 2.0, 0.04, 0.0, 0.0, 3.0, 0.0, f64::NAN, f64::NAN, f64::NAN, f64::NAN, f64::NAN, f64::NAN,
         ];
         assert!(!slabs(&w, false).is_empty());
         assert!(!railings(&w).is_empty()); // Wendelgeländer = Schraubensweep
@@ -970,7 +1120,7 @@ mod tests {
         vec![
             1.0, 2.0, 1.0, 0.0, 1.0, 0.0, 1.0, nan, nan, 0.0, 0.0, 1.5, 270.0, 1.0, 12.0, nan, 0.0, // Wendel
             nan, nan, nan, nan, nan, nan,
-            0.0, 2.8, structure, 0.04, 0.0, 0.0, railing, column,
+            0.0, 2.8, structure, 0.04, 0.0, 0.0, railing, column, f64::NAN, f64::NAN, f64::NAN, f64::NAN, f64::NAN, f64::NAN,
         ]
     }
 
@@ -1102,7 +1252,7 @@ mod tests {
         vec![
             1.0, 3.0, 0.0, 0.0, 1.0, 0.0, 2.5, 2.5, 1.0, nan, nan, nan, nan, 1.0, 17.0, nan, 0.0,
             0.2, nan, nan, mid, nan, nan,
-            0.0, 2.89, structure, 0.04, 0.0, 0.0, railing, 0.0,
+            0.0, 2.89, structure, 0.04, 0.0, 0.0, railing, 0.0, f64::NAN, f64::NAN, f64::NAN, f64::NAN, f64::NAN, f64::NAN,
         ]
     }
 
@@ -1210,7 +1360,7 @@ mod tests {
             vec![
                 1.0, 4.0, 0.0, 0.0, 1.0, 0.0, 2.0, 2.0, nan, nan, nan, nan, nan, 1.0, 16.0, nan, 0.0,
                 nan, 1.2, 8.0, nan, nan, nan,
-                0.0, 2.8, structure, 0.04, 0.0, 0.0, 3.0, 0.0,
+                0.0, 2.8, structure, 0.04, 0.0, 0.0, 3.0, 0.0, f64::NAN, f64::NAN, f64::NAN, f64::NAN, f64::NAN, f64::NAN,
             ]
         };
         let s = slabs(&b(0.0), false);
@@ -1223,5 +1373,68 @@ mod tests {
         assert!(!r.is_empty());
         let c = tube_centers(&r[0]);
         assert!((c[c.len() - 1][0] - 5.2).abs() < 1e-9 && (c[c.len() - 1][2] - 3.7).abs() < 1e-9);
+    }
+
+    /// [T3] Ohne Angabe: Standard-Rundrohr; Rechteck/Flachstahl: vier Ecken je Querschnitt, Mass wie angegeben.
+    #[test]
+    fn handlauf_profile() {
+        assert_eq!(RailSpec::decode([f64::NAN; 6]), RailSpec::default());
+        assert!((RailSpec::default().rail_area() - std::f64::consts::PI * 0.02 * 0.02).abs() < 1e-12);
+        // Rechteck 6 × 2 cm entlang x: y-Spanne = Breite, z-Spanne = Höhe (Querachse waagrecht).
+        let path: Vec<V3> = vec![[0.0, 0.0, 1.0], [2.0, 0.0, 1.0]];
+        let (pos, idx) = sweep(&path, &rect_section(0.06, 0.02), rail_across(1, &path)).unwrap();
+        assert_eq!(pos.len(), 3 * (2 * 4 + 2));
+        let span = |d: usize| {
+            let v: Vec<f64> = pos.chunks(3).take(8).map(|q| q[d]).collect();
+            v.iter().cloned().fold(f64::MIN, f64::max) - v.iter().cloned().fold(f64::MAX, f64::min)
+        };
+        assert!((span(1) - 0.06).abs() < 1e-9 && (span(2) - 0.02).abs() < 1e-9, "{} {}", span(1), span(2));
+        assert_eq!(idx.len(), 3 * (2 * 4 + 2 * 4)); // vier Seitenflächen (je 2 Dreiecke) + Deckel
+        // nach aussen orientiert (positives Volumen)
+        let m = Mesh { src: 0, positions: pos, indices: idx };
+        assert!(signed_volume(&m) > 0.0);
+        // Treppe: Rechteck-Handlauf hat weniger Ecken als das Rundrohr, das Profil wirkt auch auf den Pfosten
+        let mut round = straight(2.0, 1.0, 0.0, 0.0);
+        let r0 = railings(&round);
+        let n = round.len();
+        round[n - 6..].copy_from_slice(&[1.0, 0.06, 0.03, 1.0, 0.05, 0.02]);
+        let r1 = railings(&round);
+        assert_eq!(r0.len(), r1.len());
+        assert!(r1[0].positions.len() < r0[0].positions.len());
+        assert!(r1.iter().skip(1).all(|m| m.positions.len() == 3 * (2 * 4 + 2)), "Pfosten vierkant");
+        // Ansichtskanten im Schnitt bleiben dünne Rundrohre
+        assert_eq!(railings_with(&round, 0.004)[0].positions.len(), railings_with(&straight(2.0, 1.0, 0.0, 0.0), 0.004)[0].positions.len());
+    }
+
+    /// [T3] Absturzsicherung nimmt das Profil der Treppe; Pfosten stehen mit der Breite in Richtung des Handlaufs.
+    #[test]
+    fn absturzsicherung_profil() {
+        let axes = vec![vec![[0.0, 0.0], [2.0, 0.0]]];
+        let round = guard_mesh(&axes, 0.0, 0, &RailSpec::default()).unwrap();
+        let spec = RailSpec::decode([1.0, 0.05, 0.03, 2.0, 0.04, 0.01]);
+        let flat = guard_mesh(&axes, 0.0, 0, &spec).unwrap();
+        assert!(flat.positions.len() < round.positions.len());
+        // erster Pfosten (nach dem Handlauf): x-Spanne 4 cm (Breite), y-Spanne 1 cm (Dicke)
+        let first = &flat.positions[3 * (2 * 4 + 2)..3 * (2 * 4 + 2) + 3 * 8];
+        let span = |d: usize| {
+            let v: Vec<f64> = first.chunks(3).map(|q| q[d]).collect();
+            v.iter().cloned().fold(f64::MIN, f64::max) - v.iter().cloned().fold(f64::MAX, f64::min)
+        };
+        assert!((span(0) - 0.04).abs() < 1e-9 && (span(1) - 0.01).abs() < 1e-9, "{} {}", span(0), span(1));
+    }
+
+    /// [155] Geschlossener Zug (freier Lochring): ohne Deckel, Naht ohne Lücke.
+    #[test]
+    fn geschlossener_zug_ohne_deckel() {
+        let path: Vec<V3> = vec![[0.0, 0.0, 1.0], [1.0, 0.0, 1.0], [1.0, 1.0, 1.0], [0.0, 1.0, 1.0], [0.0, 0.0, 1.0]];
+        let (pos, idx) = sweep(&path, &round_section(0.02), None).unwrap();
+        assert_eq!(idx.len(), 6 * TUBE_SEGMENTS * 4, "nur Mantel");
+        // erster und letzter Ring fallen zusammen
+        let m = TUBE_SEGMENTS * 3;
+        for k in 0..m {
+            assert!((pos[k] - pos[4 * m + k]).abs() < 1e-9, "{k}");
+        }
+        // offener Zug behält die Deckel
+        assert_eq!(sweep(&path[..4], &round_section(0.02), None).unwrap().1.len(), 6 * TUBE_SEGMENTS * 3 + 6 * TUBE_SEGMENTS);
     }
 }

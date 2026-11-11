@@ -219,6 +219,18 @@ impl Roof {
 }
 
 impl Stair {
+    /// [T3] Handlauf-/Pfosten-Profil als `[profil, breite, höhe, pfostenProfil, pfostenBreite, pfostenTiefe]`
+    /// (Profil 0 rund, 1 rechteck, 2 flach; fehlend = NaN = Standard), Eingabe von [`crate::stairs3d::RailSpec::decode`].
+    pub fn rail_params(&self) -> [f64; 6] {
+        let n = |v: Option<f64>| v.unwrap_or(f64::NAN);
+        let k = |p: Option<StairRailProfile>| match p {
+            Some(StairRailProfile::Rechteck) => 1.0,
+            Some(StairRailProfile::Flach) => 2.0,
+            _ => 0.0,
+        };
+        [k(self.rail_profile), n(self.rail_width), n(self.rail_height), k(self.post_profile), n(self.post_width), n(self.post_depth)]
+    }
+
     /// Treppen-Parameter als [`crate::stair::PARAMS`] Zahlen (Aufbau: `stair.rs`, `encodeStair` in TS);
     /// fehlend = NaN.
     pub fn encode(&self) -> [f64; crate::stair::PARAMS] {

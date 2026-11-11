@@ -379,11 +379,13 @@ pub fn stair_parts(one: &Project, stair: &Stair, base: f64) -> StairParts {
         })
         .collect();
 
+    // [T3] Querschnitt des Handlaufs (Rund-, Rechteck-, Flachprofil) für die Basismengen
+    let section_area = crate::stairs3d::RailSpec::decode(stair.rail_params()).rail_area();
     let rail_meshes = model3d::emit_stair_handrails(one);
     let rail = (!rail_meshes.is_empty()).then(|| {
         let (positions, indices) = concat(&rail_meshes);
         let sides = if one.stair_type(stair).and_then(|t| t.railing) == Some(StairTypeRailing::Beide) { 2.0 } else { 1.0 };
-        Rail { mesh: ifc_mesh(positions, &indices, base), quantities: railing_quantities(walk_length(stair, rise) * sides) }
+        Rail { mesh: ifc_mesh(positions, &indices, base), quantities: railing_quantities(walk_length(stair, rise) * sides, section_area) }
     });
     let guard_meshes = model3d::stair_guard_meshes(one);
     let guard = (!guard_meshes.is_empty()).then(|| {
@@ -395,7 +397,7 @@ pub fn stair_parts(one: &Project, stair: &Stair, base: f64) -> StairParts {
         }
         // Länge der Achsen aller Löcher, in denen die Treppe ankommt
         let length: f64 = one.drawing_levels.iter().map(|f| crate::stair_guard::arrivals(one, &f.id, &|_| true, &|| model3d::wall_footprints_of_floor(one, &f.id)).iter().map(|a| crate::stair_guard::axes_length(&a.axes)).sum::<f64>()).sum();
-        Rail { mesh: ifc_mesh(positions, &indices, base), quantities: railing_quantities(length) }
+        Rail { mesh: ifc_mesh(positions, &indices, base), quantities: railing_quantities(length, section_area) }
     });
     StairParts { flights, landings, rail, guard, column }
 }

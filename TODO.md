@@ -137,6 +137,8 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   Kreise ohne (geschlossen), DXF/DWG ohne Phase je Objekt,
   Metal-Chunks verketten nur über das Ketten-Flag, React-SVG-Ansicht ohne Phase. · M
 - ◐ **[155]** Treppensymbol. (10.11.) Lauflinie hinter der Bruchlinie gestrichelt wie die Tritte (Pfeil bleibt ausgezogen); Raumstempel weichen allen Treppen-Linien aus (`stamp_obstacles_with` nimmt `d.stairs` ganz, Test `stempel_weichen_den_treppenlinien_aus`). (11.11.)
+  Freier Lochring ohne Wand und Austritt: geschlossener Zug mit Gehrung an der Naht (`offset_polyline` erkennt geschlossene
+  Züge, 3D-Rohr ohne Deckel; Test `freier_ring_ist_geschlossen_mit_gehrung`); offene Enden stehen rechtwinklig. (11.11.)
   Absturzsicherung am Deckenloch auch in 3D (Körper aus Pfosten, Handlauf, Stäben, `stairs3d::guard_mesh`; Lage aus dem
   gemeinsamen `stair_guard.rs`, gleiche Quelle wie der Grundriss; Teil der Treppen-Handläufe, pickbar mit der Treppe) und im
   IFC (eigenes IfcRailing GUARDRAIL an der IfcStair, Länge als Basismenge; Wire-Format STAIR: `n_rails` statt `has_rail`). Offen:
@@ -374,7 +376,6 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   `arc_wall_radius_target`). Bogenlänge per Tab auch über dem Halbkreis: Seite eindeutig aus dem Cursor, Öffnungswinkel
   genau l/r (`arc_wall_resize`, `moveGrip` mit `arcLength`); Vorschau mit echtem Bulge. Geprüft: Rust-/vitest-Tests; nicht in der
   App geklickt (Shift-Griff, Tab-Feld „Radius", HUD). · M
-- ◐ **[T3]** Wendeltreppe. Kein Handlauf-Profil im Modell (rund fest). · S
 - ◐ **[T4]** Import-Meshes glätten oder kantig. Metal-Pfad nicht gebaut/gesehen. · S
 - ◐ **[T6]** Glattes Gelände aus Höhenlinien (`terrain.rs`). Natural-Neighbour/Clough-Tocher statt Hermite-Teilung;
   Erdreich-Band nicht „bis zur Planunterkante“; Glättung ohne Kantenerhalt; Baugrube ist eigene Kategorie und
@@ -435,7 +436,7 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   nicht in der Tauri-App geprüft. · S
 - ◐ **[108]** Schräge Wandanschlüsse exakt (T/L/X). 3D nur per Rust-Test (kein Metal-Render). · S
 - ◐ **[151]** Treppenformen U und gerade mit Podest (`Stair`, `kernel2d`, `stairs3d.rs`). Kein Wendelpodest/Wendelstufen am
-  Podest; Handlauf-Profil fest rund; Doppellinie ab 1:50 fest (keine Einstellung). · M
+  Podest; Doppellinie ab 1:50 fest (keine Einstellung). · M
 - ◐ **[100]** Standard-Baustoffe/Ansichtsschraffur (SIA 400). Deckenspiegel: Unterzüge (kein Modell-Element), UK unter
   Gauben, kein Leuchten-Werkzeug; waagrechte Flächen in Schnitt/Ansicht nicht sichtbar; Decken ohne
   `surfacePatternAngle/Offset`. · M
@@ -621,3 +622,9 @@ exakte Durchdringung, [61] Zuordnung per Hand, [63] Profil je Kante, [70] Fläch
   Hindernis der Höhenlinien-Beschriftungen (Räume werden vor dem Kontext gesetzt, `outside_stamps`); Beschriftungen an
   dichten Bündeln fehlen nicht mehr, sondern rücken entlang der Linie auf freie Stellen (Abschnitt, dann ganze Linie, erst
   zuletzt auf dem Bündel; `contour_prims`)
+- [T3] Handlauf-Profil im Modell (11.11.): `Stair.railProfile` (rund / rechteck / flach), `railWidth`, `railHeight`, dazu
+  Pfosten `postProfile`, `postWidth`, `postDepth`; gilt für alle Treppenformen und die Absturzsicherung am Deckenloch
+  (`stairs3d::RailSpec`, `sweep` statt Rundrohr; Pfostenbreite in Richtung des Handlaufs). Grundriss-Doppellinie nutzt die
+  halbe Handlaufbreite, IFC-Basismenge `CrossSectionArea`, Objekt-Info (Profil + Masse). Ohne Angabe Rundrohr wie bisher
+  (Netze bit-gleich). Offen: Profil am Treppentyp (nur am Element), Profil nur für Handlauf/Pfosten, Stäbe der
+  Absturzsicherung bleiben rund; in der App nicht geklickt

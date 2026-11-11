@@ -562,7 +562,7 @@ export interface PanelHostValue {
   /** Weist der Treppe einen Treppentyp (Bibliothek) zu; "" löst die Zuweisung. */
   onSetStairType: (typeId: string) => void;
   /** [151] Lauf-/Podest-Parameter (Lauflängen, Drehsinn, Auge, Podesttiefe, Stufen je Lauf, Versatz). */
-  onSetStairPatch: (patch: Partial<Pick<Stair, "runLength" | "run2Length" | "turn" | "gap" | "landingLength" | "run1Steps" | "midSteps" | "run2Offset" | "midOffset">>) => void;
+  onSetStairPatch: (patch: Partial<Pick<Stair, "runLength" | "run2Length" | "turn" | "gap" | "landingLength" | "run1Steps" | "midSteps" | "run2Offset" | "midOffset" | "railProfile" | "railWidth" | "railHeight" | "postProfile" | "postWidth" | "postDepth">>) => void;
 
   // ── Raum-Attribute (Object-Info-Panel; nur der selektierte Raum) ────────
   /** Setzt den Raum-Namen. */

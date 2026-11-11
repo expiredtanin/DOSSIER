@@ -212,10 +212,18 @@ pub fn boundary_arc(poly: &[P], a: P, b: P, avoid: &[P]) -> Vec<P> {
     }
 }
 
+/// Geschlossener Zug: mindestens drei verschiedene Ecken, letzter Punkt gleich dem ersten.
+pub fn is_closed(pts: &[P]) -> bool {
+    pts.len() >= 4 && near(pts[0], pts[pts.len() - 1])
+}
+
 /// Parallele zu einem Polygonzug im Abstand `d` (> 0 links der Laufrichtung), Gehrungen an den Ecken
 /// (bei sehr spitzen Ecken auf das Vierfache begrenzt). Aufeinanderfolgende gleiche Punkte sind nicht erlaubt.
+/// [155] Ein geschlossener Zug (letzter Punkt = erster, mindestens drei Ecken) bekommt auch an der Naht eine
+/// Gehrung; Anfang und Ende bleiben gleich.
 pub fn offset_polyline(pts: &[P], d: f64) -> Vec<P> {
     let n = pts.len();
+    let closed = is_closed(pts);
     let normals: Vec<Option<P>> = pts
         .windows(2)
         .map(|w| {
@@ -226,8 +234,8 @@ pub fn offset_polyline(pts: &[P], d: f64) -> Vec<P> {
         .collect();
     (0..n)
         .map(|i| {
-            let a = i.checked_sub(1).and_then(|k| normals[k]);
-            let b = normals.get(i).copied().flatten();
+            let a = i.checked_sub(1).and_then(|k| normals[k]).or_else(|| if closed && i == 0 { normals[n - 2] } else { None });
+            let b = normals.get(i).copied().flatten().or_else(|| if closed && i == n - 1 { normals[0] } else { None });
             let m = match (a, b) {
                 (Some(a), Some(b)) => {
                     let s = [a[0] + b[0], a[1] + b[1]];

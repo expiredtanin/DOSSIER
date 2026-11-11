@@ -284,6 +284,13 @@ export interface StairInfo {
   referenz?: "links" | "mitte" | "rechts";
   /** Nur Wendel: Radius der Mittelsäule (Meter); fehlt → keine Säule. */
   centerColumn?: number;
+  /** [T3] Handlauf-/Pfosten-Profil (rund / rechteck / flach) und Masse in Metern; fehlt → Rundrohr. */
+  railProfile?: "rund" | "rechteck" | "flach";
+  railWidth?: number;
+  railHeight?: number;
+  postProfile?: "rund" | "rechteck" | "flach";
+  postWidth?: number;
+  postDepth?: number;
   /** Länge des (ersten) Laufs (Meter). */
   runLength?: number;
   /** [151] L / U / gerade mit Podest: Länge des zweiten bzw. letzten Laufs; Drehsinn (+1 links, −1 rechts). */

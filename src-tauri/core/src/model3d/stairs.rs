@@ -12,7 +12,7 @@ fn rail_rgb() -> Rgb {
     hex_to_rgb("#74797f", SLAB_RGB)
 }
 
-/// Flache Eingabe der Treppen für `stairs3d` (24 Zahlen je Treppe); `wanted` wählt vor.
+/// Flache Eingabe der Treppen für `stairs3d` (36 Zahlen je Treppe); `wanted` wählt vor.
 pub(super) fn stair_input<'a>(p: &'a Project, wanted: impl Fn(&Stair, Option<&StairType>) -> bool) -> Option<(Vec<(usize, &'a Stair)>, Vec<f64>)> {
     let mut stairs: Vec<(usize, &Stair)> = Vec::new();
     let mut types: Vec<Option<&StairType>> = Vec::new();
@@ -48,6 +48,7 @@ pub(super) fn stair_input<'a>(p: &'a Project, wanted: impl Fn(&Stair, Option<&St
             _ => 0.0,
         });
         buf.push(s.center_column.filter(|r| r.is_finite() && *r > 0.0).unwrap_or(0.0));
+        buf.extend(s.rail_params());
     }
     Some((stairs, buf))
 }
@@ -150,7 +151,8 @@ pub fn stair_guard_meshes_by_floor(p: &Project) -> Vec<(usize, String, crate::me
     let mut out: Vec<(usize, String, crate::mesh3d::Mesh)> = Vec::new();
     for f in p.drawing_levels.iter().filter(|f| f.kind == DrawingLevelKind::Floor) {
         for a in crate::stair_guard::arrivals(p, &f.id, &|_| true, &|| wall_footprints_of_floor(p, &f.id)) {
-            if let Some(m) = crate::stairs3d::guard_mesh(&a.axes, a.z, a.stair) {
+            let spec = crate::stairs3d::RailSpec::decode(p.stairs.as_deref().and_then(|v| v.get(a.stair)).map_or([f64::NAN; 6], |s| s.rail_params()));
+            if let Some(m) = crate::stairs3d::guard_mesh(&a.axes, a.z, a.stair, &spec) {
                 out.push((a.stair, f.id.clone(), m));
             }
         }

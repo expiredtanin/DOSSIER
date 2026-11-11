@@ -3516,6 +3516,27 @@ export type Stair = {
    * ≤ 0, gibt es keine Säule.
    */
   centerColumn?: number;
+  /**
+   * [T3] Handlauf-Profil (gilt für alle Treppenformen und die Absturzsicherung am Deckenloch);
+   * fehlt es, ist der Handlauf ein Rundrohr von 4 cm.
+   */
+  railProfile?: "rund" | "rechteck" | "flach";
+  /** [T3] Handlauf-Breite in Metern (rund: Durchmesser; fehlt = 0.04). */
+  railWidth?: number;
+  /**
+   * [T3] Handlauf-Höhe in Metern (rechteckig: fehlt = 0.04; Flachstahl: Dicke, fehlt = 0.01; rund: ohne Wirkung).
+   */
+  railHeight?: number;
+  /** [T3] Pfosten-Profil (fehlt = rund). */
+  postProfile?: "rund" | "rechteck" | "flach";
+  /**
+   * [T3] Pfosten-Breite in Metern, in Richtung des Handlaufs (rund: Durchmesser; fehlt = 0.03, Flachstahl 0.04).
+   */
+  postWidth?: number;
+  /**
+   * [T3] Pfosten-Tiefe in Metern, quer zum Handlauf (rechteckig: fehlt = 0.03; Flachstahl: Dicke, fehlt = 0.01; rund: ohne Wirkung).
+   */
+  postDepth?: number;
 };
 
 /**
