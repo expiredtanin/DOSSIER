@@ -1295,7 +1295,7 @@ export type ExtrudedSolid = {
    * Geschlossenes Profil in der XY-Ebene (Grundriss), ≥3 Punkte. Bei einem
    * Kreis-Profil (`circle` gesetzt) eine Tessellierung des Kreises (48-Eck) —
    * für 2D-Footprint/Auswahl/bbox/Verschieben; die 3D-Extrusion nutzt in dem
-   * Fall stattdessen `circle` (echte runde truck-Extrusion, `extrudeCircle`).
+   * Fall stattdessen `circle` (Zylinder bzw. Kegel, `solid_mesh.rs`).
    */
   points: Array<Vec2>;
   /** Extrusionshöhe in Metern (> 0), nach +Z ab der Geschoss-UK. */
@@ -1305,7 +1305,7 @@ export type ExtrudedSolid = {
   /**
    * Boolesche Rolle im Gebäude: "subtract" = Abzugskörper (Aussparung/Durchbruch/Nische).
    * Er zieht sich von allen Wänden, Decken und Stützen ab, die er durchdringt — in 3D
-   * (truck-Boolean), im Grundriss und im Schnitt; selbst wird er nur als Umriss gezeigt.
+   * (Manifold-Boolean im Kern), im Grundriss und im Schnitt; selbst wird er nur als Umriss gezeigt.
    * Fehlt = normaler Körper.
    */
   operation?: "subtract";
@@ -1316,8 +1316,8 @@ export type ExtrudedSolid = {
   siteProjection?: boolean;
   /**
    * Gesetzt, wenn das Profil ein Kreis ist (aus einem `Drawing2D` mit
-   * `shape:"circle"`) — `points` bleibt die Tessellierung, `toWalls3d.ts`
-   * (emitExtrudedSolids) nutzt `circle` für die runde 3D-Extrusion.
+   * `shape:"circle"`) — `points` bleibt die Tessellierung, der Kern
+   * (`solid_mesh.rs`) nutzt `circle` für den runden Körper.
    */
   circle?: { center: Vec2; r: number };
   /**

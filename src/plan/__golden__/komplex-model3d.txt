@@ -1,18 +1,20 @@
-meshes [1958]
-meshes[].color [3] x1958
+meshes [1961]
+meshes[].color [3] x1961
 meshes[].indices [108] x6
 meshes[].indices [11376]
+meshes[].indices [1152]
 meshes[].indices [12960]
 meshes[].indices [144] x55
 meshes[].indices [156642]
 meshes[].indices [1584]
+meshes[].indices [1716]
 meshes[].indices [180]
 meshes[].indices [192] x3
 meshes[].indices [348] x6
 meshes[].indices [360]
 meshes[].indices [36] x1860
 meshes[].indices [396]
-meshes[].indices [564]
+meshes[].indices [564] x2
 meshes[].indices [60] x9
 meshes[].indices [72]
 meshes[].indices [7632]
@@ -27,17 +29,19 @@ meshes[].positions [216]
 meshes[].positions [24] x1828
 meshes[].positions [252] x2
 meshes[].positions [264]
-meshes[].positions [288] x7
+meshes[].positions [288] x8
 meshes[].positions [306] x3
 meshes[].positions [324] x6
 meshes[].positions [4128]
 meshes[].positions [4746]
+meshes[].positions [576]
 meshes[].positions [6096]
 meshes[].positions [7050]
 meshes[].positions [72] x2
 meshes[].positions [78837]
 meshes[].positions [78] x55
 meshes[].positions [798]
+meshes[].positions [864]
 roofLayers [59]
 roofLayers[].color [3] x59
 roofLayers[].normal [3] x59
@@ -68,4 +72,4 @@ walls[].start [2] x1492
 walls[].startCut [4] x1107
 walls[].topDrop [2] x115
 walls[].topPlane [3] x271
-hash 11c141a0fe0852d7
+hash 1a05da01394b019d

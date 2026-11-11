@@ -1,33 +1,15 @@
 // Abschnitte „Extrudierter Körper" und „Stütze" der Attribute ([165] aus `ObjectInfoPanel.tsx`), dazu die
-// Kennwert-Zeilen des Körpers (truck). Gerufen von `AttributesPanel`.
+// Kennwert-Zeilen des Körpers (Kern-Netz, [115]). Gerufen von `AttributesPanel`.
 
-import type { SolidSpec, SolidProps } from "../../engine/truckSolid";
-import { useState, useEffect } from "react";
-import { solidProps } from "../../engine/truckSolid";
 import { t } from "../../i18n";
-import type { ExtrudedSolidInfo, ColumnInfo } from "../../state/selectionInfo";
+import type { ExtrudedSolidInfo, ColumnInfo, SolidProps } from "../../state/selectionInfo";
 import { usePanelHost } from "../host";
 import { useStore } from "../../state/appStore";
 import { Dropdown } from "../../ui/Dropdown";
 import { DimensionField } from "./fields";
 
-/** Volumen/Oberfläche/Schwerpunkt aus truck (asynchron, aus dem tessellierten B-Rep). */
-function SolidPropsRows({ spec }: { spec: SolidSpec | null }) {
-  const [props, setProps] = useState<SolidProps | null>(null);
-  const key = JSON.stringify(spec);
-  useEffect(() => {
-    let alive = true;
-    setProps(null);
-    if (!spec) return;
-    solidProps(spec).then(
-      (p) => alive && setProps(p),
-      () => alive && setProps(null),
-    );
-    return () => {
-      alive = false;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key]);
+/** Volumen/Oberfläche/Schwerpunkt aus dem Kern-Netz des Körpers (Manifold, dasselbe Netz wie im 3D). */
+function SolidPropsRows({ props }: { props: SolidProps | null }) {
   if (!props) return null;
   const f = (v: number, d = 2) => v.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
   return (
@@ -52,7 +34,7 @@ function SolidPropsRows({ spec }: { spec: SolidSpec | null }) {
 }
 
 
-// ── Extrusions-Attribut-Abschnitt (truck-Integration) ───────────────────────
+// ── Extrusions-Attribut-Abschnitt ───────────────────────────────────────────
 // Höhe editierbar (löst Re-Extrusion aus); Grundfläche + Geschoss read-only.
 export function ExtrudedSolidSection({
   solid,
@@ -67,7 +49,7 @@ export function ExtrudedSolidSection({
       <div className="objinfo-sep" />
       <div className="objinfo-section-label">{t("objinfo.extrudedSolid.section")}</div>
 
-      {/* Höhe (editierbar, > 0) — löst eine Re-Extrusion (truck-WASM) aus. */}
+      {/* Höhe (editierbar, > 0) — baut das Kern-Netz neu. */}
       <div className="objinfo-field">
         <span className="objinfo-flabel">{t("objinfo.extrudedSolid.height")}</span>
         <input
@@ -84,7 +66,7 @@ export function ExtrudedSolidSection({
         />
       </div>
 
-      <SolidPropsRows spec={solid.spec} />
+      <SolidPropsRows props={solid.props} />
 
       {/* Abstand über Geschoss-UK (Brüstungs-/Durchbruchshöhe). */}
       <div className="objinfo-field">
@@ -177,7 +159,7 @@ export function ExtrudedSolidSection({
         </div>
       )}
 
-      {/* Verjüngung (editierbar, 0..1) — löst eine Re-Extrusion (truck-WASM) aus. */}
+      {/* Verjüngung (editierbar, 0..1) — baut das Kern-Netz neu. */}
       {!solid.brepLabel && (
       <div className="objinfo-field">
         <span className="objinfo-flabel">{t("objinfo.extrudedSolid.taper")}</span>

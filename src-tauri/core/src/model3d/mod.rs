@@ -32,6 +32,7 @@ mod context;
 mod drawings;
 mod pick;
 mod classes;
+mod solids;
 
 pub use ceilings::*;
 pub use columns::*;
@@ -43,6 +44,7 @@ pub use context::*;
 pub use drawings::*;
 pub use pick::*;
 pub use classes::*;
+pub use solids::*;
 
 #[cfg(test)]
 mod tests;
@@ -124,7 +126,7 @@ pub const DEFAULT_CREASE_DEG: f64 = 30.0;
 // ── Bündel ───────────────────────────────────────────────────────────────────
 
 
-/// Das 3D-Modell in Teilen: TS fügt die truck-Körper (asynchron) zwischen Kontext und Stützen ein.
+/// Das 3D-Modell in Teilen.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Parts {
@@ -137,6 +139,8 @@ pub struct Parts {
     pub stair_railings: Vec<RMesh>,
     pub roof_meshes: Vec<RMesh>,
     pub roof_layers: Vec<RRoofLayer>,
+    /// [115] Freie Körper (`extrudedSolids` ohne Abzugskörper) als Kern-Netze ([`emit_solids`]).
+    pub solid_meshes: Vec<RMesh>,
 }
 
 /// `detail`: 0 grob, 1 mittel, 2 fein.

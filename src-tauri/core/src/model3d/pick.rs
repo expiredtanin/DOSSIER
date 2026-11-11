@@ -101,7 +101,7 @@ pub struct PickGeometry {
     pub context_meshes: Vec<PickContextMesh>,
     /// [137] Stützen (vorher im 3D nicht anwählbar).
     pub columns: Vec<PickColumn>,
-    /// [137] Freie Körper (Prisma-Näherung; TS ersetzt sie durch das truck-Netz).
+    /// [137] Freie Körper (Dreiecke des Kern-Netzes, [115]).
     pub solids: Vec<PickSolid>,
     /// [137] Öffnungen in Dach/Decke/Gaube als Netz.
     #[serde(rename = "openingMeshes")]
@@ -385,22 +385,28 @@ pub fn pick_hosted_openings(p: &Project) -> Vec<PickOpeningMesh> {
     out
 }
 
-/// [137] Freie Körper (`extrudedSolids`, ohne Abzugskörper) als Prisma über dem Grundriss-Umriss: UK =
-/// Geschoss-UK + `baseOffset`, OK = UK + `height`. Näherung für Loft/Rotation/Abzug/Verjüngung — die Hülle
-/// (`pickGeometry` in `plan/toWalls3d.ts`) ersetzt die Dreiecke durch das truck-Netz, sobald es geladen ist.
+/// [137] Freie Körper (`extrudedSolids`, ohne Abzugskörper) als Welt-Dreiecke ihres 3D-Netzes aus dem Kern
+/// ([115], `solid_mesh::body_mesh_3d`, dasselbe Netz wie im Bild). Ohne Netz (unbaubare Beschreibung) das
+/// Prisma über dem Grundriss-Umriss (UK = Geschoss-UK + `baseOffset`, OK = UK + `height`).
 pub fn pick_solids(p: &Project) -> Vec<PickSolid> {
     let mut out = Vec::new();
     for s in p.extruded_solids.as_deref().unwrap_or(&[]) {
-        if s.operation.as_deref() == Some("subtract") || !(s.height > 0.0) || s.points.len() < 3 {
+        if s.operation.as_deref() == Some("subtract") || !(s.height > 0.0) {
             continue;
         }
-        let z0 = solid_base_z(p, s);
-        let foot: Vec<[f64; 2]> = s.points.iter().map(|q| [q.x, q.y]).collect();
-        if !(z0.is_finite() && foot.iter().all(|q| q[0].is_finite() && q[1].is_finite())) {
-            continue;
-        }
-        let (pos, idx) = crate::columns3d::prism(&foot, z0, z0 + s.height);
-        let tris = extrusion_tris(&pos, &idx);
+        let mesh = crate::solid_mesh::body_mesh_3d(p, s);
+        let tris = match mesh.as_deref().and_then(Option::as_ref) {
+            Some(m) => extrusion_tris(&m.positions, &m.indices),
+            None => {
+                let z0 = solid_base_z(p, s);
+                let foot: Vec<[f64; 2]> = s.points.iter().map(|q| [q.x, q.y]).collect();
+                if foot.len() < 3 || !(z0.is_finite() && foot.iter().all(|q| q[0].is_finite() && q[1].is_finite())) {
+                    continue;
+                }
+                let (pos, idx) = crate::columns3d::prism(&foot, z0, z0 + s.height);
+                extrusion_tris(&pos, &idx)
+            }
+        };
         if !tris.is_empty() {
             out.push(PickSolid { tris, solid_id: s.id.clone() });
         }
@@ -408,7 +414,7 @@ pub fn pick_solids(p: &Project) -> Vec<PickSolid> {
     out
 }
 
-/// UK eines freien Körpers (Geschoss-UK + `baseOffset`), wie `emitExtrudedSolids`.
+/// UK eines freien Körpers (Geschoss-UK + `baseOffset`).
 pub fn solid_base_z(p: &Project, s: &ExtrudedSolid) -> f64 {
     p.floor(&s.level_id).map_or(0.0, |f| f.base_elevation.unwrap_or(0.0)) + s.base_offset.unwrap_or(0.0)
 }

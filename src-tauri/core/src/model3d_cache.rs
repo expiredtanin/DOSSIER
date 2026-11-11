@@ -312,6 +312,7 @@ impl Model3dCache {
             walls: Vec::new(),
             slabs,
             context_meshes: model3d::emit_context_meshes(p),
+            solid_meshes: model3d::emit_solids(p),
             column_meshes: { let mut m = model3d::emit_columns(p); m.extend(model3d::emit_trees(p)); m },
             opening_meshes: Vec::new(),
             stair_meshes: model3d::emit_stair_meshes(p),
@@ -367,6 +368,7 @@ impl Model3dCache {
             js(&parts.stair_railings)?,
             js(&parts.roof_meshes)?,
             js(&parts.roof_layers)?,
+            js(&parts.solid_meshes)?,
         ];
         let mut json = String::new();
         if let Some(mark) = delta {
@@ -400,6 +402,8 @@ impl Model3dCache {
             json.push_str(&rest[5]);
             json.push_str(",\"roofLayers\":");
             json.push_str(&rest[6]);
+            json.push_str(",\"solidMeshes\":");
+            json.push_str(&rest[7]);
             json.push('}');
         }
         if structs {
@@ -437,7 +441,7 @@ struct OpenOut<'a> {
 /// [180] `wallKeep`/`openingKeep` (nur wenn nicht leer): Einträge ausgeblendeter Klassen, die der Aufrufer
 /// behält, aber nicht zeigt (je `[gezeigt, behalten]` übergeben). Gültig nur, wenn der Aufrufer die Einträge
 /// ≤ `mark` aus seiner letzten Antwort hat (sonst `mark` 0).
-fn write_delta(mark: u64, walls: [&[(u64, &str)]; 2], openings: [&[(u64, &[String; 5])]; 2], opening_tail: &str, rest: &[String; 7]) -> String {
+fn write_delta(mark: u64, walls: [&[(u64, &str)]; 2], openings: [&[(u64, &[String; 5])]; 2], opening_tail: &str, rest: &[String; 8]) -> String {
     use std::fmt::Write;
     let fresh = |serial: u64| mark == 0 || serial > mark || mark > current_serial();
     let cap = walls.iter().flat_map(|v| v.iter()).filter(|e| fresh(e.0)).map(|e| e.1.len() + 32).sum::<usize>()
@@ -487,8 +491,8 @@ fn write_delta(mark: u64, walls: [&[(u64, &str)]; 2], openings: [&[(u64, &[Strin
     }
     let _ = write!(
         out,
-        "],\"openingTail\":[{opening_tail}],\"slabs\":{},\"contextMeshes\":{},\"columnMeshes\":{},\"stairMeshes\":{},\"stairRailings\":{},\"roofMeshes\":{},\"roofLayers\":{}}}",
-        rest[0], rest[1], rest[2], rest[3], rest[4], rest[5], rest[6]
+        "],\"openingTail\":[{opening_tail}],\"slabs\":{},\"contextMeshes\":{},\"columnMeshes\":{},\"stairMeshes\":{},\"stairRailings\":{},\"roofMeshes\":{},\"roofLayers\":{},\"solidMeshes\":{}}}",
+        rest[0], rest[1], rest[2], rest[3], rest[4], rest[5], rest[6], rest[7]
     );
     out
 }
@@ -583,7 +587,7 @@ mod tests {
                 out.insert(k.into(), r[k].clone());
             }
             out.insert("openingMeshes".into(), Value::Array(meshes));
-            for k in ["stairMeshes", "stairRailings", "roofMeshes", "roofLayers", "voidCuts"] {
+            for k in ["stairMeshes", "stairRailings", "roofMeshes", "roofLayers", "solidMeshes", "voidMeshes"] {
                 if let Some(v) = r.get(k) {
                     out.insert(k.into(), v.clone());
                 }

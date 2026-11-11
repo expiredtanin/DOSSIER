@@ -146,6 +146,7 @@ pub fn parts_filtered(p: &Project, layered: bool, detail: f64, for_section: bool
         walls,
         slabs,
         context_meshes: model3d::emit_context_meshes(p),
+        solid_meshes: model3d::emit_solids(p),
         column_meshes: vec![],
         opening_meshes: vec![],
         stair_meshes: vec![],
@@ -187,10 +188,16 @@ pub fn parts_filtered(p: &Project, layered: bool, detail: f64, for_section: bool
     filter.retain_walls(&mut out);
     out.slabs.retain(|s| !filter.hides(&s.ceiling_id));
     out.context_meshes.retain(|m| filter.keep_owner(p, m.owner));
+    // [115] Freie Körper heben sich mit ihrem Geschoss.
+    out.solid_meshes.retain(|m| filter.keep_owner(p, m.owner));
+    for m in &mut out.solid_meshes {
+        let dz = m.owner.id(p).map_or(0.0, |id| ex.of(id));
+        shift_mesh(m, dz);
+    }
     Ok(out)
 }
 
-/// Versatz je Geschoss-id (für die TS-seitigen truck-Extrusionen, `levelId`).
+/// Versatz je Geschoss-id (3D-Griffe und Arbeitsebene, `levelId`).
 pub fn floor_offsets(p: &Project, gap: f64) -> HashMap<String, f64> {
     Explode::new(p, gap).map(|ex| ex.by_floor.iter().map(|(k, v)| (k.to_string(), *v)).collect()).unwrap_or_default()
 }

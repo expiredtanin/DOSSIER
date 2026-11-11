@@ -45,7 +45,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Project, Wall, Drawing2D, Ceiling, Roof, Vec2 } from "../model/types";
 import { roofBaseElevation, roofGeometry, verticalExtents } from "../core";
-import { projectToModel3d, pickGeometry, draftWorldLines, explodeFloorOffsets, hiddenClassCodes, TRUCK_MESH_READY_EVENT } from "../core";
+import { projectToModel3d, pickGeometry, draftWorldLines, explodeFloorOffsets, hiddenClassCodes } from "../core";
 import type { DetailLevel, RenderMode, View3d } from "../model/viewTypes";
 import type { ToolDraft } from "../tools/types";
 import { hudSegments, type HudFieldsState } from "../tools/hudFormat";
@@ -674,20 +674,6 @@ export function Wasm3DViewport({
       else redrawRef.current();
     }
   }, [ready, pointClouds, geoKey, syncPointClouds]);
-
-  // truck-Extrusionen (s. toWalls3d.ts emitExtrudedSolids): die WASM-Extrusion
-  // läuft asynchron und ist beim ersten `updateModel` oben typischerweise noch
-  // nicht fertig — ohne diesen Re-Push bliebe sie trotz erfolgreichen Ladens
-  // unsichtbar, weil `project` sich dafür nicht ändert.
-  useEffect(() => {
-    if (!ready) return;
-    const onMeshReady = () => {
-      updateModel(projectRef.current, detailRef.current, explodeRef.current, hideRef.current);
-      redrawRef.current();
-    };
-    window.addEventListener(TRUCK_MESH_READY_EVENT, onMeshReady);
-    return () => window.removeEventListener(TRUCK_MESH_READY_EVENT, onMeshReady);
-  }, [ready, updateModel]);
 
   // Blickwinkel-Praeset anwenden, wenn `view3d` wechselt (oder der Renderer
   // bereit wird): springt über `set_view_preset` (Rust) auf die formatfüllende,

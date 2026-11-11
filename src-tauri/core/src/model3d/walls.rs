@@ -101,6 +101,14 @@ pub fn material_color_maps(p: &Project, only_roof: Option<&str>) -> Vec<String> 
             }
         }
     }
+    // [115] Freie Körper mit Bauteil (nicht beim Dach-Export).
+    if only_roof.is_none() {
+        for s in p.extruded_solids.as_deref().unwrap_or(&[]) {
+            if let Some(c) = s.component_id.as_deref().filter(|c| !c.is_empty()) {
+                consider(c);
+            }
+        }
+    }
     list
 }
 

@@ -49,7 +49,7 @@ describe("deriveSelection (Kern)", () => {
     expect(deriveSelection(p, { drawings: ["nix"] })).toBeNull();
   });
 
-  it("Extrusion: Fläche im Kern, B-Rep-Beschreibung (truck) aus TS", () => {
+  it("Extrusion: Fläche und Kennwerte (Kern-Netz, [115]) aus dem Kern", () => {
     const p = base();
     const lvl = p.drawingLevels[0].id;
     p.extrudedSolids = [
@@ -57,9 +57,10 @@ describe("deriveSelection (Kern)", () => {
     ];
     const sel = deriveSelection(p, { solids: ["x"] })!;
     expect(sel.extrudedSolid!.area).toBeCloseTo(3, 12);
-    expect(sel.extrudedSolid!.spec).toMatchObject({ kind: "extrude", height: 2 });
+    expect(sel.extrudedSolid!.props!.volume).toBeCloseTo(6, 9);
+    expect(sel.extrudedSolid!.props!.closed).toBe(true);
     expect(Object.keys(sel.extrudedSolid!)).toEqual([
-      "height", "taper", "cornerRadius", "chamfer", "area", "spec", "subtract", "canSubtract", "baseOffset", "componentId", "floorId", "floorName",
+      "height", "taper", "cornerRadius", "chamfer", "area", "props", "subtract", "canSubtract", "baseOffset", "componentId", "floorId", "floorName",
     ]);
   });
 

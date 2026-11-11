@@ -9,9 +9,8 @@
 //      Kreis-, Pyramide bei Polygon-Profil) ODER Enter für den zuletzt
 //      genutzten Default (persistent, wie Höhe). → commit neues ExtrudedSolid.
 //
-// Die eigentliche Extrusion (truck-WASM) läuft asynchron erst in toWalls3d.ts
-// (emitExtrudedSolids); dieser Befehl legt nur die Rohdaten (Punkte + Höhe +
-// Verjüngung) im Projekt ab.
+// Das Netz baut der Kern ([115], `solid_mesh.rs`); dieser Befehl legt nur die
+// Rohdaten (Punkte + Höhe + Verjüngung) im Projekt ab.
 
 import type {
   Command,

@@ -225,11 +225,46 @@ fn subtract(base: Value, voids: &[&VoidPrism], dz: f64) -> Value {
 }
 
 /// Bauteile des 3D-Modells, die ein Abzugskörper trifft: (Index im Modell, Spezifikation Bauteil −
-/// Körper). TS tesselliert sie über truck und ersetzt das Bauteil durch das Mesh.
+/// Körper). Das 3D baut daraus Netze im Kern ([`void_meshes`], Manifold), der STEP-Export B-Rep über truck.
 #[derive(serde::Serialize, Default, Debug)]
 pub struct VoidCuts {
     pub walls: Vec<(usize, Value)>,
     pub slabs: Vec<(usize, Value)>,
+}
+
+/// [115] Netze der von Abzugskörpern getroffenen Wände und Decken (Index im Modell, Inhalts-Schlüssel für die
+/// Teil-id des Viewers, Netz in Farbe/Textur des Bauteils), gebaut im Kern über Manifold (`solid_mesh::spec_mesh`, gemerkt nach Inhalt) statt über truck in
+/// TS. Scheitert ein Boolean, fehlt der Eintrag: das 3D zeigt das Bauteil ungeschnitten.
+#[derive(serde::Serialize, Default, Debug)]
+pub struct VoidMeshes {
+    pub walls: Vec<(usize, String, crate::model3d::RMesh)>,
+    pub slabs: Vec<(usize, String, crate::model3d::RMesh)>,
+}
+
+fn cut_mesh(spec: &Value) -> Option<(String, crate::solid_bool::Mesh)> {
+    let hash = crate::solid_bool::ContentHash::default().json(spec).finish();
+    let key = format!("{hash:x}");
+    let m = (*crate::solid_bool::cached(&format!("void-cut:{key}"), hash, || crate::solid_mesh::spec_mesh(spec))).clone()?;
+    Some((key, m))
+}
+
+pub fn void_meshes(cuts: &VoidCuts, walls: &[RWall], slabs: &[RSlab]) -> VoidMeshes {
+    let mesh = |i: usize, spec: &Value, color: crate::style::Rgb, material_index: Option<f64>| {
+        cut_mesh(spec).map(|(key, m)| (i, format!("{key}{}", material_index.unwrap_or(0.0)), crate::model3d::RMesh {
+            positions: m.positions,
+            indices: m.indices,
+            kind: "extrusion",
+            color,
+            vertex_colors: None,
+            material_index,
+            crease_angle: None,
+            owner: Default::default(),
+        }))
+    };
+    VoidMeshes {
+        walls: cuts.walls.iter().filter_map(|(i, s)| walls.get(*i).and_then(|w| mesh(*i, s, w.color, w.material_index))).collect(),
+        slabs: cuts.slabs.iter().filter_map(|(i, s)| slabs.get(*i).and_then(|b| mesh(*i, s, b.color, None))).collect(),
+    }
 }
 
 /// Abzugskörper auf Wände und Decken des Modells anwenden (früher `applyVoids3d`, Spezifikationsteil).

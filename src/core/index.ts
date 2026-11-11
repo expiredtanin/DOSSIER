@@ -251,7 +251,6 @@ export { snapshotTemplate } from "../plan/viewportPlan";
 export { TEMPLATE_LEVEL_KEYS, linkedViewTemplate, projectWithTemplate, templateDisplay, templateLevelPatch } from "../plan/viewTemplate";
 
 export {
-  TRUCK_MESH_READY_EVENT,
   draftWorldLines,
   emitDrawingLineVerts,
   emitSurfacePatternLines,

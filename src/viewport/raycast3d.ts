@@ -448,7 +448,7 @@ export function pickNearest(
     const t = rayContextMeshTris(ray, { tris: tr.tris, contextObjectId: tr.treeId });
     if (t !== null) consider({ kind: "tree", id: tr.treeId, t }, 1);
   }
-  // [137] Freie Körper (truck-Netz bzw. Prisma-Näherung), Rang wie Wand/Decke.
+  // [137] Freie Körper (Kern-Netz, [115]), Rang wie Wand/Decke.
   for (const s of solids) {
     const t = rayContextMeshTris(ray, { tris: s.tris, contextObjectId: s.solidId });
     if (t !== null) consider({ kind: "solid", id: s.solidId, t }, 1);
