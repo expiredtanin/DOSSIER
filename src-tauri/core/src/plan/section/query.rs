@@ -48,7 +48,7 @@ fn cache_put(key: (f64, u64), o: std::rc::Rc<Output>) {
 pub fn section_plan_buf(p: &Project, args: &[f64], text: &str) -> Result<Vec<u8>, String> {
     let v: serde_json::Value = serde_json::from_str(text).map_err(|e| format!("Schnitt-Argumente: {e}"))?;
     let level = LevelSpec::from_json(v.get("level").unwrap_or(&serde_json::Value::Null));
-    let vis = Visibility::from_json(&v);
+    let mut vis = Visibility::from_json(&v);
     let mono = args.first().is_some_and(|&x| x != 0.0);
     let openings = args.get(1).is_some_and(|&x| x != 0.0);
     let key = args.get(2).copied().unwrap_or(0.0);
@@ -60,6 +60,21 @@ pub fn section_plan_buf(p: &Project, args: &[f64], text: &str) -> Result<Vec<u8>
     let hidden_ids = crate::plan::overrides::hidden_elements(p, rv);
     let filtered = (!hidden_ids.is_empty()).then(|| without_elements(p, &hidden_ids));
     let p = filtered.as_ref().unwrap_or(p);
+    // [184] Öffnungen mit Detailgrad grob (Strich im Schnitt): Wandschnitt an Sturz/Brüstung flach. Das ändert die
+    // Schnittflächen, gehört also in den Schlüssel (unten) und in die Sichtbarkeit.
+    let open_mv = {
+        let detail = Detail::parse(v.get("detail").and_then(|d| d.as_str()).unwrap_or("mittel"));
+        let mv_id = v.get("modelView").and_then(|m| m.as_str()).filter(|m| !m.is_empty()).or(level.model_view.as_deref());
+        crate::plan::model_view::for_view_scaled(p, mv_id, detail, scale)
+    };
+    vis.flat_openings = p
+        .openings
+        .as_deref()
+        .unwrap_or(&[])
+        .iter()
+        .filter(|o| open_mv.section_look(o.kind == crate::model::ElementKind::Door, o.detail_level) == crate::plan::model_view::SectionLook::Line)
+        .map(|o| o.id.clone())
+        .collect();
     // [180] Ausgeblendete Klassen gehören in den Schlüssel: sie nehmen an der Verdeckung nicht teil, der Schnitt
     // hängt also an ihnen (graue nicht).
     let hkey = {
@@ -68,8 +83,16 @@ pub fn section_plan_buf(p: &Project, args: &[f64], text: &str) -> Result<Vec<u8>
         let mut codes: Vec<&String> = vis.hidden_codes().collect();
         codes.sort();
         codes.dedup();
-        let empty = ids.is_empty() && codes.is_empty();
-        ids.iter().flat_map(|s| s.bytes().chain([0u8])).chain([1u8]).chain(codes.iter().flat_map(|s| s.bytes().chain([0u8]))).fold(if empty { 0 } else { 0xcbf2_9ce4_8422_2325u64 }, |h, b| (h ^ b as u64).wrapping_mul(0x0000_0100_0000_01b3))
+        let mut flat: Vec<&String> = vis.flat_openings.iter().collect();
+        flat.sort();
+        let empty = ids.is_empty() && codes.is_empty() && flat.is_empty();
+        ids.iter()
+            .flat_map(|s| s.bytes().chain([0u8]))
+            .chain([1u8])
+            .chain(codes.iter().flat_map(|s| s.bytes().chain([0u8])))
+            .chain([2u8])
+            .chain(flat.iter().flat_map(|s| s.bytes().chain([0u8])))
+            .fold(if empty { 0 } else { 0xcbf2_9ce4_8422_2325u64 }, |h, b| (h ^ b as u64).wrapping_mul(0x0000_0100_0000_01b3))
     };
     let key = (key, hkey);
     let mut w = crate::plan::buf::Writer::new(true);
@@ -110,11 +133,11 @@ pub fn section_plan_buf(p: &Project, args: &[f64], text: &str) -> Result<Vec<u8>
     trees.extend(unfold::bend_lines(&level, bounds));
     let prims = trees;
     w.group(&prims);
-    let (door_detail, window_detail) = mvo.as_ref().map_or((true, true), |o| (o.door.section_detail, o.window.section_detail));
+    // [184] Öffnungen wie im Grundriss: Detailgrad aus Stufe bzw. Massstab (mittel ab 1:200 grob).
     let mut ops = Vec::new();
     if openings {
         for (l, s) in &parts {
-            ops.extend(unfold::clip_prims(section_opening_primitives_mv(p, l, &vis, door_detail, window_detail)?, s.as_ref()));
+            ops.extend(unfold::clip_prims(section_opening_primitives_mv(p, l, &vis, &open_mv)?, s.as_ref()));
         }
     }
     crate::plan::extras::scale_line_weights(p, scale, &mut ops);

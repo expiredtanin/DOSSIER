@@ -2222,7 +2222,7 @@ pub struct ModelViewDoors {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub threshold: Option<ModelViewThreshold>,
-    /// Zarge, Blatt und Sturz im Schnitt (Basis: ja; nein = nur das Blatt).
+    /// Zarge, Blatt und Sturz im Schnitt: ja = voll, nein = höchstens das Blatt; ohne Wert folgt es dem Detailgrad (grob: Blatt als Strich).
     #[serde(rename = "sectionDetail", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub section_detail: Option<bool>,
@@ -2277,11 +2277,11 @@ pub struct ModelViewWindows {
     #[serde(rename = "lintelLine", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub lintel_line: Option<bool>,
-    /// Rahmen, Kämpfer, Sturz, Fensterbank und Storen im Schnitt (Basis: ja; nein = Rahmen und Glas).
+    /// Rahmen, Kämpfer, Sturz, Fensterbank im Schnitt: ja = voll, nein = höchstens einfacher Rahmen und Glas; ohne Wert folgt es dem Detailgrad (grob: ein Strich, mittel: einfach, fein: voll).
     #[serde(rename = "sectionDetail", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub section_detail: Option<bool>,
-    /// Fensterteilung (Flügel, Sprossen, Kämpfer) in der Ansicht (Basis: ja).
+    /// Fensterteilung (Flügel, Sprossen, Kämpfer) in der Ansicht; ohne Wert folgt sie dem Detailgrad (grob: keine).
     #[serde(rename = "elevationDivision", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub elevation_division: Option<bool>,

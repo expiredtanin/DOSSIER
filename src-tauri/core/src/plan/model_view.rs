@@ -84,8 +84,9 @@ pub struct DoorOpts {
     pub leaf_rect: bool,
     /// Schwelle im Grundriss.
     pub threshold: Threshold,
-    /// Zarge, Blatt und Sturz im Schnitt (sonst nur das Blatt).
-    pub section_detail: bool,
+    /// [184] Zarge, Blatt und Sturz im Schnitt: `Some(true)` voll, `Some(false)` höchstens vereinfacht (nur das
+    /// Blatt); `None` = folgt dem Detailgrad (s. [`Options::section_look`]).
+    pub section_detail: Option<bool>,
 }
 
 /// Schwelle der Türen im Grundriss.
@@ -133,10 +134,11 @@ pub struct WindowOpts {
     pub shading_box: bool,
     /// Sturzlinie im Grundriss.
     pub lintel_line: bool,
-    /// Rahmen, Kämpfer, Sturz, Fensterbank und Storen im Schnitt (sonst Rahmen und Glas).
-    pub section_detail: bool,
-    /// Fensterteilung (Flügel, Sprossen, Kämpfer) in der Ansicht.
-    pub elevation_division: bool,
+    /// [184] Rahmen, Kämpfer, Sturz, Fensterbank im Schnitt: `Some(true)` voll, `Some(false)` höchstens vereinfacht
+    /// (Rahmen und Glas); `None` = folgt dem Detailgrad (s. [`Options::section_look`]).
+    pub section_detail: Option<bool>,
+    /// Fensterteilung (Flügel, Sprossen, Kämpfer) in der Ansicht: `None` = folgt dem Detailgrad (grob/vereinfacht: keine).
+    pub elevation_division: Option<bool>,
 }
 
 impl WindowOpts {
@@ -324,7 +326,51 @@ pub struct Options {
     pub dims: DimOpts,
 }
 
+/// [184] Wie ein geschnittenes Fenster/eine geschnittene Tür im Schnitt aussieht (Stufen wie im Grundriss).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum SectionLook {
+    /// Grob: Leibungen offen, ein Strich in der Rahmenmitte (Tür: Blatt als Linie); kein Profil, kein Sturz.
+    Line,
+    /// Mittel: Rechteck-Rahmen und Glaslinie (Tür: Blatt), Fensterbank als einfache Fläche; kein Sturz, kein Kämpfer.
+    Simple,
+    /// Fein: volles Profil mit Sturz, Kämpfer, Fensterbank.
+    Full,
+}
+
 impl Options {
+    /// [184] EINE Auflösung des Detailgrads einer Öffnung für Grundriss, Schnitt und Ansicht: Element-Detailgrad >
+    /// Detailgrad der Ansicht (Modelldarstellung über Basis, im Grundriss massstabsabhängig); bei Fenstern übersteuert
+    /// „Vereinfacht (3 Linien)" alles mit grob. Der Grundriss löst den Element-Detailgrad vorab auf
+    /// ([`Options::element_detail`]) und wendet danach nur die „Vereinfacht"-Regel an (`element: None`).
+    pub fn opening_detail(&self, door: bool, element: Option<DetailLevel>) -> Detail {
+        if !door && self.window.simplified {
+            Detail::Grob
+        } else {
+            self.element_detail(element)
+        }
+    }
+
+    /// Detailgrad eines Elements mit eigenem Detailgrad (sonst der der Ansicht).
+    pub fn element_detail(&self, element: Option<DetailLevel>) -> Detail {
+        element.and_then(detail_of).unwrap_or(self.detail)
+    }
+
+    /// [184] Schnittdarstellung einer Öffnung: aus dem Detailgrad ([`Options::opening_detail`]; grob → Linie, mittel →
+    /// einfach, fein → voll); die Option „Schnittdetail" der Stufe geht vor (ja = voll, nein = höchstens einfach).
+    pub fn section_look(&self, door: bool, element: Option<DetailLevel>) -> SectionLook {
+        let base = match self.opening_detail(door, element) {
+            Detail::Grob => SectionLook::Line,
+            Detail::Mittel => SectionLook::Simple,
+            Detail::Fein => SectionLook::Full,
+        };
+        let opt = if door { self.door.section_detail } else { self.window.section_detail };
+        match opt {
+            Some(true) if door || !self.window.simplified => SectionLook::Full,
+            Some(false) => base.min(SectionLook::Simple),
+            _ => base,
+        }
+    }
+
     /// Schnittflächen schraffiert: Ebene > Modelldarstellung > nein.
     pub fn cut_hatch(&self, level: Option<bool>) -> bool {
         level.or(self.wall.cut_hatch_mv).unwrap_or(false)
@@ -374,6 +420,18 @@ pub fn for_view(p: &Project, id: Option<&str>, detail: Detail, scale: f64) -> Op
     let id = id.filter(|s| !s.is_empty());
     let detail = id.and_then(|id| base_of(p, id)).unwrap_or(detail);
     resolve(id.and_then(|id| find(p, id)), detail, scale)
+}
+
+/// [184] Wie [`for_view`], mit dem massstabsabhängigen Detailgrad des Grundrisses ([140]: „mittel" ab 1:200 wie „grob"):
+/// für Schnitt und Ansicht, deren Öffnungen wie im Grundriss aufgelöst werden.
+pub fn for_view_scaled(p: &Project, id: Option<&str>, detail: Detail, scale: f64) -> Options {
+    let o = for_view(p, id, detail, scale);
+    let (d, _) = super::domains::effective_detail(o.detail, scale);
+    if d == o.detail {
+        o
+    } else {
+        resolve(id.filter(|s| !s.is_empty()).and_then(|id| find(p, id)), d, scale)
+    }
 }
 
 fn layer_mode(m: Option<ModelViewLayers>) -> LayerMode {
@@ -437,7 +495,7 @@ pub fn resolve(mv: Option<&ModelViewOption>, detail: Detail, scale: f64) -> Opti
                 Some(ModelViewThreshold::All) => Threshold::All,
                 _ => Threshold::Off,
             },
-            section_detail: d.and_then(|d| d.section_detail).unwrap_or(true),
+            section_detail: d.and_then(|d| d.section_detail),
         },
         window: WindowOpts {
             sash_symbols_mv: w.and_then(|w| w.sash_symbols),
@@ -447,8 +505,8 @@ pub fn resolve(mv: Option<&ModelViewOption>, detail: Detail, scale: f64) -> Opti
             simplified: w.and_then(|w| w.simplified).unwrap_or(false),
             shading_box: w.and_then(|w| w.shading_box).unwrap_or(false),
             lintel_line: w.and_then(|w| w.lintel_line).unwrap_or(false),
-            section_detail: w.and_then(|w| w.section_detail).unwrap_or(true),
-            elevation_division: w.and_then(|w| w.elevation_division).unwrap_or(true),
+            section_detail: w.and_then(|w| w.section_detail),
+            elevation_division: w.and_then(|w| w.elevation_division),
         },
         stair: StairOpts {
             walk_line: s.and_then(|s| s.walk_line).unwrap_or(true),

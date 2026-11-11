@@ -174,6 +174,9 @@ pub struct Visibility {
     pub has_display: bool,
     pub norender: HashSet<String>,
     pub grey: HashSet<String>,
+    /// [184] Öffnungen, die im Schnitt nur als Strich erscheinen (grob): im Wandschnitt an Sturz und Brüstung
+    /// weder Anschlag-Nase noch Schichteinzug (flache Kante). Vom Aufrufer aus dem Detailgrad gefüllt (`query.rs`).
+    pub flat_openings: HashSet<String>,
 }
 
 impl Visibility {
@@ -185,6 +188,7 @@ impl Visibility {
             has_display: v.get("hasDisplay").and_then(|b| b.as_bool()).unwrap_or(false),
             norender: set("norender"),
             grey: set("grey"),
+            flat_openings: HashSet::new(),
         }
     }
     /// `visibleCodes.has(code)` (ohne `visibleCodes`: wahr).
@@ -614,7 +618,7 @@ pub(super) fn compute_plane(p: &Project, level: &LevelSpec, bodies: &[BodyMesh],
     let shown = |c: &str| vis.visible(c) && vis.render(c);
     let skip = |k: Kind, i: usize| edge_cats.get(&(k, i)).is_some_and(|c| !shown(c));
     cuts.retain(|c| !skip(c.kind, c.index));
-    let cuts = attach_cut_styles(cuts, p, &plane, &walls, &slabs)?;
+    let cuts = attach_cut_styles(cuts, p, &plane, &walls, &slabs, &vis.flat_openings)?;
     let cuts = merge_monolith_cuts(cuts, &slabs_r, &stair_flight_sections(p, plane.base(), plane.u_model()));
     let base = plane.base();
     let u = plane.u_model();
@@ -624,7 +628,7 @@ pub(super) fn compute_plane(p: &Project, level: &LevelSpec, bodies: &[BodyMesh],
     bodies.retain(|b| !skip(Kind::Body, b.index));
     let cuts = subtract_body_voids_in_section(cuts, &void_bodies, base, u);
     let cuts = subtract_pockets_in_section(cuts, p, base, u);
-    let mut cuts = parallel_reveal_cuts(cuts, p, &plane, &walls)?;
+    let mut cuts = parallel_reveal_cuts(cuts, p, &plane, &walls, &vis.flat_openings)?;
     append_body_sections(&mut cuts, p, &bodies, base, u);
     // [152] Netzkörper: geschnitten (Flächen bzw. offene Linien) und in der Projektion. Gelände ist ein eigenes
     // Element (`terrainMesh`, auch IFC-Gelände seit dem Import, [181]) und wird Geländelinie (`append_terrain_profiles`).

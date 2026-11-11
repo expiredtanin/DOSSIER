@@ -2068,7 +2068,9 @@ export type ModelViewDoors = {
   leaf?: ModelViewLeaf;
   /** Schwelle im Grundriss: aus, nur Hebeschiebetüren oder alle Türen (Basis: aus). */
   threshold?: ModelViewThreshold;
-  /** Zarge, Blatt und Sturz im Schnitt (Basis: ja; nein = nur das Blatt). */
+  /**
+   * Zarge, Blatt und Sturz im Schnitt: ja = voll, nein = höchstens das Blatt; ohne Wert folgt es dem Detailgrad (grob: Blatt als Strich).
+   */
   sectionDetail?: boolean;
 };
 
@@ -2254,10 +2256,12 @@ export type ModelViewWindows = {
    */
   lintelLine?: boolean;
   /**
-   * Rahmen, Kämpfer, Sturz, Fensterbank und Storen im Schnitt (Basis: ja; nein = Rahmen und Glas).
+   * Rahmen, Kämpfer, Sturz, Fensterbank im Schnitt: ja = voll, nein = höchstens einfacher Rahmen und Glas; ohne Wert folgt es dem Detailgrad (grob: ein Strich, mittel: einfach, fein: voll).
    */
   sectionDetail?: boolean;
-  /** Fensterteilung (Flügel, Sprossen, Kämpfer) in der Ansicht (Basis: ja). */
+  /**
+   * Fensterteilung (Flügel, Sprossen, Kämpfer) in der Ansicht; ohne Wert folgt sie dem Detailgrad (grob: keine).
+   */
   elevationDivision?: boolean;
 };
 

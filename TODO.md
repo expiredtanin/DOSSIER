@@ -325,6 +325,18 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
 
 ## Schnitt und Ansicht
 
+- ◐ **[184]** Fenster/Türen im Schnitt und in der Ansicht nach Detailgrad wie im Grundriss (11.11., Wunsch Maintainer).
+  EINE Auflösung `model_view::Options::opening_detail`/`section_look` (Element-Detailgrad > Stufe > Basis; Fenster
+  „Vereinfacht" = grob; ohne Stufe der Massstab-Detailgrad des Grundrisses, mittel ab 1:200 = grob, `for_view_scaled`).
+  Schnitt grob: NUR ein Strich in der Öffnung (Rahmenmitte), kein Rahmen/Fensterbank/Sturz-Fläche/Storen (Sturz und
+  Brüstung = Wandschnitt); Tür grob: Öffnung + Blatt als ein Strich. Mittel: Rechteck-Rahmen oben/unten + Glaslinie,
+  Fensterbank als einfache Fläche, Tür-Blatt als Fläche. Fein: volles Profil wie bisher. Storenkasten im Schnitt nur
+  mit `windows.shadingBox` (Basis aus). `sectionDetail` der Stufe ist jetzt optional (ja = voll, nein = höchstens
+  mittel, fehlt = Detailgrad). Ansicht: Fensterteilung folgt dem Detailgrad (grob/vereinfacht: keine), `elevationDivision`
+  geht vor. 11.11. Nachbesserung: grob = Sturz unten und Brüstung oben im Wandschnitt FLACH (kein Anschlag, keine Nase,
+  kein Schichteinzug [168]; `Visibility.flat_openings` aus `section_look == Line`, im Cache-Schlüssel, `section/bands.rs`
+  `section_reveal`, `parallel_reveal_cuts`); Grundriss grob: Leibung gerade, keine Anschlag-Nasen (Wand-Nasen in
+  `walls.rs`, Tür-Nasen in `plan/openings.rs`). Offen: Ansicht-Details (Rahmen/Laibung) nach Stufe; nicht in der Tauri-App geprüft.
 - ◐ **[178]** Deckenauflager an Aussenwänden (11.11., Wunsch Maintainer). Decke endet an der Aussenkante des Kerns
   ([33] `layer_positions`), Aussendämmung/Putz laufen an der Stirn durch — abgeleitet, Umriss bleibt
   (`model3d/bearing.rs`: Platten-Umriss minus Aussenschicht-Streifen, wo vor der Wand keine Decke liegt → `emit_slabs`
