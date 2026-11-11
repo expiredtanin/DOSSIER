@@ -173,7 +173,7 @@ pub fn plan_stairs(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) {
                 bounds.acc(q.x, q.y);
             }
         }
-        let f = crate::plan::stair_symbol::plan_stair_run(&params, zt - zb, cut_height, lw, s.arrow_style == Some(StairArrowStyle::Filled), s.center_column.unwrap_or(0.0), railing_code(p, s), double, &[], &run_opts(&opts, c.a.scale));
+        let f = crate::plan::stair_symbol::plan_stair_run(&params, zt - zb, cut_height, lw, s.arrow_style == Some(StairArrowStyle::Filled), s.center_column.unwrap_or(0.0), railing_code(p, s), double, &[], &run_opts(&opts, c.a.scale, s));
         emit(out, &f, &stroke, greyed, &s.id, &opts);
         if let (true, Some(geo)) = (opts.step_numbers, &geo) {
             let avoid = arrow_boxes(&out[out_start..]);
@@ -252,9 +252,14 @@ fn step_numbers(out: &mut Vec<Primitive>, geo: &kernel2d::StairGeometry, cut_hei
 
 /// [173] Lauflinie nach der Modelldarstellung: Versatz (Papier-mm → Meter bei 1:`scale`) und Antrittspunkt
 /// (Halbmesser 0.75 mm Papier, nur mit Lauflinie).
-fn run_opts(o: &super::model_view::StairOpts, scale: f64) -> crate::plan::stair_symbol::RunOpts {
+fn run_opts(o: &super::model_view::StairOpts, scale: f64, s: &Stair) -> crate::plan::stair_symbol::RunOpts {
     let m = |mm: f64| if scale.is_finite() && scale > 0.0 { mm * scale / 1000.0 } else { 0.0 };
-    crate::plan::stair_symbol::RunOpts { start: m(o.run_start_mm), end: m(o.run_end_mm), start_mark: (o.start_mark && o.walk_line).then(|| m(0.75)).filter(|r| *r > 0.0) }
+    crate::plan::stair_symbol::RunOpts { start: m(o.run_start_mm), end: m(o.run_end_mm), start_mark: (o.start_mark && o.walk_line).then(|| m(0.75)).filter(|r| *r > 0.0), rail_half: rail_half(s) }
+}
+
+/// [T3] Halbe Handlaufbreite der Treppe (Meter).
+fn rail_half(s: &Stair) -> f64 {
+    crate::stairs3d::RailSpec::decode(s.rail_params()).rail_half_width()
 }
 
 /// [155] Treppen tieferer Geschosse, die auf diesem Geschoss ankommen: durch das Loch der Decke, auf der
@@ -270,10 +275,10 @@ fn arriving(c: &Ctx, out: &mut Vec<Primitive>, double: bool, opts: &super::model
         let lw = ov.lineweight.unwrap_or_else(|| c.cat(&s.category_code).map_or(WALL_FALLBACK_MM, |k| k.lw));
         let stroke = ov.color.as_deref().or(s.color.as_deref()).unwrap_or(POCHE_STROKE).to_string();
         // ganz unter der Schnittebene: alles ausgezogen, keine Bruchlinie
-        let f = crate::plan::stair_symbol::plan_stair_run(&a.params, a.rise, a.rise + 1.0, lw, s.arrow_style == Some(StairArrowStyle::Filled), 0.0, railing_code(p, s), double, &a.rings, &run_opts(opts, c.a.scale));
+        let f = crate::plan::stair_symbol::plan_stair_run(&a.params, a.rise, a.rise + 1.0, lw, s.arrow_style == Some(StairArrowStyle::Filled), 0.0, railing_code(p, s), double, &a.rings, &run_opts(opts, c.a.scale, s));
         emit(out, &f, &stroke, greyed, &s.id, opts);
         for axis in &a.axes {
-            let r = crate::stair_rail::RAIL_THICK / 2.0;
+            let r = rail_half(s);
             let lines = if double { vec![crate::stair_rail::offset_polyline(axis, r), crate::stair_rail::offset_polyline(axis, -r)] } else { vec![axis.clone()] };
             for l in lines {
                 for w in l.windows(2) {

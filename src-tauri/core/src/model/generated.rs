@@ -3845,6 +3845,24 @@ pub enum StairArrowStyle {
     Unknown,
 }
 
+/// [T3] Querschnittsform von Handlauf bzw. Geländerpfosten.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+pub enum StairRailProfile {
+    /// Rundrohr (Durchmesser = Breite).
+    #[default]
+    #[serde(rename = "rund")]
+    Rund,
+    /// Rechteck (Breite × Höhe bzw. Tiefe).
+    #[serde(rename = "rechteck")]
+    Rechteck,
+    /// Flachstahl (Breite × Dicke, Dicke klein).
+    #[serde(rename = "flach")]
+    Flach,
+    #[serde(other)]
+    #[ts(skip)]
+    Unknown,
+}
+
 /// Eine Treppe (Treppe/Stair) — ein geschossübergreifendes Bauteil, das über die
 /// Geschosshöhe (OKFF → OKFF des nächsten Geschosses) steigt. Definiert über eine
 /// Grundform (gerade / L / Wendel), eine Basis-Geometrie, die Laufbreite und die
@@ -3997,6 +4015,31 @@ pub struct Stair {
     #[serde(rename = "centerColumn", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub center_column: Option<f64>,
+    /// [T3] Handlauf-Profil (gilt für alle Treppenformen und die Absturzsicherung am Deckenloch);
+    /// fehlt es, ist der Handlauf ein Rundrohr von 4 cm.
+    #[serde(rename = "railProfile", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, inline)]
+    pub rail_profile: Option<StairRailProfile>,
+    /// [T3] Handlauf-Breite in Metern (rund: Durchmesser; fehlt = 0.04).
+    #[serde(rename = "railWidth", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub rail_width: Option<f64>,
+    /// [T3] Handlauf-Höhe in Metern (rechteckig: fehlt = 0.04; Flachstahl: Dicke, fehlt = 0.01; rund: ohne Wirkung).
+    #[serde(rename = "railHeight", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub rail_height: Option<f64>,
+    /// [T3] Pfosten-Profil (fehlt = rund).
+    #[serde(rename = "postProfile", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, inline)]
+    pub post_profile: Option<StairRailProfile>,
+    /// [T3] Pfosten-Breite in Metern, in Richtung des Handlaufs (rund: Durchmesser; fehlt = 0.03, Flachstahl 0.04).
+    #[serde(rename = "postWidth", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub post_width: Option<f64>,
+    /// [T3] Pfosten-Tiefe in Metern, quer zum Handlauf (rechteckig: fehlt = 0.03; Flachstahl: Dicke, fehlt = 0.01; rund: ohne Wirkung).
+    #[serde(rename = "postDepth", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub post_depth: Option<f64>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,

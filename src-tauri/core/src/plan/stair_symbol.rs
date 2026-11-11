@@ -333,6 +333,8 @@ pub struct RunOpts {
     pub start: f64,
     pub end: f64,
     pub start_mark: Option<f64>,
+    /// [T3] Halbe Handlaufbreite (Meter) für die Doppellinie; 0 = Standard ([`crate::stair_rail::RAIL_THICK`] / 2).
+    pub rail_half: f64,
 }
 
 /// [173] Schnittparameter des Strahls `a + t·d` mit der Geraden durch `c`–`e` (`None` = parallel).
@@ -565,7 +567,7 @@ pub fn plan_stair_run(params: &[f64], total_rise: f64, cut_rise: f64, lw_mm: f64
     }
 
     // [151] Handlauf: über der Bruchlinie gestrichelt (dieselbe Teilung wie Tritte und Wange).
-    let r = crate::stair_rail::RAIL_THICK / 2.0;
+    let r = if run.rail_half.is_finite() && run.rail_half > 0.0 { run.rail_half } else { crate::stair_rail::RAIL_THICK / 2.0 };
     for rail in crate::stair_rail::rails(&p, &geo, railing) {
         let path = crate::stair_rail::plan_path(&rail);
         let mut pieces: Vec<(Vec<P>, bool)> = Vec::new();
@@ -981,7 +983,7 @@ mod tests {
             assert!(l(&g.run_line) >= l(&raw.run_line) - 1e-9, "{name}: nicht kürzer als vorher");
             assert!(len(sub(g.arrow.head.1, g.run_line[n - 1])) < 1e-9, "{name}: Pfeil am Ende");
             let mut h = stair_geometry(&sp, 2.8);
-            run_line_to_edges(&mut h, spiral, &RunOpts { start: 0.1, end: 0.2, start_mark: None });
+            run_line_to_edges(&mut h, spiral, &RunOpts { start: 0.1, end: 0.2, start_mark: None, rail_half: 0.0 });
             assert!((l(&g.run_line) - l(&h.run_line) - 0.3).abs() < 1e-6, "{name}: Versatz 0.1 + 0.2");
             assert!(len(sub(h.arrow.head.1, h.run_line[h.run_line.len() - 1])) < 1e-9);
         }

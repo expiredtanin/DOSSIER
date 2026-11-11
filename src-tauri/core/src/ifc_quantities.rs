@@ -323,9 +323,9 @@ pub fn flight_quantities(length: f64, volume: f64) -> Vec<Qty> {
     vec![len("Length", length), vol("GrossVolume", volume), vol("NetVolume", volume)]
 }
 
-/// Geländer: Länge.
-pub fn railing_quantities(length: f64) -> Vec<Qty> {
-    vec![len("Length", length)]
+/// Geländer: Länge und [T3] Querschnittsfläche des Handlaufs (Rund-, Rechteck- oder Flachprofil).
+pub fn railing_quantities(length: f64, section_area: f64) -> Vec<Qty> {
+    vec![len("Length", length), area("CrossSectionArea", section_area)]
 }
 
 #[cfg(test)]
@@ -483,6 +483,6 @@ mod tests {
         assert_eq!(get(&q, "Width"), Some(0.0));
         assert!(close(get(&q, "Perimeter"), 4.0));
         assert_eq!(flight_quantities(-1.0, 2.0)[0].value, 0.0);
-        assert_eq!(railing_quantities(3.0)[0].value, 3.0);
+        assert_eq!(railing_quantities(3.0, 0.001)[0].value, 3.0);
     }
 }

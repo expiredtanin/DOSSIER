@@ -14,6 +14,40 @@ import { DimensionField } from "./fields";
  * [151] Läufe und Podest einer Podesttreppe (L, U, gerade mit Podest): Lauflängen, Steigungen im ersten
  * Lauf, Drehsinn (L/U), Treppenauge, Mittellauf und Versatz (U), Podesttiefe (U, gerade mit Podest).
  */
+type RailProfile = "rund" | "rechteck" | "flach";
+
+/** [T3] Handlauf- und Pfosten-Querschnitt (gilt für alle Treppenformen und die Absturzsicherung). */
+function StairRailFields({ stair, host }: { stair: StairInfo; host: ReturnType<typeof usePanelHost> }) {
+  const profiles = [
+    { value: "rund", label: t("objinfo.stair.profile.rund") },
+    { value: "rechteck", label: t("objinfo.stair.profile.rechteck") },
+    { value: "flach", label: t("objinfo.stair.profile.flach") },
+  ];
+  const rail = stair.railProfile ?? "rund";
+  const post = stair.postProfile ?? "rund";
+  // Standardmasse wie im Kern (`RailSpec::decode`)
+  const railH = stair.railHeight ?? (rail === "flach" ? 0.01 : 0.04);
+  const postW = stair.postWidth ?? (post === "flach" ? 0.04 : 0.03);
+  const postD = stair.postDepth ?? (post === "flach" ? 0.01 : 0.03);
+  const set = (patch: Parameters<typeof host.onSetStairPatch>[0]) => host.onSetStairPatch(patch);
+  return (
+    <>
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.stair.railProfile")}</span>
+        <Dropdown value={rail} onChange={(v) => set({ railProfile: v === "rund" ? undefined : (v as RailProfile) })} options={profiles} title={t("objinfo.stair.railProfile")} width={130} />
+      </div>
+      <DimensionField label={rail === "rund" ? t("objinfo.stair.railDiameter") : t("objinfo.stair.railWidth")} value={stair.railWidth ?? 0.04} onCommit={(v) => set({ railWidth: v > 0 ? v : undefined })} />
+      {rail !== "rund" && <DimensionField label={t("objinfo.stair.railHeight")} value={railH} onCommit={(v) => set({ railHeight: v > 0 ? v : undefined })} />}
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.stair.postProfile")}</span>
+        <Dropdown value={post} onChange={(v) => set({ postProfile: v === "rund" ? undefined : (v as RailProfile) })} options={profiles} title={t("objinfo.stair.postProfile")} width={130} />
+      </div>
+      <DimensionField label={post === "rund" ? t("objinfo.stair.postDiameter") : t("objinfo.stair.postWidth")} value={postW} onCommit={(v) => set({ postWidth: v > 0 ? v : undefined })} />
+      {post !== "rund" && <DimensionField label={t("objinfo.stair.postDepth")} value={postD} onCommit={(v) => set({ postDepth: v > 0 ? v : undefined })} />}
+    </>
+  );
+}
+
 function StairFlightFields({ stair, host }: { stair: StairInfo; host: ReturnType<typeof usePanelHost> }) {
   const isU = stair.shape === "U";
   const turn = stair.turn ?? 1;
@@ -213,6 +247,7 @@ export function StairSection({
           onCommit={(v) => host.onSetStairColumn(v)}
         />
       )}
+      <StairRailFields stair={stair} host={host} />
       {stair.shape !== "spiral" && stair.shape !== "straight" && <StairFlightFields stair={stair} host={host} />}
       <DimensionField
         label={t("objinfo.stair.steps")}

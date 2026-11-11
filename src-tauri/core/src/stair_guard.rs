@@ -135,6 +135,14 @@ fn guard_chains(ring: &[[f64; 2]], fps: &[WallFootprint], arrival: ([f64; 2], [f
         last.extend(chains[0].iter().skip(1).copied());
         chains[0] = last;
     }
+    // [155] Ein freier Lochring ohne Wand und Austritt ist ein einziger geschlossener Zug: Anfang und Ende
+    // fallen genau zusammen, damit die Achse an der Naht eine Gehrung bekommt statt zweier stumpfer Enden.
+    if let [ch] = chains.as_mut_slice() {
+        if ch.len() >= 4 && near(*ch.last().unwrap(), ch[0]) {
+            let first = ch[0];
+            *ch.last_mut().unwrap() = first;
+        }
+    }
     chains
 }
 
@@ -198,5 +206,51 @@ mod tests {
         let parts = crate::ifc_stairs::stair_parts(&p, &st, 0.0);
         let g = parts.guard.expect("Absturzsicherung");
         assert!(g.quantities[0].value > 1.0 && !g.mesh.indices.is_empty());
+    }
+
+    /// [155] Freier Lochring ohne Wand und Austritt: ein geschlossener Zug mit Gehrung an der Naht.
+    #[test]
+    fn freier_ring_ist_geschlossen_mit_gehrung() {
+        let ring: Vec<[f64; 2]> = vec![[0.0, 0.0], [2.0, 0.0], [2.0, 2.0], [0.0, 2.0]];
+        let chains = guard_chains(&ring, &[], ([9.0, 9.0], [9.5, 9.0]));
+        assert_eq!(chains.len(), 1);
+        assert!(crate::stair_rail::is_closed(&chains[0]), "{:?}", chains[0]);
+        let axis = offset_polyline(&chains[0], GUARD_INSET);
+        assert!(crate::stair_rail::is_closed(&axis));
+        // alle Ecken (auch die Naht) um GUARD_INSET innen, mit Gehrung: Quadrat 0.04 … 1.96
+        for q in &axis {
+            assert!(((q[0] - 1.0).abs() - (1.0 - GUARD_INSET)).abs() < 1e-9 && ((q[1] - 1.0).abs() - (1.0 - GUARD_INSET)).abs() < 1e-9, "{q:?}");
+        }
+        // Ring mit Austritt: offener Zug, rechtwinkliger Abschluss
+        let open = guard_chains(&ring, &[], ([1.0, 0.0], [1.5, 0.0]));
+        assert_eq!(open.len(), 1);
+        assert!(!crate::stair_rail::is_closed(&open[0]));
+        let a = offset_polyline(&open[0], GUARD_INSET);
+        assert!((a[0][0] - open[0][0][0]).abs() < 1e-9, "Anfang senkrecht zur Kante: {:?}", a[0]);
+    }
+
+    /// [T3] Profil der Treppe wirkt auf Absturzsicherung (3D) und IFC-Basismengen (Querschnittsfläche); Rundung wie bisher.
+    #[test]
+    fn handlaufprofil_in_3d_und_ifc() {
+        let mut p = with_hole();
+        let area = |p: &Project| {
+            let st = p.stairs.as_ref().unwrap()[0].clone();
+            let g = crate::ifc_stairs::stair_parts(p, &st, 0.0).guard.unwrap();
+            g.quantities.iter().find(|q| q.name == "CrossSectionArea").unwrap().value
+        };
+        let round_mesh = crate::model3d::stair_guard_meshes(&p)[0].1.positions.len();
+        assert!((area(&p) - std::f64::consts::PI * 0.02 * 0.02).abs() < 1e-9);
+        let st = &mut p.stairs.as_mut().unwrap()[0];
+        st.rail_profile = Some(StairRailProfile::Rechteck);
+        st.rail_width = Some(0.05);
+        st.rail_height = Some(0.03);
+        st.post_profile = Some(StairRailProfile::Rechteck);
+        assert!((area(&p) - 0.0015).abs() < 1e-9);
+        assert!(crate::model3d::stair_guard_meshes(&p)[0].1.positions.len() < round_mesh);
+        // JSON-Namen
+        let j = serde_json::to_value(&p.stairs.as_ref().unwrap()[0]).unwrap();
+        assert_eq!(j["railProfile"], "rechteck");
+        assert_eq!(j["railWidth"], 0.05);
+        assert!(serde_json::to_value(&sample().stairs.unwrap()[0]).unwrap().get("railProfile").is_none());
     }
 }
