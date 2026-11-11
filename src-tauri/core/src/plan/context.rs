@@ -62,11 +62,7 @@ fn bbox_corners(positions: &[f64]) -> Option<Vec<Vec2>> {
 /// Kontext-Schicht (`addContextContours`). Objekte ohne Kategorie bleiben immer sichtbar. Die
 /// Höhenlinien-Beschriftungen weichen den Zeichnungen des Geschosses aus (`drawings::stamp_obstacle_prims`).
 pub fn plan_context(c: &Ctx, out: &mut Vec<Primitive>) {
-    let mut o = super::stamp_place::Obstacles::default();
-    for q in super::drawings::stamp_obstacle_prims(c) {
-        o.add_prim(&q);
-    }
-    plan_context_with(c, out, &o);
+    plan_context_with(c, out, c.drawn_obstacles());
 }
 
 /// Wie [`plan_context`], mit den schon gesammelten Hindernissen der Zeichnungen (Bemassung, Koten, Texte …).
@@ -153,9 +149,7 @@ pub fn plan_context_with(c: &Ctx, out: &mut Vec<Primitive>, drawing_obstacles: &
                 // [150] Beschriftungen weichen auch den Blasen der Achsraster aus.
                 let obst = label_obst.get_or_insert_with(|| {
                     let mut o = drawing_obstacles.clone();
-                    for q in super::drawings::grid_bubble_prims(c) {
-                        o.add_prim(&q);
-                    }
+                    o.extend(c.bubble_obstacles());
                     // [157] Baugruben (Sohle, Böschungsoberkante, Böschungsschraffur): keine Höhenkote darauf.
                     for q in out.iter().filter(|q| matches!(q, Primitive::Line { cls, color: Some(k), .. } if cls == "context-line" && k == EXCAVATION_INK)) {
                         o.add_prim(q);
@@ -977,9 +971,8 @@ pub fn plan_section_lines(c: &Ctx, out: &mut Vec<Primitive>) {
     if labels.is_empty() {
         return;
     }
-    for q in super::drawings::stamp_obstacle_prims(c).iter().chain(super::drawings::grid_bubble_prims(c).iter()) {
-        obst.add_prim(q);
-    }
+    obst.extend(c.drawn_obstacles());
+    obst.extend(c.bubble_obstacles());
     // [157] Sohle, Böschungsoberkante und Böschungsschraffur der sichtbaren Baugruben.
     if !excavation_segments(c).is_empty() {
         let house = terrain_footprint(c.p, &c.a.floor);
