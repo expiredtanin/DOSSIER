@@ -226,11 +226,14 @@ impl DimOpts {
     }
 }
 
-/// Kette einer automatischen Aussenbemassung (`openings`, `steps`, `total`, `arc`); `None` = eigene Bemassung.
+/// Kette einer automatischen Aussenbemassung (`openings`, `steps`, `total`, `arc`, `radius`); `None` = eigene Bemassung.
 pub fn autodim_chain(d: &Drawing2D) -> Option<&str> {
     let rest = d.id.strip_prefix("autodim-")?.strip_prefix(d.level_id.as_str())?.strip_prefix('-')?;
     if rest.starts_with("arc-") {
         return Some("arc");
+    }
+    if rest.starts_with("radius-") {
+        return Some("radius");
     }
     rest.rsplit_once('-').map(|(_, c)| c).filter(|c| matches!(*c, "openings" | "steps" | "total"))
 }

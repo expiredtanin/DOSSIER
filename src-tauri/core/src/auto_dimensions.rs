@@ -299,7 +299,8 @@ pub fn auto_exterior_dimensions(walls: &[WallIn], openings: &[OpeningIn], scale_
     }
     out.extend(arc_chains(walls, openings, &rings, scale));
     let bands: Vec<Ring> = out.iter().filter_map(|c| chain_band(c, scale)).collect();
-    out.extend(oblique_chains(walls, openings, &rings, &bands, scale));
+    let oblique = oblique_chains(walls, openings, &rings, &bands, &out, scale);
+    out.extend(oblique);
     out
 }
 
@@ -452,7 +453,7 @@ fn outer_face_s(w: &WallIn, n: Vec2) -> Option<f64> {
 /// Kanten kürzer als die dickste Wand (Stirnseiten, Gehrungsreste) fallen weg. Bogenwände: Facetten und
 /// Stirnseiten fallen weg; die Sehne zwischen den Ecken der gewölbten Aussenfläche gilt als
 /// Fassadenstück, wenn sie schief liegt (achsparallel deckt sie schon die Seitenkette).
-fn oblique_chains(walls: &[WallIn], openings: &[OpeningIn], rings: &[Ring], bands: &[Ring], scale: f64) -> Vec<DimChain> {
+fn oblique_chains(walls: &[WallIn], openings: &[OpeningIn], rings: &[Ring], bands: &[Ring], straight: &[DimChain], scale: f64) -> Vec<DimChain> {
     let min_gap = MIN_SEGMENT_MM / 1000.0 * scale;
     let min_len = (walls.iter().map(thick).fold(0.0, f64::max) + 1e-3).max(min_gap);
     let circles = arc_circles(walls);
@@ -564,6 +565,7 @@ fn oblique_chains(walls: &[WallIn], openings: &[OpeningIn], rings: &[Ring], band
         }
         // [81] Kreuzt eine Kette (Masslinie oder Hilfslinie) den Grundriss — schiefe Fläche in einer Einbuchtung mit
         // spitzem Winkel, Flügel davor —, rückt die Grundlinie hinaus vor alles, was im Streifen der Kette liegt.
+        let mut s_line = s_line;
         let mut chains = vec![];
         emit_chains(&mut chains, side, 0, n, s_line, (t_min, t_max), &corners, jambs.clone(), &feats, scale);
         if chains.iter().any(|c| chain_segments(c, scale).iter().any(|&(a, b)| seg_in_interior(a, b, rings))) {
@@ -572,12 +574,32 @@ fn oblique_chains(walls: &[WallIn], openings: &[OpeningIn], rings: &[Ring], band
             let obst: Vec<Ring> = rings.iter().chain(bands).cloned().collect();
             let s_free = strip_max(&obst, n, (t_min - m, t_max + m));
             chains.clear();
-            emit_chains(&mut chains, side, 0, n, s_line.max(s_free), (t_min, t_max), &corners, jambs, &feats, scale);
+            s_line = s_line.max(s_free);
+            emit_chains(&mut chains, side, 0, n, s_line, (t_min, t_max), &corners, jambs.clone(), &feats, scale);
+        }
+        // Kreuzt eine Kette eine achsparallele oder eine schon gesetzte schiefe Kette (Masslinie oder Hilfslinie),
+        // rückt sie weiter hinaus, bis nichts mehr kreuzt (die Kreuzung verschwindet spätestens vor dem Gebäude).
+        let others: Vec<(Vec2, Vec2)> = straight.iter().chain(out.iter()).filter(|c| c.arc.is_none()).flat_map(|c| chain_segments(c, scale)).collect();
+        let step = 4.0 / 1000.0 * scale;
+        for _ in 0..200 {
+            if !chains.iter().any(|c| chain_segments(c, scale).iter().any(|&a| others.iter().any(|&b| segs_cross(a, b)))) {
+                break;
+            }
+            s_line += step;
+            chains.clear();
+            emit_chains(&mut chains, side, 0, n, s_line, (t_min, t_max), &corners, jambs.clone(), &feats, scale);
         }
         out.extend(chains);
         side += 1;
     }
     out
+}
+
+/// Schneiden sich die Strecken a und b echt (Berühren und Überlagern zählt nicht)?
+fn segs_cross(a: (Vec2, Vec2), b: (Vec2, Vec2)) -> bool {
+    let cr = |o: Vec2, p: Vec2, q: Vec2| (p[0] - o[0]) * (q[1] - o[1]) - (p[1] - o[1]) * (q[0] - o[0]);
+    let e = 1e-9;
+    cr(a.0, a.1, b.0) * cr(a.0, a.1, b.1) < -e && cr(b.0, b.1, a.0) * cr(b.0, b.1, a.1) < -e
 }
 
 /// Hilfslinien-Abstand und -Überstand der Darstellung (Papier-mm, wie `plan/drawings.rs`).
@@ -586,17 +608,22 @@ const DIM_OVERSHOOT_MM: f64 = 1.0;
 
 /// Strecken, die eine gerade Kette zeichnet: Masslinie (mit Überstand) und je Punkt die Hilfslinie.
 fn chain_segments(d: &DimChain, scale: f64) -> Vec<(Vec2, Vec2)> {
-    let (Some(&a), Some(&b)) = (d.pts.first(), d.pts.last()) else { return vec![] };
+    segments_of(&d.pts, d.offset, scale)
+}
+
+/// Strecken einer geraden Kette aus Punkten und Abstand (Masslinie samt Überstand, je Punkt die Hilfslinie).
+pub fn segments_of(pts: &[Vec2], offset: f64, scale: f64) -> Vec<(Vec2, Vec2)> {
+    let (Some(&a), Some(&b)) = (pts.first(), pts.last()) else { return vec![] };
     let len = (b[0] - a[0]).hypot(b[1] - a[1]);
     if !(len >= EPS) {
         return vec![];
     }
     let u = [(b[0] - a[0]) / len, (b[1] - a[1]) / len];
     let n = [-u[1], u[0]];
-    let (gap, ov, off) = (DIM_GAP_MM / 1000.0 * scale, DIM_OVERSHOOT_MM / 1000.0 * scale, d.offset);
+    let (gap, ov, off) = (DIM_GAP_MM / 1000.0 * scale, DIM_OVERSHOOT_MM / 1000.0 * scale, offset);
     let at = |p: Vec2, k: f64, t: f64| [p[0] + n[0] * k + u[0] * t, p[1] + n[1] * k + u[1] * t];
     let mut out = vec![(at(a, off, -ov), at(b, off, ov))];
-    out.extend(d.pts.iter().map(|&p| (at(p, gap, 0.0), at(p, off + ov, 0.0))));
+    out.extend(pts.iter().map(|&p| (at(p, gap, 0.0), at(p, off + ov, 0.0))));
     out
 }
 
@@ -744,6 +771,24 @@ fn arc_chains(walls: &[WallIn], openings: &[OpeningIn], rings: &[Ring], scale: f
     out
 }
 
+/// [81] Radiusmass: je Bogenwand der Aussenhülle ein Punkt auf der gewölbten Aussenfläche (Bogenmitte des
+/// Umriss-Stücks), an dem das Radiusmass (Mittelpunkt → Rand) angesetzt wird. (Wandindex, Punkt.)
+pub fn auto_radius_points(walls: &[WallIn]) -> Vec<(usize, Vec2)> {
+    let rings = outer_rings(walls);
+    if rings.is_empty() {
+        return vec![];
+    }
+    walls
+        .iter()
+        .enumerate()
+        .filter_map(|(wi, w)| {
+            let (a, n_out, lo, hi) = arc_outer(w, &rings)?;
+            let q = a.point((lo + hi) / 2.0, n_out);
+            finite2([q.x, q.y]).then_some((wi, [q.x, q.y]))
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -857,6 +902,25 @@ mod tests {
         // Nach innen gewölbt: keine Bogenmass-Kette.
         w[0].bulge = 0.4;
         assert!(auto_exterior_dimensions(&w, &[], 100.0).iter().all(|d| d.arc.is_none()));
+    }
+
+    #[test]
+    fn radiuspunkt_nur_aussen_gewoelbt() {
+        let mut w = vec![
+            WallIn { start: [0.0, 0.0], end: [10.0, 0.0], thickness: 0.3, shift: 0.0, bulge: -0.4 },
+            WallIn { start: [10.0, 0.0], end: [10.0, 6.0], thickness: 0.3, shift: 0.0, bulge: 0.0 },
+            WallIn { start: [10.0, 6.0], end: [0.0, 6.0], thickness: 0.3, shift: 0.0, bulge: 0.0 },
+            WallIn { start: [0.0, 6.0], end: [0.0, 0.0], thickness: 0.3, shift: 0.0, bulge: 0.0 },
+        ];
+        let pts = auto_radius_points(&w);
+        assert_eq!(pts.len(), 1);
+        let a = w[0].arc().unwrap();
+        let r_out = a.radius_at(if a.radius_at(0.15) > a.radius_at(-0.15) { 0.15 } else { -0.15 });
+        let (wi, q) = pts[0];
+        assert_eq!(wi, 0);
+        assert!(((q[0] - a.center.x).hypot(q[1] - a.center.y) - r_out).abs() < 1e-6 && q[1] < 0.0, "{q:?}");
+        w[0].bulge = 0.4;
+        assert!(auto_radius_points(&w).is_empty(), "nach innen gewölbt: kein Radiusmass");
     }
 
     /// Mauerversprung von 0.1 m ergäbe ein Kleinmass: Ketten enthalten keine Teilstrecke unter 1.5 mm Papier.
@@ -1109,6 +1173,31 @@ mod tests {
         let total_s = dims.iter().find(|d| d.side == 0 && d.chain == CHAIN_TOTAL).unwrap();
         assert!(total_s.pts[0][1] < -0.9, "Gesamtkette vor dem Scheitel: {total_s:?}");
         assert_eq!(dims.iter().filter(|d| d.arc.is_some()).count(), 1);
+    }
+
+    /// [81] Keine Kette (Masslinie, Hilfslinien) kreuzt eine Kette einer anderen Seite bzw. Fassadengruppe.
+    fn assert_ohne_kreuzung(dims: &[DimChain]) {
+        for (i, a) in dims.iter().enumerate() {
+            for b in dims[i + 1..].iter().filter(|b| (b.side, b.part) != (a.side, a.part) && a.arc.is_none() && b.arc.is_none()) {
+                for x in chain_segments(a, 100.0) {
+                    for y in chain_segments(b, 100.0) {
+                        assert!(!segs_cross(x, y), "{a:?} kreuzt {b:?}");
+                    }
+                }
+            }
+        }
+    }
+
+    /// [81] Schiefe Stützmauer neben dem Haus (Musterhaus komplex, UG): ihre Ketten kreuzen die Westketten nicht.
+    #[test]
+    fn schiefe_kette_kreuzt_keine_achsparallele() {
+        let mut walls = ring_walls(&[[0.0, 0.0], [15.0, 0.0], [15.0, 10.0], [0.0, 10.0]]);
+        for (a, b) in [([-0.195, 4.0], [-4.5, 1.0]), ([-4.5, 1.0], [-6.0, -4.0])] {
+            walls.push(WallIn { start: a, end: b, thickness: 0.3, shift: 0.0, bulge: 0.0 });
+        }
+        let dims = auto_exterior_dimensions(&walls, &[], 100.0);
+        assert!(dims.iter().any(|d| d.side >= 4), "schiefe Ketten fehlen");
+        assert_ohne_kreuzung(&dims);
     }
 
     /// Achsparallele Grundrisse: keine schiefen Ketten.

@@ -1185,6 +1185,29 @@ fn auto_dims(root: &Map<String, Value>, pr: &Project, ctx: &Ctx, prefix: &str, s
     const SIDES: [&str; 4] = ["south", "east", "north", "west"];
     const CHAINS: [&str; 3] = ["openings", "steps", "total"];
     let lk = crate::document::Lookup::plain(root);
+    let mut radii = Vec::new();
+    for (wi, click) in crate::auto_dimensions::auto_radius_points(&win) {
+        // [81] Radiusmass je Bogenwand der Hülle; hängt über den Bezug an der Wand (wie ein von Hand gesetztes).
+        // Hat die Wand schon ein eigenes Radiusmass (Bezug auf sie), setzt die Auto-Bemassung keins dazu.
+        let has_own = arr(root.get("drawings2d")).iter().any(|d| {
+            let g = d.get("geom");
+            !id_of(d).is_some_and(|i| i.starts_with("autodim-"))
+                && g.and_then(|g| g.get("kind")).and_then(Value::as_str) == Some("radius")
+                && arr(g.and_then(|g| g.get("refs"))).iter().any(|r| r.get("id").and_then(Value::as_str) == Some(walls[wi].id.as_str()))
+        });
+        if has_own {
+            continue;
+        }
+        let Some((pts, refs)) = crate::dim_assoc::round_dimension(&lk, ctx.level, crate::model::DimKind::Radius, &[(click[0], click[1])], 1e-3) else { continue };
+        let geom = obj(vec![
+            ("shape", s("dimension")),
+            ("pts", pvs(&pts)),
+            ("offset", js_num(0.0)),
+            ("kind", s("radius")),
+            ("refs", serde_json::to_value(refs).unwrap_or(Value::Null)),
+        ]);
+        radii.push(drawing(format!("{prefix}-{}-radius-{}", ctx.level, walls[wi].id), ctx, geom));
+    }
     auto_exterior_dimensions(&win, &oin, scale)
         .into_iter()
         .map(|c| {
@@ -1210,6 +1233,7 @@ fn auto_dims(root: &Map<String, Value>, pr: &Project, ctx: &Ctx, prefix: &str, s
             }
             drawing(id, ctx, obj(fields))
         })
+        .chain(radii)
         .collect()
 }
 
@@ -1225,10 +1249,13 @@ fn autodim_ops(root: &Map<String, Value>, p: &Project, v: &Value, ctx: &Ctx) -> 
     }
     // [180] Eigene Klasse „Auto-Bemassung" (ohne sie im Projekt: die aktive Klasse); je Kette änderbar.
     let cat = crate::cmd_create::category_or(p, crate::standards::AUTO_DIM_CATEGORY, ctx);
-    for d in &mut dims {
-        d["categoryCode"] = cat.clone();
-    }
     let own = format!("autodim-{}-", ctx.level);
+    // [81] Eine vom Nutzer auf eine andere Klasse gelegte Kette bleibt beim erneuten Ausführen dort.
+    let kept = |id: &str| arr(root.get("drawings2d")).iter().find(|d| id_of(d) == Some(id)).and_then(|d| d.get("categoryCode")).filter(|c| c.as_str().is_some_and(|c| !c.is_empty())).cloned();
+    for d in &mut dims {
+        let own_cat = d.get("id").and_then(Value::as_str).and_then(kept);
+        d["categoryCode"] = own_cat.unwrap_or_else(|| cat.clone());
+    }
     let old: Vec<&str> = arr(root.get("drawings2d")).iter().filter_map(id_of).filter(|id| id.starts_with(&own)).collect();
     let mut ops = crate::cmd_create::remove_op(root, "drawings2d", &old);
     ops.extend(add_op("drawings2d", dims));

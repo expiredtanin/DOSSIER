@@ -272,7 +272,12 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
 - ◐ **[77]** Zauberstab (Befehl `wand`). In der App nicht geklickt. (10.11.: Splines sind schon Begrenzung — der Fang-Sammler `snap_model` tesselliert sie; Test `spline_als_rand`.) · S
 - ◐ **[81]** Automatische Aussenbemassung (`auto_dimensions`). (9.11.) Schiefe Ketten kreuzen den Grundriss nicht mehr
   (sonst vor alles im Streifen hinausgerückt), getrennte Gebäude eigene Seitenketten (`south2` …), Erker-Facetten ohne
-  Stufe. Offen: schiefe Kette kann eine achsparallele Kette kreuzen; Radius von Bogenwänden nicht automatisch. · S
+  Stufe. (11.11.) Schiefe Ketten rücken hinaus, bis
+  sie keine achsparallele und keine andere schiefe Kette kreuzen (Masslinie, Hilfslinien; Musterhaus komplex, alle Geschosse 1:100/1:50
+  frei: `MK_FILE=mk.obp cargo test --lib autodim_musterhaus -- --ignored`); je Bogenwand der Hülle ein Radiusmass
+  (`autodim-<Ebene>-radius-<Wand>`, Klasse 81, an der Wand verankert; entfällt, wenn die Wand schon ein eigenes Radiusmass hat;
+  in „Aussen/Gesamtmass"-Ansicht ausgeblendet wie das Bogenmass); eine auf eine andere Klasse gelegte Auto-Kette bleibt beim
+  erneuten `autodim` auf ihrer Klasse. Offen: nicht in der App geklickt. · S
 - ◐ **[172]** Masszahl der Bemassung „snappy" und mittig. (10.11.) Vorgabe: Zahl wirklich mittig (bisher hing sie mit ihrem Anfang an der Segmentmitte, jetzt
   um die Breite halbiert zurückgesetzt, auch Bogenlänge) über jedem Segment im festen Abstand (Grundlinie 0.6 Schrifthöhe); passt sie nicht zwischen die Hilfslinien, weicht sie nach aussen (erstes Segment links, letztes rechts,
   mittlere zum längeren Nachbarn, bei Überdeckung eine Zeile höher) — `dim_auto_offsets` in `plan/drawings.rs`, gilt für
