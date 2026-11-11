@@ -295,6 +295,9 @@ fn plan_opening_inner(buf: &[f64]) -> Option<Vec<f64>> {
             for off in [ref_off - total / 2.0, ref_off + total / 2.0] {
                 o.line(C_WINDOW_FRAME, frame_hair, 2.0, 0.0, add(js, scale(wn, off)), add(je, scale(wn, off)));
             }
+            // Strich in der Fenstermitte (Glasebene bzw. Mitte Rahmen).
+            let mid = (f_lo + f_hi) / 2.0;
+            o.line(C_WINDOW_FRAME, frame_hair, 2.0, 0.0, add(js, scale(wn, mid)), add(je, scale(wn, mid)));
         }
     } else {
         o.polygon(1.0, frame_view_w, 3.0, &sym.frame);
@@ -667,8 +670,8 @@ mod tests {
         assert_eq!(t.len(), 1 + 1 + 1 + 2 + 2);
     }
 
-    /// [140] Fenster grob: nur zwei Striche quer durch die Öffnung in den Wandfluchten (kein Rahmen, kein Glas,
-    /// keine Bank, kein Anschlag) — auch mit Fenstertyp, Anschlag und Bank.
+    /// [140] Fenster grob: drei Striche quer durch die Öffnung (Wandfluchten aussen/innen und Fenstermitte; kein
+    /// Rahmen, keine Flügel, keine Bank, kein Anschlag) — auch mit Fenstertyp, Anschlag und Bank.
     #[test]
     fn fenster_grob_zwei_striche_in_der_wandflucht() {
         let sashes = [[0.0, 1.0, NAN, NAN, 1.0], [0.0, 1.0, NAN, NAN, 1.0]];
@@ -677,13 +680,15 @@ mod tests {
             b[DETAILS] = 0.04; // Anschlag
             b[DETAILS + 1] = 3.0; // Bank beidseitig
             let f = plan_opening(&b);
-            assert_eq!(tags(&f), vec![1.0, 2.0, 2.0], "Lücke + zwei Striche");
+            assert_eq!(tags(&f), vec![1.0, 2.0, 2.0, 2.0], "Lücke + drei Striche");
             let mut ys: Vec<f64> = lines(&f).iter().map(|l| {
                 assert!((l.3 - l.5).abs() < 1e-9 && (l.2 - 1.0).abs() < 1e-9 && (l.4 - 1.9).abs() < 1e-9, "quer durch die Öffnung: {l:?}");
                 l.3
             }).collect();
             ys.sort_by(f64::total_cmp);
-            assert!((ys[0] + 0.15).abs() < 1e-9 && (ys[1] - 0.15).abs() < 1e-9, "Wandfluchten: {ys:?}");
+            assert_eq!(ys.len(), 3);
+            assert!((ys[0] + 0.15).abs() < 1e-9 && (ys[2] - 0.15).abs() < 1e-9, "Wandfluchten: {ys:?}");
+            assert!(ys[1] > ys[0] + 0.01 && ys[1] < ys[2] - 0.01, "Strich in der Fenstermitte: {ys:?}");
         }
     }
 

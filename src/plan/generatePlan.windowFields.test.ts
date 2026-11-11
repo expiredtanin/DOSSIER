@@ -201,18 +201,18 @@ describe("generatePlan — Verglasung glazingPanes (Item 2)", () => {
     expect(glassLineCount(p1, "fein")).toBe(0);
   });
 
-  it("ohne typeId: mittel=1, fein=2 Glaslinien; grob keine ([140]: zwei Striche in der Wandflucht)", () => {
+  it("ohne typeId: mittel=1, fein=2 Glaslinien; grob keine ([140]: drei Striche)", () => {
     const p = project({ ...baseWindow });
     expect(glassLineCount(p, "grob")).toBe(0);
     expect(glassLineCount(p, "mittel")).toBe(1);
     expect(glassLineCount(p, "fein")).toBe(2);
   });
 
-  it("glazingPanes wirkt bei 'grob' NICHT (keine Glaslinie, nur die zwei Striche)", () => {
+  it("glazingPanes wirkt bei 'grob' NICHT (keine Glaslinie, nur die drei Striche)", () => {
     const wt: WindowType = { ...baseWindowType, glazingPanes: 3 };
     const p = project({ ...baseWindow, typeId: "wt1" }, [wt]);
     expect(glassLineCount(p, "grob")).toBe(0);
-    expect(linesOfClass(p, "window-frame", "grob").length).toBe(2);
+    expect(linesOfClass(p, "window-frame", "grob").length).toBe(3);
   });
 });
 
@@ -440,7 +440,7 @@ describe("generatePlan — Linien-Übersteuerung je Kategorie (Opening.frameLine
     );
     expect(linesOfClass(p, "window-glass", "grob").length).toBe(0);
     const g = linesOfClass(p, "window-frame", "grob");
-    expect(g.length).toBe(2);
+    expect(g.length).toBe(3);
     expect(g.every((q) => q.kind === "line" && q.color === "#00ff00")).toBe(true);
     expect(g[0].kind === "line" && g[0].weightMm).toBeCloseTo(0.3, 6);
   });
@@ -449,13 +449,13 @@ describe("generatePlan — Linien-Übersteuerung je Kategorie (Opening.frameLine
 describe("generatePlan — Rollladenkasten shading (Item 3)", () => {
   const shadingLineCount = (p: Project) => linesOfClass(p, "window-shading").length;
 
-  it("shading.create: true erzeugt eine zusätzliche Kastenkontur (4 Linien)", () => {
+  it("shading.create: true zeichnet im Grundriss nur mit der Modelldarstellung-Option (Rust-Test); Basis: keine Kontur", () => {
     const wt: WindowType = {
       ...baseWindowType,
       shading: { create: true, kind: "rollladen", box: { width: 1.2, height: 0.2, depth: 0.15 } },
     };
     const p = project({ ...baseWindow, typeId: "wt1" }, [wt]);
-    expect(shadingLineCount(p)).toBe(4);
+    expect(shadingLineCount(p)).toBe(0); // Basis: Storenkasten im Grundriss aus
   });
 
   it("shading.create: false erzeugt KEINE Kastenkontur", () => {

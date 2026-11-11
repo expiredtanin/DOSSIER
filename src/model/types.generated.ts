@@ -2202,6 +2202,15 @@ export type ModelViewWindows = {
   /** Flügelrahmen im Grundriss (Basis: nur „fein"). */
   sashFrames?: boolean;
   /**
+   * Vereinfachter Grundriss („3 Linien", CH-Praxis 1:200): nur Leibungskante aussen, Leibungskante innen und ein Strich
+   * in der Fenstermitte; kein Rahmen, keine Flügel, keine Anschlagnase, keine Fensterbank (Basis: nur Detailgrad „grob").
+   */
+  simplified?: boolean;
+  /**
+   * Storenkasten im Grundriss als Untersicht (gestrichelt über der Schnittebene) zeigen (Basis: nein).
+   */
+  shadingBox?: boolean;
+  /**
    * Sturzlinie im Grundriss (gestrichelt an den Wandflächen; Element-Linientyp geht vor; Basis: nein).
    */
   lintelLine?: boolean;

@@ -174,6 +174,8 @@ export const MODEL_VIEW_FIELDS: readonly ModelViewField[] = [
   { section: "windows", key: "planSwingArcs", values: "bool" },
   { section: "windows", key: "sill", values: "bool" },
   { section: "windows", key: "sashFrames", values: "bool" },
+  { section: "windows", key: "simplified", values: "bool" },
+  { section: "windows", key: "shadingBox", values: "bool" },
   { section: "windows", key: "lintelLine", values: "bool" },
   { section: "windows", key: "sectionDetail", values: "bool" },
   { section: "windows", key: "elevationDivision", values: "bool" },
