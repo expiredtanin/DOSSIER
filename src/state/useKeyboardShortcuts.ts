@@ -672,3 +672,30 @@ export function useViewNavigationShortcuts(overrides: ShortcutOverrides): void {
     return () => window.removeEventListener("keydown", onKey);
   }, [overrides]);
 }
+
+/**
+ * [189] Taste T (rebindbar, `objectSettings`): Einstellungen des gewählten Objekts öffnen (`state/objectSettings.ts`).
+ * Nicht in Textfeldern/Auswahllisten und nicht, wenn ein laufender Befehl diese Taste als Option-Kürzel belegt.
+ * `run` liefert `true`, wenn es etwas zu öffnen gab (dann wird die Taste verbraucht).
+ */
+export function useObjectSettingsShortcut(
+  overrides: ShortcutOverrides,
+  engineRef: RefObject<CommandEngine | null>,
+  run: () => boolean,
+): void {
+  const runRef = useRef(run);
+  runRef.current = run;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || isEditableTarget(e) || (e.target as HTMLElement | null)?.tagName === "SELECT") return;
+      if (!matchesShortcut(e, "objectSettings", overrides)) return;
+      // Ein laufender Befehl behält seine Option-Kürzel (U/I/O/P …); sonst gilt T auch mitten im Zeichnen.
+      const eng = engineRef.current;
+      const k = e.key.toLowerCase();
+      if (eng?.isActive() && eng.view().options.some((o) => o.key?.toLowerCase() === k)) return;
+      if (runRef.current()) e.preventDefault();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [overrides, engineRef]);
+}

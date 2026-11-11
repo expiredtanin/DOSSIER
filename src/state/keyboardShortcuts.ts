@@ -52,7 +52,8 @@ export type ShortcutId =
   | "floorDown"
   | "floorUp"
   | "showSelection3d"
-  | "hideSelection3d";
+  | "hideSelection3d"
+  | "objectSettings";
 
 export type ShortcutCategory =
   | "general"
@@ -214,6 +215,8 @@ export const SHORTCUT_DEFS: ShortcutDef[] = [
   { id: "floorUp", category: "navigation", labelKey: "shortcut.floorUp", defaultCombo: "mod+6" },
   { id: "showSelection3d", category: "navigation", labelKey: "shortcut.showSelection3d", defaultCombo: "mod+3" },
   { id: "hideSelection3d", category: "navigation", labelKey: "shortcut.hideSelection3d", defaultCombo: "mod+4" },
+  // [189] Einstellungsdialog des gewählten Objekts (Archicad Cmd+T), hier schlicht „t".
+  { id: "objectSettings", category: "edit", labelKey: "shortcut.objectSettings", defaultCombo: "t", bareKeyOnly: true },
 ];
 
 const DEFS_BY_ID = new Map<ShortcutId, ShortcutDef>(SHORTCUT_DEFS.map((d) => [d.id, d]));

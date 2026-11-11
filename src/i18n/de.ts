@@ -147,6 +147,7 @@ export const de = {
   "menu.native.move": "Bewegen",
   "menu.native.mirror": "Spiegeln",
   "menu.native.rotate": "Drehen",
+  "menu.native.objectSettings": "Objekteinstellungen…",
   "menu.native.view": "Ansicht",
   "menu.native.window": "Fenster",
   "menu.native.panels": "Panels",
@@ -432,11 +433,6 @@ export const de = {
   "attr.source.layer": "Nach Ebene",
   "attr.source.object": "Nach Bauteil",
   "attr.source.custom": "eigener Wert",
-  "attr.size": "Maße",
-  "attr.width": "Breite",
-  "attr.height": "Höhe",
-  "attr.extentX": "Ausdehnung X",
-  "attr.extentY": "Ausdehnung Y",
 
   // Objekt-Info-Palette (ObjectInfoPanel)
   "objinfo.title": "Objekt-Info",
@@ -931,6 +927,8 @@ export const de = {
   "objinfo.room.editStamp": "Stempel bearbeiten …",
   // ── Extrusions-Attribute (truck-Integration, Object-Info-Panel) ─────────
   "objinfo.sectionLine.section": "Schnittlinie",
+  "objinfo.dimText.section": "Masszahl",
+  "objinfo.group.toggle": "Abschnitt ein-/ausklappen",
   "objinfo.detailRef.section": "Detail-/Schnitt-Verweis",
   "objinfo.dimRefs.section": "Assoziative Bemassung",
   "objinfo.dimRefs.point": "Punkt {n}",
@@ -3073,6 +3071,7 @@ export const de = {
   "shortcut.floorDown": "Geschoss tiefer",
   "shortcut.floorUp": "Geschoss höher",
   "shortcut.showSelection3d": "Auswahl in 3D zeigen (ohne Auswahl: alles)",
+  "shortcut.objectSettings": "Einstellungen des gewählten Objekts öffnen (ohne Auswahl: Werkzeug-Voreinstellung)",
   "shortcut.hideSelection3d": "Auswahl im 3D ausblenden",
 
   "settings.section.update": "Update",

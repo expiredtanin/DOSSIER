@@ -59,9 +59,11 @@ import { useProjectActions } from "./state/useProjectActions";
 import { useCommandEngineHost } from "./state/useCommandEngineHost";
 import { TRANSFORM_COMMANDS, useToolInput } from "./state/useToolInput";
 import { useSelectionCommands } from "./state/useSelectionCommands";
+import { openObjectSettings } from "./state/objectSettings";
 import {
   useActiveToolKeys,
   useElementClipboardShortcut,
+  useObjectSettingsShortcut,
   useUndoRedoShortcut,
 } from "./state/useKeyboardShortcuts";
 import { useProjectFileActions } from "./state/useProjectFileActions";
@@ -494,8 +496,18 @@ export default function App() {
     pa,
   });
 
+  // [189] Taste T / Menü „Objekteinstellungen…": Öffnungs-Dialog bzw. Objekt-Info (state/objectSettings.ts).
+  const openSettingsOfObject = () =>
+    openObjectSettings({
+      activeTool,
+      openOpeningEditor: setOpeningEditorId,
+      revealObjectInfo: () => setLayout((l) => revealPanel(l, "object-info")),
+    });
+  useObjectSettingsShortcut(shortcutOverrides, engineRef, openSettingsOfObject);
+
   // Native macOS-Menüleiste → state/useNativeMenu.ts.
   useNativeMenu({
+    onObjectSettings: openSettingsOfObject,
     files,
     notify,
     undo,

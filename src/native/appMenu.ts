@@ -51,6 +51,8 @@ export interface NativeAppMenuHandlers {
   onMove: () => void;
   onMirror: () => void;
   onRotate: () => void;
+  /** [189] Einstellungen des gewählten Objekts (Taste T; als Menüpunkt ohne Kürzel, ein nacktes „T" würde das Tippen in Textfeldern abfangen). */
+  onObjectSettings?: () => void;
 
   onViewType: (v: ViewType) => void;
   onView3d: (v: View3d) => void;
@@ -286,6 +288,10 @@ export function useNativeAppMenu(
           await MenuItem.new({
             text: t("menu.native.rotate"),
             action: () => handlersRef.current.onRotate(),
+          }),
+          await MenuItem.new({
+            text: t("menu.native.objectSettings"),
+            action: () => handlersRef.current.onObjectSettings?.(),
           }),
           await PredefinedMenuItem.new({ item: "Separator" }),
           await MenuItem.new({
