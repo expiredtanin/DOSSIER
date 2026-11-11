@@ -367,7 +367,10 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   geht vor. 11.11. Nachbesserung: grob = Sturz unten und Brüstung oben im Wandschnitt FLACH (kein Anschlag, keine Nase,
   kein Schichteinzug [168]; `Visibility.flat_openings` aus `section_look == Line`, im Cache-Schlüssel, `section/bands.rs`
   `section_reveal`, `parallel_reveal_cuts`); Grundriss grob: Leibung gerade, keine Anschlag-Nasen (Wand-Nasen in
-  `walls.rs`, Tür-Nasen in `plan/openings.rs`). Offen: Ansicht-Details (Rahmen/Laibung) nach Stufe; nicht in der Tauri-App geprüft.
+  `walls.rs`, Tür-Nasen in `plan/openings.rs`). 11.11. (3): Ansicht nach Detailgrad (`plan/elevation/mod.rs`, `opening_detail`): grob = nur Öffnungsumriss mit Glas-/Blattfläche (kein
+  Rahmen, Fensterbank, Teilung, Laibungsschatten, Flügelsymbole), mittel = Rahmen + Teilung und Laibungsschatten, aber ohne Fensterbank, fein wie bisher;
+  Storenkasten über der Öffnung nur mit `windows.shadingBox`. Ressourcen-Tab: „Schnittdetail Tür/Fenster" als Wahl „Wie Detailgrad /
+  Voll / Vereinfacht" mit Tooltip. Nicht in der Tauri-App geprüft.
 - ◐ **[178]** Deckenauflager an Aussenwänden (11.11., Wunsch Maintainer). Decke endet an der Aussenkante des Kerns
   ([33] `layer_positions`), Aussendämmung/Putz laufen an der Stirn durch — abgeleitet, Umriss bleibt
   (`model3d/bearing.rs`: Platten-Umriss minus Aussenschicht-Streifen, wo vor der Wand keine Decke liegt → `emit_slabs`

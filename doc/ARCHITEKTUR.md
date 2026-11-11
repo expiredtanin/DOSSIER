@@ -330,7 +330,7 @@ Werkzeugleiste (Detailgrad-Wahl = Liste der Stufen) und die Ansichtsvorlage (Ebe
 Ebenen-Felder, die selbst Darstellung sind (`cutHatch`, `floorFinish`, `showTerrain`, `shadows`), gehen der
 Modelldarstellung vor, wenn sie gesetzt sind. Angebunden (Etappe 1): Türen und Fenster
 (`plan/walls.rs::opening_symbol`, `plan/openings.rs`; Fenster-Öffnungslinien auch in der Ansicht,
-`plan/elevation/openings.rs`), Treppen (`plan/stairs.rs`, filtert das Symbol nach Linienklasse — das
+`plan/elevation/openings.rs`; Ansicht nach Detailgrad ([184]) in `plan/elevation/mod.rs` über `Options::opening_detail`), Treppen (`plan/stairs.rs`, filtert das Symbol nach Linienklasse — das
 Symbol selbst in `stair_symbol.rs` bleibt unberührt), Wandschichten und Schichteinzug
 (`plan/walls.rs::layer_targets`), Schnittflächen, Bodenbelag und Gelände. Etappe 2:
 
