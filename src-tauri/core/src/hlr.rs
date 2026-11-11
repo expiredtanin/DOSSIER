@@ -23,7 +23,12 @@
 //!    Flackern, keine falschen verdeckten Stücke); eine Kante genau hinter dem Rand oder einer Fuge
 //!    näherer Flächen ist verdeckt (sie fiele mit deren Kante zusammen bzw. schiene durch die Fuge).
 //!
-//! Nicht gezeichnet werden Durchdringungslinien sich schneidender Körper (keine Polygonkante).
+//! 3. **Durchdringungslinien** sich schneidender Körper (Gaube ↔ Dach, Kamin ↔ Dach, Körper ↔ Wand): Schnittgerade
+//!    je Paar zugewandter Flächen verschiedener Körper (`solid`), soweit sie im Innern beider Flächen liegt (auf
+//!    einem Rand ist sie eine Kante, die Schritt 1 schon zeichnet); Vorauswahl über ein 2D-Raster der Umrisse und
+//!    die Tiefenbereiche. Danach gelten sie wie Kanten (Schritt 2).
+//!
+//! Die sichtbaren Teilflächen (Füllungen konsistent zu den Kanten) rechnet `hlr_fill.rs`.
 
 use std::collections::HashMap;
 use std::hash::{BuildHasherDefault, Hasher};
@@ -74,11 +79,13 @@ pub struct Face {
     pub two_sided: bool,
     /// Kanten `i → i+1`, die nie gezeichnet werden (z. B. vom Abschneiden an der Schnittebene); leer = keine.
     pub no_edge: Vec<bool>,
+    /// Körper (vom Aufrufer vergeben, 0 = keiner): Flächen verschiedener Körper liefern Durchdringungslinien.
+    pub solid: u32,
 }
 
 impl Face {
     pub fn new(pts: Vec<V3>, normal: V3, owner: u32) -> Face {
-        Face { pts, normal, smooth: 0, owner, edges: true, occludes: true, two_sided: false, no_edge: Vec::new() }
+        Face { pts, normal, smooth: 0, owner, edges: true, occludes: true, two_sided: false, no_edge: Vec::new(), solid: 0 }
     }
 }
 
@@ -685,7 +692,8 @@ pub fn hidden_lines(faces: &[Face], opts: &Opts) -> Vec<Seg> {
     let grid = OccGrid::new(&prep);
     // Ohne verdeckte Kanten: Flächen, die ein konvexer Verdecker ganz deckt, zeichnen keine Kanten.
     let covered: Vec<bool> = if opts.hidden { vec![false; faces.len()] } else { faces.iter().zip(&prep).map(|(f, p)| p.as_ref().is_some_and(|p| p.front) && fully_covered(f, &prep, &grid, opts)).collect() };
-    let feats = feature_edges(faces, &prep, &covered, opts);
+    let mut feats = feature_edges(faces, &prep, &covered, opts);
+    feats.extend(intersection_edges(faces, &prep, &covered, opts));
     if feats.is_empty() {
         return Vec::new();
     }
@@ -751,6 +759,137 @@ pub fn hidden_lines(faces: &[Face], opts: &Opts) -> Vec<Seg> {
         }
     }
     out
+}
+
+/// Kleinster Winkel (Sinus) zwischen zwei Flächen, die eine Durchdringungslinie liefern: fast parallele Flächen
+/// (verschieden fein facettierte Rundungen) schneiden sich nur numerisch.
+const MEET_MIN_SIN: f64 = 0.05;
+/// Kürzeste Durchdringungslinie (m) und Abstand vom Rand, ab dem sie im Innern einer Fläche liegt.
+const MEET_MIN_LEN: f64 = 1e-3;
+
+/// Durchdringungslinien ([G4]): Schnittgeraden je Paar zugewandter Flächen verschiedener Körper, soweit sie im
+/// Innern beider Flächen liegen. Vorauswahl: 2D-Raster der Umrisse (ein Paar nur in der Zelle der unteren linken
+/// Ecke seiner gemeinsamen Ausdehnung), dann Tiefen- und 3D-Ausdehnung.
+fn intersection_edges(faces: &[Face], prep: &[Option<Prep>], covered: &[bool], opts: &Opts) -> Vec<(V3, V3, u32)> {
+    let cand: Vec<usize> = (0..faces.len()).filter(|&i| faces[i].solid != 0 && !covered[i] && prep[i].as_ref().is_some_and(|p| p.front)).collect();
+    if cand.len() < 2 || !faces.iter().any(|f| f.solid != 0 && f.solid != faces[cand[0]].solid) {
+        return Vec::new();
+    }
+    let bb: Vec<[f64; 6]> = cand
+        .iter()
+        .map(|&i| {
+            faces[i].pts.iter().fold([f64::INFINITY, f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY], |b, p| {
+                [b[0].min(p[0]), b[1].min(p[1]), b[2].min(p[2]), b[3].max(p[0]), b[4].max(p[1]), b[5].max(p[2])]
+            })
+        })
+        .collect();
+    let (mut lo, mut hi) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
+    for b in &bb {
+        lo = [lo[0].min(b[0]), lo[1].min(b[1])];
+        hi = [hi[0].max(b[3]), hi[1].max(b[4])];
+    }
+    let side = ((cand.len() as f64).sqrt().ceil() as usize).clamp(1, 512);
+    let cell = |x: f64, k: usize| -> usize {
+        if !(hi[k] > lo[k]) {
+            return 0;
+        }
+        let c = ((x - lo[k]) / (hi[k] - lo[k]) * side as f64).floor();
+        if c.is_nan() { 0 } else { c.clamp(0.0, (side - 1) as f64) as usize }
+    };
+    let mut grid: Vec<Vec<u32>> = vec![Vec::new(); side * side];
+    for (k, b) in bb.iter().enumerate() {
+        for y in cell(b[1] - opts.tol, 1)..=cell(b[4] + opts.tol, 1) {
+            for x in cell(b[0] - opts.tol, 0)..=cell(b[3] + opts.tol, 0) {
+                grid[y * side + x].push(k as u32);
+            }
+        }
+    }
+    let t = opts.tol;
+    let mut out = Vec::new();
+    for (c, list) in grid.iter().enumerate() {
+        let (cx, cy) = (c % side, c / side);
+        for (x, &ka) in list.iter().enumerate() {
+            let a = &bb[ka as usize];
+            for &kb in &list[x + 1..] {
+                let b = &bb[kb as usize];
+                let (i, j) = (cand[ka as usize], cand[kb as usize]);
+                if faces[i].solid == faces[j].solid {
+                    continue;
+                }
+                if a[0] > b[3] + t || b[0] > a[3] + t || a[1] > b[4] + t || b[1] > a[4] + t || a[2] > b[5] + t || b[2] > a[5] + t {
+                    continue;
+                }
+                // Nur in der Zelle der unteren linken Ecke der gemeinsamen Ausdehnung (jedes Paar einmal).
+                if cell(a[0].max(b[0]) - t, 0) != cx || cell(a[1].max(b[1]) - t, 1) != cy {
+                    continue;
+                }
+                let (lo_i, hi_i) = (i.min(j), i.max(j));
+                meet(&faces[lo_i], prep[lo_i].as_ref().map(|p| p.nw), &faces[hi_i], prep[hi_i].as_ref().map(|p| p.nw), lo_i as u32, &mut out);
+            }
+        }
+    }
+    out
+}
+
+/// Schnittstrecken der Flächen `a` und `b` (Umlauf-Normalen `na`, `nb`) im Innern beider.
+fn meet(a: &Face, na: Option<V3>, b: &Face, nb: Option<V3>, owner: u32, out: &mut Vec<(V3, V3, u32)>) {
+    let (Some(na), Some(nb)) = (na, nb) else { return };
+    let l = cross(na, nb);
+    let ll = dot(l, l);
+    if ll < MEET_MIN_SIN * MEET_MIN_SIN {
+        return;
+    }
+    let (da, db) = (dot(na, a.pts[0]), dot(nb, b.pts[0]));
+    let c1 = cross(nb, l);
+    let c2 = cross(l, na);
+    let p = [(da * c1[0] + db * c2[0]) / ll, (da * c1[1] + db * c2[1]) / ll, (da * c1[2] + db * c2[2]) / ll];
+    let e = unit(l);
+    let ia = line_in_face(&a.pts, na, p, e);
+    if ia.is_empty() {
+        return;
+    }
+    let ib = line_in_face(&b.pts, nb, p, e);
+    for &(s0, s1) in &ia {
+        for &(t0, t1) in &ib {
+            let (r0, r1) = (s0.max(t0), s1.min(t1));
+            if r1 - r0 <= MEET_MIN_LEN {
+                continue;
+            }
+            let at = |s: f64| [p[0] + e[0] * s, p[1] + e[1] * s, p[2] + e[2] * s];
+            let m = at((r0 + r1) / 2.0);
+            // Auf dem Rand einer der Flächen: eine Kante, keine Durchdringung.
+            if near_boundary(&a.pts, m, MEET_MIN_LEN) || near_boundary(&b.pts, m, MEET_MIN_LEN) {
+                continue;
+            }
+            out.push((at(r0), at(r1), owner));
+        }
+    }
+}
+
+/// Parameterbereiche der Geraden `p + s·e` (in der Ebene der Fläche) im Polygon `pts` (gerade/ungerade).
+fn line_in_face(pts: &[V3], n: V3, p: V3, e: V3) -> Vec<(f64, f64)> {
+    let e2 = cross(n, e);
+    let rs: Vec<(f64, f64)> = pts.iter().map(|q| { let w = sub(*q, p); (dot(w, e), dot(w, e2)) }).collect();
+    let mut xs: Vec<f64> = Vec::new();
+    for i in 0..rs.len() {
+        let (a, b) = (rs[i], rs[(i + 1) % rs.len()]);
+        if (a.1 > 0.0) != (b.1 > 0.0) {
+            xs.push(a.0 + (b.0 - a.0) * a.1 / (a.1 - b.1));
+        }
+    }
+    xs.sort_by(f64::total_cmp);
+    xs.chunks_exact(2).map(|c| (c[0], c[1])).collect()
+}
+
+/// Liegt `m` näher als `tol` an einer Kante des Polygons?
+fn near_boundary(pts: &[V3], m: V3, tol: f64) -> bool {
+    (0..pts.len()).any(|i| {
+        let (a, b) = (pts[i], pts[(i + 1) % pts.len()]);
+        let d = sub(b, a);
+        let l2 = dot(d, d);
+        let t = if l2 > 0.0 { (dot(sub(m, a), d) / l2).clamp(0.0, 1.0) } else { 0.0 };
+        norm(sub(m, lerp(a, b, t))) < tol
+    })
 }
 
 fn seg_hits_cell(g: &OccGrid, a: V3, b: V3, x: usize, y: usize) -> bool {
@@ -965,6 +1104,58 @@ mod tests {
         ];
         let s = hidden_lines(&f, &opts(false));
         assert!((total(&s, false) - 4.0).abs() < 1e-9, "{s:?}");
+    }
+
+    /// Durchdringung ([G4]): ein über Eck gestellter Quader steckt in einer Wandscheibe; die Schnittlinien seiner
+    /// zugewandten Seiten mit der Wandfläche sind sichtbare Kanten (nur zwischen verschiedenen Körpern).
+    #[test]
+    fn durchdringungslinien_verschiedener_koerper() {
+        let scene = |sa: u32, sb: u32| {
+            let mut f = boxf(0.0, 4.0, 0.0, 2.0, 1.0, 2.0, 1);
+            f.iter_mut().for_each(|x| x.solid = sa);
+            // Raute im Grundriss (u, d): vorn (2, 0.7), links (1.5, 1.2), hinten (2, 1.7), rechts (2.5, 1.2); v 0.5…1.5.
+            let q = [[2.0, 0.7], [1.5, 1.2], [2.0, 1.7], [2.5, 1.2]];
+            for i in 0..4 {
+                let (a, b) = (q[i], q[(i + 1) % 4]);
+                let n = [-(b[1] - a[1]), 0.0, b[0] - a[0]];
+                let mut x = Face::new(vec![[a[0], 0.5, a[1]], [b[0], 0.5, b[1]], [b[0], 1.5, b[1]], [a[0], 1.5, a[1]]], n, 2);
+                x.solid = sb;
+                f.push(x);
+            }
+            let mut top = Face::new(q.iter().rev().map(|p| [p[0], 1.5, p[1]]).collect(), [0.0, 1.0, 0.0], 2);
+            let mut bot = Face::new(q.iter().map(|p| [p[0], 0.5, p[1]]).collect(), [0.0, -1.0, 0.0], 2);
+            top.solid = sb;
+            bot.solid = sb;
+            f.extend([top, bot]);
+            hidden_lines(&f, &opts(false))
+        };
+        let at = |s: &[Seg], u: f64| s.iter().filter(|x| (x.a[0] - u).abs() < 1e-9 && (x.b[0] - u).abs() < 1e-9).map(|x| (x.b[1] - x.a[1]).abs()).sum::<f64>();
+        let s = scene(1, 2);
+        assert!((at(&s, 1.7) - 1.0).abs() < 1e-6 && (at(&s, 2.3) - 1.0).abs() < 1e-6, "{s:?}");
+        // Seitliche Ecken der Raute liegen hinter der Wandfläche: verdeckt.
+        assert!(at(&s, 1.5) < 1e-9 && at(&s, 2.5) < 1e-9, "{s:?}");
+        // Ein Körper (oder ohne Körper-Nummer): keine Durchdringungslinien.
+        for (a, b) in [(1, 1), (0, 0)] {
+            let s = scene(a, b);
+            assert!(at(&s, 1.7) < 1e-9 && at(&s, 2.3) < 1e-9, "{a} {b}: {s:?}");
+        }
+    }
+
+    /// Flächen, die sich nur auf einem Rand berühren (Wand auf Wand, Gaube bis an die Dachfläche), liefern keine
+    /// Durchdringungslinie (die Kante zeichnet Schritt 1).
+    #[test]
+    fn beruehrung_am_rand_ohne_durchdringung() {
+        let mut f = boxf(0.0, 2.0, 0.0, 1.0, 1.0, 2.0, 1);
+        f.iter_mut().for_each(|x| x.solid = 1);
+        // Schräge Scheibe, die genau an der Vorderfläche endet (Rand bei d = 1).
+        let mut s = Face::new(vec![[0.5, 0.2, 1.0], [0.3, 0.2, 0.5], [0.3, 0.8, 0.5], [0.5, 0.8, 1.0]], [0.5, 0.0, -0.2], 2);
+        s.solid = 2;
+        f.push(s);
+        let segs = hidden_lines(&f, &opts(false));
+        let total_len = total(&segs, false);
+        // Gleich viel wie ohne Körper-Nummern.
+        let base = { let mut g = boxf(0.0, 2.0, 0.0, 1.0, 1.0, 2.0, 1); g.push(f.last().unwrap().clone()); g.iter_mut().for_each(|x| x.solid = 0); total(&hidden_lines(&g, &opts(false)), false) };
+        assert!((total_len - base).abs() < 1e-9, "{total_len} {base}");
     }
 
     #[test]

@@ -471,6 +471,11 @@ Offen: Bauzonen sind kein eigener Planinhalt (nur Baurecht-Einstellungen); „gr
    importierte Netze und freie Körper (`collect.rs`, Körper-Netze aus `solid_mesh.rs`, [115]),
    Override-Regeln, Ansichtsschraffur der sichtbaren Bauteilseite (`surface_pattern.rs`), Öffnungen,
    Verdeckung, Schlagschatten, Maler-Ordnung von fern nach nah.
+   Exakte Sichtbarkeit ([G4]): Kanten über `hlr.rs` (samt Durchdringungslinien sich schneidender Bauteile, je
+   Bauteil ein Körper), Füllungen über `hlr_fill.rs` (je Fläche die sichtbaren Teilpolygone: Fläche minus die
+   näher liegenden Teile der anderen Flächen, Halbebene der Tiefendifferenz, 2D-Booleans); die Ansichtsschraffur
+   wird auf die sichtbaren Teile ihrer Fläche beschnitten. Die Maler-Ordnung ordnet nur noch Füllungen gegen
+   Öffnungen, Schatten, Bäume und Muster (die Flächen überdecken einander nicht mehr).
 3. Die reine Geometrie (Verdeckungs-Clipping, Schatten, Eck-Verlängerung, Öffnungen) liegt in
    `src-tauri/core/src/plan/elevation_geom.rs` (`clip_segments()`, `shadows()`, `wall_extensions()`,
    `openings()`).

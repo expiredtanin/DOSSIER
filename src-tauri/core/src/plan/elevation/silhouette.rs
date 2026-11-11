@@ -139,11 +139,18 @@ pub(super) fn elevation_edges(p: &Project, faces: &[Face], openings: &[ProjOpeni
     let (n, u) = ([frame[3], frame[4], frame[5]], [frame[6], frame[7], frame[8]]);
     let mut hf: Vec<crate::hlr::Face> = Vec::with_capacity(faces.len() + openings.len());
     let mut mesh_groups: HashMap<&str, u32> = HashMap::new();
+    // [G4] Körper je Bauteil (Rolle + id): Flächen verschiedener Bauteile liefern Durchdringungslinien. Ohne:
+    // Flächen ohne id und die nach hinten gerückten Stirnfacetten gekrümmter Decken (nur numerisch schräg).
+    let mut solids: HashMap<(Role, &str), u32> = HashMap::new();
     for (fi, f) in faces.iter().enumerate() {
         let pts = f.pts.iter().zip(&f.pd).map(|(q, &d)| [q[0], q[1], d]).collect();
         let m = f.normal;
         let normal = [m[0] * u[0] + m[1] * u[1] + m[2] * u[2], m[1], m[0] * n[0] + m[1] * n[1] + m[2] * n[2]];
         let mut h = crate::hlr::Face::new(pts, normal, fi as u32 + 1);
+        if !f.id.is_empty() && !f.curved_slab {
+            let next = solids.len() as u32 + 1;
+            h.solid = *solids.entry((f.role, f.id.as_str())).or_insert(next);
+        }
         if f.role == Role::Wall {
             h.smooth = arc_ids.get(f.id.as_str()).copied().unwrap_or(0);
         }

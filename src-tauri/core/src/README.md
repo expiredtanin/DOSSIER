@@ -58,7 +58,7 @@ Neues Modul: `<modul>.rs` und `mod` in `lib.rs`, Bindungen in `web/<modul>.rs` u
 | `room_area.rs`, `room_boundary.rs` | Raumflächen nach SIA 416; Raum-Erkennung aus Wänden |
 | `polygon_bool.rs`, `polygon_holes.rs`, `bulge.rs`, `curves.rs`, `delaunay.rs` | 2D-Booleans (i_overlay), Löcher, Bögen, Kurven, Triangulierung |
 | `terrain.rs`, `excavation.rs` | Gelände (TIN aus Höhenlinien), Baugrube |
-| `hlr.rs` | exakte Sichtbarkeit (Hidden-Line-Removal) für Schnitt und Ansicht |
+| `hlr.rs`, `hlr_fill.rs` | exakte Sichtbarkeit (Hidden-Line-Removal, Durchdringungslinien) für Schnitt und Ansicht; sichtbare Teilflächen (Füllungen der Ansicht) |
 | `mesh_section.rs`, `mesh_view.rs`, `mesh_repair.rs` | Ebenenschnitt beliebiger Netze; importierte Netze; Netz-Reparatur |
 | `voids.rs` | Abzugskörper in Grundriss und Schnitt |
 | `surface_pattern.rs` | Ansichtsschraffur (Lattung, Verband, Schindeln …) |

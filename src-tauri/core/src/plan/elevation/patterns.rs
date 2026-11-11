@@ -15,8 +15,9 @@ const PATTERN_INK: &str = "#3a3f47";
 /// [140] Ansichtsschraffur in Tusche: feines Grau (Materialstruktur tritt hinter die Kanten zurück).
 pub(super) const MONO_PATTERN_INK: &str = "#8c8c8c";
 
-/// Linie der Ansichtsschraffur: Endpunkte, Verdeckungstiefe, Maler-Tiefe, Stil-Index.
-type PatternLine = (Pt, Pt, f64, f64, usize);
+/// Linie der Ansichtsschraffur: Endpunkte, Verdeckungstiefe, Maler-Tiefe, Stil-Index und [G4] die Flächen (Index
+/// in `faces`), auf denen sie liegt — sie wird auf deren sichtbare Teile beschnitten; ohne: Verdeckung wie bisher.
+pub(super) type PatternLine = (Pt, Pt, f64, f64, usize, Option<Rc<[usize]>>);
 
 /// Ansichtsfarbe (`Component.elevationColor`) der sichtbaren Seite auf die Flächen legen und die
 /// Ansichtsschraffur ([100]) als Linien liefern: Wände in Wand-Koordinaten (x ab Wandanfang, y ab UK),
@@ -35,7 +36,7 @@ pub(super) fn surface_patterns(p: &Project, faces: &mut [Face], frame: &[f64; 9]
     for w in &p.walls {
         walls.entry(w.id.as_str()).or_insert(w);
     }
-    for f in faces.iter_mut() {
+    for (fi, f) in faces.iter_mut().enumerate() {
         if f.role != Role::Wall || f.id.is_empty() || f.pts.len() < 3 {
             continue;
         }
@@ -71,10 +72,11 @@ pub(super) fn surface_patterns(p: &Project, faces: &mut [Face], frame: &[f64; 9]
         }
         styles.push(pattern_style(pat, comp));
         let si = styles.len() - 1;
+        let own: Rc<[usize]> = Rc::from(vec![fi]);
         for (s0, s1) in segs {
             let (qa, qb) = ([u0 + k * s0[0], s0[1] + z0], [u0 + k * s1[0], s1[1] + z0]);
             let d = min(depth_at(qa[0]), depth_at(qb[0])) - EPS * 5.0;
-            lines.push((qa, qb, d, f.depth - EPS * 5.0, si));
+            lines.push((qa, qb, d, f.depth - EPS * 5.0, si, Some(own.clone())));
         }
     }
     // Dachflächen: äusserste Schicht (Eindeckung).
@@ -122,9 +124,11 @@ pub(super) fn surface_patterns(p: &Project, faces: &mut [Face], frame: &[f64; 9]
             // [132] Verschnittene Dächer kommen als Dreiecke dieser Ebene. Mit je eigener Maler-Tiefe würden
             // sich die Dreiecke derselben Ebene gegenseitig samt Musterlinien überdecken (Streifen, halbe
             // Schraffur): alle Dreiecke der Ebene bekommen die Tiefe der ganzen Fläche, die Linien liegen darauf.
-            for ti in plane_triangles(faces, &roof.id, n, plane, &proj) {
+            let tris = plane_triangles(faces, &roof.id, n, plane, &proj);
+            for &ti in &tris {
                 faces[ti].depth = face_depth;
             }
+            let own: Option<Rc<[usize]>> = (!tris.is_empty()).then(|| Rc::from(tris));
             for (a, b) in sp::segments_3d(plane, &spec, off, scale) {
                 let (ua, va, da) = proj([a[0], a[2], a[1]]);
                 let (ub, vb, db) = proj([b[0], b[2], b[1]]);
@@ -135,7 +139,7 @@ pub(super) fn surface_patterns(p: &Project, faces: &mut [Face], frame: &[f64; 9]
                     styles.push(pattern_style(pat, comp));
                     styles.len() - 1
                 });
-                lines.push(([ua, va], [ub, vb], min(da, db) - EPS * 5.0, face_depth - EPS * 5.0, k));
+                lines.push(([ua, va], [ub, vb], min(da, db) - EPS * 5.0, face_depth - EPS * 5.0, k, own.clone()));
             }
         }
     }

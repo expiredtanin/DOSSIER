@@ -13,6 +13,8 @@ import { generateElevationPlan } from "./toElevation";
 describe("toElevation — Painter-Reihenfolge", () => {
   it("im Plan: nähere Wand-Fläche hat einen höheren Primitiv-Index", () => {
     const project = elevationProject({ overhang: false });
+    // [G4] Die fernere Wand ragt rechts 2 m heraus; nur dieser Teil ist sichtbar (exakte Sichtbarkeit).
+    project.walls = project.walls.map((w) => (w.id === "FAR" ? { ...w, end: { x: 6, y: w.end.y } } : w));
     const plan = generateElevationPlan(project, project.drawingLevels[1])!;
     expect(plan).not.toBeNull();
     const idxNear = plan.primitives.findIndex(
@@ -24,6 +26,9 @@ describe("toElevation — Painter-Reihenfolge", () => {
     expect(idxNear).toBeGreaterThanOrEqual(0);
     expect(idxFar).toBeGreaterThanOrEqual(0);
     expect(idxNear).toBeGreaterThan(idxFar); // fern zuerst, nah zuletzt
+    const far = plan.primitives.filter((p) => p.kind === "polygon" && p.wallId === "FAR");
+    const xs = far.flatMap((p) => (p.kind === "polygon" ? p.pts.map((q) => q.x) : []));
+    expect(Math.max(...xs) - Math.min(...xs)).toBeLessThan(2.3); // ohne den verdeckten Teil (6 m)
   });
 });
 
