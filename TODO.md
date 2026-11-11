@@ -314,9 +314,13 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   Kontext-Netze nicht in der Projektion. · XL
 - ◐ **[G6]** Allgemeine Polygon-Dominanz im Schnitt. 3D-Live-Schnitt (`render3d/section_boolean.rs`) rechnet nur
   Rechtecke, Ring mit Loch bleibt unbeschnitten; dort fehlt auch der Schraffur-Deckel von Abzugskörpern (aus [G8]). · M
-- ◐ **[G1]** Ebenenschnitt beliebiger Körper (`plan/meshSection.ts`, `plan/domains.rs`). Poché für B-Rep-Körper im Grundriss
-  (kein Netz im Kern), Eckenradius/Fase in der Poché, `ExtrudedSolid` ohne Material-Feld (keine SIA-Schraffur),
-  Abzugskörper beliebiger Form im Grundriss, Untersicht von Wendel-/Podesttreppen. · L
+- ◐ **[G1]** Ebenenschnitt beliebiger Körper (`plan/mesh_plan.rs::plan_bodies`, `plan/extras.rs`). 11.11.: Grundriss aller
+  freien Körper über das Kern-Netz (`solid_mesh.rs`): Poché = Ebenenschnitt auf Schnitthöhe (B-Rep, Eckenradius/Fase,
+  Löcher, Verjüngung), darunter Aufsicht, darüber Überkopf; `ExtrudedSolid.componentId` (Objekt-Info „Bauteil")
+  gibt Füllung/SIA-Schraffur in Grundriss und Schnitt; Abzugskörper beliebiger Form sparen Wände/Stützen (Ebenenschnitt)
+  und Decken (Grundriss im Plattenband, Manifold + i_overlay) aus; Kreis-Körper ohne `points` bauen. Offen: Untersicht
+  von Wendel-/Podesttreppen; Abzugskörper-Symbol bleibt das Profil-Rechteck mit Kreuz; Körper verdecken keine
+  importierten Netze (getrennte Sichtbarkeitsrechnung); nicht in der Tauri-App geprüft. · M
 - ◐ **[G2]** Wand an Dach. Ansicht bleibt Painter + Verdeckungstest (→ [G4]); fast achsparallele Grenzen im Band nur
   genähert; Fenster, das ins Dach ragt, verliert seinen Sturz; Dachgeometrie im 3D-Live-Schnitt unverändert
   (`wall_bands.rs`). · M
@@ -332,8 +336,8 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   rechnet der Kern selbst (`solid_mesh.rs`, Tessellierung der B-Rep-Beschreibung, Booleans über Manifold; Entscheid in
   `doc/ARCHITEKTUR.md`): Ansicht (Flächen mit Körper-Id, Verdeckung, Klasse), Blatt-Viewports (Schnitt + Ansicht, Fang) und
   CLI zeigen freie Körper; `computeSection` baut keine truck-Netze mehr. Offen: 3D nimmt weiter truck (könnte die Kern-Netze
-  nehmen); Kreis-Körper mit leeren `points` (Brunnen im Musterhaus komplex) baut weder truck noch der Kern; 3D-Ausschnitt im
-  Viewport; nicht in der Tauri-App geprüft. · S
+  nehmen); Kreis-Körper mit leeren `points` (Brunnen im Musterhaus komplex) baut der Kern seit [G1] (truck/3D nicht geprüft);
+  3D-Ausschnitt im Viewport; nicht in der Tauri-App geprüft. · S
 - ◐ **[36]** View Range (`plan/view_range.rs`). Dach/Decke über/unter Schnitt verfeinern, Raum/Fenster eigenständig,
   Tiefe nur ganzes Bauteil (kein Clip an der Ebene). 11.11.: Öffnung ganz unter der Schnittebene schliesst die Wand auch
   ohne eigenen Bereich (Symbol gepunktet, `walls.rs`). · M
@@ -619,7 +623,7 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
 
 Auf dem Mac (Tauri/Metal) noch nicht angesehen oder geprüft; bisher nur Linux-Container, CLI-SVG, Chromium oder
 Unit-Tests: [116] (atomares Speichern), [117] (CSP unter `tauri://`), [118], [122], [123], [126], [110], [101],
-[102], [131], [133], [136], [140], [145], [146], [153], [64], [T2], [T4], [34], [108], [65], [169], [113], [181]. Je Punkt ansehen, dann hier und
+[102], [131], [133], [136], [140], [145], [146], [153], [64], [T2], [T4], [34], [108], [65], [169], [113], [181], [G1]. Je Punkt ansehen, dann hier und
 im jeweiligen Eintrag streichen. · M (gesamt)
 
 ---

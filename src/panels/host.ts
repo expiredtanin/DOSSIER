@@ -585,6 +585,8 @@ export interface PanelHostValue {
   onSetExtrudedSolidSubtract: (subtract: boolean) => void;
   /** Abstand der Körper-UK über der Geschoss-UK (Meter). */
   onSetExtrudedSolidBaseOffset: (offset: number) => void;
+  /** [G1] Bauteil des Körpers (Schnittfläche); "" löst die Zuweisung. */
+  onSetExtrudedSolidComponent: (componentId: string) => void;
 
   // ── Stützen-Attribute (Tragwerk; nur die selektierte Stütze) ────────────
   /** Wechselt das Profil (Rechteck/Kreis); leitet ein sinnvolles Mass ab. */

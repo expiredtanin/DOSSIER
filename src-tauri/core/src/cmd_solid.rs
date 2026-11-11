@@ -43,11 +43,12 @@ pub fn extruded_solid_spec(solid: &Value, floor_z: f64) -> Option<Value> {
         return Some(obj(vec![("kind", s("translate")), ("v", json!([js_num(dx), js_num(dy), js_num(base_z)])), ("solid", spec)]));
     }
     let height = num_of(field(solid, "height"));
-    if points.len() < 3 || height <= 0.0 {
-        return None;
-    }
     let taper = jsnum::min(1.0, jsnum::max(0.0, num_or(field(solid, "taper"), 0.0)));
     let circle = field(solid, "circle").filter(|c| truthy(Some(c)));
+    // [G1] Kreis-Körper brauchen keine Profil-Punkte (Brunnen im Musterhaus komplex: `points` leer).
+    if height <= 0.0 || (points.len() < 3 && circle.is_none()) {
+        return None;
+    }
     if let Some(c) = circle {
         if taper < 1e-6 || taper >= 1.0 - 1e-6 {
             let ctr = xy(field(c, "center").unwrap_or(&Value::Null));
@@ -61,6 +62,9 @@ pub fn extruded_solid_spec(solid: &Value, floor_z: f64) -> Option<Value> {
                 ("height", js_num(height)),
             ]));
         }
+    }
+    if points.len() < 3 {
+        return None;
     }
     let pts: Vec<V> = points.iter().map(xy).collect();
     let flat = |ps: &[V]| Value::Array(ps.iter().flat_map(|p| [js_num(p.0), js_num(p.1)]).collect());

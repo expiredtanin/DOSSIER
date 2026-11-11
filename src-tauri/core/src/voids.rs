@@ -108,11 +108,18 @@ pub struct Piece {
 
 /// `None` = keine Überschneidung (Original unverändert lassen).
 pub fn subtract_rings(pts: &[Pair], cutters: &[Vec<Pair>], no_stroke: &[usize]) -> Option<Vec<Piece>> {
-    if pts.len() < 3 || cutters.is_empty() {
+    let clips: Vec<Vec<Vec<Pair>>> = cutters.iter().map(|c| vec![c.clone()]).collect();
+    subtract_polys(pts, &clips, no_stroke)
+}
+
+/// Wie [`subtract_rings`], Schneider als Polygone mit Löchern (erster Ring aussen; [G1] Ebenenschnitt bzw.
+/// Grundriss eines Abzugskörpers beliebiger Form). Unendliche Koordinaten ⇒ `None`.
+pub fn subtract_polys(pts: &[Pair], cutters: &[Vec<Vec<Pair>>], no_stroke: &[usize]) -> Option<Vec<Piece>> {
+    if pts.len() < 3 || cutters.is_empty() || !finite(&[pts.to_vec()]) || cutters.iter().any(|c| !finite(c)) {
         return None;
     }
     let subject = vec![pts.to_vec()];
-    let clips: Vec<Vec<Vec<Pair>>> = cutters.iter().filter(|c| c.len() >= 3).map(|c| vec![c.clone()]).collect();
+    let clips: Vec<Vec<Vec<Pair>>> = cutters.iter().filter(|c| c.first().is_some_and(|r| r.len() >= 3)).cloned().collect();
     if clips.is_empty() {
         return None;
     }
@@ -187,10 +194,16 @@ fn point_in_ring(x: f64, y: f64, r: &[Pair]) -> bool {
 
 /// Teile der Strecke a→b ausserhalb aller Ringe, als Parameter-Intervalle.
 pub fn segment_outside(a: Pair, b: Pair, cutters: &[Vec<Pair>]) -> Vec<(f64, f64)> {
+    let polys: Vec<Vec<Vec<Pair>>> = cutters.iter().map(|c| vec![c.clone()]).collect();
+    segment_outside_polys(a, b, &polys)
+}
+
+/// Wie [`segment_outside`], Schneider als Polygone mit Löchern ([G1]): innen = in ungerade vielen Ringen.
+pub fn segment_outside_polys(a: Pair, b: Pair, cutters: &[Vec<Vec<Pair>>]) -> Vec<(f64, f64)> {
     let mut ts = vec![0.0, 1.0];
     let dx = b[0] - a[0];
     let dy = b[1] - a[1];
-    for r in cutters {
+    for r in cutters.iter().flatten() {
         for i in 0..r.len() {
             let p = r[i];
             let q = r[(i + 1) % r.len()];
@@ -217,7 +230,7 @@ pub fn segment_outside(a: Pair, b: Pair, cutters: &[Vec<Pair>]) -> Vec<(f64, f64
         let tm = (t0 + t1) / 2.0;
         let mx = a[0] + dx * tm;
         let my = a[1] + dy * tm;
-        if cutters.iter().any(|r| point_in_ring(mx, my, r)) {
+        if cutters.iter().any(|poly| poly.iter().filter(|r| point_in_ring(mx, my, r)).count() % 2 == 1) {
             continue;
         }
         match out.last_mut() {

@@ -7,6 +7,7 @@ import { solidProps } from "../../engine/truckSolid";
 import { t } from "../../i18n";
 import type { ExtrudedSolidInfo, ColumnInfo } from "../../state/selectionInfo";
 import { usePanelHost } from "../host";
+import { useStore } from "../../state/appStore";
 import { Dropdown } from "../../ui/Dropdown";
 import { DimensionField } from "./fields";
 
@@ -60,6 +61,7 @@ export function ExtrudedSolidSection({
   solid: ExtrudedSolidInfo;
   host: ReturnType<typeof usePanelHost>;
 }) {
+  const components = useStore((st) => st.project.components);
   return (
     <>
       <div className="objinfo-sep" />
@@ -99,6 +101,23 @@ export function ExtrudedSolidSection({
           title={t("objinfo.extrudedSolid.baseOffset")}
         />
       </div>
+
+      {/* [G1] Bauteil: Füllung und SIA-Schraffur der Schnittfläche in Grundriss und Schnitt. */}
+      {!solid.subtract && (
+        <div className="objinfo-field">
+          <span className="objinfo-flabel">{t("objinfo.extrudedSolid.component")}</span>
+          <Dropdown
+            value={solid.componentId}
+            onChange={(v) => host.onSetExtrudedSolidComponent(v)}
+            options={[
+              { value: "", label: t("objinfo.extrudedSolid.component.none") },
+              ...components.map((c) => ({ value: c.id, label: c.name })),
+            ]}
+            title={t("objinfo.extrudedSolid.componentHint")}
+            width={130}
+          />
+        </div>
+      )}
 
       {/* Abzugskörper: zieht sich von Wänden/Decken/Stützen ab (Grundriss, Schnitt, 3D, STEP). */}
       {solid.canSubtract && (

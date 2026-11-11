@@ -256,6 +256,97 @@ fn encode_rings(rings: &[&[Vec2]]) -> Vec<f64> {
     b
 }
 
+/// Schneider-Polygon (erster Ring aussen, weitere Löcher).
+type CutPoly = Vec<Vec<[f64; 2]>>;
+
+/// [G1] Abzugskörper beliebiger Form (kein senkrechtes Prisma, s. [`void_prisms`]): Kern-Netz
+/// (`solid_mesh::body_mesh`) und Höhenbereich.
+pub(crate) struct VoidMesh {
+    pub(crate) mesh: std::rc::Rc<Option<crate::solid_bool::Mesh>>,
+    pub(crate) z0: f64,
+    pub(crate) z1: f64,
+}
+
+pub(crate) fn void_meshes(p: &Project) -> Vec<VoidMesh> {
+    let mut out = Vec::new();
+    for s in p.extruded_solids.as_deref().unwrap_or(&[]) {
+        let prism = s.brep.is_none() && s.taper.unwrap_or(0.0) < 1e-6 && s.points.len() >= 3 && s.height > 0.0;
+        if s.operation.as_deref() != Some("subtract") || prism {
+            continue;
+        }
+        let Some(mesh) = crate::solid_mesh::body_mesh(p, s) else { continue };
+        let Some((lo, hi)) = mesh.as_ref().as_ref().and_then(|m| m.bounds()) else { continue };
+        out.push(VoidMesh { mesh: mesh.clone(), z0: lo[2], z1: hi[2] });
+    }
+    out
+}
+
+/// Ringliste flach (`encode_rings`), solange kein Schneider Löcher hat (sonst `None`: Polygon-Weg).
+fn flat_rings(polys: &[CutPoly]) -> Option<Vec<f64>> {
+    if polys.iter().any(|p| p.len() != 1) {
+        return None;
+    }
+    let mut b = vec![polys.len() as f64];
+    for r in polys.iter().map(|p| &p[0]) {
+        b.push(r.len() as f64);
+        for q in r {
+            b.extend([q[0], q[1]]);
+        }
+    }
+    Some(b)
+}
+
+/// [G1] Waagrechter Ebenenschnitt eines Netzes auf Höhe `z` als Polygone mit Löchern.
+fn mesh_level_polys(mesh: &Option<crate::solid_bool::Mesh>, z: f64) -> Vec<CutPoly> {
+    let Some(m) = mesh else { return Vec::new() };
+    let idx: Vec<f64> = m.indices.iter().map(|&i| i as f64).collect();
+    let f = crate::mesh_section::cut(&m.positions, &idx, &[1.0, z]);
+    let Some(&n) = f.first() else { return Vec::new() };
+    let mut rings = Vec::new();
+    let mut i = 1;
+    for _ in 0..n as usize {
+        let k = f[i] as usize;
+        i += 1;
+        rings.push((0..k).map(|j| [f[i + 2 * j], f[i + 2 * j + 1]]).collect::<Vec<_>>());
+        i += 2 * k;
+    }
+    super::section::rings_to_polygons(&rings)
+}
+
+/// [G1] Grundriss eines Netzes im Höhenbereich `z0..z1`: der Körper wird auf das Band beschnitten
+/// (Manifold), dann die nach oben weisenden Dreiecke projiziert und vereinigt (i_overlay).
+fn mesh_footprint(mesh: &Option<crate::solid_bool::Mesh>, z0: f64, z1: f64) -> Vec<CutPoly> {
+    use crate::solid_bool::{Mesh, Solid};
+    let Some(m) = mesh else { return Vec::new() };
+    let Some((lo, hi)) = m.bounds() else { return Vec::new() };
+    let clipped;
+    let m = if z0 <= lo[2] + EPS && z1 >= hi[2] - EPS {
+        m
+    } else {
+        let (a, b) = (z0.max(lo[2] - 1.0), z1.min(hi[2] + 1.0));
+        if !(b > a + EPS) {
+            return Vec::new();
+        }
+        let r = [[lo[0] - 1.0, lo[1] - 1.0], [hi[0] + 1.0, lo[1] - 1.0], [hi[0] + 1.0, hi[1] + 1.0], [lo[0] - 1.0, hi[1] + 1.0]];
+        let Some(c) = Solid::new(m).ok().and_then(|s| Solid::new(&Mesh::prism(&r, a, b)).ok().and_then(|band| s.intersection(&band).ok())) else { return Vec::new() };
+        clipped = c.to_mesh();
+        &clipped
+    };
+    let p = |i: u32| {
+        let j = 3 * i as usize;
+        [m.positions[j], m.positions[j + 1]]
+    };
+    let mut tris: Vec<CutPoly> = Vec::new();
+    for t in m.indices.chunks_exact(3) {
+        let (a, b, c) = (p(t[0]), p(t[1]), p(t[2]));
+        let cross = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+        if cross > 1e-12 {
+            tris.push(vec![vec![a, b, c]]);
+        }
+    }
+    crate::polygon_bool::union(&tris)
+}
+
 /// Linien-Klassen der Wand-Poché, die ein Abzugskörper auf Schnitthöhe unterbricht.
 const WALL_LINE_CLS: [&str; 3] = ["wall-outline", "layer-joint", "layer-joint-l"];
 
@@ -265,15 +356,28 @@ const WALL_LINE_CLS: [&str; 3] = ["wall-outline", "layer-joint", "layer-joint-l"
 /// Abzugskörper unverändert. Gleiche Rechnung wie der frühere Weg über die flachen Bindungen.
 pub fn subtract_voids(prims: Vec<Primitive>, p: &Project, cut_z: f64) -> Vec<Primitive> {
     let voids = void_prisms(p);
-    if voids.is_empty() {
+    let shaped = void_meshes(p);
+    if voids.is_empty() && shaped.is_empty() {
         return prims;
     }
     // Maps wie in TS: bei doppelter id gewinnt der letzte Eintrag.
     let ceilings: HashMap<&str, &Ceiling> = p.ceilings.as_deref().unwrap_or(&[]).iter().map(|c| (c.id.as_str(), c)).collect();
     let columns: HashMap<&str, &Column> = p.columns.as_deref().unwrap_or(&[]).iter().map(|c| (c.id.as_str(), c)).collect();
-    let cutters_for = |z0: f64, z1: f64| -> Vec<&[Vec2]> { voids.iter().filter(|v| v.z0 < z1 - EPS && v.z1 > z0 + EPS).map(|v| v.pts.as_slice()).collect() };
-    let wall_cutters = cutters_for(cut_z - 1e-4, cut_z + 1e-4);
-    let wall_flat = encode_rings(&wall_cutters);
+    let ring_of = |pts: &[Vec2]| -> Vec<[f64; 2]> { pts.iter().map(|q| [q.x, q.y]).collect() };
+    // [G1] Abzugskörper beliebiger Form: Grundriss des Körpers im Höhenbereich des Bauteils.
+    let cutters_for = |z0: f64, z1: f64| -> Vec<CutPoly> {
+        let mut c: Vec<CutPoly> = voids.iter().filter(|v| v.z0 < z1 - EPS && v.z1 > z0 + EPS).map(|v| vec![ring_of(&v.pts)]).collect();
+        for v in shaped.iter().filter(|v| v.z0 < z1 - EPS && v.z1 > z0 + EPS) {
+            c.extend(mesh_footprint(&v.mesh, z0, z1));
+        }
+        c
+    };
+    // Wände: Prismen wie bisher über ihr Profil, Körper beliebiger Form über ihren Ebenenschnitt auf Schnitthöhe.
+    let mut wall_cutters: Vec<CutPoly> = voids.iter().filter(|v| v.z0 < cut_z + 1e-4 - EPS && v.z1 > cut_z - 1e-4 + EPS).map(|v| vec![ring_of(&v.pts)]).collect();
+    for v in shaped.iter().filter(|v| v.z0 < cut_z && v.z1 > cut_z) {
+        wall_cutters.extend(mesh_level_polys(&v.mesh, cut_z));
+    }
+    let wall_flat = flat_rings(&wall_cutters);
     // [159] Nichts zu tun (z. B. Kontext mit zehntausenden Höhenlinien): die Liste unverändert, ohne Umkopieren.
     let nonempty = |s: &Option<String>| s.as_deref().is_some_and(|s| !s.is_empty());
     let touched = |q: &Primitive| match q {
@@ -288,9 +392,15 @@ pub fn subtract_voids(prims: Vec<Primitive>, p: &Project, cut_z: f64) -> Vec<Pri
     for pr in prims {
         if let Primitive::Line { a, b, cls, .. } = &pr {
             if WALL_LINE_CLS.contains(&cls.as_str()) && !wall_cutters.is_empty() {
-                let f = crate::voids::segment_outside_flat(&[a.x, a.y, b.x, b.y], &wall_flat);
-                let n = f.first().copied().unwrap_or(0.0) as usize;
-                let parts: Vec<(f64, f64)> = (0..n).map(|k| (f[1 + 2 * k], f[2 + 2 * k])).collect();
+                let parts: Vec<(f64, f64)> = match &wall_flat {
+                    Some(flat) => {
+                        let f = crate::voids::segment_outside_flat(&[a.x, a.y, b.x, b.y], flat);
+                        let n = f.first().copied().unwrap_or(0.0) as usize;
+                        (0..n).map(|k| (f[1 + 2 * k], f[2 + 2 * k])).collect()
+                    }
+                    None if [a.x, a.y, b.x, b.y].iter().all(|v| v.is_finite()) => crate::voids::segment_outside_polys([a.x, a.y], [b.x, b.y], &wall_cutters),
+                    None => Vec::new(),
+                };
                 if parts.len() == 1 && parts[0].0 == 0.0 && parts[0].1 == 1.0 {
                     out.push(pr);
                 } else {
@@ -319,7 +429,7 @@ pub fn subtract_voids(prims: Vec<Primitive>, p: &Project, cut_z: f64) -> Vec<Pri
             out.push(pr);
             continue;
         }
-        let cutters: Option<Vec<&[Vec2]>> = if wall_id.is_some() {
+        let cutters: Option<Vec<CutPoly>> = if wall_id.is_some() {
             Some(wall_cutters.clone())
         } else if let Some(id) = &ceiling_id {
             ceilings.get(id.as_str()).map(|c| {
@@ -349,15 +459,33 @@ pub fn subtract_voids(prims: Vec<Primitive>, p: &Project, cut_z: f64) -> Vec<Pri
         // [159] Weit neben allen Abzugskörpern (Rechtecke getrennt): unverändert wie mit leerer Schnittmenge
         // (`subtract_rings` → `None`), ohne die Booleans je Polygon.
         let pb = bbox_of(pts.iter().map(|q| [q.x, q.y]));
-        if cutters.iter().all(|c| apart(pb, bbox_of(c.iter().map(|q| [q.x, q.y])))) {
+        if cutters.iter().all(|c| apart(pb, bbox_of(c[0].iter().copied()))) {
             out.push(pr);
             continue;
         }
-        let ring = encode_rings(&[pts]);
         let ns = no_stroke_edges.as_deref().unwrap_or(&[]);
+        let Some(cutters_flat) = flat_rings(&cutters) else {
+            // [G1] Schneider mit Löchern (Ring-Körper): direkt über die Polygone.
+            let ns: Vec<usize> = ns.iter().filter(|v| v.is_finite() && **v >= 0.0).map(|v| *v as usize).collect();
+            match crate::voids::subtract_polys(&ring_of(pts), &cutters, &ns) {
+                None => out.push(pr),
+                Some(pieces) => {
+                    for pc in pieces {
+                        let mut q = pr.clone();
+                        if let Primitive::Polygon { pts, no_stroke_edges, .. } = &mut q {
+                            *pts = pc.pts.iter().map(|q| Vec2 { x: q[0], y: q[1] }).collect();
+                            *no_stroke_edges = (!pc.no_stroke.is_empty()).then(|| pc.no_stroke.iter().map(|&i| i as f64).collect());
+                        }
+                        out.push(q);
+                    }
+                }
+            }
+            continue;
+        };
+        let ring = encode_rings(&[pts]);
         let mut nsf = vec![ns.len() as f64];
         nsf.extend_from_slice(ns);
-        let f = crate::voids::subtract_rings_flat(&ring[1..], &encode_rings(&cutters), &nsf);
+        let f = crate::voids::subtract_rings_flat(&ring[1..], &cutters_flat, &nsf);
         if f.is_empty() || f[0] < 0.0 {
             out.push(pr);
             continue;
@@ -822,6 +950,74 @@ mod tests {
         let after = walls(&v);
         assert_ne!(before, after);
         assert!(after.len() > before.len(), "{} → {}", before.len(), after.len());
+    }
+
+    /// [G1] Abzugskörper beliebiger Form im Grundriss: Zylinder (B-Rep) spart Wand-Poché und Wandlinie über
+    /// seinen Ebenenschnitt auf Schnitthöhe aus; ein Ring-Körper (Loch) lässt den Kern der Wand stehen; eine
+    /// Kugel an der Decke spart deren Grundriss im Plattenband aus.
+    #[test]
+    fn abzugskoerper_beliebiger_form_im_grundriss() {
+        let v2 = |x: f64, y: f64| Vec2 { x, y };
+        let poly = |pts: Vec<Vec2>, wall: bool| {
+            let mut q = flat_polygon(pts, "#000", 1.0);
+            if let Primitive::Polygon { wall_id, ceiling_id, .. } = &mut q {
+                if wall {
+                    *wall_id = Some("w".into());
+                } else {
+                    *ceiling_id = Some("d".into());
+                }
+            }
+            q
+        };
+        let wall = poly(vec![v2(0.0, -0.1), v2(4.0, -0.1), v2(4.0, 0.1), v2(0.0, 0.1)], true);
+        let outline = super::super::domains::line(v2(0.0, 0.1), v2(4.0, 0.1), "wall-outline", 0.35, None, "#000", None);
+        let deck = poly(vec![v2(0.0, -2.0), v2(4.0, -2.0), v2(4.0, 2.0), v2(0.0, 2.0)], false);
+        let project = |spec: serde_json::Value| -> Project {
+            serde_json::from_value(serde_json::json!({
+                "drawingLevels": [{"id": "eg", "name": "EG", "kind": "floor", "baseElevation": 0, "floorHeight": 3, "cutHeight": 1, "visible": true}],
+                "ceilings": [{"id": "d", "type": "ceiling", "floorId": "eg", "categoryCode": "30", "outline": [{"x": 0, "y": -2}, {"x": 4, "y": -2}, {"x": 4, "y": 2}, {"x": 0, "y": 2}]}],
+                "extrudedSolids": [{"id": "v", "type": "extrudedSolid", "levelId": "eg", "categoryCode": "20", "operation": "subtract", "height": 2,
+                    "points": [{"x": 0, "y": 0}, {"x": 1, "y": 0}, {"x": 1, "y": 1}], "brep": {"origin": {"x": 0, "y": 0}, "spec": spec}}]
+            }))
+            .unwrap()
+        };
+        let area = |prims: &[Primitive], wall: bool| -> f64 {
+            prims.iter().filter_map(|q| match q {
+                Primitive::Polygon { pts, wall_id, .. } if wall_id.is_some() == wall => {
+                    let n = pts.len();
+                    Some(((0..n).map(|k| pts[k].x * pts[(k + 1) % n].y - pts[(k + 1) % n].x * pts[k].y).sum::<f64>() / 2.0).abs())
+                }
+                _ => None,
+            }).sum()
+        };
+        let line_len = |prims: &[Primitive]| -> (usize, f64) {
+            let l: Vec<f64> = prims.iter().filter_map(|q| match q { Primitive::Line { a, b, .. } => Some(b.x - a.x), _ => None }).collect();
+            (l.len(), l.iter().sum())
+        };
+        // Zylinder r = 0.3 um (2, 0): Kreis ∩ Wandstreifen (|y| ≤ 0.1) fehlt.
+        let p = project(serde_json::json!({"kind": "cylinder", "cx": 2, "cy": 0, "z0": 0, "r": 0.3, "height": 2}));
+        let out = subtract_voids(vec![wall.clone(), outline.clone()], &p, 1.0);
+        let n = 2000;
+        let lens: f64 = (0..n).map(|k| { let y = -0.1 + 0.2 * (k as f64 + 0.5) / n as f64; 2.0 * (0.09 - y * y).sqrt() * 0.2 / n as f64 }).sum();
+        assert!((area(&out, true) - (0.8 - lens)).abs() < 2e-3, "{} ≠ {}", area(&out, true), 0.8 - lens);
+        let (k, len) = line_len(&out);
+        assert_eq!(k, 2, "Wandlinie unterbrochen");
+        assert!((len - (4.0 - 2.0 * 0.08f64.sqrt())).abs() < 5e-3, "{len}");
+        // Ring-Körper 1.6 × 1.6 mit Loch 0.6 × 0.6: der Wandkern im Loch bleibt.
+        let p = project(serde_json::json!({"kind": "extrude", "points": [1.2, -0.8, 2.8, -0.8, 2.8, 0.8, 1.2, 0.8], "holes": [[1.7, -0.3, 2.3, -0.3, 2.3, 0.3, 1.7, 0.3]], "height": 2, "z0": 0}));
+        let out = subtract_voids(vec![wall.clone(), outline.clone()], &p, 1.0);
+        assert!((area(&out, true) - 0.2 * 3.0).abs() < 1e-6, "{}", area(&out, true));
+        assert_eq!(out.iter().filter(|q| matches!(q, Primitive::Polygon { .. })).count(), 3);
+        let (k, len) = line_len(&out);
+        assert_eq!(k, 3);
+        assert!((len - 3.0).abs() < 1e-6, "{len}");
+        // Kugel r = 0.5 um (2, 0, 3) an der Decke (Platte am Geschoss-Oberrand): Kreis aus der Decke; die
+        // Wand (Schnitthöhe 1) bleibt.
+        let p = project(serde_json::json!({"kind": "sphere", "center": [2, 0, 3], "r": 0.5}));
+        let out = subtract_voids(vec![wall, outline, deck], &p, 1.0);
+        let pi = std::f64::consts::PI;
+        assert!((area(&out, false) - (16.0 - pi * 0.25)).abs() < 0.01, "{}", area(&out, false));
+        assert!((area(&out, true) - 0.8).abs() < 1e-9);
     }
 
     #[test]

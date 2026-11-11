@@ -1341,6 +1341,11 @@ export type ExtrudedSolid = {
    * Grundriss-Fläche (Auswahl/2D-Umriss), `height` die Körperhöhe.
    */
   brep?: { spec: Record<string, unknown>; origin: Vec2; label?: string };
+  /**
+   * [G1] Bauteil (Component Manager) des Körpers: Füllung und SIA-Schraffur der Schnittfläche im
+   * Grundriss und im Schnitt. Fehlt = neutrale Körper-Füllung mit Rückfall-Schraffur.
+   */
+  componentId?: string;
 };
 
 /**

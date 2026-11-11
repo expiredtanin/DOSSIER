@@ -55,6 +55,8 @@ pub(crate) fn keyhole(poly: &[Vec<[f64; 2]>]) -> (Vec<[f64; 2]>, Vec<f64>) {
 pub(super) fn append_body_sections(cuts: &mut Vec<Cut>, p: &Project, bodies: &[&BodyMesh], base: (f64, f64), u: (f64, f64)) {
     let solids = p.extruded_solids.as_deref().unwrap_or(&[]);
     for b in bodies {
+        // [G1] Bauteil des Körpers: Füllung und SIA-Schraffur wie im Grundriss.
+        let style = solids.get(b.index).and_then(|s| crate::plan::style::body_component_style(p, s).map(|st| (st, s.component_id.clone())));
         let (rings, _) = cut_mesh(&b.positions, &b.indices, base, u);
         for poly in rings_to_polygons(&rings) {
             let (pts, nse) = if poly.len() > 1 {
@@ -66,6 +68,11 @@ pub(super) fn append_body_sections(cuts: &mut Vec<Cut>, p: &Project, bodies: &[&
             };
             let mut c = Cut::new(Kind::Body, b.index, pts);
             c.fill = Some(BODY_FILL.into());
+            if let Some(((fill, hatch), comp)) = &style {
+                c.fill = Some(fill.clone());
+                c.hatch = Some(hatch.clone());
+                c.component_id = comp.clone();
+            }
             c.nse = nse;
             c.source_id = solids.get(b.index).map(|s| s.id.clone());
             // [180] Klasse des Körpers (Sichtbarkeit, Darstellungsmodus).

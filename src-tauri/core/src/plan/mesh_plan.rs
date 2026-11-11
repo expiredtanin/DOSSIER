@@ -172,35 +172,103 @@ fn component_occluders(c: &Ctx, range: &ViewRange, out: &mut Vec<crate::hlr::Fac
     }
 }
 
+/// Ein Netz im Grundriss: importiert (Kontext) oder [G1] freier Körper (`extrudedSolids`, Netz aus
+/// `solid_mesh.rs`).
+struct Item<'a> {
+    m: MeshRef<'a>,
+    zone: Zone,
+    ov: Option<MeshOv>,
+    greyed: bool,
+    /// Freier Körper: Pick über `extrudedSolidId`, Poché aus seinem Bauteil.
+    solid: Option<&'a ExtrudedSolid>,
+}
+
 /// Importierte Netze des Geschosses in `out`; `false`, wenn die Ebene kein Geschoss ist (dann zeichnet
 /// `context.rs` den Fussabdruck wie bisher).
 pub fn plan_meshes(c: &Ctx, out: &mut Vec<Primitive>) -> bool {
     let Some(l) = c.p.floor(&c.a.floor).filter(|l| l.kind == DrawingLevelKind::Floor) else { return false };
     let range = ViewRange::of(c.p, &c.a.floor);
     let band = floor_band(c.p, l, &range);
-    let cut = range.cut;
-    let meshes: Vec<(MeshRef, Zone)> = mesh_view::meshes(c.p)
+    let items: Vec<Item> = mesh_view::meshes(c.p)
         .into_iter()
         .filter(|m| c.shown(&m.mesh.category_code) && !c.rule_hidden(&m.mesh.id))
         .filter_map(|m| {
-            let z = zone_of(&range, band, m.info.bbox[2], m.info.bbox[5])?;
-            Some((m, z))
+            let zone = zone_of(&range, band, m.info.bbox[2], m.info.bbox[5])?;
+            let (ov, greyed) = (mesh_ov(c, m.mesh), c.greyed(&m.mesh.category_code));
+            Some(Item { m, zone, ov, greyed, solid: None })
         })
         .collect();
-    if meshes.is_empty() {
+    if items.is_empty() {
         return true;
     }
+    draw_items(c, &range, &items, out);
+    // Pick-Flächen (Hüllbox) zuletzt: Klick wählt das Netz.
+    for it in &items {
+        let b = &it.m.info.bbox;
+        let pts = vec![Vec2 { x: b[0], y: b[1] }, Vec2 { x: b[3], y: b[1] }, Vec2 { x: b[3], y: b[4] }, Vec2 { x: b[0], y: b[4] }];
+        out.push(super::context::pick_band(pts, Some(&it.m.mesh.id), None));
+    }
+    true
+}
+
+/// [G1] Freie Körper des Geschosses über ihr Kern-Netz (`solid_mesh::body_mesh`), wie importierte Netze:
+/// geschnitten ⇒ Ebenenschnitt als Poché (mit Eckenradius/Fase, Löchern, Verjüngung, B-Rep-Grundkörpern;
+/// Füllung/SIA-Schraffur aus `componentId`, ab 1:100 schwarz) und der Teil darunter als Aufsicht; ganz
+/// darunter Aufsicht, darüber Überkopf-Linien (gestrichelt). Liefert die Körper ohne baubares Netz zurück
+/// (der Aufrufer zeichnet sie wie bisher über ihr Profil).
+pub fn plan_bodies<'a>(c: &Ctx, solids: &[&'a ExtrudedSolid], out: &mut Vec<Primitive>) -> Vec<&'a ExtrudedSolid> {
+    let range = ViewRange::of(c.p, &c.a.floor);
+    let mut rest = Vec::new();
+    let mut owned: Vec<(&ExtrudedSolid, ImportedMesh)> = Vec::new();
+    for s in solids {
+        match crate::solid_mesh::body_mesh(c.p, s).and_then(|m| (*m).clone()) {
+            Some(m) => {
+                let indices = m.indices.iter().map(|&i| i as f64).collect();
+                owned.push((s, ImportedMesh { id: s.id.clone(), name: s.id.clone(), category_code: s.category_code.clone(), positions: m.positions, indices, ..Default::default() }));
+            }
+            None => rest.push(*s),
+        }
+    }
+    let mut items: Vec<Item> = Vec::new();
+    for (k, (s, im)) in owned.iter().enumerate() {
+        let Some(info) = mesh_view::info(im) else {
+            rest.push(*s);
+            continue;
+        };
+        let zone = range.classify(info.bbox[2], info.bbox[5]);
+        if zone == Zone::Hidden {
+            continue;
+        }
+        items.push(Item { m: MeshRef { index: k, mesh: im, info }, zone, ov: None, greyed: c.greyed(&s.category_code), solid: Some(s) });
+    }
+    // Pick-Fläche (Grundriss-Profil, sonst Hüllbox) zuerst, darüber Linien und Poché.
+    for it in &items {
+        let Some(s) = it.solid else { continue };
+        let pts = if s.points.len() >= 3 {
+            s.points.clone()
+        } else {
+            let b = &it.m.info.bbox;
+            vec![Vec2 { x: b[0], y: b[1] }, Vec2 { x: b[3], y: b[1] }, Vec2 { x: b[3], y: b[4] }, Vec2 { x: b[0], y: b[4] }]
+        };
+        out.push(super::domains::polygon(pts, "none", "none", 0.0, no_hatch(), Some(it.greyed), None, super::domains::Pick::Solid(&s.id)));
+    }
+    if !items.is_empty() {
+        draw_items(c, &range, &items, out);
+    }
+    rest
+}
+
+/// Schnittflächen, Aufsicht und Überkopf-Linien einer Netz-Gruppe (gegenseitig und durch die Bauteile verdeckt).
+fn draw_items(c: &Ctx, range: &ViewRange, items: &[Item], out: &mut Vec<Primitive>) {
+    let cut = range.cut;
     let (solid_fill, solid_hatch) = if c.solid_cut() { (HATCH_INK.to_string(), no_hatch()) } else { (super::section::BODY_FILL.to_string(), super::section::section_hatch()) };
-    let ovs: Vec<Option<MeshOv>> = meshes.iter().map(|(m, _)| mesh_ov(c, m.mesh)).collect();
-    let greyed = |m: &MeshRef| c.greyed(&m.mesh.category_code);
     // Schnittflächen (und Verdecker der Aufsicht in Tiefe 0).
     let mut below: Vec<crate::hlr::Face> = Vec::new();
     let mut cut_prims: Vec<Primitive> = Vec::new();
-    for (k, (m, z)) in meshes.iter().enumerate() {
-        if *z != Zone::Cut {
-            continue;
-        }
-        let ov = ovs[k].as_ref();
+    for it in items.iter().filter(|it| it.zone == Zone::Cut) {
+        let (m, ov) = (&it.m, it.ov.as_ref());
+        // [G1] Körper mit Bauteil: dessen Füllung und Schraffur (ausser schwarz ab 1:100).
+        let comp = it.solid.filter(|_| !c.solid_cut()).and_then(|s| super::style::body_component_style(c.p, s));
         let (rings, open) = mesh_view::cut(m, &[1.0, cut]);
         for poly in super::section::rings_to_polygons(&rings) {
             let mut f = crate::hlr::Face::new(poly[0].iter().map(|q| [q[0], q[1], 0.0]).collect(), [0.0, 0.0, -1.0], u32::MAX);
@@ -217,21 +285,26 @@ pub fn plan_meshes(c: &Ctx, out: &mut Vec<Primitive>) -> bool {
             if pts.len() < 3 {
                 continue;
             }
-            let fill = ov.and_then(|o| o.fill.clone()).unwrap_or_else(|| solid_fill.clone());
-            let hatch = ov.and_then(|o| o.hatch.clone()).map_or_else(|| solid_hatch.clone(), |h| h.unwrap_or_else(no_hatch));
+            let (fill, hatch) = match &comp {
+                Some((f, h)) => (f.clone(), h.clone()),
+                None => (ov.and_then(|o| o.fill.clone()).unwrap_or_else(|| solid_fill.clone()), ov.and_then(|o| o.hatch.clone()).map_or_else(|| solid_hatch.clone(), |h| h.unwrap_or_else(no_hatch))),
+            };
             let mut q = super::section::polygon(pts.iter().map(|q| Vec2 { x: q[0], y: q[1] }).collect(), &fill, POCHE_STROKE, WALL_FALLBACK_MM, hatch);
-            if let Primitive::Polygon { context_object_id, no_stroke_edges, greyed: g, .. } = &mut q {
-                *context_object_id = Some(m.mesh.id.clone());
+            if let Primitive::Polygon { context_object_id, extruded_solid_id, no_stroke_edges, greyed: g, .. } = &mut q {
+                match it.solid {
+                    Some(s) => *extruded_solid_id = Some(s.id.clone()),
+                    None => *context_object_id = Some(m.mesh.id.clone()),
+                }
                 *no_stroke_edges = nse;
-                *g = Some(greyed(m));
+                *g = Some(it.greyed);
             }
             cut_prims.push(q);
         }
         for l in open {
             for w in l.windows(2) {
-                let mut q = view_line(w[0], w[1], None, greyed(m), ov);
+                let mut q = view_line(w[0], w[1], None, it.greyed, ov);
                 if let Primitive::Line { cls, weight_mm, .. } = &mut q {
-                    *cls = "mesh-cut".into();
+                    *cls = if it.solid.is_some() { "solid-cut" } else { "mesh-cut" }.into();
                     if ov.and_then(|o| o.weight).is_none() {
                         *weight_mm = WALL_FALLBACK_MM;
                     }
@@ -241,13 +314,13 @@ pub fn plan_meshes(c: &Ctx, out: &mut Vec<Primitive>) -> bool {
         }
     }
     // Bauteile verdecken die Aufsicht: geschnitten in Tiefe 0 (Poché), darunter in Höhe ihrer Oberkante.
-    component_occluders(c, &range, &mut below);
+    component_occluders(c, range, &mut below);
     // Aufsicht von oben (Tiefe = Schnitthöhe − z, nur unter der Schnittebene) und Überkopf von unten.
     let mut above: Vec<crate::hlr::Face> = Vec::new();
-    for (k, (m, z)) in meshes.iter().enumerate() {
-        match z {
-            Zone::Above => mesh_view::hlr_faces(m, &|q| [q[0], q[1], q[2] - cut], k as u32, k as u32 + 1, false, &mut above),
-            _ => mesh_view::hlr_faces(m, &|q| [q[0], q[1], cut - q[2]], k as u32, k as u32 + 1, true, &mut below),
+    for (k, it) in items.iter().enumerate() {
+        match it.zone {
+            Zone::Above => mesh_view::hlr_faces(&it.m, &|q| [q[0], q[1], q[2] - cut], k as u32, k as u32 + 1, false, &mut above),
+            _ => mesh_view::hlr_faces(&it.m, &|q| [q[0], q[1], cut - q[2]], k as u32, k as u32 + 1, true, &mut below),
         }
     }
     let opts = crate::hlr::Opts { tol: 1e-4, depth_eps: 1e-4, hidden: false, ..crate::hlr::Opts::default() };
@@ -257,27 +330,24 @@ pub fn plan_meshes(c: &Ctx, out: &mut Vec<Primitive>) -> bool {
             continue;
         }
         for s in crate::hlr::hidden_lines(faces, &opts) {
-            let Some((m, z)) = meshes.get(s.owner as usize) else { continue };
+            let Some(it) = items.get(s.owner as usize) else { continue };
             if s.hidden {
                 continue;
             }
-            let dash: Option<&[f64]> = match z {
+            let dash: Option<&[f64]> = match it.zone {
                 Zone::Above => Some(&ABOVE_DASH),
                 Zone::Under => Some(&UNDER_DASH),
                 _ => None,
             };
-            lines.push(view_line(s.a, s.b, dash, greyed(m), ovs[s.owner as usize].as_ref()));
+            let mut q = view_line(s.a, s.b, dash, it.greyed, it.ov.as_ref());
+            if let (Primitive::Line { cls, .. }, Some(_)) = (&mut q, it.solid) {
+                *cls = "solid-view".into();
+            }
+            lines.push(q);
         }
     }
     out.extend(lines);
     out.extend(cut_prims);
-    // Pick-Flächen (Hüllbox) zuletzt: Klick wählt das Netz.
-    for (m, _) in &meshes {
-        let b = &m.info.bbox;
-        let pts = vec![Vec2 { x: b[0], y: b[1] }, Vec2 { x: b[3], y: b[1] }, Vec2 { x: b[3], y: b[4] }, Vec2 { x: b[0], y: b[4] }];
-        out.push(super::context::pick_band(pts, Some(&m.mesh.id), None));
-    }
-    true
 }
 
 #[cfg(test)]
