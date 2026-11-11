@@ -14,6 +14,20 @@ const byLevel = new Map<string, SnapSeg[]>();
 /** Je Ebene: Umriss-Polygone je Bauteil (`wall:<id>` / `ceiling:<id>`) — Vorschau beim Ziehen im Schnitt. */
 const outlinesByLevel = new Map<string, Map<string, Vec2[][]>>();
 
+// [187] Die Umrisse ändern sich asynchron (der Schnitt rechnet nach Undo/Änderung neu): Höhen-Griffe, die daraus stehen,
+// müssen mitziehen — Version + Abo für `useSyncExternalStore`.
+let outlinesVersion = 0;
+const outlineListeners = new Set<() => void>();
+const bumpOutlines = () => {
+  outlinesVersion++;
+  outlineListeners.forEach((l) => l());
+};
+export function subscribeSheetOutlines(l: () => void): () => void {
+  outlineListeners.add(l);
+  return () => void outlineListeners.delete(l);
+}
+export const sheetOutlinesVersion = (): number => outlinesVersion;
+
 /** Strecken der Ebene `levelId` setzen (leeres Array/`null` = entfernen). */
 export function setSheetSnapSegments(levelId: string, segs: SnapSeg[] | null): void {
   if (!segs || segs.length === 0) byLevel.delete(levelId);
@@ -68,7 +82,7 @@ export type SheetOwnerKind = "wall" | "ceiling" | "opening" | "stair";
  */
 export function setSheetOwnerOutlines(levelId: string, prims: readonly Primitive[] | null): void {
   if (!prims) {
-    outlinesByLevel.delete(levelId);
+    if (outlinesByLevel.delete(levelId)) bumpOutlines();
     return;
   }
   const map = new Map<string, Vec2[][]>();
@@ -85,6 +99,7 @@ export function setSheetOwnerOutlines(levelId: string, prims: readonly Primitive
     else if (p.ceilingId) add(`ceiling:${p.ceilingId}`, p.pts);
   }
   outlinesByLevel.set(levelId, map);
+  bumpOutlines();
 }
 
 /** Schnittflächen eines Bauteils im Blatt der Ebene `levelId` (leer, wenn nicht geschnitten). */

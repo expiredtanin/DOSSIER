@@ -108,23 +108,31 @@ export function gripEdgeTarget(edge: EdgeGrip, raw: Vec2, d: EdgeDrive = {}): Ve
   );
 }
 
-/** Art eines Höhen-Griffs im Schnitt/in der Ansicht. */
-export type SheetHeightKind = "wallTop" | "openingTop" | "openingBottom";
+/** Art eines Höhen-Griffs im Schnitt/in der Ansicht ([187]; Index = `sheet_height::Kind` im Kern). */
+export type SheetHeightKind = "wallTop" | "openingTop" | "openingBottom" | "wallBottom" | "ceilingTop" | "ceilingBottom";
+
+const SHEET_KIND = { wallTop: 0, openingTop: 1, openingBottom: 2, wallBottom: 3, ceilingTop: 4, ceilingBottom: 6 } as const;
 
 /**
- * Höhen-Griff auf die Blatt-Höhe `y` ziehen (1-cm-Raster, `free` = ohne): neue Ober-/Unterkante im Blatt und
- * der Patch fürs Bauteil (`height`, Fenster-Unterkante zusätzlich `sillHeight`; mm-genau).
+ * Höhen-Griff auf die Blatt-Höhe `y` ziehen (1-cm-Raster, `free` = ohne): neue Ober-/Unterkante im Blatt für die
+ * Vorschau (Mindestmasse im Kern). `base` = tiefste Brüstungskante (UK der Wand), `bottomFixed` = Decke mit
+ * gebundener Unterkante (OK ändert dann die Dicke statt die Platte zu verschieben). Die Änderung am Bauteil
+ * rechnet der Kern beim Loslassen (Griff-Anfrage `sheetHeight`).
  */
 export function sheetHeightDrag(
   kind: SheetHeightKind,
-  g: { base: number; top: number; bottom: number },
+  g: { base: number; top: number; bottom: number; bottomFixed?: boolean },
   y: number,
   free: boolean,
-): { top: number; bottom: number; patch: Record<string, number> } {
-  const k = kind === "wallTop" ? 0 : kind === "openingTop" ? 1 : 2;
+): { top: number; bottom: number } {
+  const k = kind === "ceilingTop" && g.bottomFixed ? 5 : SHEET_KIND[kind];
   const f = core().grip_sheet_height(k, g.base, g.top, g.bottom, y, free);
-  const patch: Record<string, number> = kind === "openingBottom" ? { sillHeight: f[3], height: f[2] } : { height: f[2] };
-  return { top: f[0], bottom: f[1], patch };
+  return f.length ? { top: f[0], bottom: f[1] } : { top: g.top, bottom: g.bottom };
+}
+
+/** Fang einer Blatt-Höhe auf die nächste Kote aus `levels` innerhalb `tol` Metern. */
+export function snapSheetHeight(y: number, levels: readonly number[], tol: number): number {
+  return core().grip_snap_height(y, Float64Array.from(levels), tol);
 }
 
 /**

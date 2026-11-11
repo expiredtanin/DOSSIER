@@ -281,7 +281,7 @@ fn floor_name(floor: Option<&Value>, fallback: Option<&Value>) -> Option<Value> 
 }
 
 /// UK/OK-Bindung (`resolveAnchor`): absolutes Z oder `None` (Rückfall des Aufrufers).
-fn anchor(root: &Map<String, Value>, a: Option<&Value>) -> Option<f64> {
+pub(crate) fn anchor(root: &Map<String, Value>, a: Option<&Value>) -> Option<f64> {
     let a = a.filter(|a| truthy(Some(a)))?;
     if str_of(field(a, "mode")) == Some("custom") {
         // `return anchor.z` — fehlend/null fällt beim `??` des Aufrufers zurück.
@@ -300,14 +300,14 @@ fn num_or(v: Option<&Value>, d: f64) -> f64 {
 }
 
 /// (UK, OK) einer Wand oder Stütze: UK aus `bottom` sonst Geschoss-Basis, OK aus `top` sonst UK + Höhe.
-fn vertical_extent(root: &Map<String, Value>, el: &Value) -> (f64, f64) {
+pub(crate) fn vertical_extent(root: &Map<String, Value>, el: &Value) -> (f64, f64) {
     let floor_base = level(root, field(el, "floorId")).map_or(0.0, |f| num_or(field(f, "baseElevation"), 0.0));
     heights::element(floor_base, anchor(root, field(el, "bottom")), anchor(root, field(el, "top")), num_of(field(el, "height")))
 }
 
 /// (UK, OK) einer Decke (`ceilingVerticalExtent`): OK aus `top` sonst Geschoss-Oberkante (Basis + Höhe), UK aus
 /// `bottom` sonst OK − `thickness` (die Decke wächst nach unten).
-fn ceiling_extent(root: &Map<String, Value>, c: &Value, thickness: f64) -> (f64, f64) {
+pub(crate) fn ceiling_extent(root: &Map<String, Value>, c: &Value, thickness: f64) -> (f64, f64) {
     let floor_top = level(root, field(c, "floorId")).map_or(0.0, |f| num_or(field(f, "baseElevation"), 0.0) + num_or(field(f, "floorHeight"), 0.0));
     heights::ceiling(floor_top, anchor(root, field(c, "bottom")), anchor(root, field(c, "top")), || thickness)
 }
@@ -344,7 +344,7 @@ fn ceiling_type<'a>(root: &'a Map<String, Value>, c: &Value) -> Result<&'a Value
 }
 
 /// Deckendicke (`ceilingThickness`): `thickness` > 0, sonst Typ-Dicke, sonst 0.2.
-fn ceiling_thickness(root: &Map<String, Value>, c: &Value) -> f64 {
+pub(crate) fn ceiling_thickness(root: &Map<String, Value>, c: &Value) -> f64 {
     if nn(field(c, "thickness")).is_some() && num_of(field(c, "thickness")) > 0.0 {
         return num_of(field(c, "thickness"));
     }

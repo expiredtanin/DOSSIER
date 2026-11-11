@@ -11,7 +11,7 @@
 import { useMemo } from "react";
 import type { Drawing2D, DrawingLevel, Project, Vec2 } from "../model/types";
 import type { Selection } from "./selection";
-import { addItems, cmdMutation, opsMutation, patchItems, removeItems } from "../core";
+import { addItems, cmdMutation, opsMutation, fieldOps, patchItems, removeItems } from "../core";
 import type { ToolId } from "../tools/types";
 import type { DrawingStyle } from "../editors/matchProps";
 import { applyDrawingStyleOps, readDrawingStyle } from "../editors/matchProps";

@@ -2320,6 +2320,8 @@ export const de = {
   "edit.cutSegment.label": "Segment löschen",
   // Tab-Feld-Zyklus (Präzisionseingabe): geordnete Zahlenfelder je Schritt.
   "cmd.field.length": "Länge",
+  "cmd.field.level": "Kote",
+  "grip.sheetHeight": "Kote {z} m · Höhe {d} m",
   "cmd.field.angle": "Winkel",
   "cmd.field.width": "Breite",
   "cmd.field.height": "Höhe",

@@ -5,7 +5,8 @@
 import { core, coreEpoch, coreReady } from "../engine/coreWasm";
 import { getState } from "./appStore";
 import { storeDocument } from "./historySlice";
-import { computeSection, generatePlan, generateSectionPlan, pickGeometry, projectToModel3d } from "../core";
+import { ceilingThickness } from "../model/types";
+import { computeSection, generatePlan, verticalExtents, generateSectionPlan, pickGeometry, projectToModel3d } from "../core";
 import { getViewStateBridge } from "./viewTabs";
 import { getView3dFilter, toFilter3d } from "./view3dFilter";
 
@@ -27,6 +28,12 @@ declare global {
       selected: () => { drawings: string[]; groups: string[]; all: string };
       /** [144] Öffnungen (id, Wirtswand, Lage ab Wandanfang). */
       openings: () => { id: string; hostWallId: string; position: number }[];
+      /** [187] Höhen von Decken (UK/OK/Dicke), Wänden (UK/OK) und Fenstern (Brüstung/Höhe) aus dem Kern, in Metern (absolutes Z). */
+      heights: () => {
+        ceilings: { id: string; zBottom: number; zTop: number; thickness: number }[];
+        walls: { id: string; zBottom: number; zTop: number }[];
+        openings: { id: string; sillHeight: number; height: number }[];
+      };
       /** [144] Auswahl setzen (wie ein Klick), z. B. `{ openings: ["D1"] }`. */
       select: (patch: Record<string, string[]>) => void;
       /** [144] Punkte einer Bemassung (Kette) — folgt sie der Öffnung? */
@@ -76,6 +83,16 @@ export function installTestHooks(): void {
     polylines: (prefix) =>
       getState().project.drawings2d.flatMap((d) => (d.id.startsWith(prefix) && d.geom.shape === "polyline" ? [{ id: d.id, pts: d.geom.pts }] : [])),
     openings: () => (getState().project.openings ?? []).map((o) => ({ id: o.id, hostWallId: o.hostWallId, position: o.position })),
+    heights: () => {
+      const p = getState().project;
+      const ceilings = p.ceilings ?? [];
+      const ext = verticalExtents(p, p.walls, ceilings);
+      return {
+        ceilings: ceilings.map((c, i) => ({ id: c.id, zBottom: ext.ceilings[i].zBottom, zTop: ext.ceilings[i].zTop, thickness: ceilingThickness(p, c) })),
+        walls: p.walls.map((w, i) => ({ id: w.id, zBottom: ext.walls[i].zBottom, zTop: ext.walls[i].zTop })),
+        openings: (p.openings ?? []).map((o) => ({ id: o.id, sillHeight: o.sillHeight, height: o.height })),
+      };
+    },
     select: (patch) => getState().setSelection(patch),
     dimPts: (id) => {
       const g = getState().project.drawings2d.find((d) => d.id === id)?.geom;
