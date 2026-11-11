@@ -1247,9 +1247,14 @@ fn place_stamp(ring: &[[f64; 2]], candidates: &[Vec2], obst: &super::stamp_place
         for k in [1.3, 1.0] {
             let mut best: Option<(f64, Vec2)> = None;
             for q in candidates.iter().filter(|q| inside(q, k)) {
-                let d = obst.clearance(*q, w / 2.0, h / 2.0).min(clear);
+                // [179] Wie `obst.clearance(..).min(clear)`, aber ohne ferne Hindernisse und ohne Lagen, die `best` nicht schlagen.
+                let d = obst.clearance_capped(*q, w / 2.0, h / 2.0, clear, best.map_or(0.0, |(b, _)| b));
                 if d > 0.0 && best.is_none_or(|(b, _)| d > b) {
                     best = Some((d, *q));
+                    // Mehr als `clear` zählt nicht: keine spätere Lage schlägt das (strikt grösser).
+                    if d >= clear {
+                        break;
+                    }
                 }
             }
             if let Some((_, q)) = best {

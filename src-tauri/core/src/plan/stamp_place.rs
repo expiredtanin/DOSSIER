@@ -208,6 +208,48 @@ impl Obstacles {
 }
 
 impl Obstacles {
+    /// [179] `clearance(c, hw, hh).min(cap)` für die Lagewahl, schneller: Hindernisse, deren Hüllrechteck weiter als der
+    /// bisherige Mindestabstand (anfangs `cap`) vom Rechteck liegt, ändern das Minimum nicht und entfallen; sobald der
+    /// Abstand `floor` unterschreitet, kann die Lage keine bessere mehr sein (Aufrufer vergleicht `> floor`), dann
+    /// kommt ein Wert `<= floor` zurück. Über `floor` ist das Ergebnis genau `clearance(..).min(cap)`.
+    pub fn clearance_capped(&self, c: Vec2, hw: f64, hh: f64, cap: f64, floor: f64) -> f64 {
+        let r = [c.x - hw, c.y - hh, c.x + hw, c.y + hh];
+        // Untergrenze des Abstands Strecke–Rechteck aus dem Hüllrechteck (Seitenabstände).
+        let far = |a: P, b: P, d: f64| {
+            let gx = (r[0] - a[0].max(b[0])).max(a[0].min(b[0]) - r[2]);
+            let gy = (r[1] - a[1].max(b[1])).max(a[1].min(b[1]) - r[3]);
+            gx.max(gy) >= d
+        };
+        let mut d = cap;
+        for s in &self.segs {
+            if far(s[0], s[1], d) {
+                continue;
+            }
+            d = d.min(seg_rect_dist(s[0], s[1], r));
+            if d <= floor {
+                return d;
+            }
+        }
+        for a in &self.areas {
+            if point_in_ring(a, [c.x, c.y]) {
+                return 0.0;
+            }
+            for i in 0..a.len() {
+                let (p, q) = (a[i], a[(i + 1) % a.len()]);
+                if far(p, q, d) {
+                    continue;
+                }
+                d = d.min(seg_rect_dist(p, q, r));
+                if d <= floor {
+                    return d;
+                }
+            }
+        }
+        d
+    }
+}
+
+impl Obstacles {
     /// [150] Berührt der (einfache) Ring `ring` — z. B. ein gedrehtes Beschriftungs-Rechteck — ein Hindernis
     /// (Strecke schneidet oder liegt darin; Fläche überlappt)?
     pub fn hits_convex(&self, ring: &[P]) -> bool {
@@ -404,6 +446,33 @@ mod tests {
 
     fn v(x: f64, y: f64) -> Vec2 {
         Vec2 { x, y }
+    }
+
+    /// [179] `clearance_capped` liefert über `floor` genau `clearance(..).min(cap)`, sonst einen Wert `<= floor`.
+    #[test]
+    fn clearance_capped_wie_clearance() {
+        let mut o = Obstacles::default();
+        let mut s = 12345u64;
+        let mut rnd = || {
+            s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            (s >> 11) as f64 / (1u64 << 53) as f64 * 20.0
+        };
+        for _ in 0..40 {
+            o.seg([rnd(), rnd()], [rnd(), rnd()]);
+        }
+        for _ in 0..6 {
+            let (x, y) = (rnd(), rnd());
+            o.area(vec![[x, y], [x + 1.5, y], [x + 1.5, y + 0.6], [x, y + 0.6]]);
+        }
+        for _ in 0..400 {
+            let (c, hw, hh) = (v(rnd(), rnd()), 0.2 + rnd() / 20.0, 0.1 + rnd() / 40.0);
+            let cap = 0.05 + rnd() / 10.0;
+            let full = o.clearance(c, hw, hh).min(cap);
+            assert_eq!(o.clearance_capped(c, hw, hh, cap, 0.0).max(0.0), full);
+            let floor = full * 0.5;
+            let got = o.clearance_capped(c, hw, hh, cap, floor);
+            assert!(if full > floor { got == full } else { got <= floor }, "{got} {full} {floor}");
+        }
     }
 
     #[test]

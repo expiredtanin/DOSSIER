@@ -519,8 +519,28 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   `Box<HatchRender>`), `cls`/`color` der Linien/Bögen als geteilte `Sstr` (Arc, Clone = Zähler); Cache-Treffer der Höhenlinien
   reserviert Luft (vorher verdoppelte das Anhängen der Pick-Flächen den 30k-Puffer: 16 ms). Kontext/Gelände 1:100 24→4 ms,
   1:50 18→6, mit Schatten 22→7; eg 1:100 61→41, 1:50 65→43, mit Schatten 88→83 (Maschine ausgelastet, Schatten schwankt). JSON/Puffer
-  byte-gleich (Goldens ungeändert). Offen: Schatten/Baurecht 25–40 ms, Räume/Stempel 1:50 11–15 ms, kleine Änderung baut den Plan noch voll
-  (kein Teil-Cache; Gelände-Höhenlinien bei geändertem Hindernis-Schlüssel neu: ~35 ms). Mac nicht gemessen. · M
+  byte-gleich (Goldens ungeändert).
+  Etappe 3 (11.11., Container, Mittel aus 3 Läufen à 8, ohne LTO, Maschine ausgelastet, ±20 %): (a) Plan-Schatten (`sun.rs`) nach
+  Inhalts-Schlüssel gemerkt (128 Bit über Werfer, Dachflächen, Kronen, Abdeckungen, Empfänger, Sonne, Schnitthöhe, Gelände-Schlüssel;
+  die letzten 6): gleiche Eingaben (Massstabs-/Ansichtswechsel, Zeichnung/Raum geändert, Innenwand nicht im Schatten-Schlüssel)
+  rechnen nichts; Geländeschatten-Teile zusätzlich je Prisma und für alle Dachflächen gemerkt, so projiziert eine bewegte Wand nur
+  sich neu (Strahlabtastung 20 von 32 ms). (b) Raumstempel: `Obstacles::clearance_capped` (ferne Hindernisse nach Hüllrechteck
+  übersprungen, Abbruch unter dem bisher besten Abstand) und Abbruch der Lagesuche bei vollem Abstand – gleiches Ergebnis (Test
+  gegen `clearance`). Höhenlinien-Cache war schon nach Inhalt geschlüsselt (Gelände, Fussabdruck, Hindernisse): ändert sich nur der
+  Fussabdruck (Aussenwand), ist das Ergebnis tatsächlich ein anderes, nicht zu vermeiden. Goldens und CLI-Goldens byte-gleich.
+  | bench159 (ms) | vorher | nachher |
+  |---|---|---|
+  | Domänen eg 1:50: Räume/Stempel | 14.2 | 1.2 |
+  | Domänen eg 1:100 mit Schatten: Schatten/Baurecht (Treffer) | 38.6 | 3.6 |
+  | eg 1:100 mit Schatten, Plan ohne Cache | 74 | 37 |
+  | eg 1:50 Plan ohne Cache | 46 | 38 |
+  | ug 1:50 Plan ohne Cache | 21 | 5.7 |
+  | Innenwand verschieben + Plan, eg 1:100 mit Schatten | 75 | 57 |
+  | Innenwand verschieben + Plan, eg 1:50 | 45 | 34 |
+  Unverändert (Rauschen): Aussenwand verschieben + Plan (eg 1:100 76/86, 1:50 151/186, mit Schatten 119/110: Fussabdruck, Höhenlinien
+  und Schatten ändern sich wirklich), eg 1:100 ohne Schatten 42/44. Offen: kalter Schatten ~32 ms (Vereinigung der ~690 Teile 13 ms, Dächer
+  8 ms nach Dachänderung), kleine Änderung baut die übrigen Domänen noch voll (Schnittlinien 6.7, Zeichnungs-Hindernisse 4.5,
+  Kontext 4.2 ms), kein Teil-Cache je Domäne. Mac nicht gemessen. · M
 - ◐ **[58]** Inkrementelle Ableitung. 3D ist inkrementell; Schnitt/Ansicht (~100 ms) und Plan-Szene (`planToRenderScene`
   ~30 ms) noch voll; Gehrung über alle Wände je Update (~9 ms); Explosion ohne Cache; Upload/Frame mit echter GPU
   nicht gemessen. · L

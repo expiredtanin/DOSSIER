@@ -763,17 +763,68 @@ fn face_part_on(face: &Face, k: [f64; 2], g: &Ground, edges: &EdgeCount, cache: 
     (signed_area(&ring).abs() > 1e-9).then(|| oriented(vec![ring]))
 }
 
-/// Schatten aller Werfer auf dem Gelände.
-fn terrain_shadow(c: &Casters, k: [f64; 2], g: &Ground) -> Vec<Polygon> {
-    let mut parts: Vec<Polygon> = c.prisms.iter().flat_map(|(p, _)| prism_parts_on(&p.footprint, p.z_bottom, p.z_top, k, g)).collect();
-    let mut edges = EdgeCount::new();
-    for r in c.roof_faces.iter().filter_map(|f| f.first()) {
-        for i in 0..r.len() {
-            *edges.entry(edge_key(r[i], r[(i + 1) % r.len()])).or_default() += 1;
+/// [179] Geländeschatten-Teile je Prisma und für alle Dachflächen zusammen, gemerkt nach Inhalt (Prisma bzw. Dachflächen,
+/// Sonnenverschiebung, Gelände): ändert sich eine Wand, werden nur ihre Teile neu projiziert (Strahlabtastung).
+/// Reine Funktionen ihrer Eingaben, das Ergebnis ist dasselbe wie ohne Zwischenspeicher.
+const PART_CACHE_MAX: usize = 4096;
+
+type PartCache = std::collections::HashMap<[u64; 2], std::rc::Rc<Vec<Polygon>>>;
+
+thread_local! {
+    static PRISM_PARTS: std::cell::RefCell<PartCache> = std::cell::RefCell::new(PartCache::new());
+    static ROOF_PARTS: std::cell::RefCell<PartCache> = std::cell::RefCell::new(PartCache::new());
+}
+
+fn cached_parts(cache: &'static std::thread::LocalKey<std::cell::RefCell<PartCache>>, key: [u64; 2], make: impl FnOnce() -> Vec<Polygon>) -> std::rc::Rc<Vec<Polygon>> {
+    if let Some(hit) = cache.with(|c| c.borrow().get(&key).cloned()) {
+        return hit;
+    }
+    let v = std::rc::Rc::new(make());
+    cache.with(|c| {
+        let mut c = c.borrow_mut();
+        if c.len() >= PART_CACHE_MAX {
+            c.clear();
+        }
+        c.insert(key, v.clone());
+    });
+    v
+}
+
+/// Schatten aller Werfer auf dem Gelände; `gkey` = Inhalts-Schlüssel des Geländes (`SiteTerrain::key`).
+fn terrain_shadow(c: &Casters, k: [f64; 2], g: &Ground, gkey: u64) -> Vec<Polygon> {
+    let mut parts: Vec<Polygon> = Vec::new();
+    for (p, _) in &c.prisms {
+        let mut h = KeyHash::new();
+        h.f(k[0]);
+        h.f(k[1]);
+        h.u(gkey);
+        h.ring(&p.footprint);
+        h.f(p.z_bottom);
+        h.f(p.z_top);
+        parts.extend(cached_parts(&PRISM_PARTS, h.0, || prism_parts_on(&p.footprint, p.z_bottom, p.z_top, k, g)).iter().cloned());
+    }
+    let mut h = KeyHash::new();
+    h.f(k[0]);
+    h.f(k[1]);
+    h.u(gkey);
+    h.u(c.roof_faces.len() as u64);
+    for f in &c.roof_faces {
+        h.u(f.len() as u64);
+        for r in f {
+            h.pts3(r);
         }
     }
-    let mut cache = ProjCache::new();
-    parts.extend(c.roof_faces.iter().filter_map(|f| face_part_on(f, k, g, &edges, &mut cache)));
+    let roofs = cached_parts(&ROOF_PARTS, h.0, || {
+        let mut edges = EdgeCount::new();
+        for r in c.roof_faces.iter().filter_map(|f| f.first()) {
+            for i in 0..r.len() {
+                *edges.entry(edge_key(r[i], r[(i + 1) % r.len()])).or_default() += 1;
+            }
+        }
+        let mut cache = ProjCache::new();
+        c.roof_faces.iter().filter_map(|f| face_part_on(f, k, g, &edges, &mut cache)).collect()
+    });
+    parts.extend(roofs.iter().cloned());
     parts.extend(c.clouds.iter().map(|cl| cloud_part_on(cl, k, g)).filter(|r| r.len() >= 3).map(|r| vec![r]));
     if parts.is_empty() {
         return vec![];
@@ -963,6 +1014,101 @@ pub fn shadow_polygons_plan_in(p: &Project, sun: SunPosition, cut: f64, min_top:
     shadow_plan(p, sun, Some(cut), min_top, with_ground)
 }
 
+/// [179] Zuletzt berechnete Plan-Schatten (Inhalts-Schlüssel der Eingaben → Polygone): derselbe Plan nach einer
+/// Änderung, die die Werfer/Empfänger nicht berührt (Innenwand unter Dach, Zeichnung, Raum), rechnet den Schatten
+/// nicht neu. Der Schlüssel deckt alle Eingaben der Rechnung ab, das Ergebnis bleibt bitgleich.
+const SHADOW_CACHE_LEN: usize = 6;
+
+type ShadowCache = Vec<([u64; 2], Vec<Polygon>)>;
+
+thread_local! {
+    static SHADOW_CACHE: std::cell::RefCell<ShadowCache> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// [179] 128-Bit-Inhaltsschlüssel (zwei unabhängig gestartete FNV-Läufe).
+struct KeyHash([u64; 2]);
+impl KeyHash {
+    fn new() -> Self {
+        KeyHash([0xcbf2_9ce4_8422_2325, 0x9E37_79B9_7F4A_7C15])
+    }
+    fn u(&mut self, v: u64) {
+        for (i, h) in self.0.iter_mut().enumerate() {
+            *h = (*h ^ v.wrapping_add(i as u64)).wrapping_mul(0x0000_0100_0000_01b3).rotate_left(23 + i as u32 * 7);
+        }
+    }
+    fn f(&mut self, v: f64) {
+        self.u(v.to_bits());
+    }
+    fn ring(&mut self, r: &[[f64; 2]]) {
+        self.u(r.len() as u64);
+        for q in r {
+            self.f(q[0]);
+            self.f(q[1]);
+        }
+    }
+    fn poly(&mut self, p: &Polygon) {
+        self.u(p.len() as u64);
+        for r in p {
+            self.ring(r);
+        }
+    }
+    fn pts3(&mut self, r: &[[f64; 3]]) {
+        self.u(r.len() as u64);
+        for q in r {
+            self.f(q[0]);
+            self.f(q[1]);
+            self.f(q[2]);
+        }
+    }
+}
+
+/// 128-Bit-Schlüssel (zwei unabhängig gestartete FNV-Läufe) über alle Eingaben von [`shadow_plan`].
+#[allow(clippy::too_many_arguments)]
+fn shadow_key(k: [f64; 2], cut: Option<f64>, min_top: f64, with_ground: bool, terrain: Option<u64>, casters: &Casters, covers: &[Cover], recvs: &[Recv]) -> [u64; 2] {
+    let mut h = KeyHash::new();
+    h.f(k[0]);
+    h.f(k[1]);
+    h.u(cut.map_or(1, |c| c.to_bits() ^ 2));
+    h.f(min_top);
+    h.u(with_ground as u64 + 7);
+    h.u(terrain.map_or(3, |t| t ^ 5));
+    h.u(casters.prisms.len() as u64);
+    for (pr, holes) in &casters.prisms {
+        h.ring(&pr.footprint);
+        h.f(pr.z_bottom);
+        h.f(pr.z_top);
+        h.u(holes.len() as u64);
+        for r in holes {
+            h.ring(r);
+        }
+    }
+    h.u(casters.roof_faces.len() as u64);
+    for f in &casters.roof_faces {
+        h.u(f.len() as u64);
+        for r in f {
+            h.pts3(r);
+        }
+    }
+    h.u(casters.clouds.len() as u64);
+    for c in &casters.clouds {
+        h.pts3(c);
+    }
+    h.u(covers.len() as u64);
+    for c in covers {
+        h.poly(&c.region);
+        h.f(c.bottom);
+    }
+    h.u(recvs.len() as u64);
+    for r in recvs {
+        h.poly(&r.region);
+        for v in r.plane {
+            h.f(v);
+        }
+        h.f(r.top);
+    }
+    h.0
+}
+
 fn shadow_plan(p: &Project, sun: SunPosition, cut: Option<f64>, min_top: f64, with_ground: bool) -> Vec<Polygon> {
     let Some(k) = shadow_shift(sun) else { return vec![] };
     // [142] Mit Geländenetz fällt der Schatten aufs Gelände (inkl. Baugruben), sonst auf ±0.00.
@@ -972,14 +1118,29 @@ fn shadow_plan(p: &Project, sun: SunPosition, cut: Option<f64>, min_top: f64, wi
     if !min_top.is_nan() {
         recvs.retain(|r| r.top >= min_top - 0.05);
     }
+    let key = shadow_key(k, cut, min_top, with_ground, site.as_deref().map(|s| s.key), &casters, &covers, &recvs);
+    if let Some(hit) = SHADOW_CACHE.with(|c| c.borrow().iter().find(|(h, _)| *h == key).map(|(_, v)| v.clone())) {
+        return hit;
+    }
+    let out = shadow_compute(&casters, &covers, &recvs, k, cut, with_ground, ground.as_ref().zip(site.as_deref().map(|s| s.key)));
+    SHADOW_CACHE.with(|c| {
+        let mut c = c.borrow_mut();
+        c.insert(0, (key, out.clone()));
+        c.truncate(SHADOW_CACHE_LEN);
+    });
+    out
+}
+
+fn shadow_compute(casters: &Casters, covers: &[Cover], recvs: &[Recv], k: [f64; 2], cut: Option<f64>, with_ground: bool, ground: Option<(&Ground, u64)>) -> Vec<Polygon> {
+    let has_site = ground.is_some();
     let mask = |above: f64| -> Vec<Polygon> {
         covers.iter().filter(|c| c.bottom > above + LEVEL_EPS).map(|c| c.region.clone()).chain(recvs.iter().filter(|r| r.top > above + LEVEL_EPS).map(|r| r.region.clone())).collect()
     };
     let mut out: Vec<Polygon> = Vec::new();
     if with_ground {
-        let mut sh = match &ground {
-            Some(g) => terrain_shadow(&casters, k, g),
-            None => plane_shadow(&casters, [0.0, 0.0, GROUND_Z], k, None).unwrap_or_default(),
+        let mut sh = match ground {
+            Some((g, gkey)) => terrain_shadow(casters, k, g, gkey),
+            None => plane_shadow(casters, [0.0, 0.0, GROUND_Z], k, None).unwrap_or_default(),
         };
         if cut.is_some() {
             // Gelände unter Gebäudeflächen und unter sichtbaren Empfängern zeigt keinen Schatten.
@@ -990,14 +1151,14 @@ fn shadow_plan(p: &Project, sun: SunPosition, cut: Option<f64>, min_top: f64, wi
         }
         out.extend(sh);
     }
-    for r in &recvs {
+    for r in recvs {
         let m = mask(r.top);
         let vis = if m.is_empty() { vec![r.region.clone()] } else { polygon_bool::difference(&[r.region.clone()], &m) };
         if vis.is_empty() {
             continue;
         }
         let b = bbox2(vis.iter().flat_map(|q| q[0].iter()));
-        match plane_shadow(&casters, r.plane, k, Some(b)) {
+        match plane_shadow(casters, r.plane, k, Some(b)) {
             None => out.extend(vis),
             Some(sh) if !sh.is_empty() => out.extend(polygon_bool::intersection(&sh, &vis)),
             Some(_) => {}
@@ -1006,7 +1167,7 @@ fn shadow_plan(p: &Project, sun: SunPosition, cut: Option<f64>, min_top: f64, wi
     if out.is_empty() {
         return vec![];
     }
-    without_slivers(polygon_bool::union(&out), if site.is_some() { SLIVER_AREA } else { 1e-4 })
+    without_slivers(polygon_bool::union(&out), if has_site { SLIVER_AREA } else { 1e-4 })
 }
 
 /// Grösster Rest (m²), der als Rest an Abdeckungen wegfällt ([`drop_cover_rests`]).
@@ -1319,7 +1480,7 @@ mod terrain_tests {
         let g = Ground::new(&tin, 0.0);
         let k = shadow_shift(sun).unwrap();
         let (c, _, _) = collect(&p, k, None, Some(&g));
-        let on = terrain_shadow(&c, k, &g);
+        let on = terrain_shadow(&c, k, &g, 0x7e57);
         assert!(shaded(&on, 4.0, 4.5) && shaded(&on, 1.0, 8.5) && !shaded(&on, 1.0, 9.2) && !shaded(&on, 4.5, 5.5));
         assert!((area(&on) - area(&sh)).abs() < 0.05, "{} {}", area(&on), area(&sh));
     }
