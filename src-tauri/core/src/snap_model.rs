@@ -167,6 +167,12 @@ pub fn collect_model_at(p: &Project, level: &str, codes: &HashSet<String>, skip:
             closed_poly(&r.outline, &mut segs);
         }
     }
+    // [115] Freie Körper (Profil-Extrusion): Umriss wie im Plan; Klasse und Ausnahmen wie bei jedem Bauteil.
+    for s in p.extruded_solids.as_deref().unwrap_or(&[]) {
+        if vis_el(&s.id, &s.level_id, &s.category_code) {
+            closed_poly(&s.points, &mut segs);
+        }
+    }
     let mut stair_arcs = Vec::new();
     for s in p.stairs.as_deref().unwrap_or(&[]) {
         if !vis_el(&s.id, &s.floor_id, &s.category_code) {
@@ -475,7 +481,7 @@ struct PartKey {
 }
 
 /// Felder, aus denen der Modell-Teil sammelt (ändert sich eines, wird neu gesammelt).
-const MODEL_FIELDS: [&str; 7] = ["walls", "wallTypes", "rooms", "ceilings", "roofs", "stairs", "columns"];
+const MODEL_FIELDS: [&str; 8] = ["walls", "wallTypes", "rooms", "ceilings", "roofs", "stairs", "columns", "extrudedSolids"];
 const DRAWING_FIELDS: [&str; 1] = ["drawings2d"];
 /// So viele Teile je Art und abgelegte Geschosse bleiben (älteste fallen weg).
 const KEEP: usize = 6;
@@ -758,6 +764,22 @@ mod tests {
         assert!(cache.get(no_line).unwrap().drawings.segs.segs.is_empty());
         // Leere Ausnahme = ohne Ausnahme.
         assert_eq!(cache.hold_except(1, &mut d, "eg", &codes(), &[]), all);
+    }
+
+    /// [115] Freie Körper fangen mit ihrem Umriss; eine ausgeblendete Klasse (und eine Ausnahme) nimmt sie heraus.
+    #[test]
+    fn freie_koerper_fangen_nach_klasse() {
+        let mut v = base();
+        v["extrudedSolids"] = json!([{"id": "k", "type": "extrudedSolid", "levelId": "eg", "categoryCode": "20", "height": 1.0,
+            "points": [{"x": 0, "y": 0}, {"x": 2, "y": 0}, {"x": 2, "y": 1}, {"x": 0, "y": 1}]}]);
+        let mut d = doc(v);
+        let mut cache = SnapCache::default();
+        let all = cache.hold(1, &mut d, "eg", &codes());
+        assert_eq!(cache.get(all).unwrap().model.segs.segs.len(), 4);
+        let hidden = cache.hold(1, &mut d, "eg", &[]);
+        assert!(cache.get(hidden).unwrap().model.segs.segs.is_empty(), "ausgeblendete Klasse fängt nicht");
+        let skipped = cache.hold_except(1, &mut d, "eg", &codes(), &["k".into()]);
+        assert!(cache.get(skipped).unwrap().model.segs.segs.is_empty());
     }
 
     /// [33] Eine Regel „Ausblenden“ (Grundriss) nimmt die Wand aus dem Fang der Plan-Ansicht; ohne Ansicht
