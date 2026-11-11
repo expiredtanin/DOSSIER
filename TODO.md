@@ -233,7 +233,12 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
 - ◐ **[26]** Dächer über beliebige Grundrisse (`core/src/roof*.rs`). Grundriss-Griffe (11.11.): am einzeln gewählten Dach
   Eck-Griffe und Kanten-Anfasser an Umriss UND Höfen (Kern-Ops `roofVertex`/`roofEdge`, flacher Index Umriss→Höfe,
   Umriss bleibt frei, Vorschau + ein Undo-Schritt je Zug), Kante unter dem Anfasser wird hervorgehoben (`plan-edge-hover`,
-  auch bei Decke/Raum/Baugrube). Offen: Eck einfügen/löschen (Mittel-Raute) am Dach, Kanten-Neigung/Giebel per Kontextmenü am
+  auch bei Decke/Raum/Baugrube). Ecke einfügen/löschen (11.11.), einheitlich für Dach (Umriss + Höfe), Decke, Raum, Baugrube und
+  geschlossene Polylinie: Kern-Ops `ringInsert`/`ringDelete`/`ringTidy` (`grips.rs`, `ring_edit`; Polylinie nutzt `insertPoint`/`deletePoint`,
+  Aufräumen nur an geraden Segmenten); Raute (`plan-grip-insert`) bei 25 % der Kante (die Mitte gehört dem Kanten-Anfasser), Ziehen fügt
+  die Ecke ein, auf der Geraden/auf dem Nachbarn entfällt sie (auch nach normalem Eck-Zug), Kontextmenü „Ecke löschen" (mind. 3 bleiben),
+  ein Undo-Schritt je Aktion; `edgePitchDeg` (Dach) bzw. `edgeSlopes`/`edgeShoring` (Baugrube) laufen mit (neue Kante erbt die geteilte).
+  Offen: Raute an Decken-`openings`; Kanten-Neigung/Giebel per Kontextmenü am
   Griff (heute im Objekt-Info), Hover-Hervorhebung in der App nicht angesehen; Mansarde mit Hof und verschieden geneigten Kanten (zweite Schicht nicht geschlossen);
   Schattenwurf nimmt die Hülle der Dachfläche. · M
 - ◐ **[137]** Alles Sichtbare anwählbar. (10.11. bewusst nicht anwählbar, mit Begründung: Punktwolken sind kein

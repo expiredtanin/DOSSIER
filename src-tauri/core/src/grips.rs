@@ -339,6 +339,30 @@ pub fn run(lk: &Lookup, req: &Request) -> Result<GripResult, String> {
             })
             .into()
         }
+        // [26] Ecke einfügen/löschen/aufräumen an Umriss-Ringen (Dach samt Höfen, Decke, Raum, Baugrube, geschlossene
+        // Polylinie), ein Kern für alle: `kind` = "roof" | "ceiling" | "room" | "excavation" | "polyline", `seg`/`index`
+        // wie bei den Eck-Griffen (Dach: flacher Index über Umriss + Höfe). Kanten-Eigenschaften laufen mit.
+        "ringInsert" | "ringDelete" | "ringTidy" => {
+            let (index, (x, y)) = (if op == "ringInsert" { r.n("seg") } else { r.n("index") }, r.p("pt"));
+            let edit = match op {
+                "ringInsert" => RingEdit::Insert(x, y),
+                "ringDelete" => RingEdit::Delete,
+                _ => {
+                    let tol = r.n("tol");
+                    RingEdit::Tidy(if tol.is_finite() { tol.clamp(BEND_TIDY_M, 1.0) } else { BEND_TIDY_M })
+                }
+            };
+            let coll = match r.s("kind") {
+                Some("roof") => "roofs",
+                Some("ceiling") => "ceilings",
+                Some("room") => "rooms",
+                Some("excavation") => "context",
+                Some("polyline") => "drawings2d",
+                _ => return Ok(GripResult::default()),
+            };
+            let kind = r.s("kind").unwrap_or("");
+            patch(coll, r.s("id"), &|e| ring_edit(e, kind, index, &edit)).into()
+        }
         "stairBy" => {
             let (dx, dy) = r.p("delta");
             patch("stairs", r.s("id"), &|s| {
@@ -1211,6 +1235,153 @@ fn roof_ring_edit(r: &Value, a: f64, b: Option<f64>, f: &dyn Fn(&[Value], usize)
     None
 }
 
+enum RingEdit {
+    /// Ecke hinter Ecke `i` einfügen (Mittel-Griff der Kante i → i+1).
+    Insert(f64, f64),
+    Delete,
+    /// Ecke `i` entfernen, wenn sie (fast) auf dem Nachbarpunkt oder der Geraden zwischen den Nachbarn liegt.
+    Tidy(f64),
+}
+
+/// Was mit den Kanten-Einträgen (Neigung, Böschung …) geschieht: Eintrag `i` verdoppeln bzw. streichen.
+enum EdgeShift {
+    Dup(usize),
+    Drop(usize),
+}
+
+/// Neuer Ring nach `edit` an Ecke/Kante `i`; mindestens 3 Ecken bleiben.
+fn ring_apply(ring: &[Value], i: usize, edit: &RingEdit) -> Option<(Vec<Value>, EdgeShift)> {
+    let n = ring.len();
+    let mut v = ring.to_vec();
+    match *edit {
+        RingEdit::Insert(x, y) => {
+            if !(x.is_finite() && y.is_finite()) {
+                return None;
+            }
+            v.insert(i + 1, pt(x, y));
+            Some((v, EdgeShift::Dup(i)))
+        }
+        RingEdit::Delete => {
+            if n <= 3 {
+                return None;
+            }
+            v.remove(i);
+            Some((v, EdgeShift::Drop(i)))
+        }
+        RingEdit::Tidy(tol) => {
+            if n <= 3 || !point_near_neighbors(ring, i, tol) {
+                return None;
+            }
+            v.remove(i);
+            Some((v, EdgeShift::Drop(i)))
+        }
+    }
+}
+
+/// Liegt Ecke `i` des Rings näher als `tol` an der Strecke zwischen ihren Nachbarn (Nachbarpunkt eingeschlossen)?
+fn point_near_neighbors(ring: &[Value], i: usize, tol: f64) -> bool {
+    let n = ring.len();
+    let (a, b, c) = (xy(&ring[(i + n - 1) % n]), xy(&ring[i]), xy(&ring[(i + 1) % n]));
+    let (dx, dy) = (c.0 - a.0, c.1 - a.1);
+    let len2 = dx * dx + dy * dy;
+    let t = if len2 > 0.0 { ((b.0 - a.0) * dx + (b.1 - a.1) * dy) / len2 } else { 0.0 };
+    let (qx, qy) = (a.0 + t.clamp(0.0, 1.0) * dx, a.1 + t.clamp(0.0, 1.0) * dy);
+    (b.0 - qx).hypot(b.1 - qy) < tol
+}
+
+/// Kanten-Einträge `field` (ab Kante `off`) nachführen: die neue Kante erbt die geteilte, beim Löschen bleibt die
+/// vorherige Kante (Nachbar → Nachbar). Fehlende Einträge (kürzere Liste) bleiben fehlend = Standard.
+fn shift_edge_list(e: Value, field_name: &str, off: usize, shift: &EdgeShift) -> Value {
+    let Some(list) = field(&e, field_name).and_then(Value::as_array) else { return e };
+    let mut v = list.clone();
+    match *shift {
+        EdgeShift::Dup(i) => {
+            if v.len() > off + i {
+                let c = v[off + i].clone();
+                v.insert(off + i + 1, c);
+            }
+        }
+        EdgeShift::Drop(i) => {
+            if v.len() > off + i {
+                v.remove(off + i);
+            }
+        }
+    }
+    with(&e, field_name, Value::Array(v))
+}
+
+/// [26] Ecke einfügen/löschen/aufräumen an einem Umriss-Element (s. `ringInsert`).
+fn ring_edit(e: &Value, kind: &str, flat: f64, edit: &RingEdit) -> Option<Value> {
+    if truthy(field(e, "locked")) {
+        return None;
+    }
+    let simple = |name: &str| -> Option<Value> {
+        let ring = field(e, name)?.as_array()?;
+        let (v, shift) = ring_apply(ring, index_in(flat, ring.len())?, edit)?;
+        let out = with(e, name, Value::Array(v));
+        Some(if kind == "excavation" {
+            shift_edge_list(shift_edge_list(out, "edgeSlopes", 0, &shift), "edgeShoring", 0, &shift)
+        } else {
+            out
+        })
+    };
+    match kind {
+        "ceiling" => simple("outline"),
+        "excavation" => simple("outline"),
+        "room" => simple("boundary"),
+        "polyline" => polyline_ring_edit(e, flat, edit),
+        "roof" => {
+            let outline = field(e, "outline")?.as_array()?;
+            let holes: Vec<&Vec<Value>> = arr(field(e, "holes")).iter().filter_map(|h| h.as_array()).collect();
+            let mut off = 0usize;
+            for ring_no in 0..=holes.len() {
+                let ring: &[Value] = if ring_no == 0 { outline } else { holes[ring_no - 1] };
+                if let Some(i) = index_in(flat - off as f64, ring.len()) {
+                    let (v, shift) = ring_apply(ring, i, edit)?;
+                    let out = if ring_no == 0 {
+                        with(e, "outline", Value::Array(v))
+                    } else {
+                        let mut hs: Vec<Value> = arr(field(e, "holes")).to_vec();
+                        hs[ring_no - 1] = Value::Array(v);
+                        with(e, "holes", Value::Array(hs))
+                    };
+                    return Some(shift_edge_list(out, "edgePitchDeg", off, &shift));
+                }
+                off += ring.len();
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+/// Geschlossene Polylinie: nur Aufräumen (Einfügen/Löschen laufen über `insertPoint`/`deletePoint`, die Bögen
+/// kennen). Ecke entfällt, wenn beide anliegenden Segmente gerade sind und sie auf der Nachbargeraden liegt.
+fn polyline_ring_edit(d: &Value, index: f64, edit: &RingEdit) -> Option<Value> {
+    let RingEdit::Tidy(tol) = *edit else { return None };
+    let g = field(d, "geom")?;
+    if shape(g) != "polyline" || !truthy(field(g, "closed")) {
+        return None;
+    }
+    let pts = arr(field(g, "pts"));
+    let n = pts.len();
+    let k = index_in(index, n)?;
+    if n <= 3 || !point_near_neighbors(pts, k, tol) {
+        return None;
+    }
+    let bulge = arr(field(g, "bulge"));
+    let straight = |i: usize| num_or(bulge.get(i), 0.0).abs() < 1e-9;
+    if !(straight(k) && straight((k + n - 1) % n)) {
+        return None;
+    }
+    let drop = |l: &[Value]| Value::Array(l.iter().enumerate().filter(|(i, _)| *i != k).map(|(_, v)| v.clone()).collect());
+    let mut fields = vec![("pts", drop(pts))];
+    if truthy(field(g, "bulge")) {
+        fields.push(("bulge", drop(bulge)));
+    }
+    Some(with_geom(d, with_all(g, fields)))
+}
+
 /// Dach-Eckgriff: die gegenüberliegende Ecke bleibt fix, der Umriss bleibt ein achsparalleles Rechteck.
 fn roof_grip(r: &Value, index: f64, x: f64, y: f64) -> Option<Value> {
     if index >= DORMER_GRIP_BASE {
@@ -1733,6 +1904,75 @@ mod tests {
         assert!(ent(json!({"op": "roofEdge", "id": "R", "a": 3, "b": 4, "delta": [0, 1]})).is_none());
         assert!(ent(json!({"op": "roofVertex", "id": "R", "index": 8, "pt": [0, 0]})).is_none());
         assert!(ent(json!({"op": "roofVertex", "id": "R", "index": -1, "pt": [0, 0]})).is_none());
+    }
+
+    /// [26] Ecke einfügen/löschen/aufräumen an Umriss-Ringen; Kanten-Neigung des Dachs läuft mit.
+    #[test]
+    fn ring_ecken_einfuegen_loeschen() {
+        let roof = json!({"id": "R", "type": "roof", "shape": "walm",
+            "outline": [{"x": 0, "y": 0}, {"x": 10, "y": 0}, {"x": 10, "y": 8}, {"x": 0, "y": 8}],
+            "holes": [[{"x": 3, "y": 2}, {"x": 5, "y": 2}, {"x": 5, "y": 4}]],
+            "edgePitchDeg": [30, null, 40, 50, 20, 21, 22]});
+        let r = root(json!({"roofs": [roof],
+            "ceilings": [{"id": "C", "outline": [{"x": 0, "y": 0}, {"x": 4, "y": 0}, {"x": 4, "y": 4}]}],
+            "rooms": [{"id": "Rm", "boundary": [{"x": 0, "y": 0}, {"x": 4, "y": 0}, {"x": 4, "y": 4}, {"x": 0, "y": 4}]}],
+            "context": [{"id": "bg", "type": "excavation", "outline": [{"x": 0, "y": 0}, {"x": 4, "y": 0}, {"x": 4, "y": 4}, {"x": 0, "y": 4}],
+                "edgeSlopes": [1, 2, 3, 4], "edgeShoring": [true, false, false, true]}],
+            "drawings2d": [{"id": "pl", "geom": {"shape": "polyline", "closed": true, "bulge": [0, 0, 0, 0.5],
+                "pts": [{"x": 0, "y": 0}, {"x": 4, "y": 0}, {"x": 4, "y": 4}, {"x": 0, "y": 4}]}}]}));
+        let ent = |v: Value| run(&Lookup::plain(&r), &rq(v)).unwrap().ops.first().map(|o| o.to_json()["entity"].clone());
+        // Dach: Kante 1 (Umriss) teilen -> neue Ecke 2, beide Hälften erben `null` (Giebel); Hof-Einträge rücken nach.
+        let e = ent(json!({"op": "ringInsert", "kind": "roof", "id": "R", "seg": 1, "pt": [11, 4]})).unwrap();
+        assert_eq!(e["outline"].as_array().unwrap().len(), 5);
+        assert_eq!(e["outline"][2], json!({"x": 11, "y": 4}));
+        assert_eq!(e["edgePitchDeg"], json!([30, null, null, 40, 50, 20, 21, 22]));
+        // Hof-Kante (flacher Index 5) teilen: Eintrag 21 verdoppelt, Umriss unberührt.
+        let e = ent(json!({"op": "ringInsert", "kind": "roof", "id": "R", "seg": 5, "pt": [5, 3]})).unwrap();
+        assert_eq!(e["holes"][0].as_array().unwrap().len(), 4);
+        assert_eq!(e["edgePitchDeg"], json!([30, null, 40, 50, 20, 21, 21, 22]));
+        // Löschen: Umriss-Ecke 2 -> Kante 1 (Nachbar -> Nachbar) bleibt, Eintrag 2 entfällt.
+        let e = ent(json!({"op": "ringDelete", "kind": "roof", "id": "R", "index": 2})).unwrap();
+        assert_eq!(e["outline"].as_array().unwrap().len(), 3);
+        assert_eq!(e["edgePitchDeg"], json!([30, null, 50, 20, 21, 22]));
+        // Ecke 0: die Schlusskante bleibt, Eintrag 0 entfällt.
+        let e = ent(json!({"op": "ringDelete", "kind": "roof", "id": "R", "index": 0})).unwrap();
+        assert_eq!(e["edgePitchDeg"], json!([null, 40, 50, 20, 21, 22]));
+        // Hof hat nur 3 Ecken, Index ausserhalb, falsche Art: nichts.
+        assert!(ent(json!({"op": "ringDelete", "kind": "roof", "id": "R", "index": 5})).is_none());
+        assert!(ent(json!({"op": "ringDelete", "kind": "roof", "id": "R", "index": 9})).is_none());
+        assert!(ent(json!({"op": "ringDelete", "kind": "ceiling", "id": "C", "index": 0})).is_none());
+        assert!(ent(json!({"op": "ringInsert", "kind": "wand", "id": "C", "seg": 0, "pt": [1, 1]})).is_none());
+        // Decke, Raum.
+        let e = ent(json!({"op": "ringInsert", "kind": "ceiling", "id": "C", "seg": 2, "pt": [1, 3]})).unwrap();
+        assert_eq!(e["outline"].as_array().unwrap().len(), 4);
+        assert_eq!(e["outline"][3], json!({"x": 1, "y": 3}));
+        let e = ent(json!({"op": "ringDelete", "kind": "room", "id": "Rm", "index": 1})).unwrap();
+        assert_eq!(e["boundary"].as_array().unwrap().len(), 3);
+        // Baugrube: Böschung/Verbau laufen mit.
+        let e = ent(json!({"op": "ringInsert", "kind": "excavation", "id": "bg", "seg": 3, "pt": [-1, 2]})).unwrap();
+        assert_eq!((e["edgeSlopes"].clone(), e["edgeShoring"].clone()), (json!([1, 2, 3, 4, 4]), json!([true, false, false, true, true])));
+        let e = ent(json!({"op": "ringDelete", "kind": "excavation", "id": "bg", "index": 1})).unwrap();
+        assert_eq!((e["edgeSlopes"].clone(), e["edgeShoring"].clone()), (json!([1, 3, 4]), json!([true, false, true])));
+        // Aufräumen: Ecke 1 auf der Geraden bzw. auf dem Nachbarn entfällt, eine echte Ecke bleibt.
+        let tidy = |kind: &str, id: &str, ring: Value, index: u32| {
+            let key = if kind == "ceiling" { "ceilings" } else { "rooms" };
+            let field = if kind == "ceiling" { "outline" } else { "boundary" };
+            let r2 = root(json!({ key: [{"id": id, field: ring}] }));
+            run(&Lookup::plain(&r2), &rq(json!({"op": "ringTidy", "kind": kind, "id": id, "index": index}))).unwrap().ops.first().map(|o| o.to_json()["entity"].clone())
+        };
+        let p = |x: f64, y: f64| json!({"x": x, "y": y});
+        assert_eq!(tidy("ceiling", "c", json!([p(0.0, 0.0), p(2.0, 0.001), p(4.0, 0.0), p(4.0, 4.0)]), 1).unwrap()["outline"].as_array().unwrap().len(), 3);
+        assert_eq!(tidy("room", "c", json!([p(0.0, 0.0), p(0.0, 0.0), p(4.0, 0.0), p(4.0, 4.0)]), 1).unwrap()["boundary"].as_array().unwrap().len(), 3);
+        assert!(tidy("room", "c", json!([p(0.0, 0.0), p(2.0, 1.0), p(4.0, 0.0), p(4.0, 4.0)]), 1).is_none());
+        assert!(tidy("room", "c", json!([p(0.0, 0.0), p(2.0, 0.001), p(4.0, 0.0)]), 1).is_none());
+        // Polylinie: Aufräumen entfernt die Ecke samt Bulge-Eintrag, aber nicht an einem Bogen-Segment.
+        let r3 = root(json!({"drawings2d": [
+            {"id": "a", "geom": {"shape": "polyline", "closed": true, "bulge": [0, 0.5, 0, 0], "pts": [p(0.0, 0.0), p(2.0, 0.0), p(4.0, 0.0), p(4.0, 4.0)]}},
+            {"id": "b", "geom": {"shape": "polyline", "closed": true, "bulge": [0, 0, 0, 0.5], "pts": [p(0.0, 0.0), p(2.0, 0.0), p(4.0, 0.0), p(4.0, 4.0)]}}]}));
+        let t3 = |id: &str| run(&Lookup::plain(&r3), &rq(json!({"op": "ringTidy", "kind": "polyline", "id": id, "index": 1}))).unwrap().ops.first().map(|o| o.to_json()["entity"].clone());
+        assert!(t3("a").is_none());
+        let g = &t3("b").unwrap()["geom"];
+        assert_eq!((g["pts"].as_array().unwrap().len(), g["bulge"].clone()), (3, json!([0, 0, 0.5])));
     }
 
     /// [176] Schnittlinie: Endpunkte und Knickpunkte als Griffe.

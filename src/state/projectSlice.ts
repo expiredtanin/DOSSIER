@@ -63,7 +63,7 @@ import { reorderByIds } from "../model/reorder";
 import { transformMutation } from "../tools/transform";
 import type { CopyMode, TransformOp, TransformSelection } from "../tools/transform";
 import { uniqueId } from "../tools/types";
-import { gripPt, type GripRequest } from "../core";
+import { gripPt, type GripRequest, type RingKind } from "../core";
 import { DEFAULT_SCALE_DENOMINATOR } from "../model/dimension";
 import { DEFAULT_PRESETS, type TextStylePreset } from "../text/richText";
 import { t } from "../i18n";
@@ -394,6 +394,14 @@ export interface ProjectSlice {
   deleteSectionBend: (id: string, index: number) => void;
   /** [176] Nach dem Ziehen: Knicke auf einem Nachbarpunkt oder auf der Geraden entfernen. */
   tidySectionLine: (id: string, coalesceKey?: string, tol?: number) => void;
+  /** [26] Ecke von Dach/Decke/Raum/Baugrube/geschlossener Polylinie ziehen (Kern wählt den Op je `kind`); `coalesceKey` fasst Einfügen + Zug zusammen. */
+  moveRingVertex: (kind: RingKind, id: string, index: number, pt: Vec2, coalesceKey?: string) => void;
+  /** [26] Ecke hinter Ecke `seg` (Dach: flacher Index) einfügen; Kanten-Eigenschaften erbt die neue Kante. */
+  insertRingVertex: (kind: RingKind, id: string, seg: number, pt: Vec2, coalesceKey?: string) => void;
+  /** [26] Ecke löschen (mind. 3 bleiben); ein Undo-Schritt. */
+  deleteRingVertex: (kind: RingKind, id: string, index: number) => void;
+  /** [26] Nach dem Ziehen: Ecke auf Nachbar bzw. Gerade zwischen den Nachbarn entfällt. */
+  tidyRingVertex: (kind: RingKind, id: string, index: number, coalesceKey?: string, tol?: number) => void;
   moveExcavationEdge: (id: string, aIndex: number, bIndex: number, delta: Vec2) => void;
   /** Verschiebt eine Decke (ganzer Umriss) um `delta`. */
   moveCeilingBy: (ceilingId: string, delta: Vec2) => void;
@@ -1256,6 +1264,22 @@ export function createProjectSlice(
       applyGrip({ op: "sectionLineGrip", id, index, pt: gripPt(pt) }, coalesceKey ?? `moveSectionLineGrip:${id}:${index}`),
     insertSectionBend: (id, seg, pt, coalesceKey) => applyGrip({ op: "sectionBendInsert", id, seg, pt: gripPt(pt) }, coalesceKey),
     deleteSectionBend: (id, index) => applyGrip({ op: "sectionBendDelete", id, index }),
+    moveRingVertex: (kind, id, index, pt, coalesceKey) => {
+      const p = gripPt(pt);
+      const req: GripRequest =
+        kind === "roof" ? { op: "roofVertex", id, index, pt: p }
+        : kind === "ceiling" ? { op: "ceilingGrip", id, index, pt: p }
+        : kind === "room" ? { op: "roomGrip", id, index, pt: p }
+        : kind === "excavation" ? { op: "excavationGrip", id, index, pt: p }
+        : { op: "moveGrip", drawingId: id, wallId: null, index, pt: p, scale: DEFAULT_SCALE_DENOMINATOR };
+      applyGrip(req, coalesceKey ?? `moveRingVertex:${kind}:${id}:${index}`);
+    },
+    insertRingVertex: (kind, id, seg, pt, coalesceKey) =>
+      applyGrip(kind === "polyline" ? { op: "insertPoint", id, seg, pt: gripPt(pt) } : { op: "ringInsert", kind, id, seg, pt: gripPt(pt) }, coalesceKey),
+    deleteRingVertex: (kind, id, index) =>
+      applyGrip(kind === "polyline" ? { op: "deletePoint", id, index } : { op: "ringDelete", kind, id, index }),
+    tidyRingVertex: (kind, id, index, coalesceKey, tol) =>
+      applyGrip({ op: "ringTidy", kind, id, index, ...(tol != null ? { tol } : {}) }, coalesceKey),
     tidySectionLine: (id, coalesceKey, tol) => applyGrip({ op: "sectionLineTidy", id, ...(tol != null ? { tol } : {}) }, coalesceKey),
 
     moveExcavationEdge: (id, aIndex, bIndex, delta) =>

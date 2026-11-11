@@ -54,7 +54,7 @@ async function clickModel(page: Page, dx: number, dy: number): Promise<void> {
 /** Abstand (px) des nächsten gezeichneten Griffs zum Bildschirmort des Modellpunkts. */
 async function gripOffset(page: Page, dx: number, dy: number): Promise<number> {
   const want = await screenOf(page, dx, dy);
-  const boxes = await page.locator(".plan-grip").evaluateAll((els) =>
+  const boxes = await page.locator(".plan-grip:not(.plan-grip-insert)").evaluateAll((els) =>
     els.map((e) => {
       const r = e.getBoundingClientRect();
       return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
@@ -127,7 +127,7 @@ test("Kataster-DXF in LV95: Parzelle anklicken, Eckgriff ziehen, Rückgängig", 
   await clickModel(page, 38, 53);
   await expect(widthField(page)).toHaveValue("30.000");
   // 4 Eckgriffe (gerade Kanten: keine Bogen-Mitten-Griffe).
-  await expect(page.locator(".plan-grip")).toHaveCount(4);
+  await expect(page.locator(".plan-grip:not(.plan-grip-insert)")).toHaveCount(4);
   // Die Griffe liegen sichtbar auf den Ecken (früher: `<circle cx>` mit LV95-Koordinaten, vom
   // Browser als CSS-Länge auf ±33.5 Mio. geklemmt → weit ausserhalb des Bildes).
   await expectGripAt(page, 68, 68);
@@ -158,7 +158,7 @@ test("Kataster: Strassenparzelle mit Bögen bleibt Bogen-Polylinie und hat Griff
   await clickModel(page, -6 + 3 * 8, -3);
   await expect(widthField(page)).toHaveValue("80.000");
   // 22 Ecken + 22 Bogen-Mitten (früher: über 100 zerlegte Punkte, ohne Bogen-Griffe).
-  await expect(page.locator(".plan-grip")).toHaveCount(44);
+  await expect(page.locator(".plan-grip:not(.plan-grip-insert)")).toHaveCount(44);
 });
 
 test("Kataster: einzeln gewähltes Element mit über 600 Stützpunkten bekommt Griffe", async ({ page }) => {
@@ -177,7 +177,7 @@ test("Kataster: einzeln gewähltes Element mit über 600 Stützpunkten bekommt G
 
   await clickModel(page, 140 + 20, 30); // Stützpunkt k = 0 des Waldrands
   await expect(widthField(page)).toHaveValue(/^4\d\.\d{3}$/);
-  const grips = page.locator(".plan-grip");
+  const grips = page.locator(".plan-grip:not(.plan-grip-insert)");
   await expect.poll(() => grips.count()).toBeGreaterThan(50);
   // Gezeichnet werden nur die sichtbaren, je Bildschirmzelle einer (gripCull.ts) — nie alle 1400.
   expect(await grips.count()).toBeLessThanOrEqual(1400);
@@ -187,7 +187,7 @@ test("Kataster in LV95: Griffe auf den Ecken auch stark hineingezoomt, Lineal st
   await startNewProject(page);
   await importDxf(page, "kataster.dxf", await readFile(KATASTER_DXF, "utf8"));
   await clickModel(page, 38, 53);
-  await expect(page.locator(".plan-grip")).toHaveCount(4);
+  await expect(page.locator(".plan-grip:not(.plan-grip-insert)")).toHaveCount(4);
   await expectGripAt(page, 68, 68);
 
   // Bisher (Overlay in absoluten viewBox-Einheiten, Browser rechnet f32): ~6 px bei 11 m,
@@ -222,16 +222,16 @@ test("Kataster: geschlossene Bogen-Polylinie hat keine Kanten-Griffe im Innern",
   // Strassenparzelle: jedes Segment ein Bogen → Bogen-Mitten-Griffe, keine Kanten-Dreiecke
   // (früher liefen die Kanten-Griffe auch über die Bogen-Mitten: Dreiecke quer durchs Innere).
   await clickModel(page, -6 + 3 * 8, -3);
-  await expect(page.locator(".plan-grip")).toHaveCount(44);
+  await expect(page.locator(".plan-grip:not(.plan-grip-insert)")).toHaveCount(44);
   await expect(page.locator(".plan-edge-grip")).toHaveCount(0);
   // Parzelle mit geraden Kanten: genau 4 Kanten-Griffe, je auf der Kantenmitte.
   await clickModel(page, 38, 53);
-  await expect(page.locator(".plan-grip")).toHaveCount(4);
+  await expect(page.locator(".plan-grip:not(.plan-grip-insert)")).toHaveCount(4);
   await expect(page.locator(".plan-edge-grip")).toHaveCount(4);
   // Parzelle 0..30 m mit zwei Bogen- und zwei geraden Seiten: 4 Ecken + 2 Bogen-Mitten,
   // Kanten-Griffe nur an den geraden Seiten (rechts bei x = 30, links bei x = 0).
   await clickModel(page, 30, 15);
-  await expect(page.locator(".plan-grip")).toHaveCount(6);
+  await expect(page.locator(".plan-grip:not(.plan-grip-insert)")).toHaveCount(6);
   const edges = page.locator(".plan-edge-grip");
   await expect(edges).toHaveCount(2);
   const right = await screenOf(page, 30, 15);

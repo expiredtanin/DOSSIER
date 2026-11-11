@@ -17,6 +17,9 @@ import { textFrameCorners } from "../text/textFrame";
 /** Punkt als `[x, y]` (Anfragen an den Kern). */
 type P = [number, number];
 
+/** Elemente mit Umriss-Ring, an denen sich Ecken einfügen/löschen lassen (geschlossene Polylinie eingeschlossen). */
+export type RingKind = "roof" | "ceiling" | "room" | "excavation" | "polyline";
+
 /** Eine Griff-Änderung für den Kern (`grips.rs::run`); Zahlen dürfen NaN/±∞ sein (Marken). */
 export type GripRequest =
   | { op: "moveGrip"; drawingId: string | null; wallId: string | null; index: number; pt: P; scale: number; free?: boolean; arcLength?: number }
@@ -37,6 +40,10 @@ export type GripRequest =
   | { op: "sectionBendInsert"; id: string; seg: number; pt: P }
   | { op: "sectionBendDelete"; id: string; index: number }
   | { op: "sectionLineTidy"; id: string; tol?: number }
+  // [26] Ecke an Umriss-Ringen einfügen (hinter Kante `seg`), löschen, aufräumen (Kern `ring_edit`); Dach: flacher Index.
+  | { op: "ringInsert"; kind: RingKind; id: string; seg: number; pt: P }
+  | { op: "ringDelete"; kind: RingKind; id: string; index: number }
+  | { op: "ringTidy"; kind: RingKind; id: string; index: number; tol?: number }
   // [151] Parameter-Griff einer Podesttreppe (Kern `grip_drag::stair_param_drag`).
   | { op: "stairParam"; id: string; index: number; pt: P }
   | { op: "excavationEdge"; id: string; a: number; b: number; delta: P }

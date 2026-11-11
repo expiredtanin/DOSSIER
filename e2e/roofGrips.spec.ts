@@ -4,7 +4,7 @@ import type { Page } from "@playwright/test";
 import { blurFocus, elementRows, expect, openSample, openTab, startNewProject, test } from "./app";
 
 async function gripCentres(page: Page): Promise<{ x: number; y: number }[]> {
-  const c = await page.locator(".plan-grip").evaluateAll((els) =>
+  const c = await page.locator(".plan-grip:not(.plan-grip-insert)").evaluateAll((els) =>
     els.map((e) => {
       const r = e.getBoundingClientRect();
       return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) };
@@ -29,7 +29,7 @@ test("Dach: Eckgriff im Grundriss ziehen, Rückgängig ([26])", async ({ page })
   await elementRows(page).filter({ hasText: "RF1" }).first().click();
   await expect(page.getByText("Dachform")).toBeVisible();
 
-  await expect.poll(() => page.locator(".plan-grip").count()).toBe(4);
+  await expect.poll(() => page.locator(".plan-grip:not(.plan-grip-insert)").count()).toBe(4);
   // Kanten-Anfasser je Seite.
   await expect(page.locator(".plan-edge-grip")).toHaveCount(4);
   const before = await gripCentres(page);

@@ -73,7 +73,7 @@ export type { GroupMembership, MemberKind } from "../model/groups";
 export { drawingVertices, gripPt, openEdges, polylineEdgeGrips, ringEdges } from "../geometry/grips";
 export { verticalExtents } from "../geometry/grips";
 export type { VerticalExtent } from "../geometry/grips";
-export type { GripRequest } from "../geometry/grips";
+export type { GripRequest, RingKind } from "../geometry/grips";
 export { clampInside, coincidentGripPoints, excavationGripPoints, gripArcWallRadius, gripArcWallResize, gripArcWallTarget, gripAxisLock, gripEdgeTarget, gripPolar, gripPolarPoint, openingGripPoint, openingSheetSlide, openingTypedPosition, sheetHeightDrag, stairMoveHandle, stairParamPoints, wallGripPoints } from "../geometry/gripDrag";
 export type { EdgeDrive, GripLocks, SheetHeightKind } from "../geometry/gripDrag";
 export { openingPreviewProject, openingPreviewSvgs } from "../plan/openingPreview";

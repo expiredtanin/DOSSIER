@@ -7,6 +7,7 @@
 import type { RefObject } from "react";
 import { useStore } from "../state/appStore";
 import { ContextMenu } from "../ui/ContextMenu";
+import type { Vec2 } from "../model/types";
 import type { PlanViewHandle } from "../views/plan/PlanView";
 import { countClosedAreas, differenceDrawings, intersectionDrawings, unionDrawings } from "../editors/booleanOps";
 import { categoryNames } from "../state/selectionLayers";
@@ -59,6 +60,8 @@ export function AppContextMenu(props: {
     insertDrawingPoint,
     insertSectionBend,
     deleteSectionBend,
+    insertRingVertex,
+    deleteRingVertex,
     deleteDrawingPoint,
     setPolylineVertexType,
     reorderDrawingLevels,
@@ -149,6 +152,25 @@ export function AppContextMenu(props: {
         })(),
         insertSectionBend,
         deleteSectionBend,
+        // [26] Umriss-Ecken: genau ein Element mit Umriss gewählt (sonst kein Bezug für den Klick).
+        selectedRing: (() => {
+          const total = Object.values(selection).reduce((n, v) => n + (Array.isArray(v) ? v.length : 0), 0);
+          if (total !== 1) return null;
+          const roof = selection.roofs.length === 1 ? (project.roofs ?? []).find((x) => x.id === selection.roofs[0]) : undefined;
+          if (roof && !roof.locked) {
+            return { kind: "roof" as const, id: roof.id, rings: [roof.outline, ...(roof.holes ?? [])].reduce<{ pts: Vec2[]; off: number }[]>(
+              (acc, pts) => [...acc, { pts, off: acc.reduce((n, r) => n + r.pts.length, 0) }], []) };
+          }
+          const ceiling = selection.ceilings.length === 1 ? (project.ceilings ?? []).find((x) => x.id === selection.ceilings[0]) : undefined;
+          if (ceiling && !ceiling.locked) return { kind: "ceiling" as const, id: ceiling.id, rings: [{ pts: ceiling.outline, off: 0 }] };
+          const room = selection.rooms.length === 1 ? (project.rooms ?? []).find((x) => x.id === selection.rooms[0]) : undefined;
+          if (room && !room.locked) return { kind: "room" as const, id: room.id, rings: [{ pts: room.boundary, off: 0 }] };
+          const ctx = selection.contextObjects.length === 1 ? (project.context ?? []).find((x) => x.id === selection.contextObjects[0]) : undefined;
+          if (ctx && ctx.type === "excavation") return { kind: "excavation" as const, id: ctx.id, rings: [{ pts: ctx.outline, off: 0 }] };
+          return null;
+        })(),
+        insertRingVertex,
+        deleteRingVertex,
         insertPolylinePoint: insertDrawingPoint,
         deletePolylinePoint: deleteDrawingPoint,
         setPolylineVertexType,

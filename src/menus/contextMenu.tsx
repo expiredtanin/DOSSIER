@@ -8,7 +8,7 @@
 // Kommentare deutsch (CONVENTIONS.md).
 
 import { t } from "../i18n";
-import { canSetVertexType, vertexTypeOf, type PolylineVertexType } from "../core";
+import { canSetVertexType, vertexTypeOf, type PolylineVertexType, type RingKind } from "../core";
 import { nearestPolylineTarget, toleranceFor } from "../core";
 import type { LayerCategory, Project, Vec2 } from "../model/types";
 import { flattenCategories } from "../model/types";
@@ -89,6 +89,10 @@ export interface MenuActions {
   /** [176] Einzeln gewählte Schnittlinie: Anfang, Knickpunkte, Ende (für „Knick einfügen/löschen"). */
   selectedSectionLine?: { id: string; pts: Vec2[] } | null;
   insertSectionBend?: (id: string, seg: number, pt: Vec2) => void;
+  /** [26] Einzeln gewähltes Element mit Umriss (Dach samt Höfen, Decke, Raum, Baugrube): Ringe mit Start-Index im flachen Ecken-Index. */
+  selectedRing?: { kind: RingKind; id: string; rings: { pts: Vec2[]; off: number }[] } | null;
+  insertRingVertex?: (kind: RingKind, id: string, seg: number, pt: Vec2) => void;
+  deleteRingVertex?: (kind: RingKind, id: string, index: number) => void;
   deleteSectionBend?: (id: string, index: number) => void;
   /** Ob eine Element-Stil-Zwischenablage gefüllt ist (aktiviert „Einfügen"). */
   hasDrawingStyleClipboard: boolean;
@@ -335,6 +339,33 @@ function planMenuItems(
       icon: <MenuIcon name="do_not_disturb_on" />,
       onClick: () => a.deleteSectionBend?.(sec.id, secTarget.index),
     });
+  }
+  // [26] Umriss-Element: Ecke am Klick einfügen bzw. die getroffene Ecke löschen (mindestens drei bleiben).
+  const ring = a.selectedRing;
+  if (ring) {
+    for (const { pts, off } of ring.rings) {
+      const geom = { pts, closed: true };
+      const hit = nearestPolylineTarget(geom, model, toleranceFor(geom));
+      if (!hit) continue;
+      if (hit.kind === "segment" && a.insertRingVertex) {
+        pointItems.push({
+          label: t("ctx.insertCorner"),
+          icon: <MenuIcon name="add_circle" />,
+          onClick: () => a.insertRingVertex?.(ring.kind, ring.id, off + hit.segIndex, hit.at),
+        });
+      }
+      if (hit.kind === "vertex" && a.deleteRingVertex) {
+        const enabled = pts.length > 3;
+        pointItems.push({
+          label: t("ctx.deleteCorner"),
+          icon: <MenuIcon name="do_not_disturb_on" />,
+          disabled: !enabled,
+          title: enabled ? undefined : t("ctx.deleteCorner.min"),
+          onClick: () => a.deleteRingVertex?.(ring.kind, ring.id, off + hit.index),
+        });
+      }
+      break;
+    }
   }
   // Eigenschaften übertragen — dasselbe Muster wie im Ebenen-Menü, nur für
   // 2D-Elemente. Kopieren ab einem gewählten Element, Einfügen sobald etwas

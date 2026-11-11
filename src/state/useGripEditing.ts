@@ -8,6 +8,7 @@
 import { useRef, useState, type RefObject } from "react";
 import { useEventBundle, useSameData } from "./useEvent";
 import { leftNormal, normalize, scale, sub, wallCorners } from "../model/geometry";
+import type { RingKind } from "../core";
 import type { Ceiling, Drawing2D, EdgeGrip, Excavation, Project, Roof, Room, Vec2, Wall } from "../model/types";
 import { wallTypeThickness } from "../model/types";
 import { bulgeArcPoints, drawingVertices, surfaceOpeningGripPatch, surfaceOpeningGrips, surfaceOpeningInfo, wallArcBand } from "../core";
@@ -199,6 +200,8 @@ export function useGripEditing(opts: {
   /** Pixel je Meter beim letzten Zug (Aufräum-Toleranz). */
   const sectionPxRef = useRef(0);
   const sectionDragRef = useRef<{ id: string; key: string; midIndex: number; bendIndex: number } | null>(null);
+  /** [26] Laufender Zug an einer Einfüge-Raute: gemeinsamer Undo-Schlüssel, Raute-Index und Index der eingefügten Ecke. */
+  const ringDragRef = useRef<{ kind: RingKind; id: string; key: string; midIndex: number; vertex: number } | null>(null);
   // Mit gezeigter Beschriftung dazu ihr Griff (`labelOffset`, s. `treeGrips.ts`).
   const treeGrips = (tr: NonNullable<typeof selectedTree>): Vec2[] => treeGripPoints(tr, scaleDenominator);
   const selectedRoomId = single(selection, "rooms");
@@ -220,6 +223,9 @@ export function useGripEditing(opts: {
     drawingId?: string;
     wallId?: string;
     localIndex: number;
+    /** [26] Einfüge-Griff (Raute) in Kante `insertSeg` des Umriss-Rings `ring` (Dach: flacher Index). */
+    insertSeg?: number;
+    ring?: { kind: RingKind; id: string };
   }
   const gripOwners: GripOwner[] = [];
   // [ersterFlachIndex, letzterFlachIndex] DESSELBEN Elements — für die Anker-
@@ -310,6 +316,32 @@ export function useGripEditing(opts: {
     return [];
   })();
 
+  const MAX_INSERT_GRIP_POINTS = 100; // Kataster-Umrisse mit tausenden Punkten: keine Rauten
+  /** Anteil entlang der Kante, an dem der Einfüge-Griff sitzt (neben dem Kanten-Anfasser in der Mitte). */
+  const INSERT_AT = 0.25;
+  /**
+   * [26] Einfüge-Griffe (Rauten) je Kante der Ringe hinter die Ecken-Griffe in `out` hängen: Ziehen fügt dort eine
+   * Ecke ein. `rings` mit Start-Index im flachen Ecken-Index (Dach: Umriss, dann Höfe).
+   */
+  const pushInsertGrips = (
+    out: Vec2[],
+    rings: { pts: Vec2[]; off: number }[],
+    ring: { kind: RingKind; id: string },
+    owner: { drawingId?: string } = {},
+    keep?: (seg: number) => boolean,
+  ) => {
+    const start = out.length;
+    for (const { pts, off } of rings) {
+      pts.forEach((a, i) => {
+        if (keep && !keep(off + i)) return;
+        const b = pts[(i + 1) % pts.length];
+        out.push({ x: a.x + (b.x - a.x) * INSERT_AT, y: a.y + (b.y - a.y) * INSERT_AT, insert: true } as Vec2);
+        gripOwners.push({ ...owner, localIndex: -1, insertSeg: off + i, ring });
+      });
+    }
+    for (let i = start; i < out.length; i++) gripOwnerRange.push([start, out.length - 1]);
+  };
+
   const grips: Vec2[] = (() => {
     // Öffnung (Fenster/Tür): EIN Mittelpunkt-Griff auf der Wandachse. Ziehen
     // verschiebt die Öffnung entlang der Wirts-Wand (siehe applyGrip →
@@ -364,12 +396,14 @@ export function useGripEditing(opts: {
       for (const { pts, off } of roofRings(selectedRoof)) {
         pts.forEach((q, i) => { out.push(q); gripOwners.push({ localIndex: off + i }); gripOwnerRange.push([off, off + pts.length - 1]); });
       }
+      pushInsertGrips(out, roofRings(selectedRoof), { kind: "roof", id: selectedRoof.id });
       return out;
     }
     // [68] Baugrube: Umriss-Ecken + Sohlen-Griff (Lage: Schwerpunkt, y um die Sohlenhöhe versetzt).
     if (modelEditable && selectedExcavation && !selectedCeiling && effectiveDrawingIds.length === 0 && selectedWallIds.length === 0) {
       const pts = excavationGripPoints(selectedExcavation);
       pts.forEach((_, i) => { gripOwners.push({ localIndex: i }); gripOwnerRange.push([0, pts.length - 1]); });
+      pushInsertGrips(pts, [{ pts: selectedExcavation.outline, off: 0 }], { kind: "excavation", id: selectedExcavation.id });
       return pts;
     }
     // Decke: die Umriss-Vertices als Griffe (nur bei genau einer gewählten Decke,
@@ -377,6 +411,7 @@ export function useGripEditing(opts: {
     if (modelEditable && selectedCeiling && effectiveDrawingIds.length === 0 && selectedWallIds.length === 0) {
       const pts = [...selectedCeiling.outline];
       pts.forEach((_, i) => { gripOwners.push({ localIndex: i }); gripOwnerRange.push([0, pts.length - 1]); });
+      if (!selectedCeiling.locked) pushInsertGrips(pts, [{ pts: selectedCeiling.outline, off: 0 }], { kind: "ceiling", id: selectedCeiling.id });
       return pts;
     }
     // Raum: die Umriss-Vertices als Griffe (nur bei genau einem gewählten Raum).
@@ -389,6 +424,7 @@ export function useGripEditing(opts: {
     ) {
       const pts = [...selectedRoom.boundary];
       pts.forEach((_, i) => { gripOwners.push({ localIndex: i }); gripOwnerRange.push([0, pts.length - 1]); });
+      if (!selectedRoom.locked) pushInsertGrips(pts, [{ pts: selectedRoom.boundary, off: 0 }], { kind: "room", id: selectedRoom.id });
       return pts;
     }
     // Mehrfachauswahl (Regel- UND Standardfall): je gewähltem 2D-Element bzw.
@@ -425,6 +461,10 @@ export function useGripEditing(opts: {
           ? (i: number) => i < g.pts.length || Math.abs(g.bulge?.[i - g.pts.length] ?? 0) > 1e-9
           : undefined;
       pushGroup(drawingVertices(d, scaleDenominator), { drawingId: id }, keep);
+      // [26] Geschlossene Polylinie: Einfüge-Raute auf jedem geraden Segment (Bogen-Segmente haben ihren Mitten-Griff).
+      if (g.shape === "polyline" && g.closed && !d.locked && g.pts.length >= 3 && g.pts.length <= MAX_INSERT_GRIP_POINTS) {
+        pushInsertGrips(out, [{ pts: g.pts, off: 0 }], { kind: "polyline", id }, { drawingId: id }, (seg) => Math.abs(g.bulge?.[seg] ?? 0) < 1e-9);
+      }
     }
     if (modelEditable && effectiveDrawingIds.length === 0) {
       for (const id of selectedWallIds) {
@@ -716,6 +756,7 @@ export function useGripEditing(opts: {
   // Wand/Öffnung/Treppe haben keine Polygon-Nachbarn → null.
   const resolvePolygonRing = (index: number): { pts: Vec2[]; index: number; closed: boolean } | null => {
     const owner = gripOwners[index];
+    if (owner?.insertSeg != null) return null;
     if (roofGripsOn && selectedRoof && !owner?.drawingId && !owner?.wallId) {
       const ring = roofRings(selectedRoof).find((rg) => index >= rg.off && index < rg.off + rg.pts.length);
       return ring ? { pts: ring.pts, index: index - ring.off, closed: true } : null;
@@ -935,6 +976,20 @@ export function useGripEditing(opts: {
   // Editier-Dispatch: bei gewählter Decke auf die Decken-Aktionen umleiten, sonst
   // auf die Wand/2D-Aktionen. So teilen Plan- UND 3D-Griffe denselben Pfad.
   const applyGrip = (index: number, pt: Vec2, arcLength?: number) => {
+    // [26] Einfüge-Raute am Umriss (Dach, Decke, Raum, Baugrube, geschlossene Polylinie): der erste Zug fügt die Ecke
+    // ein, danach folgt sie dem Zeiger; Einfügen, Zug und Aufräumen sind ein Undo-Schritt (gleicher Schlüssel).
+    const rd = ringDragRef.current;
+    if (rd && rd.midIndex === index) {
+      storeState().moveRingVertex(rd.kind, rd.id, rd.vertex, pt, rd.key);
+      return;
+    }
+    const ins = gripOwners[index];
+    if (modelEditable && ins?.insertSeg != null && ins.ring) {
+      const key = `ringInsert:${ins.ring.id}:${Date.now()}`;
+      ringDragRef.current = { ...ins.ring, key, midIndex: index, vertex: ins.insertSeg + 1 };
+      storeState().insertRingVertex(ins.ring.kind, ins.ring.id, ins.insertSeg, pt, key);
+      return;
+    }
     // Öffnung: den gezogenen Punkt auf die Wandachse projizieren → neue
     // `position` (Abstand des ersten Pfostens vom Wand-Start), sodass die
     // Öffnung entlang der Wand gleitet. Griff sitzt in der Öffnungsmitte, daher
@@ -1112,13 +1167,18 @@ export function useGripEditing(opts: {
       else if (pa.kind === "excavation") moveExcavationGrip(pa.id, pa.index, pa.pt);
       else if (pa.kind === "roof") opts.moveRoofVertex?.(pa.id, pa.index, pa.pt);
       else moveCeilingGrip(pa.id, pa.index, pa.pt);
+      // [26] Ecke auf einem Nachbarn bzw. auf der Geraden zwischen den Nachbarn entfällt (im selben Undo-Schritt).
+      storeState().tidyRingVertex(pa.kind, pa.id, pa.index, undefined, ringTidyTol());
     }
     const pw = pendingWallGripRef.current;
     pendingWallGripRef.current = null;
     if (pw) moveGripOf(null, pw.wallId, pw.localIndex, pw.pt, scaleDenominator, undefined, pw.arcLength);
     const pend = pendingGripRef.current;
     pendingGripRef.current = null;
-    if (pend) moveGripOf(pend.drawingId, null, pend.localIndex, pend.pt, scaleDenominator);
+    if (pend) {
+      moveGripOf(pend.drawingId, null, pend.localIndex, pend.pt, scaleDenominator);
+      storeState().tidyRingVertex("polyline", pend.drawingId, pend.localIndex, undefined, ringTidyTol());
+    }
   };
 
   /** Polylinien-Element (nicht gesperrt), dessen Änderung aufgeschoben werden darf. */
@@ -1254,8 +1314,16 @@ export function useGripEditing(opts: {
     // Zeiger-Genauigkeit: ca. 6 Pixel der Ansicht.
     if (drag) storeState().tidySectionLine(drag.id, drag.key, sectionPxRef.current > 0 ? 6 / sectionPxRef.current : undefined);
   };
+  /** Aufräum-Abstand (m) der Ecken: ca. 6 Pixel der Ansicht (unbekannt = Kern-Vorgabe). */
+  const ringTidyTol = (): number | undefined => (sectionPxRef.current > 0 ? 6 / sectionPxRef.current : undefined);
+  /** [26] Nach einem Zug an einer Einfüge-Raute: die eingefügte Ecke entfällt, wenn sie auf der Geraden liegt. */
+  const tidyRingDrag = () => {
+    const rd = ringDragRef.current;
+    if (rd) storeState().tidyRingVertex(rd.kind, rd.id, rd.vertex, rd.key, ringTidyTol());
+  };
   const endEditing = () => {
     sectionDragRef.current = null;
+    ringDragRef.current = null;
     setDraft(null);
     edgeAppliedDeltaRef.current = null; // Kanten-Drag beendet → Anker zurücksetzen
     moveCoincidentRef.current = null; // Körper-Koinzidenz-Gruppe verwerfen
@@ -1377,6 +1445,7 @@ export function useGripEditing(opts: {
       // verankern (s. Kommentar an gripOriginRef).
       if (gripDragInfoRef.current === null) {
         sectionDragRef.current = null; // [176] neuer Zug: eigener Undo-Schlüssel, kein eingefügter Knick
+        ringDragRef.current = null; // [26] dito für eingefügte Ecken
         gripOriginRef.current = grips[index];
         const op0 = selectedOpeningId ? (project.openings ?? []).find((o) => o.id === selectedOpeningId) : undefined;
         const dir0 = op0 ? openingWallDir() : null;
@@ -1609,6 +1678,7 @@ export function useGripEditing(opts: {
       commitPendingGrip();
       commitPendingBody();
       tidySectionDrag();
+      tidyRingDrag();
       endEditing();
     },
     // Bewaffneten Punkt-Griff verwerfen (Escape): exakt auf `origin`
@@ -1625,6 +1695,10 @@ export function useGripEditing(opts: {
       } else if (sectionDragRef.current) {
         applyGrip(index, origin);
         tidySectionDrag();
+      } else if (ringDragRef.current) {
+        // Eingefügte Ecke zurück auf die Kante: das Aufräumen entfernt sie wieder.
+        applyGrip(index, origin);
+        tidyRingDrag();
       } else if (!selectedSectionLine) applyGrip(index, origin);
       endEditing();
     },
