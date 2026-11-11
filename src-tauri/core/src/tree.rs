@@ -30,8 +30,11 @@ pub const CONIFER_RGB: [f64; 3] = [0.29, 0.45, 0.30];
 pub struct TreeGeom {
     /// Stammmitte.
     pub c: [f64; 2],
-    /// Fuss (absolute Höhe).
+    /// Fuss (absolute Höhe) an der Stammmitte.
     pub base: f64,
+    /// Unterkante des Stamms (absolute Höhe, ≤ `base`): am Hang so tief wie das Gelände am bergab liegenden
+    /// Stammrand, damit der Stamm nicht über dem Boden schwebt.
+    pub foot: f64,
     pub trunk_r: f64,
     pub crown_r: f64,
     /// Kronenansatz und Spitze (absolute Höhen), `crown_bottom < top`.
@@ -60,7 +63,7 @@ impl TreeGeom {
         let trunk_r = jsnum::min(pos(t.trunk_diameter, DEFAULT_TRUNK_DIAMETER) / 2.0, crown_r * 0.8);
         // Kronenansatz zwischen 0 und 90 % der Höhe.
         let cb = if t.crown_base.is_finite() { t.crown_base.clamp(0.0, 0.9 * h) } else { jsnum::min(DEFAULT_CROWN_BASE, 0.5 * h) };
-        Some(TreeGeom { c: [t.position.x, t.position.y], base, trunk_r, crown_r, crown_bottom: base + cb, top: base + h, shape: t.shape })
+        Some(TreeGeom { c: [t.position.x, t.position.y], base, foot: base, trunk_r, crown_r, crown_bottom: base + cb, top: base + h, shape: t.shape })
     }
 
     /// Kronenprofil als (z, r) von unten nach oben, `n` Abschnitte (≥ 2); an den Enden r = 0 (Pole).
@@ -115,7 +118,7 @@ impl TreeGeom {
 
     /// Stamm als Prisma: Positionen und Dreiecke.
     pub fn trunk_mesh(&self, seg: usize) -> (Vec<f64>, Vec<u32>) {
-        crate::columns3d::prism(&self.trunk_ring(seg), self.base, self.trunk_top())
+        crate::columns3d::prism(&self.trunk_ring(seg), self.foot, self.trunk_top())
     }
 
     /// Punkte der Krone (für den Schatten als konvexe Hülle der projizierten Punkte).
@@ -132,8 +135,55 @@ impl TreeGeom {
         crown.extend(prof.iter().rev().skip(1).take(prof.len().saturating_sub(2)).map(|&(z, r)| [s - r, z]));
         crown.dedup();
         let tr = self.trunk_r;
-        let trunk = vec![[s - tr, self.base], [s + tr, self.base], [s + tr, self.crown_bottom], [s - tr, self.crown_bottom]];
+        let trunk = vec![[s - tr, self.foot], [s + tr, self.foot], [s + tr, self.crown_bottom], [s - tr, self.crown_bottom]];
         (crown, trunk)
+    }
+}
+
+impl TreeGeom {
+    /// Schnitt der Krone und des Stamms mit einer lotrechten Ebene im Abstand `d` von der Stammachse (`s` =
+    /// Lage der Achse entlang der Ebene): Kronenquerschnitt und Stammquerschnitt als Umriss (s, z); `None`,
+    /// wenn die Ebene Krone bzw. Stamm nicht trifft. Die Krone ist ein Rotationskörper, die Sehne in
+    /// Höhe z hat die halbe Breite `sqrt(r(z)² − d²)`.
+    pub fn cut_silhouette(&self, s: f64, d: f64, n: usize) -> (Option<Vec<[f64; 2]>>, Option<Vec<[f64; 2]>>) {
+        let d = d.abs();
+        let tr = self.trunk_r;
+        let trunk = (d < tr).then(|| {
+            let h = (tr * tr - d * d).sqrt();
+            vec![[s - h, self.foot], [s + h, self.foot], [s + h, self.crown_bottom], [s - h, self.crown_bottom]]
+        });
+        if !(d < self.crown_r) {
+            return (None, trunk);
+        }
+        let k = n.max(8);
+        let prof = self.profile(k);
+        // Kronenradius auf Höhe z (lineare Zwischenwerte des Profils).
+        let r_at = |z: f64| -> f64 {
+            prof.windows(2).find(|w| w[0].0 <= z && z <= w[1].0).map_or(0.0, |w| {
+                let t = if w[1].0 > w[0].0 { (z - w[0].0) / (w[1].0 - w[0].0) } else { 0.0 };
+                w[0].1 + t * (w[1].1 - w[0].1)
+            })
+        };
+        let (zb, zt) = (self.crown_bottom, self.top);
+        let zs: Vec<f64> = (0..=k).map(|i| zb + (zt - zb) * i as f64 / k as f64).collect();
+        let rs: Vec<f64> = zs.iter().map(|&z| r_at(z)).collect();
+        let Some(first) = rs.iter().position(|&r| r > d) else { return (None, trunk) };
+        let last = rs.iter().rposition(|&r| r > d).unwrap_or(first);
+        // Rechte Seite von unten nach oben (mit Schnittpunkt der Sehne gegen die Enden), linke zurück.
+        let mut side: Vec<(f64, f64)> = Vec::new();
+        if first > 0 {
+            let t = (d - rs[first - 1]) / (rs[first] - rs[first - 1]);
+            side.push((zs[first - 1] + t * (zs[first] - zs[first - 1]), 0.0));
+        }
+        side.extend((first..=last).map(|i| (zs[i], (rs[i] * rs[i] - d * d).sqrt())));
+        if last + 1 < zs.len() {
+            let t = (d - rs[last]) / (rs[last + 1] - rs[last]);
+            side.push((zs[last] + t * (zs[last + 1] - zs[last]), 0.0));
+        }
+        let mut poly: Vec<[f64; 2]> = side.iter().map(|&(z, w)| [s + w, z]).collect();
+        poly.extend(side.iter().rev().map(|&(z, w)| [s - w, z]));
+        poly.dedup();
+        (Some(poly), trunk)
     }
 }
 
@@ -184,9 +234,10 @@ pub fn lathe(c: [f64; 2], prof: &[(f64, f64)], seg: usize) -> (Vec<f64>, Vec<u32
     (pos, idx)
 }
 
-/// Fusshöhen aller Bäume (`Project.trees`, gleiche Reihenfolge): Gelände an der Stammmitte (sichtbares
-/// Geländenetz inkl. Baugruben), sonst UK des Geschosses; plus `baseOffset`.
-pub fn bases(p: &Project) -> Vec<f64> {
+/// Fusshöhen aller Bäume (`Project.trees`, gleiche Reihenfolge) als (Fuss, Stamm-Unterkante): Fuss = Gelände an der
+/// Stammmitte (sichtbares Geländenetz inkl. Baugruben), sonst UK des Geschosses; plus `baseOffset`. Die
+/// Stamm-Unterkante reicht am Hang bis zum tiefsten Geländepunkt am Stammrand (Gelände bei Stammmitte ± Stammradius).
+pub fn bases(p: &Project) -> Vec<(f64, f64)> {
     let trees = p.trees.as_deref().unwrap_or(&[]);
     if trees.is_empty() {
         return Vec::new();
@@ -197,8 +248,15 @@ pub fn bases(p: &Project) -> Vec<f64> {
         .iter()
         .map(|t| {
             let floor = p.floor(&t.floor_id).map_or(0.0, |f| f.base_elevation.unwrap_or(0.0));
-            let ground = idx.as_ref().and_then(|(i, datum)| i.z_at(t.position.x, t.position.y).map(|z| z - datum)).filter(|z| z.is_finite());
-            ground.unwrap_or(floor) + t.base_offset.filter(|o| o.is_finite()).unwrap_or(0.0)
+            let z_at = |x: f64, y: f64| idx.as_ref().and_then(|(i, datum)| i.z_at(x, y).map(|z| z - datum)).filter(|z| z.is_finite());
+            let off = t.base_offset.filter(|o| o.is_finite()).unwrap_or(0.0);
+            let ground = z_at(t.position.x, t.position.y);
+            let base = ground.unwrap_or(floor) + off;
+            let tr = pos(t.trunk_diameter, DEFAULT_TRUNK_DIAMETER) / 2.0;
+            let low = ground.map_or(base, |g| {
+                [(tr, 0.0), (-tr, 0.0), (0.0, tr), (0.0, -tr)].iter().filter_map(|(dx, dy)| z_at(t.position.x + dx, t.position.y + dy)).fold(g, f64::min) + off
+            });
+            (base, low.min(base))
         })
         .collect()
 }
@@ -206,7 +264,7 @@ pub fn bases(p: &Project) -> Vec<f64> {
 /// Abmessungen aller darstellbaren Bäume mit ihrem Index in `Project.trees`.
 pub fn geoms(p: &Project) -> Vec<(usize, TreeGeom)> {
     let b = bases(p);
-    p.trees.as_deref().unwrap_or(&[]).iter().zip(b).enumerate().filter_map(|(i, (t, base))| TreeGeom::of(t, base).map(|g| (i, g))).collect()
+    p.trees.as_deref().unwrap_or(&[]).iter().zip(b).enumerate().filter_map(|(i, (t, (base, foot)))| TreeGeom::of(t, base).map(|g| (i, TreeGeom { foot, ..g }))).collect()
 }
 
 /// Stamm- und Kronenfarbe eines Baums im 3D.
@@ -310,5 +368,60 @@ mod tests {
         };
         let round = TreeGeom::of(&tree("round"), 0.0).unwrap();
         assert!(width_at(&g, 0.25) > 0.95 * 3.0 && width_at(&round, 0.25) < 0.9 * 3.0);
+    }
+
+    /// Schnitt der Krone mit einer Ebene im Abstand d: Sehne = 2 sqrt(r² − d²), Stamm nur bei d < Stammradius.
+    #[test]
+    fn schnitt_der_krone_mit_ebene() {
+        let g = TreeGeom::of(&tree("round"), 0.0).unwrap();
+        let w = |pts: &[[f64; 2]]| pts.iter().map(|q| q[0]).fold(f64::NEG_INFINITY, f64::max) - pts.iter().map(|q| q[0]).fold(f64::INFINITY, f64::min);
+        let (c, t) = g.cut_silhouette(5.0, 0.0, 32);
+        assert!((w(&c.unwrap()) - 6.0).abs() < 1e-6 && (w(&t.unwrap()) - 0.4).abs() < 1e-12);
+        let (c, t) = g.cut_silhouette(5.0, 2.0, 32);
+        let c = c.unwrap();
+        assert!((w(&c) - 2.0 * 5f64.sqrt()).abs() < 0.05 && t.is_none());
+        let (zl, zh) = (c.iter().map(|q| q[1]).fold(f64::INFINITY, f64::min), c.iter().map(|q| q[1]).fold(f64::NEG_INFINITY, f64::max));
+        assert!(zl > g.crown_bottom + 1.0 && zh < g.top - 1.0, "{zl} {zh}");
+        let (c, _) = g.cut_silhouette(5.0, 3.0, 32);
+        assert!(c.is_none(), "Ebene tangiert nur");
+    }
+
+    /// Fuss auf dem Gelände: Stammmitte auf der Geländehöhe, die Stamm-Unterkante reicht am Hang bis zum
+    /// tiefsten Punkt am Stammrand; Gelände eben: kein Unterschied.
+    #[test]
+    fn fuss_am_hang() {
+        let mut p: Project = serde_json::from_value(serde_json::json!({
+            "id": "p", "name": "P", "lineStyles": [], "hatches": [], "components": [], "wallTypes": [], "layers": [], "walls": [], "openings": [],
+            "drawingLevels": [{"id": "eg", "name": "EG", "kind": "floor", "visible": true, "locked": false, "floorHeight": 3.0, "baseElevation": 0}]
+        }))
+        .unwrap();
+        // Geländenetz z = 10 + slope · x (x 0…40).
+        let mesh = |slope: f64| {
+            ContextObject::TerrainMesh(TerrainMesh {
+                id: "t".into(),
+                positions: vec![0.0, 0.0, 10.0, 40.0, 0.0, 10.0 + 40.0 * slope, 40.0, 40.0, 10.0 + 40.0 * slope, 0.0, 40.0, 10.0],
+                indices: vec![0.0, 1.0, 2.0, 0.0, 2.0, 3.0],
+                ..Default::default()
+            })
+        };
+        let mut t = tree("round");
+        t.position = Vec2 { x: 20.0, y: 20.0 };
+        p.trees = Some(vec![t]);
+        p.context = Some(vec![mesh(0.5)]);
+        let (base0, foot0) = bases(&p)[0];
+        // Stamm 0.2 m Radius: tiefster Rand 0.1 m (Gefälle 0.5) unter der Stammmitte.
+        assert!((base0 - foot0 - 0.1).abs() < 1e-9, "{base0} {foot0}");
+        let g = geoms(&p)[0].1;
+        assert!((g.base - base0).abs() < 1e-12 && (g.foot - foot0).abs() < 1e-12);
+        let (pos, _) = g.trunk_mesh(8);
+        let zmin = pos.chunks_exact(3).map(|q| q[2]).fold(f64::INFINITY, f64::min);
+        assert!((zmin - foot0).abs() < 1e-9, "Stamm-Mesh beginnt an der Unterkante");
+        let (_, trunk) = g.silhouette(3.0, 8);
+        assert!((trunk[0][1] - foot0).abs() < 1e-12);
+        assert!((g.top - base0 - 12.0).abs() < 1e-9);
+        p.context = Some(vec![mesh(0.0)]);
+        let (b1, f1) = bases(&p)[0];
+        assert!((b1 - f1).abs() < 1e-12);
+        assert!((base0 - b1 - 10.0).abs() < 1e-6, "Gelände 10 m höher: {base0} {b1}");
     }
 }
