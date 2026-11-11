@@ -198,6 +198,10 @@ impl Visibility {
     pub fn greyed(&self, code: &str) -> bool {
         self.grey.contains(code)
     }
+    /// [180] Codes, die weder sichtbar noch gerendert werden (in beliebiger Reihenfolge, evtl. doppelt).
+    pub fn hidden_codes(&self) -> impl Iterator<Item = &String> {
+        self.invisible.iter().filter(|_| self.has_vis).chain(self.norender.iter())
+    }
 }
 
 // ── Cut-Bänder ────────────────────────────────────────────────────────────────
@@ -559,17 +563,24 @@ pub fn read_bodies(buf: &[f64]) -> Option<Vec<BodyMesh>> {
 
 // ── Gesamtrechnung ───────────────────────────────────────────────────────────
 
-/// `computeSection` (ohne den asynchronen Teil: die Körper-Netze kommen fertig aus TS).
+/// `computeSection` (ohne den asynchronen Teil: die Körper-Netze kommen fertig aus TS), alle Klassen sichtbar.
 pub fn compute_section(p: &Project, level: &LevelSpec, bodies: &[BodyMesh]) -> Result<Option<Output>, String> {
+    compute_section_vis(p, level, bodies, &Visibility::default())
+}
+
+/// [180] Wie [`compute_section`], mit Klassen-Sichtbarkeit: Bauteile ausgeblendeter Klassen (`invisible`,
+/// `norender`) nehmen an der Sichtbarkeitsrechnung nicht teil — keine Schnittflächen, keine Dominanz über
+/// andere Bänder, keine Projektion und keine Verdeckung der Projektion dahinter. Graue Klassen verdecken weiter.
+pub fn compute_section_vis(p: &Project, level: &LevelSpec, bodies: &[BodyMesh], vis: &Visibility) -> Result<Option<Output>, String> {
     // [176] Geknickter Schnitt: je Segment, aneinander abgewickelt.
     match unfold::segments(level) {
-        Some(segs) => unfold::compute_unfolded(p, &segs, bodies),
-        None => compute_plane(p, level, bodies, None),
+        Some(segs) => unfold::compute_unfolded(p, &segs, bodies, vis),
+        None => compute_plane(p, level, bodies, None, vis),
     }
 }
 
 /// Schnitt an einer geraden Ebene; mit `strip` ([176]) auf den Streifen eines Segments begrenzt (lokale u).
-fn compute_plane(p: &Project, level: &LevelSpec, bodies: &[BodyMesh], strip: Option<&unfold::Strip>) -> Result<Option<Output>, String> {
+pub(super) fn compute_plane(p: &Project, level: &LevelSpec, bodies: &[BodyMesh], strip: Option<&unfold::Strip>, vis: &Visibility) -> Result<Option<Output>, String> {
     let Some(plane) = level.plane() else { return Ok(None) };
     let walls_r = model3d::emit_walls_with(p, false, false)?;
     let mut slabs_r = model3d::emit_slabs(p);
@@ -607,20 +618,26 @@ fn compute_plane(p: &Project, level: &LevelSpec, bodies: &[BodyMesh], strip: Opt
     let walls: Vec<Option<&Wall>> = owners.iter().zip(&virt).map(|(o, v)| v.as_ref().or(*o)).collect();
     let slabs = slab_owners(p, &slabs_r);
     let edge_cats = edge_categories(p, &walls, &slabs);
+    // [180] Ausgeblendete Klassen vor der Dominanz und der Verdeckung entfernen (nicht erst beim Zeichnen).
+    let shown = |c: &str| vis.visible(c) && vis.render(c);
+    let skip = |k: Kind, i: usize| edge_cats.get(&(k, i)).is_some_and(|c| !shown(c));
+    cuts.retain(|c| !skip(c.kind, c.index));
     let cuts = attach_cut_styles(cuts, p, &plane, &walls, &slabs)?;
     let cuts = merge_monolith_cuts(cuts, &slabs_r, &stair_flight_sections(p, plane.base(), plane.u_model()));
     let base = plane.base();
     let u = plane.u_model();
     let cuts = subtract_voids_in_section(cuts, p, base, u);
     // [G1] Abzugskörper beliebiger Form kommen als Netz mit (wie freie Körper): ausgespart, nicht gezeichnet.
-    let (void_bodies, bodies): (Vec<&BodyMesh>, Vec<&BodyMesh>) = bodies.iter().partition(|b| is_subtract_body(p, b));
+    let (void_bodies, mut bodies): (Vec<&BodyMesh>, Vec<&BodyMesh>) = bodies.iter().partition(|b| is_subtract_body(p, b));
+    bodies.retain(|b| !skip(Kind::Body, b.index));
     let cuts = subtract_body_voids_in_section(cuts, &void_bodies, base, u);
     let cuts = subtract_pockets_in_section(cuts, p, base, u);
     let mut cuts = parallel_reveal_cuts(cuts, p, &plane, &walls)?;
     append_body_sections(&mut cuts, p, &bodies, base, u);
     // [152] Netzkörper: geschnitten (Flächen bzw. offene Linien) und in der Projektion. Gelände ist ein eigenes
     // Element (`terrainMesh`, auch IFC-Gelände seit dem Import, [181]) und wird Geländelinie (`append_terrain_profiles`).
-    let meshes = crate::mesh_view::meshes(p);
+    let mut meshes = crate::mesh_view::meshes(p);
+    meshes.retain(|m| shown(&m.mesh.category_code));
     let mut mesh_lines = Vec::new();
     append_mesh_sections(&mut cuts, &mut mesh_lines, &meshes, base, u);
     // [176] Segment eines geknickten Schnitts: Schnittflächen auf den Streifen (sie verdecken nur dort).
@@ -629,8 +646,9 @@ fn compute_plane(p: &Project, level: &LevelSpec, bodies: &[BodyMesh], strip: Opt
         unfold::clip_output(&mut part, s);
         (cuts, mesh_lines) = (part.cuts, part.mesh_lines);
     }
+    cuts.retain(|c| c.category.as_deref().is_none_or(shown));
     // Projektion hinter der Ebene exakt ([G4]); die Schnittflächen verdecken, was hinter ihnen liegt.
-    let (mut visible, hidden) = projection_edges(p, &plane, &walls_r, &wi, &slabs_r, &bodies, &meshes, &cuts, level.hidden_lines, level.depth, strip.map_or(&[][..], |s| &s.half[..]));
+    let (mut visible, hidden) = projection_edges(p, &plane, &walls_r, &wi, &slabs_r, &bodies, &meshes, &cuts, level.hidden_lines, level.depth, strip.map_or(&[][..], |s| &s.half[..]), &skip);
     shaped_projection(&mut visible, p, &walls_r, &plane);
     let meshes = meshes.iter().map(|m| MeshMeta { id: m.mesh.id.clone(), name: m.mesh.name.clone(), category: Some(m.mesh.category_code.clone()) }).collect();
     let mut out = Output { cuts, visible, hidden, profiles: Vec::new(), earth: Vec::new(), terrain_id: None, meshes, mesh_lines, edge_cats };

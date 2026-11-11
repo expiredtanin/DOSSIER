@@ -50,7 +50,7 @@ fn quad_of(t: &[[f64; 3]; 3], n: [f64; 3], next: &[u32], vert: &dyn Fn(u32) -> (
 /// auf die Seite hinter der Ebene zugeschnitten; die Schnittflächen verdecken in Tiefe 0. Bogenwände,
 /// verschnittene Dächer und Körper glätten ihre Facetten (keine Fugen, nur Knicke und Silhouetten).
 #[allow(clippy::too_many_arguments)]
-pub(super) fn projection_edges(p: &Project, plane: &Plane, walls_r: &[RWall], wi: &[render3d::WallInput], slabs_r: &[RSlab], bodies: &[&BodyMesh], meshes: &[crate::mesh_view::MeshRef], cuts: &[Cut], hidden: bool, max_depth: Option<f64>, strip: &[[f64; 3]]) -> (Vec<Edge>, Vec<Edge>) {
+pub(super) fn projection_edges(p: &Project, plane: &Plane, walls_r: &[RWall], wi: &[render3d::WallInput], slabs_r: &[RSlab], bodies: &[&BodyMesh], meshes: &[crate::mesh_view::MeshRef], cuts: &[Cut], hidden: bool, max_depth: Option<f64>, strip: &[[f64; 3]], skip: &dyn Fn(Kind, usize) -> bool) -> (Vec<Edge>, Vec<Edge>) {
     use crate::hlr;
     let nl = crate::jsmath::hypot(&plane.normal);
     if !(nl > 1e-12) {
@@ -232,6 +232,8 @@ pub(super) fn projection_edges(p: &Project, plane: &Plane, walls_r: &[RWall], wi
         crate::mesh_view::hlr_faces(m, &|q| view([q[0], q[2], q[1]]), owner, group, true, &mut faces);
         group += 1;
     }
+    // [180] Bauteile ausgeblendeter Klassen: weder Kanten noch Verdecker.
+    faces.retain(|f| owners.get(f.owner as usize).is_none_or(|&(k, i)| !skip(k, i)));
     // [176] Segment eines geknickten Schnitts: nur, was in seinem Streifen liegt (Winkelhalbierende).
     if !strip.is_empty() {
         faces = faces.into_iter().filter_map(|f| super::unfold::clip_face(f, strip)).collect();

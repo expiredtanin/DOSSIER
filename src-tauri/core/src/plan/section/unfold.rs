@@ -447,10 +447,10 @@ pub fn bend_lines(level: &LevelSpec, bounds: [f64; 4]) -> Vec<Primitive> {
 const BEND_LINE_MM: f64 = 0.13;
 
 /// `compute_section` für einen geknickten Schnitt: je Segment rechnen, zuschneiden, verschieben, sammeln.
-pub(super) fn compute_unfolded(p: &Project, segs: &[(LevelSpec, Option<Strip>)], bodies: &[BodyMesh]) -> Result<Option<Output>, String> {
+pub(super) fn compute_unfolded(p: &Project, segs: &[(LevelSpec, Option<Strip>)], bodies: &[BodyMesh], vis: &Visibility) -> Result<Option<Output>, String> {
     let mut acc: Option<Output> = None;
     for (l, s) in segs {
-        let Some(mut o) = compute_plane(p, l, bodies, s.as_ref())? else { continue };
+        let Some(mut o) = compute_plane(p, l, bodies, s.as_ref(), vis)? else { continue };
         if let Some(s) = s {
             shift_output(&mut o, s.offset);
         }
