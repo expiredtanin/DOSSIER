@@ -44,7 +44,7 @@ Neues Modul: `<modul>.rs` und `mod` in `lib.rs`, Bindungen in `web/<modul>.rs` u
 | `wall_bands.rs`, `wall_mesh_cut.rs` | Schichtbänder einer Wand; Wandnetz mit echtem Loch für Datei-Exporte |
 | `ceilings3d.rs`, `columns3d.rs`, `stairs3d.rs`, `openings3d.rs`, `drawing2d_3d.rs`, `mesh3d.rs` | Netze je Bauteilart |
 | `explode3d.rs`, `highlight3d.rs`, `surface_pattern3d.rs` | Explosionsaxonometrie, Auswahl-Umrisse, Ansichtsschraffur auf 3D-Flächen |
-| `solid_bool.rs`, `solid_specs.rs` | Körper-Booleans über Manifold; B-Rep-Spezifikationen für truck |
+| `solid_bool.rs`, `solid_specs.rs`, `solid_mesh.rs` | Körper-Booleans über Manifold; B-Rep-Spezifikationen für truck; Netze der freien Körper für Schnitt/Ansicht ([115]) |
 
 ## Geometrie
 

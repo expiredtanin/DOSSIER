@@ -46,7 +46,7 @@ pub(super) fn merge_coplanar(tris: Vec<Face>, out: &mut Vec<Face>) {
         let pd: Vec<f64> = pts.iter().map(depth_at).collect();
         let depth = pd.iter().sum::<f64>() / pd.len() as f64;
         let (dmin, dmax) = (pd.iter().copied().fold(f64::INFINITY, f64::min), pd.iter().copied().fold(f64::NEG_INFINITY, f64::max));
-        out.push(Face { pts, pd, depth, depth_min: dmin, depth_max: dmax, role: Role::Mesh, id: f0.id.clone(), fill: f0.fill, normal: f0.normal, ov: None, two_sided: f0.two_sided, curved_slab: false });
+        out.push(Face { pts, pd, depth, depth_min: dmin, depth_max: dmax, role: f0.role, id: f0.id.clone(), fill: f0.fill, normal: f0.normal, ov: None, two_sided: f0.two_sided, curved_slab: false });
     }
 }
 
@@ -124,7 +124,7 @@ pub(super) fn curved_slab_facets(faces: &[Face]) -> Vec<bool> {
 pub(super) fn paint_rank(r: Role) -> f64 {
     match r {
         Role::Slab => 0.0,
-        Role::Wall | Role::Column | Role::Mesh => 1.0,
+        Role::Wall | Role::Column | Role::Mesh | Role::Body => 1.0,
         Role::Roof => 2.0,
     }
 }
@@ -137,7 +137,7 @@ pub(super) fn paint_rank(r: Role) -> f64 {
 /// am Rand einer deckenden Fläche; die Kanten rechnet `hlr` weiter aus allen Flächen.
 pub(super) fn mesh_faces_needed(faces: &[Face]) -> Vec<bool> {
     let mut keep = vec![true; faces.len()];
-    if !faces.iter().any(|f| f.role == Role::Mesh) {
+    if !faces.iter().any(|f| f.role.is_mesh()) {
         return keep;
     }
     let finite = |f: &Face| f.pts.len() >= 3 && f.pts.iter().all(|q| q[0].is_finite() && q[1].is_finite());
@@ -223,7 +223,7 @@ pub(super) fn mesh_faces_needed(faces: &[Face]) -> Vec<bool> {
     // Netz-Flächen: gebraucht, sobald eine berührte Zelle nichts Späteres trägt.
     let r2 = cell * cell / 2.0;
     for (k, f) in faces.iter().enumerate() {
-        if f.role != Role::Mesh || !finite(f) {
+        if !f.role.is_mesh() || !finite(f) {
             continue;
         }
         let (i0, j0, i1, j1) = span(f);

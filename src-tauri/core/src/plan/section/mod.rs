@@ -534,36 +534,16 @@ pub struct MeshMeta {
     pub category: Option<String>,
 }
 
-/// Ein truck-Körper (aus TS, asynchron gebaut): Index in `extrudedSolids` + Netz.
+/// Netz eines freien Körpers ([115] aus dem Kern, `solid_mesh::body_meshes`): Index in `extrudedSolids` + Netz.
 pub struct BodyMesh {
     pub index: usize,
     pub positions: Vec<f64>,
     pub indices: Vec<f64>,
 }
 
-/// Liest `[n, (index, nPos, pos…, nIdx, idx…) × n]`; Unsinn → `None`.
-pub fn read_bodies(buf: &[f64]) -> Option<Vec<BodyMesh>> {
-    if buf.is_empty() {
-        return Some(Vec::new());
-    }
-    let mut r = crate::flat_read::Reader::new(buf);
-    let n = r.count()?;
-    let mut out = Vec::with_capacity(n);
-    for _ in 0..n {
-        let index = r.count()?;
-        let np = r.count()?;
-        let positions = (0..np).map(|_| r.num()).collect::<Option<Vec<f64>>>()?;
-        let ni = r.count()?;
-        let indices = (0..ni).map(|_| r.num()).collect::<Option<Vec<f64>>>()?;
-        out.push(BodyMesh { index, positions, indices });
-    }
-    Some(out)
-}
-
-
 // ── Gesamtrechnung ───────────────────────────────────────────────────────────
 
-/// `computeSection` (ohne den asynchronen Teil: die Körper-Netze kommen fertig aus TS), alle Klassen sichtbar.
+/// `computeSection` mit den gegebenen Körper-Netzen (Abfrage: `solid_mesh::body_meshes`), alle Klassen sichtbar.
 pub fn compute_section(p: &Project, level: &LevelSpec, bodies: &[BodyMesh]) -> Result<Option<Output>, String> {
     compute_section_vis(p, level, bodies, &Visibility::default())
 }

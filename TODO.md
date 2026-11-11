@@ -324,9 +324,12 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
 - ◐ **[132]** Ansichten/Schnitte aus [114]. Haarlinien an Dreiecksfugen (SVG-Kantenglättung); Carport bleibt Pultdach 3°. · S
 - ◐ **[115]** Schnitt/Ansicht wie Grundriss. 11.11.: Freie Körper (`extrudedSolids`) fangen im Grundriss mit ihrem Umriss
   (`snap_model.rs`, Klasse/Ausnahmen wie jedes Bauteil; Test `freie_koerper_fangen_nach_klasse`). Im Schnitt-Viewport fängt
-  der Fang die Schnitt-Primitive (Körper-Schnittflächen/Kanten sind dort drin, nicht geprüft in der App). Offen: die Ansicht
-  (Elevation) und Blatt-Viewports zeichnen freie Körper gar nicht (kein Netz im Kern) und fangen sie daher auch nicht;
-  3D-Ausschnitt im Viewport. · S
+  der Fang die Schnitt-Primitive (Körper-Schnittflächen/Kanten sind dort drin, nicht geprüft in der App). 11.11.: Körper-Netze
+  rechnet der Kern selbst (`solid_mesh.rs`, Tessellierung der B-Rep-Beschreibung, Booleans über Manifold; Entscheid in
+  `doc/ARCHITEKTUR.md`): Ansicht (Flächen mit Körper-Id, Verdeckung, Klasse), Blatt-Viewports (Schnitt + Ansicht, Fang) und
+  CLI zeigen freie Körper; `computeSection` baut keine truck-Netze mehr. Offen: 3D nimmt weiter truck (könnte die Kern-Netze
+  nehmen); Kreis-Körper mit leeren `points` (Brunnen im Musterhaus komplex) baut weder truck noch der Kern; 3D-Ausschnitt im
+  Viewport; nicht in der Tauri-App geprüft. · S
 - ◐ **[36]** View Range (`plan/view_range.rs`). Dach/Decke über/unter Schnitt verfeinern, Raum/Fenster eigenständig,
   Tiefe nur ganzes Bauteil (kein Clip an der Ebene). 11.11.: Öffnung ganz unter der Schnittebene schliesst die Wand auch
   ohne eigenen Bereich (Symbol gepunktet, `walls.rs`). · M

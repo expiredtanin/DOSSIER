@@ -144,6 +144,14 @@ reisst ein Panic nicht den Kern mit; `guarded()` in `src/engine/truckSolid.ts` i
 3D-Booleans im Modell rechnet dagegen Manifold im Kern (`src-tauri/core/src/solid_bool.rs`). Der
 BSP-Port in `src-tauri/fileio/src/csg.rs` dient nur dem IFC-Import.
 
+**Netze der freien Körper im Kern ([115], Entscheid 11.11.).** Schnitt, Ansicht, Blatt-Ausschnitte und CLI
+brauchen die Körper (`extrudedSolids`) synchron und ohne TS. Darum tesselliert der Kern die B-Rep-Beschreibung
+selbst (`src-tauri/core/src/solid_mesh.rs`: dieselbe `SolidSpec` aus `cmd_solid::extruded_solid_spec`, die truck
+bekommt): alle Arten der Beschreibung sind einfache Extrusionen, Lofts, Rotations- und Grundkörper, gekrümmte
+Flächen als Facetten (5 mm Sehnenabweichung); Booleans und Löcher über Manifold. Verworfen: die TS-Netze als
+Dokument-Cache in den Kern zu reichen (asynchron, fehlt in CLI und PDF, zweite Wahrheit). truck bleibt für das
+3D-Bild (exakte Rundungen), STEP, Kennwerte und Kollision; das 3D könnte später ebenfalls die Kern-Netze nehmen.
+
 ---
 
 ## 2. Die WASM-Grenze im Detail
@@ -389,7 +397,7 @@ alle Klassen aus ⇒ Grundriss jedes Geschosses, Schnitte, Ansichten leer; jede 
 | Treppe: Lauflinie, Stufennummern, Absturzsicherung; Ansicht | Treppe | `stairs.rs`; Ansicht über `ceil_cat` |
 | Deckenkanten, Untersichten | Decke | `domains.rs::ceilings` |
 | Storenkasten, Fenster/Türen (auch Ansicht, mit Wirt) | Öffnung (+ Wand/Dach) | `walls.rs`; `elevation/mod.rs` |
-| Körper, Abzugskörper (Grundriss, Schnitt) | Element (`ExtrudedSolid.categoryCode`, neu) | `domains.rs::solids`, Schnitt `edge_cats` |
+| Körper, Abzugskörper (Grundriss, Schnitt, Ansicht) | Element (`ExtrudedSolid.categoryCode`, neu) | `domains.rs::solids`, Schnitt `edge_cats`, Ansicht `body_cat` |
 | Projektionskanten im Schnitt | Bauteil hinter der Ebene | `section/mod.rs::edge_categories` |
 | Dach-Ansichtsmuster | Dach (nur mit sichtbaren Flächen) | `elevation/patterns.rs` |
 | Höhenlinien + Beschriftung, Gelände, Baugrube, Netze, Luftbild, Bäume | Element ([181]) | `context.rs`, `trees.rs` |
@@ -420,8 +428,9 @@ Offen: Bauzonen sind kein eigener Planinhalt (nur Baurecht-Einstellungen); „gr
 ## 4. Schnitt
 
 1. Eine Schnitt-Ebene ist ein `DrawingLevel` mit `kind: "section"` und einer Schnittlinie.
-2. `computeSection()` in `src/plan/toSection.ts` baut vorab die Netze freier Körper über truck
-   (asynchron, mit Cache) und gibt sie flach weiter. Senkrechte Abzugsprismen rechnet der Kern selbst.
+2. `computeSection()` in `src/plan/toSection.ts` vergibt nur den Cache-Schlüssel des Schnitts. Die Netze
+   freier Körper (auch Abzugskörper beliebiger Form) erzeugt der Kern selbst (`solid_mesh::body_meshes()`, [115]);
+   senkrechte Abzugsprismen rechnet der Schnitt ohne Netz.
 3. `generateSectionPlan()` fragt `queryBin("sectionPlan", …)`. Im Kern: `section_plan_buf()` in
    `src-tauri/core/src/plan/section/query.rs`. Ein Cache merkt sich die letzten Schnitte, damit Umschalten von
    Schwarz-Weiss oder verdeckten Kanten nicht neu rechnet. Der Schnitt liegt im Ordner `plan/section/`
@@ -448,6 +457,7 @@ Offen: Bauzonen sind kein eigener Planinhalt (nur Baurecht-Einstellungen); „gr
 1. `generateElevationPlan()` in `src/plan/toElevation.ts` fragt `queryBin("elevationPlan", …)`.
 2. `elevation_plan_buf()` und `elevation_primitives_with()` in `src-tauri/core/src/plan/elevation/` (`mod.rs`, Teile je Thema):
    Flächen der Wände, Decken und Dächer in die Ansichtsebene projizieren, Ansichtsbereich anwenden,
+   importierte Netze und freie Körper (`collect.rs`, Körper-Netze aus `solid_mesh.rs`, [115]),
    Override-Regeln, Ansichtsschraffur der sichtbaren Bauteilseite (`surface_pattern.rs`), Öffnungen,
    Verdeckung, Schlagschatten, Maler-Ordnung von fern nach nah.
 3. Die reine Geometrie (Verdeckungs-Clipping, Schatten, Eck-Verlängerung, Öffnungen) liegt in
@@ -477,7 +487,7 @@ Offen: Bauzonen sind kein eigener Planinhalt (nur Baurecht-Einstellungen); „gr
    entfernte Teile an render3d (`set_parts()` in `src-tauri/render3d/src/web.rs`). Dort baut
    `scene.rs` die Szene aus Teilen, `mesh.rs` extrudiert Wände und Platten zu Dreiecksnetzen,
    `gpu.rs` zeichnet.
-5. Was truck braucht (freie Körper mit B-Rep, Abzugskörper beliebiger Form), rechnet die TS-Seite
+5. Was truck braucht (freie Körper mit B-Rep, Abzugskörper beliebiger Form), rechnet für das 3D die TS-Seite
    asynchron über `src/engine/truckSolid.ts` (`src/plan/toWalls3d/extrusions.ts`,
    `src/plan/toWalls3d/voids3d.ts`).
 6. Headless-Bilder (nur macOS, braucht Metal): `dossier-cli … model3d --out m.json`, dann

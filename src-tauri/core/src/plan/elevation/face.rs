@@ -12,6 +12,15 @@ pub(super) enum Role {
     Column,
     /// [152] Importiertes Netz (`ImportedMesh`): Dreiecke, id = Netz-id.
     Mesh,
+    /// [115] Freier Körper (`ExtrudedSolid`, Netz aus `solid_mesh.rs`): wie ein Netz, id = Körper-id.
+    Body,
+}
+
+impl Role {
+    /// Dreiecksnetz (importiertes Netz oder freier Körper): Facetten geglättet, Flächen gerastert verdeckt.
+    pub(super) fn is_mesh(self) -> bool {
+        matches!(self, Role::Mesh | Role::Body)
+    }
 }
 
 pub(super) struct Face {
@@ -135,6 +144,7 @@ pub(super) fn face_overrides(p: &Project, faces: &mut [Face], v: RuleView) {
                 ContextObject::ImportedMesh(m) if m.id == id => Some(m),
                 _ => None,
             }).and_then(|m| surf_ov(p, v, super::super::section::MESH_KIND, &m.category_code, Some(&m.name), &[], None)),
+            Role::Body => None,
         };
         memo.insert(key, o.clone());
         f.ov = o;
