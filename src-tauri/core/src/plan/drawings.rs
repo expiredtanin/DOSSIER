@@ -888,13 +888,8 @@ fn emit_inner(c: &Ctx, d: &Drawing2D, attrs: Attrs, geom: &Drawing2DGeom, greyed
         Drawing2DGeom::Grid { bubble_mm, .. } => {
             if let Some(spec) = crate::grid::Spec::of(geom) {
                 // [140] Achsen enden an der Gebäudegrundfläche (alle Geschosse vereinigt).
-                let house = super::context::building_rings(p);
-                // [157] Blasen nicht auf den Massketten und Höhenkoten des Geschosses.
-                let mut dims = super::stamp_place::Obstacles::default();
-                for q in prims_where(c, |g| matches!(g, Drawing2DGeom::Dimension { .. } | Drawing2DGeom::Kote { .. })) {
-                    dims.add_prim(&q);
-                }
-                emit_grid(&mut em, &spec, crate::grid::bubble_diameter(*bubble_mm, scale), &house, &dims);
+                // [157] Blasen nicht auf den Massketten und Höhenkoten des Geschosses ([179] je Plan einmal gerechnet).
+                emit_grid(&mut em, &spec, crate::grid::bubble_diameter(*bubble_mm, scale), c.house_rings(), c.dims_obstacles());
             }
         }
         Drawing2DGeom::Text { at, text: s, height, angle, width, marks, doc, leader_target, leader_bend_points, path_pts, paper_height } => {
@@ -1680,6 +1675,31 @@ pub fn is_stamp_obstacle(g: &Drawing2DGeom) -> bool {
 /// ([`is_stamp_obstacle`]), wie [`plan_drawings`] sie zeichnet.
 pub fn stamp_obstacle_prims(c: &Ctx) -> Vec<Primitive> {
     prims_where(c, is_stamp_obstacle)
+}
+
+/// [179] Hindernisse der Zeichnungen des Geschosses ([`is_stamp_obstacle`]) und, daraus in einem Durchgang,
+/// die der Masse und Höhenkoten allein (Achsblasen weichen ihnen aus, [157]).
+pub(super) fn drawn_and_dimension_obstacles(c: &Ctx) -> (super::stamp_place::Obstacles, super::stamp_place::Obstacles) {
+    let mut memo = Memo::default();
+    let (mut drawn, mut dims) = (super::stamp_place::Obstacles::default(), super::stamp_place::Obstacles::default());
+    for d in c.p.drawings2d.iter().filter(|d| is_stamp_obstacle(&d.geom) && on_floor(c, d)) {
+        let m = memo.get(c, d);
+        if !m.shown {
+            continue;
+        }
+        let mut out = Out::default();
+        let mut sink = Sink::new(Target::Vec(&mut out), Keep::All);
+        // Fehler einer Zeichnung: ohne sie weiter (Hindernisse sind nur ein Hinweis für die Lage).
+        let _ = emit(c, d, Attrs::with(d, &m.ov, m.cat), &d.geom, m.greyed, c.a.scale, &mut sink, 0);
+        let is_dim = matches!(d.geom, Drawing2DGeom::Dimension { .. } | Drawing2DGeom::Kote { .. });
+        for q in &out.prims {
+            drawn.add_prim(q);
+            if is_dim {
+                dims.add_prim(q);
+            }
+        }
+    }
+    (drawn, dims)
 }
 
 /// [150] Blasen und Beschriftungen der Achsraster des Geschosses (ohne die Achsen): Höhenlinien-Beschriftungen

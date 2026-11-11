@@ -140,6 +140,11 @@ pub struct Ctx<'a> {
     mv_sel: Option<&'a ModelViewOption>,
     /// [173] Aufgelöste Darstellungsoptionen (Modelldarstellung über dem Detailgrad).
     mv: super::model_view::Options,
+    /// [179] Je Plan-Erzeugung einmal gerechnet (mehrere Domänen und alle Raster brauchen sie): Gebäuderinge,
+    /// Hindernisse der Masse/Koten, der übrigen Hindernis-Zeichnungen und der Achsblasen.
+    house: std::cell::OnceCell<Vec<Vec<Vec2>>>,
+    drawn_obst: std::cell::OnceCell<(super::stamp_place::Obstacles, super::stamp_place::Obstacles)>,
+    bubble_obst: std::cell::OnceCell<super::stamp_place::Obstacles>,
 }
 
 impl<'a> Ctx<'a> {
@@ -151,7 +156,33 @@ impl<'a> Ctx<'a> {
         let hidden = overrides::hidden_elements(p, overrides::RuleView::at(a.scale, a.rules.as_ref()).view("plan"));
         let mv_sel = super::model_view::selected_id(p, &a.floor, a.model_view.as_deref()).and_then(|id| super::model_view::find(p, id));
         let mv = super::model_view::resolve(mv_sel, a.detail, a.scale);
-        Ctx { p, a, cats, hidden, mv_sel, mv }
+        Ctx { p, a, cats, hidden, mv_sel, mv, house: Default::default(), drawn_obst: Default::default(), bubble_obst: Default::default() }
+    }
+
+    /// [179] Aussenringe der Gebäudegrundfläche (`context::building_rings`), einmal je Plan.
+    pub(super) fn house_rings(&self) -> &[Vec<Vec2>] {
+        self.house.get_or_init(|| super::context::building_rings(self.p))
+    }
+
+    /// [179] Masse und Höhenkoten des Geschosses als Hindernisse (Achsblasen weichen ihnen aus).
+    pub(super) fn dims_obstacles(&self) -> &super::stamp_place::Obstacles {
+        &self.drawn_obst.get_or_init(|| super::drawings::drawn_and_dimension_obstacles(self)).1
+    }
+
+    /// [179] Hindernisse der Zeichnungen des Geschosses (Bemassung, Koten, Texte, Symbole).
+    pub(super) fn drawn_obstacles(&self) -> &super::stamp_place::Obstacles {
+        &self.drawn_obst.get_or_init(|| super::drawings::drawn_and_dimension_obstacles(self)).0
+    }
+
+    /// [179] Blasen und Beschriftungen der Achsraster als Hindernisse.
+    pub(super) fn bubble_obstacles(&self) -> &super::stamp_place::Obstacles {
+        self.bubble_obst.get_or_init(|| {
+            let mut o = super::stamp_place::Obstacles::default();
+            for q in super::drawings::grid_bubble_prims(self) {
+                o.add_prim(&q);
+            }
+            o
+        })
     }
 
     /// [173] Aufgelöste Darstellungsoptionen dieser Plan-Erzeugung (`plan/model_view.rs`).
@@ -1149,11 +1180,7 @@ fn stamp_obstacles(c: &Ctx, d: &DomainPrims) -> super::stamp_place::Obstacles {
 /// [150] Hindernisse der Zeichnungen des Geschosses (Bemassung, Koten, Texte, Symbole) — für Raumstempel und
 /// Höhenlinien-Beschriftungen, einmal gerechnet.
 fn drawing_obstacles(c: &Ctx) -> super::stamp_place::Obstacles {
-    let mut o = super::stamp_place::Obstacles::default();
-    for q in super::drawings::stamp_obstacle_prims(c) {
-        o.add_prim(&q);
-    }
-    o
+    c.drawn_obstacles().clone()
 }
 
 /// Hindernisse der Raumstempel: `drawn` (Zeichnungen) und die Domänen.

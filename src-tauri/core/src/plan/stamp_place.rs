@@ -62,6 +62,12 @@ impl Obstacles {
         h.finish()
     }
 
+    /// [179] Hindernisse von `o` hinten anhängen (Reihenfolge wie einzelnes `add_prim`).
+    pub fn extend(&mut self, o: &Obstacles) {
+        self.segs.extend_from_slice(&o.segs);
+        self.areas.extend(o.areas.iter().cloned());
+    }
+
     pub fn is_empty(&self) -> bool {
         self.segs.is_empty() && self.areas.is_empty()
     }

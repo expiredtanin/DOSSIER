@@ -1,6 +1,6 @@
 # Dossier — Arbeitsliste
 
-Stand 9.11.2026. Die vollständige bisherige Liste mit allen Details, Messwerten und Befunden steht
+Stand 11.11.2026. Die vollständige bisherige Liste mit allen Details, Messwerten und Befunden steht
 unverändert in [`doc/archiv/TODO-bis-2026-11-08.md`](doc/archiv/TODO-bis-2026-11-08.md) (rund 4500 Zeilen).
 Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `**[ID]`.
 
@@ -10,7 +10,7 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   stehen im Archiv („Bewusst nicht übernommen“).
 - **Grösse** (eine Person mit Agenten): S ≤ 1 Tag · M ≤ 1 Woche · L ≤ 1 Monat · XL > 1 Monat.
   Steht keine Grösse im Archiv, ist sie hier geschätzt.
-- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 163);
+- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 179);
   nie eine ID wiederverwenden oder umnummerieren. Präfix-IDs (`[K]`, `[G]`, `[T]`, `[B]`, `[C]`) bleiben.
 - **Pro Punkt:** was fehlt · wo im Code · Grösse. Höchstens ein bis drei Sätze je Punkt;
   Messwerte und Befunde gehören in den Commit.
@@ -456,6 +456,12 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
 
 ## Kern und Leistung
 
+- ◐ **[179]** Leistung messen und gezielt optimieren (11.11.2026, Linux-Container, `bench159`, Musterhaus komplex, Mittel ms).
+  Erledigt: Raster-Hindernisse (Masse/Koten, Zeichnungen, Achsblasen) und Gebäuderinge je Plan einmal im `Ctx` statt je Raster
+  und je Aufrufer neu; Masse/Koten und Zeichnungen in einem Durchgang. eg 1:100 83→57, 1:50 90→~62, mit Schatten 116→~90,
+  Schnittlinien 14.6→6.8, Zeichnungen 11.9→10; Wand verschieben + Plan 90→65 / 67→43. Goldens byte-gleich. Offen (grösste
+  Fresser): Kontext/Gelände 25 ms (Cache-Treffer klont 29–35k Primitive mit Strings, 6–25 ms: `cls`/`color` als `Rc<str>`
+  oder gepufferte Treffer), Schatten 30 ms, Räume/Stempel 1:50 14 ms, Kleine Änderung baut den Plan noch voll (kein Teil-Cache). Mac nicht gemessen. · M
 - ◐ **[58]** Inkrementelle Ableitung. 3D ist inkrementell; Schnitt/Ansicht (~100 ms) und Plan-Szene (`planToRenderScene`
   ~30 ms) noch voll; Gehrung über alle Wände je Update (~9 ms); Explosion ohne Cache; Upload/Frame mit echter GPU
   nicht gemessen. · L
