@@ -85,6 +85,7 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   gedämpft (render3d hat nur `set_ghost` für die Hülle); natives Mac-3D-Fenster bekommt nur den Ebenen-Baum, nicht
   den Darstellungsmodus; Datei-Exporte (OBJ/glTF/IFC/STEP) bleiben vollständig; kein e2e (3D-Pick headless unzuverlässig);
   nicht in der Tauri-App/auf dem Mac geprüft. · M
+- ○ **[189]** Panels neu ordnen + Einstellungsdialog (12.11., Maintainer): Attribute-Panel unten links nur Gestaltung (Stift, Füllung, Linienstil, Schraffur); BIM-/Bauteil-Infos (Typ, Schichten, Masse, Kennwerte, IFC/Psets, Material …) in die Objekt-Info. Taste T bei Auswahl öffnet direkt den Einstellungsdialog des Objekts (wie Archicad Cmd+T), v. a. für Fenster/Türen, deren Einstellungen heute nur über das Attribute-Panel erreichbar sind. · M
 - ○ **[187]** Griffe im Schnitt/in der Ansicht (12.11., Maintainer): angewählte Elemente haben dort kaum Fasspunkte (Decken, Gelände, Dächer …). Wie Archicad: Decke OK/UK (Höhe/Dicke), Wand OK (Höhe), Öffnung Brüstung/Sturz, Dach Traufe/First bzw. Neigung, Treppe An-/Austritt, Gelände-Profilpunkte (falls Modell es erlaubt); ein Undo-Schritt je Zug, Fang + Tab-Eingabe wie im Grundriss. · L
 - ○ **[186]** Schatten (12.11., Maintainer): (1) 3D-Schatten stellenweise unscharf (Shadow-Map-Auflösung/Frustum zu gross, Filter) → Frustum auf Gebäude fitten bzw. Kaskaden, schärferer PCF; (2) Grundriss-Schatten fehlt unmittelbar am Haus (Lücke zwischen Fassade und Schatten; vermutlich Werfer ab ±0.00 statt ab Wandfuss/Gelände) → Schatten beginnt an der Fassade. Opus. · M
 - ○ **[185]** Navigation wie Archicad (12.11., Wunsch Maintainer): Grundriss-Geschosswechsel behält Zoom/Ausschnitt exakt; Cmd+5 Geschoss runter, Cmd+6 hoch; Cmd+3 mit Auswahl (aus Grundriss/Schnitt/3D) → 3D-Tab nur mit der Auswahl (Tab-Titel „3D · Auswahl“), ohne Auswahl → wieder alles; Cmd+4 blendet gewählte Objekte im 3D temporär aus (zurück mit Cmd+3). Sonnet. · M
@@ -657,6 +658,7 @@ Einzeilig mit ID, Titel, Datum (2026). Kleine Reste erledigter Punkte (z. B. [T7
 exakte Durchdringung, [61] Zuordnung per Hand, [63] Profil je Kante, [70] Flächentabelle als Layout-Element,
 [80] Einzelplan-PDF ohne Ebenen, [82] Legende per Ziehen) stehen im Archiv beim jeweiligen Eintrag.
 
+- [188] Wand am Anfang kürzen/verlängern: Öffnungen bleiben im Plan stehen (Position ab Wandanfang wird beim Griff-Zug nachgeführt, gerade Wände; `grips.rs::openings_keep_place`) (12.11.)
 - [183] Elemente-Panel: Dachfenster/Deckenöffnungen ohne Wirtswand bekamen kein Geschoss (leere Gruppe); `export_schedule` nimmt Dach bzw. Decke als Wirt (12.11.)
 - [K0] Lader und Grenze (27.10.) · [K1] 2D-Geometrie inkl. Straight Skeleton [B2] (28.10.) · [K2] Geometrie-Ableitungen
   (27.10.) · [K3] Plan, Schnitt, Ansicht in Rust (29.10.) · [K4] Modell und Ops in Rust (29.10.)

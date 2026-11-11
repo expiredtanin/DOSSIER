@@ -234,7 +234,15 @@ pub fn run(lk: &Lookup, req: &Request) -> Result<GripResult, String> {
             };
             // Mit Zeichnung wird nur sie geändert (die Wand zählt dann nur für die Sperre).
             let (coll, e, wall) = if did.is_some() { ("drawings2d", d, false) } else { ("walls", w, true) };
-            e.and_then(|e| f(e, wall)).map(|e| vec![replace(coll, e)]).unwrap_or_default().into()
+            let Some((old, new)) = e.and_then(|e| f(e, wall).map(|n| (e, n))) else { return Ok(GripResult::default()) };
+            let mut ops = Vec::new();
+            // [188] Wand kürzen/verlängern: Öffnungen bleiben an ihrer Stelle im Plan (ihre Position zählt ab
+            // Wandanfang — ohne Ausgleich wanderten sie beim Ziehen des Anfangspunkts mit).
+            if wall && op == "moveGrip" {
+                ops.extend(openings_keep_place(root, old, &new));
+            }
+            ops.insert(0, replace(coll, new));
+            ops.into()
         }
         "resize" => {
             let (w, h, fx, fy) = (r.n("w"), r.n("h"), r.n("fx"), r.n("fy"));
@@ -474,6 +482,35 @@ pub fn run(lk: &Lookup, req: &Request) -> Result<GripResult, String> {
 }
 
 // ── Wand ─────────────────────────────────────────────────────────────────────
+
+/// [188] Öffnungen einer geraden Wand, deren Anfang/Ende verschoben wurde, so nachführen, dass sie im Plan stehen
+/// bleiben: neue Position = Projektion des alten Weltpunkts (Anfang + Richtung·Position) auf die neue Achse.
+/// Bogenwände (Position = Bogenlänge) bleiben wie bisher.
+fn openings_keep_place(root: &Map<String, Value>, old: &Value, new: &Value) -> Vec<Op> {
+    let is_arc = |w: &Value| crate::wall_arc::is_arc_bulge(field(w, "bulge").and_then(Value::as_f64));
+    if is_arc(old) || is_arc(new) {
+        return vec![];
+    }
+    let p = |w: &Value, k: &str| xy(field(w, k).unwrap_or(&Value::Null));
+    let (s0, e0, s1, e1) = (p(old, "start"), p(old, "end"), p(new, "start"), p(new, "end"));
+    let unit = |a: (f64, f64), b: (f64, f64)| {
+        let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+        let l = crate::jsmath::hypot2(dx, dy);
+        (l > 1e-12).then(|| (dx / l, dy / l))
+    };
+    let (Some(d0), Some(d1)) = (unit(s0, e0), unit(s1, e1)) else { return vec![] };
+    let Some(wid) = field(old, "id").and_then(Value::as_str) else { return vec![] };
+    crate::json_util::arr(root.get("openings"))
+        .iter()
+        .filter(|o| field(o, "hostWallId").and_then(Value::as_str) == Some(wid))
+        .filter_map(|o| {
+            let pos = field(o, "position").and_then(Value::as_f64)?;
+            let (wx, wy) = (s0.0 + d0.0 * pos, s0.1 + d0.1 * pos);
+            let np = (wx - s1.0) * d1.0 + (wy - s1.1) * d1.1;
+            ((np - pos).abs() > 1e-9).then(|| replace("openings", with(o, "position", js_num(np))))
+        })
+        .collect()
+}
 
 fn wall_grip(w: &Value, index: f64, x: f64, y: f64, fixed_center: bool, arc_length: f64) -> Value {
     // Bogenwand ([T2]): Griff 2 = Bogenscheitel; der Bogen geht durch den gezogenen Punkt.
@@ -1738,6 +1775,24 @@ mod tests {
         assert_eq!(num_of(Some(&json!("\u{1}Infinity"))), f64::INFINITY);
         assert_eq!(num_of(Some(&Value::Null)), 0.0);
         assert!(num_of(None).is_nan());
+    }
+
+    /// [188] Wand am Anfang kürzen: das Fenster bleibt an seiner Stelle im Plan (Position ab Wandanfang wird
+    /// nachgeführt); am Ende kürzen ändert die Position nicht.
+    #[test]
+    fn wand_kuerzen_fenster_bleibt_stehen() {
+        let r = root(json!({
+            "walls": [{"id": "w", "start": {"x": 0, "y": 0}, "end": {"x": 10, "y": 0}}],
+            "openings": [{"id": "o", "hostWallId": "w", "position": 4.0, "width": 1.2}, {"id": "x", "hostWallId": "andere", "position": 4.0}]
+        }));
+        let res = run(&Lookup::plain(&r), &rq(json!({"op": "moveGrip", "wallId": "w", "index": 0, "pt": [3, 0]}))).unwrap();
+        let ops: Vec<Value> = res.ops.iter().map(|o| o.to_json()).collect();
+        assert_eq!(ops.len(), 2, "Wand + eine Öffnung");
+        assert_eq!(ops[0]["entity"]["start"]["x"].as_f64(), Some(3.0));
+        assert_eq!(ops[1]["entity"]["id"], "o");
+        assert!((ops[1]["entity"]["position"].as_f64().unwrap() - 1.0).abs() < 1e-9, "4 m ab altem Anfang = 1 m ab neuem");
+        let res = run(&Lookup::plain(&r), &rq(json!({"op": "moveGrip", "wallId": "w", "index": 1, "pt": [7, 0]}))).unwrap();
+        assert_eq!(res.ops.len(), 1, "Ende kürzen: Öffnung unverändert");
     }
 
     /// [140] Stempel-Griff: ohne eigenen Anker ab der gezeichneten Lage `pt` (sonst ab dem Pol), mit Anker ab ihm.
