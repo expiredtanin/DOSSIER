@@ -2415,6 +2415,7 @@ export const de = {
   "site.excavation.shoringKind.soldierPile": "Rühlwand (Träger + Holz)",
   "site.excavation.shoringKind.borePile": "Bohrpfahlwand (Beton)",
   "site.excavation.shoringThickness": "Wanddicke [m]",
+  "site.excavation.shoringEmbed": "Einbindetiefe unter Sohle [m]",
   "site.excavation.workingSpaceWarn": "Arbeitsraum zu schmal: {min} m statt {need} m an {n} Stelle(n) (rotes Kreuz im Plan)",
   "site.excavation.shoringHint": "Gewählte Kanten: senkrechte Wand (Spundwand) statt Böschung",
   "site.earthDepth": "Erdreich-Band im Schnitt [m]",

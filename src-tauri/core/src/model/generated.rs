@@ -6379,6 +6379,10 @@ pub struct Excavation {
     #[serde(rename = "shoringThickness", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub shoring_thickness: Option<f64>,
+    /// [68] Einbindetiefe der Verbauwand unter die Sohle in m; fehlt = 1 m.
+    #[serde(rename = "shoringEmbed", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub shoring_embed: Option<f64>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,

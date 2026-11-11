@@ -277,7 +277,7 @@ fn append_shoring(out: &mut Output, p: &Project, base: (f64, f64), u: (f64, f64)
             let hatch_id = crate::excavation::shoring_hatch_id(spec.shore_kind);
             let hatch = crate::plan::style::resolve_hatch(p, hatch_id, None, None, None)
                 .unwrap_or(HatchRender { pattern: HatchPattern::Diagonal, scale: 1.0, angle: 45.0, color: HATCH_INK.into(), line_weight: 0.1, ..no_hatch_base() });
-            let z_bottom = e.bottom - crate::excavation::SHORING_EMBED;
+            let z_bottom = e.bottom - crate::excavation::shoring_embed(e);
             for (_, quad) in quads {
                 // Schnitt der Geraden base + s·u mit dem Viereck: erster und letzter Durchgang.
                 let mut ss: Vec<f64> = Vec::new();
@@ -360,11 +360,7 @@ fn append_earth(out: &mut Output, p: &Project, base: (f64, f64), u: (f64, f64)) 
         return;
     }
     let mut band = crate::polygon_bool::union(&band);
-    // [68] Verbauwände stehen im Erdreich: das Band lässt sie aus.
-    if !out.shoring.is_empty() {
-        let walls: Vec<crate::flat::Polygon> = out.shoring.iter().map(|w| vec![w.ring.clone()]).collect();
-        band = crate::polygon_bool::difference(&band, &walls);
-    }
+    // [68] Die Verbauwände lässt erst `section_primitives` aus, und nur die sichtbaren (ausgeblendete Klasse = kein Loch).
     // Gebäude-Inneres: Abschnitte der Schnittlinie in der Grundfläche.
     let mut holes: Vec<crate::flat::Polygon> = Vec::new();
     for poly in crate::site_rules::building_footprint(p) {

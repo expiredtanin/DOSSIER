@@ -432,7 +432,18 @@ pub fn section_primitives_mv(out: &Output, mono: bool, hidden_lines: bool, vis: 
     let tov = rules.terrain.as_ref();
     let terrain_shown = out.profiles.iter().all(|pr| pr.category.as_deref().is_none_or(shown)) && !tov.is_some_and(|(a, _)| a.hidden());
     if terrain_shown {
-        for (ring, hatch) in &out.earth {
+        // [68] Sichtbare Verbauwände stehen im Erdreich: das Band lässt sie aus.
+        let walls: Vec<crate::flat::Polygon> = out.shoring.iter().filter(|w| shown(&w.category)).map(|w| vec![w.ring.clone()]).collect();
+        let earth: Vec<(Vec<[f64; 2]>, &HatchRender)> = if walls.is_empty() {
+            out.earth.iter().map(|(r, h)| (r.clone(), h)).collect()
+        } else {
+            out.earth
+                .iter()
+                .flat_map(|(r, h)| crate::polygon_bool::difference(&[vec![r.clone()]], &walls).into_iter().filter_map(move |poly| poly.into_iter().next().filter(|o| o.len() >= 3).map(|o| (o, h))))
+                .collect()
+        };
+        for (ring, hatch) in &earth {
+            let hatch: &HatchRender = hatch;
             let hatch = match tov.and_then(|(_, l)| l.hatch.as_deref()) {
                 Some("none") => no_hatch(),
                 Some("material") | None => hatch.clone(),

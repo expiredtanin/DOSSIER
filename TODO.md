@@ -447,8 +447,12 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   Schnitt geschnittene Fläche mit Schraffur der Art (Stahl/Holz/Beton), unten Sohle − 1 m Einbindung, Erdreich-Band
   spart sie aus; im Grundriss Wandband an der Kante (Klasse der Baugrube, Pick = Baugrube); Sohlenfläche bei
   überlappenden Gruben exakt (i_overlay); Arbeitsraum-Prüfung `working_space_check` (enge Nischen, gekappte Gehrung):
-  rotes Kreuz im Plan, Warnung im Panel. Offen: Einbindetiefe fest 1 m (kein Feld), Verbau je Kante nur eine Art,
-  Verbau noch nicht in Ansicht/3D; nicht in der App angesehen; IVHB-Terrain nach kantonalem Recht. · M
+  rotes Kreuz im Plan, Warnung im Panel. (11.11., 2) Einbindetiefe als Feld `shoringEmbed` (Vorgabe 1 m, Panel);
+  Verbau auch im 3D (Körper je Kante in Farbe der Verbauart, Klasse der Baugrube, Pick = Baugrube; `excavation::
+  shoring_solids`) und in der Ansicht (Netz-Flächen mit exakter Sichtbarkeit `hlr_fill`, Klasse/Pick wie 3D);
+  Erdreich-Band im Schnitt lässt die Wand nur aus, wenn deren Klasse sichtbar ist (kein Loch bei ausgeblendeter
+  Klasse). Geprüft: cargo test (Kern), vitest, Goldens; nicht in der App/Metal angesehen. Offen: Verbau je Kante
+  nur eine Art, Ansicht ohne Verbau-Schraffur (nur Farbfläche); IVHB-Terrain nach kantonalem Recht. · M
 - ◐ **[143]** Baugrube erstellen. (9.11.) DXF/DWG-Höhenlinien werden beim Import erkannt (Layer-Name Höhenlinie/HL/
   Contour/Kote …, Erhebung Gruppe 38, 3D-Polylinien mit konstantem Z, sonst Höhentexte nahe der Linie) und als
   `contourSet` „02 Gelände“ statt als 2D-Zeichnung übernommen: Kern `import_terrain.rs`, Option „Höhenlinien als Gelände

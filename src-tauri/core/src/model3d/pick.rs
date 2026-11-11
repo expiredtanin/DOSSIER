@@ -201,6 +201,17 @@ pub fn pick_geometry(p: &Project) -> Result<PickGeometry, String> {
                 (pos, idx, &m.id)
             }
             ContextObject::ImportedMesh(m) => (std::borrow::Cow::Borrowed(m.positions.as_slice()), std::borrow::Cow::Borrowed(m.indices.as_slice()), &m.id),
+            // [68] Verbauwand: Körper der Baugrube (Positionen im Modell, Welt wie die übrigen Kontext-Meshes).
+            ContextObject::Excavation(e) => {
+                if let Some(s) = crate::excavation::shoring_solids(p).into_iter().find(|s| s.excavation_id == e.id) {
+                    let at = |i: u32| -> V3 { [s.pos[i as usize * 3], s.pos[i as usize * 3 + 2], -s.pos[i as usize * 3 + 1]] };
+                    let tris: Vec<Tri> = s.idx.chunks_exact(3).map(|t| [at(t[0]), at(t[1]), at(t[2])]).collect();
+                    if !tris.is_empty() {
+                        context_meshes.push(PickContextMesh { tris, context_object_id: e.id.clone() });
+                    }
+                }
+                continue;
+            }
             _ => continue,
         };
         let (pos, idx) = (&*pos, &*idx);

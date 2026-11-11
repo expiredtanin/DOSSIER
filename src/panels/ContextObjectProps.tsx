@@ -202,6 +202,7 @@ export function ContextObjectProps({ obj, quantities }: { obj: ContextObject; qu
               </select>
             </label>
             <NumField label={t("site.excavation.shoringThickness")} value={obj.shoringThickness} step={0.05} min={0.05} placeholder={obj.shoringKind === "borePile" ? "0.6" : obj.shoringKind === "soldierPile" ? "0.3" : "0.2"} onChange={patch("shoringThickness")} />
+            <NumField label={t("site.excavation.shoringEmbed")} value={obj.shoringEmbed} step={0.1} min={0} placeholder="1" onChange={patch("shoringEmbed")} />
           </>
         )}
         <ExcavationQty q={quantities.find((x) => x.id === obj.id)} />

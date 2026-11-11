@@ -594,3 +594,44 @@ fn netzkoerper_klasse_ausgeblendet() {
     assert!(emit_context_meshes(&mk(false)).is_empty());
     assert!(pick_geometry(&mk(false)).unwrap().context_meshes.is_empty());
 }
+
+/// [68] Verbau im 3D: Körper in der Farbe der Verbauart, Klasse der Baugrube, Pick wählt die Baugrube.
+#[test]
+fn verbau_im_3d_klasse_und_pick() {
+    let t = crate::model::TerrainMesh {
+        id: "t".into(),
+        category_code: "02".into(),
+        positions: vec![-50.0, -50.0, 0.0, 50.0, -50.0, 0.0, 50.0, 50.0, 0.0, -50.0, 50.0, 0.0],
+        indices: vec![0.0, 1.0, 2.0, 0.0, 2.0, 3.0],
+        ..Default::default()
+    };
+    let v = |x: f64, y: f64| crate::model::Vec2 { x, y };
+    let pit = crate::model::Excavation {
+        id: "bg".into(),
+        category_code: "07".into(),
+        outline: vec![v(0.0, 0.0), v(8.0, 0.0), v(8.0, 6.0), v(0.0, 6.0)],
+        bottom: -3.0,
+        edge_shoring: Some(vec![true, false, true, false]),
+        shoring_kind: Some("soldierPile".into()),
+        shoring_embed: Some(0.5),
+        ..Default::default()
+    };
+    let cat = |visible| crate::model::LayerCategory { code: "07".into(), name: "Baugrube".into(), visible, ..Default::default() };
+    let mk = |visible| Project { context: Some(vec![ContextObject::TerrainMesh(t.clone()), ContextObject::Excavation(pit.clone())]), layers: vec![cat(visible)], ..Default::default() };
+    let meshes = emit_context_meshes(&mk(true));
+    assert_eq!(meshes.len(), 2, "Gelände + Verbau");
+    let m = meshes.iter().find(|m| matches!(m.owner, Owner::Context(1))).unwrap();
+    assert_eq!(m.color, shoring_rgb("soldierPile"));
+    // Zwei Wände: unten Sohle - 0.5, oben Gelände (0).
+    let zs: Vec<f64> = m.positions.chunks_exact(3).map(|q| q[2]).collect();
+    assert!((zs.iter().cloned().fold(f64::INFINITY, f64::min) + 3.5).abs() < 1e-6 && zs.iter().cloned().fold(f64::NEG_INFINITY, f64::max).abs() < 1e-6);
+    assert_eq!(m.indices.len(), 2 * 12 * 3);
+    // Klasse aus: Verbau weg, Gelände bleibt.
+    let off = emit_context_meshes(&mk(false));
+    assert_eq!(off.len(), 1);
+    assert!(off.iter().all(|m| matches!(m.owner, Owner::Context(0))));
+    // Pick.
+    let g = pick_geometry(&mk(true)).unwrap();
+    assert!(g.context_meshes.iter().any(|m| m.context_object_id == "bg" && m.tris.len() == 24));
+    assert!(pick_geometry(&mk(false)).unwrap().context_meshes.iter().all(|m| m.context_object_id != "bg" || m.tris.len() != 24), "Klasse aus: kein Verbau-Pick");
+}

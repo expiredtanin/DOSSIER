@@ -2401,6 +2401,7 @@ export const en: Record<TranslationKey, string> = {
   "site.excavation.shoringKind.soldierPile": "Soldier pile wall (beams + timber)",
   "site.excavation.shoringKind.borePile": "Bored pile wall (concrete)",
   "site.excavation.shoringThickness": "Wall thickness [m]",
+  "site.excavation.shoringEmbed": "Embedment below base [m]",
   "site.excavation.workingSpaceWarn": "Working space too narrow: {min} m instead of {need} m at {n} spot(s) (red cross in the plan)",
   "site.excavation.shoringHint": "Selected edges: vertical wall (sheet piling) instead of a slope",
   "site.earthDepth": "Earth band in section [m]",

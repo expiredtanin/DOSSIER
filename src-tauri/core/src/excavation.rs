@@ -234,6 +234,11 @@ impl ExSpec {
 /// Einbindetiefe der Verbauwand unter die Sohle (m).
 pub const SHORING_EMBED: f64 = 1.0;
 
+/// Einbindetiefe der Baugrube (Feld `shoringEmbed`, Vorgabe [`SHORING_EMBED`]).
+pub fn shoring_embed(e: &Excavation) -> f64 {
+    e.shoring_embed.filter(|v| v.is_finite() && *v >= 0.0).unwrap_or(SHORING_EMBED)
+}
+
 /// Art des Verbaus und ihre Vorgabe-Dicke (m); Unbekanntes = Spundwand.
 pub fn shoring_kind(k: Option<&str>) -> (&'static str, f64) {
     match k {
@@ -263,6 +268,67 @@ impl ExSpec {
         let off = offset_ring(&self.ring, self.shore_t);
         (0..n).filter(|i| self.shored[*i]).map(|i| (i, vec![self.ring[i], self.ring[(i + 1) % n], off[(i + 1) % n], off[i]])).collect()
     }
+}
+
+/// [68] Verbauwand einer Baugrube als geschlossene Prismen (Modellbezug, Höhen = Gelände − Höhenbezug) für 3D, Ansicht
+/// und Pick: je verbauter Kante ein Körper von Sohle − Einbindetiefe bis zum gewachsenen Gelände.
+#[derive(Clone, Debug)]
+pub struct ShoringSolid {
+    pub excavation_id: String,
+    pub kind: &'static str,
+    /// x, y, z je Ecke.
+    pub pos: Vec<f64>,
+    pub idx: Vec<u32>,
+}
+
+/// Verbauwände aller Baugruben des Projekts, ein [`ShoringSolid`] je Baugrube mit Verbau.
+pub fn shoring_solids(p: &Project) -> Vec<ShoringSolid> {
+    let mut out: Vec<ShoringSolid> = Vec::new();
+    for t in terrains(p) {
+        if t.positions.len() < 9 {
+            continue;
+        }
+        let st = site_terrain(p, t);
+        let idx = st.index_orig();
+        for (id, spec, _) in &st.items {
+            if out.iter().any(|s| &s.excavation_id == id) {
+                continue;
+            }
+            let Some(e) = excavations(p).into_iter().find(|e| e.id == *id) else { continue };
+            let quads = spec.shoring_quads();
+            if quads.is_empty() {
+                continue;
+            }
+            let z_bottom = e.bottom - shoring_embed(e);
+            let mut s = ShoringSolid { excavation_id: id.clone(), kind: spec.shore_kind, pos: Vec::new(), idx: Vec::new() };
+            for (_, mut quad) in quads {
+                if signed_area(&quad) < 0.0 {
+                    quad.reverse();
+                }
+                let tops: Vec<Option<f64>> = quad.iter().map(|q| idx.z_at(q[0], q[1]).map(|z| (z - st.datum).max(e.bottom))).collect();
+                if tops.iter().any(Option::is_none) || tops.iter().flatten().all(|z| *z <= e.bottom + 1e-3) {
+                    continue;
+                }
+                let b = s.pos.len() as u32 / 3;
+                for q in &quad {
+                    s.pos.extend([q[0], q[1], z_bottom]);
+                }
+                for (q, z) in quad.iter().zip(&tops) {
+                    s.pos.extend([q[0], q[1], z.unwrap_or(e.bottom)]);
+                }
+                // Unterseite, Oberseite, vier Seiten (aussen, gegen den Uhrzeigersinn).
+                s.idx.extend([b, b + 2, b + 1, b, b + 3, b + 2, b + 4, b + 5, b + 6, b + 4, b + 6, b + 7]);
+                for i in 0..4u32 {
+                    let j = (i + 1) % 4;
+                    s.idx.extend([b + i, b + j, b + 4 + j, b + i, b + 4 + j, b + 4 + i]);
+                }
+            }
+            if !s.idx.is_empty() {
+                out.push(s);
+            }
+        }
+    }
+    out
 }
 
 /// Prüfung des Arbeitsraums an den Ecken des Umrisses ([68]).

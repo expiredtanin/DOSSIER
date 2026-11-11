@@ -1286,6 +1286,8 @@ export type Excavation = {
   shoringKind?: string;
   /** [68] Dicke der Verbauwand in m (nach aussen von der Sohlkante); fehlt = Vorgabe der Art. */
   shoringThickness?: number;
+  /** [68] Einbindetiefe der Verbauwand unter die Sohle in m; fehlt = 1 m. */
+  shoringEmbed?: number;
 };
 
 /** Ein extrudierter Körper: geschlossenes Profil (Modell-Meter) + Höhe. */

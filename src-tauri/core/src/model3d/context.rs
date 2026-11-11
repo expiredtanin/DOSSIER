@@ -61,8 +61,32 @@ pub fn emit_context_meshes(p: &Project) -> Vec<RMesh> {
                 owner: Owner::Context(ci),
                 crease_angle: (m.smooth_shading == Some(true)).then(|| m.crease_angle.filter(|a| a.is_finite() && *a > 0.0).unwrap_or(DEFAULT_CREASE_DEG).min(180.0)),
             }),
+            // [68] Verbauwand der Baugrube: Körper in der Farbe der Verbauart, Klasse und Pick der Baugrube.
+            ContextObject::Excavation(e) => {
+                if let Some(s) = crate::excavation::shoring_solids(p).into_iter().find(|s| s.excavation_id == e.id) {
+                    out.push(RMesh {
+                        positions: s.pos,
+                        indices: s.idx,
+                        kind: "imported",
+                        color: shoring_rgb(s.kind),
+                        vertex_colors: None,
+                        material_index: None,
+                        owner: Owner::Context(ci),
+                        crease_angle: None,
+                    })
+                }
+            }
             _ => {}
         }
     }
     out
+}
+
+/// [68] Bauteilfarbe der Verbauart: Stahl (Spundwand), Holz (Rühlwand), Beton (Bohrpfahlwand).
+pub fn shoring_rgb(kind: &str) -> Rgb {
+    match kind {
+        "soldierPile" => [0.62, 0.47, 0.30],
+        "borePile" => [0.72, 0.72, 0.70],
+        _ => [0.52, 0.56, 0.60],
+    }
 }
