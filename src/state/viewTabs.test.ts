@@ -14,6 +14,7 @@ import {
   navigateToLevel,
   switchViewKind,
   tabKindOf,
+  isPlanKindActive,
   openTab,
   restoreViewTabs,
   restoreViewTabsFromProject,
@@ -197,6 +198,13 @@ describe("Reiter-Arten und Navigation [182]", () => {
     expect(tabKindOf(live("ans"), levels)).toBe("elevation");
     expect(tabKindOf(live("det"), levels)).toBe("drawing");
     expect(tabKindOf(undefined, levels)).toBeNull();
+  });
+
+  it("isPlanKindActive: Grundriss-Knopf nur im Grundriss-Reiter hervorgehoben", () => {
+    expect(isPlanKindActive("grundriss", "floor")).toBe(true);
+    expect(isPlanKindActive("grundriss", "section")).toBe(false);
+    expect(isPlanKindActive("grundriss", "elevation")).toBe(false);
+    expect(isPlanKindActive("perspektive", "floor")).toBe(false);
   });
 
   it("Geschoss im 3D-Reiter: nur Geschoss wechselt, kein neuer Reiter", () => {

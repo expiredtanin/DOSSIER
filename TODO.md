@@ -49,7 +49,8 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   `state/tabNavigation.ts`): Geschoss im Navigator behält die Art (3D bleibt 3D, nur das Geschoss wechselt); Schnitt/Ansicht/Zeichnung/
   Layout/Ausschnitt anderer Art öffnen einen eigenen Reiter bzw. springen zum offenen; Grundriss-/3D-Knöpfe und Menü sind in jedem
   Reiter aktiv und wechseln/öffnen den 3D- bzw. Grundriss-Reiter (Titel „3D · Geschoss"). Der 3D-Live-Schnitt „3D im Schnitt-Reiter"
-  entfällt damit als Einstieg. Offen: nicht in der Tauri-App geprüft; Knopf „Grundriss" ist im Schnitt-Reiter noch hervorgehoben. · S
+  entfällt damit als Einstieg (toter Auto-Schnitt in `useSectionLineState` entfernt; der Live-Schnitt per Schalter im Objekt-Info der
+  Schnittlinie bleibt im 3D-Reiter). Knopf „Grundriss" nur im Grundriss-Reiter hervorgehoben (`isPlanKindActive`, 11.11.). Offen: nicht in der Tauri-App geprüft. · S
 - ○ **[181]** Importe als eigenständige Elemente (11.11., Wunsch Maintainer): Swisstopo-Gelände/-Gebäude, DXF-/IFC-Kontext usw. werden nach dem Import normale Modell-Elemente auf Ebenen (eigene Klasse), unabhängig von der Quelle; keine Import-Liste mehr, die Sichtbarkeit/Darstellung steuert. Gelände-Mesh als Gelände-/Freiflächen-Element, Gebäude als 3D-Körper (wie Möbel/Körper oder eigener Typ). Keine Migration nötig (nur Beispielprojekte nachführen). Opus. · L
 - ○ **[180]** Alles Sichtbare auf Ebene/Klasse (11.11., Vorgabe Maintainer): jedes Primitive in Plan/Schnitt/Ansicht (auch abgeleitete: Schatten, Auto-Masse, Koten, Schnitt-/Ansichtsmarken, Raster, Nordpfeil, Stempel, Gelände) hat eine Klasse/Ebene und verschwindet mit ihr; Audit + Test, der Primitives ohne Zuordnung meldet. Regel in CLAUDE.md. · M
 - ◐ **[133]** Musterhaus komplex: Rest. Skalieren-Kopie lässt `position`/Breite unverändert; Vollflächen-/Bildschraffur
@@ -191,8 +192,7 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   (`sun.rs`, Kern `plan/`). · M
 - ◐ **[64]+[59]** Sonnenstand/Schatten. Schatten im 3D (`render3d`, Shadow-Mapping) ist gebaut, aber nicht auf Metal
   und nicht in der App angesehen; mehrere Kaskaden erst bei grossen Lageplänen. · S
-- ◐ **[149]** Baum als eigenes Objekt. Nicht im Auswahlrechteck; keine Art-Beschriftung im Plan; Beschriftung fest
-  rechts vom Stamm (kein Ausweichen, kein Griff); Schnitt durch die Krone zeigt die ganze Silhouette; Fuss am
+- ◐ **[149]** Baum als eigenes Objekt. Auswahlrechteck, Gruppen, Art-Beschriftung (`species`/`showLabel`) und Beschriftungs-Griff sind gebaut (11.11. geprüft, TODO-Text war veraltet). Offen: Beschriftung weicht nicht aus; Schnitt durch die Krone zeigt die ganze Silhouette; Fuss am
   Gelände der Stammmitte (Hang). · M
 - ◐ **[148]** Flach-/Pultdach auf beliebigem Umriss (`roof_geometry`). Pult mit Höfen (Höfe ignoriert); Pult auf
   schiefem Umriss neigt nur entlang x/y (`ridgeAxis`); Attika/Gefälle fehlen im Modell; Dachfenster-Laibung genau auf
