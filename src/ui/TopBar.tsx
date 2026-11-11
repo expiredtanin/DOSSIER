@@ -271,8 +271,9 @@ function ViewSplitMenu({
   const active = viewType === "perspektive" && variants.includes(view3d);
 
   const select = (v: View3d) => {
-    onView3d(v);
+    // Zuerst in den 3D-Reiter wechseln ([182]), dann die Variante setzen (sonst überschreibt der Reiter sie).
     if (viewType !== "perspektive") onViewType("perspektive");
+    onView3d(v);
     setOpen(false);
   };
 
@@ -1208,8 +1209,8 @@ export const ViewRibbonTab = memo(function ViewRibbonTab({
               : ""
           }`}
           onClick={() => {
-            onView3d("perspective");
             if (viewType !== "perspektive") onViewType("perspektive");
+            onView3d("perspective");
           }}
           disabled={!viewToggleEnabled}
           title={viewToggleEnabled ? `${t("topbar.axo")} — ${t("topbar.axo.hint")}` : t("topbar.viewGroup.disabled")}

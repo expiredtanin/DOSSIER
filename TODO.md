@@ -44,7 +44,12 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
 
 ## Grundriss
 
-- ○ **[182]** Tabs/Ansichten wie Archicad (11.11., Wunsch Maintainer): Geschoss im Navigator wählen behält die Tab-Art (3D bleibt 3D, nur aktives Geschoss wechselt; Grundriss-Tab zeigt den Grundriss); Schnitt/Ansicht/2D-Zeichnung öffnen immer einen eigenen Tab (bzw. springen zum offenen), nie gemischt in einem Tab; aus dem Schnitt jederzeit ins 3D (eigener Tab), kein „Lock“ der Ansicht. Baut auf [136] (Reiter entkoppelt) auf. Sonnet. · M
+- ◐ **[182]** Tabs/Ansichten wie Archicad (11.11., Wunsch Maintainer). Umgesetzt: Reiter-Arten Grundriss · 3D · Schnitt · Ansicht ·
+  2D-Zeichnung/Layout werden nie gemischt (`navigateToLevel`/`switchViewKind` in `state/viewTabs.ts`, Anwendung in
+  `state/tabNavigation.ts`): Geschoss im Navigator behält die Art (3D bleibt 3D, nur das Geschoss wechselt); Schnitt/Ansicht/Zeichnung/
+  Layout/Ausschnitt anderer Art öffnen einen eigenen Reiter bzw. springen zum offenen; Grundriss-/3D-Knöpfe und Menü sind in jedem
+  Reiter aktiv und wechseln/öffnen den 3D- bzw. Grundriss-Reiter (Titel „3D · Geschoss"). Der 3D-Live-Schnitt „3D im Schnitt-Reiter"
+  entfällt damit als Einstieg. Offen: nicht in der Tauri-App geprüft; Knopf „Grundriss" ist im Schnitt-Reiter noch hervorgehoben. · S
 - ○ **[181]** Importe als eigenständige Elemente (11.11., Wunsch Maintainer): Swisstopo-Gelände/-Gebäude, DXF-/IFC-Kontext usw. werden nach dem Import normale Modell-Elemente auf Ebenen (eigene Klasse), unabhängig von der Quelle; keine Import-Liste mehr, die Sichtbarkeit/Darstellung steuert. Gelände-Mesh als Gelände-/Freiflächen-Element, Gebäude als 3D-Körper (wie Möbel/Körper oder eigener Typ). Keine Migration nötig (nur Beispielprojekte nachführen). Opus. · L
 - ○ **[180]** Alles Sichtbare auf Ebene/Klasse (11.11., Vorgabe Maintainer): jedes Primitive in Plan/Schnitt/Ansicht (auch abgeleitete: Schatten, Auto-Masse, Koten, Schnitt-/Ansichtsmarken, Raster, Nordpfeil, Stempel, Gelände) hat eine Klasse/Ebene und verschwindet mit ihr; Audit + Test, der Primitives ohne Zuordnung meldet. Regel in CLAUDE.md. · M
 - ◐ **[133]** Musterhaus komplex: Rest. Skalieren-Kopie lässt `position`/Breite unverändert; Vollflächen-/Bildschraffur

@@ -12,6 +12,7 @@ import { openLayerSettingsWindowNative, useLayerSettingsWindowHost } from "../na
 import { BUILTIN_PANEL_IDS } from "../panels/builtinPanels";
 import type { useContextMenuState } from "../menus/useContextMenuState";
 import { useStore, type RootState } from "./appStore";
+import { openLevel } from "./tabNavigation";
 import type { useDisplayResolvers } from "./useDisplayResolvers";
 import type { useProjectActions } from "./useProjectActions";
 
@@ -20,7 +21,6 @@ type Menu = ReturnType<typeof useContextMenuState>;
 export function useNativeWindowHosts(opts: {
   applyChange: RootState["applyChange"];
   activeLevelId: string;
-  setActiveLevelId: RootState["setActiveLevelId"];
   setModeFor: RootState["setModeFor"];
   drawingLevelsMode: ReturnType<typeof useDisplayResolvers>["drawingLevelsMode"];
   nativeLayerSettingsCode: Menu["nativeLayerSettingsCode"];
@@ -31,7 +31,6 @@ export function useNativeWindowHosts(opts: {
   const {
     applyChange,
     activeLevelId,
-    setActiveLevelId,
     setModeFor,
     drawingLevelsMode,
     nativeLayerSettingsCode,
@@ -83,7 +82,7 @@ export function useNativeWindowHosts(opts: {
       displayMode: drawingLevelsMode,
     },
     {
-      onSelectLevel: setActiveLevelId,
+      onSelectLevel: openLevel,
       onToggleLevel: toggleLevelVisible,
       onAddFloor: addFloor,
       onAddSection: addSection,

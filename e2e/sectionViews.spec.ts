@@ -1,7 +1,7 @@
 // [115] Maintainer-Befund am Musterhaus komplex: aus Schnitt/Ansicht liess sich nicht ins 3D wechseln, und ein
 // Schnitt liess sich nicht wie ein Grundriss auf ein Layout-Blatt legen (Viewport zeigte nur die 2D-Elemente).
 import type { Page } from "@playwright/test";
-import { discardIfAsked, expect, fileMenu, openTab, showSnapshot, startNewProject, test } from "./app";
+import { discardIfAsked, drawingTab, drawingTabs, expect, fileMenu, openTab, showSnapshot, startNewProject, test } from "./app";
 
 async function openComplex(page: Page) {
   await startNewProject(page);
@@ -15,27 +15,27 @@ async function openViewTab(page: Page, name: string) {
   await expect(page.locator("svg.plan-svg").first()).toBeVisible({ timeout: 30_000 });
 }
 
-test("Schnitt und Ansicht: Wechsel ins 3D (Schnitt mit Live-Schnitt) und zurück", async ({ page }) => {
+test("Schnitt und Ansicht: Wechsel ins 3D (eigener Reiter, Schnitt bleibt offen) und zurück", async ({ page }) => {
   test.setTimeout(120_000);
   await openComplex(page);
 
   await openViewTab(page, "Schnitt A-A");
-  // Axonometrie-Knopf in der Ansicht-Leiste ist nicht mehr gesperrt.
+  // [182] Axonometrie-Knopf ist nicht gesperrt und öffnet einen eigenen 3D-Reiter; der Schnitt-Reiter bleibt Schnitt.
   await page.getByRole("button", { name: "Axonometrie", exact: true }).click();
-  await expect(page.getByText("Perspektive · Schnitt A-A")).toBeVisible({ timeout: 30_000 });
-  // Live-Schnitt an der Schnittlinie gebunden.
-  await expect(page.getByRole("button", { name: "Schnittebene" })).toBeVisible();
+  await expect(drawingTabs(page).getByRole("tab", { name: /^3D/ })).toHaveAttribute("aria-selected", "true", { timeout: 30_000 });
+  await expect(drawingTab(page, "Schnitt A-A")).toHaveAttribute("aria-selected", "false");
   await page.screenshot({ path: "test-results/schnitt-3d.png" });
-  // Zurück in die Schnittzeichnung.
+  // Zurück: „Grundriss" wechselt in einen Grundriss-Reiter, der Schnitt-Reiter zeigt weiter die Schnittzeichnung.
   await page.getByRole("button", { name: "Grundriss", exact: true }).click();
-  await expect(page.getByText("Perspektive · Schnitt A-A")).toHaveCount(0);
+  await expect(drawingTabs(page).getByRole("tab", { name: /^3D/ })).toHaveAttribute("aria-selected", "false");
+  await drawingTab(page, "Schnitt A-A").click();
   await expect(page.locator("svg.plan-svg").first()).toBeVisible({ timeout: 30_000 });
 
   // Ansicht: über das Menü Ansicht → Perspektive.
   await openViewTab(page, "Ansicht Süd");
   await page.getByRole("button", { name: "Ansicht", exact: true }).click();
   await page.getByRole("option", { name: "Perspektive" }).first().click();
-  await expect(page.getByText("Perspektive · Ansicht Süd")).toBeVisible({ timeout: 30_000 });
+  await expect(drawingTabs(page).getByRole("tab", { name: /^3D/ })).toHaveAttribute("aria-selected", "true", { timeout: 30_000 });
 });
 
 test("Layout-Blatt: Viewport zeigt Schnitt wie einen Grundriss", async ({ page }) => {

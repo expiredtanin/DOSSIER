@@ -667,7 +667,7 @@ export interface PanelHostValue {
   onCaptureViewSnapshot: (name: string, folderId?: string) => string;
   /** Titel eines Reiters ohne Ausschnitt ([136]): aktive Zeichnungskombination bzw. Name der
    *  Zeichnungsebene `levelId` (ohne Argument: die aktive). */
-  viewTabAutoName: (levelId?: string) => string;
+  viewTabAutoName: (levelId?: string, is3d?: boolean) => string;
   /** Klick im Panel: zeigt den Ausschnitt im AKTIVEN Reiter und wählt ihn im Panel ([136]). */
   onApplyViewSnapshot: (id: string) => void;
   /** Doppelklick/Knopf im Panel: öffnet den Ausschnitt in einem NEUEN Reiter ([136]). */

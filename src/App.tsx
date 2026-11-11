@@ -47,6 +47,7 @@ import { openPointCloudFileDialog } from "./state/pointCloudStore";
 import { clearKinds, toIdLists } from "./state/selection";
 import { loadDrawingCombo, loadLayerCombo, saveDrawingCombo, saveLayerCombo } from "./state/visibilitySets";
 import { useViewTabs } from "./state/viewTabs";
+import { openLevel, switchViewType } from "./state/tabNavigation";
 import { useDialogState } from "./state/useDialogState";
 import { useTopBarState } from "./state/useTopBarState";
 import { useDrawingToolState } from "./state/useDrawingToolState";
@@ -486,7 +487,6 @@ export default function App() {
   const { openLayerSettings } = useNativeWindowHosts({
     applyChange,
     activeLevelId,
-    setActiveLevelId,
     setModeFor,
     drawingLevelsMode,
     nativeLayerSettingsCode,
@@ -505,7 +505,7 @@ export default function App() {
     canRedo,
     setLayout,
     viewType,
-    setViewType,
+    setViewType: switchViewType, // [182] Reiter-Art statt Umbau des Reiters
     view3d,
     setView3d,
     referenceLines,
@@ -748,7 +748,7 @@ export default function App() {
       onActivate: baseHost.onActivateViewTab,
       onNew: baseHost.onNewViewTab,
       onClose: baseHost.onCloseViewTab,
-      autoName: (levelId?: string) => baseHost.viewTabAutoName(levelId),
+      autoName: (levelId?: string, is3d?: boolean) => baseHost.viewTabAutoName(levelId, is3d),
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [baseHost, viewTabsState, drawingLevels],
@@ -762,7 +762,7 @@ export default function App() {
     canRedo,
     hasSelection: hasSelectionToDelete(),
     viewType,
-    setViewType,
+    setViewType: switchViewType, // [182] Reiter-Art statt Umbau des Reiters
     view3d,
     setView3d,
     referenceLines,
@@ -828,7 +828,7 @@ export default function App() {
     onClearSection3d: ev.onClearSection3d,
     mono: planColorMode === "mono",
     viewSnapshotTabs,
-    onSelectLevel: setActiveLevelId,
+    onSelectLevel: openLevel,
     floorDisplay,
     categoryDisplay,
     displayKey,

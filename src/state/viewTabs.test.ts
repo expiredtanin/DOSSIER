@@ -11,6 +11,9 @@ import {
   getViewTabs,
   initialTabs,
   linkActiveTab,
+  navigateToLevel,
+  switchViewKind,
+  tabKindOf,
   openTab,
   restoreViewTabs,
   restoreViewTabsFromProject,
@@ -170,5 +173,121 @@ describe("viewTabs [136] — mit dem Projekt gesichert", () => {
     expect(getViewTabs().tabs).toHaveLength(1);
     setViewStateBridge(null);
     vi.useRealTimers();
+  });
+});
+
+// ── [182] Reiter-Arten: Navigator und 3D/Grundriss ──────────────────────────
+describe("Reiter-Arten und Navigation [182]", () => {
+  const levels = [
+    { id: "eg", kind: "floor" as const },
+    { id: "og", kind: "floor" as const },
+    { id: "sec", kind: "section" as const },
+    { id: "sec2", kind: "section" as const },
+    { id: "ans", kind: "elevation" as const },
+    { id: "det", kind: "drawing" as const },
+  ];
+  const live = (activeLevelId: string, viewType: "grundriss" | "perspektive" = "grundriss"): ViewSnapshotState =>
+    ({ ...st(activeLevelId), viewType, cameraCenter: { x: 1, y: 2 }, cameraPxPerMeter: 40 }) as ViewSnapshotState;
+  const one = () => initialTabs();
+
+  it("tabKindOf: Art aus Ansicht und Ebene", () => {
+    expect(tabKindOf(live("eg"), levels)).toBe("plan");
+    expect(tabKindOf(live("eg", "perspektive"), levels)).toBe("3d");
+    expect(tabKindOf(live("sec"), levels)).toBe("section");
+    expect(tabKindOf(live("ans"), levels)).toBe("elevation");
+    expect(tabKindOf(live("det"), levels)).toBe("drawing");
+    expect(tabKindOf(undefined, levels)).toBeNull();
+  });
+
+  it("Geschoss im 3D-Reiter: nur Geschoss wechselt, kein neuer Reiter", () => {
+    const s = one();
+    const r = navigateToLevel(s, live("eg", "perspektive"), levels, "og");
+    expect(r.setLevel).toBe("og");
+    expect(r.apply).toBeNull();
+    expect(r.next).toBe(s);
+  });
+
+  it("Geschoss im Grundriss-Reiter: gleicher Reiter, Grundriss", () => {
+    const r = navigateToLevel(one(), live("eg"), levels, "og");
+    expect(r.setLevel).toBe("og");
+  });
+
+  it("Schnitt: neuer Reiter, 3D-Reiter bleibt bestehen", () => {
+    const s = one();
+    const r = navigateToLevel(s, live("eg", "perspektive"), levels, "sec");
+    expect(r.next.tabs).toHaveLength(2);
+    expect(r.next.tabs[0].id).toBe(s.tabs[0].id);
+    expect(r.next.tabs[0].state?.viewType).toBe("perspektive");
+    expect(r.apply?.activeLevelId).toBe("sec");
+    expect(r.apply?.viewType).toBe("grundriss");
+    expect(r.apply?.cameraCenter).toBeUndefined();
+    expect(r.next.activeId).toBe(r.next.tabs[1].id);
+  });
+
+  it("Schnitt zweimal: springt zum offenen Reiter, anderer Schnitt öffnet weiteren", () => {
+    const a = navigateToLevel(one(), live("eg"), levels, "sec");
+    const back = navigateToLevel(a.next, live("sec"), levels, "eg"); // Grundriss-Reiter wieder aktiv
+    expect(back.next.tabs).toHaveLength(2);
+    expect(back.apply?.activeLevelId).toBe("eg");
+    const again = navigateToLevel(back.next, live("eg"), levels, "sec");
+    expect(again.next.tabs).toHaveLength(2);
+    expect(again.next.activeId).toBe(a.next.activeId);
+    const other = navigateToLevel(again.next, live("sec"), levels, "sec2");
+    expect(other.next.tabs).toHaveLength(3);
+    expect(navigateToLevel(other.next, live("sec2"), levels, "sec2").apply).toBeNull();
+  });
+
+  it("Geschoss aus dem Schnitt: Grundriss-Reiter, Schnitt-Reiter bleibt Schnitt", () => {
+    const a = navigateToLevel(one(), live("eg"), levels, "sec");
+    const r = navigateToLevel(a.next, live("sec"), levels, "og");
+    expect(r.next.tabs).toHaveLength(2);
+    expect(r.apply).toMatchObject({ activeLevelId: "og", viewType: "grundriss" });
+    expect(r.next.tabs.find((t) => t.state?.activeLevelId === "sec")).toBeTruthy();
+  });
+
+  it("Ansicht und Zeichnung öffnen je einen eigenen Reiter", () => {
+    const a = navigateToLevel(one(), live("eg"), levels, "ans");
+    const b = navigateToLevel(a.next, live("ans"), levels, "det");
+    expect(b.next.tabs).toHaveLength(3);
+    expect(b.apply?.activeLevelId).toBe("det");
+  });
+
+  it("3D aus dem Schnitt: öffnet 3D-Reiter mit Geschoss, Schnitt-Reiter bleibt", () => {
+    const a = navigateToLevel(one(), live("eg"), levels, "sec");
+    const r = switchViewKind(a.next, live("sec"), levels, "perspektive");
+    expect(r.next.tabs).toHaveLength(3);
+    expect(r.apply).toMatchObject({ viewType: "perspektive", activeLevelId: "eg" });
+    expect(r.next.tabs.some((t) => t.state?.activeLevelId === "sec" && t.state.viewType === "grundriss")).toBe(true);
+  });
+
+  it("3D mit vorhandenem 3D-Reiter: wechselt dorthin, aus dem Grundriss mit dessen Geschoss", () => {
+    const s0 = one();
+    const a = switchViewKind(s0, live("eg"), levels, "perspektive"); // Grundriss -> neuer 3D-Reiter
+    expect(a.next.tabs).toHaveLength(2);
+    const planBack = switchViewKind(a.next, live("eg", "perspektive"), levels, "grundriss");
+    expect(planBack.next.tabs).toHaveLength(2);
+    expect(planBack.next.activeId).toBe(s0.tabs[0].id);
+    const toggle = navigateToLevel(planBack.next, live("eg"), levels, "og");
+    expect(toggle.setLevel).toBe("og");
+    const to3d = switchViewKind(planBack.next, live("og"), levels, "perspektive");
+    expect(to3d.next.tabs).toHaveLength(2);
+    expect(to3d.apply).toMatchObject({ viewType: "perspektive", activeLevelId: "og" });
+  });
+
+  it("Schon in der gewünschten Art: nichts zu tun", () => {
+    expect(switchViewKind(one(), live("eg", "perspektive"), levels, "perspektive").apply).toBeNull();
+    expect(switchViewKind(one(), live("eg"), levels, "grundriss").apply).toBeNull();
+  });
+
+  it("Grundriss aus dem Schnitt: zum vorhandenen Grundriss-Reiter, sonst neu", () => {
+    const a = navigateToLevel(one(), live("eg"), levels, "sec");
+    const r = switchViewKind(a.next, live("sec"), levels, "grundriss");
+    expect(r.next.tabs).toHaveLength(2);
+    expect(r.apply?.activeLevelId).toBe("eg");
+    // Nur Schnitt-Reiter offen -> neuer Grundriss-Reiter mit erstem Geschoss
+    const only = { tabs: [{ id: "x", state: live("sec") }], activeId: "x" };
+    const n = switchViewKind(only, live("sec"), levels, "grundriss");
+    expect(n.next.tabs).toHaveLength(2);
+    expect(n.apply).toMatchObject({ viewType: "grundriss", activeLevelId: "eg" });
   });
 });

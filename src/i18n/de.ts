@@ -341,6 +341,7 @@ export const de = {
 
   // ── Dokument-Tabs (Zeichnungen/Blätter) ─────────────────────────────────
   "tabs.drawings": "Zeichnungen",
+  "tabs.3d": "3D",
   "tabs.add": "Neuer Reiter mit der aktuellen Ansicht",
   "tabs.close": "Reiter „{name}\" schliessen",
 

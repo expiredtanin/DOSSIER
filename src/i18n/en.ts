@@ -339,6 +339,7 @@ export const en: Record<TranslationKey, string> = {
 
   // Document tabs (drawings/sheets).
   "tabs.drawings": "Drawings",
+  "tabs.3d": "3D",
   "tabs.add": "New tab with the current view",
   "tabs.close": "Close tab “{name}”",
 

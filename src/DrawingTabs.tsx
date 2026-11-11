@@ -22,7 +22,7 @@ export interface ViewSnapshotTabsHandlers {
   onNew: () => void;
   onClose: (tabId: string) => void;
   /** Titel eines Reiters ohne Ausschnitt (Zeichnungskombination bzw. Zeichnungsebene). */
-  autoName: (levelId?: string) => string;
+  autoName: (levelId?: string, is3d?: boolean) => string;
 }
 
 const NO_SNAPSHOTS: ViewSnapshot[] = [];
@@ -31,8 +31,13 @@ const NO_SNAPSHOTS: ViewSnapshot[] = [];
 export const DrawingTabs = memo(function DrawingTabs({ handlers }: { handlers: ViewSnapshotTabsHandlers }) {
   const snapshots = useStore((s) => s.project.viewSnapshots) ?? NO_SNAPSHOTS;
   const { tabs, onActivate, onNew, onClose, autoName } = handlers;
+  const liveLevelId = useStore((s) => s.activeLevelId);
+  const liveIs3d = useStore((s) => s.viewType === "perspektive");
+  // 3D-Reiter heissen „3D · Geschoss" (der aktive liest die Live-Ansicht).
   const title = (tab: ViewTab) =>
-    tabTitle(tab, snapshots, (tb) => autoName(tb.id === tabs.activeId ? undefined : tb.state?.activeLevelId));
+    tabTitle(tab, snapshots, (tb) =>
+      tb.id === tabs.activeId ? autoName(liveIs3d ? liveLevelId : undefined, liveIs3d) : autoName(tb.state?.activeLevelId, tb.state?.viewType === "perspektive"),
+    );
   const closable = tabs.tabs.length > 1;
 
   return (

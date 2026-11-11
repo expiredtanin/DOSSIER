@@ -15,11 +15,16 @@
 // - Wird ein Ausschnitt gelöscht, bleiben seine Reiter offen (sie tragen ihren eigenen Zustand) und
 //   behalten den letzten Namen als Titel; die Verbindung zum Ausschnitt fällt weg.
 // - Neues/geöffnetes Projekt: ein einziger Reiter mit der aktuellen Ansicht.
+// - Reiter-Arten wie in Archicad ([182]): Grundriss, 3D, Schnitt, Ansicht, 2D-Zeichnung werden nie in einem
+//   Reiter gemischt. Geschoss im Navigator wählen behält die Art des aktiven Reiters (3D bleibt 3D); Schnitt,
+//   Ansicht, Zeichnung öffnen einen eigenen Reiter bzw. springen zum offenen; 3D/Grundriss sind aus jedem
+//   Reiter erreichbar (`navigateToLevel`, `switchViewKind`).
 //
 // Pure Funktionen + ein kleiner externer Store (Muster liveScaleStore.ts).
 
 import { useSyncExternalStore } from "react";
-import type { Project, UiState } from "../model/types";
+import type { DrawingLevel, Project, UiState } from "../model/types";
+import type { ViewType } from "../model/viewTypes";
 import type { ViewSnapshotState } from "./viewSnapshots";
 
 export interface ViewTab {
@@ -97,6 +102,122 @@ export function closeTab(
   return { next: { tabs, activeId: neighbour.id }, apply: neighbour.state ?? null };
 }
 
+// ── Reiter-Arten und Navigation ([182]) ─────────────────────────────────────
+
+export type TabKind = "plan" | "3d" | "section" | "elevation" | "drawing";
+type LevelLite = Pick<DrawingLevel, "id" | "kind">;
+type KindState = Pick<ViewSnapshotState, "viewType" | "activeLevelId">;
+
+/** Reiter-Art, die eine Zeichnungsebene (ohne 3D) öffnet. */
+export function levelTabKind(kind: DrawingLevel["kind"]): Exclude<TabKind, "3d"> {
+  return kind === "floor" ? "plan" : kind === "section" ? "section" : kind === "elevation" ? "elevation" : "drawing";
+}
+
+/** Art eines Reiters aus seinem Darstellungszustand (`null`: unbekannt, z. B. ohne gemerkten Zustand). */
+export function tabKindOf(st: KindState | undefined, levels: readonly LevelLite[]): TabKind | null {
+  if (!st) return null;
+  if (st.viewType === "perspektive") return "3d";
+  const level = levels.find((l) => l.id === st.activeLevelId);
+  return level ? levelTabKind(level.kind) : null;
+}
+
+/** Ergebnis einer Reiter-Navigation: neuer Reiter-Stand, anzuwendender Zustand und/oder nur Geschosswechsel im selben Reiter. */
+export interface TabNav {
+  next: ViewTabsState;
+  /** Voller Zustand, der anzuwenden ist (anderer/neuer Reiter), sonst `null`. */
+  apply: ViewSnapshotState | null;
+  /** Gleicher Reiter, nur das aktive Geschoss wechselt (Ansichtsart bleibt). */
+  setLevel?: string;
+}
+
+function noCamera(st: ViewSnapshotState): ViewSnapshotState {
+  const { cameraCenter: _c, cameraPxPerMeter: _p, ...rest } = st;
+  return rest;
+}
+
+function firstFloor(levels: readonly LevelLite[]): string | undefined {
+  return levels.find((l) => l.kind === "floor")?.id;
+}
+
+/** Geschoss für einen neuen 3D-/Grundriss-Reiter, wenn die aktuelle Ansicht keines hat. */
+function lastFloorId(s: ViewTabsState, levels: readonly LevelLite[]): string | undefined {
+  for (const t of s.tabs) {
+    const k = tabKindOf(t.state, levels);
+    if ((k === "plan" || k === "3d") && t.state) return t.state.activeLevelId;
+  }
+  return firstFloor(levels);
+}
+
+function activateOther(stored: ViewTabsState, tab: ViewTab, state: ViewSnapshotState): TabNav {
+  return { next: { ...stored, activeId: tab.id }, apply: state };
+}
+
+function openNew(stored: ViewTabsState, state: ViewSnapshotState): TabNav {
+  const id = newTabId();
+  const i = stored.tabs.findIndex((t) => t.id === stored.activeId);
+  const tabs = [...stored.tabs];
+  tabs.splice(i < 0 ? tabs.length : i + 1, 0, { id, state });
+  return { next: { tabs, activeId: id }, apply: state };
+}
+
+/**
+ * Ebene im Navigator gewählt. Geschoss: im Grundriss-/3D-Reiter bleibt die Art, nur das Geschoss wechselt;
+ * aus Schnitt/Ansicht/Zeichnung geht es in einen Grundriss-Reiter. Schnitt/Ansicht/Zeichnung: eigener
+ * Reiter (der offene dieses Elements wird aktiv), nie ein umgebauter Grundriss-/3D-Reiter.
+ */
+export function navigateToLevel(
+  s: ViewTabsState,
+  live: ViewSnapshotState,
+  levels: readonly DrawingLevel[] | readonly LevelLite[],
+  levelId: string,
+): TabNav {
+  const level = levels.find((l) => l.id === levelId);
+  if (!level) return { next: s, apply: null };
+  const want = levelTabKind(level.kind);
+  const liveKind = tabKindOf(live, levels);
+  if (want === "plan" && (liveKind === "plan" || liveKind === "3d")) {
+    return live.activeLevelId === levelId ? { next: s, apply: null } : { next: s, apply: null, setLevel: levelId };
+  }
+  if (want !== "plan" && liveKind === want && live.activeLevelId === levelId) return { next: s, apply: null };
+  const stored = storeActiveState(s, live);
+  const others = stored.tabs.filter((t) => t.id !== stored.activeId);
+  if (want === "plan") {
+    const same = others.find((t) => tabKindOf(t.state, levels) === "plan" && t.state!.activeLevelId === levelId);
+    const any = same ?? others.find((t) => tabKindOf(t.state, levels) === "plan");
+    if (any) return activateOther(stored, any, { ...any.state!, activeLevelId: levelId });
+  } else {
+    const found = others.find((t) => tabKindOf(t.state, levels) === want && t.state!.activeLevelId === levelId);
+    if (found) return activateOther(stored, found, found.state!);
+  }
+  return openNew(stored, noCamera({ ...live, viewType: "grundriss", activeLevelId: levelId }));
+}
+
+/**
+ * „Grundriss" bzw. „3D" gewählt (Werkzeugleiste, Menü, Kürzel): aus jedem Reiter erreichbar, wechselt zum
+ * passenden Reiter (bei Grundriss/3D mit dem aktiven Geschoss) oder öffnet ihn. Schnitt-/Ansichts-Reiter
+ * werden nie umgebaut.
+ */
+export function switchViewKind(
+  s: ViewTabsState,
+  live: ViewSnapshotState,
+  levels: readonly DrawingLevel[] | readonly LevelLite[],
+  want: ViewType,
+): TabNav {
+  const wantKind: TabKind = want === "perspektive" ? "3d" : "plan";
+  const liveKind = tabKindOf(live, levels);
+  if (liveKind === wantKind) return { next: s, apply: null };
+  // Geschoss mitnehmen, wenn die aktuelle Ansicht ein Geschoss zeigt (Grundriss ↔ 3D).
+  const carry = liveKind === "plan" || liveKind === "3d" ? live.activeLevelId : undefined;
+  const stored = storeActiveState(s, live);
+  const others = stored.tabs.filter((t) => t.id !== stored.activeId);
+  const sameKind = others.filter((t) => tabKindOf(t.state, levels) === wantKind);
+  const found = sameKind.find((t) => carry && t.state!.activeLevelId === carry) ?? sameKind[0];
+  if (found) return activateOther(stored, found, carry ? { ...found.state!, activeLevelId: carry } : found.state!);
+  const levelId = carry ?? lastFloorId(stored, levels);
+  if (!levelId) return { next: s, apply: null };
+  return openNew(stored, noCamera({ ...live, viewType: want, activeLevelId: levelId }));
+}
+
 /** Verbindet den aktiven Reiter mit einem Ausschnitt (Klick im Panel / Speichern). */
 export function linkActiveTab(s: ViewTabsState, snapshotId: string): ViewTabsState {
   return {
@@ -157,6 +278,10 @@ let bridge: ViewStateBridge | null = null;
 
 export function setViewStateBridge(b: ViewStateBridge | null): void {
   bridge = b;
+}
+
+export function getViewStateBridge(): ViewStateBridge | null {
+  return bridge;
 }
 
 /** Reiter für die Datei: der aktive trägt den Live-Zustand `live` (sonst seinen gemerkten). */

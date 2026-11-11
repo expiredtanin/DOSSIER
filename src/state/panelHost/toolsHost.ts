@@ -5,10 +5,11 @@
 
 import { isTauriRuntime } from "../../native/projectFile";
 import { openDrawingLevelsWindowNative } from "../../native/drawingLevelsWindow";
+import { openLevel } from "../tabNavigation";
 import type { FlatHostOpts, HostPart } from "./types";
 
 export function buildToolsHost(c: FlatHostOpts) {
-  const { activeCategoryCode, activeLevel, activeLevelId, activeTool, activeWallTypeId, addCategory, addCeiling, addCeilingType, addComponent, addDrawing, addElevation, addFloor, addHatch, addLineStyle, addRoofType, addSection, addTextStyle, addWallType, deleteCeilingType, deleteComponent, deleteHatch, deleteLineStyle, deleteRoofType, deleteTextStyle, deleteWallType, engineView, importHatches, importLineStyles, onRunCommand, onSelectTool, openLayerSettings, openSettings, patchCeilingType, patchComponent, patchHatch, patchLineStyle, patchRoofType, patchTextStyle, patchWallType, setActiveCategoryCode, setActiveLevelId, setActiveWallTypeId, setMenu, setSnap, snap, toggleCategoryVisible, toggleLevelVisible } = c;
+  const { activeCategoryCode, activeLevel, activeLevelId, activeTool, activeWallTypeId, addCategory, addCeiling, addCeilingType, addComponent, addDrawing, addElevation, addFloor, addHatch, addLineStyle, addRoofType, addSection, addTextStyle, addWallType, deleteCeilingType, deleteComponent, deleteHatch, deleteLineStyle, deleteRoofType, deleteTextStyle, deleteWallType, engineView, importHatches, importLineStyles, onRunCommand, onSelectTool, openLayerSettings, openSettings, patchCeilingType, patchComponent, patchHatch, patchLineStyle, patchRoofType, patchTextStyle, patchWallType, setActiveCategoryCode, setActiveWallTypeId, setMenu, setSnap, snap, toggleCategoryVisible, toggleLevelVisible } = c;
   return {
     activeLevelId,
     activeTool,
@@ -23,7 +24,7 @@ export function buildToolsHost(c: FlatHostOpts) {
     onActiveWallTypeId: setActiveWallTypeId,
     snap,
     onSnapChange: setSnap,
-    onSelectLevel: setActiveLevelId,
+    onSelectLevel: openLevel,
     onToggleLevel: toggleLevelVisible,
     onAddFloor: addFloor,
     onAddDrawing: addDrawing,

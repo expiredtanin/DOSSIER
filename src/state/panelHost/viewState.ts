@@ -44,7 +44,7 @@ export interface ViewStateFns {
 }
 
 export function buildViewStateFns(c: FlatHostOpts): ViewStateFns {
-  const { activeLevelId, applyChange, applyDrawingVisibility, applyLayerVisibility, detail, fov, planViewRef, scaleDenominator, setActiveLevelId, setDetail, setFov, setScaleDenominator, setView3d, setViewType, snapshotDrawingVisibility, snapshotLayerVisibility, view3d, viewType } = c;
+  const { activeLevelId, applyChange, applyDrawingVisibility, applyLayerVisibility, detail, fov, planViewRef, scaleDenominator, setActiveLayoutId, setActiveLevelId, setDetail, setFov, setScaleDenominator, setView3d, setViewType, snapshotDrawingVisibility, snapshotLayerVisibility, view3d, viewType } = c;
   // Aktueller Darstellungszustand (Ansicht/Kamera/Massstab/Detail/Geschoss + Sichtbarkeit + Overrides).
   const liveViewState = (): ViewSnapshotState => ({
     viewType,
@@ -64,6 +64,9 @@ export function buildViewStateFns(c: FlatHostOpts): ViewStateFns {
   // Den imperativen Massstab-Zoom (Plan muss für den neuen View gemountet sein) via rAF nachziehen.
   const applyViewState = (st: ViewSnapshotState) => {
     setActiveLevelId(st.activeLevelId);
+    // [182] Reiter eines Layouts: das Blatt wieder öffnen (sonst schickt der Blatt-Effekt zur vorigen Ebene zurück).
+    const sheetLayout = getState().project.drawingLevels.find((l) => l.id === st.activeLevelId)?.layoutId;
+    if (sheetLayout) setActiveLayoutId(sheetLayout);
     setViewType(st.viewType);
     setView3d(st.view3d);
     setFov(st.fov);
@@ -83,6 +86,7 @@ export function buildViewStateFns(c: FlatHostOpts): ViewStateFns {
           );
       });
     }
+    if (sheetLayout) return; // Blatt: das Layout passt sich selbst ein (1:1), kein Plan-Massstab
     requestAnimationFrame(() => {
       planViewRef.current?.applyScale(st.scaleDenominator);
       // Kamera NACH `applyScale` restaurieren (nicht statt): `applyScale` setzt auch die

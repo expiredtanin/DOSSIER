@@ -6,6 +6,7 @@ import { t } from "../../i18n";
 import { createLayout, createLayoutFolder, createMasterLayout, deleteFolder as deleteLayoutFolder, deleteMasterFolder, moveLayoutToFolder, moveFolderToFolder, createSheetLevel } from "../../model/layoutModel";
 import { folderPdfBytes } from "../../export/layoutPdf";
 import { addPublishSetOps, deletePublishSetOps, patchPublishSetOps, publishSet } from "../publishActions";
+import { openLayoutTab } from "../tabNavigation";
 import { saveBinaryFile } from "../../native/saveFile";
 import type { FlatHostOpts, HostPart } from "./types";
 
@@ -20,6 +21,7 @@ export function buildLayoutsHost(c: FlatHostOpts) {
       const lay = createLayout(`lay-${Date.now()}`, name, paper, orientation);
       // Jedes Blatt trägt seine Blatt-Ebene (2D-Zeichnung auf dem Blatt, s. layoutModel).
       applyChange([...addItems("layouts", [lay]), ...addItems("drawingLevels", [createSheetLevel(`sheet-${lay.id}`, lay)])]);
+      openLayoutTab(lay.id);
       setActiveLayoutId(lay.id);
     },
     onRenameLayout: (id, name) => {
@@ -38,7 +40,10 @@ export function buildLayoutsHost(c: FlatHostOpts) {
       });
       setActiveLayoutId((cur) => (cur === id ? null : cur));
     },
-    onOpenLayout: (id) => setActiveLayoutId(id),
+    onOpenLayout: (id) => {
+      openLayoutTab(id); // [182] Layout in eigenem Reiter
+      setActiveLayoutId(id);
+    },
     onAddMasterLayout: (name) => {
       const m = createMasterLayout(`mas-${Date.now()}`, name, "a4", "portrait");
       applyChange(addItems("masterLayouts", [m]));

@@ -7,14 +7,14 @@ import { addItems, fieldOps, patchItem, removeItems } from "../../core";
 import { t } from "../../i18n";
 import { getState } from "../appStore";
 import { captureViewSnapshot, matchingComboName, readViewSnapshot } from "../viewSnapshots";
-import { setViewStateBridge, activateTab, activeTab, closeTab, detachSnapshots, getViewTabs, linkActiveTab, openTab, setViewTabs, storeActiveState, type ViewTabsState } from "../viewTabs";
+import { setViewStateBridge, activateTab, activeTab, closeTab, detachSnapshots, getViewTabs, linkActiveTab, openTab, setViewTabs, storeActiveState, tabKindOf, type ViewTabsState } from "../viewTabs";
 import { createViewSnapshotFolder, deleteFolder as deleteViewSnapshotFolder, moveSnapshotToFolder, moveFolder as moveViewSnapshotFolder } from "../viewSnapshotFolders";
 import { listDrawingCombos, listLayerCombos, loadDrawingCombo, loadLayerCombo } from "../visibilitySets";
 import type { FlatHostOpts, HostPart } from "./types";
 import type { ViewStateFns } from "./viewState";
 
 /** Letzter Klick auf einen Ausschnitt im Panel (Doppelklick-Erkennung, [136]). */
-let lastPanelClick: { id: string; at: number; tabs: ViewTabsState } | null = null;
+let lastPanelClick: { id: string; at: number; tabs: ViewTabsState; opened?: boolean } | null = null;
 
 export function buildViewSnapshotsHost(c: FlatHostOpts, view: ViewStateFns) {
   const { activeLevelId, applyChange, project, selectedViewSnapshotId, setSelectedViewSnapshotId, snapshotDrawingVisibility } = c;
@@ -42,7 +42,8 @@ export function buildViewSnapshotsHost(c: FlatHostOpts, view: ViewStateFns) {
 
     // Titel eines Reiters ohne Ausschnitt: aktive Zeichnungskombination (falls deren
     // Sichtbarkeits-Map exakt passt), sonst die Zeichnungsebene des Reiters.
-    viewTabAutoName: (levelId?: string): string => {
+    viewTabAutoName: (levelId?: string, is3d?: boolean): string => {
+      if (is3d) return levelId ? `${t("tabs.3d")} · ${project.drawingLevels.find((l) => l.id === levelId)?.name ?? levelId}` : t("tabs.3d");
       if (!levelId || levelId === activeLevelId) {
         const combo = matchingComboName(listDrawingCombos(), loadDrawingCombo, snapshotDrawingVisibility());
         if (combo) return combo;
@@ -56,6 +57,22 @@ export function buildViewSnapshotsHost(c: FlatHostOpts, view: ViewStateFns) {
       // Aktuellen Stand lesen (direkt nach einer Änderung am Ausschnitt ist `project` hier noch der alte).
       const snap = (getState().project.viewSnapshots ?? []).find((s) => s.id === id);
       if (!snap) return;
+      // [182] Andere Art als der aktive Reiter (Schnitt im Grundriss-Reiter …): nie umbauen, sondern zum offenen
+      // Reiter dieses Ausschnitts springen bzw. einen neuen öffnen.
+      const levels = getState().project.drawingLevels;
+      const target = readViewSnapshot(snap);
+      const live = liveViewState();
+      const kind = tabKindOf(target, levels);
+      if (kind !== tabKindOf(live, levels)) {
+        const stored = storeActiveState(getViewTabs(), live);
+        const existing = stored.tabs.find((tb) => tb.id !== stored.activeId && tb.snapshotId === id && tabKindOf(tb.state, levels) === kind);
+        lastPanelClick = { id, at: Date.now(), tabs: stored, opened: true };
+        if (existing) setViewTabs({ ...stored, activeId: existing.id });
+        else setViewTabs(openTab(getViewTabs(), { snapshotId: id }, live));
+        applyViewState(target); // der Ausschnitt wird gezeigt (im offenen Reiter ersetzt er dessen Stand)
+        setSelectedViewSnapshotId(id);
+        return;
+      }
       // Für einen folgenden Doppelklick merken, was der aktive Reiter vorher zeigte.
       lastPanelClick = { id, at: Date.now(), tabs: storeActiveState(getViewTabs(), liveViewState()) };
       applyViewState(readViewSnapshot(snap));
@@ -71,6 +88,7 @@ export function buildViewSnapshotsHost(c: FlatHostOpts, view: ViewStateFns) {
       // dieser behält seinen früheren Inhalt, nur der neue Reiter zeigt den Ausschnitt.
       const prev = lastPanelClick;
       lastPanelClick = null;
+      if (prev && prev.id === id && prev.opened && Date.now() - prev.at < 1000) return; // der Klick hat schon einen Reiter geöffnet
       const base = prev && prev.id === id && Date.now() - prev.at < 1000 ? prev.tabs : undefined;
       const cur = getViewTabs();
       setViewTabs(

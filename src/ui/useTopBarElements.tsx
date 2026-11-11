@@ -180,7 +180,7 @@ export function useTopBarElements(opts: {
   const viewControlsEl = useMemo(
     () => (
       <ViewRibbonTab
-        viewToggleEnabled={has3dView}
+        viewToggleEnabled={true} /* [182] 3D/Grundriss sind aus jedem Reiter erreichbar */
         viewType={viewType}
         onViewType={setViewType}
         view3d={view3d}
