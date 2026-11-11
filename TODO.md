@@ -323,8 +323,10 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   freien Körper über das Kern-Netz (`solid_mesh.rs`): Poché = Ebenenschnitt auf Schnitthöhe (B-Rep, Eckenradius/Fase,
   Löcher, Verjüngung), darunter Aufsicht, darüber Überkopf; `ExtrudedSolid.componentId` (Objekt-Info „Bauteil")
   gibt Füllung/SIA-Schraffur in Grundriss und Schnitt; Abzugskörper beliebiger Form sparen Wände/Stützen (Ebenenschnitt)
-  und Decken (Grundriss im Plattenband, Manifold + i_overlay) aus; Kreis-Körper ohne `points` bauen. Offen: Untersicht
-  von Wendel-/Podesttreppen; Abzugskörper-Symbol bleibt das Profil-Rechteck mit Kreuz; Körper verdecken keine
+  und Decken (Grundriss im Plattenband, Manifold + i_overlay) aus; Kreis-Körper ohne `points` bauen. 11.11. (2): Abzugskörper zeigen ihren echten
+  Schnittumriss (Ebenenschnitt des Kern-Netzes) als Strich-Punkt-Linie, Diagonalkreuz nur beim Durchbruch durch eine Decke
+  (`extras::void_pierces_slab`); Treppen (alle Formen) des Geschosses darüber erscheinen im Deckenloch als gestrichelte
+  Untersicht (`stairs.rs::underside`, `RunOpts.no_break`; ohne Loch nicht). Offen: Körper verdecken keine
   importierten Netze (getrennte Sichtbarkeitsrechnung); nicht in der Tauri-App geprüft. · M
 - ◐ **[G2]** Wand an Dach. Ansicht bleibt Painter + Verdeckungstest (→ [G4]); fast achsparallele Grenzen im Band nur
   genähert; Fenster, das ins Dach ragt, verliert seinen Sturz; Dachgeometrie im 3D-Live-Schnitt unverändert

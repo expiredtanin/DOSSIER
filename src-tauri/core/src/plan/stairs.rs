@@ -184,6 +184,7 @@ pub fn plan_stairs(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) {
         }
     }
     arriving(c, out, double, &opts);
+    underside(c, out, double, &opts);
 }
 
 /// [173] Höhe der Stufennummern (Papier-mm).
@@ -254,7 +255,7 @@ fn step_numbers(out: &mut Vec<Primitive>, geo: &kernel2d::StairGeometry, cut_hei
 /// (Halbmesser 0.75 mm Papier, nur mit Lauflinie).
 fn run_opts(o: &super::model_view::StairOpts, scale: f64, s: &Stair) -> crate::plan::stair_symbol::RunOpts {
     let m = |mm: f64| if scale.is_finite() && scale > 0.0 { mm * scale / 1000.0 } else { 0.0 };
-    crate::plan::stair_symbol::RunOpts { start: m(o.run_start_mm), end: m(o.run_end_mm), start_mark: (o.start_mark && o.walk_line).then(|| m(0.75)).filter(|r| *r > 0.0), rail_half: rail_half(s) }
+    crate::plan::stair_symbol::RunOpts { start: m(o.run_start_mm), end: m(o.run_end_mm), start_mark: (o.start_mark && o.walk_line).then(|| m(0.75)).filter(|r| *r > 0.0), rail_half: rail_half(s), no_break: false }
 }
 
 /// [T3] Halbe Handlaufbreite der Treppe (Meter).
@@ -286,6 +287,63 @@ fn arriving(c: &Ctx, out: &mut Vec<Primitive>, double: bool, opts: &super::model
                 }
             }
         }
+    }
+}
+
+/// [G1] Untersicht: Treppen (alle Formen: gerade, Podest, Wendel) des Geschosses darüber, die auf einer Decke dieses
+/// Geschosses stehen, in deren Loch sichtbar sind; von unten gesehen ganz gestrichelt („über Schnitt"), auf das
+/// Loch beschnitten. Ohne Deckenloch deckt die Decke die Treppe, dann entfällt sie (wie jedes Bauteil darüber).
+fn underside(c: &Ctx, out: &mut Vec<Primitive>, double: bool, opts: &super::model_view::StairOpts) {
+    let p = c.p;
+    let Some(floor) = p.floor(&c.a.floor) else { return };
+    if floor.kind != DrawingLevelKind::Floor {
+        return;
+    }
+    let cut = super::view_range::ViewRange::of(p, &c.a.floor).cut;
+    let ceilings: Vec<&Ceiling> = p.ceilings.as_deref().unwrap_or(&[]).iter().filter(|ce| ce.floor_id == c.a.floor && c.vis(&ce.category_code, &ce.id)).collect();
+    if ceilings.is_empty() {
+        return;
+    }
+    for s in p.stairs.as_deref().unwrap_or(&[]).iter().filter(|s| s.floor_id != c.a.floor && c.vis(&s.category_code, &s.id)) {
+        let (zb, zt) = p.stair_vertical_extent(s);
+        if !(zb > cut && (zt - zb).is_finite()) {
+            continue;
+        }
+        let params = s.encode();
+        let Some(sp) = crate::stair::decode_params(&params) else { continue };
+        let geo = kernel2d::stair_geometry(&sp, zt - zb);
+        let centroid = |t: &kernel2d::TreadRect| {
+            let n = t.pts.len().max(1) as f64;
+            [t.pts.iter().map(|q| q.x).sum::<f64>() / n, t.pts.iter().map(|q| q.y).sum::<f64>() / n]
+        };
+        let rings: Vec<Vec<crate::stair_rail::P>> = ceilings
+            .iter()
+            .filter(|ce| {
+                let top = p.ceiling_vertical_extent(ce).1;
+                top >= zb - 0.3 && top <= zb + 0.05
+            })
+            .flat_map(|ce| crate::opening_shape::ceiling_hole_rings(p, ce))
+            .map(|h| h.iter().map(|q| [q.x, q.y]).collect::<Vec<_>>())
+            .filter(|h| h.len() >= 3 && h.iter().all(|q| q[0].is_finite() && q[1].is_finite()))
+            .filter(|h| geo.treads.iter().any(|t| crate::surface_pattern::point_in(centroid(t), h)) || geo.landing.iter().chain(geo.landing2.iter()).any(|l| l.iter().any(|q| crate::surface_pattern::point_in([q.x, q.y], h))))
+            .collect();
+        if rings.is_empty() {
+            continue;
+        }
+        let greyed = Some(c.greyed(&s.category_code));
+        let ov = c.overrides(Some("stair"), &s.category_code, Some(&stair_label(s)));
+        let lw = ov.lineweight.unwrap_or_else(|| c.cat(&s.category_code).map_or(WALL_FALLBACK_MM, |k| k.lw));
+        let stroke = ov.color.as_deref().or(s.color.as_deref()).unwrap_or(POCHE_STROKE).to_string();
+        // Schnitthöhe unter dem Treppenfuss (-1): jedes Element liegt über der Schnittebene, also ganz gestrichelt.
+        let start = out.len();
+        let f = crate::plan::stair_symbol::plan_stair_run(&params, zt - zb, -1.0, lw, s.arrow_style == Some(StairArrowStyle::Filled), s.center_column.unwrap_or(0.0), railing_code(p, s), double, &rings, &crate::plan::stair_symbol::RunOpts { no_break: true, ..run_opts(opts, c.a.scale, s) });
+        emit(out, &f, &stroke, greyed, &s.id, opts);
+        // Von unten gibt es keine Gehrichtung: Pfeil (Linien, gefüllte Spitze) und Bruchlinie entfallen.
+        let mut k = 0;
+        out.retain(|q| {
+            k += 1;
+            k <= start || !matches!(q, Primitive::Line { cls, .. } if cls == "stair-arrow" || cls == "stair-break") && !matches!(q, Primitive::Polygon { fill, .. } if fill != "none")
+        });
     }
 }
 

@@ -297,7 +297,7 @@ fn flat_rings(polys: &[CutPoly]) -> Option<Vec<f64>> {
 }
 
 /// [G1] Waagrechter Ebenenschnitt eines Netzes auf Höhe `z` als Polygone mit Löchern.
-fn mesh_level_polys(mesh: &Option<crate::solid_bool::Mesh>, z: f64) -> Vec<CutPoly> {
+pub(super) fn mesh_level_polys(mesh: &Option<crate::solid_bool::Mesh>, z: f64) -> Vec<CutPoly> {
     let Some(m) = mesh else { return Vec::new() };
     let idx: Vec<f64> = m.indices.iter().map(|&i| i as f64).collect();
     let f = crate::mesh_section::cut(&m.positions, &idx, &[1.0, z]);
@@ -315,7 +315,7 @@ fn mesh_level_polys(mesh: &Option<crate::solid_bool::Mesh>, z: f64) -> Vec<CutPo
 
 /// [G1] Grundriss eines Netzes im Höhenbereich `z0..z1`: der Körper wird auf das Band beschnitten
 /// (Manifold), dann die nach oben weisenden Dreiecke projiziert und vereinigt (i_overlay).
-fn mesh_footprint(mesh: &Option<crate::solid_bool::Mesh>, z0: f64, z1: f64) -> Vec<CutPoly> {
+pub(super) fn mesh_footprint(mesh: &Option<crate::solid_bool::Mesh>, z0: f64, z1: f64) -> Vec<CutPoly> {
     use crate::solid_bool::{Mesh, Solid};
     let Some(m) = mesh else { return Vec::new() };
     let Some((lo, hi)) = m.bounds() else { return Vec::new() };
@@ -345,6 +345,56 @@ fn mesh_footprint(mesh: &Option<crate::solid_bool::Mesh>, z0: f64, z1: f64) -> V
         }
     }
     crate::polygon_bool::union(&tris)
+}
+
+/// [G1] Echter Umriss eines Abzugskörpers im Grundriss (Ringe, Löcher eingeschlossen): Ebenenschnitt des Kern-Netzes
+/// auf Schnitthöhe `cut`, liegt `cut` ausserhalb des Körpers dessen Grundriss. Ohne Netz leer (Rückfall: Profil).
+pub(super) fn void_outline(p: &Project, s: &ExtrudedSolid, cut: f64) -> Vec<Vec<Vec2>> {
+    let Some(mesh) = crate::solid_mesh::body_mesh(p, s) else { return Vec::new() };
+    let Some((lo, hi)) = mesh.as_ref().as_ref().and_then(|m| m.bounds()) else { return Vec::new() };
+    let polys = if cut > lo[2] + EPS && cut < hi[2] - EPS { mesh_level_polys(&mesh, cut) } else { mesh_footprint(&mesh, lo[2], hi[2]) };
+    let mut out: Vec<Vec<Vec2>> = Vec::new();
+    for r in polys.into_iter().flatten() {
+        let ring = simplify_ring(&r);
+        let key = |q: &Vec2| (q.x * 1e6).round() as i64 * 1_000_003 + (q.y * 1e6).round() as i64;
+        let same = |o: &Vec<Vec2>| o.len() == ring.len() && o.iter().map(key).sum::<i64>() == ring.iter().map(key).sum::<i64>();
+        if ring.len() >= 3 && !out.iter().any(same) {
+            out.push(ring);
+        }
+    }
+    out
+}
+
+/// Ring ohne doppelte Endpunkte und ohne Punkte auf der Geraden (Teilungspunkte des Netzes).
+fn simplify_ring(r: &[[f64; 2]]) -> Vec<Vec2> {
+    let mut pts: Vec<[f64; 2]> = Vec::new();
+    for q in r {
+        if pts.last().map_or(true, |l| (l[0] - q[0]).hypot(l[1] - q[1]) > 1e-9) {
+            pts.push(*q);
+        }
+    }
+    while pts.len() > 1 && (pts[0][0] - pts[pts.len() - 1][0]).hypot(pts[0][1] - pts[pts.len() - 1][1]) <= 1e-9 {
+        pts.pop();
+    }
+    let n = pts.len();
+    let keep: Vec<[f64; 2]> = (0..n)
+        .filter(|&i| {
+            let (a, b, c) = (pts[(i + n - 1) % n], pts[i], pts[(i + 1) % n]);
+            ((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])).abs() > 1e-9
+        })
+        .map(|i| pts[i])
+        .collect();
+    keep.into_iter().map(|q| Vec2 { x: q[0], y: q[1] }).collect()
+}
+
+/// [G1] Durchbruch: der Abzugskörper durchstösst eine Decke (die dieses Geschosses unten oder seine Oberkante).
+pub(super) fn void_pierces_slab(p: &Project, s: &ExtrudedSolid) -> bool {
+    let Some(f) = p.floor(&s.level_id) else { return false };
+    let base = f.base_elevation.unwrap_or(0.0);
+    let z0 = base + s.base_offset.unwrap_or(0.0);
+    let z1 = z0 + s.height;
+    let top = base + f.floor_height.unwrap_or(0.0);
+    (z0 < base - EPS && z1 > base + EPS) || (f.floor_height.is_some() && z0 < top - EPS && z1 > top + EPS)
 }
 
 /// Linien-Klassen der Wand-Poché, die ein Abzugskörper auf Schnitthöhe unterbricht.
