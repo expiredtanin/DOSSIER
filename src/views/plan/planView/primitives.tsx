@@ -421,8 +421,10 @@ export function DrawingRunShape({
   const scrPts = modelPts.map(toScreen);
   const pts = scrPts.map((s) => `${s.x},${s.y}`).join(" ");
   const plotN = paperScale ?? 100;
+  // [153] Ring = geschlossener Zug (Rechteck, Vieleck, Ellipse, Kreis; Ende = Anfang): Muster über den Umfang gestreckt.
   const ring =
-    !run.closed && scrPts.length >= 8 && Math.hypot(scrPts[scrPts.length - 1].x - scrPts[0].x, scrPts[scrPts.length - 1].y - scrPts[0].y) < 1e-6;
+    run.closed ||
+    (scrPts.length >= 4 && Math.hypot(scrPts[scrPts.length - 1].x - scrPts[0].x, scrPts[scrPts.length - 1].y - scrPts[0].y) < 1e-6);
   const dashStr =
     run.dash && run.dash.length
       ? dashArrayCss(ring ? ringDashVb(run.dash, plotN, runLen(scrPts)) : lineDashVb(run.dash, plotN), !print)

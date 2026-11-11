@@ -170,6 +170,8 @@ struct Flat {
     dim_styles: HashMap<String, usize>,
     blocks: HashSet<String>,
     block_counts: [u32; 8],
+    /// [153] Polylinien-Sätze als „Muster durchlaufend" schreiben (gesetzt rund um einen gestrichelten Ring).
+    plinegen: bool,
 }
 
 impl Flat {
@@ -184,6 +186,7 @@ impl Flat {
             dim_styles: HashMap::new(),
             blocks: HashSet::new(),
             block_counts: [0; 8],
+            plinegen: false,
         }
     }
 
@@ -262,13 +265,23 @@ impl Flat {
         self.push(b, &[REC_LINE, l, p.x, p.y, q.x, q.y]);
     }
 
+    /// Geschlossen-Flag der Polylinien-Sätze: Bit 0 = geschlossen, Bit 1 = Muster durchlaufend (plinegen,
+    /// DXF Gruppe 70 Bit 128; nur bei geschlossenem, gestricheltem Zug, vom Aufrufer mit `plinegen` gesetzt).
+    fn closed_flag(&self, closed: bool) -> f64 {
+        if closed && self.plinegen {
+            3.0
+        } else {
+            b01(closed)
+        }
+    }
+
     fn add_polyline(&mut self, b: &mut Buf, layer: &str, pts: &[V2], closed: bool) {
         if pts.len() < 2 {
             return;
         }
         b.counts[K_POLY] += 1;
         let l = self.layer(layer);
-        self.push(b, &[REC_POLYLINE, l, b01(closed), pts.len() as f64]);
+        self.push(b, &[REC_POLYLINE, l, self.closed_flag(closed), pts.len() as f64]);
         for p in pts {
             self.push(b, &[p.x, p.y]);
         }
@@ -306,7 +319,7 @@ impl Flat {
         let Some((v, bulge)) = arc_fit::bulges(&shape) else { return false };
         b.counts[K_POLY] += 1;
         let l = self.layer(layer);
-        self.push(b, &[REC_POLYLINE_BULGE, l, b01(closed), v.len() as f64]);
+        self.push(b, &[REC_POLYLINE_BULGE, l, self.closed_flag(closed), v.len() as f64]);
         for (p, g) in v.iter().zip(&bulge) {
             self.push(b, &[p.x, p.y, *g]);
         }
@@ -901,14 +914,25 @@ impl Ctx<'_> {
     /// Wiederholungen über den Umfang gestreckt, eigener Linientyp je Radius (`…_R<mm>`). DXF/DWG kennen keine
     /// Musterphase je Objekt (das Muster beginnt am Entitätsanfang); so schliesst die Naht des Kreises trotzdem.
     fn ltype_of_circle(&mut self, dash: &[f64], r: f64) -> f64 {
+        self.ltype_of_ring(dash, std::f64::consts::TAU * r, "R", r)
+    }
+
+    /// [153] Linientyp eines gestrichelten geschlossenen Zugs (Rechteck, Vieleck, Ellipse) vom Umfang `len`
+    /// (Modell-Meter): Muster auf ganze Wiederholungen gestreckt, eigener Linientyp je Umfang (`…_U<mm>`).
+    /// Zusammen mit dem Flag „Muster durchlaufend" (plinegen) läuft die Phase über die Ecken.
+    fn ltype_of_closed(&mut self, dash: &[f64], len: f64) -> f64 {
+        self.ltype_of_ring(dash, len, "U", len)
+    }
+
+    fn ltype_of_ring(&mut self, dash: &[f64], len: f64, tag: &str, key_m: f64) -> f64 {
         let k = self.o.scale / 1000.0;
-        if dash.is_empty() || !(k > 0.0) || !(r > 0.0) {
+        if dash.is_empty() || !(k > 0.0) || !(len > 0.0) {
             return self.ltype_of(dash);
         }
-        let fit = crate::plan::line_pattern::fit_closed(dash, std::f64::consts::TAU * r / k);
+        let fit = crate::plan::line_pattern::fit_closed(dash, len / k);
         match dash_to_ltype_meters(&fit, self.o.scale) {
             Some(el) => {
-                let name = format!("{}_R{}", ltype_name_for(dash, &self.project.line_styles), jsnum::round(r * 1000.0));
+                let name = format!("{}_{tag}{}", ltype_name_for(dash, &self.project.line_styles), jsnum::round(key_m * 1000.0));
                 self.flat.add_linetype(&name, &el)
             }
             None => -1.0,
@@ -1389,10 +1413,24 @@ fn emit_entries(cx: &mut Ctx, main: &mut Buf, entries: &[Entry], layer_by_code: 
             if pts.len() >= 4 {
                 let closed = (pts[0].x - pts[pts.len() - 1].x).abs() <= 1e-9 && (pts[0].y - pts[pts.len() - 1].y).abs() <= 1e-9;
                 let ring = if closed { &pts[..pts.len() - 1] } else { &pts[..] };
-                let lt = cx.ltype_of(dash);
-                if crate::plan::arc_fit::fit(ring, closed, crate::plan::arc_fit::TOL).is_some() {
+                let shape = crate::plan::arc_fit::fit(ring, closed, crate::plan::arc_fit::TOL);
+                // [153] Gestrichelter geschlossener Zug: Muster auf ganze Wiederholungen über den Umfang gestreckt
+                // und „Muster durchlaufend" (plinegen), damit die Naht schliesst und die Phase über die Ecken läuft.
+                let ring_len = match &shape {
+                    Some(sh) => crate::plan::arc_fit::length(sh),
+                    None => (0..ring.len()).map(|i| crate::jsmath::hypot2(ring[(i + 1) % ring.len()].x - ring[i].x, ring[(i + 1) % ring.len()].y - ring[i].y)).sum(),
+                };
+                let fitted = closed && !dash.is_empty();
+                let lt = if fitted { cx.ltype_of_closed(dash, ring_len) } else { cx.ltype_of(dash) };
+                if shape.is_some() || fitted {
                     cx.flat.set_pen(main, lt);
-                    cx.flat.add_curve(main, &l, ring, closed);
+                    cx.flat.plinegen = fitted;
+                    if shape.is_some() {
+                        cx.flat.add_curve(main, &l, ring, closed);
+                    } else {
+                        cx.flat.add_polyline(main, &l, ring, true);
+                    }
+                    cx.flat.plinegen = false;
                     skip_to = j;
                     continue;
                 }
@@ -1701,6 +1739,20 @@ mod tests {
         let el = cx.flat.root.windows(3).position(|w| w[0] == REC_LTYPE).map(|i| &cx.flat.root[i + 3..i + 5]).unwrap();
         let total = el[0].abs() + el[1].abs();
         let reps = std::f64::consts::TAU * 0.73 / total;
+        assert!((reps - reps.round()).abs() < 1e-6 && reps.round() >= 1.0, "{el:?} {reps}");
+    }
+
+    /// [153] Linientyp eines geschlossenen Zugs: ganze Wiederholungen über den Umfang, ein Typ je Umfang.
+    #[test]
+    fn closed_linientyp_mit_ganzen_wiederholungen() {
+        let project = Project::default();
+        let o = DxfOptions { scale: 100.0, include_hatches: false, dim_cm: false, paper_layout: false, bounds: [0.0; 4], default_font: "Arial".into(), floor: String::new(), table_labels: String::new() };
+        let mut cx = Ctx { project: &project, o: &o, flat: Flat::new() };
+        let a = cx.ltype_of_closed(&[2.0, 1.0], 22.0);
+        assert_eq!(a, cx.ltype_of_closed(&[2.0, 1.0], 22.0));
+        assert_ne!(a, cx.ltype_of_closed(&[2.0, 1.0], 12.0));
+        let el = cx.flat.root.windows(3).position(|w| w[0] == REC_LTYPE).map(|i| &cx.flat.root[i + 3..i + 5]).unwrap();
+        let reps = 22.0 / (el[0].abs() + el[1].abs());
         assert!((reps - reps.round()).abs() < 1e-6 && reps.round() >= 1.0, "{el:?} {reps}");
     }
 

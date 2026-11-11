@@ -23,7 +23,7 @@
 //   [FLAT_VERSION, Datensatz, Datensatz, …]
 //   LAYER    = 1, name_idx, rgb (0xRRGGBB, −1 = keine → ACI 7), lineweight (1/100 mm, −3 = Standard)
 //   LINE     = 2, layer, x1, y1, x2, y2
-//   POLYLINE = 3, layer, closed (0/1), n, x0, y0, …, x(n−1), y(n−1)
+//   POLYLINE = 3, layer, closed (0 = offen, 1 = geschlossen, 3 = geschlossen + Muster durchlaufend/plinegen), n, x0, y0, …, x(n−1), y(n−1)
 //   ARC      = 4, layer, cx, cy, r, start (rad), end (rad)      (gegen den Uhrzeigersinn, DXF-Konvention)
 //   CIRCLE   = 5, layer, cx, cy, r
 //   TEXT     = 6, layer, text_idx, x, y, height, rotation (rad)
@@ -633,16 +633,19 @@ pub fn build_document(flat: &[f64], strings: &str) -> Result<CadDocument, String
             let v = r.take(4)?;
             all_finite(v).then(|| EntityType::Line(Line::from_coords(v[0], v[1], 0.0, v[2], v[3], 0.0)))
         } else if tag == REC_POLYLINE {
-            let closed = r.f()? != 0.0;
+            let flag = r.f()?;
+            let (closed, plinegen) = (flag != 0.0, flag == 3.0);
             let n = r.idx()?;
             let v = r.take(n.checked_mul(2).ok_or("Überlauf")?)?;
             (n >= 2 && all_finite(v)).then(|| {
                 let mut pl = LwPolyline::from_points(v.chunks_exact(2).map(|p| Vector2::new(p[0], p[1])).collect());
                 pl.is_closed = closed;
+                pl.plinegen = closed && plinegen;
                 EntityType::LwPolyline(pl)
             })
         } else if tag == REC_POLYLINE_BULGE {
-            let closed = r.f()? != 0.0;
+            let flag = r.f()?;
+            let (closed, plinegen) = (flag != 0.0, flag == 3.0);
             let n = r.idx()?;
             let v = r.take(n.checked_mul(3).ok_or("Überlauf")?)?;
             (n >= 2 && all_finite(v)).then(|| {
@@ -651,6 +654,7 @@ pub fn build_document(flat: &[f64], strings: &str) -> Result<CadDocument, String
                     vx.bulge = p[2];
                 }
                 pl.is_closed = closed;
+                pl.plinegen = closed && plinegen;
                 EntityType::LwPolyline(pl)
             })
         } else if tag == REC_ARC {
