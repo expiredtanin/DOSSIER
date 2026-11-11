@@ -72,13 +72,19 @@ pub fn schedule_rows(p: &Project) -> Vec<ScheduleRow> {
     }
     for o in p.openings.as_deref().unwrap_or(&[]) {
         let kind = if o.kind == ElementKind::Window { "Fenster" } else { "Tür" };
-        let host = p.walls.iter().find(|w| w.id == o.host_wall_id);
+        // Geschoss über den Wirt: Wand, sonst Dach bzw. Decke (Dachfenster, Deckenöffnungen).
+        let host_floor = p.walls.iter().find(|w| w.id == o.host_wall_id).map(|w| w.floor_id.clone()).or_else(|| {
+            let roof = o.host_roof_id.as_deref().filter(|s| !s.is_empty());
+            let ceil = o.host_ceiling_id.as_deref().filter(|s| !s.is_empty());
+            roof.and_then(|id| p.roofs.as_deref()?.iter().find(|r| r.id == id).map(|r| r.floor_id.clone()))
+                .or_else(|| ceil.and_then(|id| p.ceilings.as_deref()?.iter().find(|c| c.id == id).map(|c| c.floor_id.clone())))
+        });
         rows.push(ScheduleRow {
             kind,
             id: o.id.clone(),
             type_name: kind.to_string(),
-            floor: host.map_or(o.host_wall_id.clone(), |w| floor_name(p, &w.floor_id)),
-            floor_id: host.map(|w| w.floor_id.clone()),
+            floor: host_floor.as_deref().map_or(o.host_wall_id.clone(), |f| floor_name(p, f)),
+            floor_id: host_floor,
             length: Some(o.width),
             height_m: Some(o.height),
             thickness: None,
@@ -270,6 +276,26 @@ mod tests {
         assert!(csv.starts_with("Typ;ID;Bauteil;Geschoss;Länge [m];Höhe [m];Dicke [m];Fläche [m²]\r\n"));
         assert!(csv.contains("Zusammenfassung (je Bauteil-Typ)"));
         assert_eq!(export_schedule_csv(&Project::default(), ";", true), "Typ;ID;Bauteil;Geschoss;Länge [m];Höhe [m];Dicke [m];Fläche [m²]");
+    }
+
+    /// Dachfenster und Deckenöffnungen haben keine Wirtswand: Geschoss kommt vom Dach bzw. von der Decke
+    /// (sonst leere Gruppe im Elemente-Panel).
+    #[test]
+    fn dachfenster_bekommt_geschoss_vom_dach() {
+        use crate::model::generated::{Ceiling, DrawingLevel, Opening, Roof};
+        let mut p = Project::default();
+        p.drawing_levels = vec![DrawingLevel { id: "dg".into(), name: "Dachgeschoss".into(), kind: crate::model::generated::DrawingLevelKind::Floor, ..Default::default() }];
+        p.roofs = Some(vec![Roof { id: "r".into(), floor_id: "dg".into(), ..Default::default() }]);
+        p.ceilings = Some(vec![Ceiling { id: "c".into(), floor_id: "dg".into(), ..Default::default() }]);
+        p.openings = Some(vec![
+            Opening { id: "df".into(), host_roof_id: Some("r".into()), ..Default::default() },
+            Opening { id: "do".into(), host_ceiling_id: Some("c".into()), ..Default::default() },
+        ]);
+        let rows = schedule_rows(&p);
+        for id in ["df", "do"] {
+            let r = rows.iter().find(|r| r.id == id).unwrap();
+            assert_eq!((r.floor.as_str(), r.floor_id.as_deref()), ("Dachgeschoss", Some("dg")), "{id}");
+        }
     }
 
     #[test]
