@@ -2920,6 +2920,36 @@ mod tests {
         }
     }
 
+    /// [156] Geschlossene 2D-Formen der Kategorie „Möbel“ (Rechteck, Kreis, Polylinie) sparen den Belag aus,
+    /// gleiche Formen in anderen Kategorien nicht.
+    #[test]
+    fn belag_spart_geschlossene_moebelformen_aus() {
+        let p0 = belag_projekt(SurfacePatternKind::Grid, 0.1, 0.1);
+        assert!(p0.flat_categories().iter().any(|c| c.code == "22" && c.name == "Möbel"));
+        let shape = |id: &str, cat: &str, geom: serde_json::Value| serde_json::from_value(serde_json::json!({ "id": id, "type": "drawing2d", "levelId": "og", "categoryCode": cat, "geom": geom })).unwrap();
+        let mk = |cat: &str| {
+            let mut p = p0.clone();
+            p.drawings2d.push(shape("r", cat, serde_json::json!({"shape": "rect", "min": {"x": 0.6, "y": 0.6}, "max": {"x": 1.4, "y": 1.4}})));
+            p.drawings2d.push(shape("c", cat, serde_json::json!({"shape": "circle", "center": {"x": 3.0, "y": 1.0}, "r": 0.4})));
+            p.drawings2d.push(shape("pl", cat, serde_json::json!({"shape": "polyline", "closed": true, "pts": [{"x": 3.6, "y": 0.2}, {"x": 4.8, "y": 0.2}, {"x": 4.8, "y": 0.8}, {"x": 3.6, "y": 0.8}]})));
+            belag(&p, "og", 1.0, 50.0, serde_json::json!({"show": ["30", "40", "60", "20", "22", "10"]}))
+        };
+        let inside = |l: &[(Vec2, Vec2, f64, String)], x0: f64, y0: f64, x1: f64, y1: f64| {
+            l.iter().any(|(a, b, ..)| (1..10).any(|k| {
+                let t = k as f64 / 10.0;
+                let m = [a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t];
+                m[0] > x0 + 1e-6 && m[0] < x1 - 1e-6 && m[1] > y0 + 1e-6 && m[1] < y1 - 1e-6
+            }))
+        };
+        let mobel = mk("22");
+        assert!(mobel.len() > 20);
+        assert!(!inside(&mobel, 0.6, 0.6, 1.4, 1.4), "Belag unter dem Möbel-Rechteck");
+        assert!(!inside(&mobel, 2.7, 0.7, 3.3, 1.3), "Belag unter dem Möbel-Kreis");
+        assert!(!inside(&mobel, 3.6, 0.2, 4.8, 0.8), "Belag unter der Möbel-Polylinie");
+        let fremd = mk("60");
+        assert!(inside(&fremd, 0.6, 0.6, 1.4, 1.4) && inside(&fremd, 3.6, 0.2, 4.8, 0.8), "andere Kategorie spart nicht aus");
+    }
+
     /// [158] Raum mit eigenem Bodenbelag (Material mit Muster): im Raum gilt sein Muster, auf den Raum
     /// beschnitten, statt des Deckenbelags; ausserhalb bleibt der Deckenbelag.
     #[test]
