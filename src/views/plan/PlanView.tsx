@@ -321,6 +321,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     selectedCeilingIds,
     selectedStairIds,
     selectedWallIds,
+    selectedContextObjectIds,
     selectedDrawingIds,
     selectedDrawingId,
     getUnderlayIds,

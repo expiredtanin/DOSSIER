@@ -11,7 +11,7 @@
 import { useMemo } from "react";
 import type { Drawing2D, DrawingLevel, Project, Vec2 } from "../model/types";
 import type { Selection } from "./selection";
-import { addItems, cmdMutation, opsMutation, patchItems, removeItems } from "../core";
+import { addItems, cmdMutation, fieldOps, opsMutation, patchItem, patchItems, removeItems } from "../core";
 import type { ToolId } from "../tools/types";
 import type { DrawingStyle } from "../editors/matchProps";
 import { applyDrawingStyleOps, readDrawingStyle } from "../editors/matchProps";
@@ -155,6 +155,10 @@ export function useSelectionCommands(opts: {
     const siteHide: ReturnType<typeof fieldOps> = [];
     if (selection.site.includes("sunStudy") && project.sunStudy?.show) siteHide.push(...fieldOps(project, "sunStudy", { ...project.sunStudy, show: false }));
     if (selection.site.includes("siteRules") && project.siteRules && project.siteRules.show !== false) siteHide.push(...fieldOps(project, "siteRules", { ...project.siteRules, show: false }));
+    // Schlagschatten der Ansicht (`viewShadows`): schaltet `shadows` der aktiven Ansicht aus.
+    if (selection.site.includes("viewShadows") && project.drawingLevels.find((l) => l.id === activeLevel.id)?.shadows) {
+      siteHide.push(...patchItem(project, "drawingLevels", activeLevel.id, { shadows: false }));
+    }
     setProject(
       opsMutation((p) => [
         ...siteHide,

@@ -49,4 +49,10 @@ describe("selectAllIds", () => {
     const ogWall = p.walls.find((w) => w.floorId === "og")!;
     expect(ids.walls).not.toContain(ogWall.id);
   });
+
+  it("wählt den Schlagschatten einer Ansicht mit (Entf schaltet ihn ab), solange er eingeschaltet ist", () => {
+    expect(selectAllIds(p, "ansicht-sued").site).toEqual(["viewShadows"]);
+    const off = { ...p, drawingLevels: p.drawingLevels.map((l) => (l.id === "ansicht-sued" ? { ...l, shadows: false } : l)) };
+    expect(selectAllIds(off, "ansicht-sued").site).toEqual([]);
+  });
 });

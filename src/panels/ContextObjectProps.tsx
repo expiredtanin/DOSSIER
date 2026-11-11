@@ -12,7 +12,6 @@ import type { ContextObject } from "../model/types";
 import { flattenCategories } from "../model/types";
 import { resmoothGridTerrain } from "../model/terrain";
 import { useMemo, useState } from "react";
-import { contourHeightPatch, heightOffsetPatch } from "../state/contextHeight";
 import type { ExcavationQuantity } from "../core";
 
 /** Zahl-Eingabe für ein Feld eines Kontext-Objekts (leer = Standard, ungültig = keine Änderung). */
@@ -68,12 +67,12 @@ const RESMOOTH_PASSES = [1, 2, 4] as const;
 
 /** [193] Höhenversatz (alle Höhen um dz) und, bei Höhenlinien, die Höhe je Linie. */
 function HeightFields({ obj }: { obj: ContextObject }) {
-  const host = usePanelHost();
+  const offsetContextHeight = useStore((s) => s.offsetContextHeight);
+  const setContourHeight = useStore((s) => s.setContourHeight);
   const [dz, setDz] = useState("");
   if (obj.type === "image") return null;
   const apply = () => {
-    const patch = dz.trim() === "" ? null : heightOffsetPatch(obj, Number(dz.replace(",", ".")));
-    if (patch) host.onPatchContextObject(obj.id, patch);
+    if (dz.trim() !== "") offsetContextHeight(obj.id, Number(dz.replace(",", ".")));
     setDz("");
   };
   return (
@@ -104,8 +103,7 @@ function HeightFields({ obj }: { obj: ContextObject }) {
                 data-testid={`contour-z-${i}`}
                 value={c.z}
                 onChange={(e) => {
-                  const patch = e.target.value.trim() === "" ? null : contourHeightPatch(obj, i, Number(e.target.value));
-                  if (patch) host.onPatchContextObject(obj.id, patch, `site-${obj.id}-contourZ-${i}`);
+                  if (e.target.value.trim() !== "") setContourHeight(obj.id, i, Number(e.target.value), `site-${obj.id}-contourZ-${i}`);
                 }}
               />
             </label>

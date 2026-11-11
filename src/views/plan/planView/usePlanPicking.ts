@@ -34,6 +34,7 @@ export interface UsePlanPickingArgs {
   selectedCeilingIds: string[];
   selectedStairIds: string[];
   selectedWallIds: string[];
+  selectedContextObjectIds: string[];
   selectedDrawingIds: string[];
   selectedDrawingId: string | null;
   getUnderlayIds: () => Map<string, UnderlayGroup> | null;
@@ -58,6 +59,7 @@ export function usePlanPicking(inp: UsePlanPickingArgs) {
     selectedCeilingIds,
     selectedStairIds,
     selectedWallIds,
+    selectedContextObjectIds,
     selectedDrawingIds,
     selectedDrawingId,
     getUnderlayIds,
@@ -374,6 +376,11 @@ export function usePlanPicking(inp: UsePlanPickingArgs) {
     if (selDraws) {
       const id = pickDrawing(clientX, clientY);
       if (id && selDraws.has(id)) return { drawingId: id };
+    }
+    // [193] Gewähltes Gelände-/Umgebungs-Element unter dem Cursor: alle gewählten Kontext-Elemente ziehen mit.
+    if (selectedContextObjectIds.length) {
+      const sel = new Set(selectedContextObjectIds);
+      if (contextIdsAt(clientX, clientY).some((id) => sel.has(id))) return { contextIds: selectedContextObjectIds };
     }
     return null;
   };

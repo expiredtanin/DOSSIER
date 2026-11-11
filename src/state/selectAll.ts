@@ -38,7 +38,8 @@ export function selectAllIds(project: Project, levelId: string): Partial<Selecti
   }
   // Schattenfläche der Sonnenstudie: abgeleitet, aber angeklickt wählbar ([137]) — also auch hier; Entf blendet sie aus.
   const level = project.drawingLevels.find((l) => l.id === levelId);
-  const site = project.sunStudy?.show && level?.kind === "floor" ? ["sunStudy"] : [];
+  // [193] dito der Schlagschatten der Ansicht (`DrawingLevel.shadows`), nur in einer Ansicht.
+  const site = project.sunStudy?.show && level?.kind === "floor" ? ["sunStudy"] : level?.kind === "elevation" && level.shadows ? ["viewShadows"] : [];
   return {
     site,
     walls: wallIds,

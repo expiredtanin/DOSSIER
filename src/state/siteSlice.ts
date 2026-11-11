@@ -9,7 +9,9 @@
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
 import { generateTerrainFromContours, resmoothGridTerrain, type TerrainOptions } from "../model/terrain";
-import type { ContextObject, Project } from "../model/types";
+import type { ContextObject, Project, Vec2 } from "../model/types";
+import { documentFor } from "../core/document";
+import { transformOps } from "../tools/transform";
 import { addItems, fieldOps, patchItem, removeItems } from "../core/opsBuild";
 import type { CoreOp } from "../core/ops";
 import { ensureContextCategories } from "../model/contextCategories";
@@ -32,6 +34,12 @@ export interface SiteSlice {
    * null, wenn der ContourSet nicht existiert / kein Mesh entsteht.
    */
   generateTerrain: (contourSetId: string, opts?: TerrainOptions) => string | null;
+  /** [193] Alle Höhen eines Elements um `dz` Meter versetzen (Netz-z, Höhenlinien-z, Baugruben-Sohle; Kern `cmd_context.rs`). */
+  offsetContextHeight: (id: string, dz: number) => void;
+  /** [193] Höhe der Höhenlinie `index` eines Höhenlinien-Satzes setzen (Kern `cmd_context.rs`); `coalesceKey` für Tippen. */
+  setContourHeight: (id: string, index: number, z: number, coalesceKey?: string) => void;
+  /** [193] Kontext-Elemente um `delta` verschieben (Maus-Ziehen im Plan; Kern `cmd_transform.rs`), ein Undo-Schritt. */
+  moveContextBy: (ids: string[], delta: Vec2) => void;
   /** [T6]/[68] Ändert Felder eines Kontext-Objekts (Gelände, Baugrube) in einem Schritt; `coalesceKey` für Tippen. */
   patchContextObject: (id: string, patch: Record<string, unknown>, coalesceKey?: string) => void;
   /**
@@ -91,6 +99,22 @@ export function createSiteSlice(
     removeContextObjects: (ids) => {
       if (ids.length === 0) return;
       get().applyChange((p) => removeItems(p, "context", ids));
+    },
+
+    offsetContextHeight: (id, dz) => {
+      const ops = documentFor(get().project).cmdOps({ cmd: "contextOffset", id, dz });
+      if (ops.length) get().applyChange(ops);
+    },
+
+    setContourHeight: (id, index, z, coalesceKey) => {
+      const ops = documentFor(get().project).cmdOps({ cmd: "contourZ", id, index, z });
+      if (ops.length) get().applyChange(ops, coalesceKey);
+    },
+
+    moveContextBy: (ids, delta) => {
+      if (ids.length === 0 || (delta.x === 0 && delta.y === 0)) return;
+      const ops = transformOps(get().project, { wallIds: [], drawingId: null, contextIds: ids }, "move", [{ x: 0, y: 0 }, delta], "move", 1);
+      if (ops.length) get().applyChange(ops);
     },
 
     patchContextObject: (id, patch, coalesceKey) =>
