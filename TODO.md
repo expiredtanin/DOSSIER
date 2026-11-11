@@ -133,9 +133,11 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   Ende eines freien Lochrings ohne Gehrung; dichtes Belagsmuster in 1:100; 3D-Darstellung nur als Zahlen/Golden
   geprüft (Metal nur macOS). (11.11.) Im Explosionsbild folgt die Sicherung dem Geschoss der Decke mit dem Loch, Handläufe
   der Treppe (`explode3d::parts`/`pick_geometry`, `emit_stair_guards_on`, `pick_stair_railings_split`). · M
-- ◐ **[156]** Bodenbelag-Muster massstabsgerecht. Möbel nur als Blöcke/Körper (geschlossene 2D-Formen der Kategorie
-  „Möbel“ sparen nicht aus); Deckenspiegel-Untersicht unverändert (alte Ausdünnung). Nassraum nach Name ist durch
-  [158] ersetzt. · S
+- ◐ **[156]** Bodenbelag-Muster massstabsgerecht. Möbel sparen den Belag aus als Blöcke, Körper und (11.11.) geschlossene
+  2D-Formen (Rechteck, Kreis, Ellipse, geschlossene Polylinie) der Kategorie „Möbel“ (nach Kategoriename;
+  `drawings::furniture_shape_footprints`; Bogensegmente der Polylinie gelten als gerade). Offen: Deckenspiegel-Untersicht
+  behält die alte Ausdünnung (0.7 mm, eigene Strichstärke/Farbe — eigene Darstellung der Untersicht, kein Belag; Umstellung
+  änderte das Bild ohne klaren Gewinn). Nassraum nach Name ist durch [158] ersetzt. · S
 - ◐ **[158]** Raumbuch. Stand 11.11.: lichte Höhe unter Dachschrägen (kleinste/mittlere Höhe, Fläche < 1.0 m / 1.0–1.5 m /
   ≥ 1.5 m nach SIA 416, Raster über dem Raum mit den Dächern des eigenen Geschosses; `room_book::height_bands`);
   Wandoberflächen je Wandseite (`wall_sides`, Raumseite der Wand abzüglich Öffnungen), Leibungsflächen und Sockellänge

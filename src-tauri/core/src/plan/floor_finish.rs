@@ -4,7 +4,7 @@
 //! Override-Regeln mit Bauteilart „floor_finish" blenden aus (`hide`), erzwingen (`hide: false`) oder
 //! färben/verstärken. Sichtbares Muster: feine Tusche-graue Linie (0.02–0.05 mm), Teilung auf dem Papier
 //! nicht dichter als [`MIN_PAPER_MM`] (sonst gröber, s. `surface_pattern::thin_factor`), ausgespart unter
-//! Treppen, Möbeln/Einbauten (Blöcke, Körper) und Raumstempeln. Bildschirm und Druck gleich (kein
+//! Treppen, Möbeln/Einbauten (Blöcke, geschlossene Möbel-Formen, Körper) und Raumstempeln. Bildschirm und Druck gleich (kein
 //! Unterschied nach `forPrint`/`compact`).
 
 use super::domains::Ctx;
@@ -139,7 +139,7 @@ pub fn wet_rooms(c: &Ctx) -> Vec<Vec<P>> {
 }
 
 /// Aussparungen: Raumstempel (Rechteck mit Luft) aus den schon gesetzten Raum-Primitiven, Möbel/Symbole
-/// (Blöcke der 2D-Zeichnungen, konvexe Hülle) und Körper des Geschosses (Einbauten, ohne Abzugskörper).
+/// (Blöcke der 2D-Zeichnungen, konvexe Hülle; geschlossene 2D-Formen der Kategorie „Möbel“) und Körper des Geschosses (Einbauten, ohne Abzugskörper).
 pub fn exclusions(c: &Ctx, rooms: &[Primitive]) -> Vec<Vec<P>> {
     let mut out = Vec::new();
     let margin = STAMP_MARGIN_MM * c.a.scale / 1000.0;
@@ -153,6 +153,7 @@ pub fn exclusions(c: &Ctx, rooms: &[Primitive]) -> Vec<Vec<P>> {
         }
     }
     out.extend(super::drawings::block_footprints(c));
+    out.extend(super::drawings::furniture_shape_footprints(c));
     for s in c.p.extruded_solids.as_deref().unwrap_or(&[]) {
         // Nur Körper, die auf dem Boden stehen (Küchenblock, Einbauschrank), nicht Träger darüber.
         let on_floor = s.base_offset.unwrap_or(0.0).abs() <= 0.05 && s.height > 0.0;

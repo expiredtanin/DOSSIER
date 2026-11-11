@@ -1750,6 +1750,53 @@ pub fn block_footprints(c: &Ctx) -> Vec<Vec<[f64; 2]>> {
     res
 }
 
+/// [156] Kategorie „Möbel“ (nach Name, ohne Gross-/Kleinschreibung): auch umbenannte Codes aus Importen.
+fn is_furniture_category(c: &Ctx, code: &str) -> bool {
+    c.cat(code).is_some_and(|k| {
+        let n = k.name.to_lowercase();
+        n.contains("möbel") || n.contains("moebel") || n.contains("furniture")
+    })
+}
+
+/// [156] Grundflächen der geschlossenen 2D-Formen (Rechteck, Kreis, Ellipse, geschlossene Polylinie) der
+/// Kategorie „Möbel“ auf dem Geschoss: der Bodenbelag spart sie aus wie die Blöcke ([`block_footprints`]).
+pub fn furniture_shape_footprints(c: &Ctx) -> Vec<Vec<[f64; 2]>> {
+    use std::f64::consts::TAU;
+    let mut memo = Memo::default();
+    let mut res = Vec::new();
+    for d in c.p.drawings2d.iter().filter(|d| {
+        matches!(d.geom, Drawing2DGeom::Rect { .. } | Drawing2DGeom::Circle { .. } | Drawing2DGeom::Ellipse { .. } | Drawing2DGeom::Polyline { closed: true, .. })
+            && is_furniture_category(c, &d.category_code)
+            && on_floor(c, d)
+    }) {
+        if !memo.get(c, d).shown {
+            continue;
+        }
+        let ring: Vec<[f64; 2]> = match &d.geom {
+            Drawing2DGeom::Rect { min, max } => vec![[min.x, min.y], [max.x, min.y], [max.x, max.y], [min.x, max.y]],
+            Drawing2DGeom::Circle { center, r } => (0..32).map(|i| {
+                let a = i as f64 * TAU / 32.0;
+                [center.x + r * crate::jsnum::cos(a), center.y + r * crate::jsnum::sin(a)]
+            }).collect(),
+            Drawing2DGeom::Ellipse { center, rx, ry, rotation } => {
+                let (cr, sr) = (crate::jsnum::cos(*rotation), crate::jsnum::sin(*rotation));
+                (0..32).map(|i| {
+                    let a = i as f64 * TAU / 32.0;
+                    let (x, y) = (rx * crate::jsnum::cos(a), ry * crate::jsnum::sin(a));
+                    [center.x + x * cr - y * sr, center.y + x * sr + y * cr]
+                }).collect()
+            }
+            // Bogensegmente (`bulge`) bleiben gerade: der Belag weicht eher etwas zu viel als zu wenig aus.
+            Drawing2DGeom::Polyline { pts, .. } => pts.iter().map(|v| [v.x, v.y]).collect(),
+            _ => continue,
+        };
+        if ring.len() >= 3 && ring.iter().all(|q| q[0].is_finite() && q[1].is_finite()) {
+            res.push(ring);
+        }
+    }
+    res
+}
+
 /// Mittlere Grösse eines Stücks der 2D-Zeichnungen (Elemente) und Obergrenze.
 const CHUNK_MEAN: u64 = 256;
 const CHUNK_MAX: usize = 2048;
