@@ -474,7 +474,7 @@ export function usePlanPointer(inp: UsePlanPointerArgs) {
     if (md && md.pointerId === p.pointerId) {
       const delta = { x: raw.x - md.last.x, y: raw.y - md.last.y };
       if (delta.x !== 0 || delta.y !== 0) {
-        gripHandlers!.onMoveBody(delta, md.target, mods);
+        gripHandlers!.onMoveBody(delta, md.target, mods, currentPxPerMeter());
         md.last = raw;
       }
       return;

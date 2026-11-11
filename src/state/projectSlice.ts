@@ -1276,13 +1276,14 @@ export function createProjectSlice(
         : kind === "ceiling" ? { op: "ceilingGrip", id, index, pt: p }
         : kind === "room" ? { op: "roomGrip", id, index, pt: p }
         : kind === "excavation" ? { op: "excavationGrip", id, index, pt: p }
+        : kind === "contours" ? { op: "contourGrip", id, index, pt: p }
         : { op: "moveGrip", drawingId: id, wallId: null, index, pt: p, scale: DEFAULT_SCALE_DENOMINATOR };
       applyGrip(req, coalesceKey ?? `moveRingVertex:${kind}:${id}:${index}`);
     },
     insertRingVertex: (kind, id, seg, pt, coalesceKey) =>
-      applyGrip(kind === "polyline" ? { op: "insertPoint", id, seg, pt: gripPt(pt) } : { op: "ringInsert", kind, id, seg, pt: gripPt(pt) }, coalesceKey),
+      applyGrip(kind === "contours" ? { op: "contourInsert", id, seg, pt: gripPt(pt) } : kind === "polyline" ? { op: "insertPoint", id, seg, pt: gripPt(pt) } : { op: "ringInsert", kind, id, seg, pt: gripPt(pt) }, coalesceKey),
     deleteRingVertex: (kind, id, index) =>
-      applyGrip(kind === "polyline" ? { op: "deletePoint", id, index } : { op: "ringDelete", kind, id, index }),
+      kind === "contours" ? undefined : applyGrip(kind === "polyline" ? { op: "deletePoint", id, index } : { op: "ringDelete", kind, id, index }),
     tidyRingVertex: (kind, id, index, coalesceKey, tol) =>
       applyGrip({ op: "ringTidy", kind, id, index, ...(tol != null ? { tol } : {}) }, coalesceKey),
     tidySectionLine: (id, coalesceKey, tol) => applyGrip({ op: "sectionLineTidy", id, ...(tol != null ? { tol } : {}) }, coalesceKey),

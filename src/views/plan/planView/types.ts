@@ -430,6 +430,8 @@ export interface BodyTarget {
   ceilingId?: string;
   /** Nur im Schnitt/in der Ansicht (`sheetBodies`). */
   stairId?: string;
+  /** [193] Gelände-/Umgebungs-Elemente (alle gewählten, das gegriffene liegt darunter). */
+  contextIds?: string[];
 }
 
 export interface GripHandlers {
@@ -445,6 +447,7 @@ export interface GripHandlers {
     delta: Vec2,
     target?: BodyTarget,
     mods?: ToolMods,
+    pxPerMeter?: number,
   ): void;
   /**
    * Eine SEITE (Kante) ziehen: verschiebt beide Vertices der Kante senkrecht

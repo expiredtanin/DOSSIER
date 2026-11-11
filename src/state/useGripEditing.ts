@@ -35,7 +35,8 @@ import {
   wallGripPoints,
   type GripLocks,
 } from "../core";
-import { areaMovePreview, drawingMovePreview } from "../tools/transform";
+import { areaMovePreview, drawingMovePreview, transformPreview } from "../tools/transform";
+import { contextAnchor } from "./contextDrag";
 import type { DraftShape, SnapResult, SnapSettings, ToolDraft, ToolMods } from "../tools/types";
 import { computeSnap } from "../tools/snapping";
 import { useCommandTabShortcut } from "./useKeyboardShortcuts";
@@ -185,6 +186,14 @@ export function useGripEditing(opts: {
   const selectedOpeningId = single(selection, "openings");
   const selectedStairId = single(selection, "stairs");
   // [149] Baum: Griff in der Stammmitte (verschieben) und am Kronenrand (Kronendurchmesser).
+  // [193] Einzeln gewählter Höhenlinien-Satz: Punkte als Griffe (Kern `grips.rs::contour_edit`).
+  const selectedContourSetId = modelEditable && selection.contextObjects.length === 1 ? selection.contextObjects[0] : null;
+  const selectedContourSet = selectedContourSetId
+    ? (() => {
+        const o = (project.context ?? []).find((c) => c.id === selectedContourSetId);
+        return o && o.type === "contourSet" ? o : null;
+      })()
+    : null;
   const selectedTreeId = single(selection, "trees");
   const selectedTree = selectedTreeId ? (project.trees ?? []).find((x) => x.id === selectedTreeId) : undefined;
   // [176] Schnitt-/Ansichtslinie im Grundriss: Griffe an Anfang, Knickpunkten (`bendPoints`) und Ende.
@@ -343,6 +352,7 @@ export function useGripEditing(opts: {
   })();
 
   const MAX_INSERT_GRIP_POINTS = 100; // Kataster-Umrisse mit tausenden Punkten: keine Rauten
+  const MAX_CONTOUR_GRIPS = 600; // Höhenlinien-Sätze mit tausenden Punkten: gar keine Punkt-Griffe
   /** Anteil entlang der Kante, an dem der Einfüge-Griff sitzt (neben dem Kanten-Anfasser in der Mitte). */
   const INSERT_AT = 0.25;
   /**
@@ -424,6 +434,28 @@ export function useGripEditing(opts: {
       }
       pushInsertGrips(out, roofRings(selectedRoof), { kind: "roof", id: selectedRoof.id });
       return out;
+    }
+    // [193] Höhenlinien: jeder Punkt ein Griff (flacher Index über alle Linien), dazu je Segment eine Einfüge-Raute.
+    // Kataster-grosse Sätze (hunderte Punkte) bekommen keine Griffe bzw. keine Rauten.
+    if (selectedContourSet && !selectedCeiling && effectiveDrawingIds.length === 0 && selectedWallIds.length === 0) {
+      const lines = selectedContourSet.contours;
+      const pts: Vec2[] = lines.flatMap((c) => c.pts);
+      if (pts.length > MAX_CONTOUR_GRIPS) return [];
+      pts.forEach((_, i) => { gripOwners.push({ localIndex: i }); gripOwnerRange.push([0, pts.length - 1]); });
+      if (pts.length <= MAX_INSERT_GRIP_POINTS) {
+        let off = 0;
+        const rings: { pts: Vec2[]; off: number }[] = [];
+        const noSeg = new Set<number>();
+        for (const c of lines) {
+          if (c.pts.length >= 2) {
+            rings.push({ pts: c.pts, off });
+            if (!c.closed) noSeg.add(off + c.pts.length - 1);
+          }
+          off += c.pts.length;
+        }
+        pushInsertGrips(pts, rings, { kind: "contours", id: selectedContourSet.id }, {}, (seg) => !noSeg.has(seg));
+      }
+      return pts;
     }
     // [68] Baugrube: Umriss-Ecken + Sohlen-Griff (Lage: Schwerpunkt, y um die Sohlenhöhe versetzt).
     if (modelEditable && selectedExcavation && !selectedCeiling && effectiveDrawingIds.length === 0 && selectedWallIds.length === 0) {
@@ -695,6 +727,10 @@ export function useGripEditing(opts: {
   const pendingAreaGripRef = useRef<{ kind: "room" | "ceiling" | "excavation" | "roof"; id: string; index: number; flat: number; pt: Vec2 } | null>(null);
   const pendingAreaMoveRef = useRef<{ kind: "ceiling" | "room" | "stair"; id: string; total: Vec2 } | null>(null);
   const pendingWallMoveRef = useRef<{ wallId: string; total: Vec2 } | null>(null);
+  /** [193] Aufgeschobenes Ziehen von Gelände-/Umgebungs-Elementen: ungefangenes und gefangenes Gesamt-Delta. */
+  const pendingContextMoveRef = useRef<{ ids: string[]; raw: Vec2; total: Vec2; anchor: Vec2 | null } | null>(null);
+  /** [193] Zug an einem Höhenlinien-Punkt (bzw. einer Einfüge-Raute: `insertSeg`): Vorschau bis zum Setzen, dann EIN Undo-Schritt. */
+  const pendingContourRef = useRef<{ id: string; index: number; pt: Vec2; insertSeg?: number } | null>(null);
   /** Aufgeschobene Öffnungs-Verschiebung im Schnitt/in der Ansicht (neue `position`). */
   const pendingOpeningMoveRef = useRef<{ id: string; position: number } | null>(null);
   /** Aufgeschobene Höhen-Änderung im Schnitt (Kante `kind` auf die Höhe `y`, Kern `sheetHeight`). */
@@ -1020,6 +1056,14 @@ export function useGripEditing(opts: {
   // Editier-Dispatch: bei gewählter Decke auf die Decken-Aktionen umleiten, sonst
   // auf die Wand/2D-Aktionen. So teilen Plan- UND 3D-Griffe denselben Pfad.
   const applyGrip = (index: number, pt: Vec2, arcLength?: number) => {
+    // [193] Höhenlinien-Punkt bzw. Einfüge-Raute: nur Vorschau, das Projekt ändert sich beim Setzen (ein Undo-Schritt).
+    if (selectedContourSet) {
+      const ins = gripOwners[index];
+      pendingContourRef.current = ins?.insertSeg != null
+        ? { id: selectedContourSet.id, index: ins.insertSeg + 1, pt, insertSeg: ins.insertSeg }
+        : { id: selectedContourSet.id, index, pt };
+      return;
+    }
     // [26] Einfüge-Raute am Umriss (Dach, Decke, Raum, Baugrube, geschlossene Polylinie): der erste Zug fügt die Ecke
     // ein, danach folgt sie dem Zeiger; Einfügen, Zug und Aufräumen sind ein Undo-Schritt (gleicher Schlüssel).
     const rd = ringDragRef.current;
@@ -1143,6 +1187,23 @@ export function useGripEditing(opts: {
 
   /** Vorschau-Form des ausstehenden Eckpunkt-Zugs (leer, wenn keiner läuft). */
   const gripPreviewShapes = (): DraftShape[] => {
+    const pc = pendingContourRef.current;
+    if (pc && selectedContourSet?.id === pc.id) {
+      // Die betroffene Höhenlinie mit dem gezogenen (bzw. eingefügten) Punkt als Linienzug.
+      let off = 0;
+      for (const c of selectedContourSet.contours) {
+        if (pc.index >= off && pc.index < off + c.pts.length + (pc.insertSeg != null ? 1 : 0) && (pc.insertSeg == null || pc.insertSeg >= off)) {
+          const local = pc.index - off;
+          const pts = pc.insertSeg != null ? [...c.pts.slice(0, local), pc.pt, ...c.pts.slice(local)] : c.pts.map((q, i) => (i === local ? pc.pt : q));
+          const out: DraftShape[] = [];
+          for (let i = 0; i + 1 < pts.length; i++) out.push({ kind: "line", a: pts[i], b: pts[i + 1] });
+          if (c.closed && pts.length > 2) out.push({ kind: "line", a: pts[pts.length - 1], b: pts[0] });
+          return out;
+        }
+        off += c.pts.length;
+      }
+      return [];
+    }
     const pa = pendingAreaGripRef.current;
     if (pa?.kind === "roof" && selectedRoof) {
       return roofRings(selectedRoof).map(({ pts, off }) => ({
@@ -1201,6 +1262,12 @@ export function useGripEditing(opts: {
     const ph = pendingSheetHeightRef.current;
     pendingSheetHeightRef.current = null;
     if (ph) sheetHeightGrip(ph.kind, ph.id, ph.y, ph.free);
+    const pc = pendingContourRef.current;
+    pendingContourRef.current = null;
+    if (pc) {
+      if (pc.insertSeg != null) storeState().insertRingVertex("contours", pc.id, pc.insertSeg, pc.pt);
+      else storeState().moveRingVertex("contours", pc.id, pc.index, pc.pt);
+    }
     const pa = pendingAreaGripRef.current;
     pendingAreaGripRef.current = null;
     if (pa) {
@@ -1267,6 +1334,9 @@ export function useGripEditing(opts: {
     const pom = pendingOpeningMoveRef.current;
     pendingOpeningMoveRef.current = null;
     if (pom) slideOpening(pom.id, { position: pom.position });
+    const pcm = pendingContextMoveRef.current;
+    pendingContextMoveRef.current = null;
+    if (pcm) storeState().moveContextBy(pcm.ids, pcm.total);
     const pa = pendingAreaMoveRef.current;
     pendingAreaMoveRef.current = null;
     if (pa && (pa.total.x !== 0 || pa.total.y !== 0)) {
@@ -1365,6 +1435,8 @@ export function useGripEditing(opts: {
   const endEditing = () => {
     sectionDragRef.current = null;
     ringDragRef.current = null;
+    pendingContourRef.current = null;
+    pendingContextMoveRef.current = null;
     setDraft(null);
     edgeAppliedDeltaRef.current = null; // Kanten-Drag beendet → Anker zurücksetzen
     moveCoincidentRef.current = null; // Körper-Koinzidenz-Gruppe verwerfen
@@ -1599,7 +1671,31 @@ export function useGripEditing(opts: {
       delta: Vec2,
       target?: BodyTarget,
       mods?: ToolMods,
+      pxPerMeter?: number,
     ) => {
+      // [193] Gelände-/Umgebungs-Elemente: Gesamt-Delta (mit Fang des Bezugspunkts) + Vorschau, Projekt erst beim Loslassen.
+      if (target?.contextIds && modelEditable) {
+        const prev = pendingContextMoveRef.current;
+        const same = prev && prev.ids.join("\n") === target.contextIds.join("\n");
+        const anchor = same ? prev!.anchor : contextAnchor(project, target.contextIds[0]);
+        let raw = same ? { x: prev!.raw.x + delta.x, y: prev!.raw.y + delta.y } : delta;
+        if (mods?.shift) {
+          raw = Math.abs(raw.x) >= Math.abs(raw.y) ? { x: raw.x, y: 0 } : { x: 0, y: raw.y };
+        }
+        let total = raw;
+        let hit: SnapResult | null = null;
+        if (anchor && pxPerMeter && !mods?.shift) {
+          hit = snapFor({ x: anchor.x + raw.x, y: anchor.y + raw.y }, pxPerMeter, mods ?? { shift: false, ctrl: false, alt: false });
+          if (hit?.point) total = { x: hit.point.x - anchor.x, y: hit.point.y - anchor.y };
+        }
+        pendingContextMoveRef.current = { ids: target.contextIds, raw, total, anchor };
+        setDraft({
+          preview: transformPreview(project, { wallIds: [], drawingId: null, contextIds: target.contextIds }, "move", [{ x: 0, y: 0 }, total], "move", 1),
+          vertices: [],
+          snap: hit,
+        });
+        return;
+      }
       // Shift = Ortho: das Delta auf die dominante Achse (H/V) zwingen —
       // dieselbe Regel wie beim freien Kanten-Zug (onEdgeMove) und beim
       // Vertex-Griff (onGripMove). Bisher wirkte Shift beim Körper-Verschieben
@@ -1751,7 +1847,8 @@ export function useGripEditing(opts: {
       // Ausstehender Zug: einfach verwerfen (das Projekt wurde nie verändert).
       if (pendingSheetHeightRef.current) {
         pendingSheetHeightRef.current = null;
-      } else if (pendingGripRef.current || pendingWallGripRef.current || pendingAreaGripRef.current) {
+      } else if (pendingGripRef.current || pendingWallGripRef.current || pendingAreaGripRef.current || pendingContourRef.current) {
+        pendingContourRef.current = null;
         pendingGripRef.current = null;
         pendingWallGripRef.current = null;
         pendingAreaGripRef.current = null;

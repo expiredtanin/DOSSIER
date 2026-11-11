@@ -306,6 +306,15 @@ pub fn run(lk: &Lookup, req: &Request) -> Result<GripResult, String> {
             })
             .into()
         }
+        // [193] Höhenlinien-Punkt ziehen bzw. einfügen: flacher Index über alle Linien des Satzes (Punkt-Index bzw. Segment-Index).
+        "contourGrip" => {
+            let (index, (x, y)) = (r.n("index"), r.p("pt"));
+            patch("context", r.s("id"), &|e| contour_edit(e, index, Some((x, y)), false)).into()
+        }
+        "contourInsert" => {
+            let (seg, (x, y)) = (r.n("seg"), r.p("pt"));
+            patch("context", r.s("id"), &|e| contour_edit(e, seg, Some((x, y)), true)).into()
+        }
         "excavationEdge" => {
             let (a, b, (dx, dy)) = (r.n("a"), r.n("b"), r.p("delta"));
             patch("context", r.s("id"), &|e| Some(with(e, "outline", move_polygon_edge(field(e, "outline")?.as_array()?, a, b, dx, dy, true)?))).into()
@@ -1350,6 +1359,39 @@ fn shift_edge_list(e: Value, field_name: &str, off: usize, shift: &EdgeShift) ->
     with(&e, field_name, Value::Array(v))
 }
 
+/// [193] Punkt `flat` (flach über alle Linien eines Höhenlinien-Satzes) auf `at` setzen bzw. (`insert`) hinter dem
+/// Punkt `flat` einen Punkt einfügen (Segment von `flat` zum Nachfolger; geschlossen: der letzte schliesst zum Anfang,
+/// offen: der letzte hat kein Segment). Eine wahre Kurve (`curve`) fällt weg.
+fn contour_edit(e: &Value, flat: f64, at: Option<(f64, f64)>, insert: bool) -> Option<Value> {
+    let (x, y) = at.filter(|(x, y)| x.is_finite() && y.is_finite())?;
+    if field(e, "type").and_then(Value::as_str) != Some("contourSet") {
+        return None;
+    }
+    let cs = arr(field(e, "contours"));
+    let mut off = 0usize;
+    for (ci, c) in cs.iter().enumerate() {
+        let pts = arr(field(c, "pts"));
+        let closed = truthy(field(c, "closed"));
+        let count = pts.len();
+        let has_seg = |i: usize| count >= 2 && (closed || i + 1 < count);
+        if let Some(i) = index_in(flat - off as f64, count).filter(|i| !insert || has_seg(*i)) {
+            let new_pts = if insert {
+                let mut v = pts.to_vec();
+                v.insert(i + 1, pt(x, y));
+                Value::Array(v)
+            } else {
+                replace_at(pts, i as f64, &pt(x, y))
+            };
+            let nc = with_opt(&with(c, "pts", new_pts), vec![("curve", None)]);
+            let mut out = cs.to_vec();
+            out[ci] = nc;
+            return Some(with(e, "contours", Value::Array(out)));
+        }
+        off += count;
+    }
+    None
+}
+
 /// [26] Ecke einfügen/löschen/aufräumen an einem Umriss-Element (s. `ringInsert`).
 fn ring_edit(e: &Value, kind: &str, flat: f64, edit: &RingEdit) -> Option<Value> {
     if truthy(field(e, "locked")) {
@@ -1933,6 +1975,28 @@ mod tests {
         let e = ent(json!({"op": "excavationGrip", "id": "bg", "index": 4, "pt": [2, -1]}));
         assert_eq!(e["bottom"], json!(-3));
         assert_eq!(e["outline"][2], json!({"x": 4, "y": 4}));
+    }
+
+    /// [193] Höhenlinien-Satz: Punkt ziehen (flacher Index über alle Linien) und Punkt hinter einem Segment einfügen.
+    #[test]
+    fn hoehenlinien_griffe() {
+        let r = root(json!({"context": [{"id": "hl", "type": "contourSet", "contours": [
+            {"z": 1, "closed": false, "pts": [{"x": 0, "y": 0}, {"x": 2, "y": 0}, {"x": 4, "y": 0}]},
+            {"z": 2, "closed": true, "curve": {"cx": 0, "cy": 0}, "pts": [{"x": 0, "y": 1}, {"x": 2, "y": 1}, {"x": 2, "y": 3}]}]}]}));
+        let ent = |v: Value| run(&Lookup::plain(&r), &rq(v)).unwrap().ops.first().map(|o| o.to_json()["entity"].clone());
+        let e = ent(json!({"op": "contourGrip", "id": "hl", "index": 4, "pt": [9, 9]})).unwrap();
+        assert_eq!(e["contours"][1]["pts"][1], json!({"x": 9, "y": 9}));
+        assert!(e["contours"][1].get("curve").is_none());
+        assert_eq!(e["contours"][0]["pts"][1], json!({"x": 2, "y": 0}));
+        assert!(ent(json!({"op": "contourGrip", "id": "hl", "index": 6, "pt": [9, 9]})).is_none());
+        // Offene Linie: Segmente ab Punkt 0 und 1 (Punkt 2 hat keins); geschlossene: ab 3, 4, 5 (5 schliesst zum Anfang).
+        assert!(ent(json!({"op": "contourInsert", "id": "hl", "seg": 2, "pt": [3, 1]})).is_none());
+        let e = ent(json!({"op": "contourInsert", "id": "hl", "seg": 1, "pt": [3, 1]})).unwrap();
+        assert_eq!(e["contours"][0]["pts"].as_array().unwrap().len(), 4);
+        assert_eq!(e["contours"][0]["pts"][2], json!({"x": 3, "y": 1}));
+        let e = ent(json!({"op": "contourInsert", "id": "hl", "seg": 5, "pt": [1, 2]})).unwrap();
+        assert_eq!(e["contours"][1]["pts"][3], json!({"x": 1, "y": 2}));
+        assert!(ent(json!({"op": "contourInsert", "id": "hl", "seg": 6, "pt": [1, 2]})).is_none());
     }
 
     /// [26] Dach: Ecken und Kanten von Umriss und Hof über den flachen Index; schiefer Umriss bleibt schief.

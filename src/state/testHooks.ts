@@ -46,7 +46,7 @@ declare global {
       modelView: () => string | undefined;
       /** [173] Schnitt der aktiven Ebene (1:50, Detailgrad der Anzeige): Zahl der Wand-Schnittflächen und ihre Fläche (m²). */
       sectionWalls: () => Promise<{ n: number; area: number }>;
-      /** [193] Gelände-/Umgebungs-Elemente (Art, Id, bei der Baugrube die erste Umrissecke). */
+      /** [193] Gelände-/Umgebungs-Elemente (Art, Id, bei der Baugrube die erste Umrissecke, bei Höhenlinien der erste Punkt). */
       context: () => { id: string; type: string; first?: { x: number; y: number } }[];
       /** [193] Gefüllte Flächen (Füllfarbe gesetzt) im Grundriss der aktiven Ebene (alle Kategorien, 1:100); bei 0 ist nichts Gefülltes mehr zu sehen. */
       planFills: () => number;
@@ -112,7 +112,7 @@ export function installTestHooks(): void {
       return generatePlan(s.project, s.activeLevelId, codes, undefined, s.detail, false, false, true, 50).primitives.filter((q) => q.kind === "line" && q.cls === cls).length;
     },
     context: () =>
-      (getState().project.context ?? []).map((c) => ({ id: c.id, type: c.type, first: c.type === "excavation" ? c.outline[0] : undefined })),
+      (getState().project.context ?? []).map((c) => ({ id: c.id, type: c.type, first: c.type === "excavation" ? c.outline[0] : c.type === "contourSet" ? c.contours[0]?.pts[0] : undefined })),
     planFills: () => {
       const s = getState();
       const codes = new Set<string>();
