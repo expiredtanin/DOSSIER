@@ -1119,14 +1119,16 @@ fn context_selection(root: &Map<String, Value>, o: &Value) -> J {
         O::default().n("e", (bb[0] + bb[2]) / 2.0 + oe).n("n", (bb[1] + bb[3]) / 2.0 + on).done()
     });
     let image = kind == Some("image");
+    // [181] Normales Element: Klasse (im Kopf der Objekt-Info änderbar) und Farbe/Stärke der Klasse; Herkunft nur als Auskunft.
+    let cat = category(root, field(o, "categoryCode"));
     O::default()
         .s("kind", "contextObject")
         .raw("id", o, "id")
-        .s("categoryCode", "")
-        .s("color", "#888888")
-        .n("weightMm", WALL_FALLBACK_MM)
+        .raw("categoryCode", o, "categoryCode")
+        .v("color", color_of(o, cat, "#888888"))
+        .v("weightMm", lw_or(None, cat, WALL_FALLBACK_MM))
         .v("bbox", bbox_value(bb))
-        .v("contextObject", O::default().raw("objType", o, "type").o("lv95Center", lv95).done())
+        .v("contextObject", O::default().raw("objType", o, "type").raw("source", o, "source").o("lv95Center", lv95).done())
         .v("isImage", Value::Bool(image))
         .o("opacity", image.then(|| nn(field(o, "opacity")).cloned().unwrap_or_else(|| Value::from(1u64))))
         .o("imageFilters", if image { field(o, "filters").cloned() } else { None })

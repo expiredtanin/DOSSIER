@@ -59,7 +59,7 @@ function project(): Project {
   p.walls = [wall];
   const cube: ImportedMesh = {
     id: "K1",
-    type: "importedMesh",
+    type: "importedMesh", categoryCode: "10",
     name: "Nachbar",
     color: "#ff8000",
     positions: [20, 30, 0, 24, 30, 0, 24, 36, 0, 20, 36, 0, 20, 30, 9, 24, 30, 9, 24, 36, 9, 20, 36, 9],

@@ -630,7 +630,9 @@ pub enum ParametricRule {
     Sequence(SequenceRule),
 }
 
-/// Kontext-Objekt (Tag `type`).
+/// Gelände- und Umgebungs-Element (Tag `type`, Sammlung `Project.context`, [181]): Netzkörper (`importedMesh`,
+/// z. B. Nachbargebäude), Höhenlinien (`contourSet`), Gelände (`terrainMesh`), Luftbild (`image`), Baugrube
+/// (`excavation`). Normale Elemente mit Klasse (`categoryCode`), unabhängig davon, woher sie kommen.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(tag = "type")]
 pub enum ContextObject {
@@ -644,6 +646,30 @@ pub enum ContextObject {
     Image(ContextImage),
     #[serde(rename = "excavation")]
     Excavation(Excavation),
+}
+
+impl ContextObject {
+    /// [181] Klasse/Ebene des Elements (Pflichtfeld jeder Art).
+    pub fn category_code(&self) -> &str {
+        match self {
+            ContextObject::ImportedMesh(m) => &m.category_code,
+            ContextObject::ContourSet(s) => &s.category_code,
+            ContextObject::TerrainMesh(t) => &t.category_code,
+            ContextObject::Image(i) => &i.category_code,
+            ContextObject::Excavation(e) => &e.category_code,
+        }
+    }
+
+    /// Element-Id.
+    pub fn id(&self) -> &str {
+        match self {
+            ContextObject::ImportedMesh(m) => &m.id,
+            ContextObject::ContourSet(s) => &s.id,
+            ContextObject::TerrainMesh(t) => &t.id,
+            ContextObject::Image(i) => &i.id,
+            ContextObject::Excavation(e) => &e.id,
+        }
+    }
 }
 
 impl Default for Drawing2DGeom {

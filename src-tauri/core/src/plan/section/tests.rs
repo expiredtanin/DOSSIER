@@ -810,7 +810,7 @@ fn gelaende_mit_baugrube_im_schnitt() {
         id: "t".into(),
         positions: vec![-50.0, -50.0, 0.0, 50.0, -50.0, 0.0, 50.0, 50.0, 0.0, -50.0, 50.0, 0.0],
         indices: vec![0.0, 1.0, 2.0, 0.0, 2.0, 3.0],
-        category_code: Some("02".into()),
+        category_code: "02".into(),
         ..Default::default()
     };
     let pit = Excavation {

@@ -71,11 +71,11 @@ describe("[137] 3D-Pick freie Körper und Stützen", () => {
     expect(selectionHighlightLines(base, [], [], rgb, [], [], [], [], 0, [], ["s1"]).length).toBe(4 * 3 * 12);
   });
 
-  it("einzeln ausgeblendetes Gelände fängt im 3D keinen Klick", () => {
-    const terrain: TerrainMesh = { id: "t1", type: "terrainMesh", name: "G", positions: [0, 0, 0, 10, 0, 0, 10, 10, 0], indices: [0, 1, 2] };
+  it("[181] Gelände in ausgeblendeter Klasse fängt im 3D keinen Klick", () => {
+    const terrain: TerrainMesh = { id: "t1", type: "terrainMesh", categoryCode: "02", name: "G", positions: [0, 0, 0, 10, 0, 0, 10, 10, 0], indices: [0, 1, 2] };
     const shown = { ...base, context: [{ ...terrain }] } as Project;
     expect(pickGeometry(shown).contextMeshes.map((m) => m.contextObjectId)).toEqual(["t1"]);
-    const hidden = { ...base, context: [{ ...terrain, hidden: true }] } as Project;
+    const hidden = { ...base, layers: [...base.layers, { code: "02", name: "Gelände", color: "#808080", lw: 0.13, visible: false }], context: [{ ...terrain }] } as Project;
     expect(pickGeometry(hidden).contextMeshes).toEqual([]);
   });
 });

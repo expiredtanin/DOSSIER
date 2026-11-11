@@ -32,18 +32,11 @@ pub fn emit_context_meshes(p: &Project) -> Vec<RMesh> {
     // [T6]/[114] Ebenen-Sichtbarkeit: ein ausgeblendetes Gelände (Kategorie „02") verschwindet auch im 3D.
     let hidden = hidden_category_codes(&p.layers);
     for obj in p.context.as_deref().unwrap_or(&[]) {
-        let code = match obj {
-            ContextObject::TerrainMesh(m) => m.category_code.as_deref(),
-            ContextObject::ImportedMesh(m) => m.category_code.as_deref(),
-            _ => None,
-        };
-        if code.is_some_and(|c| hidden.contains(c)) {
+        // [181] Sichtbarkeit allein über die Klasse.
+        if hidden.contains(obj.category_code()) {
             continue;
         }
         match obj {
-            // [137] Einzeln ausgeblendetes Gelände.
-            ContextObject::TerrainMesh(m) if m.hidden == Some(true) => {}
-            ContextObject::ImportedMesh(m) if m.hidden == Some(true) => {}
             ContextObject::TerrainMesh(m) if m.positions.len() >= 9 && m.indices.len() >= 3 => {
                 // [T6] Baugruben schneiden das Gelände; Höhen im Modellbezug (Luftbild-Farben auf das geänderte Netz übertragen).
                 let (pos, idx, _) = crate::excavation::terrain_model_mesh(p, m);

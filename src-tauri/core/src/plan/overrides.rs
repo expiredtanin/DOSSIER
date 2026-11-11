@@ -358,7 +358,7 @@ pub fn hidden_elements(p: &Project, v: RuleView) -> HashSet<String> {
     // [152] Importierte Netze (Bauteilart „mesh"); ohne Kategorie nur über Name/Bauteilart.
     for c in p.context.iter().flatten() {
         if let ContextObject::ImportedMesh(m) = c {
-            if test(super::section::MESH_KIND, m.category_code.as_deref().unwrap_or(""), Some(&m.name)) {
+            if test(super::section::MESH_KIND, &m.category_code, Some(&m.name)) {
                 out.insert(m.id.clone());
             }
         }

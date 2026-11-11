@@ -3,7 +3,8 @@
 // Beide Quellen liefern am Ende dasselbe: geschlossene/offene Polylinien in
 // LOKALEN Modell-Metern (bereits um die Origin verschoben, siehe lv95.ts),
 // kategorisiert nach Art (Gebäude/Strasse/Wasser/Grün/Parkplatz/Bahn/Wald). Die UI wandelt diese in
-// `ContourSet`-Kontext-Objekte pro Kategorie um und legt sie in `project.context`.
+// Linien-Elemente (`contourSet`) je Klasse um und legt sie in `project.context` ([181]: normale Elemente mit
+// Klasse; die Quelle steht nur als Auskunft in `source`).
 //
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
@@ -40,7 +41,7 @@ export interface GeoFeature {
 /** Default-Gebäudehöhe (m), wenn keine Höhe aus der Quelle vorliegt. */
 export const DEFAULT_BUILDING_HEIGHT = 9;
 
-/** Menschlicher Layer-/Objektname je Kategorie (deutsch, für die Kontext-Liste). */
+/** Menschlicher Objektname je Kategorie (deutsch). */
 const CATEGORY_LABEL: Record<GeoCategory, string> = {
   building: "Gebäude",
   road: "Strassen",
@@ -49,17 +50,6 @@ const CATEGORY_LABEL: Record<GeoCategory, string> = {
   parking: "Parkplätze",
   railway: "Bahn",
   forest: "Wald",
-};
-
-/** Layer-Kennung (englischer Identifier) je Kategorie — für spätere Zuordnung. */
-const CATEGORY_LAYER: Record<GeoCategory, string> = {
-  building: "context-buildings",
-  road: "context-roads",
-  water: "context-water",
-  green: "context-green",
-  parking: "context-parking",
-  railway: "context-railway",
-  forest: "context-forest",
 };
 
 /** Erzeugt eine (kollisionsarme) ID für ein neues Kontext-Objekt. */
@@ -88,7 +78,6 @@ export function featuresToContextObjects(
       z: 0,
       pts: f.pts.map((p) => ({ x: p.x, y: p.y })),
       closed: f.closed,
-      layer: CATEGORY_LAYER[f.category],
     });
     byCat.set(f.category, list);
   }
@@ -100,8 +89,8 @@ export function featuresToContextObjects(
       id: contextId(`geo-${cat}`),
       type: "contourSet",
       name: `${CATEGORY_LABEL[cat]} (${sourceLabel})`,
-      layer: CATEGORY_LAYER[cat],
       categoryCode: GEO_CATEGORY_DEFS[cat].code,
+      source: sourceLabel,
       contours,
     });
   }
@@ -148,8 +137,8 @@ export function buildingsToMesh(
     id: contextId("geo-building3d"),
     type: "importedMesh",
     name: `Gebäude 3D (${sourceLabel})`,
-    layer: CATEGORY_LAYER.building,
     categoryCode: GEO_CATEGORY_DEFS.building.code,
+    source: sourceLabel,
     positions,
     indices,
   };

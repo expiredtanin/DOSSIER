@@ -64,7 +64,7 @@ fn near(a: V3, b: V3) -> bool {
 /// [T6]/[114] Gelände in ausgeblendeter Kategorie kommt nicht ins 3D.
 #[test]
 fn gelaende_ausgeblendet_nicht_im_3d() {
-    let t = crate::model::TerrainMesh { id: "t".into(), category_code: Some("02".into()), positions: vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0], indices: vec![0.0, 1.0, 2.0], ..Default::default() };
+    let t = crate::model::TerrainMesh { id: "t".into(), category_code: "02".into(), positions: vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0], indices: vec![0.0, 1.0, 2.0], ..Default::default() };
     let cat = |visible| crate::model::LayerCategory { code: "02".into(), name: "Gelände".into(), visible, ..Default::default() };
     let mk = |visible| Project { context: Some(vec![ContextObject::TerrainMesh(t.clone())]), layers: vec![cat(visible)], ..Default::default() };
     assert_eq!(emit_context_meshes(&mk(true)).len(), 1);
@@ -173,21 +173,19 @@ fn pick_dachfenster_im_3d() {
     assert!(g.roofs.iter().any(|r| r.roof_id == "RF1" && !r.tris.is_empty()));
 }
 
-/// [137] Einzeln ausgeblendetes Gelände (`hidden`) und Gelände einer ausgeblendeten Kategorie fehlen im 3D
-/// und in der Pick-Geometrie; ein zweites Netz bleibt.
+/// [137]/[181] Gelände-Elemente verschwinden mit ihrer Klasse aus 3D und Pick-Geometrie; ein Gelände anderer Klasse bleibt.
 #[test]
-fn gelaende_einzeln_ausblenden() {
-    let mk = |id: &str, hidden: Option<bool>, code: Option<&str>| {
+fn gelaende_nach_klasse_ausblenden() {
+    let mk = |id: &str, code: &str| {
         ContextObject::TerrainMesh(TerrainMesh {
             id: id.into(),
             positions: vec![0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 10.0, 10.0, 1.0],
             indices: vec![0.0, 1.0, 2.0],
-            hidden,
-            category_code: code.map(Into::into),
+            category_code: code.into(),
             ..Default::default()
         })
     };
-    let mut p = Project { context: Some(vec![mk("a", Some(true), None), mk("b", None, None), mk("c", Some(false), Some("02"))]), ..Default::default() };
+    let mut p = Project { context: Some(vec![mk("b", "05"), mk("c", "02")]), ..Default::default() };
     let ids = |p: &Project| pick_geometry(p).unwrap().context_meshes.iter().map(|m| m.context_object_id.clone()).collect::<Vec<_>>();
     assert_eq!(ids(&p), vec!["b", "c"]);
     assert_eq!(emit_context_meshes(&p).len(), 2);
@@ -583,15 +581,16 @@ fn pick_kreis_bogen_text_im_3d() {
     assert!(inside(&g.drawing_meshes[2].tris, 21.0, 0.2) && !inside(&g.drawing_meshes[2].tris, 22.0, 0.2));
 }
 
-/// [137] Einzeln ausgeblendetes importiertes Netz: weder im 3D noch als Pick-Dreiecke.
+/// [181] Netzkörper (z. B. Nachbargebäude) in ausgeblendeter Klasse: weder im 3D noch als Pick-Dreiecke.
 #[test]
-fn importiertes_netz_einzeln_ausgeblendet() {
-    let mk = |hidden: Option<bool>| Project {
-        context: Some(vec![ContextObject::ImportedMesh(ImportedMesh { id: "m".into(), hidden, positions: vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0], indices: vec![0.0, 1.0, 2.0], ..Default::default() })]),
+fn netzkoerper_klasse_ausgeblendet() {
+    let mk = |visible: bool| Project {
+        context: Some(vec![ContextObject::ImportedMesh(ImportedMesh { id: "m".into(), category_code: "12".into(), positions: vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0], indices: vec![0.0, 1.0, 2.0], ..Default::default() })]),
+        layers: vec![crate::model::LayerCategory { code: "12".into(), name: "Gebäude".into(), visible, ..Default::default() }],
         ..Default::default()
     };
-    assert_eq!(emit_context_meshes(&mk(None)).len(), 1);
-    assert_eq!(pick_geometry(&mk(None)).unwrap().context_meshes.len(), 1);
-    assert!(emit_context_meshes(&mk(Some(true))).is_empty());
-    assert!(pick_geometry(&mk(Some(true))).unwrap().context_meshes.is_empty());
+    assert_eq!(emit_context_meshes(&mk(true)).len(), 1);
+    assert_eq!(pick_geometry(&mk(true)).unwrap().context_meshes.len(), 1);
+    assert!(emit_context_meshes(&mk(false)).is_empty());
+    assert!(pick_geometry(&mk(false)).unwrap().context_meshes.is_empty());
 }

@@ -586,7 +586,7 @@ pub fn summary_json(d: &DrawingImport) -> Value {
     Value::Object(m)
 }
 
-/// Meshes als Kontext-Objekte (`ImportedMesh`, Kategorie „10 Situation"; Layer „0" ohne `layer`).
+/// Meshes als Netzkörper (`ImportedMesh`, Klasse „10 Situation"; Herkunft `source` = DXF-Layer ausser „0").
 pub fn mesh_values(d: &DrawingImport) -> Vec<Value> {
     d.meshes
         .iter()
@@ -596,8 +596,9 @@ pub fn mesh_values(d: &DrawingImport) -> Vec<Value> {
             o.insert("type".into(), "importedMesh".into());
             o.insert("name".into(), m.name.clone().into());
             o.insert("categoryCode".into(), GENERIC_IMPORT_CODE.into());
-            if m.layer != "0" {
-                o.insert("layer".into(), m.layer.clone().into());
+            // [181] Herkunft nur als Auskunft (DXF-Layer), ohne Wirkung.
+            if m.layer != "0" && !m.layer.is_empty() {
+                o.insert("source".into(), format!("DXF-Layer {}", m.layer).into());
             }
             o.insert("positions".into(), Value::Array(m.positions.iter().map(|&x| js_num(x)).collect()));
             o.insert("indices".into(), Value::Array(m.indices.iter().map(|&x| js_num(x)).collect()));

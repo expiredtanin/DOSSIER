@@ -45,13 +45,14 @@ describe("[137] 3D-Pick Treppengeländer und 2D-Flächen", () => {
     expect(pick(base, down(24, 5))).toBeNull();
   });
 
-  it("importiertes Netz: hidden entfernt die Pick-Dreiecke, Undo bringt sie zurück", () => {
-    const mesh = { type: "importedMesh", id: "im", name: "M", positions: [30, 0, 0, 32, 0, 0, 30, 2, 0], indices: [0, 1, 2] } as ImportedMesh;
-    setState({ project: { ...base, stairs: [], drawings2d: [], context: [mesh] }, undoDepth: 0, redoDepth: 0, canUndo: false, canRedo: false });
+  it("[181] Netzkörper in ausgeblendete Klasse verschoben: keine Pick-Dreiecke, Undo bringt sie zurück", () => {
+    const mesh = { type: "importedMesh", id: "im", name: "M", categoryCode: "10", positions: [30, 0, 0, 32, 0, 0, 30, 2, 0], indices: [0, 1, 2] } as ImportedMesh;
+    const off = { code: "99", name: "Aus", color: "#000000", lw: 0.1, visible: false } as Project["layers"][number];
+    setState({ project: { ...base, layers: [...base.layers, off], stairs: [], drawings2d: [], context: [mesh] }, undoDepth: 0, redoDepth: 0, canUndo: false, canRedo: false });
     getState().clearHistory();
     expect(pickGeometry(getState().project).contextMeshes.map((m) => m.contextObjectId)).toEqual(["im"]);
-    getState().patchContextObject("im", { hidden: true });
-    expect((getState().project.context![0] as ImportedMesh).hidden).toBe(true);
+    getState().patchContextObject("im", { categoryCode: "99" });
+    expect((getState().project.context![0] as ImportedMesh).categoryCode).toBe("99");
     expect(pickGeometry(getState().project).contextMeshes).toEqual([]);
     getState().undo();
     expect(pickGeometry(getState().project).contextMeshes).toHaveLength(1);

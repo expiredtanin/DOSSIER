@@ -51,7 +51,15 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   Reiter aktiv und wechseln/öffnen den 3D- bzw. Grundriss-Reiter (Titel „3D · Geschoss"). Der 3D-Live-Schnitt „3D im Schnitt-Reiter"
   entfällt damit als Einstieg (toter Auto-Schnitt in `useSectionLineState` entfernt; der Live-Schnitt per Schalter im Objekt-Info der
   Schnittlinie bleibt im 3D-Reiter). Knopf „Grundriss" nur im Grundriss-Reiter hervorgehoben (`isPlanKindActive`, 11.11.). Offen: nicht in der Tauri-App geprüft. · S
-- ○ **[181]** Importe als eigenständige Elemente (11.11., Wunsch Maintainer): Swisstopo-Gelände/-Gebäude, DXF-/IFC-Kontext usw. werden nach dem Import normale Modell-Elemente auf Ebenen (eigene Klasse), unabhängig von der Quelle; keine Import-Liste mehr, die Sichtbarkeit/Darstellung steuert. Gelände-Mesh als Gelände-/Freiflächen-Element, Gebäude als 3D-Körper (wie Möbel/Körper oder eigener Typ). Keine Migration nötig (nur Beispielprojekte nachführen). Opus. · L
+- ◐ **[181]** Importe als eigenständige Elemente (11.11., Wunsch Maintainer). Umgesetzt (11.11.): Gelände, Höhenlinien,
+  Netzkörper (Nachbargebäude, IFC/OBJ/STEP/DXF-Netze), Luftbilder, Baugruben sind normale Elemente mit Pflicht-Klasse
+  (`categoryCode: String`); Sichtbarkeit nur über die Klasse (kein „ohne Kategorie immer sichtbar", kein `hidden`, kein
+  Gruppierungs-`layer`); Herkunft nur als Auskunft `source` (Objekt-Info). IFC-Gelände (`IfcSite`/Name) wird beim Import ein
+  Gelände-Element (`import_context::ifc_meshes`), `mesh_view::is_terrain` entfällt. Panel „Gelände" ohne Import-Liste (nur
+  Aktionen); Auswahl im Elemente-Panel (Knoten „Gelände & Umgebung"), Klasse im Kopf der Objekt-Info änderbar. Entwurf in
+  `doc/ARCHITEKTUR.md` Abschnitt 8. Geprüft: Rust/vitest/e2e, Musterhaus komplex mit Nachbarnetzen Grundriss 1:200/Schnitt/
+  Ansicht per CLI vor/nach byte-gleich. Offen: Linien des Standort-Imports (OSM/swisstopo-Umrisse) bleiben je Klasse ein
+  `contourSet` statt einzelner 2D-Zeichnungen; Tag-Namen `importedMesh`/`terrainMesh` historisch; Mac-Gegenprobe. · L
 - ○ **[180]** Alles Sichtbare auf Ebene/Klasse (11.11., Vorgabe Maintainer): jedes Primitive in Plan/Schnitt/Ansicht (auch abgeleitete: Schatten, Auto-Masse, Koten, Schnitt-/Ansichtsmarken, Raster, Nordpfeil, Stempel, Gelände) hat eine Klasse/Ebene und verschwindet mit ihr; Audit + Test, der Primitives ohne Zuordnung meldet. Regel in CLAUDE.md. · M
 - ◐ **[133]** Musterhaus komplex: Rest. Skalieren-Kopie lässt `position`/Breite unverändert; Vollflächen-/Bildschraffur
   und Schraffur-Löcher beim Ausbreiten fehlen (`src/export/planToSvgString.ts`, Kern `plan/svg.rs`; wegen paralleler
@@ -323,8 +331,9 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
 - ◐ **[67]** Skizzenstil (`plan/sketch.rs`). Kompakte Linien-Unterlage (grosse DXF-Unterlagen), Bögen und Kreise bleiben
   exakt; keine Intensitäts-Einstellung; keine Hand-Schraffur. · S
 - ◐ **[152]** Importierte Netze in Schnitt, Ansicht, Grundriss (`core/src/mesh_view.rs`). Der Archiv-Eintrag nennt keinen
-  ausdrücklichen „Offen“-Teil; bekannt: IFC-Gelände ist nur im Schnitt eine Geländelinie, Ansicht und Grundriss
-  behandeln es weiter als Netz. · S
+  ausdrücklichen „Offen“-Teil. (11.11., [181]) IFC-Gelände wird beim Import ein Gelände-Element und läuft damit in Grundriss,
+  Schnitt, Ansicht und 3D als Gelände; offen: Baugruben auf geschlossenen Gelände-Netzen (Platte) nicht geprüft, Grundriss
+  zeigt ohne Äquidistanz nur den Rahmen. · S
 
 ## 3D
 
@@ -528,7 +537,7 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
 
 Auf dem Mac (Tauri/Metal) noch nicht angesehen oder geprüft; bisher nur Linux-Container, CLI-SVG, Chromium oder
 Unit-Tests: [116] (atomares Speichern), [117] (CSP unter `tauri://`), [118], [122], [123], [126], [110], [101],
-[102], [131], [133], [136], [140], [145], [146], [153], [64], [T2], [T4], [34], [108], [65], [169], [113]. Je Punkt ansehen, dann hier und
+[102], [131], [133], [136], [140], [145], [146], [153], [64], [T2], [T4], [34], [108], [65], [169], [113], [181]. Je Punkt ansehen, dann hier und
 im jeweiligen Eintrag streichen. · M (gesamt)
 
 ---

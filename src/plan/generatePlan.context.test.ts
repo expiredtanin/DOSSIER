@@ -1,4 +1,4 @@
-// Kontext-Schicht im Grundriss (generatePlan → addContextContours):
+// Gelände-/Umgebungs-Elemente im Grundriss (generatePlan → addContextContours):
 //   • ImportedMesh -> [152] im Geschoss nach Ansichtsbereich: Schnittfläche, Aufsicht (mesh-view), Überkopf gestrichelt.
 //   • TerrainMesh -> nur 2D-Bounding-Box-Umriss (4 Linien).
 //   • Nutzer-Report: importierte Gebäude waren im Plan UNSICHTBAR (nur 3D).
@@ -29,7 +29,8 @@ function projectWith(context: Project["context"]): Project {
   } as unknown as Project;
 }
 
-const visible = new Set<string>();
+// [181] Klassen der Test-Elemente (Gelände „02", Luftbild „03", Netzkörper „10") eingeblendet.
+const visible = new Set<string>(["02", "03", "10"]);
 
 function contextLines(p: Project) {
   return generatePlan(p, "eg", visible).primitives.filter(
@@ -55,25 +56,25 @@ function box(z0: number, z1: number) {
 
 describe("generatePlan — importierte Netze im Grundriss ([152])", () => {
   it("ein Gebäude durch die Schnitthöhe wird geschnitten (Poché, anwählbar)", () => {
-    const p = projectWith([{ id: "B1", type: "importedMesh", name: "Haus", ...box(0, 5) }]);
+    const p = projectWith([{ id: "B1", type: "importedMesh", categoryCode: "10", name: "Haus", ...box(0, 5) }]);
     const cut = generatePlan(p, "eg", visible).primitives.filter((pr) => pr.kind === "polygon" && pr.contextObjectId === "B1" && pr.fill !== "none");
     expect(cut).toHaveLength(1);
   });
 
   it("eine Fläche am Boden als Aufsicht, ohne Triangulations-Diagonale", () => {
-    const p = projectWith([{ id: "B1", type: "importedMesh", name: "Platte", positions: [0, 0, 0, 2, 0, 0, 2, 3, 0, 0, 3, 0], indices: [0, 1, 2, 0, 2, 3] }]);
+    const p = projectWith([{ id: "B1", type: "importedMesh", categoryCode: "10", name: "Platte", positions: [0, 0, 0, 2, 0, 0, 2, 3, 0, 0, 3, 0], indices: [0, 1, 2, 0, 2, 3] }]);
     expect(meshLines(p)).toHaveLength(4);
   });
 
   it("ein Träger über der Schnitthöhe als gestrichelte Überkopf-Linie", () => {
-    const p = projectWith([{ id: "T1", type: "importedMesh", name: "Träger", ...box(2.2, 2.4) }]);
+    const p = projectWith([{ id: "T1", type: "importedMesh", categoryCode: "10", name: "Träger", ...box(2.2, 2.4) }]);
     const lines = meshLines(p);
     expect(lines).toHaveLength(4);
     expect(lines.every((l) => l.kind === "line" && Array.isArray(l.dash))).toBe(true);
   });
 
   it("ein Netz des Geschosses darüber erscheint nicht", () => {
-    const p = projectWith([{ id: "O1", type: "importedMesh", name: "OG", ...box(2.6, 5) }]);
+    const p = projectWith([{ id: "O1", type: "importedMesh", categoryCode: "10", name: "OG", ...box(2.6, 5) }]);
     expect(generatePlan(p, "eg", visible).primitives.filter((pr) => pr.kind === "polygon" && pr.contextObjectId === "O1")).toHaveLength(0);
   });
 });
@@ -83,7 +84,7 @@ describe("generatePlan — Kontext-Objekte anklickbar (Pick-Region)", () => {
     const p = projectWith([
       {
         id: "B1",
-        type: "importedMesh",
+        type: "importedMesh", categoryCode: "10",
         name: "Haus",
         positions: [0, 0, 0, 2, 0, 0, 2, 3, 0, 0, 3, 0],
         indices: [0, 1, 2, 0, 2, 3],
@@ -111,7 +112,7 @@ describe("generatePlan — Kontext-Objekte anklickbar (Pick-Region)", () => {
     const p = projectWith([
       {
         id: "T1",
-        type: "terrainMesh",
+        type: "terrainMesh", categoryCode: "02",
         name: "Gelände",
         positions: [0, 0, 400, 10, 0, 401, 5, 8, 402],
         indices: [0, 1, 2],
@@ -131,7 +132,7 @@ describe("generatePlan — Kontext-Umriss (TerrainMesh)", () => {
     const p = projectWith([
       {
         id: "T1",
-        type: "terrainMesh",
+        type: "terrainMesh", categoryCode: "02",
         name: "Gelände",
         positions: [0, 0, 400, 10, 0, 401, 5, 8, 402],
         indices: [0, 1, 2],
@@ -153,9 +154,8 @@ describe("generatePlan — Luftbild (ContextImage)", () => {
     const p = projectWith([
       {
         id: "IMG1",
-        type: "image",
+        type: "image", categoryCode: "03",
         name: "Luftbild",
-        layer: "Luftbild",
         src: "data:image/jpeg;base64,AAAA",
         min: { x: -100, y: -80 },
         max: { x: 100, y: 80 },
@@ -178,7 +178,7 @@ describe("generatePlan — Luftbild (ContextImage)", () => {
     const p = projectWith([
       {
         id: "IMG1",
-        type: "image",
+        type: "image", categoryCode: "03",
         name: "Luftbild",
         src: "data:image/jpeg;base64,AAAA",
         min: { x: 0, y: 0 },
@@ -199,7 +199,7 @@ describe("generatePlan — Luftbild (ContextImage)", () => {
     const p = projectWith([
       {
         id: "IMG1",
-        type: "image",
+        type: "image", categoryCode: "03",
         name: "Luftbild",
         src: "data:image/jpeg;base64,AAAA",
         min: { x: 0, y: 0 },
@@ -214,7 +214,7 @@ describe("generatePlan — Luftbild (ContextImage)", () => {
     const p = projectWith([
       {
         id: "IMG1",
-        type: "image",
+        type: "image", categoryCode: "03",
         name: "Luftbild",
         src: "data:image/jpeg;base64,AAAA",
         min: { x: 0, y: 0 },
@@ -227,11 +227,10 @@ describe("generatePlan — Luftbild (ContextImage)", () => {
 });
 
 describe("generatePlan — Kontext-Objekte: Ebenen-Sichtbarkeit (categoryCode)", () => {
-  // Ein Kontext-Objekt MIT `categoryCode` respektiert dieselbe visibleCodes-
-  // Allowlist wie jedes andere Bauteil (Wand/Dach/…) — Nutzer-Report: "sollten
-  // wie Gebäude/Dächer ausblendbar sein". Objekte OHNE categoryCode (ältere
-  // Importe) bleiben unabhängig davon immer sichtbar (Rückwärtskompatibilität).
-  const buildingMesh = (id: string, categoryCode?: string) => ({
+  // Gelände-/Umgebungs-Elemente respektieren dieselbe visibleCodes-Allowlist wie jedes andere Bauteil
+  // (Wand/Dach/…) — Nutzer-Report: "sollten wie Gebäude/Dächer ausblendbar sein". [181] Die Klasse ist
+  // Pflicht; ein „ohne Kategorie immer sichtbar" gibt es nicht mehr.
+  const buildingMesh = (id: string, categoryCode: string) => ({
     id,
     type: "importedMesh" as const,
     name: "Haus",
@@ -258,12 +257,4 @@ describe("generatePlan — Kontext-Objekte: Ebenen-Sichtbarkeit (categoryCode)",
     expect(lines.length).toBeGreaterThan(0);
   });
 
-  it("ein Objekt OHNE categoryCode bleibt immer sichtbar (Altbestand)", () => {
-    const p = projectWith([buildingMesh("B1", undefined)]);
-    const visibleEmpty = new Set<string>(); // schliesst alles Benannte aus
-    const lines = generatePlan(p, "eg", visibleEmpty).primitives.filter(
-      (pr) => pr.kind === "line" && (pr as { cls?: string }).cls === "mesh-view",
-    );
-    expect(lines.length).toBeGreaterThan(0);
-  });
 });

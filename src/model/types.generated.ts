@@ -428,10 +428,16 @@ export type ContextImage = {
   type: "image";
   id: string;
   name: string;
-  /** Ebenen-/Gruppierungsname (SitePanel), z. B. „Luftbild". Optional. */
-  layer?: string;
-  /** Grafik-Kategorie-Code, s. {@link ImportedMesh.categoryCode}. */
-  categoryCode?: string;
+  /**
+   * [181] Klasse/Ebene (Grafik-Kategorie, s. {@link LayerCategory}): steuert Sichtbarkeit, Grau und
+   * Sperren wie bei jedem anderen Element. Pflicht; Importe setzen sie (`model/contextCategories.ts`).
+   */
+  categoryCode: string;
+  /**
+   * [181] Herkunft (z. B. „swissBUILDINGS3D", „IFC IfcSite", „DXF-Layer Haus") — nur Auskunft in der
+   * Objekt-Info, ohne jede Wirkung auf Darstellung oder Sichtbarkeit (die steuert allein `categoryCode`).
+   */
+  source?: string;
   /** Bildquelle als Data-URL (PNG/JPEG). */
   src: string;
   /** Modell-Meter Bounding-Box (das Bild füllt [min..max] planar von oben). */
@@ -463,7 +469,11 @@ export type ContextImage = {
   };
 };
 
-/** Kontext-Objekt (Tag `type`). */
+/**
+ * Gelände- und Umgebungs-Element (Tag `type`, Sammlung `Project.context`, [181]): Netzkörper (`importedMesh`,
+ * z. B. Nachbargebäude), Höhenlinien (`contourSet`), Gelände (`terrainMesh`), Luftbild (`image`), Baugrube
+ * (`excavation`). Normale Elemente mit Klasse (`categoryCode`), unabhängig davon, woher sie kommen.
+ */
 export type ContextObject = ImportedMesh | ContourSet | TerrainMesh | ContextImage | Excavation;
 
 /**
@@ -494,10 +504,16 @@ export type ContourSet = {
   type: "contourSet";
   id: string;
   name: string;
-  /** Ursprünglicher DXF-Layer-Name (für spätere Kategorisierung). */
-  layer?: string;
-  /** Grafik-Kategorie-Code, s. {@link ImportedMesh.categoryCode}. */
-  categoryCode?: string;
+  /**
+   * [181] Klasse/Ebene (Grafik-Kategorie, s. {@link LayerCategory}): steuert Sichtbarkeit, Grau und
+   * Sperren wie bei jedem anderen Element. Pflicht; Importe setzen sie (`model/contextCategories.ts`).
+   */
+  categoryCode: string;
+  /**
+   * [181] Herkunft (z. B. „swissBUILDINGS3D", „IFC IfcSite", „DXF-Layer Haus") — nur Auskunft in der
+   * Objekt-Info, ohne jede Wirkung auf Darstellung oder Sichtbarkeit (die steuert allein `categoryCode`).
+   */
+  source?: string;
   contours: Array<Contour>;
 };
 
@@ -1242,8 +1258,11 @@ export type Excavation = {
   type: "excavation";
   id: string;
   name: string;
-  layer?: string;
-  categoryCode?: string;
+  /**
+   * [181] Klasse/Ebene (Grafik-Kategorie, s. {@link LayerCategory}): steuert Sichtbarkeit, Grau und
+   * Sperren wie bei jedem anderen Element. Pflicht; Importe setzen sie (`model/contextCategories.ts`).
+   */
+  categoryCode: string;
   outline: Array<Vec2>;
   bottom: number;
   slope?: number;
@@ -1576,15 +1595,16 @@ export type ImportedMesh = {
   type: "importedMesh";
   id: string;
   name: string;
-  /** Ursprünglicher DXF-Layer-Name (für spätere Kategorisierung). */
-  layer?: string;
   /**
-   * Grafik-Kategorie-Code (s. {@link LayerCategory}, `model/contextCategories.ts`)
-   * — steuert Sichtbarkeit/Grau/Sperren wie bei jedem anderen Bauteil (Ebenen-
-   * Panel). Fehlt er (ältere Importe vor dieser Erweiterung), bleibt das Objekt
-   * IMMER sichtbar (Rückwärtskompatibilität), s. `plan/context.rs` im Kern.
+   * [181] Klasse/Ebene (Grafik-Kategorie, s. {@link LayerCategory}): steuert Sichtbarkeit, Grau und
+   * Sperren wie bei jedem anderen Element. Pflicht; Importe setzen sie (`model/contextCategories.ts`).
    */
-  categoryCode?: string;
+  categoryCode: string;
+  /**
+   * [181] Herkunft (z. B. „swissBUILDINGS3D", „IFC IfcSite", „DXF-Layer Haus") — nur Auskunft in der
+   * Objekt-Info, ohne jede Wirkung auf Darstellung oder Sichtbarkeit (die steuert allein `categoryCode`).
+   */
+  source?: string;
   /**
    * Farbe aus der Quelldatei (`#rrggbb`, z. B. IFC-Oberflächenstil/Material); fehlt sie, gilt die Kontext-Grundfarbe.
    */
@@ -1595,11 +1615,6 @@ export type ImportedMesh = {
   smoothShading?: boolean;
   /** [T4] Knickwinkel in Grad für das glatte Schattieren (Default 30°). */
   creaseAngle?: number;
-  /**
-   * [137] Nur dieses Netz ausblenden (Grundriss, Schnitt, Ansicht, 3D, Pick); die Kategorie bleibt
-   * davon unberührt. Fehlt/false = sichtbar.
-   */
-  hidden?: boolean;
   positions: Array<number>;
   indices: Array<number>;
 };
@@ -2757,9 +2772,9 @@ export type Project = {
   /** Freie 2D-Zeichengeometrie (Line/Polyline/Rect/Circle/Arc/Text). */
   drawings2d: Array<Drawing2D>;
   /**
-   * Kontext-Schicht: importierte/abgeleitete „dumme" Geometrie (Meshes,
-   * Konturen, Gelände-TIN) — NICHT semantisch. Optional, damit bestehende
-   * Projekte/Tests ohne `context` gültig bleiben (Default: leer behandeln).
+   * [181] Gelände- und Umgebungs-Elemente (Gelände, Höhenlinien, Netzkörper wie Nachbargebäude, Luftbilder,
+   * Baugruben): normale Elemente mit Klasse (`categoryCode`), unabhängig von ihrer Herkunft; s.
+   * {@link ContextObject}. Fehlt das Feld, gilt die Liste als leer.
    */
   context?: Array<ContextObject>;
   /**
@@ -3572,16 +3587,23 @@ export type SwingSide = "left" | "right";
 /**
  * Ein TIN-Geländemodell, abgeleitet aus Konturen (Delaunay über (x,y), Z aus der
  * jeweiligen Kontur-Höhe). `positions` = flaches (x,y,z…)-Array in Metern,
- * `indices` = Dreiecks-Indizes. Gelände ist NICHT semantisch (Kontext-Schicht).
+ * `indices` = Dreiecks-Indizes. Gelände-Element ([181]): aus Höhenlinien erzeugt oder importiert (swissALTI3D,
+ * IFC-Gelände), danach unabhängig von der Quelle.
  */
 export type TerrainMesh = {
   type: "terrainMesh";
   id: string;
   name: string;
-  /** Ebenen-/Gruppierungsname (SitePanel), z. B. „Terrain". Optional. */
-  layer?: string;
-  /** Grafik-Kategorie-Code, s. {@link ImportedMesh.categoryCode}. */
-  categoryCode?: string;
+  /**
+   * [181] Klasse/Ebene (Grafik-Kategorie, s. {@link LayerCategory}): steuert Sichtbarkeit, Grau und
+   * Sperren wie bei jedem anderen Element. Pflicht; Importe setzen sie (`model/contextCategories.ts`).
+   */
+  categoryCode: string;
+  /**
+   * [181] Herkunft (z. B. „swissBUILDINGS3D", „IFC IfcSite", „DXF-Layer Haus") — nur Auskunft in der
+   * Objekt-Info, ohne jede Wirkung auf Darstellung oder Sichtbarkeit (die steuert allein `categoryCode`).
+   */
+  source?: string;
   positions: Array<number>;
   indices: Array<number>;
   /**
@@ -3607,11 +3629,6 @@ export type TerrainMesh = {
   smooth?: number;
   /** [137] Quelle: Id des Höhenlinien-Satzes (`contourSet`), aus dem das Netz erzeugt wurde. */
   sourceId?: string;
-  /**
-   * [137] Nur dieses Netz ausblenden (Grundriss, Schnitt, Ansicht, 3D, Pick); die Kategorie bleibt
-   * davon unberührt. Fehlt/false = sichtbar.
-   */
-  hidden?: boolean;
 };
 
 /** Ein zusammenhängender Textabschnitt mit einheitlicher Formatierung. */

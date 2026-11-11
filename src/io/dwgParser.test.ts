@@ -18,14 +18,14 @@ const fixture = (name: string): Uint8Array =>
 const asBuffer = (b: Uint8Array): ArrayBuffer => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) as ArrayBuffer;
 
 function meshByLayer(res: ImportView, layer: string) {
-  const m = res.meshes.find((x) => x.layer === layer);
+  const m = res.meshes.find((x) => x.source === `DXF-Layer ${layer}`);
   expect(m, `Mesh auf Ebene ${layer}`).toBeDefined();
   return m!;
 }
 
 /** Gemeinsame Erwartungen für alle Varianten der Kachel. */
 function checkTile(res: ImportView) {
-  expect(res.meshes.map((m) => m.layer).sort()).toEqual(["Roof", "Wall"]);
+  expect(res.meshes.map((m) => m.source).sort()).toEqual(["DXF-Layer Roof", "DXF-Layer Wall"]);
   const roof = meshByLayer(res, "Roof");
   // 3 Punkte, je um die INSERT-Einfügung verschoben (Skalierung 1, Drehung 0).
   expect(roof.positions).toEqual([

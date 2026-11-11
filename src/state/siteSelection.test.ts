@@ -89,7 +89,7 @@ describe("[137] Raster-Gelände (swissALTI3D) nachglätten", () => {
         const a = j * 6 + i;
         indices.push(a, a + 1, a + 7, a, a + 7, a + 6);
       }
-    const grid: TerrainMesh = { id: "alti", type: "terrainMesh", name: "swissALTI3D", positions, indices, smooth: 1 };
+    const grid: TerrainMesh = { id: "alti", type: "terrainMesh", categoryCode: "02", name: "swissALTI3D", positions, indices, smooth: 1 };
     setState({ project: { ...p, context: [grid] }, undoDepth: 0, redoDepth: 0, canUndo: false, canRedo: false });
     getState().clearHistory();
     const cur = () => getState().project.context!.find((c) => c.id === "alti") as TerrainMesh;

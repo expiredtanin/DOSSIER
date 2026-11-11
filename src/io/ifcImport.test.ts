@@ -117,7 +117,7 @@ describe("IFC-Import: Rundreise mit dem eigenen Export", () => {
     expect(meshes.length).toBe(products.length);
     expect(new Set(meshes.map((m) => m.id)).size).toBe(meshes.length);
     expect(meshes.every((m) => m.type === "importedMesh" && m.positions.length >= 9 && m.indices.length >= 3)).toBe(true);
-    expect(meshes.find((m) => m.layer === "IfcWall")).toBeTruthy();
+    expect(meshes.find((m) => m.source === "IFC IfcWall")).toBeTruthy();
     const grouped = (await importIfcInto(sampleProject, bytesOf(ifc), { group: "class" })).meshes;
     expect(grouped.length).toBeLessThan(meshes.length);
     expect(grouped.reduce((s, m) => s + m.indices.length, 0)).toBe(meshes.reduce((s, m) => s + m.indices.length, 0));

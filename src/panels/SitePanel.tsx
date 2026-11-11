@@ -1,21 +1,15 @@
-// Inhalts-Panel „Gelände & Kontext" — verwaltet die Kontext-Schicht
-// (importierte Meshes, Höhenlinien-Sätze, abgeleitetes Gelände-TIN). Handler
-// kommen über usePanelHost, die Kontext-Objekte aus dem Store (`project.context`, [121]).
+// Inhalts-Panel „Gelände & Kontext": Aktionen rund um die Lage — DXF-/Standort-Import, Bezugspunkt,
+// „Gelände erzeugen" aus Höhenlinien, Baugrube, Schattenstudie, Baurecht, Punktwolken.
 //
-// Aufbau:
-//   • Aktions-Zeile: „DXF importieren" (öffnet den in App montierten Datei-
-//     Dialog) + „Gelände erzeugen" (aus dem gewählten Kontur-Satz).
-//   • Liste der Kontext-Objekte: Name + Typ-Badge + „Entfernen".
-//   • Schattenstudie (SunStudySection): Schalter, Datum, Zeitregler.
-//   • Baurecht (SiteRulesSection): Parzelle, Grenzabstände, Baulinien, Gesamthöhe.
-//   • DWG-Hinweis am Fuß.
+// [181] Keine Liste der importierten Dinge mehr: Gelände, Höhenlinien, Nachbargebäude, Luftbilder und
+// Baugruben sind nach dem Import normale Elemente mit Klasse. Sichtbarkeit über die Klasse (Ebenen-Panel),
+// Auswahl im Plan/3D oder im Elemente-Panel, Einstellungen und Löschen wie bei jedem Element (Objekt-Info).
 //
 // Bezeichner englisch, UI-Text/Kommentare deutsch (CONVENTIONS.md). Alle sichtbaren
 // Texte über t(...).
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { t } from "../i18n";
-import type { TranslationKey } from "../i18n";
 import { usePanelHost } from "./host";
 import type { ContextObject } from "../model/types";
 import { ContextImportDialog } from "../ui/ContextImportDialog";
@@ -26,66 +20,12 @@ import { openContextImportWindowNative } from "../native/contextImportWindow";
 import { SunStudySection } from "./SunStudySection";
 import { SiteRulesSection } from "./SiteRulesSection";
 import { PointCloudSection } from "./PointCloudSection";
-import { excavationQuantities } from "../core";
-import { ContextObjectProps } from "./ContextObjectProps";
-
-/** Typ-spezifisches Badge-Label (i18n-Key) je Kontext-Objekt-Art. */
-function typeBadgeKey(obj: ContextObject): TranslationKey {
-  switch (obj.type) {
-    case "importedMesh":
-      return "site.type.mesh";
-    case "contourSet":
-      return "site.type.contours";
-    case "terrainMesh":
-      return "site.type.terrain";
-    case "image":
-      return "site.type.image";
-    case "excavation":
-      return "site.type.excavation";
-  }
-}
-
-/** Ebenen-/Gruppenname eines Kontext-Objekts (aus `layer`, sonst Typ-Fallback). */
-function layerOf(obj: ContextObject): string {
-  if (obj.layer && obj.layer.trim() !== "") return obj.layer;
-  switch (obj.type) {
-    case "importedMesh":
-      return t("site.group.imported");
-    case "terrainMesh":
-      return t("site.group.terrain");
-    case "contourSet":
-      return t("site.group.contours");
-    case "image":
-      return t("site.group.image");
-    case "excavation":
-      return t("site.group.terrain");
-  }
-}
-
-/** Gruppiert Kontext-Objekte nach Ebene, Reihenfolge des ersten Auftretens. */
-function groupByLayer(objects: ContextObject[]): { layer: string; items: ContextObject[] }[] {
-  const order: string[] = [];
-  const byLayer = new Map<string, ContextObject[]>();
-  for (const obj of objects) {
-    const layer = layerOf(obj);
-    let items = byLayer.get(layer);
-    if (!items) {
-      items = [];
-      byLayer.set(layer, items);
-      order.push(layer);
-    }
-    items.push(obj);
-  }
-  return order.map((layer) => ({ layer, items: byLayer.get(layer)! }));
-}
 
 const NO_CONTEXT: ContextObject[] = [];
 
 export function SitePanel() {
   const host = usePanelHost();
   const project = useStore((s) => s.project);
-  // Gewählte Kontext-Objekte schmal aus dem Store ([121], [130]).
-  const selectedContextObjectIds = useStore((s) => s.selection.contextObjects);
   const notify = useStore((s) => s.notify);
   const objects = project.context ?? NO_CONTEXT;
   const contourSets = objects.filter((o) => o.type === "contourSet");
@@ -102,8 +42,6 @@ export function SitePanel() {
 
   // [T6] Glätten beim Erzeugen (Bruchkanten werden immer erzwungen).
   const [smooth, setSmooth] = useState(true);
-  // [68] Mengen der Baugruben (Kern), nur neu, wenn sich das Projekt ändert.
-  const quantities = useMemo(() => excavationQuantities(project), [project]);
 
   const onGenerate = () => {
     if (!effectiveSet) return;
@@ -193,60 +131,6 @@ export function SitePanel() {
       <div className="site-sep" />
       <PointCloudSection />
       <div className="site-sep" />
-
-      {/* Kontext-Objekte nach Ebene (`layer`) gruppiert: importierte Gebäude
-          liegen als EINZELNE, getrennt lösch-/anwählbare Elemente unter ihrer
-          Ebene (z. B. „Gebäude"), Terrain unter „Terrain". Je Gruppe ein Kopf
-          mit Anzahl + „ganze Ebene löschen". */}
-      {objects.length === 0 ? (
-        <div className="site-empty">{t("site.empty")}</div>
-      ) : (
-        groupByLayer(objects).map(({ layer, items }) => (
-          <div key={layer} className="site-group">
-            <div className="site-group-head">
-              <span className="site-group-name">{layer}</span>
-              <span className="site-group-count">{items.length}</span>
-              <button
-                type="button"
-                className="site-remove"
-                title={t("site.deleteLayer")}
-                aria-label={t("site.deleteLayer")}
-                onClick={() => host.onRemoveContextObjects(items.map((o) => o.id))}
-              >
-                ×
-              </button>
-            </div>
-            <ul className="site-list">
-              {items.map((obj) => (
-                <li
-                  key={obj.id}
-                  className={
-                    "site-row" +
-                    (selectedContextObjectIds.includes(obj.id) ? " site-row-selected" : "")
-                  }
-                >
-                  <span className="site-name" title={obj.name}>
-                    {obj.name}
-                  </span>
-                  <span className={"site-badge site-badge-" + obj.type}>
-                    {t(typeBadgeKey(obj))}
-                  </span>
-                  <button
-                    type="button"
-                    className="site-remove"
-                    title={t("site.delete")}
-                    aria-label={t("site.delete")}
-                    onClick={() => host.onRemoveContextObject(obj.id)}
-                  >
-                    ×
-                  </button>
-                  <ContextObjectProps obj={obj} quantities={quantities} />
-                </li>
-              ))}
-            </ul>
-          </div>
-        ))
-      )}
 
       <div className="site-hint">{t("site.dwgHint")}</div>
     </div>

@@ -191,7 +191,7 @@ pub fn bases(p: &Project) -> Vec<f64> {
     if trees.is_empty() {
         return Vec::new();
     }
-    let site = crate::excavation::terrains(p).into_iter().find(|t| t.hidden != Some(true)).map(|t| crate::excavation::site_terrain(p, t)).filter(|st| !st.current().tris.is_empty());
+    let site = crate::excavation::terrains(p).into_iter().next().map(|t| crate::excavation::site_terrain(p, t)).filter(|st| !st.current().tris.is_empty());
     let idx = site.as_ref().map(|st| (st.index_current(), st.datum));
     trees
         .iter()

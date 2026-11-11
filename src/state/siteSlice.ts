@@ -1,6 +1,5 @@
-// Site-/Kontext-Slice: verwaltet die Kontext-Schicht `project.context`
-// (importierte Meshes, Konturen-Sätze, abgeleitetes Gelände-TIN). Diese
-// Geometrie ist „dumm"/nicht-semantisch — sie liegt bewusst NEBEN dem BIM-Modell.
+// Site-Slice: Gelände- und Umgebungs-Elemente `project.context` (Netzkörper, Höhenlinien, Gelände, Luftbild,
+// Baugrube). [181] Normale Elemente mit Klasse — keine eigene „Kontext-Schicht" mit Import-Liste mehr.
 //
 // Entwurfsentscheidung: `context` ist Teil von `project` (ein einziger
 // Wahrheits-Baum, konsistent mit projectSlice). Diese Slice MUTIERT daher

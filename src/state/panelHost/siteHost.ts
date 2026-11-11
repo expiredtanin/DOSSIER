@@ -1,5 +1,5 @@
 // Panel-Host, Teil Lage und Elemente-Baum ([121], aus `usePanelHostBase` herausgelöst):
-// Kontext-Objekte (Gelände, Aushub, Georeferenz, DXF-Import) und die Auswahl einer Zeile im
+// Gelände-/Umgebungs-Elemente (Gelände, Aushub, Georeferenz, DXF-Import, Auswahl im Elemente-Panel) und die Auswahl einer Zeile im
 // Elemente-Panel samt Geschosswechsel und Zoom.
 
 import { setFieldIfChanged } from "../../core";
@@ -8,12 +8,14 @@ import type { ScheduleKind } from "../../export/exportSchedule";
 import type { FlatHostOpts, HostPart } from "./types";
 
 export function buildSiteHost(c: FlatHostOpts) {
-  const { activeLevelId, addContextObjectsAndFit, applyChange, dxfInputRef, generateTerrain, onRunCommand, patchContextObject, planViewRef, removeContextObject, removeContextObjects, setActiveLevelId, setSelection } = c;
+  const { activeLevelId, addContextObjectsAndFit, applyChange, dxfInputRef, generateTerrain, onRunCommand, patchContextObject, planViewRef, setActiveLevelId, setSelection } = c;
   return {
-    // ── Site-/Kontext-Schicht ──────────────────────────────────────────────
+    // ── Gelände und Umgebung ───────────────────────────────────────────────
     onAddContextObjects: addContextObjectsAndFit,
-    onRemoveContextObject: removeContextObject,
-    onRemoveContextObjects: removeContextObjects,
+    onSelectSiteElement: (id: string, opts?: { zoom?: boolean }) => {
+      setSelection({ ...clearKinds(), contextObjects: [id] });
+      if (opts?.zoom) requestAnimationFrame(() => planViewRef.current?.fit());
+    },
     onGenerateTerrain: generateTerrain,
     onPatchContextObject: patchContextObject,
     onStartExcavation: () => onRunCommand("excavation"),

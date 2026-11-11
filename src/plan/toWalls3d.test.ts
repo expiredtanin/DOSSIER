@@ -114,7 +114,7 @@ describe("selectionHighlightLines — Kontext-Objekte", () => {
     context: [
       {
         id: "CTX1",
-        type: "importedMesh",
+        type: "importedMesh", categoryCode: "10",
         name: "Testgebäude",
         positions: [0, 0, 0, 2, 0, 0, 2, 3, 4],
         indices: [0, 1, 2],
@@ -2559,7 +2559,7 @@ describe("pickGeometry — Kontext-Meshes (importierte Gebäude/Terrain)", () =>
     context: [
       {
         id: "CTX1",
-        type: "importedMesh",
+        type: "importedMesh", categoryCode: "10",
         name: "Testgebäude",
         // model (x,y,z=Höhe) -> world (x, z, -y): ein Dreieck.
         positions: [0, 0, 0, 2, 0, 0, 2, 3, 4],
@@ -2567,7 +2567,7 @@ describe("pickGeometry — Kontext-Meshes (importierte Gebäude/Terrain)", () =>
       },
       {
         id: "CONTOURS1",
-        type: "contourSet",
+        type: "contourSet", categoryCode: "02",
         name: "Höhenlinien",
         contours: [],
       },
@@ -2591,7 +2591,7 @@ describe("pickGeometry — Kontext-Meshes (importierte Gebäude/Terrain)", () =>
       context: [
         {
           id: "CTX2",
-          type: "importedMesh",
+          type: "importedMesh", categoryCode: "10",
           name: "Kaputt",
           positions: [0, 0, 0, 1, 0, 0, 1, 1, 0],
           indices: [0, 1, 99], // Index 99 existiert nicht

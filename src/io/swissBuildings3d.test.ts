@@ -11,7 +11,7 @@ import {
   splitMeshComponents,
   stripOverhangSoffits,
   concatMeshes,
-  BUILDING_LAYER,
+  BUILDINGS_SOURCE,
 } from "./swissBuildings3d";
 import type { ImportedMesh } from "../model/types";
 
@@ -19,7 +19,7 @@ describe("shiftMeshToOrigin", () => {
   it("verschiebt x/y um die Origin, lässt z unverändert", () => {
     const mesh: ImportedMesh = {
       id: "m1",
-      type: "importedMesh",
+      type: "importedMesh", categoryCode: "10",
       name: "roh",
       positions: [2600100, 1200050, 3.5, 2600110, 1200060, 7.2],
       indices: [0, 1, 0],
@@ -33,7 +33,7 @@ describe("shiftMeshToOrigin", () => {
   it("mutiert das Eingabe-Mesh nicht", () => {
     const mesh: ImportedMesh = {
       id: "m1",
-      type: "importedMesh",
+      type: "importedMesh", categoryCode: "10",
       name: "roh",
       positions: [2600100, 1200050, 0],
       indices: [],
@@ -50,7 +50,7 @@ describe("clipMeshToBbox", () => {
   // gesuchten Radius).
   const mesh: ImportedMesh = {
     id: "m1",
-    type: "importedMesh",
+    type: "importedMesh", categoryCode: "10",
     name: "roh",
     positions: [
       0, 0, 0, 1, 0, 0, 0, 1, 0, // Dreieck 0: innerhalb [-5,5]
@@ -77,7 +77,7 @@ describe("clipMeshToBbox", () => {
   it("ein Dreieck, das die Box-Kante überragt, bleibt VOLLSTÄNDIG erhalten (kein Mittendurch-Schnitt)", () => {
     const straddling: ImportedMesh = {
       id: "m2",
-      type: "importedMesh",
+      type: "importedMesh", categoryCode: "10",
       name: "roh",
       positions: [4, 0, 0, 10, 0, 0, 4, 10, 0], // ein Eckpunkt (4,0) in [-5,5], zwei ausserhalb
       indices: [0, 1, 2],
@@ -91,7 +91,7 @@ describe("splitMeshComponents", () => {
   // Zwei räumlich getrennte Dreiecke (kein gemeinsamer Vertex) = zwei Gebäude.
   const twoBuildings: ImportedMesh = {
     id: "m1",
-    type: "importedMesh",
+    type: "importedMesh", categoryCode: "10",
     name: "Kachel",
     positions: [
       0, 0, 0, 1, 0, 0, 0, 1, 0, // Gebäude A
@@ -100,12 +100,12 @@ describe("splitMeshComponents", () => {
     indices: [0, 1, 2, 3, 4, 5],
   };
 
-  it("trennt zwei unverbundene Dreiecke in zwei Meshes mit eigener Id + Ebene", () => {
+  it("trennt zwei unverbundene Dreiecke in zwei Meshes mit eigener Id + Herkunft", () => {
     const parts = splitMeshComponents(twoBuildings);
     expect(parts.length).toBe(2);
     expect(parts[0].id).not.toBe(parts[1].id);
     for (const p of parts) {
-      expect(p.layer).toBe(BUILDING_LAYER);
+      expect(p.source).toBe(BUILDINGS_SOURCE);
       expect(p.indices.length).toBe(3); // je ein Dreieck
       expect(p.positions.length).toBe(9); // kompaktiert: nur die 3 eigenen Vertices
       // Indizes sind neu gemappt (0..2), zeigen nicht mehr auf die alten Globalindizes.
@@ -118,7 +118,7 @@ describe("splitMeshComponents", () => {
     // (getrennte Indizes, gleiche Koordinaten) — das Welding muss sie verbinden.
     const shared: ImportedMesh = {
       id: "m2",
-      type: "importedMesh",
+      type: "importedMesh", categoryCode: "10",
       name: "Haus",
       positions: [
         0, 0, 0, 1, 0, 0, 0, 1, 0, // Dreieck 1: (0,0),(1,0),(0,1)
@@ -131,21 +131,21 @@ describe("splitMeshComponents", () => {
     expect(parts[0].indices.length).toBe(6);
   });
 
-  it("ein einzelnes zusammenhängendes Mesh bleibt ein Mesh (bekommt aber die Ebene)", () => {
+  it("ein einzelnes zusammenhängendes Mesh bleibt ein Mesh (bekommt aber die Herkunft)", () => {
     const one: ImportedMesh = {
       id: "m3",
-      type: "importedMesh",
+      type: "importedMesh", categoryCode: "10",
       name: "Solo",
       positions: [0, 0, 0, 1, 0, 0, 0, 1, 0],
       indices: [0, 1, 2],
     };
     const parts = splitMeshComponents(one);
     expect(parts.length).toBe(1);
-    expect(parts[0].layer).toBe(BUILDING_LAYER);
+    expect(parts[0].source).toBe(BUILDINGS_SOURCE);
   });
 
   it("leeres/entartetes Mesh -> leeres Ergebnis (kein Crash)", () => {
-    const empty: ImportedMesh = { id: "e", type: "importedMesh", name: "x", positions: [], indices: [] };
+    const empty: ImportedMesh = { id: "e", type: "importedMesh", categoryCode: "10", name: "x", positions: [], indices: [] };
     expect(splitMeshComponents(empty)).toEqual([]);
   });
 });
@@ -159,7 +159,7 @@ describe("stripOverhangSoffits", () => {
   it("entfernt eine nach unten zeigende Überstand-Untersicht oberhalb der Grundmauer", () => {
     const mesh: ImportedMesh = {
       id: "m1",
-      type: "importedMesh",
+      type: "importedMesh", categoryCode: "10",
       name: "Haus",
       positions: [
         0, 0, 0, // 0: Sockel
@@ -191,7 +191,7 @@ describe("stripOverhangSoffits", () => {
   it("lässt ein Mesh ohne Soffiten unverändert", () => {
     const mesh: ImportedMesh = {
       id: "m1",
-      type: "importedMesh",
+      type: "importedMesh", categoryCode: "10",
       name: "Dreieck",
       positions: [0, 0, 0, 1, 0, 0, 0, 1, 0],
       indices: [0, 1, 2],
@@ -206,7 +206,7 @@ describe("stripOverhangSoffits", () => {
     // Boden-Ausnahme greift VOR der Normalen-Prüfung, bleibt also erhalten.
     const mesh: ImportedMesh = {
       id: "m1",
-      type: "importedMesh",
+      type: "importedMesh", categoryCode: "10",
       name: "Sockel",
       positions: [0, 0, 0, 0, 1, 0, 1, 0, 0], // a,c,b-Reihenfolge -> nz=-1
       indices: [0, 1, 2],
@@ -216,7 +216,7 @@ describe("stripOverhangSoffits", () => {
   });
 
   it("leeres/entartetes Mesh -> unverändert (kein Crash)", () => {
-    const empty: ImportedMesh = { id: "e", type: "importedMesh", name: "x", positions: [], indices: [] };
+    const empty: ImportedMesh = { id: "e", type: "importedMesh", categoryCode: "10", name: "x", positions: [], indices: [] };
     expect(stripOverhangSoffits(empty)).toBe(empty);
   });
 });
@@ -226,7 +226,8 @@ describe("concatMeshes", () => {
     id,
     type: "importedMesh",
     name: id,
-    layer: id,
+    categoryCode: "10",
+    source: id,
     positions: [ox, 0, 0, ox + 1, 0, 0, ox, 1, 0],
     indices: [0, 1, 2],
   });
@@ -239,7 +240,7 @@ describe("concatMeshes", () => {
   });
 
   it("leere Teile (kein Dreieck) werden übersprungen, kein Beitrag zu Positions/Indizes", () => {
-    const emptyPart: ImportedMesh = { id: "e", type: "importedMesh", name: "e", positions: [1, 2, 3], indices: [] };
+    const emptyPart: ImportedMesh = { id: "e", type: "importedMesh", categoryCode: "10", name: "e", positions: [1, 2, 3], indices: [] };
     const merged = concatMeshes([emptyPart, tri("a", 0)]);
     expect(merged?.positions).toEqual([0, 0, 0, 1, 0, 0, 0, 1, 0]);
   });
@@ -250,12 +251,12 @@ describe("concatMeshes", () => {
   });
 
   it("ausschliesslich leere Teile -> null", () => {
-    const empty: ImportedMesh = { id: "e", type: "importedMesh", name: "e", positions: [], indices: [] };
+    const empty: ImportedMesh = { id: "e", type: "importedMesh", categoryCode: "10", name: "e", positions: [], indices: [] };
     expect(concatMeshes([empty, empty])).toBeNull();
   });
 
-  it("übernimmt Metadaten (z. B. `layer`) vom ERSTEN nicht-leeren Teil", () => {
+  it("übernimmt Metadaten (z. B. `source`) vom ERSTEN nicht-leeren Teil", () => {
     const merged = concatMeshes([tri("a", 0), tri("b", 10)]);
-    expect(merged?.layer).toBe("a");
+    expect(merged?.source).toBe("a");
   });
 });

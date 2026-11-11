@@ -92,8 +92,6 @@ export type PanelHostOpts = {
     | "importLineStyles"
     | "importHatches"
     | "addContextObjectsAndFit"
-    | "removeContextObject"
-    | "removeContextObjects"
     | "generateTerrain"
     | "patchContextObject"
     | "commitTransformOn"

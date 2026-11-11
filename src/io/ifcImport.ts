@@ -1,6 +1,7 @@
 // IFC-Import ([B3] Kontext-Meshes, [B4] Bauteile): dünne Fassade über `import_ifc`/`import_ifc_elements` im
 // Format-Modul (`src-tauri/fileio`, `ifc_import.rs`, `ifc_semantic.rs`). Die Umwandlung ins Projekt — je
-// Bauteil ein `ImportedMesh` der Kontext-Schicht (GlobalId, Farbe, Klasse als `layer`; ab `MAX_SINGLE`
+// Bauteil ein Netzkörper (`ImportedMesh`: GlobalId, Farbe, IFC-Klasse als Herkunft `source`; Gelände wird ein
+// Gelände-Element, [181]; ab `MAX_SINGLE`
 // Bauteilen je Klasse + Geschoss zusammengelegt) bzw. echte Wände, Öffnungen, Decken, Stützen, Räume — macht
 // der Kern als EIN Undo-Schritt (`core/src/import_ifc.rs`, `ProjectDocument.importIfc`, [K4] S4).
 //

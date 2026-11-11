@@ -463,6 +463,34 @@ Es gibt drei Schatten, alle aus derselben Sonnenstudie (`Project.sunStudy`, Ort 
    `ifc_import()` in `src-tauri/core/src/import_ifc.rs` (Netze über `import_context.rs`). Der Kern legt
    alles als **einen** Undo-Schritt an.
 
+### Importe werden Elemente ([181], 11.11.2026)
+
+Was ein Import ins Modell bringt, ist danach ein gewöhnliches Element, unabhängig von der Quelle. Es gibt keine
+Import-Liste und keine „Kontext-Schicht", die Sichtbarkeit oder Darstellung steuert:
+
+| Herkunft | Element (`Project.context`, Tag `type`) | Klasse (`categoryCode`) |
+|---|---|---|
+| swissALTI3D, „Gelände erzeugen", IFC `IfcSite` bzw. Name mit Gelände/Terrain | Gelände `terrainMesh` (TIN; geschlossene Netze schneidet der Schnitt als Oberkante) | „02 Gelände" |
+| DXF-/DWG-Höhenlinien, OSM-/swisstopo-Linien | Höhenlinien `contourSet` | „02"/„14" bzw. je Art („11 Strasse" …) |
+| swissBUILDINGS3D, OSM-Gebäude, IFC-Bauteile, OBJ/STL/glTF/PLY, STEP, DXF-Netze | Netzkörper `importedMesh` (eigene Art, wie Möbel ein 3D-Objekt) | „12 Gebäude", „31 Dächer", sonst „10 Situation" |
+| SWISSIMAGE | Luftbild `image` | „03 Luftbild" |
+| (gezeichnet) | Baugrube `excavation` | „07 Baugrube" |
+| DXF-/DWG-/PDF-Linien und Texte | 2D-Zeichnung `drawings2d` (wie bisher) | nach DXF-Layer |
+
+- **Klasse ist Pflicht** (Rust `category_code: String`, `ContextObject::category_code()`); Plan, Schnitt, Ansicht, 3D und
+  Pick fragen nur sie (und Override-Regeln) ab. Das frühere „ohne Kategorie immer sichtbar", das Einzel-Ausblenden
+  (`hidden`) und der Gruppierungs-Name `layer` sind entfallen.
+- **Herkunft** steht höchstens in `source` (z. B. „swissBUILDINGS3D", „IFC IfcWall", „DXF-Layer Haus") und wird nur in der
+  Objekt-Info angezeigt. Was von der Quelle abhängt (IFC-Gelände → Gelände-Element, Dach-Layer → Klasse „31"), entscheidet
+  der Import einmal (`import_context::ifc_meshes`, `src/io/swissBuildings3d.ts`); danach zählt nur die Elementart.
+- **Oberfläche:** Auswahl im Plan/3D oder im Elemente-Panel (Knoten „Gelände & Umgebung", `ElementTreePanel.tsx`), Klasse
+  im Kopf der Objekt-Info änderbar (`onSetSelectionCategory`), Löschen wie jedes Element. Das Panel „Gelände" behält nur
+  Aktionen (Import, Gelände erzeugen, Baugrube, Schatten, Baurecht, Punktwolken).
+- **Entscheid Netzkörper:** Nachbargebäude bleiben Netze (`importedMesh`) statt Extrusionen (`extrudedSolids`): LOD2-Dächer
+  und IFC-Freiformen lassen sich nicht verlustfrei extrudieren, ein Möbel-Typ existiert nicht. Die Tag-Namen
+  (`importedMesh`, `terrainMesh`) und der Feldname `context` sind historisch und bewusst nicht umbenannt (keine Wirkung,
+  viel Umbau); die Oberfläche nennt sie „Netzkörper", „Gelände", „Gelände & Umgebung".
+
 ### Export
 
 1. `src/export/exportIfc.ts` fragt `queryBin("ifcExportData", …)`. Im Kern sammelt
@@ -549,6 +577,7 @@ schreibt `src-tauri/src/atomic_save.rs` die Datei absturzsicher.
 | **solid_cut** | Regel, wann Schnittflächen als volle schwarze Fläche ohne Schichten und Schraffur gezeichnet werden: bei Detail „grob" immer, sonst ab Massstabszahl 75 (also 1:100 und gröber), ausser bei Detail „fein" oder mit „Schnittflächen schraffiert" (Feld der Ebene bzw. Ansichtsvorlage). | `solid_cut()` in `plan/style.rs` |
 | **Tusche** | Darstellung schwarz-weiss wie ein Tuscheplan; Standard der App. Farbe nur auf Wunsch (CLI `--color`, Ansichtsvorlage mit `mono: false`). | TODO `[140]`, `plan/extras.rs` |
 | **Wandknoten**, **Joins** | Verschneidung von Wänden am Stoss: Gehrung, T-Stoss, Kreuzung, je Schicht nach Priorität. Ergebnis sind Schnittlinien je Wandende. | `compute_joins()` in `joins.rs`, `resolve_join_priority()` |
+| **Gelände-/Umgebungs-Element** | Gelände, Höhenlinien, Netzkörper (z. B. Nachbargebäude), Luftbild, Baugrube; normale Elemente mit Pflicht-Klasse, Herkunft nur als Auskunft (`source`), [181]. | `Project.context`, `ContextObject` in `model/manual.rs` |
 | **Fussabdruck** | Grundriss-Umriss eines Elements. Wand: gedrehtes Rechteck (`wall_footprint()`), verdeckt Decken-Umrisse. Kontext-Gebäude: Sockelkanten des Netzes. | `plan/wall_poche.rs`, `plan/misc.rs` |
 | **Ansichtsbereich** | Schnitthöhe sowie Ober- und Unterkante der Sicht eines Geschosses. Legt fest, ob ein Bauteil geschnitten, darunter oder darüber (Überkopf) gezeichnet wird. | `plan/view_range.rs` |
 | **Override-Regel** | Grafische Regel mit Bedingungen (Ebene, Name, Bauteilart, Schicht, Massstab) und Aktionen (ausblenden, Farbe, Schraffur, Strich). Die oberste passende Regel gewinnt je Feld. | `Project.overrideRules`, `plan/overrides.rs` (`effective()`, `effective_layer()`) |

@@ -36,7 +36,7 @@ fn beispiel_ansicht() {
 #[test]
 fn importierte_netze_in_der_ansicht() {
     use crate::mesh_view::tests::cube;
-    let mesh = |id: &str, (positions, indices): (Vec<f64>, Vec<f64>)| ContextObject::ImportedMesh(ImportedMesh { id: id.into(), name: id.into(), category_code: Some("10".into()), color: Some("#ff0000".into()), positions, indices, ..Default::default() });
+    let mesh = |id: &str, (positions, indices): (Vec<f64>, Vec<f64>)| ContextObject::ImportedMesh(ImportedMesh { id: id.into(), name: id.into(), category_code: "10".into(), color: Some("#ff0000".into()), positions, indices, ..Default::default() });
     // Ansicht von y = −1 nach +y, u = x + 5.
     let level = LevelSpec { kind: "elevation".into(), line: Some([Vec2 { x: -5.0, y: -1.0 }, Vec2 { x: 8.0, y: -1.0 }]), direction_sign: Some(1.0), ..Default::default() };
     let lines = |prims: &[Primitive]| -> Vec<([f64; 2], [f64; 2])> {
@@ -77,7 +77,7 @@ fn importierte_netze_in_der_ansicht() {
 #[test]
 fn verdeckte_netzflaechen_entfallen() {
     use crate::mesh_view::tests::cube;
-    let mesh = |id: &str, (positions, indices): (Vec<f64>, Vec<f64>)| ContextObject::ImportedMesh(ImportedMesh { id: id.into(), name: id.into(), category_code: Some("10".into()), positions, indices, ..Default::default() });
+    let mesh = |id: &str, (positions, indices): (Vec<f64>, Vec<f64>)| ContextObject::ImportedMesh(ImportedMesh { id: id.into(), name: id.into(), category_code: "10".into(), positions, indices, ..Default::default() });
     let level = LevelSpec { kind: "elevation".into(), line: Some([Vec2 { x: -5.0, y: -1.0 }, Vec2 { x: 8.0, y: -1.0 }]), direction_sign: Some(1.0), ..Default::default() };
     let count = |prims: &[Primitive], id: &str| prims.iter().filter(|q| matches!(q, Primitive::Polygon { context_object_id: Some(i), .. } if i == id)).count();
     // Wand x −1…5, 3 m hoch, bei y = 0.5; dahinter „hinten" (ganz verdeckt), „teil" (ragt rechts heraus),

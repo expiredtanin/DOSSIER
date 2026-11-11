@@ -210,11 +210,8 @@ fn candidate_codes(p: &Project) -> HashSet<String> {
     codes.extend(p.roofs.iter().flatten().map(|e| e.category_code.clone()));
     codes.extend(p.stairs.iter().flatten().map(|e| e.category_code.clone()));
     codes.extend(p.openings.iter().flatten().map(|e| e.category_code.clone()));
-    for c in p.context.iter().flatten() {
-        if let crate::model::ContextObject::TerrainMesh(t) = c {
-            codes.extend(t.category_code.clone());
-        }
-    }
+    // [181] Gelände- und Umgebungs-Elemente tragen ihre Klasse wie jedes Bauteil.
+    codes.extend(p.context.iter().flatten().map(|c| c.category_code().to_string()));
     codes
 }
 

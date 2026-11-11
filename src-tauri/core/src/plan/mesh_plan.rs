@@ -62,7 +62,7 @@ fn mesh_ov(c: &Ctx, m: &ImportedMesh) -> Option<MeshOv> {
     if !super::overrides::has_active(c.p, v) {
         return None;
     }
-    let code = m.category_code.as_deref();
+    let code = Some(m.category_code.as_str());
     let s = super::overrides::Subject { layer_name: code.and_then(|k| c.p.layer_category(k)).map(|k| k.name.as_str()), layer_code: code, object_name: Some(&m.name), element_kind: Some(super::section::MESH_KIND), ..Default::default() };
     let (el, ly, _) = super::overrides::effective_surface(c.p.override_rules.as_deref(), &s, v);
     let hatch = match ly.hatch.as_deref() {
@@ -181,7 +181,7 @@ pub fn plan_meshes(c: &Ctx, out: &mut Vec<Primitive>) -> bool {
     let cut = range.cut;
     let meshes: Vec<(MeshRef, Zone)> = mesh_view::meshes(c.p)
         .into_iter()
-        .filter(|m| m.mesh.category_code.as_deref().is_none_or(|k| c.shown(k)) && !c.rule_hidden(&m.mesh.id))
+        .filter(|m| c.shown(&m.mesh.category_code) && !c.rule_hidden(&m.mesh.id))
         .filter_map(|m| {
             let z = zone_of(&range, band, m.info.bbox[2], m.info.bbox[5])?;
             Some((m, z))
@@ -192,7 +192,7 @@ pub fn plan_meshes(c: &Ctx, out: &mut Vec<Primitive>) -> bool {
     }
     let (solid_fill, solid_hatch) = if c.solid_cut() { (HATCH_INK.to_string(), no_hatch()) } else { (super::section::BODY_FILL.to_string(), super::section::section_hatch()) };
     let ovs: Vec<Option<MeshOv>> = meshes.iter().map(|(m, _)| mesh_ov(c, m.mesh)).collect();
-    let greyed = |m: &MeshRef| m.mesh.category_code.as_deref().is_some_and(|k| c.greyed(k));
+    let greyed = |m: &MeshRef| c.greyed(&m.mesh.category_code);
     // Schnittflächen (und Verdecker der Aufsicht in Tiefe 0).
     let mut below: Vec<crate::hlr::Face> = Vec::new();
     let mut cut_prims: Vec<Primitive> = Vec::new();
@@ -287,7 +287,7 @@ mod tests {
     use crate::plan::domains::PlanArgs;
 
     fn mesh(id: &str, (positions, indices): (Vec<f64>, Vec<f64>)) -> ContextObject {
-        ContextObject::ImportedMesh(ImportedMesh { id: id.into(), name: id.into(), category_code: Some("10".into()), positions, indices, ..Default::default() })
+        ContextObject::ImportedMesh(ImportedMesh { id: id.into(), name: id.into(), category_code: "10".into(), positions, indices, ..Default::default() })
     }
 
     /// Zwei Geschosse: EG (0, Höhe 2.7, Schnitt 1.0), OG (2.7).

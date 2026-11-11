@@ -289,7 +289,7 @@ impl CutRules {
     pub fn of(p: &Project, out: &Output, v: RuleView) -> CutRules {
         let ts = crate::excavation::terrains(p);
         let t = out.terrain_id.as_deref().and_then(|id| ts.iter().find(|t| t.id == id)).or(ts.first());
-        let terrain = if out.profiles.is_empty() && out.earth.is_empty() { None } else { t.and_then(|t| super::overrides::terrain_override(p, v, t.category_code.as_deref(), &t.name)) };
+        let terrain = if out.profiles.is_empty() && out.earth.is_empty() { None } else { t.and_then(|t| super::overrides::terrain_override(p, v, Some(&t.category_code), &t.name)) };
         let terrain_dash = terrain.as_ref().and_then(|(a, _)| super::overrides::linetype_dash(p, a.linetype_id.as_deref()));
         let terrain_hatch = terrain.as_ref().and_then(|(_, l)| l.hatch.as_deref()).filter(|h| !matches!(*h, "none" | "material")).and_then(|id| resolve_hatch(p, id, None, None, None));
         let mut ov = cut_overrides(p, &out.cuts, v);
@@ -588,9 +588,9 @@ fn compute_plane(p: &Project, level: &LevelSpec, bodies: &[BodyMesh], strip: Opt
     let cuts = subtract_pockets_in_section(cuts, p, base, u);
     let mut cuts = parallel_reveal_cuts(cuts, p, &plane, &walls)?;
     append_body_sections(&mut cuts, p, &bodies, base, u);
-    // [152] Importierte Netze: geschnitten (Flächen bzw. offene Linien) und in der Projektion.
-    // IFC-Gelände ([152]) wird Geländelinie (`append_terrain_profiles`), kein Körper.
-    let (terrain_meshes, meshes): (Vec<_>, Vec<_>) = crate::mesh_view::meshes(p).into_iter().partition(|m| crate::mesh_view::is_terrain(m.mesh));
+    // [152] Netzkörper: geschnitten (Flächen bzw. offene Linien) und in der Projektion. Gelände ist ein eigenes
+    // Element (`terrainMesh`, auch IFC-Gelände seit dem Import, [181]) und wird Geländelinie (`append_terrain_profiles`).
+    let meshes = crate::mesh_view::meshes(p);
     let mut mesh_lines = Vec::new();
     append_mesh_sections(&mut cuts, &mut mesh_lines, &meshes, base, u);
     // [176] Segment eines geknickten Schnitts: Schnittflächen auf den Streifen (sie verdecken nur dort).
@@ -602,9 +602,9 @@ fn compute_plane(p: &Project, level: &LevelSpec, bodies: &[BodyMesh], strip: Opt
     // Projektion hinter der Ebene exakt ([G4]); die Schnittflächen verdecken, was hinter ihnen liegt.
     let (mut visible, hidden) = projection_edges(p, &plane, &walls_r, &wi, &slabs_r, &bodies, &meshes, &cuts, level.hidden_lines, level.depth, strip.map_or(&[][..], |s| &s.half[..]));
     shaped_projection(&mut visible, p, &walls_r, &plane);
-    let meshes = meshes.iter().map(|m| MeshMeta { id: m.mesh.id.clone(), name: m.mesh.name.clone(), category: m.mesh.category_code.clone() }).collect();
+    let meshes = meshes.iter().map(|m| MeshMeta { id: m.mesh.id.clone(), name: m.mesh.name.clone(), category: Some(m.mesh.category_code.clone()) }).collect();
     let mut out = Output { cuts, visible, hidden, profiles: Vec::new(), earth: Vec::new(), terrain_id: None, meshes, mesh_lines };
-    append_terrain_profiles(&mut out, p, base, u, &terrain_meshes);
+    append_terrain_profiles(&mut out, p, base, u);
     if let Some(s) = strip {
         unfold::clip_output(&mut out, s);
     }

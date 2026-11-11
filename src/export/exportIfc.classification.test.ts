@@ -122,10 +122,10 @@ describe("Rundreise Export → Import", () => {
     const { products } = await inspectIfc(bytes);
     expect(products.find((p) => p.ifcClass === "IfcRoof")?.classifications?.[0]).toMatchObject({ system: "eBKP-H", code: "F" });
     const r = await importIfcInto(sampleProject, bytes, { group: "product" });
-    const roof = r.meshes.find((m) => m.layer === "IfcRoof")!;
+    const roof = r.meshes.find((m) => m.source === "IFC IfcRoof")!;
     expect(roof.name).toMatch(/ \[eBKP-H F\]$/);
     // Ohne Klassifikation kein Zusatz.
-    expect(r.meshes.find((m) => m.layer === "IfcStairFlight")?.name).not.toMatch(/\[/);
+    expect(r.meshes.find((m) => m.source === "IFC IfcStairFlight")?.name).not.toMatch(/\[/);
   });
 });
 

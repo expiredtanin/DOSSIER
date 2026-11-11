@@ -224,9 +224,7 @@ pub fn elevation_primitives_with(p: &Project, level: &LevelSpec, shadows: bool, 
     let mut mesh_cat: HashMap<&str, &str> = HashMap::new();
     for c in p.context.as_deref().unwrap_or(&[]) {
         if let ContextObject::ImportedMesh(m) = c {
-            if let Some(code) = m.category_code.as_deref() {
-                mesh_cat.entry(m.id.as_str()).or_insert(code);
-            }
+            mesh_cat.entry(m.id.as_str()).or_insert(m.category_code.as_str());
         }
     }
     let category = |f: &Face| -> Option<&str> {
@@ -614,13 +612,13 @@ pub fn elevation_primitives_with(p: &Project, level: &LevelSpec, shadows: bool, 
     let depth_max = faces.iter().map(|f| f.depth_min).fold(f64::INFINITY, f64::min) + 0.3;
     let mut has_terrain = false;
     if acc.min_x.is_finite() && depth_max.is_finite() && !crate::excavation::terrains(p).is_empty() {
-        let terrain_shown = |c: Option<&str>| c.is_none_or(|c| vis.visible(c) && vis.render(c));
+        let terrain_shown = |c: &str| vis.visible(c) && vis.render(c);
         for t in crate::excavation::terrains(p) {
-            if !terrain_shown(t.category_code.as_deref()) || t.hidden == Some(true) {
+            if !terrain_shown(&t.category_code) {
                 continue;
             }
             // [33] Gelände über Regeln (Bauteilart „Gelände“): Ausblenden, Füllung der Geländefläche, Linie.
-            let tov = super::overrides::terrain_override(p, rv, t.category_code.as_deref(), &t.name);
+            let tov = super::overrides::terrain_override(p, rv, Some(&t.category_code), &t.name);
             if tov.as_ref().is_some_and(|(a, _)| a.hidden()) {
                 continue;
             }

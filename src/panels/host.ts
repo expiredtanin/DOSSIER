@@ -600,14 +600,12 @@ export interface PanelHostValue {
   /** Setzt die Drehung der Stütze (Grad; intern in Radiant gespeichert). */
   onSetColumnRotation: (deg: number) => void;
 
-  // ── Site-/Kontext-Schicht (SitePanel) ───────────────────────────────────
-  // Die Kontext-Objekte selbst liest das Panel aus dem Store (`project.context`).
-  /** Fügt mehrere Kontext-Objekte hinzu (z. B. aus einem DXF-Import). */
+  // ── Gelände und Umgebung (SitePanel, Elemente-Panel) ─────────────────────
+  // Die Elemente selbst liest das Panel aus dem Store (`project.context`).
+  /** Fügt mehrere Gelände-/Umgebungs-Elemente hinzu (z. B. aus einem Standort-Import). */
   onAddContextObjects: (objs: ContextObject[]) => void;
-  /** Entfernt ein Kontext-Objekt per ID. */
-  onRemoveContextObject: (id: string) => void;
-  /** Entfernt mehrere Kontext-Objekte in einem Schritt (ganze Ebene/Gruppe). */
-  onRemoveContextObjects: (ids: string[]) => void;
+  /** [181] Wählt ein Gelände-/Umgebungs-Element (Elemente-Panel); `zoom` passt die Ansicht ein. */
+  onSelectSiteElement: (id: string, opts?: { zoom?: boolean }) => void;
   /**
    * Erzeugt aus einem ContourSet (per ID) ein Gelände-TIN. Liefert die neue
    * TerrainMesh-ID oder null (unbekannte ID / kein sinnvolles TIN).
