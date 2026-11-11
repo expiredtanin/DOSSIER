@@ -126,9 +126,14 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
 - ◐ **[156]** Bodenbelag-Muster massstabsgerecht. Möbel nur als Blöcke/Körper (geschlossene 2D-Formen der Kategorie
   „Möbel“ sparen nicht aus); Deckenspiegel-Untersicht unverändert (alte Ausdünnung). Nassraum nach Name ist durch
   [158] ersetzt. · S
-- ◐ **[158]** Raumbuch. Keine IfcCovering-Bauteile (nur Pset-Texte); Wandoberfläche nicht je Wandseite, keine Sockel-/
-  Leibungsflächen; lichte Höhe ohne Dachschrägen; Belagsmuster am ersten Umrisspunkt ausgerichtet; Belag im 3D und
-  im Deckenspiegel nicht nach Raum. · M
+- ◐ **[158]** Raumbuch. Stand 11.11.: lichte Höhe unter Dachschrägen (kleinste/mittlere Höhe, Fläche < 1.0 m / 1.0–1.5 m /
+  ≥ 1.5 m nach SIA 416, Raster über dem Raum mit den Dächern des eigenen Geschosses; `room_book::height_bands`);
+  Wandoberflächen je Wandseite (`wall_sides`, Raumseite der Wand abzüglich Öffnungen), Leibungsflächen und Sockellänge
+  (Umfang − Türbreiten) in Zeile und Panel/Bericht; Belagsmuster im Plan an der längsten Raumkante ausgerichtet
+  (`floor_finish::pattern_frame`; Räume haben keinen eigenen Bezugspunkt). Offen: keine IfcCovering-Bauteile (nur
+  Pset-Texte); Bogenwände liefern keine Wandseite (Kante läuft unter „ohne Wand“); Wandfläche unter Schrägen rechnet
+  weiter mit der vollen lichten Höhe; Blatt-Tabelle (`sheet_table.rs`) ohne die neuen Spalten; Belag im 3D und im
+  Deckenspiegel nicht nach Raum. · M
 - ◐ **[157]** Plan-Review Musterhaus komplex (Schweizer Praxis). Stand 10.11. (CLI-SVG `--hatch`, Chromium, nur Linux):
   behoben: Raumstempel verlieren beim Ausweichen keine Zeile mehr (erst frei, dann mit geringster Überdeckung, Zeilen
   entfallen nur noch, wenn das Rechteck im Raum nirgends passt; `fit_room_stamp`); Schnitt-/Ansichtsbeschriftung („B-B“)
