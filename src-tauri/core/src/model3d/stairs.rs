@@ -141,15 +141,26 @@ pub fn wall_footprints_of_floor(p: &Project, floor: &str) -> Vec<crate::plan::wa
 /// [155] Absturzsicherung am Deckenloch ankommender Treppen (Lage: [`crate::stair_guard`]) als Körper je Treppe
 /// (Index in `p.stairs`), Modell [x, y, Höhe]; alle Wände des Geschosses stehen der Sicherung im Weg.
 pub fn stair_guard_meshes(p: &Project) -> Vec<(usize, crate::mesh3d::Mesh)> {
-    let mut out: Vec<(usize, crate::mesh3d::Mesh)> = Vec::new();
+    stair_guard_meshes_by_floor(p).into_iter().map(|(si, _, m)| (si, m)).collect()
+}
+
+/// Wie [`stair_guard_meshes`], mit der Geschoss-id der Decke mit dem Loch: dort steht die Sicherung
+/// (nicht beim Geschoss der Treppe), darum folgt sie im Explosionsbild diesem Geschoss.
+pub fn stair_guard_meshes_by_floor(p: &Project) -> Vec<(usize, String, crate::mesh3d::Mesh)> {
+    let mut out: Vec<(usize, String, crate::mesh3d::Mesh)> = Vec::new();
     for f in p.drawing_levels.iter().filter(|f| f.kind == DrawingLevelKind::Floor) {
         for a in crate::stair_guard::arrivals(p, &f.id, &|_| true, &|| wall_footprints_of_floor(p, &f.id)) {
             if let Some(m) = crate::stairs3d::guard_mesh(&a.axes, a.z, a.stair) {
-                out.push((a.stair, m));
+                out.push((a.stair, f.id.clone(), m));
             }
         }
     }
     out
+}
+
+/// Absturzsicherungen, die auf dem Geschoss `floor_id` stehen (Körper wie in [`emit_stair_railings`]).
+pub fn emit_stair_guards_on(p: &Project, floor_id: &str) -> Vec<RMesh> {
+    meshes_of(stair_guard_meshes_by_floor(p).into_iter().filter(|(_, f, _)| f == floor_id).map(|(_, _, m)| m).collect(), rail_rgb())
 }
 
 /// Handlauf, Pfosten und Absturzsicherung der Treppen (`emitStairRailings`).

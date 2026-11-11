@@ -161,7 +161,11 @@ pub fn parts(p: &Project, layered: bool, detail: f64, for_section: bool, gap: f6
         out.column_meshes.extend(shifted(model3d::emit_columns(&q), dz, shift_mesh));
         out.column_meshes.extend(shifted(model3d::emit_trees(&q), dz, shift_mesh));
         out.stair_meshes.extend(shifted(model3d::emit_stair_meshes(&q), dz, shift_mesh));
-        out.stair_railings.extend(shifted(model3d::emit_stair_railings(&q), dz, shift_mesh));
+        // Handläufe folgen der Treppe, die Absturzsicherung der Decke mit dem Loch (Geschoss `g`, [155]).
+        out.stair_railings.extend(shifted(model3d::emit_stair_handrails(&q), dz, shift_mesh));
+        if let Some(fid) = g {
+            out.stair_railings.extend(shifted(model3d::emit_stair_guards_on(p, fid), dz, shift_mesh));
+        }
         out.roof_meshes.extend(shifted(model3d::emit_roofs(&q, None)?, dz, shift_mesh));
         out.roof_layers.extend(shifted(model3d::emit_roof_cut_layers(&q)?, dz, shift_roof_layer));
         // Öffnungen brauchen alle Dächer (Dachfenster-Wirt liegt im selben Geschoss, Rest schadet nicht).
@@ -218,11 +222,21 @@ pub fn pick_geometry(p: &Project, gap: f64) -> Result<PickGeometry, String> {
             v[1] += dz;
         }
     }
+    // Handläufe folgen der Treppe; die Absturzsicherung steht auf dem Geschoss der Decke mit dem Loch ([155]).
+    let (rails, guards) = model3d::pick_stair_railings_split(p);
+    g.stair_meshes = rails;
     for m in &mut g.stair_meshes {
         let dz = ex.of(&m.stair_id);
         for v in m.tris.iter_mut().flatten() {
             v[1] += dz;
         }
+    }
+    for (floor, mut m) in guards {
+        let dz = ex.floor(&floor);
+        for v in m.tris.iter_mut().flatten() {
+            v[1] += dz;
+        }
+        g.stair_meshes.push(m);
     }
     for c in &mut g.columns {
         let dz = ex.of(&c.column_id);
@@ -359,6 +373,31 @@ mod tests {
         let off = floor_offsets(&p, 3.0);
         assert_eq!(off.get("EG"), Some(&0.0));
         assert_eq!(off.get("OG"), Some(&3.0));
+    }
+
+    /// [155] Die Absturzsicherung steht auf der Decke mit dem Loch (Geschoss darüber), nicht beim Geschoss der Treppe.
+    #[test]
+    fn absturzsicherung_folgt_dem_geschoss_der_decke() {
+        let mut p: Project = serde_json::from_str(include_str!("../tests/fixtures/sample_project.json")).unwrap();
+        let hole = vec![crate::model::Vec2 { x: 3.2, y: 1.6 }, crate::model::Vec2 { x: 4.2, y: 1.6 }, crate::model::Vec2 { x: 4.2, y: 3.6 }, crate::model::Vec2 { x: 3.2, y: 3.6 }];
+        p.ceilings.as_mut().unwrap()[0].openings = Some(vec![hole]);
+        let gap = 3.0;
+        let og_dz = floor_offsets(&p, gap)["og"];
+        assert!(og_dz > 0.0);
+        let guard = model3d::stair_guard_meshes(&p);
+        assert_eq!(guard.len(), 1);
+        let base_z = guard[0].1.positions.chunks(3).map(|q| q[2]).fold(f64::INFINITY, f64::min);
+        // 3D-Körper: ein Mesh beginnt genau auf dem Boden des OG plus dessen Versatz.
+        let ex = parts(&p, true, 2.0, false, gap).unwrap();
+        let base = model3d::parts(&p, true, 2.0, false).unwrap();
+        assert_eq!(ex.stair_railings.len(), base.stair_railings.len());
+        let mins: Vec<f64> = ex.stair_railings.iter().map(|m| m.positions.chunks_exact(3).map(|c| c[2]).fold(f64::INFINITY, f64::min)).collect();
+        assert!(mins.iter().any(|z| (z - (base_z + og_dz)).abs() < 1e-6), "{mins:?} {base_z}");
+        assert!(!mins.iter().any(|z| (z - base_z).abs() < 1e-6), "Sicherung nicht am Geschoss der Treppe: {mins:?}");
+        // Pick: höchster Punkt (Welt-y) der Treppen-Geländer liegt über dem Versatz des OG.
+        let top = |g: &PickGeometry| g.stair_meshes.iter().flat_map(|m| m.tris.iter().flatten()).map(|v| v[1]).fold(f64::NEG_INFINITY, f64::max);
+        let (pa, pb) = (model3d::pick_geometry(&p).unwrap(), pick_geometry(&p, gap).unwrap());
+        assert!(top(&pb) > top(&pa) + og_dz - 0.2, "{} {}", top(&pb), top(&pa));
     }
 
     #[test]

@@ -47,24 +47,24 @@ roofLayers[].polygon[] [3] x281
 slabs [70]
 slabs[].color [3] x70
 slabs[].outline [12]
-slabs[].outline [14] x5
 slabs[].outline [21] x4
+slabs[].outline [22] x5
 slabs[].outline [24]
-slabs[].outline [33] x5
+slabs[].outline [41] x5
 slabs[].outline [4] x49
-slabs[].outline [51] x5
-slabs[].outline[] [2] x806
-walls [1489]
+slabs[].outline [55] x5
+slabs[].outline[] [2] x906
+walls [1492]
 walls[].arcCenter [2] x832
-walls[].color [3] x1489
-walls[].end [2] x1489
-walls[].endCut [4] x1162
-walls[].holes [1] x84
+walls[].color [3] x1492
+walls[].end [2] x1492
+walls[].endCut [4] x1105
+walls[].holes [1] x90
 walls[].holes [2] x25
 walls[].holes [3] x14
-walls[].layers [0] x1489
-walls[].start [2] x1489
-walls[].startCut [4] x1164
-walls[].topDrop [2] x103
-walls[].topPlane [3] x259
-hash 9acaf7b7c01c66a3
+walls[].layers [0] x1492
+walls[].start [2] x1492
+walls[].startCut [4] x1107
+walls[].topDrop [2] x115
+walls[].topPlane [3] x271
+hash cb17b0d0419be35e
