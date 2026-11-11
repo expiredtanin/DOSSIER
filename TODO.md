@@ -220,8 +220,11 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   Musterhaus komplex: Erker). Offen: Gefälle der Dachhaut (nur Darstellung im Schnitt); Attika bei Pult, an Höfen und bei
   verschnittenen Dächern; Live-Schnitt im 3D (`roofCutLayers`) ohne Attika; Ansicht orientiert Aussenflächen am
   Dachschwerpunkt (konkave Umrisse), Attika in Dachfarbe statt Bauteilfarbe. · M
-- ◐ **[26]** Dächer über beliebige Grundrisse (`core/src/roof*.rs`). Kante im Grundriss hervorheben und Kanten-/
-  Hof-Griffe (PlanView); Mansarde mit Hof und verschieden geneigten Kanten (zweite Schicht nicht geschlossen);
+- ◐ **[26]** Dächer über beliebige Grundrisse (`core/src/roof*.rs`). Grundriss-Griffe (11.11.): am einzeln gewählten Dach
+  Eck-Griffe und Kanten-Anfasser an Umriss UND Höfen (Kern-Ops `roofVertex`/`roofEdge`, flacher Index Umriss→Höfe,
+  Umriss bleibt frei, Vorschau + ein Undo-Schritt je Zug), Kante unter dem Anfasser wird hervorgehoben (`plan-edge-hover`,
+  auch bei Decke/Raum/Baugrube). Offen: Eck einfügen/löschen (Mittel-Raute) am Dach, Kanten-Neigung/Giebel per Kontextmenü am
+  Griff (heute im Objekt-Info), Hover-Hervorhebung in der App nicht angesehen; Mansarde mit Hof und verschieden geneigten Kanten (zweite Schicht nicht geschlossen);
   Schattenwurf nimmt die Hülle der Dachfläche. · M
 - ◐ **[137]** Alles Sichtbare anwählbar. (10.11. bewusst nicht anwählbar, mit Begründung: Punktwolken sind kein
   Modellelement (Sitzungszustand, Millionen Punkte) — Ausblenden/Entfernen im Lage-Panel („Punktwolken"); Baurechts-Hüllkörper

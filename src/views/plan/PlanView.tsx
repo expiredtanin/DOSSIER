@@ -9,7 +9,7 @@ import { forwardRef, useEffect, useMemo, useState } from "react";
 import type { ComponentProps, CSSProperties } from "react";
 import type { PlanImage, Primitive } from "../../core";
 import { planLineEndsProps } from "../../core";
-import type { Vec2 } from "../../model/types";
+import type { EdgeGrip, Vec2 } from "../../model/types";
 import { t } from "../../i18n";
 import { docFromText } from "../../text/richText";
 import { contentFontBaselineFromTop, TEXT_LINE_HEIGHT_MULT } from "../../text/fontMetrics";
@@ -173,6 +173,9 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
 
   // Aktueller Ausschnitt; treibt die viewBox des SVG. Initial = eingepasst.
   const [view, setView] = useState<ViewBox>(defaultView);
+  // [26] Kante unter dem Cursor (Kanten-Anfasser); gezeichnet wird sie nur für Flächen-Elemente
+  // (Dach, Decke, Raum, Baugrube), deren Kanten-Indizes Griff-Indizes sind.
+  const [hoverEdge, setHoverEdge] = useState<EdgeGrip | null>(null);
   // Ausschnitt NUR bei Plan-/Geschoss-Wechsel (resetKey) auf „eingepasst"
   // zurücksetzen — NICHT bei jeder Bounds-Änderung durch Editieren (sonst
   // „wandert" die Ansicht beim Verschieben/Löschen mit). `defaultView` ist beim
@@ -362,6 +365,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     grips,
     edgeGripsActive,
     edgeGripAt,
+    onHoverEdge: (e) => setHoverEdge((h) => (h?.aIndex === e?.aIndex && h?.bIndex === e?.bIndex && h?.owner === e?.owner ? h : e)),
     grabbedBody,
     moveDrag,
     marquee,
@@ -1150,6 +1154,16 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           AUSSEN entlang der (bildschirm-transformierten) Normale versetzt, mit
           der Spitze nach außen. Y wird gespiegelt (toScreen spiegelt Y), damit
           das Dreieck wirklich nach außen zeigt. Größe bildschirmkonstant. */}
+      {edgeGripsActive && hoverEdge && !hoverEdge.owner?.drawingId && !hoverEdge.owner?.wallId && grips?.[hoverEdge.aIndex] && grips[hoverEdge.bIndex] && (
+        <line
+          className="plan-edge-hover"
+          x1={toLocal(grips[hoverEdge.aIndex]).x}
+          y1={toLocal(grips[hoverEdge.aIndex]).y}
+          x2={toLocal(grips[hoverEdge.bIndex]).x}
+          y2={toLocal(grips[hoverEdge.bIndex]).y}
+          pointerEvents="none"
+        />
+      )}
       {edgeGripsActive && (
         <LiveMeet store={meetStore} base={meetScale(view, canvasRef.current ?? svgRef.current) ?? 1}>
           {(s) =>

@@ -43,6 +43,11 @@ export function useGripInputs(opts: {
     const o = (project.context ?? []).find((c) => c.id === selection.contextObjects[0]);
     return o && o.type === "excavation" ? o : null;
   }, [project.context, selection.contextObjects]);
+  // [26] Genau ein gewähltes Dach (Ecken-/Kanten-Griffe von Umriss und Höfen).
+  const selectedRoof = useMemo(() => {
+    if (selection.roofs.length !== 1) return null;
+    return (project.roofs ?? []).find((r) => r.id === selection.roofs[0]) ?? null;
+  }, [project.roofs, selection.roofs]);
   const selectedRoom = useMemo(
     () => (project.rooms ?? []).find((r) => r.id === selectedRoomId) ?? null,
     [project.rooms, selectedRoomId],
@@ -89,5 +94,5 @@ export function useGripInputs(opts: {
     });
   };
 
-  return { selectedDrawing, selectedCeiling, selectedExcavation, selectedRoom, roomStamp, sectionSheet, snapFor };
+  return { selectedDrawing, selectedCeiling, selectedExcavation, selectedRoof, selectedRoom, roomStamp, sectionSheet, snapFor };
 }

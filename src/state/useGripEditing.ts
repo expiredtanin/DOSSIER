@@ -8,7 +8,7 @@
 import { useRef, useState, type RefObject } from "react";
 import { useEventBundle, useSameData } from "./useEvent";
 import { leftNormal, normalize, scale, sub, wallCorners } from "../model/geometry";
-import type { Ceiling, Drawing2D, EdgeGrip, Excavation, Project, Room, Vec2, Wall } from "../model/types";
+import type { Ceiling, Drawing2D, EdgeGrip, Excavation, Project, Roof, Room, Vec2, Wall } from "../model/types";
 import { wallTypeThickness } from "../model/types";
 import { bulgeArcPoints, drawingVertices, surfaceOpeningGripPatch, surfaceOpeningGrips, surfaceOpeningInfo, wallArcBand } from "../core";
 import { gripDrawingIdsFor } from "./gripLimits";
@@ -71,6 +71,8 @@ export function useGripEditing(opts: {
   selectedCeiling: Ceiling | null;
   /** [68] Einzeln gewählte Baugrube (Umriss-Ecken, Kanten, Sohlenhöhe als Griffe). */
   selectedExcavation?: Excavation | null;
+  /** [26] Einzeln gewähltes Dach: Ecken und Kanten von Umriss und Höfen als Griffe. */
+  selectedRoof?: Roof | null;
   selectedRoom: Room | null;
   /** Die Auswahl ([130]); Einzel-Elemente daraus wie in `useSelectionState`. */
   selection: Selection;
@@ -111,6 +113,9 @@ export function useGripEditing(opts: {
   moveCeilingGrip: (id: string, index: number, pt: Vec2) => void;
   moveExcavationGrip: (id: string, index: number, pt: Vec2) => void;
   moveExcavationEdge: (id: string, aIndex: number, bIndex: number, delta: Vec2) => void;
+  /** [26] Dach: Ecke bzw. Kante von Umriss/Hof (flacher Index: erst `outline`, dann `holes` Ring für Ring). */
+  moveRoofVertex?: (id: string, index: number, pt: Vec2) => void;
+  moveRoofEdge?: (id: string, aIndex: number, bIndex: number, delta: Vec2) => void;
   moveGripOf: (
     drawingId: string | null,
     wallId: string | null,
@@ -143,6 +148,7 @@ export function useGripEditing(opts: {
     selectedDrawing,
     selectedCeiling,
     selectedExcavation = null,
+    selectedRoof = null,
     selectedRoom,
     selection,
     levelId,
@@ -227,6 +233,20 @@ export function useGripEditing(opts: {
   const effectiveDrawingIds = modelEditable
     ? selectedDrawingIds
     : selectedDrawingIds.filter((id) => project.drawings2d.find((x) => x.id === id)?.levelId === levelId);
+
+  // [26] Dach-Griffe: nur bei einzeln gewähltem, nicht gesperrtem Dach und ohne andere Griff-Träger in der Auswahl.
+  const roofGripsOn =
+    modelEditable && !!selectedRoof && !selectedRoof.locked && !!opts.moveRoofVertex && !selectedCeiling && !selectedRoom &&
+    !selectedExcavation && !selectedTree && !selectedSectionLine && effectiveDrawingIds.length === 0 && selectedWallIds.length === 0;
+  /** Ringe des Dachs in der Reihenfolge des flachen Index (Umriss, dann Höfe) samt Start-Index. */
+  const roofRings = (r: Roof): { pts: Vec2[]; off: number }[] => {
+    let off = 0;
+    return [r.outline, ...(r.holes ?? [])].map((pts) => {
+      const ring = { pts, off };
+      off += pts.length;
+      return ring;
+    });
+  };
 
   // Griff-Grenzen (s. gripLimits.ts): grosse Mehrfachauswahlen ohne Griffe, ein einzeln gewähltes
   // Element immer mit Griffen (Kataster-Parzellen mit tausenden Stützpunkten).
@@ -337,6 +357,14 @@ export function useGripEditing(opts: {
       const nCorner = (selectedSectionLine.bendPoints?.length ?? 0) + 2;
       pts.forEach((_, i) => { gripOwners.push({ localIndex: i }); gripOwnerRange.push(i < nCorner ? [0, nCorner - 1] : [nCorner, pts.length - 1]); });
       return pts;
+    }
+    // [26] Dach: Ecken von Umriss und Höfen (flacher Index, Besitzer-Bereich = der eigene Ring).
+    if (roofGripsOn && selectedRoof) {
+      const out: Vec2[] = [];
+      for (const { pts, off } of roofRings(selectedRoof)) {
+        pts.forEach((q, i) => { out.push(q); gripOwners.push({ localIndex: off + i }); gripOwnerRange.push([off, off + pts.length - 1]); });
+      }
+      return out;
     }
     // [68] Baugrube: Umriss-Ecken + Sohlen-Griff (Lage: Schwerpunkt, y um die Sohlenhöhe versetzt).
     if (modelEditable && selectedExcavation && !selectedCeiling && effectiveDrawingIds.length === 0 && selectedWallIds.length === 0) {
@@ -470,6 +498,12 @@ export function useGripEditing(opts: {
   //    Verschieben EINER Kante einer komplexen Polylinie, §Task B).
   const edgeGrips: EdgeGrip[] = (() => {
     // ringEdges/openEdges/polylineEdgeGrips: Kern (`geometry/grips.ts`, `grips.rs`).
+    // [26] Dach: Kanten von Umriss und Höfen, Indizes im flachen Ecken-Index.
+    if (roofGripsOn && selectedRoof) {
+      return roofRings(selectedRoof).flatMap(({ pts, off }) =>
+        ringEdges(pts, {}).map((e) => ({ ...e, aIndex: e.aIndex + off, bIndex: e.bIndex + off })),
+      );
+    }
     if (modelEditable && selectedExcavation && !selectedCeiling && effectiveDrawingIds.length === 0 && selectedWallIds.length === 0) {
       return ringEdges(selectedExcavation.outline, {});
     }
@@ -592,7 +626,7 @@ export function useGripEditing(opts: {
   // Dasselbe für das Verschieben eines ganzen 2D-Elements (Gesamt-Delta) und für
   // Kanten-Griffe von Polylinien (Ziel-Delta): bis zum Loslassen nur Vorschau.
   const pendingWallGripRef = useRef<{ wallId: string; localIndex: number; flat: number; pt: Vec2; arcLength?: number } | null>(null);
-  const pendingAreaGripRef = useRef<{ kind: "room" | "ceiling" | "excavation"; id: string; index: number; flat: number; pt: Vec2 } | null>(null);
+  const pendingAreaGripRef = useRef<{ kind: "room" | "ceiling" | "excavation" | "roof"; id: string; index: number; flat: number; pt: Vec2 } | null>(null);
   const pendingAreaMoveRef = useRef<{ kind: "ceiling" | "room" | "stair"; id: string; total: Vec2 } | null>(null);
   const pendingWallMoveRef = useRef<{ wallId: string; total: Vec2 } | null>(null);
   /** Aufgeschobene Öffnungs-Verschiebung im Schnitt/in der Ansicht (neue `position`). */
@@ -682,6 +716,10 @@ export function useGripEditing(opts: {
   // Wand/Öffnung/Treppe haben keine Polygon-Nachbarn → null.
   const resolvePolygonRing = (index: number): { pts: Vec2[]; index: number; closed: boolean } | null => {
     const owner = gripOwners[index];
+    if (roofGripsOn && selectedRoof && !owner?.drawingId && !owner?.wallId) {
+      const ring = roofRings(selectedRoof).find((rg) => index >= rg.off && index < rg.off + rg.pts.length);
+      return ring ? { pts: ring.pts, index: index - ring.off, closed: true } : null;
+    }
     if (!owner?.drawingId && !owner?.wallId) {
       // Raum/Decke (exklusiv) — kein Owner, `localIndex` fehlt dann auch, also
       // ist der flache `index` selbst der Ring-Index.
@@ -957,6 +995,11 @@ export function useGripEditing(opts: {
       }
       return;
     }
+    // [26] Dach: Ecke von Umriss/Hof als Vorschau, ein Undo-Schritt beim Setzen.
+    if (roofGripsOn && selectedRoof) {
+      pendingAreaGripRef.current = { kind: "roof", id: selectedRoof.id, index, flat: index, pt };
+      return;
+    }
     // [68] Baugrube: Sohlen-Griff sofort (Höhe), Ecken als Vorschau bis zum Setzen.
     if (selectedExcavation && !selectedCeilingId && !selectedRoomId) {
       if (index >= selectedExcavation.outline.length) moveExcavationGrip(selectedExcavation.id, index, pt);
@@ -1002,6 +1045,13 @@ export function useGripEditing(opts: {
   /** Vorschau-Form des ausstehenden Eckpunkt-Zugs (leer, wenn keiner läuft). */
   const gripPreviewShapes = (): DraftShape[] => {
     const pa = pendingAreaGripRef.current;
+    if (pa?.kind === "roof" && selectedRoof) {
+      return roofRings(selectedRoof).map(({ pts, off }) => ({
+        kind: "poly" as const,
+        pts: pts.map((q, i) => (off + i === pa.index ? pa.pt : q)),
+        closed: true,
+      }));
+    }
     if (pa) {
       const ring =
         pa.kind === "room"
@@ -1060,6 +1110,7 @@ export function useGripEditing(opts: {
     if (pa) {
       if (pa.kind === "room") moveRoomGrip(pa.id, pa.index, pa.pt);
       else if (pa.kind === "excavation") moveExcavationGrip(pa.id, pa.index, pa.pt);
+      else if (pa.kind === "roof") opts.moveRoofVertex?.(pa.id, pa.index, pa.pt);
       else moveCeilingGrip(pa.id, pa.index, pa.pt);
     }
     const pw = pendingWallGripRef.current;
@@ -1139,7 +1190,8 @@ export function useGripEditing(opts: {
     applyEdge(pend.edge, pend.delta);
   };
   const applyEdge = (edge: EdgeGrip, delta: Vec2) => {
-    if (selectedExcavation && !selectedRoomId && !selectedCeilingId) moveExcavationEdge(selectedExcavation.id, edge.aIndex, edge.bIndex, delta);
+    if (roofGripsOn && selectedRoof) opts.moveRoofEdge?.(selectedRoof.id, edge.aIndex, edge.bIndex, delta);
+    else if (selectedExcavation && !selectedRoomId && !selectedCeilingId) moveExcavationEdge(selectedExcavation.id, edge.aIndex, edge.bIndex, delta);
     else if (selectedRoomId) moveRoomEdge(selectedRoomId, edge.aIndex, edge.bIndex, delta);
     else if (selectedCeilingId) moveCeilingEdge(selectedCeilingId, edge.aIndex, edge.bIndex, delta);
     else moveEdgeOf(edge.owner?.drawingId ?? selectedDrawingId, edge.owner?.wallId ?? selectedWallId, edge.aIndex, edge.bIndex, delta);
@@ -1346,7 +1398,7 @@ export function useGripEditing(opts: {
       // das singuläre selectedDrawingId/selectedWallId) — von den eigenen
       // Snap-Kandidaten ausschließen (sonst fängt der Punkt an sich selbst).
       const owner = gripOwners[index];
-      const snapSkip = selectedRoomId || selectedCeilingId || owner?.drawingId || owner?.wallId;
+      const snapSkip = selectedRoomId || selectedCeilingId || (roofGripsOn ? selectedRoof?.id : null) || owner?.drawingId || owner?.wallId;
       const excludeIds = snapSkip ? [snapSkip] : [];
       // Bezugspunkt für Shift-Ortho: ein Nachbar-Griff DESSELBEN Elements
       // (festes Ende), relativ zu dem die Bewegung auf H/V eingerastet wird.

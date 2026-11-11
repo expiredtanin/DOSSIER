@@ -439,6 +439,10 @@ export interface ProjectSlice {
   moveRoofGrip: (roofId: string, index: number, pt: import("../model/types").Vec2) => void;
   /** Dach als Ganzes um `delta` verschieben (Verschiebe-Griff). */
   moveRoofBy: (roofId: string, delta: import("../model/types").Vec2) => void;
+  /** [26] Dach-Ecke von Umriss bzw. Hof (flacher Index: `outline`, dann `holes`) auf `pt`; Umriss bleibt frei. */
+  moveRoofVertex: (roofId: string, index: number, pt: import("../model/types").Vec2) => void;
+  /** [26] Dach-Kante von Umriss bzw. Hof (flache Eck-Indizes) um `delta` verschieben. */
+  moveRoofEdge: (roofId: string, aIndex: number, bIndex: number, delta: import("../model/types").Vec2) => void;
 
   // ── Treppen-Editieren ──────────────────────────────────────────────────────
   /** Verschiebt eine Treppe (Antritt) um `delta`. */
@@ -1295,6 +1299,10 @@ export function createProjectSlice(
 
     // Dach als Ganzes verschieben (Verschiebe-Griff).
     moveRoofBy: (roofId, delta) => applyGrip({ op: "roofBy", id: roofId, delta: gripPt(delta) }, `moveRoofBy:${roofId}`),
+    moveRoofVertex: (roofId, index, pt) =>
+      applyGrip({ op: "roofVertex", id: roofId, index, pt: gripPt(pt) }, `moveRoofVertex:${roofId}:${index}`),
+    moveRoofEdge: (roofId, aIndex, bIndex, delta) =>
+      applyGrip({ op: "roofEdge", id: roofId, a: aIndex, b: bIndex, delta: gripPt(delta) }, `moveRoofEdge:${roofId}:${aIndex}:${bIndex}`),
 
     // ── Treppen-Editieren ──────────────────────────────────────────────────
     // (coalesceKey: siehe Kommentar bei moveGripOf.)

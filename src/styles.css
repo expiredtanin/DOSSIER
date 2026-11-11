@@ -2342,6 +2342,15 @@ body {
    nach außen. Gleiche papierfarbene + Akzent-Ring-Sprache wie die Eckpunkt-
    Griffe, nur mit runden statt spitzen Ecken (stroke-linejoin überstimmt die
    globale Miter-Regel für Plan-Polygone via höherer Selektor-Spezifität). */
+/* [26] Kante unter dem Kanten-Anfasser hervorgehoben. */
+.plan-svg .plan-edge-hover {
+  stroke: var(--accent);
+  stroke-width: 3.5;
+  stroke-linecap: round;
+  opacity: 0.85;
+  vector-effect: non-scaling-stroke;
+}
+
 .plan-svg .plan-edge-grip {
   fill: var(--sheet);
   stroke: var(--accent);

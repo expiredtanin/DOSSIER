@@ -376,6 +376,8 @@ export function useProjectActions(
   const moveCeilingGrip = useStore((s) => s.moveCeilingGrip);
   const moveExcavationGrip = useStore((s) => s.moveExcavationGrip);
   const moveExcavationEdge = useStore((s) => s.moveExcavationEdge);
+  const moveRoofVertex = useStore((s) => s.moveRoofVertex);
+  const moveRoofEdge = useStore((s) => s.moveRoofEdge);
   const moveCeilingBy = useStore((s) => s.moveCeilingBy);
   const moveCeilingEdge = useStore((s) => s.moveCeilingEdge);
   const updateCeiling = useStore((s) => s.updateCeiling);
@@ -496,6 +498,8 @@ export function useProjectActions(
     moveCeilingGrip,
     moveExcavationGrip,
     moveExcavationEdge,
+    moveRoofVertex,
+    moveRoofEdge,
     moveCeilingBy,
     moveCeilingEdge,
     updateCeiling,

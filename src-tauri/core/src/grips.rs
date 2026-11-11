@@ -316,6 +316,29 @@ pub fn run(lk: &Lookup, req: &Request) -> Result<GripResult, String> {
             let (index, (x, y)) = (r.n("index"), r.p("pt"));
             patch("roofs", r.s("id"), &|e| roof_grip(e, index, x, y)).into()
         }
+        // [26] Dach über beliebigem Grundriss: Eckpunkt bzw. Kante des Umrisses oder eines Hofs. Flacher Index:
+        // erst die Ecken von `outline`, danach die der `holes` Ring für Ring (wie die Kanten-Nummerierung
+        // von `edgePitchDeg`); eine Kante liegt immer in EINEM Ring.
+        "roofVertex" => {
+            let (index, (x, y)) = (r.n("index"), r.p("pt"));
+            patch("roofs", r.s("id"), &|e| {
+                if !(x.is_finite() && y.is_finite()) {
+                    return None;
+                }
+                roof_ring_edit(e, index, None, &|ring, i| Some(replace_at(ring, i as f64, &pt(x, y))))
+            })
+            .into()
+        }
+        "roofEdge" => {
+            let (a, b, (dx, dy)) = (r.n("a"), r.n("b"), r.p("delta"));
+            patch("roofs", r.s("id"), &|e| {
+                if !(dx.is_finite() && dy.is_finite()) {
+                    return None;
+                }
+                roof_ring_edit(e, a, Some(b), &|ring, i| move_polygon_edge(ring, i as f64, b - (a - i as f64), dx, dy, true))
+            })
+            .into()
+        }
         "stairBy" => {
             let (dx, dy) = r.p("delta");
             patch("stairs", r.s("id"), &|s| {
@@ -1158,6 +1181,36 @@ mod dormer_grip_tests {
     }
 }
 
+/// [26] Ring (Umriss oder Hof) des Dachs, in dem der flache Index `a` (und ggf. `b`) liegt, durch `f` ersetzen.
+/// `f` bekommt den Ring und den Index von `a` darin. Gesperrt, Index ausserhalb, `b` in anderem Ring → None.
+fn roof_ring_edit(r: &Value, a: f64, b: Option<f64>, f: &dyn Fn(&[Value], usize) -> Option<Value>) -> Option<Value> {
+    if truthy(field(r, "locked")) {
+        return None;
+    }
+    let outline = field(r, "outline")?.as_array()?;
+    let holes: Vec<&Vec<Value>> = arr(field(r, "holes")).iter().filter_map(|h| h.as_array()).collect();
+    let mut off = 0usize;
+    for ring_no in 0..=holes.len() {
+        let ring: &[Value] = if ring_no == 0 { outline } else { holes[ring_no - 1] };
+        let in_ring = |i: f64| index_in(i - off as f64, ring.len());
+        if let Some(i) = in_ring(a) {
+            if let Some(b) = b {
+                in_ring(b)?;
+            }
+            let new = f(ring, i)?;
+            return Some(if ring_no == 0 {
+                with(r, "outline", new)
+            } else {
+                let mut hs: Vec<Value> = arr(field(r, "holes")).to_vec();
+                hs[ring_no - 1] = new;
+                with(r, "holes", Value::Array(hs))
+            });
+        }
+        off += ring.len();
+    }
+    None
+}
+
 /// Dach-Eckgriff: die gegenüberliegende Ecke bleibt fix, der Umriss bleibt ein achsparalleles Rechteck.
 fn roof_grip(r: &Value, index: f64, x: f64, y: f64) -> Option<Value> {
     if index >= DORMER_GRIP_BASE {
@@ -1651,6 +1704,35 @@ mod tests {
         let e = ent(json!({"op": "excavationGrip", "id": "bg", "index": 4, "pt": [2, -1]}));
         assert_eq!(e["bottom"], json!(-3));
         assert_eq!(e["outline"][2], json!({"x": 4, "y": 4}));
+    }
+
+    /// [26] Dach: Ecken und Kanten von Umriss und Hof über den flachen Index; schiefer Umriss bleibt schief.
+    #[test]
+    fn dach_griffe_umriss_und_hof() {
+        let roof = json!({"id": "R", "type": "roof", "floorId": "F", "categoryCode": "35", "shape": "walm",
+            "outline": [{"x": 0, "y": 0}, {"x": 10, "y": 0}, {"x": 12, "y": 8}, {"x": 0, "y": 8}],
+            "holes": [[{"x": 3, "y": 2}, {"x": 5, "y": 2}, {"x": 5, "y": 4}, {"x": 3, "y": 4}]]});
+        let r = root(json!({"roofs": [roof]}));
+        let ent = |v: Value| run(&Lookup::plain(&r), &rq(v)).unwrap().ops.first().map(|o| o.to_json()["entity"].clone());
+        // Umriss-Ecke 2 ziehen: übrige Ecken (kein Rechteck erzwungen) und Höfe bleiben.
+        let e = ent(json!({"op": "roofVertex", "id": "R", "index": 2, "pt": [13, 9]})).unwrap();
+        assert_eq!(e["outline"][2], json!({"x": 13, "y": 9}));
+        assert_eq!(e["outline"][1], json!({"x": 10, "y": 0}));
+        assert_eq!(e["holes"][0][0], json!({"x": 3, "y": 2}));
+        // Hof-Ecke: flacher Index 4 + 2 = Ecke 2 des Hofs.
+        let e = ent(json!({"op": "roofVertex", "id": "R", "index": 6, "pt": [6, 5]})).unwrap();
+        assert_eq!(e["holes"][0][2], json!({"x": 6, "y": 5}));
+        assert_eq!(e["outline"].as_array().unwrap().len(), 4);
+        // Hof-Kante 4–5 (Hof-Ecken 0–1) um 1 nach oben.
+        let e = ent(json!({"op": "roofEdge", "id": "R", "a": 4, "b": 5, "delta": [0, 1]})).unwrap();
+        assert_eq!((e["holes"][0][0]["y"].as_f64(), e["holes"][0][1]["y"].as_f64()), (Some(3.0), Some(3.0)));
+        // Umriss-Kante 3–0 (Schlusskante, Westwand) um 1 nach aussen.
+        let e = ent(json!({"op": "roofEdge", "id": "R", "a": 3, "b": 0, "delta": [-1, 0]})).unwrap();
+        assert_eq!((e["outline"][3]["x"].as_f64(), e["outline"][0]["x"].as_f64()), (Some(-1.0), Some(-1.0)));
+        // Kante über zwei Ringe, Index ausserhalb, NaN: kein Op.
+        assert!(ent(json!({"op": "roofEdge", "id": "R", "a": 3, "b": 4, "delta": [0, 1]})).is_none());
+        assert!(ent(json!({"op": "roofVertex", "id": "R", "index": 8, "pt": [0, 0]})).is_none());
+        assert!(ent(json!({"op": "roofVertex", "id": "R", "index": -1, "pt": [0, 0]})).is_none());
     }
 
     /// [176] Schnittlinie: Endpunkte und Knickpunkte als Griffe.

@@ -103,7 +103,7 @@ export function ViewportCenter(props: {
   const project = useStore((s) => s.project);
 
   // ── Einzeln gewählte Elemente, Blatt, Fang für die Griffe → state/useGripInputs.ts ──
-  const { selectedDrawing, selectedCeiling, selectedExcavation, selectedRoom, roomStamp, sectionSheet, snapFor } = useGripInputs({
+  const { selectedDrawing, selectedCeiling, selectedExcavation, selectedRoof, selectedRoom, roomStamp, sectionSheet, snapFor } = useGripInputs({
     project,
     activeLevel,
     selection,
@@ -121,6 +121,7 @@ export function ViewportCenter(props: {
     selectedDrawing,
     selectedCeiling,
     selectedExcavation,
+    selectedRoof,
     selectedRoom,
     selection,
     levelId: activeLevel.id,
@@ -142,6 +143,8 @@ export function ViewportCenter(props: {
     moveCeilingGrip: pa.moveCeilingGrip,
     moveExcavationGrip: pa.moveExcavationGrip,
     moveExcavationEdge: pa.moveExcavationEdge,
+    moveRoofVertex: pa.moveRoofVertex,
+    moveRoofEdge: pa.moveRoofEdge,
     moveGripOf: pa.moveGripOf,
     moveRoomEdge: pa.moveRoomEdge,
     moveCeilingEdge: pa.moveCeilingEdge,

@@ -29,6 +29,9 @@ export type GripRequest =
   | { op: "roomStamp"; id: string; delta: P; pt?: P }
   | { op: "ceilingEdge" | "roomEdge"; id: string; a: number; b: number; delta: P }
   | { op: "excavationGrip"; id: string; index: number; pt: P }
+  // [26] Dach: Ecke bzw. Kante von Umriss/Hof, flacher Index (erst `outline`, dann `holes` Ring für Ring).
+  | { op: "roofVertex"; id: string; index: number; pt: P }
+  | { op: "roofEdge"; id: string; a: number; b: number; delta: P }
   // [176] Schnittlinie: 0 = Anfang, dann `bendPoints`, zuletzt das Ende.
   | { op: "sectionLineGrip"; id: string; index: number; pt: P }
   | { op: "sectionBendInsert"; id: string; seg: number; pt: P }
