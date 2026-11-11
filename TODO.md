@@ -44,6 +44,7 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
 
 ## Grundriss
 
+- ○ **[181]** Importe als eigenständige Elemente (11.11., Wunsch Maintainer): Swisstopo-Gelände/-Gebäude, DXF-/IFC-Kontext usw. werden nach dem Import normale Modell-Elemente auf Ebenen (eigene Klasse), unabhängig von der Quelle; keine Import-Liste mehr, die Sichtbarkeit/Darstellung steuert. Gelände-Mesh als Gelände-/Freiflächen-Element, Gebäude als 3D-Körper (wie Möbel/Körper oder eigener Typ). Alte Projekte beim Laden überführen. Opus. · L
 - ○ **[180]** Alles Sichtbare auf Ebene/Klasse (11.11., Vorgabe Maintainer): jedes Primitive in Plan/Schnitt/Ansicht (auch abgeleitete: Schatten, Auto-Masse, Koten, Schnitt-/Ansichtsmarken, Raster, Nordpfeil, Stempel, Gelände) hat eine Klasse/Ebene und verschwindet mit ihr; Audit + Test, der Primitives ohne Zuordnung meldet. Regel in CLAUDE.md. · M
 - ◐ **[133]** Musterhaus komplex: Rest. Skalieren-Kopie lässt `position`/Breite unverändert; Vollflächen-/Bildschraffur
   und Schraffur-Löcher beim Ausbreiten fehlen (`src/export/planToSvgString.ts`, Kern `plan/svg.rs`; wegen paralleler
