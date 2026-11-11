@@ -127,6 +127,10 @@ pub struct WindowOpts {
     pub sill: bool,
     /// Flügelrahmen im Grundriss.
     pub sash_frames: bool,
+    /// Vereinfacht (3 Linien) im Grundriss, auch über „mittel"/„fein".
+    pub simplified: bool,
+    /// Storenkasten im Grundriss (Untersicht).
+    pub shading_box: bool,
     /// Sturzlinie im Grundriss.
     pub lintel_line: bool,
     /// Rahmen, Kämpfer, Sturz, Fensterbank und Storen im Schnitt (sonst Rahmen und Glas).
@@ -437,6 +441,8 @@ pub fn resolve(mv: Option<&ModelViewOption>, detail: Detail, scale: f64) -> Opti
             plan_swing_arcs_mv: w.and_then(|w| w.plan_swing_arcs),
             sill: w.and_then(|w| w.sill).unwrap_or(fein),
             sash_frames: w.and_then(|w| w.sash_frames).unwrap_or(fein),
+            simplified: w.and_then(|w| w.simplified).unwrap_or(false),
+            shading_box: w.and_then(|w| w.shading_box).unwrap_or(false),
             lintel_line: w.and_then(|w| w.lintel_line).unwrap_or(false),
             section_detail: w.and_then(|w| w.section_detail).unwrap_or(true),
             elevation_division: w.and_then(|w| w.elevation_division).unwrap_or(true),

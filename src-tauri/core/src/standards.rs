@@ -292,7 +292,7 @@ pub fn model_views() -> Vec<Value> {
     vec![
         json!({"id": "std-mv-wettbewerb-200", "name": "Wettbewerb 1:200", "baseDetail": "mittel",
                "doors": {"frame": false, "threshold": "off"},
-               "windows": {"sill": false, "sashFrames": false, "lintelLine": false},
+               "windows": {"simplified": true, "sill": false, "sashFrames": false, "lintelLine": false},
                "stairs": {"aboveCut": "off", "handrail": "off", "stepNumbers": false},
                "walls": {"layers": "simplified", "reveals": false},
                "slabs": {"floorFinish": "off", "viewHatch": false},

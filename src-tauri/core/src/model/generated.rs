@@ -2264,6 +2264,15 @@ pub struct ModelViewWindows {
     #[serde(rename = "sashFrames", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub sash_frames: Option<bool>,
+    /// Vereinfachter Grundriss („3 Linien", CH-Praxis 1:200): nur Leibungskante aussen, Leibungskante innen und ein Strich
+    /// in der Fenstermitte; kein Rahmen, keine Flügel, keine Anschlagnase, keine Fensterbank (Basis: nur Detailgrad „grob").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub simplified: Option<bool>,
+    /// Storenkasten im Grundriss als Untersicht (gestrichelt über der Schnittebene) zeigen (Basis: nein).
+    #[serde(rename = "shadingBox", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub shading_box: Option<bool>,
     /// Sturzlinie im Grundriss (gestrichelt an den Wandflächen; Element-Linientyp geht vor; Basis: nein).
     #[serde(rename = "lintelLine", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]

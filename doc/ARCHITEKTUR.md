@@ -319,7 +319,9 @@ Symbol selbst in `stair_symbol.rs` bleibt unberührt), Wandschichten und Schicht
   `layer_positions`; Holzrahmenbau: eine Beplankung unter 3 cm ist nicht der Kern, dann die dickste
   Konstruktionsschicht, `overrides::MIN_CORE_THICKNESS`) in ihrer echten Lage und Dicke (`walls.rs::core_band`);
   geschnittene Dächer als Schichtstreifen je Dachfläche nach Stufe (`domains.rs::roof_cut`); Schwelle der Türen und
-  Sturzlinie der Fenster (`walls.rs::opening_extras`, beide Basis aus); Decken (Umriss,
+  Sturzlinie der Fenster (`walls.rs::opening_extras`, beide Basis aus); Fenster „vereinfacht" (`windows.simplified`:
+  drei Linien — Leibung aussen, Leibung innen, Fenstermitte —, wie Detailgrad grob, auch über mittel/fein; Basis nur bei grob)
+  und Storenkasten als Untersicht (`windows.shadingBox`, Basis aus); Decken (Umriss,
   Ansichtsschraffur), Dächer (Rand über dem Schnitt, Schraffur der Aufsicht), Stützen (Schnittfläche
   Schraffur/schwarz/leer) in `plan/domains.rs`.
 - **Schnitt:** `section_plan_buf` löst die Stufe auf (`model_view::for_view`; angefragt über `modelView`,

@@ -640,6 +640,8 @@ fn opening_symbol(c: &Ctx, out: &mut Vec<Primitive>, w: &Wall, o: &Opening, colo
     let b01 = |b: bool| if b { 1.0 } else { 0.0 };
     // [173] Modelldarstellung (bei eigenem Detailgrad der Öffnung über deren Basis).
     let mo = c.mv_for(detail);
+    // [173] Fenster „vereinfacht" (3 Linien): wie grob, auch bei mittel/fein.
+    let detail = if !door && mo.window.simplified { Detail::Grob } else { detail };
     let detail_code = match detail {
         // [140] Übersicht (1:500 und kleiner): Türen ohne Aufschlag-Bogen (ausser die Modelldarstellung will ihn).
         Detail::Grob if c.a.scale >= super::domains::OVERVIEW_FROM && mo.door.swing_arc != Some(true) => -1.0,
@@ -648,7 +650,8 @@ fn opening_symbol(c: &Ctx, out: &mut Vec<Primitive>, w: &Wall, o: &Opening, colo
         Detail::Fein => 2.0,
     };
     // [105] Rahmen-Detail und Türzarge (eigene Zeichnung in `opening_detail_plan`).
-    let det = crate::opening_detail::frame_of(p, o).filter(|f| f.detailed);
+    // Fenster grob: kein Rahmenprofil, keine Anschlagnasen, keine Verbreiterung (nur Leibungen und Mitte).
+    let det = crate::opening_detail::frame_of(p, o).filter(|f| f.detailed && (door || detail != Detail::Grob));
     let dframe = crate::opening_detail::door_frame_of(p, o);
     // Verbreiterungsprofile: das Fenster-Element sitzt um sie eingerückt in der Rohbauöffnung.
     let (ext_l, ext_r) = det.as_ref().filter(|_| !door).map_or((0.0, 0.0), |f| (f.ext.left, f.ext.right));
@@ -746,7 +749,8 @@ fn opening_symbol(c: &Ctx, out: &mut Vec<Primitive>, w: &Wall, o: &Opening, colo
     }));
     b.push(b01(sill.is_some_and(|s| s.view == WindowTypeSillLineView::Unter)));
     let shading = wt.and_then(|t| t.shading.as_ref());
-    b.push(b01(shading.is_some_and(|s| s.create)));
+    // Storenkasten als Untersicht nur, wenn die Modelldarstellung es will (Basis: aus).
+    b.push(b01(shading.is_some_and(|s| s.create) && mo.window.shading_box));
     b.push(shading.map_or(0.0, |s| s.r#box.width));
     b.push(shading.map_or(0.0, |s| s.r#box.height));
     // Strichstärken

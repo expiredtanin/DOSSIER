@@ -303,3 +303,35 @@ fn ausschnitt_und_vorlage_waehlen_die_modelldarstellung() {
     let l = crate::sheet_viewports::level_with_template(p.floor("eg").unwrap(), &t);
     assert_eq!(l.model_view_option_id.as_deref(), Some("mv"));
 }
+
+/// Fenster „vereinfacht" (3 Linien): auch bei mittel/fein nur Leibungen und Mitte; Wettbewerb 1:200 nutzt es.
+#[test]
+fn fenster_vereinfacht_drei_linien() {
+    let p = sample();
+    let none = serde_json::json!({});
+    let sash_fein = lines(&p, 2.0, 50.0, none.clone(), "window-sash");
+    assert!(sash_fein > 0);
+    let q = with_mv(p.clone(), mv(serde_json::json!({"windows": {"simplified": true}})));
+    for d in [1.0, 2.0] {
+        assert_eq!(lines(&q, d, 50.0, select(), "window-sash"), 0, "keine Flügel");
+        assert_eq!(lines(&q, d, 50.0, select(), "window-sill"), 0, "keine Bank");
+        assert_eq!(lines(&q, d, 50.0, select(), "window-glass"), lines(&p, 0.0, 50.0, none.clone(), "window-glass"), "nur der Mittelstrich");
+    }
+    let o = resolve(None, Detail::Mittel, 200.0);
+    assert!(!o.window.simplified && !o.window.shading_box);
+    let w = crate::standards::model_views().into_iter().find(|v| v["id"] == "std-mv-wettbewerb-200").unwrap();
+    assert_eq!(w["windows"]["simplified"], true);
+}
+
+/// Storenkasten (Untersicht) im Grundriss: Basis aus, mit der Option an.
+#[test]
+fn storenkasten_nur_mit_option() {
+    let mut p = sample();
+    for t in p.window_types.iter_mut().flatten() {
+        t.shading = Some(serde_json::from_value(serde_json::json!({"create": true, "kind": "rollladen", "mount": "sturz", "box": {"width": 0.0, "height": 0.25, "depth": 0.2}})).unwrap());
+    }
+    let none = serde_json::json!({});
+    assert_eq!(lines(&p, 2.0, 50.0, none.clone(), "window-shading"), 0, "Basis: aus");
+    let q = with_mv(p.clone(), mv(serde_json::json!({"windows": {"shadingBox": true}})));
+    assert!(lines(&q, 2.0, 50.0, select(), "window-shading") > 0, "Option an");
+}

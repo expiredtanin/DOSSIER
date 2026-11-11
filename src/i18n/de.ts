@@ -1227,6 +1227,8 @@ export const de = {
   "resources.modelViews.opt.windows.planSwingArcs": "Aufschlagbögen (Grundriss)",
   "resources.modelViews.opt.windows.sill": "Fensterbank",
   "resources.modelViews.opt.windows.sashFrames": "Flügelrahmen",
+  "resources.modelViews.opt.windows.simplified": "Vereinfacht (3 Linien)",
+  "resources.modelViews.opt.windows.shadingBox": "Storenkasten (Untersicht)",
   "resources.modelViews.opt.stairs.walkLine": "Lauflinie",
   "resources.modelViews.opt.stairs.arrow": "Pfeil",
   "resources.modelViews.opt.stairs.breakLine": "Bruchlinie",

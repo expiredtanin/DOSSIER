@@ -253,6 +253,11 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   Detailgrad hat in der Ansicht (Fassade) keine Wirkung; `showTerrain`/`floorFinish` wirken nur im Grundriss; nicht in
   der Tauri-App geprüft. · S
 - ◐ **[173]** Modelldarstellung (≙ Archicad „Model View Options"), Wunsch Maintainer: grob/mittel/fein als wählbare und
+  (11.11.) Fenster im Grundriss grob = CH-Praxis 1:200: drei Linien (Leibung aussen/innen über die Öffnung, Strich in der
+  Fenstermitte = Rahmenmitte, Klasse `window-frame`), keine Anschlagnasen/Verbreiterungen; neue Fenster-Option „Vereinfacht
+  (3 Linien)" (`windows.simplified`, auch über mittel/fein), Stufe Wettbewerb 1:200 setzt sie; Storenkasten (Untersicht) im
+  Grundriss neu Basis AUS, zuschaltbar je Stufe (`windows.shadingBox`; kein Element-/Typ-Schalter). Goldens: keine
+  Änderung (kein Golden mit grobem Fenster/Storenkasten). Nicht in der Tauri-App geprüft.
   eigene Stufen mit Einfluss auf alle Bauteile. Etappe 1 (10.11.): `Project.modelViewOptions` (Basis-Detailgrad +
   Abschnitte Türen/Fenster/Treppen/Wände/Decken-Böden/Gelände, jede Option „wie Basis" = heute), Wahl über
   `DrawingLevel.modelViewOptionId` (Werkzeugleiste: Detailgrad-Liste = Stufen; Ansichtsvorlage als Ebenen-Feld),

@@ -1221,6 +1221,8 @@ export const en: Record<TranslationKey, string> = {
   "resources.modelViews.opt.windows.planSwingArcs": "Swing arcs (plan)",
   "resources.modelViews.opt.windows.sill": "Window board",
   "resources.modelViews.opt.windows.sashFrames": "Sash frames",
+  "resources.modelViews.opt.windows.simplified": "Simplified (3 lines)",
+  "resources.modelViews.opt.windows.shadingBox": "Blind box (view from below)",
   "resources.modelViews.opt.stairs.walkLine": "Walking line",
   "resources.modelViews.opt.stairs.arrow": "Arrow",
   "resources.modelViews.opt.stairs.breakLine": "Break line",
