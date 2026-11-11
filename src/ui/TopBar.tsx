@@ -1024,6 +1024,8 @@ function AboutDialog({ onClose }: { onClose: () => void }) {
  */
 export interface ViewRibbonTabProps {
   viewToggleEnabled: boolean;
+  /** Aktiver Reiter ist ein Grundriss-Reiter ([182]); sonst ist der Grundriss-Knopf nicht hervorgehoben. */
+  planTabActive?: boolean;
   viewType: ViewType;
   onViewType: (v: ViewType) => void;
   view3d: View3d;
@@ -1106,6 +1108,7 @@ const LiveScaleStat = memo(function LiveScaleStat({
  */
 export const ViewRibbonTab = memo(function ViewRibbonTab({
   viewToggleEnabled,
+  planTabActive = true,
   viewType,
   onViewType,
   view3d,
@@ -1170,7 +1173,7 @@ export const ViewRibbonTab = memo(function ViewRibbonTab({
         <button
           type="button"
           className={`tb-vt-btn${
-            viewToggleEnabled && viewType === "grundriss" ? " active" : ""
+            viewToggleEnabled && planTabActive && viewType === "grundriss" ? " active" : ""
           }`}
           onClick={() => onViewType("grundriss")}
           disabled={!viewToggleEnabled}

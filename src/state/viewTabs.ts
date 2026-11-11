@@ -113,6 +113,11 @@ export function levelTabKind(kind: DrawingLevel["kind"]): Exclude<TabKind, "3d">
   return kind === "floor" ? "plan" : kind === "section" ? "section" : kind === "elevation" ? "elevation" : "drawing";
 }
 
+/** Ist der Reiter ein Grundriss-Reiter (Hervorhebung des Grundriss-Knopfs)? Schnitt/Ansicht/Zeichnung/3D: nein. */
+export function isPlanKindActive(viewType: ViewSnapshotState["viewType"], levelKind: DrawingLevel["kind"]): boolean {
+  return viewType !== "perspektive" && levelTabKind(levelKind) === "plan";
+}
+
 /** Art eines Reiters aus seinem Darstellungszustand (`null`: unbekannt, z. B. ohne gemerkten Zustand). */
 export function tabKindOf(st: KindState | undefined, levels: readonly LevelLite[]): TabKind | null {
   if (!st) return null;

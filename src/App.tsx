@@ -399,7 +399,6 @@ export default function App() {
   // ── Gewählte Schnittlinie, 3D-Live-Schnitt → state/useSectionLineState.ts ──
   const { sectionLine, section3dPlane, onToggleSection3dCut } = useSectionLineState({
     activeLevel,
-    viewType,
     selectedSectionLineId,
     section3dCutId,
     setSection3dCutId,

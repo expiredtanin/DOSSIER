@@ -4,8 +4,8 @@
 // Zeichnungsebenen aus dem Store ([121]); die Objekt-Info der Auswahl rechnen Panels selbst
 // (`useSelectionInfo`), der Panel-Host beim Aufruf eines Handlers.
 
-import { useCallback, useEffect, useMemo } from "react";
-import type { DrawingLevel, ViewType } from "../model/types";
+import { useCallback, useMemo } from "react";
+import type { DrawingLevel } from "../model/types";
 import { sectionPlaneFromLevel } from "../core";
 import { useStore } from "./appStore";
 import type { useSelectionState } from "./useSelectionState";
@@ -14,12 +14,11 @@ type Sel = ReturnType<typeof useSelectionState>;
 
 export function useSectionLineState(opts: {
   activeLevel: DrawingLevel;
-  viewType: ViewType;
   selectedSectionLineId: string | null;
   section3dCutId: Sel["section3dCutId"];
   setSection3dCutId: Sel["setSection3dCutId"];
 }) {
-  const { activeLevel, viewType, selectedSectionLineId, section3dCutId, setSection3dCutId } = opts;
+  const { activeLevel, selectedSectionLineId, section3dCutId, setSection3dCutId } = opts;
   const drawingLevels = useStore((s) => s.project.drawingLevels);
 
   // Gewählte Schnitt-/Ansichtslinie (DrawingLevel) — separat von `selection`, da
@@ -55,13 +54,6 @@ export function useSectionLineState(opts: {
     );
     return lvl ? sectionPlaneFromLevel(lvl) : null;
   }, [drawingLevels, section3dCutId]);
-
-  // Aus einem Schnitt ins 3D ([115]): der Live-Schnitt folgt der Schnittlinie dieses Schnitts (einmal
-  // beim Wechsel; im 3D lässt er sich wie sonst aufheben).
-  const sectionLevelIn3d = activeLevel.kind === "section" && viewType === "perspektive" ? activeLevel.id : null;
-  useEffect(() => {
-    if (sectionLevelIn3d) setSection3dCutId(sectionLevelIn3d);
-  }, [sectionLevelIn3d, setSection3dCutId]);
 
   // Bindet den 3D-Live-Schnitt an eine Schnittlinie (Toggle im Objekt-Info).
   const onToggleSection3dCut = useCallback(

@@ -3,6 +3,7 @@
 // samt Ebenen-/Zeichnungs-Kombinationen — als memoisierte Elemente mit denselben Abhängigkeiten wie
 // zuvor ([121]), damit ein App-Render sie nicht neu zeichnet. Aufgerufen von `App.tsx` für die `TopBar`.
 
+import { isPlanKindActive } from "../state/viewTabs";
 import { useMemo } from "react";
 import type { DrawingLevel, ModelViewOption, ViewType } from "../model/types";
 import { currentModelViewId, modelViewChoices } from "../state/modelViews";
@@ -181,6 +182,7 @@ export function useTopBarElements(opts: {
     () => (
       <ViewRibbonTab
         viewToggleEnabled={true} /* [182] 3D/Grundriss sind aus jedem Reiter erreichbar */
+        planTabActive={isPlanKindActive(viewType, activeLevel.kind)}
         viewType={viewType}
         onViewType={setViewType}
         view3d={view3d}
