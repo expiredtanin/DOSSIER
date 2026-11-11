@@ -499,12 +499,11 @@ export default function App() {
     pa,
   });
 
-  // [189] Taste T / Menü „Objekteinstellungen…": Öffnungs-Dialog bzw. Objekt-Info (state/objectSettings.ts).
+  // [195] Taste T / Menü „Objekteinstellungen…": schwebendes Fenster (state/objectSettings.ts).
   const openSettingsOfObject = () =>
     openObjectSettings({
       activeTool,
-      openOpeningEditor: setOpeningEditorId,
-      revealObjectInfo: () => setLayout((l) => revealPanel(l, "object-info")),
+      revealObjectSettings: () => setLayout((l) => revealPanel(l, "object-settings", { x: 96, y: 96, w: 360, h: 560 })),
     });
   useObjectSettingsShortcut(shortcutOverrides, engineRef, openSettingsOfObject);
 

@@ -4,7 +4,9 @@
 // der gewählten Elemente und die Geometrie-Felder freier 2D-Elemente (Linie, Kreis, Bogen, Text).
 
 import { applyFillMode } from "../fillMode";
-import { cmdMutation, opsMutation, patchItem } from "../../core";
+import { cmdMutation, opsMutation, patchItem, patchItems } from "../../core";
+import { getState } from "../appStore";
+import { STYLE_KINDS } from "../mixedValues";
 import { resolvePenColor } from "../../model/penSets";
 import type { TransformSelection } from "../../tools/transform";
 import type { FlatHostOpts, HostPart } from "./types";
@@ -34,11 +36,28 @@ function singleTransformSel(kind: string, id: string): TransformSelection | null
   return null;
 }
 
+/** Mindestens ein Element der Arten mit Stift (Wand, Decke, 2D) gewählt ([195]: ein Pfad für eines und mehrere). */
+function multiStyle(): boolean {
+  const s = getState().selection;
+  return STYLE_KINDS.reduce((n, k) => n + s[k].length, 0) > 0;
+}
+
+/** coalesceKey je Auswahl: Tippen in einem Feld = ein Undo-Schritt, ein Wechsel der Auswahl beginnt einen neuen. */
+function styleKey(s: { walls: string[]; ceilings: string[]; drawings: string[] }): string {
+  return [...s.walls, ...s.ceilings, ...s.drawings].join(",");
+}
+
 export function buildSelectionStyleHost(c: FlatHostOpts) {
   const { addColorToCustomPalette, applyChange, commitTransformOn, project, resizeElement, selection, setElementBackground, setElementColor, setElementFill, setElementFillColor, setElementForeground, setElementWeight, setProject, updateCeiling, updateDrawing2D, updateOpening, updateRoof, updateRoom, updateStair, updateWall } = c;
   return {
     onSetSelectionColor: (color) => {
       if (!selection) return;
+      // [195] Farbe für alle gewählten Wände/Decken/2D-Elemente, ein Undo-Schritt.
+      if (multiStyle()) {
+        const s = getState().selection;
+        applyChange((p) => [...patchItems(p, "walls", s.walls, (e) => ({ ...e, color })), ...patchItems(p, "ceilings", s.ceilings, (e) => ({ ...e, color })), ...patchItems(p, "drawings2d", s.drawings, (e) => ({ ...e, color }))], `sel-color:${styleKey(s)}`);
+        return;
+      }
       if (selection.kind === "wall" || selection.kind === "drawing2d")
         setElementColor(selection.kind, selection.id, color);
       else if (selection.kind === "ceiling")
@@ -66,6 +85,12 @@ export function buildSelectionStyleHost(c: FlatHostOpts) {
       else if (selection.kind === "room") updateRoom(selection.id, patch);
     },
     onSetSelectionWeight: (weightMm) => {
+      // [195] Für alle gewählten Wände/Decken/2D-Elemente; Tippen = ein Undo-Schritt (coalesceKey).
+      if (multiStyle()) {
+        const s = getState().selection;
+        applyChange((p) => [...patchItems(p, "walls", s.walls, (e) => ({ ...e, strokeWeight: weightMm })), ...patchItems(p, "ceilings", s.ceilings, (e) => ({ ...e, strokeWeight: weightMm })), ...patchItems(p, "drawings2d", s.drawings, (e) => ({ ...e, weightMm }))], `sel-weight:${styleKey(s)}`);
+        return;
+      }
       // Strichstärke-Override: Wand/Decke (`strokeWeight`) oder Drawing2D (`weightMm`).
       if (selection?.kind === "wall") updateWall(selection.id, { strokeWeight: weightMm });
       else if (selection?.kind === "ceiling")

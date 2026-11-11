@@ -49,40 +49,47 @@ test("Wand gewählt: Attribute ohne Aufbau/Typ-Felder, Objekt-Info mit Wand-Absc
   }
 });
 
-test("Taste T: Fenster gewählt → Einstellungsdialog ([189])", async ({ page }) => {
+test("Taste T: Fenster gewählt → Fenster Objekteinstellungen mit Öffnungs-Feldern ([195])", async ({ page }) => {
   await startNewProject(page);
   await openSample(page);
   await openTab(page, "Elemente");
   await elementRows(page).filter({ hasText: /Fenster/ }).first().click();
   await blurFocus(page);
-  await expect(page.locator(".oed-dialog")).toHaveCount(0);
+  const win = page.locator(".objset-panel");
+  await expect(win).toHaveCount(0);
   await page.keyboard.press("t");
-  await expect(page.locator(".oed-dialog")).toBeVisible();
+  await expect(win).toBeVisible();
+  await expect(win.locator('[data-group="opening"] .objinfo-group-head')).toHaveAttribute("aria-expanded", "true");
+  await expect(win.locator('[data-group="opening"]').getByText("Brüstung").first()).toBeVisible();
+  await expect(page.locator(".oed-dialog")).toHaveCount(0);
 });
 
-test("Taste T: Wand gewählt → Wand-Abschnitt der Objekt-Info fokussiert und aufgeklappt ([189])", async ({ page }) => {
+test("Taste T: Wand gewählt → Wand-Abschnitt im Fenster fokussiert und aufgeklappt ([195])", async ({ page }) => {
   await startNewProject(page);
   await openSample(page);
   await selectW1(page);
-  const head = page.locator('[data-group="wall"] .objinfo-group-head');
+  await blurFocus(page);
+  await page.keyboard.press("t");
+  const head = page.locator('.objset-panel [data-group="wall"] .objinfo-group-head');
+  await expect(head).toHaveAttribute("aria-expanded", "true");
+  await expect(head).toBeFocused();
   await head.click(); // zuklappen
   await expect(head).toHaveAttribute("aria-expanded", "false");
   await blurFocus(page);
-  await page.keyboard.press("t");
+  await page.keyboard.press("t"); // klappt wieder auf, Fenster bleibt einmalig
   await expect(head).toHaveAttribute("aria-expanded", "true");
-  await expect(head).toBeFocused();
+  await expect(page.locator(".objset-panel")).toHaveCount(1);
   await expect(page.locator(".oed-dialog")).toHaveCount(0);
 });
 
-test("Taste T ohne Auswahl bei Wand-Werkzeug: Typ des neuen Bauteils in der Objekt-Info ([189])", async ({ page }) => {
+test("Taste T ohne Auswahl bei Wand-Werkzeug: Typ des neuen Bauteils im Fenster ([189])", async ({ page }) => {
   await startNewProject(page);
   await openSample(page);
-  await openTab(page, "Objekt-Info");
   await blurFocus(page);
   await page.keyboard.press("6");
   await blurFocus(page); // der Befehl holt den Fokus in die Befehlszeile
   await page.keyboard.press("t");
-  await expect(page.locator('[data-group="newComponent"] .objinfo-group-head')).toBeFocused();
+  await expect(page.locator('.objset-panel [data-group="newComponent"] .objinfo-group-head')).toBeFocused();
   await expect(page.locator(".attr-panel").getByText("Neues Bauteil")).toHaveCount(0);
 });
 
@@ -91,14 +98,14 @@ test("Taste T: in Textfeldern wirkungslos, ohne Auswahl und Werkzeug nichts ([18
   await openSample(page);
   await openTab(page, "Elemente");
   await elementRows(page).filter({ hasText: /Fenster/ }).first().click();
-  // Tippen im Befehlsfeld darf den Dialog nicht öffnen.
+  // Tippen im Befehlsfeld darf das Fenster nicht öffnen.
   await page.locator(".cmdline-input").fill("t");
   await page.locator(".cmdline-input").press("t");
-  await expect(page.locator(".oed-dialog")).toHaveCount(0);
+  await expect(page.locator(".objset-panel")).toHaveCount(0);
   // Auswahl leeren: T tut nichts.
   await page.locator(".cmdline-input").fill("");
   await blurFocus(page);
   await page.keyboard.press("Escape");
   await page.keyboard.press("t");
-  await expect(page.locator(".oed-dialog")).toHaveCount(0);
+  await expect(page.locator(".objset-panel")).toHaveCount(0);
 });

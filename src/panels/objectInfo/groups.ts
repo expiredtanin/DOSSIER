@@ -98,18 +98,14 @@ export function attrGroups(c: AttrGroupContext): AttrGroupId[] {
 }
 
 /**
- * Ziel der Taste T ([189], wie Archicad Cmd+T): Fenster/Tür → Öffnungs-Dialog; sonst der Abschnitt der
- * Objekt-Info (fokussiert und aufgeklappt, `group: null` = nur das Panel); ohne Auswahl die Voreinstellung des
- * aktiven Werkzeugs (Wand/Decke: Typ des neuen Bauteils), sonst nichts.
+ * Ziel der Taste T ([195], wie Archicad Cmd+T): immer das Fenster Objekteinstellungen; `group` ist der Abschnitt
+ * des Bereichs Objekt, der aufgeklappt und fokussiert wird (`null` = nur das Fenster). Ohne Auswahl die
+ * Voreinstellung des aktiven Werkzeugs (Wand/Decke: Typ des neuen Bauteils), sonst nichts.
  */
-export type ObjectSettingsTarget =
-  | { kind: "opening"; id: string }
-  | { kind: "info"; group: InfoGroupId | null }
-  | null;
+export type ObjectSettingsTarget = { group: InfoGroupId | null } | null;
 
 export function objectSettingsTarget(sel: SelectionInfo | null, activeTool: string, isGrid = false): ObjectSettingsTarget {
-  if (!sel) return activeTool === "wall" || activeTool === "ceiling" ? { kind: "info", group: "newComponent" } : null;
-  if (sel.opening) return { kind: "opening", id: sel.id };
+  if (!sel) return activeTool === "wall" || activeTool === "ceiling" ? { group: "newComponent" } : null;
   const first = infoGroups({ sel, isGrid, sectionLine: false, newComponentTool: false })[0];
-  return { kind: "info", group: first ?? null };
+  return { group: first ?? null };
 }

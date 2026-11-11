@@ -373,7 +373,11 @@ export function setActiveTab(
  *   • angedockt, inaktiver Tab → als aktiven Tab seiner Gruppe setzen.
  *   • nirgends vorhanden   → als neues schwebendes Fenster öffnen (Default-Rect).
  */
-export function revealPanel(layout: LayoutState, panelId: string): LayoutState {
+export function revealPanel(
+  layout: LayoutState,
+  panelId: string,
+  rect: { x: number; y: number; w: number; h: number } = { x: 120, y: 120, w: 320, h: 420 },
+): LayoutState {
   if (layout.floating.some((f) => f.panelId === panelId)) {
     return bringToFront(layout, panelId);
   }
@@ -382,7 +386,7 @@ export function revealPanel(layout: LayoutState, panelId: string): LayoutState {
       return setActiveTab(layout, dock, panelId);
     }
   }
-  return moveToFloat(layout, panelId, { x: 120, y: 120, w: 320, h: 420 });
+  return moveToFloat(layout, panelId, rect);
 }
 
 // `otherDock` wird (noch) nicht extern gebraucht, ist aber Teil der Aufräum-

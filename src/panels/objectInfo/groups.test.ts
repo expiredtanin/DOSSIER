@@ -56,19 +56,19 @@ describe("Panel-Zuordnung [189]", () => {
 });
 
 describe("Taste T: Ziel [189]", () => {
-  it("Fenster/Tür öffnet den Öffnungs-Dialog", () => {
+  it("Fenster/Tür öffnet den Öffnungs-Abschnitt (kein eigener Dialog mehr, [195])", () => {
     const sel = deriveSelection(p, { openings: [p.openings![0].id] });
-    expect(objectSettingsTarget(sel, "select")).toEqual({ kind: "opening", id: p.openings![0].id });
+    expect(objectSettingsTarget(sel, "select")).toEqual({ group: "opening" });
   });
 
   it("Wand öffnet den Wand-Abschnitt der Objekt-Info", () => {
     const sel = deriveSelection(p, { walls: [p.walls[0].id] });
-    expect(objectSettingsTarget(sel, "select")).toEqual({ kind: "info", group: "wall" });
+    expect(objectSettingsTarget(sel, "select")).toEqual({ group: "wall" });
   });
 
   it("ohne Auswahl: Wand-/Decken-Werkzeug → Typ des neuen Bauteils, sonst nichts", () => {
-    expect(objectSettingsTarget(null, "wall")).toEqual({ kind: "info", group: "newComponent" });
-    expect(objectSettingsTarget(null, "ceiling")).toEqual({ kind: "info", group: "newComponent" });
+    expect(objectSettingsTarget(null, "wall")).toEqual({ group: "newComponent" });
+    expect(objectSettingsTarget(null, "ceiling")).toEqual({ group: "newComponent" });
     expect(objectSettingsTarget(null, "select")).toBeNull();
     expect(objectSettingsTarget(null, "line")).toBeNull();
   });

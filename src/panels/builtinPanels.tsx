@@ -28,6 +28,7 @@ import { LayoutsPanel, LayoutsTabIcon } from "./LayoutsPanel";
 import { BcfPanel } from "./BcfPanel";
 import { ClashPanel } from "./ClashPanel";
 import { HistoryPanel } from "./HistoryPanel";
+import { ObjectSettingsPanel } from "./objectSettings/ObjectSettingsPanel";
 import {
   ToolsTabIcon,
   AttributesTabIcon,
@@ -55,6 +56,7 @@ export const BUILTIN_PANEL_IDS = {
   bcf: "bcf",
   clash: "clash",
   history: "history",
+  objectSettings: "object-settings",
 } as const;
 
 // Werkzeug-Palette (Symbol + Name je Werkzeug, ArchiCAD/Vectorworks-Stil).
@@ -182,4 +184,14 @@ registerPanel({
   icon: <HistoryTabIcon />,
   hasDisplayMode: false,
   render: () => <HistoryPanel />,
+});
+
+// Objekteinstellungen ([195]) — Taste T: schwebendes Fenster, folgt der Auswahl; Bereiche „Objekt" (Objekt-Info)
+// und „Darstellung" (Attribute). Nicht im Standard-Layout; öffnet sich mit T bzw. „Bearbeiten > Objekteinstellungen…".
+registerPanel({
+  id: BUILTIN_PANEL_IDS.objectSettings,
+  title: "nav.objectSettings",
+  icon: <ObjectInfoTabIcon />,
+  hasDisplayMode: false,
+  render: () => <ObjectSettingsPanel />,
 });
