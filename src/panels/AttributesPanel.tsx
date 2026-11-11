@@ -3,6 +3,10 @@
 // ersten selektierten Elements und erlaubt das direkte Bearbeiten (Farbe,
 // Strichstärke, Füllschraffur).
 //
+// [189] NUR Gestaltung: Stift, Linienenden, Bemassungs-Darstellung, Füllung. Alles Bauteil-/BIM-Bezogene (Typ,
+// Aufbau, Masse, Raumdaten, Dach-/Treppen-Parameter, Achsraster, Schnittlinie …) liegt in der Objekt-Info
+// (`ObjectInfoPanel`, Abschnitte in `objectInfo/`); welcher Abschnitt wohin gehört, hält `objectInfo/groups.ts`.
+//
 // Vordergrund/Hintergrund/Strichstärke/Schraffur tragen je einen 3-Optionen-
 // Quellen-Dropdown: „Nach Ebene" (die LayerCategory erzwingt den Wert), „Nach
 // Bauteil" (erbt vom Component-Manager, heutiges Default-Verhalten) oder
@@ -25,10 +29,9 @@
 import { Fragment } from "react";
 import { useSelectionInfo } from "../state/useSelectionInfo";
 import { useStore } from "../state/appStore";
+import { attrGroups } from "./objectInfo/groups";
 import type { ReactNode } from "react";
 import { t } from "../i18n";
-import { formatM, wallTypeLabel } from "../model/types";
-import { fmtLength, unitsForLevel } from "../tools/displayUnits";
 import { PEN_WEIGHTS } from "../model/types";
 import type { AttributeSource } from "../model/types";
 import { usePanelHost } from "./host";
@@ -40,20 +43,6 @@ import type { EndMark } from "../model/types";
 
 /** Auswahl der Linienenden (Reihenfolge = Anzeige im Dropdown). */
 const END_MARK_OPTIONS: EndMark[] = ["none", "arrow", "arrowOpen", "dot", "tick", "square"];
-// Element-spezifische Attribut-Abschnitte (Wand/Decke/Öffnung/Treppe/Raum) —
-// aus ObjectInfoPanel hierher verschoben (Ribbon Phase 3: ObjectInfo trägt nur
-// noch Bezugspunkt + Masse).
-import { WallSection } from "./objectInfo/WallSection";
-import { CeilingSection } from "./objectInfo/CeilingSection";
-import { RoofSection } from "./objectInfo/RoofSections";
-import { OpeningSection } from "./objectInfo/OpeningSections";
-import { StairSection } from "./objectInfo/StairSection";
-import { RoomSection } from "./objectInfo/RoomSection";
-import { ExtrudedSolidSection, ColumnSection } from "./objectInfo/SolidSections";
-import { SectionLineSection } from "./objectInfo/SectionLineSection";
-import { DetailRefSection, DimRefsSection, DimTextSection } from "./objectInfo/RefSections";
-import { SurfacePatternPlacement } from "./SurfacePatternPlacement";
-
 /** UI-Zustand des 3-Optionen-Quellen-Dropdowns (nicht 1:1 das Modell-Feld:
  *  „custom" ist abgeleitet aus „ist ein expliziter Wert gesetzt?", nicht
  *  selbst gespeichert). */
@@ -79,54 +68,16 @@ export function AttributesPanel() {
   const project = useStore((s) => s.project);
   const sel = useSelectionInfo();
 
-  // Wandtyp-/Deckentyp-Wahl für das NEUE Bauteil (was gezeichnet wird) — früher
-  // in der Werkzeug-Sidebar (ToolsPanel), seit deren Entfernung hier. Erscheint
-  // nur bei aktivem Wand-/Decken-Werkzeug (unabhängig von einer Auswahl); Wand und
-  // Decke teilen sich denselben Aufbau-Typ (WallType) + Host-State.
-  const drawingComponent =
-    host.activeTool === "wall" || host.activeTool === "ceiling";
-  const typeSection = drawingComponent ? (
-    <>
-      <div className="attr-section-label">{t("attr.newComponent")}</div>
-      <div className="attr-grid">
-        <span className="attr-key">
-          {t(host.activeTool === "wall" ? "tool.wallType" : "tool.ceilingType")}
-        </span>
-        <span className="attr-val">
-          <Dropdown
-            value={host.activeWallTypeId}
-            disabled={!host.toolsEnabled}
-            onChange={(v) => host.onActiveWallTypeId(v)}
-            options={project.wallTypes.map((wt) => ({
-              value: wt.id,
-              label: wallTypeLabel(wt, project.components),
-              title: wt.name,
-            }))}
-          />
-        </span>
-      </div>
-    </>
-  ) : null;
-
-  // Leerzustand: der Typ-Picker (falls ein Bauteil-Werkzeug aktiv ist), sonst ein
-  // kompakter Hinweis.
+  // Leerzustand: Hinweis. (Typ des neuen Bauteils und Schnittlinie liegen seit [189] in der Objekt-Info.)
   if (sel === null) {
-    // Schnitt-/Ansichtslinie ist kein Projekt-Bauteil (kein `selection`) — sie
-    // kommt über host.sectionLine und wird hier im „Leerzustand" bearbeitet.
     return (
       <div className="attr-panel">
-        {typeSection}
-        {host.sectionLine && <SectionLineSection level={host.sectionLine} host={host} />}
-        {!typeSection && !host.sectionLine && (
-          <div className="attr-empty">{t("attr.empty")}</div>
-        )}
+        <div className="attr-empty">{t("attr.empty")}</div>
       </div>
     );
   }
 
   const isDrawing = sel.kind === "drawing2d";
-  const sheetUnits = unitsForLevel(project.drawingLevels.find((z) => z.id === sel.floorId));
-  const sizeText = (m: number): string => (sheetUnits.perMeter === 1 ? formatM(m) : `${fmtLength(sheetUnits, m).replace(/mm$/, "")} mm`);
   // Strichstärke: Wand/Decke/Stütze/Drawing2D tragen einen eigenen Override
   // (`strokeWeight`/`weightMm`) + Quellen-Dropdown; andere Elementarten erben
   // stets aus der Kategorie (kein Setter im Kontrakt → nicht editierbar).
@@ -262,14 +213,10 @@ export function AttributesPanel() {
     ? project.lineStyles.find((l) => l.id === drawing.lineStyleId)
     : undefined;
 
-  const bboxW = sel.bbox.maxX - sel.bbox.minX;
-  const bboxH = sel.bbox.maxY - sel.bbox.minY;
-  const isModelElement = !!(sel.wall || sel.ceiling || sel.roof || sel.stair || sel.room);
+  const groups = attrGroups({ sel, openEnds: openEndsShape, isDimension: drawing?.geom.shape === "dimension" });
 
   return (
     <div className="attr-panel">
-      {/* Typ-Picker für das neue Bauteil (nur bei aktivem Wand-/Decken-Werkzeug). */}
-      {typeSection}
       {/* EIN durchgehendes Grid über alle Sektionen — dieselben zwei Spalten
           (Label | Wert) für Stift/Füllung/Maße, damit die Wertfelder überall
           bündig in EINER Spalte stehen. Sektion-Balken spannen beide Spalten. */}
@@ -451,7 +398,7 @@ export function AttributesPanel() {
             Nur bei OFFENEN 2D-Formen und beim Text mit Hinweislinie —
             geschlossene Formen haben keine Enden. Grösse in Papier-mm
             (massstabsunabhängig, wie die Bemassungswerte). */}
-        {openEndsShape && (
+        {groups.includes("ends") && (
           <>
             <div className="attr-section-label">{t("attr.ends.section")}</div>
             {(
@@ -499,83 +446,7 @@ export function AttributesPanel() {
             (Modellmass, s. `model/dimension.ts`); leer/0 fällt auf den
             Standard zurück. Die Masszahl selbst wird direkt im Plan am
             eigenen Griff verschoben (rastet nahe der Standardlage ein). */}
-        {drawing?.geom.shape === "grid" && (() => {
-          const fmtAxis = (v: number) => (Math.round(v * 100) / 100).toString();
-          const geom = drawing.geom as Extract<typeof drawing.geom, { shape: "grid" }>;
-          const here = geom.levels?.includes(drawing.levelId) && geom.levels.length === 1;
-          return (
-            <>
-              <div className="attr-section-label">{t("attr.grid.section")}</div>
-              <span className="attr-key">{t("attr.grid.bubbles")}</span>
-              <span className="attr-val">
-                <select value={geom.bubbles ?? "both"} onChange={(e) => host.onSetGridProps(drawing.id, { bubbles: e.target.value as "start" | "end" | "both" })}>
-                  <option value="both">{t("attr.grid.bubbles.both")}</option>
-                  <option value="start">{t("attr.grid.bubbles.start")}</option>
-                  <option value="end">{t("attr.grid.bubbles.end")}</option>
-                </select>
-              </span>
-              <span className="attr-key">{t("attr.grid.extend")}</span>
-              <span className="attr-val">
-                <input className="attr-num" style={{ width: 72 }} type="number" step={0.1} min={0} value={geom.extend ?? 1.5}
-                  onChange={(e) => { const v = Number(e.target.value); if (Number.isFinite(v) && v >= 0) host.onSetGridProps(drawing.id, { extend: v }); }} />
-              </span>
-              <span className="attr-key">{t("attr.grid.bubbleMm")}</span>
-              <span className="attr-val">
-                <input className="attr-num" style={{ width: 72 }} type="number" step={0.5} min={2} value={geom.bubbleMm ?? 5}
-                  onChange={(e) => { const v = Number(e.target.value); if (Number.isFinite(v) && v >= 2) host.onSetGridProps(drawing.id, { bubbleMm: v }); }} />
-              </span>
-              <span className="attr-key">{t("attr.grid.show3d")}</span>
-              <span className="attr-val">
-                <input type="checkbox" checked={geom.show3d === true} onChange={(e) => host.onSetGridProps(drawing.id, { show3d: e.target.checked })} />
-              </span>
-              {(["a", "b"] as const).map((list) =>
-                geom[list].map((ax, i) => (
-                  <Fragment key={`${list}${i}`}>
-                    <span className="attr-key">{t(geom.radial ? (list === "a" ? "attr.grid.ray" : "attr.grid.ring") : "attr.grid.axis", { pos: fmtAxis(ax.pos) })}</span>
-                    <span className="attr-val" data-testid="grid-axis-row">
-                      <input
-                        className="attr-num"
-                        style={{ width: 56 }}
-                        type="text"
-                        aria-label={t("attr.grid.axisLabel")}
-                        value={ax.label}
-                        onChange={(e) => host.onSetGridProps(drawing.id, { [list]: geom[list].map((x, k) => (k === i ? { ...x, label: e.target.value } : x)) })}
-                      />
-                      <select
-                        aria-label={t("attr.grid.axisBubble")}
-                        value={ax.bubble ?? ""}
-                        onChange={(e) => {
-                          const v = e.target.value as "" | "start" | "end" | "both";
-                          host.onSetGridProps(drawing.id, {
-                            [list]: geom[list].map((x, k) => {
-                              if (k !== i) return x;
-                              const { bubble: _old, ...rest } = x;
-                              return v ? { ...rest, bubble: v } : rest;
-                            }),
-                          });
-                        }}
-                      >
-                        <option value="">{t("attr.grid.axisBubble.grid")}</option>
-                        <option value="both">{t("attr.grid.bubbles.both")}</option>
-                        <option value="start">{t("attr.grid.bubbles.start")}</option>
-                        <option value="end">{t("attr.grid.bubbles.end")}</option>
-                      </select>
-                    </span>
-                  </Fragment>
-                )),
-              )}
-              <span className="attr-key">{t("attr.grid.levels")}</span>
-              <span className="attr-val">
-                <select value={here ? "here" : "all"} onChange={(e) => host.onSetGridProps(drawing.id, { levels: e.target.value === "here" ? [drawing.levelId] : undefined })}>
-                  <option value="all">{t("attr.grid.levels.all")}</option>
-                  <option value="here">{t("attr.grid.levels.here")}</option>
-                </select>
-              </span>
-            </>
-          );
-        })()}
-
-        {drawing?.geom.shape === "dimension" && (
+        {groups.includes("dimension") && drawing?.geom.shape === "dimension" && (
           <>
             <div className="attr-section-label">{t("attr.dim.section")}</div>
             {/* Abstände/Grössen in PAPIER-mm (massstabsunabhängig, wie die
@@ -618,7 +489,7 @@ export function AttributesPanel() {
             also massstabsunabhängig. Leer gelassen (0) = Standard: Mass-
             und Hilfslinie erben die Elementstärke, der Massstrich wird
             doppelt so dick gezeichnet. */}
-        {drawing?.geom.shape === "dimension" &&
+        {groups.includes("dimension") && drawing?.geom.shape === "dimension" &&
           (
             [
               ["lineWeightMm", "attr.dim.lineWeight"],
@@ -657,7 +528,7 @@ export function AttributesPanel() {
             Nach Bauteil (erbt vom Component-Manager, Default) / eigener Wert.
             Eine Layout-Annotation kennt keine Füllung (nur Umriss) — Sektion
             entfällt komplett statt drei bedeutungslose Dropdowns zu zeigen. */}
-        {(
+        {groups.includes("fill") && (
           <>
             <div className="attr-section-label">{t("attr.fill")}</div>
 
@@ -838,38 +709,7 @@ export function AttributesPanel() {
         )}
           </>
         )}
-
-        {/* ── Masse (informativ, aus der bbox) — auf einem Layout-Blatt in Papier-mm ([93]). */}
-        {/* Bauteile: die bbox ist der GRUNDRISS-Umriss (X/Y), keine Höhe — als
-            „Ausdehnung X/Y" beschriften (Nutzer-Report: Fenster zeigte „Höhe
-            0.34 m" = Wanddicke). Öffnungen tragen Breite/Höhe im eigenen
-            Abschnitt, dort entfällt die bbox ganz. */}
-        {!sel.opening && (
-          <>
-            <div className="attr-section-label">{t("attr.size")}</div>
-            <span className="attr-key">{t(isModelElement ? "attr.extentX" : "attr.width")}</span>
-            <span className="attr-val attr-readonly">{sizeText(bboxW)}</span>
-            <span className="attr-key">{t(isModelElement ? "attr.extentY" : "attr.height")}</span>
-            <span className="attr-val attr-readonly">{sizeText(bboxH)}</span>
-          </>
-        )}
       </div>
-
-      {/* Element-spezifische Abschnitte (aus ObjectInfo hierher verschoben) —
-          nur der jeweils passende erscheint. Nutzen weiter die `objinfo-*`-
-          Darstellung + die Host-Handler. */}
-      {sel.wall && <WallSection wall={sel.wall} host={host} />}
-      {sel.ceiling && <CeilingSection ceiling={sel.ceiling} host={host} />}
-      {sel.roof && <RoofSection roof={sel.roof} host={host} />}
-      {(sel.wall || sel.roof) && <SurfacePatternPlacement kind={sel.wall ? "wall" : "roof"} id={sel.id} host={host} />}
-      {sel.opening && <OpeningSection opening={sel.opening} host={host} />}
-      {sel.stair && <StairSection stair={sel.stair} host={host} />}
-      {sel.room && <RoomSection room={sel.room} roomId={sel.id} host={host} />}
-      {sel.extrudedSolid && <ExtrudedSolidSection solid={sel.extrudedSolid} host={host} />}
-      {sel.column && <ColumnSection column={sel.column} host={host} />}
-      {sel.detailRef && <DetailRefSection detailRef={sel.detailRef} drawingId={sel.id} host={host} />}
-      {sel.dimRefs && <DimRefsSection refs={sel.dimRefs} drawingId={sel.id} host={host} />}
-      {sel.dimTextMoved && <DimTextSection drawingId={sel.id} host={host} />}
     </div>
   );
 }

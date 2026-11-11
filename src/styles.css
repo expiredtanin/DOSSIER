@@ -5187,7 +5187,8 @@ body {
    `.attr-panel` — denselben sauberen Look wie das obere Attribut-Grid: Sektion-
    Balken, Zeilentrenner, einheitliche Label-Spalte, linksbündig füllende Felder.
    Das eigenständige ObjectInfo-Panel (Bezugspunkt/Masse) bleibt unberührt. */
-.attr-panel .objinfo-section-label {
+.attr-panel .objinfo-section-label,
+.objinfo-group-body .objinfo-section-label {
   color: var(--label);
   font-weight: 700;
   text-transform: uppercase;
@@ -5199,18 +5200,21 @@ body {
   border-radius: 3px;
 }
 /* Sektion-Balken trennen bereits → die dünnen Extra-Striche entfallen. */
-.attr-panel .objinfo-sep {
+.attr-panel .objinfo-sep,
+.objinfo-group-body .objinfo-sep {
   display: none;
 }
 /* Zeile: Label-Spalte | Wert/Control, mit dezentem Zeilentrenner (wie .attr-*). */
-.attr-panel .objinfo-field {
+.attr-panel .objinfo-field,
+.objinfo-group-body .objinfo-field {
   display: flex;
   align-items: center;
   gap: 6px;
   padding: 2px 2px 2px 2px;
   border-bottom: 1px solid var(--line);
 }
-.attr-panel .objinfo-flabel {
+.attr-panel .objinfo-flabel,
+.objinfo-group-body .objinfo-flabel {
   flex: 0 0 104px;
   width: 104px;
   white-space: nowrap;
@@ -5220,23 +5224,65 @@ body {
   color: var(--label);
 }
 /* Werte/Controls füllen die Zelle linksbündig (statt rechtsbündig). */
-.attr-panel .objinfo-fval {
+.attr-panel .objinfo-fval,
+.objinfo-group-body .objinfo-fval {
   flex: 1 1 auto;
   text-align: left;
 }
-.attr-panel .objinfo-input {
+.attr-panel .objinfo-input,
+.objinfo-group-body .objinfo-input {
   text-align: left;
 }
-.attr-panel .objinfo-field .tb-dd-trigger {
+.attr-panel .objinfo-field .tb-dd-trigger,
+.objinfo-group-body .objinfo-field .tb-dd-trigger {
   flex: 1 1 auto;
   min-width: 0;
   justify-content: space-between;
 }
 /* Segment-Umschalter + verschachtelte Felder füllen ebenfalls die Wert-Spalte. */
 .attr-panel .objinfo-segment,
-.attr-panel .objinfo-subfield {
+.objinfo-group-body .objinfo-segment,
+.attr-panel .objinfo-subfield,
+.objinfo-group-body .objinfo-subfield {
   flex: 1 1 auto;
   min-width: 0;
+}
+
+/* [189] Einklappbare Gruppen der Objekt-Info: Kopfzeile als Knopf; Trennlinie und Titel, die jede
+   Abschnitts-Komponente selbst mitbringt, entfallen im Rumpf der Gruppe (der Kopf ersetzt sie). */
+.objinfo-group {
+  margin-top: 4px;
+}
+.objinfo-group-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  margin: 0;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: 3px;
+  background: var(--panel-2);
+  color: var(--label);
+  font: inherit;
+  font-weight: 700;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  text-align: left;
+  cursor: pointer;
+}
+.objinfo-group-head:hover {
+  background: var(--accent-dim);
+}
+.objinfo-group-chev {
+  flex: 0 0 auto;
+  width: 10px;
+  color: var(--muted);
+}
+.objinfo-group-body > .objinfo-sep:first-child,
+.objinfo-group-body > .objinfo-sep:first-child + .objinfo-section-label {
+  display: none;
 }
 
 /* ── Wand-Abschnitt (Object-Info) ─────────────────────────────────────── */

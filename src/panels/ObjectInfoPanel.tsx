@@ -14,8 +14,9 @@
 // Bezeichner englisch, UI-Text/Kommentare deutsch (CONVENTIONS.md). Alle sichtbaren
 // Texte über t(...).
 //
-// [165] Die Abschnitte (Wand, Decke, Dach, Treppe …) liegen in `objectInfo/`; `AttributesPanel` ruft sie
-// von dort, das Panel selbst nur Baum, Messwerte und die gemeinsamen Felder.
+// [165] Die Abschnitte (Wand, Decke, Dach, Treppe …) liegen in `objectInfo/`. [189] Sie erscheinen hier als
+// einklappbare Gruppen (`objectInfo/InfoGroups.tsx`; Zuordnung in `objectInfo/groups.ts`) — das Attribute-Panel
+// zeigt nur noch Gestaltung. Das Panel selbst hält Baum, Messwerte und die gemeinsamen Felder.
 
 import { useSelectionInfo } from "../state/useSelectionInfo";
 import { lengthFromDisplay, lengthToDisplay, unitsForLevel, xToDisplay, yFromDisplay, yToDisplay } from "../tools/displayUnits";
@@ -32,6 +33,7 @@ import { SiteRulesSection } from "./SiteRulesSection";
 import { TreeSection } from "./objectInfo/TreeSection";
 import { ViewShadowsInfo, MeasurementSection } from "./objectInfo/InfoBlocks";
 import { DimensionField, RotateField } from "./objectInfo/fields";
+import { InfoGroups, hasInfoGroups } from "./objectInfo/InfoGroups";
 
 // ── Bezugspunkt-Raster ───────────────────────────────────────────────────────
 // Neun Anker als 3×3-Raster. Zeile 0 = oben (fy=0), Spalte 0 = links (fx=0).
@@ -94,9 +96,11 @@ export function ObjectInfoPanel() {
     );
   }
   if (sel === null) {
+    const groups = hasInfoGroups(null, undefined, host);
     return (
       <div className="objinfo-panel">
-        {m ? <MeasurementSection m={m} /> : <div className="objinfo-empty">{t("objinfo.empty")}</div>}
+        {m ? <MeasurementSection m={m} /> : !groups && <div className="objinfo-empty">{t("objinfo.empty")}</div>}
+        <InfoGroups sel={null} drawing={undefined} host={host} />
       </div>
     );
   }
@@ -141,8 +145,7 @@ export function ObjectInfoPanel() {
     <div className="objinfo-panel">
       {m && <MeasurementSection m={m} />}
       {/* Kopfzeile: Typ + editierbare Klasse (Grafik-Kategorie) + Zeichnungsebene
-          (VW-Muster „Klasse"/„Ebene"). Die element-spezifischen Attribut-
-          Abschnitte (Wand/Decke/Öffnung/Treppe/Raum) liegen im Attribute-Panel. */}
+          (VW-Muster „Klasse"/„Ebene"). */}
       <div className="objinfo-head">
         <span className="objinfo-kind">{t(`objinfo.kind.${sel.kind}`)}</span>
       </div>
@@ -370,9 +373,8 @@ export function ObjectInfoPanel() {
           )}
         </>
       )}
-      {/* Die element-spezifischen Abschnitte (Wand/Decke/Öffnung/Treppe/Raum)
-          werden jetzt im Attribute-Panel gerendert (AttributesPanel importiert
-          die exportierten *Section-Komponenten). */}
+      {/* [189] Bauteil-/BIM-Abschnitte (Wand, Decke, Öffnung, Treppe, Raum …) als einklappbare Gruppen. */}
+      <InfoGroups sel={sel} drawing={rawDrawing} host={host} />
     </div>
   );
 }

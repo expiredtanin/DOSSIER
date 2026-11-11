@@ -52,6 +52,8 @@ export function useNativeMenu(opts: {
   openSettings: () => void;
   openLayerSettings: (code: string, x: number, y: number) => void;
   activeCategoryCode: string;
+  /** [189] Objekteinstellungen (Taste T): Öffnungs-Dialog bzw. Objekt-Info. */
+  onObjectSettings: () => boolean;
 }) {
   const {
     notify,
@@ -154,6 +156,7 @@ export function useNativeMenu(opts: {
       onMove: () => onRunCommand("move"),
       onMirror: () => onRunCommand("mirror"),
       onRotate: () => onRunCommand("rotate"),
+      onObjectSettings: () => void opts.onObjectSettings(),
       onViewType: setViewType,
       onView3d: setView3d,
       onReferenceLines: setReferenceLines,

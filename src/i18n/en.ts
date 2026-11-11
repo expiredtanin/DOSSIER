@@ -145,6 +145,7 @@ export const en: Record<TranslationKey, string> = {
   "menu.native.move": "Move",
   "menu.native.mirror": "Mirror",
   "menu.native.rotate": "Rotate",
+  "menu.native.objectSettings": "Object Settings…",
   "menu.native.view": "View",
   "menu.native.window": "Window",
   "menu.native.panels": "Panels",
@@ -430,11 +431,6 @@ export const en: Record<TranslationKey, string> = {
   "attr.source.layer": "By layer",
   "attr.source.object": "By component",
   "attr.source.custom": "Custom",
-  "attr.size": "Size",
-  "attr.width": "Width",
-  "attr.height": "Height",
-  "attr.extentX": "Extent X",
-  "attr.extentY": "Extent Y",
 
   // Objekt-Info-Palette (ObjectInfoPanel)
   "objinfo.title": "Object Info",
@@ -927,6 +923,8 @@ export const en: Record<TranslationKey, string> = {
   "objinfo.room.editStamp": "Edit stamp …",
   // ── Extruded solid attributes (truck integration, object info panel) ────
   "objinfo.sectionLine.section": "Section line",
+  "objinfo.dimText.section": "Dimension text",
+  "objinfo.group.toggle": "Expand/collapse section",
   "objinfo.detailRef.section": "Detail/section reference",
   "objinfo.dimRefs.section": "Associative dimension",
   "objinfo.dimRefs.point": "Point {n}",
@@ -3060,6 +3058,7 @@ export const en: Record<TranslationKey, string> = {
   "shortcut.floorDown": "Story down",
   "shortcut.floorUp": "Story up",
   "shortcut.showSelection3d": "Show selection in 3D (no selection: everything)",
+  "shortcut.objectSettings": "Open settings of the selected object (no selection: tool defaults)",
   "shortcut.hideSelection3d": "Hide selection in 3D",
 
   "settings.section.update": "Update",
