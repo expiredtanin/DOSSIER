@@ -18,6 +18,9 @@ pub struct RRoofLayer {
     pub color: Rgb,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cut: Option<RCutMeta>,
+    /// [180] Herkunft (Dach) für den Klassen-Filter; nur im Kern.
+    #[serde(skip)]
+    pub owner: Owner,
 }
 
 fn push_fan_triangles(positions: &mut Vec<f64>, indices: &mut Vec<u32>, pts: &[V3], flip: bool) {
@@ -547,7 +550,7 @@ pub fn emit_roofs(p: &Project, only_roof: Option<&str>) -> Result<Vec<RMesh>, St
             let color = override_color.unwrap_or_else(|| p.component(comp_id).map_or(WALL_RGB, |c| hex_to_rgb(&c.color, WALL_RGB)));
             let material_index = if override_color.is_none() && !comp_id.is_empty() { material_layer(p, &maps, comp_id) } else { None };
             let m = crate::roof_parapet::mesh(&pp);
-            out.push(RMesh { crease_angle: None, positions: m.positions, indices: m.indices, kind: "extrusion", color, vertex_colors: None, material_index });
+            out.push(RMesh { crease_angle: None, positions: m.positions, indices: m.indices, kind: "extrusion", color, vertex_colors: None, material_index, owner: Owner::Roof(ri) });
         }
         // Verschnittene Dächer und Gauben ([G5]): Körper aus `roof_assembly`.
         if let Some(solids) = crate::roof_assembly::roof_solids_with(p, ri, &nb) {
@@ -561,7 +564,7 @@ pub fn emit_roofs(p: &Project, only_roof: Option<&str>) -> Result<Vec<RMesh>, St
                 let material_index = if (wall || override_color.is_none()) && !part.component_id.is_empty() { material_layer(p, &maps, &part.component_id) } else { None };
                 let (positions, indices) = crate::roof_assembly::unshared(&part.mesh);
                 out.push(RMesh {
-                    crease_angle: None, positions, indices, kind: "extrusion", color, vertex_colors: None, material_index });
+                    crease_angle: None, positions, indices, kind: "extrusion", color, vertex_colors: None, material_index, owner: Owner::Roof(ri) });
             }
             continue;
         }
@@ -592,7 +595,7 @@ pub fn emit_roofs(p: &Project, only_roof: Option<&str>) -> Result<Vec<RMesh>, St
             }
             if !indices.is_empty() {
                 out.push(RMesh {
-                    crease_angle: None, positions, indices, kind: "extrusion", color, vertex_colors: None, material_index });
+                    crease_angle: None, positions, indices, kind: "extrusion", color, vertex_colors: None, material_index, owner: Owner::Roof(ri) });
             }
             offset_above += t;
         }
@@ -622,7 +625,7 @@ pub fn emit_roof_cut_layers(p: &Project) -> Result<Vec<RRoofLayer>, String> {
                 let polygon: Vec<V3> = plane.iter().map(|q| [q[0] - nrm[0] * offset_above, q[1] - nrm[1] * offset_above, q[2] - nrm[2] * offset_above]).collect();
                 // Dachfenster ([103]): Reststücke statt der ganzen Fläche (Loch im Live-Schnitt).
                 for polygon in clip_plane_holes(&polygon, &holes[i]) {
-                    out.push(RRoofLayer { polygon, normal: nrm, thickness: t, color, cut: cut.clone() });
+                    out.push(RRoofLayer { polygon, normal: nrm, thickness: t, color, cut: cut.clone(), owner: Owner::Roof(ri) });
                 }
             }
             offset_above += t;

@@ -19,7 +19,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ContextImage, Project } from "../model/types";
-import { emitDrawingLineVerts, emitSurfacePatternLines, projectToModel3d, projectToModel3dParts, siteEnvelope3d } from "../core";
+import { emitDrawingLineVerts, emitSurfacePatternLines, hiddenClassCodes, projectToModel3d, projectToModel3dParts, siteEnvelope3d } from "../core";
 import { Model3dPartsSync } from "./model3dPartsSync";
 import type { DetailLevel } from "../model/viewTypes";
 import { loadEngine3d } from "../engine/engine3d";
@@ -199,11 +199,11 @@ const partsSyncs = new WeakMap<object, Model3dPartsSync>();
  * und werden in render3d neu vernetzt und hochgeladen), sonst bzw. bei älteren WASM-Builds und nach
  * einem Fehler das ganze Modell über `set_model`.
  */
-function syncModel3d(r: WebModelRendererLike, project: Project, detail: DetailLevel | undefined, explode: number): void {
+function syncModel3d(r: WebModelRendererLike, project: Project, detail: DetailLevel | undefined, explode: number, hide?: readonly string[]): void {
   let sync = partsSyncs.get(r);
   if (!sync) partsSyncs.set(r, (sync = new Model3dPartsSync()));
   try {
-    const parts = typeof r.set_parts === "function" ? projectToModel3dParts(project, { detail, voids: true, explode }) : null;
+    const parts = typeof r.set_parts === "function" ? projectToModel3dParts(project, { detail, voids: true, explode, hide }) : null;
     if (parts) {
       const d = sync.diff(parts);
       if (d) r.set_parts!(d.json);
@@ -214,7 +214,7 @@ function syncModel3d(r: WebModelRendererLike, project: Project, detail: DetailLe
   }
   sync.reset();
   try {
-    r.set_model(JSON.stringify(projectToModel3d(project, { detail, voids: true, explode })));
+    r.set_model(JSON.stringify(projectToModel3d(project, { detail, voids: true, explode, hide })));
   } catch (e) {
     console.warn("render3d set_model fehlgeschlagen:", e);
   }
@@ -269,11 +269,12 @@ export function useWasm3dRenderer(
   const aerialSigRef = useRef<string | null>(null);
 
   /** Modell bei Projektänderung neu setzen (re-extrudiert in Rust). `detail`
-   *  steuert den Öffnungs-Detailgrad (grob/mittel/fein) im 3D wie im Grundriss. */
-  const updateModel = useCallback((project: Project, detail?: DetailLevel, explode = 0) => {
+   *  steuert den Öffnungs-Detailgrad (grob/mittel/fein) im 3D wie im Grundriss. `hide`: Klassen, die der
+   *  Darstellungsmodus nicht zeichnet ([180]; die im Ebenen-Baum ausgeschalteten blendet der Kern selbst aus). */
+  const updateModel = useCallback((project: Project, detail?: DetailLevel, explode = 0, hide?: readonly string[]) => {
     const r = rendererRef.current;
     if (!r || !project) return;
-    syncModel3d(r, project, detail, explode);
+    syncModel3d(r, project, detail, explode, hide);
     // 2D-Boden-Spuren als eigener BINÄRER LineList-Kanal — bewusst NICHT Teil
     // des JSON-Modells oben: ein Kataster-DXF (Mio. Segmente) sprengt als
     // Ribbon-Meshes im JSON die String-Längengrenze komplett (Nutzer-Report
@@ -281,21 +282,22 @@ export function useWasm3dRenderer(
     // Fehler hier das bereits gesetzte Modell nicht mit wegreisst.
     if (typeof r.set_drawing_lines === "function") {
       try {
-        r.set_drawing_lines(emitDrawingLineVerts(project, explode));
+        r.set_drawing_lines(emitDrawingLineVerts(project, explode, hide));
       } catch (e) {
         console.warn("render3d set_drawing_lines fehlgeschlagen:", e);
       }
     }
     if (typeof r.set_ghost === "function") {
       try {
-        r.set_ghost(siteEnvelope3d(project));
+        // Zulässige Hülle (Baurecht) liegt wie im Grundriss auf `01 Vermessung` ([180]).
+        r.set_ghost(hiddenClassCodes(project, hide).has("01") ? new Float32Array(0) : siteEnvelope3d(project));
       } catch (e) {
         console.warn("render3d set_ghost fehlgeschlagen:", e);
       }
     }
     if (typeof r.set_pattern_lines === "function") {
       try {
-        r.set_pattern_lines(emitSurfacePatternLines(project, explode));
+        r.set_pattern_lines(emitSurfacePatternLines(project, explode, hide));
       } catch (e) {
         console.warn("render3d set_pattern_lines fehlgeschlagen:", e);
       }

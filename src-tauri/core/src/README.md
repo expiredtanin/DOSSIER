@@ -39,7 +39,7 @@ Neues Modul: `<modul>.rs` und `mod` in `lib.rs`, Bindungen in `web/<modul>.rs` u
 
 | Datei | Inhalt |
 |---|---|
-| `model3d/` | 3D-Ableitung aus dem Projekt: `parts()` in `mod.rs`; je eine Datei für Decken, Stützen und Bäume, Wände, Öffnungen, Treppen, Dächer, Kontext, Zeichnungs-Spuren, Pick-Geometrie; Tests in `tests.rs` |
+| `model3d/` | 3D-Ableitung aus dem Projekt: `parts()` in `mod.rs`; je eine Datei für Decken, Stützen und Bäume, Wände, Öffnungen, Treppen, Dächer, Kontext, Zeichnungs-Spuren, Pick-Geometrie, Klassen-Filter (`classes.rs`, [180]); Tests in `tests.rs` |
 | `model3d_cache.rs` | inkrementelle 3D-Ableitung (Cache je Wand und Öffnung) |
 | `wall_bands.rs`, `wall_mesh_cut.rs` | Schichtbänder einer Wand; Wandnetz mit echtem Loch für Datei-Exporte |
 | `ceilings3d.rs`, `columns3d.rs`, `stairs3d.rs`, `openings3d.rs`, `drawing2d_3d.rs`, `mesh3d.rs` | Netze je Bauteilart |

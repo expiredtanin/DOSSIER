@@ -31,7 +31,7 @@ pub fn emit_context_meshes(p: &Project) -> Vec<RMesh> {
     let mut out = Vec::new();
     // [T6]/[114] Ebenen-Sichtbarkeit: ein ausgeblendetes Gelände (Kategorie „02") verschwindet auch im 3D.
     let hidden = hidden_category_codes(&p.layers);
-    for obj in p.context.as_deref().unwrap_or(&[]) {
+    for (ci, obj) in p.context.as_deref().unwrap_or(&[]).iter().enumerate() {
         // [181] Sichtbarkeit allein über die Klasse.
         if hidden.contains(obj.category_code()) {
             continue;
@@ -48,6 +48,7 @@ pub fn emit_context_meshes(p: &Project) -> Vec<RMesh> {
                     color: TERRAIN_RGB,
                     vertex_colors: crate::excavation::terrain_vertex_colors(p, m),
                     material_index: None,
+                    owner: Owner::Context(ci),
                 })
             }
             ContextObject::ImportedMesh(m) if m.positions.len() >= 9 && m.indices.len() >= 3 => out.push(RMesh {
@@ -57,6 +58,7 @@ pub fn emit_context_meshes(p: &Project) -> Vec<RMesh> {
                 color: IMPORTED_RGB,
                 vertex_colors: None,
                 material_index: None,
+                owner: Owner::Context(ci),
                 crease_angle: (m.smooth_shading == Some(true)).then(|| m.crease_angle.filter(|a| a.is_finite() && *a > 0.0).unwrap_or(DEFAULT_CREASE_DEG).min(180.0)),
             }),
             _ => {}

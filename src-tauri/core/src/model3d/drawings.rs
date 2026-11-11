@@ -27,7 +27,8 @@ fn drawing_color(
 
 /// Packt die darstellbaren Zeichnungen (Linie, Polylinie, Rechteck) in Chargen für `drawing2d_3d`.
 /// `lift`: zusätzliche Höhe je Geschoss-id (Explosionsaxonometrie [65], `explode3d.rs`; leer = keine).
-fn for_each_drawing_chunk(p: &Project, with_color: bool, lift: &HashMap<String, f64>, mut f: impl FnMut(&[f64], &[&Drawing2D])) {
+/// `filter`: Zeichnungen ausgeblendeter Klassen fallen weg ([180]).
+fn for_each_drawing_chunk(p: &Project, with_color: bool, lift: &HashMap<String, f64>, filter: &ClassFilter, mut f: impl FnMut(&[f64], &[&Drawing2D])) {
     if p.drawings2d.is_empty() {
         return;
     }
@@ -46,7 +47,7 @@ fn for_each_drawing_chunk(p: &Project, with_color: bool, lift: &HashMap<String, 
         ids.clear();
         buf.truncate(1);
     };
-    for d in &p.drawings2d {
+    for d in p.drawings2d.iter().filter(|d| !filter.hides(&d.id)) {
         // Teile einer Zeichnung: (Art, Punkte); ein Achsraster mit `show3d` liefert je Achse eines.
         let parts: Vec<(f64, Vec<Vec2>)> = match &d.geom {
             Drawing2DGeom::Line { a, b } => vec![(1.0, vec![*a, *b])],
@@ -80,8 +81,13 @@ pub fn drawing_line_verts(p: &Project) -> Vec<f32> {
 
 /// Wie [`drawing_line_verts`], jede Spur um `lift[level_id]` angehoben (Explosion [65]).
 pub fn drawing_line_verts_lifted(p: &Project, lift: &HashMap<String, f64>) -> Vec<f32> {
+    drawing_line_verts_filtered(p, lift, &ClassFilter::none())
+}
+
+/// Wie [`drawing_line_verts_lifted`], ohne Zeichnungen ausgeblendeter Klassen ([180]).
+pub fn drawing_line_verts_filtered(p: &Project, lift: &HashMap<String, f64>, filter: &ClassFilter) -> Vec<f32> {
     let mut out = Vec::new();
-    for_each_drawing_chunk(p, true, lift, |buf, _| out.extend(crate::drawing2d_3d::line_verts(buf)));
+    for_each_drawing_chunk(p, true, lift, filter, |buf, _| out.extend(crate::drawing2d_3d::line_verts(buf)));
     out
 }
 
@@ -97,7 +103,7 @@ pub struct PickDrawingSeg {
 
 pub(crate) fn pick_drawing_segs(p: &Project, lift: &HashMap<String, f64>) -> Vec<PickDrawingSeg> {
     let mut out = Vec::new();
-    for_each_drawing_chunk(p, false, lift, |buf, drawings| {
+    for_each_drawing_chunk(p, false, lift, &ClassFilter::none(), |buf, drawings| {
         let f = crate::drawing2d_3d::pick_segs(buf, DRAWING_PICK_TOLERANCE);
         for c in f.chunks_exact(6) {
             out.push(PickDrawingSeg { start: [c[0], c[1]], end: [c[2], c[3]], base_elevation: c[4], drawing_id: drawings[c[5] as usize].id.clone() });

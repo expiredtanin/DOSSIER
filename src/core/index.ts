@@ -263,5 +263,6 @@ export {
   wallMaterialColorMaps,
 } from "../plan/toWalls3d";
 export type { Model3dPart } from "../plan/toWalls3d";
+export { hiddenClassCodes } from "../plan/toWalls3d";
 
 export * from "./extra";

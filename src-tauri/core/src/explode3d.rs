@@ -122,7 +122,12 @@ fn shifted<T>(mut v: Vec<T>, dz: f64, f: fn(&mut T, f64)) -> Vec<T> {
 
 /// `model3d::parts` mit auseinandergezogenen Geschossen; `gap` ≤ 0 liefert genau `parts`.
 pub fn parts(p: &Project, layered: bool, detail: f64, for_section: bool, gap: f64) -> Result<Parts, String> {
-    let Some(ex) = Explode::new(p, gap) else { return model3d::parts(p, layered, detail, for_section) };
+    parts_filtered(p, layered, detail, for_section, gap, &model3d::ClassFilter::none())
+}
+
+/// Wie [`parts`], ohne die Teile ausgeblendeter Klassen ([180], `model3d::parts_filtered`).
+pub fn parts_filtered(p: &Project, layered: bool, detail: f64, for_section: bool, gap: f64, filter: &model3d::ClassFilter) -> Result<Parts, String> {
+    let Some(ex) = Explode::new(p, gap) else { return model3d::parts_filtered(p, layered, detail, for_section, filter) };
     let mut walls = model3d::emit_walls(p, layered)?;
     for w in &mut walls {
         shift_wall(w, ex.of(&w.wall_id));
@@ -157,21 +162,31 @@ pub fn parts(p: &Project, layered: bool, detail: f64, for_section: bool, gap: f6
         q.trees = p.trees.as_ref().map(|v| v.iter().filter(|t| pick(&t.floor_id)).cloned().collect());
         q.stairs = p.stairs.as_ref().map(|v| v.iter().filter(|s| pick(&s.floor_id)).cloned().collect());
         q.roofs = p.roofs.as_ref().map(|v| v.iter().filter(|r| pick(&r.floor_id)).cloned().collect());
-        q.openings = p.openings.as_ref().map(|v| v.iter().filter(|o| pick(ex.floor_of.get(o.id.as_str()).copied().unwrap_or(""))).cloned().collect());
-        out.column_meshes.extend(shifted(model3d::emit_columns(&q), dz, shift_mesh));
-        out.column_meshes.extend(shifted(model3d::emit_trees(&q), dz, shift_mesh));
-        out.stair_meshes.extend(shifted(model3d::emit_stair_meshes(&q), dz, shift_mesh));
+        q.openings = p.openings.as_ref().map(|v| v.iter().filter(|o| filter.keep_opening(o) && pick(ex.floor_of.get(o.id.as_str()).copied().unwrap_or(""))).cloned().collect());
+        // [180] Herkunft der Teile zeigt in die Listen von `q` (bzw. `p` für die Absturzsicherung).
+        let kept = |pp: &Project, mut v: Vec<RMesh>| {
+            v.retain(|m| filter.keep_owner(pp, m.owner));
+            v
+        };
+        out.column_meshes.extend(shifted(kept(&q, model3d::emit_columns(&q)), dz, shift_mesh));
+        out.column_meshes.extend(shifted(kept(&q, model3d::emit_trees(&q)), dz, shift_mesh));
+        out.stair_meshes.extend(shifted(kept(&q, model3d::emit_stair_meshes(&q)), dz, shift_mesh));
         // Handläufe folgen der Treppe, die Absturzsicherung der Decke mit dem Loch (Geschoss `g`, [155]).
-        out.stair_railings.extend(shifted(model3d::emit_stair_handrails(&q), dz, shift_mesh));
+        out.stair_railings.extend(shifted(kept(&q, model3d::emit_stair_handrails(&q)), dz, shift_mesh));
         if let Some(fid) = g {
-            out.stair_railings.extend(shifted(model3d::emit_stair_guards_on(p, fid), dz, shift_mesh));
+            out.stair_railings.extend(shifted(kept(p, model3d::emit_stair_guards_on(p, fid)), dz, shift_mesh));
         }
-        out.roof_meshes.extend(shifted(model3d::emit_roofs(&q, None)?, dz, shift_mesh));
-        out.roof_layers.extend(shifted(model3d::emit_roof_cut_layers(&q)?, dz, shift_roof_layer));
+        out.roof_meshes.extend(shifted(kept(&q, model3d::emit_roofs(&q, None)?), dz, shift_mesh));
+        let mut layers = model3d::emit_roof_cut_layers(&q)?;
+        layers.retain(|l| filter.keep_owner(&q, l.owner));
+        out.roof_layers.extend(shifted(layers, dz, shift_roof_layer));
         // Öffnungen brauchen alle Dächer (Dachfenster-Wirt liegt im selben Geschoss, Rest schadet nicht).
         q.roofs = p.roofs.clone();
         out.opening_meshes.extend(shifted(model3d::emit_opening_meshes(&q, detail), dz, shift_mesh));
     }
+    filter.retain_walls(&mut out);
+    out.slabs.retain(|s| !filter.hides(&s.ceiling_id));
+    out.context_meshes.retain(|m| filter.keep_owner(p, m.owner));
     Ok(out)
 }
 
@@ -192,6 +207,11 @@ pub fn void_cuts(p: &Project, parts: &Parts, gap: f64) -> crate::solid_specs::Vo
 /// Boden-Spuren der 2D-Zeichnungen, je Geschoss angehoben (`gap` ≤ 0: wie `drawing_line_verts`).
 pub fn drawing_line_verts(p: &Project, gap: f64) -> Vec<f32> {
     model3d::drawing_line_verts_lifted(p, &floor_offsets(p, gap))
+}
+
+/// Wie [`drawing_line_verts`], ohne Zeichnungen ausgeblendeter Klassen ([180]).
+pub fn drawing_line_verts_filtered(p: &Project, gap: f64, filter: &model3d::ClassFilter) -> Vec<f32> {
+    model3d::drawing_line_verts_filtered(p, &floor_offsets(p, gap), filter)
 }
 
 /// Pick-Geometrie passend zu [`parts`]; Kontext bleibt stehen wie im Modell.

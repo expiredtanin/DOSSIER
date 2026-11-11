@@ -121,18 +121,23 @@ pub fn pattern_lines_3d(p: &Project) -> Vec<f32> {
 
 /// Wie `pattern_lines_3d`, mit Explosionsabstand `gap` ([65], ≤ 0 = aus): die Linien heben sich mit dem Geschoss ihres Bauteils.
 pub fn pattern_lines_3d_exploded(p: &Project, gap: f64) -> Vec<f32> {
+    pattern_lines_3d_filtered(p, gap, &crate::model3d::ClassFilter::none())
+}
+
+/// Wie [`pattern_lines_3d_exploded`], ohne die Muster der Bauteile ausgeblendeter Klassen ([180]).
+pub fn pattern_lines_3d_filtered(p: &Project, gap: f64, filter: &crate::model3d::ClassFilter) -> Vec<f32> {
     let ex = crate::explode3d::Explode::new(p, gap);
     let dz_of = |id: &str| ex.as_ref().map_or(0.0, |e| e.of(id));
     let mut s = Sink { out: Vec::new(), dz: 0.0 };
-    for w in &p.walls {
+    for w in p.walls.iter().filter(|w| !filter.hides(&w.id)) {
         s.dz = dz_of(&w.id);
         wall_lines(p, w, &mut s);
     }
-    for ce in p.ceilings.as_deref().unwrap_or(&[]) {
+    for ce in p.ceilings.as_deref().unwrap_or(&[]).iter().filter(|c| !filter.hides(&c.id)) {
         s.dz = dz_of(&ce.id);
         ceiling_lines(p, ce, &mut s);
     }
-    for roof in p.roofs.as_deref().unwrap_or(&[]) {
+    for roof in p.roofs.as_deref().unwrap_or(&[]).iter().filter(|r| !filter.hides(&r.id)) {
         s.dz = dz_of(&roof.id);
         let Some((pat, comp, spec)) = spec_for(p.roof_layers(roof).first().and_then(|l| p.component(&l.component_id)), roof.surface_pattern_angle.unwrap_or(0.0)) else { continue };
         let rgb = ink_rgb(pat, comp);

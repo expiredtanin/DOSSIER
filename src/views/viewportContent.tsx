@@ -11,6 +11,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, memo } from "react";
 import { t } from "../i18n";
 import { LayoutSheetPane, type LayoutSheetHandlers, type SheetPlanProps } from "../ui/LayoutSheet";
 import { SHEET_SCALE_DENOMINATOR } from "../model/layoutModel";
+import { flattenCategories } from "../model/types";
 import type {
   Ceiling,
   Drawing2D,
@@ -307,6 +308,12 @@ export const Content = memo(function Content({
     return merged;
   }, [selectionLines, clashes]);
 
+  // [180] Klassen, die der Darstellungsmodus des Ebenen-Panels nicht zeichnet, fehlen auch im 3D (die im
+  // Ebenen-Baum ausgeschalteten blendet der Kern selbst aus).
+  const hidden3d = useMemo(
+    () => flattenCategories(project.layers ?? []).map((c) => c.code).filter((c) => !categoryDisplay(c).render),
+    [project.layers, categoryDisplay],
+  );
   // 3D-Sicht: aus dem Grundriss UND aus Schnitt/Ansicht ([115]); im Schnitt schneidet der Live-Schnitt
   // an der Schnittlinie (App setzt `section3d` beim Wechsel).
   const view3dPane = (
@@ -316,6 +323,7 @@ export const Content = memo(function Content({
       </div>
       <Viewport3D
         project={project}
+        hiddenCodes={hidden3d}
         renderMode={renderMode}
         detail={detail}
         view3d={view3d}

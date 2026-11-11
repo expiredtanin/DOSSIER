@@ -31,6 +31,7 @@ mod roofs;
 mod context;
 mod drawings;
 mod pick;
+mod classes;
 
 pub use ceilings::*;
 pub use columns::*;
@@ -41,6 +42,7 @@ pub use roofs::*;
 pub use context::*;
 pub use drawings::*;
 pub use pick::*;
+pub use classes::*;
 
 #[cfg(test)]
 mod tests;
@@ -110,6 +112,9 @@ pub struct RMesh {
     /// [T4] Glatt schattieren mit Knickwinkel (Grad), s. `render3d::types::MeshInput.creaseAngle`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub crease_angle: Option<f64>,
+    /// [180] Herkunft (Element) für den Klassen-Filter; nur im Kern.
+    #[serde(skip)]
+    pub owner: Owner,
 }
 
 /// [T4] Vorgabe-Knickwinkel (Grad) für glatt schattierte Import-Meshes.
@@ -135,18 +140,7 @@ pub struct Parts {
 }
 
 /// `detail`: 0 grob, 1 mittel, 2 fein.
+/// Ohne Klassen-Filter (nur Kontext nach dem Ebenen-Baum); gefiltert: [`parts_filtered`].
 pub fn parts(p: &Project, layered: bool, detail: f64, for_section: bool) -> Result<Parts, String> {
-    let mut slabs = emit_slabs(p);
-    slabs.extend(emit_stairs(p, for_section));
-    Ok(Parts {
-        walls: emit_walls(p, layered)?,
-        slabs,
-        context_meshes: emit_context_meshes(p),
-        column_meshes: { let mut m = emit_columns(p); m.extend(emit_trees(p)); m },
-        opening_meshes: emit_opening_meshes(p, detail),
-        stair_meshes: emit_stair_meshes(p),
-        stair_railings: emit_stair_railings(p),
-        roof_meshes: emit_roofs(p, None)?,
-        roof_layers: emit_roof_cut_layers(p)?,
-    })
+    parts_filtered(p, layered, detail, for_section, &ClassFilter::none())
 }

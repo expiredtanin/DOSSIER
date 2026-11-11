@@ -801,12 +801,24 @@ impl Document {
     /// 3D-Modell in Teilen ([58]) wie `model3d::parts`, Wände und Öffnungs-Einbauteile je Wand aus dem
     /// Cache (`model3d_cache`); `structs` wie dort.
     pub fn model3d_parts(&mut self, layered: bool, detail: f64, for_section: bool, structs: bool, delta: Option<u64>) -> Result<crate::model3d_cache::CachedParts, String> {
+        self.model3d_parts_with(layered, detail, for_section, structs, delta, "")
+    }
+
+    /// Wie [`Self::model3d_parts`] mit Klassen-Filter ([180], `text` = `{"hide": [codes]}` zusätzlich zum
+    /// Ebenen-Baum, s. `model3d::ClassFilter::from_text`).
+    pub fn model3d_parts_with(&mut self, layered: bool, detail: f64, for_section: bool, structs: bool, delta: Option<u64>, text: &str) -> Result<crate::model3d_cache::CachedParts, String> {
         self.project()?;
         let p = self.typed.as_ref().expect("gerade gelesen");
         let n_open = p.openings.as_ref().map_or(0, Vec::len);
         let walls = self.revs.items("walls", p.walls.len()).to_vec();
         let openings = self.revs.items("openings", n_open).to_vec();
-        self.model3d_cache.parts(p, &self.revs, &walls, &openings, layered, detail, for_section, structs, delta)
+        let filter = crate::model3d::ClassFilter::from_text(p, text);
+        self.model3d_cache.parts(p, &self.revs, &walls, &openings, layered, detail, for_section, structs, delta, &filter)
+    }
+
+    /// [180] Letzte Statistik des 3D-Caches (Tests): neu gerechnete Öffnungs-Varianten des Klassen-Filters.
+    pub fn model3d_variants(&self) -> usize {
+        self.model3d_cache.last_variants
     }
 
     /// Letzte Statistik des 3D-Caches (Tests): neu gerechnete Wände / Öffnungs-Wände.
