@@ -46,6 +46,8 @@ pub(crate) mod wall_join_tests;
 #[cfg(test)]
 mod hatch_dir_tests;
 #[cfg(test)]
+mod hatch_fill_tests;
+#[cfg(test)]
 mod arc_output_tests;
 #[cfg(test)]
 mod derived_class_tests;

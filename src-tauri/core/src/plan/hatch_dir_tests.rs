@@ -44,7 +44,7 @@ fn base() -> Project {
 type Axis = Box<dyn Fn(V2) -> V2>;
 
 /// Gezeichneter Lauf (Linie/Polylinie) in Modell-Metern.
-type Seg = Vec<V2>;
+pub(super) type Seg = Vec<V2>;
 
 fn unit(x: f64, y: f64) -> V2 {
     let l = x.hypot(y);
@@ -131,7 +131,7 @@ fn check(bands: &[(Vec<V2>, Axis)], runs: &[Seg], what: &str) {
 }
 
 /// Die drei Ausgaben eines Plan-Puffers: Linien der Szene, des CLI-SVG und des Druck-SVG.
-fn rendered(prims: &[Primitive], scale: f64) -> Vec<(&'static str, Vec<Seg>)> {
+pub(super) fn rendered(prims: &[Primitive], scale: f64) -> Vec<(&'static str, Vec<Seg>)> {
     let mut w = Writer::new(true);
     w.group(prims);
     let bytes = w.finish();

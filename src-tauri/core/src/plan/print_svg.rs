@@ -346,6 +346,25 @@ pub(super) fn hatch_dash_paper(h: &Hatch, mm_per_m: f64) -> Vec<f64> {
     hatch::hatch_dash(h).iter().map(|d| jsnum::max(0.0, *d) * hatch::DASH_MM_TO_M * mm_per_m).collect()
 }
 
+/// [133] Kachelgrösse einer Bild-Schraffur bei Massstab-Faktor 1 (Papier-mm), wie `IMG_TILE_MM` in `planToPrintSvg.ts`.
+pub(super) const IMG_TILE_MM: f64 = 20.0;
+
+/// [133] Bild-Schraffur (JSON `{src, scaleX, scaleY, rotation}`): Kachelbreite/-höhe in Papier-mm und Drehung (Grad).
+pub(super) fn image_tile(img: &serde_json::Value) -> (f64, f64, f64) {
+    let sc = |k: &str| img.get(k).and_then(|v| v.as_f64()).filter(|v| *v > 0.0).unwrap_or(1.0);
+    (jsnum::max(0.5, IMG_TILE_MM * sc("scaleX")), jsnum::max(0.5, IMG_TILE_MM * sc("scaleY")), img.get("rotation").and_then(|v| v.as_f64()).unwrap_or(0.0))
+}
+
+/// [133] Linienzüge einer Vektor-Schraffur in Modell-Metern — der eine Generator für CLI-SVG (`svg.rs`) und
+/// Druck-SVG (zufällige Schraffur: nur Anfang/Ende je Lauf; sonst `hatch::build_hatch_runs` wie Szene und PDF).
+pub(super) fn hatch_runs(pts: &[V2], h: &Hatch) -> Vec<Vec<V2>> {
+    if h.random {
+        hatch::build_random_hatch_runs(pts, h, None).into_iter().filter(|r| r.len() >= 2).map(|r| vec![r[0], r[r.len() - 1]]).collect()
+    } else {
+        hatch::build_hatch_runs(pts, h)
+    }
+}
+
 fn num(o: &serde_json::Value, k: &str) -> f64 {
     o.get(k).and_then(|x| x.as_f64()).unwrap_or(f64::NAN)
 }
@@ -430,26 +449,16 @@ fn entry(out: &mut Out, view: &View, i: usize, hatches: &[(i32, Hatch, i32)], m:
                 }
                 let pen = quantize_pen(h.line_weight);
                 let hdash = hatch_dash_paper(&h, k);
-                if h.random {
-                    for run in hatch::build_random_hatch_runs(&pts, &h, None) {
-                        if run.len() < 2 {
-                            continue;
-                        }
-                        let (a, b) = (run[0], run[run.len() - 1]);
-                        out.el(1, "line", &line_attrs(m.at(a.x, a.y), m.at(b.x, b.y), &hatch_color, pen, Some(&hdash)));
-                    }
-                } else {
-                    // Alle Vektor-Schraffuren aus dem Kern-Generator: dieselben Linien wie Szene, PDF-Export und
-                    // Chunk-Pfad ([109] Schicht-/Streumuster; [166] auch Geraden-/Kreuzschar und Motiv: die
-                    // frühere eigene Linienschar las den Winkel um 90° verdreht — Dämm-Striche längs statt quer —
-                    // und kannte die polare Schraffur der Bogenwand nicht).
-                    for run in hatch::build_hatch_runs(&pts, &h) {
-                        let p: Vec<V2> = run.iter().map(|q| m.at(q.x, q.y)).collect();
-                        match p.len() {
-                            0 | 1 => {}
-                            2 => out.el(1, "line", &line_attrs(p[0], p[1], &hatch_color, pen, Some(&hdash))),
-                            _ => out.el(1, "polyline", &polyline_attrs(&p, &hatch_color, pen, Some(&hdash))),
-                        }
+                // Alle Vektor-Schraffuren aus dem Kern-Generator: dieselben Linien wie Szene, PDF-Export und
+                // Chunk-Pfad ([109] Schicht-/Streumuster; [166] auch Geraden-/Kreuzschar und Motiv: die
+                // frühere eigene Linienschar las den Winkel um 90° verdreht — Dämm-Striche längs statt quer —
+                // und kannte die polare Schraffur der Bogenwand nicht).
+                for run in hatch_runs(&pts, &h) {
+                    let p: Vec<V2> = run.iter().map(|q| m.at(q.x, q.y)).collect();
+                    match p.len() {
+                        0 | 1 => {}
+                        2 => out.el(1, "line", &line_attrs(p[0], p[1], &hatch_color, pen, Some(&hdash))),
+                        _ => out.el(1, "polyline", &polyline_attrs(&p, &hatch_color, pen, Some(&hdash))),
                     }
                 }
                 if stroke_mm > 0.0 {

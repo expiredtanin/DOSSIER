@@ -71,10 +71,12 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   Tooltip im Ebenen-Panel (de/en). Tests `plan/derived_class_tests.rs`, `src/plan/derivedCategories.test.ts`. Offen:
   ausgeblendete Bauteile verdecken im Schnitt weiter die Projektion dahinter (Lücken); 3D nicht nach Klassen geprüft;
   nicht in der Tauri-App/auf dem Mac geprüft. · M
-- ◐ **[133]** Musterhaus komplex: Rest. Skalieren-Kopie lässt `position`/Breite unverändert; Vollflächen-/Bildschraffur
-  und Schraffur-Löcher beim Ausbreiten fehlen (`src/export/planToSvgString.ts`, Kern `plan/svg.rs`; wegen paralleler
-  Arbeit an `svg.rs` (Bögen) am 10.11. nicht angefasst). (10.11.: Skalieren skaliert `position`/`width` der Wandöffnungen
-  bei Kopie und Original, Test `skalieren_skaliert_oeffnungen`.) · S
+- ◐ **[133]** Musterhaus komplex: Rest. Skalieren-Kopie lässt `position`/Breite unverändert (10.11.: Skalieren skaliert
+  `position`/`width` der Wandöffnungen bei Kopie und Original, Test `skalieren_skaliert_oeffnungen`). 11.11.: Schraffur-
+  Ausbreiten: Vollfläche füllt in Schraffurfarbe, Bild-Schraffur als `<pattern>`/`<image>` (CLI `--hatch`; Druck/PDF hatte
+  beides schon), eine gemeinsame Linien-Funktion `print_svg::hatch_runs`; Löcher (Ring mit Brücke) liefen schon richtig,
+  jetzt per Test belegt (`plan/hatch_fill_tests.rs`, Szene/CLI/Druck). Bildschirm (render2d) zeichnet Vollflächen-/Bild-
+  Schraffur nicht selbst (Füllung des Erzeugers) und Verläufe fehlen in allen Ausgaben. Nur im Linux-Container geprüft. · S
 - ◐ **[140]** Plandarstellung. (9.11.: Stempel in Tusche ohne farbige Auszeichnung, eigene Stempel ab 1:200
   verkleinert, IFC-Räume ohne festen Anker, Schatten-Reihenfolge geprüft; Rest der Liste war schon erledigt.)
   Offen: Fang-Punkt des Stempels rechnet mit Detail „mittel“; Deckenspiegel-Stempel ohne Hindernisse; Mac-Gegenprobe
