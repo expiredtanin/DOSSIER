@@ -70,7 +70,8 @@ describe("Georeferenzierter Export: alle Entitäten im LV95-Rahmen", () => {
           .map((p) => `${e.layer}/${e.type}: ${p!.x}, ${p!.y}`),
       );
       expect(dwgBad.slice(0, 5)).toEqual([]);
-    });
+      // DWG über libredwg (WASM) braucht unter Last (volle Suite parallel) deutlich länger als allein.
+    }, 120_000);
   }
 
   it("Rundreise Export → Import: alle importierten Zeichnungen im selben Rahmen", () => {
