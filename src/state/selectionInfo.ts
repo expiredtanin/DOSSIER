@@ -72,6 +72,12 @@ export interface RoofInfo {
   overhang: number;
   /** Dachüberstand am Ortgang (Giebelseite, Meter); fehlt ⇒ = Traufüberstand. */
   overhangGable?: number;
+  /** Attika ([148]): Höhe über der Dachhaut (Flachdach); fehlt ⇒ keine. */
+  parapetHeight?: number;
+  /** Attika: Breite (m); fehlt ⇒ 0.2. */
+  parapetWidth?: number;
+  /** Attika: Bauteil/Material (Farbe, Schnittschraffur). */
+  parapetComponentId?: string;
   /** Firstrichtung entlang X oder Y. */
   ridgeAxis: "x" | "y";
   /** Dachdicke (Meter). */

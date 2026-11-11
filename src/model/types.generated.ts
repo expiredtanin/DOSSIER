@@ -3078,6 +3078,15 @@ export type Roof = {
   surfacePatternOffset?: Vec2;
   /** Gauben/Lukarnen ([G5]) in den Dachflächen dieses Dachs. Fehlt ⇒ keine. */
   dormers?: Array<Dormer>;
+  /**
+   * Attika ([148]): Höhe über der Dachhaut (Meter) am Rand eines Flachdachs, umlaufend auf dem Dachumriss
+   * (mit Überstand). Fehlt oder 0 ⇒ keine Attika. Wirkt nur bei Flachdach.
+   */
+  parapetHeight?: number;
+  /** Attika: Breite (Meter, nach innen vom Dachrand); fehlt ⇒ 0.2. */
+  parapetWidth?: number;
+  /** Attika: Bauteil/Material (Farbe, Schnittschraffur); fehlt ⇒ Wandfarbe ohne Schraffur. */
+  parapetComponentId?: string;
 };
 
 /**

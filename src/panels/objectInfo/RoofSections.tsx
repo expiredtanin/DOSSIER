@@ -295,6 +295,33 @@ export function RoofSection({
           0.05,
           (v) => host.onSetRoofPatch({ overhangGable: Math.max(0, v) }),
         )}
+      {/* Attika ([148]): Brüstung am Rand des Flachdachs; Höhe 0 = keine. */}
+      {roof.shape === "flach" && (
+        <>
+          {numField("objinfo.roof.parapetHeight", roof.parapetHeight ?? 0, 0.05, (v) =>
+            host.onSetRoofPatch({ parapetHeight: v > 0 ? v : undefined }),
+          )}
+          {(roof.parapetHeight ?? 0) > 0 &&
+            numField("objinfo.roof.parapetWidth", roof.parapetWidth ?? 0.2, 0.01, (v) =>
+              host.onSetRoofPatch({ parapetWidth: Math.max(0.02, v) }),
+            )}
+          {(roof.parapetHeight ?? 0) > 0 && (
+            <div className="objinfo-field">
+              <span className="objinfo-flabel">{t("objinfo.roof.parapetMaterial")}</span>
+              <Dropdown
+                value={roof.parapetComponentId ?? ""}
+                onChange={(v) => host.onSetRoofPatch({ parapetComponentId: v || undefined })}
+                options={[
+                  { value: "", label: t("objinfo.roof.parapetMaterial.none") },
+                  ...storeProject.components.map((c) => ({ value: c.id, label: c.name })),
+                ]}
+                title={t("objinfo.roof.parapetMaterial")}
+                width={130}
+              />
+            </div>
+          )}
+        </>
+      )}
       {numField("objinfo.roof.thickness", roof.thickness, 0.02, (v) =>
         host.onSetRoofPatch({ thickness: Math.max(0.01, v) }),
       )}

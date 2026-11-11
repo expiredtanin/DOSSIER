@@ -541,6 +541,14 @@ pub fn emit_roofs(p: &Project, only_roof: Option<&str>) -> Result<Vec<RMesh>, St
     let nb = crate::roof_assembly::neighbors_rc(p);
     for (ri, roof) in p.roofs.as_deref().unwrap_or(&[]).iter().enumerate().filter(|(_, r)| only_roof.is_none_or(|id| r.id == id)) {
         let override_color = roof.color.as_deref().filter(|c| !c.is_empty()).map(|c| hex_to_rgb(c, ROOF_RGB));
+        // Attika ([148]): Ringkörper auf dem Dachrand eines Flachdachs.
+        if let Some(pp) = crate::roof_parapet::parapet(roof, &crate::roof::roof_geometry(&roof.params(), p.roof_base_elevation(roof))) {
+            let comp_id = roof.parapet_component_id.as_deref().unwrap_or("");
+            let color = override_color.unwrap_or_else(|| p.component(comp_id).map_or(WALL_RGB, |c| hex_to_rgb(&c.color, WALL_RGB)));
+            let material_index = if override_color.is_none() && !comp_id.is_empty() { material_layer(p, &maps, comp_id) } else { None };
+            let m = crate::roof_parapet::mesh(&pp);
+            out.push(RMesh { crease_angle: None, positions: m.positions, indices: m.indices, kind: "extrusion", color, vertex_colors: None, material_index });
+        }
         // Verschnittene Dächer und Gauben ([G5]): Körper aus `roof_assembly`.
         if let Some(solids) = crate::roof_assembly::roof_solids_with(p, ri, &nb) {
             for part in &solids.parts {
