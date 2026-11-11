@@ -365,7 +365,7 @@ export function pickGeometry(
  * (immer obenauf gezeichnete Akzent-Umrisslinie, s. useWasm3dRenderer). Leere
  * Auswahl → leeres Array (Highlight löschen).
  *
- * Gerechnet im Kern (`src-tauri/core/src/highlight3d.rs`).
+ * Gerechnet im Kern (`src-tauri/core/src/highlight3d.rs`; freie Körper/importierte Netze als Feature-Kanten).
  *
  * GEOMETRIE (dieselbe Welt-Konvention wie pickGeometry/raycast3d: model (x,y)
  * → world (x, elevation, y), Höhe entlang +Y):

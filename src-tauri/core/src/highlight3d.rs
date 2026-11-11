@@ -1,15 +1,18 @@
 //! Umriss-Linien der 3D-Auswahl (früher `selectionHighlightLines` in `plan/toWalls3d.ts`): je
 //! gewähltes Bauteil die Kanten seiner Hülle als Linienliste `[x, y, z, r, g, b] × 2` (Welt-Meter,
 //! y = Höhe), die der 3D-Viewport ohne Tiefentest obenauf zeichnet. Wände/Öffnungen als Quader,
-//! Decken/Treppen als Prisma, Dächer als Flächen-/Giebel-Umrisse, Kontext-Meshes als Hüllquader.
+//! Decken/Treppen als Prisma, Dächer als Flächen-/Giebel-Umrisse, freie Körper und importierte Netze als Feature-Kanten
+//! (Randkanten + Knick > 15°, [115]), Gelände als Hüllquader.
 //! Rechnung und Reihenfolge wie die TS-Fassung (f32 wie `Float32Array`).
 
 use crate::jsmath::hypot2;
 use crate::model::{ContextObject, Project};
 use crate::model3d::{emit_slabs, emit_walls, pick_openings, pick_stairs};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 const EPS: f64 = 1e-4;
+/// Grösste Dreieckszahl eines importierten Netzes, dessen Feature-Kanten berechnet werden (sonst Hüllquader).
+const MAX_EDGE_TRIS: usize = 200_000;
 
 type V3 = [f64; 3];
 
@@ -23,7 +26,7 @@ pub struct Args {
     pub stairs: Vec<String>,
     pub roofs: Vec<String>,
     pub context: Vec<String>,
-    /// [137] Stützen und freie Körper (Prisma über dem Grundriss).
+    /// [137] Stützen (Prisma über dem Grundriss) und freie Körper ([115]: Feature-Kanten des Kern-Netzes).
     pub columns: Vec<String>,
     pub solids: Vec<String>,
     /// [149] Bäume (Umriss-Prisma Kronendurchmesser × Fuss bis Spitze).
@@ -97,6 +100,50 @@ impl Out {
         }
         for (i, j) in BOX_EDGES {
             self.edge(c[i], c[j]);
+        }
+    }
+
+    /// [115] Feature-Kanten eines Dreiecksnetzes (Modell-Meter, z = Höhe), wie render3d sie zeichnet: Randkanten
+    /// (ein Dreieck) und Kanten, an denen zwei Flächen mehr als 15° knicken; koplanare Diagonalen und
+    /// Facettenfugen glatter Rundungen fallen weg. Reihenfolge der Dreiecke (deterministisch).
+    fn mesh_edges(&mut self, positions: &[f64], indices: &[u32]) {
+        let nv = positions.len() / 3;
+        let key = |i: usize| -> [i64; 3] { let q = &positions[i * 3..i * 3 + 3]; [(q[0] * 1e6).round() as i64, (q[1] * 1e6).round() as i64, (q[2] * 1e6).round() as i64] };
+        let mut ids: HashMap<[i64; 3], usize> = HashMap::new();
+        let canon: Vec<usize> = (0..nv).map(|i| { let n = ids.len(); *ids.entry(key(i)).or_insert(n) }).collect();
+        let mut at: HashMap<(usize, usize), usize> = HashMap::new();
+        let mut edges: Vec<(usize, usize, Vec<V3>)> = Vec::new();
+        for t in indices.chunks_exact(3) {
+            let v: Vec<usize> = t.iter().map(|&i| i as usize).collect();
+            if v.iter().any(|&i| i >= nv) {
+                continue;
+            }
+            let p = |i: usize| [positions[i * 3], positions[i * 3 + 1], positions[i * 3 + 2]];
+            let (a, b, c) = (p(v[0]), p(v[1]), p(v[2]));
+            let (u, w) = ([b[0] - a[0], b[1] - a[1], b[2] - a[2]], [c[0] - a[0], c[1] - a[1], c[2] - a[2]]);
+            let n = [u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]];
+            let l = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
+            if !(l > 1e-18) {
+                continue; // entartet
+            }
+            let n = [n[0] / l, n[1] / l, n[2] / l];
+            for (i, j) in [(0, 1), (1, 2), (2, 0)] {
+                let (ci, cj) = (canon[v[i]], canon[v[j]]);
+                if ci == cj {
+                    continue;
+                }
+                let k = (ci.min(cj), ci.max(cj));
+                let e = *at.entry(k).or_insert_with(|| { edges.push((v[i], v[j], Vec::new())); edges.len() - 1 });
+                edges[e].2.push(n);
+            }
+        }
+        const CREASE_COS: f64 = 0.966; // 15°, wie render3d
+        let world = |i: usize| [positions[i * 3], positions[i * 3 + 2], positions[i * 3 + 1]];
+        for (i, j, ns) in &edges {
+            let draw = ns.len() == 1 || ns.iter().enumerate().any(|(x, a)| ns[x + 1..].iter().any(|b| a[0] * b[0] + a[1] * b[1] + a[2] * b[2] < CREASE_COS));
+            if draw {
+                self.edge(world(*i), world(*j));
+            }
         }
     }
 
@@ -229,10 +276,16 @@ pub fn selection_highlight_lines(p: &Project, a: &Args) -> Result<Vec<f32>, Stri
     }
     for s in p.extruded_solids.as_deref().unwrap_or(&[]) {
         if solids.contains(s.id.as_str()) {
-            let z0 = crate::model3d::solid_base_z(p, s);
-            let foot: Vec<[f64; 2]> = s.points.iter().map(|q| [q.x, q.y]).collect();
             let n = out.v.len();
-            out.prism_edges(&foot, z0, z0 + s.height);
+            // [115] echte Kanten des Kern-Netzes; ohne Netz (kaputte Beschreibung) bleibt das Prisma.
+            match crate::solid_mesh::body_mesh_3d(p, s).as_deref().and_then(|m| m.as_ref()) {
+                Some(m) => out.mesh_edges(&m.positions, &m.indices),
+                None => {
+                    let z0 = crate::model3d::solid_base_z(p, s);
+                    let foot: Vec<[f64; 2]> = s.points.iter().map(|q| [q.x, q.y]).collect();
+                    out.prism_edges(&foot, z0, z0 + s.height);
+                }
+            }
             lift(&mut out, n, &s.id);
         }
     }
@@ -245,6 +298,14 @@ pub fn selection_highlight_lines(p: &Project, a: &Args) -> Result<Vec<f32>, Stri
             };
             if !context.contains(id.as_str()) {
                 continue;
+            }
+            // [115] Importierte Netze: Feature-Kanten statt Hüllquader (Gelände bleibt Quader, zu viele Dreiecke).
+            if let ContextObject::ImportedMesh(m) = obj {
+                if m.indices.len() / 3 <= MAX_EDGE_TRIS && m.positions.len() >= 9 {
+                    let idx: Vec<u32> = m.indices.iter().map(|&i| if i >= 0.0 && i < u32::MAX as f64 { i as u32 } else { u32::MAX }).collect();
+                    out.mesh_edges(&m.positions, &idx);
+                    continue;
+                }
             }
             let (mut min_x, mut max_x, mut min_y, mut max_y, mut min_h, mut max_h) = (f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY);
             for c in pos.chunks_exact(3) {
@@ -330,7 +391,60 @@ mod tests {
         .unwrap();
         assert_eq!(lines(&p, serde_json::json!({"columns": ["k1"]})).len(), 4 * 3 * 12);
         let l = lines(&p, serde_json::json!({"solids": ["s1"]}));
-        assert_eq!(l.len(), 3 * 3 * 12);
+        // Dreiecks-Prisma: 9 echte Kanten (Deckel-/Boden-Diagonalen fallen weg).
+        assert_eq!(l.len(), 9 * 2 * 6);
         assert!(l.chunks_exact(6).any(|v| (v[1] - 2.0).abs() < 1e-6));
+    }
+
+    fn solid_project(solid: serde_json::Value) -> Project {
+        serde_json::from_value(serde_json::json!({
+            "id": "p", "name": "t", "lineStyles": [], "hatches": [], "components": [], "wallTypes": [], "layers": [], "openings": [], "walls": [],
+            "drawingLevels": [{"id": "EG", "name": "EG", "kind": "floor", "visible": true, "locked": false, "floorHeight": 3.0, "baseElevation": 0.0}],
+            "extrudedSolids": [solid], "drawings2d": []
+        }))
+        .unwrap()
+    }
+
+    /// Anzahl Kanten mit `f(a, b)`; Kanten aus `[x,y,z,r,g,b]×2`.
+    fn count(l: &[f32], f: impl Fn(&[f32], &[f32]) -> bool) -> usize {
+        l.chunks_exact(12).filter(|s| f(&s[0..3], &s[6..9])).count()
+    }
+
+    /// [115] Zylinder: zwei Kreise (Boden/Deckel) und keine Facettenfugen (Mantel-Längskanten).
+    #[test]
+    fn zylinder_zwei_kreise_ohne_facettenfugen() {
+        let p = solid_project(serde_json::json!({"id": "z", "type": "extrudedSolid", "levelId": "EG", "points": [], "height": 2.0,
+            "circle": {"center": {"x": 0, "y": 0}, "r": 0.5}}));
+        let l = lines(&p, serde_json::json!({"solids": ["z"]}));
+        assert!(!l.is_empty());
+        let vertical = count(&l, |a, b| (a[0] - b[0]).abs() < 1e-6 && (a[2] - b[2]).abs() < 1e-6);
+        assert_eq!(vertical, 0, "keine Längsfugen");
+        let horizontal = count(&l, |a, b| (a[1] - b[1]).abs() < 1e-6);
+        assert_eq!(l.len() / 12, horizontal, "nur Kreiskanten");
+        let (bot, top) = (count(&l, |a, _| a[1].abs() < 1e-6), count(&l, |a, _| (a[1] - 2.0).abs() < 1e-6));
+        assert_eq!(bot, top);
+        assert!(bot >= 48, "Kreis fein facettiert: {bot}");
+    }
+
+    /// [115] Verjüngter Quader: schräge Kanten (Basis-Ecke → kleinere Deckel-Ecke) statt senkrechtes Prisma.
+    #[test]
+    fn verjuengter_koerper_schraege_kanten() {
+        let p = solid_project(serde_json::json!({"id": "v", "type": "extrudedSolid", "levelId": "EG", "height": 2.0, "taper": 0.5,
+            "points": [{"x": 0, "y": 0}, {"x": 2, "y": 0}, {"x": 2, "y": 2}, {"x": 0, "y": 2}]}));
+        let l = lines(&p, serde_json::json!({"solids": ["v"]}));
+        assert_eq!(l.len() / 12, 12, "Quader-Stumpf: 12 Kanten");
+        let slanted = count(&l, |a, b| (a[1] - b[1]).abs() > 1e-6 && ((a[0] - b[0]).abs() > 1e-6 || (a[2] - b[2]).abs() > 1e-6));
+        assert_eq!(slanted, 4, "vier schräge Kanten, kein Prisma");
+    }
+
+    /// [115] Importiertes Netz: Würfel = 12 Feature-Kanten (Diagonalen der Quad-Hälften fehlen).
+    #[test]
+    fn importiertes_netz_feature_kanten() {
+        let pos: Vec<f64> = (0..8).flat_map(|i| [(i & 1) as f64, ((i >> 1) & 1) as f64, ((i >> 2) & 1) as f64]).collect();
+        let quads = [[0, 2, 3, 1], [4, 5, 7, 6], [0, 1, 5, 4], [2, 6, 7, 3], [0, 4, 6, 2], [1, 3, 7, 5]];
+        let idx: Vec<f64> = quads.iter().flat_map(|q| [q[0], q[1], q[2], q[0], q[2], q[3]]).map(|i| i as f64).collect();
+        let mut p = Project::default();
+        p.context = Some(vec![ContextObject::ImportedMesh(crate::model::ImportedMesh { id: "m".into(), category_code: "12".into(), positions: pos, indices: idx, ..Default::default() })]);
+        assert_eq!(lines(&p, serde_json::json!({"context": ["m"]})).len() / 12, 12);
     }
 }

@@ -348,8 +348,9 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   ≥ 48 Facetten je Vollkreis (Fugen unter dem 15°-Kantenwinkel, glatt schattiert), Farbe/Textur aus `componentId`; volle
   Verjüngung ergibt jetzt eine Pyramide (Netz-Spezifikation, auch Grundriss/STEP). TS-truck-Pfad (`toWalls3d/extrusions.ts`,
   `TRUCK_MESH_READY_EVENT`, truck-Booleans in `voids3d.ts`) entfernt; truck bleibt für STEP und Kollision (Begründung in
-  `doc/ARCHITEKTUR.md`). Ein OBJ-/glTF-Export existiert nicht. Offen: 3D-Hervorhebung eines Körpers bleibt das Prisma über
-  dem Umriss (`highlight3d.rs`); 3D-Ausschnitt im Viewport; nicht in der Tauri-App und nicht mit Metal geprüft. · S
+  `doc/ARCHITEKTUR.md`). Ein OBJ-/glTF-Export existiert nicht. 11.11.: 3D-Auswahl-Hervorhebung freier Körper und importierter Netze zeigt die Feature-Kanten des Kern-Netzes
+  (`highlight3d.rs::mesh_edges`: Randkanten + Knick > 15° wie render3d; Zylinder = zwei Kreise ohne Facettenfugen, verjüngter
+  Körper = schräge Kanten; Gelände bleibt Hüllquader; Prisma nur noch ohne Netz). Offen: 3D-Ausschnitt im Viewport; nicht in der Tauri-App und nicht mit Metal geprüft. · S
 - ◐ **[36]** View Range (`plan/view_range.rs`). Dach/Decke über/unter Schnitt verfeinern, Raum/Fenster eigenständig,
   Tiefe nur ganzes Bauteil (kein Clip an der Ebene). 11.11.: Öffnung ganz unter der Schnittebene schliesst die Wand auch
   ohne eigenen Bereich (Symbol gepunktet, `walls.rs`). · M
