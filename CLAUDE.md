@@ -125,6 +125,9 @@ aus dem Hauptcheckout kopieren (beide gitignored).
 auch abgeleitete wie Schatten, automatische Masse, Koten, Schnitt-/Ansichtsmarken, Raster, Nordpfeil, Stempel — gehört zu einer
 Ebene bzw. Klasse und lässt sich darüber ausschalten. Neue Darstellungen nie ohne diese Zuordnung.
 
+**Keine produktiven Projekte** (Stand 11.11.): Modell-/Formatänderungen brauchen keine Migration oder Rückwärts-
+kompatibilität alter Dateien — nur die Beispielprojekte (`src/model/sample*`, Fixtures) nachführen. Lieber sauber als kompatibel.
+
 Bezeichner englisch, Kommentare und UI-Text deutsch, UI-Text nur über `t()` (de + en; Test
 `src/i18n/untranslated.test.ts`). Intern Meter, Strichstärken in Papier-mm. Kein
 `window.alert/confirm/prompt` (im Tauri-WKWebView stumm) → `notify()` oder Overlay-Dialog. Entfernte Abrufe
