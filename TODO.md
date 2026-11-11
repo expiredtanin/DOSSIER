@@ -317,10 +317,14 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   statt `RWall` gehen), 3D-Live-Schnitt-Deckel verschnittener Dächer, IFC-Mengen der Gaube, Kehlen symmetrisch je
   Schicht, Wand ↔ Decke für beliebige Polygone ([G6]). · L
 - ◐ **[132]** Ansichten/Schnitte aus [114]. Haarlinien an Dreiecksfugen (SVG-Kantenglättung); Carport bleibt Pultdach 3°. · S
-- ◐ **[115]** Schnitt/Ansicht wie Grundriss. Freie Körper (`extrudedSolids`, truck-Netze aus TS) fehlen im Fang des
-  Schnitt-Viewports; 3D-Ausschnitt im Viewport. · S
+- ◐ **[115]** Schnitt/Ansicht wie Grundriss. 11.11.: Freie Körper (`extrudedSolids`) fangen im Grundriss mit ihrem Umriss
+  (`snap_model.rs`, Klasse/Ausnahmen wie jedes Bauteil; Test `freie_koerper_fangen_nach_klasse`). Im Schnitt-Viewport fängt
+  der Fang die Schnitt-Primitive (Körper-Schnittflächen/Kanten sind dort drin, nicht geprüft in der App). Offen: die Ansicht
+  (Elevation) und Blatt-Viewports zeichnen freie Körper gar nicht (kein Netz im Kern) und fangen sie daher auch nicht;
+  3D-Ausschnitt im Viewport. · S
 - ◐ **[36]** View Range (`plan/view_range.rs`). Dach/Decke über/unter Schnitt verfeinern, Raum/Fenster eigenständig,
-  Tiefe nur ganzes Bauteil (kein Clip an der Ebene); Öffnung ganz unter der Schnittebene bleibt mit Lücke. · M
+  Tiefe nur ganzes Bauteil (kein Clip an der Ebene). 11.11.: Öffnung ganz unter der Schnittebene schliesst die Wand auch
+  ohne eigenen Bereich (Symbol gepunktet, `walls.rs`). · M
 - ◐ **[34]** Ansichtsvorlagen (`Project.viewTemplates`). Vorlage wirkt vollständig auch für Schnitt und Ansicht (10.11.):
   Blatt-Viewports (App, PDF, Kern-Puffer `sheet_viewports::snapshot_project`) und CLI (`--template`, sonst die an der
   Ebene verknüpfte Vorlage) setzen Ebenen-Felder, Detailgrad, Massstab, Tusche/Farbe, Kategorien, Override-Regeln und

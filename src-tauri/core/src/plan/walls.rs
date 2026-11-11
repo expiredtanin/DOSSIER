@@ -1108,7 +1108,9 @@ pub fn plan_walls(c: &Ctx, reference_lines: bool, out: &mut Vec<Primitive>, boun
         };
         let all_openings: Vec<(std::borrow::Cow<Opening>, Zone)> = p.openings_of_wall(&w.id).map(|o| {
             let (ob, ot) = super::view_range::opening_vertical_extent(p, w, o);
-            let oz = if range.custom { range.classify(ob, ot) } else { Zone::Cut };
+            // [36] Auch ohne eigenen Bereich: eine Öffnung ganz unter der Schnittebene (Brüstungs-/Kellerfenster) schneidet
+            // keine Lücke in die Wand; ganz darüber (Oberlicht) bleibt es ohne Bereich wie bisher.
+            let oz = if range.custom { range.classify(ob, ot) } else if ot < cut_z { Zone::Below } else { Zone::Cut };
             match shaped_plan_cut(&wr, o, ob, ot, cut_z).filter(|_| oz == Zone::Cut && zone == Zone::Cut) {
                 Some(Ok(chord)) => (std::borrow::Cow::Owned(chord), oz),
                 Some(Err(miss)) => (std::borrow::Cow::Borrowed(o), miss),

@@ -2760,14 +2760,23 @@ mod tests {
         let of = |v: &serde_json::Value, id: &str| -> Vec<serde_json::Value> { v.as_array().unwrap().iter().filter(|x| x["openingId"] == id).cloned().collect() };
         let w1_polys = |v: &serde_json::Value| v.as_array().unwrap().iter().filter(|x| x["kind"] == "polygon" && x["wallId"] == "W1").count();
         let dotted = |xs: &[serde_json::Value]| xs.iter().filter(|x| x["kind"] == "line").all(|x| x["dash"] == serde_json::json!([0.0, 1.0]));
+        // Ohne Grenzen ([36]): Wand trotzdem ohne Lücke, Symbol gepunktet (Ansichtslinie).
         let w0 = run(&p);
-        assert!(!of(&w0, "O1").is_empty() && !dotted(&of(&w0, "O1")));
+        let s0 = of(&w0, "O1");
+        assert!(s0.iter().any(|x| x["kind"] == "line") && dotted(&s0), "{s0:?}");
+        let wb = {
+            let mut q = p.clone();
+            q.openings.as_mut().unwrap().iter_mut().find(|o| o.id == "O1").unwrap().sill_height = 0.9;
+            q.openings.as_mut().unwrap().iter_mut().find(|o| o.id == "O1").unwrap().height = 0.6;
+            run(&q)
+        };
+        assert!(w1_polys(&wb) > w1_polys(&w0), "Fenster über der Schnitthöhe-Grenze schneidet weiter die Lücke: {} {}", w1_polys(&wb), w1_polys(&w0));
         // Unterkante 0 m: Schlitz liegt im Bereich unter dem Schnitt → Wand geschlossen, Symbol gepunktet.
         set_range(&mut p, "eg", None, Some(0.0), None);
         let w1 = run(&p);
         let s1 = of(&w1, "O1");
         assert!(s1.iter().any(|x| x["kind"] == "line") && dotted(&s1), "{s1:?}");
-        assert!(w1_polys(&w1) < w1_polys(&w0), "{} {}", w1_polys(&w1), w1_polys(&w0));
+        assert_eq!(w1_polys(&w1), w1_polys(&w0));
         assert!(!dotted(&of(&w1, "D1")) && !dotted(&of(&w1, "O2")));
         // Unterkante 0.5 m ohne „darunter sichtbar bis“: Schlitz entfällt, Wand bleibt geschlossen.
         set_range(&mut p, "eg", None, Some(0.5), None);
