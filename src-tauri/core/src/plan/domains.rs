@@ -1207,6 +1207,12 @@ fn stamp_obstacles_with(d: &DomainPrims, drawn: super::stamp_place::Obstacles) -
     for q in d.stairs.iter().chain(&d.columns) {
         o.add_prim(q);
     }
+    // [G1] Körper: Schnittfläche und Aufsicht (nicht die Überkopf-Linien) — der Stempel steht daneben.
+    for q in &d.solids {
+        if matches!(q, Primitive::Polygon { fill, .. } if fill != "none") || matches!(q, Primitive::Line { dash: None, .. }) {
+            o.add_prim(q);
+        }
+    }
     for q in &d.walls {
         if matches!(q, Primitive::Arc { opening_id: Some(_), .. }) {
             o.add_prim(q);
@@ -1553,50 +1559,66 @@ pub(super) fn columns(c: &Ctx, out: &mut Vec<Primitive>) {
 // ── Extrusionen ─────────────────────────────────────────────────────────────
 
 fn solids(c: &Ctx, out: &mut Vec<Primitive>) {
+    // [180] Körper und Abzugskörper liegen wie jedes Bauteil auf ihrer Klasse (die Aussparung wirkt unabhängig davon).
+    let on: Vec<&ExtrudedSolid> = c.p.extruded_solids.as_deref().unwrap_or(&[]).iter().filter(|s| s.level_id == c.a.floor && c.vis(&s.category_code, &s.id)).collect();
+    // [G1] Körper über ihr Kern-Netz (Ebenenschnitt, Aufsicht, Überkopf); ohne baubares Netz über das Profil.
+    let bodies: Vec<&ExtrudedSolid> = on.iter().copied().filter(|s| s.operation.as_deref() != Some("subtract")).collect();
+    let mut meshed = Vec::new();
+    let rest = super::mesh_plan::plan_bodies(c, &bodies, &mut meshed);
+    for s in on.iter().copied().filter(|s| s.operation.as_deref() == Some("subtract") || rest.iter().any(|r| std::ptr::eq(*r, *s))) {
+        solid_by_profile(c, s, out);
+    }
+    out.extend(meshed);
+}
+
+/// Körper ohne Netz (Kreis-Körper ohne Profil …) und Abzugskörper: Umriss des Profils, geschnitten mit der
+/// Profil-Poché ([`body_cut_ring`]).
+fn solid_by_profile(c: &Ctx, s: &ExtrudedSolid, out: &mut Vec<Primitive>) {
     let range = super::view_range::ViewRange::of(c.p, &c.a.floor);
     let base = c.p.floor(&c.a.floor).and_then(|f| f.base_elevation).unwrap_or(0.0);
-    // [180] Körper und Abzugskörper liegen wie jedes Bauteil auf ihrer Klasse (die Aussparung wirkt unabhängig davon).
-    for s in c.p.extruded_solids.as_deref().unwrap_or(&[]).iter().filter(|s| s.level_id == c.a.floor && c.vis(&s.category_code, &s.id)) {
-        let greyed = c.greyed(&s.category_code).then_some(true);
-        let subtract = s.operation.as_deref() == Some("subtract");
-        let zb = base + s.base_offset.unwrap_or(0.0);
-        let zone = if subtract { super::view_range::Zone::Cut } else { range.classify(zb, zb + s.height) };
-        if zone == super::view_range::Zone::Hidden {
-            continue;
+    let greyed = c.greyed(&s.category_code).then_some(true);
+    let subtract = s.operation.as_deref() == Some("subtract");
+    let zb = base + s.base_offset.unwrap_or(0.0);
+    let zone = if subtract { super::view_range::Zone::Cut } else { range.classify(zb, zb + s.height) };
+    if zone == super::view_range::Zone::Hidden {
+        return;
+    }
+    let out_start = out.len();
+    if subtract {
+        out.push(polygon(s.points.clone(), "none", "none", 0.0, no_hatch(), greyed, None, Pick::Solid(&s.id)));
+        let n = s.points.len();
+        let seg = |a: Vec2, b: Vec2, dash: Option<Vec<f64>>| line(a, b, "void", SYMBOL_HAIRLINE_MM, Some(dash), EXTRUSION_STROKE, greyed);
+        for i in 0..n {
+            out.push(seg(s.points[i], s.points[(i + 1) % n], Some(vec![2.0, 1.0])));
         }
-        let out_start = out.len();
-        if s.operation.as_deref() == Some("subtract") {
-            out.push(polygon(s.points.clone(), "none", "none", 0.0, no_hatch(), greyed, None, Pick::Solid(&s.id)));
-            let n = s.points.len();
-            let seg = |a: Vec2, b: Vec2, dash: Option<Vec<f64>>| line(a, b, "void", SYMBOL_HAIRLINE_MM, Some(dash), EXTRUSION_STROKE, greyed);
-            for i in 0..n {
-                out.push(seg(s.points[i], s.points[(i + 1) % n], Some(vec![2.0, 1.0])));
-            }
-            if n == 4 {
-                out.push(seg(s.points[0], s.points[2], None));
-                out.push(seg(s.points[1], s.points[3], None));
-            }
-        } else {
-            out.push(polygon(s.points.clone(), "none", EXTRUSION_STROKE, SYMBOL_HAIRLINE_MM, no_hatch(), greyed, None, Pick::Solid(&s.id)));
-            // [G1] Schnittfläche auf Schnitthöhe (Poché); der Umriss darunter bleibt als Projektion.
-            if zone == super::view_range::Zone::Cut {
-                if let Some(ring) = body_cut_ring(s, zb, range.cut) {
-                    let (fill, hatch) = if c.solid_cut() { (HATCH_INK, no_hatch()) } else { (super::section::BODY_FILL, super::section::section_hatch()) };
-                    out.push(polygon(ring, fill, POCHE_STROKE, WALL_FALLBACK_MM, hatch, greyed, None, Pick::Solid(&s.id)));
-                }
+        if n == 4 {
+            out.push(seg(s.points[0], s.points[2], None));
+            out.push(seg(s.points[1], s.points[3], None));
+        }
+    } else {
+        out.push(polygon(s.points.clone(), "none", EXTRUSION_STROKE, SYMBOL_HAIRLINE_MM, no_hatch(), greyed, None, Pick::Solid(&s.id)));
+        // [G1] Schnittfläche auf Schnitthöhe (Poché); der Umriss darunter bleibt als Projektion.
+        if zone == super::view_range::Zone::Cut {
+            if let Some(ring) = body_cut_ring(s, zb, range.cut) {
+                let (fill, hatch) = if c.solid_cut() {
+                    (HATCH_INK.to_string(), no_hatch())
+                } else {
+                    super::style::body_component_style(c.p, s).unwrap_or_else(|| (super::section::BODY_FILL.to_string(), super::section::section_hatch()))
+                };
+                out.push(polygon(ring, &fill, POCHE_STROKE, WALL_FALLBACK_MM, hatch, greyed, None, Pick::Solid(&s.id)));
             }
         }
-        // [152] Über der Schnitthöhe immer als Überkopf-Linie (Träger, Pfetten), auch ohne eigenen Ansichtsbereich.
-        let dash = if zone == super::view_range::Zone::Above { Some(&super::view_range::ABOVE_DASH[..]) } else { range.restyle_dash(zone) };
-        if let Some(d) = dash {
-            super::view_range::restyle(out, out_start, d);
-        }
+    }
+    // [152] Über der Schnitthöhe immer als Überkopf-Linie (Träger, Pfetten), auch ohne eigenen Ansichtsbereich.
+    let dash = if zone == super::view_range::Zone::Above { Some(&super::view_range::ABOVE_DASH[..]) } else { range.restyle_dash(zone) };
+    if let Some(d) = dash {
+        super::view_range::restyle(out, out_start, d);
     }
 }
 
 /// [G1] Schnittfläche eines Körpers (Profil-Extrusion, auch verjüngt) auf der Höhe `cut` (UK `zb`):
 /// das Profil, linear zum Ecken-Schwerpunkt gestaucht wie die truck-Verjüngung (`extruded_solid_spec`).
-/// `None` für B-Rep-Körper (kein Netz im Kern), Abzugskörper, entartete Profile und ausserhalb.
+/// Rückfall ohne Kern-Netz; `None` für B-Rep-Körper, Abzugskörper, entartete Profile und ausserhalb.
 fn body_cut_ring(s: &ExtrudedSolid, zb: f64, cut: f64) -> Option<Vec<Vec2>> {
     let n = s.points.len();
     if s.brep.is_some() || s.operation.as_deref() == Some("subtract") || n < 3 || !(s.height > 0.0) || !(cut > zb && cut < zb + s.height) {
@@ -2627,11 +2649,12 @@ mod tests {
         assert!(!w0.contains("view-range"));
         let r = plan_domains(&p, &args("eg", 1.0, &["20", "30", "60"])).unwrap();
         let dashed: Vec<&str> = r.solids.iter().filter_map(|q| match q {
-            Primitive::Line { cls, dash: Some(Some(d)), .. } if cls == "view-range" && d[..] == super::super::view_range::ABOVE_DASH[..] => Some("x"),
+            Primitive::Line { cls, dash: Some(Some(d)), .. } if cls == "solid-view" && d[..] == super::super::view_range::ABOVE_DASH[..] => Some("x"),
             _ => None,
         }).collect();
         assert_eq!(dashed.len(), 4, "{s0}");
-        assert!(r.solids.iter().any(|q| matches!(q, Primitive::Polygon { stroke, extruded_solid_id: Some(id), .. } if id == "unten" && stroke != "none")), "Sockel als Aufsicht");
+        // [G1] Sockel als Aufsicht (Kern-Netz, durchgezogen; wo er unter der geschnittenen Wand liegt, verdeckt).
+        assert!(r.solids.iter().any(|q| matches!(q, Primitive::Line { cls, dash: None, .. } if cls == "solid-view")), "Sockel als Aufsicht");
         // Oberkante 1.2 m: Schrank (ab 1.4) fällt weg.
         p.drawing_levels.iter_mut().find(|l| l.id == "eg").unwrap().view_top = Some(1.2);
         let (_, s1) = walls(&p);
@@ -2639,7 +2662,7 @@ mod tests {
         // Oberkante 2.0 m: Schrank bleibt, gestrichelt „über Schnitt“.
         p.drawing_levels.iter_mut().find(|l| l.id == "eg").unwrap().view_top = Some(2.0);
         let (_, s2) = walls(&p);
-        assert!(s2.contains("\"oben\"") && s2.contains("view-range"), "{s2}");
+        assert!(s2.contains("\"oben\"") && s2.contains("[6.0,1.5,0.0,1.5]"), "{s2}");
         // Unterkante 0.6 m ohne Tiefe: Sockel (bis 0.5) entfällt; mit Tiefe gepunktet.
         let l = p.drawing_levels.iter_mut().find(|l| l.id == "eg").unwrap();
         l.view_bottom = Some(0.6);
@@ -3399,18 +3422,80 @@ mod tests {
                 _ => None,
             })
             .collect();
+        let mut poche = poche;
+        poche.sort_by(|a, b| a.0.cmp(b.0));
         let ids: Vec<&str> = poche.iter().map(|q| q.0).collect();
         assert_eq!(ids, vec!["block", "pyr"], "{ids:?}");
         let area = |pts: &[Vec2]| (pts.iter().enumerate().fold(0.0, |a, (i, q)| { let n = pts[(i + 1) % pts.len()]; a + q.x * n.y - n.x * q.y }) / 2.0).abs();
-        assert!((area(&poche[0].1) - 4.0).abs() < 1e-9);
+        assert!((area(&poche[0].1) - 4.0).abs() < 1e-6);
         // Pyramide (Spitze bei 2 m): auf Schnitthöhe um (1 − t) gestaucht.
         let k = 1.0 - (cut - base) / 2.0;
-        assert!((area(&poche[1].1) - 4.0 * k * k).abs() < 1e-9, "{}", area(&poche[1].1));
+        assert!((area(&poche[1].1) - 4.0 * k * k).abs() < 1e-6, "{}", area(&poche[1].1));
         assert!(poche.iter().all(|q| q.2 == WALL_FALLBACK_MM));
         // Darunter bleibt der Umriss (Projektion) aller vier.
         let s = serde_json::to_string(&r.solids).unwrap();
         for id in ["block", "pyr", "hoch", "void"] {
             assert!(s.contains(&format!("\"{id}\"")), "{id}");
         }
+    }
+
+    /// [G1] Poché über das Kern-Netz (`solid_mesh`): Eckenradius und Fase, B-Rep mit Loch (Schlüsselloch),
+    /// Bauteil-Schraffur (`componentId`); ganz unter der Schnitthöhe nur Aufsicht ohne Poché.
+    #[test]
+    fn koerper_poche_aus_netz_radius_fase_loch_bauteil() {
+        let mut p = sample();
+        p.drawing_levels.iter_mut().find(|l| l.id == "eg").unwrap().cut_hatch = Some(true);
+        let comp = p.components.iter().find(|k| p.hatch(&k.hatch_id).is_some_and(|h| h.pattern != HatchPattern::None && h.pattern != HatchPattern::Diagonal && h.pattern != HatchPattern::Solid)).expect("Bauteil mit Schraffur").clone();
+        let sq = |x0: f64| vec![Vec2 { x: x0, y: 0.0 }, Vec2 { x: x0 + 2.0, y: 0.0 }, Vec2 { x: x0 + 2.0, y: 2.0 }, Vec2 { x: x0, y: 2.0 }];
+        let mk = |id: &str, x0: f64, f: &dyn Fn(&mut ExtrudedSolid)| {
+            let mut s = ExtrudedSolid { id: id.into(), level_id: "eg".into(), category_code: "20".into(), points: sq(x0), height: 2.0, ..Default::default() };
+            f(&mut s);
+            s
+        };
+        let ring = serde_json::json!({"origin": {"x": 26.0, "y": 0.0}, "spec": {"kind": "extrude", "points": [26, 0, 28, 0, 28, 2, 26, 2], "holes": [[26.5, 0.5, 27.5, 0.5, 27.5, 1.5, 26.5, 1.5]], "height": 2, "z0": 0}});
+        p.extruded_solids = Some(vec![
+            mk("rund", 20.0, &|s| s.corner_radius = Some(0.5)),
+            mk("fase", 23.0, &|s| s.chamfer = Some(0.5)),
+            mk("ring", 26.0, &|s| s.brep = Some(serde_json::from_value(ring.clone()).unwrap())),
+            mk("mat", 29.0, &|s| s.component_id = Some(comp.id.clone())),
+            mk("tief", 32.0, &|s| s.height = 0.4),
+        ]);
+        let r = plan_domains(&p, &args("eg", 1.0, &["20", "30", "60"])).unwrap();
+        let area = |pts: &[Vec2]| (pts.iter().enumerate().fold(0.0, |a, (i, q)| { let n = pts[(i + 1) % pts.len()]; a + q.x * n.y - n.x * q.y }) / 2.0).abs();
+        let poche = |id: &str| -> Vec<(f64, String, HatchPattern, bool)> {
+            r.solids
+                .iter()
+                .filter_map(|q| match q {
+                    Primitive::Polygon { pts, fill, hatch, no_stroke_edges, extruded_solid_id: Some(i), .. } if i == id && fill != "none" => Some((area(pts), fill.clone(), hatch.pattern, no_stroke_edges.as_ref().is_some_and(|v| !v.is_empty()))),
+                    _ => None,
+                })
+                .collect()
+        };
+        let pi = std::f64::consts::PI;
+        let rund = poche("rund");
+        assert_eq!(rund.len(), 1);
+        assert!((rund[0].0 - (4.0 - (4.0 - pi) * 0.25)).abs() < 0.01, "Eckenradius {}", rund[0].0);
+        let fase = poche("fase");
+        assert!((fase[0].0 - 3.5).abs() < 1e-6, "Fase {}", fase[0].0);
+        let ring = poche("ring");
+        assert_eq!(ring.len(), 1, "B-Rep geschnitten");
+        assert!((ring[0].0 - 3.0).abs() < 1e-6 && ring[0].3, "Loch als Schlüsselloch: {ring:?}");
+        let mat = poche("mat");
+        let h = p.hatch(&comp.hatch_id).unwrap();
+        assert_eq!(mat[0].2, h.pattern, "Bauteil-Schraffur");
+        assert_eq!(mat[0].1, comp.background.clone().unwrap_or_else(|| poche_fill(h.pattern).to_string()));
+        assert_eq!(rund[0].2, HatchPattern::Diagonal, "ohne Bauteil Rückfall-Schraffur");
+        assert!(poche("tief").is_empty(), "unter der Schnitthöhe keine Poché");
+        // Aufsicht des niedrigen Körpers: Umriss als durchgezogene Ansichtslinien (Länge 8).
+        let len: f64 = r.solids.iter().filter_map(|q| match q {
+            Primitive::Line { a, b, cls, dash: None, .. } if cls == "solid-view" && a.x >= 32.0 - 1e-9 && b.x >= 32.0 - 1e-9 => Some(crate::jsmath::hypot2(b.x - a.x, b.y - a.y)),
+            _ => None,
+        }).sum();
+        assert!((len - 8.0).abs() < 1e-6, "Aufsicht {len}");
+        // Ab 1:100 schwarz (auch mit Bauteil).
+        p.drawing_levels.iter_mut().find(|l| l.id == "eg").unwrap().cut_hatch = None;
+        let t = serde_json::json!({ "floor": "eg", "show": ["20", "30", "60"], "grey": [], "scale": 100 }).to_string();
+        let r = plan_domains(&p, &PlanArgs::parse(1.0, &t).unwrap()).unwrap();
+        assert!(r.solids.iter().any(|q| matches!(q, Primitive::Polygon { fill, extruded_solid_id: Some(i), .. } if i == "mat" && fill == HATCH_INK)));
     }
 }

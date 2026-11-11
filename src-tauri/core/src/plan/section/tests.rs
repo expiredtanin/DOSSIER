@@ -113,6 +113,28 @@ fn abzugskoerper_beliebiger_form_im_schnitt() {
     assert!(!out.visible.iter().chain(&out.hidden).any(|e| apex(e.a) || apex(e.b)));
 }
 
+/// [G1] Freier Körper mit Bauteil (`componentId`): seine Schnittfläche trägt Füllung und Schraffur des
+/// Bauteils (SIA), ohne Bauteil die neutrale Körper-Füllung.
+#[test]
+fn koerper_mit_bauteil_im_schnitt() {
+    let mut p = sample();
+    let comp = p.components.iter().find(|k| p.hatch(&k.hatch_id).is_some_and(|h| h.pattern != HatchPattern::None && h.pattern != HatchPattern::Solid)).unwrap().clone();
+    let sq = vec![Vec2 { x: 20.0, y: 0.0 }, Vec2 { x: 22.0, y: 0.0 }, Vec2 { x: 22.0, y: 2.0 }, Vec2 { x: 20.0, y: 2.0 }];
+    p.extruded_solids = Some(vec![ExtrudedSolid { id: "k".into(), level_id: "eg".into(), category_code: "20".into(), points: sq, height: 1.0, ..Default::default() }]);
+    let l = LevelSpec { kind: "section".into(), line: Some([Vec2 { x: 19.0, y: 1.0 }, Vec2 { x: 23.0, y: 1.0 }]), ..Default::default() };
+    let body = |p: &Project| {
+        let out = compute_section(p, &l, &crate::solid_mesh::body_meshes(p)).unwrap().unwrap();
+        out.cuts.into_iter().find(|c| c.kind == Kind::Body).expect("Körper geschnitten")
+    };
+    let c = body(&p);
+    assert_eq!(c.fill.as_deref(), Some(BODY_FILL));
+    assert!(c.hatch.is_none() && c.component_id.is_none());
+    p.extruded_solids.as_mut().unwrap()[0].component_id = Some(comp.id.clone());
+    let c = body(&p);
+    assert_eq!(c.hatch.as_ref().map(|h| h.pattern), p.hatch(&comp.hatch_id).map(|h| h.pattern));
+    assert_eq!(c.component_id.as_deref(), Some(comp.id.as_str()));
+}
+
 /// [157] Wangentreppe hinter der Schnittebene (von vorn gesehen): neben den Tritten die Wangen (Ansichtskante
 /// aussen an der Treppe, bis zur Austrittshöhe) und der Handlauf beidseitig — vorher schwebten die Tritte
 /// als „graue Streifen“ ohne Wange und Geländer.

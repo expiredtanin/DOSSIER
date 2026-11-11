@@ -151,6 +151,10 @@ bekommt): alle Arten der Beschreibung sind einfache Extrusionen, Lofts, Rotation
 Flächen als Facetten (5 mm Sehnenabweichung); Booleans und Löcher über Manifold. Verworfen: die TS-Netze als
 Dokument-Cache in den Kern zu reichen (asynchron, fehlt in CLI und PDF, zweite Wahrheit). truck bleibt für das
 3D-Bild (exakte Rundungen), STEP, Kennwerte und Kollision; das 3D könnte später ebenfalls die Kern-Netze nehmen.
+Seit [G1] zeichnet auch der Grundriss alle freien Körper aus diesen Netzen (wie importierte Netze, `plan/mesh_plan.rs`:
+waagrechter Ebenenschnitt als Poché, Aufsicht/Überkopf über `hlr`), und Abzugskörper beliebiger Form sparen im
+Grundriss über Ebenenschnitt bzw. Grundriss im Plattenband aus (`plan/extras.rs::subtract_voids`, Manifold-Band +
+i_overlay-Vereinigung). Senkrechte Prismen-Abzugskörper bleiben beim Profil-Weg.
 
 ---
 
@@ -243,7 +247,7 @@ Beispiel: Die Plan-Ansicht zeigt das Erdgeschoss im Massstab 1:100.
    | Wände mit Öffnungen | `plan_walls()` in `plan/walls.rs` | Wandknoten `joins.rs`, Poché `plan/wall_poche.rs`, Symbole `plan/openings.rs` und `opening_geom.rs`, Wand an Stütze `plan/wall_columns.rs` |
    | Treppen | `plan_stairs()` in `plan/stairs.rs` | Symbol `plan/stair_symbol.rs`, Geometrie `stair.rs` und `kernel2d` |
    | Stützen, Bäume | `columns()`, `plan_trees()` | `plan/trees.rs`, `tree.rs` |
-   | Körper (Extrusionen) | `solids()` in `domains.rs` | Umriss auf Schnitthöhe |
+   | Körper (Extrusionen) | `solids()` in `domains.rs` | Kern-Netz (`solid_mesh.rs`) über `plan/mesh_plan.rs::plan_bodies()`: Ebenenschnitt (Poché, Bauteil-Schraffur aus `componentId`), Aufsicht, Überkopf ([G1]) |
    | 2D-Zeichnungen | `plan_drawings()` in `plan/drawings.rs` | Linien, Bögen, Bemassung, Texte, Blöcke |
    | Schnittführungen | `plan_section_lines()` in `plan/context.rs` | Symbol aus `plan/misc.rs` |
    | Kontext, Gelände | `plan_context_with()` in `plan/context.rs` | Höhenlinien `terrain.rs`, Netze `plan/mesh_plan.rs` |

@@ -130,6 +130,16 @@ pub fn poche_fill(p: HatchPattern) -> &'static str {
     }
 }
 
+/// [G1] Füllung und Schraffur der Schnittfläche eines freien Körpers aus seinem Bauteil (`componentId`):
+/// Bauteil-Schraffur (SIA) mit Vorder-/Hintergrund des Bauteils, Füllung wie die Stützen-Poché.
+/// `None` ohne (auflösbares) Bauteil — dann die neutrale Körper-Füllung mit Rückfall-Schraffur.
+pub fn body_component_style(p: &Project, s: &ExtrudedSolid) -> Option<(String, HatchRender)> {
+    let k = s.component_id.as_deref().filter(|id| !id.is_empty()).and_then(|id| p.component(id))?;
+    let h = resolve_hatch(p, &k.hatch_id, None, k.foreground.as_deref(), None)?;
+    let fill = k.background.as_deref().unwrap_or(poche_fill(h.pattern)).to_string();
+    Some((fill, h))
+}
+
 /// [141] Drehung einer wandbezogenen Schraffur. Kreuzschraffur und Diagonale unter 45° zur Achse sehen
 /// um 90° gedreht gleichwertig aus (45° zur Achse bleibt 45° zur Achse); sie drehen nur um den Rest der
 /// Wandrichtung modulo 90° mit — so laufen sie an rechtwinkligen Ecken, T- und Kreuzstössen (und zwischen

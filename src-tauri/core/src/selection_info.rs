@@ -1031,6 +1031,8 @@ fn solid_selection(root: &Map<String, Value>, s: &Value) -> J {
         .v("subtract", Value::Bool(subtract))
         .v("canSubtract", Value::Bool(brep.is_none() && taper < 1e-6))
         .n("baseOffset", num_or(field(s, "baseOffset"), 0.0))
+        // [G1] Bauteil der Schnittfläche (leer = neutrale Körper-Füllung).
+        .s("componentId", str_of(field(s, "componentId")).unwrap_or(""))
         .raw("floorId", s, "levelId")
         .o("floorName", floor_name(floor, field(s, "levelId")))
         .done();

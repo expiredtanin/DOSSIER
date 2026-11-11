@@ -21,7 +21,7 @@ Herkunft, kein Wegweiser.
 | `stairs.rs`, `stair_symbol.rs` | Treppen: Filter und Stil; Symbol (Tritte, Lauflinie, Pfeil, Bruchlinie) |
 | `drawings.rs` | freie 2D-Zeichnungen (Linie bis Bild, Bemassung, Blöcke), Zeichnungs-Stücke, kompakte Linien-Unterlage |
 | `context.rs` | Kontext (Höhenlinien, Fussabdrücke importierter Gebäude, Gelände) und Schnittführungs-Symbole |
-| `mesh_plan.rs` | importierte Netze im Grundriss: geschnitten, darunter, darüber |
+| `mesh_plan.rs` | importierte Netze und ([G1]) freie Körper über ihr Kern-Netz im Grundriss: geschnitten, darunter, darüber |
 | `ceiling_plan.rs` | Deckenspiegel als eigene Ebenen-Art |
 | `floor_finish.rs` | Bodenbelag-Muster nach Massstab |
 | `model_view.rs` | Modelldarstellung ([173]): Optionen je Bauteilart über dem Detailgrad, Rangfolge Element > Typ > Stufe > Basis |

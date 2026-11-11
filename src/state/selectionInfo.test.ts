@@ -59,7 +59,7 @@ describe("deriveSelection (Kern)", () => {
     expect(sel.extrudedSolid!.area).toBeCloseTo(3, 12);
     expect(sel.extrudedSolid!.spec).toMatchObject({ kind: "extrude", height: 2 });
     expect(Object.keys(sel.extrudedSolid!)).toEqual([
-      "height", "taper", "cornerRadius", "chamfer", "area", "spec", "subtract", "canSubtract", "baseOffset", "floorId", "floorName",
+      "height", "taper", "cornerRadius", "chamfer", "area", "spec", "subtract", "canSubtract", "baseOffset", "componentId", "floorId", "floorName",
     ]);
   });
 

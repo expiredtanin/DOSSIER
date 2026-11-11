@@ -276,6 +276,11 @@ export function buildElementAttributesHost(c: FlatHostOpts) {
       const id = selection.id;
       applyChange((p) => patchItem(p, "extrudedSolids", id, { baseOffset: Math.abs(offset) > 1e-9 ? offset : undefined }));
     },
+    onSetExtrudedSolidComponent: (componentId) => {
+      if (selection?.kind !== "extrudedSolid") return;
+      const id = selection.id;
+      applyChange((p) => patchItem(p, "extrudedSolids", id, { componentId: componentId || undefined }));
+    },
     // ── Stützen-Attribute (Tragwerk; nur bei selektierter Stütze) ──────────
     onSetColumnProfileKind: (kind) => {
       if (selection?.kind !== "column") return;

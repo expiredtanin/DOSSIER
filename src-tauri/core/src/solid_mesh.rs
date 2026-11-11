@@ -553,4 +553,22 @@ mod tests {
         let zs: Vec<f64> = b[0].positions.chunks_exact(3).map(|q| q[2]).collect();
         assert!(zs.iter().all(|z| (*z - 3.0).abs() < 1e-9 || (*z - 5.0).abs() < 1e-9), "{zs:?}");
     }
+
+    /// [G1] Kreis-Körper ohne Profil-Punkte (Brunnen im Musterhaus komplex) bekommen ein Netz (Zylinder).
+    #[test]
+    fn kreis_koerper_ohne_punkte() {
+        let p: Project = serde_json::from_value(json!({
+            "drawingLevels": [{"id": "ug", "name": "UG", "kind": "floor", "baseElevation": -3, "visible": true}],
+            "extrudedSolids": [{"id": "b", "type": "extrudedSolid", "levelId": "ug", "categoryCode": "20", "points": [], "circle": {"center": {"x": 4.5, "y": -6.5}, "r": 0.7}, "height": 0.6, "baseOffset": -0.1}]
+        }))
+        .unwrap();
+        let b = body_meshes(&p);
+        assert_eq!(b.len(), 1);
+        let m = Mesh { positions: b[0].positions.clone(), indices: b[0].indices.iter().map(|&i| i as u32).collect() };
+        let v = m.volume();
+        let exact = std::f64::consts::PI * 0.49 * 0.6;
+        assert!((v - exact).abs() < 0.02 * exact, "{v}");
+        let (lo, hi) = m.bounds().unwrap();
+        assert!((lo[2] + 3.1).abs() < 1e-9 && (hi[2] + 2.5).abs() < 1e-9);
+    }
 }

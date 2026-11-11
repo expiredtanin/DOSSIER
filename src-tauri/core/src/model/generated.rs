@@ -4589,6 +4589,11 @@ pub struct ExtrudedSolid {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional, inline)]
     pub brep: Option<ExtrudedSolidBrep>,
+    /// [G1] Bauteil (Component Manager) des Körpers: Füllung und SIA-Schraffur der Schnittfläche im
+    /// Grundriss und im Schnitt. Fehlt = neutrale Körper-Füllung mit Rückfall-Schraffur.
+    #[serde(rename = "componentId", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub component_id: Option<String>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,

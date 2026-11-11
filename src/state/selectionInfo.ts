@@ -361,6 +361,8 @@ export interface ExtrudedSolidInfo {
   canSubtract: boolean;
   /** Abstand der UK über der Geschoss-UK (m). */
   baseOffset: number;
+  /** [G1] Bauteil der Schnittfläche (Füllung/SIA-Schraffur in Grundriss und Schnitt); "" = keins. */
+  componentId: string;
   /** B-Rep-Beschreibung (Weltkoordinaten) für Kennwerte — `null`, wenn truck keine hat. */
   spec: SolidSpec | null;
   /** Geschoss, dessen `baseElevation` die UK des Körpers bestimmt. */
