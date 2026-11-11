@@ -408,7 +408,7 @@ fn daemm_muster_gehen_an_der_gehrung_ineinander_ueber() {
                 let bands: Vec<(String, Vec<Vec2>, super::prim::HatchRender)> = ps
                     .iter()
                     .filter_map(|q| match q {
-                        Primitive::Polygon { pts, hatch, wall_id: Some(w), .. } if hatch.pattern == pat => Some((w.clone(), pts.clone(), hatch.clone())),
+                        Primitive::Polygon { pts, hatch, wall_id: Some(w), .. } if hatch.pattern == pat => Some((w.clone(), pts.clone(), (**hatch).clone())),
                         _ => None,
                     })
                     .collect();
@@ -775,7 +775,7 @@ fn daemm_muster_im_wandring_eckquadrat_gehoert_einer_wand() {
             let bands: Vec<(Vec<Vec2>, super::prim::HatchRender)> = ps
                 .iter()
                 .filter_map(|q| match q {
-                    Primitive::Polygon { pts, hatch, wall_id: Some(_), .. } if hatch.pattern == pat => Some((pts.clone(), hatch.clone())),
+                    Primitive::Polygon { pts, hatch, wall_id: Some(_), .. } if hatch.pattern == pat => Some((pts.clone(), (**hatch).clone())),
                     _ => None,
                 })
                 .collect();

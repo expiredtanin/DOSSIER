@@ -35,7 +35,7 @@ pub(super) fn pick_band(pts: Vec<Vec2>, context_id: Option<&str>, section_id: Op
         fill: "none".into(),
         stroke: "none".into(),
         stroke_width_mm: 0.0,
-        hatch: no_hatch(),
+        hatch: Box::new(no_hatch()),
         greyed: None,
         opacity: None,
         no_stroke_edges: None,
@@ -225,7 +225,7 @@ pub(super) fn restyle_lines(p: &Project, a: &super::overrides::Actions, prims: &
         match q {
             Primitive::Line { color, weight_mm, dash: d, .. } => {
                 if let Some(c) = &a.color {
-                    *color = Some(c.clone());
+                    *color = Some(c.clone().into());
                 }
                 if let Some(w) = a.lineweight.filter(|w| w.is_finite() && *w >= 0.0) {
                     *weight_mm = w;
@@ -595,6 +595,8 @@ fn terrain_contours(c: &Ctx, t: &TerrainMesh, out: &mut Vec<Primitive>, house: &
     }
     let key: LinesKey = (st.key, iv.to_bits(), every, c.a.scale.max(1.0).to_bits(), h.finish(), obst.sig());
     if let Some(v) = CONTOUR_LINES.with(|m| m.borrow().iter().find(|(k, _)| *k == key).map(|(_, v)| v.clone())) {
+        // [179] Mit Luft: sonst verdoppelt das spätere Anhängen (Pick-Flächen) den ganzen Puffer (~20 MB kopieren).
+        out.reserve(v.len() + 4096);
         out.extend(v.iter().cloned());
         return;
     }

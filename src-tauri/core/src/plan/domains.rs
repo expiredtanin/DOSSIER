@@ -317,7 +317,7 @@ pub(super) fn polygon(pts: Vec<Vec2>, fill: &str, stroke: &str, w: f64, hatch: H
         fill: fill.into(),
         stroke: stroke.into(),
         stroke_width_mm: w,
-        hatch,
+        hatch: Box::new(hatch),
         greyed,
         opacity: None,
         no_stroke_edges,
@@ -1517,7 +1517,7 @@ pub(super) fn columns(c: &Ctx, out: &mut Vec<Primitive>) {
                     dash: None,
                     zigzag: None,
                     motif: None,
-                    color: Some(stroke.to_string()),
+                    color: Some(stroke.to_string().into()),
                     drawing_id: None,
                     opening_id: None,
                     stair_id: None,
@@ -2317,7 +2317,7 @@ mod tests {
         for q in &d.stairs {
             if let Primitive::Line { a, b, cls, .. } = q {
                 if matches!(cls.as_str(), "stair-run" | "stair-arrow" | "stair-tread" | "stair-break") {
-                    seen.insert(cls.clone());
+                    seen.insert(cls.to_string());
                     let m = Vec2 { x: (a.x + b.x) / 2.0, y: (a.y + b.y) / 2.0 };
                     assert_eq!(o.clearance(m, 0.001, 0.001), 0.0, "{cls}");
                 }
@@ -2790,7 +2790,7 @@ mod tests {
         r.ceilings
             .iter()
             .filter_map(|q| match q {
-                Primitive::Line { a, b, cls, weight_mm, color, .. } if cls == "floor-finish-pattern" => Some((*a, *b, *weight_mm, color.clone().unwrap_or_default())),
+                Primitive::Line { a, b, cls, weight_mm, color, .. } if cls == "floor-finish-pattern" => Some((*a, *b, *weight_mm, color.as_ref().map(|c| c.to_string()).unwrap_or_default())),
                 _ => None,
             })
             .collect()
@@ -3091,7 +3091,7 @@ mod tests {
         let lines: Vec<(String, Vec2, Vec2, bool)> = st
             .iter()
             .filter_map(|q| match q {
-                Primitive::Line { a, b, cls, dash, stair_id, .. } if stair_id.as_deref() == Some("ST1") => Some((cls.clone(), *a, *b, dash.as_ref().is_some_and(|d| d.is_some()))),
+                Primitive::Line { a, b, cls, dash, stair_id, .. } if stair_id.as_deref() == Some("ST1") => Some((cls.to_string(), *a, *b, dash.as_ref().is_some_and(|d| d.is_some()))),
                 _ => None,
             })
             .collect();

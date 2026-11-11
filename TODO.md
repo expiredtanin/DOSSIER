@@ -476,9 +476,13 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
 - ◐ **[179]** Leistung messen und gezielt optimieren (11.11.2026, Linux-Container, `bench159`, Musterhaus komplex, Mittel ms).
   Erledigt: Raster-Hindernisse (Masse/Koten, Zeichnungen, Achsblasen) und Gebäuderinge je Plan einmal im `Ctx` statt je Raster
   und je Aufrufer neu; Masse/Koten und Zeichnungen in einem Durchgang. eg 1:100 83→57, 1:50 90→~62, mit Schatten 116→~90,
-  Schnittlinien 14.6→6.8, Zeichnungen 11.9→10; Wand verschieben + Plan 90→65 / 67→43. Goldens byte-gleich. Offen (grösste
-  Fresser): Kontext/Gelände 25 ms (Cache-Treffer klont 29–35k Primitive mit Strings, 6–25 ms: `cls`/`color` als `Rc<str>`
-  oder gepufferte Treffer), Schatten 30 ms, Räume/Stempel 1:50 14 ms, Kleine Änderung baut den Plan noch voll (kein Teil-Cache). Mac nicht gemessen. · M
+  Schnittlinien 14.6→6.8, Zeichnungen 11.9→10; Wand verschieben + Plan 90→65 / 67→43. Goldens byte-gleich.
+  Etappe 2 (11.11., Container, Mittel ≥3 Läufe, ohne LTO gebaut): `Primitive` von 952 auf 400 Byte (Schraffur im Polygon als
+  `Box<HatchRender>`), `cls`/`color` der Linien/Bögen als geteilte `Sstr` (Arc, Clone = Zähler); Cache-Treffer der Höhenlinien
+  reserviert Luft (vorher verdoppelte das Anhängen der Pick-Flächen den 30k-Puffer: 16 ms). Kontext/Gelände 1:100 24→4 ms,
+  1:50 18→6, mit Schatten 22→7; eg 1:100 61→41, 1:50 65→43, mit Schatten 88→83 (Maschine ausgelastet, Schatten schwankt). JSON/Puffer
+  byte-gleich (Goldens ungeändert). Offen: Schatten/Baurecht 25–40 ms, Räume/Stempel 1:50 11–15 ms, kleine Änderung baut den Plan noch voll
+  (kein Teil-Cache; Gelände-Höhenlinien bei geändertem Hindernis-Schlüssel neu: ~35 ms). Mac nicht gemessen. · M
 - ◐ **[58]** Inkrementelle Ableitung. 3D ist inkrementell; Schnitt/Ansicht (~100 ms) und Plan-Szene (`planToRenderScene`
   ~30 ms) noch voll; Gehrung über alle Wände je Update (~9 ms); Explosion ohne Cache; Upload/Frame mit echter GPU
   nicht gemessen. · L
