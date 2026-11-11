@@ -53,7 +53,13 @@ export type ShortcutId =
   | "floorUp"
   | "showSelection3d"
   | "hideSelection3d"
-  | "objectSettings";
+  | "objectSettings"
+  | "duplicate"
+  | "toggleLock"
+  | "hideSelectionLayers"
+  | "showAllLayers"
+  | "fitAll"
+  | "fitSelection";
 
 export type ShortcutCategory =
   | "general"
@@ -217,6 +223,13 @@ export const SHORTCUT_DEFS: ShortcutDef[] = [
   { id: "hideSelection3d", category: "navigation", labelKey: "shortcut.hideSelection3d", defaultCombo: "mod+4" },
   // [189] Einstellungsdialog des gewählten Objekts (Archicad Cmd+T), hier schlicht „t".
   { id: "objectSettings", category: "edit", labelKey: "shortcut.objectSettings", defaultCombo: "t", bareKeyOnly: true },
+  // [190] Weitere Archicad-Kürzel (Esc = Auswahl leeren / Befehl abbrechen ist fest verdrahtet, s. oben).
+  { id: "duplicate", category: "edit", labelKey: "shortcut.duplicate", defaultCombo: "mod+d" },
+  { id: "toggleLock", category: "edit", labelKey: "shortcut.toggleLock", defaultCombo: "mod+l" },
+  { id: "hideSelectionLayers", category: "navigation", labelKey: "shortcut.hideSelectionLayers", defaultCombo: "mod+shift+h" },
+  { id: "showAllLayers", category: "navigation", labelKey: "shortcut.showAllLayers", defaultCombo: "mod+shift+a" },
+  { id: "fitAll", category: "navigation", labelKey: "shortcut.fitAll", defaultCombo: "mod+0" },
+  { id: "fitSelection", category: "navigation", labelKey: "shortcut.fitSelection", defaultCombo: "mod+shift+f" },
 ];
 
 const DEFS_BY_ID = new Map<ShortcutId, ShortcutDef>(SHORTCUT_DEFS.map((d) => [d.id, d]));

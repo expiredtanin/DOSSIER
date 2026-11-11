@@ -1013,6 +1013,110 @@ pub fn join_ops(root: &Map<String, Value>, pr: &Project, ids_sel: &[String]) -> 
     ops
 }
 
+/// Ein Wandende, das beim Verbinden auf einen Achsschnittpunkt `x` rückt.
+struct Move {
+    i: usize,
+    at_end: bool,
+    x: P,
+}
+
+/// Lage des Achsschnittpunkts zu einer Wand: nahe einem Ende (Abstand, Ende?) oder im Innern.
+enum Spot {
+    End(f64, bool),
+    Inner,
+}
+
+fn spot(ax: &Axis, x: P, tol: f64) -> Option<Spot> {
+    let s = ax.local(x).0;
+    let (d0, d1) = (s.abs(), (s - ax.len).abs());
+    if d0.min(d1) <= tol {
+        Some(Spot::End(d0.min(d1), d1 < d0))
+    } else if s > 0.0 && s < ax.len {
+        Some(Spot::Inner)
+    } else {
+        None
+    }
+}
+
+/// Verbinden von Ecken ([190], Archicad-Art): gewählte gerade Wände eines Geschosses, deren Achsen sich
+/// nicht sauber treffen, werden bis zum Achsschnittpunkt verlängert bzw. gekürzt. Zwei Enden nahe am
+/// Schnittpunkt ergeben eine L-Ecke (beide rücken), ein Ende nahe am Schnittpunkt, der im Innern der
+/// anderen Wand liegt, einen T-Stoss (nur das Ende rückt). Toleranz je Paar: grösser von 0.5 m und der
+/// doppelten Wanddicke. Jedes Ende rückt höchstens einmal (nahe Paare zuerst). Die Gehrung bzw. der
+/// Anschluss folgt aus den Enden (`joins.rs`); Öffnungen und Bemassung führt [`commit`] nach (wie
+/// Trim/Extend — Öffnungen bleiben im Plan stehen). Wände in `skip` (schon kollinear verkettet) und
+/// Bogenwände bleiben aussen vor. Parallele Wände (auch versetzte) werden nicht angefasst.
+pub fn connect_ops(root: &Map<String, Value>, pr: &Project, ids_sel: &[String], skip: &[String]) -> Vec<Op> {
+    let sel: Vec<(&Wall, Axis)> = walls(pr)
+        .iter()
+        .filter(|w| editable(w) && ids_sel.contains(&w.id) && !skip.contains(&w.id))
+        .filter_map(|w| Axis::of(w).filter(|a| a.arc.is_none()).map(|a| (w, a)))
+        .collect();
+    // Kandidaten: (Kosten, Bewegungen)
+    let mut cands: Vec<(f64, Vec<Move>)> = Vec::new();
+    for i in 0..sel.len() {
+        for j in i + 1..sel.len() {
+            let ((wi, ai), (wj, aj)) = (&sel[i], &sel[j]);
+            if wi.floor_id != wj.floor_id {
+                continue;
+            }
+            let den = cross(ai.u, aj.u);
+            if den.abs() < 0.02 {
+                continue;
+            }
+            let t = cross(P::new(aj.a.x - ai.a.x, aj.a.y - ai.a.y), aj.u) / den;
+            let x = P::new(ai.a.x + ai.u.x * t, ai.a.y + ai.u.y * t);
+            if !fin(x) {
+                continue;
+            }
+            let thick = |w: &Wall| {
+                let (lo, hi) = faces(pr, w);
+                (hi - lo).abs()
+            };
+            let tol = 0.5_f64.max(2.0 * thick(wi).max(thick(wj)));
+            match (spot(ai, x, tol), spot(aj, x, tol)) {
+                (Some(Spot::End(da, ea)), Some(Spot::End(db, eb))) => cands.push((da + db, vec![Move { i, at_end: ea, x }, Move { i: j, at_end: eb, x }])),
+                (Some(Spot::End(da, ea)), Some(Spot::Inner)) => cands.push((da, vec![Move { i, at_end: ea, x }])),
+                (Some(Spot::Inner), Some(Spot::End(db, eb))) => cands.push((db, vec![Move { i: j, at_end: eb, x }])),
+                _ => {}
+            }
+        }
+    }
+    cands.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut span: Vec<(f64, f64)> = sel.iter().map(|(_, a)| (0.0, a.len)).collect();
+    let mut used: Vec<(usize, bool)> = Vec::new();
+    for (_, moves) in &cands {
+        if moves.iter().any(|m| used.contains(&(m.i, m.at_end))) {
+            continue;
+        }
+        // Keine Wand darf dabei (fast) verschwinden.
+        let next: Vec<(usize, (f64, f64))> = moves
+            .iter()
+            .map(|m| {
+                let s = sel[m.i].1.local(m.x).0;
+                (m.i, if m.at_end { (span[m.i].0, s) } else { (s, span[m.i].1) })
+            })
+            .collect();
+        if next.iter().any(|(_, (a, b))| !(b - a >= 0.05)) {
+            continue;
+        }
+        for (m, (i, sp)) in moves.iter().zip(next) {
+            span[i] = sp;
+            used.push((m.i, m.at_end));
+        }
+    }
+    let plans: Vec<Plan> = sel
+        .iter()
+        .zip(&span)
+        .filter(|((_, a), (s0, s1))| s0.abs() > EPS_S || (s1 - a.len).abs() > EPS_S)
+        .map(|((w, a), sp)| Plan { src: w, ax: a.clone(), pieces: vec![*sp], follow_ends: true })
+        .collect();
+    if plans.is_empty() {
+        return vec![];
+    }
+    commit(root, pr, &Edit { plans, extra: vec![] }, &mut IdGen::new("join"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1394,5 +1498,64 @@ mod tests {
         let a = w_of(&n, "a");
         assert!(close(xy_of(&a["end"]), (5.0, 0.0)));
         assert!((a["bulge"].as_f64().unwrap() + 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn verbinden_l_ecke_mit_luecke_und_ueberstand() {
+        // a endet 0.3 vor der Ecke, b beginnt 0.3 daneben; Fenster in a bei 1..2 und in b (ab Start).
+        let r = project(
+            vec![wall("a", (0.0, 0.0), (5.7, 0.0), None), wall("b", (6.0, 0.3), (6.0, 4.4), None)],
+            vec![opening("o1", "a", 1.0, 1.0), opening("o2", "b", 1.0, 1.0)],
+            vec![],
+        );
+        let n = apply(&r, connect_ops(&r, &typed(&r), &["a".into(), "b".into()], &[]));
+        assert!(close(xy_of(&w_of(&n, "a")["end"]), (6.0, 0.0)));
+        assert!(close(xy_of(&w_of(&n, "b")["start"]), (6.0, 0.0)));
+        assert!(close(xy_of(&w_of(&n, "a")["start"]), (0.0, 0.0)));
+        assert!(close(xy_of(&w_of(&n, "b")["end"]), (6.0, 4.4)));
+        // Öffnungen bleiben im Plan stehen: o2 lag bei y = 1.3, jetzt Position 1.3 ab neuem Start.
+        let o2 = arr(n.get("openings")).iter().find(|o| o["id"] == "o2").unwrap();
+        assert!((o2["position"].as_f64().unwrap() - 1.3).abs() < 1e-9);
+        let o1 = arr(n.get("openings")).iter().find(|o| o["id"] == "o1").unwrap();
+        assert!((o1["position"].as_f64().unwrap() - 1.0).abs() < 1e-9);
+        // Überstand: a ragt über b hinaus → gekürzt.
+        let r = project(vec![wall("a", (0.0, 0.0), (6.4, 0.0), None), wall("b", (6.0, 0.0), (6.0, 4.0), None)], vec![], vec![]);
+        let n = apply(&r, connect_ops(&r, &typed(&r), &["a".into(), "b".into()], &[]));
+        assert!(close(xy_of(&w_of(&n, "a")["end"]), (6.0, 0.0)));
+        // Schon sauber oder zu weit weg: nichts.
+        let r = project(vec![wall("a", (0.0, 0.0), (6.0, 0.0), None), wall("b", (6.0, 0.0), (6.0, 4.0), None)], vec![], vec![]);
+        assert!(connect_ops(&r, &typed(&r), &["a".into(), "b".into()], &[]).is_empty());
+        let r = project(vec![wall("a", (0.0, 0.0), (4.0, 0.0), None), wall("b", (6.0, 0.0), (6.0, 4.0), None)], vec![], vec![]);
+        assert!(connect_ops(&r, &typed(&r), &["a".into(), "b".into()], &[]).is_empty());
+    }
+
+    #[test]
+    fn verbinden_t_stoss_und_kollinear_unberuehrt() {
+        // a endet 0.3 vor der Querwand b (die weiter durchläuft): nur a rückt, b bleibt.
+        let r = project(vec![wall("a", (0.0, 0.0), (5.7, 0.0), None), wall("b", (6.0, -3.0), (6.0, 3.0), None)], vec![opening("o", "a", 1.0, 1.0)], vec![]);
+        let n = apply(&r, connect_ops(&r, &typed(&r), &["a".into(), "b".into()], &[]));
+        assert!(close(xy_of(&w_of(&n, "a")["end"]), (6.0, 0.0)));
+        assert!(close(xy_of(&w_of(&n, "b")["start"]), (6.0, -3.0)));
+        assert!(close(xy_of(&w_of(&n, "b")["end"]), (6.0, 3.0)));
+        assert_eq!(arr(n.get("openings")).len(), 1);
+        // Kollinear und parallel versetzt: connect_ops fasst nichts an.
+        let r = project(vec![wall("a", (0.0, 0.0), (4.0, 0.0), None), wall("b", (4.2, 0.0), (8.0, 0.0), None), wall("c", (4.0, 0.5), (8.0, 0.5), None)], vec![], vec![]);
+        assert!(connect_ops(&r, &typed(&r), &["a".into(), "b".into(), "c".into()], &[]).is_empty());
+    }
+
+    #[test]
+    fn verbinden_mehr_als_zwei_waende_und_ein_undo_schritt() {
+        // U-Form mit Lücken: a–b und b–c.
+        let r = project(
+            vec![wall("a", (0.0, 0.0), (5.8, 0.0), None), wall("b", (6.0, 0.2), (6.0, 3.8), None), wall("c", (6.0, 4.0), (0.2, 4.0), None)],
+            vec![],
+            vec![],
+        );
+        let ops = connect_ops(&r, &typed(&r), &["a".into(), "b".into(), "c".into()], &[]);
+        let n = apply(&r, ops);
+        assert!(close(xy_of(&w_of(&n, "a")["end"]), (6.0, 0.0)));
+        assert!(close(xy_of(&w_of(&n, "b")["start"]), (6.0, 0.0)));
+        assert!(close(xy_of(&w_of(&n, "b")["end"]), (6.0, 4.0)));
+        assert!(close(xy_of(&w_of(&n, "c")["start"]), (6.0, 4.0)));
     }
 }

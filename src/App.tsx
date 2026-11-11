@@ -64,8 +64,11 @@ import {
   useActiveToolKeys,
   useElementClipboardShortcut,
   useObjectSettingsShortcut,
+  useFitShortcuts,
   useUndoRedoShortcut,
 } from "./state/useKeyboardShortcuts";
+import { registerSelectionActions } from "./state/selectionActions";
+import { fitView as fitView3d } from "./viewport/cameraBridge";
 import { useProjectFileActions } from "./state/useProjectFileActions";
 import { useModelImport } from "./state/useModelImport";
 import { useTextTarget } from "./state/useTextTarget";
@@ -555,6 +558,11 @@ export default function App() {
   // Zoom-Buttons der Oberleiste an die montierte Plan-Ansicht weiterreichen.
   const fitPlan = () => planViewRef.current?.fit();
   const fitSelection = () => planViewRef.current?.fitSelection();
+  // [190] Cmd/Ctrl+0 alles einpassen, Cmd/Ctrl+Shift+F auf Auswahl (ohne Plan-Ansicht: 3D-Kamera).
+  const fitAllKey = () => (planViewRef.current ? planViewRef.current.fit() : fitView3d());
+  const fitSelectionKey = () => (planViewRef.current ? planViewRef.current.fitSelection() : fitView3d());
+  registerSelectionActions({ fitAll: fitAllKey, fitSelection: fitSelectionKey });
+  useFitShortcuts(fitAllKey, fitSelectionKey, shortcutOverrides);
   // Papier-Massstab anwenden: gewählten Nenner merken UND den Plan-Zoom exakt
   // auf 1:N setzen (PlanView rechnet die viewBox aus N + Canvas + dpi).
   const applyScale = (n: number) => {

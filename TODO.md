@@ -88,6 +88,21 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
 - ○ **[193]** Anwählen/Bearbeiten von Gelände & Co. (12.11., Maintainer, PRIO): Cmd+A lässt Kontext-Elemente (Gelände, Höhenlinien, Baugrube, Kontext) bewusst aus (`useKeyboardShortcuts.ts`) — seit [181] normale Elemente → mit auswählen (gesperrte nicht). Nach Löschen bleibt eine Belag-Schraffur, die weder anwählbar noch löschbar ist (vermutlich Decke/Raum anderes Geschoss) → klären: sichtbar ⇒ anwählbar. Baugrube im Grundriss nicht anwähl-/verschiebbar → Pick, Verschieben, Eckgriffe. Gelände nicht anpassbar → Anwählen, Verschieben, Höhe versetzen; Höhenlinien: Höhe je Linie, Punkte ziehen; Netz: verschieben/versetzen/zuschneiden. e2e für alles. · M
 - ○ **[192]** Ebenen/Klassen schnell schalten (12.11., Maintainer): Rechtsklick im Ebenen-Panel „Nur diese Ebene anzeigen“, „Diese ausblenden“, „Alle einblenden“; Rechtsklick auf Objekt (Plan/Schnitt/3D) „Ebene des Objekts isolieren/ausblenden“, „Alle Ebenen einblenden“ (stellt Zustand vor dem Isolieren wieder her); optional Kürzel. Sonnet. · S
 - ○ **[191]** Runde Decken/Dächer (12.11., Maintainer-Screenshot Erker 3D): Decken-/Dachumrisse sind Polygone (Beispiel: `arcPts(…, 14)`) → facettierte Kanten; Bogenwände ohne Deckenauflager [178] → Decke ragt durch die runde Wand (Flackern/Linien). Umsetzen: Bögen im Umriss (Bulge je Kante wie Wände) für Decken/Dächer/Räume oder Ableitung aus angrenzenden Bogenwänden, feine Tessellierung + weiche Normalen im 3D, echte Bögen in Plan/Schnitt/Export; [178] auch an Bogenwänden; Beispielprojekt auf echte Bögen umstellen. Opus. · L
+- ◐ **[190]** Verbinden wie Archicad + Kürzel (12.11., Wunsch Maintainer). Umgesetzt (12.11.): Cmd/Ctrl+J („join") schliesst bei
+  gewählten Wänden auch Ecken: nicht parallele gerade Wände eines Geschosses, deren Enden bis 0.5 m (bzw. 2 × Wanddicke)
+  vom Achsschnittpunkt liegen (Lücke oder Überstand), werden dort verlängert/gekürzt (L-Ecke, beide Enden); Ende nahe einer
+  anderen Wand, deren Achse im Innern getroffen wird, ergibt einen T-Stoss (nur dieses Ende rückt). Mehr als zwei Wände: alle
+  Paare, nahe Paare zuerst, jedes Ende höchstens einmal; kollinear wie bisher zusammengefasst (dann nicht noch einmal
+  angefasst). Gehrung/Anschluss aus `joins.rs`; Öffnungen und Bemassung führt `cmd_wall_edit::commit` nach (wie Trim/Extend:
+  Öffnungen bleiben im Plan stehen, [188]), ein Undo-Schritt; ohne Wirkung Hinweis `cmd.join.nothing`. Kern
+  `cmd_wall_edit.rs::connect_ops`; Tests `verbinden_*`; e2e `wallJoin190.spec.ts`. Das Tastenkürzel reagiert jetzt auch bei
+  reiner Wandauswahl. Neue umbelegbare Kürzel (Einstellungen): Cmd+D Duplizieren (Kopie 0.5 m versetzt, danach gewählt),
+  Cmd+L Sperren/Entsperren, Cmd+Shift+H Ebenen der Auswahl ausblenden, Cmd+Shift+A alle Ebenen einblenden, Cmd+0 alles
+  einpassen, Cmd+Shift+F auf Auswahl einpassen (ohne Plan: 3D-Kamera); alle im nativen Menü (`state/selectionActions.ts`).
+  Offen: Bogenwände werden nicht verbunden; T-Stoss nur bis zur Achse (nicht Fläche); „Auswahl ausblenden" im Grundriss
+  schaltet Ebenen (persistent, undo-bar), nicht einzelne Elemente temporär; kein Cmd+E/F2 (keine Funktion dahinter);
+  nicht in der Tauri-App geprüft. · S
+- ○ **[189]** Panels neu ordnen + Einstellungsdialog (12.11., Maintainer): Attribute-Panel unten links nur Gestaltung (Stift, Füllung, Linienstil, Schraffur); BIM-/Bauteil-Infos (Typ, Schichten, Masse, Kennwerte, IFC/Psets, Material …) in die Objekt-Info. Taste T bei Auswahl öffnet direkt den Einstellungsdialog des Objekts (wie Archicad Cmd+T), v. a. für Fenster/Türen, deren Einstellungen heute nur über das Attribute-Panel erreichbar sind. · M
 - ○ **[187]** Griffe im Schnitt/in der Ansicht (12.11., Maintainer): angewählte Elemente haben dort kaum Fasspunkte (Decken, Gelände, Dächer …). Wie Archicad: Decke OK/UK (Höhe/Dicke), Wand OK (Höhe), Öffnung Brüstung/Sturz, Dach Traufe/First bzw. Neigung, Treppe An-/Austritt, Gelände-Profilpunkte (falls Modell es erlaubt); ein Undo-Schritt je Zug, Fang + Tab-Eingabe wie im Grundriss. · L
   (Navigator, Kürzel, Ebenen-Panel) behält Zoom und Ausschnitt exakt — Geschosse teilen sich den Einpass-Schlüssel
   (`viewTabs.ts::planFitKey`, `PlanView` `fitKey`; Schnitt/Ansicht/Zeichnung/neues Projekt passen weiter ein).

@@ -54,7 +54,10 @@ pub fn result(root: &Map<String, Value>, p: &Project, text: &str) -> Result<Grip
     if v.get("group").is_none() && v.get("cmd").and_then(Value::as_str) == Some("transform") {
         return Ok(crate::cmd_transform::transform_result(root, p, &parse(&v, "transform")?));
     }
-    Ok(GripResult { ops: ops(root, p, text)?, notice: None })
+    let ops = ops(root, p, text)?;
+    // [190] Verbinden ohne Wirkung: Hinweis statt stillem Nichts.
+    let notice = (ops.is_empty() && v.get("cmd").and_then(Value::as_str) == Some("join")).then_some("cmd.join.nothing");
+    Ok(GripResult { ops, notice })
 }
 
 /// Wie [`result`], als Antwort-JSON `{"ops": […], "notice": …}` (Zahlen mit Nicht-endlich-Marken).

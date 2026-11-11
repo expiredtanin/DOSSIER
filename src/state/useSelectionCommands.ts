@@ -18,7 +18,10 @@ import { applyDrawingStyleOps, readDrawingStyle } from "../editors/matchProps";
 import { cutSegmentOps, splitOps } from "../editors/splitJoin";
 import type { BooleanResult } from "../editors/booleanOps";
 import type { EngineView } from "../commands/engine";
-import { clearKinds, fromIdLists, hasTransformable, isEmpty, toMembership } from "./selection";
+import { clearKinds, fromIdLists, hasTransformable, isEmpty, toMembership, toTransformSelection } from "./selection";
+import { registerSelectionActions } from "./selectionActions";
+import { transformOps } from "../tools/transform";
+import { addedIds, type PastedIds } from "../editors/elementClipboard";
 import { containingGroupId, EMPTY_MEMBERSHIP } from "./groupActions";
 import type { GroupMembership, MemberKind } from "./groupActions";
 import { isLocked, lockMembersOps } from "./objectLock";
@@ -28,6 +31,7 @@ import {
   useBooleanOpsShortcut,
   useGroupShortcut,
   useSelectAllAndDeleteShortcut,
+  useSelectionActionShortcuts,
   useSplitJoinShortcut,
   useTransformShortcuts,
   useViewNavigationShortcuts,
@@ -192,7 +196,7 @@ export function useSelectionCommands(opts: {
 
   // Ctrl/Cmd+S = Split, Ctrl/Cmd+J = Join der selektierten Drawing2D-Elemente —
   // siehe state/useKeyboardShortcuts.ts.
-  useSplitJoinShortcut(selection.drawings, engine, runSplit, setSelection, shortcutOverrides);
+  useSplitJoinShortcut(selection.drawings, engine, runSplit, setSelection, shortcutOverrides, selection.walls);
 
   // Ctrl/Cmd+Shift+U/D/I = Boolean Vereinigung/Subtraktion/Schnitt — siehe
   // state/useKeyboardShortcuts.ts. (Ctrl/Cmd+C/V-Kopieren/Einfügen folgt weiter
@@ -258,6 +262,20 @@ export function useSelectionCommands(opts: {
     const codes = new Set(selectionLayerCodes);
     applyChange((p) => fieldOps(p, "layers", setCategoriesVisible(p.layers, codes, false)));
   };
+  // [190] Alle Ebenen wieder einblenden (Cmd/Ctrl+Shift+A, Gegenstück zu „Ebenen der Auswahl ausblenden").
+  const showAllLayers = () =>
+    applyChange((p) => fieldOps(p, "layers", setCategoriesVisible(p.layers, new Set(p.layers.map((l) => l.code)), true)));
+  // [190] Cmd/Ctrl+D: gewählte Elemente duplizieren — Kopie mit Versatz (0.5 m rechts/unten), die Kopie ist danach gewählt.
+  const duplicateSelection = () => {
+    if (!hasTransformable(selection)) return;
+    const out: { ids?: PastedIds } = {};
+    applyChange((p) => {
+      const ops = transformOps(p, toTransformSelection(selection), "move", [{ x: 0, y: 0 }, { x: 0.5, y: -0.5 }], "copy", 1);
+      out.ids = addedIds(ops);
+      return ops;
+    });
+    if (out.ids) setSelection(fromIdLists(out.ids));
+  };
   const isolateSelectionLayers = () => {
     const { selectionLayerCodes } = menuState(true);
     if (selectionLayerCodes.length === 0) return;
@@ -307,6 +325,24 @@ export function useSelectionCommands(opts: {
   );
   // [185] Cmd/Ctrl+3/4/5/6: Auswahl in 3D zeigen/ausblenden, Geschoss tiefer/höher.
   useViewNavigationShortcuts(shortcutOverrides);
+  // [190] Verbinden (Cmd/Ctrl+J) auch aus dem nativen Menü: dieselbe Aktion wie das Tastenkürzel.
+  const joinSelection = () => {
+    if (selection.drawings.length + selection.walls.length === 0) return;
+    engine.start("join");
+    setSelection({ drawings: [], walls: [] });
+  };
+  registerSelectionActions({
+    duplicate: duplicateSelection,
+    toggleLock: toggleSelectionLock,
+    join: joinSelection,
+    hideLayers: hideSelectionLayers,
+    showAllLayers,
+  });
+  // [190] Cmd/Ctrl+D/L, Cmd/Ctrl+Shift+H/A.
+  useSelectionActionShortcuts(
+    { duplicate: duplicateSelection, toggleLock: toggleSelectionLock, hideLayers: hideSelectionLayers, showAllLayers },
+    shortcutOverrides,
+  );
 
   // Doppelklick auf ein gruppiertes Element → Gruppe betreten (Isolation):
   // alles ausserhalb wird gedimmt/gesperrt gerendert (s. viewportContent.tsx/

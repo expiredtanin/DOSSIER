@@ -68,6 +68,7 @@ in `ProjectSync`.
 | `viewSnapshots.ts`, `viewSnapshotFolders.ts`, `viewTabs.ts` | Ausschnitte, ihre Ordner, Zeichnungs-Reiter (mit dem Projekt als `uiState.viewTabs` gesichert, [136]); Reiter-Arten und Navigations-Regeln ([182]) |
 | `tabNavigation.ts` | Navigator/Grundriss-/3D-Knöpfe/Layouts wählen den passenden Reiter (`openLevel`, `switchViewType`, `openLayoutTab`, [182]) |
 | `view3dFilter.ts` | 3D-Element-Filter ([185], rein UI): „Auswahl in 3D zeigen" (Cmd/Ctrl+3) und temporär ausgeblendete Elemente (Cmd/Ctrl+4); Geschoss-Kürzel Cmd/Ctrl+5/6 in `tabNavigation.ts` |
+| `selectionActions.ts` | Ablage für Aktionen mit mehreren Eingängen ([190]): Duplizieren, Sperren, Verbinden, Ebenen aus-/einblenden, Einpassen — Tastenkürzel und natives Menü rufen dieselben Funktionen (`runSelectionAction`) |
 | `groupActions.ts` | Gruppen erzeugen, auflösen, betreten |
 | `exportScope.ts`, `objectLock.ts` | Export „nur Auswahl"; Objekt-Sperre |
 | `autosave.ts`, `projectStore.ts`, `recentProjects.ts`, `startupGuard.ts` | Autosave und Wiederherstellen, IndexedDB, zuletzt geöffnet, Start-Protokoll |
