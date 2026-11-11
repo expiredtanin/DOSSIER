@@ -6370,6 +6370,15 @@ pub struct Excavation {
     #[serde(rename = "edgeShoring", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub edge_shoring: Option<Vec<bool>>,
+    /// [68] Art des Verbaus auf den verbauten Kanten: `sheetPile` (Spundwand, Vorgabe), `soldierPile` (Rühlwand),
+    /// `borePile` (Bohrpfahlwand). Bestimmt Vorgabe-Dicke und Schraffur im Schnitt und Grundriss.
+    #[serde(rename = "shoringKind", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub shoring_kind: Option<String>,
+    /// [68] Dicke der Verbauwand in m (nach aussen von der Sohlkante); fehlt = Vorgabe der Art.
+    #[serde(rename = "shoringThickness", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub shoring_thickness: Option<f64>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,

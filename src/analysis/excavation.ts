@@ -18,6 +18,12 @@ export interface ExcavationQuantity {
   fill: number;
   /** Hinterfüllung (m³). */
   backfill: number;
+  /** Arbeitsraum: verlangte Breite (m, 0 = keiner), kleinster Abstand Umriss–Sohle, eingehalten? */
+  workingSpace: number;
+  workingSpaceMin: number;
+  workingSpaceOk: boolean;
+  /** Stellen mit fehlender Arbeitsraum-Breite (Modell-x/y). */
+  workingSpaceSpots: [number, number][];
 }
 
 export function excavationQuantities(project: Project): ExcavationQuantity[] {

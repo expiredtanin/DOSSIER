@@ -365,6 +365,8 @@ pub(super) fn outside_bb(a: Vec2, b: Vec2, rings: &[Vec<Vec2>], bb: [f64; 4]) ->
     ts.windows(2).filter(|w| w[1] - w[0] > 1e-9 && !rings.iter().any(|r| inside(at((w[0] + w[1]) / 2.0), r))).map(|w| (at(w[0]), at(w[1]))).collect()
 }
 const EXCAVATION_INK: &str = "#1f242c";
+/// [68] Warnmarke: Arbeitsraum zu schmal.
+const WS_WARN_INK: &str = "#d6001c";
 
 fn ink_line(a: Vec2, b: Vec2, w: f64, color: &str, dash: Option<Vec<f64>>) -> Primitive {
     Primitive::Line { a, b, cls: "context-line".into(), weight_mm: w, dash: dash.map(Some), zigzag: None, motif: None, color: Some(color.into()), drawing_id: None, opening_id: None, stair_id: None, greyed: None, opacity: None }
@@ -807,6 +809,28 @@ fn excavation_lines(c: &Ctx, e: &Excavation, out: &mut Vec<Primitive>, bands: &m
             for &(a, b) in hatch.iter() {
                 for (a, b) in outside_bb(v2(a[0], a[1]), v2(b[0], b[1]), house, house_bb) {
                     out.push(ink_line(a, b, 0.1, EXCAVATION_INK, None));
+                }
+            }
+        }
+        // [68] Verbauwand als Wandband an der Kante: Dicke nach aussen, Schraffur der Verbauart; Pick wählt die Baugrube.
+        let quads = spec.shoring_quads();
+        if !quads.is_empty() {
+            let hatch = crate::plan::style::resolve_hatch(c.p, crate::excavation::shoring_hatch_id(spec.shore_kind), None, None, None)
+                .unwrap_or_else(no_hatch);
+            for (_, q) in quads {
+                let mut band = super::section::polygon(q.iter().map(|p| v2(p[0], p[1])).collect(), crate::plan::style::HATCH_PAPER, EXCAVATION_INK, 0.25, hatch.clone());
+                if let Primitive::Polygon { context_object_id, .. } = &mut band {
+                    *context_object_id = Some(e.id.clone());
+                }
+                out.push(band);
+            }
+        }
+        // [68] Arbeitsraum zu schmal (enge Nische, gekappte Ecke): rotes Kreuz an der Stelle.
+        if let Some(chk) = crate::excavation::working_space_check(spec).filter(|w| !w.ok) {
+            let r = 0.0025 * c.a.scale.max(1.0);
+            for s in chk.spots {
+                for (dx, dy) in [(1.0, 1.0), (1.0, -1.0)] {
+                    out.push(ink_line(v2(s[0] - dx * r, s[1] - dy * r), v2(s[0] + dx * r, s[1] + dy * r), 0.35, WS_WARN_INK, None));
                 }
             }
         }
@@ -1469,6 +1493,32 @@ mod tests {
             assert!(!(m > 18.5 && m < 21.5), "Sohle im Anbau: {a:?}–{b:?}");
         }
         assert_eq!(sohle.iter().filter(|(a, b)| (a.x - 12.0).abs() < 1e-9 && (b.x - 12.0).abs() < 1e-9).count(), 1, "Westrand ganz");
+    }
+
+    /// [68] Verbau als Wandband im Grundriss (mit Schraffur der Verbauart, Pick = Baugrube) und rotes Kreuz, wo der
+    /// Arbeitsraum an einer engen Nische nicht reicht.
+    #[test]
+    fn verbauband_und_arbeitsraum_marke() {
+        let mut p = sample_with_walls(serde_json::json!([["h1", "eg", 14.0, 0.0, 26.0, 0.0]]));
+        let t = TerrainMesh { id: "t".into(), category_code: "02".into(), positions: vec![0.0, -10.0, 0.0, 40.0, -10.0, 0.0, 40.0, 30.0, 0.0, 0.0, 30.0, 0.0], indices: vec![0.0, 1.0, 2.0, 0.0, 2.0, 3.0], ..Default::default() };
+        let mut pit = Excavation { id: "bg".into(), category_code: "02".into(), outline: vec![v2(12.0, -2.0), v2(28.0, -2.0), v2(28.0, 10.0), v2(12.0, 10.0)], bottom: -3.0, edge_shoring: Some(vec![true, false, false, false]), shoring_kind: Some("soldierPile".into()), ..Default::default() };
+        p.context = Some(vec![ContextObject::TerrainMesh(t.clone()), ContextObject::Excavation(pit.clone())]);
+        let a = super::super::domains::PlanArgs::parse(1.0, r#"{"floor": "eg", "show": ["02", "90", "80", "02"], "scale": 100}"#).unwrap();
+        let c = Ctx::new(&p, &a);
+        let mut ctx = Vec::new();
+        plan_context(&c, &mut ctx);
+        let bands: Vec<&Primitive> = ctx.iter().filter(|q| matches!(q, Primitive::Polygon { stroke, context_object_id: Some(id), .. } if stroke == EXCAVATION_INK && id == "bg")).collect();
+        assert_eq!(bands.len(), 1, "ein Band für die eine verbaute Kante");
+        assert!(!ctx.iter().any(|q| matches!(q, Primitive::Line { color: Some(k), .. } if k == WS_WARN_INK)), "kein Arbeitsraum, keine Marke");
+        // Enge Nische mit Arbeitsraum: Marken.
+        pit.outline = vec![v2(12.0, -2.0), v2(28.0, -2.0), v2(28.0, 10.0), v2(20.5, 10.0), v2(20.5, 3.0), v2(19.5, 3.0), v2(19.5, 10.0), v2(12.0, 10.0)];
+        pit.edge_shoring = None;
+        pit.working_space = Some(1.0);
+        p.context = Some(vec![ContextObject::TerrainMesh(t), ContextObject::Excavation(pit)]);
+        let c = Ctx::new(&p, &a);
+        let mut ctx = Vec::new();
+        plan_context(&c, &mut ctx);
+        assert!(ctx.iter().any(|q| matches!(q, Primitive::Line { color: Some(k), .. } if k == WS_WARN_INK)));
     }
 
     /// [157] Schnittmarken-Beschriftung nicht auf der Böschungsschraffur: Sohle, Böschungsoberkante und Schraffur

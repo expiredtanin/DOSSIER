@@ -480,6 +480,16 @@ pub struct Profile {
     pub natural: bool,
 }
 
+/// [68] Schnitt durch die Verbauwand einer Baugrube.
+#[derive(Clone, Debug)]
+pub struct ShoringCut {
+    pub ring: Vec<[f64; 2]>,
+    pub hatch: HatchRender,
+    /// Klasse der Baugrube.
+    pub category: String,
+    pub excavation_id: String,
+}
+
 /// Ergebnis eines Schnitts (`SectionOutput`).
 #[derive(Clone, Debug, Default)]
 pub struct Output {
@@ -489,6 +499,8 @@ pub struct Output {
     pub profiles: Vec<Profile>,
     /// [T6] Erdreich unter dem gestalteten Terrain (Band, ohne Gebäude-Inneres), mit Schraffur.
     pub earth: Vec<(Vec<[f64; 2]>, HatchRender)>,
+    /// [68] Verbauwände der Baugruben (Spundwand, Rühlwand, Bohrpfahlwand) als Schnittflächen mit Schraffur.
+    pub shoring: Vec<ShoringCut>,
     /// [137] Gelände, zu dem das Erdreich-Band gehört (Pick-Id: Klick ins Band wählt das Gelände).
     pub terrain_id: Option<String>,
     /// [152] Importierte Netze im Schnitt (Index = `Cut::index`/`Edge::index` bei `Kind::Mesh`).
@@ -631,7 +643,7 @@ pub(super) fn compute_plane(p: &Project, level: &LevelSpec, bodies: &[BodyMesh],
     let (mut visible, hidden) = projection_edges(p, &plane, &walls_r, &wi, &slabs_r, &bodies, &meshes, &cuts, level.hidden_lines, level.depth, strip.map_or(&[][..], |s| &s.half[..]), &skip);
     shaped_projection(&mut visible, p, &walls_r, &plane);
     let meshes = meshes.iter().map(|m| MeshMeta { id: m.mesh.id.clone(), name: m.mesh.name.clone(), category: Some(m.mesh.category_code.clone()) }).collect();
-    let mut out = Output { cuts, visible, hidden, profiles: Vec::new(), earth: Vec::new(), terrain_id: None, meshes, mesh_lines, edge_cats };
+    let mut out = Output { cuts, visible, hidden, profiles: Vec::new(), earth: Vec::new(), shoring: Vec::new(), terrain_id: None, meshes, mesh_lines, edge_cats };
     append_terrain_profiles(&mut out, p, base, u);
     if let Some(s) = strip {
         unfold::clip_output(&mut out, s);

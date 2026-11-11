@@ -200,6 +200,7 @@ pub(super) fn clip_output(out: &mut Output, s: &Strip) {
         .collect();
     out.profiles = std::mem::take(&mut out.profiles).into_iter().flat_map(|pr| clip_line_to_u(&pr.pts, lo, hi).into_iter().map(move |pts| Profile { pts, ..pr.clone() })).collect();
     out.earth = std::mem::take(&mut out.earth).into_iter().filter_map(|(pts, h)| clip_poly_u(&pts, None, lo, hi).map(|(p, _)| (p, h))).collect();
+    out.shoring = std::mem::take(&mut out.shoring).into_iter().filter_map(|mut w| clip_poly_u(&w.ring, None, lo, hi).map(|(p, _)| { w.ring = p; w })).collect();
     out.mesh_lines = std::mem::take(&mut out.mesh_lines).into_iter().flat_map(|(k, pts)| clip_line_to_u(&pts, lo, hi).into_iter().map(move |p| (k, p))).collect();
 }
 
@@ -216,6 +217,7 @@ pub(super) fn shift_output(out: &mut Output, du: f64) {
     }
     out.profiles.iter_mut().flat_map(|p| p.pts.iter_mut()).for_each(sh);
     out.earth.iter_mut().flat_map(|p| p.0.iter_mut()).for_each(sh);
+    out.shoring.iter_mut().flat_map(|w| w.ring.iter_mut()).for_each(sh);
     out.mesh_lines.iter_mut().flat_map(|p| p.1.iter_mut()).for_each(sh);
 }
 
@@ -230,6 +232,7 @@ pub(super) fn merge_output(acc: &mut Option<Output>, o: Output) {
     a.hidden.extend(o.hidden);
     a.profiles.extend(o.profiles);
     a.earth.extend(o.earth);
+    a.shoring.extend(o.shoring);
     a.mesh_lines.extend(o.mesh_lines);
     a.edge_cats.extend(o.edge_cats);
     if a.terrain_id.is_none() {
