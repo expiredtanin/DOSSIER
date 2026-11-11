@@ -72,7 +72,7 @@ export function emitDrawingLineVerts(
   /** Explosionsabstand ([65]): Spuren heben sich mit ihrem Geschoss; 0 = aus. */
   explode = 0,
   /** [180] Zusätzlich ausgeblendete Klassen (Darstellungsmodus), s. {@link Model3dOptions.hide}. */
-  hide?: readonly string[],
+  hide?: Hide3d,
 ): Float32Array {
   return documentFor(project).drawingLineVerts(explodeGap(explode), classFilterText(hide));
 }
@@ -82,17 +82,44 @@ export function emitDrawingLineVerts(
  * Ebenen-Baum aus sind (Ebenen-Panel, Kombinationen, Vorlagen); `hide` ergänzt die, die der Darstellungsmodus
  * nicht zeichnet (`categoryDisplay(code).render === false`).
  */
-export function classFilterText(hide?: readonly string[], extra?: Record<string, unknown>): string {
-  const h = hide && hide.length ? { hide } : {};
-  return hide?.length || extra ? JSON.stringify({ ...extra, ...h }) : "";
+export function classFilterText(hide?: Hide3d, extra?: Record<string, unknown>): string {
+  const f = filter3d(hide);
+  const h: Record<string, unknown> = f.hide?.length ? { hide: f.hide } : {};
+  // [185] Element-Auswahl: `only` (nur diese Elemente) und `hideIds` (temporär ausgeblendet), s. `model3d::ElementSelection`.
+  if (f.only) h.only = f.only;
+  if (f.hideIds?.length) h.hideIds = f.hideIds;
+  return Object.keys(h).length || extra ? JSON.stringify({ ...extra, ...h }) : "";
+}
+
+/**
+ * [185] 3D-Filter: Klassen-Codes (`hide`, wie bisher) und die Element-Auswahl der 3D-Ansicht — `only` = nur diese
+ * Element-ids zeigen („Auswahl in 3D zeigen", `null`/fehlt = alle), `hideIds` = temporär ausgeblendete. Rein UI.
+ */
+export interface Filter3d {
+  hide?: readonly string[];
+  only?: readonly string[] | null;
+  hideIds?: readonly string[];
+}
+
+/** Klassen-Codes (bisherige Form) oder der volle {@link Filter3d}. */
+export type Hide3d = readonly string[] | Filter3d;
+
+/** {@link Hide3d} als {@link Filter3d}. */
+export function filter3d(hide?: Hide3d): Filter3d {
+  if (!hide) return {};
+  return isCodeList(hide) ? { hide } : hide;
+}
+
+function isCodeList(h: Hide3d): h is readonly string[] {
+  return Array.isArray(h);
 }
 
 /**
  * [180] Ausgeblendete Klassen-Codes (Ebenen-Baum samt Elternklassen, dazu `hide`) — für die 3D-Zutaten, die
  * nicht aus dem Kern-Modell kommen (Schatten, Baurechts-Hülle); die Teile filtert der Kern.
  */
-export function hiddenClassCodes(project: Project, hide?: readonly string[]): Set<string> {
-  const out = new Set(hide ?? []);
+export function hiddenClassCodes(project: Project, hide?: Hide3d): Set<string> {
+  const out = new Set(filter3d(hide).hide ?? []);
   const visible = collectVisibleCodes(project.layers ?? []);
   for (const c of flattenCategories(project.layers ?? [])) if (!visible.has(c.code)) out.add(c.code);
   return out;
@@ -116,7 +143,7 @@ export function emitSurfacePatternLines(
   /** Explosionsabstand ([65]): Linien heben sich mit dem Geschoss ihres Bauteils; 0 = aus. */
   explode = 0,
   /** [180] Zusätzlich ausgeblendete Klassen, s. {@link Model3dOptions.hide}. */
-  hide?: readonly string[],
+  hide?: Hide3d,
 ): Float32Array {
   return documentFor(project).surfacePatternLines(explodeGap(explode), classFilterText(hide));
 }
@@ -193,9 +220,9 @@ export interface Model3dOptions {
   /**
    * [180] Klassen, die zusätzlich zum Ebenen-Baum nicht gezeichnet werden (Darstellungsmodus des Ebenen-Panels).
    * Ausgeblendete Klassen fehlen im Modell, in der Pick-Geometrie und im Export der Ansicht (Kern filtert nach dem
-   * Cache, Umschalten rechnet keine Wand neu).
+   * Cache, Umschalten rechnet keine Wand neu). [185] Auch als {@link Filter3d} mit Element-Auswahl.
    */
-  hide?: readonly string[];
+  hide?: Hide3d;
 }
 
 /** Das volle 3D-Modell: Wände (mit Öffnungen) + Deckenplatten + Kontext-Meshes. */
@@ -337,7 +364,7 @@ export function pickGeometry(
   /** Explosionsabstand ([65]) wie bei {@link projectToModel3d}; 0 = aus. */
   explode = 0,
   /** [180] Zusätzlich ausgeblendete Klassen (nicht anwählbar), s. {@link Model3dOptions.hide}. */
-  hide?: readonly string[],
+  hide?: Hide3d,
 ): {
   walls: RWall[];
   slabs: RSlab[];

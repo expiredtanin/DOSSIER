@@ -100,7 +100,9 @@ export function usePlanCoords(inp: UsePlanCoordsArgs) {
         // nächste Massstab gewählt wird); Rad-Zoom lässt ihn unberührt.
         if (n > 0) setPaperScale(n);
       },
-      pxPerMeter: () => currentPxPerMeter(),
+      // [185] Aus der frischen viewBox (Ref): `currentPxPerMeter` sähe im stabilen Handle die erste viewBox
+      // (Reiter/Ausschnitte merkten sonst den Start-Zoom statt des aktuellen).
+      pxPerMeter: () => (meetScale(viewRef.current, canvasRef.current ?? svgRef.current) ?? 1) * PX_PER_M,
       viewCenterModel: () => {
         // Mitte der frischen viewBox (aus Ref) → Modell (inverse toScreen).
         const v = viewRef.current;

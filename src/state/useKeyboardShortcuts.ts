@@ -32,6 +32,7 @@ import {
 import type { ElementClipboard, ElementSelectionIds, PastedIds } from "../editors/elementClipboard";
 import { parseClipboardText, serializeClipboardText } from "../editors/elementClipboardSerialize";
 import { matchesShortcut, type ShortcutId, type ShortcutOverrides } from "./keyboardShortcuts";
+import { hideSelectionIn3d, showSelectionIn3d, stepActiveFloor } from "./tabNavigation";
 
 const isEditableTarget = (e: KeyboardEvent): boolean => {
   const el = e.target as HTMLElement | null;
@@ -642,4 +643,32 @@ export function useGroupShortcut(
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentSelection, selectedGroupIds, overrides]);
+}
+
+/**
+ * [185] Navigation wie Archicad: Cmd/Ctrl+5 Geschoss tiefer, Cmd/Ctrl+6 höher (Grundriss- und 3D-Reiter, Zoom
+ * bleibt), Cmd/Ctrl+3 Auswahl in 3D zeigen (ohne Auswahl: alles), Cmd/Ctrl+4 Auswahl im 3D ausblenden. Unter Tauri
+ * fängt das native Menü dieselben Kürzel ab (`native/appMenu.ts`).
+ */
+export function useViewNavigationShortcuts(overrides: ShortcutOverrides): void {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      // Die (oft fokussierte) Befehlszeile tippt keine Cmd/Ctrl-Ziffern: dort gelten die Kürzel.
+      if (isEditableTarget(e) && !(e.target as HTMLElement).classList.contains("cmdline-input")) return;
+      const fn = matchesShortcut(e, "floorDown", overrides)
+        ? () => stepActiveFloor(-1)
+        : matchesShortcut(e, "floorUp", overrides)
+          ? () => stepActiveFloor(1)
+          : matchesShortcut(e, "showSelection3d", overrides)
+            ? showSelectionIn3d
+            : matchesShortcut(e, "hideSelection3d", overrides)
+              ? hideSelectionIn3d
+              : null;
+      if (!fn) return;
+      e.preventDefault();
+      fn();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [overrides]);
 }

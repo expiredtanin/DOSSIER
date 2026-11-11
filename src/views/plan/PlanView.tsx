@@ -95,6 +95,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     {
       plan: planRaw,
       resetKey,
+      fitKey,
       onCursor,
       onScale,
       onSelect,
@@ -180,10 +181,12 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   // zurücksetzen — NICHT bei jeder Bounds-Änderung durch Editieren (sonst
   // „wandert" die Ansicht beim Verschieben/Löschen mit). `defaultView` ist beim
   // resetKey-Wechsel bereits frisch (neues Geschoss), daher direkt anwendbar.
+  // [185] Geschosswechsel: gleicher `fitKey`, der Ausschnitt bleibt exakt stehen (wie Archicad).
+  const viewKey = fitKey ?? resetKey;
   useEffect(() => {
     setView(defaultView);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resetKey]);
+  }, [viewKey]);
   // [165] Renderer-Anbindung: Pick-Index, Engine-Wahl (nativ/WASM/SVG), Plan-Aufbereitung, Culling, Papier-Massstab, GL-Effekte.
   const {
     getPick,
@@ -226,7 +229,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     view,
     hairline,
     onScale,
-    resetKey,
+    resetKey: viewKey, // Papier-Massstab folgt dem Einpassen
   });
   // [165] Steuerhandle, Zieh-Zustände, Koordinaten-Umrechnung und Griff-Treffer.
   const {

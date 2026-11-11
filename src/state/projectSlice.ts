@@ -72,6 +72,7 @@ import { createHistorySlice, historyPatch, labelCommit, storeDocument } from "./
 import type { HistorySlice } from "./historySlice";
 import { opsLabel } from "./historyLabels";
 import { resetViewTabs, restoreViewTabsFromProject } from "./viewTabs";
+import { resetView3dFilter } from "./view3dFilter";
 import type { NotifyKind } from "./notifySlice";
 
 /** Felder, die diese Slice in den RootState beisteuert. */
@@ -658,6 +659,7 @@ export function createProjectSlice(
       doc.load(next);
       set({ project: next, projectEpoch: get().projectEpoch + 1, ...historyPatch(doc) });
       resetViewTabs(); // [136] neues Projekt: ein Reiter mit der aktuellen Ansicht
+      resetView3dFilter(); // [185] keine 3D-Element-Auswahl aus dem vorigen Projekt
     },
 
     openProjectFile: (text) => {
@@ -666,6 +668,7 @@ export function createProjectSlice(
       if (r.ok) {
         set({ project: r.project, projectEpoch: get().projectEpoch + 1, ...historyPatch(doc) });
         restoreViewTabsFromProject(r.project); // [136] gesicherte Reiter, sonst ein Reiter
+        resetView3dFilter(); // [185]
       }
       return r;
     },

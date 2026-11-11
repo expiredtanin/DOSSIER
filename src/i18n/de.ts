@@ -117,6 +117,10 @@ export const de = {
   "menu.view.floorplan": "Grundriss",
   "menu.view.perspective": "Perspektive",
   "menu.view.referenceLines": "Referenzlinien",
+  "menu.view.floorDown": "Geschoss tiefer",
+  "menu.view.floorUp": "Geschoss höher",
+  "menu.view.showSelection3d": "Auswahl in 3D zeigen",
+  "menu.view.hideSelection3d": "Auswahl im 3D ausblenden",
   "menu.window": "Fenster",
   "menu.window.resources": "Ressourcen",
   "menu.window.settings": "Einstellungen",
@@ -342,6 +346,7 @@ export const de = {
   // ── Dokument-Tabs (Zeichnungen/Blätter) ─────────────────────────────────
   "tabs.drawings": "Zeichnungen",
   "tabs.3d": "3D",
+  "tabs.3dSelection": "3D · Auswahl",
   "tabs.add": "Neuer Reiter mit der aktuellen Ansicht",
   "tabs.close": "Reiter „{name}\" schliessen",
 
@@ -3029,6 +3034,7 @@ export const de = {
   "settings.keyboardShortcuts.category.transform": "Transformieren",
   "settings.keyboardShortcuts.category.group": "Gruppieren",
   "settings.keyboardShortcuts.category.tools": "Werkzeuge",
+  "settings.keyboardShortcuts.category.navigation": "Navigation",
 
   "shortcut.undo": "Rückgängig",
   "shortcut.redo": "Wiederholen",
@@ -3057,6 +3063,10 @@ export const de = {
   "shortcut.toolWindow": "Werkzeug: Fenster",
   "shortcut.toolDoor": "Werkzeug: Tür",
   "shortcut.toolRoom": "Werkzeug: Raum",
+  "shortcut.floorDown": "Geschoss tiefer",
+  "shortcut.floorUp": "Geschoss höher",
+  "shortcut.showSelection3d": "Auswahl in 3D zeigen (ohne Auswahl: alles)",
+  "shortcut.hideSelection3d": "Auswahl im 3D ausblenden",
 
   "settings.section.update": "Update",
   "settings.update.autoCheck": "Automatisch nach Updates suchen",

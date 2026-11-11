@@ -88,7 +88,20 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
 - ○ **[189]** Panels neu ordnen + Einstellungsdialog (12.11., Maintainer): Attribute-Panel unten links nur Gestaltung (Stift, Füllung, Linienstil, Schraffur); BIM-/Bauteil-Infos (Typ, Schichten, Masse, Kennwerte, IFC/Psets, Material …) in die Objekt-Info. Taste T bei Auswahl öffnet direkt den Einstellungsdialog des Objekts (wie Archicad Cmd+T), v. a. für Fenster/Türen, deren Einstellungen heute nur über das Attribute-Panel erreichbar sind. · M
 - ○ **[187]** Griffe im Schnitt/in der Ansicht (12.11., Maintainer): angewählte Elemente haben dort kaum Fasspunkte (Decken, Gelände, Dächer …). Wie Archicad: Decke OK/UK (Höhe/Dicke), Wand OK (Höhe), Öffnung Brüstung/Sturz, Dach Traufe/First bzw. Neigung, Treppe An-/Austritt, Gelände-Profilpunkte (falls Modell es erlaubt); ein Undo-Schritt je Zug, Fang + Tab-Eingabe wie im Grundriss. · L
 - ○ **[186]** Schatten (12.11., Maintainer): (1) 3D-Schatten stellenweise unscharf (Shadow-Map-Auflösung/Frustum zu gross, Filter) → Frustum auf Gebäude fitten bzw. Kaskaden, schärferer PCF; (2) Grundriss-Schatten fehlt unmittelbar am Haus (Lücke zwischen Fassade und Schatten; vermutlich Werfer ab ±0.00 statt ab Wandfuss/Gelände) → Schatten beginnt an der Fassade. Opus. · M
-- ○ **[185]** Navigation wie Archicad (12.11., Wunsch Maintainer): Grundriss-Geschosswechsel behält Zoom/Ausschnitt exakt; Cmd+5 Geschoss runter, Cmd+6 hoch; Cmd+3 mit Auswahl (aus Grundriss/Schnitt/3D) → 3D-Tab nur mit der Auswahl (Tab-Titel „3D · Auswahl“), ohne Auswahl → wieder alles; Cmd+4 blendet gewählte Objekte im 3D temporär aus (zurück mit Cmd+3). Sonnet. · M
+- ◐ **[185]** Navigation wie Archicad (12.11., Wunsch Maintainer). Umgesetzt (12.11.): Geschosswechsel im Grundriss
+  (Navigator, Kürzel, Ebenen-Panel) behält Zoom und Ausschnitt exakt — Geschosse teilen sich den Einpass-Schlüssel
+  (`viewTabs.ts::planFitKey`, `PlanView` `fitKey`; Schnitt/Ansicht/Zeichnung/neues Projekt passen weiter ein).
+  Cmd/Ctrl+5 Geschoss tiefer, Cmd/Ctrl+6 höher im Grundriss- und 3D-Reiter (`stepFloor`/`adjacentFloorId`, nach
+  `baseElevation`); Cmd/Ctrl+3 „Auswahl in 3D zeigen" (wechselt/öffnet den 3D-Reiter, Titel „3D · Auswahl", Kamera
+  passt ein; ohne Auswahl wieder alles), Cmd/Ctrl+4 blendet die Auswahl im 3D aus (nicht anwählbar, Auswahl leer).
+  Zustand rein UI (`state/view3dFilter.ts`, nicht in der Datei, kein Undo; Projektwechsel setzt zurück); Kern
+  `model3d::ElementSelection` im `ClassFilter` (Text `{"only", "hideIds"}`: Teile, Cache, Pick, Spuren, Muster;
+  gewählte Wand zeigt ihre Öffnungen, gewählte Öffnung bringt ihren Wirt mit). Kürzel umbelegbar (Einstellungen,
+  Gruppe „Navigation"), natives Menü Ansicht mit denselben Kürzeln. Nebenbei: `PlanViewHandle.pxPerMeter` las die
+  erste viewBox (Reiter/Ausschnitte merkten den Start-Zoom statt des aktuellen), jetzt aus der Ref. Tests `model3d/classes.rs`
+  (`element_auswahl_*`), `viewTabs.test.ts`, `view3dFilter.test.ts`, `toWalls3d.classes.test.ts`, e2e
+  `navigation185.spec.ts`. Offen: natives Mac-3D-Fenster kennt den Element-Filter nicht; Ebenen-Panel-Wechsel nicht
+  einzeln e2e geprüft; nicht in der Tauri-App/auf dem Mac geprüft (Menü-Kürzel vs. Browser-Kürzel). · M
 - ◐ **[133]** Musterhaus komplex: Rest. Skalieren-Kopie lässt `position`/Breite unverändert (10.11.: Skalieren skaliert
   `position`/`width` der Wandöffnungen bei Kopie und Original, Test `skalieren_skaliert_oeffnungen`). 11.11.: Schraffur-
   Ausbreiten: Vollfläche füllt in Schraffurfarbe, Bild-Schraffur als `<pattern>`/`<image>` (CLI `--hatch`; Druck/PDF hatte

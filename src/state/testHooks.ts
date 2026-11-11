@@ -5,7 +5,9 @@
 import { core, coreEpoch, coreReady } from "../engine/coreWasm";
 import { getState } from "./appStore";
 import { storeDocument } from "./historySlice";
-import { computeSection, generatePlan, generateSectionPlan } from "../core";
+import { computeSection, generatePlan, generateSectionPlan, pickGeometry, projectToModel3d } from "../core";
+import { getViewStateBridge } from "./viewTabs";
+import { getView3dFilter, toFilter3d } from "./view3dFilter";
 
 declare global {
   interface Window {
@@ -37,6 +39,10 @@ declare global {
       modelView: () => string | undefined;
       /** [173] Schnitt der aktiven Ebene (1:50, Detailgrad der Anzeige): Zahl der Wand-Schnittflächen und ihre Fläche (m²). */
       sectionWalls: () => Promise<{ n: number; area: number }>;
+      /** [185] Darstellungszustand der Plan-Ansicht: aktive Ebene, Bildmitte (Modell-m), Zoom (px/m), Massstab. */
+      viewCamera: () => { levelId: string; center: { x: number; y: number } | null; pxPerMeter: number | null; scale: number };
+      /** [185] 3D-Element-Filter (Store) und die Wand-ids des 3D-Modells bzw. der Pick-Geometrie mit ihm. */
+      view3d: () => { only: string[] | null; hidden: string[]; walls: string[]; pickWalls: string[] };
     };
   }
 }
@@ -89,6 +95,27 @@ export function installTestHooks(): void {
       const polys = generateSectionPlan(out, false, { scaleDenominator: 50, detail: s.detail }).primitives.filter((q) => q.kind === "polygon" && !!q.wallId);
       const area = (pts: { x: number; y: number }[]) => Math.abs(pts.reduce((a, p, i) => a + p.x * pts[(i + 1) % pts.length].y - pts[(i + 1) % pts.length].x * p.y, 0)) / 2;
       return { n: polys.length, area: polys.reduce((a, q) => a + (q.kind === "polygon" ? area(q.pts) : 0), 0) };
+    },
+    viewCamera: () => {
+      const st = getViewStateBridge()?.live();
+      return {
+        levelId: getState().activeLevelId,
+        center: st?.cameraCenter ?? null,
+        pxPerMeter: st?.cameraPxPerMeter ?? null,
+        scale: getState().scaleDenominator,
+      };
+    },
+    view3d: () => {
+      const f = getView3dFilter();
+      const p = getState().project;
+      const hide = toFilter3d(f, []);
+      const uniq = (ids: string[]) => [...new Set(ids)].sort();
+      return {
+        only: f.only,
+        hidden: f.hidden,
+        walls: uniq(projectToModel3d(p, { hide }).walls.map((w) => w.wallId)),
+        pickWalls: uniq(pickGeometry(p, 0, hide).walls.map((w) => w.wallId)),
+      };
     },
     selected: () => ({ drawings: [...getState().selection.drawings], groups: [...getState().selection.groups], all: JSON.stringify(getState().selection) }),
   };

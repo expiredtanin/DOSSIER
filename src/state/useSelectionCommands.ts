@@ -30,6 +30,7 @@ import {
   useSelectAllAndDeleteShortcut,
   useSplitJoinShortcut,
   useTransformShortcuts,
+  useViewNavigationShortcuts,
 } from "./useKeyboardShortcuts";
 import { TRANSFORM_COMMANDS } from "./useToolInput";
 import { getState, type RootState } from "./appStore";
@@ -304,6 +305,8 @@ export function useSelectionCommands(opts: {
     applyGroupSelection,
     shortcutOverrides,
   );
+  // [185] Cmd/Ctrl+3/4/5/6: Auswahl in 3D zeigen/ausblenden, Geschoss tiefer/höher.
+  useViewNavigationShortcuts(shortcutOverrides);
 
   // Doppelklick auf ein gruppiertes Element → Gruppe betreten (Isolation):
   // alles ausserhalb wird gedimmt/gesperrt gerendert (s. viewportContent.tsx/

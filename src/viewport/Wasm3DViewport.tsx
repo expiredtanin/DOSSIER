@@ -46,6 +46,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Project, Wall, Drawing2D, Ceiling, Roof, Vec2 } from "../model/types";
 import { roofBaseElevation, roofGeometry, verticalExtents } from "../core";
 import { projectToModel3d, pickGeometry, draftWorldLines, explodeFloorOffsets, hiddenClassCodes } from "../core";
+import type { Hide3d } from "../core";
+import { toFilter3d, useView3dFilter } from "../state/view3dFilter";
 import type { DetailLevel, RenderMode, View3d } from "../model/viewTypes";
 import type { ToolDraft } from "../tools/types";
 import { hudSegments, type HudFieldsState } from "../tools/hudFormat";
@@ -309,7 +311,7 @@ function computeGripsAt(
  * müssen auf dieselbe Distanz/dasselbe Ziel kommen, damit der Orbit-Zustand
  * (hier) nahtlos an die exakte Praeset-Kamera (dort) anschliesst.
  */
-function fitTargetDist(project: Project, hide?: readonly string[]): {
+function fitTargetDist(project: Project, hide?: Hide3d): {
   target: [number, number, number];
   dist: number;
 } {
@@ -601,7 +603,14 @@ export function Wasm3DViewport({
   explodeRef.current = explode;
   // [180] Ausgeblendete Klassen: Inhalt statt Identität als Abhängigkeit (der Aufrufer baut die Liste je Render).
   const hiddenKey = (hiddenCodes ?? []).join("\u0001");
-  const hide = useMemo(() => (hiddenKey ? hiddenKey.split("\u0001") : []), [hiddenKey]);
+  // [185] Element-Auswahl („Auswahl in 3D zeigen", temporär ausgeblendet) kommt dazu; ohne sie bleibt `hide` die
+  // Code-Liste (gleicher Text an den Kern wie bisher).
+  const elementFilter = useView3dFilter();
+  const { only: onlyIds, hidden: hiddenIds, fitSeq } = elementFilter;
+  const hide = useMemo<Hide3d>(() => {
+    const codes = hiddenKey ? hiddenKey.split("\u0001") : [];
+    return onlyIds || hiddenIds.length ? toFilter3d({ only: onlyIds, hidden: hiddenIds, fitSeq: 0 }, codes) : codes;
+  }, [hiddenKey, onlyIds, hiddenIds]);
   const hideRef = useRef(hide);
   hideRef.current = hide;
   // Versatz je Geschoss ([65]) für Griffe und gezogene Höhen (Modell bleibt unversetzt).
@@ -711,6 +720,15 @@ export function Wasm3DViewport({
     if (!ready) return;
     applyPreset();
   }, [ready, applyPreset]);
+
+  // [185] „Auswahl in 3D zeigen" / alles zeigen: Kamera auf das Gezeigte einpassen (das Modell ist im Effekt oben
+  // schon mit dem neuen Filter eingespielt).
+  const fitSeqRef = useRef(fitSeq);
+  useEffect(() => {
+    if (!ready || fitSeqRef.current === fitSeq) return;
+    fitSeqRef.current = fitSeq;
+    fitCameraRef.current();
+  }, [ready, fitSeq]);
 
   // Kamera-Brücke ([BCF]): Lesen/Setzen der Orbit-Kamera, Schnappschuss und Schnitt von aussen
   // (`cameraBridge.ts`). Der Orbit-Zustand ist die Wahrheit; nach einem Preset ist er aus der

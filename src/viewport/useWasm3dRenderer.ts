@@ -19,7 +19,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ContextImage, Project } from "../model/types";
-import { emitDrawingLineVerts, emitSurfacePatternLines, hiddenClassCodes, projectToModel3d, projectToModel3dParts, siteEnvelope3d } from "../core";
+import { emitDrawingLineVerts, emitSurfacePatternLines, filter3d, hiddenClassCodes, projectToModel3d, projectToModel3dParts, siteEnvelope3d } from "../core";
+import type { Hide3d } from "../core";
 import { Model3dPartsSync } from "./model3dPartsSync";
 import type { DetailLevel } from "../model/viewTypes";
 import { loadEngine3d } from "../engine/engine3d";
@@ -199,7 +200,7 @@ const partsSyncs = new WeakMap<object, Model3dPartsSync>();
  * und werden in render3d neu vernetzt und hochgeladen), sonst bzw. bei älteren WASM-Builds und nach
  * einem Fehler das ganze Modell über `set_model`.
  */
-function syncModel3d(r: WebModelRendererLike, project: Project, detail: DetailLevel | undefined, explode: number, hide?: readonly string[]): void {
+function syncModel3d(r: WebModelRendererLike, project: Project, detail: DetailLevel | undefined, explode: number, hide?: Hide3d): void {
   let sync = partsSyncs.get(r);
   if (!sync) partsSyncs.set(r, (sync = new Model3dPartsSync()));
   try {
@@ -270,8 +271,9 @@ export function useWasm3dRenderer(
 
   /** Modell bei Projektänderung neu setzen (re-extrudiert in Rust). `detail`
    *  steuert den Öffnungs-Detailgrad (grob/mittel/fein) im 3D wie im Grundriss. `hide`: Klassen, die der
-   *  Darstellungsmodus nicht zeichnet ([180]; die im Ebenen-Baum ausgeschalteten blendet der Kern selbst aus). */
-  const updateModel = useCallback((project: Project, detail?: DetailLevel, explode = 0, hide?: readonly string[]) => {
+   *  Darstellungsmodus nicht zeichnet ([180]; die im Ebenen-Baum ausgeschalteten blendet der Kern selbst aus),
+   *  dazu die Element-Auswahl ([185], {@link Hide3d}). */
+  const updateModel = useCallback((project: Project, detail?: DetailLevel, explode = 0, hide?: Hide3d) => {
     const r = rendererRef.current;
     if (!r || !project) return;
     syncModel3d(r, project, detail, explode, hide);
@@ -290,7 +292,9 @@ export function useWasm3dRenderer(
     if (typeof r.set_ghost === "function") {
       try {
         // Zulässige Hülle (Baurecht) liegt wie im Grundriss auf `01 Vermessung` ([180]).
-        r.set_ghost(hiddenClassCodes(project, hide).has("01") ? new Float32Array(0) : siteEnvelope3d(project));
+        // [185] „Auswahl in 3D zeigen": nur die gewählten Elemente, keine Hülle.
+        const off = hiddenClassCodes(project, hide).has("01") || !!filter3d(hide).only;
+        r.set_ghost(off ? new Float32Array(0) : siteEnvelope3d(project));
       } catch (e) {
         console.warn("render3d set_ghost fehlgeschlagen:", e);
       }

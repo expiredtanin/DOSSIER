@@ -14,6 +14,9 @@ import {
   navigateToLevel,
   switchViewKind,
   tabKindOf,
+  adjacentFloorId,
+  planFitKey,
+  stepFloor,
   isPlanKindActive,
   openTab,
   restoreViewTabs,
@@ -297,5 +300,42 @@ describe("Reiter-Arten und Navigation [182]", () => {
     const n = switchViewKind(only, live("sec"), levels, "grundriss");
     expect(n.next.tabs).toHaveLength(2);
     expect(n.apply).toMatchObject({ viewType: "grundriss", activeLevelId: "eg" });
+  });
+});
+
+describe("Geschoss-Navigation wie Archicad [185]", () => {
+  // Liste absichtlich nicht nach Höhe sortiert: UG unten, DG oben.
+  const levels = [
+    { id: "eg", kind: "floor" as const, baseElevation: 0 },
+    { id: "sec", kind: "section" as const },
+    { id: "dg", kind: "floor" as const, baseElevation: 6 },
+    { id: "og", kind: "floor" as const, baseElevation: 3 },
+    { id: "ug", kind: "floor" as const, baseElevation: -3 },
+  ];
+  const live = (activeLevelId: string, viewType: "grundriss" | "perspektive" = "grundriss"): ViewSnapshotState =>
+    ({ ...st(activeLevelId), viewType, cameraCenter: { x: 1, y: 2 }, cameraPxPerMeter: 40 }) as ViewSnapshotState;
+
+  it("adjacentFloorId: nach Höhe, am Rand null, Nicht-Geschoss null", () => {
+    expect(adjacentFloorId(levels, "eg", 1)).toBe("og");
+    expect(adjacentFloorId(levels, "og", 1)).toBe("dg");
+    expect(adjacentFloorId(levels, "dg", 1)).toBeNull();
+    expect(adjacentFloorId(levels, "eg", -1)).toBe("ug");
+    expect(adjacentFloorId(levels, "ug", -1)).toBeNull();
+    expect(adjacentFloorId(levels, "sec", 1)).toBeNull();
+  });
+
+  it("stepFloor: Grundriss und 3D bleiben im Reiter, Schnitt tut nichts", () => {
+    const s = initialTabs();
+    expect(stepFloor(s, live("eg"), levels, 1)).toEqual({ next: s, apply: null, setLevel: "og" });
+    expect(stepFloor(s, live("eg", "perspektive"), levels, -1)).toEqual({ next: s, apply: null, setLevel: "ug" });
+    expect(stepFloor(s, live("dg"), levels, 1)).toBeNull();
+    expect(stepFloor(s, live("sec"), levels, 1)).toBeNull();
+  });
+
+  it("planFitKey: Geschosse teilen den Schlüssel (Zoom bleibt), andere Ebenen und neues Projekt passen ein", () => {
+    expect(planFitKey(levels[0], 1)).toBe(planFitKey(levels[3], 1));
+    expect(planFitKey(levels[0], 1)).not.toBe(planFitKey(levels[0], 2));
+    expect(planFitKey(levels[1], 1)).not.toBe(planFitKey(levels[0], 1));
+    expect(planFitKey({ id: "x", kind: "drawing" }, 1)).not.toBe(planFitKey({ id: "y", kind: "drawing" }, 1));
   });
 });

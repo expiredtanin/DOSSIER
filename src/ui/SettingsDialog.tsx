@@ -581,6 +581,7 @@ const CATEGORY_ORDER: ShortcutCategory[] = [
   "transform",
   "group",
   "tools",
+  "navigation",
 ];
 
 /**

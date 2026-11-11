@@ -116,6 +116,10 @@ export const en: Record<TranslationKey, string> = {
   "menu.view.floorplan": "Floor plan",
   "menu.view.perspective": "Perspective",
   "menu.view.referenceLines": "Reference lines",
+  "menu.view.floorDown": "Story down",
+  "menu.view.floorUp": "Story up",
+  "menu.view.showSelection3d": "Show selection in 3D",
+  "menu.view.hideSelection3d": "Hide selection in 3D",
   "menu.window": "Window",
   "menu.window.resources": "Resources",
   "menu.window.settings": "Settings",
@@ -340,6 +344,7 @@ export const en: Record<TranslationKey, string> = {
   // Document tabs (drawings/sheets).
   "tabs.drawings": "Drawings",
   "tabs.3d": "3D",
+  "tabs.3dSelection": "3D · Selection",
   "tabs.add": "New tab with the current view",
   "tabs.close": "Close tab “{name}”",
 
@@ -3016,6 +3021,7 @@ export const en: Record<TranslationKey, string> = {
   "settings.keyboardShortcuts.category.transform": "Transform",
   "settings.keyboardShortcuts.category.group": "Grouping",
   "settings.keyboardShortcuts.category.tools": "Tools",
+  "settings.keyboardShortcuts.category.navigation": "Navigation",
 
   "shortcut.undo": "Undo",
   "shortcut.redo": "Redo",
@@ -3044,6 +3050,10 @@ export const en: Record<TranslationKey, string> = {
   "shortcut.toolWindow": "Tool: Window",
   "shortcut.toolDoor": "Tool: Door",
   "shortcut.toolRoom": "Tool: Room",
+  "shortcut.floorDown": "Story down",
+  "shortcut.floorUp": "Story up",
+  "shortcut.showSelection3d": "Show selection in 3D (no selection: everything)",
+  "shortcut.hideSelection3d": "Hide selection in 3D",
 
   "settings.section.update": "Update",
   "settings.update.autoCheck": "Check for updates automatically",

@@ -79,4 +79,31 @@ describe("3D nach Klassen ([180])", () => {
     expect(s.has("20") && s.has("21") && s.has("31")).toBe(true);
     expect(s.has("30")).toBe(false);
   });
+
+  it("[185] Element-Auswahl: `only` zeigt nur die Wand (samt ihren Öffnungen), `hideIds` blendet sie aus — Modell, Teile und Pick", () => {
+    const host = (p.openings ?? [])[0].hostWallId;
+    const hostOf = new Map((p.openings ?? []).map((o) => [o.id, o.hostWallId]));
+    const others = p.walls.filter((w) => w.id !== host).length;
+    const wallIds = (m: ReturnType<typeof projectToModel3d>) => new Set(m.walls.map((w) => w.wallId));
+    const only = projectToModel3d(p, { hide: { only: [host] } });
+    expect([...wallIds(only)]).toEqual([host]);
+    expect(only.slabs).toHaveLength(0);
+    expect(roofs(only)).toBe(0);
+    const g = pickGeometry(p, 0, { only: [host] });
+    expect(new Set(g.walls.map((w) => w.wallId))).toEqual(new Set([host]));
+    expect(g.openings.length).toBeGreaterThan(0);
+    expect(g.openings.every((o) => hostOf.get(o.openingId) === host)).toBe(true);
+    expect(g.slabs).toHaveLength(0);
+    const parts = projectToModel3dParts(p, { hide: { only: [host] } })!;
+    expect(parts.flatMap((x) => x.walls ?? []).every((w) => w.wallId === host)).toBe(true);
+
+    const hid = projectToModel3d(p, { hide: { hideIds: [host] } });
+    expect(wallIds(hid).has(host)).toBe(false);
+    expect(wallIds(hid).size).toBe(others);
+    const gh = pickGeometry(p, 0, { hideIds: [host] });
+    expect(gh.walls.some((w) => w.wallId === host)).toBe(false);
+    expect(gh.openings.some((o) => hostOf.get(o.openingId) === host)).toBe(false);
+    // Kein Filter: alles wieder da.
+    expect(wallIds(projectToModel3d(p, { hide: { only: null, hideIds: [] } })).size).toBe(p.walls.length);
+  });
 });
