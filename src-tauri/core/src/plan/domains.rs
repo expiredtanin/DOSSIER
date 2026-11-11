@@ -1585,15 +1585,30 @@ fn solid_by_profile(c: &Ctx, s: &ExtrudedSolid, out: &mut Vec<Primitive>) {
     }
     let out_start = out.len();
     if subtract {
-        out.push(polygon(s.points.clone(), "none", "none", 0.0, no_hatch(), greyed, None, Pick::Solid(&s.id)));
-        let n = s.points.len();
-        let seg = |a: Vec2, b: Vec2, dash: Option<Vec<f64>>| line(a, b, "void", SYMBOL_HAIRLINE_MM, Some(dash), EXTRUSION_STROKE, greyed);
-        for i in 0..n {
-            out.push(seg(s.points[i], s.points[(i + 1) % n], Some(vec![2.0, 1.0])));
+        // [G1] Echter Schnittumriss als dünne Strich-Punkt-Linie (Aussparung); Diagonalkreuz nur bei Durchbruch durch eine Decke.
+        let mut rings = super::extras::void_outline(c.p, s, range.cut);
+        if rings.is_empty() {
+            rings = vec![s.points.clone()];
         }
-        if n == 4 {
-            out.push(seg(s.points[0], s.points[2], None));
-            out.push(seg(s.points[1], s.points[3], None));
+        out.push(polygon(rings[0].clone(), "none", "none", 0.0, no_hatch(), greyed, None, Pick::Solid(&s.id)));
+        let seg = |a: Vec2, b: Vec2, dash: Option<Vec<f64>>| line(a, b, "void", SYMBOL_HAIRLINE_MM, Some(dash), EXTRUSION_STROKE, greyed);
+        for ring in &rings {
+            let n = ring.len();
+            for i in 0..n {
+                out.push(seg(ring[i], ring[(i + 1) % n], Some(super::line_pattern::CONSTRUCTION.to_vec())));
+            }
+        }
+        if super::extras::void_pierces_slab(c.p, s) {
+            let ring = &rings[0];
+            if ring.len() == 4 {
+                out.push(seg(ring[0], ring[2], None));
+                out.push(seg(ring[1], ring[3], None));
+            } else {
+                let (x0, x1) = ring.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |a, q| (a.0.min(q.x), a.1.max(q.x)));
+                let (y0, y1) = ring.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |a, q| (a.0.min(q.y), a.1.max(q.y)));
+                out.push(seg(Vec2 { x: x0, y: y0 }, Vec2 { x: x1, y: y1 }, None));
+                out.push(seg(Vec2 { x: x0, y: y1 }, Vec2 { x: x1, y: y0 }, None));
+            }
         }
     } else {
         out.push(polygon(s.points.clone(), "none", EXTRUSION_STROKE, SYMBOL_HAIRLINE_MM, no_hatch(), greyed, None, Pick::Solid(&s.id)));
@@ -3203,6 +3218,47 @@ mod tests {
         assert!(st.iter().all(|x| !matches!(x, Primitive::Line { stair_id, .. } if stair_id.as_deref() == Some("ST1"))), "{st:?}");
     }
 
+    /// [G1] Untersicht: Treppe (gerade, L, Wendel) des Geschosses darüber im Deckenloch, von unten gestrichelt, auf das
+    /// Loch beschnitten; ohne Loch entfällt sie.
+    #[test]
+    fn untersicht_der_treppe_darueber_im_deckenloch() {
+        use crate::model::StairShape;
+        let mut p = sample();
+        let hole = vec![Vec2 { x: 1.0, y: 1.0 }, Vec2 { x: 3.0, y: 1.0 }, Vec2 { x: 3.0, y: 3.0 }, Vec2 { x: 1.0, y: 3.0 }];
+        p.ceilings.as_mut().unwrap()[0].openings = Some(vec![hole]);
+        let base = p.stairs.as_ref().unwrap()[0].clone();
+        let run = |p: &Project| {
+            let t = serde_json::json!({ "floor": "eg", "show": ["30", "40"], "grey": [], "scale": 50 }).to_string();
+            plan_domains(p, &PlanArgs::parse(1.0, &t).unwrap()).unwrap().stairs
+        };
+        let lines = |st: &[Primitive], id: &str| -> Vec<(Vec2, Vec2, bool)> {
+            st.iter().filter_map(|q| match q { Primitive::Line { a, b, dash, stair_id, .. } if stair_id.as_deref() == Some(id) => Some((*a, *b, dash.as_ref().is_some_and(|d| d.is_some()))), _ => None }).collect()
+        };
+        for (shape, start, dir) in [(StairShape::Straight, (1.4, 1.0), (0.0, 1.0)), (StairShape::L, (1.2, 1.1), (0.0, 1.0)), (StairShape::Spiral, (2.0, 2.0), (0.0, 1.0))] {
+            let mut s = base.clone();
+            s.id = "OBEN".into();
+            s.floor_id = "og".into();
+            s.shape = shape;
+            s.start = Vec2 { x: start.0, y: start.1 };
+            s.dir = Vec2 { x: dir.0, y: dir.1 };
+            s.run_length = 1.5;
+            s.run2_length = Some(0.6);
+            s.center = Some(Vec2 { x: 2.0, y: 2.0 });
+            s.radius = Some(0.8);
+            s.sweep = Some(300.0);
+            s.width = 0.8;
+            p.stairs.as_mut().unwrap().truncate(1);
+            p.stairs.as_mut().unwrap().push(s);
+            let l = lines(&run(&p), "OBEN");
+            assert!(!l.is_empty(), "{shape:?}: Untersicht fehlt");
+            assert!(l.iter().all(|q| q.2), "{shape:?}: ganz gestrichelt");
+            assert!(l.iter().all(|q| [q.0, q.1].iter().all(|v| v.x > 1.0 - 1e-6 && v.x < 3.0 + 1e-6 && v.y > 1.0 - 1e-6 && v.y < 3.0 + 1e-6)), "{shape:?}: auf das Loch beschnitten");
+            let mut q = p.clone();
+            q.ceilings.as_mut().unwrap()[0].openings = None;
+            assert!(lines(&run(&q), "OBEN").is_empty(), "{shape:?}: ohne Loch keine Untersicht");
+        }
+    }
+
     /// [150] Nur der Stempel mit Anker ausserhalb seines Raums wird Hindernis der Höhenlinien-Beschriftungen.
     #[test]
     fn stempel_ausserhalb_des_raums_ist_hindernis() {
@@ -3389,6 +3445,41 @@ mod tests {
         assert!((band_area - exact).abs() < exact * 2e-3, "{band_area} ≠ {exact}");
         assert!(arcs >= 2 * 2, "Umriss innen/aussen als Bögen (≤ 90° je Stück): {arcs}");
         assert_eq!(polar, 4, "ein polar schraffiertes Band je Schicht");
+    }
+
+    /// [G1] Abzugskörper: Schnittumriss als Strich-Punkt-Linie (verjüngt ⇒ kleiner als das Profil), Kreuz nur beim Durchbruch.
+    #[test]
+    fn abzugskoerper_umriss_und_kreuz() {
+        let mut p = sample();
+        let mk = |id: &str, off: f64, h: f64, taper: Option<f64>| ExtrudedSolid {
+            id: id.into(),
+            level_id: "eg".into(),
+            category_code: "20".into(),
+            points: vec![Vec2 { x: 20.0, y: 0.0 }, Vec2 { x: 24.0, y: 0.0 }, Vec2 { x: 24.0, y: 4.0 }, Vec2 { x: 20.0, y: 4.0 }],
+            height: h,
+            base_offset: Some(off),
+            taper,
+            operation: Some("subtract".into()),
+            ..Default::default()
+        };
+        let lines = |p: &Project, id: &str| -> (Vec<(Vec2, Vec2)>, usize) {
+            let r = plan_domains(p, &args("eg", 1.0, &["20", "30", "60"])).unwrap();
+            let _ = id;
+            let v: Vec<(Vec2, Vec2, bool)> = r.solids.iter().filter_map(|q| match q { Primitive::Line { a, b, cls, dash, .. } if cls == "void" => Some((*a, *b, dash.as_ref().is_some_and(|d| d.is_some()))), _ => None }).collect();
+            (v.iter().filter(|q| q.2).map(|q| (q.0, q.1)).collect(), v.iter().filter(|q| !q.2).count())
+        };
+        // senkrecht, Aussparung (nur im Geschoss): Rechteck-Umriss strich-punktiert, kein Kreuz
+        p.extruded_solids = Some(vec![mk("v", 0.0, 2.0, None)]);
+        let (dashed, cross) = lines(&p, "v");
+        assert_eq!((dashed.len(), cross), (4, 0));
+        // verjüngt: Umriss auf Schnitthöhe kleiner als das Profil
+        p.extruded_solids = Some(vec![mk("v", 0.0, 2.0, Some(0.5))]);
+        let (dashed, _) = lines(&p, "v");
+        assert!(!dashed.is_empty() && dashed.iter().all(|(a, _)| a.x > 20.05 && a.x < 23.95), "{dashed:?}");
+        // Durchbruch durch die Decke darunter: Kreuz
+        p.extruded_solids = Some(vec![mk("v", -0.5, 2.0, None)]);
+        let (dashed, cross) = lines(&p, "v");
+        assert_eq!((dashed.len(), cross), (4, 2));
     }
 
     /// [G1] Körper, die die Schnitthöhe durchdringen: Poché (Schnittfläche auf Schnitthöhe, Schraffur,

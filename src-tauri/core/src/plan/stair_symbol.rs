@@ -335,6 +335,8 @@ pub struct RunOpts {
     pub start_mark: Option<f64>,
     /// [T3] Halbe Handlaufbreite (Meter) für die Doppellinie; 0 = Standard ([`crate::stair_rail::RAIL_THICK`] / 2).
     pub rail_half: f64,
+    /// [G1] Untersicht: ohne Bruchlinie, alles über der Schnitthöhe gestrichelt (Schnitthöhe unter dem Treppenfuss).
+    pub no_break: bool,
 }
 
 /// [173] Schnittparameter des Strahls `a + t·d` mit der Geraden durch `c`–`e` (`None` = parallel).
@@ -437,7 +439,10 @@ pub fn plan_stair_run(params: &[f64], total_rise: f64, cut_rise: f64, lw_mm: f64
     let outline = stair_outline(&p);
     let spiral = p.shape == "spiral";
     let center = outline.spiral.as_ref().map(|s| s.arcs[0].0);
-    let lay = Layout::new(&p, &geo, cut_rise, center);
+    let mut lay = Layout::new(&p, &geo, cut_rise, center);
+    if run.no_break {
+        lay.brk = None;
+    }
     let (w_tread, w_outline) = (lw_mm * TREAD_FACTOR, lw_mm * OUTLINE_FACTOR);
     let mut o = Out::default();
 
@@ -983,7 +988,7 @@ mod tests {
             assert!(l(&g.run_line) >= l(&raw.run_line) - 1e-9, "{name}: nicht kürzer als vorher");
             assert!(len(sub(g.arrow.head.1, g.run_line[n - 1])) < 1e-9, "{name}: Pfeil am Ende");
             let mut h = stair_geometry(&sp, 2.8);
-            run_line_to_edges(&mut h, spiral, &RunOpts { start: 0.1, end: 0.2, start_mark: None, rail_half: 0.0 });
+            run_line_to_edges(&mut h, spiral, &RunOpts { start: 0.1, end: 0.2, start_mark: None, rail_half: 0.0, no_break: false });
             assert!((l(&g.run_line) - l(&h.run_line) - 0.3).abs() < 1e-6, "{name}: Versatz 0.1 + 0.2");
             assert!(len(sub(h.arrow.head.1, h.run_line[h.run_line.len() - 1])) < 1e-9);
         }
