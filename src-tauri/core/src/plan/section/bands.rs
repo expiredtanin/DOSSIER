@@ -347,7 +347,7 @@ fn split_layers_along(cp: &Cut, p: &Project, layers: &[Layer], owner: &Wall, u_w
 }
 
 /// `splitWallLayers`: stehende Teil-Rechtecke je Schicht quer zur Dicke (u).
-pub(super) fn split_wall_layers(cp: &Cut, p: &Project, layers: &[Layer], owner: &Wall, u_world: (f64, f64), plane: &Plane) -> Result<Vec<Cut>, String> {
+pub(super) fn split_wall_layers(cp: &Cut, p: &Project, layers: &[Layer], owner: &Wall, u_world: (f64, f64), plane: &Plane, flat: &HashSet<String>) -> Result<Vec<Cut>, String> {
     let total = sum_thickness(layers);
     let [u_min, u_max, v_min, v_max] = bbox(&cp.pts);
     let u_span = u_max - u_min;
@@ -364,7 +364,7 @@ pub(super) fn split_wall_layers(cp: &Cut, p: &Project, layers: &[Layer], owner: 
     let mut out = Vec::with_capacity(layers.len());
     // [106] Schichteinzug am Sturz (Stück liegt über der Öffnung) bzw. an der Brüstung (darunter),
     // [94] Anschlag: die Schichten vor dem Rahmen reichen um die Anschlagtiefe in die Öffnung.
-    let (top, bottom) = section_reveal(p, owner, plane, v_min, v_max);
+    let (top, bottom) = section_reveal(p, owner, plane, v_min, v_max, flat);
     let n = layers.len();
     let offsets: Vec<f64> = layers.iter().scan(0.0, |acc, l| { let o = *acc; *acc += l.thickness; Some(o) }).collect();
     let mut acc = 0.0;
@@ -444,13 +444,13 @@ pub(super) fn split_wall_layers(cp: &Cut, p: &Project, layers: &[Layer], owner: 
 }
 
 /// Anschlag-Nasen eines einschaligen Wandbands (ganze Dicke als eine Schicht).
-fn single_layer_nibs(p: &Project, owner: &Wall, cp: &Cut, u_world: (f64, f64), plane: &Plane) -> Vec<[f64; 4]> {
+fn single_layer_nibs(p: &Project, owner: &Wall, cp: &Cut, u_world: (f64, f64), plane: &Plane, flat: &HashSet<String>) -> Vec<[f64; 4]> {
     let total = sum_thickness(&p.wall_type_or_fallback(owner).layers);
     let [u_min, u_max, v_min, v_max] = bbox(&cp.pts);
     if !(total > 1e-9 && u_max - u_min > 1e-9) {
         return Vec::new();
     }
-    let (top, bottom) = section_reveal(p, owner, plane, v_min, v_max);
+    let (top, bottom) = section_reveal(p, owner, plane, v_min, v_max, flat);
     if top.is_none() && bottom.is_none() {
         return Vec::new();
     }
@@ -536,7 +536,7 @@ fn rebate_nibs(top: &Option<EdgeJoin>, bottom: &Option<EdgeJoin>, (l0, l1): (f64
 
 /// Schichteinzug und Anschlag der Öffnung, deren Sturz (unten an `v_min`) bzw. Brüstung (oben an `v_max`)
 /// dieses Wandstück ist und die die Schnittebene quert.
-fn section_reveal(p: &Project, wall: &Wall, plane: &Plane, v_min: f64, v_max: f64) -> (Option<EdgeJoin>, Option<EdgeJoin>) {
+fn section_reveal(p: &Project, wall: &Wall, plane: &Plane, v_min: f64, v_max: f64, flat: &HashSet<String>) -> (Option<EdgeJoin>, Option<EdgeJoin>) {
     let (mut top, mut bottom) = (None, None);
     let u_raw = plane.u_model();
     let l = hypot2(u_raw.0, u_raw.1);
@@ -547,6 +547,10 @@ fn section_reveal(p: &Project, wall: &Wall, plane: &Plane, v_min: f64, v_max: f6
     // Bogenwand: `wall` ist hier die Sehnen-Teilwand (mit Bulge) — die Öffnung sitzt auf der echten Wand.
     let host = p.walls.iter().find(|w| w.id == wall.id).unwrap_or(wall);
     for o in p.openings_of_wall(&wall.id) {
+        // [184] Grob: nur ein Strich, Sturz und Brüstung des Wandschnitts bleiben flach (kein Anschlag, kein Einzug).
+        if flat.contains(&o.id) {
+            continue;
+        }
         // Bogenwand ([T2]): Einzug auf der Sehne zwischen den Laibungen.
         let chord = arc_chord_opening(host, o);
         let (wall, o) = match &chord {
@@ -584,7 +588,7 @@ fn section_reveal(p: &Project, wall: &Wall, plane: &Plane, v_min: f64, v_max: f6
 }
 
 /// `attachCutStyles`: Stil, Herkunft, Schicht-Bänder, Terminierung, Dominanz.
-pub(super) fn attach_cut_styles(cuts: Vec<Cut>, p: &Project, plane: &Plane, walls: &[Option<&Wall>], slabs: &[SlabOwner]) -> Result<Vec<Cut>, String> {
+pub(super) fn attach_cut_styles(cuts: Vec<Cut>, p: &Project, plane: &Plane, walls: &[Option<&Wall>], slabs: &[SlabOwner], flat: &HashSet<String>) -> Result<Vec<Cut>, String> {
     if cuts.is_empty() {
         return Ok(cuts);
     }
@@ -606,7 +610,7 @@ pub(super) fn attach_cut_styles(cuts: Vec<Cut>, p: &Project, plane: &Plane, wall
                 if let Some(o) = owner {
                     let wt = p.wall_type_or_fallback(o);
                     if wt.layers.len() > 1 {
-                        bands.extend(split_wall_layers(&cp, p, &wt.layers, o, u_world, plane)?);
+                        bands.extend(split_wall_layers(&cp, p, &wt.layers, o, u_world, plane, flat)?);
                         continue;
                     }
                 }
@@ -617,7 +621,7 @@ pub(super) fn attach_cut_styles(cuts: Vec<Cut>, p: &Project, plane: &Plane, wall
                 cp.join_priority = owner.and_then(|o| wall_representative_priority(p, o));
                 cp.component_id = owner.and_then(|o| wall_representative_component_id(p, o));
                 // [94] Anschlag-Nase der einschaligen Wand: Band und Nase als ein Umriss.
-                let nibs = owner.map(|o| single_layer_nibs(p, o, &cp, u_world, plane)).unwrap_or_default();
+                let nibs = owner.map(|o| single_layer_nibs(p, o, &cp, u_world, plane, flat)).unwrap_or_default();
                 if !nibs.is_empty() {
                     let mut polys = vec![vec![cp.pts.clone()]];
                     polys.extend(nibs.iter().map(|r| vec![vec![[r[0], r[3]], [r[1], r[3]], [r[1], r[2]], [r[0], r[2]]]]));

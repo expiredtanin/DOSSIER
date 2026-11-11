@@ -264,8 +264,8 @@ fn schichten_aussen_aussen_und_override_auf_allen_schichten() {
     let w2 = p.walls.iter().find(|w| w.id == "W2").unwrap().clone();
     let w4 = p.walls.iter().find(|w| w.id == "W4").unwrap().clone();
     let u = (1.0, 0.0);
-    let b2 = split_wall_layers(&cp, &p, &layers, &w2, u, &Plane { point: [0.0; 3], normal: [1.0, 0.0, 0.0] }).unwrap();
-    let b4 = split_wall_layers(&cp, &p, &layers, &w4, u, &Plane { point: [0.0; 3], normal: [1.0, 0.0, 0.0] }).unwrap();
+    let b2 = split_wall_layers(&cp, &p, &layers, &w2, u, &Plane { point: [0.0; 3], normal: [1.0, 0.0, 0.0] }, &Default::default()).unwrap();
+    let b4 = split_wall_layers(&cp, &p, &layers, &w4, u, &Plane { point: [0.0; 3], normal: [1.0, 0.0, 0.0] }, &Default::default()).unwrap();
     // W4 (Aussenseite −x): layers[0] an uMin; W2 gespiegelt: layers[0] an uMax.
     assert_eq!(b4[0].component_id.as_deref(), Some(layers[0].component_id.as_str()));
     assert!(close(bbox(&b4[0].pts)[0], 0.0));
@@ -273,6 +273,6 @@ fn schichten_aussen_aussen_und_override_auf_allen_schichten() {
     // Override der Wand gilt für jede Schicht
     p.walls[1].background = Some("#123456".into());
     let w = p.walls[1].clone();
-    let bands = split_wall_layers(&cp, &p, &layers, &w, u, &Plane { point: [0.0; 3], normal: [1.0, 0.0, 0.0] }).unwrap();
+    let bands = split_wall_layers(&cp, &p, &layers, &w, u, &Plane { point: [0.0; 3], normal: [1.0, 0.0, 0.0] }, &Default::default()).unwrap();
     assert!(bands.iter().all(|b| b.fill.as_deref() == Some("#123456")));
 }

@@ -984,7 +984,8 @@ fn opening_detail_plan(c: &Ctx, out: &mut Vec<Primitive>, w: &Wall, o: &Opening,
     let id = Some(o.id.as_str());
     let frame = od::frame_of(p, o);
     // Anschlag je Seite.
-    if let (Some(r), Some(f)) = (rebate, frame.as_ref()) {
+    // [184] Grob: Leibung gerade, kein Anschlag.
+    if let (Some(r), Some(f)) = (rebate.filter(|_| s.detail != Detail::Grob), frame.as_ref()) {
         if let Some((z0, z1)) = f.rebate_zone(total) {
             let category = c.cat(&w.category_code);
             let angle = atan2(w.end.y - w.start.y, w.end.x - w.start.x) * 180.0 / std::f64::consts::PI;

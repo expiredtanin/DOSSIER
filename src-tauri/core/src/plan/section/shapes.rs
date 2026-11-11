@@ -355,7 +355,7 @@ pub(super) fn is_void_solid(s: &ExtrudedSolid) -> bool {
 /// [106] Schnitt parallel zur Wand durch die Leibungen: Die geschnittene Schicht springt an den
 /// Öffnungen um ihren Rücksprung zurück (Loch geweitet), ihre Zusatzstücke (Leibungsdämmung, Putz,
 /// Überdämmung), die die Schnittebene quert, kommen als Schnittfläche im Stil der Schicht dazu.
-pub(super) fn parallel_reveal_cuts(mut cuts: Vec<Cut>, p: &Project, plane: &Plane, walls: &[Option<&Wall>]) -> Result<Vec<Cut>, String> {
+pub(super) fn parallel_reveal_cuts(mut cuts: Vec<Cut>, p: &Project, plane: &Plane, walls: &[Option<&Wall>], flat: &HashSet<String>) -> Result<Vec<Cut>, String> {
     use crate::opening_detail::SIDES;
     let (base, u_raw) = (plane.base(), plane.u_model());
     let l = hypot2(u_raw.0, u_raw.1);
@@ -403,6 +403,9 @@ pub(super) fn parallel_reveal_cuts(mut cuts: Vec<Cut>, p: &Project, plane: &Plan
             vec![[ua, z0], [ub, z0], [ub, z1], [ua, z1]]
         };
         for o in p.openings_of_wall(&w.id) {
+            if flat.contains(&o.id) {
+                continue;
+            }
             let Some(r) = crate::opening_detail::opening_reveal(p, w, o) else { continue };
             let (zb, zt) = opening_extent(p, w, o);
             // Rücksprung je Seite dieser Schicht; die seitlichen reichen in die Ecken oben/unten.

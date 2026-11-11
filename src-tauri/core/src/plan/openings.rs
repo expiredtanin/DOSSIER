@@ -238,7 +238,10 @@ fn plan_opening_inner(buf: &[f64]) -> Option<Vec<f64>> {
         }
         if has_frame {
             let zone = frame_band(&mut o, &w, position, width, frame_width, frame_block, frame_inset, frame_inset_side, hair);
-            rebate_nibs(&mut o, &w, position, width, rebate, zone);
+            // [184] Grob: Leibung gerade durchgezogen, keine Anschlag-Nase.
+            if detail != Detail::Grob {
+                rebate_nibs(&mut o, &w, position, width, rebate, zone);
+            }
         }
         if lintel != 0 {
             let half_d = total / 2.0;

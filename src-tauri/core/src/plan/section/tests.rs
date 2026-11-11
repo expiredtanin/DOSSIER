@@ -556,6 +556,43 @@ fn anschlag_im_schnitt_sturz_nase_und_bruestung() {
     assert_eq!(k, count["insulation"], "Einzug gehört zum Band");
 }
 
+/// [184] Grob (Fenster nur als Strich): Sturz-Unterkante und Brüstungs-Oberkante des Wandschnitts sind flach —
+/// kein Anschlag, keine Nase, kein Schichteinzug. Fein (ohne `flat_openings`) bleibt wie bisher.
+#[test]
+fn grob_wandschnitt_an_oeffnung_flach() {
+    let mut p = sample_flush();
+    let o1 = p.openings.as_deref().unwrap().iter().find(|o| o.id == "O1").unwrap().clone();
+    let w1 = p.walls.iter().find(|w| w.id == "W1").unwrap().clone();
+    let (u, n) = axis_frame(&w1);
+    let m = o1.position + o1.width / 2.0;
+    let c = (w1.start.x + u.0 * m, w1.start.y + u.1 * m);
+    let l = LevelSpec { kind: "section".into(), line: Some([Vec2 { x: c.0 - n.0 * 3.0, y: c.1 - n.1 * 3.0 }, Vec2 { x: c.0 + n.0 * 3.0, y: c.1 + n.1 * 3.0 }]), ..Default::default() };
+    let (zb, zt) = opening_extent(&p, &w1, &o1);
+    // Anschlag 5 cm und Überdämmung 3 cm: im Fein-Schnitt Nase bzw. Einzug.
+    for t in p.window_types.iter_mut().flatten() {
+        t.inset_face = Some(WindowTypeInsetFace::Aussen);
+        t.inset_from_face = Some(0.18);
+        t.rebate_depth = Some(0.05);
+    }
+    for o in p.openings.iter_mut().flatten().filter(|o| o.id == "O1") {
+        o.layer_reveals = Some(vec![crate::model::LayerReveal { layer: 1.0, mode: crate::model::RevealMode::Ueberdaemmt, amount: Some(0.03), ..Default::default() }]);
+    }
+    // Alle Wandschnitt-Kanten in der Öffnungshöhe: nur zb und zt (keine Stufe dazwischen).
+    let ys = |vis: &Visibility| -> Vec<f64> {
+        let out = compute_section_vis(&p, &l, &[], vis).unwrap().unwrap();
+        let mut ys: Vec<f64> = out.cuts.iter().filter(|c| c.kind == Kind::Wall && c.source_id.as_deref() == Some("W1")).flat_map(|c| c.pts.iter().map(|q| q[1])).filter(|y| *y > zb - 0.1 && *y < zt + 0.1).collect();
+        ys.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        ys.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
+        ys
+    };
+    let fine = ys(&Visibility::default());
+    assert!(fine.iter().any(|y| (y - (zt - 0.05)).abs() < 1e-6) && fine.iter().any(|y| (y - (zb + 0.05)).abs() < 1e-6), "fein: Anschlag {fine:?}");
+    let flat = Visibility { flat_openings: ["O1".to_string()].into(), ..Default::default() };
+    let rough = ys(&flat);
+    assert!(rough.iter().all(|y| (y - zb).abs() < 1e-6 || (y - zt).abs() < 1e-6), "grob: keine Stufe {rough:?}");
+    assert!(rough.iter().any(|y| (y - zb).abs() < 1e-6) && rough.iter().any(|y| (y - zt).abs() < 1e-6), "{rough:?}");
+}
+
 /// [G3] Rundbogen-Fenster: an der Schnittstelle reicht die Wand bis an den Bogen, Rahmen/Glas folgen.
 #[test]
 fn rundbogen_im_schnitt() {
