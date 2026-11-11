@@ -30,8 +30,8 @@
 // SCHATTEN ([64]): Die drei beleuchteten Flaechen-Shader (Mesh, texturiert, Luftbild) haengen an
 // `Globals` zwei Felder an — `light_view_proj` (world -> Licht-Clip, `shadow::light_view_proj`) und
 // `shadow` (x = an/aus, y = Normalen-Verschiebung in m, z = PCF-Schritt in UV = 1/Texturgroesse,
-// w = Tiefen-Bias im Licht-NDC) — und lesen die Tiefentextur aus `SHADOW_WGSL` (group 0, binding 1/2,
-// Vergleichs-Sampler). Nur der Sonnen-Anteil (Lambert) wird abgeschattet; Himmels-Ambient und
+// w = Tiefen-Bias im Licht-NDC), dazu [186] dieselben zwei fuer Kaskade 1 (`_far`) — und lesen die
+// Tiefentexturen aus `SHADOW_WGSL` (group 0, binding 1 = Kaskade 0, 3 = Kaskade 1, 2 = Vergleichs-Sampler). Nur der Sonnen-Anteil (Lambert) wird abgeschattet; Himmels-Ambient und
 // Gegen-Fuelllicht bleiben, Schatten sind also hell genug zum Lesen. Die uebrigen Shader deklarieren
 // `Globals` ohne die Anhaengsel (gueltig: ihr Struct ist ein Praefix des Puffers).
 
@@ -48,12 +48,39 @@ struct Globals {
     section_plane : vec4<f32>,
     light_view_proj : mat4x4<f32>,
     shadow        : vec4<f32>,
+    light_view_proj_far : mat4x4<f32>,
+    shadow_far    : vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> globals : Globals;
 @group(0) @binding(1) var shadow_map  : texture_depth_2d;
 @group(0) @binding(2) var shadow_samp : sampler_comparison;
+@group(0) @binding(3) var shadow_map_far : texture_depth_2d;
 
-// Sonnen-Sichtbarkeit [0,1] aus der Schattentextur ([64], s. Kopf von shaders.rs).
+// PCF: 3x3 Abtastungen mit linearem Vergleichs-Sampler (je 2x2 Texel) -> weicher Rand von ~4 Texeln.
+fn shadow_pcf(t : texture_depth_2d, uv : vec2<f32>, depth : f32, step : f32) -> f32 {
+    var sum = 0.0;
+    for (var dy = -1; dy <= 1; dy += 1) {
+        for (var dx = -1; dx <= 1; dx += 1) {
+            let o = vec2<f32>(f32(dx), f32(dy)) * step;
+            sum += textureSampleCompareLevel(t, shadow_samp, uv + o, depth);
+        }
+    }
+    return sum / 9.0;
+}
+
+// Lage in einer Kaskade: xy = Textur-UV, z = Tiefe (Licht-NDC), w = 1, wenn der PCF-Kern ganz in der
+// Textur liegt (Rand 2 Texel) und die Tiefe im Frustum.
+fn shadow_coord(m : mat4x4<f32>, p : vec3<f32>, step : f32) -> vec4<f32> {
+    let c = m * vec4<f32>(p, 1.0);
+    let ndc = c.xyz / c.w;
+    let uv = vec2<f32>(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
+    let r = 2.0 * step;
+    let inside = uv.x >= r && uv.x <= 1.0 - r && uv.y >= r && uv.y <= 1.0 - r && ndc.z >= 0.0 && ndc.z <= 1.0;
+    return vec4<f32>(uv, ndc.z, select(0.0, 1.0, inside));
+}
+
+// Sonnen-Sichtbarkeit [0,1] aus den Schattentexturen ([64], [186], s. Kopf von shaders.rs): Kaskade 0
+// (eng aufs Gebaeude, fein), sonst Kaskade 1 (alle eigenen Bauteile), ausserhalb besonnt.
 fn sun_visibility(world_pos : vec3<f32>, n : vec3<f32>, l : vec3<f32>) -> f32 {
     if (globals.shadow.x < 0.5) {
         return 1.0;
@@ -62,24 +89,20 @@ fn sun_visibility(world_pos : vec3<f32>, n : vec3<f32>, l : vec3<f32>) -> f32 {
     if (ndl <= 0.0) {
         return 1.0;
     }
-    // Normalen-Verschiebung gegen Schattenakne: flach beschienene Flaechen etwas mehr.
-    let offset = globals.shadow.y * (1.0 + 2.0 * (1.0 - ndl));
-    let p = globals.light_view_proj * vec4<f32>(world_pos + n * offset, 1.0);
-    let ndc = p.xyz / p.w;
-    let uv = vec2<f32>(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
-    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || ndc.z > 1.0 || ndc.z < 0.0) {
+    // Normalen-Verschiebung gegen Schattenakne (je Kaskade ≈ 1.5 Texel): flach beschienene Flaechen etwas mehr.
+    let slope = 1.0 + 2.0 * (1.0 - ndl);
+    let c0 = shadow_coord(globals.light_view_proj, world_pos + n * (globals.shadow.y * slope), globals.shadow.z);
+    if (c0.w > 0.5) {
+        return shadow_pcf(shadow_map, c0.xy, c0.z - globals.shadow.w, globals.shadow.z);
+    }
+    if (globals.shadow_far.x < 0.5) {
         return 1.0;
     }
-    let depth = ndc.z - globals.shadow.w;
-    // PCF: 3x3 Abtastungen mit linearem Vergleichs-Sampler (je 2x2 Texel) -> weicher Rand.
-    var sum = 0.0;
-    for (var dy = -1; dy <= 1; dy += 1) {
-        for (var dx = -1; dx <= 1; dx += 1) {
-            let o = vec2<f32>(f32(dx), f32(dy)) * globals.shadow.z;
-            sum += textureSampleCompareLevel(shadow_map, shadow_samp, uv + o, depth);
-        }
+    let c1 = shadow_coord(globals.light_view_proj_far, world_pos + n * (globals.shadow_far.y * slope), globals.shadow_far.z);
+    if (c1.w < 0.5) {
+        return 1.0;
     }
-    return sum / 9.0;
+    return shadow_pcf(shadow_map_far, c1.xy, c1.z - globals.shadow_far.w, globals.shadow_far.z);
 }
 
 // Faktoren (Sonne, Umgebung) mit Schatten: x = Sonnen-Anteil (abgeschattet, bei aktiven Schatten
@@ -197,12 +220,39 @@ struct Globals {
     section_plane : vec4<f32>,
     light_view_proj : mat4x4<f32>,
     shadow        : vec4<f32>,
+    light_view_proj_far : mat4x4<f32>,
+    shadow_far    : vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> globals : Globals;
 @group(0) @binding(1) var shadow_map  : texture_depth_2d;
 @group(0) @binding(2) var shadow_samp : sampler_comparison;
+@group(0) @binding(3) var shadow_map_far : texture_depth_2d;
 
-// Sonnen-Sichtbarkeit [0,1] aus der Schattentextur ([64], s. Kopf von shaders.rs).
+// PCF: 3x3 Abtastungen mit linearem Vergleichs-Sampler (je 2x2 Texel) -> weicher Rand von ~4 Texeln.
+fn shadow_pcf(t : texture_depth_2d, uv : vec2<f32>, depth : f32, step : f32) -> f32 {
+    var sum = 0.0;
+    for (var dy = -1; dy <= 1; dy += 1) {
+        for (var dx = -1; dx <= 1; dx += 1) {
+            let o = vec2<f32>(f32(dx), f32(dy)) * step;
+            sum += textureSampleCompareLevel(t, shadow_samp, uv + o, depth);
+        }
+    }
+    return sum / 9.0;
+}
+
+// Lage in einer Kaskade: xy = Textur-UV, z = Tiefe (Licht-NDC), w = 1, wenn der PCF-Kern ganz in der
+// Textur liegt (Rand 2 Texel) und die Tiefe im Frustum.
+fn shadow_coord(m : mat4x4<f32>, p : vec3<f32>, step : f32) -> vec4<f32> {
+    let c = m * vec4<f32>(p, 1.0);
+    let ndc = c.xyz / c.w;
+    let uv = vec2<f32>(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
+    let r = 2.0 * step;
+    let inside = uv.x >= r && uv.x <= 1.0 - r && uv.y >= r && uv.y <= 1.0 - r && ndc.z >= 0.0 && ndc.z <= 1.0;
+    return vec4<f32>(uv, ndc.z, select(0.0, 1.0, inside));
+}
+
+// Sonnen-Sichtbarkeit [0,1] aus den Schattentexturen ([64], [186], s. Kopf von shaders.rs): Kaskade 0
+// (eng aufs Gebaeude, fein), sonst Kaskade 1 (alle eigenen Bauteile), ausserhalb besonnt.
 fn sun_visibility(world_pos : vec3<f32>, n : vec3<f32>, l : vec3<f32>) -> f32 {
     if (globals.shadow.x < 0.5) {
         return 1.0;
@@ -211,24 +261,20 @@ fn sun_visibility(world_pos : vec3<f32>, n : vec3<f32>, l : vec3<f32>) -> f32 {
     if (ndl <= 0.0) {
         return 1.0;
     }
-    // Normalen-Verschiebung gegen Schattenakne: flach beschienene Flaechen etwas mehr.
-    let offset = globals.shadow.y * (1.0 + 2.0 * (1.0 - ndl));
-    let p = globals.light_view_proj * vec4<f32>(world_pos + n * offset, 1.0);
-    let ndc = p.xyz / p.w;
-    let uv = vec2<f32>(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
-    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || ndc.z > 1.0 || ndc.z < 0.0) {
+    // Normalen-Verschiebung gegen Schattenakne (je Kaskade ≈ 1.5 Texel): flach beschienene Flaechen etwas mehr.
+    let slope = 1.0 + 2.0 * (1.0 - ndl);
+    let c0 = shadow_coord(globals.light_view_proj, world_pos + n * (globals.shadow.y * slope), globals.shadow.z);
+    if (c0.w > 0.5) {
+        return shadow_pcf(shadow_map, c0.xy, c0.z - globals.shadow.w, globals.shadow.z);
+    }
+    if (globals.shadow_far.x < 0.5) {
         return 1.0;
     }
-    let depth = ndc.z - globals.shadow.w;
-    // PCF: 3x3 Abtastungen mit linearem Vergleichs-Sampler (je 2x2 Texel) -> weicher Rand.
-    var sum = 0.0;
-    for (var dy = -1; dy <= 1; dy += 1) {
-        for (var dx = -1; dx <= 1; dx += 1) {
-            let o = vec2<f32>(f32(dx), f32(dy)) * globals.shadow.z;
-            sum += textureSampleCompareLevel(shadow_map, shadow_samp, uv + o, depth);
-        }
+    let c1 = shadow_coord(globals.light_view_proj_far, world_pos + n * (globals.shadow_far.y * slope), globals.shadow_far.z);
+    if (c1.w < 0.5) {
+        return 1.0;
     }
-    return sum / 9.0;
+    return shadow_pcf(shadow_map_far, c1.xy, c1.z - globals.shadow_far.w, globals.shadow_far.z);
 }
 
 // Faktoren (Sonne, Umgebung) mit Schatten: x = Sonnen-Anteil (abgeschattet, bei aktiven Schatten
@@ -344,12 +390,39 @@ struct Globals {
     section_plane : vec4<f32>,
     light_view_proj : mat4x4<f32>,
     shadow        : vec4<f32>,
+    light_view_proj_far : mat4x4<f32>,
+    shadow_far    : vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> globals : Globals;
 @group(0) @binding(1) var shadow_map  : texture_depth_2d;
 @group(0) @binding(2) var shadow_samp : sampler_comparison;
+@group(0) @binding(3) var shadow_map_far : texture_depth_2d;
 
-// Sonnen-Sichtbarkeit [0,1] aus der Schattentextur ([64], s. Kopf von shaders.rs).
+// PCF: 3x3 Abtastungen mit linearem Vergleichs-Sampler (je 2x2 Texel) -> weicher Rand von ~4 Texeln.
+fn shadow_pcf(t : texture_depth_2d, uv : vec2<f32>, depth : f32, step : f32) -> f32 {
+    var sum = 0.0;
+    for (var dy = -1; dy <= 1; dy += 1) {
+        for (var dx = -1; dx <= 1; dx += 1) {
+            let o = vec2<f32>(f32(dx), f32(dy)) * step;
+            sum += textureSampleCompareLevel(t, shadow_samp, uv + o, depth);
+        }
+    }
+    return sum / 9.0;
+}
+
+// Lage in einer Kaskade: xy = Textur-UV, z = Tiefe (Licht-NDC), w = 1, wenn der PCF-Kern ganz in der
+// Textur liegt (Rand 2 Texel) und die Tiefe im Frustum.
+fn shadow_coord(m : mat4x4<f32>, p : vec3<f32>, step : f32) -> vec4<f32> {
+    let c = m * vec4<f32>(p, 1.0);
+    let ndc = c.xyz / c.w;
+    let uv = vec2<f32>(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
+    let r = 2.0 * step;
+    let inside = uv.x >= r && uv.x <= 1.0 - r && uv.y >= r && uv.y <= 1.0 - r && ndc.z >= 0.0 && ndc.z <= 1.0;
+    return vec4<f32>(uv, ndc.z, select(0.0, 1.0, inside));
+}
+
+// Sonnen-Sichtbarkeit [0,1] aus den Schattentexturen ([64], [186], s. Kopf von shaders.rs): Kaskade 0
+// (eng aufs Gebaeude, fein), sonst Kaskade 1 (alle eigenen Bauteile), ausserhalb besonnt.
 fn sun_visibility(world_pos : vec3<f32>, n : vec3<f32>, l : vec3<f32>) -> f32 {
     if (globals.shadow.x < 0.5) {
         return 1.0;
@@ -358,24 +431,20 @@ fn sun_visibility(world_pos : vec3<f32>, n : vec3<f32>, l : vec3<f32>) -> f32 {
     if (ndl <= 0.0) {
         return 1.0;
     }
-    // Normalen-Verschiebung gegen Schattenakne: flach beschienene Flaechen etwas mehr.
-    let offset = globals.shadow.y * (1.0 + 2.0 * (1.0 - ndl));
-    let p = globals.light_view_proj * vec4<f32>(world_pos + n * offset, 1.0);
-    let ndc = p.xyz / p.w;
-    let uv = vec2<f32>(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
-    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || ndc.z > 1.0 || ndc.z < 0.0) {
+    // Normalen-Verschiebung gegen Schattenakne (je Kaskade ≈ 1.5 Texel): flach beschienene Flaechen etwas mehr.
+    let slope = 1.0 + 2.0 * (1.0 - ndl);
+    let c0 = shadow_coord(globals.light_view_proj, world_pos + n * (globals.shadow.y * slope), globals.shadow.z);
+    if (c0.w > 0.5) {
+        return shadow_pcf(shadow_map, c0.xy, c0.z - globals.shadow.w, globals.shadow.z);
+    }
+    if (globals.shadow_far.x < 0.5) {
         return 1.0;
     }
-    let depth = ndc.z - globals.shadow.w;
-    // PCF: 3x3 Abtastungen mit linearem Vergleichs-Sampler (je 2x2 Texel) -> weicher Rand.
-    var sum = 0.0;
-    for (var dy = -1; dy <= 1; dy += 1) {
-        for (var dx = -1; dx <= 1; dx += 1) {
-            let o = vec2<f32>(f32(dx), f32(dy)) * globals.shadow.z;
-            sum += textureSampleCompareLevel(shadow_map, shadow_samp, uv + o, depth);
-        }
+    let c1 = shadow_coord(globals.light_view_proj_far, world_pos + n * (globals.shadow_far.y * slope), globals.shadow_far.z);
+    if (c1.w < 0.5) {
+        return 1.0;
     }
-    return sum / 9.0;
+    return shadow_pcf(shadow_map_far, c1.xy, c1.z - globals.shadow_far.w, globals.shadow_far.z);
 }
 
 // Faktoren (Sonne, Umgebung) mit Schatten: x = Sonnen-Anteil (abgeschattet, bei aktiven Schatten

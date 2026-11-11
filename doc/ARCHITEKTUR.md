@@ -528,7 +528,12 @@ Es gibt drei Schatten, alle aus derselben Sonnenstudie (`Project.sunStudy`, Ort 
 - **Ansicht**: Schlagschatten der Vorsprünge auf die Fassade, `shadows()` in
   `plan/elevation_geom.rs`.
 - **3D**: Shadow-Mapping in render3d. `src/viewport/sun3d.ts` holt Azimut und Höhe aus dem Kern und
-  ruft `set_sun()` (`render3d/src/web.rs`); Lichtrichtung und Matrix in `render3d/src/shadow.rs`.
+  ruft `set_sun()` (`render3d/src/web.rs`); Lichtrichtung und Matrizen in `render3d/src/shadow.rs`: zwei
+  Kaskaden ([186]) — 0 eng aufs Gebäude bzw. in der Nahsicht auf den sichtbaren Ausschnitt, 1 über alle
+  eigenen Bauteile; Tiefenpass nur, wenn sich Sonne, Modell oder die (gerasterte) Ausschnitt-Box ändern.
+
+Im Grundriss gilt nur das Gebäudeinnere als abgedeckt (Decken/Dächer innerhalb der Hülle der geschnittenen
+Wände); unter Dachvorsprung, Balkon und Vordach liegt der echte Schatten, er schliesst an die Fassade an ([186]).
 
 ---
 

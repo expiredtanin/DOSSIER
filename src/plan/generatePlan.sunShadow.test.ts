@@ -24,8 +24,14 @@ describe("Schattenstudie im Grundriss", () => {
     const first = generatePlan(p, "eg", ALL).primitives[0];
     expect(first.kind === "polygon" && first.fill === SUN_SHADOW_FILL).toBe(true);
   });
-  it("nicht im OG, nicht ausgeschaltet, nicht nachts, nicht ohne Studie", () => {
-    expect(shadows(withStudy("2026-12-21T11:00:00Z"), "og")).toEqual([]);
+  it("im OG nur auf dem Balkon, nicht ausgeschaltet, nicht nachts, nicht ohne Studie", () => {
+    // [186] OG: kein Gelände-Schatten; die EG-Decke ragt nördlich als Balkon (y 3.17…4) unter dem Dachvorsprung
+    // vor — im Freien, auf der Schattenseite, also beschattet (vorher galt die Traufe als Abdeckung).
+    const og = shadows(withStudy("2026-12-21T11:00:00Z"), "og");
+    const ys = og.flatMap((q) => (q.kind === "polygon" ? q.pts.map((p) => p.y) : []));
+    expect(og.length).toBe(1);
+    expect(Math.min(...ys)).toBeGreaterThan(3.1);
+    expect(Math.max(...ys)).toBeLessThan(4 + 1e-6);
     expect(shadows(withStudy("2026-12-21T11:00:00Z", false), "eg")).toEqual([]);
     expect(shadows(withStudy("2026-12-21T22:00:00Z"), "eg")).toEqual([]);
     expect(shadows(sampleProject, "eg")).toEqual([]);

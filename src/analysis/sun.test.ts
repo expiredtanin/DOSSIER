@@ -94,3 +94,29 @@ describe("Schatten in eine Richtung (Musterhaus komplex)", () => {
     expect(Math.min(...pts.map(dot))).toBeLessThan(Math.min(...casters.map(dot)) - 2);
   });
 });
+
+// [186] Grundriss EG (Schnitt 1.0): Der Schatten schliesst an die Fassaden auf der Schattenseite an. Vorher lag
+// unter dem Dachvorsprung (Nord 0.6 m, West 0.35 m) kein Schatten — die Traufe galt als Abdeckung —, er
+// begann erst jenseits davon.
+describe("Schatten an der Fassade (Musterhaus komplex, EG)", () => {
+  it("Punkte 1 cm vor Nord- und Westfassade liegen im Schatten", async () => {
+    const { buildComplexSampleProject } = await import("../model/sampleProjectComplex");
+    const p = buildComplexSampleProject();
+    const { lat, lon } = projectLatLon(p);
+    const sun = sunPosition(lat, lon, new Date(p.sunStudy!.when));
+    const shadows = shadowPolygons(p, sun, 1.0);
+    const inside = (q: Vec2, r: Vec2[]) => {
+      let c = false;
+      for (let i = 0, j = r.length - 1; i < r.length; j = i++) {
+        if (r[i].y > q.y !== r[j].y > q.y && q.x < ((r[j].x - r[i].x) * (q.y - r[i].y)) / (r[j].y - r[i].y) + r[i].x) c = !c;
+      }
+      return c;
+    };
+    const shaded = (q: Vec2) => shadows.some((poly) => poly.reduce((c, r) => (inside(q, r) ? !c : c), false));
+    // Aussenkante Nord (Atelier) y = 10.195, West x = −0.195.
+    for (const x of [0.5, 2.5, 4.5]) expect(shaded({ x, y: 10.205 }), `Nord x=${x}`).toBe(true);
+    for (const y of [6, 8, 9.5]) expect(shaded({ x: -0.205, y }), `West y=${y}`).toBe(true);
+    // Das Innere bleibt ohne Schatten.
+    expect(shaded({ x: 2.5, y: 7.5 })).toBe(false);
+  });
+});
