@@ -110,6 +110,8 @@ pub mod cmd_transform;
 pub mod cmd_edit;
 pub mod cmd_create;
 pub mod cmd_draw;
+#[cfg(test)]
+mod cmd_autodim_tests;
 pub mod cmd_solid;
 pub mod polyline_vertex;
 pub mod import_drawing;

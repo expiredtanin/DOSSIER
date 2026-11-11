@@ -1583,7 +1583,7 @@ fn autodim_shift(c: &Ctx, d: &Drawing2D, scale: f64) -> f64 {
     let prefix = format!("autodim-{}-", d.level_id);
     let Some(rest) = d.id.strip_prefix(&prefix) else { return 0.0 };
     let Some((side, _)) = rest.rsplit_once('-') else { return 0.0 };
-    if side == "arc" || side.starts_with("arc-") {
+    if side == "arc" || side.starts_with("arc-") || side == "radius" || side.starts_with("radius-") {
         return 0.0;
     }
     let obst = super::context::excavation_segments(c);

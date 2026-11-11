@@ -189,6 +189,7 @@ fn kette_aus_der_id() {
     assert_eq!(autodim_chain(&d("autodim-eg-south2-total", "eg")), Some("total"));
     assert_eq!(autodim_chain(&d("autodim-eg-oblique1-steps", "eg")), Some("steps"));
     assert_eq!(autodim_chain(&d("autodim-eg-arc-wand-3", "eg")), Some("arc"));
+    assert_eq!(autodim_chain(&d("autodim-eg-radius-wand-3", "eg")), Some("radius"));
     assert_eq!(autodim_chain(&d("autodim-eg-south-total", "og")), None, "andere Ebene");
     assert_eq!(autodim_chain(&d("massk-1", "eg")), None);
 }
