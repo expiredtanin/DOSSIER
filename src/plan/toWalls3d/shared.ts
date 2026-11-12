@@ -214,6 +214,8 @@ export type RMeshKind = "terrain" | "imported" | "extrusion";
  * render3d::types::MeshInput.
  */
 export interface RMesh {
+  /** [216] Wand, deren Körper (Formöffnung) dieses Netz ist; sonst leer. */
+  wallId?: string;
   positions: number[];
   indices: number[];
   kind: RMeshKind;

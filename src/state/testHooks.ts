@@ -205,7 +205,11 @@ export function installTestHooks(): void {
       return {
         only: f.only,
         hidden: f.hidden,
-        walls: uniq(projectToModel3d(p, { hide }).walls.map((w) => w.wallId)),
+        // [216] Wände mit Formöffnung kommen als Körper-Netz (mit `wallId`) statt als Stücke.
+        walls: (() => {
+          const m = projectToModel3d(p, { hide });
+          return uniq([...m.walls.map((w) => w.wallId), ...m.meshes.flatMap((x) => (x.wallId ? [x.wallId] : []))]);
+        })(),
         pickWalls: uniq(pickGeometry(p, 0, hide).walls.map((w) => w.wallId)),
         pickOpenings: (() => {
           const g = pickGeometry(p, 0, hide);

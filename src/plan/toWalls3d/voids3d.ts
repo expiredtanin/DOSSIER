@@ -48,6 +48,7 @@ export function splitWallBodies(walls: readonly RWall[]): { walls: RWall[]; mesh
     }
     if (w.body) {
       meshes.push({
+        wallId: w.wallId,
         positions: w.body.positions,
         indices: w.body.indices,
         kind: "extrusion",
