@@ -84,6 +84,10 @@ describe("Mehrfachwerte Decke, Dach, Öffnung, Höhen [195b]", () => {
     const v = selectionRoofValues(q, mergeSelection(EMPTY_SELECTION, { roofs: [a, b] }));
     expect(v.pitchDeg.mixed).toBe(true);
     expect(v.roofTypeId.mixed).toBe(true);
+    const q2 = { ...q, roofs: q.roofs.map((r) => (r.id === a ? { ...r, overhang: 0.3, thickness: 0.2 } : r.id === b ? { ...r, overhang: 0.5, thickness: 0.2 } : r)) };
+    const v2 = selectionRoofValues(q2, mergeSelection(EMPTY_SELECTION, { roofs: [a, b] }));
+    expect(v2.overhang.mixed).toBe(true);
+    expect(v2.thickness).toEqual({ value: 0.2, mixed: false });
     const one = selectionRoofValues(q, mergeSelection(EMPTY_SELECTION, { roofs: [a] }));
     expect(one.pitchDeg).toEqual({ value: 20, mixed: false });
   });

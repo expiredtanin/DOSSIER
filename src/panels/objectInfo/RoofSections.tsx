@@ -156,6 +156,7 @@ export function RoofSection({
     value: number,
     step: number,
     apply: (v: number) => void,
+    mixedKey?: keyof NonNullable<typeof multi>,
   ) => (
     <div className="objinfo-field">
       <span className="objinfo-flabel">{t(labelKey)}</span>
@@ -170,6 +171,7 @@ export function RoofSection({
         }}
         title={t(labelKey)}
       />
+      {mixedKey && <MixedMark on={multi?.[mixedKey].mixed} what={mixedKey} />}
     </div>
   );
   return (
@@ -194,6 +196,7 @@ export function RoofSection({
           title={t("objinfo.roof.shape")}
           width={130}
         />
+        <MixedMark on={multi?.shape.mixed} what="shape" />
       </div>
 
       {/* Dachtyp (mehrschichtiger Aufbau) — leer = einschichtig (Dicke unten). */}
@@ -227,18 +230,18 @@ export function RoofSection({
             title={t("objinfo.roof.ridgeAxis")}
             width={130}
           />
+          <MixedMark on={multi?.ridgeAxis.mixed} what="ridgeAxis" />
         </div>
       )}
 
       {/* Neigung(en) — Flachdach hat keine. */}
       {roof.shape !== "flach" &&
         numField("objinfo.roof.pitch", roof.pitchDeg, 1, (v) =>
-          host.onSetRoofPatch({ pitchDeg: Math.max(0, Math.min(85, v)) }),
+          host.onSetRoofPatch({ pitchDeg: Math.max(0, Math.min(85, v)) }), "pitchDeg",
         )}
-      {roof.shape !== "flach" && <MixedMark on={multi?.pitchDeg.mixed} what="pitch" />}
       {roof.shape === "mansarde" &&
         numField("objinfo.roof.pitchUpper", roof.pitchUpperDeg ?? roof.pitchDeg / 2, 1, (v) =>
-          host.onSetRoofPatch({ pitchUpperDeg: Math.max(0, Math.min(85, v)) }),
+          host.onSetRoofPatch({ pitchUpperDeg: Math.max(0, Math.min(85, v)) }), "pitchUpperDeg",
         )}
       {/* Mansarde-Untertyp (Giebel/Walm/Zelt) + Knicklage. */}
       {roof.shape === "mansarde" && (
@@ -257,23 +260,25 @@ export function RoofSection({
             title={t("objinfo.roof.mansardType")}
             width={130}
           />
+          <MixedMark on={multi?.mansardType.mixed} what="mansardType" />
         </div>
       )}
       {roof.shape === "mansarde" &&
         numField("objinfo.roof.mansardKnee", (roof.mansardKneeRatio ?? 0.4) * 100, 1, (v) =>
-          host.onSetRoofPatch({ mansardKneeRatio: Math.max(5, Math.min(49, v)) / 100 }),
+          host.onSetRoofPatch({ mansardKneeRatio: Math.max(5, Math.min(49, v)) / 100 }), "mansardKneeRatio",
         )}
 
       {roof.shape === "sattel" &&
         numField("objinfo.roof.halfHip", (roof.halfHipRatio ?? 0) * 100, 5, (v) =>
-          host.onSetRoofPatch({ halfHipRatio: Math.max(0, Math.min(90, v)) / 100 }),
+          host.onSetRoofPatch({ halfHipRatio: Math.max(0, Math.min(90, v)) / 100 }), "halfHipRatio",
         )}
 
       {/* Grundriss-Masse (Breite/Tiefe): das Umriss-Rechteck neu bilden, die
           untere/linke Ecke (minX/minY) bleibt fix. */}
       {/* Mit Innenhöfen oder Kanten ausserhalb eines Vierecks würde das Rechteck die Höfe/Kantenneigungen
           zerstören — dort entfallen Breite/Tiefe. */}
-      {roof.holes.length === 0 &&
+      {!multi &&
+        roof.holes.length === 0 &&
         roof.edges.length === 4 &&
         numField("objinfo.roof.width", roof.width, 0.1, (v) => {
           const w = Math.max(0.2, v);
@@ -281,7 +286,8 @@ export function RoofSection({
             outline: rectOutline(roof.minX, roof.minY, w, roof.depth),
           });
         })}
-      {roof.holes.length === 0 &&
+      {!multi &&
+        roof.holes.length === 0 &&
         roof.edges.length === 4 &&
         numField("objinfo.roof.depth", roof.depth, 0.1, (v) => {
           const d = Math.max(0.2, v);
@@ -292,7 +298,7 @@ export function RoofSection({
 
       {/* Überstand: Traufe (senkrecht zum First) + Ortgang (Giebelseite). */}
       {numField("objinfo.roof.overhang", roof.overhang, 0.05, (v) =>
-        host.onSetRoofPatch({ overhang: Math.max(0, v) }),
+        host.onSetRoofPatch({ overhang: Math.max(0, v) }), "overhang",
       )}
       {roof.shape !== "flach" &&
         roof.shape !== "zelt" &&
@@ -300,17 +306,17 @@ export function RoofSection({
           "objinfo.roof.overhangGable",
           roof.overhangGable ?? roof.overhang,
           0.05,
-          (v) => host.onSetRoofPatch({ overhangGable: Math.max(0, v) }),
+          (v) => host.onSetRoofPatch({ overhangGable: Math.max(0, v) }), "overhangGable",
         )}
       {/* Attika ([148]): Brüstung am Rand des Flachdachs; Höhe 0 = keine. */}
       {roof.shape === "flach" && (
         <>
           {numField("objinfo.roof.parapetHeight", roof.parapetHeight ?? 0, 0.05, (v) =>
-            host.onSetRoofPatch({ parapetHeight: v > 0 ? v : undefined }),
+            host.onSetRoofPatch({ parapetHeight: v > 0 ? v : undefined }), "parapetHeight",
           )}
           {(roof.parapetHeight ?? 0) > 0 &&
             numField("objinfo.roof.parapetWidth", roof.parapetWidth ?? 0.2, 0.01, (v) =>
-              host.onSetRoofPatch({ parapetWidth: Math.max(0.02, v) }),
+              host.onSetRoofPatch({ parapetWidth: Math.max(0.02, v) }), "parapetWidth",
             )}
           {(roof.parapetHeight ?? 0) > 0 && (
             <div className="objinfo-field">
@@ -325,16 +331,17 @@ export function RoofSection({
                 title={t("objinfo.roof.parapetMaterial")}
                 width={130}
               />
+              <MixedMark on={multi?.parapetComponentId.mixed} what="parapetComponent" />
             </div>
           )}
         </>
       )}
       {numField("objinfo.roof.thickness", roof.thickness, 0.02, (v) =>
-        host.onSetRoofPatch({ thickness: Math.max(0.01, v) }),
+        host.onSetRoofPatch({ thickness: Math.max(0.01, v) }), "thickness",
       )}
       {/* Traufhöhe (absolutes Z) — z. B. für einen Kniestock übers Geschoss anheben. */}
       {numField("objinfo.roof.baseElevation", roof.baseElevation, 0.1, (v) =>
-        host.onSetRoofPatch({ baseElevation: v }),
+        host.onSetRoofPatch({ baseElevation: v }), "baseElevation",
       )}
 
       {/* Kanten: Neigung je Kante (leer = Standard) und Giebel ([26]). Wirkt bei Sattel/Walm/

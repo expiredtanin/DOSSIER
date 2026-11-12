@@ -37,8 +37,12 @@ function targetIds(collection: MultiCollection, id: string): string[] {
   return ids.filter((x) => openings.find((o) => o.id === x)?.kind === kind);
 }
 
-/** Dach-Felder, die bei Mehrfachauswahl für alle gewählten Dächer gelten (Rest: nur das erste). */
-const ROOF_MULTI_KEYS: ReadonlySet<string> = new Set(["roofTypeId", "pitchDeg"]);
+/**
+ * Dach-Felder, die je Dach eigen sind und bei Mehrfachauswahl nur das erste Dach treffen: Umriss samt Höfen/Bögen,
+ * Kantenneigungen (Indizes) und Gauben. Alle anderen Felder (Typ, Neigung, Dicke, Traufhöhe, Überstände, Attika …)
+ * gelten für alle gewählten Dächer.
+ */
+const ROOF_OWN_KEYS: ReadonlySet<string> = new Set(["outline", "holes", "outlineBulge", "holesBulge", "edgePitchDeg", "dormers"]);
 
 export function buildElementAttributesHost(c: FlatHostOpts) {
   const { applyChange, onOpenStampEditor, onToggleSection3dCut, openResources, patchLevel, project, section3dCutId, sectionLine, selection, patchDoorType, patchWindowType, saveOpeningStyle, setCeilingThickness, setWallThickness, slideOpening, updateCeiling, updateOpening, updateRoof, updateRoom, updateStair, updateWall } = c;
@@ -225,7 +229,7 @@ export function buildElementAttributesHost(c: FlatHostOpts) {
     // ── Dach-Attribute (nur bei selektiertem Dach) ─────────────────────────
     onSetRoofPatch: (patch, coalesceKey) => {
       if (selection?.kind !== "roof") return;
-      const multi = Object.keys(patch).every((k) => ROOF_MULTI_KEYS.has(k));
+      const multi = !Object.keys(patch).some((k) => ROOF_OWN_KEYS.has(k));
       if (multi) patchAll("roofs", selection.id, patch, coalesceKey);
       else updateRoof(selection.id, patch, coalesceKey);
     },

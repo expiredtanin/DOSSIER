@@ -79,17 +79,35 @@ describe("Mehrfachauswahl setzt alle gewählten Elemente in einem Schritt [195b]
     expect(getState().undoDepth).toBe(depth);
   });
 
-  it("Dächer: Neigung für alle; andere Felder nur für das erste", () => {
+  it("Dächer: Neigung, Dicke, Traufhöhe, Überstand für alle in EINEM Undo-Schritt; Gauben/Kanten nur das erste", () => {
     getState().loadProject(buildComplexSampleProject());
     const [a, b] = getState().project.roofs!;
     setState({ selection: { ...EMPTY_SELECTION, roofs: [a.id, b.id] } });
     const host = hostFor("roof", a.id);
-    (host.onSetRoofPatch as (p: object) => void)({ pitchDeg: 33 });
+    const patch = host.onSetRoofPatch as (p: object, k?: string) => void;
+    patch({ pitchDeg: 33 });
     expect(getState().project.roofs!.find((r) => r.id === b.id)!.pitchDeg).toBe(33);
-    (host.onSetRoofPatch as (p: object) => void)({ overhang: 0.77 });
+    const depth = getState().undoDepth;
+    patch({ overhang: 0.77 });
+    patch({ thickness: 0.31 });
+    patch({ baseElevation: 4.2 });
     const r2 = getState().project.roofs!;
-    expect(r2.find((r) => r.id === a.id)!.overhang).toBe(0.77);
-    expect(r2.find((r) => r.id === b.id)!.overhang).not.toBe(0.77);
+    for (const id of [a.id, b.id]) {
+      const r = r2.find((x) => x.id === id)!;
+      expect(r.overhang).toBe(0.77);
+      expect(r.thickness).toBe(0.31);
+      expect(r.baseElevation).toBe(4.2);
+    }
+    expect(getState().undoDepth).toBe(depth + 3);
+    getState().undo();
+    getState().undo();
+    getState().undo();
+    expect(getState().project.roofs!.find((r) => r.id === b.id)!.overhang).toBe(b.overhang);
+    // dachspezifisch: nur das erste Dach
+    patch({ edgePitchDeg: [20, 20, 20, 20] });
+    const r3 = getState().project.roofs!;
+    expect(r3.find((r) => r.id === a.id)!.edgePitchDeg).toEqual([20, 20, 20, 20]);
+    expect(r3.find((r) => r.id === b.id)!.edgePitchDeg).toEqual(b.edgePitchDeg);
   });
 
   it("Wände: Unterkante und Dicke für alle", () => {

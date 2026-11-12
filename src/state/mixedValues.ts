@@ -124,22 +124,53 @@ export function selectionCeilingValues(project: Project, sel: Selection): Select
   return { typeId: commonValue(types), thickness: commonValue(thick), bottom: commonValue(b), top: commonValue(t) };
 }
 
-/** [195b] Typ und Neigung der gewählten Dächer. */
+/** [195b] Dach-Felder der gewählten Dächer (alle ausser Umriss, Kanten, Gauben und Höfen, die je Dach eigen sind). */
 export interface SelectionRoofValues {
   roofTypeId: Common<string>;
   pitchDeg: Common<number>;
+  shape: Common<string>;
+  ridgeAxis: Common<string>;
+  pitchUpperDeg: Common<number>;
+  mansardType: Common<string>;
+  mansardKneeRatio: Common<number>;
+  halfHipRatio: Common<number>;
+  overhang: Common<number>;
+  overhangGable: Common<number>;
+  parapetHeight: Common<number>;
+  parapetWidth: Common<number>;
+  parapetComponentId: Common<string>;
+  thickness: Common<number>;
+  baseElevation: Common<number>;
 }
 
 export function selectionRoofValues(project: Project, sel: Selection): SelectionRoofValues {
-  const types: string[] = [];
-  const pitch: number[] = [];
+  const v = {
+    roofTypeId: [] as string[], pitchDeg: [] as number[], shape: [] as string[], ridgeAxis: [] as string[],
+    pitchUpperDeg: [] as number[], mansardType: [] as string[], mansardKneeRatio: [] as number[], halfHipRatio: [] as number[],
+    overhang: [] as number[], overhangGable: [] as number[], parapetHeight: [] as number[], parapetWidth: [] as number[],
+    parapetComponentId: [] as string[], thickness: [] as number[], baseElevation: [] as number[],
+  };
   for (const id of sel.roofs.slice(0, MAX_COMPARED)) {
     const r = deriveSelection(project, { roofs: [id] })?.roof;
     if (!r) continue;
-    types.push(r.roofTypeId ?? "");
-    pitch.push(r.pitchDeg);
+    v.roofTypeId.push(r.roofTypeId ?? "");
+    v.pitchDeg.push(r.pitchDeg);
+    v.shape.push(r.shape);
+    v.ridgeAxis.push(r.ridgeAxis);
+    // Vorgaben wie in der Anzeige (RoofSection), damit „gleich angezeigt" auch „gleich" heisst.
+    v.pitchUpperDeg.push(r.pitchUpperDeg ?? r.pitchDeg / 2);
+    v.mansardType.push(r.mansardType ?? "giebel");
+    v.mansardKneeRatio.push(r.mansardKneeRatio ?? 0.4);
+    v.halfHipRatio.push(r.halfHipRatio ?? 0);
+    v.overhang.push(r.overhang);
+    v.overhangGable.push(r.overhangGable ?? r.overhang);
+    v.parapetHeight.push(r.parapetHeight ?? 0);
+    v.parapetWidth.push(r.parapetWidth ?? 0.2);
+    v.parapetComponentId.push(r.parapetComponentId ?? "");
+    v.thickness.push(r.thickness);
+    v.baseElevation.push(r.baseElevation);
   }
-  return { roofTypeId: commonValue(types), pitchDeg: commonValue(pitch) };
+  return Object.fromEntries(Object.entries(v).map(([k, a]) => [k, commonValue(a as (string | number)[])])) as unknown as SelectionRoofValues;
 }
 
 /** [195b] Breite, Höhe, Brüstung und Typ der gewählten Öffnungen. */
