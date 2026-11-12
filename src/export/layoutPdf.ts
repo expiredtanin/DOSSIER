@@ -20,6 +20,9 @@ import { generatePlan, type Plan } from "../plan/generatePlan";
 import { snapshotMono, snapshotOverrideRuleIds, snapshotTemplate, viewportLevelPlan } from "../plan/viewportPlan";
 import { planToPrintSvg } from "./planToPrintSvg";
 import { drawTablesPdf, sheetTables } from "./sheetTable";
+import { applyPdfInfo, finishPdfBytes } from "./pdfInfo";
+import { imageGeometry } from "../model/layoutImages";
+import { posterHeaderItems, viewportScaleLabel } from "../model/posterTemplates";
 import { collectVisibleCodes } from "../model/types";
 import {
   effectiveSheetSizeMm,
@@ -90,6 +93,9 @@ function drawTitleBlock(
   doc.text(`${tb.date} · ${fmt}`, x + boxW - 3, y + boxH - 2.4, { align: "right" });
 }
 
+/** Schrifthöhe in mm → pt (jsPDF misst Schriftgrössen in pt). */
+const MM_TO_PT = 72 / 25.4;
+
 function clip(s: string, max: number): string {
   return s.length > max ? s.slice(0, max - 1) + "…" : s;
 }
@@ -149,6 +155,55 @@ function inLayer(ctx: PageCtx, name: string, fn: () => void | Promise<void>): Pr
   return ctx.layers ? ctx.layers.run(name, fn) : fn();
 }
 
+/**
+ * Bilder des Blatts ([208]): das Original unverändert eingebettet (JPEG ohne Neukompression), auf den Rahmen
+ * geklippt; mit Zuschnitt liegt das ganze Bild verschoben/vergrössert dahinter, sichtbar ist nur der Rahmen.
+ */
+function drawImagesPdf(doc: jsPDF, layout: Layout): void {
+  for (const img of layout.images ?? []) {
+    const m = /^data:image\/(png|jpeg);base64,/.exec(img.src);
+    if (!m || img.widthMm <= 0 || img.heightMm <= 0) continue;
+    const g = imageGeometry(img);
+    doc.saveGraphicsState();
+    doc.rect(g.clip.x, g.clip.y, g.clip.w, g.clip.h, null);
+    doc.clip();
+    doc.discardPath();
+    try {
+      doc.addImage(img.src, m[1] === "png" ? "PNG" : "JPEG", g.draw.x, g.draw.y, g.draw.w, g.draw.h, img.id, "NONE");
+    } finally {
+      doc.restoreGraphicsState();
+    }
+  }
+}
+
+/** Massstabsangabe unter jedem Viewport ([208], Master `viewportScaleLabels`). */
+function drawScaleLabelsPdf(doc: jsPDF, project: Project, layout: Layout, sheet: { w: number; h: number }, scaleOverride?: number): void {
+  doc.setTextColor(17, 17, 17);
+  doc.setFont("helvetica", "normal");
+  for (const vp of layout.viewports) {
+    const l = viewportScaleLabel(project, vp, sheet, scaleOverride);
+    if (!l) continue;
+    doc.setFontSize(l.sizeMm * MM_TO_PT);
+    doc.text(l.text, l.x, l.y);
+  }
+}
+
+/** Plakat-Kopfzeile ([208]): Band, Kennwort-Feld, Titel, „Plan x/n". */
+function drawPosterHeaderPdf(doc: jsPDF, project: Project, layout: Layout, master: MasterLayout, sheet: { w: number; h: number }): void {
+  doc.setDrawColor(17, 17, 17);
+  doc.setTextColor(17, 17, 17);
+  for (const it of posterHeaderItems(project, layout, master, sheet)) {
+    if (it.kind === "rect") {
+      doc.setLineWidth(it.stroke);
+      doc.rect(it.x, it.y, it.w, it.h);
+    } else {
+      doc.setFont("helvetica", it.bold ? "bold" : "normal");
+      doc.setFontSize(it.sizeMm * MM_TO_PT);
+      doc.text(it.text, it.x, it.y, { align: it.align });
+    }
+  }
+}
+
 /** Zeichnet die Viewports + Master-Elemente EINER Seite in das jsPDF-Dokument. */
 async function renderPage(
   doc: jsPDF,
@@ -196,6 +251,18 @@ async function renderPage(
     }
   }
 
+  // Bilder ([208]): Renderings, Fotos — über den Viewports, unter Legenden und Schriftfeld.
+  try {
+    await inLayer(ctx, t("pdfLayers.images"), () => drawImagesPdf(doc, layout));
+  } catch {
+    // Ein Bild, das nicht einbettet, darf die Seite nicht killen.
+  }
+
+  // Massstab je Viewport ([208]).
+  if (master?.viewportScaleLabels) {
+    await inLayer(ctx, t("pdfLayers.frame"), () => drawScaleLabelsPdf(doc, project, layout, { w: widthMm, h: heightMm }, ctx.scaleOverride));
+  }
+
   // Legenden ([82]): live aus den Viewports (oder Handauswahl), Muster vom Kern-Schraffurgenerator.
   for (const lg of layout.legends ?? []) {
     try {
@@ -219,6 +286,7 @@ async function renderPage(
       }
       const tb = resolveTitleBlock(project, layout, master);
       drawTitleBlock(doc, widthMm, heightMm, tb, layout.paper, layout.orientation, ctx.includeRevision);
+      if (master.posterHeader) drawPosterHeaderPdf(doc, project, layout, master, { w: widthMm, h: heightMm });
     });
   }
 
@@ -259,6 +327,9 @@ export async function buildPagesPdf(project: Project, pages: FolderPdfPage[], op
 
   const first = sizeOf(pages[0]);
   const doc = new jsPDF({ unit: "mm", format: [first.w, first.h], orientation: orientOf(first), compress: true });
+  // Info-Wörterbuch: anonym nur das Kennwort ([208]); sonst Projektname und Bearbeiter des ersten Blatts.
+  const firstMaster = findMaster(project, pages[0].layout);
+  applyPdfInfo(doc, project, firstMaster ? resolveTitleBlock(project, pages[0].layout, firstMaster).author : undefined);
   const ctx: PageCtx = {
     layers: opts.layers ? enablePdfLayers(doc) : undefined,
     scaleOverride: opts.scaleOverride && opts.scaleOverride > 0 ? opts.scaleOverride : undefined,
@@ -301,5 +372,10 @@ export async function buildFolderPdf(project: Project, folderId: string): Promis
 export async function folderPdfBytes(project: Project, folderId: string): Promise<Uint8Array | null> {
   const doc = await buildFolderPdf(project, folderId);
   if (!doc) return null;
-  return new Uint8Array(doc.output("arraybuffer"));
+  return pdfBytes(project, doc);
+}
+
+/** Fertige PDF-Bytes eines Dokuments; bei anonymer Abgabe ohne Erzeuger-/Datumsangaben ([208]). */
+export function pdfBytes(project: Project, doc: jsPDF): Uint8Array {
+  return finishPdfBytes(project, new Uint8Array(doc.output("arraybuffer")));
 }

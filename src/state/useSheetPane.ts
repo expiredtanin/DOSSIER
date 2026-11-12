@@ -5,7 +5,7 @@
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
 import { useEffect, useMemo, useRef } from "react";
-import type { Layout, LayoutLegend, LayoutTable, LayoutTitleBlock, LayoutViewport } from "../model/types";
+import type { Layout, LayoutImage, LayoutLegend, LayoutTable, LayoutTitleBlock, LayoutViewport } from "../model/types";
 import { useStore } from "./appStore";
 import { addItems, patchItem } from "../core";
 import type { ProjectSlice } from "./projectSlice";
@@ -21,6 +21,7 @@ import {
   patchTable as patchTableInLayout,
   removeTable as removeTableFromLayout,
 } from "../model/layoutModel";
+import { addImage, patchImage, removeImage } from "../model/layoutImages";
 import { addLegend, patchLegend, removeLegend } from "../analysis/legend";
 import { useEventBundle } from "./useEvent";
 
@@ -95,6 +96,10 @@ export function useSheetPane(opts: {
     onPatchTable: (tableId: string, patch: Partial<Omit<LayoutTable, "id">>, coalesceKey?: string) =>
       patchOpenLayout(openId(), (l) => patchTableInLayout(l, tableId, patch), coalesceKey),
     onRemoveTable: (tableId: string) => patchOpenLayout(openId(), (l) => removeTableFromLayout(l, tableId)),
+    onAddImage: (image: LayoutImage) => patchOpenLayout(openId(), (l) => addImage(l, image)),
+    onPatchImage: (imageId: string, patch: Partial<Omit<LayoutImage, "id">>, coalesceKey?: string) =>
+      patchOpenLayout(openId(), (l) => patchImage(l, imageId, patch), coalesceKey),
+    onRemoveImage: (imageId: string) => patchOpenLayout(openId(), (l) => removeImage(l, imageId)),
     onAddViewport: (snapshotId: string, init: Partial<Omit<LayoutViewport, "id" | "snapshotId">>) =>
       patchOpenLayout(openId(), (l) =>
         addViewportToLayout(l, createViewport(`vp-${Date.now()}`, snapshotId, init)),

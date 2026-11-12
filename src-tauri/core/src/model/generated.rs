@@ -5574,6 +5574,90 @@ pub struct Layout {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub tables: Option<Vec<LayoutTable>>,
+    /// Bilder auf dem Blatt ([208]): Renderings, Fotos, Luftbilder; fehlt = keine.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub images: Option<Vec<LayoutImage>>,
+    #[serde(flatten)]
+    #[ts(skip)]
+    pub extra: Extra,
+}
+
+/// Bild auf einem Layout-Blatt ([208]): PNG oder JPEG als Data-URL (gleicher Weg wie `ContextImage.src`),
+/// im Rahmen `xMm`/`yMm`/`widthMm`/`heightMm` (Papier-mm). Das Seitenverhältnis des Ausschnitts bleibt erhalten;
+/// `crop` schneidet zu (Anteile 0..1 des Originals). Im PDF wird das Original unverändert eingebettet (JPEG ohne
+/// Neukompression).
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct LayoutImage {
+    pub id: String,
+    /// Anzeigename (Dateiname).
+    pub name: String,
+    /// Bildquelle als Data-URL (`data:image/png;base64,…` oder `data:image/jpeg;base64,…`).
+    pub src: String,
+    /// Linke Kante auf dem Blatt (mm, von links).
+    #[serde(rename = "xMm")]
+    pub x_mm: f64,
+    /// Obere Kante auf dem Blatt (mm, von oben).
+    #[serde(rename = "yMm")]
+    pub y_mm: f64,
+    /// Breite des gezeigten Ausschnitts (mm).
+    #[serde(rename = "widthMm")]
+    pub width_mm: f64,
+    /// Höhe des gezeigten Ausschnitts (mm).
+    #[serde(rename = "heightMm")]
+    pub height_mm: f64,
+    /// Pixelbreite des Originals (aus dem Dateikopf gelesen).
+    #[serde(rename = "pixelWidth")]
+    pub pixel_width: f64,
+    /// Pixelhöhe des Originals.
+    #[serde(rename = "pixelHeight")]
+    pub pixel_height: f64,
+    /// Zuschnitt als Anteile des Originals (0..1); fehlt = ganzes Bild.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, inline)]
+    pub crop: Option<LayoutImageCrop>,
+    #[serde(flatten)]
+    #[ts(skip)]
+    pub extra: Extra,
+}
+
+/// Zuschnitt eines Blatt-Bilds ([208]): linke/obere Kante und Breite/Höhe als Anteile des Originals.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct LayoutImageCrop {
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+    #[serde(flatten)]
+    #[ts(skip)]
+    pub extra: Extra,
+}
+
+/// Hilfslinie eines Masters ([208], Gestaltungsraster): senkrecht (`x`) oder waagrecht (`y`) in Papier-mm.
+/// Nur am Bildschirm, nie im Druck.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct LayoutGuide {
+    /// "x" = senkrechte Linie bei `posMm` von links, "y" = waagrechte Linie bei `posMm` von oben.
+    pub axis: String,
+    #[serde(rename = "posMm")]
+    pub pos_mm: f64,
+    #[serde(flatten)]
+    #[ts(skip)]
+    pub extra: Extra,
+}
+
+/// Wettbewerbs-Einstellung des Projekts ([208]): anonym = Kennwort statt Büro- und Projektname in Plankopf,
+/// Dateinamen und PDF-Metadaten.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct CompetitionSettings {
+    /// Anonyme Abgabe: keine Büro-/Autor-Angaben in Export und Plankopf.
+    pub anonymous: bool,
+    /// Kennwort der Abgabe (steht in Plankopf und PDF-Titel).
+    pub keyword: String,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -5747,6 +5831,22 @@ pub struct MasterLayout {
     #[serde(rename = "customHeightMm", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub custom_height_mm: Option<f64>,
+    /// Vorlagen-Schlüssel ([208], z. B. "poster-a1-landscape"): wiederverwendet den Master beim Anlegen weiterer Plakate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub template: Option<String>,
+    /// Plakat-Kopfzeile ([208]): Band über die Satzbreite mit Kennwort-Feld, Projekttitel und „Plan x/n".
+    #[serde(rename = "posterHeader", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub poster_header: Option<bool>,
+    /// Massstab unter jedem Viewport ausgeben ([208]).
+    #[serde(rename = "viewportScaleLabels", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub viewport_scale_labels: Option<bool>,
+    /// Hilfslinien des Gestaltungsrasters ([208]), nur am Bildschirm.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub guides: Option<Vec<LayoutGuide>>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -6093,6 +6193,10 @@ pub struct Project {
     #[serde(rename = "projectNumber", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub project_number: Option<String>,
+    /// Wettbewerb ([208]): anonyme Abgabe mit Kennwort.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub competition: Option<CompetitionSettings>,
     /// Höhe von ±0.00 (OK fertig Boden des Bezugsgeschosses, `DrawingLevel.zeroLevel`)
     /// in Metern über Meer (m ü. M.), editierbar im Einstellungs-Fenster. Optional.
     /// Die automatischen Koten im Schnitt/in der Ansicht schreiben „±0.00 = 512.40"
@@ -6953,6 +7057,12 @@ impl Project {
             "projectNumber" => {
                 self.project_number = match v {
                     Some(v) => <Option<String>>::deserialize(v).map_err(|e| e.to_string())?,
+                    None => Default::default(),
+                };
+            }
+            "competition" => {
+                self.competition = match v {
+                    Some(v) => <Option<CompetitionSettings>>::deserialize(v).map_err(|e| e.to_string())?,
                     None => Default::default(),
                 };
             }

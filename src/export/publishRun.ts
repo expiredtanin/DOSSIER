@@ -8,7 +8,7 @@ import { collectVisibleCodes } from "../model/types";
 import { generatePlan } from "../plan/generatePlan";
 import { sheetLevelOf } from "../model/layoutModel";
 import { legendDrawings, legendEntries } from "../analysis/legend";
-import { buildPagesPdf, layoutPages } from "./layoutPdf";
+import { buildPagesPdf, layoutPages, pdfBytes } from "./layoutPdf";
 import { buildPlanDwg, buildPlanDxfBinary } from "./exportDxf";
 import { loadFileio } from "../engine/fileioWasm";
 import { withDocument } from "../core/document";
@@ -97,7 +97,7 @@ async function publishFiles(shown: Project, set: PublishSet, plan: PublishPlan):
       paperOverride: plan.paperOverride,
       includeRevision: plan.includeRevision,
     });
-    if (doc) out.push({ fileName: f.fileName, bytes: new Uint8Array(doc.output("arraybuffer")), mime: "application/pdf" });
+    if (doc) out.push({ fileName: f.fileName, bytes: pdfBytes(shown, doc), mime: "application/pdf" });
   }
   return out;
 }

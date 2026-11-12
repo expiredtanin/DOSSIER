@@ -460,6 +460,7 @@ export function LayoutsPanel() {
       orientation: start.orientation,
       customWidthMm: start.customWidthMm,
       customHeightMm: start.customHeightMm,
+      posterTemplate: start.posterTemplate,
     });
     if (activeFolderId) expandFolder(activeFolderId);
     setDialog(null);

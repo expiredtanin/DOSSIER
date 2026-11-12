@@ -803,6 +803,10 @@ export interface PanelHostValue {
   onPublishSet: (id: string) => void;
   /** Setzt die Projektnummer (Dateinamen-Muster `{Projektnummer}`). */
   onSetProjectNumber: (value: string) => void;
+  /** Wettbewerb ([208]): anonyme Abgabe und Kennwort setzen (Teil-Patch). */
+  onSetCompetition: (patch: { anonymous?: boolean; keyword?: string }) => void;
+  /** Legt den Publikationssatz „WBW-Abgabe" mit allen Plakaten an; liefert dessen Id. */
+  onAddWbwSet: () => string;
 }
 
 /** Startwerte eines neuen Layouts (aus dem „Neues Layout"-Dialog). */
@@ -815,6 +819,8 @@ export interface CreateLayoutOptions {
   orientation: LayoutOrientation;
   customWidthMm?: number;
   customHeightMm?: number;
+  /** Plakat-Vorlage ([208], Schlüssel aus `model/posterTemplates`): legt den Vorlagen-Master an bzw. verwendet ihn. */
+  posterTemplate?: string;
 }
 
 /** Startwerte eines neuen Masterlayouts (aus dem „Neues Masterlayout"-Dialog). */

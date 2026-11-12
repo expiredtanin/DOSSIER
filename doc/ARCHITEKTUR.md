@@ -292,6 +292,7 @@ Beispiel: Die Plan-Ansicht zeigt das Erdgeschoss im Massstab 1:100.
 | SVG (CLI, Goldens) | `planToSvgString()` in `src/export/planToSvgString.ts` | `plan_svg_string()` → `plan_svg()` in `plan/svg.rs` | Text |
 | PDF eines Plans | `src/export/exportPdf.ts`: `planToRenderScene()` → `sceneToPrintSvg()` (`src/export/sceneToPrintSvg.ts`) | `plan_scene_f64()` in `plan/scene.rs` | jsPDF und svg2pdf.js |
 | Layout-Blatt, Blatt-PDF | `planToPrintSvg()` in `src/export/planToPrintSvg.ts`, aufgerufen von `src/ui/LayoutSheet.tsx` und `src/export/layoutPdf.ts` | `plan_print_svg_ops()` → `print_svg_ops()` in `plan/print_svg.rs` | SVG-Knoten in Papier-mm |
+| Bild auf dem Layout-Blatt, Plakat-Vorlage ([208]) | `src/model/layoutImages.ts` (Data-URL, Zuschnitt), `src/model/posterTemplates.ts`, Bildzeichnen in `layoutPdf.ts` (`drawImagesPdf`, JPEG ohne Neukompression), `LayoutSheet.tsx` | `layout_image.rs`, `layout_poster.rs` über `layout_call` | `Layout.images`, Master mit Raster/Kopfzeile |
 | DXF, DWG | `src/export/exportDxf.ts` | `plan_dxf_flat()` → `collect()`, `encode()` in `plan/dxf.rs` | `fileio`: `export_dxf()`, `export_dwg()` in `src-tauri/fileio/src/export.rs` |
 
 Runde Formen (Stütze, Bogenwand, Bogen-Umrisse) reisen im Puffer als Vielecke; die Ausgaben erkennen die Bögen

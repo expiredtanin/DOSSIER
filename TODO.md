@@ -65,8 +65,23 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
 ### Phase 2 (20.–26.11.): Wettbewerb lückenlos
 - ○ **[207]** Schwarzplan / Situationsplan 1:500: Gebäude schwarz gefüllt, Nachbarbauten (Kataster/swisstopo) grau/schwarz,
   Parzelle, Strassen, Nordpfeil, Massstabsbalken; als Ansichtsvorlage „Situation WBW“. · M
-- ○ **[208]** Wettbewerbs-Layouts: Plakat-Vorlagen A0/A1 hoch/quer mit Raster, Kennwort-Feld (Anonymität: kein Büroname,
-  Metadaten im PDF leer), Planköpfe; Publikationssatz „WBW-Abgabe“ → PDF. · M
+- ◐ **[208]** Wettbewerbs-Abgabe (12.11.). Umgesetzt: **Bild-Element im Layout** (`Layout.images`, `LayoutImage`: PNG/JPEG als Data-URL wie
+  `ContextImage.src`, Rahmen in Papier-mm, Zuschnitt als Anteile; Kern `layout_image.rs`: Dateikopf, Seitenverhältnis, Zeichen-/Klipp-Rechteck,
+  dpi; Blatt: Knopf „Bild“, verschieben, Ecke skalieren mit festem Seitenverhältnis, HUD mit Breite, Zuschnitt, dpi-Warnung unter 100;
+  PDF: Original unverändert eingebettet, JPEG ohne Neukompression, auf den Rahmen geklippt). Rendering-Dialog: „Ins Layout einsetzen“
+  (Ziel-Blatt wählbar, vorgewählt das offene). **Plakat-Vorlagen** A0/A1 hoch/quer (`MasterLayout.template`, `posterHeader`,
+  `viewportScaleLabels`, `guides`; Kern `layout_poster.rs`: Ränder, Spalten 4–8, Hilfslinien nur am Bildschirm, Kopfzeile mit Kennwort-Feld
+  und „Plan x/n“ unter den Plakat-Blättern, Massstab unter jedem Viewport), wählbar im Dialog „Neues Layout“. **Anonymität**
+  (`Project.competition`: anonym + Kennwort; Mappe, Abschnitt Publikation): Plankopf zeigt das Kennwort statt Projekt/Bearbeiter, PDF-Info
+  nur Titel = Kennwort, Producer/Datum längengleich neutralisiert (`export/pdfInfo.ts`; jsPDF schreibt sie sonst immer), Dateinamen und
+  Schriftfeld des Einzelplan-PDF mit Kennwort. **Publikationssatz „WBW-Abgabe“** (Knopf in der Publikation): alle Plakate als ein PDF,
+  Format über den Satz-Editor auf Einzeldateien umstellbar. Tests: Rust (`layout_image`, `layout_poster`, Titelblock anonym), vitest
+  (`layoutImages`, `posterTemplates`, `layoutPdf.images`), e2e `competition` (A1 quer aus Vorlage, Bild, anonym, PDF). Offen: Hilfslinien nicht
+  als Fang und nicht frei setzbar; Bild-Zuschnitt nur per Prozentfeldern (kein Ziehen), Bild in DXF/IFC-Exporten nicht; Anonymität nur im PDF und
+  in Dateinamen (IFC/DXF/SVG-Metadaten, Layer-/Blattnamen mit Büroangaben prüft niemand); Berichts-PDF (`areaReport`)
+  noch nicht anonymisiert (Blatt-, Ordner- und Satz-PDF sind es); Download-Namen im Browser ohne Tauri-Dialog; grosse Bilder: jede
+  Blatt-Änderung (Viewport verschieben …) ersetzt das ganze Layout samt Data-URL im Op und im Verlauf (wie `ContextImage`) — bei vielen MB Bilder
+  in eine eigene Sammlung auslagern; nicht in der Tauri-App/auf dem Mac geprüft. · M
 - [61] Raumprogramm gegen Modell und Flächennachweis SIA 416 als Tabelle/Layout-Element ([70]); Kennzahlen (GF, GV, HNF/GF, Fassadenanteil).
 - 3D-Bilder für die Abgabe: hochaufgelöster PNG-Export (Perspektive, Axonometrie, Schatten), Sonnenstand; [205] Pausfolie.
 - [199]/[204] Plan- und App-Review-Reste im Darstellungsbereich 1:500/1:200 schliessen.

@@ -85,9 +85,11 @@ export function planPublish(project: Project, set: PublishSet, today: string): P
     const revision = includeRevision ? (bump ? nextRevision(l.revision) : (l.revision ?? "")) : "";
     return { layoutId: l.id, number: tb.planNumber, name: l.name, revision };
   });
+  // Anonyme Abgabe ([208]): Dateinamen tragen das Kennwort statt Projektnummer und Projektname.
+  const anon = project.competition?.anonymous === true;
   const base = {
-    Projektnummer: project.projectNumber ?? "",
-    Projekt: project.name ?? "",
+    Projektnummer: anon ? "" : (project.projectNumber ?? ""),
+    Projekt: anon ? (project.competition?.keyword ?? "").trim() : (project.name ?? ""),
     Datum: today,
     Satz: set.name,
   };
