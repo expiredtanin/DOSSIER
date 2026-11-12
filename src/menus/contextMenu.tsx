@@ -90,7 +90,7 @@ export interface MenuActions {
   selectedSectionLine?: { id: string; pts: Vec2[] } | null;
   insertSectionBend?: (id: string, seg: number, pt: Vec2) => void;
   /** [26] Einzeln gewähltes Element mit Umriss (Dach samt Höfen, Decke, Raum, Baugrube): Ringe mit Start-Index im flachen Ecken-Index. */
-  selectedRing?: { kind: RingKind; id: string; rings: { pts: Vec2[]; off: number }[] } | null;
+  selectedRing?: { kind: RingKind; id: string; rings: { pts: Vec2[]; off: number; closed?: boolean }[] } | null;
   insertRingVertex?: (kind: RingKind, id: string, seg: number, pt: Vec2) => void;
   deleteRingVertex?: (kind: RingKind, id: string, index: number) => void;
   deleteSectionBend?: (id: string, index: number) => void;
@@ -364,8 +364,8 @@ function planMenuItems(
   // [26] Umriss-Element: Ecke am Klick einfügen bzw. die getroffene Ecke löschen (mindestens drei bleiben).
   const ring = a.selectedRing;
   if (ring) {
-    for (const { pts, off } of ring.rings) {
-      const geom = { pts, closed: true };
+    for (const { pts, off, closed = true } of ring.rings) {
+      const geom = { pts, closed };
       const hit = nearestPolylineTarget(geom, model, toleranceFor(geom));
       if (!hit) continue;
       if (hit.kind === "segment" && a.insertRingVertex) {
@@ -376,7 +376,7 @@ function planMenuItems(
         });
       }
       if (hit.kind === "vertex" && a.deleteRingVertex) {
-        const enabled = pts.length > 3;
+        const enabled = pts.length > (closed ? 3 : 2);
         pointItems.push({
           label: t("ctx.deleteCorner"),
           icon: <MenuIcon name="do_not_disturb_on" />,

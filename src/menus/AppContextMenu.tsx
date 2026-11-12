@@ -171,6 +171,11 @@ export function AppContextMenu(props: {
           if (room && !room.locked) return { kind: "room" as const, id: room.id, rings: [{ pts: room.boundary, off: 0 }] };
           const ctx = selection.contextObjects.length === 1 ? (project.context ?? []).find((x) => x.id === selection.contextObjects[0]) : undefined;
           if (ctx && ctx.type === "excavation") return { kind: "excavation" as const, id: ctx.id, rings: [{ pts: ctx.outline, off: 0 }] };
+          // [193] Höhenlinien-Satz: je Linie ein Ring (flacher Index über alle Linien); offene Linien haben kein Schlusssegment.
+          if (ctx && ctx.type === "contourSet") {
+            return { kind: "contours" as const, id: ctx.id, rings: ctx.contours.reduce<{ pts: Vec2[]; off: number; closed: boolean }[]>(
+              (acc, c) => (c.pts.length >= 2 ? [...acc, { pts: c.pts, off: ctx.contours.slice(0, ctx.contours.indexOf(c)).reduce((n, x) => n + x.pts.length, 0), closed: !!c.closed }] : acc), []) };
+          }
           return null;
         })(),
         insertRingVertex,

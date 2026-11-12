@@ -65,6 +65,51 @@ const SMOOTH_LEVELS = [0, 1, 2, 3] as const;
 const RESMOOTH_PASSES = [1, 2, 4] as const;
 
 
+/** [193] Netzpunkt wählen (Nummer ab 1) und seine Höhe setzen; Zuschneiden des Netzes auf die Parzelle. */
+function MeshPointFields({ obj }: { obj: Extract<ContextObject, { positions: number[] }> }) {
+  const setMeshPointHeight = useStore((s) => s.setMeshPointHeight);
+  const cropMesh = useStore((s) => s.cropMesh);
+  const notify = useStore((s) => s.notify);
+  const parcel = useStore((s) => s.project.siteRules?.parcel);
+  const [nr, setNr] = useState("1");
+  const n = Math.floor(obj.positions.length / 3);
+  const i = Math.round(Number(nr)) - 1;
+  const valid = Number.isFinite(i) && i >= 0 && i < n;
+  return (
+    <>
+      <label className="site-prop" title={t("site.meshPoint.hint", { n })}>
+        <span>{t("site.meshPoint")}</span>
+        <input type="number" min={1} max={n} step={1} style={{ width: 90 }} data-testid="mesh-point-nr" value={nr} onChange={(e) => setNr(e.target.value)} />
+      </label>
+      <label className="site-prop">
+        <span>{t("site.meshPoint.z")}</span>
+        <input
+          type="number"
+          step={0.1}
+          style={{ width: 90 }}
+          data-testid="mesh-point-z"
+          disabled={!valid}
+          value={valid ? obj.positions[3 * i + 2] : ""}
+          onChange={(e) => {
+            if (valid && e.target.value.trim() !== "") setMeshPointHeight(obj.id, i, Number(e.target.value), `site-${obj.id}-meshZ-${i}`);
+          }}
+        />
+      </label>
+      <button
+        type="button"
+        data-testid="mesh-crop-parcel"
+        disabled={!parcel || parcel.length < 3}
+        title={parcel && parcel.length >= 3 ? t("site.meshCrop.hint") : t("site.meshCrop.noParcel")}
+        onClick={() => {
+          if (parcel && !cropMesh(obj.id, parcel)) notify(t("site.meshCrop.nothing"), "info");
+        }}
+      >
+        {t("site.meshCrop")}
+      </button>
+    </>
+  );
+}
+
 /** [193] Höhenversatz (alle Höhen um dz) und, bei Höhenlinien, die Höhe je Linie. */
 function HeightFields({ obj }: { obj: ContextObject }) {
   const offsetContextHeight = useStore((s) => s.offsetContextHeight);
@@ -90,6 +135,7 @@ function HeightFields({ obj }: { obj: ContextObject }) {
           onBlur={apply}
         />
       </label>
+      {(obj.type === "terrainMesh" || obj.type === "importedMesh") && <MeshPointFields obj={obj} />}
       {obj.type === "contourSet" && (
         <div className="site-prop" data-testid="contour-heights" style={{ display: "block", maxHeight: 180, overflowY: "auto" }}>
           <span>{t("site.contours", { n: obj.contours.length })}</span>

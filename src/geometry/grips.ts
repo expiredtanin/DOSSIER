@@ -36,6 +36,8 @@ export type GripRequest =
   // [193] Höhenlinien-Satz: Punkt (flacher Index über alle Linien) ziehen bzw. hinter Punkt `seg` einfügen (Kern `contour_edit`).
   | { op: "contourGrip"; id: string; index: number; pt: P }
   | { op: "contourInsert"; id: string; seg: number; pt: P }
+  // [193] Gelände-Netz: Netzpunkt (Vertex-Nummer) im Grundriss verschieben (Kern `mesh_grip`).
+  | { op: "meshGrip"; id: string; index: number; pt: P }
   // [26] Dach: Ecke bzw. Kante von Umriss/Hof, flacher Index (erst `outline`, dann `holes` Ring für Ring).
   | { op: "roofVertex"; id: string; index: number; pt: P }
   | { op: "roofEdge"; id: string; a: number; b: number; delta: P }

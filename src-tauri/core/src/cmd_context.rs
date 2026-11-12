@@ -53,19 +53,82 @@ pub fn contour_height(e: &Value, index: usize, z: f64) -> Option<Value> {
     Some(with(e, "contours", Value::Array(out)))
 }
 
-/// Ops der Höhen-Befehle (`None` = fremder Befehl).
+/// Höhe des Netzpunkts `index` (Vertex-Nummer) eines Geländes/Netzes auf `z` setzen.
+pub fn mesh_point_height(e: &Value, index: usize, z: f64) -> Option<Value> {
+    if !matches!(kind(e), "terrainMesh" | "importedMesh") || !z.is_finite() {
+        return None;
+    }
+    let pos = arr(field(e, "positions"));
+    let k = index.checked_mul(3)?.checked_add(2)?;
+    if k >= pos.len() || num_of(Some(&pos[k])) == z {
+        return None;
+    }
+    let mut out = pos.to_vec();
+    out[k] = js_num(z);
+    Some(with(e, "positions", Value::Array(out)))
+}
+
+/// Netz auf ein Polygon (`poly` = flach x,y,…) zuschneiden: Dreiecke bleiben, deren Schwerpunkt im Polygon liegt; nicht
+/// mehr genutzte Punkte (samt `vertexColors`) fallen weg. Nichts übrig oder nichts abgeschnitten = keine Änderung.
+pub fn mesh_crop(e: &Value, poly: &[f64]) -> Option<Value> {
+    if !matches!(kind(e), "terrainMesh" | "importedMesh") || poly.len() < 6 || poly.len() % 2 != 0 || poly.iter().any(|v| !v.is_finite()) {
+        return None;
+    }
+    let pos: Vec<f64> = arr(field(e, "positions")).iter().map(|v| num_of(Some(v))).collect();
+    let idx: Vec<usize> = arr(field(e, "indices")).iter().map(|v| num_of(Some(v))).map(|f| if f >= 0.0 && f.fract() == 0.0 { f as usize } else { usize::MAX }).collect();
+    let nv = pos.len() / 3;
+    if idx.len() < 3 || idx.iter().any(|&i| i >= nv) {
+        return None;
+    }
+    let keep: Vec<&[usize]> = idx
+        .chunks_exact(3)
+        .filter(|t| {
+            let (cx, cy) = t.iter().fold((0.0, 0.0), |a, &i| (a.0 + pos[3 * i] / 3.0, a.1 + pos[3 * i + 1] / 3.0));
+            crate::plan::pick::point_in_polygon(cx, cy, poly)
+        })
+        .collect();
+    if keep.is_empty() || keep.len() == idx.len() / 3 {
+        return None;
+    }
+    let mut map = vec![usize::MAX; nv];
+    let mut order: Vec<usize> = Vec::new();
+    let mut new_idx: Vec<Value> = Vec::with_capacity(keep.len() * 3);
+    for t in keep {
+        for &i in t {
+            if map[i] == usize::MAX {
+                map[i] = order.len();
+                order.push(i);
+            }
+            new_idx.push(js_num(map[i] as f64));
+        }
+    }
+    let new_pos: Vec<Value> = order.iter().flat_map(|&i| (0..3).map(move |c| (i, c))).map(|(i, c)| js_num(pos[3 * i + c])).collect();
+    let mut out = with(&with(e, "positions", Value::Array(new_pos)), "indices", Value::Array(new_idx));
+    if let Some(vc) = field(e, "vertexColors").and_then(Value::as_array).filter(|c| c.len() == nv * 3) {
+        let nc: Vec<Value> = order.iter().flat_map(|&i| vc[3 * i..3 * i + 3].iter().cloned()).collect();
+        out = with(&out, "vertexColors", Value::Array(nc));
+    }
+    Some(out)
+}
+
+/// Ops der Höhen-/Netz-Befehle (`None` = fremder Befehl).
 pub fn ops(root: &Map<String, Value>, v: &Value) -> Option<Vec<Op>> {
     let cmd = v.get("cmd").and_then(Value::as_str)?;
-    if cmd != "contextOffset" && cmd != "contourZ" {
+    if !matches!(cmd, "contextOffset" | "contourZ" | "meshPointZ" | "meshCrop") {
         return None;
     }
     let num = |k: &str| v.get(k).and_then(Value::as_f64).unwrap_or(f64::NAN);
-    let patched = v.get("id").and_then(Value::as_str).and_then(|id| element(root, id)).and_then(|e| {
-        if cmd == "contextOffset" {
-            height_offset(e, num("dz"))
-        } else {
-            let i = num("index");
-            if i.is_finite() && i >= 0.0 { contour_height(e, i as usize, num("z")) } else { None }
+    let index = || {
+        let i = num("index");
+        (i.is_finite() && i >= 0.0).then_some(i as usize)
+    };
+    let patched = v.get("id").and_then(Value::as_str).and_then(|id| element(root, id)).and_then(|e| match cmd {
+        "contextOffset" => height_offset(e, num("dz")),
+        "contourZ" => contour_height(e, index()?, num("z")),
+        "meshPointZ" => mesh_point_height(e, index()?, num("z")),
+        _ => {
+            let poly: Vec<f64> = v.get("poly").and_then(Value::as_array)?.iter().map(|x| x.as_f64().unwrap_or(f64::NAN)).collect();
+            mesh_crop(e, &poly)
         }
     });
     Some(patched.map(|entity| vec![Op::Replace { collection: "context".into(), entity }]).unwrap_or_default())
@@ -110,6 +173,29 @@ mod tests {
         assert!(run(json!({"cmd":"contextOffset","id":"im","dz":1})).is_empty());
         assert!(run(json!({"cmd":"contextOffset","id":"nix","dz":1})).is_empty());
         assert!(run(json!({"cmd":"contextOffset","id":"hl"})).is_empty());
+    }
+
+    #[test]
+    fn netzpunkt_hoehe_und_zuschnitt() {
+        let o = run(json!({"cmd":"meshPointZ","id":"tm","index":1,"z":9}));
+        assert_eq!(o[0]["entity"]["positions"], json!([0, 0, 5, 1, 0, 9, 0, 1, 7]));
+        assert!(run(json!({"cmd":"meshPointZ","id":"tm","index":1,"z":6})).is_empty());
+        assert!(run(json!({"cmd":"meshPointZ","id":"tm","index":3,"z":6})).is_empty());
+        assert!(run(json!({"cmd":"meshPointZ","id":"hl","index":0,"z":6})).is_empty());
+        // Zwei Dreiecke (Quadrat 0..2); Zuschnitt auf die linke Hälfte behält eines, verwirft Punkte und Farben.
+        let mut r = root();
+        r.insert("context".into(), json!([{"id":"q","type":"terrainMesh","positions":[0,0,1, 2,0,2, 2,2,3, 0,2,4],"indices":[0,1,2, 0,2,3],"vertexColors":[0,0,0, 1,1,1, 2,2,2, 3,3,3]}]));
+        let cut = |poly: Value| ops(&r, &json!({"cmd":"meshCrop","id":"q","poly":poly})).unwrap().iter().map(|o| o.to_json()).collect::<Vec<_>>();
+        let o = cut(json!([-1.0, -1.0, 1.5, -1.0, 1.5, 3.0, -1.0, 3.0]));
+        // Schwerpunkte: (4/3, 2/3) und (2/3, 4/3) -> beide liegen links von 1.5: nichts abgeschnitten.
+        assert!(o.is_empty());
+        let o = cut(json!([-1.0, -1.0, 1.0, -1.0, 1.0, 3.0, -1.0, 3.0]));
+        assert_eq!(o[0]["entity"]["indices"], json!([0, 1, 2]));
+        assert_eq!(o[0]["entity"]["positions"], json!([0, 0, 1, 2, 2, 3, 0, 2, 4]));
+        assert_eq!(o[0]["entity"]["vertexColors"], json!([0, 0, 0, 2, 2, 2, 3, 3, 3]));
+        // ausserhalb von allem / kaputtes Polygon
+        assert!(cut(json!([10, 10, 11, 10, 11, 11])).is_empty());
+        assert!(cut(json!([0, 0, 1])).is_empty());
     }
 
     #[test]
