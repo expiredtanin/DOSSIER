@@ -18,6 +18,7 @@
 // „elevation"). Bezeichner englisch, sichtbarer Text via t().
 
 import { t } from "../../i18n";
+import type { TranslationKey } from "../../i18n";
 import { createMutation, createPreview } from "../createCore";
 import type {
   Command,
@@ -77,14 +78,14 @@ interface LineEnd extends CommandState {
 }
 type LineState = LineIdle | LineEnd;
 
-function makeCommand(name: string, startKind: LineKind): Command {
+function makeCommand(name: string, startKind: LineKind, labelKey: TranslationKey): Command {
   const idle = (kind: LineKind): [CommandState, CommandResult] => [
     { phase: "start", kind, lastPoint: null } as LineIdle,
     { draft: null, done: true },
   ];
   return {
     name,
-    labelKey: "cmd.sectionline.label",
+    labelKey,
     // Nicht floorOnly: eine Schnittlinie zieht man IM Grundriss, wo Bauteile
     // liegen — die aktive Ebene ist dann ein Geschoss. Aber der Befehl soll auch
     // auf freien Zeichnungsebenen nutzbar bleiben; die Prüfung übernimmt der
@@ -164,8 +165,8 @@ function makeCommand(name: string, startKind: LineKind): Command {
 }
 
 /** Schnittlinie (startet als „section"). */
-export const sectionLineCommand: Command = makeCommand("sectionline", "section");
+export const sectionLineCommand: Command = makeCommand("sectionline", "section", "cmd.sectionline.label");
 /** Ansichtslinie (startet als „elevation"; identische Mechanik). */
-export const viewLineCommand: Command = makeCommand("viewline", "elevation");
+export const viewLineCommand: Command = makeCommand("viewline", "elevation", "cmd.viewline.label");
 
 // Für Tests: die reinen Datenpfad-Helfer.

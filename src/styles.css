@@ -1670,6 +1670,25 @@ body {
   font-weight: 600;
   color: var(--active-light);
 }
+/* [204] „Ausschnitt aktualisieren": Textknopf in Breite des Textes (war der runde 20-px-„+"-Knopf, der Text
+   lief über den Umbenennen-Knopf daneben). */
+.viewsnap-update-btn {
+  flex: 0 0 auto;
+  height: 20px;
+  padding: 0 8px;
+  border: none;
+  border-radius: 10px;
+  background: var(--field-bg);
+  color: var(--ink-2);
+  font-family: inherit;
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.viewsnap-update-btn:hover {
+  background: var(--accent-dim);
+  color: var(--ink);
+}
 .viewsnap-footer-grid {
   display: grid;
   grid-template-columns: auto 1fr;

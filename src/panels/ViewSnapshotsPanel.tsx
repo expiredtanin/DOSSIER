@@ -623,8 +623,7 @@ export function ViewSnapshotsPanel() {
               <>
                 <span className="viewsnap-footer-title">{selectedSnap.name}</span>
                 <button
-                  className="nav-add"
-                  style={{ padding: "1px 5px" }}
+                  className="viewsnap-update-btn"
                   title={t("viewsnap.updateHint")}
                   data-testid="viewsnap-update"
                   onClick={() => host.onUpdateViewSnapshot(selectedSnap.id)}

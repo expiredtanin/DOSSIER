@@ -223,6 +223,18 @@ describe("Reiter-Arten und Navigation [182]", () => {
     expect(r.setLevel).toBe("og");
   });
 
+  it("[204] Geschoss im Reiter eines Ausschnitts („EG 1:100“): Reiter löst sich vom Ausschnitt, Titel = Geschoss", () => {
+    const s = linkActiveTab(one(), "snap-eg");
+    const r = navigateToLevel(s, live("eg"), levels, "og");
+    expect(r.setLevel).toBe("og");
+    expect(activeTab(r.next).snapshotId).toBeUndefined();
+    expect(tabTitle(activeTab(r.next), [{ id: "snap-eg", name: "EG 1:100" }], () => "Obergeschoss")).toBe("Obergeschoss");
+    // Cmd/Ctrl+6 nimmt denselben Weg.
+    expect(activeTab(stepFloor(s, live("eg"), levels, 1)!.next).snapshotId).toBeUndefined();
+    // Gleiches Geschoss: Verbindung bleibt.
+    expect(activeTab(navigateToLevel(s, live("eg"), levels, "eg").next).snapshotId).toBe("snap-eg");
+  });
+
   it("Schnitt: neuer Reiter, 3D-Reiter bleibt bestehen", () => {
     const s = one();
     const r = navigateToLevel(s, live("eg", "perspektive"), levels, "sec");
