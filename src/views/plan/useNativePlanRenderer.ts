@@ -19,6 +19,7 @@ import type { Primitive } from "../../core";
 import { NativeGl, type NativeInvoke } from './nativeGl';
 import { readCssColor } from './cssColor';
 import { NativeFrameQueue } from './nativeFrameQueue';
+import { loadFontFile } from '../../text/glyphFonts';
 import { NativeTextSync } from "../../core";
 import { planTextEntries, planScreenTexts } from "../../core";
 
@@ -97,6 +98,24 @@ export function useNativePlanRenderer(
   const textScaleRef = useRef(100);
   const sceneTextsRetries = useRef(0);
 
+  /**
+   * [226] Schriftfamilien der gesetzten Zeilen: die Fläche nennt die Dateien, die ihr fehlen
+   * (`native2d_needed_fonts`), die Webview liefert die Bytes (`native2d_font`, leer = gibt es nicht) und fragt
+   * erneut, bis nichts mehr fehlt (Ersatzkette bei fehlendem Schnitt). Nicht auf dem Mac geprüft.
+   */
+  const feedFonts = useCallback(async (invoke: NativeInvoke) => {
+    for (let round = 0; round < 8; round++) {
+      const needed = (await invoke('native2d_needed_fonts').catch(() => [])) as number[];
+      if (!Array.isArray(needed) || needed.length === 0) return;
+      await Promise.all(
+        needed.map(async (key) => {
+          const bytes = (await loadFontFile(key)) ?? new Uint8Array(0);
+          await invoke('native2d_font', bytes, { headers: { 'x-font-key': String(key) } }).catch(() => {});
+        }),
+      );
+    }
+  }, []);
+
   const pushSceneTexts = useCallback(function push(plan: Plan | null) {
     const invoke = invokeRef.current;
     if (!invoke || !plan || sceneTextsDisabled.current) return;
@@ -114,6 +133,7 @@ export function useNativePlanRenderer(
         if (ok === true) {
           sceneTextsRetries.current = 0;
           setSceneTexts(true);
+          void feedFonts(invoke);
         } else {
           // Fläche (noch) nicht bereit: etwas später erneut versuchen (höchstens ein paar Mal).
           sceneTextsSent.current = null;

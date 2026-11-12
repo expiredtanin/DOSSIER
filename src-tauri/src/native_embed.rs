@@ -252,6 +252,32 @@ pub fn set_scene_texts(app: &AppHandle, bytes: &[u8], n: f64) -> bool {
     }
 }
 
+/// [226] Schriftdatei (WOFF2/SFNT) fuer `key` = Familie << 8 | Schnitt in den Glyphen-Pass einspielen und neu
+/// zeichnen; leere `bytes` = es gibt keine Datei (nicht weiter anfordern). `false` = Flaeche fehlt oder unbrauchbar.
+pub fn add_font(app: &AppHandle, key: u32, bytes: &[u8]) -> bool {
+    match app.state::<EmbedState>().0.lock().unwrap().as_mut() {
+        Some(e) => {
+            let ok = if bytes.is_empty() {
+                e.renderer.mark_font_unavailable(key);
+                true
+            } else {
+                e.renderer.add_font(key, bytes)
+            };
+            draw(e);
+            ok
+        }
+        None => false,
+    }
+}
+
+/// [226] Schriftdateien (`Familie << 8 | Schnitt`), die die gesetzten Textzeilen noch brauchen.
+pub fn needed_fonts(app: &AppHandle) -> Vec<u32> {
+    match app.state::<EmbedState>().0.lock().unwrap().as_ref() {
+        Some(e) => e.renderer.needed_fonts(),
+        None => Vec::new(),
+    }
+}
+
 /// Geaenderte Bereiche eines Puffers einspielen und ihn unter neuer ID fuehren.
 pub fn patch(app: &AppHandle, from: u32, to: u32, ranges: &[(u64, u64)], bytes: &[u8]) -> bool {
     match app.state::<EmbedState>().0.lock().unwrap().as_mut() {

@@ -586,6 +586,22 @@ impl Renderer {
         self.text.set_font(bytes);
     }
 
+
+    /// [226] Schriftdatei (WOFF2/SFNT) fuer `key` = Familie << 8 | Schnitt (`glyph::font_key`) einspielen.
+    pub fn add_font(&mut self, key: u32, bytes: &[u8]) -> bool {
+        self.text.add_font(key >> 8, key & 0xff, bytes).is_ok()
+    }
+
+    /// [226] Es gibt keine Datei fuer `key` (nicht weiter anfordern).
+    pub fn mark_font_unavailable(&mut self, key: u32) {
+        self.text.mark_font_unavailable(key >> 8, key & 0xff);
+    }
+
+    /// [226] Schriftdateien (`font_key`), die die aktuellen Textzeilen noch brauchen.
+    pub fn needed_fonts(&self) -> Vec<u32> {
+        self.text.needed_fonts()
+    }
+
     /// Stellt sicher, dass der dynamische Uniform-Puffer mindestens `count`
     /// Bloecke fasst; realloziert (Puffer + Bind-Group) bei Bedarf.
     fn ensure_uniform_capacity(&mut self, device: &wgpu::Device, count: u64) {

@@ -16,7 +16,8 @@
 //     Bogen       [r, widthMm, dashLen, rgba]          7
 //     Linie       [widthMm, dashLen, z, rgba]          7
 //     Text        [sizeMm, code, strOff, strLen, rgba] 8   (code: Ausrichtung 0 l,1 c,2 r im
-//                 unteren Byte, darueber der Schnitt: Bit 8 fett, Bit 9 kursiv, [194])
+//                 unteren Byte, darueber der Schnitt: Bit 8 fett, Bit 9 kursiv, [194]; ab Bit 16 die
+//                 Schriftfamilie, 0 = Inter, [226])
 //   Strings:        str_bytes UTF-8-Bytes; Texte verweisen mit Byte-Offset und -Laenge hinein.
 // `dashLen` 0 = durchgezogen (None). Punkte werden beim Lesen auf f32 gekuerzt (wie bisher
 // beim JSON-Weg), Farben und Masse sind f32. Nicht-endliche Zahlen gelten als kaputte Daten.
@@ -201,7 +202,8 @@ pub fn decode_scene(bytes: &[u8]) -> Result<Scene, String> {
             2 => TextAlign::Right,
             _ => return Err("Text: Ausrichtung unbekannt".into()),
         };
-        let style = code >> 8;
+        let style = (code >> 8) & 0xff;
+        let family = code >> 16;
         if style & !(STYLE_BOLD | STYLE_ITALIC) != 0 {
             return Err("Text: Schnitt unbekannt".into());
         }
@@ -210,7 +212,7 @@ pub fn decode_scene(bytes: &[u8]) -> Result<Scene, String> {
         let color = r.rgba()?;
         let end = off.checked_add(len).filter(|&e| e <= strings.len()).ok_or("Text ausserhalb der Tabelle")?;
         let content = strings.get(off..end).ok_or("Text: Offset mitten im Zeichen")?.to_string();
-        scene.texts.push(Text { pos: pts.take(1)?[0], content, size_mm, color, align, style });
+        scene.texts.push(Text { pos: pts.take(1)?[0], content, size_mm, color, align, style, family });
     }
     if pts.next != n_pts || dashes.next != dashes.v.len() {
         return Err("Pools nicht vollstaendig verbraucht".into());
@@ -245,9 +247,9 @@ mod tests {
             arcs: vec![Arc { center: [1.0, 1.0], from: [2.0, 1.0], to: [1.0, 2.0], r: 1.0, color: [1.0, 0.0, 0.0, 1.0], width_mm: 0.125, dash: None }],
             lines: vec![Line { a: [0.0, 0.0], b: [2600000.5, 1200000.25], color: [0.0, 0.5, 0.0, 1.0], width_mm: 0.35, dash: Some(vec![3.0, 1.0, 0.5, 1.0]), z: 4 }],
             texts: vec![
-                Text { pos: [1.0, 2.0], content: "Küche 12,5 m²".into(), size_mm: 2.5, color: [0.0, 0.0, 0.0, 1.0], align: TextAlign::Center, style: 0 },
-                Text { pos: [3.0, 4.0], content: String::new(), size_mm: 2.0, color: [0.0, 0.0, 0.0, 1.0], align: TextAlign::Right, style: 0 },
-                Text { pos: [5.0, 6.0], content: "A".into(), size_mm: 1.0, color: [0.0, 0.0, 1.0, 1.0], align: TextAlign::Left, style: 0 },
+                Text { pos: [1.0, 2.0], content: "Küche 12,5 m²".into(), size_mm: 2.5, color: [0.0, 0.0, 0.0, 1.0], align: TextAlign::Center, style: 0, family: 0 },
+                Text { pos: [3.0, 4.0], content: String::new(), size_mm: 2.0, color: [0.0, 0.0, 0.0, 1.0], align: TextAlign::Right, style: 0, family: 0 },
+                Text { pos: [5.0, 6.0], content: "A".into(), size_mm: 1.0, color: [0.0, 0.0, 1.0, 1.0], align: TextAlign::Left, style: 0, family: 0 },
             ],
             line_ends: 0,
         }
@@ -362,6 +364,10 @@ mod tests {
         a[text0 + 4..text0 + 8].copy_from_slice(&(1u32 | (STYLE_BOLD | STYLE_ITALIC) << 8).to_le_bytes());
         let s = decode_scene(&a).unwrap();
         assert_eq!((s.texts[0].align, s.texts[0].style), (TextAlign::Center, STYLE_BOLD | STYLE_ITALIC));
+        // [226] Familie ab Bit 16.
+        a[text0 + 4..text0 + 8].copy_from_slice(&(1u32 | STYLE_BOLD << 8 | 15 << 16).to_le_bytes());
+        let s = decode_scene(&a).unwrap();
+        assert_eq!((s.texts[0].style, s.texts[0].family), (STYLE_BOLD, 15));
         a[text0 + 4..text0 + 8].copy_from_slice(&(1u32 | 4 << 8).to_le_bytes());
         assert!(decode_scene(&a).unwrap_err().contains("Schnitt"));
     }
@@ -429,7 +435,7 @@ mod roundtrip {
         }
         for t in &s.texts {
             wf(&mut rec, t.size_mm);
-            w(&mut rec, t.align as u32 | (t.style << 8));
+            w(&mut rec, t.align as u32 | (t.style << 8) | (t.family << 16));
             w(&mut rec, strs.len() as u32);
             w(&mut rec, t.content.len() as u32);
             c(&mut rec, &t.color);
@@ -479,7 +485,7 @@ mod roundtrip {
             s.fills.push(FillPolygon { pts, color: [0.8, 0.8, 0.75, 1.0], z: (i % 50) as u32 });
         }
         for i in 0..n_texts {
-            s.texts.push(Text { pos: [rnd() * 500.0, rnd() * 500.0], content: format!("Raum {i} 12,5 m²"), size_mm: 2.0, color: [0.0, 0.0, 0.0, 1.0], align: TextAlign::Center, style: 0 });
+            s.texts.push(Text { pos: [rnd() * 500.0, rnd() * 500.0], content: format!("Raum {i} 12,5 m²"), size_mm: 2.0, color: [0.0, 0.0, 0.0, 1.0], align: TextAlign::Center, style: 0, family: 0 });
         }
         s
     }

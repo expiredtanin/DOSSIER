@@ -19,6 +19,7 @@ pub mod shaders;
 pub mod tessellate;
 pub mod text_lines;
 pub mod types;
+pub mod woff2;
 
 #[cfg(feature = "render")]
 pub mod gpu;

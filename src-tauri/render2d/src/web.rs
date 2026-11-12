@@ -216,6 +216,23 @@ impl WebPlanRenderer {
         Ok(())
     }
 
+    /// [226] Schriftdatei (WOFF2/SFNT) fuer `key` = Familie << 8 | Schnitt einspielen; `false` = unbrauchbar.
+    /// Die Zeilen dieser Familie werden beim naechsten `render` neu gesetzt.
+    pub fn add_font(&mut self, key: u32, bytes: &[u8]) -> bool {
+        self.renderer.add_font(key, bytes)
+    }
+
+    /// [226] Zu `key` gibt es keine Datei (nicht weiter anfordern).
+    pub fn mark_font_unavailable(&mut self, key: u32) {
+        self.renderer.mark_font_unavailable(key);
+    }
+
+    /// [226] Schriftdateien (`Familie << 8 | Schnitt`), die die aktuelle Szene noch braucht und die noch nicht
+    /// geliefert wurden; nach `set_scene_bin` abfragen, laden, per `add_font` einspielen.
+    pub fn needed_fonts(&self) -> Vec<u32> {
+        self.renderer.needed_fonts()
+    }
+
     /// Aktuellen Ausschnitt (viewBox-Einheiten, Bildschirm-Raum) setzen. Aendert
     /// nur die Ortho-Matrix im naechsten `render` (kein Re-Tessellieren).
     pub fn set_view_box(&mut self, x: f32, y: f32, w: f32, h: f32) {

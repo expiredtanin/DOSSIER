@@ -79,6 +79,18 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
 - Datensicherheit: Speichern/Autosave/Wiederherstellen auf dem Mac ([116]), Öffnen alter Beispielstände, kein Kern-Panic im Ablauf.
 
 ### Phase 2 (20.–26.11.): Wettbewerb lückenlos
+- ◐ **[226]** Schriftfamilien im GPU-Text (13.11., Nachfolger [218]/[194]): Der Glyphen-Pass (`render2d/src/glyph.rs`, WebGPU und Metal) kannte nur
+  Inter; die in Stempel/Textfeldern gewählte Familie wirkte nur in SVG/PDF/DXF. **Stand 13.11.:** Szenenformat: Familien-Kennung (Index in
+  `TEXT_FONTS` + 1, 0 = Inter) ab Bit 16 des Text-Codes (`plan/scene.rs`, `plan_screen_texts`, `scene_bin.rs`, `text_lines.rs`; Kern
+  `text_layout::font_family_id`, Test gleicht mit `src/text/fontList.ts` ab). Atlas je Familie/Schnitt lazy: `GlyphText::needed_fonts` →
+  Webview lädt `/fonts/<slug>/…woff2` (`src/text/glyphFonts.ts`, `wasmRendererSession`) → `add_font`; render2d entpackt WOFF2 selbst
+  (`woff2.rs`, brotli-decompressor, nur untransformierte Pakete — die 56 Dateien in `public/fonts` wurden so neu gepackt). Rückfall Inter bei
+  fehlender Familie, bei fehlendem Schnitt (Manrope/Outfit/Space Grotesk kursiv) der aufrechte der Familie. Messung: `text_metrics.rs`
+  (erzeugt von `scripts/gen-text-metrics.py` aus `hmtx`, 4 Schnitte je Familie) über `text_width_em_in` für Stempelblock/Ausrichtung;
+  Inter und alle anderen Aufrufer (Masse, Marken) unverändert. Bildtest `headless::schriftfamilien_im_glyphen_pass` (Breite gezeichnet =
+  Breite gemessen ±4 %). Mac: `native2d_font`/`native2d_needed_fonts` (`lib.rs`, `native_embed.rs`, `useNativePlanRenderer.ts`) nach Muster
+  geschrieben, NICHT kompiliert/geprüft. **Offen:** Mac-Gegenprobe; je Zeile zählt nur die Familie des ersten Laufs (Mischzeilen); Textfelder
+  mit Drehung (Vektor-Glyphen `vtext.rs`, Systemschrift) und SVG-Overlay-Texte unverändert; Kerning nicht in der Kern-Messung. · S
 - ◐ **[218]** Raumstempel bearbeiten im Objekteinstellungsfenster (13.11., Wunsch Maintainer): **Stand 13.11.:** Der Overlay-Dialog
   („Fenster im Fenster“, `RoomStampEditor`/`RoomStampEditorHost`, samt Alt-Rich-Text-Dialog `TextEditorDialog`) ist weg. Doppelklick auf einen
   Raumstempel (oder den Raum) wählt den Raum und öffnet die Objekteinstellungen mit dem neuen Abschnitt „Raumstempel“

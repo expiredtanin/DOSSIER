@@ -74,6 +74,25 @@ class FakeRenderer implements WebPlanRendererLike {
   free(): void {
     this.freed = true;
   }
+  /** [226] Schriften, die die Szene braucht; `add_font` erfüllt sie, `mark_font_unavailable` streicht sie. */
+  wanted: number[] = [];
+  fonts: Record<number, number> = {};
+  needed_fonts(): number[] {
+    this.enter("needed");
+    this.leave();
+    return this.wanted.filter((k) => !(k in this.fonts));
+  }
+  add_font(key: number, bytes: Uint8Array): boolean {
+    this.enter(`font:${key}`);
+    this.fonts[key] = bytes.length;
+    this.leave();
+    return bytes.length > 0;
+  }
+  mark_font_unavailable(key: number): void {
+    this.enter(`nofont:${key}`);
+    this.fonts[key] = -1;
+    this.leave();
+  }
 }
 
 const frame = (x: number): PlanFrame => ({
@@ -84,7 +103,7 @@ const frame = (x: number): PlanFrame => ({
   height: 100,
 });
 
-function setup(opts: { maxRecoveries?: number; failCreate?: () => boolean; now?: () => number } = {}) {
+function setup(opts: { maxRecoveries?: number; failCreate?: () => boolean; now?: () => number; loadFont?: (key: number) => Promise<Uint8Array | null> } = {}) {
   const made: FakeRenderer[] = [];
   const ready: boolean[] = [];
   const warnings: string[] = [];
@@ -101,6 +120,7 @@ function setup(opts: { maxRecoveries?: number; failCreate?: () => boolean; now?:
       }),
     encode: (s) => new TextEncoder().encode(s.name),
     onReadyChange: (r) => ready.push(r),
+    loadFont: opts.loadFont,
     warn: (m) => warnings.push(m),
     maxRecoveries: opts.maxRecoveries,
     recoveryWindowMs: 1000,
@@ -132,6 +152,29 @@ describe("WasmPlanRendererSession", () => {
     expect(made[0].calls.filter((c) => c.startsWith("scene"))).toEqual(["scene:A"]);
     expect(made[0].calls.at(-2)).toBe("view:2");
     expect(made[0].calls.at(-1)).toBe("render");
+  });
+
+  it("[226] fordert fehlende Schriften an, spielt sie ein und zeichnet neu; fehlende Dateien werden gemeldet", async () => {
+    const asked: number[] = [];
+    const { session, made, settle } = setup({
+      loadFont: async (k) => {
+        asked.push(k);
+        return k === (7 << 8) ? null : new Uint8Array([1, 2]);
+      },
+    });
+    session.start();
+    await settle();
+    made[0].wanted = [(15 << 8) | 1, 7 << 8];
+    session.setScene({ name: "A" });
+    session.draw(frame(1));
+    await settle();
+    expect(asked.sort()).toEqual([7 << 8, (15 << 8) | 1]);
+    expect(made[0].fonts).toEqual({ [(15 << 8) | 1]: 2, [7 << 8]: -1 });
+    // Nach dem Einspielen wurde neu gezeichnet; nichts wird zweimal angefordert.
+    expect(made[0].calls.filter((c) => c === "render").length).toBeGreaterThanOrEqual(2);
+    session.setScene({ name: "B" });
+    await settle();
+    expect(asked.length).toBe(2);
   });
 
   it("Szene und Ausschnitt vor dem Start gehen nicht verloren", async () => {

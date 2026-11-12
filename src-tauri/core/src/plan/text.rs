@@ -13,7 +13,7 @@ use crate::plan::buf::{whole, T_DRAWING_TEXT, T_TEXT};
 use crate::plan::dxf::{StampLine as DxfLine, TextIn, TextStyleIn};
 use crate::plan::parts::{in_ranges, Part};
 use crate::plan::scene::{to_rgba, Rgba, SText, STYLE_BOLD, STYLE_ITALIC};
-use crate::text_layout::{doc_from_text, font_name_of, is_blank, plain_text, split_ws, stamp_block, stamp_line_offsets, wrap_doc_to_lines, LayoutOpts, LineAlign, Placed, PT_TO_MM, TEXT_LINE_HEIGHT_MULT};
+use crate::text_layout::{doc_from_text, font_family_id, font_name_of, is_blank, plain_text, split_ws, stamp_block, stamp_line_offsets, wrap_doc_to_lines, LayoutOpts, LineAlign, Placed, PT_TO_MM, TEXT_LINE_HEIGHT_MULT};
 use serde::{Deserialize, Deserializer};
 
 fn num<'de, D: Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
@@ -119,8 +119,13 @@ fn greyed_color(c: Rgba, greyed: bool) -> Rgba {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn push(out: &mut Vec<SText>, x: f64, y: f64, content: String, size_mm: f64, color: Rgba, align: LineAlign, style: u32) {
-    out.push(SText { pos: crate::hatch::V2 { x, y }, size_mm, color, align: align.code(), style, content: content.into_bytes() });
+fn push(out: &mut Vec<SText>, x: f64, y: f64, content: String, size_mm: f64, color: Rgba, align: LineAlign, style: u32, family: u32) {
+    out.push(SText { pos: crate::hatch::V2 { x, y }, size_mm, color, align: align.code(), style, family, content: content.into_bytes() });
+}
+
+/// [226] Schriftfamilie einer gesetzten Zeile aus ihrem ersten Lauf (0 = Inter, auch für nicht gebündelte Namen).
+fn line_family(line: &crate::text_layout::Line) -> u32 {
+    font_family_id(line.tspans.first().and_then(|s| font_name_of(s.font_family.as_deref())).as_deref())
 }
 
 /// Schnitt einer gesetzten Zeile aus ihrem ersten Lauf (wie der DXF-Export, `stamp_lines`).
@@ -193,7 +198,7 @@ fn stamp_scene(t: &StampText, forced: bool, mm_to_m: f64, out: &mut Vec<SText>) 
         let fill = line.tspans.first().map(|s| s.fill.as_str()).or(color);
         let c = greyed_color(to_rgba(fill).unwrap_or(def), greyed);
         let dx = offsets.get(k).copied().unwrap_or(0.0) * mm_to_m;
-        push(out, t.at.x + dx, t.at.y - y * mm_to_m, content, line.max_size().unwrap_or(base_mm), c, line.align, line_style(line));
+        push(out, t.at.x + dx, t.at.y - y * mm_to_m, content, line.max_size().unwrap_or(base_mm), c, line.align, line_style(line), line_family(line));
     }
 }
 
@@ -217,7 +222,7 @@ fn single_scene(t: &SingleText, forced: bool, mm_to_m: f64, out: &mut Vec<SText>
         let fill = line.tspans.first().map(|s| s.fill.as_str()).or(color);
         let c = greyed_color(to_rgba(fill).unwrap_or(def), greyed);
         let style = line_style(&line);
-        push(out, t.at.x, t.at.y - dy, content, if unit_per_pt > 0.0 { size_m / mm_to_m } else { size_m }, c, line.align, style);
+        push(out, t.at.x, t.at.y - dy, content, if unit_per_pt > 0.0 { size_m / mm_to_m } else { size_m }, c, line.align, style, line_family(&line));
     }
 }
 
@@ -341,6 +346,14 @@ mod tests {
         assert!((big[1].size_mm - 20.0 * PT_TO_MM).abs() < 1e-3, "{}", big[1].size_mm);
         assert_eq!(big[1].style, STYLE_BOLD | STYLE_ITALIC);
         assert_eq!(big[1].color, [1.0, 0.0, 0.0, 1.0]);
+        assert_eq!((plain[1].family, big[1].family), (0, 0));
+        // [226] Schriftfamilie der Zeile reist in die Szene: Serifenschrift = Kennung 15, Arial (nicht gebündelt) = Inter.
+        let serif = run(r##","marks":{"font":"'Source Serif 4', serif"}"##);
+        assert_eq!(serif[1].family, 15);
+        assert_eq!(run(r##","marks":{"font":"Arial"}"##)[1].family, 0);
+        // Block-Breite und Zeilenlage folgen der Metrik der gewählten Schrift (Serif ≠ Inter).
+        let (wide_inter, wide_serif) = (run(r##","marks":{"sizePt":30}"##), run(r##","marks":{"sizePt":30,"font":"Source Serif 4"}"##));
+        assert!((wide_serif[1].pos.x - wide_inter[1].pos.x).abs() > 1e-4, "{} {}", wide_serif[1].pos.x, wide_inter[1].pos.x);
         // Grössere Zeile: der Block wird höher, die erste Grundlinie rückt nach oben (Modell-y nach oben).
         assert!(big[0].pos.y > plain[0].pos.y);
     }

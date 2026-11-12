@@ -61,6 +61,8 @@ headless = ["render", "dep:image"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
+# WOFF2-Schriften fuer den Glyphen-Pass (src/woff2.rs, [226]); reiner Rust-Dekoder, auch wasm.
+brotli-decompressor = "5"
 
 # --- GPU (nur mit Feature "render") ------------------------------------------
 # Standard-Features von wgpu (wgsl, webgpu, dx12, metal + target-spezifisch

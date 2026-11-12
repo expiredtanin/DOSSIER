@@ -558,6 +558,21 @@ impl ChunkRenderer {
         self.scene_text_n = if n.is_finite() && n > 0.0 { n } else { 100.0 };
     }
 
+    /// [226] Schriftdatei (WOFF2/SFNT) fuer `key` = Familie << 8 | Schnitt (`glyph::font_key`) einspielen.
+    pub fn add_font(&mut self, key: u32, bytes: &[u8]) -> bool {
+        self.scene_text.add_font(key >> 8, key & 0xff, bytes).is_ok()
+    }
+
+    /// [226] Es gibt keine Datei fuer `key` (nicht weiter anfordern).
+    pub fn mark_font_unavailable(&mut self, key: u32) {
+        self.scene_text.mark_font_unavailable(key >> 8, key & 0xff);
+    }
+
+    /// [226] Schriftdateien (`font_key`), die die aktuellen Textzeilen noch brauchen.
+    pub fn needed_fonts(&self) -> Vec<u32> {
+        self.scene_text.needed_fonts()
+    }
+
     pub fn scene_text_count(&self) -> usize {
         self.scene_text.lines().len()
     }

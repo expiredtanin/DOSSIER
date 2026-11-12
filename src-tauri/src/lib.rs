@@ -286,6 +286,44 @@ fn native2d_scene_texts(app: tauri::AppHandle, request: tauri::ipc::Request<'_>)
     }
 }
 
+/// [226] Schriftdatei fuer den Glyphen-Pass der Flaeche: Body = WOFF2/SFNT-Bytes (leer = Datei gibt es nicht),
+/// Header `x-font-key` = Familie << 8 | Schnitt.
+#[tauri::command]
+fn native2d_font(app: tauri::AppHandle, request: tauri::ipc::Request<'_>) -> Result<bool, String> {
+    #[cfg(all(feature = "native2d", target_os = "macos"))]
+    {
+        let key: u32 = request
+            .headers()
+            .get("x-font-key")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse().ok())
+            .ok_or("x-font-key fehlt")?;
+        let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+            return Err("Rohdaten erwartet".into());
+        };
+        return Ok(native_embed::add_font(&app, key, bytes));
+    }
+    #[cfg(not(all(feature = "native2d", target_os = "macos")))]
+    {
+        let _ = (app, request);
+        Ok(false)
+    }
+}
+
+/// [226] Schriftdateien (`Familie << 8 | Schnitt`), die die gesetzten Textzeilen noch brauchen.
+#[tauri::command]
+fn native2d_needed_fonts(app: tauri::AppHandle) -> Vec<u32> {
+    #[cfg(all(feature = "native2d", target_os = "macos"))]
+    {
+        return native_embed::needed_fonts(&app);
+    }
+    #[cfg(not(all(feature = "native2d", target_os = "macos")))]
+    {
+        let _ = app;
+        Vec::new()
+    }
+}
+
 #[tauri::command]
 fn native2d_frame(app: tauri::AppHandle, view: serde_json::Value, paper_scale: f64, clear: Option<[f64; 3]>, dash_scale: Option<f64>) -> Result<(), String> {
     #[cfg(all(feature = "native2d", target_os = "macos"))]
@@ -362,6 +400,8 @@ pub fn run() {
         native2d_frame,
         native2d_texts,
         native2d_scene_texts,
+        native2d_font,
+        native2d_needed_fonts,
         push_native_scene,
         push_native_walls,
         acquire_project_lock,
@@ -385,6 +425,8 @@ pub fn run() {
         native2d_frame,
         native2d_texts,
         native2d_scene_texts,
+        native2d_font,
+        native2d_needed_fonts,
         acquire_project_lock,
         release_project_lock,
         save_atomic,

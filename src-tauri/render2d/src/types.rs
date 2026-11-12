@@ -161,6 +161,10 @@ pub struct Text {
     /// Schnitt ([194]): `STYLE_BOLD` | `STYLE_ITALIC` (Default: normal).
     #[serde(default)]
     pub style: u32,
+    /// Schriftfamilie ([226]): 0 = eingebettetes Inter, sonst 1-basierter Index der gebuendelten Familien
+    /// (`src/text/fontList.ts`, `core::text_layout::FONT_FAMILIES`). Unbekannte/ungeladene → Inter.
+    #[serde(default)]
+    pub family: u32,
 }
 
 /// Schnitt-Bit fett (`Text::style`, Szene: Kennung >> 8).

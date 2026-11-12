@@ -32,6 +32,12 @@ export interface WebPlanRendererLike {
   set_dash_scale?(n: number): void;
   resize(w: number, h: number): void;
   render(): void;
+  /** [226] Schriftdateien (Familie << 8 | Schnitt), die die Szene noch braucht. */
+  needed_fonts?(): ArrayLike<number>;
+  /** [226] Schriftdatei (WOFF2/SFNT) einspielen; false = unbrauchbar. */
+  add_font?(key: number, bytes: Uint8Array): boolean;
+  /** [226] Zu `key` gibt es keine Datei. */
+  mark_font_unavailable?(key: number): void;
   /** true, sobald das WebGPU-Gerät verloren ist (dann zeichnet der Renderer nichts mehr). */
   is_lost(): boolean;
   /** Rückruf beim Geräteverlust (aus dem `device.lost`-Promise). */
@@ -55,6 +61,8 @@ export interface SessionOptions<S> {
   create(): Promise<WebPlanRendererLike>;
   /** Szene → Binärpuffer (`planSceneBin`). */
   encode(scene: S): Uint8Array;
+  /** [226] Bytes der Schriftdatei zu `key` (Familie << 8 | Schnitt) holen; `null` = gibt es nicht. */
+  loadFont?(key: number): Promise<Uint8Array | null>;
   /** Bereitschaft geändert (false → Aufrufer zeichnet über SVG). */
   onReadyChange(ready: boolean): void;
   warn?(msg: string, e?: unknown): void;
@@ -80,6 +88,8 @@ export class WasmPlanRendererSession<S> {
   private disposed = false;
   /** Zeitpunkte der Neuaufbauten im laufenden Fenster. */
   private recoveries: number[] = [];
+  /** [226] Schriftdateien, die gerade geladen werden. */
+  private fontsLoading = new Set<number>();
   private _ready = false;
   private readonly maxRecoveries: number;
 
@@ -149,6 +159,7 @@ export class WasmPlanRendererSession<S> {
         }
         this.renderer = r;
         this.uploaded = undefined;
+        this.fontsLoading.clear();
         r.set_lost_callback?.(() => {
           if (this.renderer === r) this.fail(new Error("WebGPU-Gerät verloren"), true);
         });
@@ -162,6 +173,45 @@ export class WasmPlanRendererSession<S> {
         if (!this.disposed) this.warn("render2d WASM/WebGPU-Init fehlgeschlagen → SVG", e);
       },
     );
+  }
+
+  /**
+   * [226] Schriften, die die Szene braucht und der Renderer noch nicht hat, laden und einspielen; danach
+   * neu zeichnen (und erneut fragen: fehlt ein Schnitt, kommt der nächste der Ersatzkette). Aufruf im
+   * `flush` (Renderer frei); die Antworten kommen asynchron, nie mitten in einem Aufruf.
+   */
+  private requestFonts(r: WebPlanRendererLike): void {
+    const load = this.opts.loadFont;
+    if (!load || !r.needed_fonts) return;
+    for (const key of Array.from(r.needed_fonts())) {
+      if (this.fontsLoading.has(key)) continue;
+      this.fontsLoading.add(key);
+      load(key).then(
+        (bytes) => this.fontArrived(r, key, bytes),
+        () => this.fontArrived(r, key, null),
+      );
+    }
+  }
+
+  private fontArrived(r: WebPlanRendererLike, key: number, bytes: Uint8Array | null): void {
+    this.fontsLoading.delete(key);
+    if (this.disposed || this.renderer !== r) return;
+    if (this.inCall) {
+      // Kann bei synchron erfüllten Schein-Ladern vorkommen: nach dem Aufruf nachholen.
+      Promise.resolve().then(() => this.fontArrived(r, key, bytes));
+      return;
+    }
+    this.inCall = true;
+    try {
+      if (!bytes || !r.add_font?.(key, bytes)) r.mark_font_unavailable?.(key);
+    } catch (e) {
+      this.inCall = false;
+      this.fail(e, false);
+      return;
+    }
+    this.inCall = false;
+    this.requestFonts(r);
+    this.flush(true);
   }
 
   /** Renderer ausgefallen: verwerfen und (im Budget) neu aufbauen. */
@@ -213,6 +263,7 @@ export class WasmPlanRendererSession<S> {
         if (bytes) {
           r.set_scene_bin(bytes);
           this.uploaded = scene;
+          this.requestFonts(r);
         }
         const f = this.frame;
         if (drawFrame && f) {
