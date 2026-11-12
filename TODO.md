@@ -10,7 +10,7 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   stehen im Archiv („Bewusst nicht übernommen“).
 - **Grösse** (eine Person mit Agenten): S ≤ 1 Tag · M ≤ 1 Woche · L ≤ 1 Monat · XL > 1 Monat.
   Steht keine Grösse im Archiv, ist sie hier geschätzt.
-- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 220);
+- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 225);
   nie eine ID wiederverwenden oder umnummerieren. Präfix-IDs (`[K]`, `[G]`, `[T]`, `[B]`, `[C]`) bleiben.
 - **Pro Punkt:** was fehlt · wo im Code · Grösse. Höchstens ein bis drei Sätze je Punkt;
   Messwerte und Befunde gehören in den Commit.
@@ -59,10 +59,10 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   oben ein Test; was fehlt, wird hier als Aufgabe eingetragen. · M
   Umgesetzt (12.11.): `e2e/release10.spec.ts` spielt leeres Projekt → Kataster-DXF (LV95) → Baurecht → Wände/Decke/Dach → Raum +
   Raumprogramm → SIA 416/Kennzahlen (CSV/PDF) → 1:200 → Schnitt → Axonometrie/Schatten → Präsentationsplan A1 → Publikation PDF → DXF/IFC
-  → Speichern in 13 Schritten durch; fehlende Schritte als `test.fixme` ([207] [208] [209] [211] [216]–[219]). Behoben: GV in der
+  → Speichern in 13 Schritten durch; fehlende Schritte als `test.fixme` ([207] [208] [209] [211] [221]–[224]). Behoben: GV in der
   Kennzahlenleiste war ohne freie Körper 0 m³, neue Decken bekamen den Aussenwand-Aufbau statt eines Deckentyps. Offen: Durchlauf
   der Checkliste auf dem Mac (Maintainer); 3D-Bild headless nicht prüfbar (kein WebGPU).
-- ○ **[216]** LV95-Projekt: Schnitt A und Ansicht Süd des leeren Projekts liegen am Nullpunkt (`linePoints` −1…6 m). Repro: Neues Projekt →
+- ○ **[221]** LV95-Projekt: Schnitt A und Ansicht Süd des leeren Projekts liegen am Nullpunkt (`linePoints` −1…6 m). Repro: Neues Projekt →
   Kataster-DXF mit Landeskoordinaten importieren → Erdgeschoss → Gebäude bei E 2'600'050 / N 1'200'050 zeichnen → „Auf Plan einpassen“:
   Massstab ≈ 1:10'000'000 (Ausmass Nullpunkt … LV95, `plan/domains.rs` Marken im Ausmass), Rad-Zoom endet bei ≈ 130 m Breite
   (`ZOOM_MAX` relativ zum Ausmass), der EG-Reiter öffnet am Nullpunkt; Schnitt A schneidet nichts. Vorschlag: Standard-Schnitt/-Ansicht
@@ -98,16 +98,16 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   Wiederholtes wie Fenster/Bäume), Sichtkegel-Culling, Schatten-Map nur bei Änderung von Licht/Modell, Kantenpass günstiger, LOD für
   Kontext/Gelände. Messbar machen (Bench in `dossier-cli bench` bzw. render3d-Test) und vorher/nachher belegen. Opus. · L
 
-- ○ **[217]** Volumenstudie → Bauteile (12.11., aus [206]): gewählten Körper (Massenmodell) in Aussenwände je Geschoss, Decken und Flachdach
+- ○ **[222]** Volumenstudie → Bauteile (12.11., aus [206]): gewählten Körper (Massenmodell) in Aussenwände je Geschoss, Decken und Flachdach
   umwandeln, Geschosse aus der Körperhöhe; heute nur Zeichnen von Wand/Decke/Dach oder GV aus Körpern. Ort: neuer Befehl, Kern `cmd_create.rs`. · M
-- ○ **[218]** 3D-Bild für die Abgabe (12.11., aus [206]; Punkt „3D-Bilder für die Abgabe“ oben): Befehl/Menü „3D-Bild exportieren …“ mit
+- ○ **[223]** 3D-Bild für die Abgabe (12.11., aus [206]; Punkt „3D-Bilder für die Abgabe“ oben): Befehl/Menü „3D-Bild exportieren …“ mit
   Pixelgrösse (z. B. 6000 px), Perspektive/Axonometrie mit Schatten als PNG-Download bzw. Datei. Heute gibt es `snapshotPng` nur für BCF
   (`viewport/Wasm3DViewport.tsx`), keinen Export für den Menschen; nativ über `render_png`. · S
-- ○ **[219]** Präsentationsplan für den Wettbewerb (12.11., aus [206]): leere Geschosse (z. B. OG ohne Bauteile) sind im Dialog vorgewählt
+- ○ **[224]** Präsentationsplan für den Wettbewerb (12.11., aus [206]): leere Geschosse (z. B. OG ohne Bauteile) sind im Dialog vorgewählt
   und geben leere Viewports; es gibt nur die vorhandenen Ansichten (leeres Projekt: nur „Ansicht Süd“) — fehlende Ansichten N/O/W aus dem
   Gebäudeumriss anbieten; Massstab wählbar (heute der grösste passende, im Testgebäude auf A1 1:50 statt 1:200 für den Wettbewerb).
   Ort: `ui/PresentationDialog.tsx`, `commands/cmds/presentation.ts`. · S
-- ○ **[220]** Kennzahlenleiste und Flächentabelle widersprechen sich (12.11., aus [206]): Leiste „GF“ = Summe der Raumflächen (NGF,
+- ○ **[225]** Kennzahlenleiste und Flächentabelle widersprechen sich (12.11., aus [206]): Leiste „GF“ = Summe der Raumflächen (NGF,
   `kennzahlen.rs`), Tabelle GF = NGF + KF (`flaechen.rs`); im Testgebäude 12 × 10 m: Leiste GF 112.5 m², Tabelle 127.7 m², ÜZ ebenso
   verschieden. Leiste aus der Flächentabelle rechnen (GV ist seit [206] gleich). · S
 

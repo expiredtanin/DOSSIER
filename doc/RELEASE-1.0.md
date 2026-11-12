@@ -52,11 +52,11 @@ E 2'600'048 / N 1'200'046 und E 2'600'060 / N 1'200'056. Raumprogramm als CSV (`
 
 | # | Schritt in Dossier | Erwartet | Status |
 |---|---|---|---|
-| 3.1 | Zeichnungsebenen → Erdgeschoss | Statusleiste „Geschoss Erdgeschoss“, Plan zeigt das Gebäude | ◐ der EG-Reiter öffnet am Nullpunkt, „Einpassen“ (⌘0) zoomt auf ≈ 1:10 Mio. → **[216]** |
+| 3.1 | Zeichnungsebenen → Erdgeschoss | Statusleiste „Geschoss Erdgeschoss“, Plan zeigt das Gebäude | ◐ der EG-Reiter öffnet am Nullpunkt, „Einpassen“ (⌘0) zoomt auf ≈ 1:10 Mio. → **[221]** |
 | 3.2 | Befehl `wand` (Kürzel `w`), Punkte tippen `2600048,1200046` … zurück zum Start, Enter | 4 Aussenwände, Ecken verbunden | ✅ (Spec 3) |
 | 3.3 | Befehl `decke` (`d`), 4 Ecken, Enter | eine Decke mit Deckentyp „Geschossdecke mehrschichtig“ | ✅ (Spec 3; vorher Aussenwand-Aufbau, in [206] behoben) |
 | 3.4 | Befehl `dach` (`rf`), zwei Ecken | Satteldach 30°, Vorsprung 0.4 m | ✅ (Spec 3) |
-| 3.5 | Volumen als Körper (`koerper`) und daraus Wände/Decken/Dach | Bauteile je Geschoss aus dem Körper | ❌ **[217]** (Körper geht, Umwandlung fehlt) |
+| 3.5 | Volumen als Körper (`koerper`) und daraus Wände/Decken/Dach | Bauteile je Geschoss aus dem Körper | ❌ **[222]** (Körper geht, Umwandlung fehlt) |
 | 3.6 | Obergeschoss: Wände kopieren (⌘5/⌘6 Geschoss wechseln) | OG mit Wänden, GF steigt | ◐ nicht in der Spec |
 
 ## 4. Raumprogramm gegen Modell
@@ -65,7 +65,7 @@ E 2'600'048 / N 1'200'046 und E 2'600'060 / N 1'200'056. Raumprogramm als CSV (`
 |---|---|---|---|
 | 4.1 | Befehl `raum` (`rm`), Klick ins Gebäude | „Raum 1“, 112.53 m² | ✅ (Spec 4) |
 | 4.2 | Flächenbilanz → „Raumprogramm importieren …“ → CSV, Spalten zuordnen → Importieren | 2 Programmzeilen, Soll/Ist-Tabelle | ✅ (Spec 4) |
-| 4.3 | Raum in „Atelier“ umbenennen (Objekt-Info) | Zeile „Atelier“ grün/gelb statt „fehlt“ | ◐ in der Spec nur „fehlt“ geprüft (Raum ist headless schwer anklickbar, s. [216]) |
+| 4.3 | Raum in „Atelier“ umbenennen (Objekt-Info) | Zeile „Atelier“ grün/gelb statt „fehlt“ | ◐ in der Spec nur „fehlt“ geprüft (Raum ist headless schwer anklickbar, s. [221]) |
 | 4.4 | „Räume generieren“ | neues Blatt mit Raumrechtecken nach Programm | ✅ (`e2e/roomprogram.spec.ts`) |
 | 4.5 | Mac: Menü „Kennzahlen und Raumprogramm …“ | Meldung mit Kennzahlen und Programmstand | ◐ nur auf dem Mac |
 
@@ -75,8 +75,8 @@ E 2'600'048 / N 1'200'046 und E 2'600'060 / N 1'200'056. Raumprogramm als CSV (`
 |---|---|---|---|
 | 5.1 | Kopfleiste Massstab → 1:200, Detailgrad „grob“/„mittel“ | Strichstärken und Schraffuren für 1:200 | ✅ (Spec 7) |
 | 5.2 | Befehl `sectionline`, Start/Ende quer durchs Gebäude, Enter | neue Ebene „Schnitt B“, Schnitt zeigt Wände, Decke, Dach, Koten | ✅ (Spec 8) |
-| 5.3 | „Schnitt A“ / „Ansicht Süd“ aus dem leeren Projekt | zeigen das Gebäude | ◐ Linien liegen am Nullpunkt, Schnitt A leer → **[216]**; Ansicht Süd zeigt das Gebäude |
-| 5.4 | Befehl `viewline` für Ansichten Nord/Ost/West | je eine Ansichtsebene | ◐ geht von Hand, kein automatischer Satz → **[219]** |
+| 5.3 | „Schnitt A“ / „Ansicht Süd“ aus dem leeren Projekt | zeigen das Gebäude | ◐ Linien liegen am Nullpunkt, Schnitt A leer → **[221]**; Ansicht Süd zeigt das Gebäude |
+| 5.4 | Befehl `viewline` für Ansichten Nord/Ost/West | je eine Ansichtsebene | ◐ geht von Hand, kein automatischer Satz → **[224]** |
 | 5.5 | 1:100 mit Bemassung, Koten, Raumstempeln, Öffnungen (Vorprojekt) | abgabefähiger 1:100-Plan | ◐ Plan-Review-Runde 4 (TODO Phase 3) |
 
 ## 6. Situation 1:500 mit Schwarzplan
@@ -91,7 +91,7 @@ E 2'600'048 / N 1'200'046 und E 2'600'060 / N 1'200'056. Raumprogramm als CSV (`
 |---|---|---|---|
 | 7.1 | Kopfleiste „Axonometrie“ | eigener Reiter „3D · Erdgeschoss“ | ✅ (Spec 9; Bild nur auf dem Mac prüfbar) |
 | 7.2 | Gelände → „Schatten im 3D zeigen“, Datum 21.03./21.06./21.12., Uhrzeit | Schatten im 3D und (Haken) im Grundriss | ◐ Schalter geprüft, Bild nur auf dem Mac |
-| 7.3 | 3D-Bild als PNG in Abgabeauflösung | PNG-Datei, z. B. 6000 px breit | ❌ **[218]** |
+| 7.3 | 3D-Bild als PNG in Abgabeauflösung | PNG-Datei, z. B. 6000 px breit | ❌ **[223]** |
 | 7.4 | „Rendering …“ (Blender/Cycles) | PNG zurück, ins Layout einsetzbar | ❌ **[211]** |
 
 ## 8. Flächen und Volumen SIA 416, Kennzahlen
@@ -100,7 +100,7 @@ E 2'600'048 / N 1'200'046 und E 2'600'060 / N 1'200'056. Raumprogramm als CSV (`
 |---|---|---|---|
 | 8.1 | Flächenbilanz → Kennzahlenleiste | GF, aGF, GV, AZ, ÜZ mit Werten; GV ≈ GF × Geschosshöhe | ✅ (Spec 5; GV war 0 m³ ohne Körper, in [206] behoben) |
 | 8.2 | „Flächen- und Kennzahlen-Nachweis“ → CSV / PDF | Tabelle HNF…GF, IVHB-Ziffern (GFZ, AZ, BMZ, ÜZ), Gesamthöhe | ✅ (Spec 5) |
-| 8.3 | Leiste und Tabelle vergleichen | gleiche GF/ÜZ | ❌ Leiste GF 112.5 m² (Räume), Tabelle 127.7 m² (NGF + KF) → **[220]** |
+| 8.3 | Leiste und Tabelle vergleichen | gleiche GF/ÜZ | ❌ Leiste GF 112.5 m² (Räume), Tabelle 127.7 m² (NGF + KF) → **[225]** |
 
 ## 9. Kostenschätzung grob
 
@@ -112,7 +112,7 @@ E 2'600'048 / N 1'200'046 und E 2'600'060 / N 1'200'056. Raumprogramm als CSV (`
 
 | # | Schritt in Dossier | Erwartet | Status |
 |---|---|---|---|
-| 10.1 | Panel **Mappe** → „Präsentationsplan erstellen“ (Befehl `praesentationsplan`), Schnitt B, A1 | Blatt mit Grundrissen, Ansicht, Schnitt, Nordpfeil, Massstabsbalken, gemeinsamer Massstab | ◐ geht (Spec 10), aber leeres OG als leerer Viewport, nur „Ansicht Süd“ → **[219]** |
+| 10.1 | Panel **Mappe** → „Präsentationsplan erstellen“ (Befehl `praesentationsplan`), Schnitt B, A1 | Blatt mit Grundrissen, Ansicht, Schnitt, Nordpfeil, Massstabsbalken, gemeinsamer Massstab | ◐ geht (Spec 10), aber leeres OG als leerer Viewport, nur „Ansicht Süd“ → **[224]** |
 | 10.2 | Mappe → Publikation → ＋ Satz, Blatt anhaken, „Publizieren“ | ein PDF (A1, 1 Seite), Index im Titelblock | ✅ (Spec 11) |
 | 10.3 | Plakat A0/A1 mit Raster, Kennwort-Feld, anonym (kein Büroname, PDF-Metadaten leer), Bilder im Layout | WBW-Plakat als PDF | ❌ **[208]** |
 

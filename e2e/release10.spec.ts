@@ -256,23 +256,23 @@ test("Referenz-Ablauf WBW/Vorprojekt: leeres Projekt bis Abgabe", async ({ page 
 
 // ── Was für 1.0 noch fehlt (je ein Test, bis der Schritt geht; Reproduktion in TODO.md) ──────────────────────
 
-test.fixme("[216] LV95: Einpassen im Geschoss zeigt das Gebäude (Schnitt A/Ansicht Süd nicht am Nullpunkt)", async () => {
+test.fixme("[221] LV95: Einpassen im Geschoss zeigt das Gebäude (Schnitt A/Ansicht Süd nicht am Nullpunkt)", async () => {
   // Neues Projekt → Kataster-DXF (Landeskoordinaten) → Erdgeschoss → Gebäude in LV95 zeichnen → „Auf Plan einpassen“:
   // heute ≈ 1:10 000 000 (Nullpunkt und Gebäude 2.6 Mio. m auseinander), Rad-Zoom endet bei ≈ 130 m Breite.
 });
 
-test.fixme("[217] Volumenstudie: Wände/Decken/Dach aus einem Volumen (Körper) erzeugen", async () => {});
+test.fixme("[222] Volumenstudie: Wände/Decken/Dach aus einem Volumen (Körper) erzeugen", async () => {});
 
 test.fixme("[207] Situation 1:500 / Schwarzplan als Ansichtsvorlage „Situation WBW“", async () => {});
 
-test.fixme("[218] 3D-Bild für die Abgabe: hochaufgelöster PNG-Export (Perspektive/Axonometrie, mit Schatten)", async () => {});
+test.fixme("[223] 3D-Bild für die Abgabe: hochaufgelöster PNG-Export (Perspektive/Axonometrie, mit Schatten)", async () => {});
 
 test.fixme("[211] Rendering mit Blender/Cycles aus der 3D-Ansicht", async () => {});
 
-test.fixme("[220] Kennzahlenleiste GF/ÜZ gleich wie die SIA-416-Flächentabelle (GF = NGF + KF)", async () => {});
+test.fixme("[225] Kennzahlenleiste GF/ÜZ gleich wie die SIA-416-Flächentabelle (GF = NGF + KF)", async () => {});
 
 test.fixme("[209] Kostenschätzung grob (Kennwerte je m³ GV / m² GF, eBKP-H)", async () => {});
 
-test.fixme("[219] Präsentationsplan: leere Geschosse nicht vorgewählt, Ansichten N/O/W aus dem Gebäude", async () => {});
+test.fixme("[224] Präsentationsplan: leere Geschosse nicht vorgewählt, Ansichten N/O/W aus dem Gebäude", async () => {});
 
 test.fixme("[208] Wettbewerbs-Plakat A0/A1 mit Kennwort, anonymes PDF (keine Büro-Metadaten)", async () => {});
