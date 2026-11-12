@@ -9,7 +9,8 @@
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
 import { generateTerrainFromContours, resmoothGridTerrain, type TerrainOptions } from "../model/terrain";
-import type { ContextObject, Project, Vec2 } from "../model/types";
+import type { ContextObject, Drawing2D, Project, Vec2 } from "../model/types";
+import type { ImportedLine } from "../io/geoContext";
 import { documentFor } from "../core/document";
 import { transformOps } from "../tools/transform";
 import { addItems, fieldOps, patchItem, removeItems } from "../core/opsBuild";
@@ -22,7 +23,11 @@ export interface SiteSlice {
   /** Fügt ein Kontext-Objekt (Mesh/Konturen/Gelände) hinzu (immutabel). */
   addContextObject: (obj: ContextObject) => void;
   /** Fügt mehrere Kontext-Objekte in einem Schritt hinzu (z. B. DXF-Import). */
-  addContextObjects: (objs: ContextObject[]) => void;
+  /**
+   * Übernimmt Importe als normale Elemente: Kontext-Objekte in `project.context`, Linien (`lines`, z. B. die
+   * Umrisse des Standort-Imports) als einzelne 2D-Zeichnungen auf der aktiven Ebene; ein Undo-Schritt.
+   */
+  addContextObjects: (objs: ContextObject[], lines?: ImportedLine[]) => void;
   /** Entfernt ein Kontext-Objekt per ID (No-op bei unbekannter ID). */
   removeContextObject: (id: string) => void;
   /** Entfernt mehrere Kontext-Objekte in EINEM Schritt (z. B. eine ganze
@@ -76,6 +81,7 @@ export interface SiteSlice {
  */
 type SiteSliceDeps = {
   project: Project;
+  activeLevelId: string;
   applyChange: (ops: readonly CoreOp[] | ((p: Project) => readonly CoreOp[]), coalesceKey?: string) => void;
 };
 
@@ -90,13 +96,16 @@ export function createSiteSlice(
   // `ensureContextCategories`), damit sie sofort im Ebenen-Panel erscheinen
   // und über dessen Sichtbarkeit/Grau/Sperren steuerbar sind — genau wie
   // Wand/Decke/Dach, statt wie bisher immer unconditional gezeichnet zu werden.
-  const addToContext = (added: ContextObject[]): void => {
-    if (added.length === 0) return;
-    const codes = added
+  const addToContext = (added: ContextObject[], lines: ImportedLine[] = []): void => {
+    if (added.length === 0 && lines.length === 0) return;
+    const levelId = get().activeLevelId;
+    const drawings: Drawing2D[] = lines.map((l) => ({ ...l, levelId }));
+    const codes = [...added, ...drawings]
       .map((o) => o.categoryCode)
       .filter((c): c is string => !!c);
     get().applyChange((p) => [
       ...addItems("context", added),
+      ...addItems("drawings2d", drawings),
       ...fieldOps(p, "layers", ensureContextCategories(p.layers, codes)),
     ]);
   };
@@ -104,7 +113,7 @@ export function createSiteSlice(
   return {
     addContextObject: (obj) => addToContext([obj]),
 
-    addContextObjects: (objs) => addToContext(objs),
+    addContextObjects: (objs, lines) => addToContext(objs, lines),
 
     removeContextObject: (id) => get().applyChange((p) => removeItems(p, "context", [id])),
 

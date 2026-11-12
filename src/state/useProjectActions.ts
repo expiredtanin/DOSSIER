@@ -13,6 +13,7 @@ import { addItems, fieldOps, patchItem, removeItems } from "../core";
 import type { CoreOp } from "../core";
 import { t } from "../i18n";
 import { uniqueId } from "../tools/types";
+import type { ImportedLine } from "../io/geoContext";
 import { instantiatePreset } from "../model/openingPresets";
 import type {
   CeilingType,
@@ -36,12 +37,15 @@ import type { NotifyKind } from "./notifySlice";
  * Z-Achse (reine 2D-Projektion, wie die Plan-Darstellung der Kontext-
  * Konturen in generatePlan.ts). Leere/degenerierte Eingabe → null.
  */
-function contextObjectsBounds(objs: ContextObject[]): Vec2[] | null {
+function contextObjectsBounds(objs: ContextObject[], lines: readonly ImportedLine[] = []): Vec2[] | null {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   const acc = (x: number, y: number) => {
     minX = Math.min(minX, x); minY = Math.min(minY, y);
     maxX = Math.max(maxX, x); maxY = Math.max(maxY, y);
   };
+  for (const l of lines) {
+    if (l.geom.shape === "polyline") for (const p of l.geom.pts) acc(p.x, p.y);
+  }
   for (const obj of objs) {
     if (obj.type === "contourSet") {
       for (const c of obj.contours) for (const p of c.pts) acc(p.x, p.y);
@@ -346,13 +350,13 @@ export function useProjectActions(
   // Wie addContextObjects, aber passt die Plan-Ansicht danach auf die Bounding-
   // Box der NEU importierten Objekte ein (Auto-Zoom auf Import, ROADMAP §11) —
   // sonst muss man nach Standort-/Geo-Import manuell zur Geometrie suchen.
-  const addContextObjectsAndFit = (objs: ContextObject[]) => {
-    addContextObjects(objs);
-    fitToContextObjects(objs);
+  const addContextObjectsAndFit = (objs: ContextObject[], lines: ImportedLine[] = []) => {
+    addContextObjects(objs, lines);
+    fitToContextObjects(objs, lines);
   };
   /** Plan-Ansicht auf schon übernommene Kontext-Objekte einpassen (Importe im Kern, [K4] S4). */
-  const fitToContextObjects = (objs: readonly ContextObject[]) => {
-    const pts = contextObjectsBounds(objs as ContextObject[]);
+  const fitToContextObjects = (objs: readonly ContextObject[], lines: readonly ImportedLine[] = []) => {
+    const pts = contextObjectsBounds(objs as ContextObject[], lines);
     if (pts) planViewRef.current?.fitBounds(pts);
   };
   const generateTerrain = useStore((s) => s.generateTerrain);

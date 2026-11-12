@@ -54,6 +54,7 @@ const store = createStore<RootState>((api) => ({
     api as unknown as StoreApi<
       SiteSlice & {
         project: ProjectSlice["project"];
+        activeLevelId: string;
         applyChange: ProjectSlice["applyChange"];
       }
     >,

@@ -115,6 +115,23 @@ describe("Kontext-Schicht über Ops", () => {
   });
 });
 
+describe("Import-Linien als einzelne 2D-Elemente ([181])", () => {
+  it("Linien landen als eigene drawings2d auf der aktiven Ebene und Klasse, ein Undo-Schritt", () => {
+    const before = st().project.drawings2d.length;
+    const line = (id: string) => ({
+      id,
+      type: "drawing2d" as const,
+      categoryCode: "11",
+      geom: { shape: "polyline" as const, pts: [{ x: 0, y: 0 }, { x: 5, y: 0 }], closed: false },
+    });
+    oneStep("addContextObjects+lines", () => st().addContextObjects([], [line("l1"), line("l2")]));
+    const added = st().project.drawings2d.slice(before);
+    expect(added.map((d) => d.id)).toEqual(["l1", "l2"]);
+    expect(added.every((d) => d.levelId === st().activeLevelId && d.categoryCode === "11")).toBe(true);
+    expect(st().project.context ?? []).toEqual([]);
+  });
+});
+
 describe("3D-Griffe: Element und mitgeführte Ecken", () => {
   it("ein Zug mit mehreren Maus-Schritten = ein Undo-Schritt (Gruppe mit Schlüssel)", () => {
     const [a, b] = st().project.walls;

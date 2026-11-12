@@ -26,7 +26,7 @@ export interface ContextImportSyncState {
 }
 
 export interface ContextImportCommandHandlers {
-  onImport: (objs: unknown[]) => void;
+  onImport: (objs: unknown[], lines: unknown[]) => void;
   onSetGeoAnchor: (anchor: GeoAnchor | undefined) => void;
 }
 

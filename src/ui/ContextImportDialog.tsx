@@ -20,7 +20,7 @@ import type { TerrainResolution } from "../io/swissAlti3d";
 import { fetchSwissImage } from "../io/swissImage";
 import { fetchOsm } from "../io/osm";
 import type { OsmSelection } from "../io/osm";
-import { featuresToContextObjects } from "../io/geoContext";
+import { featuresToImport, type ImportedLine } from "../io/geoContext";
 import type { GeoFeature } from "../io/geoContext";
 import { smoothTerrainGrid, terrainMeshFromGrid } from "../model/terrain";
 import { makeOrigin } from "../io/lv95";
@@ -43,8 +43,8 @@ export interface GeoAnchor {
 }
 
 export interface ContextImportDialogProps {
-  /** Übernimmt die fertigen Kontext-Objekte (nach erfolgreichem Import). */
-  onImport: (objs: ContextObject[]) => void;
+  /** Übernimmt die fertigen Elemente (nach erfolgreichem Import): Kontext-Objekte und einzelne 2D-Linien ohne Zeichnungsebene. */
+  onImport: (objs: ContextObject[], lines: ImportedLine[]) => void;
   onClose: () => void;
   /** Aktueller Georeferenzierungs-Bezug des Projekts (falls schon gesetzt). */
   geoAnchor?: GeoAnchor;
@@ -330,21 +330,19 @@ export function ContextImportDialog({
         });
       }
 
-      const objs = featuresToContextObjects(all, selected.label);
+      const { objects: objs, lines } = featuresToImport(all, selected.label);
       for (const o of extraObjs) objs.push(o);
       if (terrain) objs.push(terrain);
       if (image) objs.push(image);
-      onImport(objs);
+      onImport(objs, lines);
       setStatus(
         buildingsSkipped > 0
           ? t("ctxImport.importedWithSkipped", {
               count: all.length + extraObjs.length,
-              sets: objs.length,
               skipped: buildingsSkipped,
             })
           : t("ctxImport.imported", {
               count: all.length + extraObjs.length,
-              sets: objs.length,
             }),
       );
       onClose();

@@ -66,7 +66,7 @@ export function ContextImportWindowApp() {
 
   return (
     <ContextImportDialog
-      onImport={(objs) => send("onImport", objs)}
+      onImport={(objs, lines) => send("onImport", objs, lines)}
       onClose={onClose}
       geoAnchor={state.geoAnchor}
       onSetGeoAnchor={(anchor: GeoAnchor | undefined) => send("onSetGeoAnchor", anchor)}

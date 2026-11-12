@@ -4,7 +4,7 @@
 import { describe, it, expect } from "vitest";
 import {
   buildingsToMesh,
-  featuresToContextObjects,
+  featuresToImport,
   DEFAULT_BUILDING_HEIGHT,
 } from "./geoContext";
 import type { GeoFeature } from "./geoContext";
@@ -88,8 +88,8 @@ describe("buildingsToMesh", () => {
   });
 });
 
-describe("featuresToContextObjects", () => {
-  it("liefert Footprint-contourSet UND extrudiertes Gebäude-Mesh", () => {
+describe("featuresToImport", () => {
+  it("liefert je Linie eine eigene 2D-Polylinie auf der Klasse UND das extrudierte Gebäude-Netz", () => {
     const features: GeoFeature[] = [
       { category: "building", pts: square(10), closed: true, height: 9 },
       {
@@ -100,12 +100,31 @@ describe("featuresToContextObjects", () => {
         ],
         closed: false,
       },
+      {
+        category: "road",
+        pts: [
+          { x: 0, y: 5 },
+          { x: 20, y: 5 },
+        ],
+        closed: false,
+      },
     ];
-    const objs = featuresToContextObjects(features, "Ort");
-    const types = objs.map((o) => o.type).sort();
-    // contourSet (Gebäude-Footprint) + contourSet (Strasse) + importedMesh.
-    expect(objs.some((o) => o.type === "importedMesh")).toBe(true);
-    expect(objs.filter((o) => o.type === "contourSet").length).toBe(2);
-    expect(types).toContain("importedMesh");
+    const { objects, lines } = featuresToImport(features, "Ort");
+    // Kein contourSet mehr: jede Linie ist ein eigenes Element mit eigener Id.
+    expect(objects.map((o) => o.type)).toEqual(["importedMesh"]);
+    expect(lines).toHaveLength(3);
+    expect(new Set(lines.map((l) => l.id)).size).toBe(3);
+    expect(lines.every((l) => l.type === "drawing2d" && l.geom.shape === "polyline")).toBe(true);
+    expect(lines.map((l) => l.categoryCode)).toEqual(["12", "11", "11"]);
+    const closed = lines.map((l) => (l.geom.shape === "polyline" ? l.geom.closed : null));
+    expect(closed).toEqual([true, false, false]);
+  });
+
+  it("verwirft Linien mit weniger als zwei Punkten", () => {
+    const { lines } = featuresToImport(
+      [{ category: "road", pts: [{ x: 0, y: 0 }], closed: false }],
+      "Ort",
+    );
+    expect(lines).toHaveLength(0);
   });
 });

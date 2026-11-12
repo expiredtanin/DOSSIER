@@ -58,8 +58,15 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   Gelände-Element (`import_context::ifc_meshes`), `mesh_view::is_terrain` entfällt. Panel „Gelände" ohne Import-Liste (nur
   Aktionen); Auswahl im Elemente-Panel (Knoten „Gelände & Umgebung"), Klasse im Kopf der Objekt-Info änderbar. Entwurf in
   `doc/ARCHITEKTUR.md` Abschnitt 8. Geprüft: Rust/vitest/e2e, Musterhaus komplex mit Nachbarnetzen Grundriss 1:200/Schnitt/
-  Ansicht per CLI vor/nach byte-gleich. Offen: Linien des Standort-Imports (OSM/swisstopo-Umrisse) bleiben je Klasse ein
-  `contourSet` statt einzelner 2D-Zeichnungen; Tag-Namen `importedMesh`/`terrainMesh` historisch; Mac-Gegenprobe. · L
+  Ansicht per CLI vor/nach byte-gleich. Nachtrag (12.11.): Linien des Standort-Imports (OSM/swisstopo-Umrisse:
+  Strassen, Parzellen, Gewässer, Gebäudeumrisse …) sind jetzt einzelne `drawing2d`-Polylinien (offen/geschlossen) auf der
+  Klasse ihrer Kategorie, auf der aktiven Ebene, Stift aus der Klasse – einzeln wähl-, verschieb-, lösch-, editierbar
+  (`io/geoContext.ts::featuresToImport`, `siteSlice.addContextObjects(objs, lines)`, ein Undo-Schritt; Dialog und
+  Fenster-Brücke reichen `lines` durch). `contourSet` bleibt nur für echte Höhenlinien (mit z). Tag-Namen
+  `importedMesh`/`terrainMesh` bewusst belassen: die zwei Arten tragen verschiedene Felder (Gelände: Höhenfarben,
+  Intervall, Erdtiefe, Glättung, Quell-Id; Netz: Farbe, Glättungswinkel, IFC-GlobalId), ein gemeinsamer Typ `mesh` mit Rolle
+  wäre eine Union mit vielen Option-Feldern und würde ~360 Stellen in ~94 Dateien berühren, ohne Code zu sparen; der Name
+  ist nur ein Tag. Offen: Mac-Gegenprobe. · L
 - ◐ **[180]** Alles Sichtbare auf Ebene/Klasse (11.11., Vorgabe Maintainer). Umgesetzt (11.11.): Audit-Tabelle in
   `doc/ARCHITEKTUR.md` 3.6; Standard-Klassen der abgeleiteten Darstellung `08 Schatten` (Sonnenschatten Grundriss,
   Schlagschatten Ansicht), `81 Auto-Bemassung` (Befehl `autodim`, je Kette änderbar), `82 Höhenkoten` (automatische

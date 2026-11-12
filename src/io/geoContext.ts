@@ -3,14 +3,14 @@
 // Beide Quellen liefern am Ende dasselbe: geschlossene/offene Polylinien in
 // LOKALEN Modell-Metern (bereits um die Origin verschoben, siehe lv95.ts),
 // kategorisiert nach Art (Gebäude/Strasse/Wasser/Grün/Parkplatz/Bahn/Wald). Die UI wandelt diese in
-// Linien-Elemente (`contourSet`) je Klasse um und legt sie in `project.context` ([181]: normale Elemente mit
-// Klasse; die Quelle steht nur als Auskunft in `source`).
+// einzelne 2D-Polylinien (`drawing2d`) auf der Klasse ihrer Kategorie um ([181]: normale, unabhängige Elemente);
+// Gebäude-Volumen kommen als Netz-Element in `project.context`.
 //
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
 import { allowHost } from "../net/net";
 import { core } from "../engine/coreWasm";
-import type { ContextObject, Contour, ImportedMesh } from "../model/types";
+import type { ContextObject, Drawing2D, ImportedMesh } from "../model/types";
 import { GEO_CATEGORY_DEFS } from "../model/contextCategories";
 
 /** Fachliche Kategorie einer importierten Kontext-Linie. */
@@ -41,17 +41,6 @@ export interface GeoFeature {
 /** Default-Gebäudehöhe (m), wenn keine Höhe aus der Quelle vorliegt. */
 export const DEFAULT_BUILDING_HEIGHT = 9;
 
-/** Menschlicher Objektname je Kategorie (deutsch). */
-const CATEGORY_LABEL: Record<GeoCategory, string> = {
-  building: "Gebäude",
-  road: "Strassen",
-  water: "Gewässer",
-  green: "Grünflächen",
-  parking: "Parkplätze",
-  railway: "Bahn",
-  forest: "Wald",
-};
-
 /** Erzeugt eine (kollisionsarme) ID für ein neues Kontext-Objekt. */
 function contextId(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}-${Math.random()
@@ -59,52 +48,47 @@ function contextId(prefix: string): string {
     .slice(2, 8)}`;
 }
 
+/** Importierte Linie als freies 2D-Element, noch ohne Zeichnungsebene (`levelId` setzt der Aufrufer). */
+export type ImportedLine = Omit<Drawing2D, "levelId">;
+
+/** Ergebnis von {@link featuresToImport}: Kontext-Elemente (Volumen) und einzelne 2D-Linien. */
+export interface GeoImport {
+  objects: ContextObject[];
+  lines: ImportedLine[];
+}
+
 /**
- * Wandelt importierte Features in `ContextObject`s (je Kategorie EIN
- * ContourSet). Die Konturen liegen auf z=0 (Grundriss-Kontext); geschlossene
- * Ringe (Gebäude/Wasser/Grün) werden als geschlossene Konturen markiert,
- * Strassen als offene Linienzüge. Der Aufrufer legt das Ergebnis über
- * `onAddContextObjects` in `project.context` ab.
+ * Wandelt importierte Features in normale, unabhängige Elemente ([181]): jede Linie/jeder Ring wird EINE
+ * 2D-Polylinie (`drawing2d`) auf der Klasse ihrer Kategorie (Stift aus der Klasse), einzeln wähl-, verschieb-,
+ * lösch- und editierbar; Gebäude zusätzlich als extrudiertes Volumen (`importedMesh`) für 3D. Geschlossene
+ * Ringe (Gebäude/Wasser/Grün) sind geschlossene Polylinien, Strassen offene. Der Aufrufer ergänzt die
+ * Zeichnungsebene und legt das Ergebnis über `onImport` ab.
  */
-export function featuresToContextObjects(
-  features: GeoFeature[],
-  sourceLabel: string,
-): ContextObject[] {
-  const byCat = new Map<GeoCategory, Contour[]>();
+export function featuresToImport(features: GeoFeature[], sourceLabel: string): GeoImport {
+  const lines: ImportedLine[] = [];
   for (const f of features) {
     if (f.pts.length < 2) continue;
-    const list = byCat.get(f.category) ?? [];
-    list.push({
-      z: 0,
-      pts: f.pts.map((p) => ({ x: p.x, y: p.y })),
-      closed: f.closed,
-    });
-    byCat.set(f.category, list);
-  }
-
-  const objs: ContextObject[] = [];
-  for (const [cat, contours] of byCat) {
-    if (contours.length === 0) continue;
-    objs.push({
-      id: contextId(`geo-${cat}`),
-      type: "contourSet",
-      name: `${CATEGORY_LABEL[cat]} (${sourceLabel})`,
-      categoryCode: GEO_CATEGORY_DEFS[cat].code,
-      source: sourceLabel,
-      contours,
+    lines.push({
+      id: contextId(`geo-${f.category}`),
+      type: "drawing2d",
+      categoryCode: GEO_CATEGORY_DEFS[f.category].code,
+      geom: {
+        shape: "polyline",
+        pts: f.pts.map((p) => ({ x: p.x, y: p.y })),
+        closed: f.closed,
+      },
     });
   }
 
-  // Gebäude zusätzlich als extrudierte Volumen (Footprint × Höhe) für die
-  // 3D-Ansicht. Der flache Footprint bleibt als contourSet erhalten (2D-Plan),
-  // das Volumen kommt als importedMesh dazu — beide teilen dieselbe Lage.
+  // Gebäude zusätzlich als extrudierte Volumen (Footprint × Höhe) für die 3D-Ansicht; die flachen
+  // Umrisse sind die Linien oben, das Volumen ein eigenes Netz-Element mit derselben Lage.
+  const objects: ContextObject[] = [];
   const buildingMesh = buildingsToMesh(
     features.filter((f) => f.category === "building"),
     sourceLabel,
   );
-  if (buildingMesh) objs.push(buildingMesh);
-
-  return objs;
+  if (buildingMesh) objects.push(buildingMesh);
+  return { objects, lines };
 }
 
 /**

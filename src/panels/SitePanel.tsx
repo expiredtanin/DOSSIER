@@ -86,7 +86,7 @@ export function SitePanel() {
 
       {ctxImportOpen && (
         <ContextImportDialog
-          onImport={(objs) => host.onAddContextObjects(objs)}
+          onImport={(objs, lines) => host.onAddContextObjects(objs, lines)}
           onClose={() => setCtxImportOpen(false)}
           geoAnchor={project.geoAnchor}
           onSetGeoAnchor={host.onSetGeoAnchor}

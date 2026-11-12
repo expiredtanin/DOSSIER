@@ -4,6 +4,7 @@
 // dann den Inline-Editor. Aufgerufen von `App.tsx`.
 
 import type { ContextObject } from "../model/types";
+import type { ImportedLine } from "../io/geoContext";
 import { setFieldIfChanged } from "../core";
 import { isTauriRuntime } from "../native/projectFile";
 import { useContextImportWindowHost } from "../native/contextImportWindow";
@@ -67,7 +68,7 @@ export function useNativeWindowHosts(opts: {
 
   // Standort-Import als eigenes natives Fenster — s. native/contextImportWindow.ts.
   useContextImportWindowHost(geoAnchor, {
-    onImport: (objs) => addContextObjectsAndFit(objs as ContextObject[]),
+    onImport: (objs, lines) => addContextObjectsAndFit(objs as ContextObject[], lines as ImportedLine[]),
     onSetGeoAnchor: (anchor) => applyChange((p) => setFieldIfChanged(p, "geoAnchor", anchor)),
   });
 

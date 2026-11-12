@@ -40,6 +40,7 @@ import type {
   WallType,
 } from "../model/types";
 import type { MeasurementReadout, SnapSettings, ToolId } from "../tools/types";
+import type { ImportedLine } from "../io/geoContext";
 import type { TerrainOptions } from "../model/terrain";
 import type { TextStylePreset } from "../text/richText";
 import type { ScheduleKind } from "../export/exportSchedule";
@@ -608,7 +609,7 @@ export interface PanelHostValue {
   // ── Gelände und Umgebung (SitePanel, Elemente-Panel) ─────────────────────
   // Die Elemente selbst liest das Panel aus dem Store (`project.context`).
   /** Fügt mehrere Gelände-/Umgebungs-Elemente hinzu (z. B. aus einem Standort-Import). */
-  onAddContextObjects: (objs: ContextObject[]) => void;
+  onAddContextObjects: (objs: ContextObject[], lines?: ImportedLine[]) => void;
   /** [181] Wählt ein Gelände-/Umgebungs-Element (Elemente-Panel); `zoom` passt die Ansicht ein. */
   onSelectSiteElement: (id: string, opts?: { zoom?: boolean }) => void;
   /**
