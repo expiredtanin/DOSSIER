@@ -53,7 +53,7 @@ export function currentRenderCamera(view: View3d = getState().view3d): RenderCam
 /** Bytes einer Bildkarte: mitgelieferte (`/assets/…`) und Blob-URLs direkt, Web-Adressen über `netFetch`. */
 export const loadTextureBytes: TextureLoader = async (url) => {
   try {
-    const res = /^https?:/i.test(url) ? await netFetch(url) : await fetch(url);
+    const res = await netFetch(url); // lokale Pfade lässt netFetch ohne Prüfung durch
     if (!res.ok) return null;
     return new Uint8Array(await res.arrayBuffer());
   } catch {
