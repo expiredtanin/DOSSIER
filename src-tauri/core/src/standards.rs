@@ -281,8 +281,18 @@ pub fn view_templates() -> Vec<Value> {
                "layerVisibility": {"99": false}}),
         json!({"id": "std-vt-ausfuehrung-50", "name": "Ausführungsplan 1:50", "detail": "fein", "scaleDenominator": 50, "mono": true, "shadows": false,
                "scaleLineWeights": true, "layerVisibility": {"99": false}}),
+        // [207] Situationsplan 1:500 für Wettbewerbe: eigenes Gebäude schwarz, Kontext grau (bzw. alles schwarz im Schwarzplan);
+        // ohne Raster, Bauteil-Zeichnungen, Text, Bemassung, Koten und Referenzen. Parzelle, Strassen, Höhenlinien und Bäume bleiben.
+        json!({"id": "std-vt-situation-wbw", "name": "Situation WBW 1:500", "detail": "grob", "scaleDenominator": 500, "mono": true, "shadows": false,
+               "showTerrain": true, "modelViewOptionId": "std-mv-situation-wbw", "layerVisibility": SITUATION_HIDDEN.iter().map(|c| (c.to_string(), json!(false))).collect::<serde_json::Map<_, _>>()}),
+        json!({"id": "std-vt-schwarzplan", "name": "Schwarzplan 1:500", "detail": "grob", "scaleDenominator": 500, "mono": true, "shadows": false,
+               "showTerrain": false, "modelViewOptionId": "std-mv-schwarzplan", "layerVisibility": SITUATION_HIDDEN.iter().chain(["02", "14"].iter()).map(|c| (c.to_string(), json!(false))).collect::<serde_json::Map<_, _>>()}),
     ]
 }
+
+/// [207] Klassen, die der Situationsplan ausblendet: Raster, Wände (samt Türen/Fenster, Möbel, Stützen), Decken, Dächer,
+/// Träger, Treppen, Baugrube, Text, Räume, Bemassung, Auto-Bemassung, Höhenkoten, Details, Referenzen, Schnittmarken, Konstruktion.
+const SITUATION_HIDDEN: [&str; 18] = ["00", "07", "20", "21", "22", "25", "30", "35", "40", "50", "60", "80", "81", "82", "85", "90", "91", "99"];
 
 /// [173] Stufen der Modelldarstellung als Vorlagen (≙ Archicad „Modelldarstellung"): Wettbewerb 1:200 (Wände als
 /// Fläche, Räume mit Name und Fläche ohne Nummer, nur das Gesamtmass, ohne Koten), Baueingabe 1:100 (SIA-Kategorie,
@@ -316,6 +326,12 @@ pub fn model_views() -> Vec<Value> {
                "slabs": {"floorFinish": "all", "layers": "all"},
                "roomStamps": {"number": true, "area": true, "height": true, "finish": true, "divider": true},
                "dimensions": {"chains": "all", "levelMarks": true}}),
+        // [207] Situationsplan: eigenes Gebäude schwarz, Kontext grau, mit Nordpfeil und Massstabsbalken.
+        json!({"id": "std-mv-situation-wbw", "name": "Situation WBW", "baseDetail": "grob",
+               "situation": {"own": "black", "context": "grey", "symbols": true}}),
+        // [207] Schwarzplan: alle Gebäude schwarz.
+        json!({"id": "std-mv-schwarzplan", "name": "Schwarzplan", "baseDetail": "grob",
+               "situation": {"own": "black", "context": "black", "symbols": true}}),
         json!({"id": "std-mv-rohbau", "name": "Rohbau/Statik", "baseDetail": "mittel",
                "doors": {"frame": false, "swingArc": false, "threshold": "off", "sectionDetail": false},
                "windows": {"sill": false, "sashFrames": false, "sectionDetail": false},
@@ -363,13 +379,19 @@ pub const AUTO_DIM_CATEGORY: &str = "81";
 pub const LEVEL_MARK_CATEGORY: &str = "82";
 /// Schnitt- und Ansichtsmarken im Grundriss (Schnittführung mit Pfeilen und Beschriftung).
 pub const SECTION_MARK_CATEGORY: &str = "91";
+/// [207] Eigenes Gebäude im Situationsplan/Schwarzplan (gefüllter Umriss über alle Geschosse, `plan/situation.rs`).
+pub const SITUATION_CATEGORY: &str = "83";
+/// [207] Planzeichen des Situationsplans: Nordpfeil und Massstabsbalken.
+pub const SYMBOL_CATEGORY: &str = "84";
 
 /// Die Klassen der abgeleiteten Darstellung (Code, Name, Farbe, Strichstärke).
-pub const DERIVED_CATEGORIES: [(&str, &str, &str, f64); 4] = [
+pub const DERIVED_CATEGORIES: [(&str, &str, &str, f64); 6] = [
     (SHADOW_CATEGORY, "Schatten", "#707078", 0.13),
     (AUTO_DIM_CATEGORY, "Auto-Bemassung", "#303038", 0.13),
     (LEVEL_MARK_CATEGORY, "Höhenkoten", "#1a1a1a", 0.13),
     (SECTION_MARK_CATEGORY, "Schnittmarken", "#1a1a1a", 0.18),
+    (SITUATION_CATEGORY, "Situation Gebäude", "#000000", 0.13),
+    (SYMBOL_CATEGORY, "Planzeichen", "#000000", 0.18),
 ];
 
 pub fn derived_categories() -> Vec<Value> {
@@ -841,7 +863,7 @@ mod tests {
         // Andere Kategorien bleiben, die neue kommt ans Ende.
         own.insert("layers".into(), json!([{"code": "20", "name": "Wände", "color": "#000", "lw": 0.35, "visible": true, "locked": false}]));
         let op = merge_ops(&own).into_iter().find(|o| o["key"] == "layers").unwrap();
-        assert_eq!(op["value"].as_array().unwrap().iter().map(|l| l["code"].as_str().unwrap()).collect::<Vec<_>>(), ["20", "65", "08", "81", "82", "91"]);
+        assert_eq!(op["value"].as_array().unwrap().iter().map(|l| l["code"].as_str().unwrap()).collect::<Vec<_>>(), ["20", "65", "08", "81", "82", "91", "83", "84"]);
     }
 
     /// [180] Klassen der abgeleiteten Darstellung: „Standards laden" legt sie an, einmal; vorhandene (Code oder Name) bleiben.
@@ -857,7 +879,7 @@ mod tests {
         own.insert("layers".into(), json!([{"code": "77", "name": "schatten", "color": "#000", "lw": 0.13, "visible": true, "locked": false}]));
         let op = merge_ops(&own).into_iter().find(|o| o["key"] == "layers").unwrap();
         let codes: Vec<&str> = op["value"].as_array().unwrap().iter().map(|l| l["code"].as_str().unwrap()).collect();
-        assert_eq!(codes, ["77", "65", "81", "82", "91"]);
+        assert_eq!(codes, ["77", "65", "81", "82", "91", "83", "84"]);
         // Sichtbar, solange die Klasse fehlt; sonst nach der Klassen-Sichtbarkeit.
         assert!(derived_visible(&p, SHADOW_CATEGORY, |c| c == SHADOW_CATEGORY));
         assert!(!derived_visible(&p, SHADOW_CATEGORY, |_| false));

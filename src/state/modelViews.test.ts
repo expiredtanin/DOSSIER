@@ -136,7 +136,7 @@ describe("modelViews", () => {
 
   it("[173] Etappe 3: Vorlagen aus den Standards übernehmen; wirken auf Raumstempel und Treppe", () => {
     const lib = standardModelViews(sampleProject);
-    expect(lib.map((m) => m.id)).toEqual(["std-mv-wettbewerb-200", "std-mv-baueingabe-100", "std-mv-ausfuehrung-50", "std-mv-rohbau"]);
+    expect(lib.map((m) => m.id)).toEqual(["std-mv-wettbewerb-200", "std-mv-baueingabe-100", "std-mv-ausfuehrung-50", "std-mv-situation-wbw", "std-mv-schwarzplan", "std-mv-rohbau"]);
     let p = applyOps(sampleProject, adoptModelViewOps(sampleProject, lib[2]!));
     expect(p.modelViewOptions?.map((m) => m.id)).toEqual(["std-mv-ausfuehrung-50"]);
     expect(adoptModelViewOps(p, lib[2]!)).toEqual([]);

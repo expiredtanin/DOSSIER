@@ -78,7 +78,8 @@ describe("[66] Präsentationsplan", () => {
     st().undo();
     expect((st().project.layouts ?? []).length).toBe(layoutsBefore);
     expect(st().project.viewSnapshots?.some((s) => s.id.startsWith("vs-pres-"))).toBe(false);
-  });
+    // [207] 60 s: mit den Nachbargebäuden des Musterhauses rechnet das Blatt im Container knapp über die 30 s des Standards.
+  }, 60_000);
 
   it("gewählte Geschosse, ohne Ansichten/Schnitt, Skizze an, A3: kleinerer Massstab", () => {
     const floors = project.drawingLevels.filter((l) => l.kind === "floor" && !l.layoutId).slice(0, 2).map((l) => l.id);

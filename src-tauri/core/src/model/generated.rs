@@ -2093,6 +2093,48 @@ pub struct ModelViewOption {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub dimensions: Option<ModelViewDimensions>,
+    /// [207] Situationsplan / Schwarzplan: fehlt ⇒ gewöhnlicher Grundriss; vorhanden ⇒ statt der Bauteile das
+    /// eigene Gebäude als gefüllter Umriss, die Kontextgebäude gefüllt, dazu Nordpfeil und Massstabsbalken.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub situation: Option<ModelViewSituation>,
+    #[serde(flatten)]
+    #[ts(skip)]
+    pub extra: Extra,
+}
+
+/// [207] Füllung eines Gebäudes im Situationsplan.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+pub enum SituationFill {
+    #[default]
+    #[serde(rename = "black")]
+    Black,
+    #[serde(rename = "grey")]
+    Grey,
+    #[serde(rename = "off")]
+    Off,
+    #[serde(other)]
+    #[ts(skip)]
+    Unknown,
+}
+
+/// [207] Situationsplan in der Modelldarstellung (≙ Schwarzplan): jede Option fehlt ⇒ Standard des
+/// Situationsplans (eigenes Gebäude schwarz, Kontext grau, mit Planzeichen).
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct ModelViewSituation {
+    /// Eigenes Gebäude: Umriss über alle Geschosse über Terrain und die Dächer, gefüllt (Basis: schwarz).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub own: Option<SituationFill>,
+    /// Kontextgebäude (importierte Netze, Grundfläche aus der Aufsicht), gefüllt (Basis: grau; „Schwarzplan": schwarz).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub context: Option<SituationFill>,
+    /// Nordpfeil und Massstabsbalken zeichnen (Basis: ja).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub symbols: Option<bool>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,

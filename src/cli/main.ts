@@ -20,6 +20,7 @@
 //                                                  das Massstab-Kriterium einer Regel (ab/bis 1:n) gilt nach --scale;
 //                                                  --model-view <Name> wählt eine Modelldarstellung (eigene Stufe oder grob/mittel/fein) [173]
 //                                                  --hide <Code|Name,…> blendet Klassen aus (z. B. --hide "Schatten,Auto-Bemassung") [180]
+//                                                  --snapshot <Name|id> übernimmt Geschoss, Massstab, Vorlage und Sichtbarkeit eines Ausschnitts [207]
 //   dossier-cli <projekt.obp> ifc [--ebkph] [--ebenen]   (IFC mit eBKP-H-Hauptgruppen bzw. Modell-Ebenen als Klassifikation)
 //                                                  --schema 4|2x3: IFC4 (Standard) oder IFC2x3 (Coordination View 2.0)
 //   dossier-cli <projekt.obp> dxf [--binary] [--scale 100] [--dim-unit cm] [--layout]|dwg|ifc|step|obj [--no-mtl]|stl|glb|gltf|schedule [--openings|--elements|--rooms] [--format json|csv|svg|pdf]|kennzahlen [--sia416] [--ivhb] [--format json|csv|svg|pdf] [--agsf m2] [--gruenflaeche m2] [--agf-basis gf|ngf|nf] [--untergeschosse]|raumprogramm [--import tabelle] [--sheet name|nr] [--mode replace|append] [--tolerance %] [--generate] [--format json|csv|svg|pdf] [--save projekt.obp]|sun [--level EG] [--out datei]
@@ -684,6 +685,24 @@ async function execute(project: Project, file: string, command: string, rest: st
     }
   };
   collectCodes(project.layers);
+
+  // [207] `--snapshot <Name|id>` (plan/section/elevation): Geschoss, Massstab, verknüpfte Ansichtsvorlage und Sichtbarkeit eines
+  // Ausschnitts (`viewSnapshots`) übernehmen, z. B. `plan --snapshot "Situation 1:500" --hatch`. Ausdrückliche Flags gehen vor.
+  const snapName = args.flags.get("snapshot");
+  if (snapName && (command === "plan" || command === "section" || command === "elevation")) {
+    const n = snapName.toLowerCase();
+    const snap = (project.viewSnapshots ?? []).find((s) => s.id.toLowerCase() === n || s.name.toLowerCase() === n);
+    if (!snap) fail(`Ausschnitt nicht gefunden: ${snapName}`);
+    const level = project.drawingLevels.find((l) => l.id === snap.activeLevelId);
+    if (!level) fail(`Ausschnitt ${snap.name}: Ebene ${snap.activeLevelId} fehlt`);
+    const f = args.flags;
+    if (!f.has("level")) f.set("level", level.id);
+    if (!f.has("scale")) f.set("scale", String(snap.scaleDenominator));
+    if (!f.has("template") && snap.templateId && snap.templateLinked) f.set("template", snap.templateId);
+    const hidden = [...allCodes].filter((c) => snap.layerVisibility[c] === false || !(c in snap.layerVisibility));
+    if (!f.has("hide") && hidden.length) f.set("hide", hidden.join(","));
+    if (command !== "plan") rest = [rest[0] ?? level.id];
+  }
 
   switch (command) {
     case "info": {

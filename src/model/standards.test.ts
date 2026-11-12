@@ -36,7 +36,7 @@ describe("Standard-Bibliothek ([100]–[102])", () => {
     expect(c.lineStyles).toBeGreaterThan(5);
     expect(c.wallTypes + c.ceilingTypes + c.roofTypes).toBe(5);
     expect(c.overrideRules).toBe(2);
-    expect(c.modelViewOptions).toBe(4);
+    expect(c.modelViewOptions).toBe(6);
     expect(standardsMergeCounts(standardsMergeOps(withStandards(empty)))).toEqual({ lineStyles: 0, hatches: 0, components: 0, wallTypes: 0, ceilingTypes: 0, roofTypes: 0, viewTemplates: 0, blockDefs: 0, overrideRules: 0, modelViewOptions: 0 });
   });
 

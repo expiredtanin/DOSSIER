@@ -39,6 +39,7 @@ pub mod floor_finish;
 pub mod model_view;
 pub mod trees;
 pub mod mesh_plan;
+pub mod situation;
 pub mod arc_fit;
 pub(crate) mod seams;
 pub(crate) mod wall_columns;

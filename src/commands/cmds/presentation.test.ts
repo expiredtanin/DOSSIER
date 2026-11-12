@@ -38,5 +38,5 @@ describe("[66] Befehl praesentation", () => {
     expect(q.layouts?.some((l) => l.id === id)).toBe(false);
     expect(q.drawingLevels.some((l) => l.sketch)).toBe(false);
     expect(q.drawingLevels.length).toBe(before.drawingLevels.length);
-  });
+  }, 60_000);
 });

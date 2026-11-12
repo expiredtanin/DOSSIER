@@ -22,6 +22,7 @@ Herkunft, kein Wegweiser.
 | `drawings.rs` | freie 2D-Zeichnungen (Linie bis Bild, Bemassung, Blöcke), Zeichnungs-Stücke, kompakte Linien-Unterlage |
 | `context.rs` | Kontext (Höhenlinien, Fussabdrücke importierter Gebäude, Gelände) und Schnittführungs-Symbole |
 | `mesh_plan.rs` | importierte Netze und ([G1]) freie Körper über ihr Kern-Netz im Grundriss: geschnitten, darunter, darüber |
+| `situation.rs` | Situationsplan/Schwarzplan ([207]): Modelldarstellung mit `situation` ersetzt die Bauteile durch den gefüllten Umriss des eigenen Gebäudes (Klasse 83), füllt Kontextnetze (Klasse des Netzes) und zeichnet Nordpfeil/Massstabsbalken (Klasse 84) |
 | `ceiling_plan.rs` | Deckenspiegel als eigene Ebenen-Art |
 | `floor_finish.rs` | Bodenbelag-Muster nach Massstab |
 | `model_view.rs` | Modelldarstellung ([173]): Optionen je Bauteilart über dem Detailgrad, Rangfolge Element > Typ > Stufe > Basis |

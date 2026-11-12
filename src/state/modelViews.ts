@@ -34,7 +34,8 @@ export type ModelViewSection =
   | "site"
   | "sectionMarks"
   | "roomStamps"
-  | "dimensions";
+  | "dimensions"
+  | "situation";
 
 /** Ein Eintrag der Auswahl (Werkzeugleiste, Vorlage): eingebaute Stufen zuerst, dann die eigenen. */
 export interface ModelViewChoice {
@@ -216,6 +217,10 @@ export const MODEL_VIEW_FIELDS: readonly ModelViewField[] = [
   { section: "roomStamps", key: "divider", values: "bool" },
   { section: "dimensions", key: "chains", values: ["all", "outer", "total"] },
   { section: "dimensions", key: "levelMarks", values: "bool" },
+  // [207] Situationsplan/Schwarzplan: Füllung des eigenen Gebäudes und der Kontextgebäude, Nordpfeil + Massstabsbalken.
+  { section: "situation", key: "own", values: ["black", "grey", "off"] },
+  { section: "situation", key: "context", values: ["black", "grey", "off"] },
+  { section: "situation", key: "symbols", values: "bool" },
 ];
 
 /** Auswahlwert eines Feldes als Text (`""` = wie Basis); Gegenstück: {@link parseFieldValue}. */
