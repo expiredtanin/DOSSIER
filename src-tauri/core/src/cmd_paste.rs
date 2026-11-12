@@ -13,7 +13,7 @@
 //! fehlende kommen ans Ende, unbekannte Felder bleiben).
 
 use crate::cmd_transform::IdGen;
-use crate::json_util::{arr, field, with_all};
+use crate::json_util::{arr, as_copy, field, with_all};
 use crate::ops::{id_of, Op};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -51,7 +51,7 @@ pub fn paste_ops(clip: &Value, level_id: &str, stamp: &str) -> Vec<Op> {
                 });
                 let Some((key, host)) = host else { continue };
                 let host = Value::String(host.clone());
-                items.push(with_all(e, vec![("id", Value::String(ids.next(prefix))), (key, host)]));
+                items.push(with_all(&as_copy(e), vec![("id", Value::String(ids.next(prefix))), (key, host)]));
                 continue;
             }
             let id = ids.next(prefix);
@@ -60,7 +60,7 @@ pub fn paste_ops(clip: &Value, level_id: &str, stamp: &str) -> Vec<Op> {
                     host_ids.insert(old.to_owned(), id.clone());
                 }
             }
-            items.push(with_all(e, vec![("id", Value::String(id)), (level_field, level.clone())]));
+            items.push(with_all(&as_copy(e), vec![("id", Value::String(id)), (level_field, level.clone())]));
         }
         if !items.is_empty() {
             ops.push(Op::Add { collection: collection.into(), items, at: None });
@@ -73,6 +73,21 @@ pub fn paste_ops(clip: &Value, level_id: &str, stamp: &str) -> Vec<Op> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// [201] Eine Kopie bekommt eine neue id und NICHT die IFC-GlobalId des Originals.
+    #[test]
+    fn kopie_traegt_keine_ifc_global_id() {
+        let clip = json!({
+            "walls": [{"id": "w1", "floorId": "eg", "ifcGlobalId": "0AbcDEFghijKLMNOPQRSt1"}],
+            "openings": [{"id": "o1", "hostWallId": "w1", "ifcGlobalId": "1AbcDEFghijKLMNOPQRSt2"}],
+            "columns": [{"id": "c1", "floorId": "eg", "ifcGlobalId": "2AbcDEFghijKLMNOPQRSt3"}]
+        });
+        for op in paste_ops(&clip, "og", "s") {
+            for item in op.to_json()["items"].as_array().unwrap() {
+                assert!(item.get("ifcGlobalId").is_none(), "{item}");
+            }
+        }
+    }
 
     #[test]
     fn klone_mit_neuen_ids_auf_dem_aktiven_geschoss_oeffnung_umgehaengt() {

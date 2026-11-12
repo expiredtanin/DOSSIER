@@ -150,7 +150,7 @@ fn rundreise_gltf_data_uri() {
 #[test]
 fn rundreise_obj_y_up_aus_kopf() {
     let (f, s) = flat(&two_boxes());
-    let obj = export_obj(&f, &s).expect("obj");
+    let obj = export_obj(&f, &s, "").expect("obj");
     let m = import_mesh(obj.as_bytes(), "x.obj", &opts()).expect("import");
     assert_eq!(m.format, Format::Obj);
     assert_eq!(m.up_used, Up::Y);
@@ -177,7 +177,7 @@ fn rundreise_stl_achse_aus_ausdehnung() {
 #[test]
 fn einheit_skaliert_ausser_gltf() {
     let (f, s) = flat(&two_boxes());
-    let obj = export_obj(&f, &s).expect("obj");
+    let obj = export_obj(&f, &s, "").expect("obj");
     let m = import_mesh(obj.as_bytes(), "x.obj", &Options { unit_scale: 0.001, ..opts() }).expect("import");
     let v: f64 = m.objects.iter().map(volume).sum();
     assert!((v - 61.0e-9).abs() < 1e-12, "{v}");
@@ -496,7 +496,7 @@ fn gltf_draco_abgelehnt() {
 fn dreiecksbudget() {
     let (p, t) = cuboid(0.0, 0.0, 0.0, 1.0, 1.0, 1.0);
     let (f, s) = flat(&[G { name: "K", rgba: None, pos: p, tris: t }]);
-    let obj = export_obj(&f, &s).expect("obj");
+    let obj = export_obj(&f, &s, "").expect("obj");
     let m = import_mesh(obj.as_bytes(), "x.obj", &Options { max_triangles: 5, ..opts() }).expect("import");
     assert!(m.truncated);
     assert_eq!(m.triangles, 5);
@@ -531,7 +531,7 @@ fn kaputte_dateien_ohne_panic() {
     }
     let (p, t) = cuboid(0.0, 0.0, 0.0, 1.0, 1.0, 1.0);
     let (f, s) = flat(&[G { name: "K", rgba: Some([0.5; 4]), pos: p, tris: t }]);
-    let obj = export_obj(&f, &s).expect("obj");
+    let obj = export_obj(&f, &s, "").expect("obj");
     for n in 0..obj.len() {
         let _ = import_mesh(&obj.as_bytes()[..n], "x.obj", &opts());
     }

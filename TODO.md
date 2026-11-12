@@ -10,7 +10,7 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   stehen im Archiv („Bewusst nicht übernommen“).
 - **Grösse** (eine Person mit Agenten): S ≤ 1 Tag · M ≤ 1 Woche · L ≤ 1 Monat · XL > 1 Monat.
   Steht keine Grösse im Archiv, ist sie hier geschätzt.
-- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 179);
+- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 201);
   nie eine ID wiederverwenden oder umnummerieren. Präfix-IDs (`[K]`, `[G]`, `[T]`, `[B]`, `[C]`) bleiben.
 - **Pro Punkt:** was fehlt · wo im Code · Grösse. Höchstens ein bis drei Sätze je Punkt;
   Messwerte und Befunde gehören in den Commit.
@@ -658,7 +658,14 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
 - ◐ **[BCF]** BCF (`fileio/src/bcf.rs`). Kamera im nativen Metal-Fenster; Schnittebene aus dem Live-Schnitt übernehmen;
   Kamera-Roll; schräge Schnittebenen nur angezeigt; `extensions.xml`, Farbgruppen/Linien, BimSnippet, Dokument-
   Referenzen und verwandte Themen gehen beim Speichern verloren. · M
-- ◐ **[C11]** glTF/GLB-Export (`fileio/src/mesh_export.rs`). Keine Normalen/Texturen/Instanzen; Gelände ohne Vertex-Farben;
+- ◐ **[201]** IFC-GlobalId-Rundreise, Normalen in glTF/OBJ (12.11.). Erledigt: `ifcGlobalId` an Wand, Öffnung (IfcDoor/IfcWindow), Decke, Stütze,
+  Dach, Treppe, Raum, Extrusionskörper — der IFC-Import setzt sie (`import_ifc.rs`), der Export schreibt sie zurück (Datensatz `GUIDS`,
+  `ifc_export/`), doppelte/ungültige fallen auf die abgeleitete GUID zurück; Kopieren/Einfügen/Reihe/Spiegeln/Wand teilen setzen sie
+  NICHT mit (`json_util::as_copy`); BCF-Zuordnung (`bcfMatch.ts`) nimmt sie. glTF/GLB mit `NORMAL` (geteilt bis 30° Knickwinkel, Funktion
+  `hatchgen/src/mesh_normals.rs` wie die 3D-Anzeige), OBJ mit `vn`, `usemtl` und `.mtl` (zweiter Speichern-Dialog; CLI schreibt beide
+  Dateien). Offen: GlobalId von Bäumen und IfcOpeningElement/-Beziehungen (bleiben abgeleitet); OBJ-Normalen/MTL im Tauri-Dialog
+  (zweiter Dialog) und IFC nicht in Revit/ArchiCAD geprüft; keine UVs/Texturen. · S
+- ◐ **[C11]** glTF/GLB-Export (`fileio/src/mesh_export.rs`). Keine Texturen/Instanzen; Gelände ohne Vertex-Farben;
   Abzugskörper-Booleans und truck-Extrusionen nicht wie im 3D. · M
 - ◐ **[C12]** Allgemeiner Mesh-Import. Keine Texturen/UVs/Normalen/Vertex-Farben, keine `EXT_mesh_gpu_instancing`,
   Sparse-Accessors, Draco/Meshopt. · M

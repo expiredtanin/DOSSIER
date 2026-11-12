@@ -54,6 +54,7 @@ const REC_TREE: f64 = 19.0;
 const REC_COLUMN_PIECES: f64 = 20.0;
 const REC_CEILING_ARC: f64 = 21.0;
 const REC_SPACE_ARC: f64 = 22.0;
+const REC_GUIDS: f64 = 23.0;
 
 /// Toleranz des Kerns (`wall_bands.rs::EPS`) für „Öffnung trifft Band".
 const BAND_EPS: f64 = 1e-4;
@@ -897,6 +898,34 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
     for (i, fl) in floors.iter().enumerate() {
         let (a, b) = (f.str(&fl.id), f.str(&fl.name));
         f.nums(&[a, b, storey_base[i]]);
+    }
+
+    // [201] Übernommene GlobalIds (IFC-Import) vor allen Bauteilen; jede GlobalId höchstens einmal
+    // (Kopien tragen sie nicht, doppelt importierte Dateien würden sonst kollidieren).
+    {
+        let mut guids: Vec<(String, String)> = Vec::new();
+        let mut push = |key: String, g: &Option<String>| {
+            if let Some(g) = g.as_deref().filter(|g| !g.is_empty()) {
+                guids.push((key, g.to_string()));
+            }
+        };
+        p.walls.iter().for_each(|x| push(format!("wall/{}", x.id), &x.ifc_global_id));
+        p.ceilings.iter().flatten().for_each(|x| push(format!("slab/{}", x.id), &x.ifc_global_id));
+        p.roofs.iter().flatten().for_each(|x| push(format!("roof/{}", x.id), &x.ifc_global_id));
+        p.columns.iter().flatten().for_each(|x| push(format!("column/{}", x.id), &x.ifc_global_id));
+        p.stairs.iter().flatten().for_each(|x| push(format!("stair/{}", x.id), &x.ifc_global_id));
+        p.rooms.iter().flatten().for_each(|x| push(format!("space/{}", x.id), &x.ifc_global_id));
+        p.extruded_solids.iter().flatten().for_each(|x| push(format!("extrusion/{}", x.id), &x.ifc_global_id));
+        p.openings.iter().flatten().for_each(|x| push(format!("fill/{}", x.id), &x.ifc_global_id));
+        let mut seen = std::collections::HashSet::new();
+        guids.retain(|(_, g)| seen.insert(g.clone()));
+        if !guids.is_empty() {
+            f.nums(&[REC_GUIDS, guids.len() as f64]);
+            for (k, g) in guids {
+                let (a, b) = (f.str(&k), f.str(&g));
+                f.nums(&[a, b]);
+            }
+        }
     }
 
     // Klassifikation: je geschriebenem Bauteil Schlüssel (wie für die GUID), Art und Ebene; `fileio`

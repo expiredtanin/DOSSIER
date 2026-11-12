@@ -2838,6 +2838,11 @@ pub struct Wall {
     /// Grafik-Kategorie (Ebene), z. B. "20" für Wände.
     #[serde(rename = "categoryCode")]
     pub category_code: String,
+    /// [201] IFC-GlobalId des Quell-Bauteils (IFC-Import); der IFC-Export schreibt sie zurück, damit
+    /// die Rundreise dieselben GUIDs behält. Kopien (Einfügen, Kopieren, Reihe, Wand teilen) tragen sie NICHT.
+    #[serde(rename = "ifcGlobalId", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub ifc_global_id: Option<String>,
     /// Vorsprung im Baurecht ([63]: Wand eines Erkers): darf mit `SiteRules.projectionDepth`/
     /// `projectionShare` in den Grenzabstand ragen. Fehlt ⇒ normales Bauteil.
     #[serde(rename = "siteProjection", default, skip_serializing_if = "Option::is_none")]
@@ -3018,6 +3023,11 @@ pub struct Ceiling {
     /// Grafik-Kategorie (Ebene), z. B. "30" für Decken.
     #[serde(rename = "categoryCode")]
     pub category_code: String,
+    /// [201] IFC-GlobalId des Quell-Bauteils (IFC-Import); der IFC-Export schreibt sie zurück, damit
+    /// die Rundreise dieselben GUIDs behält. Kopien (Einfügen, Kopieren, Reihe, Wand teilen) tragen sie NICHT.
+    #[serde(rename = "ifcGlobalId", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub ifc_global_id: Option<String>,
     /// Vorsprung im Baurecht ([63]: Balkon, Erker): darf mit `SiteRules.projectionDepth`/
     /// `projectionShare` in den Grenzabstand ragen. Fehlt ⇒ normales Bauteil.
     #[serde(rename = "siteProjection", default, skip_serializing_if = "Option::is_none")]
@@ -3219,6 +3229,11 @@ pub struct Roof {
     /// Grafik-Kategorie (Ebene), z. B. "35" für Dächer.
     #[serde(rename = "categoryCode")]
     pub category_code: String,
+    /// [201] IFC-GlobalId des Quell-Bauteils (IFC-Import); der IFC-Export schreibt sie zurück, damit
+    /// die Rundreise dieselben GUIDs behält. Kopien (Einfügen, Kopieren, Reihe, Wand teilen) tragen sie NICHT.
+    #[serde(rename = "ifcGlobalId", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub ifc_global_id: Option<String>,
     /// Objekt-Sperre, analog `Wall.locked`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -3601,6 +3616,11 @@ pub struct Opening {
     /// Grafik-Kategorie (Ebene), z. B. "21" für Türen/Fenster.
     #[serde(rename = "categoryCode")]
     pub category_code: String,
+    /// [201] IFC-GlobalId des Quell-Bauteils (IFC-Import); der IFC-Export schreibt sie zurück, damit
+    /// die Rundreise dieselben GUIDs behält. Kopien (Einfügen, Kopieren, Reihe, Wand teilen) tragen sie NICHT.
+    #[serde(rename = "ifcGlobalId", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub ifc_global_id: Option<String>,
     /// Objekt-Sperre, analog `Wall.locked`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -3914,6 +3934,11 @@ pub struct Stair {
     /// Grafik-Kategorie (Ebene), z. B. "40" für Treppen.
     #[serde(rename = "categoryCode")]
     pub category_code: String,
+    /// [201] IFC-GlobalId des Quell-Bauteils (IFC-Import); der IFC-Export schreibt sie zurück, damit
+    /// die Rundreise dieselben GUIDs behält. Kopien (Einfügen, Kopieren, Reihe, Wand teilen) tragen sie NICHT.
+    #[serde(rename = "ifcGlobalId", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub ifc_global_id: Option<String>,
     /// Objekt-Sperre, analog `Wall.locked`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -4216,6 +4241,11 @@ pub struct Room {
     /// Grafik-Kategorie (Ebene), z. B. "45" für Räume.
     #[serde(rename = "categoryCode")]
     pub category_code: String,
+    /// [201] IFC-GlobalId des Quell-Bauteils (IFC-Import); der IFC-Export schreibt sie zurück, damit
+    /// die Rundreise dieselben GUIDs behält. Kopien (Einfügen, Kopieren, Reihe, Wand teilen) tragen sie NICHT.
+    #[serde(rename = "ifcGlobalId", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub ifc_global_id: Option<String>,
     /// Objekt-Sperre, analog `Wall.locked`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -4565,6 +4595,11 @@ pub struct ExtrudedSolid {
     /// [180] Klasse (Ebene/Kategorie) wie bei jedem Bauteil: Sichtbarkeit in Grundriss, Schnitt und Ansicht.
     #[serde(rename = "categoryCode")]
     pub category_code: String,
+    /// [201] IFC-GlobalId des Quell-Bauteils (IFC-Import); der IFC-Export schreibt sie zurück, damit
+    /// die Rundreise dieselben GUIDs behält. Kopien (Einfügen, Kopieren, Reihe, Wand teilen) tragen sie NICHT.
+    #[serde(rename = "ifcGlobalId", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub ifc_global_id: Option<String>,
     /// Geschlossenes Profil in der XY-Ebene (Grundriss), ≥3 Punkte. Bei einem
     /// Kreis-Profil (`circle` gesetzt) eine Tessellierung des Kreises (48-Eck) —
     /// für 2D-Footprint/Auswahl/bbox/Verschieben; die 3D-Extrusion nutzt in dem
@@ -4643,6 +4678,11 @@ pub struct Column {
     /// Grafik-Kategorie (Ebene), z. B. "50" für Tragwerk.
     #[serde(rename = "categoryCode")]
     pub category_code: String,
+    /// [201] IFC-GlobalId des Quell-Bauteils (IFC-Import); der IFC-Export schreibt sie zurück, damit
+    /// die Rundreise dieselben GUIDs behält. Kopien (Einfügen, Kopieren, Reihe, Wand teilen) tragen sie NICHT.
+    #[serde(rename = "ifcGlobalId", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub ifc_global_id: Option<String>,
     /// Objekt-Sperre, analog `Wall.locked`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]

@@ -20,7 +20,7 @@
 //                                                  --hide <Code|Name,…> blendet Klassen aus (z. B. --hide "Schatten,Auto-Bemassung") [180]
 //   dossier-cli <projekt.obp> ifc [--ebkph] [--ebenen]   (IFC mit eBKP-H-Hauptgruppen bzw. Modell-Ebenen als Klassifikation)
 //                                                  --schema 4|2x3: IFC4 (Standard) oder IFC2x3 (Coordination View 2.0)
-//   dossier-cli <projekt.obp> dxf [--binary] [--scale 100] [--dim-unit cm] [--layout]|dwg|ifc|step|obj|stl|glb|gltf|schedule [--openings|--elements|--rooms] [--format json|csv|svg|pdf]|kennzahlen [--sia416] [--ivhb] [--format json|csv|svg|pdf] [--agsf m2] [--gruenflaeche m2] [--agf-basis gf|ngf|nf] [--untergeschosse]|raumprogramm [--import tabelle] [--sheet name|nr] [--mode replace|append] [--tolerance %] [--generate] [--format json|csv|svg|pdf] [--save projekt.obp]|sun [--level EG] [--out datei]
+//   dossier-cli <projekt.obp> dxf [--binary] [--scale 100] [--dim-unit cm] [--layout]|dwg|ifc|step|obj [--no-mtl]|stl|glb|gltf|schedule [--openings|--elements|--rooms] [--format json|csv|svg|pdf]|kennzahlen [--sia416] [--ivhb] [--format json|csv|svg|pdf] [--agsf m2] [--gruenflaeche m2] [--agf-basis gf|ngf|nf] [--untergeschosse]|raumprogramm [--import tabelle] [--sheet name|nr] [--mode replace|append] [--tolerance %] [--generate] [--format json|csv|svg|pdf] [--save projekt.obp]|sun [--level EG] [--out datei]
 //                                                  glb/gltf = glTF 2.0 (Y-up, Meter, Geschoss als Eltern; --flat ohne Geschoss-Knoten)
 //   dossier-cli convert <eingabe> <ausgabe> [--cmd "befehl"]…   Format nach Endung: dxf/dwg/ifc/obp → obp-Import,
 //                                                  obp → dxf/dwg/ifc/obj/stl/glb/gltf/step; --cmd: weitere Befehle
@@ -50,7 +50,7 @@
 // WASM-Pakete (src/engine/pkg*) werden aus DOSSIER_WASM_DIR bzw. `<repo>/src/engine` gelesen.
 
 import { readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   buildPlanDxf,
@@ -70,6 +70,7 @@ import {
   computeSection,
   exportIfcSpf,
   exportObj,
+  exportMtl,
   exportProjectStep,
   exportScheduleCsv,
   computeKennzahlen,
@@ -441,7 +442,7 @@ export async function run(argv: string[]): Promise<number> {
   if (file === "mcp" && args.flags.has("app")) return runAppBridge(args);
   if (!file || (!command && args.cmds.length === 0)) {
     process.stderr.write(
-      "Aufruf: dossier-cli <projekt.obp> <info|validate|migrate|plan|section|elevation|dxf|dwg|ifc|import-ifc|import-mesh|erkennen|step|obj|stl|glb|gltf|schedule|kennzahlen|raumprogramm|sun|model3d> [Optionen]\n" +
+      "Aufruf: dossier-cli <projekt.obp> <info|validate|migrate|plan|section|elevation|dxf|dwg|ifc|import-ifc|import-mesh|erkennen|step|obj [--no-mtl]|stl|glb|gltf|schedule|kennzahlen|raumprogramm|sun|model3d> [Optionen]\n" +
         "        dossier-cli convert <eingabe.dxf|dwg|ifc|pdf|obj|stl|gltf|glb|ply|obp> <ausgabe.obp|dxf|dwg|ifc|obj|stl|glb|gltf|step> [--cmd \"befehl …\"]…\n" +
         "        dossier-cli <projekt.obp> --cmd \"befehl …\" [--cmd …]   ({last} = zuletzt geschriebene Datei)\n" +
         "        dossier-cli pointcloud-info <datei> [--voxel 0.05] [--max 2000000]\n" +
@@ -786,7 +787,19 @@ async function execute(project: Project, file: string, command: string, rest: st
       return 0;
     case "obj":
       await loadFileio();
-      out(args, exportObj(project), `${project.name || "projekt"}.obj`);
+      // [201] Mit MTL (Farben) daneben: `--out haus.obj` schreibt auch `haus.mtl`; `--out -` oder `--no-mtl`: nur das OBJ
+      // (Farben dann als Kommentar im Kopf).
+      {
+        const target = args.flags.get("out") ?? `${project.name || "projekt"}.obj`;
+        if (target === "-" || args.flags.has("no-mtl")) {
+          out(args, exportObj(project), `${project.name || "projekt"}.obj`);
+        } else {
+          const mtlPath = target.replace(/\.obj$/i, "") + ".mtl";
+          out(args, exportObj(project, {}, basename(mtlPath)), target);
+          writeFileSync(mtlPath, exportMtl(project));
+          process.stderr.write(`geschrieben: ${mtlPath}\n`);
+        }
+      }
       return 0;
     case "stl":
       await loadFileio();

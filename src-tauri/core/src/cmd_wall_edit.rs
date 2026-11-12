@@ -23,7 +23,7 @@
 //! Geschosses, 2D-Linien/-Polylinien (mit Bögen)/-Rechtecke/-Kreise/-Bögen und Achsraster der Ebene.
 
 use crate::cmd_transform::{IdGen, Shapes};
-use crate::json_util::{arr, field, js_num, pt, with, with_all};
+use crate::json_util::{arr, as_copy, field, js_num, pt, with, with_all};
 use crate::joins::Line;
 use crate::model::{DimFeature, DimRef, Drawing2D, Drawing2DGeom, Project, Vec2, Wall, WallReferenceLine};
 use crate::ops::{id_of, Op};
@@ -592,7 +592,7 @@ pub fn commit(root: &Map<String, Value>, pr: &Project, e: &Edit, ids: &mut IdGen
                 ops.push(Op::Replace { collection: "walls".into(), entity: with_all(src, f) });
             } else {
                 f.push(("id", Value::String(id.clone())));
-                added.push(with_all(src, f));
+                added.push(with_all(&as_copy(src), f));
             }
             targets.push(Target { id, s0: *s0, s1: *s1 });
         }
@@ -605,7 +605,7 @@ pub fn commit(root: &Map<String, Value>, pr: &Project, e: &Edit, ids: &mut IdGen
         let Some(src) = raw(root, "walls", &n.src.id) else { continue };
         let mut f = geom_fields(n.a, n.b, n.bulge);
         f.push(("id", Value::String(ids.next("wall"))));
-        let w = with_all(src, f);
+        let w = with_all(&as_copy(src), f);
         // Gerade Kopie einer Bogenwand: kein Bulge.
         let w = if n.bulge.is_none() { without(&w, "bulge") } else { w };
         added.push(w);
@@ -1291,11 +1291,15 @@ mod tests {
     fn trim_mittelstueck_teilt_und_haengt_oeffnungen_um() {
         let mut r = t_case();
         r.get_mut("walls").unwrap().as_array_mut().unwrap().push(wall("c", (3.0, -3.0), (3.0, 3.0), None));
+        r.get_mut("walls").unwrap().as_array_mut().unwrap()[0]["ifcGlobalId"] = "0AbcDEFghijKLMNOPQRSt1".into();
         let pr = typed(&r);
         let e = trim(&pr, find_wall(&pr, "a").unwrap(), P::new(4.5, 0.0), false);
         let n = commit_edit(&r, &pr, e);
         assert!(close(xy_of(&w_of(&n, "a")["end"]), (3.0, 0.0)));
         let new = arr(n.get("walls")).iter().find(|w| w["id"] == "wall-s-1").unwrap();
+        // [201] Das abgetrennte Stück ist eine neue Wand: GlobalId bleibt nur beim Original.
+        assert_eq!(w_of(&n, "a")["ifcGlobalId"], "0AbcDEFghijKLMNOPQRSt1");
+        assert!(new.get("ifcGlobalId").is_none());
         assert!(close(xy_of(&new["start"]), (6.0, 0.0)));
         let o2 = arr(n.get("openings")).iter().find(|o| o["id"] == "o2").unwrap();
         assert_eq!(o2["hostWallId"], "wall-s-1");

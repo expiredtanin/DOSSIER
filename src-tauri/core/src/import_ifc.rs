@@ -50,6 +50,8 @@ struct Info {
     type_name: Option<String>,
     layers: Vec<MatLayer>,
     classified: bool,
+    /// [201] IFC-GlobalId des Quell-Bauteils (22 Zeichen); bleibt am Element, der Export schreibt sie zurück.
+    global_id: Option<String>,
     /// Eigenschaften aus `Pset_*Common` (Text).
     common: Map<String, Value>,
 }
@@ -190,6 +192,11 @@ struct Elements {
     kept_reasons: Map<String, Value>,
 }
 
+/// Gültige IFC-GlobalId: 22 Zeichen aus dem 64er-Alphabet, erstes Zeichen 0–3 (128 Bit).
+fn is_ifc_guid(g: &str) -> bool {
+    g.len() == 22 && g.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'$') && matches!(g.as_bytes()[0], b'0'..=b'3')
+}
+
 fn s_of(v: Option<&Value>) -> Option<String> {
     v.and_then(Value::as_str).map(str::to_string)
 }
@@ -214,6 +221,7 @@ fn info_of(e: &Value) -> Info {
         type_name: s_of(e.get("typeName")),
         layers,
         classified: e.get("classifications").and_then(Value::as_array).is_some_and(|a| !a.is_empty()),
+        global_id: s_of(e.get("globalId")).filter(|g| is_ifc_guid(g)),
         common: e.get("common").and_then(Value::as_object).cloned().unwrap_or_default(),
     }
 }
@@ -415,6 +423,13 @@ fn is_floor(l: &Value) -> bool {
 
 fn id_of(v: &Value) -> &str {
     v.get("id").and_then(Value::as_str).unwrap_or("")
+}
+
+/// [201] GlobalId der Quelle ans neue Element (`ifcGlobalId`).
+fn set_gid(v: &mut Value, info: &Info) {
+    if let Some(g) = &info.global_id {
+        v["ifcGlobalId"] = g.clone().into();
+    }
 }
 
 fn pt(p: [f64; 2]) -> Value {
@@ -694,6 +709,7 @@ fn elements_ops(root: &Map<String, Value>, meta: &Value, products: &[IfcProduct]
         if let Some(b) = w.info.flag("LoadBearing") {
             o["loadBearing"] = b.into();
         }
+        set_gid(&mut o, &w.info);
         walls.push(o);
     }
     let mut door_types: Vec<(Value, bool)> = list_of(root, "doorTypes");
@@ -740,6 +756,9 @@ fn elements_ops(root: &Map<String, Value>, meta: &Value, products: &[IfcProduct]
         let mut v = Map::new();
         v.insert("id".into(), ctx.new_id("opening").into());
         v.insert("type".into(), "opening".into());
+        if let Some(g) = &o.info.global_id {
+            v.insert("ifcGlobalId".into(), g.clone().into());
+        }
         v.insert("hostWallId".into(), host["id"].clone());
         v.insert("categoryCode".into(), OPENING_CATEGORY.into());
         v.insert("kind".into(), kind.into());
@@ -795,6 +814,9 @@ fn elements_ops(root: &Map<String, Value>, meta: &Value, products: &[IfcProduct]
         let mut v = Map::new();
         v.insert("id".into(), ctx.new_id("ceiling").into());
         v.insert("type".into(), "ceiling".into());
+        if let Some(g) = &s.info.global_id {
+            v.insert("ifcGlobalId".into(), g.clone().into());
+        }
         v.insert("floorId".into(), fid.clone().into());
         v.insert("categoryCode".into(), CEILING_CATEGORY.into());
         v.insert("outline".into(), s.outline.iter().map(|&p| mv(p)).collect());
@@ -824,6 +846,9 @@ fn elements_ops(root: &Map<String, Value>, meta: &Value, products: &[IfcProduct]
         let mut v = Map::new();
         v.insert("id".into(), ctx.new_id("column").into());
         v.insert("type".into(), "column".into());
+        if let Some(g) = &c.info.global_id {
+            v.insert("ifcGlobalId".into(), g.clone().into());
+        }
         v.insert("floorId".into(), fid.clone().into());
         v.insert("categoryCode".into(), COLUMN_CATEGORY.into());
         v.insert("position".into(), mv(c.center));
@@ -880,6 +905,7 @@ fn elements_ops(root: &Map<String, Value>, meta: &Value, products: &[IfcProduct]
         if let Some(t) = s.info.text("FloorBuildUp") {
             room["floorBuildUp"] = t.into();
         }
+        set_gid(&mut room, &s.info);
         rooms.push(room);
     }
 
@@ -902,6 +928,7 @@ fn elements_ops(root: &Map<String, Value>, meta: &Value, products: &[IfcProduct]
         if r.info.layers.iter().any(|l| !l.material.trim().is_empty()) {
             v["roofTypeId"] = type_for(&mut ctx, &mut roof_types, &r.info, r.thickness, "rooftype", "roofTypes").into();
         }
+        set_gid(&mut v, &r.info);
         roofs.push(v);
     }
     let mut stairs: Vec<Value> = Vec::new();
@@ -952,6 +979,7 @@ fn elements_ops(root: &Map<String, Value>, meta: &Value, products: &[IfcProduct]
             }
             _ => {}
         }
+        set_gid(&mut v, &s.info);
         stairs.push(v);
     }
     // Träger als Extrusionskörper (Grundriss + Höhe über der Geschoss-UK).
@@ -966,6 +994,7 @@ fn elements_ops(root: &Map<String, Value>, meta: &Value, products: &[IfcProduct]
         if off.abs() > 1e-9 {
             v["baseOffset"] = js_num(off);
         }
+        set_gid(&mut v, &b.info);
         solids.push(v);
     }
 
@@ -1218,6 +1247,25 @@ mod tests {
         sp["common"] = json!({"Usage": "sauna"});
         let r = ifc_import(&base, &meta(&sp).to_string(), &[], &[], &data, &opts, 0.0).unwrap();
         assert!(added(&r.ops, "rooms")[0].get("usage").is_none());
+    }
+
+    /// [201] Die GlobalId der Quelle landet an jedem erkannten Bauteil; ungültige fallen weg.
+    #[test]
+    fn global_id_goes_to_every_element() {
+        let (mut m, data) = meta("Haustür Eiche");
+        let ids = ["0AbcDEFghijKLMNOPQRSt1", "1AbcDEFghijKLMNOPQRSt2", "2AbcDEFghijKLMNOPQRSt3", "3AbcDEFghijKLMNOPQRSt4", "kurz", "0AbcDEFghijKLMNOPQRSt6"];
+        for (i, g) in ids.iter().enumerate() {
+            m["elements"]["elements"][i]["globalId"] = (*g).into();
+        }
+        let opts = IfcOptions { file_name: "a.ifc".into(), group: None, elements: true };
+        let r = ifc_import(&root(), &m.to_string(), &[], &[], &data, &opts, 0.0).unwrap();
+        let gid = |v: &Value| v["ifcGlobalId"].as_str().map(str::to_string);
+        let walls = added(&r.ops, "walls");
+        assert_eq!((gid(walls[0]), gid(walls[1])), (Some(ids[0].into()), Some(ids[2].into())));
+        let openings = added(&r.ops, "openings");
+        assert_eq!((gid(openings[0]), gid(openings[1])), (Some(ids[1].into()), Some(ids[3].into())));
+        assert_eq!(gid(added(&r.ops, "roofs")[0]), None, "ungültige GlobalId wird nicht übernommen");
+        assert_eq!(gid(added(&r.ops, "stairs")[0]), Some(ids[5].into()));
     }
 
     #[test]

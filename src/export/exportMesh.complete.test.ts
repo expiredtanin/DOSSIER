@@ -86,7 +86,7 @@ function objVolumes(obj: string): Map<string, number> {
       cur = l.slice(2).trim();
       out.set(cur, 0);
     } else if (l.startsWith("f ")) {
-      const [a, b, c] = l.slice(2).trim().split(/\s+/).map((i) => verts[Number(i) - 1]);
+      const [a, b, c] = l.slice(2).trim().split(/\s+/).map((i) => verts[Number(i.split("/")[0]) - 1]); // [201]: `v//vn`
       const v =
         a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0]) + a[2] * (b[0] * c[1] - b[1] * c[0]);
       out.set(cur, (out.get(cur) ?? 0) + v / 6);

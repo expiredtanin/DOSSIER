@@ -10,7 +10,7 @@ import { join } from "node:path";
 import "../engine/fileioWasm.setup";
 import { exportIfcSpf, ifcGuid } from "./exportIfc";
 import { wallMeshVolumes } from "./meshScene.testutil";
-import { sampleProject } from "../model/sampleProject";
+import { emptyProject, sampleProject } from "../model/sampleProject";
 import { buildComplexSampleProject } from "../model/sampleProjectComplex";
 import type { Project } from "../model/types";
 
@@ -164,6 +164,15 @@ describe.skipIf(!hasIfcOpenShell)("IFC-Export gegen ifcopenshell", { timeout: 60
     expect(r.out).toContain("0 Befunde");
     expect(r.status).toBe(0);
   });
+  it("[201] Import → Export mit übernommenen GlobalIds: gültig (22 Zeichen, keine doppelten)", async () => {
+    const { importIfcInto } = await import("../io/importView.testutil");
+    const first = (await importIfcInto(emptyProject, new TextEncoder().encode(exportIfcSpf(sampleProject)), { elements: true })).project;
+    const ifc = exportIfcSpf(first);
+    expect(ifc).toContain(`'${first.walls[0].ifcGlobalId}'`);
+    const r = validate("globalid-rundreise", ifc);
+    expect(r.out).toContain("0 Befunde");
+    expect(r.status).toBe(0);
+  }, 240_000);
   it("[191] Decken/Räume mit Bogenkanten: IfcCompositeCurve mit IfcTrimmedCurve, gültig", () => {
     const ifc = exportIfcSpf(buildComplexSampleProject());
     expect(ifc).toContain("IFCCOMPOSITECURVE(");
