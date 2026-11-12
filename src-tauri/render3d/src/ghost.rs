@@ -17,7 +17,7 @@
 // GPU-frei (nur `Vec<f32>`), per `cargo test` prüfbar.
 
 use crate::edges::EDGE_FLOATS_PER_VERTEX;
-use crate::scene::{PartInput, Scene};
+use crate::scene::{ChunkData, PartInput, Scene};
 use crate::types::FLOATS_PER_VERTEX;
 
 /// f32 je Dreiecks-Vertex der Geisterschicht (wie `gpu::GHOST_FLOATS_PER_VERTEX`).
@@ -51,18 +51,27 @@ pub fn ghost_buffers(part: PartInput) -> (Vec<f32>, Vec<f32>) {
     let mut tris = Vec::new();
     let mut lines = Vec::new();
     for c in 0..scene.chunk_count() {
-        let data = scene.chunk_data(c);
-        let v = &data.mesh.verts;
-        tris.reserve(data.mesh.indices.len() * GHOST_TRI_FLOATS);
-        for &i in &data.mesh.indices {
-            let b = i as usize * FLOATS_PER_VERTEX;
-            let Some(x) = v.get(b..b + FLOATS_PER_VERTEX) else { continue };
-            let col = ghost_color([x[6], x[7], x[8]], [x[3], x[4], x[5]]);
-            tris.extend_from_slice(&[x[0], x[1], x[2], col[0], col[1], col[2], GHOST_ALPHA]);
-        }
-        for e in data.edges.chunks_exact(EDGE_FLOATS_PER_VERTEX) {
-            lines.extend_from_slice(&[e[0], e[1], e[2], GHOST_EDGE_COLOR[0], GHOST_EDGE_COLOR[1], GHOST_EDGE_COLOR[2]]);
-        }
+        let (t, l) = chunk_ghost_buffers(&scene.chunk_data(c));
+        tris.extend(t);
+        lines.extend(l);
+    }
+    (tris, lines)
+}
+
+/// [214] Dreiecke und Kanten eines Klumpens der Geisterschicht (Formate wie [`ghost_buffers`]); die GPU-Schicht
+/// setzt damit nach einem Teil-Update nur die geänderten Klumpen neu (`gpu::Renderer::update_ghost_parts`).
+pub fn chunk_ghost_buffers(data: &ChunkData) -> (Vec<f32>, Vec<f32>) {
+    let v = &data.mesh.verts;
+    let mut tris = Vec::with_capacity(data.mesh.indices.len() * GHOST_TRI_FLOATS);
+    for &i in &data.mesh.indices {
+        let b = i as usize * FLOATS_PER_VERTEX;
+        let Some(x) = v.get(b..b + FLOATS_PER_VERTEX) else { continue };
+        let col = ghost_color([x[6], x[7], x[8]], [x[3], x[4], x[5]]);
+        tris.extend_from_slice(&[x[0], x[1], x[2], col[0], col[1], col[2], GHOST_ALPHA]);
+    }
+    let mut lines = Vec::with_capacity(data.edges.len());
+    for e in data.edges.chunks_exact(EDGE_FLOATS_PER_VERTEX) {
+        lines.extend_from_slice(&[e[0], e[1], e[2], GHOST_EDGE_COLOR[0], GHOST_EDGE_COLOR[1], GHOST_EDGE_COLOR[2]]);
     }
     (tris, lines)
 }
@@ -134,6 +143,50 @@ mod tests {
         let dunkel = ghost_color([0.0, 0.0, 0.0], n);
         assert!(hell[0] > dunkel[0] && dunkel[0] > 0.6);
         assert!(ghost_color([0.5, 0.5, 0.5], [f32::NAN, 0.0, 0.0]).iter().all(|c| c.is_finite()));
+    }
+
+    /// [214] Teil-Update der Geisterschicht: die Klumpen nach dem Update ergeben dieselben Dreiecke und Kanten wie ein
+    /// Vollaufbau des neuen Stands, und nur die Klumpen des geänderten Teils sind neu.
+    #[test]
+    fn teil_update_gleich_vollaufbau() {
+        use crate::scene::{PartEntry, PartsUpdate};
+        let at = |x: f32, y: f32| -> WallInput {
+            let mut w = wall();
+            w.start = [x, y];
+            w.end = [x + 4.0, y];
+            w
+        };
+        let parts = |shift: f32| -> Vec<PartEntry> {
+            (0..6).map(|i| PartEntry::new(&format!("w{i}"), PartInput { walls: vec![at(if i == 3 { shift } else { 0.0 }, 3.0 * i as f32)], ..Default::default() })).collect()
+        };
+        let sorted = |v: Vec<f32>, n: usize| {
+            let mut g: Vec<Vec<i64>> = v.chunks_exact(n).map(|c| c.iter().map(|x| (x * 1e4).round() as i64).collect()).collect();
+            g.sort();
+            g
+        };
+        let all = |s: &Scene| {
+            let (mut t, mut l) = (Vec::new(), Vec::new());
+            for c in 0..s.chunk_count() {
+                let (a, b) = chunk_ghost_buffers(&s.chunk_data(c));
+                t.extend(a);
+                l.extend(b);
+            }
+            (sorted(t, 3 * GHOST_TRI_FLOATS), sorted(l, 2 * EDGE_FLOATS_PER_VERTEX))
+        };
+        let mut s = Scene::new();
+        s.apply(PartsUpdate { reset: true, remove: vec![], upsert: parts(0.0) });
+        let ch = s.apply(PartsUpdate { reset: false, remove: vec![], upsert: vec![parts(1.5).remove(3)] });
+        assert_eq!((ch.remeshed, ch.dirty_chunks.len()), (1, 1), "nur der geänderte Teil");
+        let mut full = Scene::new();
+        full.apply(PartsUpdate { reset: true, remove: vec![], upsert: parts(1.5) });
+        assert_eq!(all(&s), all(&full));
+        // Dasselbe wie die bisherige Ganz-Umsetzung.
+        let mut whole = PartInput::default();
+        for e in parts(1.5) {
+            whole.walls.extend(e.walls);
+        }
+        let (t, l) = ghost_buffers(whole);
+        assert_eq!(all(&s), (sorted(t, 3 * GHOST_TRI_FLOATS), sorted(l, 2 * EDGE_FLOATS_PER_VERTEX)));
     }
 
     #[test]

@@ -17,7 +17,8 @@ kommt als Teile aus dem Kern (`src/plan/toWalls3d.ts`). Weg eines Modells in den
 
 | Datei | Inhalt |
 |---|---|
-| `ghostSync.ts` | Prüfsumme der Geisterschicht (graue Klassen/Geschosse): render3d bekommt sie nur bei Änderung neu |
+| `ghostSync.ts` | Geisterschicht (graue Klassen/Geschosse) als Teile an render3d (`GhostLayerSync`, nur Geändertes, [214]); Prüfsumme für Ganz-Weg und Spuren/Muster |
+| `render3d.bench.test.ts` | [214] Messung der 3D-Kette je Szene (`BENCH_3D=1`), schreibt die Eingaben für `render_png --bench` |
 | `model3dPartsSync.ts` | schickt nur neue, geänderte und entfernte Modellteile an render3d (`set_parts`) |
 | `pointCloudSync.ts` | Punktwolken-Store gegen render3d abgleichen: neu laden, umstellen oder entfernen (`[27]`) |
 | `materialTextures.ts` | dekodiert die Farbkarten der Materialien für den Stil „Textured" |

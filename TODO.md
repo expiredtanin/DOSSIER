@@ -80,12 +80,22 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   Öffnungswinkel; Klasse „Kameras“ nach [180]), Liste im Navigator; „Aus aktueller Ansicht anlegen“, „Kamera öffnen“, Rendering [211]
   wählt eine Kamera. 3D-Navigation: WASD/Pfeile laufen, Q/E hoch/runter, Maus schauen, Shift schneller (Begehen-Modus wie Archicad/Spiele),
   Augenhöhe halten; auch im nativen Mac-3D. · M
-- ○ **[214]** 3D-Engine optimieren (12.11., Wunsch Maintainer: „render3d hat sich sehr früh entwickelt, Leistung könnte besser sein“).
-  Zuerst messen (Bildzeit, Draw-Calls, Upload-Zeit, Neu-Vernetzen je Änderung, Speicher; Musterhaus komplex + Grossgebäude
-  `buildBigSampleProject` + grosser Kontext-Import), dann der Reihe nach: nur geänderte Elemente neu vernetzen/hochladen (statt ganzes
-  Modell, auch Geisterschicht [180]), Puffer wiederverwenden, Draw-Calls bündeln (ein Puffer je Material/Durchgang, Instancing für
-  Wiederholtes wie Fenster/Bäume), Sichtkegel-Culling, Schatten-Map nur bei Änderung von Licht/Modell, Kantenpass günstiger, LOD für
-  Kontext/Gelände. Messbar machen (Bench in `dossier-cli bench` bzw. render3d-Test) und vorher/nachher belegen. Opus. · L
+- ◐ **[214]** 3D-Engine optimieren (12.11., Wunsch Maintainer). Messung: `BENCH_3D=1 BENCH_3D_OUT=<dir> npx vitest run
+  src/viewport/render3d.bench.test.ts` (Kern/TS je Änderung wie `updateModel`, Szenen komplex/gross/kontext) und
+  `render_png --bench <dir>/<szene>` (Aufbau, Bildzeit, Draw-Calls, Teil-Update, GPU-Speicher); Kern-Profil `model3d_cache::tests::bench214`.
+  Umgesetzt (12.11.): Geisterschicht als Teile (`GhostLayerSync`, `set_ghost_parts`, eigene Szene in render3d) statt ganzem Modell-JSON +
+  Prüfsumme je Änderung; Kern-Cache hält Decken/Dächer/Kontext (zweite Abfrage mit Geister-Filter rechnet nichts), Deckenauflager mit
+  bekannten Fugen und Schichtfunktion je Wand einmal; texturierter Pfad ohne zweites Netz (UV im Shader); unveränderte 2D-Spuren/Muster/Hülle
+  nicht neu hochgeladen. Wand verschieben, Kern/TS je Änderung (WASM, Container): gross 1388 → 285 ms (Teile 668 → 138, Geisterschicht
+  877 → 141), komplex 146 → 176 (Rauschen, Geisterschicht 74 → 79), kontext 253 → 277 (Rauschen); GPU-Puffer komplex 57 → 42 MB,
+  kontext 175 → 123, gross 131 → 118; Aufbau render3d komplex 517 → 263 ms, gross 396 → 203. Schattenpass lief schon nur bei Änderung,
+  Bild-CPU je Frame 0.3–1.5 ms (Draw-Calls 64/275). Bilder byte-gleich, Geisterschicht ≤ 8/255 auf ~1 % (Mischreihenfolge der
+  durchscheinenden Flächen je Klumpen). Nicht auf dem Mac/Metal und nicht in der App angesehen. Offen, nach Messwert: (1) Rest-Gruppen ohne
+  JSON-Rundreise (Laufnummer je Gruppe statt `JSON.stringify`-Vergleich: kontext 69 ms, komplex 27 ms je Änderung); (2) Kern: Geschoss-
+  Kontexte aller Geschosse je Abfrage (gross 29 ms nativ, zweimal je Änderung), Kontext-Netze je Objekt als Teil statt eine Gruppe;
+  (3) Vernetzen in render3d (komplex 324 ms/147k Dreiecke kalt, Geisterschicht gross 2 s beim Geschosswechsel); (4) GPU-Bildzeit nur auf
+  lavapipe gemessen (komplex ~150–570 ms Software), Culling/LOD/Instancing erst nach Messung auf echter GPU (Mac); (5) Draw-Calls der
+  Geisterschicht je Klumpen (gross 275 → 465), ggf. bündeln. · M
 
 ### Phase 3 (27.11.–3.12.): Vorprojekt
 - ○ **[209]** Kostenschätzung grob (Vorprojekt ±15–25 %): Kennwerte je m³ GV (SIA 416) bzw. je m² GF und eBKP-H-Hauptgruppen,
@@ -919,7 +929,7 @@ Punktwolken/BCF-Ausbau, Windows-Paket, [C5]/[C7]/[15] Kern-Umbauten — ausser s
 
 Auf dem Mac (Tauri/Metal) noch nicht angesehen oder geprüft; bisher nur Linux-Container, CLI-SVG, Chromium oder
 Unit-Tests: [116] (atomares Speichern), [117] (CSP unter `tauri://`), [118], [122], [123], [126], [110], [101],
-[102], [131], [133], [136], [140], [145], [194], [146], [153], [64], [T2], [T4], [34], [108], [65], [169], [113], [181], [G1]. Je Punkt ansehen, dann hier und
+[102], [131], [133], [136], [140], [145], [194], [146], [153], [64], [T2], [T4], [34], [108], [65], [169], [113], [181], [G1], [214]. Je Punkt ansehen, dann hier und
 im jeweiligen Eintrag streichen. · M (gesamt)
 
 ---

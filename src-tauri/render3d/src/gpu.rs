@@ -26,7 +26,7 @@ use crate::shaders::{CAP_WGSL, GHOST_WGSL, GRID_WGSL, MESH_AERIAL_WGSL, MESH_TEX
 use crate::shadow::{caster_indices, cascades, far_map_size, texel_world_size, DEFAULT_SHADOW_MAP_SIZE};
 use crate::types::{
     Camera, MeshInput, RoofLayerInput, SlabInput, WallInput,
-    FLOATS_PER_VERTEX, TEXTURED_FLOATS_PER_VERTEX,
+    FLOATS_PER_VERTEX,
 };
 
 /// Darstellungsart des 3D-Renderers (Oberleiste: shaded/white/textured/
@@ -201,18 +201,11 @@ struct MeshBuffers {
     index_count: u32,
 }
 
-/// GPU-seitige Puffer des TEXTURIERTEN Wand-Meshes (`RenderStyle::Textured`).
-/// Eigenes Vertex-Layout `[pos vec3, normal vec3, uv vec2]`
-/// (`TEXTURED_FLOATS_PER_VERTEX`), sonst wie `MeshBuffers`. Zweiter, additiver
-/// Puffer neben `MeshBuffers` — der Alt-Pfad bleibt bitgleich unangetastet.
+/// Material-Ebenen des TEXTURIERTEN Pfades (`RenderStyle::Textured`): EIN f32 (Material-Textur-Ebene) je
+/// Vertex, @location(3) im `MESH_TEXTURED_WGSL`. Ecken und Indizes kommen aus `MeshBuffers` desselben Klumpens
+/// (UV im Shader, [214]); immer gesetzt (Fallback `-1` je Vertex), damit das Layout stets zwei Puffer hat.
 struct TexturedMeshBuffers {
-    vbo: wgpu::Buffer,
-    /// Zweiter Vertex-Buffer: EIN f32 (Material-Textur-Ebene) je Vertex,
-    /// @location(3) im `MESH_TEXTURED_WGSL`. Immer gesetzt (Fallback: `-1` je
-    /// Vertex), damit das Pipeline-Layout stets zwei Vertex-Buffer erwartet.
     layer_vbo: wgpu::Buffer,
-    ibo: wgpu::Buffer,
-    index_count: u32,
 }
 
 /// GPU-Ressourcen EINES georeferenzierten Luftbilds (SWISSIMAGE), das aufs Gelaende
@@ -342,17 +335,10 @@ fn upload_chunk(device: &wgpu::Device, d: ChunkData) -> ChunkBuffers {
         ibo: index_buffer(device, "mesh.ibo", &d.mesh.indices),
         index_count: d.mesh.indices.len() as u32,
     });
-    // Texturiertes Pendant: [pos, normal, uv] + Material-Ebene je Vertex (fehlt sie: -1 = Schachbrett).
-    let vertex_count = d.textured.verts.len() / TEXTURED_FLOATS_PER_VERTEX;
-    let layer_data: Vec<f32> =
-        if d.textured.layers.len() == vertex_count { d.textured.layers } else { vec![-1.0; vertex_count] };
-    out.textured = Some(TexturedMeshBuffers {
-        vbo: vertex_buffer(device, "mesh.textured.vbo", &d.textured.verts),
-        layer_vbo: vertex_buffer(device, "mesh.textured.layer.vbo", &layer_data),
-        ibo: index_buffer(device, "mesh.textured.ibo", &d.textured.indices),
-        index_count: d.textured.indices.len() as u32,
-    })
-    ;
+    // Texturiert ([214]): nur die Material-Ebene je Vertex (fehlt sie: -1 = Schachbrett); Ecken/Indizes wie oben.
+    let vertex_count = d.mesh.vertex_count();
+    let layer_data: Vec<f32> = if d.layers.len() == vertex_count { d.layers } else { vec![-1.0; vertex_count] };
+    out.textured = Some(TexturedMeshBuffers { layer_vbo: vertex_buffer(device, "mesh.textured.layer.vbo", &layer_data) });
     out
 }
 
@@ -419,10 +405,11 @@ pub struct Renderer {
     /// durchscheinenden Koerper; None = nichts. Ueber `set_ghost`, gezeichnet nach allem Opaken.
     ghost: Option<LineBuffers>,
     ghost_lines: Option<LineBuffers>,
-    /// [180] Geisterschicht: Elemente grauer Klassen (`ghost::ghost_buffers`), gleiche Pipeline und Puffer-Formate
-    /// wie `ghost`/`ghost_lines`, aber unabhaengig davon gesetzt (`set_ghost_model`).
-    ghost_model: Option<LineBuffers>,
-    ghost_model_lines: Option<LineBuffers>,
+    /// [180] Geisterschicht: Elemente grauer Klassen als eigene Szene aus Teilen ([214]: ein Teil-Update vernetzt und
+    /// laedt nur die geaenderten Klumpen, `update_ghost_parts`), je Klumpen Dreiecke und Kanten in den Formaten von
+    /// `ghost`/`ghost_lines` (`ghost::chunk_ghost_buffers`), gleiche Pipeline.
+    ghost_scene: Scene,
+    ghost_chunks: Vec<GhostChunk>,
     /// [180] 2D-Spuren grauer Klassen (gedaempft, `ghost::mute_lines`), tiefengetestet wie die Kanten der Geisterschicht.
     ghost_drawing_lines: Option<LineBuffers>,
     /// [180] Flaechenmuster grauer Klassen (gedaempft, `ghost::mute_pattern`): wie `pattern_data` je Kamera nach Abstand
@@ -572,6 +559,74 @@ pub struct Renderer {
     points: PointRenderer,
     /// Loeschfarbe (Hintergrund). Default heller Grauton wie die three.js-Sicht.
     pub clear_color: wgpu::Color,
+    /// [214] Zahlen des letzten Frames (`frame_stats`).
+    frame_stats: FrameStats,
+    /// [214] Inhalts-Schluessel der zuletzt gesetzten Linien/Huelle: Gleiches wird nicht neu hochgeladen.
+    keys: DataKeys,
+}
+
+/// [180]/[214] GPU-Puffer eines Klumpens der Geisterschicht (Formate wie `set_ghost`).
+#[derive(Default)]
+struct GhostChunk {
+    tris: Option<LineBuffers>,
+    lines: Option<LineBuffers>,
+}
+
+/// [214] Daten, die der Viewer bei jeder Modellaenderung ganz neu schickt.
+#[derive(Clone, Copy)]
+enum DataSlot {
+    Drawing,
+    Pattern,
+    Envelope,
+    GhostLines,
+}
+
+/// [214] Inhalts-Schluessel je [`DataSlot`] (`content_key`); `None` = noch nichts gesetzt.
+#[derive(Default)]
+struct DataKeys([Option<u64>; 4]);
+
+impl DataKeys {
+    /// Merkt den Schluessel von `data`; `false`, wenn er dem zuletzt gemerkten gleicht (nichts zu tun).
+    fn changed(&mut self, slot: DataSlot, data: &[&[f32]]) -> bool {
+        let k = Some(content_key(data));
+        let old = std::mem::replace(&mut self.0[slot as usize], k);
+        old != k
+    }
+}
+
+/// [214] 64-Bit-Schluessel ueber die Bits mehrerer f32-Folgen samt ihrer Laengen (Kollision praktisch
+/// ausgeschlossen; billig gegen das Anlegen und Hochladen eines Puffers).
+pub(crate) fn content_key(data: &[&[f32]]) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut mix = |w: u64| {
+        h ^= w;
+        h = h.wrapping_mul(0x0000_0100_0000_01b3).rotate_left(29).wrapping_mul(0x9e37_79b9_7f4a_7c15);
+    };
+    for d in data {
+        mix(d.len() as u64 | (1 << 63));
+        for c in d.chunks(2) {
+            let a = c[0].to_bits() as u64;
+            let b = c.get(1).map_or(0, |v| v.to_bits() as u64);
+            mix(a | (b << 32));
+        }
+    }
+    h
+}
+
+/// [214] Zahlen eines Frames (Messung): Draw-Calls und gezeichnete Ecken/Indizes im Hauptpass, Draw-Calls im
+/// Schatten-Tiefenpass (0 = kein Pass in diesem Frame).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct FrameStats {
+    pub draws: u32,
+    pub elements: u64,
+    pub shadow_draws: u32,
+}
+
+impl FrameStats {
+    fn add(&mut self, n: u32) {
+        self.draws += 1;
+        self.elements += n as u64;
+    }
 }
 
 /// Floats je Ecke der durchscheinenden Koerper: `[px,py,pz, r,g,b,a]`.
@@ -1002,11 +1057,12 @@ impl Renderer {
             label: Some("mesh_textured.wgsl"),
             source: wgpu::ShaderSource::Wgsl(MESH_TEXTURED_WGSL.into()),
         });
-        // Vertex-Layout: [pos vec3, normal vec3, uv vec2], stride 8*4.
+        // [214] Vertex-Layout = Flaechen-Puffer `[pos vec3, normal vec3, color vec3]` (color ungenutzt, UV im
+        // Shader): derselbe Puffer wie der schattierte Pfad, kein zweites Netz je Klumpen.
         let textured_vertex_layout = wgpu::VertexBufferLayout {
-            array_stride: (TEXTURED_FLOATS_PER_VERTEX * 4) as u64,
+            array_stride: (FLOATS_PER_VERTEX * 4) as u64,
             step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x2],
+            attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3],
         };
         // ZWEITER Vertex-Buffer: die Material-Textur-Ebene je Vertex (@location(3),
         // 1 f32). Separat gehalten, damit das Haupt-`[pos,normal,uv]`-Layout (und
@@ -1343,8 +1399,8 @@ impl Renderer {
             ghost_pipeline,
             ghost: None,
             ghost_lines: None,
-            ghost_model: None,
-            ghost_model_lines: None,
+            ghost_scene: Scene::new(),
+            ghost_chunks: Vec::new(),
             ghost_drawing_lines: None,
             ghost_pattern_data: Vec::new(),
             cap_pipeline,
@@ -1407,7 +1463,34 @@ impl Renderer {
                 b: 0.961,
                 a: 1.0,
             },
+            frame_stats: FrameStats::default(),
+            keys: DataKeys::default(),
         }
+    }
+
+    /// [214] Bytes der Modell-Puffer auf der GPU (Messung): Klumpen (Flächen, texturiert, Schatten-Indizes, Kanten,
+    /// Kappen), Gelände-Overlay, Geisterschicht, Linien (Zeichnungen, Muster, Silhouette). Ohne Texturen/Punktwolken.
+    pub fn gpu_bytes(&self) -> u64 {
+        let mut n = 0u64;
+        for c in &self.chunks {
+            if let Some(m) = &c.mesh {
+                n += m.vbo.size() + m.ibo.size();
+            }
+            if let Some(t) = &c.textured {
+                n += t.layer_vbo.size();
+            }
+            n += c.caster_ibo.as_ref().map_or(0, |b| b.size());
+            n += c.edges.as_ref().map_or(0, |b| b.vbo.size());
+            n += c.caps.as_ref().map_or(0, |b| b.vbo.size());
+        }
+        n += self.terrain_overlay.as_ref().map_or(0, |m| m.vbo.size() + m.ibo.size());
+        for l in [&self.ghost, &self.ghost_lines, &self.ghost_drawing_lines, &self.drawing_lines, &self.pattern_lines, &self.silhouette] {
+            n += l.as_ref().map_or(0, |b| b.vbo.size());
+        }
+        for g in &self.ghost_chunks {
+            n += g.tris.as_ref().map_or(0, |b| b.vbo.size()) + g.lines.as_ref().map_or(0, |b| b.vbo.size());
+        }
+        n
     }
 
     /// Setzt/ersetzt die Punktwolke `id` ([27]); `None` (unbrauchbare Eingabe) entfernt sie.
@@ -1633,6 +1716,10 @@ impl Renderer {
     /// `[px,py,pz, r,g,b,a, ...]` (world, `GHOST_FLOATS_PER_VERTEX`), `lines` = LineList wie
     /// `set_highlight_lines`. Leere Slices loeschen; unvollstaendige Ecken am Ende fallen weg.
     pub fn set_ghost(&mut self, device: &wgpu::Device, tris: &[f32], lines: &[f32]) {
+        // [214] Gleicher Inhalt wie zuletzt (jede Modellaenderung schickt die Huelle neu): nichts hochladen.
+        if !self.keys.changed(DataSlot::Envelope, &[tris, lines]) {
+            return;
+        }
         let buf = |label: &str, v: &[f32], stride: usize, per: usize| {
             let n = v.len() / stride / per * per;
             (n > 0).then(|| LineBuffers {
@@ -1648,32 +1735,52 @@ impl Renderer {
         self.ghost_lines = buf("ghost.lines.vbo", lines, GRID_FLOATS_PER_VERTEX, 2);
     }
 
-    /// [180] Setzt/loescht die Geisterschicht (Elemente grauer Klassen): Formate wie [`Self::set_ghost`]
-    /// (`ghost::ghost_buffers`). Leere Slices loeschen.
-    pub fn set_ghost_model(&mut self, device: &wgpu::Device, tris: &[f32], lines: &[f32]) {
-        let buf = |label: &str, v: &[f32], stride: usize, per: usize| {
-            let n = v.len() / stride / per * per;
-            (n > 0).then(|| LineBuffers {
+    /// [180] Setzt/loescht die Geisterschicht (Elemente grauer Klassen) als ganzes Modell (ein Teil; leer loescht).
+    pub fn set_ghost_model(&mut self, device: &wgpu::Device, part: PartInput) -> SceneChange {
+        let empty = part.walls.is_empty() && part.slabs.is_empty() && part.meshes.is_empty() && part.roof_layers.is_empty();
+        let upsert = if empty { Vec::new() } else { vec![PartEntry::new("", part)] };
+        self.update_ghost_parts(device, PartsUpdate { reset: true, remove: Vec::new(), upsert })
+    }
+
+    /// [180]/[214] Teil-Update der Geisterschicht (Format wie [`Self::update_parts`]): vernetzt nur die geaenderten
+    /// Teile und setzt nur die Klumpen neu, in denen sich etwas geaendert hat.
+    pub fn update_ghost_parts(&mut self, device: &wgpu::Device, upd: PartsUpdate) -> SceneChange {
+        let ch = self.ghost_scene.apply(upd);
+        if ch.reset {
+            self.ghost_chunks.clear();
+        }
+        self.ghost_chunks.resize_with(self.ghost_scene.chunk_count(), GhostChunk::default);
+        let buf = |label: &str, v: &[f32], stride: usize| {
+            (v.len() >= stride).then(|| LineBuffers {
                 vbo: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some(label),
-                    contents: bytemuck::cast_slice(&v[..n * stride]),
+                    contents: bytemuck::cast_slice(v),
                     usage: wgpu::BufferUsages::VERTEX,
                 }),
-                vertex_count: n as u32,
+                vertex_count: (v.len() / stride) as u32,
             })
         };
-        self.ghost_model = buf("ghost.model.vbo", tris, GHOST_FLOATS_PER_VERTEX, 3);
-        self.ghost_model_lines = buf("ghost.model.lines.vbo", lines, GRID_FLOATS_PER_VERTEX, 2);
+        for &c in &ch.dirty_chunks {
+            let (tris, lines) = crate::ghost::chunk_ghost_buffers(&self.ghost_scene.chunk_data(c));
+            self.ghost_chunks[c] = GhostChunk {
+                tris: buf("ghost.model.vbo", &tris, GHOST_FLOATS_PER_VERTEX),
+                lines: buf("ghost.model.lines.vbo", &lines, GRID_FLOATS_PER_VERTEX),
+            };
+        }
+        ch
     }
 
     /// [180] Ob eine Geisterschicht gesetzt ist (Test/Diagnose).
     pub fn has_ghost_model(&self) -> bool {
-        self.ghost_model.is_some() || self.ghost_model_lines.is_some() || self.ghost_drawing_lines.is_some() || !self.ghost_pattern_data.is_empty()
+        self.ghost_chunks.iter().any(|g| g.tris.is_some() || g.lines.is_some()) || self.ghost_drawing_lines.is_some() || !self.ghost_pattern_data.is_empty()
     }
 
     /// [180] 2D-Spuren (`drawing`, LineList `[x y z r g b]`) und Flaechenmuster (`pattern`, `PATTERN_STRIDE`) der grauen
     /// Klassen: in der Geisterschicht gedaempft gezeichnet (`ghost::mute_lines`/`mute_pattern`). Leer loescht.
     pub fn set_ghost_lines(&mut self, device: &wgpu::Device, drawing: &[f32], pattern: &[f32]) {
+        if !self.keys.changed(DataSlot::GhostLines, &[drawing, pattern]) {
+            return;
+        }
         let d = crate::ghost::mute_lines(drawing);
         self.ghost_drawing_lines = (!d.is_empty()).then(|| LineBuffers {
             vbo: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -1696,6 +1803,10 @@ impl Renderer {
     /// Setzt die Ansichtsschraffur-Linien (`pattern_lines::PATTERN_STRIDE` Floats je Linie); leer löscht.
     /// Die Auswahl nach Abstand passiert im nächsten `render`.
     pub fn set_pattern_lines(&mut self, data: &[f32]) {
+        // [214] Unveraendert (jede Modellaenderung schickt die Muster neu): Auswahl und Puffer behalten.
+        if !self.keys.changed(DataSlot::Pattern, &[data]) {
+            return;
+        }
         self.pattern_data = data.to_vec();
         self.pattern_lines = None;
         self.pattern_key = None;
@@ -1714,6 +1825,10 @@ impl Renderer {
     /// JS-String-Laengengrenze. Als LineList + `&[f32]`-Binaertransfer bleibt es
     /// bei 2 Vertices je Segment ohne jede Textkodierung.
     pub fn set_drawing_lines(&mut self, device: &wgpu::Device, verts: &[f32]) {
+        // [214] Unveraendert (jede Modellaenderung schickt die Spuren neu, ein Kataster hat Mio. Segmente): behalten.
+        if !self.keys.changed(DataSlot::Drawing, &[verts]) {
+            return;
+        }
         if verts.is_empty() {
             self.drawing_lines = None;
             return;
@@ -2091,7 +2206,8 @@ impl Renderer {
     }
 
     /// Rendert die schattenwerfenden Dreiecke aller Klumpen in die Schattentextur(en).
-    fn encode_shadow_pass(&self, encoder: &mut wgpu::CommandEncoder) {
+    fn encode_shadow_pass(&self, encoder: &mut wgpu::CommandEncoder) -> FrameStats {
+        let mut st = FrameStats::default();
         let mut targets = vec![(&self.shadow_view, &self.shadow_bind_group)];
         if self.shadow_far_on {
             targets.push((&self.shadow_view_far, &self.shadow_bind_group_far));
@@ -2120,8 +2236,10 @@ impl Renderer {
                 let ibo = c.caster_ibo.as_ref().unwrap_or(&m.ibo);
                 pass.set_index_buffer(ibo.slice(..), wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..c.caster_count, 0, 0..1);
+                st.add(c.caster_count);
             }
         }
+        st
     }
 
     /// Stellt sicher, dass ein Tiefenpuffer passend zur Ziel-Groesse existiert.
@@ -2319,8 +2437,10 @@ impl Renderer {
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("3d.encoder"),
         });
+        let mut st = FrameStats::default();
         if shadow_pass {
-            self.encode_shadow_pass(&mut encoder);
+            let sh = self.encode_shadow_pass(&mut encoder);
+            st.shadow_draws = sh.draws;
         }
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -2378,11 +2498,12 @@ impl Renderer {
                     pass.set_pipeline(&self.textured_pipeline);
                     pass.set_bind_group(0, &self.bind_group, &[]);
                     pass.set_bind_group(1, &self.texture_bind_group, &[]);
-                    for t in self.chunks.iter().filter_map(|c| c.textured.as_ref()) {
-                        pass.set_vertex_buffer(0, t.vbo.slice(..));
+                    for (m, t) in self.chunks.iter().filter_map(|c| Some((c.mesh.as_ref()?, c.textured.as_ref()?))) {
+                        pass.set_vertex_buffer(0, m.vbo.slice(..));
                         pass.set_vertex_buffer(1, t.layer_vbo.slice(..));
-                        pass.set_index_buffer(t.ibo.slice(..), wgpu::IndexFormat::Uint32);
-                        pass.draw_indexed(0..t.index_count, 0, 0..1);
+                        pass.set_index_buffer(m.ibo.slice(..), wgpu::IndexFormat::Uint32);
+                        pass.draw_indexed(0..m.index_count, 0, 0..1);
+                        st.add(m.index_count);
                     }
                 } else {
                     let face_pipeline = if self.style.needs_biased_face_pipeline()
@@ -2398,6 +2519,7 @@ impl Renderer {
                         pass.set_vertex_buffer(0, m.vbo.slice(..));
                         pass.set_index_buffer(m.ibo.slice(..), wgpu::IndexFormat::Uint32);
                         pass.draw_indexed(0..m.index_count, 0, 0..1);
+                        st.add(m.index_count);
                     }
                 }
             }
@@ -2415,6 +2537,7 @@ impl Renderer {
                     pass.set_vertex_buffer(0, t.vbo.slice(..));
                     pass.set_index_buffer(t.ibo.slice(..), wgpu::IndexFormat::Uint32);
                     pass.draw_indexed(0..t.index_count, 0, 0..1);
+                    st.add(t.index_count);
                 }
             }
 
@@ -2431,6 +2554,7 @@ impl Renderer {
                 for wc in self.chunks.iter().filter_map(|c| c.caps.as_ref()) {
                     pass.set_vertex_buffer(0, wc.vbo.slice(..));
                     pass.draw(0..wc.vertex_count, 0..1);
+                    st.add(wc.vertex_count);
                 }
             }
 
@@ -2443,6 +2567,7 @@ impl Renderer {
                 pass.set_bind_group(0, &self.bind_group, &[]);
                 pass.set_vertex_buffer(0, c.vbo.slice(..));
                 pass.draw(0..c.vertex_count, 0..1);
+                st.add(c.vertex_count);
             }
 
             // 1c) Schnitt-Umrisslinien (Cut-Cap-Kanten, P2) NACH den Caps: die
@@ -2455,6 +2580,7 @@ impl Renderer {
                 pass.set_bind_group(0, &self.bind_group, &[]);
                 pass.set_vertex_buffer(0, cl.vbo.slice(..));
                 pass.draw(0..cl.vertex_count, 0..1);
+                st.add(cl.vertex_count);
             }
 
             // 2) Modell-Kanten (wireframe/hidden, ODER erzwungen bei aktivem
@@ -2467,6 +2593,7 @@ impl Renderer {
                 for e in self.chunks.iter().filter_map(|c| c.edges.as_ref()) {
                     pass.set_vertex_buffer(0, e.vbo.slice(..));
                     pass.draw(0..e.vertex_count, 0..1);
+                    st.add(e.vertex_count);
                 }
             }
 
@@ -2478,6 +2605,7 @@ impl Renderer {
                     pass.set_bind_group(0, &self.bind_group, &[]);
                     pass.set_vertex_buffer(0, pl.vbo.slice(..));
                     pass.draw(0..pl.vertex_count, 0..1);
+                    st.add(pl.vertex_count);
                 }
             }
 
@@ -2491,6 +2619,7 @@ impl Renderer {
                     pass.set_bind_group(0, &self.bind_group, &[]);
                     pass.set_vertex_buffer(0, s.vbo.slice(..));
                     pass.draw(0..s.vertex_count, 0..1);
+                    st.add(s.vertex_count);
                 }
             }
 
@@ -2504,6 +2633,7 @@ impl Renderer {
                 pass.set_bind_group(0, &self.bind_group, &[]);
                 pass.set_vertex_buffer(0, dl.vbo.slice(..));
                 pass.draw(0..dl.vertex_count, 0..1);
+                st.add(dl.vertex_count);
             }
 
             // 2d) Punktwolken ([27]): Instanz-Quads, tiefengetestet gegen Modell/Unterlage —
@@ -2519,23 +2649,28 @@ impl Renderer {
                     pass.set_bind_group(0, &self.bind_group, &[]);
                     pass.set_vertex_buffer(0, g.vbo.slice(..));
                     pass.draw(0..g.vertex_count, 0..1);
+                    st.add(g.vertex_count);
                 }
             }
 
             // 3b) Durchscheinende Koerper ([63] zulaessige Huelle): Kanten tiefengetestet wie das
             //     Gitter, dann die Flaechen mit Alpha-Blending (ohne Tiefen-Write) nach allem Opaken.
             //     [180] Davor die Geisterschicht der grauen Klassen (gleiche Pipelines).
-            for gl in [&self.ghost_model_lines, &self.ghost_drawing_lines, &self.ghost_lines].into_iter().flatten() {
+            let ghost_model_lines = self.ghost_chunks.iter().filter_map(|g| g.lines.as_ref());
+            for gl in ghost_model_lines.chain([&self.ghost_drawing_lines, &self.ghost_lines].into_iter().flatten()) {
                 pass.set_pipeline(&self.grid_pipeline);
                 pass.set_bind_group(0, &self.bind_group, &[]);
                 pass.set_vertex_buffer(0, gl.vbo.slice(..));
                 pass.draw(0..gl.vertex_count, 0..1);
+                st.add(gl.vertex_count);
             }
-            for g in [&self.ghost_model, &self.ghost].into_iter().flatten() {
+            let ghost_model = self.ghost_chunks.iter().filter_map(|g| g.tris.as_ref());
+            for g in ghost_model.chain(self.ghost.as_ref()) {
                 pass.set_pipeline(&self.ghost_pipeline);
                 pass.set_bind_group(0, &self.bind_group, &[]);
                 pass.set_vertex_buffer(0, g.vbo.slice(..));
                 pass.draw(0..g.vertex_count, 0..1);
+                st.add(g.vertex_count);
             }
 
             // 4) Auswahl-Highlight-Linien als ALLERLETZTES — ohne Tiefentest
@@ -2547,9 +2682,39 @@ impl Renderer {
                 pass.set_bind_group(0, &self.bind_group, &[]);
                 pass.set_vertex_buffer(0, hl.vbo.slice(..));
                 pass.draw(0..hl.vertex_count, 0..1);
+                st.add(hl.vertex_count);
             }
         }
         queue.submit(std::iter::once(encoder.finish()));
+        self.frame_stats = st;
+    }
+
+    /// [214] Zahlen des letzten `render` (Messung, `render_png --bench`).
+    pub fn frame_stats(&self) -> FrameStats {
+        self.frame_stats
+    }
+}
+
+#[cfg(test)]
+mod data_key_tests {
+    use super::{content_key, DataKeys, DataSlot};
+
+    /// [214] Gleiche Daten erkennt der Schlüssel wieder (kein neuer Puffer), jede Änderung (Wert, Länge, Aufteilung
+    /// auf die Folgen) nicht; die Fächer sind unabhängig.
+    #[test]
+    fn gleiche_daten_werden_nicht_neu_gesetzt() {
+        let a = [1.0f32, 2.0, 3.0];
+        assert_eq!(content_key(&[&a]), content_key(&[&[1.0, 2.0, 3.0]]));
+        assert_ne!(content_key(&[&a]), content_key(&[&[1.0, 2.0, 3.5]]));
+        assert_ne!(content_key(&[&[1.0]]), content_key(&[&[1.0, 0.0]]), "Länge zählt");
+        assert_ne!(content_key(&[&a, &[]]), content_key(&[&[], &a]), "Aufteilung zählt");
+        assert_ne!(content_key(&[&[0.0]]), content_key(&[&[-0.0]]), "Bits, nicht Werte");
+        let mut k = DataKeys::default();
+        assert!(k.changed(DataSlot::Drawing, &[&a]), "erstes Mal");
+        assert!(!k.changed(DataSlot::Drawing, &[&a]), "unverändert");
+        assert!(k.changed(DataSlot::Pattern, &[&a]), "anderes Fach");
+        assert!(k.changed(DataSlot::Drawing, &[&[]]), "geleert");
+        assert!(!k.changed(DataSlot::Drawing, &[&[]]));
     }
 }
 

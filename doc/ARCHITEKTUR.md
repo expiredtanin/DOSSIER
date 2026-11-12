@@ -508,7 +508,11 @@ Offen: Bauzonen sind kein eigener Planinhalt (nur Baurecht-Einstellungen); „gr
 4. Die Teile reisen als JSON. `src/viewport/model3dPartsSync.ts` schickt nur neue, geänderte und
    entfernte Teile an render3d (`set_parts()` in `src-tauri/render3d/src/web.rs`). Dort baut
    `scene.rs` die Szene aus Teilen, `mesh.rs` extrudiert Wände und Platten zu Dreiecksnetzen,
-   `gpu.rs` zeichnet.
+   `gpu.rs` zeichnet. Die Geisterschicht grauer Klassen/Geschosse ([180]) reist genauso als Teile
+   (`GhostLayerSync` in `src/viewport/ghostSync.ts`, `set_ghost_parts()`) in eine eigene Szene. Der Kern-Cache hält
+   auch die übrigen Gruppen (Decken, Dächer, Kontext …), solange keine Wand/Öffnung und kein anderes Feld sich
+   ändert — die zweite Abfrage mit dem Geister-Filter rechnet nichts neu ([214]). Messung:
+   `src/viewport/render3d.bench.test.ts` (Kern/TS) und `render_png --bench` (Engine).
 5. Freie Körper (`extrudedSolids`) und Abzugskörper rechnet der Kern synchron ([115]): `model3d/solids.rs`
    (`emit_solids`, Teil `solidMeshes`, Netz aus `solid_mesh::body_mesh_3d`, Farbe/Textur aus `componentId`,
    Herkunft `Owner::Solid` für den Klassen-Filter [180], mit der Explosion angehoben), Pick-Dreiecke in
