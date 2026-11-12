@@ -17,7 +17,7 @@ import { computeAreaTable, computeIvhb } from "../analysis/areaTable";
 import type { AreaRow, IvhbOptions } from "../analysis/areaTable";
 
 /** Zelle: Text oder Zahl (`d` Nachkommastellen, `null` = nicht berechenbar). */
-export type Cell = string | { n: number | null; d: number };
+export type Cell = string | { n: number | null; d: number; g?: boolean };
 
 export interface ReportRow {
   cells: Cell[];

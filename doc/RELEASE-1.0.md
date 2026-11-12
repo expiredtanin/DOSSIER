@@ -106,7 +106,10 @@ E 2'600'048 / N 1'200'046 und E 2'600'060 / N 1'200'056. Raumprogramm als CSV (`
 
 | # | Schritt in Dossier | Erwartet | Status |
 |---|---|---|---|
-| 9.1 | Kennwerte je m³ GV / m² GF, eBKP-H-Hauptgruppen, Ergebnis als Tabelle/CSV | Kosten ±15–25 % | ❌ **[209]** |
+| 9.1 | Flächenbilanz → „Kostenschätzung grob“: Methode CHF/m³ GV, Kennwert C ändern | Tabelle B–J mit Menge, Kennwert, Betrag; Summe B–J, Honorare, Reserve, Total exkl./inkl. MwSt, Bandbreite ±15 %; Beispielwerte als solche markiert | ✅ (Spec 5b) |
+| 9.2 | Methode auf CHF/m² GF umstellen | Beispielwerte der Methode, eigene Kennwerte umgerechnet (Betrag gleich) | ✅ (Spec 5b) |
+| 9.3 | „CSV“ / „PDF“ in der Kostenschätzung | CSV mit Zahlen ohne Tausender-Trenner, PDF A4 quer mit Fussnoten (Preisstand, Faktoren, Herkunft) | ✅ (Spec 5b; PDF nur auf %PDF- geprüft) |
+| 9.4 | Layout-Blatt → „＋ Tabelle“ → „Kostenschätzung grob (eBKP-H)“ | lebendige Tabelle auf dem Blatt, im Blatt-PDF | ✅ (Spec 10b; Bild auf dem Mac prüfen) |
 
 ## 10. Abgabe-Layouts als PDF
 

@@ -36,6 +36,7 @@ bekommen.
 | Datei | Inhalt |
 |---|---|
 | `areaReport.ts` | Flächen- und Kennzahlen-Nachweis (`[70]`); Aufbau, den die übrigen Berichte nutzen |
+| `costReport.ts` | Kostenschätzung grob als Bericht (CSV/PDF über `areaReport.ts`, [209]) |
 | `programReport.ts` | Soll/Ist-Vergleich des Raumprogramms (`[61]`) |
 | `elementSchedule.ts` | Bauteilliste mit U-Werten (`[71]`) |
 | `openingSchedule.ts` | Fenster- und Türliste (`[97]`) |

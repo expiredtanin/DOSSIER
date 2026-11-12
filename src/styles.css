@@ -8550,6 +8550,97 @@ body {
   color: var(--ink-2);
 }
 
+/* [209] Kostenschätzung grob (CostEstimateSection). */
+.cost-example-banner {
+  padding: 4px 6px;
+  border-radius: 4px;
+  background: var(--panel-2);
+  border-left: 3px solid var(--accent);
+  color: var(--ink);
+  font-size: 11px;
+}
+.cost-settings {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 3px 10px;
+}
+.cost-settings .kz-num {
+  width: 48px;
+}
+.cost-settings .kz-parcel > span:first-child {
+  font-size: 11px;
+}
+.cost-table {
+  table-layout: fixed;
+}
+.cost-table th:nth-child(1) {
+  width: 34px;
+}
+.cost-table th:nth-child(3) {
+  width: 62px;
+}
+.cost-table th:nth-child(4) {
+  width: 62px;
+}
+.cost-table th:nth-child(5) {
+  width: 16px;
+}
+.cost-table th:nth-child(5),
+.cost-table td:nth-child(5) {
+  padding: 2px 0;
+}
+.cost-table th {
+  white-space: normal;
+}
+.cost-table td {
+  vertical-align: top;
+}
+.cost-table .kz-input {
+  font-size: 11px;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.cost-table .cost-code {
+  width: 30px;
+}
+.cost-table .cost-name {
+  white-space: normal;
+}
+.cost-table .cost-name > .kz-input {
+  width: 100%;
+}
+.cost-sub {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
+  color: var(--ink-2);
+  font-size: 10px;
+}
+.cost-sub select {
+  flex: 0 0 auto;
+  width: 84px;
+  font-size: 10px;
+}
+.cost-qty {
+  white-space: nowrap;
+}
+.cost-table tr.cost-range td {
+  white-space: normal;
+  color: var(--ink-2);
+}
+.cost-rate {
+  white-space: nowrap;
+}
+.cost-rate.example .kz-input {
+  font-style: italic;
+  color: var(--ink-2);
+}
+.cost-quantities td {
+  white-space: normal;
+  border-bottom: none;
+}
+
 /* Raumprogramm: Gruppenspalte, Aktionen, Soll/Ist-Vergleich, Import-Dialog ([61]). */
 .kz-program-row {
   grid-template-columns: minmax(0, 1fr) 52px 36px 64px 56px 18px;

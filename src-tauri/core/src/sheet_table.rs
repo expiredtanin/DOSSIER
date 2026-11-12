@@ -118,6 +118,16 @@ const ROOM_BOOK: &[Col] = &[
     c("wet", "roomBook.col.wet", 1.0, false, false),
 ];
 
+/// [209] Kostenschätzung grob.
+const COSTS: &[Col] = &[
+    c("code", "sheetTable.col.costCode", 0.9, false, true),
+    c("group", "sheetTable.col.costGroup", 3.6, false, true),
+    c("quantity", "sheetTable.col.quantity", 1.4, true, true),
+    c("unit", "sheetTable.col.unit", 0.8, false, true),
+    c("rate", "sheetTable.col.rate", 1.3, true, true),
+    c("amount", "sheetTable.col.amount", 1.8, true, true),
+];
+
 /// [158] Raumbuch-Spalten, die nur erscheinen, wenn ein Raum eine Dachschräge hat.
 const SLOPE_COLS: &[&str] = &["heightMin", "heightMean", "areaUnder1", "area1To15"];
 
@@ -152,6 +162,22 @@ pub const VALUE_KEYS: &[&str] = &[
     "roomBook.usage.office",
     "roomBook.usage.other",
     "roomBook.wet",
+    "costs.group.B",
+    "costs.group.C",
+    "costs.group.D",
+    "costs.group.E",
+    "costs.group.F",
+    "costs.group.G",
+    "costs.group.H",
+    "costs.group.I",
+    "costs.group.J",
+    "costs.row.subtotal",
+    "costs.row.fees",
+    "costs.row.reserve",
+    "costs.row.net",
+    "costs.row.vat",
+    "costs.row.gross",
+    "costs.lump",
 ];
 
 pub fn catalog(source: LayoutTableSource) -> &'static [Col] {
@@ -162,6 +188,7 @@ pub fn catalog(source: LayoutTableSource) -> &'static [Col] {
         LayoutTableSource::Elements => ELEMENTS,
         LayoutTableSource::Earthworks => EARTHWORKS,
         LayoutTableSource::RoomBook => ROOM_BOOK,
+        LayoutTableSource::Costs => COSTS,
     }
 }
 
@@ -169,7 +196,7 @@ pub fn catalog(source: LayoutTableSource) -> &'static [Col] {
 pub fn catalog_json() -> Value {
     let one = |s: &[Col]| s.iter().map(|k| json!({"id": k.id, "key": k.key, "numeric": k.numeric, "default": k.default})).collect::<Vec<_>>();
     json!({
-        "sources": {"openings": one(OPENINGS), "areas": one(AREAS), "rooms": one(ROOMS), "elements": one(ELEMENTS), "earthworks": one(EARTHWORKS), "roomBook": one(ROOM_BOOK)},
+        "sources": {"openings": one(OPENINGS), "areas": one(AREAS), "rooms": one(ROOMS), "elements": one(ELEMENTS), "earthworks": one(EARTHWORKS), "roomBook": one(ROOM_BOOK), "costs": one(COSTS)},
         "valueKeys": VALUE_KEYS,
     })
 }
@@ -188,7 +215,7 @@ impl Labels {
 }
 
 fn num(n: f64, d: usize) -> Cell {
-    Cell::Num { n: if n.is_finite() { Some(n) } else { None }, d }
+    Cell::Num { n: if n.is_finite() { Some(n) } else { None }, d, g: false }
 }
 fn txt(s: impl Into<String>) -> Cell {
     Cell::Text(s.into())
@@ -233,7 +260,7 @@ fn openings_data(p: &Project, filter: Option<&str>, lb: &Labels) -> Data {
                 txt(swing),
                 txt(r.fire_rating),
                 txt(r.sound_class),
-                Cell::Num { n: r.u_value, d: 2 },
+                Cell::Num { n: r.u_value, d: 2, g: false },
                 txt(r.burglary_class),
                 txt(match r.external {
                     Some(true) => lb.get("openings.external"),
@@ -262,7 +289,7 @@ fn rooms_data(p: &Project) -> Data {
     let rows = cmp
         .rows
         .iter()
-        .map(|r| vec![txt(r.name.clone()), opt(&r.group), num(r.target_count as f64, 0), num(r.target_area, 2), num(r.soll, 2), num(r.ist, 2), num(r.diff, 2), Cell::Num { n: r.diff_pct.map(|v| v * 100.0), d: 1 }])
+        .map(|r| vec![txt(r.name.clone()), opt(&r.group), num(r.target_count as f64, 0), num(r.target_area, 2), num(r.soll, 2), num(r.ist, 2), num(r.diff, 2), Cell::Num { n: r.diff_pct.map(|v| v * 100.0), d: 1, g: false }])
         .collect();
     Data { rows, sloped: false, total_last: false }
 }
@@ -305,6 +332,7 @@ fn data_of(p: &Project, t: &LayoutTable, lb: &Labels) -> Data {
         LayoutTableSource::Elements => elements_data(p, lb),
         LayoutTableSource::Earthworks => earthworks_data(p, lb),
         LayoutTableSource::RoomBook => room_book_data(p, lb),
+        LayoutTableSource::Costs => costs_data(p, lb),
     }
 }
 
@@ -340,6 +368,31 @@ fn room_book_data(p: &Project, lb: &Labels) -> Data {
         })
         .collect();
     Data { rows, sloped, total_last: false }
+}
+
+/// [209] Kostenschätzung: eine Zeile je Kennwert, dann Summe B–J, Honorare, Reserve, Total exkl. MwSt, MwSt und
+/// Total inkl. MwSt mit Genauigkeit (Summenzeile). Beträge in CHF mit Tausender-Apostroph.
+fn costs_data(p: &Project, lb: &Labels) -> Data {
+    let r = crate::kosten::estimate(p);
+    let chf = |n: f64| Cell::Num { n: if n.is_finite() { Some(n) } else { None }, d: 0, g: true };
+    let empty = || txt("");
+    let mut rows: Vec<Vec<Cell>> = r
+        .rows
+        .iter()
+        .map(|g| {
+            let name = g.name.clone().unwrap_or_else(|| lb.get(&format!("costs.group.{}", g.code)));
+            let unit = if g.unit.is_empty() { lb.get("costs.lump") } else { g.unit.to_string() };
+            vec![txt(g.code.clone()), txt(name), Cell::Num { n: Some(g.quantity), d: if g.unit.is_empty() { 0 } else { 1 }, g: true }, txt(unit), chf(g.rate), chf(g.amount)]
+        })
+        .collect();
+    let pct = |label: &str, v: f64| format!("{} {} %", lb.get(label), to_fixed(v, 1).trim_end_matches(".0"));
+    rows.push(vec![empty(), txt(lb.get("costs.row.subtotal")), empty(), empty(), empty(), chf(r.subtotal)]);
+    rows.push(vec![txt("V"), txt(pct("costs.row.fees", r.fees_pct)), empty(), empty(), empty(), chf(r.fees)]);
+    rows.push(vec![txt("Y"), txt(pct("costs.row.reserve", r.reserve_pct)), empty(), empty(), empty(), chf(r.reserve)]);
+    rows.push(vec![empty(), txt(lb.get("costs.row.net")), empty(), empty(), empty(), chf(r.net)]);
+    rows.push(vec![txt("Z"), txt(pct("costs.row.vat", r.vat_pct)), empty(), empty(), empty(), chf(r.vat)]);
+    rows.push(vec![empty(), txt(format!("{} (±{} %)", lb.get("costs.row.gross"), to_fixed(r.accuracy_pct, 0))), empty(), empty(), empty(), chf(r.gross)]);
+    Data { rows, sloped: false, total_last: true }
 }
 
 /// [68] Erdarbeiten je Baugrube (m³ gegen das gewachsene Terrain) mit Summenzeile.
@@ -413,7 +466,7 @@ fn cell_text(c: &Cell) -> String {
     match c {
         Cell::Text(s) => s.clone(),
         Cell::Num { n: None, .. } => "–".to_string(),
-        Cell::Num { n: Some(n), d } => to_fixed(*n, *d),
+        Cell::Num { n: Some(n), d, g } => crate::area_report::fmt_num(*n, *d, *g),
     }
 }
 
@@ -755,5 +808,26 @@ mod tests {
         assert!(render(&p, &p.layouts.as_ref().unwrap()[0], &lb()).is_empty());
         assert_eq!(query(&p, r#"{"layoutId":"nix"}"#), json!([]));
         assert!(catalog_json()["sources"]["elements"].as_array().unwrap().len() >= 6);
+    }
+
+    /// [209] Kostenschätzung als Blatt-Tabelle: Gruppen beschriftet, Franken mit Apostroph, Total als Summenzeile.
+    #[test]
+    fn kosten_tabelle() {
+        let mut t = table("k", None);
+        t.source = LayoutTableSource::Costs;
+        let mut p = project(0, vec![t]);
+        p.drawing_levels[0].floor_height = Some(3.0);
+        let r = render(&p, &p.layouts.as_ref().unwrap()[0], &Labels::parse(&json!({"costs.group.C": "Konstruktion", "costs.row.gross": "Total inkl. MwSt."})));
+        assert_eq!(r[0].total, 9 + 6, "9 Hauptgruppen + Summe, V, Y, exkl., MwSt, inkl.");
+        let tx = texts(&r[0]);
+        assert!(tx.contains(&"Konstruktion".to_string()), "{tx:?}");
+        let gross = crate::kosten::estimate(&p).gross;
+        assert!(gross > 1000.0);
+        assert!(tx.contains(&crate::area_report::fmt_num(gross, 0, true)), "{tx:?}");
+        assert!(tx.iter().any(|s| s.starts_with("Total inkl. MwSt. (±15 %)")), "{tx:?}");
+        assert_eq!(serde_json::to_value(LayoutTableSource::Costs).unwrap(), "costs");
+        assert_eq!(crate::area_report::fmt_num(1234567.5, 2, true), "1'234'567.50");
+        assert_eq!(crate::area_report::fmt_num(-999.0, 0, true), "-999");
+        assert_eq!(crate::area_report::fmt_num(-1000.0, 0, true), "-1'000");
     }
 }

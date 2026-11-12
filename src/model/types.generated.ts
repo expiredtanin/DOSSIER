@@ -590,6 +590,51 @@ export type ContourSet = {
   contours: Array<Contour>;
 };
 
+/** [209] Bezugsmenge eines Kostenkennwerts (Kostenschätzung nach der Kennwert-Methode). */
+export type CostBasis = "method" | "gv" | "gf" | "hnf" | "facade" | "roof" | "lump";
+
+/**
+ * [209] Grobe Kostenschätzung (Vorprojekt/Wettbewerb) nach der Kennwert-Methode: Menge × Kennwert je
+ * eBKP-H-Hauptgruppe, dazu Honorare, Reserve und MwSt in Prozent. Fehlt das Feld, rechnet der Kern mit
+ * Beispielwerten (`kosten::default_estimate`).
+ */
+export type CostEstimate = {
+  method: CostMethod;
+  groups: Array<CostGroup>;
+  /** Honorare (eBKP-H V) in % der Summe B–J. */
+  feesPct: number;
+  /** Reserve/Unvorhergesehenes (eBKP-H Y) in % der Summe B–J + Honorare. */
+  reservePct: number;
+  /** Mehrwertsteuer (eBKP-H Z) in %. */
+  vatPct: number;
+  /** Genauigkeit der Schätzung ± in %. */
+  accuracyPct: number;
+  /** Region-Faktor auf alle Kennwerte (1 = keiner). */
+  regionFactor: number;
+  /**
+   * Teuerung vom Preisstand der Kennwerte bis heute als Faktor (Baupreisindex neu / alt; 1 = keine).
+   */
+  indexFactor: number;
+  /** Preisstand der Kennwerte (Text, z. B. „Okt. 2025, Baupreisindex Hochbau“). */
+  priceBase: string;
+};
+
+/**
+ * [209] Eine Zeile der Kennwert-Tabelle: eBKP-H-Hauptgruppe (B–J) oder eine zusammengefasste Gruppe.
+ */
+export type CostGroup = {
+  /** Kennung der Gruppe nach eBKP-H (SN 506 511), z. B. „C“ oder „B–J“. */
+  code: string;
+  /** Eigene Bezeichnung; fehlt = Name der eBKP-H-Hauptgruppe (aus `code`). */
+  name?: string;
+  basis: CostBasis;
+  /** Kennwert in CHF je Einheit der Bezugsmenge (pauschal: CHF). */
+  rate: number;
+};
+
+/** [209] Hauptmenge der Kostenschätzung: m³ GV oder m² GF. */
+export type CostMethod = "gv" | "gf";
+
 /**
  * Eine benutzerdefinierte Farbpalette (Farbmischer → „Diese Farbe
  * speichern", `ui/FreeColorPicker.tsx`). Anders als Stiftsätze: reine
@@ -1987,7 +2032,14 @@ export type LayoutTable = {
 };
 
 /** Quelle einer Blatt-Tabelle ([111]). */
-export type LayoutTableSource = "openings" | "areas" | "rooms" | "elements" | "earthworks" | "roomBook";
+export type LayoutTableSource =
+  | "openings"
+  | "areas"
+  | "rooms"
+  | "elements"
+  | "earthworks"
+  | "roomBook"
+  | "costs";
 
 /**
  * Einfache Textfelder des Titelblocks (Master). Alle optional — leere Felder
@@ -3052,6 +3104,8 @@ export type Project = {
   projectNumber?: string;
   /** Wettbewerb ([208]): anonyme Abgabe mit Kennwort. */
   competition?: CompetitionSettings;
+  /** [209] Kostenschätzung grob (Kennwerte, Zuschläge); fehlt = Beispielwerte. */
+  costEstimate?: CostEstimate;
   /**
    * Höhe von ±0.00 (OK fertig Boden des Bezugsgeschosses, `DrawingLevel.zeroLevel`)
    * in Metern über Meer (m ü. M.), editierbar im Einstellungs-Fenster. Optional.

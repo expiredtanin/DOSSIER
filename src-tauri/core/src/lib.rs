@@ -143,5 +143,6 @@ pub mod opening_slide;
 mod web;
 pub mod presentation_sheet;
 pub mod drawing_recognize;
+pub mod kosten;
 #[cfg(test)]
 mod wall_join3d_tests;

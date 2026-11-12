@@ -145,6 +145,8 @@ export type QueryName =
   | "presentationSheet"
   | "kennzahlen"
   | "areaTable"
+  | "costEstimate"
+  | "costDefaults"
   | "programCompare"
   | "programLayout"
   | "ivhb"

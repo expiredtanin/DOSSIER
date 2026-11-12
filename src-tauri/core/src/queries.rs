@@ -68,6 +68,9 @@ pub fn run(p: &Project, name: &str, args: &[f64], text: &str) -> Result<String, 
     match (name, args.len()) {
         ("kennzahlen", _) => json(&kennzahlen::compute(p)),
         ("areaTable", _) => json(&flaechen::area_table(p)),
+        // [209] Kostenschätzung grob; `costDefaults` mit Text „gf“/„gv“ = Beispielwerte der Methode.
+        ("costEstimate", _) => json(&crate::kosten::estimate(p)),
+        ("costDefaults", _) => json(&crate::kosten::default_estimate(if text.trim() == "gf" { crate::model::CostMethod::Gf } else { crate::model::CostMethod::Gv })),
         ("ivhb", _) => {
             let opt: flaechen::IvhbOptions = if text.trim().is_empty() { Default::default() } else { serde_json::from_str(text).map_err(|e| format!("ivhb: {e}"))? };
             json(&flaechen::ivhb(p, &opt))

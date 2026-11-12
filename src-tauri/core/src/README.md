@@ -91,6 +91,7 @@ Neues Modul: `<modul>.rs` und `mod` in `lib.rs`, Bindungen in `web/<modul>.rs` u
 | `sun.rs` | Sonnenstand und Boden-Schatten |
 | `site_rules.rs` | Baurecht der Parzelle |
 | `kennzahlen.rs`, `flaechen.rs`, `area_report.rs` | Kennzahlen und Flächennachweise nach SIA 416 |
+| `kosten.rs` | Kostenschätzung grob nach Kennwerten je eBKP-H-Hauptgruppe, Mengen aus `flaechen.rs` ([209]) |
 | `room_program.rs`, `room_book.rs` | Raumprogramm (Soll/Ist), Raumbuch |
 | `u_value.rs`, `clash_broad.rs` | U-Wert aus dem Schichtaufbau; Vorstufe der Kollisionsprüfung |
 
