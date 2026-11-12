@@ -1068,7 +1068,8 @@ fn collect(p: &Project, k: [f64; 2], cut: Option<f64>, ground: Option<&Ground>) 
     for ce in p.ceilings.as_deref().unwrap_or(&[]) {
         let (zb, zt) = p.ceiling_vertical_extent(ce);
         let ring = |r: &[crate::model::Vec2]| r.iter().map(|v| [v.x, v.y]).collect::<Ring>();
-        let outline = ring(&ce.outline);
+        // [191] Umriss mit Bögen fein geteilt (wie die Aussparungen), sonst schnitte die Sehne den Erker ab.
+        let outline = ring(&ce.ring());
         let holes: Vec<Ring> = crate::opening_shape::ceiling_hole_rings(p, ce).iter().map(|h| ring(h)).collect();
         let region = oriented(std::iter::once(outline.clone()).chain(holes.iter().cloned()).collect());
         if region.first().is_none_or(|r| r.len() < 3) || !(zt > zb) {
@@ -1846,6 +1847,30 @@ mod terrain_tests {
             assert!(!shaded(&sh, 3.0, -0.3), "Sonnenseite unter dem Vorsprung hell");
             assert!(!shaded(&sh, 3.0, 2.0), "Inneres abgedeckt");
         }
+    }
+
+    /// [191] Decken mit Bogen-Umriss (Erker): Abdeckung und Werfer folgen dem Bogen, nicht der Sehne. Haus 6 × 4 m mit
+    /// Halbkreis-Erker (Bogenwand r = 2 m) im Osten, darüber eine Decke mit Aussparung im Erker: im Loch fällt kein Schatten auf
+    /// den Boden darunter, weil darüber die Decke liegt; der Umriss mit Bogen wird fein geteilt (vorher: Sehne, Loch halb draussen).
+    #[test]
+    fn decke_mit_bogenumriss_deckt_den_erker_ab() {
+        let e = serde_json::json!({});
+        let walls = serde_json::json!([
+            wall_json("s", [0.0, 0.0], [6.0, 0.0], e.clone()),
+            wall_json("o", [6.0, 0.0], [6.0, 4.0], serde_json::json!({"bulge": -1.0})),
+            wall_json("n", [6.0, 4.0], [0.0, 4.0], e.clone()), wall_json("w", [0.0, 4.0], [0.0, 0.0], e)
+        ]);
+        let outline = serde_json::json!([{"x": -0.1, "y": -0.1}, {"x": 6.0, "y": -0.1}, {"x": 6.0, "y": 4.1}, {"x": -0.1, "y": 4.1}]);
+        let lower = serde_json::json!({"id": "c1", "type": "ceiling", "floorId": "eg", "categoryCode": "21", "wallTypeId": "x", "outline": outline, "outlineBulge": [0.0, -1.0, 0.0, 0.0],
+            "openings": [rect(6.4, 1.6, 7.0, 2.4)]});
+        let upper = serde_json::json!({"id": "c2", "type": "ceiling", "floorId": "og", "categoryCode": "21", "wallTypeId": "x", "outline": outline, "outlineBulge": [0.0, -1.0, 0.0, 0.0]});
+        // Hoher Pfosten südlich des Erkers: sein Schatten (45°, Sonne aus Süden) reicht über das Deckenloch.
+        let post = serde_json::json!([{"id": "s", "type": "extrudedSolid", "levelId": "eg", "points": rect(6.5, -2.0, 6.9, -1.6), "height": 9.0}]);
+        let p = project_json(serde_json::json!({ "drawingLevels": levels(), "walls": walls, "ceilings": [lower, upper], "extrudedSolids": post, "context": flat_terrain(0.0) }));
+        let sh = shadow_polygons_plan(&p, SunPosition { azimuth: 180.0, elevation: 45.0 }, 1.0, true);
+        assert!(shaded(&sh, 6.7, -0.5), "Pfosten wirft Schatten im Freien");
+        assert!(!shaded(&sh, 6.7, 1.5) && !shaded(&sh, 6.7, 3.0), "Erker unter der Decke (Bogen) ist abgedeckt");
+        assert!(!shaded(&sh, 6.7, 2.0), "Loch in der unteren Decke: darüber liegt die obere, kein Schatten auf den Boden");
     }
 
     /// [148] Flachdach auf L-Umriss wirft einen L-förmigen Schatten (nicht Bounding-Box, nicht konvexe
