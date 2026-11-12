@@ -497,11 +497,6 @@ export interface ProjectSlice {
     roomId: string,
     doc: import("../model/types").RichTextDoc,
   ) => void;
-  /** Setzt den strukturierten Raum-Stempel (Feldmodell). */
-  setRoomStamp: (
-    roomId: string,
-    stamp: import("../model/types").RoomStamp,
-  ) => void;
 }
 
 /**
@@ -1412,9 +1407,6 @@ export function createProjectSlice(
 
     setRoomStampDoc: (roomId, doc) =>
       applyChange((p) => mapRoom(p, roomId, (r) => ({ ...r, stampDoc: doc }))),
-
-    setRoomStamp: (roomId, stamp) =>
-      applyChange((p) => mapRoom(p, roomId, (r) => ({ ...r, stamp }))),
   };
 }
 

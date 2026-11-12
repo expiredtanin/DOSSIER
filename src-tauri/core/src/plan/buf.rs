@@ -2354,7 +2354,7 @@ pub(crate) mod tests {
             Primitive::Text {
                 at: v(2.0, 2.0),
                 doc: RichTextDoc::default(),
-                extra_lines: vec![StampLine { text: "17.01 m²".into(), align: Default::default() }],
+                extra_lines: vec![StampLine::plain("17.01 m²".into(), Default::default())],
                 base_pt: 10.0,
                 color: "#6b7280".into(),
                 room_id: Some("R1".into()),

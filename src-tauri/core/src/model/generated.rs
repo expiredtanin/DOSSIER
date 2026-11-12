@@ -4142,6 +4142,35 @@ pub struct RichTextDoc {
     pub extra: Extra,
 }
 
+/// [218] Schrift einer Zeile des Raumstempels; fehlende Werte gelten als „wie die Vorgabe" (Stempelschrift, dann
+/// die eingebauten Werte der Zeile). Grösse in typografischen Punkt auf dem Papier bei der Grundschrift 10 pt
+/// (kleinere Massstäbe verkleinern sie im Verhältnis).
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct RoomStampFont {
+    /// Schriftfamilie (eine der gebündelten Schriften, z. B. "Work Sans").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub family: Option<String>,
+    /// Schriftgrösse in pt.
+    #[serde(rename = "sizePt", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub size_pt: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub bold: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub italic: Option<bool>,
+    /// Farbe als "#rrggbb".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub color: Option<String>,
+    #[serde(flatten)]
+    #[ts(skip)]
+    pub extra: Extra,
+}
+
 /// Feldmodell des Raum-Stempels. Ersetzt den freien Text durch benannte Felder;
 /// daraus baut roomStamp.ts sowohl das gerenderte Rich-Text-Dokument als auch die
 /// Live-Zeilen. Minimal gehalten (MVP).
@@ -4209,6 +4238,30 @@ pub struct RoomStamp {
     #[serde(rename = "showDivider", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub show_divider: Option<bool>,
+    /// [218] Schrift des ganzen Stempels (Vorgabe für alle Zeilen ohne eigene Angabe).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub font: Option<RoomStampFont>,
+    /// [218] Schrift der Namenszeile (Vorgabe: Stempelschrift, sonst 12 pt fett).
+    #[serde(rename = "nameFont", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub name_font: Option<RoomStampFont>,
+    /// [218] Schrift der zweiten Namenszeile (Vorgabe: Stempelschrift, sonst 9 pt kursiv).
+    #[serde(rename = "line2Font", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub line2_font: Option<RoomStampFont>,
+    /// [218] Schrift der Raumnummer (Vorgabe: Stempelschrift, sonst 9 pt).
+    #[serde(rename = "numberFont", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub number_font: Option<RoomStampFont>,
+    /// [218] Schrift der Bodenflächen-Zeile (Vorgabe: Stempelschrift, sonst 0.8 × Grundschrift).
+    #[serde(rename = "areaFont", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub area_font: Option<RoomStampFont>,
+    /// [218] Schrift der Nutzungs-Zeile (Vorgabe: Stempelschrift, sonst 0.8 × Grundschrift).
+    #[serde(rename = "usageFont", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub usage_font: Option<RoomStampFont>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,

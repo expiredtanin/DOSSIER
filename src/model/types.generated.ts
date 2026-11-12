@@ -3322,6 +3322,34 @@ export type RoomStamp = {
   showFinish?: boolean;
   /** [177] Trennlinie unter dem Namen anzeigen. Fehlt/false: keine Linie. */
   showDivider?: boolean;
+  /** [218] Schrift des ganzen Stempels (Vorgabe für alle Zeilen ohne eigene Angabe). */
+  font?: RoomStampFont;
+  /** [218] Schrift der Namenszeile (Vorgabe: Stempelschrift, sonst 12 pt fett). */
+  nameFont?: RoomStampFont;
+  /** [218] Schrift der zweiten Namenszeile (Vorgabe: Stempelschrift, sonst 9 pt kursiv). */
+  line2Font?: RoomStampFont;
+  /** [218] Schrift der Raumnummer (Vorgabe: Stempelschrift, sonst 9 pt). */
+  numberFont?: RoomStampFont;
+  /** [218] Schrift der Bodenflächen-Zeile (Vorgabe: Stempelschrift, sonst 0.8 × Grundschrift). */
+  areaFont?: RoomStampFont;
+  /** [218] Schrift der Nutzungs-Zeile (Vorgabe: Stempelschrift, sonst 0.8 × Grundschrift). */
+  usageFont?: RoomStampFont;
+};
+
+/**
+ * [218] Schrift einer Zeile des Raumstempels; fehlende Werte gelten als „wie die Vorgabe" (Stempelschrift, dann
+ * die eingebauten Werte der Zeile). Grösse in typografischen Punkt auf dem Papier bei der Grundschrift 10 pt
+ * (kleinere Massstäbe verkleinern sie im Verhältnis).
+ */
+export type RoomStampFont = {
+  /** Schriftfamilie (eine der gebündelten Schriften, z. B. "Work Sans"). */
+  family?: string;
+  /** Schriftgrösse in pt. */
+  sizePt?: number;
+  bold?: boolean;
+  italic?: boolean;
+  /** Farbe als "#rrggbb". */
+  color?: string;
 };
 
 /** [158] Nutzung eines Raums (Raumbuch). Nassräume: Bad, WC, Dusche, Waschküche. */

@@ -30,8 +30,6 @@ export function useContextMenuState() {
   const [nativeLayerSettingsCode, setNativeLayerSettingsCode] = useState<string | null>(
     null,
   );
-  // Offener Raum-Stempel-Editor (Rich-Text) — per Doppelklick/Button geöffnet.
-  const [stampEditorRoomId, setStampEditorRoomId] = useState<string | null>(null);
   // Text-Inhalt-Editor: Id des per Doppelklick bearbeiteten Text-2D-Elements.
   const [editTextId, setEditTextId] = useState<string | null>(null);
   // Mindesthöhe (Meter) des Inline-Editors, wenn `editTextId` aus einem frisch
@@ -51,8 +49,6 @@ export function useContextMenuState() {
     setEditor,
     nativeLayerSettingsCode,
     setNativeLayerSettingsCode,
-    stampEditorRoomId,
-    setStampEditorRoomId,
     editTextId,
     setEditTextId,
     editTextMinHeightM,

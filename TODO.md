@@ -67,6 +67,20 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   Parzelle, Strassen, Nordpfeil, Massstabsbalken; als Ansichtsvorlage „Situation WBW“. · M
 - ○ **[208]** Wettbewerbs-Layouts: Plakat-Vorlagen A0/A1 hoch/quer mit Raster, Kennwort-Feld (Anonymität: kein Büroname,
   Metadaten im PDF leer), Planköpfe; Publikationssatz „WBW-Abgabe“ → PDF. · M
+- ◐ **[218]** Raumstempel bearbeiten im Objekteinstellungsfenster (13.11., Wunsch Maintainer): **Stand 13.11.:** Der Overlay-Dialog
+  („Fenster im Fenster“, `RoomStampEditor`/`RoomStampEditorHost`, samt Alt-Rich-Text-Dialog `TextEditorDialog`) ist weg. Doppelklick auf einen
+  Raumstempel (oder den Raum) wählt den Raum und öffnet die Objekteinstellungen mit dem neuen Abschnitt „Raumstempel“
+  (`panels/objectInfo/RoomStampSection.tsx`, Fokus-Abschnitt wie bei T, `openObjectSettings(deps, "roomStamp")`); unter Tauri im nativen
+  Nebenfenster über die bestehende Spiegelung ([195b], Abschnitt schreibt über Store-Ops). Schrift wählbar: Modell `RoomStampFont`
+  (Familie aus den gebündelten Schriften, Grösse pt, fett, kursiv, Farbe) am Stempel (`font`, ganzer Stempel) und je Zeile (`nameFont`,
+  `line2Font`, `numberFont`, `areaFont`, `usageFont`); Auflösung im Kern `plan/domains.rs::stamp_line_marks`: Zeile > Stempel > bisherige
+  Vorgabe (Name 12 pt fett, Zeile 2 9 pt kursiv, Nummer 9 pt, Zusatzzeilen 0.8 × Grundschrift); Zusatzzeilen tragen `StampLine.marks`
+  (Grösse bezogen auf Grundschrift 10 pt, folgt dem Massstab 7/10 und dem Einpassen), `text_layout::stamp_block*` und alle Ausgaben
+  (Anzeige-Szene `plan/text.rs` mit den gemessenen Grundlinien, SVG, Druck-SVG/PDF, DXF, HTML-Block) lesen sie. Mehrfachauswahl: gemischte
+  Werte „gemischt“, Änderung für alle gewählten Räume in EINEM Undo-Schritt (`state/roomStampEdit.ts`); Nummer/Namen bleiben je Raum. Bezugspunkt und Masse
+  (Breite/Höhe/Drehen, bei allen Elementarten) erscheinen nur noch im Objekt-Info-Panel, nicht im Fenster (`ObjectInfoPanel showPlacement=false`).
+  **Offen:** Die Schriftfamilie zeigt der GPU-Glyphen-Pass (WebGPU/Metal, `render2d/glyph.rs`) noch nicht — er kennt nur das eingebettete Inter
+  (Grösse, fett, kursiv, Farbe wirken); Familie sichtbar in SVG/PDF/DXF/HTML; Mac-Nebenfenster nicht geprüft (nur Linux-Container). · M
 - [61] Raumprogramm gegen Modell und Flächennachweis SIA 416 als Tabelle/Layout-Element ([70]); Kennzahlen (GF, GV, HNF/GF, Fassadenanteil).
 - 3D-Bilder für die Abgabe: hochaufgelöster PNG-Export (Perspektive, Axonometrie, Schatten), Sonnenstand; [205] Pausfolie.
 - [199]/[204] Plan- und App-Review-Reste im Darstellungsbereich 1:500/1:200 schliessen.
@@ -290,7 +304,7 @@ Punktwolken/BCF-Ausbau, Windows-Paket, [C5]/[C7]/[15] Kern-Umbauten — ausser s
   nicht mehr im Stempel (Attribut des Raums; nur mit „SIA-Kategorie anzeigen“ = `showUsage`, neue Stempel Vorgabe aus), neue
   Option `showDivider` (Trennlinie unter dem Namen); Ausrichtung je Zeile bleibt wählbar. Bestehende Stempel mit
   `showUsage: true` behalten die Zeile, fehlende Ausrichtungen gelten jetzt als links. Offen: Mac-Gegenprobe (Metal/native
-  Ansicht) (Kern `plan/domains.rs`, `src/panels/RoomStampEditor.tsx`). · S
+  Ansicht) (Kern `plan/domains.rs`, Bearbeiten: `src/panels/objectInfo/RoomStampSection.tsx`, [218]). · S
 
 - ◐ **[141]** Wandecken. 9.11.: Wand und Stütze überlappen nicht mehr — runde Stütze an der Kontur, Wand durch
   bzw. breiter als die Stütze, Stütze kürzer als die Wand (3D: `model3d::carve_at_columns`, Streifen an den

@@ -18,7 +18,6 @@ import type { useProjectActions } from "../state/useProjectActions";
 import type { useProjectFileActions } from "../state/useProjectFileActions";
 import type { useSettingsHost } from "../state/useSettingsHost";
 import type { useTopBarState } from "../state/useTopBarState";
-import type { useContextMenuState } from "../menus/useContextMenuState";
 import { t } from "../i18n";
 import { AiActivityPanel } from "./AiActivityPanel";
 import { BusyOverlay } from "./BusyOverlay";
@@ -32,14 +31,12 @@ import { PresentationDialogHost } from "./PresentationDialog";
 import { PromptDialog } from "./PromptDialog";
 import { RecoverAutosaveDialog } from "./RecoverAutosaveDialog";
 import { ResourceManager, type ResourceManagerHandlers } from "./ResourceManager";
-import { RoomStampEditorHost } from "./RoomStampEditorHost";
 import { SettingsDialog } from "./SettingsDialog";
 import { UnsavedChangesDialog } from "./UnsavedChangesDialog";
 
 type TopBar = ReturnType<typeof useTopBarState>;
 type EngineHost = ReturnType<typeof useCommandEngineHost>;
 type ToolState = ReturnType<typeof useDrawingToolState>;
-type Menu = ReturnType<typeof useContextMenuState>;
 
 export function AppDialogs(props: {
   applyChange: RootState["applyChange"];
@@ -67,8 +64,6 @@ export function AppDialogs(props: {
   pendingCopyMode: ToolState["pendingCopyMode"];
   setPendingCopyMode: ToolState["setPendingCopyMode"];
   commitCopyCount: ToolState["commitCopyCount"];
-  stampEditorRoomId: Menu["stampEditorRoomId"];
-  setStampEditorRoomId: Menu["setStampEditorRoomId"];
 }) {
   const {
     applyChange,
@@ -88,8 +83,6 @@ export function AppDialogs(props: {
     pendingCopyMode,
     setPendingCopyMode,
     commitCopyCount,
-    stampEditorRoomId,
-    setStampEditorRoomId,
   } = props;
   const {
     resourcesOpen,
@@ -128,7 +121,6 @@ export function AppDialogs(props: {
   const { pendingIfc, setPendingIfc, ifcReport, setIfcReport, runIfcImport } = props.modelImport;
   const { themeMode, setThemeMode, offline, onOfflineChange, aiAccess, setScaleLineWeights, setLineEnds } = props.settings;
   const { exportContentMeters, onExportPdf, onExportSvg, onExportDxf } = props.planExport;
-  const { setRoomStamp, setRoomStampDoc } = props.pa;
   // Das Projekt nur abonnieren, solange ein Dialog offen ist, der es zeigt ([121]): sonst rendert eine Op
   // am Modell hier nichts. `App` reicht es nicht mehr durch.
   const needsProject = resourcesOpen || !!importState || settingsOpen;
@@ -332,18 +324,8 @@ export function AppDialogs(props: {
         `text`/`textbox` (sofort nach Platzieren, s. host.focusDrawing) oder
         Doppelklick auf ein bestehendes Element (onEditDrawingText). */}
 
-    {/* Text-Editor (schwebendes Fenster): Doppelklick auf einen Raumstempel bzw.
-        Button in der Objekt-Info öffnet ihn. „Übernehmen" schreibt das
-        bearbeitete Rich-Text-Dokument über setRoomStampDoc. Die Formatier-
-        Leiste in der Oberleiste wirkt ebenfalls live auf den gewählten Raum. */}
-    {stampEditorRoomId && (
-      <RoomStampEditorHost
-        roomId={stampEditorRoomId}
-        onClose={() => setStampEditorRoomId(null)}
-        setRoomStamp={setRoomStamp}
-        setRoomStampDoc={setRoomStampDoc}
-      />
-    )}
+    {/* Raumstempel: kein Dialog mehr ([218]) — Doppelklick auf einen Stempel öffnet die Objekteinstellungen mit dem
+        Abschnitt „Raumstempel". Die Formatier-Leiste in der Oberleiste wirkt weiter live auf den Alt-Text eines Raums. */}
 
     {/* Dezenter Drop-Rahmen, solange eine Datei über die App gezogen wird. */}
     {dropActive && (

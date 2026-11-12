@@ -573,8 +573,6 @@ export interface PanelHostValue {
   onSetRoomName: (name: string) => void;
   /** Setzt die SIA-416-Blatt-Kategorie des Raums. */
   onSetRoomSia: (category: SiaCategory) => void;
-  /** Öffnet den Rich-Text-Editor des Raum-Stempels (per ID). */
-  onEditRoomStamp: (roomId: string) => void;
 
   // ── Extrusions-Attribute (truck-Integration; nur der selektierte Körper) ──
   /** Setzt die Extrusionshöhe (Meter, > 0) — löst eine Re-Extrusion aus. */

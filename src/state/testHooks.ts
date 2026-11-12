@@ -79,6 +79,10 @@ declare global {
       stairHole: (stairId: string, ceilingId: string) => { start: { x: number; y: number }; center: { x: number; y: number } | null; hole0: { x: number; y: number } | null; lines: number };
       /** [203] Grundriss der aktiven Ebene wie in der Ansicht (Geschoss-Überlagerung nach Zeichnungsebenen-Modus): Raumstempel je Geschoss (gesamt/gedimmt) und Zahl der Achs-Beschriftungen `axis`. */
       planStamps: (axis: string) => { floors: Record<string, { n: number; greyed: number }>; axis: number };
+      /** [218] Stempel des Raums `roomId` im Grundriss der aktiven Ebene (wie angezeigt): Lage, Schrift der Namenszeile und Zusatzzeilen; `null` ohne Stempel. */
+      roomStamp: (roomId: string) => { at: { x: number; y: number }; basePt: number; name: { sizePt?: number; font?: string; bold?: boolean }; extra: { text: string; marks?: { sizePt?: number; font?: string; italic?: boolean } }[] } | null;
+      /** [218] Räume der aktiven Ebene mit Mittelpunkt des Umrisses (Modell-m). */
+      roomCenters: () => { id: string; name: string; x: number; y: number }[];
       /** [205] Pausfolie des Reiters (Store) und ihr Plan für die aktive Ebene: Zahl der Primitive, Linienfarben, Zahl mit Auswahl-Ids, Ausmass. */
       trace: () => { trace: unknown; n: number; colors: string[]; withIds: number; bounds: { minX: number; minY: number; maxX: number; maxY: number } | null; probe: { x: number; y: number } | null };
     };
@@ -218,6 +222,23 @@ export function installTestHooks(): void {
         } else if (q.kind === "drawingText" && q.text === axis && q.drawingId && p.drawings2d.some((d) => d.id === q.drawingId && d.geom.shape === "grid")) n++;
       }
       return { floors, axis: n };
+    },
+    roomStamp: (roomId) => {
+      const s = getState();
+      const p = s.project;
+      const mode = s.displayModes[BUILTIN_PANEL_IDS.drawingLevels] ?? "all";
+      const display = (id: string) => itemDisplay(mode, id === s.activeLevelId, p.drawingLevels.find((l) => l.id === id)?.visible ?? false);
+      const plan = materializeGreyed(materializeUnderlay(generateVisibleLevelsPlan(p, s.activeLevelId, collectVisibleCodes(p.layers), undefined, s.detail, false, false, display, s.scaleDenominator)), true);
+      for (const q of plan.primitives) {
+        if (q.kind !== "text" || q.roomId !== roomId) continue;
+        const m = q.doc.paragraphs[0]?.runs[0]?.marks ?? {};
+        return { at: q.at, basePt: q.basePt, name: { sizePt: m.sizePt, font: m.font, bold: m.bold }, extra: (q.extraLines ?? []).map((l) => ({ text: l.text, marks: l.marks })) };
+      }
+      return null;
+    },
+    roomCenters: () => {
+      const s = getState();
+      return (s.project.rooms ?? []).filter((r) => r.floorId === s.activeLevelId && r.boundary.length >= 3).map((r) => ({ id: r.id, name: r.name, x: r.boundary.reduce((a, v) => a + v.x, 0) / r.boundary.length, y: r.boundary.reduce((a, v) => a + v.y, 0) / r.boundary.length }));
     },
     trace: () => {
       const s = getState();

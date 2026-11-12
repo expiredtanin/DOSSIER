@@ -8,6 +8,7 @@
 // aus App, Aktionen melden sich über Callbacks zurück. Bezeichner englisch,
 // UI-Text/Kommentare deutsch (CONVENTIONS.md).
 
+import { TEXT_FONTS } from "../text/fontList";
 import { t } from "../i18n";
 import { checkForUpdate } from "../update/checkForUpdate";
 import { getRunningVersion } from "../update/version";
@@ -522,32 +523,6 @@ function Segment({
     </div>
   );
 }
-
-/**
- * Schriftauswahl der Text-Gruppe: 15 kuratierte, lokal gebuendelte
- * Open-Source-Schriften (SIL Open Font License, siehe `src/text/fonts.css`
- * und `public/fonts/<slug>/OFL.txt`). Bewusst KEINE Systemfonts mehr — die
- * Darstellung soll unabhaengig vom Betriebssystem und der PDF-Export
- * deterministisch sein. Ein spaeterer Einstellungen-Dialog kann weitere
- * Schriften nachladen; das hier ist die Standardliste.
- */
-export const TEXT_FONTS: string[] = [
-  "Inter",
-  "Work Sans",
-  "IBM Plex Sans",
-  "IBM Plex Mono",
-  "Source Sans 3",
-  "Space Grotesk",
-  "Manrope",
-  "Outfit",
-  "DM Sans",
-  "Public Sans",
-  "Karla",
-  "Rubik",
-  "Jost",
-  "Archivo",
-  "Source Serif 4",
-];
 
 /** Grössen-Presets (pt) der Text-Gruppe. */
 const TEXT_SIZES: number[] = [8, 9, 10, 11, 12, 14, 18, 24, 36, 48];

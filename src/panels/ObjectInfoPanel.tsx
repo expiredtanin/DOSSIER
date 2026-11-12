@@ -54,7 +54,11 @@ function toDeg360(rad: number): number {
 }
 
 
-export function ObjectInfoPanel() {
+/**
+ * `showPlacement` = false: ohne Bezugspunkt/Lage und Masse (Breite/Höhe/Drehen) — so zeigt sie das Fenster
+ * Objekteinstellungen ([218], Wunsch Maintainer: Platzierung und Masse gehören nur ins Objekt-Info-Panel).
+ */
+export function ObjectInfoPanel({ showPlacement = true }: { showPlacement?: boolean } = {}) {
   const host = usePanelHost();
   const storeProject = useStore((st) => st.project);
   const sel = useSelectionInfo();
@@ -183,10 +187,9 @@ export function ObjectInfoPanel() {
         </div>
       )}
 
-      <div className="objinfo-sep" />
-
-      {(
+      {showPlacement && (
         <>
+          <div className="objinfo-sep" />
           {/* Bezugspunkt-Würfel (3×3, immer quadratisch) links, X/Y/Z als Spalte
               rechts daneben (Nutzer-Wunsch). */}
           <div className="objinfo-section-label">{t("objinfo.refpoint")}</div>

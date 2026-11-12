@@ -50,7 +50,7 @@ describe("Panel-Zuordnung [189]", () => {
   });
 
   it("jede Gruppe hat einen Titel", () => {
-    const all: InfoGroupId[] = ["newComponent", "sectionLine", "wall", "ceiling", "roof", "surfacePattern", "opening", "openingEditor", "stair", "room", "extrudedSolid", "column", "detailRef", "dimRefs", "dimText", "grid"];
+    const all: InfoGroupId[] = ["newComponent", "sectionLine", "wall", "ceiling", "roof", "surfacePattern", "opening", "openingEditor", "stair", "room", "roomStamp", "extrudedSolid", "column", "detailRef", "dimRefs", "dimText", "grid"];
     for (const g of all) expect(INFO_GROUP_TITLE[g]).toBeTruthy();
   });
 });
