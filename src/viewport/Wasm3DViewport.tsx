@@ -45,7 +45,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Project, Wall, Drawing2D, Ceiling, Roof, Vec2 } from "../model/types";
 import { roofBaseElevation, roofGeometry, verticalExtents } from "../core";
-import { projectToModel3d, pickGeometry, draftWorldLines, explodeFloorOffsets, hiddenClassCodes } from "../core";
+import { projectToModel3d, pickGeometry, draftWorldLines, explodeFloorOffsets, hiddenClassCodes, filter3d } from "../core";
 import type { Hide3d } from "../core";
 import { toFilter3d, useView3dFilter } from "../state/view3dFilter";
 import type { DetailLevel, RenderMode, View3d } from "../model/viewTypes";
@@ -315,7 +315,9 @@ function fitTargetDist(project: Project, hide?: Hide3d): {
   target: [number, number, number];
   dist: number;
 } {
-  const model = projectToModel3d(project, { hide });
+  // [180] Graue Klassen (Geisterschicht) zählen zur Ausdehnung wie sichtbare.
+  const f = filter3d(hide);
+  const model = projectToModel3d(project, { hide: f.grey ? { ...f, grey: undefined } : hide });
   let minX = Infinity;
   let minY = Infinity;
   let minZ = Infinity;
@@ -420,6 +422,8 @@ export function Wasm3DViewport({
   onGrip3dEditCancel,
   hiddenCodes,
   hiddenFloors,
+  greyCodes,
+  lockedCodes,
 }: {
   project: Project;
   /** Kanonischer Blickwinkel (Oberleiste) — s. Datei-Kommentar. */
@@ -537,6 +541,10 @@ export function Wasm3DViewport({
   hiddenCodes?: readonly string[];
   /** [196] Geschosse (Zeichnungsebenen-ids) mit ausgeschaltetem Auge: ihre Elemente fehlen im Modell und im Pick. */
   hiddenFloors?: readonly string[];
+  /** [180] Klassen im Darstellungsmodus „grau": gedämpft und durchscheinend (Geisterschicht), anwählbar wie im Grundriss. */
+  greyCodes?: readonly string[];
+  /** [180] Gesperrte Klassen des Darstellungsmodus: sichtbar, aber nicht anwählbar. */
+  lockedCodes?: readonly string[];
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   // Pick-Callback in einem Ref spiegeln, damit der (einmal registrierte)
@@ -611,11 +619,17 @@ export function Wasm3DViewport({
   const elementFilter = useView3dFilter();
   const { only: onlyIds, hidden: hiddenIds } = elementFilter;
   const floorsKey = (hiddenFloors ?? []).join("\u0001");
+  const greyKey = (greyCodes ?? []).join("\u0001");
+  const lockKey = (lockedCodes ?? []).join("\u0001");
   const hide = useMemo<Hide3d>(() => {
-    const codes = hiddenKey ? hiddenKey.split("\u0001") : [];
-    const floors = floorsKey ? floorsKey.split("\u0001") : [];
-    return onlyIds || hiddenIds.length || floors.length ? toFilter3d({ only: onlyIds, hidden: hiddenIds }, codes, floors) : codes;
-  }, [hiddenKey, floorsKey, onlyIds, hiddenIds]);
+    const split = (k: string) => (k ? k.split("\u0001") : []);
+    const codes = split(hiddenKey);
+    const floors = split(floorsKey);
+    const dim = { grey: split(greyKey), lock: split(lockKey) };
+    return onlyIds || hiddenIds.length || floors.length || dim.grey.length || dim.lock.length
+      ? toFilter3d({ only: onlyIds, hidden: hiddenIds }, codes, floors, dim)
+      : codes;
+  }, [hiddenKey, floorsKey, greyKey, lockKey, onlyIds, hiddenIds]);
   const hideRef = useRef(hide);
   hideRef.current = hide;
   // Versatz je Geschoss ([65]) für Griffe und gezogene Höhen (Modell bleibt unversetzt).

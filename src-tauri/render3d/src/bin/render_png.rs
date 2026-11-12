@@ -8,7 +8,8 @@
 // `--points` ([27]): Textdatei mit einem Punkt je Zeile `x y z [r g b [intensitaet [klasse]]]` in
 // Modell-Metern (x = Ost, y = Nord, z = Hoehe) — dieselbe Punkt-Pipeline wie im Browser-Viewport.
 //
-// `modell.json` ist das Modell wie `set_model` es bekommt (`dossier-cli … model3d`).
+// `modell.json` ist das Modell wie `set_model` es bekommt (`dossier-cli … model3d`); ein Feld `ghost` (gleiches
+// Format, `dossier-cli … model3d --grey …`) zeichnet die grauen Klassen als Geisterschicht wie der Viewer ([180]).
 
 use std::io::Write;
 
@@ -26,6 +27,9 @@ struct ModelInput {
     slabs: Vec<SlabInput>,
     #[serde(default)]
     meshes: Vec<MeshInput>,
+    /// [180] Geisterschicht (graue Klassen), s. Kopf.
+    #[serde(default)]
+    ghost: Option<Box<ModelInput>>,
 }
 
 fn bounds(m: &ModelInput) -> Option<([f32; 3], [f32; 3])> {
@@ -198,7 +202,7 @@ fn main() {
         .and_then(|(a, b)| Some((a.parse::<u32>().ok()?, b.parse::<u32>().ok()?)))
         .unwrap_or((1200, 800));
     let json = std::fs::read_to_string(pos[0]).expect("Modell lesen");
-    let model: ModelInput = serde_json::from_str(&json).expect("Modell parsen");
+    let mut model: ModelInput = serde_json::from_str(&json).expect("Modell parsen");
 
     let instance = wgpu::Instance::default();
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -221,6 +225,11 @@ fn main() {
     let mut renderer = Renderer::new(&device, format);
     renderer.set_render_style(RenderStyle::from_str_or_shaded(&flag("--style", "shaded")));
     renderer.upload_model(&device, &model.walls, &model.slabs, &model.meshes);
+    if let Some(g) = model.ghost.take() {
+        let g = *g;
+        let (tris, lines) = render3d::ghost::ghost_buffers(render3d::scene::PartInput { walls: g.walls, slabs: g.slabs, meshes: g.meshes, roof_layers: Vec::new() });
+        renderer.set_ghost_model(&device, &tris, &lines);
+    }
     // Sonne + Schatten ([64]): `--sun AZIMUT,HOEHE` (Grad, wie `dossier-cli sun`).
     let sun: Vec<f64> = flag("--sun", "").split(',').filter_map(|v| v.trim().parse().ok()).collect();
     if sun.len() == 2 {

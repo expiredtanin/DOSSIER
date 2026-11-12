@@ -772,6 +772,36 @@ mod tests {
         assert!(pick["openings"].as_array().unwrap().iter().any(|o| o["openingId"] == "O1"));
     }
 
+    /// [180] Grau: Hauptmodell ohne, Geisterschicht nur mit den grauen Wänden — beide aus dem Cache (keine Wand neu),
+    /// Änderungs-Antworten gleich der vollen Abfrage, zusammen wieder alle Wände.
+    #[test]
+    fn grey_class_ghost_split() {
+        let mut d = sample();
+        let mut clients: [Client; 4] = Default::default();
+        check_with(&mut d, &mut clients, "alles sichtbar", "");
+        let parts = |d: &mut Document, text: &str| -> Value { serde_json::from_str(&crate::queries::run_doc(d, "model3dParts", &[1.0, 2.0, 0.0, 0.0, 0.0], text).unwrap()).unwrap() };
+        let len = |v: &Value, k: &str| v[k].as_array().map_or(0, Vec::len);
+        let all = parts(&mut d, "");
+        let main_t = r#"{"grey":["20"]}"#;
+        let ghost_t = r#"{"grey":["20"],"ghost":true}"#;
+        for (step, text) in [("Wände grau", main_t), ("Geisterschicht", ghost_t), ("Wände grau 2", main_t), ("Geisterschicht 2", ghost_t)] {
+            check_with(&mut d, &mut clients, step, text);
+            d.model3d_parts_with(true, 2.0, false, false, None, text).unwrap();
+            assert_eq!(d.model3d_rebuilt(), (0, 0), "{step}");
+        }
+        let main = parts(&mut d, main_t);
+        let ghost = parts(&mut d, ghost_t);
+        assert!(len(&ghost, "walls") > 0 && len(&main, "walls") < len(&all, "walls"));
+        assert_eq!(len(&main, "walls") + len(&ghost, "walls"), len(&all, "walls"));
+        assert_eq!(len(&ghost, "roofMeshes"), 0);
+        assert_eq!(len(&main, "roofMeshes"), len(&all, "roofMeshes"));
+        // Graue Wände bleiben anwählbar (Modus „grau"), gesperrt nicht.
+        let pick = |d: &mut Document, text: &str| -> Value { serde_json::from_str(&crate::queries::run_doc(d, "pickGeometry", &[0.0], text).unwrap()).unwrap() };
+        let n = len(&pick(&mut d, ""), "walls");
+        assert_eq!(len(&pick(&mut d, main_t), "walls"), n);
+        assert!(len(&pick(&mut d, r#"{"grey":["20"],"lock":["20"]}"#), "walls") < n);
+    }
+
     /// Eine Wandhöhe ändern: nur diese Wand (Körper und Einbauteile) wird neu gerechnet.
     #[test]
     fn one_wall_edit_rebuilds_one_wall() {

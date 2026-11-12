@@ -12,6 +12,7 @@ Browser-Bindung. Das 3D-Modell kommt als Teile aus dem Kern (`src-tauri/core/src
 | `lib.rs` | Modulliste und Beschreibung der Schichten |
 | `types.rs` | Eingabe-Typen (Wände, Platten, Meshes, Kamera) und das `Mesh` |
 | `scene.rs` | Szene aus benannten Teilen: ein Teil-Update baut nur die betroffenen Teile neu |
+| `ghost.rs` | `[180]` Geisterschicht: Elemente grauer Klassen hell, entsättigt und durchscheinend (`set_ghost_model`) |
 | `mesh.rs` | extrudiert Wände und Platten zu Dreiecksnetzen, hängt Kontext-Meshes an |
 | `openings.rs` | Rechteck-Zerlegung von Wänden an Öffnungen |
 | `math.rs` | 4x4-Matrizen, Kamera (Perspektive und Orthografie, Presets), Orbit |

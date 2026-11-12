@@ -9,6 +9,7 @@ import {
   selectionIds3d,
   setView3dFilter,
   showSelection3d,
+  classDisplay3d,
   toFilter3d,
 } from "./view3dFilter";
 
@@ -45,6 +46,23 @@ describe("3D-Element-Filter [185]", () => {
   it("toFilter3d: Klassen plus Element-Auswahl für den Kern", () => {
     expect(toFilter3d(NO_VIEW3D_FILTER, ["31"])).toEqual({ hide: ["31"], only: null, hideIds: [], hideFloors: [] });
     expect(toFilter3d(showSelection3d(["w1"]), [])).toEqual({ hide: [], only: ["w1"], hideIds: [], hideFloors: [] });
+  });
+
+  it("[180] classDisplay3d: Darstellungsmodus je Klasse als Code-Listen (aus, grau, gesperrt)", () => {
+    const modes: Record<string, { render: boolean; greyed: boolean; locked: boolean }> = {
+      "20": { render: true, greyed: false, locked: false },
+      "25": { render: true, greyed: true, locked: false },
+      "31": { render: true, greyed: true, locked: true },
+      "40": { render: false, greyed: false, locked: false },
+      "41": { render: true, greyed: false, locked: true },
+    };
+    expect(classDisplay3d(Object.keys(modes), (c) => modes[c]!)).toEqual({ hide: ["40"], grey: ["25", "31"], lock: ["31", "41"] });
+  });
+
+  it("[180] toFilter3d: graue und gesperrte Klassen gehen mit", () => {
+    expect(toFilter3d(NO_VIEW3D_FILTER, ["40"], [], { grey: ["25"], lock: ["31"] })).toEqual({
+      hide: ["40"], only: null, hideIds: [], hideFloors: [], grey: ["25"], lock: ["31"],
+    });
   });
 
   it("Store: setzen und beim Projektwechsel zurücksetzen", () => {

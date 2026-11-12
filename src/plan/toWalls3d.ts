@@ -90,6 +90,11 @@ export function classFilterText(hide?: Hide3d, extra?: Record<string, unknown>):
   if (f.hideIds?.length) h.hideIds = f.hideIds;
   // [196] Geschosse mit ausgeschaltetem Auge: ihre Elemente fehlen im 3D (Kern `ElementSelection::hide_floors`).
   if (f.hideFloors?.length) h.hideFloors = f.hideFloors;
+  // [180] Darstellungsmodus „grau"/„gesperrt": graue Klassen fehlen im Hauptmodell (`ghost` = nur sie, für die
+  // Geisterschicht), gesperrte sind nicht anwählbar (Kern `ElementSelection::grey/lock/ghost`).
+  if (f.grey?.length) h.grey = f.grey;
+  if (f.lock?.length) h.lock = f.lock;
+  if (f.ghost) h.ghost = true;
   return Object.keys(h).length || extra ? JSON.stringify({ ...extra, ...h }) : "";
 }
 
@@ -103,6 +108,21 @@ export interface Filter3d {
   hideIds?: readonly string[];
   /** [196] Geschoss-ids (Zeichnungsebenen) mit ausgeschaltetem Auge. */
   hideFloors?: readonly string[];
+  /** [180] Klassen im Darstellungsmodus „grau": im Hauptmodell weg, in der Geisterschicht ({@link ghostFilter3d}). */
+  grey?: readonly string[];
+  /** [180] Gesperrte Klassen des Darstellungsmodus: sichtbar, aber nicht anwählbar. */
+  lock?: readonly string[];
+  /** [180] Geisterschicht: nur die grauen Elemente. */
+  ghost?: boolean;
+}
+
+/**
+ * [180] Filter der Geisterschicht zu `hide` (nur die grauen Elemente; render3d `set_ghost_model`), `null` ohne graue
+ * Klasse.
+ */
+export function ghostFilter3d(hide?: Hide3d): Filter3d | null {
+  const f = filter3d(hide);
+  return f.grey?.length ? { ...f, ghost: true } : null;
 }
 
 /** Klassen-Codes (bisherige Form) oder der volle {@link Filter3d}. */

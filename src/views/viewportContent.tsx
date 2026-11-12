@@ -44,6 +44,7 @@ import { hiddenFloorIds } from "../panels/displayMode";
 import { applyGroupDimmingToPlan } from "../state/groupActions";
 import { useStore } from "../state/appStore";
 import { planFitKey } from "../state/viewTabs";
+import { classDisplay3d } from "../state/view3dFilter";
 import { PlanView } from "./plan/PlanView";
 import type {
   GripHandlers,
@@ -312,8 +313,9 @@ export const Content = memo(function Content({
 
   // [180] Klassen, die der Darstellungsmodus des Ebenen-Panels nicht zeichnet, fehlen auch im 3D (die im
   // Ebenen-Baum ausgeschalteten blendet der Kern selbst aus).
-  const hidden3d = useMemo(
-    () => flattenCategories(project.layers ?? []).map((c) => c.code).filter((c) => !categoryDisplay(c).render),
+  // Graue Klassen erscheinen gedämpft (Geisterschicht), gesperrte sind nicht anwählbar — wie im Grundriss.
+  const display3d = useMemo(
+    () => classDisplay3d(flattenCategories(project.layers ?? []).map((c) => c.code), categoryDisplay),
     [project.layers, categoryDisplay],
   );
   // [196] Geschosse mit ausgeschaltetem Auge (Zeichnungsebenen-Panel) fehlen auch im 3D.
@@ -327,7 +329,9 @@ export const Content = memo(function Content({
       </div>
       <Viewport3D
         project={project}
-        hiddenCodes={hidden3d}
+        hiddenCodes={display3d.hide}
+        greyCodes={display3d.grey}
+        lockedCodes={display3d.lock}
         hiddenFloors={hiddenFloors3d}
         renderMode={renderMode}
         detail={detail}
@@ -855,9 +859,14 @@ function LevelPlanView({
   }, [plan]);
   // Explosionsaxonometrie ([65]) auch im nativen 3D-Fenster.
   const explode = useStore((s) => (s.explode3d ? s.explode3dGap : 0));
+  // [180] Mit dem Darstellungsmodus der Klassen wie im WASM-Viewport (aus, grau = Geisterschicht).
+  const nativeHide = useMemo(() => {
+    const d = classDisplay3d(flattenCategories(project.layers ?? []).map((c) => c.code), categoryDisplay);
+    return { hide: d.hide, grey: d.grey, hideFloors: hiddenFloorIds(project.drawingLevels, floorDisplay) };
+  }, [project.layers, project.drawingLevels, categoryDisplay, floorDisplay]);
   useEffect(() => {
-    pushNativeWalls(project, explode);
-  }, [project, explode]);
+    pushNativeWalls(project, explode, nativeHide);
+  }, [project, explode, nativeHide]);
 
   return (
     <section className="pane">

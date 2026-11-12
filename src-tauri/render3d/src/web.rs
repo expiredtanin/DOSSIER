@@ -501,6 +501,26 @@ impl WebModelRenderer {
         Ok(())
     }
 
+    /// [180] Geisterschicht: Elemente grauer Klassen (Darstellungsmodus „grau"), gedaempft und durchscheinend
+    /// ueber dem Modell (`ghost.rs`). `json` = Modell wie bei `set_model` (vom Kern nur aus den grauen Elementen
+    /// gebaut); leer oder ungueltig loescht. Wirkt erst beim naechsten `render`.
+    pub fn set_ghost_model(&mut self, json: &str) -> Result<(), JsValue> {
+        let part = if json.trim().is_empty() {
+            PartInput::default()
+        } else {
+            match serde_json::from_str::<ModelInput>(json) {
+                Ok(m) => PartInput { walls: m.walls, slabs: m.slabs, meshes: m.meshes, roof_layers: Vec::new() },
+                Err(e) => {
+                    self.renderer.set_ghost_model(&self.device, &[], &[]);
+                    return Err(JsValue::from_str(&format!("Geisterschicht parsen: {e}")));
+                }
+            }
+        };
+        let (tris, lines) = crate::ghost::ghost_buffers(part);
+        self.renderer.set_ghost_model(&self.device, &tris, &lines);
+        Ok(())
+    }
+
     /// Ansichtsschraffur auf den Flaechen ([100]): je Linie `ax ay az bx by bz r g b maske`
     /// (`pattern_lines::PATTERN_STRIDE`), Auswahl nach Abstand je Kamera; leer loescht.
     pub fn set_pattern_lines(&mut self, data: &[f32]) -> Result<(), JsValue> {

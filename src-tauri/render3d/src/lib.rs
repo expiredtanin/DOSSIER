@@ -15,6 +15,7 @@
 // GPU-freien Schichten und ist damit unabhaengig von einer Display-Session.
 
 pub mod edges;
+pub mod ghost;
 pub mod grid;
 pub mod math;
 pub mod mesh;

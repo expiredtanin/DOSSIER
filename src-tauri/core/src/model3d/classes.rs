@@ -8,6 +8,12 @@
 //! [196] Geschosse mit ausgeschaltetem Auge (`{"hideFloors": [ids]}`, Zeichnungsebenen-Panel) blenden alle Elemente ihres
 //! Geschosses aus (wie eine ausgeblendete Klasse, auch im Pick); Öffnungen folgen ihrem Wirt (Wand, Dach, Decke).
 //!
+//! [180] Darstellungsmodus „grau" (`{"grey": [codes]}`): die Elemente grauer Klassen fehlen im Hauptmodell und
+//! erscheinen in einer eigenen, gedämpften Geisterschicht (`{"grey": [codes], "ghost": true}` liefert NUR sie, der
+//! Viewer zeichnet sie durchscheinend, render3d `set_ghost_model`). Anwählbar bleiben sie wie im Grundriss, ausser
+//! ihre Klasse ist zusätzlich gesperrt (`{"lock": [codes]}`, Modi „grau + gesperrt"/„gesperrt"). Öffnungen sind grau,
+//! wenn ihre eigene Klasse oder ihr Wirt grau ist; Ausblenden geht vor Grau.
+//!
 //! Öffnungs-Einbauteile werden je Wand gemeinsam gerechnet (ohne Zuordnung zur Öffnung): dort wirkt der
 //! Filter auf die Eingabe (nur sichtbare Öffnungen, [`ClassFilter::keep_opening`]); das Loch in der Wand
 //! bleibt. Eine Öffnung verschwindet auch mit ihrem Wirt (Wand, Dach, Decke), wie in der Ansicht.
@@ -55,12 +61,18 @@ pub struct ElementSelection {
     pub hide: HashSet<String>,
     /// [196] Geschosse (Zeichnungsebenen-Ids) mit ausgeschaltetem Auge: ihre Elemente fehlen im 3D.
     pub hide_floors: HashSet<String>,
+    /// [180] Klassen im Darstellungsmodus „grau": fehlen im Hauptmodell, erscheinen in der Geisterschicht.
+    pub grey: HashSet<String>,
+    /// [180] Gesperrte Klassen des Darstellungsmodus: sichtbar (bzw. grau), aber nicht anwählbar.
+    pub lock: HashSet<String>,
+    /// [180] Geisterschicht: NUR die grauen (nicht ausgeblendeten) Elemente liefern.
+    pub ghost: bool,
 }
 
 impl ElementSelection {
     /// Keine Einschränkung.
     pub fn is_empty(&self) -> bool {
-        self.only.is_none() && self.hide.is_empty() && self.hide_floors.is_empty()
+        self.only.is_none() && self.hide.is_empty() && self.hide_floors.is_empty() && self.grey.is_empty() && self.lock.is_empty() && !self.ghost
     }
 }
 
@@ -73,7 +85,10 @@ fn opening_hosts(o: &Opening) -> impl Iterator<Item = &str> {
 #[derive(Debug, Clone, Default)]
 pub struct ClassFilter {
     codes: HashSet<String>,
+    /// Elemente, die in den Teilen fehlen (ausgeblendet; dazu grau im Hauptmodell bzw. nicht grau in der Geisterschicht).
     ids: HashSet<String>,
+    /// [180] Elemente, die nicht anwählbar sind (ausgeblendet oder gesperrt; graue bleiben anwählbar).
+    pick: HashSet<String>,
 }
 
 impl ClassFilter {
@@ -93,7 +108,7 @@ impl ClassFilter {
         codes.extend(extra.iter().cloned());
         let mut ids = HashSet::new();
         if codes.is_empty() && sel.is_empty() {
-            return ClassFilter { codes, ids };
+            return ClassFilter { codes, ids, pick: HashSet::new() };
         }
         // Gewählte Öffnungen bringen ihren Wirt mit (eine Öffnung ohne Wand gibt es im 3D nicht).
         let only: Option<HashSet<&str>> = sel.only.as_ref().map(|o| {
@@ -105,9 +120,18 @@ impl ClassFilter {
             }
             s
         });
+        // Ausgeblendet, grau (nicht ausgeblendet), gesperrt — je Element.
+        let mut hidden = HashSet::new();
+        let mut grey = HashSet::new();
+        let mut locked = HashSet::new();
         let mut add = |code: &str, id: &str, floor: &str| {
             if codes.contains(code) || sel.hide.contains(id) || sel.hide_floors.contains(floor) || only.as_ref().is_some_and(|o| !o.contains(id)) {
-                ids.insert(id.to_owned());
+                hidden.insert(id.to_owned());
+            } else if sel.grey.contains(code) {
+                grey.insert(id.to_owned());
+            }
+            if sel.lock.contains(code) {
+                locked.insert(id.to_owned());
             }
         };
         for w in &p.walls {
@@ -137,21 +161,41 @@ impl ClassFilter {
         for d in &p.drawings2d {
             add(&d.category_code, &d.id, &d.level_id);
         }
-        // Öffnungen nach den Wirten (Wand, Dach, Decke), die jetzt schon in `ids` stehen; mit `only` zeigt
-        // ein gewählter Wirt seine Öffnungen.
-        let hidden_openings: Vec<String> = p
-            .openings
-            .as_deref()
-            .unwrap_or(&[])
-            .iter()
-            .filter(|o| codes.contains(&o.category_code) || sel.hide.contains(&o.id) || opening_hosts(o).any(|h| ids.contains(h)))
-            .map(|o| o.id.clone())
-            .collect();
-        ids.extend(hidden_openings);
-        ClassFilter { codes, ids }
+        // Öffnungen nach den Wirten (Wand, Dach, Decke), die jetzt schon eingeordnet sind; mit `only` zeigt
+        // ein gewählter Wirt seine Öffnungen. Grau ist eine Öffnung mit grauer Klasse oder grauem Wirt.
+        for o in p.openings.as_deref().unwrap_or(&[]) {
+            if codes.contains(&o.category_code) || sel.hide.contains(&o.id) || opening_hosts(o).any(|h| hidden.contains(h)) {
+                hidden.insert(o.id.clone());
+            } else if sel.grey.contains(&o.category_code) || opening_hosts(o).any(|h| grey.contains(h)) {
+                grey.insert(o.id.clone());
+            }
+            if sel.lock.contains(&o.category_code) {
+                locked.insert(o.id.clone());
+            }
+        }
+        let pick: HashSet<String> = hidden.iter().chain(&locked).cloned().collect();
+        if sel.ghost {
+            // Geisterschicht: alles ausser den grauen Elementen fehlt.
+            let all = p.walls.iter().map(|w| &w.id)
+                .chain(p.ceilings.iter().flatten().map(|c| &c.id))
+                .chain(p.roofs.iter().flatten().map(|r| &r.id))
+                .chain(p.stairs.iter().flatten().map(|s| &s.id))
+                .chain(p.columns.iter().flatten().map(|c| &c.id))
+                .chain(p.trees.iter().flatten().map(|t| &t.id))
+                .chain(p.extruded_solids.iter().flatten().map(|s| &s.id))
+                .chain(p.drawings2d.iter().map(|d| &d.id))
+                .chain(p.openings.iter().flatten().map(|o| &o.id));
+            ids.extend(all.filter(|id| !grey.contains(*id)).cloned());
+            ids.extend(p.context.iter().flatten().map(|c| c.id()).filter(|id| !grey.contains(*id)).map(String::from));
+        } else {
+            ids = hidden;
+            ids.extend(grey);
+        }
+        ClassFilter { codes, ids, pick }
     }
 
-    /// `text` der 3D-Abfragen: `{"hide": [codes], "only": [ids], "hideIds": [ids], …}` (fehlt/kein JSON:
+    /// `text` der 3D-Abfragen: `{"hide": [codes], "only": [ids], "hideIds": [ids], "grey": [codes], "lock": [codes],
+    /// "ghost": bool, …}` (fehlt/kein JSON:
     /// nur der Ebenen-Baum; `only` fehlt/`null` = alle Elemente, [185]).
     pub fn from_text(p: &Project, text: &str) -> ClassFilter {
         let t = text.trim();
@@ -166,6 +210,9 @@ impl ClassFilter {
             only: list("only").map(|o| o.into_iter().collect()),
             hide: list("hideIds").unwrap_or_default().into_iter().collect(),
             hide_floors: list("hideFloors").unwrap_or_default().into_iter().collect(),
+            grey: list("grey").unwrap_or_default().into_iter().collect(),
+            lock: list("lock").unwrap_or_default().into_iter().collect(),
+            ghost: v.as_ref().and_then(|v| v.get("ghost")).and_then(|b| b.as_bool()).unwrap_or(false),
         };
         ClassFilter::with_elements(p, &list("hide").unwrap_or_default(), &sel)
     }
@@ -214,12 +261,12 @@ impl ClassFilter {
         }
     }
 
-    /// Pick-Geometrie: ausgeblendete Elemente sind nicht anwählbar.
+    /// Pick-Geometrie: ausgeblendete und gesperrte Elemente sind nicht anwählbar (graue schon, wie im Grundriss).
     pub fn retain_pick(&self, g: &mut PickGeometry) {
-        if self.is_empty() {
+        if self.pick.is_empty() {
             return;
         }
-        let k = |id: &str| !self.ids.contains(id);
+        let k = |id: &str| !self.pick.contains(id);
         g.walls.retain(|w| k(&w.wall_id));
         g.slabs.retain(|s| k(&s.ceiling_id));
         g.openings.retain(|o| k(&o.opening_id));
@@ -381,6 +428,65 @@ mod tests {
         assert!(g.walls.iter().all(|w| w.wall_id == "w1") && !g.walls.is_empty() && g.roofs.is_empty() && g.columns.is_empty());
         let parts = crate::explode3d::parts_filtered(&p, true, 2.0, false, 0.0, &ClassFilter::from_text(&p, r#"{"hideFloors":["OG"]}"#)).unwrap();
         assert!(parts.walls.iter().all(|w| w.wall_id == "w1") && parts.roof_meshes.is_empty() && parts.column_meshes.iter().all(|m| !matches!(m.owner, Owner::Column(_))));
+    }
+
+    /// [180] Darstellungsmodus „grau": die graue Klasse fehlt im Hauptmodell, die Geisterschicht (`ghost`) liefert nur
+    /// sie; anwählbar bleibt sie, ausser sie ist gesperrt (`lock`); ausgeblendet geht vor grau.
+    #[test]
+    fn grau_klasse_in_der_geisterschicht() {
+        let p = project(&[]);
+        for gap in [0.0, 2.0] {
+            for (k, code) in ["25", "13", "35", "60"].into_iter().enumerate() {
+                let main = counts(&p, &ClassFilter::from_text(&p, &format!(r#"{{"grey":["{code}"]}}"#)), gap);
+                let ghost = counts(&p, &ClassFilter::from_text(&p, &format!(r#"{{"grey":["{code}"],"ghost":true}}"#)), gap);
+                for i in 0..4 {
+                    assert_eq!(main[i] == 0, i == k, "Hauptmodell, {code} grau, Abstand {gap}: {main:?}");
+                    assert_eq!(ghost[i] > 0, i == k, "Geisterschicht, {code} grau, Abstand {gap}: {ghost:?}");
+                }
+                // Grau bleibt anwählbar; grau + gesperrt nicht.
+                let picks = |text: &str| {
+                    let mut g = crate::explode3d::pick_geometry(&p, gap).unwrap();
+                    ClassFilter::from_text(&p, text).retain_pick(&mut g);
+                    [g.columns.len(), g.trees.len(), g.stairs.len() + g.stair_meshes.len(), g.drawings.len()]
+                };
+                assert!(picks(&format!(r#"{{"grey":["{code}"]}}"#)).iter().all(|&n| n > 0));
+                let locked = picks(&format!(r#"{{"grey":["{code}"],"lock":["{code}"]}}"#));
+                for (i, n) in locked.iter().enumerate() {
+                    assert_eq!(*n == 0, i == k, "gesperrt {code}: {locked:?}");
+                }
+            }
+        }
+        // Ausgeblendet (Ebenen-Baum) geht vor grau: auch in der Geisterschicht weg.
+        let q = project(&["25"]);
+        assert!(counts(&q, &ClassFilter::from_text(&q, r#"{"grey":["25"],"ghost":true}"#), 0.0).iter().all(|&n| n == 0));
+        // Ohne graue Klasse ist die Geisterschicht leer.
+        assert!(counts(&p, &ClassFilter::from_text(&p, r#"{"ghost":true}"#), 0.0).iter().all(|&n| n == 0));
+    }
+
+    /// [180] Öffnungen sind grau mit ihrer Klasse oder ihrem Wirt: graue Wand nimmt ihr Fenster in die Geisterschicht mit;
+    /// graues Fenster in normaler Wand steht allein in der Geisterschicht.
+    #[test]
+    fn grau_oeffnungen_folgen_klasse_und_wirt() {
+        let mut v = serde_json::to_value(project(&[])).unwrap();
+        v["walls"] = serde_json::json!([
+            {"id": "w1", "type": "wall", "floorId": "EG", "categoryCode": "20", "start": {"x": 0, "y": 0}, "end": {"x": 5, "y": 0}, "wallTypeId": "aw", "height": 2.8}]);
+        v["wallTypes"] = serde_json::json!([{"id": "aw", "name": "AW", "layers": [{"componentId": "c", "thickness": 0.2}]}]);
+        v["openings"] = serde_json::json!([{"id": "o1", "type": "opening", "kind": "window", "hostWallId": "w1", "categoryCode": "40", "position": 2.0, "width": 1.0, "height": 1.2, "sillHeight": 0.9}]);
+        let p: Project = serde_json::from_value(v).unwrap_or_else(|e| panic!("Projekt: {e}"));
+        let f = ClassFilter::from_text(&p, r#"{"grey":["20"]}"#);
+        assert!(f.hides("w1") && f.hides("o1") && !f.hides("k1"));
+        let f = ClassFilter::from_text(&p, r#"{"grey":["20"],"ghost":true}"#);
+        assert!(!f.hides("w1") && !f.hides("o1") && f.hides("k1") && f.hides("T1"));
+        let f = ClassFilter::from_text(&p, r#"{"grey":["40"]}"#);
+        assert!(!f.hides("w1") && f.hides("o1"));
+        let f = ClassFilter::from_text(&p, r#"{"grey":["40"],"ghost":true}"#);
+        assert!(f.hides("w1") && !f.hides("o1"));
+        // Wand ausgeblendet, Fenster grau: weg (ausgeblendeter Wirt geht vor).
+        let f = ClassFilter::from_text(&p, r#"{"hide":["20"],"grey":["40"],"ghost":true}"#);
+        assert!(f.hides("w1") && f.hides("o1"));
+        let parts = parts_filtered(&p, true, 2.0, false, &ClassFilter::from_text(&p, r#"{"grey":["20"],"ghost":true}"#)).unwrap();
+        assert!(!parts.walls.is_empty() && parts.walls.iter().all(|w| w.wall_id == "w1") && !parts.opening_meshes.is_empty());
+        assert!(parts.column_meshes.is_empty() && parts.stair_railings.is_empty());
     }
 
     /// Jede Klasse einzeln aus (Ebenen-Baum bzw. `hide`): nur ihr Teil fehlt im 3D (auch in der Explosion) und im Pick.

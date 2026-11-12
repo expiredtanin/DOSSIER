@@ -13,7 +13,10 @@ import type { Plan } from "../../core";
 import { materializeUnderlay } from "../../core";
 import type { Project } from "../../model/types";
 import { planSceneBin } from "../../core";
-import { projectToModel3d } from "../../core";
+import { ghostFilter3d, projectToModel3d } from "../../core";
+import type { Hide3d } from "../../core";
+
+type Model3d = ReturnType<typeof projectToModel3d>;
 
 /** Sammel-Fenster: Modelländerungen werden gebündelt gepusht (nicht je Frame). */
 const DEBOUNCE_MS = 200;
@@ -89,14 +92,23 @@ export function pushNativeWalls(
   project: Project,
   /** Explosionsabstand ([65], 0 = aus): dasselbe Modell wie im WASM-Viewport (`projectToModel3d`). */
   explode = lastExplode,
+  /** [180] Darstellungsmodus wie im WASM-Viewport (ausgeblendete, graue Klassen; graue als `ghost`-Schicht). */
+  hide?: Hide3d,
 ): void {
   if (!isTauri()) return;
   lastExplode = explode;
   clearTimeout(wallsTimer);
   wallsTimer = setTimeout(async () => {
     if (!(await isNativeEnabled())) return;
-    void invokeNative("push_native_walls", { walls: projectToModel3d(project, { voids: true, explode }) });
+    void invokeNative("push_native_walls", { walls: nativeModel3d(project, explode, hide) });
   }, DEBOUNCE_MS);
+}
+
+/** [180] Modell fürs native 3D-Fenster: ohne die grauen Klassen, die stehen gedämpft in `ghost` (render3d `ghost.rs`). */
+export function nativeModel3d(project: Project, explode: number, hide?: Hide3d): Model3d & { ghost?: Model3d } {
+  const model = projectToModel3d(project, { voids: true, explode, hide });
+  const ghost = ghostFilter3d(hide);
+  return ghost ? { ...model, ghost: projectToModel3d(project, { voids: true, explode, hide: ghost }) } : model;
 }
 
 
