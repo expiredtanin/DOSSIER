@@ -17,6 +17,7 @@ kommt als Teile aus dem Kern (`src/plan/toWalls3d.ts`). Weg eines Modells in den
 
 | Datei | Inhalt |
 |---|---|
+| `ghostSync.ts` | Prüfsumme der Geisterschicht (graue Klassen/Geschosse): render3d bekommt sie nur bei Änderung neu |
 | `model3dPartsSync.ts` | schickt nur neue, geänderte und entfernte Modellteile an render3d (`set_parts`) |
 | `pointCloudSync.ts` | Punktwolken-Store gegen render3d abgleichen: neu laden, umstellen oder entfernen (`[27]`) |
 | `materialTextures.ts` | dekodiert die Farbkarten der Materialien für den Stil „Textured" |

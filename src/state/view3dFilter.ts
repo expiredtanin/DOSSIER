@@ -56,10 +56,11 @@ export function toFilter3d(
   f: View3dFilter,
   hide: readonly string[],
   hideFloors: readonly string[] = [],
-  dim: { grey?: readonly string[]; lock?: readonly string[] } = {},
+  dim: { grey?: readonly string[]; lock?: readonly string[]; greyFloors?: readonly string[] } = {},
 ): Filter3d {
   const out: Filter3d = { hide, only: f.only, hideIds: f.hidden, hideFloors };
   if (dim.grey?.length) out.grey = dim.grey;
+  if (dim.greyFloors?.length) out.greyFloors = dim.greyFloors;
   if (dim.lock?.length) out.lock = dim.lock;
   return out;
 }

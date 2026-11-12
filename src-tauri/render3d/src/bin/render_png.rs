@@ -30,6 +30,12 @@ struct ModelInput {
     /// [180] Geisterschicht (graue Klassen), s. Kopf.
     #[serde(default)]
     ghost: Option<Box<ModelInput>>,
+    /// [180] 2D-Spuren der Geisterschicht (LineList `[x y z r g b]`, `emitDrawingLineVerts`), nur oberste Ebene.
+    #[serde(default, rename = "ghostDrawing")]
+    ghost_drawing: Vec<f32>,
+    /// [180] Flächenmuster der Geisterschicht (`PATTERN_STRIDE` je Linie, `emitSurfacePatternLines`).
+    #[serde(default, rename = "ghostPattern")]
+    ghost_pattern: Vec<f32>,
 }
 
 fn bounds(m: &ModelInput) -> Option<([f32; 3], [f32; 3])> {
@@ -229,6 +235,9 @@ fn main() {
         let g = *g;
         let (tris, lines) = render3d::ghost::ghost_buffers(render3d::scene::PartInput { walls: g.walls, slabs: g.slabs, meshes: g.meshes, roof_layers: Vec::new() });
         renderer.set_ghost_model(&device, &tris, &lines);
+    }
+    if !model.ghost_drawing.is_empty() || !model.ghost_pattern.is_empty() {
+        renderer.set_ghost_lines(&device, &model.ghost_drawing, &model.ghost_pattern);
     }
     // Sonne + Schatten ([64]): `--sun AZIMUT,HOEHE` (Grad, wie `dossier-cli sun`).
     let sun: Vec<f64> = flag("--sun", "").split(',').filter_map(|v| v.trim().parse().ok()).collect();

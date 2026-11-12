@@ -8,6 +8,9 @@
 //! [196] Geschosse mit ausgeschaltetem Auge (`{"hideFloors": [ids]}`, Zeichnungsebenen-Panel) blenden alle Elemente ihres
 //! Geschosses aus (wie eine ausgeblendete Klasse, auch im Pick); Öffnungen folgen ihrem Wirt (Wand, Dach, Decke).
 //!
+//! [180] Graue Geschosse (`{"greyFloors": [ids]}`, Zeichnungsebenen-Modus „grau"): die Elemente des Geschosses verhalten sich
+//! wie die grauer Klassen (Geisterschicht); Geschoss-Auge aus (`hideFloors`) geht vor.
+//!
 //! [180] Darstellungsmodus „grau" (`{"grey": [codes]}`): die Elemente grauer Klassen fehlen im Hauptmodell und
 //! erscheinen in einer eigenen, gedämpften Geisterschicht (`{"grey": [codes], "ghost": true}` liefert NUR sie, der
 //! Viewer zeichnet sie durchscheinend, render3d `set_ghost_model`). Anwählbar bleiben sie wie im Grundriss, ausser
@@ -63,6 +66,8 @@ pub struct ElementSelection {
     pub hide_floors: HashSet<String>,
     /// [180] Klassen im Darstellungsmodus „grau": fehlen im Hauptmodell, erscheinen in der Geisterschicht.
     pub grey: HashSet<String>,
+    /// [180] Geschosse (Zeichnungsebenen-Ids) im Darstellungsmodus „grau": ihre Elemente verhalten sich wie die grauer Klassen.
+    pub grey_floors: HashSet<String>,
     /// [180] Gesperrte Klassen des Darstellungsmodus: sichtbar (bzw. grau), aber nicht anwählbar.
     pub lock: HashSet<String>,
     /// [180] Geisterschicht: NUR die grauen (nicht ausgeblendeten) Elemente liefern.
@@ -72,7 +77,7 @@ pub struct ElementSelection {
 impl ElementSelection {
     /// Keine Einschränkung.
     pub fn is_empty(&self) -> bool {
-        self.only.is_none() && self.hide.is_empty() && self.hide_floors.is_empty() && self.grey.is_empty() && self.lock.is_empty() && !self.ghost
+        self.only.is_none() && self.hide.is_empty() && self.hide_floors.is_empty() && self.grey.is_empty() && self.grey_floors.is_empty() && self.lock.is_empty() && !self.ghost
     }
 }
 
@@ -127,7 +132,7 @@ impl ClassFilter {
         let mut add = |code: &str, id: &str, floor: &str| {
             if codes.contains(code) || sel.hide.contains(id) || sel.hide_floors.contains(floor) || only.as_ref().is_some_and(|o| !o.contains(id)) {
                 hidden.insert(id.to_owned());
-            } else if sel.grey.contains(code) {
+            } else if sel.grey.contains(code) || sel.grey_floors.contains(floor) {
                 grey.insert(id.to_owned());
             }
             if sel.lock.contains(code) {
@@ -194,7 +199,7 @@ impl ClassFilter {
         ClassFilter { codes, ids, pick }
     }
 
-    /// `text` der 3D-Abfragen: `{"hide": [codes], "only": [ids], "hideIds": [ids], "grey": [codes], "lock": [codes],
+    /// `text` der 3D-Abfragen: `{"hide": [codes], "only": [ids], "hideIds": [ids], "grey": [codes], "greyFloors": [ids], "lock": [codes],
     /// "ghost": bool, …}` (fehlt/kein JSON:
     /// nur der Ebenen-Baum; `only` fehlt/`null` = alle Elemente, [185]).
     pub fn from_text(p: &Project, text: &str) -> ClassFilter {
@@ -211,6 +216,7 @@ impl ClassFilter {
             hide: list("hideIds").unwrap_or_default().into_iter().collect(),
             hide_floors: list("hideFloors").unwrap_or_default().into_iter().collect(),
             grey: list("grey").unwrap_or_default().into_iter().collect(),
+            grey_floors: list("greyFloors").unwrap_or_default().into_iter().collect(),
             lock: list("lock").unwrap_or_default().into_iter().collect(),
             ghost: v.as_ref().and_then(|v| v.get("ghost")).and_then(|b| b.as_bool()).unwrap_or(false),
         };
@@ -487,6 +493,42 @@ mod tests {
         let parts = parts_filtered(&p, true, 2.0, false, &ClassFilter::from_text(&p, r#"{"grey":["20"],"ghost":true}"#)).unwrap();
         assert!(!parts.walls.is_empty() && parts.walls.iter().all(|w| w.wall_id == "w1") && !parts.opening_meshes.is_empty());
         assert!(parts.column_meshes.is_empty() && parts.stair_railings.is_empty());
+    }
+
+    /// [180] Graues Geschoss (`greyFloors`, Zeichnungsebenen-Modus „grau"): seine Elemente samt Öffnungen fehlen im
+    /// Hauptmodell und stehen in der Geisterschicht; Geschoss-Auge aus (`hideFloors`) und ausgeblendete Klassen gehen vor.
+    #[test]
+    fn graues_geschoss_in_der_geisterschicht() {
+        let mut v = serde_json::to_value(project(&[])).unwrap();
+        v["walls"] = serde_json::json!([
+            {"id": "w1", "type": "wall", "floorId": "EG", "categoryCode": "20", "start": {"x": 0, "y": 0}, "end": {"x": 5, "y": 0}, "wallTypeId": "aw", "height": 2.8},
+            {"id": "w2", "type": "wall", "floorId": "OG", "categoryCode": "20", "start": {"x": 0, "y": 4}, "end": {"x": 5, "y": 4}, "wallTypeId": "aw", "height": 2.8}]);
+        v["wallTypes"] = serde_json::json!([{"id": "aw", "name": "AW", "layers": [{"componentId": "c", "thickness": 0.2}]}]);
+        v["openings"] = serde_json::json!([{"id": "o2", "type": "opening", "kind": "window", "hostWallId": "w2", "categoryCode": "40", "position": 2.0, "width": 1.0, "height": 1.2, "sillHeight": 0.9}]);
+        let p: Project = serde_json::from_value(v).unwrap_or_else(|e| panic!("Projekt: {e}"));
+        // Hauptmodell: OG-Elemente (Wand, Fenster, Stütze k1) fehlen, EG bleibt.
+        let f = ClassFilter::from_text(&p, r#"{"greyFloors":["OG"]}"#);
+        assert!(f.hides("w2") && f.hides("o2") && f.hides("k1") && !f.hides("w1") && !f.hides("T1") && !f.hides("s1") && !f.hides("L"));
+        // Geisterschicht: nur das OG.
+        let g = ClassFilter::from_text(&p, r#"{"greyFloors":["OG"],"ghost":true}"#);
+        assert!(!g.hides("w2") && !g.hides("o2") && !g.hides("k1") && g.hides("w1") && g.hides("T1") && g.hides("s1") && g.hides("L"));
+        let parts = parts_filtered(&p, true, 2.0, false, &g).unwrap();
+        assert!(!parts.walls.is_empty() && parts.walls.iter().all(|w| w.wall_id == "w2") && !parts.opening_meshes.is_empty());
+        assert!(parts.column_meshes.iter().all(|m| matches!(m.owner, Owner::Column(_))) && !parts.column_meshes.is_empty());
+        // Das graue Geschoss bleibt anwählbar, gesperrt (Klasse im Sperr-Modus) nicht.
+        let mut pg = crate::explode3d::pick_geometry(&p, 0.0).unwrap();
+        ClassFilter::from_text(&p, r#"{"greyFloors":["OG"]}"#).retain_pick(&mut pg);
+        assert!(pg.walls.iter().any(|w| w.wall_id == "w2") && !pg.columns.is_empty());
+        // Auge aus geht vor grau; ausgeblendete Klasse ebenso.
+        let g = ClassFilter::from_text(&p, r#"{"greyFloors":["OG"],"hideFloors":["OG"],"ghost":true}"#);
+        assert!(g.hides("w2") && g.hides("o2") && g.hides("k1") && g.hides("w1"));
+        let g = ClassFilter::from_text(&p, r#"{"greyFloors":["OG"],"hide":["20"],"ghost":true}"#);
+        assert!(g.hides("w2") && g.hides("o2") && !g.hides("k1"));
+        // 2D-Spuren und Flächenmuster der Geisterschicht: nur die des grauen Geschosses.
+        let line = |f: &ClassFilter| crate::explode3d::drawing_line_verts_filtered(&p, 0.0, f).len();
+        assert_eq!(line(&ClassFilter::from_text(&p, r#"{"greyFloors":["EG"],"ghost":true}"#)), line(&ClassFilter::none()));
+        assert_eq!(line(&ClassFilter::from_text(&p, r#"{"greyFloors":["OG"],"ghost":true}"#)), 0);
+        assert_eq!(line(&ClassFilter::from_text(&p, r#"{"greyFloors":["EG"]}"#)), 0);
     }
 
     /// Jede Klasse einzeln aus (Ebenen-Baum bzw. `hide`): nur ihr Teil fehlt im 3D (auch in der Explosion) und im Pick.

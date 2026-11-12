@@ -521,6 +521,13 @@ impl WebModelRenderer {
         Ok(())
     }
 
+    /// [180] 2D-Spuren (`drawing`, `[x y z r g b]` je Vertex) und Flaechenmuster (`pattern`, wie `set_pattern_lines`) der
+    /// grauen Klassen, gedaempft in der Geisterschicht (`ghost::mute_lines`/`mute_pattern`); leer loescht.
+    pub fn set_ghost_lines(&mut self, drawing: &[f32], pattern: &[f32]) -> Result<(), JsValue> {
+        self.renderer.set_ghost_lines(&self.device, drawing, pattern);
+        Ok(())
+    }
+
     /// Ansichtsschraffur auf den Flaechen ([100]): je Linie `ax ay az bx by bz r g b maske`
     /// (`pattern_lines::PATTERN_STRIDE`), Auswahl nach Abstand je Kamera; leer loescht.
     pub fn set_pattern_lines(&mut self, data: &[f32]) -> Result<(), JsValue> {

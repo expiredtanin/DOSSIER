@@ -114,6 +114,8 @@ import {
   viewportLevelPlan,
   planToRenderScene,
   projectToModel3d,
+  emitDrawingLineVerts,
+  emitSurfacePatternLines,
   ghostFilter3d,
   parseProjectFile,
   planToSvgString,
@@ -249,6 +251,19 @@ function hideFlagCodes(project: Project, args: Args, flag = "hide"): string[] {
     out.push(code);
   }
   return out;
+}
+
+/** [180] --grey-floor <id|Name,…>: Geschosse (Zeichnungsebenen) im Modus „grau"; Ids. */
+function greyFloorIds(project: Project, args: Args): string[] {
+  return (args.flags.get("grey-floor") ?? "")
+    .split(",")
+    .map((x) => x.trim().toLowerCase())
+    .filter(Boolean)
+    .map((w) => {
+      const l = project.drawingLevels.find((d) => d.id.toLowerCase() === w || d.name.toLowerCase() === w);
+      if (!l) fail(`Geschoss nicht gefunden: ${w}`);
+      return l.id;
+    });
 }
 
 /** Darstellung einer Ebene nach Vorlage und Aufruf: ausdrückliche Optionen (`--scale`, `--color`) gehen vor. */
@@ -989,10 +1004,19 @@ async function execute(project: Project, file: string, command: string, rest: st
       // `--grey`: Klassen grau ([180]): fehlen im Modell und stehen in `ghost` (Geisterschicht, render_png zeichnet sie
       // durchscheinend wie der Viewer).
       const explode = Number(args.flags.get("explode") ?? 0) || 0;
-      const filter: Filter3d = { hide: hideFlagCodes(project, args), grey: hideFlagCodes(project, args, "grey") };
+      // `--grey-floor <id|Name,…>`: Geschosse grau (Zeichnungsebenen-Modus), ebenso in der Geisterschicht.
+      const filter: Filter3d = { hide: hideFlagCodes(project, args), grey: hideFlagCodes(project, args, "grey"), greyFloors: greyFloorIds(project, args) };
       const ghost = ghostFilter3d(filter);
       const model = projectToModel3d(project, { explode, hide: filter });
-      const json = ghost ? { ...model, ghost: projectToModel3d(project, { explode, hide: ghost }) } : model;
+      // Geisterschicht: Modell, dazu gedämpfte 2D-Spuren und Flächenmuster (render_png `ghostDrawing`/`ghostPattern`).
+      const json = ghost
+        ? {
+            ...model,
+            ghost: projectToModel3d(project, { explode, hide: ghost }),
+            ghostDrawing: Array.from(emitDrawingLineVerts(project, explode, ghost)),
+            ghostPattern: Array.from(emitSurfacePatternLines(project, explode, ghost)),
+          }
+        : model;
       out(args, JSON.stringify(json), `${project.name || "projekt"}.model3d.json`);
       return 0;
     }

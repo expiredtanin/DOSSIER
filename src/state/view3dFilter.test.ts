@@ -1,3 +1,4 @@
+import { greyedFloorIds } from "../panels/displayMode";
 import { describe, expect, it } from "vitest";
 import { fromIdLists, EMPTY_SELECTION, mergeSelection } from "./selection";
 import {
@@ -63,6 +64,16 @@ describe("3D-Element-Filter [185]", () => {
     expect(toFilter3d(NO_VIEW3D_FILTER, ["40"], [], { grey: ["25"], lock: ["31"] })).toEqual({
       hide: ["40"], only: null, hideIds: [], hideFloors: [], grey: ["25"], lock: ["31"],
     });
+  });
+
+  it("[180] toFilter3d: graue Geschosse gehen mit; greyedFloorIds wählt Geschosse im Modus grau", () => {
+    expect(toFilter3d(NO_VIEW3D_FILTER, [], [], { greyFloors: ["og"] })).toEqual({ hide: [], only: null, hideIds: [], hideFloors: [], greyFloors: ["og"] });
+    const levels = [{ id: "eg", kind: "floor" }, { id: "og", kind: "floor" }, { id: "dg", kind: "floor" }, { id: "s", kind: "section" }];
+    const modes: Record<string, { render: boolean; greyed: boolean }> = {
+      eg: { render: true, greyed: false }, og: { render: true, greyed: true }, dg: { render: false, greyed: true }, s: { render: true, greyed: true },
+    };
+    // Nur gezeichnete, graue Geschosse (Auge aus geht vor grau); Schnitt-/Ansichts-Ebenen zählen nicht.
+    expect(greyedFloorIds(levels, (id) => modes[id]!)).toEqual(["og"]);
   });
 
   it("Store: setzen und beim Projektwechsel zurücksetzen", () => {
