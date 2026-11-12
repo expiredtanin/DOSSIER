@@ -5,8 +5,8 @@
 // über homogene Koordinaten. Kurven werden je Knotenintervall so fein zerlegt, bis der Sehnenfehler unter
 // `CHORD_TOL` liegt.
 //
-// Getrimmte Flächen über den Parameterraum (Verfahren wie truck-meshalgo `triangulation.rs`,
-// github.com/ricosjp/truck, Apache-2.0 — nur das Vorgehen, kein Code übernommen):
+// Herkunft (nur Verfahren, kein Code übernommen; s. `NOTICE`): getrimmte Flächen über den Parameterraum wie
+// truck-meshalgo `triangulation.rs`, github.com/ricosjp/truck, Apache-2.0:
 //   1. Die Randschleifen (3D-Punktfolgen der Kanten) werden auf die Fläche projiziert (analytisch für
 //      Zylinder/Kegel/Kugel/Torus, sonst Gauss-Newton ab Startwert aus einem Raster) und bei periodischen
 //      Richtungen stetig abgewickelt. Schleifen, die einmal ganz herumlaufen (Zylinder zwischen zwei

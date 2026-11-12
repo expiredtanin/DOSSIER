@@ -24,9 +24,22 @@ truck (https://github.com/ricosjp/truck, truck-meshalgo src/tessellation/triangu
   Nur das Verfahren (Rand in den Parameterraum projizieren, Rasterpunkte, eingeschränkte Delaunay-
   Triangulierung, Auswahl innen) als Vorbild; eigener Code in src-tauri/fileio/src/ifc_nurbs.rs.
 
-manifold-rust (https://github.com/larsbrubaker/manifold-rust), Apache-2.0 — Rust-Port von Manifold (elalish/manifold)
-  Abhängigkeit von src-tauri/trucksolid (Mesh-Booleans, Ersatz des früheren csgrs-Fallbacks, [107]), Version 0.19.1
-  fest gepinnt, unverändert. Bringt clipper2-rust (BSL-1.0) und dashu (MIT OR Apache-2.0) mit.
+manifold-rust (https://github.com/larsbrubaker/manifold-rust), Apache-2.0, Copyright 2026 Lars Brubaker — Rust-Port von
+  Manifold (https://github.com/elalish/manifold, Emmett Lalish, Copyright The Manifold Authors, Apache-2.0)
+  Abhängigkeit von src-tauri/trucksolid (Mesh-Booleans, Ersatz des früheren csgrs-Fallbacks, [107]) und von
+  src-tauri/core (exakte Körper-Booleans, src-tauri/core/src/solid_bool.rs), Version 0.19.1 fest gepinnt, unverändert.
+  Bringt clipper2-rust (https://github.com/larsbrubaker/clipper2-rust, BSL-1.0, Rust-Port von Clipper2,
+  Angus Johnson) und dashu (MIT OR Apache-2.0) mit. Die Apache-Lizenz liegt im Quellpaket (LICENSE).
+
+delaunator (https://github.com/mapbox/delaunator, ISC License, Copyright Mapbox) und robust-predicates
+  (https://github.com/mourner/robust-predicates, Unlicense/gemeinfrei, Volodymyr Agafonkin; nach Shewchuks gemeinfreien
+  Prädikaten) — Verfahren und Schrittfolge von delaunator 5.1.0 samt exaktem orient2d in Rust neu geschrieben:
+  src-tauri/core/src/delaunay.rs (Gelände-TIN, Kontext-Gebäude). Die ISC-Erlaubnis lautet: Permission to use, copy,
+  modify, and/or distribute this software for any purpose with or without fee is hereby granted, provided that the
+  above copyright notice and this permission notice appear in all copies.
+
+polylabel (https://github.com/mapbox/polylabel, ISC License, Mapbox / Volodymyr Agafonkin)
+  Nur das Verfahren (Pol der Unzugänglichkeit); eigener Code in src-tauri/core/src/room_area.rs (`label_point`).
 
 csg.js (https://github.com/evanw/csg.js, Datei csg.js), Copyright (c) 2011 Evan Wallace, MIT License
   Verfahren (BSP-Bäume, Ebenen-Teilung, clipTo/invert, Vereinigung/Differenz/Schnitt) in Rust neu
@@ -62,6 +75,12 @@ BIMCraft (https://github.com/IPedrax/BIMCraft), MIT OR Apache-2.0, Copyright (c)
   Skeleton mit Löchern) aus Commit f3bbb33f3b8b6cc6f80b3bd6611e33c330cb448f → src-tauri/core/src/skeleton.rs
   (Meter statt Millimeter, Rust 2021, Arbeitsbudget, Fehler statt Panic, deutsche Kommentare); hier unter
   der MIT-Lizenz genutzt.
+
+Materialtexturen (public/assets/materials/*, Manifest manifest.json), ambientCG (https://ambientcg.com), CC0 1.0 (gemeinfrei)
+  Lokal gebündelt, 2K-Auflösung; die Bibliothek wird zur Laufzeit zusätzlich live von ambientCG abgefragt (src/materials/ambientcg.ts).
+
+Farbpaletten (src/model/color.ts): Tango (Tango Desktop Project, https://tango.freedesktop.org) und Material Design (Google,
+  https://m2.material.io/design/color) — nur die veröffentlichten Hex-Farbwerte, kein Code; Namen der Farbfamilien wie dort.
 
 Ausgelieferte Pakete und Schriften ([130]); die Lizenztexte liegen in den jeweiligen Paketen bzw. Ordnern.
 Die Rust-Abhängigkeiten werden mit cargo-deny geprüft (src-tauri/deny.toml, CI-Job "licenses").

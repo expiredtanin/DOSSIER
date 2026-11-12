@@ -6,6 +6,10 @@
 //!
 //! `triangulate(coords)` mit `coords = [x0, y0, x1, y1 …]` → Dreiecks-Indizes (je drei, gegen den
 //! Uhrzeigersinn); leer bei < 3 Punkten, nur kollinearen Punkten oder nicht endlichen Werten.
+//!
+//! Herkunft: Verfahren von delaunator 5.1.0 (https://github.com/mapbox/delaunator, ISC License, Copyright Mapbox)
+//! und `orient2d` aus robust-predicates (https://github.com/mourner/robust-predicates, Unlicense; nach Shewchuks
+//! gemeinfreien Prädikaten), in Rust neu geschrieben; s. `NOTICE`.
 
 const EPSILON: f64 = 1.0 / 4503599627370496.0; // 2^-52
 const EDGE_STACK_LEN: usize = 512;

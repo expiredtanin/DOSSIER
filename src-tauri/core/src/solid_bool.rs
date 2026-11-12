@@ -1,6 +1,9 @@
 //! Körper-Booleans im Kern ([107] Schritt 2, für [G5]): `manifold-rust` (exakter Modus) für synchrone
 //! Ableitungen (Dach-Verschneidung, Gauben, Wand an Dach). Messung und Entscheid: TODO.md [107].
 //!
+//! Herkunft: Abhängigkeit `manifold-rust` 0.19.1 (Apache-2.0, Rust-Port von Manifold), unverändert eingebunden; kein
+//! übernommener Code in dieser Datei, Eintrag in `NOTICE`.
+//!
 //! **Panik-Schutz.** Auf wasm32-unknown-unknown gibt es kein `catch_unwind`; eine Panik legt den ganzen
 //! Kern lahm. Daher geht nur ein vorher geprüftes Netz an Manifold ([`Solid::new`]): Dreier-Gruppen,
 //! Indizes im Bereich, endliche Koordinaten mit |x| < 1e7 m, Obergrenze Dreiecke, Ecken verschweisst
