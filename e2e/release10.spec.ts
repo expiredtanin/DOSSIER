@@ -1,7 +1,7 @@
 // [206] Referenz-Ablauf „Wettbewerb/Vorprojekt" für Release 1.0 (TODO.md, Abschnitt „Release 1.0"):
 // derselbe Ablauf wie die Mac-Abnahme-Checkliste `doc/RELEASE-1.0.md`, so weit er im Browser geht.
 // Ein durchgehender Test (leeres Projekt → Kataster → Baurecht → Volumen → Raumprogramm → Pläne →
-// Flächen/Kennzahlen → Abgabe-PDF → DXF/IFC), jeder Schritt ein `test.step` mit Prüfung des Ergebnisses.
+// Flächen/Kennzahlen → Kostenschätzung → Abgabe-PDF → DXF/IFC), jeder Schritt ein `test.step` mit Prüfung des Ergebnisses.
 // Schritte, die noch fehlen, stehen als eigene `test.fixme` mit TODO-ID unten — nicht weglassen, damit
 // sichtbar bleibt, was für 1.0 fehlt.
 // Netzabrufe (swisstopo/geo.admin) gibt es offline nicht: Grundstück und Nachbarbauten kommen aus der
@@ -173,6 +173,40 @@ test("Referenz-Ablauf WBW/Vorprojekt: leeres Projekt bis Abgabe", async ({ page 
     await areas.screenshot({ path: shotPath("05-flaechen") }).catch(() => undefined);
   });
 
+  await test.step("5b Kostenschätzung grob: Kennwerte je m³ GV (eBKP-H), Total inkl. MwSt, CSV/PDF", async () => {
+    const cost = page.getByTestId("cost-section");
+    await cost.scrollIntoViewIfNeeded();
+    // Ohne eigene Werte: Beispielwerte, deutlich als solche markiert.
+    await expect(cost).toContainText("Beispielwerte, bitte anpassen");
+    await expect(cost.getByTestId("cost-rate-C")).toHaveValue("192");
+    const gross = cost.getByTestId("cost-gross");
+    await expect(gross).toContainText(/\d'\d{3}/);
+    await expect(cost.getByTestId("cost-range")).toContainText("±15 %");
+    const before = await gross.textContent();
+    // Kennwert C ändern: das Total folgt.
+    await cost.getByTestId("cost-rate-C").fill("250");
+    await cost.getByTestId("cost-rate-C").press("Enter");
+    await expect(gross).not.toHaveText(before ?? "");
+    const csv = await download(page, () => cost.getByTestId("cost-export-csv").click());
+    expect(csv.name).toMatch(/kosten\.csv$/);
+    const text = csv.bytes.toString("utf8");
+    expect(text).toContain("Konstruktion Gebäude");
+    expect(text).toMatch(/Total inkl\. MwSt\./);
+    expect(text).toMatch(/;250;/);
+    const pdf = await download(page, () => cost.getByTestId("cost-export-pdf").click());
+    expect(pdf.bytes.subarray(0, 5).toString("latin1")).toBe("%PDF-");
+    // Methode m² GF: Beispielwerte der Methode, eigene Werte umgerechnet.
+    await cost.getByTestId("cost-method").selectOption("gf");
+    await expect(cost.getByTestId("cost-rate-B")).toHaveValue("50");
+    if (process.env.DOSSIER_SHOTS) {
+      // Panel hoch genug, damit die ganze Kostenschätzung aufs Bild passt.
+      await page.setViewportSize({ width: 1600, height: 2600 });
+      await cost.scrollIntoViewIfNeeded();
+      await cost.screenshot({ path: shotPath("05b-kosten") }).catch(() => undefined);
+      await page.setViewportSize({ width: 1600, height: 1200 });
+    }
+  });
+
   await test.step("6 Baurecht gegen Modell: Gebäude in der zulässigen Fläche, Höhe geprüft", async () => {
     await openTab(page, "Gelände");
     await expect(page.locator(".site-rules-result")).toContainText("Gebäude innerhalb der zulässigen Fläche");
@@ -228,6 +262,22 @@ test("Referenz-Ablauf WBW/Vorprojekt: leeres Projekt bis Abgabe", async ({ page 
     sheetName = "Präsentationsplan";
     await page.waitForTimeout(1500);
     await shot(page, "10-praesentationsplan");
+  });
+
+  await test.step("10b Kostenschätzung als Layout-Element (Blatt-Tabelle eBKP-H)", async () => {
+    await page.locator("[data-table-add]").selectOption({ label: "Kostenschätzung grob (eBKP-H)" });
+    await expect(page.locator("[data-table-id] text", { hasText: /^Total inkl\. MwSt\./ })).toHaveCount(1);
+    await expect(page.locator("[data-table-id] text", { hasText: "Konstruktion Gebäude" })).toHaveCount(1);
+    await page.waitForTimeout(500);
+    if (process.env.DOSSIER_SHOTS) {
+      await page.locator(".layout-sheet-stage").screenshot({ path: shotPath("10b-kosten-blatt") }).catch(() => undefined);
+      // Tabelle allein als SVG (auf dem Übersichtsbild ist der Text zu klein zum Prüfen).
+      const svg = await page.locator("[data-table-id]").first().evaluate((g) => {
+        const b = (g as SVGGraphicsElement).getBBox();
+        return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${b.x - 2} ${b.y - 2} ${b.width + 4} ${b.height + 4}" width="${(b.width + 4) * 8}" height="${(b.height + 4) * 8}" style="background:#fff">${g.outerHTML}</svg>`;
+      });
+      await writeFile(`${process.env.DOSSIER_SHOTS}/10b-kosten-tabelle.svg`, svg);
+    }
   });
 
   await test.step("11 Abgabe als PDF: Publikationssatz mit dem Blatt → PDF-Datei", async () => {
@@ -287,6 +337,8 @@ test("Referenz-Ablauf WBW/Vorprojekt: leeres Projekt bis Abgabe", async ({ page 
     expect(Math.max(sa[0].x, sa[1].x)).toBeGreaterThan(B.x1);
     expect(line("Ansicht Süd")[0].y).toBeLessThan(B.y0);
     expect(j.layouts.length).toBeGreaterThanOrEqual(1);
+    expect(j.costEstimate.method).toBe("gf");
+    expect(j.costEstimate.groups).toHaveLength(9);
     if (process.env.DOSSIER_SHOTS) await writeFile(`${process.env.DOSSIER_SHOTS}/release10.obp`, saved.bytes);
   });
 });
@@ -301,7 +353,6 @@ test.fixme("[223] 3D-Bild für die Abgabe: hochaufgelöster PNG-Export (Perspekt
 
 test.fixme("[211] Rendering mit Blender/Cycles aus der 3D-Ansicht", async () => {});
 
-test.fixme("[209] Kostenschätzung grob (Kennwerte je m³ GV / m² GF, eBKP-H)", async () => {});
 
 test.fixme("[224] Präsentationsplan: leere Geschosse nicht vorgewählt, Ansichten N/O/W aus dem Gebäude", async () => {});
 

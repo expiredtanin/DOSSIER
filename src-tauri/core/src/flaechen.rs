@@ -391,6 +391,15 @@ fn solid_volume_above(s: &SolidIn, base: f64) -> f64 {
 
 /// Vereinigte Grundfläche der oberirdischen Bauteile (Wände, Räume, positive Körper).
 fn above_ground_footprint(p: &Project) -> f64 {
+    let parts = above_ground_parts(p);
+    if parts.is_empty() {
+        return 0.0;
+    }
+    finite(multi_polygon_area(&polygon_bool::union(&parts))).max(0.0)
+}
+
+/// Grundrisse der oberirdischen Bauteile (Wände, Räume, positive Körper).
+fn above_ground_parts(p: &Project) -> Vec<Polygon> {
     let mut parts: Vec<Polygon> = Vec::new();
     for l in p.drawing_levels.iter().filter(|l| l.kind == DrawingLevelKind::Floor && !is_underground(l)) {
         parts.extend(wall_polygons(p, &l.id));
@@ -405,10 +414,58 @@ fn above_ground_footprint(p: &Project) -> f64 {
             parts.push(vec![s.points.iter().map(|v| [v.x, v.y]).collect()]);
         }
     }
+    parts
+}
+
+/// [209] Fläche innerhalb der Aussenumrisse der oberirdischen Bauteile (Löcher gefüllt: ein Wandring ohne
+/// Räume zählt als ganzes Gebäude, Innenhöfe werden nicht abgezogen). Dient als Dachfläche ohne Dachelement.
+pub fn above_ground_outline_area(p: &Project) -> f64 {
+    let parts = above_ground_parts(p);
     if parts.is_empty() {
         return 0.0;
     }
-    finite(multi_polygon_area(&polygon_bool::union(&parts))).max(0.0)
+    finite(polygon_bool::union(&parts).iter().filter_map(|poly| poly.first()).map(|r| signed_area(r).abs()).sum::<f64>()).max(0.0)
+}
+
+/// [209] Fassadenfläche (m²) der oberirdischen Geschosse, gleiche Quelle wie das GV: mit freien Körpern
+/// deren Umfang × Höhe über ±0.00, sonst je Geschoss der Aussenumfang der vereinigten Wand- und
+/// Raumgrundrisse × Geschosshöhe. Innenhöfe (Löcher) zählen nicht; Brüstungen/Attiken fehlen.
+pub fn facade_area(p: &Project) -> f64 {
+    let perimeter = |r: &[[f64; 2]]| -> f64 { (0..r.len()).map(|i| crate::jsmath::hypot2(r[(i + 1) % r.len()][0] - r[i][0], r[(i + 1) % r.len()][1] - r[i][1])).sum() };
+    let t = area_table(p);
+    if t.gv_source == GvSource::Solids {
+        return p
+            .extruded_solids
+            .as_deref()
+            .unwrap_or(&[])
+            .iter()
+            .filter(|s| s.operation.as_deref() != Some("subtract"))
+            .map(|s| {
+                let base = p.floor(&s.level_id).map_or(0.0, |f| f.base_elevation.unwrap_or(0.0)) + s.base_offset.unwrap_or(0.0);
+                let h = finite((base + s.height).min(s.height)).max(0.0);
+                let u = match &s.circle {
+                    Some(c) => 2.0 * std::f64::consts::PI * finite(c.r).abs(),
+                    None => perimeter(&s.points.iter().map(|v| [v.x, v.y]).collect::<Vec<_>>()),
+                };
+                finite(u * h)
+            })
+            .sum();
+    }
+    floors_sorted(p)
+        .into_iter()
+        .filter(|l| !is_underground(l))
+        .map(|l| {
+            let mut parts = wall_polygons(p, &l.id);
+            parts.extend(room_polygons(p, &l.id, |c| c < CATEGORIES && c != AGF));
+            if parts.is_empty() {
+                return 0.0;
+            }
+            let u: f64 = polygon_bool::union(&parts).iter().filter_map(|poly| poly.first()).map(|r| perimeter(r)).sum();
+            // Teilweise eingegrabenes Geschoss: nur der Teil über ±0.00.
+            let (base, h) = (l.base_elevation.unwrap_or(0.0), level_height(l));
+            finite(u * (base + h).min(h).max(0.0))
+        })
+        .sum()
 }
 
 /// IVHB-Kennziffern des Projekts.

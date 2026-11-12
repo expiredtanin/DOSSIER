@@ -59,7 +59,7 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   oben ein Test; was fehlt, wird hier als Aufgabe eingetragen. · M
   Umgesetzt (12.11.): `e2e/release10.spec.ts` spielt leeres Projekt → Kataster-DXF (LV95) → Baurecht → Wände/Decke/Dach → Raum +
   Raumprogramm → SIA 416/Kennzahlen (CSV/PDF) → 1:200 → Schnitt → Axonometrie/Schatten → Präsentationsplan A1 → Publikation PDF → DXF/IFC
-  → Speichern in 13 Schritten durch; fehlende Schritte als `test.fixme` ([207] [208] [209] [211] [222]–[224]; [221] und [225] seit 12.11. aktiv). Behoben: GV in der
+  → Speichern in 13 Schritten durch; fehlende Schritte als `test.fixme` ([207] [208] [211] [222]–[224]; [209], [221] und [225] seit 12.11. aktiv). Behoben: GV in der
   Kennzahlenleiste war ohne freie Körper 0 m³, neue Decken bekamen den Aussenwand-Aufbau statt eines Deckentyps. Offen: Durchlauf
   der Checkliste auf dem Mac (Maintainer); 3D-Bild headless nicht prüfbar (kein WebGPU).
 
@@ -184,8 +184,6 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   Ort: `ui/PresentationDialog.tsx`, `commands/cmds/presentation.ts`. · S
 
 ### Phase 3 (27.11.–3.12.): Vorprojekt
-- ○ **[209]** Kostenschätzung grob (Vorprojekt ±15–25 %): Kennwerte je m³ GV (SIA 416) bzw. je m² GF und eBKP-H-Hauptgruppen,
-  Kennwert-Tabelle im Projekt editierbar, Ergebnis als Tabelle/Layout-Element und CSV. · M
 - 1:100-Pläne in Abgabequalität (Bemassung, Koten, Raumstempel, Öffnungen nach Detailgrad) — Plan-Review-Runde 4 nach [199].
 - Fachplaner-Austausch: DXF/DWG je Geschoss/Schnitt/Ansicht ([200]), IFC mit Räumen/Psets ([201]); Rundreise in Archicad/Revit einmal
   real prüfen ([C9]).
@@ -1046,7 +1044,7 @@ Punktwolken/BCF-Ausbau, Windows-Paket, [C5]/[C7]/[15] Kern-Umbauten — ausser s
 
 Auf dem Mac (Tauri/Metal) noch nicht angesehen oder geprüft; bisher nur Linux-Container, CLI-SVG, Chromium oder
 Unit-Tests: [116] (atomares Speichern), [117] (CSP unter `tauri://`), [118], [122], [123], [126], [110], [101],
-[102], [131], [133], [136], [140], [145], [194], [146], [153], [64], [T2], [T4], [34], [108], [65], [169], [113], [181], [G1], [214]. Je Punkt ansehen, dann hier und
+[102], [131], [133], [136], [140], [145], [194], [146], [153], [64], [T2], [T4], [34], [108], [65], [169], [113], [181], [G1], [214], [209]. Je Punkt ansehen, dann hier und
 im jeweiligen Eintrag streichen. · M (gesamt)
 
 ---
@@ -1057,6 +1055,7 @@ Einzeilig mit ID, Titel, Datum (2026). Kleine Reste erledigter Punkte (z. B. [T7
 exakte Durchdringung, [61] Zuordnung per Hand, [63] Profil je Kante, [70] Flächentabelle als Layout-Element,
 [80] Einzelplan-PDF ohne Ebenen, [82] Legende per Ziehen) stehen im Archiv beim jeweiligen Eintrag.
 
+- [209] Kostenschätzung grob (12.11.): Kennwert-Methode Menge × Kennwert je eBKP-H-Hauptgruppe B–J (Bezug m³ GV oder m² GF je Methode, wahlweise HNF/Fassade/Dach/pauschal), Honorare/Reserve/MwSt in %, Genauigkeit ±, Region- und Index-Faktor, Preisstand; `Project.costEstimate`, Kern `kosten.rs` (Mengen aus der SIA-416-Flächentabelle, eine Quelle mit [225]). Panel im Flächenbilanz-Panel, Blatt-Tabelle Quelle „costs", CSV/PDF wie der Flächen-Nachweis; e2e-Schritte 5b/10b in `release10.spec.ts`. Vorgaben sind Beispielwerte (≈ 800 CHF/m³ GV bzw. 2'600 CHF/m² GF, keine offizielle Quelle) und als solche markiert; belegt nur MwSt 8.1 % und die SIA-102-Genauigkeiten. Offen: Varianten nebeneinander, Kennwerte aus einer echten Quelle (Büro/CRB), Mac-Gegenprobe
 - [185] Navigation wie Archicad (12.11.): Geschosswechsel behält den Ausschnitt, Cmd+5/6 Geschoss runter/hoch, Cmd+3 „3D · Auswahl", Cmd+4 Auswahl im 3D ausblenden.
 - [195] Objekt-Einstellungsfenster (12.11.): Taste T öffnet die Objekteinstellungen (Objekt + Darstellung) für alle Bauteile; Weiterführung als natives Nebenfenster in [195b].
 - [197] Cmd+3/4: Kamera bleibt stehen (`fitSeq` entfällt, Einpassen nur Cmd/Ctrl+Shift+F); bei „nur Auswahl" bleiben Dachfenster/Deckenöffnungen nicht mehr stehen (Öffnungen folgen ihrem Wirt Wand, Dach oder Decke, `classes.rs::opening_hosts`); Rust-Test + e2e (`navigation185`: Pick-Öffnungen nur der gewählten Wand). Nicht geprüft: Kamera im echten 3D (headless kein WebGPU) und nicht in der Tauri-App (12.11.)

@@ -104,3 +104,7 @@ export {
   BlenderMissingError, RenderCancelled, RENDER_SIZE_PRESETS, RENDER_QUALITY_PRESETS, RENDER_VIEW_PRESETS, BLENDER_CANDIDATES, BLENDER_DOWNLOAD_URL,
 } from "../export/blenderRender";
 export type { BlenderHost, RenderPackage, RenderOptions, RenderScene, RenderCamera, RenderCameraSpec, RenderViewPreset, RenderMaterial, RenderRole, RenderCameraChoice, TextureLoader, BlenderEvent, RenderResult, RenderRunOptions } from "../export/blenderRender";
+// [209] Kostenschätzung grob (Kern kosten.rs): Rechnung, Beispielwerte, Bericht (CSV/PDF wie der Flächen-Nachweis)
+export { computeCostEstimate, defaultCostEstimate, formatChf } from "../analysis/costEstimate";
+export type { CostResult, CostRow, CostQuantities, CostEstimate, CostGroup, CostMethod, CostBasis } from "../analysis/costEstimate";
+export { buildCostReport, costGroupLabel, costUnitLabel } from "../export/costReport";

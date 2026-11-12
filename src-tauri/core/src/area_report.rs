@@ -7,12 +7,42 @@ use serde_json::{json, Value};
 
 use crate::js_fmt::{js_number, to_fixed};
 
-/// Zelle: Text oder Zahl (`d` Nachkommastellen, `n = null` = nicht berechenbar).
+/// Zelle: Text oder Zahl (`d` Nachkommastellen, `n = null` = nicht berechenbar; `g`: Tausender mit
+/// Apostroph in Blatt/PDF, z. B. Franken [209] — die CSV bleibt ohne Trenner).
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum Cell {
     Text(String),
-    Num { n: Option<f64>, d: usize },
+    Num {
+        n: Option<f64>,
+        d: usize,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        g: bool,
+    },
+}
+
+/// Zahl wie `toFixed`, mit `g` Tausender-Apostroph (Schweizer Schreibweise, 1'234'567.50).
+pub fn fmt_num(n: f64, d: usize, g: bool) -> String {
+    let s = to_fixed(n, d);
+    if !g {
+        return s;
+    }
+    let (sign, rest) = if let Some(r) = s.strip_prefix('-') { ("-", r) } else { ("", s.as_str()) };
+    let (int, frac) = match rest.find('.') {
+        Some(i) => (&rest[..i], &rest[i..]),
+        None => (rest, ""),
+    };
+    if !int.bytes().all(|b| b.is_ascii_digit()) {
+        return s;
+    }
+    let mut out = String::new();
+    for (i, ch) in int.chars().enumerate() {
+        if i > 0 && (int.len() - i) % 3 == 0 {
+            out.push('\'');
+        }
+        out.push(ch);
+    }
+    format!("{sign}{out}{frac}")
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -74,7 +104,7 @@ pub fn cell_text(c: &Cell) -> String {
     match c {
         Cell::Text(s) => s.clone(),
         Cell::Num { n: None, .. } => String::new(),
-        Cell::Num { n: Some(n), d } => to_fixed(*n, *d),
+        Cell::Num { n: Some(n), d, .. } => to_fixed(*n, *d),
     }
 }
 
@@ -379,7 +409,7 @@ pub fn layout(report: &Report, o: &LayoutOptions) -> Layout {
                 .map(|c| match c {
                     Cell::Text(t) => t.clone(),
                     Cell::Num { n: None, .. } => "–".to_string(),
-                    Cell::Num { n: Some(n), d } => to_fixed(*n, *d),
+                    Cell::Num { n: Some(n), d, g } => fmt_num(*n, *d, *g),
                 })
                 .collect();
             let total = r.total == Some(true);

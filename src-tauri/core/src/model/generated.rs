@@ -5563,6 +5563,9 @@ pub enum LayoutTableSource {
     /// [158] Raumbuch: Oberflächen je Raum.
     #[serde(rename = "roomBook")]
     RoomBook,
+    /// [209] Kostenschätzung grob (eBKP-H-Hauptgruppen, Zuschläge, Total).
+    #[serde(rename = "costs")]
+    Costs,
     #[serde(other)]
     #[ts(skip)]
     Unknown,
@@ -5759,6 +5762,101 @@ pub struct CompetitionSettings {
     pub anonymous: bool,
     /// Kennwort der Abgabe (steht in Plankopf und PDF-Titel).
     pub keyword: String,
+    #[serde(flatten)]
+    #[ts(skip)]
+    pub extra: Extra,
+}
+
+/// [209] Bezugsmenge eines Kostenkennwerts (Kostenschätzung nach der Kennwert-Methode).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+pub enum CostBasis {
+    /// Die Menge der Methode des Projekts (`CostEstimate.method`: m³ GV oder m² GF).
+    #[default]
+    #[serde(rename = "method")]
+    Method,
+    /// Gebäudevolumen GV (m³, SIA 416).
+    #[serde(rename = "gv")]
+    Gv,
+    /// Geschossfläche GF (m², SIA 416).
+    #[serde(rename = "gf")]
+    Gf,
+    /// Hauptnutzfläche HNF (m², SIA 416).
+    #[serde(rename = "hnf")]
+    Hnf,
+    /// Fassadenfläche (m², Aussenumfang × Geschosshöhe).
+    #[serde(rename = "facade")]
+    Facade,
+    /// Dachfläche (m², geneigte Dachflächen, ohne Dach die oberirdische Grundfläche).
+    #[serde(rename = "roof")]
+    Roof,
+    /// Pauschal: der Kennwert ist der Betrag (Menge 1).
+    #[serde(rename = "lump")]
+    Lump,
+    #[serde(other)]
+    #[ts(skip)]
+    Unknown,
+}
+
+/// [209] Hauptmenge der Kostenschätzung: m³ GV oder m² GF.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+pub enum CostMethod {
+    #[default]
+    #[serde(rename = "gv")]
+    Gv,
+    #[serde(rename = "gf")]
+    Gf,
+    #[serde(other)]
+    #[ts(skip)]
+    Unknown,
+}
+
+/// [209] Eine Zeile der Kennwert-Tabelle: eBKP-H-Hauptgruppe (B–J) oder eine zusammengefasste Gruppe.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct CostGroup {
+    /// Kennung der Gruppe nach eBKP-H (SN 506 511), z. B. „C“ oder „B–J“.
+    pub code: String,
+    /// Eigene Bezeichnung; fehlt = Name der eBKP-H-Hauptgruppe (aus `code`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub name: Option<String>,
+    pub basis: CostBasis,
+    /// Kennwert in CHF je Einheit der Bezugsmenge (pauschal: CHF).
+    pub rate: f64,
+    #[serde(flatten)]
+    #[ts(skip)]
+    pub extra: Extra,
+}
+
+/// [209] Grobe Kostenschätzung (Vorprojekt/Wettbewerb) nach der Kennwert-Methode: Menge × Kennwert je
+/// eBKP-H-Hauptgruppe, dazu Honorare, Reserve und MwSt in Prozent. Fehlt das Feld, rechnet der Kern mit
+/// Beispielwerten (`kosten::default_estimate`).
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct CostEstimate {
+    pub method: CostMethod,
+    pub groups: Vec<CostGroup>,
+    /// Honorare (eBKP-H V) in % der Summe B–J.
+    #[serde(rename = "feesPct")]
+    pub fees_pct: f64,
+    /// Reserve/Unvorhergesehenes (eBKP-H Y) in % der Summe B–J + Honorare.
+    #[serde(rename = "reservePct")]
+    pub reserve_pct: f64,
+    /// Mehrwertsteuer (eBKP-H Z) in %.
+    #[serde(rename = "vatPct")]
+    pub vat_pct: f64,
+    /// Genauigkeit der Schätzung ± in %.
+    #[serde(rename = "accuracyPct")]
+    pub accuracy_pct: f64,
+    /// Region-Faktor auf alle Kennwerte (1 = keiner).
+    #[serde(rename = "regionFactor")]
+    pub region_factor: f64,
+    /// Teuerung vom Preisstand der Kennwerte bis heute als Faktor (Baupreisindex neu / alt; 1 = keine).
+    #[serde(rename = "indexFactor")]
+    pub index_factor: f64,
+    /// Preisstand der Kennwerte (Text, z. B. „Okt. 2025, Baupreisindex Hochbau“).
+    #[serde(rename = "priceBase")]
+    pub price_base: String,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -6298,6 +6396,10 @@ pub struct Project {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub competition: Option<CompetitionSettings>,
+    /// [209] Kostenschätzung grob (Kennwerte, Zuschläge); fehlt = Beispielwerte.
+    #[serde(rename = "costEstimate", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub cost_estimate: Option<CostEstimate>,
     /// Höhe von ±0.00 (OK fertig Boden des Bezugsgeschosses, `DrawingLevel.zeroLevel`)
     /// in Metern über Meer (m ü. M.), editierbar im Einstellungs-Fenster. Optional.
     /// Die automatischen Koten im Schnitt/in der Ansicht schreiben „±0.00 = 512.40"
@@ -7164,6 +7266,12 @@ impl Project {
             "competition" => {
                 self.competition = match v {
                     Some(v) => <Option<CompetitionSettings>>::deserialize(v).map_err(|e| e.to_string())?,
+                    None => Default::default(),
+                };
+            }
+            "costEstimate" => {
+                self.cost_estimate = match v {
+                    Some(v) => <Option<CostEstimate>>::deserialize(v).map_err(|e| e.to_string())?,
                     None => Default::default(),
                 };
             }

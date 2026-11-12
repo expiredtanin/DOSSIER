@@ -14,6 +14,7 @@ import type { Room } from "../model/types";
 import { roomDisplayName } from "../model/roomStamp";
 import { KennzahlenSection } from "./KennzahlenSection";
 import { AreaTableSection } from "./AreaTableSection";
+import { CostEstimateSection } from "./CostEstimateSection";
 import { OpeningScheduleSection } from "./OpeningScheduleSection";
 import { ElementScheduleSection } from "./ElementScheduleSection";
 import { RoomBookSection } from "./RoomBookSection";
@@ -45,6 +46,7 @@ export function RoomBalancePanel() {
       <div className="balance-panel">
         <KennzahlenSection />
         <AreaTableSection />
+        <CostEstimateSection />
         <OpeningScheduleSection />
         <ElementScheduleSection />
         <div className="balance-empty">{t("balance.empty")}</div>
@@ -81,6 +83,9 @@ export function RoomBalancePanel() {
 
       {/* Flächentabelle und IVHB-Kennziffern. */}
       <AreaTableSection />
+
+      {/* Kostenschätzung grob ([209]). */}
+      <CostEstimateSection />
 
       {/* Fenster- und Türliste. */}
       <OpeningScheduleSection />
