@@ -559,6 +559,9 @@ pub fn section_primitives_mv(out: &Output, mono: bool, hidden_lines: bool, vis: 
         prims.push(pr);
     }
     prims.append(&mut late_joints);
+    // [198] Fugen zwischen gleich gestalteten Schnittflächen verschiedener Bauteile entfallen.
+    let tail = prims.split_off(cut_start);
+    prims.extend(crate::plan::seams::fuse_section(tail));
     // [140] Schnittkante: Umriss der vereinigten Schnittflächen schwer, Fugen dazwischen bleiben fein.
     for poly in crate::polygon_bool::union(&cut_rings) {
         for ring in &poly {

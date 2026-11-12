@@ -1230,3 +1230,40 @@ fn hoehenlinien_ergeben_gelaendelinie_und_erdreich() {
     assert_eq!(lines, 5, "6 Schnittpunkte = 5 Segmente");
     assert!(g.iter().any(|q| matches!(q, Primitive::Polygon { context_object_id: Some(id), .. } if id == "hl")), "Erdreich mit Pick-Id");
 }
+
+/// [198] Zwei Wandschnitte mit gleichem Innenputz (gleiche Füllung/Schraffur, verschiedene Wände) stossen
+/// ohne feine Fuge aneinander; die Fuge zum Backstein (anderer Stil) und die Fuge zwischen zwei Schichten
+/// DERSELBEN Wand bleiben.
+#[test]
+fn schnitt_gleiche_flaechen_verschiedener_waende_ohne_fuge() {
+    let cut = |src: &str, x0: f64, x1: f64, pattern: HatchPattern| {
+        let mut c = Cut::new(Kind::Wall, 0, vec![[x0, 0.0], [x1, 0.0], [x1, 2.5], [x0, 2.5]]);
+        c.source_id = Some(src.into());
+        c.hatch = Some(HatchRender { pattern, ..section_hatch() });
+        c.fill = Some(HATCH_PAPER.into());
+        c
+    };
+    // Wand A: Putz 0…0.05, Backstein 0.05…0.2; Wand B: Putz 0.2…0.25 und 0.25…0.3 (zwei Schichten gleichen Stils);
+    // Wand A: Putz 0.3…0.35 (stösst an den Putz der Wand B).
+    let out = Output {
+        cuts: vec![cut("A", 0.0, 0.05, HatchPattern::None), cut("A", 0.05, 0.2, HatchPattern::Diagonal), cut("B", 0.2, 0.25, HatchPattern::None), cut("B", 0.25, 0.3, HatchPattern::None), cut("A", 0.3, 0.35, HatchPattern::None)],
+        ..Default::default()
+    };
+    let (prims, _) = section_primitives_at(&out, false, false, &Visibility::default(), 20.0, Detail::Mittel, true, &CutRules::default());
+    let edges: Vec<(f64, f64, f64, f64)> = prims
+        .iter()
+        .flat_map(|q| match q {
+            Primitive::Polygon { pts, stroke, no_stroke_edges, .. } if stroke != "none" => {
+                let skip = no_stroke_edges.clone().unwrap_or_default();
+                (0..pts.len()).filter(|i| !skip.contains(&(*i as f64))).map(|i| (pts[i].x, pts[i].y, pts[(i + 1) % pts.len()].x, pts[(i + 1) % pts.len()].y)).collect::<Vec<_>>()
+            }
+            Primitive::Line { a, b, cls, .. } if &**cls == "section-joint" => vec![(a.x, a.y, b.x, b.y)],
+            _ => vec![],
+        })
+        .collect();
+    let at = |x: f64| edges.iter().any(|(ax, _, bx, _)| (ax - x).abs() < 1e-6 && (bx - x).abs() < 1e-6);
+    assert!(at(0.05), "Fuge Putz/Backstein bleibt: {edges:?}");
+    assert!(at(0.2), "Fuge Backstein/Putz (Materialwechsel) bleibt");
+    assert!(at(0.25), "Fuge zwischen zwei Schichten DERSELBEN Wand bleibt");
+    assert!(!at(0.3), "Putz B an Putz A (gleicher Stil, verschiedene Wände): keine Fuge");
+}

@@ -7,17 +7,15 @@
 <text x="1.80481" y="2.54903" font-family="Inter, sans-serif" text-anchor="start"><tspan font-size="0.3528" fill="#111111">Wohnen</tspan></text>
 <text x="1.80481" y="3.00764" font-family="Inter, sans-serif" text-anchor="start"><tspan font-size="0.28222" fill="#111111">17.01 m²</tspan></text>
 <polygon points="-0.1725,4.845 0.8,4.845 0.8,4.5 0.1725,4.5" fill="#0f0f0f" stroke="#0f0f0f" stroke-width="0.012"/>
-<polygon points="1.7,4.845 3,4.845 3,4.5 1.7,4.5" fill="#0f0f0f" stroke="#1a1a1a" stroke-width="0.025"/>
+<polygon points="1.7,4.845 3,4.845 3,4.5 1.7,4.5" fill="#0f0f0f" stroke="#0f0f0f" stroke-width="0.012"/>
 <polygon points="4,4.845 5.1725,4.845 4.8275,4.5 4,4.5" fill="#0f0f0f" stroke="#0f0f0f" stroke-width="0.012"/>
 <polygon points="5.1725,4.845 5.1725,0.5 4.8275,0.845 4.8275,4.5" fill="#0f0f0f" stroke="#0f0f0f" stroke-width="0.012"/>
 <polygon points="5.1725,0.5 4.4,0.5 4.4,0.845 4.8275,0.845" fill="#0f0f0f" stroke="#0f0f0f" stroke-width="0.012"/>
 <polygon points="4.8275,0.845 4.8275,4.5 4,4.5 4,4.845 5.1725,4.845 5.1725,0.5 4.4,0.5 4.4,0.845" fill="none" stroke="#1a1a1a" stroke-width="0.025"/>
 <polygon points="3,0.5 -0.1725,0.5 0.1725,0.845 3,0.845" fill="#0f0f0f" stroke="#0f0f0f" stroke-width="0.012"/>
 <polygon points="-0.1725,0.5 -0.1725,4.845 0.1725,4.5 0.1725,0.845" fill="#0f0f0f" stroke="#0f0f0f" stroke-width="0.012"/>
-<polygon points="0.1725,0.845 3,0.845 3,0.5 -0.1725,0.5 -0.1725,4.845 0.8,4.845 0.8,4.5 0.1725,4.5" fill="none" stroke="#1a1a1a" stroke-width="0.025"/>
 <polygon points="2.475,4.5 2.475,0.845 2.325,0.845 2.325,4.5" fill="#0f0f0f" stroke="#0f0f0f" stroke-width="0.012"/>
-<line x1="2.475" y1="4.5" x2="2.475" y2="0.845" stroke="#1a1a1a" stroke-width="0.025"/>
-<line x1="2.325" y1="0.845" x2="2.325" y2="4.5" stroke="#1a1a1a" stroke-width="0.025"/>
+<polygon points="2.325,4.5 1.7,4.5 1.7,4.845 3,4.845 3,4.5 2.475,4.5 2.475,0.845 3,0.845 3,0.5 -0.1725,0.5 -0.1725,4.845 0.8,4.845 0.8,4.5 0.1725,4.5 0.1725,0.845 2.325,0.845" fill="none" stroke="#1a1a1a" stroke-width="0.025"/>
 <polygon points="3.2,4.2725 4.2,4.2725 4.2,1.0725 3.2,1.0725" fill="none" stroke="none" stroke-width="0"/>
 <polyline points="4.2,3.09917 4.2,1.0725 3.2,1.0725 3.2,3.09917" fill="none" stroke="#1a1a1a" stroke-width="0.013" stroke-dasharray="0.2 0.1" stroke-dashoffset="0.12333"/>
 <line x1="3.2" y1="4.05917" x2="4.2" y2="4.05917" stroke="#1a1a1a" stroke-width="0.01"/>

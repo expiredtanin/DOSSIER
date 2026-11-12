@@ -235,9 +235,10 @@ describe("generatePlan — Durchgangswand-Aussparung am Mittelspann-Stoss (Phase
       expect(Math.abs(l.a.y - 0.075) < 1e-6).toBe(true);
       expect(Math.abs(l.b.y - 0.075) < 1e-6).toBe(true);
     }
-    // Ein Segment endet bei 3.94, das andere beginnt bei 4.06.
+    // [198] Unter dem Putz des Abzweigs (1.5 cm je Seite) entfällt die Linie: Putz an Putz ohne Trennlinie.
+    // Ein Segment endet bei 3.925, das andere beginnt bei 4.075 (statt an der Kernbreite 3.94/4.06).
     const allX = outline.flatMap((l) => [l.a.x, l.b.x]);
-    expect(allX.some((x) => Math.abs(x - 3.94) < 1e-6)).toBe(true);
-    expect(allX.some((x) => Math.abs(x - 4.06) < 1e-6)).toBe(true);
+    expect(allX.some((x) => Math.abs(x - 3.925) < 1e-6)).toBe(true);
+    expect(allX.some((x) => Math.abs(x - 4.075) < 1e-6)).toBe(true);
   });
 });

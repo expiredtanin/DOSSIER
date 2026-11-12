@@ -40,9 +40,12 @@ pub mod model_view;
 pub mod trees;
 pub mod mesh_plan;
 pub mod arc_fit;
+pub(crate) mod seams;
 pub(crate) mod wall_columns;
 #[cfg(test)]
 pub(crate) mod wall_join_tests;
+#[cfg(test)]
+mod wall_merge_tests;
 #[cfg(test)]
 mod hatch_dir_tests;
 #[cfg(test)]
