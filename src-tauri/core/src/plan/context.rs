@@ -73,10 +73,23 @@ pub fn plan_context_with(c: &Ctx, out: &mut Vec<Primitive>, drawing_obstacles: &
     let mut late: Vec<Primitive> = Vec::new();
     // [140]/[150] Höhenlinien, Böschungsschraffur und Beschriftungen enden am Fussabdruck des Geschosses.
     let mut house_cache: Option<Vec<Vec<Vec2>>> = None;
-    let mut house = || -> Vec<Vec<Vec2>> { house_cache.get_or_insert_with(|| terrain_footprint(c.p, &c.a.floor)).clone() };
+    // [207] Situationsplan: Kontextgebäude gefüllt; die Höhenlinien enden auch an ihnen.
+    let sit = super::situation::opts(c);
+    let mut house = || -> Vec<Vec<Vec2>> {
+        house_cache
+            .get_or_insert_with(|| {
+                let mut h = terrain_footprint(c.p, &c.a.floor);
+                if let Some(s) = &sit {
+                    h.extend(super::situation::own_rings(c.p));
+                    h.extend(super::situation::context_rings(c, s));
+                }
+                h
+            })
+            .clone()
+    };
     let mut label_obst: Option<super::stamp_place::Obstacles> = None;
     // [152] Importierte Netze im Geschoss nach dem Ansichtsbereich (`mesh_plan.rs`); sonst Fussabdruck.
-    let meshes_done = super::mesh_plan::plan_meshes(c, out);
+    let meshes_done = sit.is_none() && super::mesh_plan::plan_meshes(c, out);
     for obj in c.p.context.as_deref().unwrap_or(&[]) {
         if meshes_done && matches!(obj, ContextObject::ImportedMesh(_)) {
             continue;
@@ -119,6 +132,11 @@ pub fn plan_context_with(c: &Ctx, out: &mut Vec<Primitive>, drawing_obstacles: &
                             out.push(context_line(a, b));
                         }
                     }
+                }
+            }
+            ContextObject::ImportedMesh(m) if sit.is_some() => {
+                if let Some(s) = &sit {
+                    super::situation::context_mesh(c, s, m, out);
                 }
             }
             ContextObject::ImportedMesh(m) => {

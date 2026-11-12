@@ -74,8 +74,15 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   (Fassade, Dach) im 3D nicht auf die Fläche beschnitten — Linien ragen über Giebel/Ortgang hinaus in die Luft; (3) Rundbogen-Öffnung:
   Leibungs-/Sturzflächen mit Streifen-/Backsteinmuster, Bogen-Leibung nicht sauber geschnitten; (4) Dachfenster in der Darstellung
   „ohne Material“ als offener Schlitz ohne Glas. · M
-- ○ **[207]** Schwarzplan / Situationsplan 1:500: Gebäude schwarz gefüllt, Nachbarbauten (Kataster/swisstopo) grau/schwarz,
-  Parzelle, Strassen, Nordpfeil, Massstabsbalken; als Ansichtsvorlage „Situation WBW“. · M
+- ◐ **[207]** Schwarzplan / Situationsplan 1:500 (12.11.): Modelldarstellung mit `situation` (`ModelViewOption.situation`, Kern
+  `plan/situation.rs`) ersetzt im Grundriss die Bauteile durch den gefüllten Umriss des eigenen Gebäudes (Wände/Decken/Körper ab
+  Erdgeschoss + Dächer mit Überstand, Klasse „83 Situation Gebäude"), gefüllte Grundfläche der Kontextnetze ([181], auf ihrer Klasse;
+  grau, im Schwarzplan schwarz) und Nordpfeil + Massstabsbalken (Klasse „84 Planzeichen"); Raster/Wände/Möbel/Text/Masse/Koten/
+  Schnittmarken über die Klassen der Vorlage aus, Parzelle, Strassen, Höhenlinien (enden an den Gebäuden) und Bäume bleiben. Standard-
+  Ressourcen „Situation WBW 1:500"/„Schwarzplan 1:500" (Vorlagen + Modelldarstellungen, Ressourcen-Tab „Modelldarstellung"),
+  Musterhaus komplex: Ausschnitt „Situation 1:500" nutzt sie, mit fünf Nachbargebäuden (Schnitte/Ansichten blenden Klasse 12 aus); CLI `plan --snapshot "Situation 1:500" --hatch`.
+  Offen: geschlossene Kataster-Polylinien (Klasse „Gebäude", nur 2D) bleiben Linien (gefüllt werden die Netze); Innenhöfe als weisse
+  Fläche statt Loch; Strassennamen/Gewässer nur als gewöhnliche Zeichnungen; nicht in der Tauri-App/auf dem Mac geprüft. · M
 - ○ **[208]** Wettbewerbs-Layouts: Plakat-Vorlagen A0/A1 hoch/quer mit Raster, Kennwort-Feld (Anonymität: kein Büroname,
   Metadaten im PDF leer), Planköpfe; Publikationssatz „WBW-Abgabe“ → PDF. · M
 - [61] Raumprogramm gegen Modell und Flächennachweis SIA 416 als Tabelle/Layout-Element ([70]); Kennzahlen (GF, GV, HNF/GF, Fassadenanteil).

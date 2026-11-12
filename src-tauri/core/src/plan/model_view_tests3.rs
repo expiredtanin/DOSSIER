@@ -262,7 +262,7 @@ fn mitgelieferte_stufen_aus_den_standards() {
         .map(|v| serde_json::from_value(v).unwrap())
         .collect();
     let names: Vec<&str> = add.iter().map(|m| m.name.as_str()).collect();
-    assert_eq!(names, ["Wettbewerb 1:200", "Baueingabe 1:100", "Ausführung 1:50", "Rohbau/Statik"]);
+    assert_eq!(names, ["Wettbewerb 1:200", "Baueingabe 1:100", "Ausführung 1:50", "Situation WBW", "Schwarzplan", "Rohbau/Statik"]);
     // Alles bekannt (keine verlorenen Felder) und unterscheidbar.
     for m in &add {
         assert!(m.extra.0.is_empty(), "{}: {:?}", m.name, m.extra);
@@ -271,7 +271,7 @@ fn mitgelieferte_stufen_aus_den_standards() {
     let w = resolve(Some(&add[0]), crate::plan::style::Detail::Mittel, 200.0);
     assert_eq!(w.dims.chains, DimChains::Total);
     assert_eq!(w.stamp.number, Some(false));
-    let r = resolve(Some(&add[3]), crate::plan::style::Detail::Mittel, 100.0);
+    let r = resolve(add.iter().find(|m| m.name == "Rohbau/Statik"), crate::plan::style::Detail::Mittel, 100.0);
     assert_eq!(r.wall.layers, LayerMode::Core);
     let a = resolve(Some(&add[2]), crate::plan::style::Detail::Fein, 50.0);
     assert!(a.stair.step_numbers && a.stamp.height == Some(true));

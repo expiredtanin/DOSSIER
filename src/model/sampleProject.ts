@@ -417,6 +417,9 @@ export const sampleProject: Project = {
     { code: "90", name: "Referenzen", color: "#1a1a1a", lw: 0.13, visible: true, locked: false },
     { code: "91", name: "Schnittmarken", color: "#1a1a1a", lw: 0.18, visible: true, locked: false },
     { code: "92", name: "Kameras", color: "#1a1a1a", lw: 0.18, visible: true, locked: false },
+    // [207] Situationsplan/Schwarzplan: eigenes Gebäude als gefüllter Umriss, Nordpfeil und Massstabsbalken.
+    { code: "83", name: "Situation Gebäude", color: "#000000", lw: 0.13, visible: true, locked: false },
+    { code: "84", name: "Planzeichen", color: "#000000", lw: 0.18, visible: true, locked: false },
     { code: "99", name: "Konstruktion", color: "#404040", lw: 0.13, visible: true, locked: false },
   ],
   // [140] Strichstärken folgen dem Massstab (neue Projekte; bestehende behalten ihre Einstellung).

@@ -189,6 +189,11 @@ impl<'a> Ctx<'a> {
         })
     }
 
+    /// [207] Situationsplan der wirksamen Modelldarstellung (`None` = gewöhnlicher Grundriss).
+    pub fn situation(&self) -> Option<&ModelViewSituation> {
+        self.mv_sel.and_then(|m| m.situation.as_ref())
+    }
+
     /// [173] Aufgelöste Darstellungsoptionen dieser Plan-Erzeugung (`plan/model_view.rs`).
     pub fn mv(&self) -> &super::model_view::Options {
         &self.mv
@@ -1739,6 +1744,12 @@ fn domains_before(c: &Ctx, out: &mut DomainPrims, bounds: &mut Bounds) -> Result
     if super::ceiling_plan::domains(c, out, bounds)? {
         return Ok(());
     }
+    // [207] Situationsplan: das eigene Gebäude als gefüllter Umriss statt der Bauteile (nur Bäume bleiben).
+    if let Some(s) = super::situation::opts(c) {
+        super::situation::own_prims(c, &s, &mut out.roofs, bounds);
+        super::trees::plan_trees(c, &mut out.columns);
+        return Ok(());
+    }
     ceilings(c, &mut out.ceilings, bounds)?;
     roofs(c, &mut out.roofs, bounds);
     super::walls::plan_walls(c, c.a.reference_lines, &mut out.walls, bounds)?;
@@ -1770,7 +1781,9 @@ fn domains_after(c: &Ctx, out: &mut DomainPrims, bounds: &mut Bounds, marks: &mu
         return;
     }
     let drawn = drawing_obstacles(c);
-    if c.a.global {
+    // [207] Situationsplan: keine Schnittführungen, Räume und Bodenbeläge; dafür Nordpfeil und Massstabsbalken.
+    let sit = super::situation::opts(c);
+    if c.a.global && sit.is_none() {
         // [150] Schnittführungen zuerst: ihre Beschriftungen sind Hindernisse der Höhenlinien-Beschriftungen.
         super::context::plan_section_lines(c, &mut out.sections);
         // [157] Marken und Beschriftungen der Schnittführungen gehören zum Ausmass (sonst oben abgeschnitten).
@@ -1802,7 +1815,9 @@ fn domains_after(c: &Ctx, out: &mut DomainPrims, bounds: &mut Bounds, marks: &mu
     }
     let obstacles = stamp_obstacles_with(out, drawn.clone());
     let mut top = Vec::new();
-    rooms(c, &mut out.rooms, &mut top, bounds, &obstacles);
+    if sit.is_none() {
+        rooms(c, &mut out.rooms, &mut top, bounds, &obstacles);
+    }
     if c.a.global {
         let mut o = drawn;
         for q in out.sections.iter().filter(|q| matches!(q, Primitive::DrawingText { .. })) {
@@ -1829,6 +1844,12 @@ fn domains_after(c: &Ctx, out: &mut DomainPrims, bounds: &mut Bounds, marks: &mu
             }
         }
         super::trees::plan_tree_labels(c, &o, &mut out.columns);
+    }
+    if let Some(s) = &sit {
+        if c.a.global {
+            super::situation::symbol_prims(c, s, &mut out.sections, bounds);
+        }
+        return;
     }
     // [156] Bodenbelag nach den Raumstempeln (spart sie aus), zuunterst in der Gruppe der Decken.
     let mut finish = Vec::new();
@@ -1909,6 +1930,10 @@ fn extras_of(p: &Project, a: &PlanArgs) -> (Vec<(Primitive, u32)>, Vec<Primitive
     if a.global {
         // [66] Baurecht (Parzelle, Baubereich, Verstösse) gehört zur Vermessung: ausgeblendete Kategorie „01" ⇒ ohne.
         let site = crate::standards::derived_visible(p, super::extras::SITE_CATEGORY, |k| a.show.contains(k));
+        // [207] Situationsplan: nur die Parzellengrenze, ohne Baubereich, Verstösse und Schatten.
+        if super::situation::active(p, a) {
+            return (if site { super::extras::parcel_only(p) } else { Vec::new() }, Vec::new());
+        }
         // [180] Sonnenschatten auf der Klasse „Schatten".
         let sun_when = a.sun_when.filter(|_| crate::standards::derived_visible(p, crate::standards::SHADOW_CATEGORY, |k| a.show.contains(k)));
         super::extras::site_and_shadow(p, &a.floor, sun_when, a.scale, site)

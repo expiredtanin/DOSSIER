@@ -18,7 +18,12 @@ export const SECTION_MARK_CATEGORY = "91";
 /** Kameras ([213]): Symbol mit Sichtkegel im Grundriss. */
 export const CAMERA_CATEGORY = "92";
 
-export const DERIVED_CATEGORY_CODES: readonly string[] = [SHADOW_CATEGORY, AUTO_DIM_CATEGORY, LEVEL_MARK_CATEGORY, SECTION_MARK_CATEGORY, CAMERA_CATEGORY];
+/** [207] Eigenes Gebäude im Situationsplan/Schwarzplan (gefüllter Umriss über alle Geschosse). */
+export const SITUATION_CATEGORY = "83";
+/** [207] Planzeichen des Situationsplans: Nordpfeil und Massstabsbalken. */
+export const SYMBOL_CATEGORY = "84";
+
+export const DERIVED_CATEGORY_CODES: readonly string[] = [SHADOW_CATEGORY, AUTO_DIM_CATEGORY, LEVEL_MARK_CATEGORY, SECTION_MARK_CATEGORY, CAMERA_CATEGORY, SITUATION_CATEGORY, SYMBOL_CATEGORY];
 
 /** Abgeleitete Darstellung der Klasse `code` sichtbar: Klasse eingeblendet (`shown`) oder im Projekt nicht vorhanden. */
 export function derivedVisible(layers: LayerCategory[], code: string, shown: (code: string) => boolean): boolean {

@@ -2189,6 +2189,11 @@ export type ModelViewOption = {
   roomStamps?: ModelViewRoomStamps;
   /** [173] Bemassung: Massketten der automatischen Aussenbemassung, Höhenkoten. */
   dimensions?: ModelViewDimensions;
+  /**
+   * [207] Situationsplan / Schwarzplan: fehlt ⇒ gewöhnlicher Grundriss; vorhanden ⇒ statt der Bauteile das
+   * eigene Gebäude als gefüllter Umriss, die Kontextgebäude gefüllt, dazu Nordpfeil und Massstabsbalken.
+   */
+  situation?: ModelViewSituation;
 };
 
 /** [173] Dächer in der Modelldarstellung (fehlt ⇒ wie Basis). */
@@ -2231,6 +2236,23 @@ export type ModelViewSectionMarks = {
 export type ModelViewSite = {
   /** Gelände, Höhenlinien und Baugruben im Grundriss (die Ebene geht vor; Basis: automatisch). */
   terrain?: boolean;
+};
+
+/**
+ * [207] Situationsplan in der Modelldarstellung (≙ Schwarzplan): jede Option fehlt ⇒ Standard des
+ * Situationsplans (eigenes Gebäude schwarz, Kontext grau, mit Planzeichen).
+ */
+export type ModelViewSituation = {
+  /**
+   * Eigenes Gebäude: Umriss über alle Geschosse über Terrain und die Dächer, gefüllt (Basis: schwarz).
+   */
+  own?: SituationFill;
+  /**
+   * Kontextgebäude (importierte Netze, Grundfläche aus der Aufsicht), gefüllt (Basis: grau; „Schwarzplan": schwarz).
+   */
+  context?: SituationFill;
+  /** Nordpfeil und Massstabsbalken zeichnen (Basis: ja). */
+  symbols?: boolean;
 };
 
 /** [173] Decken und Böden in der Modelldarstellung. */
@@ -3495,6 +3517,9 @@ export type SiteRules = {
    */
   profileHeight?: number;
 };
+
+/** [207] Füllung eines Gebäudes im Situationsplan. */
+export type SituationFill = "black" | "grey" | "off";
 
 /** Terminierungs-Regel einer Wand am Deckenanschluss (siehe {@link Wall.sliceTermination}). */
 export type SliceTermination = "both" | "below" | "above";

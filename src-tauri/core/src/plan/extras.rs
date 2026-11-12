@@ -217,6 +217,16 @@ pub fn site_and_shadow(p: &Project, floor: &str, when_ms: Option<f64>, scale: f6
     (under, violations)
 }
 
+/// [207] Situationsplan: nur die Parzellengrenze des Baurechts (ohne Baubereich, Verstösse und Schatten), auf der
+/// Klasse „01"; Strichstärke wie im Baurecht.
+pub fn parcel_only(p: &Project) -> Vec<(Primitive, u32)> {
+    let mut under = Vec::new();
+    if let Some(rules) = p.site_rules.as_ref().filter(|r| r.parcel.len() >= 3) {
+        ring_lines(&mut under, &rules.parcel, SITE_PARCEL_CLS, PARCEL_COLOR, 0.35, &PARCEL_DASH, 1);
+    }
+    under
+}
+
 // ── Abzugskörper ────────────────────────────────────────────────────────────────────────────────
 
 const EPS: f64 = 1e-7;
