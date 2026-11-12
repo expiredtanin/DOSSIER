@@ -13,8 +13,10 @@ import {
   RenderCancelled,
   defaultRenderTime,
   paperPixels,
+  projectRenderCameras,
   renderSun,
   type BlenderHost,
+  type RenderCameraChoice,
   type RenderCameraSpec,
 } from "../core";
 import { getState } from "../state/appStore";
@@ -50,6 +52,9 @@ export const RenderDialogHost = memo(function RenderDialogHost() {
   const [quality, setQuality] = useState<(typeof RENDER_QUALITY_PRESETS)[number]["id"]>("normal");
   const [when, setWhen] = useState("");
   const [camera, setCamera] = useState<RenderCameraSpec>({ preset: "iso" });
+  // [213] "live" = aktuelle 3D-Ansicht, sonst die Id einer gespeicherten Kamera.
+  const [cameraKey, setCameraKey] = useState("live");
+  const [cameras, setCameras] = useState<RenderCameraChoice[]>([]);
   const [blenderPath, setPath] = useState("");
   const [host, setHost] = useState<BlenderHost | null | undefined>(undefined);
   const [phase, setPhase] = useState<Phase>("setup");
@@ -65,6 +70,8 @@ export const RenderDialogHost = memo(function RenderDialogHost() {
       const st = getState();
       setWhen(toInputValue(defaultRenderTime(st.project)));
       setCamera(currentRenderCamera());
+      setCameraKey("live");
+      setCameras(projectRenderCameras(st.project));
       setPath(getBlenderPath());
       setPhase("setup");
       setMessage("");
@@ -118,6 +125,17 @@ export const RenderDialogHost = memo(function RenderDialogHost() {
   const validDims = dims.width >= 16 && dims.height >= 16 && dims.width <= MAX_EDGE && dims.height <= MAX_EDGE;
   const canStart = validDims && date !== null && !busy;
   const samples = RENDER_QUALITY_PRESETS.find((q) => q.id === quality)?.samples ?? 128;
+  const pickCamera = (key: string) => {
+    setCameraKey(key);
+    const choice = cameras.find((c) => c.id === key);
+    if (!choice) {
+      setCamera(currentRenderCamera());
+      return;
+    }
+    setCamera(choice.camera);
+    // Sonnenzeit der Kamera übernehmen (änderbar).
+    if (choice.sunWhen) setWhen(toInputValue(choice.sunWhen));
+  };
   const request = () => ({ width: dims.width, height: dims.height, samples, when: date!, camera });
 
   const start = async () => {
@@ -191,7 +209,7 @@ export const RenderDialogHost = memo(function RenderDialogHost() {
     if (await saveBinaryFile(png, name, "image/png")) st.notify(t("render.saved"), "info");
   };
 
-  const camLabel = "preset" in camera ? t("render.camera.preset", { name: t(`view3d.${camera.preset === "right" ? "side" : camera.preset}` as never) }) : t("render.camera.view");
+  const camLabel = cameraKey !== "live" ? t("render.camera.saved", { name: cameras.find((c) => c.id === cameraKey)?.name ?? "" }) : "preset" in camera ? t("render.camera.preset", { name: t(`view3d.${camera.preset === "right" ? "side" : camera.preset}` as never) }) : t("render.camera.view");
   const browserOnly = host === null;
 
   return (
@@ -208,6 +226,19 @@ export const RenderDialogHost = memo(function RenderDialogHost() {
           <p className="imp-note" data-testid="render-camera">
             {camLabel}
           </p>
+          {phase !== "done" && cameras.length > 0 && (
+            <section className="imp-section">
+              <div className="imp-section-title">{t("render.camera.title")}</div>
+              <select className="imp-select" data-testid="render-camera-select" value={cameraKey} disabled={busy} onChange={(e) => pickCamera(e.target.value)}>
+                <option value="live">{t("render.camera.live")}</option>
+                {cameras.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </section>
+          )}
 
           {phase !== "done" && (
             <>

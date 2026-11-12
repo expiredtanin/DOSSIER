@@ -25,10 +25,35 @@ nach z-oben zurück, `scene.json` braucht keine Umrechnung.
   direction[3] (normiert), up[3], fovDeg (vertikal), orthoHeight (volle Sichthöhe, m)}`.
 - `sun {azimuth, elevation, when, lat, lon}`: Grad, Azimut von Norden im Uhrzeigersinn (Ost = 90), Höhe über
   dem Horizont. Himmel: physikalischer Tageshimmel mit Sonnenscheibe an dieser Richtung; unter dem Horizont wird
-  mit 1° gerendert. Optional `sun.intensity` und `exposure` (Leser-Voreinstellungen), `ground` (bool, Bodenplatte).
+  mit 1° gerendert. Optional `sun.intensity` (Standard 1.0) und `exposure` (EV; fehlt sie, belichtet der Leser automatisch
+  nach Sonnenhöhe, s. u.), `ground` (bool, Bodenplatte).
 - `materials[]`, Schlüssel = glTF-Materialname:
   `color [r,g,b]` sRGB 0..1, `opacity`, `roughness`, `metallic`, `glass` (bool), `transmission` 0..1, `ior`,
-  `textures {color, normal, roughness, metalness}` (Pfade), `sizeM` (Kantenlänge einer Kachel in m).
+  `textures {color, normal, roughness, metalness}` (Pfade), `sizeM` (Kantenlänge einer Kachel in m),
+  `role` (`terrain` | `roof` | `context` | `opening` | `building`: Verwendung nach dem Bauteil-Knoten des GLB) und
+  `component` (Baustoff, wenn er vom Materialnamen abweicht). Gleiche Namen mit verschiedener Farbe ordnet der Leser
+  über die Farbe zu.
+
+## Material je Bauteil
+
+Der glTF-Materialname ist der Baustoff-Name (`Component.name`); dessen `material` liefert die Bildkarten. Ausnahmen:
+- **Dach:** der Kern legt alle Dachschichten als „Dach“ ab. `splitRoofMaterials` ordnet jedem Teilnetz die Schicht des Dachtyps
+  zu (Farbe des Baustoffs, Rückfall die äusserste Schicht) und benennt das Material `Dach: <Baustoff>` (`component` = Baustoff,
+  damit dessen Bildkarten/Ersatzlook gelten). Hat das Dach eine eigene Farbe (`Roof.color`), bleibt es bei „Dach“.
+- **Gelände:** hat im Modell kein Material; bekommt die Wiese `Grass005` der Bibliothek (Kachel 4 m). Ohne Bildkarte setzt der
+  Leser ein Wiesengrün. **Kontext** (importierte Körper): neutral hellgrau.
+
+## Bildwirkung (Leser)
+
+Cycles-Standard statt Augenmass: Nishita-Himmel mit Sonnenstärke 1.0 (absolut, weisse besonnte Fläche ≈ 45 bei 60°), automatische
+Belichtung nach Sonnenhöhe (besonnte weisse Fläche → 1.5; ≈ −4.9 EV bei 60°), AgX, Albedo höchstens 0.8, Wiese/Ziegel/Blech nach
+Rolle und Baustoffname, Glas mit Transmission (für Schattenstrahlen durchsichtig), leichte Umgebungsverdeckung. Werte im Kopf von
+`render_dossier.py`.
+
+## Kamera
+
+`camera` = Voreinstellung oder explizit. Der Dialog bietet „Aktuelle 3D-Ansicht“ und jede gespeicherte Kamera (`Project.cameras`,
+[213]); deren Sonnenzeit (`sunWhen`) füllt die Zeit vor (änderbar). CLI: `--camera <Name|id>`; `--when` übersteuert die Zeit.
 
 ## Texturen ohne UVs
 

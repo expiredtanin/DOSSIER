@@ -64,6 +64,30 @@ describe("dossier-cli render", () => {
     expect(scene.sun.elevation).toBeGreaterThan(40);
   }, 60_000);
 
+  it("--camera: gespeicherte Kamera und deren Sonnenzeit (--when übersteuert)", async () => {
+    const err = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      expect(await run([":musterhaus-komplex", "render", "--out", join(dir, "k.png"), "--camera", "Südost", "--samples", "8", "--size", "320x180", "--cpu", "--blender", fake])).toBe(0);
+      const scene = JSON.parse(readFileSync(join(dir, "fake-scene.json"), "utf8"));
+      expect(scene.camera.kind).toBe("perspective");
+      expect(scene.camera.position[0]).toBeCloseTo(17, 6);
+      expect(scene.camera.position[1]).toBeCloseTo(-3, 6);
+      expect(scene.camera.fovDeg).toBe(50);
+      expect(scene.sun.when).toBe("2026-06-21T16:00:00.000Z");
+      expect(await run([":musterhaus-komplex", "render", "--out", join(dir, "k2.png"), "--camera", "kamera-suedost", "--when", "2026-06-21T08:00Z", "--samples", "8", "--size", "320x180", "--cpu", "--blender", fake])).toBe(0);
+      expect(JSON.parse(readFileSync(join(dir, "fake-scene.json"), "utf8")).sun.when).toBe("2026-06-21T08:00:00.000Z");
+      // `fail()` beendet den Prozess: hier als Ausnahme abfangen.
+      const exit = vi.spyOn(process, "exit").mockImplementation((() => {
+        throw new Error("exit");
+      }) as never);
+      await expect(run([":musterhaus-komplex", "render", "--out", join(dir, "k3.png"), "--camera", "gibt-es-nicht", "--blender", fake])).rejects.toThrow("exit");
+      exit.mockRestore();
+      expect(err.mock.calls.map((c) => String(c[0])).join("")).toContain("--camera");
+    } finally {
+      err.mockRestore();
+    }
+  }, 120_000);
+
   it("ohne Blender: Hinweis und Exit-Code 3", async () => {
     const err = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     try {

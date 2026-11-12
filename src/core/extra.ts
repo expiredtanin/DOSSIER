@@ -100,6 +100,7 @@ export type { MeshRect } from "../geometry/meshPick";
 // [211] Rendering mit Blender/Cycles: Export-Paket, Prozess-Ablauf (Gastgeber: Tauri/Electron/Node)
 export {
   buildRenderPackage, runBlenderRender, parseBlenderLine, blenderArgs, glbMaterials, renderSun, defaultRenderTime, paperPixels,
+  projectRenderCameras, findRenderCamera,
   BlenderMissingError, RenderCancelled, RENDER_SIZE_PRESETS, RENDER_QUALITY_PRESETS, RENDER_VIEW_PRESETS, BLENDER_CANDIDATES, BLENDER_DOWNLOAD_URL,
 } from "../export/blenderRender";
-export type { BlenderHost, RenderPackage, RenderOptions, RenderScene, RenderCamera, RenderCameraSpec, RenderViewPreset, RenderMaterial, TextureLoader, BlenderEvent, RenderResult, RenderRunOptions } from "../export/blenderRender";
+export type { BlenderHost, RenderPackage, RenderOptions, RenderScene, RenderCamera, RenderCameraSpec, RenderViewPreset, RenderMaterial, RenderRole, RenderCameraChoice, TextureLoader, BlenderEvent, RenderResult, RenderRunOptions } from "../export/blenderRender";
