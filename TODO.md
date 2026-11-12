@@ -44,6 +44,7 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
 
 ## Grundriss
 
+- ○ **[205]** Pausfolie/Referenz wie Archicad „Trace & Reference“ (12.11., Wunsch Maintainer): hinter die aktive Ansicht (Grundriss, Schnitt, Ansicht, Zeichnungsblatt/Layout) eine beliebige andere Ansicht als halbtransparente Pause legen — anderes Geschoss, Schnitt, Ansicht, Detail, Blatt; Quelle frei wählbar (nicht nur „Andere grau“ aller Geschosse, [203]), Farbe/Deckkraft, verschieben/drehen der Pause (ohne das Modell zu ändern), ein/aus per Kürzel und in der Ansichtsleiste; Pause nicht anwählbar; auch umgekehrt Grundriss hinter Schnitt (Höhenbezug) prüfen. Opus. · L
 - ◐ **[182]** Tabs/Ansichten wie Archicad (11.11., Wunsch Maintainer). Umgesetzt: Reiter-Arten Grundriss · 3D · Schnitt · Ansicht ·
   2D-Zeichnung/Layout werden nie gemischt (`navigateToLevel`/`switchViewKind` in `state/viewTabs.ts`, Anwendung in
   `state/tabNavigation.ts`): Geschoss im Navigator behält die Art (3D bleibt 3D, nur das Geschoss wechselt); Schnitt/Ansicht/Zeichnung/
