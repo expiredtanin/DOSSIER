@@ -78,7 +78,7 @@ fn domain_profile(p: &Project, a: &PlanArgs, n: usize) -> Vec<(&'static str, f64
         add("Kontext/Gelände", ms(t));
         let t = Instant::now();
         let obstacles = stamp_obstacles_with(&d, drawn);
-        rooms(&c, &mut d.rooms, &mut b, &obstacles);
+        rooms(&c, &mut d.rooms, &mut Vec::new(), &mut b, &obstacles);
         add("Räume/Stempel", ms(t));
         let t = Instant::now();
         let mut finish = Vec::new();
