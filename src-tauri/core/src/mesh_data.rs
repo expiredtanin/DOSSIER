@@ -37,11 +37,13 @@ pub struct MeshOptions {
     pub context: bool,
     /// Geschoss als Eltern-Knoten (nur glTF; OBJ/STL: aus).
     pub by_level: bool,
+    /// [227] Baugruben weglassen: das Gelände ist das gewachsene (hinterfüllt, bis an die Fassade geschlossen).
+    pub backfilled: bool,
 }
 
 impl Default for MeshOptions {
     fn default() -> Self {
-        MeshOptions { opening_parts: true, context: true, by_level: true }
+        MeshOptions { opening_parts: true, context: true, by_level: true, backfilled: false }
     }
 }
 
@@ -508,7 +510,7 @@ pub fn mesh_export_data(src: &Project, opt: &MeshOptions) -> Result<Flat, String
         for obj in p.context.as_deref().unwrap_or(&[]) {
             let (terrain, id, name, color, positions, indices) = match obj {
                 ContextObject::TerrainMesh(m) => {
-                    let (pos, idx, _) = crate::excavation::terrain_model_mesh(&p, m);
+                    let (pos, idx, _) = if opt.backfilled { crate::excavation::terrain_original_mesh(&p, m) } else { crate::excavation::terrain_model_mesh(&p, m) };
                     (true, &m.id, &m.name, None, pos, idx)
                 }
                 ContextObject::ImportedMesh(m) => (false, &m.id, &m.name, m.color.as_deref(), std::borrow::Cow::Borrowed(m.positions.as_slice()), std::borrow::Cow::Borrowed(m.indices.as_slice())),
@@ -565,6 +567,26 @@ mod tests {
 
     fn sample() -> Project {
         serde_json::from_str(include_str!("../tests/fixtures/sample_project.json")).unwrap()
+    }
+
+    #[test]
+    fn hinterfuellt_laesst_die_baugrube_weg() {
+        let mut p = sample();
+        let t = TerrainMesh { id: "g".into(), positions: vec![-50.0, -50.0, 0.0, 50.0, -50.0, 0.0, 50.0, 50.0, 0.0, -50.0, 50.0, 0.0], indices: vec![0.0, 1.0, 2.0, 0.0, 2.0, 3.0], ..Default::default() };
+        let pit = Excavation {
+            id: "bg".into(),
+            outline: vec![Vec2 { x: -5.0, y: -5.0 }, Vec2 { x: 5.0, y: -5.0 }, Vec2 { x: 5.0, y: 5.0 }, Vec2 { x: -5.0, y: 5.0 }],
+            bottom: -3.0,
+            slope: Some(45.0),
+            ..Default::default()
+        };
+        p.context = Some(vec![ContextObject::TerrainMesh(t), ContextObject::Excavation(pit)]);
+        // Die Sohle (z = -3) steht nur im Netz mit Baugrube.
+        let has_floor = |f: &Flat| f.nums.iter().any(|v| *v == -3.0);
+        let with = mesh_export_data(&p, &MeshOptions::default()).unwrap();
+        let back = mesh_export_data(&p, &MeshOptions { backfilled: true, ..Default::default() }).unwrap();
+        assert!(has_floor(&with) && !has_floor(&back));
+        assert_ne!(with.nums.len(), back.nums.len());
     }
 
     #[test]

@@ -93,6 +93,20 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   (Fassade, Dach) im 3D nicht auf die Fläche beschnitten — Linien ragen über Giebel/Ortgang hinaus in die Luft; (3) Rundbogen-Öffnung:
   Leibungs-/Sturzflächen mit Streifen-/Backsteinmuster, Bogen-Leibung nicht sauber geschnitten; (4) Dachfenster in der Darstellung
   „ohne Material“ als offener Schlitz ohne Glas. · M
+- ◐ **[227]** Kontextgebäude auf dem Gelände, Baugrube im Rendering ausblenden (12.11., Befunde der Mac-Gegenprobe [211]). (1) Kern
+  `context_ground.rs`: jedes zusammenhängende Gebäude eines Netzes (`importedMesh`, auch mehrere Häuser in einem Netz) wird senkrecht auf den
+  tiefsten Punkt des gewachsenen Geländes unter dem Fussabdruck gesetzt (Fusspunkte, Fusskanten, Raster innen; Sockel reicht bis dorthin, kein
+  Spalt talseitig); Befehl `contextToTerrain {ids}` (`cmd_context.rs`, ein `Replace` je Netz); Store `groundContextObjects`; Knopf „Aufs
+  Gelände setzen“ in der Objekt-Info der Netze (`ContextObjectProps`); beim Hinzufügen eines Geo-Imports (Kataster/swisstopo/OSM,
+  `isGeoBuildingMesh`) automatisch im selben Undo-Schritt wie der Import (`siteSlice.addToContext`). Musterhaus komplex: Nachbarn ruhen auf dem
+  Gelände; die Höhenlinien reichen dafür bis x −44 … 54 (vorher −16 … 32, Nachbarn lagen ausserhalb des Netzes; Goldens `komplex-*` neu). (2)
+  Rendering: Option „Baugrube ausblenden (hinterfüllt)“ (Vorgabe an; `RenderOptions.backfilled`, `scene.backfilled`, CLI `--excavation` lässt
+  sie stehen): das Paket enthält das gewachsene Gelände ohne Aushub (`MeshOptions.backfilled`, Kern `mesh_data.rs`, 4. Argument von
+  `meshExportData`, `excavation::terrain_original_mesh`), das normale 3D und die Klasse „07 Baugrube“ bleiben unberührt. Geprüft: Rust-Tests
+  (`context_ground`, `mesh_data`), vitest (Paket, Szene, Store, Beispielprojekt), echter Cycles-Lauf mit `bpy` (CPU) vorher/nachher.
+  **Offen:** Nachbarn ausserhalb des Geländenetzes (Musterhaus: Nordhäuser, ≤ 0.3 m über dem Hang) bleiben auf z = 0; Gelände im Rendering ist das
+  gewachsene Terrain, auch innerhalb des Grundrisses (steigt es dort über die Bodenplatte, schneidet es durch); nicht in der Tauri-App/auf dem
+  Mac, Dialog nicht im Browser geklickt. · S
 - ◐ **[207]** Schwarzplan / Situationsplan 1:500 (12.11.): Modelldarstellung mit `situation` (`ModelViewOption.situation`, Kern
   `plan/situation.rs`) ersetzt im Grundriss die Bauteile durch den gefüllten Umriss des eigenen Gebäudes (Wände/Decken/Körper ab
   Erdgeschoss + Dächer mit Überstand, Klasse „83 Situation Gebäude"), gefüllte Grundfläche der Kontextnetze ([181], auf ihrer Klasse;

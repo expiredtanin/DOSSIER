@@ -290,8 +290,9 @@ pub fn run_bin(p: &Project, name: &str, args: &[f64], text: &str) -> Result<Vec<
             let opt = crate::ifc_data::IfcOptions { now: args[0], ifc2x3: args[1] != 0.0, ebkph: args[2] != 0.0, layer_codes: args[3] != 0.0, iso: text.to_string() };
             crate::ifc_data::ifc_export_data(p, &opt).map(|f| f.to_bytes())
         }
-        ("meshExportData", 3) => {
-            let opt = crate::mesh_data::MeshOptions { opening_parts: args[0] != 0.0, context: args[1] != 0.0, by_level: args[2] != 0.0 };
+        ("meshExportData", 3 | 4) => {
+            // 4. Argument [227]: Baugruben weglassen (hinterfüllt).
+            let opt = crate::mesh_data::MeshOptions { opening_parts: args[0] != 0.0, context: args[1] != 0.0, by_level: args[2] != 0.0, backfilled: args.get(3).is_some_and(|v| *v != 0.0) };
             crate::mesh_data::mesh_export_data(p, &opt).map(|f| f.to_bytes())
         }
         // Gruppen der kompakten Linien-Unterlage (gleiche Argumente wie `planDomains`), als f64.

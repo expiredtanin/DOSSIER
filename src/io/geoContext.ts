@@ -41,6 +41,14 @@ export interface GeoFeature {
 /** Default-Gebäudehöhe (m), wenn keine Höhe aus der Quelle vorliegt. */
 export const DEFAULT_BUILDING_HEIGHT = 9;
 
+/** Id-Präfix des extrudierten Gebäudenetzes eines Geo-Imports ([227]: wird beim Hinzufügen aufs Gelände gesetzt). */
+const GEO_BUILDING_MESH_PREFIX = "geo-building3d";
+
+/** Ist `o` das Gebäudenetz eines Geo-Imports (Kataster, swisstopo, OSM; {@link buildingsToMesh})? */
+export function isGeoBuildingMesh(o: ContextObject): boolean {
+  return o.type === "importedMesh" && o.id.startsWith(GEO_BUILDING_MESH_PREFIX);
+}
+
 /** Erzeugt eine (kollisionsarme) ID für ein neues Kontext-Objekt. */
 function contextId(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}-${Math.random()
@@ -118,7 +126,7 @@ export function buildingsToMesh(
   const indices = Array.from(r.subarray(1 + nPos));
   if (positions.length < 9 || indices.length < 3) return null;
   return {
-    id: contextId("geo-building3d"),
+    id: contextId(GEO_BUILDING_MESH_PREFIX),
     type: "importedMesh",
     name: `Gebäude 3D (${sourceLabel})`,
     categoryCode: GEO_CATEGORY_DEFS.building.code,

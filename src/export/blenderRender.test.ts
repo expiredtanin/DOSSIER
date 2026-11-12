@@ -29,6 +29,7 @@ import {
   type RenderOptions,
 } from "./blenderRender";
 import { exportGlb } from "./exportMesh";
+import { meshSceneGroups } from "./meshScene.testutil";
 import { cameraToView } from "../viewport/cameraView";
 
 const when = new Date(Date.UTC(2026, 5, 21, 10, 0, 0));
@@ -340,5 +341,33 @@ describe("Kamera wählen ([213])", () => {
     expect(pkg.scene.sun.when).toBe("2026-06-21T16:00:00.000Z");
     // Abendsonne: tiefer als zur Vormittagszeit des Projekts.
     expect(pkg.scene.sun.elevation).toBeLessThan(renderSun(mk, defaultRenderTime(mk)).elevation);
+  });
+});
+
+describe("Baugrube im Rendering ausblenden ([227])", () => {
+  const complex = buildComplexSampleProject();
+  const lowest = (groups: ReturnType<typeof meshSceneGroups>, kind: string): number => {
+    let m = Infinity;
+    for (const g of groups) if (g.kind === kind) for (const p of g.prims) for (let i = 1; i < p.positions.length; i += 3) m = Math.min(m, p.positions[i]);
+    return m;
+  };
+
+  it("hinterfüllt: das Gelände ist das gewachsene, ohne Sohle bei −3.35 m; sonst bleibt die Grube", () => {
+    expect(lowest(meshSceneGroups(complex), "terrain")).toBeCloseTo(-3.35, 2);
+    expect(lowest(meshSceneGroups(complex, true), "terrain")).toBeGreaterThan(-3.3);
+  });
+
+  it("Paket: Vorgabe an (scene.backfilled, kleineres/anderes GLB), mit backfilled: false bleibt die Grube", async () => {
+    const on = await buildRenderPackage(complex, opts());
+    const off = await buildRenderPackage(complex, opts({ backfilled: false }));
+    expect(on.scene.backfilled).toBe(true);
+    expect(off.scene.backfilled).toBe(false);
+    const size = (p: typeof on) => p.files.find((f) => f.path === "model.glb")!.bytes.length;
+    expect(size(on)).not.toBe(size(off));
+  });
+
+  it("das normale GLB (Export, Anzeige) behält die Baugrube", () => {
+    expect(exportGlb(complex).length).toBe(exportGlb(complex, { backfilled: false }).length);
+    expect(exportGlb(complex).length).not.toBe(exportGlb(complex, { backfilled: true }).length);
   });
 });

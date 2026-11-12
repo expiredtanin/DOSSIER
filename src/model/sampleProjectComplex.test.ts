@@ -20,6 +20,15 @@ const p = buildComplexSampleProject();
 const codes = collectVisibleCodes(p.layers);
 
 describe("Musterhaus komplex", () => {
+  it("[227] Nachbargebäude stehen auf dem Gelände, nicht auf z = 0", () => {
+    const n = p.context?.find((c) => c.id === "nachbarn");
+    if (n?.type !== "importedMesh") throw new Error("Nachbarn fehlen");
+    const zs = n.positions.filter((_, i) => i % 3 === 2);
+    // Die Höhenlinien reichen bis unter die West- und Ostnachbarn; deren Fuss liegt auf dem Hang (−2.5 … −0.9 m).
+    expect(Math.min(...zs)).toBeLessThan(-1);
+    expect(Math.min(...zs)).toBeGreaterThan(-3.3);
+  });
+
   it("ist gültig und deterministisch; Datei-Rundreise", () => {
     expect(validateProject(p)).toEqual([]);
     const warnings = projectWarnings(p);

@@ -213,8 +213,18 @@ pub fn mesh_point_delete(e: &Value, index: usize) -> Option<Value> {
 }
 
 /// Ops der Höhen-/Netz-Befehle (`None` = fremder Befehl).
-pub fn ops(root: &Map<String, Value>, v: &Value) -> Option<Vec<Op>> {
+pub fn ops(root: &Map<String, Value>, p: &crate::model::Project, v: &Value) -> Option<Vec<Op>> {
     let cmd = v.get("cmd").and_then(Value::as_str)?;
+    // [227] Kontextgebäude aufs Gelände setzen: ein Befehl für mehrere Netze (`ids`).
+    if cmd == "contextToTerrain" {
+        let ids: Vec<&str> = v.get("ids").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).collect()).unwrap_or_default();
+        return Some(
+            ids.into_iter()
+                .filter_map(|id| element(root, id).and_then(|e| crate::context_ground::ground_element(p, e)))
+                .map(|entity| Op::Replace { collection: "context".into(), entity })
+                .collect(),
+        );
+    }
     if !matches!(cmd, "contextOffset" | "contourZ" | "meshPointZ" | "meshCrop" | "meshPointDelete") {
         return None;
     }
@@ -253,7 +263,7 @@ mod tests {
     }
 
     fn run(v: Value) -> Vec<Value> {
-        ops(&root(), &v).unwrap().iter().map(|o| o.to_json()).collect()
+        ops(&root(), &Default::default(), &v).unwrap().iter().map(|o| o.to_json()).collect()
     }
 
     #[test]
@@ -287,7 +297,7 @@ mod tests {
         // Zwei Dreiecke (Quadrat 0..2); Zuschnitt auf die linke Hälfte behält eines, verwirft Punkte und Farben.
         let mut r = root();
         r.insert("context".into(), json!([{"id":"q","type":"terrainMesh","positions":[0,0,1, 2,0,2, 2,2,3, 0,2,4],"indices":[0,1,2, 0,2,3],"vertexColors":[0,0,0, 1,1,1, 2,2,2, 3,3,3]}]));
-        let cut = |poly: Value| ops(&r, &json!({"cmd":"meshCrop","id":"q","poly":poly})).unwrap().iter().map(|o| o.to_json()).collect::<Vec<_>>();
+        let cut = |poly: Value| ops(&r, &Default::default(), &json!({"cmd":"meshCrop","id":"q","poly":poly})).unwrap().iter().map(|o| o.to_json()).collect::<Vec<_>>();
         let o = cut(json!([-1.0, -1.0, 1.5, -1.0, 1.5, 3.0, -1.0, 3.0]));
         // Schwerpunkte: (4/3, 2/3) und (2/3, 4/3) -> beide liegen links von 1.5: nichts abgeschnitten.
         assert!(o.is_empty());
@@ -308,7 +318,7 @@ mod tests {
         r.insert("context".into(), json!([{"id":"q","type":"terrainMesh",
             "positions":[0,0,0, 2,0,0, 2,2,0, 0,2,0, 1,1,9],
             "indices":[0,1,4, 1,2,4, 2,3,4, 3,0,4], "vertexColors":[0,0,0, 1,1,1, 2,2,2, 3,3,3, 4,4,4]}]));
-        let del = |r: &Map<String, Value>, i: usize| ops(r, &json!({"cmd":"meshPointDelete","id":"q","index":i})).unwrap().iter().map(|o| o.to_json()).collect::<Vec<_>>();
+        let del = |r: &Map<String, Value>, i: usize| ops(r, &Default::default(), &json!({"cmd":"meshPointDelete","id":"q","index":i})).unwrap().iter().map(|o| o.to_json()).collect::<Vec<_>>();
         let o = del(&r, 4);
         let e = &o[0]["entity"];
         assert_eq!(e["positions"].as_array().unwrap().len(), 12);
