@@ -156,6 +156,8 @@ export interface PlanSelection {
    * Öffnung/Wand/Stütze/2D-Element/Körper getroffen wurde; Vorrang vor Decke, Raum, Dach und Gelände.
    */
   treeId?: string | null;
+  /** [213] Getroffene Kamera (Sichtkegel/Gehäuse, Pick-Id `@camera:<id>` im Feld `contextObjectId`); Vorrang vor allem ausser Öffnung/Wand/Stütze/2D-Element/Körper/Baum. */
+  cameraId?: string | null;
   /**
    * War beim Klick Shift gedrückt? Dann ERWEITERT der Aufrufer (App) die
    * Auswahl um das getroffene Element (bzw. schaltet es ab/zu), statt sie zu
@@ -185,6 +187,8 @@ export interface MarqueeSelection {
   stairIds: string[];
   /** [149] Getroffene Bäume (Kronenfläche, gleiche Konvention). */
   treeIds?: string[];
+  /** [213] Getroffene Kameras (Pick-Flächen von Gehäuse und Sichtgrenzen, gleiche Konvention). */
+  cameraIds?: string[];
   /**
    * Zieh-Richtung: `false` = links→rechts (positiv Δx) → nur VOLLSTÄNDIG
    * eingeschlossene Wände; `true` = rechts→links (negativ Δx) → auch berührte/

@@ -99,6 +99,9 @@ pub fn dangling_refs(p: &Project) -> Vec<String> {
     for r in p.rooms.as_deref().unwrap_or(&[]) {
         miss(&mut out, "Raum", &r.id, "Geschoss", &r.floor_id, &levels);
     }
+    for c in p.cameras.as_deref().unwrap_or(&[]) {
+        miss(&mut out, "Kamera", &c.id, "Geschoss", &c.floor_id, &levels);
+    }
     for d in &p.drawings2d {
         miss(&mut out, "Zeichnung", &d.id, "Ebene", &d.level_id, &levels);
         miss(&mut out, "Zeichnung", &d.id, "Linienstil", d.line_style_id.as_deref().unwrap_or(""), &line_styles);

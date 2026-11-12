@@ -51,6 +51,7 @@ import { getPlanViewport, subscribePlanViewport } from "./planViewport";
 import { growRect, meshGripIndices } from "../core";
 import { patchItem, verticalExtents } from "../core";
 import { treeGripPatch, treeGripPoints } from "./treeGrips";
+import { cameraGripPoints } from "../core";
 import type { Selection } from "./selection";
 
 export interface GripEditFieldsState {
@@ -209,6 +210,9 @@ export function useGripEditing(opts: {
   const meshViewport = useSyncExternalStore(subscribePlanViewport, () => (selectedMesh && selectedMesh.positions.length / 3 > 600 ? getPlanViewport() : null));
   const selectedTreeId = single(selection, "trees");
   const selectedTree = selectedTreeId ? (project.trees ?? []).find((x) => x.id === selectedTreeId) : undefined;
+  // [213] Kamera: Griffe an Standpunkt, Ziel und Sichtkegel-Rand (Bildwinkel); nur auf dem Geschoss der Kamera.
+  const selectedCameraId = single(selection, "cameras");
+  const selectedCamera = selectedCameraId ? (project.cameras ?? []).find((x) => x.id === selectedCameraId && x.floorId === levelId) : undefined;
   // [176] Schnitt-/Ansichtslinie im Grundriss: Griffe an Anfang, Knickpunkten (`bendPoints`) und Ende.
   const selectedSectionLineId = single(selection, "sectionLines");
   const selectedSectionLine = modelEditable && selectedSectionLineId
@@ -507,6 +511,11 @@ export function useGripEditing(opts: {
       if (!st) return [];
       // [151] Podesttreppen: dazu die Parameter-Griffe (Lauf-Enden, Podestrand).
       const pts = [stairMoveHandle(st), ...stairParamPoints(st)];
+      pts.forEach((_, i) => { gripOwners.push({ localIndex: i }); gripOwnerRange.push([0, pts.length - 1]); });
+      return pts;
+    }
+    if (selectedCamera && modelEditable && !selectedCamera.locked) {
+      const pts = cameraGripPoints(selectedCamera, scaleDenominator);
       pts.forEach((_, i) => { gripOwners.push({ localIndex: i }); gripOwnerRange.push([0, pts.length - 1]); });
       return pts;
     }
@@ -1236,6 +1245,11 @@ export function useGripEditing(opts: {
       const st = (project.stairs ?? []).find((s) => s.id === selectedStairId);
       if (st && index > 0) opts.dragStairParam?.(st.id, index - 1, pt);
       else if (st) moveStairBy(st.id, sub(pt, stairMoveHandle(st)));
+      return;
+    }
+    // [213] Kamera: Standpunkt, Ziel bzw. Sichtkegel-Rand live (Kern `camera::grip_edit`), ein Undo-Schritt je Zug.
+    if (selectedCamera) {
+      if (!selectedCamera.locked) storeState().moveCameraGrip(selectedCamera.id, index, pt);
       return;
     }
     // [149] Baum: Stammmitte, Kronenrand bzw. Beschriftung live, ein Undo-Schritt je Zug (gleicher coalesceKey).

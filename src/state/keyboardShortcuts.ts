@@ -61,7 +61,8 @@ export type ShortcutId =
   | "fitAll"
   | "fitSelection"
   | "isolateLayer"
-  | "toggleTrace";
+  | "toggleTrace"
+  | "walkMode";
 
 export type ShortcutCategory =
   | "general"
@@ -236,6 +237,9 @@ export const SHORTCUT_DEFS: ShortcutDef[] = [
   { id: "isolateLayer", category: "navigation", labelKey: "shortcut.isolateLayer", defaultCombo: "mod+shift+l" },
   // [205] Pausfolie ein/aus (Archicad „Referenz ein/aus"); T wie Trace, frei neben den übrigen Cmd+Shift-Kürzeln.
   { id: "toggleTrace", category: "navigation", labelKey: "shortcut.toggleTrace", defaultCombo: "mod+shift+t" },
+  // [213] Begehen im 3D (WASD): Umschalt+F schaltet den Begehen-Modus; die Bewegungstasten selbst (W/A/S/D, Q/E, Pfeile) gelten nur
+  // darin, damit sie nicht mit „s" (Spiegeln), „d" (Drehen) und „q" (Messen) kollidieren (`viewport/walk.ts`).
+  { id: "walkMode", category: "navigation", labelKey: "shortcut.walkMode", defaultCombo: "shift+f" },
 ];
 
 const DEFS_BY_ID = new Map<ShortcutId, ShortcutDef>(SHORTCUT_DEFS.map((d) => [d.id, d]));

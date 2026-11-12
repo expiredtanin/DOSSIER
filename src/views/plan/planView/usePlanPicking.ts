@@ -4,7 +4,7 @@
 
 import type { GroupableHit, BodyTarget } from "./types";
 import { planPrimAt, nearestInDrawings, marqueeHitUnderlay } from "../../../core";
-import { LINE_PICK_PX, TREE_PICK } from "./constants";
+import { CAMERA_PICK, LINE_PICK_PX, TREE_PICK } from "./constants";
 import type { Primitive, ModelRect } from "../../../core";
 import type { Vec2 } from "../../../model/types";
 import { useState, useRef, useEffect } from "react";
@@ -257,7 +257,7 @@ export function usePlanPicking(inp: UsePlanPickingArgs) {
 
   // [137] Getroffene Lage-Darstellung: Quelle `"sunStudy"`/`"siteRules"` (Baurechtslinie vor Schatten) oder null.
   const pickSiteAt = (clientX: number, clientY: number): string | null => {
-    const all = contextIdsAt(clientX, clientY).filter((id) => !id.startsWith(TREE_PICK));
+    const all = contextIdsAt(clientX, clientY).filter((id) => !id.startsWith(TREE_PICK) && !id.startsWith(CAMERA_PICK));
     // [193] Liegt ein Kontext-Element (Baugrube, Netz) über der Schattenfläche, gehört der Klick ihm — sonst wäre
     // die Baugrube unter dem Schatten des Hauses nicht anzuwählen. Die Baurechtslinie (unsichtbares Band) gewinnt immer.
     if (all.includes("@siteRules")) return "siteRules";
@@ -269,6 +269,12 @@ export function usePlanPicking(inp: UsePlanPickingArgs) {
   const pickTree = (clientX: number, clientY: number): string | null => {
     const id = contextIdsAt(clientX, clientY).find((x) => x.startsWith(TREE_PICK));
     return id ? id.slice(TREE_PICK.length) : null;
+  };
+
+  // [213] Getroffene Kamera (oberste Pickfläche aus Gehäuse und Sichtkegel) oder null.
+  const pickCamera = (clientX: number, clientY: number): string | null => {
+    const id = contextIdsAt(clientX, clientY).find((x) => x.startsWith(CAMERA_PICK));
+    return id ? id.slice(CAMERA_PICK.length) : null;
   };
 
   const pickContextObject = (clientX: number, clientY: number): string | null =>
@@ -407,6 +413,7 @@ export function usePlanPicking(inp: UsePlanPickingArgs) {
     pickSectionLine,
     pickSiteAt,
     pickTree,
+    pickCamera,
     pickContextObject,
     pickExtrudedSolid,
     pickColumn,

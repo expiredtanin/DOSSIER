@@ -63,7 +63,7 @@ Neues Modul: `<modul>.rs` und `mod` in `lib.rs`, Bindungen in `web/<modul>.rs` u
 | `mesh_section.rs`, `mesh_view.rs`, `mesh_repair.rs` | Ebenenschnitt beliebiger Netze; importierte Netze; Netz-Reparatur |
 | `voids.rs` | Abzugskörper in Grundriss und Schnitt |
 | `surface_pattern.rs` | Ansichtsschraffur (Lattung, Verband, Schindeln …) |
-| `grid.rs`, `tree.rs`, `auto_dimensions.rs` | Achsraster, Bäume, automatische Aussenbemassung |
+| `grid.rs`, `tree.rs`, `camera.rs`, `auto_dimensions.rs` | Achsraster, Bäume, Kameras (Auflösung, Griffe, Brennweite), automatische Aussenbemassung |
 
 ## Befehle, Griffe, Auswahl, Verwaltung
 

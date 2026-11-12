@@ -118,6 +118,10 @@ pub fn translate_project(p: &Project, dx: f64, dy: f64) -> Project {
     for t in out.trees.iter_mut().flatten() {
         t.position = shift(t.position, dx, dy);
     }
+    for c in out.cameras.iter_mut().flatten() {
+        c.position = shift(c.position, dx, dy);
+        c.target = shift(c.target, dx, dy);
+    }
     if let Some(r) = &mut out.site_rules {
         shift_all(&mut r.parcel, dx, dy);
         for l in r.building_lines.iter_mut().flatten() {

@@ -76,6 +76,7 @@ export interface UsePlanPointerArgs {
   pickColumn: (clientX: number, clientY: number) => string | null;
   pickExtrudedSolid: (clientX: number, clientY: number) => string | null;
   pickTree: (clientX: number, clientY: number) => string | null;
+  pickCamera: (clientX: number, clientY: number) => string | null;
   pickStair: (clientX: number, clientY: number) => string | null;
   pickRoof: (clientX: number, clientY: number) => string | null;
   pickSiteAt: (clientX: number, clientY: number) => string | null;
@@ -141,6 +142,7 @@ export function usePlanPointer(inp: UsePlanPointerArgs) {
     pickColumn,
     pickExtrudedSolid,
     pickTree,
+    pickCamera,
     pickStair,
     pickRoof,
     pickSiteAt,
@@ -616,27 +618,30 @@ export function usePlanPointer(inp: UsePlanPointerArgs) {
     // [149] Baum (Kronenfläche) vor Decke, Raum, Dach und Gelände.
     const treeId =
       openingId || wallId || columnId || drawingId || extrudedSolidId ? null : pickTree(clientX, clientY);
+    // [213] Kamera (schmale Pickflächen von Gehäuse, Sichtgrenzen und Ziel) wie der Baum vor Decke, Raum, Dach.
+    const cameraId =
+      openingId || wallId || columnId || drawingId || extrudedSolidId || treeId ? null : pickCamera(clientX, clientY);
     // Decke nur, wenn weder Öffnung/Wand noch 2D-Element getroffen wurde. Da die
     // Decken-Polygone UNTER der Wand-Poché liegen, trifft ein direkter Klick
     // auf die Wand zuerst die Wand; freie Deckenfläche trifft die Decke.
     const hitCeilingId =
       hit && hit.kind === "polygon" ? hit.ceilingId ?? null : null;
     const ceilingId =
-      openingId || wallId || columnId || drawingId || extrudedSolidId || treeId ? null : hitCeilingId;
+      openingId || wallId || columnId || drawingId || extrudedSolidId || treeId || cameraId ? null : hitCeilingId;
     // Treppe nur, wenn nichts anderes getroffen wurde (Tritte liegen frei).
     const stairId =
-      openingId || wallId || columnId || drawingId || extrudedSolidId || treeId || ceilingId
+      openingId || wallId || columnId || drawingId || extrudedSolidId || treeId || cameraId || ceilingId
         ? null
         : pickStair(clientX, clientY);
     // Raum als vorletzte Priorität: die Raum-Fläche liegt UNTER allem anderen.
     const roomId =
-      openingId || wallId || columnId || drawingId || extrudedSolidId || treeId || ceilingId || stairId
+      openingId || wallId || columnId || drawingId || extrudedSolidId || treeId || cameraId || ceilingId || stairId
         ? null
         : pickRoom(clientX, clientY);
     // Dach als LETZTE Priorität: die Traufe-Fläche deckt den ganzen Grundriss
     // ab, daher erst wählen, wenn wirklich nichts anderes getroffen wurde.
     const roofId =
-      openingId || wallId || columnId || drawingId || extrudedSolidId || treeId || ceilingId || stairId || roomId
+      openingId || wallId || columnId || drawingId || extrudedSolidId || treeId || cameraId || ceilingId || stairId || roomId
         ? null
         : pickRoof(clientX, clientY);
     // Kontext-Objekt (Gebäude/Terrain) als ALLERLETZTE Priorität — seine
@@ -644,11 +649,11 @@ export function usePlanPointer(inp: UsePlanPointerArgs) {
     // nichts anderes getroffen wurde.
     // [137] Schatten/Baurechtslinien (Lage-Darstellung) über dem Gelände, unter allen Bauteilen.
     const siteId =
-      openingId || wallId || columnId || drawingId || extrudedSolidId || treeId || ceilingId || stairId || roomId || roofId
+      openingId || wallId || columnId || drawingId || extrudedSolidId || treeId || cameraId || ceilingId || stairId || roomId || roofId
         ? null
         : pickSiteAt(clientX, clientY);
     const contextObjectId =
-      openingId || wallId || columnId || drawingId || extrudedSolidId || treeId || ceilingId || stairId || roomId || roofId || siteId
+      openingId || wallId || columnId || drawingId || extrudedSolidId || treeId || cameraId || ceilingId || stairId || roomId || roofId || siteId
         ? null
         : pickContextObject(clientX, clientY);
     return {
@@ -666,6 +671,7 @@ export function usePlanPointer(inp: UsePlanPointerArgs) {
       contextObjectId,
       siteId,
       treeId,
+      cameraId,
     };
   };
 

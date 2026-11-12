@@ -39,6 +39,8 @@ export interface Selection {
   site: string[];
   /** [149] Bäume (`Project.trees`). */
   trees: string[];
+  /** [213] Kameras (`Project.cameras`). */
+  cameras: string[];
   /**
    * Gewählte Gruppen — rein informativ (Bounding-Box, Doppelklick-Ziel); die
    * Mitglieder stehen zusätzlich in den übrigen Arten (s. `groupActions.ts`).
@@ -63,6 +65,7 @@ export const SELECTION_KINDS: readonly SelectionKind[] = [
   "sectionLines",
   "site",
   "trees",
+  "cameras",
   "groups",
 ];
 
@@ -184,6 +187,8 @@ export interface SelectionIdLists {
   groupIds: string[];
   /** [149] Bäume (nicht gruppierbar; Zwischenablage, Nachauswahl). */
   treeIds?: string[];
+  /** [213] Kameras (nicht gruppierbar). */
+  cameraIds?: string[];
 }
 
 const ID_LIST_KEYS: [SelectionKind, keyof SelectionIdLists][] = [
@@ -200,6 +205,7 @@ const ID_LIST_KEYS: [SelectionKind, keyof SelectionIdLists][] = [
   ["sectionLines", "sectionLineIds"],
   ["groups", "groupIds"],
   ["trees", "treeIds"],
+  ["cameras", "cameraIds"],
 ];
 
 /** Auswahl → `…Ids`-Listen (passt strukturell auf `GroupMembership` und `BcfSelection`). */

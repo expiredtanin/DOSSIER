@@ -242,6 +242,14 @@ export function getCamera(): ViewCamera | null {
   return r ? viewCameraFromCamera3d(r.camera, r.aspect) : null;
 }
 
+/** [213] Abstand zwischen Augpunkt und Blickziel der Live-Kamera (Meter), oder null ohne Viewport. */
+export function getCameraTargetDistance(): number | null {
+  const r = api?.read();
+  if (!r) return null;
+  const d = len(sub(r.camera.target, r.camera.eye));
+  return Number.isFinite(d) && d > 0 ? d : null;
+}
+
 /** Kamera setzen. `false` ohne Viewport oder bei unbrauchbarer Kamera (NaN, Nullvektor). */
 /** [C10] Systemeinstellung „Bewegung reduzieren": Kamerafahrten springen dann direkt ans Ziel. */
 export function prefersReducedMotion(): boolean {

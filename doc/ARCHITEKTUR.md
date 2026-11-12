@@ -834,7 +834,7 @@ Reines Verschieben, ohne Verhaltensänderung (gleiche Abhängigkeitslisten, glei
 |---|---|
 | `src/views/plan/PlanView.tsx` (3902 Zeilen) | rund 1400 Zeilen: Props, Zustand, Hook-Aufrufe, SVG-Ebene. Typen und Konstanten in `planView/types.ts`, `planView/constants.ts`; Hooks `usePlanEngine`, `usePlanCoords`, `usePlanPicking`, `usePlanPointer`, `usePlanPickCycle`, `usePlanZoomInput`, `usePlanHighlights` in `planView/` (je 130 bis 680 Zeilen) |
 | `src-tauri/core/src/plan/elevation.rs` (3226 Zeilen) | Ordner `plan/elevation/`: `mod.rs` (Konstanten, Orchestrierung, Abfrage), `face`, `cull`, `collect`, `mesh_cull`, `openings`, `silhouette`, `patterns`, `tests`; `fascia_quads()` und `corner_shifts()` bleiben über `plan::elevation::` erreichbar |
-| `src/panels/ObjectInfoPanel.tsx` (2847 Zeilen) | rund 370 Zeilen; Abschnitte je Element-Art in `src/panels/objectInfo/` (`WallSection`, `CeilingSection`, `RoofSections`, `OpeningSections`, `StairSection`, `RoomSection`, `SolidSections`, `SectionLineSection`, `RefSections`, `TreeSection`, `fields`, `InfoBlocks`) |
+| `src/panels/ObjectInfoPanel.tsx` (2847 Zeilen) | rund 370 Zeilen; Abschnitte je Element-Art in `src/panels/objectInfo/` (`WallSection`, `CeilingSection`, `RoofSections`, `OpeningSections`, `StairSection`, `RoomSection`, `SolidSections`, `SectionLineSection`, `RefSections`, `TreeSection`, `CameraSection`, `fields`, `InfoBlocks`) |
 
 Zwei Stellen in `PlanView` wurden dafür umgestellt, weil ein Hook nur zusammenhängende Anweisungen aufnimmt: der Aufräum-Effekt für den
 ausstehenden Pan steht jetzt bei `panRaf` (in `usePlanPointer`), die Hover-Teilpunkte (Zustand, Funktionen, zwei Effekte) bei den

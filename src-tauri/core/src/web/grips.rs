@@ -58,6 +58,14 @@ pub fn grip_vertices(drawing_json: &str, scale: f64) -> Vec<f64> {
     }
 }
 
+/// [213] Griffe einer Kamera (JSON) beim Massstab 1:`scale`: `[x0, y0, x1, y1, x2, y2]` (Standpunkt, Ziel,
+/// Bildwinkel/Sichtbreite), `[]` bei kaputtem JSON.
+#[wasm_bindgen]
+pub fn camera_grip_points(camera_json: &str, scale: f64) -> Vec<f64> {
+    let Ok(c) = serde_json::from_str::<crate::model::Camera>(camera_json) else { return vec![] };
+    crate::camera::grip_points(&c, scale).into_iter().flat_map(|p| [p.0, p.1]).collect()
+}
+
 /// Editier-Griffe einer Polylinie aus flachen Puffern (grosse Kataster-Umrisse ohne JSON): `pts = [x0, y0, …]`,
 /// `bulge` je Segment (fehlend/NaN = gerade) → `[x0, y0, …]` (Eckpunkte, dann je Segment die Bogen-Mitte).
 #[wasm_bindgen]

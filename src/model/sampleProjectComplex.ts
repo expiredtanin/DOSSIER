@@ -857,6 +857,14 @@ export function buildComplexSampleProject(): Project {
     roomProgramTolerance: 0.1,
     parcelArea: 1540,
     sunStudy: { when: "2026-06-21T10:00:00Z", show: true },
+    // [213] Kamera aus Südost auf das Haus (Standpunkt 1.6 m über OK EG, Sonne am Abend).
+    cameras: [
+      {
+        id: "kamera-suedost", type: "camera", name: "Südost", floorId: "eg", categoryCode: "92",
+        position: P(17, -3), eyeHeight: 1.6, target: P(7.5, 5), targetHeight: 4, fovDeg: 50, projection: "perspective",
+        sunWhen: "2026-06-21T16:00:00Z",
+      },
+    ],
     siteRules: {
       parcel: PARCEL,
       // Grenzabstände je Parzellenkante (Süd, Ost, Nord, West); Baulinie entlang der Strasse.

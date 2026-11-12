@@ -70,16 +70,8 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
 - [61] Raumprogramm gegen Modell und Flächennachweis SIA 416 als Tabelle/Layout-Element ([70]); Kennzahlen (GF, GV, HNF/GF, Fassadenanteil).
 - 3D-Bilder für die Abgabe: hochaufgelöster PNG-Export (Perspektive, Axonometrie, Schatten), Sonnenstand; [205] Pausfolie.
 - [199]/[204] Plan- und App-Review-Reste im Darstellungsbereich 1:500/1:200 schliessen.
-- ○ **[211]** Rendern mit Blender/Cycles (Entscheid Maintainer 12.11.: zuerst Brücke, danach eigener Renderer [212]): Knopf/Befehl
-  „Rendering…“ übergibt Modell (glTF mit Normalen/UV), Materialien (Farben, ambientCG-Texturen, Glas), Kamera der 3D-Ansicht und
-  Sonnenstand/Himmel an ein installiertes Blender (`blender -b --python`, eigener Prozess, GPL bleibt getrennt), rechnet im Hintergrund
-  mit Cycles (Metal auf dem Mac), zeigt Fortschritt und lädt das PNG zurück (als Bild ins Layout einsetzbar). Ohne Blender: klarer Hinweis
-  mit Download-Link. · M
-- ○ **[213]** Kameras und WASD (12.11., Wunsch Maintainer): Kameras als Modell-Elemente (Name, Standpunkt, Ziel, Augenhöhe,
-  Brennweite/Bildwinkel, Perspektive/Axo, Uhrzeit für Sonne), im Grundriss als Kamerasymbol mit Griffen (Standpunkt, Ziel,
-  Öffnungswinkel; Klasse „Kameras“ nach [180]), Liste im Navigator; „Aus aktueller Ansicht anlegen“, „Kamera öffnen“, Rendering [211]
-  wählt eine Kamera. 3D-Navigation: WASD/Pfeile laufen, Q/E hoch/runter, Maus schauen, Shift schneller (Begehen-Modus wie Archicad/Spiele),
-  Augenhöhe halten; auch im nativen Mac-3D. · M
+- [211] Rendering mit Blender/Cycles (◐, Eintrag unter „Import und Export“): Belichtung/Materialien abstimmen, Kamera [213] im Dialog wählbar, Mac-Gegenprobe.
+- [213] Kameras und Begehen/WASD (◐, Eintrag unter „Grundriss“): Kopieren/Gruppen/IFC, Mac-Gegenprobe.
 - ○ **[214]** 3D-Engine optimieren (12.11., Wunsch Maintainer: „render3d hat sich sehr früh entwickelt, Leistung könnte besser sein“).
   Zuerst messen (Bildzeit, Draw-Calls, Upload-Zeit, Neu-Vernetzen je Änderung, Speicher; Musterhaus komplex + Grossgebäude
   `buildBigSampleProject` + grosser Kontext-Import), dann der Reihe nach: nur geänderte Elemente neu vernetzen/hochladen (statt ganzes
@@ -117,6 +109,18 @@ Punktwolken/BCF-Ausbau, Windows-Paket, [C5]/[C7]/[15] Kern-Umbauten — ausser s
 
 ## Grundriss
 
+- ◐ **[213]** Kameras und Begehen im 3D (12.11., Wunsch Maintainer; ersetzt den offenen Eintrag in „Release 1.0“). Umgesetzt: Modell `Project.cameras`
+  (Rust `Camera`: Name, Geschoss, Standpunkt + Augenhöhe über Geschoss, Ziel + Zielhöhe, Bildwinkel/Brennweite, Perspektive/Axonometrie/Parallel,
+  Sichthöhe, Sonnenstand als ISO-Zeit; Klasse „Kameras“ Code 92, `standards::CAMERA_CATEGORY`); Ops über die gewöhnlichen Helfer. Grundriss-Symbol im Kern
+  (`plan/cameras.rs`: Gehäuse mit Objektiv, Sichtkegel bzw. Streifen, Ziel mit Blicklinie, Name; Pick-Bänder `@camera:<id>`, nur Gehäuse/Kanten/Ziel,
+  nicht der ganze Kegel); Griffe im Kern (`camera.rs`/`grips.rs`: Standpunkt, Ziel, Bildwinkel bzw. Sichtbreite, `cameraGrip`/`cameraBy`);
+  Objekt-Info-Abschnitt `CameraSection` (Werte, Brennweite ↔ Bildwinkel, Sonne, „Kamera öffnen“, „Aus aktueller Ansicht“, „Isometrisch“); Liste mit Anlegen/Öffnen/Löschen im
+  Panel „Ausschnitte“ (`CamerasGroup`); 3D: Knopf „Kamera+“ legt aus der aktuellen Ansicht an, Doppelklick auf das Symbol im Grundriss bzw. „Kamera öffnen“ setzt die 3D-Ansicht
+  exakt (Reiterwechsel, Sonnenstudie übernimmt `sunWhen`); `viewport/cameraView.ts::cameraToView(project, camera)` liefert dieselbe `ViewCamera` wie `getCamera()`
+  (Anschluss für das Rendering [211]: `cameraToView` statt der Live-Ansicht). Begehen: Umschalt+F bzw. Knopf „Begehen“, darin W/A/S/D und Pfeile gehen (horizontal, Augenhöhe bleibt),
+  Q/E runter/hoch, Umschalt ×4, Alt ×0.25, Maus (links oder rechts) schaut um den Augpunkt, Esc beendet; die Tasten gelten nur im Modus (sonst kollidieren sie mit S/D/Q, [190]), pro Frame mit
+  gekapptem Zeitschritt (`viewport/walk.ts`). Beispiel: Kamera „Südost“ im Musterhaus komplex. Offen: nicht in der Tauri-App geprüft (3D headless leer, Kamera-Brücke nur per Zustand); nativer Mac-3D ohne
+  Begehen/Kameras (`native.rs` ist Linux/winit); Kameras fehlen in Verschieben/Kopieren/Gruppen/IFC/Zwischenablage; Stil „Sonne am Tag“ (Datum/Uhrzeit-Dialog) und Animation entlang mehrerer Kameras. · M
 - ◐ **[205]** Pausfolie/Referenz wie Archicad „Trace & Reference“ (12.11., Wunsch Maintainer). Umgesetzt (12.11.): **Entscheid:** die Pausfolie ist UI-Zustand je Reiter (`state.trace`, Typ `TraceReference` aus dem Rust-Modell; mit dem Reiter in `uiState.viewTabs` und im Ausschnitt `ViewSnapshot.trace` gespeichert, kein Op, kein Undo, nie im Druck/Export). Die Quelle rechnen die bestehenden Abfragen (`planDomains`, `sectionPlan` + eigene 2D-Elemente, `elevationPlan`), die TS-Fassade `plan/trace.ts` schickt sie als Teil-Abfragen an die neue Kern-Abfrage `tracePlan` (`plan/trace.rs`): Ausrichtung nach Koordinatenraum (Schnitt/Ansicht hinter Grundriss an der Schnittlinie aufgeklappt, u längs der Linie, jenseits des Grundrisses; Grundriss hinter Schnitt wie bisher die Unterlage `underlay.rs`; gleicher Raum deckungsgleich, Schnitt hinter Schnitt höhengleich), dann Verschieben/Drehen (Starrkörper), Auswahl-Ids weg, Farbe nach Deckkraft zur Papierfarbe aufgehellt in den Primitiven selbst — alle drei Zeichenwege (WebGPU, Metal, SVG) ohne eigene Logik; `withTrace` legt sie unter/über den Plan. **Vereinheitlicht:** die [203]-Überlagerung anderer Geschosse über den Modus „Andere grau“ entfällt im Grundriss (Modus wirkt nur noch im 3D), die Grundriss-Unterlage `DrawingLevel.planUnderlayId` (Objekt-Info Schnittlinie, Abfrage `planUnderlay`) entfällt, Schnitt/Ansicht hinter freien Zeichnungen über das Auge entfällt — alles nur noch als Pausfolie; Auge/Modus komponiert weiter Geschoss ↔ freie Zeichnung. **Bedienung:** Navigator-Kontextmenü „Als Pausfolie zeigen“, Statusleiste „Pausfolie“ (Ein/Aus, ▴: Quelle, Farbe, Deckkraft, über/unter, Versatz, Drehung, Verschieben/Drehen per Klick, Zurücksetzen), Kürzel Cmd/Ctrl+Shift+T (rebindbar, Menü Ansicht), Befehle `tracemove`/`tracerotate`. Tests: Rust `plan::trace` (9), vitest `plan/trace.test.ts`, `state/traceRef.test.ts`, `levelTrace203` angepasst, e2e `trace205`. Offen: Fang auf der Pause nur im Schnitt/in der Ansicht (im Grundriss nicht); Blatt/Layout als Quelle und Pause im Layout; nicht in der Tauri-App/auf dem Mac (Metal) geprüft. Opus. · L
 - ◐ **[182]** Tabs/Ansichten wie Archicad (11.11., Wunsch Maintainer). Umgesetzt: Reiter-Arten Grundriss · 3D · Schnitt · Ansicht ·
   2D-Zeichnung/Layout werden nie gemischt (`navigateToLevel`/`switchViewKind` in `state/viewTabs.ts`, Anwendung in

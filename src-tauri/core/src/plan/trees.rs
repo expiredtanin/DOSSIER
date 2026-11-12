@@ -43,7 +43,7 @@ pub fn pick_id(id: &str) -> String {
     format!("{TREE_PICK_PREFIX}{id}")
 }
 
-fn poly(pts: Vec<Vec2>, fill: &str, stroke: &str, w: f64, pick: Option<String>, greyed: Option<bool>) -> Primitive {
+pub(super) fn poly(pts: Vec<Vec2>, fill: &str, stroke: &str, w: f64, pick: Option<String>, greyed: Option<bool>) -> Primitive {
     Primitive::Polygon {
         pts,
         fill: fill.into(),
@@ -67,7 +67,7 @@ fn poly(pts: Vec<Vec2>, fill: &str, stroke: &str, w: f64, pick: Option<String>, 
     }
 }
 
-fn line(a: Vec2, b: Vec2, cls: &str, w: f64, color: &str, dash: Option<&[f64]>, greyed: Option<bool>) -> Primitive {
+pub(super) fn line(a: Vec2, b: Vec2, cls: &str, w: f64, color: &str, dash: Option<&[f64]>, greyed: Option<bool>) -> Primitive {
     Primitive::Line {
         a,
         b,
