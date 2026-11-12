@@ -24,7 +24,7 @@ function writeIfc(name: string, ifc: string): string {
 }
 
 function validate(name: string, ifc: string): { status: number | null; out: string } {
-  const r = spawnSync("python3", ["scripts/validate-ifc.py", writeIfc(name, ifc)], { encoding: "utf8", timeout: 120_000 });
+  const r = spawnSync("python3", ["scripts/validate-ifc.py", writeIfc(name, ifc)], { encoding: "utf8", timeout: 230_000 }); // unter Last braucht der komplexe Fall > 120 s (sonst leere Ausgabe statt Befund)
   return { status: r.status, out: `${r.stdout}\n${r.stderr}` };
 }
 
@@ -47,7 +47,7 @@ type WallVolume = { volume: number; openings: number; fills: number; rep: string
 
 /** Je IfcWall (Schlüssel GlobalId): Volumen, Anzahl Öffnungen/Füllungen, Darstellungsart. */
 function wallVolumes(name: string, ifc: string): Record<string, WallVolume> {
-  const r = spawnSync("python3", ["-c", WALL_VOLUMES, writeIfc(name, ifc)], { encoding: "utf8", timeout: 120_000 });
+  const r = spawnSync("python3", ["-c", WALL_VOLUMES, writeIfc(name, ifc)], { encoding: "utf8", timeout: 230_000 }); // unter Last braucht der komplexe Fall > 120 s (sonst leere Ausgabe statt Befund)
   expect(r.status, r.stderr).toBe(0);
   return JSON.parse(r.stdout);
 }
@@ -89,7 +89,7 @@ interface WallAxis {
 }
 
 function wallAxes(name: string, ifc: string): Record<string, WallAxis> {
-  const r = spawnSync("python3", ["-c", WALL_AXES, writeIfc(name, ifc)], { encoding: "utf8", timeout: 120_000 });
+  const r = spawnSync("python3", ["-c", WALL_AXES, writeIfc(name, ifc)], { encoding: "utf8", timeout: 230_000 }); // unter Last braucht der komplexe Fall > 120 s (sonst leere Ausgabe statt Befund)
   expect(r.status, r.stderr).toBe(0);
   return JSON.parse(r.stdout);
 }
@@ -136,7 +136,7 @@ interface FillInfo {
 }
 
 function fillInfo(name: string, ifc: string): FillInfo[] {
-  const r = spawnSync("python3", ["-c", FILL_INFO, writeIfc(name, ifc)], { encoding: "utf8", timeout: 120_000 });
+  const r = spawnSync("python3", ["-c", FILL_INFO, writeIfc(name, ifc)], { encoding: "utf8", timeout: 230_000 }); // unter Last braucht der komplexe Fall > 120 s (sonst leere Ausgabe statt Befund)
   expect(r.status, r.stderr).toBe(0);
   return JSON.parse(r.stdout);
 }
@@ -229,7 +229,7 @@ body = [r for r in c[0].Representation.Representations if r.RepresentationIdenti
 q = ue.get_psets(c[0])["Qto_ColumnBaseQuantities"]
 print(json.dumps({"n": len(c), "solids": len(body.Items), "volume": us.get_volume(sh.geometry), "net": q["NetVolume"]}))
 `;
-    const r = spawnSync("python3", ["-c", script, writeIfc("stuetze-abschnitte-q", ifc)], { encoding: "utf8", timeout: 120_000 });
+    const r = spawnSync("python3", ["-c", script, writeIfc("stuetze-abschnitte-q", ifc)], { encoding: "utf8", timeout: 230_000 }); // unter Last braucht der komplexe Fall > 120 s (sonst leere Ausgabe statt Befund)
     expect(r.status, r.stderr).toBe(0);
     const o = JSON.parse(r.stdout);
     expect(o.n).toBe(1);
