@@ -74,7 +74,8 @@ test("Schnitt A-A als Pausfolie hinter dem EG: sichtbar, nicht anwählbar, versc
   await blurFocus(page);
   const box = (await plan.boundingBox())!;
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  for (let i = 0; i < 3; i++) {
+  // [204] Der Start-Zoom passt seit dem Gebäude-Einpassen enger (1:121 statt 1:375): mehr Schritte heraus.
+  for (let i = 0; i < 20; i++) {
     await page.mouse.wheel(0, 240);
     await page.waitForTimeout(150);
   }
