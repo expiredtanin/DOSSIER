@@ -87,6 +87,8 @@ pub struct RestEntry {
     pub bounds: [f64; 4],
     /// Ausmass der Zutaten (Schatten, Baurecht, Kontext), s. `extras::extra_bounds`.
     pub extra: [f64; 4],
+    /// [204] Ausmass der Bauteile (Decken, Dächer, Wände, Treppen, Räume), fehlt ohne Bauteile.
+    pub house: Option<[f64; 4]>,
 }
 
 #[derive(Debug)]

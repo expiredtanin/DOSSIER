@@ -720,11 +720,17 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   zählte nur Wände (Tür → „Auswahl", Wand+3 Öffnungen → „1 Wand"); Werkzeugliste zweimal „Schnittlinie" (→ „Ansichtslinie").
   Offen (je Reproduktion): (a) Objekt-Info „Masse" einer Wand = Achs-Rechteck ohne Dicke: Musterhaus, W2 (x=5) wählen →
   Breite 0.000, Höhe 4.000; bei der Tür D1 heisst die Wanddicke „Höhe 0.345" (Türhöhe 2.10 steht weiter unten) · S;
-  (b) Schnitt A-A (Musterhaus komplex): dünne Geländelinie (hinter dem Schnitt) läuft im UG sichtbar durch die Räume, rechts
-  gestrichelt — verdeckt durch die Rückwand, gehört weg · S; (c) Objekteinstellungen (T): Esc schliesst die Palette nicht,
+  (b) ERLEDIGT 12.11. (b): Die dünne gestrichelte Linie war das gewachsene Terrain der Baugrube ([T6], `append_terrain_profiles`),
+  das quer durch die UG-Räume lief (kein Gelände-Netz hinter dem Schnitt: Ansichtsbereich zeichnet kein Gelände); jetzt
+  `outside_building` (`plan/section/meshes.rs`): Schnittflächen zu Gebäudegruppen vereint, innerhalb der Spanne einer Gruppe
+  (Höhenband ±2,5 m wegen Fensterlücken) fällt die gestrichelte Linie weg, vor/hinter dem Haus in der Grube bleibt sie ·
+  (c) Objekteinstellungen (T): Esc schliesst die Palette nicht,
   Kopf „Objekteinstellungen" doppelt (Fenstertitel + Panelkopf) · S; (d) Objekt-Info einer Ansicht („Ansicht Süd") heisst
-  „Schnittlinie" mit „Schnitt-Tiefe", „Schnittlinie löschen" · S; (e) Musterhaus komplex öffnet bei 1:375/27 % mit dem ganzen
-  Kataster, das Haus ist winzig (Archicad: Gebäude einpassen) · S; (f) nach Einfügen (Cmd+V) einer Wand mit Öffnungen zeigt die
+  „Schnittlinie" mit „Schnitt-Tiefe", „Schnittlinie löschen" · S; (e) ERLEDIGT 12.11.: Startansicht (Öffnen, Geschoss-/Plan-Wechsel ohne gemerkten Zoom) passt auf das GEBÄUDE ein
+  (Musterhaus komplex 1:121/83 % statt 1:375/27 %): der Kern schreibt das Bauteil-Ausmass (Wände, Decken, Dächer, Räume,
+  Treppen; ohne Kontext, Gelände, Raster, Zeichnungen, Schnittmarken) in den Plan-Puffer (Kopf 20 Wörter, Flag 4, `Plan.houseBounds`),
+  `PlanView.startView`. Cmd+0 und Zoom-Grenzen bleiben bei ALLEM (Archicad „Alles einpassen"; sonst nicht bis zum Kataster
+  herauszoomen) · (f) nach Einfügen (Cmd+V) einer Wand mit Öffnungen zeigt die
   Objekt-Info „Öffnung · Typ gemischt" statt der Wand · S; (g) „Overrides" im Ausschnitt-Fuss und Ressourcen-Reiter unübersetzt
   (de) · S; (h) Punkt-Griff bleibt nach Ziehen+Loslassen „bewaffnet" (HUD `L:/W:` folgt dem Zeiger bis zum nächsten Klick) —
   so gewollt (VW-Stil), weicht aber von Archicad ab; Tür-Griff rastet beim Greifen auf den Zeiger (D1 rückt 5 cm) · S.

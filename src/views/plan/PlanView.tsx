@@ -5,7 +5,7 @@
 // Polygon wird ein eigenes <pattern> in <defs> definiert, damit Maßstab/Winkel/
 // Farbe variieren können.
 
-import { forwardRef, useEffect, useMemo, useState } from "react";
+import { forwardRef, useEffect, useMemo, useRef, useState } from "react";
 import type { ComponentProps, CSSProperties } from "react";
 import type { PlanImage, Primitive } from "../../core";
 import { planLineEndsProps } from "../../core";
@@ -173,8 +173,20 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     return defaultViewFor(b, pad, fitBounds ? 0 : undefined);
   }, [planRaw, fitBounds]);
 
-  // Aktueller Ausschnitt; treibt die viewBox des SVG. Initial = eingepasst.
-  const [view, setView] = useState<ViewBox>(defaultView);
+  // [204] Startansicht (Öffnen, Geschoss-/Plan-Wechsel ohne gemerkten Zoom): auf das GEBÄUDE eingepasst (Wände, Decken,
+  // Dächer, Räume, Treppen), nicht auf Kontext/Kataster/Gelände — sonst ist das Haus bei einem Grundstück-Import winzig.
+  // Ohne Bauteile (oder bei festem Blatt-Ausschnitt) = `defaultView`. „Einpassen" (Cmd+0) und die Zoom-Grenzen bleiben
+  // beim Ausmass von ALLEM (`defaultView`): „alles einpassen" soll auch das Umfeld zeigen, und der Zoom-Bereich bezieht
+  // sich auf das ganze Ausmass (sonst liesse sich nicht bis zum Kataster herauszoomen).
+  const startView = useMemo<ViewBox>(() => {
+    const h = fitBounds ? undefined : planRaw.houseBounds;
+    return h ? defaultViewFor(h, PAD) : defaultView;
+  }, [planRaw, fitBounds, defaultView]);
+  const startViewRef = useRef(startView);
+  startViewRef.current = startView;
+
+  // Aktueller Ausschnitt; treibt die viewBox des SVG. Initial = auf das Gebäude eingepasst.
+  const [view, setView] = useState<ViewBox>(startView);
   // [193] Sichtbarer Ausschnitt (Modell-Meter) für die Netzpunkt-Griffe grosser Netze (verzögert gemeldet).
   useEffect(() => publishPlanViewport(viewBoxToMeshRect(view, PX_PER_M)), [view]);
   // [26] Kante unter dem Cursor (Kanten-Anfasser); gezeichnet wird sie nur für Flächen-Elemente
@@ -187,7 +199,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   // [185] Geschosswechsel: gleicher `fitKey`, der Ausschnitt bleibt exakt stehen (wie Archicad).
   const viewKey = fitKey ?? resetKey;
   useEffect(() => {
-    setView(defaultView);
+    setView(startView);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewKey]);
   // [165] Renderer-Anbindung: Pick-Index, Engine-Wahl (nativ/WASM/SVG), Plan-Aufbereitung, Culling, Papier-Massstab, GL-Effekte.
@@ -232,6 +244,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     view,
     hairline,
     onScale,
+    startViewRef, // [204] Papier-Massstab folgt der Startansicht
     resetKey: viewKey, // Papier-Massstab folgt dem Einpassen
   });
   // [165] Steuerhandle, Zieh-Zustände, Koordinaten-Umrechnung und Griff-Treffer.

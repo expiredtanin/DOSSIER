@@ -1287,3 +1287,45 @@ fn schnitt_gleiche_flaechen_verschiedener_waende_ohne_fuge() {
     assert!(at(0.25), "Fuge zwischen zwei Schichten DERSELBEN Wand bleibt");
     assert!(!at(0.3), "Putz B an Putz A (gleicher Stil, verschiedene Wände): keine Fuge");
 }
+
+/// [204] Das gewachsene Terrain (gestrichelt) läuft nicht durch die Räume des Gebäudes: Wo ein Bauteilschnitt links und
+/// rechts davon auf derselben Höhe liegt, ist es verdeckt; ausserhalb (in der Baugrube vor dem Haus) bleibt es.
+#[test]
+fn gewachsenes_gelaende_nicht_durch_gebaeude() {
+    let mut p = sample();
+    let flat = TerrainMesh {
+        id: "t".into(),
+        positions: vec![-50.0, -50.0, 0.0, 50.0, -50.0, 0.0, 50.0, 50.0, 0.0, -50.0, 50.0, 0.0],
+        indices: vec![0.0, 1.0, 2.0, 0.0, 2.0, 3.0],
+        category_code: "02".into(),
+        ..Default::default()
+    };
+    let pit = Excavation {
+        id: "bg".into(),
+        outline: vec![Vec2 { x: -3.0, y: -1.0 }, Vec2 { x: 8.0, y: -1.0 }, Vec2 { x: 8.0, y: 5.0 }, Vec2 { x: -3.0, y: 5.0 }],
+        bottom: -2.0,
+        ..Default::default()
+    };
+    p.context = Some(vec![ContextObject::TerrainMesh(flat), ContextObject::Excavation(pit)]);
+    let out = compute_section(&p, &level(&p, "schnitt-a"), &[]).unwrap().unwrap();
+    let nat: Vec<&Profile> = out.profiles.iter().filter(|pr| pr.natural).collect();
+    assert!(!nat.is_empty(), "gewachsenes Terrain bleibt in der Baugrube vor dem Haus");
+    // Haus-Spanne auf Höhe 0: kleinster/grösster x der Schnittflächen, die diese Höhe überdecken.
+    let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+    for c in &out.cuts {
+        let (zmin, zmax) = c.pts.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |a, q| (a.0.min(q[1]), a.1.max(q[1])));
+        if zmin <= 0.0 && zmax >= 0.0 {
+            for q in &c.pts {
+                lo = lo.min(q[0]);
+                hi = hi.max(q[0]);
+            }
+        }
+    }
+    assert!(lo.is_finite() && hi - lo > 2.0);
+    for pr in &nat {
+        for q in &pr.pts {
+            assert!(q[0] <= lo + 1e-6 || q[0] >= hi - 1e-6, "gewachsenes Terrain im Gebäude bei x = {} (Haus {lo}..{hi})", q[0]);
+        }
+    }
+    assert!(nat.iter().any(|pr| pr.pts.iter().any(|q| q[0] <= lo + 1e-6)), "vor dem Haus bleibt es");
+}

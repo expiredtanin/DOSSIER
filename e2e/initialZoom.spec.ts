@@ -1,4 +1,4 @@
-// [147] Plan öffnet nicht zu stark gezoomt: neues Projekt = Standardansicht, Muster = eingepasst.
+// [147]/[204] Plan öffnet nicht zu stark gezoomt: neues Projekt = Standardansicht, Muster = eingepasst.
 import type { Page } from "@playwright/test";
 import { discardIfAsked, expect, fileMenu, startNewProject, test } from "./app";
 
@@ -47,4 +47,6 @@ test("Startzoom: neues Projekt, Muster und komplexes Muster passen sich ein", as
   const m2 = await view(page);
   sane(m2.n, "Musterhaus komplex");
   expect(shows(m2.vb, 0, 0, 15, 10), "Musterhaus komplex sichtbar").toBe(true);
+  // [204] Auf das Gebäude eingepasst, nicht auf das ganze Kataster (vorher 1:375, das Haus winzig).
+  expect(m2.n, "Musterhaus komplex: aufs Gebäude, nicht aufs Kataster eingepasst").toBeLessThan(200);
 });

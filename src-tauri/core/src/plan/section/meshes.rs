@@ -252,7 +252,11 @@ pub(super) fn append_terrain_profiles(out: &mut Output, p: &Project, base: (f64,
                     None => vec![line],
                 };
                 for pts in parts {
-                    out.profiles.push(Profile { category: Some(t.category_code.clone()), pts, natural });
+                    // [204] Das gewachsene Terrain (gestrichelt) scheint nicht durch die Räume des Gebäudes.
+                    let pieces = if natural { outside_building(&pts, &out.cuts) } else { vec![pts] };
+                    for pts in pieces {
+                        out.profiles.push(Profile { category: Some(t.category_code.clone()), pts, natural });
+                    }
                 }
             }
         }
@@ -443,4 +447,106 @@ fn append_earth(out: &mut Output, p: &Project, base: (f64, f64), u: (f64, f64)) 
             }
         }
     }
+}
+
+/// Höhenband (m) um einen Punkt, in dem Schnitte der Gebäudegruppe seine Spanne bestimmen ([`outside_building`]).
+const BUILDING_BAND: f64 = 2.5;
+
+/// [204] Teile einer Geländelinie, die NICHT im Gebäude liegen. Die Bauteilschnitte werden zu zusammenhängenden Gruppen
+/// (Gebäude, Carport …) vereint; „im Gebäude" heisst: auf der Höhe des Punkts (± [`BUILDING_BAND`], damit Fensterlücken
+/// in der Aussenwand nicht aufreissen) liegt links und rechts davon ein Schnitt derselben Gruppe. Die Räume dazwischen sind
+/// keine Flächen, das gewachsene Terrain schiene sonst durch sie hindurch. Übergänge werden per Bisektion genau gesetzt.
+fn outside_building(line: &[[f64; 2]], cuts: &[super::Cut]) -> Vec<Vec<[f64; 2]>> {
+    // Rahmen (x0, z0, x1, z1) je Schnittfläche.
+    let boxes: Vec<[f64; 4]> = cuts
+        .iter()
+        .filter(|c| c.pts.len() >= 3)
+        .map(|c| c.pts.iter().fold([f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY], |b, q| [b[0].min(q[0]), b[1].min(q[1]), b[2].max(q[0]), b[3].max(q[1])]))
+        .collect();
+    if boxes.is_empty() {
+        return vec![line.to_vec()];
+    }
+    // Gruppen: Rahmen, die sich berühren (1 cm), gehören zusammen (Union-Find).
+    let mut parent: Vec<usize> = (0..boxes.len()).collect();
+    fn root(parent: &mut [usize], mut i: usize) -> usize {
+        while parent[i] != i {
+            parent[i] = parent[parent[i]];
+            i = parent[i];
+        }
+        i
+    }
+    const TOUCH: f64 = 0.01;
+    for i in 0..boxes.len() {
+        for j in 0..i {
+            let (a, b) = (boxes[i], boxes[j]);
+            if a[0] <= b[2] + TOUCH && b[0] <= a[2] + TOUCH && a[1] <= b[3] + TOUCH && b[1] <= a[3] + TOUCH {
+                let (ri, rj) = (root(&mut parent, i), root(&mut parent, j));
+                parent[ri] = rj;
+            }
+        }
+    }
+    let groups: Vec<usize> = (0..boxes.len()).map(|i| root(&mut parent, i)).collect();
+    let mut ids: Vec<usize> = groups.clone();
+    ids.sort_unstable();
+    ids.dedup();
+    let inside = |q: [f64; 2]| {
+        ids.iter().any(|&g| {
+            let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+            for (b, _) in boxes.iter().zip(&groups).filter(|(b, &gi)| gi == g && b[1] <= q[1] + BUILDING_BAND && b[3] >= q[1] - BUILDING_BAND) {
+                lo = lo.min(b[0]);
+                hi = hi.max(b[2]);
+            }
+            q[0] > lo + 1e-6 && q[0] < hi - 1e-6
+        })
+    };
+    let mut out: Vec<Vec<[f64; 2]>> = Vec::new();
+    let mut cur: Vec<[f64; 2]> = Vec::new();
+    let flush = |cur: &mut Vec<[f64; 2]>, out: &mut Vec<Vec<[f64; 2]>>| {
+        if cur.len() >= 2 {
+            out.push(std::mem::take(cur));
+        }
+        cur.clear();
+    };
+    for w in line.windows(2) {
+        let (a, b) = (w[0], w[1]);
+        let len = ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2)).sqrt();
+        let n = ((len / 0.1).ceil() as usize).clamp(1, 400);
+        let at = |t: f64| [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+        let mut prev_t = 0.0;
+        let mut prev_in = inside(a);
+        if !prev_in && cur.is_empty() {
+            cur.push(a);
+        }
+        for k in 1..=n {
+            let t = k as f64 / n as f64;
+            let now_in = inside(at(t));
+            if now_in != prev_in {
+                let (mut lo_t, mut hi_t) = (prev_t, t);
+                for _ in 0..30 {
+                    let mid = 0.5 * (lo_t + hi_t);
+                    if inside(at(mid)) == prev_in {
+                        lo_t = mid;
+                    } else {
+                        hi_t = mid;
+                    }
+                }
+                if prev_in {
+                    // Eintritt in die Aussenseite: neues Stück ab der Grenze.
+                    cur.push(at(hi_t));
+                } else {
+                    cur.push(at(lo_t));
+                    flush(&mut cur, &mut out);
+                }
+            }
+            prev_t = t;
+            prev_in = now_in;
+        }
+        if !prev_in {
+            cur.push(b);
+        } else {
+            flush(&mut cur, &mut out);
+        }
+    }
+    flush(&mut cur, &mut out);
+    out
 }

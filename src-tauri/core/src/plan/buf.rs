@@ -6,10 +6,11 @@
 //!
 //! Ein Puffer sind Bytes (little-endian): erst ein `f64`-Teil, dann die Text-Einheiten (UTF-16).
 //! ```text
-//! Kopf (16 × f64)  [MAGIC, VERSION, flags, nStrings, nHatches, nHatchWords, nGroups, nPrims,
-//!                   nRecWords, nPool, nUnits, 0, minX, minY, maxX, maxY]
+//! Kopf (20 × f64)  [MAGIC, VERSION, flags, nStrings, nHatches, nHatchWords, nGroups, nPrims,
+//!                   nRecWords, nPool, nUnits, 0, minX, minY, maxX, maxY, hausMinX, hausMinY, hausMaxX, hausMaxY]
 //!                  MAGIC = 0x504C4232 ("PLB2"), VERSION = 2 — fremde Werte → Puffer abgelehnt
-//!                  flags 1 = Inhalts-Hashes vorhanden · 2 = Ausmass (minX…maxY) gesetzt
+//!                  flags 1 = Inhalts-Hashes vorhanden · 2 = Ausmass (minX…maxY) gesetzt ·
+//!                         4 = Bauteil-Ausmass (haus…, [204]: Wände/Decken/Dächer/Räume/Treppen) gesetzt
 //! Strings     nStrings × [unitOff, unitLen]        (Abschnitt der UTF-16-Einheiten am Ende)
 //! Schraffuren nHatchWords Wörter, nHatches Einträge: [jsonStr, Hatch]
 //!             jsonStr = die volle `HatchRender` als JSON (TS liest sie einmal je Eintrag);
@@ -92,10 +93,12 @@ pub const MAGIC: f64 = 1_347_174_962.0; // 0x504C4232 "PLB2"
 pub const VERSION: f64 = 2.0;
 /// Fehlerpuffer einer Abfrage ("PLBe").
 pub const ERR_MAGIC: f64 = 1_347_175_013.0;
-const HEAD: usize = 16;
+const HEAD: usize = 20;
 
 const HEAD_HASHES: u32 = 1;
 const HEAD_BOUNDS: u32 = 2;
+/// [204] Ausmass der Bauteile (Kopf-Wörter 16–19), fürs Einpassen beim Öffnen.
+const HEAD_HOUSE: u32 = 4;
 
 pub const F_GREYED_SET: u32 = 1;
 pub const F_GREYED: u32 = 2;
@@ -484,6 +487,7 @@ pub struct View<'a> {
     recs_end: usize,
     pool_at: usize,
     bounds: Option<[f64; 4]>,
+    house: Option<[f64; 4]>,
 }
 
 /// Ein Primitiv-Eintrag, roh gelesen (Indizes noch nicht aufgelöst).
@@ -546,6 +550,7 @@ impl<'a> View<'a> {
             return None;
         }
         let bounds = (flags & HEAD_BOUNDS != 0).then(|| [h(12), h(13), h(14), h(15)]);
+        let house = (flags & HEAD_HOUSE != 0).then(|| [h(16), h(17), h(18), h(19)]);
         Some(View {
             w: Words { bytes: &bytes[..n_f64 * 8] },
             units: &bytes[n_f64 * 8..],
@@ -564,6 +569,7 @@ impl<'a> View<'a> {
             recs_end: pool_at,
             pool_at,
             bounds,
+            house,
         })
     }
 
@@ -582,6 +588,11 @@ impl<'a> View<'a> {
 
     pub fn bounds(&self) -> Option<[f64; 4]> {
         self.bounds
+    }
+
+    /// [204] Ausmass der Bauteile (Wände, Decken, Dächer, Räume, Treppen), falls geschrieben.
+    pub fn house(&self) -> Option<[f64; 4]> {
+        self.house
     }
 
     /// Gruppen `[start, end)`; `None` bei ungültigen Bereichen.
@@ -988,6 +999,7 @@ pub fn recode(bytes: &[u8]) -> Vec<u8> {
         w.groups.push((a, b));
     }
     w.bounds = bounds;
+    w.house = View::parse(bytes).and_then(|v| v.house());
     w.finish()
 }
 
@@ -1085,6 +1097,8 @@ pub struct Writer {
     prev: Option<ChainKey>,
     h: u64,
     pub bounds: Option<[f64; 4]>,
+    /// [204] Ausmass der Bauteile (ohne Zeichnungen/Kontext), s. [`View::house`].
+    pub house: Option<[f64; 4]>,
     /// Laufende Aufnahme eines Abschnitts ([`Writer::mark`] … [`Writer::take_segment`]).
     rec: Option<Recording>,
     /// Nachbearbeitung jedes geschriebenen Primitivs (Schwarz-Weiss, Strichstärken-Faktor).
@@ -1218,6 +1232,7 @@ impl Writer {
             prev: None,
             h: FNV_OFFSET,
             bounds: None,
+            house: None,
             rec: None,
             post: None,
         }
@@ -1980,6 +1995,10 @@ impl Writer {
         if self.bounds.is_some() {
             flags |= HEAD_BOUNDS;
         }
+        let hs = self.house.unwrap_or([0.0; 4]);
+        if self.house.is_some() {
+            flags |= HEAD_HOUSE;
+        }
         let head = [
             MAGIC,
             VERSION,
@@ -1997,6 +2016,10 @@ impl Writer {
             b[1],
             b[2],
             b[3],
+            hs[0],
+            hs[1],
+            hs[2],
+            hs[3],
         ];
         let n_f64 = HEAD + 2 * self.t.strings.len() + self.t.hatch_words.len() + 2 * self.groups.len() + n_prims * if self.hashes.is_some() { 2 } else { 1 } + self.recs.len() + self.pool.len();
         let mut out = Vec::with_capacity(n_f64 * 8 + self.t.units.len() * 2);
