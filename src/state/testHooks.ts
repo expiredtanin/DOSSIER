@@ -7,7 +7,8 @@ import { getState } from "./appStore";
 import { runSelectionAction, type SelectionActionId } from "./selectionActions";
 import { storeDocument } from "./historySlice";
 import { ceilingThickness } from "../model/types";
-import { computeSection, generatePlan, verticalExtents, generateSectionPlan, pickGeometry, projectToModel3d } from "../core";
+import { computeSection, generatePlan, generateVisibleLevelsPlan, materializeGreyed, materializeUnderlay, verticalExtents, generateSectionPlan, pickGeometry, projectToModel3d } from "../core";
+import { collectVisibleCodes } from "../model/layers";
 import { getViewStateBridge } from "./viewTabs";
 import { getView3dFilter, toFilter3d } from "./view3dFilter";
 import { BUILTIN_PANEL_IDS } from "../panels/builtinPanels";
@@ -73,6 +74,8 @@ declare global {
       walls: () => { id: string; start: { x: number; y: number }; end: { x: number; y: number } }[];
       /** [185] 3D-Element-Filter (Store) und die Wand-ids des 3D-Modells bzw. der Pick-Geometrie mit ihm. */
       view3d: () => { only: string[] | null; hidden: string[]; walls: string[]; pickWalls: string[]; floors: string[]; pickOpenings: { id: string; host: string }[] };
+      /** [203] Grundriss der aktiven Ebene wie in der Ansicht (Geschoss-Überlagerung nach Zeichnungsebenen-Modus): Raumstempel je Geschoss (gesamt/gedimmt) und Zahl der Achs-Beschriftungen `axis`. */
+      planStamps: (axis: string) => { floors: Record<string, { n: number; greyed: number }>; axis: number };
     };
   }
 }
@@ -192,6 +195,24 @@ export function installTestHooks(): void {
         })(),
         floors: uniq(projectToModel3d(p, { hide }).walls.map((w) => p.walls.find((x) => x.id === w.wallId)?.floorId ?? "")),
       };
+    },
+    planStamps: (axis) => {
+      const s = getState();
+      const p = s.project;
+      const mode = s.displayModes[BUILTIN_PANEL_IDS.drawingLevels] ?? "all";
+      const display = (id: string) => itemDisplay(mode, id === s.activeLevelId, p.drawingLevels.find((l) => l.id === id)?.visible ?? false);
+      const plan = materializeGreyed(materializeUnderlay(generateVisibleLevelsPlan(p, s.activeLevelId, collectVisibleCodes(p.layers), undefined, s.detail, false, false, display, s.scaleDenominator)), true);
+      const floorOf = new Map((p.rooms ?? []).map((r) => [r.id, r.floorId]));
+      const floors: Record<string, { n: number; greyed: number }> = {};
+      let n = 0;
+      for (const q of plan.primitives) {
+        if (q.kind === "text" && q.roomId) {
+          const f = (floors[floorOf.get(q.roomId) ?? "?"] ??= { n: 0, greyed: 0 });
+          f.n++;
+          if (q.greyed) f.greyed++;
+        } else if (q.kind === "drawingText" && q.text === axis && q.drawingId && p.drawings2d.some((d) => d.id === q.drawingId && d.geom.shape === "grid")) n++;
+      }
+      return { floors, axis: n };
     },
     layerView: () => {
       const s = getState();

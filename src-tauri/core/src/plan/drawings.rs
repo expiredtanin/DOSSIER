@@ -1639,8 +1639,12 @@ fn d_sign(d: &Drawing2D) -> f64 {
 
 /// [173] Dazu die Bemassung der Modelldarstellung: Ketten der automatischen Aussenbemassung und Höhenkoten
 /// (`model_view::DimOpts::shows`).
+/// [203] In der Pausfolie fehlen Achsraster, die auch im Geschoss darüber (`trace_of`) stehen.
 fn on_floor(c: &Ctx, d: &Drawing2D) -> bool {
-    crate::grid::visible_on(d, &c.a.floor) && !(c.a.for_print && d.no_print == Some(true)) && c.mv().dims.shows(d)
+    crate::grid::visible_on(d, &c.a.floor)
+        && !(matches!(d.geom, Drawing2DGeom::Grid { .. }) && c.a.trace_of.as_deref().is_some_and(|t| crate::grid::visible_on(d, t)))
+        && !(c.a.for_print && d.no_print == Some(true))
+        && c.mv().dims.shows(d)
 }
 
 /// Domäne „2D-Zeichnungen" von `planDomains`: alle gezeichneten Zeichnungen des Geschosses in
@@ -2292,6 +2296,29 @@ mod tests {
         assert!(on_floor(&c, &d), "ohne levels: in allen Geschossen (Plan zeigt eg)");
         assert!(!on_floor(&c, &g(Some(vec!["og"]))));
         assert!(on_floor(&c, &g(Some(vec!["og", "eg"]))));
+    }
+
+    /// [203] Pausfolie (`traceOf`): Raster, die auch im aktiven Geschoss stehen, fehlen (nur einmal im Bild);
+    /// ein Raster nur im Pausfolien-Geschoss bleibt, übrige Zeichnungen ebenso.
+    #[test]
+    fn pausfolie_ohne_doppeltes_raster() {
+        let grid = |levels: Option<Vec<&str>>| {
+            let mut d: Drawing2D = serde_json::from_value(drawing(serde_json::json!({"shape": "grid", "origin": {"x": 0, "y": 0}, "angle": 0, "a": [], "b": []}))).unwrap();
+            if let Drawing2DGeom::Grid { levels: l, .. } = &mut d.geom {
+                *l = levels.map(|v| v.into_iter().map(String::from).collect());
+            }
+            d
+        };
+        let p = project(serde_json::json!({}));
+        let a = PlanArgs::parse(1.0, r#"{"floor":"eg","show":["20"],"scale":100,"traceOf":"og"}"#).unwrap();
+        assert_eq!(a.trace_of.as_deref(), Some("og"));
+        let c = Ctx::new(&p, &a);
+        assert!(!on_floor(&c, &grid(None)), "Raster in allen Geschossen: steht schon im aktiven OG");
+        assert!(!on_floor(&c, &grid(Some(vec!["eg", "og"]))));
+        assert!(on_floor(&c, &grid(Some(vec!["eg"]))), "nur im EG: gehört zur Pausfolie");
+        let line: Drawing2D = serde_json::from_value(drawing(serde_json::json!({"shape": "line", "a": {"x": 0, "y": 0}, "b": {"x": 1, "y": 0}}))).unwrap();
+        assert!(on_floor(&c, &line));
+        assert_ne!(crate::plan::cache::ctx_key(&a), crate::plan::cache::ctx_key(&args(100.0)), "Cache trennt Pausfolie und eigenen Plan");
     }
 
     /// [38] Radius-, Durchmesser- und Bogenlängen-Mass: Linien, Masszahl mit R / Ø / L.

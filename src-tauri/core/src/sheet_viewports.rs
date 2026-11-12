@@ -139,6 +139,7 @@ pub fn viewport_args(p: &Project, snap: &ViewSnapshot, scale: f64, mono: bool) -
         rules: snapshot_rule_ids(p, snap),
         // [173] Modelldarstellung des Ausschnitts (sonst die der Ebene, auch über die verknüpfte Vorlage).
         model_view: snap.model_view_option_id.clone().filter(|s| !s.is_empty()),
+        trace_of: None,
     };
     a.apply_model_view(p);
     a

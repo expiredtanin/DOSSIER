@@ -133,6 +133,26 @@ describe("generateVisibleLevelsPlan", () => {
     expect(wallIds).not.toContain("w-og");
   });
 
+  it("[203] Geschoss sichtbar, aber nicht gedimmt (Modus „Ausgewählte“): KEIN Überlagern; freie Zeichnungsebenen schon", () => {
+    const p = baseProject(
+      [floor("eg", "EG"), floor("og", "OG")],
+      [wallOf("w-eg", "eg", 0), wallOf("w-og", "og", 10)],
+    );
+    const plan = generateVisibleLevelsPlan(p, "eg", visible, SHOW_ALL, "mittel", false, false, SHOW_ALL);
+    const wallIds = plan.primitives.map((pr) => (pr as { wallId?: string }).wallId).filter(Boolean);
+    expect(wallIds).toContain("w-eg");
+    expect(wallIds).not.toContain("w-og");
+
+    const draw = (id: string): DrawingLevel => ({ id, name: id, kind: "drawing", visible: true, locked: false }) as DrawingLevel;
+    const line = (id: string, levelId: string, y: number) =>
+      ({ id, type: "drawing2d", levelId, categoryCode: "90", geom: { shape: "line", a: { x: 0, y }, b: { x: 1, y } } }) as unknown as Project["drawings2d"][number];
+    const q = { ...baseProject([draw("z1"), draw("z2")], []), drawings2d: [line("l1", "z1", 0), line("l2", "z2", 5)] };
+    const zp = generateVisibleLevelsPlan(q, "z1", visible, SHOW_ALL, "mittel", false, false, SHOW_ALL);
+    const ids = zp.primitives.map((pr) => (pr as { drawingId?: string }).drawingId).filter(Boolean);
+    expect(ids).toContain("l1");
+    expect(ids).toContain("l2");
+  });
+
   it("dedupliziert projektglobale Zutaten (Schnittlinien) — nur einmal, nicht je Ebene", () => {
     const p = baseProject(
       [
@@ -150,7 +170,9 @@ describe("generateVisibleLevelsPlan", () => {
       ],
       [wallOf("w-eg", "eg", 0), wallOf("w-og", "og", 10)],
     );
-    const plan = generateVisibleLevelsPlan(p, "eg", visible, SHOW_ALL, "mittel", false, false, SHOW_ALL);
+    // OG als Pausfolie (gedimmt) — nur dann überlagert ein anderes Geschoss ([203]).
+    const trace: CategoryDisplayResolver = (id) => ({ render: true, greyed: id !== "eg", locked: false });
+    const plan = generateVisibleLevelsPlan(p, "eg", visible, SHOW_ALL, "mittel", false, false, trace);
     const bands = plan.primitives.filter(
       (pr) => pr.kind === "polygon" && (pr as { sectionLineId?: string }).sectionLineId === "s-a",
     );

@@ -251,6 +251,11 @@ export function generatePlan(
    * `snapshotOverrideRuleIds`); fehlt = Schalter `enabled` der Regeln im Projekt.
    */
   overrideRuleIds?: readonly string[] | null,
+  /**
+   * [203] Pausfolie: dieser Plan liegt gedimmt unter dem Grundriss der Ebene `traceOf` (s.
+   * {@link generateVisibleLevelsPlan}); Achsraster, die dort auch stehen, fehlen hier (nur einmal im Bild).
+   */
+  traceOf?: string | null,
 ): Plan {
   const compact = compactUnderlay && !forPrint;
   // Blatt-Ebene eines Layouts (Papier 1:1): ohne projektglobale Zutaten (Kontext, Luftbilder,
@@ -266,7 +271,7 @@ export function generatePlan(
   // Zeitpunkt der Schattenstudie: `Date` nimmt das Datum, wie es in der Datei steht (Ortszeit ohne Zone).
   const study = project.sunStudy;
   const sunWhen = includeGlobal && study?.show ? new Date(study.when).getTime() : NaN;
-  const dom = planDomains(project, floorId, visibleCodes, categoryDisplay, detail, showReferenceLines, includeGlobal, scaleDenominator, forPrint, compact, mono, sunWhen, overrideRuleIds);
+  const dom = planDomains(project, floorId, visibleCodes, categoryDisplay, detail, showReferenceLines, includeGlobal, scaleDenominator, forPrint, compact, mono, sunWhen, overrideRuleIds, traceOf);
   const pieces: PlanPiece[] = [];
   const pushGroups = (first: number, last: number): void => {
     const from = dom.buf.groups[first][0];
@@ -303,13 +308,19 @@ export function generatePlan(
 }
 
 /**
- * Wie `generatePlan`, überlagert aber ZUSÄTZLICH alle sichtbaren Geschoss-
- * oder Zeichnungs-Ebenen DERSELBEN Art wie `activeLevelId` in EINEM Plan —
- * das Vectorworks-Bild „andere Ebenen als Referenz einblenden": die aktive
- * Ebene farbig/bearbeitbar, die übrigen je Darstellungsmodus gedimmt
- * (`levelDisplay`, derselbe Resolver wie für Geschosse im Panel/3D). Schnitt-/
- * Ansichts-Ebenen bleiben Einzel-Pane (andere Projektionsachse — ein
- * Überlagern mehrerer Schnitte ergäbe kein sinnvolles Bild).
+ * Wie `generatePlan`, überlagert aber ZUSÄTZLICH sichtbare Ebenen DERSELBEN Art
+ * wie `activeLevelId` in EINEM Plan — die aktive Ebene farbig/bearbeitbar, die
+ * übrigen je Darstellungsmodus (`levelDisplay`, derselbe Resolver wie für
+ * Geschosse im Panel/3D). Schnitt-/Ansichts-Ebenen bleiben Einzel-Pane (andere
+ * Projektionsachse — ein Überlagern mehrerer Schnitte ergäbe kein sinnvolles Bild).
+ *
+ * [203] Geschosse wie Archicad: ein Geschoss-Grundriss zeigt nur sein Geschoss.
+ * Das Auge eines Geschosses steuert das 3D (alle Geschosse sichtbar ist dort der
+ * Normalfall) und überlagert im Grundriss NICHT; andere Geschosse erscheinen nur
+ * als bewusst eingeschaltete Pausfolie, also wenn der Modus sie GEDIMMT zeigt
+ * („Andere grau", „Andere grau & gesperrt"). Freie Zeichnungsebenen (`drawing`)
+ * überlagern wie bisher je Modus (Vectorworks-artige Ebenen). Achsraster, die
+ * im aktiven Geschoss stehen, fehlen in den überlagerten Ebenen (`traceOf`).
  */
 /**
  * Gedimmte Variante eines Primitivs, pro Quell-Objekt EINMAL erzeugt. Ohne den
@@ -367,6 +378,8 @@ export function generateVisibleLevelsPlan(
   for (const l of siblings) {
     const d = levelDisplay(l.id);
     if (!d.render) continue;
+    // [203] Anderes Geschoss nur als gedimmte Pausfolie, nie farbig darunter (Auge an = 3D).
+    if (l.kind === "floor" && !d.greyed) continue;
     const p = generatePlan(
       project,
       l.id,
@@ -379,6 +392,8 @@ export function generateVisibleLevelsPlan(
       scaleDenominator,
       false,
       compactUnderlay,
+      null,
+      activeLevelId, // [203] Achsraster des aktiven Geschosses nicht noch einmal
     );
     for (const g of p.underlay ?? []) underlay.push({ ...g, tint: d.greyed, above: false });
     const from = count;
@@ -471,6 +486,7 @@ function planDomainsArgs(
   mono: boolean,
   sunWhen: number,
   rules?: readonly string[] | null,
+  traceOf?: string | null,
 ): Record<string, unknown> {
   // Sichtbar und gezeichnet bzw. gedimmt: über die sichtbaren Codes (wenige), nicht über alle
   // Elemente — der Kern zeichnet ein Element genau dann, wenn sein Code in `show` steht.
@@ -484,6 +500,7 @@ function planDomainsArgs(
   }
   const out: Record<string, unknown> = { floor: floorId, show, grey, referenceLines, global, scale, forPrint, compact, mono, sunWhen: Number.isNaN(sunWhen) ? null : sunWhen };
   if (rules) out.rules = [...rules];
+  if (traceOf) out.traceOf = traceOf;
   return out;
 }
 
@@ -551,8 +568,9 @@ function planDomains(
   /** Zeitpunkt der Schattenstudie (Unix-ms, NaN = keiner). */
   sunWhen: number,
   rules?: readonly string[] | null,
+  traceOf?: string | null,
 ): DomainPrims {
-  const args = JSON.stringify(planDomainsArgs(floorId, visibleCodes, categoryDisplay, referenceLines, global, scale, forPrint, compact, mono, sunWhen, rules));
+  const args = JSON.stringify(planDomainsArgs(floorId, visibleCodes, categoryDisplay, referenceLines, global, scale, forPrint, compact, mono, sunWhen, rules, traceOf));
   const held = chunkStores.get(args);
   const query = held && held.size ? `${args.slice(0, -1)},"have":[${[...held.keys()].join(",")}]}` : args;
   const res = readPlanMulti(documentFor(project).queryBin("planDomains", [DETAIL_CODE[detail] ?? 1], query), held);
