@@ -261,7 +261,8 @@ fn section_view_buf(p: &Project, level: &DrawingLevel, snap: &ViewSnapshot, scal
     let own_buf = plan_domains_buf(p, &PlanArgs { global: false, ..args }).ok()?;
     let ov = crate::plan::buf::View::parse(&own_buf)?;
     let own = ov.prims().unwrap_or_default();
-    let marks = if marks_on { crate::plan::drawings::level_markers(p, b) } else { Vec::new() };
+    // [199] Wie `levelMarkers.ts`: links neben dem Gebauten, oberste Kote an seiner Oberkante (nicht an Achsblasen).
+    let marks = if marks_on { crate::plan::drawings::level_markers(p, crate::plan::drawings::level_marker_bounds(p, &raw_prims, b)) } else { Vec::new() };
     let mut grow = |x: f64, y: f64| {
         b = [b[0].min(x), b[1].min(y), b[2].max(x), b[3].max(y)];
     };

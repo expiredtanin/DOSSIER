@@ -38,15 +38,23 @@ export function levelMarkerPrimitives(
 ): Primitive[] {
   if (!(bounds.maxX > bounds.minX) || !(bounds.maxY > bounds.minY)) return [];
   const minX = primitives ? Math.max(bounds.minX, builtMinX(project, primitives)) : bounds.minX;
-  return decodePlanBuf(documentFor(project).queryBin("levelMarkers", [minX < bounds.maxX ? minX : bounds.minX, bounds.minY, bounds.maxX, bounds.maxY])).prims;
+  // [199] Oberste Kote = Oberkante des Gebauten: die Grenzen reichen sonst bis über die Achsblasen (Musterhaus
+  // komplex: „+13.13" 1.4 m über dem First), über Bäume und Texte.
+  const top = primitives ? Math.min(bounds.maxY, builtMaxY(project, primitives)) : bounds.maxY;
+  const maxY = top > bounds.minY ? top : bounds.maxY;
+  return decodePlanBuf(documentFor(project).queryBin("levelMarkers", [minX < bounds.maxX ? minX : bounds.minX, bounds.minY, bounds.maxX, maxY])).prims;
 }
 
 // [171] Gelände (Schnittfläche, Profil- und Grundlinie) zählt nicht zur Lage der Koten: sie stehen neben dem
 // Gebauten (Haus, Carport, Körper), nicht links vom ganzen Geländeschnitt (Musterhaus komplex: ~15 m weiter).
 const TERRAIN_CLS = new Set(["section-terrain", "elevation-terrain", "section-ground", "elevation-ground"]);
 
+function siteIds(project: Project): Set<string> {
+  return new Set((project.context ?? []).filter((c) => c.type === "terrainMesh" || c.type === "excavation" || c.type === "contourSet").map((c) => c.id));
+}
+
 function builtMinX(project: Project, primitives: readonly Primitive[]): number {
-  const site = new Set((project.context ?? []).filter((c) => c.type === "terrainMesh" || c.type === "excavation" || c.type === "contourSet").map((c) => c.id));
+  const site = siteIds(project);
   let minX = Infinity;
   for (const q of primitives) {
     if (q.kind === "line") {
@@ -56,4 +64,22 @@ function builtMinX(project: Project, primitives: readonly Primitive[]): number {
     }
   }
   return minX;
+}
+
+// [199] Achsraster (Linien „draw2d", Blasen, Beschriftungen) und Bäume zählen nicht zur Oberkante.
+const NOT_BUILT_TOP = new Set([...TERRAIN_CLS, "draw2d", "tree-crown", "tree-remove"]);
+const TREE_PICK_PREFIX = "@tree:"; // Kern `tree::TREE_PICK_PREFIX`
+
+function builtMaxY(project: Project, primitives: readonly Primitive[]): number {
+  const site = siteIds(project);
+  let maxY = -Infinity;
+  for (const q of primitives) {
+    if (q.kind === "line") {
+      if (!NOT_BUILT_TOP.has(q.cls)) maxY = Math.max(maxY, q.a.y, q.b.y);
+    } else if (q.kind === "polygon") {
+      const id = q.contextObjectId;
+      if (!(id && (site.has(id) || id.startsWith(TREE_PICK_PREFIX)))) for (const v of q.pts) maxY = Math.max(maxY, v.y);
+    }
+  }
+  return maxY;
 }

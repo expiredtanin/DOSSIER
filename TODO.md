@@ -357,6 +357,28 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   Winkel, Bogenwände: bisher (Spiegelung an der Gehrung). Weiter offen:
   Ansicht Ost: Schatten-Keile neben dem Erker mit Lücken je Geschoss und Strichreste am Erker. Nicht in der Tauri-App/auf dem Mac
   angesehen. · M
+- ◐ **[199]** Plan-Review Runde 3 (12.11., beide Musterhäuser, Grundrisse aller Geschosse, Schnitte, Ansichten 1:200/1:100/1:50,
+  CLI-SVG `--hatch` in Chromium, nur Linux). Behoben (Test je Fix, Goldens nachgeführt): oberste Höhenkote im Schnitt/in der
+  Ansicht sass an den Achsblasen statt am First („+13.13" 1.4 m über dem Dach, komplex A-A/B-B/alle Ansichten) — jetzt Oberkante
+  des Gebauten ohne Achsraster, Bäume, Gelände (`levelMarkers.ts` `builtMaxY`; Blatt-Ausschnitte über `drawings::level_marker_bounds`,
+  dort jetzt auch links neben dem Gebauten wie in der App); Raumstempel mit eigener Schriftgrösse (Name 12 pt, Nummer 9 pt) bei auf
+  2 mm verkleinerter Grundschrift: Name und Nummer überdeckten sich (komplex DG „Schlafen" 1:100) — Zeilenvorschub mindestens nach
+  der grössten Schrift der Zeile, Block misst die erste Zeile nach ihrer Schrift (`text_layout::stamp_block_refs`); Achsblasen
+  zwischen zwei Massketten bzw. auf Masszahlen (komplex OG oben, UG Ost „4.37" auf Blase B) — Reihe einer Seite gemeinsam gesucht,
+  frei für JEDE Blase und mit einem Durchmesser Luft dahinter (`drawings::bubble_shift`); Verbauwand (Rühlwand) der UG-Grube lief
+  im EG quer durch den Anbau „Eingang" über Wände, Boden und Raumstempel — endet jetzt am Fussabdruck wie Sohle/Böschung
+  (`context::excavation_lines`); einfaches Musterhaus: Stempel „Wohnen" auf der Zwischenwand W9 und der Schnittlinie A (Anker
+  in den Daten, jetzt im Westteil). Offen (nach Schwere): (1) 1:200 Masszahlen der Aussenbemassung überdecken sich zwischen den
+  Ketten (komplex EG/OG Nord/Ost: „5.39" auf „1.10", „1.00"/„5.00") — die Ausweich-Zeile „eine Zeile höher" (`dim_auto_offsets`)
+  kennt die Nachbarkette nicht, Kettenabstand 0.7 m Modell = 3.5 mm Papier bei 2.5-mm-Schrift; Vorschlag Kettenabstand von
+  `autodim` in Papier-mm (massstabsabhängig) oder Ketten-übergreifendes Ausweichen. (2) Raumstempel schrumpft auf 2 mm, sobald
+  Schnittlinie, Achse, gestrichelte Gaube und Kote den Raum queren (komplex DG „Schlafen" 1:100; Archicad legt ihn darüber) —
+  dünne Strich-Punkt-/Projektionslinien als weiche Hindernisse? (3) Ansicht Ost: Gaubenwange der Flachdachgaube fehlt (Gaubendach
+  „schwebt" über der Dachfläche). (4) Schnitt A einfaches Musterhaus: um die geschnittene Treppe ein U-förmiger Rahmen
+  (Herkunft unklar), Giebel über OG offen (Wände nicht ans Dach geführt, Daten); OG ohne ankommende Treppe/Treppenloch (Daten).
+  (5) Schnittmarke B-B (UG/EG Ost) steht auf der Gesamtmass-Zahl „19.24"; (6) Gesamtmass „17.39" und Kote „▽-2.71" Süd (Daten,
+  schon [171]); Radiusmass „R 2.00" auf der Wendeltreppe im Erker (Daten); kleiner geschnittener Balken frei im DG (Schnitt A-A,
+  Herkunft prüfen). Nicht in der Tauri-App/auf dem Mac angesehen. · M
 - ◐ **[142]** Sonnenschatten im Grundriss (`sun.rs`, Kern `plan/extras.rs`, Klasse 08). Stand 11.11.: Decken/Balkone/Vordächer
   und Dächer werfen eigenen Schatten (Dächer in echter Form, nicht-konvex; Tests `vordach_wirft_schatten`,
   `nichtkonvexes_dach`, `flachdach_l_schatten`, war schon gebaut, TODO-Text veraltet). Neu: Wandöffnungen lassen Licht durch
