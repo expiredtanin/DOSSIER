@@ -6,12 +6,13 @@ import { usePanelHost } from "../host";
 import { t } from "../../i18n";
 import type { VerticalAnchor } from "../../model/types";
 import { Dropdown } from "../../ui/Dropdown";
-import { useState, useRef } from "react";
+import { memo, useState, useRef } from "react";
 
 /** [195b] Kennzeichnung „gemischt": Die gewählten Elemente haben für dieses Feld verschiedene Werte. */
-export function MixedMark({ on, what }: { on: boolean | undefined; what: string }) {
+// memo: Props sind Grundwerte; der Abschnitt rendert bei jeder Projektänderung neu, die Marke nur bei Wechsel ([121]).
+export const MixedMark = memo(function MixedMark({ on, what }: { on: boolean | undefined; what: string }) {
   return on ? <span className="attr-mixed" data-mixed={what}>{t("objsettings.mixed")}</span> : null;
-}
+});
 
 // ── Decken-Attribut-Abschnitt ────────────────────────────────────────────────
 // Aufbau-Typ (einschichtig/mehrschichtig), Dicke/Preset, Referenzgeschoss +

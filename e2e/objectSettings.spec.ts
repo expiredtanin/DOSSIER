@@ -61,7 +61,8 @@ test("Taste T: Fenster gewählt → Fenster Objekteinstellungen mit Öffnungs-Fe
   await expect(win).toBeVisible();
   await expect(win.locator('[data-group="opening"] .objinfo-group-head')).toHaveAttribute("aria-expanded", "true");
   await expect(win.locator('[data-group="opening"]').getByText("Brüstung").first()).toBeVisible();
-  await expect(page.locator(".oed-dialog")).toHaveCount(0);
+  // Kein Overlay-Dialog mehr: der Öffnungs-Editor ist ein Abschnitt im Bereich „Objekt“.
+  await expect(page.locator(".oed-dialog:not(.oed-embedded)")).toHaveCount(0);
 });
 
 test("Taste T: Wand gewählt → Wand-Abschnitt im Fenster fokussiert und aufgeklappt ([195])", async ({ page }) => {
@@ -79,7 +80,8 @@ test("Taste T: Wand gewählt → Wand-Abschnitt im Fenster fokussiert und aufgek
   await page.keyboard.press("t"); // klappt wieder auf, Fenster bleibt einmalig
   await expect(head).toHaveAttribute("aria-expanded", "true");
   await expect(page.locator(".objset-panel")).toHaveCount(1);
-  await expect(page.locator(".oed-dialog")).toHaveCount(0);
+  // Kein Overlay-Dialog mehr: der Öffnungs-Editor ist ein Abschnitt im Bereich „Objekt“.
+  await expect(page.locator(".oed-dialog:not(.oed-embedded)")).toHaveCount(0);
 });
 
 test("Taste T ohne Auswahl bei Wand-Werkzeug: Typ des neuen Bauteils im Fenster ([189])", async ({ page }) => {

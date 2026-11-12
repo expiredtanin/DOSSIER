@@ -7,8 +7,10 @@ import { useStore } from "../../state/appStore";
 import type { Selection } from "../../state/selection";
 
 export function useMulti<T>(kind: "walls" | "ceilings" | "roofs" | "openings" | "stairs" | "rooms" | "columns" | "solids", compute: (p: Project, sel: Selection) => T): T | null {
-  const project = useStore((s) => s.project);
+  const multi = useStore((s) => s.selection[kind].length > 1);
   const selection = useStore((s) => s.selection);
+  // Projekt nur bei Mehrfachauswahl abonnieren: bei einem Element kein Neurendern je Projektänderung ([121]).
+  const project = useStore((s) => (multi ? s.project : null));
   // `compute` ist je Aufrufstelle eine Modul-Funktion (stabil).
-  return useMemo(() => (selection[kind].length > 1 ? compute(project, selection) : null), [project, selection, kind, compute]);
+  return useMemo(() => (multi && project ? compute(project, selection) : null), [multi, project, selection, compute]);
 }
