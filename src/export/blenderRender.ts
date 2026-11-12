@@ -455,7 +455,8 @@ export type BlenderEvent =
 
 /** Eine Ausgabezeile von Blender: Cycles meldet `… | Sample 16/128`, das Skript die `DOSSIER_*`-Marken. */
 export function parseBlenderLine(line: string): BlenderEvent | null {
-  const s = /\bSample\s+(\d+)\s*\/\s*(\d+)/.exec(line);
+  // Cycles je nach Version: `| Sample 16/128` (5.x) bzw. `| Rendering 16 / 128 samples` (3.x/4.x, auch macOS).
+  const s = /\bSample\s+(\d+)\s*\/\s*(\d+)/.exec(line) ?? /\bRendering\s+(\d+)\s*\/\s*(\d+)\s+samples\b/i.exec(line);
   if (s) return { kind: "sample", done: Number(s[1]), total: Number(s[2]) };
   const m = /^DOSSIER_(STAGE|DONE|ERROR|NOTE)\s+(.*)$/.exec(line.trim());
   if (!m) return null;

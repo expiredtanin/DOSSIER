@@ -125,6 +125,8 @@ describe("Paket", () => {
 describe("Blender-Ausgabe", () => {
   it("liest Cycles-Fortschritt und die Marken des Skripts", () => {
     expect(parseBlenderLine("Fra:1 Mem:34.12M (Peak 40M) | Time:00:02.10 | Remaining:00:10.5 | Mem:2M | Scene, ViewLayer | Sample 16/128")).toEqual({ kind: "sample", done: 16, total: 128 });
+    // Blender 4.x (macOS): andere Fortschrittszeile
+    expect(parseBlenderLine("Fra:1 Mem:120.4M (Peak 300M) | Time:00:03.21 | Remaining:00:09.12 | Mem:80M, Peak:90M | Scene, ViewLayer | Rendering 5 / 32 samples")).toEqual({ kind: "sample", done: 5, total: 32 });
     expect(parseBlenderLine("DOSSIER_STAGE render")).toEqual({ kind: "stage", stage: "render" });
     expect(parseBlenderLine("DOSSIER_DONE /tmp/x/render.png")).toEqual({ kind: "done", path: "/tmp/x/render.png" });
     expect(parseBlenderLine("DOSSIER_ERROR kaputt")).toEqual({ kind: "error", message: "kaputt" });

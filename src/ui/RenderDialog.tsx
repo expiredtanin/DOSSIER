@@ -57,6 +57,8 @@ export const RenderDialogHost = memo(function RenderDialogHost() {
   const [cameraKey, setCameraKey] = useState("live");
   const [cameras, setCameras] = useState<RenderCameraChoice[]>([]);
   const [blenderPath, setPath] = useState("");
+  // Letzte Ausgabezeile von Blender (zeigt z. B. das erstmalige Übersetzen der Metal-Kernel, das Minuten dauern kann).
+  const [lastLine, setLastLine] = useState("");
   const [host, setHost] = useState<BlenderHost | null | undefined>(undefined);
   const [phase, setPhase] = useState<Phase>("setup");
   const [status, setStatus] = useState("");
@@ -157,8 +159,13 @@ export const RenderDialogHost = memo(function RenderDialogHost() {
       if (pkg.missingTextures.length > 0) st.notify(t("render.missingTextures", { n: pkg.missingTextures.length }), "warning");
       if (!host) throw new Error("kein Gastgeber");
       setPhase("running");
+      setLastLine("");
       const res = await renderWithBlender(host, pkg, {
         signal: ac.signal,
+        onLine: (l) => {
+          const v = l.trim();
+          if (v) setLastLine(v.length > 160 ? `${v.slice(0, 157)}…` : v);
+        },
         onProgress: (e) => {
           setFraction(e.fraction);
           setStatus(
@@ -323,6 +330,11 @@ export const RenderDialogHost = memo(function RenderDialogHost() {
             <section className="imp-section" data-testid="render-progress">
               <progress max={1} value={phase === "running" ? fraction : undefined} style={{ width: "100%" }} />
               <div className="imp-note">{status}</div>
+              {lastLine && (
+                <div className="imp-note" data-testid="render-last-line" style={{ fontFamily: "ui-monospace, monospace", fontSize: 11, opacity: 0.7, overflowWrap: "anywhere" }}>
+                  {lastLine}
+                </div>
+              )}
             </section>
           )}
 
