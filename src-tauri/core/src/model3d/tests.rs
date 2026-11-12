@@ -249,12 +249,18 @@ fn formoeffnung_fuellkoerper_rahmen_glas() {
         o.shape = Some(OpeningShape::Rundbogen);
     }
     let meshes = emit_opening_meshes(&p, 2.0);
-    assert_ne!(meshes.len(), plain);
     let w1 = p.walls.iter().find(|w| w.id == "W1").unwrap();
     let wall_rgb = resolve_wall_bands(&p, &wall_material_color_maps(&p), w1, false).0[0].color;
-    let fills: Vec<&RMesh> = meshes.iter().filter(|m| m.color == wall_rgb).collect();
-    assert!(fills.len() >= 10, "Bogenzwickel als Streifen: {}", fills.len());
+    // [216] Der Wandkörper reicht bis zum Umriss: die Öffnungsteile haben keine Füllkörper mehr, nur Rahmen und Glas.
+    assert_ne!(meshes.len(), plain);
+    assert!(meshes.iter().all(|m| m.color != wall_rgb), "keine Füllkörper in den Öffnungsteilen");
+    assert!(emit_walls(&p, true).unwrap().iter().any(|w| w.wall_id == "W1" && w.body.is_some()));
+    // Die Füllkörper selbst (Export, Bogenwände): Streifen in Wandfarbe zwischen Rechteck-Loch und Bogen.
     let (zb, _) = p.wall_vertical_extent(w1);
+    let o1 = p.openings.as_ref().unwrap().iter().find(|o| o.id == "O1").unwrap();
+    let direct = shaped_wall_opening_meshes(&p, w1, &wall_ref(&p, w1), o1, [3.0, 4.0, zb + 0.9, zb + 2.1]);
+    let fills: Vec<&RMesh> = direct.iter().filter(|m| m.color == wall_rgb).collect();
+    assert!(fills.len() >= 10, "Bogenzwickel als Streifen: {}", fills.len());
     // O1: x 3…4 an der Wand y = 0, Brüstung 0,9, Höhe 1,2: Füllung nur über dem Kämpfer (0,7).
     for m in &fills {
         for c in m.positions.chunks_exact(3) {
@@ -634,6 +640,83 @@ fn verbau_im_3d_klasse_und_pick() {
     let g = pick_geometry(&mk(true)).unwrap();
     assert!(g.context_meshes.iter().any(|m| m.context_object_id == "bg" && m.tris.len() == 24));
     assert!(pick_geometry(&mk(false)).unwrap().context_meshes.iter().all(|m| m.context_object_id != "bg" || m.tris.len() != 24), "Klasse aus: kein Verbau-Pick");
+}
+
+/// [216] Jede Kante des Körper-Netzes gehört (nach Lage) zu genau zwei Dreiecken: keine inneren Flächen (Stossfugen).
+fn body_without_seams(b: &WallBody) -> bool {
+    let key = |i: u32| -> [i64; 3] {
+        let c = &b.positions[i as usize * 3..i as usize * 3 + 3];
+        [(c[0] * 1e5).round() as i64, (c[1] * 1e5).round() as i64, (c[2] * 1e5).round() as i64]
+    };
+    let mut n: std::collections::HashMap<([i64; 3], [i64; 3]), usize> = std::collections::HashMap::new();
+    for t in b.indices.chunks_exact(3) {
+        for k in 0..3 {
+            let (u, v) = (key(t[k]), key(t[(k + 1) % 3]));
+            if u != v {
+                *n.entry((u.min(v), u.max(v))).or_default() += 1;
+            }
+        }
+    }
+    n.values().all(|c| *c == 2)
+}
+
+/// [216] Formöffnung in der Wand: EIN Körper je Band mit rundem Loch statt Rechteck-Loch + Füllkörper; die
+/// Stücke zeigt render3d nicht mehr (`noMesh`).
+#[test]
+fn formoeffnung_wandkoerper_mit_rundem_loch() {
+    let mut p = sample();
+    p.openings = Some(vec![]);
+    let plain: f64 = emit_walls(&p, true).unwrap().iter().filter(|w| w.wall_id == "W1").map(wall_piece_volume).sum();
+    let o: Opening = serde_json::from_value(serde_json::json!({
+        "id": "R1", "type": "opening", "hostWallId": "W1", "categoryCode": "21", "kind": "window", "typeId": "",
+        "position": 0.5, "width": 1.2, "height": 1.2, "sillHeight": 0.9, "shape": "rund"
+    }))
+    .unwrap();
+    let outline = crate::opening_shape::opening_outline(&o, 1.2, 1.2).unwrap();
+    let n = outline.len();
+    let area = (0..n).map(|i| outline[i][0] * outline[(i + 1) % n][1] - outline[(i + 1) % n][0] * outline[i][1]).sum::<f64>() / 2.0;
+    let wt = p.wall_type(&p.walls[0]).unwrap().clone();
+    let total = Project::type_thickness(&wt.layers);
+    p.openings = Some(vec![o]);
+    let walls = emit_walls(&p, true).unwrap();
+    let w1: Vec<&RWall> = walls.iter().filter(|w| w.wall_id == "W1").collect();
+    assert!(w1.iter().all(|w| w.no_mesh), "alle Stücke der Wand ohne eigene Extrusion");
+    let bodies: Vec<&WallBody> = w1.iter().filter_map(|w| w.body.as_ref()).collect();
+    assert_eq!(bodies.len(), wt.layers.len(), "ein Körper je Schicht");
+    let vol: f64 = bodies.iter().map(|b| crate::solid_bool::Mesh { positions: b.positions.clone(), indices: b.indices.clone() }.volume().abs()).sum();
+    // Die Stücke überlappen um 0,1 mm (Vereinigung ohne Stossfugen): Volumen auf ein Prozent genau.
+    assert!((plain - vol - area * total).abs() < 1e-2, "Rest {} soll {}", plain - vol, area * total);
+    // Das Loch ist rund (Volumen oben = Kreisfläche, nicht 1.2 × 1.2): kein Körper hat eine Ecke am Rechteck-Loch.
+    let (x0, z0) = (0.5, p.wall_vertical_extent(&p.walls[0]).0 + 0.9);
+    let at_corner = |b: &WallBody| b.positions.chunks_exact(3).any(|c| (c[0] - x0).abs() < 1e-6 && (c[2] - z0).abs() < 1e-6);
+    assert!(!bodies.iter().any(|b| at_corner(b)), "Rechteck-Loch im Körper");
+    assert!(bodies.iter().all(|b| body_without_seams(b)), "innere Flächen (Stossfugen) im Körper");
+}
+
+/// [216] Giebelwand mit rundem Fenster auf dem First: die Stücke (links/rechts des Firsts, Ebene Oberkante) sind zu EINEM
+/// Körper je Band vereinigt, ohne innere Flächen an der Stossfuge, und das Fenster ist ein rundes Loch.
+#[test]
+fn giebelwand_mit_rundfenster_ohne_stossfuge() {
+    let mut p = sample();
+    p.ceilings = Some(vec![]);
+    p.walls.retain(|w| w.id == "W6");
+    p.walls[0].height = 6.0;
+    p.walls[0].roof_attach = Some(true);
+    let o: Opening = serde_json::from_value(serde_json::json!({
+        "id": "R1", "type": "opening", "hostWallId": "W6", "categoryCode": "21", "kind": "window", "typeId": "",
+        "position": 1.5, "width": 1.0, "height": 1.0, "sillHeight": 1.5, "shape": "rund"
+    }))
+    .unwrap();
+    p.openings = Some(vec![o]);
+    let walls = emit_walls(&p, true).unwrap();
+    assert!(walls.iter().any(|w| w.top_plane.is_some()), "Giebel mit schräger Oberkante");
+    let bodies: Vec<&WallBody> = walls.iter().filter_map(|w| w.body.as_ref()).collect();
+    assert!(!bodies.is_empty());
+    for b in bodies {
+        assert!(body_without_seams(b), "innere Flächen im Giebel-Körper");
+        let m = crate::solid_bool::Mesh { positions: b.positions.clone(), indices: b.indices.clone() };
+        assert!(m.volume().abs() > 0.1 && m.is_closed());
+    }
 }
 
 /// [217] Wandkörper mit negativer/NaN-Höhe und ebener Oberkante: `wall_top_at`/`wall_piece_mesh` dürfen nicht

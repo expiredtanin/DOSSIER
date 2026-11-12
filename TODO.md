@@ -88,11 +88,15 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   (Breite/Höhe/Drehen, bei allen Elementarten) erscheinen nur noch im Objekt-Info-Panel, nicht im Fenster (`ObjectInfoPanel showPlacement=false`).
   **Offen:** Die Schriftfamilie zeigt der GPU-Glyphen-Pass (WebGPU/Metal, `render2d/glyph.rs`) noch nicht — er kennt nur das eingebettete Inter
   (Grösse, fett, kursiv, Farbe wirken); Familie sichtbar in SVG/PDF/DXF/HTML; Mac-Nebenfenster nicht geprüft (nur Linux-Container). · M
-- ○ **[216]** 3D-Darstellungsfehler (12.11., Screenshots Maintainer, Musterhaus komplex): (1) Rundfenster im Giebel: Wandloch
+- ◐ **[216]** 3D-Darstellungsfehler (12.11., Screenshots Maintainer, Musterhaus komplex): (1) Rundfenster im Giebel: Wandloch
   quadratisch statt rund, Leibung mit Streifen; dazu ein senkrechtes Band im Giebel vom Fenster bis zur Decke; (2) Flächenmuster
   (Fassade, Dach) im 3D nicht auf die Fläche beschnitten — Linien ragen über Giebel/Ortgang hinaus in die Luft; (3) Rundbogen-Öffnung:
   Leibungs-/Sturzflächen mit Streifen-/Backsteinmuster, Bogen-Leibung nicht sauber geschnitten; (4) Dachfenster in der Darstellung
   „ohne Material“ als offener Schlitz ohne Glas. · M
+  Stand 12.11.: (1)–(4) umgesetzt (Wandkörper per Manifold `core/src/model3d/wall_body.rs` + TS `splitWallBodies`; Wandmuster am Giebel/Öffnungsumriss
+  beschnitten `surface_pattern3d.rs`; Glas im Shader), nur im Linux-Container per render_png geprüft. Offen: Mac-Gegenprobe (Metal, Texturen);
+  Bogenwände behalten Füllkörper; 3D-Live-Schnitt durch Formfenster zeigt Rechteck-Loch; Dachmuster an Kehlen nicht beschnitten; einzelne
+  Körper mit inneren Stossflächen (Überlappung 0,1 mm mildert).
 - ◐ **[207]** Schwarzplan / Situationsplan 1:500 (12.11.): Modelldarstellung mit `situation` (`ModelViewOption.situation`, Kern
   `plan/situation.rs`) ersetzt im Grundriss die Bauteile durch den gefüllten Umriss des eigenen Gebäudes (Wände/Decken/Körper ab
   Erdgeschoss + Dächer mit Überstand, Klasse „83 Situation Gebäude"), gefüllte Grundfläche der Kontextnetze ([181], auf ihrer Klasse;
@@ -122,6 +126,22 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
 - [61] Raumprogramm gegen Modell und Flächennachweis SIA 416 als Tabelle/Layout-Element ([70]); Kennzahlen (GF, GV, HNF/GF, Fassadenanteil).
 - 3D-Bilder für die Abgabe: hochaufgelöster PNG-Export (Perspektive, Axonometrie, Schatten), Sonnenstand; [205] Pausfolie.
 - [199]/[204] Plan- und App-Review-Reste im Darstellungsbereich 1:500/1:200 schliessen.
+- ○ **[211]** Rendern mit Blender/Cycles (Entscheid Maintainer 12.11.: zuerst Brücke, danach eigener Renderer [212]): Knopf/Befehl
+  „Rendering…“ übergibt Modell (glTF mit Normalen/UV), Materialien (Farben, ambientCG-Texturen, Glas), Kamera der 3D-Ansicht und
+  Sonnenstand/Himmel an ein installiertes Blender (`blender -b --python`, eigener Prozess, GPL bleibt getrennt), rechnet im Hintergrund
+  mit Cycles (Metal auf dem Mac), zeigt Fortschritt und lädt das PNG zurück (als Bild ins Layout einsetzbar). Ohne Blender: klarer Hinweis
+  mit Download-Link. · M
+- ○ **[213]** Kameras und WASD (12.11., Wunsch Maintainer): Kameras als Modell-Elemente (Name, Standpunkt, Ziel, Augenhöhe,
+  Brennweite/Bildwinkel, Perspektive/Axo, Uhrzeit für Sonne), im Grundriss als Kamerasymbol mit Griffen (Standpunkt, Ziel,
+  Öffnungswinkel; Klasse „Kameras“ nach [180]), Liste im Navigator; „Aus aktueller Ansicht anlegen“, „Kamera öffnen“, Rendering [211]
+  wählt eine Kamera. 3D-Navigation: WASD/Pfeile laufen, Q/E hoch/runter, Maus schauen, Shift schneller (Begehen-Modus wie Archicad/Spiele),
+  Augenhöhe halten; auch im nativen Mac-3D. · M
+- ○ **[214]** 3D-Engine optimieren (12.11., Wunsch Maintainer: „render3d hat sich sehr früh entwickelt, Leistung könnte besser sein“).
+  Zuerst messen (Bildzeit, Draw-Calls, Upload-Zeit, Neu-Vernetzen je Änderung, Speicher; Musterhaus komplex + Grossgebäude
+  `buildBigSampleProject` + grosser Kontext-Import), dann der Reihe nach: nur geänderte Elemente neu vernetzen/hochladen (statt ganzes
+  Modell, auch Geisterschicht [180]), Puffer wiederverwenden, Draw-Calls bündeln (ein Puffer je Material/Durchgang, Instancing für
+  Wiederholtes wie Fenster/Bäume), Sichtkegel-Culling, Schatten-Map nur bei Änderung von Licht/Modell, Kantenpass günstiger, LOD für
+  Kontext/Gelände. Messbar machen (Bench in `dossier-cli bench` bzw. render3d-Test) und vorher/nachher belegen. Opus. · L
 - [211] Rendering mit Blender/Cycles (◐, Eintrag unter „Import und Export“): Mac-Gegenprobe (Tauri, Metal), Blender 3.6/4.x, Dialog im Browser klicken.
 - [213] Kameras und Begehen/WASD (◐, Eintrag unter „Grundriss“): Kopieren/Gruppen/IFC, Mac-Gegenprobe.
 - ◐ **[214]** 3D-Engine optimieren (12.11., Wunsch Maintainer). Messung: `BENCH_3D=1 BENCH_3D_OUT=<dir> npx vitest run

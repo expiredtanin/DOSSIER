@@ -54,6 +54,25 @@ pub struct RWall {
     /// [169] Sehnen-Teilkörper einer Bogenwand: Mittelpunkt des Bogens (render3d `arcCenter`, glatt schattiert).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub arc_center: Option<[f64; 2]>,
+    /// [216] Wand mit Formöffnungen ([G3], gerade Wand): fertiger Körper dieses Bandes (Manifold: Stücke ohne
+    /// Stossfugen, Öffnung nach dem Umriss), am ersten Stück des Bandes; die TS-Fassade (`splitWallBodies`) gibt
+    /// render3d statt der Stücke (`noMesh`) sein Netz als Mesh. Schnitt, Ansicht, Exporte rechnen mit den Stücken.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub body: Option<WallBody>,
+    /// [216] Dieses Stück zeigt der 3D-Viewer nicht (sein Band hat einen `body`).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub no_mesh: bool,
+    /// Index des Wandbandes (Schicht) dieses Stücks, nur im Kern.
+    #[serde(skip)]
+    pub band: usize,
+}
+
+/// [216] Dreiecksnetz eines Wandkörpers (Modell x, y, z).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WallBody {
+    pub positions: Vec<f64>,
+    pub indices: Vec<u32>,
 }
 
 /// Textur-Karten-URLs der Bauteile in der Reihenfolge des ersten Auftretens: Wandtypen, dann
@@ -673,6 +692,9 @@ pub(crate) fn wall_pieces(p: &Project, maps: &[String], wall: &Wall, ctx: &Floor
     }
     let carves = cuts.column_carves.clone();
     let carve_from = out.len();
+    // [216] Formöffnungen der geraden Wand: Körper je Band ([`super::wall_body`]); die Schnitte für die zweite Rechnung.
+    let shaped: Vec<&Opening> = if layered { super::wall_body::body_openings(wall, openings) } else { Vec::new() };
+    let body_cuts = (!shaped.is_empty()).then(|| cuts.clone());
     {
         let (bands, stacked) = resolve_wall_bands(p, maps, wall, layered);
         let (z_bottom, z_top) = p.wall_vertical_extent(wall);
@@ -742,6 +764,9 @@ pub(crate) fn wall_pieces(p: &Project, maps: &[String], wall: &Wall, ctx: &Floor
                     [j[0] || piece.joint[0], j[1] || piece.joint[1]]
                 },
                 arc_center: arc.map(|a| [a.center.x, a.center.y]),
+                body: None,
+                no_mesh: false,
+                band: piece.band,
             });
         }
         if let (Some(a), false) = (arc, pocket_cuts.is_empty()) {
@@ -760,6 +785,13 @@ pub(crate) fn wall_pieces(p: &Project, maps: &[String], wall: &Wall, ctx: &Floor
         }
     }
     carve_at_columns(out, carve_from, &carves);
+    if let Some(body_cuts) = body_cuts {
+        let plain_ops: Vec<&Opening> = openings.iter().copied().filter(|o| !shaped.iter().any(|s| std::ptr::eq(*s, *o))).collect();
+        let mut plain = Vec::new();
+        wall_pieces(p, maps, wall, ctx, &plain_ops, body_cuts, true, pockets, &mut plain);
+        let (bands, stacked) = resolve_wall_bands(p, maps, wall, true);
+        super::wall_body::attach_bodies(p, wall, &shaped, &plain, bands.len(), stacked, &mut out[carve_from..]);
+    }
 }
 
 /// [95] Taschen der Taschen-Schiebetüren einer Wand: je Tasche `[u0, u1, n0, n1, z0, z1]` im Wandrahmen

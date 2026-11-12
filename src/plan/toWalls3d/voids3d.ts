@@ -29,3 +29,33 @@ export function applyVoidMeshes(model: RModel3d, cuts: VoidMeshes): void {
   });
   model.slabs = slabs;
 }
+
+/** [216] Knickwinkel (Grad) der Wandkörper: Bogen-Leibungen glatt, Wand-Ecken (90°) hart. */
+const WALL_BODY_CREASE_DEG = 20;
+
+/**
+ * [216] Wandstücke, deren Band einen fertigen Körper hat (Wand mit Formöffnungen, Kern `model3d/wall_body.rs`):
+ * render3d bekommt statt der Stücke (`noMesh`) das Netz des Körpers als Mesh; Schnitt, Ansicht und Export
+ * rechnen im Kern mit den Stücken. Rest und Netze getrennt.
+ */
+export function splitWallBodies(walls: readonly RWall[]): { walls: RWall[]; meshes: RMesh[] } {
+  const rest: RWall[] = [];
+  const meshes: RMesh[] = [];
+  for (const w of walls) {
+    if (!w.noMesh) {
+      rest.push(w);
+      continue;
+    }
+    if (w.body) {
+      meshes.push({
+        positions: w.body.positions,
+        indices: w.body.indices,
+        kind: "extrusion",
+        color: w.color,
+        ...(w.materialIndex !== undefined ? { materialIndex: w.materialIndex } : {}),
+        creaseAngle: WALL_BODY_CREASE_DEG,
+      });
+    }
+  }
+  return { walls: rest, meshes };
+}

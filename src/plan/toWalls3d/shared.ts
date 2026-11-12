@@ -169,6 +169,14 @@ export interface RWall {
    * glatt (radiale Normalen, `WallInput.arcCenter`).
    */
   arcCenter?: [number, number];
+  /**
+   * [216] Wand mit Formöffnungen (Rund, Bogen …): fertiger Körper des Bandes (`body`, Manifold-Boolean im Kern, ohne
+   * Stossfugen, Öffnung nach dem Umriss) am ersten Stück; `noMesh` = das Stück zeigt der Viewer nicht. Die Fassade
+   * `splitWallBodies` (`toWalls3d/voids3d.ts`) gibt render3d statt der Stücke das Netz als Mesh; Schnitt und Ansicht
+   * rechnen im Kern mit den Stücken.
+   */
+  noMesh?: boolean;
+  body?: { positions: number[]; indices: number[] };
 }
 
 /** Eine extrudierte Deckenplatte: geschlossener Grundriss-Umriss + Z-Ausdehnung. */

@@ -103,6 +103,10 @@ struct Sink {
     out: Vec<f32>,
     /// Explosionsversatz ([65]) des aktuellen Bauteils (Höhe, m).
     dz: f64,
+    /// Geschoss-Kontexte (Decken, Dächer) für die Wand-Oberkante unter dem Dach, je Geschoss einmal.
+    ctx: HashMap<String, crate::wall_bands::FloorContext>,
+    /// Farb-Karten-Liste der Wände (`wall_material_color_maps`), von `wall_pieces` gebraucht.
+    maps: Vec<String>,
 }
 
 impl Sink {
@@ -128,7 +132,7 @@ pub fn pattern_lines_3d_exploded(p: &Project, gap: f64) -> Vec<f32> {
 pub fn pattern_lines_3d_filtered(p: &Project, gap: f64, filter: &crate::model3d::ClassFilter) -> Vec<f32> {
     let ex = crate::explode3d::Explode::new(p, gap);
     let dz_of = |id: &str| ex.as_ref().map_or(0.0, |e| e.of(id));
-    let mut s = Sink { out: Vec::new(), dz: 0.0 };
+    let mut s = Sink { out: Vec::new(), dz: 0.0, ctx: HashMap::new(), maps: crate::model3d::wall_material_color_maps(p) };
     for w in p.walls.iter().filter(|w| !filter.hides(&w.id)) {
         s.dz = dz_of(&w.id);
         wall_lines(p, w, &mut s);
@@ -207,21 +211,32 @@ fn wall_lines(p: &Project, w: &Wall, s: &mut Sink) {
     let ref_off = crate::joins::reference_offset(crate::model3d::wall_reference(w), total);
     let (ux, uy) = (dx / len, dy / len);
     let (nx, ny) = (-uy, ux); // linke Normale
-    let holes: Vec<Vec<P>> = p
-        .openings
-        .as_deref()
-        .unwrap_or(&[])
-        .iter()
-        .filter(|o| o.host_wall_id == w.id)
-        .filter_map(|o| {
-            let from = o.position.max(0.0).min(len);
-            let to = (o.position + o.width).max(from).min(len);
-            let b = o.sill_height.max(0.0);
-            let t = (b + o.height).min(z1 - z0);
-            (to - from > 1e-4 && t - b > 1e-4).then(|| vec![[from, b], [to, b], [to, t], [from, t]])
-        })
-        .collect();
-    let face = ring_with_holes(&[[0.0, 0.0], [len, 0.0], [len, z1 - z0], [0.0, z1 - z0]], &holes);
+    // Wandfläche in Wand-Koordinaten (x ab Wandanfang, y ab UK): Oberkante entlang der Achse wie der Körper
+    // (Giebel, Pultwand unter dem Dach), Löcher nach dem Umriss der Öffnung (Rund, Bogen …).
+    let top = wall_top_profile(p, w, s, len).unwrap_or_else(|| vec![[0.0, z1 - z0], [len, z1 - z0]]);
+    let top_at = |x: f64| profile_at(&top, x);
+    let mut holes: Vec<Vec<P>> = Vec::new();
+    for o in p.openings.as_deref().unwrap_or(&[]).iter().filter(|o| o.host_wall_id == w.id) {
+        let from = o.position.max(0.0).min(len);
+        let to = (o.position + o.width).max(from).min(len);
+        let b = o.sill_height.max(0.0);
+        let t = (b + o.height).min(z1 - z0);
+        if !(to - from > 1e-4 && t - b > 1e-4) {
+            continue;
+        }
+        // Öffnung, die in die Dachschräge ragt: ihre Lage am Rand der Fläche lässt sich nicht als Loch im Ring
+        // führen, die Musterlinien laufen dort bis zum Rand (wie vor der Dachkante).
+        if top_at(from).min(top_at(to)) <= t + 1e-4 {
+            continue;
+        }
+        match crate::opening_shape::opening_outline(o, to - from, t - b) {
+            Some(poly) => holes.push(poly.iter().map(|q| [from + q[0], b + q[1]]).collect()),
+            None => holes.push(vec![[from, b], [to, b], [to, t], [from, t]]),
+        }
+    }
+    let mut outer: Vec<P> = vec![[0.0, 0.0], [len, 0.0]];
+    outer.extend(top.iter().rev().map(|q| [q[0], q[1].max(1e-6)]));
+    let face = ring_with_holes(&outer, &holes);
     let off = w.surface_pattern_offset.as_ref().map_or([0.0, 0.0], |o| [o.x, o.y]);
     for (layer, side) in [(wt.layers.first(), -1.0), (wt.layers.last(), 1.0)] {
         let Some((pat, comp, spec)) = spec_for(layer.and_then(|l| p.component(&l.component_id)), w.surface_pattern_angle.unwrap_or(0.0)) else { continue };
@@ -234,6 +249,75 @@ fn wall_lines(p: &Project, w: &Wall, s: &mut Sink) {
             s.push(at(a), at(b), rgb, m);
         }
     }
+}
+
+/// Höhe der Oberkante-Linie `top` (Punkte `[x, höhe]`, nach x sortiert) bei `x`, linear dazwischen.
+fn profile_at(top: &[P], x: f64) -> f64 {
+    let Some(first) = top.first() else { return 0.0 };
+    if x <= first[0] {
+        return first[1];
+    }
+    for pair in top.windows(2) {
+        if x <= pair[1][0] {
+            let span = pair[1][0] - pair[0][0];
+            return if span > 1e-12 { pair[0][1] + (pair[1][1] - pair[0][1]) * (x - pair[0][0]) / span } else { pair[1][1] };
+        }
+    }
+    top.last().map_or(0.0, |q| q[1])
+}
+
+/// Oberkante der Wand entlang ihrer Achse als Linie `[x ab Wandanfang, Höhe ab UK]`: die Körper der Wand unter
+/// den Dächern (Giebel, Pultwand, Kniestock) zeigen ihre Oberkante an der Dach-Unterkante; die Musterlinien
+/// einer Wandseite dürfen nicht darüber hinausragen. `None` ohne Körper (die Wand zeigt dann das Rechteck).
+fn wall_top_profile(p: &Project, w: &Wall, s: &mut Sink, len: f64) -> Option<Vec<P>> {
+    let (z0, z1) = p.wall_vertical_extent(w);
+    if !p.roofs.as_deref().is_some_and(|r| !r.is_empty()) || w.roof_attach == Some(false) {
+        return Some(vec![[0.0, z1 - z0], [len, z1 - z0]]);
+    }
+    let ctx = s.ctx.entry(w.floor_id.clone()).or_insert_with(|| crate::model3d::floor_context_with(p, &w.floor_id, true, None));
+    let mut pieces = Vec::new();
+    crate::model3d::wall_pieces(p, &s.maps, w, ctx, &[], crate::joins::WallCuts::default(), true, false, &mut pieces);
+    if pieces.is_empty() {
+        return None;
+    }
+    let (dx, dy) = (w.end.x - w.start.x, w.end.y - w.start.y);
+    let (ux, uy) = (dx / len, dy / len);
+    let along = |q: [f64; 2]| (q[0] - w.start.x) * ux + (q[1] - w.start.y) * uy;
+    let mut xs: Vec<f64> = vec![0.0, len];
+    for pc in &pieces {
+        xs.extend([along(pc.start), along(pc.end)].map(|x| x.clamp(0.0, len)));
+    }
+    xs.sort_by(f64::total_cmp);
+    xs.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
+    // Höhe an Stelle x: höchste Oberkante der Körper, die x überdecken (auf der Mittellinie der Wand).
+    let height_at = |x: f64| -> Option<f64> {
+        let mut best: Option<f64> = None;
+        for pc in &pieces {
+            let (a, b) = (along(pc.start), along(pc.end));
+            let (lo, hi) = (a.min(b), a.max(b));
+            if x < lo - 1e-6 || x > hi + 1e-6 {
+                continue;
+            }
+            let q = [w.start.x + ux * x, w.start.y + uy * x];
+            let mut z = crate::model3d::wall_top_at(pc, q);
+            if pc.top_plane.is_none() {
+                if let Some(d) = pc.top_drop {
+                    let t = if hi - lo > 1e-9 { ((x - lo) / (hi - lo)).clamp(0.0, 1.0) } else { 0.0 };
+                    let (d0, d1) = if a <= b { (d[0], d[1]) } else { (d[1], d[0]) };
+                    z -= d0 + (d1 - d0) * t;
+                }
+            }
+            best = Some(best.map_or(z, |b: f64| b.max(z)));
+        }
+        best
+    };
+    let mut out: Vec<P> = Vec::new();
+    for x in xs {
+        // Fehlt ein Körper (Lücke), zählt die Wandhöhe nicht: die Fläche reicht dort nur bis zur UK.
+        let z = height_at(x).map_or(0.0, |z| z - z0);
+        out.push([x, z.clamp(0.0, z1 - z0)]);
+    }
+    (out.len() >= 2).then_some(out)
 }
 
 /// Bogenwand ([T2]): Muster je Seite auf der abgewickelten Wandfläche (x = Bogenlänge DIESER Fläche, damit
@@ -391,6 +475,28 @@ mod tests {
                 assert!((r - r_face).abs() < 1e-4, "{r} ≠ {r_face}");
             }
         }
+    }
+
+    /// [216] Giebelwand: die Musterlinien enden an der Dach-Unterkante (Dreieck), nicht am Wandrechteck.
+    #[test]
+    fn giebelwand_muster_endet_am_dach() {
+        let mut p = sample();
+        p.openings = Some(vec![]);
+        p.ceilings = Some(vec![]);
+        p.walls.retain(|w| w.id == "W6");
+        p.walls[0].height = 6.0;
+        p.walls[0].roof_attach = Some(true);
+        let outer = p.wall_type(&p.walls[0]).unwrap().layers[0].component_id.clone();
+        with_pattern(&mut p, &outer, 0.1);
+        let v = pattern_lines_3d(&p);
+        assert!(!v.is_empty());
+        let (z0, _) = p.wall_vertical_extent(&p.walls[0]);
+        // Welt (x, Höhe, y): Höhe am Dachrand (y ≈ 0) deutlich unter der Höhe am First (y ≈ 2).
+        let top_at = |lo: f32, hi: f32| v.chunks(PATTERN_STRIDE).flat_map(|c| [(c[2], c[1]), (c[5], c[4])]).filter(|(y, _)| *y >= lo && *y <= hi).map(|(_, h)| h).fold(f32::MIN, f32::max);
+        let (eave, ridge) = (top_at(0.0, 0.25), top_at(1.8, 2.2));
+        assert!(ridge - eave > 0.6, "Traufe {eave}, First {ridge}");
+        // Keine Linie über dem First der Dachfläche (Wandhöhe 6 m wäre z0 + 6).
+        assert!(ridge < z0 as f32 + 5.0, "{ridge}");
     }
 
     #[test]

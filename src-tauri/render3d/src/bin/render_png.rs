@@ -40,6 +40,9 @@ struct ModelInput {
     /// [180] Flächenmuster der Geisterschicht (`PATTERN_STRIDE` je Linie, `emitSurfacePatternLines`).
     #[serde(default, rename = "ghostPattern")]
     ghost_pattern: Vec<f32>,
+    /// Flächenmuster des Modells (`PATTERN_STRIDE` je Linie, `emitSurfacePatternLines`), nur oberste Ebene.
+    #[serde(default, rename = "patternLines")]
+    pattern_lines: Vec<f32>,
 }
 
 fn bounds(m: &ModelInput) -> Option<([f32; 3], [f32; 3])> {
@@ -289,6 +292,7 @@ fn main() {
     let mut renderer = Renderer::new(&device, format);
     renderer.set_render_style(RenderStyle::from_str_or_shaded(&flag("--style", "shaded")));
     renderer.upload_model(&device, &model.walls, &model.slabs, &model.meshes);
+    renderer.set_pattern_lines(&model.pattern_lines);
     if let Some(g) = model.ghost.take() {
         let g = *g;
         renderer.set_ghost_model(&device, render3d::scene::PartInput { walls: g.walls, slabs: g.slabs, meshes: g.meshes, roof_layers: Vec::new() });
