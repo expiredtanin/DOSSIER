@@ -7,7 +7,7 @@
 //!
 //! Teilung: Winkelschritt ≤ 3.75° (≥ 48 Teile je Halbkreis) und Pfeilhöhe ≤ 0.25 mm.
 
-use crate::model::{Ceiling, Roof, Room, Vec2};
+use crate::model::{Ceiling, Excavation, Roof, Room, Vec2};
 use std::borrow::Cow;
 use std::f64::consts::PI;
 
@@ -44,21 +44,35 @@ pub fn arc_of(a: Vec2, b: Vec2, bulge: f64) -> Option<(Vec2, f64, f64, f64)> {
     (k.r.is_finite() && k.r > 1e-9 && k.sweep.is_finite()).then_some((Vec2 { x: k.center.x, y: k.center.y }, k.r, k.a0, k.sweep))
 }
 
+/// [191] Pfeilhöhe der Teilung einer Baugrube (5 mm): Erdbau braucht keine Viertelmillimeter, und Böschung,
+/// Mengen und Gelände-Netz rechnen je Punkt über alle Kanten. Die Punkte liegen trotzdem exakt auf dem Kreis
+/// (Plan-Ausgaben als echte Bögen).
+pub const SAGITTA_EARTHWORK: f64 = 5e-3;
+
 /// Anzahl Teile eines Bogens (Radius `r`, Schwenk `sweep`).
 pub fn segments(r: f64, sweep: f64) -> usize {
+    segments_with(r, sweep, SAGITTA)
+}
+
+/// Wie [`segments`] mit eigener grösster Pfeilhöhe `sagitta`.
+fn segments_with(r: f64, sweep: f64, sagitta: f64) -> usize {
     let s = sweep.abs();
     if !(s.is_finite() && r.is_finite() && r > 0.0) {
         return 1;
     }
     let by_angle = s / MAX_STEP;
-    let by_sag = if r > SAGITTA { s / (2.0 * (1.0 - SAGITTA / r).acos()) } else { 1.0 };
+    let by_sag = if r > sagitta { s / (2.0 * (1.0 - sagitta / r).acos()) } else { 1.0 };
     (by_angle.max(by_sag).max(1.0).ceil() as usize).min(MAX_SEGMENTS)
 }
 
 /// Innere Teilpunkte der Kante a → b (ohne a und b; leer bei gerader Kante).
 pub fn edge_points(a: Vec2, b: Vec2, bulge: f64) -> Vec<Vec2> {
+    edge_points_with(a, b, bulge, SAGITTA)
+}
+
+fn edge_points_with(a: Vec2, b: Vec2, bulge: f64, sagitta: f64) -> Vec<Vec2> {
     let Some((c, r, a0, sweep)) = arc_of(a, b, bulge) else { return Vec::new() };
-    let n = segments(r, sweep);
+    let n = segments_with(r, sweep, sagitta);
     (1..n)
         .map(|i| {
             let t = a0 + sweep * (i as f64 / n as f64);
@@ -358,6 +372,45 @@ impl Roof {
             off += ring.len();
         }
         Some(out)
+    }
+}
+
+/// Fein geteilter Ring mit grösster Pfeilhöhe `sagitta`: Punkte, je Punkt die Kante des Stützpunkt-Rings, die
+/// dort beginnt, und ob der Punkt im Inneren eines Bogens liegt (glatt, keine Ecke).
+pub fn densify_marked(pts: &[Vec2], bulge: Option<&[f64]>, sagitta: f64) -> (Vec<Vec2>, Vec<usize>, Vec<bool>) {
+    let n = pts.len();
+    let (mut out, mut src, mut smooth) = (Vec::with_capacity(n), Vec::with_capacity(n), Vec::with_capacity(n));
+    for i in 0..n {
+        let (a, b) = (pts[i], pts[(i + 1) % n]);
+        out.push(a);
+        src.push(i);
+        smooth.push(false);
+        for q in edge_points_with(a, b, bulge_at(bulge, i), sagitta) {
+            out.push(q);
+            src.push(i);
+            smooth.push(true);
+        }
+    }
+    (out, src, smooth)
+}
+
+impl Excavation {
+    /// [191] Umriss mit fein geteilten Bögen (Teilung [`SAGITTA_EARTHWORK`]); ohne Bögen der Umriss selbst.
+    /// Gleiche Punkte wie [`Excavation::ring_marked`] und damit wie die Sohle der Böschungsrechnung.
+    pub fn ring(&self) -> Cow<'_, [Vec2]> {
+        if !has_arcs(self.outline_bulge.as_deref(), self.outline.len()) || self.outline.len() < 2 {
+            return Cow::Borrowed(&self.outline);
+        }
+        Cow::Owned(self.ring_marked().0)
+    }
+    /// [191] Fein geteilter Umriss, je Punkt die Modell-Kante (für `edgeSlopes`/`edgeShoring`) und ob er im Inneren
+    /// eines Bogens liegt (s. [`densify_marked`]).
+    pub fn ring_marked(&self) -> (Vec<Vec2>, Vec<usize>, Vec<bool>) {
+        densify_marked(&self.outline, self.outline_bulge.as_deref(), SAGITTA_EARTHWORK)
+    }
+    /// Sohlenfläche des Umrisses exakt (Bögen als Kreisabschnitte), ohne Vorzeichen.
+    pub fn outline_area(&self) -> f64 {
+        signed_area(&self.outline, self.outline_bulge.as_deref()).abs()
     }
 }
 

@@ -5,7 +5,7 @@
 // die Anzeige-Werte zur Auswahl rechnet `selectionMenuState`.
 
 import type { RefObject } from "react";
-import { useStore } from "../state/appStore";
+import { getState, useStore } from "../state/appStore";
 import { ContextMenu } from "../ui/ContextMenu";
 import type { Vec2 } from "../model/types";
 import type { PlanViewHandle } from "../views/plan/PlanView";
@@ -162,15 +162,16 @@ export function AppContextMenu(props: {
           if (total !== 1) return null;
           const roof = selection.roofs.length === 1 ? (project.roofs ?? []).find((x) => x.id === selection.roofs[0]) : undefined;
           if (roof && !roof.locked) {
-            return { kind: "roof" as const, id: roof.id, rings: [roof.outline, ...(roof.holes ?? [])].reduce<{ pts: Vec2[]; off: number }[]>(
-              (acc, pts) => [...acc, { pts, off: acc.reduce((n, r) => n + r.pts.length, 0) }], []) };
+            const bulges = [roof.outlineBulge, ...(roof.holes ?? []).map((_, k) => roof.holesBulge?.[k])];
+            return { kind: "roof" as const, id: roof.id, rings: [roof.outline, ...(roof.holes ?? [])].reduce<{ pts: Vec2[]; off: number; bulge?: number[] }[]>(
+              (acc, pts, k) => [...acc, { pts, off: acc.reduce((n, r) => n + r.pts.length, 0), bulge: bulges[k] }], []) };
           }
           const ceiling = selection.ceilings.length === 1 ? (project.ceilings ?? []).find((x) => x.id === selection.ceilings[0]) : undefined;
-          if (ceiling && !ceiling.locked) return { kind: "ceiling" as const, id: ceiling.id, rings: [{ pts: ceiling.outline, off: 0 }] };
+          if (ceiling && !ceiling.locked) return { kind: "ceiling" as const, id: ceiling.id, rings: [{ pts: ceiling.outline, off: 0, bulge: ceiling.outlineBulge }] };
           const room = selection.rooms.length === 1 ? (project.rooms ?? []).find((x) => x.id === selection.rooms[0]) : undefined;
-          if (room && !room.locked) return { kind: "room" as const, id: room.id, rings: [{ pts: room.boundary, off: 0 }] };
+          if (room && !room.locked) return { kind: "room" as const, id: room.id, rings: [{ pts: room.boundary, off: 0, bulge: room.boundaryBulge }] };
           const ctx = selection.contextObjects.length === 1 ? (project.context ?? []).find((x) => x.id === selection.contextObjects[0]) : undefined;
-          if (ctx && ctx.type === "excavation") return { kind: "excavation" as const, id: ctx.id, rings: [{ pts: ctx.outline, off: 0 }] };
+          if (ctx && ctx.type === "excavation") return { kind: "excavation" as const, id: ctx.id, rings: [{ pts: ctx.outline, off: 0, bulge: ctx.outlineBulge }] };
           // [193] Höhenlinien-Satz: je Linie ein Ring (flacher Index über alle Linien); offene Linien haben kein Schlusssegment.
           if (ctx && ctx.type === "contourSet") {
             return { kind: "contours" as const, id: ctx.id, rings: ctx.contours.reduce<{ pts: Vec2[]; off: number; closed: boolean }[]>(
@@ -180,6 +181,7 @@ export function AppContextMenu(props: {
         })(),
         insertRingVertex,
         deleteRingVertex,
+        setRingArc: (kind, id, seg, pt) => getState().setRingArc(kind, id, seg, pt),
         insertPolylinePoint: insertDrawingPoint,
         deletePolylinePoint: deleteDrawingPoint,
         setPolylineVertexType,

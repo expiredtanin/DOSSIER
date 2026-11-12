@@ -20,6 +20,8 @@ type P = [number, number];
 
 /** Elemente mit Umriss-Ring, an denen sich Ecken einfügen/löschen lassen (geschlossene Polylinie eingeschlossen). */
 export type RingKind = "roof" | "ceiling" | "room" | "excavation" | "polyline" | "contours";
+/** [191] Umriss-Ringe mit Bögen je Kante (Scheitel-Griff `ringArc`). */
+export type ArcRingKind = "roof" | "ceiling" | "room" | "excavation";
 
 /** Eine Griff-Änderung für den Kern (`grips.rs::run`); Zahlen dürfen NaN/±∞ sein (Marken). */
 export type GripRequest =
@@ -50,8 +52,8 @@ export type GripRequest =
   | { op: "ringInsert"; kind: RingKind; id: string; seg: number; pt: P }
   | { op: "ringDelete"; kind: RingKind; id: string; index: number }
   | { op: "ringTidy"; kind: RingKind; id: string; index: number; tol?: number }
-  // [191] Bogen-Scheitel einer Umriss-Kante (Decke, Raum, Dach samt Höfen; `seg` wie bei `ringInsert`).
-  | { op: "ringArc"; kind: "roof" | "ceiling" | "room"; id: string; seg: number; pt: P }
+  // [191] Bogen-Scheitel einer Umriss-Kante (Decke, Raum, Dach samt Höfen, Baugrube; `seg` wie bei `ringInsert`).
+  | { op: "ringArc"; kind: ArcRingKind; id: string; seg: number; pt: P }
   // [151] Parameter-Griff einer Podesttreppe (Kern `grip_drag::stair_param_drag`).
   | { op: "stairParam"; id: string; index: number; pt: P }
   | { op: "excavationEdge"; id: string; a: number; b: number; delta: P }
@@ -133,6 +135,23 @@ export function ringEdges(verts: readonly Vec2[], owner: Owner, bulge?: readonly
 export function arcApex(a: Vec2, b: Vec2, bulge: number | undefined): Vec2 {
   const k = Number.isFinite(bulge) ? (bulge as number) / 2 : 0;
   return { x: (a.x + b.x) / 2 - (b.y - a.y) * k, y: (a.y + b.y) / 2 + (b.x - a.x) * k };
+}
+
+/**
+ * [191] „Kante gerade ↔ Bogen" (Kontextmenü an einer Umriss-Kante): Ziel-Scheitel für `ringArc` an Kante `i` des
+ * geschlossenen Rings. Gerade Kante → Segmentbogen nach aussen (Pfeilhöhe = Sehne/4, Bulge ±0.5); Bogenkante →
+ * Sehnenmitte (gerade). `null` bei kaputtem Index oder Ring.
+ */
+export function edgeArcToggle(pts: readonly Vec2[], bulge: readonly number[] | undefined, i: number): { pt: Vec2; toArc: boolean } | null {
+  const n = pts.length;
+  if (n < 3 || !Number.isInteger(i) || i < 0 || i >= n) return null;
+  const [a, b] = [pts[i], pts[(i + 1) % n]];
+  const cur = bulge?.[i];
+  if (cur && Number.isFinite(cur) && Math.abs(cur) > 1e-9) return { pt: arcApex(a, b, 0), toArc: false };
+  let area = 0;
+  for (let k = 0; k < n; k++) area += pts[k].x * pts[(k + 1) % n].y - pts[(k + 1) % n].x * pts[k].y;
+  // Gegen den Uhrzeigersinn liegt aussen rechts der Kante (Bulge negativ = Scheitel rechts).
+  return { pt: arcApex(a, b, area >= 0 ? -0.5 : 0.5), toArc: true };
 }
 
 /**

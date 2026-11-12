@@ -6373,6 +6373,13 @@ pub struct Excavation {
     #[serde(rename = "categoryCode")]
     pub category_code: String,
     pub outline: Vec<Vec2>,
+    /// [191] Bögen im Umriss: je Kante (Punkt i → i+1) ein Bulge wie bei `Ceiling.outlineBulge`
+    /// (`tan(Öffnungswinkel/4)`, positiv = Scheitel links; fehlt/0 = Gerade). Die Ableitungen (Böschung,
+    /// Arbeitsraum, Verbau, Schnitt, 3D, Plan) rechnen auf dem fein geteilten Umriss; `edgeSlopes`/`edgeShoring`
+    /// gelten je Kante dieses Felds (eine Bogenkante = ein Eintrag).
+    #[serde(rename = "outlineBulge", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub outline_bulge: Option<Vec<f64>>,
     pub bottom: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]

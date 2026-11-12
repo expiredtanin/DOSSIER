@@ -1272,6 +1272,13 @@ export type Excavation = {
    */
   categoryCode: string;
   outline: Array<Vec2>;
+  /**
+   * [191] Bögen im Umriss: je Kante (Punkt i → i+1) ein Bulge wie bei `Ceiling.outlineBulge`
+   * (`tan(Öffnungswinkel/4)`, positiv = Scheitel links; fehlt/0 = Gerade). Die Ableitungen (Böschung,
+   * Arbeitsraum, Verbau, Schnitt, 3D, Plan) rechnen auf dem fein geteilten Umriss; `edgeSlopes`/`edgeShoring`
+   * gelten je Kante dieses Felds (eine Bogenkante = ein Eintrag).
+   */
+  outlineBulge?: Array<number>;
   bottom: number;
   slope?: number;
   fillSlope?: number;

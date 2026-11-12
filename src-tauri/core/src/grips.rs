@@ -387,7 +387,7 @@ pub fn run(lk: &Lookup, req: &Request) -> Result<GripResult, String> {
             let kind = r.s("kind").unwrap_or("");
             patch(coll, r.s("id"), &|e| ring_edit(e, kind, index, &edit)).into()
         }
-        // [191] Bogen-Scheitel einer Umriss-Kante (Decke, Raum, Dach samt Höfen; `seg` wie bei `ringInsert`): der
+        // [191] Bogen-Scheitel einer Umriss-Kante (Decke, Raum, Dach samt Höfen, Baugrube; `seg` wie bei `ringInsert`): der
         // Griff liegt im Scheitel, Ziehen setzt den Bulge über die Pfeilhöhe (senkrecht zur Sehne; auf der Sehne =
         // gerade Kante).
         "ringArc" => {
@@ -396,6 +396,7 @@ pub fn run(lk: &Lookup, req: &Request) -> Result<GripResult, String> {
                 Some("roof") => "roofs",
                 Some("ceiling") => "ceilings",
                 Some("room") => "rooms",
+                Some("excavation") => "context",
                 _ => return Ok(GripResult::default()),
             };
             let kind = r.s("kind").unwrap_or("");
@@ -1603,7 +1604,7 @@ fn ring_arc_edit(e: &Value, kind: &str, flat: f64, x: f64, y: f64) -> Option<Val
         Some(put_bulges(e.clone(), bulge_key, &bl))
     };
     match kind {
-        "ceiling" => simple("outline", "outlineBulge"),
+        "ceiling" | "excavation" => simple("outline", "outlineBulge"),
         "room" => simple("boundary", "boundaryBulge"),
         "roof" => {
             let outline = field(e, "outline")?.as_array()?;
@@ -2262,6 +2263,13 @@ mod tests {
         // Kante 1 (x = 4) nach aussen zum Halbkreis: Scheitel bei (6, 2), Bulge −1 (Scheitel rechts der Kante).
         let e = ent(&r, json!({"op": "ringArc", "kind": "ceiling", "id": "C", "seg": 1, "pt": [6, 2]})).unwrap();
         assert_eq!(e["outlineBulge"], json!([0, -1, 0, 0]));
+        // Baugrube ebenso (Kontextobjekt); Böschung/Verbau je Kante bleiben.
+        let rx = root(json!({"context": [{"id": "bg", "type": "excavation", "bottom": -3, "outline": sq, "edgeSlopes": [45, 60, 45, 45]}]}));
+        let ex = ent(&rx, json!({"op": "ringArc", "kind": "excavation", "id": "bg", "seg": 1, "pt": [6, 2]})).unwrap();
+        assert_eq!((ex["outlineBulge"].clone(), ex["edgeSlopes"].clone()), (json!([0, -1, 0, 0]), json!([45, 60, 45, 45])));
+        let rx2 = root(json!({"context": [ex]}));
+        let back = ent(&rx2, json!({"op": "ringArc", "kind": "excavation", "id": "bg", "seg": 1, "pt": [4, 2]})).unwrap();
+        assert_eq!(back["outlineBulge"], json!([0, 0, 0, 0]), "auf die Sehne gezogen = gerade");
         let e2 = ent(&r, json!({"op": "ringArc", "kind": "room", "id": "Rm", "seg": 3, "pt": [0.0005, 2]}));
         assert!(e2.is_none() || e2.unwrap().get("boundaryBulge").is_none(), "fast gerade bleibt gerade, ohne Feld");
         // Dach: Hof-Kante (flacher Index 4 + 1 = 5).

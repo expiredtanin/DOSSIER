@@ -1075,6 +1075,8 @@ export const en: Record<TranslationKey, string> = {
   "ctx.insertCorner": "Insert corner",
   "ctx.deleteCorner": "Delete corner",
   "ctx.deleteCorner.min": "At least three corners remain.",
+  "ctx.edgeToArc": "Make edge an arc",
+  "ctx.edgeStraight": "Straighten edge",
   "ctx.vertexType.corner": "Corner point",
   "ctx.vertexType.arc": "Arc point",
   "ctx.vertexType.spline": "Spline point",

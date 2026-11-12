@@ -1080,6 +1080,8 @@ export const de = {
   "ctx.insertCorner": "Ecke einfügen",
   "ctx.deleteCorner": "Ecke löschen",
   "ctx.deleteCorner.min": "Mindestens drei Ecken bleiben.",
+  "ctx.edgeToArc": "Kante als Bogen",
+  "ctx.edgeStraight": "Kante gerade",
   "ctx.vertexType.corner": "Eckpunkt",
   "ctx.vertexType.arc": "Bogenpunkt",
   "ctx.vertexType.spline": "Splinepunkt",

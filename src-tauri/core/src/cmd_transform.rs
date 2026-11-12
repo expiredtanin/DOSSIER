@@ -329,7 +329,11 @@ fn mv_context(e: &Value, xf: &Xf) -> Value {
                 .collect();
             with(e, "contours", Value::Array(cs))
         }
-        "excavation" => with(e, "outline", xf.pts(field(e, "outline"))),
+        "excavation" => {
+            let mut f = vec![("outline", xf.pts(field(e, "outline")))];
+            f.extend(flip_bulges(e, xf, &["outlineBulge"], &[]));
+            with_all(e, f)
+        }
         "image" => {
             let (a, b) = (xy(field(e, "min").unwrap_or(&Value::Null)), xy(field(e, "max").unwrap_or(&Value::Null)));
             let (p, q) = (xf.apply(a.0, a.1), xf.apply(b.0, b.1));
@@ -1512,7 +1516,7 @@ mod tests {
     #[test]
     fn kontext_verschieben() {
         let r = root(json!({"context":[
-            {"id":"bg","type":"excavation","bottom":-2,"outline":[{"x":0,"y":0},{"x":4,"y":0},{"x":4,"y":4}]},
+            {"id":"bg","type":"excavation","bottom":-2,"outline":[{"x":0,"y":0},{"x":4,"y":0},{"x":4,"y":4}],"outlineBulge":[0,-0.5,0]},
             {"id":"hl","type":"contourSet","contours":[{"z":5,"pts":[{"x":1,"y":1},{"x":2,"y":1}],"closed":false}]},
             {"id":"tm","type":"terrainMesh","positions":[0,0,7, 1,0,8, 0,1,9],"indices":[0,1,2]},
             {"id":"x","type":"excavation","outline":[{"x":0,"y":0}]}]}));
@@ -1532,6 +1536,9 @@ mod tests {
         let ops = run("mirror", json!([[0, 0], [1, 0]]));
         assert_eq!(ops[2]["entity"]["positions"], json!([0, 0, 7, 1, 0, 8, 0, -1, 9]));
         assert_eq!(ops[2]["entity"]["indices"], json!([0, 2, 1]));
+        // [191] Bögen im Baugruben-Umriss kehren beim Spiegeln, beim Verschieben bleiben sie.
+        assert_eq!(ops[0]["entity"]["outlineBulge"], json!([0, 0.5, 0]));
+        assert_eq!(run("move", json!([[0, 0], [3, 1]]))[0]["entity"]["outlineBulge"], json!([0, -0.5, 0]));
     }
 
     /// [T2] Bogenwand: Verschieben/Drehen behalten den Bulge, Spiegeln kehrt ihn um.

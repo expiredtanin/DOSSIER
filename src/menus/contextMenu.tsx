@@ -8,7 +8,7 @@
 // Kommentare deutsch (CONVENTIONS.md).
 
 import { t } from "../i18n";
-import { canSetVertexType, vertexTypeOf, type PolylineVertexType, type RingKind } from "../core";
+import { canSetVertexType, edgeArcToggle, vertexTypeOf, type ArcRingKind, type PolylineVertexType, type RingKind } from "../core";
 import { nearestPolylineTarget, toleranceFor } from "../core";
 import type { LayerCategory, Project, Vec2 } from "../model/types";
 import { flattenCategories } from "../model/types";
@@ -90,8 +90,10 @@ export interface MenuActions {
   selectedSectionLine?: { id: string; pts: Vec2[] } | null;
   insertSectionBend?: (id: string, seg: number, pt: Vec2) => void;
   /** [26] Einzeln gewähltes Element mit Umriss (Dach samt Höfen, Decke, Raum, Baugrube): Ringe mit Start-Index im flachen Ecken-Index. */
-  selectedRing?: { kind: RingKind; id: string; rings: { pts: Vec2[]; off: number; closed?: boolean }[] } | null;
+  selectedRing?: { kind: RingKind; id: string; rings: { pts: Vec2[]; off: number; closed?: boolean; bulge?: number[] }[] } | null;
   insertRingVertex?: (kind: RingKind, id: string, seg: number, pt: Vec2) => void;
+  /** [191] Bogen-Scheitel einer Umriss-Kante setzen („Kante gerade ↔ Bogen"). */
+  setRingArc?: (kind: ArcRingKind, id: string, seg: number, pt: Vec2) => void;
   deleteRingVertex?: (kind: RingKind, id: string, index: number) => void;
   deleteSectionBend?: (id: string, index: number) => void;
   /** Ob eine Element-Stil-Zwischenablage gefüllt ist (aktiviert „Einfügen"). */
@@ -364,7 +366,7 @@ function planMenuItems(
   // [26] Umriss-Element: Ecke am Klick einfügen bzw. die getroffene Ecke löschen (mindestens drei bleiben).
   const ring = a.selectedRing;
   if (ring) {
-    for (const { pts, off, closed = true } of ring.rings) {
+    for (const { pts, off, closed = true, bulge } of ring.rings) {
       const geom = { pts, closed };
       const hit = nearestPolylineTarget(geom, model, toleranceFor(geom));
       if (!hit) continue;
@@ -373,6 +375,16 @@ function planMenuItems(
           label: t("ctx.insertCorner"),
           icon: <MenuIcon name="add_circle" />,
           onClick: () => a.insertRingVertex?.(ring.kind, ring.id, off + hit.segIndex, hit.at),
+        });
+      }
+      // [191] Kante gerade ↔ Bogen (Decke, Raum, Dach, Baugrube); die Pfeilhöhe danach am Scheitel-Griff.
+      const arcKind = ring.kind === "polyline" || ring.kind === "contours" ? null : ring.kind;
+      const toggle = hit.kind === "segment" && closed && arcKind ? edgeArcToggle(pts, bulge, hit.segIndex) : null;
+      if (toggle && arcKind && a.setRingArc && hit.kind === "segment") {
+        pointItems.push({
+          label: t(toggle.toArc ? "ctx.edgeToArc" : "ctx.edgeStraight"),
+          icon: <MenuIcon name={toggle.toArc ? "line_curve" : "horizontal_rule"} />,
+          onClick: () => a.setRingArc?.(arcKind, ring.id, off + hit.segIndex, toggle.pt),
         });
       }
       if (hit.kind === "vertex" && a.deleteRingVertex) {

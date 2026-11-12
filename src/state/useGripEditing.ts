@@ -565,7 +565,10 @@ export function useGripEditing(opts: {
     if (modelEditable && selectedExcavation && !selectedCeiling && effectiveDrawingIds.length === 0 && selectedWallIds.length === 0) {
       const pts = excavationGripPoints(selectedExcavation);
       pts.forEach((_, i) => { gripOwners.push({ localIndex: i }); gripOwnerRange.push([0, pts.length - 1]); });
-      pushInsertGrips(pts, [{ pts: selectedExcavation.outline, off: 0 }], { kind: "excavation", id: selectedExcavation.id });
+      // [191] Bogenkanten: Einfüge-Raute auf dem Bogen, Scheitel-Griff wie bei Decken.
+      const rings = [{ pts: selectedExcavation.outline, off: 0, bulge: selectedExcavation.outlineBulge }];
+      pushInsertGrips(pts, rings, { kind: "excavation", id: selectedExcavation.id });
+      pushArcGrips(pts, rings, { kind: "excavation", id: selectedExcavation.id });
       return pts;
     }
     // Decke: die Umriss-Vertices als Griffe (nur bei genau einer gewählten Decke,
@@ -715,7 +718,7 @@ export function useGripEditing(opts: {
       );
     }
     if (modelEditable && selectedExcavation && !selectedCeiling && effectiveDrawingIds.length === 0 && selectedWallIds.length === 0) {
-      return ringEdges(selectedExcavation.outline, {});
+      return ringEdges(selectedExcavation.outline, {}, selectedExcavation.outlineBulge ?? []);
     }
     // Decke: geschlossener Ring aus dem Umriss (Auswahl exklusiv, wie bei grips).
     if (modelEditable && selectedCeiling && effectiveDrawingIds.length === 0 && selectedWallIds.length === 0) {
@@ -1189,7 +1192,7 @@ export function useGripEditing(opts: {
     }
     const ins = gripOwners[index];
     // [191] Scheitel-Griff einer Bogenkante: Bulge live, ein Undo-Schritt je Zug.
-    if (modelEditable && ins?.arcSeg != null && ins.ring && ins.ring.kind !== "excavation" && ins.ring.kind !== "polyline" && ins.ring.kind !== "contours") {
+    if (modelEditable && ins?.arcSeg != null && ins.ring && ins.ring.kind !== "polyline" && ins.ring.kind !== "contours") {
       storeState().setRingArc(ins.ring.kind, ins.ring.id, ins.arcSeg, pt);
       return;
     }
