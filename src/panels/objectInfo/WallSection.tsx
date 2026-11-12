@@ -79,6 +79,7 @@ export function WallSection({
           title={t("objinfo.wall.refLine")}
           width={120}
         />
+        {mixedMark(multi?.referenceLine.mixed, "referenceLine")}
       </div>
 
       {/* Terminierung am Deckenanschluss (Zuschnitt, NICHT Priorität): ob die Wand

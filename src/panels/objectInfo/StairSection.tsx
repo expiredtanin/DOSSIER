@@ -8,7 +8,9 @@ import { t } from "../../i18n";
 import { Dropdown } from "../../ui/Dropdown";
 import type { StairShape } from "../../model/types";
 import { formatM } from "../../model/types";
-import { DimensionField } from "./fields";
+import { selectionStairValues } from "../../state/mixedValues";
+import { DimensionField, MixedMark } from "./fields";
+import { useMulti } from "./useMulti";
 
 /**
  * [151] Läufe und Podest einer Podesttreppe (L, U, gerade mit Podest): Lauflängen, Steigungen im ersten
@@ -135,6 +137,8 @@ export function StairSection({
   host: ReturnType<typeof usePanelHost>;
 }) {
   const storeProject = useStore((st) => st.project);
+  // [195b] Mehrfachauswahl: abweichende Werte als „gemischt" kennzeichnen; Änderungen gelten für alle gewählten Treppen.
+  const multi = useMulti("stairs", selectionStairValues);
   return (
     <>
       <div className="objinfo-sep" />
@@ -156,6 +160,7 @@ export function StairSection({
           title={t("objinfo.stair.type")}
           width={130}
         />
+        <MixedMark on={multi?.typeId.mixed} what="stairType" />
       </div>
 
       {/* Grundform-Dropdown. */}
@@ -174,6 +179,7 @@ export function StairSection({
           title={t("objinfo.stair.shape")}
           width={130}
         />
+        <MixedMark on={multi?.shape.mixed} what="stairShape" />
       </div>
 
       {/* Referenzpunkt der Laufbreite (links/mitte/rechts). */}
@@ -240,6 +246,7 @@ export function StairSection({
         value={stair.width}
         onCommit={(v) => host.onSetStairWidth(v)}
       />
+      <MixedMark on={multi?.width.mixed} what="width" />
       {stair.shape === "spiral" && (
         <DimensionField
           label={t("objinfo.stair.column")}
@@ -254,11 +261,13 @@ export function StairSection({
         value={stair.stepCount}
         onCommit={(v) => host.onSetStairSteps(v)}
       />
+      <MixedMark on={multi?.stepCount.mixed} what="stepCount" />
       <DimensionField
         label={t("objinfo.stair.rise")}
         value={stair.totalRise}
         onCommit={(v) => host.onSetStairRise(v)}
       />
+      <MixedMark on={multi?.totalRise.mixed} what="totalRise" />
       <DimensionField
         label={t("objinfo.stair.baseOffset")}
         value={stair.baseOffset ?? 0}

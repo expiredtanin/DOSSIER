@@ -610,10 +610,11 @@ export function deriveSelection(project: Project, selection: Partial<Selection>)
     // abweichende Werte („gemischt", `mixedValues.ts`).
     ceilingId: sel.ceilings[0] ?? null,
     openingId: sel.openings[0] ?? null,
-    stairId: single(sel, "stairs"),
-    roomId: single(sel, "rooms"),
-    extrudedSolidId: single(sel, "solids"),
-    columnId: single(sel, "columns"),
+    // Ebenso Treppen, Räume, Körper und Stützen.
+    stairId: sel.stairs[0] ?? null,
+    roomId: sel.rooms[0] ?? null,
+    extrudedSolidId: sel.solids[0] ?? null,
+    columnId: sel.columns[0] ?? null,
     roofId: sel.roofs[0] ?? null,
     contextObjectId: single(sel, "contextObjects"),
   };

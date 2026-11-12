@@ -138,6 +138,7 @@ export function OpeningSection({
             min={1}
             onCommit={(v) => host.onSetOpeningWingCount(Math.max(1, Math.min(4, Math.round(v))))}
           />
+          <MixedMark on={multi?.wingCount.mixed} what="wingCount" />
           {/* Grundriss-Linien je Kategorie: Rahmen (Blendrahmen+Stulp), Fenster
               (Flügelrahmen/Sprossen), Sims (Auf-/Untersicht, nur wenn der
               Fenstertyp sie aktiviert hat — s. WindowType.sillLine). */}
@@ -249,6 +250,7 @@ export function OpeningSection({
               title={t("objinfo.opening.hinge")}
               width={130}
             />
+            <MixedMark on={multi?.hinge.mixed} what="hinge" />
           </div>
           <div className="objinfo-field">
             <span className="objinfo-flabel">{t("objinfo.opening.swing")}</span>
@@ -262,6 +264,7 @@ export function OpeningSection({
               title={t("objinfo.opening.swing")}
               width={130}
             />
+            <MixedMark on={multi?.swing.mixed} what="swing" />
           </div>
           <div className="objinfo-field">
             <span className="objinfo-flabel">{t("objinfo.opening.dir")}</span>
@@ -275,6 +278,7 @@ export function OpeningSection({
               title={t("objinfo.opening.dir")}
               width={130}
             />
+            <MixedMark on={multi?.openingDir.mixed} what="openingDir" />
           </div>
           <DimensionField
             label={t("objinfo.opening.swingAngle")}

@@ -34,4 +34,19 @@ describe("Objekteinstellungen: Öffnung [195b]", () => {
     setState({ selection: { ...EMPTY_SELECTION, openings: [a.id] } });
     expect(render()).not.toContain('data-mixed="width"');
   });
+
+  it("zwei Treppen mit abweichender Breite: Treppen-Abschnitt mit „gemischt“; zwei Dächer ohne Gauben-/Kantenabschnitt", () => {
+    const p = buildComplexSampleProject();
+    const [a, b] = p.stairs!;
+    getState().loadProject({ ...p, stairs: p.stairs!.map((x) => (x.id === a.id ? { ...x, width: 1 } : x.id === b.id ? { ...x, width: 1.3 } : x)) });
+    setState({ selection: { ...EMPTY_SELECTION, stairs: [a.id, b.id] } });
+    expect(render()).toContain('data-mixed="width"');
+    const [r1, r2] = getState().project.roofs!;
+    setState({ selection: { ...EMPTY_SELECTION, roofs: [r1.id] } });
+    const single = render();
+    setState({ selection: { ...EMPTY_SELECTION, roofs: [r1.id, r2.id] } });
+    const multi = render();
+    expect(multi).not.toContain("objinfo-dormer");
+    expect(multi.length).toBeLessThan(single.length);
+  });
 });

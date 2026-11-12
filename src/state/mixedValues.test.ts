@@ -1,7 +1,7 @@
 // [195] Mehrfach-Werte: gleiche Werte → ein Wert, abweichende → leer (gemischt).
 import { describe, expect, it } from "vitest";
 import { buildComplexSampleProject } from "../model/sampleProjectComplex";
-import { commonValue, selectionAppearance, selectionWallValues, selectedCount, selectionCeilingValues, selectionOpeningValues, selectionRoofValues, selectionWallHeights } from "./mixedValues";
+import { commonValue, selectionAppearance, selectionWallValues, selectedCount, selectionCeilingValues, selectionOpeningValues, selectionRoofValues, selectionWallHeights, selectionStairValues, selectionRoomValues, selectionColumnValues, selectionSolidValues } from "./mixedValues";
 import { EMPTY_SELECTION, mergeSelection } from "./selection";
 
 describe("commonValue [195]", () => {
@@ -102,5 +102,36 @@ describe("Mehrfachwerte Decke, Dach, Öffnung, Höhen [195b]", () => {
     const q = { ...p, walls: p.walls.map((w) => (w.id === b ? { ...w, bottom: { mode: "custom" as const, z: 0.37 } } : w)) };
     const v = selectionWallHeights(q, mergeSelection(EMPTY_SELECTION, { walls: [a, b] }));
     expect(v.bottom.mixed).toBe(true);
+  });
+});
+
+describe("Mehrfachwerte Treppe, Raum, Stütze, Körper [195b]", () => {
+  const p = buildComplexSampleProject();
+  it("Treppe: Breite gleich → Wert, abweichend → gemischt", () => {
+    const [a, b] = p.stairs!;
+    const sel = mergeSelection(EMPTY_SELECTION, { stairs: [a.id, b.id] });
+    const same = { ...p, stairs: p.stairs!.map((s) => (s.id === b.id ? { ...s, width: a.width } : s)) };
+    expect(selectionStairValues(same, sel).width.mixed).toBe(false);
+    const diff = { ...p, stairs: p.stairs!.map((s) => (s.id === b.id ? { ...s, width: a.width + 0.2 } : s)) };
+    expect(selectionStairValues(diff, sel).width.mixed).toBe(true);
+  });
+  it("Raum: SIA-Kategorie", () => {
+    const [a, b] = p.rooms!;
+    const sel = mergeSelection(EMPTY_SELECTION, { rooms: [a.id, b.id] });
+    const same = { ...p, rooms: p.rooms!.map((r) => (r.id === b.id ? { ...r, siaCategory: a.siaCategory } : r)) };
+    expect(selectionRoomValues(same, sel).siaCategory.mixed).toBe(false);
+    const other = a.siaCategory === "NNF" ? ("VF" as const) : ("NNF" as const);
+    const diff = { ...p, rooms: p.rooms!.map((r) => (r.id === b.id ? { ...r, siaCategory: other } : r)) };
+    expect(selectionRoomValues(diff, sel).siaCategory.mixed).toBe(true);
+  });
+  it("Stütze und Körper: Höhe", () => {
+    const [c1, c2] = p.columns!;
+    const csel = mergeSelection(EMPTY_SELECTION, { columns: [c1.id, c2.id] });
+    const cdiff = { ...p, columns: p.columns!.map((c) => (c.id === c2.id ? { ...c, height: c1.height + 1 } : c)) };
+    expect(selectionColumnValues(cdiff, csel).height.mixed).toBe(true);
+    const [e1, e2] = p.extrudedSolids!;
+    const ssel = mergeSelection(EMPTY_SELECTION, { solids: [e1.id, e2.id] });
+    const same = { ...p, extrudedSolids: p.extrudedSolids!.map((e) => (e.id === e2.id ? { ...e, height: e1.height } : e)) };
+    expect(selectionSolidValues(same, ssel).height.mixed).toBe(false);
   });
 });

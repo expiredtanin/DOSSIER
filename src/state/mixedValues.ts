@@ -60,18 +60,22 @@ export function selectionAppearance(project: Project, sel: Selection): Selection
 export interface SelectionWallValues {
   wallTypeId: Common<string>;
   thickness: Common<number>;
+  /** Referenzlinie samt freiem Fugen-Versatz. */
+  referenceLine: Common<string>;
 }
 
 export function selectionWallValues(project: Project, sel: Selection): SelectionWallValues {
   const types: string[] = [];
   const thick: number[] = [];
+  const refs: string[] = [];
   for (const id of sel.walls.slice(0, MAX_COMPARED)) {
     const wall = deriveSelection(project, { walls: [id] })?.wall;
     if (!wall) continue;
     types.push(wall.wallTypeId);
     thick.push(wall.thickness);
+    refs.push(`${wall.referenceLine}|${wall.referenceOffset ?? ""}`);
   }
-  return { wallTypeId: commonValue(types), thickness: commonValue(thick) };
+  return { wallTypeId: commonValue(types), thickness: commonValue(thick), referenceLine: commonValue(refs) };
 }
 
 /** Schlüssel einer Höhenangabe (Anker + aufgelöstes Z), damit gleiche Lagen als gleich gelten. */
@@ -144,6 +148,11 @@ export interface SelectionOpeningValues {
   height: Common<number>;
   sillHeight: Common<number>;
   typeId: Common<string>;
+  /** Tür: Anschlag, Aufschlag, Richtung; Fenster: Flügelzahl. */
+  hinge: Common<string>;
+  swing: Common<string>;
+  openingDir: Common<string>;
+  wingCount: Common<number>;
 }
 
 export function selectionOpeningValues(project: Project, sel: Selection): SelectionOpeningValues {
@@ -151,6 +160,10 @@ export function selectionOpeningValues(project: Project, sel: Selection): Select
   const h: number[] = [];
   const s: number[] = [];
   const ty: string[] = [];
+  const hinge: string[] = [];
+  const swing: string[] = [];
+  const dir: string[] = [];
+  const wings: number[] = [];
   for (const id of sel.openings.slice(0, MAX_COMPARED)) {
     const o = deriveSelection(project, { openings: [id] })?.opening;
     if (!o) continue;
@@ -158,6 +171,83 @@ export function selectionOpeningValues(project: Project, sel: Selection): Select
     h.push(o.height);
     s.push(o.sillHeight);
     ty.push(o.typeId ?? "");
+    hinge.push(o.hinge ?? "");
+    swing.push(o.swing ?? "");
+    dir.push(o.openingDir ?? "");
+    wings.push(o.wingCount ?? 1);
   }
-  return { width: commonValue(w), height: commonValue(h), sillHeight: commonValue(s), typeId: commonValue(ty) };
+  return {
+    width: commonValue(w),
+    height: commonValue(h),
+    sillHeight: commonValue(s),
+    typeId: commonValue(ty),
+    hinge: commonValue(hinge),
+    swing: commonValue(swing),
+    openingDir: commonValue(dir),
+    wingCount: commonValue(wings),
+  };
+}
+
+/** [195b] Form, Breite, Stufenzahl, Steighöhe und Typ der gewählten Treppen. */
+export interface SelectionStairValues {
+  shape: Common<string>;
+  width: Common<number>;
+  stepCount: Common<number>;
+  totalRise: Common<number>;
+  typeId: Common<string>;
+}
+
+export function selectionStairValues(project: Project, sel: Selection): SelectionStairValues {
+  const shape: string[] = [];
+  const width: number[] = [];
+  const steps: number[] = [];
+  const rise: number[] = [];
+  const ty: string[] = [];
+  for (const id of sel.stairs.slice(0, MAX_COMPARED)) {
+    const st = deriveSelection(project, { stairs: [id] })?.stair;
+    if (!st) continue;
+    shape.push(st.shape);
+    width.push(st.width);
+    steps.push(st.stepCount);
+    rise.push(st.totalRise);
+    ty.push(st.typeId ?? "");
+  }
+  return { shape: commonValue(shape), width: commonValue(width), stepCount: commonValue(steps), totalRise: commonValue(rise), typeId: commonValue(ty) };
+}
+
+/** [195b] SIA-Kategorie der gewählten Räume (der Name bleibt je Raum eigen und wird nicht für alle gesetzt). */
+export interface SelectionRoomValues {
+  siaCategory: Common<string>;
+}
+
+export function selectionRoomValues(project: Project, sel: Selection): SelectionRoomValues {
+  const sia: string[] = [];
+  for (const id of sel.rooms.slice(0, MAX_COMPARED)) {
+    const r = deriveSelection(project, { rooms: [id] })?.room;
+    if (r) sia.push(r.siaCategory);
+  }
+  return { siaCategory: commonValue(sia) };
+}
+
+/** [195b] Höhe der gewählten Stützen bzw. Körper (Extrusionshöhe). */
+export interface SelectionHeightValue {
+  height: Common<number>;
+}
+
+export function selectionColumnValues(project: Project, sel: Selection): SelectionHeightValue {
+  const h: number[] = [];
+  for (const id of sel.columns.slice(0, MAX_COMPARED)) {
+    const c = deriveSelection(project, { columns: [id] })?.column;
+    if (c) h.push(c.height);
+  }
+  return { height: commonValue(h) };
+}
+
+export function selectionSolidValues(project: Project, sel: Selection): SelectionHeightValue {
+  const h: number[] = [];
+  for (const id of sel.solids.slice(0, MAX_COMPARED)) {
+    const c = deriveSelection(project, { solids: [id] })?.extrudedSolid;
+    if (c) h.push(c.height);
+  }
+  return { height: commonValue(h) };
 }
