@@ -10,7 +10,7 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   stehen im Archiv („Bewusst nicht übernommen“).
 - **Grösse** (eine Person mit Agenten): S ≤ 1 Tag · M ≤ 1 Woche · L ≤ 1 Monat · XL > 1 Monat.
   Steht keine Grösse im Archiv, ist sie hier geschätzt.
-- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 212);
+- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 213);
   nie eine ID wiederverwenden oder umnummerieren. Präfix-IDs (`[K]`, `[G]`, `[T]`, `[B]`, `[C]`) bleiben.
 - **Pro Punkt:** was fehlt · wo im Code · Grösse. Höchstens ein bis drei Sätze je Punkt;
   Messwerte und Befunde gehören in den Commit.
@@ -75,6 +75,11 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   Sonnenstand/Himmel an ein installiertes Blender (`blender -b --python`, eigener Prozess, GPL bleibt getrennt), rechnet im Hintergrund
   mit Cycles (Metal auf dem Mac), zeigt Fortschritt und lädt das PNG zurück (als Bild ins Layout einsetzbar). Ohne Blender: klarer Hinweis
   mit Download-Link. · M
+- ○ **[213]** Kameras und WASD (12.11., Wunsch Maintainer): Kameras als Modell-Elemente (Name, Standpunkt, Ziel, Augenhöhe,
+  Brennweite/Bildwinkel, Perspektive/Axo, Uhrzeit für Sonne), im Grundriss als Kamerasymbol mit Griffen (Standpunkt, Ziel,
+  Öffnungswinkel; Klasse „Kameras“ nach [180]), Liste im Navigator; „Aus aktueller Ansicht anlegen“, „Kamera öffnen“, Rendering [211]
+  wählt eine Kamera. 3D-Navigation: WASD/Pfeile laufen, Q/E hoch/runter, Maus schauen, Shift schneller (Begehen-Modus wie Archicad/Spiele),
+  Augenhöhe halten; auch im nativen Mac-3D. · M
 
 ### Phase 3 (27.11.–3.12.): Vorprojekt
 - ○ **[209]** Kostenschätzung grob (Vorprojekt ±15–25 %): Kennwerte je m³ GV (SIA 416) bzw. je m² GF und eBKP-H-Hauptgruppen,
