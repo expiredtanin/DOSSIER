@@ -470,6 +470,22 @@ mod tests {
         close(&ring_of(&d, 0), &shifted(&r0, (-0.2, 0.1)));
     }
 
+    /// Vorschau des Bewegen-Befehls zeigt den Lochring an der neuen Lage mit (Kopieren: nicht).
+    #[test]
+    fn vorschau_zeigt_mitwanderndes_loch() {
+        let mut d = doc_of(&with_hole());
+        let r0 = ring_of(&d, 0);
+        let (p, lk) = d.project_lookup().unwrap();
+        let buf = |mode: &str| {
+            let req: crate::cmd_transform::TransformReq = serde_json::from_value(json!({"sel":{"wallIds":[],"drawingId":null,"stairIds":["ST1"]},"op":"move","pts":[[0,0],[-0.5,0.25]],"mode":mode,"count":1,"stamp":"s"})).unwrap();
+            crate::cmd_transform::preview_finish(Some(p), crate::cmd_transform::preview_pending(lk.root, p, &req), 100.0, 0.0)
+        };
+        let has = |b: &[f64], q: (f64, f64)| b.windows(2).any(|w| (w[0] - q.0).abs() < 1e-9 && (w[1] - q.1).abs() < 1e-9);
+        let moved = shifted(&r0, (-0.5, 0.25));
+        assert!(moved.iter().all(|q| has(&buf("move"), *q)), "Lochring fehlt in der Vorschau");
+        assert!(!has(&buf("copy"), moved[0]), "Kopie lässt das Loch stehen");
+    }
+
     /// Gesperrte Decke: Loch bleibt (Sperre schützt die Decke); mitgewählte Decke: nicht doppelt bewegt.
     #[test]
     fn gesperrte_oder_mitgewaehlte_decke() {

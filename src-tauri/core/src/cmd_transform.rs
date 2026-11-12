@@ -1417,6 +1417,35 @@ fn stair_preview(e: &Value, xf: &Xf, out: &mut Shapes) {
     out.poly(&outer);
 }
 
+/// [202] Vorschau des mitwandernden Deckenlochs: Umriss an der neuen Lage (gleiche Auswahl und Abbildung
+/// wie `transform_ops`: `stair_guard::carried_holes` + `carry_hole_ops`). Nur beim Bewegen, nicht bei Kopien.
+fn carried_hole_preview(root: &Map<String, Value>, p: &Project, req: &TransformReq, items: &[(Kind, &Value)], xf: &Xf, out: &mut Shapes) {
+    let moved: std::collections::HashSet<&str> = items.iter().filter(|(k, _)| matches!(k, Kind::Stair)).filter_map(|(_, e)| id_of(e)).collect();
+    if moved.is_empty() {
+        return;
+    }
+    let (ceil, sel_openings) = (Ids::opt(&req.sel.ceiling_ids), Ids::opt(&req.sel.opening_ids));
+    for h in crate::stair_guard::carried_holes(p, &|id| moved.contains(id), &|id| ceil.0.contains(id), &|id| sel_openings.0.contains(id)) {
+        match h {
+            crate::stair_guard::HoleSrc::Ring { ceiling, ring } => {
+                let Some(r) = p.ceilings.as_deref().and_then(|v| v.get(ceiling)).and_then(|c| c.openings.as_ref()).and_then(|o| o.get(ring)) else { continue };
+                out.poly(&r.iter().map(|q| xf.apply(q.x, q.y)).collect::<Vec<_>>());
+            }
+            crate::stair_guard::HoleSrc::Opening(i) => {
+                let Some(id) = p.openings.as_deref().and_then(|v| v.get(i)).map(|o| o.id.as_str()) else { continue };
+                let Some(o) = list(root, "openings").iter().find(|o| id_of(o) == Some(id)) else { continue };
+                let mut v = mv_surface_opening(o, xf);
+                let k = xf.scale_k();
+                if k != 1.0 {
+                    let f: Vec<(&str, Value)> = ["width", "height"].iter().filter_map(|key| field(o, key).and_then(Value::as_f64).map(|x| (*key, js_num(x * k)))).collect();
+                    v = with_all(&v, f);
+                }
+                out.poly(&surface_quad(&v));
+            }
+        }
+    }
+}
+
 /// Vorschau aller Instanzen (Kopien, dann das bewegte Original im Modus „move“) — Teil 1 auf der Wurzel.
 pub fn preview_pending(root: &Map<String, Value>, p: &Project, req: &TransformReq) -> Pending {
     let op = req.op.as_str();
@@ -1434,6 +1463,9 @@ pub fn preview_pending(root: &Map<String, Value>, p: &Project, req: &TransformRe
         let xf = Xf::of(op, &pts, t);
         for (kind, e) in &items {
             item_preview(p, *kind, e, &xf, &mut out);
+        }
+        if req.mode == "move" && t == 1.0 {
+            carried_hole_preview(root, p, req, &items, &xf, &mut out.shapes);
         }
         for o in &free {
             if let Some(q) = slide_opening(root, p, o, move_delta(&pts, t), req.mode != "move", &skip).and_then(|(v, _)| opening_quad(root, p, &v)) {
