@@ -3994,6 +3994,11 @@ pub struct Stair {
     #[serde(rename = "totalRise", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub total_rise: Option<f64>,
+    /// [187] Antrittsversatz in Metern: Höhe des Antritts über der Basis des Geschosses (negativ = darunter). Der
+    /// Austritt bleibt auf `totalRise` ab Geschoss-Basis, die Steigung ist `totalRise - baseOffset`. Fehlt es: 0.
+    #[serde(rename = "baseOffset", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub base_offset: Option<f64>,
     /// Anzahl der Steigungen (Setzstufen). Die Trittanzahl = stepCount (letzte =
     ///  Austritt aufs obere Geschoss). Steigungshöhe = totalRise / stepCount.
     #[serde(rename = "stepCount")]

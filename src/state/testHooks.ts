@@ -38,7 +38,9 @@ declare global {
         openings: { id: string; sillHeight: number; height: number }[];
         /** [187] Teil 2: Traufe (absolutes Z), Neigung, Attika-Höhe; Steighöhe der Treppen; Sohle der Baugruben. */
         roofs: { id: string; eave: number; pitchDeg: number; parapetHeight: number }[];
-        stairs: { id: string; totalRise: number }[];
+        stairs: { id: string; totalRise: number; baseOffset: number }[];
+        /** [187] Höhe je Höhenlinie der Höhenlinien-Sätze. */
+        contours: { id: string; zs: number[] }[];
         excavations: { id: string; bottom: number }[];
       };
       /** [144] Auswahl setzen (wie ein Klick), z. B. `{ openings: ["D1"] }`. */
@@ -108,7 +110,8 @@ export function installTestHooks(): void {
           const f = p.drawingLevels.find((l) => l.id === r.floorId);
           return { id: r.id, eave: r.baseElevation ?? (f ? (f.baseElevation ?? 0) + (f.floorHeight ?? 0) : 0), pitchDeg: r.pitchDeg, parapetHeight: r.parapetHeight ?? 0 };
         }),
-        stairs: (p.stairs ?? []).map((st) => ({ id: st.id, totalRise: st.totalRise ?? NaN })),
+        stairs: (p.stairs ?? []).map((st) => ({ id: st.id, totalRise: st.totalRise ?? NaN, baseOffset: st.baseOffset ?? 0 })),
+        contours: (p.context ?? []).flatMap((c) => (c.type === "contourSet" ? [{ id: c.id, zs: c.contours.map((k) => k.z) }] : [])),
         excavations: (p.context ?? []).flatMap((c) => (c.type === "excavation" ? [{ id: c.id, bottom: c.bottom }] : [])),
       };
     },

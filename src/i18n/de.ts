@@ -901,6 +901,7 @@ export const de = {
   "objinfo.stair.profile.flach": "Flachstahl",
   "objinfo.stair.steps": "Stufenanzahl",
   "objinfo.stair.rise": "Steighöhe (gesamt)",
+  "objinfo.stair.baseOffset": "Antritt über Geschoss-Basis",
   "objinfo.stair.riser": "Steigungshöhe",
   "objinfo.stair.tread": "Auftrittstiefe",
   "objinfo.stair.concreteVolume": "Betonvolumen Lauf",

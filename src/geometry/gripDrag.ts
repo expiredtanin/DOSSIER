@@ -112,10 +112,10 @@ export function gripEdgeTarget(edge: EdgeGrip, raw: Vec2, d: EdgeDrive = {}): Ve
 export type SheetHeightKind =
   | "wallTop" | "openingTop" | "openingBottom" | "wallBottom" | "ceilingTop" | "ceilingBottom"
   // Dach: Traufe, First (bzw. Neigung), Attika; Treppe: Austritt; Gelände: Oberkante (Netz) bzw. Sohle (Baugrube).
-  | "roofEave" | "roofTop" | "parapetTop" | "stairTop" | "contextTop" | "contextBottom";
+  | "roofEave" | "roofTop" | "parapetTop" | "stairTop" | "stairBottom" | "contextTop" | "contextBottom" | "contourLine";
 
 const SHEET_KIND = { wallTop: 0, openingTop: 1, openingBottom: 2, wallBottom: 3, ceilingTop: 4, ceilingBottom: 6,
-  roofEave: 7, roofTop: 8, parapetTop: 9, stairTop: 10, contextTop: 4, contextBottom: 7 } as const;
+  roofEave: 7, roofTop: 8, parapetTop: 9, stairTop: 10, stairBottom: 11, contextTop: 4, contextBottom: 7, contourLine: 4 } as const;
 
 /**
  * Höhen-Griff auf die Blatt-Höhe `y` ziehen (1-cm-Raster, `free` = ohne): neue Ober-/Unterkante im Blatt für die
@@ -132,6 +132,28 @@ export function sheetHeightDrag(
   const k = kind === "ceilingTop" && g.bottomFixed ? 5 : SHEET_KIND[kind];
   const f = core().grip_sheet_height(k, g.base, g.top, g.bottom, y, free);
   return f.length ? { top: f[0], bottom: f[1] } : { top: g.top, bottom: g.bottom };
+}
+
+/**
+ * [187] Griffe der Höhenlinien eines Satzes im Schnitt: Schnittpunkte der Linien mit der Schnittebene (Punkt `base` im
+ * Grundriss, Richtung `uAxis`) als Blatt-Koordinate `{ u, z }` samt Index der Linie im Satz. Gleiche Rechnung und Bezugshöhe
+ * wie die Geländelinie des Schnitts (Kern `sheet_height::contour_marks`).
+ */
+export function contourMarks(
+  contours: readonly { z: number; closed: boolean; pts: readonly Vec2[] }[],
+  base: Vec2,
+  uAxis: Vec2,
+  referenceMasl: number | undefined,
+): { u: number; z: number; index: number }[] {
+  const flat: number[] = [base.x, base.y, uAxis.x, uAxis.y, referenceMasl ?? NaN];
+  for (const c of contours) {
+    flat.push(c.z, c.closed ? 1 : 0, c.pts.length);
+    for (const q of c.pts) flat.push(q.x, q.y);
+  }
+  const f = core().grip_contour_marks(Float64Array.from(flat));
+  const out: { u: number; z: number; index: number }[] = [];
+  for (let i = 0; i + 2 < f.length; i += 3) out.push({ u: f[i], z: f[i + 1], index: f[i + 2] });
+  return out;
 }
 
 /** Fang einer Blatt-Höhe auf die nächste Kote aus `levels` innerhalb `tol` Metern. */

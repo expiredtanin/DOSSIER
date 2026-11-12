@@ -423,7 +423,7 @@ export interface ProjectSlice {
   /** Setzt die Gesamtdicke einer Decke (thickness-Übersteuerung, Meter). */
   setCeilingThickness: (ceilingId: string, thickness: number) => void;
   /** [187] Höhen-Griff im Schnitt/in der Ansicht: Kante `kind` des Bauteils `id` auf die Blatt-Höhe `y` (absolutes Z) ziehen. */
-  sheetHeightGrip: (kind: SheetHeightKind, id: string, y: number, free?: boolean, from?: number) => void;
+  sheetHeightGrip: (kind: SheetHeightKind, id: string, y: number, free?: boolean, from?: number, index?: number) => void;
 
   // ── Öffnungs-Editieren (Object-Info-Panel) ────────────────────────────────
   /** Generischer immutabler Patch auf eine Öffnung (per ID). */
@@ -1323,14 +1323,14 @@ export function createProjectSlice(
         newName: t("default.ceilingTypeSingle", { thickness: thickness.toFixed(2) }),
       }),
 
-    sheetHeightGrip: (kind, id, y, free, from) =>
+    sheetHeightGrip: (kind, id, y, free, from, index) =>
       applyGrip({
         op: "sheetHeight",
         kind,
         id,
         a: y,
         b: from, // Griffhöhe vor dem Zug: Dach, Treppe, Gelände zählen den Zug relativ
-
+        index, // Höhenlinie `contourLine`
         free: !!free,
         newId: `ct-${Date.now()}`,
         newName: t("default.ceilingTypeSingle", { thickness: "{t}" }), // {t} setzt der Kern ein

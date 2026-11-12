@@ -1211,3 +1211,22 @@ fn schnitt_cache_kennt_ausgeblendete_klassen() {
     assert_eq!(run(&[]), all);
     assert_eq!(run(&["31"]), off);
 }
+
+/// [187]/[143] Höhenlinien-Satz (ohne Gelände-Netz): die Schnittpunkte mit der Ebene ergeben die Geländelinie, darunter
+/// das Erdreich-Band mit Pick-Id des Satzes (Klasse = die des Satzes, `Profile::category`).
+#[test]
+fn hoehenlinien_ergeben_gelaendelinie_und_erdreich() {
+    let mut p = sample();
+    let ring = |x0: f64, x1: f64, z: f64| Contour { z, pts: vec![Vec2 { x: x0, y: -50.0 }, Vec2 { x: x1, y: -50.0 }, Vec2 { x: x1, y: 50.0 }, Vec2 { x: x0, y: 50.0 }], closed: true, ..Default::default() };
+    p.context = Some(vec![ContextObject::ContourSet(ContourSet { id: "hl".into(), name: "HL".into(), category_code: "02".into(), contours: vec![ring(-4.0, 8.0, -1.0), ring(-2.0, 7.0, -0.5), ring(-1.5, 6.5, 0.0)], ..Default::default() })]);
+    let l = p.drawing_levels.iter().find(|l| l.id == "schnitt-a").unwrap();
+    let text = serde_json::json!({ "level": serde_json::to_value(l).unwrap(), "scale": 50 }).to_string();
+    let run = |p: &Project| -> Vec<Primitive> {
+        let (prims, groups, _) = crate::plan::buf::decode(&section_plan_buf(p, &[0.0, 1.0, 7.0, 0.0], &text).unwrap()).unwrap();
+        prims[groups[0].0..groups[0].1].to_vec()
+    };
+    let g = run(&p);
+    let lines = g.iter().filter(|q| matches!(q, Primitive::Line { cls, .. } if cls == "section-terrain")).count();
+    assert_eq!(lines, 5, "6 Schnittpunkte = 5 Segmente");
+    assert!(g.iter().any(|q| matches!(q, Primitive::Polygon { context_object_id: Some(id), .. } if id == "hl")), "Erdreich mit Pick-Id");
+}

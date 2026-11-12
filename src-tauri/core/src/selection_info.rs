@@ -925,7 +925,10 @@ fn stair_selection(root: &Map<String, Value>, s: &Value) -> Result<J, String> {
     } else {
         2.6
     };
-    let (zb, zt) = (base, base + rise);
+    // [187] Antrittsversatz: der Antritt liegt über/unter der Basis, der Austritt bleibt auf `base + rise`.
+    let offset = num_of(field(s, "baseOffset"));
+    let offset = if offset.is_finite() { offset.min(rise - 0.05) } else { 0.0 };
+    let (zb, zt) = (base + offset, base + rise);
     let total_rise = zt - zb;
     let typed: crate::model::Stair = serde_json::from_value(s.clone()).map_err(|e| format!("Treppe passt nicht zum Kern-Modell: {e}"))?;
     // Wie die TS-Fassade: Geometrie flach, leer (Unsinn-Eingabe) = leere Geometrie, daraus die bbox.
@@ -954,7 +957,8 @@ fn stair_selection(root: &Map<String, Value>, s: &Value) -> Result<J, String> {
         .raw("shape", s, "shape")
         .raw("width", s, "width")
         .raw("stepCount", s, "stepCount")
-        .n("totalRise", total_rise)
+        .n("totalRise", rise)
+        .n("baseOffset", offset)
         .n("riserHeight", geo[0])
         .n("treadDepth", geo[1])
         .v("up", Value::Bool(field(s, "up") != Some(&Value::Bool(false))))

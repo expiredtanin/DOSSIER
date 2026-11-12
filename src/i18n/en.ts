@@ -885,6 +885,7 @@ export const en: Record<TranslationKey, string> = {
   "objinfo.stair.profile.flach": "Flat bar",
   "objinfo.stair.steps": "Step count",
   "objinfo.stair.rise": "Total rise",
+  "objinfo.stair.baseOffset": "Start above floor base",
   "objinfo.stair.riser": "Riser height",
   "objinfo.stair.tread": "Tread depth",
   "objinfo.stair.concreteVolume": "Concrete volume (flight)",

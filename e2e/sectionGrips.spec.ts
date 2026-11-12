@@ -211,18 +211,33 @@ test("Schnitt A-A: Dach-Traufe und First ziehen, Zug = ein Undo-Schritt", async 
   await expect.poll(async () => (await roofOf(page, "dach-haupt")).pitchDeg).toBe(r0.pitchDeg);
 });
 
-test("Schnitt B-B: Treppen-Austritt ziehen", async ({ page }) => {
+test("Schnitt B-B: Treppen-Austritt und -Antritt ziehen", async ({ page }) => {
   test.setTimeout(180_000);
   await openSheet(page, "Schnitt B-B");
   const stair = async () => (await heights(page)).stairs.find((s) => s.id === "tr-kern")!;
   const s0 = await stair();
   await select(page, { stairs: ["tr-kern"] });
-  await expect(page.locator(".plan-grip")).toHaveCount(1);
-  const [g] = await gripCentres(page);
-  await dragGrip(page, g, -30);
-  expect((await stair()).totalRise).toBeGreaterThan(s0.totalRise + 0.02);
+  await expect(page.locator(".plan-grip")).toHaveCount(2);
+  const [bottom, top] = await gripCentres(page);
+  expect(bottom.x).toBeLessThan(top.x);
+  // Austritt nach oben: die Steighöhe wächst, der Antritt bleibt.
+  await dragGrip(page, top, -30);
+  const s1 = await stair();
+  expect(s1.totalRise).toBeGreaterThan(s0.totalRise + 0.02);
+  expect(s1.baseOffset).toBe(s0.baseOffset);
   await undo(page);
   await expect.poll(async () => (await stair()).totalRise).toBe(s0.totalRise);
+
+  // Antritt nach oben: Versatz über der Geschoss-Basis, der Austritt bleibt stehen.
+  await select(page, { stairs: ["tr-kern"] });
+  await expect(page.locator(".plan-grip")).toHaveCount(2);
+  const [bottom2] = await gripCentres(page);
+  await dragGrip(page, bottom2, -30);
+  const s2 = await stair();
+  expect(s2.baseOffset).toBeGreaterThan(s0.baseOffset + 0.02);
+  expect(s2.totalRise).toBe(s0.totalRise);
+  await undo(page);
+  await expect.poll(async () => (await stair()).baseOffset).toBe(s0.baseOffset);
 });
 
 test("Schnitt A-A: Sohle der Baugrube ziehen", async ({ page }) => {

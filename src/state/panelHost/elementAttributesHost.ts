@@ -212,6 +212,9 @@ export function buildElementAttributesHost(c: FlatHostOpts) {
       if (selection?.kind === "stair" && totalRise > 0)
         updateStair(selection.id, { totalRise });
     },
+    onSetStairBaseOffset: (baseOffset) => {
+      if (selection?.kind === "stair" && Number.isFinite(baseOffset)) updateStair(selection.id, { baseOffset });
+    },
     onSetStairUp: (up) => {
       if (selection?.kind === "stair") updateStair(selection.id, { up });
     },

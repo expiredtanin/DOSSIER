@@ -268,8 +268,10 @@ export interface StairInfo {
   width: number;
   /** Stufenanzahl (Setzstufen). */
   stepCount: number;
-  /** Gesamt-Steighöhe (Meter, OKFF → OKFF). */
+  /** Austrittshöhe ab Geschoss-Basis (Meter; ohne Antrittsversatz die Gesamt-Steighöhe OKFF → OKFF). */
   totalRise: number;
+  /** [187] Antritt über (negativ: unter) der Geschoss-Basis (Meter); die Steigung ist totalRise − baseOffset. */
+  baseOffset: number;
   /** Abgeleitete Steigungshöhe (Meter) = totalRise / stepCount. */
   riserHeight: number;
   /** Abgeleitete Auftrittstiefe (Meter). */

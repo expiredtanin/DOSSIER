@@ -73,7 +73,7 @@ export function useGripInputs(opts: {
     if (!plane) return null;
     const u = sectionUAxisModel(plane);
     const len = Math.hypot(u.x, u.y) || 1;
-    return { levelId: activeLevel.id, uAxis: { x: u.x / len, y: u.y / len } };
+    return { levelId: activeLevel.id, uAxis: { x: u.x / len, y: u.y / len }, base: { x: plane.point[0], y: plane.point[2] } };
   }, [activeLevel]);
 
   // Snap ohne Entwurfspunkte (Griff-Ziehen, s. useGripEditing).
