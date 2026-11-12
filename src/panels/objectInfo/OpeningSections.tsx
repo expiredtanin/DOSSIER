@@ -10,7 +10,17 @@ import type { DetailLevel } from "../../model/viewTypes";
 import { formatM } from "../../model/types";
 import { surfaceOpeningInfo } from "../../core";
 import { ColorHexField } from "../../ui/ColorHexField";
-import { DimensionField } from "./fields";
+import { selectionOpeningValues } from "../../state/mixedValues";
+import { DimensionField, MixedMark } from "./fields";
+import { useMulti } from "./useMulti";
+import { expandAndFocusInfoGroup } from "./infoGroupState";
+import { setSettingsArea } from "../objectSettings/areaState";
+
+/** ⚙: den Abschnitt „Fenster-/Türeditor" im Bereich „Objekt" aufklappen und fokussieren. */
+function openEditor(): void {
+  setSettingsArea("object");
+  expandAndFocusInfoGroup("openingEditor");
+}
 
 // Anzeige-Fallbacks für die Öffnungs-Linien-Übersteuerung (LineStyleRow) —
 // dieselben Werte wie POCHE_STROKE/SYMBOL_HAIRLINE_MM im Grundriss (Kern: plan/style.rs)
@@ -31,6 +41,8 @@ export function OpeningSection({
   host: ReturnType<typeof usePanelHost>;
 }) {
   const storeProject = useStore((st) => st.project);
+  // [195b] Mehrfachauswahl: abweichende Werte als „gemischt" kennzeichnen.
+  const multi = useMulti("openings", selectionOpeningValues);
   const isDoor = opening.kind === "door";
   if (opening.hostRoofId || opening.hostCeilingId) {
     return <SurfaceOpeningSection opening={opening} host={host} />;
@@ -57,12 +69,13 @@ export function OpeningSection({
           title={t("objinfo.opening.type")}
           width={106}
         />
+        <MixedMark on={multi?.typeId.mixed} what="openingType" />
         <button
           type="button"
           className="objinfo-typebtn"
           title={t("objinfo.opening.editType")}
           aria-label={t("objinfo.opening.editType")}
-          onClick={() => host.onOpenOpeningEditor(opening.id)}
+          onClick={openEditor}
         >
           ⚙
         </button>
@@ -103,11 +116,13 @@ export function OpeningSection({
         value={opening.width}
         onCommit={(v) => host.onSetOpeningWidth(v)}
       />
+      <MixedMark on={multi?.width.mixed} what="width" />
       <DimensionField
         label={t("objinfo.opening.height")}
         value={opening.height}
         onCommit={(v) => host.onSetOpeningHeight(v)}
       />
+      <MixedMark on={multi?.height.mixed} what="height" />
       {!isDoor && (
         <>
           <DimensionField
@@ -115,6 +130,7 @@ export function OpeningSection({
             value={opening.sillHeight}
             onCommit={(v) => host.onSetOpeningSill(v)}
           />
+          <MixedMark on={multi?.sillHeight.mixed} what="sill" />
           {/* Fenster-spezifisch: Flügelanzahl (1–4). */}
           <DimensionField
             label={t("objinfo.opening.wingCount")}
@@ -342,7 +358,7 @@ function SurfaceOpeningSection({
           className="objinfo-typebtn"
           title={t("objinfo.opening.editType")}
           aria-label={t("objinfo.opening.editType")}
-          onClick={() => host.onOpenOpeningEditor(opening.id)}
+          onClick={openEditor}
         >
           ⚙
         </button>

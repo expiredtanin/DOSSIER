@@ -15,6 +15,7 @@ export type InfoGroupId =
   | "roof"
   | "surfacePattern"
   | "opening"
+  | "openingEditor"
   | "stair"
   | "room"
   | "extrudedSolid"
@@ -32,6 +33,7 @@ export const INFO_GROUP_TITLE: Record<InfoGroupId, TranslationKey> = {
   roof: "objinfo.roof.section",
   surfacePattern: "objinfo.surfacePattern",
   opening: "objinfo.opening.section",
+  openingEditor: "objinfo.openingEditor.section",
   stair: "objinfo.stair.section",
   room: "objinfo.room.section",
   extrudedSolid: "objinfo.extrudedSolid.section",
@@ -65,7 +67,7 @@ export function infoGroups(c: InfoGroupContext): InfoGroupId[] {
   if (sel.ceiling) out.push("ceiling");
   if (sel.roof) out.push("roof");
   if (sel.wall || sel.roof) out.push("surfacePattern");
-  if (sel.opening) out.push("opening");
+  if (sel.opening) out.push("opening", "openingEditor");
   if (sel.stair) out.push("stair");
   if (sel.room) out.push("room");
   if (sel.extrudedSolid) out.push("extrudedSolid");

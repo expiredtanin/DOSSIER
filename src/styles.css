@@ -5800,7 +5800,7 @@ body {
   border-color: var(--ctx-danger);
 }
 
-/* ── Fenster-/Tür-Einstellungsdialog (OpeningEditorDialog) ──────────────────
+/* ── Fenster-/Tür-Einstellungsdialog (OpeningEditor, Abschnitt der Objekt-Info) ──────────────────
    Drei Zonen (Sidebar · Panel · Ansicht) unter einer Stil-Leiste. Nutzt sonst
    die imp-*-Klassen (Overlay/Head/Foot). */
 .oed-dialog {
@@ -5813,6 +5813,30 @@ body {
   border-radius: 10px;
   box-shadow: var(--shadow-3);
   overflow: hidden;
+}
+/* Eingebettet im Objekteinstellungs-Fenster: schmal, Sidebar als Reihe über dem Parameter-Panel. */
+.oed-dialog.oed-embedded {
+  width: auto;
+  max-height: none;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+}
+.oed-embedded .oed-main {
+  grid-template-columns: 1fr;
+  min-height: 0;
+  overflow: visible;
+}
+.oed-embedded .oed-sidebar {
+  flex-direction: row;
+  flex-wrap: wrap;
+  width: auto;
+  border-right: 0;
+}
+.oed-embedded .oed-stylebar {
+  padding: 6px 0;
+  flex-wrap: wrap;
 }
 .oed-stylebar {
   display: flex;

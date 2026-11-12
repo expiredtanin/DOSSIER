@@ -498,12 +498,11 @@ export interface PanelHostValue {
    * (Discoverability: von der gewählten Öffnung in den Typeditor springen).
    */
   onEditOpeningType: (kind: "door" | "window") => void;
-  /**
-   * Öffnet den reichen Fenster-/Tür-Einstellungsdialog für DIESE Öffnung
-   * (Kategorie-Sidebar, Live-2D-Vorschau, Flügeleinteilung, „Als Stil speichern").
-   * Ist der Primärort für Öffnungs-Parameter; das ⚙ der OpeningSection ruft ihn.
-   */
-  onOpenOpeningEditor: (openingId: string) => void;
+  /** Fenster-/Türeditor ([195b], Abschnitt der Objekt-Info): Typ-Felder des Stils ändern (wirkt auf alle Öffnungen des Stils). */
+  onPatchWindowType: (typeId: string, patch: Partial<import("../model/types").WindowType>) => void;
+  onPatchDoorType: (typeId: string, patch: Partial<import("../model/types").DoorType>) => void;
+  /** „Als Stil speichern": Stil der Öffnung als neuen benannten Stil ablegen und zuweisen. */
+  onSaveOpeningStyle: (openingId: string, name: string) => void;
   /**
    * Immutable Änderung von Dach-Attributen (Form/Neigung/Überstand/Firstrichtung/
    * Dicke) — wirkt NUR auf das selektierte Dach.

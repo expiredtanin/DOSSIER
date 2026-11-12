@@ -623,9 +623,10 @@ export const de = {
   "objinfo.ceiling.anchorCustom": "Eigene",
   // ── Öffnungs-Attribute (Object-Info-Panel) ──────────────────────────────
   "objinfo.opening.section": "Öffnung",
+  "objinfo.openingEditor.section": "Fenster-/Türeditor",
   "objinfo.opening.type": "Typ",
   "objinfo.opening.editType": "Einstellungen …",
-  // Fenster-/Tür-Einstellungsdialog (OpeningEditorDialog).
+  // Fenster-/Tür-Einstellungsdialog (OpeningEditor).
   "oed.title.window": "Fenster-Einstellungen",
   "oed.title.door": "Tür-Einstellungen",
   "oed.style": "Stil",

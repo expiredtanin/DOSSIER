@@ -73,3 +73,91 @@ export function selectionWallValues(project: Project, sel: Selection): Selection
   }
   return { wallTypeId: commonValue(types), thickness: commonValue(thick) };
 }
+
+/** Schlüssel einer Höhenangabe (Anker + aufgelöstes Z), damit gleiche Lagen als gleich gelten. */
+function heightKey(anchor: unknown, z: number): string {
+  return `${JSON.stringify(anchor ?? null)}|${Math.round(z * 1e6)}`;
+}
+
+/** [195b] Unter-/Oberkante der gewählten Wände. */
+export interface SelectionHeights {
+  bottom: Common<string>;
+  top: Common<string>;
+}
+
+/** Wandtyp/Dicke und Höhen: eine Abfrage je Wand. */
+export function selectionWallHeights(project: Project, sel: Selection): SelectionHeights {
+  const b: string[] = [];
+  const t: string[] = [];
+  for (const id of sel.walls.slice(0, MAX_COMPARED)) {
+    const w = deriveSelection(project, { walls: [id] })?.wall;
+    if (!w) continue;
+    b.push(heightKey(w.bottom, w.zBottom));
+    t.push(heightKey(w.top, w.zTop));
+  }
+  return { bottom: commonValue(b), top: commonValue(t) };
+}
+
+/** [195b] Typ, Dicke und Höhen der gewählten Decken. */
+export interface SelectionCeilingValues extends SelectionHeights {
+  typeId: Common<string>;
+  thickness: Common<number>;
+}
+
+export function selectionCeilingValues(project: Project, sel: Selection): SelectionCeilingValues {
+  const types: string[] = [];
+  const thick: number[] = [];
+  const b: string[] = [];
+  const t: string[] = [];
+  for (const id of sel.ceilings.slice(0, MAX_COMPARED)) {
+    const c = deriveSelection(project, { ceilings: [id] })?.ceiling;
+    if (!c) continue;
+    types.push(c.typeId);
+    thick.push(c.thickness);
+    b.push(heightKey(c.bottom, c.zBottom));
+    t.push(heightKey(c.top, c.zTop));
+  }
+  return { typeId: commonValue(types), thickness: commonValue(thick), bottom: commonValue(b), top: commonValue(t) };
+}
+
+/** [195b] Typ und Neigung der gewählten Dächer. */
+export interface SelectionRoofValues {
+  roofTypeId: Common<string>;
+  pitchDeg: Common<number>;
+}
+
+export function selectionRoofValues(project: Project, sel: Selection): SelectionRoofValues {
+  const types: string[] = [];
+  const pitch: number[] = [];
+  for (const id of sel.roofs.slice(0, MAX_COMPARED)) {
+    const r = deriveSelection(project, { roofs: [id] })?.roof;
+    if (!r) continue;
+    types.push(r.roofTypeId ?? "");
+    pitch.push(r.pitchDeg);
+  }
+  return { roofTypeId: commonValue(types), pitchDeg: commonValue(pitch) };
+}
+
+/** [195b] Breite, Höhe, Brüstung und Typ der gewählten Öffnungen. */
+export interface SelectionOpeningValues {
+  width: Common<number>;
+  height: Common<number>;
+  sillHeight: Common<number>;
+  typeId: Common<string>;
+}
+
+export function selectionOpeningValues(project: Project, sel: Selection): SelectionOpeningValues {
+  const w: number[] = [];
+  const h: number[] = [];
+  const s: number[] = [];
+  const ty: string[] = [];
+  for (const id of sel.openings.slice(0, MAX_COMPARED)) {
+    const o = deriveSelection(project, { openings: [id] })?.opening;
+    if (!o) continue;
+    w.push(o.width);
+    h.push(o.height);
+    s.push(o.sillHeight);
+    ty.push(o.typeId ?? "");
+  }
+  return { width: commonValue(w), height: commonValue(h), sillHeight: commonValue(s), typeId: commonValue(ty) };
+}

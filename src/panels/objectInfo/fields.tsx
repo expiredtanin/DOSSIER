@@ -8,6 +8,11 @@ import type { VerticalAnchor } from "../../model/types";
 import { Dropdown } from "../../ui/Dropdown";
 import { useState, useRef } from "react";
 
+/** [195b] Kennzeichnung „gemischt": Die gewählten Elemente haben für dieses Feld verschiedene Werte. */
+export function MixedMark({ on, what }: { on: boolean | undefined; what: string }) {
+  return on ? <span className="attr-mixed" data-mixed={what}>{t("objsettings.mixed")}</span> : null;
+}
+
 // ── Decken-Attribut-Abschnitt ────────────────────────────────────────────────
 // Aufbau-Typ (einschichtig/mehrschichtig), Dicke/Preset, Referenzgeschoss +
 // OK-Bindung, Fläche. Alle Werte/Setter über den Host.

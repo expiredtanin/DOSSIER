@@ -1281,7 +1281,7 @@ export function createProjectSlice(
         op: "wallThickness",
         id: wallId,
         thickness,
-        newId: `wt-${Date.now()}`,
+        newId: uniqueId("wt"),
         newName: t("default.wallTypeSingle", { thickness: thickness.toFixed(2) }),
       }),
 
@@ -1337,7 +1337,7 @@ export function createProjectSlice(
         op: "ceilingThickness",
         id: ceilingId,
         thickness,
-        newId: `ct-${Date.now()}`,
+        newId: uniqueId("ct"),
         newName: t("default.ceilingTypeSingle", { thickness: thickness.toFixed(2) }),
       }),
 
@@ -1350,7 +1350,7 @@ export function createProjectSlice(
         b: from, // Griffhöhe vor dem Zug: Dach, Treppe, Gelände zählen den Zug relativ
         index, // Höhenlinie `contourLine`
         free: !!free,
-        newId: `ct-${Date.now()}`,
+        newId: uniqueId("ct"),
         newName: t("default.ceilingTypeSingle", { thickness: "{t}" }), // {t} setzt der Kern ein
       }),
 

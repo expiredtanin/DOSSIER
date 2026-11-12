@@ -1,7 +1,7 @@
 // Frontal-Ansicht (Elevation, SVG) eines Fensters/einer Tür: Rahmen, Flügel/
 // Pfosten (mit Öffnungslinien je Flügel), Verglasungshinweis und Rollladen-
 // kasten. Rein aus den Modellwerten gezeichnet — kein Renderer-Roundtrip,
-// deterministisch. Ursprünglich Teil von {@link OpeningEditorDialog} (dort
+// deterministisch. Ursprünglich Teil von `OpeningEditor` (dort
 // mit einer echten Öffnungs-Instanz gefüttert); hierher extrahiert, damit
 // auch die Typ-Bibliothek (ResourceManager, ohne konkrete Instanz — s.
 // `WindowStylesTab`/`DoorStylesTab`) dieselbe Vorschau zeigen kann. Braucht
