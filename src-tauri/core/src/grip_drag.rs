@@ -15,6 +15,7 @@
 //!
 //! Zahlen wie in JS (`jsnum`: min/max/round, Trigonometrie über libm); NaN steht für „fehlt".
 
+use crate::jsnum::ClampSafe;
 use crate::jsmath::hypot2;
 use crate::jsnum;
 use std::f64::consts::PI;
@@ -351,7 +352,7 @@ fn arc_slide_sheet(a: &crate::wall_arc::WallArc, u: P, position: f64, width: f64
         let q = a.point(p + width / 2.0, 0.0);
         q.x * u.0 + q.y * u.1
     };
-    let p0 = position.clamp(0.0, hi);
+    let p0 = position.clamp_safe(0.0, hi);
     if du == 0.0 {
         return Some((p0, 0.0));
     }

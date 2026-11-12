@@ -3,6 +3,7 @@
 //! Symbole der Schnitt-/Ansichtsebenen — Rust-Gegenstück zu `generatePlan/{context,sections}.ts`.
 //! Die Geometrie liegt in `plan_misc.rs`; die Meshes werden direkt aus dem Dokument gelesen.
 
+use crate::jsnum::ClampSafe;
 use super::domains::Ctx;
 use super::overrides::{js_space, js_trim};
 use super::prim::Primitive;
@@ -410,7 +411,7 @@ impl Iso {
     /// Punkt bei Bogenlänge `s` (geschlossen: modulo Länge).
     fn at(&self, s: f64) -> [f64; 2] {
         let l = self.len();
-        let s = if self.closed && l > 0.0 { s.rem_euclid(l) } else { s.clamp(0.0, l) };
+        let s = if self.closed && l > 0.0 { s.rem_euclid(l) } else { s.clamp_safe(0.0, l) };
         let i = self.cum.partition_point(|c| *c <= s).clamp(1, self.pts.len() - 1);
         let (a, b) = (self.pts[i - 1], self.pts[i]);
         let d = self.cum[i] - self.cum[i - 1];

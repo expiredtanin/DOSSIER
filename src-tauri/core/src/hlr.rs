@@ -30,6 +30,7 @@
 //!
 //! Die sichtbaren Teilflächen (Füllungen konsistent zu den Kanten) rechnet `hlr_fill.rs`.
 
+use crate::jsnum::ClampSafe;
 use std::collections::HashMap;
 use std::hash::{BuildHasherDefault, Hasher};
 
@@ -318,7 +319,7 @@ fn feature_edges(faces: &[Face], prep: &[Option<Prep>], covered: &[bool], opts: 
         ends.push(if i > 0 && entries[i - 1].0 == x.0 { ends[i - 1].max(end) } else { end });
     }
     let diag = if count > 0 { norm(sub(hi, lo)).max(tol) } else { 1.0 };
-    let h = if count > 0 { (total / count as f64).clamp(diag / 512.0, diag / 2.0).max(tol * 16.0) } else { 1.0 };
+    let h = if count > 0 { (total / count as f64).clamp_safe(diag / 512.0, diag / 2.0).max(tol * 16.0) } else { 1.0 };
     let cell = |x: f64, k: usize| ((x - lo[k]) / h).floor() as i64;
     let range = |e: &Edge, k: usize| (cell(e.a[k].min(e.b[k]) - tol, k), cell(e.a[k].max(e.b[k]) + tol, k));
     let mut grid: FxMap<(i64, i64, i64), Vec<u32>> = FxMap::default();
@@ -590,7 +591,7 @@ impl OccGrid {
         if c.is_nan() {
             0
         } else {
-            c.clamp(0.0, (self.n[k] - 1) as f64) as usize
+            c.clamp_safe(0.0, (self.n[k] - 1) as f64) as usize
         }
     }
 }
