@@ -3,7 +3,8 @@
 // Handler wirkt nur bei passender Auswahl (`selection.kind`) und schreibt über die Projekt-Aktionen
 // bzw. `applyChange`.
 
-import { patchItem, removeRoofHole, setRoofEdge } from "../../core";
+import { patchItem, patchItems, removeRoofHole, setRoofEdge } from "../../core";
+import { getState } from "../appStore";
 import type { FlatHostOpts, HostPart } from "./types";
 
 export function buildElementAttributesHost(c: FlatHostOpts) {
@@ -46,8 +47,11 @@ export function buildElementAttributesHost(c: FlatHostOpts) {
       if (selection?.kind === "ceiling") updateCeiling(selection.id, { edgeAtOutline: edgeAtOutline || undefined });
     },
     onSetWallType: (wallTypeId) => {
-      if (selection?.kind === "wall")
-        updateWall(selection.id, { wallTypeId });
+      if (selection?.kind !== "wall") return;
+      // [195b] Mehrfachauswahl: alle gewählten Wände bekommen den Typ (ein Undo-Schritt).
+      const ids = getState().selection.walls;
+      if (ids.length > 1) applyChange((p) => patchItems(p, "walls", ids, (w) => ({ ...w, wallTypeId })));
+      else updateWall(selection.id, { wallTypeId });
     },
     onSetWallThickness: (thickness) => {
       if (selection?.kind === "wall")

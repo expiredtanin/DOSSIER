@@ -614,18 +614,22 @@ export function AttributesPanel() {
               fillEditable,
               hatchUi,
               onHatchSourceChange,
-              <Dropdown
-                value={hatchPatternIsNone ? "" : sel.effectiveHatchId ?? ""}
-                disabled={!fillEditable}
-                onChange={(v) => host.onSetSelectionFill(v || null)}
-                options={[
-                  { value: "", label: t("attr.hatch.none") },
-                  // Die Ressource „Ohne" (Muster none) wäre dasselbe wie „Keine Schraffur".
-                  ...project.hatches
-                    .filter((h) => h.pattern !== "none")
-                    .map((h) => ({ value: h.id, label: h.name })),
-                ]}
-              />,
+              <>
+                <Dropdown
+                  value={hatchPatternIsNone ? "" : sel.effectiveHatchId ?? ""}
+                  disabled={!fillEditable}
+                  onChange={(v) => host.onSetSelectionFill(v || null)}
+                  options={[
+                    { value: "", label: t("attr.hatch.none") },
+                    // Die Ressource „Ohne" (Muster none) wäre dasselbe wie „Keine Schraffur".
+                    ...project.hatches
+                      .filter((h) => h.pattern !== "none")
+                      .map((h) => ({ value: h.id, label: h.name })),
+                  ]}
+                />
+                {/* [195b] Mehrfachauswahl mit abweichender Schraffur. */}
+                {appearance.hatch.mixed && <span className="attr-mixed" data-mixed="hatch">{t("objsettings.mixed")}</span>}
+              </>,
             )}
 
             {/* Transparenz NUR der Füllung/Schraffurfläche (Umriss bleibt deckend);

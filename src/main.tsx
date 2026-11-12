@@ -8,6 +8,7 @@ import { SettingsWindowApp } from "./native/SettingsWindowApp";
 import { DrawingLevelsWindowApp } from "./native/DrawingLevelsWindowApp";
 import { LayerSettingsWindowApp } from "./native/LayerSettingsWindowApp";
 import { ContextImportWindowApp } from "./native/ContextImportWindowApp";
+import { ObjectSettingsWindowApp } from "./native/ObjectSettingsWindowApp";
 import { ErrorBoundary } from "./ui/ErrorBoundary";
 import { initCore } from "./core";
 import { getLanguage, setLanguage } from "./i18n";
@@ -80,6 +81,7 @@ function RootByWindowKind() {
   if (windowKind === "drawing-levels") return <DrawingLevelsWindowApp />;
   if (windowKind === "layer-settings") return <LayerSettingsWindowApp />;
   if (windowKind === "context-import") return <ContextImportWindowApp />;
+  if (windowKind === "object-settings") return <ObjectSettingsWindowApp />;
   return <App />;
 }
 

@@ -28,6 +28,8 @@ export interface SelectionAppearance {
   count: number;
   weightMm: Common<number>;
   color: Common<string>;
+  /** [195b] Wirksame Schraffur (Ressourcen-id, "" = keine). */
+  hatch: Common<string>;
 }
 
 /** Zahl der gewählten Elemente (ohne Gruppen, Schnittlinien, Lage-Darstellung, Bäume). */
@@ -39,6 +41,7 @@ export function selectedCount(sel: Selection): number {
 export function selectionAppearance(project: Project, sel: Selection): SelectionAppearance {
   const weights: number[] = [];
   const colors: string[] = [];
+  const hatches: string[] = [];
   let n = 0;
   for (const kind of STYLE_KINDS) {
     for (const id of sel[kind]) {
@@ -47,7 +50,26 @@ export function selectionAppearance(project: Project, sel: Selection): Selection
       if (!info) continue;
       weights.push(info.weightMm);
       colors.push(info.color);
+      hatches.push(info.effectiveHatchId ?? "");
     }
   }
-  return { count: selectedCount(sel), weightMm: commonValue(weights), color: commonValue(colors) };
+  return { count: selectedCount(sel), weightMm: commonValue(weights), color: commonValue(colors), hatch: commonValue(hatches) };
+}
+
+/** [195b] Wandtyp und Dicke über die gewählten Wände (Typ und Masse bei Mehrfachauswahl). */
+export interface SelectionWallValues {
+  wallTypeId: Common<string>;
+  thickness: Common<number>;
+}
+
+export function selectionWallValues(project: Project, sel: Selection): SelectionWallValues {
+  const types: string[] = [];
+  const thick: number[] = [];
+  for (const id of sel.walls.slice(0, MAX_COMPARED)) {
+    const wall = deriveSelection(project, { walls: [id] })?.wall;
+    if (!wall) continue;
+    types.push(wall.wallTypeId);
+    thick.push(wall.thickness);
+  }
+  return { wallTypeId: commonValue(types), thickness: commonValue(thick) };
 }

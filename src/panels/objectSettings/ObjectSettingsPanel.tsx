@@ -20,7 +20,7 @@ export function ObjectSettingsPanel() {
   const sel = useSelectionInfo();
   const otherSelected = useStore((s) => s.selection.trees.length + s.selection.site.length > 0);
   const isGrid = useStore((s) => (sel?.kind === "drawing2d" ? s.project.drawings2d.find((d) => d.id === sel.id)?.geom.shape === "grid" : false));
-  const wanted = useSyncExternalStore(subscribeSettingsArea, getSettingsArea);
+  const wanted = useSyncExternalStore(subscribeSettingsArea, getSettingsArea, getSettingsArea);
 
   const areas = settingsAreas({
     sel,

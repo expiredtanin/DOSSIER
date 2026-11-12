@@ -63,6 +63,7 @@ const store = createStore<RootState>((api) => ({
 export const useStore = store.useStore;
 export const getState = store.getState;
 export const setState = store.setState;
+export const subscribe = store.subscribe;
 
 
 // Aktive Ebene nach Projektänderungen absichern: Undo/Redo (oder jede andere Änderung) kann die
