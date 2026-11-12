@@ -10,7 +10,7 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   stehen im Archiv („Bewusst nicht übernommen“).
 - **Grösse** (eine Person mit Agenten): S ≤ 1 Tag · M ≤ 1 Woche · L ≤ 1 Monat · XL > 1 Monat.
   Steht keine Grösse im Archiv, ist sie hier geschätzt.
-- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 202);
+- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 210);
   nie eine ID wiederverwenden oder umnummerieren. Präfix-IDs (`[K]`, `[G]`, `[T]`, `[B]`, `[C]`) bleiben.
 - **Pro Punkt:** was fehlt · wo im Code · Grösse. Höchstens ein bis drei Sätze je Punkt;
   Messwerte und Befunde gehören in den Commit.
@@ -39,6 +39,55 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   Bauteile-Erkennung aus 2D-Linien; `dossier-cli` (Plan, Schnitt, Ansicht, Kennzahlen, IFC, MCP).
 - **Plattform:** Tauri/macOS (Hauptplattform), Electron/Linux, Browser-Build; Autosave mit Wiederherstellen,
   atomares Speichern, Tests (Rust, vitest, Golden-Ausgaben, e2e).
+
+---
+
+## Release 1.0 — Wettbewerb & Vorprojekt (Ziel 12.12.2026)
+
+Fokus der nächsten vier Wochen (Entscheid Maintainer 12.11.): eine erste Version, mit der man einen Wettbewerb (WBW) und
+ein Vorprojekt (SIA 31) durchgehend auf dem Mac bearbeiten und abgeben kann. Alles andere wartet. Neue Aufgaben nur, wenn
+sie einen Schritt dieses Ablaufs blockieren. **Abnahme:** der Maintainer spielt den Referenz-Ablauf ([206]) auf dem Mac
+von leerem Projekt bis zur Abgabe ohne Absturz, Datenverlust oder Umweg durch.
+
+**Referenz-Ablauf WBW/Vorprojekt:** Grundstück/Kontext laden (swisstopo, Kataster) → Baurecht/Hülle → Volumenstudie →
+Raumprogramm gegen Modell → Grundrisse/Schnitte/Ansichten 1:200 (Vorprojekt 1:100) → Situation 1:500 mit Schwarzplan →
+3D-Bilder/Axonometrie/Schatten → Flächen/Volumen SIA 416 und Kennzahlen → Kostenschätzung grob → Abgabe-Layouts (Plakate A0/A1,
+Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
+
+### Phase 1 (13.–19.11.): Stabil und baubar
+- ○ **[206]** Referenz-Ablauf als e2e-Spec (Browser) und als Checkliste für die Mac-Abnahme (`doc/RELEASE-1.0.md`): jeder Schritt
+  oben ein Test; was fehlt, wird hier als Aufgabe eingetragen. · M
+- [30] Release-Workflow lauffähig: macOS universal signiert/notarisiert, Updater, Versionsnummer 1.0.0-beta; [57]/[120] CI auf GitHub grün.
+- „Mac-Gegenprobe“ (Sammelpunkt unten) für alles im Referenz-Ablauf abarbeiten (Maintainer), Befunde sofort beheben;
+  [194] Texte synchron, [195b] Objektfenster, [190] Cmd+J auf dem Mac bestätigen.
+- Datensicherheit: Speichern/Autosave/Wiederherstellen auf dem Mac ([116]), Öffnen alter Beispielstände, kein Kern-Panic im Ablauf.
+
+### Phase 2 (20.–26.11.): Wettbewerb lückenlos
+- ○ **[207]** Schwarzplan / Situationsplan 1:500: Gebäude schwarz gefüllt, Nachbarbauten (Kataster/swisstopo) grau/schwarz,
+  Parzelle, Strassen, Nordpfeil, Massstabsbalken; als Ansichtsvorlage „Situation WBW“. · M
+- ○ **[208]** Wettbewerbs-Layouts: Plakat-Vorlagen A0/A1 hoch/quer mit Raster, Kennwort-Feld (Anonymität: kein Büroname,
+  Metadaten im PDF leer), Planköpfe; Publikationssatz „WBW-Abgabe“ → PDF. · M
+- [61] Raumprogramm gegen Modell und Flächennachweis SIA 416 als Tabelle/Layout-Element ([70]); Kennzahlen (GF, GV, HNF/GF, Fassadenanteil).
+- 3D-Bilder für die Abgabe: hochaufgelöster PNG-Export (Perspektive, Axonometrie, Schatten), Sonnenstand; [205] Pausfolie.
+- [199]/[204] Plan- und App-Review-Reste im Darstellungsbereich 1:500/1:200 schliessen.
+
+### Phase 3 (27.11.–3.12.): Vorprojekt
+- ○ **[209]** Kostenschätzung grob (Vorprojekt ±15–25 %): Kennwerte je m³ GV (SIA 416) bzw. je m² GF und eBKP-H-Hauptgruppen,
+  Kennwert-Tabelle im Projekt editierbar, Ergebnis als Tabelle/Layout-Element und CSV. · M
+- 1:100-Pläne in Abgabequalität (Bemassung, Koten, Raumstempel, Öffnungen nach Detailgrad) — Plan-Review-Runde 4 nach [199].
+- Fachplaner-Austausch: DXF/DWG je Geschoss/Schnitt/Ansicht ([200]), IFC mit Räumen/Psets ([201]); Rundreise in Archicad/Revit einmal
+  real prüfen ([C9]).
+- Baurecht-Hülle/Ausnützung (AZ/ÜZ) gegen Modell als Nachweis-Tabelle.
+
+### Phase 4 (4.–12.12.): Härten und veröffentlichen
+- Nur noch Fehler aus dem Referenz-Ablauf; Leistung mit grossen Kontext-Importen; keine neuen Funktionen.
+- ○ **[210]** Kurzanleitung „Erster Wettbewerb mit Dossier“ (deutsch, Bilder) + Beispielprojekt „Wettbewerb“ als Vorlage
+  (`src/model/sample*`), Tastaturkürzel-Übersicht im Hilfemenü. · M
+- Release 1.0.0: Tag, signierte Pakete, Release-Notes (ehrlich: was nicht geht), Download-Seite.
+
+### Nicht in 1.0 (bewusst später)
+Ausführungsplanung 1:50/1:20-Details, [42] Varianten, [11] Bibliothek per GUID, [88] Web-Link, [G7] Booleans-Ausbau,
+Punktwolken/BCF-Ausbau, Windows-Paket, [C5]/[C7]/[15] Kern-Umbauten — ausser sie blockieren den Referenz-Ablauf.
 
 ---
 

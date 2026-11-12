@@ -9,6 +9,7 @@ Wer Dateien verschiebt oder umbenennt, führt diese Doku im selben Commit nach.
 
 ## Arbeitsablauf (jeder Agent, jede Aufgabe)
 
+0. **Fokus bis 12.12.2026:** Release 1.0 „Wettbewerb & Vorprojekt“ — Abschnitt zuoberst in `TODO.md`. Neue Arbeit nur, wenn sie den Referenz-Ablauf dort voranbringt.
 1. **Lesen:** `TODO.md` (Arbeitsliste mit stabilen IDs wie `[63]`, Stand ◐ ○, Erledigtes als Liste am Ende; Historie mit allen Details: `doc/archiv/TODO-bis-2026-11-08.md`), dann diese Datei.
 2. **Test zuerst**, dann Code. Rust: `cargo test` im Crate; TS: vitest neben der Datei (`*.test.ts`).
 3. **Neuer Kern-Code in Rust** (s. „Rust-Kern"). Wer eine TS-Kernfunktion ersetzt, löscht die TS-Fassung
