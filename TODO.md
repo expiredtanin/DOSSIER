@@ -10,7 +10,7 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   stehen im Archiv („Bewusst nicht übernommen“).
 - **Grösse** (eine Person mit Agenten): S ≤ 1 Tag · M ≤ 1 Woche · L ≤ 1 Monat · XL > 1 Monat.
   Steht keine Grösse im Archiv, ist sie hier geschätzt.
-- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 216);
+- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 218);
   nie eine ID wiederverwenden oder umnummerieren. Präfix-IDs (`[K]`, `[G]`, `[T]`, `[B]`, `[C]`) bleiben.
 - **Pro Punkt:** was fehlt · wo im Code · Grösse. Höchstens ein bis drei Sätze je Punkt;
   Messwerte und Befunde gehören in den Commit.
@@ -63,6 +63,12 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
 - Datensicherheit: Speichern/Autosave/Wiederherstellen auf dem Mac ([116]), Öffnen alter Beispielstände, kein Kern-Panic im Ablauf.
 
 ### Phase 2 (20.–26.11.): Wettbewerb lückenlos
+- ○ **[218]** Raumstempel bearbeiten (12.11., Maintainer, PRIO): (1) kein Fenster im Fenster mehr — der Stempel-Editor
+  (`src/ui/RoomStampEditorHost.tsx`, `panels/RoomStampEditor.tsx`, Doppelklick auf Stempel) wird Bereich „Raumstempel“ im eigenen
+  Objekteinstellungsfenster ([195b], macOS-Nebenfenster; Browser: schwebendes Panel); (2) Schrift je Stempel bzw. je Zeile wählbar:
+  Schriftart, Grösse (pt/mm), fett/kursiv, Farbe — im Rust-Modell `RoomStamp` (Vorgabe aus der Modelldarstellung/Ansichtsvorlage,
+  Mehrfachauswahl „gemischt“); (3) Bezugspunkt/Platzierung und „Masse“ (Breite/Höhe/Drehen) nur im Objekt-Info-Panel, nicht im
+  Objekteinstellungsfenster. · M
 - ○ **[216]** 3D-Darstellungsfehler (12.11., Screenshots Maintainer, Musterhaus komplex): (1) Rundfenster im Giebel: Wandloch
   quadratisch statt rund, Leibung mit Streifen; dazu ein senkrechtes Band im Giebel vom Fenster bis zur Decke; (2) Flächenmuster
   (Fassade, Dach) im 3D nicht auf die Fläche beschnitten — Linien ragen über Giebel/Ortgang hinaus in die Luft; (3) Rundbogen-Öffnung:
