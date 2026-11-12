@@ -369,10 +369,15 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   frei für JEDE Blase und mit einem Durchmesser Luft dahinter (`drawings::bubble_shift`); Verbauwand (Rühlwand) der UG-Grube lief
   im EG quer durch den Anbau „Eingang" über Wände, Boden und Raumstempel — endet jetzt am Fussabdruck wie Sohle/Böschung
   (`context::excavation_lines`); einfaches Musterhaus: Stempel „Wohnen" auf der Zwischenwand W9 und der Schnittlinie A (Anker
-  in den Daten, jetzt im Westteil). Offen (nach Schwere): (1) 1:200 Masszahlen der Aussenbemassung überdecken sich zwischen den
-  Ketten (komplex EG/OG Nord/Ost: „5.39" auf „1.10", „1.00"/„5.00") — die Ausweich-Zeile „eine Zeile höher" (`dim_auto_offsets`)
-  kennt die Nachbarkette nicht, Kettenabstand 0.7 m Modell = 3.5 mm Papier bei 2.5-mm-Schrift; Vorschlag Kettenabstand von
-  `autodim` in Papier-mm (massstabsabhängig) oder Ketten-übergreifendes Ausweichen. (2) Raumstempel schrumpft auf 2 mm, sobald
+  in den Daten, jetzt im Westteil). 12.11. behoben: (1) 1:200 Masszahlen der Aussenbemassung überdeckten sich zwischen den
+  Ketten (komplex EG/OG Nord/Ost: „5.39" auf „1.10", „1.00"/„5.00"; Kettenabstand 0.7 m Modell = 3.5 mm Papier) — beim Zeichnen
+  liegen die Ketten einer Seite jetzt mindestens 7 mm Papier (bzw. 2.8 Schrifthöhen) auseinander, die äusseren rücken hinaus
+  (`drawings::autodim_layout`, im Modell bleibt `offset`; 1:100/1:50 unverändert, Goldens gleich); ausweichende Zahlen stehen
+  nicht auf Hilfslinien äusserer Ketten und rücken notfalls hinter das nächste Hindernis statt eine Zeile höher
+  (`dim_auto_offsets_avoiding`); Ansichtsmarker rückt von der Bemassung weg (`context::view_marker`). Test
+  `plan/autodim_text_tests.rs` (Zahlen-Kästen beider Musterhäuser 1:200/100/50, Fixture `autodim_musterhaus_komplex.json`).
+  Offen dazu: Griffe (`grips.rs`) und DXF-Export kennen den Zeichen-Versatz nicht (wie schon die Böschungs-Verschiebung [157]).
+  Offen (nach Schwere): (2) Raumstempel schrumpft auf 2 mm, sobald
   Schnittlinie, Achse, gestrichelte Gaube und Kote den Raum queren (komplex DG „Schlafen" 1:100; Archicad legt ihn darüber) —
   dünne Strich-Punkt-/Projektionslinien als weiche Hindernisse? (3) Ansicht Ost: Gaubenwange der Flachdachgaube fehlt (Gaubendach
   „schwebt" über der Dachfläche). (4) Schnitt A einfaches Musterhaus: um die geschnittene Treppe ein U-förmiger Rahmen

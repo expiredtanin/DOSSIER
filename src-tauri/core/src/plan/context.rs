@@ -885,10 +885,26 @@ pub fn section_label_tag(name: &str) -> String {
 /// die Bezeichnung waagrecht dahinter (auf der dem Blick abgewandten Seite); Pick-Band über Dreieck und Text.
 #[allow(clippy::too_many_arguments)]
 fn view_marker(c: &Ctx, level: &DrawingLevel, p0: Vec2, p1: Vec2, sign: f64, k: f64, tag: &str, greyed: Option<bool>, obst: &mut super::stamp_place::Obstacles, out: &mut Vec<Primitive>) {
-    let _ = c;
     let h = SECTION_LABEL_MM * k;
     let w = crate::text_layout::text_width_em(tag, false) * h;
-    let f = crate::plan::misc::view_marker_sized(p0.x, p0.y, p1.x, p1.y, sign, k, w);
+    // [199] Steht der Marker auf der Bemassung (Massketten rücken bei 1:200 auf 7 mm Abstand hinaus), rückt er
+    // gegen die Blickrichtung weg vom Gebäude, in 1-mm-Schritten bis 40 mm Papier, bis er frei ist.
+    let len = (p1.x - p0.x).hypot(p1.y - p0.y);
+    let bn = if len > 1e-9 { v2(-(p1.y - p0.y) / len * sign, (p1.x - p0.x) / len * sign) } else { v2(0.0, 0.0) };
+    let at = |s: f64| crate::plan::misc::view_marker_sized(p0.x - bn.x * s, p0.y - bn.y * s, p1.x - bn.x * s, p1.y - bn.y * s, sign, k, w);
+    let band = |f: &[f64]| -> Option<Vec<[f64; 2]>> {
+        let mut i = 1;
+        for _ in 0..f.first().copied().unwrap_or(0.0) as usize {
+            match f.get(i).copied()? {
+                3.0 => i += 7,
+                5.0 => i += 3,
+                _ => return Some((0..4).map(|j| [f[i + 1 + 2 * j], f[i + 2 + 2 * j]]).collect()),
+            }
+        }
+        None
+    };
+    let dims = c.dims_obstacles();
+    let f = (0..=40).map(|s| at(s as f64 * k)).find(|f| band(f).is_none_or(|r| !dims.hits_convex(&r))).unwrap_or_else(|| at(0.0));
     if f.is_empty() {
         return;
     }
@@ -1212,6 +1228,34 @@ mod tests {
         // Text hinter der Basis (unterhalb der Linie), waagrecht um die Mitte, ohne das Dreieck zu überlappen.
         let w = crate::text_layout::text_width_em("Süd", false) * t.2;
         assert!(t.0.y + 0.75 * t.2 < -2.0 && ((t.0.x + w / 2.0) - 5.0).abs() < 1e-9, "{t:?}");
+    }
+
+    /// [199] Ansichtsmarker auf einer Masskette (bei 1:200 rücken die Ketten auf 7 mm Papierabstand hinaus): er rückt
+    /// gegen die Blickrichtung, bis Dreieck und Bezeichnung frei von der Bemassung sind; frei bleibt er, wo er ist.
+    #[test]
+    fn ansichtsmarker_weicht_der_bemassung_aus() {
+        let mk = |dim_y: f64| Project {
+            drawing_levels: vec![serde_json::from_value(serde_json::json!({ "id": "n", "name": "Ansicht Süd", "kind": "elevation", "visible": true, "locked": false,
+                "linePoints": [{ "x": 0.0, "y": -2.0 }, { "x": 10.0, "y": -2.0 }] })).unwrap()],
+            drawings2d: vec![serde_json::from_value(serde_json::json!({ "id": "m", "type": "drawing2d", "levelId": "eg", "categoryCode": "02",
+                "geom": { "shape": "dimension", "pts": [{ "x": 0.0, "y": 0.0 }, { "x": 4.0, "y": 0.0 }, { "x": 10.0, "y": 0.0 }], "offset": dim_y } })).unwrap()],
+            ..Default::default()
+        };
+        let a = super::super::domains::PlanArgs::parse(1.0, r#"{"floor": "eg", "show": ["02", "90"], "scale": 200}"#).unwrap();
+        let tri = |p: &Project| {
+            let mut out = Vec::new();
+            plan_section_lines(&Ctx::new(p, &a), &mut out);
+            out.iter().find_map(|q| match q { Primitive::Polygon { pts, fill, .. } if fill != "none" => Some(pts.clone()), _ => None }).unwrap()
+        };
+        // Frei (Kette weit weg): Spitze 3 mm · 200 = 0.6 m über der Linie.
+        assert!((tri(&mk(-8.0))[0].y - (-2.0 + 0.6)).abs() < 1e-9);
+        // Masslinie bei y = -1.8 (Überstand der Hilfslinien bis -2.0): Marker und Bezeichnung rücken darunter weg.
+        let p = mk(-1.8);
+        let t = tri(&p);
+        assert!(t[0].y <= -2.0 + 1e-9, "{t:?}");
+        let c = Ctx::new(&p, &a);
+        let ring: Vec<[f64; 2]> = t.iter().map(|q| [q.x, q.y]).collect();
+        assert!(!c.dims_obstacles().hits_convex(&ring), "{t:?}");
     }
 
     /// [176] Schnittmarke als L: Ebenenfeld `markerStyle` bzw. Vorgabe der Modelldarstellung (`sectionMarks.style`);

@@ -781,7 +781,9 @@ fn emit_inner(c: &Ctx, d: &Drawing2D, attrs: Attrs, geom: &Drawing2DGeom, greyed
         Drawing2DGeom::Dimension { pts, offset, gap_mm, overshoot_mm, tick_len_mm, text_height_mm, line_weight_mm, ext_weight_mm, tick_weight_mm, text_offsets_mm, refs, kind, arc_center } => {
             let mm = |x: f64| mm_to_model(x, scale);
             // [157] Aussenbemassung hinter der sichtbaren Böschung (nur beim Zeichnen).
-            let shifted = if arc_center.is_none() && kind.is_none() { *offset + autodim_shift(c, d, scale) } else { *offset };
+            // [199] Ketten einer Seite mindestens 7 mm Papier auseinander; Zahlen weichen den Hilfslinien äusserer Ketten aus.
+            let layout = if arc_center.is_none() && kind.is_none() { autodim_layout(c, d, scale) } else { AutodimLayout { shift: 0.0, blocked: Vec::new() } };
+            let shifted = *offset + layout.shift;
             let offset = &shifted;
             if let Some(k) = kind {
                 let st = DimStyle {
@@ -797,7 +799,7 @@ fn emit_inner(c: &Ctx, d: &Drawing2D, attrs: Attrs, geom: &Drawing2DGeom, greyed
                 };
                 dimension_round(&mut em, pts, *offset, *k, &st);
             }
-            let auto = if kind.is_none() && arc_center.is_none() { dim_auto_offsets(pts, mm(text_height_mm.unwrap_or(DIM_TEXT_HEIGHT_MM))) } else { Vec::new() };
+            let auto = if kind.is_none() && arc_center.is_none() { dim_auto_offsets_avoiding(pts, mm(text_height_mm.unwrap_or(DIM_TEXT_HEIGHT_MM)), &layout.blocked) } else { Vec::new() };
             for i in 0..(if kind.is_some() { 0 } else { pts.len().saturating_sub(1) }) {
                 let st = DimStyle {
                     gap: mm(gap_mm.unwrap_or(DIM_GAP_MM)),
@@ -1055,6 +1057,14 @@ pub fn dim_text_below(h: f64) -> f64 {
 /// rückt sie nach aussen (links vom Segment, rechts davon, bei mittleren Segmenten auf die Seite des längeren
 /// Nachbarn), auf die erste Seite ohne Überdeckung, notfalls eine Zeile höher. Für Plan und Griffe gleich.
 pub fn dim_auto_offsets(pts: &[Vec2], h: f64) -> Vec<(f64, f64)> {
+    dim_auto_offsets_avoiding(pts, h, &[])
+}
+
+/// Wie [`dim_auto_offsets`]; dazu stehen ausweichende Zahlen nicht auf den Stellen `blocked` (entlang der Kette ab
+/// dem ersten Punkt, Modell-m) — [199] Hilfslinien äusserer Ketten, die das Zahlenband queren. Sind links und rechts
+/// direkt neben dem Segment belegt, rückt die Zahl weiter hinaus hinter das nächste Hindernis (höchstens drei
+/// Zahlbreiten), erst dann eine Zeile höher.
+pub fn dim_auto_offsets_avoiding(pts: &[Vec2], h: f64, blocked: &[f64]) -> Vec<(f64, f64)> {
     let n = pts.len().saturating_sub(1);
     let mut out = vec![(0.0, 0.0); n];
     if n == 0 || !(h.is_finite() && h > 0.0) || pts.iter().any(|q| !(q.x.is_finite() && q.y.is_finite())) {
@@ -1064,21 +1074,40 @@ pub fn dim_auto_offsets(pts: &[Vec2], h: f64) -> Vec<(f64, f64)> {
     let starts: Vec<f64> = lens.iter().scan(0.0, |acc, l| { let s = *acc; *acc += l; Some(s) }).collect();
     let widths: Vec<f64> = lens.iter().map(|l| dim_text_width(*l, h)).collect();
     let pad = dim_text_pad(h);
+    let eps = 1e-6 * h;
+    let blocked: Vec<f64> = blocked.iter().copied().filter(|b| b.is_finite()).collect();
     let fits: Vec<bool> = (0..n).map(|i| widths[i] + 2.0 * pad <= lens[i]).collect();
     // Belegte Streifen entlang der Kette: passende Zahlen in der Mitte ihres Segments.
     let mut taken: Vec<(f64, f64)> = (0..n).filter(|i| fits[*i]).map(|i| (starts[i] + lens[i] / 2.0 - widths[i] / 2.0, starts[i] + lens[i] / 2.0 + widths[i] / 2.0)).collect();
-    let free = |c: f64, w: f64, taken: &[(f64, f64)]| taken.iter().all(|(a, b)| c + w / 2.0 + pad <= *a || c - w / 2.0 - pad >= *b);
+    let free = |c: f64, w: f64, taken: &[(f64, f64)]| {
+        taken.iter().all(|(a, b)| c + w / 2.0 + pad <= *a + eps || c - w / 2.0 - pad >= *b - eps)
+            && blocked.iter().all(|b| c + w / 2.0 + pad <= *b + eps || c - w / 2.0 - pad >= *b - eps)
+    };
     for i in 0..n {
         if fits[i] || lens[i] < 1e-6 {
             continue;
         }
         let w = widths[i];
-        let left = starts[i] - pad - w / 2.0;
-        let right = starts[i] + lens[i] + pad + w / 2.0;
+        let (s0, s1) = (starts[i], starts[i] + lens[i]);
+        let left = s0 - pad - w / 2.0;
+        let right = s1 + pad + w / 2.0;
         let prefer_left = if i == 0 { true } else if i == n - 1 { false } else { lens[i - 1] >= lens[i + 1] };
         let order = if prefer_left { [left, right] } else { [right, left] };
-        let (centre, row) = match order.iter().find(|c| free(**c, w, &taken)) {
-            Some(c) => (*c, 0.0),
+        let found = order.iter().copied().find(|c| free(*c, w, &taken)).or_else(|| {
+            // [199] Weiter hinaus: hinter die Kante eines Hindernisses, nächste Stelle zuerst.
+            let mid = (s0 + s1) / 2.0;
+            let reach = lens[i] / 2.0 + pad + 3.0 * w;
+            let mut cands: Vec<f64> = taken
+                .iter()
+                .flat_map(|&(a, b)| [a - pad - w / 2.0, b + pad + w / 2.0])
+                .chain(blocked.iter().flat_map(|&b| [b - pad - w / 2.0, b + pad + w / 2.0]))
+                .filter(|&c| (c <= left + eps || c >= right - eps) && (c - mid).abs() <= reach + w / 2.0)
+                .collect();
+            cands.sort_by(|a, b| (a - mid).abs().total_cmp(&(b - mid).abs()));
+            cands.into_iter().find(|c| free(*c, w, &taken))
+        });
+        let (centre, row) = match found {
+            Some(c) => (c, 0.0),
             None => (order[0], dim_text_row(h)),
         };
         taken.push((centre - w / 2.0, centre + w / 2.0));
@@ -1580,42 +1609,91 @@ fn acc_bounds(g: &Drawing2DGeom, b: &mut Bounds) {
     }
 }
 
-/// Liegt die Zeichnung auf dem Geschoss (und ist sie im Druck nicht ausgenommen, `noPrint`)?
-/// [157] Zusätzlicher Abstand einer Kette der automatischen Aussenbemassung (`autodim-<Geschoss>-<Seite>-<Kette>`,
-/// gerade) beim Zeichnen: zeigt der Grundriss die Baugrube und schneidet eine Kette dieser Seite Sohle oder
-/// Böschung (bis zur Böschungsoberkante), rücken alle Ketten der Seite gleich weit hinaus — die innerste mit
-/// 4 mm Papier Luft hinter die Böschung. Im Modell bleiben die Ketten, wo sie sind (Geschosse ohne Gelände,
-/// Ausmass des Präsentationsplans).
-fn autodim_shift(c: &Ctx, d: &Drawing2D, scale: f64) -> f64 {
+/// [199] Kleinster Abstand zweier Ketten der automatischen Aussenbemassung auf dem Papier (mm): wie `autodim` bei
+/// 1:100 (7 mm) bzw. 2.8 Schrifthöhen — Platz für die Zahl über der Linie und ihre Ausweich-Zeile.
+const AUTODIM_CHAIN_GAP_MM: f64 = 7.0;
+
+/// Lage einer Kette der automatischen Aussenbemassung beim Zeichnen ([`autodim_layout`]).
+struct AutodimLayout {
+    /// Zusätzlicher Versatz (Modell-m, Vorzeichen wie `offset`).
+    shift: f64,
+    /// Stellen entlang der Kette (ab dem ersten Punkt, Modell-m), an denen Hilfslinien äusserer Ketten derselben
+    /// Seite das Zahlenband queren: ausweichende Zahlen stehen nicht darauf.
+    blocked: Vec<f64>,
+}
+
+/// Lage einer Kette der automatischen Aussenbemassung (`autodim-<Geschoss>-<Seite>-<Kette>`, gerade) beim Zeichnen.
+/// Im Modell bleiben die Ketten, wo `autodim` sie gesetzt hat (Massstab der Ansicht beim Ausführen); gezeichnet wird:
+/// - [199] Die Ketten einer Seite liegen mindestens [`AUTODIM_CHAIN_GAP_MM`] Papier auseinander (bei 1:200 rücken
+///   die äusseren hinaus; 1:100/1:50 bleiben, wie gespeichert); die innerste bleibt.
+/// - [157] Zeigt der Grundriss die Baugrube und schneidet eine Kette dieser Seite Sohle oder Böschung (bis zur
+///   Böschungsoberkante), rücken alle Ketten der Seite gleich weit hinaus — die innerste mit 4 mm Papier Luft
+///   hinter die Böschung.
+fn autodim_layout(c: &Ctx, d: &Drawing2D, scale: f64) -> AutodimLayout {
+    let none = AutodimLayout { shift: 0.0, blocked: Vec::new() };
     let prefix = format!("autodim-{}-", d.level_id);
-    let Some(rest) = d.id.strip_prefix(&prefix) else { return 0.0 };
-    let Some((side, _)) = rest.rsplit_once('-') else { return 0.0 };
+    let Some(rest) = d.id.strip_prefix(&prefix) else { return none };
+    let Some((side, _)) = rest.rsplit_once('-') else { return none };
     if side == "arc" || side.starts_with("arc-") || side == "radius" || side.starts_with("radius-") {
-        return 0.0;
+        return none;
     }
-    let obst = super::context::excavation_segments(c);
-    if obst.is_empty() {
-        return 0.0;
+    // Ketten der Seite: Richtung, Normale nach aussen (Seite des Versatzes, wie `dimension_segment`), Abstand.
+    struct Ch<'a> {
+        id: &'a str,
+        pts: &'a [Vec2],
+        a: Vec2,
+        len: f64,
+        u: (f64, f64),
+        n: (f64, f64),
+        off: f64,
+        h: f64,
     }
     let group = format!("{prefix}{side}-");
+    let chains: Vec<Ch> = c
+        .p
+        .drawings2d
+        .iter()
+        .filter(|g| g.id.starts_with(&group) && g.level_id == d.level_id)
+        .filter_map(|g| {
+            let Drawing2DGeom::Dimension { pts, offset, arc_center: None, kind: None, text_height_mm, .. } = &g.geom else { return None };
+            let (a, b) = (*pts.first()?, *pts.last()?);
+            let len = hypot2(b.x - a.x, b.y - a.y);
+            if !(len > 1e-6) || !offset.is_finite() || offset.abs() < 1e-9 {
+                return None;
+            }
+            let u = ((b.x - a.x) / len, (b.y - a.y) / len);
+            let sg = offset.signum();
+            let h = mm_to_model(text_height_mm.unwrap_or(DIM_TEXT_HEIGHT_MM), scale);
+            Some(Ch { id: g.id.as_str(), pts, a, len, u, n: (-u.1 * sg, u.0 * sg), off: offset.abs(), h })
+        })
+        .collect();
+    let Some(me) = chains.iter().position(|ch| ch.id == d.id) else { return none };
+    let nr = chains[me].n;
+    // Lage der Masslinie entlang der Aussennormalen dieser Kette; Ketten anderer Richtung bleiben unberührt.
+    let level = |ch: &Ch| (ch.a.x * nr.0 + ch.a.y * nr.1) + ch.off * (ch.n.0 * nr.0 + ch.n.1 * nr.1);
+    let mut order: Vec<usize> = (0..chains.len()).filter(|&i| chains[i].n.0 * nr.0 + chains[i].n.1 * nr.1 > 1.0 - 1e-6).collect();
+    order.sort_by(|&i, &j| level(&chains[i]).total_cmp(&level(&chains[j])));
+    let gap = mm_to_model(AUTODIM_CHAIN_GAP_MM, scale).max(order.iter().map(|&i| 2.8 * chains[i].h).fold(0.0, f64::max));
+    // [199] Mindestabstand: jede Kette mindestens `gap` hinter der vorigen.
+    let mut extra = vec![0.0; chains.len()];
+    let mut prev = f64::NEG_INFINITY;
+    for &i in &order {
+        let at = level(&chains[i]).max(prev + gap);
+        extra[i] = at - level(&chains[i]);
+        prev = at;
+    }
+    // [157] Hinter die sichtbare Böschung.
+    let obst = super::context::excavation_segments(c);
     let margin = mm_to_model(4.0, scale);
     let mut need: f64 = 0.0;
-    for g in c.p.drawings2d.iter().filter(|g| g.id.starts_with(&group)) {
-        let Drawing2DGeom::Dimension { pts, offset, arc_center: None, kind: None, .. } = &g.geom else { continue };
-        let (Some(a), Some(b)) = (pts.first(), pts.last()) else { continue };
-        let len = hypot2(b.x - a.x, b.y - a.y);
-        if !(len > 1e-6) || !offset.is_finite() || offset.abs() < 1e-9 {
-            continue;
-        }
-        let u = ((b.x - a.x) / len, (b.y - a.y) / len);
-        // Aussen = Seite des Versatzes (wie `dimension_segment`).
-        let sg = offset.signum();
-        let n = (-u.1 * sg, u.0 * sg);
-        let (t0, t1) = (-margin, len + margin);
+    for &i in &order {
+        let ch = &chains[i];
+        let off = ch.off + extra[i];
+        let (t0, t1) = (-margin, ch.len + margin);
         let mut s_max = f64::NEG_INFINITY;
         for &(p, q) in &obst {
-            let (tp, tq) = ((p[0] - a.x) * u.0 + (p[1] - a.y) * u.1, (q[0] - a.x) * u.0 + (q[1] - a.y) * u.1);
-            let (sp, sq) = ((p[0] - a.x) * n.0 + (p[1] - a.y) * n.1, (q[0] - a.x) * n.0 + (q[1] - a.y) * n.1);
+            let (tp, tq) = ((p[0] - ch.a.x) * ch.u.0 + (p[1] - ch.a.y) * ch.u.1, (q[0] - ch.a.x) * ch.u.0 + (q[1] - ch.a.y) * ch.u.1);
+            let (sp, sq) = ((p[0] - ch.a.x) * ch.n.0 + (p[1] - ch.a.y) * ch.n.1, (q[0] - ch.a.x) * ch.n.0 + (q[1] - ch.a.y) * ch.n.1);
             // Teilstück im Streifen der Kette.
             let (lo, hi) = if (tq - tp).abs() < 1e-12 {
                 if tp < t0 || tp > t1 { continue } else { (0.0, 1.0) }
@@ -1629,11 +1707,20 @@ fn autodim_shift(c: &Ctx, d: &Drawing2D, scale: f64) -> f64 {
             s_max = s_max.max(sp + (sq - sp) * lo).max(sp + (sq - sp) * hi);
         }
         // Nur was aussen vor der Kette liegt und sie erreicht.
-        if s_max > 0.0 && s_max + margin > offset.abs() {
-            need = need.max(s_max + margin - offset.abs());
+        if s_max > 0.0 && s_max + margin > off {
+            need = need.max(s_max + margin - off);
         }
     }
-    need * d_sign(d)
+    // [199] Hilfslinien der äusseren Ketten queren das Zahlenband dieser Kette.
+    let mine = &chains[me];
+    let my_level = level(mine) + extra[me];
+    let blocked = order
+        .iter()
+        .filter(|&&i| i != me && level(&chains[i]) + extra[i] > my_level + 1e-9)
+        .flat_map(|&i| chains[i].pts.iter())
+        .map(|q| (q.x - mine.a.x) * mine.u.0 + (q.y - mine.a.y) * mine.u.1)
+        .collect();
+    AutodimLayout { shift: (extra[me] + need) * d_sign(d), blocked }
 }
 
 /// Vorzeichen des Versatzes einer Masskette (der Abstand wächst in seiner Richtung).
@@ -1644,6 +1731,7 @@ fn d_sign(d: &Drawing2D) -> f64 {
     }
 }
 
+/// Liegt die Zeichnung auf dem Geschoss (und ist sie im Druck nicht ausgenommen, `noPrint`)?
 /// [173] Dazu die Bemassung der Modelldarstellung: Ketten der automatischen Aussenbemassung und Höhenkoten
 /// (`model_view::DimOpts::shows`).
 fn on_floor(c: &Ctx, d: &Drawing2D) -> bool {

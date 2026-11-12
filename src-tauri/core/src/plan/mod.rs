@@ -54,3 +54,5 @@ mod hatch_fill_tests;
 mod arc_output_tests;
 #[cfg(test)]
 mod derived_class_tests;
+#[cfg(test)]
+mod autodim_text_tests;
