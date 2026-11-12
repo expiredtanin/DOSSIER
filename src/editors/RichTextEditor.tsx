@@ -39,7 +39,7 @@ export interface RichTextEditorProps {
   autoFocus?: boolean;
   /**
    * "pt" (Default) — absolute Schriftgrösse, passend für ein schwebendes
-   * Dialogfenster ohne Zoom-Bezug (TextEditorDialog). "em" — Grösse relativ
+   * Dialogfenster ohne Zoom-Bezug. "em" — Grösse relativ
    * zur geerbten Schriftgrösse des `.rt-surface`-Containers: für die beiden
    * Inline-Editoren AUF der Zeichenfläche/dem Blatt (PlanView/LayoutSheet),
    * die die Basisgrösse selbst per CSS-Variable aus dem echten Zoom setzen —

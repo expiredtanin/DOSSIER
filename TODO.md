@@ -79,12 +79,20 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
 - Datensicherheit: Speichern/Autosave/Wiederherstellen auf dem Mac ([116]), Öffnen alter Beispielstände, kein Kern-Panic im Ablauf.
 
 ### Phase 2 (20.–26.11.): Wettbewerb lückenlos
-- ○ **[218]** Raumstempel bearbeiten (12.11., Maintainer, PRIO): (1) kein Fenster im Fenster mehr — der Stempel-Editor
-  (`src/ui/RoomStampEditorHost.tsx`, `panels/RoomStampEditor.tsx`, Doppelklick auf Stempel) wird Bereich „Raumstempel“ im eigenen
-  Objekteinstellungsfenster ([195b], macOS-Nebenfenster; Browser: schwebendes Panel); (2) Schrift je Stempel bzw. je Zeile wählbar:
-  Schriftart, Grösse (pt/mm), fett/kursiv, Farbe — im Rust-Modell `RoomStamp` (Vorgabe aus der Modelldarstellung/Ansichtsvorlage,
-  Mehrfachauswahl „gemischt“); (3) Bezugspunkt/Platzierung und „Masse“ (Breite/Höhe/Drehen) nur im Objekt-Info-Panel, nicht im
-  Objekteinstellungsfenster. · M
+- ◐ **[218]** Raumstempel bearbeiten im Objekteinstellungsfenster (13.11., Wunsch Maintainer): **Stand 13.11.:** Der Overlay-Dialog
+  („Fenster im Fenster“, `RoomStampEditor`/`RoomStampEditorHost`, samt Alt-Rich-Text-Dialog `TextEditorDialog`) ist weg. Doppelklick auf einen
+  Raumstempel (oder den Raum) wählt den Raum und öffnet die Objekteinstellungen mit dem neuen Abschnitt „Raumstempel“
+  (`panels/objectInfo/RoomStampSection.tsx`, Fokus-Abschnitt wie bei T, `openObjectSettings(deps, "roomStamp")`); unter Tauri im nativen
+  Nebenfenster über die bestehende Spiegelung ([195b], Abschnitt schreibt über Store-Ops). Schrift wählbar: Modell `RoomStampFont`
+  (Familie aus den gebündelten Schriften, Grösse pt, fett, kursiv, Farbe) am Stempel (`font`, ganzer Stempel) und je Zeile (`nameFont`,
+  `line2Font`, `numberFont`, `areaFont`, `usageFont`); Auflösung im Kern `plan/domains.rs::stamp_line_marks`: Zeile > Stempel > bisherige
+  Vorgabe (Name 12 pt fett, Zeile 2 9 pt kursiv, Nummer 9 pt, Zusatzzeilen 0.8 × Grundschrift); Zusatzzeilen tragen `StampLine.marks`
+  (Grösse bezogen auf Grundschrift 10 pt, folgt dem Massstab 7/10 und dem Einpassen), `text_layout::stamp_block*` und alle Ausgaben
+  (Anzeige-Szene `plan/text.rs` mit den gemessenen Grundlinien, SVG, Druck-SVG/PDF, DXF, HTML-Block) lesen sie. Mehrfachauswahl: gemischte
+  Werte „gemischt“, Änderung für alle gewählten Räume in EINEM Undo-Schritt (`state/roomStampEdit.ts`); Nummer/Namen bleiben je Raum. Bezugspunkt und Masse
+  (Breite/Höhe/Drehen, bei allen Elementarten) erscheinen nur noch im Objekt-Info-Panel, nicht im Fenster (`ObjectInfoPanel showPlacement=false`).
+  **Offen:** Die Schriftfamilie zeigt der GPU-Glyphen-Pass (WebGPU/Metal, `render2d/glyph.rs`) noch nicht — er kennt nur das eingebettete Inter
+  (Grösse, fett, kursiv, Farbe wirken); Familie sichtbar in SVG/PDF/DXF/HTML; Mac-Nebenfenster nicht geprüft (nur Linux-Container). · M
 - ○ **[216]** 3D-Darstellungsfehler (12.11., Screenshots Maintainer, Musterhaus komplex): (1) Rundfenster im Giebel: Wandloch
   quadratisch statt rund, Leibung mit Streifen; dazu ein senkrechtes Band im Giebel vom Fenster bis zur Decke; (2) Flächenmuster
   (Fassade, Dach) im 3D nicht auf die Fläche beschnitten — Linien ragen über Giebel/Ortgang hinaus in die Luft; (3) Rundbogen-Öffnung:
@@ -366,7 +374,7 @@ Punktwolken/BCF-Ausbau, Windows-Paket, [C5]/[C7]/[15] Kern-Umbauten — ausser s
   nicht mehr im Stempel (Attribut des Raums; nur mit „SIA-Kategorie anzeigen“ = `showUsage`, neue Stempel Vorgabe aus), neue
   Option `showDivider` (Trennlinie unter dem Namen); Ausrichtung je Zeile bleibt wählbar. Bestehende Stempel mit
   `showUsage: true` behalten die Zeile, fehlende Ausrichtungen gelten jetzt als links. Offen: Mac-Gegenprobe (Metal/native
-  Ansicht) (Kern `plan/domains.rs`, `src/panels/RoomStampEditor.tsx`). · S
+  Ansicht) (Kern `plan/domains.rs`, Bearbeiten: `src/panels/objectInfo/RoomStampSection.tsx`, [218]). · S
 
 - ◐ **[141]** Wandecken. 9.11.: Wand und Stütze überlappen nicht mehr — runde Stütze an der Kontur, Wand durch
   bzw. breiter als die Stütze, Stütze kürzer als die Wand (3D: `model3d::carve_at_columns`, Streifen an den

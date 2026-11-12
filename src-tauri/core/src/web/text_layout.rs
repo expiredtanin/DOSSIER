@@ -12,7 +12,7 @@
 //! sie schon; keine Texte über die Grenze zurück).
 
 use crate::model::RichTextDoc;
-use crate::text_layout::{layout_refs, place_lines, tspan_of, stamp_block_refs, stamp_extra_tspan, text_frame_corners, wrap_plain, LayoutOpts, LineAlign, LineRef, Tok, Tspan};
+use crate::text_layout::{layout_refs, place_lines, tspan_of, stamp_block_refs, text_frame_corners, wrap_plain, LayoutOpts, LineRef, Tok, Tspan};
 use wasm_bindgen::prelude::wasm_bindgen;
 
 fn style_bits(t: &Tspan) -> f64 {
@@ -105,7 +105,7 @@ pub fn text_frame(doc_json: &str, opts: &[f64]) -> Vec<f64> {
 #[wasm_bindgen]
 pub fn text_stamp_block(prim_json: &str, unit_per_pt: f64, x0: f64, y0: f64) -> Vec<f64> {
     let Ok(p) = serde_json::from_str::<crate::plan::text::StampText>(prim_json) else { return Vec::new() };
-    let extra: Vec<(&str, LineAlign)> = p.extra_lines.iter().map(|l| (l.text.as_str(), LineAlign::of(Some(l.align)))).collect();
+    let extra: Vec<crate::text_layout::ExtraRow> = p.extra_lines.iter().map(|l| l.row()).collect();
     let color = p.color.as_deref().unwrap_or("#000000");
     let placed = stamp_block_refs(&p.doc, &extra, p.base_pt, unit_per_pt, color, y0);
     // [140] Zeilen im gemessenen, um den Anker zentrierten Block (`stamp_line_offsets`).
@@ -115,7 +115,7 @@ pub fn text_stamp_block(prim_json: &str, unit_per_pt: f64, x0: f64, y0: f64) -> 
     let n = p.doc.paragraphs.len();
     encode_lines(&lines, &at, |t| {
         if t.para >= n {
-            stamp_extra_tspan(String::new(), p.base_pt, unit_per_pt, color)
+            crate::text_layout::stamp_extra_span(String::new(), p.extra_lines[t.para - n].marks.as_ref(), p.base_pt, unit_per_pt, color)
         } else {
             tspan_of(String::new(), &p.doc.paragraphs[t.para].runs[t.run].marks, p.base_pt, unit_per_pt, color)
         }

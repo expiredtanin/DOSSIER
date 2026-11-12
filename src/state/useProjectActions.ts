@@ -398,7 +398,6 @@ export function useProjectActions(
   const moveRoomEdge = useStore((s) => s.moveRoomEdge);
   const moveRoomStamp = useStore((s) => s.moveRoomStamp);
   const setRoomStampDoc = useStore((s) => s.setRoomStampDoc);
-  const setRoomStamp = useStore((s) => s.setRoomStamp);
 
   return {
     toggleLevelVisible,
@@ -523,6 +522,5 @@ export function useProjectActions(
     moveRoomEdge,
     moveRoomStamp,
     setRoomStampDoc,
-    setRoomStamp,
   };
 }

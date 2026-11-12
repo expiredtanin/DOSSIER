@@ -939,17 +939,56 @@ pub fn doc_from_text(text: &str) -> RichTextDoc {
     }
 }
 
+/// [218] Gültige Farbe der Stempelschrift ("#rrggbb").
+fn valid_hex(c: &str) -> bool {
+    let b = c.as_bytes();
+    b.len() == 7 && b[0] == b'#' && b[1..].iter().all(|c| c.is_ascii_hexdigit())
+}
+
+/// [218] Schrift einer Stempelzeile: Zeilenschrift > Stempelschrift (`all`) > eingebaute Werte der Zeile
+/// (`builtin`). Unsinn (leere Familie, Grösse ≤ 0 oder NaN, keine Hex-Farbe) zählt als nicht gesetzt.
+pub fn stamp_line_marks(line: Option<&RoomStampFont>, all: Option<&RoomStampFont>, builtin: Marks) -> Marks {
+    let pick = |f: fn(&RoomStampFont) -> Option<&String>| line.and_then(f).or_else(|| all.and_then(f));
+    let family = pick(|f| f.family.as_ref()).filter(|v| !v.trim().is_empty());
+    let color = pick(|f| f.color.as_ref()).filter(|v| valid_hex(v));
+    let size = [line, all].into_iter().flatten().find_map(|f| f.size_pt).filter(|v| v.is_finite() && *v > 0.0);
+    let flag = |f: fn(&RoomStampFont) -> Option<bool>| [line, all].into_iter().flatten().find_map(f);
+    Marks {
+        bold: flag(|f| f.bold).or(builtin.bold),
+        italic: flag(|f| f.italic).or(builtin.italic),
+        font: family.cloned().or(builtin.font),
+        size_pt: size.or(builtin.size_pt),
+        color: color.cloned().or(builtin.color),
+        ..Default::default()
+    }
+}
+
+/// [218] Trägt der Stempel eigene Schriftgrössen (am ganzen Stempel oder einer Zeile)?
+fn stamp_has_sizes(s: &RoomStamp) -> bool {
+    [&s.font, &s.name_font, &s.line2_font, &s.number_font, &s.area_font, &s.usage_font].into_iter().flatten().any(|f| f.size_pt.is_some_and(|v| v.is_finite() && v > 0.0))
+}
+
+/// [218] Schrift einer Zusatzzeile; `None`, wenn weder die Zeile noch der Stempel etwas festlegen (dann gilt
+/// 0.8 × Grundschrift wie bisher).
+pub fn stamp_extra_marks(line: Option<&RoomStampFont>, all: Option<&RoomStampFont>) -> Option<Marks> {
+    let m = stamp_line_marks(line, all, Marks::default());
+    (m != Marks::default()).then_some(m)
+}
+
 /// `roomStampToDoc` ([177], Archicad-Zonenstempel): Zeile 1 = Name (gross, fett), optional Zeile 2 (kursiv),
-/// darunter die Raumnummer (klein). Ausrichtung je Absatz (Vorgabe links).
+/// darunter die Raumnummer (klein). Ausrichtung je Absatz (Vorgabe links). [218] Schrift je Zeile
+/// (`name_font` …) und für den ganzen Stempel (`font`).
 pub fn room_stamp_to_doc(s: &RoomStamp) -> RichTextDoc {
-    let mut paragraphs = vec![Paragraph { runs: vec![run(s.name.clone(), Marks { bold: Some(true), size_pt: Some(NAME_PT), ..Default::default() })], align: s.name_align, ..Default::default() }];
+    let all = s.font.as_ref();
+    let m = |f: Option<&RoomStampFont>, builtin: Marks| stamp_line_marks(f, all, builtin);
+    let mut paragraphs = vec![Paragraph { runs: vec![run(s.name.clone(), m(s.name_font.as_ref(), Marks { bold: Some(true), size_pt: Some(NAME_PT), ..Default::default() }))], align: s.name_align, ..Default::default() }];
     let line2 = js_trim(s.name_line2.as_deref().unwrap_or(""));
     if !line2.is_empty() {
-        paragraphs.push(Paragraph { runs: vec![run(line2.into(), Marks { italic: Some(true), size_pt: Some(LINE2_PT), ..Default::default() })], align: s.line2_align, ..Default::default() });
+        paragraphs.push(Paragraph { runs: vec![run(line2.into(), m(s.line2_font.as_ref(), Marks { italic: Some(true), size_pt: Some(LINE2_PT), ..Default::default() }))], align: s.line2_align, ..Default::default() });
     }
     let number = js_trim(s.number.as_deref().unwrap_or(""));
     if !number.is_empty() {
-        paragraphs.push(Paragraph { runs: vec![run(number.into(), Marks { size_pt: Some(NUMBER_PT), ..Default::default() })], align: s.name_align, ..Default::default() });
+        paragraphs.push(Paragraph { runs: vec![run(number.into(), m(s.number_font.as_ref(), Marks { size_pt: Some(NUMBER_PT), ..Default::default() }))], align: s.name_align, ..Default::default() });
     }
     RichTextDoc { version: 1.0, paragraphs, ..Default::default() }
 }
@@ -983,13 +1022,13 @@ pub fn room_stamp_extra_lines_mv(s: &RoomStamp, net_area: f64, sia: SiaCategory,
     let mut lines = Vec::new();
     if StampOpts::line(s.show_floor_area, st.area, true) {
         let prefix = s.floor_area_prefix.as_deref().unwrap_or("");
-        lines.push(StampLine { text: format!("{prefix}{} m²", format_stamp_area(net_area, s.rounding_step)), align: s.floor_area_align.unwrap_or(Align::Left) });
+        lines.push(StampLine { text: format!("{prefix}{} m²", format_stamp_area(net_area, s.rounding_step)), align: s.floor_area_align.unwrap_or(Align::Left), marks: stamp_extra_marks(s.area_font.as_ref(), s.font.as_ref()) });
     }
     if StampOpts::line(s.show_usage, st.usage, false) {
-        lines.push(StampLine { text: format!("{} · {}", sia_key(sia), sia_label(sia)), align: s.usage_align.unwrap_or(Align::Left) });
+        lines.push(StampLine { text: format!("{} · {}", sia_key(sia), sia_label(sia)), align: s.usage_align.unwrap_or(Align::Left), marks: stamp_extra_marks(s.usage_font.as_ref(), s.font.as_ref()) });
     }
     if let Some(o) = s.occupancy {
-        lines.push(StampLine { text: format!("{} Pers.", js_number(o)), align: Align::Left });
+        lines.push(StampLine { text: format!("{} Pers.", js_number(o)), align: Align::Left, marks: stamp_extra_marks(None, s.font.as_ref()) });
     }
     lines
 }
@@ -1027,7 +1066,7 @@ const STAMP_PAD_MM: f64 = 0.5;
 /// [140] Ausmass des Stempels in Metern bei 1:`scale` (echte Schriftmetrik, `text_layout::stamp_block_size`)
 /// samt Rand.
 pub(super) fn stamp_size_m(doc: &RichTextDoc, extra: &[StampLine], pt: f64, scale: f64) -> (f64, f64) {
-    let rows: Vec<(&str, crate::text_layout::LineAlign)> = extra.iter().map(|l| (l.text.as_str(), crate::text_layout::LineAlign::of(Some(l.align)))).collect();
+    let rows: Vec<crate::text_layout::ExtraRow> = extra.iter().map(|l| l.row()).collect();
     let (w, h) = crate::text_layout::stamp_block_size(doc, &rows, pt, PT_MM * scale / 1000.0);
     let pad = 2.0 * STAMP_PAD_MM * scale / 1000.0;
     (w * STAMP_MARGIN + pad, h * STAMP_MARGIN + pad)
@@ -1048,7 +1087,15 @@ pub(super) fn stamp_size_m(doc: &RichTextDoc, extra: &[StampLine], pt: f64, scal
 /// `place(breite, höhe, frei)`: mit `frei` nur Lagen ohne Überdeckung anderen Planinhalts ([140] Teil 6).
 /// Zuerst sucht die ganze Reihenfolge (ohne Nummer/Kürzen) eine freie Lage — weniger Zeilen und kleinere
 /// Schrift gehen vor Überdeckung; erst wenn keine Stufe frei liegt, dieselbe Reihenfolge mit Überdeckung.
+#[cfg(test)]
 fn fit_room_stamp(doc: &RichTextDoc, number: Option<&str>, extra: Vec<StampLine>, pt: f64, scale: f64, place: &dyn Fn(f64, f64, bool) -> Option<Vec2>) -> (Vec<StampLine>, f64, Option<RichTextDoc>, Option<Vec2>) {
+    fit_room_stamp_with(doc, number, extra, pt, scale, false, place)
+}
+
+/// [218] Wie [`fit_room_stamp`]; `styled` = der Stempel trägt eigene Schriftgrössen. Die Grössen gehen dann vor
+/// Überdeckung: erst mit dem Namen in der gewählten Schrift (frei, dann mit Überdeckung), erst danach die
+/// Ersatzvarianten ohne eigene Grössen.
+fn fit_room_stamp_with(doc: &RichTextDoc, number: Option<&str>, extra: Vec<StampLine>, pt: f64, scale: f64, styled: bool, place: &dyn Fn(f64, f64, bool) -> Option<Vec2>) -> (Vec<StampLine>, f64, Option<RichTextDoc>, Option<Vec2>) {
     if !(scale > 0.0) || !scale.is_finite() {
         return (extra, pt, None, None);
     }
@@ -1059,9 +1106,20 @@ fn fit_room_stamp(doc: &RichTextDoc, number: Option<&str>, extra: Vec<StampLine>
     let text = crate::text_layout::plain_text(doc);
     // Name mit eigenen Schriftgrössen (Stempel: Name 12 pt fett) schrumpft nicht mit `pt`: dann ohne
     // Auszeichnungen in der Grundschrift (Ersatz `Some`).
-    let plain = doc_from_text(&text);
+    // [218] Familie und Farbe des Namens bleiben auch ohne die eigenen Grössen.
+    let look = doc.paragraphs.first().and_then(|q| q.runs.first()).map(|r| (r.marks.font.clone(), r.marks.color.clone()));
+    let restyle = |mut d: RichTextDoc| {
+        if let Some((font, color)) = &look {
+            for r in d.paragraphs.iter_mut().flat_map(|q| q.runs.iter_mut()) {
+                r.marks.font = font.clone();
+                r.marks.color = color.clone();
+            }
+        }
+        d
+    };
+    let plain = restyle(doc_from_text(&text));
     // Umbrüche, schmalste Teilung zuerst.
-    let mut wraps: Vec<RichTextDoc> = wrap_variants(&text).iter().map(|t| doc_from_text(t)).collect();
+    let mut wraps: Vec<RichTextDoc> = wrap_variants(&text).iter().map(|t| restyle(doc_from_text(t))).collect();
     let width = |d: &RichTextDoc| stamp_size_m(d, &[], ROOM_STAMP_MIN_PT, scale).0;
     wraps.sort_by(|a, b| width(a).total_cmp(&width(b)));
     let wrapped: Vec<Option<&RichTextDoc>> = wraps.iter().map(Some).collect();
@@ -1095,6 +1153,12 @@ fn fit_room_stamp(doc: &RichTextDoc, number: Option<&str>, extra: Vec<StampLine>
     // [199] Anderer Planinhalt allein verkleinert die Schrift nur bis `ROOM_STAMP_KEEP` der Grundschrift: ein Stempel
     // in Schriftgrösse über Linien (mit Freistellung, `stamp_knockout`) liest sich besser als einer in 2 mm. Erst
     // wenn der Raum auch das nicht fasst, geht es wie bisher bis auf 2 mm hinunter.
+    if styled {
+        let own: Vec<(Vec<Option<&RichTextDoc>>, f64)> = steps_to(ROOM_STAMP_MIN_PT).into_iter().map(|(v, p)| (v.into_iter().filter(Option::is_none).collect(), p)).collect();
+        if let Some((e, pt, v, q)) = search(&own, &[(true, false), (false, false)]) {
+            return (e, pt, v, Some(q));
+        }
+    }
     let keep = (pt * ROOM_STAMP_KEEP).max(ROOM_STAMP_MIN_PT);
     if keep > ROOM_STAMP_MIN_PT {
         if let Some((e, pt, v, q)) = search(&steps_to(keep), &[(true, false), (false, false)]) {
@@ -1388,10 +1452,10 @@ fn rooms(c: &Ctx, out: &mut Vec<Primitive>, top: &mut Vec<Primitive>, bounds: &m
                 // [173] Fläche und SIA-Kategorie nach der Stufe (Basis: Fläche ja, Kategorie nein).
                 let mut lines = Vec::new();
                 if StampOpts::line(None, st.area, true) {
-                    lines.push(StampLine { text: format!("{} m²", to_fixed(res.net, 2)), align: Align::Left });
+                    lines.push(StampLine::plain(format!("{} m²", to_fixed(res.net, 2)), Align::Left));
                 }
                 if StampOpts::line(None, st.usage, false) {
-                    lines.push(StampLine { text: format!("{} · {}", sia_key(room.sia_category), sia_label(room.sia_category)), align: Align::Left });
+                    lines.push(StampLine::plain(format!("{} · {}", sia_key(room.sia_category), sia_label(room.sia_category)), Align::Left));
                 }
                 (room.stamp_doc.clone().unwrap_or_else(|| doc_from_text(&room.name)), lines)
             }
@@ -1403,7 +1467,7 @@ fn rooms(c: &Ctx, out: &mut Vec<Primitive>, top: &mut Vec<Primitive>, bounds: &m
         let mut extra_lines = extra_lines;
         // [173] Lichte Höhe nach der Stufe (Basis nein; auch ab 1:200, wenn die Stufe sie verlangt).
         if !overview && StampOpts::line(None, st.height, false) {
-            extra_lines.push(StampLine { text: format!("LH {} m", to_fixed(crate::room_book::clear_height(c.p, room), 2)), align: Align::Left });
+            extra_lines.push(StampLine { text: format!("LH {} m", to_fixed(crate::room_book::clear_height(c.p, room), 2)), align: Align::Left, marks: stamp_extra_marks(None, room.stamp.as_ref().and_then(|s| s.font.as_ref())) });
         }
         // Belag: Stempel (nicht ab 1:200) > Stufe > nein.
         let finish = match room.stamp.as_ref().and_then(|s| s.show_finish) {
@@ -1413,7 +1477,7 @@ fn rooms(c: &Ctx, out: &mut Vec<Primitive>, top: &mut Vec<Primitive>, bounds: &m
         if !overview && finish {
             let label = crate::room_book::finish_label(c.p, room.floor_finish.as_deref());
             if !label.is_empty() {
-                extra_lines.push(StampLine { text: label, align: Align::Left });
+                extra_lines.push(StampLine { text: label, align: Align::Left, marks: stamp_extra_marks(None, room.stamp.as_ref().and_then(|s| s.font.as_ref())) });
             }
         }
         let candidates = if room.stamp_anchor.is_some() { vec![at] } else { stamp_candidates(&pts, pole) };
@@ -1422,7 +1486,7 @@ fn rooms(c: &Ctx, out: &mut Vec<Primitive>, top: &mut Vec<Primitive>, bounds: &m
         let clear = STAMP_CLEAR_MM * c.a.scale / 1000.0;
         let place = |w: f64, h: f64, free: bool| place_stamp(&pts, &candidates, &obst, clear, w, h, free);
         let number = stamp.as_deref().and_then(|s| s.number.clone());
-        let (extra_lines, base_pt, name, placed) = fit_room_stamp(&doc, number.as_deref(), extra_lines, if small { ROOM_STAMP_SMALL_PT } else { ROOM_STAMP_PT }, c.a.scale, &place);
+        let (extra_lines, base_pt, name, placed) = fit_room_stamp_with(&doc, number.as_deref(), extra_lines, if small { ROOM_STAMP_SMALL_PT } else { ROOM_STAMP_PT }, c.a.scale, stamp.as_deref().is_some_and(stamp_has_sizes), &place);
         let at = placed.unwrap_or(at);
         let name_replaced = name.clone();
         let doc = name.unwrap_or(doc);
@@ -1439,7 +1503,7 @@ fn rooms(c: &Ctx, out: &mut Vec<Primitive>, top: &mut Vec<Primitive>, bounds: &m
         // [177] Trennlinie unter dem Namen (Einstellung am Stempel, Vorgabe aus), nur im unveränderten Block.
         if let (Some(s), None, false, false) = (stamp.as_deref(), &name_replaced, overview, small) {
             if StampOpts::line(s.show_divider, st.divider, false) {
-                let rows: Vec<(&str, crate::text_layout::LineAlign)> = extra_lines.iter().map(|l| (l.text.as_str(), crate::text_layout::LineAlign::of(Some(l.align)))).collect();
+                let rows: Vec<crate::text_layout::ExtraRow> = extra_lines.iter().map(|l| l.row()).collect();
                 let placed = crate::text_layout::stamp_block(&doc, &rows, base_pt, PT_MM, "#000000", 0.0);
                 let np = room_stamp_name_paragraphs(s);
                 if placed.len() > np {
@@ -2199,6 +2263,94 @@ mod tests {
         assert!(ly < at.y + 0.353 && ly > at.y - 0.106, "{ly} {}", at.y);
     }
 
+    /// [218] Schrift im Stempel: Grösse und Fett ändern die Textmasse, fehlende Werte gelten als bisherige Vorgabe.
+    #[test]
+    fn raumstempel_schrift_aendert_masse() {
+        let base = RoomStamp { name: "Wohnen".into(), name_line2: Some("Essen".into()), number: Some("E.03".into()), ..Default::default() };
+        let first = |d: &RichTextDoc| d.paragraphs[0].runs[0].marks.clone();
+        // Ohne Angaben: wie bisher (Name 12 pt fett, Zeile 2 kursiv 9 pt, Nummer 9 pt).
+        let d0 = room_stamp_to_doc(&base);
+        assert_eq!((first(&d0).size_pt, first(&d0).bold, first(&d0).font.clone()), (Some(NAME_PT), Some(true), None));
+        assert_eq!(d0.paragraphs[1].runs[0].marks.italic, Some(true));
+        assert_eq!(d0.paragraphs[2].runs[0].marks.size_pt, Some(NUMBER_PT));
+        let (w0, h0) = stamp_size_m(&d0, &[], ROOM_STAMP_PT, 100.0);
+        // Grösserer Name: Block breiter und höher.
+        let big = RoomStamp { name_font: Some(RoomStampFont { size_pt: Some(24.0), ..Default::default() }), ..base.clone() };
+        let (w1, h1) = stamp_size_m(&room_stamp_to_doc(&big), &[], ROOM_STAMP_PT, 100.0);
+        assert!(w1 > w0 * 1.5 && h1 > h0, "{w0}x{h0} -> {w1}x{h1}");
+        // Fett aus: schmaler.
+        let thin = RoomStamp { name_font: Some(RoomStampFont { bold: Some(false), ..Default::default() }), ..base.clone() };
+        let dt = room_stamp_to_doc(&thin);
+        assert_eq!(first(&dt).bold, Some(false));
+        assert!(stamp_size_m(&dt, &[], ROOM_STAMP_PT, 100.0).0 < w0);
+        // Stempelschrift gilt für alle Zeilen, die Zeilenschrift geht vor.
+        let all = RoomStamp { font: Some(RoomStampFont { family: Some("Work Sans".into()), color: Some("#336699".into()), ..Default::default() }), number_font: Some(RoomStampFont { family: Some("Jost".into()), ..Default::default() }), ..base.clone() };
+        let da = room_stamp_to_doc(&all);
+        let fam = |i: usize| da.paragraphs[i].runs[0].marks.font.clone();
+        assert_eq!((fam(0), fam(1), fam(2)), (Some("Work Sans".into()), Some("Work Sans".into()), Some("Jost".into())));
+        assert_eq!(da.paragraphs[2].runs[0].marks.color.as_deref(), Some("#336699"));
+        // Unsinn zählt als nicht gesetzt.
+        let bad = RoomStamp { font: Some(RoomStampFont { family: Some("  ".into()), size_pt: Some(f64::NAN), color: Some("rot".into()), ..Default::default() }), ..base.clone() };
+        assert_eq!(room_stamp_to_doc(&bad), d0);
+        // Zusatzzeilen: Fläche gross und fett, Nutzung bleibt Vorgabe; ohne Angaben keine Auszeichnung.
+        let s = RoomStamp { show_floor_area: Some(true), show_usage: Some(true), area_font: Some(RoomStampFont { size_pt: Some(16.0), bold: Some(true), ..Default::default() }), ..base.clone() };
+        let lines = room_stamp_extra_lines(&s, 20.0, SiaCategory::HNF);
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0].marks.as_ref().map(|m| (m.size_pt, m.bold)), Some((Some(16.0), Some(true))));
+        assert!(lines[1].marks.is_none());
+        let plain_lines = room_stamp_extra_lines(&RoomStamp { show_floor_area: Some(true), ..base.clone() }, 20.0, SiaCategory::HNF);
+        let (_, hp) = stamp_size_m(&d0, &plain_lines, ROOM_STAMP_PT, 100.0);
+        let (wb, hb) = stamp_size_m(&d0, &lines[..1], ROOM_STAMP_PT, 100.0);
+        assert!(hb > hp, "grössere Flächenzeile macht den Block höher: {hp} -> {hb}");
+        // Die Grösse folgt der Grundschrift (7 pt ab 1:200): 16 pt × 7/10.
+        let rows: Vec<crate::text_layout::ExtraRow> = lines.iter().map(|l| l.row()).collect();
+        let placed = crate::text_layout::stamp_block(&d0, &rows, ROOM_STAMP_SMALL_PT, PT_MM, "#000000", 0.0);
+        let sz = placed[3].line.tspans[0].font_size / PT_MM;
+        assert!((sz - 16.0 * 0.7).abs() < 0.01 && wb > 0.0, "{sz}");
+    }
+
+    /// [218] Eigene Schriftgrössen gehen vor Überdeckung: findet sich nur eine Lage mit Überdeckung, bleibt der Name in
+    /// der gewählten Schrift (statt der Ersatzvariante ohne eigene Grössen).
+    #[test]
+    fn raumstempel_eigene_grosse_geht_vor_ueberdeckung() {
+        let s = RoomStamp { name: "Wohnen".into(), name_font: Some(RoomStampFont { size_pt: Some(24.0), ..Default::default() }), ..Default::default() };
+        assert!(stamp_has_sizes(&s) && !stamp_has_sizes(&RoomStamp { name: "x".into(), ..Default::default() }));
+        let doc = room_stamp_to_doc(&s);
+        // Frei (ohne Überdeckung) gibt es keine Lage; mit Überdeckung überall.
+        let place = |_: f64, _: f64, free: bool| (!free).then_some(Vec2 { x: 0.0, y: 0.0 });
+        let (_, _, d, at) = fit_room_stamp_with(&doc, None, vec![], ROOM_STAMP_PT, 100.0, true, &place);
+        assert!(d.is_none() && at.is_some(), "Name in 24 pt bleibt");
+        // Ohne `styled` (Standard) bleibt das Verhalten: Ersatzvariante, wenn die Lage damit frei ist.
+        let place2 = |w: f64, _: f64, free: bool| (!free || w < 2.0).then_some(Vec2 { x: 0.0, y: 0.0 });
+        let (_, _, d2, _) = fit_room_stamp_with(&doc, None, vec![], ROOM_STAMP_PT, 100.0, false, &place2);
+        assert!(d2.is_some(), "ohne eigene Grössen als Ersatz");
+        let (_, _, d3, _) = fit_room_stamp_with(&doc, None, vec![], ROOM_STAMP_PT, 100.0, true, &place2);
+        assert!(d3.is_none(), "mit eigenen Grössen: Überdeckung statt Ersatz");
+    }
+
+    /// [218] Im Plan trägt der Stempel die gewählte Schrift (Primitiv `text`): Familie im Namen, Zeilenmarken.
+    #[test]
+    fn raumstempel_schrift_im_plan() {
+        let mut p = sample();
+        for r in p.rooms.as_mut().unwrap() {
+            r.stamp = Some(RoomStamp {
+                name: r.name.clone(),
+                show_floor_area: Some(true),
+                font: Some(RoomStampFont { family: Some("Jost".into()), ..Default::default() }),
+                area_font: Some(RoomStampFont { size_pt: Some(9.0), italic: Some(true), ..Default::default() }),
+                ..Default::default()
+            });
+        }
+        let t = serde_json::json!({ "floor": "eg", "show": ["20", "60"], "grey": [], "scale": 100 }).to_string();
+        let d = plan_domains(&p, &PlanArgs::parse(1.0, &t).unwrap()).unwrap();
+        let (doc, extra) = d.rooms.iter().find_map(|q| match q { Primitive::Text { doc, extra_lines, .. } => Some((doc.clone(), extra_lines.clone())), _ => None }).unwrap();
+        assert_eq!(doc.paragraphs[0].runs[0].marks.font.as_deref(), Some("Jost"));
+        let m = extra[0].marks.as_ref().expect("Marken der Flächenzeile");
+        assert_eq!((m.font.as_deref(), m.size_pt, m.italic), (Some("Jost"), Some(9.0), Some(true)));
+        // Das Primitiv trägt die Marken auch im JSON (Anzeige, SVG, DXF lesen sie von dort).
+        assert!(serde_json::to_string(&Primitive::Text { at: Vec2 { x: 0.0, y: 0.0 }, doc, extra_lines: extra, base_pt: 10.0, color: "#000".into(), room_id: None, greyed: None, opacity: None }).unwrap().contains("\"italic\":true"));
+    }
+
     /// [140] Raumstempel ab 1:200 kleiner (7 pt); bis 1:100 10 pt mit der Flächenzeile.
     #[test]
     fn raumstempel_je_massstab() {
@@ -2256,7 +2408,7 @@ mod tests {
     /// Breite aus der Schriftmetrik (Inter), Platz aus dem Raumumriss um den Anker.
     #[test]
     fn raumstempel_passt_in_engen_raum() {
-        let extra = || vec![StampLine { text: "4.6 m²".into(), align: Align::Center }, StampLine { text: "NNF · Nebennutzfläche".into(), align: Align::Center }];
+        let extra = || vec![StampLine::plain("4.6 m²".into(), Align::Center), StampLine::plain("NNF · Nebennutzfläche".into(), Align::Center)];
         let name = doc_from_text("E.04 Bad");
         let room = |w: f64, h: f64| move |sw: f64, sh: f64, _free: bool| (sw <= w && sh <= h).then_some(Vec2 { x: 0.0, y: 0.0 });
         let (e, pt, d, _) = fit_room_stamp(&name, None, extra(), ROOM_STAMP_PT, 100.0, &room(6.0, 4.0));

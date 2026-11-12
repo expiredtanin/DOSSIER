@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { defaultRoomStamp, roomDisplayName } from "./roomStamp";
+import { defaultRoomStamp, roomDisplayName, setStampFontAttr } from "./roomStamp";
 import type { Room } from "./types";
 
 function makeRoom(over: Partial<Room> = {}): Room {
@@ -48,5 +48,22 @@ describe("roomDisplayName", () => {
       stamp: { name: "Küche", showFloorArea: true, showUsage: true },
     });
     expect(roomDisplayName(room)).toBe("Küche");
+  });
+});
+
+describe("setStampFontAttr [218]", () => {
+  const base = { name: "Wohnen" };
+  it("setzt und entfernt Eigenschaften je Zeile, eine leere Schrift entfällt", () => {
+    const a = setStampFontAttr(base, "nameFont", "sizePt", 18);
+    expect(a.nameFont).toEqual({ sizePt: 18 });
+    const b = setStampFontAttr(a, "nameFont", "family", "Jost");
+    expect(b.nameFont).toEqual({ sizePt: 18, family: "Jost" });
+    const c = setStampFontAttr(setStampFontAttr(b, "nameFont", "sizePt", undefined), "nameFont", "family", "");
+    expect("nameFont" in c).toBe(false);
+    expect(a).toEqual({ name: "Wohnen", nameFont: { sizePt: 18 } }); // unverändert (rein)
+  });
+  it("Unsinn (Grösse <= 0) setzt nichts", () => {
+    expect("font" in setStampFontAttr(base, "font", "sizePt", 0)).toBe(false);
+    expect(setStampFontAttr(base, "areaFont", "bold", true).areaFont).toEqual({ bold: true });
   });
 });

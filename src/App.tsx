@@ -60,6 +60,7 @@ import { useCommandEngineHost } from "./state/useCommandEngineHost";
 import { TRANSFORM_COMMANDS, useToolInput } from "./state/useToolInput";
 import { useSelectionCommands } from "./state/useSelectionCommands";
 import { openObjectSettings } from "./state/objectSettings";
+import type { InfoGroupId } from "./panels/objectInfo/groups";
 import { openObjectSettingsWindowNative, useObjectSettingsWindowHost } from "./native/objectSettingsWindow";
 import { isTauriRuntime } from "./native/projectFile";
 import {
@@ -183,7 +184,7 @@ export default function App() {
   // ── Kontextmenüs (transienter UI-State, bleibt lokal) ─────────────────────
   const {
     layerClipboard, setLayerClipboard, drawingStyleClipboard, setDrawingStyleClipboard, menu, setMenu, editor,
-    setEditor, nativeLayerSettingsCode, setNativeLayerSettingsCode, stampEditorRoomId, setStampEditorRoomId,
+    setEditor, nativeLayerSettingsCode, setNativeLayerSettingsCode,
     editTextId, setEditTextId, editTextMinHeightM, setEditTextMinHeightM,
   } = useContextMenuState();
 
@@ -504,14 +505,16 @@ export default function App() {
 
   // [195] Taste T / Menü „Objekteinstellungen…" (state/objectSettings.ts): unter Tauri natives Nebenfenster ([195b]),
   // sonst schwebendes Panel.
-  const openSettingsOfObject = () =>
-    openObjectSettings({
-      activeTool,
-      revealObjectSettings: (group) =>
-        isTauriRuntime()
-          ? void openObjectSettingsWindowNative(group)
-          : setLayout((l) => revealPanel(l, "object-settings", { x: 96, y: 96, w: 360, h: 560 })),
-    });
+  const settingsDeps = () => ({
+    activeTool,
+    revealObjectSettings: (group: InfoGroupId | null) =>
+      isTauriRuntime()
+        ? void openObjectSettingsWindowNative(group)
+        : setLayout((l) => revealPanel(l, "object-settings", { x: 96, y: 96, w: 360, h: 560 })),
+  });
+  const openSettingsOfObject = () => openObjectSettings(settingsDeps());
+  // [218] Doppelklick auf einen Raumstempel: dieselben Objekteinstellungen, Abschnitt „Raumstempel" fokussiert.
+  const openRoomStampSettings = () => openObjectSettings(settingsDeps(), "roomStamp");
   useObjectSettingsShortcut(shortcutOverrides, engineRef, openSettingsOfObject);
   useCloseObjectSettingsOnEscape(activeTool !== "select" || commandActive);
 
@@ -606,7 +609,8 @@ export default function App() {
     categoryDisplay,
     floorDisplay,
     selectionState: { selection, setSelection, groupPath },
-    contextMenuState: { setMenu, setStampEditorRoomId, editTextId, setEditTextId, setEditTextMinHeightM },
+    contextMenuState: { setMenu, editTextId, setEditTextId, setEditTextMinHeightM },
+    openRoomStampSettings,
   });
 
   // „Bild einfügen" (Werkzeug „image") — siehe state/useImportHandling.ts.
@@ -655,7 +659,6 @@ export default function App() {
     onToggleSection3dCut,
     openLayerSettings,
     openSettings,
-    onOpenStampEditor,
     openResources,
     dxfInputRef,
     planViewRef,
@@ -1034,8 +1037,6 @@ export default function App() {
         pendingCopyMode={pendingCopyMode}
         setPendingCopyMode={setPendingCopyMode}
         commitCopyCount={commitCopyCount}
-        stampEditorRoomId={stampEditorRoomId}
-        setStampEditorRoomId={setStampEditorRoomId}
       />
 
       {/* Aktives Kontextmenü (genau eines), verdrahtet in menus/AppContextMenu.tsx. */}

@@ -389,12 +389,12 @@ pub struct Placed {
 /// Basisgrösse bzw. die Absatz-Zeilenhöhe), darunter die Live-Zeilen (`extra`: Text und
 /// Ausrichtung; Verweis-Absatz = Absatzzahl + Nummer), vertikal um `y0` zentriert; `y` wächst nach
 /// unten (Bildschirm) — im Modell ist es der Abstand nach unten.
-pub fn stamp_block_refs(doc: &RichTextDoc, extra: &[(&str, LineAlign)], base_pt: f64, unit_per_pt: f64, color: &str, y0: f64) -> Vec<(LineRef, f64)> {
+pub fn stamp_block_refs(doc: &RichTextDoc, extra: &[ExtraRow], base_pt: f64, unit_per_pt: f64, color: &str, y0: f64) -> Vec<(LineRef, f64)> {
     let base_fs = base_pt * unit_per_pt;
     let line_gap = base_fs * 1.3;
     let mut lines = layout_refs(doc, &LayoutOpts { line_height: line_gap, unit_per_pt, base_pt, color }, None);
     let n = doc.paragraphs.len();
-    for (i, (text, align)) in extra.iter().enumerate() {
+    for (i, (text, align, _)) in extra.iter().enumerate() {
         lines.push(LineRef { toks: vec![Tok { para: n + i, run: 0, b0: 0, b1: text.len(), u0: 0, u1: utf16_len(text) }], align: *align, line_height: line_gap });
     }
     if lines.is_empty() {
@@ -409,7 +409,7 @@ pub fn stamp_block_refs(doc: &RichTextDoc, extra: &[(&str, LineAlign)], base_pt:
         .map(|l| {
             l.toks
                 .iter()
-                .map(|t| if t.para >= n { base_fs * 0.8 } else { doc.paragraphs[t.para].runs[t.run].marks.size_pt.filter(|v| v.is_finite() && *v > 0.0).map_or(base_fs, |pt| pt * unit_per_pt) })
+                .map(|t| if t.para >= n { extra_size_pt(extra[t.para - n].2, base_pt) * unit_per_pt } else { doc.paragraphs[t.para].runs[t.run].marks.size_pt.filter(|v| v.is_finite() && *v > 0.0).map_or(base_fs, |pt| pt * unit_per_pt) })
                 .fold(f64::NAN, f64::max)
         })
         .map(|f| if f.is_finite() { f } else { base_fs })
@@ -435,13 +435,34 @@ pub fn stamp_block_refs(doc: &RichTextDoc, extra: &[(&str, LineAlign)], base_pt:
         .collect()
 }
 
+/// [218] Grundschrift des Raumstempels in pt (Bezug der Grössen in den Zeilen-`Marks`).
+pub const STAMP_REF_PT: f64 = 10.0;
+
+/// Zusatzzeile eines Raumstempels: Text, Ausrichtung, eigene Schrift (`None`: 0.8 × Grundschrift).
+pub type ExtraRow<'a> = (&'a str, LineAlign, Option<&'a Marks>);
+
+/// [218] Schriftgrösse (pt) einer Zusatzzeile: eigene Angabe (bezogen auf [`STAMP_REF_PT`], wächst und schrumpft
+/// mit der Grundschrift `base_pt`) oder 0.8 × Grundschrift.
+pub fn extra_size_pt(m: Option<&Marks>, base_pt: f64) -> f64 {
+    m.and_then(|m| m.size_pt).filter(|v| v.is_finite() && *v > 0.0).map_or(base_pt * 0.8, |s| s * base_pt / STAMP_REF_PT)
+}
+
+/// [218] Lauf einer Zusatzzeile: ohne eigene Schrift wie bisher ([`stamp_extra_tspan`]), sonst mit Familie, Schnitt,
+/// Farbe und Grösse der Zeile.
+pub fn stamp_extra_span(text: String, m: Option<&Marks>, base_pt: f64, unit_per_pt: f64, color: &str) -> Tspan {
+    match m {
+        None => stamp_extra_tspan(text, base_pt, unit_per_pt, color),
+        Some(m) => tspan_of(text, &Marks { size_pt: Some(extra_size_pt(Some(m), base_pt)), ..m.clone() }, base_pt, unit_per_pt, color),
+    }
+}
+
 /// Stil der Live-Zeilen eines Raumstempels (0.8 × Basisgrösse, ungerundet, Farbe `color`).
 pub fn stamp_extra_tspan(text: String, base_pt: f64, unit_per_pt: f64, color: &str) -> Tspan {
     Tspan { text, font_size: base_pt * unit_per_pt * 0.8, fill: color.to_string(), bold: false, italic: false, font_family: None, text_decoration: None, baseline_shift: None }
 }
 
 /// Raumstempel-Block ausgeschrieben ([`stamp_block_refs`]).
-pub fn stamp_block(doc: &RichTextDoc, extra: &[(&str, LineAlign)], base_pt: f64, unit_per_pt: f64, color: &str, y0: f64) -> Vec<Placed> {
+pub fn stamp_block(doc: &RichTextDoc, extra: &[ExtraRow], base_pt: f64, unit_per_pt: f64, color: &str, y0: f64) -> Vec<Placed> {
     let o = LayoutOpts { line_height: 0.0, unit_per_pt, base_pt, color };
     let n = doc.paragraphs.len();
     stamp_block_refs(doc, extra, base_pt, unit_per_pt, color, y0)
@@ -452,7 +473,7 @@ pub fn stamp_block(doc: &RichTextDoc, extra: &[(&str, LineAlign)], base_pt: f64,
                 .iter()
                 .map(|t| {
                     if t.para >= n {
-                        stamp_extra_tspan(extra[t.para - n].0.to_string(), base_pt, unit_per_pt, color)
+                        stamp_extra_span(extra[t.para - n].0.to_string(), extra[t.para - n].2, base_pt, unit_per_pt, color)
                     } else {
                         let r = &doc.paragraphs[t.para].runs[t.run];
                         tspan_of(r.text[t.b0..t.b1].to_string(), &r.marks, o.base_pt, o.unit_per_pt, o.color)
@@ -638,7 +659,7 @@ pub fn stamp_line_offsets(placed: &[Placed]) -> Vec<f64> {
 /// [140] Ausmass eines Raumstempels ([`stamp_block`]) in Einheiten von `unit_per_pt`: Breite der breitesten
 /// Zeile (Summe der Tspans mit echter Metrik, [`text_width_em`]) und Höhe des Blocks (erste Zeile plus
 /// Zeilenvorschübe, wie die Zentrierung in [`stamp_block_refs`]).
-pub fn stamp_block_size(doc: &RichTextDoc, extra: &[(&str, LineAlign)], base_pt: f64, unit_per_pt: f64) -> (f64, f64) {
+pub fn stamp_block_size(doc: &RichTextDoc, extra: &[ExtraRow], base_pt: f64, unit_per_pt: f64) -> (f64, f64) {
     let placed = stamp_block(doc, extra, base_pt, unit_per_pt, "#000000", 0.0);
     if placed.is_empty() {
         return (0.0, 0.0);
@@ -792,16 +813,16 @@ mod tests {
             ..Default::default()
         };
         let base = 5.67;
-        let placed = stamp_block(&d, &[("35.2 m²", LineAlign::Left)], base, 1.0, "#000", 0.0);
+        let placed = stamp_block(&d, &[("35.2 m²", LineAlign::Left, None)], base, 1.0, "#000", 0.0);
         let ys: Vec<f64> = placed.iter().map(|p| p.y).collect();
         // Grundlinie Name → Nummer: Unterlänge 12 pt + Oberlänge 9 pt passen (≥ 1.15 × 9).
         assert!(ys[1] - ys[0] >= 1.15 * 9.0 - 1e-9, "{ys:?}");
         assert!(ys[2] - ys[1] >= 0.3 * 9.0 + 0.8 * base * 0.8 - 1e-9, "{ys:?}");
         // Oberkante des Blocks (Grundlinie Name − 0.8 × 12) bis Grundlinie letzte Zeile: so hoch misst der Block.
-        let (_, h) = stamp_block_size(&d, &[("35.2 m²", LineAlign::Left)], base, 1.0);
+        let (_, h) = stamp_block_size(&d, &[("35.2 m²", LineAlign::Left, None)], base, 1.0);
         assert!((h - (12.0 + (ys[2] - ys[0]))).abs() < 1e-9, "{h}");
         // Normale Grundschrift (10 pt): Vorschub wie bisher 13 pt.
-        let placed = stamp_block(&d, &[("35.2 m²", LineAlign::Left)], 10.0, 1.0, "#000", 0.0);
+        let placed = stamp_block(&d, &[("35.2 m²", LineAlign::Left, None)], 10.0, 1.0, "#000", 0.0);
         assert!((placed[1].y - placed[0].y - 13.0).abs() < 1e-9 && (placed[2].y - placed[1].y - 13.0).abs() < 1e-9);
     }
     /// [140] Echte Metrik: „Bad" schmaler als „WWW", Leerzeichen schmal; Stempelblock misst Name und Zeilen.
@@ -812,7 +833,7 @@ mod tests {
         assert!(text_width_em("m²", false) > text_width_em("m", false));
         assert!(text_width_em("Bad", true) > text_width_em("Bad", false));
         let d = doc_from_text("Bad", &Marks::default());
-        let (w, h) = stamp_block_size(&d, &[("4.60 m²", LineAlign::Center)], 10.0, 1.0);
+        let (w, h) = stamp_block_size(&d, &[("4.60 m²", LineAlign::Center, None)], 10.0, 1.0);
         // Zweite Zeile 8 pt: 4.60 m² ≈ 3.6 em · 8; Höhe 10 + 13.
         assert!((h - 23.0).abs() < 1e-9, "{h}");
         assert!((w - text_width_em("4.60 m²", false) * 8.0).abs() < 1e-9, "{w}");

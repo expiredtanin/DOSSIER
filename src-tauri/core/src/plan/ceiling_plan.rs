@@ -357,10 +357,10 @@ fn room_labels(c: &Ctx, soffits: &[Soffit], roofs: &[RoofUnder], out: &mut Vec<P
         let mut lines = Vec::new();
         let kote = super::drawings::kote_label;
         if z.is_finite() {
-            lines.push(super::prim::StampLine { text: format!("UK {}", kote(z)), align: Align::Center });
+            lines.push(super::prim::StampLine::plain(format!("UK {}", kote(z)), Align::Center));
         } else if let Some((lo, hi)) = roof_range(&pts, roofs) {
             let text = if hi - lo < 0.005 { format!("UK {}", kote(lo)) } else { format!("UK {} … {}", kote(lo), kote(hi)) };
-            lines.push(super::prim::StampLine { text, align: Align::Center });
+            lines.push(super::prim::StampLine::plain(text, Align::Center));
         }
         out.push(Primitive::Text { at, doc: super::domains::doc_from_text(&room.name), extra_lines: lines, base_pt: LABEL_PT, color: POCHE_STROKE.into(), room_id: Some(room.id.clone()), greyed: Some(c.greyed(&room.category_code)), opacity: None });
     }

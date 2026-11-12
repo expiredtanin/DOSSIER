@@ -38,7 +38,6 @@ liegen in `src/panels`, Befehle in `src/commands`.
 | Datei | Inhalt |
 |---|---|
 | `LayoutSheet.tsx`, `layoutSheetMath.ts`, `LayoutCreateDialogs.tsx`, `SheetTableHud.tsx` | Layout-Blatt im Haupt-Viewport, Treffer- und Resize-Rechnung der Viewports, Erstell-Dialoge, Eigenschaften einer Blatt-Tabelle |
-| `TextEditorDialog.tsx`, `RoomStampEditorHost.tsx` | Rich-Text-Editor, Stempel-Editor eines Raums |
 | `OpeningDetailPanels.tsx`, `ElevationPreview.tsx` | Detail-Panels des Fenster-/Türeditors (der Editor selbst: `panels/objectInfo/OpeningEditor.tsx`), Ansichtsvorschau |
 
 ## Unterordner

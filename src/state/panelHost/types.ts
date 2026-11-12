@@ -48,7 +48,6 @@ export type PanelHostOpts = {
   onToggleSection3dCut: (id: string) => void;
   openLayerSettings: (code: string, x: number, y: number) => void;
   openSettings: () => void;
-  onOpenStampEditor: (roomId: string) => void;
   openResources: (tab?: ResourceTabId) => void;
   dxfInputRef: RefObject<HTMLInputElement | null>;
   planViewRef: RefObject<PlanViewHandle | null>;

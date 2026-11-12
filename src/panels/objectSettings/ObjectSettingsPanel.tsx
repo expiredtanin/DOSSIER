@@ -58,7 +58,7 @@ export function ObjectSettingsPanel() {
         </div>
       )}
       <div className="objset-body" role="tabpanel" aria-label={t(AREA_TITLE[area])}>
-        {area === "object" ? <ObjectInfoPanel /> : <AttributesPanel />}
+        {area === "object" ? <ObjectInfoPanel showPlacement={false} /> : <AttributesPanel />}
       </div>
     </div>
   );
