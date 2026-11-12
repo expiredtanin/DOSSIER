@@ -1,20 +1,40 @@
 /**
- * Texte für die NATIVE 2D-Engine (Vektor-Text in Rust, src-tauri/render2d/src/vtext.rs).
+ * Texte für die NATIVE 2D-Engine (macOS-Metal-Fläche, src-tauri/render2d).
  *
- * Einfache, einzeilige `drawingText`-Primitive (auch gedrehte) zeichnet die native
- * Fläche; alles Reichere (Textfelder mit `doc`, Spaltenumbruch, Mehrzeiler) bleibt
- * im SVG-Overlay. Die Webview schickt nur DELTAS: je Text eine Signatur, nur neue
- * oder geänderte Texte gehen über die Schnittstelle.
+ * Zwei Wege, beide im selben Frame wie die Linien ([194]):
+ *  • Glyphen-Pass (glyphon, `render2d/src/glyph.rs`): Raumstempel und WAAGRECHTE Textfelder samt
+ *    Mehrzeilern, Umbruch, Fett/Kursiv und Ausrichtung — Zeilen setzt der Kern (`plan_screen_texts`,
+ *    {@link isSceneText}); die Webview schickt sie gesammelt (`native2d_scene_texts`).
+ *  • Vektor-Glyphen (`vtext.rs`): GEDREHTE einfache Einzeiler ({@link isGpuText}), als Delta: je Text
+ *    eine Signatur, nur neue oder geänderte Texte gehen über die Schnittstelle.
+ * Gedrehte Mehrzeiler/Textfelder bleiben im SVG-Overlay.
  */
 
 import type { Primitive } from './generatePlan';
 
 type DrawingText = Extract<Primitive, { kind: 'drawingText' }>;
 
-/** Zeichnet die native Fläche diesen Text (statt des SVG-Overlays)? */
+/**
+ * Gedreht (wie Kern `plan::text::is_rotated`; der Glyphen-Pass zeichnet nur waagrecht)? Volle Umdrehungen
+ * (Masszahlen tragen oft 2π) gelten als waagrecht.
+ */
+export function isRotated(angle: number): boolean {
+  if (!Number.isFinite(angle)) return false;
+  const tau = 2 * Math.PI;
+  const a = ((angle % tau) + tau) % tau;
+  return a > 1e-9 && tau - a > 1e-9;
+}
+
+/** Setzt der Kern diesen Text in die Bildschirm-Szene (Glyphen-Pass)? Raumstempel und waagrechte Textfelder. */
+export function isSceneText(p: Primitive): boolean {
+  return p.kind === 'text' || (p.kind === 'drawingText' && !isRotated(p.angle));
+}
+
+/** Zeichnet die native Fläche diesen gedrehten Einzeiler als Vektor-Glyphen (statt des SVG-Overlays)? */
 export function isGpuText(p: Primitive): p is DrawingText {
   return (
     p.kind === 'drawingText' &&
+    isRotated(p.angle) &&
     !!p.drawingId &&
     !p.doc &&
     !p.wrapWidth &&

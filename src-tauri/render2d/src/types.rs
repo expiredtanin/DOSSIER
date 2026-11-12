@@ -158,7 +158,15 @@ pub struct Text {
     /// Ausrichtung relativ zu `pos` (Default: left).
     #[serde(default)]
     pub align: TextAlign,
+    /// Schnitt ([194]): `STYLE_BOLD` | `STYLE_ITALIC` (Default: normal).
+    #[serde(default)]
+    pub style: u32,
 }
+
+/// Schnitt-Bit fett (`Text::style`, Szene: Kennung >> 8).
+pub const STYLE_BOLD: u32 = 1;
+/// Schnitt-Bit kursiv.
+pub const STYLE_ITALIC: u32 = 2;
 
 /// Die vollstaendige Szene: alles, was ein Frame zeichnet. Reihenfolge ist
 /// signifikant (Z-/Alpha-Ueberlagerung): erst Fuellungen, dann Umrisse, dann

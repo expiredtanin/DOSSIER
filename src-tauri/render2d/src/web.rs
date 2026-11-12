@@ -23,12 +23,6 @@ use crate::gpu::Renderer;
 use crate::scene_bin::decode_scene;
 use crate::types::ViewBox;
 
-/// Eingebettete Plan-Schrift (Inter). cosmic-text findet auf wasm KEINE
-/// Systemfonts — ohne eingebettete Bytes bliebe der Grundriss textlos. Die
-/// Familie meldet sich als "Inter Variable"; `Renderer::load_font` uebernimmt
-/// den tatsaechlichen Namen automatisch.
-const INTER_TTF: &[u8] = include_bytes!("../assets/Inter.ttf");
-
 // Geraeteverlust (`device.lost`): wgpu verlangt einen `Send`-Rueckruf, eine JS-Funktion ist
 // das nicht. Der Rueckruf traegt daher nur die Renderer-Nummer; die JS-Funktion liegt hier
 // (WASM ist einfaedig, der Rueckruf laeuft im Ereignis-Takt des Browsers).
@@ -171,7 +165,10 @@ impl WebPlanRenderer {
 
         let mut renderer = Renderer::new(&device, format);
         // Font einspielen: uebergebene Bytes ODER die eingebettete Inter-Schrift.
-        renderer.load_font(font_bytes.unwrap_or_else(|| INTER_TTF.to_vec()));
+        // Ohne eigene Bytes: das eingebettete Inter (`glyph::INTER_TTF`; wasm kennt keine Systemschriften).
+        if let Some(bytes) = font_bytes {
+            renderer.load_font(bytes);
+        }
 
         web_sys::console::log_1(&JsValue::from_str(&format!(
             "render2d WebGPU-Viewport initialisiert ({}x{}, {:?})",

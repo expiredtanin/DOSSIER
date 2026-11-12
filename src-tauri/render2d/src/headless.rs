@@ -19,6 +19,7 @@ use image::ImageEncoder;
 
 use crate::chunks::{ChunkGeom, ChunkRenderer, DashBatch, FillBatch, LineBatch, View};
 use crate::gpu::Renderer;
+use crate::text_lines::GlyphLine;
 use crate::types::{Scene, ViewBox};
 
 /// Farbformat der Offscreen-Zieltextur. Non-sRGB (Rgba8Unorm): der Fragment-
@@ -161,10 +162,22 @@ impl HeadlessRenderer {
     /// `gpu_compile_flat`, gepackte Linien-Vertices) ueber den Chunk-Renderer, den der
     /// native macOS-Pfad benutzt (`chunks.rs`: dieselben Shader und dieselbe
     /// Zeichenreihenfolge, nur ohne Metal-Flaeche). `view` in Bildschirm-Einheiten.
-    /// Fuer Headless-Vergleiche Chunk-Pfad gegen Szenen-Pfad.
-    pub fn render_chunks_to_image(&self, chunks: &[Vec<u32>], width: u32, height: u32, view: View, paper_scale_n: f64) -> Result<RgbaImage, String> {
+    /// Fuer Headless-Vergleiche Chunk-Pfad gegen Szenen-Pfad. `texts`: gesetzte Textzeilen samt
+    /// Satz-Massstab 1:N (`plan_screen_texts`, Glyphen-Pass wie auf dem Mac, [194]).
+    pub fn render_chunks_to_image(
+        &self,
+        chunks: &[Vec<u32>],
+        width: u32,
+        height: u32,
+        view: View,
+        paper_scale_n: f64,
+        texts: Option<(Vec<GlyphLine>, f64)>,
+    ) -> Result<RgbaImage, String> {
         let (width, height) = (width.max(1), height.max(1));
         let mut cr = ChunkRenderer::new(&self.device, COLOR_FORMAT, 4);
+        if let Some((lines, n)) = texts {
+            cr.set_scene_texts(lines, n);
+        }
         let mut layout = Vec::new();
         let mut next_id = 1u32;
         for words in chunks {
@@ -382,7 +395,7 @@ mod tests {
         // 200 Einheiten lang, Muster 20 an / 20 aus; Ansicht 1:1 auf 200x40 px.
         let chunk = dashed_chunk(200.0, 20.0, 20.0, 0.05);
         let img = r
-            .render_chunks_to_image(&[chunk], 200, 40, View { x: 0.0, y: -20.0, w: 200.0, h: 40.0 }, 1000.0)
+            .render_chunks_to_image(&[chunk], 200, 40, View { x: 0.0, y: -20.0, w: 200.0, h: 40.0 }, 1000.0, None)
             .expect("rendern");
         let px = |x: u32| {
             let i = ((20 * img.width + x) * 4) as usize;
@@ -395,6 +408,56 @@ mod tests {
         for c in [30u32, 70, 110, 150] {
             assert!(px(c) > 200, "Luecke bei x={c}: {}", px(c));
         }
+    }
+
+    /// [194] Der Chunk-Renderer (native Flaeche) zeichnet die gesetzten Textzeilen selbst: Text liegt
+    /// an der Ausrichtung des Ankers, fett deckt mehr als normal, die Groesse folgt dem Zoom wie die Geometrie.
+    #[test]
+    fn chunk_renderer_zeichnet_textzeilen() {
+        use crate::types::{TextAlign, STYLE_BOLD};
+        let r = match HeadlessRenderer::new() {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("uebersprungen, kein Headless-Adapter: {e}");
+                return;
+            }
+        };
+        let line = |x: f64, style: u32, align: TextAlign| GlyphLine {
+            x,
+            y: 0.0,
+            content: "Wohnen".into(),
+            size_mm: 5.0,
+            color: [0.0, 0.0, 0.0, 1.0],
+            align,
+            style,
+        };
+        // Ansicht: x 0..4 m, y −1..1 m auf 360x180 px (1 Einheit = 1 px); 5 mm bei 1:100 = 0.5 m = 45 px.
+        // Tinte = Abdunklung gegenueber dem Blatt (Rot-Kanal der Ecke oben links).
+        let ink = |img: &RgbaImage, x0: u32, x1: u32| -> u32 {
+            let bg = img.pixels[0] as u32;
+            let mut s = 0;
+            for y in 0..img.height {
+                for x in x0..x1.min(img.width) {
+                    s += bg.saturating_sub(img.pixels[((y * img.width + x) * 4) as usize] as u32);
+                }
+            }
+            s
+        };
+        let render = |lines: Vec<GlyphLine>, w: f64| r.render_chunks_to_image(&[], 360, 180, View { x: 0.0, y: -w / 4.0, w, h: w / 2.0 }, 100.0, Some((lines, 100.0))).unwrap();
+        let normal = render(vec![line(0.5, 0, TextAlign::Left)], 360.0);
+        let bold = render(vec![line(0.5, STYLE_BOLD, TextAlign::Left)], 360.0);
+        let (n, b) = (ink(&normal, 0, 360), ink(&bold, 0, 360));
+        assert!(n > 0, "Text gezeichnet");
+        assert!(b as f64 > n as f64 * 1.2, "fett deckt mehr: {b} vs {n}");
+        // Linksbuendig am Anker (x = 0.5 m = 45 px): links davon nichts. Rechtsbuendig an x = 4 m: alles links.
+        assert_eq!(ink(&normal, 0, 43), 0);
+        assert!(ink(&normal, 45, 60) > 0);
+        let right = render(vec![line(4.0, 0, TextAlign::Right)], 360.0);
+        assert!(ink(&right, 180, 360) > ink(&right, 0, 180));
+        // Halber Ausschnitt (2× Zoom): Text doppelt so gross → rund 4× so viel Tinte (Flaeche).
+        let zoomed = render(vec![line(0.5, 0, TextAlign::Left)], 180.0);
+        let ratio = ink(&zoomed, 0, 360) as f64 / n as f64;
+        assert!((3.0..5.0).contains(&ratio), "Zoom-Verhaeltnis {ratio}");
     }
 
     #[test]

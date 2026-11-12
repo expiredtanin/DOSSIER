@@ -680,8 +680,14 @@ pub struct SText {
     pub color: Rgba,
     /// 0 links · 1 Mitte · 2 rechts
     pub align: u32,
+    /// Schnitt der Zeile ([194], erster Lauf): Bit 0 fett, Bit 1 kursiv.
+    pub style: u32,
     pub content: Vec<u8>,
 }
+
+/// Schnitt-Bits einer Zeile (`SText::style`).
+pub const STYLE_BOLD: u32 = 1;
+pub const STYLE_ITALIC: u32 = 2;
 
 /// `z >>> 0` (ToUint32).
 fn u32_of(z: f64) -> u32 {
@@ -784,7 +790,8 @@ pub fn encode_scene_bin(s: &Scene, texts: &[SText]) -> Vec<u8> {
     }
     for t in texts {
         f(&mut rec, t.size_mm);
-        u(&mut rec, t.align);
+        // Ausrichtung im unteren Byte, Schnitt darüber ([194], `render2d/src/scene_bin.rs`).
+        u(&mut rec, t.align | (t.style << 8));
         u(&mut rec, strs.len() as u32);
         u(&mut rec, t.content.len() as u32);
         col(&mut rec, &t.color);
@@ -883,7 +890,7 @@ mod tests {
             lines: vec![SLine { a: v2(0.0, 0.0), b: v2(2600000.5, 1200000.25), color: [0.0, 0.5, 0.0, 1.0], width_mm: 0.35, dash: SDash::List(vec![3.0, 1.0, 0.5, 1.0]), z: 4.0 }],
             line_ends: 0,
         };
-        let t = |x: f64, y: f64, content: &str, size_mm: f64, color: Rgba, align: u32| SText { pos: v2(x, y), size_mm, color, align, content: content.as_bytes().to_vec() };
+        let t = |x: f64, y: f64, content: &str, size_mm: f64, color: Rgba, align: u32| SText { pos: v2(x, y), size_mm, color, align, style: 0, content: content.as_bytes().to_vec() };
         let texts = vec![
             t(1.0, 2.0, "Küche 12,5 m²", 2.5, [0.0, 0.0, 0.0, 1.0], 1),
             t(3.0, 4.0, "", 2.0, [0.0, 0.0, 0.0, 1.0], 2),

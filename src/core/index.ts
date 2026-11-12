@@ -148,6 +148,7 @@ export {
 export {
   NativeTextSync,
   isGpuText,
+  isSceneText,
 } from "../plan/nativeText";
 
 export {
@@ -232,6 +233,7 @@ export {
 
 export {
   planSceneBin,
+  planScreenTexts,
   planToRenderScene,
 } from "../plan/toRenderScene";
 

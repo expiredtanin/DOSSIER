@@ -13,6 +13,7 @@ Zusammenspiel: `doc/ARCHITEKTUR.md`, Abschnitt 3.4.
 | `lib.rs` | Modulliste und Beschreibung der Schichten |
 | `types.rs` | Eingabe-Typen: Primitive, Szene, Ausschnitt |
 | `scene_bin.rs` | Binärformat der Plan-Szene (little-endian), das der Kern schreibt und render2d liest |
+| `text_lines.rs` | Textzeilen für den Glyphen-Pass (Modell-Meter in f64) und ihr Lesen aus der Kern-Bindung `plan_screen_texts` |
 | `tessellate.rs` | Polygone (Ear-Clipping) und Linien (Quads) zu Vertex- und Index-Puffern |
 | `ortho.rs` | aspekt-treue Ortho-Matrix und Strichbreite in Papier-mm |
 | `shaders.rs` | WGSL-Quellen für Füllung und Linie |
@@ -23,8 +24,9 @@ Zusammenspiel: `doc/ARCHITEKTUR.md`, Abschnitt 3.4.
 | Datei | Inhalt |
 |---|---|
 | `gpu.rs` | wgpu-Pipelines (Füllung, Linie) und der `Renderer` |
-| `vtext.rs` | Vektor-Text: Glyphen-Umrisse einmal tesselliert und instanziert gezeichnet, auch gedreht |
-| `chunks.rs` | Chunk-Renderer des nativen macOS-Wegs: zeichnet die in der Webansicht fertig tessellierten GPU-Chunks |
+| `glyph.rs` | Glyphen-Pass (glyphon, eingebettetes Inter, fett/kursiv) für beide Renderer: Zeilen einmal geshapt, je Frame nur skaliert |
+| `vtext.rs` | Vektor-Text: Glyphen-Umrisse einmal tesselliert und instanziert gezeichnet, auch gedreht (native Fläche: gedrehte Einzeiler) |
+| `chunks.rs` | Chunk-Renderer des nativen macOS-Wegs: zeichnet die in der Webansicht fertig tessellierten GPU-Chunks und die Plan-Texte ([194]) |
 
 ## Ziele
 

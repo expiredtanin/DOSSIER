@@ -2,8 +2,9 @@
 // UNTER der (transparent gemachten) Webview, exakt hinter dem Plan-Bereich.
 //
 // Die Webview bleibt fuer ALLE Eingaben und Overlays zustaendig (Auswahl,
-// Griffe, Fang, Text) und liegt vorne; die native Flaeche liefert nur die
-// Pixel der grossen Geometrie. Position/Groesse kommt aus der Webview
+// Griffe, Fang, Text-Editor) und liegt vorne; die native Flaeche liefert die
+// Pixel der Geometrie und der Plan-Texte ([194]: Raumstempel/Textfelder ueber
+// den Glyphen-Pass, gedrehte Einzeiler als Vektor-Glyphen — im selben Frame). Position/Groesse kommt aus der Webview
 // (`native2d_embed_rect`, CSS-Pixel des Plan-Containers).
 
 use std::ptr::NonNull;
@@ -230,6 +231,22 @@ pub fn set_texts(app: &AppHandle, upsert: Vec<TextIn>, remove: Vec<u32>) -> bool
             let ok = e.renderer.set_texts(upsert, &remove);
             draw(e);
             ok
+        }
+        None => false,
+    }
+}
+
+/// Gesetzte Textzeilen (Raumstempel, waagrechte Textfelder; f64-Bytes der Kern-Bindung
+/// `plan_screen_texts`, gesetzt zu 1:`n`) ersetzen und neu zeichnen ([194]: Glyphen-Pass im selben
+/// Frame wie die Linien). `false` = Flaeche fehlt oder Puffer kaputt (die Webview zeichnet die Texte dann
+/// weiter im SVG-Overlay).
+pub fn set_scene_texts(app: &AppHandle, bytes: &[u8], n: f64) -> bool {
+    let Some(lines) = render2d::text_lines::lines_from_bytes(bytes) else { return false };
+    match app.state::<EmbedState>().0.lock().unwrap().as_mut() {
+        Some(e) => {
+            e.renderer.set_scene_texts(lines, n);
+            draw(e);
+            true
         }
         None => false,
     }

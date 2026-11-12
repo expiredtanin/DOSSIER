@@ -10,6 +10,8 @@
 // `--chunks`: GPU-Chunks (je Datei die u32-Ausgabe von `gpu_compile_flat`, gepackt) über den
 // Chunk-Renderer des nativen macOS-Pfads (`chunks.rs`); Ausschnitt = Vereinigung der Chunk-Ausmasse.
 // `--bounds` (Modell-Meter) ersetzt das Ausmass — für deckungsgleiche Vergleiche Szene ↔ Chunks.
+// `--texts`: zu `--chunks` die gesetzten Textzeilen (f64-Bytes der Kern-Bindung `plan_screen_texts`, gesetzt
+// zu 1:`--text-scale`, Standard 100) — Glyphen-Pass der nativen Fläche ([194]).
 #![cfg(feature = "headless")]
 
 use render2d::headless::HeadlessRenderer;
@@ -26,6 +28,8 @@ fn main() {
     let mut paper_n = 100.0f32;
     let mut chunk_files: Vec<String> = Vec::new();
     let mut bounds_arg: Option<[f32; 4]> = None;
+    let mut texts_file: Option<String> = None;
+    let mut text_n = 100.0f64;
 
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -44,6 +48,8 @@ fn main() {
             }
             "--out" => out = args.next().unwrap_or(out),
             "--scene" => scene_file = args.next(),
+            "--texts" => texts_file = args.next(),
+            "--text-scale" => text_n = args.next().and_then(|v| v.parse().ok()).unwrap_or(text_n),
             "--chunks" => chunk_files = args.next().unwrap_or_default().split(',').filter(|f| !f.is_empty()).map(String::from).collect(),
             "--bounds" => {
                 let v: Vec<f32> = args.next().unwrap_or_default().split(',').filter_map(|x| x.parse().ok()).collect();
@@ -86,7 +92,11 @@ fn main() {
         });
         let vb = view_of(b);
         let view = render2d::chunks::View { x: vb.x as f64, y: vb.y as f64, w: vb.w as f64, h: vb.h as f64 };
-        let image = renderer.render_chunks_to_image(&chunks, width, height, view, paper_n as f64).expect("Chunks rendern");
+        let texts = texts_file.map(|f| {
+            let lines = render2d::text_lines::lines_from_bytes(&std::fs::read(f).expect("Texte lesen")).expect("Texte dekodieren");
+            (lines, text_n)
+        });
+        let image = renderer.render_chunks_to_image(&chunks, width, height, view, paper_n as f64, texts).expect("Chunks rendern");
         std::fs::write(&out, image.encode_png()).expect("PNG schreiben");
         println!("render_png: Chunks geschrieben nach {out} ({width}x{height})");
         return;

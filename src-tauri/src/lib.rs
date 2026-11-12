@@ -213,6 +213,31 @@ fn native2d_texts(app: tauri::AppHandle, upsert: serde_json::Value, remove: Vec<
     }
 }
 
+/// Gesetzte Textzeilen fuer den Glyphen-Pass der Flaeche ([194]): Body = f64-Bytes von
+/// `plan_screen_texts`, Header `x-text-scale` = Massstab 1:N des Satzes. `false` → die Webview zeichnet
+/// die Texte selbst (kein natives 2D, Flaeche noch nicht da, Puffer kaputt).
+#[tauri::command]
+fn native2d_scene_texts(app: tauri::AppHandle, request: tauri::ipc::Request<'_>) -> Result<bool, String> {
+    #[cfg(all(feature = "native2d", target_os = "macos"))]
+    {
+        let n: f64 = request
+            .headers()
+            .get("x-text-scale")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(100.0);
+        let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+            return Err("Rohdaten erwartet".into());
+        };
+        return Ok(native_embed::set_scene_texts(&app, bytes, n));
+    }
+    #[cfg(not(all(feature = "native2d", target_os = "macos")))]
+    {
+        let _ = (app, request);
+        Ok(false)
+    }
+}
+
 #[tauri::command]
 fn native2d_frame(app: tauri::AppHandle, view: serde_json::Value, paper_scale: f64, clear: Option<[f64; 3]>, dash_scale: Option<f64>) -> Result<(), String> {
     #[cfg(all(feature = "native2d", target_os = "macos"))]
@@ -286,6 +311,7 @@ pub fn run() {
         native2d_layout,
         native2d_frame,
         native2d_texts,
+        native2d_scene_texts,
         push_native_scene,
         push_native_walls,
         acquire_project_lock,
@@ -304,6 +330,7 @@ pub fn run() {
         native2d_layout,
         native2d_frame,
         native2d_texts,
+        native2d_scene_texts,
         acquire_project_lock,
         release_project_lock,
         save_atomic

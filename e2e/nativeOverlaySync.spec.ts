@@ -5,11 +5,13 @@
 // Hier wird die native Fläche im Browser nachgestellt (`__TAURI_INTERNALS__`-Attrappe, Antwort mit
 // IPC-Verzögerung). Gemessen wird, ob das Overlay noch im selben Task (vor dem nächsten Malen) auf
 // demselben Ausschnitt steht wie der eben an die Fläche geschickte Frame.
-import { expect, startNewProject, test } from "./app";
+import { blurFocus, commandInput, expect, startNewProject, test, typeCommand } from "./app";
 
 declare global {
   interface Window {
     __nativeFrames?: { view: { x: number; y: number; w: number; h: number }; svg: number[] | null }[];
+    /** [194] Zuletzt an die Fläche geschickte Textzeilen (Glyphen-Pass) samt Satz-Massstab. */
+    __nativeSceneTexts?: { texts: string[]; codes: number[]; n: number } | null;
   }
 }
 
@@ -84,3 +86,65 @@ test("native Fläche: Overlay-Ausschnitt folgt jedem Zoom-/Schwenk-Frame im selb
   });
   expect(lagging.length, `Overlay hinter der Geometrie in ${lagging.length}/${frames.length} Frames`).toBe(0);
 });
+
+// [194] Die native Fläche zeichnet die Plan-Texte selbst (Glyphen-Pass im selben Frame wie die Linien):
+// waagrechte Beschriftungen (hier Achsraster-Blasen und Masszahlen) gehen als gesetzte Zeilen an die Fläche
+// und fehlen im SVG-Overlay; ohne Bestätigung der Fläche bleiben sie im Overlay.
+for (const accept of [true, false]) {
+  test(`native Fläche: Plan-Texte ${accept ? "im Glyphen-Pass, nicht im Overlay" : "im Overlay, wenn die Fläche ablehnt"}`, async ({ page }) => {
+    test.setTimeout(60_000);
+    await page.addInitScript((acceptTexts: boolean) => {
+      window.__nativeSceneTexts = null;
+      let cb = 1;
+      (window as unknown as { __TAURI_INTERNALS__: unknown }).__TAURI_INTERNALS__ = {
+        transformCallback: () => cb++,
+        unregisterCallback: () => {},
+        convertFileSrc: (p: string) => p,
+        metadata: { currentWindow: { label: "main" }, currentWebview: { label: "main", windowLabel: "main" } },
+        invoke(cmd: string, args: unknown, opts?: { headers?: Record<string, string> }) {
+          if (cmd === "native2d_embed_available" || cmd === "native2d_texts") return Promise.resolve(true);
+          if (cmd === "native2d_scene_texts") {
+            const b = args as Uint8Array;
+            const f = new Float64Array(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength));
+            const n = f[0];
+            let u = 1 + n * 9;
+            const texts: string[] = [];
+            const codes: number[] = [];
+            for (let k = 0; k < n; k++) {
+              const len = f[1 + k * 9 + 8];
+              texts.push(String.fromCharCode(...Array.from(f.subarray(u, u + len))));
+              codes.push(f[1 + k * 9 + 7]);
+              u += len;
+            }
+            window.__nativeSceneTexts = { texts, codes, n: Number(opts?.headers?.["x-text-scale"]) };
+            return Promise.resolve(acceptTexts);
+          }
+          return Promise.resolve(cmd === "plugin:window|get_all_windows" ? [] : null);
+        },
+      };
+    }, accept);
+    await startNewProject(page);
+    const svg = page.locator("svg.plan-svg");
+    await expect(svg).toHaveAttribute("data-engine", "native");
+    await commandInput(page).focus();
+    await typeCommand(page, "achsraster");
+    await typeCommand(page, "0,0");
+    await typeCommand(page, "6 6");
+    await typeCommand(page, "5");
+    await blurFocus(page);
+    await page.getByTitle("Auf Plan einpassen").click();
+    // Zeilen gehen an die Fläche (gesetzt zum Anzeige-Massstab 1:100).
+    await expect
+      .poll(() => page.evaluate(() => window.__nativeSceneTexts?.texts ?? []))
+      .toEqual(expect.arrayContaining(["1", "2", "3", "A", "B"]));
+    expect(await page.evaluate(() => window.__nativeSceneTexts!.n)).toBe(100);
+    const overlay = () => page.locator("svg.plan-svg text").evaluateAll((els) => els.map((e) => e.textContent ?? ""));
+    if (accept) {
+      // Im Overlay keine dieser Beschriftungen mehr (sonst liefen sie beim Zoomen einen Frame hinterher).
+      await expect.poll(overlay).not.toEqual(expect.arrayContaining(["A"]));
+      expect((await overlay()).filter((t) => ["1", "2", "3", "A", "B"].includes(t))).toEqual([]);
+    } else {
+      await expect.poll(overlay).toEqual(expect.arrayContaining(["1", "2", "3", "A", "B"]));
+    }
+  });
+}

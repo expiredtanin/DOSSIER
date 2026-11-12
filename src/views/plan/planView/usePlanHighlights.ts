@@ -25,7 +25,7 @@ export interface UsePlanHighlightsArgs {
   editTextId: string | null | undefined;
   useGpuRenderer: boolean;
   wantNative: boolean;
-  nativeHook: { render: (viewBox: ViewBox, paperScaleN?: number, _textScale?: number, onSent?: () => void) => void; updateGeometry: (plan: Plan, pxPerMeter?: number) => void; ready: boolean; gpuTexts: boolean; setExcludedText: (id: string | null) => void; setHighlight: (prims: readonly Primitive[], color: string) => void; setDashScale: (n: number) => void; };
+  nativeHook: { render: (viewBox: ViewBox, paperScaleN?: number, _textScale?: number, onSent?: () => void) => void; updateGeometry: (plan: Plan, pxPerMeter?: number) => void; ready: boolean; gpuTexts: boolean; sceneTexts: boolean; setExcludedText: (id: string | null) => void; setHighlight: (prims: readonly Primitive[], color: string) => void; setDashScale: (n: number) => void; };
   toLocal: (p: Vec2) => Vec2;
   overlayHeavyRef: React.MutableRefObject<boolean>;
   selectedCeilingIds: string[];

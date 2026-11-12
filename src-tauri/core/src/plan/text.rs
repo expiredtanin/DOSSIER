@@ -12,7 +12,7 @@ use crate::plan::prim::StampLine;
 use crate::plan::buf::{whole, T_DRAWING_TEXT, T_TEXT};
 use crate::plan::dxf::{StampLine as DxfLine, TextIn, TextStyleIn};
 use crate::plan::parts::{in_ranges, Part};
-use crate::plan::scene::{to_rgba, Rgba, SText};
+use crate::plan::scene::{to_rgba, Rgba, SText, STYLE_BOLD, STYLE_ITALIC};
 use crate::text_layout::{doc_from_text, doc_to_lines, font_name_of, is_blank, plain_text, split_ws, stamp_block, stamp_line_offsets, wrap_doc_to_lines, LayoutOpts, LineAlign, Placed, PT_TO_MM, TEXT_LINE_HEIGHT_MULT};
 use serde::{Deserialize, Deserializer};
 
@@ -118,15 +118,37 @@ fn greyed_color(c: Rgba, greyed: bool) -> Rgba {
     }
 }
 
-fn push(out: &mut Vec<SText>, x: f64, y: f64, content: String, size_mm: f64, color: Rgba, align: LineAlign) {
-    out.push(SText { pos: crate::hatch::V2 { x, y }, size_mm, color, align: align.code(), content: content.into_bytes() });
+#[allow(clippy::too_many_arguments)]
+fn push(out: &mut Vec<SText>, x: f64, y: f64, content: String, size_mm: f64, color: Rgba, align: LineAlign, style: u32) {
+    out.push(SText { pos: crate::hatch::V2 { x, y }, size_mm, color, align: align.code(), style, content: content.into_bytes() });
+}
+
+/// Schnitt einer gesetzten Zeile aus ihrem ersten Lauf (wie der DXF-Export, `stamp_lines`).
+fn line_style(line: &crate::text_layout::Line) -> u32 {
+    line.tspans.first().map_or(0, |s| if s.bold { STYLE_BOLD } else { 0 } | if s.italic { STYLE_ITALIC } else { 0 })
+}
+
+/// Auswahl der Texte für die BILDSCHIRM-Szene ([194]): gedrehte Einzeltexte fehlen (der Glyphen-Pass
+/// zeichnet nur waagrecht; die Webview bzw. die Vektor-Glyphen der nativen Fläche zeichnen sie), ebenso
+/// der Eintrag `skip` (Plan-Index des Texts im Inline-Editor). Exporte nehmen alle Texte (`None`).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ScreenTexts {
+    pub skip: Option<usize>,
+}
+
+/// Einzeltext gedreht (zeichnet der Glyphen-Pass nicht)? Volle Umdrehungen (Masszahlen tragen oft 2π)
+/// gelten als waagrecht.
+pub fn is_rotated(angle: f64) -> bool {
+    use std::f64::consts::TAU;
+    let a = angle.rem_euclid(TAU);
+    angle.is_finite() && a > 1e-9 && TAU - a > 1e-9
 }
 
 /// Textzeilen der Render-Szene in Zeichenreihenfolge (`planSceneTexts`): Raumstempel = Rich-Text-
 /// Zeilen + Live-Zeilen, Block vertikal um den Anker zentriert, Vorschub 1.3 × Basisgrösse;
 /// Einzeltexte top-down ab `at` mit `heightM` als Basisgrösse, umbrochen auf die Spalte.
 /// `paper_scale_n` (1:N) rechnet Papier-mm in Modell-Meter um. `None` bei kaputtem Puffer.
-pub fn scene_texts(parts: &mut [Part], ranges: &[(usize, usize)], paper_scale_n: f64) -> Option<Vec<SText>> {
+pub fn scene_texts(parts: &mut [Part], ranges: &[(usize, usize)], paper_scale_n: f64, screen: Option<ScreenTexts>) -> Option<Vec<SText>> {
     let mm_to_m = paper_scale_n / 1000.0;
     let mut out = Vec::new();
     let mut gi = 0usize;
@@ -138,8 +160,12 @@ pub fn scene_texts(parts: &mut [Part], ranges: &[(usize, usize)], paper_scale_n:
             if tag != T_TEXT && tag != T_DRAWING_TEXT {
                 continue;
             }
+            if screen.is_some_and(|s| s.skip == Some(gi - 1)) {
+                continue;
+            }
             match read_text(part, i) {
                 Some(TextPrim::Stamp(t)) => stamp_scene(&t, forced, mm_to_m, &mut out),
+                Some(TextPrim::Single(t)) if screen.is_some() && is_rotated(t.angle) => {}
                 Some(TextPrim::Single(t)) => single_scene(&t, forced, mm_to_m, &mut out),
                 None => {}
             }
@@ -154,14 +180,14 @@ fn stamp_scene(t: &StampText, forced: bool, mm_to_m: f64, out: &mut Vec<SText>) 
     let def = greyed_color(to_rgba(color).unwrap_or(INK), greyed);
     let o = LayoutOpts { line_height: 0.0, unit_per_pt: PT_TO_MM, base_pt: t.base_pt, color: color.unwrap_or("#000000") };
     let base_mm = t.base_pt * PT_TO_MM;
-    let mut flat: Vec<(String, f64, Rgba, LineAlign)> = Vec::new();
+    let mut flat: Vec<(String, f64, Rgba, LineAlign, u32)> = Vec::new();
     for line in doc_to_lines(&t.doc, &o) {
         let fill = line.tspans.first().map(|s| s.fill.as_str()).or(color);
         let c = greyed_color(to_rgba(fill).unwrap_or(def), greyed);
-        flat.push((line.content(), line.max_size().unwrap_or(base_mm), c, line.align));
+        flat.push((line.content(), line.max_size().unwrap_or(base_mm), c, line.align, line_style(&line)));
     }
     for l in &t.extra_lines {
-        flat.push((l.text.clone(), base_mm * 0.8, def, LineAlign::of(Some(l.align))));
+        flat.push((l.text.clone(), base_mm * 0.8, def, LineAlign::of(Some(l.align)), 0));
     }
     if flat.is_empty() {
         return;
@@ -172,12 +198,12 @@ fn stamp_scene(t: &StampText, forced: bool, mm_to_m: f64, out: &mut Vec<SText>) 
     // [140] Zeilen im gemessenen, um den Anker zentrierten Block (`stamp_line_offsets`, Papier-mm).
     let extra: Vec<(&str, LineAlign)> = t.extra_lines.iter().map(|l| (l.text.as_str(), LineAlign::of(Some(l.align)))).collect();
     let offsets = stamp_line_offsets(&stamp_block(&t.doc, &extra, t.base_pt, PT_TO_MM, "#000000", 0.0));
-    for (k, (content, size, c, align)) in flat.into_iter().enumerate() {
+    for (k, (content, size, c, align, style)) in flat.into_iter().enumerate() {
         if is_blank(&content) {
             continue;
         }
         let dx = offsets.get(k).copied().unwrap_or(0.0) * mm_to_m;
-        push(out, t.at.x + dx, t.at.y + total_h / 2.0 - base_h * 0.8 - k as f64 * line_gap, content, size, c, align);
+        push(out, t.at.x + dx, t.at.y + total_h / 2.0 - base_h * 0.8 - k as f64 * line_gap, content, size, c, align, style);
     }
 }
 
@@ -200,7 +226,8 @@ fn single_scene(t: &SingleText, forced: bool, mm_to_m: f64, out: &mut Vec<SText>
         let size_m = line.max_size().unwrap_or(t.height_m);
         let fill = line.tspans.first().map(|s| s.fill.as_str()).or(color);
         let c = greyed_color(to_rgba(fill).unwrap_or(def), greyed);
-        push(out, t.at.x, t.at.y - dy, content, if unit_per_pt > 0.0 { size_m / mm_to_m } else { size_m }, c, line.align);
+        let style = line_style(&line);
+        push(out, t.at.x, t.at.y - dy, content, if unit_per_pt > 0.0 { size_m / mm_to_m } else { size_m }, c, line.align, style);
     }
 }
 
@@ -300,8 +327,52 @@ mod tests {
         let base_h = 10.0 * PT_TO_MM * 0.1;
         assert_eq!(out[0].pos.y, 3.0 + (base_h + 2.0 * base_h * 1.3) / 2.0 - base_h * 0.8);
         assert_eq!((out[0].align, out[1].align), (1, 2));
+        // [194] Schnitt der Zeile (erster Lauf): Name fett, Live-Zeile normal.
+        assert_eq!((out[0].style, out[1].style), (STYLE_BOLD, 0));
         let l = stamp_lines(&t, 100.0, &|f| f.unwrap_or("Arial").to_string());
         assert_eq!(l.len(), 2);
         assert!(l[0].style.bold && l[0].style.family == "Arial");
+    }
+
+    /// [194] Bildschirm-Szene: gedrehte Einzeltexte und der Text im Editor fehlen, Exporte behalten alle;
+    /// Schnitt (fett/kursiv) reist mit.
+    #[test]
+    fn bildschirm_texte_ohne_gedrehte_und_editor_text() {
+        use crate::model::Vec2;
+        use crate::plan::buf::{View, Writer};
+        use crate::plan::prim::Primitive;
+        let single = |x: f64, angle: f64, marks: Marks| Primitive::DrawingText {
+            at: Vec2 { x, y: 0.0 },
+            text: "Text".into(),
+            height_m: 0.25,
+            angle,
+            color: "#000".into(),
+            marks: Some(marks),
+            wrap_width: None,
+            doc: None,
+            drawing_id: Some(format!("t{x}")),
+            greyed: None,
+            opacity: None,
+        };
+        let prims = vec![
+            single(0.0, 0.0, Marks { bold: Some(true), ..Default::default() }),
+            single(1.0, 0.5, Marks::default()),
+            single(2.0, 0.0, Marks { italic: Some(true), ..Default::default() }),
+        ];
+        let mut w = Writer::new(false);
+        w.group(&prims);
+        let bytes = w.finish();
+        let run = |screen: Option<ScreenTexts>| {
+            let view = View::parse(&bytes).unwrap();
+            let n = view.len();
+            let mut parts = vec![Part::new(view, 0, n).unwrap()];
+            scene_texts(&mut parts, &[], 100.0, screen).unwrap()
+        };
+        let xs = |t: &[SText]| t.iter().map(|t| (t.pos.x, t.style)).collect::<Vec<_>>();
+        assert_eq!(xs(&run(None)), vec![(0.0, STYLE_BOLD), (1.0, 0), (2.0, STYLE_ITALIC)]);
+        assert_eq!(xs(&run(Some(ScreenTexts::default()))), vec![(0.0, STYLE_BOLD), (2.0, STYLE_ITALIC)]);
+        assert_eq!(xs(&run(Some(ScreenTexts { skip: Some(2) }))), vec![(0.0, STYLE_BOLD)]);
+        assert!(!is_rotated(0.0) && !is_rotated(f64::NAN) && is_rotated(-0.1));
+        assert!(!is_rotated(std::f64::consts::TAU) && !is_rotated(-2e-11) && is_rotated(std::f64::consts::PI));
     }
 }
