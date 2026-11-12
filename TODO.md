@@ -198,6 +198,13 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   Gebäudeumriss anbieten; Massstab wählbar (heute der grösste passende, im Testgebäude auf A1 1:50 statt 1:200 für den Wettbewerb).
   Ort: `ui/PresentationDialog.tsx`, `commands/cmds/presentation.ts`. · S
 
+- ✓ **[229]** Cycles-Rendering: Streifen/Dreiecke auf der Hauptdachfläche (12.11., Maintainer, Musterhaus komplex Iso). Ursache: Das GLB hat keine
+  UVs; der Normal-Map-Knoten (Tangentenraum) bekam je Dreieck einen anderen Tangentenrahmen und zeichnete die Gauben-Fan-Triangulierung als
+  helle/dunkle Diagonalen. Nicht im Netz: GLB geprüft (Normalen der Dachdreiecke an der Oberseite max. 0.0002 rad neben der Flächennormalen,
+  keine verdrehte Wicklung, Schichten 12 mm Abstand ohne Koplanarität); Rendern ohne Normalenkarte beseitigt es. Lösung `render_dossier.py`
+  `add_textures`: keine Normalenkarte, stattdessen Rauigkeitskarte als Höhenfeld (Bump, Stärke 0.3, rahmenfrei). Test:
+  `blenderRender.test.ts` (Skript ohne Normal-Map-Knoten). Geprüft: echter Lauf `bpy` 5.3 (CPU) vorher/nachher. Offen: Mac/Blender 3.6/4.x;
+  echte Normalenkarten bräuchten UVs im GLB-Export. · S
 ### Phase 3 (27.11.–3.12.): Vorprojekt
 - 1:100-Pläne in Abgabequalität (Bemassung, Koten, Raumstempel, Öffnungen nach Detailgrad) — Plan-Review-Runde 4 nach [199].
 - Fachplaner-Austausch: DXF/DWG je Geschoss/Schnitt/Ansicht ([200]), IFC mit Räumen/Psets ([201]); Rundreise in Archicad/Revit einmal

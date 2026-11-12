@@ -235,6 +235,11 @@ describe("Blender-Skript", () => {
     }
   });
 
+  it("nutzt keine Tangentenraum-Normalenkarte ohne UVs ([229]: sonst Streifen über triangulierten Dachflächen)", () => {
+    expect(script).not.toContain("ShaderNodeNormalMap");
+    expect(script).toContain("ShaderNodeBump");
+  });
+
   it("ist gültiges Python", () => {
     const r = spawnSync("python3", ["-c", "import ast,sys; ast.parse(open(sys.argv[1]).read())", path]);
     if (r.error) return; // kein Python: übersprungen

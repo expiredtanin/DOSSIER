@@ -236,12 +236,16 @@ def add_textures(mat, spec, base_dir):
     n = image_node(textures["metalness"], "Non-Color") if "metalness" in textures else None
     if n is not None:
         nt.links.new(n.outputs["Color"], bsdf.inputs["Metallic"])
-    n = image_node(textures["normal"], "Non-Color") if "normal" in textures else None
+    # Keine UVs im GLB: eine Tangentenraum-Normalenkarte (Normal-Map-Knoten) bekaeme je Dreieck einen anderen
+    # Tangentenrahmen und zeigte die Triangulierung als diagonale Streifen/Dreiecke (Dach mit Gauben, [229]).
+    # Die Rauigkeitskarte dient deshalb als Hoehenfeld fuer einen Bump-Knoten: rahmenfrei, nur Bildableitungen.
+    n = image_node(textures["roughness"], "Non-Color") if "roughness" in textures else None
     if n is not None:
-        nm = nt.nodes.new("ShaderNodeNormalMap")
-        nm.inputs["Strength"].default_value = 0.8
-        nt.links.new(n.outputs["Color"], nm.inputs["Color"])
-        nt.links.new(nm.outputs["Normal"], bsdf.inputs["Normal"])
+        bump = nt.nodes.new("ShaderNodeBump")
+        bump.inputs["Strength"].default_value = 0.3
+        bump.inputs["Distance"].default_value = 0.01
+        nt.links.new(n.outputs["Color"], bump.inputs["Height"])
+        nt.links.new(bump.outputs["Normal"], bsdf.inputs["Normal"])
     return has_color
 
 

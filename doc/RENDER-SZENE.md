@@ -31,7 +31,7 @@ nach z-oben zurück, `scene.json` braucht keine Umrechnung.
   nach Sonnenhöhe, s. u.), `ground` (bool, Bodenplatte).
 - `materials[]`, Schlüssel = glTF-Materialname:
   `color [r,g,b]` sRGB 0..1, `opacity`, `roughness`, `metallic`, `glass` (bool), `transmission` 0..1, `ior`,
-  `textures {color, normal, roughness, metalness}` (Pfade), `sizeM` (Kantenlänge einer Kachel in m),
+  `textures {color, normal, roughness, metalness}` (Pfade; Cycles-Leser: Normalenkarte unbenutzt, ohne UVs gibt es keinen Tangentenrahmen — Rauigkeit als Bump, [229]), `sizeM` (Kantenlänge einer Kachel in m),
   `role` (`terrain` | `roof` | `context` | `opening` | `building`: Verwendung nach dem Bauteil-Knoten des GLB) und
   `component` (Baustoff, wenn er vom Materialnamen abweicht). Gleiche Namen mit verschiedener Farbe ordnet der Leser
   über die Farbe zu.
