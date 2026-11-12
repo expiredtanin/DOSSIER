@@ -119,7 +119,7 @@ export interface ProjectSlice {
   openProjectFile: (text: string) => LoadFileResult;
 
   // ── Zeichnungsebenen (Levels/Geschosse) ──────────────────────────────────
-  toggleLevelVisible: (id: string) => void;
+  toggleLevelVisible: (id: string, frozen?: Record<string, boolean>) => void;
   patchActiveFloor: (patch: Partial<DrawingLevel>) => void;
   addFloor: () => void;
   addDrawing: () => void;
@@ -676,8 +676,12 @@ export function createProjectSlice(
     },
 
     // ── Zeichnungsebenen ───────────────────────────────────────────────────
-    toggleLevelVisible: (id) =>
-      applyChange((p) => patchItem(p, "drawingLevels", id, (z) => ({ ...z, visible: !z.visible }))),
+    // [196] `frozen`: Flags aller Ebenen, wie der Modus sie gerade zeigt — nur die angeklickte wird umgeschaltet.
+    toggleLevelVisible: (id, frozen) =>
+      applyChange((p) => {
+        const flag = (z: DrawingLevel) => frozen?.[z.id] ?? z.visible;
+        return patchItems(p, "drawingLevels", (z) => z.id === id || flag(z) !== z.visible, (z) => ({ ...z, visible: z.id === id ? !flag(z) : flag(z) }));
+      }),
 
     patchActiveFloor: (patch) => {
       const activeLevelId = get().activeLevelId;

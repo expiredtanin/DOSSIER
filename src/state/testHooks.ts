@@ -9,6 +9,8 @@ import { ceilingThickness } from "../model/types";
 import { computeSection, generatePlan, verticalExtents, generateSectionPlan, pickGeometry, projectToModel3d } from "../core";
 import { getViewStateBridge } from "./viewTabs";
 import { getView3dFilter, toFilter3d } from "./view3dFilter";
+import { BUILTIN_PANEL_IDS } from "../panels/builtinPanels";
+import { hiddenFloorIds, itemDisplay } from "../panels/displayMode";
 
 declare global {
   interface Window {
@@ -57,7 +59,7 @@ declare global {
       /** [192] Sichtbare Ebenen-Codes und Zahl der Plan-Primitive (gesamt / mit Wand-Bezug) der aktiven Ebene. */
       layerView: () => { wallId: string; visible: string[]; prims: number; wallPrims: number };
       /** [185] 3D-Element-Filter (Store) und die Wand-ids des 3D-Modells bzw. der Pick-Geometrie mit ihm. */
-      view3d: () => { only: string[] | null; hidden: string[]; walls: string[]; pickWalls: string[] };
+      view3d: () => { only: string[] | null; hidden: string[]; walls: string[]; pickWalls: string[]; floors: string[]; pickOpenings: { id: string; host: string }[] };
     };
   }
 }
@@ -150,14 +152,22 @@ export function installTestHooks(): void {
     },
     view3d: () => {
       const f = getView3dFilter();
-      const p = getState().project;
-      const hide = toFilter3d(f, []);
+      const s = getState();
+      const p = s.project;
+      const mode = s.displayModes[BUILTIN_PANEL_IDS.drawingLevels] ?? "all";
+      const hide = toFilter3d(f, [], hiddenFloorIds(p.drawingLevels, (id) => itemDisplay(mode, id === s.activeLevelId, p.drawingLevels.find((l) => l.id === id)?.visible ?? false)));
       const uniq = (ids: string[]) => [...new Set(ids)].sort();
       return {
         only: f.only,
         hidden: f.hidden,
         walls: uniq(projectToModel3d(p, { hide }).walls.map((w) => w.wallId)),
         pickWalls: uniq(pickGeometry(p, 0, hide).walls.map((w) => w.wallId)),
+        pickOpenings: (() => {
+          const g = pickGeometry(p, 0, hide);
+          const ids = uniq([...g.openings.map((o) => o.openingId), ...g.openingMeshes.map((o) => o.openingId)]);
+          return ids.map((id) => ({ id, host: p.openings?.find((o) => o.id === id)?.hostWallId || p.openings?.find((o) => o.id === id)?.hostRoofId || p.openings?.find((o) => o.id === id)?.hostCeilingId || "" }));
+        })(),
+        floors: uniq(projectToModel3d(p, { hide }).walls.map((w) => p.walls.find((x) => x.id === w.wallId)?.floorId ?? "")),
       };
     },
     layerView: () => {

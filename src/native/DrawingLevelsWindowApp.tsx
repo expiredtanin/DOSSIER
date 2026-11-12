@@ -22,6 +22,7 @@ import type { DrawingLevelsCommandHandlers, DrawingLevelsSyncState } from "./dra
 import type { DrawingLevelKind } from "../model/types";
 import { t } from "../i18n";
 import { listenBridgeState } from "./windowBridge";
+import { frozenLevelFlags } from "../panels/displayMode";
 
 type HandlerName = keyof DrawingLevelsCommandHandlers;
 
@@ -100,10 +101,9 @@ export function DrawingLevelsWindowApp() {
   // Klick aufs Auge in „Alle anzeigen"/„Nur aktive" schaltet automatisch auf
   // „Ausgewählte" — dieselbe DOSSIER-Regel wie im Dock-Panel.
   const toggle = (id: string) => {
-    if (state.displayMode === "all_force" || state.displayMode === "active") {
-      handlers.onSetDisplayMode("all");
-    }
-    handlers.onToggleLevel(id);
+    const frozen = frozenLevelFlags(state.displayMode, state.drawingLevels, state.activeLevelId);
+    if (frozen) handlers.onSetDisplayMode("all");
+    handlers.onToggleLevel(id, frozen ?? undefined);
   };
 
   return (

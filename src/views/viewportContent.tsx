@@ -40,6 +40,7 @@ import { pushNativeScene, pushNativeWalls } from "./plan/nativeSync";
 import { explodeFloorOffsets, selectionHighlightLines } from "../core";
 import { clashHighlightLines } from "../analysis/clash";
 import { useClashSession } from "../panels/clashSession";
+import { hiddenFloorIds } from "../panels/displayMode";
 import { applyGroupDimmingToPlan } from "../state/groupActions";
 import { useStore } from "../state/appStore";
 import { planFitKey } from "../state/viewTabs";
@@ -315,6 +316,8 @@ export const Content = memo(function Content({
     () => flattenCategories(project.layers ?? []).map((c) => c.code).filter((c) => !categoryDisplay(c).render),
     [project.layers, categoryDisplay],
   );
+  // [196] Geschosse mit ausgeschaltetem Auge (Zeichnungsebenen-Panel) fehlen auch im 3D.
+  const hiddenFloors3d = useMemo(() => hiddenFloorIds(project.drawingLevels, floorDisplay), [project.drawingLevels, floorDisplay]);
   // 3D-Sicht: aus dem Grundriss UND aus Schnitt/Ansicht ([115]); im Schnitt schneidet der Live-Schnitt
   // an der Schnittlinie (App setzt `section3d` beim Wechsel).
   const view3dPane = (
@@ -325,6 +328,7 @@ export const Content = memo(function Content({
       <Viewport3D
         project={project}
         hiddenCodes={hidden3d}
+        hiddenFloors={hiddenFloors3d}
         renderMode={renderMode}
         detail={detail}
         view3d={view3d}

@@ -98,7 +98,7 @@ export interface PanelHostValue {
 
   // Zeichnungsebenen-Handler.
   onSelectLevel: (id: string) => void;
-  onToggleLevel: (id: string) => void;
+  onToggleLevel: (id: string, frozen?: Record<string, boolean>) => void;
   onAddFloor: () => void;
   onAddDrawing: () => void;
   onAddSection: () => void;

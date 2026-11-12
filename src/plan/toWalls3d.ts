@@ -88,6 +88,8 @@ export function classFilterText(hide?: Hide3d, extra?: Record<string, unknown>):
   // [185] Element-Auswahl: `only` (nur diese Elemente) und `hideIds` (temporär ausgeblendet), s. `model3d::ElementSelection`.
   if (f.only) h.only = f.only;
   if (f.hideIds?.length) h.hideIds = f.hideIds;
+  // [196] Geschosse mit ausgeschaltetem Auge: ihre Elemente fehlen im 3D (Kern `ElementSelection::hide_floors`).
+  if (f.hideFloors?.length) h.hideFloors = f.hideFloors;
   return Object.keys(h).length || extra ? JSON.stringify({ ...extra, ...h }) : "";
 }
 
@@ -99,6 +101,8 @@ export interface Filter3d {
   hide?: readonly string[];
   only?: readonly string[] | null;
   hideIds?: readonly string[];
+  /** [196] Geschoss-ids (Zeichnungsebenen) mit ausgeschaltetem Auge. */
+  hideFloors?: readonly string[];
 }
 
 /** Klassen-Codes (bisherige Form) oder der volle {@link Filter3d}. */
