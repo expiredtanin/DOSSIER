@@ -3250,10 +3250,21 @@ mod tests {
         // nicht an der Austrittskante (y = 3.6), aber an der Lochkante y = 1.6 (ausserhalb des Lochs)
         assert!(guard.iter().all(|l| !((l.1.y - 3.6).abs() < 0.1 && (l.2.y - 3.6).abs() < 0.1 && (l.1.x - l.2.x).abs() > 0.2)), "{guard:?}");
         assert!(guard.iter().any(|l| l.1.y < 1.6 && l.2.y < 1.6 && (l.1.x - l.2.x).abs() > 0.5));
-        // ohne Loch: nichts von ST1 im OG
+        // [202] ohne Loch (z. B. Treppe verschoben, Loch gesperrt): ST1 im OG trotzdem sichtbar, unbeschnitten
+        // (auch unterhalb y = 1.6), ausgezogen, aber ohne Absturzsicherung
         let mut q = p.clone();
         q.ceilings.as_mut().unwrap()[0].openings = None;
-        assert!(run(&q).iter().all(|x| !matches!(x, Primitive::Line { stair_id, .. } if stair_id.as_deref() == Some("ST1"))));
+        let free: Vec<(String, Vec2, Vec2, bool)> = run(&q)
+            .iter()
+            .filter_map(|x| match x {
+                Primitive::Line { a, b, cls, dash, stair_id, .. } if stair_id.as_deref() == Some("ST1") => Some((cls.to_string(), *a, *b, dash.as_ref().is_some_and(|d| d.is_some()))),
+                _ => None,
+            })
+            .collect();
+        assert!(free.iter().any(|l| l.0 == "stair-tread"), "Treppe ohne Loch sichtbar");
+        assert!(free.iter().any(|l| l.1.y < 1.0 || l.2.y < 1.0), "unbeschnitten");
+        assert!(free.iter().all(|l| !l.3 && l.0 != "stair-break"));
+        assert!(free.iter().all(|l| l.0 != "stair-guard"), "ohne Loch keine Absturzsicherung");
         // [157] Nur in Geschoss-Grundrissen: die 2D-Ebene eines Schnitts (Bezugshöhe wie das OG) zeigt keine
         // ankommende Treppe (vorher Wendeltreppen-Symbol mitten im Schnitt A-A, Musterhaus komplex).
         let mut q = p.clone();

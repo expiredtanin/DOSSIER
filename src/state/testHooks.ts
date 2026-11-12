@@ -73,6 +73,8 @@ declare global {
       walls: () => { id: string; start: { x: number; y: number }; end: { x: number; y: number } }[];
       /** [185] 3D-Element-Filter (Store) und die Wand-ids des 3D-Modells bzw. der Pick-Geometrie mit ihm. */
       view3d: () => { only: string[] | null; hidden: string[]; walls: string[]; pickWalls: string[]; floors: string[]; pickOpenings: { id: string; host: string }[] };
+      /** [202] Treppe (Antritt, Zentrum), erster Punkt des ersten Lochs der Decke `ceilingId` und Zahl der Plan-Linien der Treppe im aktiven Geschoss. */
+      stairHole: (stairId: string, ceilingId: string) => { start: { x: number; y: number }; center: { x: number; y: number } | null; hole0: { x: number; y: number } | null; lines: number };
     };
   }
 }
@@ -207,5 +209,22 @@ export function installTestHooks(): void {
       return { wallId: s.project.walls.find((w) => w.floorId === s.activeLevelId)?.id ?? s.project.walls[0]?.id ?? "", visible: vis.sort(), prims: prims.length, wallPrims: prims.filter((q) => !!(q as { wallId?: string }).wallId).length };
     },
     selected: () => ({ drawings: [...getState().selection.drawings], groups: [...getState().selection.groups], all: JSON.stringify(getState().selection) }),
+    stairHole: (stairId, ceilingId) => {
+      const s = getState();
+      const st = (s.project.stairs ?? []).find((x) => x.id === stairId)!;
+      const hole = (s.project.ceilings ?? []).find((c) => c.id === ceilingId)?.openings?.[0]?.[0];
+      const codes = new Set<string>();
+      const walk = (cs: { code: string; children?: unknown[] }[]): void => {
+        for (const c of cs) {
+          codes.add(c.code);
+          walk((c.children ?? []) as { code: string; children?: unknown[] }[]);
+        }
+      };
+      walk(s.project.layers);
+      const lines = generatePlan(s.project, s.activeLevelId, codes, undefined, s.detail, false, false, true, 50).primitives.filter(
+        (q) => q.kind === "line" && (q as { stairId?: string }).stairId === stairId,
+      ).length;
+      return { start: { ...st.start }, center: st.center ? { ...st.center } : null, hole0: hole ? { ...hole } : null, lines };
+    },
   };
 }

@@ -10,7 +10,7 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   stehen im Archiv („Bewusst nicht übernommen“).
 - **Grösse** (eine Person mit Agenten): S ≤ 1 Tag · M ≤ 1 Woche · L ≤ 1 Monat · XL > 1 Monat.
   Steht keine Grösse im Archiv, ist sie hier geschätzt.
-- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 201);
+- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 202);
   nie eine ID wiederverwenden oder umnummerieren. Präfix-IDs (`[K]`, `[G]`, `[T]`, `[B]`, `[C]`) bleiben.
 - **Pro Punkt:** was fehlt · wo im Code · Grösse. Höchstens ein bis drei Sätze je Punkt;
   Messwerte und Befunde gehören in den Commit.
@@ -632,6 +632,7 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
 
 ## Modell und Bauteile
 
+- ◐ **[202]** Treppe verschieben: Deckenloch wandert mit (12.11., Befund Maintainer „Wendeltreppe verschwindet“). Griff `stairBy` (`grips::run_doc`) und Bewegen/Drehen/Spiegeln/Skalieren (`cmd_transform`) nehmen die Löcher der Decke mit, auf der die Treppe ankommt (Aussparung `Ceiling.openings` samt Bögen und Deckenöffnungs-Element `hostCeilingId`; `stair_guard::carried_holes`), im selben Op-Satz; Loch mit einer anderen Treppe, gesperrte Decke/Öffnung und mitgewählte Decke/Öffnung bleiben. Ankommende Treppe ohne Loch wird oben unbeschnitten gezeichnet (`arrivals_in_plan`), Absturzsicherung (3D/IFC) nur mit Loch. Tests: Rust (`stair_guard` [202]-Tests, `plan/domains.rs`), e2e `stairHole202`. Weitere Wege geprüft: Objekt-Info ändert den Antritt nicht, Pfeiltasten nur als Achs-Sperre im 3D-Griff (Wände/Zeichnungen), Kopien lassen das Loch beim Original. **Offen:** Vorschau des Bewegen-Befehls zeigt das Loch nicht; nicht in der Tauri-App geprüft. · S
 - ◐ **[94]** Fenster/Türen: Konstruktionsdetails. Brüstung als eigenes Bauteil; Anschlag/Leibung in den Ressourcen-Tabs
   (nur im Bearbeiten-Dialog). · M
 - ◐ **[95]** Fenster/Türen: mehr Bauarten. (10.11.) Hebeschiebetür in der Ansicht mit Bandseite: festes Feld auf der

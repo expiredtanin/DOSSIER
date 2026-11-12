@@ -19,7 +19,7 @@ pub fn doc_grip_commit(h: u32, req_json: &str, key: &str, now_ms: f64) -> String
     let key = (!key.is_empty()).then_some(key);
     let now = if now_ms.is_finite() { now_ms } else { 0.0 };
     let out = with_doc(h, |d| -> Result<String, String> {
-        let res = crate::grips::run(&d.lookup(), &req)?;
+        let res = crate::grips::run_doc(d, &req)?;
         let text = crate::grips::result_json(&res);
         if res.ops.is_empty() {
             return Ok(text);
