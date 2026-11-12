@@ -735,7 +735,7 @@ fn value_hash(v: &Value, h: &mut u64) {
 }
 
 /// Firsthöhe über der Traufe (Dach-Geometrie des Kerns, `roof.rs`), nach Inhalt gemerkt.
-fn roof_ridge_height(r: &Value, eaves: f64) -> Result<f64, String> {
+pub(crate) fn roof_ridge_height(r: &Value, eaves: f64) -> Result<f64, String> {
     let mut key = 0xcbf2_9ce4_8422_2325u64 ^ eaves.to_bits();
     value_hash(r, &mut key);
     let hit = RIDGE_CACHE.with(|c| c.borrow().get(&key).and_then(|l| l.iter().find(|(v, z, _)| *z == eaves.to_bits() && v == r).map(|e| e.2)));
