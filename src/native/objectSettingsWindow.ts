@@ -7,6 +7,7 @@
 
 import { useEffect, useRef } from "react";
 import { getState, subscribe } from "../state/appStore";
+import { storeDocument } from "../state/historySlice";
 import { t } from "../i18n";
 import type { NotifyKind } from "../state/notifySlice";
 import type { InfoGroupId } from "../panels/objectInfo/groups";
@@ -16,9 +17,9 @@ import { BORDERLESS_WINDOW_CHROME } from "./windowChrome";
 import {
   OBJECT_SETTINGS_PREFIX as PREFIX,
   OBJECT_SETTINGS_WINDOW_LABEL as LABEL,
+  ObjectSettingsSender,
   applyForwardedChange,
   hostSnapshot,
-  objectSettingsSync,
   type ObjectSettingsSnapshot,
 } from "./objectSettingsSync";
 
@@ -66,7 +67,8 @@ export function useObjectSettingsWindowHost(host: object): void {
     if (!isTauriRuntime()) return;
     let disposed = false;
     let open = false;
-    let sent: ObjectSettingsSnapshot | null = null;
+    // Baut die Nachrichten; sammelt dafür die angenommenen Ops des Kern-Dokuments (Ops-Strom statt Neuladen).
+    const sender = new ObjectSettingsSender();
     let timer: ReturnType<typeof setTimeout> | null = null;
     const unlisten: Array<() => void> = [];
 
@@ -81,17 +83,14 @@ export function useObjectSettingsWindowHost(host: object): void {
       if (!(await WebviewWindow.getByLabel(LABEL))) {
         // Fenster zu: beim nächsten Öffnen meldet es „ready" und bekommt den ganzen Stand.
         open = false;
-        sent = null;
+        sender.reset();
         return;
       }
-      const next = current();
-      const msg = objectSettingsSync(sent, next);
+      const msg = sender.next(current());
       if (!msg) return;
-      sent = next;
       const { emitTo } = await import("@tauri-apps/api/event");
-      await emitTo(LABEL, `${PREFIX}-sync`, msg).catch(() => {
-        sent = null;
-      });
+      // Fehlgeschlagen: das Fenster merkt die Lücke an `seq`; der nächste Sync ist ohnehin der ganze Stand.
+      await emitTo(LABEL, `${PREFIX}-sync`, msg).catch(() => sender.reset());
     };
     const schedule = () => {
       if (!open || timer !== null) return;
@@ -108,6 +107,7 @@ export function useObjectSettingsWindowHost(host: object): void {
         last = s;
       }),
     );
+    unlisten.push(storeDocument(getState().project).onChange((before, after, ops) => sender.record(before, after, ops)));
     focusListeners.add(schedule);
     unlisten.push(() => focusListeners.delete(schedule));
 
@@ -116,7 +116,7 @@ export function useObjectSettingsWindowHost(host: object): void {
       if (disposed) return;
       const offReady = await listen(`${PREFIX}-window-ready`, () => {
         open = true;
-        sent = null;
+        sender.reset();
         void flush();
       });
       const offCommand = await listen<{ name: string; args?: unknown[] }>(`${PREFIX}-command`, (e) => {

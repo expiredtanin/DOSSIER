@@ -15,9 +15,10 @@ import { setSettingsArea } from "../panels/objectSettings/areaState";
 import { expandAndFocusInfoGroup } from "../panels/objectInfo/infoGroupState";
 import { setState } from "../state/appStore";
 import { setChangeSink } from "../state/changeSink";
+import { storeDocument } from "../state/historySlice";
 import {
   OBJECT_SETTINGS_PREFIX as PREFIX,
-  applyObjectSettingsSync,
+  ObjectSettingsReceiver,
   mirrorIntoStore,
   remoteHost,
   type ObjectSettingsSnapshot,
@@ -50,9 +51,13 @@ export function ObjectSettingsWindowApp() {
     void (async () => {
       const { listen, emitTo } = await import("@tauri-apps/api/event");
       if (disposed) return;
+      const receiver = new ObjectSettingsReceiver(storeDocument);
+      const ready = () => emitTo("main", `${PREFIX}-window-ready`).catch(() => {});
       const off = await listen<ObjectSettingsSync>(`${PREFIX}-sync`, (e) => {
-        const next = applyObjectSettingsSync(snap, e.payload);
-        if (!next) return;
+        const next = receiver.receive(e.payload);
+        // Lücke in der Folge bzw. Ops abgelehnt: ganzen Stand neu anfordern.
+        if (next === "resync") void ready();
+        if (!next || next === "resync") return;
         mirrorIntoStore(snap, next);
         snap = next;
         const f = next.ui.focus;
@@ -65,7 +70,7 @@ export function ObjectSettingsWindowApp() {
       });
       if (disposed) return off();
       unlisten.push(off);
-      await emitTo("main", `${PREFIX}-window-ready`).catch(() => {});
+      await ready();
     })();
 
     const onKey = (e: KeyboardEvent) => {
