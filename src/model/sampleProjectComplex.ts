@@ -382,7 +382,8 @@ door("og-t-anbau", "og-iw-anbau", "mk-tu-wand", 1.8, 1.2, 2.1);
 win("dg-f1", "dg-aw-w", "mk-fe-fest", 4.4, 1.2, 1.2, 1.8, { shape: "rund" });
 win("dg-f2", "dg-aw-o", "mk-fe-dk2", 4.2, 1.6, 1.6, 0.8);
 door("dg-t1", "dg-iw-x6", "mk-tu-futter", 4.0, 0.85, 2.0);
-door("dg-t2", "dg-iw-y6", "mk-tu-schiebe", 3.0, 0.9, 2.0);
+// Tür nicht auf der Schnittlinie A-A (x = 3): dort stünde im Schnitt nur der Sturz als freier Balken im DG ([199]).
+door("dg-t2", "dg-iw-y6", "mk-tu-schiebe", 3.6, 0.9, 2.0);
 
 // ═════════════════════════════════════════════════════════════════════════════
 // Decken (mit Aussparungen für Treppen), Bodenplatte

@@ -1029,3 +1029,25 @@ fn koerper_durch_wand_zeigt_durchdringungslinie() {
     assert!(!verticals.iter().any(|&u| (u - 6.5).abs() < 1e-6 || (u - 7.5).abs() < 1e-6), "{verticals:?}");
 }
 
+
+/// [199] Gaubenwange in der Seitenansicht: das Gaubendach schwebte über der Dachfläche, weil die senkrechten
+/// Wangen (Flächen mit Normale quer zur Hochachse) je nach Rundungsrauschen der Newell-Normale als Rückseite
+/// verworfen wurden. Ansicht von Westen (u = 10 − y): die Wange der Gaube bei y = 1.2 (x 2.8 … 5.2) liegt über der
+/// Dachlinie (z = 3 + y·tan 40°) bis zur Unterkante des Gaubendachs und zeigt die Wandfarbe.
+#[test]
+fn gaubenwange_in_der_seitenansicht() {
+    for kind in ["flach", "schlepp", "sattel"] {
+        let p = proj132(
+            serde_json::json!([{"id": "R", "type": "roof", "floorId": "F", "categoryCode": "35", "color": "#aa0000",
+                "outline": [{"x": 0, "y": 0}, {"x": 10, "y": 0}, {"x": 10, "y": 8}, {"x": 0, "y": 8}],
+                "shape": "sattel", "pitchDeg": 40, "overhang": 0, "ridgeAxis": "x", "baseElevation": 3.0, "thickness": 0.3,
+                "dormers": [{"id": "D", "kind": kind, "position": {"x": 4.0, "y": 1.2}, "width": 2.4, "frontHeight": 1.5}]}]),
+            serde_json::json!([]),
+        );
+        let prims = view132(&p, "w");
+        // Punkt knapp über der Dachlinie, unter dem Gaubendach (Unterkante ≥ 4.57 bei y = 2.3).
+        let (y, z) = (2.0, 3.0 + 2.0 * 40f64.to_radians().tan() + 0.15);
+        let top = top_at(&prims, [10.0 - y, z]);
+        assert!(matches!(top, Some(Primitive::Polygon { fill, .. }) if fill == "#d9d4cc"), "{kind}: Wange fehlt: {top:?}");
+    }
+}
