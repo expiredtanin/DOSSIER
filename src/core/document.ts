@@ -197,6 +197,9 @@ export type QueryName =
   | "selectionHighlight"
   | "modelJson";
 
+/** [195b] Beobachter einer neuen Leseansicht: alter und neuer Stand, Ops dazwischen (`null` = unbekannt). */
+export type DocumentChangeListener = (before: Project, after: Project, ops: readonly CoreOp[] | null) => void;
+
 export class ProjectDocument {
   private handle = 0;
   private mirror: Project;
@@ -241,10 +244,48 @@ export class ProjectDocument {
   /** Ob beim letzten Kern-Neustart der Verlauf erhalten blieb ([118]; Meldung an den Benutzer). */
   historyKept = true;
 
-  /** Neue Leseansicht nach einer angenommenen Änderung bzw. Undo/Redo; Verlaufskopie nachführen ([118]). */
-  private setMirror(project: Project): void {
+  /**
+   * Neue Leseansicht nach einer angenommenen Änderung bzw. Undo/Redo; Verlaufskopie nachführen ([118]).
+   * `ops` = die Ops, die den alten Stand in den neuen überführen (`null` = unbekannt, z. B. Laden).
+   */
+  private setMirror(project: Project, ops: readonly CoreOp[] | null): void {
+    const before = this.mirror;
     this.mirror = project;
     this.hist.sync(this.handle, project);
+    this.notifyChange(before, project, ops);
+  }
+
+  /** [195b] Beobachter der übernommenen Stände (s. {@link onChange}). */
+  private changeListeners = new Set<DocumentChangeListener>();
+
+  /**
+   * [195b] Meldet jede neue Leseansicht samt der Ops, die dahin führten (Commit, Griff, Befehl, Import,
+   * Undo/Redo, Sprung im Verlauf; `null` bei Laden oder grossem Verlaufsschritt ohne Ops-Rückgabe). So
+   * kann ein Spiegel (natives Nebenfenster) dieselben Ops nachführen statt das Projekt neu zu laden.
+   * Liefert die Abmeldung.
+   */
+  onChange(fn: DocumentChangeListener): () => void {
+    this.changeListeners.add(fn);
+    return () => this.changeListeners.delete(fn);
+  }
+
+  private notifyChange(before: Project, after: Project, ops: readonly CoreOp[] | null): void {
+    for (const fn of [...this.changeListeners]) fn(before, after, ops);
+  }
+
+  /**
+   * [195b] Ops nachführen, die ein ANDERES Dokument schon geprüft, angewendet und aufgezeichnet hat
+   * (Spiegel eines Nebenfensters, Ops-Strom des Hauptfensters): ohne Verlaufseintrag (`doc_apply`), die
+   * Leseansicht wie beim Commit über `applyOps`. `null` = das Dokument spiegelt `base` nicht oder der Kern
+   * lehnt ab (Dokument unverändert; der Aufrufer gleicht dann ganz ab).
+   */
+  applyRemote(base: Project, ops: readonly CoreOp[]): Project | null {
+    if (base !== this.mirror || !this.handle) return null;
+    if (ops.length === 0) return base;
+    if (core().doc_apply(this.handle, opsToJson(ops))) return null;
+    const project = applyOps(base, ops, core().doc_last_hits(this.handle));
+    this.setMirror(project, ops);
+    return project;
   }
 
   private reopen(project: Project): void {
@@ -331,11 +372,13 @@ export class ProjectDocument {
    * ganzen Inhalt im Kern und leert den Verlauf. `project` wird die Leseansicht (Identität bleibt).
    */
   load(project: Project): void {
+    const before = this.mirror;
     this.mirror = project;
     this.steps.clear();
     this.m3d.clear();
     if (!this.handle || !core().doc_load_json(this.handle, JSON.stringify(project))) this.reopen(project);
     this.hist.sync(this.handle, project);
+    this.notifyChange(before, project, null);
   }
 
   /**
@@ -351,7 +394,7 @@ export class ProjectDocument {
       | { ok: false; error: string };
     if (!r.ok) return r;
     const project = JSON.parse(core().doc_json(this.handle)) as Project;
-    this.setMirror(project);
+    this.setMirror(project, null);
     return { ok: true, project, warnings: r.warnings, migratedFrom: r.migratedFrom };
   }
 
@@ -427,8 +470,9 @@ export class ProjectDocument {
     }
     const extra = this.lastExtra();
     const project = this.withExtra(applyOps(base, ops, core().doc_last_hits(this.handle)), extra);
-    this.setMirror(project);
-    this.rememberCommit(base, project, extra.length ? [...ops, ...extra] : ops);
+    const all = extra.length ? [...ops, ...extra] : ops;
+    this.setMirror(project, all);
+    this.rememberCommit(base, project, all);
     return { project };
   }
 
@@ -448,8 +492,9 @@ export class ProjectDocument {
     if (r.ops.length === 0) return { project: base, ops: r.ops, notice: r.notice };
     const extra = this.lastExtra();
     const project = this.withExtra(applyOps(base, r.ops, core().doc_last_hits(this.handle)), extra);
-    this.setMirror(project);
-    return { project, ops: extra.length ? [...r.ops, ...extra] : r.ops, notice: r.notice };
+    const ops = extra.length ? [...r.ops, ...extra] : r.ops;
+    this.setMirror(project, ops);
+    return { project, ops, notice: r.notice };
   }
 
   /**
@@ -498,8 +543,9 @@ export class ProjectDocument {
     if (r.ops.length === 0) return { project: base, ops: r.ops, notice: r.notice };
     const extra = this.lastExtra();
     const project = this.withExtra(applyOps(base, r.ops), extra);
-    this.setMirror(project);
-    return { project, ops: extra.length ? [...r.ops, ...extra] : r.ops, notice: r.notice };
+    const ops = extra.length ? [...r.ops, ...extra] : r.ops;
+    this.setMirror(project, ops);
+    return { project, ops, notice: r.notice };
   }
 
   /**
@@ -516,8 +562,8 @@ export class ProjectDocument {
     if ("problems" in r) return r;
     const extra = r.ops.length ? this.lastExtra() : [];
     const project = r.ops.length ? this.withExtra(applyOps(base, r.ops), extra) : base;
-    this.setMirror(project);
     const ops = extra.length ? [...r.ops, ...extra] : r.ops;
+    this.setMirror(project, ops);
     this.rememberCommit(base, project, ops);
     return { ...r, ops, project };
   }
@@ -604,14 +650,14 @@ export class ProjectDocument {
     if (this.steps.has(top)) {
       if (!core().doc_jump_quiet(this.handle, !undo)) return null;
       const project = this.steps.jump(top, base, undo, this.historySeqs()[undo ? 1 : 0]);
-      this.setMirror(project);
+      this.setMirror(project, null);
       return project;
     }
     const json = core()[fn](this.handle);
     if (!json) return null;
     const ops = JSON.parse(json) as CoreOp[];
     const project = applyOps(base, ops, core().doc_last_hits(this.handle));
-    this.setMirror(project);
+    this.setMirror(project, ops);
     // Gegenschritt (neu oben auf dem anderen Stapel) führt zwischen denselben Ständen.
     const next = this.historySeqs()[undo ? 1 : 0];
     if (undo) this.steps.remember(next, project, base, ops);
@@ -627,8 +673,9 @@ export class ProjectDocument {
     }
     const json = core().doc_history_jump(this.handle, target);
     if (!json) return null;
-    const project = applyOps(base, JSON.parse(json) as CoreOp[], core().doc_last_hits(this.handle));
-    this.setMirror(project);
+    const ops = JSON.parse(json) as CoreOp[];
+    const project = applyOps(base, ops, core().doc_last_hits(this.handle));
+    this.setMirror(project, ops);
     return project;
   }
 
