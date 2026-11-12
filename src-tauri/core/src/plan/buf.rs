@@ -90,7 +90,8 @@ impl Hasher for FnvHasher {
 type FastMap<K, V> = HashMap<K, V, BuildHasherDefault<FnvHasher>>;
 
 pub const MAGIC: f64 = 1_347_174_962.0; // 0x504C4232 "PLB2"
-pub const VERSION: f64 = 2.0;
+/// Bei jeder Änderung des Formats erhöhen (3: Kopf 20 Wörter mit Gebäude-Ausmass, [204]); TS `PLAN_BUF_VERSION` gleich.
+pub const VERSION: f64 = 3.0;
 /// Fehlerpuffer einer Abfrage ("PLBe").
 pub const ERR_MAGIC: f64 = 1_347_175_013.0;
 const HEAD: usize = 20;

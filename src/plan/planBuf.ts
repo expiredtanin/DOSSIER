@@ -29,7 +29,8 @@ import type { HatchRender, Primitive } from "./generatePlan";
 import type { Vec2 } from "../model/types";
 
 export const PLAN_BUF_MAGIC = 0x504c4232;
-export const PLAN_BUF_VERSION = 2;
+/** Gleich wie Kern `plan::buf::VERSION`; bei Formatänderung beide erhöhen (3: Kopf 20 Wörter, [204]). */
+export const PLAN_BUF_VERSION = 3;
 /** Fehlerpuffer einer Kern-Abfrage ("PLBe"): `[ERR_MAGIC, nUnits]` + Meldung (UTF-16). */
 export const PLAN_BUF_ERR_MAGIC = 0x504c4265;
 const HEAD = 20;
@@ -520,7 +521,8 @@ export function decodePlanBuf(input: Uint8Array): DecodedPlanBuf {
   }
   if (bytes.byteLength < HEAD * 8) bad("zu kurz");
   const hd = new Float64Array(bytes.buffer, bytes.byteOffset, HEAD);
-  if (hd[0] !== PLAN_BUF_MAGIC || hd[1] !== PLAN_BUF_VERSION) bad("fremde Version");
+  if (hd[0] !== PLAN_BUF_MAGIC || hd[1] !== PLAN_BUF_VERSION)
+    bad(`Kern-Version ${hd[1]} passt nicht zur Oberfläche (${PLAN_BUF_VERSION}) — WASM-Kern veraltet, \`npm run build:core\` ausführen`);
   const [, , flags, nStrings, nHatches, nHatchWords, nGroups, nPrims, nRec, nPool, nUnits] = hd;
   const hashes = (flags & 1) !== 0;
   const strAt = HEAD;
