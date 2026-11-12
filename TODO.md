@@ -10,7 +10,7 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   stehen im Archiv („Bewusst nicht übernommen“).
 - **Grösse** (eine Person mit Agenten): S ≤ 1 Tag · M ≤ 1 Woche · L ≤ 1 Monat · XL > 1 Monat.
   Steht keine Grösse im Archiv, ist sie hier geschätzt.
-- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 225);
+- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 228);
   nie eine ID wiederverwenden oder umnummerieren. Präfix-IDs (`[K]`, `[G]`, `[T]`, `[B]`, `[C]`) bleiben.
 - **Pro Punkt:** was fehlt · wo im Code · Grösse. Höchstens ein bis drei Sätze je Punkt;
   Messwerte und Befunde gehören in den Commit.
@@ -109,6 +109,7 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   beschnitten `surface_pattern3d.rs`; Glas im Shader), nur im Linux-Container per render_png geprüft. Offen: Mac-Gegenprobe (Metal, Texturen);
   Bogenwände behalten Füllkörper; 3D-Live-Schnitt durch Formfenster zeigt Rechteck-Loch; Dachmuster an Kehlen nicht beschnitten; einzelne
   Körper mit inneren Stossflächen (Überlappung 0,1 mm mildert).
+- ○ **[228]** In Blender öffnen / .blend speichern (12.11., Wunsch Maintainer): im Rendering-Dialog „Als .blend speichern …“ (Skript baut die Szene wie fürs Rendering und speichert mit `bpy.ops.wm.save_as_mainfile`, Texturen eingepackt) und „In Blender öffnen“ (Blender mit Oberfläche statt `-b`, Szene fertig eingerichtet: Kamera, Sonne/Himmel, Materialien, Cycles), damit man dort weiterarbeiten kann (z. B. BlenderKit-Möbel, Bäume, Personen). Objekte nach Bauteil/Klasse in Collections, Namen lesbar. CLI: `dossier-cli … blend --out x.blend`. · S
 - ◐ **[207]** Schwarzplan / Situationsplan 1:500 (12.11.): Modelldarstellung mit `situation` (`ModelViewOption.situation`, Kern
   `plan/situation.rs`) ersetzt im Grundriss die Bauteile durch den gefüllten Umriss des eigenen Gebäudes (Wände/Decken/Körper ab
   Erdgeschoss + Dächer mit Überstand, Klasse „83 Situation Gebäude"), gefüllte Grundfläche der Kontextnetze ([181], auf ihrer Klasse;
