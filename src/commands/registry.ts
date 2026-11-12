@@ -75,6 +75,7 @@ import { georefCommand } from "./cmds/georef";
 import { blockCommand } from "./cmds/block";
 import { defblockCommand } from "./cmds/defblock";
 import { presentationCommand } from "./cmds/presentation";
+import { renderingCommand } from "./cmds/rendering";
 
 /** Alle bekannten Befehle, Schlüssel = Befehlsname (lowercase). */
 export const COMMANDS: Record<string, Command> = {
@@ -148,6 +149,7 @@ export const COMMANDS: Record<string, Command> = {
   multiline: multilineCommand,
   import: importCommand,
   praesentation: presentationCommand,
+  rendering: renderingCommand,
   terrain: terrainCommand,
   excavation: excavationCommand,
   meshcrop: meshCropCommand,
@@ -198,6 +200,9 @@ export const ALIASES: Record<string, string> = {
   praesentationsplan: "praesentation",
   präsentation: "praesentation",
   presentation: "praesentation",
+  render: "rendering",
+  blender: "rendering",
+  rendern: "rendering",
   lukarne: "dormer",
   dachhof: "roofhole",
   lichthof: "roofhole",

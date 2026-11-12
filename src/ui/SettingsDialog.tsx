@@ -21,6 +21,7 @@ import type { LineCap, LineEnds, LineJoin } from "../core";
 import type { ThemeMode } from "../theme/themeMode";
 import { checkForUpdate, getUpdateSnoozeUntil, setUpdateSnooze } from "../update/checkForUpdate";
 import { getRunningVersion } from "../update/version";
+import { getBlenderPath, setBlenderPath } from "../state/blenderSettings";
 import {
   fetchVersionHistory,
   openVersionDownload,
@@ -299,6 +300,11 @@ export function SettingsDialog({
             <div className="imp-note">{t("settings.referenceElevation.hint")}</div>
             <LineWeightScaleField enabled={scaleLineWeights} onChange={onScaleLineWeightsChange} />
             <LineEndsField value={lineEnds} onChange={onLineEndsChange} />
+          </section>
+
+          <section className="imp-section">
+            <div className="imp-section-title">{t("settings.section.rendering")}</div>
+            <BlenderPathField />
           </section>
         </>
         )}
@@ -780,6 +786,31 @@ function LineWeightScaleField({ enabled, onChange }: { enabled: boolean; onChang
         <span>{t("settings.scaleLineWeights")}</span>
       </label>
       <div className="imp-note">{t("settings.scaleLineWeights.hint")}</div>
+    </>
+  );
+}
+
+/** [211] Pfad der Blender-Programmdatei für das Rendering (pro Rechner, localStorage; leer = automatisch suchen). */
+function BlenderPathField() {
+  const [path, setPath] = useState(getBlenderPath);
+  return (
+    <>
+      <label className="settings-field-label" htmlFor="settings-blender-path">
+        {t("settings.blenderPath")}
+      </label>
+      <input
+        id="settings-blender-path"
+        className="settings-num-input"
+        type="text"
+        style={{ width: "100%" }}
+        value={path}
+        placeholder={t("render.blenderPath.placeholder")}
+        onChange={(e) => {
+          setPath(e.target.value);
+          setBlenderPath(e.target.value);
+        }}
+      />
+      <div className="imp-note">{t("settings.blenderPath.hint")}</div>
     </>
   );
 }

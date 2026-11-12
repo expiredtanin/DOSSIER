@@ -8,6 +8,7 @@ const { app, BrowserWindow, Menu, ipcMain, protocol, session } = require("electr
 const path = require("node:path");
 const fs = require("node:fs");
 const { buildCsp } = require("./csp.cjs");
+require("./electron-blender.cjs").register(ipcMain); // [211] Blender als eigener Prozess
 
 // Randloses App-Fenster wie chromium-shell.sh (--app=…): keine native
 // Menüleiste (File/Edit/View/Window), kein Fensterrahmen. Minimieren/

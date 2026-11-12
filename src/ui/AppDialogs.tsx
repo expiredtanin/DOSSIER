@@ -29,6 +29,7 @@ import { IfcImportDialog, IfcImportReportDialog } from "./IfcImportDialog";
 import { ImportDialog } from "./ImportDialog";
 import { LockConflictDialog } from "./LockConflictDialog";
 import { PresentationDialogHost } from "./PresentationDialog";
+import { RenderDialogHost } from "./RenderDialog";
 import { PromptDialog } from "./PromptDialog";
 import { RecoverAutosaveDialog } from "./RecoverAutosaveDialog";
 import { ResourceManager, type ResourceManagerHandlers } from "./ResourceManager";
@@ -165,6 +166,8 @@ export function AppDialogs(props: {
         runImport (Ebene anlegen / Drawings anhängen / Meshes als Kontext). */}
     {/* [66] Präsentationsplan: Dialog (Befehl `praesentation`, Knopf im Layouts-Panel) */}
     <PresentationDialogHost onCreated={setActiveLayoutId} />
+    {/* [211] Rendering mit Blender/Cycles (Befehl `rendering`, Menü Ansicht) */}
+    <RenderDialogHost />
     {importState && (
       <ImportDialog
         fileName={importState.fileName}

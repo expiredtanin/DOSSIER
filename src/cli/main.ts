@@ -35,6 +35,8 @@
 //   dossier-cli <projekt.obp> erkennen [--level EG] [--source ebene] [--out neu.obp]
 //                                                  [154] Bauteile aus 2D-Zeichnung erkennen (Wände, Öffnungen, Räume
 //                                                  ins Geschoss); Bericht als JSON. Z. B. convert plan.dxf p.obp --cmd "erkennen --out e.obp"
+//   dossier-cli <projekt.obp> render --out bild.png [--view iso|perspective|front|back|left|right|top] [--when 2026-06-21T10:00Z]
+//                                                  [--samples 128] [--size 1920x1080] [--cpu] [--blender pfad] [--keep]   [211] Rendering mit Blender/Cycles
 //   dossier-cli <projekt.obp> model3d [--explode 3] [--hide …] [--grey …] [--out modell.json]   3D-Modell fürs Headless-Rendern (render_png)
 //   dossier-cli pointcloud-info <datei.las|laz|e57|ply|xyz|pts> [--voxel 0.05] [--max 2000000]
 //                                                  Punktwolke lesen ([B9]) und Bericht als JSON (ohne Projekt)
@@ -51,7 +53,9 @@
 //
 // WASM-Pakete (src/engine/pkg*) werden aus DOSSIER_WASM_DIR bzw. `<repo>/src/engine` gelesen.
 
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -141,8 +145,15 @@ import {
   recognizeMutation,
   recognizeReport,
   recognizeSourceLevels,
+  buildRenderPackage,
+  runBlenderRender,
+  defaultRenderTime,
+  BlenderMissingError,
+  BLENDER_CANDIDATES,
+  BLENDER_DOWNLOAD_URL,
+  RENDER_VIEW_PRESETS,
 } from "../core";
-import type { Filter3d, Project, ViewTemplate } from "../core";
+import type { BlenderHost, Filter3d, Project, RenderViewPreset, TextureLoader, ViewTemplate } from "../core";
 import { serveStdio } from "./mcp";
 import { startBridge } from "./mcpBridge";
 
@@ -444,7 +455,7 @@ export async function run(argv: string[]): Promise<number> {
   if (file === "mcp" && args.flags.has("app")) return runAppBridge(args);
   if (!file || (!command && args.cmds.length === 0)) {
     process.stderr.write(
-      "Aufruf: dossier-cli <projekt.obp> <info|validate|migrate|plan|section|elevation|dxf|dwg|ifc|import-ifc|import-mesh|erkennen|step|obj [--no-mtl]|stl|glb|gltf|schedule|kennzahlen|raumprogramm|sun|model3d> [Optionen]\n" +
+      "Aufruf: dossier-cli <projekt.obp> <info|validate|migrate|plan|section|elevation|dxf|dwg|ifc|import-ifc|import-mesh|erkennen|step|obj [--no-mtl]|stl|glb|gltf|schedule|kennzahlen|raumprogramm|sun|model3d|render> [Optionen]\n" +
         "        dossier-cli convert <eingabe.dxf|dwg|ifc|pdf|obj|stl|gltf|glb|ply|obp> <ausgabe.obp|dxf|dwg|ifc|obj|stl|glb|gltf|step> [--cmd \"befehl …\"]…\n" +
         "        dossier-cli <projekt.obp> --cmd \"befehl …\" [--cmd …]   ({last} = zuletzt geschriebene Datei)\n" +
         "        dossier-cli pointcloud-info <datei> [--voxel 0.05] [--max 2000000]\n" +
@@ -670,6 +681,127 @@ async function meshInto(project: Project, bytes: Uint8Array, path: string, args:
   const r = importDoc(project).importMesh(project, read.flat, { fileName, placement }, Date.now());
   if ("problems" in r) return fail(`${path}: ${r.problems.join("; ")}`);
   return { next: r.project, report: { ...read.report, contextObjects: r.contextObjects } };
+}
+
+/** [211] Das Blender-Skript: neben `dist-cli/` (`<repo>/scripts/blender`) bzw. aus `src/cli/` (Vitest); `--script` übersteuert. */
+function renderScript(args: Args): string {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const own = args.flags.get("script");
+  const candidates = own ? [own] : [resolve(here, "..", "scripts", "blender", "render_dossier.py"), resolve(here, "..", "..", "scripts", "blender", "render_dossier.py")];
+  const found = candidates.find((c) => existsSync(c));
+  if (!found) return fail(`render: Blender-Skript nicht gefunden (${candidates.join(", ")})`);
+  return readFileSync(found, "utf8");
+}
+
+/** [211] Bildkarten der mitgelieferten Materialien (`/assets/materials/…` unter `<repo>/public`); Web-Adressen lädt die CLI nicht. */
+function localTextureLoader(): TextureLoader {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const roots = [resolve(here, "..", "public"), resolve(here, "..", "..", "public")];
+  return async (url) => {
+    if (/^[a-z]+:/i.test(url)) return null;
+    for (const r of roots) {
+      const p = join(r, url);
+      if (existsSync(p)) return new Uint8Array(readFileSync(p));
+    }
+    return null;
+  };
+}
+
+/** [211] Blender als Kindprozess (Node): Programmdatei suchen, Arbeitsordner im Temp-Ordner, Ausgabe zeilenweise. */
+function nodeBlenderHost(keep: boolean): BlenderHost {
+  let dir = "";
+  return {
+    async find(custom) {
+      const c = custom?.trim();
+      if (c) {
+        if (existsSync(c)) return c;
+        const inner = join(c, "Contents", "MacOS", "Blender");
+        return existsSync(inner) ? inner : null;
+      }
+      for (const d of (process.env.PATH ?? "").split(process.platform === "win32" ? ";" : ":")) {
+        if (d && existsSync(join(d, "blender"))) return join(d, "blender");
+      }
+      return BLENDER_CANDIDATES.find((p) => existsSync(p)) ?? null;
+    },
+    async prepare(files) {
+      dir = mkdtempSync(join(tmpdir(), "dossier-render-"));
+      for (const f of files) {
+        const target = join(dir, f.path);
+        mkdirSync(dirname(target), { recursive: true });
+        writeFileSync(target, f.bytes);
+      }
+      if (keep) process.stderr.write(`Arbeitsordner: ${dir}\n`);
+      return dir;
+    },
+    spawn(exe, argv, onLine) {
+      const child = spawn(exe, argv, { stdio: ["ignore", "pipe", "pipe"] });
+      const feed = (): ((d: Buffer) => void) => {
+        let rest = "";
+        return (d) => {
+          const parts = (rest + d.toString("utf8")).split(/[\r\n]+/);
+          rest = parts.pop() ?? "";
+          for (const p of parts) if (p) onLine(p);
+        };
+      };
+      child.stdout.on("data", feed());
+      child.stderr.on("data", feed());
+      const done = new Promise<number>((res) => {
+        child.on("error", (e) => {
+          onLine(`DOSSIER_ERROR ${e.message}`);
+          res(1);
+        });
+        child.on("close", (code) => res(code ?? -1));
+      });
+      return { done, cancel: () => void child.kill() };
+    },
+    async readFile(path) {
+      return new Uint8Array(readFileSync(path));
+    },
+    join: (d, r) => join(d, r),
+  };
+}
+
+/** `dossier-cli … render`: Paket bauen, Blender starten, Bild nach `--out`. Rückgabe = Exit-Code. */
+async function runRender(project: Project, args: Args): Promise<number> {
+  const view = (args.flags.get("view") ?? "iso") as RenderViewPreset;
+  if (!(RENDER_VIEW_PRESETS as readonly string[]).includes(view)) return fail(`--view: ${RENDER_VIEW_PRESETS.join("|")}`);
+  const whenText = args.flags.get("when");
+  const when = whenText ? new Date(whenText) : defaultRenderTime(project);
+  if (Number.isNaN(when.getTime())) return fail("--when: ungültiges Datum");
+  const samples = Number(args.flags.get("samples") ?? 128);
+  if (!Number.isFinite(samples) || samples < 1) return fail("--samples: Zahl ≥ 1");
+  const sizeText = args.flags.get("size") ?? "1920x1080";
+  const m = /^(\d+)x(\d+)$/i.exec(sizeText);
+  if (!m) return fail("--size: BreitexHöhe in Pixeln, z. B. 1920x1080");
+  await loadFileio();
+  const pkg = await buildRenderPackage(
+    project,
+    { width: Number(m[1]), height: Number(m[2]), samples, when, camera: { preset: view }, device: args.flags.has("cpu") ? "cpu" : "auto" },
+    localTextureLoader(),
+  );
+  if (pkg.missingTextures.length > 0) process.stderr.write(`Hinweis: ${pkg.missingTextures.length} Bildkarten nicht lesbar (Material erscheint einfarbig)\n`);
+  const target = args.flags.get("out") ?? `${project.name || "projekt"}.png`;
+  try {
+    const res = await runBlenderRender(nodeBlenderHost(args.flags.has("keep")), pkg, {
+      script: renderScript(args),
+      blenderPath: args.flags.get("blender"),
+      onLine: args.flags.has("verbose") ? (l) => process.stderr.write(`  ${l}\n`) : undefined,
+      onProgress: (e) => {
+        if (e.stage === "render" && e.done > 0 && e.total > 0 && (e.done === e.total || e.done % Math.max(1, Math.floor(e.total / 8)) === 0)) process.stderr.write(`Sample ${e.done}/${e.total}\n`);
+      },
+    });
+    writeFileSync(target, res.png);
+    lastOutput = target;
+    process.stderr.write(`geschrieben: ${target} (${res.png.length} Bytes)\n`);
+    return 0;
+  } catch (e) {
+    if (e instanceof BlenderMissingError) {
+      process.stderr.write(`Blender nicht gefunden. Installieren (${BLENDER_DOWNLOAD_URL}) oder --blender <pfad> angeben.\n`);
+      return 3;
+    }
+    process.stderr.write(`dossier-cli: ${e instanceof Error ? e.message : String(e)}\n`);
+    return 1;
+  }
 }
 
 /** Führt EINEN Befehl gegen ein geladenes Projekt aus (Rückgabe = Exit-Code). */
@@ -1023,6 +1155,9 @@ async function execute(project: Project, file: string, command: string, rest: st
     case "mcp":
       await serveStdio(file);
       return 0;
+    case "render":
+      // [211] Rendering mit Blender/Cycles (Paket + Blender-Prozess, `export/blenderRender.ts`)
+      return runRender(project, args);
     case "model3d":
     {
       // `--explode <m>`: Explosionsaxonometrie ([65]), Geschosse um Index × Abstand angehoben. `--hide`: Klassen aus ([180]).
