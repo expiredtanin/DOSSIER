@@ -2,6 +2,7 @@
 //! Monolith-Vereinigung der Platten, Laufplatten gerader Betontreppen ([G1]) und Schnitt parallel zur
 //! Wand durch die Leibungen ([106]). Aufgerufen von `compute_section()` (`mod.rs`).
 
+use crate::jsnum::ClampSafe;
 use super::*;
 
 /// `appendRoofSections`: Schnittspur der Dachflächen, je Schicht ein Band.
@@ -34,7 +35,7 @@ pub(super) fn shaped_wall_cuts(cuts: &mut [Cut], p: &Project, walls_r: &[RWall],
         if along < from - 1e-4 || along > to + 1e-4 {
             continue;
         }
-        let along = along.clamp(from, to);
+        let along = along.clamp_safe(from, to);
         let (zb, zt) = opening_extent(p, wall, o);
         let Some(poly) = crate::opening_shape::opening_outline(o, to - from, zt - zb) else { continue };
         let Some((lo, hi)) = crate::opening_shape::v_range(&poly, along - from) else { continue };

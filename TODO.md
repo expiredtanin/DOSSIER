@@ -57,6 +57,11 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
 ### Phase 1 (13.–19.11.): Stabil und baubar
 - ○ **[206]** Referenz-Ablauf als e2e-Spec (Browser) und als Checkliste für die Mac-Abnahme (`doc/RELEASE-1.0.md`): jeder Schritt
   oben ein Test; was fehlt, wird hier als Aufgabe eingetragen. · M
+- ✓ **[217]** Kern-Panics aus dem Robustheitstest (12.11.): `wall_top_at` nutzte `f64::clamp(base, base+height)` — bei negativer/NaN-Höhe
+  min > max bzw. NaN → Panic in `wall_piece_mesh` (und über 3D/Exporte, u. a. `exportIfcSpf`). Neu `jsnum::clamp_safe`/`ClampSafe`
+  (Grenzen tauschen, NaN wie JS); 28 weitere `.clamp(` mit berechneten Grenzen in Kern-Modulen umgestellt. „Zufall 13“-Timeout war
+  Last (je Fall < 1 s, ganze Datei ~30 s), keine Endlosschleife. Regressionstests: Rust `wandkoerper_mit_kaputter_hoehe_ohne_panic`,
+  `jsnum::clamp_ohne_panic`, vitest in `robustness.test.ts`. Offen: ganzzahlige `usize::clamp` mit berechneten Grenzen nicht einzeln geprüft.
 - [30] Release-Workflow lauffähig: macOS universal signiert/notarisiert, Updater, Versionsnummer 1.0.0-beta; [57]/[120] CI auf GitHub grün.
 - „Mac-Gegenprobe“ (Sammelpunkt unten) für alles im Referenz-Ablauf abarbeiten (Maintainer), Befunde sofort beheben;
   [194] Texte synchron, [195b] Objektfenster, [190] Cmd+J auf dem Mac bestätigen.

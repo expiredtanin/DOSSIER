@@ -11,6 +11,7 @@
 //! Deckenoberkante (Mittelpunkt `hostPoint`), Breite längs der Traufe, Höhe das Gefälle hinauf. Die
 //! Öffnung schneidet alle Schichten senkrecht zur Fläche (Normale `n`).
 
+use crate::jsnum::ClampSafe;
 use crate::model::*;
 
 pub type P = [f64; 2];
@@ -61,7 +62,7 @@ pub fn outline(shape: OpeningShape, rise: Option<f64>, w: f64, h: f64) -> Option
     match shape {
         OpeningShape::Rundbogen | OpeningShape::Segmentbogen => {
             let r = if shape == OpeningShape::Rundbogen { w / 2.0 } else { rise.unwrap_or(w / 6.0) };
-            let r = r.clamp(MIN * 10.0, (w / 2.0).min(h));
+            let r = r.clamp_safe(MIN * 10.0, (w / 2.0).min(h));
             let big = (w * w / 4.0 + r * r) / (2.0 * r);
             let c = [w / 2.0, h - big];
             let a0 = (big - r).atan2(w / 2.0);
@@ -70,7 +71,7 @@ pub fn outline(shape: OpeningShape, rise: Option<f64>, w: f64, h: f64) -> Option
             arc(&mut pts, c, big, a0, std::f64::consts::PI - a0);
         }
         OpeningShape::Spitzbogen => {
-            let r = rise.unwrap_or(w * 3f64.sqrt() / 2.0).clamp(w / 2.0, h.max(w / 2.0)).min(h);
+            let r = rise.unwrap_or(w * 3f64.sqrt() / 2.0).clamp_safe(w / 2.0, h.max(w / 2.0)).min(h);
             if r < w / 2.0 - MIN {
                 // Zu niedrig für einen Spitzbogen: Rundbogen.
                 return outline(OpeningShape::Rundbogen, None, w, h);
@@ -93,11 +94,11 @@ pub fn outline(shape: OpeningShape, rise: Option<f64>, w: f64, h: f64) -> Option
             }
         }
         OpeningShape::Schraeg => {
-            let d = rise.unwrap_or(w / 2.0).clamp(-h, h);
+            let d = rise.unwrap_or(w / 2.0).clamp_safe(-h, h);
             pts = vec![[0.0, 0.0], [w, 0.0], [w, h - (-d).max(0.0)], [0.0, h - d.max(0.0)]];
         }
         OpeningShape::Giebel => {
-            let r = rise.unwrap_or(w / 2.0).clamp(0.0, h);
+            let r = rise.unwrap_or(w / 2.0).clamp_safe(0.0, h);
             pts = vec![[0.0, 0.0], [w, 0.0], [w, h - r], [w / 2.0, h], [0.0, h - r]];
         }
         _ => return None,
@@ -179,7 +180,7 @@ pub fn layer_fill_quads(poly: &[P], w: f64, h: f64, s: [f64; 4]) -> Vec<[P; 4]> 
         return fill_quads(poly, w, h);
     }
     let (ww, hh) = (w + s[0] + s[1], h + s[2] + s[3]);
-    let moved: Vec<P> = outset_sides(poly, s).into_iter().map(|q| [(q[0] + s[0]).clamp(0.0, ww), (q[1] + s[3]).clamp(0.0, hh)]).collect();
+    let moved: Vec<P> = outset_sides(poly, s).into_iter().map(|q| [(q[0] + s[0]).clamp_safe(0.0, ww), (q[1] + s[3]).clamp_safe(0.0, hh)]).collect();
     fill_quads(&dedup(moved), ww, hh).into_iter().map(|q| q.map(|c| [c[0] - s[0], c[1] - s[3]])).collect()
 }
 

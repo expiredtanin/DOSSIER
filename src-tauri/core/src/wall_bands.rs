@@ -8,6 +8,7 @@
 //! Zwei Pfade wie in TS: `layered` (3D-Viewer: ein Körper je Band über die volle Achse, Öffnungen
 //! als Löcher) und Schnitt-Eingabe (Pfeiler/Brüstung/Sturz-Segmente ohne Löcher).
 
+use crate::jsnum::ClampSafe;
 use crate::joins::{js_hypot, reference_offset, Line, Reference, WallCuts};
 use kernel2d::{add, dot, left_normal, line_intersect, point_in_outline, scale, sub, Vec2};
 
@@ -700,7 +701,7 @@ fn strip_tops(w: &WallIn, t: &Tops, u: Vec2, n: Vec2, off: f64, th: f64, a: f64,
     let pt = |s: f64| add(base, scale(u, s));
     let steps = 8usize.max(((b - a) / ROOF_SAMPLE).ceil() as usize).min(20_000);
     let ts: Vec<f64> = (0..=steps).map(|i| if i == steps { b } else { a + (b - a) * i as f64 / steps as f64 }).collect();
-    let inner = |s: f64| s.clamp(a + 1e-6, b - 1e-6);
+    let inner = |s: f64| s.clamp_safe(a + 1e-6, b - 1e-6);
     let fac: Vec<Fac> = ts.iter().map(|&s| t.at(pt(inner(s)))).collect();
     // Läufe gleicher Bereiche und die Grenzen dazwischen (Achsmass, Schnittlinie).
     let mut runs: Vec<(Fac, f64, Option<Line>)> = vec![(fac[0], a, cut_a)];
@@ -735,7 +736,7 @@ fn strip_tops(w: &WallIn, t: &Tops, u: Vec2, n: Vec2, off: f64, th: f64, a: f64,
             }
         }
         let prev = runs.last().map_or(a, |r| r.1);
-        let s_cut = line.and_then(|l| band_cut_distance(w, u, n, off, &l)).filter(|x| x.is_finite()).unwrap_or(sm).clamp(prev, b);
+        let s_cut = line.and_then(|l| band_cut_distance(w, u, n, off, &l)).filter(|x| x.is_finite()).unwrap_or(sm).clamp_safe(prev, b);
         runs.push((fb, s_cut, line));
     }
     let k_last = runs.len() - 1;
@@ -972,7 +973,7 @@ pub fn wall_bands(w: &WallIn, ctx: &FloorContext) -> Vec<Piece> {
         } else {
             let mut cursor = lo;
             for c in &cutouts {
-                let (cf, ct) = (c.from.clamp(lo, hi), c.to.clamp(lo, hi));
+                let (cf, ct) = (c.from.clamp_safe(lo, hi), c.to.clamp_safe(lo, hi));
                 let seg_from = cursor.max(cf);
                 if cf > cursor {
                     seg(&mut em, cursor, cf, z_bottom, z_top);

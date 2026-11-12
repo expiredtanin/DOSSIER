@@ -937,7 +937,11 @@ pub(crate) fn wall_footprint(w: &RWall) -> Option<[[f64; 2]; 4]> {
 pub(crate) fn wall_top_at(w: &RWall, q: [f64; 2]) -> f64 {
     let zt = w.base_elevation + w.height;
     match w.top_plane {
-        Some(c) => (c[0] + c[1] * (q[0] - w.start[0]) + c[2] * (q[1] - w.start[1])).clamp(w.base_elevation, zt),
+        // Negative Höhe oder NaN: Grenzen vertauscht bzw. ungültig -> ebene Oberkante, kein Panic.
+        Some(c) => {
+            let z = crate::jsnum::clamp_safe(c[0] + c[1] * (q[0] - w.start[0]) + c[2] * (q[1] - w.start[1]), w.base_elevation, zt);
+            if z.is_finite() { z } else { zt }
+        }
         None => zt,
     }
 }

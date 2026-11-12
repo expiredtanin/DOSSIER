@@ -635,3 +635,26 @@ fn verbau_im_3d_klasse_und_pick() {
     assert!(g.context_meshes.iter().any(|m| m.context_object_id == "bg" && m.tris.len() == 24));
     assert!(pick_geometry(&mk(false)).unwrap().context_meshes.iter().all(|m| m.context_object_id != "bg" || m.tris.len() != 24), "Klasse aus: kein Verbau-Pick");
 }
+
+/// [217] Wandkörper mit negativer/NaN-Höhe und ebener Oberkante: `wall_top_at`/`wall_piece_mesh` dürfen nicht
+/// panikieren (`f64::clamp` mit min > max oder NaN-Grenzen legte das WASM-Modul lahm).
+#[test]
+fn wandkoerper_mit_kaputter_hoehe_ohne_panic() {
+    use crate::plan::walls::tests::pocket_project;
+    let ws = emit_walls(&pocket_project(DoorTypeKind::Schiebe, None, 1.0), false).unwrap();
+    let mut w = ws[0].clone();
+    w.top_plane = Some([3.0, 0.1, 0.0]);
+    for h in [-3.0, f64::NAN, 0.0, f64::INFINITY, -1e300] {
+        w.height = h;
+        let _ = wall_top_at(&w, [0.0, 0.0]);
+        let _ = wall_piece_mesh(&w);
+        let _ = wall_piece_volume(&w);
+    }
+    for c in [[f64::NAN, 0.0, 0.0], [f64::INFINITY, 1.0, 1.0]] {
+        w.height = 2.5;
+        w.top_plane = Some(c);
+        assert!(wall_top_at(&w, [1.0, 1.0]).is_finite());
+    }
+    w.base_elevation = f64::NAN;
+    let _ = wall_piece_mesh(&w);
+}

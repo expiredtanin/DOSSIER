@@ -52,6 +52,7 @@
 //! `[n, (verlStart, verlEnde) × n]`: Wandenden bis zur Aussenfläche der dicksten anstossenden Wand
 //! desselben Geschosses (`wallCornerExtensions`).
 
+use crate::jsnum::ClampSafe;
 use crate::jsmath::{hypot, hypot2};
 use crate::jsnum::{max, min, round};
 use crate::ugrid::Grid1;
@@ -209,7 +210,7 @@ impl OccCells {
             return 0;
         }
         let c = ((u - self.lo) * self.inv).floor();
-        if c.is_nan() { 0 } else { c.clamp(0.0, (self.cells.len() - 1) as f64) as usize }
+        if c.is_nan() { 0 } else { c.clamp_safe(0.0, (self.cells.len() - 1) as f64) as usize }
     }
 }
 
@@ -617,7 +618,7 @@ fn wall_faces(f: &Frame, w: &[f64], src: usize, out: &mut Vec<Projected>) {
     let corner = |s_along: f64, t_off: f64, y: f64| -> V3 {
         let (x, z) = (sx + a_hat[0] * s_along + n_hat[0] * t_off, sz + a_hat[2] * s_along + n_hat[2] * t_off);
         let y = match plane {
-            Some(c) if y == zt => (c[0] + c[1] * (x - sx) + c[2] * (z - sz)).clamp(zb, zt),
+            Some(c) if y == zt => (c[0] + c[1] * (x - sx) + c[2] * (z - sz)).clamp_safe(zb, zt),
             _ => y,
         };
         [x, y, z]

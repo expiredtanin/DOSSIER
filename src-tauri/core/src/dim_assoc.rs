@@ -25,6 +25,7 @@
 //!   Bezüge nur, wenn das Element mitkopiert wird (auf die Kopie umgeschrieben).
 //! - **Lösen** ([`detach_ops`], Befehl „Bemassung lösen"): `refs` weg, `pts` bleibt.
 
+use crate::jsnum::ClampSafe;
 use crate::document::Lookup;
 use crate::model::{DimFeature, DimRef};
 use crate::ops::Op;
@@ -96,7 +97,7 @@ fn wall_geo(lk: &Lookup, w: &Value) -> Option<WallGeo> {
     let total: f64 = layers.iter().sum();
     let half = total / 2.0;
     let ref_off = match (num(w.get("referenceOffset")), str_of(w, "referenceLine")) {
-        (Some(v), _) => v.clamp(-half, half),
+        (Some(v), _) => v.clamp_safe(-half, half),
         (None, Some("left")) => half,
         (None, Some("right")) => -half,
         _ => 0.0,

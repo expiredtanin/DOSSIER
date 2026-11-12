@@ -7,6 +7,7 @@
 //! sonst auf der UK des Geschosses; dazu `baseOffset`. Höhen über dem Fuss: Kronenansatz `crownBase`,
 //! Spitze `height`.
 
+use crate::jsnum::ClampSafe;
 use crate::jsnum;
 use crate::model::*;
 
@@ -62,7 +63,7 @@ impl TreeGeom {
         // Stamm nie dicker als die Krone.
         let trunk_r = jsnum::min(pos(t.trunk_diameter, DEFAULT_TRUNK_DIAMETER) / 2.0, crown_r * 0.8);
         // Kronenansatz zwischen 0 und 90 % der Höhe.
-        let cb = if t.crown_base.is_finite() { t.crown_base.clamp(0.0, 0.9 * h) } else { jsnum::min(DEFAULT_CROWN_BASE, 0.5 * h) };
+        let cb = if t.crown_base.is_finite() { t.crown_base.clamp_safe(0.0, 0.9 * h) } else { jsnum::min(DEFAULT_CROWN_BASE, 0.5 * h) };
         Some(TreeGeom { c: [t.position.x, t.position.y], base, foot: base, trunk_r, crown_r, crown_bottom: base + cb, top: base + h, shape: t.shape })
     }
 
