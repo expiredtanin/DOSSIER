@@ -2640,7 +2640,7 @@ pub(crate) mod tests {
         extra.push(0);
         assert!(View::parse(&extra).is_none());
         let mut wrong = enc.clone();
-        wrong[8..16].copy_from_slice(&3.0f64.to_le_bytes());
+        wrong[8..16].copy_from_slice(&(VERSION + 1.0).to_le_bytes());
         assert!(View::parse(&wrong).is_none());
         assert!(View::parse(&[]).is_none());
         assert!(View::parse(&encode_error("x")).is_none());
