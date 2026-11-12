@@ -287,6 +287,7 @@ Beispiel: Die Plan-Ansicht zeigt das Erdgeschoss im Massstab 1:100.
 |---|---|---|---|
 | Bildschirm (Browser, Electron) | `planSceneBin()` in `src/plan/toRenderScene.ts`, aufgerufen von `src/views/plan/useWasmPlanRenderer.ts` | `plan_scene_bin()` → `build_scene()`, `encode_scene_bin()` in `plan/scene.rs` | render2d `set_scene_bin()` (`render2d/src/web.rs`) → `tessellate.rs` → `gpu.rs` |
 | Bildschirm (macOS nativ) | `src/views/plan/useNativePlanRenderer.ts`, Chunk-Cache `src/plan/glPlan/glPlanChunks.ts`, Puffer-Brücke `src/views/plan/nativeGl.ts` | `gpu_compile_held()` → `compile()` in `gpu_compile.rs` | Tauri-Befehle `native2d_upload` u. a. (`src-tauri/src/lib.rs`) → `src-tauri/src/native_embed.rs` → `render2d/src/chunks.rs` |
+| Texte auf dem Bildschirm (macOS nativ, [194]) | `planScreenTexts()` in `src/plan/toRenderScene.ts`, Auswahl `isSceneText`/`isGpuText` in `src/plan/nativeText.ts` | `plan_screen_texts()` → `scene_texts()` in `plan/text.rs` (Layout `text_layout.rs`) | `native2d_scene_texts` → `ChunkRenderer::set_scene_texts` → Glyphen-Pass `render2d/src/glyph.rs` (gleich wie im Browser); gedrehte Einzeiler `native2d_texts` → `vtext.rs` |
 | Auswahl, Picken | `src/plan/planView/planPick.ts` | `pick_index_build()` → `plan/pick.rs` | Indizes in `plan.primitives` |
 | SVG (CLI, Goldens) | `planToSvgString()` in `src/export/planToSvgString.ts` | `plan_svg_string()` → `plan_svg()` in `plan/svg.rs` | Text |
 | PDF eines Plans | `src/export/exportPdf.ts`: `planToRenderScene()` → `sceneToPrintSvg()` (`src/export/sceneToPrintSvg.ts`) | `plan_scene_f64()` in `plan/scene.rs` | jsPDF und svg2pdf.js |
@@ -307,7 +308,8 @@ Bildschirm, SVG, PDF und DXF lesen also denselben Plan-Puffer. Was in einem Ausg
 als in einem anderen, ist fast immer ein Fehler im jeweiligen Leser, nicht in der Plan-Erzeugung.
 
 `src/views/plan/PlanView.tsx` legt über die GPU-Fläche eine SVG-Ebene für Auswahl, Griffe, Fang und
-Text-Bearbeitung (Zeiger, Picken, Zoom, Renderer-Anbindung und Hervorhebung liegen als Hooks in `planView/usePlan*.ts`). Läuft kein GPU-Weg, zeichnet dieselbe Ebene den ganzen Plan (Rückfall, `?gl=0`).
+Text-Bearbeitung (Plan-Texte zeichnet auf macOS die native Fläche im selben Frame wie die Linien, [194]; im
+Overlay bleiben dort nur gedrehte Mehrzeiler, Text auf Pfad und der Text im Editor) (Zeiger, Picken, Zoom, Renderer-Anbindung und Hervorhebung liegen als Hooks in `planView/usePlan*.ts`). Läuft kein GPU-Weg, zeichnet dieselbe Ebene den ganzen Plan (Rückfall, `?gl=0`).
 
 ### 3.5 Modelldarstellung: wer bestimmt, wie ein Bauteil aussieht ([173])
 

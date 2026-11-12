@@ -17,6 +17,7 @@ pub mod ortho;
 pub mod scene_bin;
 pub mod shaders;
 pub mod tessellate;
+pub mod text_lines;
 pub mod types;
 
 #[cfg(feature = "render")]
@@ -29,6 +30,9 @@ pub mod chunks;
 // Vektor-Text (Glyphen-Umrisse → Dreiecke, instanziert, drehbar).
 #[cfg(feature = "render")]
 pub mod vtext;
+
+#[cfg(feature = "render")]
+pub mod glyph;
 
 // Browser-Bindings (wasm32 + WebGPU), nur mit Feature "web". Setzt "render" voraus
 // (dieselbe GPU-Schicht wie das native Fenster), fuegt aber KEINE winit-Abhaengigkeit

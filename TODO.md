@@ -92,7 +92,13 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
 - ○ **[196]** (12.11., Maintainer, PRIO) (1) Raster-Bodenschraffur in Gebäudeform (mit Loch an der Wendeltreppe) im EG-Grundriss lässt sich weder anwählen noch löschen — Vermutung: Ansichtsschraffur der Decke des darunterliegenden Geschosses (UG-Decke von oben) bzw. Bodenbelag; klären (Musterhaus komplex EG), Pick wählt das Quell-Element (auch wenn es zu einem anderen Geschoss gehört), Entf löscht es bzw. Hinweis. (2) Zeichnungsebenen-Panel: Auge/„sichtbar“ bei einer Ansicht blendet bei den Grundrissen alle Geschosse ein → Auge schaltet nur die eigene Ebene. (3) Auge eines Geschosses aus → Geschoss fehlt auch im 3D (heute zeigt 3D immer alle Geschosse; Filter wie Klassen [180] im 3D-Cache-Ausgang). e2e für alles. · S
 - ○ **[195b]** Objekteinstellungen als ECHTES Nebenfenster (Wunsch Maintainer, 12.11.): heute schwebendes Panel im Hauptfenster ([195]); natives Fenster braucht eine Store-Spiegelung über die Sync-Brücke (Projekt-Leseansicht per applyOps + Auswahl hin, Ops zurück) ohne zweite Abschnitts-Implementierung — Architektur-Entscheid, Opus. Danach Mehrfachwerte für Füllung/Typ/Masse; OpeningEditorDialog in den Bereich „Objekt“ übernehmen. · L
 - ○ **[195]** Objekt-Einstellungsfenster (12.11., Maintainer): T öffnet ein EIGENES Fenster (macOS-Nebenfenster wie Einstellungen/Ressourcen über die Sync-Brücke, Browser: verschiebbares Fenster), für ALLE Bauteile (Wand, Decke, Dach, Treppe, Stütze, Öffnung, Raum, Körper, Gelände/Baugrube, 2D, Bemassung), mit Abschnitten Objektspezifisch (Typ/Aufbau/Masse/Parameter) + Darstellung (Stift, Füllung, Schraffur, Linienstil, Modelldarstellung). Mehrfachauswahl gleicher Art, live mit Undo je Änderung; dieselben Abschnitts-Komponenten wie Objekt-Info (keine Doppelspur). Ersetzt den bisherigen Öffnungs-Dialog bei T. · L
-- ○ **[194]** Texte exakt synchron beim Zoomen (12.11., Maintainer Mac: Texte immer leicht verzögert, Bewegung sonst smooth; Nachfolger [145]): alle Texte (Raumstempel, Textfelder, Beschriftungen) und möglichst Griffe in der nativen Metal-Fläche im selben Frame zeichnen — glyphon-Textpfad aus render2d (WebGPU) auch für `native2d` (mehrzeilig, fett, Ausrichtung), Overlay nur noch für Interaktion. Prüfbar im Container nur mit Software-Vulkan; Urteil auf dem Mac. Opus. · M
+- ◐ **[194]** Texte exakt synchron beim Zoomen (12.11., Maintainer Mac: Texte immer leicht verzögert; Nachfolger [145]).
+  12.11.: Die native Fläche zeichnet die Plan-Texte selbst im selben Frame wie die Linien: Raumstempel und waagrechte
+  Textfelder/Masszahlen/Beschriftungen (mehrzeilig, Umbruch, fett/kursiv, Ausrichtung) über denselben Glyphen-Pass
+  wie im Browser (`render2d/src/glyph.rs`, eingebettetes Inter; Zeilen aus dem Kern `plan_screen_texts`, Befehl
+  `native2d_scene_texts`), gedrehte Einzeiler wie bisher als Vektor-Glyphen; Overlay nur noch gedrehte Mehrzeiler,
+  Text auf Pfad, Editor, Griffe. Offen: auf dem Mac prüfen (Takt, Schärfe auf Retina, Bild gegen SVG); Griffe nativ;
+  gemischte Schnitte innerhalb einer Zeile (Schnitt des ersten Laufs gilt). · M
 - ◐ **[190]** Verbinden wie Archicad + Kürzel (12.11., Wunsch Maintainer). Umgesetzt (12.11.): Cmd/Ctrl+J („join") schliesst bei
   gewählten Wänden auch Ecken: nicht parallele gerade Wände eines Geschosses, deren Enden bis 0.5 m (bzw. 2 × Wanddicke)
   vom Achsschnittpunkt liegen (Lücke oder Überstand), werden dort verlängert/gekürzt (L-Ecke, beide Enden); Ende nahe einer
@@ -220,8 +226,7 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   `ifc_data.rs` `schichteinzug_wand_als_ein_koerper`. Offen: schwarze Sammelfläche (ab 1:100) ohne Einzug/Nase wie
   bisher; Fenster ohne Typ ohne Vorgabe; Aussenputz bleibt an der Rohbaukante (nur die Dämmung überdeckt); nicht in
   der Tauri-App/auf dem Mac (render2d nativ, 3D) angesehen. · S
-- ◐ **[145]** Texte beim Zoomen synchron. Falls der Mac noch nachläuft: Raumstempel nativ zeichnen (vtext kann nur
-  einzeilig/linksbündig, eine Schrift, kein Fett). 9.11.: `clampInside` nur noch im Kern (`grip_clamp_inside`,
+- ◐ **[145]** Texte beim Zoomen synchron. Raumstempel/Textfelder zeichnet seit 12.11. die native Fläche selbst ([194]). 9.11.: `clampInside` nur noch im Kern (`grip_clamp_inside`,
   Fassade `clampInside` in `src/core`); die Öffnungs-Vorschau beim Setzen zeigt die geklemmte/gerückte Lage
   (`placed_gap`, Test `oeffnung_vorschau_zeigt_gerueckte_lage`). Offen: Dach-/Deckenöffnung hat beim Setzen keine
   eigene Vorschau; Raumstempel setzt ohne Klemmung (nichts zu zeigen). · S
@@ -745,7 +750,7 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
 
 Auf dem Mac (Tauri/Metal) noch nicht angesehen oder geprüft; bisher nur Linux-Container, CLI-SVG, Chromium oder
 Unit-Tests: [116] (atomares Speichern), [117] (CSP unter `tauri://`), [118], [122], [123], [126], [110], [101],
-[102], [131], [133], [136], [140], [145], [146], [153], [64], [T2], [T4], [34], [108], [65], [169], [113], [181], [G1]. Je Punkt ansehen, dann hier und
+[102], [131], [133], [136], [140], [145], [194], [146], [153], [64], [T2], [T4], [34], [108], [65], [169], [113], [181], [G1]. Je Punkt ansehen, dann hier und
 im jeweiligen Eintrag streichen. · M (gesamt)
 
 ---

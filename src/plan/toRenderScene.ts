@@ -160,6 +160,17 @@ function sceneTexts(plan: Plan, paperScaleN: number): RText[] {
   return out;
 }
 
+/**
+ * Textzeilen der BILDSCHIRM-Szene für den Glyphen-Pass der nativen Fläche ([194], `native2d_scene_texts`):
+ * Format des Kerns (`plan_screen_texts`: `[n, (x, y, sizeMm, r, g, b, a, Ausrichtung | Schnitt << 8, nUtf16)*,
+ * UTF-16…]`), gesetzt zu 1:`paperScaleN`; ohne gedrehte Einzeltexte und ohne den Eintrag mit Plan-Index
+ * `skipIndex` (Text im Editor, −1 = keiner). Leer = Kern konnte nicht lesen.
+ */
+export function planScreenTexts(plan: Plan, paperScaleN: number = STAMP_DEFAULT_N, skipIndex = -1): Float64Array {
+  const greyed = greyedFlat(plan);
+  return withPlanParts(planParts(plan), (segs) => core().plan_screen_texts(segs, greyed, paperScaleN, skipIndex));
+}
+
 /** Eingebettete Bilder des Plans (nur Text-/Bild-Einträge, kein Layout). */
 function sceneImages(plan: Plan): RImage[] {
   const images: RImage[] = [];

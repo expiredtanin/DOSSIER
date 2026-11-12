@@ -5,7 +5,9 @@
  *
  * Kompilierung + Chunk-Cache bleiben TypeScript (`GpuChunkCache` mit `NativeGl`);
  * Rust hält die Puffer. Pan/Zoom kostet nur noch einen kleinen Frame-Aufruf.
- * Eingaben, Auswahl, Griffe, Text bleiben im SVG-Overlay darüber.
+ * Texte zeichnet die Fläche im selben Frame wie die Linien ([194], s. nativeText.ts): Raumstempel
+ * und waagrechte Textfelder über den Glyphen-Pass, gedrehte Einzeiler als Vektor-Glyphen.
+ * Eingaben, Auswahl, Griffe und der Text-Editor bleiben im SVG-Overlay darüber.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -18,7 +20,7 @@ import { NativeGl, type NativeInvoke } from './nativeGl';
 import { readCssColor } from './cssColor';
 import { NativeFrameQueue } from './nativeFrameQueue';
 import { NativeTextSync } from "../../core";
-import { planTextEntries } from "../../core";
+import { planTextEntries, planScreenTexts } from "../../core";
 
 /** Läuft die App in einer Tauri-Webview? */
 const isTauri = (): boolean => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
@@ -87,6 +89,44 @@ export function useNativePlanRenderer(
   const highlightGeom = useRef<GpuGeometry | null>(null);
   const lastPxPerMeter = useRef(0);
   const excludedText = useRef<string | null>(null);
+  // Glyphen-Pass ([194]): Raumstempel + waagrechte Textfelder, gesetzt im Kern zum Text-Massstab.
+  // `sceneTexts` = die Fläche hat sie angenommen (bis dahin zeichnet sie das SVG-Overlay).
+  const [sceneTexts, setSceneTexts] = useState(false);
+  const sceneTextsDisabled = useRef(false);
+  const sceneTextsSent = useRef<{ plan: Plan; n: number; skip: string | null } | null>(null);
+  const textScaleRef = useRef(100);
+  const sceneTextsRetries = useRef(0);
+
+  const pushSceneTexts = useCallback(function push(plan: Plan | null) {
+    const invoke = invokeRef.current;
+    if (!invoke || !plan || sceneTextsDisabled.current) return;
+    const n = textScaleRef.current;
+    const skip = excludedText.current;
+    const last = sceneTextsSent.current;
+    if (last && last.plan === plan && last.n === n && last.skip === skip) return;
+    sceneTextsSent.current = { plan, n, skip };
+    const skipIndex = skip == null ? -1 : (planTextEntries(plan).find((e) => e.p.kind === 'drawingText' && e.p.drawingId === skip)?.i ?? -1);
+    const f = planScreenTexts(plan, n, skipIndex);
+    if (f.length === 0) return; // Kern konnte nicht lesen: Stand behalten
+    const bytes = new Uint8Array(f.buffer, f.byteOffset, f.byteLength);
+    void invoke('native2d_scene_texts', bytes, { headers: { 'x-text-scale': String(n) } })
+      .then((ok) => {
+        if (ok === true) {
+          sceneTextsRetries.current = 0;
+          setSceneTexts(true);
+        } else {
+          // Fläche (noch) nicht bereit: etwas später erneut versuchen (höchstens ein paar Mal).
+          sceneTextsSent.current = null;
+          setSceneTexts(false);
+          if (sceneTextsRetries.current++ < 10) setTimeout(() => push(lastPlan.current), 300);
+        }
+      })
+      .catch(() => {
+        // Ältere App ohne den Befehl: Texte bleiben im SVG-Overlay.
+        sceneTextsDisabled.current = true;
+        setSceneTexts(false);
+      });
+  }, []);
 
   const pushTexts = useCallback((plan: Plan | null) => {
     const invoke = invokeRef.current;
@@ -115,8 +155,9 @@ export function useNativePlanRenderer(
       if (excludedText.current === id) return;
       excludedText.current = id;
       pushTexts(lastPlan.current);
+      pushSceneTexts(lastPlan.current);
     },
-    [pushTexts],
+    [pushTexts, pushSceneTexts],
   );
 
   // Frame-Aufrufe zusammenfassen: höchstens einer in der Luft, der letzte gewinnt ([145]: das
@@ -183,6 +224,12 @@ export function useNativePlanRenderer(
         highlightGeom.current = null;
         lastSentGeoms.current = null;
         setGpuTexts(false);
+        if (sceneTextsSent.current) {
+          const empty = new Uint8Array(new Float64Array([0]).buffer);
+          void invoke('native2d_scene_texts', empty, { headers: { 'x-text-scale': '100' } }).catch(() => {});
+        }
+        sceneTextsSent.current = null;
+        setSceneTexts(false);
         const { delete: del } = glRef.current.takeLayout([]);
         void invoke('native2d_layout', { layout: [], delete: del }).catch(() => {});
         void invoke('native2d_embed_hide').catch(() => {});
@@ -280,7 +327,8 @@ export function useNativePlanRenderer(
       );
     }
     pushTexts(plan);
-  }, [pushTexts, takeFullLayout]);
+    pushSceneTexts(plan);
+  }, [pushTexts, pushSceneTexts, takeFullLayout]);
 
   // Plot-Massstab der Strichmuster (`setDashScale`), mit jedem Frame gesendet.
   const dashScaleRef = useRef(0);
@@ -292,13 +340,19 @@ export function useNativePlanRenderer(
      * `onSent`: läuft synchron, sobald der Frame an die Fläche geht (gleicher Takt wie deren
      * Zeichnen) — dort setzt die Ansicht das SVG-Overlay (Texte, Griffe) auf denselben Ausschnitt.
      */
-    (viewBox: ViewBox, paperScaleN = 100, _textScale?: number, onSent?: () => void) => {
+    (viewBox: ViewBox, paperScaleN = 100, textScaleN = 100, onSent?: () => void) => {
       const invoke = invokeRef.current;
       if (!invoke) {
         onSent?.();
         return;
       }
       syncRect();
+      // Text-Massstab gewechselt (Druckansicht ↔ Anzeige): Zeilen VOR dem Frame neu setzen lassen.
+      const tn = textScaleN > 0 && Number.isFinite(textScaleN) ? textScaleN : 100;
+      if (tn !== textScaleRef.current) {
+        textScaleRef.current = tn;
+        pushSceneTexts(lastPlan.current);
+      }
       const sheet = readCssColor('--sheet');
       frames.current!.send(
         () =>
@@ -311,8 +365,8 @@ export function useNativePlanRenderer(
         onSent,
       );
     },
-    [syncRect],
+    [syncRect, pushSceneTexts],
   );
 
-  return { render, updateGeometry, ready, gpuTexts, setExcludedText, setHighlight, setDashScale };
+  return { render, updateGeometry, ready, gpuTexts, sceneTexts, setExcludedText, setHighlight, setDashScale };
 }

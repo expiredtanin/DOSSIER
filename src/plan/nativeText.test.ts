@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Primitive } from './generatePlan';
-import { NativeTextSync, cssColorToRgba, isGpuText } from './nativeText';
+import { NativeTextSync, cssColorToRgba, isGpuText, isRotated, isSceneText } from './nativeText';
 
 const txt = (id: string, over: Record<string, unknown> = {}) =>
   ({ kind: 'drawingText', drawingId: id, at: { x: 1, y: 2 }, text: 'A', heightM: 2, angle: 0.5, color: '#ff0000', ...over }) as unknown as Primitive;
@@ -12,6 +12,22 @@ describe('isGpuText', () => {
     expect(isGpuText(txt('a', { wrapWidth: 3 }))).toBe(false);
     expect(isGpuText(txt('a', { text: 'x\ny' }))).toBe(false);
     expect(isGpuText(txt('', {}))).toBe(false);
+    // [194] Waagrechte Texte zeichnet der Glyphen-Pass, nicht die Vektor-Glyphen.
+    expect(isGpuText(txt('a', { angle: 0 }))).toBe(false);
+  });
+});
+
+describe('isSceneText ([194])', () => {
+  it('Raumstempel und waagrechte Textfelder (auch reich/umbrochen), gedrehte nicht', () => {
+    expect(isSceneText({ kind: 'text' } as unknown as Primitive)).toBe(true);
+    expect(isSceneText(txt('a', { angle: 0 }))).toBe(true);
+    expect(isSceneText(txt('a', { angle: 0, doc: {}, wrapWidth: 2 }))).toBe(true);
+    expect(isSceneText(txt('a', { angle: null }))).toBe(true); // NaN aus dem Puffer = waagrecht wie im Kern
+    expect(isSceneText(txt('a'))).toBe(false);
+    expect(isSceneText({ kind: 'line' } as unknown as Primitive)).toBe(false);
+    expect(isRotated(1e-12)).toBe(false);
+    expect(isRotated(2 * Math.PI)).toBe(false); // Masszahlen tragen oft 2π
+    expect(isRotated(-Math.PI / 2)).toBe(true);
   });
 });
 

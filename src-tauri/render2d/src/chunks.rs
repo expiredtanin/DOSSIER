@@ -17,13 +17,19 @@
 // schickt nur noch die Puffer-BYTES je Chunk einmalig; pro Frame geht nur der
 // Ausschnitt (viewBox) hierher. Rust haelt die Puffer — kein JSON, kein
 // Re-Upload bei Pan/Zoom.
+//
+// Texte ([194]): Raumstempel und waagrechte Textfelder setzt der Kern (`plan_screen_texts`) und zeichnet
+// hier derselbe Glyphen-Pass wie im Browser (`glyph.rs`, glyphon, eingebettetes Inter) — im selben Frame
+// wie die Linien. Gedrehte einzeilige Texte bleiben Vektor-Glyphen (`vtext.rs`, glyphon dreht nicht).
 
 use std::collections::HashMap;
 
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
 
+use crate::glyph::GlyphText;
 use crate::shaders::{DASH_LINE_WGSL, FILL_WGSL};
+use crate::text_lines::GlyphLine;
 
 /// Graustufe fuer gedimmte Linien (== GREY_RGB in glPlanCompile.ts).
 const GREY: f32 = 0.549;
@@ -271,6 +277,10 @@ pub struct ChunkRenderer {
     glyph_vbo: Option<wgpu::Buffer>,
     glyph_ibo: Option<wgpu::Buffer>,
     inst_buf: Option<(wgpu::Buffer, u64)>,
+    // --- Glyphen-Text (Raumstempel, Textfelder) ---
+    scene_text: GlyphText,
+    /// Massstab 1:N, zu dem der Kern die Zeilen gesetzt hat (Papier-mm → Modell-Meter).
+    scene_text_n: f64,
 }
 
 /// Aspekt-korrigierte Grenzen (left,right,bottom,top) wie `orthoBounds`.
@@ -446,6 +456,8 @@ impl ChunkRenderer {
             cache: None,
         });
         Self {
+            scene_text: GlyphText::new(format, samples),
+            scene_text_n: 100.0,
             text_pipeline,
             font: None,
             texts: HashMap::new(),
@@ -537,6 +549,17 @@ impl ChunkRenderer {
             );
         }
         true
+    }
+
+    /// Gesetzte Textzeilen (Raumstempel, waagrechte Textfelder) ersetzen; `n` = Massstab 1:N, zu dem der
+    /// Kern sie gesetzt hat. Die Schriftgroesse folgt damit dem Modell wie die Zeilenlage.
+    pub fn set_scene_texts(&mut self, lines: Vec<GlyphLine>, n: f64) {
+        self.scene_text.set_lines(lines);
+        self.scene_text_n = if n.is_finite() && n > 0.0 { n } else { 100.0 };
+    }
+
+    pub fn scene_text_count(&self) -> usize {
+        self.scene_text.lines().len()
     }
 
     pub fn text_count(&self) -> usize {
@@ -701,6 +724,15 @@ impl ChunkRenderer {
             }
         }
 
+        // Glyphen-Text: Anker (Modell-Meter) → Bildschirm-Raum (x·90, −y·90) → Geraete-px; Schriftgroesse
+        // Papier-mm beim Satz-Massstab → Modell → px (zoomt exakt mit der Geometrie).
+        {
+            let (left, top) = (bounds.0, bounds.3);
+            let place = |x: f64, y: f64| (((x * PX_PER_M - left) * meet) as f32, ((-y * PX_PER_M - top) * meet) as f32);
+            let px_per_mm = (self.scene_text_n / 1000.0 * PX_PER_M * meet) as f32;
+            self.scene_text.prepare(device, queue, viewport, place, px_per_mm);
+        }
+
         // Uniform-Puffer bei Bedarf vergroessern, dann einmal schreiben.
         let need = stride * blocks.len().max(1) as u64;
         if self.uniform.as_ref().map_or(true, |u| u.2 < need) {
@@ -860,6 +892,8 @@ impl ChunkRenderer {
                     }
                 }
             }
+            // Glyphen-Text zuoberst (gleiche MSAA-Stufe wie der Pass, s. `GlyphText::new`).
+            self.scene_text.render(&mut pass);
         }
         queue.submit(Some(enc.finish()));
     }

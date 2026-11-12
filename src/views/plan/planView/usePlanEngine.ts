@@ -4,7 +4,7 @@
 // `PlanView`; die Reihenfolge der Hooks und Effekte ist wie vor der Aufteilung.
 
 import { useRef, useEffect, useMemo, useState, useLayoutEffect } from "react";
-import { PlanPickIndex, planTextEntries, materializeGreyed, materializeUnderlay, roomStampAt, buildDrawingIndex, isGpuText, meetScale, PLAN_DASH_VAR, toScreen, scaleFromView, PX_PER_M } from "../../../core";
+import { PlanPickIndex, planTextEntries, materializeGreyed, materializeUnderlay, roomStampAt, buildDrawingIndex, isGpuText, isSceneText, meetScale, PLAN_DASH_VAR, toScreen, scaleFromView, PX_PER_M } from "../../../core";
 import { useNativeAvailable, useNativePlanRenderer } from "../useNativePlanRenderer";
 import { useWasmPlanRenderer } from "../useWasmPlanRenderer";
 import type { UnderlayGroup, DrawingIndex, Primitive, ViewBox__plan_planView_geometry as ViewBox } from "../../../core";
@@ -197,12 +197,14 @@ export function usePlanEngine(inp: UsePlanEngineArgs) {
           ? p.kind !== "drawingText"
           : p.kind !== "text" && p.kind !== "drawingText"
         : p.kind === "line" && !!p.drawingId;
-      // Einfache Texte zeichnet die native Fläche selbst (Vektor-Glyphen, auch gedreht).
+      // Texte zeichnet die native Fläche selbst, im selben Frame wie die Linien ([194]): Raumstempel und
+      // waagrechte Textfelder über den Glyphen-Pass, gedrehte Einzeiler als Vektor-Glyphen.
+      if (useGpuRenderer && wantNative && nativeHook.sceneTexts && isSceneText(p)) continue;
       if (useGpuRenderer && wantNative && nativeHook.gpuTexts && isGpuText(p)) continue;
       if (!drawnElsewhere) out.push({ p, i });
     }
     return out;
-  }, [plan, useGpuRenderer, wantWasm, wantNative, nativeHook.gpuTexts]);
+  }, [plan, useGpuRenderer, wantWasm, wantNative, nativeHook.gpuTexts, nativeHook.sceneTexts]);
   const needsCull = svgCandidates.length > CULL_THRESHOLD;
   const [cullState, setCullState] = useState<CullState | null>(() => {
     if (!needsCull) return null;

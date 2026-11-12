@@ -126,6 +126,7 @@ pub fn demo_scene() -> Scene {
             size_mm: 3.5,
             color: ink,
             align: TextAlign::Center,
+            style: 0,
         }],
         line_ends: 0,
     }
