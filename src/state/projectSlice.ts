@@ -405,7 +405,7 @@ export interface ProjectSlice {
   /** [193] Netzpunkt eines Geländes/Netzes im Grundriss verschieben (Höhe bleibt). */
   moveMeshPoint: (id: string, index: number, pt: Vec2) => void;
   /** [191] Bogen-Scheitel der Kante `seg` (Dach: flacher Index) ziehen: setzt den Bulge über die Pfeilhöhe. */
-  setRingArc: (kind: "roof" | "ceiling" | "room", id: string, seg: number, pt: Vec2, coalesceKey?: string) => void;
+  setRingArc: (kind: "roof" | "ceiling" | "room" | "excavation", id: string, seg: number, pt: Vec2, coalesceKey?: string) => void;
   /** [26] Nach dem Ziehen: Ecke auf Nachbar bzw. Gerade zwischen den Nachbarn entfällt. */
   tidyRingVertex: (kind: RingKind, id: string, index: number, coalesceKey?: string, tol?: number) => void;
   moveExcavationEdge: (id: string, aIndex: number, bIndex: number, delta: Vec2) => void;

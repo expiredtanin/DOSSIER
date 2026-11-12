@@ -30,8 +30,10 @@ fn tan_deg(a: f64) -> f64 {
 /// Baugrube im Höhenbezug des Netzes.
 #[derive(Clone, Debug)]
 pub struct ExSpec {
-    /// Umriss gegen den Uhrzeigersinn.
+    /// Umriss gegen den Uhrzeigersinn (Bögen fein geteilt, [191]).
     pub ring: Vec<P2>,
+    /// [191] Je Punkt von `ring`: liegt im Inneren eines Bogens (keine Ecke: Schraffur läuft durch, kein Fächer).
+    pub smooth: Vec<bool>,
     pub bottom: f64,
     pub cut_tan: Vec<f64>,
     /// Kante mit senkrechtem Verbau (Spundwand): keine Böschung, keine Schraffur.
@@ -97,35 +99,138 @@ pub fn offset_ring(ring: &[P2], d: f64) -> Vec<P2> {
         .collect()
 }
 
+/// [191] Wie [`offset_ring`], dazu ohne Schwalbenschwänze an Bögen: an einer einspringenden Ecke neben einem fein
+/// geteilten Bogen kehren sich die kurzen versetzten Teilkanten um (die Gehrungspunkte überholen einander). Solche
+/// Kanten (`arc[i]`: Kante i gehört zu einem Bogen) entfallen der Reihe nach — ihre Ecken rücken auf den Schnitt der
+/// versetzten Nachbarkanten. Gerade Kanten bleiben wie bei [`offset_ring`] (zu enge Nischen meldet die Prüfung).
+/// Gleiche Punktzahl wie `ring`; entfallene Kanten haben Länge 0.
+pub fn offset_ring_clean(ring: &[P2], d: f64, arc: &[bool]) -> Vec<P2> {
+    let n = ring.len();
+    let mut off = offset_ring(ring, d);
+    if n < 4 || !arc.iter().any(|a| *a) {
+        return off;
+    }
+    let dir = |i: usize| [ring[(i + 1) % n][0] - ring[i][0], ring[(i + 1) % n][1] - ring[i][1]];
+    let normal = |i: usize| {
+        let v = dir(i);
+        let l = v[0].hypot(v[1]).max(1e-12);
+        [v[1] / l, -v[0] / l]
+    };
+    // Versetzte Gerade der Kante i: Punkt und Richtung.
+    let line = |i: usize| {
+        let nn = normal(i);
+        ([ring[i][0] + nn[0] * d, ring[i][1] + nn[1] * d], dir(i))
+    };
+    let mut alive = vec![true; n];
+    let reversed = |off: &[P2], i: usize| {
+        let v = dir(i);
+        let w = [off[(i + 1) % n][0] - off[i][0], off[(i + 1) % n][1] - off[i][1]];
+        v[0] * w[0] + v[1] * w[1] < 0.0
+    };
+    for _ in 0..n {
+        let Some(i) = (0..n).find(|&i| alive[i] && arc.get(i).copied().unwrap_or(false) && reversed(&off, i)) else { break };
+        alive[i] = false;
+        let Some(p) = (1..n).map(|k| (i + n - k) % n).find(|&k| alive[k]) else { break };
+        let Some(q) = (1..n).map(|k| (i + k) % n).find(|&k| alive[k]) else { break };
+        if p == q {
+            break;
+        }
+        let ((a, u), (b, w)) = (line(p), line(q));
+        let den = u[0] * w[1] - u[1] * w[0];
+        // Ecken zwischen p und q (Ende von p bis Anfang von q) auf den Schnitt; parallel: Mitte.
+        let x = if den.abs() > 1e-12 {
+            let t = ((b[0] - a[0]) * w[1] - (b[1] - a[1]) * w[0]) / den;
+            [a[0] + u[0] * t, a[1] + u[1] * t]
+        } else {
+            let (s, e) = (off[(p + 1) % n], off[q]);
+            [(s[0] + e[0]) / 2.0, (s[1] + e[1]) / 2.0]
+        };
+        let mut k = (p + 1) % n;
+        loop {
+            off[k] = x;
+            if k == q {
+                break;
+            }
+            k = (k + 1) % n;
+        }
+    }
+    off
+}
+
+/// Kanten eines fein geteilten Bogens: mindestens ein Ende liegt im Inneren des Bogens.
+fn arc_edges(smooth: &[bool]) -> Vec<bool> {
+    let n = smooth.len();
+    (0..n).map(|i| smooth[i] || smooth[(i + 1) % n]).collect()
+}
+
+/// Doppelte Punkte (nach [`offset_ring_clean`]) aus dem Ring samt Kanten- und Punkt-Eigenschaften entfernen: die Kante
+/// ab einem doppelten Punkt ist die des späteren.
+fn dedup_ring(ring: &mut Vec<P2>, cut_tan: &mut Vec<f64>, shored: &mut Vec<bool>, smooth: &mut Vec<bool>) {
+    let n = ring.len();
+    let keep: Vec<bool> = (0..n).map(|i| { let j = (i + 1) % n; (ring[i][0] - ring[j][0]).hypot(ring[i][1] - ring[j][1]) >= 1e-9 }).collect();
+    if keep.iter().all(|k| *k) || keep.iter().filter(|k| **k).count() < 3 {
+        return;
+    }
+    let pick = |v: &[bool], k: &[bool]| v.iter().zip(k).filter(|(_, k)| **k).map(|(x, _)| *x).collect::<Vec<bool>>();
+    // Ein entfallener Punkt i liegt auf i+1: Punkt i+1 bleibt, wird aber eine Ecke.
+    let mut sm = smooth.clone();
+    for i in 0..n {
+        if !keep[i] {
+            sm[(i + 1) % n] = false;
+        }
+    }
+    *ring = ring.iter().zip(&keep).filter(|(_, k)| **k).map(|(p, _)| *p).collect();
+    *cut_tan = cut_tan.iter().zip(&keep).filter(|(_, k)| **k).map(|(t, _)| *t).collect();
+    *shored = pick(shored, &keep);
+    *smooth = pick(&sm, &keep);
+}
+
 impl ExSpec {
     /// Aus dem Modell; `dz` = Höhenbezug des Netzes ([`datum`]). `None` bei kaputtem Umriss.
     pub fn of(e: &Excavation, dz: f64) -> Option<ExSpec> {
-        let mut ring: Vec<P2> = e.outline.iter().map(|v| [v.x, v.y]).filter(|p| p[0].is_finite() && p[1].is_finite()).collect();
-        ring.dedup_by(|a, b| (a[0] - b[0]).hypot(a[1] - b[1]) < 1e-9);
-        if ring.len() > 2 && (ring[0][0] - ring[ring.len() - 1][0]).hypot(ring[0][1] - ring[ring.len() - 1][1]) < 1e-9 {
-            ring.pop();
+        // [191] Bögen fein geteilt; je Punkt die Modell-Kante (Neigung, Verbau) und ob er im Inneren eines Bogens liegt.
+        let (dense, src, smooth_in) = e.ring_marked();
+        let mut pts: Vec<(P2, usize, bool)> = Vec::with_capacity(dense.len());
+        for ((v, k), sm) in dense.iter().zip(src).zip(smooth_in) {
+            let p = [v.x, v.y];
+            if !(p[0].is_finite() && p[1].is_finite()) {
+                continue;
+            }
+            match pts.last_mut() {
+                // Doppelter Punkt: die Kante ab hier ist die des späteren.
+                Some(l) if (l.0[0] - p[0]).hypot(l.0[1] - p[1]) < 1e-9 => *l = (l.0, k, sm),
+                _ => pts.push((p, k, sm)),
+            }
         }
+        if pts.len() > 2 && (pts[0].0[0] - pts[pts.len() - 1].0[0]).hypot(pts[0].0[1] - pts[pts.len() - 1].0[1]) < 1e-9 {
+            pts.pop();
+        }
+        let mut ring: Vec<P2> = pts.iter().map(|q| q.0).collect();
         if ring.len() < 3 || !e.bottom.is_finite() || signed_area(&ring).abs() < 1e-6 {
             return None;
         }
         let n = ring.len();
         let slope = e.slope.filter(|s| s.is_finite() && *s > 0.0).unwrap_or(DEFAULT_SLOPE);
-        let mut shored: Vec<bool> = (0..n).map(|i| e.edge_shoring.as_ref().and_then(|v| v.get(i)).copied().unwrap_or(false)).collect();
-        let mut cut_tan: Vec<f64> = (0..n).map(|i| if shored[i] { tan_deg(89.5) } else { tan_deg(e.edge_slopes.as_ref().and_then(|v| v.get(i)).copied().filter(|s| s.is_finite() && *s > 0.0).unwrap_or(slope)) }).collect();
+        let mut shored: Vec<bool> = pts.iter().map(|q| e.edge_shoring.as_ref().and_then(|v| v.get(q.1)).copied().unwrap_or(false)).collect();
+        let mut cut_tan: Vec<f64> = pts.iter().zip(&shored).map(|(q, sh)| if *sh { tan_deg(89.5) } else { tan_deg(e.edge_slopes.as_ref().and_then(|v| v.get(q.1)).copied().filter(|s| s.is_finite() && *s > 0.0).unwrap_or(slope)) }).collect();
+        let mut smooth: Vec<bool> = pts.iter().map(|q| q.2).collect();
         if signed_area(&ring) < 0.0 {
-            // Kante i (p_i → p_i+1) wird nach dem Umdrehen Kante n−2−i (mod n).
+            // Kante i (p_i → p_i+1) wird nach dem Umdrehen Kante n−2−i (mod n), Punkt i wird Punkt n−1−i.
             ring.reverse();
+            smooth.reverse();
             let (old, old_s) = (cut_tan.clone(), shored.clone());
             for i in 0..n {
                 cut_tan[(2 * n - 2 - i) % n] = old[i];
                 shored[(2 * n - 2 - i) % n] = old_s[i];
             }
         }
-        // Arbeitsraum: Sohle um `workingSpace` nach aussen (Gehrung, höchstens 4× so weit an spitzen Ecken).
+        // Arbeitsraum: Sohle um `workingSpace` nach aussen (Gehrung, höchstens 4× so weit an spitzen Ecken; an Bögen
+        // ohne Schwalbenschwänze, [191]).
         let ws = e.working_space.filter(|v| v.is_finite() && *v > 0.0).unwrap_or(0.0);
         let base = ring.clone();
         if ws > 0.0 {
-            ring = offset_ring(&ring, ws);
+            ring = offset_ring_clean(&ring, ws, &arc_edges(&smooth));
+            dedup_ring(&mut ring, &mut cut_tan, &mut shored, &mut smooth);
         }
         let (shore_kind, default_t) = shoring_kind(e.shoring_kind.as_deref());
         let shore_t = e.shoring_thickness.filter(|v| v.is_finite() && *v > 0.0).unwrap_or(default_t);
@@ -133,6 +238,7 @@ impl ExSpec {
         let bh = e.berm_height.filter(|v| v.is_finite() && *v > 0.0).unwrap_or(0.0);
         Some(ExSpec {
             ring,
+            smooth,
             bottom: e.bottom + dz,
             cut_tan,
             shored,
@@ -257,16 +363,60 @@ pub fn shoring_hatch_id(kind: &str) -> &'static str {
     }
 }
 
+/// [68] Wandband einer Folge verbauter Kanten: Sohlkante (`inner`, gegen den Uhrzeigersinn der Baugrube) und die um
+/// die Wanddicke nach aussen versetzte Kante (`outer`, gleich viele Punkte, Gehrung an den Ecken).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ShoringBand {
+    pub inner: Vec<P2>,
+    pub outer: Vec<P2>,
+    /// Ringsum verbaut (Band ohne Stirnseiten; `inner`/`outer` ohne Schlusspunkt).
+    pub closed: bool,
+}
+
+impl ShoringBand {
+    /// Umriss des Bands (Sohlkante, dann die Aussenkante rückwärts); ringsum verbaut nur die Aussenkante.
+    pub fn polygon(&self) -> Vec<P2> {
+        if self.closed {
+            return self.outer.clone();
+        }
+        self.inner.iter().chain(self.outer.iter().rev()).copied().collect()
+    }
+
+    /// Vierecke je Teilkante (Sohlkante i → i+1, aussen i+1 → i), gegen den Uhrzeigersinn.
+    pub fn quads(&self) -> Vec<[P2; 4]> {
+        let m = self.inner.len();
+        let k = if self.closed { m } else { m.saturating_sub(1) };
+        (0..k).map(|i| { let j = (i + 1) % m; [self.inner[i], self.inner[j], self.outer[j], self.outer[i]] }).collect()
+    }
+}
+
 impl ExSpec {
-    /// Wandbänder der verbauten Kanten: Vierecke von der Sohlkante um die Wanddicke nach aussen (Gehrung an den
-    /// Ecken, wie der Arbeitsraum). Index der Kante, Viereck.
-    pub fn shoring_quads(&self) -> Vec<(usize, Vec<P2>)> {
+    /// Wandbänder der verbauten Kanten: zusammenhängende verbaute Kanten (auch die Teilkanten eines Bogens, [191])
+    /// bilden EIN Band von der Sohlkante um die Wanddicke nach aussen (Gehrung an den Ecken, wie der Arbeitsraum).
+    pub fn shoring_bands(&self) -> Vec<ShoringBand> {
         if !self.shored.iter().any(|b| *b) || !(self.shore_t > 0.0) {
             return Vec::new();
         }
         let n = self.ring.len();
-        let off = offset_ring(&self.ring, self.shore_t);
-        (0..n).filter(|i| self.shored[*i]).map(|i| (i, vec![self.ring[i], self.ring[(i + 1) % n], off[(i + 1) % n], off[i]])).collect()
+        let off = offset_ring_clean(&self.ring, self.shore_t, &arc_edges(&self.smooth));
+        if self.shored.iter().all(|b| *b) {
+            return vec![ShoringBand { inner: self.ring.clone(), outer: off, closed: true }];
+        }
+        let mut out = Vec::new();
+        for i in 0..n {
+            // Anfang eines Laufs: verbaut, Vorgänger nicht.
+            if !self.shored[i] || self.shored[(i + n - 1) % n] {
+                continue;
+            }
+            let mut idx = vec![i];
+            let mut j = i;
+            while self.shored[j] {
+                j = (j + 1) % n;
+                idx.push(j);
+            }
+            out.push(ShoringBand { inner: idx.iter().map(|&k| self.ring[k]).collect(), outer: idx.iter().map(|&k| off[k]).collect(), closed: false });
+        }
+        out
     }
 }
 
@@ -295,32 +445,48 @@ pub fn shoring_solids(p: &Project) -> Vec<ShoringSolid> {
                 continue;
             }
             let Some(e) = excavations(p).into_iter().find(|e| e.id == *id) else { continue };
-            let quads = spec.shoring_quads();
-            if quads.is_empty() {
+            let bands = spec.shoring_bands();
+            if bands.is_empty() {
                 continue;
             }
             let z_bottom = e.bottom - shoring_embed(e);
             let mut s = ShoringSolid { excavation_id: id.clone(), kind: spec.shore_kind, pos: Vec::new(), idx: Vec::new() };
-            for (_, mut quad) in quads {
-                if signed_area(&quad) < 0.0 {
-                    quad.reverse();
-                }
-                let tops: Vec<Option<f64>> = quad.iter().map(|q| idx.z_at(q[0], q[1]).map(|z| (z - st.datum).max(e.bottom))).collect();
-                if tops.iter().any(Option::is_none) || tops.iter().flatten().all(|z| *z <= e.bottom + 1e-3) {
+            for band in bands {
+                // [191] Ein Körper je Band: Ober-/Unterseite als Streifen der Teilvierecke, Seiten nur aussen herum
+                // (keine Innenflächen zwischen den Teilkanten eines Bogens).
+                let quads = band.quads();
+                let top_of = |q: &P2| idx.z_at(q[0], q[1]).map(|z| (z - st.datum).max(e.bottom));
+                let (ti, to): (Vec<Option<f64>>, Vec<Option<f64>>) = (band.inner.iter().map(top_of).collect(), band.outer.iter().map(top_of).collect());
+                if ti.iter().chain(&to).any(Option::is_none) || ti.iter().chain(&to).flatten().all(|z| *z <= e.bottom + 1e-3) || quads.is_empty() {
                     continue;
                 }
+                // Ecken: innen 0..m, aussen m..2m; je unten, dann oben (+2m).
+                let m = band.inner.len() as u32;
                 let b = s.pos.len() as u32 / 3;
-                for q in &quad {
+                for q in band.inner.iter().chain(&band.outer) {
                     s.pos.extend([q[0], q[1], z_bottom]);
                 }
-                for (q, z) in quad.iter().zip(&tops) {
+                for (q, z) in band.inner.iter().chain(&band.outer).zip(ti.iter().chain(&to)) {
                     s.pos.extend([q[0], q[1], z.unwrap_or(e.bottom)]);
                 }
-                // Unterseite, Oberseite, vier Seiten (aussen, gegen den Uhrzeigersinn).
-                s.idx.extend([b, b + 2, b + 1, b, b + 3, b + 2, b + 4, b + 5, b + 6, b + 4, b + 6, b + 7]);
-                for i in 0..4u32 {
-                    let j = (i + 1) % 4;
-                    s.idx.extend([b + i, b + j, b + 4 + j, b + i, b + 4 + j, b + 4 + i]);
+                let (lo, hi) = (|k: u32| b + k, |k: u32| b + 2 * m + k);
+                let k = quads.len() as u32;
+                for i in 0..k {
+                    let j = (i + 1) % m;
+                    let (a0, a1, o1, o0) = (i, j, m + j, m + i);
+                    // Das Viereck a0 → a1 → o1 → o0 läuft im Uhrzeigersinn (aussen rechts der Sohlkante).
+                    // Oberseite (Normale nach oben), Unterseite (nach unten).
+                    s.idx.extend([hi(a0), hi(o0), hi(o1), hi(a0), hi(o1), hi(a1)]);
+                    s.idx.extend([lo(a0), lo(o1), lo(o0), lo(a0), lo(a1), lo(o1)]);
+                    // Sohlseite (Normale in die Grube) und Aussenseite.
+                    s.idx.extend([lo(a0), hi(a0), hi(a1), lo(a0), hi(a1), lo(a1)]);
+                    s.idx.extend([lo(o0), hi(o1), hi(o0), lo(o0), lo(o1), hi(o1)]);
+                }
+                if !band.closed {
+                    // Stirnseiten am Anfang und am Ende.
+                    let (e0, e1) = (m - 1, 2 * m - 1);
+                    s.idx.extend([lo(0), lo(m), hi(m), lo(0), hi(m), hi(0)]);
+                    s.idx.extend([lo(e0), hi(e1), lo(e1), lo(e0), hi(e0), hi(e1)]);
                 }
             }
             if !s.idx.is_empty() {
@@ -900,6 +1066,10 @@ pub fn slope_hatch_of(st: &SiteTerrain, id: &str, spec: &ExSpec, spacing: f64) -
     Some(v)
 }
 
+/// Kleinster Knick einer konvexen Ecke mit Strich-Fächer (5°); flachere Ecken sind von den Strichen der beiden
+/// Kanten schon gedeckt.
+const FAN_MIN_TURN: f64 = 5.0 * std::f64::consts::PI / 180.0;
+
 pub fn slope_hatch(t: &Tin, ex: &ExSpec, spacing: f64) -> Vec<(P2, P2)> {
     let idx = TinIndex::new(t);
     let r = ex.reach_in(t, &idx).max(spacing);
@@ -927,26 +1097,72 @@ pub fn slope_hatch(t: &Tin, ex: &ExSpec, spacing: f64) -> Vec<(P2, P2)> {
         [(b[1] - a[1]) / l, -(b[0] - a[0]) / l]
     };
     let mut rays: Vec<(P2, P2)> = Vec::new();
-    for i in 0..n {
-        let (a, b) = (ex.ring[i], ex.ring[(i + 1) % n]);
-        let len = (b[0] - a[0]).hypot(b[1] - a[1]);
-        let nn = normal(i);
-        if ex.shored[i] {
+    // [191] Läufe von Kanten zwischen zwei Ecken: Punkte im Inneren eines Bogens (fein geteilt) sind keine Ecken —
+    // die Striche laufen im Abstand `spacing` über den ganzen Bogen, ohne Fächer an jedem kleinen Knick.
+    let corner = |v: usize| !ex.smooth.get(v).copied().unwrap_or(false);
+    let starts: Vec<usize> = (0..n).filter(|&v| corner(v)).collect();
+    let cyclic = starts.is_empty();
+    let runs: Vec<(usize, usize)> = if cyclic {
+        vec![(0, n)]
+    } else {
+        starts.iter().enumerate().map(|(k, &v)| (v, (starts[(k + 1) % starts.len()] + n - v - 1) % n + 1)).collect()
+    };
+    for (v0, m) in runs {
+        let edges: Vec<usize> = (0..m).map(|k| (v0 + k) % n).collect();
+        if ex.shored[edges[0]] {
             continue;
         }
-        let k = (len / spacing).floor() as usize;
-        let off = (len - k as f64 * spacing) / 2.0;
+        let lens: Vec<f64> = edges.iter().map(|&i| { let (a, b) = (ex.ring[i], ex.ring[(i + 1) % n]); (b[0] - a[0]).hypot(b[1] - a[1]) }).collect();
+        let total: f64 = lens.iter().sum();
+        // Normale im Punkt v: an einer Ecke die der Kante i, im Bogen das Mittel der beiden Kanten (radial).
+        let vnormal = |v: usize, i: usize| -> P2 {
+            if corner(v) {
+                return normal(i);
+            }
+            let (a, b) = (normal((v + n - 1) % n), normal(v % n));
+            let (x, y) = (a[0] + b[0], a[1] + b[1]);
+            let l = x.hypot(y);
+            if l > 1e-12 { [x / l, y / l] } else { normal(i) }
+        };
+        // Stelle s entlang des Laufs: Punkt und Normale dort (zwischen den Punkt-Normalen gemittelt, damit die
+        // Striche im Bogen radial stehen statt je Teilkante gekippt).
+        let at = |s: f64| -> (P2, P2) {
+            let mut rest = s;
+            for (k, &i) in edges.iter().enumerate() {
+                if rest <= lens[k] || k + 1 == edges.len() {
+                    let (a, b) = (ex.ring[i], ex.ring[(i + 1) % n]);
+                    let f = (rest / lens[k].max(1e-12)).clamp(0.0, 1.0);
+                    let (na, nb) = (vnormal(i, i), vnormal((i + 1) % n, i));
+                    let (x, y) = (na[0] + (nb[0] - na[0]) * f, na[1] + (nb[1] - na[1]) * f);
+                    let l = x.hypot(y).max(1e-12);
+                    return ([a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f], [x / l, y / l]);
+                }
+                rest -= lens[k];
+            }
+            (ex.ring[v0], normal(v0))
+        };
+        if cyclic {
+            let k = ((total / spacing).round() as usize).max(1);
+            for s in 0..k {
+                rays.push(at(total * s as f64 / k as f64));
+            }
+            continue;
+        }
+        let k = (total / spacing).floor() as usize;
+        let off = (total - k as f64 * spacing) / 2.0;
         for s in 0..=k {
-            let f = (off + s as f64 * spacing) / len.max(1e-12);
-            if f <= 1e-9 || f >= 1.0 - 1e-9 {
+            let pos = off + s as f64 * spacing;
+            if pos <= 1e-9 || pos >= total - 1e-9 {
                 continue;
             }
-            rays.push(([a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f], nn));
+            rays.push(at(pos));
         }
-        // Fächer an der konvexen Ecke b.
-        let n2 = normal((i + 1) % n);
+        // Fächer an der konvexen Ecke am Ende des Laufs (nicht an einer fast tangentialen, z. B. Gerade → Bogen).
+        let (last, next) = (edges[m - 1], (edges[m - 1] + 1) % n);
+        let b = ex.ring[next];
+        let (nn, n2) = (normal(last), normal(next));
         let cross = nn[0] * n2[1] - nn[1] * n2[0];
-        if cross > 1e-9 && !ex.shored[(i + 1) % n] {
+        if cross > FAN_MIN_TURN.sin() && !ex.shored[next] {
             let a0 = nn[1].atan2(nn[0]);
             let mut a1 = n2[1].atan2(n2[0]);
             if a1 < a0 {
@@ -1038,6 +1254,7 @@ mod tests {
     use super::*;
     use crate::model::Vec2;
     use crate::terrain::{mesh_volume, prism, watertight};
+    use std::f64::consts::PI;
 
     fn flat(z: f64, half: f64) -> Tin {
         Tin { xy: vec![[-half, -half], [half, -half], [half, half], [-half, half]], z: vec![z; 4], tris: vec![[0, 1, 2], [0, 2, 3]] }
@@ -1174,19 +1391,126 @@ mod tests {
         e.edge_shoring = Some(vec![true, false, false, false]);
         let spec = ExSpec::of(&e, 0.0).unwrap();
         assert_eq!((spec.shore_kind, spec.shore_t), ("sheetPile", 0.2));
-        let q = spec.shoring_quads();
+        let q = spec.shoring_bands();
         assert_eq!(q.len(), 1);
+        assert_eq!((q[0].inner.len(), q[0].quads().len()), (2, 1));
         // 10 m × 0.2 m plus die Gehrungsdreiecke an den Enden.
-        assert!((signed_area(&q[0].1).abs() - 2.04).abs() < 1e-9, "{}", signed_area(&q[0].1));
+        assert!((signed_area(&q[0].polygon()).abs() - 2.04).abs() < 1e-9, "{}", signed_area(&q[0].polygon()));
         // Band liegt ausserhalb der Sohle.
-        assert!(q[0].1.iter().skip(2).all(|p| !point_in_ring(*p, &spec.ring)));
+        assert!(q[0].outer.iter().all(|p| !point_in_ring(*p, &spec.ring)));
+        // Zwei anstossende verbaute Kanten: EIN Band über die Ecke; ringsum verbaut: geschlossenes Band.
+        e.edge_shoring = Some(vec![true, true, false, false]);
+        let b = ExSpec::of(&e, 0.0).unwrap().shoring_bands();
+        assert_eq!((b.len(), b[0].inner.len()), (1, 3));
+        e.edge_shoring = Some(vec![true; 4]);
+        let b = ExSpec::of(&e, 0.0).unwrap().shoring_bands();
+        assert!(b.len() == 1 && b[0].closed && b[0].quads().len() == 4);
+        e.edge_shoring = Some(vec![true, false, false, false]);
         e.shoring_kind = Some("borePile".into());
         e.shoring_thickness = Some(0.9);
         let spec = ExSpec::of(&e, 0.0).unwrap();
         assert_eq!((spec.shore_kind, spec.shore_t), ("borePile", 0.9));
         assert_eq!(shoring_hatch_id(spec.shore_kind), "std-h-beton");
         // Ohne Verbau keine Bänder.
-        assert!(ExSpec::of(&square(5.0, -3.0), 0.0).unwrap().shoring_quads().is_empty());
+        assert!(ExSpec::of(&square(5.0, -3.0), 0.0).unwrap().shoring_bands().is_empty());
+    }
+
+    /// [191] Baugrube 10 × 6 m, Ostkante als Halbkreis nach aussen (r = 3, tangential an Süd- und Nordkante).
+    fn bogen_pit() -> Excavation {
+        let v = |x: f64, y: f64| Vec2 { x, y };
+        Excavation { id: "bg".into(), outline: vec![v(-5.0, -3.0), v(5.0, -3.0), v(5.0, 3.0), v(-5.0, 3.0)], outline_bulge: Some(vec![0.0, -1.0, 0.0, 0.0]), bottom: -3.0, slope: Some(45.0), ..Default::default() }
+    }
+
+    /// [191] Bogenkante: fein geteilt (Punkte auf dem Kreis, im Inneren glatt), Mengen wie analytisch für die
+    /// glatte Form, Böschungsschraffur im gleichen Abstand über den Bogen — kein Fächer an den kleinen Knicken.
+    #[test]
+    fn bogenkante_glatte_boeschung() {
+        let ex = ExSpec::of(&bogen_pit(), 0.0).unwrap();
+        let on_arc: Vec<&P2> = ex.ring.iter().filter(|q| q[0] > 5.0 + 1e-9).collect();
+        assert!(on_arc.len() + 1 >= 48, "{} Teile", on_arc.len() + 1);
+        assert!(on_arc.iter().all(|q| ((q[0] - 5.0).hypot(q[1]) - 3.0).abs() < 1e-9));
+        assert_eq!(ex.smooth.iter().filter(|s| **s).count(), on_arc.len());
+        assert_eq!(ex.cut_tan.len(), ex.ring.len());
+        // Mengen: V = A·h + U·h²/2 + π h³/3 (45°, konvex, glatter Bogen); Sohle exakt bis auf die Sehnen.
+        let t = flat(0.0, 60.0);
+        let (a, u, h) = (60.0 + PI * 4.5, 26.0 + 3.0 * PI, 3.0);
+        let exact = a * h + u * h * h / 2.0 + PI * h * h * h / 3.0;
+        let v = volumes(&t, &ex, 0.02, &[]);
+        assert!((v.cut - exact).abs() < 3e-3 * exact, "{} vs {exact}", v.cut);
+        assert!((v.bottom_area - a).abs() < 2e-2 && (bogen_pit().outline_area() - a).abs() < 1e-12, "{}", v.bottom_area);
+        // Schraffur: Striche radial vom Bogen bis zur Böschungsoberkante (Abstand 6 vom Mittelpunkt), Teilung 0.5 m.
+        let sp = 0.5;
+        let hatch = slope_hatch(&t, &ex, sp);
+        let mut ang: Vec<f64> = hatch.iter().filter(|(top, _)| top[0] > 5.0 + 1e-6 && ((top[0] - 5.0).hypot(top[1]) - 6.0).abs() < 0.15).map(|(top, _)| top[1].atan2(top[0] - 5.0)).collect();
+        ang.sort_by(f64::total_cmp);
+        let want = PI * 3.0 / sp;
+        assert!((ang.len() as f64 - want).abs() <= 2.0, "{} Striche am Bogen, erwartet ≈ {want}", ang.len());
+        let gaps: Vec<f64> = ang.windows(2).map(|w| (w[1] - w[0]) * 3.0).collect();
+        assert!(gaps.iter().all(|g| (g - sp).abs() < 0.1 * sp), "{gaps:?}");
+        // Gerade Kanten unverändert: Striche alle `sp` auf der Südkante.
+        let south = hatch.iter().filter(|(top, _)| top[1] < -3.0 - 1e-6 && top[0].abs() < 4.9).count();
+        assert!((south as f64 - 10.0 / sp).abs() <= 1.0, "{south}");
+    }
+
+    /// [191] Arbeitsraum und Verbau an der Bogenkante: Sohle um den Arbeitsraum nach aussen (ohne Gehrungs-Spitzen,
+    /// Prüfung eingehalten), Verbau als EIN Band über den ganzen Bogen, Verbaukörper geschlossen.
+    #[test]
+    fn bogenkante_arbeitsraum_und_verbau() {
+        let mut e = bogen_pit();
+        e.working_space = Some(1.0);
+        let ex = ExSpec::of(&e, 0.0).unwrap();
+        let c = working_space_check(&ex).unwrap();
+        assert!(c.ok && (c.min_width - 1.0).abs() < 1e-6, "{c:?}");
+        for q in ex.ring.iter().filter(|q| q[0] > 5.0 + 1e-6) {
+            assert!(((q[0] - 5.0).hypot(q[1]) - 4.0).abs() < 2e-3, "{q:?}");
+        }
+        // Erker: Halbkreis (r = 2) aus der Mitte der Ostkante, an beiden Enden eine einspringende Ecke. Die versetzten
+        // kurzen Bogen-Teilkanten an der Ecke kehren sich um (Schwalbenschwanz) — sie entfallen, die Sohle bleibt
+        // einfach und hält den Arbeitsraum überall ein.
+        let v = |x: f64, y: f64| Vec2 { x, y };
+        let erker = Excavation { outline: vec![v(0.0, 0.0), v(10.0, 0.0), v(10.0, 3.0), v(10.0, 7.0), v(10.0, 10.0), v(0.0, 10.0)], outline_bulge: Some(vec![0.0, 0.0, -1.0, 0.0, 0.0, 0.0]), working_space: Some(0.8), edge_shoring: Some(vec![false, false, true, false, false, false]), ..bogen_pit() };
+        let ex = ExSpec::of(&erker, 0.0).unwrap();
+        let c = working_space_check(&ex).unwrap();
+        assert!(c.ok && (c.min_width - 0.8).abs() < 1e-6, "{c:?}");
+        let n = ex.ring.len();
+        assert_eq!((ex.cut_tan.len(), ex.shored.len(), ex.smooth.len()), (n, n, n));
+        for i in 0..n {
+            for j in i + 2..n {
+                if !(i == 0 && j == n - 1) {
+                    assert!(seg_cross(ex.ring[i], ex.ring[(i + 1) % n], ex.ring[j], ex.ring[(j + 1) % n]).is_none(), "Sohle kreuzt sich: Kante {i} / {j}");
+                }
+            }
+        }
+        // Sohle auf dem Kreis r = 2.8 bzw. auf den versetzten Geraden.
+        for q in &ex.ring {
+            let d = (q[0] - 10.0).hypot(q[1] - 5.0);
+            assert!((d - 2.8).abs() < 2e-3 || (q[0] - 10.8).abs() < 1e-9 || q[0] < 10.8, "{q:?} {d}");
+        }
+        // Verbau am Bogen: Band ohne umgekehrte Vierecke.
+        for b in ex.shoring_bands() {
+            for q in b.quads() {
+                assert!(signed_area(&q) <= 1e-12, "Viereck umgekehrt: {q:?}");
+            }
+        }
+        let mut e = bogen_pit();
+        e.edge_shoring = Some(vec![false, true, false, false]);
+        let ex = ExSpec::of(&e, 0.0).unwrap();
+        let bands = ex.shoring_bands();
+        assert_eq!(bands.len(), 1);
+        assert_eq!(bands[0].inner.len(), ex.ring.iter().filter(|q| q[0] > 5.0 - 1e-9).count());
+        let ring_area = PI / 2.0 * (3.2f64.powi(2) - 9.0);
+        assert!((signed_area(&bands[0].polygon()).abs() - ring_area).abs() < 5e-3, "{}", signed_area(&bands[0].polygon()));
+        // Verbaukörper: dicht (jede Kante in genau zwei Dreiecken), Höhe Sohle − 1 m bis Gelände.
+        let t = crate::model::TerrainMesh { id: "t".into(), positions: vec![-50.0, -50.0, 0.0, 50.0, -50.0, 0.0, 50.0, 50.0, 0.0, -50.0, 50.0, 0.0], indices: vec![0.0, 1.0, 2.0, 0.0, 2.0, 3.0], ..Default::default() };
+        let p = Project { context: Some(vec![ContextObject::TerrainMesh(t), ContextObject::Excavation(e)]), ..Default::default() };
+        let solids = shoring_solids(&p);
+        assert_eq!(solids.len(), 1);
+        let tris: Vec<[u32; 3]> = solids[0].idx.chunks_exact(3).map(|q| [q[0], q[1], q[2]]).collect();
+        assert!(watertight(&tris));
+        // Volumen positiv (Dreiecke nach aussen) ≈ Ringfläche × 4 m.
+        let pos = &solids[0].pos;
+        let vol: f64 = tris.iter().map(|t| { let p = |i: u32| [pos[3 * i as usize], pos[3 * i as usize + 1], pos[3 * i as usize + 2]]; let (a, b, c) = (p(t[0]), p(t[1]), p(t[2])); (a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0]) + a[2] * (b[0] * c[1] - b[1] * c[0])) / 6.0 }).sum();
+        assert!((vol - ring_area * 4.0).abs() < 0.05, "{vol}");
     }
 
     #[test]

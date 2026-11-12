@@ -298,8 +298,8 @@ fn append_shoring(out: &mut Output, p: &Project, base: (f64, f64), u: (f64, f64)
                 continue;
             }
             let Some(e) = crate::excavation::excavations(p).into_iter().find(|e| e.id == *id) else { continue };
-            let quads = spec.shoring_quads();
-            if quads.is_empty() {
+            let bands = spec.shoring_bands();
+            if bands.is_empty() {
                 continue;
             }
             done.push(id.clone());
@@ -307,25 +307,35 @@ fn append_shoring(out: &mut Output, p: &Project, base: (f64, f64), u: (f64, f64)
             let hatch = crate::plan::style::resolve_hatch(p, hatch_id, None, None, None)
                 .unwrap_or(HatchRender { pattern: HatchPattern::Diagonal, scale: 1.0, angle: 45.0, color: HATCH_INK.into(), line_weight: 0.1, ..no_hatch_base() });
             let z_bottom = e.bottom - crate::excavation::shoring_embed(e);
-            for (_, quad) in quads {
-                // Schnitt der Geraden base + s·u mit dem Viereck: erster und letzter Durchgang.
-                let mut ss: Vec<f64> = Vec::new();
-                for i in 0..quad.len() {
-                    let (a, b) = (quad[i], quad[(i + 1) % quad.len()]);
+            // [191] Schnitt der Geraden base + s·u mit dem Band-Umriss (gekrümmt bei Bogenkanten): Durchgänge sortiert,
+            // je Ein-/Austritt ein Stück.
+            let crossings = |poly: &[[f64; 2]], ss: &mut Vec<f64>| {
+                for i in 0..poly.len() {
+                    let (a, b) = (poly[i], poly[(i + 1) % poly.len()]);
                     let (ex, ey) = (b[0] - a[0], b[1] - a[1]);
                     let den = u.0 * ey - u.1 * ex;
                     if den.abs() < 1e-12 {
                         continue;
                     }
                     let (wx, wy) = (a[0] - base.0, a[1] - base.1);
-                    let s_ = (wx * ey - wy * ex) / den;
                     let t_ = (wx * u.1 - wy * u.0) / den;
                     if (0.0..1.0).contains(&t_) {
-                        ss.push(s_);
+                        ss.push((wx * ey - wy * ex) / den);
                     }
                 }
+            };
+            let mut spans: Vec<(f64, f64)> = Vec::new();
+            for band in &bands {
+                let mut ss: Vec<f64> = Vec::new();
+                crossings(&band.polygon(), &mut ss);
+                if band.closed {
+                    // Ringsum verbaut: Aussenkante und Sohlkante begrenzen das Band.
+                    crossings(&band.inner, &mut ss);
+                }
                 ss.sort_by(|a, b| a.total_cmp(b));
-                let (Some(&s0), Some(&s1)) = (ss.first(), ss.last()) else { continue };
+                spans.extend(ss.chunks_exact(2).map(|w| (w[0], w[1])));
+            }
+            for (s0, s1) in spans {
                 if s1 - s0 < 1e-6 {
                     continue;
                 }

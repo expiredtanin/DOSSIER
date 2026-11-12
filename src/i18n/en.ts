@@ -1083,6 +1083,8 @@ export const en: Record<TranslationKey, string> = {
   "site.meshPointHeight.title": "Mesh point height",
   "site.meshPointHeight.label": "Height of mesh point {n} (m)",
   "site.meshPointDelete": "Delete point",
+  "ctx.edgeToArc": "Make edge an arc",
+  "ctx.edgeStraight": "Straighten edge",
   "ctx.vertexType.corner": "Corner point",
   "ctx.vertexType.arc": "Arc point",
   "ctx.vertexType.spline": "Spline point",

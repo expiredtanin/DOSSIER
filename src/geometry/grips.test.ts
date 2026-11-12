@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { drawingVertices, openEdges, polylineEdgeGrips, ringEdges } from "./grips";
+import { drawingVertices, edgeArcToggle, openEdges, polylineEdgeGrips, ringEdges } from "./grips";
 import { documentFor } from "../core/document";
 import type { Drawing2D, Project } from "../model/types";
 
@@ -149,5 +149,19 @@ describe("polylineEdgeGrips", () => {
   it("offen: je gerades Segment ein freier Griff, ohne Schlusskante", () => {
     const e = polylineEdgeGrips({ shape: "polyline", pts: sq, closed: false, bulge: [0, 0.3, 0] }, {});
     expect(e.map((g) => [g.aIndex, g.bIndex, g.free])).toEqual([[0, 1, true], [2, 3, true]]);
+  });
+});
+
+describe("[191] Kante gerade ↔ Bogen", () => {
+  const sq = [{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 4 }, { x: 0, y: 4 }];
+  it("gerade → Segmentbogen nach aussen (Pfeilhöhe Sehne/4), unabhängig vom Umlaufsinn", () => {
+    expect(edgeArcToggle(sq, undefined, 1)).toEqual({ pt: { x: 5, y: 2 }, toArc: true });
+    // Im Uhrzeigersinn ist Kante 0 die Nordkante (0,4) → (4,4): aussen liegt darüber.
+    expect(edgeArcToggle([...sq].reverse(), [0, 0, 0, 0], 0)).toEqual({ pt: { x: 2, y: 5 }, toArc: true });
+  });
+  it("Bogen → Sehnenmitte (gerade), Unsinn → null", () => {
+    expect(edgeArcToggle(sq, [0, -1, 0, 0], 1)).toEqual({ pt: { x: 4, y: 2 }, toArc: false });
+    expect(edgeArcToggle(sq, undefined, 4)).toBeNull();
+    expect(edgeArcToggle(sq.slice(0, 2), undefined, 0)).toBeNull();
   });
 });

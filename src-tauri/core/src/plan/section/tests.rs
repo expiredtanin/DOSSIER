@@ -984,6 +984,26 @@ fn shoring_site() -> (Project, Excavation) {
     (p, pit)
 }
 
+/// [191] Verbau an einer Bogenkante: der Schnitt quer durch den Halbkreis trifft das gekrümmte Band zweimal — zwei
+/// schmale Wandstücke (je etwa die Wanddicke), nicht ein Stück vom ersten bis zum letzten Durchgang.
+#[test]
+fn verbau_an_bogenkante_im_schnitt() {
+    let (mut p, mut pit) = shoring_site();
+    pit.outline_bulge = Some(vec![0.0, -1.0, 0.0, 0.0]);
+    pit.edge_shoring = Some(vec![false, true, false, false]);
+    let flat = p.context.as_ref().unwrap()[0].clone();
+    p.context = Some(vec![flat, ContextObject::Excavation(pit)]);
+    p.drawing_levels.push(serde_json::from_value(serde_json::json!({ "id": "s-bogen", "name": "Schnitt C", "kind": "section", "visible": true, "locked": false,
+        "linePoints": [{ "x": 7.5, "y": -3.0 }, { "x": 7.5, "y": 7.0 }], "directionSign": 1 })).unwrap());
+    let out = compute_section(&p, &level(&p, "s-bogen"), &[]).unwrap().unwrap();
+    assert_eq!(out.shoring.len(), 2, "{:?}", out.shoring.iter().map(|w| w.ring.clone()).collect::<Vec<_>>());
+    for w in &out.shoring {
+        let width = w.ring[1][0] - w.ring[0][0];
+        // Wanddicke 0.2 m schräg geschnitten: 0.2 / cos(30°) ≈ 0.23 m.
+        assert!(width > 0.2 - 1e-6 && width < 0.26, "{width}");
+    }
+}
+
 /// [68] Einbindetiefe als Feld: `shoringEmbed` ersetzt die Vorgabe von 1 m.
 #[test]
 fn verbauwand_einbindetiefe_feld() {

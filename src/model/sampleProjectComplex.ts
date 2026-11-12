@@ -838,9 +838,10 @@ export function buildComplexSampleProject(): Project {
       {
         // Baugrube: Böschung 60° (Ost 50°), Nordkante (Hang) mit Rühlwand gesichert, Sohle unter der Bodenplatte.
         type: "excavation", id: "baugrube", name: "Baugrube Haupthaus", categoryCode: "07",
-        // Umriss = Gebäude-Grundfläche UG (mit Erker), Arbeitsraum 0.8 m; Neigungen in Grad.
-        outline: rect(-HA, -HA, 17.2, 10 + HA), bottom: -3.35, slope: 60, fillSlope: 33.7,
-        edgeSlopes: [60, 50, 90, 60], edgeShoring: [false, false, true, false], shoringKind: "soldierPile", workingSpace: 0.8,
+        // Umriss = Gebäude-Grundfläche UG mit dem runden Erker als Bogenkante ([191]), Arbeitsraum 0.8 m; Neigungen in
+        // Grad je Kante (Süd, Ost bis Erker, Erker, Ost ab Erker, Nord, West).
+        ...slabOutline(true, false), bottom: -3.35, slope: 60, fillSlope: 33.7,
+        edgeSlopes: [60, 50, 50, 50, 90, 60], edgeShoring: [false, false, false, false, true, false], shoringKind: "soldierPile", workingSpace: 0.8,
       },
     ],
     roomProgram: [

@@ -169,7 +169,7 @@ pub(super) fn excavation_segments(c: &Ctx) -> Vec<([f64; 2], [f64; 2])> {
     }
     let mut out = Vec::new();
     for e in pits {
-        let ring: Vec<[f64; 2]> = e.outline.iter().filter(|q| q.x.is_finite() && q.y.is_finite()).map(|q| [q.x, q.y]).collect();
+        let ring: Vec<[f64; 2]> = e.ring().iter().filter(|q| q.x.is_finite() && q.y.is_finite()).map(|q| [q.x, q.y]).collect();
         for i in 0..ring.len() {
             out.push((ring[i], ring[(i + 1) % ring.len()]));
         }
@@ -777,17 +777,37 @@ fn contour_prims(c: &Ctx, st: &crate::excavation::SiteTerrain, iv: f64, every: i
 
 /// [68] Baugrube im Grundriss: Sohle (Böschungsfuss) und Böschungsoberkante, Böschungsschraffur.
 /// [150] Böschungsoberkante und -schraffur (Gelände) enden am Fussabdruck `house`; [157] die Sohle auch.
+/// [191] Grösster Abstand (m), in dem ein Stück der Sohle als auf dem Gebäude-Umriss liegend gilt: ein Bogen der Sohle
+/// und derselbe Bogen am Gebäude sind verschieden fein geteilt (Pfeilhöhe ≤ 5 mm) und liefen sonst als Splitter mal
+/// innen, mal aussen.
+const SOLE_ON_HOUSE: f64 = 6e-3;
+
+/// [157] Teile der Sohle ausserhalb des Gebäudes; Stücke auf dem Gebäude-Umriss (beide Enden und Mitte näher als
+/// [`SOLE_ON_HOUSE`]) zeichnet das Gebäude selbst.
+fn sole_pieces(ring: &[Vec2], house: &[Vec<Vec2>]) -> Vec<(Vec2, Vec2)> {
+    let near = |q: Vec2| house.iter().any(|r| (0..r.len()).any(|i| seg_dist(q, [r[i].x, r[i].y], [r[(i + 1) % r.len()].x, r[(i + 1) % r.len()].y]) < SOLE_ON_HOUSE));
+    let mut out = Vec::new();
+    for i in 0..ring.len() {
+        for (a, b) in outside(ring[i], ring[(i + 1) % ring.len()], house) {
+            if near(a) && near(b) && near(v2((a.x + b.x) / 2.0, (a.y + b.y) / 2.0)) {
+                continue;
+            }
+            out.push((a, b));
+        }
+    }
+    out
+}
+
 fn excavation_lines(c: &Ctx, e: &Excavation, out: &mut Vec<Primitive>, bands: &mut Vec<Primitive>, house: &[Vec<Vec2>]) {
-    let ring: Vec<Vec2> = e.outline.iter().copied().filter(|q| q.x.is_finite() && q.y.is_finite()).collect();
+    // [191] Bögen fein geteilt (Punkte auf dem Kreis): die Ausgaben fassen die Sohle wieder zu echten Bögen ([169]).
+    let ring: Vec<Vec2> = e.ring().iter().copied().filter(|q| q.x.is_finite() && q.y.is_finite()).collect();
     if ring.len() < 3 {
         return;
     }
     // [157] Die Sohle endet ebenfalls am Gebäude: wo es über die Grube reicht (Anbau ohne Untergeschoss),
     // liegt sie unter dem Boden — vorher lief sie als 0.25-mm-Linie quer durch den Raum.
-    for i in 0..ring.len() {
-        for (a, b) in outside(ring[i], ring[(i + 1) % ring.len()], house) {
-            out.push(ink_line(a, b, 0.25, EXCAVATION_INK, None));
-        }
+    for (a, b) in sole_pieces(&ring, house) {
+        out.push(ink_line(a, b, 0.25, EXCAVATION_INK, None));
     }
     // [137] Pick-Fläche = Wirkbereich (Sohle + Böschungen), ohne Gelände nur die Sohle.
     let hull = crate::excavation::terrains(c.p).into_iter().map(|t| crate::excavation::affected_hull(&crate::excavation::site_terrain(c.p, t), &e.id)).find(|h| h.len() >= 3);
@@ -813,12 +833,13 @@ fn excavation_lines(c: &Ctx, e: &Excavation, out: &mut Vec<Primitive>, bands: &m
             }
         }
         // [68] Verbauwand als Wandband an der Kante: Dicke nach aussen, Schraffur der Verbauart; Pick wählt die Baugrube.
-        let quads = spec.shoring_quads();
-        if !quads.is_empty() {
+        // [191] Zusammenhängende verbaute Kanten (auch die Teilkanten eines Bogens) als EIN Band.
+        let bands = spec.shoring_bands();
+        if !bands.is_empty() {
             let hatch = crate::plan::style::resolve_hatch(c.p, crate::excavation::shoring_hatch_id(spec.shore_kind), None, None, None)
                 .unwrap_or_else(no_hatch);
-            for (_, q) in quads {
-                let mut band = super::section::polygon(q.iter().map(|p| v2(p[0], p[1])).collect(), crate::plan::style::HATCH_PAPER, EXCAVATION_INK, 0.25, hatch.clone());
+            for b in bands {
+                let mut band = super::section::polygon(b.polygon().iter().map(|p| v2(p[0], p[1])).collect(), crate::plan::style::HATCH_PAPER, EXCAVATION_INK, 0.25, hatch.clone());
                 if let Primitive::Polygon { context_object_id, .. } = &mut band {
                     *context_object_id = Some(e.id.clone());
                 }
@@ -1519,6 +1540,58 @@ mod tests {
         let mut ctx = Vec::new();
         plan_context(&c, &mut ctx);
         assert!(ctx.iter().any(|q| matches!(q, Primitive::Line { color: Some(k), .. } if k == WS_WARN_INK)));
+    }
+
+    /// [191] Baugrube mit Bogenkante (Ostkante Halbkreis nach aussen, mit Verbau): die Sohle liegt auf dem Kreis und
+    /// fügt sich zu EINEM echten Bogen ([169]), der Verbau ist EIN Band über den ganzen Bogen.
+    #[test]
+    fn baugrube_mit_bogenkante() {
+        use crate::plan::arc_fit::{fit, Seg, Shape, TOL};
+        let mut p = sample_with_walls(serde_json::json!([]));
+        let t = TerrainMesh { id: "t".into(), category_code: "02".into(), positions: vec![0.0, -20.0, 0.0, 50.0, -20.0, 0.0, 50.0, 30.0, 0.0, 0.0, 30.0, 0.0], indices: vec![0.0, 1.0, 2.0, 0.0, 2.0, 3.0], ..Default::default() };
+        let pit = Excavation { id: "bg".into(), category_code: "02".into(), outline: vec![v2(12.0, -2.0), v2(28.0, -2.0), v2(28.0, 10.0), v2(12.0, 10.0)], outline_bulge: Some(vec![0.0, -1.0, 0.0, 0.0]), bottom: -3.0, edge_shoring: Some(vec![false, true, false, false]), ..Default::default() };
+        p.context = Some(vec![ContextObject::TerrainMesh(t), ContextObject::Excavation(pit)]);
+        let a = super::super::domains::PlanArgs::parse(1.0, r#"{"floor": "eg", "show": ["02", "90", "80", "02"], "scale": 100}"#).unwrap();
+        let c = Ctx::new(&p, &a);
+        let mut ctx = Vec::new();
+        plan_context(&c, &mut ctx);
+        let sohle: Vec<Vec<crate::hatch::V2>> = ctx.iter().filter_map(|q| match q { Primitive::Line { a, b, weight_mm, color: Some(k), .. } if k == EXCAVATION_INK && *weight_mm == 0.25 => Some(vec![crate::hatch::V2 { x: a.x, y: a.y }, crate::hatch::V2 { x: b.x, y: b.y }]), _ => None }).collect();
+        let on_arc = sohle.iter().filter(|r| r[0].x > 28.0 + 1e-6).count();
+        assert!(on_arc >= 40, "{on_arc} Teilstücke auf dem Bogen");
+        for r in sohle.iter().filter(|r| r[0].x > 28.0 + 1e-6) {
+            assert!(((r[0].x - 28.0).hypot(r[0].y - 4.0) - 6.0).abs() < 1e-9);
+        }
+        let chains = crate::plan::scene::stitch_runs(sohle);
+        assert_eq!(chains.len(), 1, "Sohle ein geschlossener Zug");
+        let (pts, closed) = &chains[0];
+        let mut pts = pts.clone();
+        if *closed && pts.len() > 1 {
+            pts.pop();
+        }
+        let Some(Shape::Path { segs, .. }) = fit(&pts, *closed, TOL) else { panic!("kein Pfad") };
+        let arcs: Vec<f64> = segs.iter().filter_map(|s| if let Seg::Arc { r, sweep, .. } = s { Some(r * sweep.abs()) } else { None }).collect();
+        assert!((arcs.iter().sum::<f64>() - 6.0 * std::f64::consts::PI).abs() < 1e-6, "{arcs:?}");
+        assert!(!arcs.is_empty() && arcs.len() <= 2, "{arcs:?}");
+        let bands = ctx.iter().filter(|q| matches!(q, Primitive::Polygon { stroke, context_object_id: Some(id), .. } if stroke == EXCAVATION_INK && id == "bg")).count();
+        assert_eq!(bands, 1, "ein Verbauband über den Bogen");
+    }
+
+    /// [191] Sohle auf dem Gebäude-Umriss: derselbe Bogen am Gebäude und an der Baugrube, verschieden fein geteilt —
+    /// keine Splitter; ein Stück ausserhalb bleibt.
+    #[test]
+    fn sohle_auf_gebaeudebogen_ohne_splitter() {
+        let arc = |n: usize, r: f64| -> Vec<Vec2> {
+            let mut v = vec![v2(0.0, -2.0), v2(4.0, -2.0)];
+            v.extend((1..n).map(|k| { let t = -std::f64::consts::FRAC_PI_2 + std::f64::consts::PI * k as f64 / n as f64; v2(4.0 + r * t.cos(), r * t.sin()) }));
+            v.extend([v2(4.0, 2.0), v2(0.0, 2.0)]);
+            v
+        };
+        let house = vec![arc(48, 2.0)];
+        assert!(sole_pieces(&arc(31, 2.0), &house).is_empty(), "{:?}", sole_pieces(&arc(31, 2.0), &house));
+        // Grube 1 m weiter westlich: das Stück westlich des Hauses bleibt.
+        let pit = vec![v2(-1.0, -2.0), v2(4.0, -2.0), v2(4.0, 2.0), v2(-1.0, 2.0)];
+        let p = sole_pieces(&pit, &house);
+        assert!(p.iter().any(|(a, b)| (a.x + 1.0).abs() < 1e-9 && (b.x + 1.0).abs() < 1e-9), "{p:?}");
     }
 
     /// [157] Schnittmarken-Beschriftung nicht auf der Böschungsschraffur: Sohle, Böschungsoberkante und Schraffur

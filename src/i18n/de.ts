@@ -1088,6 +1088,8 @@ export const de = {
   "site.meshPointHeight.title": "Höhe des Netzpunkts",
   "site.meshPointHeight.label": "Höhe von Netzpunkt {n} (m)",
   "site.meshPointDelete": "Punkt löschen",
+  "ctx.edgeToArc": "Kante als Bogen",
+  "ctx.edgeStraight": "Kante gerade",
   "ctx.vertexType.corner": "Eckpunkt",
   "ctx.vertexType.arc": "Bogenpunkt",
   "ctx.vertexType.spline": "Splinepunkt",

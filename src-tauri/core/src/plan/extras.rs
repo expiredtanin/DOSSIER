@@ -799,7 +799,7 @@ pub fn extra_bounds(p: &Project, extra: &[(Primitive, u32)], shown: impl Fn(&str
             ContextObject::ImportedMesh(m) => mesh_bounds(&m.positions, &mut b),
             ContextObject::TerrainMesh(m) => mesh_bounds(&m.positions, &mut b),
             ContextObject::Excavation(e) => {
-                for q in &e.outline {
+                for q in e.ring().iter() {
                     b.acc(q.x, q.y);
                 }
             }
