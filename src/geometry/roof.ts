@@ -63,8 +63,16 @@ function encodeRoof(roof: Roof): Float64Array {
   const pts = roof.outline;
   const holes = roof.holes ?? [];
   const edges = roof.edgePitchDeg;
+  // [191] Bögen je Ring (Umriss, dann Höfe); der Kern teilt Bogenkanten fein und vererbt die Kantenneigung.
+  const bulges = [roof.outlineBulge, ...holes.map((_, k) => roof.holesBulge?.[k])];
+  const hasArcs = bulges.some((b) => b?.some((v) => v));
   let size = 10 + 2 * pts.length + 1 + 1 + (edges ? edges.length : 0);
   for (const h of holes) size += 1 + 2 * h.length;
+  if (hasArcs) {
+    size += 1;
+    const rings = [pts, ...holes];
+    for (const r of rings) size += 1 + r.length;
+  }
   const buf = new Float64Array(size);
   buf[0] = SHAPE_CODE[roof.shape] ?? 0;
   buf[1] = roof.pitchDeg;
@@ -92,6 +100,14 @@ function encodeRoof(roof: Roof): Float64Array {
   // Neigung je Kante: NaN = Feld fehlt, +∞ = Giebel (null), negativ = Standard.
   buf[i++] = edges ? edges.length : NaN;
   if (edges) for (const v of edges) buf[i++] = v === null ? Infinity : v;
+  if (hasArcs) {
+    const rings = [pts, ...holes];
+    buf[i++] = rings.length;
+    rings.forEach((r, k) => {
+      buf[i++] = r.length;
+      for (let e = 0; e < r.length; e++) buf[i++] = bulges[k]?.[e] ?? 0;
+    });
+  }
   return buf;
 }
 

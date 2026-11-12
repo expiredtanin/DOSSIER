@@ -310,8 +310,9 @@ impl Builder {
         (placement, shape)
     }
 
-    /// Profil aus Ecken mit Bulge (zur nächsten Ecke; DXF-Sinn) als IfcCompositeCurve → IfcExtrudedAreaSolid.
-    pub(super) fn emit_bulge_extrusion(&mut self, ring: &[(f64, f64, f64)], z_rel: f64, depth: f64) -> usize {
+    /// Ring aus Ecken mit Bulge (zur nächsten Ecke; DXF-Sinn) als IfcCompositeCurve (Strecken als IfcPolyline,
+    /// Bögen als IfcTrimmedCurve auf IfcCircle).
+    fn emit_bulge_curve(&mut self, ring: &[(f64, f64, f64)]) -> usize {
         let n = ring.len();
         let mut segs = Vec::with_capacity(n);
         for i in 0..n {
@@ -335,7 +336,37 @@ impl Builder {
             };
             segs.push(self.add("IFCCOMPOSITECURVESEGMENT", format!("{},.T.,#{curve}", enum_("CONTINUOUS"))));
         }
-        let cc = self.add("IFCCOMPOSITECURVE", format!("{},.F.", refs(&segs)));
+        self.add("IFCCOMPOSITECURVE", format!("{},.F.", refs(&segs)))
+    }
+
+    /// Ring mit Bulge: ohne Bogenkante als geschlossener Linienzug, sonst als IfcCompositeCurve.
+    fn emit_ring_curve(&mut self, ring: &[(f64, f64, f64)]) -> usize {
+        if ring.iter().any(|v| v.2.abs() >= 1e-9) {
+            self.emit_bulge_curve(ring)
+        } else {
+            let pts: Vec<(f64, f64)> = ring.iter().map(|v| (v.0, v.1)).collect();
+            self.emit_closed_polyline(&pts)
+        }
+    }
+
+    /// [191] Wie {@link emit_box_product_voids}, Umriss und Aussparungen mit Bögen (`(x, y, bulge)`).
+    pub(super) fn emit_box_product_voids_arcs(&mut self, footprint: &[(f64, f64, f64)], inner: &[Vec<(f64, f64, f64)>], z_bottom_rel: f64, depth: f64, relative_to: usize) -> (usize, usize) {
+        let outer = self.emit_ring_curve(footprint);
+        let profile = if inner.is_empty() {
+            self.add("IFCARBITRARYCLOSEDPROFILEDEF", format!("{},$,#{outer}", enum_("AREA")))
+        } else {
+            let holes: Vec<usize> = inner.iter().map(|ring| self.emit_ring_curve(ring)).collect();
+            self.add("IFCARBITRARYPROFILEDEFWITHVOIDS", format!("{},$,#{outer},{}", enum_("AREA"), refs(&holes)))
+        };
+        let solid = self.add("IFCEXTRUDEDAREASOLID", format!("#{profile},#{},#{},{}", self.identity_axis, self.extrude_dir, fmt_real(depth.max(0.001))));
+        let shape = self.emit_swept_shape(&[solid]);
+        let placement = self.emit_placement(z_bottom_rel, relative_to);
+        (placement, shape)
+    }
+
+    /// Profil aus Ecken mit Bulge (zur nächsten Ecke; DXF-Sinn) als IfcCompositeCurve → IfcExtrudedAreaSolid.
+    pub(super) fn emit_bulge_extrusion(&mut self, ring: &[(f64, f64, f64)], z_rel: f64, depth: f64) -> usize {
+        let cc = self.emit_bulge_curve(ring);
         let profile = self.add("IFCARBITRARYCLOSEDPROFILEDEF", format!("{},$,#{cc}", enum_("AREA")));
         let mut position = self.identity_axis;
         if z_rel != 0.0 {

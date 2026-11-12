@@ -775,6 +775,32 @@ fn decke_mit_aussparung_hat_profil_mit_loechern() {
     assert_eq!(count(&plain, "IFCARBITRARYPROFILEDEFWITHVOIDS"), 0);
 }
 
+/// [191] Decke mit Bogenkante und runder Aussparung: Profil als IfcCompositeCurve mit IfcTrimmedCurve/IfcCircle.
+#[test]
+fn decke_mit_bogenkante_hat_zusammengesetzte_kurve() {
+    let mut b = mini();
+    b.n(&[REC_CEILING_ARC, -1.0]);
+    b.str("D1");
+    b.str("Decke");
+    b.no_type();
+    b.qto("Qto_SlabBaseQuantities", &[("GrossArea", 4.0, 2.0), ("NetArea", 4.0, 1.5)]);
+    // Quadrat, rechte Kante Halbkreis nach aussen (Scheitel rechts der Kante 1 -> 2 = negativer Bulge).
+    b.n(&[4.0, 0.0, 0.0, 0.0, 2.0, 0.0, -1.0, 2.0, 2.0, 0.0, 0.0, 2.0, 0.0]);
+    b.n(&[1.0]);
+    b.n(&[3.0, 0.2, 0.2, 0.0, 0.8, 0.2, 0.0, 0.5, 0.8, 0.0]);
+    b.n(&[2.6, 0.2]);
+    let ifc = build(&b).unwrap();
+    check_structure(&ifc);
+    assert_eq!(count(&ifc, "IFCARBITRARYPROFILEDEFWITHVOIDS"), 1);
+    assert_eq!(count(&ifc, "IFCCOMPOSITECURVE("), 1);
+    assert_eq!(count(&ifc, "IFCCOMPOSITECURVESEGMENT"), 4);
+    assert_eq!(count(&ifc, "IFCCIRCLE"), 1);
+    assert_eq!(count(&ifc, "IFCTRIMMEDCURVE"), 1);
+    // Aussparung ohne Bögen bleibt Linienzug.
+    assert_eq!(count(&ifc, "IFCPOLYLINE"), 4);
+    assert!(first_line(&ifc, "IFCTRIMMEDCURVE").contains(".F.,.CARTESIAN."));
+}
+
 /// Treppe mit zwei Läufen (Prismen), Podest und Geländer (Mesh).
 fn stair_with_parts(b: &mut B) {
     b.n(&[REC_STAIR, -1.0]);

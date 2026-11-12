@@ -125,9 +125,11 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   (`ringArc`), Einfügen teilt/Löschen fügt Bögen zusammen, Spiegeln kehrt sie; Raum „innen" an Bogenwänden übernimmt den
   Bogen (`ring_arc::fit_arcs`); Attika-Innenring bleibt am Bogen rund; Musterhaus komplex: Erker-Decken, Spindel-Loch,
   Erker-Dach und die drei Erker-Räume als echte Bögen. Offen:
-  Baugrube ohne Bögen; IFC-Profil als Linienzug (kein IfcCompositeCurve); Dach-Kantenneigung an Bogen-Teilkanten nur
-  geerbt (Kanten-Griffe/Objekt-Info kennen den Bogen als eine Kante, die Dach-Geometrie in TS für 3D-Griffe nicht);
-  Bogenwände im 3D weiter 7.5°-Sehnen (Plattenrand feiner); keine Kante gerade → Bogen per Objekt-Info; nicht in der
+  Baugrube ohne Bögen; Dach-Kantenneigung an Bogen-Teilkanten nur geerbt (Kanten-Griffe/Objekt-Info kennen den Bogen
+  als eine Kante). 12.11.: `roofGeometry` (TS-Fassade) reicht `outlineBulge`/`holesBulge` an den Kern (Anhang der flachen
+  Eingabe, `roof.rs::densify_rings`), 3D-Griffe/Firstgriff/Gauben sehen dieselbe Geometrie wie die Ableitungen; IFC:
+  Decken und Räume mit Bögen als `CEILING_ARC`/`SPACE_ARC` (Profil = IfcCompositeCurve aus IfcPolyline/IfcTrimmedCurve auf
+  IfcCircle, auch Aussparungen), ifcopenshell-Validierung an der komplexen Probe grün (Dach bleibt Netz). Bogenwände im 3D weiter 7.5°-Sehnen (Plattenrand feiner); keine Kante gerade → Bogen per Objekt-Info; nicht in der
   Tauri-App/auf dem Mac geprüft. Nachlauf 12.11. (Schatten): `sun.rs::collect` nahm für Decken den rohen Umriss (Sehne statt
   Bogen), die Aussparungen aber fein geteilt — Spindel-Loch im Erker lag halb ausserhalb der Abdeckung, im EG-Grundriss fiel
   Sonnenschatten ins Loch. Jetzt `ce.ring()` (Bogen fein geteilt) für Abdeckung, Werfer und Empfänger; Test

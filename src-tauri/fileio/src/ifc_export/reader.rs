@@ -95,6 +95,12 @@ impl<'a> Reader<'a> {
         let s = self.take(n.checked_mul(2).ok_or("Überlauf")?)?;
         Ok(s.chunks_exact(2).map(|c| (c[0], c[1])).collect())
     }
+    /// [191] Ring mit Bögen: n, (x, y, bulge) × n.
+    pub(super) fn bpts(&mut self) -> Result<Vec<(f64, f64, f64)>, String> {
+        let n = self.idx()?;
+        let s = self.take(n.checked_mul(3).ok_or("Überlauf")?)?;
+        Ok(s.chunks_exact(3).map(|c| (c[0], c[1], c[2])).collect())
+    }
     /// Optionaler Wert: has (0/1), value.
     fn opt_f(&mut self) -> Result<Option<f64>, String> {
         let has = self.flag()?;

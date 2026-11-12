@@ -630,7 +630,8 @@ pub fn roof_underside_at(planes: &[Vec<P3>], total_layer_thickness: f64, x: f64,
 //
 // Eingabe: [shape, pitchDeg, pitchUpperDeg, mansardType, mansardKneeRatio, halfHipRatio,
 //           overhang, overhangGable, ridgeAxis, nPts, x0, y0, …,
-//           nHoles, (n, (x, y)…)…, nEdges (NaN = Feld fehlt), pitch… (+∞ = Giebel)]
+//           nHoles, (n, (x, y)…)…, nEdges (NaN = Feld fehlt), pitch… (+∞ = Giebel),
+//           [191] optional nBulgeRings, (n, bulge…)… (Ring 0 = Umriss, dann die Höfe; Bögen werden fein geteilt)]
 //   shape: 0 flach, 1 pult, 2 sattel, 3 walm, 4 mansarde, 5 zelt;
 //   mansardType: 0 giebel, 1 walm, 2 zelt; ridgeAxis: 0 x, 1 y; NaN = Feld fehlt.
 // Ausgabe: [ridgeHeight, nEaves, (x, y)…, nRidges, (x, y, x, y)…, nHips, …, nBreaks, …,
@@ -662,9 +663,13 @@ pub fn decode_params(buf: &[f64]) -> Option<RoofParams> {
     }
     let end = 10 + 2 * n as usize;
     let pts = buf.get(10..end)?;
-    let (holes, edge_pitch_deg) = decode_extra(buf.get(end..).unwrap_or(&[]))?;
+    let (mut holes, mut edge_pitch_deg, bulges) = decode_extra(buf.get(end..).unwrap_or(&[]))?;
+    let mut outline: Vec<P2> = pts.chunks_exact(2).map(|c| [c[0], c[1]]).collect();
+    if bulges.iter().any(|b| b.iter().any(|&v| v != 0.0)) {
+        densify_rings(&mut outline, &mut holes, &mut edge_pitch_deg, &bulges);
+    }
     Some(RoofParams {
-        outline: pts.chunks_exact(2).map(|c| [c[0], c[1]]).collect(),
+        outline,
         shape,
         pitch_deg: head[1],
         pitch_upper_deg: opt(head[2]),
@@ -682,9 +687,9 @@ pub fn decode_params(buf: &[f64]) -> Option<RoofParams> {
 /// Anhang der Eingabe: `[nHoles, (n, (x, y)…)…, nEdges, v…]`; fehlt er (ältere Puffer), gibt es
 /// weder Höfe noch Kantenneigungen. `nEdges` = NaN: Feld fehlt; Wert +∞ = Giebel (`null`).
 #[allow(clippy::type_complexity)]
-fn decode_extra(buf: &[f64]) -> Option<(Vec<Vec<P2>>, Option<Vec<Option<f64>>>)> {
+fn decode_extra(buf: &[f64]) -> Option<(Vec<Vec<P2>>, Option<Vec<Option<f64>>>, Vec<Vec<f64>>)> {
     let count = |v: f64| (v.is_finite() && v >= 0.0 && v.fract() == 0.0 && v < 1e9).then_some(v as usize);
-    let Some(&nh) = buf.first() else { return Some((vec![], None)) };
+    let Some(&nh) = buf.first() else { return Some((vec![], None, vec![])) };
     let nh = count(nh)?;
     let mut i = 1;
     let mut holes = Vec::with_capacity(nh.min(1 << 12));
@@ -695,16 +700,56 @@ fn decode_extra(buf: &[f64]) -> Option<(Vec<Vec<P2>>, Option<Vec<Option<f64>>>)>
         i += 2 * m;
         holes.push(pts.chunks_exact(2).map(|c| [c[0], c[1]]).collect());
     }
-    let edges = match buf.get(i) {
-        None => None,
-        Some(v) if v.is_nan() => None,
+    let (edges, next) = match buf.get(i) {
+        None => (None, i),
+        Some(v) if v.is_nan() => (None, i + 1),
         Some(&v) => {
             let m = count(v)?;
             let vals = buf.get(i + 1..i + 1 + m)?;
-            Some(vals.iter().map(|&x| (x != f64::INFINITY).then_some(if x.is_nan() { -1.0 } else { x })).collect())
+            (Some(vals.iter().map(|&x| (x != f64::INFINITY).then_some(if x.is_nan() { -1.0 } else { x })).collect()), i + 1 + m)
         }
     };
-    Some((holes, edges))
+    // [191] Bögen je Ring (fehlt der Anhang: keine).
+    let mut bulges = Vec::new();
+    if let Some(&nb) = buf.get(next) {
+        let nb = count(nb)?;
+        let mut j = next + 1;
+        for _ in 0..nb {
+            let m = count(*buf.get(j)?)?;
+            bulges.push(buf.get(j + 1..j + 1 + m)?.to_vec());
+            j += 1 + m;
+        }
+    }
+    Some((holes, edges, bulges))
+}
+
+/// [191] Teilt Umriss und Höfe an den Bogenkanten fein (`ring_arc`); Teilkanten erben die Kantenneigung.
+/// `bulges[0]` gehört zum Umriss, die folgenden zu den Höfen; fehlende Ringe bleiben gerade.
+fn densify_rings(outline: &mut Vec<P2>, holes: &mut [Vec<P2>], edge_pitch: &mut Option<Vec<Option<f64>>>, bulges: &[Vec<f64>]) {
+    use crate::model::Vec2;
+    let mut dense_pitch: Vec<Option<f64>> = Vec::new();
+    let mut off = 0usize;
+    let mut one = |ring: &mut Vec<P2>, bulge: Option<&Vec<f64>>| {
+        let n = ring.len();
+        if n >= 2 {
+            let pts: Vec<Vec2> = ring.iter().map(|p| Vec2 { x: p[0], y: p[1] }).collect();
+            let (dense, map) = crate::ring_arc::densify_map(&pts, bulge.map(Vec::as_slice));
+            *ring = dense.iter().map(|v| [v.x, v.y]).collect();
+            if let Some(src) = edge_pitch.as_ref() {
+                dense_pitch.extend(map.iter().map(|&k| src.get(off + k).copied().unwrap_or(None)));
+            }
+        } else if let Some(src) = edge_pitch.as_ref() {
+            dense_pitch.extend((0..n).map(|k| src.get(off + k).copied().unwrap_or(None)));
+        }
+        off += n;
+    };
+    one(outline, bulges.first());
+    for (k, h) in holes.iter_mut().enumerate() {
+        one(h, bulges.get(k + 1));
+    }
+    if edge_pitch.is_some() {
+        *edge_pitch = Some(dense_pitch);
+    }
 }
 
 fn push_lines(out: &mut Vec<f64>, lines: &[Line]) {
@@ -885,6 +930,26 @@ mod tests {
         // Flächen stehen hinter Kopf, Traufe und drei Linienlisten.
         let off = 2 + 2 * 4 + 1 + 4 * g.ridges.len() + 1 + 4 * g.hips.len() + 1;
         assert_eq!(decode_polys3(&enc[off..]).unwrap(), g.planes);
+    }
+
+    #[test]
+    fn decode_teilt_bogenkanten_fein_und_vererbt_neigung() {
+        // Rechteck 4 x 2, rechte Kante Halbkreis; Kantenneigung 10/20/30/40; Bulge-Anhang.
+        let mut buf = vec![0.0, 30.0, f64::NAN, 0.0, f64::NAN, f64::NAN, 0.0, f64::NAN, 0.0, 4.0];
+        buf.extend_from_slice(&[0.0, 0.0, 4.0, 0.0, 4.0, 2.0, 0.0, 2.0]);
+        buf.push(0.0); // keine Höfe
+        buf.extend_from_slice(&[4.0, 10.0, 20.0, 30.0, 40.0]);
+        buf.extend_from_slice(&[1.0, 4.0, 0.0, -1.0, 0.0, 0.0]);
+        let p = decode_params(&buf).unwrap();
+        assert!(p.outline.len() > 48);
+        assert_eq!(p.edge_pitch_deg.as_ref().unwrap().len(), p.outline.len());
+        // Alle Teilkanten des Bogens erben 20.
+        let twenty = p.edge_pitch_deg.unwrap().iter().filter(|v| **v == Some(20.0)).count();
+        assert!(twenty > 48, "{twenty}");
+        // Punkte auf dem Kreis um (4, 1), r = 1.
+        assert!(p.outline.iter().all(|q| q[0] <= 5.0 + 1e-9) && p.outline.iter().any(|q| q[0] > 4.99));
+        // Ohne Anhang: unverändert 4 Ecken.
+        assert_eq!(decode_params(&buf[..buf.len() - 6]).unwrap().outline.len(), 4);
     }
 
     #[test]
