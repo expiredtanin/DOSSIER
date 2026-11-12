@@ -813,7 +813,8 @@ function LevelPlanView({
     // Überlagert ALLE sichtbaren Geschoss-/Zeichnungs-Ebenen derselben Art wie
     // `level` in einem Plan (aktive Ebene farbig, andere je Darstellungsmodus
     // gedimmt/gesperrt — Nutzer-Wunsch "mehrere Geschosse gleichzeitig
-    // einschaltbar", s. plan/generatePlan.ts::generateVisibleLevelsPlan).
+    // einschaltbar", s. plan/generatePlan.ts::generateVisibleLevelsPlan). [203] Andere
+    // Geschosse nur als gedimmte Pausfolie (Modus „Andere grau"), sonst nur das eigene.
     const p = generateVisibleLevelsPlan(
       project,
       level.id,

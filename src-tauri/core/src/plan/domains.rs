@@ -61,6 +61,9 @@ pub struct PlanArgs {
     /// [173] Ausdrücklich angefragte Modelldarstellung (Id einer eigenen oder eingebauten Stufe); `None` =
     /// die der Ebene (`DrawingLevel.modelViewOptionId`), sonst nur der Detailgrad (`plan/model_view.rs`).
     pub model_view: Option<String>,
+    /// [203] Pausfolie: dieser Plan liegt gedimmt unter dem Grundriss des Geschosses `trace_of` (Zeichnungsebenen-Modus
+    /// „Andere grau"). Achsraster, die auch dort stehen, fehlen hier — sie stehen nur einmal im Bild. `None` = eigener Plan.
+    pub trace_of: Option<String>,
 }
 
 /// [140] Ab diesem Massstab (1:N) zeichnet der Detailgrad „mittel" wie „grob".
@@ -106,6 +109,7 @@ impl PlanArgs {
             auto_coarse,
             rules: v.get("rules").and_then(|a| a.as_array()).map(|a| a.iter().filter_map(|s| s.as_str().map(String::from)).collect()),
             model_view: v.get("modelView").and_then(|m| m.as_str()).filter(|m| !m.is_empty()).map(String::from),
+            trace_of: v.get("traceOf").and_then(|m| m.as_str()).filter(|m| !m.is_empty()).map(String::from),
         })
     }
 
@@ -1418,7 +1422,7 @@ pub fn room_stamp_spots(p: &Project, floor: &str, show: &HashSet<String>, scale:
         return out;
     }
     let (detail, auto_coarse) = effective_detail(Detail::Mittel, scale);
-    let a = PlanArgs { floor: floor.to_string(), detail, show: show.clone(), grey: HashSet::new(), reference_lines: false, global: true, scale, for_print: false, compact: false, mono: false, sun_when: None, auto_coarse, rules: None, model_view: None };
+    let a = PlanArgs { floor: floor.to_string(), detail, show: show.clone(), grey: HashSet::new(), reference_lines: false, global: true, scale, for_print: false, compact: false, mono: false, sun_when: None, auto_coarse, rules: None, model_view: None, trace_of: None };
     let Ok(d) = plan_domains(p, &a) else { return out };
     for q in &d.rooms {
         if let Primitive::Text { at, room_id: Some(id), .. } = q {
