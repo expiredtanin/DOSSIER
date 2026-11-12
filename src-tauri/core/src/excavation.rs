@@ -928,6 +928,13 @@ pub fn terrain_model_mesh<'a>(p: &Project, t: &'a TerrainMesh) -> (std::borrow::
     (Cow::Owned(pos), Cow::Owned(idx), st.modified.is_some())
 }
 
+/// [227] Das gewachsene Gelände-Netz im Modellbezug, ohne Baugruben (hinterfüllt, z. B. für Bilder).
+pub fn terrain_original_mesh(p: &Project, t: &TerrainMesh) -> (std::borrow::Cow<'static, [f64]>, std::borrow::Cow<'static, [f64]>, bool) {
+    let st = site_terrain(p, t);
+    let (pos, idx) = st.orig.to_flat(-st.datum);
+    (std::borrow::Cow::Owned(pos), std::borrow::Cow::Owned(idx), false)
+}
+
 /// [T6] Luftbild-Farben (flach r,g,b je Eckpunkt des Original-Netzes) auf das geänderte Gelände übertragen:
 /// jeder neue Eckpunkt erhält die in der Grundrissprojektion (x, y) des Originals interpolierte Farbe
 /// (Böschungen und Sohle bekommen so die Farbe des Bildes darüber); ausserhalb der nächste Eckpunkt.

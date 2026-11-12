@@ -82,6 +82,11 @@ export interface RenderOptions {
   denoise?: boolean;
   /** `cpu` erzwingt die CPU, sonst GPU wenn vorhanden. */
   device?: "auto" | "cpu";
+  /**
+   * [227] Baugrube ausblenden: Gelände ohne Aushub, hinterfüllt bis an die Fassade (Standard: an — für Bilder). Nur das Paket;
+   * die 3D-Ansicht im Modell bleibt unberührt (Klasse „07 Baugrube").
+   */
+  backfilled?: boolean;
 }
 
 /** Eintrag der Materialtabelle in `scene.json`. */
@@ -124,6 +129,8 @@ export interface RenderScene {
   samples: number;
   denoise: boolean;
   device: "auto" | "cpu";
+  /** [227] Gelände im Paket ohne Baugruben (hinterfüllt); nur Hinweis, der Leser setzt nichts um. */
+  backfilled: boolean;
   camera: RenderCameraSpec;
   sun: { azimuth: number; elevation: number; when: string; lat: number; lon: number };
   materials: RenderMaterial[];
@@ -334,7 +341,7 @@ function componentMaterials(project: Project): Map<string, ComponentMaterial> {
  * Kamera, Sonne. Verlangt das geladene Format-Modul (`await loadFileio()`) und den Kern.
  */
 export async function buildRenderPackage(project: Project, opts: RenderOptions, loadTexture?: TextureLoader): Promise<RenderPackage> {
-  const glb = splitRoofMaterials(exportGlb(project), project);
+  const glb = splitRoofMaterials(exportGlb(project, { backfilled: opts.backfilled ?? true }), project);
   const files: RenderPackage["files"] = [{ path: "model.glb", bytes: glb }];
   const materials = glbMaterials(glb);
   const comp = componentMaterials(project);
@@ -377,6 +384,7 @@ export async function buildRenderPackage(project: Project, opts: RenderOptions, 
     samples: Math.max(1, Math.round(opts.samples)),
     denoise: opts.denoise ?? true,
     device: opts.device ?? "auto",
+    backfilled: opts.backfilled ?? true,
     camera: opts.camera,
     sun: renderSun(project, opts.when),
     materials,

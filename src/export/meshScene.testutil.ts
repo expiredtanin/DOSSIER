@@ -13,8 +13,8 @@ export interface SceneGroup {
 }
 
 /** Knoten der Mesh-Szene (Welt x, Höhe, y; Wicklung nach aussen im Modell). */
-export function meshSceneGroups(project: Project): SceneGroup[] {
-  const [b, text] = decodeExportFlat(documentFor(project).queryBin("meshExportData", [1, 1, 0]));
+export function meshSceneGroups(project: Project, backfilled = false): SceneGroup[] {
+  const [b, text] = decodeExportFlat(documentFor(project).queryBin("meshExportData", [1, 1, 0, backfilled ? 1 : 0]));
   const s = text.split("\0");
   let i = 2;
   i += 1 + b[i] * 7;

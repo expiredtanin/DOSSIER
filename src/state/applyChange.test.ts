@@ -175,3 +175,44 @@ describe("Zufallsfolgen der umgestellten Aktionen", () => {
     }
   });
 });
+
+// [227] Gebäude eines Geo-Imports (Kataster/swisstopo/OSM) stehen nach dem Hinzufügen auf dem Gelände — ein Undo-Schritt.
+describe("Geo-Import setzt Gebäude aufs Gelände", () => {
+  const terrain = {
+    type: "terrainMesh" as const,
+    id: "gel",
+    categoryCode: "02",
+    name: "Gelände",
+    positions: [-50, -50, -5, 50, -50, 5, 50, 50, 5, -50, 50, -5],
+    indices: [0, 1, 2, 0, 2, 3],
+  };
+  const building = (id: string) => ({
+    type: "importedMesh" as const,
+    id,
+    categoryCode: "12",
+    name: "Gebäude",
+    positions: [10, 0, 0, 20, 0, 0, 20, 6, 0, 10, 6, 0, 10, 0, 8, 20, 0, 8, 20, 6, 8, 10, 6, 8],
+    indices: [0, 1, 2, 0, 2, 3, 4, 6, 5, 4, 7, 6, 0, 1, 5, 0, 5, 4, 1, 2, 6, 1, 6, 5],
+  });
+  const minZ = (id: string) => {
+    const m = st().project.context?.find((c) => c.id === id);
+    if (m?.type !== "importedMesh") throw new Error("kein Netz");
+    return Math.min(...m.positions.filter((_, i) => i % 3 === 2));
+  };
+
+  it("geo-building3d wird versetzt, ein anderer importierter Körper nicht; Undo stellt alles zurück", () => {
+    st().addContextObjects([terrain]);
+    st().clearHistory();
+    st().addContextObjects([building("geo-building3d-x"), building("ifc-koerper")]);
+    expect(minZ("geo-building3d-x")).toBeCloseTo(1, 9);
+    expect(minZ("ifc-koerper")).toBe(0);
+    expect(st().undoDepth).toBe(1);
+    // Knopf "Aufs Gelände setzen" für das andere Netz.
+    expect(st().groundContextObjects(["ifc-koerper"])).toBe(true);
+    expect(minZ("ifc-koerper")).toBeCloseTo(1, 9);
+    expect(st().groundContextObjects(["ifc-koerper"])).toBe(false);
+    st().undo();
+    st().undo();
+    expect(st().project.context?.some((c) => c.id.startsWith("geo-building3d"))).toBe(false);
+  });
+});

@@ -35,7 +35,7 @@ pub fn ops(root: &Map<String, Value>, p: &Project, text: &str) -> Result<Vec<Op>
     if let Some(ops) = crate::cmd_create::ops(root, p, &v) {
         return Ok(ops);
     }
-    if let Some(ops) = crate::cmd_context::ops(root, &v) {
+    if let Some(ops) = crate::cmd_context::ops(root, p, &v) {
         return Ok(ops);
     }
     Ok(match cmd {

@@ -10,7 +10,7 @@
 
 import { generateTerrainFromContours, resmoothGridTerrain, type TerrainOptions } from "../model/terrain";
 import type { ContextObject, Drawing2D, Project, Vec2 } from "../model/types";
-import type { ImportedLine } from "../io/geoContext";
+import { isGeoBuildingMesh, type ImportedLine } from "../io/geoContext";
 import { documentFor } from "../core/document";
 import { transformOps } from "../tools/transform";
 import { addItems, fieldOps, patchItem, removeItems } from "../core/opsBuild";
@@ -28,6 +28,11 @@ export interface SiteSlice {
    * Umrisse des Standort-Imports) als einzelne 2D-Zeichnungen auf der aktiven Ebene; ein Undo-Schritt.
    */
   addContextObjects: (objs: ContextObject[], lines?: ImportedLine[]) => void;
+  /**
+   * [227] Setzt Kontextgebäude (importierte Netze) aufs Gelände: jedes Gebäude des Netzes auf den tiefsten Geländepunkt
+   * unter seinem Grundriss (Kern `context_ground.rs`). true = mindestens ein Netz wurde versetzt.
+   */
+  groundContextObjects: (ids: string[]) => boolean;
   /** Entfernt ein Kontext-Objekt per ID (No-op bei unbekannter ID). */
   removeContextObject: (id: string) => void;
   /** Entfernt mehrere Kontext-Objekte in EINEM Schritt (z. B. eine ganze
@@ -83,6 +88,7 @@ type SiteSliceDeps = {
   project: Project;
   activeLevelId: string;
   applyChange: (ops: readonly CoreOp[] | ((p: Project) => readonly CoreOp[]), coalesceKey?: string) => void;
+  groupChanges: (fn: () => void, key?: string) => void;
 };
 
 export function createSiteSlice(
@@ -103,17 +109,29 @@ export function createSiteSlice(
     const codes = [...added, ...drawings]
       .map((o) => o.categoryCode)
       .filter((c): c is string => !!c);
-    get().applyChange((p) => [
-      ...addItems("context", added),
-      ...addItems("drawings2d", drawings),
-      ...fieldOps(p, "layers", ensureContextCategories(p.layers, codes)),
-    ]);
+    // [227] Importierte Gebäude (Kataster/swisstopo/OSM) stehen auf dem Gelände, nicht auf z = 0 — im selben Undo-Schritt.
+    const buildings = added.filter(isGeoBuildingMesh).map((o) => o.id);
+    get().groupChanges(() => {
+      get().applyChange((p) => [
+        ...addItems("context", added),
+        ...addItems("drawings2d", drawings),
+        ...fieldOps(p, "layers", ensureContextCategories(p.layers, codes)),
+      ]);
+      if (buildings.length) get().groundContextObjects(buildings);
+    });
   };
 
   return {
     addContextObject: (obj) => addToContext([obj]),
 
     addContextObjects: (objs, lines) => addToContext(objs, lines),
+
+    groundContextObjects: (ids) => {
+      const ops = documentFor(get().project).cmdOps({ cmd: "contextToTerrain", ids });
+      if (ops.length === 0) return false;
+      get().applyChange(ops);
+      return true;
+    },
 
     removeContextObject: (id) => get().applyChange((p) => removeItems(p, "context", [id])),
 

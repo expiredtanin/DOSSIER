@@ -20,6 +20,8 @@ nach z-oben zurück, `scene.json` braucht keine Umrechnung.
 
 - `model`, `output`: Dateinamen (`model.glb`, `render.png`).
 - `resolution {width, height}` in Pixeln; `samples` je Pixel; `denoise` (bool); `device` `"auto"` oder `"cpu"`.
+- `backfilled` (bool, nur Hinweis): das Gelände im `model.glb` ist das gewachsene, ohne Baugruben (hinterfüllt, bis an die Fassade geschlossen);
+  false = mit Aushub wie im 3D. Der Leser setzt dazu nichts um, die Geometrie steckt im GLB.
 - `camera`: entweder `{preset}` (`iso`, `perspective`, `front`, `back`, `left`, `right`, `side`, `top`; der Leser
   rahmt das Gebäude ein, ohne Gelände/Kontext) oder explizit `{kind: "perspective"|"orthogonal", position[3],
   direction[3] (normiert), up[3], fovDeg (vertikal), orthoHeight (volle Sichthöhe, m)}`.

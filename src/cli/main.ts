@@ -37,7 +37,7 @@
 //                                                  [154] Bauteile aus 2D-Zeichnung erkennen (Wände, Öffnungen, Räume
 //                                                  ins Geschoss); Bericht als JSON. Z. B. convert plan.dxf p.obp --cmd "erkennen --out e.obp"
 //   dossier-cli <projekt.obp> render --out bild.png [--view iso|perspective|front|back|left|right|top] [--when 2026-06-21T10:00Z]
-//                                                  [--camera Name|id] [--samples 128] [--size 1920x1080] [--cpu] [--blender pfad] [--keep]   [211] Rendering mit Blender/Cycles
+//                                                  [--camera Name|id] [--samples 128] [--size 1920x1080] [--cpu] [--excavation] [--blender pfad] [--keep]   [211] [227] (--excavation: Baugrube im Bild lassen) Rendering mit Blender/Cycles
 //   dossier-cli <projekt.obp> model3d [--explode 3] [--hide …] [--grey …] [--out modell.json]   3D-Modell fürs Headless-Rendern (render_png)
 //   dossier-cli pointcloud-info <datei.las|laz|e57|ply|xyz|pts> [--voxel 0.05] [--max 2000000]
 //                                                  Punktwolke lesen ([B9]) und Bericht als JSON (ohne Projekt)
@@ -784,7 +784,7 @@ async function runRender(project: Project, args: Args): Promise<number> {
   await loadFileio();
   const pkg = await buildRenderPackage(
     project,
-    { width: Number(m[1]), height: Number(m[2]), samples, when, camera: choice ? choice.camera : { preset: view }, device: args.flags.has("cpu") ? "cpu" : "auto" },
+    { width: Number(m[1]), height: Number(m[2]), samples, when, camera: choice ? choice.camera : { preset: view }, device: args.flags.has("cpu") ? "cpu" : "auto", backfilled: !args.flags.has("excavation") },
     localTextureLoader(),
   );
   if (pkg.missingTextures.length > 0) process.stderr.write(`Hinweis: ${pkg.missingTextures.length} Bildkarten nicht lesbar (Material erscheint einfarbig)\n`);

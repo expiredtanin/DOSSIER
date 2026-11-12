@@ -136,6 +136,9 @@ function MeshPointFields({ obj }: { obj: Extract<ContextObject, { positions: num
 function HeightFields({ obj }: { obj: ContextObject }) {
   const offsetContextHeight = useStore((s) => s.offsetContextHeight);
   const setContourHeight = useStore((s) => s.setContourHeight);
+  const groundContextObjects = useStore((s) => s.groundContextObjects);
+  const hasTerrain = useStore((s) => s.project.context?.some((c) => c.type === "terrainMesh") ?? false);
+  const notify = useStore((s) => s.notify);
   const [dz, setDz] = useState("");
   if (obj.type === "image") return null;
   const apply = () => {
@@ -157,6 +160,20 @@ function HeightFields({ obj }: { obj: ContextObject }) {
           onBlur={apply}
         />
       </label>
+      {obj.type === "importedMesh" && (
+        // [227] Kontextgebäude auf den tiefsten Geländepunkt unter dem Grundriss setzen.
+        <button
+          type="button"
+          data-testid="context-ground"
+          disabled={!hasTerrain}
+          title={hasTerrain ? t("site.ground.hint") : t("site.ground.noTerrain")}
+          onClick={() => {
+            if (!groundContextObjects([obj.id])) notify(t("site.ground.nothing"), "info");
+          }}
+        >
+          {t("site.ground")}
+        </button>
+      )}
       {(obj.type === "terrainMesh" || obj.type === "importedMesh") && <MeshPointFields obj={obj} />}
       {obj.type === "contourSet" && (
         <div className="site-prop" data-testid="contour-heights" style={{ display: "block", maxHeight: 180, overflowY: "auto" }}>

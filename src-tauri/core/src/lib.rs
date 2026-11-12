@@ -130,6 +130,7 @@ pub mod import_ifc;
 pub mod cmd_paste;
 pub mod cmd_split;
 pub mod cmd_context;
+pub mod context_ground;
 pub mod cmd_wall_edit;
 pub mod snap_model;
 pub mod solid_specs;

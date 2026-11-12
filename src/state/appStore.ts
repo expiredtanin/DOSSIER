@@ -56,6 +56,7 @@ const store = createStore<RootState>((api) => ({
         project: ProjectSlice["project"];
         activeLevelId: string;
         applyChange: ProjectSlice["applyChange"];
+        groupChanges: HistorySlice["groupChanges"];
       }
     >,
   ),

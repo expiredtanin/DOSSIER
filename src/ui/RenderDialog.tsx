@@ -56,6 +56,8 @@ export const RenderDialogHost = memo(function RenderDialogHost() {
   // [213] "live" = aktuelle 3D-Ansicht, sonst die Id einer gespeicherten Kamera.
   const [cameraKey, setCameraKey] = useState("live");
   const [cameras, setCameras] = useState<RenderCameraChoice[]>([]);
+  // [227] Baugrube im Bild ausblenden (Gelände hinterfüllt); das 3D im Modell bleibt wie es ist.
+  const [backfilled, setBackfilled] = useState(true);
   const [blenderPath, setPath] = useState("");
   // Letzte Ausgabezeile von Blender (zeigt z. B. das erstmalige Übersetzen der Metal-Kernel, das Minuten dauern kann).
   const [lastLine, setLastLine] = useState("");
@@ -142,7 +144,7 @@ export const RenderDialogHost = memo(function RenderDialogHost() {
     // Sonnenzeit der Kamera übernehmen (änderbar).
     if (choice.sunWhen) setWhen(toInputValue(choice.sunWhen));
   };
-  const request = () => ({ width: dims.width, height: dims.height, samples, when: date!, camera });
+  const request = () => ({ width: dims.width, height: dims.height, samples, when: date!, camera, backfilled });
 
   const start = async () => {
     if (!canStart) return;
@@ -302,6 +304,12 @@ export const RenderDialogHost = memo(function RenderDialogHost() {
                     {sun.elevation < 1 && <div>{t("render.sun.night")}</div>}
                   </div>
                 )}
+              </section>
+              <section className="imp-section">
+                <label>
+                  <input type="checkbox" data-testid="render-backfilled" checked={backfilled} disabled={busy} onChange={(e) => setBackfilled(e.target.checked)} /> {t("render.backfilled")}
+                </label>
+                <div className="imp-note">{t("render.backfilled.hint")}</div>
               </section>
               {!browserOnly && (
                 <section className="imp-section">

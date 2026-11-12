@@ -19,11 +19,13 @@ export interface MeshOptions {
   openingParts?: boolean;
   /** Gelände und importierte Kontext-Meshes (IFC/DXF) mitnehmen (Standard: ja). */
   context?: boolean;
+  /** [227] Baugruben weglassen: Gelände ohne Aushub (hinterfüllt, bis an die Fassade geschlossen). Standard: nein. */
+  backfilled?: boolean;
 }
 
 /** Ruft eine Rust-Bindung; leeres Ergebnis (kaputter Puffer) wird zum Fehler mit dem Grund. */
 function write<T extends string | Uint8Array>(project: Project, opts: MeshOptions, byLevel: boolean, run: (m: ReturnType<typeof fileio>, buf: Float64Array, strings: string) => T): T {
-  const args = [(opts.openingParts ?? true) ? 1 : 0, (opts.context ?? true) ? 1 : 0, byLevel ? 1 : 0];
+  const args = [(opts.openingParts ?? true) ? 1 : 0, (opts.context ?? true) ? 1 : 0, byLevel ? 1 : 0, opts.backfilled ? 1 : 0];
   const [buf, strings] = decodeExportFlat(documentFor(project).queryBin("meshExportData", args));
   const m = fileio();
   const out = run(m, buf, strings);

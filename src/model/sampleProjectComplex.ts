@@ -519,7 +519,7 @@ const terrainZ = (x: number, y: number) => -1.8 + 1.5 * Math.tanh((y - 4 - 0.8 *
 /** Höhenlinie z als Polylinie y(x) über x = −16 … 32. */
 function contourAt(z: number): Vec2[] {
   const pts: Vec2[] = [];
-  for (let x = -16; x <= 32; x += 2) pts.push(P(x, r3(4 + 0.8 * Math.sin(x / 9) + 8 * Math.atanh((z + 1.8) / 1.5))));
+  for (let x = -44; x <= 54; x += 2) pts.push(P(x, r3(4 + 0.8 * Math.sin(x / 9) + 8 * Math.atanh((z + 1.8) / 1.5))));
   return pts;
 }
 const CONTOUR_Z = [-3.25, -3.2, -2.95, -2.7, -2.45, -2.2, -1.95, -1.7, -1.45, -1.2, -0.95, -0.7, -0.45, -0.35];
@@ -912,6 +912,8 @@ export function buildComplexSampleProject(): Project {
 
   // Gelände aus den Höhenlinien (Kern: geglättetes TIN mit Bruchkanten).
   p = runCmd(p, "ug", "terrain", {}).project;
+  // [227] Nachbargebäude stehen auf dem Gelände (tiefster Punkt unter dem Grundriss), nicht auf z = 0.
+  p = runCmd(p, "ug", "contextToTerrain", { ids: ["nachbarn"] }).project;
 
   // Freie Körper im Garten: Loft (Pflanzgefäss, quadratisch → gedreht) und Rotationskörper (Sitzrolle).
   const profiles: Drawing2D[] = [
