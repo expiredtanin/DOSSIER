@@ -379,6 +379,13 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   (`dim_auto_offsets_avoiding`); Ansichtsmarker rückt von der Bemassung weg (`context::view_marker`). Test
   `plan/autodim_text_tests.rs` (Zahlen-Kästen beider Musterhäuser 1:200/100/50, Fixture `autodim_musterhaus_komplex.json`).
   Offen dazu: Griffe (`grips.rs`) und DXF-Export kennen den Zeichen-Versatz nicht (wie schon die Böschungs-Verschiebung [157]).
+  12.11. (Achsen): Masszahlen der Aussenbemassung stehen nicht mehr auf Achslinien und Achsblasen (komplex UG Ost „19.24"/„4.37"
+  auf Achse B) und nicht neben dem Pfeil-Schenkel einer Schnittlinie („19.24" neben „B-B") — dieselben Streifen wie bei den
+  Schnittmarken (`drawings::grid_strips`/`axis_cross_strips` neben `section_mark_strips`, Mechanik `dim_auto_offsets_marks`);
+  eine Achse mit Blase gilt bis hinter alle Ketten (die Blase rückt vor sie, [157]; die genaue Blasenlage hängt von den Massen ab,
+  daher nicht verwendet). Test `achsstreifen_auf_der_masslinie`, `schnittpfeil_neben_der_masslinie`; `autodim_text_tests` prüft jetzt
+  auch Achsen/Blasen (komplex mit Raster, 1:100/1:50). Offen: bei 1:200 (eng) und bei Bogenmassen (kein Ausweichen) liegen
+  einzelne Zahlen noch auf Achsen (komplex UG/EG/OG, 5 Fälle); einfaches Musterhaus hat kein Raster.
   12.11. (Forts.): (1) Raumstempel schrumpfte auf 2 mm, sobald Schnittlinie, Achse, Gaube und Kote den Raum querten (komplex DG
   „Schlafen"): Anderer Planinhalt verkleinert die Schrift jetzt nur noch bis 80 % der Grundschrift (`ROOM_STAMP_KEEP`,
   `fit_room_stamp`); 2 mm nur noch, wenn der Raum auch das nicht fasst. Findet sich keine freie Lage, steht der Stempel an der
