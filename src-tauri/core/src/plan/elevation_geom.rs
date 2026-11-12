@@ -753,7 +753,13 @@ fn roof_faces(f: &Frame, planes: &[Vec<V3>], gables: &[Vec<V3>], src: usize, out
     cz /= cnf;
     for poly in planes {
         let mut n = newell(poly);
-        if n[1] < 0.0 {
+        if n[1].abs() < 1e-9 {
+            // [199] Senkrechte Fläche (Gaubenwange, Stirn): "nach oben" sagt nichts, das Vorzeichen der Höhen-
+            // komponente ist Rundungsrauschen. Die Fläche kommt aus den zugewandten Dreiecken: dem Betrachter zu.
+            if f.n[0] * n[0] + f.n[1] * n[1] + f.n[2] * n[2] > 0.0 {
+                n = neg(n);
+            }
+        } else if n[1] < 0.0 {
             n = neg(n);
         }
         if let Some(p) = project_face(f, poly, n, 2, src) {
