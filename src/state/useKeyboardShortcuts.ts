@@ -34,6 +34,7 @@ import type { ElementClipboard, ElementSelectionIds, PastedIds } from "../editor
 import { parseClipboardText, serializeClipboardText } from "../editors/elementClipboardSerialize";
 import { matchesShortcut, type ShortcutId, type ShortcutOverrides } from "./keyboardShortcuts";
 import { isolateSelectionLayerCodes, showAllLayerCodes } from "./layerIsolate";
+import { toggleTraceAction } from "./traceActions";
 import { joinCurrentSelection } from "./selectionJoin";
 import { hideSelectionIn3d, showSelectionIn3d, stepActiveFloor } from "./tabNavigation";
 
@@ -605,7 +606,9 @@ export function useViewNavigationShortcuts(overrides: ShortcutOverrides): void {
                 ? isolateSelectionLayerCodes
                 : matchesShortcut(e, "showAllLayers", overrides)
                   ? showAllLayerCodes
-                  : null;
+                  : matchesShortcut(e, "toggleTrace", overrides)
+                    ? toggleTraceAction
+                    : null;
       if (!fn) return;
       e.preventDefault();
       fn();

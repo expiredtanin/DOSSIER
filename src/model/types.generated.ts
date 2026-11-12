@@ -1186,13 +1186,6 @@ export type DrawingLevel = {
    */
   showTerrain?: boolean;
   /**
-   * Grundriss-Unterlage (nur Schnitt/Ansicht): ID eines Geschosses, dessen
-   * Grundriss AUSGERICHTET unter dem Schnitt/der Ansicht gezeigt wird (Schnitt-
-   * linie waagrecht, Blickrichtung nach oben, s. Kern `plan/underlay.rs`).
-   * Fehlt ⇒ keine Unterlage.
-   */
-  planUnderlayId?: string;
-  /**
    * Automatische Höhenkoten (nur Schnitt/Ansicht): je Geschoss OK fertig Boden
    * + oberste Kante, links neben der Zeichnung (`plan/levelMarkers.ts`).
    * Fehlt ⇒ an; `false` ⇒ aus.
@@ -3761,6 +3754,28 @@ export type TextStylePreset = {
 };
 
 /**
+ * [205] Pausfolie (Archicad „Pausfolie & Referenz"): eine andere Ansicht gedämpft hinter (oder über) der
+ * aktiven — nur Anzeige, nie anwählbar, nie im Druck/Export. Lebt je Reiter (UI-Zustand `uiState.viewTabs`)
+ * und im Ausschnitt; das Modell ändert sie nie. Gezeichnet über die Kern-Abfrage `tracePlan` (`plan/trace.rs`).
+ */
+export type TraceReference = {
+  /** Quell-Ebene (`DrawingLevel.id`: Geschoss, Schnitt, Ansicht, Zeichnung, Deckenspiegel). */
+  sourceId: string;
+  /** Eingeschaltet (das Kürzel schaltet nur dies, die Einstellungen bleiben). */
+  show: boolean;
+  /** Farbe `#rrggbb`; fehlt = Grau. */
+  color?: string;
+  /** Deckkraft 0…1. */
+  opacity: number;
+  /** Verschiebung der Pause in Metern (nach der Drehung). */
+  offset: Vec2;
+  /** Drehung der Pause in Grad (CCW um den Ursprung). */
+  rotation: number;
+  /** Über statt unter der aktiven Ansicht. */
+  above?: boolean;
+};
+
+/**
  * Ein Baum ([149]) — eigenes Objekt der Umgebung mit Stamm, Krone und Höhe. Grundriss/Situation
  * (Kronenkreis mit Planzeichen, Stamm), Schnitt/Ansicht (Silhouette nach Form), 3D (Stamm-Zylinder +
  * Krone), Schatten (Sonnenstudie), IFC (IfcGeographicElement). Fuss auf dem Gelände an `position`
@@ -3950,6 +3965,8 @@ export type ViewSnapshot = {
    * Fehlt ⇒ der Detailgrad allein bestimmt die Darstellung (heutiges Verhalten).
    */
   modelViewOptionId?: string;
+  /** [205] Pausfolie des Ausschnitts (nur Anzeige, nie im Druck). */
+  trace?: TraceReference;
 };
 
 /**

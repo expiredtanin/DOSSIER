@@ -1002,6 +1002,8 @@ export default function App() {
         lineModeEnabled={!has3dView || viewType === "grundriss"}
         snap={snap}
         onSnapChange={setSnap}
+        traceEnabled={viewType === "grundriss" && !activeLevel.layoutId}
+        onRunCommand={onRunCommand}
       />
 
       {/* Dialoge und Overlays (Ressourcen, Import/Export, Einstellungen, Projektdatei …) → ui/AppDialogs.tsx. */}

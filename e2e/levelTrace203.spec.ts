@@ -1,6 +1,6 @@
 // [203] Musterhaus komplex, Ausschnitt „EG 1:100“: der Geschoss-Grundriss zeigt nur sein Geschoss (wie Archicad) —
 // keine Raumstempel anderer Geschosse (U./O./D.) und das Achsraster nur einmal. Andere Geschosse erscheinen nur als
-// bewusst eingeschaltete Pausfolie (Zeichnungsebenen-Modus „Andere grau“), dann gedimmt.
+// bewusst gewählte Pausfolie ([205]), nie über den Zeichnungsebenen-Modus.
 import type { Page } from "@playwright/test";
 import { discardIfAsked, expect, fileMenu, openTab, showSnapshot, test } from "./app";
 import type {} from "../src/state/testHooks"; // Typ von window.__dossierTest
@@ -33,15 +33,14 @@ test("Ausschnitt EG 1:100 zeigt nur das Erdgeschoss; andere Geschosse nur als gr
   // Achsraster einmal: Achse „A“ hat zwei Blasen (beide Enden), nicht je Geschoss weitere.
   expect(s.axis).toBe(2);
 
-  // Pausfolie bewusst einschalten: Modus „Andere grau“ — dann erscheinen die übrigen sichtbaren Geschosse gedimmt.
+  // [205] Auch der Modus „Andere grau“ legt keine anderen Geschosse mehr darunter (er dimmt nur im 3D); ein anderes
+  // Geschoss kommt nur als bewusst gewählte Pausfolie (e2e `trace205`).
   await openTab(page, "Zeichnungsebenen");
   await page.locator(".panel-vis .display-mode").first().click();
   await page.getByRole("option", { name: "Andere grau", exact: true }).click();
-  await expect.poll(async () => (await stamps(page)).floors.og?.n ?? 0).toBeGreaterThan(0);
   await page.waitForTimeout(1500);
-  if (shot) await page.screenshot({ path: `${shot}/eg-pausfolie-grau.png` });
   const g = await stamps(page);
+  expect(Object.keys(g.floors)).toEqual(["eg"]);
   expect(g.floors.eg.greyed).toBe(0);
-  for (const f of ["ug", "og", "dg"]) expect(g.floors[f]?.greyed, f).toBe(g.floors[f]?.n);
   expect(g.axis).toBe(2);
 });

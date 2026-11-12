@@ -157,7 +157,9 @@ function activateOther(stored: ViewTabsState, tab: ViewTab, state: ViewSnapshotS
   return { next: { ...stored, activeId: tab.id }, apply: state };
 }
 
-function openNew(stored: ViewTabsState, state: ViewSnapshotState): TabNav {
+function openNew(stored: ViewTabsState, withTrace: ViewSnapshotState): TabNav {
+  // [205] Die Pausfolie gehört zum Reiter: ein neu geöffneter Reiter (andere Ebene/Art) startet ohne.
+  const { trace: _trace, ...state } = withTrace;
   const id = newTabId();
   const i = stored.tabs.findIndex((t) => t.id === stored.activeId);
   const tabs = [...stored.tabs];

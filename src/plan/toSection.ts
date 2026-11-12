@@ -37,8 +37,7 @@ export function hasLine(level: DrawingLevel): boolean {
  * Schnittlinie trägt. Asynchron geblieben für die Aufrufer; die Körper-Netze rechnet seit [115] der Kern.
  */
 export async function computeSection(project: Project, level: DrawingLevel): Promise<SectionOutput | null> {
-  if (!hasLine(level)) return null;
-  return { project, level, args: Float64Array.of(0, 0, ++sectionKey) };
+  return prepareSection(project, level);
 }
 
 /** Kategorie-Codes, die Schnitt/Ansicht prüfen. */
@@ -107,6 +106,24 @@ export function generateSectionPlan(
     overrideRuleIds?: readonly string[] | null;
   } = {},
 ): Plan {
+  const { project } = output;
+  const { args, text } = sectionPlanQuery(output, mono, opts);
+  // `output` kann von einem älteren Stand stammen (inzwischen geändert): dann rechnet ein eigenes,
+  // kurzlebiges Dokument dieses Stands ([122]).
+  const buf = decodePlanBuf(withDocument(project, (d) => d.queryBin("sectionPlan", args, text)));
+  if (buf.groups.length === 0) return { primitives: [], bounds: { minX: 0, minY: 0, maxX: 1, maxY: 1 } };
+  const b = buf.bounds ?? [0, 0, 1, 1];
+  return lazyPlan(
+    { bounds: { minX: b[0], minY: b[1], maxX: b[2], maxY: b[3] }, lineEnds: lineEndsCode(project) },
+    buf.groups.map(([from, to]) => ({ buf, from, to })),
+  );
+}
+
+/** Optionen von {@link generateSectionPlan}. */
+export type SectionPlanOptions = NonNullable<Parameters<typeof generateSectionPlan>[2]>;
+
+/** Kern-Abfrage `sectionPlan` eines vorbereiteten Schnitts (auch Teil-Abfrage der Pausfolie, [205] `plan/trace.ts`). */
+export function sectionPlanQuery(output: SectionOutput, mono: boolean, opts: SectionPlanOptions): { name: "sectionPlan"; args: Float64Array; text: string } {
   const { project, level } = output;
   const text = JSON.stringify({
     level: levelArg(level),
@@ -120,15 +137,13 @@ export function generateSectionPlan(
   const args = output.args.slice();
   args[0] = mono ? 1 : 0;
   args[1] = opts.openings ? 1 : 0;
-  // `output` kann von einem älteren Stand stammen (inzwischen geändert): dann rechnet ein eigenes,
-  // kurzlebiges Dokument dieses Stands ([122]).
-  const buf = decodePlanBuf(withDocument(project, (d) => d.queryBin("sectionPlan", args, text)));
-  if (buf.groups.length === 0) return { primitives: [], bounds: { minX: 0, minY: 0, maxX: 1, maxY: 1 } };
-  const b = buf.bounds ?? [0, 0, 1, 1];
-  return lazyPlan(
-    { bounds: { minX: b[0], minY: b[1], maxX: b[2], maxY: b[3] }, lineEnds: lineEndsCode(project) },
-    buf.groups.map(([from, to]) => ({ buf, from, to })),
-  );
+  return { name: "sectionPlan" as const, args, text };
+}
+
+/** Vorbereiteter Schnitt, synchron (wie {@link computeSection}); `null` ohne gültige Schnittlinie. */
+export function prepareSection(project: Project, level: DrawingLevel): SectionOutput | null {
+  if (!hasLine(level)) return null;
+  return { project, level, args: Float64Array.of(0, 0, ++sectionKey) };
 }
 
 /**

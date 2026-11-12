@@ -41,7 +41,7 @@ const store = createStore<RootState>((api) => ({
   // notifySlice.ts).
   ...createProjectSlice(
     api as unknown as StoreApi<
-      ProjectSlice & HistorySlice & { activeLevelId: string } & Pick<NotifySlice, "notify">
+      ProjectSlice & HistorySlice & { activeLevelId: string; trace: unknown } & Pick<NotifySlice, "notify">
     >,
   ),
   ...createNotifySlice(api as unknown as StoreApi<NotifySlice>),

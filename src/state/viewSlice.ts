@@ -9,6 +9,7 @@
 
 import { sampleProject } from "../model/sampleProject";
 import type { DetailLevel, RenderMode, View3d, ViewType } from "../model/viewTypes";
+import type { TraceReference } from "../model/types";
 import type { DisplayMode } from "../panels/types";
 import { DEFAULT_MARQUEE_COLOR, DEFAULT_SNAP_COLOR } from "../theme/accents";
 import type { StoreApi } from "./store";
@@ -61,6 +62,8 @@ export interface ViewSlice {
   // Einstellbar im Einstellungs-Fenster; Default = Akzent „Sora" (vorläufig,
   // siehe HANDOVER-Rückfrage „aki").
   snapColor: string;
+  // [205] Pausfolie des aktiven Reiters (UI-Zustand, s. `state/traceRef.ts`); null = keine gewählt.
+  trace: TraceReference | null;
 
   setActiveLevelId: (id: string) => void;
   setViewType: (v: ViewType) => void;
@@ -82,6 +85,7 @@ export interface ViewSlice {
   setModeFor: (id: string | null, mode: DisplayMode) => void;
   setMarqueeColor: (hex: string) => void;
   setSnapColor: (hex: string) => void;
+  setTrace: (t: TraceReference | null) => void;
 }
 
 export function createViewSlice(api: StoreApi<ViewSlice>): ViewSlice {
@@ -106,6 +110,7 @@ export function createViewSlice(api: StoreApi<ViewSlice>): ViewSlice {
     displayModes: {},
     marqueeColor: DEFAULT_MARQUEE_COLOR,
     snapColor: DEFAULT_SNAP_COLOR,
+    trace: null,
 
     setActiveLevelId: (id) =>
       set((s) => ({
@@ -138,5 +143,6 @@ export function createViewSlice(api: StoreApi<ViewSlice>): ViewSlice {
     },
     setMarqueeColor: (hex) => set({ marqueeColor: hex }),
     setSnapColor: (hex) => set({ snapColor: hex }),
+    setTrace: (t) => set({ trace: t }),
   };
 }

@@ -15,6 +15,7 @@ pub mod grid_view;
 pub mod cache;
 pub mod extras;
 pub mod underlay;
+pub mod trace;
 pub mod view_range;
 pub mod stair_symbol;
 pub mod buf;

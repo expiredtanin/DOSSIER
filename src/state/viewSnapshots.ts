@@ -13,7 +13,7 @@
 //
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
-import type { OverrideRule, ViewSnapshot, Vec2 } from "../model/types";
+import type { OverrideRule, TraceReference, ViewSnapshot, Vec2 } from "../model/types";
 import type { DetailLevel, View3d, ViewType } from "../model/viewTypes";
 
 /**
@@ -40,6 +40,8 @@ export interface ViewSnapshotState {
    */
   cameraCenter?: Vec2;
   cameraPxPerMeter?: number;
+  /** [205] Pausfolie des Reiters/Ausschnitts (nur Anzeige); fehlt = keine. */
+  trace?: TraceReference;
 }
 
 /**
@@ -70,6 +72,7 @@ export function captureViewSnapshot(
   if (folder && folder.trim()) snap.folder = folder.trim();
   if (state.cameraCenter) snap.cameraCenter = { ...state.cameraCenter };
   if (state.cameraPxPerMeter !== undefined) snap.cameraPxPerMeter = state.cameraPxPerMeter;
+  if (state.trace) snap.trace = { ...state.trace, offset: { ...state.trace.offset } };
   return snap;
 }
 
@@ -94,6 +97,7 @@ export function readViewSnapshot(snap: ViewSnapshot): ViewSnapshotState {
       : [],
     cameraCenter: snap.cameraCenter ? { ...snap.cameraCenter } : undefined,
     cameraPxPerMeter: snap.cameraPxPerMeter,
+    ...(snap.trace ? { trace: { ...snap.trace, offset: { ...snap.trace.offset } } } : {}),
   };
 }
 

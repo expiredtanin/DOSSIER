@@ -1,4 +1,5 @@
-//! Grundriss-Unterlage in Schnitt/Ansicht (früher `src/plan/planUnderlay.ts`): ein Geschoss-
+//! Grundriss-Unterlage in Schnitt/Ansicht (früher `src/plan/planUnderlay.ts`, seit [205] die Ausrichtung der
+//! Pausfolie „Grundriss hinter Schnitt“, `trace.rs`): ein Geschoss-
 //! Grundriss wird AUSGERICHTET unter die Schnitt-/Ansichtsfläche gelegt — die klassische
 //! Konstruktion „Ansicht über dem Grundriss“. Die Schnittlinie wird waagrecht gedreht, die
 //! Blickrichtung zeigt im Blatt nach OBEN, und die u-Achse stimmt mit der des Schnitts überein
@@ -145,7 +146,7 @@ fn as_reference(pr: Primitive) -> Primitive {
 }
 
 /// Legt die Grundriss-Primitive ausgerichtet unter einen Schnitt / eine Ansicht, deren tiefste Kante
-/// bei `section_min_y` liegt (`planUnderlayPrimitives`): gedimmt, ohne Auswahl-Ids, dazu die
+/// bei `section_min_y` liegt: gedimmt, ohne Auswahl-Ids, dazu die
 /// Schnittlinie. Ohne gültige Linie leer.
 pub fn underlay_primitives(line: Option<[Vec2; 2]>, direction_sign: Option<f64>, plan: impl IntoIterator<Item = Primitive>, section_min_y: f64) -> Vec<Primitive> {
     underlay_for_level(&LevelSpec { line, direction_sign, ..Default::default() }, plan, section_min_y)
@@ -217,7 +218,7 @@ pub fn underlay_for_level(level: &LevelSpec, plan: impl IntoIterator<Item = Prim
 /// Stücken an Stelle ihrer (leeren) Gruppe 7.
 pub fn plan_out_primitives(out: &super::domains::PlanOut) -> Result<Vec<Primitive>, String> {
     use crate::plan::buf::View;
-    let bad = || "planUnderlay: Plan-Puffer unlesbar".to_string();
+    let bad = || "Plan-Puffer unlesbar".to_string();
     let v = View::parse(&out.main).ok_or_else(bad)?;
     let main = v.prims().ok_or_else(bad)?;
     let groups = v.groups().ok_or_else(bad)?;
@@ -226,27 +227,11 @@ pub fn plan_out_primitives(out: &super::domains::PlanOut) -> Result<Vec<Primitiv
     let mut it = main.into_iter();
     prims.extend(it.by_ref().take(at));
     for (_, bytes) in &out.chunks {
-        let bytes = bytes.as_ref().ok_or_else(|| "planUnderlay: Zeichnungs-Stück fehlt".to_string())?;
+        let bytes = bytes.as_ref().ok_or_else(|| "Zeichnungs-Stück fehlt".to_string())?;
         prims.extend(View::parse(bytes).and_then(|c| c.prims()).ok_or_else(bad)?);
     }
     prims.extend(it);
     Ok(prims)
-}
-
-/// Argumente aus dem Abfrage-Text: die `planDomains`-Argumente des Geschosses plus `level` (Schnitt/
-/// Ansicht) und `minY` (tiefste Kante des Schnitts).
-pub fn parse_args(text: &str) -> Result<(super::section::LevelSpec, f64), String> {
-    let v: serde_json::Value = serde_json::from_str(text).map_err(|e| format!("planUnderlay: {e}"))?;
-    let level = super::section::LevelSpec::from_json(v.get("level").unwrap_or(&serde_json::Value::Null));
-    let min_y = v.get("minY").and_then(|x| x.as_f64()).ok_or("planUnderlay: minY fehlt")?;
-    Ok((level, min_y))
-}
-
-/// Plan-Puffer (eine Gruppe) der Unterlage.
-pub fn underlay_buf(prims: &[Primitive]) -> Vec<u8> {
-    let mut w = crate::plan::buf::Writer::new(false);
-    w.group(prims);
-    w.finish()
 }
 
 #[cfg(test)]
@@ -259,25 +244,6 @@ mod tests {
 
     fn line(a: Vec2, b: Vec2) -> Primitive {
         Primitive::Line { a, b, cls: "t".into(), weight_mm: 0.25, dash: None, zigzag: None, motif: None, color: None, drawing_id: Some("d".into()), opening_id: None, stair_id: None, greyed: None, opacity: None }
-    }
-
-    /// Abfrage auf dem Dokument (Plan-Caches, Zeichnungs-Stücke) == ohne Cache.
-    #[test]
-    fn abfrage_mit_und_ohne_cache_gleich() {
-        let text = include_str!("../../tests/fixtures/sample_project.json");
-        let p: crate::model::Project = serde_json::from_str(text).unwrap();
-        let mut d = crate::document::Document::from_json(text).unwrap();
-        let sec = p.drawing_levels.iter().find(|l| l.line_points.is_some()).unwrap();
-        for floor in p.drawing_levels.iter().filter(|l| l.kind == crate::model::DrawingLevelKind::Floor) {
-            let show: Vec<&str> = p.layers.iter().map(|l| l.code.as_str()).collect();
-            let args = serde_json::json!({ "floor": floor.id, "show": show, "scale": 100, "level": serde_json::to_value(sec).unwrap(), "minY": -0.25 }).to_string();
-            let plain = crate::queries::run_bin(&p, "planUnderlay", &[1.0], &args).unwrap();
-            for _ in 0..2 {
-                assert_eq!(crate::queries::run_bin_doc(&mut d, "planUnderlay", &[1.0], &args).unwrap(), plain);
-            }
-            let n = crate::plan::buf::View::parse(&plain).unwrap().len();
-            assert!(n > 5, "{n}");
-        }
     }
 
     #[test]

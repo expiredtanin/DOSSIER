@@ -176,8 +176,9 @@ export {
 
 export {
   crossKindOverlayAllowed,
-  planUnderlayPrimitives,
 } from "../plan/generatePlan";
+// [205] Pausfolie (Kern `plan/trace.rs`).
+export { defaultTrace, tracePlan, traceSourceAllowed, withTrace, type TraceContext } from "../plan/trace";
 
 export {
   type Bounds,

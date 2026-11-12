@@ -1,6 +1,6 @@
 // [203] Geschoss-Grundriss wie Archicad: zeigt nur sein Geschoss. Andere Geschosse erscheinen nur als bewusst
-// eingeschaltete Pausfolie (Zeichnungsebenen-Modus „Andere grau“ bzw. „Andere grau & gesperrt“), dann gedimmt;
-// das Achsraster (in allen Geschossen gezeigt) steht nur einmal im Plan.
+// gewählte Pausfolie ([205], je Reiter, `plan/trace.ts`), nie über Auge/Darstellungsmodus; das Achsraster
+// (in allen Geschossen gezeigt) steht nur einmal im Plan.
 import { describe, expect, it } from "vitest";
 import { buildComplexSampleProject } from "../model/sampleProjectComplex";
 import { collectVisibleCodes } from "../model/layers";
@@ -31,15 +31,11 @@ describe("[203] Geschoss-Grundriss zeigt nur sein Geschoss", () => {
     }
   });
 
-  it("Pausfolie nur bewusst („Andere grau“): andere Geschosse gedimmt, Raster weiter nur einmal", () => {
+  it("[205] auch „Andere grau“ legt keine Geschosse mehr darunter — das tut nur die Pausfolie (`trace.test.ts`)", () => {
     for (const mode of ["grey", "grey_locked"] as DisplayMode[]) {
       const { stamps, axisA } = planFor(mode);
-      const own = stamps.filter((s) => s.floor === "eg");
-      const others = stamps.filter((s) => s.floor !== "eg");
-      expect(own.length).toBeGreaterThan(3);
-      expect(own.every((s) => !s.greyed)).toBe(true);
-      expect(others.length, mode).toBeGreaterThan(0);
-      expect(others.every((s) => s.greyed), mode).toBe(true);
+      expect(stamps.length).toBeGreaterThan(3);
+      expect(stamps.every((s) => s.floor === "eg" && !s.greyed), mode).toBe(true);
       expect(axisA, mode).toBe(2);
     }
   });

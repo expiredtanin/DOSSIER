@@ -75,6 +75,7 @@ import { georefCommand } from "./cmds/georef";
 import { blockCommand } from "./cmds/block";
 import { defblockCommand } from "./cmds/defblock";
 import { presentationCommand } from "./cmds/presentation";
+import { traceMoveCommand, traceRotateCommand } from "./cmds/tracemove";
 
 /** Alle bekannten Befehle, Schlüssel = Befehlsname (lowercase). */
 export const COMMANDS: Record<string, Command> = {
@@ -157,6 +158,8 @@ export const COMMANDS: Record<string, Command> = {
   georef: georefCommand,
   block: blockCommand,
   defblock: defblockCommand,
+  tracemove: traceMoveCommand,
+  tracerotate: traceRotateCommand,
 };
 
 /**

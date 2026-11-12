@@ -35,6 +35,18 @@ export interface ElevationOptions {
  */
 export function generateElevationPlan(project: Project, level: DrawingLevel, opts: ElevationOptions = {}): Plan | null {
   if (!hasLine(level)) return null;
+  const q = elevationPlanQuery(project, level, opts);
+  const buf = decodePlanBuf(documentFor(project).queryBin(q.name, q.args, q.text));
+  if (buf.groups.length === 0) return null;
+  const b = buf.bounds ?? [0, 0, 1, 1];
+  return lazyPlan(
+    { bounds: { minX: b[0], minY: b[1], maxX: b[2], maxY: b[3] }, lineEnds: lineEndsCode(project) },
+    buf.groups.map(([from, to]) => ({ buf, from, to })),
+  );
+}
+
+/** Kern-Abfrage `elevationPlan` einer Ebene (auch Teil-Abfrage der Pausfolie, [205] `plan/trace.ts`). */
+export function elevationPlanQuery(project: Project, level: DrawingLevel, opts: ElevationOptions = {}): { name: "elevationPlan"; args: number[]; text: string } {
   // Schatten: 1 an, 0 aus, 2 = nicht gesetzt (der Kern nimmt die Modelldarstellung der Ebene, sonst aus).
   const shadows = opts.shadows ?? level.shadows;
   const text = JSON.stringify({
@@ -42,11 +54,5 @@ export function generateElevationPlan(project: Project, level: DrawingLevel, opt
     ...(opts.overrideRuleIds ? { rules: [...opts.overrideRuleIds] } : {}),
     ...visibilityArgs(project, opts.visibleCodes, opts.categoryDisplay),
   });
-  const buf = decodePlanBuf(documentFor(project).queryBin("elevationPlan", [opts.mono ? 1 : 0, shadows === undefined || shadows === null ? 2 : shadows ? 1 : 0, opts.scaleDenominator ?? 100], text));
-  if (buf.groups.length === 0) return null;
-  const b = buf.bounds ?? [0, 0, 1, 1];
-  return lazyPlan(
-    { bounds: { minX: b[0], minY: b[1], maxX: b[2], maxY: b[3] }, lineEnds: lineEndsCode(project) },
-    buf.groups.map(([from, to]) => ({ buf, from, to })),
-  );
+  return { name: "elevationPlan" as const, args: [opts.mono ? 1 : 0, shadows === undefined || shadows === null ? 2 : shadows ? 1 : 0, opts.scaleDenominator ?? 100], text };
 }

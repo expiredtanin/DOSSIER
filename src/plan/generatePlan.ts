@@ -19,7 +19,6 @@ import type {
   ContextImage,
   ContextObject,
   Drawing2D,
-  DrawingLevel,
   DrawingLevelKind,
   Project,
   Vec2,
@@ -316,11 +315,11 @@ export function generatePlan(
  *
  * [203] Geschosse wie Archicad: ein Geschoss-Grundriss zeigt nur sein Geschoss.
  * Das Auge eines Geschosses steuert das 3D (alle Geschosse sichtbar ist dort der
- * Normalfall) und überlagert im Grundriss NICHT; andere Geschosse erscheinen nur
- * als bewusst eingeschaltete Pausfolie, also wenn der Modus sie GEDIMMT zeigt
- * („Andere grau", „Andere grau & gesperrt"). Freie Zeichnungsebenen (`drawing`)
+ * Normalfall) und überlagert im Grundriss NICHT, auch nicht gedimmt: ein anderes
+ * Geschoss erscheint nur als bewusst gewählte Pausfolie ([205], `plan/trace.ts`,
+ * je Reiter, mit Farbe/Deckkraft/Verschieben). Freie Zeichnungsebenen (`drawing`)
  * überlagern wie bisher je Modus (Vectorworks-artige Ebenen). Achsraster, die
- * im aktiven Geschoss stehen, fehlen in den überlagerten Ebenen (`traceOf`).
+ * in der aktiven Ebene stehen, fehlen in den überlagerten Ebenen (`traceOf`).
  */
 /**
  * Gedimmte Variante eines Primitivs, pro Quell-Objekt EINMAL erzeugt. Ohne den
@@ -378,8 +377,9 @@ export function generateVisibleLevelsPlan(
   for (const l of siblings) {
     const d = levelDisplay(l.id);
     if (!d.render) continue;
-    // [203] Anderes Geschoss nur als gedimmte Pausfolie, nie farbig darunter (Auge an = 3D).
-    if (l.kind === "floor" && !d.greyed) continue;
+    // [203]/[205] Andere Geschosse nie über Auge/Modus (Auge an = 3D, „Andere grau" dimmt dort): ein anderes
+    // Geschoss kommt nur als bewusst gewählte Pausfolie dazu (`plan/trace.ts`).
+    if (l.kind === "floor") continue;
     const p = generatePlan(
       project,
       l.id,
@@ -473,7 +473,7 @@ registerCoreRestore(() => chunkStores.clear());
 
 const DETAIL_CODE: Record<DetailLevel, number> = { grob: 0, mittel: 1, fein: 2 };
 
-/** Argumente der Kern-Abfrage `planDomains` (auch `planUnderlay`). */
+/** Argumente der Kern-Abfrage `planDomains` (auch Teil-Abfrage der Pausfolie `tracePlan`). */
 function planDomainsArgs(
   floorId: string,
   visibleCodes: Set<string>,
@@ -505,45 +505,32 @@ function planDomainsArgs(
 }
 
 /**
- * Grundriss-Unterlage in Schnitt/Ansicht aus dem Kern (`plan/underlay.rs`, früher `planUnderlay.ts`):
- * der Grundriss des Geschosses `floorId` (wie `generatePlan` ohne projektglobale Zutaten, aus den
- * Plan-Caches) AUSGERICHTET unter die Schnitt-/Ansichtsfläche gelegt, deren tiefste Kante bei
- * `sectionMinY` liegt — Schnittlinie waagrecht, Blickrichtung im Blatt nach oben, u-Achse wie im
- * Schnitt. Gedimmt, ohne Auswahl-Ids (fremde Projektion), plus die Schnittlinie (strichpunktiert).
+ * Kern-Abfrage `planDomains` des Grundrisses der Ebene `floorId` ohne projektglobale Zutaten (Teil-Abfrage der
+ * Pausfolie, [205] `plan/trace.ts`); `traceOf` lässt Achsraster weg, die auch in dieser Ebene stehen.
  */
-export function planUnderlayPrimitives(
-  project: Project,
-  level: DrawingLevel,
+export function planDomainsQuery(
   floorId: string,
-  sectionMinY: number,
   visibleCodes: Set<string>,
-  categoryDisplay: CategoryDisplayResolver = SHOW_ALL,
-  detail: DetailLevel = "mittel",
-  showReferenceLines = false,
-  mono = false,
-  scaleDenominator: number = DEFAULT_SCALE_DENOMINATOR,
-): Primitive[] {
-  const args = planDomainsArgs(floorId, visibleCodes, categoryDisplay, showReferenceLines, false, scaleDenominator, false, false, mono, NaN);
-  const text = JSON.stringify({ ...args, level: { kind: level.kind, linePoints: level.linePoints, directionSign: level.directionSign }, minY: sectionMinY });
-  return decodePlanBuf(documentFor(project).queryBin("planUnderlay", [DETAIL_CODE[detail] ?? 1], text)).prims;
+  categoryDisplay: CategoryDisplayResolver,
+  detail: DetailLevel,
+  referenceLines: boolean,
+  mono: boolean,
+  scaleDenominator: number,
+  traceOf?: string | null,
+): { name: "planDomains"; args: number[]; text: string } {
+  const args = planDomainsArgs(floorId, visibleCodes, categoryDisplay, referenceLines, false, scaleDenominator, false, false, mono, NaN, null, traceOf);
+  return { name: "planDomains", args: [DETAIL_CODE[detail] ?? 1], text: JSON.stringify(args) };
 }
 
 /**
- * Welche Fremd-Art-Ebene darf als Unterlage in welcher aktiven Ebene erscheinen?
- * Massgebend ist der Koordinatenraum: Geschoss und freie Zeichnung teilen X/Y,
- * Schnitte/Ansichten messen dagegen Länge×Höhe entlang IHRER Linie. Ein Schnitt
- * im Grundriss (oder ein Grundriss/eine andere Ansicht im Schnitt) lag darum
- * nur zufällig irgendwo und überdeckte den eigentlichen Plan (Nutzer-Report
- * 2026-10-20: Fenster der Ansicht im EG-Grundriss, Raumstempel im Schnitt).
- *  • freie Zeichnung: alles (Kalkierpapier zum Abzeichnen, Nutzer-Wunsch).
- *  • Geschoss: nur freie Zeichnungen (gleicher X/Y-Raum).
- *  • Schnitt/Ansicht: nichts — ein Grundriss kommt dort ausgerichtet über
- *    `DrawingLevel.planUnderlayId` dazu (s. {@link planUnderlayPrimitives}).
+ * Welche Fremd-Art-Ebene überlagert über Auge/Darstellungsmodus (Ebenen-Komposition) welche aktive Ebene?
+ * Nur Ebenen im selben X/Y-Raum: Geschoss und freie Zeichnung gegenseitig. Alles andere — ein Schnitt, eine
+ * Ansicht, ein anderes Geschoss — kommt bewusst gewählt als Pausfolie dazu ([205], `plan/trace.ts`:
+ * ausgerichtet, verschiebbar, gedämpft), nie mehr lose über das Auge (Nutzer-Report 2026-10-20: Fenster der
+ * Ansicht im EG-Grundriss, Raumstempel im Schnitt).
  */
 export function crossKindOverlayAllowed(active: DrawingLevelKind, other: DrawingLevelKind): boolean {
-  if (active === "drawing") return true;
-  if (active === "floor") return other === "drawing";
-  return false;
+  return (active === "drawing" && other === "floor") || (active === "floor" && other === "drawing");
 }
 
 /**

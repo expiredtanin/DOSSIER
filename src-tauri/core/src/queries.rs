@@ -323,18 +323,19 @@ pub fn run_bin(p: &Project, name: &str, args: &[f64], text: &str) -> Result<Vec<
             w.group(&drawings::level_markers(p, [args[0], args[1], args[2], args[3]]));
             Ok(w.finish())
         }
-        // Grundriss-Unterlage unter Schnitt/Ansicht: `planDomains`-Argumente + `level`, `minY`.
-        ("planUnderlay", 1) => {
-            let a = domains::PlanArgs::parse_in(p, args[0], text)?;
-            let (level, min_y) = crate::plan::underlay::parse_args(text)?;
-            let bytes = domains::plan_domains_buf(p, &a)?;
-            let prims = crate::plan::buf::View::parse(&bytes).and_then(|v| v.prims()).ok_or("planUnderlay: Plan-Puffer unlesbar")?;
-            Ok(crate::plan::underlay::underlay_buf(&crate::plan::underlay::underlay_for_level(&level, prims, min_y)))
-        }
         // Umriss-Linien der 3D-Auswahl (`highlight3d.rs`): `text` = JSON der ids je Art + `rgb`; Antwort f32-LE.
         ("selectionHighlight", _) => {
             let a: crate::highlight3d::Args = serde_json::from_str(text).map_err(|e| format!("selectionHighlight: {e}"))?;
             Ok(crate::highlight3d::selection_highlight_lines(p, &a)?.iter().flat_map(|v| v.to_le_bytes()).collect())
+        }
+        // [205] Pausfolie: Teil-Abfragen der Quelle, ausgerichtet, verschoben/gedreht, gefärbt (`plan/trace.rs`).
+        ("tracePlan", _) => {
+            let a = crate::plan::trace::TraceArgs::parse(text)?;
+            let mut prims = Vec::new();
+            for part in &a.parts {
+                prims.extend(bin_prims(&run_bin(p, &part.name, &part.args, &part.text)?)?);
+            }
+            Ok(crate::plan::trace::trace_buf(&crate::plan::trace::trace_primitives(p, &a, prims)))
         }
         ("sectionPlan", _) => crate::plan::section::section_plan_buf(p, args, text),
         ("elevationPlan", _) => crate::plan::elevation::elevation_plan_buf(p, args, text),
@@ -356,17 +357,33 @@ pub fn run_bin_doc(d: &mut crate::document::Document, name: &str, args: &[f64], 
         a.apply_model_view(p);
         return crate::plan::domains::plan_domains_cached(p, revs, cache, &a, &have).map(|o| o.encode());
     }
-    if name == "planUnderlay" && args.len() == 1 {
-        // Der Grundriss kommt aus den Plan-Caches (wie `generatePlan` desselben Geschosses).
-        let mut a = crate::plan::domains::PlanArgs::parse(args[0], text)?;
-        let (level, min_y) = crate::plan::underlay::parse_args(text)?;
-        let (p, revs, cache) = d.project_cached().map_err(model_err)?;
-        a.apply_model_view(p);
-        let out = crate::plan::domains::plan_domains_cached(p, revs, cache, &a, &Default::default())?;
-        let prims = crate::plan::underlay::plan_out_primitives(&out)?;
-        return Ok(crate::plan::underlay::underlay_buf(&crate::plan::underlay::underlay_for_level(&level, prims, min_y)));
+    if name == "tracePlan" {
+        // [205] Teil-Abfragen auf dem Dokument (Grundrisse aus den Plan-Caches wie `generatePlan`).
+        let a = crate::plan::trace::TraceArgs::parse(text)?;
+        let mut prims = Vec::new();
+        for part in &a.parts {
+            if part.name == "planDomains" && part.args.len() == 1 {
+                let mut pa = crate::plan::domains::PlanArgs::parse(part.args[0], &part.text)?;
+                let (p, revs, cache) = d.project_cached().map_err(model_err)?;
+                pa.apply_model_view(p);
+                let out = crate::plan::domains::plan_domains_cached(p, revs, cache, &pa, &Default::default())?;
+                prims.extend(crate::plan::underlay::plan_out_primitives(&out)?);
+            } else {
+                prims.extend(bin_prims(&run_bin_doc(d, &part.name, &part.args, &part.text)?)?);
+            }
+        }
+        let p = d.project().map_err(model_err)?;
+        return Ok(crate::plan::trace::trace_buf(&crate::plan::trace::trace_primitives(p, &a, prims)));
     }
     run_bin(d.project().map_err(model_err)?, name, args, text)
+}
+
+/// Primitive eines (einfachen) Plan-Puffers.
+fn bin_prims(bytes: &[u8]) -> Result<Vec<crate::plan::prim::Primitive>, String> {
+    if bytes.is_empty() {
+        return Ok(vec![]);
+    }
+    crate::plan::buf::View::parse(bytes).and_then(|v| v.prims()).ok_or_else(|| "tracePlan: Plan-Puffer unlesbar".to_string())
 }
 
 /// Plan-Puffer (eine Gruppe, ohne Inhalts-Hashes), in den `f` die Zeichnungs-Primitive schreibt.

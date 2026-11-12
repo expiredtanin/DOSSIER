@@ -1894,13 +1894,6 @@ pub struct DrawingLevel {
     #[serde(rename = "showTerrain", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub show_terrain: Option<bool>,
-    /// Grundriss-Unterlage (nur Schnitt/Ansicht): ID eines Geschosses, dessen
-    /// Grundriss AUSGERICHTET unter dem Schnitt/der Ansicht gezeigt wird (Schnitt-
-    /// linie waagrecht, Blickrichtung nach oben, s. Kern `plan/underlay.rs`).
-    /// Fehlt ⇒ keine Unterlage.
-    #[serde(rename = "planUnderlayId", default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub plan_underlay_id: Option<String>,
     /// Automatische Höhenkoten (nur Schnitt/Ansicht): je Geschoss OK fertig Boden
     /// + oberste Kante, links neben der Zeichnung (`plan/levelMarkers.ts`).
     /// Fehlt ⇒ an; `false` ⇒ aus.
@@ -5236,9 +5229,40 @@ pub struct ViewSnapshot {
     #[serde(rename = "modelViewOptionId", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub model_view_option_id: Option<String>,
+    /// [205] Pausfolie des Ausschnitts (nur Anzeige, nie im Druck).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub trace: Option<TraceReference>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
+}
+
+/// [205] Pausfolie (Archicad „Pausfolie & Referenz"): eine andere Ansicht gedämpft hinter (oder über) der
+/// aktiven — nur Anzeige, nie anwählbar, nie im Druck/Export. Lebt je Reiter (UI-Zustand `uiState.viewTabs`)
+/// und im Ausschnitt; das Modell ändert sie nie. Gezeichnet über die Kern-Abfrage `tracePlan` (`plan/trace.rs`).
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct TraceReference {
+    /// Quell-Ebene (`DrawingLevel.id`: Geschoss, Schnitt, Ansicht, Zeichnung, Deckenspiegel).
+    #[serde(rename = "sourceId")]
+    pub source_id: String,
+    /// Eingeschaltet (das Kürzel schaltet nur dies, die Einstellungen bleiben).
+    pub show: bool,
+    /// Farbe `#rrggbb`; fehlt = Grau.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub color: Option<String>,
+    /// Deckkraft 0…1.
+    pub opacity: f64,
+    /// Verschiebung der Pause in Metern (nach der Drehung).
+    pub offset: Vec2,
+    /// Drehung der Pause in Grad (CCW um den Ursprung).
+    pub rotation: f64,
+    /// Über statt unter der aktiven Ansicht.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub above: Option<bool>,
 }
 
 /// Ein Ordner im Ausschnitte-Baum (DOSSIER A2). Ausschnitte verweisen per

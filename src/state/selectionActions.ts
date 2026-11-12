@@ -10,7 +10,8 @@ export type SelectionActionId =
   | "hideLayers"
   | "showAllLayers"
   | "fitAll"
-  | "fitSelection";
+  | "fitSelection"
+  | "toggleTrace";
 
 const actions: Partial<Record<SelectionActionId, () => void>> = {};
 

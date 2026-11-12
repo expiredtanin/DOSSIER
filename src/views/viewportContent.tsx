@@ -27,12 +27,12 @@ import { categoryNameForPick } from "../core";
 import type { PickKind } from "../core";
 import { generatePlan, generateSectionPlan, generateVisibleLevelsPlan } from "../core";
 import { planWithExtra } from "../core";
-import type { CategoryDisplayResolver, Primitive } from "../core";
+import type { CategoryDisplayResolver, Plan, Primitive } from "../core";
 import type { RichTextDoc } from "../text/richText";
 import { computeSection, sameSectionInputs, sameSectionLine } from "../core";
 import type { SectionOutput } from "../core";
 import { generateElevationPlan } from "../core";
-import { crossKindOverlayAllowed, planUnderlayPrimitives } from "../core";
+import { crossKindOverlayAllowed, tracePlan, withTrace } from "../core";
 import { levelMarkerPrimitives, levelMarksEnabled } from "../core";
 import { unitsForLevel } from "../tools/displayUnits";
 import { setSheetOwnerOutlines, setSheetSnapSegments, snapSegmentsFromPrimitives } from "../tools/sheetSnapGeometry";
@@ -592,16 +592,10 @@ function stripSelectableIds(pr: Primitive): Primitive {
 }
 
 /**
- * Fremd-Art-Referenzüberlagerung: zeigt jede andere sichtbare Zeichnungsebene,
- * deren KIND vom aktiven Level abweicht (Geschoss/Zeichnung/Schnitt/Ansicht —
- * Auge an + Darstellungsmodus über `floorDisplay`), als nicht-interaktive
- * Kalkierpapier-Unterlage. Gleiche Art (z. B. andere Geschosse im Grundriss)
- * läuft stattdessen über `generateVisibleLevelsPlan` (echte X/Y-Überlagerung
- * im selben Koordinatenraum) — hier geht es um GRUNDSÄTZLICH andere
- * Projektionsachsen (Schnitt/Ansicht: Länge×Höhe statt X×Y), die sich nur als
- * lose, nicht exakt ausgerichtete Referenz überlagern lassen. Schnitte
- * brauchen die asynchrone WASM-Pipeline (computeSection, gecacht je Ebene-ID);
- * Ansichten/Grundrisse/Zeichnungen laufen synchron.
+ * Fremd-Art-Überlagerung über Auge/Darstellungsmodus (Ebenen-Komposition): Geschoss und freie Zeichnung teilen
+ * den X/Y-Raum und legen sich gegenseitig darunter (Auge an, Modus „Andere grau" dimmt), nicht anwählbar. Alles
+ * andere — ein Schnitt, eine Ansicht, ein anderes Geschoss — kommt bewusst gewählt als Pausfolie dazu ([205],
+ * {@link useTracePlan}).
  */
 function useCrossKindOverlay(
   project: Project,
@@ -624,67 +618,49 @@ function useCrossKindOverlay(
       ),
     [project.drawingLevels, activeLevel.kind, floorDisplay],
   );
-  const [sectionOutputs, setSectionOutputs] = useState<Record<string, SectionOutput | null>>({});
-  useEffect(() => {
-    const sectionLevels = overlayLevels.filter((l) => l.kind === "section");
-    if (sectionLevels.length === 0) return;
-    let disposed = false;
-    void Promise.all(
-      sectionLevels.map(async (l) => {
-        try {
-          return [l.id, await computeSection(project, l)] as const;
-        } catch (e) {
-          console.warn("render3d-Schnitt (Referenz-Überlagerung) fehlgeschlagen:", e);
-          return [l.id, null] as const;
-        }
-      }),
-    ).then((entries) => {
-      if (disposed) return;
-      setSectionOutputs((prev) => {
-        const next = { ...prev };
-        for (const [id, out] of entries) next[id] = out;
-        return next;
-      });
-    });
-    return () => {
-      disposed = true;
-    };
-  }, [project, overlayLevels]);
-
   return useMemo(() => {
     const out: Primitive[] = [];
     for (const l of overlayLevels) {
       const greyed = floorDisplay(l.id).greyed;
-      let prims: Primitive[];
-      if (l.kind === "elevation") {
-        prims =
-          generateElevationPlan(project, l, { mono, visibleCodes, categoryDisplay, scaleDenominator })?.primitives ?? [];
-      } else if (l.kind === "section") {
-        const sOut = sectionOutputs[l.id];
-        prims = sOut
-          ? generateSectionPlan(sOut, mono, { hiddenLines: l.hiddenLines, visibleCodes, categoryDisplay, scaleDenominator, detail })
-              .primitives
-          : [];
-      } else {
-        // Geschoss ODER freie Zeichnung: dieselbe Grundriss-Pipeline, aber ohne
-        // die projektglobalen Zutaten (Kontext-Konturen/Schnittlinien) — die
-        // liefert bereits die aktive Ebene selbst (kein Doppel-Zeichnen).
-        prims = generatePlan(
-          project,
-          l.id,
-          visibleCodes,
-          categoryDisplay,
-          detail,
-          referenceLines,
-          mono,
-          false,
-          scaleDenominator,
-        ).primitives;
-      }
+      // Dieselbe Grundriss-Pipeline, aber ohne die projektglobalen Zutaten (Kontext-Konturen/Schnittlinien) —
+      // die liefert bereits die aktive Ebene selbst (kein Doppel-Zeichnen).
+      const prims = generatePlan(project, l.id, visibleCodes, categoryDisplay, detail, referenceLines, mono, false, scaleDenominator).primitives;
       for (const pr of prims) out.push(stripSelectableIds(greyed ? { ...pr, greyed: true } : pr));
     }
     return out;
-  }, [overlayLevels, sectionOutputs, project, mono, floorDisplay, visibleCodes, categoryDisplay, detail, referenceLines]);
+  }, [overlayLevels, project, mono, floorDisplay, visibleCodes, categoryDisplay, detail, referenceLines, scaleDenominator]);
+}
+
+/**
+ * [205] Pausfolie des aktiven Reiters (`state.trace`, s. `state/traceRef.ts`): die gewählte Quelle als Plan aus
+ * dem Kern (`tracePlan`), ausgerichtet, verschoben/gedreht, gefärbt, ohne Auswahl-Ids. `null` ohne Pause.
+ */
+function useTracePlan(
+  project: Project,
+  level: DrawingLevel,
+  activeBounds: Plan["bounds"] | undefined,
+  visibleCodes: Set<string>,
+  categoryDisplay: CategoryDisplayResolver,
+  detail: DetailLevel,
+  referenceLines: boolean,
+  mono: boolean,
+  scaleDenominator: number,
+): Plan | null {
+  const trace = useStore((s) => s.trace);
+  const bKey = activeBounds ? `${activeBounds.minX},${activeBounds.minY},${activeBounds.maxX},${activeBounds.maxY}` : "";
+  return useMemo(
+    () => {
+      if (!trace?.show) return null;
+      try {
+        return tracePlan(project, level, trace, { visibleCodes, categoryDisplay, detail, referenceLines, mono, scaleDenominator, activeBounds });
+      } catch (e) {
+        console.warn("Pausfolie fehlgeschlagen:", e);
+        return null;
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [trace, project, level, bKey, visibleCodes, categoryDisplay, detail, referenceLines, mono, scaleDenominator],
+  );
 }
 
 /** Abgeleiteter Grundriss eines Geschosses. */
@@ -809,7 +785,7 @@ function LevelPlanView({
 
   // Detailgrad + Referenzlinien fließen in die Plan-Erzeugung ein (Symbole,
   // Schraffuren/Linienfeinheit bzw. Wand-Achslinien).
-  const plan = useMemo(() => {
+  const basePlan = useMemo(() => {
     // Überlagert ALLE sichtbaren Geschoss-/Zeichnungs-Ebenen derselben Art wie
     // `level` in einem Plan (aktive Ebene farbig, andere je Darstellungsmodus
     // gedimmt/gesperrt — Nutzer-Wunsch "mehrere Geschosse gleichzeitig
@@ -847,6 +823,10 @@ function LevelPlanView({
     overlayPrimitives,
     groupPath,
   ]);
+  // [205] Pausfolie des Reiters unter (bzw. über) dem Grundriss — nicht anwählbar (ohne Ids), nicht gedimmt.
+  const trace = useTracePlan(project, level, basePlan.bounds, visibleCodes, categoryDisplay, detail, referenceLines, mono, scaleDenominator);
+  const traceAbove = useStore((s) => !!s.trace?.above);
+  const plan = useMemo(() => withTrace(basePlan, trace, traceAbove), [basePlan, trace, traceAbove]);
 
   // Kategorie-/Layer-Name für die Objekt-Liste (Cmd/Strg+Klick), s. plan/pickLabels.ts.
   const describePick = useCallback(
@@ -1117,31 +1097,13 @@ function SectionPlanView({
     [isElevation, output, mono, level.hiddenLines, visibleCodes, categoryDisplay, inputs, scaleDenominator, detail],
   );
   const rawPlan = isElevation ? elevationPlan : sectionPlan;
-  // Grundriss-Unterlage (Nutzer-Wunsch: "in der Ansicht auch mal einen
-  // Grundriss zeigen können"): das in `level.planUnderlayId` gewählte Geschoss
-  // AUSGERICHTET unter dem Schnitt/der Ansicht (Kern `plan/underlay.rs`) —
-  // nicht mehr jede sichtbare Ebene lose übereinander (die lag in einem
-  // fremden Koordinatenraum und verdeckte den Schnitt).
-  const underlayFloor = project.drawingLevels.find(
-    (l) => l.id === level.planUnderlayId && l.kind === "floor",
-  );
-  const sectionMinY = rawPlan?.bounds.minY;
-  const overlayPrimitives = useMemo(() => {
-    if (!underlayFloor || sectionMinY === undefined) return [];
-    // Der Kern legt den Grundriss (aus seinen Plan-Caches) gedimmt und ohne Auswahl-Ids darunter.
-    return planUnderlayPrimitives(
-      project,
-      level,
-      underlayFloor.id,
-      sectionMinY,
-      visibleCodes,
-      categoryDisplay,
-      detail,
-      referenceLines,
-      mono,
-      scaleDenominator,
-    );
-  }, [underlayFloor, sectionMinY, project, level, visibleCodes, categoryDisplay, detail, referenceLines, mono, scaleDenominator]);
+  // [205] Pausfolie des Reiters (früher nur die Grundriss-Unterlage `planUnderlayId`): jede andere Ebene, ein
+  // Grundriss ausgerichtet unter dem Schnitt (Kern `plan/trace.rs` → `underlay.rs`), ein anderer Schnitt / eine
+  // Ansicht höhengleich.
+  const trace = useTracePlan(project, level, rawPlan?.bounds, visibleCodes, categoryDisplay, detail, referenceLines, mono, scaleDenominator);
+  const traceAbove = useStore((s) => !!s.trace?.above);
+  // Fangkanten auch auf der Pause (Abzeichnen).
+  const overlayPrimitives = useMemo(() => (trace ? trace.primitives : []), [trace]);
   // Eigene 2D-Elemente des Schnitts/der Ansicht (Bemassung, Höhenkoten,
   // Beschriftung, Ergänzungslinien …): liegen in `drawings2d` mit
   // `levelId === level.id` im Blatt-Raum (u, Höhe). Bisher zeichnete die Ansicht
@@ -1181,9 +1143,9 @@ function SectionPlanView({
       if (x > b.maxX) b.maxX = x;
       if (y > b.maxY) b.maxY = y;
     };
-    for (const pr of overlayPrimitives) {
-      if (pr.kind === "polygon") for (const p of pr.pts) grow(p.x, p.y);
-      else if (pr.kind === "line") { grow(pr.a.x, pr.a.y); grow(pr.b.x, pr.b.y); }
+    if (trace) {
+      grow(trace.bounds.minX, trace.bounds.minY);
+      grow(trace.bounds.maxX, trace.bounds.maxY);
     }
     if (sheetDrawings.primitives.length > 0) {
       const eb = sheetDrawings.bounds;
@@ -1191,9 +1153,10 @@ function SectionPlanView({
       grow(eb.maxX, eb.maxY);
     }
     for (const pr of marks) if (pr.kind === "line") grow(pr.a.x, pr.a.y);
-    // Unterlage zuunterst, Blatt-Zeichnungen obenauf.
-    return { ...rawPlan, primitives: [...overlayPrimitives, ...rawPlan.primitives, ...extra], bounds: b };
-  }, [rawPlan, overlayPrimitives, sheetDrawings, marks]);
+    // Pause zuunterst (bzw. ganz oben), Blatt-Zeichnungen über dem Schnitt.
+    const own = [...rawPlan.primitives, ...extra];
+    return { ...rawPlan, primitives: traceAbove ? [...own, ...overlayPrimitives] : [...overlayPrimitives, ...own], bounds: b };
+  }, [rawPlan, overlayPrimitives, trace, traceAbove, sheetDrawings, marks]);
   // Fangkanten der abgeleiteten Geometrie (Schnitt-/Ansichtskanten + Unterlage)
   // für `computeSnap` bereitstellen — die stehen nicht im Projekt. Die eigenen
   // 2D-Elemente fängt computeSnap ohnehin über `drawings2d`.

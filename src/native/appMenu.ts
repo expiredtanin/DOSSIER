@@ -416,6 +416,12 @@ export function useNativeAppMenu(
             accelerator: "CmdOrCtrl+Shift+A",
             action: () => handlersRef.current.onSelectionAction?.("showAllLayers"),
           }),
+          // [205] Pausfolie ein/aus (im Browser `useViewNavigationShortcuts`).
+          await MenuItem.new({
+            text: t("menu.view.toggleTrace"),
+            accelerator: "CmdOrCtrl+Shift+T",
+            action: () => handlersRef.current.onSelectionAction?.("toggleTrace"),
+          }),
         ],
       });
 
