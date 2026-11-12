@@ -1100,7 +1100,7 @@ export function useGripEditing(opts: {
     }
     const ins = gripOwners[index];
     // [191] Scheitel-Griff einer Bogenkante: Bulge live, ein Undo-Schritt je Zug.
-    if (modelEditable && ins?.arcSeg != null && ins.ring && ins.ring.kind !== "excavation" && ins.ring.kind !== "polyline") {
+    if (modelEditable && ins?.arcSeg != null && ins.ring && ins.ring.kind !== "excavation" && ins.ring.kind !== "polyline" && ins.ring.kind !== "contours") {
       storeState().setRingArc(ins.ring.kind, ins.ring.id, ins.arcSeg, pt);
       return;
     }
