@@ -24,6 +24,8 @@ export function selectAllIds(project: Project, levelId: string): Partial<Selecti
   const roomIds = (project.rooms ?? []).filter((r) => r.floorId === levelId).map((r) => r.id);
   const solids = (project.extrudedSolids ?? []).filter((s) => s.levelId === levelId).map((s) => s.id);
   const columnIds = (project.columns ?? []).filter((c) => c.floorId === levelId).map((c) => c.id);
+  // [213] Kameras des Geschosses (Symbol im Grundriss), gesperrte bleiben.
+  const cameras = (project.cameras ?? []).filter((c) => c.floorId === levelId && !c.locked).map((c) => c.id);
   // Schnittführungs-Symbole sind projektweit (kein floorId; plan/context.rs, plan_section_lines).
   const sectionLines = project.drawingLevels
     .filter((l) => (l.kind === "section" || l.kind === "elevation") && l.linePoints)
@@ -50,6 +52,7 @@ export function selectAllIds(project: Project, levelId: string): Partial<Selecti
     rooms: roomIds,
     solids,
     columns: columnIds,
+    cameras,
     roofs: roofIds,
     contextObjects,
     sectionLines,

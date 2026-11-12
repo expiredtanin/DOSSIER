@@ -156,7 +156,17 @@ export function installTestHooks(): void {
         }
       };
       walk(s.project.layers);
-      return generatePlan(s.project, s.activeLevelId, codes, undefined, s.detail, false, false, true, 100).primitives.filter((q) => q.kind === "polygon" && q.fill && q.fill !== "none").length;
+      // Ankommende Treppen anderer Geschosse ([202]: ohne Deckenloch unbeschnitten gezeichnet) gehören nicht zum Geschoss.
+      const ownStairs = new Set((s.project.stairs ?? []).filter((t) => t.floorId === s.activeLevelId).map((t) => t.id));
+      return generatePlan(s.project, s.activeLevelId, codes, undefined, s.detail, false, false, true, 100).primitives.filter(
+        (q) =>
+          q.kind === "polygon" &&
+          q.fill &&
+          q.fill !== "none" &&
+          (!q.stairId || ownStairs.has(q.stairId)) &&
+          // nur Füllungen von Elementen (Pfeilspitzen der Schnittmarken u. ä. tragen keine Element-Id)
+          Object.entries(q).some(([k, v]) => k.endsWith("Id") && !!v),
+      ).length;
     },
     terrainZ: () => {
       const t = (getState().project.context ?? []).find((c) => c.type === "terrainMesh");
