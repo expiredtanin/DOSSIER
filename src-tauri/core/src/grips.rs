@@ -489,8 +489,8 @@ pub fn run(lk: &Lookup, req: &Request) -> Result<GripResult, String> {
             vec![replace("drawings2d", with_geom(d, with_all(g, fields)))].into()
         }
         // [187] Höhen-Griff im Schnitt/in der Ansicht: `kind` = wallTop | wallBottom | openingTop | openingBottom |
-        // ceilingTop | ceilingBottom, `a` = Blatt-Höhe (absolutes Z), `free` ohne 1-cm-Raster (`sheet_height.rs`).
-        "sheetHeight" => crate::sheet_height::ops(lk, r.s("kind").unwrap_or(""), r.s("id").unwrap_or(""), r.n("a"), r.free, r.s("newId").unwrap_or(""), &req.new_name).into(),
+        // ceilingTop | ceilingBottom | roofEave | roofTop | parapetTop | stairTop | contextTop | contourLine, `a` = Blatt-Höhe (absolutes Z), `free` ohne 1-cm-Raster (`sheet_height.rs`).
+        "sheetHeight" => crate::sheet_height::ops(lk, r.s("kind").unwrap_or(""), r.s("id").unwrap_or(""), r.n("a"), r.free, r.s("newId").unwrap_or(""), &req.new_name, r.n("b"), r.n("index")).into(),
         "wallThickness" => wall_thickness(root, r.s("id").unwrap_or(""), r.n("thickness"), r.s("newId").unwrap_or(""), req.new_name.clone()).into(),
         "ceilingThickness" => ceiling_thickness(root, r.s("id").unwrap_or(""), r.n("thickness"), r.s("newId").unwrap_or(""), req.new_name.clone()).into(),
         // [144] Wandöffnung gleiten lassen: Griff-Zug nach `pt` bzw. Objekt-Info-Position `a` (ab

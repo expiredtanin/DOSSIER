@@ -109,9 +109,13 @@ export function gripEdgeTarget(edge: EdgeGrip, raw: Vec2, d: EdgeDrive = {}): Ve
 }
 
 /** Art eines Höhen-Griffs im Schnitt/in der Ansicht ([187]; Index = `sheet_height::Kind` im Kern). */
-export type SheetHeightKind = "wallTop" | "openingTop" | "openingBottom" | "wallBottom" | "ceilingTop" | "ceilingBottom";
+export type SheetHeightKind =
+  | "wallTop" | "openingTop" | "openingBottom" | "wallBottom" | "ceilingTop" | "ceilingBottom"
+  // Dach: Traufe, First (bzw. Neigung), Attika; Treppe: Austritt; Gelände: Oberkante (Netz) bzw. Sohle (Baugrube).
+  | "roofEave" | "roofTop" | "parapetTop" | "stairTop" | "contextTop" | "contextBottom";
 
-const SHEET_KIND = { wallTop: 0, openingTop: 1, openingBottom: 2, wallBottom: 3, ceilingTop: 4, ceilingBottom: 6 } as const;
+const SHEET_KIND = { wallTop: 0, openingTop: 1, openingBottom: 2, wallBottom: 3, ceilingTop: 4, ceilingBottom: 6,
+  roofEave: 7, roofTop: 8, parapetTop: 9, stairTop: 10, contextTop: 4, contextBottom: 7 } as const;
 
 /**
  * Höhen-Griff auf die Blatt-Höhe `y` ziehen (1-cm-Raster, `free` = ohne): neue Ober-/Unterkante im Blatt für die
