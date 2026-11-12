@@ -181,7 +181,9 @@ export function navigateToLevel(
   const want = levelTabKind(level.kind);
   const liveKind = tabKindOf(live, levels);
   if (want === "plan" && (liveKind === "plan" || liveKind === "3d")) {
-    return live.activeLevelId === levelId ? { next: s, apply: null } : { next: s, apply: null, setLevel: levelId };
+    // [204] Anderes Geschoss im selben Reiter: der Reiter zeigt keinen Ausschnitt mehr (Titel = Geschoss, wie Archicad);
+    // sonst hiesse er weiter „EG 1:100" und „Ausschnitt aktualisieren" schriebe das OG in den EG-Ausschnitt.
+    return live.activeLevelId === levelId ? { next: s, apply: null } : { next: unlinkActiveTab(s), apply: null, setLevel: levelId };
   }
   if (want !== "plan" && liveKind === want && live.activeLevelId === levelId) return { next: s, apply: null };
   const stored = storeActiveState(s, live);
@@ -275,6 +277,13 @@ export function linkActiveTab(s: ViewTabsState, snapshotId: string): ViewTabsSta
     ...s,
     tabs: s.tabs.map((t) => (t.id === s.activeId ? { id: t.id, snapshotId, state: t.state } : t)),
   };
+}
+
+/** [204] Löst den aktiven Reiter von seinem Ausschnitt (Titel folgt dann der Ebene); ohne Ausschnitt unverändert. */
+export function unlinkActiveTab(s: ViewTabsState): ViewTabsState {
+  const tab = activeTab(s);
+  if (!tab?.snapshotId) return s;
+  return { ...s, tabs: s.tabs.map((t) => (t.id === tab.id ? { id: t.id, state: t.state } : t)) };
 }
 
 /** Ausschnitte gelöscht: Reiter bleiben offen, verlieren die Verbindung und behalten den letzten Namen. */

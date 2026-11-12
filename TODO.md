@@ -711,6 +711,26 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
 
 ## App und UI
 
+- ◐ **[204]** App-Review im Browser (12.11.): beide Musterhäuser wie in Archicad bedient (Playwright, Linux/Chromium, Rendering
+  per SVG-Rückfall). Behoben (e2e `review204.spec.ts`, vitest): Esc in modalem Dialog (DXF-Export) mit Auswahl schloss ihn nicht
+  und hob die Auswahl dahinter auf (Aufheben lief im Mikro-Task → sofortiges Neurendern meldete später registrierte Esc-Listener
+  ab; jetzt nach dem Ereignis und nie bei offenem `aria-modal`, `useKeyboardShortcuts.ts`); Cmd/Ctrl+5/6 im Reiter eines
+  Ausschnitts behielt dessen Titel („EG 1:100" zeigte das OG, „Ausschnitt aktualisieren" hätte das OG in den EG-Ausschnitt
+  geschrieben) → Reiter löst sich (`unlinkActiveTab`); „Ausschnitt aktualisieren" lief über den Umbenennen-Knopf; Status-Leiste
+  zählte nur Wände (Tür → „Auswahl", Wand+3 Öffnungen → „1 Wand"); Werkzeugliste zweimal „Schnittlinie" (→ „Ansichtslinie").
+  Offen (je Reproduktion): (a) Objekt-Info „Masse" einer Wand = Achs-Rechteck ohne Dicke: Musterhaus, W2 (x=5) wählen →
+  Breite 0.000, Höhe 4.000; bei der Tür D1 heisst die Wanddicke „Höhe 0.345" (Türhöhe 2.10 steht weiter unten) · S;
+  (b) Schnitt A-A (Musterhaus komplex): dünne Geländelinie (hinter dem Schnitt) läuft im UG sichtbar durch die Räume, rechts
+  gestrichelt — verdeckt durch die Rückwand, gehört weg · S; (c) Objekteinstellungen (T): Esc schliesst die Palette nicht,
+  Kopf „Objekteinstellungen" doppelt (Fenstertitel + Panelkopf) · S; (d) Objekt-Info einer Ansicht („Ansicht Süd") heisst
+  „Schnittlinie" mit „Schnitt-Tiefe", „Schnittlinie löschen" · S; (e) Musterhaus komplex öffnet bei 1:375/27 % mit dem ganzen
+  Kataster, das Haus ist winzig (Archicad: Gebäude einpassen) · S; (f) nach Einfügen (Cmd+V) einer Wand mit Öffnungen zeigt die
+  Objekt-Info „Öffnung · Typ gemischt" statt der Wand · S; (g) „Overrides" im Ausschnitt-Fuss und Ressourcen-Reiter unübersetzt
+  (de) · S; (h) Punkt-Griff bleibt nach Ziehen+Loslassen „bewaffnet" (HUD `L:/W:` folgt dem Zeiger bis zum nächsten Klick) —
+  so gewollt (VW-Stil), weicht aber von Archicad ab; Tür-Griff rastet beim Greifen auf den Zeiger (D1 rückt 5 cm) · S.
+  Nicht geprüft: 3D-Ansicht (headless kein WebGPU), Tauri/Mac. Headless verschwand der Plan im Vollbild-Screenshot zeitweise
+  (Element-Screenshot zeigt ihn) — Compositing von SwiftShader, kein App-Fehler. · M
+
 - ◐ **[121]** `App.tsx` zerlegen, Neurendern stoppen. 9.11.: Panels lesen Projekt/Objekt-Info selbst aus dem Store
   (`useSelectionInfo`), Panel-Host stabil und in `src/state/panelHost/` zerlegt, Docks u. a. memoisiert, Nebenfenster
   senden Patches; Wand-Änderung 55 → 42 Renders (Zoom 8, Zeiger 20). 9.11. (Teil 3): `App` abonniert das Projekt

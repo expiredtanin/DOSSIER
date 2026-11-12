@@ -6,6 +6,7 @@ import { categoryLabel } from "../model/layers";
 import { useStore } from "./appStore";
 import { t } from "../i18n";
 import type { useSelectionState } from "./useSelectionState";
+import { ELEMENT_KINDS, type Selection } from "./selection";
 
 export function useStatusBarInfo(opts: {
   selection: ReturnType<typeof useSelectionState>["selection"];
@@ -38,15 +39,22 @@ export function useStatusBarInfo(opts: {
     selectionCount === 1 && selectedWallCategory !== null
       ? categoryLabel(layers, selectedWallCategory)
       : categoryLabel(layers, activeCategoryCode);
-  // Kontextueller Werkzeug-Hinweis (links). Zeigt die Anzahl gewählter Wände:
-  // 0 → „Auswahl", 1 → „Auswahl: 1 Wand", n → „Auswahl: n Wände".
-  const toolHint =
-    selectionCount === 0
-      ? t("status.selection")
-      : t("status.selectionN", {
-          n: selectionCount,
-          noun: selectionCount === 1 ? t("status.wall") : t("status.walls"),
-        });
+  // Kontextueller Werkzeug-Hinweis (links), s. `selectionHint`.
+  const toolHint = selectionHint(selection, selectionCount);
 
   return { toolHint, activeLayerName };
+}
+
+/**
+ * Werkzeug-Hinweis der Status-Leiste: 0 → „Auswahl", nur Wände → „Auswahl: 1 Wand" / „n Wände", sonst
+ * „Auswahl: n Element(e)" über alle Bauteilarten. [204] Vorher zählten nur Wände: eine gewählte Tür oder Treppe
+ * zeigte „Auswahl", eine eingefügte Wand samt Öffnungen „1 Wand". `wallCount` = noch vorhandene gewählte Wände;
+ * Gruppen zählen nicht (ihre Mitglieder stehen in den übrigen Arten).
+ */
+export function selectionHint(selection: Selection, wallCount: number): string {
+  const others = ELEMENT_KINDS.reduce((n, k) => (k === "walls" ? n : n + selection[k].length), 0);
+  const n = wallCount + others;
+  if (n === 0) return t("status.selection");
+  const noun = others === 0 ? (n === 1 ? t("status.wall") : t("status.walls")) : n === 1 ? t("status.element") : t("status.elements");
+  return t("status.selectionN", { n, noun });
 }

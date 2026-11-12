@@ -78,3 +78,14 @@ describe("Körper-Befehle (truck)", () => {
     expect(resolveCommand("zs")?.name).toBe("zauberstab");
   });
 });
+
+describe("[204] Werkzeugliste", () => {
+  it("jeder Befehl hat eine eigene Beschriftung (vorher zweimal „Schnittlinie“ für Schnitt- und Ansichtslinie)", () => {
+    const byLabel = new Map<string, string[]>();
+    for (const [name, cmd] of Object.entries(COMMANDS)) {
+      if (cmd.name !== name) continue; // Einträge, die auf einen anderen Befehl zeigen
+      byLabel.set(cmd.labelKey, [...(byLabel.get(cmd.labelKey) ?? []), name]);
+    }
+    expect([...byLabel.entries()].filter(([, names]) => names.length > 1)).toEqual([]);
+  });
+});

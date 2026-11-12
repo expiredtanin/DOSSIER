@@ -277,9 +277,14 @@ export function useSelectAllAndDeleteShortcut(opts: {
       if (isEditableTarget(e)) return;
       // Escape = Auswahl aufheben. Erst NACH den anderen Escape-Handlern prüfen
       // (bewaffneter Griff, Entwurf, Dialoge verbrauchen Esc per preventDefault) —
-      // daher im Mikro-Task: nur wenn niemand sonst Esc beansprucht hat.
+      // nur wenn niemand sonst Esc beansprucht hat. [204] Nicht im Mikro-Task: der läuft bei echten
+      // Tastenereignissen schon nach DIESEM Listener; das Aufheben rendert sofort neu, die Effekte melden
+      // ihre Listener ab und neu an — später registrierte (z. B. Esc eines Export-Dialogs) verpassten die
+      // Taste. Daher erst nach dem ganzen Ereignis (Task) und nie, solange ein modaler Dialog offen ist
+      // (Esc gehört dann dem Dialog, die Auswahl dahinter bleibt wie in Archicad).
       if (e.key === "Escape" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        queueMicrotask(() => {
+        if (document.querySelector("[aria-modal='true']")) return;
+        setTimeout(() => {
           if (e.defaultPrevented) return;
           if (isEmpty(opts.selection, { withGroups: false })) return;
           setSelection(clearKinds());
