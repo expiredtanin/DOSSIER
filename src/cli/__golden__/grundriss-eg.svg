@@ -4,8 +4,8 @@
 <g stroke-linecap="butt" stroke-linejoin="miter" stroke-miterlimit="4">
 <polygon points="0,4.6725 5,4.6725 5,0.6725 0,0.6725" fill="none" stroke="none" stroke-width="0"/>
 <polygon points="0.1725,4.5 4.8275,4.5 4.8275,0.845 0.1725,0.845" fill="#6b728000" stroke="#6b7280" stroke-width="0.002"/>
-<text x="1.80481" y="2.54903" font-family="Inter, sans-serif" text-anchor="start"><tspan font-size="0.3528" fill="#111111">Wohnen</tspan></text>
-<text x="1.80481" y="3.00764" font-family="Inter, sans-serif" text-anchor="start"><tspan font-size="0.28222" fill="#111111">17.01 m²</tspan></text>
+<text x="0.55481" y="1.54903" font-family="Inter, sans-serif" text-anchor="start"><tspan font-size="0.3528" fill="#111111">Wohnen</tspan></text>
+<text x="0.55481" y="2.00764" font-family="Inter, sans-serif" text-anchor="start"><tspan font-size="0.28222" fill="#111111">17.01 m²</tspan></text>
 <polygon points="-0.1725,4.845 0.8,4.845 0.8,4.5 0.1725,4.5" fill="#0f0f0f" stroke="#0f0f0f" stroke-width="0.012"/>
 <polygon points="1.7,4.845 3,4.845 3,4.5 1.7,4.5" fill="#0f0f0f" stroke="#0f0f0f" stroke-width="0.012"/>
 <polygon points="4,4.845 5.1725,4.845 4.8275,4.5 4,4.5" fill="#0f0f0f" stroke="#0f0f0f" stroke-width="0.012"/>

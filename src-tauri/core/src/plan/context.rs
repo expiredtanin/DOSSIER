@@ -838,12 +838,23 @@ fn excavation_lines(c: &Ctx, e: &Excavation, out: &mut Vec<Primitive>, bands: &m
         if !bands.is_empty() {
             let hatch = crate::plan::style::resolve_hatch(c.p, crate::excavation::shoring_hatch_id(spec.shore_kind), None, None, None)
                 .unwrap_or_else(no_hatch);
+            // [199] Das Band endet am Fussabdruck des Geschosses wie Sohle und Böschung (Rühlwand unter einem Anbau ohne
+            // Untergeschoss lief sonst über Wände, Boden und Raumstempel).
+            let house_polys: Vec<crate::flat::Polygon> = house.iter().map(|r| vec![r.iter().map(|q| [q.x, q.y]).collect()]).collect();
             for b in bands {
-                let mut band = super::section::polygon(b.polygon().iter().map(|p| v2(p[0], p[1])).collect(), crate::plan::style::HATCH_PAPER, EXCAVATION_INK, 0.25, hatch.clone());
-                if let Primitive::Polygon { context_object_id, .. } = &mut band {
-                    *context_object_id = Some(e.id.clone());
+                let ring: Vec<[f64; 2]> = b.polygon();
+                let pieces: Vec<Vec<[f64; 2]>> = if house_polys.is_empty() {
+                    vec![ring]
+                } else {
+                    crate::polygon_bool::difference(&[vec![ring]], &house_polys).into_iter().filter_map(|poly| poly.into_iter().next()).filter(|r| r.len() >= 3).collect()
+                };
+                for piece in pieces {
+                    let mut band = super::section::polygon(piece.iter().map(|p| v2(p[0], p[1])).collect(), crate::plan::style::HATCH_PAPER, EXCAVATION_INK, 0.25, hatch.clone());
+                    if let Primitive::Polygon { context_object_id, .. } = &mut band {
+                        *context_object_id = Some(e.id.clone());
+                    }
+                    out.push(band);
                 }
-                out.push(band);
             }
         }
         // [68] Arbeitsraum zu schmal (enge Nische, gekappte Ecke): rotes Kreuz an der Stelle.
@@ -1540,6 +1551,27 @@ mod tests {
         let mut ctx = Vec::new();
         plan_context(&c, &mut ctx);
         assert!(ctx.iter().any(|q| matches!(q, Primitive::Line { color: Some(k), .. } if k == WS_WARN_INK)));
+    }
+
+    /// [199] Verbauwand unter einem Anbau (Musterhaus komplex: Rühlwand der UG-Grube unter dem Eingang im EG): das Band
+    /// endet am Fussabdruck des Geschosses wie Sohle und Böschung, statt über Wände, Boden und Raumstempel zu laufen.
+    #[test]
+    fn verbauband_endet_am_gebaeude() {
+        let mut p = sample_with_walls(serde_json::json!([
+            ["a1", "eg", 18.0, -4.0, 22.0, -4.0], ["a2", "eg", 22.0, -4.0, 22.0, 1.0], ["a3", "eg", 22.0, 1.0, 18.0, 1.0], ["a4", "eg", 18.0, 1.0, 18.0, -4.0]
+        ]));
+        let t = TerrainMesh { id: "t".into(), category_code: "02".into(), positions: vec![0.0, -10.0, 0.0, 40.0, -10.0, 0.0, 40.0, 30.0, 0.0, 0.0, 30.0, 0.0], indices: vec![0.0, 1.0, 2.0, 0.0, 2.0, 3.0], ..Default::default() };
+        let pit = Excavation { id: "bg".into(), category_code: "02".into(), outline: vec![v2(12.0, -2.0), v2(28.0, -2.0), v2(28.0, 10.0), v2(12.0, 10.0)], bottom: -3.0, edge_shoring: Some(vec![true, false, false, false]), shoring_kind: Some("soldierPile".into()), ..Default::default() };
+        p.context = Some(vec![ContextObject::TerrainMesh(t), ContextObject::Excavation(pit)]);
+        let a = super::super::domains::PlanArgs::parse(1.0, r#"{"floor": "eg", "show": ["02", "90", "80", "02", "20"], "scale": 100}"#).unwrap();
+        let c = Ctx::new(&p, &a);
+        let mut ctx = Vec::new();
+        plan_context(&c, &mut ctx);
+        let bands: Vec<&Vec<Vec2>> = ctx.iter().filter_map(|q| match q { Primitive::Polygon { pts, stroke, context_object_id: Some(id), fill, .. } if stroke == EXCAVATION_INK && id == "bg" && fill != "none" => Some(pts), _ => None }).collect();
+        assert_eq!(bands.len(), 2, "Band links und rechts des Anbaus: {bands:?}");
+        for b in &bands {
+            assert!(b.iter().all(|q| q.x <= 17.9 + 1e-6 || q.x >= 22.1 - 1e-6), "Band im Anbau: {b:?}");
+        }
     }
 
     /// [191] Baugrube mit Bogenkante (Ostkante Halbkreis nach aussen, mit Verbau): die Sohle liegt auf dem Kreis und

@@ -574,7 +574,9 @@ export const sampleProject: Project = {
         { x: 0.1725, y: 3.8275 },
       ],
       color: "#6b7280",
-      stampAnchor: { x: 2.5, y: 2.0 },
+      // [199] Stempel im westlichen Teil über der Schnittlinie A (y = 2): vorher (2.5, 2.0) mitten auf der
+      // Zwischenwand W9 und auf der Schnittlinie.
+      stampAnchor: { x: 1.25, y: 3.0 },
     },
   ],
   // Freie 2D-Zeichengeometrie — anfangs leer; wird mit den Zeichenwerkzeugen

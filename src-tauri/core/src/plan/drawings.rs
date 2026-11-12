@@ -1153,11 +1153,15 @@ fn scalebar_labels(labels: Vec<(f64, String)>, seg: f64, text_h: f64) -> Vec<(f6
     out
 }
 
-/// [157] Wie weit die Blase (Radius `r`) am Achsende `end` in Richtung `dir` hinaus muss, damit sie mit Luft
-/// (10 % des Radius) ausserhalb jedes Gebäuderings und frei von den Massketten `dims` liegt; 0, wenn sie schon
-/// frei ist (höchstens 60 m).
-fn bubble_shift(end: Vec2, dir: Vec2, r: f64, house: &[Vec<Vec2>], dims: &super::stamp_place::Obstacles) -> f64 {
-    if !(r > 0.0) || (house.is_empty() && dims.is_empty()) || !(end.x.is_finite() && end.y.is_finite() && dir.x.is_finite() && dir.y.is_finite()) {
+/// [157] Wie weit die Blasen (Radius `r`) an den Achsenden `ends` (je Ende, Richtung) einer Seite in Richtung ihrer
+/// Achse hinaus müssen, damit sie mit Luft (10 % des Radius) ausserhalb jedes Gebäuderings und frei von den
+/// Massketten `dims` liegen; 0, wenn sie schon frei sind (höchstens 60 m). Alle Blasen der Seite rücken gleich weit
+/// (eine Reihe), die Lage muss für JEDE frei sein ([199]: vorher je Blase gesucht und das grösste genommen — andere
+/// Blasen der Reihe landeten so auf Massketten). [199] Frei heisst auch: dahinter noch einen Blasendurchmesser frei,
+/// sonst passte eine Blase in die Lücke zwischen zwei Ketten und stand auf deren Linien.
+fn bubble_shift(ends: &[(Vec2, Vec2)], r: f64, house: &[Vec<Vec2>], dims: &super::stamp_place::Obstacles) -> f64 {
+    let ok = |q: &Vec2| q.x.is_finite() && q.y.is_finite();
+    if !(r > 0.0) || (house.is_empty() && dims.is_empty()) || ends.is_empty() || !ends.iter().all(|(e, d)| ok(e) && ok(d)) {
         return 0.0;
     }
     let clear = |c: Vec2| {
@@ -1166,9 +1170,13 @@ fn bubble_shift(end: Vec2, dir: Vec2, r: f64, house: &[Vec<Vec2>], dims: &super:
         }) && (dims.is_empty() || dims.clearance(c, r * 1.1, r * 1.1) > 0.0)
     };
     let step = r / 4.0;
+    // Lauf hinter der Blase: ein Durchmesser in Schritten (die Achse läuft bis zur Blase durch die Ketten, die Blase
+    // selbst steht hinter der letzten).
+    let run = (2.0 * r / step).ceil() as usize;
+    let free_at = |t: f64| ends.iter().all(|(end, dir)| (0..=run).all(|k| clear(v(end.x + dir.x * (t + r + k as f64 * step), end.y + dir.y * (t + r + k as f64 * step)))));
     let mut t = 0.0;
     while t <= 60.0 {
-        if clear(v(end.x + dir.x * (t + r), end.y + dir.y * (t + r))) {
+        if free_at(t) {
             return t;
         }
         t += step;
@@ -1188,14 +1196,13 @@ fn emit_grid(em: &mut Em, spec: &crate::grid::Spec, diameter: f64, house: &[Vec<
     // ihre Blase entlang der Achse hinaus; alle Blasen derselben Seite (gleiche Richtung) gleich weit.
     let axes = spec.axes();
     let side = |d: (f64, f64)| ((d.0 * 1e3).round() as i64, (d.1 * 1e3).round() as i64);
-    let mut shift: HashMap<(i64, i64), f64> = HashMap::new();
+    let mut sides: HashMap<(i64, i64), Vec<(Vec2, Vec2)>> = HashMap::new();
     for ax in axes.iter().filter(|ax| matches!(ax.shape, Shape::Line { .. })) {
         for (end, dir) in ax.bubbles.iter().flatten() {
-            let t = bubble_shift(v(end.0, end.1), v(dir.0, dir.1), r, house, dims);
-            let e = shift.entry(side(*dir)).or_insert(0.0);
-            *e = e.max(t);
+            sides.entry(side(*dir)).or_default().push((v(end.0, end.1), v(dir.0, dir.1)));
         }
     }
+    let shift: HashMap<(i64, i64), f64> = sides.into_iter().map(|(k, ends)| (k, bubble_shift(&ends, r, house, dims))).collect();
     for ax in axes {
         let line = matches!(ax.shape, Shape::Line { .. });
         let shift_of = |dir: (f64, f64)| if line { shift.get(&side(dir)).copied().unwrap_or(0.0) } else { 0.0 };
@@ -2020,6 +2027,51 @@ pub fn underlay_lines(c: &Ctx, indices: &[f64], greyed: bool, sink: &mut Sink) -
     Ok(())
 }
 
+/// [171]/[199] Lage der automatischen Koten aus dem Gebauten (wie `levelMarkers.ts`): links neben dem Gebauten
+/// (Gelände, Höhenlinien, Baugruben zählen nicht), die oberste Kote an der Oberkante des Gebauten — ohne Gelände,
+/// Achsraster (Linien „draw2d", Blasen, Texte) und Bäume, die sonst die Grenzen der Zeichnung `b` bis über den First
+/// ziehen. Ergebnis: Grenzen für [`level_markers`] (unverändert, wo nichts Gebautes liegt).
+pub fn level_marker_bounds(p: &Project, prims: &[Primitive], b: [f64; 4]) -> [f64; 4] {
+    const TERRAIN: [&str; 4] = ["section-terrain", "elevation-terrain", "section-ground", "elevation-ground"];
+    let site: Vec<&str> = p
+        .context
+        .as_deref()
+        .unwrap_or(&[])
+        .iter()
+        .filter(|c| matches!(c, crate::model::ContextObject::TerrainMesh(_) | crate::model::ContextObject::Excavation(_) | crate::model::ContextObject::ContourSet(_)))
+        .map(|c| c.id())
+        .collect();
+    let (mut min_x, mut max_y) = (f64::INFINITY, f64::NEG_INFINITY);
+    for q in prims {
+        match q {
+            Primitive::Line { a, b, cls, .. } if !TERRAIN.contains(&cls.as_str()) => {
+                min_x = min_x.min(a.x).min(b.x);
+                if cls != "draw2d" && cls != "tree-crown" && cls != "tree-remove" {
+                    max_y = max_y.max(a.y).max(b.y);
+                }
+            }
+            Primitive::Polygon { pts, context_object_id, .. } => {
+                let id = context_object_id.as_deref();
+                if id.is_some_and(|i| site.contains(&i)) {
+                    continue;
+                }
+                for v in pts {
+                    min_x = min_x.min(v.x);
+                }
+                if !id.is_some_and(|i| i.starts_with(crate::tree::TREE_PICK_PREFIX)) {
+                    for v in pts {
+                        max_y = max_y.max(v.y);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    let x = b[0].max(min_x);
+    let y = b[3].min(max_y);
+    [if x < b[2] { x } else { b[0] }, b[1], b[2], if y > b[1] { y } else { b[3] }]
+}
+
 /// Automatische Höhenkoten im Schnitt/in der Ansicht (`levelMarkers.ts`): je Geschoss OK fertig
 /// Boden plus die oberste Kante, links neben der Zeichnung mit kurzer Bezugslinie.
 pub fn level_markers(p: &Project, b: [f64; 4]) -> Vec<Primitive> {
@@ -2245,6 +2297,24 @@ mod tests {
         assert_eq!(low.len(), 2);
         assert!(low.iter().all(|c| (c.y - y).abs() > r && c.y < y), "{low:?} Kette bei {y}");
         assert!(low.iter().all(|c| (c.y - low[0].y).abs() < 1e-9), "eine Reihe: {low:?}");
+    }
+
+    /// [199] Zwei Massketten 1 m übereinander: die Blasenreihe rückt hinter BEIDE Ketten (vorher passte die Blase in
+    /// die Lücke zwischen den Ketten und stand auf deren Linien/Zahlen, Musterhaus komplex OG/UG 1:100).
+    #[test]
+    fn achsblasen_nicht_zwischen_massketten() {
+        let grid = serde_json::json!({"shape": "grid", "origin": {"x": 0, "y": 0}, "angle": 0,
+            "a": [{"label": "1", "pos": 0}, {"label": "2", "pos": 5}], "b": [{"label": "A", "pos": 0}, {"label": "B", "pos": 4}], "extend": 1});
+        let free = render(&project(serde_json::json!({})), drawing(grid.clone()), 100.0);
+        let (c0, r) = free.iter().find_map(|q| if let Primitive::DrawingCircle { center, r, .. } = q { (center.y < 0.0).then_some((*center, *r)) } else { None }).unwrap();
+        let chain = |id: &str, y: f64| serde_json::json!({"id": id, "type": "drawing2d", "levelId": "eg", "categoryCode": "20", "geom": {"shape": "dimension",
+            "pts": [{"x": -6.0, "y": y}, {"x": 2.5, "y": y}, {"x": 11.0, "y": y}], "offset": 0.0}});
+        let (y1, y2) = (c0.y, c0.y - 1.0);
+        let p = project(serde_json::json!({"drawings2d": [chain("m1", y1), chain("m2", y2)]}));
+        let prims = render(&p, drawing(grid), 100.0);
+        let low: Vec<Vec2> = prims.iter().filter_map(|q| if let Primitive::DrawingCircle { center, .. } = q { (center.y < 0.0).then_some(*center) } else { None }).collect();
+        assert_eq!(low.len(), 2);
+        assert!(low.iter().all(|c| c.y < y2 - r), "{low:?} Ketten bei {y1}, {y2}");
     }
 
     /// [157] Massstabsbalken im kleinen Massstab: die Zahlen (3 mm Papier) stehen nicht ineinander — liegen
@@ -2485,6 +2555,33 @@ mod tests {
         // je Höhe (0, 3, 6): Bezugslinie, Dreieck, Zahl
         assert_eq!(out.len(), 9);
         assert!(level_markers(&p, [0.0, 0.0, 0.0, 6.0]).is_empty());
+    }
+
+    /// [199] Oberste Kote am Gebauten: Achsraster (Stummel, Blase), Bäume und Gelände über/neben dem Haus zählen nicht.
+    #[test]
+    fn koten_grenzen_aus_dem_gebauten() {
+        let p = project(serde_json::json!({}));
+        let poly = |pts: &[(f64, f64)], ctx: Option<&str>| {
+            let mut q = polygon(pts.iter().map(|q| v(q.0, q.1)).collect(), "#000", "#000", 0.5, no_hatch(), false, None);
+            if let Primitive::Polygon { context_object_id, .. } = &mut q {
+                *context_object_id = ctx.map(String::from);
+            }
+            q
+        };
+        let line = |a: (f64, f64), b: (f64, f64), cls: &str| -> Primitive {
+            serde_json::from_value(serde_json::json!({"kind": "line", "a": {"x": a.0, "y": a.1}, "b": {"x": b.0, "y": b.1}, "cls": cls, "weightMm": 0.25})).unwrap()
+        };
+        let tree = format!("{}t1", crate::tree::TREE_PICK_PREFIX);
+        let prims = vec![
+            poly(&[(0.0, 0.0), (5.0, 0.0), (5.0, 6.2), (0.0, 6.2)], None),
+            line((2.0, 6.5), (2.0, 7.2), "draw2d"),
+            line((-12.0, -1.0), (8.0, -0.5), "section-terrain"),
+            line((7.0, 0.0), (7.0, 9.0), "tree-crown"),
+            poly(&[(6.5, 3.0), (7.5, 3.0), (7.0, 9.5)], Some(&tree)),
+        ];
+        assert_eq!(level_marker_bounds(&p, &prims, [-12.0, -1.0, 8.0, 9.5]), [0.0, -1.0, 8.0, 6.2]);
+        // Nichts Gebautes: die Grenzen bleiben.
+        assert_eq!(level_marker_bounds(&p, &prims[2..3], [-12.0, -1.0, 8.0, 9.5]), [-12.0, -1.0, 8.0, 9.5]);
     }
 
     /// [131] Untergeschoss unter ±0.00: negative Kote; mit `referenceElevationMasl` trägt ±0.00 die Meereshöhe.

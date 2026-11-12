@@ -8,4 +8,4 @@ rect 1
 svg 1
 text 5
 tspan 2
-hash 230c5dca73339bd7
+hash 5c5454d2e7f9a18c

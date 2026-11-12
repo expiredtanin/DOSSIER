@@ -400,8 +400,29 @@ pub fn stamp_block_refs(doc: &RichTextDoc, extra: &[(&str, LineAlign)], base_pt:
     if lines.is_empty() {
         return Vec::new();
     }
-    let total_h = base_fs + lines[1..].iter().fold(0.0, |s, l| s + l.line_height);
-    let mut y = y0 - total_h / 2.0 + base_fs * 0.8;
+    // [199] Zeilen mit eigener Schriftgrösse (Name 12 pt, Nummer 9 pt) schrumpfen nicht mit der Grundschrift: bei
+    // verkleinerter Grundschrift (enger Raum, 2 mm) lag der Vorschub (1.3 × Grundschrift) unter der Zeilenhöhe und
+    // Name und Nummer überdeckten sich (Musterhaus komplex, DG „Schlafen" 1:100). Vorschub mindestens 1.15 × die
+    // grösste Schrift der Zeile bzw. Unterlänge der Zeile davor plus Oberlänge dieser; erste Zeile nach ihrer Schrift.
+    let fs: Vec<f64> = lines
+        .iter()
+        .map(|l| {
+            l.toks
+                .iter()
+                .map(|t| if t.para >= n { base_fs * 0.8 } else { doc.paragraphs[t.para].runs[t.run].marks.size_pt.filter(|v| v.is_finite() && *v > 0.0).map_or(base_fs, |pt| pt * unit_per_pt) })
+                .fold(f64::NAN, f64::max)
+        })
+        .map(|f| if f.is_finite() { f } else { base_fs })
+        .collect();
+    for k in 1..lines.len() {
+        let need = (1.15 * fs[k]).max(0.3 * fs[k - 1] + 0.8 * fs[k]);
+        if lines[k].line_height < need {
+            lines[k].line_height = need;
+        }
+    }
+    let first = base_fs.max(fs[0]);
+    let total_h = first + lines[1..].iter().fold(0.0, |s, l| s + l.line_height);
+    let mut y = y0 - total_h / 2.0 + first * 0.8;
     lines
         .into_iter()
         .enumerate()
@@ -623,8 +644,9 @@ pub fn stamp_block_size(doc: &RichTextDoc, extra: &[(&str, LineAlign)], base_pt:
         return (0.0, 0.0);
     }
     let w = placed.iter().map(|p| p.line.tspans.iter().map(|t| text_width_em(&t.text, t.bold) * t.font_size).sum::<f64>()).fold(0.0, f64::max);
-    let base_fs = base_pt * unit_per_pt;
-    let h = base_fs + placed[1..].iter().map(|p| p.line.line_height).sum::<f64>();
+    // [199] Erste Zeile nach ihrer grössten Schrift (wie die Zentrierung in [`stamp_block_refs`]).
+    let first = placed[0].line.tspans.iter().map(|t| t.font_size).fold(base_pt * unit_per_pt, f64::max);
+    let h = first + placed[1..].iter().map(|p| p.line.line_height).sum::<f64>();
     (w, h)
 }
 
@@ -754,6 +776,33 @@ mod tests {
         assert_eq!(w[1].0, 1.5);
         let r = text_frame_corners(&d, (0.0, 0.0), 0.2, std::f64::consts::FRAC_PI_2, None, 0.9);
         assert!((r[0].0 + 0.18).abs() < 1e-12 && r[0].1.abs() < 1e-12);
+    }
+    /// [199] Name/Nummer mit eigener Schriftgrösse bei verkleinerter Grundschrift: kein Überdecken der Zeilen,
+    /// der Block misst die grössere Schrift.
+    #[test]
+    fn stempel_vorschub_nach_eigener_schrift() {
+        let name = Marks { bold: Some(true), size_pt: Some(12.0), ..Default::default() };
+        let num = Marks { size_pt: Some(9.0), ..Default::default() };
+        let d = RichTextDoc {
+            version: 1.0,
+            paragraphs: vec![
+                Paragraph { runs: vec![TextRun { text: "Schlafen".into(), marks: name, ..Default::default() }], ..Default::default() },
+                Paragraph { runs: vec![TextRun { text: "D.01".into(), marks: num, ..Default::default() }], ..Default::default() },
+            ],
+            ..Default::default()
+        };
+        let base = 5.67;
+        let placed = stamp_block(&d, &[("35.2 m²", LineAlign::Left)], base, 1.0, "#000", 0.0);
+        let ys: Vec<f64> = placed.iter().map(|p| p.y).collect();
+        // Grundlinie Name → Nummer: Unterlänge 12 pt + Oberlänge 9 pt passen (≥ 1.15 × 9).
+        assert!(ys[1] - ys[0] >= 1.15 * 9.0 - 1e-9, "{ys:?}");
+        assert!(ys[2] - ys[1] >= 0.3 * 9.0 + 0.8 * base * 0.8 - 1e-9, "{ys:?}");
+        // Oberkante des Blocks (Grundlinie Name − 0.8 × 12) bis Grundlinie letzte Zeile: so hoch misst der Block.
+        let (_, h) = stamp_block_size(&d, &[("35.2 m²", LineAlign::Left)], base, 1.0);
+        assert!((h - (12.0 + (ys[2] - ys[0]))).abs() < 1e-9, "{h}");
+        // Normale Grundschrift (10 pt): Vorschub wie bisher 13 pt.
+        let placed = stamp_block(&d, &[("35.2 m²", LineAlign::Left)], 10.0, 1.0, "#000", 0.0);
+        assert!((placed[1].y - placed[0].y - 13.0).abs() < 1e-9 && (placed[2].y - placed[1].y - 13.0).abs() < 1e-9);
     }
     /// [140] Echte Metrik: „Bad" schmaler als „WWW", Leerzeichen schmal; Stempelblock misst Name und Zeilen.
     #[test]
