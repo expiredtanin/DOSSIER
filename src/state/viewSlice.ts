@@ -129,7 +129,7 @@ export function createViewSlice(api: StoreApi<ViewSlice>): ViewSlice {
     setGrid3dVisible: (b) => set({ grid3dVisible: b }),
     setExplode3d: (b) => set({ explode3d: b }),
     setExplode3dGap: (m) => {
-      if (Number.isFinite(m) && m > 0) set({ explode3dGap: Math.min(m, 100) });
+      if (Number.isFinite(m) && m >= 0) set({ explode3dGap: Math.min(m, 100) });
     },
     setPlanColorMode: (m) => set({ planColorMode: m }),
     setReferenceLines: (b) => set({ referenceLines: b }),

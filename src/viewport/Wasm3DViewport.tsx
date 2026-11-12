@@ -2062,26 +2062,38 @@ export function Wasm3DViewport({
       {/* Explosionsaxonometrie ([65]): Umschalter links neben dem Raster-Knopf, aktiv mit Abstandsfeld. */}
       <div style={{ position: "absolute", right: onToggleGrid ? 48 : 10, bottom: 10, display: "flex", gap: 4, alignItems: "center" }}>
         {explodeOn && (
-          <input
-            type="number"
-            min={0.5}
-            max={100}
-            step={0.5}
-            value={explodeGap}
-            aria-label={t("viewport3d.explode.gap")}
+          // Schieberegler statt Zahlenfeld (Wunsch Maintainer 12.11.): 0 = zusammengesetzt, Doppelklick setzt auf 0 zurück.
+          <label
             title={t("viewport3d.explode.gap")}
-            onChange={(e) => setExplodeGap(Number(e.target.value))}
+            onDoubleClick={() => setExplodeGap(0)}
             style={{
-              width: 56,
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
               height: 30,
               boxSizing: "border-box",
+              padding: "0 8px",
               borderRadius: 7,
               border: "1px solid rgba(255,255,255,0.14)",
               background: "rgba(20,20,24,0.65)",
               color: "#f2f2f2",
-              padding: "0 6px",
+              backdropFilter: "blur(4px)",
+              fontSize: 12,
+              fontVariantNumeric: "tabular-nums",
             }}
-          />
+          >
+            <input
+              type="range"
+              min={0}
+              max={10}
+              step={0.1}
+              value={Math.min(explodeGap, 10)}
+              aria-label={t("viewport3d.explode.gap")}
+              onChange={(e) => setExplodeGap(Number(e.target.value))}
+              style={{ width: 96, accentColor: "#f2f2f2" }}
+            />
+            <span style={{ minWidth: 38, textAlign: "right" }}>{explodeGap.toFixed(1)} m</span>
+          </label>
         )}
         <button
           type="button"
