@@ -46,7 +46,9 @@ import type { BodyTarget } from "../views/plan/PlanView";
 import type { CommandLineHandle } from "../ui/CommandLine";
 import type { CommandEngine } from "../commands/engine";
 import { single } from "./selection";
-import { getState as storeState } from "./appStore";
+import { getState as storeState, useStore } from "./appStore";
+import { getPlanViewport, subscribePlanViewport } from "./planViewport";
+import { growRect, meshGripIndices } from "../core";
 import { patchItem, verticalExtents } from "../core";
 import { treeGripPatch, treeGripPoints } from "./treeGrips";
 import type { Selection } from "./selection";
@@ -202,6 +204,9 @@ export function useGripEditing(opts: {
         return o && (o.type === "terrainMesh" || o.type === "importedMesh") ? o : null;
       })()
     : null;
+  // [193] Aktiver Netzpunkt und sichtbarer Ausschnitt (nur für Netze über der Griff-Grenze abonniert).
+  const activeMeshPoint = useStore((st) => st.activeMeshPoint);
+  const meshViewport = useSyncExternalStore(subscribePlanViewport, () => (selectedMesh && selectedMesh.positions.length / 3 > 600 ? getPlanViewport() : null));
   const selectedTreeId = single(selection, "trees");
   const selectedTree = selectedTreeId ? (project.trees ?? []).find((x) => x.id === selectedTreeId) : undefined;
   // [176] Schnitt-/Ansichtslinie im Grundriss: Griffe an Anfang, Knickpunkten (`bendPoints`) und Ende.
@@ -548,15 +553,17 @@ export function useGripEditing(opts: {
       }
       return pts;
     }
-    // [193] Gelände-Netz: jeder Netzpunkt ein Griff (xy; die Höhe steht in der Objekt-Info). Grosse Netze (swissALTI3D
-    // mit tausenden Punkten) bekommen keine Griffe — dort hilft Zuschneiden auf das Grundstück.
+    // [193] Gelände-Netz: Netzpunkte als Griffe (xy; die Höhe: Klick auf den Griff wählt den Punkt, dann die Objekt-Info
+    // bzw. Rechtsklick „Höhe setzen …"). Bis MAX_CONTOUR_GRIPS Punkte alle, grössere Netze (swissALTI3D) nur im
+    // sichtbaren Ausschnitt (mit Rand, die der Mitte nächsten, höchstens MAX_CONTOUR_GRIPS).
     if (selectedMesh && !selectedCeiling && effectiveDrawingIds.length === 0 && selectedWallIds.length === 0) {
       const n = Math.floor(selectedMesh.positions.length / 3);
-      if (n > MAX_CONTOUR_GRIPS) return [];
+      const active = activeMeshPoint?.id === selectedMesh.id ? activeMeshPoint.index : null;
+      const rect = n > MAX_CONTOUR_GRIPS && meshViewport ? growRect(meshViewport, 0.5) : null;
       const pts: Vec2[] = [];
-      for (let i = 0; i < n; i++) {
+      for (const i of meshGripIndices(selectedMesh.positions, rect, MAX_CONTOUR_GRIPS, active)) {
         pts.push({ x: selectedMesh.positions[3 * i], y: selectedMesh.positions[3 * i + 1] });
-        gripOwners.push({ localIndex: i });
+        gripOwners.push({ localIndex: i }); // = Netzpunkt-Nummer (bei Ausschnitt ≠ Griff-Index)
         gripOwnerRange.push([0, n - 1]);
       }
       return pts;
@@ -1170,7 +1177,7 @@ export function useGripEditing(opts: {
   const applyGrip = (index: number, pt: Vec2, arcLength?: number) => {
     // [193] Höhenlinien-Punkt bzw. Einfüge-Raute: nur Vorschau, das Projekt ändert sich beim Setzen (ein Undo-Schritt).
     if (selectedMesh) {
-      pendingContourRef.current = { id: selectedMesh.id, index, pt, mesh: true };
+      pendingContourRef.current = { id: selectedMesh.id, index: gripOwners[index]?.localIndex ?? index, pt, mesh: true };
       return;
     }
     if (selectedContourSet) {
@@ -1685,6 +1692,11 @@ export function useGripEditing(opts: {
   };
 
   const gripHandlers = {
+    /** [193] Griff gepackt: bei Netzpunkten wird der Punkt zum aktiven (Objekt-Info, Rechtsklick-Höhe). */
+    onGripGrab: (index: number) => {
+      const vi = gripOwners[index]?.localIndex;
+      if (selectedMesh && vi != null) storeState().setActiveMeshPoint({ id: selectedMesh.id, index: vi });
+    },
     onGripMove: (index: number, raw: Vec2, pxPerMeter: number, mods: ToolMods) => {
       sectionPxRef.current = pxPerMeter;
       // Schnitt/Ansicht ([187]): Höhen-Griff (Wand, Öffnung, Decke).

@@ -11,7 +11,7 @@ import { useStore } from "../state/appStore";
 import type { ContextObject } from "../model/types";
 import { flattenCategories } from "../model/types";
 import { resmoothGridTerrain } from "../model/terrain";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ExcavationQuantity } from "../core";
 
 /** Zahl-Eingabe für ein Feld eines Kontext-Objekts (leer = Standard, ungültig = keine Änderung). */
@@ -67,11 +67,19 @@ const RESMOOTH_PASSES = [1, 2, 4] as const;
 
 /** [193] Netzpunkt wählen (Nummer ab 1) und seine Höhe setzen; Zuschneiden des Netzes auf die Parzelle. */
 function MeshPointFields({ obj }: { obj: Extract<ContextObject, { positions: number[] }> }) {
+  const host = usePanelHost();
   const setMeshPointHeight = useStore((s) => s.setMeshPointHeight);
   const cropMesh = useStore((s) => s.cropMesh);
   const notify = useStore((s) => s.notify);
   const parcel = useStore((s) => s.project.siteRules?.parcel);
+  const deleteMeshPoint = useStore((s) => s.deleteMeshPoint);
+  const active = useStore((s) => s.activeMeshPoint);
   const [nr, setNr] = useState("1");
+  // Klick auf einen Netzpunkt-Griff im Grundriss wählt den Punkt: Nummer (und damit Höhe) vorausgefüllt.
+  const activeIndex = active?.id === obj.id ? active.index : null;
+  useEffect(() => {
+    if (activeIndex != null) setNr(String(activeIndex + 1));
+  }, [activeIndex]);
   const n = Math.floor(obj.positions.length / 3);
   const i = Math.round(Number(nr)) - 1;
   const valid = Number.isFinite(i) && i >= 0 && i < n;
@@ -97,6 +105,17 @@ function MeshPointFields({ obj }: { obj: Extract<ContextObject, { positions: num
       </label>
       <button
         type="button"
+        data-testid="mesh-point-delete"
+        disabled={!valid || n <= 3}
+        title={t("ctx.meshPointDelete.hint")}
+        onClick={() => {
+          if (valid) deleteMeshPoint(obj.id, i);
+        }}
+      >
+        {t("site.meshPointDelete")}
+      </button>
+      <button
+        type="button"
         data-testid="mesh-crop-parcel"
         disabled={!parcel || parcel.length < 3}
         title={parcel && parcel.length >= 3 ? t("site.meshCrop.hint") : t("site.meshCrop.noParcel")}
@@ -105,6 +124,9 @@ function MeshPointFields({ obj }: { obj: Extract<ContextObject, { positions: num
         }}
       >
         {t("site.meshCrop")}
+      </button>
+      <button type="button" data-testid="mesh-crop-polygon" title={t("site.meshCrop.draw.hint")} onClick={() => host.onRunCommand("meshcrop")}>
+        {t("site.meshCrop.draw")}
       </button>
     </>
   );

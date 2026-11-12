@@ -79,4 +79,17 @@ describe("Gelände-Netz: Punkte und Zuschnitt [193]", () => {
     const crop = documentFor(p).cmdOps({ cmd: "meshCrop", id: "tm", poly: [-1, -1, 1, -1, 1, 3, -1, 3] });
     expect(JSON.stringify(crop)).toContain('"indices":[0,1,2]');
   });
+  it("Netzpunkt löschen vernetzt das Loch neu und führt Nummern nach", () => {
+    // Quadrat 0..2 mit Mittelpunkt (Nr. 4): ohne ihn bleiben zwei Dreiecke über den vier Ecken.
+    const sq = {
+      id: "sq", type: "terrainMesh", categoryCode: "02", name: "Gelände",
+      positions: [0, 0, 0, 2, 0, 0, 2, 2, 0, 0, 2, 0, 1, 1, 9], indices: [0, 1, 4, 1, 2, 4, 2, 3, 4, 3, 0, 4],
+    } as unknown as ContextObject;
+    const p: Project = { ...sampleProject, context: [sq] };
+    const ops = documentFor(p).cmdOps({ cmd: "meshPointDelete", id: "sq", index: 4 });
+    expect(ops).toHaveLength(1);
+    const j = JSON.stringify(ops);
+    expect(j).toContain('"positions":[0,0,0,2,0,0,2,2,0,0,2,0]');
+    expect(documentFor(p).cmdOps({ cmd: "meshPointDelete", id: "sq", index: 9 })).toHaveLength(0);
+  });
 });

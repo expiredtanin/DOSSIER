@@ -9,7 +9,7 @@
 
 import { t } from "../i18n";
 import { canSetVertexType, vertexTypeOf, type PolylineVertexType, type RingKind } from "../core";
-import { nearestPolylineTarget, toleranceFor } from "../core";
+import { meshTolerance, nearestMeshVertex, nearestPolylineTarget, toleranceFor } from "../core";
 import type { LayerCategory, Project, Vec2 } from "../model/types";
 import { flattenCategories } from "../model/types";
 import { findCategory } from "../model/layers";
@@ -93,6 +93,10 @@ export interface MenuActions {
   selectedRing?: { kind: RingKind; id: string; rings: { pts: Vec2[]; off: number; closed?: boolean }[] } | null;
   insertRingVertex?: (kind: RingKind, id: string, seg: number, pt: Vec2) => void;
   deleteRingVertex?: (kind: RingKind, id: string, index: number) => void;
+  /** [193] Einzeln gewähltes Gelände-/Netz-Element: Rechtsklick auf einen Netzpunkt → „Höhe setzen …" / „Netzpunkt löschen". */
+  selectedMesh?: { id: string; positions: number[] } | null;
+  askMeshPointHeight?: (id: string, index: number) => void;
+  deleteMeshPoint?: (id: string, index: number) => void;
   deleteSectionBend?: (id: string, index: number) => void;
   /** Ob eine Element-Stil-Zwischenablage gefüllt ist (aktiviert „Einfügen"). */
   hasDrawingStyleClipboard: boolean;
@@ -381,11 +385,33 @@ function planMenuItems(
           label: t("ctx.deleteCorner"),
           icon: <MenuIcon name="do_not_disturb_on" />,
           disabled: !enabled,
-          title: enabled ? undefined : t("ctx.deleteCorner.min"),
+          title: enabled ? undefined : t(closed ? "ctx.deleteCorner.min" : "ctx.deleteCorner.minOpen"),
           onClick: () => a.deleteRingVertex?.(ring.kind, ring.id, off + hit.index),
         });
       }
       break;
+    }
+  }
+  // [193] Netzpunkt unter dem Zeiger: Höhe setzen (Overlay-Eingabe) bzw. Punkt löschen (Loch wird neu vernetzt).
+  const mesh = a.selectedMesh;
+  const meshHit = mesh ? nearestMeshVertex(mesh.positions, model, meshTolerance(mesh.positions)) : null;
+  if (mesh && meshHit != null) {
+    if (a.askMeshPointHeight) {
+      pointItems.push({
+        label: t("ctx.meshPointHeight"),
+        icon: <MenuIcon name="height" />,
+        onClick: () => a.askMeshPointHeight?.(mesh.id, meshHit),
+      });
+    }
+    if (a.deleteMeshPoint) {
+      const enabled = mesh.positions.length / 3 > 3;
+      pointItems.push({
+        label: t("ctx.meshPointDelete"),
+        icon: <MenuIcon name="do_not_disturb_on" />,
+        disabled: !enabled,
+        title: enabled ? t("ctx.meshPointDelete.hint") : t("ctx.meshPointDelete.min"),
+        onClick: () => a.deleteMeshPoint?.(mesh.id, meshHit),
+      });
     }
   }
   // Eigenschaften übertragen — dasselbe Muster wie im Ebenen-Menü, nur für

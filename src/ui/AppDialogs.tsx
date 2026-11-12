@@ -134,6 +134,13 @@ export function AppDialogs(props: {
   const needsProject = resourcesOpen || !!importState || settingsOpen;
   const subscribed = useStore((s) => (needsProject ? s.project : null));
   const project = subscribed ?? getState().project;
+  // [193] Höhe eines Netzpunkts (Rechtsklick auf den Griff): Overlay-Eingabe statt window.prompt.
+  const meshHeightPrompt = useStore((s) => s.meshHeightPrompt);
+  const meshPromptZ = useStore((s) => {
+    const p = s.meshHeightPrompt;
+    const o = p ? (s.project.context ?? []).find((c) => c.id === p.id) : undefined;
+    return p && o && "positions" in o ? o.positions[3 * p.index + 2] : undefined;
+  });
   return (
     <>
     {/* Frei schwebendes, NICHT-modales Ressourcen-Fenster: kein Backdrop, der
@@ -289,6 +296,21 @@ export function AppDialogs(props: {
           setPendingDiscard(null);
         }}
         onSave={onSaveProject}
+      />
+    )}
+
+    {meshHeightPrompt && meshPromptZ !== undefined && (
+      <PromptDialog
+        title={t("site.meshPointHeight.title")}
+        label={t("site.meshPointHeight.label", { n: meshHeightPrompt.index + 1 })}
+        defaultValue={String(Math.round(meshPromptZ * 1000) / 1000)}
+        type="number"
+        onConfirm={(v) => {
+          const z = Number(v.replace(",", "."));
+          if (Number.isFinite(z)) getState().setMeshPointHeight(meshHeightPrompt.id, meshHeightPrompt.index, z);
+          getState().setMeshHeightPrompt(null);
+        }}
+        onClose={() => getState().setMeshHeightPrompt(null)}
       />
     )}
 

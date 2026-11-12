@@ -80,6 +80,8 @@ export function AppContextMenu(props: {
     resetDimensionTexts,
   } = props.selCmds;
   const project = useStore((s) => s.project);
+  const deleteMeshPoint = useStore((s) => s.deleteMeshPoint);
+  const setMeshHeightPrompt = useStore((s) => s.setMeshHeightPrompt);
   const { selectionAllLocked, selectionLayerCodes, selectionAllNoPrint, attachedDimensionIds, movedDimTextIds } = selectionMenuState(
     project,
     selection,
@@ -180,6 +182,12 @@ export function AppContextMenu(props: {
         })(),
         insertRingVertex,
         deleteRingVertex,
+        selectedMesh: (() => {
+          const ctx = selection.contextObjects.length === 1 ? (project.context ?? []).find((x) => x.id === selection.contextObjects[0]) : undefined;
+          return ctx && (ctx.type === "terrainMesh" || ctx.type === "importedMesh") ? { id: ctx.id, positions: ctx.positions } : null;
+        })(),
+        askMeshPointHeight: (id, index) => setMeshHeightPrompt({ id, index }),
+        deleteMeshPoint: (id, index) => { deleteMeshPoint(id, index); },
         insertPolylinePoint: insertDrawingPoint,
         deletePolylinePoint: deleteDrawingPoint,
         setPolylineVertexType,

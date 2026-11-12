@@ -40,6 +40,14 @@ export interface SiteSlice {
   setContourHeight: (id: string, index: number, z: number, coalesceKey?: string) => void;
   /** [193] Höhe eines Netzpunkts (Vertex-Nummer ab 0) setzen. */
   setMeshPointHeight: (id: string, index: number, z: number, coalesceKey?: string) => void;
+  /** [193] Netzpunkt löschen; sein Loch wird neu vernetzt (Kern `cmd_context.rs`); false = nichts geändert. */
+  deleteMeshPoint: (id: string, index: number) => boolean;
+  /** [193] Aktiver Netzpunkt (Klick auf den Griff): die Objekt-Info zeigt seine Nummer und Höhe. */
+  activeMeshPoint: { id: string; index: number } | null;
+  setActiveMeshPoint: (p: { id: string; index: number } | null) => void;
+  /** [193] Offene Höhen-Eingabe für einen Netzpunkt (Rechtsklick auf den Griff, „Höhe setzen …"). */
+  meshHeightPrompt: { id: string; index: number } | null;
+  setMeshHeightPrompt: (p: { id: string; index: number } | null) => void;
   /** [193] Netz auf ein Polygon (Modell-Meter) zuschneiden; false = nichts geändert. */
   cropMesh: (id: string, poly: Vec2[]) => boolean;
   /** [193] Kontext-Elemente um `delta` verschieben (Maus-Ziehen im Plan; Kern `cmd_transform.rs`), ein Undo-Schritt. */
@@ -119,6 +127,24 @@ export function createSiteSlice(
       const ops = documentFor(get().project).cmdOps({ cmd: "meshPointZ", id, index, z });
       if (ops.length) get().applyChange(ops, coalesceKey);
     },
+
+    deleteMeshPoint: (id, index) => {
+      const ops = documentFor(get().project).cmdOps({ cmd: "meshPointDelete", id, index });
+      if (ops.length) {
+        get().applyChange(ops);
+        api.set({ activeMeshPoint: null, meshHeightPrompt: null }); // Nummern verschieben sich
+      }
+      return ops.length > 0;
+    },
+
+    activeMeshPoint: null,
+    setActiveMeshPoint: (p) => {
+      const cur = get().activeMeshPoint;
+      if (cur?.id === p?.id && cur?.index === p?.index) return;
+      api.set({ activeMeshPoint: p });
+    },
+    meshHeightPrompt: null,
+    setMeshHeightPrompt: (p) => api.set({ meshHeightPrompt: p }),
 
     cropMesh: (id, poly) => {
       const ops = documentFor(get().project).cmdOps({ cmd: "meshCrop", id, poly: poly.flatMap((q) => [q.x, q.y]) });

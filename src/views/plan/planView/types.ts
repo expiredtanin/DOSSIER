@@ -455,6 +455,8 @@ export interface GripHandlers {
    * Modellpunkt unter dem Cursor.
    */
   onEdgeMove(edge: EdgeGrip, raw: Vec2, pxPerMeter: number, mods: ToolMods): void;
+  /** Griff `index` wurde gepackt (Klick), noch vor dem ersten Ziehen. */
+  onGripGrab?(index: number): void;
   onGripEnd(): void;
   /**
    * Bewaffneten Punkt-Griff verwerfen (Escape): setzt den Punkt exakt auf

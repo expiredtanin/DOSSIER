@@ -68,6 +68,7 @@ import { multilineCommand } from "./cmds/multiline";
 import { importCommand } from "./cmds/import";
 import { terrainCommand } from "./cmds/terrain";
 import { excavationCommand } from "./cmds/excavation";
+import { meshCropCommand } from "./cmds/meshcrop";
 import { measureCommand } from "./cmds/measure";
 import { sectionLineCommand, viewLineCommand } from "./cmds/sectionline";
 import { georefCommand } from "./cmds/georef";
@@ -149,6 +150,7 @@ export const COMMANDS: Record<string, Command> = {
   praesentation: presentationCommand,
   terrain: terrainCommand,
   excavation: excavationCommand,
+  meshcrop: meshCropCommand,
   measure: measureCommand,
   sectionline: sectionLineCommand,
   viewline: viewLineCommand,
@@ -302,6 +304,7 @@ export const ALIASES: Record<string, string> = {
   ter: "terrain",
   baugrube: "excavation",
   aushub: "excavation",
+  netzzuschnitt: "meshcrop",
   schnittlinie: "sectionline",
   ansichtslinie: "viewline",
   bezugspunkt: "georef",

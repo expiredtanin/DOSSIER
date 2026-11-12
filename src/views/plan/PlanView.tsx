@@ -16,6 +16,7 @@ import { contentFontBaselineFromTop, TEXT_LINE_HEIGHT_MULT } from "../../text/fo
 import { textFrameCorners } from "../../text/textFrame";
 import { RichTextEditor } from "../../editors/RichTextEditor";
 import { LiveMeet, LiveValue } from "./planView/liveMeet";
+import { publishPlanViewport, viewBoxToMeshRect } from "../../state/planViewport";
 import { DEFAULT_MARQUEE_COLOR, DEFAULT_SNAP_COLOR } from "../../theme/accents";
 import { type ViewBox__plan_planView_geometry as ViewBox, PX_PER_M, PAD, toScreen, meetScale, defaultViewFor } from "../../core";
 import {
@@ -174,6 +175,8 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
 
   // Aktueller Ausschnitt; treibt die viewBox des SVG. Initial = eingepasst.
   const [view, setView] = useState<ViewBox>(defaultView);
+  // [193] Sichtbarer Ausschnitt (Modell-Meter) für die Netzpunkt-Griffe grosser Netze (verzögert gemeldet).
+  useEffect(() => publishPlanViewport(viewBoxToMeshRect(view, PX_PER_M)), [view]);
   // [26] Kante unter dem Cursor (Kanten-Anfasser); gezeichnet wird sie nur für Flächen-Elemente
   // (Dach, Decke, Raum, Baugrube), deren Kanten-Indizes Griff-Indizes sind.
   const [hoverEdge, setHoverEdge] = useState<EdgeGrip | null>(null);

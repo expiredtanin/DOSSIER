@@ -93,3 +93,5 @@ export { standardOverrideRules } from "../model/standards";
 export { standardModelViews } from "../model/standards";
 export { recognizeMutation, recognizeReport, recognizeSourceLevels } from "../io/recognizeDrawing";
 export type { RecognizeOptions, RecognizeReport, RecognizeUnclear } from "../io/recognizeDrawing";
+export { meshGripIndices, growRect, nearestMeshVertex, meshTolerance } from "../geometry/meshPick";
+export type { MeshRect } from "../geometry/meshPick";

@@ -252,6 +252,7 @@ export function usePlanPointer(inp: UsePlanPointerArgs) {
         // und folgt via normalem Hover-onPointerMove weiter dem Cursor (s.
         // Kommentar an der gripDrag-Deklaration).
         gripDrag.current = { pointerId: e.pointerId, index: gi, origin: grips![gi], startX: e.clientX, startY: e.clientY };
+        gripHandlers?.onGripGrab?.(gi);
         return;
       }
       // Linke Taste auf einem Kanten-Anfasser (Dreieck): Seite ziehen. KEIN
