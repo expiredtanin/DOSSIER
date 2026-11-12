@@ -195,6 +195,13 @@ export function useGripEditing(opts: {
         return o && o.type === "contourSet" ? o : null;
       })()
     : null;
+  // [193] Einzeln gewähltes Gelände-/Netz-Element: Netzpunkte als Griffe (Kern `grips.rs::mesh_grip`).
+  const selectedMesh = selectedContourSetId
+    ? (() => {
+        const o = (project.context ?? []).find((c) => c.id === selectedContourSetId);
+        return o && (o.type === "terrainMesh" || o.type === "importedMesh") ? o : null;
+      })()
+    : null;
   const selectedTreeId = single(selection, "trees");
   const selectedTree = selectedTreeId ? (project.trees ?? []).find((x) => x.id === selectedTreeId) : undefined;
   // [176] Schnitt-/Ansichtslinie im Grundriss: Griffe an Anfang, Knickpunkten (`bendPoints`) und Ende.
@@ -541,6 +548,19 @@ export function useGripEditing(opts: {
       }
       return pts;
     }
+    // [193] Gelände-Netz: jeder Netzpunkt ein Griff (xy; die Höhe steht in der Objekt-Info). Grosse Netze (swissALTI3D
+    // mit tausenden Punkten) bekommen keine Griffe — dort hilft Zuschneiden auf das Grundstück.
+    if (selectedMesh && !selectedCeiling && effectiveDrawingIds.length === 0 && selectedWallIds.length === 0) {
+      const n = Math.floor(selectedMesh.positions.length / 3);
+      if (n > MAX_CONTOUR_GRIPS) return [];
+      const pts: Vec2[] = [];
+      for (let i = 0; i < n; i++) {
+        pts.push({ x: selectedMesh.positions[3 * i], y: selectedMesh.positions[3 * i + 1] });
+        gripOwners.push({ localIndex: i });
+        gripOwnerRange.push([0, n - 1]);
+      }
+      return pts;
+    }
     // [68] Baugrube: Umriss-Ecken + Sohlen-Griff (Lage: Schwerpunkt, y um die Sohlenhöhe versetzt).
     if (modelEditable && selectedExcavation && !selectedCeiling && effectiveDrawingIds.length === 0 && selectedWallIds.length === 0) {
       const pts = excavationGripPoints(selectedExcavation);
@@ -822,7 +842,7 @@ export function useGripEditing(opts: {
   /** [193] Aufgeschobenes Ziehen von Gelände-/Umgebungs-Elementen: ungefangenes und gefangenes Gesamt-Delta. */
   const pendingContextMoveRef = useRef<{ ids: string[]; raw: Vec2; total: Vec2; anchor: Vec2 | null } | null>(null);
   /** [193] Zug an einem Höhenlinien-Punkt (bzw. einer Einfüge-Raute: `insertSeg`): Vorschau bis zum Setzen, dann EIN Undo-Schritt. */
-  const pendingContourRef = useRef<{ id: string; index: number; pt: Vec2; insertSeg?: number } | null>(null);
+  const pendingContourRef = useRef<{ id: string; index: number; pt: Vec2; insertSeg?: number; mesh?: boolean } | null>(null);
   /** Aufgeschobene Öffnungs-Verschiebung im Schnitt/in der Ansicht (neue `position`). */
   const pendingOpeningMoveRef = useRef<{ id: string; position: number } | null>(null);
   /** Aufgeschobene Höhen-Änderung im Schnitt (Kante `kind` auf die Höhe `y`, Kern `sheetHeight`). */
@@ -1149,6 +1169,10 @@ export function useGripEditing(opts: {
   // auf die Wand/2D-Aktionen. So teilen Plan- UND 3D-Griffe denselben Pfad.
   const applyGrip = (index: number, pt: Vec2, arcLength?: number) => {
     // [193] Höhenlinien-Punkt bzw. Einfüge-Raute: nur Vorschau, das Projekt ändert sich beim Setzen (ein Undo-Schritt).
+    if (selectedMesh) {
+      pendingContourRef.current = { id: selectedMesh.id, index, pt, mesh: true };
+      return;
+    }
     if (selectedContourSet) {
       const ins = gripOwners[index];
       pendingContourRef.current = ins?.insertSeg != null
@@ -1285,6 +1309,7 @@ export function useGripEditing(opts: {
   /** Vorschau-Form des ausstehenden Eckpunkt-Zugs (leer, wenn keiner läuft). */
   const gripPreviewShapes = (): DraftShape[] => {
     const pc = pendingContourRef.current;
+    if (pc?.mesh) return [];
     if (pc && selectedContourSet?.id === pc.id) {
       // Die betroffene Höhenlinie mit dem gezogenen (bzw. eingefügten) Punkt als Linienzug.
       let off = 0;
@@ -1360,9 +1385,12 @@ export function useGripEditing(opts: {
     if (ph) sheetHeightGrip(ph.kind, ph.id, ph.y, ph.free, ph.from, ph.index);
     const pc = pendingContourRef.current;
     pendingContourRef.current = null;
-    if (pc) {
+    if (pc?.mesh) storeState().moveMeshPoint(pc.id, pc.index, pc.pt);
+    else if (pc) {
       if (pc.insertSeg != null) storeState().insertRingVertex("contours", pc.id, pc.insertSeg, pc.pt);
       else storeState().moveRingVertex("contours", pc.id, pc.index, pc.pt);
+      // [193] Punkt, der auf einem Nachbarn bzw. auf der Geraden zwischen den Nachbarn landet, entfällt (derselbe Undo-Schritt).
+      storeState().tidyRingVertex("contours", pc.id, pc.index, undefined, ringTidyTol());
     }
     const pa = pendingAreaGripRef.current;
     pendingAreaGripRef.current = null;

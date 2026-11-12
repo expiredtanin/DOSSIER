@@ -317,6 +317,11 @@ pub fn run(lk: &Lookup, req: &Request) -> Result<GripResult, String> {
             let (seg, (x, y)) = (r.n("seg"), r.p("pt"));
             patch("context", r.s("id"), &|e| contour_edit(e, seg, Some((x, y)), true)).into()
         }
+        // [193] Gelände-Netz: Netzpunkt `index` (Vertex-Nummer) im Grundriss verschieben, die Höhe bleibt (Höhe: Befehl `meshPointZ`).
+        "meshGrip" => {
+            let (index, (x, y)) = (r.n("index"), r.p("pt"));
+            patch("context", r.s("id"), &|e| mesh_grip(e, index, x, y)).into()
+        }
         "excavationEdge" => {
             let (a, b, (dx, dy)) = (r.n("a"), r.n("b"), r.p("delta"));
             patch("context", r.s("id"), &|e| Some(with(e, "outline", move_polygon_edge(field(e, "outline")?.as_array()?, a, b, dx, dy, true)?))).into()
@@ -375,7 +380,7 @@ pub fn run(lk: &Lookup, req: &Request) -> Result<GripResult, String> {
                 Some("roof") => "roofs",
                 Some("ceiling") => "ceilings",
                 Some("room") => "rooms",
-                Some("excavation") => "context",
+                Some("excavation") | Some("contours") => "context",
                 Some("polyline") => "drawings2d",
                 _ => return Ok(GripResult::default()),
             };
@@ -1475,6 +1480,58 @@ fn contour_edit(e: &Value, flat: f64, at: Option<(f64, f64)>, insert: bool) -> O
     None
 }
 
+/// [193] Netzpunkt `index` eines `terrainMesh`/`importedMesh` auf `(x, y)` setzen (z unverändert).
+fn mesh_grip(e: &Value, index: f64, x: f64, y: f64) -> Option<Value> {
+    if !(x.is_finite() && y.is_finite()) || !matches!(field(e, "type").and_then(Value::as_str), Some("terrainMesh" | "importedMesh")) {
+        return None;
+    }
+    let pos = arr(field(e, "positions"));
+    let i = index_in(index, pos.len() / 3)?;
+    let mut v = pos.to_vec();
+    v[3 * i] = js_num(x);
+    v[3 * i + 1] = js_num(y);
+    Some(with(e, "positions", Value::Array(v)))
+}
+
+/// [193] Höhenlinien-Punkt löschen bzw. aufräumen (flacher Index über alle Linien des Satzes). Mindestens 2 Punkte
+/// (offen) bzw. 3 (geschlossen) bleiben. Aufräumen entfernt den Punkt nur, wenn er auf dem Nachbarpunkt oder (innen) auf
+/// der Geraden zwischen den Nachbarn liegt. Eine wahre Kurve (`curve`) fällt weg. Einfügen läuft über `contourInsert`.
+fn contour_ring_edit(e: &Value, flat: f64, edit: &RingEdit) -> Option<Value> {
+    if field(e, "type").and_then(Value::as_str) != Some("contourSet") || matches!(edit, RingEdit::Insert(..)) {
+        return None;
+    }
+    let cs = arr(field(e, "contours"));
+    let mut off = 0usize;
+    for (ci, c) in cs.iter().enumerate() {
+        let pts = arr(field(c, "pts"));
+        let (closed, n) = (truthy(field(c, "closed")), pts.len());
+        if let Some(i) = index_in(flat - off as f64, n) {
+            if n <= if closed { 3 } else { 2 } {
+                return None;
+            }
+            if let RingEdit::Tidy(tol) = *edit {
+                let near = |a: usize, b: usize| {
+                    let (p, q) = (xy(&pts[a]), xy(&pts[b]));
+                    hypot2(p.0 - q.0, p.1 - q.1) < tol
+                };
+                let end = !closed && (i == 0 || i == n - 1);
+                let hit = if end { near(i, if i == 0 { 1 } else { n - 2 }) } else { near(i, (i + n - 1) % n) || near(i, (i + 1) % n) || point_near_neighbors(pts, i, tol) };
+                if !hit {
+                    return None;
+                }
+            }
+            let mut v = pts.to_vec();
+            v.remove(i);
+            let nc = with_opt(&with(c, "pts", Value::Array(v)), vec![("curve", None)]);
+            let mut out = cs.to_vec();
+            out[ci] = nc;
+            return Some(with(e, "contours", Value::Array(out)));
+        }
+        off += n;
+    }
+    None
+}
+
 /// [26] Ecke einfügen/löschen/aufräumen an einem Umriss-Element (s. `ringInsert`).
 fn ring_edit(e: &Value, kind: &str, flat: f64, edit: &RingEdit) -> Option<Value> {
     if truthy(field(e, "locked")) {
@@ -1496,6 +1553,7 @@ fn ring_edit(e: &Value, kind: &str, flat: f64, edit: &RingEdit) -> Option<Value>
         "excavation" => simple("outline", "outlineBulge"),
         "room" => simple("boundary", "boundaryBulge"),
         "polyline" => polyline_ring_edit(e, flat, edit),
+        "contours" => contour_ring_edit(e, flat, edit),
         "roof" => {
             let outline = field(e, "outline")?.as_array()?;
             let holes: Vec<&Vec<Value>> = arr(field(e, "holes")).iter().filter_map(|h| h.as_array()).collect();
@@ -2130,6 +2188,37 @@ mod tests {
         let e = ent(json!({"op": "contourInsert", "id": "hl", "seg": 5, "pt": [1, 2]})).unwrap();
         assert_eq!(e["contours"][1]["pts"][3], json!({"x": 1, "y": 2}));
         assert!(ent(json!({"op": "contourInsert", "id": "hl", "seg": 6, "pt": [1, 2]})).is_none());
+    }
+
+    /// [193] Netzpunkt im Grundriss verschieben (z bleibt).
+    #[test]
+    fn netzpunkt_griff() {
+        let r = root(json!({"context": [{"id": "tm", "type": "terrainMesh", "positions": [0, 0, 5, 1, 0, 6, 0, 1, 7], "indices": [0, 1, 2]}]}));
+        let ent = |v: Value| run(&Lookup::plain(&r), &rq(v)).unwrap().ops.first().map(|o| o.to_json()["entity"].clone());
+        let e = ent(json!({"op": "meshGrip", "id": "tm", "index": 1, "pt": [3, 4]})).unwrap();
+        assert_eq!(e["positions"], json!([0, 0, 5, 3, 4, 6, 0, 1, 7]));
+        assert!(ent(json!({"op": "meshGrip", "id": "tm", "index": 3, "pt": [3, 4]})).is_none());
+    }
+
+    /// [193] Höhenlinien-Punkt löschen / aufräumen (Mindestpunktzahl offen 2, geschlossen 3).
+    #[test]
+    fn hoehenlinien_punkt_loeschen() {
+        let r = root(json!({"context": [{"id": "hl", "type": "contourSet", "contours": [
+            {"z": 1, "closed": false, "pts": [{"x": 0, "y": 0}, {"x": 2, "y": 0}, {"x": 4, "y": 0}]},
+            {"z": 2, "closed": true, "curve": {"cx": 0, "cy": 0}, "pts": [{"x": 0, "y": 1}, {"x": 2, "y": 1}, {"x": 2, "y": 3}]},
+            {"z": 3, "closed": false, "pts": [{"x": 0, "y": 5}, {"x": 5, "y": 5}]}]}]}));
+        let ent = |v: Value| run(&Lookup::plain(&r), &rq(v)).unwrap().ops.first().map(|o| o.to_json()["entity"].clone());
+        let e = ent(json!({"op": "ringDelete", "kind": "contours", "id": "hl", "index": 1})).unwrap();
+        assert_eq!(e["contours"][0]["pts"].as_array().unwrap().len(), 2);
+        assert_eq!(e["contours"][0]["pts"][1], json!({"x": 4, "y": 0}));
+        // geschlossen mit 3 Punkten und offen mit 2: nicht löschbar
+        assert!(ent(json!({"op": "ringDelete", "kind": "contours", "id": "hl", "index": 4})).is_none());
+        assert!(ent(json!({"op": "ringDelete", "kind": "contours", "id": "hl", "index": 6})).is_none());
+        assert!(ent(json!({"op": "ringDelete", "kind": "contours", "id": "hl", "index": 9})).is_none());
+        // Aufräumen: Punkt 1 liegt auf der Geraden -> weg; ein Punkt abseits bliebe.
+        let e = ent(json!({"op": "ringTidy", "kind": "contours", "id": "hl", "index": 1, "tol": 0.01})).unwrap();
+        assert_eq!(e["contours"][0]["pts"].as_array().unwrap().len(), 2);
+        assert!(ent(json!({"op": "ringTidy", "kind": "contours", "id": "hl", "index": 4, "tol": 0.01})).is_none());
     }
 
     /// [26] Dach: Ecken und Kanten von Umriss und Hof über den flachen Index; schiefer Umriss bleibt schief.

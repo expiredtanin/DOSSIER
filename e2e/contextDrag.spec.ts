@@ -89,3 +89,23 @@ test("Musterhaus komplex: Höhenlinien-Punkt per Griff ziehen, ein Undo-Schritt"
   expect(await firstOf(page, "contourSet")).toEqual(p0);
   expect(p1).not.toEqual(p0);
 });
+
+test("Musterhaus komplex: Höhenlinien-Punkt per Rechtsklick löschen, ein Undo-Schritt [193]", async ({ page }) => {
+  test.setTimeout(120_000);
+  await openComplex(page);
+  await showSnapshot(page, "Situation 1:500");
+  await openTab(page, "Elemente");
+  await elementRows(page).filter({ hasText: "Höhenlinien (Vermessung)" }).first().click();
+  const grips = page.locator(".plan-grip:not(.plan-grip-insert)");
+  await expect.poll(() => grips.count(), { timeout: 30_000 }).toBeGreaterThan(20);
+
+  const p0 = await firstOf(page, "contourSet");
+  const g = await modelToClient(page, p0.x, p0.y);
+  await page.mouse.click(g.x, g.y, { button: "right" });
+  await page.getByRole("menuitem", { name: /Ecke löschen/ }).click();
+  await expect.poll(async () => JSON.stringify(await firstOf(page, "contourSet"))).not.toBe(JSON.stringify(p0));
+
+  await blurFocus(page);
+  await page.keyboard.press("ControlOrMeta+z");
+  expect(await firstOf(page, "contourSet")).toEqual(p0);
+});

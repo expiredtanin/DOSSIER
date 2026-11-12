@@ -46,6 +46,11 @@ describe("Höhenlinien: Punkte per Griff", () => {
     expect(ins.contours[0].pts).toHaveLength(4);
     expect(ins.contours[0].pts[2]).toEqual({ x: 3, y: 1 });
   });
+  it("Punkt löschen und Aufräumen laufen über ringDelete/ringTidy", () => {
+    const p = project();
+    expect(commit<ContourSet>(p, { op: "ringDelete", kind: "contours", id: "hl", index: 1 }, "hl").contours[0].pts).toHaveLength(2);
+    expect(commit<ContourSet>(p, { op: "ringTidy", kind: "contours", id: "hl", index: 1, tol: 0.01 }, "hl").contours[0].pts).toHaveLength(2);
+  });
 });
 
 describe("Kontext verschieben (Maus-Ziehen im Plan)", () => {
@@ -56,5 +61,22 @@ describe("Kontext verschieben (Maus-Ziehen im Plan)", () => {
     expect(contextAnchor(p, "bg")).toEqual({ x: 0, y: 0 });
     expect(contextAnchor(p, "hl")).toEqual({ x: 0, y: 0 });
     expect(contextAnchor(p, "nix")).toBeNull();
+  });
+});
+
+describe("Gelände-Netz: Punkte und Zuschnitt [193]", () => {
+  const mesh = {
+    id: "tm", type: "terrainMesh", categoryCode: "02", name: "Gelände",
+    positions: [0, 0, 1, 2, 0, 2, 2, 2, 3, 0, 2, 4], indices: [0, 1, 2, 0, 2, 3],
+  } as unknown as ContextObject;
+  const proj = (): Project => ({ ...sampleProject, context: [mesh] });
+  it("Netzpunkt per Griff verschieben, Höhe setzen, auf Polygon zuschneiden", () => {
+    const p = proj();
+    const m = commit<ContextObject & { positions: number[] }>(p, { op: "meshGrip", id: "tm", index: 1, pt: [5, 6] }, "tm");
+    expect(m.positions.slice(3, 6)).toEqual([5, 6, 2]);
+    const z = documentFor(p).cmdOps({ cmd: "meshPointZ", id: "tm", index: 2, z: 9 });
+    expect(JSON.stringify(z)).toContain("9");
+    const crop = documentFor(p).cmdOps({ cmd: "meshCrop", id: "tm", poly: [-1, -1, 1, -1, 1, 3, -1, 3] });
+    expect(JSON.stringify(crop)).toContain('"indices":[0,1,2]');
   });
 });

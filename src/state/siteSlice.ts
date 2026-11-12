@@ -38,6 +38,10 @@ export interface SiteSlice {
   offsetContextHeight: (id: string, dz: number) => void;
   /** [193] Höhe der Höhenlinie `index` eines Höhenlinien-Satzes setzen (Kern `cmd_context.rs`); `coalesceKey` für Tippen. */
   setContourHeight: (id: string, index: number, z: number, coalesceKey?: string) => void;
+  /** [193] Höhe eines Netzpunkts (Vertex-Nummer ab 0) setzen. */
+  setMeshPointHeight: (id: string, index: number, z: number, coalesceKey?: string) => void;
+  /** [193] Netz auf ein Polygon (Modell-Meter) zuschneiden; false = nichts geändert. */
+  cropMesh: (id: string, poly: Vec2[]) => boolean;
   /** [193] Kontext-Elemente um `delta` verschieben (Maus-Ziehen im Plan; Kern `cmd_transform.rs`), ein Undo-Schritt. */
   moveContextBy: (ids: string[], delta: Vec2) => void;
   /** [T6]/[68] Ändert Felder eines Kontext-Objekts (Gelände, Baugrube) in einem Schritt; `coalesceKey` für Tippen. */
@@ -109,6 +113,17 @@ export function createSiteSlice(
     setContourHeight: (id, index, z, coalesceKey) => {
       const ops = documentFor(get().project).cmdOps({ cmd: "contourZ", id, index, z });
       if (ops.length) get().applyChange(ops, coalesceKey);
+    },
+
+    setMeshPointHeight: (id, index, z, coalesceKey) => {
+      const ops = documentFor(get().project).cmdOps({ cmd: "meshPointZ", id, index, z });
+      if (ops.length) get().applyChange(ops, coalesceKey);
+    },
+
+    cropMesh: (id, poly) => {
+      const ops = documentFor(get().project).cmdOps({ cmd: "meshCrop", id, poly: poly.flatMap((q) => [q.x, q.y]) });
+      if (ops.length) get().applyChange(ops);
+      return ops.length > 0;
     },
 
     moveContextBy: (ids, delta) => {
