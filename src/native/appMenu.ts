@@ -15,6 +15,7 @@
 import { useEffect, useRef } from "react";
 import { isTauriRuntime } from "./projectFile";
 import { t } from "../i18n";
+import { openRenderDialog } from "../state/renderDialogHook";
 import { APP_VERSION } from "../ui/TopBar";
 import type { View3d, ViewType } from "../model/viewTypes";
 import type { SelectionActionId } from "../state/selectionActions";
@@ -421,6 +422,12 @@ export function useNativeAppMenu(
             text: t("menu.view.toggleTrace"),
             accelerator: "CmdOrCtrl+Shift+T",
             action: () => handlersRef.current.onSelectionAction?.("toggleTrace"),
+          }),
+          // [211] Rendering mit Blender/Cycles (Dialog in App montiert, Öffner über den Modul-Hook).
+          await PredefinedMenuItem.new({ item: "Separator" }),
+          await MenuItem.new({
+            text: t("menu.view.rendering"),
+            action: () => openRenderDialog(),
           }),
         ],
       });

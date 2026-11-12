@@ -19,6 +19,9 @@ mod lock;
 // Absturzsicheres Speichern ([116]): Temp-Datei + fsync + Umbenennen, `<pfad>~` als Sicherung.
 mod atomic_save;
 
+// Blender als eigener Prozess ([211], Rendering mit Blender/Cycles): suchen, starten, abbrechen.
+mod blender;
+
 use std::path::PathBuf;
 use tauri::State;
 
@@ -38,6 +41,51 @@ fn acquire_project_lock(
 #[tauri::command]
 fn save_atomic(path: String, content: String) -> Result<(), String> {
     atomic_save::save_atomic_impl(&PathBuf::from(path), content.as_bytes())
+}
+
+/// Blender-Programmdatei ([211]): eigene Angabe aus den Einstellungen, sonst PATH und die üblichen Orte. `None` = nicht gefunden.
+#[tauri::command]
+fn blender_find(custom: Option<String>) -> Option<String> {
+    blender::find(custom.as_deref(), std::env::var_os("PATH").as_deref(), blender::CANDIDATES).map(|p| p.to_string_lossy().into_owned())
+}
+
+/// Neuer Arbeitsordner für ein Rendering (`<temp>/dossier-render/…`); die Webview schreibt das Paket hinein.
+#[tauri::command]
+fn blender_job_dir() -> Result<String, String> {
+    blender::job_dir().map(|p| p.to_string_lossy().into_owned())
+}
+
+/// Startet Blender als Hintergrundprozess. Ausgabezeilen kommen als Ereignis `blender://line` `{ jobId, line }`, das
+/// Ende als `blender://exit` `{ jobId, code }`. Nur Programme, die nach Blender heissen.
+#[tauri::command]
+fn blender_start(
+    app: tauri::AppHandle,
+    job_id: String,
+    exe: String,
+    args: Vec<String>,
+    state: State<blender::Jobs>,
+) -> Result<(), String> {
+    use tauri::Emitter;
+    let (a1, a2) = (app.clone(), app);
+    let (i1, i2) = (job_id.clone(), job_id.clone());
+    blender::start(
+        &state,
+        &job_id,
+        &PathBuf::from(exe),
+        &args,
+        move |line| {
+            let _ = a1.emit("blender://line", serde_json::json!({ "jobId": i1, "line": line }));
+        },
+        move |code| {
+            let _ = a2.emit("blender://exit", serde_json::json!({ "jobId": i2, "code": code }));
+        },
+    )
+}
+
+/// Bricht ein laufendes Rendering ab.
+#[tauri::command]
+fn blender_cancel(job_id: String, state: State<blender::Jobs>) {
+    blender::cancel(&state, &job_id);
 }
 
 /// Gibt einen von dieser Instanz gehaltenen Lock frei. No-op, wenn der Pfad
@@ -282,7 +330,9 @@ pub fn run() {
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_shell::init())
         // Haelt die pro Instanz offen gelockten Projektdatei-Handles (lock.rs).
-        .manage(lock::LockState::default());
+        .manage(lock::LockState::default())
+        // Laufende Blender-Aufträge ([211], blender.rs).
+        .manage(blender::Jobs::default());
 
     #[cfg(all(feature = "native2d", target_os = "macos"))]
     let builder = builder.manage(native_embed::EmbedState::default());
@@ -316,7 +366,11 @@ pub fn run() {
         push_native_walls,
         acquire_project_lock,
         release_project_lock,
-        save_atomic
+        save_atomic,
+        blender_find,
+        blender_job_dir,
+        blender_start,
+        blender_cancel
     ]);
     #[cfg(not(any(feature = "native2d", feature = "native3d")))]
     let builder = builder.invoke_handler(tauri::generate_handler![
@@ -333,7 +387,11 @@ pub fn run() {
         native2d_scene_texts,
         acquire_project_lock,
         release_project_lock,
-        save_atomic
+        save_atomic,
+        blender_find,
+        blender_job_dir,
+        blender_start,
+        blender_cancel
     ]);
 
     builder

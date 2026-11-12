@@ -11,6 +11,7 @@ import { Dropdown } from "./Dropdown";
 import type { DropdownItem } from "./Dropdown";
 import { t } from "../i18n";
 import type { View3d, ViewType } from "../model/viewTypes";
+import { openRenderDialog } from "../state/renderDialogHook";
 
 export interface AppMenuBarProps {
   /** Datei: Neu/Neu aus Vorlage/Öffnen/Speichern/Importieren. */
@@ -158,6 +159,9 @@ export const AppMenuBar = memo(function AppMenuBar({
       onSelect: () => onReferenceLines(!referenceLines),
       active: referenceLines,
     },
+    { divider: true },
+    // [211] Rendering mit Blender/Cycles (Dialog in App montiert, Öffner über den Modul-Hook).
+    { label: t("menu.view.rendering"), onSelect: openRenderDialog },
   ];
 
   const windowItems: DropdownItem[] = [

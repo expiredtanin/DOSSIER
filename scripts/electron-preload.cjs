@@ -18,6 +18,25 @@ contextBridge.exposeInMainWorld("dossierWindow", {
   },
 });
 
+// [211] Rendering mit Blender: Prozess im Hauptprozess (electron-blender.cjs), Renderer-Seite src/native/blender.ts.
+contextBridge.exposeInMainWorld("dossierBlender", {
+  find: (custom) => ipcRenderer.invoke("blender:find", custom),
+  prepare: (files) => ipcRenderer.invoke("blender:prepare", files),
+  start: (jobId, exe, args) => ipcRenderer.invoke("blender:start", jobId, exe, args),
+  cancel: (jobId) => ipcRenderer.send("blender:cancel", jobId),
+  readFile: (path) => ipcRenderer.invoke("blender:read", path),
+  onLine: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on("blender:line", listener);
+    return () => ipcRenderer.removeListener("blender:line", listener);
+  },
+  onExit: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on("blender:exit", listener);
+    return () => ipcRenderer.removeListener("blender:exit", listener);
+  },
+});
+
 // [170] Projektdatei, mit der die App gestartet wurde (`dossier datei.obp`), und spätere Aufrufe
 // einer zweiten Instanz. Inhalt wird im Hauptprozess gelesen: {name, path, text} oder null.
 contextBridge.exposeInMainWorld("dossierLaunch", {
