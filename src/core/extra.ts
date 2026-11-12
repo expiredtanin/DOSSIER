@@ -74,7 +74,7 @@ export { arcApex, drawingVertices, gripPt, openEdges, polylineEdgeGrips, ringEdg
 export { verticalExtents } from "../geometry/grips";
 export type { VerticalExtent } from "../geometry/grips";
 export type { GripRequest, RingKind } from "../geometry/grips";
-export { clampInside, coincidentGripPoints, excavationGripPoints, gripArcWallRadius, gripArcWallResize, gripArcWallTarget, gripAxisLock, gripEdgeTarget, gripPolar, gripPolarPoint, openingGripPoint, openingSheetSlide, openingTypedPosition, sheetHeightDrag, snapSheetHeight, stairMoveHandle, stairParamPoints, wallGripPoints } from "../geometry/gripDrag";
+export { clampInside, coincidentGripPoints, excavationGripPoints, gripArcWallRadius, gripArcWallResize, gripArcWallTarget, gripAxisLock, gripEdgeTarget, gripPolar, gripPolarPoint, openingGripPoint, openingSheetSlide, openingTypedPosition, contourMarks, sheetHeightDrag, snapSheetHeight, stairMoveHandle, stairParamPoints, wallGripPoints } from "../geometry/gripDrag";
 export type { EdgeDrive, GripLocks, SheetHeightKind } from "../geometry/gripDrag";
 export { openingPreviewProject, openingPreviewSvgs } from "../plan/openingPreview";
 export type { OpeningPreviewSvgs } from "../plan/openingPreview";

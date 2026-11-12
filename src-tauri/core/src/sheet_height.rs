@@ -9,13 +9,20 @@
 //! | `openingBottom` | Brüstung (`sillHeight`) bei gleicher Oberkante (Fenster) |
 //! | `ceilingTop` | Höhenlage: Oberkante-Bindung (`top`); ohne UK-Bindung zieht die Dicke die Unterkante mit |
 //! | `ceilingBottom` | Dicke (über den Deckentyp, wie die Objekt-Info) bzw. die UK-Bindung, falls es eine gibt |
+//! | `roofEave` | Traufhöhe (`baseElevation`); das ganze Dach wandert, die Firsthöhe über der Traufe bleibt |
+//! | `roofTop` | Firsthöhe: die Neigung (`pitchDeg`) wird so gerechnet, dass der First auf der Kote liegt |
+//! | `parapetTop` | Attika-Höhe (`parapetHeight`, Flachdach): Oberkante über der Traufe |
+//! | `stairTop` | Austrittshöhe (`totalRise`, ab Geschoss-Basis; Mindeststeigung 0.30 m über dem Antritt) |
+//! | `stairBottom` | Antritt (`baseOffset` über der Geschoss-Basis); der Austritt bleibt stehen |
+//! | `contextTop`, `contextBottom` | Gelände (Netz, Baugrube, Höhenlinien): alle Höhen um die Differenz zur Griffhöhe `b` versetzen |
+//! | `contourLine` | Höhe der Höhenlinie `index` eines Höhenlinien-Satzes (Blatt-Höhe + Bezugshöhe `datum` → Höhe der Linie) |
 //!
 //! Raster 1 cm (`free` = ohne), Mindestmasse: Wand 0.30 m, Öffnung 0.20 m, Decke 0.05 m. Bindungen bleiben in ihrer
 //! Art (Geschoss + Versatz bleibt Geschoss + Versatz, absolut bleibt absolut); ohne Bindung entsteht eine
 //! Geschoss-Bindung des eigenen Geschosses. Gesperrte Bauteile ändern sich nicht.
 
 use crate::document::Lookup;
-use crate::json_util::{field, js_num, num_of, truthy, with, with_all};
+use crate::json_util::{arr, field, js_num, num_of, truthy, with, with_all};
 use crate::jsnum;
 use crate::ops::Op;
 use crate::selection_info::{anchor, ceiling_extent, ceiling_thickness as ceiling_thickness_of, vertical_extent};
@@ -24,6 +31,8 @@ use serde_json::{json, Map, Value};
 const MIN_WALL: f64 = 0.3;
 const MIN_OPENING: f64 = 0.2;
 const MIN_CEILING: f64 = 0.05;
+const MIN_RIDGE: f64 = 0.1;
+const MIN_STAIR: f64 = 0.3;
 
 /// Art eines Höhen-Griffs (Reihenfolge = Index der Bindung `grip_sheet_height`).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -37,12 +46,22 @@ pub enum Kind {
     /// Decke OK bei gebundener UK: die Dicke ändert sich.
     CeilingTopFixed,
     CeilingBottom,
+    /// Traufe: das Dach wandert (Firsthöhe über der Traufe bleibt); `bottom` = Traufe, `top` = First.
+    RoofEave,
+    /// First: `bottom` = Traufe bleibt, `top` mindestens 0.10 m darüber.
+    RoofTop,
+    /// Attika-Oberkante: `bottom` = Dachhaut, `top` darüber (mindestens gleich).
+    ParapetTop,
+    /// Treppen-Austritt: `bottom` = Basis, `top` mindestens 0.30 m darüber.
+    StairTop,
+    /// Treppen-Antritt: `top` = Austritt bleibt, `bottom` höchstens 0.30 m darunter.
+    StairBottom,
 }
 
 impl Kind {
     pub fn from_index(i: u32) -> Option<Kind> {
         use Kind::*;
-        [WallTop, OpeningTop, OpeningBottom, WallBottom, CeilingTop, CeilingTopFixed, CeilingBottom].get(i as usize).copied()
+        [WallTop, OpeningTop, OpeningBottom, WallBottom, CeilingTop, CeilingTopFixed, CeilingBottom, RoofEave, RoofTop, ParapetTop, StairTop, StairBottom].get(i as usize).copied()
     }
 }
 
@@ -59,6 +78,11 @@ pub fn drag(kind: Kind, base: f64, top: f64, bottom: f64, y: f64, free: bool) ->
         Kind::CeilingTop => (v, bottom + (v - top)),
         Kind::CeilingTopFixed => (jsnum::max(bottom + MIN_CEILING, v), bottom),
         Kind::CeilingBottom => (top, jsnum::min(top - MIN_CEILING, v)),
+        Kind::RoofEave => (top + (v - bottom), v),
+        Kind::RoofTop => (jsnum::max(bottom + MIN_RIDGE, v), bottom),
+        Kind::ParapetTop => (jsnum::max(bottom, v), bottom),
+        Kind::StairTop => (jsnum::max(bottom + MIN_STAIR, v), bottom),
+        Kind::StairBottom => (top, jsnum::min(top - MIN_STAIR, v)),
     }
 }
 
@@ -99,7 +123,9 @@ pub fn snap_level(y: f64, levels: &[f64], tol: f64) -> f64 {
 /// Die Ops für den Zug von `kind` an Bauteil `id` auf die Blatt-Höhe `y`. `new_id`/`new_name`: Deckentyp, falls die
 /// Dicke einen eigenen braucht (`ceilingThickness`). Leer bei unbekanntem Bauteil/Art, Sperre, Unsinn oder wenn sich
 /// nichts ändert.
-pub fn ops(lk: &Lookup, kind: &str, id: &str, y: f64, free: bool, new_id: &str, new_name: &Value) -> Vec<Op> {
+/// `b` = Höhe, auf der der Griff vor dem Zug stand (Dach, Treppe, `contextTop`: der Zug zählt dann relativ), `index` = Höhenlinie (nur `contourLine`).
+#[allow(clippy::too_many_arguments)]
+pub fn ops(lk: &Lookup, kind: &str, id: &str, y: f64, free: bool, new_id: &str, new_name: &Value, b: f64, index: f64) -> Vec<Op> {
     if !y.is_finite() {
         return vec![];
     }
@@ -169,8 +195,137 @@ pub fn ops(lk: &Lookup, kind: &str, id: &str, y: f64, free: bool, new_id: &str, 
             let name = new_name.as_str().map_or_else(|| new_name.clone(), |n| Value::from(n.replace("{t}", &format!("{t:.2}"))));
             crate::grips::ceiling_thickness(root, id, t, new_id, name)
         }
+        "roofEave" | "roofTop" | "parapetTop" => {
+            let Some(r) = lk.find("roofs", id).filter(|r| !locked(r)) else { return vec![] };
+            let eave = roof_eave(root, r);
+            let new = match kind {
+                "roofEave" => {
+                    let z = target(y, free, b, eave);
+                    with(r, "baseElevation", js_num(mm(drag(Kind::RoofEave, 0.0, eave, eave, z, true).1)))
+                }
+                "parapetTop" => {
+                    if field(r, "shape").and_then(Value::as_str) != Some("flach") {
+                        return vec![];
+                    }
+                    let h = jsnum::max(0.0, num_of(field(r, "parapetHeight")));
+                    let h = if h.is_finite() { h } else { 0.0 };
+                    let z = target(y, free, b, eave + h);
+                    with(r, "parapetHeight", js_num(mm(drag(Kind::ParapetTop, 0.0, eave, eave, z, true).0 - eave)))
+                }
+                _ => {
+                    // Ist der Zug relativ (`b`), zählt die heutige Firsthöhe als Ausgang.
+                    let h0 = crate::selection_info::roof_ridge_height(r, eave).unwrap_or(0.0);
+                    let z = target(y, free, b, eave + h0);
+                    match ridge_pitch(r, eave, drag(Kind::RoofTop, 0.0, eave, eave, z, true).0 - eave) {
+                        Some(p) => with(r, "pitchDeg", js_num(p)),
+                        None => return vec![],
+                    }
+                }
+            };
+            if new == *r { vec![] } else { vec![replace("roofs", new)] }
+        }
+        "stairTop" | "stairBottom" => {
+            let Some(st) = lk.find("stairs", id).filter(|s| !locked(s)) else { return vec![] };
+            let f = field(st, "floorId").and_then(Value::as_str).and_then(|i| lk.find("drawingLevels", i));
+            let base = Some(f.map_or(0.0, |f| num_of(field(f, "baseElevation")))).filter(|b| b.is_finite()).unwrap_or(0.0);
+            let floor_h = f.map_or(0.0, |f| num_of(field(f, "floorHeight")));
+            let cur = match num_of(field(st, "totalRise")) {
+                r if r > 0.0 => r,
+                _ if floor_h > 0.0 => floor_h,
+                _ => 2.6,
+            };
+            let off = Some(num_of(field(st, "baseOffset"))).filter(|o| o.is_finite()).unwrap_or(0.0);
+            let new = if kind == "stairTop" {
+                let z = target(y, free, b, base + cur);
+                let top = drag(Kind::StairTop, base, base + cur, base + off, z, true).0;
+                with(st, "totalRise", js_num(mm(top - base)))
+            } else {
+                let z = target(y, free, b, base + off);
+                let bottom = drag(Kind::StairBottom, base, base + cur, base + off, z, true).1;
+                with(st, "baseOffset", js_num(mm(bottom - base)))
+            };
+            if new == *st { vec![] } else { vec![replace("stairs", new)] }
+        }
+        "contextTop" | "contextBottom" | "contourLine" => {
+            let Some(e) = lk.find("context", id).filter(|e| !locked(e)) else { return vec![] };
+            let v = if free { y } else { jsnum::round(y * 100.0) / 100.0 };
+            let new = if kind != "contourLine" {
+                crate::cmd_context::height_offset(e, v - b)
+            } else if index.is_finite() && index >= 0.0 {
+                // Der Schnitt zeichnet die Höhen abzüglich der Bezugshöhe (`datum`, wie das Gelände): zurückrechnen.
+                crate::cmd_context::contour_height(e, index as usize, v + contour_datum(root, e))
+            } else {
+                None
+            };
+            new.map(|entity| vec![replace("context", entity)]).unwrap_or_default()
+        }
         _ => vec![],
     }
+}
+
+/// Bezugshöhe, die der Schnitt von den Höhen eines Höhenlinien-Satzes abzieht (`terrain::datum` über alle Höhenlinien).
+pub(crate) fn contour_datum(root: &Map<String, Value>, set: &Value) -> f64 {
+    let zs: Vec<f64> = arr(field(set, "contours")).iter().map(|c| num_of(field(c, "z"))).collect();
+    crate::terrain::datum(root.get("referenceElevationMasl").and_then(Value::as_f64), &zs)
+}
+
+/// [187] Griffe einer Höhenlinie im Schnitt: Schnittpunkte der Linien des Satzes mit der Schnittebene als
+/// `[u, Blatt-Höhe, Index]` (je Punkt). Eingabe flach: `[Basis x, y, u-Richtung x, y, Bezug m ü. M. (NaN = keiner)]`, dann je
+/// Linie `[z, geschlossen (0/1), Anzahl Punkte, x, y, …]`. Gleiche Bezugshöhe wie die Geländelinie des Schnitts; Unsinn → leer.
+pub fn contour_marks(flat: &[f64]) -> Vec<f64> {
+    if flat.len() < 5 || flat[..4].iter().any(|v| !v.is_finite()) {
+        return vec![];
+    }
+    let (base, u, reference) = ([flat[0], flat[1]], [flat[2], flat[3]], Some(flat[4]).filter(|r| !r.is_nan()));
+    let mut cs = Vec::new();
+    let mut i = 5;
+    while i + 3 <= flat.len() {
+        let (z, closed, n) = (flat[i], flat[i + 1] != 0.0, flat[i + 2]);
+        if !(n >= 0.0 && n.fract() == 0.0) || i + 3 + 2 * (n as usize) > flat.len() {
+            return vec![];
+        }
+        let pts = flat[i + 3..i + 3 + 2 * (n as usize)].chunks_exact(2).map(|c| [c[0], c[1]]).collect();
+        cs.push(crate::terrain::ContourIn { z, pts, closed });
+        i += 3 + 2 * (n as usize);
+    }
+    let datum = crate::terrain::datum(reference, &cs.iter().map(|c| c.z).collect::<Vec<_>>());
+    crate::terrain::contour_crossings(&cs, base, u).into_iter().flat_map(|(s, z, k)| [s, z - datum, k as f64]).collect()
+}
+
+/// Zielhöhe des Zugs: mit bekannter Ausgangshöhe des Griffs `b` relativ (heutige Kante `cur` + Zug, 1-cm-Raster auf
+/// dem Zug), sonst absolut `y`. Die Hülle zieht die sichtbare Kante des Schnitts (inkl. Überstand, Dicke), nicht
+/// die Modell-Kante — darum der Zug als Differenz.
+fn target(y: f64, free: bool, b: f64, cur: f64) -> f64 {
+    let v = if free { y } else { jsnum::round(y * 100.0) / 100.0 };
+    if b.is_finite() { cur + (v - b) } else { v }
+}
+
+/// Traufhöhe (absolutes Z) eines Dachs: `baseElevation`, sonst Oberkante des Geschosses.
+fn roof_eave(root: &Map<String, Value>, r: &Value) -> f64 {
+    if let Some(b) = field(r, "baseElevation").filter(|b| !b.is_null()) {
+        return num_of(Some(b));
+    }
+    let id = field(r, "floorId").and_then(Value::as_str);
+    arr(root.get("drawingLevels")).iter().find(|l| field(l, "id").and_then(Value::as_str) == id).map_or(0.0, |f| num_of(field(f, "baseElevation")) + num_of(field(f, "floorHeight")))
+}
+
+/// Neigung (Grad, 0.01°), bei der der First `rise` Meter über der Traufe liegt; `None` bei Flachdach, Fehler oder
+/// unveränderter Neigung. Die Firsthöhe wächst mit tan(Neigung): Sekantenverfahren auf dem Kern, höchstens 8 Schritte.
+fn ridge_pitch(r: &Value, eave: f64, rise: f64) -> Option<f64> {
+    if field(r, "shape").and_then(Value::as_str) == Some("flach") || !rise.is_finite() {
+        return None;
+    }
+    let p0 = num_of(field(r, "pitchDeg"));
+    let mut p = if p0.is_finite() && p0 > 0.0 { p0 } else { 10.0 };
+    for _ in 0..8 {
+        let h = crate::selection_info::roof_ridge_height(&with(r, "pitchDeg", js_num(p)), eave).ok()?;
+        if !(h > 1e-9) || (h - rise).abs() < 1e-4 {
+            break;
+        }
+        p = ((p.to_radians().tan() * rise / h).atan().to_degrees()).clamp(0.5, 85.0);
+    }
+    let p = jsnum::round(p * 100.0) / 100.0;
+    if p == p0 { None } else { Some(p) }
 }
 
 #[cfg(test)]
@@ -207,7 +362,7 @@ mod tests {
 
     fn run(kind: &str, id: &str, y: f64) -> Vec<Op> {
         let r = root();
-        ops(&Lookup::plain(&r), kind, id, y, false, "ct-neu", &json!("Neu"))
+        ops(&Lookup::plain(&r), kind, id, y, false, "ct-neu", &json!("Neu"), f64::NAN, f64::NAN)
     }
 
     fn entity(ops: &[Op]) -> Value {
@@ -301,4 +456,167 @@ mod tests {
         assert_eq!(e["bottom"], json!({"mode": "custom", "z": 2.1}));
     }
 
+    fn roof_root() -> Map<String, Value> {
+        json!({
+            "drawingLevels": [{"id": "eg", "kind": "floor", "baseElevation": 0.0, "floorHeight": 2.6}],
+            "roofs": [
+                {"id": "r1", "type": "roof", "floorId": "eg", "categoryCode": "35", "shape": "sattel", "pitchDeg": 30, "ridgeAxis": "x",
+                 "outline": [{"x": 0, "y": 0}, {"x": 10, "y": 0}, {"x": 10, "y": 8}, {"x": 0, "y": 8}], "overhang": 0, "thickness": 0.2},
+                {"id": "r2", "type": "roof", "floorId": "eg", "categoryCode": "35", "shape": "flach", "pitchDeg": 0, "baseElevation": 3.5,
+                 "outline": [{"x": 0, "y": 0}, {"x": 10, "y": 0}, {"x": 10, "y": 8}, {"x": 0, "y": 8}], "overhang": 0, "thickness": 0.2},
+                {"id": "r3", "type": "roof", "floorId": "eg", "shape": "sattel", "pitchDeg": 30, "locked": true, "outline": []}
+            ],
+            "stairs": [{"id": "s1", "floorId": "eg", "stepCount": 14}, {"id": "s2", "floorId": "eg", "stepCount": 14, "totalRise": 2.8, "locked": true}],
+            "context": [
+                {"id": "tm", "type": "terrainMesh", "positions": [0, 0, 500, 1, 0, 501, 0, 1, 502]},
+                {"id": "hl", "type": "contourSet", "contours": [{"z": 500, "pts": [], "closed": false}, {"z": 501, "pts": [], "closed": false}]},
+                {"id": "im", "type": "image"}
+            ]
+        })
+        .as_object()
+        .unwrap()
+        .clone()
+    }
+
+    fn run_roof(kind: &str, id: &str, y: f64, b: f64, index: f64) -> Vec<Op> {
+        let r = roof_root();
+        ops(&Lookup::plain(&r), kind, id, y, false, "", &Value::Null, b, index)
+    }
+
+    #[test]
+    fn dach_traufe_verschiebt_das_dach() {
+        let e = entity(&run_roof("roofEave", "r1", 2.7449, f64::NAN, f64::NAN));
+        assert_eq!(e["baseElevation"], json!(2.74));
+        assert_eq!(e["pitchDeg"], json!(30));
+        assert!(run_roof("roofEave", "r2", 3.5, f64::NAN, f64::NAN).is_empty(), "gleiche Traufe: keine Änderung");
+        assert!(run_roof("roofEave", "r3", 3.0, f64::NAN, f64::NAN).is_empty(), "gesperrt");
+    }
+
+    #[test]
+    fn dach_first_rechnet_die_neigung() {
+        // Spannweite 8 m: First bei 30° = 4 * tan 30° = 2.309 m über der Traufe (2.6).
+        let r = roof_root();
+        let r1 = r["roofs"][0].clone();
+        let h0 = crate::selection_info::roof_ridge_height(&r1, 2.6).unwrap();
+        assert!((h0 - 4.0 * 30f64.to_radians().tan()).abs() < 1e-6, "{h0}");
+        let e = entity(&run_roof("roofTop", "r1", 2.6 + 3.0, f64::NAN, f64::NAN));
+        let p = e["pitchDeg"].as_f64().unwrap();
+        assert!(p > 30.0);
+        let h = crate::selection_info::roof_ridge_height(&e, 2.6).unwrap();
+        assert!((h - 3.0).abs() < 0.01, "First liegt auf der Kote: {h}");
+        // Mindesthöhe: nie flacher als 0.10 m über der Traufe; Flachdach hat keinen First.
+        let p_min = entity(&run_roof("roofTop", "r1", 0.0, f64::NAN, f64::NAN))["pitchDeg"].as_f64().unwrap();
+        assert!(p_min < 2.0 && p_min >= 0.5);
+        assert!(run_roof("roofTop", "r2", 6.0, f64::NAN, f64::NAN).is_empty());
+    }
+
+    #[test]
+    fn dach_attika_nur_beim_flachdach() {
+        let e = entity(&run_roof("parapetTop", "r2", 3.95, f64::NAN, f64::NAN));
+        assert_eq!(e["parapetHeight"], json!(0.45));
+        assert_eq!(entity(&run_roof("parapetTop", "r2", 1.0, f64::NAN, f64::NAN))["parapetHeight"], json!(0));
+        assert!(run_roof("parapetTop", "r1", 4.0, f64::NAN, f64::NAN).is_empty());
+    }
+
+    #[test]
+    fn treppe_austritt_setzt_die_steighoehe() {
+        assert_eq!(entity(&run_roof("stairTop", "s1", 2.9, f64::NAN, f64::NAN))["totalRise"], json!(2.9));
+        assert_eq!(entity(&run_roof("stairTop", "s1", -4.0, f64::NAN, f64::NAN))["totalRise"], json!(0.3));
+        assert!(run_roof("stairTop", "s2", 3.0, f64::NAN, f64::NAN).is_empty(), "gesperrt");
+    }
+
+    #[test]
+    fn gelaende_versatz_und_hoehenlinie() {
+        // Netz: höchster Punkt stand auf 502, Zug auf 503.5 → alle z um 1.5 höher.
+        let e = entity(&run_roof("contextTop", "tm", 503.5, 502.0, f64::NAN));
+        assert_eq!(e["positions"], json!([0, 0, 501.5, 1, 0, 502.5, 0, 1, 503.5]));
+        // Höhenlinie 1 auf 510.
+        let e = entity(&run_roof("contourLine", "hl", 510.0, f64::NAN, 1.0));
+        assert_eq!(e["contours"][1]["z"], json!(510));
+        assert_eq!(e["contours"][0]["z"], json!(500));
+        assert!(run_roof("contourLine", "hl", 510.0, f64::NAN, 7.0).is_empty());
+        assert!(run_roof("contextTop", "im", 5.0, 4.0, f64::NAN).is_empty(), "Luftbild hat keine Höhe");
+        assert!(run_roof("contextTop", "tm", 502.0, 502.0, f64::NAN).is_empty());
+    }
+
+    #[test]
+    fn treppe_antritt_setzt_den_versatz() {
+        // Antritt auf 0.5 über der Basis; der Austritt (totalRise) bleibt.
+        let e = entity(&run_roof("stairBottom", "s1", 0.5, f64::NAN, f64::NAN));
+        assert_eq!(e["baseOffset"], json!(0.5));
+        assert!(e.get("totalRise").is_none());
+        // Unter die Basis ist erlaubt (Antritt im Keller); über dem Austritt: Mindeststeigung 0.30 (Geschosshöhe 2.6).
+        assert_eq!(entity(&run_roof("stairBottom", "s1", -0.4, f64::NAN, f64::NAN))["baseOffset"], json!(-0.4));
+        assert_eq!(entity(&run_roof("stairBottom", "s1", 9.0, f64::NAN, f64::NAN))["baseOffset"], json!(2.3));
+        // Relativ: Griff stand auf 0.2, Zug auf 0.6 → +0.4.
+        assert_eq!(entity(&run_roof("stairBottom", "s1", 0.6, 0.2, f64::NAN))["baseOffset"], json!(0.4));
+        assert_eq!(entity(&run_roof("stairBottom", "s1", 0.0, f64::NAN, f64::NAN))["baseOffset"], json!(0));
+        assert!(run_roof("stairBottom", "s2", 0.5, f64::NAN, f64::NAN).is_empty(), "gesperrt");
+        // Der Austritt hält den Abstand zum Antritt: totalRise nie unter Antritt + 0.30.
+        let r = {
+            let mut r = roof_root();
+            r["stairs"][0]["baseOffset"] = json!(1.0);
+            r
+        };
+        let ops = ops(&Lookup::plain(&r), "stairTop", "s1", 0.5, false, "", &Value::Null, f64::NAN, f64::NAN);
+        assert_eq!(entity(&ops)["totalRise"], json!(1.3));
+    }
+
+    #[test]
+    fn hoehenlinien_griffe_im_schnitt() {
+        // Schnitt entlang x durch y = 5: zwei Linien (z 500 offen, z 501 geschlossen) kreuzen ihn.
+        let mut f = vec![0.0, 5.0, 1.0, 0.0, f64::NAN];
+        f.extend([500.0, 0.0, 2.0, 2.0, 0.0, 2.0, 10.0]); // senkrecht bei x = 2
+        f.extend([501.0, 1.0, 4.0, 6.0, 0.0, 9.0, 0.0, 9.0, 10.0, 6.0, 10.0]); // Rechteck x 6..9: Kreuzungen bei 6 und 9
+        let m = contour_marks(&f);
+        assert_eq!(m, vec![2.0, 500.0, 0.0, 6.0, 501.0, 1.0, 9.0, 501.0, 1.0]);
+        // Bezug 500: Blatt-Höhen 0 und 1.
+        f[4] = 500.0;
+        let m = contour_marks(&f);
+        assert_eq!(m.chunks(3).map(|c| c[1]).collect::<Vec<_>>(), vec![0.0, 1.0, 1.0]);
+        assert!(contour_marks(&[1.0]).is_empty());
+        assert!(contour_marks(&[0.0, 0.0, 1.0, 0.0, f64::NAN, 5.0, 0.0, 99.0]).is_empty(), "Punktzahl über das Ende");
+        assert!(contour_marks(&[f64::NAN, 0.0, 1.0, 0.0, f64::NAN]).is_empty());
+    }
+
+    #[test]
+    fn hoehenlinie_mit_bezugshoehe() {
+        // Bezug 500 m ü. M.: der Schnitt zeigt 501 als 1.0 — Zug auf Blatt-Höhe 3.0 setzt die Linie auf 503.
+        let mut r = roof_root();
+        r.insert("referenceElevationMasl".into(), json!(500));
+        let ops = ops(&Lookup::plain(&r), "contourLine", "hl", 3.0, false, "", &Value::Null, f64::NAN, 1.0);
+        assert_eq!(entity(&ops)["contours"][1]["z"], json!(503));
+    }
+
+    #[test]
+    fn dach_und_treppe_relativ_zur_griffhoehe() {
+        // Sichtbare Kante stand auf 5.0 (Überstand/Dicke), Zug auf 5.5 → Traufe 2.6 + 0.5.
+        let e = entity(&run_roof("roofEave", "r1", 5.5, 5.0, f64::NAN));
+        assert_eq!(e["baseElevation"], json!(3.1));
+        // Treppe ohne totalRise: Geschosshöhe 2.6; Griff stand auf 2.7, Zug auf 2.9 → 2.8.
+        assert_eq!(entity(&run_roof("stairTop", "s1", 2.9, 2.7, f64::NAN))["totalRise"], json!(2.8));
+        // First: Zug um +1 m über den heutigen First hebt die Neigung.
+        let r = roof_root();
+        let h0 = crate::selection_info::roof_ridge_height(&r["roofs"][0], 2.6).unwrap();
+        let e = entity(&run_roof("roofTop", "r1", 6.0, 5.0, f64::NAN));
+        let h = crate::selection_info::roof_ridge_height(&e, 2.6).unwrap();
+        assert!((h - (h0 + 1.0)).abs() < 0.01, "{h} vs {h0}+1");
+    }
+
+    #[test]
+    fn vorschau_dach_und_treppe() {
+        assert_eq!(drag(Kind::RoofEave, 0.0, 5.0, 2.6, 3.0, false), (5.4, 3.0));
+        assert_eq!(drag(Kind::RoofTop, 0.0, 5.0, 2.6, 2.0, false), (2.7, 2.6));
+        assert_eq!(drag(Kind::ParapetTop, 0.0, 3.0, 3.0, 2.0, false), (3.0, 3.0));
+        assert_eq!(drag(Kind::StairTop, 0.0, 2.6, 0.0, 0.1, false), (0.3, 0.0));
+    }
+
+    #[test]
+    fn wand_unterkante_unter_geschoss_erlaubt() {
+        // Kellerwand: UK unter der Geschoss-Basis (0.0) ist erlaubt; über OK bleibt die Mindesthöhe.
+        let e = entity(&run("wallBottom", "w1", -1.2));
+        assert_eq!(e["bottom"], json!({"mode": "floor", "floorId": "eg", "offset": -1.2}));
+        assert_eq!(e["height"], json!(3.8));
+        assert_eq!(entity(&run("wallBottom", "w1", 4.0))["height"], json!(0.3));
+    }
 }

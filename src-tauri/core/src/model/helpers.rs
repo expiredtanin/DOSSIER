@@ -170,7 +170,9 @@ impl Project {
             _ if floor_height > 0.0 => floor_height,
             _ => 2.6,
         };
-        (base, base + rise)
+        // [187] Antritt über/unter der Geschoss-Basis; der Austritt bleibt bei `base + rise` (Mindeststeigung 5 cm).
+        let off = s.base_offset.filter(|o| o.is_finite()).unwrap_or(0.0).min(rise - 0.05);
+        (base + off, base + rise)
     }
 
     pub fn column_vertical_extent(&self, c: &Column) -> (f64, f64) {

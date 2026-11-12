@@ -259,6 +259,11 @@ export function StairSection({
         value={stair.totalRise}
         onCommit={(v) => host.onSetStairRise(v)}
       />
+      <DimensionField
+        label={t("objinfo.stair.baseOffset")}
+        value={stair.baseOffset ?? 0}
+        onCommit={(v) => host.onSetStairBaseOffset(v)}
+      />
 
       {/* Abgeleitete Werte (read-only). */}
       <div className="objinfo-field">

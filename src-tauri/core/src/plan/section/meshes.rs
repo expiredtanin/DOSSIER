@@ -201,8 +201,16 @@ pub(super) fn clip_line_to_u(pts: &[[f64; 2]], lo: f64, hi: f64) -> Vec<Vec<[f64
 /// `appendTerrainProfiles`.
 /// [152]/[181] Geschlossene Gelände-Netze (z. B. IFC-Gelände als Platte): von ihren Schnittringen nur die Oberkante.
 pub(super) fn append_terrain_profiles(out: &mut Output, p: &Project, base: (f64, f64), u: (f64, f64)) {
-    let terrains: Vec<&TerrainMesh> = p.context.as_deref().unwrap_or(&[]).iter().filter_map(|c| if let ContextObject::TerrainMesh(t) = c { Some(t) } else { None }).collect();
-    if terrains.is_empty() {
+    let ctx = p.context.as_deref().unwrap_or(&[]);
+    let terrains: Vec<&TerrainMesh> = ctx.iter().filter_map(|c| if let ContextObject::TerrainMesh(t) = c { Some(t) } else { None }).collect();
+    // [187]/[143] Höhenlinien-Sätze ohne daraus erzeugtes Gelände-Netz (`sourceId`): ihre Schnittpunkte mit der Ebene
+    // ergeben die Geländelinie.
+    let sets: Vec<&ContourSet> = ctx
+        .iter()
+        .filter_map(|c| if let ContextObject::ContourSet(s) = c { Some(s) } else { None })
+        .filter(|s| !terrains.iter().any(|t| t.source_id.as_deref() == Some(s.id.as_str())))
+        .collect();
+    if terrains.is_empty() && sets.is_empty() {
         return;
     }
     let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
@@ -249,8 +257,29 @@ pub(super) fn append_terrain_profiles(out: &mut Output, p: &Project, base: (f64,
             }
         }
     }
+    for set in sets {
+        let cs = contours_in(set);
+        let datum = crate::terrain::datum(p.reference_elevation_masl, &cs.iter().map(|c| c.z).collect::<Vec<_>>());
+        let pts: Vec<[f64; 2]> = crate::terrain::contour_crossings(&cs, [base.0, base.1], [u.0, u.1]).into_iter().map(|(s, z, _)| [s, z - datum]).collect();
+        if pts.len() < 2 {
+            continue;
+        }
+        out.terrain_id.get_or_insert_with(|| set.id.clone());
+        let parts = match range {
+            Some((lo, hi)) => clip_line_to_u(&pts, lo - TERRAIN_MARGIN, hi + TERRAIN_MARGIN),
+            None => vec![pts],
+        };
+        for pts in parts {
+            out.profiles.push(Profile { category: Some(set.category_code.clone()), pts, natural: false });
+        }
+    }
     append_shoring(out, p, base, u, range);
     append_earth(out, p, base, u);
+}
+
+/// Höhenlinien eines Satzes als Eingabe für `terrain.rs`.
+pub(crate) fn contours_in(set: &ContourSet) -> Vec<crate::terrain::ContourIn> {
+    set.contours.iter().map(|c| crate::terrain::ContourIn { z: c.z, pts: c.pts.iter().map(|q| [q.x, q.y]).collect(), closed: c.closed }).collect()
 }
 
 /// [68] Verbauwände der Baugruben im Schnitt: das Wandband jeder verbauten Sohlkante (Dicke nach aussen) wird mit

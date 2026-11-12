@@ -3513,6 +3513,11 @@ export type Stair = {
    */
   totalRise?: number;
   /**
+   * [187] Antrittsversatz in Metern: Höhe des Antritts über der Basis des Geschosses (negativ = darunter). Der
+   * Austritt bleibt auf `totalRise` ab Geschoss-Basis, die Steigung ist `totalRise - baseOffset`. Fehlt es: 0.
+   */
+  baseOffset?: number;
+  /**
    * Anzahl der Steigungen (Setzstufen). Die Trittanzahl = stepCount (letzte =
    *  Austritt aufs obere Geschoss). Steigungshöhe = totalRise / stepCount.
    */

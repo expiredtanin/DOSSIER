@@ -551,6 +551,8 @@ export interface PanelHostValue {
   onSetStairSteps: (stepCount: number) => void;
   /** Setzt die Gesamt-Steighöhe (Meter, OKFF → OKFF). */
   onSetStairRise: (totalRise: number) => void;
+  /** [187] Antritt über/unter der Geschoss-Basis (Meter). */
+  onSetStairBaseOffset: (baseOffset: number) => void;
   /** Setzt die Laufrichtung (aufwärts/abwärts). */
   onSetStairUp: (up: boolean) => void;
   /** Setzt die Pfeil-Darstellung (offener Winkel- vs. gefüllter Vollpfeil). */

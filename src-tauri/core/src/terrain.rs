@@ -735,6 +735,39 @@ pub struct ContourIn {
     pub closed: bool,
 }
 
+/// [187] Schnittpunkte der Höhenlinien mit der senkrechten Ebene durch `base` in Richtung `u` (Einheitsvektor):
+/// `(u, Höhe der Linie, Index der Linie)`, nach `u` sortiert (Lage entlang der Schnittlinie, wie die Schnittblätter
+/// sie führen). Eine Ecke genau auf der Ebene zählt einmal; Linien in der Ebene schneiden nicht.
+pub fn contour_crossings(contours: &[ContourIn], base: P2, u: P2) -> Vec<(f64, f64, usize)> {
+    let mut out = Vec::new();
+    if ![base[0], base[1], u[0], u[1]].iter().all(|v| v.is_finite()) {
+        return out;
+    }
+    let side = |p: P2| (p[0] - base[0]) * u[1] - (p[1] - base[1]) * u[0];
+    let along = |p: P2| (p[0] - base[0]) * u[0] + (p[1] - base[1]) * u[1];
+    for (i, c) in contours.iter().enumerate() {
+        if !c.z.is_finite() {
+            continue;
+        }
+        let n = c.pts.len();
+        let segs = if c.closed && n > 2 { n } else { n.saturating_sub(1) };
+        for k in 0..segs {
+            let (a, b) = (c.pts[k], c.pts[(k + 1) % n]);
+            if !(a[0].is_finite() && a[1].is_finite() && b[0].is_finite() && b[1].is_finite()) {
+                continue;
+            }
+            let (da, db) = (side(a), side(b));
+            if (da < 0.0) == (db < 0.0) {
+                continue;
+            }
+            let t = da / (da - db);
+            out.push((along(a) + (along(b) - along(a)) * t, c.z, i));
+        }
+    }
+    out.sort_by(|a, b| a.0.total_cmp(&b.0));
+    out
+}
+
 /// Optionen: `smooth` = Glättungsstufen (0 = reines TIN mit Bruchkanten), `max_edge` = Verdichtung und
 /// grösste Kante (≤ 0 → automatisch), `breaklines` = Konturen erzwingen.
 #[derive(Clone, Copy, Debug)]

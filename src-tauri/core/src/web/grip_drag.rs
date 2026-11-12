@@ -109,7 +109,7 @@ pub fn grip_edge_target(
 }
 
 /// Höhen-Griff im Schnitt ([187], `sheet_height::Kind`: 0 Wand OK, 1 Öffnung oben, 2 Öffnung unten, 3 Wand UK, 4 Decke OK
-/// (Platte wandert), 5 Decke OK bei gebundener UK, 6 Decke UK): neue `[oben, unten]` im Blatt; `[]` bei unbekannter Art
+/// (Platte wandert), 5 Decke OK bei gebundener UK, 6 Decke UK, 7 Traufe, 8 First, 9 Attika, 10 Treppen-Austritt, 11 Treppen-Antritt): neue `[oben, unten]` im Blatt; `[]` bei unbekannter Art
 /// oder Unsinn (NaN).
 #[wasm_bindgen]
 pub fn grip_sheet_height(kind: u32, base: f64, top: f64, bottom: f64, y: f64, free: bool) -> Vec<f64> {
@@ -119,6 +119,13 @@ pub fn grip_sheet_height(kind: u32, base: f64, top: f64, bottom: f64, y: f64, fr
     }
     let (t, b) = crate::sheet_height::drag(k, base, top, bottom, y, free);
     vec![t, b]
+}
+
+/// Griffe der Höhenlinien im Schnitt ([187], `sheet_height::contour_marks`): `[u, Blatt-Höhe, Linien-Index]` je
+/// Schnittpunkt; `[]` bei Unsinn.
+#[wasm_bindgen]
+pub fn grip_contour_marks(flat: &[f64]) -> Vec<f64> {
+    crate::sheet_height::contour_marks(flat)
 }
 
 /// Fang einer Blatt-Höhe `y` auf die nächste Kote aus `levels` innerhalb `tol` (Meter): die Kote, sonst `y`.
@@ -210,7 +217,7 @@ mod tests {
         assert!(grip_coincident(&[0.0, 0.0], &[3.0, 1.0]).is_empty());
         assert!(grip_coincident(&[0.0, 0.0], &[f64::NAN]).is_empty());
         assert_eq!(grip_coincident(&[0.0, 0.0], &[1.0, 0.01, 0.0, 0.0]), vec![0.0, 0.0]);
-        assert!(grip_sheet_height(7, 0.0, 1.0, 0.0, 1.0, false).is_empty());
+        assert!(grip_sheet_height(12, 0.0, 1.0, 0.0, 1.0, false).is_empty());
         // Unsinniger Index: keine Polygon-Nachbarn, nur Welt-H/V.
         assert_eq!(grip_axis_lock(3.0, 0.4, 0.0, 0.0, 1.0, 1.0, &[0.0, 0.0, 1.0, 1.0], f64::NAN, true), vec![3.0, 0.0]);
     }

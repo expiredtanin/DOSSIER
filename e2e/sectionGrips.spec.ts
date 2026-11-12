@@ -54,7 +54,7 @@ async function undo(page: Page) {
 async function select(page: Page, patch: Record<string, string[]>) {
   await blurFocus(page);
   // setSelection mischt: die anderen Arten leeren, sonst bleibt z. B. das Fenster gewählt
-  await page.evaluate((p) => window.__dossierTest!.select({ walls: [], openings: [], ceilings: [], ...p }), patch);
+  await page.evaluate((p) => window.__dossierTest!.select({ walls: [], openings: [], ceilings: [], roofs: [], stairs: [], contextObjects: [], ...p }), patch);
 }
 
 test("Schnitt A-A: Decke, Fenster und Wand haben Höhen-Griffe, Zug = ein Undo-Schritt", async ({ page }) => {
@@ -166,4 +166,90 @@ test("Schnitt A-A: Tab tippt die Kote der Decken-Oberkante", async ({ page }) =>
   await expect.poll(async () => r3((await ceiling(page, "c-eg")).zTop)).toBe(target);
   await undo(page);
   await expect.poll(async () => (await ceiling(page, "c-eg")).zTop).toBe(c0.zTop);
+});
+
+// [187] Teil 2: Dach (Traufe, First), Treppe (Austritt) und Gelände (Sohle der Baugrube) im Schnitt.
+async function openSheet(page: Page, name: string) {
+  await page.goto("/?dossierTest");
+  await page.getByRole("button", { name: /Neues Projekt/ }).first().click();
+  await expect(page.getByRole("group", { name: "Befehlszeile" })).toBeVisible();
+  await fileMenu(page, /Musterhaus \(komplex\)/);
+  await discardIfAsked(page);
+  await expect(page.locator(".project-name")).toHaveText("Musterhaus komplex", { timeout: 30_000 });
+  await showSnapshot(page, name);
+  await expect(page.locator("svg.plan-svg").first()).toBeVisible({ timeout: 30_000 });
+  await page.waitForTimeout(1000);
+}
+const roofOf = async (page: Page, id: string) => (await heights(page)).roofs.find((r) => r.id === id)!;
+
+test("Schnitt A-A: Dach-Traufe und First ziehen, Zug = ein Undo-Schritt", async ({ page }) => {
+  test.setTimeout(180_000);
+  await openSheet(page, "Schnitt A-A");
+  const r0 = await roofOf(page, "dach-haupt");
+  await select(page, { roofs: ["dach-haupt"] });
+  await expect(page.locator(".plan-grip")).toHaveCount(2);
+  const [eave, ridge] = await gripCentres(page);
+  expect(eave.x).toBeLessThan(ridge.x);
+
+  // Traufe nach oben: das ganze Dach wandert, die Neigung bleibt.
+  await dragGrip(page, eave, -30);
+  const r1 = await roofOf(page, "dach-haupt");
+  expect(r1.eave).toBeGreaterThan(r0.eave + 0.05);
+  expect(r1.pitchDeg).toBe(r0.pitchDeg);
+  await undo(page);
+  await expect.poll(async () => (await roofOf(page, "dach-haupt")).eave).toBe(r0.eave);
+
+  // First nach oben: die Neigung wächst, die Traufe bleibt.
+  await select(page, { roofs: ["dach-haupt"] });
+  await expect(page.locator(".plan-grip")).toHaveCount(2);
+  const [, ridge2] = await gripCentres(page);
+  await dragGrip(page, ridge2, -30);
+  const r2 = await roofOf(page, "dach-haupt");
+  expect(r2.pitchDeg).toBeGreaterThan(r0.pitchDeg + 0.5);
+  expect(r2.eave).toBe(r0.eave);
+  await undo(page);
+  await expect.poll(async () => (await roofOf(page, "dach-haupt")).pitchDeg).toBe(r0.pitchDeg);
+});
+
+test("Schnitt B-B: Treppen-Austritt und -Antritt ziehen", async ({ page }) => {
+  test.setTimeout(180_000);
+  await openSheet(page, "Schnitt B-B");
+  const stair = async () => (await heights(page)).stairs.find((s) => s.id === "tr-kern")!;
+  const s0 = await stair();
+  await select(page, { stairs: ["tr-kern"] });
+  await expect(page.locator(".plan-grip")).toHaveCount(2);
+  const [bottom, top] = await gripCentres(page);
+  expect(bottom.x).toBeLessThan(top.x);
+  // Austritt nach oben: die Steighöhe wächst, der Antritt bleibt.
+  await dragGrip(page, top, -30);
+  const s1 = await stair();
+  expect(s1.totalRise).toBeGreaterThan(s0.totalRise + 0.02);
+  expect(s1.baseOffset).toBe(s0.baseOffset);
+  await undo(page);
+  await expect.poll(async () => (await stair()).totalRise).toBe(s0.totalRise);
+
+  // Antritt nach oben: Versatz über der Geschoss-Basis, der Austritt bleibt stehen.
+  await select(page, { stairs: ["tr-kern"] });
+  await expect(page.locator(".plan-grip")).toHaveCount(2);
+  const [bottom2] = await gripCentres(page);
+  await dragGrip(page, bottom2, -30);
+  const s2 = await stair();
+  expect(s2.baseOffset).toBeGreaterThan(s0.baseOffset + 0.02);
+  expect(s2.totalRise).toBe(s0.totalRise);
+  await undo(page);
+  await expect.poll(async () => (await stair()).baseOffset).toBe(s0.baseOffset);
+});
+
+test("Schnitt A-A: Sohle der Baugrube ziehen", async ({ page }) => {
+  test.setTimeout(180_000);
+  await openSheet(page, "Schnitt A-A");
+  const pit = async () => (await heights(page)).excavations.find((e) => e.id === "baugrube")!;
+  const b0 = await pit();
+  await select(page, { contextObjects: ["baugrube"] });
+  await expect(page.locator(".plan-grip")).toHaveCount(1);
+  const [g] = await gripCentres(page);
+  await dragGrip(page, g, 30);
+  expect((await pit()).bottom).toBeLessThan(b0.bottom - 0.05);
+  await undo(page);
+  await expect.poll(async () => (await pit()).bottom).toBe(b0.bottom);
 });
