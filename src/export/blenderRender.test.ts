@@ -20,10 +20,16 @@ import {
   parseBlenderLine,
   renderSun,
   runBlenderRender,
+  findRenderCamera,
+  projectRenderCameras,
+  renderCameraOf,
+  splitRoofMaterials,
+  TERRAIN_MATERIAL,
   type BlenderHost,
   type RenderOptions,
 } from "./blenderRender";
 import { exportGlb } from "./exportMesh";
+import { cameraToView } from "../viewport/cameraView";
 
 const when = new Date(Date.UTC(2026, 5, 21, 10, 0, 0));
 const opts = (over: Partial<RenderOptions> = {}): RenderOptions => ({ width: 640, height: 360, samples: 16, when, camera: { preset: "iso" }, ...over });
@@ -230,5 +236,107 @@ describe("Blender-Skript", () => {
     const r = spawnSync("python3", ["-c", "import ast,sys; ast.parse(open(sys.argv[1]).read())", path]);
     if (r.error) return; // kein Python: übersprungen
     expect(r.status, String(r.stderr)).toBe(0);
+  });
+});
+
+describe("Materialzuordnung Gelände und Dach ([211])", () => {
+  const mk = buildComplexSampleProject();
+
+  it("Dachschichten bekommen eigene Materialien nach Baustoff (Ziegel, Kies, Blech), nicht mehr alle „Dach“", async () => {
+    const pkg = await buildRenderPackage(mk, opts(), async () => new Uint8Array([1]));
+    const roofs = pkg.scene.materials.filter((m) => m.role === "roof");
+    const names = roofs.map((m) => m.name);
+    expect(names).toContain("Dach: Tonziegel");
+    expect(names).toContain("Dach: Kies / Sauberkeitsschicht");
+    expect(names).toContain("Dach: Trapezblech");
+    expect(names).not.toContain("Dach");
+    const tile = roofs.find((m) => m.name === "Dach: Tonziegel")!;
+    expect(tile.component).toBe("Tonziegel");
+    // Bildkarten des Baustoffs „Tonziegel“ (RoofingTiles013A), nicht des Namens „Dach“.
+    expect(tile.textures?.color).toBeDefined();
+    expect(tile.sizeM).toBeGreaterThan(0);
+  });
+
+  it("das neue GLB bleibt gültig und die Dachknoten zeigen auf die neuen Materialien", () => {
+    const glb = splitRoofMaterials(exportGlb(mk), mk);
+    const dv = new DataView(glb.buffer, glb.byteOffset, glb.byteLength);
+    expect(dv.getUint32(0, true)).toBe(0x46546c67);
+    expect(dv.getUint32(8, true)).toBe(glb.byteLength);
+    expect(dv.getUint32(12, true) % 4).toBe(0);
+    const json = JSON.parse(new TextDecoder().decode(glb.subarray(20, 20 + dv.getUint32(12, true))));
+    // BIN-Chunk dahinter unverändert vorhanden.
+    const binLen = dv.getUint32(20 + dv.getUint32(12, true), true);
+    expect(20 + dv.getUint32(12, true) + 8 + binLen).toBe(glb.byteLength);
+    const roofNode = json.nodes.find((n: { name?: string }) => n.name === "Dach_dach-haupt");
+    const used = json.meshes[roofNode.mesh].primitives.map((p: { material: number }) => json.materials[p.material].name);
+    expect(used).toEqual(["Dach: Tonziegel"]);
+  });
+
+  it("Gelände: Rolle terrain mit Wiese aus der Bibliothek; ohne Bildkarten bleibt die Rolle für den Leser", async () => {
+    const pkg = await buildRenderPackage(mk, opts(), async () => new Uint8Array([1]));
+    const terrain = pkg.scene.materials.find((m) => m.name === "Gelaende")!;
+    expect(terrain.role).toBe("terrain");
+    expect(terrain.textures?.color).toMatch(/^textures\/\d+_color\.jpg$/);
+    expect(terrain.sizeM).toBe(TERRAIN_MATERIAL.sizeM);
+    expect(TERRAIN_MATERIAL.libraryId).toBe("Grass005");
+    const bare = await buildRenderPackage(mk, opts());
+    const t2 = bare.scene.materials.find((m) => m.name === "Gelaende")!;
+    expect(t2.role).toBe("terrain");
+    expect(t2.textures).toBeUndefined();
+  });
+
+  it("Glas und Öffnungsteile haben ihre Rolle, Wände „building“", async () => {
+    const pkg = await buildRenderPackage(mk, opts());
+    expect(pkg.scene.materials.find((m) => m.glass)?.role).toBe("opening");
+    expect(pkg.scene.materials.find((m) => m.name === "Aussenputz")?.role).toBe("building");
+  });
+
+  it("jedes Material des GLB hat eine Rolle und kommt in der Tabelle vor, nicht benutzte (altes „Dach“) fehlen", () => {
+    const mats = glbMaterials(splitRoofMaterials(exportGlb(mk), mk));
+    expect(mats.every((m) => m.role)).toBe(true);
+    expect(mats.some((m) => m.name === "Dach")).toBe(false);
+  });
+});
+
+describe("Kamera wählen ([213])", () => {
+  const mk = buildComplexSampleProject();
+
+  it("Südost: gleiche Sicht wie cameraToView, Sonnenzeit der Kamera", () => {
+    const choice = findRenderCamera(mk, "Südost")!;
+    expect(choice).toBeTruthy();
+    expect(choice.id).toBe("kamera-suedost");
+    const cam = mk.cameras![0];
+    const view = cameraToView(mk, cam)!;
+    expect(choice.camera.position).toEqual(view.position);
+    expect(choice.camera.direction).toEqual(view.direction);
+    expect(choice.camera.up).toEqual(view.up);
+    expect(choice.camera.fovDeg).toBe(view.fovDeg);
+    expect(choice.camera.kind).toBe(view.kind);
+    expect(choice.camera.orthoHeight).toBe(view.orthoHeight);
+    expect(choice.sunWhen?.toISOString()).toBe("2026-06-21T16:00:00.000Z");
+    // Augenhöhe 1.6 m über OK EG.
+    expect(choice.camera.position[2]).toBeCloseTo(1.6 + (mk.drawingLevels.find((l) => l.id === "eg")?.baseElevation ?? 0), 9);
+  });
+
+  it("Suche nach Id oder Name (Schreibweise egal), unbekannt = null", () => {
+    expect(findRenderCamera(mk, "kamera-suedost")?.name).toBe("Südost");
+    expect(findRenderCamera(mk, "südost")?.id).toBe("kamera-suedost");
+    expect(findRenderCamera(mk, "gibt es nicht")).toBeNull();
+    expect(projectRenderCameras(sampleProject)).toEqual([]);
+  });
+
+  it("entartete Kamera (Standpunkt = Ziel) fällt aus der Liste", () => {
+    const cam = { ...mk.cameras![0], target: { ...mk.cameras![0].position } };
+    expect(renderCameraOf(mk, { ...cam, targetHeight: 1.6 })).toBeNull();
+    expect(projectRenderCameras({ ...mk, cameras: [{ ...cam, targetHeight: 1.6 }] })).toEqual([]);
+  });
+
+  it("das Paket trägt die Kamera und die Sonne der Kamera", async () => {
+    const choice = findRenderCamera(mk, "Südost")!;
+    const pkg = await buildRenderPackage(mk, opts({ camera: choice.camera, when: choice.sunWhen! }));
+    expect(pkg.scene.camera).toEqual(choice.camera);
+    expect(pkg.scene.sun.when).toBe("2026-06-21T16:00:00.000Z");
+    // Abendsonne: tiefer als zur Vormittagszeit des Projekts.
+    expect(pkg.scene.sun.elevation).toBeLessThan(renderSun(mk, defaultRenderTime(mk)).elevation);
   });
 });

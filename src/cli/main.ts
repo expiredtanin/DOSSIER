@@ -36,7 +36,7 @@
 //                                                  [154] Bauteile aus 2D-Zeichnung erkennen (Wände, Öffnungen, Räume
 //                                                  ins Geschoss); Bericht als JSON. Z. B. convert plan.dxf p.obp --cmd "erkennen --out e.obp"
 //   dossier-cli <projekt.obp> render --out bild.png [--view iso|perspective|front|back|left|right|top] [--when 2026-06-21T10:00Z]
-//                                                  [--samples 128] [--size 1920x1080] [--cpu] [--blender pfad] [--keep]   [211] Rendering mit Blender/Cycles
+//                                                  [--camera Name|id] [--samples 128] [--size 1920x1080] [--cpu] [--blender pfad] [--keep]   [211] Rendering mit Blender/Cycles
 //   dossier-cli <projekt.obp> model3d [--explode 3] [--hide …] [--grey …] [--out modell.json]   3D-Modell fürs Headless-Rendern (render_png)
 //   dossier-cli pointcloud-info <datei.las|laz|e57|ply|xyz|pts> [--voxel 0.05] [--max 2000000]
 //                                                  Punktwolke lesen ([B9]) und Bericht als JSON (ohne Projekt)
@@ -152,6 +152,8 @@ import {
   BLENDER_CANDIDATES,
   BLENDER_DOWNLOAD_URL,
   RENDER_VIEW_PRESETS,
+  findRenderCamera,
+  projectRenderCameras,
 } from "../core";
 import type { BlenderHost, Filter3d, Project, RenderViewPreset, TextureLoader, ViewTemplate } from "../core";
 import { serveStdio } from "./mcp";
@@ -765,8 +767,12 @@ function nodeBlenderHost(keep: boolean): BlenderHost {
 async function runRender(project: Project, args: Args): Promise<number> {
   const view = (args.flags.get("view") ?? "iso") as RenderViewPreset;
   if (!(RENDER_VIEW_PRESETS as readonly string[]).includes(view)) return fail(`--view: ${RENDER_VIEW_PRESETS.join("|")}`);
+  // [213] `--camera <Name|id>`: gespeicherte Kamera (Standpunkt, Ziel, Bildwinkel; Sonnenzeit der Kamera, falls `--when` fehlt).
+  const camKey = args.flags.get("camera");
+  const choice = camKey ? findRenderCamera(project, camKey) : null;
+  if (camKey && !choice) return fail(`--camera: "${camKey}" nicht gefunden (vorhanden: ${projectRenderCameras(project).map((c) => c.name).join(", ") || "keine"})`);
   const whenText = args.flags.get("when");
-  const when = whenText ? new Date(whenText) : defaultRenderTime(project);
+  const when = whenText ? new Date(whenText) : (choice?.sunWhen ?? defaultRenderTime(project));
   if (Number.isNaN(when.getTime())) return fail("--when: ungültiges Datum");
   const samples = Number(args.flags.get("samples") ?? 128);
   if (!Number.isFinite(samples) || samples < 1) return fail("--samples: Zahl ≥ 1");
@@ -776,7 +782,7 @@ async function runRender(project: Project, args: Args): Promise<number> {
   await loadFileio();
   const pkg = await buildRenderPackage(
     project,
-    { width: Number(m[1]), height: Number(m[2]), samples, when, camera: { preset: view }, device: args.flags.has("cpu") ? "cpu" : "auto" },
+    { width: Number(m[1]), height: Number(m[2]), samples, when, camera: choice ? choice.camera : { preset: view }, device: args.flags.has("cpu") ? "cpu" : "auto" },
     localTextureLoader(),
   );
   if (pkg.missingTextures.length > 0) process.stderr.write(`Hinweis: ${pkg.missingTextures.length} Bildkarten nicht lesbar (Material erscheint einfarbig)\n`);

@@ -9,7 +9,9 @@
 // UV-Koordinaten: das GLB hat keine. Texturen legt das Skript per Box-Projektion über Objektkoordinaten
 // (Kachelgrösse `sizeM` des Materials in Metern), das ersetzt UVs ohne den Rust-Exporter anzufassen.
 // Materialzuordnung: der glTF-Materialname ist der Bauteilname (`Component.name`); dessen `material` (ambientCG-
-// Karten) kommt als Textur-Eintrag in die Materialtabelle. Verglasung (Deckkraft < 1) bekommt `glass: true`.
+// Karten) kommt als Textur-Eintrag in die Materialtabelle. Verglasung (Deckkraft < 1) bekommt `glass: true`. Dachschichten
+// bekommen je Baustoff ein eigenes Material (`splitRoofMaterials`), das Gelände die Wiese `Grass005`, jedes Material seine
+// Verwendung (`role`, aus dem Knoten des GLB) — der Leser wählt danach Ersatzlooks ohne Bildkarte.
 //
 // Das Format ist renderer-neutral und in `doc/RENDER-SZENE.md` beschrieben (Blender-Skript = ein Leser davon;
 // später auch Cycles-Standalone, [215]).
@@ -17,7 +19,7 @@
 // Achsen in `scene.json`: Modell-Koordinaten (x Ost, y Nord, z oben, Meter) — Blenders glTF-Import dreht das
 // Y-oben-GLB genau dorthin zurück, Kamera und Sonne brauchen im Skript keine Umrechnung.
 
-import type { ComponentMaterial, LayoutOrientation, LayoutPaperFormat, Project } from "../model/types";
+import type { Camera, ComponentMaterial, LayoutOrientation, LayoutPaperFormat, Project } from "../model/types";
 import { projectLatLon, sunPosition } from "../analysis/sun";
 import { sheetSizeMm } from "../model/layoutModel";
 import { exportGlb } from "./exportMesh";
@@ -100,7 +102,14 @@ export interface RenderMaterial {
   textures?: Partial<Record<TextureKind, string>>;
   /** Kantenlänge einer Texturkachel in Metern. */
   sizeM?: number;
+  /** Wofür das Material gebraucht wird (aus dem Bauteil-Knoten des GLB); der Leser wählt danach Ersatzlooks (Wiese, Ziegel, Kontext). */
+  role?: RenderRole;
+  /** Name des Bauteils (Baustoff), dessen Aussehen gilt, wenn er vom Materialnamen abweicht (Dachschicht: `Dach: Tonziegel`). */
+  component?: string;
 }
+
+/** Verwendung eines Materials: Gelände, Dach, Kontext-Körper (Nachbarn), Öffnungsteile, sonst Gebäude. */
+export type RenderRole = "terrain" | "roof" | "context" | "opening" | "building";
 
 export type TextureKind = "color" | "normal" | "roughness" | "metalness";
 const TEXTURE_KINDS: TextureKind[] = ["color", "normal", "roughness", "metalness"];
@@ -134,7 +143,7 @@ export function defaultRenderTime(project: Project): Date {
 }
 
 /** JSON-Chunk eines GLB. */
-function glbJson(glb: Uint8Array): { materials?: GltfMaterial[] } {
+function glbJson(glb: Uint8Array): GltfJson {
   const dv = new DataView(glb.buffer, glb.byteOffset, glb.byteLength);
   if (glb.byteLength < 20 || dv.getUint32(0, true) !== 0x46546c67) throw new Error("Kein GLB");
   const len = dv.getUint32(12, true);
@@ -144,7 +153,34 @@ function glbJson(glb: Uint8Array): { materials?: GltfMaterial[] } {
 interface GltfMaterial {
   name?: string;
   alphaMode?: string;
+  extras?: { component?: string };
   pbrMetallicRoughness?: { baseColorFactor?: number[]; metallicFactor?: number; roughnessFactor?: number };
+}
+
+interface GltfJson {
+  materials?: GltfMaterial[];
+  meshes?: { name?: string; primitives: { material?: number }[] }[];
+  nodes?: { name?: string; mesh?: number; extras?: { type?: string; id?: string } }[];
+}
+
+/** GLB mit geändertem JSON-Chunk (BIN-Chunk unverändert; Länge auf 4 Byte aufgefüllt). */
+function glbWithJson(glb: Uint8Array, json: GltfJson): Uint8Array {
+  const dv = new DataView(glb.buffer, glb.byteOffset, glb.byteLength);
+  const oldLen = dv.getUint32(12, true);
+  const rest = glb.subarray(20 + oldLen);
+  const bytes = new TextEncoder().encode(JSON.stringify(json));
+  const padded = new Uint8Array(Math.ceil(bytes.length / 4) * 4).fill(0x20);
+  padded.set(bytes);
+  const out = new Uint8Array(20 + padded.length + rest.length);
+  const odv = new DataView(out.buffer);
+  out.set(glb.subarray(0, 4), 0);
+  odv.setUint32(4, dv.getUint32(4, true), true);
+  odv.setUint32(8, out.length, true);
+  odv.setUint32(12, padded.length, true);
+  out.set(glb.subarray(16, 20), 16);
+  out.set(padded, 20);
+  out.set(rest, 20 + padded.length);
+  return out;
 }
 
 const linearToSrgb = (c: number): number => {
@@ -152,24 +188,110 @@ const linearToSrgb = (c: number): number => {
   return x <= 0.0031308 ? x * 12.92 : 1.055 * Math.pow(x, 1 / 2.4) - 0.055;
 };
 
-/** Materialien eines GLB (glTF speichert die Farbe linear, hier sRGB). */
+const hexToLinear = (hex: string): [number, number, number] | null => {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return null;
+  const c = (i: number) => {
+    const v = parseInt(m[1].slice(i, i + 2), 16) / 255;
+    return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+  };
+  return [c(0), c(2), c(4)];
+};
+
+/**
+ * Dachschichten als eigene Materialien. Der Kern legt alle Dachteile unter den Namen „Dach" ab (gleiche Farbe =
+ * ein Material), darum hängt „Ziegel" am selben Material wie „Kies", und Texturen lassen sich nicht zuordnen.
+ * Hier bekommt jedes Dach-Teilnetz ein Material `Dach: <Baustoff>`: die Schicht des Dachtyps (aussen → innen),
+ * deren Baustoff-Farbe die des Teilnetzes ist (sichtbar ist die äusserste), Rückfall die äusserste Schicht.
+ * Hat das Dach eine eigene Farbe (`Roof.color`), bleibt es bei dieser (ohne Baustoff-Textur).
+ */
+export function splitRoofMaterials(glb: Uint8Array, project: Project): Uint8Array {
+  const json = glbJson(glb);
+  const mats = json.materials ?? [];
+  const roofById = new Map((project.roofs ?? []).map((r) => [r.id, r]));
+  const made = new Map<string, number>();
+  let changed = false;
+  for (const node of json.nodes ?? []) {
+    if (node.extras?.type !== "roof" || node.mesh === undefined) continue;
+    const roof = roofById.get(node.extras.id ?? "");
+    const type = roof?.roofTypeId ? project.roofTypes?.find((t) => t.id === roof.roofTypeId) : undefined;
+    if (!roof || roof.color || !type || type.layers.length === 0) continue;
+    const layers = type.layers.map((l) => project.components.find((c) => c.id === l.componentId)).filter((c): c is NonNullable<typeof c> => !!c);
+    if (layers.length === 0) continue;
+    for (const prim of json.meshes?.[node.mesh]?.primitives ?? []) {
+      const src = prim.material === undefined ? undefined : mats[prim.material];
+      if (!src || src.name !== "Dach") continue;
+      const f = src.pbrMetallicRoughness?.baseColorFactor ?? [1, 1, 1, 1];
+      const close = (a: [number, number, number] | null) => a !== null && Math.abs(a[0] - f[0]) + Math.abs(a[1] - f[1]) + Math.abs(a[2] - f[2]) < 0.02;
+      const comp = layers.find((c) => close(hexToLinear(c.color))) ?? layers[0];
+      const key = `${comp.name}|${prim.material}`;
+      let idx = made.get(key);
+      if (idx === undefined) {
+        idx = mats.length;
+        mats.push({ ...src, name: `Dach: ${comp.name}`, extras: { component: comp.name } });
+        made.set(key, idx);
+      }
+      prim.material = idx;
+      changed = true;
+    }
+  }
+  return changed ? glbWithJson(glb, { ...json, materials: mats }) : glb;
+}
+
+/** Verwendung je Material aus den Knoten (`extras.type`); bei mehreren gewinnt Gelände vor Kontext, Dach, Öffnung, Gebäude. */
+const ROLE_PRIORITY: RenderRole[] = ["terrain", "context", "roof", "opening", "building"];
+function roleOfNode(type: string | undefined): RenderRole {
+  switch (type) {
+    case "terrain":
+      return "terrain";
+    case "context":
+      return "context";
+    case "roof":
+      return "roof";
+    case "window":
+    case "door":
+    case "opening":
+      return "opening";
+    default:
+      return "building";
+  }
+}
+
+/** Materialien eines GLB (glTF speichert die Farbe linear, hier sRGB), mit Verwendung; nicht benutzte entfallen. */
 export function glbMaterials(glb: Uint8Array): RenderMaterial[] {
+  const json = glbJson(glb);
+  const roles = new Map<number, RenderRole>();
+  for (const node of json.nodes ?? []) {
+    if (node.mesh === undefined) continue;
+    const role = roleOfNode(node.extras?.type);
+    for (const prim of json.meshes?.[node.mesh]?.primitives ?? []) {
+      if (prim.material === undefined) continue;
+      const prev = roles.get(prim.material);
+      if (!prev || ROLE_PRIORITY.indexOf(role) < ROLE_PRIORITY.indexOf(prev)) roles.set(prim.material, role);
+    }
+  }
   const out: RenderMaterial[] = [];
-  for (const m of glbJson(glb).materials ?? []) {
+  (json.materials ?? []).forEach((m, i) => {
     const p = m.pbrMetallicRoughness ?? {};
     const f = p.baseColorFactor ?? [1, 1, 1, 1];
     const opacity = f[3] ?? 1;
+    const glass = m.alphaMode === "BLEND" && opacity < 1;
+    const used = roles.get(i);
+    // Materialien ohne Knoten (Altlasten nach `splitRoofMaterials`) lässt der Leser weg; ohne Knotenangaben (GLB fremder Herkunft) bleiben alle.
+    if (!used && roles.size > 0) return;
     out.push({
       name: m.name ?? "",
       color: [linearToSrgb(f[0] ?? 1), linearToSrgb(f[1] ?? 1), linearToSrgb(f[2] ?? 1)],
       opacity,
       roughness: p.roughnessFactor ?? 0.9,
       metallic: p.metallicFactor ?? 0,
-      glass: m.alphaMode === "BLEND" && opacity < 1,
-      transmission: m.alphaMode === "BLEND" && opacity < 1 ? 1 : 0,
-      ior: m.alphaMode === "BLEND" && opacity < 1 ? 1.45 : 1.5,
+      glass,
+      transmission: glass ? 1 : 0,
+      ior: 1.5,
+      ...(used ? { role: used } : {}),
+      ...(m.extras?.component ? { component: m.extras.component } : {}),
     });
-  }
+  });
   return out;
 }
 
@@ -189,6 +311,15 @@ function extensionOf(url: string): string {
   return m ? m[1].toLowerCase() : "jpg";
 }
 
+/** Wiese für das Gelände (ambientCG Grass005, im Material-Katalog `public/assets/materials`); Kachel 4 m. */
+export const TERRAIN_MATERIAL: ComponentMaterial = {
+  libraryId: "Grass005",
+  color: "/assets/materials/Grass005/color.jpg",
+  normal: "/assets/materials/Grass005/normal.jpg",
+  roughness: "/assets/materials/Grass005/roughness.jpg",
+  sizeM: 4,
+};
+
 /** Bauteil-Materialkarten nach glTF-Materialname (erste Komponente gleichen Namens mit Farbkarte gewinnt). */
 function componentMaterials(project: Project): Map<string, ComponentMaterial> {
   const byName = new Map<string, ComponentMaterial>();
@@ -203,7 +334,7 @@ function componentMaterials(project: Project): Map<string, ComponentMaterial> {
  * Kamera, Sonne. Verlangt das geladene Format-Modul (`await loadFileio()`) und den Kern.
  */
 export async function buildRenderPackage(project: Project, opts: RenderOptions, loadTexture?: TextureLoader): Promise<RenderPackage> {
-  const glb = exportGlb(project);
+  const glb = splitRoofMaterials(exportGlb(project), project);
   const files: RenderPackage["files"] = [{ path: "model.glb", bytes: glb }];
   const materials = glbMaterials(glb);
   const comp = componentMaterials(project);
@@ -211,7 +342,8 @@ export async function buildRenderPackage(project: Project, opts: RenderOptions, 
   const stored = new Map<string, string>();
 
   for (const mat of materials) {
-    const cm = comp.get(mat.name);
+    // Gelände hat im Modell kein Material: Wiese aus der mitgelieferten Bibliothek (ohne Bildkarten übernimmt der Leser eine Wiesenfarbe).
+    const cm = mat.role === "terrain" ? TERRAIN_MATERIAL : comp.get(mat.component ?? mat.name);
     if (!cm || mat.glass || !loadTexture) continue;
     const textures: Partial<Record<TextureKind, string>> = {};
     for (const kind of TEXTURE_KINDS) {
@@ -251,6 +383,65 @@ export async function buildRenderPackage(project: Project, opts: RenderOptions, 
   };
   files.push({ path: "scene.json", bytes: new TextEncoder().encode(JSON.stringify(scene, null, 2)) });
   return { scene, files, missingTextures: missing };
+}
+
+// ── Kameras ([213]) ─────────────────────────────────────────────────────────
+
+/** Eine gespeicherte Kamera (`Project.cameras`) als Rendering-Kamera, mit ihrer Sonnenzeit. */
+export interface RenderCameraChoice {
+  id: string;
+  name: string;
+  camera: RenderCamera;
+  /** `Camera.sunWhen`, falls gesetzt und gültig. */
+  sunWhen?: Date;
+}
+
+/**
+ * Sicht einer Kamera in Modell-Koordinaten: Standpunkt = Fussboden des Geschosses + Augenhöhe, Blick zum Ziel,
+ * Up aus der Senkrechten (bei senkrechtem Blick Norden). Gleiche Rechnung wie `viewport/cameraView.ts::cameraToView`
+ * (der Kern darf den Viewport nicht importieren; der Test vergleicht beide). Null bei Standpunkt = Ziel.
+ */
+export function renderCameraOf(project: Project, cam: Camera): RenderCamera | null {
+  const base = project.drawingLevels.find((l) => l.id === cam.floorId)?.baseElevation;
+  const eye: [number, number, number] = [cam.position.x, cam.position.y, (typeof base === "number" && Number.isFinite(base) ? base : 0) + (Number.isFinite(cam.eyeHeight) ? cam.eyeHeight : 1.6)];
+  const tgt: [number, number, number] = [cam.target.x, cam.target.y, cam.targetHeight];
+  if (![...eye, ...tgt].every(Number.isFinite)) return null;
+  const d = [tgt[0] - eye[0], tgt[1] - eye[1], tgt[2] - eye[2]];
+  const len = Math.hypot(d[0], d[1], d[2]);
+  if (!(len > 1e-9)) return null;
+  const dir: [number, number, number] = [d[0] / len, d[1] / len, d[2] / len];
+  const ref = Math.abs(dir[2]) > 0.9999 ? [0, 1, 0] : [0, 0, 1];
+  const k = ref[0] * dir[0] + ref[1] * dir[1] + ref[2] * dir[2];
+  const u = [ref[0] - dir[0] * k, ref[1] - dir[1] * k, ref[2] - dir[2] * k];
+  const ul = Math.hypot(u[0], u[1], u[2]);
+  const fov = Number.isFinite(cam.fovDeg) && cam.fovDeg > 0 ? Math.min(120, Math.max(5, cam.fovDeg)) : 50;
+  return {
+    kind: cam.projection === "perspective" ? "perspective" : "orthogonal",
+    position: eye,
+    direction: dir,
+    up: [u[0] / ul, u[1] / ul, u[2] / ul],
+    fovDeg: fov,
+    orthoHeight: cam.orthoHeight && cam.orthoHeight > 0 ? cam.orthoHeight : 10,
+  };
+}
+
+/** Alle brauchbaren Kameras des Projekts in Listenreihenfolge. */
+export function projectRenderCameras(project: Project): RenderCameraChoice[] {
+  const out: RenderCameraChoice[] = [];
+  for (const c of project.cameras ?? []) {
+    const camera = renderCameraOf(project, c);
+    if (!camera) continue;
+    const w = c.sunWhen ? new Date(c.sunWhen) : null;
+    out.push({ id: c.id, name: c.name, camera, ...(w && Number.isFinite(w.getTime()) ? { sunWhen: w } : {}) });
+  }
+  return out;
+}
+
+/** Kamera nach Id oder Name (Gross-/Kleinschreibung egal; bei gleichem Namen die erste). */
+export function findRenderCamera(project: Project, key: string): RenderCameraChoice | null {
+  const all = projectRenderCameras(project);
+  const k = key.trim().toLowerCase();
+  return all.find((c) => c.id === key) ?? all.find((c) => c.name.toLowerCase() === k) ?? null;
 }
 
 // ── Blender-Ausgabe lesen ───────────────────────────────────────────────────
