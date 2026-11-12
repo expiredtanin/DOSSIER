@@ -104,7 +104,15 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   reiner Wandauswahl. Neue umbelegbare Kürzel (Einstellungen): Cmd+D Duplizieren (Kopie 0.5 m versetzt, danach gewählt),
   Cmd+L Sperren/Entsperren, Cmd+Shift+H Ebenen der Auswahl ausblenden, Cmd+Shift+A alle Ebenen einblenden, Cmd+0 alles
   einpassen, Cmd+Shift+F auf Auswahl einpassen (ohne Plan: 3D-Kamera); alle im nativen Menü (`state/selectionActions.ts`).
-  Offen: Bogenwände werden nicht verbunden; T-Stoss nur bis zur Achse (nicht Fläche); „Auswahl ausblenden" im Grundriss
+  Nachtrag (13.11., Meldung Maintainer „Cmd+J geht bei Wänden nicht" in der Mac-App): T-Stoss endet jetzt an der dem Abzweig
+  zugewandten Fläche der Durchgangswand (Referenzlinie beachtet; `joins.rs` schneidet dort sauber, Test gegen `compute_joins`),
+  nicht mehr an der Achse. Hinweis ohne Wirkung nennt den Grund (`cmd.join.far` mit Abstand/Toleranz, `.met`, `.cross`,
+  `.parallel`, `.arc`, `.locked`, `.floors`, `.few`; Kern `join_hint`, Zahlen als `Schlüssel|arg|arg` im `notice`). Mac-Weg:
+  das native Menü (Accelerator CmdOrCtrl+J) fängt die Taste ab, das Fenster bekommt kein keydown; der Menü-Weg und das
+  Tastenkürzel laufen nun über `state/selectionJoin.ts` (Auswahl frisch aus dem Store, nicht aus der Render-Closure; auch der
+  Engine-Kontext liest sie frisch), e2e `wallJoinMenu190.spec.ts` löst `selectionAction("join")` wie der Menüpunkt aus.
+  Eine veraltete Closure war im Code nicht nachweisbar; die genaue Mac-Ursache ist ungeprüft (kein macOS hier).
+  Offen: Bogenwände werden nicht verbunden; „Auswahl ausblenden" im Grundriss
   schaltet Ebenen (persistent, undo-bar), nicht einzelne Elemente temporär; kein Cmd+E/F2 (keine Funktion dahinter);
   nicht in der Tauri-App geprüft. · S
 - ○ **[189]** Panels neu ordnen + Einstellungsdialog (12.11., Maintainer): Attribute-Panel unten links nur Gestaltung (Stift, Füllung, Linienstil, Schraffur); BIM-/Bauteil-Infos (Typ, Schichten, Masse, Kennwerte, IFC/Psets, Material …) in die Objekt-Info. Taste T bei Auswahl öffnet direkt den Einstellungsdialog des Objekts (wie Archicad Cmd+T), v. a. für Fenster/Türen, deren Einstellungen heute nur über das Attribute-Panel erreichbar sind. · M

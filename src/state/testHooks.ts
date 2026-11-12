@@ -4,6 +4,7 @@
 
 import { core, coreEpoch, coreReady } from "../engine/coreWasm";
 import { getState } from "./appStore";
+import { runSelectionAction, type SelectionActionId } from "./selectionActions";
 import { storeDocument } from "./historySlice";
 import { ceilingThickness } from "../model/types";
 import { computeSection, generatePlan, verticalExtents, generateSectionPlan, pickGeometry, projectToModel3d } from "../core";
@@ -58,6 +59,10 @@ declare global {
       layerView: () => { wallId: string; visible: string[]; prims: number; wallPrims: number };
       /** [195] Strichstärke-Override der Wände (id → mm), nur gesetzte. */
       wallWeights: () => Record<string, number>;
+      /** [190] Auswahl-Aktion wie das native Menü (Bearbeiten > Verbinden usw.), ohne Tastendruck: `runSelectionAction`. */
+      selectionAction: (id: SelectionActionId) => void;
+      /** [190] Wände (id, Start, Ende) des Projekts. */
+      walls: () => { id: string; start: { x: number; y: number }; end: { x: number; y: number } }[];
       /** [185] 3D-Element-Filter (Store) und die Wand-ids des 3D-Modells bzw. der Pick-Geometrie mit ihm. */
       view3d: () => { only: string[] | null; hidden: string[]; walls: string[]; pickWalls: string[] };
     };
@@ -96,6 +101,8 @@ export function installTestHooks(): void {
       };
     },
     wallWeights: () => Object.fromEntries(getState().project.walls.flatMap((w) => (w.strokeWeight === undefined ? [] : [[w.id, w.strokeWeight]]))),
+    selectionAction: (id) => runSelectionAction(id),
+    walls: () => getState().project.walls.map((w) => ({ id: w.id, start: { ...w.start }, end: { ...w.end } })),
     select: (patch) => getState().setSelection(patch),
     dimPts: (id) => {
       const g = getState().project.drawings2d.find((d) => d.id === id)?.geom;

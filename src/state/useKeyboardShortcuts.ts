@@ -34,6 +34,7 @@ import type { ElementClipboard, ElementSelectionIds, PastedIds } from "../editor
 import { parseClipboardText, serializeClipboardText } from "../editors/elementClipboardSerialize";
 import { matchesShortcut, type ShortcutId, type ShortcutOverrides } from "./keyboardShortcuts";
 import { isolateSelectionLayerCodes, showAllLayerCodes } from "./layerIsolate";
+import { joinCurrentSelection } from "./selectionJoin";
 import { hideSelectionIn3d, showSelectionIn3d, stepActiveFloor } from "./tabNavigation";
 
 const isEditableTarget = (e: KeyboardEvent): boolean => {
@@ -332,7 +333,7 @@ export function useSplitJoinShortcut(
   selectedDrawingIds: string[],
   engine: CommandEngine,
   runSplit: (ids: string[]) => void,
-  setSelection: (patch: Partial<Selection>) => void,
+  _setSelection: (patch: Partial<Selection>) => void,
   overrides: ShortcutOverrides,
   selectedWallIds: string[] = [],
 ): void {
@@ -351,10 +352,8 @@ export function useSplitJoinShortcut(
         runSplit(ids);
         return;
       }
-      // Join: exakt derselbe Befehl wie „join" tippen (Sofort-Befehl, autoRun).
-      // Nach dem Verbinden zeigt die alte Auswahl auf ersetzte IDs → aufräumen.
-      engine.start("join");
-      setSelection({ drawings: [], walls: [] });
+      // Join: derselbe Pfad wie das native Menü (Auswahl frisch aus dem Store, Hinweis bei < 2 Elementen).
+      joinCurrentSelection(engine);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);

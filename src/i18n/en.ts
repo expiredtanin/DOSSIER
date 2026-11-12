@@ -2312,7 +2312,15 @@ export const en: Record<TranslationKey, string> = {
   // Alt+Click). Labels for the command line / menus.
   "edit.split.label": "Split",
   "edit.join.label": "Join",
-  "cmd.join.nothing": "Nothing to join: walls already meet or are too far apart.",
+  "cmd.join.few": "Select at least two elements to join.",
+  "cmd.join.nothing": "Nothing to join.",
+  "cmd.join.far": "Nothing to join: distance too large ({d} m, at most {max} m).",
+  "cmd.join.met": "Nothing to join: the walls already meet.",
+  "cmd.join.cross": "Nothing to join: the walls cross each other.",
+  "cmd.join.parallel": "Nothing to join: the walls are parallel.",
+  "cmd.join.arc": "Nothing to join: curved walls are not joined at corners.",
+  "cmd.join.locked": "Nothing to join: the walls are locked.",
+  "cmd.join.floors": "Nothing to join: the walls are on different floors.",
   "edit.cutSegment.label": "Delete segment",
   // Tab field cycle (precision input): ordered numeric fields per step.
   "cmd.field.length": "Length",

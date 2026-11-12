@@ -58,9 +58,25 @@ pub fn result(root: &Map<String, Value>, p: &Project, text: &str) -> Result<Grip
         return Ok(crate::cmd_transform::transform_result(root, p, &parse(&v, "transform")?));
     }
     let ops = ops(root, p, text)?;
-    // [190] Verbinden ohne Wirkung: Hinweis statt stillem Nichts.
-    let notice = (ops.is_empty() && v.get("cmd").and_then(Value::as_str) == Some("join")).then_some("cmd.join.nothing");
-    Ok(GripResult { ops, notice })
+    // [190] Verbinden ohne Wirkung: Hinweis mit Grund statt stillem Nichts (Wände: Abstand, parallel, Bogenwand …).
+    let (mut notice, mut notice_args) = (None, vec![]);
+    if ops.is_empty() && v.get("cmd").and_then(Value::as_str) == Some("join") {
+        let ids: Vec<String> = v.get("ids").and_then(|x| serde_json::from_value(x.clone()).ok()).unwrap_or_default();
+        let hint = crate::cmd_wall_edit::join_hint(p, &ids);
+        let mut parts = hint.as_deref().unwrap_or("cmd.join.nothing").split('|');
+        notice = Some(match parts.next() {
+            Some("cmd.join.far") => "cmd.join.far",
+            Some("cmd.join.locked") => "cmd.join.locked",
+            Some("cmd.join.arc") => "cmd.join.arc",
+            Some("cmd.join.floors") => "cmd.join.floors",
+            Some("cmd.join.met") => "cmd.join.met",
+            Some("cmd.join.cross") => "cmd.join.cross",
+            Some("cmd.join.parallel") => "cmd.join.parallel",
+            _ => "cmd.join.nothing",
+        });
+        notice_args = parts.map(str::to_owned).collect();
+    }
+    Ok(GripResult { ops, notice, notice_args })
 }
 
 /// Wie [`result`], als Antwort-JSON `{"ops": […], "notice": …}` (Zahlen mit Nicht-endlich-Marken).
