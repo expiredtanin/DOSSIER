@@ -1753,7 +1753,9 @@ fn autodim_layout(c: &Ctx, d: &Drawing2D, scale: f64) -> AutodimLayout {
         .flat_map(|&i| chains[i].pts.iter())
         .map(|q| (q.x - mine.a.x) * mine.u.0 + (q.y - mine.a.y) * mine.u.1)
         .collect();
-    let marks = section_mark_strips(c, mine.a, mine.u, mine.n, mine.off + extra[me] + need, mine.len, scale);
+    let off_me = mine.off + extra[me] + need;
+    let mut marks = section_mark_strips(c, mine.a, mine.u, mine.n, off_me, mine.len, scale);
+    marks.extend(grid_strips(c, mine.a, mine.u, mine.n, off_me, mine.len, scale));
     AutodimLayout { shift: (extra[me] + need) * d_sign(d), blocked, marks }
 }
 
@@ -1766,6 +1768,8 @@ fn section_mark_strips(c: &Ctx, a: Vec2, u: (f64, f64), n: (f64, f64), off: f64,
         return out;
     }
     let (leg, end_half, cross_half) = (mm_to_model(8.0, scale), mm_to_model(6.0, scale), mm_to_model(1.0, scale));
+    // [199] Schenkel samt Pfeil neben der Masslinie: bis 9 mm Papier Abstand (Zahl und Pfeilkopf reichen so weit), Pfeilkopf ±1.5 mm.
+    let (near, arrow_half) = (mm_to_model(9.0, scale), mm_to_model(1.5, scale));
     let (ox, oy) = (a.x + n.0 * off, a.y + n.1 * off);
     let cross = |p: (f64, f64), q: (f64, f64)| p.0 * q.1 - p.1 * q.0;
     for level in c.p.drawing_levels.iter().filter(|l| matches!(l.kind, DrawingLevelKind::Section)) {
@@ -1796,6 +1800,80 @@ fn section_mark_strips(c: &Ctx, a: Vec2, u: (f64, f64), n: (f64, f64), off: f64,
                 out.push((t - cross_half, t + cross_half));
             } else if before || after {
                 out.push((t - end_half, t + end_half));
+            }
+        }
+        // [199] Der Schenkel mit Pfeil am Ende (Blickrichtung, `leg` lang) liegt oft neben der Masslinie statt auf ihr.
+        let sign = level.direction_sign.unwrap_or(1.0);
+        let dir_of = |a: (f64, f64), b: (f64, f64)| {
+            let l = hypot2(b.0 - a.0, b.1 - a.1);
+            if l < 1e-6 { None } else { Some(((b.0 - a.0) / l, (b.1 - a.1) / l)) }
+        };
+        let first = (1..m).find_map(|i| dir_of(path[0], path[i]));
+        let last = (0..m - 1).rev().find_map(|i| dir_of(path[i], path[m - 1]));
+        for (e, dir) in [(path[0], first), (path[m - 1], last)] {
+            let Some(dir) = dir else { continue };
+            let tip = (e.0 + -dir.1 * sign * leg, e.1 + dir.0 * sign * leg);
+            let (we, wt) = ((e.0 - ox, e.1 - oy), (tip.0 - ox, tip.1 - oy));
+            let (de, dt) = (cross(u, we), cross(u, wt));
+            let (te, tt) = (we.0 * u.0 + we.1 * u.1, wt.0 * u.0 + wt.1 * u.1);
+            if (de * dt < 0.0 || de.abs().min(dt.abs()) <= near) && te.min(tt) < len + arrow_half && te.max(tt) > -arrow_half {
+                out.push((te.min(tt) - arrow_half, te.max(tt) + arrow_half));
+            }
+        }
+    }
+    out
+}
+
+/// [199] Wo queren Achslinien und Achsblasen der Raster des Geschosses die Masslinie einer Kette (Anfang `a`, Richtung
+/// `u`, Normale `n`, Abstand `off`, Länge `len`)? Streifen (von, bis) entlang der Kette in Modell-m, gleiche Mechanik wie
+/// [`section_mark_strips`]: Masszahlen weichen ihnen aus. Die Blasen stehen hier an den Achsenden (ohne das
+/// Hinausrücken vor Anbauten: das hängt von den Massketten ab und würde im Kreis rechnen).
+fn grid_strips(c: &Ctx, a: Vec2, u: (f64, f64), n: (f64, f64), off: f64, len: f64, scale: f64) -> Vec<(f64, f64)> {
+    let mut out = Vec::new();
+    let mut memo = Memo::default();
+    for d in c.p.drawings2d.iter().filter(|d| matches!(d.geom, Drawing2DGeom::Grid { .. }) && on_floor(c, d)) {
+        if !memo.get(c, d).shown {
+            continue;
+        }
+        let (Some(spec), Drawing2DGeom::Grid { bubble_mm, .. }) = (crate::grid::Spec::of(&d.geom), &d.geom) else { continue };
+        let diameter = crate::grid::bubble_diameter(*bubble_mm, scale);
+        out.extend(axis_cross_strips(&spec.axes(), diameter, (a.x + n.0 * off, a.y + n.1 * off), u, len, mm_to_model(1.0, scale)));
+    }
+    out
+}
+
+/// Kern von [`grid_strips`]: Masslinie ab `o` in Richtung `u` (Länge `len`); Achsstrecken queren sie mit ±`cross_half`,
+/// Blasen (Durchmesser `diameter`, an den Achsenden nach aussen) mit der Sehne des Kreises. Eine Achse mit Blase gilt
+/// über ihr Ende hinaus als bis hinter alle Massketten reichend.
+fn axis_cross_strips(axes: &[crate::grid::Axis], diameter: f64, o: (f64, f64), u: (f64, f64), len: f64, cross_half: f64) -> Vec<(f64, f64)> {
+    let mut out = Vec::new();
+    let r = diameter / 2.0;
+    let cross = |p: (f64, f64), q: (f64, f64)| p.0 * q.1 - p.1 * q.0;
+    for ax in axes {
+        let crate::grid::Shape::Line { a: p, b: q } = ax.shape else { continue };
+        let l = hypot2(q.0 - p.0, q.1 - p.1);
+        if !(l > 1e-6) {
+            continue;
+        }
+        let d = ((q.0 - p.0) / l, (q.1 - p.1) / l);
+        let den = cross(u, d);
+        if den.abs() >= 0.2 {
+            let w = (p.0 - o.0, p.1 - o.1);
+            let t = cross(w, d) / den;
+            let s = cross(w, u) / den;
+            // Eine Achse mit Blase reicht bis hinter die Massketten (die Blase rückt vor sie hinaus, [157]).
+            let near_start = |e: &(f64, f64)| hypot2(e.0 - p.0, e.1 - p.1) < hypot2(e.0 - q.0, e.1 - q.1);
+            let beyond = |start: bool| if ax.bubbles.iter().flatten().any(|(e, _)| near_start(e) == start) { f64::INFINITY } else { 0.0 };
+            if s >= -beyond(true) && s <= l + beyond(false) && t > -r && t < len + r {
+                out.push((t - cross_half, t + cross_half));
+            }
+        }
+        for (end, dir) in ax.bubbles.iter().flatten() {
+            let ctr = (end.0 + dir.0 * r - o.0, end.1 + dir.1 * r - o.1);
+            let (t, q_off) = (ctr.0 * u.0 + ctr.1 * u.1, cross(u, ctr));
+            if q_off.abs() < r && t > -r && t < len + r {
+                let half = (r * r - q_off * q_off).sqrt();
+                out.push((t - half, t + half));
             }
         }
     }
@@ -2627,6 +2705,51 @@ mod tests {
         assert_eq!(dim_auto_offsets_marks(&pts, h, &[], &[(-1.0, 25.0)]), vec![(0.0, 0.0)]);
         // Streifen fern der Zahl: unverändert.
         assert_eq!(dim_auto_offsets_marks(&pts, h, &[], &[(1.0, 1.5)]), vec![(0.0, 0.0)]);
+    }
+
+    /// [199] Achslinie B auf der Gesamtmass-Zahl (komplex UG Ost, „19.24“ / „4.37“): senkrechte Achse quert die Masslinie,
+    /// die Blase am Ende liegt als Sehne im Streifen; parallele Achsen und Achsen fern der Kette zählen nicht.
+    #[test]
+    fn achsstreifen_auf_der_masslinie() {
+        use crate::grid::{Axis, Shape};
+        let ax = |a: (f64, f64), b: (f64, f64), bub: bool| Axis { index: 0, label: "B".into(), shape: Shape::Line { a, b }, bubbles: [None, if bub { Some((b, ((b.0 - a.0) / (b.1 - a.1).hypot(b.0 - a.0), (b.1 - a.1) / (b.1 - a.1).hypot(b.0 - a.0)))) } else { None }] };
+        // Masslinie waagrecht bei y = -1, x von 0 bis 20; Achse bei x = 5 von y = -3 bis 8 (quert), Achse x = 30 (fern), y = 2 (parallel).
+        let axes = [ax((5.0, -3.0), (5.0, 8.0), false), ax((30.0, -3.0), (30.0, 8.0), false), ax((0.0, 2.0), (20.0, 2.0), false)];
+        let s = axis_cross_strips(&axes, 0.5, (0.0, -1.0), (1.0, 0.0), 20.0, 0.1);
+        assert_eq!(s.len(), 1);
+        assert!((s[0].0 - 4.9).abs() < 1e-9 && (s[0].1 - 5.1).abs() < 1e-9, "{s:?}");
+        // Blase am unteren Ende (y = -3) nach unten: Kreis um (5, -3.25), r = 0.25 — Masslinie bei y = -3.2 schneidet sie.
+        let bub = Axis { index: 0, label: "B".into(), shape: Shape::Line { a: (5.0, 8.0), b: (5.0, -3.0) }, bubbles: [None, Some(((5.0, -3.0), (0.0, -1.0)))] };
+        let s = axis_cross_strips(&[bub], 0.5, (0.0, -3.2), (1.0, 0.0), 20.0, 0.1);
+        // Die Achse mit Blase reicht über ihr Ende hinaus (Linie ±0.1) und die Sehne des Kreises (Blase selbst).
+        assert_eq!(s.len(), 2, "{s:?}");
+        assert!(s.iter().all(|x| x.0 < 5.0 && x.1 > 5.0 && x.1 - x.0 <= 0.5 + 1e-9));
+        // Ohne Blase endet die Achse am Ende: die Masslinie dahinter wird nicht gequert.
+        let bare = Axis { index: 0, label: "B".into(), shape: Shape::Line { a: (5.0, 8.0), b: (5.0, -3.0) }, bubbles: [None, None] };
+        assert!(axis_cross_strips(&[bare], 0.5, (0.0, -3.2), (1.0, 0.0), 20.0, 0.1).is_empty());
+        // Mit der Zahl daneben: Masszahl weicht aus.
+        let pts = [v(0.0, 0.0), v(20.0, 0.0)];
+        let o = dim_auto_offsets_marks(&pts, 0.35, &[], &[(4.9, 5.1)]);
+        assert_eq!(o, vec![(0.0, 0.0)], "Zahl in der Mitte (10) liegt nicht auf der Achse");
+        let o = dim_auto_offsets_marks(&pts, 0.35, &[], &[(9.9, 10.1)]);
+        assert!(o[0].0.abs() > 0.1);
+    }
+
+    /// [199] Pfeil-Schenkel am Ende einer Schnittlinie neben der Masslinie (komplex UG Ost, „B-B“ neben „19.24“): der Streifen
+    /// deckt den Schenkel (8 mm Papier in Blickrichtung) samt Pfeilkopf, auch wenn die Linie die Masslinie nicht erreicht.
+    #[test]
+    fn schnittpfeil_neben_der_masslinie() {
+        let p = project(serde_json::json!({"drawingLevels": [
+            {"id": "eg", "name": "EG", "kind": "floor", "visible": true, "locked": false},
+            {"id": "sb", "name": "Schnitt B-B", "kind": "section", "visible": true, "locked": false, "linePoints": [{"x": -5.0, "y": 5.0}, {"x": 10.0, "y": 5.0}], "directionSign": 1}
+        ]}));
+        let a = args(100.0);
+        let c = Ctx::new(&p, &a);
+        // Masslinie senkrecht bei x = 10.4 (0.4 neben dem Ende der Schnittlinie), t = y; der Pfeil läuft von y = 5 bis 5.8.
+        let s = section_mark_strips(&c, v(10.0, 0.0), (0.0, 1.0), (1.0, 0.0), 0.4, 20.0, 100.0);
+        assert!(s.iter().any(|x| x.0 <= 5.0 && x.1 >= 5.8), "{s:?}");
+        // Weit weg (Masslinie bei x = 13): kein Streifen.
+        assert!(section_mark_strips(&c, v(10.0, 0.0), (0.0, 1.0), (1.0, 0.0), 3.0, 20.0, 100.0).is_empty());
     }
 
     #[test]
