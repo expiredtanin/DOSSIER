@@ -59,14 +59,9 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   oben ein Test; was fehlt, wird hier als Aufgabe eingetragen. · M
   Umgesetzt (12.11.): `e2e/release10.spec.ts` spielt leeres Projekt → Kataster-DXF (LV95) → Baurecht → Wände/Decke/Dach → Raum +
   Raumprogramm → SIA 416/Kennzahlen (CSV/PDF) → 1:200 → Schnitt → Axonometrie/Schatten → Präsentationsplan A1 → Publikation PDF → DXF/IFC
-  → Speichern in 13 Schritten durch; fehlende Schritte als `test.fixme` ([207] [208] [209] [211] [221]–[224]). Behoben: GV in der
+  → Speichern in 13 Schritten durch; fehlende Schritte als `test.fixme` ([207] [208] [209] [211] [222]–[224]; [221] und [225] seit 12.11. aktiv). Behoben: GV in der
   Kennzahlenleiste war ohne freie Körper 0 m³, neue Decken bekamen den Aussenwand-Aufbau statt eines Deckentyps. Offen: Durchlauf
   der Checkliste auf dem Mac (Maintainer); 3D-Bild headless nicht prüfbar (kein WebGPU).
-- ○ **[221]** LV95-Projekt: Schnitt A und Ansicht Süd des leeren Projekts liegen am Nullpunkt (`linePoints` −1…6 m). Repro: Neues Projekt →
-  Kataster-DXF mit Landeskoordinaten importieren → Erdgeschoss → Gebäude bei E 2'600'050 / N 1'200'050 zeichnen → „Auf Plan einpassen“:
-  Massstab ≈ 1:10'000'000 (Ausmass Nullpunkt … LV95, `plan/domains.rs` Marken im Ausmass), Rad-Zoom endet bei ≈ 130 m Breite
-  (`ZOOM_MAX` relativ zum Ausmass), der EG-Reiter öffnet am Nullpunkt; Schnitt A schneidet nichts. Vorschlag: Standard-Schnitt/-Ansicht
-  beim ersten Bauteil bzw. DXF-Import mit Landeskoordinaten ans Gebäude setzen oder im leeren Projekt weglassen. · S
 
 - ✓ **[217]** Kern-Panics aus dem Robustheitstest (12.11.): `wall_top_at` nutzte `f64::clamp(base, base+height)` — bei negativer/NaN-Höhe
   min > max bzw. NaN → Panic in `wall_piece_mesh` (und über 3D/Exporte, u. a. `exportIfcSpf`). Neu `jsnum::clamp_safe`/`ClampSafe`
@@ -155,9 +150,6 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   und geben leere Viewports; es gibt nur die vorhandenen Ansichten (leeres Projekt: nur „Ansicht Süd“) — fehlende Ansichten N/O/W aus dem
   Gebäudeumriss anbieten; Massstab wählbar (heute der grösste passende, im Testgebäude auf A1 1:50 statt 1:200 für den Wettbewerb).
   Ort: `ui/PresentationDialog.tsx`, `commands/cmds/presentation.ts`. · S
-- ○ **[225]** Kennzahlenleiste und Flächentabelle widersprechen sich (12.11., aus [206]): Leiste „GF“ = Summe der Raumflächen (NGF,
-  `kennzahlen.rs`), Tabelle GF = NGF + KF (`flaechen.rs`); im Testgebäude 12 × 10 m: Leiste GF 112.5 m², Tabelle 127.7 m², ÜZ ebenso
-  verschieden. Leiste aus der Flächentabelle rechnen (GV ist seit [206] gleich). · S
 
 ### Phase 3 (27.11.–3.12.): Vorprojekt
 - ○ **[209]** Kostenschätzung grob (Vorprojekt ±15–25 %): Kennwerte je m³ GV (SIA 416) bzw. je m² GF und eBKP-H-Hauptgruppen,
@@ -1099,3 +1091,24 @@ exakte Durchdringung, [61] Zuordnung per Hand, [63] Profil je Kante, [70] Fläch
 
 - **[192]** Ebenen schnell schalten (11.11.): Rechtsklick auf eine Zeile im Ebenen-Panel „Nur diese Ebene anzeigen“ / „Diese Ebene ausblenden“ / „Alle Ebenen einblenden“; im Kontextmenü von Objekt und leerer Fläche (Plan, Schnitt, Ansicht, 3D) „Ebene des Objekts isolieren/ausblenden“ und „Alle Ebenen einblenden“. Sichtbarkeit bleibt `layers[].visible` über Ops (`state/layerIsolate.ts`, ein Undo-Schritt je Aktion); Isolieren lässt Elternklassen an; „Alle einblenden“ stellt den Zustand vor dem ersten Isolieren wieder her (gemerkt je Sitzung/Projekt-Epoche), sonst alles an. Kürzel (umbelegbar): Cmd/Ctrl+Shift+L Ebene der Auswahl isolieren (Cmd+Shift+I ist Boolean-Schnitt), Cmd/Ctrl+Shift+E alle Ebenen einblenden. Test: vitest `layerIsolate.test.ts`, e2e `layerIsolate.spec.ts` (Linux-Chromium; nicht in der Tauri-App geprüft; das native Menü hat keinen Eintrag).
 - **[51]** Herkunft übernommenen Codes (12.11.): Inventur; `NOTICE` ergänzt um delaunator/robust-predicates (`core/delaunay.rs`), polylabel (Verfahren, `room_area.rs`), Manifold (Urheber, `solid_bool.rs`), ambientCG-Texturen (CC0), Tango-/Material-Farbwerte; Dateiköpfe `Herkunft:` in `delaunay.rs`, `solid_bool.rs`, `ifc_nurbs.rs` (csg.rs, skeleton.rs hatten ihn schon); Test `src/core/notice.test.ts` (Datei mit `Herkunft:` im Kopf muss in NOTICE stehen, NOTICE-Pfade existieren, jede Schrift hat OFL.txt). Offen/ungeklärt: Herkunft und Lizenz der App-Icons (`src-tauri/icons`) und der Website-Bilder nicht belegt; Mapbox-Copyright ohne Jahr übernommen (die LICENSE im Upstream nennt ein Jahr, das nach Vorlage aussieht); Lizenztexte der Rust-/npm-Abhängigkeiten liegen nur in den Paketen (cargo-deny prüft die Lizenzart, keine Attribution-Datei im Produkt).
+- **[221]** LV95-Projekte (12.11.): Entscheid: das Modell bleibt lokal um einen Projekt-Nullpunkt, statt Landeskoordinaten
+  (≈ 2.6 Mio. m) im Modell zu führen — f32 in 3D/GPU (≈ 25 cm Raster bei LV95), das Ganzzahlraster der Booleans und alle
+  Ausmass-Rechnungen vertragen das nicht. Der DXF/DWG-Import „an DXF-Koordinaten" in LV95 setzt ohne Standort-Bezug den
+  Kilometerpunkt unter der Mitte als `geoAnchor` (Modell-x = Landeskoordinate ohne Kilometer, z. B. E 2 600 048 → 48) und
+  verschiebt Zeichnungen, Höhenlinien und Meshes; mit Bezug rechnet er auf dessen Ursprung (Kern `import_drawing::lv95_origin`).
+  Exporte rechneten schon zurück (`projectToWorldCoords`); getippte Landeskoordinaten werden auf den Nullpunkt gerechnet
+  (`parseInput.ts::fromWorldInput`), die Statusleiste zeigt im Grundriss zusätzlich LV95 des Zeigers. Schnitt A/Ansicht Süd
+  des leeren Projekts tragen `autoLine` und folgen im selben Undo-Schritt dem Gebauten (ab 1 × 1 m Ausmass, sonst der Parzelle) — Schnitt quer
+  durch die Mitte, Ansicht davor —, bis man die Linie bearbeitet (Kern `auto_lines.rs`, wie die assoziative Bemassung im
+  `commit`). Schnitt-/Ansichtsmarken weit weg vom Gebauten zählen nicht mehr zum Ausmass (`domains::merge_marks`): kein
+  „Einpassen" auf 1:10 Mio. mehr. Tests: Rust (`auto_lines`, `import_drawing_tests`, `ferne_schnittmarken_nicht_im_ausmass`),
+  vitest (`parseInput.test.ts`, `dxfBulgeImport`), e2e `release10` Schritt 3b + Datei-Prüfung, `kataster.spec` auf lokale
+  Koordinaten. Offen: IFC-/Mesh-/STEP-Import setzen noch keinen Bezug (rechnen nur auf einen vorhandenen); Lineale zeigen
+  lokale Koordinaten; alte Dateien mit Landeskoordinaten ohne Bezug bleiben, wie sie sind (Befehl „Neuer Bezugspunkt");
+  Schnitt A ist ein Längsschnitt (parallel zur Linie des leeren Projekts), nicht quer zum First; nicht in der Tauri-App geprüft.
+- **[225]** Kennzahlenleiste = Flächentabelle (12.11.): `kennzahlen::compute` liest die Flächentabelle und die IVHB-Ziffern
+  (`flaechen::area_table`/`ivhb` mit den Vorgaben der Tabelle: aGF = NGF oberirdisch, aGSF aus Parzellenfläche/-grenze):
+  GF = NGF + KF (Testgebäude 127.7 m² statt 112.5), ÜZ = aGbF/aGSF, dazu NGF, HNF, KF in der Abfrage. Tests: Rust
+  `leiste_gleich_flaechentabelle`, vitest Musterhaus, Musterhaus komplex und Referenz-Ablauf-Gebäude, e2e `release10` Schritt 5
+  (Kachel GF = Summenzeile GF). Offen: die Eingaben der Tabelle (aGSF, Basis der aGF, Untergeschosse) wirken nur auf die
+  Tabelle, die Leiste rechnet mit den Vorgaben.

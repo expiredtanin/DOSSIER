@@ -713,6 +713,8 @@ impl Document {
     /// machen selbst: die Inverse der Inversen, s. [`Document::undo`]).
     pub fn commit(&mut self, ops: Vec<Op>, key: Option<&str>, now: f64, sanitize: bool) -> Result<(), Vec<String>> {
         let touches = crate::dim_assoc::touches_sources(&ops);
+        // [221] Standard-Schnitt/-Ansicht, die dem Gebäude folgen: vor dem Anwenden prüfen, was die Änderung betrifft.
+        let auto = crate::auto_lines::touch(&self.root, &ops);
         let mut inverse = self.apply_checked(ops, sanitize)?;
         self.last_extra.clear();
         if touches {
@@ -724,6 +726,22 @@ impl Document {
                     inv.extend(inverse);
                     inverse = inv;
                     self.last_extra = extra;
+                }
+                self.last_hits = hits;
+            }
+        }
+        if auto.any() {
+            // [221] Linien nachführen: gleicher Undo-Schritt, Treffer bleiben die der Benutzer-Ops.
+            let extra = match (self.project().is_ok(), self.typed.as_ref()) {
+                (true, Some(p)) => crate::auto_lines::sync_ops(p, &self.root, &auto),
+                _ => Vec::new(),
+            };
+            if !extra.is_empty() {
+                let hits = std::mem::take(&mut self.last_hits);
+                if let Ok(mut inv) = self.apply_checked(extra.clone(), false) {
+                    inv.extend(inverse);
+                    inverse = inv;
+                    self.last_extra.extend(extra);
                 }
                 self.last_hits = hits;
             }

@@ -1795,11 +1795,28 @@ pub fn plan_domains(p: &Project, a: &PlanArgs) -> Result<DomainPrims, String> {
     let mut drawings = super::drawings::Out::default();
     super::drawings::plan_drawings(&c, &mut super::drawings::Sink::new(super::drawings::Target::Vec(&mut drawings), super::drawings::Keep::All), &mut bounds)?;
     out.drawings = drawings;
-    let mut marks = Bounds::new();
+    let mut marks = Vec::new();
     domains_after(&c, &mut out, &mut bounds, &mut marks);
-    bounds.merge(marks.raw());
+    merge_marks(&mut bounds, &marks);
     out.bounds = bounds.get();
     Ok(out)
+}
+
+/// [157]/[221] Schnitt- und Ansichtsmarken zählen zum Ausmass (sonst beim Einpassen abgeschnitten), aber nur in
+/// der Nähe des Gebauten (`b`: Bauteile und Räume): eine Schnittlinie weit weg — etwa die Standard-Schnitte am
+/// Nullpunkt eines Projekts in Landeskoordinaten — spannte sonst den Plan über Millionen Meter auf („Einpassen"
+/// zoomte auf 1:10 Mio., der Rad-Zoom endete relativ zum Ausmass). Nah heisst: Kasten der Marke schneidet das
+/// Gebaute, erweitert um seine doppelte Grösse bzw. mindestens 100 m. Ohne Gebautes zählen alle Marken.
+fn merge_marks(b: &mut Bounds, marks: &[[f64; 4]]) {
+    let near = b.get().map(|h| {
+        let r = (2.0 * (h[2] - h[0]).max(h[3] - h[1])).max(100.0);
+        [h[0] - r, h[1] - r, h[2] + r, h[3] + r]
+    });
+    for m in marks {
+        if near.is_none_or(|n| m[0] <= n[2] && m[2] >= n[0] && m[1] <= n[3] && m[3] >= n[1]) {
+            b.merge(*m);
+        }
+    }
 }
 
 /// Decken bis Extrusionen (alles vor den 2D-Zeichnungen gerechnet).
@@ -1839,7 +1856,7 @@ fn domains_before(c: &Ctx, out: &mut DomainPrims, bounds: &mut Bounds) -> Result
 
 /// Kontext und Schnittlinien (projektglobal, nur mit `global`), zuletzt die Räume: ihre Stempel weichen dem
 /// übrigen Inhalt aus ([`stamp_obstacles`]), darum nach allen anderen Domänen (Gruppen-Reihenfolge bleibt).
-fn domains_after(c: &Ctx, out: &mut DomainPrims, bounds: &mut Bounds, marks: &mut Bounds) {
+fn domains_after(c: &Ctx, out: &mut DomainPrims, bounds: &mut Bounds, marks: &mut Vec<[f64; 4]>) {
     let ceiling = super::ceiling_plan::is_ceiling_level(c.p, &c.a.floor);
     if ceiling {
         return;
@@ -1853,13 +1870,10 @@ fn domains_after(c: &Ctx, out: &mut DomainPrims, bounds: &mut Bounds, marks: &mu
         // [157] Marken und Beschriftungen der Schnittführungen gehören zum Ausmass (sonst oben abgeschnitten).
         for q in &out.sections {
             match q {
-                Primitive::Line { a, b, .. } => {
-                    marks.acc(a.x, a.y);
-                    marks.acc(b.x, b.y);
-                }
+                Primitive::Line { a, b, .. } => marks.push([min(a.x, b.x), min(a.y, b.y), max(a.x, b.x), max(a.y, b.y)]),
                 Primitive::DrawingText { at, text, height_m, .. } => {
-                    marks.acc(at.x, at.y);
-                    marks.acc(at.x + crate::text_layout::text_width_em(text, false) * height_m, at.y + height_m);
+                    let x1 = at.x + crate::text_layout::text_width_em(text, false) * height_m;
+                    marks.push([min(at.x, x1), min(at.y, at.y + height_m), max(at.x, x1), max(at.y, at.y + height_m)]);
                 }
                 _ => {}
             }
@@ -1963,11 +1977,11 @@ pub fn plan_domains_buf(p: &Project, a: &PlanArgs) -> Result<Vec<u8>, String> {
     let mut d = DomainPrims::default();
     let mut bounds = Bounds::new();
     domains_before(&c, &mut d, &mut bounds)?;
-    let mut marks = Bounds::new();
+    let mut marks = Vec::new();
     domains_after(&c, &mut d, &mut bounds, &mut marks);
     // [204] Ausmass der Bauteile (ohne Schnittmarken, Zeichnungen, Kontext) fürs Einpassen beim Öffnen.
     let house = bounds.get();
-    bounds.merge(marks.raw());
+    merge_marks(&mut bounds, &marks);
     let mut w = crate::plan::buf::Writer::new(true);
     w.post = super::extras::post_for(p, a);
     let (under, violations) = extras_of(p, a);
@@ -2118,11 +2132,11 @@ fn assemble_cached(c: &Ctx, revs: &crate::document::Revs, cc: &mut super::cache:
         let mut d = DomainPrims::default();
         let mut b = Bounds::new();
         domains_before(c, &mut d, &mut b)?;
-        let mut marks = Bounds::new();
+        let mut marks = Vec::new();
         domains_after(c, &mut d, &mut b, &mut marks);
         // [204] Ausmass der Bauteile (ohne Schnittmarken, Zeichnungen, Kontext) fürs Einpassen beim Öffnen.
         let house = b.get();
-        b.merge(marks.raw());
+        merge_marks(&mut b, &marks);
         let (under, violations) = extras_of(c.p, c.a);
         let extra = super::extras::extra_bounds(c.p, &under, |k| c.shown(k));
         apply_voids(c.p, c.a, &mut d);
@@ -3662,6 +3676,34 @@ mod tests {
         let mut db = Bounds::new();
         db.merge(d.bounds.unwrap());
         assert_eq!(bounds, Some(super::super::extras::plan_bounds(&db, &super::super::extras::extra_bounds(&p, &[], |_| true))));
+    }
+
+    /// [221] Schnittmarken nahe am Gebäude gehören zum Ausmass, eine Schnittlinie weit weg (Landeskoordinaten
+    /// gegenüber Nullpunkt) nicht — sonst „Einpassen" auf 1:10 Mio.
+    #[test]
+    fn ferne_schnittmarken_nicht_im_ausmass() {
+        let mut p = sample();
+        let codes: Vec<String> = p.flat_categories().iter().map(|c| c.code.clone()).collect();
+        let t = serde_json::json!({ "floor": "eg", "show": codes, "grey": [], "global": true }).to_string();
+        let a = PlanArgs::parse(1.0, &t).unwrap();
+        let line = |p: &mut Project, x0: f64, y: f64, x1: f64| {
+            let l = p.drawing_levels.iter_mut().find(|l| l.id == "schnitt-a").unwrap();
+            l.line_points = Some([Vec2 { x: x0, y }, Vec2 { x: x1, y }]);
+        };
+        line(&mut p, -1.0, 2.0, 40.0);
+        let near = plan_domains(&p, &a).unwrap().bounds.unwrap();
+        assert!(near[2] >= 40.0, "nahe Marke zählt: {near:?}");
+        let (_, _, buf_bounds) = crate::plan::buf::decode(&plan_domains_buf(&p, &a).unwrap()).unwrap();
+        assert!(buf_bounds.unwrap()[2] >= 40.0);
+        line(&mut p, 2_600_000.0, 1_200_000.0, 2_600_010.0);
+        let far = plan_domains(&p, &a).unwrap().bounds.unwrap();
+        assert!(far[2] < 100.0 && far[3] < 100.0, "ferne Marke zählt nicht: {far:?}");
+        let (_, _, buf_bounds) = crate::plan::buf::decode(&plan_domains_buf(&p, &a).unwrap()).unwrap();
+        assert!(buf_bounds.unwrap()[2] < 100.0);
+        // Ohne Gebautes zählen die Marken (leeres Projekt: Einpassen auf die Schnittlinien).
+        let mut b = Bounds::new();
+        merge_marks(&mut b, &[[2.6e6, 1.2e6, 2.6e6 + 10.0, 1.2e6]]);
+        assert_eq!(b.get(), Some([2.6e6, 1.2e6, 2.6e6 + 10.0, 1.2e6]));
     }
 
     #[test]

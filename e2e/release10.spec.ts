@@ -37,7 +37,8 @@ function pdfPages(bytes: Buffer): number {
   return (bytes.toString("latin1").match(/\/Type\s*\/Page(?![a-z])/g) ?? []).length;
 }
 
-/** Modellpunkt (Versatz zu E0/N0 in m) → Client-Pixel (wie `kataster.spec.ts`, f64 statt getScreenCTM). */
+/** Modellpunkt (Versatz zu E0/N0 in m) → Client-Pixel (wie `kataster.spec.ts`, f64 statt getScreenCTM). [221] Der
+ *  Kataster-Import setzt den Projekt-Nullpunkt auf E0/N0 (Kilometerpunkt unter der Mitte): Modell = Versatz. */
 async function screenOf(page: Page, dx: number, dy: number): Promise<{ x: number; y: number }> {
   return page.locator("svg.plan-svg").evaluate(
     (el, [x, y]) => {
@@ -51,7 +52,7 @@ async function screenOf(page: Page, dx: number, dy: number): Promise<{ x: number
         y: r.top + (r.height - vh * s) / 2 + (-y * 90 - oy - vy) * s,
       };
     },
-    [E0 + dx, N0 + dy],
+    [dx, dy],
   );
 }
 
@@ -112,6 +113,24 @@ test("Referenz-Ablauf WBW/Vorprojekt: leeres Projekt bis Abgabe", async ({ page 
     await shot(page, "03-volumen");
   });
 
+  await test.step("3b [221] LV95: Einpassen zeigt Gebäude und Kataster (nicht Nullpunkt … Landeskoordinaten)", async () => {
+    await blurFocus(page);
+    await page.getByTitle("Auf Plan einpassen").click();
+    await page.waitForTimeout(500);
+    // Sichtbarer Ausschnitt in Modell-Metern aus der viewBox des Overlays (x·90, −y·90, lokaler Ursprung).
+    const view = await page.locator("svg.plan-svg").evaluate((el) => {
+      const [vx, vy, vw, vh] = el.getAttribute("viewBox")!.split(/\s+/).map(Number);
+      const ox = Number(el.getAttribute("data-origin-x") ?? 0);
+      const oy = Number(el.getAttribute("data-origin-y") ?? 0);
+      return { w: vw / 90, h: vh / 90, cx: (vx + ox + vw / 2) / 90, cy: -(vy + oy + vh / 2) / 90 };
+    });
+    // Kataster ≈ 80 × 80 m (vor [221]: Ausmass vom Nullpunkt bis zu den Landeskoordinaten, ≈ 2.9 Mio. m ≙ 1:10 Mio.).
+    expect(Math.max(view.w, view.h)).toBeLessThan(400);
+    expect(Math.abs(view.cx - 34)).toBeLessThan(60);
+    expect(Math.abs(view.cy - 30)).toBeLessThan(60);
+    await shot(page, "03b-einpassen");
+  });
+
   await test.step("4 Raumprogramm gegen Modell: Raum setzen, Programm importieren, Soll/Ist", async () => {
     await typeCommand(page, "raum");
     await expect(page.locator(".cmdline-prompt")).toHaveText("Klick in Raum setzen:");
@@ -139,6 +158,13 @@ test("Referenz-Ablauf WBW/Vorprojekt: leeres Projekt bis Abgabe", async ({ page 
     const areas = page.locator(".area-section").filter({ hasText: "Flächen- und Kennzahlen-Nachweis" });
     const table = areas.locator(".area-table").first();
     await expect(table).toContainText("Erdgeschoss");
+    // [225] Leiste und Tabelle zeigen dieselbe GF (SIA 416: NGF + KF), nicht die Leiste nur die Räume.
+    const gfCol = (await table.locator("thead th").allTextContents()).indexOf("GF");
+    expect(gfCol).toBeGreaterThan(0);
+    const gfTable = Number((await table.locator("tbody tr.total td").nth(gfCol).textContent())!.trim());
+    const gfTile = Number((await tile("GF").textContent())!.replace(/[^\d.]/g, ""));
+    expect(gfTable).toBeGreaterThan(120);
+    expect(Math.abs(gfTile - gfTable)).toBeLessThan(0.06);
     const csv = await download(page, () => areas.locator(".balance-export", { hasText: "CSV" }).click());
     expect(csv.name).toMatch(/\.csv$/);
     expect(csv.bytes.toString("utf8")).toMatch(/GF/);
@@ -249,17 +275,23 @@ test("Referenz-Ablauf WBW/Vorprojekt: leeres Projekt bis Abgabe", async ({ page 
     expect(j.siteRules.parcel).toHaveLength(4);
     expect(j.siteRules.maxHeight).toBe(12);
     expect(j.roomProgram).toHaveLength(2);
+    // [221] Projekt-Nullpunkt aus dem Kataster: Modell lokal, Landeskoordinaten im Standort-Bezug.
+    expect(j.geoAnchor.lv95).toEqual({ e: E0, n: N0 });
+    expect(j.walls[0].start).toEqual({ x: B.x0, y: B.y0 });
+    // Schnitt A folgt dem Gebäude (quer durch die Mitte), die Ansicht Süd liegt davor.
+    const line = (name: string) => j.drawingLevels.find((l: { name: string }) => l.name === name).linePoints as { x: number; y: number }[];
+    const sa = line("Schnitt A");
+    expect(sa[0].y).toBeGreaterThan(B.y0);
+    expect(sa[0].y).toBeLessThan(B.y1);
+    expect(Math.min(sa[0].x, sa[1].x)).toBeLessThan(B.x0);
+    expect(Math.max(sa[0].x, sa[1].x)).toBeGreaterThan(B.x1);
+    expect(line("Ansicht Süd")[0].y).toBeLessThan(B.y0);
     expect(j.layouts.length).toBeGreaterThanOrEqual(1);
     if (process.env.DOSSIER_SHOTS) await writeFile(`${process.env.DOSSIER_SHOTS}/release10.obp`, saved.bytes);
   });
 });
 
 // ── Was für 1.0 noch fehlt (je ein Test, bis der Schritt geht; Reproduktion in TODO.md) ──────────────────────
-
-test.fixme("[221] LV95: Einpassen im Geschoss zeigt das Gebäude (Schnitt A/Ansicht Süd nicht am Nullpunkt)", async () => {
-  // Neues Projekt → Kataster-DXF (Landeskoordinaten) → Erdgeschoss → Gebäude in LV95 zeichnen → „Auf Plan einpassen“:
-  // heute ≈ 1:10 000 000 (Nullpunkt und Gebäude 2.6 Mio. m auseinander), Rad-Zoom endet bei ≈ 130 m Breite.
-});
 
 test.fixme("[222] Volumenstudie: Wände/Decken/Dach aus einem Volumen (Körper) erzeugen", async () => {});
 
@@ -268,8 +300,6 @@ test.fixme("[207] Situation 1:500 / Schwarzplan als Ansichtsvorlage „Situation
 test.fixme("[223] 3D-Bild für die Abgabe: hochaufgelöster PNG-Export (Perspektive/Axonometrie, mit Schatten)", async () => {});
 
 test.fixme("[211] Rendering mit Blender/Cycles aus der 3D-Ansicht", async () => {});
-
-test.fixme("[225] Kennzahlenleiste GF/ÜZ gleich wie die SIA-416-Flächentabelle (GF = NGF + KF)", async () => {});
 
 test.fixme("[209] Kostenschätzung grob (Kennwerte je m³ GV / m² GF, eBKP-H)", async () => {});
 

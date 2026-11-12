@@ -10,8 +10,8 @@ import type { DrawingLevel } from "../model/types";
 import type { SnapSettings, ToolDraft } from "../tools/types";
 import type { TransformSelection } from "../tools/transform";
 import { computeSnap } from "../tools/snapping";
-import { unitsForLevel } from "../tools/displayUnits";
-import { cmdMutation, type ProjectMutation } from "../core";
+import { MODEL_UNITS, unitsForLevel } from "../tools/displayUnits";
+import { cmdMutation, projectGeoOrigin, type ProjectMutation } from "../core";
 import { CommandEngine } from "../commands/engine";
 import type { EngineHost } from "../commands/engine";
 import type { CommandContext } from "../commands/types";
@@ -172,6 +172,8 @@ export function useCommandEngineHost(opts: {
       notify: (key, params, kind) => notify(t(key as Parameters<typeof t>[0], params), kind ?? "info"),
       // Getippte Werte auf einem Layout-Blatt in Papier-mm, y nach unten ([93]).
       inputUnits: () => unitsForLevel(cmdLatest.current.activeLevel),
+      // [221] Getippte Landeskoordinaten auf den Projekt-Nullpunkt (Standort-Bezug), nicht auf dem Layout-Blatt.
+      inputGeoOrigin: () => (unitsForLevel(cmdLatest.current.activeLevel) === MODEL_UNITS ? projectGeoOrigin(getState().project) : null),
       // Frisch über `text`/`textbox` erzeugtes Element sofort inline editieren
       // (kein Lookup nötig — der Commit hat es bereits angehängt, s. engine.ts
       // applyResult-Reihenfolge commit→focusDrawing). Auswahl-Löschen wie

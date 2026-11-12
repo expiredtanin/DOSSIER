@@ -25,7 +25,8 @@ async function importDxf(page: Page, name: string, text: string): Promise<void> 
 }
 
 /**
- * Modellpunkt (Versatz zu E0/N0 in m) → Client-Pixel, in f64 wie `PlanView` (`clientToView`):
+ * Modellpunkt (Versatz zu E0/N0 in m) → Client-Pixel, in f64 wie `PlanView` (`clientToView`). [221] Der Import setzt
+ * den Projekt-Nullpunkt auf den Kilometerpunkt E0/N0 unter der Mitte: Modell-Koordinate = Versatz.
  * viewBox-Attribut + Box des SVG, `meet`-Einpassung. NICHT `getScreenCTM()`: der Browser rechnet
  * SVG-Koordinaten in f32, bei LV95 (≈ 2.3e8 viewBox-Einheiten) liegt das Pixel daneben.
  */
@@ -42,7 +43,7 @@ async function screenOf(page: Page, dx: number, dy: number): Promise<{ x: number
         y: r.top + (r.height - vh * s) / 2 + (-y * 90 - oy - vy) * s,
       };
     },
-    [E0 + dx, N0 + dy],
+    [dx, dy],
   );
 }
 
@@ -208,10 +209,11 @@ test("Kataster in LV95: Griffe auf den Ecken auch stark hineingezoomt, Lineal st
     .evaluateAll((els) => els.map((e) => ({ text: e.textContent ?? "", left: e.getBoundingClientRect().left })));
   expect(labels.length).toBeGreaterThan(1);
   for (const l of labels) {
+    // [221] Lineal in Modell-Koordinaten (lokal um den Projekt-Nullpunkt; Landeskoordinaten in der Statusleiste).
     const m = Number.parseFloat(l.text);
-    expect(m).toBeGreaterThan(E0 + 66);
-    expect(m).toBeLessThan(E0 + 70);
-    const want = await screenOf(page, m - E0, 0);
+    expect(m).toBeGreaterThan(66);
+    expect(m).toBeLessThan(70);
+    const want = await screenOf(page, m, 0);
     expect(Math.abs(l.left - (want.x + 3)), `Lineal ${l.text}`).toBeLessThan(2);
   }
 });

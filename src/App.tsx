@@ -28,7 +28,7 @@
 // das Projekt beim Aufruf aus dem Store (`getState()`).
 
 import { useEffect, useMemo, useRef, type ComponentProps } from "react";
-import { patchItem } from "./core";
+import { patchItem, projectGeoOrigin } from "./core";
 import { collectVisibleCodes } from "./model/types";
 import { isSheetLevel, effectiveSheetSizeMm, findMaster, sheetMmToModel, SHEET_SCALE_DENOMINATOR } from "./model/layoutModel";
 import { setDxfImportTrigger } from "./io/dxfImportHook";
@@ -126,6 +126,7 @@ export default function App() {
   const drawingLevels = useStore((s) => s.project.drawingLevels);
   const projectLayers = useStore((s) => s.project.layers);
   const projectName = useStore((s) => s.project.name);
+  const geoAnchor = useStore((s) => s.project.geoAnchor);
   const textStyles = useStore((s) => s.project.textStyles);
   const modelViewOptions = useStore((s) => s.project.modelViewOptions);
   const masterLayouts = useStore((s) => s.project.masterLayouts);
@@ -994,6 +995,12 @@ export default function App() {
         showCursor={planActive}
         unit="m"
         units={displayUnits}
+        // [221] Landeskoordinaten des Zeigers im Grundriss (Modell lokal um den Projekt-Nullpunkt).
+        geoOrigin={
+          viewType === "grundriss" && !activeLevel.layoutId && (activeLevel.kind === "floor" || activeLevel.kind === "drawing")
+            ? projectGeoOrigin({ geoAnchor } as Parameters<typeof projectGeoOrigin>[0])
+            : null
+        }
         referenceLines={referenceLines}
         onReferenceLines={setReferenceLines}
         referenceLinesEnabled={planActive}

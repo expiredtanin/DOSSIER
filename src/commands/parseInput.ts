@@ -132,6 +132,24 @@ export function toModelInput(p: ParsedInput, u: DisplayUnits, distance: "length"
   }
 }
 
+/**
+ * [221] Liegt der Punkt in den Landeskoordinaten LV95 (Ost 2.4–2.9 Mio. m, Nord 1.0–1.4 Mio. m)? Dieselben
+ * Grenzen wie der Kern beim Import (`src-tauri/core/src/import_drawing.rs::is_lv95`).
+ */
+export function isLv95(e: number, n: number): boolean {
+  return e >= 2.4e6 && e <= 2.9e6 && n >= 1.0e6 && n <= 1.4e6;
+}
+
+/**
+ * [221] Getippte absolute Landeskoordinaten auf den Projekt-Nullpunkt rechnen: das Modell liegt lokal um den
+ * Ursprung des Standort-Bezugs (`origin` = `projectGeoOrigin`, LV95 des Modell-Nullpunkts), getippt wird oft
+ * aus dem Kataster (`2600048,1200046`). Ohne Bezug, ausserhalb LV95 und für relative Eingaben unverändert.
+ */
+export function fromWorldInput(p: ParsedInput, origin: { e: number; n: number } | null): ParsedInput {
+  if (!origin || p.kind !== "absolute" || !isLv95(p.point.x, p.point.y)) return p;
+  return { kind: "absolute", point: { x: p.point.x - origin.e, y: p.point.y - origin.n } };
+}
+
 /** Punkt aus polarer Form (Distanz/Winkel) relativ zu einem Basispunkt. */
 export function polarPoint(base: Vec2, dist: number, angleDeg: number): Vec2 {
   const a = angleDeg * DEG;

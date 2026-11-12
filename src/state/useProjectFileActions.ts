@@ -293,7 +293,10 @@ export function useProjectFileActions(
     }
   };
 
+  // [221] Dateiname des laufenden Imports: Bezeichnung des Standort-Bezugs, den ein Import in Landeskoordinaten setzt.
+  const importFileNameRef = useRef("");
   const openImportForFile = (file: File) => {
+    importFileNameRef.current = file.name;
     if (isPdfFile(file.name)) {
       openPdfImport(file);
       return;
@@ -674,6 +677,7 @@ export function useProjectFileActions(
             importMeshes: decision.importMeshes,
             terrainContours: decision.terrainContours,
             terrainName: t("import.terrain.setName"),
+            geoLabel: importFileNameRef.current,
             ...(center ? { viewCenter: [center.x, center.y] as [number, number] } : {}),
             levelNameTemplate: t("default.drawingName", { n: "{n}" }),
             parentName: t("import.layers.parentName", { name: importParentName(decision) }),

@@ -28,6 +28,8 @@ export interface StatusBarProps {
   showCursor: boolean;
   /** Einheit aus dem Projekt (vorerst fix „m"). */
   unit: string;
+  /** [221] LV95 des Modell-Nullpunkts (Standort-Bezug): zeigt die Landeskoordinaten des Zeigers dazu. */
+  geoOrigin?: { e: number; n: number } | null;
   /** Anzeige-Einheiten der Cursor-Koordinaten (Layout-Blatt: Papier-mm, y nach unten, [93]). */
   units?: DisplayUnits;
   /** Referenzlinien (Wandachsen) an/aus — sitzt jetzt in der Statusleiste. */
@@ -370,9 +372,11 @@ const fmt = (n: number): string => n.toFixed(3);
 const CursorField = memo(function CursorField({
   showCursor,
   units,
+  geoOrigin,
 }: {
   showCursor: boolean;
   units: DisplayUnits;
+  geoOrigin?: { e: number; n: number } | null;
 }) {
   const liveCursor = useCursor();
   const cursor = showCursor ? liveCursor : null;
@@ -381,7 +385,16 @@ const CursorField = memo(function CursorField({
       ? `${fmt(cursor.x)}, ${fmt(cursor.y)}`
       : `${fmtDisplay(units, xToDisplay(units, cursor.x))}, ${fmtDisplay(units, yToDisplay(units, cursor.y))}`
     : "—";
-  return <Field label={t("status.xy")} value={coords} />;
+  if (!geoOrigin) return <Field label={t("status.xy")} value={coords} />;
+  const lv95 = cursor ? `${(cursor.x + geoOrigin.e).toFixed(2)}, ${(cursor.y + geoOrigin.n).toFixed(2)}` : "—";
+  return (
+    <>
+      <Field label={t("status.xy")} value={coords} />
+      <span title={t("status.lv95.hint")}>
+        <Field label={t("status.lv95")} value={lv95} />
+      </span>
+    </>
+  );
 });
 
 export const StatusBar = memo(function StatusBar({
@@ -389,6 +402,7 @@ export const StatusBar = memo(function StatusBar({
   showCursor,
   unit,
   units = MODEL_UNITS,
+  geoOrigin = null,
   referenceLines,
   onReferenceLines,
   referenceLinesEnabled,
@@ -438,7 +452,7 @@ export const StatusBar = memo(function StatusBar({
           {t("status.referenceLines")}
         </button>
         <Sep />
-        <CursorField showCursor={showCursor} units={units} />
+        <CursorField showCursor={showCursor} units={units} geoOrigin={geoOrigin} />
         <Sep />
         <Field label={t("status.unit")} value={units === MODEL_UNITS ? unit : units.suffix} />
         <Sep />

@@ -83,6 +83,7 @@ Neues Modul: `<modul>.rs` und `mod` in `lib.rs`, Bindungen in `web/<modul>.rs` u
 | `layout_model.rs`, `sheet_viewports.rs`, `sheet_table.rs`, `presentation_sheet.rs` | Layout-Blätter, Viewports, Tabellen, Präsentationsplan |
 | `layout_image.rs`, `layout_poster.rs` | Bilder auf Blättern (Dateikopf, Zuschnitt, dpi) und Plakat-Vorlagen mit Raster und Kopfzeile ([208]) |
 | `parametric_walls.rs`, `geo_translate.rs`, `geo_rebase.rs` | parametrische Wände; Projekt verschieben; Ursprung für Exporte |
+| `auto_lines.rs` | [221] Standard-Schnitt/-Ansicht folgen dem Gebauten (im `commit` nachgeführt, wie `dim_assoc`) |
 
 ## Analyse
 
