@@ -2859,7 +2859,7 @@ export const en: Record<TranslationKey, string> = {
   "kennzahlen.programIssue": "{name}: {status}",
   "kennzahlen.gf": "Gross floor area (SIA 416) from rooms",
   "kennzahlen.agf": "Chargeable floor area ≈ net floor area",
-  "kennzahlen.gv": "Building volume from the free solids",
+  "kennzahlen.gv": "Building volume from the free solids, without them GFA × storey height",
   "kennzahlen.az": "Floor area ratio (usable area / site)",
   "kennzahlen.uez": "Site coverage (built area / site)",
   "kennzahlen.parcelArea": "Site area",

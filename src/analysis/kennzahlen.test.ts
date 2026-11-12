@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { sampleProject } from "../model/sampleProject";
 import type { Project } from "../model/types";
 import { computeKennzahlen, checkRoomProgram, solidVolume } from "./kennzahlen";
+import { computeAreaTable } from "./areaTable";
 
 const sq = (x: number, y: number, s: number) => [
   { x, y }, { x: x + s, y }, { x: x + s, y: y + s }, { x, y: y + s },
@@ -40,6 +41,11 @@ describe("computeKennzahlen", () => {
     };
     const k = computeKennzahlen(p);
     expect(k.gv).toBeCloseTo(300 - 3, 6);
+  });
+  it("[206] ohne freie Körper: GV wie die Flächentabelle (GF × Geschosshöhe), nicht 0", () => {
+    const k = computeKennzahlen(sampleProject);
+    expect(k.gv).toBeGreaterThan(0);
+    expect(k.gv).toBeCloseTo(computeAreaTable(sampleProject).gv, 6);
   });
 });
 

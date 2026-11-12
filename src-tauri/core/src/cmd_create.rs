@@ -448,17 +448,19 @@ fn ceiling_ops(p: &Project, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
     if abs_area(&outline) < 1e-4 {
         return Vec::new();
     }
-    add_op(
-        "ceilings",
-        vec![obj(vec![
-            ("id", s(&ids.next("C"))),
-            ("type", s("ceiling")),
-            ("floorId", s(ctx.level)),
-            ("categoryCode", category_or(p, "30", ctx)),
-            ("outline", pvs(&outline)),
-            ("wallTypeId", active_wall_type_id(p, ctx)),
-        ])],
-    )
+    let mut fields = vec![
+        ("id", s(&ids.next("C"))),
+        ("type", s("ceiling")),
+        ("floorId", s(ctx.level)),
+        ("categoryCode", category_or(p, "30", ctx)),
+        ("outline", pvs(&outline)),
+        ("wallTypeId", active_wall_type_id(p, ctx)),
+    ];
+    // Eigener Deckentyp (erster des Projekts); `wallTypeId` bleibt als Pflichtfeld/Rückfall ([206]).
+    if let Some(ct) = p.ceiling_types.as_deref().and_then(|l| l.first()) {
+        fields.push(("ceilingTypeId", s(&ct.id)));
+    }
+    add_op("ceilings", vec![obj(fields)])
 }
 
 /// Wände des Geschosses als `[n, (ax, ay, bx, by, dicke)…]` für die Raumerkennung.
@@ -1362,6 +1364,24 @@ mod tests {
         // Gerade Wand ohne `bulge`-Feld.
         let o = ops(&r, &crate::model::lenient::typed_for_test(&r), &req(json!({"cmd": "wall", "pts": [[0, 0], [4, 0]], "segs": [0], "thick": null}))).unwrap();
         assert!(items(&o, 0)[0].get("bulge").is_none());
+    }
+
+    /// [206] Decke: eigener Deckentyp (erster aus `ceilingTypes`) statt des Wand-Aufbaus — vorher bekam eine neue
+    /// Decke nur das LEGACY-`wallTypeId` des aktiven Wandtyps und zeigte im Schnitt die Aussenwand-Schichten.
+    #[test]
+    fn decke_mit_deckentyp() {
+        let wt = json!([{"id": "WT1", "name": "Aussenwand", "layers": [{"componentId": "c", "thickness": 0.3}]}]);
+        let ct = json!([{"id": "CT1", "name": "Stahlbetondecke", "layers": [{"componentId": "c", "thickness": 0.25}]}]);
+        let pts = json!({"cmd": "ceiling", "pts": [[0, 0], [4, 0], [4, 3], [0, 3]]});
+        let r = root(json!({"wallTypes": wt, "ceilingTypes": ct}));
+        let o = ops(&r, &crate::model::lenient::typed_for_test(&r), &req(pts.clone())).unwrap();
+        let c = &items(&o, 0)[0];
+        assert_eq!(c["ceilingTypeId"], "CT1");
+        assert_eq!(c["wallTypeId"], "WT1");
+        // Ohne Deckentypen bleibt es beim Wand-Aufbau (Pflichtfeld `wallTypeId`).
+        let r = root(json!({"wallTypes": wt}));
+        let o = ops(&r, &crate::model::lenient::typed_for_test(&r), &req(pts)).unwrap();
+        assert!(items(&o, 0)[0].get("ceilingTypeId").is_none());
     }
 
     #[test]

@@ -2909,7 +2909,7 @@ export const de = {
   "kennzahlen.programIssue": "{name}: {status}",
   "kennzahlen.gf": "Geschossfläche (SIA 416) aus den Räumen",
   "kennzahlen.agf": "Anrechenbare Geschossfläche ≈ NGF",
-  "kennzahlen.gv": "Gebäudevolumen aus den freien Körpern",
+  "kennzahlen.gv": "Gebäudevolumen aus den freien Körpern, ohne solche GF × Geschosshöhe",
   "kennzahlen.az": "Ausnützungsziffer aGF / Parzelle",
   "kennzahlen.uez": "Überbauungsziffer bebaute Fläche / Parzelle",
   "kennzahlen.parcelArea": "Parzellenfläche",
