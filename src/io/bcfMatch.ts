@@ -2,7 +2,8 @@
 //
 // Dieselbe Ableitung wie der IFC-Export (`exportIfc.ts`/`ifc_export/mod.rs`: `ifcGuid("<Projekt-id>/<Art>/<id>")`),
 // damit die Rundreise Dossier → IFC → Solibri → BCF → Dossier trifft. Importierte Meshes tragen die
-// GlobalId ihres Quell-Bauteils (`ImportedMesh.ifcGlobalId`). Bauteile, die im Export nicht vorkommen
+// GlobalId ihres Quell-Bauteils (`ImportedMesh.ifcGlobalId`); erkannte Bauteile des IFC-Imports ebenso (`ifcGlobalId`,
+// [201]: der Export schreibt sie zurück, sie gilt statt der abgeleiteten). Bauteile, die im Export nicht vorkommen
 // (2D-Zeichnungen, Gruppen), haben keine GlobalId.
 
 import type { BcfViewpoint } from "./bcf";
@@ -49,17 +50,21 @@ interface Target {
 export function buildGuidIndex(project: Project): Map<string, Target> {
   const index = new Map<string, Target>();
   const pid = project.id;
-  const add = (key: string, channel: BcfChannel, id: string) => index.set(ifcGuid(`${pid}/${key}/${id}`), { channel, id });
-  for (const w of project.walls ?? []) add("wall", "wallIds", w.id);
-  for (const c of project.ceilings ?? []) add("slab", "ceilingIds", c.id);
-  for (const r of project.roofs ?? []) add("roof", "roofIds", r.id);
-  for (const c of project.columns ?? []) add("column", "columnIds", c.id);
-  for (const s of project.stairs ?? []) add("stair", "stairIds", s.id);
-  for (const e of project.extrudedSolids ?? []) add("extrusion", "extrudedSolidIds", e.id);
-  for (const r of project.rooms ?? []) add("space", "roomIds", r.id);
+  // Übernommene GlobalId (Import) vor der abgeleiteten; bei doppelter GlobalId gilt der erste (wie im Export).
+  const add = (key: string, channel: BcfChannel, id: string, own?: string) => {
+    const g = own || ifcGuid(`${pid}/${key}/${id}`);
+    if (!index.has(g)) index.set(g, { channel, id });
+  };
+  for (const w of project.walls ?? []) add("wall", "wallIds", w.id, w.ifcGlobalId);
+  for (const c of project.ceilings ?? []) add("slab", "ceilingIds", c.id, c.ifcGlobalId);
+  for (const r of project.roofs ?? []) add("roof", "roofIds", r.id, r.ifcGlobalId);
+  for (const c of project.columns ?? []) add("column", "columnIds", c.id, c.ifcGlobalId);
+  for (const s of project.stairs ?? []) add("stair", "stairIds", s.id, s.ifcGlobalId);
+  for (const e of project.extrudedSolids ?? []) add("extrusion", "extrudedSolidIds", e.id, e.ifcGlobalId);
+  for (const r of project.rooms ?? []) add("space", "roomIds", r.id, r.ifcGlobalId);
   for (const o of project.openings ?? []) {
     // Tür/Fenster (IfcDoor/IfcWindow) und Öffnung (IfcOpeningElement) gehören zur selben Dossier-Öffnung.
-    add("fill", "openingIds", o.id);
+    add("fill", "openingIds", o.id, o.ifcGlobalId);
     add("opening", "openingIds", o.id);
   }
   for (const o of project.context ?? []) {
@@ -96,15 +101,16 @@ export function viewpointGuids(vp: BcfViewpoint): string[] {
 export function selectionToGuids(project: Project, sel: BcfSelection): string[] {
   const pid = project.id;
   const guids: string[] = [];
-  const g = (key: string, ids: string[]) => ids.forEach((id) => guids.push(ifcGuid(`${pid}/${key}/${id}`)));
-  g("wall", sel.wallIds);
-  g("slab", sel.ceilingIds);
-  g("roof", sel.roofIds);
-  g("column", sel.columnIds);
-  g("stair", sel.stairIds);
-  g("extrusion", sel.extrudedSolidIds);
-  g("space", sel.roomIds);
-  g("fill", sel.openingIds);
+  const g = (key: string, ids: string[], items: { id: string; ifcGlobalId?: string }[] | undefined) =>
+    ids.forEach((id) => guids.push(items?.find((e) => e.id === id)?.ifcGlobalId || ifcGuid(`${pid}/${key}/${id}`)));
+  g("wall", sel.wallIds, project.walls);
+  g("slab", sel.ceilingIds, project.ceilings);
+  g("roof", sel.roofIds, project.roofs);
+  g("column", sel.columnIds, project.columns);
+  g("stair", sel.stairIds, project.stairs);
+  g("extrusion", sel.extrudedSolidIds, project.extrudedSolids);
+  g("space", sel.roomIds, project.rooms);
+  g("fill", sel.openingIds, project.openings);
   for (const id of sel.contextObjectIds) {
     const o = (project.context ?? []).find((c) => c.id === id);
     if (o?.type === "importedMesh" && o.ifcGlobalId) guids.push(o.ifcGlobalId);

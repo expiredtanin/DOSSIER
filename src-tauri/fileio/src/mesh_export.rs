@@ -21,11 +21,19 @@
 //
 // glTF: ein Knoten je Bauteil (Name = Gruppenname, `extras` = Typ und id), je Material eine Primitive,
 // PBR (`baseColorFactor` linear, aus sRGB umgerechnet), transparente Materialien mit `alphaMode: BLEND`,
-// Positionen als FLOAT mit `min`/`max`, Indizes als UNSIGNED_INT, keine Normalen (glTF schreibt dann
-// Flat-Shading vor). GLB = JSON-Chunk + BIN-Chunk; `.gltf` bettet den Puffer als Base64-Data-URI ein.
+// Positionen als FLOAT mit `min`/`max`, Indizes als UNSIGNED_INT, NORMAL als FLOAT VEC3 ([201]): geteilte
+// Ecken-Normalen nach Knickwinkel (`CREASE_DEG`), dieselbe Funktion wie die 3D-Anzeige
+// (`dossier_hatch::mesh_normals::smooth_corner_normals`); Ecken mit verschiedener Normale werden getrennte Eckpunkte,
+// scharfe Kanten (über dem Knickwinkel) bleiben also kantig. OBJ: `vn` je Fläche/Ecke, `usemtl` je Teil-Netz und
+// optional `mtllib` auf eine MTL mit den Farben (`export_mtl`). GLB = JSON-Chunk + BIN-Chunk; `.gltf` bettet den Puffer als Base64-Data-URI ein.
 // Keine Abhängigkeit: JSON und Base64 sind hier von Hand geschrieben.
 
 use crate::ifc_export::fmt_real;
+use dossier_hatch::mesh_normals::smooth_corner_normals;
+use std::collections::HashMap;
+
+/// Knickwinkel, bis zu dem Ecken-Normalen geteilt werden (wie `DEFAULT_CREASE_DEG` der 3D-Anzeige für glatte Netze).
+const CREASE_DEG: f32 = 30.0;
 
 const FLAT_VERSION: f64 = 1.0;
 
@@ -171,16 +179,105 @@ fn to_file(x: f64, y: f64, z: f64) -> [f64; 3] {
     [x, y, 0.0 - z]
 }
 
-// ── OBJ ─────────────────────────────────────────────────────────────────────
+// ── Normalen ────────────────────────────────────────────────────────────────
 
-fn write_obj(s: &Scene) -> String {
+/// Ecken-Normalen je Dreieck eines Teil-Netzes in DATEI-Achsen ((x, y, −z), passend zu `to_file`); entartete Dreiecke
+/// bekommen +Y. Rechnung in Szene-Achsen (Wicklung nach aussen), dann gespiegelt: Spiegelung + vertauschte Wicklung
+/// lassen die Normale nach aussen zeigen.
+fn corner_normals_file(p: &Prim) -> Vec<[[f32; 3]; 3]> {
+    let nv = p.positions.len() / 3;
+    let world = |i: usize| -> [f32; 3] { [p.positions[i * 3] as f32, p.positions[i * 3 + 1] as f32, p.positions[i * 3 + 2] as f32] };
+    smooth_corner_normals(&p.indices, nv, &world, CREASE_DEG)
+        .into_iter()
+        .map(|t| match t {
+            Some(n) => n.map(|v| [v[0], v[1], 0.0 - v[2]]),
+            None => [[0.0, 1.0, 0.0]; 3],
+        })
+        .collect()
+}
+
+fn normal_key(n: [f32; 3]) -> [i32; 3] {
+    [(n[0] * 1e5).round() as i32, (n[1] * 1e5).round() as i32, (n[2] * 1e5).round() as i32]
+}
+
+// ── OBJ / MTL ───────────────────────────────────────────────────────────────
+
+/// Materialnamen für `usemtl`/`newmtl`: ohne Leerraum, eindeutig; Index `materials.len()` = „Standard“ (Teile ohne Material).
+fn material_names(s: &Scene) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for (i, m) in s.materials.iter().enumerate() {
+        let base: String = m.name.chars().map(|c| if c.is_whitespace() || c.is_control() { '_' } else { c }).collect();
+        let base = if base.is_empty() { "Material".to_string() } else { base };
+        let name = if out.contains(&base) { format!("{base}_{i}") } else { base };
+        out.push(name);
+    }
+    out.push(if out.iter().any(|n| n == "Standard") { "Standard_0".to_string() } else { "Standard".to_string() });
+    out
+}
+
+fn mat_index(s: &Scene, m: i64) -> usize {
+    if m >= 0 {
+        m as usize
+    } else {
+        s.materials.len()
+    }
+}
+
+/// Verwendete Materialien (Index in `material_names`) in der Reihenfolge des ersten Auftretens.
+fn used_materials(s: &Scene) -> Vec<usize> {
+    let mut used: Vec<usize> = Vec::new();
+    for g in s.groups.iter().filter(|g| tri_count(g) > 0) {
+        for p in g.prims.iter().filter(|p| !p.indices.is_empty()) {
+            let k = mat_index(s, p.material);
+            if !used.contains(&k) {
+                used.push(k);
+            }
+        }
+    }
+    used
+}
+
+/// Farbe eines (verwendeten) Materials: aus der Szene, „Standard“ grau.
+fn rgba_of(s: &Scene, k: usize) -> [f64; 4] {
+    s.materials.get(k).map_or([0.8, 0.8, 0.8, 1.0], |m| m.rgba)
+}
+
+/// MTL-Datei mit den Farben der verwendeten Materialien (Kd = sRGB-Farbe, d = Deckkraft).
+fn write_mtl(s: &Scene) -> String {
+    let names = material_names(s);
+    let mut out = String::from("# DOSSIER MTL - Materialien des OBJ-Exports (Kd = sRGB-Farbe 0..1, d = Deckkraft)\n");
+    for k in used_materials(s) {
+        let c = rgba_of(s, k);
+        out.push_str(&format!("\nnewmtl {}\nKa 0 0 0\n", names[k]));
+        out.push_str(&format!("Kd {} {} {}\n", fmt_real(c[0].clamp(0.0, 1.0)), fmt_real(c[1].clamp(0.0, 1.0)), fmt_real(c[2].clamp(0.0, 1.0))));
+        out.push_str(&format!("Ks 0 0 0\nd {}\nillum 2\n", fmt_real(c[3].clamp(0.0, 1.0))));
+    }
+    out
+}
+
+/// OBJ mit `vn` und `usemtl`. `mtl_name` = Dateiname der MTL (`mtllib`); leer ⇒ keine MTL daneben, die Farben stehen dann
+/// als Kommentar im Kopf (jedes Material bleibt eine eigene `usemtl`-Gruppe).
+fn write_obj(s: &Scene, mtl_name: &str) -> String {
+    let names = material_names(s);
     let mut out = String::new();
     out.push_str("# DOSSIER OBJ-Export - Dreiecks-Mesh des 3D-Gebaeudemodells\n");
     out.push_str("# Achsen: rechtshaendig, Y-up (Y = Hoehe ueber OKFF), Modell (x,y,z) -> (x,z,-y), Norden = -Z.\n");
     out.push_str("# Waende: Schicht-Baender mit oeffnungsgenau ausgeschnittenen Loechern (inkl. Laibungen).\n");
     out.push_str("# Decken/Extrusionen: Umriss-Prisma (Ear-Clipping-Triangulierung).\n");
     out.push_str("# Daecher, Treppen, Stuetzen, Fenster/Tueren (je Oeffnung ein Objekt), Gelaende und Kontext-Meshes wie im 3D.\n");
+    out.push_str(&format!("# Normalen: je Ecke geteilt bis {CREASE_DEG} Grad Knickwinkel (wie die 3D-Anzeige), scharfe Kanten bleiben kantig.\n"));
+    let mtl_name = mtl_name.trim();
+    if mtl_name.is_empty() {
+        out.push_str("# Farben (ohne MTL-Datei; Gruppen je Material mit usemtl):\n");
+        for k in used_materials(s) {
+            let c = rgba_of(s, k);
+            out.push_str(&format!("# {}: Kd {} {} {} d {}\n", names[k], fmt_real(c[0]), fmt_real(c[1]), fmt_real(c[2]), fmt_real(c[3])));
+        }
+    } else {
+        out.push_str(&format!("mtllib {mtl_name}\n"));
+    }
     let mut offset = 0usize;
+    let mut n_off = 0usize;
     for g in s.groups.iter().filter(|g| tri_count(g) > 0) {
         out.push_str("o ");
         out.push_str(&g.name);
@@ -192,15 +289,41 @@ fn write_obj(s: &Scene) -> String {
                 out.push_str(&format!("v {} {} {}\n", fmt_real(f[0]), fmt_real(f[1]), fmt_real(f[2])));
             }
         }
+        // Normalen des Objekts (je verschiedene Richtung einmal), Flächen verweisen darauf.
+        let mut normals: HashMap<[i32; 3], usize> = HashMap::new();
+        let mut per_prim: Vec<Vec<[usize; 3]>> = Vec::new();
+        let mut vn = String::new();
         for p in &g.prims {
-            for t in p.indices.chunks_exact(3) {
-                let (a, b, c) = (t[0] as usize, t[1] as usize, t[2] as usize);
+            let mut tris = Vec::new();
+            for t in corner_normals_file(p) {
+                let mut ids = [0usize; 3];
+                for (c, n) in t.iter().enumerate() {
+                    let next = normals.len();
+                    ids[c] = *normals.entry(normal_key(*n)).or_insert_with(|| {
+                        vn.push_str(&format!("vn {} {} {}\n", fmt_real(f64::from(n[0])), fmt_real(f64::from(n[1])), fmt_real(f64::from(n[2]))));
+                        next
+                    });
+                }
+                tris.push(ids);
+            }
+            per_prim.push(tris);
+        }
+        out.push_str(&vn);
+        for (p, tris) in g.prims.iter().zip(&per_prim) {
+            if p.indices.is_empty() {
+                continue;
+            }
+            out.push_str(&format!("usemtl {}\n", names[mat_index(s, p.material)]));
+            for (t, nrm) in p.indices.chunks_exact(3).zip(tris) {
+                let (a, b, c) = (t[0] as usize + 1 + offset + local, t[2] as usize + 1 + offset + local, t[1] as usize + 1 + offset + local);
                 // Z gespiegelt ⇒ Wicklung vertauschen (Normalen zeigen weiter nach aussen).
-                out.push_str(&format!("f {} {} {}\n", a + 1 + offset + local, c + 1 + offset + local, b + 1 + offset + local));
+                let (na, nb, nc) = (nrm[0] + 1 + n_off, nrm[2] + 1 + n_off, nrm[1] + 1 + n_off);
+                out.push_str(&format!("f {a}//{na} {b}//{nb} {c}//{nc}\n"));
             }
             local += p.positions.len() / 3;
         }
         offset += local;
+        n_off += normals.len();
     }
     out
 }
@@ -338,7 +461,7 @@ fn build_gltf(s: &Scene, uri_for_buffer: bool) -> (String, Vec<u8>) {
     // Gruppen mit Dreiecken → Knoten 0..n_mesh (Knoten i = Mesh i).
     for g in s.groups.iter().filter(|g| tri_count(g) > 0) {
         // Je Material eine Primitive (gleiches Material zusammenfassen, Reihenfolge des ersten Auftretens).
-        let mut merged: Vec<(i64, Vec<f32>, Vec<u32>)> = Vec::new();
+        let mut merged: Vec<(i64, Vec<f32>, Vec<f32>, Vec<u32>)> = Vec::new();
         for p in &g.prims {
             if p.indices.is_empty() {
                 continue;
@@ -346,18 +469,27 @@ fn build_gltf(s: &Scene, uri_for_buffer: bool) -> (String, Vec<u8>) {
             let at = match merged.iter().position(|m| m.0 == p.material) {
                 Some(i) => i,
                 None => {
-                    merged.push((p.material, Vec::new(), Vec::new()));
+                    merged.push((p.material, Vec::new(), Vec::new(), Vec::new()));
                     merged.len() - 1
                 }
             };
             let m = &mut merged[at];
-            let base = (m.1.len() / 3) as u32;
-            // Z spiegeln (Modell-Welt → rechtshändiges glTF) und Wicklung vertauschen.
-            for v in p.positions.chunks_exact(3) {
-                m.1.extend_from_slice(&[v[0] as f32, v[1] as f32, 0.0 - v[2] as f32]);
-            }
-            for t in p.indices.chunks_exact(3) {
-                m.2.extend_from_slice(&[base + t[0], base + t[2], base + t[1]]);
+            // Eckpunkte je (Index, Normale): Ecken mit gleicher Normale teilen sich einen Punkt, scharfe Kanten
+            // bekommen getrennte. Z spiegeln (Modell-Welt → rechtshändiges glTF) und Wicklung vertauschen.
+            let normals = corner_normals_file(p);
+            let mut local: HashMap<(u32, [i32; 3]), u32> = HashMap::new();
+            for (t, nrm) in p.indices.chunks_exact(3).zip(&normals) {
+                for c in [0usize, 2, 1] {
+                    let key = (t[c], normal_key(nrm[c]));
+                    let next = (m.1.len() / 3) as u32;
+                    let id = *local.entry(key).or_insert_with(|| {
+                        let v = &p.positions[t[c] as usize * 3..t[c] as usize * 3 + 3];
+                        m.1.extend_from_slice(&[v[0] as f32, v[1] as f32, 0.0 - v[2] as f32]);
+                        m.2.extend_from_slice(&nrm[c]);
+                        next
+                    });
+                    m.3.push(id);
+                }
             }
         }
         push_sep(&mut meshes, n_mesh);
@@ -365,7 +497,7 @@ fn build_gltf(s: &Scene, uri_for_buffer: bool) -> (String, Vec<u8>) {
         meshes.push_str("{\"name\":");
         json_str(&g.name, &mut meshes);
         meshes.push_str(",\"primitives\":[");
-        for (k, (mat, pos, idx)) in merged.iter().enumerate() {
+        for (k, (mat, pos, nrm, idx)) in merged.iter().enumerate() {
             let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
             for v in pos.chunks_exact(3) {
                 for a in 0..3 {
@@ -381,9 +513,14 @@ fn build_gltf(s: &Scene, uri_for_buffer: bool) -> (String, Vec<u8>) {
             for i in idx {
                 bin.extend_from_slice(&i.to_le_bytes());
             }
+            let nrm_off = bin.len();
+            for f in nrm {
+                bin.extend_from_slice(&f.to_le_bytes());
+            }
             push_sep(&mut views, n_views);
             views.push_str(&format!("{{\"buffer\":0,\"byteOffset\":{pos_off},\"byteLength\":{},\"target\":34962}}", pos.len() * 4));
             views.push_str(&format!(",{{\"buffer\":0,\"byteOffset\":{idx_off},\"byteLength\":{},\"target\":34963}}", idx.len() * 4));
+            views.push_str(&format!(",{{\"buffer\":0,\"byteOffset\":{nrm_off},\"byteLength\":{},\"target\":34962}}", nrm.len() * 4));
             push_sep(&mut accessors, n_acc);
             // min/max als exakter Wert des f32 (der Prüfer vergleicht mit den Daten).
             accessors.push_str(&format!(
@@ -401,6 +538,7 @@ fn build_gltf(s: &Scene, uri_for_buffer: bool) -> (String, Vec<u8>) {
                 n_views + 1,
                 idx.len()
             ));
+            accessors.push_str(&format!(",{{\"bufferView\":{},\"componentType\":5126,\"count\":{},\"type\":\"VEC3\"}}", n_views + 2, nrm.len() / 3));
             let material = if *mat >= 0 {
                 *mat as usize
             } else {
@@ -409,11 +547,12 @@ fn build_gltf(s: &Scene, uri_for_buffer: bool) -> (String, Vec<u8>) {
             };
             push_sep(&mut meshes, k);
             meshes.push_str(&format!(
-                "{{\"attributes\":{{\"POSITION\":{n_acc}}},\"indices\":{},\"material\":{material},\"mode\":4}}",
+                "{{\"attributes\":{{\"POSITION\":{n_acc},\"NORMAL\":{}}},\"indices\":{},\"material\":{material},\"mode\":4}}",
+                n_acc + 2,
                 n_acc + 1
             ));
-            n_views += 2;
-            n_acc += 2;
+            n_views += 3;
+            n_acc += 3;
         }
         meshes.push_str("]}");
         nodes.push_str("{\"name\":");
@@ -505,8 +644,13 @@ fn build_gltf(s: &Scene, uri_for_buffer: bool) -> (String, Vec<u8>) {
 // ── Öffentliche Schreiber ───────────────────────────────────────────────────
 
 /// OBJ-Text aus der flachen Szene.
-pub fn export_obj(flat: &[f64], strings: &str) -> Result<String, String> {
-    Ok(write_obj(&parse(flat, strings)?))
+pub fn export_obj(flat: &[f64], strings: &str, mtl_name: &str) -> Result<String, String> {
+    Ok(write_obj(&parse(flat, strings)?, mtl_name))
+}
+
+/// MTL-Datei (Farben) zum OBJ aus derselben Szene.
+pub fn export_mtl(flat: &[f64], strings: &str) -> Result<String, String> {
+    Ok(write_mtl(&parse(flat, strings)?))
 }
 
 /// ASCII-STL aus der flachen Szene.
@@ -558,10 +702,16 @@ pub fn export_glb(flat: &[f64], strings: &str) -> Result<Vec<u8>, String> {
 mod wasm {
     use wasm_bindgen::prelude::*;
 
-    /// Flache Szene → OBJ-Text; leer bei kaputtem Puffer.
+    /// Flache Szene → OBJ-Text; leer bei kaputtem Puffer. `mtl_name` = Dateiname der MTL (`mtllib`), leer = keine.
     #[wasm_bindgen]
-    pub fn export_mesh_obj_flat(flat: &[f64], strings: &str) -> String {
-        super::export_obj(flat, strings).unwrap_or_default()
+    pub fn export_mesh_obj_flat(flat: &[f64], strings: &str, mtl_name: &str) -> String {
+        super::export_obj(flat, strings, mtl_name).unwrap_or_default()
+    }
+
+    /// Flache Szene → MTL-Text (Farben zum OBJ); leer bei kaputtem Puffer.
+    #[wasm_bindgen]
+    pub fn export_mesh_mtl_flat(flat: &[f64], strings: &str) -> String {
+        super::export_mtl(flat, strings).unwrap_or_default()
     }
 
     /// Flache Szene → ASCII-STL; leer bei kaputtem Puffer.
@@ -649,12 +799,64 @@ mod tests {
     #[test]
     fn obj_aufbau() {
         let (n, s) = scene(true);
-        let obj = export_obj(&n, &s).unwrap();
+        let obj = export_obj(&n, &s, "").unwrap();
         assert!(obj.starts_with("# DOSSIER OBJ-Export"));
         assert!(obj.contains("o Wand_W1\nv 0.0 0.0 0.0\nv 1.0 0.0 0.0\n"));
         // Zweite Gruppe: Indizes global (8 Vertices davor, 1-basiert). Rechtshändig: Z gespiegelt, Wicklung vertauscht.
-        assert!(obj.contains("o Decke_D\"1\nv 0.0 2.5 0.0\nv 1.0 2.5 0.0\nv 0.0 2.5 -1.0\nf 9 11 10\n"), "{obj}");
+        // Normale der Decke (Dreiecks-Normale in Szene-Achsen (0,-1,0), Spiegelung von z ändert sie nicht); davor 6 Würfel-Normalen (flach, 90° > Knickwinkel), daher Index 7.
+        assert!(obj.contains("o Decke_D\"1\nv 0.0 2.5 0.0\nv 1.0 2.5 0.0\nv 0.0 2.5 -1.0\nvn 0.0 -1.0 0.0\nusemtl Standard\nf 9//7 11//7 10//7\n"), "{obj}");
         assert_eq!(obj.matches("\nf ").count(), 13);
+        // Ohne MTL-Datei: Farben als Kommentar, Gruppen je Material.
+        assert!(obj.contains("# Beton: Kd 0.8 0.8 0.8 d 1.0\n") && obj.contains("usemtl Beton\n") && !obj.contains("mtllib"), "{obj}");
+        // Jede Fläche trägt Normale; Würfel: genau 6 verschiedene `vn`.
+        assert_eq!(obj.split("o Decke").next().unwrap().matches("\nvn ").count(), 6);
+    }
+
+    #[test]
+    fn obj_mit_mtl() {
+        let (n, s) = scene(true);
+        let obj = export_obj(&n, &s, "haus.mtl").unwrap();
+        assert!(obj.contains("\nmtllib haus.mtl\n") && !obj.contains("# Beton: Kd"), "{obj}");
+        let mtl = export_mtl(&n, &s).unwrap();
+        assert!(mtl.contains("\nnewmtl Beton\nKa 0 0 0\nKd 0.8 0.8 0.8\nKs 0 0 0\nd 1.0\nillum 2\n"), "{mtl}");
+        assert!(mtl.contains("\nnewmtl Standard\n"), "{mtl}");
+    }
+
+    #[test]
+    fn normalen_im_gltf_flach_und_geteilt() {
+        // Würfel: scharfe Kanten (90°) ⇒ 24 Eckpunkte, Normalen = Einheitsachsen, passend zur geschriebenen Wicklung.
+        let (n, s) = scene(false);
+        let (json, bin) = build_gltf(&parse(&n, &s).unwrap(), false);
+        assert!(json.contains(r#""NORMAL":2"#), "{json}");
+        let f = |o: usize| f32::from_le_bytes(bin[o..o + 4].try_into().unwrap());
+        let idx = |o: usize| u32::from_le_bytes(bin[o..o + 4].try_into().unwrap()) as usize;
+        // Gruppe 1: 24 Positionen (288 B), 36 Indizes (144 B), dann 24 Normalen.
+        let (pos0, idx0, nrm0) = (0, 24 * 12, 24 * 12 + 36 * 4);
+        let at = |base: usize, v: usize| [f(base + v * 12), f(base + v * 12 + 4), f(base + v * 12 + 8)];
+        for v in 0..24 {
+            let n = at(nrm0, v);
+            assert!((n.iter().map(|x| x * x).sum::<f32>() - 1.0).abs() < 1e-5 && n.iter().filter(|x| x.abs() > 0.99).count() == 1, "{n:?}");
+        }
+        for t in 0..12 {
+            let (a, b, c) = (idx(idx0 + t * 12), idx(idx0 + t * 12 + 4), idx(idx0 + t * 12 + 8));
+            let (pa, pb, pc) = (at(pos0, a), at(pos0, b), at(pos0, c));
+            let (u, w) = ([pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]], [pc[0] - pa[0], pc[1] - pa[1], pc[2] - pa[2]]);
+            let cross = [u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]];
+            for v in [a, b, c] {
+                let n = at(nrm0, v);
+                assert!(cross[0] * n[0] + cross[1] * n[1] + cross[2] * n[2] > 0.0, "Dreieck {t}: Normale gegen die Wicklung");
+            }
+        }
+        // Leicht geknickte Fläche (zwei Dreiecke, ~6° Knick < Knickwinkel) ⇒ geteilte Normalen: 4 statt 6 Eckpunkte.
+        let mut f2 = Flat::default();
+        let (g, k, i) = (f2.s("Wand_X"), f2.s("wall"), f2.s("X"));
+        f2.nums = vec![FLAT_VERSION, 0.0, 0.0, 0.0, 1.0, g, k, i, -1.0, 1.0, -1.0, 4.0];
+        f2.nums.extend([0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.1]);
+        f2.nums.extend([2.0, 0.0, 1.0, 2.0, 1.0, 3.0, 2.0]);
+        let (n2, s2) = f2.args();
+        let (json2, _) = build_gltf(&parse(&n2, &s2).unwrap(), false);
+        assert!(json2.contains(r#""count":4,"type":"VEC3","min""#), "{json2}");
+        assert!(json2.contains(r#""count":4,"type":"VEC3"}"#), "{json2}");
     }
 
     #[test]
@@ -696,8 +898,8 @@ mod tests {
         let (n, s) = scene(true);
         let glb = export_glb(&n, &s).unwrap();
         let (json, bl) = json_of_glb(&glb);
-        // Puffer: (8 + 3) Vertices je 12 B + (36 + 3) Indizes je 4 B.
-        assert_eq!(bl, (8 + 3) * 12 + (36 + 3) * 4);
+        // Puffer: Würfel mit scharfen Kanten = 24 Eckpunkte + 3 des Dreiecks, je Position + Normale 24 B; (36 + 3) Indizes je 4 B.
+        assert_eq!(bl, (24 + 3) * 24 + (36 + 3) * 4);
         assert!(json.contains(&format!("\"byteLength\":{bl}")));
         // Knoten 0/1 = Bauteile, Knoten 2 = Geschoss mit Kind 0; Decke (ohne Geschoss) bleibt an der Wurzel.
         assert!(json.contains("\"scenes\":[{\"nodes\":[2,1]}]"), "{json}");
@@ -728,7 +930,7 @@ mod tests {
         let (json, bl) = json_of_glb(&glb);
         assert_eq!(bl, 0);
         assert!(json.trim_end().ends_with("\"scene\":0,\"scenes\":[{}]}"), "{json}");
-        assert_eq!(export_obj(&n, "").unwrap().lines().count(), 5);
+        assert_eq!(export_obj(&n, "", "").unwrap().lines().count(), 7);
         assert_eq!(export_stl(&n, "").unwrap(), "solid dossier\nendsolid dossier\n");
     }
 
@@ -756,14 +958,14 @@ mod tests {
             for bad in [f64::NAN, f64::INFINITY, -1.0, 1e12, 0.5] {
                 let mut m = n.clone();
                 m[pos] = bad;
-                let _ = export_obj(&m, &s);
+                let _ = export_obj(&m, &s, "");
                 let _ = export_stl(&m, &s);
                 let _ = export_glb(&m, &s);
                 let _ = export_gltf(&m, &s);
             }
         }
-        assert!(export_obj(&n, "").is_err());
-        assert!(export_obj(&[], "").is_err());
+        assert!(export_obj(&n, "", "").is_err());
+        assert!(export_obj(&[], "", "").is_err());
     }
 
     #[test]

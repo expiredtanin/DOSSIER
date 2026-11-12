@@ -125,6 +125,12 @@ pub fn with_opt(v: &Value, fields: Vec<(&str, Option<Value>)>) -> Value {
     Value::Object(m)
 }
 
+/// [201] Eine Kopie mit neuer id trägt die IFC-GlobalId des Originals nicht mit (sonst zwei Bauteile mit
+/// derselben GlobalId im Export).
+pub fn as_copy(v: &Value) -> Value {
+    with_opt(v, vec![("ifcGlobalId", None)])
+}
+
 pub fn arr(v: Option<&Value>) -> &[Value] {
     v.and_then(Value::as_array).map(Vec::as_slice).unwrap_or(&[])
 }

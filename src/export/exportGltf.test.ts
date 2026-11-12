@@ -3,7 +3,7 @@
 import { describe, it, expect } from "vitest";
 import "../engine/fileioWasm.setup";
 import validator from "gltf-validator";
-import { exportGlb, exportGltf, exportObj } from "./exportMesh";
+import { exportGlb, exportGltf, exportMtl, exportObj } from "./exportMesh";
 import { sampleProject } from "../model/sampleProject";
 
 interface Gltf {
@@ -81,5 +81,41 @@ describe("glTF-Export", () => {
     // Wandmaterial trägt den Namen der Komponente.
     const names = sampleProject.components.map((c) => c.name);
     expect(g.materials.some((m) => names.includes(m.name))).toBe(true);
+  });
+});
+
+describe("[201] Normalen und MTL", () => {
+  it("jede Primitive trägt NORMAL (gleiche Anzahl wie POSITION); Validator ohne Meldung zu Normalen", async () => {
+    const glb = exportGlb(sampleProject);
+    const g = glbJson(glb) as Gltf & { meshes: { primitives: { attributes: { POSITION: number; NORMAL?: number } }[] }[] };
+    for (const m of g.meshes) {
+      for (const p of m.primitives) {
+        expect(p.attributes.NORMAL).toBeDefined();
+        expect(g.accessors[p.attributes.NORMAL!].count).toBe(g.accessors[p.attributes.POSITION].count);
+        expect(g.accessors[p.attributes.NORMAL!].type).toBe("VEC3");
+      }
+    }
+    const report = await validator.validateBytes(glb, { maxIssues: 200 });
+    const normalIssues = report.issues.messages.filter((m) => /NORMAL|normal/.test(m.code + m.message));
+    expect(normalIssues).toEqual([]);
+  });
+
+  it("OBJ: vn zu jeder Fläche, usemtl je Material, mtllib nur mit MTL; MTL nennt jedes verwendete Material", () => {
+    const withMtl = exportObj(sampleProject, {}, "haus.mtl");
+    const lines = withMtl.split("\n");
+    expect(lines).toContain("mtllib haus.mtl");
+    const faces = lines.filter((l) => l.startsWith("f "));
+    expect(lines.filter((l) => l.startsWith("vn ")).length).toBeGreaterThan(0);
+    for (const f of faces) expect(f).toMatch(/^f \d+\/\/\d+ \d+\/\/\d+ \d+\/\/\d+$/);
+    const used = new Set(lines.filter((l) => l.startsWith("usemtl ")).map((l) => l.slice(7)));
+    expect(used.size).toBeGreaterThan(1);
+    const mtl = exportMtl(sampleProject);
+    const defined = new Set(mtl.split("\n").filter((l) => l.startsWith("newmtl ")).map((l) => l.slice(7)));
+    for (const u of used) expect(defined.has(u), u).toBe(true);
+    expect(mtl).toMatch(/\nKd [\d.]+ [\d.]+ [\d.]+\n/);
+    // Ohne MTL: keine mtllib, Farben im Kopf als Kommentar.
+    const plain = exportObj(sampleProject);
+    expect(plain).not.toContain("mtllib");
+    expect(plain).toMatch(/\n# \S+: Kd /);
   });
 });

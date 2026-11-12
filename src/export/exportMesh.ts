@@ -38,10 +38,17 @@ function write<T extends string | Uint8Array>(project: Project, opts: MeshOption
  * Baut einen vollständigen Wavefront-OBJ-String des 3D-Gebäudemodells (Meter, Y-up rechtshändig:
  * Modell (x, y, z-hoch) → (x, z, −y)). Ein `o`-Objekt je Bauteil-Vorkommen (Wand, Decke, Extrusion, Dach,
  * Treppe, Stütze, Fenster/Tür, Kontext-Mesh). Leeres Projekt ⇒ gültige Datei nur mit Kopf-Kommentaren.
- * Verlangt das geladene Format-Modul (`await loadFileio()`).
+ * Mit Normalen (`vn`, geteilt bis 30° Knickwinkel wie die 3D-Anzeige) und `usemtl` je Material ([201]). `mtlName` =
+ * Dateiname der MTL daneben (`mtllib`, Datei von {@link exportMtl}); leer ⇒ ohne MTL, die Farben stehen dann als
+ * Kommentar im Kopf. Verlangt das geladene Format-Modul (`await loadFileio()`).
  */
-export function exportObj(project: Project, opts: MeshOptions = {}): string {
-  return write(project, opts, false, (m, b, s) => m.export_mesh_obj_flat(b, s));
+export function exportObj(project: Project, opts: MeshOptions = {}, mtlName = ""): string {
+  return write(project, opts, false, (m, b, s) => m.export_mesh_obj_flat(b, s, mtlName));
+}
+
+/** MTL-Datei mit den Farben (`Kd`, Deckkraft `d`) der OBJ-Materialien aus {@link exportObj} ([201]). */
+export function exportMtl(project: Project, opts: MeshOptions = {}): string {
+  return write(project, opts, false, (m, b, s) => m.export_mesh_mtl_flat(b, s));
 }
 
 /**
@@ -63,7 +70,8 @@ export interface GltfOptions extends MeshOptions {
  * glTF 2.0 binär (GLB) für Blender, Twinmotion, Enscape, Web-Viewer. Ein Knoten je Bauteil (Name
  * `Wand_<id>`, `Decke_<id>`, `Dach_<id>`, `Treppe_<id>`, `Stuetze_<id>`, `Fenster_<id>`, `Tuer_<id>`,
  * `Extrusion_<id>`, `Kontext_<id>`, `Gelaende_<id>`; `extras` = Typ + id), PBR-Materialien mit der
- * Farbe der Bauteilschicht, Verglasung transparent (`BLEND`), Geschosse als Eltern-Knoten. Meter;
+ * Farbe der Bauteilschicht, Verglasung transparent (`BLEND`), `NORMAL` je Ecke (geteilt bis 30° Knickwinkel wie die
+ * 3D-Anzeige, scharfe Kanten bleiben kantig), Geschosse als Eltern-Knoten. Meter;
  * rechtshändig, Y-up: Modell (x, y, z-hoch) → (x, z, −y), Norden = −Z. Verlangt das geladene
  * Format-Modul (`await loadFileio()`).
  */

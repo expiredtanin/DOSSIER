@@ -12,7 +12,7 @@
 //! Rechnung auf der rohen Projekt-Wurzel (verlustfrei, Schlüsselreihenfolge wie das Objekt-Spreizen in
 //! TS); Zahlen wie in JS (`jsnum`, `jsmath`), nicht endliche Ergebnisse als Marken (`json_util::js_num`).
 
-use crate::json_util::{arr, field, js_num, num_of, num_or, pt, truthy, with, with_all, with_opt, xy, N};
+use crate::json_util::{arr, as_copy, field, js_num, num_of, num_or, pt, truthy, with, with_all, with_opt, xy, N};
 use crate::jsmath::hypot2;
 use crate::jsnum;
 use crate::model::Project;
@@ -959,7 +959,7 @@ pub fn transform_result(root: &Map<String, Value>, p: &Project, req: &TransformR
         for o in list(root, "openings") {
             let (Some(oid), Some(nh)) = (id_of(o), wall_host(o).and_then(|h| copied.get(h)).cloned()) else { continue };
             let nid = ids.next("O");
-            new_openings.push(with_all(&mv_wall_opening(o, &xf), vec![("id", Value::String(nid.clone())), ("hostWallId", Value::String(nh))]));
+            new_openings.push(with_all(&as_copy(&mv_wall_opening(o, &xf)), vec![("id", Value::String(nid.clone())), ("hostWallId", Value::String(nh))]));
             copied.insert(oid, nid);
         }
         let to_copy = |id: &str| copied.get(id).cloned();
@@ -976,23 +976,23 @@ pub fn transform_result(root: &Map<String, Value>, p: &Project, req: &TransformR
                 Kind::Tree => (8, mv_tree(e, &xf)),
                 Kind::Context => (9, mv_context(e, &xf)),
             };
-            new[slot].push(with(&v, "id", Value::String(new_id.clone())));
+            new[slot].push(with(&as_copy(&v), "id", Value::String(new_id.clone())));
         }
         // Öffnungen kopierter Dächer/Decken ([103]) mit neuem Wirt mitkopieren.
         for o in list(root, "openings") {
             let Some((key, nh)) = surface_host(o).and_then(|(k, h)| Some((k, to_copy(h)?))) else { continue };
-            let v = with(&mv_surface_opening(o, &xf), key, Value::String(nh));
+            let v = with(&as_copy(&mv_surface_opening(o, &xf)), key, Value::String(nh));
             new_openings.push(with(&v, "id", Value::String(ids.next("O"))));
         }
         // Kopien frei gewählter Wandöffnungen ([144]) in der Wand versetzt.
         for o in &free {
             if let Some(v) = slide(o, move_delta(&pts, t), true) {
-                new_openings.push(with(&v, "id", Value::String(ids.next("O"))));
+                new_openings.push(with(&as_copy(&v), "id", Value::String(ids.next("O"))));
             }
         }
         for o in &free_surf {
             if let Some(v) = slide_surface_opening(root, o, move_delta(&pts, t)) {
-                new_openings.push(with(&v, "id", Value::String(ids.next("O"))));
+                new_openings.push(with(&as_copy(&v), "id", Value::String(ids.next("O"))));
             }
         }
     }

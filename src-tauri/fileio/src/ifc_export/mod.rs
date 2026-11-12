@@ -100,6 +100,10 @@
 //                 IfcZone mit IfcRelAssignsToGroup der Räume (`space/<id>`-Entitäten; unbekannte ids werden
 //                 übersprungen, ohne Raum keine Zone). GlobalId aus `zone/<key>`; Psets/Mengen wie bei Bauteilen.
 //   ATTACH      = 14, key, PSETS   (Psets/Mengen an ein schon geschriebenes Bauteil/Geschoss, Schlüssel wie oben)
+//   GUIDS       = 23 ([201] GlobalId-Rundreise), n, (key, guid) × n: übernommene GlobalIds importierter Bauteile.
+//                 key = Bauteil-Schlüssel wie für die abgeleitete GlobalId (`wall/<id>`, `slab/<id>`, `roof/<id>`,
+//                 `column/<id>`, `stair/<id>`, `space/<id>`, `extrusion/<id>`, `fill/<Öffnungs-id>`); guid = 22 Zeichen.
+//                 Gehört VOR alle Bauteile. Doppelte oder ungültige GlobalIds werden verworfen (dann abgeleitet).
 //   TREE        = 19 ([149] Baum), structure, id, name, PSETS, MESH (Stamm + Krone, Welt rel. Geschoss-UK)
 //                 IFC4: IfcGeographicElement (ObjectType „Baum", PredefinedType USERDEFINED); IFC2x3 (kennt die
 //                 Klasse nicht): IfcBuildingElementProxy mit ObjectType „Baum". GlobalId aus `tree/<id>`.
@@ -153,6 +157,7 @@ pub const REC_OPENING_SOLID: f64 = 15.0;
 pub const REC_WALL_ARC: f64 = 16.0;
 pub const REC_WALL_ARC_SOLID: f64 = 17.0;
 pub const REC_GRID: f64 = 18.0;
+pub const REC_GUIDS: f64 = 23.0;
 pub const REC_TREE: f64 = 19.0;
 pub const REC_COLUMN_PIECES: f64 = 20.0;
 pub const REC_CEILING_ARC: f64 = 21.0;
@@ -186,6 +191,7 @@ fn rec_name(code: f64) -> &'static str {
         c if c == REC_ZONE => "ZONE",
         c if c == REC_ATTACH => "ATTACH",
         c if c == REC_GRID => "GRID",
+        c if c == REC_GUIDS => "GUIDS",
         c if c == REC_TREE => "TREE",
         c if c == REC_COLUMN_PIECES => "COLUMN_PIECES",
         _ => "?",
@@ -257,6 +263,7 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
         types: Vec::new(),
         type_index: HashMap::new(),
         walls: HashMap::new(),
+        guid_override: HashMap::new(),
         axis_context: 0,
         styles: [0; 3],
         spaces: Vec::new(),
@@ -1130,6 +1137,18 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
                 );
                 w.add_to_containment(structure, entity);
                 w.elements.insert(format!("grid/{id}"), entity);
+            }
+            c if c == REC_GUIDS => {
+                let n = r.idx()?;
+                let mut used: std::collections::HashSet<String> = w.guid_override.values().cloned().collect();
+                for _ in 0..n {
+                    let key = r.string()?;
+                    let guid = r.string()?;
+                    // Nur gültige, bisher unbenutzte GlobalIds; sonst bleibt es bei der abgeleiteten.
+                    if valid_guid(&guid) && used.insert(guid.clone()) {
+                        w.guid_override.insert(key, guid);
+                    }
+                }
             }
             c if c == REC_ATTACH => {
                 let key = r.string()?;

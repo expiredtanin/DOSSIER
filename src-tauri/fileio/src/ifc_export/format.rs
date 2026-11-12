@@ -48,6 +48,11 @@ pub(super) fn fnv1a64(bytes: &[u8], seed: u64, reverse: bool) -> u64 {
     hash
 }
 
+/// Gültige IFC-GlobalId: 22 Zeichen des 64er-Alphabets, erstes Zeichen 0–3 (128 Bit).
+pub fn valid_guid(g: &str) -> bool {
+    g.len() == 22 && g.bytes().all(|b| IFC_GUID_CHARS.contains(&b)) && matches!(g.as_bytes()[0], b'0'..=b'3')
+}
+
 /// Deterministische 22-stellige IFC-GUID aus einem Namen: zwei unabhängige 64-Bit-Läufe (FNV-1a vorwärts/
 /// rückwärts mit verschiedenen Startwerten, je fmix64-nachgemischt), gekennzeichnet als RFC-9562-UUID
 /// Version 8 mit Variante 10. Im Export lautet der Name `<Projekt-id>/<Art>/<id>[/<Zusatz>]`.

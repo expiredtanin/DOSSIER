@@ -71,6 +71,11 @@ export type Ceiling = {
   /** Grafik-Kategorie (Ebene), z. B. "30" für Decken. */
   categoryCode: string;
   /**
+   * [201] IFC-GlobalId des Quell-Bauteils (IFC-Import); der IFC-Export schreibt sie zurück, damit
+   * die Rundreise dieselben GUIDs behält. Kopien (Einfügen, Kopieren, Reihe, Wand teilen) tragen sie NICHT.
+   */
+  ifcGlobalId?: string;
+  /**
    * Vorsprung im Baurecht ([63]: Balkon, Erker): darf mit `SiteRules.projectionDepth`/
    * `projectionShare` in den Grenzabstand ragen. Fehlt ⇒ normales Bauteil.
    */
@@ -208,6 +213,11 @@ export type Column = {
   floorId: string;
   /** Grafik-Kategorie (Ebene), z. B. "50" für Tragwerk. */
   categoryCode: string;
+  /**
+   * [201] IFC-GlobalId des Quell-Bauteils (IFC-Import); der IFC-Export schreibt sie zurück, damit
+   * die Rundreise dieselben GUIDs behält. Kopien (Einfügen, Kopieren, Reihe, Wand teilen) tragen sie NICHT.
+   */
+  ifcGlobalId?: string;
   /** Objekt-Sperre, analog `Wall.locked`. */
   locked?: boolean;
   /** Einfügepunkt (Profil-Mitte) im Grundriss (Meter). */
@@ -1316,6 +1326,11 @@ export type ExtrudedSolid = {
    */
   categoryCode: string;
   /**
+   * [201] IFC-GlobalId des Quell-Bauteils (IFC-Import); der IFC-Export schreibt sie zurück, damit
+   * die Rundreise dieselben GUIDs behält. Kopien (Einfügen, Kopieren, Reihe, Wand teilen) tragen sie NICHT.
+   */
+  ifcGlobalId?: string;
+  /**
    * Geschlossenes Profil in der XY-Ebene (Grundriss), ≥3 Punkte. Bei einem
    * Kreis-Profil (`circle` gesetzt) eine Tessellierung des Kreises (48-Eck) —
    * für 2D-Footprint/Auswahl/bbox/Verschieben; die 3D-Extrusion nutzt in dem
@@ -2331,6 +2346,11 @@ export type Opening = {
   hostWallId: string;
   /** Grafik-Kategorie (Ebene), z. B. "21" für Türen/Fenster. */
   categoryCode: string;
+  /**
+   * [201] IFC-GlobalId des Quell-Bauteils (IFC-Import); der IFC-Export schreibt sie zurück, damit
+   * die Rundreise dieselben GUIDs behält. Kopien (Einfügen, Kopieren, Reihe, Wand teilen) tragen sie NICHT.
+   */
+  ifcGlobalId?: string;
   /** Objekt-Sperre, analog `Wall.locked`. */
   locked?: boolean;
   /** Bauteilnummer (Fenster-/Türliste); leer = automatisch je Geschoss nummeriert. */
@@ -3027,6 +3047,11 @@ export type Roof = {
   floorId: string;
   /** Grafik-Kategorie (Ebene), z. B. "35" für Dächer. */
   categoryCode: string;
+  /**
+   * [201] IFC-GlobalId des Quell-Bauteils (IFC-Import); der IFC-Export schreibt sie zurück, damit
+   * die Rundreise dieselben GUIDs behält. Kopien (Einfügen, Kopieren, Reihe, Wand teilen) tragen sie NICHT.
+   */
+  ifcGlobalId?: string;
   /** Objekt-Sperre, analog `Wall.locked`. */
   locked?: boolean;
   /**
@@ -3176,6 +3201,11 @@ export type Room = {
   floorId: string;
   /** Grafik-Kategorie (Ebene), z. B. "45" für Räume. */
   categoryCode: string;
+  /**
+   * [201] IFC-GlobalId des Quell-Bauteils (IFC-Import); der IFC-Export schreibt sie zurück, damit
+   * die Rundreise dieselben GUIDs behält. Kopien (Einfügen, Kopieren, Reihe, Wand teilen) tragen sie NICHT.
+   */
+  ifcGlobalId?: string;
   /** Objekt-Sperre, analog `Wall.locked`. */
   locked?: boolean;
   /** SIA-416-Blatt-Kategorie (HNF/NNF/VF/FF/KGF). */
@@ -3456,6 +3486,11 @@ export type Stair = {
   floorId: string;
   /** Grafik-Kategorie (Ebene), z. B. "40" für Treppen. */
   categoryCode: string;
+  /**
+   * [201] IFC-GlobalId des Quell-Bauteils (IFC-Import); der IFC-Export schreibt sie zurück, damit
+   * die Rundreise dieselben GUIDs behält. Kopien (Einfügen, Kopieren, Reihe, Wand teilen) tragen sie NICHT.
+   */
+  ifcGlobalId?: string;
   /** Objekt-Sperre, analog `Wall.locked`. */
   locked?: boolean;
   /** Grundform (gerade / L / Wendel). */
@@ -3989,6 +4024,11 @@ export type Wall = {
   floorId: string;
   /** Grafik-Kategorie (Ebene), z. B. "20" für Wände. */
   categoryCode: string;
+  /**
+   * [201] IFC-GlobalId des Quell-Bauteils (IFC-Import); der IFC-Export schreibt sie zurück, damit
+   * die Rundreise dieselben GUIDs behält. Kopien (Einfügen, Kopieren, Reihe, Wand teilen) tragen sie NICHT.
+   */
+  ifcGlobalId?: string;
   /**
    * Vorsprung im Baurecht ([63]: Wand eines Erkers): darf mit `SiteRules.projectionDepth`/
    * `projectionShare` in den Grenzabstand ragen. Fehlt ⇒ normales Bauteil.

@@ -121,6 +121,17 @@ describe("BCF-GlobalId-Zuordnung", () => {
     expect(resolveGuids(sampleProject, [g]).selection.wallIds).toEqual([w.id]);
   });
 
+  it("[201] Bauteil mit übernommener ifcGlobalId: sie gilt statt der abgeleiteten (beide Richtungen)", () => {
+    const own = "2O2Fr$t4X7Zf8NOew3FLOH";
+    const p = { ...sampleProject, walls: sampleProject.walls.map((w, i) => (i === 0 ? { ...w, ifcGlobalId: own } : w)) } as Project;
+    const w = p.walls[0];
+    expect(resolveGuids(p, [own]).selection.wallIds).toEqual([w.id]);
+    expect(resolveGuids(p, [ifcGuid(`${p.id}/wall/${w.id}`)]).missing).toHaveLength(1);
+    const sel = emptyBcfSelection();
+    sel.wallIds = [w.id];
+    expect(selectionToGuids(p, sel)).toEqual([own]);
+  });
+
   it("unbekannte GUIDs werden gemeldet", () => {
     const r = resolveGuids(sampleProject, ["0000000000000000000000", ifcGuid(`${sampleProject.id}/wall/${sampleProject.walls[0].id}`)]);
     expect(r.missing).toEqual(["0000000000000000000000"]);

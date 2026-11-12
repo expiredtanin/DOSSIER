@@ -26,9 +26,9 @@ import { exportScheduleCsv } from "../export/exportSchedule";
 import { exportIfcSpf, type IfcExportOptions } from "../export/exportIfc";
 import { loadFileio } from "../engine/fileioWasm";
 import { exportProjectStep } from "../export/exportStep";
-import { exportGlb, exportObj, exportStl } from "../export/exportMesh";
+import { exportGlb, exportMtl, exportObj, exportStl } from "../export/exportMesh";
 import type { ExportSaveFormat } from "../ui/ExportSaveDialog";
-import { saveBinaryFile, saveTextFile } from "../native/saveFile";
+import { saveBinaryFile, saveTextFile, saveTextWithCompanion } from "../native/saveFile";
 import {
   saveProjectFile,
   openProjectFileNative,
@@ -583,7 +583,9 @@ export function useProjectFileActions(
         void loadFileio()
           .then(() => {
             if (format === "glb") void saveBinaryFile(exportGlb(project), filename, "model/gltf-binary");
-            else downloadTextFile(format === "obj" ? exportObj(project) : exportStl(project), filename);
+            // [201] OBJ mit MTL (Farben) als zweite Datei gleichen Namens; STL kennt keine Farben.
+            else if (format === "obj") void saveTextWithCompanion((mtlName) => ({ main: exportObj(project, {}, mtlName), companion: exportMtl(project) }), filename, "mtl");
+            else downloadTextFile(exportStl(project), filename);
           })
           .catch((e) => notify(`${t("mesh.export.failed")}: ${e instanceof Error ? e.message : String(e)}`, "error"));
         break;

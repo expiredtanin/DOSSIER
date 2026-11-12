@@ -34,6 +34,8 @@ pub(super) struct Builder {
     pub(super) column_materials: Vec<(String, String, Vec<usize>)>,
     /// Bauteil-Schlüssel (wie für die GlobalId, z. B. `wall/<id>`) → Entität; Ziel von Klassifikation/Zone/Attach.
     pub(super) elements: HashMap<String, usize>,
+    /// [201] Übernommene GlobalIds (Schlüssel wie für `gid`), Vorrang vor der abgeleiteten.
+    pub(super) guid_override: HashMap<String, String>,
     /// IFC2x3: Türen/Fenster je (Tür?, Ausführung) → Bauteile; am Ende je ein IfcDoorStyle/IfcWindowStyle.
     pub(super) fill_styles: Vec<(bool, String, Vec<usize>)>,
 }
@@ -53,6 +55,9 @@ impl Builder {
 
     /// Dauerhafte GlobalId (als STEP-String) aus `<Art>/<id>[/<Zusatz>]`, im Namensraum des Projekts.
     pub(super) fn gid(&self, key: &str) -> String {
+        if let Some(g) = self.guid_override.get(key) {
+            return ifc_string(g);
+        }
         ifc_string(&ifc_guid(&format!("{}/{key}", self.project_id)))
     }
 

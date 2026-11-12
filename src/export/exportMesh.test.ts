@@ -164,7 +164,7 @@ function parseObjFaces(obj: string): number[][] {
   return obj
     .split("\n")
     .filter((l) => l.startsWith("f "))
-    .map((l) => l.slice(2).trim().split(/\s+/).map(Number));
+    .map((l) => l.slice(2).trim().split(/\s+/).map((t) => Number(t.split("/")[0]))); // [201]: `v//vn`
 }
 
 describe("exportObj — Wavefront-OBJ-Export", () => {

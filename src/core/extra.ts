@@ -13,7 +13,7 @@ export { projectGeoOrigin } from "../model/geoRebase";
 export { ensureContextCategories } from "../model/contextCategories";
 export { projectToWorldCoords } from "../model/geoRebase";
 export { exportScheduleCsv } from "../export/exportSchedule";
-export { exportObj, exportStl, exportGlb, exportGltf } from "../export/exportMesh";
+export { exportObj, exportMtl, exportStl, exportGlb, exportGltf } from "../export/exportMesh";
 export { exportProjectStep } from "../export/exportStep";
 export { planToSvgString } from "../export/planToSvgString";
 export { setWasmBytesProvider } from "../engine/wasmSource";

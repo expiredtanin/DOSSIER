@@ -146,3 +146,52 @@ function browserDownloadBlob(blob: Blob, defaultName: string): boolean {
   }, 4000);
   return true;
 }
+
+/** Hauptdatei samt Begleitdatei, die auf sie verweist ([201], OBJ + MTL). */
+export interface TextWithCompanion {
+  main: string;
+  companion: string;
+}
+
+/**
+ * Speichert eine Textdatei und eine Begleitdatei mit gleichem Namen, aber anderer Endung (OBJ + MTL).
+ * `build` bekommt den Dateinamen der Begleitdatei (für den Verweis in der Hauptdatei, z. B. `mtllib`).
+ * - Unter Tauri: Speichern-Dialog für die Hauptdatei, danach ein zweiter für die Begleitdatei (Vorschlag: gleicher Ordner und
+ *   Stamm) — der Dialog gibt den Pfad frei; ein stilles Schreiben neben die Hauptdatei dürfte am Dateizugriff scheitern.
+ *   Bricht man den zweiten ab, bleibt die Hauptdatei mit totem Verweis (nur die Farben fehlen dann).
+ * - Im Browser: zwei Downloads nacheinander.
+ *
+ * @returns `true` wenn die Hauptdatei geschrieben wurde, `false` bei Abbruch.
+ */
+export async function saveTextWithCompanion(
+  build: (companionName: string) => TextWithCompanion,
+  defaultName: string,
+  companionExt: string,
+  filters?: FileDialogFilter[],
+  companionFilters?: FileDialogFilter[],
+): Promise<boolean> {
+  const stemOf = (name: string) => name.replace(/^.*[\\/]/, "").replace(/\.[^.]*$/, "");
+  if (isTauri()) {
+    try {
+      const { save } = await import("@tauri-apps/plugin-dialog");
+      const { writeTextFile } = await import("@tauri-apps/plugin-fs");
+      const path = await save({ defaultPath: defaultName, filters });
+      if (!path) return false;
+      const companionName = `${stemOf(path)}.${companionExt}`;
+      const files = build(companionName);
+      await writeTextFile(path, files.main);
+      const companionPath = await save({ defaultPath: path.replace(/[^\\/]*$/, companionName), filters: companionFilters });
+      if (companionPath) await writeTextFile(companionPath, files.companion);
+      return true;
+    } catch (err) {
+      if (!warnedFallback) {
+        warnedFallback = true;
+        console.warn("Nativer Speichern-Dialog fehlgeschlagen, nutze Browser-Download.", err);
+      }
+    }
+  }
+  const companionName = `${stemOf(defaultName)}.${companionExt}`;
+  const files = build(companionName);
+  browserDownload(files.main, defaultName, "application/octet-stream");
+  return browserDownload(files.companion, companionName, "application/octet-stream");
+}

@@ -61,7 +61,7 @@ Schreiber `fileio/src/ifc_export/mod.rs`, Aufruf `src/export/exportIfc.ts`.
 | Stützen, Bäume, Achsraster, Extrusionskörper | `IfcColumn`, `IfcGeographicElement` (IFC2x3: Proxy), `IfcGrid`, `IfcBuildingElementProxy` | Baum: zwei Netze Stamm + Krone | `ifc_data.rs` |
 | Psets / Mengen | `Pset_*Common` und `Qto_*BaseQuantities` nur mit **Modellwerten**; `CH_Qto_SIA416`, `Dossier_*` | keine frei definierbaren Eigenschaften | Kopf `ifc_data.rs`, Pset-Namen dort und in `ifc_quantities.rs` |
 | Georeferenz | ganze Geometrie in LV95, wenn `geoAnchor` gesetzt | – | `geo_rebase`, Kopf `ifc_data.rs` |
-| GUIDs | deterministisch aus der Modell-id | – | `ifc_export::ifc_guid` |
+| GUIDs | `ifcGlobalId` des Bauteils, wenn gesetzt (Import, [201]; Wand, Decke, Dach, Stütze, Treppe, Raum, Extrusion, Tür/Fenster); sonst deterministisch aus der Modell-id. Doppelte oder ungültige GlobalIds fallen auf die abgeleitete zurück | Bäume, `IfcOpeningElement` und Beziehungen bleiben abgeleitet | `ifc_data.rs` (Datensatz `GUIDS`), `ifc_export::ifc_guid` |
 | **Nicht exportiert** | 2D-Zeichnungen (ausser Raster), Texte, Bemassungen, Schraffuren, Layouts/Blätter, Ebenen als Sichtbarkeit, Stifte, Gruppen, Gelände, Netzkörper, Möbel/Blöcke, Ansichtsausschnitte | Im Sammler wird nur über Bauteile iteriert, `context` und `drawings2d` (ausser `Grid`) kommen nicht vor | `ifc_data.rs` (`grep context` leer) |
 
 Geprüft mit IfcOpenShell nur, wenn `ifcopenshell` installiert ist (`src/export/exportIfc.validate.test.ts`); ob
@@ -80,7 +80,7 @@ Revit/ArchiCAD alles wie gewünscht lesen: ungeprüft.
 | Geschosse | Geschosse (Höhe ±5 mm wiederverwendet) | – | `import_ifc.rs::LEVEL_TOL` |
 | Psets | nur `IsExternal`, `LoadBearing`, `ThermalTransmittance`, Brand-/Schall-/Einbruchschutz, Raumbuch-Felder; **übrige Psets gehen verloren** | frei definierte Eigenschaften, Mengen (`Qto_*`) werden neu gerechnet | `import_ifc.rs` (`info.flag/text`), Tests „[98] Pset_*Common", „[158] Raumbuch" |
 | Klassifikation | nur **gezählt** im Bericht, nicht im Modell gespeichert | eBKP-H/Uniclass-Codes gehen verloren | `import_ifc.rs` (`classified`) |
-| GlobalId | nur am Netzkörper (`ImportedMesh.ifcGlobalId`); Wände, Decken usw. **verlieren** sie | Export vergibt neue, aus der Dossier-id abgeleitete GUIDs; Rundreise über GUID nicht möglich | `model/generated.rs`, Test „Kontext-Mesh: Farbe und GlobalId" |
+| GlobalId | an jedem erkannten Bauteil `ifcGlobalId` (Wand, Öffnung, Decke, Stütze, Dach, Treppe, Raum, Träger/Extrusion) und am Netzkörper | Kopien (Einfügen, Kopieren, Reihe, Spiegeln, Wand teilen) bekommen keine; der Export schreibt sie zurück, Rundreise über GUID möglich | `import_ifc.rs` (`set_gid`), Tests `ifcGlobalIdRoundtrip.test.ts`, „Kontext-Mesh: Farbe und GlobalId" |
 | Rest (Möbel, Haustechnik, Freiformen, Gelände) | Netzkörper `importedMesh` bzw. Gelände `terrainMesh` mit Klasse nach Herkunft | Nur Dreiecke und Farbe; Booleans und Öffnungen via BSP (`csg.rs`), bei Budget-Überschreitung fällt der Import auf den ersten Operanden zurück | `ARCHITEKTUR.md` §8, `CLAUDE.md` („3D-Booleans, wer wo") |
 | Klasse (`categoryCode`) | feste Codes je Bauteilart (Wand 20, Öffnung 21, Decke 30, Dach/Träger 35, Treppe 40, Stütze 50, Raum 60) | Eigene Ebenen der Quelle werden nicht übernommen | Konstanten in `import_ifc.rs` |
 
@@ -146,8 +146,8 @@ Rundreise Dossier → DXF → Dossier: Linien/Bögen/Texte kommen wieder, Wände
 
 | Richtung | Inhalt | Verlust | Beleg |
 |---|---|---|---|
-| Export OBJ/STL | Dreiecke; ein Objekt je Bauteil; Y-up rechtshändig, Meter | **OBJ ohne MTL, ohne Farben, Normalen und UVs**; STL ohne Farbe | `fileio/src/mesh_export.rs::write_obj` (keine `usemtl`/`mtllib`) |
-| Export glTF/GLB | Knoten je Bauteil (`extras`: Typ, id), Material je Primitive (Farbe, Transparenz), optional nach Geschoss gegliedert | Keine Normalen, Texturen, UVs; im UI nur **GLB** wählbar (`.gltf` per Funktion) | Kopf `mesh_export.rs`, `ExportSaveDialog.tsx` |
+| Export OBJ/STL | Dreiecke; ein Objekt je Bauteil; Y-up rechtshändig, Meter. OBJ mit `vn` (je Ecke geteilt bis 30° Knickwinkel wie die 3D-Anzeige, scharfe Kanten bleiben kantig), `usemtl` je Material und `.mtl` mit Farbe (`Kd`) und Deckkraft (`d`) | **OBJ ohne UVs/Texturen**; STL ohne Farbe. Die MTL ist eine zweite Datei: im Speichern-Dialog der App folgt ein zweiter Dialog (Browser: zweiter Download), CLI `obj --out haus.obj` schreibt `haus.mtl` mit, `--no-mtl` oder `--out -` nur das OBJ (Farben dann als Kommentar im Kopf, ohne `mtllib`) | `fileio/src/mesh_export.rs::write_obj`/`write_mtl`, `saveTextWithCompanion` |
+| Export glTF/GLB | Knoten je Bauteil (`extras`: Typ, id), Material je Primitive (Farbe, Transparenz), optional nach Geschoss gegliedert | `NORMAL` je Ecke (wie OBJ geteilt bis 30°; Eckpunkte an scharfen Kanten getrennt). Keine Texturen, UVs; im UI nur **GLB** wählbar (`.gltf` per Funktion) | Kopf `mesh_export.rs`, `ExportSaveDialog.tsx` |
 | Quelle der Dreiecke | wie das 3D; Extrusionen mit Verjüngung als **Prisma-Näherung** | Dächer, Treppen, Stützen, Bäume (Stamm + Krone), Gelände und Netzkörper sind enthalten (Optionen `context`, `openingParts`) | Kopf `core/src/mesh_data.rs` |
 | Import OBJ(+MTL), STL, PLY (mit Flächen), glTF/GLB | Netzkörper je Objekt mit Name, Gruppe und Farbe; Achse und Einheit wählbar bzw. erkannt | **Texturen, Skinning, Morphing, Draco/Meshopt** nicht unterstützt; Dreiecksbudget 6 Mio. (Rest abgeschnitten) | Kopf `mesh_import.rs`, `mesh_import_gltf.rs` |
 
@@ -202,8 +202,8 @@ Nur Import, alle Abrufe über `netFetch` (`src/net`).
 ## BCF
 
 `.bcfzip` 2.1/3.0 lesen und schreiben (Text, Kamera, Komponenten-GUIDs, Snapshots), `src/io/bcf.ts` und `fileio/src/bcf.rs`.
-Die Zuordnung GUID zu Bauteil läuft über `bcfMatch.ts`; da importierte Bauteile ihre GlobalId verlieren (s. IFC-Import),
-trifft sie nur Dossier-eigene, deterministische GUIDs. Themen leben in einer eigenen Datei, nicht im Projekt.
+Die Zuordnung GUID zu Bauteil läuft über `bcfMatch.ts`: übernommene `ifcGlobalId` (IFC-Import, [201]) zuerst, sonst die
+Dossier-eigene, deterministische GUID. Themen leben in einer eigenen Datei, nicht im Projekt.
 
 ## Querschnitt: was nirgends mitreist
 
