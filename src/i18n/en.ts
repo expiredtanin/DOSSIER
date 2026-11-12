@@ -2621,6 +2621,9 @@ export const en: Record<TranslationKey, string> = {
   "exportDxf.format.dxfbin": "DXF binary (AutoCAD 2018, compact)",
   "exportDxf.format.dwg": "DWG (AutoCAD 2018)",
   "exportDxf.failed": "Export failed",
+  "exportDxf.empty": "The view has nothing to export (check the section/elevation line).",
+  "export.section": "Section",
+  "export.elevation": "Elevation",
   "exportDxf.unitsNote":
     "Model space in meters (1:1). Layers mirror the project's categories; scale freely on plot.",
   "exportDxf.scale": "Scale (dimensions, dash patterns, labels)",

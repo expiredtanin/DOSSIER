@@ -9,6 +9,8 @@
 //                                                  json = render2d-Szene (planToRenderScene)
 //   dossier-cli <projekt.obp> section <Name> [--sketch] [--hatch] [--color] [--out schnitt.svg]       (--format json: render2d-Szene)
 //   dossier-cli <projekt.obp> elevation <Name> [--sketch] [--hatch] [--color] [--out ansicht.svg]     (--sketch: Skizzenstil [67])
+//                                                  section/elevation: --format dxf|dxfbin|dwg schreibt die Zeichnung als CAD-Datei [200]
+//                                                  (Modell-Space in Metern: x entlang der Schnitt-/Ansichtslinie, y = Höhe; --scale, --dim-unit cm, --layout wie bei dxf)
 //                                                  --color: Darstellung „Farbig" statt Tusche (Standard, [140])
 //                                                  plan/section/elevation: --template <Vorlage> wendet eine Ansichtsvorlage ganz an
 //                                                  (Ebenen-Felder wie verdeckte Kanten/Schnittflächen schraffiert/Schatten/Skizze,
@@ -758,6 +760,16 @@ async function execute(project: Project, file: string, command: string, rest: st
       if (plan.primitives.length === 0) fail(kind === "section" ? "keine gültige Schnittlinie" : "keine gültige Ansichtslinie");
       if (args.flags.get("format") === "json") {
         out(args, JSON.stringify(planToRenderScene(plan, tv.scale)), `${lvl.name}.scene.json`);
+        return 0;
+      }
+      // [200] `--format dxf|dxfbin|dwg`: Schnitt/Ansicht als Modell-Space-Zeichnung (Plan-Einheiten: Meter, y = Höhe).
+      const cadFormat = args.flags.get("format");
+      if (cadFormat === "dxf" || cadFormat === "dxfbin" || cadFormat === "dwg") {
+        await loadFileio();
+        const cad = { scaleDenominator: tv.scale, dimUnit: args.flags.get("dim-unit") === "cm" ? ("cm" as const) : ("m" as const), paperLayout: args.flags.has("layout"), levelId: lvl.id };
+        if (cadFormat === "dxf") out(args, buildPlanDxf(plan, sp, cad), `${lvl.name}.dxf`);
+        else if (cadFormat === "dxfbin") out(args, buildPlanDxfBinary(plan, sp, cad), `${lvl.name}.dxf`);
+        else out(args, buildPlanDwg(plan, sp, cad), `${lvl.name}.dwg`);
         return 0;
       }
       out(args, planToSvgString(plan, { scaleDenominator: tv.scale, hatch: args.flags.has("hatch") && args.flags.get("hatch") !== "false" }), `${lvl.name}.svg`);

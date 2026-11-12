@@ -143,6 +143,20 @@ describe("dossier-cli", () => {
       expect(readFileSync(out, "utf8")).toContain("±0.00");
     }
   }, 60_000);
+  it("[200] Schnitt und Ansicht als DXF/DWG (--format)", async () => {
+    for (const kind of ["section", "elevation"] as const) {
+      const lvl = sampleProject.drawingLevels.find((l) => l.kind === kind);
+      if (!lvl) continue;
+      const dxf = join(dir, `${kind}.dxf`);
+      expect(await call(kind, lvl.name, "--format", "dxf", "--out", dxf)).toBe(0);
+      const text = readFileSync(dxf, "utf8");
+      expect(text).toContain("AC1032");
+      expect(text).toContain("ENTITIES");
+      const dwg = join(dir, `${kind}.dwg`);
+      expect(await call(kind, lvl.name, "--format", "dwg", "--out", dwg)).toBe(0);
+      expect(readFileSync(dwg).subarray(0, 6).toString("latin1")).toBe("AC1032");
+    }
+  }, 60_000);
   it("Schnitt und STEP über das WASM", async () => {
     const section = sampleProject.drawingLevels.find((l) => l.kind === "section");
     if (section) {

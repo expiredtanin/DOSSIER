@@ -7,7 +7,7 @@
 // Extrahiert aus App.tsx. Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
 import { useMemo } from "react";
-import { generatePlan, withDocument } from "../core";
+import { generatePlan, viewportLevelPlan, withDocument } from "../core";
 import type { CategoryDisplayResolver } from "../core";
 import type { DetailLevel } from "../model/viewTypes";
 import type { DisplayResolver } from "../viewport/Viewport3D";
@@ -155,18 +155,36 @@ export function useExportHandlers(opts: {
     const scoped = scopedProject(decision.selectionOnly);
     const exportProject = withDocument(scoped, () => projectToWorldCoords(scoped));
     await withDocument(exportProject, async () => {
-    const plan = generatePlan(
-      exportProject,
-      activeLevelId,
-      visibleCodes,
-      categoryDisplay,
-      detail,
-      referenceLines,
-      planColorMode === "mono",
-      true, // includeGlobal (Default)
-      decision.scaleDenominator, // Export-Massstab (wie PDF): Strichstärken, Bemassung
-      true, // forPrint: `Drawing2D.noPrint`-Elemente ausschliessen
-    );
+    // [200] Schnitt und Ansicht: dieselbe Ableitung wie in der Schnitt-/Ansichts-Ansicht und im PDF-Blatt
+    // (`viewportLevelPlan`: Projektion aus dem Kern, Koten, eigene 2D-Elemente), sonst der Grundriss.
+    const levelKind = exportProject.drawingLevels.find((l) => l.id === activeLevelId)?.kind;
+    const plan =
+      levelKind === "section" || levelKind === "elevation"
+        ? await viewportLevelPlan(
+            exportProject,
+            activeLevelId,
+            visibleCodes,
+            detail,
+            decision.scaleDenominator,
+            true, // forPrint: `Drawing2D.noPrint`-Elemente ausschliessen
+            planColorMode === "mono",
+          )
+        : generatePlan(
+            exportProject,
+            activeLevelId,
+            visibleCodes,
+            categoryDisplay,
+            detail,
+            referenceLines,
+            planColorMode === "mono",
+            true, // includeGlobal (Default)
+            decision.scaleDenominator, // Export-Massstab (wie PDF): Strichstärken, Bemassung
+            true, // forPrint: `Drawing2D.noPrint`-Elemente ausschliessen
+          );
+    if (plan.primitives.length === 0) {
+      getState().notify(`${t("exportDxf.failed")}: ${t("exportDxf.empty")}`, "error");
+      return;
+    }
     try {
       await savePlanDxf(plan, exportProject, {
         title: activeLevelName,

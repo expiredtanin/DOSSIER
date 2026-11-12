@@ -30,6 +30,8 @@ export interface ExportDxfDecision {
 export interface ExportDxfDialogProps {
   /** Titel/Geschossname (nur Anzeige im Dialogkopf). */
   planTitle: string;
+  /** [200] Art der aktiven Ebene: Schnitt und Ansicht werden wie der Grundriss exportiert, nur anders beschriftet. */
+  levelKind?: string;
   /** s. `ExportPdfDialogProps.selectionCount`. */
   selectionCount?: number;
   /** Massstab der aktiven Ansicht (Vorgabe, Default 1:100). */
@@ -40,6 +42,7 @@ export interface ExportDxfDialogProps {
 
 export function ExportDxfDialog({
   planTitle,
+  levelKind,
   selectionCount = 0,
   initialScale = 100,
   onExport,
@@ -93,7 +96,7 @@ export function ExportDxfDialog({
 
         <div className="imp-body">
           <div className="imp-file">
-            <span className="imp-file-label">{t("export.plan")}</span>
+            <span className="imp-file-label">{levelKind === "section" ? t("export.section") : levelKind === "elevation" ? t("export.elevation") : t("export.plan")}</span>
             <span className="imp-file-name" title={planTitle}>
               {planTitle}
             </span>

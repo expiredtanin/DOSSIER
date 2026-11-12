@@ -16,7 +16,7 @@ kennen nur einen Teil des Modells, und beim Import entstehen daraus gewöhnliche
 |---|---|---|---|
 | `.obp` / `.obpt` (Projekt, Vorlage) | ja | ja | ja, bis auf Undo-Verlauf, Punktwolken, BCF-Themen |
 | IFC4 / IFC2x3 (`.ifc`) | ja (Bauteile) | ja (Bauteile, sonst Netz) | nein: Bauteile ja, alles Grafische nein |
-| DXF / Binär-DXF / DWG | ja (ein Geschoss-Plan) | ja (2D-Zeichnung, Netze) | nein: Plan wird zur Zeichnung, nicht zum Modell |
+| DXF / Binär-DXF / DWG | ja (Geschoss-Plan, Schnitt, Ansicht) | ja (2D-Zeichnung, Netze) | nein: Plan wird zur Zeichnung, nicht zum Modell |
 | STEP (`.stp`) | ja (B-Rep, nur Geometrie) | ja (als Netz) | nein |
 | OBJ, STL, glTF/GLB | ja (Dreiecksnetz) | ja (Netz) | nein: Netz, keine Bauteile |
 | PDF, SVG (Plan, Blätter) | ja | PDF-Vektor und -Raster | nein: Ausgabeformat |
@@ -90,15 +90,16 @@ nur mit externen Beispielen (`DOSSIER_IFC_SAMPLES`), im Repo nicht enthalten.
 
 ## DXF / DWG (Export)
 
-Nur der **Plan eines Geschosses** (`generatePlan`), Modell-Space in Metern, 1:1; DXF und DWG je R2018 (Binär-DXF
+Der **Plan eines Geschosses** (`generatePlan`) sowie **Schnitt und Ansicht** (`viewportLevelPlan`, [200]: dieselbe Ableitung
+wie Ansicht und PDF-Blatt, durch denselben Sammler), Modell-Space in Metern, 1:1; DXF und DWG je R2018 (Binär-DXF
 zusätzlich). Sammler `core/src/plan/dxf.rs`, Schreiber `fileio/src/export.rs` (acadrust), Aufruf
 `useExportHandlers.ts::onExportDxf`, Publikationssätze `publishRun.ts`.
 
 | Modell/Plan | Wird zu | Verlust / Vereinfachung | Beleg |
 |---|---|---|---|
 | Kategorien (Ebenen) | `LAYER` `Code_Name` mit Farbe und Strichstärke; Hierarchie **flach**; Sammel-Ebenen `SYMBOLS`, `HATCH`, `CONTEXT`, `PLAN`, `SECTIONS`, `EXTRUSION` | Baum der Ebenen und Sichtbarkeits-Regeln gehen verloren; verbotene Zeichen im Namen werden `_` | `dxf.rs::collect` (Schritt 1), `sanitize_layer_name` |
-| Farbe, Strichstärke | **nur je Ebene**, Entitäten `ByLayer` | Stifte und Strichstärke je Element (`weightMm`, Stiftsätze) gehen verloren | `export.rs` (`layer.line_weight`, Test mit `Color::ByLayer`), `dxf.rs` |
-| Geschosse | ein Geschoss je Datei; CLI schreibt je Geschoss eine Datei | Schnitt und Ansicht haben keinen eigenen DXF-Export (im Code nicht gefunden) | `useExportHandlers.ts` (`activeLevelId`), `src/cli/main.ts` |
+| Farbe, Strichstärke | Ebene: Farbe und Strichstärke; **Entität: eigene Farbe** (True-Color 420 + nächste ACI 62) **und Strichstärke** (370, auf CAD-Stufen gerastet), wenn Linie, Bogen, Kreis oder Umriss vom Ebenen-Standard abweichen, sonst `ByLayer` ([200]) | Linien ohne eigene Farbe/Stärke im Plan (Klassen-Stil) bleiben `ByLayer`; Schraffuren und Texte tragen keine Stärke; Stiftsätze als Ganzes gibt es nicht, nur die aufgelösten Werte | `dxf.rs` (`Pen`, `apply_pen`), `export.rs` (`REC_ENTITY_PEN`), Tests `exportDxf.ezdxf.test.ts` ([200]) |
+| Geschosse, Schnitt, Ansicht | eine Ebene je Datei (App: aktive Ebene, Dialog beschriftet Plan/Schnitt/Ansicht); CLI: `dxf`/`dwg` je Geschoss, `section`/`elevation <Name> --format dxf\|dxfbin\|dwg` | Schnitt/Ansicht: Zeichnung in Metern (x entlang der Linie, y = Höhe), nicht am Modell verankert | `useExportHandlers.ts` (`viewportLevelPlan`), `src/cli/main.ts`, Test `exportDxf.section.test.ts` |
 | Wände, Decken, Umrisse | `LINE`, `LWPOLYLINE` (mit Bulges), `ARC`, `CIRCLE`, `ELLIPSE` | Aneinanderstossende Einzellinien werden zu Bögen **zusammengesetzt**, verrauschte Ringe zu Ausgleichskreisen: leichte Abweichung möglich | `dxf.rs` (`arc_fit`, REC 24–26), Test `exportDxf.arcs.test.ts` |
 | Schraffuren | `HATCH` (Vollfläche, Linienmuster, Verlauf); Kurven-/Schichtmuster und polare Schraffur als **Polylinien**; Zufallsstriche als `LINE`; **Bild-Schraffuren fehlen** | Optional abschaltbar (`includeHatches`) | `dxf.rs` (Hatch-Zweig), Test `exportDxf.gradient.test.ts` |
 | Linienstile | Linientypen mit Strichmuster in Modell-Metern | Zickzack/Motiv-Linien werden zu Polylinien | `dxf.rs` (`zigzag`, `motif`) |

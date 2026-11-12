@@ -52,6 +52,9 @@ const REC_POLYLINE_BULGE: f64 = 24.0;
 const REC_HATCH_BULGE: f64 = 25.0;
 /// [169] Ellipsenbogen (schräg gesehenes Rundbogenfenster), fileio Satz 26.
 const REC_ELLIPSE: f64 = 26.0;
+/// [200] Stift der folgenden Entitäten: `[rgb (0xRRGGBB, −1 = nach Ebene), Strichstärke (1/100 mm, −1 = nach Ebene)]`,
+/// gilt bis zum nächsten Satz (Blockinhalte beginnen wieder „nach Ebene").
+const REC_ENTITY_PEN: f64 = 27.0;
 
 /// Sammel-Ebenen für Primitive ohne eigene Kategorie.
 const LAYER_HATCH: &str = "HATCH";
@@ -147,15 +150,17 @@ pub struct FlatDxf {
 struct Buf {
     nums: Option<Vec<f64>>,
     pen: f64,
+    /// [200] Stift (Farbe, Strichstärke) der zuletzt geschriebenen Entität; (−1, −1) = nach Ebene.
+    epen: (f64, f64),
     counts: [u32; 8],
 }
 
 impl Buf {
     fn main() -> Buf {
-        Buf { nums: None, pen: -1.0, counts: [0; 8] }
+        Buf { nums: None, pen: -1.0, epen: (-1.0, -1.0), counts: [0; 8] }
     }
     fn block() -> Buf {
-        Buf { nums: Some(Vec::new()), pen: -1.0, counts: [0; 8] }
+        Buf { nums: Some(Vec::new()), pen: -1.0, epen: (-1.0, -1.0), counts: [0; 8] }
     }
 }
 
@@ -165,6 +170,10 @@ struct Flat {
     strings: Vec<String>,
     str_idx: HashMap<String, usize>,
     layers: HashMap<String, usize>,
+    /// [200] Standard-Farbe und -Strichstärke (auf CAD-Stufe gerastet) je Ebene, für „weicht ab?".
+    layer_defaults: HashMap<String, (Option<f64>, f64)>,
+    /// [200] Stift des gerade ausgegebenen Primitivs (vom Sammelschritt gesetzt).
+    pen: Pen,
     ltypes: HashMap<String, usize>,
     styles: HashMap<String, usize>,
     dim_styles: HashMap<String, usize>,
@@ -181,6 +190,8 @@ impl Flat {
             strings: Vec::new(),
             str_idx: HashMap::new(),
             layers: HashMap::new(),
+            layer_defaults: HashMap::new(),
+            pen: Pen::default(),
             ltypes: HashMap::new(),
             styles: HashMap::new(),
             dim_styles: HashMap::new(),
@@ -215,9 +226,34 @@ impl Flat {
         }
         let idx = self.layers.len();
         self.layers.insert(name.to_string(), idx);
+        self.layer_defaults.insert(name.to_string(), (rgb, snap_lweight(lw)));
         let s = self.str(name);
         self.root.extend_from_slice(&[REC_LAYER, s, rgb.unwrap_or(-1.0), lw]);
         idx as f64
+    }
+
+    /// [200] Stift (Farbe, Strichstärke) der nächsten Entitäten setzen; schreibt nur bei Änderung.
+    fn set_epen(&mut self, b: &mut Buf, color: f64, lw: f64) {
+        if b.epen == (color, lw) {
+            return;
+        }
+        b.epen = (color, lw);
+        self.push(b, &[REC_ENTITY_PEN, color, lw]);
+    }
+
+    /// [200] Den Stift des aktuellen Primitivs auf `layer` setzen: Werte, die dem Ebenen-Standard gleichen, bleiben
+    /// „nach Ebene" (−1); abweichende gehen als eigene Farbe bzw. Strichstärke an die Entitäten.
+    fn apply_pen(&mut self, b: &mut Buf, layer: &str) {
+        let (dc, dl) = self.layer_defaults.get(layer).copied().unwrap_or((None, f64::NAN));
+        let color = match self.pen.color {
+            Some(c) if dc != Some(c) => c,
+            _ => -1.0,
+        };
+        let lw = match self.pen.lw {
+            Some(w) if w != dl => w,
+            _ => -1.0,
+        };
+        self.set_epen(b, color, lw);
     }
 
     fn layer(&mut self, name: &str) -> f64 {
@@ -538,14 +574,10 @@ pub fn paper_for(w: f64, h: f64, scale: f64, margin: f64) -> (f64, f64, f64, f64
     (pw, ph, pw - 2.0 * margin, ph - 2.0 * margin)
 }
 
-/// `/^#?([0-9a-f]{6})$/i` nach JS-`trim` → 0xRRGGBB, sonst dunkelgrau.
+/// Farbe einer Ebene: `#rrggbb` bzw. `#rgb` nach JS-`trim` → 0xRRGGBB, sonst dunkelgrau ([200]: auch die Kurzform, damit
+/// Ebenen- und Elementfarbe gleich gelesen werden).
 fn rgb_from_hex(hex: &str) -> f64 {
-    let t = js_trim(hex);
-    let h = t.strip_prefix('#').unwrap_or(t);
-    if h.len() == 6 && h.bytes().all(|c| c.is_ascii_hexdigit()) {
-        return i64::from_str_radix(h, 16).map_or(0x111111 as f64, |v| v as f64);
-    }
-    0x111111 as f64
+    rgb_or_null(hex).unwrap_or(0x111111 as f64)
 }
 
 /// `/^#?([0-9a-f]{6}|[0-9a-f]{3})$/i` → 0xRRGGBB, sonst `None` (Farbe der Ebene).
@@ -666,6 +698,34 @@ struct HatchIn {
     gradient: Option<Gradient>,
 }
 
+/// [200] Stift eines Primitivs: Farbe (0xRRGGBB) und Strichstärke (1/100 mm, auf die CAD-Stufen gerastet);
+/// `None` = nicht gesetzt (nach Ebene).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct Pen {
+    color: Option<f64>,
+    lw: Option<f64>,
+}
+
+/// Genormte CAD-Strichstärken (1/100 mm), wie `fileio/export.rs`.
+const STD_LINE_WEIGHTS: [i16; 24] =
+    [0, 5, 9, 13, 15, 18, 20, 25, 30, 35, 40, 50, 53, 60, 70, 80, 90, 100, 106, 120, 140, 158, 200, 211];
+
+/// Strichstärke (1/100 mm) auf die nächste CAD-Stufe; nicht endlich/negativ → −3 (Standard).
+fn snap_lweight(v: f64) -> f64 {
+    if !v.is_finite() || v < 0.0 {
+        return -3.0;
+    }
+    let w = jsnum::round(v).min(211.0) as i16;
+    STD_LINE_WEIGHTS.iter().copied().min_by_key(|s| (s - w).abs()).map_or(25.0, f64::from)
+}
+
+impl Pen {
+    /// Farbe aus dem CSS-Text (Hex), Strichstärke aus Papier-mm (NaN/fehlt → nach Ebene).
+    fn of(color: &str, weight_mm: f64) -> Pen {
+        Pen { color: rgb_or_null(color), lw: weight_mm.is_finite().then(|| snap_lweight(mm_to_lwe(weight_mm))) }
+    }
+}
+
 /// Ein Plan-Primitiv in der Form, die der Sammler braucht.
 #[derive(Clone, Debug)]
 enum Prim {
@@ -693,6 +753,8 @@ struct Ids {
 
 struct Entry {
     prim: Prim,
+    /// [200] Farbe und Strichstärke des Elements (Linien, Bögen, Kreise, Umrisse).
+    pen: Pen,
     ids: Ids,
     /// `cls` einer Linie bzw. Typ-Kennung (für die Ebene).
     tag: u32,
@@ -791,7 +853,12 @@ fn read_entry(part: &mut Part, i: usize, hatches: &[(i32, Hatch, i32)], text: Op
         },
         _ => Prim::Other,
     };
-    Some(Entry { prim, ids, tag: rec.tag })
+    let pen = match rec.tag {
+        T_POLYGON | T_LINE | T_ARC | T_CIRCLE => Pen::of(&s(f[1])?, f[2]),
+        T_DRAWING_ARC => Pen::of(&s(f[0])?, f[1]),
+        _ => Pen::default(),
+    };
+    Some(Entry { prim, pen, ids, tag: rec.tag })
 }
 
 /// Blocklokales System: Verschiebung `-origin`, Drehung `-rot`, Skalierung `1/scale`.
@@ -949,6 +1016,13 @@ impl Ctx<'_> {
         self.flat.add_text_style(&name, &family, bold, italic)
     }
 
+    /// [200] Ein Plan-Eintrag mit dem Stift seines Elements.
+    fn emit_pen(&mut self, b: &mut Buf, e: &Entry, layer: &str) {
+        self.flat.pen = e.pen;
+        self.emit(b, &e.prim, layer, LAYER_HATCH);
+        self.flat.pen = Pen::default();
+    }
+
     /// Ein Primitiv als Entität(en) (`emitPrimitive`); `hatch_layer` = Ebene der Schraffuren.
     fn emit(&mut self, b: &mut Buf, p: &Prim, layer: &str, hatch_layer: &str) {
         match p {
@@ -956,20 +1030,24 @@ impl Ctx<'_> {
                 if let Some((amp, wav)) = zigzag {
                     let pts = hatch::zigzag_points(*a, *q, amp * hatch::DASH_MM_TO_M, wav * hatch::DASH_MM_TO_M).unwrap_or_else(|| vec![*a, *q]);
                     self.flat.set_pen(b, -1.0);
+                    self.flat.apply_pen(b, layer);
                     self.flat.add_polyline(b, layer, &pts, false);
                 } else if let Some(m) = motif {
                     let pts = hatch::motif_points_opt(*a, *q, m, hatch::DASH_MM_TO_M).unwrap_or_else(|| vec![*a, *q]);
                     self.flat.set_pen(b, -1.0);
+                    self.flat.apply_pen(b, layer);
                     self.flat.add_polyline(b, layer, &pts, false);
                 } else {
                     let lt = self.ltype_of(dash);
                     self.flat.set_pen(b, lt);
+                    self.flat.apply_pen(b, layer);
                     self.flat.add_line(b, layer, *a, *q);
                 }
             }
             Prim::Arc { center, from, to, r, dash } => {
                 let lt = self.ltype_of(dash);
                 self.flat.set_pen(b, lt);
+                self.flat.apply_pen(b, layer);
                 let a1 = angle_rad(*center, *from);
                 let a2 = angle_rad(*center, *to);
                 let v1 = (from.x - center.x, from.y - center.y);
@@ -984,14 +1062,17 @@ impl Ctx<'_> {
             Prim::Circle { center, r, dash } => {
                 let lt = self.ltype_of_circle(dash, *r);
                 self.flat.set_pen(b, lt);
+                self.flat.apply_pen(b, layer);
                 self.flat.add_circle(b, layer, *center, *r);
             }
             Prim::DrawingArc { center, r, a0, a1, dash } => {
                 let lt = self.ltype_of(dash);
                 self.flat.set_pen(b, lt);
+                self.flat.apply_pen(b, layer);
                 self.flat.add_arc(b, layer, *center, *r, *a0, *a1);
             }
             Prim::Single { at, angle, height, wrap, style, paras } => {
+                self.flat.set_epen(b, -1.0, -1.0);
                 let dir = V2 { x: jsnum::sin(*angle), y: -jsnum::cos(*angle) };
                 for (text, down) in single_lines(*height, *wrap, paras) {
                     if js_trim(&text).is_empty() || !(*height > 0.0) {
@@ -1003,6 +1084,7 @@ impl Ctx<'_> {
                 }
             }
             Prim::Stamp { at, lines } => {
+                self.flat.set_epen(b, -1.0, -1.0);
                 for l in lines {
                     let st = self.style_of(Some(&l.style));
                     self.flat.add_text2(b, layer, V2 { x: at.x + l.dx, y: at.y - l.down }, l.height, 0.0, &l.text, l.align, st);
@@ -1018,6 +1100,7 @@ impl Ctx<'_> {
                     return;
                 }
                 let include = self.o.include_hatches;
+                self.flat.set_epen(b, -1.0, -1.0);
                 if let (true, Some(h)) = (include && kind == HatchKind::Gradient && pts.len() >= 3, hatch) {
                     if let Some(g) = &h.gradient {
                         if let (Some(c1), Some(c2)) = (rgb_or_null(&g.color1), rgb_or_null(&g.color2)) {
@@ -1062,6 +1145,8 @@ impl Ctx<'_> {
                     }
                 }
                 self.flat.set_pen(b, -1.0);
+                // [200] Umriss in Farbe und Strichstärke des Elements (Schraffuren oben bleiben nach Ebene).
+                self.flat.apply_pen(b, layer);
                 // [169] Runde Stütze als CIRCLE, Bogenwand-/Bogen-Umrisse als LWPOLYLINE mit Bulges.
                 if !self.flat.add_curve(b, layer, pts, true) {
                     self.flat.add_polyline(b, layer, pts, true);
@@ -1268,6 +1353,7 @@ pub fn collect(parts: &mut [Part], project: &Project, o: &DxfOptions) -> Option<
 
     emit_entries(&mut cx, &mut main, &entries, &layer_by_code, true);
     cx.flat.set_pen(&mut main, -1.0);
+    cx.flat.set_epen(&mut main, -1.0, -1.0);
 
     // 5) Papierbereich (optional): Layout mit Ansichtsfenster im Planmassstab.
     if o.paper_layout {
@@ -1404,7 +1490,7 @@ fn emit_entries(cx: &mut Ctx, main: &mut Buf, entries: &[Entry], layer_by_code: 
             while j < entries.len() && keys[j].is_none() && plain(&entries[j]) {
                 let Prim::Line { a: aj, b: bj, dash: dj, .. } = &entries[j].prim else { break };
                 let last = pts[pts.len() - 1];
-                if dj != dash || (aj.x - last.x).abs() > 1e-9 || (aj.y - last.y).abs() > 1e-9 || layer_for(&entries[j]) != l {
+                if dj != dash || entries[j].pen != e.pen || (aj.x - last.x).abs() > 1e-9 || (aj.y - last.y).abs() > 1e-9 || layer_for(&entries[j]) != l {
                     break;
                 }
                 pts.push(*bj);
@@ -1424,6 +1510,9 @@ fn emit_entries(cx: &mut Ctx, main: &mut Buf, entries: &[Entry], layer_by_code: 
                 let lt = if fitted { cx.ltype_of_closed(dash, ring_len) } else { cx.ltype_of(dash) };
                 if shape.is_some() || fitted {
                     cx.flat.set_pen(main, lt);
+                    cx.flat.pen = e.pen;
+                    cx.flat.apply_pen(main, &l);
+                    cx.flat.pen = Pen::default();
                     cx.flat.plinegen = fitted;
                     if shape.is_some() {
                         cx.flat.add_curve(main, &l, ring, closed);
@@ -1440,6 +1529,7 @@ fn emit_entries(cx: &mut Ctx, main: &mut Buf, entries: &[Entry], layer_by_code: 
             if !done.insert(key) {
                 continue;
             }
+            cx.flat.set_epen(main, -1.0, -1.0);
             let members: Vec<&Entry> = groups.get(key).map(|l| l.iter().map(|&k| &entries[k]).collect()).unwrap_or_default();
             let prims: Vec<&Prim> = members.iter().map(|m| &m.prim).collect();
             let id = key.1.as_str();
@@ -1455,7 +1545,7 @@ fn emit_entries(cx: &mut Ctx, main: &mut Buf, entries: &[Entry], layer_by_code: 
                     if !cx.block_instance(main, d, &prims, &layer, &mut names) {
                         for m in &members {
                             let l = layer_for(m);
-                            cx.emit(main, &m.prim, &l, LAYER_HATCH);
+                            cx.emit_pen(main, m, &l);
                         }
                     }
                 }
@@ -1465,7 +1555,7 @@ fn emit_entries(cx: &mut Ctx, main: &mut Buf, entries: &[Entry], layer_by_code: 
                     if !cx.opening(main, op, &prims, &layer, &mut names) {
                         for m in &members {
                             let l = layer_for(m);
-                            cx.emit(main, &m.prim, &l, LAYER_HATCH);
+                            cx.emit_pen(main, m, &l);
                         }
                     }
                 }
@@ -1473,7 +1563,7 @@ fn emit_entries(cx: &mut Ctx, main: &mut Buf, entries: &[Entry], layer_by_code: 
             continue;
         }
         let l = layer_for(e);
-        cx.emit(main, &e.prim, &l, LAYER_HATCH);
+        cx.emit_pen(main, e, &l);
     }
 }
 
@@ -1705,6 +1795,45 @@ mod tests {
         assert!(f.nums.contains(&REC_TEXT2) && f.nums.contains(&REC_LINE));
     }
 
+    /// [200] Stift je Element: weicht Farbe/Strichstärke einer Zeichnungslinie vom Ebenen-Standard ab, steht davor ein
+    /// ENTPEN-Satz; gleiche Werte (Ebene „20": #000, 0.5 mm) bleiben nach Ebene; danach wird zurückgesetzt.
+    #[test]
+    fn stift_je_element_vor_der_entitaet() {
+        let mut v = crate::sheet_viewports::tests::json();
+        v["drawings2d"][0]["color"] = serde_json::json!("#c03020");
+        v["drawings2d"][0]["weightMm"] = serde_json::json!(0.35);
+        v["drawings2d"][1]["color"] = serde_json::json!("#000");
+        v["drawings2d"][1]["weightMm"] = serde_json::json!(0.5);
+        let p: Project = serde_json::from_value(v).unwrap();
+        let a = crate::plan::domains::PlanArgs::parse(1.0, r#"{"floor":"eg","show":["20"],"scale":100}"#).unwrap();
+        let buf = crate::plan::domains::plan_domains_buf(&p, &a).unwrap();
+        let view = View::parse(&buf).unwrap();
+        let len = view.len();
+        let mut parts = [Part::new(view, 0, len).unwrap()];
+        let o = DxfOptions { scale: 100.0, include_hatches: true, dim_cm: false, paper_layout: false, bounds: [0.0, 0.0, 10.0, 4.0], default_font: "Arial".into(), floor: "eg".into(), table_labels: String::new() };
+        let f = collect(&mut parts, &p, &o).unwrap();
+        // Satzfolge der Hauptzeichnung nach den Ebenen: (Satzart, Farbe/Ebene, Strichstärke/x1).
+        let at = f.nums.iter().position(|x| *x == REC_ENTITY_PEN).expect("ENTPEN-Satz");
+        assert_eq!(&f.nums[at..at + 3], &[REC_ENTITY_PEN, 0xc03020 as f64, 35.0]);
+        assert_eq!(f.nums[at + 3], REC_LINE, "Stift gilt für die folgende Linie");
+        assert_eq!(&f.nums[at + 5..at + 9], &[0.0, 0.0, 10.0, 0.0]);
+        // Die zweite Linie trägt Standard-Werte der Ebene: zurück auf „nach Ebene", nie eine eigene Farbe/Stärke.
+        let pens: Vec<&[f64]> = f.nums.windows(3).filter(|w| w[0] == REC_ENTITY_PEN).collect();
+        assert!(pens.iter().all(|w| w[1] == 0xc03020 as f64 || w[1] == -1.0), "{pens:?}");
+        assert_eq!(pens.last().map(|w| (w[1], w[2])), Some((-1.0, -1.0)), "am Ende wieder nach Ebene");
+    }
+
+    #[test]
+    fn strichstaerke_rastet_auf_cad_stufen() {
+        assert_eq!(snap_lweight(35.0), 35.0);
+        assert_eq!(snap_lweight(33.0), 35.0);
+        assert_eq!(snap_lweight(10.0), 9.0);
+        assert_eq!(snap_lweight(500.0), 211.0);
+        assert_eq!(snap_lweight(f64::NAN), -3.0);
+        assert_eq!(Pen::of("#112233", 0.25), Pen { color: Some(0x112233 as f64), lw: Some(25.0) });
+        assert_eq!(Pen::of("none", f64::NAN), Pen::default());
+    }
+
     #[test]
     fn linientyp_aus_strichmuster() {
         assert_eq!(dash_to_ltype_meters(&[2.0, 1.0], 100.0), Some(vec![0.2, -0.1]));
@@ -1790,6 +1919,7 @@ mod tests {
     fn farben_und_zeilen() {
         assert_eq!(rgb_from_hex(" #A0b1C2 "), 0xa0b1c2 as f64);
         assert_eq!(rgb_from_hex("rot"), 0x111111 as f64);
+        assert_eq!(rgb_from_hex("#000"), 0.0);
         assert_eq!(rgb_or_null("#abc"), Some(0xaabbcc as f64));
         assert_eq!(rgb_or_null("none"), None);
         let words = |s: &str| s.split(' ').map(|w| w.to_string()).collect::<Vec<_>>();

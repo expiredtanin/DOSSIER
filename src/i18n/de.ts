@@ -2633,6 +2633,9 @@ export const de = {
   "exportDxf.format.dxfbin": "DXF binär (AutoCAD 2018, kompakt)",
   "exportDxf.format.dwg": "DWG (AutoCAD 2018)",
   "exportDxf.failed": "Export fehlgeschlagen",
+  "exportDxf.empty": "Die Ansicht enthält nichts zum Exportieren (Schnitt-/Ansichtslinie prüfen).",
+  "export.section": "Schnitt",
+  "export.elevation": "Ansicht",
   "exportDxf.unitsNote":
     "Modell-Space in Metern (1:1). Layer entsprechen den Ebenen des Projekts; beim Plot beliebig skalierbar.",
   "exportDxf.scale": "Massstab (Bemassung, Strichmuster, Beschriftung)",

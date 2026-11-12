@@ -20,7 +20,7 @@ eigenen Dateien `*_tests.rs`.
 | `text.rs`, `annotation.rs` | Texte (MTEXT-Formate, Ausrichtung); Pfeilspitzen, Bemassungen und Führungslinien |
 | `split.rs` | teilt eine grosse ASCII-DXF in unabhängige Teile für parallele Web-Worker |
 | `common.rs` | Abbildungen für Import und Export (Ebenenfarben, Format-Erkennung) |
-| `export.rs`, `export_dim.rs` | flache 2D-Zeichnung als DXF oder DWG schreiben; Bemassung als echte DIMENSION-Entitäten |
+| `export.rs`, `export_dim.rs` | flache 2D-Zeichnung als DXF oder DWG schreiben (Farbe und Strichstärke je Entität über `ENTPEN`, [200]); Bemassung als echte DIMENSION-Entitäten |
 
 ## IFC
 

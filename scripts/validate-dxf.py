@@ -28,6 +28,10 @@ def main(path: str) -> int:
     for e in msp:
         t = e.dxftype()
         item = {"type": t, "layer": e.dxf.layer}
+        # [200] Stift je Element: eigene Farbe (True-Color 420 / ACI 62) und Strichstärke (370), sonst nach Ebene.
+        item["trueColor"] = list(e.rgb) if e.dxf.hasattr("true_color") and t != "HATCH" else None
+        item["aci"] = e.dxf.color if e.dxf.hasattr("color") else None
+        item["lineweight"] = e.dxf.lineweight if e.dxf.hasattr("lineweight") else None
         if t == "LINE":
             item["pts"] = [[e.dxf.start.x, e.dxf.start.y], [e.dxf.end.x, e.dxf.end.y]]
         elif t == "LWPOLYLINE":

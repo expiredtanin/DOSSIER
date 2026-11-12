@@ -46,6 +46,7 @@
 //              — alle Entitätsdatensätze bis BLOCK_END gehören in die Blockdefinition (Koordinaten blocklokal)
 //   BLOCK_END= 17
 //   INSERT   = 18, layer, name_idx, x, y, rotation, sx, sy, n_att, (tag_idx, value_idx) × n_att
+//   ENTPEN   = 27, rgb (−1 = nach Ebene), lineweight (1/100 mm, −1 = nach Ebene)   gilt für alle folgenden Entitäten bis zum nächsten ENTPEN
 //   LAYOUT   = 19, name_idx, paper_w, paper_h (mm), vp_cx, vp_cy, vp_w, vp_h (mm), view_cx, view_cy (Modell-m), scale_denominator
 //
 // `layer` ist der Index des LAYER-Datensatzes (Reihenfolge des Auftretens, ab 0), er muss vorher
@@ -117,6 +118,11 @@ pub const REC_HATCH_BULGE: f64 = 25.0;
 /// [169] Ellipsenbogen: `[Ebene, Mitte x, y, Hauptachse x, y, Verhältnis, Startparameter, Endparameter]`
 /// (Parameter gegen den Uhrzeiger, Bogenmass; Kern `plan/arc_fit.rs::pieces`).
 pub const REC_ELLIPSE: f64 = 26.0;
+/// [200] Stift der folgenden Entitäten: `[rgb (0xRRGGBB, −1 = nach Ebene), Strichstärke (1/100 mm, −1 = nach Ebene)]`.
+/// Gilt bis zum nächsten Satz; ein Block beginnt „nach Ebene" und gibt am Ende den Stand davor zurück. Die Entität
+/// trägt dann True-Color (Gruppe 420, mit nächster ACI-Farbe 62) und Strichstärke (370, auf CAD-Stufe gerastet).
+/// Schraffuren mit eigener Farbe behalten sie.
+pub const REC_ENTITY_PEN: f64 = 27.0;
 
 /// DXF-Ausgabeversion (s. Kopf).
 pub const DXF_VERSION: DxfVersion = DxfVersion::AC1032;
@@ -395,6 +401,10 @@ pub fn build_document(flat: &[f64], strings: &str) -> Result<CadDocument, String
     // Papierbereiche der Projekt-Layouts ([93]): Name → nächste Ansichtsfenster-Nummer.
     let mut sheets: std::collections::HashMap<String, i16> = std::collections::HashMap::new();
     let mut cur_ltype = String::new();
+    // [200] Stift (Farbe, Strichstärke) der folgenden Entitäten; Stand vor einem Block.
+    let mut cur_color = Color::ByLayer;
+    let mut cur_lw = LineWeight::ByLayer;
+    let mut saved_pen: Option<(Color, LineWeight)> = None;
     let mut cur_block: Option<Handle> = None;
     let mut dim_counter = 0usize;
 
@@ -478,6 +488,13 @@ pub fn build_document(flat: &[f64], strings: &str) -> Result<CadDocument, String
             }
             continue;
         }
+        if tag == REC_ENTITY_PEN {
+            let rgb = r.f()?;
+            let lw = r.f()?;
+            cur_color = if rgb.is_finite() && (0.0..=16_777_215.0).contains(&rgb) { layer_color(rgb) } else { Color::ByLayer };
+            cur_lw = if lw.is_finite() && lw >= 0.0 { line_weight(lw) } else { LineWeight::ByLayer };
+            continue;
+        }
         if tag == REC_STYLE {
             let name = sanitize_layer_name(str_at(r.idx()?)?);
             let font = str_at(r.idx()?)?.trim().to_string();
@@ -544,6 +561,8 @@ pub fn build_document(flat: &[f64], strings: &str) -> Result<CadDocument, String
             if n_att > MAX_BLOCK_ATTS {
                 return Err(format!("zu viele Attribute ({n_att}) bei {}", r.pos - 1));
             }
+            saved_pen = Some((cur_color, cur_lw));
+            (cur_color, cur_lw) = (Color::ByLayer, LineWeight::ByLayer);
             let h = new_block_record(&mut doc, &name, false)?;
             if let Some(br) = doc.block_records.get_mut(&name) {
                 br.description = desc;
@@ -579,6 +598,7 @@ pub fn build_document(flat: &[f64], strings: &str) -> Result<CadDocument, String
             if cur_block.take().is_none() {
                 return Err(format!("BLOCK_END ohne BLOCK bei {}", r.pos - 1));
             }
+            (cur_color, cur_lw) = saved_pen.take().unwrap_or((Color::ByLayer, LineWeight::ByLayer));
             continue;
         }
         if tag == REC_LAYOUT {
@@ -806,6 +826,13 @@ pub fn build_document(flat: &[f64], strings: &str) -> Result<CadDocument, String
                 && matches!(e, EntityType::Line(_) | EntityType::LwPolyline(_) | EntityType::Arc(_) | EntityType::Circle(_) | EntityType::Ellipse(_))
             {
                 e.common_mut().linetype = cur_ltype.clone();
+            }
+            // [200] Eigene Farbe und Strichstärke des Elements (sonst nach Ebene).
+            if matches!(e.common_mut().color, Color::ByLayer) {
+                e.common_mut().color = cur_color;
+            }
+            if matches!(e.common_mut().line_weight, LineWeight::ByLayer) {
+                e.common_mut().line_weight = cur_lw;
             }
             if let Some(owner) = cur_block {
                 e.common_mut().owner_handle = owner;
@@ -1576,6 +1603,57 @@ mod tests {
         bad.extend_from_slice(&[REC_DIM, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]);
         let doc = read_dxf(export_dxf(&bad, "S").unwrap());
         assert_eq!(doc.entities().count(), 0);
+    }
+
+    /// [200] Stift je Element: abweichende Farbe/Strichstärke als True-Color + ACI und Gruppe 370, sonst nach Ebene;
+    /// Blöcke beginnen nach Ebene und geben den Stand davor zurück; Unsinn heisst nach Ebene.
+    #[test]
+    fn stift_je_element_farbe_und_strichstaerke() {
+        let flat = vec![
+            FLAT_VERSION,
+            REC_LAYER, 0.0, 0x11_11_11 as f64, 25.0,
+            REC_LINE, 0.0, 0.0, 0.0, 1.0, 0.0,
+            REC_ENTITY_PEN, 0xc0_30_20 as f64, 50.0,
+            REC_LINE, 0.0, 0.0, 1.0, 1.0, 1.0,
+            REC_CIRCLE, 0.0, 5.0, 5.0, 1.0,
+            REC_BLOCK, 0.0, -1.0, 0.0,
+            REC_LINE, 0.0, 0.0, 0.0, 0.5, 0.0,
+            REC_BLOCK_END,
+            REC_LINE, 0.0, 0.0, 2.0, 1.0, 2.0,
+            REC_ENTITY_PEN, -1.0, 18.0,
+            REC_LINE, 0.0, 0.0, 3.0, 1.0, 3.0,
+            REC_ENTITY_PEN, f64::NAN, -1.0,
+            REC_LINE, 0.0, 0.0, 4.0, 1.0, 4.0,
+        ];
+        let strings = "Wand\0Blk";
+        for doc in [read_dxf(export_dxf(&flat, strings).unwrap()), read_dwg(export_dwg(&flat, strings).unwrap())] {
+            let by_y = |y: f64| -> (Color, LineWeight) {
+                doc.entities()
+                    .find_map(|e| match e {
+                        EntityType::Line(l) if (l.start.y - y).abs() < 1e-9 && l.start.x.abs() < 1e-9 && (l.end.x - 1.0).abs() < 1e-9 => {
+                            Some((l.common.color, l.common.line_weight))
+                        }
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| panic!("Linie y={y}"))
+            };
+            assert_eq!(by_y(0.0), (Color::ByLayer, LineWeight::ByLayer));
+            assert_eq!(by_y(1.0), (Color::from_rgb(0xc0, 0x30, 0x20), LineWeight::Value(50)));
+            assert_eq!(by_y(2.0), (Color::from_rgb(0xc0, 0x30, 0x20), LineWeight::Value(50)), "nach dem Block gilt der Stift wieder");
+            assert_eq!(by_y(3.0), (Color::ByLayer, LineWeight::Value(18)));
+            assert_eq!(by_y(4.0), (Color::ByLayer, LineWeight::ByLayer), "NaN = nach Ebene");
+            let circle = doc.entities().find_map(|e| if let EntityType::Circle(c) = e { Some(c.common.color) } else { None }).unwrap();
+            assert_eq!(circle, Color::from_rgb(0xc0, 0x30, 0x20));
+        }
+        // Text: True-Color (420) und ACI (62), Strichstärke (370) in der Datei.
+        let txt = String::from_utf8(export_dxf(&flat, strings).unwrap()).unwrap();
+        let lines: Vec<&str> = txt.lines().map(str::trim).collect();
+        let has = |code: &str, val: &str| lines.windows(2).any(|w| w[0] == code && w[1] == val);
+        assert!(has("420", "12595232"), "True-Color 0xc03020");
+        // Linie, Kreis und die Linie nach dem Block; die Linie im Block bleibt nach Ebene.
+        assert_eq!(lines.windows(2).filter(|w| w[0] == "420" && w[1] == "12595232").count(), 3);
+        assert!(has("370", "50") && has("370", "18"));
+        assert!(has("62", "22"), "nächste ACI-Farbe");
     }
 
     #[test]

@@ -201,6 +201,7 @@ export function AppDialogs(props: {
     {exportDxfOpen && (
       <ExportDxfDialog
         planTitle={activeLevel.name}
+        levelKind={activeLevel.kind}
         initialScale={scaleDenominator}
         selectionCount={props.selectionCount}
         onExport={onExportDxf}

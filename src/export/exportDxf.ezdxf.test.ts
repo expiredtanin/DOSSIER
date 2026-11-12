@@ -29,6 +29,10 @@ interface EzEntity {
   paths?: number;
   pattern_lines?: number;
   rgb?: number[] | null;
+  /** [200] Eigene Farbe (True-Color 420 / ACI 62) und Strichstärke (370); `null` = nach Ebene. */
+  trueColor?: number[] | null;
+  aci?: number | null;
+  lineweight?: number | null;
   gradient?: { name: string; rotation: number; color1: number[]; color2: number[] } | null;
 }
 interface EzResult {
@@ -172,5 +176,42 @@ describe.skipIf(!hasEzdxf)("DXF-Export gegen ezdxf", { timeout: 60_000 }, () => 
     const r = ezdxfRead("bin-grad", buildPlanDxfBinary(gradPlan(), sampleProject));
     expect(r.result!.errors).toEqual([]);
     expect(r.result!.entities.filter((e) => e.type === "HATCH").map((h) => h.gradient?.name)).toEqual(["LINEAR", "SPHERICAL"]);
+  });
+
+  // [200] Stifte je Element: Entitäten tragen eigene Farbe (420 + nächste ACI 62) und Strichstärke (370), wenn sie vom
+  // Ebenen-Standard abweichen; Standardwerte bleiben ByLayer.
+  it("[200] Stift je Element: abweichende Farbe/Strichstärke je Entität, sonst nach Ebene", () => {
+    const cat = sampleProject.layers[0];
+    const project: Project = {
+      ...sampleProject,
+      drawings2d: [{ ...(sampleProject.drawings2d[0] ?? {}), id: "d1", categoryCode: cat.code } as Project["drawings2d"][number]],
+    };
+    const line = (y: number, color: string, weightMm: number) => ({ kind: "line", a: { x: 0, y }, b: { x: 1, y }, cls: "x", color, weightMm, opacity: 1, drawingId: "d1" });
+    const plan = {
+      primitives: [
+        line(0, cat.color, cat.lw), // Standard der Ebene
+        line(1, "#c03020", 0.35), // abweichend
+        line(2, cat.color, 0.7), // nur die Stärke weicht ab
+        { kind: "polygon", pts: [{ x: 0, y: 5 }, { x: 2, y: 5 }, { x: 2, y: 7 }], fill: "none", stroke: "#336699", strokeWidthMm: 0.5, hatch: { pattern: "none", scale: 1, angle: 0, color: "#000", lineWeight: 0.1, dash: null }, drawingId: "d1" },
+      ],
+      bounds: { minX: 0, minY: 0, maxX: 2, maxY: 7 },
+    } as unknown as Plan;
+    for (const bytes of [buildPlanDxf(plan, project), buildPlanDxfBinary(plan, project)]) {
+      const r = ezdxfRead("stift", bytes);
+      expect(r.result, r.err).not.toBeNull();
+      expect(r.result!.errors).toEqual([]);
+      expect(r.status).toBe(0);
+      const e = r.result!.entities;
+      expect(e.map((x) => x.type)).toEqual(["LINE", "LINE", "LINE", "LWPOLYLINE"]);
+      expect(e[0].trueColor ?? null).toBeNull();
+      expect(e[0].lineweight ?? null).toBeNull();
+      expect(e[1].trueColor).toEqual([0xc0, 0x30, 0x20]);
+      expect(e[1].aci).toBeGreaterThan(0);
+      expect(e[1].lineweight).toBe(35);
+      expect(e[2].trueColor ?? null).toBeNull();
+      expect(e[2].lineweight).toBe(70);
+      expect(e[3].trueColor).toEqual([0x33, 0x66, 0x99]);
+      expect(e[3].lineweight).toBe(50);
+    }
   });
 });
