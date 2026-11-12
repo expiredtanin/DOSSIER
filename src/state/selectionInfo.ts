@@ -605,13 +605,16 @@ export function deriveSelection(project: Project, selection: Partial<Selection>)
   const args = {
     wallIds: sel.walls,
     drawingId: single(sel, "drawings"),
-    ceilingId: single(sel, "ceilings"),
-    openingId: single(sel, "openings"),
+    // [195b] Decken, Öffnungen und Dächer: bei Mehrfachauswahl führt das erste Element die Anzeige; die
+    // Setter des Panel-Hosts (`elementAttributesHost`) wirken auf alle gewählten, die Abschnitte kennzeichnen
+    // abweichende Werte („gemischt", `mixedValues.ts`).
+    ceilingId: sel.ceilings[0] ?? null,
+    openingId: sel.openings[0] ?? null,
     stairId: single(sel, "stairs"),
     roomId: single(sel, "rooms"),
     extrudedSolidId: single(sel, "solids"),
     columnId: single(sel, "columns"),
-    roofId: single(sel, "roofs"),
+    roofId: sel.roofs[0] ?? null,
     contextObjectId: single(sel, "contextObjects"),
   };
   // Das Element sucht der Kern über den Positions-Index des Dokuments (keine lineare Suche).

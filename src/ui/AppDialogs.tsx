@@ -28,7 +28,6 @@ import { ExportSaveDialog } from "./ExportSaveDialog";
 import { IfcImportDialog, IfcImportReportDialog } from "./IfcImportDialog";
 import { ImportDialog } from "./ImportDialog";
 import { LockConflictDialog } from "./LockConflictDialog";
-import { OpeningEditorDialog } from "./OpeningEditorDialog";
 import { PresentationDialogHost } from "./PresentationDialog";
 import { PromptDialog } from "./PromptDialog";
 import { RecoverAutosaveDialog } from "./RecoverAutosaveDialog";
@@ -96,8 +95,6 @@ export function AppDialogs(props: {
     resourcesOpen,
     setResourcesOpen,
     resourcesTab,
-    openingEditorId,
-    setOpeningEditorId,
     setActiveLayoutId,
     importState,
     setImportState,
@@ -131,10 +128,10 @@ export function AppDialogs(props: {
   const { pendingIfc, setPendingIfc, ifcReport, setIfcReport, runIfcImport } = props.modelImport;
   const { themeMode, setThemeMode, offline, onOfflineChange, aiAccess, setScaleLineWeights, setLineEnds } = props.settings;
   const { exportContentMeters, onExportPdf, onExportSvg, onExportDxf } = props.planExport;
-  const { patchWindowType, patchDoorType, updateOpening, saveOpeningStyle, setRoomStamp, setRoomStampDoc } = props.pa;
+  const { setRoomStamp, setRoomStampDoc } = props.pa;
   // Das Projekt nur abonnieren, solange ein Dialog offen ist, der es zeigt ([121]): sonst rendert eine Op
   // am Modell hier nichts. `App` reicht es nicht mehr durch.
-  const needsProject = resourcesOpen || openingEditorId != null || !!importState || settingsOpen;
+  const needsProject = resourcesOpen || !!importState || settingsOpen;
   const subscribed = useStore((s) => (needsProject ? s.project : null));
   const project = subscribed ?? getState().project;
   return (
@@ -150,20 +147,6 @@ export function AppDialogs(props: {
         handlers={resourceHandlers}
         initialTab={resourcesTab}
         onClose={() => setResourcesOpen(false)}
-      />
-    )}
-
-    {/* Reicher Fenster-/Tür-Einstellungsdialog (⚙ der OpeningSection). */}
-    {openingEditorId != null && (
-      <OpeningEditorDialog
-        openingId={openingEditorId}
-        project={project}
-        onPatchWindowType={patchWindowType}
-        onPatchDoorType={patchDoorType}
-        onPatchOpening={(patch) => updateOpening(openingEditorId, patch)}
-        onSetOpeningType={(typeId) => updateOpening(openingEditorId, { typeId: typeId || undefined })}
-        onSaveAsStyle={(name) => saveOpeningStyle(openingEditorId, name)}
-        onClose={() => setOpeningEditorId(null)}
       />
     )}
 

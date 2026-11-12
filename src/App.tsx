@@ -147,7 +147,7 @@ export default function App() {
   // State, siehe state/useDialogState.ts.
   const dialogs = useDialogState();
   const {
-    resourcesOpen, setResourcesOpen, setResourcesTab, setOpeningEditorId, activeLayoutId, setActiveLayoutId,
+    resourcesOpen, setResourcesOpen, setResourcesTab, activeLayoutId, setActiveLayoutId,
     setImportState, exportOpen, setExportOpen, setExportDxfOpen, setSettingsOpen, setExportSaveFormat,
     setDropActive,
   } = dialogs;
@@ -680,7 +680,7 @@ export default function App() {
       selectedViewSnapshotId,
       setSelectedViewSnapshotId,
     },
-    dialogState: { setActiveLayoutId, setOpeningEditorId },
+    dialogState: { setActiveLayoutId },
     contextMenuState: { setMenu },
   });
 

@@ -8,7 +8,9 @@ import { t } from "../../i18n";
 import { Dropdown } from "../../ui/Dropdown";
 import { UValueRow } from "../UValueRow";
 import { formatM } from "../../model/types";
-import { BuildingFlags, DimensionField, VerticalAnchorRow } from "./fields";
+import { selectionCeilingValues } from "../../state/mixedValues";
+import { BuildingFlags, DimensionField, MixedMark, VerticalAnchorRow } from "./fields";
+import { useMulti } from "./useMulti";
 
 export function CeilingSection({
   ceiling,
@@ -18,6 +20,8 @@ export function CeilingSection({
   host: ReturnType<typeof usePanelHost>;
 }) {
   const storeProject = useStore((st) => st.project);
+  // [195b] Mehrfachauswahl: abweichende Werte als „gemischt" kennzeichnen.
+  const multi = useMulti("ceilings", selectionCeilingValues);
   const isSingle = ceiling.singleLayer;
   const multiPresets = ceiling.ceilingTypes.filter((ct) => ct.layerCount > 1);
 
@@ -61,11 +65,14 @@ export function CeilingSection({
 
       {/* Einschichtig → Dicke-Zahlfeld. Mehrschichtig → Preset-Dropdown. */}
       {isSingle ? (
-        <DimensionField
-          label={t("objinfo.ceiling.thickness")}
-          value={ceiling.thickness}
-          onCommit={(v) => host.onSetCeilingThickness(v)}
-        />
+        <>
+          <DimensionField
+            label={t("objinfo.ceiling.thickness")}
+            value={ceiling.thickness}
+            onCommit={(v) => host.onSetCeilingThickness(v)}
+          />
+          <MixedMark on={multi?.thickness.mixed} what="thickness" />
+        </>
       ) : (
         <div className="objinfo-field">
           <span className="objinfo-flabel">{t("objinfo.ceiling.preset")}</span>
@@ -80,6 +87,7 @@ export function CeilingSection({
             title={t("objinfo.ceiling.preset")}
             width={150}
           />
+          <MixedMark on={multi?.typeId.mixed} what="ceilingType" />
         </div>
       )}
 
@@ -149,6 +157,7 @@ export function CeilingSection({
         defaultFloorId={ceiling.floorId}
         onChange={(a) => host.onSetCeilingTop(a)}
       />
+      <MixedMark on={multi?.top.mixed} what="top" />
 
       {/* UK der Decke: an Geschoss gebunden ODER eigene Höhe; ohne Override
           bleibt es beim heutigen Verhalten UK = OK − Dicke. */}
@@ -160,6 +169,7 @@ export function CeilingSection({
         defaultFloorId={ceiling.floorId}
         onChange={(a) => host.onSetCeilingBottom?.(a)}
       />
+      <MixedMark on={multi?.bottom.mixed} what="bottom" />
       <div className="objinfo-field">
         <span className="objinfo-flabel">{t("objinfo.ceiling.height")}</span>
         <span className="objinfo-fval">{formatM(ceiling.zTop - ceiling.zBottom)}</span>

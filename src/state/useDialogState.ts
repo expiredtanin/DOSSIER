@@ -22,9 +22,6 @@ export function useDialogState() {
   // Angeforderter Start-Tab des Ressourcen-Fensters (z. B. „doorStyles", wenn man
   // von einer gewählten Tür in den Typeditor springt).
   const [resourcesTab, setResourcesTab] = useState<ResourceTabId>("components");
-  // Offener Fenster-/Tür-Einstellungsdialog (⚙ der OpeningSection) — ID der
-  // editierten Öffnung, oder null wenn geschlossen.
-  const [openingEditorId, setOpeningEditorId] = useState<string | null>(null);
 
   // Aktives Layout-Blatt im HAUPT-Viewport (DOSSIER A3, Phase 2b): Id des offenen
   // Layouts oder null (= normale Modell-Ansicht). Transienter UI-State; das
@@ -65,8 +62,6 @@ export function useDialogState() {
     setResourcesOpen,
     resourcesTab,
     setResourcesTab,
-    openingEditorId,
-    setOpeningEditorId,
     activeLayoutId,
     setActiveLayoutId,
     importState,

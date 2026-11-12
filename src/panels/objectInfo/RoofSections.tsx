@@ -13,6 +13,9 @@ import { Dropdown } from "../../ui/Dropdown";
 import { UValueRow } from "../UValueRow";
 import { formatM } from "../../model/types";
 import type { RoofEdge, EdgeSpec } from "../../core";
+import { selectionRoofValues } from "../../state/mixedValues";
+import { MixedMark } from "./fields";
+import { useMulti } from "./useMulti";
 
 // ── Treppen-Attribut-Abschnitt ───────────────────────────────────────────────
 // Grundform (gerade/L/Wendel), Laufbreite, Stufenanzahl, Steighöhe (+ abgeleitete
@@ -146,6 +149,8 @@ export function RoofSection({
   host: ReturnType<typeof usePanelHost>;
 }) {
   const storeProject = useStore((st) => st.project);
+  // [195b] Mehrfachauswahl: abweichender Typ/abweichende Neigung als „gemischt" kennzeichnen.
+  const multi = useMulti("roofs", selectionRoofValues);
   const numField = (
     labelKey: TranslationKey,
     value: number,
@@ -204,6 +209,7 @@ export function RoofSection({
           title={t("objinfo.roof.type")}
           width={130}
         />
+        <MixedMark on={multi?.roofTypeId.mixed} what="roofType" />
       </div>
       <UValueRow project={storeProject} kind="roof" typeId={roof.roofTypeId} />
 
@@ -229,6 +235,7 @@ export function RoofSection({
         numField("objinfo.roof.pitch", roof.pitchDeg, 1, (v) =>
           host.onSetRoofPatch({ pitchDeg: Math.max(0, Math.min(85, v)) }),
         )}
+      {roof.shape !== "flach" && <MixedMark on={multi?.pitchDeg.mixed} what="pitch" />}
       {roof.shape === "mansarde" &&
         numField("objinfo.roof.pitchUpper", roof.pitchUpperDeg ?? roof.pitchDeg / 2, 1, (v) =>
           host.onSetRoofPatch({ pitchUpperDeg: Math.max(0, Math.min(85, v)) }),

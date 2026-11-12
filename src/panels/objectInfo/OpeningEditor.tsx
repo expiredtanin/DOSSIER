@@ -1,5 +1,6 @@
-// Reicher Fenster-/Tür-Einstellungsdialog (VW „Fenster bearbeiten"-Muster,
-// Studie docs/design/window-editor-vectorworks-study.md). Drei Zonen:
+// Reicher Fenster-/Tür-Editor (VW „Fenster bearbeiten"-Muster, Studie docs/design/window-editor-vectorworks-study.md),
+// [195b] als Abschnitt „Fenster-/Türeditor" im Bereich „Objekt" des Objekteinstellungs-Fensters (früher modaler
+// Dialog `OpeningEditorDialog`). Drei Zonen:
 //  1. Kategorie-Sidebar links,
 //  2. Parameter-Panel Mitte,
 //  3. Live-2D-Ansicht (Elevation) rechts — direkt aus den aktuellen Werten
@@ -11,7 +12,7 @@
 // (Grösse/Position dieser Öffnung). Bezeichner englisch, UI-Text deutsch.
 
 import { useEffect, useState } from "react";
-import { t } from "../i18n";
+import { t } from "../../i18n";
 import type {
   DoorType,
   FrameDetail,
@@ -22,9 +23,11 @@ import type {
   Project,
   SashDef,
   WindowType,
-} from "../model/types";
-import { getDoorType, getWindowType, sashesOfWindowType, glazingPanesOf } from "../model/types";
-import { CorePreview, DoorFramePanel, FrameDetailPanel, RebatePanel, RevealPanel, ScopeSwitch } from "./OpeningDetailPanels";
+} from "../../model/types";
+import { useStore } from "../../state/appStore";
+import type { usePanelHost } from "../host";
+import { getDoorType, getWindowType, sashesOfWindowType, glazingPanesOf } from "../../model/types";
+import { CorePreview, DoorFramePanel, FrameDetailPanel, RebatePanel, RevealPanel, ScopeSwitch } from "../../ui/OpeningDetailPanels";
 
 /** P0-Kategorien der Sidebar, je nach Öffnungsart. */
 type CatId =
@@ -39,7 +42,24 @@ type CatId =
   | "zarge"
   | "schichten";
 
-export interface OpeningEditorDialogProps {
+/** Abschnitt „Fenster-/Türeditor" der Objekt-Info: Projekt aus dem Store, Änderungen über die Host-Handler. */
+export function OpeningEditorSection({ openingId, host }: { openingId: string; host: ReturnType<typeof usePanelHost> }) {
+  const project = useStore((st) => st.project);
+  const updateOpening = useStore((st) => st.updateOpening);
+  return (
+    <OpeningEditor
+      openingId={openingId}
+      project={project}
+      onPatchWindowType={host.onPatchWindowType}
+      onPatchDoorType={host.onPatchDoorType}
+      onPatchOpening={(patch) => updateOpening(openingId, patch)}
+      onSetOpeningType={(typeId) => updateOpening(openingId, { typeId: typeId || undefined })}
+      onSaveAsStyle={(name) => host.onSaveOpeningStyle(openingId, name)}
+    />
+  );
+}
+
+export interface OpeningEditorProps {
   openingId: string;
   project: Project;
   /** Typ-Feld (aktueller Stil) ändern — wirkt auf alle Instanzen des Stils. */
@@ -51,10 +71,9 @@ export interface OpeningEditorDialogProps {
   onSetOpeningType: (typeId: string) => void;
   /** Aktuellen Stil als NEUEN benannten Stil ablegen und der Öffnung zuweisen. */
   onSaveAsStyle: (name: string) => void;
-  onClose: () => void;
 }
 
-export function OpeningEditorDialog({
+export function OpeningEditor({
   openingId,
   project,
   onPatchWindowType,
@@ -62,8 +81,7 @@ export function OpeningEditorDialog({
   onPatchOpening,
   onSetOpeningType,
   onSaveAsStyle,
-  onClose,
-}: OpeningEditorDialogProps) {
+}: OpeningEditorProps) {
   const opening = (project.openings ?? []).find((o) => o.id === openingId);
   const isDoor = opening?.kind === "door";
   const wt = opening && !isDoor ? getWindowType(project, opening) : undefined;
@@ -94,16 +112,11 @@ export function OpeningEditorDialog({
   // [105]/[106]: Detail-Panels wirken auf den Typ (alle Öffnungen) oder nur auf diese Öffnung.
   const [scope, setScope] = useState<"type" | "opening">(opening?.frameDetail || opening?.layerReveals || opening?.doorFrame || opening?.doorFrameKind ? "opening" : "type");
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  // Name für „Als Stil speichern" (null = Eingabe zu); `window.prompt` ist im Tauri-WKWebView stumm.
+  const [newStyleName, setNewStyleName] = useState<string | null>(null);
 
   if (!opening) {
-    // Öffnung verschwand (Undo/Löschen während offen) → Dialog schliesst sich.
+    // Öffnung verschwand (Undo/Löschen während offen) → nichts zu zeigen.
     return null;
   }
 
@@ -137,23 +150,7 @@ export function OpeningEditorDialog({
   );
 
   return (
-    <div className="imp-overlay" onClick={onClose}>
-      <div
-        className="oed-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-label={t(isDoor ? "oed.title.door" : "oed.title.window")}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <header className="imp-head">
-          <span className="imp-head-title">
-            {t(isDoor ? "oed.title.door" : "oed.title.window")}
-          </span>
-          <button className="imp-close" onClick={onClose} aria-label={t("export.close")}>
-            ×
-          </button>
-        </header>
-
+    <div className="oed-dialog oed-embedded" role="group" aria-label={t(isDoor ? "oed.title.door" : "oed.title.window")} data-testid="opening-editor">
         {/* Stil-Leiste: Stil wählen · als Stil speichern · zurücksetzen. */}
         <div className="oed-stylebar">
           <span className="oed-style-label">{t("oed.style")}</span>
@@ -174,17 +171,31 @@ export function OpeningEditorDialog({
             type="button"
             className="oed-btn"
             title={t("oed.saveStyle.hint")}
-            onClick={() => {
-              const name = window.prompt(
-                t("oed.saveStyle.prompt"),
-                `${styleName} ${t("oed.saveStyle.copySuffix")}`,
-              );
-              if (name && name.trim()) onSaveAsStyle(name.trim());
-            }}
+            onClick={() => setNewStyleName(newStyleName === null ? `${styleName} ${t("oed.saveStyle.copySuffix")}` : null)}
           >
             {t("oed.saveStyle")}
           </button>
         </div>
+        {newStyleName !== null && (
+          <form
+            className="oed-stylebar"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (newStyleName.trim()) onSaveAsStyle(newStyleName.trim());
+              setNewStyleName(null);
+            }}
+          >
+            <input
+              className="oed-input"
+              aria-label={t("oed.saveStyle.prompt")}
+              placeholder={t("oed.saveStyle.prompt")}
+              value={newStyleName}
+              autoFocus
+              onChange={(e) => setNewStyleName(e.target.value)}
+            />
+            <button type="submit" className="oed-btn">{t("oed.saveStyle")}</button>
+          </form>
+        )}
 
         <div className="oed-main">
           {/* 1. Kategorie-Sidebar. */}
@@ -244,13 +255,6 @@ export function OpeningEditorDialog({
             <CorePreview project={project} openingId={opening.id} />
           </div>
         </div>
-
-        <footer className="imp-foot">
-          <button className="imp-btn primary" onClick={onClose}>
-            {t("export.close")}
-          </button>
-        </footer>
-      </div>
     </div>
   );
 }

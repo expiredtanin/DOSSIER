@@ -1,9 +1,8 @@
 // Abschnitt „Wand" der Attribute ([165] aus `ObjectInfoPanel.tsx`): Referenzlinie, Aufbau, Geschoss, Unter-
 // und Oberkante. Gerufen von `AttributesPanel`.
 
-import { useMemo } from "react";
 import { useStore } from "../../state/appStore";
-import { selectionWallValues } from "../../state/mixedValues";
+import { selectionWallHeights, selectionWallValues } from "../../state/mixedValues";
 import type { WallInfo } from "../../state/selectionInfo";
 import { usePanelHost } from "../host";
 import { t } from "../../i18n";
@@ -11,7 +10,8 @@ import { Dropdown } from "../../ui/Dropdown";
 import type { WallReferenceLine, SliceTermination } from "../../model/types";
 import { UValueRow } from "../UValueRow";
 import { formatM } from "../../model/types";
-import { BuildingFlags, DimensionField, VerticalAnchorRow } from "./fields";
+import { BuildingFlags, DimensionField, MixedMark, VerticalAnchorRow } from "./fields";
+import { useMulti } from "./useMulti";
 
 // ── Wand-Attribut-Abschnitt ──────────────────────────────────────────────────
 // Aufbau-Typ (einschichtig/mehrschichtig), Dicke/Preset, Referenzgeschoss +
@@ -24,14 +24,10 @@ export function WallSection({
   host: ReturnType<typeof usePanelHost>;
 }) {
   const storeProject = useStore((st) => st.project);
-  const selection = useStore((st) => st.selection);
-  // [195b] Mehrfachauswahl: abweichender Typ/abweichende Dicke als „gemischt" kennzeichnen.
-  const multi = useMemo(
-    () => (selection.walls.length > 1 ? selectionWallValues(storeProject, selection) : null),
-    [storeProject, selection],
-  );
-  const mixedMark = (on: boolean | undefined, what: string) =>
-    on ? <span className="attr-mixed" data-mixed={what}>{t("objsettings.mixed")}</span> : null;
+  // [195b] Mehrfachauswahl: abweichender Typ/Dicke/Höhe als „gemischt" kennzeichnen.
+  const multi = useMulti("walls", selectionWallValues);
+  const heights = useMulti("walls", selectionWallHeights);
+  const mixedMark = (on: boolean | undefined, what: string) => <MixedMark on={on} what={what} />;
   // Aufbau-Typ-Segment: einschichtig vs. mehrschichtig. Aus dem Modell
   // abgeleitet (singleLayer); der Umschalter auf „mehrschichtig" wählt einen
   // mehrschichtigen Wandtyp-Preset (erster mit >1 Schicht), auf „einschichtig"
@@ -232,6 +228,7 @@ export function WallSection({
         defaultFloorId={wall.floorAbove?.id ?? wall.floorId}
         onChange={(a) => host.onSetWallTop(a)}
       />
+      {mixedMark(heights?.top.mixed, "top")}
       <VerticalAnchorRow
         label={t("objinfo.wall.bottom")}
         anchor={wall.bottom}
@@ -240,6 +237,7 @@ export function WallSection({
         defaultFloorId={wall.floorId}
         onChange={(a) => host.onSetWallBottom(a)}
       />
+      {mixedMark(heights?.bottom.mixed, "bottom")}
 
       {/* Höhe = OK − UK (abgeleitet, read-only). */}
       <div className="objinfo-field">

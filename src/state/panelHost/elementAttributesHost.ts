@@ -7,8 +7,31 @@ import { patchItem, patchItems, removeRoofHole, setRoofEdge } from "../../core";
 import { getState } from "../appStore";
 import type { FlatHostOpts, HostPart } from "./types";
 
+type MultiCollection = "walls" | "ceilings" | "roofs" | "openings";
+
+/**
+ * [195b] Ziele einer Änderung: bei Mehrfachauswahl gleicher Art alle gewählten Elemente (in einem Undo-Schritt
+ * zu setzen), sonst nur das Objekt der Objekt-Info.
+ */
+function targetIds(collection: MultiCollection, id: string): string[] {
+  const ids = getState().selection[collection];
+  return ids.length > 1 && ids.includes(id) ? [...ids] : [id];
+}
+
+/** Dach-Felder, die bei Mehrfachauswahl für alle gewählten Dächer gelten (Rest: nur das erste). */
+const ROOF_MULTI_KEYS: ReadonlySet<string> = new Set(["roofTypeId", "pitchDeg"]);
+
 export function buildElementAttributesHost(c: FlatHostOpts) {
-  const { applyChange, onOpenStampEditor, onToggleSection3dCut, openResources, patchLevel, project, section3dCutId, sectionLine, selection, setCeilingThickness, setOpeningEditorId, setWallThickness, slideOpening, updateCeiling, updateOpening, updateRoof, updateRoom, updateStair, updateWall } = c;
+  const { applyChange, onOpenStampEditor, onToggleSection3dCut, openResources, patchLevel, project, section3dCutId, sectionLine, selection, patchDoorType, patchWindowType, saveOpeningStyle, setCeilingThickness, setWallThickness, slideOpening, updateCeiling, updateOpening, updateRoof, updateRoom, updateStair, updateWall } = c;
+  /** Patch auf alle Ziele (s. {@link targetIds}); ein Element: wie bisher über die Einzel-Aktion. */
+  function patchAll<K extends MultiCollection>(collection: K, id: string, patch: Record<string, unknown>, coalesceKey?: string): void {
+    const ids = targetIds(collection, id);
+    if (ids.length > 1) applyChange((p) => patchItems(p, collection, ids, (e) => ({ ...(e as object), ...patch }) as typeof e), coalesceKey);
+    else if (collection === "walls") updateWall(id, patch, coalesceKey);
+    else if (collection === "ceilings") updateCeiling(id, patch);
+    else if (collection === "roofs") updateRoof(id, patch, coalesceKey);
+    else updateOpening(id, patch);
+  }
   return {
     // ── Wand-Attribute (nur bei selektierter Wand) ─────────────────────────
     onSetWallReferenceLine: (ref) => {
@@ -47,32 +70,30 @@ export function buildElementAttributesHost(c: FlatHostOpts) {
       if (selection?.kind === "ceiling") updateCeiling(selection.id, { edgeAtOutline: edgeAtOutline || undefined });
     },
     onSetWallType: (wallTypeId) => {
-      if (selection?.kind !== "wall") return;
       // [195b] Mehrfachauswahl: alle gewählten Wände bekommen den Typ (ein Undo-Schritt).
-      const ids = getState().selection.walls;
-      if (ids.length > 1) applyChange((p) => patchItems(p, "walls", ids, (w) => ({ ...w, wallTypeId })));
-      else updateWall(selection.id, { wallTypeId });
+      if (selection?.kind === "wall") patchAll("walls", selection.id, { wallTypeId });
     },
     onSetWallThickness: (thickness) => {
-      if (selection?.kind === "wall")
-        setWallThickness(selection.id, thickness);
+      if (selection?.kind !== "wall") return;
+      const ids = targetIds("walls", selection.id);
+      if (ids.length === 1) setWallThickness(selection.id, thickness);
+      else getState().groupChanges(() => ids.forEach((id) => setWallThickness(id, thickness)));
     },
     onSetWallBottom: (anchor) => {
-      if (selection?.kind === "wall")
-        updateWall(selection.id, { bottom: anchor ?? undefined });
+      if (selection?.kind === "wall") patchAll("walls", selection.id, { bottom: anchor ?? undefined });
     },
     onSetWallTop: (anchor) => {
-      if (selection?.kind === "wall")
-        updateWall(selection.id, { top: anchor ?? undefined });
+      if (selection?.kind === "wall") patchAll("walls", selection.id, { top: anchor ?? undefined });
     },
     // ── Decken-Attribute (nur bei selektierter Decke) ──────────────────────
     onSetCeilingType: (ceilingTypeId) => {
-      if (selection?.kind === "ceiling")
-        updateCeiling(selection.id, { ceilingTypeId, thickness: undefined });
+      if (selection?.kind === "ceiling") patchAll("ceilings", selection.id, { ceilingTypeId, thickness: undefined });
     },
     onSetCeilingThickness: (thickness) => {
-      if (selection?.kind === "ceiling")
-        setCeilingThickness(selection.id, thickness);
+      if (selection?.kind !== "ceiling") return;
+      const ids = targetIds("ceilings", selection.id);
+      if (ids.length === 1) setCeilingThickness(selection.id, thickness);
+      else getState().groupChanges(() => ids.forEach((id) => setCeilingThickness(id, thickness)));
     },
     onRemoveCeilingOpening: (index) => {
       if (selection?.kind !== "ceiling") return;
@@ -83,12 +104,10 @@ export function buildElementAttributesHost(c: FlatHostOpts) {
       });
     },
     onSetCeilingTop: (anchor) => {
-      if (selection?.kind === "ceiling")
-        updateCeiling(selection.id, { top: anchor ?? undefined });
+      if (selection?.kind === "ceiling") patchAll("ceilings", selection.id, { top: anchor ?? undefined });
     },
     onSetCeilingBottom: (anchor) => {
-      if (selection?.kind === "ceiling")
-        updateCeiling(selection.id, { bottom: anchor ?? undefined });
+      if (selection?.kind === "ceiling") patchAll("ceilings", selection.id, { bottom: anchor ?? undefined });
     },
     // ── Öffnungs-Attribute (nur bei selektierter Öffnung) ──────────────────
     onSetOpeningKind: (kind) => {
@@ -101,16 +120,13 @@ export function buildElementAttributesHost(c: FlatHostOpts) {
         );
     },
     onSetOpeningWidth: (width) => {
-      if (selection?.kind === "opening" && width > 0)
-        updateOpening(selection.id, { width });
+      if (selection?.kind === "opening" && width > 0) patchAll("openings", selection.id, { width });
     },
     onSetOpeningHeight: (height) => {
-      if (selection?.kind === "opening" && height > 0)
-        updateOpening(selection.id, { height });
+      if (selection?.kind === "opening" && height > 0) patchAll("openings", selection.id, { height });
     },
     onSetOpeningSill: (sillHeight) => {
-      if (selection?.kind === "opening" && sillHeight >= 0)
-        updateOpening(selection.id, { sillHeight });
+      if (selection?.kind === "opening" && sillHeight >= 0) patchAll("openings", selection.id, { sillHeight });
     },
     onSetOpeningPosition: (position) => {
       if (selection?.kind !== "opening" || !Number.isFinite(position)) return;
@@ -166,16 +182,20 @@ export function buildElementAttributesHost(c: FlatHostOpts) {
     // Typ-Zuweisung (Bibliothek): Tür-/Fenstertyp per typeId; leerer String löst
     // die Zuweisung wieder (Inline-Verhalten).
     onSetOpeningType: (typeId) => {
-      if (selection?.kind === "opening")
-        updateOpening(selection.id, { typeId: typeId || undefined });
+      if (selection?.kind === "opening") patchAll("openings", selection.id, { typeId: typeId || undefined });
     },
     onEditOpeningType: (kind) => {
       openResources(kind === "door" ? "doorStyles" : "windowStyles");
     },
-    onOpenOpeningEditor: (id) => setOpeningEditorId(id),
+    onPatchWindowType: patchWindowType,
+    onPatchDoorType: patchDoorType,
+    onSaveOpeningStyle: saveOpeningStyle,
     // ── Dach-Attribute (nur bei selektiertem Dach) ─────────────────────────
     onSetRoofPatch: (patch, coalesceKey) => {
-      if (selection?.kind === "roof") updateRoof(selection.id, patch, coalesceKey);
+      if (selection?.kind !== "roof") return;
+      const multi = Object.keys(patch).every((k) => ROOF_MULTI_KEYS.has(k));
+      if (multi) patchAll("roofs", selection.id, patch, coalesceKey);
+      else updateRoof(selection.id, patch, coalesceKey);
     },
     onSetRoofEdge: (index, spec) => {
       if (selection?.kind !== "roof") return;

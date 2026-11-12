@@ -622,9 +622,10 @@ export const en: Record<TranslationKey, string> = {
   "objinfo.ceiling.anchorCustom": "Custom",
   // ── Opening attributes (object info panel) ──────────────────────────────
   "objinfo.opening.section": "Opening",
+  "objinfo.openingEditor.section": "Window/door editor",
   "objinfo.opening.type": "Type",
   "objinfo.opening.editType": "Settings …",
-  // Window/door settings dialog (OpeningEditorDialog).
+  // Window/door settings dialog (OpeningEditor).
   "oed.title.window": "Window settings",
   "oed.title.door": "Door settings",
   "oed.style": "Style",

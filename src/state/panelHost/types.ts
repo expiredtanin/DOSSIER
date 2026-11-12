@@ -106,6 +106,9 @@ export type PanelHostOpts = {
     | "updateWall"
     | "setWallThickness"
     | "updateOpening"
+    | "patchWindowType"
+    | "patchDoorType"
+    | "saveOpeningStyle"
     | "slideOpening"
     | "updateCeiling"
     | "setCeilingThickness"
@@ -137,7 +140,7 @@ export type PanelHostOpts = {
     | "selectedViewSnapshotId"
     | "setSelectedViewSnapshotId"
   >;
-  dialogState: Pick<ReturnType<typeof useDialogState>, "setActiveLayoutId" | "setOpeningEditorId">;
+  dialogState: Pick<ReturnType<typeof useDialogState>, "setActiveLayoutId">;
   contextMenuState: Pick<ReturnType<typeof useContextMenuState>, "setMenu">;
 };
 
