@@ -609,4 +609,7 @@ export const emptyProject: Project = {
   extrudedSolids: [],
   drawings2d: [],
   context: [],
+  // [221] Schnitt A und Ansicht Süd folgen dem ersten Gebauten (bzw. der Parzelle), bis man sie bearbeitet
+  // (Kern `auto_lines.rs`) — sonst lägen sie bei einem Projekt in Landeskoordinaten oder abseits des Nullpunkts daneben.
+  drawingLevels: sampleProject.drawingLevels.map((l) => (l.kind === "section" || l.kind === "elevation" ? { ...l, autoLine: true } : l)),
 };

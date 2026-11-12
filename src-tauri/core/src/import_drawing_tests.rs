@@ -384,3 +384,73 @@ fn import_hoehenlinien_als_contour_set() {
     assert!(!r.ops.iter().any(|o| matches!(o, Op::Add { collection, .. } if collection == "context")));
     assert_eq!(summary_json(&d)["terrainContours"], json!(2));
 }
+
+/// [221] Kataster in Landeskoordinaten (LV95): das Modell bleibt lokal. Ohne Standort-Bezug setzt der Import
+/// den Projekt-Nullpunkt (Kilometerpunkt unter der Mitte) als `geoAnchor`; mit Bezug rechnet er auf dessen Ursprung.
+#[test]
+fn landeskoordinaten_setzen_den_projekt_nullpunkt() {
+    const E: f64 = 2_600_000.0;
+    const N: f64 = 1_200_000.0;
+    let (g, s) = sample();
+    let d0 = decode_drawing(&g, &s, "", 0.0).unwrap();
+    assert!(!is_lv95(0.0, 0.0) && is_lv95(E, N));
+    let mut d = d0.clone();
+    for c in &mut d.contours {
+        for p in &mut c.pts {
+            p[0] += E;
+            p[1] += N;
+        }
+        if let Some((pts, _)) = &mut c.bulge {
+            for p in pts {
+                p[0] += E;
+                p[1] += N;
+            }
+        }
+        if let Some(k) = &mut c.curve {
+            k.cx += E;
+            k.cy += N;
+        }
+    }
+    for t in &mut d.texts {
+        t.x += E;
+        t.y += N;
+    }
+    for m in &mut d.meshes {
+        for (i, v) in m.positions.iter_mut().enumerate() {
+            *v += [E, N, 0.0][i % 3];
+        }
+    }
+    let has_anchor = |r: &ImportResult| r.ops.iter().map(Op::to_json).any(|o| o["key"] == "geoAnchor");
+    let dec = decision(json!({"target": {"kind": "new", "name": "kataster"}, "categoryMode": "active", "activeCategoryCode": "20", "importMeshes": true, "geoLabel": "kataster.dxf"}));
+    let r = import_ops(&project(), &d, &dec, 0.0);
+    assert_eq!(r.shift, [-E, -N]);
+    let ops: Vec<Value> = r.ops.iter().map(Op::to_json).collect();
+    let anchor = ops.iter().find(|o| o["key"] == "geoAnchor").expect("geoAnchor gesetzt");
+    assert_eq!(anchor["value"], json!({"lv95": {"e": 2600000, "n": 1200000}, "model": {"x": 0, "y": 0}, "label": "kataster.dxf"}));
+    // Dieselben Modell-Koordinaten wie dieselbe Datei in lokalen Koordinaten.
+    let local = import_ops(&project(), &d0, &dec, 0.0);
+    assert!(!has_anchor(&local) && local.shift == [0.0, 0.0]);
+    let geoms = |r: &ImportResult| -> Vec<Value> {
+        r.ops
+            .iter()
+            .map(Op::to_json)
+            .filter(|o| o["collection"] == "drawings2d" || o["collection"] == "context")
+            .flat_map(|o| o["items"].as_array().unwrap().clone())
+            .map(|i| json!([i["geom"], i["positions"]]))
+            .collect()
+    };
+    assert_eq!(geoms(&r), geoms(&local));
+
+    // Projekt mit Standort-Bezug: dessen Ursprung, kein neuer Anker.
+    let mut root = project();
+    root.insert("geoAnchor".into(), json!({"lv95": {"e": E + 110.0, "n": N + 20.0}, "model": {"x": 10.0, "y": 20.0}}));
+    let r2 = import_ops(&root, &d, &dec, 0.0);
+    assert_eq!(r2.shift, [-E - 100.0, -N]);
+    assert!(!has_anchor(&r2));
+    // „viewCenter" bleibt wie bisher (Mitte auf den Ausschnitt), ohne Anker.
+    let dec_vc = decision(json!({"target": {"kind": "new", "name": "k"}, "categoryMode": "active", "activeCategoryCode": "20", "viewCenter": [5.0, 5.0]}));
+    assert!(!has_anchor(&import_ops(&project(), &d, &dec_vc, 0.0)));
+    // Kilometerpunkt unter der Mitte (abgerundet).
+    assert_eq!(lv95_origin(&project(), [2_600_999.0, 1_200_001.0], "").unwrap().0, [2_600_000.0, 1_200_000.0]);
+    assert!(lv95_origin(&project(), [600_000.0, 200_000.0], "").is_none());
+}

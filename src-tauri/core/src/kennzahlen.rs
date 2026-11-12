@@ -131,8 +131,13 @@ mod tests {
 }
 
 // ── Kennzahlen aus dem Projekt-Dokument ([K4] S2) ───────────────────────────
+//
+// [225] Eine Quelle der Wahrheit: die Kennzahlenleiste liest dieselben Zahlen wie die Flächentabelle
+// und die IVHB-Ziffern (`flaechen::area_table`, `flaechen::ivhb` mit den Vorgaben der Tabelle: aGF = NGF,
+// ohne Untergeschosse, aGSF aus `parcelArea` bzw. der Parzellengrenze). Vorher rechnete die Leiste GF aus
+// den Räumen allein (= NGF, ohne Konstruktionsfläche) und die ÜZ aus der GF des untersten Geschosses.
 
-use crate::model::{DrawingLevelKind, Project, SiaCategory};
+use crate::model::{Project, SiaCategory};
 use serde::Serialize;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -140,19 +145,31 @@ use serde::Serialize;
 pub struct LevelKennzahlen {
     pub level_id: String,
     pub name: String,
-    /// Geschossfläche (SIA 416 GF) aus den Räumen.
+    /// Geschossfläche SIA 416 (GF = NGF + KF), gleich der Zeile der Flächentabelle.
     pub gf: f64,
-    /// Anrechenbare Fläche ≈ Nettogeschossfläche NGF.
+    /// Anrechenbare Geschossfläche dieses Geschosses (Basis wie die IVHB-Vorgabe: NGF; Untergeschosse 0).
     pub agf: f64,
+    /// Nettogeschossfläche (NF + VF + FF).
+    pub ngf: f64,
+    /// Hauptnutzfläche.
+    pub hnf: f64,
     pub rooms: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Kennzahlen {
     pub levels: Vec<LevelKennzahlen>,
+    /// Σ GF (SIA 416) aller Geschosse = Summenzeile der Flächentabelle.
     pub gf: f64,
+    /// Anrechenbare Geschossfläche (IVHB, Vorgabe NGF, oberirdisch) = Zähler der AZ.
     pub agf: f64,
+    pub ngf: f64,
+    pub hnf: f64,
+    /// Konstruktionsfläche (Σ).
+    pub kf: f64,
     pub gv: f64,
+    /// Anrechenbare Gebäudefläche (IVHB aGbF) = Zähler der ÜZ.
     pub footprint: f64,
     pub az: Option<f64>,
     pub uez: Option<f64>,
@@ -170,70 +187,36 @@ pub(crate) fn category_index(c: SiaCategory) -> usize {
     }
 }
 
-/// Flächen je Geschoss (SIA 416), Gebäudevolumen, Ausnützungs- und Überbauungsziffer.
+/// Flächen je Geschoss (SIA 416), Gebäudevolumen, Ausnützungs- und Überbauungsziffer — aus der
+/// Flächentabelle und den IVHB-Ziffern mit ihren Vorgaben ([225]).
 pub fn compute(p: &Project) -> Kennzahlen {
-    let mut floors: Vec<&crate::model::DrawingLevel> = p.drawing_levels.iter().filter(|l| l.kind == DrawingLevelKind::Floor).collect();
-    floors.sort_by(|a, b| a.base_elevation.unwrap_or(0.0).partial_cmp(&b.base_elevation.unwrap_or(0.0)).unwrap_or(std::cmp::Ordering::Equal));
-    let mut level_index: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
-    for (i, l) in floors.iter().enumerate() {
-        level_index.entry(l.id.as_str()).or_insert(i);
-    }
-    let all_rooms = p.rooms.as_deref().unwrap_or(&[]);
-    let rooms: Vec<&crate::model::Room> = all_rooms.iter().filter(|r| level_index.contains_key(r.floor_id.as_str())).collect();
-    let rooms_in: Vec<RoomIn> = rooms
+    let opt = crate::flaechen::IvhbOptions::default();
+    let t = crate::flaechen::area_table(p);
+    let v = crate::flaechen::ivhb(p, &opt);
+    let levels: Vec<LevelKennzahlen> = t
+        .levels
         .iter()
-        .map(|r| RoomIn {
-            level: level_index[r.floor_id.as_str()],
-            category: category_index(r.sia_category),
-            boundary: r.ring_xy(),
-            area: Some(r.area()),
+        .map(|r| LevelKennzahlen {
+            level_id: r.level_id.clone(),
+            name: r.name.clone(),
+            gf: r.gf,
+            agf: if r.underground && !opt.include_underground { 0.0 } else { r.ngf },
+            ngf: r.ngf,
+            hnf: r.hnf,
+            rooms: r.rooms,
         })
         .collect();
-    let solids: Vec<SolidIn> = p
-        .extruded_solids
-        .as_deref()
-        .unwrap_or(&[])
-        .iter()
-        .map(|s| SolidIn {
-            subtract: s.operation.as_deref() == Some("subtract"),
-            points: if s.circle.is_some() { vec![] } else { s.points.iter().map(|v| [v.x, v.y]).collect() },
-            circle_r: s.circle.as_ref().map_or(f64::NAN, |c| c.r),
-            height: s.height,
-            taper: s.taper.unwrap_or(0.0),
-        })
-        .collect();
-    let parcel_ring: Vec<[f64; 2]> = p.site_rules.as_ref().map(|r| r.parcel.iter().map(|v| [v.x, v.y]).collect()).unwrap_or_default();
-    let sums = area_sums(floors.len(), &rooms_in, &solids, p.parcel_area.unwrap_or(f64::NAN), &parcel_ring);
-    let levels: Vec<LevelKennzahlen> = floors
-        .iter()
-        .enumerate()
-        .map(|(i, l)| {
-            let entries: Vec<(usize, f64)> = (0..CATEGORIES).map(|k| (k, sums.by_level[i][k])).collect();
-            let b = crate::room_area::balance(&entries);
-            LevelKennzahlen {
-                level_id: l.id.clone(),
-                name: l.name.clone(),
-                gf: b.agg_area[2],
-                agf: b.agg_area[1],
-                rooms: rooms.iter().filter(|r| r.floor_id == l.id).count(),
-            }
-        })
-        .collect();
-    let gf: f64 = levels.iter().map(|l| l.gf).sum();
-    let agf: f64 = levels.iter().map(|l| l.agf).sum();
-    let footprint = levels.iter().find(|l| l.gf > 0.0).map_or(0.0, |l| l.gf);
-    // GV: Volumen der freien Körper (Massenmodell); ohne solche dieselbe Näherung wie die
-    // Flächentabelle (GF × Geschosshöhe je Geschoss, `flaechen::area_table`), sonst stünde bei einem
-    // aus Wänden/Decken modellierten Gebäude 0 m³ in der Leiste ([206]).
-    let gv = if solids.iter().any(|s| !s.subtract) { sums.gv } else { crate::flaechen::area_table(p).gv };
     Kennzahlen {
         levels,
-        gf,
-        agf,
-        gv,
-        footprint,
-        az: sums.parcel.filter(|x| *x != 0.0).map(|x| agf / x),
-        uez: sums.parcel.filter(|x| *x != 0.0).map(|x| footprint / x),
+        gf: t.total.gf,
+        agf: v.agf,
+        ngf: t.total.ngf,
+        hnf: t.total.hnf,
+        kf: t.total.kf,
+        gv: t.gv,
+        footprint: v.agbf,
+        az: v.az,
+        uez: v.uz,
     }
 }
 
@@ -252,6 +235,31 @@ mod doc_tests {
         let with_parcel = Project { parcel_area: Some(1000.0), ..p };
         let k2 = compute(&with_parcel);
         assert!((k2.az.unwrap() - k2.agf / 1000.0).abs() < 1e-12);
+        assert!((k2.uez.unwrap() - k2.footprint / 1000.0).abs() < 1e-12);
+    }
+
+    /// [225] Leiste und Flächentabelle/IVHB zeigen dieselben Zahlen (GF = NGF + KF, nicht nur die Räume).
+    #[test]
+    fn leiste_gleich_flaechentabelle() {
+        let fixtures = [include_str!("../tests/fixtures/sample_project.json")];
+        for json in fixtures {
+            let mut p: Project = serde_json::from_str(json).unwrap();
+            p.parcel_area = Some(900.0);
+            let k = compute(&p);
+            let t = crate::flaechen::area_table(&p);
+            let v = crate::flaechen::ivhb(&p, &Default::default());
+            assert!(t.total.kf > 0.0, "Testprojekt ohne Wände");
+            assert!((k.gf - t.total.gf).abs() < 1e-9, "GF {} statt {}", k.gf, t.total.gf);
+            assert!((k.gf - (t.total.ngf + t.total.kf)).abs() < 1e-9);
+            assert!((k.ngf - t.total.ngf).abs() < 1e-9 && (k.hnf - t.total.hnf).abs() < 1e-9);
+            assert!((k.gv - t.gv).abs() < 1e-9);
+            assert_eq!(k.az, v.az);
+            assert_eq!(k.uez, v.uz);
+            for (l, r) in k.levels.iter().zip(&t.levels) {
+                assert_eq!(l.level_id, r.level_id);
+                assert!((l.gf - r.gf).abs() < 1e-9);
+            }
+        }
     }
 
     /// [206] Ohne freie Körper (Modell aus Wänden/Decken) war das GV in der Kennzahlenleiste 0 m³,

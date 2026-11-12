@@ -16,7 +16,7 @@
 import type { Vec2 } from "../model/types";
 import type { SnapResult, ToolDraft } from "../tools/types";
 import type { ProjectMutation } from "../core";
-import { NON_LENGTH_FIELDS, parseInput, resolvePoint, toModelInput } from "./parseInput";
+import { NON_LENGTH_FIELDS, fromWorldInput, parseInput, resolvePoint, toModelInput } from "./parseInput";
 import { MODEL_UNITS, type DisplayUnits } from "../tools/displayUnits";
 import { getCommand, resolveCommand, autocomplete } from "./registry";
 import { hasTransformSelection } from "../tools/transform";
@@ -66,6 +66,11 @@ export interface EngineHost {
    * (s. `tools/displayUnits.ts`). Fehlt der Handler, gelten Meter.
    */
   inputUnits?(): DisplayUnits;
+  /**
+   * Optional ([221]): LV95-Ursprung des Projekts (Standort-Bezug), wenn getippte Landeskoordinaten auf den
+   * Projekt-Nullpunkt gerechnet werden sollen (Modell-Ebenen, nicht auf dem Layout-Blatt); `null` = keiner.
+   */
+  inputGeoOrigin?(): { e: number; n: number } | null;
   /** Optional: Hinweis zeigen (i18n-Key), z. B. „erst Objekte wählen" (`Command.needsSelection`). */
   notify?(key: string, params?: Record<string, string | number>, kind?: "info" | "warning" | "error"): void;
 }
@@ -484,12 +489,15 @@ export class CommandEngine {
       return;
     }
 
-    const parsed = toModelInput(
-      parseInput(text),
-      this.host.inputUnits?.() ?? MODEL_UNITS,
-      // Nackte Zahl: Länge im Längen-Feld bzw. als Distanz-Lock eines Punkt-Schritts; reine Zahl-Schritte
-      // (Anzahl, Faktor, Winkel …) bleiben ohne Umrechnung.
-      this.hasFields() ? this.activeFieldUnit() : accepts.includes("point") ? "length" : "none",
+    const parsed = fromWorldInput(
+      toModelInput(
+        parseInput(text),
+        this.host.inputUnits?.() ?? MODEL_UNITS,
+        // Nackte Zahl: Länge im Längen-Feld bzw. als Distanz-Lock eines Punkt-Schritts; reine Zahl-Schritte
+        // (Anzahl, Faktor, Winkel …) bleiben ohne Umrechnung.
+        this.hasFields() ? this.activeFieldUnit() : accepts.includes("point") ? "length" : "none",
+      ),
+      this.host.inputGeoOrigin?.() ?? null,
     );
 
     // Tab-Feld-Modus (§2.7): eine nackte Zahl LOCKT das aktive Feld (statt als

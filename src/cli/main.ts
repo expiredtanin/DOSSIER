@@ -576,6 +576,7 @@ async function importAny(path: string, args: Args): Promise<Project> {
         terrainName: "Höhenlinien",
         parentName: `Import ${fileName}`,
         dashStyleTemplate: "PDF-Strich {pattern} mm",
+        geoLabel: fileName,
       },
       Date.now(),
     );

@@ -704,6 +704,9 @@ pub struct Decision {
     /// [143] Name des Höhenlinien-Satzes (übersetzt von der Hülle); leer = „Höhenlinien".
     #[serde(default)]
     pub terrain_name: String,
+    /// [221] Bezeichnung des Standort-Bezugs, den ein Import in Landeskoordinaten neu setzt (z. B. Dateiname).
+    #[serde(default)]
+    pub geo_label: String,
 }
 
 /// Ergebnis von [`import_ops`].
@@ -715,6 +718,38 @@ pub struct ImportResult {
     pub meshes: usize,
     /// [143] Höhenlinien, die als Gelände (`contourSet`) übernommen wurden.
     pub terrain_contours: usize,
+    /// [221] Verschiebung der Datei-Koordinaten ins Modell (Landeskoordinaten → Projekt-Nullpunkt), sonst 0.
+    pub shift: [f64; 2],
+}
+
+/// [221] Liegt der Punkt in den Landeskoordinaten LV95 (Schweiz mit Rand: Ost 2.4–2.9 Mio. m, Nord 1.0–1.4 Mio. m)?
+pub fn is_lv95(e: f64, n: f64) -> bool {
+    (2.4e6..=2.9e6).contains(&e) && (1.0e6..=1.4e6).contains(&n)
+}
+
+/// [221] Projekt-Nullpunkt für einen Import mit Mitte `c` in Landeskoordinaten: hat das Projekt einen Standort-
+/// Bezug (`geoAnchor`), dessen Ursprung; sonst der Kilometerpunkt des Landeskoordinatennetzes unter der Mitte (abgerundet,
+/// Modell-Koordinate = Landeskoordinate ohne die Kilometer, z. B. E 2 600 048 → x 48), der als neuer Bezug gesetzt wird
+/// (zweites Feld = der neue `geoAnchor`). Ausserhalb LV95 `None` (Datei-Koordinaten bleiben).
+///
+/// Warum: Landeskoordinaten (≈ 2.6 Mio. m) im Modell sprengen alles, was in f32 rechnet (3D-Netze, GPU,
+/// Ganzzahlraster der Booleans über einem Ausmass bis zum Nullpunkt), und die Standard-Schnitte/-Ansichten
+/// am Nullpunkt liegen 2.6 Mio. m daneben. Das Modell bleibt darum lokal um den Projekt-Nullpunkt; Exporte mit
+/// Standort-Bezug rechnen zurück (`geo_rebase::project_to_world_coords`), getippte Landeskoordinaten ebenso
+/// (`src/commands/parseInput.ts::fromWorldInput`).
+pub fn lv95_origin(root: &Map<String, Value>, c: [f64; 2], label: &str) -> Option<([f64; 2], Option<Value>)> {
+    if !is_lv95(c[0], c[1]) {
+        return None;
+    }
+    if let Some(o) = crate::import_context::project_geo_origin(root).filter(|o| o[0].is_finite() && o[1].is_finite()) {
+        return Some((o, None));
+    }
+    let o = [(c[0] / 1000.0).floor() * 1000.0, (c[1] / 1000.0).floor() * 1000.0];
+    let mut a = json!({"lv95": {"e": js_num(o[0]), "n": js_num(o[1])}, "model": {"x": 0, "y": 0}});
+    if !label.trim().is_empty() {
+        a["label"] = label.trim().into();
+    }
+    Some((o, Some(a)))
 }
 
 fn layer_list(root: &Map<String, Value>) -> Vec<Value> {
@@ -902,9 +937,19 @@ pub fn import_ops(root: &Map<String, Value>, d: &DrawingImport, dec: &Decision, 
         }
         code_by_layer.get(layer).or_else(|| by_name.get(&layer.to_lowercase())).cloned().unwrap_or_else(|| active.to_string())
     };
-    // Platzierung „viewCenter": Mitte des Umrisses auf die Mitte des Ausschnitts.
+    // Platzierung „viewCenter": Mitte des Umrisses auf die Mitte des Ausschnitts. Sonst an den Datei-Koordinaten;
+    // [221] Landeskoordinaten relativ zum Projekt-Nullpunkt (neuer Standort-Bezug, falls das Projekt keinen hat).
     let (dx, dy) = match (dec.view_center, bbox(d)) {
         (Some(c), Some(b)) => (c[0] - (b[0] + b[2]) / 2.0, c[1] - (b[1] + b[3]) / 2.0),
+        (None, Some(b)) => match lv95_origin(root, [(b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0], &dec.geo_label) {
+            Some((o, anchor)) => {
+                if let Some(a) = anchor {
+                    ops.push(Op::SetField { key: "geoAnchor".into(), value: Some(a), at: None });
+                }
+                (-o[0], -o[1])
+            }
+            None => (0.0, 0.0),
+        },
         _ => (0.0, 0.0),
     };
     // [143] Höhenlinien nicht als Zeichnung, sondern als Gelände-Höhenlinien.
@@ -985,7 +1030,19 @@ pub fn import_ops(root: &Map<String, Value>, d: &DrawingImport, dec: &Decision, 
     }
     let mut n_meshes = 0;
     if dec.import_meshes && !d.meshes.is_empty() {
-        let meshes = mesh_values(d);
+        let mut meshes = mesh_values(d);
+        if dx != 0.0 || dy != 0.0 {
+            for m in &mut meshes {
+                if let Some(Value::Array(pos)) = m.get_mut("positions") {
+                    for (i, v) in pos.iter_mut().enumerate() {
+                        let d = [dx, dy, 0.0][i % 3];
+                        if d != 0.0 {
+                            *v = js_num(v.as_f64().unwrap_or(f64::NAN) + d);
+                        }
+                    }
+                }
+            }
+        }
         n_meshes = meshes.len();
         ops.push(Op::Add { collection: "context".into(), items: meshes, at: None });
         if crate::import_context::ensure_context_categories(&mut layers, [GENERIC_IMPORT_CODE]) {
@@ -995,7 +1052,7 @@ pub fn import_ops(root: &Map<String, Value>, d: &DrawingImport, dec: &Decision, 
     if layers_changed {
         ops.push(Op::SetField { key: "layers".into(), value: Some(Value::Array(layers)), at: None });
     }
-    ImportResult { ops, level_id, drawings: n_drawings, meshes: n_meshes, terrain_contours: det.lines.len() }
+    ImportResult { ops, level_id, drawings: n_drawings, meshes: n_meshes, terrain_contours: det.lines.len(), shift: [dx, dy] }
 }
 
 #[cfg(test)]

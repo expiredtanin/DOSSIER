@@ -35,7 +35,7 @@ E 2'600'048 / N 1'200'046 und E 2'600'060 / N 1'200'056. Raumprogramm als CSV (`
 
 | # | Schritt in Dossier | Erwartet | Status |
 |---|---|---|---|
-| 1.1 | Panel **Gelände** → „⤓ DXF importieren“ (oder Datei → Importieren …) → `kataster.dxf`, Vorgaben lassen (neue Zeichnung, Landeskoordinaten) → Importieren | neue Zeichnungsebene „kataster“, Parzellen mit Nummern 1000–1003, Gebäude grau, Parzellen anklickbar mit Griffen | ✅ (Spec Schritt 1) |
+| 1.1 | Panel **Gelände** → „⤓ DXF importieren“ (oder Datei → Importieren …) → `kataster.dxf`, Vorgaben lassen (neue Zeichnung, Landeskoordinaten) → Importieren | neue Zeichnungsebene „kataster“, Parzellen mit Nummern 1000–1003, Gebäude grau, Parzellen anklickbar mit Griffen; Projekt-Nullpunkt = Kilometerpunkt E 2'600'000 / N 1'200'000 (Standort-Bezug), Statusleiste zeigt X/Y lokal und LV95 | ✅ (Spec Schritt 1, [221]) |
 | 1.2 | Gelände → „Standort importieren“ → Adresse/Koordinate, swisstopo-Gebäude, Gelände, Luftbild | Nachbarbauten als Netzkörper, Gelände, Luftbild lagerichtig zum Kataster | ◐ nur online; im Container nicht prüfbar (kein Netz) |
 | 1.3 | Gelände → „Gelände erzeugen“ aus Höhenlinien (falls importiert) | Geländemodell, im Schnitt sichtbar | ◐ nicht im Ablauf der Spec |
 
@@ -52,8 +52,8 @@ E 2'600'048 / N 1'200'046 und E 2'600'060 / N 1'200'056. Raumprogramm als CSV (`
 
 | # | Schritt in Dossier | Erwartet | Status |
 |---|---|---|---|
-| 3.1 | Zeichnungsebenen → Erdgeschoss | Statusleiste „Geschoss Erdgeschoss“, Plan zeigt das Gebäude | ◐ der EG-Reiter öffnet am Nullpunkt, „Einpassen“ (⌘0) zoomt auf ≈ 1:10 Mio. → **[221]** |
-| 3.2 | Befehl `wand` (Kürzel `w`), Punkte tippen `2600048,1200046` … zurück zum Start, Enter | 4 Aussenwände, Ecken verbunden | ✅ (Spec 3) |
+| 3.1 | Zeichnungsebenen → Erdgeschoss, „Einpassen“ (⌘0) | Statusleiste „Geschoss Erdgeschoss“, Plan zeigt Kataster und Gebäude (≈ 1:100–1:500) | ✅ (Spec 3b; vorher ≈ 1:10 Mio., [221]) |
+| 3.2 | Befehl `wand` (Kürzel `w`), Punkte tippen `2600048,1200046` … zurück zum Start, Enter | 4 Aussenwände, Ecken verbunden (getippte Landeskoordinaten landen lokal bei 48/46) | ✅ (Spec 3) |
 | 3.3 | Befehl `decke` (`d`), 4 Ecken, Enter | eine Decke mit Deckentyp „Geschossdecke mehrschichtig“ | ✅ (Spec 3; vorher Aussenwand-Aufbau, in [206] behoben) |
 | 3.4 | Befehl `dach` (`rf`), zwei Ecken | Satteldach 30°, Vorsprung 0.4 m | ✅ (Spec 3) |
 | 3.5 | Volumen als Körper (`koerper`) und daraus Wände/Decken/Dach | Bauteile je Geschoss aus dem Körper | ❌ **[222]** (Körper geht, Umwandlung fehlt) |
@@ -65,7 +65,7 @@ E 2'600'048 / N 1'200'046 und E 2'600'060 / N 1'200'056. Raumprogramm als CSV (`
 |---|---|---|---|
 | 4.1 | Befehl `raum` (`rm`), Klick ins Gebäude | „Raum 1“, 112.53 m² | ✅ (Spec 4) |
 | 4.2 | Flächenbilanz → „Raumprogramm importieren …“ → CSV, Spalten zuordnen → Importieren | 2 Programmzeilen, Soll/Ist-Tabelle | ✅ (Spec 4) |
-| 4.3 | Raum in „Atelier“ umbenennen (Objekt-Info) | Zeile „Atelier“ grün/gelb statt „fehlt“ | ◐ in der Spec nur „fehlt“ geprüft (Raum ist headless schwer anklickbar, s. [221]) |
+| 4.3 | Raum in „Atelier“ umbenennen (Objekt-Info) | Zeile „Atelier“ grün/gelb statt „fehlt“ | ◐ in der Spec nur „fehlt“ geprüft (Raum headless nicht angeklickt) |
 | 4.4 | „Räume generieren“ | neues Blatt mit Raumrechtecken nach Programm | ✅ (`e2e/roomprogram.spec.ts`) |
 | 4.5 | Mac: Menü „Kennzahlen und Raumprogramm …“ | Meldung mit Kennzahlen und Programmstand | ◐ nur auf dem Mac |
 
@@ -75,7 +75,7 @@ E 2'600'048 / N 1'200'046 und E 2'600'060 / N 1'200'056. Raumprogramm als CSV (`
 |---|---|---|---|
 | 5.1 | Kopfleiste Massstab → 1:200, Detailgrad „grob“/„mittel“ | Strichstärken und Schraffuren für 1:200 | ✅ (Spec 7) |
 | 5.2 | Befehl `sectionline`, Start/Ende quer durchs Gebäude, Enter | neue Ebene „Schnitt B“, Schnitt zeigt Wände, Decke, Dach, Koten | ✅ (Spec 8) |
-| 5.3 | „Schnitt A“ / „Ansicht Süd“ aus dem leeren Projekt | zeigen das Gebäude | ◐ Linien liegen am Nullpunkt, Schnitt A leer → **[221]**; Ansicht Süd zeigt das Gebäude |
+| 5.3 | „Schnitt A“ / „Ansicht Süd“ aus dem leeren Projekt | zeigen das Gebäude: die Linien folgen dem Gebauten (Schnitt durch die Mitte, Ansicht davor), bis man sie verschiebt | ✅ (Spec 13 prüft die Linien, CLI-Schnitt zeigt Wände/Decke/Dach; [221]) |
 | 5.4 | Befehl `viewline` für Ansichten Nord/Ost/West | je eine Ansichtsebene | ◐ geht von Hand, kein automatischer Satz → **[224]** |
 | 5.5 | 1:100 mit Bemassung, Koten, Raumstempeln, Öffnungen (Vorprojekt) | abgabefähiger 1:100-Plan | ◐ Plan-Review-Runde 4 (TODO Phase 3) |
 
@@ -100,7 +100,7 @@ E 2'600'048 / N 1'200'046 und E 2'600'060 / N 1'200'056. Raumprogramm als CSV (`
 |---|---|---|---|
 | 8.1 | Flächenbilanz → Kennzahlenleiste | GF, aGF, GV, AZ, ÜZ mit Werten; GV ≈ GF × Geschosshöhe | ✅ (Spec 5; GV war 0 m³ ohne Körper, in [206] behoben) |
 | 8.2 | „Flächen- und Kennzahlen-Nachweis“ → CSV / PDF | Tabelle HNF…GF, IVHB-Ziffern (GFZ, AZ, BMZ, ÜZ), Gesamthöhe | ✅ (Spec 5) |
-| 8.3 | Leiste und Tabelle vergleichen | gleiche GF/ÜZ | ❌ Leiste GF 112.5 m² (Räume), Tabelle 127.7 m² (NGF + KF) → **[225]** |
+| 8.3 | Leiste und Tabelle vergleichen | gleiche GF/ÜZ (GF = NGF + KF = 127.7 m²) | ✅ (Spec 5, [225]) |
 
 ## 9. Kostenschätzung grob
 

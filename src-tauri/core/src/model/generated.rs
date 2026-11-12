@@ -1847,6 +1847,12 @@ pub struct DrawingLevel {
     #[serde(rename = "bendPoints", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub bend_points: Option<Vec<Vec2>>,
+    /// [221] Standard-Schnitt/-Ansicht eines neuen Projekts: die Linie folgt dem Gebäude (sonst der Parzelle), bis
+    /// sie bearbeitet wird (verschieben, drehen, Richtung wechseln löscht das Kennzeichen). Nur Schnitt/Ansicht;
+    /// der Kern führt die Linie im selben Undo-Schritt nach (`auto_lines.rs`).
+    #[serde(rename = "autoLine", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub auto_line: Option<bool>,
     /// [176] Schnittmarke im Grundriss: "arrow" (Pfeil mit Dreieck, Basis) oder "lAngle" (nur ein L je Ende). Fehlt ⇒ die
     /// Vorgabe der Modelldarstellung (`sectionMarks.style`), sonst Pfeil. Nur Schnitt.
     #[serde(rename = "markerStyle", default, skip_serializing_if = "Option::is_none")]

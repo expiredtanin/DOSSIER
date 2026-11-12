@@ -1,9 +1,11 @@
 // Kennzahlen und Raumprogramm-Prüfung (Wettbewerbswerkzeug, [41]/[61]/[62]/[70]).
 //
-//  • Flächen je Geschoss aus den Räumen (SIA 416: GF, NGF/aGF), Summe über das Gebäude.
+//  • Flächen je Geschoss nach SIA 416 (GF = NGF + KF, NGF, HNF), Summe über das Gebäude — dieselben Zahlen
+//    wie die Flächentabelle ([225]: eine Quelle, `flaechen.rs`).
 //  • Gebäudevolumen (GV) aus den freien Körpern (Massenmodell); Abzugskörper zählen nicht mit,
 //    ihr Volumen wird abgezogen. Ohne freie Körper GF × Geschosshöhe wie die Flächentabelle ([206]).
-//  • Ausnützungs-/Überbauungsziffer nur mit `project.parcelArea` oder der Parzellengrenze (`siteRules`).
+//  • AZ/ÜZ wie die IVHB-Ziffern der Tabelle mit ihren Vorgaben (aGF = NGF oberirdisch, aGbF), nur mit
+//    `project.parcelArea` oder der Parzellengrenze (`siteRules`).
 //  • Raumprogramm (`project.roomProgram`, Soll) gegen die gezeichneten Räume.
 // Exakt für Prismen/Kegelstümpfe/Kreise, Näherung sonst (Fasen/Rundungen). Raumflächen je
 // Geschoss und Kategorie, Volumen, Parzellenfläche und die SIA-416-Zusammenfassung rechnet der
@@ -19,24 +21,34 @@ import type { ProgramStatus } from "./roomProgram";
 export interface LevelKennzahlen {
   levelId: string;
   name: string;
-  /** Geschossfläche (SIA 416 GF) aus den Räumen. */
+  /** Geschossfläche SIA 416 (GF = NGF + KF), gleich der Zeile der Flächentabelle. */
   gf: number;
-  /** Anrechenbare Fläche ≈ Nettogeschossfläche NGF (NF + VF + FF). */
+  /** Anrechenbare Geschossfläche (Vorgabe NGF; Untergeschosse 0). */
   agf: number;
+  /** Nettogeschossfläche (NF + VF + FF). */
+  ngf: number;
+  /** Hauptnutzfläche. */
+  hnf: number;
   rooms: number;
 }
 
 export interface Kennzahlen {
   levels: LevelKennzahlen[];
+  /** Σ GF (SIA 416) = Summenzeile der Flächentabelle. */
   gf: number;
+  /** Anrechenbare Geschossfläche (IVHB, Basis NGF, oberirdisch) = Zähler der AZ. */
   agf: number;
+  ngf: number;
+  hnf: number;
+  /** Konstruktionsfläche (Σ). */
+  kf: number;
   /** Gebäudevolumen aus den freien Körpern (m³), Abzugskörper abgezogen; ohne Körper GF × Geschosshöhe. */
   gv: number;
-  /** Bebaute Fläche ≈ GF des untersten Geschosses (m²). */
+  /** Anrechenbare Gebäudefläche (IVHB aGbF, m²) = Zähler der ÜZ. */
   footprint: number;
   /** Ausnützungsziffer aGF / Parzelle; `null` ohne Parzellenfläche. */
   az: number | null;
-  /** Überbauungsziffer bebaute Fläche / Parzelle; `null` ohne Parzellenfläche. */
+  /** Überbauungsziffer aGbF / Parzelle; `null` ohne Parzellenfläche. */
   uez: number | null;
 }
 

@@ -45,6 +45,8 @@ export interface DrawingImportDecision {
   terrainContours?: boolean;
   /** [143] Name des Höhenlinien-Satzes (übersetzt). */
   terrainName?: string;
+  /** [221] Bezeichnung des Standort-Bezugs, den ein Import in Landeskoordinaten neu setzt (Dateiname). */
+  geoLabel?: string;
 }
 
 /** Rohergebnis des IFC-Lesers (`fileio`): Bericht (JSON), Positionen, Indizes, Zahlen der Bauteil-Erkennung. */
@@ -574,7 +576,8 @@ export class ProjectDocument {
    * Linienstile, 2D-Zeichnungen, Kontext-Meshes) und wendet sie als EINEN Undo-Schritt an.
    */
   importDrawing(base: Project, src: ImportSource, decision: DrawingImportDecision, now: number) {
-    return this.commitCore<{ levelId: string; drawings: number; meshes: number; terrainContours: number }>(base, (h) =>
+    // `shift`: Verschiebung Datei → Modell ([221] Landeskoordinaten auf den Projekt-Nullpunkt, sonst 0).
+    return this.commitCore<{ levelId: string; drawings: number; meshes: number; terrainContours: number; shift: [number, number] }>(base, (h) =>
       core().doc_import_drawing(h, src.geom, JSON.stringify(src.strings), JSON.stringify(src.source), JSON.stringify(decision), "", now),
     );
   }

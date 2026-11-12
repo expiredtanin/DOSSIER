@@ -34,11 +34,12 @@ describe("DXF-Import: Polylinien mit Bögen", () => {
     const [d] = toDrawings(dxf(PARZELLE));
     expect(d.geom.shape).toBe("polyline");
     if (d.geom.shape !== "polyline") return;
+    // [221] Landeskoordinaten relativ zum Projekt-Nullpunkt (Kilometerpunkt E 2 600 000 / N 1 200 000 unter der Mitte).
     expect(d.geom.pts).toEqual([
-      { x: 2600000, y: 1200000 },
-      { x: 2600030, y: 1200000 },
-      { x: 2600030, y: 1200030 },
-      { x: 2600000, y: 1200030 },
+      { x: 0, y: 0 },
+      { x: 30, y: 0 },
+      { x: 30, y: 30 },
+      { x: 0, y: 30 },
     ]);
     // Vorzeichen umgekehrt: Modell-Bulge > 0 = Scheitel links der Sehne, DXF > 0 = Gegenuhrzeigersinn.
     expect(d.geom.bulge).toEqual([-0.12, 0, 0.25, 0]);
@@ -49,7 +50,8 @@ describe("DXF-Import: Polylinien mit Bögen", () => {
     const contour = inspectDxf(dxf(PARZELLE)).contours[0].contours[0];
     const [d] = toDrawings(dxf(PARZELLE));
     if (d.geom.shape !== "polyline") throw new Error("Polylinie erwartet");
-    const ours = bulgePolylinePoints(d.geom.pts, d.geom.bulge, true);
+    // [221] Modell lokal um den Projekt-Nullpunkt: zurück in Landeskoordinaten wie die Tessellierung der Datei.
+    const ours = bulgePolylinePoints(d.geom.pts, d.geom.bulge, true).map((p) => ({ x: p.x + 2_600_000, y: p.y + 1_200_000 }));
     // Jeder Punkt der Import-Tessellierung liegt auf dem Linienzug der Modell-Polylinie (≤ 15 cm: Sehnenfehler der gröberen Modell-Tessellierung; die falsche Seite läge Meter daneben).
     const dist = (p: Vec2) => {
       let best = Infinity;

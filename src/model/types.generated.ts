@@ -1196,6 +1196,12 @@ export type DrawingLevel = {
    */
   bendPoints?: Array<Vec2>;
   /**
+   * [221] Standard-Schnitt/-Ansicht eines neuen Projekts: die Linie folgt dem Gebäude (sonst der Parzelle), bis
+   * sie bearbeitet wird (verschieben, drehen, Richtung wechseln löscht das Kennzeichen). Nur Schnitt/Ansicht;
+   * der Kern führt die Linie im selben Undo-Schritt nach (`auto_lines.rs`).
+   */
+  autoLine?: boolean;
+  /**
    * [176] Schnittmarke im Grundriss: "arrow" (Pfeil mit Dreieck, Basis) oder "lAngle" (nur ein L je Ende). Fehlt ⇒ die
    * Vorgabe der Modelldarstellung (`sectionMarks.style`), sonst Pfeil. Nur Schnitt.
    */
