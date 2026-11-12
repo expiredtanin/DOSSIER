@@ -979,7 +979,7 @@ pub fn transform_result(root: &Map<String, Value>, p: &Project, req: &TransformR
         ops.extend(add(key, items));
     }
     ops.extend(add("openings", new_openings));
-    crate::grips::GripResult { ops, notice: notice.get() }
+    crate::grips::GripResult { ops, notice: notice.get(), ..Default::default() }
 }
 
 // ── Ausrichten/Verteilen, Block definieren ───────────────────────────────────

@@ -20,6 +20,7 @@ import type { BooleanResult } from "../editors/booleanOps";
 import type { EngineView } from "../commands/engine";
 import { clearKinds, fromIdLists, hasTransformable, isEmpty, toMembership, toTransformSelection } from "./selection";
 import { registerSelectionActions } from "./selectionActions";
+import { joinCurrentSelection } from "./selectionJoin";
 import { transformOps } from "../tools/transform";
 import { addedIds, type PastedIds } from "../editors/elementClipboard";
 import { containingGroupId, EMPTY_MEMBERSHIP } from "./groupActions";
@@ -327,11 +328,7 @@ export function useSelectionCommands(opts: {
   // [185] Cmd/Ctrl+3/4/5/6: Auswahl in 3D zeigen/ausblenden, Geschoss tiefer/höher.
   useViewNavigationShortcuts(shortcutOverrides);
   // [190] Verbinden (Cmd/Ctrl+J) auch aus dem nativen Menü: dieselbe Aktion wie das Tastenkürzel.
-  const joinSelection = () => {
-    if (selection.drawings.length + selection.walls.length === 0) return;
-    engine.start("join");
-    setSelection({ drawings: [], walls: [] });
-  };
+  const joinSelection = () => void joinCurrentSelection(engine);
   registerSelectionActions({
     duplicate: duplicateSelection,
     toggleLock: toggleSelectionLock,

@@ -2324,7 +2324,15 @@ export const de = {
   // Alt+Klick). Labels für Befehlsleiste/Menüs.
   "edit.split.label": "Teilen",
   "edit.join.label": "Verbinden",
-  "cmd.join.nothing": "Nichts zu verbinden: Wände treffen sich bereits oder liegen zu weit auseinander.",
+  "cmd.join.few": "Zum Verbinden mindestens zwei Elemente wählen.",
+  "cmd.join.nothing": "Nichts zu verbinden.",
+  "cmd.join.far": "Nichts zu verbinden: Abstand zu gross ({d} m, höchstens {max} m).",
+  "cmd.join.met": "Nichts zu verbinden: die Wände treffen sich bereits.",
+  "cmd.join.cross": "Nichts zu verbinden: die Wände kreuzen sich.",
+  "cmd.join.parallel": "Nichts zu verbinden: die Wände sind parallel.",
+  "cmd.join.arc": "Nichts zu verbinden: Bogenwände werden nicht an Ecken verbunden.",
+  "cmd.join.locked": "Nichts zu verbinden: die Wände sind gesperrt.",
+  "cmd.join.floors": "Nichts zu verbinden: die Wände liegen auf verschiedenen Geschossen.",
   "edit.cutSegment.label": "Segment löschen",
   // Tab-Feld-Zyklus (Präzisionseingabe): geordnete Zahlenfelder je Schritt.
   "cmd.field.length": "Länge",

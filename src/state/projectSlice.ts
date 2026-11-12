@@ -596,7 +596,10 @@ export function createProjectSlice(
     const now = Date.now();
     if (notice === lastNotice.key && now - lastNotice.at < 2000) return;
     lastNotice = { key: notice, at: now };
-    get().notify(t(notice as Parameters<typeof t>[0]), "warning");
+    // `Schlüssel|arg|arg` ([190]): Zahlen aus dem Kern, im Text als {d}, {max}.
+    const [key, ...args] = notice.split("|");
+    const params = args.length ? { d: args[0], max: args[1] ?? "" } : undefined;
+    get().notify(t(key as Parameters<typeof t>[0], params), "warning");
   };
 
   // Griff-Änderung ([K4] S3): der Kern rechnet sie auf dem Dokument und wendet sie im selben Aufruf an

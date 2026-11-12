@@ -131,7 +131,8 @@ export function useCommandEngineHost(opts: {
           // Befehl). Move/Copy/Offset operieren darauf.
           // Im Schnitt/in der Ansicht nur die 2D-Elemente der Ebene: Bauteile
           // leben im Grundriss-Raum, ein Schnitt-Delta wäre dort falsch.
-          selection: sheetOnlySelection(c.activeLevel, toCommandSelection(c.selection)),
+          // Auswahl frisch aus dem Store ([190]): das native Menü ruft Befehle ausserhalb von React, die Render-Kopie kann dort veraltet sein.
+          selection: sheetOnlySelection(c.activeLevel, toCommandSelection(getState().selection)),
         };
       },
       snap: (raw, draftPoints, mods) => {

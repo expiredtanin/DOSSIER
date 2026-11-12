@@ -162,11 +162,13 @@ impl Request {
 pub struct GripResult {
     pub ops: Vec<Op>,
     pub notice: Option<&'static str>,
+    /// Zahlen/Texte für den Hinweis ([190]); die Antwort trägt sie als `Schlüssel|arg|arg` im Feld `notice`.
+    pub notice_args: Vec<String>,
 }
 
 impl From<Vec<Op>> for GripResult {
     fn from(ops: Vec<Op>) -> Self {
-        GripResult { ops, notice: None }
+        GripResult { ops, notice: None, notice_args: vec![] }
     }
 }
 
@@ -193,7 +195,7 @@ pub fn result_json(r: &GripResult) -> String {
     out.push(b']');
     if let Some(n) = r.notice {
         out.extend_from_slice(b",\"notice\":");
-        let _ = serde_json::to_writer(&mut out, n);
+        let _ = if r.notice_args.is_empty() { serde_json::to_writer(&mut out, n) } else { serde_json::to_writer(&mut out, &format!("{n}|{}", r.notice_args.join("|"))) };
     }
     out.push(b'}');
     String::from_utf8(out).unwrap_or_default()
@@ -460,7 +462,7 @@ pub fn run(lk: &Lookup, req: &Request) -> Result<GripResult, String> {
             let pts = arr(field(g, "pts"));
             let min = if truthy(field(g, "closed")) { 4 } else { 3 };
             if pts.len() < min {
-                return Ok(GripResult { ops: vec![], notice: Some("alert.polylineMinPoints") });
+                return Ok(GripResult { ops: vec![], notice: Some("alert.polylineMinPoints"), ..Default::default() });
             }
             let Some(k) = index_in(index, pts.len()) else { return Ok(GripResult::default()) };
             // Zwei Segmente werden eins: der Bogen des entfernten Segments fällt weg, das verbleibende behält
@@ -487,7 +489,7 @@ pub fn run(lk: &Lookup, req: &Request) -> Result<GripResult, String> {
             let Some(placed) = want.and_then(|w| crate::opening_slide::slide_to(root, o, w)) else { return Ok(GripResult::default()) };
             let v = with(o, "position", js_num(placed.position));
             let ops = if v == *o { vec![] } else { vec![replace("openings", v)] };
-            GripResult { ops, notice: placed.clamped.then_some(crate::opening_slide::NOTICE_OVERLAP) }
+            GripResult { ops, notice: placed.clamped.then_some(crate::opening_slide::NOTICE_OVERLAP), ..Default::default() }
         }
         other => return Err(format!("Unbekannte Griff-Änderung: {other}")),
     })

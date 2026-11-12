@@ -1038,10 +1038,20 @@ fn spot(ax: &Axis, x: P, tol: f64) -> Option<Spot> {
     }
 }
 
+/// T-Stoss ([190]): Punkt, an dem die Achse des Abzweigs (`ab`, Ende `at_end`) auf die dem Abzweig
+/// zugewandte Fläche der Durchgangswand `wt` trifft. Dort endet der Abzweig; `joins.rs`
+/// (`apply_mid_span_tee`) schneidet ihn an dieser Fläche, es bleibt kein Überstand im Durchgang.
+fn tee_face_point(pr: &Project, ab: &Axis, at_end: bool, wt: &Wall, at: &Axis) -> Option<P> {
+    let far = if at_end { ab.a } else { ab.b };
+    let (lo, hi) = faces(pr, wt);
+    let face = if at.local(far).1 >= 0.0 { hi } else { lo };
+    kernel2d::line_intersect(ab.a, ab.u, at.point(0.0, face), at.u).filter(|x| fin(*x))
+}
+
 /// Verbinden von Ecken ([190], Archicad-Art): gewählte gerade Wände eines Geschosses, deren Achsen sich
 /// nicht sauber treffen, werden bis zum Achsschnittpunkt verlängert bzw. gekürzt. Zwei Enden nahe am
 /// Schnittpunkt ergeben eine L-Ecke (beide rücken), ein Ende nahe am Schnittpunkt, der im Innern der
-/// anderen Wand liegt, einen T-Stoss (nur das Ende rückt). Toleranz je Paar: grösser von 0.5 m und der
+/// anderen Wand liegt, einen T-Stoss (nur das Ende rückt, an die zugewandte Fläche der Durchgangswand). Toleranz je Paar: grösser von 0.5 m und der
 /// doppelten Wanddicke. Jedes Ende rückt höchstens einmal (nahe Paare zuerst). Die Gehrung bzw. der
 /// Anschluss folgt aus den Enden (`joins.rs`); Öffnungen und Bemassung führt [`commit`] nach (wie
 /// Trim/Extend — Öffnungen bleiben im Plan stehen). Wände in `skip` (schon kollinear verkettet) und
@@ -1076,8 +1086,8 @@ pub fn connect_ops(root: &Map<String, Value>, pr: &Project, ids_sel: &[String], 
             let tol = 0.5_f64.max(2.0 * thick(wi).max(thick(wj)));
             match (spot(ai, x, tol), spot(aj, x, tol)) {
                 (Some(Spot::End(da, ea)), Some(Spot::End(db, eb))) => cands.push((da + db, vec![Move { i, at_end: ea, x }, Move { i: j, at_end: eb, x }])),
-                (Some(Spot::End(da, ea)), Some(Spot::Inner)) => cands.push((da, vec![Move { i, at_end: ea, x }])),
-                (Some(Spot::Inner), Some(Spot::End(db, eb))) => cands.push((db, vec![Move { i: j, at_end: eb, x }])),
+                (Some(Spot::End(da, ea)), Some(Spot::Inner)) => cands.push((da, vec![Move { i, at_end: ea, x: tee_face_point(pr, ai, ea, wj, aj).unwrap_or(x) }])),
+                (Some(Spot::Inner), Some(Spot::End(db, eb))) => cands.push((db, vec![Move { i: j, at_end: eb, x: tee_face_point(pr, aj, eb, wi, ai).unwrap_or(x) }])),
                 _ => {}
             }
         }
@@ -1115,6 +1125,83 @@ pub fn connect_ops(root: &Map<String, Value>, pr: &Project, ids_sel: &[String], 
         return vec![];
     }
     commit(root, pr, &Edit { plans, extra: vec![] }, &mut IdGen::new("join"))
+}
+
+/// Hinweis für die Hülle, wenn Verbinden ([190]) bei gewählten Wänden nichts bewirkt: i18n-Schlüssel, bei
+/// Zahlen mit `|`-getrennten Werten dahinter (`cmd.join.far|0.73|0.50` = Abstand, Toleranz in Metern).
+/// `None`, wenn kein Grund erkennbar ist (die Hülle zeigt dann den allgemeinen Hinweis).
+pub fn join_hint(pr: &Project, ids_sel: &[String]) -> Option<String> {
+    let sel: Vec<&Wall> = walls(pr).iter().filter(|w| ids_sel.contains(&w.id)).collect();
+    if sel.len() < 2 {
+        return None;
+    }
+    let free: Vec<&Wall> = sel.iter().copied().filter(|w| editable(w)).collect();
+    if free.len() < 2 {
+        return Some("cmd.join.locked".into());
+    }
+    let straight: Vec<(&Wall, Axis)> = free.iter().filter_map(|w| Axis::of(w).filter(|a| a.arc.is_none()).map(|a| (*w, a))).collect();
+    if straight.len() < 2 {
+        return Some("cmd.join.arc".into());
+    }
+    let (mut same_floor, mut parallel, mut met, mut crossing) = (false, false, false, false);
+    let mut far: Option<(f64, f64)> = None;
+    for i in 0..straight.len() {
+        for j in i + 1..straight.len() {
+            let ((wi, ai), (wj, aj)) = (&straight[i], &straight[j]);
+            if wi.floor_id != wj.floor_id {
+                continue;
+            }
+            same_floor = true;
+            let den = cross(ai.u, aj.u);
+            if den.abs() < 0.02 {
+                parallel = true;
+                continue;
+            }
+            let t = cross(P::new(aj.a.x - ai.a.x, aj.a.y - ai.a.y), aj.u) / den;
+            let x = P::new(ai.a.x + ai.u.x * t, ai.a.y + ai.u.y * t);
+            if !fin(x) {
+                continue;
+            }
+            // Abstand des Schnittpunkts zur Wand: 0 im Innern, sonst zum nächsten Ende.
+            let gap = |a: &Axis| {
+                let s = a.local(x).0;
+                if s > 0.0 && s < a.len {
+                    (0.0, true)
+                } else {
+                    (s.abs().min((s - a.len).abs()), false)
+                }
+            };
+            let ((gi, ini), (gj, inj)) = (gap(ai), gap(aj));
+            let thick = |w: &Wall| {
+                let (lo, hi) = faces(pr, w);
+                (hi - lo).abs()
+            };
+            let tol = 0.5_f64.max(2.0 * thick(wi).max(thick(wj)));
+            if ini && inj {
+                crossing = true;
+            } else if gi.max(gj) < 1e-6 {
+                met = true;
+            } else if gi.max(gj) > tol {
+                let g = gi.max(gj);
+                if far.map_or(true, |f| g < f.0) {
+                    far = Some((g, tol));
+                }
+            }
+        }
+    }
+    if !same_floor {
+        return Some("cmd.join.floors".into());
+    }
+    if let Some((g, tol)) = far {
+        return Some(format!("cmd.join.far|{g:.2}|{tol:.2}"));
+    }
+    if met {
+        return Some("cmd.join.met".into());
+    }
+    if crossing {
+        return Some("cmd.join.cross".into());
+    }
+    parallel.then(|| "cmd.join.parallel".into())
 }
 
 #[cfg(test)]
@@ -1534,7 +1621,7 @@ mod tests {
         // a endet 0.3 vor der Querwand b (die weiter durchläuft): nur a rückt, b bleibt.
         let r = project(vec![wall("a", (0.0, 0.0), (5.7, 0.0), None), wall("b", (6.0, -3.0), (6.0, 3.0), None)], vec![opening("o", "a", 1.0, 1.0)], vec![]);
         let n = apply(&r, connect_ops(&r, &typed(&r), &["a".into(), "b".into()], &[]));
-        assert!(close(xy_of(&w_of(&n, "a")["end"]), (6.0, 0.0)));
+        assert!(close(xy_of(&w_of(&n, "a")["end"]), (5.9, 0.0)));
         assert!(close(xy_of(&w_of(&n, "b")["start"]), (6.0, -3.0)));
         assert!(close(xy_of(&w_of(&n, "b")["end"]), (6.0, 3.0)));
         assert_eq!(arr(n.get("openings")).len(), 1);
@@ -1557,5 +1644,73 @@ mod tests {
         assert!(close(xy_of(&w_of(&n, "b")["start"]), (6.0, 0.0)));
         assert!(close(xy_of(&w_of(&n, "b")["end"]), (6.0, 4.0)));
         assert!(close(xy_of(&w_of(&n, "c")["start"]), (6.0, 4.0)));
+    }
+
+    #[test]
+    fn verbinden_t_stoss_endet_an_der_zugewandten_flaeche() {
+        // Wandtyp 0.2 m, Mitte: Fläche der Querwand b bei x = 5.9 bzw. 6.1.
+        let r = project(vec![wall("a", (0.0, 0.0), (5.7, 0.0), None), wall("b", (6.0, -3.0), (6.0, 3.0), None)], vec![], vec![]);
+        let n = apply(&r, connect_ops(&r, &typed(&r), &["a".into(), "b".into()], &[]));
+        assert!(close(xy_of(&w_of(&n, "a")["end"]), (5.9, 0.0)));
+        // Überstand durch die Querwand hindurch: gekürzt auf die Fläche.
+        let r = project(vec![wall("a", (0.0, 0.0), (6.4, 0.0), None), wall("b", (6.0, -3.0), (6.0, 3.0), None)], vec![], vec![]);
+        let n = apply(&r, connect_ops(&r, &typed(&r), &["a".into(), "b".into()], &[]));
+        assert!(close(xy_of(&w_of(&n, "a")["end"]), (5.9, 0.0)));
+        // Abzweig von der anderen Seite (Start am Durchgang): Fläche x = 6.1.
+        let r = project(vec![wall("a", (6.3, 0.0), (9.0, 0.0), None), wall("b", (6.0, -3.0), (6.0, 3.0), None)], vec![], vec![]);
+        let n = apply(&r, connect_ops(&r, &typed(&r), &["a".into(), "b".into()], &[]));
+        assert!(close(xy_of(&w_of(&n, "a")["start"]), (6.1, 0.0)));
+        // Referenzlinie links: Band x = 5.8 … 6.0.
+        let mut b = wall("b", (6.0, -3.0), (6.0, 3.0), None);
+        b["referenceLine"] = json!("left");
+        let r = project(vec![wall("a", (0.0, 0.0), (5.5, 0.0), None), b], vec![], vec![]);
+        let n = apply(&r, connect_ops(&r, &typed(&r), &["a".into(), "b".into()], &[]));
+        assert!(close(xy_of(&w_of(&n, "a")["end"]), (5.8, 0.0)));
+    }
+
+    #[test]
+    fn verbinden_t_stoss_passt_zu_den_wand_joins() {
+        use crate::joins::{compute_joins, JoinLayer, JoinWall, Reference};
+        use kernel2d::Vec2;
+        let r = project(vec![wall("a", (0.0, 0.0), (5.7, 0.0), None), wall("b", (6.0, -3.0), (6.0, 3.0), None)], vec![], vec![]);
+        let n = apply(&r, connect_ops(&r, &typed(&r), &["a".into(), "b".into()], &[]));
+        let jw = |id: &str| {
+            let w = w_of(&n, id);
+            let (s, e) = (xy_of(&w["start"]), xy_of(&w["end"]));
+            JoinWall {
+                start: Vec2 { x: s.0, y: s.1 },
+                end: Vec2 { x: e.0, y: e.1 },
+                reference: Reference::Center,
+                layers: Some(vec![JoinLayer { thickness: 0.2, component: Some(0), priority: 1.0 }]),
+                bulge: None,
+            }
+        };
+        let cuts = compute_joins(&[jw("a"), jw("b")]).unwrap();
+        // a bekommt einen Schnitt an der Fläche x = 5.9 (senkrecht zu a), b bleibt durchgehend.
+        let cut = cuts[0].end_cut.expect("T-Anschluss: Schnitt am Ende von a");
+        assert!((cut.point.x - 5.9).abs() < 1e-9 && cut.dir.x.abs() < 1e-9);
+        assert!(cuts[1].start_cut.is_none() && cuts[1].end_cut.is_none());
+    }
+
+    #[test]
+    fn verbinden_hinweis_nennt_den_grund() {
+        let ids = ["a".to_string(), "b".to_string()];
+        let hint = |ws: Vec<Value>| {
+            let r = project(ws, vec![], vec![]);
+            join_hint(&typed(&r), &ids)
+        };
+        // Zu weit auseinander: Abstand 1.7 m zur Ecke, Toleranz 0.5 m.
+        assert_eq!(hint(vec![wall("a", (0.0, 0.0), (4.3, 0.0), None), wall("b", (6.0, 0.0), (6.0, 4.0), None)]).as_deref(), Some("cmd.join.far|1.70|0.50"));
+        // Parallel (versetzt).
+        assert_eq!(hint(vec![wall("a", (0.0, 0.0), (4.0, 0.0), None), wall("b", (0.0, 1.0), (4.0, 1.0), None)]).as_deref(), Some("cmd.join.parallel"));
+        // Treffen sich schon.
+        assert_eq!(hint(vec![wall("a", (0.0, 0.0), (6.0, 0.0), None), wall("b", (6.0, 0.0), (6.0, 4.0), None)]).as_deref(), Some("cmd.join.met"));
+        // Kreuzung.
+        assert_eq!(hint(vec![wall("a", (0.0, 0.0), (6.0, 0.0), None), wall("b", (3.0, -2.0), (3.0, 2.0), None)]).as_deref(), Some("cmd.join.cross"));
+        // Bogenwand.
+        assert_eq!(hint(vec![wall("a", (0.0, 0.0), (6.0, 0.0), Some(0.5)), wall("b", (6.0, 0.0), (6.0, 4.0), None)]).as_deref(), Some("cmd.join.arc"));
+        // Eine Wand allein: kein besonderer Grund.
+        let r = project(vec![wall("a", (0.0, 0.0), (6.0, 0.0), None)], vec![], vec![]);
+        assert_eq!(join_hint(&typed(&r), &["a".to_string()]), None);
     }
 }
