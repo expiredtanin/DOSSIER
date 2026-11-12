@@ -52,13 +52,13 @@ test("Musterhaus komplex: Gelände und Schatten anwählen und bearbeiten (mit Un
   await expect(objInfo(page).locator(".objinfo-field").filter({ hasText: "Klasse" }).first()).toContainText("02");
   await expect(objInfo(page).getByTestId("terrain-mesh-visible")).toHaveCount(0);
 
-  // Schatten: EG 1:100, Klick in den Schlagschatten nördlich des Hauses (21. Juni, 10 Uhr; nördlich des Eingangs, ausserhalb der Baugrube).
+  // Schatten: EG 1:100, Klick in den Schlagschatten nördlich des Hauses (21. Juni, 10 Uhr; westlich des Eingangs, zwischen Baugrube und Massketten — [199] rückte Achsblasen/Ketten nach aussen).
   await showSnapshot(page, "EG 1:100");
   await openTab(page, "Objekt-Info");
   const time = objInfo(page).locator(".sun-time");
   await expect(async () => {
     await page.keyboard.press("Escape");
-    await clickModel(page, 6, 18.5);
+    await clickModel(page, 4, 13.5);
     await expect(time).toBeVisible({ timeout: 1000 });
   }).toPass({ timeout: 30_000 });
   await expect(objInfo(page)).toContainText("Schatten (Sonnenstand)");
