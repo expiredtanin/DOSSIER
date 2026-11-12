@@ -5,7 +5,7 @@
 // und den Diff der Dateien im Commit ansehen. Zahlen sind gerundet (Plan 1e-3 m, 3D 1e-4 m).
 import { describe, expect, it } from "vitest";
 import { createHash } from "node:crypto";
-import { computeSection, generateElevationPlan, generatePlan, generateSectionPlan, planToSvgString, projectToModel3d } from "../core";
+import { computeSection, generateElevationPlan, generatePlan, generateSectionPlan, planToSvgString, projectToModel3d, projectWithTemplate } from "../core";
 import { sampleProject } from "../model/sampleProject";
 import { buildComplexSampleProject } from "../model/sampleProjectComplex";
 import type { Project } from "../model/types";
@@ -75,6 +75,18 @@ for (const [name, make] of projects) {
           await expect(svgDigest(svg)).toMatchFileSnapshot(`__golden__/${name}-grundriss-${lvl.id}-${scale}.txt`);
         });
       }
+    }
+
+    // [207] Situationsplan 1:500 (Ansichtsvorlage „Situation WBW") und Schwarzplan.
+    for (const [id, file] of [["std-vt-situation-wbw", "situation"], ["std-vt-schwarzplan", "schwarzplan"]]) {
+      it(`${file} 1:500`, async () => {
+        const tpl = p.viewTemplates?.find((t) => t.id === id);
+        if (!tpl) return;
+        const tp = projectWithTemplate(p, "eg", tpl);
+        const show = new Set([...codes].filter((c) => tpl.layerVisibility?.[c] !== false));
+        const svg = planToSvgString(generatePlan(tp, "eg", show, undefined, tpl.detail ?? "grob", false, true, true, 500), { scaleDenominator: 500 });
+        await expect(svgDigest(svg)).toMatchFileSnapshot(`__golden__/${name}-${file}-500.txt`);
+      });
     }
 
     it("Schnitt", async () => {

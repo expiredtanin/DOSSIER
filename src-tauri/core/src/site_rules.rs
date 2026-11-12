@@ -496,7 +496,7 @@ pub(crate) fn wall_corners(start: Vec2, end: Vec2, thickness: f64) -> Vec<[f64; 
 }
 
 /// Grundriss einer Wand (Bogenwand [T2]: Kreisringsektor); `None` bei Länge 0.
-fn wall_footprint(p: &Project, w: &crate::model::Wall) -> Option<Ring> {
+pub(crate) fn wall_footprint(p: &Project, w: &crate::model::Wall) -> Option<Ring> {
     if hypot2(w.end.x - w.start.x, w.end.y - w.start.y) < 1e-9 {
         return None;
     }

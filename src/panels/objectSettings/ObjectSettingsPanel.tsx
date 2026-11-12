@@ -18,7 +18,7 @@ const AREA_TITLE = { object: "objsettings.area.object", appearance: "objsettings
 export function ObjectSettingsPanel() {
   const host = usePanelHost();
   const sel = useSelectionInfo();
-  const otherSelected = useStore((s) => s.selection.trees.length + s.selection.site.length > 0);
+  const otherSelected = useStore((s) => s.selection.trees.length + s.selection.cameras.length + s.selection.site.length > 0);
   const isGrid = useStore((s) => (sel?.kind === "drawing2d" ? s.project.drawings2d.find((d) => d.id === sel.id)?.geom.shape === "grid" : false));
   const wanted = useSyncExternalStore(subscribeSettingsArea, getSettingsArea, getSettingsArea);
 
@@ -58,7 +58,7 @@ export function ObjectSettingsPanel() {
         </div>
       )}
       <div className="objset-body" role="tabpanel" aria-label={t(AREA_TITLE[area])}>
-        {area === "object" ? <ObjectInfoPanel /> : <AttributesPanel />}
+        {area === "object" ? <ObjectInfoPanel showPlacement={false} /> : <AttributesPanel />}
       </div>
     </div>
   );

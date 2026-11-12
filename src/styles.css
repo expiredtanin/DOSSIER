@@ -2089,6 +2089,36 @@ body {
   height: 100% !important;
 }
 
+/* [213] Begehen und Kamera anlegen: kleine Knöpfe oben rechts im 3D-Viewport. */
+.viewport3d-tools {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 6;
+  display: flex;
+  gap: 6px;
+}
+.viewport3d-tool {
+  padding: 3px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--label);
+  font-size: 11px;
+  cursor: pointer;
+  opacity: 0.85;
+}
+.viewport3d-tool:hover {
+  background: var(--panel-2);
+  opacity: 1;
+}
+.viewport3d-tool.is-on {
+  background: var(--active-dim);
+  border-color: var(--active-light);
+  color: var(--active-light);
+  opacity: 1;
+}
+
 .viewport-fallback {
   position: absolute;
   inset: 0;
@@ -6981,168 +7011,36 @@ body {
   border-color: var(--accent);
 }
 
-/* Schwebendes Dialog-Fenster zum Bearbeiten eines Rich-Text-Dokuments
-   (Raum-Stempel / Textobjekt) — DOSSIER §4: zentriert, --shadow-3, radius 8,
-   Titel „Text bearbeiten", Kopf mit Schliessen-✕, Fuss Abbrechen/Übernehmen. */
-.texteditor-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.28);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
+/* [218] Abschnitt „Raumstempel" der Objekteinstellungen (früher Dialog). */
+.roomstamp-fontrow {
+  border-bottom: 1px solid var(--line);
 }
-.texteditor-dialog {
-  display: flex;
-  flex-direction: column;
-  width: 560px;
-  max-width: calc(100vw - 32px);
-  height: 420px;
-  max-height: calc(100vh - 32px);
-  background: var(--panel);
+.roomstamp-fontrow .objinfo-field {
+  border-bottom: none;
+}
+.roomstamp-fontattrs {
+  gap: 4px;
+  justify-content: flex-end;
+}
+.roomstamp-size {
+  flex: 0 0 56px;
+  width: 56px;
+  min-width: 0;
+}
+.roomstamp-fontbtn {
   border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: var(--shadow-3);
-  overflow: hidden;
+  border-radius: 6px;
+  min-width: 26px;
+  height: 26px;
 }
-.texteditor-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--border);
-}
-.texteditor-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--ink);
-}
-.texteditor-x {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
+.roomstamp-color {
+  width: 28px;
   height: 26px;
   padding: 0;
-  border: 1px solid transparent;
-  border-radius: 999px;
-  background: transparent;
-  color: var(--muted);
-  cursor: pointer;
-  transition: background 0.14s, color 0.14s, border-color 0.14s;
-}
-.texteditor-x:hover {
-  background: var(--accent-dim);
-  border-color: var(--accent-border);
-  color: var(--accent);
-}
-.texteditor-x .material-symbols-outlined {
-  font-size: 18px;
-  line-height: 1;
-}
-.texteditor-body {
-  flex: 1 1 auto;
-  min-height: 0;
-  display: flex;
-  padding: 12px;
-  overflow: auto;
-}
-.texteditor-body .rt-editor {
-  flex: 1 1 auto;
-  min-height: 0;
-}
-.texteditor-foot {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-  padding: 10px 12px;
-  border-top: 1px solid var(--border);
-}
-.texteditor-btn {
   border: 1px solid var(--border);
-  background: var(--input);
-  color: var(--ink);
-  font-family: inherit;
-  font-size: 12px;
-  font-weight: 600;
-  padding: 5px 14px;
-  border-radius: 999px;
-  cursor: pointer;
-  transition: background 0.14s, color 0.14s, border-color 0.14s;
-}
-.texteditor-btn:hover {
-  border-color: var(--accent-border);
-  background: var(--accent-dim);
-  color: var(--accent);
-}
-.texteditor-btn-primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-}
-.texteditor-btn-primary:hover {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-  filter: brightness(1.08);
-}
-
-/* Strukturierter Raum-Stempel-Editor (Feldmodell). */
-.roomstamp-dialog {
-  height: auto;
-}
-.roomstamp-body {
-  flex-direction: column;
-  gap: 10px;
-  overflow: auto;
-}
-.roomstamp-field {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.roomstamp-label {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--muted);
-}
-.roomstamp-input {
-  border: 1px solid var(--border);
-  background: var(--input);
-  color: var(--ink);
-  font-family: inherit;
-  font-size: 13px;
-  padding: 5px 8px;
   border-radius: 6px;
-}
-.roomstamp-input:focus {
-  outline: none;
-  border-color: var(--accent-border);
-}
-.roomstamp-input:disabled {
-  opacity: 0.5;
-}
-.roomstamp-check {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  color: var(--ink);
+  background: transparent;
   cursor: pointer;
-}
-/* Zeile mit Feld/Häkchen links und Ausrichtungs-Umschalter rechts. */
-.roomstamp-row {
-  display: flex;
-  align-items: flex-end;
-  gap: 8px;
-}
-.roomstamp-row .roomstamp-field {
-  flex: 1;
-}
-.roomstamp-row .roomstamp-check {
-  flex: 1;
 }
 /* Drei-Wege-Umschalter (links/mitte/rechts) je Stempelzeile. */
 .roomstamp-align {

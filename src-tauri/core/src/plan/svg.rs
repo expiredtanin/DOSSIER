@@ -24,10 +24,10 @@ use std::f64::consts::PI;
 /// `x`/`y0` = Anker in SVG-Koordinaten, `mm_to_m` = Modell-Meter je Papier-mm.
 fn stamp_svg(v: &Value, x: f64, y0: f64, mm_to_m: f64) -> String {
     use crate::model::RichTextDoc;
-    use crate::text_layout::{stamp_block, stamp_line_offsets, LineAlign, PT_TO_MM};
+    use crate::text_layout::{stamp_block, stamp_line_offsets, PT_TO_MM};
     let doc: RichTextDoc = v.get("doc").and_then(|d| serde_json::from_value(d.clone()).ok()).unwrap_or_default();
     let extra: Vec<crate::plan::prim::StampLine> = v.get("extraLines").and_then(|d| serde_json::from_value(d.clone()).ok()).unwrap_or_default();
-    let rows: Vec<(&str, LineAlign)> = extra.iter().map(|l| (l.text.as_str(), LineAlign::of(Some(l.align)))).collect();
+    let rows: Vec<crate::text_layout::ExtraRow> = extra.iter().map(|l| l.row()).collect();
     let color = jstr(v, "color").unwrap_or("");
     let o = op_json(v);
     // In Papier-mm setzen (Schriftgrössen auf 1/1000 gerundet), dann in Modell-Meter umrechnen.
@@ -596,7 +596,7 @@ mod tests {
         let doc = crate::text_layout::doc_from_text("Wohnen", &bold);
         let mut w = Writer::new(true);
         let g = w.begin_group();
-        w.push(&Primitive::Text { at: Vec2 { x: 2.0, y: 2.0 }, doc, extra_lines: vec![StampLine { text: "20.00 m²".into(), align: Align::Center }], base_pt: 10.0, color: "#111111".into(), room_id: Some("r".into()), greyed: None, opacity: None });
+        w.push(&Primitive::Text { at: Vec2 { x: 2.0, y: 2.0 }, doc, extra_lines: vec![StampLine::plain("20.00 m²".into(), Align::Center)], base_pt: 10.0, color: "#111111".into(), room_id: Some("r".into()), greyed: None, opacity: None });
         w.end_group(g);
         let bytes = w.finish();
         let view = View::parse(&bytes).unwrap();

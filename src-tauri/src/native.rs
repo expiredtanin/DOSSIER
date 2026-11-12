@@ -259,16 +259,11 @@ struct Model3d {
 #[cfg(feature = "native3d")]
 fn upload_model3d(renderer: &mut Renderer3d, device: &wgpu::Device, model: &Model3d) {
     renderer.upload_model(device, &model.walls, &model.slabs, &model.meshes);
-    let (tris, lines) = match &model.ghost {
-        Some(g) => render3d::ghost::ghost_buffers(render3d::scene::PartInput {
-            walls: g.walls.clone(),
-            slabs: g.slabs.clone(),
-            meshes: g.meshes.clone(),
-            roof_layers: Vec::new(),
-        }),
-        None => (Vec::new(), Vec::new()),
+    let ghost = match &model.ghost {
+        Some(g) => render3d::scene::PartInput { walls: g.walls.clone(), slabs: g.slabs.clone(), meshes: g.meshes.clone(), roof_layers: Vec::new() },
+        None => render3d::scene::PartInput::default(),
     };
-    renderer.set_ghost_model(device, &tris, &lines);
+    renderer.set_ghost_model(device, ghost);
 }
 
 #[cfg(feature = "native3d")]

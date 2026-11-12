@@ -9,6 +9,7 @@
 //!    Flächen-Körper, je Empfänger (Gelände, Decken, Dachflächen unter dem Schnitt) projiziert.
 //!  • [`without_holes`]: Polygon mit Löchern → lochfreie Teile gleicher Fläche (Plan-Primitiv).
 
+use crate::jsnum::ClampSafe;
 use crate::flat::{Polygon, Ring};
 use crate::polygon_bool;
 
@@ -890,7 +891,7 @@ fn wall_gaps(os: &[&crate::model::Opening], axis: f64, zb: f64, zt: f64) -> Vec<
             let (ua, ub) = (w * i as f64 / n as f64, w * (i + 1) as f64 / n as f64);
             let (Some(ra), Some(rb)) = (crate::opening_shape::v_range(&shape, ua + eps), crate::opening_shape::v_range(&shape, ub - eps)) else { continue };
             let (lo, hi) = (ob + ra.0.max(rb.0), ot.min(ob + ra.1.min(rb.1)));
-            let (u0, u1) = ((pos + ua).clamp(from, to), (pos + ub).clamp(from, to));
+            let (u0, u1) = ((pos + ua).clamp_safe(from, to), (pos + ub).clamp_safe(from, to));
             if u1 - u0 >= MIN_GAP && hi - lo > MIN_GAP {
                 out.push([u0, u1, lo, hi]);
             }

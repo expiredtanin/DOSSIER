@@ -98,6 +98,20 @@ pub struct Model3dCache {
     pub last_rebuilt: (usize, usize),
     /// [180] Statistik (Tests): im letzten Aufruf neu gerechnete Öffnungs-Varianten (Klassen-Filter).
     pub last_variants: usize,
+    /// [214] Übrige Gruppen (Decken, Treppen, Kontext, Körper, Stützen, Dächer) ungefiltert zum letzten Stand: gleich,
+    /// solange keine Wand/Öffnung und kein anderes Feld (`sig`) sich ändert — die Geisterschicht fragt im selben
+    /// Durchgang mit anderem Klassen-Filter, Ein-/Ausblenden ändert nur den Filter.
+    rest: Option<(RestKey, Parts)>,
+    /// [214] Statistik (Tests): ob der letzte Aufruf die übrigen Gruppen aus `rest` nahm.
+    pub last_rest_hit: bool,
+}
+
+/// [214] Schlüssel der übrigen Gruppen: Schnitt-Variante der Treppen und Element-Stände der Wände/Öffnungen.
+#[derive(Debug, PartialEq)]
+struct RestKey {
+    for_section: bool,
+    walls: Vec<u64>,
+    openings: Vec<u64>,
 }
 
 /// Ergebnis: die Teile (Wände/Öffnungen nur mit `structs`) und das JSON wie `serde_json::to_string(&parts)`.
@@ -306,20 +320,28 @@ impl Model3dCache {
         }
         self.last_variants = variants_built;
 
-        let mut slabs = model3d::emit_slabs(p);
-        slabs.extend(model3d::emit_stairs(p, for_section));
-        let mut parts = Parts {
-            walls: Vec::new(),
-            slabs,
-            context_meshes: model3d::emit_context_meshes(p),
-            solid_meshes: model3d::emit_solids(p),
-            column_meshes: { let mut m = model3d::emit_columns(p); m.extend(model3d::emit_trees(p)); m },
-            opening_meshes: Vec::new(),
-            stair_meshes: model3d::emit_stair_meshes(p),
-            stair_railings: model3d::emit_stair_railings(p),
-            roof_meshes: model3d::emit_roofs(p, None)?,
-            roof_layers: model3d::emit_roof_cut_layers(p)?,
-        };
+        // [214] Übrige Gruppen: aus `rest`, solange Stände und Variante gleich sind (sonst neu, mit den schon
+        // bekannten Schnittlinien fürs Deckenauflager).
+        let key = RestKey { for_section, walls: wall_stamps.to_vec(), openings: opening_stamps.to_vec() };
+        self.last_rest_hit = matches!(&self.rest, Some((k, _)) if *k == key);
+        if !self.last_rest_hit {
+            let mut slabs = model3d::emit_slabs_with(p, Some(&joins));
+            slabs.extend(model3d::emit_stairs(p, for_section));
+            let all = Parts {
+                walls: Vec::new(),
+                slabs,
+                context_meshes: model3d::emit_context_meshes(p),
+                solid_meshes: model3d::emit_solids(p),
+                column_meshes: { let mut m = model3d::emit_columns(p); m.extend(model3d::emit_trees(p)); m },
+                opening_meshes: Vec::new(),
+                stair_meshes: model3d::emit_stair_meshes(p),
+                stair_railings: model3d::emit_stair_railings(p),
+                roof_meshes: model3d::emit_roofs(p, None)?,
+                roof_layers: model3d::emit_roof_cut_layers(p)?,
+            };
+            self.rest = Some((key, all));
+        }
+        let mut parts = self.rest.as_ref().map(|(_, r)| r.clone()).expect("gerade gesetzt");
         filter.retain_rest(p, &mut parts);
         // JSON in einem Zug (wie `serde_json::to_string(&parts)`): Bruchstücke sammeln, dann einmal kopieren.
         // [180] Ausgeblendete Einträge bleiben beim Aufrufer (`keep`), damit Einblenden nichts neu schickt.
@@ -843,5 +865,89 @@ mod tests {
         d.undo();
         d.model3d_parts(true, 2.0, false, false, None).unwrap();
         assert_eq!(d.model3d_rebuilt(), (1, 1));
+    }
+
+    /// [214] Die übrigen Gruppen (Decken, Dächer …) rechnet ein zweiter Aufruf mit anderem Klassen-Filter (Geisterschicht)
+    /// nicht neu; eine Wand-Änderung oder die Schnitt-Variante schon. Ergebnisse gleich voll: `incremental_equals_full_*`.
+    #[test]
+    fn uebrige_gruppen_aus_dem_cache() {
+        let mut d = sample();
+        let q = |d: &mut Document, text: &str, for_section: bool| d.model3d_parts_with(true, 2.0, for_section, false, None, text).unwrap().json;
+        let all = q(&mut d, "", false);
+        assert!(!d.model3d_rest_hit());
+        let grey = q(&mut d, r#"{"grey":["30"],"ghost":true}"#, false);
+        assert!(d.model3d_rest_hit(), "anderer Filter: aus dem Cache");
+        assert_ne!(all, grey);
+        assert_eq!(q(&mut d, "", false), all);
+        assert!(d.model3d_rest_hit());
+        q(&mut d, "", true);
+        assert!(!d.model3d_rest_hit(), "Schnitt-Variante der Treppen");
+        let mut w = list(&d, "walls")[2].clone();
+        w["height"] = json!(w["height"].as_f64().unwrap_or(2.6) + 0.2);
+        d.commit(vec![Op::Replace { collection: "walls".into(), entity: w }], None, 0.0, false).unwrap();
+        q(&mut d, "", true);
+        assert!(!d.model3d_rest_hit(), "Wand geändert");
+    }
+
+    /// [214] Messung (von Hand): wo die Zeit einer Teil-Abfrage nach einer Wand-Änderung bleibt.
+    /// `BENCH_FILE=gross.obp cargo test --release --lib model3d_cache::tests::bench214 -- --ignored --nocapture`
+    /// (`gross.obp` aus `dossier-cli :gross migrate --out gross.obp`).
+    #[test]
+    #[ignore]
+    fn bench214() {
+        use std::time::Instant;
+        let Ok(path) = std::env::var("BENCH_FILE") else { return };
+        let ms = |t: Instant| t.elapsed().as_secs_f64() * 1e3;
+        let mut d = Document::default();
+        d.load_file(&std::fs::read_to_string(path).unwrap(), 0.0).unwrap();
+        let t = Instant::now();
+        let n = d.model3d_parts(true, 2.0, false, true, None).unwrap().json.len();
+        println!("kalt: {:.1} ms ({n} Zeichen)", ms(t));
+        let mut runs = Vec::new();
+        for k in 0..5 {
+            let walls = list(&d, "walls");
+            let mut w = walls[(k * 37) % walls.len()].clone();
+            let x = w["end"]["x"].as_f64().unwrap_or(0.0);
+            w["end"]["x"] = json!(x + 0.01);
+            d.apply(&[Op::Replace { collection: "walls".into(), entity: w }]).unwrap();
+            let t = Instant::now();
+            d.model3d_parts(true, 2.0, false, true, Some(0)).unwrap();
+            runs.push(ms(t));
+        }
+        println!("nach Wand-Änderung: {runs:.1?} ms, neu: {:?}", d.model3d_rebuilt());
+        let p = d.project().unwrap().clone();
+        let lap = |name: &str, f: &dyn Fn()| {
+            let t = Instant::now();
+            for _ in 0..3 {
+                f();
+            }
+            println!("  {name:<28} {:.1} ms", ms(t) / 3.0);
+        };
+        lap("Fugen-Eingabe je Geschoss", &|| {
+            for (_, idx) in crate::model3d::floor_groups(&p) {
+                crate::model3d::floor_join_input(&p, &idx);
+            }
+        });
+        lap("Geschoss-Kontexte", &|| {
+            let mut seen = std::collections::HashSet::new();
+            for w in &p.walls {
+                if seen.insert(w.floor_id.clone()) {
+                    crate::model3d::floor_context_with(&p, &w.floor_id, true, None);
+                }
+            }
+        });
+        lap("emit_slabs", &|| drop(crate::model3d::emit_slabs(&p)));
+        lap("  Auflager (ohne Fugen)", &|| drop(crate::model3d::bearing::ceiling_bearing_outlines(&p)));
+        let mut c2 = super::Model3dCache::default();
+        let joins = c2.joins(&p);
+        lap("  Auflager (Fugen bekannt)", &|| drop(crate::model3d::bearing::bearing_outlines(&p, |_| true, Some(&joins))));
+        lap("emit_stairs", &|| drop(crate::model3d::emit_stairs(&p, false)));
+        lap("emit_context_meshes", &|| drop(crate::model3d::emit_context_meshes(&p)));
+        lap("emit_solids", &|| drop(crate::model3d::emit_solids(&p)));
+        lap("emit_columns+trees", &|| drop(crate::model3d::emit_columns(&p)));
+        lap("emit_stair_meshes", &|| drop(crate::model3d::emit_stair_meshes(&p)));
+        lap("emit_stair_railings", &|| drop(crate::model3d::emit_stair_railings(&p)));
+        lap("emit_roofs", &|| drop(crate::model3d::emit_roofs(&p, None)));
+        lap("emit_roof_cut_layers", &|| drop(crate::model3d::emit_roof_cut_layers(&p)));
     }
 }

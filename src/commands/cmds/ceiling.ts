@@ -10,8 +10,8 @@
 // bestehende Decken-Darstellung (generatePlan / 3D); der Draft zeigt den Umriss.
 //
 // Herkunft der Decken-Felder (CommandContext):
-//   • wallTypeId  ← ctx.activeWallTypeId (Fallback: erster Projekt-Wandtyp) — der
-//     Schichtaufbau (Bauteil/Schraffur/Material) wird identisch zur Wand aufgelöst.
+//   • ceilingTypeId ← erster Deckentyp des Projekts (`ceilingTypes`, [206]); ohne Deckentypen gilt
+//     das Pflichtfeld wallTypeId ← ctx.activeWallTypeId (Fallback: erster Projekt-Wandtyp).
 //   • floorId     ← ctx.level.id (aktives Geschoss)
 //   • categoryCode← "30" (Ebene „Decken"; Fallback ctx.defaultCategoryCode)
 

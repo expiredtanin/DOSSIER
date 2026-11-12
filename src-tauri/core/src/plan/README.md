@@ -22,10 +22,12 @@ Herkunft, kein Wegweiser.
 | `drawings.rs` | freie 2D-Zeichnungen (Linie bis Bild, Bemassung, Blöcke), Zeichnungs-Stücke, kompakte Linien-Unterlage |
 | `context.rs` | Kontext (Höhenlinien, Fussabdrücke importierter Gebäude, Gelände) und Schnittführungs-Symbole |
 | `mesh_plan.rs` | importierte Netze und ([G1]) freie Körper über ihr Kern-Netz im Grundriss: geschnitten, darunter, darüber |
+| `situation.rs` | Situationsplan/Schwarzplan ([207]): Modelldarstellung mit `situation` ersetzt die Bauteile durch den gefüllten Umriss des eigenen Gebäudes (Klasse 83), füllt Kontextnetze (Klasse des Netzes) und zeichnet Nordpfeil/Massstabsbalken (Klasse 84) |
 | `ceiling_plan.rs` | Deckenspiegel als eigene Ebenen-Art |
 | `floor_finish.rs` | Bodenbelag-Muster nach Massstab |
 | `model_view.rs` | Modelldarstellung ([173]): Optionen je Bauteilart über dem Detailgrad, Rangfolge Element > Typ > Stufe > Basis |
 | `trees.rs` | Bäume in Grundriss, Schnitt und Ansicht |
+| `cameras.rs` | [213] Kameras im Grundriss: Gehäuse, Sichtkegel, Ziel, Name, Pick-Bänder (Klasse „Kameras“) |
 | `stamp_place.rs` | Hindernisse für die Lage der Raumstempel |
 | `view_range.rs` | Ansichtsbereich: Schnitthöhe, Ober- und Unterkante der Sicht |
 | `extras.rs` | Zutaten: Schatten und Baurecht, Abzugskörper, Strichstärken nach Massstab, Schwarz-Weiss, Ausmass |

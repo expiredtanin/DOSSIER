@@ -11,13 +11,16 @@ kommt als Teile aus dem Kern (`src/plan/toWalls3d.ts`). Weg eines Modells in den
 | `Wasm3DViewport.tsx` | die 3D-Ansicht: Canvas, Maus und Tastatur, Auswahl, Griffe, Cursor-HUD, Live-Schnitt |
 | `Viewport3D.tsx` | Zugang zur Ansicht (`Viewport3D = Wasm3DViewport`) und die geteilten Typen (`RenderDisplay`, `DisplayResolver`) |
 | `useWasm3dRenderer.ts` | Hook: lädt render3d, hält Modell, Kamera und Punktwolken, zeichnet; Typ `Camera3d` |
+| `cameraView.ts` | [213] Kamera-Element (`Project.cameras`) ↔ Sicht des Viewports: `cameraToView`, `cameraFromView`, Brennweite, Geschoss zur Höhe |
+| `walk.ts` | [213] Begehen (WASD): Bewegung und Umschauen als reine Funktionen auf dem Orbit-Zustand |
 | `cameraBridge.ts` | Kamera von aussen lesen und setzen, Bild-Schnappschuss, Live-Schnittebene (für BCF-Viewpoints) |
 
 ## Abgleich mit render3d
 
 | Datei | Inhalt |
 |---|---|
-| `ghostSync.ts` | Prüfsumme der Geisterschicht (graue Klassen/Geschosse): render3d bekommt sie nur bei Änderung neu |
+| `ghostSync.ts` | Geisterschicht (graue Klassen/Geschosse) als Teile an render3d (`GhostLayerSync`, nur Geändertes, [214]); Prüfsumme für Ganz-Weg und Spuren/Muster |
+| `render3d.bench.test.ts` | [214] Messung der 3D-Kette je Szene (`BENCH_3D=1`), schreibt die Eingaben für `render_png --bench` |
 | `model3dPartsSync.ts` | schickt nur neue, geänderte und entfernte Modellteile an render3d (`set_parts`) |
 | `pointCloudSync.ts` | Punktwolken-Store gegen render3d abgleichen: neu laden, umstellen oder entfernen (`[27]`) |
 | `materialTextures.ts` | dekodiert die Farbkarten der Materialien für den Stil „Textured" |

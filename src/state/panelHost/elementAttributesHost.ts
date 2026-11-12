@@ -45,7 +45,7 @@ function targetIds(collection: MultiCollection, id: string): string[] {
 const ROOF_OWN_KEYS: ReadonlySet<string> = new Set(["outline", "holes", "outlineBulge", "holesBulge", "edgePitchDeg", "dormers"]);
 
 export function buildElementAttributesHost(c: FlatHostOpts) {
-  const { applyChange, onOpenStampEditor, onToggleSection3dCut, openResources, patchLevel, project, section3dCutId, sectionLine, selection, patchDoorType, patchWindowType, saveOpeningStyle, setCeilingThickness, setWallThickness, slideOpening, updateCeiling, updateOpening, updateRoof, updateRoom, updateStair, updateWall } = c;
+  const { applyChange, onToggleSection3dCut, openResources, patchLevel, project, section3dCutId, sectionLine, selection, patchDoorType, patchWindowType, saveOpeningStyle, setCeilingThickness, setWallThickness, slideOpening, updateCeiling, updateOpening, updateRoof, updateRoom, updateStair, updateWall } = c;
   /** Wie {@link patchAll}, aber mit Änderungsfunktion je Element (z. B. Stützen-Profil). */
   function mapAll<K extends MultiCollection>(collection: K, id: string, fn: (e: EntityOf<(typeof PROJECT_LIST)[K]>) => EntityOf<(typeof PROJECT_LIST)[K]>, coalesceKey?: string): void {
     const ids = targetIds(collection, id);
@@ -308,7 +308,6 @@ export function buildElementAttributesHost(c: FlatHostOpts) {
     onSetRoomSia: (category) => {
       if (selection?.kind === "room") patchAll("rooms", selection.id, { siaCategory: category });
     },
-    onEditRoomStamp: (roomId) => onOpenStampEditor(roomId),
     // ── Extrusions-Attribute (truck-Integration; nur bei selektiertem Körper) ──
     onSetExtrudedSolidHeight: (height) => {
       if (selection?.kind !== "extrudedSolid" || !(height > 0)) return;

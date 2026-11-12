@@ -7,7 +7,7 @@
 // Bewusst TS: die Rahmen-Ecken einer Textspalte (`textFrameCorners` braucht die Schrift-Metrik der
 // Hülle) — der Kern meldet dafür nur „Textspalte".
 
-import type { Ceiling, Drawing2D, Drawing2DGeom, EdgeGrip, Project, Vec2, Wall } from "../model/types";
+import type { Camera, Ceiling, Drawing2D, Drawing2DGeom, EdgeGrip, Project, Vec2, Wall } from "../model/types";
 import { documentFor } from "../core/document";
 import { core } from "../engine/coreWasm";
 import { toMarkedJson } from "../core/ops";
@@ -46,6 +46,9 @@ export type GripRequest =
   // [176] Schnittlinie: 0 = Anfang, dann `bendPoints`, zuletzt das Ende.
   | { op: "sectionLineGrip"; id: string; index: number; pt: P }
   | { op: "sectionBendInsert"; id: string; seg: number; pt: P }
+  // [213] Kamera: 0 = Standpunkt, 1 = Ziel, 2 = Bildwinkel bzw. Sichtbreite (Kern `camera::grip_edit`); `cameraBy` verschiebt Standpunkt und Ziel.
+  | { op: "cameraGrip"; id: string; index: number; pt: P }
+  | { op: "cameraBy"; id: string; delta: P }
   | { op: "sectionBendDelete"; id: string; index: number }
   | { op: "sectionLineTidy"; id: string; tol?: number }
   // [26] Ecke an Umriss-Ringen einfügen (hinter Kante `seg`), löschen, aufräumen (Kern `ring_edit`); Dach: flacher Index.
@@ -97,6 +100,14 @@ export function drawingVertices(d: Drawing2D, scaleDenominator: number = DEFAULT
   const n = f[0] ?? 0;
   const out: Vec2[] = new Array(n);
   for (let i = 0; i < n; i++) out[i] = { x: f[1 + 2 * i], y: f[2 + 2 * i] };
+  return out;
+}
+
+/** [213] Griffe einer Kamera im Grundriss beim Massstab 1:`scaleDenominator`: Standpunkt, Ziel, Bildwinkel/Sichtbreite (Kern `camera::grip_points`). */
+export function cameraGripPoints(c: Camera, scaleDenominator: number = DEFAULT_SCALE_DENOMINATOR): Vec2[] {
+  const f = core().camera_grip_points(JSON.stringify(c), scaleDenominator);
+  const out: Vec2[] = [];
+  for (let i = 0; i + 1 < f.length; i += 2) out.push({ x: f[i], y: f[i + 1] });
   return out;
 }
 

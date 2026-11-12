@@ -292,6 +292,7 @@ Beispiel: Die Plan-Ansicht zeigt das Erdgeschoss im Massstab 1:100.
 | SVG (CLI, Goldens) | `planToSvgString()` in `src/export/planToSvgString.ts` | `plan_svg_string()` → `plan_svg()` in `plan/svg.rs` | Text |
 | PDF eines Plans | `src/export/exportPdf.ts`: `planToRenderScene()` → `sceneToPrintSvg()` (`src/export/sceneToPrintSvg.ts`) | `plan_scene_f64()` in `plan/scene.rs` | jsPDF und svg2pdf.js |
 | Layout-Blatt, Blatt-PDF | `planToPrintSvg()` in `src/export/planToPrintSvg.ts`, aufgerufen von `src/ui/LayoutSheet.tsx` und `src/export/layoutPdf.ts` | `plan_print_svg_ops()` → `print_svg_ops()` in `plan/print_svg.rs` | SVG-Knoten in Papier-mm |
+| Bild auf dem Layout-Blatt, Plakat-Vorlage ([208]) | `src/model/layoutImages.ts` (Data-URL, Zuschnitt), `src/model/posterTemplates.ts`, Bildzeichnen in `layoutPdf.ts` (`drawImagesPdf`, JPEG ohne Neukompression), `LayoutSheet.tsx` | `layout_image.rs`, `layout_poster.rs` über `layout_call` | `Layout.images`, Master mit Raster/Kopfzeile |
 | DXF, DWG | `src/export/exportDxf.ts` | `plan_dxf_flat()` → `collect()`, `encode()` in `plan/dxf.rs` | `fileio`: `export_dxf()`, `export_dwg()` in `src-tauri/fileio/src/export.rs` |
 
 Runde Formen (Stütze, Bogenwand, Bogen-Umrisse) reisen im Puffer als Vielecke; die Ausgaben erkennen die Bögen
@@ -508,7 +509,11 @@ Offen: Bauzonen sind kein eigener Planinhalt (nur Baurecht-Einstellungen); „gr
 4. Die Teile reisen als JSON. `src/viewport/model3dPartsSync.ts` schickt nur neue, geänderte und
    entfernte Teile an render3d (`set_parts()` in `src-tauri/render3d/src/web.rs`). Dort baut
    `scene.rs` die Szene aus Teilen, `mesh.rs` extrudiert Wände und Platten zu Dreiecksnetzen,
-   `gpu.rs` zeichnet.
+   `gpu.rs` zeichnet. Die Geisterschicht grauer Klassen/Geschosse ([180]) reist genauso als Teile
+   (`GhostLayerSync` in `src/viewport/ghostSync.ts`, `set_ghost_parts()`) in eine eigene Szene. Der Kern-Cache hält
+   auch die übrigen Gruppen (Decken, Dächer, Kontext …), solange keine Wand/Öffnung und kein anderes Feld sich
+   ändert — die zweite Abfrage mit dem Geister-Filter rechnet nichts neu ([214]). Messung:
+   `src/viewport/render3d.bench.test.ts` (Kern/TS) und `render_png --bench` (Engine).
 5. Freie Körper (`extrudedSolids`) und Abzugskörper rechnet der Kern synchron ([115]): `model3d/solids.rs`
    (`emit_solids`, Teil `solidMeshes`, Netz aus `solid_mesh::body_mesh_3d`, Farbe/Textur aus `componentId`,
    Herkunft `Owner::Solid` für den Klassen-Filter [180], mit der Explosion angehoben), Pick-Dreiecke in
@@ -834,7 +839,7 @@ Reines Verschieben, ohne Verhaltensänderung (gleiche Abhängigkeitslisten, glei
 |---|---|
 | `src/views/plan/PlanView.tsx` (3902 Zeilen) | rund 1400 Zeilen: Props, Zustand, Hook-Aufrufe, SVG-Ebene. Typen und Konstanten in `planView/types.ts`, `planView/constants.ts`; Hooks `usePlanEngine`, `usePlanCoords`, `usePlanPicking`, `usePlanPointer`, `usePlanPickCycle`, `usePlanZoomInput`, `usePlanHighlights` in `planView/` (je 130 bis 680 Zeilen) |
 | `src-tauri/core/src/plan/elevation.rs` (3226 Zeilen) | Ordner `plan/elevation/`: `mod.rs` (Konstanten, Orchestrierung, Abfrage), `face`, `cull`, `collect`, `mesh_cull`, `openings`, `silhouette`, `patterns`, `tests`; `fascia_quads()` und `corner_shifts()` bleiben über `plan::elevation::` erreichbar |
-| `src/panels/ObjectInfoPanel.tsx` (2847 Zeilen) | rund 370 Zeilen; Abschnitte je Element-Art in `src/panels/objectInfo/` (`WallSection`, `CeilingSection`, `RoofSections`, `OpeningSections`, `StairSection`, `RoomSection`, `SolidSections`, `SectionLineSection`, `RefSections`, `TreeSection`, `fields`, `InfoBlocks`) |
+| `src/panels/ObjectInfoPanel.tsx` (2847 Zeilen) | rund 370 Zeilen; Abschnitte je Element-Art in `src/panels/objectInfo/` (`WallSection`, `CeilingSection`, `RoofSections`, `OpeningSections`, `StairSection`, `RoomSection`, `SolidSections`, `SectionLineSection`, `RefSections`, `TreeSection`, `CameraSection`, `fields`, `InfoBlocks`) |
 
 Zwei Stellen in `PlanView` wurden dafür umgestellt, weil ein Hook nur zusammenhängende Anweisungen aufnimmt: der Aufräum-Effekt für den
 ausstehenden Pan steht jetzt bei `panRaf` (in `usePlanPointer`), die Hover-Teilpunkte (Zustand, Funktionen, zwei Effekte) bei den

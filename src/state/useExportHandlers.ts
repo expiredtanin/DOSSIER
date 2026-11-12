@@ -12,6 +12,7 @@ import type { CategoryDisplayResolver } from "../core";
 import type { DetailLevel } from "../model/viewTypes";
 import type { DisplayResolver } from "../viewport/Viewport3D";
 import { savePlanPdf } from "../export/exportPdf";
+import { exportProjectName } from "../export/pdfInfo";
 import { savePlanSvg } from "../export/exportSvg";
 import { savePlanDxf } from "../export/exportDxf";
 import type { ExportPdfDecision } from "../ui/ExportPdfDialog";
@@ -110,8 +111,10 @@ export function useExportHandlers(opts: {
       paper: decision.paper,
       orientation: decision.orientation,
       title: activeLevelName,
-      subtitle: getState().project.name,
-      fileName: `${getState().project.name}-${activeLevelName}`,
+      // Wettbewerb anonym ([208]): Kennwort statt Projektname in Schriftfeld und Dateiname.
+      subtitle: exportProjectName(getState().project),
+      fileName: `${exportProjectName(getState().project)}-${activeLevelName}`,
+      competition: getState().project.competition,
     });
     setExportOpen(false);
   };
@@ -137,7 +140,7 @@ export function useExportHandlers(opts: {
       scaleDenominator: decision.scaleDenominator,
       paper: decision.paper,
       orientation: decision.orientation,
-      fileName: `${getState().project.name}-${activeLevelName}`,
+      fileName: `${exportProjectName(getState().project)}-${activeLevelName}`,
     });
     setExportOpen(false);
   };
@@ -194,7 +197,7 @@ export function useExportHandlers(opts: {
         dimUnit: decision.dimUnit,
         paperLayout: decision.paperLayout,
         levelId: activeLevelId,
-        fileName: `${getState().project.name}-${activeLevelName}`,
+        fileName: `${exportProjectName(getState().project)}-${activeLevelName}`,
       });
     } catch (err) {
       getState().notify(`${t("exportDxf.failed")}: ${err instanceof Error ? err.message : String(err)}`, "error");

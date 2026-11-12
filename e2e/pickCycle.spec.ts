@@ -58,7 +58,8 @@ test("Situation 1:500: erneuter Klick schaltet durch Bemassung, Schatten und Gel
     await page.mouse.click(p.x, p.y);
     await expect(hint).toContainText(`${i}/${n} Treffer`);
     seen.push((await objInfo(page).locator(".objinfo-kind").first().textContent().catch(() => "")) ?? "");
-    if (await objInfo(page).getByTestId("terrain-smooth").isVisible()) seen.push("terrain");
+    // [207] Die Vorlage „Situation WBW“ zeigt das Gelände als Höhenlinien (ohne Netz-Füllung): beides zählt als Gelände.
+    if ((await objInfo(page).getByTestId("terrain-smooth").isVisible()) || seen[seen.length - 1].includes("Gelände")) seen.push("terrain");
   }
   expect(seen).toContain("Schatten (Sonnenstand)");
   expect(seen).toContain("terrain");

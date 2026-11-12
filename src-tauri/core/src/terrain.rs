@@ -15,6 +15,7 @@
 //! Höhen sind Rohwerte des Netzes (bei swissALTI3D/DXF meist m ü. M.); den Bezug zum Modell (±0.00)
 //! liefert [`datum`].
 
+use crate::jsnum::ClampSafe;
 use crate::delaunay::{orient2d, triangulate};
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -625,7 +626,7 @@ pub fn fix_flat(t: &mut Tin, fixed: &HashSet<(u32, u32)>, interval: f64) {
             up = true;
             down = true;
         }
-        let zm = z0 + (est / 3.0 - z0).clamp(if down { -cap } else { 0.0 }, if up { cap } else { 0.0 });
+        let zm = z0 + (est / 3.0 - z0).clamp_safe(if down { -cap } else { 0.0 }, if up { cap } else { 0.0 });
         let k = t.xy.len() as u32;
         t.xy.push(m);
         t.z.push(zm);
@@ -668,11 +669,11 @@ pub fn refine(t: &mut Tin, fixed: &mut HashSet<(u32, u32)>, interval: f64, tol: 
                 let h = lin + ((g[a][0] - g[b][0]) * d[0] + (g[a][1] - g[b][1]) * d[1]) / 8.0;
                 if (za - zb).abs() < 1e-9 {
                     let (olo, ohi) = opp.get(&e).copied().unwrap_or((za, za));
-                    za + (h - za).clamp((olo - za).max(-cap).min(0.0), (ohi - za).min(cap).max(0.0))
+                    za + (h - za).clamp_safe((olo - za).max(-cap).min(0.0), (ohi - za).min(cap).max(0.0))
                 } else {
                     // streng zwischen den Enden (sonst entstünden neue flache Dreiecke)
                     let (lo, hi) = (za.min(zb), za.max(zb));
-                    h.clamp(lo + 0.1 * (hi - lo), hi - 0.1 * (hi - lo))
+                    h.clamp_safe(lo + 0.1 * (hi - lo), hi - 0.1 * (hi - lo))
                 }
             };
             if (zm - lin).abs() > tol || len > max_edge {

@@ -90,7 +90,8 @@ impl Hasher for FnvHasher {
 type FastMap<K, V> = HashMap<K, V, BuildHasherDefault<FnvHasher>>;
 
 pub const MAGIC: f64 = 1_347_174_962.0; // 0x504C4232 "PLB2"
-pub const VERSION: f64 = 2.0;
+/// Bei jeder Änderung des Formats erhöhen (3: Kopf 20 Wörter mit Gebäude-Ausmass, [204]); TS `PLAN_BUF_VERSION` gleich.
+pub const VERSION: f64 = 3.0;
 /// Fehlerpuffer einer Abfrage ("PLBe").
 pub const ERR_MAGIC: f64 = 1_347_175_013.0;
 const HEAD: usize = 20;
@@ -2354,7 +2355,7 @@ pub(crate) mod tests {
             Primitive::Text {
                 at: v(2.0, 2.0),
                 doc: RichTextDoc::default(),
-                extra_lines: vec![StampLine { text: "17.01 m²".into(), align: Default::default() }],
+                extra_lines: vec![StampLine::plain("17.01 m²".into(), Default::default())],
                 base_pt: 10.0,
                 color: "#6b7280".into(),
                 room_id: Some("R1".into()),
@@ -2639,7 +2640,7 @@ pub(crate) mod tests {
         extra.push(0);
         assert!(View::parse(&extra).is_none());
         let mut wrong = enc.clone();
-        wrong[8..16].copy_from_slice(&3.0f64.to_le_bytes());
+        wrong[8..16].copy_from_slice(&(VERSION + 1.0).to_le_bytes());
         assert!(View::parse(&wrong).is_none());
         assert!(View::parse(&[]).is_none());
         assert!(View::parse(&encode_error("x")).is_none());

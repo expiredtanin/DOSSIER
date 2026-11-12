@@ -63,7 +63,7 @@ Neues Modul: `<modul>.rs` und `mod` in `lib.rs`, Bindungen in `web/<modul>.rs` u
 | `mesh_section.rs`, `mesh_view.rs`, `mesh_repair.rs` | Ebenenschnitt beliebiger Netze; importierte Netze; Netz-Reparatur |
 | `voids.rs` | Abzugskörper in Grundriss und Schnitt |
 | `surface_pattern.rs` | Ansichtsschraffur (Lattung, Verband, Schindeln …) |
-| `grid.rs`, `tree.rs`, `auto_dimensions.rs` | Achsraster, Bäume, automatische Aussenbemassung |
+| `grid.rs`, `tree.rs`, `camera.rs`, `auto_dimensions.rs` | Achsraster, Bäume, Kameras (Auflösung, Griffe, Brennweite), automatische Aussenbemassung |
 
 ## Befehle, Griffe, Auswahl, Verwaltung
 
@@ -81,6 +81,7 @@ Neues Modul: `<modul>.rs` und `mod` in `lib.rs`, Bindungen in `web/<modul>.rs` u
 | `dim_assoc.rs`, `magic_wand.rs`, `polyline_vertex.rs`, `drawing_recognize.rs` | assoziative Bemassung, Zauberstab, Punkttypen, Bauteile aus Zeichnung erkennen |
 | `layers.rs`, `levels.rs`, `groups.rs`, `pens.rs`, `reorder.rs`, `folder_tree.rs` | Ebenen, Geschosse, Gruppen, Stiftsätze, Z-Reihenfolge, Ordner |
 | `layout_model.rs`, `sheet_viewports.rs`, `sheet_table.rs`, `presentation_sheet.rs` | Layout-Blätter, Viewports, Tabellen, Präsentationsplan |
+| `layout_image.rs`, `layout_poster.rs` | Bilder auf Blättern (Dateikopf, Zuschnitt, dpi) und Plakat-Vorlagen mit Raster und Kopfzeile ([208]) |
 | `parametric_walls.rs`, `geo_translate.rs`, `geo_rebase.rs` | parametrische Wände; Projekt verschieben; Ursprung für Exporte |
 
 ## Analyse

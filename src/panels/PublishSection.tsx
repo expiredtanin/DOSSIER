@@ -173,6 +173,32 @@ export function PublishSection() {
           onChange={(e) => host.onSetProjectNumber(e.target.value)}
         />
       </label>
+      {/* Wettbewerb ([208]): anonyme Abgabe mit Kennwort; WBW-Satz mit allen Plakaten. */}
+      <div style={{ padding: "2px 10px", display: "grid", gap: 4, fontSize: 12 }} data-competition>
+        <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <input
+            type="checkbox"
+            data-testid="competition-anonymous"
+            checked={project.competition?.anonymous === true}
+            onChange={(e) => host.onSetCompetition({ anonymous: e.target.checked })}
+          />
+          <span>{t("publish.competition.anonymous")}</span>
+        </label>
+        <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <span>{t("publish.competition.keyword")}</span>
+          <input
+            className="res-input mono"
+            style={{ flex: 1 }}
+            data-testid="competition-keyword"
+            value={project.competition?.keyword ?? ""}
+            onChange={(e) => host.onSetCompetition({ keyword: e.target.value })}
+          />
+        </label>
+        {project.competition?.anonymous === true && <div style={{ color: "var(--muted)" }}>{t("publish.competition.hint")}</div>}
+        <button className="nav-add" style={{ justifySelf: "start", whiteSpace: "nowrap", padding: "1px 6px", fontSize: 12 }} data-testid="publish-add-wbw" onClick={() => setOpen(host.onAddWbwSet())}>
+          ＋ {t("publish.wbw.add")}
+        </button>
+      </div>
       {sets.length === 0 && <div style={{ padding: "4px 10px 8px", fontSize: 12, color: "var(--muted)" }}>{t("publish.none")}</div>}
       {sets.map((s) => (
         <div key={s.id} data-publish-set={s.id}>

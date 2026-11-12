@@ -2086,6 +2086,48 @@ pub struct ModelViewOption {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub dimensions: Option<ModelViewDimensions>,
+    /// [207] Situationsplan / Schwarzplan: fehlt ⇒ gewöhnlicher Grundriss; vorhanden ⇒ statt der Bauteile das
+    /// eigene Gebäude als gefüllter Umriss, die Kontextgebäude gefüllt, dazu Nordpfeil und Massstabsbalken.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub situation: Option<ModelViewSituation>,
+    #[serde(flatten)]
+    #[ts(skip)]
+    pub extra: Extra,
+}
+
+/// [207] Füllung eines Gebäudes im Situationsplan.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+pub enum SituationFill {
+    #[default]
+    #[serde(rename = "black")]
+    Black,
+    #[serde(rename = "grey")]
+    Grey,
+    #[serde(rename = "off")]
+    Off,
+    #[serde(other)]
+    #[ts(skip)]
+    Unknown,
+}
+
+/// [207] Situationsplan in der Modelldarstellung (≙ Schwarzplan): jede Option fehlt ⇒ Standard des
+/// Situationsplans (eigenes Gebäude schwarz, Kontext grau, mit Planzeichen).
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct ModelViewSituation {
+    /// Eigenes Gebäude: Umriss über alle Geschosse über Terrain und die Dächer, gefüllt (Basis: schwarz).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub own: Option<SituationFill>,
+    /// Kontextgebäude (importierte Netze, Grundfläche aus der Aufsicht), gefüllt (Basis: grau; „Schwarzplan": schwarz).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub context: Option<SituationFill>,
+    /// Nordpfeil und Massstabsbalken zeichnen (Basis: ja).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub symbols: Option<bool>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -4142,6 +4184,35 @@ pub struct RichTextDoc {
     pub extra: Extra,
 }
 
+/// [218] Schrift einer Zeile des Raumstempels; fehlende Werte gelten als „wie die Vorgabe" (Stempelschrift, dann
+/// die eingebauten Werte der Zeile). Grösse in typografischen Punkt auf dem Papier bei der Grundschrift 10 pt
+/// (kleinere Massstäbe verkleinern sie im Verhältnis).
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct RoomStampFont {
+    /// Schriftfamilie (eine der gebündelten Schriften, z. B. "Work Sans").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub family: Option<String>,
+    /// Schriftgrösse in pt.
+    #[serde(rename = "sizePt", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub size_pt: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub bold: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub italic: Option<bool>,
+    /// Farbe als "#rrggbb".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub color: Option<String>,
+    #[serde(flatten)]
+    #[ts(skip)]
+    pub extra: Extra,
+}
+
 /// Feldmodell des Raum-Stempels. Ersetzt den freien Text durch benannte Felder;
 /// daraus baut roomStamp.ts sowohl das gerenderte Rich-Text-Dokument als auch die
 /// Live-Zeilen. Minimal gehalten (MVP).
@@ -4209,6 +4280,30 @@ pub struct RoomStamp {
     #[serde(rename = "showDivider", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub show_divider: Option<bool>,
+    /// [218] Schrift des ganzen Stempels (Vorgabe für alle Zeilen ohne eigene Angabe).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub font: Option<RoomStampFont>,
+    /// [218] Schrift der Namenszeile (Vorgabe: Stempelschrift, sonst 12 pt fett).
+    #[serde(rename = "nameFont", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub name_font: Option<RoomStampFont>,
+    /// [218] Schrift der zweiten Namenszeile (Vorgabe: Stempelschrift, sonst 9 pt kursiv).
+    #[serde(rename = "line2Font", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub line2_font: Option<RoomStampFont>,
+    /// [218] Schrift der Raumnummer (Vorgabe: Stempelschrift, sonst 9 pt).
+    #[serde(rename = "numberFont", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub number_font: Option<RoomStampFont>,
+    /// [218] Schrift der Bodenflächen-Zeile (Vorgabe: Stempelschrift, sonst 0.8 × Grundschrift).
+    #[serde(rename = "areaFont", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub area_font: Option<RoomStampFont>,
+    /// [218] Schrift der Nutzungs-Zeile (Vorgabe: Stempelschrift, sonst 0.8 × Grundschrift).
+    #[serde(rename = "usageFont", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub usage_font: Option<RoomStampFont>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -4878,6 +4973,71 @@ pub struct Tree {
     pub extra: Extra,
 }
 
+/// Projektion einer Kamera ([213]): Perspektive, Axonometrie (Parallelprojektion mit schrägem Blick, z. B.
+/// Isometrie) oder Parallelprojektion (frei ausgerichtet). Axonometrie und Parallel zeichnen im 3D orthografisch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+pub enum CameraProjection {
+    #[default]
+    #[serde(rename = "perspective")]
+    Perspective,
+    #[serde(rename = "axonometric")]
+    Axonometric,
+    #[serde(rename = "parallel")]
+    Parallel,
+    #[serde(other)]
+    #[ts(skip)]
+    Unknown,
+}
+
+/// Eine Kamera ([213]) — gespeicherter Standpunkt für die 3D-Ansicht (und das Rendering): Standpunkt im
+/// Grundriss mit Augenhöhe über dem Geschoss, Ziel (Grundriss und absolute Höhe), Bildwinkel, Projektion
+/// und optional Datum/Uhrzeit für den Sonnenstand. Im Grundriss als Symbol mit Sichtkegel auf der Klasse
+/// „Kameras" (Vorgabe "92"); „Kamera öffnen" setzt die 3D-Ansicht exakt.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct Camera {
+    pub id: String,
+    #[ts(type = "\"camera\"")]
+    pub r#type: String,
+    pub name: String,
+    /// Geschoss, auf dem das Symbol im Grundriss steht und auf das sich die Augenhöhe bezieht.
+    #[serde(rename = "floorId")]
+    pub floor_id: String,
+    /// Klasse (Ebene), Vorgabe "92" (Kameras).
+    #[serde(rename = "categoryCode")]
+    pub category_code: String,
+    /// Objekt-Sperre, analog `Wall.locked`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub locked: Option<bool>,
+    /// Standpunkt im Grundriss (Meter).
+    pub position: Vec2,
+    /// Augenhöhe über OK Fertigboden des Geschosses (m).
+    #[serde(rename = "eyeHeight")]
+    pub eye_height: f64,
+    /// Ziel im Grundriss (Meter); der Abstand Standpunkt–Ziel ist die Länge des Sichtkegels.
+    pub target: Vec2,
+    /// Höhe des Ziels (m, absolut, z des Modells).
+    #[serde(rename = "targetHeight")]
+    pub target_height: f64,
+    /// Vertikaler Bildwinkel (Grad, perspektivisch). Die Kleinbild-Brennweite folgt daraus (24-mm-Sensorhöhe).
+    #[serde(rename = "fovDeg")]
+    pub fov_deg: f64,
+    pub projection: CameraProjection,
+    /// Sichthöhe in Metern (volle Bildhöhe) bei Axonometrie/Parallel; fehlt = 10 m.
+    #[serde(rename = "orthoHeight", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub ortho_height: Option<f64>,
+    /// Zeitpunkt für den Sonnenstand (ISO-8601 in UTC wie `SunStudy.when`); „Kamera öffnen" setzt ihn in der
+    /// Sonnenstudie. Fehlt er, bleibt die Sonne der Studie.
+    #[serde(rename = "sunWhen", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub sun_when: Option<String>,
+    #[serde(flatten)]
+    #[ts(skip)]
+    pub extra: Extra,
+}
+
 /// Gruppe (Vectorworks-artig) — reine Mitgliedschaft je Elementart, siehe
 /// {@link Project.groups}. Alle ID-Listen sind additiv; ein Element gehört
 /// NIE zu mehr als einer Gruppe auf derselben Ebene (das Werkzeug/der Befehl
@@ -5509,6 +5669,90 @@ pub struct Layout {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub tables: Option<Vec<LayoutTable>>,
+    /// Bilder auf dem Blatt ([208]): Renderings, Fotos, Luftbilder; fehlt = keine.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub images: Option<Vec<LayoutImage>>,
+    #[serde(flatten)]
+    #[ts(skip)]
+    pub extra: Extra,
+}
+
+/// Bild auf einem Layout-Blatt ([208]): PNG oder JPEG als Data-URL (gleicher Weg wie `ContextImage.src`),
+/// im Rahmen `xMm`/`yMm`/`widthMm`/`heightMm` (Papier-mm). Das Seitenverhältnis des Ausschnitts bleibt erhalten;
+/// `crop` schneidet zu (Anteile 0..1 des Originals). Im PDF wird das Original unverändert eingebettet (JPEG ohne
+/// Neukompression).
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct LayoutImage {
+    pub id: String,
+    /// Anzeigename (Dateiname).
+    pub name: String,
+    /// Bildquelle als Data-URL (`data:image/png;base64,…` oder `data:image/jpeg;base64,…`).
+    pub src: String,
+    /// Linke Kante auf dem Blatt (mm, von links).
+    #[serde(rename = "xMm")]
+    pub x_mm: f64,
+    /// Obere Kante auf dem Blatt (mm, von oben).
+    #[serde(rename = "yMm")]
+    pub y_mm: f64,
+    /// Breite des gezeigten Ausschnitts (mm).
+    #[serde(rename = "widthMm")]
+    pub width_mm: f64,
+    /// Höhe des gezeigten Ausschnitts (mm).
+    #[serde(rename = "heightMm")]
+    pub height_mm: f64,
+    /// Pixelbreite des Originals (aus dem Dateikopf gelesen).
+    #[serde(rename = "pixelWidth")]
+    pub pixel_width: f64,
+    /// Pixelhöhe des Originals.
+    #[serde(rename = "pixelHeight")]
+    pub pixel_height: f64,
+    /// Zuschnitt als Anteile des Originals (0..1); fehlt = ganzes Bild.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, inline)]
+    pub crop: Option<LayoutImageCrop>,
+    #[serde(flatten)]
+    #[ts(skip)]
+    pub extra: Extra,
+}
+
+/// Zuschnitt eines Blatt-Bilds ([208]): linke/obere Kante und Breite/Höhe als Anteile des Originals.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct LayoutImageCrop {
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+    #[serde(flatten)]
+    #[ts(skip)]
+    pub extra: Extra,
+}
+
+/// Hilfslinie eines Masters ([208], Gestaltungsraster): senkrecht (`x`) oder waagrecht (`y`) in Papier-mm.
+/// Nur am Bildschirm, nie im Druck.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct LayoutGuide {
+    /// "x" = senkrechte Linie bei `posMm` von links, "y" = waagrechte Linie bei `posMm` von oben.
+    pub axis: String,
+    #[serde(rename = "posMm")]
+    pub pos_mm: f64,
+    #[serde(flatten)]
+    #[ts(skip)]
+    pub extra: Extra,
+}
+
+/// Wettbewerbs-Einstellung des Projekts ([208]): anonym = Kennwort statt Büro- und Projektname in Plankopf,
+/// Dateinamen und PDF-Metadaten.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct CompetitionSettings {
+    /// Anonyme Abgabe: keine Büro-/Autor-Angaben in Export und Plankopf.
+    pub anonymous: bool,
+    /// Kennwort der Abgabe (steht in Plankopf und PDF-Titel).
+    pub keyword: String,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -5682,6 +5926,22 @@ pub struct MasterLayout {
     #[serde(rename = "customHeightMm", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub custom_height_mm: Option<f64>,
+    /// Vorlagen-Schlüssel ([208], z. B. "poster-a1-landscape"): wiederverwendet den Master beim Anlegen weiterer Plakate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub template: Option<String>,
+    /// Plakat-Kopfzeile ([208]): Band über die Satzbreite mit Kennwort-Feld, Projekttitel und „Plan x/n".
+    #[serde(rename = "posterHeader", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub poster_header: Option<bool>,
+    /// Massstab unter jedem Viewport ausgeben ([208]).
+    #[serde(rename = "viewportScaleLabels", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub viewport_scale_labels: Option<bool>,
+    /// Hilfslinien des Gestaltungsrasters ([208]), nur am Bildschirm.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub guides: Option<Vec<LayoutGuide>>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -5943,6 +6203,11 @@ pub struct Project {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub trees: Option<Vec<Tree>>,
+    /// Kameras ([213]) — gespeicherte Standpunkte für 3D-Ansicht und Rendering, siehe {@link Camera}. Optional
+    /// (Default: leer behandeln).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub cameras: Option<Vec<Camera>>,
     /// Gruppen (Vectorworks-artig: Cmd+G fasst die Auswahl zu einer Einheit
     /// zusammen; Doppelklick betritt die Gruppe zum Bearbeiten, alles andere
     /// wird dabei gedimmt/gesperrt — s. `state/useGroupState.ts`). Eine Gruppe
@@ -6023,6 +6288,10 @@ pub struct Project {
     #[serde(rename = "projectNumber", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub project_number: Option<String>,
+    /// Wettbewerb ([208]): anonyme Abgabe mit Kennwort.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub competition: Option<CompetitionSettings>,
     /// Höhe von ±0.00 (OK fertig Boden des Bezugsgeschosses, `DrawingLevel.zeroLevel`)
     /// in Metern über Meer (m ü. M.), editierbar im Einstellungs-Fenster. Optional.
     /// Die automatischen Koten im Schnitt/in der Ansicht schreiben „±0.00 = 512.40"
@@ -6883,6 +7152,12 @@ impl Project {
             "projectNumber" => {
                 self.project_number = match v {
                     Some(v) => <Option<String>>::deserialize(v).map_err(|e| e.to_string())?,
+                    None => Default::default(),
+                };
+            }
+            "competition" => {
+                self.competition = match v {
+                    Some(v) => <Option<CompetitionSettings>>::deserialize(v).map_err(|e| e.to_string())?,
                     None => Default::default(),
                 };
             }

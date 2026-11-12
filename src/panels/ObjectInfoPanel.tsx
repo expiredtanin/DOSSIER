@@ -31,6 +31,7 @@ import { ContextObjectProps } from "./ContextObjectProps";
 import { SunStudySection } from "./SunStudySection";
 import { SiteRulesSection } from "./SiteRulesSection";
 import { TreeSection } from "./objectInfo/TreeSection";
+import { CameraSection } from "./objectInfo/CameraSection";
 import { ViewShadowsInfo, MeasurementSection } from "./objectInfo/InfoBlocks";
 import { DimensionField, RotateField } from "./objectInfo/fields";
 import { elementDimensions } from "./objectInfo/elementDims";
@@ -54,7 +55,11 @@ function toDeg360(rad: number): number {
 }
 
 
-export function ObjectInfoPanel() {
+/**
+ * `showPlacement` = false: ohne Bezugspunkt/Lage und Masse (Breite/Höhe/Drehen) — so zeigt sie das Fenster
+ * Objekteinstellungen ([218], Wunsch Maintainer: Platzierung und Masse gehören nur ins Objekt-Info-Panel).
+ */
+export function ObjectInfoPanel({ showPlacement = true }: { showPlacement?: boolean } = {}) {
   const host = usePanelHost();
   const storeProject = useStore((st) => st.project);
   const sel = useSelectionInfo();
@@ -74,6 +79,7 @@ export function ObjectInfoPanel() {
   // [137] Lage-Darstellung angeklickt (Schattenfläche / Baurechtslinie): Einstellungen der Quelle.
   const site = useStore((s) => s.selection.site);
   const treeSel = useStore((s) => s.selection.trees);
+  const cameraSel = useStore((s) => s.selection.cameras);
   const ctxObj = sel?.kind === "contextObject" ? (storeProject.context ?? []).find((o) => o.id === sel.id) : undefined;
   const quantities = useMemo(
     () => (ctxObj?.type === "excavation" ? excavationQuantities(storeProject) : []),
@@ -83,6 +89,8 @@ export function ObjectInfoPanel() {
   // ── Leerzustand ───────────────────────────────────────────────────────────
   // [149] Baum gewählt: eigene Felder (Lage, Masse, Form, Bestand).
   if (sel === null && treeSel.length > 0) return <TreeSection ids={treeSel} />;
+  // [213] Kamera gewählt: Standpunkt, Ziel, Bildwinkel, Projektion, Sonne und „Kamera öffnen".
+  if (sel === null && cameraSel.length > 0) return <CameraSection ids={cameraSel} />;
   if (sel === null && site[0] === "viewShadows") return <ViewShadowsInfo />;
   if (sel === null && site.length > 0) {
     const sun = site[0] === "sunStudy";
@@ -183,10 +191,9 @@ export function ObjectInfoPanel() {
         </div>
       )}
 
-      <div className="objinfo-sep" />
-
-      {(
+      {showPlacement && (
         <>
+          <div className="objinfo-sep" />
           {/* Bezugspunkt-Würfel (3×3, immer quadratisch) links, X/Y/Z als Spalte
               rechts daneben (Nutzer-Wunsch). */}
           <div className="objinfo-section-label">{t("objinfo.refpoint")}</div>

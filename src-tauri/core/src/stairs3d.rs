@@ -13,6 +13,7 @@
 //! (Laufplatte, Geländer): `[n, (treppe, nPos, nIdx, positionen…, indizes…)…]`. `treppe` ist der
 //! Index in der Eingabe. Unsinn (NaN, kaputte Puffer) ergibt ein leeres Ergebnis.
 
+use crate::jsnum::ClampSafe;
 use crate::flat_read::Reader;
 use crate::jsmath::{hypot, hypot2};
 use crate::mesh3d::Mesh;
@@ -762,7 +763,7 @@ pub fn stringers(buf: &[f64]) -> Vec<Mesh> {
             let pitch = |run: f64| base + rise + run * lift / len;
             let top_end = base + lift + STRINGER_ABOVE;
             // Seitenprofil (Lauf, Höhe), gegen den Uhrzeigersinn.
-            let rf = ((STRINGER_BELOW - rise) * len / lift).clamp(0.0, len);
+            let rf = ((STRINGER_BELOW - rise) * len / lift).clamp_safe(0.0, len);
             let prof = [(0.0, base), (rf, base), (len, pitch(len) - STRINGER_BELOW), (len, top_end), (len - going, top_end), (0.0, pitch(0.0) + STRINGER_ABOVE)];
             let sides: Vec<f64> = geo.treads[r.clone()].iter().flat_map(|t| t.pts.iter().map(|q| ax.side_of(pt(q)))).collect();
             let (lo, hi) = sides.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), &x| (a.min(x), b.max(x)));

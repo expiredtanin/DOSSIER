@@ -39,6 +39,7 @@ import { applyToSnapshotOps } from "../state/viewTemplates";
 import { getState } from "../state/appStore";
 import { patchItem } from "../core";
 import { t } from "../i18n";
+import { CamerasGroup } from "./CamerasGroup";
 
 // ── Baum-Icons (inline-SVG im Panel-Stil: 14px, stroke currentColor 1.4) ──────
 
@@ -518,6 +519,7 @@ export function ViewSnapshotsPanel() {
     tree.rootFolders.length === 0 && tree.rootSnapshots.length === 0;
 
   return (
+    <>
     <section className="nav-group">
       <header className="nav-group-head">
         <span className="nav-group-title">{t("viewsnap.title")}</span>
@@ -687,6 +689,9 @@ export function ViewSnapshotsPanel() {
         </div>
       )}
     </section>
+    {/* [213] Kameras des Projekts (öffnen, anlegen, löschen). */}
+    <CamerasGroup />
+    </>
   );
 }
 

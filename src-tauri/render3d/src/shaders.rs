@@ -302,13 +302,23 @@ fn sun_shadow(world_pos : vec3<f32>, n : vec3<f32>, l : vec3<f32>) -> vec2<f32> 
 @group(1) @binding(0) var tex  : texture_2d_array<f32>;
 @group(1) @binding(1) var samp : sampler;
 
+// [214] Ecken aus dem Flaechen-Puffer (`[pos, normal, color]`, color ungenutzt) — kein eigener texturierter
+// Puffer mehr; die UV rechnet der Vertex-Shader wie `mesh::textured_from_mesh`.
 struct VsIn {
     @location(0) position : vec3<f32>,
     @location(1) normal   : vec3<f32>,
-    @location(2) uv       : vec2<f32>,
     // Material-Textur-Ebene dieses Vertex (`-1` = kein Material -> Schachbrett).
     @location(3) layer    : f32,
 };
+
+// Weltmassstaebliche UV (Meter) wie `mesh::textured_from_mesh`: Deckel/Boden (|n.y| > 0.5) im Grundriss
+// (u = x, v = z), Mantelflaechen laengs der horizontalen Tangente t = (-n.z, 0, n.x) und nach der Hoehe.
+fn wall_uv(p : vec3<f32>, n : vec3<f32>) -> vec2<f32> {
+    if (abs(n.y) > 0.5) {
+        return vec2<f32>(p.x, p.z);
+    }
+    return vec2<f32>(p.x * (-n.z) + p.z * n.x, p.y);
+}
 
 struct VsOut {
     @builtin(position) clip_pos : vec4<f32>,
@@ -323,7 +333,7 @@ fn vs_main(in : VsIn) -> VsOut {
     var out : VsOut;
     out.clip_pos = globals.view_proj * vec4<f32>(in.position, 1.0);
     out.world_normal = in.normal;
-    out.uv = in.uv;
+    out.uv = wall_uv(in.position, in.normal);
     out.world_pos = in.position;
     out.layer = in.layer;
     return out;

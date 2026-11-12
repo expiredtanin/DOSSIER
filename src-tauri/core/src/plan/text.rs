@@ -13,7 +13,7 @@ use crate::plan::buf::{whole, T_DRAWING_TEXT, T_TEXT};
 use crate::plan::dxf::{StampLine as DxfLine, TextIn, TextStyleIn};
 use crate::plan::parts::{in_ranges, Part};
 use crate::plan::scene::{to_rgba, Rgba, SText, STYLE_BOLD, STYLE_ITALIC};
-use crate::text_layout::{doc_from_text, doc_to_lines, font_name_of, is_blank, plain_text, split_ws, stamp_block, stamp_line_offsets, wrap_doc_to_lines, LayoutOpts, LineAlign, Placed, PT_TO_MM, TEXT_LINE_HEIGHT_MULT};
+use crate::text_layout::{doc_from_text, font_name_of, is_blank, plain_text, split_ws, stamp_block, stamp_line_offsets, wrap_doc_to_lines, LayoutOpts, LineAlign, Placed, PT_TO_MM, TEXT_LINE_HEIGHT_MULT};
 use serde::{Deserialize, Deserializer};
 
 fn num<'de, D: Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
@@ -178,32 +178,22 @@ fn stamp_scene(t: &StampText, forced: bool, mm_to_m: f64, out: &mut Vec<SText>) 
     let greyed = t.greyed == Some(true) || forced;
     let color = t.color.as_deref();
     let def = greyed_color(to_rgba(color).unwrap_or(INK), greyed);
-    let o = LayoutOpts { line_height: 0.0, unit_per_pt: PT_TO_MM, base_pt: t.base_pt, color: color.unwrap_or("#000000") };
     let base_mm = t.base_pt * PT_TO_MM;
-    let mut flat: Vec<(String, f64, Rgba, LineAlign, u32)> = Vec::new();
-    for line in doc_to_lines(&t.doc, &o) {
-        let fill = line.tspans.first().map(|s| s.fill.as_str()).or(color);
-        let c = greyed_color(to_rgba(fill).unwrap_or(def), greyed);
-        flat.push((line.content(), line.max_size().unwrap_or(base_mm), c, line.align, line_style(&line)));
-    }
-    for l in &t.extra_lines {
-        flat.push((l.text.clone(), base_mm * 0.8, def, LineAlign::of(Some(l.align)), 0));
-    }
-    if flat.is_empty() {
-        return;
-    }
-    let base_h = base_mm * mm_to_m;
-    let line_gap = base_h * 1.3;
-    let total_h = base_h + (flat.len() - 1) as f64 * line_gap;
-    // [140] Zeilen im gemessenen, um den Anker zentrierten Block (`stamp_line_offsets`, Papier-mm).
-    let extra: Vec<(&str, LineAlign)> = t.extra_lines.iter().map(|l| (l.text.as_str(), LineAlign::of(Some(l.align)))).collect();
-    let offsets = stamp_line_offsets(&stamp_block(&t.doc, &extra, t.base_pt, PT_TO_MM, "#000000", 0.0));
-    for (k, (content, size, c, align, style)) in flat.into_iter().enumerate() {
+    // [140] Zeilen im gemessenen, um den Anker zentrierten Block (`stamp_block`, Papier-mm): Grundlinien nach der
+    // grössten Schrift der Zeile ([199]), Spalten nach der Ausrichtung (`stamp_line_offsets`). [218] Zusatzzeilen mit
+    // eigener Grösse, Farbe und eigenem Schnitt.
+    let extra: Vec<crate::text_layout::ExtraRow> = t.extra_lines.iter().map(|l| l.row()).collect();
+    let placed = stamp_block(&t.doc, &extra, t.base_pt, PT_TO_MM, color.unwrap_or("#000000"), 0.0);
+    let offsets = stamp_line_offsets(&placed);
+    for (k, Placed { line, y }) in placed.iter().enumerate() {
+        let content = line.content();
         if is_blank(&content) {
             continue;
         }
+        let fill = line.tspans.first().map(|s| s.fill.as_str()).or(color);
+        let c = greyed_color(to_rgba(fill).unwrap_or(def), greyed);
         let dx = offsets.get(k).copied().unwrap_or(0.0) * mm_to_m;
-        push(out, t.at.x + dx, t.at.y + total_h / 2.0 - base_h * 0.8 - k as f64 * line_gap, content, size, c, align, style);
+        push(out, t.at.x + dx, t.at.y - y * mm_to_m, content, line.max_size().unwrap_or(base_mm), c, line.align, line_style(line));
     }
 }
 
@@ -277,7 +267,7 @@ fn split_lines(s: &str) -> Vec<String> {
 /// den Anker zentriert ([`stamp_block`]), Höhen in Modell-Metern beim Massstab.
 fn stamp_lines(p: &StampText, scale: f64, family: &dyn Fn(Option<&str>) -> String) -> Vec<DxfLine> {
     let unit_per_pt = (0.0254 / 72.0) * scale;
-    let extra: Vec<(&str, LineAlign)> = p.extra_lines.iter().map(|l| (l.text.as_str(), LineAlign::of(Some(l.align)))).collect();
+    let extra: Vec<crate::text_layout::ExtraRow> = p.extra_lines.iter().map(|l| l.row()).collect();
     let mut out = Vec::new();
     let placed = stamp_block(&p.doc, &extra, p.base_pt, unit_per_pt, p.color.as_deref().unwrap_or("#000000"), 0.0);
     let offsets = stamp_line_offsets(&placed);
@@ -325,13 +315,34 @@ mod tests {
         stamp_scene(&t, false, 0.1, &mut out);
         assert_eq!(out.len(), 2);
         let base_h = 10.0 * PT_TO_MM * 0.1;
-        assert_eq!(out[0].pos.y, 3.0 + (base_h + 2.0 * base_h * 1.3) / 2.0 - base_h * 0.8);
+        assert!((out[0].pos.y - (3.0 + (base_h + 2.0 * base_h * 1.3) / 2.0 - base_h * 0.8)).abs() < 1e-12);
         assert_eq!((out[0].align, out[1].align), (1, 2));
         // [194] Schnitt der Zeile (erster Lauf): Name fett, Live-Zeile normal.
         assert_eq!((out[0].style, out[1].style), (STYLE_BOLD, 0));
         let l = stamp_lines(&t, 100.0, &|f| f.unwrap_or("Arial").to_string());
         assert_eq!(l.len(), 2);
         assert!(l[0].style.bold && l[0].style.family == "Arial");
+    }
+
+    /// [218] Zusatzzeile mit eigener Schrift: Grösse, Farbe und Schnitt reisen in die Szene, der Block bleibt zentriert.
+    #[test]
+    fn raumstempel_zusatzzeile_mit_eigener_schrift() {
+        let js = |marks: &str| format!(r##"{{"at":{{"x":0,"y":0}},"doc":{{"version":1,"paragraphs":[{{"runs":[{{"text":"Wohnen"}}]}}]}},"extraLines":[{{"text":"17.01 m²","align":"left"{marks}}}],"basePt":10,"color":"#333"}}"##);
+        let run = |marks: &str| {
+            let t: StampText = serde_json::from_str(&js(marks)).unwrap();
+            let mut out = Vec::new();
+            stamp_scene(&t, false, 0.1, &mut out);
+            out
+        };
+        let plain = run("");
+        let big = run(r##","marks":{"sizePt":20,"bold":true,"italic":true,"color":"#ff0000"}"##);
+        assert_eq!((plain.len(), big.len()), (2, 2));
+        assert!((plain[1].size_mm - 8.0 * PT_TO_MM).abs() < 1e-9 && plain[1].style == 0);
+        assert!((big[1].size_mm - 20.0 * PT_TO_MM).abs() < 1e-3, "{}", big[1].size_mm);
+        assert_eq!(big[1].style, STYLE_BOLD | STYLE_ITALIC);
+        assert_eq!(big[1].color, [1.0, 0.0, 0.0, 1.0]);
+        // Grössere Zeile: der Block wird höher, die erste Grundlinie rückt nach oben (Modell-y nach oben).
+        assert!(big[0].pos.y > plain[0].pos.y);
     }
 
     /// [194] Bildschirm-Szene: gedrehte Einzeltexte und der Text im Editor fehlen, Exporte behalten alle;

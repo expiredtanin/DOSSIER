@@ -43,7 +43,7 @@ describe("Musterhaus komplex", () => {
     expect(p.rooms!.length).toBeGreaterThanOrEqual(20);
     expect(p.roofs!.some((r) => (r.dormers ?? []).length === 2)).toBe(true);
     expect(p.stairs!.map((s) => s.shape).sort()).toEqual(["L", "spiral", "straight"]);
-    expect(p.context!.map((c) => c.type).sort()).toEqual(["contourSet", "excavation", "terrainMesh"]);
+    expect(p.context!.map((c) => c.type).sort()).toEqual(["contourSet", "excavation", "importedMesh", "terrainMesh"]);
     expect(p.extrudedSolids!.filter((s) => s.brep).length).toBe(2);
     expect(p.drawings2d.filter((d) => d.geom.shape === "dimension").length).toBeGreaterThan(8);
     const frameKinds = new Set(p.doorTypes!.map((d) => d.frameKind ?? d.kind));

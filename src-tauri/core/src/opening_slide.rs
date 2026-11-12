@@ -7,6 +7,7 @@
 //!   einen Steg von [`MIN_WEB`]; schon überlappende Daten (Bestand) bleiben, wie sie sind.
 //! - **Dach-/Deckenöffnungen**: Mittelpunkt im Umriss des Wirts halten ([`clamp_inside`]).
 
+use crate::jsnum::ClampSafe;
 use crate::json_util::{field, num_of};
 use crate::ops::id_of;
 use crate::wall_arc::WallArc;
@@ -84,7 +85,7 @@ impl Axis {
             Axis::Line { s, u, .. } => (p.0 - s.0) * u.0 + (p.1 - s.1) * u.1,
             Axis::Arc(a) => a.local(kernel2d::Vec2::new(p.0, p.1)).0,
         };
-        let q = self.point(t.clamp(0.0, self.len()), 0.0);
+        let q = self.point(t.clamp_safe(0.0, self.len()), 0.0);
         (t, crate::jsmath::hypot2(p.0 - q.0, p.1 - q.1))
     }
 }
@@ -123,7 +124,7 @@ pub fn place(root: &Map<String, Value>, host: &str, len: f64, width: f64, from: 
         return None;
     }
     let max = max.max(0.0);
-    let want = want.clamp(0.0, max);
+    let want = want.clamp_safe(0.0, max);
     // Gesperrte Anfangslagen je Nachbar: offenes Intervall (lo, hi).
     let blocked: Vec<(f64, f64)> = neighbours(root, host, skip).into_iter().map(|(a, b)| (a - width - MIN_WEB, b + MIN_WEB)).collect();
     let inside = |x: f64, (lo, hi): (f64, f64)| x > lo + EPS && x < hi - EPS;
@@ -141,7 +142,7 @@ pub fn place(root: &Map<String, Value>, host: &str, len: f64, width: f64, from: 
         .chain(blocked.iter().flat_map(|(lo, hi)| [*lo, *hi]))
         .filter(|x| free(*x))
         .min_by(|a, b| (a - want).abs().total_cmp(&(b - want).abs()))
-        .map(|x| Placed { position: x.clamp(0.0, max), clamped: (x - want).abs() > EPS })
+        .map(|x| Placed { position: x.clamp_safe(0.0, max), clamped: (x - want).abs() > EPS })
 }
 
 /// Öffnung `o` in ihrer Wand auf den Anfang `want` setzen (gleitend ab ihrer jetzigen Lage; geklemmt auf

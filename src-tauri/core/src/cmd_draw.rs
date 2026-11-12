@@ -4,6 +4,7 @@
 //! Klickpunkten (Bögen, Kreise, Vielecke, Rundungen, Revisionswolke …), die Vorschau-Formen je Mausschritt
 //! und die Treffer der Befehle (Tangenten-Objekt, Massketten). Einstieg über `cmd_create`.
 
+use crate::jsnum::ClampSafe;
 use crate::cmd_create::{
     add_op, b_of, circle_pts, find, n_of, normalize, obj, opt_n, opt_p, p_of, pair, point_segment_distance, polyline_edges,
     pts_of, pv, pvs, s, s_of, seg_len, to_p, Ctx, Preview, V, EPS,
@@ -1151,7 +1152,7 @@ fn auto_dims(root: &Map<String, Value>, pr: &Project, ctx: &Ctx, prefix: &str, s
             // Wandmitte gegenüber der Achse (Referenzlinie links/rechts bzw. -versatz, wie `dim_assoc`).
             let half = th / 2.0;
             let shift = match (w.reference_offset, w.reference_line) {
-                (Some(v), _) => v.clamp(-half, half),
+                (Some(v), _) => v.clamp_safe(-half, half),
                 (None, Some(WallReferenceLine::Left)) => half,
                 (None, Some(WallReferenceLine::Right)) => -half,
                 _ => 0.0,

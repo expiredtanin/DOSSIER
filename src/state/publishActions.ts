@@ -14,6 +14,30 @@ export function addPublishSetOps(p: Project, id: string): CoreOp[] {
   return fieldOps(p, "publishSets", [...(p.publishSets ?? []), set]);
 }
 
+/** Publikationssatz „WBW-Abgabe" ([208]): alle Plakate (Blätter mit Plakat-Master, sonst alle Blätter) als ein PDF. */
+export function addWbwSetOps(p: Project, id: string): CoreOp[] {
+  const posterMasters = new Set((p.masterLayouts ?? []).filter((m) => m.posterHeader).map((m) => m.id));
+  const posters = (p.layouts ?? []).filter((l) => l.masterId && posterMasters.has(l.masterId));
+  const layoutIds = (posters.length > 0 ? posters : (p.layouts ?? [])).map((l) => l.id);
+  const set: PublishSet = {
+    id,
+    name: t("publish.wbw.name"),
+    layoutIds,
+    format: "pdf-multi",
+    namePattern: "{Projekt}_{Satz}",
+    includeRevision: false,
+    bumpRevision: false,
+    pdfLayers: false,
+  };
+  return fieldOps(p, "publishSets", [...(p.publishSets ?? []), set]);
+}
+
+/** Wettbewerbs-Einstellung ([208]) ändern; ohne Kennwort und nicht anonym entfällt das Feld. */
+export function setCompetitionOps(p: Project, patch: { anonymous?: boolean; keyword?: string }): CoreOp[] {
+  const next = { anonymous: false, keyword: "", ...p.competition, ...patch };
+  return fieldOps(p, "competition", next.anonymous || next.keyword.trim() ? next : undefined);
+}
+
 export function patchPublishSetOps(p: Project, id: string, patch: Partial<Omit<PublishSet, "id">>): CoreOp[] {
   return fieldOps(p, "publishSets", (p.publishSets ?? []).map((s) => (s.id === id ? { ...s, ...patch } : s)));
 }

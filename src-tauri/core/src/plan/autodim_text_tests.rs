@@ -22,7 +22,14 @@ fn project_with(drawings: Vec<Value>) -> Project {
 }
 
 fn komplex() -> Vec<Value> {
-    serde_json::from_str(include_str!("../../tests/fixtures/autodim_musterhaus_komplex.json")).unwrap()
+    let mut d: Vec<Value> = serde_json::from_str(include_str!("../../tests/fixtures/autodim_musterhaus_komplex.json")).unwrap();
+    // [199] Achsraster des Musterhauses (wie `sampleProjectComplex.ts`): Achsen kreuzen die Massketten.
+    d.push(json!({"id": "raster", "type": "drawing2d", "levelId": "eg", "categoryCode": "00", "geom": {
+        "shape": "grid", "origin": {"x": 0, "y": 0}, "angle": 0,
+        "a": [{"label": "1", "pos": 0}, {"label": "2", "pos": 6}, {"label": "3", "pos": 10}, {"label": "4", "pos": 15}],
+        "b": [{"label": "A", "pos": 0}, {"label": "B", "pos": 5}, {"label": "C", "pos": 10}],
+        "extend": 2.5, "bubbles": "both", "levels": ["ug", "eg", "og", "dg"]}}));
+    d
 }
 
 /// Einfaches Musterhaus: Aussenbemassung über den Befehl (1:100) aller Geschosse.
@@ -43,7 +50,7 @@ fn einfach() -> (Vec<Value>, Vec<String>) {
 }
 
 fn draw(p: &Project, level: &str, scale: f64) -> Vec<Primitive> {
-    let a = PlanArgs::parse(1.0, &json!({"floor": level, "show": ["81"], "scale": scale}).to_string()).unwrap();
+    let a = PlanArgs::parse(1.0, &json!({"floor": level, "show": ["81", "00"], "scale": scale}).to_string()).unwrap();
     let c = Ctx::new(p, &a);
     let mut out = Out::default();
     let mut b = Bounds::new();
@@ -112,12 +119,41 @@ fn findings(p: &Project, level: &str, scale: f64) -> Vec<String> {
             _ => None,
         })
         .collect();
+    // [199] Achslinien des Rasters und ihre Blasen.
+    let axes: Vec<(Vec2, Vec2)> = prims
+        .iter()
+        .filter_map(|q| match q {
+            Primitive::Line { a, b, drawing_id: Some(id), .. } if id == "raster" => Some((*a, *b)),
+            _ => None,
+        })
+        .collect();
+    let bubbles: Vec<(Vec2, f64)> = prims
+        .iter()
+        .filter_map(|q| match q {
+            Primitive::DrawingCircle { center, r, drawing_id: Some(id), .. } if id == "raster" => Some((*center, *r)),
+            _ => None,
+        })
+        .collect();
     assert!(!texts.is_empty(), "{level}: keine Masszahlen");
     let mut bad = Vec::new();
     for (i, (ia, ta, qa)) in texts.iter().enumerate() {
         for (ib, tb, qb) in &texts[i + 1..] {
             if quads_overlap(qa, qb, eps) {
                 bad.push(format!("{level} 1:{scale}: „{ta}“ ({ia}) auf „{tb}“ ({ib})"));
+            }
+        }
+        // 1:200 ist es eng (Zahlen ohne freie Stelle bleiben, wo sie sind; Bogenmasse ohne Ausweichen): dort offen.
+        for (a, b) in axes.iter().filter(|_| scale < 200.0) {
+            if seg_quad(*a, *b, qa, eps) {
+                bad.push(format!("{level} 1:{scale}: „{ta}“ ({ia}) auf Achslinie"));
+                break;
+            }
+        }
+        for (c, r) in bubbles.iter().filter(|_| scale < 200.0) {
+            let ring = [Vec2 { x: c.x - r, y: c.y - r }, Vec2 { x: c.x + r, y: c.y - r }, Vec2 { x: c.x + r, y: c.y + r }, Vec2 { x: c.x - r, y: c.y + r }];
+            if quads_overlap(qa, &ring, eps + 0.3 * r) {
+                bad.push(format!("{level} 1:{scale}: „{ta}“ ({ia}) auf Achsblase"));
+                break;
             }
         }
         if !straight(ia) {

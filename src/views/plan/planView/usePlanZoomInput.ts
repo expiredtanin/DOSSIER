@@ -1,6 +1,7 @@
 // Rad-Zoom, Doppelklick und Kontextmenü der Plan-Ansicht ([165] aus `PlanView.tsx`). Im GPU-Pfad zoomt
 // das Rad imperativ und schreibt den Ausschnitt nach kurzer Ruhe fest. Aufgerufen einmal von `PlanView`.
 
+import { openCamera } from "../../../state/cameraActions";
 import type { ViewBox__plan_planView_geometry as ViewBox } from "../../../core";
 import type { Vec2 } from "../../../model/types";
 import { clamp } from "../../../core";
@@ -32,6 +33,7 @@ export interface UsePlanZoomInputArgs {
   pickRoom: (clientX: number, clientY: number) => string | null;
   onOpenSectionLevel: ((levelId: string) => void) | undefined;
   pickSectionLine: (clientX: number, clientY: number) => string | null;
+  pickCamera: (clientX: number, clientY: number) => string | null;
   onContextMenu: ((info: { clientX: number; clientY: number; model: Vec2; }) => void) | undefined;
   view: ViewBox;
   viewToModel: (vbX: number, vbY: number) => Vec2;
@@ -60,6 +62,7 @@ export function usePlanZoomInput(inp: UsePlanZoomInputArgs) {
     pickRoom,
     onOpenSectionLevel,
     pickSectionLine,
+    pickCamera,
     onContextMenu,
     view,
     viewToModel,
@@ -162,6 +165,12 @@ export function usePlanZoomInput(inp: UsePlanZoomInputArgs) {
         onStampEdit(rid);
         return;
       }
+    }
+    // [213] Doppelklick auf das Symbol einer Kamera → die Kamera im 3D öffnen (Reiter wechseln, Ansicht exakt setzen).
+    const cid = pickCamera(e.clientX, e.clientY);
+    if (cid) {
+      void openCamera(cid);
+      return;
     }
     // Doppelklick auf eine Schnittlinie → in deren 2D-Schnittansicht springen.
     if (onOpenSectionLevel) {

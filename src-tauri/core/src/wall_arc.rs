@@ -14,6 +14,7 @@
 //!   zwischen denen gerade Teilwände mit radialen Gehrungs-Schnitten liegen; die Versätze eines
 //!   Sehnenpolygons sind wieder Sehnenpolygone, die Teilkörper schliessen also lückenlos.
 
+use crate::jsnum::ClampSafe;
 use crate::joins::Line;
 use kernel2d::{add, dot, scale, sub, Vec2};
 use std::f64::consts::PI;
@@ -483,7 +484,7 @@ pub fn chord_walls(w: &crate::wall_bands::WallIn, arc: &WallArc) -> Vec<crate::w
         if chord < 1e-9 {
             continue;
         }
-        let map = |s: f64| ((s - sa) / (sb - sa) * chord).clamp(0.0, chord);
+        let map = |s: f64| ((s - sa) / (sb - sa) * chord).clamp_safe(0.0, chord);
         let radial = |s: f64| Line { point: arc.point(s, 0.0), dir: arc.normal(s) };
         let first = i == 0;
         let last = i + 1 == k;

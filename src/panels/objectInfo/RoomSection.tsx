@@ -16,8 +16,8 @@ import { useMulti } from "./useMulti";
 
 // ── Raum-Attribut-Abschnitt ──────────────────────────────────────────────────
 // Editierbarer Name, SIA-416-Kategorie (5 Blatt-Kategorien), abgeleitete Fläche
-// + Umfang (read-only), Referenzgeschoss, sowie ein Button, der den Rich-Text-
-// Stempel-Editor öffnet. Alle Werte/Setter über den Host.
+// + Umfang (read-only), Referenzgeschoss. Alle Werte/Setter über den Host. Der Stempel hat seit [218] einen
+// eigenen Abschnitt (`RoomStampSection`).
 export function RoomSection({
   room,
   roomId,
@@ -82,15 +82,6 @@ export function RoomSection({
 
       {/* [158] Raumbuch: Nutzung und Oberflächen. */}
       <RoomFinishFields roomId={roomId} />
-
-      {/* Stempel bearbeiten (öffnet den Rich-Text-Editor). */}
-      <button
-        type="button"
-        className="objinfo-btn"
-        onClick={() => host.onEditRoomStamp(roomId)}
-      >
-        {t("objinfo.room.editStamp")}
-      </button>
     </>
   );
 }

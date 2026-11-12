@@ -12,7 +12,7 @@ Browser-Bindung. Das 3D-Modell kommt als Teile aus dem Kern (`src-tauri/core/src
 | `lib.rs` | Modulliste und Beschreibung der Schichten |
 | `types.rs` | Eingabe-Typen (Wände, Platten, Meshes, Kamera) und das `Mesh` |
 | `scene.rs` | Szene aus benannten Teilen: ein Teil-Update baut nur die betroffenen Teile neu |
-| `ghost.rs` | `[180]` Geisterschicht: Elemente grauer Klassen hell, entsättigt und durchscheinend (`set_ghost_model`) |
+| `ghost.rs` | `[180]` Geisterschicht: Elemente grauer Klassen hell, entsättigt und durchscheinend; eigene Szene aus Teilen, je Klumpen umgesetzt (`set_ghost_parts`, `[214]`) |
 | `mesh.rs` | extrudiert Wände und Platten zu Dreiecksnetzen, hängt Kontext-Meshes an |
 | `openings.rs` | Rechteck-Zerlegung von Wänden an Öffnungen |
 | `math.rs` | 4x4-Matrizen, Kamera (Perspektive und Orthografie, Presets), Orbit |
@@ -40,7 +40,7 @@ Browser-Bindung. Das 3D-Modell kommt als Teile aus dem Kern (`src-tauri/core/src
 | Datei | Inhalt |
 |---|---|
 | `shaders.rs` | WGSL-Quellen (Fläche, texturiert, Luftbild, Raster, Schnittfläche, Geist, Schatten) |
-| `gpu.rs` | wgpu-Pipelines und der `Renderer`; `gpu_points.rs`: Pipeline der Punktwolken im selben Pass |
+| `gpu.rs` | wgpu-Pipelines und der `Renderer`: Puffer je Klumpen (texturiert nur die Material-Ebene, UV im Shader), unveränderte Linien/Hülle nicht neu hochgeladen (Inhalts-Schlüssel), Zahlen je Bild (`frame_stats`, `gpu_bytes`) — `[214]`; `gpu_points.rs`: Pipeline der Punktwolken im selben Pass |
 | `web.rs` | Browser-Bindung (Feature `web`): `set_parts()`, Kamera, Stil, Schnitt, Sonne, Punktwolken |
-| `bin/render_png.rs` | Headless-Bild in eine PNG-Datei (`npm run build:render-png`); siehe `CLAUDE.md`, „Ergebnis ansehen" |
+| `bin/render_png.rs` | Headless-Bild in eine PNG-Datei (`npm run build:render-png`); siehe `CLAUDE.md`, „Ergebnis ansehen"; `--bench <ordner>` misst die Engine (`bin/bench3d/`, Eingaben aus `src/viewport/render3d.bench.test.ts`, `[214]`) |
 | `bin/spike3d.rs` | winit-Fenster mit Orbit-Kamera zur visuellen Prüfung (Feature `window`) |

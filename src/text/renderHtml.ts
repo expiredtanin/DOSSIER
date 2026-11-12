@@ -70,7 +70,7 @@ const SCRIPT_SCALE = 0.7;
  * `sizeUnit`:
  *  • "pt" (Default) — ABSOLUTE CSS-`pt`-Grösse, unabhängig vom umgebenden
  *    Kontext. Richtig für ein schwebendes Dialogfenster ohne "echten"
- *    Massstab (TextEditorDialog).
+ *    Massstab.
  *  • "em" — Grösse RELATIV zur geerbten Schriftgrösse des Containers
  *    (`sizePt/basePt` als `em`). Nötig für die beiden Inline-Editoren AUF
  *    der Zeichenfläche/dem Blatt (PlanView/LayoutSheet): die setzen die

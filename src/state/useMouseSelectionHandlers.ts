@@ -58,22 +58,24 @@ export function useMouseSelectionHandlers(opts: {
   selectionState: Pick<ReturnType<typeof useSelectionState>, "selection" | "setSelection" | "groupPath">;
   contextMenuState: Pick<
     ReturnType<typeof useContextMenuState>,
-    "setMenu" | "setStampEditorRoomId" | "editTextId" | "setEditTextId" | "setEditTextMinHeightM"
+    "setMenu" | "editTextId" | "setEditTextId" | "setEditTextMinHeightM"
   >;
+  /** [218] Fenster Objekteinstellungen mit dem Abschnitt „Raumstempel" öffnen (Doppelklick auf einen Stempel). */
+  openRoomStampSettings: () => void;
 }) {
   // [121] Das Projekt liest jeder Handler beim Aufruf aus dem Store (App abonniert es nicht mehr).
   const { setProject, activeLevelId, visibleCodes, categoryDisplay, floorDisplay, selectionState, contextMenuState } = opts;
   const { selection, setSelection, groupPath } = selectionState;
-  const { setMenu, setStampEditorRoomId, editTextId, setEditTextId, setEditTextMinHeightM } = contextMenuState;
+  const { setMenu, editTextId, setEditTextId, setEditTextMinHeightM } = contextMenuState;
 
   // ── Maus-Schema: Auswahl + Kontextmenü aus Grundriss / 3D ─────────────────
   // Links-Klick im Grundriss: genau eine Wand wählen (Menge ersetzen) bzw.
   // Leerraum → Auswahl löschen.
-  // Doppelklick auf einen Raum-Stempel: den Raum wählen + den Stempel-Editor
-  // öffnen (Rich-Text-Popup).
+  // Doppelklick auf einen Raum-Stempel: den Raum wählen + die Objekteinstellungen mit dem Abschnitt „Raumstempel"
+  // öffnen ([218], kein Dialog im Fenster mehr). Gehört der Raum schon zur Auswahl, bleibt sie (Mehrfachwerte).
   const onOpenStampEditor = (roomId: string) => {
-    setSelection({ ...clearKinds(), rooms: [roomId] });
-    setStampEditorRoomId(roomId);
+    if (!getState().selection.rooms.includes(roomId)) setSelection({ ...clearKinds(), rooms: [roomId] });
+    opts.openRoomStampSettings();
   };
   // Doppelklick auf ein Text-2D-Element: selektieren + Inhalts-Editor öffnen.
   const onEditDrawingText = (drawingId: string) => {
@@ -215,6 +217,7 @@ export function useMouseSelectionHandlers(opts: {
         context: "contextObjects",
         site: "site",
         tree: "trees",
+        camera: "cameras",
       } as const satisfies Record<string, SelectionKind>;
       type Kind = keyof typeof channels;
       const target: { kind: Kind; id: string } | null = sel.sectionLineId
@@ -235,6 +238,8 @@ export function useMouseSelectionHandlers(opts: {
                       ? { kind: "solid", id: sel.extrudedSolidId }
                       : sel.treeId
                         ? { kind: "tree", id: sel.treeId }
+                        : sel.cameraId
+                        ? { kind: "camera", id: sel.cameraId }
                         : sel.columnId
                         ? { kind: "column", id: sel.columnId }
                         : sel.roofId
@@ -301,7 +306,9 @@ export function useMouseSelectionHandlers(opts: {
                             ? ["site", sel.siteId]
                             : sel.treeId
                               ? ["trees", sel.treeId]
-                              : null;
+                              : sel.cameraId
+                                ? ["cameras", sel.cameraId]
+                                : null;
     setSelection({ ...clearKinds(), groups: [], ...(one ? { [one[0]]: [one[1]] } : {}) });
   };
   // Links-Drag (Marquee) im Grundriss: die getroffene Wand-MENGE übernehmen
@@ -353,6 +360,7 @@ export function useMouseSelectionHandlers(opts: {
       stairs: expanded.stairIds,
       rooms: expanded.roomIds,
       trees: expanded.treeIds,
+      cameras: sel.cameraIds ?? [],
       groups: groupIds,
     });
   };

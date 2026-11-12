@@ -519,6 +519,13 @@ export interface ResolvedTitleBlock {
   planNumber: string;
   /** Revisionsindex des Blatts (`Layout.revision`, [79]); fehlt = keiner. */
   revision?: string;
+  /** Kennwort der Abgabe (`Project.competition.keyword`, [208]); leer ohne Wettbewerb. */
+  keyword: string;
+  /** Anonyme Abgabe ([208]): `projectName` ist das Kennwort, `author` leer. */
+  anonymous: boolean;
+  /** „Plan x/n" ([208]): Stelle des Blatts und Anzahl der Blätter, die mitzählen (Kern `resolve_title_block`). */
+  planIndex: number;
+  planCount: number;
 }
 
 /**
@@ -536,7 +543,7 @@ export function resolveTitleBlock(
   today: string = new Date().toISOString().slice(0, 10),
 ): ResolvedTitleBlock {
   const arg = {
-    layout: { id: layout.id, name: layout.name, planNumber: layout.planNumber, viewports: (layout.viewports ?? []).slice(0, 1) },
+    layout: { id: layout.id, name: layout.name, planNumber: layout.planNumber, masterId: layout.masterId, viewports: (layout.viewports ?? []).slice(0, 1) },
     master: master ? { titleBlock: master.titleBlock } : null,
     today,
   };

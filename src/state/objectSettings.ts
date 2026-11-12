@@ -4,7 +4,7 @@
 // und fokussiert; ohne Auswahl die Voreinstellung des aktiven Werkzeugs (Wand/Decke: Typ des neuen Bauteils), sonst
 // nichts. Die Zuordnung Auswahl → Abschnitt ist rein (`panels/objectInfo/groups.ts::objectSettingsTarget`).
 
-import { objectSettingsTarget, type InfoGroupId } from "../panels/objectInfo/groups";
+import { infoGroups, objectSettingsTarget, type InfoGroupId } from "../panels/objectInfo/groups";
 import { setSettingsArea } from "../panels/objectSettings/areaState";
 import { expandAndFocusInfoGroup } from "../panels/objectInfo/infoGroupState";
 import { getState } from "./appStore";
@@ -17,16 +17,20 @@ export interface ObjectSettingsDeps {
   revealObjectSettings: (group: InfoGroupId | null) => void;
 }
 
-/** Öffnet die Einstellungen; `false`, wenn es nichts zu öffnen gibt. */
-export function openObjectSettings(deps: ObjectSettingsDeps): boolean {
+/**
+ * Öffnet die Einstellungen; `false`, wenn es nichts zu öffnen gibt. `group` wählt den Abschnitt (statt des ersten der
+ * Auswahl), z. B. „roomStamp" beim Doppelklick auf einen Raumstempel ([218]); er muss zur Auswahl gehören.
+ */
+export function openObjectSettings(deps: ObjectSettingsDeps, group?: InfoGroupId): boolean {
   const { project, selection } = getState();
   const sel = selectionInfoFor(project, selection);
   let target = objectSettingsTarget(sel, deps.activeTool, isGridDrawing(sel?.kind === "drawing2d" ? sel.id : undefined));
   // Baum, Lage-Darstellung und Schnittlinie sind keine `SelectionInfo`, haben aber ihre Felder in der Objekt-Info.
-  if (!target && (selection.trees.length > 0 || selection.site.length > 0 || selection.sectionLines.length > 0)) {
+  if (!target && (selection.trees.length > 0 || selection.cameras.length > 0 || selection.site.length > 0 || selection.sectionLines.length > 0)) {
     target = { group: selection.sectionLines.length > 0 ? "sectionLine" : null };
   }
   if (!target) return false;
+  if (group && sel && infoGroups({ sel, isGrid: false, sectionLine: false, newComponentTool: false }).includes(group)) target = { group };
   setSettingsArea("object");
   if (target.group) expandAndFocusInfoGroup(target.group);
   deps.revealObjectSettings(target.group);

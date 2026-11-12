@@ -22,7 +22,7 @@ use crate::jsnum::round;
 
 // Teile der 3D-Ableitung ([162] aus einer Datei aufgeteilt).
 mod ceilings;
-mod bearing;
+pub(crate) mod bearing;
 mod columns;
 mod walls;
 mod wall_body;
@@ -128,7 +128,7 @@ pub const DEFAULT_CREASE_DEG: f64 = 30.0;
 
 
 /// Das 3D-Modell in Teilen.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Parts {
     pub walls: Vec<RWall>,

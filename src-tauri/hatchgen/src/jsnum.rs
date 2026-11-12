@@ -48,6 +48,27 @@ pub fn max(a: f64, b: f64) -> f64 {
     }
 }
 
+/// `Math.min(Math.max(x, a), b)` ohne Panic: vertauschte Grenzen (a > b) werden getauscht, NaN in `x`
+/// oder einer Grenze liefert NaN (wie JS; `f64::clamp` würde bei min > max oder NaN-Grenzen panikieren).
+#[inline]
+pub fn clamp_safe(x: f64, a: f64, b: f64) -> f64 {
+    let (lo, hi) = if a > b { (b, a) } else { (a, b) };
+    min(max(x, lo), hi)
+}
+
+/// Methodenform von [`clamp_safe`]: `x.clamp_safe(a, b)` statt `x.clamp(a, b)` bei Grenzen, die aus Modellwerten
+/// berechnet werden (können vertauscht oder NaN sein).
+pub trait ClampSafe {
+    fn clamp_safe(self, a: f64, b: f64) -> f64;
+}
+
+impl ClampSafe for f64 {
+    #[inline]
+    fn clamp_safe(self, a: f64, b: f64) -> f64 {
+        clamp_safe(self, a, b)
+    }
+}
+
 /// `Math.round(x)`: halbe Werte Richtung +∞, −0 bleibt −0, Werte in (−0.5, 0) → −0.
 #[inline]
 pub fn round(x: f64) -> f64 {
@@ -86,6 +107,18 @@ pub fn to_int32(x: f64) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn clamp_ohne_panic() {
+        assert_eq!(clamp_safe(5.0, 0.0, 3.0), 3.0);
+        assert_eq!(clamp_safe(-5.0, 0.0, 3.0), 0.0);
+        assert_eq!(clamp_safe(1.0, 3.0, 0.0), 1.0, "vertauschte Grenzen werden getauscht");
+        assert_eq!(clamp_safe(9.0, 3.0, 0.0), 3.0);
+        assert!(clamp_safe(f64::NAN, 0.0, 1.0).is_nan());
+        assert!(clamp_safe(0.5, f64::NAN, 1.0).is_nan());
+        assert!(clamp_safe(0.5, 0.0, f64::NAN).is_nan());
+        assert_eq!(clamp_safe(f64::INFINITY, 0.0, 1.0), 1.0);
+    }
 
     #[test]
     fn rundung_wie_js() {

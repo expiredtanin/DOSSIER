@@ -10,7 +10,7 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   stehen im Archiv („Bewusst nicht übernommen“).
 - **Grösse** (eine Person mit Agenten): S ≤ 1 Tag · M ≤ 1 Woche · L ≤ 1 Monat · XL > 1 Monat.
   Steht keine Grösse im Archiv, ist sie hier geschätzt.
-- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 215);
+- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 225);
   nie eine ID wiederverwenden oder umnummerieren. Präfix-IDs (`[K]`, `[G]`, `[T]`, `[B]`, `[C]`) bleiben.
 - **Pro Punkt:** was fehlt · wo im Code · Grösse. Höchstens ein bis drei Sätze je Punkt;
   Messwerte und Befunde gehören in den Commit.
@@ -55,18 +55,79 @@ Raumprogramm gegen Modell → Grundrisse/Schnitte/Ansichten 1:200 (Vorprojekt 1:
 Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
 
 ### Phase 1 (13.–19.11.): Stabil und baubar
-- ○ **[206]** Referenz-Ablauf als e2e-Spec (Browser) und als Checkliste für die Mac-Abnahme (`doc/RELEASE-1.0.md`): jeder Schritt
+- ◐ **[206]** Referenz-Ablauf als e2e-Spec (Browser) und als Checkliste für die Mac-Abnahme (`doc/RELEASE-1.0.md`): jeder Schritt
   oben ein Test; was fehlt, wird hier als Aufgabe eingetragen. · M
+  Umgesetzt (12.11.): `e2e/release10.spec.ts` spielt leeres Projekt → Kataster-DXF (LV95) → Baurecht → Wände/Decke/Dach → Raum +
+  Raumprogramm → SIA 416/Kennzahlen (CSV/PDF) → 1:200 → Schnitt → Axonometrie/Schatten → Präsentationsplan A1 → Publikation PDF → DXF/IFC
+  → Speichern in 13 Schritten durch; fehlende Schritte als `test.fixme` ([207] [208] [209] [211] [221]–[224]). Behoben: GV in der
+  Kennzahlenleiste war ohne freie Körper 0 m³, neue Decken bekamen den Aussenwand-Aufbau statt eines Deckentyps. Offen: Durchlauf
+  der Checkliste auf dem Mac (Maintainer); 3D-Bild headless nicht prüfbar (kein WebGPU).
+- ○ **[221]** LV95-Projekt: Schnitt A und Ansicht Süd des leeren Projekts liegen am Nullpunkt (`linePoints` −1…6 m). Repro: Neues Projekt →
+  Kataster-DXF mit Landeskoordinaten importieren → Erdgeschoss → Gebäude bei E 2'600'050 / N 1'200'050 zeichnen → „Auf Plan einpassen“:
+  Massstab ≈ 1:10'000'000 (Ausmass Nullpunkt … LV95, `plan/domains.rs` Marken im Ausmass), Rad-Zoom endet bei ≈ 130 m Breite
+  (`ZOOM_MAX` relativ zum Ausmass), der EG-Reiter öffnet am Nullpunkt; Schnitt A schneidet nichts. Vorschlag: Standard-Schnitt/-Ansicht
+  beim ersten Bauteil bzw. DXF-Import mit Landeskoordinaten ans Gebäude setzen oder im leeren Projekt weglassen. · S
+
+- ✓ **[217]** Kern-Panics aus dem Robustheitstest (12.11.): `wall_top_at` nutzte `f64::clamp(base, base+height)` — bei negativer/NaN-Höhe
+  min > max bzw. NaN → Panic in `wall_piece_mesh` (und über 3D/Exporte, u. a. `exportIfcSpf`). Neu `jsnum::clamp_safe`/`ClampSafe`
+  (Grenzen tauschen, NaN wie JS); 28 weitere `.clamp(` mit berechneten Grenzen in Kern-Modulen umgestellt. „Zufall 13“-Timeout war
+  Last (je Fall < 1 s, ganze Datei ~30 s), keine Endlosschleife. Regressionstests: Rust `wandkoerper_mit_kaputter_hoehe_ohne_panic`,
+  `jsnum::clamp_ohne_panic`, vitest in `robustness.test.ts`. Offen: ganzzahlige `usize::clamp` mit berechneten Grenzen nicht einzeln geprüft.
 - [30] Release-Workflow lauffähig: macOS universal signiert/notarisiert, Updater, Versionsnummer 1.0.0-beta; [57]/[120] CI auf GitHub grün.
 - „Mac-Gegenprobe“ (Sammelpunkt unten) für alles im Referenz-Ablauf abarbeiten (Maintainer), Befunde sofort beheben;
   [194] Texte synchron, [195b] Objektfenster, [190] Cmd+J auf dem Mac bestätigen.
 - Datensicherheit: Speichern/Autosave/Wiederherstellen auf dem Mac ([116]), Öffnen alter Beispielstände, kein Kern-Panic im Ablauf.
 
 ### Phase 2 (20.–26.11.): Wettbewerb lückenlos
-- ○ **[207]** Schwarzplan / Situationsplan 1:500: Gebäude schwarz gefüllt, Nachbarbauten (Kataster/swisstopo) grau/schwarz,
-  Parzelle, Strassen, Nordpfeil, Massstabsbalken; als Ansichtsvorlage „Situation WBW“. · M
-- ○ **[208]** Wettbewerbs-Layouts: Plakat-Vorlagen A0/A1 hoch/quer mit Raster, Kennwort-Feld (Anonymität: kein Büroname,
-  Metadaten im PDF leer), Planköpfe; Publikationssatz „WBW-Abgabe“ → PDF. · M
+- ◐ **[218]** Raumstempel bearbeiten im Objekteinstellungsfenster (13.11., Wunsch Maintainer): **Stand 13.11.:** Der Overlay-Dialog
+  („Fenster im Fenster“, `RoomStampEditor`/`RoomStampEditorHost`, samt Alt-Rich-Text-Dialog `TextEditorDialog`) ist weg. Doppelklick auf einen
+  Raumstempel (oder den Raum) wählt den Raum und öffnet die Objekteinstellungen mit dem neuen Abschnitt „Raumstempel“
+  (`panels/objectInfo/RoomStampSection.tsx`, Fokus-Abschnitt wie bei T, `openObjectSettings(deps, "roomStamp")`); unter Tauri im nativen
+  Nebenfenster über die bestehende Spiegelung ([195b], Abschnitt schreibt über Store-Ops). Schrift wählbar: Modell `RoomStampFont`
+  (Familie aus den gebündelten Schriften, Grösse pt, fett, kursiv, Farbe) am Stempel (`font`, ganzer Stempel) und je Zeile (`nameFont`,
+  `line2Font`, `numberFont`, `areaFont`, `usageFont`); Auflösung im Kern `plan/domains.rs::stamp_line_marks`: Zeile > Stempel > bisherige
+  Vorgabe (Name 12 pt fett, Zeile 2 9 pt kursiv, Nummer 9 pt, Zusatzzeilen 0.8 × Grundschrift); Zusatzzeilen tragen `StampLine.marks`
+  (Grösse bezogen auf Grundschrift 10 pt, folgt dem Massstab 7/10 und dem Einpassen), `text_layout::stamp_block*` und alle Ausgaben
+  (Anzeige-Szene `plan/text.rs` mit den gemessenen Grundlinien, SVG, Druck-SVG/PDF, DXF, HTML-Block) lesen sie. Mehrfachauswahl: gemischte
+  Werte „gemischt“, Änderung für alle gewählten Räume in EINEM Undo-Schritt (`state/roomStampEdit.ts`); Nummer/Namen bleiben je Raum. Bezugspunkt und Masse
+  (Breite/Höhe/Drehen, bei allen Elementarten) erscheinen nur noch im Objekt-Info-Panel, nicht im Fenster (`ObjectInfoPanel showPlacement=false`).
+  **Offen:** Die Schriftfamilie zeigt der GPU-Glyphen-Pass (WebGPU/Metal, `render2d/glyph.rs`) noch nicht — er kennt nur das eingebettete Inter
+  (Grösse, fett, kursiv, Farbe wirken); Familie sichtbar in SVG/PDF/DXF/HTML; Mac-Nebenfenster nicht geprüft (nur Linux-Container). · M
+- ◐ **[216]** 3D-Darstellungsfehler (12.11., Screenshots Maintainer, Musterhaus komplex): (1) Rundfenster im Giebel: Wandloch
+  quadratisch statt rund, Leibung mit Streifen; dazu ein senkrechtes Band im Giebel vom Fenster bis zur Decke; (2) Flächenmuster
+  (Fassade, Dach) im 3D nicht auf die Fläche beschnitten — Linien ragen über Giebel/Ortgang hinaus in die Luft; (3) Rundbogen-Öffnung:
+  Leibungs-/Sturzflächen mit Streifen-/Backsteinmuster, Bogen-Leibung nicht sauber geschnitten; (4) Dachfenster in der Darstellung
+  „ohne Material“ als offener Schlitz ohne Glas. · M
+  Stand 12.11.: (1)–(4) umgesetzt (Wandkörper per Manifold `core/src/model3d/wall_body.rs` + TS `splitWallBodies`; Wandmuster am Giebel/Öffnungsumriss
+  beschnitten `surface_pattern3d.rs`; Glas im Shader), nur im Linux-Container per render_png geprüft. Offen: Mac-Gegenprobe (Metal, Texturen);
+  Bogenwände behalten Füllkörper; 3D-Live-Schnitt durch Formfenster zeigt Rechteck-Loch; Dachmuster an Kehlen nicht beschnitten; einzelne
+  Körper mit inneren Stossflächen (Überlappung 0,1 mm mildert).
+- ◐ **[207]** Schwarzplan / Situationsplan 1:500 (12.11.): Modelldarstellung mit `situation` (`ModelViewOption.situation`, Kern
+  `plan/situation.rs`) ersetzt im Grundriss die Bauteile durch den gefüllten Umriss des eigenen Gebäudes (Wände/Decken/Körper ab
+  Erdgeschoss + Dächer mit Überstand, Klasse „83 Situation Gebäude"), gefüllte Grundfläche der Kontextnetze ([181], auf ihrer Klasse;
+  grau, im Schwarzplan schwarz) und Nordpfeil + Massstabsbalken (Klasse „84 Planzeichen"); Raster/Wände/Möbel/Text/Masse/Koten/
+  Schnittmarken über die Klassen der Vorlage aus, Parzelle, Strassen, Höhenlinien (enden an den Gebäuden) und Bäume bleiben. Standard-
+  Ressourcen „Situation WBW 1:500"/„Schwarzplan 1:500" (Vorlagen + Modelldarstellungen, Ressourcen-Tab „Modelldarstellung"),
+  Musterhaus komplex: Ausschnitt „Situation 1:500" nutzt sie, mit fünf Nachbargebäuden (Schnitte/Ansichten blenden Klasse 12 aus); CLI `plan --snapshot "Situation 1:500" --hatch`.
+  Offen: geschlossene Kataster-Polylinien (Klasse „Gebäude", nur 2D) bleiben Linien (gefüllt werden die Netze); Innenhöfe als weisse
+  Fläche statt Loch; Strassennamen/Gewässer nur als gewöhnliche Zeichnungen; nicht in der Tauri-App/auf dem Mac geprüft. · M
+- ◐ **[208]** Wettbewerbs-Abgabe (12.11.). Umgesetzt: **Bild-Element im Layout** (`Layout.images`, `LayoutImage`: PNG/JPEG als Data-URL wie
+  `ContextImage.src`, Rahmen in Papier-mm, Zuschnitt als Anteile; Kern `layout_image.rs`: Dateikopf, Seitenverhältnis, Zeichen-/Klipp-Rechteck,
+  dpi; Blatt: Knopf „Bild“, verschieben, Ecke skalieren mit festem Seitenverhältnis, HUD mit Breite, Zuschnitt, dpi-Warnung unter 100;
+  PDF: Original unverändert eingebettet, JPEG ohne Neukompression, auf den Rahmen geklippt). Rendering-Dialog: „Ins Layout einsetzen“
+  (Ziel-Blatt wählbar, vorgewählt das offene). **Plakat-Vorlagen** A0/A1 hoch/quer (`MasterLayout.template`, `posterHeader`,
+  `viewportScaleLabels`, `guides`; Kern `layout_poster.rs`: Ränder, Spalten 4–8, Hilfslinien nur am Bildschirm, Kopfzeile mit Kennwort-Feld
+  und „Plan x/n“ unter den Plakat-Blättern, Massstab unter jedem Viewport), wählbar im Dialog „Neues Layout“. **Anonymität**
+  (`Project.competition`: anonym + Kennwort; Mappe, Abschnitt Publikation): Plankopf zeigt das Kennwort statt Projekt/Bearbeiter, PDF-Info
+  nur Titel = Kennwort, Producer/Datum längengleich neutralisiert (`export/pdfInfo.ts`; jsPDF schreibt sie sonst immer), Dateinamen und
+  Schriftfeld des Einzelplan-PDF mit Kennwort. **Publikationssatz „WBW-Abgabe“** (Knopf in der Publikation): alle Plakate als ein PDF,
+  Format über den Satz-Editor auf Einzeldateien umstellbar. Tests: Rust (`layout_image`, `layout_poster`, Titelblock anonym), vitest
+  (`layoutImages`, `posterTemplates`, `layoutPdf.images`), e2e `competition` (A1 quer aus Vorlage, Bild, anonym, PDF). Offen: Hilfslinien nicht
+  als Fang und nicht frei setzbar; Bild-Zuschnitt nur per Prozentfeldern (kein Ziehen), Bild in DXF/IFC-Exporten nicht; Anonymität nur im PDF und
+  in Dateinamen (IFC/DXF/SVG-Metadaten, Layer-/Blattnamen mit Büroangaben prüft niemand); Berichts-PDF (`areaReport`)
+  noch nicht anonymisiert (Blatt-, Ordner- und Satz-PDF sind es); Download-Namen im Browser ohne Tauri-Dialog; grosse Bilder: jede
+  Blatt-Änderung (Viewport verschieben …) ersetzt das ganze Layout samt Data-URL im Op und im Verlauf (wie `ContextImage`) — bei vielen MB Bilder
+  in eine eigene Sammlung auslagern; nicht in der Tauri-App/auf dem Mac geprüft. · M
 - [61] Raumprogramm gegen Modell und Flächennachweis SIA 416 als Tabelle/Layout-Element ([70]); Kennzahlen (GF, GV, HNF/GF, Fassadenanteil).
 - 3D-Bilder für die Abgabe: hochaufgelöster PNG-Export (Perspektive, Axonometrie, Schatten), Sonnenstand; [205] Pausfolie.
 - [199]/[204] Plan- und App-Review-Reste im Darstellungsbereich 1:500/1:200 schliessen.
@@ -86,13 +147,37 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   Modell, auch Geisterschicht [180]), Puffer wiederverwenden, Draw-Calls bündeln (ein Puffer je Material/Durchgang, Instancing für
   Wiederholtes wie Fenster/Bäume), Sichtkegel-Culling, Schatten-Map nur bei Änderung von Licht/Modell, Kantenpass günstiger, LOD für
   Kontext/Gelände. Messbar machen (Bench in `dossier-cli bench` bzw. render3d-Test) und vorher/nachher belegen. Opus. · L
-- ◐ **[216]** 3D-Fehler am Musterhaus komplex (Mac-Screenshots 12.11., Stand 12.11.: umgesetzt, nur im Linux-Container per render_png geprüft): (1) Rund-/Bogenfenster: Wandloch folgt dem Umriss, keine
-  Füllkörper-Streifen, keine Stossfugen im Giebel (Körper je Band per Manifold, `core/src/model3d/wall_body.rs`, render3d `WallInput.body`);
-  (2) Flächenmuster der Wände enden am Giebel/der Dach-Unterkante und folgen dem Öffnungsumriss (`surface_pattern3d.rs`);
-  (3) Rundbogen-Leibung/Sturz ohne Streifen (mit (1)); (4) Glas bleibt in Weiss/Kanten/Konturen als Scheibe lesbar (Shader).
-  Offen: Gegenprobe auf dem Mac (Metal, Texturen); Bogenwände behalten die Füllkörper; 3D-Live-Schnitt durch ein Formfenster zeigt
-  das Rechteck-Loch; Dachmuster an Kehlen (Dach an Dach) nicht beschnitten; einzelne Wand-Körper haben noch innere Stossflächen
-  (Manifold-Vereinigung berührender Stücke, Überlappung 0,1 mm mildert es) — Gegenprobe am Mac. · M
+- [211] Rendering mit Blender/Cycles (◐, Eintrag unter „Import und Export“): Mac-Gegenprobe (Tauri, Metal), Blender 3.6/4.x, Dialog im Browser klicken.
+- [213] Kameras und Begehen/WASD (◐, Eintrag unter „Grundriss“): Kopieren/Gruppen/IFC, Mac-Gegenprobe.
+- ◐ **[214]** 3D-Engine optimieren (12.11., Wunsch Maintainer). Messung: `BENCH_3D=1 BENCH_3D_OUT=<dir> npx vitest run
+  src/viewport/render3d.bench.test.ts` (Kern/TS je Änderung wie `updateModel`, Szenen komplex/gross/kontext) und
+  `render_png --bench <dir>/<szene>` (Aufbau, Bildzeit, Draw-Calls, Teil-Update, GPU-Speicher); Kern-Profil `model3d_cache::tests::bench214`.
+  Umgesetzt (12.11.): Geisterschicht als Teile (`GhostLayerSync`, `set_ghost_parts`, eigene Szene in render3d) statt ganzem Modell-JSON +
+  Prüfsumme je Änderung; Kern-Cache hält Decken/Dächer/Kontext (zweite Abfrage mit Geister-Filter rechnet nichts), Deckenauflager mit
+  bekannten Fugen und Schichtfunktion je Wand einmal; texturierter Pfad ohne zweites Netz (UV im Shader); unveränderte 2D-Spuren/Muster/Hülle
+  nicht neu hochgeladen. Wand verschieben, Kern/TS je Änderung (WASM, Container): gross 1388 → 285 ms (Teile 668 → 138, Geisterschicht
+  877 → 141), komplex 146 → 176 (Rauschen, Geisterschicht 74 → 79), kontext 253 → 277 (Rauschen); GPU-Puffer komplex 57 → 42 MB,
+  kontext 175 → 123, gross 131 → 118; Aufbau render3d komplex 517 → 263 ms, gross 396 → 203. Schattenpass lief schon nur bei Änderung,
+  Bild-CPU je Frame 0.3–1.5 ms (Draw-Calls 64/275). Bilder byte-gleich, Geisterschicht ≤ 8/255 auf ~1 % (Mischreihenfolge der
+  durchscheinenden Flächen je Klumpen). Nicht auf dem Mac/Metal und nicht in der App angesehen. Offen, nach Messwert: (1) Rest-Gruppen ohne
+  JSON-Rundreise (Laufnummer je Gruppe statt `JSON.stringify`-Vergleich: kontext 69 ms, komplex 27 ms je Änderung); (2) Kern: Geschoss-
+  Kontexte aller Geschosse je Abfrage (gross 29 ms nativ, zweimal je Änderung), Kontext-Netze je Objekt als Teil statt eine Gruppe;
+  (3) Vernetzen in render3d (komplex 324 ms/147k Dreiecke kalt, Geisterschicht gross 2 s beim Geschosswechsel); (4) GPU-Bildzeit nur auf
+  lavapipe gemessen (komplex ~150–570 ms Software), Culling/LOD/Instancing erst nach Messung auf echter GPU (Mac); (5) Draw-Calls der
+  Geisterschicht je Klumpen (gross 275 → 465), ggf. bündeln. · M
+
+- ○ **[222]** Volumenstudie → Bauteile (12.11., aus [206]): gewählten Körper (Massenmodell) in Aussenwände je Geschoss, Decken und Flachdach
+  umwandeln, Geschosse aus der Körperhöhe; heute nur Zeichnen von Wand/Decke/Dach oder GV aus Körpern. Ort: neuer Befehl, Kern `cmd_create.rs`. · M
+- ○ **[223]** 3D-Bild für die Abgabe (12.11., aus [206]; Punkt „3D-Bilder für die Abgabe“ oben): Befehl/Menü „3D-Bild exportieren …“ mit
+  Pixelgrösse (z. B. 6000 px), Perspektive/Axonometrie mit Schatten als PNG-Download bzw. Datei. Heute gibt es `snapshotPng` nur für BCF
+  (`viewport/Wasm3DViewport.tsx`), keinen Export für den Menschen; nativ über `render_png`. · S
+- ○ **[224]** Präsentationsplan für den Wettbewerb (12.11., aus [206]): leere Geschosse (z. B. OG ohne Bauteile) sind im Dialog vorgewählt
+  und geben leere Viewports; es gibt nur die vorhandenen Ansichten (leeres Projekt: nur „Ansicht Süd“) — fehlende Ansichten N/O/W aus dem
+  Gebäudeumriss anbieten; Massstab wählbar (heute der grösste passende, im Testgebäude auf A1 1:50 statt 1:200 für den Wettbewerb).
+  Ort: `ui/PresentationDialog.tsx`, `commands/cmds/presentation.ts`. · S
+- ○ **[225]** Kennzahlenleiste und Flächentabelle widersprechen sich (12.11., aus [206]): Leiste „GF“ = Summe der Raumflächen (NGF,
+  `kennzahlen.rs`), Tabelle GF = NGF + KF (`flaechen.rs`); im Testgebäude 12 × 10 m: Leiste GF 112.5 m², Tabelle 127.7 m², ÜZ ebenso
+  verschieden. Leiste aus der Flächentabelle rechnen (GV ist seit [206] gleich). · S
 
 ### Phase 3 (27.11.–3.12.): Vorprojekt
 - ○ **[209]** Kostenschätzung grob (Vorprojekt ±15–25 %): Kennwerte je m³ GV (SIA 416) bzw. je m² GF und eBKP-H-Hauptgruppen,
@@ -124,6 +209,18 @@ Punktwolken/BCF-Ausbau, Windows-Paket, [C5]/[C7]/[15] Kern-Umbauten — ausser s
 
 ## Grundriss
 
+- ◐ **[213]** Kameras und Begehen im 3D (12.11., Wunsch Maintainer; ersetzt den offenen Eintrag in „Release 1.0“). Umgesetzt: Modell `Project.cameras`
+  (Rust `Camera`: Name, Geschoss, Standpunkt + Augenhöhe über Geschoss, Ziel + Zielhöhe, Bildwinkel/Brennweite, Perspektive/Axonometrie/Parallel,
+  Sichthöhe, Sonnenstand als ISO-Zeit; Klasse „Kameras“ Code 92, `standards::CAMERA_CATEGORY`); Ops über die gewöhnlichen Helfer. Grundriss-Symbol im Kern
+  (`plan/cameras.rs`: Gehäuse mit Objektiv, Sichtkegel bzw. Streifen, Ziel mit Blicklinie, Name; Pick-Bänder `@camera:<id>`, nur Gehäuse/Kanten/Ziel,
+  nicht der ganze Kegel); Griffe im Kern (`camera.rs`/`grips.rs`: Standpunkt, Ziel, Bildwinkel bzw. Sichtbreite, `cameraGrip`/`cameraBy`);
+  Objekt-Info-Abschnitt `CameraSection` (Werte, Brennweite ↔ Bildwinkel, Sonne, „Kamera öffnen“, „Aus aktueller Ansicht“, „Isometrisch“); Liste mit Anlegen/Öffnen/Löschen im
+  Panel „Ausschnitte“ (`CamerasGroup`); 3D: Knopf „Kamera+“ legt aus der aktuellen Ansicht an, Doppelklick auf das Symbol im Grundriss bzw. „Kamera öffnen“ setzt die 3D-Ansicht
+  exakt (Reiterwechsel, Sonnenstudie übernimmt `sunWhen`); `viewport/cameraView.ts::cameraToView(project, camera)` liefert dieselbe `ViewCamera` wie `getCamera()`
+  (Anschluss für das Rendering [211]: `cameraToView` statt der Live-Ansicht). Begehen: Umschalt+F bzw. Knopf „Begehen“, darin W/A/S/D und Pfeile gehen (horizontal, Augenhöhe bleibt),
+  Q/E runter/hoch, Umschalt ×4, Alt ×0.25, Maus (links oder rechts) schaut um den Augpunkt, Esc beendet; die Tasten gelten nur im Modus (sonst kollidieren sie mit S/D/Q, [190]), pro Frame mit
+  gekapptem Zeitschritt (`viewport/walk.ts`). Beispiel: Kamera „Südost“ im Musterhaus komplex. Offen: nicht in der Tauri-App geprüft (3D headless leer, Kamera-Brücke nur per Zustand); nativer Mac-3D ohne
+  Begehen/Kameras (`native.rs` ist Linux/winit); Kameras fehlen in Verschieben/Kopieren/Gruppen/IFC/Zwischenablage; Stil „Sonne am Tag“ (Datum/Uhrzeit-Dialog) und Animation entlang mehrerer Kameras. · M
 - ◐ **[205]** Pausfolie/Referenz wie Archicad „Trace & Reference“ (12.11., Wunsch Maintainer). Umgesetzt (12.11.): **Entscheid:** die Pausfolie ist UI-Zustand je Reiter (`state.trace`, Typ `TraceReference` aus dem Rust-Modell; mit dem Reiter in `uiState.viewTabs` und im Ausschnitt `ViewSnapshot.trace` gespeichert, kein Op, kein Undo, nie im Druck/Export). Die Quelle rechnen die bestehenden Abfragen (`planDomains`, `sectionPlan` + eigene 2D-Elemente, `elevationPlan`), die TS-Fassade `plan/trace.ts` schickt sie als Teil-Abfragen an die neue Kern-Abfrage `tracePlan` (`plan/trace.rs`): Ausrichtung nach Koordinatenraum (Schnitt/Ansicht hinter Grundriss an der Schnittlinie aufgeklappt, u längs der Linie, jenseits des Grundrisses; Grundriss hinter Schnitt wie bisher die Unterlage `underlay.rs`; gleicher Raum deckungsgleich, Schnitt hinter Schnitt höhengleich), dann Verschieben/Drehen (Starrkörper), Auswahl-Ids weg, Farbe nach Deckkraft zur Papierfarbe aufgehellt in den Primitiven selbst — alle drei Zeichenwege (WebGPU, Metal, SVG) ohne eigene Logik; `withTrace` legt sie unter/über den Plan. **Vereinheitlicht:** die [203]-Überlagerung anderer Geschosse über den Modus „Andere grau“ entfällt im Grundriss (Modus wirkt nur noch im 3D), die Grundriss-Unterlage `DrawingLevel.planUnderlayId` (Objekt-Info Schnittlinie, Abfrage `planUnderlay`) entfällt, Schnitt/Ansicht hinter freien Zeichnungen über das Auge entfällt — alles nur noch als Pausfolie; Auge/Modus komponiert weiter Geschoss ↔ freie Zeichnung. **Bedienung:** Navigator-Kontextmenü „Als Pausfolie zeigen“, Statusleiste „Pausfolie“ (Ein/Aus, ▴: Quelle, Farbe, Deckkraft, über/unter, Versatz, Drehung, Verschieben/Drehen per Klick, Zurücksetzen), Kürzel Cmd/Ctrl+Shift+T (rebindbar, Menü Ansicht), Befehle `tracemove`/`tracerotate`. Tests: Rust `plan::trace` (9), vitest `plan/trace.test.ts`, `state/traceRef.test.ts`, `levelTrace203` angepasst, e2e `trace205`. Offen: Fang auf der Pause nur im Schnitt/in der Ansicht (im Grundriss nicht); Blatt/Layout als Quelle und Pause im Layout; nicht in der Tauri-App/auf dem Mac (Metal) geprüft. Opus. · L
 - ◐ **[182]** Tabs/Ansichten wie Archicad (11.11., Wunsch Maintainer). Umgesetzt: Reiter-Arten Grundriss · 3D · Schnitt · Ansicht ·
   2D-Zeichnung/Layout werden nie gemischt (`navigateToLevel`/`switchViewKind` in `state/viewTabs.ts`, Anwendung in
@@ -297,7 +394,7 @@ Punktwolken/BCF-Ausbau, Windows-Paket, [C5]/[C7]/[15] Kern-Umbauten — ausser s
   nicht mehr im Stempel (Attribut des Raums; nur mit „SIA-Kategorie anzeigen“ = `showUsage`, neue Stempel Vorgabe aus), neue
   Option `showDivider` (Trennlinie unter dem Namen); Ausrichtung je Zeile bleibt wählbar. Bestehende Stempel mit
   `showUsage: true` behalten die Zeile, fehlende Ausrichtungen gelten jetzt als links. Offen: Mac-Gegenprobe (Metal/native
-  Ansicht) (Kern `plan/domains.rs`, `src/panels/RoomStampEditor.tsx`). · S
+  Ansicht) (Kern `plan/domains.rs`, Bearbeiten: `src/panels/objectInfo/RoomStampSection.tsx`, [218]). · S
 
 - ◐ **[141]** Wandecken. 9.11.: Wand und Stütze überlappen nicht mehr — runde Stütze an der Kontur, Wand durch
   bzw. breiter als die Stütze, Stütze kürzer als die Wand (3D: `model3d::carve_at_columns`, Streifen an den
@@ -459,6 +556,13 @@ Punktwolken/BCF-Ausbau, Windows-Paket, [C5]/[C7]/[15] Kern-Umbauten — ausser s
   (`dim_auto_offsets_avoiding`); Ansichtsmarker rückt von der Bemassung weg (`context::view_marker`). Test
   `plan/autodim_text_tests.rs` (Zahlen-Kästen beider Musterhäuser 1:200/100/50, Fixture `autodim_musterhaus_komplex.json`).
   Offen dazu: Griffe (`grips.rs`) und DXF-Export kennen den Zeichen-Versatz nicht (wie schon die Böschungs-Verschiebung [157]).
+  12.11. (Achsen): Masszahlen der Aussenbemassung stehen nicht mehr auf Achslinien und Achsblasen (komplex UG Ost „19.24"/„4.37"
+  auf Achse B) und nicht neben dem Pfeil-Schenkel einer Schnittlinie („19.24" neben „B-B") — dieselben Streifen wie bei den
+  Schnittmarken (`drawings::grid_strips`/`axis_cross_strips` neben `section_mark_strips`, Mechanik `dim_auto_offsets_marks`);
+  eine Achse mit Blase gilt bis hinter alle Ketten (die Blase rückt vor sie, [157]; die genaue Blasenlage hängt von den Massen ab,
+  daher nicht verwendet). Test `achsstreifen_auf_der_masslinie`, `schnittpfeil_neben_der_masslinie`; `autodim_text_tests` prüft jetzt
+  auch Achsen/Blasen (komplex mit Raster, 1:100/1:50). Offen: bei 1:200 (eng) und bei Bogenmassen (kein Ausweichen) liegen
+  einzelne Zahlen noch auf Achsen (komplex UG/EG/OG, 5 Fälle); einfaches Musterhaus hat kein Raster.
   12.11. (Forts.): (1) Raumstempel schrumpfte auf 2 mm, sobald Schnittlinie, Achse, Gaube und Kote den Raum querten (komplex DG
   „Schlafen"): Anderer Planinhalt verkleinert die Schrift jetzt nur noch bis 80 % der Grundschrift (`ROOM_STAMP_KEEP`,
   `fit_room_stamp`); 2 mm nur noch, wenn der Raum auch das nicht fasst. Findet sich keine freie Lage, steht der Stempel an der
@@ -769,6 +873,8 @@ Punktwolken/BCF-Ausbau, Windows-Paket, [C5]/[C7]/[15] Kern-Umbauten — ausser s
 
 ## Import und Export
 
+- ◐ **[211]** Rendering mit Blender/Cycles (12.11.). Export-Paket `model.glb` + `scene.json` + `textures/` (`export/blenderRender.ts`, Format renderer-neutral in `doc/RENDER-SZENE.md`, Leser für Cycles-Standalone [215] vorgesehen): Kamera der aktiven 3D-Ansicht (`getCamera`) oder Voreinstellung, Sonne aus Sonnenstand/Ort, Materialtabelle (Farbe, Rauheit, Metall, Glas mit Transmission/IOR, Bildkarten aus `Component.material`). Texturen ohne UVs per Box-Projektion (Kachel `sizeM`); keine UVs im GLB. Skript `scripts/blender/render_dossier.py` (Cycles, Nishita/Mehrfachstreuung-Himmel, Denoiser, GPU/Metal wenn vorhanden). App: Dialog „Rendering mit Blender" (Befehl `rendering`, Menü Ansicht, Pfad in Einstellungen), Fortschritt „Sample x von y", Abbrechen, Vorschau, Bild speichern; Tauri `src-tauri/src/blender.rs` + Capabilities (fs nur `$TEMP/dossier-render`), Electron `scripts/electron-blender.cjs`, Browser: Paket als ZIP. CLI `render --out bild.png [--view --when --samples --size --cpu --blender]`. Geprüft: vitest (Szene, Paket, Prozess gemockt, CLI mit Blender-Ersatz), Rust-Logik `blender.rs` (rustc --test, 6 Tests), `cargo check` der Tauri-App (Linux), echter Lauf mit `bpy` 5.3 (CPU) am Musterhaus komplex, Sonnenrichtung per Schattentest. **Offen:** nicht in der Tauri-App/auf dem Mac geprüft (Berechtigungen, Metal-GPU, Ereignisse), nicht mit einem installierten Blender 3.6/4.x; „Als Bild ins Layout" entfällt (Layouts haben keine Bildelemente); Dialog nicht im Browser geklickt; ambientCG-Web-Texturen lädt die CLI nicht. **Stand 12.11. (Bildwirkung, Kamerawahl):** Nishita mit Sonnenstärke 1.0 und automatischer Belichtung nach Sonnenhöhe (gemessen: weisse besonnte Fläche ≈ 45 bei 60°, Tabelle `SUNLIT_WHITE` im Skript), AgX, Albedo ≤ 0.8, Wiese `Grass005` fürs Gelände (Rückfall Wiesengrün), Dachschichten je Baustoff (`splitRoofMaterials`: vorher hingen Ziegel/Kies/Blech am gleichen „Dach“-Material), Kontext hellgrau, Glas mit Transmission und durchsichtig für Schattenstrahlen, leichte Umgebungsverdeckung. Kamera im Dialog („Aktuelle 3D-Ansicht“ oder gespeicherte Kamera, Sonnenzeit der Kamera), CLI `--camera <Name|id>`. Geprüft: vitest (Materialzuordnung, Kamerawahl, CLI), echter Lauf mit `bpy` 5.3 (CPU) an Musterhaus komplex, Iso und Kamera „Südost“. **Offen:** Mac/Tauri-Gegenprobe, Blender 3.6/4.x (Mix-Knoten per Platz, `light_settings.ao_factor` nur in 5.x geprüft), Dialog nicht im Browser geklickt, Gelände hat kein Material im Modell (immer Wiese), Dachtyp-Schichten ohne Bildkarte (z. B. Faserzement) nur nach Namen. · M
+
 - ◐ **[B4]** (= [25], zweite Stufe) IFC-Import zu echten Bauteilen (`io/ifcImport*`, `fileio`). Dächer, Treppen mit 3+ Podesten, Träger, schräge/
   gekrümmte Wände, Wände mit Profiländerung, Decken aus Netzen mit T-Stössen, Tür-Anschlag, Typen aus
   IfcDoorType/IfcWindowType, Farbe der Bauteile; LEFT/RIGHT nur gegen den eigenen Export geprüft. · L
@@ -936,7 +1042,7 @@ Punktwolken/BCF-Ausbau, Windows-Paket, [C5]/[C7]/[15] Kern-Umbauten — ausser s
 
 Auf dem Mac (Tauri/Metal) noch nicht angesehen oder geprüft; bisher nur Linux-Container, CLI-SVG, Chromium oder
 Unit-Tests: [116] (atomares Speichern), [117] (CSP unter `tauri://`), [118], [122], [123], [126], [110], [101],
-[102], [131], [133], [136], [140], [145], [194], [146], [153], [64], [T2], [T4], [34], [108], [65], [169], [113], [181], [G1]. Je Punkt ansehen, dann hier und
+[102], [131], [133], [136], [140], [145], [194], [146], [153], [64], [T2], [T4], [34], [108], [65], [169], [113], [181], [G1], [214]. Je Punkt ansehen, dann hier und
 im jeweiligen Eintrag streichen. · M (gesamt)
 
 ---

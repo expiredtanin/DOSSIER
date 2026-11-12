@@ -117,6 +117,20 @@ pub struct HatchRender {
 pub struct StampLine {
     pub text: String,
     pub align: Align,
+    /// [218] Schrift der Zeile (Familie, Grösse in pt bei Grundschrift 10, fett, kursiv, Farbe); fehlt: 0.8 × Grundschrift.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub marks: Option<Marks>,
+}
+
+impl StampLine {
+    /// Zeile in der Standardschrift.
+    pub fn plain(text: String, align: Align) -> Self {
+        Self { text, align, marks: None }
+    }
+    /// Zeile für den Stempel-Satz (`text_layout::stamp_block`).
+    pub fn row(&self) -> crate::text_layout::ExtraRow<'_> {
+        (self.text.as_str(), crate::text_layout::LineAlign::of(Some(self.align)), self.marks.as_ref())
+    }
 }
 
 /// `dash?: number[] | null`: fehlt (`None`), `null` (`Some(None)`) oder Muster.

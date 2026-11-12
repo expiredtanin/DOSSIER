@@ -362,6 +362,16 @@ describe("Kern robust gegen kaputte Projekte", () => {
     }, 240_000);
   }
 
+  it("[217] Wände mit negativer/NaN-Höhe unter dem Dach: 3D und Exporte ohne Kern-Panic", async () => {
+    for (const h of [-3, NaN, 0, -1e300]) {
+      const p = clone(richProject());
+      for (const w of list(p, "walls")) w.height = h;
+      for (const r of list(p, "roofs")) r.floorId = list(p, "walls")[0]?.floorId ?? r.floorId;
+      const errors = await runAll(p as unknown as Project);
+      expect(errors, `Höhe ${h}`).toEqual([]);
+    }
+  }, 120_000);
+
   it("hängender Wandtyp: Plan wie mit dem Rückfall-Typ (kein Werfen, Wand bleibt sichtbar)", () => {
     const p = clone(sampleProject);
     p.walls[0].wallTypeId = "nope";

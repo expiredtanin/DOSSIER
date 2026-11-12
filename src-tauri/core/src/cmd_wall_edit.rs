@@ -22,6 +22,7 @@
 //! Grenzen (Schneider) sind die Achsen (Option „Fläche": die beiden Aussenflächen) der übrigen Wände des
 //! Geschosses, 2D-Linien/-Polylinien (mit Bögen)/-Rechtecke/-Kreise/-Bögen und Achsraster der Ebene.
 
+use crate::jsnum::ClampSafe;
 use crate::cmd_transform::{IdGen, Shapes};
 use crate::json_util::{arr, as_copy, field, js_num, pt, with, with_all};
 use crate::joins::Line;
@@ -685,7 +686,7 @@ pub fn extend<'a>(root: &'a Project, w: &'a Wall, at: P, face: bool) -> Option<E
 pub fn break_at<'a>(w: &'a Wall, p1: P, p2: P) -> Option<Edit<'a>> {
     let mut p = plan(w, false)?;
     let len = p.ax.len;
-    let (s1, s2) = (p.ax.local(p1).0.clamp(0.0, len), p.ax.local(p2).0.clamp(0.0, len));
+    let (s1, s2) = (p.ax.local(p1).0.clamp_safe(0.0, len), p.ax.local(p2).0.clamp_safe(0.0, len));
     let (lo, hi) = if s1 <= s2 { (s1, s2) } else { (s2, s1) };
     if hi - lo < MIN_LEN {
         if lo < MIN_LEN || lo > len - MIN_LEN {

@@ -1,5 +1,5 @@
-meshes [1211]
-meshes[].color [3] x1211
+meshes [1212]
+meshes[].color [3] x1212
 meshes[].indices [108] x6
 meshes[].indices [1152] x3
 meshes[].indices [1224]
@@ -13,6 +13,7 @@ meshes[].indices [154014]
 meshes[].indices [1584]
 meshes[].indices [1716]
 meshes[].indices [180]
+meshes[].indices [204]
 meshes[].indices [2118]
 meshes[].indices [2124] x2
 meshes[].indices [2130]
@@ -42,6 +43,7 @@ meshes[].positions [1089]
 meshes[].positions [108] x30
 meshes[].positions [1188]
 meshes[].positions [120]
+meshes[].positions [132]
 meshes[].positions [1368] x2
 meshes[].positions [162]
 meshes[].positions [16428]
@@ -99,4 +101,4 @@ walls[].start [2] x1192
 walls[].startCut [4] x832
 walls[].topDrop [2] x89
 walls[].topPlane [3] x245
-hash 11d1505c4650cdb4
+hash 534b551bfdb4405a

@@ -46,6 +46,50 @@ export type BlockDef = { id: string; name: string; geom2d: Array<Drawing2DGeom> 
  */
 export type BuiltinPaletteBanks = { simple?: boolean; tango?: boolean; material?: boolean; ral?: boolean };
 
+/**
+ * Eine Kamera ([213]) — gespeicherter Standpunkt für die 3D-Ansicht (und das Rendering): Standpunkt im
+ * Grundriss mit Augenhöhe über dem Geschoss, Ziel (Grundriss und absolute Höhe), Bildwinkel, Projektion
+ * und optional Datum/Uhrzeit für den Sonnenstand. Im Grundriss als Symbol mit Sichtkegel auf der Klasse
+ * „Kameras" (Vorgabe "92"); „Kamera öffnen" setzt die 3D-Ansicht exakt.
+ */
+export type Camera = {
+  id: string;
+  type: "camera";
+  name: string;
+  /** Geschoss, auf dem das Symbol im Grundriss steht und auf das sich die Augenhöhe bezieht. */
+  floorId: string;
+  /** Klasse (Ebene), Vorgabe "92" (Kameras). */
+  categoryCode: string;
+  /** Objekt-Sperre, analog `Wall.locked`. */
+  locked?: boolean;
+  /** Standpunkt im Grundriss (Meter). */
+  position: Vec2;
+  /** Augenhöhe über OK Fertigboden des Geschosses (m). */
+  eyeHeight: number;
+  /** Ziel im Grundriss (Meter); der Abstand Standpunkt–Ziel ist die Länge des Sichtkegels. */
+  target: Vec2;
+  /** Höhe des Ziels (m, absolut, z des Modells). */
+  targetHeight: number;
+  /**
+   * Vertikaler Bildwinkel (Grad, perspektivisch). Die Kleinbild-Brennweite folgt daraus (24-mm-Sensorhöhe).
+   */
+  fovDeg: number;
+  projection: CameraProjection;
+  /** Sichthöhe in Metern (volle Bildhöhe) bei Axonometrie/Parallel; fehlt = 10 m. */
+  orthoHeight?: number;
+  /**
+   * Zeitpunkt für den Sonnenstand (ISO-8601 in UTC wie `SunStudy.when`); „Kamera öffnen" setzt ihn in der
+   * Sonnenstudie. Fehlt er, bleibt die Sonne der Studie.
+   */
+  sunWhen?: string;
+};
+
+/**
+ * Projektion einer Kamera ([213]): Perspektive, Axonometrie (Parallelprojektion mit schrägem Blick, z. B.
+ * Isometrie) oder Parallelprojektion (frei ausgerichtet). Axonometrie und Parallel zeichnen im 3D orthografisch.
+ */
+export type CameraProjection = "perspective" | "axonometric" | "parallel";
+
 /** Bekleidung einer Tür ([105]): auf der Aufschlagseite, der Gegenseite, beidseitig oder keine. */
 export type CasingSides = "beide" | "aufschlag" | "gegen" | "keine";
 
@@ -291,6 +335,17 @@ export type Column = {
  *   • "round" — Kreis mit `radius`.
  */
 export type ColumnProfile = { kind: "rect"; width: number; depth: number } | { kind: "round"; radius: number };
+
+/**
+ * Wettbewerbs-Einstellung des Projekts ([208]): anonym = Kennwort statt Büro- und Projektname in Plankopf,
+ * Dateinamen und PDF-Metadaten.
+ */
+export type CompetitionSettings = {
+  /** Anonyme Abgabe: keine Büro-/Autor-Angaben in Export und Plankopf. */
+  anonymous: boolean;
+  /** Kennwort der Abgabe (steht in Plankopf und PDF-Titel). */
+  keyword: string;
+};
 
 /**
  * Ein Bauteil-Material (Component Manager) — vereint Plan-Schnittdarstellung
@@ -1789,6 +1844,8 @@ export type Layout = {
   legends?: Array<LayoutLegend>;
   /** Lebendige Tabellen auf dem Blatt ([111]); fehlt = keine. */
   tables?: Array<LayoutTable>;
+  /** Bilder auf dem Blatt ([208]): Renderings, Fotos, Luftbilder; fehlt = keine. */
+  images?: Array<LayoutImage>;
 };
 
 /**
@@ -1809,6 +1866,44 @@ export type LayoutFolder = {
    * (rückwärtskompatibel — Alt-Projekte ohne `kind` bleiben Layout-Ordner).
    */
   kind?: "layout" | "master";
+};
+
+/**
+ * Hilfslinie eines Masters ([208], Gestaltungsraster): senkrecht (`x`) oder waagrecht (`y`) in Papier-mm.
+ * Nur am Bildschirm, nie im Druck.
+ */
+export type LayoutGuide = {
+  /** "x" = senkrechte Linie bei `posMm` von links, "y" = waagrechte Linie bei `posMm` von oben. */
+  axis: string;
+  posMm: number;
+};
+
+/**
+ * Bild auf einem Layout-Blatt ([208]): PNG oder JPEG als Data-URL (gleicher Weg wie `ContextImage.src`),
+ * im Rahmen `xMm`/`yMm`/`widthMm`/`heightMm` (Papier-mm). Das Seitenverhältnis des Ausschnitts bleibt erhalten;
+ * `crop` schneidet zu (Anteile 0..1 des Originals). Im PDF wird das Original unverändert eingebettet (JPEG ohne
+ * Neukompression).
+ */
+export type LayoutImage = {
+  id: string;
+  /** Anzeigename (Dateiname). */
+  name: string;
+  /** Bildquelle als Data-URL (`data:image/png;base64,…` oder `data:image/jpeg;base64,…`). */
+  src: string;
+  /** Linke Kante auf dem Blatt (mm, von links). */
+  xMm: number;
+  /** Obere Kante auf dem Blatt (mm, von oben). */
+  yMm: number;
+  /** Breite des gezeigten Ausschnitts (mm). */
+  widthMm: number;
+  /** Höhe des gezeigten Ausschnitts (mm). */
+  heightMm: number;
+  /** Pixelbreite des Originals (aus dem Dateikopf gelesen). */
+  pixelWidth: number;
+  /** Pixelhöhe des Originals. */
+  pixelHeight: number;
+  /** Zuschnitt als Anteile des Originals (0..1); fehlt = ganzes Bild. */
+  crop?: { x: number; y: number; w: number; h: number };
 };
 
 /**
@@ -2041,6 +2136,18 @@ export type MasterLayout = {
   customWidthMm?: number;
   /** Freie Blatthöhe in mm (siehe {@link MasterLayout.customWidthMm}). */
   customHeightMm?: number;
+  /**
+   * Vorlagen-Schlüssel ([208], z. B. "poster-a1-landscape"): wiederverwendet den Master beim Anlegen weiterer Plakate.
+   */
+  template?: string;
+  /**
+   * Plakat-Kopfzeile ([208]): Band über die Satzbreite mit Kennwort-Feld, Projekttitel und „Plan x/n".
+   */
+  posterHeader?: boolean;
+  /** Massstab unter jedem Viewport ausgeben ([208]). */
+  viewportScaleLabels?: boolean;
+  /** Hilfslinien des Gestaltungsrasters ([208]), nur am Bildschirm. */
+  guides?: Array<LayoutGuide>;
 };
 
 /** [173] Darstellung der Stufen über der Schnitthöhe. */
@@ -2145,6 +2252,11 @@ export type ModelViewOption = {
   roomStamps?: ModelViewRoomStamps;
   /** [173] Bemassung: Massketten der automatischen Aussenbemassung, Höhenkoten. */
   dimensions?: ModelViewDimensions;
+  /**
+   * [207] Situationsplan / Schwarzplan: fehlt ⇒ gewöhnlicher Grundriss; vorhanden ⇒ statt der Bauteile das
+   * eigene Gebäude als gefüllter Umriss, die Kontextgebäude gefüllt, dazu Nordpfeil und Massstabsbalken.
+   */
+  situation?: ModelViewSituation;
 };
 
 /** [173] Dächer in der Modelldarstellung (fehlt ⇒ wie Basis). */
@@ -2187,6 +2299,23 @@ export type ModelViewSectionMarks = {
 export type ModelViewSite = {
   /** Gelände, Höhenlinien und Baugruben im Grundriss (die Ebene geht vor; Basis: automatisch). */
   terrain?: boolean;
+};
+
+/**
+ * [207] Situationsplan in der Modelldarstellung (≙ Schwarzplan): jede Option fehlt ⇒ Standard des
+ * Situationsplans (eigenes Gebäude schwarz, Kontext grau, mit Planzeichen).
+ */
+export type ModelViewSituation = {
+  /**
+   * Eigenes Gebäude: Umriss über alle Geschosse über Terrain und die Dächer, gefüllt (Basis: schwarz).
+   */
+  own?: SituationFill;
+  /**
+   * Kontextgebäude (importierte Netze, Grundfläche aus der Aufsicht), gefüllt (Basis: grau; „Schwarzplan": schwarz).
+   */
+  context?: SituationFill;
+  /** Nordpfeil und Massstabsbalken zeichnen (Basis: ja). */
+  symbols?: boolean;
 };
 
 /** [173] Decken und Böden in der Modelldarstellung. */
@@ -2845,6 +2974,11 @@ export type Project = {
    */
   trees?: Array<Tree>;
   /**
+   * Kameras ([213]) — gespeicherte Standpunkte für 3D-Ansicht und Rendering, siehe {@link Camera}. Optional
+   * (Default: leer behandeln).
+   */
+  cameras?: Array<Camera>;
+  /**
    * Gruppen (Vectorworks-artig: Cmd+G fasst die Auswahl zu einer Einheit
    * zusammen; Doppelklick betritt die Gruppe zum Bearbeiten, alles andere
    * wird dabei gedimmt/gesperrt — s. `state/useGroupState.ts`). Eine Gruppe
@@ -2916,6 +3050,8 @@ export type Project = {
   publishLog?: Array<PublishLogEntry>;
   /** Projektnummer für Titelblock und Dateinamen ([79]). */
   projectNumber?: string;
+  /** Wettbewerb ([208]): anonyme Abgabe mit Kennwort. */
+  competition?: CompetitionSettings;
   /**
    * Höhe von ±0.00 (OK fertig Boden des Bezugsgeschosses, `DrawingLevel.zeroLevel`)
    * in Metern über Meer (m ü. M.), editierbar im Einstellungs-Fenster. Optional.
@@ -3322,6 +3458,34 @@ export type RoomStamp = {
   showFinish?: boolean;
   /** [177] Trennlinie unter dem Namen anzeigen. Fehlt/false: keine Linie. */
   showDivider?: boolean;
+  /** [218] Schrift des ganzen Stempels (Vorgabe für alle Zeilen ohne eigene Angabe). */
+  font?: RoomStampFont;
+  /** [218] Schrift der Namenszeile (Vorgabe: Stempelschrift, sonst 12 pt fett). */
+  nameFont?: RoomStampFont;
+  /** [218] Schrift der zweiten Namenszeile (Vorgabe: Stempelschrift, sonst 9 pt kursiv). */
+  line2Font?: RoomStampFont;
+  /** [218] Schrift der Raumnummer (Vorgabe: Stempelschrift, sonst 9 pt). */
+  numberFont?: RoomStampFont;
+  /** [218] Schrift der Bodenflächen-Zeile (Vorgabe: Stempelschrift, sonst 0.8 × Grundschrift). */
+  areaFont?: RoomStampFont;
+  /** [218] Schrift der Nutzungs-Zeile (Vorgabe: Stempelschrift, sonst 0.8 × Grundschrift). */
+  usageFont?: RoomStampFont;
+};
+
+/**
+ * [218] Schrift einer Zeile des Raumstempels; fehlende Werte gelten als „wie die Vorgabe" (Stempelschrift, dann
+ * die eingebauten Werte der Zeile). Grösse in typografischen Punkt auf dem Papier bei der Grundschrift 10 pt
+ * (kleinere Massstäbe verkleinern sie im Verhältnis).
+ */
+export type RoomStampFont = {
+  /** Schriftfamilie (eine der gebündelten Schriften, z. B. "Work Sans"). */
+  family?: string;
+  /** Schriftgrösse in pt. */
+  sizePt?: number;
+  bold?: boolean;
+  italic?: boolean;
+  /** Farbe als "#rrggbb". */
+  color?: string;
 };
 
 /** [158] Nutzung eines Raums (Raumbuch). Nassräume: Bad, WC, Dusche, Waschküche. */
@@ -3446,6 +3610,9 @@ export type SiteRules = {
    */
   profileHeight?: number;
 };
+
+/** [207] Füllung eines Gebäudes im Situationsplan. */
+export type SituationFill = "black" | "grey" | "off";
 
 /** Terminierungs-Regel einer Wand am Deckenanschluss (siehe {@link Wall.sliceTermination}). */
 export type SliceTermination = "both" | "below" | "above";

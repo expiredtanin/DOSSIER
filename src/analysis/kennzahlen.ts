@@ -2,7 +2,7 @@
 //
 //  • Flächen je Geschoss aus den Räumen (SIA 416: GF, NGF/aGF), Summe über das Gebäude.
 //  • Gebäudevolumen (GV) aus den freien Körpern (Massenmodell); Abzugskörper zählen nicht mit,
-//    ihr Volumen wird abgezogen.
+//    ihr Volumen wird abgezogen. Ohne freie Körper GF × Geschosshöhe wie die Flächentabelle ([206]).
 //  • Ausnützungs-/Überbauungsziffer nur mit `project.parcelArea` oder der Parzellengrenze (`siteRules`).
 //  • Raumprogramm (`project.roomProgram`, Soll) gegen die gezeichneten Räume.
 // Exakt für Prismen/Kegelstümpfe/Kreise, Näherung sonst (Fasen/Rundungen). Raumflächen je
@@ -30,7 +30,7 @@ export interface Kennzahlen {
   levels: LevelKennzahlen[];
   gf: number;
   agf: number;
-  /** Gebäudevolumen aus den freien Körpern (m³), Abzugskörper abgezogen. */
+  /** Gebäudevolumen aus den freien Körpern (m³), Abzugskörper abgezogen; ohne Körper GF × Geschosshöhe. */
   gv: number;
   /** Bebaute Fläche ≈ GF des untersten Geschosses (m²). */
   footprint: number;

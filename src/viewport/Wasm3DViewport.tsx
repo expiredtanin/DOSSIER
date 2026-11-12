@@ -81,6 +81,9 @@ import {
   type OrbitState,
   type V3 as CamV3,
 } from "./cameraBridge";
+import { NO_KEYS, WALK_SPEED, anyKey, lookAround, speedFactor, stepWalk, walkKeyAllowed, walkKeyOf, type WalkKeys } from "./walk";
+import { loadShortcutOverrides, matchesShortcut } from "../state/keyboardShortcuts";
+import { createCameraFromView } from "../state/cameraActions";
 
 /** Ein per 3D-Klick getroffenes Bauteil, oder null (Leerraum). */
 export type Pick3dHit =
@@ -594,6 +597,10 @@ export function Wasm3DViewport({
   // stabile Pointer-Listener-Effekt stets den aktuellen Befehlszustand liest.
   const commandActiveRef = useRef(commandActive);
   commandActiveRef.current = commandActive;
+  // [213] Begehen-Modus (Umschalt+F / Knopf): WASD, Q/E und Pfeile bewegen die Kamera, Maus ziehen schaut um.
+  const [walkMode, setWalkMode] = useState(false);
+  const walkModeRef = useRef(false);
+  walkModeRef.current = walkMode;
   const onWorkplanePointRef = useRef(onWorkplanePoint);
   onWorkplanePointRef.current = onWorkplanePoint;
   const onWorkplaneConfirmRef = useRef(onWorkplaneConfirm);
@@ -1381,6 +1388,89 @@ export function Wasm3DViewport({
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  // [213] Begehen (WASD): Umschalt+F schaltet den Modus, darin bewegen W/A/S/D und die Pfeiltasten die Kamera
+  // (vor/zurück/seitlich in der Horizontalen, Augenhöhe bleibt), Q/E senken und heben, Umschalt = schneller, Alt =
+  // langsamer. Die Tasten gelten NUR im Modus — sonst kollidieren sie mit „s" (Spiegeln), „d" (Drehen), „q" (Messen).
+  // Pro Frame (rAF) mit gekapptem Zeitschritt; Textfelder und Befehls-Modifikatoren (Strg/Cmd) sperren. Rechnung rein
+  // in `walk.ts`. Die Handler laufen in der Capture-Phase und verbrauchen die Bewegungstasten, damit globale Kürzel
+  // nicht zusätzlich feuern.
+  useEffect(() => {
+    if (!ready) return;
+    const keys: WalkKeys = { ...NO_KEYS };
+    const mods = { shift: false, alt: false };
+    let raf = 0;
+    let last = 0;
+    const redrawOrbit = () => {
+      redrawRef.current = () => {
+        if (orbitRef.current) render(orbitCamera(orbitRef.current));
+      };
+      redrawRef.current();
+    };
+    const tick = (now: number) => {
+      raf = 0;
+      if (!walkModeRef.current || !anyKey(keys)) return;
+      const o = orbitRef.current;
+      if (o) {
+        const dt = last ? (now - last) / 1000 : 0;
+        orbitRef.current = stepWalk(o, keys, dt, WALK_SPEED * speedFactor(mods.shift, mods.alt));
+        redrawOrbit();
+      }
+      last = now;
+      raf = requestAnimationFrame(tick);
+    };
+    const start = () => {
+      if (raf === 0) {
+        last = 0;
+        raf = requestAnimationFrame(tick);
+      }
+    };
+    const release = () => {
+      Object.assign(keys, NO_KEYS);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      mods.shift = e.shiftKey;
+      mods.alt = e.altKey;
+      if (!walkKeyAllowed(e, document.activeElement)) return;
+      if (!e.repeat && matchesShortcut(e, "walkMode", loadShortcutOverrides())) {
+        e.preventDefault();
+        e.stopPropagation();
+        setWalkMode((w) => !w);
+        release();
+        return;
+      }
+      if (!walkModeRef.current || commandActiveRef.current || gripDragRef.current) return;
+      if (e.key === "Escape") {
+        setWalkMode(false);
+        release();
+        return;
+      }
+      const k = walkKeyOf(e.code);
+      if (!k) return;
+      e.preventDefault();
+      e.stopPropagation();
+      keys[k] = true;
+      start();
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      mods.shift = e.shiftKey;
+      mods.alt = e.altKey;
+      const k = walkKeyOf(e.code);
+      if (k && keys[k]) {
+        keys[k] = false;
+        e.stopPropagation();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    window.addEventListener("keyup", onKeyUp, true);
+    window.addEventListener("blur", release);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown, true);
+      window.removeEventListener("keyup", onKeyUp, true);
+      window.removeEventListener("blur", release);
+      cancelAnimationFrame(raf);
+    };
+  }, [ready, render]);
+
   // Maus-Navigation (LINKS = Orbit, MITTE/RECHTS = Pan, RAD = Zoom, s.
   // Datei-Kommentar MAUS-SCHEMA). Verlässt damit IMMER die Praeset-Kamera und
   // wechselt auf die freie perspektivische Orbit-Kamera (Kontinuität über den
@@ -1398,7 +1488,7 @@ export function Wasm3DViewport({
     };
 
     let drag: {
-      mode: "orbit" | "pan";
+      mode: "orbit" | "pan" | "look";
       button: number;
       x: number;
       y: number;
@@ -1469,7 +1559,8 @@ export function Wasm3DViewport({
     };
 
     const onPointerDown = (e: PointerEvent) => {
-      const mode = e.button === 0 ? "orbit" : e.button === 1 || e.button === 2 ? "pan" : null;
+      // [213] Im Begehen-Modus schaut auch die rechte Taste um (statt zu schwenken); die mittlere schwenkt weiter.
+      const mode = e.button === 0 ? "orbit" : e.button === 2 && walkModeRef.current ? "look" : e.button === 1 || e.button === 2 ? "pan" : null;
       if (!mode) return;
       e.preventDefault();
       drag = {
@@ -1525,7 +1616,10 @@ export function Wasm3DViewport({
         return;
       }
       const h = canvas.clientHeight || 1;
-      if (drag.mode === "orbit") {
+      if (drag.mode === "look" || (drag.mode === "orbit" && walkModeRef.current)) {
+        // [213] Umschauen um den Augpunkt (Orbit-Zustand bleibt die Wahrheit, das Ziel wandert mit).
+        orbitRef.current = lookAround(o, dx, dy);
+      } else if (drag.mode === "orbit") {
         // Winkel je Pixel wie OrbitControls: voller Umlauf über die Viewport-Höhe.
         o.yaw += (2 * Math.PI * dx) / h;
         o.pitch = Math.max(
@@ -1716,6 +1810,30 @@ export function Wasm3DViewport({
           Darstellungsart kommen von der Oberleiste (TopBar); das Grid-Overlay
           unten ist der einzige eigene Umschalter hier. */}
       <canvas ref={canvasRef} data-engine="render3d" />
+      {/* [213] Begehen (WASD) und Kamera aus der aktuellen Ansicht anlegen. */}
+      <div className="viewport3d-tools" data-testid="viewport3d-tools">
+        <button
+          type="button"
+          className={`viewport3d-tool${walkMode ? " is-on" : ""}`}
+          aria-pressed={walkMode}
+          title={t("walk.hint")}
+          data-testid="walk-toggle"
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={() => setWalkMode((w) => !w)}
+        >
+          {t("walk.toggle")}
+        </button>
+        <button
+          type="button"
+          className="viewport3d-tool"
+          title={t("viewport3d.camera.create")}
+          data-testid="camera-create-3d"
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={() => createCameraFromView()}
+        >
+          {t("camera.defaultName")}+
+        </button>
+      </div>
       {/* Achsen-Lock-Führungslinie (Pfeiltasten während eines Endpunkt-/
           Verschiebe-Griff-Drags, s. `axisLockRef`-Dateikommentar) — SketchUp-
           Vorbild: eine durchgezogene farbige Linie durch den Anker markiert
@@ -1944,26 +2062,38 @@ export function Wasm3DViewport({
       {/* Explosionsaxonometrie ([65]): Umschalter links neben dem Raster-Knopf, aktiv mit Abstandsfeld. */}
       <div style={{ position: "absolute", right: onToggleGrid ? 48 : 10, bottom: 10, display: "flex", gap: 4, alignItems: "center" }}>
         {explodeOn && (
-          <input
-            type="number"
-            min={0.5}
-            max={100}
-            step={0.5}
-            value={explodeGap}
-            aria-label={t("viewport3d.explode.gap")}
+          // Schieberegler statt Zahlenfeld (Wunsch Maintainer 12.11.): 0 = zusammengesetzt, Doppelklick setzt auf 0 zurück.
+          <label
             title={t("viewport3d.explode.gap")}
-            onChange={(e) => setExplodeGap(Number(e.target.value))}
+            onDoubleClick={() => setExplodeGap(0)}
             style={{
-              width: 56,
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
               height: 30,
               boxSizing: "border-box",
+              padding: "0 8px",
               borderRadius: 7,
               border: "1px solid rgba(255,255,255,0.14)",
               background: "rgba(20,20,24,0.65)",
               color: "#f2f2f2",
-              padding: "0 6px",
+              backdropFilter: "blur(4px)",
+              fontSize: 12,
+              fontVariantNumeric: "tabular-nums",
             }}
-          />
+          >
+            <input
+              type="range"
+              min={0}
+              max={10}
+              step={0.1}
+              value={Math.min(explodeGap, 10)}
+              aria-label={t("viewport3d.explode.gap")}
+              onChange={(e) => setExplodeGap(Number(e.target.value))}
+              style={{ width: 96, accentColor: "#f2f2f2" }}
+            />
+            <span style={{ minWidth: 38, textAlign: "right" }}>{explodeGap.toFixed(1)} m</span>
+          </label>
         )}
         <button
           type="button"

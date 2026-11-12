@@ -10,7 +10,7 @@ import type { Vec2 } from "../../../model/types";
 import type { PlainCycle } from "../pickCycle";
 import { selectionHas, plainCycleNext, cycleHint } from "../pickCycle";
 import { t } from "../../../i18n";
-import { LINE_PICK_PX, TREE_PICK, PICK_ORDER, EMPTY_PICK, MARQUEE_THRESHOLD_PX, cycleModifier } from "./constants";
+import { CAMERA_PICK, LINE_PICK_PX, TREE_PICK, PICK_ORDER, EMPTY_PICK, MARQUEE_THRESHOLD_PX, cycleModifier } from "./constants";
 import { planPrimAt, drawingsWithinDistance } from "../../../core";
 import type { ViewBox__plan_planView_geometry as ViewBox } from "../../../core";
 import { PlanPickIndex } from "../../../core";
@@ -47,6 +47,7 @@ export interface UsePlanPickCycleArgs {
   pickRoom: (clientX: number, clientY: number) => string | null;
   pickRoof: (clientX: number, clientY: number) => string | null;
   pickTree: (clientX: number, clientY: number) => string | null;
+  pickCamera: (clientX: number, clientY: number) => string | null;
   pickSiteAt: (clientX: number, clientY: number) => string | null;
   pickContextObject: (clientX: number, clientY: number) => string | null;
   pickSectionLine: (clientX: number, clientY: number) => string | null;
@@ -99,6 +100,7 @@ export function usePlanPickCycle(inp: UsePlanPickCycleArgs) {
     pickRoom,
     pickRoof,
     pickTree,
+    pickCamera,
     pickSiteAt,
     pickContextObject,
     pickSectionLine,
@@ -256,6 +258,7 @@ export function usePlanPickCycle(inp: UsePlanPickCycleArgs) {
     add("drawing", dp.drawingId, dp.hitIndex);
     add("solid", dp.extrudedSolidId, dp.hitIndex);
     add("tree", dp.treeId, dp.hitIndex);
+    add("camera", dp.cameraId, dp.hitIndex);
     add("ceiling", dp.ceilingId, dp.hitIndex);
     add("stair", dp.stairId, dp.hitIndex);
     add("room", dp.roomId, dp.hitIndex);
@@ -283,6 +286,7 @@ export function usePlanPickCycle(inp: UsePlanPickCycleArgs) {
       addRest("room", p.roomId, idx);
       addRest("roof", p.roofId, idx);
       if (p.contextObjectId?.startsWith(TREE_PICK)) addRest("tree", p.contextObjectId.slice(TREE_PICK.length), idx);
+      else if (p.contextObjectId?.startsWith(CAMERA_PICK)) addRest("camera", p.contextObjectId.slice(CAMERA_PICK.length), idx);
       else if (p.contextObjectId?.startsWith("@")) addRest("site", p.contextObjectId.slice(1), idx);
       else addRest("context", p.contextObjectId, idx);
       addRest("section", p.sectionLineId, idx);
@@ -295,6 +299,7 @@ export function usePlanPickCycle(inp: UsePlanPickCycleArgs) {
     addRest("room", pickRoom(clientX, clientY), null);
     addRest("roof", pickRoof(clientX, clientY), null);
     addRest("tree", pickTree(clientX, clientY), null);
+    addRest("camera", pickCamera(clientX, clientY), null);
     addRest("site", pickSiteAt(clientX, clientY), null);
     addRest("context", pickContextObject(clientX, clientY), null);
     addRest("section", pickSectionLine(clientX, clientY), null);
@@ -333,6 +338,7 @@ export function usePlanPickCycle(inp: UsePlanPickCycleArgs) {
       contextObjectId: c.kind === "context" ? c.id : null,
       siteId: c.kind === "site" ? c.id : null,
       treeId: c.kind === "tree" ? c.id : null,
+      cameraId: c.kind === "camera" ? c.id : null,
     });
   };
 
@@ -532,6 +538,15 @@ export function usePlanPickCycle(inp: UsePlanPickCycleArgs) {
               .marquee("contextObjectId", rect, crossing)
               .filter((id) => id.startsWith(TREE_PICK))
               .map((id) => id.slice(TREE_PICK.length)),
+            // [213] Kameras: Pick-Flächen (`contextObjectId = "@camera:<id>"`).
+            cameraIds: [
+              ...new Set(
+                getPick()
+                  .marquee("contextObjectId", rect, crossing)
+                  .filter((id) => id.startsWith(CAMERA_PICK))
+                  .map((id) => id.slice(CAMERA_PICK.length)),
+              ),
+            ],
             crossing,
           });
         }

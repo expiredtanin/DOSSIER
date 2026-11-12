@@ -208,6 +208,12 @@ fn arc_cutters(arc: &crate::wall_arc::WallArc, f: &OuterFaces, cuts: &WallCuts, 
 /// Abzugs-Streifen einer Wand für eine Decke (leer: Wand trägt die Decke nicht als Aussenwand).
 pub(crate) fn wall_cutters(p: &Project, w: &Wall, cuts: &WallCuts, c: &Ceiling) -> Vec<Vec<[f64; 2]>> {
     let Some(f) = outer_faces(p, w) else { return Vec::new() };
+    wall_cutters_with(p, w, f, cuts, c)
+}
+
+/// Wie [`wall_cutters`] mit schon bestimmten Aussenschichten (`outer_faces` liest die Schichtfunktionen, [214]: je
+/// Wand einmal statt je Decke).
+fn wall_cutters_with(p: &Project, w: &Wall, f: OuterFaces, cuts: &WallCuts, c: &Ceiling) -> Vec<Vec<[f64; 2]>> {
     if cuts.covered || c.edge_at_outline == Some(true) || c.outline.len() < 3 || !overlaps_z(p, w, c) {
         return Vec::new();
     }
@@ -243,12 +249,17 @@ pub(crate) fn bearing_outlines(p: &Project, only: impl Fn(&Ceiling) -> bool, kno
     if todo.is_empty() {
         return out;
     }
-    let walls: Vec<&Wall> = p.walls.iter().filter(|w| outer_faces(p, w).is_some() && todo.iter().any(|&i| overlaps_z(p, w, &ceilings[i]))).collect();
+    let walls: Vec<(&Wall, OuterFaces)> = p
+        .walls
+        .iter()
+        .filter(|w| todo.iter().any(|&i| overlaps_z(p, w, &ceilings[i])))
+        .filter_map(|w| Some((w, outer_faces(p, w)?)))
+        .collect();
     if walls.is_empty() {
         return out;
     }
     // Verschneidung nur der Geschosse mit solchen Wänden (wie `compute_joins_by_floor`).
-    let floors: HashSet<&str> = walls.iter().map(|w| w.floor_id.as_str()).collect();
+    let floors: HashSet<&str> = walls.iter().map(|(w, _)| w.floor_id.as_str()).collect();
     let mut joins: HashMap<&str, WallCuts> = HashMap::new();
     for (floor, idx) in floor_groups(p) {
         if !floors.contains(floor) || known.is_some() {
@@ -268,7 +279,7 @@ pub(crate) fn bearing_outlines(p: &Project, only: impl Fn(&Ceiling) -> bool, kno
         let cb = bbox_of(ring.iter().copied());
         let cutters: Vec<crate::flat::Polygon> = walls
             .iter()
-            .flat_map(|w| wall_cutters(p, w, known.and_then(|k| k.get(&w.id)).or_else(|| joins.get(w.id.as_str())).unwrap_or(&none), c))
+            .flat_map(|&(w, f)| wall_cutters_with(p, w, f, known.and_then(|k| k.get(&w.id)).or_else(|| joins.get(w.id.as_str())).unwrap_or(&none), c))
             .filter(|s| {
                 let b = bbox_of(s.iter().copied());
                 b[0] < cb[2] && b[2] > cb[0] && b[1] < cb[3] && b[3] > cb[1]

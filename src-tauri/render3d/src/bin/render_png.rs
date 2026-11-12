@@ -8,10 +8,14 @@
 // `--points` ([27]): Textdatei mit einem Punkt je Zeile `x y z [r g b [intensitaet [klasse]]]` in
 // Modell-Metern (x = Ost, y = Nord, z = Hoehe) — dieselbe Punkt-Pipeline wie im Browser-Viewport.
 //
+// `--bench <ordner>` ([214]): Messung der Engine statt eines Bildes, s. `bench3d/mod.rs`.
+//
 // `modell.json` ist das Modell wie `set_model` es bekommt (`dossier-cli … model3d`); ein Feld `ghost` (gleiches
 // Format, `dossier-cli … model3d --grey …`) zeichnet die grauen Klassen als Geisterschicht wie der Viewer ([180]).
 
 use std::io::Write;
+
+mod bench3d;
 
 use render3d::gpu::{RenderStyle, Renderer};
 use render3d::gpu_points::PointStyle;
@@ -115,7 +119,7 @@ fn read_points_txt(path: &str) -> Option<PointCloudCpu> {
     )
 }
 
-fn preset(name: &str) -> CameraPreset {
+pub(crate) fn preset(name: &str) -> CameraPreset {
     match name {
         "front" => CameraPreset::Front,
         "back" => CameraPreset::Back,
@@ -187,6 +191,70 @@ fn write_png(path: &str, w: u32, h: u32, rgba: &[u8]) -> std::io::Result<()> {
     std::fs::File::create(path)?.write_all(&out)
 }
 
+pub(crate) fn new_device() -> (wgpu::Device, wgpu::Queue) {
+    let instance = wgpu::Instance::default();
+    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+        power_preference: wgpu::PowerPreference::HighPerformance,
+        force_fallback_adapter: false,
+        compatible_surface: None,
+    }))
+    .expect("kein GPU-Adapter");
+    pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+        label: Some("render_png.device"),
+        required_features: wgpu::Features::empty(),
+        required_limits: wgpu::Limits::default(),
+        experimental_features: wgpu::ExperimentalFeatures::disabled(),
+        memory_hints: wgpu::MemoryHints::Performance,
+        trace: wgpu::Trace::Off,
+    }))
+    .expect("Device")
+}
+
+pub(crate) fn target_texture(device: &wgpu::Device, format: wgpu::TextureFormat, w: u32, h: u32) -> wgpu::Texture {
+    device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("render_png.target"),
+        size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    })
+}
+
+/// Liest das Zielbild zurück und schreibt es als PNG.
+pub(crate) fn read_back(device: &wgpu::Device, queue: &wgpu::Queue, tex: &wgpu::Texture, w: u32, h: u32, path: &str) {
+    let padded = (w * 4).div_ceil(256) * 256;
+    let buf = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("render_png.readback"),
+        size: (padded * h) as u64,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+    let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+    enc.copy_texture_to_buffer(
+        wgpu::TexelCopyTextureInfo { texture: tex, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+        wgpu::TexelCopyBufferInfo {
+            buffer: &buf,
+            layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(padded), rows_per_image: Some(h) },
+        },
+        wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+    );
+    queue.submit([enc.finish()]);
+    let slice = buf.slice(..);
+    slice.map_async(wgpu::MapMode::Read, |r| r.expect("Readback"));
+    let _ = device.poll(wgpu::PollType::wait_indefinitely());
+    let data = slice.get_mapped_range();
+    let mut rgba = Vec::with_capacity((w * h * 4) as usize);
+    for y in 0..h as usize {
+        rgba.extend_from_slice(&data[y * padded as usize..y * padded as usize + w as usize * 4]);
+    }
+    drop(data);
+    write_png(path, w, h, &rgba).expect("PNG schreiben");
+    eprintln!("geschrieben: {path} ({w}x{h})");
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let flag = |name: &str, default: &str| -> String {
@@ -201,6 +269,11 @@ fn main() {
         .filter(|(i, a)| !a.starts_with("--") && (*i == 0 || !args[*i - 1].starts_with("--")))
         .map(|(_, a)| a)
         .collect();
+    let bench_dir = flag("--bench", "");
+    if !bench_dir.is_empty() {
+        bench3d::bench(&bench_dir, &flag);
+        return;
+    }
     if pos.len() < 2 {
         eprintln!("Aufruf: render_png <modell.json> <aus.png> [--view iso] [--style shaded] [--size 1200x800]");
         std::process::exit(2);
@@ -213,22 +286,7 @@ fn main() {
     let json = std::fs::read_to_string(pos[0]).expect("Modell lesen");
     let mut model: ModelInput = serde_json::from_str(&json).expect("Modell parsen");
 
-    let instance = wgpu::Instance::default();
-    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-        power_preference: wgpu::PowerPreference::HighPerformance,
-        force_fallback_adapter: false,
-        compatible_surface: None,
-    }))
-    .expect("kein GPU-Adapter");
-    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-        label: Some("render_png.device"),
-        required_features: wgpu::Features::empty(),
-        required_limits: wgpu::Limits::default(),
-        experimental_features: wgpu::ExperimentalFeatures::disabled(),
-        memory_hints: wgpu::MemoryHints::Performance,
-        trace: wgpu::Trace::Off,
-    }))
-    .expect("Device");
+    let (device, queue) = new_device();
 
     let format = wgpu::TextureFormat::Rgba8UnormSrgb;
     let mut renderer = Renderer::new(&device, format);
@@ -237,8 +295,7 @@ fn main() {
     renderer.set_pattern_lines(&model.pattern_lines);
     if let Some(g) = model.ghost.take() {
         let g = *g;
-        let (tris, lines) = render3d::ghost::ghost_buffers(render3d::scene::PartInput { walls: g.walls, slabs: g.slabs, meshes: g.meshes, roof_layers: Vec::new() });
-        renderer.set_ghost_model(&device, &tris, &lines);
+        renderer.set_ghost_model(&device, render3d::scene::PartInput { walls: g.walls, slabs: g.slabs, meshes: g.meshes, roof_layers: Vec::new() });
     }
     if !model.ghost_drawing.is_empty() || !model.ghost_pattern.is_empty() {
         renderer.set_ghost_lines(&device, &model.ghost_drawing, &model.ghost_pattern);
@@ -281,45 +338,9 @@ fn main() {
     let dist = flag("--dist", "").parse::<f32>().unwrap_or(dist);
     let camera = preset_camera(preset(&flag("--view", "iso")), target, dist);
 
-    let tex = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("render_png.target"),
-        size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-        view_formats: &[],
-    });
+    let tex = target_texture(&device, format, w, h);
     let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
     renderer.render(&device, &queue, &view, &camera, (w, h));
 
-    let padded = (w * 4).div_ceil(256) * 256;
-    let buf = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("render_png.readback"),
-        size: (padded * h) as u64,
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-        mapped_at_creation: false,
-    });
-    let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-    enc.copy_texture_to_buffer(
-        wgpu::TexelCopyTextureInfo { texture: &tex, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
-        wgpu::TexelCopyBufferInfo {
-            buffer: &buf,
-            layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(padded), rows_per_image: Some(h) },
-        },
-        wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
-    );
-    queue.submit([enc.finish()]);
-    let slice = buf.slice(..);
-    slice.map_async(wgpu::MapMode::Read, |r| r.expect("Readback"));
-    let _ = device.poll(wgpu::PollType::wait_indefinitely());
-    let data = slice.get_mapped_range();
-    let mut rgba = Vec::with_capacity((w * h * 4) as usize);
-    for y in 0..h as usize {
-        rgba.extend_from_slice(&data[y * padded as usize..y * padded as usize + w as usize * 4]);
-    }
-    drop(data);
-    write_png(pos[1], w, h, &rgba).expect("PNG schreiben");
-    eprintln!("geschrieben: {} ({}x{})", pos[1], w, h);
+    read_back(&device, &queue, &tex, w, h, pos[1]);
 }

@@ -14,7 +14,7 @@
 
 import { useState } from "react";
 import type { TextStylePreset } from "../../text/richText";
-import { TEXT_FONTS } from "../TopBar";
+import { TEXT_FONTS } from "../../text/fontList";
 import { t } from "../../i18n";
 import { ColorField, DeleteButton, FieldRow, NumberField, SelectField } from "./fields";
 

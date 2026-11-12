@@ -153,6 +153,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     drawings: selectedDrawingIds,
     site: selectedSite,
     trees: selectedTreeIds,
+    cameras: selectedCameraIds,
   } = selection;
   const selectedDrawingId = single(selection, "drawings");
   // Linke Maustaste liegt beim Werkzeug/der Transformation, wenn App das meldet
@@ -312,6 +313,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     pickSectionLine,
     pickSiteAt,
     pickTree,
+    pickCamera,
     pickContextObject,
     pickExtrudedSolid,
     pickColumn,
@@ -414,6 +416,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     pickColumn,
     pickExtrudedSolid,
     pickTree,
+    pickCamera,
     pickStair,
     pickRoof,
     pickSiteAt,
@@ -450,6 +453,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     pickRoom,
     pickRoof,
     pickTree,
+    pickCamera,
     pickSiteAt,
     pickContextObject,
     pickSectionLine,
@@ -505,6 +509,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     pickRoom,
     onOpenSectionLevel,
     pickSectionLine,
+    pickCamera,
     onContextMenu,
     view,
     viewToModel,
@@ -546,6 +551,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     selectedContextObjectIds,
     selectedSite,
     selectedTreeIds,
+    selectedCameraIds,
     selectedSectionLineIds,
     selectedExtrudedSolidIds,
     selectedColumnIds,

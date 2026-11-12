@@ -16,6 +16,7 @@
 
 import type {
   CeilingType,
+  ContextObject,
   Drawing2D,
   Drawing2DGeom,
   DoorType,
@@ -35,6 +36,7 @@ import type {
 } from "./types";
 import { sampleProject } from "./sampleProject";
 import { withStandards } from "./standards";
+import { buildingsToMesh, type GeoFeature } from "../io/geoContext";
 import { applyOps, type CoreOp } from "../core/ops";
 import { withDocument } from "../core/document";
 
@@ -527,6 +529,26 @@ const isMainContour = (z: number) => Math.abs((z + 2.7) * 2 - Math.round((z + 2.
 // Parzelle (Kataster) mit Nachbarparzellen; Grenzabstände je Kante, Baulinie an der Strasse (Nord).
 const PARCEL = [P(-14, -12), P(28, -13), P(29, 23), P(-15, 24)];
 
+/**
+ * [207] Nachbargebäude (Kataster/swisstopo-Stil): ein Volumen-Netz auf der Klasse „12 Gebäude" ([181]), im Situationsplan
+ * grau (Schwarzplan: schwarz). Westen (Kat.-Nr. 2416, L-Form), Osten (2418, zwei Häuser), Norden jenseits des Musterwegs (nach Süden bleibt der Schnitt A-A ohne Fernkörper).
+ */
+function neighbours(): ContextObject {
+  const b = (pts: Vec2[], height: number): GeoFeature => ({ category: "building", pts, closed: true, height });
+  const mesh = buildingsToMesh(
+    [
+      b([P(-34, 0), P(-22, 0), P(-22, 9), P(-27, 9), P(-27, 14), P(-34, 14)], 7.5),
+      b([P(36, -6), P(46, -6), P(46, 4), P(36, 4)], 6.5),
+      b([P(36, 9), P(44, 9), P(44, 16), P(36, 16)], 6.5),
+      b([P(-8, 35), P(16, 35), P(16, 43), P(-8, 43)], 11),
+      b([P(22, 34), P(40, 34), P(40, 40), P(22, 40)], 9),
+    ],
+    "Kataster (fiktiv)",
+  );
+  if (!mesh) throw new Error("Musterhaus komplex: Nachbargebäude nicht erzeugt");
+  return { ...mesh, id: "nachbarn", name: "Nachbargebäude" };
+}
+
 function cadastre(): Drawing2D[] {
   const d: Drawing2D[] = [];
   const add = (id: string, geom: Drawing2DGeom, extra: Partial<Drawing2D> = {}) =>
@@ -695,7 +717,10 @@ function addRooms(p: Project): Project {
 /** Sichtbarkeit je Kategorie: Ausschnitte listen jede sichtbare Kategorie ausdrücklich (fehlt = aus). */
 const codesOf = (ls: LayerCategory[]): string[] => ls.flatMap((l) => [l.code, ...codesOf(l.children ?? [])]);
 const vis = (hidden: string[] = []): Record<string, boolean> => Object.fromEntries(codesOf(LAYERS).map((c) => [c, !hidden.includes(c)]));
-const ALL = vis();
+/** [207] Schnitte und Ansichten ohne die Nachbargebäude (Klasse „12 Gebäude"): sie weiten sonst den Ausschnitt weit über das Haus. */
+const NO_NEIGHBOURS = vis(["12"]);
+/** [207] Klassen, die die Ansichtsvorlage „Situation WBW" ausblendet (`standards.rs::SITUATION_HIDDEN`; Test `sampleProjectComplex.situation.test.ts`). */
+const SITUATION_HIDDEN = ["00", "07", "20", "21", "22", "25", "30", "35", "40", "50", "60", "80", "81", "82", "85", "90", "91", "99"];
 const LEVEL_VIS: Record<string, boolean> = Object.fromEntries(LEVELS.map((l) => [l.id, true]));
 /** Grundrisse auf Blättern: ohne Kataster, Strasse, Höhenlinien und Gelände. */
 const PLAN_VIS = vis(["01", "02", "10", "11", "13", "14"]);
@@ -729,14 +754,15 @@ function views(): Pick<Project, "viewTemplates" | "viewSnapshots" | "viewSnapsho
       snap("vs-og", "OG 1:100", "og", 100, P(7.5, 6), { folderId: "vf-gr", templateId: "vt-gr100", templateLinked: true }),
       snap("vs-dg", "DG 1:100", "dg", 100, P(7.5, 5), { folderId: "vf-gr", templateId: "vt-gr100", templateLinked: true }),
       snap("vs-eg50", "EG 1:50 Ausschnitt Wohnen", "eg", 50, P(10, 3.5), { folderId: "vf-gr", templateId: "vt-gr50", templateLinked: true }),
-      snap("vs-situation", "Situation 1:500", "eg", 500, P(7, 5), { folderId: "vf-gr", detail: "grob", layerVisibility: ALL }),
+      // [207] Situationsplan: Ansichtsvorlage „Situation WBW 1:500" (Standard-Ressource, Modelldarstellung „Situation WBW").
+      snap("vs-situation", "Situation 1:500", "eg", 500, P(7, 5), { folderId: "vf-gr", detail: "grob", templateId: "std-vt-situation-wbw", templateLinked: true, layerVisibility: vis(SITUATION_HIDDEN) }),
       snap("vs-brand", "EG Brandschutz", "eg", 100, P(7.5, 6), { folderId: "vf-gr", templateId: "vt-brand", templateLinked: true, enabledOverrideRuleIds: ["or-brand"] }),
-      snap("vs-schnitt-a", "Schnitt A-A", "schnitt-a", 100, P(6, 3.3), { folderId: "vf-sa", layerVisibility: ALL }),
-      snap("vs-schnitt-b", "Schnitt B-B", "schnitt-b", 100, P(6, 3.3), { folderId: "vf-sa", layerVisibility: ALL }),
-      snap("vs-ansicht-s", "Ansicht Süd", "ansicht-sued", 100, P(6, 3.3), { folderId: "vf-sa", layerVisibility: ALL }),
-      snap("vs-ansicht-o", "Ansicht Ost", "ansicht-ost", 100, P(6, 3.3), { folderId: "vf-sa", layerVisibility: ALL }),
-      snap("vs-ansicht-n", "Ansicht Nord", "ansicht-nord", 100, P(6, 3.3), { folderId: "vf-sa", layerVisibility: ALL }),
-      snap("vs-ansicht-w", "Ansicht West", "ansicht-west", 100, P(6, 3.3), { folderId: "vf-sa", layerVisibility: ALL }),
+      snap("vs-schnitt-a", "Schnitt A-A", "schnitt-a", 100, P(6, 3.3), { folderId: "vf-sa", layerVisibility: NO_NEIGHBOURS }),
+      snap("vs-schnitt-b", "Schnitt B-B", "schnitt-b", 100, P(6, 3.3), { folderId: "vf-sa", layerVisibility: NO_NEIGHBOURS }),
+      snap("vs-ansicht-s", "Ansicht Süd", "ansicht-sued", 100, P(6, 3.3), { folderId: "vf-sa", layerVisibility: NO_NEIGHBOURS }),
+      snap("vs-ansicht-o", "Ansicht Ost", "ansicht-ost", 100, P(6, 3.3), { folderId: "vf-sa", layerVisibility: NO_NEIGHBOURS }),
+      snap("vs-ansicht-n", "Ansicht Nord", "ansicht-nord", 100, P(6, 3.3), { folderId: "vf-sa", layerVisibility: NO_NEIGHBOURS }),
+      snap("vs-ansicht-w", "Ansicht West", "ansicht-west", 100, P(6, 3.3), { folderId: "vf-sa", layerVisibility: NO_NEIGHBOURS }),
       snap("vs-detail", "Detail Deckenauflager 1:10", "detail-traufe", 10, P(DETAIL_X + 0.4, 1.0), { folderId: "vf-sa", detail: "fein", layerVisibility: HIDE_SITE }),
       snap("vs-3d", "Axonometrie Südost", "eg", 100, P(7.5, 5), { folderId: "vf-3d", viewType: "perspektive", view3d: "isoFrontLeft", fov: 45 }),
     ],
@@ -832,6 +858,7 @@ export function buildComplexSampleProject(): Project {
     extrudedSolids,
     drawings2d: [...cadastre(), ...annotations()],
     context: [
+      neighbours(),
       {
         type: "contourSet", id: "hoehenlinien", name: "Höhenlinien (Vermessung)", categoryCode: "14", source: "Vermessung (fiktiv)",
         contours: CONTOUR_Z.map((z) => ({ z, pts: contourAt(z), closed: false, layer: isMainContour(z) ? "HL-Haupt" : "HL" })),
@@ -857,6 +884,14 @@ export function buildComplexSampleProject(): Project {
     roomProgramTolerance: 0.1,
     parcelArea: 1540,
     sunStudy: { when: "2026-06-21T10:00:00Z", show: true },
+    // [213] Kamera aus Südost auf das Haus (Standpunkt 1.6 m über OK EG, Sonne am Abend).
+    cameras: [
+      {
+        id: "kamera-suedost", type: "camera", name: "Südost", floorId: "eg", categoryCode: "92",
+        position: P(17, -3), eyeHeight: 1.6, target: P(7.5, 5), targetHeight: 4, fovDeg: 50, projection: "perspective",
+        sunWhen: "2026-06-21T16:00:00Z",
+      },
+    ],
     siteRules: {
       parcel: PARCEL,
       // Grenzabstände je Parzellenkante (Süd, Ost, Nord, West); Baulinie entlang der Strasse.
