@@ -79,7 +79,7 @@ Der ganze Kern wandert nach Rust (`src-tauri/core`, Crate `dossier-core`); die U
 
 ## Parallel arbeitende Agents
 
-In der Cloud höchstens **4 Agents gleichzeitig: 1 Opus + 3 Sonnet** (Vorgabe Maintainer, 12.11.); neue erst starten,
+In der Cloud höchstens **3 Agents gleichzeitig: 1 Opus + 2 Sonnet** (Vorgabe Maintainer, 12.11. abends; vorher 1 + 3); neue erst starten,
 wenn einer fertig ist. Speicher knapp (15 GB): Rust-Builds mit `CARGO_BUILD_JOBS=2 CARGO_PROFILE_RELEASE_LTO=off`. Modell je Aufgabe: Sonnet für mechanische, klar umrissene Portierungen; Opus für knifflige
 Geometrie mit vielen Sonderfällen oder Architektur-Entscheide. Jeder Agent in eigenem Git-Worktree und eigenem Branch, nur die Dateien seiner Aufgabe. In gemeinsamen
 Dateien (`lib.rs`, `web/mod.rs`, `Cargo.toml`, `src/core/index.ts`, `src/core/extra.ts`, `i18n/de.ts`,
