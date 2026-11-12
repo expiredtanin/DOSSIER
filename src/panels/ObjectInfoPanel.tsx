@@ -33,6 +33,7 @@ import { SiteRulesSection } from "./SiteRulesSection";
 import { TreeSection } from "./objectInfo/TreeSection";
 import { ViewShadowsInfo, MeasurementSection } from "./objectInfo/InfoBlocks";
 import { DimensionField, RotateField } from "./objectInfo/fields";
+import { elementDimensions } from "./objectInfo/elementDims";
 import { InfoGroups, hasInfoGroups } from "./objectInfo/InfoGroups";
 
 // ── Bezugspunkt-Raster ───────────────────────────────────────────────────────
@@ -106,6 +107,7 @@ export function ObjectInfoPanel() {
   }
 
   const { bbox } = sel;
+  const elementDims = elementDimensions(sel);
   const width = bbox.maxX - bbox.minX;
   const height = bbox.maxY - bbox.minY;
 
@@ -244,18 +246,30 @@ export function ObjectInfoPanel() {
 
           {/* Maße (editierbar) — Commit auf blur/Enter skaliert um den Anker. */}
           <div className="objinfo-section-label">{t("objinfo.dimensions")}</div>
-          <DimensionField
-            label={t("objinfo.width")}
-            value={len(width)}
-            {...lenProps}
-            onCommit={(w) => commitSize(unlen(w), height)}
-          />
-          <DimensionField
-            label={t("objinfo.height")}
-            value={len(height)}
-            {...lenProps}
-            onCommit={(h) => commitSize(width, unlen(h))}
-          />
+          {elementDims ? (
+            // [204a] Wand: Länge/Dicke/Höhe, Öffnung: Breite/Höhe/Brüstung (nur Anzeige).
+            elementDims.map((d) => (
+              <div className="objinfo-field" key={d.label} data-testid="objinfo-dim">
+                <span className="objinfo-flabel">{t(d.label)}</span>
+                <span className="objinfo-fval">{len(d.value).toFixed(u.digits)} {u.suffix}</span>
+              </div>
+            ))
+          ) : (
+            <>
+              <DimensionField
+                label={t("objinfo.width")}
+                value={len(width)}
+                {...lenProps}
+                onCommit={(w) => commitSize(unlen(w), height)}
+              />
+              <DimensionField
+                label={t("objinfo.height")}
+                value={len(height)}
+                {...lenProps}
+                onCommit={(h) => commitSize(width, unlen(h))}
+              />
+            </>
+          )}
           {/* Formspezifische Zusatzfelder (nur wenn das Modell den Wert direkt
               hergibt — andere Formen bleiben ohne Zusatzfeld, s. Dateikopf). */}
           {drawingShape === "line" && rawDrawing?.geom.shape === "line" && (

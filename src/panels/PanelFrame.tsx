@@ -31,6 +31,8 @@ export interface PanelFrameProps {
    * `hasDisplayMode`, zeigt die Kopfzeile das Dropdown.
    */
   onDisplayModeChange?: (mode: DisplayMode) => void;
+  /** Titel in der Kopfzeile zeigen (false im schwebenden Fenster, dessen Titelleiste ihn schon trägt). */
+  showTitle?: boolean;
 }
 
 /**
@@ -43,6 +45,7 @@ export function PanelFrame({
   ctx,
   displayMode,
   onDisplayModeChange,
+  showTitle = true,
 }: PanelFrameProps) {
   // Umschalter nur, wenn das Panel ihn will UND er verdrahtet ist.
   const showMode =
@@ -52,8 +55,9 @@ export function PanelFrame({
 
   return (
     <section className="panel-frame">
+      {(showTitle || def.headerActions || showMode) && (
       <header className="panel-head">
-        <span className="panel-title">{t(def.title)}</span>
+        {showTitle ? <span className="panel-title">{t(def.title)}</span> : <span />}
         <span className="panel-head-actions">
           {def.headerActions}
           {showMode && (
@@ -64,6 +68,7 @@ export function PanelFrame({
           )}
         </span>
       </header>
+      )}
       <div className="panel-body">{def.render(ctx ?? {})}</div>
     </section>
   );

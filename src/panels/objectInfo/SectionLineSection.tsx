@@ -22,6 +22,7 @@ export function SectionLineSection({
 }) {
   const storeProject = useStore((st) => st.project);
   const line = level.linePoints;
+  const isElev = level.kind === "elevation";
   const kindLabel =
     level.kind === "elevation"
       ? t("objinfo.sectionLine.kind.elevation")
@@ -52,7 +53,7 @@ export function SectionLineSection({
     <>
       <div className="objinfo-sep" />
       <div className="objinfo-section-label">
-        {t("objinfo.sectionLine.section")} · {kindLabel}
+        {t(isElev ? "objinfo.sectionLine.section.elevation" : "objinfo.sectionLine.section")} · {kindLabel}
       </div>
 
       {/* Name (editierbar). */}
@@ -106,7 +107,7 @@ export function SectionLineSection({
 
       {/* Schnitt-Tiefe (leer = unbegrenzt). */}
       <div className="objinfo-field">
-        <span className="objinfo-flabel">{t("objinfo.sectionLine.depth")}</span>
+        <span className="objinfo-flabel">{t(isElev ? "objinfo.sectionLine.depth.elevation" : "objinfo.sectionLine.depth")}</span>
         <input
           type="number"
           className="objinfo-text"
@@ -123,7 +124,7 @@ export function SectionLineSection({
             const v = Number(raw);
             if (Number.isFinite(v) && v > 0) host.onSetSectionLinePatch({ depth: v });
           }}
-          title={t("objinfo.sectionLine.depth")}
+          title={t(isElev ? "objinfo.sectionLine.depth.elevation" : "objinfo.sectionLine.depth")}
         />
       </div>
 
@@ -188,7 +189,7 @@ export function SectionLineSection({
 
       {/* Löschen: linePoints zurücksetzen (die Ebene bleibt bestehen). */}
       <button type="button" className="objinfo-btn" onClick={() => host.onDeleteSectionLine()}>
-        {t("objinfo.sectionLine.delete")}
+        {t(isElev ? "objinfo.sectionLine.delete.elevation" : "objinfo.sectionLine.delete")}
       </button>
     </>
   );
