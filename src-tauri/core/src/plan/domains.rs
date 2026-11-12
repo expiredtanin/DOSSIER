@@ -1005,6 +1005,8 @@ fn scale_doc_pt(mut doc: RichTextDoc, k: f64) -> RichTextDoc {
     doc
 }
 
+/// [199] Bis zu diesem Anteil der Grundschrift darf ein Stempel wegen anderen Planinhalts schrumpfen.
+const ROOM_STAMP_KEEP: f64 = 0.8;
 /// [140] Kleinste Stempelschrift (2 mm Papier) für enge Räume.
 const ROOM_STAMP_MIN_PT: f64 = 2.0 / PT_MM;
 const PT_MM: f64 = crate::text_layout::PT_TO_MM;
@@ -1027,7 +1029,8 @@ pub(super) fn stamp_size_m(doc: &RichTextDoc, extra: &[StampLine], pt: f64, scal
 /// Passt der Stempel (Breite aus der Schriftmetrik, Höhe aus den Zeilen) bei `pt` nirgends, entfallen erst
 /// die Nutzungszeile, dann die Flächenzeile (Zusatzzeilen von hinten). Danach, je Stufe mit allen Zusatzzeilen
 /// neu ([171]): der Name auf zwei Zeilen umbrochen (an `/`, `-`, Leerzeichen; die schmalste Teilung zuerst),
-/// dann die Schrift auf 2 mm Papier (je Schrift zuerst der Name mit, dann ohne eigene Schriftgrössen, dann
+/// dann die Schrift auf 2 mm Papier ([199]: wegen anderen Planinhalts nur bis 80 % der Grundschrift, darunter nur, wenn
+/// der Raum sonst nicht reicht; je Schrift zuerst der Name mit, dann ohne eigene Schriftgrössen, dann
 /// umbrochen). Passt auch das nicht, zeigt der Stempel nur die Raumnummer (`number`), erst zuletzt wird der
 /// Name gekürzt (`abbreviate`: nur Wortenden, je Wort mindestens 3 Buchstaben und Punkt). Ergebnis:
 /// Zusatzzeilen, Schriftgrösse (pt), Ersatz für den Namen (`Some`: ohne Auszeichnungen, umbrochen, Nummer
@@ -1053,26 +1056,45 @@ fn fit_room_stamp(doc: &RichTextDoc, number: Option<&str>, extra: Vec<StampLine>
     let width = |d: &RichTextDoc| stamp_size_m(d, &[], ROOM_STAMP_MIN_PT, scale).0;
     wraps.sort_by(|a, b| width(a).total_cmp(&width(b)));
     let wrapped: Vec<Option<&RichTextDoc>> = wraps.iter().map(Some).collect();
-    let mut steps: Vec<(Vec<Option<&RichTextDoc>>, f64)> = vec![(vec![None], pt), (vec![Some(&plain)], pt), (wrapped.clone(), pt)];
-    if pt > ROOM_STAMP_MIN_PT {
-        steps.extend([(vec![None], ROOM_STAMP_MIN_PT), (vec![Some(&plain)], ROOM_STAMP_MIN_PT), (wrapped, ROOM_STAMP_MIN_PT)]);
-    }
-    // [157] Zeilen gehen nicht für Ausweichen verloren: erst alle Zeilen frei, dann alle Zeilen mit geringster
-    // Überdeckung (der Block rückt im Raum), erst wenn das Rechteck im Raum nirgends passt, entfallen Zeilen.
-    for (free, drop_lines) in [(true, false), (false, false), (true, true), (false, true)] {
-        for (variants, pt) in &steps {
-            for &variant in variants {
-                let mut e = extra.clone();
-                loop {
-                    if let Some(q) = at(variant.unwrap_or(doc), &e, *pt, free) {
-                        return (e, *pt, variant.cloned(), Some(q));
-                    }
-                    if !drop_lines || e.pop().is_none() {
-                        break;
+    let steps_to = |floor: f64| {
+        let mut steps: Vec<(Vec<Option<&RichTextDoc>>, f64)> = vec![(vec![None], pt), (vec![Some(&plain)], pt), (wrapped.clone(), pt)];
+        if pt > floor {
+            steps.extend([(vec![None], floor), (vec![Some(&plain)], floor), (wrapped.clone(), floor)]);
+        }
+        steps
+    };
+    let search = |steps: &[(Vec<Option<&RichTextDoc>>, f64)], modes: &[(bool, bool)]| {
+        // [157] Zeilen gehen nicht für Ausweichen verloren: erst alle Zeilen frei, dann alle Zeilen mit geringster
+        // Überdeckung (der Block rückt im Raum), erst wenn das Rechteck im Raum nirgends passt, entfallen Zeilen.
+        for &(free, drop_lines) in modes {
+            for (variants, pt) in steps {
+                for &variant in variants {
+                    let mut e = extra.clone();
+                    loop {
+                        if let Some(q) = at(variant.unwrap_or(doc), &e, *pt, free) {
+                            return Some((e, *pt, variant.cloned(), q));
+                        }
+                        if !drop_lines || e.pop().is_none() {
+                            break;
+                        }
                     }
                 }
             }
         }
+        None
+    };
+    // [199] Anderer Planinhalt allein verkleinert die Schrift nur bis `ROOM_STAMP_KEEP` der Grundschrift: ein Stempel
+    // in Schriftgrösse über Linien (mit Freistellung, `stamp_knockout`) liest sich besser als einer in 2 mm. Erst
+    // wenn der Raum auch das nicht fasst, geht es wie bisher bis auf 2 mm hinunter.
+    let keep = (pt * ROOM_STAMP_KEEP).max(ROOM_STAMP_MIN_PT);
+    if keep > ROOM_STAMP_MIN_PT {
+        if let Some((e, pt, v, q)) = search(&steps_to(keep), &[(true, false), (false, false)]) {
+            return (e, pt, v, Some(q));
+        }
+    }
+    let all = [(true, false), (false, false), (true, true), (false, true)];
+    if let Some((e, pt, v, q)) = search(&steps_to(ROOM_STAMP_MIN_PT), &all) {
+        return (e, pt, v, Some(q));
     }
     let pt = pt.min(ROOM_STAMP_MIN_PT);
     if let Some(n) = number.map(str::trim).filter(|n| !n.is_empty()) {
@@ -1303,7 +1325,19 @@ fn place_stamp(ring: &[[f64; 2]], candidates: &[Vec2], obst: &super::stamp_place
     fit(1.3).or_else(|| fit(1.0))
 }
 
-fn rooms(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds, obstacles: &super::stamp_place::Obstacles) {
+/// [199] Farbe der Freistellung unter einem Raumstempel, der anderen Planinhalt überdeckt (Papier).
+const STAMP_KNOCKOUT: &str = "#ffffff";
+
+/// [199] Stempel ohne freie Lage: Rechteck unter dem Text (Papierfarbe), das Linien dahinter abdeckt. `at` Mitte,
+/// `w`/`h` Ausmass in Metern (`stamp_size_m`).
+fn stamp_knockout(room_id: &str, at: Vec2, w: f64, h: f64, greyed: Option<bool>) -> Primitive {
+    let (hw, hh) = (w / 2.0, h / 2.0);
+    let pts = vec![Vec2 { x: at.x - hw, y: at.y - hh }, Vec2 { x: at.x + hw, y: at.y - hh }, Vec2 { x: at.x + hw, y: at.y + hh }, Vec2 { x: at.x - hw, y: at.y + hh }];
+    polygon(pts, STAMP_KNOCKOUT, "none", 0.0, no_hatch(), greyed, None, Pick::Room(room_id))
+}
+
+/// `top`: Stempel mit Freistellung (Rechteck + Text); sie liegen über allem übrigen Planinhalt des Geschosses.
+fn rooms(c: &Ctx, out: &mut Vec<Primitive>, top: &mut Vec<Primitive>, bounds: &mut Bounds, obstacles: &super::stamp_place::Obstacles) {
     for room in c.p.rooms.as_deref().unwrap_or(&[]).iter().filter(|r| r.floor_id == c.a.floor && c.vis(&r.category_code, &r.id)) {
         let ring = room.ring();
         for q in ring.iter() {
@@ -1383,6 +1417,16 @@ fn rooms(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds, obstacles: &sup
         let at = placed.unwrap_or(at);
         let name_replaced = name.clone();
         let doc = name.unwrap_or(doc);
+        // [199] Überdeckt der Stempel an der besten Stelle anderen Planinhalt, steht er mit Freistellung obenauf.
+        let knock = placed.is_some() && !obst.is_empty() && {
+            let (w, h) = stamp_size_m(&doc, &extra_lines, base_pt, c.a.scale);
+            w.is_finite() && h.is_finite() && obst.clearance(at, w / 2.0, h / 2.0) <= 0.0
+        };
+        let (out, top_mask): (&mut Vec<Primitive>, bool) = if knock { (&mut *top, true) } else { (&mut *out, false) };
+        if top_mask {
+            let (w, h) = stamp_size_m(&doc, &extra_lines, base_pt, c.a.scale);
+            out.push(stamp_knockout(&room.id, at, w, h, greyed));
+        }
         // [177] Trennlinie unter dem Namen (Einstellung am Stempel, Vorgabe aus), nur im unveränderten Block.
         if let (Some(s), None, false, false) = (stamp.as_deref(), &name_replaced, overview, small) {
             if StampOpts::line(s.show_divider, st.divider, false) {
@@ -1420,7 +1464,7 @@ pub fn room_stamp_spots(p: &Project, floor: &str, show: &HashSet<String>, scale:
     let (detail, auto_coarse) = effective_detail(Detail::Mittel, scale);
     let a = PlanArgs { floor: floor.to_string(), detail, show: show.clone(), grey: HashSet::new(), reference_lines: false, global: true, scale, for_print: false, compact: false, mono: false, sun_when: None, auto_coarse, rules: None, model_view: None };
     let Ok(d) = plan_domains(p, &a) else { return out };
-    for q in &d.rooms {
+    for q in d.rooms.iter().chain(&d.sections) {
         if let Primitive::Text { at, room_id: Some(id), .. } = q {
             out.insert(id.clone(), *at);
         }
@@ -1741,13 +1785,14 @@ fn domains_after(c: &Ctx, out: &mut DomainPrims, bounds: &mut Bounds) {
     // Räume vor dem Kontext: Stempel ausserhalb ihres Raums (eigener Anker im Gelände) sind Hindernisse der
     // Höhenlinien-Beschriftungen; Stempel im Raum liegen im Fussabdruck, wo keine Beschriftung steht.
     let obstacles = stamp_obstacles_with(out, drawn.clone());
-    rooms(c, &mut out.rooms, bounds, &obstacles);
+    let mut top = Vec::new();
+    rooms(c, &mut out.rooms, &mut top, bounds, &obstacles);
     if c.a.global {
         let mut o = drawn;
         for q in out.sections.iter().filter(|q| matches!(q, Primitive::DrawingText { .. })) {
             o.add_prim(q);
         }
-        for r in outside_stamps(c, &out.rooms) {
+        for r in outside_stamps(c, &stamp_prims(&out.rooms, &top)) {
             o.area(r);
         }
         super::context::plan_context_with(c, &mut out.context, &o);
@@ -1760,7 +1805,7 @@ fn domains_after(c: &Ctx, out: &mut DomainPrims, bounds: &mut Bounds) {
                 o.add_prim(q);
             }
         }
-        for q in &out.rooms {
+        for q in out.rooms.iter().chain(&top) {
             let Primitive::Text { at, doc, extra_lines, base_pt, room_id: Some(_), .. } = q else { continue };
             let (w, h) = stamp_size_m(doc, extra_lines, *base_pt, c.a.scale);
             if w.is_finite() && h.is_finite() {
@@ -1771,10 +1816,20 @@ fn domains_after(c: &Ctx, out: &mut DomainPrims, bounds: &mut Bounds) {
     }
     // [156] Bodenbelag nach den Raumstempeln (spart sie aus), zuunterst in der Gruppe der Decken.
     let mut finish = Vec::new();
-    floor_finishes(c, &out.rooms, &mut finish);
+    floor_finishes(c, &stamp_prims(&out.rooms, &top), &mut finish);
     if !finish.is_empty() {
         out.ceilings.splice(0..0, finish);
     }
+    // [199] Stempel mit Freistellung zuletzt: über Schnittlinie, Achsen, Koten und gestrichelten Linien.
+    out.sections.extend(top);
+}
+
+/// [199] Raumgruppe samt der Stempel mit Freistellung (für Auswertungen, die alle Stempel brauchen).
+fn stamp_prims(rooms: &[Primitive], top: &[Primitive]) -> Vec<Primitive> {
+    if top.is_empty() {
+        return rooms.to_vec();
+    }
+    rooms.iter().chain(top).cloned().collect()
 }
 
 /// [150] Rechtecke der Raumstempel, deren Mitte ausserhalb ihres Raums liegt (eigener Anker im Gelände).
@@ -1993,7 +2048,8 @@ fn assemble_cached(c: &Ctx, revs: &crate::document::Revs, cc: &mut super::cache:
         for b in super::cache::ctx_key(c.a).bytes() {
             h = (h ^ b as u64).wrapping_mul(0x0000_0100_0000_01b3);
         }
-        h ^ cc.drawings.sig.wrapping_mul(0xff51_afd7_ed55_8ccd)
+        // [199] Die Zahlen der Aussenbemassung weichen Schnittmarken aus: der Stand der Schnitte gehört dazu.
+        (h ^ revs.field("drawingLevels").rotate_left(7)) ^ cc.drawings.sig.wrapping_mul(0xff51_afd7_ed55_8ccd)
     };
     // [140] Achsraster enden an der Gebäudegrundfläche: ihr Stand folgt auch Wänden, Körpern und Dächern.
     let stamps = revs.item_stamps("drawings2d").unwrap_or(&[]);
@@ -2182,10 +2238,16 @@ mod tests {
         let side = Vec2 { x: 3.0, y: 0.0 };
         let narrow = move |h_free: f64| move |_w: f64, h: f64, free: bool| if free { (h <= h_free).then_some(side) } else { Some(pole) };
         let (_, h_small) = stamp_size_m(&name, &extra(), ROOM_STAMP_MIN_PT, 100.0);
-        // Frei liegt der ganze Stempel erst in kleinerer Schrift: dort, mit allen Zeilen (keine Zeile fällt weg).
+        // Frei liegt der ganze Stempel erst in kleinerer Schrift (bis 80 %): dort, mit allen Zeilen (keine Zeile fällt weg).
+        let (_, h_keep) = stamp_size_m(&name, &extra(), ROOM_STAMP_PT * ROOM_STAMP_KEEP, 100.0);
+        for h_free in [h_keep + 1e-9, h_keep * 1.1] {
+            let (e, pt, _, at) = fit_room_stamp(&name, None, extra(), ROOM_STAMP_PT, 100.0, &narrow(h_free));
+            assert!(pt < ROOM_STAMP_PT && pt >= ROOM_STAMP_PT * ROOM_STAMP_KEEP - 1e-9 && at == Some(side) && e.len() == 2, "kleinere Schrift frei: {pt} {at:?} {}", e.len());
+        }
+        // [199] Frei nur unter 80 % der Grundschrift (bis 2 mm): lieber in Schriftgrösse mit Überdeckung als winzig.
         for h_free in [h_small + 1e-9, h_small * 1.2] {
             let (e, pt, _, at) = fit_room_stamp(&name, None, extra(), ROOM_STAMP_PT, 100.0, &narrow(h_free));
-            assert!(pt < ROOM_STAMP_PT && at == Some(side) && e.len() == 2, "kleinere Schrift frei: {pt} {at:?} {}", e.len());
+            assert_eq!((e.len(), pt, at), (2, ROOM_STAMP_PT, Some(pole)), "Schrift behalten, überdecken");
         }
         // Auch 2 mm mit allen Zeilen zu hoch: ganzer Stempel an den Pol mit Überdeckung, statt Zeilen zu verlieren.
         let (e, pt, _, at) = fit_room_stamp(&name, None, extra(), ROOM_STAMP_PT, 100.0, &narrow(h_small * 0.5));
@@ -2253,7 +2315,7 @@ mod tests {
         let id = r.id.clone();
         let t = serde_json::json!({ "floor": "eg", "show": ["20", "60"], "grey": [], "scale": 100 }).to_string();
         let out = plan_domains(&p, &PlanArgs::parse(1.0, &t).unwrap()).unwrap();
-        let (at, extra) = out.rooms.iter().find_map(|q| match q { Primitive::Text { at, room_id: Some(rid), extra_lines, .. } if *rid == id => Some((*at, extra_lines.len())), _ => None }).unwrap();
+        let (at, extra) = out.rooms.iter().chain(&out.sections).find_map(|q| match q { Primitive::Text { at, room_id: Some(rid), extra_lines, .. } if *rid == id => Some((*at, extra_lines.len())), _ => None }).unwrap();
         let ring: Vec<[f64; 2]> = l.iter().map(|&(x, y)| [x + 50.0, y + 50.0]).collect();
         assert!(crate::room_area::rect_in_ring(&ring, at.x, at.y, 0.01, 0.01), "Anker im Raum: {at:?}");
         // Die Bounding-Box (8 × 8 m) hätte alle Zeilen erlaubt; der 1.2 m breite Flügel weniger.
@@ -2261,7 +2323,7 @@ mod tests {
         // Langer Name: rückt im Flügel vom Pol weg, bis er ganz im Raum liegt (statt gekürzt zu werden).
         p.rooms.as_mut().unwrap().iter_mut().find(|r| r.id == id).unwrap().name = "Wohnen Essen Kochen".into();
         let out = plan_domains(&p, &PlanArgs::parse(1.0, &t).unwrap()).unwrap();
-        let (at, doc) = out.rooms.iter().find_map(|q| match q { Primitive::Text { at, room_id: Some(rid), doc, .. } if *rid == id => Some((*at, doc.clone())), _ => None }).unwrap();
+        let (at, doc) = out.rooms.iter().chain(&out.sections).find_map(|q| match q { Primitive::Text { at, room_id: Some(rid), doc, .. } if *rid == id => Some((*at, doc.clone())), _ => None }).unwrap();
         assert_eq!(crate::text_layout::plain_text(&doc), "Wohnen Essen Kochen");
         let (w, _) = stamp_size_m(&doc, &[], ROOM_STAMP_PT, 100.0);
         assert!(crate::room_area::rect_in_ring(&ring, at.x, at.y, w / 2.0, 0.1), "{at:?} {w}");
@@ -2282,7 +2344,7 @@ mod tests {
         let a = PlanArgs::parse(1.0, &t).unwrap();
         let stamp = |p: &Project| {
             let out = plan_domains(p, &a).unwrap();
-            out.rooms.iter().find_map(|q| match q { Primitive::Text { at, room_id: Some(rid), doc, extra_lines, base_pt, .. } if *rid == id => Some((*at, doc.clone(), extra_lines.clone(), *base_pt)), _ => None }).unwrap()
+            out.rooms.iter().chain(&out.sections).find_map(|q| match q { Primitive::Text { at, room_id: Some(rid), doc, extra_lines, base_pt, .. } if *rid == id => Some((*at, doc.clone(), extra_lines.clone(), *base_pt)), _ => None }).unwrap()
         };
         let (pole, ..) = stamp(&p);
         assert!((pole.x - 53.5).abs() < 1e-9 && (pole.y - 52.5).abs() < 1e-9, "ohne Hindernis am Pol: {pole:?}");
@@ -2314,6 +2376,53 @@ mod tests {
         assert_eq!(stamp(&p).0, pole);
     }
 
+    /// [199] Querlinien über den ganzen Raum (komplexes Haus DG „Schlafen“: Schnittlinie, Achse, Gaube, Kote): der Stempel
+    /// schrumpfte auf 2 mm, um zwischen den Linien Platz zu finden. Jetzt bleibt er in (mindestens 80 % der) Grundschrift,
+    /// steht mit Freistellung (Rechteck + Text) als letztes der Ebene und überdeckt die Linien.
+    #[test]
+    fn raumstempel_behaelt_schrift_mit_freistellung() {
+        let mut p = sample();
+        let r = p.rooms.as_mut().unwrap().iter_mut().find(|r| r.floor_id == "eg").unwrap();
+        let q = [(0.0, 0.0), (7.0, 0.0), (7.0, 5.0), (0.0, 5.0)];
+        r.boundary = q.iter().map(|&(x, y)| Vec2 { x: x + 50.0, y: y + 50.0 }).collect();
+        r.stamp_anchor = None;
+        r.stamp = None;
+        let id = r.id.clone();
+        let t = serde_json::json!({ "floor": "eg", "show": ["20", "60", "80"], "grey": [], "scale": 100 }).to_string();
+        let a = PlanArgs::parse(1.0, &t).unwrap();
+        let mk = |geom: serde_json::Value, n: usize| -> Drawing2D { serde_json::from_value(serde_json::json!({ "id": format!("k{n}"), "type": "drawing2d", "levelId": "eg", "categoryCode": "80", "geom": geom })).unwrap() };
+        let find = |p: &Project| {
+            let out = plan_domains(p, &a).unwrap();
+            let text = out.rooms.iter().chain(&out.sections).find_map(|q| match q { Primitive::Text { at, room_id: Some(rid), base_pt, .. } if *rid == id => Some((*at, *base_pt)), _ => None }).unwrap();
+            let in_top = out.sections.iter().any(|q| matches!(q, Primitive::Text { room_id: Some(rid), .. } if *rid == id));
+            let mask = out.sections.iter().any(|q| matches!(q, Primitive::Polygon { fill, room_id: Some(rid), .. } if *rid == id && fill == STAMP_KNOCKOUT));
+            (text, in_top, mask)
+        };
+        let ((_, pt0), top0, mask0) = find(&p);
+        assert_eq!((pt0, top0, mask0), (ROOM_STAMP_PT, false, false), "ohne Hindernis: normal");
+        // Textzeilen über die ganze Breite im Abstand 1 m: weder in voller Schrift noch in 80 % passt der Stempel dazwischen, in 2 mm schon.
+        let mut n = 0;
+        let mut y = 49.9;
+        while y < 55.0 {
+            p.drawings2d.push(mk(serde_json::json!({ "shape": "text", "at": { "x": 49.5, "y": y }, "text": "X".repeat(45), "height": 0.25, "angle": 0.0 }), n));
+            n += 1;
+            y += 1.0;
+        }
+        let ((at, pt), top, mask) = find(&p);
+        assert!(pt >= ROOM_STAMP_PT * ROOM_STAMP_KEEP - 1e-9, "Schrift behalten: {pt} pt");
+        assert!(top && mask, "Text und Freistellung über dem übrigen Inhalt: {pt} {at:?}");
+        assert!(at.x > 50.0 && at.x < 57.0 && at.y > 50.0 && at.y < 55.0, "im Raum: {at:?}");
+        // Die Freistellung liegt vor dem Text.
+        let out = plan_domains(&p, &a).unwrap();
+        let i_mask = out.sections.iter().position(|q| matches!(q, Primitive::Polygon { fill, .. } if fill == STAMP_KNOCKOUT)).unwrap();
+        let i_text = out.sections.iter().position(|q| matches!(q, Primitive::Text { .. })).unwrap();
+        assert!(i_mask < i_text);
+        // Eigener Anker: kein Ausweichen, keine Freistellung.
+        p.rooms.as_mut().unwrap().iter_mut().find(|r| r.id == id).unwrap().stamp_anchor = Some(Vec2 { x: 53.5, y: 52.5 });
+        let (_, top, mask) = find(&p);
+        assert!(!top && !mask);
+    }
+
     /// [157] Schnittführung quer durch den Raum: der Stempel steht neben der strichpunktierten Linie, nicht
     /// darauf (vorher lief „A-A“ durch Raumnamen und Fläche, Musterhaus komplex OG/DG).
     #[test]
@@ -2330,7 +2439,7 @@ mod tests {
         let a = PlanArgs::parse(1.0, &t).unwrap();
         let stamp = |p: &Project| {
             let out = plan_domains(p, &a).unwrap();
-            out.rooms.iter().find_map(|q| match q { Primitive::Text { at, room_id: Some(rid), doc, extra_lines, base_pt, .. } if *rid == id => Some((*at, doc.clone(), extra_lines.clone(), *base_pt)), _ => None }).unwrap()
+            out.rooms.iter().chain(&out.sections).find_map(|q| match q { Primitive::Text { at, room_id: Some(rid), doc, extra_lines, base_pt, .. } if *rid == id => Some((*at, doc.clone(), extra_lines.clone(), *base_pt)), _ => None }).unwrap()
         };
         let (pole, ..) = stamp(&p);
         // Schnitt A-A senkrecht durch den Pol (x = 53.5), über den Raum hinaus.
@@ -2358,7 +2467,7 @@ mod tests {
         let a = PlanArgs::parse(1.0, &t).unwrap();
         let stamp = |p: &Project| {
             let out = plan_domains(p, &a).unwrap();
-            out.rooms.iter().find_map(|q| match q { Primitive::Text { at, room_id: Some(rid), doc, extra_lines, base_pt, .. } if *rid == id => Some((*at, doc.clone(), extra_lines.clone(), *base_pt)), _ => None }).unwrap()
+            out.rooms.iter().chain(&out.sections).find_map(|q| match q { Primitive::Text { at, room_id: Some(rid), doc, extra_lines, base_pt, .. } if *rid == id => Some((*at, doc.clone(), extra_lines.clone(), *base_pt)), _ => None }).unwrap()
         };
         p.roofs = None;
         let (pole, ..) = stamp(&p);

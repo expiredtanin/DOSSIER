@@ -782,7 +782,7 @@ fn emit_inner(c: &Ctx, d: &Drawing2D, attrs: Attrs, geom: &Drawing2DGeom, greyed
             let mm = |x: f64| mm_to_model(x, scale);
             // [157] Aussenbemassung hinter der sichtbaren Böschung (nur beim Zeichnen).
             // [199] Ketten einer Seite mindestens 7 mm Papier auseinander; Zahlen weichen den Hilfslinien äusserer Ketten aus.
-            let layout = if arc_center.is_none() && kind.is_none() { autodim_layout(c, d, scale) } else { AutodimLayout { shift: 0.0, blocked: Vec::new() } };
+            let layout = if arc_center.is_none() && kind.is_none() { autodim_layout(c, d, scale) } else { AutodimLayout { shift: 0.0, blocked: Vec::new(), marks: Vec::new() } };
             let shifted = *offset + layout.shift;
             let offset = &shifted;
             if let Some(k) = kind {
@@ -799,7 +799,7 @@ fn emit_inner(c: &Ctx, d: &Drawing2D, attrs: Attrs, geom: &Drawing2DGeom, greyed
                 };
                 dimension_round(&mut em, pts, *offset, *k, &st);
             }
-            let auto = if kind.is_none() && arc_center.is_none() { dim_auto_offsets_avoiding(pts, mm(text_height_mm.unwrap_or(DIM_TEXT_HEIGHT_MM)), &layout.blocked) } else { Vec::new() };
+            let auto = if kind.is_none() && arc_center.is_none() { dim_auto_offsets_marks(pts, mm(text_height_mm.unwrap_or(DIM_TEXT_HEIGHT_MM)), &layout.blocked, &layout.marks) } else { Vec::new() };
             for i in 0..(if kind.is_some() { 0 } else { pts.len().saturating_sub(1) }) {
                 let st = DimStyle {
                     gap: mm(gap_mm.unwrap_or(DIM_GAP_MM)),
@@ -1065,6 +1065,13 @@ pub fn dim_auto_offsets(pts: &[Vec2], h: f64) -> Vec<(f64, f64)> {
 /// direkt neben dem Segment belegt, rückt die Zahl weiter hinaus hinter das nächste Hindernis (höchstens drei
 /// Zahlbreiten), erst dann eine Zeile höher.
 pub fn dim_auto_offsets_avoiding(pts: &[Vec2], h: f64, blocked: &[f64]) -> Vec<(f64, f64)> {
+    dim_auto_offsets_marks(pts, h, blocked, &[])
+}
+
+/// Wie [`dim_auto_offsets_avoiding`]; dazu [199] Streifen `marks` (von, bis; entlang der Kette ab dem ersten Punkt,
+/// Modell-m), die keine Zahl überdecken soll (Schnittmarken). Eine Zahl, die in ihr Segment passt, rückt innerhalb des
+/// Segments neben den Streifen (nächste freie Stelle), sonst bleibt sie in der Mitte; ausweichende Zahlen meiden sie.
+pub fn dim_auto_offsets_marks(pts: &[Vec2], h: f64, blocked: &[f64], marks: &[(f64, f64)]) -> Vec<(f64, f64)> {
     let n = pts.len().saturating_sub(1);
     let mut out = vec![(0.0, 0.0); n];
     if n == 0 || !(h.is_finite() && h > 0.0) || pts.iter().any(|q| !(q.x.is_finite() && q.y.is_finite())) {
@@ -1078,7 +1085,30 @@ pub fn dim_auto_offsets_avoiding(pts: &[Vec2], h: f64, blocked: &[f64]) -> Vec<(
     let blocked: Vec<f64> = blocked.iter().copied().filter(|b| b.is_finite()).collect();
     let fits: Vec<bool> = (0..n).map(|i| widths[i] + 2.0 * pad <= lens[i]).collect();
     // Belegte Streifen entlang der Kette: passende Zahlen in der Mitte ihres Segments.
-    let mut taken: Vec<(f64, f64)> = (0..n).filter(|i| fits[*i]).map(|i| (starts[i] + lens[i] / 2.0 - widths[i] / 2.0, starts[i] + lens[i] / 2.0 + widths[i] / 2.0)).collect();
+    let marks: Vec<(f64, f64)> = marks.iter().copied().filter(|m| m.0.is_finite() && m.1.is_finite()).collect();
+    let hit = |c: f64, w: f64| marks.iter().any(|(a, b)| !(c + w / 2.0 + pad <= *a + eps || c - w / 2.0 - pad >= *b - eps));
+    // [199] Passende Zahlen in der Mitte ihres Segments, ausser eine Schnittmarke liegt darauf: dann daneben im Segment.
+    let mut centre: Vec<Option<f64>> = vec![None; n];
+    for i in (0..n).filter(|i| fits[*i]) {
+        let (w, mid) = (widths[i], starts[i] + lens[i] / 2.0);
+        let mut c = mid;
+        if hit(mid, w) {
+            let (lo, hi) = (starts[i] + pad + w / 2.0, starts[i] + lens[i] - pad - w / 2.0);
+            let mut cands: Vec<f64> = marks.iter().flat_map(|&(a, b)| [a - pad - w / 2.0, b + pad + w / 2.0]).filter(|c| *c >= lo - eps && *c <= hi + eps).collect();
+            cands.sort_by(|a, b| (a - mid).abs().total_cmp(&(b - mid).abs()));
+            if let Some(f) = cands.into_iter().find(|c| !hit(*c, w)) {
+                c = f;
+                // Gleich wie ausweichende Zahlen: in die Leserichtung umrechnen.
+                let (_, read, _, _) = dim_text_frame(pts[i], pts[i + 1], 0.0, h);
+                let u = v((pts[i + 1].x - pts[i].x) / lens[i], (pts[i + 1].y - pts[i].y) / lens[i]);
+                let s = if read.x * u.x + read.y * u.y >= 0.0 { 1.0 } else { -1.0 };
+                out[i] = (s * (c - mid), 0.0);
+            }
+        }
+        centre[i] = Some(c);
+    }
+    let mut taken: Vec<(f64, f64)> = (0..n).filter_map(|i| centre[i].map(|c| (c - widths[i] / 2.0, c + widths[i] / 2.0))).collect();
+    taken.extend(marks.iter().copied());
     let free = |c: f64, w: f64, taken: &[(f64, f64)]| {
         taken.iter().all(|(a, b)| c + w / 2.0 + pad <= *a + eps || c - w / 2.0 - pad >= *b - eps)
             && blocked.iter().all(|b| c + w / 2.0 + pad <= *b + eps || c - w / 2.0 - pad >= *b - eps)
@@ -1620,6 +1650,9 @@ struct AutodimLayout {
     /// Stellen entlang der Kette (ab dem ersten Punkt, Modell-m), an denen Hilfslinien äusserer Ketten derselben
     /// Seite das Zahlenband queren: ausweichende Zahlen stehen nicht darauf.
     blocked: Vec<f64>,
+    /// [199] Streifen entlang der Kette (von, bis; ab dem ersten Punkt, Modell-m), in denen eine Schnittmarke
+    /// (Linie samt Schenkel und Pfeil an den Enden) das Zahlenband quert: Zahlen weichen dem aus.
+    marks: Vec<(f64, f64)>,
 }
 
 /// Lage einer Kette der automatischen Aussenbemassung (`autodim-<Geschoss>-<Seite>-<Kette>`, gerade) beim Zeichnen.
@@ -1630,7 +1663,7 @@ struct AutodimLayout {
 ///   Böschungsoberkante), rücken alle Ketten der Seite gleich weit hinaus — die innerste mit 4 mm Papier Luft
 ///   hinter die Böschung.
 fn autodim_layout(c: &Ctx, d: &Drawing2D, scale: f64) -> AutodimLayout {
-    let none = AutodimLayout { shift: 0.0, blocked: Vec::new() };
+    let none = AutodimLayout { shift: 0.0, blocked: Vec::new(), marks: Vec::new() };
     let prefix = format!("autodim-{}-", d.level_id);
     let Some(rest) = d.id.strip_prefix(&prefix) else { return none };
     let Some((side, _)) = rest.rsplit_once('-') else { return none };
@@ -1720,7 +1753,53 @@ fn autodim_layout(c: &Ctx, d: &Drawing2D, scale: f64) -> AutodimLayout {
         .flat_map(|&i| chains[i].pts.iter())
         .map(|q| (q.x - mine.a.x) * mine.u.0 + (q.y - mine.a.y) * mine.u.1)
         .collect();
-    AutodimLayout { shift: (extra[me] + need) * d_sign(d), blocked }
+    let marks = section_mark_strips(c, mine.a, mine.u, mine.n, mine.off + extra[me] + need, mine.len, scale);
+    AutodimLayout { shift: (extra[me] + need) * d_sign(d), blocked, marks }
+}
+
+/// [199] Wo queren die Schnittführungen (Schnitt, nicht Ansicht) die Masslinie einer Kette (Anfang `a`, Richtung `u`,
+/// Normale `n`, Abstand `off`, Länge `len`)? Streifen (von, bis) entlang der Kette in Modell-m. An den Enden gehört der
+/// Schenkel samt Pfeil (8 mm Papier hinaus) zur Marke: dort ±6 mm Papier, quert nur die gestrichelte Linie ±1 mm.
+fn section_mark_strips(c: &Ctx, a: Vec2, u: (f64, f64), n: (f64, f64), off: f64, len: f64, scale: f64) -> Vec<(f64, f64)> {
+    let mut out = Vec::new();
+    if !c.derived_shown(crate::standards::SECTION_MARK_CATEGORY) || c.p.drawing_levels.iter().any(|l| l.id == c.a.floor && matches!(l.kind, DrawingLevelKind::Drawing)) {
+        return out;
+    }
+    let (leg, end_half, cross_half) = (mm_to_model(8.0, scale), mm_to_model(6.0, scale), mm_to_model(1.0, scale));
+    let (ox, oy) = (a.x + n.0 * off, a.y + n.1 * off);
+    let cross = |p: (f64, f64), q: (f64, f64)| p.0 * q.1 - p.1 * q.0;
+    for level in c.p.drawing_levels.iter().filter(|l| matches!(l.kind, DrawingLevelKind::Section)) {
+        let Some([p0, p1]) = level.line_points else { continue };
+        let mut path = vec![(p0.x, p0.y)];
+        path.extend(level.bend_points.iter().flatten().map(|q| (q.x, q.y)));
+        path.push((p1.x, p1.y));
+        let m = path.len();
+        for i in 0..m - 1 {
+            let (qa, qb) = (path[i], path[i + 1]);
+            let l = hypot2(qb.0 - qa.0, qb.1 - qa.1);
+            if !(l > 1e-6) {
+                continue;
+            }
+            let d = ((qb.0 - qa.0) / l, (qb.1 - qa.1) / l);
+            let den = cross(u, d);
+            if den.abs() < 0.2 {
+                continue;
+            }
+            let w = (qa.0 - ox, qa.1 - oy);
+            let t = cross(w, d) / den;
+            let s = cross(w, u) / den;
+            if !(t > -leg && t < len + leg) {
+                continue;
+            }
+            let (before, after) = (i == 0 && s < 0.0 && s >= -leg, i == m - 2 && s > l && s <= l + leg);
+            if s >= 0.0 && s <= l {
+                out.push((t - cross_half, t + cross_half));
+            } else if before || after {
+                out.push((t - end_half, t + end_half));
+            }
+        }
+    }
+    out
 }
 
 /// Vorzeichen des Versatzes einer Masskette (der Abstand wächst in seiner Richtung).
@@ -2499,6 +2578,28 @@ mod tests {
         assert!((h(paper, 50.0) - 0.125).abs() < 1e-12);
         let model = serde_json::json!({"shape": "text", "at": {"x": 0, "y": 0}, "text": "A", "height": 0.3, "angle": 0});
         assert!((h(model, 50.0) - 0.3).abs() < 1e-12);
+    }
+
+    /// [199] Schnittmarke auf der Gesamtmass-Zahl (komplex UG/EG Ost: „B-B“ auf „19.24“): eine Zahl, die ins Segment
+    /// passt, rückt neben den Streifen der Marke; ohne Marke bleibt sie mittig, ohne Platz auch.
+    #[test]
+    fn masszahl_weicht_schnittmarke_aus() {
+        let pts = [v(0.0, 0.0), v(0.0, 19.24)];
+        let h = 0.35;
+        let w = dim_text_width(19.24, h);
+        assert_eq!(dim_auto_offsets_marks(&pts, h, &[], &[]), vec![(0.0, 0.0)]);
+        let mark = (9.62 - 0.6, 9.62 + 0.6);
+        let o = dim_auto_offsets_marks(&pts, h, &[], &[mark]);
+        let centre = 9.62 + o[0].0 * if o[0].0 != 0.0 { 1.0 } else { 0.0 };
+        // Leserichtung der senkrechten Kette ist abwärts/aufwärts: das Vorzeichen egal, die Zahl liegt frei vom Streifen.
+        let c1 = 9.62 + o[0].0;
+        let c2 = 9.62 - o[0].0;
+        let free = |c: f64| c + w / 2.0 <= mark.0 || c - w / 2.0 >= mark.1;
+        assert!(o[0].0.abs() > 0.1 && o[0].1 == 0.0 && (free(c1) || free(c2)), "{o:?} {centre}");
+        // Streifen über dem ganzen Segment: nichts frei, die Zahl bleibt mittig.
+        assert_eq!(dim_auto_offsets_marks(&pts, h, &[], &[(-1.0, 25.0)]), vec![(0.0, 0.0)]);
+        // Streifen fern der Zahl: unverändert.
+        assert_eq!(dim_auto_offsets_marks(&pts, h, &[], &[(1.0, 1.5)]), vec![(0.0, 0.0)]);
     }
 
     #[test]

@@ -378,6 +378,17 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   (`dim_auto_offsets_avoiding`); Ansichtsmarker rückt von der Bemassung weg (`context::view_marker`). Test
   `plan/autodim_text_tests.rs` (Zahlen-Kästen beider Musterhäuser 1:200/100/50, Fixture `autodim_musterhaus_komplex.json`).
   Offen dazu: Griffe (`grips.rs`) und DXF-Export kennen den Zeichen-Versatz nicht (wie schon die Böschungs-Verschiebung [157]).
+  12.11. (Forts.): (1) Raumstempel schrumpfte auf 2 mm, sobald Schnittlinie, Achse, Gaube und Kote den Raum querten (komplex DG
+  „Schlafen"): Anderer Planinhalt verkleinert die Schrift jetzt nur noch bis 80 % der Grundschrift (`ROOM_STAMP_KEEP`,
+  `fit_room_stamp`); 2 mm nur noch, wenn der Raum auch das nicht fasst. Findet sich keine freie Lage, steht der Stempel an der
+  Lage mit der geringsten Überdeckung und mit Freistellung (weisses Rechteck in Papierfarbe unter dem Text, `stamp_knockout`);
+  Rechteck + Text liegen dann am Ende der Gruppe `sections` (über Schnittlinie, Achsen, Koten, Zeichnungen), Stempel mit
+  eigenem Anker bleiben unverändert. Gleich in Anzeige, SVG und Druck-SVG/PDF (normale Polygon-/Text-Primitive, keine neue Art).
+  Test `raumstempel_behaelt_schrift_mit_freistellung`. (2) Schnittmarke B-B stand auf der Gesamtmass-Zahl „19.24" (komplex UG/EG
+  Ost, auch West): die Zahlen weichen den Schnittmarken aus (`drawings::section_mark_strips`, `dim_auto_offsets_marks`): passt eine
+  Zahl ins Segment, rückt sie darin neben die Marke (±6 mm Papier an Schenkel/Pfeil, ±1 mm wo nur die Linie quert); Test
+  `masszahl_weicht_schnittmarke_aus`. Offen: Zahlen weichen den Achslinien weiterhin nicht aus (komplex UG Ost „4.37"/„19.24" liegen
+  auf der Achse B); Mac/Tauri nicht geprüft.
   Offen (nach Schwere): (2) Raumstempel schrumpft auf 2 mm, sobald
   Schnittlinie, Achse, gestrichelte Gaube und Kote den Raum queren (komplex DG „Schlafen" 1:100; Archicad legt ihn darüber) —
   dünne Strich-Punkt-/Projektionslinien als weiche Hindernisse? (3) Ansicht Ost: Gaubenwange der Flachdachgaube fehlt (Gaubendach
