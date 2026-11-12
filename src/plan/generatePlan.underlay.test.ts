@@ -173,29 +173,8 @@ describe("Ebenen ein-/ausblenden (Kataster-Performance)", () => {
   });
 });
 
-// Grundriss-Unterlage unter Schnitt/Ansicht (Kern `plan/underlay.rs`; Rechnung dort getestet).
-import { crossKindOverlayAllowed, planUnderlayPrimitives } from "./generatePlan";
-import { sampleProject } from "../model/sampleProject";
-
-describe("planUnderlayPrimitives (Kern)", () => {
-  it("Grundriss gedimmt, ohne Auswahl-Ids, unter dem Schnitt, plus Schnittlinie", () => {
-    const sec = sampleProject.drawingLevels.find((l) => l.kind === "section")!;
-    const eg = sampleProject.drawingLevels.find((l) => l.kind === "floor")!;
-    const codes = new Set(sampleProject.layers.map((l) => l.code));
-    const out = planUnderlayPrimitives(sampleProject, sec, eg.id, -0.3, codes);
-    expect(out.length).toBeGreaterThan(10);
-    const last = out[out.length - 1];
-    expect(last.kind === "line" && last.cls).toBe("section-underlay-line");
-    const body = out.slice(0, -1);
-    expect(body.every((p) => (p as { greyed?: boolean }).greyed === true)).toBe(true);
-    expect(body.some((p) => "wallId" in p || "roomId" in p || "drawingId" in p)).toBe(false);
-    let top = -Infinity;
-    for (const p of body) if (p.kind === "polygon") for (const q of p.pts) top = Math.max(top, q.y);
-    expect(top).toBeLessThanOrEqual(-0.3 - 1.5 + 1e-9);
-    // ohne Schnittlinie: nichts
-    expect(planUnderlayPrimitives(sampleProject, { ...sec, linePoints: undefined }, eg.id, 0, codes)).toEqual([]);
-  });
-});
+// Fremd-Art-Überlagerung über Auge/Modus (alles andere kommt als Pausfolie, [205] `trace.test.ts`).
+import { crossKindOverlayAllowed } from "./generatePlan";
 
 describe("crossKindOverlayAllowed", () => {
   it("nur Ebenen im selben Koordinatenraum überlagern sich", () => {
@@ -205,8 +184,8 @@ describe("crossKindOverlayAllowed", () => {
     expect(crossKindOverlayAllowed("section", "floor")).toBe(false);
     expect(crossKindOverlayAllowed("elevation", "section")).toBe(false);
     expect(crossKindOverlayAllowed("section", "drawing")).toBe(false);
-    // Freie Zeichnung bleibt Kalkierpapier für alles.
-    expect(crossKindOverlayAllowed("drawing", "section")).toBe(true);
+    // [205] Schnitt/Ansicht hinter einer freien Zeichnung nur noch als Pausfolie (ausgerichtet, verschiebbar).
+    expect(crossKindOverlayAllowed("drawing", "section")).toBe(false);
     expect(crossKindOverlayAllowed("drawing", "floor")).toBe(true);
   });
 });

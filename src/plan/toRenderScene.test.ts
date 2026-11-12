@@ -5,7 +5,8 @@
 
 import { describe, expect, it } from "vitest";
 import { planSceneBin, planToRenderScene } from "./toRenderScene";
-import { generatePlan, generateVisibleLevelsPlan, materializeGreyed, materializeUnderlay } from "./generatePlan";
+import { generatePlan, materializeGreyed, materializeUnderlay } from "./generatePlan";
+import { planCount, planWithExtra } from "./planLazy";
 import type { Primitive } from "./generatePlan";
 import { sampleProject } from "../model/sampleProject";
 import { flattenCategories } from "../model/types";
@@ -46,8 +47,9 @@ describe("planToRenderScene (Kern)", () => {
       expect(JSON.stringify(planToRenderScene(plan))).toBe(JSON.stringify(planToRenderScene(materializeGreyed(plan, true))));
       expect(Buffer.from(planSceneBin(plan)).equals(Buffer.from(planSceneBin(materializeGreyed(plan, true))))).toBe(true);
     }
-    const over = generateVisibleLevelsPlan(sampleProject, "og", codes, undefined, "mittel", false, false, () => ({ render: true, greyed: true, locked: false }), 100, true);
-    const plan = materializeUnderlay(over);
+    // Kompakte Unterlage + gedimmter Bereich (seit [205] legt sich kein anderes Geschoss mehr gedimmt darunter).
+    const own = materializeUnderlay(generatePlan(sampleProject, "og", codes, undefined, "mittel", false, false, true, 100, false, true));
+    const plan = planWithExtra(own, [], [], { greyedRanges: [[0, Math.floor(planCount(own) / 2)]] });
     expect(plan.greyedRanges?.length).toBeGreaterThan(0);
     expect(JSON.stringify(planToRenderScene(plan))).toBe(JSON.stringify(planToRenderScene(materializeGreyed(plan, true))));
   });

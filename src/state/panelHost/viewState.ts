@@ -57,6 +57,8 @@ export function buildViewStateFns(c: FlatHostOpts): ViewStateFns {
     drawingVisibility: snapshotDrawingVisibility(),
     enabledOverrideRuleIds: (getState().project.overrideRules ?? []).filter((r) => r.enabled).map((r) => r.id),
     ...captureCameraState(planViewRef, viewType),
+    // [205] Pausfolie des Reiters.
+    ...(getState().trace ? { trace: getState().trace! } : {}),
   });
   // Darstellungszustand wiederherstellen. Reihenfolge: Geschoss ZUERST (setActiveLevelId setzt viewType
   // provisorisch aus viewTypeByLevel), danach die Ansicht (überschreibt es synchron), dann Sichtbarkeit +
@@ -72,6 +74,7 @@ export function buildViewStateFns(c: FlatHostOpts): ViewStateFns {
     setFov(st.fov);
     setDetail(st.detail);
     setScaleDenominator(st.scaleDenominator);
+    getState().setTrace(st.trace ?? null);
     const layersDiffer = !visibilityMatches(snapshotLayerVisibility(), st.layerVisibility);
     const drawingsDiffer = !visibilityMatches(snapshotDrawingVisibility(), st.drawingVisibility);
     const wanted = new Set(st.enabledOverrideRuleIds);

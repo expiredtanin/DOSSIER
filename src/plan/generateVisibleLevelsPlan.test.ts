@@ -61,45 +61,42 @@ function floor(id: string, name: string): DrawingLevel {
 }
 
 describe("generateVisibleLevelsPlan", () => {
+  // Zwei freie Zeichnungsebenen: seit [203]/[205] überlagern sich über Auge/Modus nur diese; ein anderes Geschoss
+  // kommt nur als Pausfolie (`trace.test.ts`).
+  const draw = (id: string): DrawingLevel => ({ id, name: id, kind: "drawing", visible: true, locked: false }) as DrawingLevel;
+  const line2d = (id: string, levelId: string, y: number) =>
+    ({ id, type: "drawing2d", levelId, categoryCode: "90", geom: { shape: "line", a: { x: 0, y }, b: { x: 1, y } } }) as unknown as Project["drawings2d"][number];
+  const twoDrawings = () => ({ ...baseProject([draw("z1"), draw("z2")], []), drawings2d: [line2d("l1", "z1", 0), line2d("l2", "z2", 5)] });
+  const greyOthers: CategoryDisplayResolver = (id) => ({ render: true, greyed: id !== "z1", locked: false });
+
   it("überlagert eine zweite sichtbare Ebene zusätzlich zur aktiven", () => {
-    const p = baseProject(
-      [floor("eg", "EG"), floor("og", "OG")],
-      [wallOf("w-eg", "eg", 0), wallOf("w-og", "og", 10)],
-    );
-    const levelDisplay: CategoryDisplayResolver = (id) => ({
-      render: true,
-      greyed: id !== "eg",
-      locked: false,
-    });
-    const plan = generateVisibleLevelsPlan(p, "eg", visible, SHOW_ALL, "mittel", false, false, levelDisplay);
+    const plan = generateVisibleLevelsPlan(twoDrawings(), "z1", visible, SHOW_ALL, "mittel", false, false, greyOthers);
+    const ids = plan.primitives.map((pr) => (pr as { drawingId?: string }).drawingId).filter(Boolean);
+    expect(ids).toContain("l1");
+    expect(ids).toContain("l2");
+  });
+
+  it("[205] anderes Geschoss auch gedimmt nie über den Modus (nur als Pausfolie)", () => {
+    const p = baseProject([floor("eg", "EG"), floor("og", "OG")], [wallOf("w-eg", "eg", 0), wallOf("w-og", "og", 10)]);
+    const plan = generateVisibleLevelsPlan(p, "eg", visible, SHOW_ALL, "mittel", false, false, (id) => ({ render: true, greyed: id !== "eg", locked: false }));
     const wallIds = plan.primitives.map((pr) => (pr as { wallId?: string }).wallId).filter(Boolean);
     expect(wallIds).toContain("w-eg");
-    expect(wallIds).toContain("w-og");
+    expect(wallIds).not.toContain("w-og");
   });
 
   it("gedimmte (nicht-aktive) Ebene: als greyedRanges markiert (ohne Klonen), materialisiert greyed=true", () => {
-    const p = baseProject(
-      [floor("eg", "EG"), floor("og", "OG")],
-      [wallOf("w-eg", "eg", 0), wallOf("w-og", "og", 10)],
-    );
-    const levelDisplay: CategoryDisplayResolver = (id) => ({
-      render: true,
-      greyed: id !== "eg",
-      locked: false,
-    });
-    const plan = generateVisibleLevelsPlan(p, "eg", visible, SHOW_ALL, "mittel", false, false, levelDisplay);
-    const idx = (wallId: string) =>
-      plan.primitives.findIndex((pr) => (pr as { wallId?: string }).wallId === wallId && pr.kind === "polygon");
-    // Rohplan: Primitive unverändert, nur der OG-Bereich ist als gedimmt markiert.
+    const plan = generateVisibleLevelsPlan(twoDrawings(), "z1", visible, SHOW_ALL, "mittel", false, false, greyOthers);
+    const idx = (id: string) => plan.primitives.findIndex((pr) => (pr as { drawingId?: string }).drawingId === id);
+    // Rohplan: Primitive unverändert, nur der Bereich der anderen Ebene ist als gedimmt markiert.
     expect(plan.greyedRanges?.length).toBe(1);
-    expect(inGreyedRange(plan.greyedRanges, idx("w-og"))).toBe(true);
-    expect(inGreyedRange(plan.greyedRanges, idx("w-eg"))).toBe(false);
-    expect((plan.primitives[idx("w-og")] as { greyed?: boolean }).greyed).toBeFalsy();
-    // Materialisiert: gleiche Indizes, OG-Primitive tragen greyed=true, EG nicht.
+    expect(inGreyedRange(plan.greyedRanges, idx("l2"))).toBe(true);
+    expect(inGreyedRange(plan.greyedRanges, idx("l1"))).toBe(false);
+    expect((plan.primitives[idx("l2")] as { greyed?: boolean }).greyed).toBeFalsy();
+    // Materialisiert: gleiche Indizes, Primitive der anderen Ebene tragen greyed=true.
     const m = materializeGreyed(plan, true);
     expect(m.primitives).toHaveLength(plan.primitives.length);
-    expect((m.primitives[idx("w-og")] as { greyed?: boolean }).greyed).toBe(true);
-    expect((m.primitives[idx("w-eg")] as { greyed?: boolean }).greyed).toBeFalsy();
+    expect((m.primitives[idx("l2")] as { greyed?: boolean }).greyed).toBe(true);
+    expect((m.primitives[idx("l1")] as { greyed?: boolean }).greyed).toBeFalsy();
     // Ohne Bereiche bleibt der Plan unverändert (gleiches Objekt).
     expect(materializeGreyed({ ...plan, greyedRanges: undefined }, true).primitives).toBe(plan.primitives);
     // Linien-Ausnahme für den GPU-Pfad.

@@ -9,6 +9,7 @@ import { storeDocument } from "./historySlice";
 import { ceilingThickness } from "../model/types";
 import { computeSection, generatePlan, generateVisibleLevelsPlan, materializeGreyed, materializeUnderlay, verticalExtents, generateSectionPlan, pickGeometry, projectToModel3d } from "../core";
 import { collectVisibleCodes } from "../model/layers";
+import { tracePlan } from "../core";
 import { getViewStateBridge } from "./viewTabs";
 import { getView3dFilter, toFilter3d } from "./view3dFilter";
 import { BUILTIN_PANEL_IDS } from "../panels/builtinPanels";
@@ -78,6 +79,8 @@ declare global {
       stairHole: (stairId: string, ceilingId: string) => { start: { x: number; y: number }; center: { x: number; y: number } | null; hole0: { x: number; y: number } | null; lines: number };
       /** [203] Grundriss der aktiven Ebene wie in der Ansicht (Geschoss-Überlagerung nach Zeichnungsebenen-Modus): Raumstempel je Geschoss (gesamt/gedimmt) und Zahl der Achs-Beschriftungen `axis`. */
       planStamps: (axis: string) => { floors: Record<string, { n: number; greyed: number }>; axis: number };
+      /** [205] Pausfolie des Reiters (Store) und ihr Plan für die aktive Ebene: Zahl der Primitive, Linienfarben, Zahl mit Auswahl-Ids, Ausmass. */
+      trace: () => { trace: unknown; n: number; colors: string[]; withIds: number; bounds: { minX: number; minY: number; maxX: number; maxY: number } | null; probe: { x: number; y: number } | null };
     };
   }
 }
@@ -215,6 +218,23 @@ export function installTestHooks(): void {
         } else if (q.kind === "drawingText" && q.text === axis && q.drawingId && p.drawings2d.some((d) => d.id === q.drawingId && d.geom.shape === "grid")) n++;
       }
       return { floors, axis: n };
+    },
+    trace: () => {
+      const s = getState();
+      const level = s.project.drawingLevels.find((l) => l.id === s.activeLevelId);
+      const plan = level ? tracePlan(s.project, level, s.trace, { visibleCodes: collectVisibleCodes(s.project.layers), detail: s.detail, scaleDenominator: s.scaleDenominator }) : null;
+      const prims = plan?.primitives ?? [];
+      const colors = [...new Set(prims.flatMap((q) => (q.kind === "line" && q.color ? [q.color] : [])))];
+      const withIds = prims.filter((q) => Object.entries(q).some(([k, v]) => k.endsWith("Id") && v !== undefined)).length;
+      // Mitte der längsten Pausen-Linie (Klickziel „nicht anwählbar").
+      let probe: { x: number; y: number } | null = null;
+      let best = 0;
+      for (const q of prims) {
+        if (q.kind !== "line") continue;
+        const len = Math.hypot(q.b.x - q.a.x, q.b.y - q.a.y);
+        if (len > best) [best, probe] = [len, { x: (q.a.x + q.b.x) / 2, y: (q.a.y + q.b.y) / 2 }];
+      }
+      return { trace: s.trace, n: prims.length, colors, withIds, bounds: plan?.bounds ?? null, probe };
     },
     layerView: () => {
       const s = getState();

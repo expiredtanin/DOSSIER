@@ -14,8 +14,13 @@ import { useCursor } from "../state/cursorStore";
 import { useEffect, useRef, useState, memo } from "react";
 import type { SnapSettings } from "../tools/types";
 import { t } from "../i18n";
+import { TraceControl } from "./TraceControl";
 
 export interface StatusBarProps {
+  /** [205] Pausfolie schaltbar (2D-Ansicht: Grundriss, Schnitt, Ansicht, Zeichnung). */
+  traceEnabled?: boolean;
+  /** Befehl starten (Pausfolie verschieben/drehen per Klick). */
+  onRunCommand?: (name: string) => void;
   /** Kontextueller Werkzeug-Hinweis links (z. B. „Auswahl"). */
   hint: string;
   /** Cursor-Koordinaten anzeigen (nur bei aktiver Plan-Ansicht). Der Wert selbst
@@ -394,6 +399,8 @@ export const StatusBar = memo(function StatusBar({
   lineModeEnabled,
   snap,
   onSnapChange,
+  traceEnabled,
+  onRunCommand,
 }: StatusBarProps) {
   // [137] Klick-Zyklus im Plan („2/3 Treffer — erneut klicken zum Wechseln") hat Vorrang vor dem Werkzeug-Hinweis.
   const pickHint = usePickHint();
@@ -412,6 +419,8 @@ export const StatusBar = memo(function StatusBar({
         />
         <Sep />
         <SnapControl snap={snap} onSnapChange={onSnapChange} />
+        <Sep />
+        <TraceControl enabled={!!traceEnabled} onRunCommand={onRunCommand} />
         <Sep />
         {/* Referenzlinien-Schalter (aus der TopBar hierher gewandert). */}
         <button

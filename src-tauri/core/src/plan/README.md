@@ -67,7 +67,8 @@ Herkunft, kein Wegweiser.
 | `elevation/tests.rs` | Tests der Ansicht |
 | `elevation_geom.rs` | Geometrie der Ansicht: Verdeckung, Schlagschatten, Eck-Verlängerung, Öffnungen |
 | `grid_view.rs` | Achsraster in Schnitt und Ansicht |
-| `underlay.rs` | Grundriss-Unterlage unter Schnitt und Ansicht |
+| `underlay.rs` | Grundriss ausgerichtet unter Schnitt und Ansicht (Ausrichtung der Pausfolie „Grundriss hinter Schnitt“) |
+| `trace.rs` | Pausfolie ([205], Abfrage `tracePlan`): Teil-Abfragen der Quelle ausrichten (Schnitt an der Linie aufgeklappt, Grundriss unter dem Schnitt), verschieben/drehen, ohne Auswahl-Ids, gefärbt |
 
 ## Puffer und Ausgaben
 

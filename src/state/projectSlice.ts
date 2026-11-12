@@ -517,6 +517,8 @@ type ProjectSliceDeps = {
   /** Nicht-blockierende Kurzmeldung (Toast) — Ersatz für `window.alert`, das
    *  im Tauri-WKWebView deaktiviert ist (siehe notifySlice.ts). */
   notify: (message: string, kind?: NotifyKind) => void;
+  /** [205] Pausfolie (View-Slice): ein anderes Projekt startet ohne. */
+  trace: unknown;
 } & HistorySlice;
 
 export function createProjectSlice(
@@ -684,7 +686,7 @@ export function createProjectSlice(
     loadProject: (next) => {
       const doc = storeDocument(get().project);
       doc.load(next);
-      set({ project: next, projectEpoch: get().projectEpoch + 1, ...historyPatch(doc) });
+      set({ project: next, projectEpoch: get().projectEpoch + 1, trace: null, ...historyPatch(doc) });
       resetViewTabs(); // [136] neues Projekt: ein Reiter mit der aktuellen Ansicht
       resetView3dFilter(); // [185] keine 3D-Element-Auswahl aus dem vorigen Projekt
     },
@@ -693,7 +695,7 @@ export function createProjectSlice(
       const doc = storeDocument(get().project);
       const r = doc.loadFile(text);
       if (r.ok) {
-        set({ project: r.project, projectEpoch: get().projectEpoch + 1, ...historyPatch(doc) });
+        set({ project: r.project, projectEpoch: get().projectEpoch + 1, trace: null, ...historyPatch(doc) });
         restoreViewTabsFromProject(r.project); // [136] gesicherte Reiter, sonst ein Reiter
         resetView3dFilter(); // [185]
       }

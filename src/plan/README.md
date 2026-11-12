@@ -13,6 +13,7 @@ Fassaden, die den Kern fragen, und die Leser der Plan-Puffer. Die Hülle importi
 | `generatePlan/layerSig.ts` | Signatur der stilrelevanten Ebenen-Eigenschaften (Cache-Schlüssel) |
 | `toSection.ts` | `computeSection()` (Cache-Schlüssel; Körper-Netze rechnet der Kern), `generateSectionPlan()` (Abfrage `sectionPlan`) |
 | `toElevation.ts` | `generateElevationPlan()` (Abfrage `elevationPlan`) |
+| `trace.ts` | Pausfolie ([205]): `tracePlan()` stellt die Teil-Abfragen der Quelle zusammen (Abfrage `tracePlan`), `withTrace()` legt sie unter/über den Plan |
 | `viewportPlan.ts` | Inhalt eines Layout-Viewports: Plan der Ebene, auf die sein Ausschnitt zeigt (mit verknüpfter Ansichtsvorlage) |
 | `viewTemplate.ts` | [34] Ansichtsvorlage → Projekt/Anzeigewerte für Viewport und CLI (`projectWithTemplate`, `templateDisplay`) |
 | `levelMarkers.ts` | automatische Höhenkoten in Schnitt und Ansicht |

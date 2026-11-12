@@ -23,7 +23,7 @@ describe("sameSectionLine", () => {
     linePoints: [{ x: 0, y: 0 }, { x: 5, y: 0 }],
   };
   it("Name/Unterlage egal, Linie/Richtung/Tiefe nicht", () => {
-    expect(sameSectionLine(lv, { ...lv, name: "X", planUnderlayId: "eg", hiddenLines: true })).toBe(true);
+    expect(sameSectionLine(lv, { ...lv, name: "X", levelMarks: false, hiddenLines: true })).toBe(true);
     expect(sameSectionLine(lv, { ...lv, linePoints: [{ x: 0, y: 0 }, { x: 5, y: 1 }] })).toBe(false);
     expect(sameSectionLine(lv, { ...lv, directionSign: -1 })).toBe(false);
     expect(sameSectionLine(lv, { ...lv, depth: 3 })).toBe(false);

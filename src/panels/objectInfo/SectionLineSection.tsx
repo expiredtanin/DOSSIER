@@ -1,7 +1,6 @@
 // Abschnitt „Schnitt-/Ansichtslinie" der Attribute ([165] aus `ObjectInfoPanel.tsx`): Name, Art, Tiefe,
 // Umkehren, Höhenmarken, Plan-Unterlage. Gerufen von `AttributesPanel`.
 
-import { useStore } from "../../state/appStore";
 import type { DrawingLevel, Vec2 } from "../../model/types";
 import { usePanelHost } from "../host";
 import { t } from "../../i18n";
@@ -20,7 +19,6 @@ export function SectionLineSection({
   level: DrawingLevel;
   host: ReturnType<typeof usePanelHost>;
 }) {
-  const storeProject = useStore((st) => st.project);
   const line = level.linePoints;
   const isElev = level.kind === "elevation";
   const kindLabel =
@@ -167,25 +165,6 @@ export function SectionLineSection({
           title={t("objinfo.sectionLine.levelMarks")}
         />
       </div>
-
-      {/* Grundriss-Unterlage: ein Geschoss ausgerichtet unter dem Schnitt/der Ansicht. */}
-      {line && (
-        <div className="objinfo-field">
-          <span className="objinfo-flabel">{t("objinfo.sectionLine.planUnderlay")}</span>
-          <Dropdown
-            value={level.planUnderlayId ?? ""}
-            onChange={(v) => host.onSetSectionLinePatch({ planUnderlayId: v || undefined })}
-            options={[
-              { value: "", label: t("objinfo.sectionLine.planUnderlay.none") },
-              ...storeProject.drawingLevels
-                .filter((l) => l.kind === "floor")
-                .map((l) => ({ value: l.id, label: l.name })),
-            ]}
-            title={t("objinfo.sectionLine.planUnderlay")}
-            width={150}
-          />
-        </div>
-      )}
 
       {/* Löschen: linePoints zurücksetzen (die Ebene bleibt bestehen). */}
       <button type="button" className="objinfo-btn" onClick={() => host.onDeleteSectionLine()}>

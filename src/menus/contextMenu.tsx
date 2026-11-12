@@ -15,6 +15,8 @@ import { flattenCategories } from "../model/types";
 import { findCategory } from "../model/layers";
 import { MenuIcon } from "../ui/ContextMenu";
 import type { ContextMenuItem } from "../ui/ContextMenu";
+import { getState } from "../state/appStore";
+import { showAsTraceAction } from "../state/traceActions";
 
 /** Offenes Kontextmenü (genau eines). `x/y` = Anker in Viewport-Px. */
 export type MenuState =
@@ -254,6 +256,13 @@ function levelMenuItems(id: string, a: MenuActions): ContextMenuItem[] {
       label: t("ctx.levelSettings"),
       icon: <MenuIcon name="settings" />,
       onClick: () => a.openLevelEditor(id),
+    },
+    // [205] Pausfolie: diese Ebene gedämpft hinter die aktive Ansicht legen (Archicad „Als Referenz zeigen").
+    {
+      label: t("trace.showAs"),
+      icon: <MenuIcon name="layers" />,
+      disabled: id === getState().activeLevelId || !!a.project.drawingLevels.find((l) => l.id === id)?.layoutId,
+      onClick: () => showAsTraceAction(id),
     },
     { divider: true },
     {

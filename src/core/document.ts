@@ -191,7 +191,7 @@ export type QueryName =
   | "drawingLines"
   | "drawingPrims"
   | "levelMarkers"
-  | "planUnderlay"
+  | "tracePlan"
   | "sectionPlan"
   | "elevationPlan"
   | "selectionHighlight"

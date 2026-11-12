@@ -60,7 +60,8 @@ export type ShortcutId =
   | "showAllLayers"
   | "fitAll"
   | "fitSelection"
-  | "isolateLayer";
+  | "isolateLayer"
+  | "toggleTrace";
 
 export type ShortcutCategory =
   | "general"
@@ -233,6 +234,8 @@ export const SHORTCUT_DEFS: ShortcutDef[] = [
   { id: "fitSelection", category: "navigation", labelKey: "shortcut.fitSelection", defaultCombo: "mod+shift+f" },
   // [192] Ebenen schnell schalten (Cmd/Ctrl+Shift+I ist der Boolean-Schnitt, daher L = Layer).
   { id: "isolateLayer", category: "navigation", labelKey: "shortcut.isolateLayer", defaultCombo: "mod+shift+l" },
+  // [205] Pausfolie ein/aus (Archicad „Referenz ein/aus"); T wie Trace, frei neben den übrigen Cmd+Shift-Kürzeln.
+  { id: "toggleTrace", category: "navigation", labelKey: "shortcut.toggleTrace", defaultCombo: "mod+shift+t" },
 ];
 
 const DEFS_BY_ID = new Map<ShortcutId, ShortcutDef>(SHORTCUT_DEFS.map((d) => [d.id, d]));
