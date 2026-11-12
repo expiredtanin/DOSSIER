@@ -159,6 +159,13 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   `kennzahlen.rs`), Tabelle GF = NGF + KF (`flaechen.rs`); im Testgebäude 12 × 10 m: Leiste GF 112.5 m², Tabelle 127.7 m², ÜZ ebenso
   verschieden. Leiste aus der Flächentabelle rechnen (GV ist seit [206] gleich). · S
 
+- ✓ **[229]** Cycles-Rendering: Streifen/Dreiecke auf der Hauptdachfläche (12.11., Maintainer, Musterhaus komplex Iso). Ursache: Das GLB hat keine
+  UVs; der Normal-Map-Knoten (Tangentenraum) bekam je Dreieck einen anderen Tangentenrahmen und zeichnete die Gauben-Fan-Triangulierung als
+  helle/dunkle Diagonalen. Nicht im Netz: GLB geprüft (Normalen der Dachdreiecke an der Oberseite max. 0.0002 rad neben der Flächennormalen,
+  keine verdrehte Wicklung, Schichten 12 mm Abstand ohne Koplanarität); Rendern ohne Normalenkarte beseitigt es. Lösung `render_dossier.py`
+  `add_textures`: keine Normalenkarte, stattdessen Rauigkeitskarte als Höhenfeld (Bump, Stärke 0.3, rahmenfrei). Test:
+  `blenderRender.test.ts` (Skript ohne Normal-Map-Knoten). Geprüft: echter Lauf `bpy` 5.3 (CPU) vorher/nachher. Offen: Mac/Blender 3.6/4.x;
+  echte Normalenkarten bräuchten UVs im GLB-Export. · S
 ### Phase 3 (27.11.–3.12.): Vorprojekt
 - ○ **[209]** Kostenschätzung grob (Vorprojekt ±15–25 %): Kennwerte je m³ GV (SIA 416) bzw. je m² GF und eBKP-H-Hauptgruppen,
   Kennwert-Tabelle im Projekt editierbar, Ergebnis als Tabelle/Layout-Element und CSV. · M
