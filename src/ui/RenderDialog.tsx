@@ -25,6 +25,7 @@ import { getBlenderPath, setBlenderPath } from "../state/blenderSettings";
 import { buildPackage, currentRenderCamera, packageAsZip, renderHost, renderWithBlender } from "../state/renderAction";
 import { openExternalUrl } from "../native/blender";
 import { saveBinaryFile } from "../native/saveFile";
+import { defaultTargetLayout, placeImageOnLayout } from "../state/layoutImageActions";
 
 type SizeId = "hd" | "uhd" | "a4" | "a3" | "a2" | "custom";
 const SIZES: Record<Exclude<SizeId, "custom">, () => { width: number; height: number }> = {
@@ -64,6 +65,8 @@ export const RenderDialogHost = memo(function RenderDialogHost() {
   const [png, setPng] = useState<Uint8Array | null>(null);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const abort = useRef<AbortController | null>(null);
+  // [208] Ziel-Blatt für „Ins Layout einsetzen" (vorgewählt: das offene Blatt).
+  const [layoutTarget, setLayoutTarget] = useState("");
 
   useEffect(() => {
     setRenderDialogOpener(() => {
@@ -77,6 +80,7 @@ export const RenderDialogHost = memo(function RenderDialogHost() {
       setMessage("");
       setPng(null);
       setHost(undefined);
+      setLayoutTarget(defaultTargetLayout(st.project, st.activeLevelId)?.id ?? "");
       setOpen(true);
       void renderHost().then(setHost, () => setHost(null));
     });
@@ -200,6 +204,16 @@ export const RenderDialogHost = memo(function RenderDialogHost() {
       setPhase("error");
       setMessage(t("render.error", { message: err instanceof Error ? err.message : String(err) }));
     }
+  };
+
+  // [208] Rendering als Bild aufs gewählte Blatt (mittig, Seitenverhältnis gehalten, volle Auflösung).
+  const placeInLayout = () => {
+    if (!png) return;
+    const st = getState();
+    const layout = (st.project.layouts ?? []).find((l) => l.id === layoutTarget);
+    const name = `${(st.project.name || "projekt").replace(/[^\w.-]+/g, "_")}-rendering.png`;
+    if (layout && placeImageOnLayout(layout.id, name, png)) st.notify(t("render.toLayout.done", { name: layout.name }), "info");
+    else st.notify(t("render.toLayout.none"), "warning");
   };
 
   const savePng = async () => {
@@ -326,6 +340,18 @@ export const RenderDialogHost = memo(function RenderDialogHost() {
             <section className="imp-section" data-testid="render-result">
               <div className="imp-note">{t("render.done", { width: dims.width, height: dims.height })}</div>
               <img src={imageUrl} alt={t("render.title")} style={{ maxWidth: "100%", maxHeight: 360, display: "block", marginTop: 6 }} />
+              {(getState().project.layouts ?? []).length > 0 && (
+                <label style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 8 }}>
+                  <span>{t("render.toLayout.target")}</span>
+                  <select className="imp-select" data-testid="render-layout-target" value={layoutTarget} onChange={(e) => setLayoutTarget(e.target.value)}>
+                    {(getState().project.layouts ?? []).map((l) => (
+                      <option key={l.id} value={l.id}>
+                        {l.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
             </section>
           )}
 
@@ -349,6 +375,15 @@ export const RenderDialogHost = memo(function RenderDialogHost() {
             <>
               <button className="imp-btn" onClick={() => setPhase("setup")}>
                 {t("render.again")}
+              </button>
+              <button
+                className="imp-btn"
+                data-testid="render-to-layout"
+                disabled={(getState().project.layouts ?? []).length === 0}
+                title={(getState().project.layouts ?? []).length === 0 ? t("render.toLayout.none") : undefined}
+                onClick={placeInLayout}
+              >
+                {t("render.toLayout")}
               </button>
               <button className="imp-btn primary" data-testid="render-save" onClick={() => void savePng()}>
                 {t("render.save")}

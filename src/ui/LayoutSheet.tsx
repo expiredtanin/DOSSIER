@@ -15,6 +15,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent, ReactNode, RefObject } from "react";
 import type {
   Layout,
+  LayoutImage,
   LayoutLegend,
   LayoutTitleBlock,
   LayoutOrientation,
@@ -28,6 +29,9 @@ import type {
 import { createTable, PX_PER_M, sheetTables, TABLE_SOURCES, snapshotMono, snapshotOverrideRuleIds, snapshotTemplate, tableSourceLabel, viewportLevelPlan } from "../core";
 import type { TableOut } from "../core";
 import { SheetTableHud } from "./SheetTableHud";
+import { SheetImageHud } from "./SheetImageHud";
+import { createLayoutImage, imageAspect, imageGeometry } from "../model/layoutImages";
+import { posterHeaderItems, viewportScaleLabel } from "../model/posterTemplates";
 import { planToPrintSvg } from "../export/planToPrintSvg";
 import { legendPlan, legendPrintSvg } from "../export/legendSvg";
 import { legendBox, legendEntries, legendKeysOfViewports, type LegendKind } from "../analysis/legend";
@@ -54,6 +58,7 @@ import {
 } from "./layoutSheetMath";
 import type { PlanSelection, PlanViewHandle } from "../views/plan/PlanView";
 import { t } from "../i18n";
+import { getState } from "../state/appStore";
 
 // ── Geteilter Render-Kern ─────────────────────────────────────────────────────
 
@@ -231,6 +236,11 @@ export interface LayoutSheetHandlers {
   /** Ändert eine Tabelle (Teil-Patch; gleiche `coalesceKey` fassen sich zu einem Undo-Schritt zusammen). */
   onPatchTable: (tableId: string, patch: Partial<Omit<LayoutTable, "id">>, coalesceKey?: string) => void;
   onRemoveTable: (tableId: string) => void;
+  /** Setzt ein Bild (PNG/JPEG) auf das Blatt ([208]). */
+  onAddImage: (image: LayoutImage) => void;
+  /** Ändert ein Bild (Lage, Breite, Zuschnitt); gleiche `coalesceKey` = ein Undo-Schritt. */
+  onPatchImage: (imageId: string, patch: Partial<Omit<LayoutImage, "id">>, coalesceKey?: string) => void;
+  onRemoveImage: (imageId: string) => void;
   /**
    * [137] Schriftfeld bearbeiten: Blattname/Plan-Nr./Index am Blatt, Projekt/Bearbeiter/Datum am Master
    * (gleiche `coalesceKey` = ein Undo-Schritt beim Tippen).
@@ -313,6 +323,10 @@ export function LayoutSheetPane({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedLegendId, setSelectedLegendId] = useState<string | null>(null);
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
+  // Bilder ([208]): Auswahl und laufendes Verschieben/Skalieren (Ghost-Rahmen in mm).
+  const [selectedImageId, setSelectedImageId] = useState<string | null>(null);
+  const [imagePreview, setImagePreview] = useState<{ id: string; rect: RectMm } | null>(null);
+  const fileRef = useRef<HTMLInputElement | null>(null);
   // [137] Schriftfeld angeklickt → Felder bearbeiten.
   const [titleBlockSelected, setTitleBlockSelected] = useState(false);
   // Tabellen-Verschiebung läuft (Versatz in mm), sonst null.
@@ -337,12 +351,15 @@ export function LayoutSheetPane({
   const tables = useMemo(() => sheetTables(project, layout.id), [project, layout.id]);
   const layoutTables = layout.tables ?? [];
   const selectedTable = layoutTables.find((tb) => tb.id === selectedTableId) ?? null;
+  const layoutImages = layout.images ?? [];
+  const selectedImage = layoutImages.find((i) => i.id === selectedImageId) ?? null;
 
   // Gelöschter Viewport / anderes Blatt → Auswahl und laufendes Platzieren verwerfen.
   useEffect(() => {
     setSelectedId(null);
     setSelectedLegendId(null);
     setSelectedTableId(null);
+    setSelectedImageId(null);
     setTitleBlockSelected(false);
     setPlacing(false);
     setPendingRect(null);
@@ -357,14 +374,20 @@ export function LayoutSheetPane({
 
   // Entf löscht den gewählten Viewport, Escape hebt Auswahl/Platzieren auf (nicht in Eingabefeldern).
   useEffect(() => {
-    if (!selectedVp && !placing && !selectedTable) return;
+    if (!selectedVp && !placing && !selectedTable && !selectedImage) return;
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement | null;
       if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return;
       if (e.key === "Escape") {
         setSelectedId(null);
         setSelectedTableId(null);
+        setSelectedImageId(null);
         setPlacing(false);
+      } else if ((e.key === "Delete" || e.key === "Backspace") && selectedImage && !selectedVp && !selectedTable) {
+        e.preventDefault();
+        e.stopPropagation();
+        handlers.onRemoveImage(selectedImage.id);
+        setSelectedImageId(null);
       } else if ((e.key === "Delete" || e.key === "Backspace") && selectedTable && !selectedVp) {
         e.preventDefault();
         e.stopPropagation();
@@ -379,7 +402,7 @@ export function LayoutSheetPane({
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [selectedVp, selectedTable, placing, handlers]);
+  }, [selectedVp, selectedTable, selectedImage, placing, handlers]);
 
   // Client-Pixel → Blatt-mm über die Bildschirm-Matrix der Blatt-Gruppe (enthält Pan/Zoom).
   const toMm = (clientX: number, clientY: number): { xMm: number; yMm: number } | null => {
@@ -466,6 +489,60 @@ export function LayoutSheetPane({
     window.addEventListener("pointercancel", up);
   };
 
+  // Bild verschieben (Körper) oder an der unteren rechten Ecke skalieren (Seitenverhältnis bleibt): Ghost live,
+  // beim Loslassen ein Patch (auf 0.1 mm).
+  const startImageDrag = (e: ReactPointerEvent<SVGElement>, img: LayoutImage, handle: "body" | "se") => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    e.preventDefault();
+    const grab = toMm(e.clientX, e.clientY);
+    if (!grab) return;
+    const aspect = imageAspect(img);
+    let last: RectMm = { xMm: img.xMm, yMm: img.yMm, widthMm: img.widthMm, heightMm: img.heightMm };
+    const move = (ev: PointerEvent) => {
+      const mm = toMm(ev.clientX, ev.clientY);
+      if (!mm) return;
+      const dx = mm.xMm - grab.xMm;
+      const dy = mm.yMm - grab.yMm;
+      if (handle === "body") {
+        last = { xMm: img.xMm + dx, yMm: img.yMm + dy, widthMm: img.widthMm, heightMm: img.heightMm };
+      } else {
+        const w = Math.max(MIN_VP_MM, img.widthMm + dx);
+        last = { xMm: img.xMm, yMm: img.yMm, widthMm: w, heightMm: w / aspect };
+      }
+      setImagePreview({ id: img.id, rect: last });
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+      setImagePreview(null);
+      if (last.xMm === img.xMm && last.yMm === img.yMm && last.widthMm === img.widthMm) return;
+      handlers.onPatchImage(img.id, { xMm: round1(last.xMm), yMm: round1(last.yMm), widthMm: round1(last.widthMm), heightMm: round1(last.heightMm) });
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+  };
+
+  const imageRect = (img: LayoutImage): RectMm =>
+    imagePreview && imagePreview.id === img.id ? imagePreview.rect : { xMm: img.xMm, yMm: img.yMm, widthMm: img.widthMm, heightMm: img.heightMm };
+
+  // Bilddatei gewählt → mittig aufs Blatt, im Seitenverhältnis ([208]). Format erkennt der Kern am Dateikopf.
+  const addImageFile = async (file: File) => {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const img = createLayoutImage(`img-${Date.now()}`, file.name, bytes, sheet, file.type === "image/jpeg" ? "image/jpeg" : "image/png");
+    if (!img) {
+      getState().notify(t("sheetImage.invalid"), "warning");
+      return;
+    }
+    handlers.onAddImage(img);
+    setSelectedImageId(img.id);
+    setSelectedId(null);
+    setSelectedTableId(null);
+    setSelectedLegendId(null);
+  };
+
   const displayRect = (vp: LayoutViewport): RectMm =>
     preview && preview.drag.mode === "edit" && preview.drag.id === vp.id ? preview.rect : vpRect(vp);
 
@@ -482,6 +559,28 @@ export function LayoutSheetPane({
         <rect x={0} y={0} width={sheet.w} height={sheet.h} fill="#ffffff" stroke="rgba(26,26,24,0.25)" strokeWidth={hair} pointerEvents="none" />
         {drawBorder && (
           <rect x={5} y={5} width={sheet.w - 10} height={sheet.h - 10} fill="none" stroke="#111111" strokeWidth={0.35} pointerEvents="none" />
+        )}
+        {master?.posterHeader && (
+          <g pointerEvents="none" data-poster-header>
+            {posterHeaderItems(project, layout, master, sheet).map((it, i) =>
+              it.kind === "rect" ? (
+                <rect key={i} x={it.x} y={it.y} width={it.w} height={it.h} fill="none" stroke="#111111" strokeWidth={it.stroke} />
+              ) : (
+                <text
+                  key={i}
+                  x={it.x}
+                  y={it.y}
+                  fontSize={it.sizeMm}
+                  fontFamily="Helvetica, Arial, sans-serif"
+                  fontWeight={it.bold ? "bold" : "normal"}
+                  textAnchor={it.align === "center" ? "middle" : it.align === "right" ? "end" : "start"}
+                  fill="#111111"
+                >
+                  {it.text}
+                </text>
+              ),
+            )}
+          </g>
         )}
         {master && (
           <g pointerEvents="none">
@@ -519,6 +618,31 @@ export function LayoutSheetPane({
             </g>
           );
         })}
+        {/* Bilder ([208]): über den Viewports, unter Legenden und Tabellen. */}
+        {layoutImages.map((img) => {
+          const r = imageRect(img);
+          const g = imageGeometry({ ...img, xMm: r.xMm, yMm: r.yMm, widthMm: r.widthMm, heightMm: r.heightMm });
+          return (
+            <g key={img.id} data-image-id={img.id}>
+              <svg x={g.clip.x} y={g.clip.y} width={g.clip.w} height={g.clip.h} viewBox={`${g.clip.x} ${g.clip.y} ${g.clip.w} ${g.clip.h}`} overflow="hidden" pointerEvents="none">
+                <image href={img.src} x={g.draw.x} y={g.draw.y} width={g.draw.w} height={g.draw.h} preserveAspectRatio="none" />
+              </svg>
+              {img.id === selectedImageId && (
+                <rect {...rectAttrs(r)} fill="none" stroke={ACCENT} strokeWidth={hair * 1.5} pointerEvents="none" data-image-selected />
+              )}
+            </g>
+          );
+        })}
+        {/* Massstab unter jedem Viewport (Master „Massstabsangaben"). */}
+        {master?.viewportScaleLabels &&
+          layout.viewports.map((vp) => {
+            const l = viewportScaleLabel(project, vp, sheet);
+            return l ? (
+              <text key={`sl-${vp.id}`} x={l.x} y={l.y} fontSize={l.sizeMm} fontFamily="Helvetica, Arial, sans-serif" fill="#111111" pointerEvents="none" data-scale-label>
+                {l.text}
+              </text>
+            ) : null;
+          })}
         {(layout.legends ?? []).map((lg) => {
           const box = legendBox(project, layout, lg);
           return (
@@ -608,6 +732,42 @@ export function LayoutSheetPane({
             ))}
           </g>
         )}
+        {/* Gewähltes Bild: Körper verschieben, Ecke unten rechts skalieren. */}
+        {selectedImage && editable && (
+          <g>
+            <rect
+              {...rectAttrs(imageRect(selectedImage))}
+              fill="transparent"
+              style={{ cursor: "move" }}
+              data-image-body
+              onPointerDown={(e) => startImageDrag(e, selectedImage, "body")}
+            />
+            <rect
+              x={imageRect(selectedImage).xMm + imageRect(selectedImage).widthMm - grip / 2}
+              y={imageRect(selectedImage).yMm + imageRect(selectedImage).heightMm - grip / 2}
+              width={grip}
+              height={grip}
+              fill="#ffffff"
+              stroke={ACCENT}
+              strokeWidth={hair * 1.5}
+              style={{ cursor: "nwse-resize" }}
+              data-image-grip="se"
+              onPointerDown={(e) => startImageDrag(e, selectedImage, "se")}
+            />
+          </g>
+        )}
+        {/* Hilfslinien des Gestaltungsrasters ([208]): nur am Bildschirm, nie im Druck. */}
+        {(master?.guides ?? []).length > 0 && (
+          <g pointerEvents="none" data-guides>
+            {(master?.guides ?? []).map((gd, i) =>
+              gd.axis === "x" ? (
+                <line key={i} x1={gd.posMm} y1={0} x2={gd.posMm} y2={sheet.h} stroke="#06b6d4" strokeWidth={hair} strokeDasharray={`${hair * 6} ${hair * 4}`} opacity={0.7} />
+              ) : (
+                <line key={i} x1={0} y1={gd.posMm} x2={sheet.w} y2={gd.posMm} stroke="#06b6d4" strokeWidth={hair} strokeDasharray={`${hair * 6} ${hair * 4}`} opacity={0.7} />
+              ),
+            )}
+          </g>
+        )}
         {/* Viewport aufziehen: das ganze Blatt fängt den Zug. */}
         {placing && editable && (
           <rect
@@ -667,10 +827,15 @@ export function LayoutSheetPane({
       const onTitle = !tableHit && !lg && !!master && !!handlers.onPatchTitleBlock &&
         mm.xMm >= tbb.xMm && mm.xMm <= tbb.xMm + tbb.widthMm && mm.yMm >= tbb.yMm && mm.yMm <= tbb.yMm + tbb.heightMm;
       setTitleBlockSelected(onTitle);
-      const hit = tableHit || lg || onTitle ? null : pickViewport(layout.viewports, mm.xMm, mm.yMm, 0);
+      const imgHit = tableHit || lg || onTitle
+        ? undefined
+        : [...layoutImages].reverse().find((i) => mm.xMm >= i.xMm && mm.xMm <= i.xMm + i.widthMm && mm.yMm >= i.yMm && mm.yMm <= i.yMm + i.heightMm);
+      setSelectedImageId(imgHit ? imgHit.id : null);
+      const hit = tableHit || lg || onTitle || imgHit ? null : pickViewport(layout.viewports, mm.xMm, mm.yMm, 0);
       setSelectedId(hit ? hit.id : null);
     } else {
       setSelectedId(null);
+      setSelectedImageId(null);
       setSelectedTableId(null);
       setSelectedLegendId(null);
       setTitleBlockSelected(false);
@@ -737,6 +902,21 @@ export function LayoutSheetPane({
             <option key={src} value={src}>{tableSourceLabel(src)}</option>
           ))}
         </select>
+        <button className="nav-add" data-add-image disabled={toolInputActive} title={t("sheetImage.add")} onClick={() => fileRef.current?.click()}>
+          ＋ {t("sheetImage.add")}
+        </button>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/png,image/jpeg"
+          style={{ display: "none" }}
+          data-testid="sheet-image-input"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            e.target.value = "";
+            if (f) void addImageFile(f);
+          }}
+        />
         <span style={{ flex: 1 }} />
         <button className="nav-add" onClick={() => planViewRef.current?.fit()} title={t("layouts.fit")}>
           {t("layouts.fit")}
@@ -833,6 +1013,18 @@ export function LayoutSheetPane({
             onRemove={() => {
               handlers.onRemoveLegend(selectedLegend.id);
               setSelectedLegendId(null);
+            }}
+          />
+        )}
+
+        {/* Eigenschaften des gewählten Bilds ([208]). */}
+        {selectedImage && !selectedVp && !selectedTable && (
+          <SheetImageHud
+            image={selectedImage}
+            onPatch={(patch) => handlers.onPatchImage(selectedImage.id, patch, `sheetImage:${selectedImage.id}`)}
+            onRemove={() => {
+              handlers.onRemoveImage(selectedImage.id);
+              setSelectedImageId(null);
             }}
           />
         )}

@@ -5,9 +5,10 @@ import { addItems, fieldOps, patchItem, patchItems, removeItems } from "../../co
 import { t } from "../../i18n";
 import { createLayout, createLayoutFolder, createMasterLayout, deleteFolder as deleteLayoutFolder, deleteMasterFolder, moveLayoutToFolder, moveFolderToFolder, createSheetLevel } from "../../model/layoutModel";
 import { folderPdfBytes } from "../../export/layoutPdf";
-import { addPublishSetOps, deletePublishSetOps, patchPublishSetOps, publishSet } from "../publishActions";
+import { addPublishSetOps, addWbwSetOps, deletePublishSetOps, patchPublishSetOps, publishSet, setCompetitionOps } from "../publishActions";
 import { openLayoutTab } from "../tabNavigation";
 import { saveBinaryFile } from "../../native/saveFile";
+import { createPosterMaster, findPosterMaster, posterTemplate } from "../../model/posterTemplates";
 import type { FlatHostOpts, HostPart } from "./types";
 
 export function buildLayoutsHost(c: FlatHostOpts) {
@@ -105,10 +106,15 @@ export function buildLayoutsHost(c: FlatHostOpts) {
     },
     onCreateLayout: (opts) => {
       const id = `lay-${Date.now()}`;
+      // Plakat-Vorlage ([208]): der Master der Vorlage wird angelegt, falls das Projekt noch keinen hat.
+      const tpl = opts.posterTemplate ? posterTemplate(opts.posterTemplate) : undefined;
+      const posterMaster = tpl ? (findPosterMaster(project, tpl.key) ?? createPosterMaster(`mas-${tpl.key}`, tpl)) : undefined;
+      const newMaster = posterMaster && !findPosterMaster(project, posterMaster.template ?? "") ? posterMaster : undefined;
+      const masterId = posterMaster?.id ?? opts.masterId;
       // Bei gebundenem Master erbt das Blatt dessen Papier/Ausrichtung/Grösse.
-      const master = opts.masterId
+      const master = posterMaster ?? (opts.masterId
         ? (project.masterLayouts ?? []).find((m) => m.id === opts.masterId)
-        : undefined;
+        : undefined);
       const paper = master?.paper ?? opts.paper;
       const orientation = master?.orientation ?? opts.orientation;
       const customWidthMm = master ? master.customWidthMm : opts.customWidthMm;
@@ -116,13 +122,17 @@ export function buildLayoutsHost(c: FlatHostOpts) {
       const lay = createLayout(id, t("layouts.defaultName"), paper, orientation);
       const full = {
         ...lay,
-        ...(opts.masterId ? { masterId: opts.masterId } : {}),
+        ...(masterId ? { masterId } : {}),
         ...(opts.folderId ? { folderId: opts.folderId } : {}),
         ...(customWidthMm !== undefined && customHeightMm !== undefined
           ? { customWidthMm, customHeightMm }
           : {}),
       };
-      applyChange([...addItems("layouts", [full]), ...addItems("drawingLevels", [createSheetLevel(`sheet-${id}`, full)])]);
+      applyChange([
+        ...(newMaster ? addItems("masterLayouts", [newMaster]) : []),
+        ...addItems("layouts", [full]),
+        ...addItems("drawingLevels", [createSheetLevel(`sheet-${id}`, full)]),
+      ]);
       return id;
     },
     onCreateMasterLayout: (opts) => {
@@ -163,6 +173,12 @@ export function buildLayoutsHost(c: FlatHostOpts) {
       return id;
     },
     onPatchPublishSet: (id, patch) => applyChange((p) => patchPublishSetOps(p, id, patch), `pubset-${id}`),
+    onSetCompetition: (patch) => applyChange((p) => setCompetitionOps(p, patch), "competition"),
+    onAddWbwSet: () => {
+      const id = `pubset-${Date.now()}`;
+      applyChange((p) => addWbwSetOps(p, id));
+      return id;
+    },
     onSetProjectNumber: (value) => applyChange((p) => fieldOps(p, "projectNumber", value.trim() ? value : undefined), "projectNumber"),
     onDeletePublishSet: (id) => applyChange((p) => deletePublishSetOps(p, id)),
     onPublishSet: (id) => {

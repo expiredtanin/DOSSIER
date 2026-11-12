@@ -16,6 +16,8 @@ import "svg2pdf.js";
 import type { Plan } from "../plan/generatePlan";
 import { planToRenderScene } from "../plan/toRenderScene";
 import { sceneToPrintSvg } from "./sceneToPrintSvg";
+import type { Project } from "../model/types";
+import { finishPdfBytes, pdfInfoFields } from "./pdfInfo";
 
 /** Unterstützte Papierformate (Blattmasse in mm, Hochformat-Basis). */
 export type PaperFormat = "a4" | "a3";
@@ -42,6 +44,8 @@ export interface ExportPdfOptions {
   titleBlock?: boolean;
   /** Dateiname des Downloads (ohne/inkl. .pdf). */
   fileName?: string;
+  /** Wettbewerb ([208]): bei anonymer Abgabe nur das Kennwort als Titel, keine Erzeuger-/Datumsangaben im PDF. */
+  competition?: Project["competition"];
 }
 
 /** Blattmasse (mm) nach Format + Ausrichtung. */
@@ -90,6 +94,8 @@ export async function buildPlanPdf(
   // und deckungsgleich mit der Blattgröße; svg2pdf bildet sie 1:1 auf das mm-Ziel
   // (Blattbreite/-höhe) ab.
   await doc.svg(print.svg, { x: 0, y: 0, width: pageW, height: pageH });
+  // Info-Wörterbuch ([208]): anonym nur das Kennwort.
+  doc.setProperties(pdfInfoFields({ name: opts.subtitle ?? opts.title, competition: opts.competition }));
 
   if (opts.titleBlock ?? true) {
     drawTitleBlock(doc, pageW, pageH, opts);
@@ -149,5 +155,16 @@ export async function savePlanPdf(
 ): Promise<void> {
   const doc = await buildPlanPdf(plan, opts);
   const name = (opts.fileName ?? "grundriss").replace(/\.pdf$/i, "");
+  if (opts.competition?.anonymous) {
+    // doc.save() schreibt Producer/Datum selbst; anonym darum über die nachbearbeiteten Bytes.
+    const bytes = finishPdfBytes({ competition: opts.competition }, new Uint8Array(doc.output("arraybuffer")));
+    const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: "application/pdf" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${name}.pdf`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    return;
+  }
   doc.save(`${name}.pdf`);
 }

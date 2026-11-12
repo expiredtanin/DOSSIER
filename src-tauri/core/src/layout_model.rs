@@ -106,6 +106,14 @@ pub struct TitleBlock {
     pub date: String,
     pub author: String,
     pub plan_number: String,
+    /// Kennwort der Abgabe ([208], `Project.competition.keyword`), sonst leer.
+    pub keyword: String,
+    /// Anonyme Abgabe ([208]): `project_name` ist das Kennwort, `author` leer.
+    pub anonymous: bool,
+    /// „Plan x/n" ([208]): Stelle des Blatts unter den Blättern mit Plakat-Kopfzeile seines Masters
+    /// (ohne solchen Master: unter allen Blättern des Projekts).
+    pub plan_index: usize,
+    pub plan_count: usize,
 }
 
 /// Titelblock mit Master-Vererbung (`resolveTitleBlock`): `layout` mit `id`/`name`/`planNumber` und
@@ -134,13 +142,37 @@ pub fn resolve_title_block(root: &Map<String, Value>, layout: &Value, master: &V
     let idx = list(root, "layouts").iter().position(|l| l.get("id").and_then(Value::as_str) == layout_id && layout_id.is_some());
     let auto = format!("{:02}", idx.unwrap_or(0) + 1);
     let text = |v: Option<&Value>| v.and_then(Value::as_str).unwrap_or("").to_string();
+    // Wettbewerb ([208])
+    let comp = root.get("competition").filter(|v| v.is_object());
+    let keyword = non_empty(comp.and_then(|c| c.get("keyword"))).unwrap_or_default();
+    let anonymous = comp.and_then(|c| c.get("anonymous")).and_then(Value::as_bool).unwrap_or(false);
+    // „Plan x/n": unter den Blättern, deren Master die Plakat-Kopfzeile trägt (hat das Blatt keinen solchen Master: alle)
+    let masters = list(root, "masterLayouts");
+    let poster_master = |l: &Value| {
+        let mid = l.get("masterId").and_then(Value::as_str);
+        mid.is_some()
+            && masters
+                .iter()
+                .any(|m| m.get("id").and_then(Value::as_str) == mid && m.get("posterHeader").and_then(Value::as_bool).unwrap_or(false))
+    };
+    let all = list(root, "layouts");
+    let (plan_index, plan_count) = if poster_master(layout) {
+        let group: Vec<&Value> = all.iter().filter(|l| poster_master(l)).collect();
+        (group.iter().position(|l| l.get("id").and_then(Value::as_str) == layout_id && layout_id.is_some()).map_or(0, |i| i + 1), group.len())
+    } else {
+        (idx.map_or(0, |i| i + 1), all.len())
+    };
     TitleBlock {
-        project_name: non_empty(tb_get("projectName")).unwrap_or_else(|| text(root.get("name"))),
+        project_name: if anonymous { keyword.clone() } else { non_empty(tb_get("projectName")).unwrap_or_else(|| text(root.get("name"))) },
         sheet_name: non_empty(tb_get("sheetName")).unwrap_or_else(|| text(layout.get("name"))),
         scale: non_empty(tb_get("scale")).unwrap_or(scale_text),
         date: non_empty(tb_get("date")).unwrap_or_else(|| today.to_string()),
-        author: non_empty(tb_get("author")).unwrap_or_default(),
+        author: if anonymous { String::new() } else { non_empty(tb_get("author")).unwrap_or_default() },
         plan_number: non_empty(layout.get("planNumber")).unwrap_or(auto),
+        keyword,
+        anonymous,
+        plan_index,
+        plan_count,
     }
 }
 
@@ -189,6 +221,10 @@ mod tests {
                 date: "2026-10-29".into(),
                 author: String::new(),
                 plan_number: "02".into(),
+                keyword: String::new(),
+                anonymous: false,
+                plan_index: 2,
+                plan_count: 2,
             }
         );
         let none = resolve_title_block(&root, &json!({"id": "x", "name": "Y", "viewports": [], "planNumber": " A1 "}), &Value::Null, "d");
@@ -209,5 +245,26 @@ mod tests {
         let pages = folder_pdf_pages(&root, "f");
         let got: Vec<(usize, f64, f64)> = pages.iter().map(|p| (p.layout, p.width_mm, p.height_mm)).collect();
         assert_eq!(got, vec![(0, 297.0, 420.0), (1, 297.0, 210.0)]);
+    }
+
+    #[test]
+    fn anonym_zeigt_nur_das_kennwort() {
+        let root = obj(json!({
+            "name": "Haus Muster AG",
+            "competition": {"anonymous": true, "keyword": " FALKE 7 "},
+            "layouts": [{"id": "a", "masterId": "m"}, {"id": "b"}, {"id": "c", "masterId": "m"}],
+            "masterLayouts": [{"id": "m", "posterHeader": true, "titleBlock": {"projectName": "Büro AG", "author": "M. Muster"}}],
+        }));
+        let master = root["masterLayouts"][0].clone();
+        let layout = json!({"id": "c", "name": "Grundriss", "masterId": "m", "viewports": []});
+        let tb = resolve_title_block(&root, &layout, &master, "d");
+        assert_eq!((tb.project_name.as_str(), tb.author.as_str(), tb.keyword.as_str(), tb.anonymous), ("FALKE 7", "", "FALKE 7", true));
+        // Plan x/n zählt nur Blätter mit Plakat-Master: „c" ist das zweite von zwei
+        assert_eq!((tb.plan_index, tb.plan_count), (2, 2));
+        // nicht anonym: Name und Autor des Masters bleiben, Kennwort steht trotzdem bereit
+        let mut open = root.clone();
+        open.insert("competition".into(), json!({"anonymous": false, "keyword": "K"}));
+        let tb = resolve_title_block(&open, &layout, &master, "d");
+        assert_eq!((tb.project_name.as_str(), tb.author.as_str(), tb.keyword.as_str(), tb.anonymous), ("Büro AG", "M. Muster", "K", false));
     }
 }

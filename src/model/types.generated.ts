@@ -337,6 +337,17 @@ export type Column = {
 export type ColumnProfile = { kind: "rect"; width: number; depth: number } | { kind: "round"; radius: number };
 
 /**
+ * Wettbewerbs-Einstellung des Projekts ([208]): anonym = Kennwort statt Büro- und Projektname in Plankopf,
+ * Dateinamen und PDF-Metadaten.
+ */
+export type CompetitionSettings = {
+  /** Anonyme Abgabe: keine Büro-/Autor-Angaben in Export und Plankopf. */
+  anonymous: boolean;
+  /** Kennwort der Abgabe (steht in Plankopf und PDF-Titel). */
+  keyword: string;
+};
+
+/**
  * Ein Bauteil-Material (Component Manager) — vereint Plan-Schnittdarstellung
  * (Schraffur) und 3D-Erscheinung. Ersetzt das frühere `Material`.
  */
@@ -1833,6 +1844,8 @@ export type Layout = {
   legends?: Array<LayoutLegend>;
   /** Lebendige Tabellen auf dem Blatt ([111]); fehlt = keine. */
   tables?: Array<LayoutTable>;
+  /** Bilder auf dem Blatt ([208]): Renderings, Fotos, Luftbilder; fehlt = keine. */
+  images?: Array<LayoutImage>;
 };
 
 /**
@@ -1853,6 +1866,44 @@ export type LayoutFolder = {
    * (rückwärtskompatibel — Alt-Projekte ohne `kind` bleiben Layout-Ordner).
    */
   kind?: "layout" | "master";
+};
+
+/**
+ * Hilfslinie eines Masters ([208], Gestaltungsraster): senkrecht (`x`) oder waagrecht (`y`) in Papier-mm.
+ * Nur am Bildschirm, nie im Druck.
+ */
+export type LayoutGuide = {
+  /** "x" = senkrechte Linie bei `posMm` von links, "y" = waagrechte Linie bei `posMm` von oben. */
+  axis: string;
+  posMm: number;
+};
+
+/**
+ * Bild auf einem Layout-Blatt ([208]): PNG oder JPEG als Data-URL (gleicher Weg wie `ContextImage.src`),
+ * im Rahmen `xMm`/`yMm`/`widthMm`/`heightMm` (Papier-mm). Das Seitenverhältnis des Ausschnitts bleibt erhalten;
+ * `crop` schneidet zu (Anteile 0..1 des Originals). Im PDF wird das Original unverändert eingebettet (JPEG ohne
+ * Neukompression).
+ */
+export type LayoutImage = {
+  id: string;
+  /** Anzeigename (Dateiname). */
+  name: string;
+  /** Bildquelle als Data-URL (`data:image/png;base64,…` oder `data:image/jpeg;base64,…`). */
+  src: string;
+  /** Linke Kante auf dem Blatt (mm, von links). */
+  xMm: number;
+  /** Obere Kante auf dem Blatt (mm, von oben). */
+  yMm: number;
+  /** Breite des gezeigten Ausschnitts (mm). */
+  widthMm: number;
+  /** Höhe des gezeigten Ausschnitts (mm). */
+  heightMm: number;
+  /** Pixelbreite des Originals (aus dem Dateikopf gelesen). */
+  pixelWidth: number;
+  /** Pixelhöhe des Originals. */
+  pixelHeight: number;
+  /** Zuschnitt als Anteile des Originals (0..1); fehlt = ganzes Bild. */
+  crop?: { x: number; y: number; w: number; h: number };
 };
 
 /**
@@ -2085,6 +2136,18 @@ export type MasterLayout = {
   customWidthMm?: number;
   /** Freie Blatthöhe in mm (siehe {@link MasterLayout.customWidthMm}). */
   customHeightMm?: number;
+  /**
+   * Vorlagen-Schlüssel ([208], z. B. "poster-a1-landscape"): wiederverwendet den Master beim Anlegen weiterer Plakate.
+   */
+  template?: string;
+  /**
+   * Plakat-Kopfzeile ([208]): Band über die Satzbreite mit Kennwort-Feld, Projekttitel und „Plan x/n".
+   */
+  posterHeader?: boolean;
+  /** Massstab unter jedem Viewport ausgeben ([208]). */
+  viewportScaleLabels?: boolean;
+  /** Hilfslinien des Gestaltungsrasters ([208]), nur am Bildschirm. */
+  guides?: Array<LayoutGuide>;
 };
 
 /** [173] Darstellung der Stufen über der Schnitthöhe. */
@@ -2987,6 +3050,8 @@ export type Project = {
   publishLog?: Array<PublishLogEntry>;
   /** Projektnummer für Titelblock und Dateinamen ([79]). */
   projectNumber?: string;
+  /** Wettbewerb ([208]): anonyme Abgabe mit Kennwort. */
+  competition?: CompetitionSettings;
   /**
    * Höhe von ±0.00 (OK fertig Boden des Bezugsgeschosses, `DrawingLevel.zeroLevel`)
    * in Metern über Meer (m ü. M.), editierbar im Einstellungs-Fenster. Optional.

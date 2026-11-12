@@ -16,6 +16,7 @@ Abschnitt 3.4).
 | `exportPdf.ts` | Vektor-PDF eines Plans (Massstab, Papier, Ausrichtung) mit jsPDF und svg2pdf |
 | `layoutPdf.ts` | alle Layouts eines Ordners als Mehrseiten-PDF |
 | `pdfLayers.ts` | PDF-Ebenen (Optional Content Groups, `[80]`) |
+| `pdfInfo.ts` | PDF-Info-Wörterbuch; bei anonymer Wettbewerbs-Abgabe nur das Kennwort, Producer/Datum längengleich neutralisiert (`[208]`) |
 | `exportDxf.ts` | DXF/DWG des Grundrisses in Modellmetern; Schreiben in `src-tauri/fileio/src/export.rs` |
 | `legendSvg.ts` | Legende als Plan-/Druck-SVG (`[82]`) |
 

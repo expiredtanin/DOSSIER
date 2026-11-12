@@ -15,6 +15,7 @@ import type {
   MasterLayout,
 } from "../model/types";
 import { PAPER_FORMAT_GROUPS } from "../model/layoutModel";
+import { POSTER_TEMPLATES, posterTemplateLabel } from "../model/posterTemplates";
 
 /** Startwerte eines neuen Blatts/Masters (Grösse). */
 export interface LayoutSizeStart {
@@ -28,6 +29,8 @@ export interface LayoutSizeStart {
 export interface NewLayoutStart extends LayoutSizeStart {
   /** Gebundenes Masterlayout (erbt dessen Papier/Ausrichtung); sonst undefined. */
   masterId?: string;
+  /** Plakat-Vorlage ([208], Schlüssel aus `POSTER_TEMPLATES`): Master, Raster und Kopfzeile kommen aus der Vorlage. */
+  posterTemplate?: string;
 }
 
 type SizeMode = LayoutPaperFormat | "custom";
@@ -236,9 +239,10 @@ export function NewLayoutDialog({
   onClose: () => void;
 }) {
   const hasMasters = masters.length > 0;
-  const [source, setSource] = useState<"master" | "free">(
+  const [source, setSource] = useState<"master" | "free" | "poster">(
     hasMasters ? "master" : "free",
   );
+  const [posterKey, setPosterKey] = useState<string>("poster-a1-landscape");
   const [masterId, setMasterId] = useState<string>(masters[0]?.id ?? "");
   const [mode, setMode] = useState<SizeMode>("a4");
   const [orientation, setOrientation] = useState<LayoutOrientation>("portrait");
@@ -246,6 +250,11 @@ export function NewLayoutDialog({
   const [hMm, setHMm] = useState(297);
 
   const confirm = () => {
+    if (source === "poster") {
+      const tpl = POSTER_TEMPLATES.find((p) => p.key === posterKey) ?? POSTER_TEMPLATES[0];
+      onCreate({ posterTemplate: tpl.key, paper: tpl.paper, orientation: tpl.orientation });
+      return;
+    }
     if (source === "master" && masterId) {
       // Grösse erbt der Aufrufer vom Master; wir liefern nur die Bindung + eine
       // sinnvolle Rückfall-Grösse (A4 hoch), falls der Master unauflösbar ist.
@@ -276,9 +285,29 @@ export function NewLayoutDialog({
           />
           <span>{t("layouts.newLayout.freeSize")}</span>
         </label>
+        <label className="imp-radio">
+          <input
+            type="radio"
+            data-testid="newlayout-poster"
+            checked={source === "poster"}
+            onChange={() => setSource("poster")}
+          />
+          <span>{t("layouts.newLayout.poster")}</span>
+        </label>
       </section>
 
-      {source === "master" ? (
+      {source === "poster" ? (
+        <section className="imp-section">
+          <select className="imp-select" data-testid="newlayout-poster-select" value={posterKey} onChange={(e) => setPosterKey(e.target.value)}>
+            {POSTER_TEMPLATES.map((p) => (
+              <option key={p.key} value={p.key}>
+                {posterTemplateLabel(p)}
+              </option>
+            ))}
+          </select>
+          <div className="imp-note">{t("layouts.newLayout.posterHint")}</div>
+        </section>
+      ) : source === "master" ? (
         <section className="imp-section">
           {hasMasters ? (
             <select
