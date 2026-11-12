@@ -91,6 +91,12 @@ pub fn shift_wall(w: &mut RWall, dz: f64) {
         h.z_bottom += dz;
         h.z_top += dz;
     }
+    // [216] Körper des Bandes: Modell-Koordinaten (x, y, z), z = Höhe.
+    if let Some(b) = w.body.as_mut() {
+        for c in b.positions.chunks_exact_mut(3) {
+            c[2] += dz;
+        }
+    }
 }
 
 pub fn shift_slab(s: &mut RSlab, dz: f64) {

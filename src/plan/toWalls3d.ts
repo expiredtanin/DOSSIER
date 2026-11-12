@@ -54,7 +54,7 @@ import {
   type RVec2,
   type RWall,
 } from "./toWalls3d/shared";
-import { applyVoidMeshes, type VoidMeshes } from "./toWalls3d/voids3d";
+import { applyVoidMeshes, splitWallBodies, type VoidMeshes } from "./toWalls3d/voids3d";
 
 // Re-Export des gemeinsamen Vokabulars — externe Konsumenten (viewport/,
 // export/, toSection.ts, nativeSync.ts, …) importieren weiterhin
@@ -282,6 +282,10 @@ export function projectToModel3d(project: Project, opts: Model3dOptions = {}): R
     roofLayers: parts.roofLayers,
   };
   if (parts.voidMeshes) applyVoidMeshes(model, parts.voidMeshes);
+  // [216] Wände mit Formöffnungen: der Körper des Kerns statt der Stücke.
+  const bodies = splitWallBodies(model.walls);
+  model.walls = bodies.walls;
+  for (const m of bodies.meshes) model.meshes.push(m);
   return model;
 }
 
@@ -334,7 +338,10 @@ export function projectToModel3dParts(project: Project, opts: Model3dOptions = {
         cut += `.${i - start}m${m[0]}`;
       } else walls.push(parts.walls[i]);
     }
-    out.push(cut ? { id: `w${ns}${k}${cut}`, fixed: true, walls, meshes } : { id: `w${ns}${k}`, fixed: true, walls });
+    // [216] Wände mit Formöffnungen: der Körper des Kerns statt der Stücke.
+    const bodies = splitWallBodies(walls);
+    meshes.push(...bodies.meshes);
+    out.push(cut ? { id: `w${ns}${k}${cut}`, fixed: true, walls: bodies.walls, meshes } : meshes.length ? { id: `w${ns}${k}`, fixed: true, walls: bodies.walls, meshes } : { id: `w${ns}${k}`, fixed: true, walls: bodies.walls });
   }
   for (const [k, lists] of openingEntries) {
     const meshes = lists.flat();

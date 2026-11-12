@@ -337,6 +337,20 @@ impl Solid {
         self.0.is_empty()
     }
 
+    /// Jede Kante in `n` Teile geteilt, jede Fläche gleichmässig unterteilt (ebene Flächen bleiben eben): kleine,
+    /// gleichförmige Dreiecke vor einem Boolean, damit ein Loch in einer grossen Fläche keine langen, dünnen
+    /// Dreiecke bis in ihre Ecken erzeugt ([216]; deren Normalen sind für die Kantenerkennung zu ungenau).
+    pub fn refined(&self, n: i32) -> Solid {
+        if self.is_empty() || n <= 1 {
+            return self.clone();
+        }
+        let r = self.0.refine(n.min(24));
+        if r.status() != Error::NoError {
+            return self.clone();
+        }
+        Solid(r)
+    }
+
     pub fn volume(&self) -> f64 {
         self.0.volume()
     }

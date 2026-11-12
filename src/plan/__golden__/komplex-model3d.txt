@@ -1,43 +1,69 @@
-meshes [1962]
-meshes[].color [3] x1962
+meshes [1211]
+meshes[].color [3] x1211
 meshes[].indices [108] x6
-meshes[].indices [1152]
+meshes[].indices [1152] x3
+meshes[].indices [1224]
+meshes[].indices [1236]
 meshes[].indices [1248] x3
 meshes[].indices [12960]
+meshes[].indices [1326]
+meshes[].indices [1392]
 meshes[].indices [144] x55
 meshes[].indices [154014]
 meshes[].indices [1584]
 meshes[].indices [1716]
 meshes[].indices [180]
+meshes[].indices [2118]
+meshes[].indices [2124] x2
+meshes[].indices [2130]
 meshes[].indices [2376]
+meshes[].indices [2676] x2
 meshes[].indices [31104]
+meshes[].indices [312]
 meshes[].indices [348] x6
-meshes[].indices [36] x1861
+meshes[].indices [36] x1090
+meshes[].indices [3840]
 meshes[].indices [396]
-meshes[].indices [564] x2
+meshes[].indices [4086]
+meshes[].indices [5496]
+meshes[].indices [564] x4
 meshes[].indices [60] x9
+meshes[].indices [648]
 meshes[].indices [72]
+meshes[].indices [7332]
 meshes[].indices [7632]
 meshes[].indices [84] x2
 meshes[].indices [9288]
 meshes[].indices [96] x6
 meshes[].positions [1044] x6
+meshes[].positions [1083]
+meshes[].positions [1086] x2
+meshes[].positions [1089]
 meshes[].positions [108] x30
 meshes[].positions [1188]
 meshes[].positions [120]
+meshes[].positions [1368] x2
+meshes[].positions [162]
 meshes[].positions [16428]
 meshes[].positions [180] x9
 meshes[].positions [1890] x3
+meshes[].positions [1908]
+meshes[].positions [2031]
 meshes[].positions [216]
-meshes[].positions [24] x1829
+meshes[].positions [24] x1058
 meshes[].positions [252] x2
 meshes[].positions [264]
-meshes[].positions [288] x8
-meshes[].positions [324] x6
+meshes[].positions [2772]
+meshes[].positions [288] x10
+meshes[].positions [324] x7
+meshes[].positions [3666]
 meshes[].positions [4128]
 meshes[].positions [4746]
-meshes[].positions [576]
+meshes[].positions [576] x3
+meshes[].positions [618] x2
+meshes[].positions [663]
 meshes[].positions [7050]
+meshes[].positions [714]
 meshes[].positions [72] x2
 meshes[].positions [77523]
 meshes[].positions [78] x55
@@ -60,17 +86,17 @@ slabs[].outline [26] x5
 slabs[].outline [270] x5
 slabs[].outline [4] x49
 slabs[].outline[] [2] x2748
-walls [1273]
+walls [1192]
 walls[].arcCenter [2] x613
-walls[].color [3] x1273
-walls[].end [2] x1273
-walls[].endCut [4] x869
-walls[].holes [1] x88
+walls[].color [3] x1192
+walls[].end [2] x1192
+walls[].endCut [4] x831
+walls[].holes [1] x81
 walls[].holes [2] x25
-walls[].holes [3] x14
-walls[].layers [0] x1273
-walls[].start [2] x1273
-walls[].startCut [4] x873
-walls[].topDrop [2] x115
-walls[].topPlane [3] x271
-hash 5af7a0a70a5b3624
+walls[].holes [3] x8
+walls[].layers [0] x1192
+walls[].start [2] x1192
+walls[].startCut [4] x832
+walls[].topDrop [2] x89
+walls[].topPlane [3] x245
+hash 11d1505c4650cdb4

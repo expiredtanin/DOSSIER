@@ -357,6 +357,9 @@ mod tests {
             end_cut: None,
             joint: [false; 2],
             arc_center: None,
+            body: None,
+            no_mesh: false,
+            band: 0,
         }
     }
 

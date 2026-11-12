@@ -25,6 +25,7 @@ mod ceilings;
 mod bearing;
 mod columns;
 mod walls;
+mod wall_body;
 mod openings;
 mod stairs;
 mod roofs;

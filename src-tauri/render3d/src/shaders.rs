@@ -182,6 +182,11 @@ fn fs_main(in : VsOut) -> @location(0) vec4<f32> {
     } else if (style > 0.5) {
         albedo = clay;
     }
+    // [216] Glas (Farbe `PART_RGB[0]` der Kern-Öffnungsteile) bleibt in Weiss/Kanten/Konturen als Scheibe lesbar —
+    // sonst wirkt ein Fenster (Dachfenster) wie ein offener Schlitz.
+    if (style > 0.5 && distance(in.color, vec3<f32>(0.62, 0.76, 0.85)) < 0.01) {
+        albedo = mix(albedo, vec3<f32>(0.62, 0.76, 0.85), 0.8);
+    }
 
     var shaded = albedo * (ambient * sk.y + diffuse + fill);
 

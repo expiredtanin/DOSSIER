@@ -86,6 +86,13 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   Modell, auch Geisterschicht [180]), Puffer wiederverwenden, Draw-Calls bündeln (ein Puffer je Material/Durchgang, Instancing für
   Wiederholtes wie Fenster/Bäume), Sichtkegel-Culling, Schatten-Map nur bei Änderung von Licht/Modell, Kantenpass günstiger, LOD für
   Kontext/Gelände. Messbar machen (Bench in `dossier-cli bench` bzw. render3d-Test) und vorher/nachher belegen. Opus. · L
+- ◐ **[216]** 3D-Fehler am Musterhaus komplex (Mac-Screenshots 12.11., Stand 12.11.: umgesetzt, nur im Linux-Container per render_png geprüft): (1) Rund-/Bogenfenster: Wandloch folgt dem Umriss, keine
+  Füllkörper-Streifen, keine Stossfugen im Giebel (Körper je Band per Manifold, `core/src/model3d/wall_body.rs`, render3d `WallInput.body`);
+  (2) Flächenmuster der Wände enden am Giebel/der Dach-Unterkante und folgen dem Öffnungsumriss (`surface_pattern3d.rs`);
+  (3) Rundbogen-Leibung/Sturz ohne Streifen (mit (1)); (4) Glas bleibt in Weiss/Kanten/Konturen als Scheibe lesbar (Shader).
+  Offen: Gegenprobe auf dem Mac (Metal, Texturen); Bogenwände behalten die Füllkörper; 3D-Live-Schnitt durch ein Formfenster zeigt
+  das Rechteck-Loch; Dachmuster an Kehlen (Dach an Dach) nicht beschnitten; einzelne Wand-Körper haben noch innere Stossflächen
+  (Manifold-Vereinigung berührender Stücke, Überlappung 0,1 mm mildert es) — Gegenprobe am Mac. · M
 
 ### Phase 3 (27.11.–3.12.): Vorprojekt
 - ○ **[209]** Kostenschätzung grob (Vorprojekt ±15–25 %): Kennwerte je m³ GV (SIA 416) bzw. je m² GF und eBKP-H-Hauptgruppen,

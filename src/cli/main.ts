@@ -1032,7 +1032,11 @@ async function execute(project: Project, file: string, command: string, rest: st
       // `--grey-floor <id|Name,…>`: Geschosse grau (Zeichnungsebenen-Modus), ebenso in der Geisterschicht.
       const filter: Filter3d = { hide: hideFlagCodes(project, args), grey: hideFlagCodes(project, args, "grey"), greyFloors: greyFloorIds(project, args) };
       const ghost = ghostFilter3d(filter);
-      const model = projectToModel3d(project, { explode, hide: filter });
+      const model = {
+        ...projectToModel3d(project, { explode, hide: filter }),
+        // Flächenmuster ([100]) des Modells (render_png zeichnet sie in den Kanten-Stilen).
+        patternLines: Array.from(emitSurfacePatternLines(project, explode, filter)),
+      };
       // Geisterschicht: Modell, dazu gedämpfte 2D-Spuren und Flächenmuster (render_png `ghostDrawing`/`ghostPattern`).
       const json = ghost
         ? {

@@ -182,12 +182,12 @@ pub fn emit_opening_meshes(p: &Project, detail: f64) -> Vec<RMesh> {
 pub fn emit_opening_meshes_with(p: &Project, detail: f64, keep: &dyn Fn(&Opening) -> bool) -> Vec<RMesh> {
     let arcs: Vec<usize> = p.walls.iter().enumerate().filter(|(_, w)| crate::wall_arc::WallArc::of_wall(w).is_some()).map(|(i, _)| i).collect();
     if arcs.is_empty() {
-        return emit_opening_meshes_plain(p, detail, keep);
+        return emit_opening_meshes_plain(p, detail, keep, true);
     }
     let mut q = p.clone();
     let arc_ids: std::collections::HashSet<&str> = arcs.iter().map(|&i| p.walls[i].id.as_str()).collect();
     q.openings = p.openings.as_ref().map(|v| v.iter().filter(|o| keep(o) && !arc_ids.contains(o.host_wall_id.as_str())).cloned().collect());
-    let mut out = emit_opening_meshes_plain(&q, detail, &|_| true);
+    let mut out = emit_opening_meshes_plain(&q, detail, &|_| true, true);
     for &i in &arcs {
         let Some((arc, v)) = crate::wall_arc::unrolled_wall(&p.walls[i]) else { continue };
         q.walls = vec![v];
@@ -201,7 +201,7 @@ pub fn emit_opening_meshes_with(p: &Project, detail: f64, keep: &dyn Fn(&Opening
         };
         let (zoned, bent): (Vec<Opening>, Vec<Opening>) = own.into_iter().partition(|o| zone(o).is_some());
         q.openings = Some(bent);
-        for mut m in emit_opening_meshes_plain(&q, detail, &|_| true) {
+        for mut m in emit_opening_meshes_plain(&q, detail, &|_| true, false) {
             for c in m.positions.chunks_exact_mut(3) {
                 let w = arc.point(c[0], c[1]);
                 c[0] = w.x;
@@ -213,7 +213,7 @@ pub fn emit_opening_meshes_with(p: &Project, detail: f64, keep: &dyn Fn(&Opening
             let Some((sa, sb)) = zone(&o) else { continue };
             let (pa, u, chord) = crate::wall_arc::chord_of(&arc, sa, sb);
             q.openings = Some(vec![o]);
-            for mut m in emit_opening_meshes_plain(&q, detail, &|_| true) {
+            for mut m in emit_opening_meshes_plain(&q, detail, &|_| true, false) {
                 for c in m.positions.chunks_exact_mut(3) {
                     let t = (c[0] - sa) / (sb - sa) * chord;
                     let (x, y) = (pa.x + u.x * t - u.y * c[1], pa.y + u.y * t + u.x * c[1]);
@@ -227,12 +227,12 @@ pub fn emit_opening_meshes_with(p: &Project, detail: f64, keep: &dyn Fn(&Opening
     out
 }
 
-fn emit_opening_meshes_plain(p: &Project, detail: f64, keep: &dyn Fn(&Opening) -> bool) -> Vec<RMesh> {
+fn emit_opening_meshes_plain(p: &Project, detail: f64, keep: &dyn Fn(&Opening) -> bool, bodies: bool) -> Vec<RMesh> {
     let mut by_wall = p.openings_by_wall();
     for v in by_wall.values_mut() {
         v.retain(|o| keep(o));
     }
-    let per: Vec<WallOpeningMeshes> = p.walls.iter().map(|wall| wall_opening_meshes(p, wall, by_wall.get(wall.id.as_str()).map_or(&[][..], |v| v.as_slice()), detail)).collect();
+    let per: Vec<WallOpeningMeshes> = p.walls.iter().map(|wall| wall_opening_meshes_ex(p, wall, by_wall.get(wall.id.as_str()).map_or(&[][..], |v| v.as_slice()), detail, bodies)).collect();
     let mut out = assemble_opening_meshes(per);
     out.extend(surface_window_meshes_with(p, keep));
     out
@@ -275,6 +275,13 @@ pub(crate) fn surface_window_meshes_with(p: &Project, keep: &dyn Fn(&Opening) ->
 
 /// Einbauteile der Öffnungen `openings` (in Projekt-Reihenfolge) der Wand `wall`.
 pub(crate) fn wall_opening_meshes(p: &Project, wall: &Wall, openings: &[&Opening], detail: f64) -> WallOpeningMeshes {
+    wall_opening_meshes_ex(p, wall, openings, detail, true)
+}
+
+/// Wie [`wall_opening_meshes`]; `bodies = false` für die abgewickelte Ersatzwand einer Bogenwand: dort gibt es
+/// keinen Wandkörper nach dem Umriss ([216]), die Formöffnungen behalten ihre Füllkörper.
+pub(crate) fn wall_opening_meshes_ex(p: &Project, wall: &Wall, openings: &[&Opening], detail: f64, bodies: bool) -> WallOpeningMeshes {
+    let body_ops = if bodies { super::wall_body::body_openings(wall, openings) } else { Vec::new() };
     let mut shaped: Vec<RMesh> = Vec::new();
     let mut w = FlatWriter::new();
     w.num(detail).num(1.0);
@@ -297,7 +304,8 @@ pub(crate) fn wall_opening_meshes(p: &Project, wall: &Wall, openings: &[&Opening
             let t = *thickness.get_or_insert_with(|| p.wall_thickness(wall, 0.2));
             // Formöffnung ([G3]): Füllkörper, Rahmen und Glas entlang des Umrisses statt der Quader-Teile.
             if crate::opening_shape::is_shaped(op) {
-                shaped.extend(shaped_wall_opening_meshes(p, wall, &wr, op, [from, to, o_bottom, o_top]));
+                let with_fill = !body_ops.iter().any(|b| std::ptr::eq(*b, op));
+                shaped.extend(shaped_wall_opening_meshes_with(p, wall, &wr, op, [from, to, o_bottom, o_top], with_fill));
                 continue;
             }
             w.nums(&[from, to, o_bottom, o_top, flag(op.kind != ElementKind::Window), t]);
@@ -351,6 +359,26 @@ fn box_meshes_of_flat(buf: &[f64]) -> Vec<RMesh> {
     out
 }
 
+/// Überstand der Schneidkörper (m) bei Rahmen-Ring und Türschwelle.
+const OVER_MESH: f64 = 0.01;
+/// Knickwinkel (Grad) des Rahmen-Rings: die Facetten des Bogens glatt.
+const RING_CREASE_DEG: f64 = 20.0;
+
+/// Prisma über dem Umriss `ring` (Öffnungs-Koordinaten) quer von `n0` bis `n1`, abgebildet mit `map(u, v, n)`, als
+/// Mesh-Eingabe für [`mesh_of`] bzw. direkt als `RMesh` (Platte, Glas).
+fn prism_mesh(ring: &[crate::opening_shape::P], n0: f64, n1: f64, map: &impl Fn(f64, f64, f64) -> [f64; 3], color: Rgb) -> Option<RMesh> {
+    let m = crate::solid_bool::Mesh::prism(ring, n0, n1);
+    if m.is_empty() {
+        return None;
+    }
+    let positions: Vec<f64> = m.positions.chunks_exact(3).flat_map(|c| map(c[0], c[1], c[2])).collect();
+    Some(RMesh { crease_angle: None, positions, indices: m.indices, kind: "extrusion", color, vertex_colors: None, material_index: None, owner: Owner::None })
+}
+
+fn mesh_of(m: &RMesh) -> crate::solid_bool::Mesh {
+    crate::solid_bool::Mesh { positions: m.positions.clone(), indices: m.indices.clone() }
+}
+
 fn box_mesh(positions: [f64; 24], color: Rgb) -> RMesh {
     RMesh { crease_angle: None, positions: positions.to_vec(), indices: OPENING_BOX_TRIS.to_vec(), kind: "extrusion", color, vertex_colors: None, material_index: None, owner: Owner::None }
 }
@@ -389,7 +417,7 @@ fn shaped_fill_bands(p: &Project, wall: &Wall, op: &Opening, total: f64) -> Vec<
 /// Wandkörper einer Formöffnung als Vierecke in Öffnungskoordinaten mit Lage quer `[n0, n1]` (aussen =
 /// +total/2) und Farbe: Füllkörper je Schicht zwischen dem (geweiteten) Rechteck-Loch und dem um den
 /// Schichteinzug versetzten Umriss, Zusatzstücke [106] entlang des Umrisses (je Kante nach ihrer Seite).
-fn shaped_wall_fill(p: &Project, wall: &Wall, op: &Opening, total: f64, w: f64, h: f64) -> Vec<([crate::opening_shape::P; 4], f64, f64, Rgb)> {
+fn shaped_wall_fill(p: &Project, wall: &Wall, op: &Opening, total: f64, w: f64, h: f64, with_fill: bool) -> Vec<([crate::opening_shape::P; 4], f64, f64, Rgb)> {
     use crate::opening_shape as os;
     let Some(poly) = os::opening_outline(op, w, h) else { return Vec::new() };
     let half = total / 2.0;
@@ -397,8 +425,11 @@ fn shaped_wall_fill(p: &Project, wall: &Wall, op: &Opening, total: f64, w: f64, 
     let mut out = Vec::new();
     let mut n_hi = half;
     for b in &bands {
-        for q in os::layer_fill_quads(&poly, w, h, b.shift) {
-            out.push((q, n_hi - b.thickness, n_hi, b.color));
+        // [216] Mit Körper der Wand ([`super::wall_body`]) füllt der Wandkörper selbst bis zum Umriss.
+        if with_fill {
+            for q in os::layer_fill_quads(&poly, w, h, b.shift) {
+                out.push((q, n_hi - b.thickness, n_hi, b.color));
+            }
         }
         n_hi -= b.thickness;
     }
@@ -421,14 +452,20 @@ fn shaped_wall_fill(p: &Project, wall: &Wall, op: &Opening, total: f64, w: f64, 
 /// Anzahl der Wandkörper (Füllkörper je Schicht, Zusatzstücke) einer Formöffnung — sie stehen in
 /// [`shaped_wall_opening_meshes`] vor Rahmen und Glas.
 pub(crate) fn shaped_fill_count(p: &Project, wall: &Wall, op: &Opening, w: f64, h: f64) -> usize {
-    shaped_wall_fill(p, wall, op, p.wall_thickness(wall, 0.2), w, h).len()
+    shaped_wall_fill(p, wall, op, p.wall_thickness(wall, 0.2), w, h, true).len()
 }
 
 /// Formöffnung in der Wand ([G3]) als Quader: Füllkörper (je Wandschicht, mit Schichteinzug [106]) zwischen dem
 /// Rechteck-Loch und dem Umriss, Rahmen-Ring und Glas (bzw. Türblatt) entlang des Umrisses. Rahmenlage
 /// quer zur Wand wie bei den Rechteck-Öffnungen (`openings3d::frame_normal_range`). Nicht für Formen:
 /// Anschlag, Fensterbank, Storenkasten, Flügel-/Sprossenteilung (bleiben beim Rechteck).
-pub(crate) fn shaped_wall_opening_meshes(p: &Project, wall: &Wall, wr: &WallRef, op: &Opening, [from, to, zb, zt]: [f64; 4]) -> Vec<RMesh> {
+pub(crate) fn shaped_wall_opening_meshes(p: &Project, wall: &Wall, wr: &WallRef, op: &Opening, rect: [f64; 4]) -> Vec<RMesh> {
+    shaped_wall_opening_meshes_with(p, wall, wr, op, rect, true)
+}
+
+/// Wie [`shaped_wall_opening_meshes`]; `with_fill = false`: ohne die Füllkörper zwischen Rechteck und Umriss (der
+/// Wandkörper deckt sie, [216]); die Zahl der Wandkörper vor Rahmen und Glas ist dann nur die der Zusatzstücke.
+pub(crate) fn shaped_wall_opening_meshes_with(p: &Project, wall: &Wall, wr: &WallRef, op: &Opening, [from, to, zb, zt]: [f64; 4], with_fill: bool) -> Vec<RMesh> {
     use crate::opening_shape as os;
     let (w, h) = (to - from, zt - zb);
     let Some(poly) = os::opening_outline(op, w, h) else { return Vec::new() };
@@ -446,7 +483,7 @@ pub(crate) fn shaped_wall_opening_meshes(p: &Project, wall: &Wall, wr: &WallRef,
     };
     let half = wr.total / 2.0;
     // Wandkörper je Schicht (aussen = +half) in deren Farbe.
-    let mut out: Vec<RMesh> = shaped_wall_fill(p, wall, op, wr.total, w, h).into_iter().map(|(q, n0, n1, rgb)| box_mesh(os::quad_box(&q, n0, n1, &map), rgb)).collect();
+    let mut out: Vec<RMesh> = shaped_wall_fill(p, wall, op, wr.total, w, h, with_fill).into_iter().map(|(q, n0, n1, rgb)| box_mesh(os::quad_box(&q, n0, n1, &map), rgb)).collect();
     let door = op.kind == ElementKind::Door;
     let ty = if door {
         p.door_type(op).map(|t| (t.frame_depth, t.inset_from_face.or_else(|| crate::opening_detail::default_frame_inset(p, op)), t.inset_face == Some(DoorTypeInsetFace::Innen), t.inset_face == Some(DoorTypeInsetFace::Mitte), t.frame_width))
@@ -458,6 +495,12 @@ pub(crate) fn shaped_wall_opening_meshes(p: &Project, wall: &Wall, wr: &WallRef,
         // Ohne Typ: eine Vollscheibe mittig (wie das Rechteck-Fenster ohne Typ).
         if !door {
             let g = crate::openings3d::GLASS_HALF_THICK;
+            if !with_fill {
+                if let Some(m) = prism_mesh(&poly, -g, g, &map, glass) {
+                    out.push(m);
+                    return out;
+                }
+            }
             for q in os::strip_quads(&poly) {
                 out.push(box_mesh(os::quad_box(&q, -g, g, &map), glass));
             }
@@ -468,13 +511,6 @@ pub(crate) fn shaped_wall_opening_meshes(p: &Project, wall: &Wall, wr: &WallRef,
     let (n_min, n_max) = crate::openings3d::frame_normal_range(half, depth, inset_face.unwrap_or(0.0), inner, mid);
     let fw = fw.filter(|v| *v > 0.0).unwrap_or(crate::openings3d::DEFAULT_FRAME_WIDTH).min(w.min(h) / 3.0);
     let inner_poly = os::inset(&poly, fw);
-    for (k, q) in os::ring_quads(&poly, &inner_poly).into_iter().enumerate() {
-        // Tür: unten keine Schwelle (Kante 0 = Boden).
-        if door && k == 0 && op.shape != Some(OpeningShape::Rund) {
-            continue;
-        }
-        out.push(box_mesh(os::quad_box(&q, n_min, n_max, &map), PART_RGB[1]));
-    }
     let (inner_glass, color) = if door {
         let c = (n_min + n_max) / 2.0;
         let t = crate::openings3d::DOOR_LEAF_THICK / 2.0;
@@ -483,6 +519,37 @@ pub(crate) fn shaped_wall_opening_meshes(p: &Project, wall: &Wall, wr: &WallRef,
         let n1 = n_max - 0.02;
         ((n1 - 2.0 * crate::openings3d::GLASS_HALF_THICK, n1), glass)
     };
+    // [216] Anzeige (Wandkörper nach dem Umriss): Rahmen als EIN Ring, Glas bzw. Blatt als EINE Platte — keine
+    // Quader je Umriss-Kante (Stossfugen und Streifen im Bogen). Der Export behält die Quader (`with_fill`).
+    if !with_fill {
+        let ring = prism_mesh(&poly, n_min, n_max, &map, PART_RGB[1]).zip(prism_mesh(&inner_poly, n_min - OVER_MESH, n_max + OVER_MESH, &map, PART_RGB[1]));
+        let frame = ring.and_then(|(outer, hole)| {
+            let (a, b) = (crate::solid_bool::Solid::new(&mesh_of(&outer)).ok()?, crate::solid_bool::Solid::new(&mesh_of(&hole)).ok()?);
+            let mut r = a.difference(&b).ok()?;
+            // Tür: unten keine Schwelle (Kante 0 = Boden).
+            if door && op.shape != Some(OpeningShape::Rund) {
+                let q = os::ring_quads(&poly, &inner_poly)[0];
+                let ext = [[q[0][0] - OVER_MESH, q[0][1] - OVER_MESH], [q[1][0] + OVER_MESH, q[1][1] - OVER_MESH], [q[2][0] + OVER_MESH, q[2][1]], [q[3][0] - OVER_MESH, q[3][1]]];
+                let cut = prism_mesh(&ext, n_min - OVER_MESH, n_max + OVER_MESH, &map, PART_RGB[1])?;
+                r = r.difference(&crate::solid_bool::Solid::new(&mesh_of(&cut)).ok()?).ok()?;
+            }
+            let m = r.to_mesh_raw();
+            (!m.is_empty()).then(|| RMesh { crease_angle: Some(RING_CREASE_DEG), positions: m.positions, indices: m.indices, kind: "extrusion", color: PART_RGB[1], vertex_colors: None, material_index: None, owner: Owner::None })
+        });
+        let plate = prism_mesh(&inner_poly, inner_glass.0, inner_glass.1, &map, color);
+        if let (Some(frame), Some(plate)) = (frame, plate) {
+            out.push(frame);
+            out.push(plate);
+            return out;
+        }
+    }
+    for (k, q) in os::ring_quads(&poly, &inner_poly).into_iter().enumerate() {
+        // Tür: unten keine Schwelle (Kante 0 = Boden).
+        if door && k == 0 && op.shape != Some(OpeningShape::Rund) {
+            continue;
+        }
+        out.push(box_mesh(os::quad_box(&q, n_min, n_max, &map), PART_RGB[1]));
+    }
     for q in os::strip_quads(&inner_poly) {
         out.push(box_mesh(os::quad_box(&q, inner_glass.0, inner_glass.1, &map), color));
     }
