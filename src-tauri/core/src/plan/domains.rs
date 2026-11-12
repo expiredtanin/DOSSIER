@@ -1726,7 +1726,9 @@ pub fn plan_domains(p: &Project, a: &PlanArgs) -> Result<DomainPrims, String> {
     let mut drawings = super::drawings::Out::default();
     super::drawings::plan_drawings(&c, &mut super::drawings::Sink::new(super::drawings::Target::Vec(&mut drawings), super::drawings::Keep::All), &mut bounds)?;
     out.drawings = drawings;
-    domains_after(&c, &mut out, &mut bounds);
+    let mut marks = Bounds::new();
+    domains_after(&c, &mut out, &mut bounds, &mut marks);
+    bounds.merge(marks.raw());
     out.bounds = bounds.get();
     Ok(out)
 }
@@ -1762,7 +1764,7 @@ fn domains_before(c: &Ctx, out: &mut DomainPrims, bounds: &mut Bounds) -> Result
 
 /// Kontext und Schnittlinien (projektglobal, nur mit `global`), zuletzt die Räume: ihre Stempel weichen dem
 /// übrigen Inhalt aus ([`stamp_obstacles`]), darum nach allen anderen Domänen (Gruppen-Reihenfolge bleibt).
-fn domains_after(c: &Ctx, out: &mut DomainPrims, bounds: &mut Bounds) {
+fn domains_after(c: &Ctx, out: &mut DomainPrims, bounds: &mut Bounds, marks: &mut Bounds) {
     let ceiling = super::ceiling_plan::is_ceiling_level(c.p, &c.a.floor);
     if ceiling {
         return;
@@ -1775,12 +1777,12 @@ fn domains_after(c: &Ctx, out: &mut DomainPrims, bounds: &mut Bounds) {
         for q in &out.sections {
             match q {
                 Primitive::Line { a, b, .. } => {
-                    bounds.acc(a.x, a.y);
-                    bounds.acc(b.x, b.y);
+                    marks.acc(a.x, a.y);
+                    marks.acc(b.x, b.y);
                 }
                 Primitive::DrawingText { at, text, height_m, .. } => {
-                    bounds.acc(at.x, at.y);
-                    bounds.acc(at.x + crate::text_layout::text_width_em(text, false) * height_m, at.y + height_m);
+                    marks.acc(at.x, at.y);
+                    marks.acc(at.x + crate::text_layout::text_width_em(text, false) * height_m, at.y + height_m);
                 }
                 _ => {}
             }
@@ -1866,7 +1868,11 @@ pub fn plan_domains_buf(p: &Project, a: &PlanArgs) -> Result<Vec<u8>, String> {
     let mut d = DomainPrims::default();
     let mut bounds = Bounds::new();
     domains_before(&c, &mut d, &mut bounds)?;
-    domains_after(&c, &mut d, &mut bounds);
+    let mut marks = Bounds::new();
+    domains_after(&c, &mut d, &mut bounds, &mut marks);
+    // [204] Ausmass der Bauteile (ohne Schnittmarken, Zeichnungen, Kontext) fürs Einpassen beim Öffnen.
+    let house = bounds.get();
+    bounds.merge(marks.raw());
     let mut w = crate::plan::buf::Writer::new(true);
     w.post = super::extras::post_for(p, a);
     let (under, violations) = extras_of(p, a);
@@ -1883,6 +1889,7 @@ pub fn plan_domains_buf(p: &Project, a: &PlanArgs) -> Result<Vec<u8>, String> {
     }
     w.group(&violations);
     w.bounds = Some(super::extras::plan_bounds(&bounds, &super::extras::extra_bounds(p, &under, |k| c.shown(k))));
+    w.house = house;
     Ok(w.finish())
 }
 
@@ -2007,12 +2014,16 @@ fn assemble_cached(c: &Ctx, revs: &crate::document::Revs, cc: &mut super::cache:
     }
     let mut bounds = Bounds::new();
     // Neu zu erzeugen: Domänen-Listen (mit Strichmuster-Kennung), Ausmass der Domänen und der Zutaten.
-    let mut fresh: Option<(Vec<Vec<(Primitive, u32)>>, Bounds, Bounds)> = None;
+    let mut fresh: Option<(Vec<Vec<(Primitive, u32)>>, Bounds, Bounds, Option<[f64; 4]>)> = None;
     if cc.rest.is_none() {
         let mut d = DomainPrims::default();
         let mut b = Bounds::new();
         domains_before(c, &mut d, &mut b)?;
-        domains_after(c, &mut d, &mut b);
+        let mut marks = Bounds::new();
+        domains_after(c, &mut d, &mut b, &mut marks);
+        // [204] Ausmass der Bauteile (ohne Schnittmarken, Zeichnungen, Kontext) fürs Einpassen beim Öffnen.
+        let house = b.get();
+        b.merge(marks.raw());
         let (under, violations) = extras_of(c.p, c.a);
         let extra = super::extras::extra_bounds(c.p, &under, |k| c.shown(k));
         apply_voids(c.p, c.a, &mut d);
@@ -2022,14 +2033,14 @@ fn assemble_cached(c: &Ctx, revs: &crate::document::Revs, cc: &mut super::cache:
             lists.push(plain(g));
         }
         lists.push(plain(violations));
-        fresh = Some((lists, b, extra));
+        fresh = Some((lists, b, extra, house));
     }
     let mut segs: Vec<crate::plan::buf::Segment> = Vec::new();
     // Liste `k`: 0 Schatten/Baurecht, 1–9 Domänen (ohne Zeichnungen), 10 Verstösse.
     let put = |w: &mut crate::plan::buf::Writer, k: usize, segs: &mut Vec<crate::plan::buf::Segment>| {
         let start = w.begin_group();
         match (&fresh, &cc.rest) {
-            (Some((lists, _, _)), _) => {
+            (Some((lists, _, _, _)), _) => {
                 w.mark();
                 for (x, r) in lists[k].iter() {
                     w.push_ref(x, *r);
@@ -2068,14 +2079,16 @@ fn assemble_cached(c: &Ctx, revs: &crate::document::Revs, cc: &mut super::cache:
         put(w, k, &mut segs);
     }
     let extra = match fresh {
-        Some((_, b, extra)) => {
+        Some((_, b, extra, house)) => {
             bounds.merge(b.raw());
-            cc.rest = Some(RestEntry { sig, groups: segs, bounds: b.raw(), extra: extra.raw() });
+            cc.rest = Some(RestEntry { sig, groups: segs, bounds: b.raw(), extra: extra.raw(), house });
+            w.house = house;
             extra.raw()
         }
         None => {
             let r = cc.rest.as_ref().expect("Cache vorhanden");
             bounds.merge(r.bounds);
+            w.house = r.house;
             r.extra
         }
     };

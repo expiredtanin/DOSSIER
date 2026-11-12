@@ -97,7 +97,7 @@ function canon(v: unknown): string {
 function recFlags(bytes: Uint8Array): number[] {
   const f = new Float64Array(bytes.buffer, bytes.byteOffset, bytes.byteLength >> 3);
   const [nStrings, , nHatchWords, nGroups, nPrims] = [f[3], f[4], f[5], f[6], f[7]];
-  const offAt = 16 + 2 * nStrings + nHatchWords + 2 * nGroups;
+  const offAt = 20 + 2 * nStrings + nHatchWords + 2 * nGroups;
   const recAt = offAt + nPrims * (f[2] & 1 ? 2 : 1);
   return Array.from({ length: nPrims }, (_, i) => f[recAt + f[offAt + i] + 1]);
 }
@@ -118,15 +118,17 @@ describe("Plan-Puffer v2", () => {
 
   it("Hin und zurück: alle Typen gemischt, mit Gruppen und Ausmass", () => {
     const prims = Object.values(PRIMS);
-    const buf = encodePlanBuf(prims, { groups: [[0, 2], [2, prims.length]], bounds: [-1, -2, 3, 4] });
+    const buf = encodePlanBuf(prims, { groups: [[0, 2], [2, prims.length]], bounds: [-1, -2, 3, 4], house: [0, 0, 1, 2] });
     const d = decodePlanBuf(buf);
     expect(canon(d.prims)).toBe(canon(prims));
     expect(d.groups).toEqual([[0, 2], [2, prims.length]]);
     expect(d.bounds).toEqual([-1, -2, 3, 4]);
+    expect(d.house).toEqual([0, 0, 1, 2]);
     expect(d.hashes).toBeNull();
     const back = decodePlanBuf(core().plan_buf_recode(buf));
     expect(canon(back.prims)).toBe(canon(prims));
     expect(back.groups).toEqual(d.groups);
+    expect(back.house).toEqual([0, 0, 1, 2]);
     // Schraffuren werden einmal gelesen und geteilt.
     expect((d.prims[0] as { hatch: unknown }).hatch).toBe((d.prims[prims.length - 1] as { hatch: unknown }).hatch);
   });
@@ -216,7 +218,7 @@ describe("Plan-Puffer v2", () => {
     const h = encodeHatch(hatch);
     const buf = encodePlanBuf([PRIMS.polygon]);
     const f = new Float64Array(buf.buffer, 0, buf.byteLength >> 3);
-    const at = 16 + 2 * f[3] + 1; // nach dem JSON-String-Index des ersten Eintrags
+    const at = 20 + 2 * f[3] + 1; // nach dem JSON-String-Index des ersten Eintrags
     const inPlan = f.slice(at, at + h.length);
     // Im Plan-Puffer steht der Farb-String statt −1.
     expect(inPlan[5]).toBeGreaterThanOrEqual(0);

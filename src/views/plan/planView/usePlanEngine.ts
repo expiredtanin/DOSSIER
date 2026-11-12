@@ -24,6 +24,8 @@ export interface UsePlanEngineArgs {
   backdrop: ((origin: Vec2, pxPerMeter: number) => ReactNode) | undefined;
   roomStamp: { roomId: string; anchor: Vec2; } | null | undefined;
   defaultView: ViewBox;
+  /** [204] Startansicht (aufs Gebäude eingepasst); Referenz des Papier-Massstabs beim Öffnen/Wechsel. */
+  startViewRef?: React.MutableRefObject<ViewBox>;
   view: ViewBox;
   hairline: boolean | undefined;
   onScale: ((n: number) => void) | undefined;
@@ -37,6 +39,7 @@ export function usePlanEngine(inp: UsePlanEngineArgs) {
     backdrop,
     roomStamp,
     defaultView,
+    startViewRef,
     view,
     hairline,
     onScale,
@@ -397,7 +400,7 @@ export function usePlanEngine(inp: UsePlanEngineArgs) {
   // Beim Plan-/Geschoss-Wechsel den Referenz-Massstab an den (frisch eingepassten)
   // Ausschnitt angleichen.
   useEffect(() => {
-    const n = scaleFromView(defaultViewRef.current, svgRef.current);
+    const n = scaleFromView((startViewRef ?? defaultViewRef).current, svgRef.current);
     if (n != null && isFinite(n) && n > 0) setPaperScale(n);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resetKey]);

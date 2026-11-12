@@ -61,6 +61,11 @@ export interface PlanImage {
 export interface Plan {
   primitives: Primitive[];
   bounds: { minX: number; minY: number; maxX: number; maxY: number };
+  /**
+   * [204] Ausmass nur der Bauteile (Wände, Decken, Dächer, Räume, Treppen) ohne Kontext/Kataster, Gelände,
+   * Raster, Zeichnungen und Schnittmarken: Ziel des Einpassens beim Öffnen. Fehlt ohne Bauteile (dann `bounds`).
+   */
+  houseBounds?: { minX: number; minY: number; maxX: number; maxY: number };
   /** Hintergrund-Rasterbilder (Luftbild) — nur für die interaktive Ansicht. */
   backgroundImages?: PlanImage[];
   /**
@@ -304,7 +309,8 @@ export function generatePlan(
         }));
   // Ausmass samt Schatten, Baurecht und Kontext (immer gesetzt, ohne Punkte 0,0–1,1).
   const [minX, minY, maxX, maxY] = dom.buf.bounds ?? [0, 0, 1, 1];
-  return lazyPlan({ bounds: { minX, minY, maxX, maxY }, backgroundImages, lineEnds: lineEndsCode(project), ...(underlay.length ? { underlay } : {}) }, pieces);
+  const h = dom.buf.house;
+  return lazyPlan({ bounds: { minX, minY, maxX, maxY }, ...(h ? { houseBounds: { minX: h[0], minY: h[1], maxX: h[2], maxY: h[3] } } : {}), backgroundImages, lineEnds: lineEndsCode(project), ...(underlay.length ? { underlay } : {}) }, pieces);
 }
 
 /**
@@ -372,6 +378,14 @@ export function generateVisibleLevelsPlan(
     bounds.maxX = Math.max(bounds.maxX, b.maxX);
     bounds.maxY = Math.max(bounds.maxY, b.maxY);
   };
+  // [204] Bauteil-Ausmass aller gezeigten Geschosse (aktives und gedimmte Pausfolien).
+  let house: Plan["bounds"] | undefined;
+  const extendHouse = (b: Plan["bounds"] | undefined) => {
+    if (!b) return;
+    house = house
+      ? { minX: Math.min(house.minX, b.minX), minY: Math.min(house.minY, b.minY), maxX: Math.max(house.maxX, b.maxX), maxY: Math.max(house.maxY, b.maxY) }
+      : { ...b };
+  };
 
   // Andere sichtbare Ebenen ZUERST (unten als Referenz), die aktive zuletzt
   // (obenauf) — wie `buildBuilding` in meshBuilders.ts für die 3D-Szene.
@@ -405,6 +419,7 @@ export function generateVisibleLevelsPlan(
     // jede leere Nachbar-Ebene den Ausschnitt bis zum Ursprung (bei Landes-
     // koordinaten ~2,7 Mio. m daneben → "Einpassen" zeigte nichts).
     if (n > 0 || p.underlay) extend(p.bounds);
+    extendHouse(p.houseBounds);
   }
 
   const activePlan = generatePlan(
@@ -425,10 +440,12 @@ export function generateVisibleLevelsPlan(
   for (const g of activePlan.underlay ?? []) underlay.push(g);
   // Aktive Ebene leer UND keine Nachbar-Ebene mit Inhalt → Platzhalter-Ausmass.
   if (activeCount > 0 || activePlan.underlay || bounds.minX === Infinity) extend(activePlan.bounds);
+  extendHouse(activePlan.houseBounds);
 
   return lazyPlan(
     {
       bounds,
+      ...(house ? { houseBounds: house } : {}),
       backgroundImages: activePlan.backgroundImages,
       lineEnds: lineEndsCode(project),
       ...(greyedRanges.length ? { greyedRanges } : {}),

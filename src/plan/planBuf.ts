@@ -8,8 +8,9 @@
  *
  * ```text
  * Bytes: f64-Teil, dann UTF-16-Einheiten aller Texte
- * Kopf (16)  [MAGIC "PLB2", VERSION 2, flags (1 Hashes, 2 Ausmass), nStrings, nHatches, nHatchWords,
- *             nGroups, nPrims, nRecWords, nPool, nUnits, 0, minX, minY, maxX, maxY]
+ * Kopf (20)  [MAGIC "PLB2", VERSION 2, flags (1 Hashes, 2 Ausmass, 4 Bauteil-Ausmass), nStrings, nHatches,
+ *             nHatchWords, nGroups, nPrims, nRecWords, nPool, nUnits, 0, minX, minY, maxX, maxY,
+ *             Bauteile minX, minY, maxX, maxY]
  * Strings    nStrings × [unitOff, unitLen]
  * Schraffur  nHatches × [jsonStr, Hatch]      (Hatch wie encodeHatch, Farbe = String-Index)
  * Gruppen    nGroups × [start, end)
@@ -31,7 +32,7 @@ export const PLAN_BUF_MAGIC = 0x504c4232;
 export const PLAN_BUF_VERSION = 2;
 /** Fehlerpuffer einer Kern-Abfrage ("PLBe"): `[ERR_MAGIC, nUnits]` + Meldung (UTF-16). */
 export const PLAN_BUF_ERR_MAGIC = 0x504c4265;
-const HEAD = 16;
+const HEAD = 20;
 
 const F_GREYED_SET = 1;
 const F_GREYED = 2;
@@ -201,6 +202,8 @@ export interface EncodeOptions {
   /** Gruppen `[start, end)` in den Kopf schreiben. */
   groups?: ReadonlyArray<readonly [number, number]>;
   bounds?: readonly [number, number, number, number];
+  /** [204] Ausmass der Bauteile (Wände, Decken, Dächer, Räume, Treppen) — fürs Einpassen beim Öffnen. */
+  house?: readonly [number, number, number, number];
 }
 
 /** Primitive → Plan-Puffer v2 (Format s. Dateikopf). */
@@ -418,10 +421,11 @@ export function encodePlanBuf(prims: readonly Primitive[], opts: EncodeOptions =
   const out = new ArrayBuffer(nF64 * 8 + units * 2);
   const f = new Float64Array(out, 0, nF64);
   const bounds = opts.bounds;
+  const house = opts.house;
   f.set([
     PLAN_BUF_MAGIC,
     PLAN_BUF_VERSION,
-    bounds ? 2 : 0,
+    (bounds ? 2 : 0) | (house ? 4 : 0),
     nStrings,
     hatchIdx.size,
     hatchW.length,
@@ -435,6 +439,10 @@ export function encodePlanBuf(prims: readonly Primitive[], opts: EncodeOptions =
     bounds ? bounds[1] : 0,
     bounds ? bounds[2] : 0,
     bounds ? bounds[3] : 0,
+    house ? house[0] : 0,
+    house ? house[1] : 0,
+    house ? house[2] : 0,
+    house ? house[3] : 0,
   ]);
   let k = HEAD;
   f.set(strTab.buf.subarray(0, strTab.length), k);
@@ -475,6 +483,8 @@ export interface DecodedPlanBuf {
   tag(i: number): number;
   groups: Array<[number, number]>;
   bounds?: [number, number, number, number];
+  /** [204] Ausmass der Bauteile (ohne Zeichnungen/Kontext); fehlt ohne Bauteile. */
+  house?: [number, number, number, number];
   /** Inhalts-Hash je Primitiv (vom Kern; Schlüssel des GPU-Chunk-Caches) oder null. */
   hashes: Float64Array | null;
   /** Nummer des im Kern gehaltenen Puffers (0 = keiner), s. `compilePlanBufRange`. */
@@ -718,6 +728,7 @@ export function decodePlanBuf(input: Uint8Array): DecodedPlanBuf {
     tag: (i: number): number => f[recAt + f[offAt + i]],
     groups,
     bounds: flags & 2 ? [hd[12], hd[13], hd[14], hd[15]] : undefined,
+    house: flags & 4 ? [hd[16], hd[17], hd[18], hd[19]] : undefined,
     hashes: hashes ? new Float64Array(bytes.buffer, bytes.byteOffset + hashAt * 8, nPrims) : null,
     hold: 0,
   };
