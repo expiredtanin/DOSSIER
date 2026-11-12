@@ -437,7 +437,7 @@ zusätzlich nicht zeichnet, schickt die Hülle als `{"hide": [codes]}` (`toWalls
 nach dem 3D-Cache: `layers` ist dort keine globale Änderung, Teil-Updates halten Einträge ausgeblendeter Klassen
 (`wallKeep`/`openingKeep`), Umschalten rechnet keine Wand neu.
 
-Offen: Bauzonen sind kein eigener Planinhalt (nur Baurecht-Einstellungen); „grau" im 3D nicht gedämpft (render3d kann es nicht, nur `set_ghost` für die Hülle); Datei-Exporte
+Offen: Bauzonen sind kein eigener Planinhalt (nur Baurecht-Einstellungen); „grau" im 3D als Geisterschicht (Klassen und Geschosse, `set_ghost_model`/`set_ghost_lines`, `src/viewport/ghostSync.ts`); Datei-Exporte
 (OBJ/glTF/IFC/STEP) bleiben vollständig.
 
 ---

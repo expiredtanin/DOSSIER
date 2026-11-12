@@ -45,6 +45,11 @@ export function hiddenFloorIds(levels: readonly { id: string; kind: string }[], 
   return levels.filter((l) => l.kind === "floor" && !display(l.id).render).map((l) => l.id);
 }
 
+/** [180] Geschoss-ids, die die Zeichnungsebenen gezeichnet, aber im Modus „grau" zeigen — im 3D als Geisterschicht. */
+export function greyedFloorIds(levels: readonly { id: string; kind: string }[], display: (id: string) => { render: boolean; greyed: boolean }): string[] {
+  return levels.filter((l) => l.kind === "floor" && display(l.id).render && display(l.id).greyed).map((l) => l.id);
+}
+
 /**
  * [196] Auge einer Zeichnungsebene in „Alle anzeigen"/„Nur aktive": Der Klick schaltet auf „Ausgewählte" um. Damit er nur
  * die eigene Ebene ändert, werden die Sichtbarkeits-Flags vorher auf das eingefroren, was der Modus gerade zeigt

@@ -40,7 +40,7 @@ import { pushNativeScene, pushNativeWalls } from "./plan/nativeSync";
 import { explodeFloorOffsets, selectionHighlightLines } from "../core";
 import { clashHighlightLines } from "../analysis/clash";
 import { useClashSession } from "../panels/clashSession";
-import { hiddenFloorIds } from "../panels/displayMode";
+import { greyedFloorIds, hiddenFloorIds } from "../panels/displayMode";
 import { applyGroupDimmingToPlan } from "../state/groupActions";
 import { useStore } from "../state/appStore";
 import { planFitKey } from "../state/viewTabs";
@@ -320,6 +320,8 @@ export const Content = memo(function Content({
   );
   // [196] Geschosse mit ausgeschaltetem Auge (Zeichnungsebenen-Panel) fehlen auch im 3D.
   const hiddenFloors3d = useMemo(() => hiddenFloorIds(project.drawingLevels, floorDisplay), [project.drawingLevels, floorDisplay]);
+  // [180] Geschosse im Darstellungsmodus „grau" stehen im 3D als Geisterschicht.
+  const greyFloors3d = useMemo(() => greyedFloorIds(project.drawingLevels, floorDisplay), [project.drawingLevels, floorDisplay]);
   // 3D-Sicht: aus dem Grundriss UND aus Schnitt/Ansicht ([115]); im Schnitt schneidet der Live-Schnitt
   // an der Schnittlinie (App setzt `section3d` beim Wechsel).
   const view3dPane = (
@@ -333,6 +335,7 @@ export const Content = memo(function Content({
         greyCodes={display3d.grey}
         lockedCodes={display3d.lock}
         hiddenFloors={hiddenFloors3d}
+        greyFloors={greyFloors3d}
         renderMode={renderMode}
         detail={detail}
         view3d={view3d}
@@ -862,7 +865,7 @@ function LevelPlanView({
   // [180] Mit dem Darstellungsmodus der Klassen wie im WASM-Viewport (aus, grau = Geisterschicht).
   const nativeHide = useMemo(() => {
     const d = classDisplay3d(flattenCategories(project.layers ?? []).map((c) => c.code), categoryDisplay);
-    return { hide: d.hide, grey: d.grey, hideFloors: hiddenFloorIds(project.drawingLevels, floorDisplay) };
+    return { hide: d.hide, grey: d.grey, hideFloors: hiddenFloorIds(project.drawingLevels, floorDisplay), greyFloors: greyedFloorIds(project.drawingLevels, floorDisplay) };
   }, [project.layers, project.drawingLevels, categoryDisplay, floorDisplay]);
   useEffect(() => {
     pushNativeWalls(project, explode, nativeHide);

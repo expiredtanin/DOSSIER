@@ -58,6 +58,26 @@ describe("3D nach Klassen ([180])", () => {
     expect(pickGeometry(p, 0, { grey: ["20"], lock: ["20"] }).walls).toHaveLength(0);
   });
 
+  it("graues Geschoss: Elemente im Hauptmodell weg, in der Geisterschicht allein; anwählbar; Auge aus geht vor", () => {
+    const all = projectToModel3d(p);
+    const floors = [...new Set(p.walls.map((w) => w.floorId))];
+    expect(floors.length).toBeGreaterThan(1);
+    const grey = floors[0]!;
+    const hide = { greyFloors: [grey] };
+    const main = projectToModel3d(p, { hide });
+    const ghost = projectToModel3d(p, { hide: ghostFilter3d(hide)! });
+    expect(ghostFilter3d({})).toBeNull();
+    expect(main.walls.length).toBeLessThan(all.walls.length);
+    expect(ghost.walls.length).toBeGreaterThan(0);
+    expect(main.walls.length + ghost.walls.length).toBe(all.walls.length);
+    // Anwählbar wie im Grundriss (grau ja); mit Auge aus nicht mehr in der Geisterschicht.
+    expect(pickGeometry(p, 0, hide).walls.length).toBe(pickGeometry(p).walls.length);
+    expect(projectToModel3d(p, { hide: ghostFilter3d({ ...hide, hideFloors: [grey] })! }).walls).toHaveLength(0);
+    // Flächenmuster: Hauptmodell + Geisterschicht ergeben zusammen alle.
+    const g = ghostFilter3d(hide)!;
+    expect(emitSurfacePatternLines(p, 0, hide).length + emitSurfacePatternLines(p, 0, g).length).toBe(emitSurfacePatternLines(p, 0).length);
+  });
+
   it("Wände aus: Wände, ihre Öffnungen und Wandmuster fehlen", () => {
     const m = projectToModel3d(p, { hide: ["20"] });
     expect(m.walls).toHaveLength(0);

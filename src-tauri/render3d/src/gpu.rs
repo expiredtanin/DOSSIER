@@ -423,6 +423,11 @@ pub struct Renderer {
     /// wie `ghost`/`ghost_lines`, aber unabhaengig davon gesetzt (`set_ghost_model`).
     ghost_model: Option<LineBuffers>,
     ghost_model_lines: Option<LineBuffers>,
+    /// [180] 2D-Spuren grauer Klassen (gedaempft, `ghost::mute_lines`), tiefengetestet wie die Kanten der Geisterschicht.
+    ghost_drawing_lines: Option<LineBuffers>,
+    /// [180] Flaechenmuster grauer Klassen (gedaempft, `ghost::mute_pattern`): wie `pattern_data` je Kamera nach Abstand
+    /// ausgewaehlt und im selben Puffer gezeichnet.
+    ghost_pattern_data: Vec<f32>,
     /// Schnittflaechen-Kappen (TriangleList, CAP_WGSL, eigenes Vertex-Layout
     /// [pos vec3, uv vec2]). Teilt sich die `Globals`-Bind-Group; leichter
     /// Depth-Bias zur Kamera hin gegen Z-Fighting mit den an der Ebene
@@ -1340,6 +1345,8 @@ impl Renderer {
             ghost_lines: None,
             ghost_model: None,
             ghost_model_lines: None,
+            ghost_drawing_lines: None,
+            ghost_pattern_data: Vec::new(),
             cap_pipeline,
             cut_line_pipeline,
             textured_pipeline,
@@ -1661,7 +1668,24 @@ impl Renderer {
 
     /// [180] Ob eine Geisterschicht gesetzt ist (Test/Diagnose).
     pub fn has_ghost_model(&self) -> bool {
-        self.ghost_model.is_some() || self.ghost_model_lines.is_some()
+        self.ghost_model.is_some() || self.ghost_model_lines.is_some() || self.ghost_drawing_lines.is_some() || !self.ghost_pattern_data.is_empty()
+    }
+
+    /// [180] 2D-Spuren (`drawing`, LineList `[x y z r g b]`) und Flaechenmuster (`pattern`, `PATTERN_STRIDE`) der grauen
+    /// Klassen: in der Geisterschicht gedaempft gezeichnet (`ghost::mute_lines`/`mute_pattern`). Leer loescht.
+    pub fn set_ghost_lines(&mut self, device: &wgpu::Device, drawing: &[f32], pattern: &[f32]) {
+        let d = crate::ghost::mute_lines(drawing);
+        self.ghost_drawing_lines = (!d.is_empty()).then(|| LineBuffers {
+            vbo: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("ghost.drawing.vbo"),
+                contents: bytemuck::cast_slice(&d),
+                usage: wgpu::BufferUsages::VERTEX,
+            }),
+            vertex_count: (d.len() / GRID_FLOATS_PER_VERTEX) as u32,
+        });
+        self.ghost_pattern_data = crate::ghost::mute_pattern(pattern);
+        self.pattern_lines = None;
+        self.pattern_key = None;
     }
 
     /// Ob durchscheinende Koerper gesetzt sind (Test/Diagnose).
@@ -2215,7 +2239,7 @@ impl Renderer {
         self.ensure_msaa(device, w, h);
 
         // Ansichtsschraffur: Linien je Kamera nach Abstand auswählen (Signatur-Cache wie die Silhouette).
-        if self.style.draws_pattern_lines() && !self.pattern_data.is_empty() {
+        if self.style.draws_pattern_lines() && !(self.pattern_data.is_empty() && self.ghost_pattern_data.is_empty()) {
             let q = |v: f32, s: f32| (v * s).round() as i64;
             let key = [
                 q(camera.eye[0], 20.0),
@@ -2228,7 +2252,8 @@ impl Renderer {
                 h as i64,
             ];
             if self.pattern_key != Some(key) {
-                let verts = crate::pattern_lines::select_pattern_lines(&self.pattern_data, camera, h as f32);
+                let mut verts = crate::pattern_lines::select_pattern_lines(&self.pattern_data, camera, h as f32);
+                verts.extend(crate::pattern_lines::select_pattern_lines(&self.ghost_pattern_data, camera, h as f32));
                 self.pattern_lines = (!verts.is_empty()).then(|| LineBuffers {
                     vbo: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                         label: Some("pattern_lines.vbo"),
@@ -2500,7 +2525,7 @@ impl Renderer {
             // 3b) Durchscheinende Koerper ([63] zulaessige Huelle): Kanten tiefengetestet wie das
             //     Gitter, dann die Flaechen mit Alpha-Blending (ohne Tiefen-Write) nach allem Opaken.
             //     [180] Davor die Geisterschicht der grauen Klassen (gleiche Pipelines).
-            for gl in [&self.ghost_model_lines, &self.ghost_lines].into_iter().flatten() {
+            for gl in [&self.ghost_model_lines, &self.ghost_drawing_lines, &self.ghost_lines].into_iter().flatten() {
                 pass.set_pipeline(&self.grid_pipeline);
                 pass.set_bind_group(0, &self.bind_group, &[]);
                 pass.set_vertex_buffer(0, gl.vbo.slice(..));

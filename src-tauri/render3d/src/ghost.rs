@@ -67,6 +67,27 @@ pub fn ghost_buffers(part: PartInput) -> (Vec<f32>, Vec<f32>) {
     (tris, lines)
 }
 
+/// 2D-Spuren grauer Klassen (LineList `[x y z r g b]` je Vertex, Kern `drawing_line_verts`) gedämpft: die Farbe der
+/// Linie weicht der Kantenfarbe der Geisterschicht, die Lage bleibt. Unvollständige Reste am Ende fallen weg.
+pub fn mute_lines(verts: &[f32]) -> Vec<f32> {
+    let mut out = verts[..verts.len() / EDGE_FLOATS_PER_VERTEX * EDGE_FLOATS_PER_VERTEX].to_vec();
+    for v in out.chunks_exact_mut(EDGE_FLOATS_PER_VERTEX) {
+        v[3..6].copy_from_slice(&GHOST_EDGE_COLOR);
+    }
+    out
+}
+
+/// Flächenmuster grauer Klassen (`pattern_lines::PATTERN_STRIDE` je Linie, Farbe an Stelle 6..9) gedämpft: Farbe
+/// wie [`mute_lines`], Lage und LOD-Maske bleiben.
+pub fn mute_pattern(data: &[f32]) -> Vec<f32> {
+    use crate::pattern_lines::PATTERN_STRIDE;
+    let mut out = data[..data.len() / PATTERN_STRIDE * PATTERN_STRIDE].to_vec();
+    for l in out.chunks_exact_mut(PATTERN_STRIDE) {
+        l[6..9].copy_from_slice(&GHOST_EDGE_COLOR);
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -113,5 +134,19 @@ mod tests {
         let dunkel = ghost_color([0.0, 0.0, 0.0], n);
         assert!(hell[0] > dunkel[0] && dunkel[0] > 0.6);
         assert!(ghost_color([0.5, 0.5, 0.5], [f32::NAN, 0.0, 0.0]).iter().all(|c| c.is_finite()));
+    }
+
+    #[test]
+    fn spuren_und_muster_werden_gedaempft() {
+        let l = mute_lines(&[1.0, 2.0, 3.0, 1.0, 0.0, 0.0, 4.0, 5.0, 6.0, 0.0, 0.0, 1.0, 9.0, 9.0]);
+        assert_eq!(l.len(), 12, "unvollständiger Rest fällt weg");
+        assert_eq!(&l[..3], &[1.0, 2.0, 3.0]);
+        assert_eq!(&l[3..6], &GHOST_EDGE_COLOR);
+        assert_eq!(&l[9..12], &GHOST_EDGE_COLOR);
+        let m = mute_pattern(&[0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 5.0, 7.0]);
+        assert_eq!(m.len(), 10);
+        assert_eq!(&m[6..9], &GHOST_EDGE_COLOR);
+        assert_eq!((m[3], m[9]), (1.0, 5.0), "Lage und Maske bleiben");
+        assert!(mute_lines(&[]).is_empty() && mute_pattern(&[]).is_empty());
     }
 }

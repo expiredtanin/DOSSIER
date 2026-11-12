@@ -19,6 +19,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ContextImage, Project } from "../model/types";
+import { ghostSignature } from "./ghostSync";
 import { emitDrawingLineVerts, emitSurfacePatternLines, filter3d, ghostFilter3d, hiddenClassCodes, projectToModel3d, projectToModel3dParts, siteEnvelope3d } from "../core";
 import type { Hide3d } from "../core";
 import { Model3dPartsSync } from "./model3dPartsSync";
@@ -150,6 +151,8 @@ interface WebModelRendererLike {
   remove_point_cloud?(id: number): void;
   /** [180] Geisterschicht der grauen Klassen (Modell-JSON wie `set_model`; leer löscht). */
   set_ghost_model?(json: string): void;
+  /** [180] 2D-Spuren und Flächenmuster der Geisterschicht (gedämpft gezeichnet); leer löscht. */
+  set_ghost_lines?(drawing: Float32Array, pattern: Float32Array): void;
   set_camera(
     eyeX: number,
     eyeY: number,
@@ -246,6 +249,7 @@ export function useWasm3dRenderer(
         const renderer = await getRenderer(canvas);
         if (disposed) return;
         rendererRef.current = renderer;
+        ghostSigRef.current = null;
         // Neuer (oder wiederverwendeter) Renderer: Punktwolken neu abgleichen.
         pointCloudsRef.current = new Map();
         setReady(true);
@@ -267,6 +271,8 @@ export function useWasm3dRenderer(
   // erneutes (teures) Dekodieren/Hochladen, wenn sich die Materialien nicht
   // geändert haben (updateModel läuft bei JEDER Projektänderung).
   const materialSigRef = useRef<string | null>(null);
+  // [180] Prüfsumme der Geisterschicht in render3d (`ghostSync.ts`); null = unbekannt, "" = leer.
+  const ghostSigRef = useRef<string | null>(null);
   // Signatur des zuletzt hochgeladenen Drape-Luftbilds (src + Bbox) — verhindert
   // ein erneutes (teures) Dekodieren/Hochladen bei unveränderter Lage.
   const aerialSigRef = useRef<string | null>(null);
@@ -305,8 +311,19 @@ export function useWasm3dRenderer(
       try {
         // [180] Klassen im Darstellungsmodus „grau": gedämpft und durchscheinend (render3d `ghost.rs`); im
         // Hauptmodell fehlen sie (Kern `ClassFilter`). Ohne graue Klasse leer (löscht eine frühere Schicht).
+        // Graue Geschosse (Zeichnungsebenen-Modus) und ihre 2D-Spuren/Flächenmuster gehören dazu und erscheinen gedämpft.
+        // Nur bei geänderter Schicht neu setzen (sonst vernetzt render3d sie bei jeder Projektänderung neu).
         const ghost = ghostFilter3d(hide);
-        r.set_ghost_model(ghost ? JSON.stringify(projectToModel3d(project, { detail, voids: true, explode, hide: ghost })) : "");
+        const none = new Float32Array(0);
+        const json = ghost ? JSON.stringify(projectToModel3d(project, { detail, voids: true, explode, hide: ghost })) : "";
+        const drawing = ghost ? emitDrawingLineVerts(project, explode, ghost) : none;
+        const pattern = ghost ? emitSurfacePatternLines(project, explode, ghost) : none;
+        const sig = ghostSignature(json, drawing, pattern);
+        if (sig !== ghostSigRef.current) {
+          r.set_ghost_model(json);
+          r.set_ghost_lines?.(drawing, pattern);
+          ghostSigRef.current = sig;
+        }
       } catch (e) {
         console.warn("render3d set_ghost_model fehlgeschlagen:", e);
       }

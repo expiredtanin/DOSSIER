@@ -317,7 +317,7 @@ function fitTargetDist(project: Project, hide?: Hide3d): {
 } {
   // [180] Graue Klassen (Geisterschicht) zählen zur Ausdehnung wie sichtbare.
   const f = filter3d(hide);
-  const model = projectToModel3d(project, { hide: f.grey ? { ...f, grey: undefined } : hide });
+  const model = projectToModel3d(project, { hide: f.grey || f.greyFloors ? { ...f, grey: undefined, greyFloors: undefined } : hide });
   let minX = Infinity;
   let minY = Infinity;
   let minZ = Infinity;
@@ -422,6 +422,7 @@ export function Wasm3DViewport({
   onGrip3dEditCancel,
   hiddenCodes,
   hiddenFloors,
+  greyFloors,
   greyCodes,
   lockedCodes,
 }: {
@@ -541,6 +542,8 @@ export function Wasm3DViewport({
   hiddenCodes?: readonly string[];
   /** [196] Geschosse (Zeichnungsebenen-ids) mit ausgeschaltetem Auge: ihre Elemente fehlen im Modell und im Pick. */
   hiddenFloors?: readonly string[];
+  /** [180] Geschosse im Darstellungsmodus „grau": als Geisterschicht (wie graue Klassen). */
+  greyFloors?: readonly string[];
   /** [180] Klassen im Darstellungsmodus „grau": gedämpft und durchscheinend (Geisterschicht), anwählbar wie im Grundriss. */
   greyCodes?: readonly string[];
   /** [180] Gesperrte Klassen des Darstellungsmodus: sichtbar, aber nicht anwählbar. */
@@ -620,16 +623,17 @@ export function Wasm3DViewport({
   const { only: onlyIds, hidden: hiddenIds } = elementFilter;
   const floorsKey = (hiddenFloors ?? []).join("\u0001");
   const greyKey = (greyCodes ?? []).join("\u0001");
+  const greyFloorsKey = (greyFloors ?? []).join("\u0001");
   const lockKey = (lockedCodes ?? []).join("\u0001");
   const hide = useMemo<Hide3d>(() => {
     const split = (k: string) => (k ? k.split("\u0001") : []);
     const codes = split(hiddenKey);
     const floors = split(floorsKey);
-    const dim = { grey: split(greyKey), lock: split(lockKey) };
-    return onlyIds || hiddenIds.length || floors.length || dim.grey.length || dim.lock.length
+    const dim = { grey: split(greyKey), lock: split(lockKey), greyFloors: split(greyFloorsKey) };
+    return onlyIds || hiddenIds.length || floors.length || dim.grey.length || dim.lock.length || dim.greyFloors.length
       ? toFilter3d({ only: onlyIds, hidden: hiddenIds }, codes, floors, dim)
       : codes;
-  }, [hiddenKey, floorsKey, greyKey, lockKey, onlyIds, hiddenIds]);
+  }, [hiddenKey, floorsKey, greyKey, greyFloorsKey, lockKey, onlyIds, hiddenIds]);
   const hideRef = useRef(hide);
   hideRef.current = hide;
   // Versatz je Geschoss ([65]) für Griffe und gezogene Höhen (Modell bleibt unversetzt).
