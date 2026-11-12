@@ -24,9 +24,9 @@ use crate::edges::{draws_crease, for_each_tri_edge, push_edge, representatives, 
 use crate::math::{merge_bounds, Bounds3};
 use crate::mesh::{
     append_context_mesh, compute_free_wall_ends, compute_wall_miters, extrude_slab, extrude_wall_with_miters,
-    push_wall_caps, textured_from_mesh, WallMiters,
+    push_wall_caps, WallMiters,
 };
-use crate::types::{Mesh, MeshInput, MeshKind, RoofLayerInput, SlabInput, TexturedMesh, WallInput};
+use crate::types::{Mesh, MeshInput, MeshKind, RoofLayerInput, SlabInput, WallInput};
 
 /// Höchstzahl geteilter Klumpen (Draw-Calls je Pipeline); grosse Teile bekommen eigene.
 pub const MAX_SHARED_CHUNKS: usize = 96;
@@ -93,7 +93,8 @@ pub struct SceneChange {
 /// Zeichendaten eines Klumpens.
 pub struct ChunkData {
     pub mesh: Mesh,
-    pub textured: TexturedMesh,
+    /// Material-Ebene je Vertex von `mesh` (Stil „textured"; UV rechnet der Shader, [214]).
+    pub layers: Vec<f32>,
     pub edges: Vec<f32>,
     pub caps: Vec<f32>,
 }
@@ -380,7 +381,7 @@ impl Scene {
         let mut edges: Vec<f32> = Vec::new();
         let mut caps: Vec<f32> = Vec::new();
         let Some(c) = self.chunks.get(chunk) else {
-            return ChunkData { textured: textured_from_mesh(&mesh), mesh, edges, caps };
+            return ChunkData { mesh, layers, edges, caps };
         };
         mesh.verts.reserve(c.verts * crate::types::FLOATS_PER_VERTEX);
         for id in &c.parts {
@@ -397,9 +398,7 @@ impl Scene {
                 }
             }
         }
-        let mut textured = textured_from_mesh(&mesh);
-        textured.layers = layers;
-        ChunkData { mesh, textured, edges, caps }
+        ChunkData { mesh, layers, edges, caps }
     }
 
     fn pick_chunk(&mut self, verts: usize) -> usize {
@@ -657,10 +656,12 @@ mod tests {
         let mut d = Draw { tris: vec![], tex: vec![], layers: vec![], edges: vec![], caps: vec![] };
         for c in 0..s.chunk_count() {
             let cd = s.chunk_data(c);
-            assert_eq!(cd.textured.layers.len(), cd.textured.vertex_count(), "Ebene je Vertex");
+            assert_eq!(cd.layers.len(), cd.mesh.vertex_count(), "Ebene je Vertex");
             d.tris.extend(tris(&cd.mesh.verts, &cd.mesh.indices, FLOATS_PER_VERTEX));
-            d.tex.extend(tris(&cd.textured.verts, &cd.textured.indices, crate::types::TEXTURED_FLOATS_PER_VERTEX));
-            d.layers.extend(cd.textured.layers.iter().map(|&v| v as i64));
+            // Texturierte Ecken rechnet der Shader aus dem Flächen-Puffer ([214]); hier dieselbe Rechnung auf der CPU.
+            let t = crate::mesh::textured_from_mesh(&cd.mesh);
+            d.tex.extend(tris(&t.verts, &t.indices, crate::types::TEXTURED_FLOATS_PER_VERTEX));
+            d.layers.extend(cd.layers.iter().map(|&v| v as i64));
             d.edges.extend(groups(&cd.edges, 12));
             d.caps.extend(groups(&cd.caps, 27));
         }
@@ -819,10 +820,10 @@ mod tests {
         let ch = s.apply(serde_json::from_str(&delta).unwrap());
         let d: Vec<ChunkData> = ch.dirty_chunks.iter().map(|&c| s.chunk_data(c)).collect();
         let inc = ms(t);
-        let up: usize = d.iter().map(|c| c.mesh.verts.len() + c.textured.verts.len() + c.edges.len() + c.caps.len()).sum();
+        let up: usize = d.iter().map(|c| c.mesh.verts.len() + c.layers.len() + c.edges.len() + c.caps.len()).sum();
         let all: usize = (0..s.chunk_count())
             .map(|c| s.chunk_data(c))
-            .map(|c| c.mesh.verts.len() + c.textured.verts.len() + c.edges.len() + c.caps.len())
+            .map(|c| c.mesh.verts.len() + c.layers.len() + c.edges.len() + c.caps.len())
             .sum();
         eprintln!(
             "[58] render3d Grossgebäude: alter set_model {old:.0} ms; set_model als 1 Teil {new_full:.0} ms; \

@@ -511,14 +511,21 @@ impl WebModelRenderer {
             match serde_json::from_str::<ModelInput>(json) {
                 Ok(m) => PartInput { walls: m.walls, slabs: m.slabs, meshes: m.meshes, roof_layers: Vec::new() },
                 Err(e) => {
-                    self.renderer.set_ghost_model(&self.device, &[], &[]);
+                    self.renderer.set_ghost_model(&self.device, PartInput::default());
                     return Err(JsValue::from_str(&format!("Geisterschicht parsen: {e}")));
                 }
             }
         };
-        let (tris, lines) = crate::ghost::ghost_buffers(part);
-        self.renderer.set_ghost_model(&self.device, &tris, &lines);
+        self.renderer.set_ghost_model(&self.device, part);
         Ok(())
+    }
+
+    /// [180]/[214] Teil-Update der Geisterschicht, Format wie `set_parts` (`{ reset?, remove?, upsert? }`, Teile vom Kern
+    /// nur aus den grauen Elementen): vernetzt und laedt nur Geaendertes. Gibt die Zahl der neu vernetzten Teile zurueck.
+    pub fn set_ghost_parts(&mut self, json: &str) -> Result<u32, JsValue> {
+        let upd: PartsUpdate =
+            serde_json::from_str(json).map_err(|e| JsValue::from_str(&format!("Geisterschicht-Teile parsen: {e}")))?;
+        Ok(self.renderer.update_ghost_parts(&self.device, upd).remeshed as u32)
     }
 
     /// [180] 2D-Spuren (`drawing`, `[x y z r g b]` je Vertex) und Flaechenmuster (`pattern`, wie `set_pattern_lines`) der

@@ -25,12 +25,21 @@ pub(super) fn ceiling_layers<'a>(p: &'a Project, c: &Ceiling) -> Option<&'a [Lay
 
 /// Deckenplatten (`emitSlabs`): eine Platte je Materiallage, oben→unten gestapelt.
 pub fn emit_slabs(p: &Project) -> Vec<RSlab> {
+    emit_slabs_with(p, None)
+}
+
+/// Wie [`emit_slabs`]; `joins`: schon gerechnete Schnittlinien je Wand-id (3D-Cache, [214]: sonst rechnet das
+/// Deckenauflager die Verschneidung aller Geschosse neu).
+pub fn emit_slabs_with(p: &Project, joins: Option<&HashMap<String, WallCuts>>) -> Vec<RSlab> {
     let mut ceilings: Vec<(usize, &Ceiling)> = Vec::new();
     let mut layers_of: Vec<Option<&[Layer]>> = Vec::new();
     let mut w = FlatWriter::new();
     let count = w.slot();
     // [178] Auflager an Aussenwänden: Platte bis Aussenkante Kern (abgeleiteter Umriss, Modell unverändert).
-    let bearing = super::bearing::ceiling_bearing_outlines(p);
+    let bearing = match joins {
+        Some(j) => super::bearing::bearing_outlines(p, |_| true, Some(j)),
+        None => super::bearing::ceiling_bearing_outlines(p),
+    };
     let v2 = |r: &[[f64; 2]]| -> Vec<Vec2> { r.iter().map(|q| Vec2 { x: q[0], y: q[1] }).collect() };
     for (ci, c) in p.ceilings.as_deref().unwrap_or(&[]).iter().enumerate() {
         if c.outline.len() < 3 {
