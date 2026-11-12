@@ -196,6 +196,7 @@ export function FloatingPanel({
           ctx={ctx}
           displayMode={displayMode}
           onDisplayModeChange={onDisplayModeChange}
+          showTitle={false}
         />
       ) : (
         <div className="panel-frame panel-frame-empty" />

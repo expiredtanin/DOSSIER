@@ -61,7 +61,7 @@ test("Override-Baustein „Deckenaufbau weiss“ in eine Ansichtsvorlage überne
   await expect(page.getByTestId("view-template-rules").getByRole("checkbox", { name: "Deckenaufbau weiss" })).toBeChecked();
   await expect(page.getByTestId("view-template-rule-block-add")).toBeDisabled();
   // Overrides-Tab: Regel mit Schicht-Bedingungen und Schnittflächen-Aktionen.
-  await page.getByRole("tab", { name: "Overrides" }).click();
+  await page.getByRole("tab", { name: /Überschreibungen|Overrides/ }).click();
   await page.locator(".res-ov-row", { hasText: "Deckenaufbau weiss" }).click();
   const detail = page.getByTestId("override-rule-detail");
   await expect(detail.getByTestId("override-more-condition")).toHaveCount(1);

@@ -90,3 +90,14 @@ describe("deriveSelection (Kern)", () => {
     expect(edges(roof({})).every((e) => !e.defaultGable)).toBe(true);
   });
 });
+
+describe("Führende Art bei Wand samt Öffnungen [204f]", () => {
+  it("Öffnung deren Wirtswand mit gewählt ist, verdrängt die Wand nicht", () => {
+    const p = base();
+    const o = p.openings!.find((x) => x.hostWallId)!;
+    expect(deriveSelection(p, { walls: [o.hostWallId!], openings: [o.id] })!.kind).toBe("wall");
+    expect(deriveSelection(p, { openings: [o.id] })!.kind).toBe("opening");
+    const other = p.walls.find((w) => w.id !== o.hostWallId)!;
+    expect(deriveSelection(p, { walls: [other.id], openings: [o.id] })!.kind).toBe("opening");
+  });
+});

@@ -643,6 +643,27 @@ export function useObjectSettingsShortcut(
 }
 
 /**
+ * [204c] Esc schliesst die schwebende Objekteinstellungen-Palette (Browser-Rückfall). Capture-Phase und
+ * `preventDefault`, damit Esc nicht zugleich die Auswahl aufhebt; nicht bei laufendem Werkzeug/Befehl
+ * (dort bricht Esc diese ab), in Eingabefeldern und bei offenem modalem Dialog.
+ */
+export function useCloseObjectSettingsOnEscape(blocked: boolean): void {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.ctrlKey || e.metaKey || e.altKey || e.defaultPrevented) return;
+      if (blocked || isEditableTarget(e) || (e.target as HTMLElement | null)?.tagName === "SELECT") return;
+      if (document.querySelector('[aria-modal="true"]')) return;
+      const st = getState();
+      if (!st.layout.floating.some((f) => f.panelId === "object-settings")) return;
+      st.closeFloat("object-settings");
+      e.preventDefault();
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [blocked]);
+}
+
+/**
  * [190] Auswahl-Aktionen mit Archicad-Kürzeln: Cmd/Ctrl+D = Duplizieren (Kopie mit Versatz), Cmd/Ctrl+L =
  * Sperren/Entsperren, Cmd/Ctrl+Shift+H = Ebenen der Auswahl ausblenden, Cmd/Ctrl+Shift+A = alle Ebenen
  * einblenden. Die Aktionen selbst liegen in `useSelectionCommands` (auch vom Kontextmenü gebraucht).

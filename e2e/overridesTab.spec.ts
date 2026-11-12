@@ -23,7 +23,7 @@ test("Overrides-Tab: Regel Darstellung = Ansicht mit Ausblenden ändert die Ansi
 
   await page.getByRole("button", { name: "Fenster", exact: true }).first().click();
   await page.getByRole("option", { name: /Ressourcen/ }).click();
-  await page.getByRole("tab", { name: "Overrides" }).click();
+  await page.getByRole("tab", { name: /Überschreibungen|Overrides/ }).click();
   await page.locator(".res-window").getByRole("button", { name: /Neu$/ }).click();
   const detail = page.getByTestId("override-rule-detail");
   const pick = async (field: string, option: string) => {

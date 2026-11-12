@@ -66,6 +66,7 @@ import {
   useActiveToolKeys,
   useElementClipboardShortcut,
   useObjectSettingsShortcut,
+  useCloseObjectSettingsOnEscape,
   useFitShortcuts,
   useUndoRedoShortcut,
 } from "./state/useKeyboardShortcuts";
@@ -512,6 +513,7 @@ export default function App() {
           : setLayout((l) => revealPanel(l, "object-settings", { x: 96, y: 96, w: 360, h: 560 })),
     });
   useObjectSettingsShortcut(shortcutOverrides, engineRef, openSettingsOfObject);
+  useCloseObjectSettingsOnEscape(activeTool !== "select" || commandActive);
 
   // Native macOS-Menüleiste → state/useNativeMenu.ts.
   useNativeMenu({

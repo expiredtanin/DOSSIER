@@ -969,12 +969,15 @@ export const de = {
   "objinfo.sectionLine.endX": "Ende X",
   "objinfo.sectionLine.endY": "Ende Y",
   "objinfo.sectionLine.depth": "Schnitt-Tiefe (m)",
+  "objinfo.sectionLine.depth.elevation": "Ansichts-Tiefe (m)",
   "objinfo.sectionLine.hiddenLines": "Verdeckte Kanten",
   "objinfo.sectionLine.planUnderlay": "Grundriss darunter",
   "objinfo.sectionLine.planUnderlay.none": "Keiner",
   "objinfo.sectionLine.levelMarks": "Höhenkoten",
   "objinfo.sectionLine.depthHint": "leer = unbegrenzt",
   "objinfo.sectionLine.delete": "Schnittlinie löschen",
+  "objinfo.sectionLine.delete.elevation": "Ansichtslinie löschen",
+  "objinfo.sectionLine.section.elevation": "Ansichtslinie",
   "objinfo.extrudedSolid.section": "Extrusion",
   "objinfo.extrudedSolid.height": "Höhe",
   "objinfo.extrudedSolid.taper": "Verjüngung",
@@ -1340,7 +1343,7 @@ export const de = {
   "resources.modelViews.stampHint": "Die Einstellung am Raumstempel geht vor (Bodenfläche, SIA-Kategorie; Belag und Trennlinie, wenn gewählt).",
   "resources.viewTemplates.modelView": "Modelldarstellung",
   "topbar.detail.custom": "Eigene Stufen",
-  "resources.viewTemplates.hint": "Eine Vorlage bündelt Ansichts-Einstellungen (Detailgrad, Kategorien, Overrides, Darstellung, Ansichtsbereich, Massstab …). Einmal angewendet kopiert sie die Werte; verknüpft folgt die Ansicht der Vorlage.",
+  "resources.viewTemplates.hint": "Eine Vorlage bündelt Ansichts-Einstellungen (Detailgrad, Kategorien, Überschreibungen, Darstellung, Ansichtsbereich, Massstab …). Einmal angewendet kopiert sie die Werte; verknüpft folgt die Ansicht der Vorlage.",
   "resources.viewTemplates.empty": "Noch keine Ansichtsvorlagen.",
   "resources.viewTemplates.fromActive": "Aus aktiver Ansicht",
   "resources.viewTemplates.defaultName": "Vorlage {n}",
@@ -1361,7 +1364,7 @@ export const de = {
   "resources.viewTemplates.floorFinish.off": "aus",
   "resources.viewTemplates.floorFinish.wet": "Nassräume (Platten, gröber als 1:50)",
   "resources.viewTemplates.floorFinish.all": "alle",
-  "resources.viewTemplates.rules": "Override-Regeln festlegen",
+  "resources.viewTemplates.rules": "Überschreibungsregeln festlegen",
   "resources.viewTemplates.rulesHint": "Eingeschaltete Regeln gelten in Ansichten/Ausschnitten mit dieser Vorlage, alle übrigen sind dort aus.",
   "resources.viewTemplates.ruleBlock": "Baustein übernehmen",
   "resources.viewTemplates.ruleBlockAdd": "Übernehmen",
@@ -1382,7 +1385,7 @@ export const de = {
   "resources.viewTemplates.target.snapshot": "Ausschnitt: {name}",
   "resources.viewTemplates.applyOnce": "Einmal anwenden",
   "resources.viewTemplates.applyLinked": "Verknüpfen",
-  "resources.tab.overrides": "Overrides",
+  "resources.tab.overrides": "Überschreibungen",
   "resources.tab.pens": "Stifte",
 
   // Stiftsätze (ArchiCAD-Stiftsatz-Muster).
@@ -1412,10 +1415,10 @@ export const de = {
   "resources.palettes.noColors": "Noch keine Farben in dieser Palette.",
   "resources.delete.customPalette": "Palette „{name}\" löschen",
 
-  // Grafische Overrides (Regel-Engine).
+  // Grafische Überschreibungen (Regel-Engine).
   "resources.overrides.hint":
     "Regeln übersteuern Farbe/Strichstärke/Linienstil beim Rendern (Elementdaten bleiben unverändert). Reihenfolge = Priorität: pro Feld gewinnt die oberste aktive Regel.",
-  "resources.overrides.empty": "Noch keine Override-Regeln.",
+  "resources.overrides.empty": "Noch keine Überschreibungsregeln.",
   "resources.overrides.placeholder": "Regel",
   "resources.overrides.defaultName": "Neue Regel",
   "resources.overrides.delete": "Regel löschen",
@@ -1724,7 +1727,7 @@ export const de = {
   "resources.loadStandards.n.hatches": "{n} Schraffuren",
   "resources.loadStandards.n.lineStyles": "{n} Linientypen",
   "resources.loadStandards.n.blockDefs": "{n} Symbole",
-  "resources.loadStandards.n.overrideRules": "{n} Override-Regeln (aus)",
+  "resources.loadStandards.n.overrideRules": "{n} Überschreibungsregeln (aus)",
   "resources.loadStandards.n.modelViewOptions": "{n} Modelldarstellungen",
   "resources.col.lambda": "Wärmeleitfähigkeit λ [W/mK]",
   "resources.col.density": "Rohdichte [kg/m³]",
@@ -3343,7 +3346,7 @@ export const de = {
   "viewsnap.footer.scale": "Massstab",
   "viewsnap.footer.layerCombo": "Ebenenkombi",
   "viewsnap.footer.drawingCombo": "Zeichnungskombi",
-  "viewsnap.footer.overrides": "Overrides",
+  "viewsnap.footer.overrides": "Überschreibungen",
   "viewsnap.footer.template": "Vorlage",
   "viewsnap.footer.none": "—",
 

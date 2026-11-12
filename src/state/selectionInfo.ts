@@ -600,6 +600,21 @@ const THROWN = /^Unbekannte[rs]? /;
  * Bauteil wirft wie bisher; ein Element, das das Kern-Modell nicht lesen kann,
  * ergibt `null` (mit Warnung).
  */
+/**
+ * Öffnung, die die Objekt-Info führt: die erste gewählte, deren Wirtswand NICHT mit gewählt ist.
+ * Sind alle gewählten Öffnungen Teil gewählter Wände, ist es `null` (die Wand führt).
+ */
+export function leadingOpeningId(project: Project, sel: Selection): string | null {
+  if (sel.openings.length === 0) return null;
+  if (sel.walls.length === 0) return sel.openings[0];
+  const walls = new Set(sel.walls);
+  const byId = new Map((project.openings ?? []).map((o) => [o.id, o]));
+  return sel.openings.find((id) => {
+    const host = byId.get(id)?.hostWallId;
+    return !(host && walls.has(host));
+  }) ?? null;
+}
+
 export function deriveSelection(project: Project, selection: Partial<Selection>): SelectionInfo | null {
   const sel = mergeSelection(EMPTY_SELECTION, selection);
   const args = {
@@ -609,7 +624,8 @@ export function deriveSelection(project: Project, selection: Partial<Selection>)
     // Setter des Panel-Hosts (`elementAttributesHost`) wirken auf alle gewählten, die Abschnitte kennzeichnen
     // abweichende Werte („gemischt", `mixedValues.ts`).
     ceilingId: sel.ceilings[0] ?? null,
-    openingId: sel.openings[0] ?? null,
+    // [204f] Wand samt ihrer Öffnungen gewählt (Cmd+V, Rahmenauswahl): die Wand führt, nicht die Öffnung.
+    openingId: leadingOpeningId(project, sel),
     // Ebenso Treppen, Räume, Körper und Stützen.
     stairId: sel.stairs[0] ?? null,
     roomId: sel.rooms[0] ?? null,
