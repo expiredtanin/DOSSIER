@@ -772,7 +772,9 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
 - ◐ **[57]** Tests bei jedem Push (`check.yml`). Nicht auf GitHub gelaufen. · S
 - ○ **[C6]** `cargo xtask ci`: Formatierung, Clippy, Tests, Crate-Schichtung, Asset-Herkunft, WASM-Build in einem
   Befehl. · M
-- ○ **[C9]** Ehrliche Paritäts-Doku (`docs/file-format-parity.md`, `docs/gaps.md`): was beim Speichern verloren geht. · S
+- ◐ **[C9]** Ehrliche Paritäts-Doku `doc/DATEIFORMATE.md` (12.11.2026): je Format hin/zurück/verloren mit Belegen aus dem Code; Test
+  `src/export/dateiformateDoku.test.ts` hält die Formatliste aktuell. Offen: Rundreisen in Fremdsoftware (AutoCAD, Revit, ArchiCAD, Acrobat)
+  ungeprüft; mit „ungeprüft" markierte Zeilen (Layer-Zustände im DXF-Import, PDF-Schriften, Stifte im PDF, OSM-Lizenzhinweis) nachlesen. · S
 
 ## Mac-Gegenprobe (Sammelpunkt)
 

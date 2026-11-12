@@ -601,6 +601,8 @@ Import-Liste und keine „Kontext-Schicht", die Sichtbarkeit oder Darstellung st
 Andere Formate laufen nach demselben Muster: der Kern sammelt einen flachen Puffer (`mesh_data.rs` für
 OBJ/STL/glTF, `plan/dxf.rs` für DXF/DWG), `fileio` schreibt die Datei.
 
+Was bei Speichern, Export und Import jedes Formats mitreist und was verloren geht (mit Belegen im Code): `doc/DATEIFORMATE.md` ([C9]).
+
 ---
 
 ## 9. Eine Benutzeraktion: Wand zeichnen
