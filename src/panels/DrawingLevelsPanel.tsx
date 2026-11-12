@@ -16,7 +16,7 @@
 
 import { useState } from "react";
 import { EyeIcon } from "../ui/EyeIcon";
-import { itemDisplay } from "./displayMode";
+import { frozenLevelFlags, itemDisplay } from "./displayMode";
 import { usePanelHost } from "./host";
 import { useStore } from "../state/appStore";
 import type { DrawingLevel } from "./host";
@@ -93,8 +93,9 @@ export function DrawingLevelsPanel() {
   // „Ausgewählte" (DOSSIER-Regel), damit das Sichtbarkeits-Flag sofort greift.
   const toggle = (id: string) => {
     const m = displayMode.mode;
-    if (m === "all_force" || m === "active") displayMode.setMode("all");
-    host.onToggleLevel(id);
+    const frozen = frozenLevelFlags(m, drawingLevels, activeLevelId);
+    if (frozen) displayMode.setMode("all");
+    host.onToggleLevel(id, frozen ?? undefined);
   };
 
   // Rechtsklick auf eine Zeile → Kontextmenü in App öffnen (Browser-Menü aus).

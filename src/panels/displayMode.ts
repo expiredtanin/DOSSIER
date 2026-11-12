@@ -40,6 +40,21 @@ export interface ItemDisplay {
  * nicht aktives, unsichtbares Element wird (außer in "all_force") nie
  * gezeichnet.
  */
+/** [196] Geschoss-ids, die die Zeichnungsebenen nach `display` nicht zeigen (Auge aus bzw. Modus) — fehlen auch im 3D. */
+export function hiddenFloorIds(levels: readonly { id: string; kind: string }[], display: (id: string) => { render: boolean }): string[] {
+  return levels.filter((l) => l.kind === "floor" && !display(l.id).render).map((l) => l.id);
+}
+
+/**
+ * [196] Auge einer Zeichnungsebene in „Alle anzeigen"/„Nur aktive": Der Klick schaltet auf „Ausgewählte" um. Damit er nur
+ * die eigene Ebene ändert, werden die Sichtbarkeits-Flags vorher auf das eingefroren, was der Modus gerade zeigt
+ * (sonst erschienen alle Geschosse, deren Flag an war). `null` in den übrigen Modi (Flags gelten schon).
+ */
+export function frozenLevelFlags(mode: DisplayMode, levels: readonly { id: string }[], activeId: string): Record<string, boolean> | null {
+  if (mode !== "all_force" && mode !== "active") return null;
+  return Object.fromEntries(levels.map((l) => [l.id, itemDisplay(mode, l.id === activeId, true).render]));
+}
+
 export function itemDisplay(
   mode: DisplayMode,
   isActive: boolean,

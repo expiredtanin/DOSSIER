@@ -5,6 +5,9 @@
 //! `{"hide": [codes]}`). Gefiltert wird beim Ausgeben, nicht beim Rechnen: Der 3D-Cache bleibt
 //! klassenunabhängig (`model3d_cache.rs`), Umschalten rechnet keine Wand neu.
 //!
+//! [196] Geschosse mit ausgeschaltetem Auge (`{"hideFloors": [ids]}`, Zeichnungsebenen-Panel) blenden alle Elemente ihres
+//! Geschosses aus (wie eine ausgeblendete Klasse, auch im Pick); Öffnungen folgen ihrem Wirt (Wand, Dach, Decke).
+//!
 //! Öffnungs-Einbauteile werden je Wand gemeinsam gerechnet (ohne Zuordnung zur Öffnung): dort wirkt der
 //! Filter auf die Eingabe (nur sichtbare Öffnungen, [`ClassFilter::keep_opening`]); das Loch in der Wand
 //! bleibt. Eine Öffnung verschwindet auch mit ihrem Wirt (Wand, Dach, Decke), wie in der Ansicht.
@@ -50,13 +53,20 @@ impl Owner {
 pub struct ElementSelection {
     pub only: Option<HashSet<String>>,
     pub hide: HashSet<String>,
+    /// [196] Geschosse (Zeichnungsebenen-Ids) mit ausgeschaltetem Auge: ihre Elemente fehlen im 3D.
+    pub hide_floors: HashSet<String>,
 }
 
 impl ElementSelection {
     /// Keine Einschränkung.
     pub fn is_empty(&self) -> bool {
-        self.only.is_none() && self.hide.is_empty()
+        self.only.is_none() && self.hide.is_empty() && self.hide_floors.is_empty()
     }
+}
+
+/// Wirte einer Öffnung (Wand, Dach, Decke; leere ids zählen nicht). Dachfenster und Deckenöffnungen haben keine Wand.
+fn opening_hosts(o: &Opening) -> impl Iterator<Item = &str> {
+    [Some(o.host_wall_id.as_str()), o.host_roof_id.as_deref(), o.host_ceiling_id.as_deref()].into_iter().flatten().filter(|s| !s.is_empty())
 }
 
 /// Ausgeblendete Klassen und die ids der Elemente darauf.
@@ -90,42 +100,42 @@ impl ClassFilter {
             let mut s: HashSet<&str> = o.iter().map(String::as_str).collect();
             for op in p.openings.as_deref().unwrap_or(&[]) {
                 if o.contains(&op.id) {
-                    s.insert(op.host_wall_id.as_str());
+                    s.extend(opening_hosts(op));
                 }
             }
             s
         });
-        let mut add = |code: &str, id: &str| {
-            if codes.contains(code) || sel.hide.contains(id) || only.as_ref().is_some_and(|o| !o.contains(id)) {
+        let mut add = |code: &str, id: &str, floor: &str| {
+            if codes.contains(code) || sel.hide.contains(id) || sel.hide_floors.contains(floor) || only.as_ref().is_some_and(|o| !o.contains(id)) {
                 ids.insert(id.to_owned());
             }
         };
         for w in &p.walls {
-            add(&w.category_code, &w.id);
+            add(&w.category_code, &w.id, &w.floor_id);
         }
         for c in p.ceilings.as_deref().unwrap_or(&[]) {
-            add(&c.category_code, &c.id);
+            add(&c.category_code, &c.id, &c.floor_id);
         }
         for r in p.roofs.as_deref().unwrap_or(&[]) {
-            add(&r.category_code, &r.id);
+            add(&r.category_code, &r.id, &r.floor_id);
         }
         for s in p.stairs.as_deref().unwrap_or(&[]) {
-            add(&s.category_code, &s.id);
+            add(&s.category_code, &s.id, &s.floor_id);
         }
         for c in p.columns.as_deref().unwrap_or(&[]) {
-            add(&c.category_code, &c.id);
+            add(&c.category_code, &c.id, &c.floor_id);
         }
         for t in p.trees.as_deref().unwrap_or(&[]) {
-            add(&t.category_code, &t.id);
+            add(&t.category_code, &t.id, &t.floor_id);
         }
         for s in p.extruded_solids.as_deref().unwrap_or(&[]) {
-            add(&s.category_code, &s.id);
+            add(&s.category_code, &s.id, "");
         }
         for c in p.context.as_deref().unwrap_or(&[]) {
-            add(c.category_code(), c.id());
+            add(c.category_code(), c.id(), "");
         }
         for d in &p.drawings2d {
-            add(&d.category_code, &d.id);
+            add(&d.category_code, &d.id, &d.level_id);
         }
         // Öffnungen nach den Wirten (Wand, Dach, Decke), die jetzt schon in `ids` stehen; mit `only` zeigt
         // ein gewählter Wirt seine Öffnungen.
@@ -134,7 +144,7 @@ impl ClassFilter {
             .as_deref()
             .unwrap_or(&[])
             .iter()
-            .filter(|o| codes.contains(&o.category_code) || sel.hide.contains(&o.id) || ids.contains(&o.host_wall_id))
+            .filter(|o| codes.contains(&o.category_code) || sel.hide.contains(&o.id) || opening_hosts(o).any(|h| ids.contains(h)))
             .map(|o| o.id.clone())
             .collect();
         ids.extend(hidden_openings);
@@ -152,7 +162,11 @@ impl ClassFilter {
                 .and_then(|a| a.as_array())
                 .map(|a| a.iter().filter_map(|s| s.as_str().map(String::from)).collect())
         };
-        let sel = ElementSelection { only: list("only").map(|o| o.into_iter().collect()), hide: list("hideIds").unwrap_or_default().into_iter().collect() };
+        let sel = ElementSelection {
+            only: list("only").map(|o| o.into_iter().collect()),
+            hide: list("hideIds").unwrap_or_default().into_iter().collect(),
+            hide_floors: list("hideFloors").unwrap_or_default().into_iter().collect(),
+        };
         ClassFilter::with_elements(p, &list("hide").unwrap_or_default(), &sel)
     }
 
@@ -333,6 +347,40 @@ mod tests {
         ClassFilter::from_text(&p, r#"{"only":["w2"]}"#).retain_pick(&mut g);
         assert!(g.walls.iter().all(|w| w.wall_id == "w2") && !g.walls.is_empty());
         assert!(g.openings.is_empty() && g.columns.is_empty());
+    }
+
+    /// [197]/[196] Öffnungen ohne Wand (Dachfenster, Deckenöffnung) folgen ihrem Wirt: nur Wand gewählt → weg;
+    /// Wirt Dach ausgeblendet → weg; Geschoss-Auge aus → Elemente des Geschosses samt Öffnungen weg.
+    #[test]
+    fn dachfenster_folgen_dem_wirt_und_geschoss_auge() {
+        let mut v = serde_json::to_value(project(&[])).unwrap();
+        v["walls"] = serde_json::json!([
+            {"id": "w1", "type": "wall", "floorId": "EG", "categoryCode": "20", "start": {"x": 0, "y": 0}, "end": {"x": 5, "y": 0}, "wallTypeId": "aw", "height": 2.8},
+            {"id": "w2", "type": "wall", "floorId": "OG", "categoryCode": "20", "start": {"x": 0, "y": 4}, "end": {"x": 5, "y": 4}, "wallTypeId": "aw", "height": 2.8}]);
+        v["wallTypes"] = serde_json::json!([{"id": "aw", "name": "AW", "layers": [{"componentId": "c", "thickness": 0.2}]}]);
+        v["roofs"] = serde_json::json!([{"id": "r1", "type": "roof", "floorId": "OG", "categoryCode": "31", "outline": [{"x": 0, "y": 0}, {"x": 6, "y": 0}, {"x": 6, "y": 5}, {"x": 0, "y": 5}],
+            "shape": "sattel", "pitchDeg": 35, "overhang": 0.3, "ridgeAxis": "x", "baseElevation": 5.8, "thickness": 0.3}]);
+        v["openings"] = serde_json::json!([
+            {"id": "o1", "type": "opening", "kind": "window", "hostWallId": "w1", "categoryCode": "40", "position": 2.0, "width": 1.0, "height": 1.2, "sillHeight": 0.9},
+            {"id": "o2", "type": "opening", "kind": "window", "hostWallId": "", "hostRoofId": "r1", "hostPoint": {"x": 3, "y": 1}, "categoryCode": "21", "position": 0, "width": 0.8, "height": 1.2, "sillHeight": 0}]);
+        let p: Project = serde_json::from_value(v).unwrap_or_else(|e| panic!("Projekt: {e}"));
+        let f = ClassFilter::from_text(&p, r#"{"only":["w1"]}"#);
+        assert!(!f.hides("w1") && !f.hides("o1") && f.hides("o2") && f.hides("r1") && f.hides("w2"));
+        let f = ClassFilter::from_text(&p, r#"{"only":["o2"]}"#);
+        assert!(!f.hides("o2") && !f.hides("r1") && f.hides("o1") && f.hides("w1"));
+        let f = ClassFilter::from_text(&p, r#"{"hideIds":["r1"]}"#);
+        assert!(f.hides("o2") && !f.hides("o1"));
+        let f = ClassFilter::from_text(&p, r#"{"hideFloors":["OG"]}"#);
+        assert!(f.hides("w2") && f.hides("r1") && f.hides("o2") && f.hides("k1") && !f.hides("w1") && !f.hides("o1") && !f.hides("T1") && !f.hides("s1"));
+        assert!(f.hides("L") == false);
+        let f = ClassFilter::from_text(&p, r#"{"hideFloors":["EG"]}"#);
+        assert!(f.hides("w1") && f.hides("o1") && f.hides("T1") && f.hides("s1") && f.hides("L") && !f.hides("w2") && !f.hides("o2"));
+        // Teile und Pick ohne die Teile des ausgeblendeten Geschosses.
+        let mut g = crate::explode3d::pick_geometry(&p, 0.0).unwrap();
+        ClassFilter::from_text(&p, r#"{"hideFloors":["OG"]}"#).retain_pick(&mut g);
+        assert!(g.walls.iter().all(|w| w.wall_id == "w1") && !g.walls.is_empty() && g.roofs.is_empty() && g.columns.is_empty());
+        let parts = crate::explode3d::parts_filtered(&p, true, 2.0, false, 0.0, &ClassFilter::from_text(&p, r#"{"hideFloors":["OG"]}"#)).unwrap();
+        assert!(parts.walls.iter().all(|w| w.wall_id == "w1") && parts.roof_meshes.is_empty() && parts.column_meshes.iter().all(|m| !matches!(m.owner, Owner::Column(_))));
     }
 
     /// Jede Klasse einzeln aus (Ebenen-Baum bzw. `hide`): nur ihr Teil fehlt im 3D (auch in der Explosion) und im Pick.

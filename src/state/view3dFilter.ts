@@ -16,11 +16,9 @@ export interface View3dFilter {
   only: string[] | null;
   /** Temporär ausgeblendete Element-ids. */
   hidden: string[];
-  /** Zählt die Anfragen „Kamera auf das Gezeigte einpassen" (der 3D-Viewport passt bei jeder Änderung ein). */
-  fitSeq: number;
 }
 
-export const NO_VIEW3D_FILTER: View3dFilter = Object.freeze({ only: null, hidden: [], fitSeq: 0 }) as View3dFilter;
+export const NO_VIEW3D_FILTER: View3dFilter = Object.freeze({ only: null, hidden: [] }) as View3dFilter;
 
 /** Element-Arten, die im 3D vorkommen (Räume, Schnittlinien, Lage-Darstellung und Gruppen nicht). */
 const KINDS_3D: readonly SelectionKind[] = ["walls", "ceilings", "openings", "stairs", "solids", "columns", "roofs", "contextObjects", "trees", "drawings"];
@@ -36,11 +34,11 @@ export function isSelectionMode(f: View3dFilter): boolean {
 }
 
 /**
- * Cmd/Ctrl+3: mit Auswahl nur diese zeigen (ausgeblendete werden vergessen), ohne Auswahl alles zeigen. Beide Male
- * passt der 3D-Viewport die Kamera ein.
+ * Cmd/Ctrl+3: mit Auswahl nur diese zeigen (ausgeblendete werden vergessen), ohne Auswahl alles zeigen. Die Kamera
+ * bleibt stehen (Einpassen nur mit Cmd/Ctrl+Shift+F).
  */
-export function showSelection3d(f: View3dFilter, ids: readonly string[]): View3dFilter {
-  return ids.length ? { only: [...new Set(ids)], hidden: [], fitSeq: f.fitSeq + 1 } : { only: null, hidden: [], fitSeq: f.fitSeq + 1 };
+export function showSelection3d(ids: readonly string[]): View3dFilter {
+  return ids.length ? { only: [...new Set(ids)], hidden: [] } : { only: null, hidden: [] };
 }
 
 /** Cmd/Ctrl+4: die Elemente `ids` zusätzlich ausblenden (Kamera bleibt). Ohne ids unverändert. */
@@ -50,9 +48,9 @@ export function hideSelection3d(f: View3dFilter, ids: readonly string[]): View3d
   return hidden.length === f.hidden.length ? f : { ...f, hidden };
 }
 
-/** Filter für die 3D-Abfragen: Klassen-Codes `hide` plus Element-Auswahl (Kern `ClassFilter::from_text`). */
-export function toFilter3d(f: View3dFilter, hide: readonly string[]): Filter3d {
-  return { hide, only: f.only, hideIds: f.hidden };
+/** Filter für die 3D-Abfragen: Klassen-Codes `hide`, Geschosse mit ausgeschaltetem Auge ([196]) plus Element-Auswahl (Kern `ClassFilter::from_text`). */
+export function toFilter3d(f: View3dFilter, hide: readonly string[], hideFloors: readonly string[] = []): Filter3d {
+  return { hide, only: f.only, hideIds: f.hidden, hideFloors };
 }
 
 // ── Store ───────────────────────────────────────────────────────────────────

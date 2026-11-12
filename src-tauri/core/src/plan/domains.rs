@@ -490,6 +490,17 @@ fn floor_finishes(c: &Ctx, rooms: &[Primitive], out: &mut Vec<Primitive>) {
         };
         let segs = if own_rings.is_empty() { segs } else { ff::clip_outside_all(segs, &own_rings) };
         let w = ov.lineweight.map_or(w, |x| ff::weight(Some(x)));
+        // [196] Der Belag gehört der Decke (oft die eines anderen Geschosses: OK Decke = Boden dieses Geschosses): eine
+        // unsichtbare Fläche in ihrem Umriss macht ihn anwählbar (Pick liefert die Decke) und mit Entf löschbar. Liegt
+        // unter allem (vor Wänden/Räumen gezeichnet), nimmt also nur Klicks, die sonst ins Leere gingen.
+        if !segs.is_empty() && ce.outline.len() >= 3 && ce.floor_id != c.a.floor {
+            let pts: Vec<[f64; 2]> = ce.outline.iter().map(|v| [v.x, v.y]).collect();
+            let holes: Vec<Vec<[f64; 2]>> = crate::opening_shape::ceiling_hole_rings(p, ce).iter().map(|h| h.iter().map(|v| [v.x, v.y]).collect()).collect();
+            let merged = crate::polygon_holes::merge_holes(&pts, &holes, 1e-4);
+            let ring: Vec<Vec2> = merged.ring.iter().map(|q| pv(*q)).collect();
+            let bridges = (!merged.bridge_edges.is_empty()).then(|| merged.bridge_edges.iter().map(|&k| k as f64).collect());
+            out.push(polygon(ring, "none", "none", 0.0, no_hatch(), Some(c.greyed(&ce.category_code)), bridges, Pick::Ceiling(&ce.id)));
+        }
         jobs.push((segs, w, ov.color.unwrap_or(ink), &ce.category_code, ov.linetype_id));
     }
     for (room, comp, ring) in &own {
@@ -2860,6 +2871,17 @@ mod tests {
         // Decke C1 (über dem EG) ist der Boden des OG: Belag im OG, nicht im EG.
         assert!(count("og") > 10);
         assert_eq!(count("eg"), 0);
+        // [196] Der Belag im OG gehört der Decke C1 des EG: Eine unsichtbare Fläche macht ihn anwählbar (Pick: C1).
+        let picks = |p: &Project, floor: &str| {
+            let t = serde_json::json!({ "floor": floor, "show": ["30"], "grey": [], "scale": 50 }).to_string();
+            let r = plan_domains(p, &PlanArgs::parse(1.0, &t).unwrap()).unwrap();
+            r.ceilings.iter().filter(|q| matches!(q, Primitive::Polygon { ceiling_id: Some(id), fill, .. } if id == "C1" && fill == "none")).count()
+        };
+        let mut plain = p.clone();
+        let top = crate::model3d::ceiling_type_ref(&plain, &ce).unwrap().2[0].component_id.clone();
+        plain.components.iter_mut().find(|c| c.id == top).unwrap().surface_pattern = None;
+        assert_eq!(picks(&p, "og"), picks(&plain, "og") + 1);
+        assert_eq!(picks(&p, "eg"), picks(&plain, "eg"));
     }
 
     /// [156] Beispiel mit Belagsmuster auf C1 (Boden des OG) und einem Raum im OG.

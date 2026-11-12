@@ -32,7 +32,7 @@ export interface DrawingLevelsSyncState {
 
 export interface DrawingLevelsCommandHandlers {
   onSelectLevel: (id: string) => void;
-  onToggleLevel: (id: string) => void;
+  onToggleLevel: (id: string, frozen?: Record<string, boolean>) => void;
   onAddFloor: () => void;
   onAddSection: () => void;
   onAddElevation: () => void;

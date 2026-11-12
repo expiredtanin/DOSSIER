@@ -72,6 +72,9 @@ test("Geschoss per Ctrl+6/5 mit gleichem Ausschnitt, Auswahl in 3D zeigen/ausble
   expect(only.only).toEqual([wall]);
   expect(only.walls).toEqual([wall]);
   expect(only.pickWalls).toEqual([wall]);
+  // [197] Nur diese Wand: keine Dachfenster/Deckenöffnungen (Wirt Dach/Decke), nur Öffnungen dieser Wand.
+  expect(only.pickOpenings.every((o) => o.host === wall)).toBe(true);
+  expect(all.pickOpenings.some((o) => o.host === "dach-haupt")).toBe(true);
 
   // Ctrl+4: die gewählte Wand ausblenden (nicht mehr im Modell, nicht anwählbar), Auswahl leer.
   await page.keyboard.press("Control+4");

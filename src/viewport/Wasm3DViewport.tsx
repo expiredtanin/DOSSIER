@@ -419,6 +419,7 @@ export function Wasm3DViewport({
   onGrip3dEditTab,
   onGrip3dEditCancel,
   hiddenCodes,
+  hiddenFloors,
 }: {
   project: Project;
   /** Kanonischer Blickwinkel (Oberleiste) — s. Datei-Kommentar. */
@@ -534,6 +535,8 @@ export function Wasm3DViewport({
    * beides fehlt im Modell und ist nicht anwählbar.
    */
   hiddenCodes?: readonly string[];
+  /** [196] Geschosse (Zeichnungsebenen-ids) mit ausgeschaltetem Auge: ihre Elemente fehlen im Modell und im Pick. */
+  hiddenFloors?: readonly string[];
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   // Pick-Callback in einem Ref spiegeln, damit der (einmal registrierte)
@@ -606,11 +609,13 @@ export function Wasm3DViewport({
   // [185] Element-Auswahl („Auswahl in 3D zeigen", temporär ausgeblendet) kommt dazu; ohne sie bleibt `hide` die
   // Code-Liste (gleicher Text an den Kern wie bisher).
   const elementFilter = useView3dFilter();
-  const { only: onlyIds, hidden: hiddenIds, fitSeq } = elementFilter;
+  const { only: onlyIds, hidden: hiddenIds } = elementFilter;
+  const floorsKey = (hiddenFloors ?? []).join("\u0001");
   const hide = useMemo<Hide3d>(() => {
     const codes = hiddenKey ? hiddenKey.split("\u0001") : [];
-    return onlyIds || hiddenIds.length ? toFilter3d({ only: onlyIds, hidden: hiddenIds, fitSeq: 0 }, codes) : codes;
-  }, [hiddenKey, onlyIds, hiddenIds]);
+    const floors = floorsKey ? floorsKey.split("\u0001") : [];
+    return onlyIds || hiddenIds.length || floors.length ? toFilter3d({ only: onlyIds, hidden: hiddenIds }, codes, floors) : codes;
+  }, [hiddenKey, floorsKey, onlyIds, hiddenIds]);
   const hideRef = useRef(hide);
   hideRef.current = hide;
   // Versatz je Geschoss ([65]) für Griffe und gezogene Höhen (Modell bleibt unversetzt).
@@ -720,15 +725,6 @@ export function Wasm3DViewport({
     if (!ready) return;
     applyPreset();
   }, [ready, applyPreset]);
-
-  // [185] „Auswahl in 3D zeigen" / alles zeigen: Kamera auf das Gezeigte einpassen (das Modell ist im Effekt oben
-  // schon mit dem neuen Filter eingespielt).
-  const fitSeqRef = useRef(fitSeq);
-  useEffect(() => {
-    if (!ready || fitSeqRef.current === fitSeq) return;
-    fitSeqRef.current = fitSeq;
-    fitCameraRef.current();
-  }, [ready, fitSeq]);
 
   // Kamera-Brücke ([BCF]): Lesen/Setzen der Orbit-Kamera, Schnappschuss und Schnitt von aussen
   // (`cameraBridge.ts`). Der Orbit-Zustand ist die Wahrheit; nach einem Preset ist er aus der

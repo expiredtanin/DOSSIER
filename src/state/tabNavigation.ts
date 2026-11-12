@@ -50,10 +50,10 @@ export function stepActiveFloor(dir: 1 | -1): void {
 
 /**
  * [185] Cmd/Ctrl+3 „Auswahl in 3D zeigen": mit Auswahl zeigt der 3D-Reiter nur diese (Titel „3D · Auswahl"), ohne
- * Auswahl wieder alles; wechselt in den 3D-Reiter bzw. öffnet ihn, die Kamera passt sich ein.
+ * Auswahl wieder alles; wechselt in den 3D-Reiter bzw. öffnet ihn, die Kamera bleibt stehen (Einpassen nur Cmd/Ctrl+Shift+F).
  */
 export function showSelectionIn3d(): void {
-  setView3dFilter(showSelection3d(getView3dFilter(), selectionIds3d(getState().selection)));
+  setView3dFilter(showSelection3d(selectionIds3d(getState().selection)));
   switchViewType("perspektive");
 }
 
