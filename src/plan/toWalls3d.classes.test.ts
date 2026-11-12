@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vitest";
 import type { Project } from "../model/types";
 import { buildComplexSampleProject } from "../model/sampleProjectComplex";
-import { emitSurfacePatternLines, hiddenClassCodes, pickGeometry, projectToModel3d, projectToModel3dParts } from "./toWalls3d";
+import { emitSurfacePatternLines, ghostFilter3d, hiddenClassCodes, pickGeometry, projectToModel3d, projectToModel3dParts } from "./toWalls3d";
 import { documentFor } from "../core/document";
 import { pickNearest, type Ray } from "../viewport/raycast3d";
 
@@ -39,6 +39,23 @@ describe("3D nach Klassen ([180])", () => {
       const hit = pickNearest(ray, g.walls, g.slabs, g.openings, g.stairs, g.roofs, g.contextMeshes, g.drawings, g.columns, g.solids, g.openingMeshes, g.stairMeshes, g.drawingMeshes, g.trees);
       expect(hit?.kind).not.toBe("roof");
     }
+  });
+
+  it("Wände grau: im Hauptmodell weg, in der Geisterschicht allein; anwählbar ausser gesperrt", () => {
+    const all = projectToModel3d(p);
+    const hide = { grey: ["20"] };
+    expect(ghostFilter3d(["20"])).toBeNull();
+    const main = projectToModel3d(p, { hide });
+    const ghost = projectToModel3d(p, { hide: ghostFilter3d(hide)! });
+    expect(main.walls).toHaveLength(0);
+    expect(ghost.walls.length).toBe(all.walls.length);
+    expect(roofs(ghost)).toBe(0);
+    expect(roofs(main)).toBe(roofs(all));
+    // Wechsel hin und her über denselben Cache: gleiche Ergebnisse.
+    expect(projectToModel3d(p, { hide }).walls).toHaveLength(0);
+    expect(projectToModel3d(p, { hide: ghostFilter3d(hide)! }).walls.length).toBe(all.walls.length);
+    expect(pickGeometry(p, 0, hide).walls.length).toBe(pickGeometry(p).walls.length);
+    expect(pickGeometry(p, 0, { grey: ["20"], lock: ["20"] }).walls).toHaveLength(0);
   });
 
   it("Wände aus: Wände, ihre Öffnungen und Wandmuster fehlen", () => {

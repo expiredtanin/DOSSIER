@@ -33,7 +33,7 @@
 //   dossier-cli <projekt.obp> erkennen [--level EG] [--source ebene] [--out neu.obp]
 //                                                  [154] Bauteile aus 2D-Zeichnung erkennen (Wände, Öffnungen, Räume
 //                                                  ins Geschoss); Bericht als JSON. Z. B. convert plan.dxf p.obp --cmd "erkennen --out e.obp"
-//   dossier-cli <projekt.obp> model3d [--explode 3] [--hide …] [--out modell.json]   3D-Modell fürs Headless-Rendern (render_png)
+//   dossier-cli <projekt.obp> model3d [--explode 3] [--hide …] [--grey …] [--out modell.json]   3D-Modell fürs Headless-Rendern (render_png)
 //   dossier-cli pointcloud-info <datei.las|laz|e57|ply|xyz|pts> [--voxel 0.05] [--max 2000000]
 //                                                  Punktwolke lesen ([B9]) und Bericht als JSON (ohne Projekt)
 //   dossier-cli pdf-info <datei.pdf> [--page 1]    Vektor-PDF lesen ([76]): Seiten, Pfade, Texte, BBox (pt) als JSON
@@ -114,6 +114,7 @@ import {
   viewportLevelPlan,
   planToRenderScene,
   projectToModel3d,
+  ghostFilter3d,
   parseProjectFile,
   planToSvgString,
   serializeProject,
@@ -136,7 +137,7 @@ import {
   recognizeReport,
   recognizeSourceLevels,
 } from "../core";
-import type { Project, ViewTemplate } from "../core";
+import type { Filter3d, Project, ViewTemplate } from "../core";
 import { serveStdio } from "./mcp";
 import { startBridge } from "./mcpBridge";
 
@@ -232,9 +233,9 @@ function templateFor(project: Project, levelId: string, args: Args): ViewTemplat
 }
 
 /** [180] --hide <Code|Name,…>: Klassen ausblenden (z. B. --hide "Schatten,Auto-Bemassung"); Codes. */
-function hideFlagCodes(project: Project, args: Args): string[] {
+function hideFlagCodes(project: Project, args: Args, flag = "hide"): string[] {
   const out: string[] = [];
-  for (const w of (args.flags.get("hide") ?? "").split(",").map((x) => x.trim().toLowerCase()).filter(Boolean)) {
+  for (const w of (args.flags.get(flag) ?? "").split(",").map((x) => x.trim().toLowerCase()).filter(Boolean)) {
     const find = (ls: Project["layers"]): string | undefined => {
       for (const l of ls) {
         if (l.code.toLowerCase() === w || l.name.toLowerCase() === w) return l.code;
@@ -983,9 +984,18 @@ async function execute(project: Project, file: string, command: string, rest: st
       await serveStdio(file);
       return 0;
     case "model3d":
+    {
       // `--explode <m>`: Explosionsaxonometrie ([65]), Geschosse um Index × Abstand angehoben. `--hide`: Klassen aus ([180]).
-      out(args, JSON.stringify(projectToModel3d(project, { explode: Number(args.flags.get("explode") ?? 0) || 0, hide: hideFlagCodes(project, args) })), `${project.name || "projekt"}.model3d.json`);
+      // `--grey`: Klassen grau ([180]): fehlen im Modell und stehen in `ghost` (Geisterschicht, render_png zeichnet sie
+      // durchscheinend wie der Viewer).
+      const explode = Number(args.flags.get("explode") ?? 0) || 0;
+      const filter: Filter3d = { hide: hideFlagCodes(project, args), grey: hideFlagCodes(project, args, "grey") };
+      const ghost = ghostFilter3d(filter);
+      const model = projectToModel3d(project, { explode, hide: filter });
+      const json = ghost ? { ...model, ghost: projectToModel3d(project, { explode, hide: ghost }) } : model;
+      out(args, JSON.stringify(json), `${project.name || "projekt"}.model3d.json`);
       return 0;
+    }
     case "bench": {
       const runs = Number(args.flags.get("runs") ?? 10);
       const floor = findLevel(project, ["floor"], undefined);

@@ -48,9 +48,42 @@ export function hideSelection3d(f: View3dFilter, ids: readonly string[]): View3d
   return hidden.length === f.hidden.length ? f : { ...f, hidden };
 }
 
-/** Filter für die 3D-Abfragen: Klassen-Codes `hide`, Geschosse mit ausgeschaltetem Auge ([196]) plus Element-Auswahl (Kern `ClassFilter::from_text`). */
-export function toFilter3d(f: View3dFilter, hide: readonly string[], hideFloors: readonly string[] = []): Filter3d {
-  return { hide, only: f.only, hideIds: f.hidden, hideFloors };
+/**
+ * Filter für die 3D-Abfragen: Klassen-Codes `hide`, Geschosse mit ausgeschaltetem Auge ([196]) plus Element-Auswahl
+ * (Kern `ClassFilter::from_text`); dazu graue und gesperrte Klassen des Darstellungsmodus ([180], {@link classDisplay3d}).
+ */
+export function toFilter3d(
+  f: View3dFilter,
+  hide: readonly string[],
+  hideFloors: readonly string[] = [],
+  dim: { grey?: readonly string[]; lock?: readonly string[] } = {},
+): Filter3d {
+  const out: Filter3d = { hide, only: f.only, hideIds: f.hidden, hideFloors };
+  if (dim.grey?.length) out.grey = dim.grey;
+  if (dim.lock?.length) out.lock = dim.lock;
+  return out;
+}
+
+/**
+ * [180] Darstellungsmodus des Ebenen-Panels je Klasse als Code-Listen fürs 3D, gleiche Logik wie im Grundriss:
+ * `hide` = nicht gezeichnet, `grey` = gedämpft (Geisterschicht), `lock` = nicht anwählbar (Modi „grau + gesperrt"
+ * und „gesperrt"; grau allein bleibt anwählbar wie im Grundriss).
+ */
+export function classDisplay3d(
+  codes: readonly string[],
+  display: (code: string) => { render: boolean; greyed: boolean; locked: boolean },
+): { hide: string[]; grey: string[]; lock: string[] } {
+  const out = { hide: [] as string[], grey: [] as string[], lock: [] as string[] };
+  for (const c of codes) {
+    const d = display(c);
+    if (!d.render) {
+      out.hide.push(c);
+      continue;
+    }
+    if (d.greyed) out.grey.push(c);
+    if (d.locked) out.lock.push(c);
+  }
+  return out;
 }
 
 // ── Store ───────────────────────────────────────────────────────────────────

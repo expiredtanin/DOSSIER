@@ -19,7 +19,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ContextImage, Project } from "../model/types";
-import { emitDrawingLineVerts, emitSurfacePatternLines, filter3d, hiddenClassCodes, projectToModel3d, projectToModel3dParts, siteEnvelope3d } from "../core";
+import { emitDrawingLineVerts, emitSurfacePatternLines, filter3d, ghostFilter3d, hiddenClassCodes, projectToModel3d, projectToModel3dParts, siteEnvelope3d } from "../core";
 import type { Hide3d } from "../core";
 import { Model3dPartsSync } from "./model3dPartsSync";
 import type { DetailLevel } from "../model/viewTypes";
@@ -148,6 +148,8 @@ interface WebModelRendererLike {
   /** Nur Darstellung ändern; `false` = Wolke unbekannt. */
   set_point_cloud_style?(id: number, colorMode: string, pointSize: number, visible: boolean): boolean;
   remove_point_cloud?(id: number): void;
+  /** [180] Geisterschicht der grauen Klassen (Modell-JSON wie `set_model`; leer löscht). */
+  set_ghost_model?(json: string): void;
   set_camera(
     eyeX: number,
     eyeY: number,
@@ -297,6 +299,16 @@ export function useWasm3dRenderer(
         r.set_ghost(off ? new Float32Array(0) : siteEnvelope3d(project));
       } catch (e) {
         console.warn("render3d set_ghost fehlgeschlagen:", e);
+      }
+    }
+    if (typeof r.set_ghost_model === "function") {
+      try {
+        // [180] Klassen im Darstellungsmodus „grau": gedämpft und durchscheinend (render3d `ghost.rs`); im
+        // Hauptmodell fehlen sie (Kern `ClassFilter`). Ohne graue Klasse leer (löscht eine frühere Schicht).
+        const ghost = ghostFilter3d(hide);
+        r.set_ghost_model(ghost ? JSON.stringify(projectToModel3d(project, { detail, voids: true, explode, hide: ghost })) : "");
+      } catch (e) {
+        console.warn("render3d set_ghost_model fehlgeschlagen:", e);
       }
     }
     if (typeof r.set_pattern_lines === "function") {

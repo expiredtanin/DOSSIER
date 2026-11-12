@@ -419,6 +419,10 @@ pub struct Renderer {
     /// durchscheinenden Koerper; None = nichts. Ueber `set_ghost`, gezeichnet nach allem Opaken.
     ghost: Option<LineBuffers>,
     ghost_lines: Option<LineBuffers>,
+    /// [180] Geisterschicht: Elemente grauer Klassen (`ghost::ghost_buffers`), gleiche Pipeline und Puffer-Formate
+    /// wie `ghost`/`ghost_lines`, aber unabhaengig davon gesetzt (`set_ghost_model`).
+    ghost_model: Option<LineBuffers>,
+    ghost_model_lines: Option<LineBuffers>,
     /// Schnittflaechen-Kappen (TriangleList, CAP_WGSL, eigenes Vertex-Layout
     /// [pos vec3, uv vec2]). Teilt sich die `Globals`-Bind-Group; leichter
     /// Depth-Bias zur Kamera hin gegen Z-Fighting mit den an der Ebene
@@ -1334,6 +1338,8 @@ impl Renderer {
             ghost_pipeline,
             ghost: None,
             ghost_lines: None,
+            ghost_model: None,
+            ghost_model_lines: None,
             cap_pipeline,
             cut_line_pipeline,
             textured_pipeline,
@@ -1633,6 +1639,29 @@ impl Renderer {
         };
         self.ghost = buf("ghost.vbo", tris, GHOST_FLOATS_PER_VERTEX, 3);
         self.ghost_lines = buf("ghost.lines.vbo", lines, GRID_FLOATS_PER_VERTEX, 2);
+    }
+
+    /// [180] Setzt/loescht die Geisterschicht (Elemente grauer Klassen): Formate wie [`Self::set_ghost`]
+    /// (`ghost::ghost_buffers`). Leere Slices loeschen.
+    pub fn set_ghost_model(&mut self, device: &wgpu::Device, tris: &[f32], lines: &[f32]) {
+        let buf = |label: &str, v: &[f32], stride: usize, per: usize| {
+            let n = v.len() / stride / per * per;
+            (n > 0).then(|| LineBuffers {
+                vbo: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some(label),
+                    contents: bytemuck::cast_slice(&v[..n * stride]),
+                    usage: wgpu::BufferUsages::VERTEX,
+                }),
+                vertex_count: n as u32,
+            })
+        };
+        self.ghost_model = buf("ghost.model.vbo", tris, GHOST_FLOATS_PER_VERTEX, 3);
+        self.ghost_model_lines = buf("ghost.model.lines.vbo", lines, GRID_FLOATS_PER_VERTEX, 2);
+    }
+
+    /// [180] Ob eine Geisterschicht gesetzt ist (Test/Diagnose).
+    pub fn has_ghost_model(&self) -> bool {
+        self.ghost_model.is_some() || self.ghost_model_lines.is_some()
     }
 
     /// Ob durchscheinende Koerper gesetzt sind (Test/Diagnose).
@@ -2470,13 +2499,14 @@ impl Renderer {
 
             // 3b) Durchscheinende Koerper ([63] zulaessige Huelle): Kanten tiefengetestet wie das
             //     Gitter, dann die Flaechen mit Alpha-Blending (ohne Tiefen-Write) nach allem Opaken.
-            if let Some(gl) = &self.ghost_lines {
+            //     [180] Davor die Geisterschicht der grauen Klassen (gleiche Pipelines).
+            for gl in [&self.ghost_model_lines, &self.ghost_lines].into_iter().flatten() {
                 pass.set_pipeline(&self.grid_pipeline);
                 pass.set_bind_group(0, &self.bind_group, &[]);
                 pass.set_vertex_buffer(0, gl.vbo.slice(..));
                 pass.draw(0..gl.vertex_count, 0..1);
             }
-            if let Some(g) = &self.ghost {
+            for g in [&self.ghost_model, &self.ghost].into_iter().flatten() {
                 pass.set_pipeline(&self.ghost_pipeline);
                 pass.set_bind_group(0, &self.bind_group, &[]);
                 pass.set_vertex_buffer(0, g.vbo.slice(..));

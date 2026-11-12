@@ -92,7 +92,7 @@ pub fn push_walls(value: serde_json::Value) {
 fn parse_model3d(value: serde_json::Value) -> Result<Model3d, serde_json::Error> {
     if value.is_array() {
         let walls = serde_json::from_value::<Vec<WallInput>>(value)?;
-        Ok(Model3d { walls, slabs: Vec::new(), meshes: Vec::new() })
+        Ok(Model3d { walls, slabs: Vec::new(), meshes: Vec::new(), ghost: None })
     } else {
         serde_json::from_value::<Model3d>(value)
     }
@@ -249,6 +249,26 @@ struct Model3d {
     /// haelt aeltere Payloads ohne `meshes` gueltig.
     #[serde(default)]
     meshes: Vec<MeshInput>,
+    /// [180] Geisterschicht: Elemente grauer Klassen (Darstellungsmodus „grau"), gedaempft und durchscheinend
+    /// (`render3d::ghost`), wie im WASM-Viewer. Fehlt = keine.
+    #[serde(default)]
+    ghost: Option<Box<Model3d>>,
+}
+
+/// Modell samt Geisterschicht in den Renderer laden ([180]).
+#[cfg(feature = "native3d")]
+fn upload_model3d(renderer: &mut Renderer3d, device: &wgpu::Device, model: &Model3d) {
+    renderer.upload_model(device, &model.walls, &model.slabs, &model.meshes);
+    let (tris, lines) = match &model.ghost {
+        Some(g) => render3d::ghost::ghost_buffers(render3d::scene::PartInput {
+            walls: g.walls.clone(),
+            slabs: g.slabs.clone(),
+            meshes: g.meshes.clone(),
+            roof_layers: Vec::new(),
+        }),
+        None => (Vec::new(), Vec::new()),
+    };
+    renderer.set_ghost_model(device, &tris, &lines);
 }
 
 #[cfg(feature = "native3d")]
@@ -266,7 +286,7 @@ impl GpuState3d {
     fn new(window: Arc<Window>, model: &Model3d) -> Self {
         let (surface, device, queue, config) = configure_surface(&window, "3d.device");
         let mut renderer = Renderer3d::new(&device, config.format);
-        renderer.upload_model(&device, &model.walls, &model.slabs, &model.meshes);
+        upload_model3d(&mut renderer, &device, model);
         renderer.set_light([6.0, 12.0, 4.0]);
         Self { surface, device, queue, config, renderer, window }
     }
@@ -319,12 +339,12 @@ fn load_model() -> Model3d {
             Ok(model) => model,
             Err(e) => {
                 eprintln!("native3d: Modell-Parse-Fehler ({WALLS_PATH}): {e} — nutze Demo-Waende");
-                Model3d { walls: demo_walls(), slabs: Vec::new(), meshes: Vec::new() }
+                Model3d { walls: demo_walls(), slabs: Vec::new(), meshes: Vec::new(), ghost: None }
             }
         },
         Err(e) => {
             eprintln!("native3d: Modell nicht ladbar ({WALLS_PATH}): {e} — nutze Demo-Waende");
-            Model3d { walls: demo_walls(), slabs: Vec::new(), meshes: Vec::new() }
+            Model3d { walls: demo_walls(), slabs: Vec::new(), meshes: Vec::new(), ghost: None }
         }
     }
 }
@@ -731,7 +751,7 @@ impl ApplicationHandler<UserEvent> for App {
                     self.pending3d = Some(model);
                     return;
                 };
-                state.renderer.upload_model(&state.device, &model.walls, &model.slabs, &model.meshes);
+                upload_model3d(&mut state.renderer, &state.device, &model);
                 if !self.nav3d {
                     self.orbit = Some(Orbit::framed(&model));
                 }
