@@ -222,11 +222,15 @@ pub fn compute(p: &Project) -> Kennzahlen {
     let gf: f64 = levels.iter().map(|l| l.gf).sum();
     let agf: f64 = levels.iter().map(|l| l.agf).sum();
     let footprint = levels.iter().find(|l| l.gf > 0.0).map_or(0.0, |l| l.gf);
+    // GV: Volumen der freien Körper (Massenmodell); ohne solche dieselbe Näherung wie die
+    // Flächentabelle (GF × Geschosshöhe je Geschoss, `flaechen::area_table`), sonst stünde bei einem
+    // aus Wänden/Decken modellierten Gebäude 0 m³ in der Leiste ([206]).
+    let gv = if solids.iter().any(|s| !s.subtract) { sums.gv } else { crate::flaechen::area_table(p).gv };
     Kennzahlen {
         levels,
         gf,
         agf,
-        gv: sums.gv,
+        gv,
         footprint,
         az: sums.parcel.filter(|x| *x != 0.0).map(|x| agf / x),
         uez: sums.parcel.filter(|x| *x != 0.0).map(|x| footprint / x),
@@ -248,5 +252,17 @@ mod doc_tests {
         let with_parcel = Project { parcel_area: Some(1000.0), ..p };
         let k2 = compute(&with_parcel);
         assert!((k2.az.unwrap() - k2.agf / 1000.0).abs() < 1e-12);
+    }
+
+    /// [206] Ohne freie Körper (Modell aus Wänden/Decken) war das GV in der Kennzahlenleiste 0 m³,
+    /// die Flächentabelle daneben zeigte GF × Geschosshöhe: jetzt dieselbe Regel wie `flaechen`.
+    #[test]
+    fn gv_ohne_koerper_wie_flaechentabelle() {
+        let p: Project = serde_json::from_str(include_str!("../tests/fixtures/sample_project.json")).unwrap();
+        assert!(p.extruded_solids.as_deref().unwrap_or(&[]).is_empty());
+        let k = compute(&p);
+        let t = crate::flaechen::area_table(&p);
+        assert!(t.gv > 0.0);
+        assert!((k.gv - t.gv).abs() < 1e-9, "GV {} statt {}", k.gv, t.gv);
     }
 }
