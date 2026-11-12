@@ -201,6 +201,23 @@ pub fn result_json(r: &GripResult) -> String {
     String::from_utf8(out).unwrap_or_default()
 }
 
+/// Wie [`run`] auf dem Dokument. [202] Treppe als Ganzes ziehen (`stairBy`): das Deckenloch, in dem sie
+/// ankommt, wandert um denselben Vektor mit (`stair_guard::carried_holes`, braucht die typisierte Sicht);
+/// beides in einem Op-Satz, also ein Undo-Schritt.
+pub fn run_doc(d: &mut crate::document::Document, req: &Request) -> Result<GripResult, String> {
+    if req.op != "stairBy" {
+        return run(&d.lookup(), req);
+    }
+    let (p, lk) = d.project_lookup()?;
+    let mut res = run(&lk, req)?;
+    if let (false, Some(id)) = (res.ops.is_empty(), req.s("id")) {
+        let (dx, dy) = req.p("delta");
+        let holes = crate::stair_guard::carried_holes(p, &|s| s == id, &|_| false, &|_| false);
+        res.ops.extend(crate::cmd_transform::carry_hole_ops(lk.root, p, &holes, &crate::cmd_transform::Xf::translate(dx, dy)));
+    }
+    Ok(res)
+}
+
 /// Führt eine Griff-Änderung aus (`req.op` wählt die Art, s. `src/state/gripOps.ts`). Das Element
 /// sucht `lk` (im Dokument über den Positions-Index, je Mausschritt keine lineare Suche).
 pub fn run(lk: &Lookup, req: &Request) -> Result<GripResult, String> {

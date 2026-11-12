@@ -268,7 +268,7 @@ fn rail_half(s: &Stair) -> f64 {
 /// an den freien Lochrändern (nicht unter Wänden, nicht am Austritt der Treppe; Lage: [`crate::stair_guard`]).
 fn arriving(c: &Ctx, out: &mut Vec<Primitive>, double: bool, opts: &super::model_view::StairOpts) {
     let p = c.p;
-    let arrivals = crate::stair_guard::arrivals(p, &c.a.floor, &|s| c.vis(&s.category_code, &s.id), &|| super::domains::wall_footprints(c));
+    let arrivals = crate::stair_guard::arrivals_in_plan(p, &c.a.floor, &|s| c.vis(&s.category_code, &s.id), &|| super::domains::wall_footprints(c));
     for a in arrivals {
         let s = &p.stairs.as_deref().unwrap_or(&[])[a.stair];
         let greyed = Some(c.greyed(&s.category_code));

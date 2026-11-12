@@ -189,6 +189,11 @@ pub fn run_root_doc(d: &mut crate::document::Document, name: &str, text: &str) -
         let (p, lk) = d.project_lookup()?;
         return crate::commands::ops_json(lk.root, p, text);
     }
+    // [202] Griffe mit Dokument (`grips::run_doc`: Treppe nimmt ihr Deckenloch mit).
+    if name == "gripOps" {
+        let req: crate::grips::Request = serde_json::from_str(text).map_err(|e| format!("gripOps: {e}"))?;
+        return Ok(crate::grips::result_json(&crate::grips::run_doc(d, &req)?));
+    }
     run_root(&d.lookup(), name, text)
 }
 

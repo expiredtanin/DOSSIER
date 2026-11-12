@@ -385,6 +385,45 @@ fn mv_surface_opening(o: &Value, xf: &Xf) -> Value {
     with_all(o, f)
 }
 
+/// [202] Deckenlöcher, die mit Treppen mitwandern (`stair_guard::carried_holes`), unter `xf` abbilden: je Decke
+/// ein `replace` mit den betroffenen Aussparungen (Bögen kippen unter einer Spiegelung), je Öffnungs-Element
+/// Mittelpunkt und Richtung wie beim Wirt (Skalieren: Breite/Höhe mal Faktor, wie die Treppe).
+pub fn carry_hole_ops(root: &Map<String, Value>, p: &Project, holes: &[crate::stair_guard::HoleSrc], xf: &Xf) -> Vec<Op> {
+    use crate::stair_guard::HoleSrc;
+    let mut ops = Vec::new();
+    let mut by_ceiling: std::collections::BTreeMap<usize, Vec<usize>> = Default::default();
+    for h in holes {
+        match *h {
+            HoleSrc::Ring { ceiling, ring } => by_ceiling.entry(ceiling).or_default().push(ring),
+            HoleSrc::Opening(i) => {
+                let Some(id) = p.openings.as_deref().and_then(|v| v.get(i)).map(|o| o.id.as_str()) else { continue };
+                let Some(o) = list(root, "openings").iter().find(|o| id_of(o) == Some(id)) else { continue };
+                let mut v = mv_surface_opening(o, xf);
+                let k = xf.scale_k();
+                if k != 1.0 {
+                    let f: Vec<(&str, Value)> = ["width", "height"].iter().filter_map(|key| field(o, key).and_then(Value::as_f64).map(|x| (*key, js_num(x * k)))).collect();
+                    v = with_all(&v, f);
+                }
+                ops.push(replace("openings", v));
+            }
+        }
+    }
+    for (ci, rings) in by_ceiling {
+        let Some(id) = p.ceilings.as_deref().and_then(|v| v.get(ci)).map(|c| c.id.as_str()) else { continue };
+        let Some(c) = list(root, "ceilings").iter().find(|c| id_of(c) == Some(id)) else { continue };
+        let holes: Vec<Value> = arr(field(c, "openings")).iter().enumerate().map(|(i, h)| if rings.contains(&i) { xf.pts(Some(h)) } else { h.clone() }).collect();
+        let mut f = vec![("openings", Value::Array(holes))];
+        if xf.reverses() {
+            if let Some(b) = field(c, "openingsBulge").filter(|v| v.is_array()) {
+                let neg = |l: &Value| Value::Array(arr(Some(l)).iter().map(|b| js_num(-num_of(Some(b)))).collect());
+                f.push(("openingsBulge", Value::Array(arr(Some(b)).iter().enumerate().map(|(i, l)| if rings.contains(&i) { neg(l) } else { l.clone() }).collect())));
+            }
+        }
+        ops.push(replace("ceilings", with_all(c, f)));
+    }
+    ops
+}
+
 /// Wirt (Dach oder Decke) einer Flächenöffnung, sonst `None` (Wandöffnung).
 fn surface_host(o: &Value) -> Option<(&'static str, &str)> {
     let s = |k: &str| field(o, k).and_then(Value::as_str).filter(|v| !v.is_empty());
@@ -872,6 +911,7 @@ pub fn transform_result(root: &Map<String, Value>, p: &Project, req: &TransformR
 
     if req.mode == "move" {
         let xf = Xf::of(op, &pts, 1.0);
+        let mut carried = Vec::new();
         let mut patch = |key: &str, hit: &dyn Fn(&Value) -> bool, f: &dyn Fn(&Value) -> Value| {
             ops.extend(list(root, key).iter().filter(|e| hit(e)).map(|e| replace(key, f(e))));
         };
@@ -905,6 +945,12 @@ pub fn transform_result(root: &Map<String, Value>, p: &Project, req: &TransformR
         }
         if !stairs.is_empty() {
             patch("stairs", &|s| stairs.has(s) && !locked(s), &|s| mv_stair(s, &xf, k_at(1.0)));
+            // [202] Das Deckenloch, in dem eine bewegte Treppe ankommt, wandert mit (gleiche Abbildung, selber
+            // Op-Satz = ein Undo-Schritt). Mitgewählte Decken/Öffnungen bewegen sich schon selbst.
+            let moved_stairs: std::collections::HashSet<&str> = list(root, "stairs").iter().filter(|s| stairs.has(s) && !locked(s)).filter_map(|s| id_of(s)).collect();
+            let sel_openings = Ids::opt(&sel.opening_ids);
+            let holes = crate::stair_guard::carried_holes(p, &|id| moved_stairs.contains(id), &|id| ceil.0.contains(id), &|id| sel_openings.0.contains(id));
+            carried = carry_hole_ops(root, p, &holes, &xf);
         }
         if !rooms.is_empty() {
             patch("rooms", &|r| rooms.has(r) && !locked(r), &|r| mv_room(r, &xf));
@@ -928,6 +974,7 @@ pub fn transform_result(root: &Map<String, Value>, p: &Project, req: &TransformR
         ops.extend(free.iter().filter_map(|o| slide(o, d, false).filter(|v| v != *o)).map(|v| replace("openings", v)));
         // Frei gewählte Dach-/Deckenöffnungen ([144]) gleiten in ihrer Fläche.
         ops.extend(free_surf.iter().filter_map(|o| slide_surface_opening(root, o, d).filter(|v| v != *o)).map(|v| replace("openings", v)));
+        ops.extend(carried);
     }
 
     // Kopien (Kopie/Reihe/Verteilen bzw. gespiegelte Kopie).
