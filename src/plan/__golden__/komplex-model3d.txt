@@ -1,17 +1,17 @@
 meshes [1962]
 meshes[].color [3] x1962
 meshes[].indices [108] x6
-meshes[].indices [11376]
 meshes[].indices [1152]
+meshes[].indices [1248] x3
 meshes[].indices [12960]
 meshes[].indices [144] x55
 meshes[].indices [156642]
 meshes[].indices [1584]
 meshes[].indices [1716]
 meshes[].indices [180]
-meshes[].indices [192] x3
+meshes[].indices [2376]
+meshes[].indices [31104]
 meshes[].indices [348] x6
-meshes[].indices [360]
 meshes[].indices [36] x1861
 meshes[].indices [396]
 meshes[].indices [564] x2
@@ -23,19 +23,20 @@ meshes[].indices [9288]
 meshes[].indices [96] x6
 meshes[].positions [1044] x6
 meshes[].positions [108] x30
+meshes[].positions [1188]
 meshes[].positions [120]
-meshes[].positions [180] x10
+meshes[].positions [16428]
+meshes[].positions [180] x9
+meshes[].positions [1890] x3
 meshes[].positions [216]
 meshes[].positions [24] x1829
 meshes[].positions [252] x2
 meshes[].positions [264]
 meshes[].positions [288] x8
-meshes[].positions [306] x3
 meshes[].positions [324] x6
 meshes[].positions [4128]
 meshes[].positions [4746]
 meshes[].positions [576]
-meshes[].positions [6096]
 meshes[].positions [7050]
 meshes[].positions [72] x2
 meshes[].positions [78837]
@@ -45,31 +46,31 @@ meshes[].positions [864]
 roofLayers [59]
 roofLayers[].color [3] x59
 roofLayers[].normal [3] x59
-roofLayers[].polygon [17] x3
+roofLayers[].polygon [105] x3
 roofLayers[].polygon [4] x50
 roofLayers[].polygon [5] x6
-roofLayers[].polygon[] [3] x281
+roofLayers[].polygon[] [3] x545
 slabs [70]
 slabs[].color [3] x70
+slabs[].outline [104] x4
+slabs[].outline [124] x5
 slabs[].outline [12]
-slabs[].outline [21] x4
-slabs[].outline [22] x5
 slabs[].outline [24]
-slabs[].outline [41] x5
+slabs[].outline [26] x5
+slabs[].outline [270] x5
 slabs[].outline [4] x49
-slabs[].outline [55] x5
-slabs[].outline[] [2] x906
-walls [1492]
-walls[].arcCenter [2] x832
-walls[].color [3] x1492
-walls[].end [2] x1492
-walls[].endCut [4] x1105
-walls[].holes [1] x90
+slabs[].outline[] [2] x2748
+walls [1273]
+walls[].arcCenter [2] x613
+walls[].color [3] x1273
+walls[].end [2] x1273
+walls[].endCut [4] x869
+walls[].holes [1] x88
 walls[].holes [2] x25
 walls[].holes [3] x14
-walls[].layers [0] x1492
-walls[].start [2] x1492
-walls[].startCut [4] x1107
+walls[].layers [0] x1273
+walls[].start [2] x1273
+walls[].startCut [4] x873
 walls[].topDrop [2] x115
 walls[].topPlane [3] x271
-hash d00c532d2d56884e
+hash b2c8483fd14d95a1

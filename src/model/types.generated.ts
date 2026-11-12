@@ -100,6 +100,14 @@ export type Ceiling = {
    */
   openings?: Array<Array<Vec2>>;
   /**
+   * [191] Bögen im Umriss: `outlineBulge[i]` krümmt die Kante `outline[i] → outline[i+1]` (letzte: zum
+   * Start) zum Kreisbogen, `bulge = tan(Öffnungswinkel/4)`, positiv = Scheitel links der Kante (wie
+   * `Wall.bulge`/Polylinien). Fehlt/kürzer/0 = gerade Kante. Ableitungen rechnen über `ring_arc`.
+   */
+  outlineBulge?: Array<number>;
+  /** [191] Bögen der Aussparungen, je Loch wie `outlineBulge` (Index wie `openings`). */
+  openingsBulge?: Array<Array<number>>;
+  /**
    * LEGACY-Verweis auf einen Aufbau-Typ aus `wallTypes` (Rückwärtskompatibilität
    * für Projekte von vor den dedizierten Deckenstilen). Nur wirksam, wenn
    * `ceilingTypeId` fehlt.
@@ -3028,6 +3036,13 @@ export type Roof = {
    */
   holes?: Array<Array<Vec2>>;
   /**
+   * [191] Bögen im Umriss je Kante wie `Ceiling.outlineBulge`. Eine Bogenkante bleibt EINE Kante
+   * (Neigung/Giebel aus `edgePitchDeg` gilt für den ganzen Bogen).
+   */
+  outlineBulge?: Array<number>;
+  /** [191] Bögen der Höfe, je Ring wie `outlineBulge` (Index wie `holes`). */
+  holesBulge?: Array<Array<number>>;
+  /**
    * Neigung je Umrisskante in Grad. Nummerierung: erst die Kanten von `outline` (Kante i =
    * Punkt i → i+1, in der gespeicherten Reihenfolge), danach die Kanten der `holes` Ring für
    * Ring. Eintrag `null` = Giebel (senkrechte Wand, Kante läuft nicht nach innen), eine Zahl
@@ -3166,6 +3181,8 @@ export type Room = {
    * zu boundary[0]).
    */
   boundary: Array<Vec2>;
+  /** [191] Bögen im Umriss je Kante wie `Ceiling.outlineBulge`. */
+  boundaryBulge?: Array<number>;
   /** Strich-/Füllfarbe des Raums (hex). */
   color: string;
   /** Stift-Kopplung von `color` (s. `Component.colorPenId`-Doku). */

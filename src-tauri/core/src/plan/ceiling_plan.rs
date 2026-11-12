@@ -125,11 +125,11 @@ fn soffits(c: &Ctx, cut: f64, limit: f64, out: &mut Vec<Primitive>, bounds: &mut
     let fps = super::domains::wall_footprints(c);
     let mut res = Vec::new();
     for (ce, zb) in list {
-        for q in &ce.outline {
-            bounds.acc(q.x, q.y);
+        let pts: Vec<[f64; 2]> = ce.ring_xy();
+        for q in &pts {
+            bounds.acc(q[0], q[1]);
         }
         let greyed = Some(c.greyed(&ce.category_code));
-        let pts: Vec<[f64; 2]> = ce.outline.iter().map(|v| [v.x, v.y]).collect();
         let holes: Vec<Vec<[f64; 2]>> = crate::opening_shape::ceiling_hole_rings(p, ce).iter().filter(|h| h.len() >= 3).map(|h| h.iter().map(|v| [v.x, v.y]).collect()).collect();
         let merged = crate::polygon_holes::merge_holes(&pts, &holes, 1e-4);
         let layers = ceiling_layers(p, ce)?;
@@ -350,7 +350,7 @@ fn room_labels(c: &Ctx, soffits: &[Soffit], roofs: &[RoofUnder], out: &mut Vec<P
         return;
     }
     for room in c.p.rooms.as_deref().unwrap_or(&[]).iter().filter(|r| r.floor_id == c.a.floor && c.vis(&r.category_code, &r.id) && r.boundary.len() >= 3) {
-        let pts: Vec<[f64; 2]> = room.boundary.iter().map(|v| [v.x, v.y]).collect();
+        let pts: Vec<[f64; 2]> = room.ring_xy();
         let at = room.stamp_anchor.unwrap_or(pv(crate::room_area::label_point(&pts)));
         let z = soffits.iter().filter(|s| super::pick::point_in_polygon(at.x, at.y, &s.ring)).map(|s| s.z).fold(f64::INFINITY, f64::min);
         let mut lines = Vec::new();

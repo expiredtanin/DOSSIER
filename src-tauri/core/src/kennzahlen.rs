@@ -27,6 +27,8 @@ pub struct RoomIn {
     pub level: usize,
     pub category: usize,
     pub boundary: Vec<[f64; 2]>,
+    /// [191] Fläche exakt (Bögen im Umriss); `None` = aus `boundary`.
+    pub area: Option<f64>,
 }
 
 /// Körper für das Gebäudevolumen.
@@ -55,7 +57,7 @@ pub fn area_sums(n_levels: usize, rooms: &[RoomIn], solids: &[SolidIn], parcel_a
     for r in rooms {
         if let Some(l) = by_level.get_mut(r.level) {
             if r.category < CATEGORIES {
-                l[r.category] += finite(signed_area(&r.boundary).abs());
+                l[r.category] += finite(r.area.unwrap_or_else(|| signed_area(&r.boundary).abs()));
             }
         }
     }
@@ -98,11 +100,11 @@ mod tests {
     #[test]
     fn summen_je_geschoss_und_kategorie() {
         let rooms = vec![
-            RoomIn { level: 0, category: 0, boundary: sq(0.0, 0.0, 5.0) },
-            RoomIn { level: 0, category: 0, boundary: sq(0.0, 0.0, 1.0) },
-            RoomIn { level: 1, category: 4, boundary: sq(0.0, 0.0, 2.0) },
-            RoomIn { level: 9, category: 0, boundary: sq(0.0, 0.0, 2.0) },
-            RoomIn { level: 0, category: 99, boundary: sq(0.0, 0.0, 2.0) },
+            RoomIn { level: 0, category: 0, boundary: sq(0.0, 0.0, 5.0), area: None },
+            RoomIn { level: 0, category: 0, boundary: sq(0.0, 0.0, 1.0), area: None },
+            RoomIn { level: 1, category: 4, boundary: sq(0.0, 0.0, 2.0), area: None },
+            RoomIn { level: 9, category: 0, boundary: sq(0.0, 0.0, 2.0), area: None },
+            RoomIn { level: 0, category: 99, boundary: sq(0.0, 0.0, 2.0), area: None },
         ];
         let solids = vec![
             SolidIn { subtract: false, points: sq(0.0, 0.0, 10.0), circle_r: f64::NAN, height: 3.0, taper: 0.0 },
@@ -118,7 +120,7 @@ mod tests {
 
     #[test]
     fn unsinn_ohne_panik() {
-        let rooms = vec![RoomIn { level: 0, category: 0, boundary: vec![[f64::NAN, 0.0], [1.0, 0.0], [0.0, 1.0]] }];
+        let rooms = vec![RoomIn { level: 0, category: 0, boundary: vec![[f64::NAN, 0.0], [1.0, 0.0], [0.0, 1.0]], area: None }];
         let solids = vec![SolidIn { subtract: true, points: vec![], circle_r: f64::INFINITY, height: f64::NAN, taper: 0.0 }];
         let s = area_sums(1, &rooms, &solids, -5.0, &[[0.0, 0.0]]);
         assert_eq!(s.by_level[0][0], 0.0);
@@ -183,7 +185,8 @@ pub fn compute(p: &Project) -> Kennzahlen {
         .map(|r| RoomIn {
             level: level_index[r.floor_id.as_str()],
             category: category_index(r.sia_category),
-            boundary: r.boundary.iter().map(|v| [v.x, v.y]).collect(),
+            boundary: r.ring_xy(),
+            area: Some(r.area()),
         })
         .collect();
     let solids: Vec<SolidIn> = p

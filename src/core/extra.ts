@@ -70,7 +70,7 @@ export { cmdMutation } from "./document";
 export type { EntityCollection, EntityOf, ProjectMutation } from "./opsBuild";
 export { EMPTY_MEMBERSHIP, containingGroupId, expandToGroups, isInsideActiveGroup, transitiveMembership } from "../model/groups";
 export type { GroupMembership, MemberKind } from "../model/groups";
-export { drawingVertices, gripPt, openEdges, polylineEdgeGrips, ringEdges } from "../geometry/grips";
+export { arcApex, drawingVertices, gripPt, openEdges, polylineEdgeGrips, ringEdges } from "../geometry/grips";
 export { verticalExtents } from "../geometry/grips";
 export type { VerticalExtent } from "../geometry/grips";
 export type { GripRequest, RingKind } from "../geometry/grips";

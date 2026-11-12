@@ -1761,45 +1761,59 @@ pub fn extrude_slab(mesh: &mut Mesh, slab: &SlabInput) {
         push_tri_oriented(mesh, w(a, y0), w(b, y0), w(c, y0), [0.0, -1.0, 0.0], color);
     }
 
-    // Umriss-Schwerpunkt (Grundriss) fuer die Aussenrichtung der Mantel-Normalen.
-    let mut cx = 0.0f32;
-    let mut cy = 0.0f32;
-    for p in pts {
-        cx += p[0];
-        cy += p[1];
-    }
-    cx /= n as f32;
-    cy /= n as f32;
-
-    // Mantelflaechen: je Kante ein vertikales Quad (unten y0, oben y1).
+    // Mantelflaechen: je Kante ein vertikales Quad (unten y0, oben y1), Normale nach aussen (aus dem
+    // Umlaufsinn; bei eingefuegten Loechern laufen deren Kanten gegenlaeufig, zeigen also ins Loch).
+    // [191] Fein geteilte Boegen (kurze, gleich lange Kanten mit kleinem Knick) bekommen geteilte Normalen
+    // je Ecke — der Rand wirkt rund statt facettiert; echte Ecken und lange Kanten bleiben hart.
+    let sgn = if signed_area(pts) >= 0.0 { 1.0f32 } else { -1.0 };
+    let mut en: Vec<Option<[f32; 2]>> = Vec::with_capacity(n);
+    let mut el: Vec<f32> = Vec::with_capacity(n);
     for i in 0..n {
-        let a = pts[i];
-        let b = pts[(i + 1) % n];
-        let ex = b[0] - a[0];
-        let ez = b[1] - a[1];
+        let (a, b) = (pts[i], pts[(i + 1) % n]);
+        let (ex, ez) = (b[0] - a[0], b[1] - a[1]);
         let elen = (ex * ex + ez * ez).sqrt();
-        if elen < 1e-9 {
-            continue; // entartete Kante
+        el.push(elen);
+        en.push((elen >= 1e-9).then(|| [sgn * ez / elen, -sgn * ex / elen]));
+    }
+    let smooth_at = |i: usize| -> Option<[f32; 2]> {
+        let j = (i + n - 1) % n;
+        let (p, q) = (en[j]?, en[i]?);
+        let (lp, lq) = (el[j], el[i]);
+        let short = lp.max(lq) <= SMOOTH_MAX_EDGE && lp.max(lq) <= 2.0 * lp.min(lq);
+        if !short || p[0] * q[0] + p[1] * q[1] < SMOOTH_COS {
+            return None;
         }
-        // Horizontale Kanten-Normale (senkrecht zur Kante), nach aussen orientiert.
-        let mx = (a[0] + b[0]) * 0.5;
-        let mz = (a[1] + b[1]) * 0.5;
-        let out = [mx - cx, mz - cy];
-        let mut nx = -ez / elen;
-        let mut nz = ex / elen;
-        if nx * out[0] + nz * out[1] < 0.0 {
-            nx = -nx;
-            nz = -nz;
-        }
-        let normal = [nx, 0.0, nz];
+        let (sx, sz) = (p[0] + q[0], p[1] + q[1]);
+        let l = (sx * sx + sz * sz).sqrt();
+        (l > 1e-9).then(|| [sx / l, sz / l])
+    };
+    let vn: Vec<Option<[f32; 2]>> = (0..n).map(smooth_at).collect();
+    for i in 0..n {
+        let Some(face) = en[i] else { continue }; // entartete Kante
+        let (a, b) = (pts[i], pts[(i + 1) % n]);
+        let na = vn[i].unwrap_or(face);
+        let nb = vn[(i + 1) % n].unwrap_or(face);
+        let (na, nb, fnrm) = ([na[0], 0.0, na[1]], [nb[0], 0.0, nb[1]], [face[0], 0.0, face[1]]);
         let ba = w(a, y0);
         let bb = w(b, y0);
         let tb = w(b, y1);
         let ta = w(a, y1);
-        // Als zwei orientierte Dreiecke (Winding via push_tri_oriented gesichert).
-        push_tri_oriented(mesh, ba, bb, tb, normal, color);
-        push_tri_oriented(mesh, ba, tb, ta, normal, color);
+        push_tri_normals(mesh, [ba, bb, tb], [na, nb, nb], fnrm, color);
+        push_tri_normals(mesh, [ba, tb, ta], [na, nb, na], fnrm, color);
     }
+}
+
+/// [191] Grösster Knick (cos 10°) und längste Kante (m), an denen der Plattenrand glatt schattiert wird.
+const SMOOTH_COS: f32 = 0.984_807_8;
+const SMOOTH_MAX_EDGE: f32 = 1.0;
+
+/// Dreieck mit einer Normale je Ecke; die Reihenfolge folgt der Flaechennormale `face` (Culling).
+fn push_tri_normals(mesh: &mut Mesh, p: [[f32; 3]; 3], nrm: [[f32; 3]; 3], face: [f32; 3], color: Rgb) {
+    let ab = [p[1][0] - p[0][0], p[1][1] - p[0][1], p[1][2] - p[0][2]];
+    let ac = [p[2][0] - p[0][0], p[2][1] - p[0][1], p[2][2] - p[0][2]];
+    let gn = [ab[1] * ac[2] - ab[2] * ac[1], ab[2] * ac[0] - ab[0] * ac[2], ab[0] * ac[1] - ab[1] * ac[0]];
+    let (pp, nn) = if gn[0] * face[0] + gn[1] * face[1] + gn[2] * face[2] < 0.0 { ([p[0], p[2], p[1]], [nrm[0], nrm[2], nrm[1]]) } else { (p, nrm) };
+    push_ctx_tri_n(mesh, pp, nn, [color; 3]);
 }
 
 #[cfg(test)]
@@ -1882,6 +1896,49 @@ mod tests {
     /// [T4] Zwei Dreiecke mit 10°-Knick, Kante NICHT geteilt (eigene Punkte gleicher Lage): glatt mit
     /// 30° bekommen die Kantenpunkte beider Dreiecke dieselbe Normale, mit 5° (oder ohne) die
     /// Flaechennormalen; die Rueckseite traegt die Gegennormale.
+    /// [191] Platte mit fein geteiltem Halbkreis (48 Teile): Mantel-Normalen am Bogen je Ecke radial und
+    /// stetig (Nachbar-Quads teilen sie), an den Rechteck-Ecken hart; alle zeigen nach aussen.
+    #[test]
+    fn platte_bogenrand_glatt_ecken_hart() {
+        let r = 2.0f32;
+        let mut outline: Vec<Point2> = vec![[0.0, -r], [4.0, -r]];
+        for i in 1..48 {
+            let a = -std::f32::consts::FRAC_PI_2 + std::f32::consts::PI * i as f32 / 48.0;
+            outline.push([4.0 + r * a.cos(), r * a.sin()]);
+        }
+        outline.extend([[4.0, r], [0.0, r]]);
+        for rev in [false, true] {
+            let mut o = outline.clone();
+            if rev {
+                o.reverse();
+            }
+            let slab = SlabInput { monolith: None, outline: o, z_bottom: 0.0, z_top: 0.3, color: [0.8, 0.8, 0.8], hatch: None, cut: None };
+            let mut m = Mesh::default();
+            extrude_slab(&mut m, &slab);
+            let mut at_arc = 0;
+            for v in 0..m.vertex_count() {
+                let o = v * FLOATS_PER_VERTEX;
+                let (p, nrm) = (&m.verts[o..o + 3], &m.verts[o + 3..o + 6]);
+                if nrm[1].abs() > 0.5 {
+                    continue; // Deckel/Boden
+                }
+                if p[0] > 4.0 + 1e-3 {
+                    // Bogen: Normale radial vom Mittelpunkt (4, 0).
+                    let (dx, dz) = (p[0] - 4.0, p[2]);
+                    let l = (dx * dx + dz * dz).sqrt();
+                    assert!((nrm[0] - dx / l).abs() < 1e-3 && (nrm[2] - dz / l).abs() < 1e-3, "{p:?} {nrm:?}");
+                    at_arc += 1;
+                } else if (p[0] - 0.0).abs() < 1e-6 && (p[2] + r).abs() < 1e-6 {
+                    // Ecke (0, −2): je Seite die eigene Flächennormale.
+                    assert!(nrm[0].abs() > 0.999 || nrm[2].abs() > 0.999, "{nrm:?}");
+                }
+                // Nach aussen: weg vom Inneren (2, 0).
+                assert!(nrm[0] * (p[0] - 2.0) + nrm[2] * p[2] > 0.0, "{p:?} {nrm:?}");
+            }
+            assert!(at_arc >= 4 * 47, "{at_arc}");
+        }
+    }
+
     #[test]
     fn glatt_mit_knickwinkel_teilt_normalen() {
         let t = 10f32.to_radians();

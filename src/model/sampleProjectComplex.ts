@@ -58,8 +58,6 @@ function arcPts(c: Vec2, r: number, a0: number, a1: number, n: number): Vec2[] {
   return out;
 }
 
-/** Kreis als Polygon (n Ecken). */
-const circlePts = (c: Vec2, r: number, n: number): Vec2[] => arcPts(c, r, 0, 2 * Math.PI, n).slice(0, n);
 
 const textDoc = (lines: { text: string; bold?: boolean; sizePt?: number; italic?: boolean }[], align: "left" | "center" = "left"): RichTextDoc => ({
   version: 1,
@@ -393,32 +391,49 @@ door("dg-t2", "dg-iw-y6", "mk-tu-schiebe", 3.0, 0.9, 2.0);
 const ERKER_C = P(15, 5);
 /** Ursprung des 2D-Details (abseits des Geländes). */
 const DETAIL_X = 60;
-/** Umriss bis Aussenkante: Haupthaus, Erker (Halbkreis r = 2 + 0.195), optional Anbau. */
-function slabOutline(withErker: boolean, withAnbau: boolean): Vec2[] {
+/** Bulge eines Bogens mit Öffnungswinkel `sweep` (Bogenmass), Scheitel rechts der Kante (aussen im Gegenuhrzeigersinn). */
+const bulgeRight = (sweep: number) => -Math.tan(sweep / 4);
+
+/**
+ * Umriss bis Aussenkante: Haupthaus, Erker (Halbkreis r = 2 + 0.195 als echter Bogen, [191]), optional Anbau.
+ * `outlineBulge` je Kante; ohne Erker ohne Bögen.
+ */
+function slabOutline(withErker: boolean, withAnbau: boolean): { outline: Vec2[]; outlineBulge?: number[] } {
   const o = 15 + HA;
   const pts: Vec2[] = [P(-HA, -HA), P(o, -HA)];
+  const bulge: number[] = [0, 0];
   if (withErker) {
     const r = 2 + HA;
     const dy = Math.sqrt(r * r - HA * HA);
-    const a0 = Math.atan2(-dy, HA);
-    pts.push(...arcPts(ERKER_C, r, a0, -a0, 16));
+    pts.push(P(o, ERKER_C.y - dy), P(o, ERKER_C.y + dy));
+    bulge.push(bulgeRight(2 * Math.atan2(dy, HA)), 0);
   }
   pts.push(P(o, 10 + HA));
-  if (withAnbau) pts.push(P(10 + HA, 10 + HA), P(10 + HA, 15 + HA), P(5 - HA, 15 + HA), P(5 - HA, 10 + HA));
+  bulge.push(0);
+  if (withAnbau) {
+    pts.push(P(10 + HA, 10 + HA), P(10 + HA, 15 + HA), P(5 - HA, 15 + HA), P(5 - HA, 10 + HA));
+    bulge.push(0, 0, 0, 0);
+  }
   pts.push(P(-HA, 10 + HA));
-  return pts;
+  return withErker ? { outline: pts, outlineBulge: bulge } : { outline: pts };
 }
 
+/** Kreis als Ring aus vier Viertelbögen ([191], Gegenuhrzeigersinn). */
+const circleRing = (c: Vec2, r: number): { pts: Vec2[]; bulge: number[] } => ({
+  pts: [P(c.x + r, c.y), P(c.x, c.y + r), P(c.x - r, c.y), P(c.x, c.y - r)],
+  bulge: [0, 0, 0, 0].map(() => bulgeRight(Math.PI / 2)),
+});
+
 // Treppenlöcher: Wendel UG→EG im Erker, L-Treppe EG→OG im Kern, gerade Treppe OG→DG.
-const HOLE_SPIRAL = circlePts(P(15.3, 5), 1.2, 24);
+const HOLE_SPIRAL = circleRing(P(15.3, 5), 1.2);
 const HOLE_L = [P(8.8, 6.3), P(9.9275, 6.3), P(9.9275, 9.9275), P(7.25, 9.9275), P(7.25, 8.35), P(8.8, 8.35)];
 const HOLE_OGDG = rect(10.0725, 5.4, 11.15, 8.9);
 
 const ceilings: NonNullable<Project["ceilings"]> = [
-  { id: "c-bodenplatte", type: "ceiling", floorId: "ug", categoryCode: "30", outline: slabOutline(true, false), wallTypeId: "", ceilingTypeId: "mk-ct-bodenplatte", top: { mode: "floor", floorId: "ug", offset: 0 }, loadBearing: true },
-  { id: "c-ug", type: "ceiling", floorId: "ug", categoryCode: "30", outline: slabOutline(true, true), openings: [HOLE_SPIRAL], wallTypeId: "", ceilingTypeId: "mk-ct-platten", loadBearing: true },
-  { id: "c-eg", type: "ceiling", floorId: "eg", categoryCode: "30", outline: slabOutline(true, true), openings: [HOLE_L], wallTypeId: "", ceilingTypeId: "mk-ct-parkett", loadBearing: true },
-  { id: "c-og", type: "ceiling", floorId: "og", categoryCode: "30", outline: slabOutline(false, true), openings: [HOLE_OGDG], wallTypeId: "", ceilingTypeId: "mk-ct-parkett", loadBearing: true },
+  { id: "c-bodenplatte", type: "ceiling", floorId: "ug", categoryCode: "30", ...slabOutline(true, false), wallTypeId: "", ceilingTypeId: "mk-ct-bodenplatte", top: { mode: "floor", floorId: "ug", offset: 0 }, loadBearing: true },
+  { id: "c-ug", type: "ceiling", floorId: "ug", categoryCode: "30", ...slabOutline(true, true), openings: [HOLE_SPIRAL.pts], openingsBulge: [HOLE_SPIRAL.bulge], wallTypeId: "", ceilingTypeId: "mk-ct-platten", loadBearing: true },
+  { id: "c-eg", type: "ceiling", floorId: "eg", categoryCode: "30", ...slabOutline(true, true), openings: [HOLE_L], wallTypeId: "", ceilingTypeId: "mk-ct-parkett", loadBearing: true },
+  { id: "c-og", type: "ceiling", floorId: "og", categoryCode: "30", ...slabOutline(false, true), openings: [HOLE_OGDG], wallTypeId: "", ceilingTypeId: "mk-ct-parkett", loadBearing: true },
 ];
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -440,7 +455,10 @@ const roofs: NonNullable<Project["roofs"]> = [
     shape: "sattel", pitchDeg: PITCH, overhang: 0.6, overhangGable: 0.35, ridgeAxis: "y", baseElevation: EAVE_MAIN, thickness: 0.41, roofTypeId: "std-rt-steildach-holz",
   },
   {
-    id: "dach-erker", type: "roof", floorId: "og", categoryCode: "31", outline: [P(15 + HA, 5 - 2.2), ...arcPts(ERKER_C, 2 + HA + 0.15, -Math.PI / 2 + 0.09, Math.PI / 2 - 0.09, 14), P(15 + HA, 5 + 2.2)],
+    // [191] Rand als echter Bogen (r = 2.345, ±(90° − 5.2°) um den Erker-Mittelpunkt).
+    id: "dach-erker", type: "roof", floorId: "og", categoryCode: "31",
+    outline: [P(15 + HA, 5 - 2.2), ...[-1, 1].map((k) => P(ERKER_C.x + (2 + HA + 0.15) * Math.cos(k * (Math.PI / 2 - 0.09)), ERKER_C.y + (2 + HA + 0.15) * Math.sin(k * (Math.PI / 2 - 0.09)))), P(15 + HA, 5 + 2.2)],
+    outlineBulge: [0, bulgeRight(Math.PI - 0.18), 0, 0],
     shape: "flach", pitchDeg: 0, overhang: 0, ridgeAxis: "x", thickness: 0.46, roofTypeId: "mk-rt-flach",
     // Attika ([148]): Betonbrüstung 50 cm über der Dachhaut.
     parapetHeight: 0.5, parapetWidth: 0.2, parapetComponentId: "std-c-stahlbeton",

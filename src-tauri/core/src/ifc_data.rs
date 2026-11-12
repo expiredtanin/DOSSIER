@@ -1162,11 +1162,13 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
         // Aussparungen (wie im 3D) als innere Ringe des Profils; Netto zieht sie ab.
         let hole_rings = crate::opening_shape::ceiling_hole_rings(&p, c);
         let inner: Vec<&[Vec2]> = hole_rings.iter().filter(|r| r.len() >= 3).map(|r| r.as_slice()).collect();
-        psets.extend(qto("Qto_SlabBaseQuantities", qty::slab_quantities(&c.outline, &inner, z_top - z_bottom)));
+        // [191] Bögen im Umriss: fein geteilt (Profil als Linienzug).
+        let outline = c.ring();
+        psets.extend(qto("Qto_SlabBaseQuantities", qty::slab_quantities(&outline, &inner, z_top - z_bottom)));
         w_head(&mut f, REC_CEILING, structure, &c.id, &name);
         w_type(&mut f, ty.as_ref().map(|t| type_ref(t, 1.0, "FLOOR")).as_ref());
         w_psets(&mut f, &psets);
-        w_pts(&mut f, &c.outline);
+        w_pts(&mut f, &outline);
         f.num(inner.len() as f64);
         for r in &inner {
             w_pts(&mut f, r);
@@ -1278,8 +1280,7 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
         let structure = structure_of(&room.floor_id);
         let height = floors.iter().find(|fl| fl.id == room.floor_id).and_then(|fl| fl.floor_height).filter(|h| *h != 0.0 && !h.is_nan() && *h > 0.0).unwrap_or(2.5);
         let external = room.sia_category == SiaCategory::AGF;
-        let ring: Vec<[f64; 2]> = room.boundary.iter().map(|v| [v.x, v.y]).collect();
-        let area = crate::room_area::evaluate(&ring, 0.0);
+        let area = crate::ring_arc::evaluate(&room.boundary, room.boundary_bulge.as_deref(), 0.0);
         room_areas.push((room.id.clone(), room.floor_id.clone(), room.sia_category, area.net));
         classified.push((format!("space/{}", room.id), Kind::Space, room.category_code.clone()));
         let number = room.stamp.as_ref().and_then(|s| s.number.as_deref()).filter(|n| !n.is_empty());
@@ -1290,7 +1291,7 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
         common.push(Prop::Bool("IsExternal", external));
         let (id, name, long) = (f.str(&room.id), f.str(number.unwrap_or(&room.id)), f.str(&room.name));
         f.nums(&[REC_SPACE, structure, id, name, long, if external { 1.0 } else { 0.0 }, height]);
-        w_pts(&mut f, &room.boundary);
+        w_pts(&mut f, &room.ring());
         let cat = f.str(&sia_key(room.sia_category));
         f.nums(&[area.net, area.gross, cat]);
         // [158] Raumbuch: Oberflächen als Pset_SpaceCoveringRequirements (IFC2x3: in Pset_SpaceCommon),

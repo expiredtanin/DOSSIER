@@ -279,10 +279,10 @@ pub(super) fn terrain_footprint(p: &Project, floor: &str) -> Vec<Vec<Vec2>> {
     }
     let ring = |pts: &[Vec2]| -> Option<crate::flat::Polygon> { (pts.len() >= 3 && pts.iter().all(ok)).then(|| vec![pts.iter().map(|q| [q.x, q.y]).collect()]) };
     for c in p.ceilings.as_deref().unwrap_or(&[]).iter().filter(|c| on(&c.floor_id)) {
-        parts.extend(ring(&c.outline));
+        parts.extend(ring(&c.ring()));
     }
     for r in p.rooms.as_deref().unwrap_or(&[]).iter().filter(|r| on(&r.floor_id)) {
-        parts.extend(ring(&r.boundary));
+        parts.extend(ring(&r.ring()));
     }
     for s in p.extruded_solids.as_deref().unwrap_or(&[]).iter().filter(|s| on(&s.level_id) && s.operation.as_deref() != Some("subtract")) {
         parts.extend(ring(&s.points));

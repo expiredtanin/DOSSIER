@@ -188,10 +188,11 @@ impl Project {
 }
 
 impl Roof {
-    /// Parameter für die Dachgeometrie (`roof::roof_geometry`).
+    /// Parameter für die Dachgeometrie (`roof::roof_geometry`); [191] Bogenkanten fein geteilt, ihre Teilkanten
+    /// erben die Kantenneigung.
     pub fn params(&self) -> RoofParams {
         RoofParams {
-            outline: self.outline.iter().map(|v| [v.x, v.y]).collect(),
+            outline: self.ring().iter().map(|v| [v.x, v.y]).collect(),
             shape: match self.shape {
                 RoofShape::Flach | RoofShape::Unknown => Shape::Flach,
                 RoofShape::Pult => Shape::Pult,
@@ -212,8 +213,8 @@ impl Roof {
             overhang: self.overhang,
             overhang_gable: self.overhang_gable,
             ridge_axis: if self.ridge_axis == RoofRidgeAxis::Y { Axis::Y } else { Axis::X },
-            holes: self.holes.as_deref().unwrap_or(&[]).iter().map(|h| h.iter().map(|v| [v.x, v.y]).collect()).collect(),
-            edge_pitch_deg: self.edge_pitch_deg.clone(),
+            holes: self.hole_rings().iter().map(|h| h.iter().map(|v| [v.x, v.y]).collect()).collect(),
+            edge_pitch_deg: self.dense_edge_pitch(),
         }
     }
 }

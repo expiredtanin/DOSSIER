@@ -98,7 +98,7 @@ pub fn own_finish_rooms<'a>(c: &Ctx<'a>) -> Vec<(&'a Room, &'a Component, Vec<P>
         .filter(|r| r.floor_id == c.a.floor && r.boundary.len() >= 3 && c.vis(&r.category_code, &r.id))
         .filter_map(|r| {
             let comp = crate::room_book::finish_component(c.p, r.floor_finish.as_deref())?;
-            let ring: Vec<P> = r.boundary.iter().map(|v| [v.x, v.y]).collect();
+            let ring: Vec<P> = r.ring_xy();
             ring.iter().all(|q| q[0].is_finite() && q[1].is_finite()).then_some((r, comp, ring))
         })
         .collect()
@@ -135,7 +135,7 @@ pub fn room_segments(comp: &Component, ring: &[P], scale: f64) -> Option<(Vec<(P
 }
 
 pub fn wet_rooms(c: &Ctx) -> Vec<Vec<P>> {
-    c.p.rooms.as_deref().unwrap_or(&[]).iter().filter(|r| r.floor_id == c.a.floor && r.boundary.len() >= 3 && is_wet_room(r)).map(|r| r.boundary.iter().map(|v| [v.x, v.y]).collect()).collect()
+    c.p.rooms.as_deref().unwrap_or(&[]).iter().filter(|r| r.floor_id == c.a.floor && r.boundary.len() >= 3 && is_wet_room(r)).map(|r| r.ring_xy()).collect()
 }
 
 /// Aussparungen: Raumstempel (Rechteck mit Luft) aus den schon gesetzten Raum-Primitiven, Möbel/Symbole

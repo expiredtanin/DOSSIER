@@ -42,7 +42,7 @@ pub fn emit_slabs(p: &Project) -> Vec<RSlab> {
         let openings = crate::opening_shape::ceiling_hole_rings(p, c);
         let parts: Vec<(Vec<Vec2>, Vec<Vec<Vec2>>)> = match bearing.get(ci).cloned().flatten() {
             Some(polys) => polys.iter().map(|poly| (v2(&poly[0]), poly[1..].iter().map(|h| v2(h)).chain(openings.iter().cloned()).collect())).collect(),
-            None => vec![(c.outline.clone(), openings)],
+            None => vec![(c.ring().into_owned(), openings)],
         };
         for (outline, holes) in parts {
             w.ring(&outline);

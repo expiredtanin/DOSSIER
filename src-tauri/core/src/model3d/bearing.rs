@@ -7,8 +7,11 @@
 //!
 //! Aussenwand heisst hier geometrisch, je Stück der Wandlänge: Ein Punkt knapp vor der Aussenfläche
 //! (Schicht 0) liegt ausserhalb des Deckenumrisses. Wo die Decke vor der Wand weiterläuft (Anbau, Balkon),
-//! bleibt sie. Innenwände (Decke beidseits), einschalige Wände, Bogenwände, Wände ohne Höhen-Überlappung mit
-//! der Platte und Decken mit `edgeAtOutline` (Verhalten „wie Deckenumriss") bleiben unverändert.
+//! bleibt sie. Innenwände (Decke beidseits), einschalige Wände, Wände ohne Höhen-Überlappung mit der Platte und
+//! Decken mit `edgeAtOutline` (Verhalten „wie Deckenumriss") bleiben unverändert. Bogenwände ([191]): der Streifen
+//! ist ein Kreisringsektor (Aussenfläche bis Aussenkante Kern, fein geteilt wie `ring_arc`), an den Wandenden an
+//! den Stosslinien; er reicht 2 cm über die Aussenfläche hinaus, damit die Sehnen des Deckenumrisses keinen Rest
+//! stehen lassen.
 
 use super::*;
 use kernel2d::point_in_outline;
@@ -30,7 +33,7 @@ pub(crate) struct OuterFaces {
 }
 
 pub(crate) fn outer_faces(p: &Project, w: &Wall) -> Option<OuterFaces> {
-    if w.is_external == Some(false) || crate::wall_arc::WallArc::of_wall(w).is_some() {
+    if w.is_external == Some(false) {
         return None;
     }
     let layers = &p.wall_type(w)?.layers;
@@ -90,13 +93,16 @@ fn body_range(w: &Wall, f: &OuterFaces, cuts: &WallCuts) -> Option<[f64; 2]> {
 
 /// Achs-Intervalle `[a, b]` (m ab Wandstart, innerhalb `range`), auf denen der Punkt vor der Aussenfläche
 /// ausserhalb des Umrisses liegt.
-fn exterior_spans(w: &Wall, f: &OuterFaces, outline: &[KVec], [t0, t1]: [f64; 2]) -> Vec<[f64; 2]> {
+fn exterior_spans(w: &Wall, f: &OuterFaces, outline: &[KVec], range: [f64; 2]) -> Vec<[f64; 2]> {
     let Some((u, n, _)) = axis(w) else { return Vec::new() };
+    let o = f.o_out - PROBE;
+    spans_outside(&|t: f64| KVec::new(w.start.x + u[0] * t + n[0] * o, w.start.y + u[1] * t + n[1] * o), outline, range)
+}
+
+/// Teilbereiche von `[t0, t1]`, auf denen der Prüfpunkt `probe(t)` ausserhalb des Umrisses liegt.
+fn spans_outside(probe: &dyn Fn(f64) -> KVec, outline: &[KVec], [t0, t1]: [f64; 2]) -> Vec<[f64; 2]> {
     let l = t1 - t0;
-    let outside = |t: f64| {
-        let (o, t) = (f.o_out - PROBE, t0 + t);
-        !point_in_outline(KVec::new(w.start.x + u[0] * t + n[0] * o, w.start.y + u[1] * t + n[1] * o), outline)
-    };
+    let outside = |t: f64| !point_in_outline(probe(t0 + t), outline);
     let steps = ((l / STEP).ceil() as usize).clamp(8, 4096);
     let edge = |mut a: f64, mut b: f64, a_out: bool| {
         for _ in 0..40 {
@@ -146,13 +152,69 @@ fn outer_strip(w: &Wall, f: &OuterFaces, cuts: &WallCuts, [a, b]: [f64; 2], [t0,
     Some(vec![at(a, f.o_out, sc), at(b, f.o_out, ec), at(b, f.o_core, ec), at(a, f.o_core, sc)])
 }
 
+/// Überstand (m) des Bogen-Streifens über die Aussenfläche hinaus.
+const ARC_MARGIN: f64 = 0.02;
+
+/// [191] Abzugs-Streifen einer Bogenwand: Kreisringsektoren von knapp vor der Aussenfläche bis zur Aussenkante
+/// des Kerns über die Bogenlänge, wo die Decke vor der Wand endet; an den Wandenden an den Stosslinien.
+fn arc_cutters(arc: &crate::wall_arc::WallArc, f: &OuterFaces, cuts: &WallCuts, outline: &[KVec]) -> Vec<Vec<[f64; 2]>> {
+    let len = arc.length();
+    if !(len > 1e-9) {
+        return Vec::new();
+    }
+    let n_out = f.o_out - ARC_MARGIN;
+    // Körperbereich zwischen den Stosslinien (wie `body_range`, Bogenlänge statt Achslage).
+    let reach = |cut: Option<joins::Line>, start: bool| -> f64 {
+        let default = if start { 0.0 } else { len };
+        let Some(c) = cut else { return default };
+        let target = default;
+        let ps: Vec<f64> = [f.o_out, f.o_core]
+            .iter()
+            .filter_map(|&o| arc.line_hits(o, &c).into_iter().filter(|s| s.is_finite() && (s - target).abs() < len / 2.0).min_by(|a, b| (a - target).abs().total_cmp(&(b - target).abs())))
+            .collect();
+        if ps.is_empty() {
+            return default;
+        }
+        if start { ps.iter().copied().fold(f64::INFINITY, f64::min).max(0.0) } else { ps.iter().copied().fold(f64::NEG_INFINITY, f64::max).min(len) }
+    };
+    let (t0, t1) = (reach(cuts.start_cut, true), reach(cuts.end_cut, false));
+    if !(t1 - t0 > 1e-6) {
+        return Vec::new();
+    }
+    let probe_n = f.o_out - PROBE;
+    let spans = spans_outside(&|s: f64| arc.point(s, probe_n), outline, [t0, t1]);
+    let r_max = arc.r_max(n_out, f.o_core);
+    spans
+        .into_iter()
+        .filter_map(|[a, b]| {
+            let (sc, ec) = ((a <= t0 + 1e-9).then_some(cuts.start_cut).flatten(), (b >= t1 - 1e-9).then_some(cuts.end_cut).flatten());
+            let (a, b) = (if sc.is_some() { 0.0 } else { a }, if ec.is_some() { len } else { b });
+            let sweep = (b - a) / arc.r * arc.sweep.signum();
+            let k = crate::ring_arc::segments(r_max, sweep).max(1);
+            let at = |s: f64, n: f64| -> [f64; 2] {
+                let q = arc.point(s, n);
+                let cut = if s <= a + 1e-12 { sc } else if s >= b - 1e-12 { ec } else { None };
+                let q = cut.and_then(|c| arc.line_hit_near(n, &c, q)).unwrap_or(q);
+                [q.x, q.y]
+            };
+            let ss: Vec<f64> = (0..=k).map(|i| a + (b - a) * i as f64 / k as f64).collect();
+            let mut ring: Vec<[f64; 2]> = ss.iter().map(|&s| at(s, n_out)).collect();
+            ring.extend(ss.iter().rev().map(|&s| at(s, f.o_core)));
+            (ring_area(&ring) > 1e-9).then_some(ring)
+        })
+        .collect()
+}
+
 /// Abzugs-Streifen einer Wand für eine Decke (leer: Wand trägt die Decke nicht als Aussenwand).
 pub(crate) fn wall_cutters(p: &Project, w: &Wall, cuts: &WallCuts, c: &Ceiling) -> Vec<Vec<[f64; 2]>> {
     let Some(f) = outer_faces(p, w) else { return Vec::new() };
     if cuts.covered || c.edge_at_outline == Some(true) || c.outline.len() < 3 || !overlaps_z(p, w, c) {
         return Vec::new();
     }
-    let k: Vec<KVec> = c.outline.iter().map(|v| KVec::new(v.x, v.y)).collect();
+    let k: Vec<KVec> = c.ring().iter().map(|v| KVec::new(v.x, v.y)).collect();
+    if let Some(arc) = crate::wall_arc::WallArc::of_wall(w) {
+        return arc_cutters(&arc, &f, cuts, &k);
+    }
     let Some(range) = body_range(w, &f, cuts) else { return Vec::new() };
     exterior_spans(w, &f, &k, range).into_iter().filter_map(|s| outer_strip(w, &f, cuts, s, range)).collect()
 }
@@ -202,7 +264,7 @@ pub(crate) fn bearing_outlines(p: &Project, only: impl Fn(&Ceiling) -> bool, kno
     let none = WallCuts::default();
     for ci in todo {
         let c = &ceilings[ci];
-        let ring: Vec<[f64; 2]> = c.outline.iter().map(|v| [v.x, v.y]).collect();
+        let ring: Vec<[f64; 2]> = c.ring_xy();
         let cb = bbox_of(ring.iter().copied());
         let cutters: Vec<crate::flat::Polygon> = walls
             .iter()
@@ -343,6 +405,66 @@ mod tests {
         assert!(!inside(1.0, -0.1), "vor dem Kern abgezogen");
         assert!(inside(1.0, 0.05), "über dem Kern bleibt");
         assert!(inside(3.5, -0.1) && inside(3.5, -1.0), "Auskragung bleibt");
+    }
+
+    /// [191] W1 als Halbkreis nach aussen (Achse r = 2.5 um (2.5, 0)), Decke mit Bogenkante bis zur Aussenfläche.
+    fn sample_arc(edge_at_outline: Option<bool>) -> Project {
+        let mut p: Project = serde_json::from_str(include_str!("../../tests/fixtures/sample_project.json")).unwrap();
+        let h = 0.345 / 2.0;
+        p.walls.iter_mut().find(|w| w.id == "W1").unwrap().bulge = Some(-1.0);
+        p.walls.retain(|w| w.id != "W9");
+        // Ohne das Fenster in W1 (der Schnitt läuft durch den Scheitel).
+        if let Some(o) = p.openings.as_mut() {
+            o.retain(|o| o.host_wall_id != "W1");
+        }
+        let c = &mut p.ceilings.as_mut().unwrap()[0];
+        c.outline = [(-h, 0.0), (5.0 + h, 0.0), (5.0 + h, 4.0 + h), (-h, 4.0 + h)].iter().map(|&(x, y)| Vec2 { x, y }).collect();
+        c.outline_bulge = Some(vec![-1.0, 0.0, 0.0, 0.0]);
+        c.edge_at_outline = edge_at_outline;
+        p
+    }
+
+    #[test]
+    fn bogenwand_platte_endet_an_kern_aussenkante() {
+        let p = sample_arc(None);
+        let h = 0.345 / 2.0;
+        let r_core = 2.5 + h - 0.18;
+        let slabs = emit_slabs(&p);
+        let concrete = slabs.iter().find(|s| s.cut.as_ref().and_then(|c| c.component_id.as_deref()) == Some("concrete")).expect("Betonschicht");
+        let d = |q: &[f64; 2]| ((q[0] - 2.5).powi(2) + q[1].powi(2)).sqrt();
+        let arc_pts: Vec<f64> = concrete.outline.iter().filter(|q| q[1] < -0.3).map(d).collect();
+        assert!(arc_pts.len() >= 40, "Bogen fein: {} Punkte", arc_pts.len());
+        let (lo, hi) = arc_pts.iter().fold((f64::INFINITY, 0.0f64), |(a, b), &x| (a.min(x), b.max(x)));
+        assert!(hi <= r_core + 1e-6 && lo >= r_core - 1e-3, "Platte endet am Kern r = {r_core}: {lo}..{hi}");
+        // Wie Deckenumriss: bis zur Aussenfläche.
+        let p2 = sample_arc(Some(true));
+        let s2 = emit_slabs(&p2);
+        let c2 = s2.iter().find(|s| s.cut.as_ref().and_then(|c| c.component_id.as_deref()) == Some("concrete")).unwrap();
+        let far = c2.outline.iter().filter(|q| q[1] < -0.3).map(d).fold(0.0f64, f64::max);
+        assert!((far - (2.5 + h)).abs() < 1e-6, "{far}");
+    }
+
+    #[test]
+    fn bogenwand_schnitt_daemmung_durchgehend() {
+        let p = sample_arc(None);
+        let h = 0.345 / 2.0;
+        // Schnitt durch den Scheitel (x = 2.5): Aussenfläche bei y = −(2.5 + h), Kern 0.18 dahinter.
+        let l = LevelSpec { kind: "section".into(), line: Some([Vec2 { x: 2.5, y: -4.0 }, Vec2 { x: 2.5, y: 5.0 }]), ..Default::default() };
+        let cuts = compute_section(&p, &l, &[]).unwrap().unwrap().cuts;
+        let (eps_u, eps_z) = w1_band(&cuts, "insulation");
+        let (brick_u, _) = w1_band(&cuts, "brick");
+        assert!(eps_u[0].is_finite() && brick_u[0].is_finite(), "{eps_u:?} {brick_u:?}");
+        let concrete = slab_range(&cuts, "concrete");
+        assert!((concrete[0] - brick_u[0]).abs() < 2e-3, "Platte ab u = {}, Backstein aussen bei {}", concrete[0], brick_u[0]);
+        assert_eq!(eps_z.len(), 1, "EPS durchgehend: {eps_z:?}");
+        assert!(eps_z[0][0] <= concrete[2] + 1e-6 && eps_z[0][1] >= concrete[3] - 1e-6);
+        // Aussenfläche am Scheitel: u = 4 − (2.5 + h).
+        assert!((eps_u[0] - (4.0 - 2.5 - h + 0.02)).abs() < 2e-3, "{eps_u:?}");
+        // 3D: die Dämmung von W1 läuft an der Platte ohne Ausschnitt durch.
+        let (_, zt) = p.ceiling_vertical_extent(&p.ceilings.as_ref().unwrap()[0]);
+        let walls = emit_walls(&p, true).unwrap();
+        let eps: Vec<&RWall> = walls.iter().filter(|w| w.wall_id == "W1" && w.cut.as_ref().and_then(|c| c.component_id.as_deref()) == Some("insulation")).collect();
+        assert!(!eps.is_empty() && eps.iter().all(|w| w.base_elevation + w.height >= zt - 1e-6), "EPS bis {zt}");
     }
 
     #[test]

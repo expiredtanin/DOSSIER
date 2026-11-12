@@ -91,11 +91,11 @@ pub fn soffit_segments(p: &Project, ce: &Ceiling, holes: &[Vec<P>], scale: f64) 
 }
 
 fn ceiling_rings(ce: &Ceiling) -> Option<(Vec<P>, Vec<Vec<P>>)> {
-    let outer: Vec<P> = ce.outline.iter().map(|v| [v.x, v.y]).collect();
+    let outer: Vec<P> = ce.ring_xy();
     if outer.len() < 3 || outer.iter().any(|q| !q[0].is_finite() || !q[1].is_finite()) {
         return None;
     }
-    let holes = ce.openings.as_deref().unwrap_or(&[]).iter().filter(|h| h.len() >= 3).map(|h| h.iter().map(|v| [v.x, v.y]).collect()).collect();
+    let holes = ce.hole_rings().iter().filter(|h| h.len() >= 3).map(|h| h.iter().map(|v| [v.x, v.y]).collect()).collect();
     Some((outer, holes))
 }
 

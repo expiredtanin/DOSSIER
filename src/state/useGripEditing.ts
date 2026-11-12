@@ -11,9 +11,9 @@ import { leftNormal, normalize, scale, sub, wallCorners } from "../model/geometr
 import type { RingKind } from "../core";
 import type { Ceiling, Drawing2D, EdgeGrip, Excavation, Project, Roof, Room, Vec2, Wall } from "../model/types";
 import { wallTypeThickness } from "../model/types";
-import { bulgeArcPoints, drawingVertices, surfaceOpeningGripPatch, surfaceOpeningGrips, surfaceOpeningInfo, wallArcBand } from "../core";
+import { bulgeArcPoints, bulgePolylinePoints, drawingVertices, surfaceOpeningGripPatch, surfaceOpeningGrips, surfaceOpeningInfo, wallArcBand } from "../core";
 import { gripDrawingIdsFor } from "./gripLimits";
-import { openEdges, polylineEdgeGrips, ringEdges } from "../core";
+import { arcApex, openEdges, polylineEdgeGrips, ringEdges } from "../core";
 import {
   coincidentGripPoints,
   excavationGripPoints,
@@ -226,6 +226,8 @@ export function useGripEditing(opts: {
     /** [26] Einfüge-Griff (Raute) in Kante `insertSeg` des Umriss-Rings `ring` (Dach: flacher Index). */
     insertSeg?: number;
     ring?: { kind: RingKind; id: string };
+    /** [191] Scheitel-Griff der Bogenkante `arcSeg` (flacher Index wie `insertSeg`). */
+    arcSeg?: number;
   }
   const gripOwners: GripOwner[] = [];
   // [ersterFlachIndex, letzterFlachIndex] DESSELBEN Elements — für die Anker-
@@ -245,10 +247,11 @@ export function useGripEditing(opts: {
     modelEditable && !!selectedRoof && !selectedRoof.locked && !!opts.moveRoofVertex && !selectedCeiling && !selectedRoom &&
     !selectedExcavation && !selectedTree && !selectedSectionLine && effectiveDrawingIds.length === 0 && selectedWallIds.length === 0;
   /** Ringe des Dachs in der Reihenfolge des flachen Index (Umriss, dann Höfe) samt Start-Index. */
-  const roofRings = (r: Roof): { pts: Vec2[]; off: number }[] => {
+  const roofRings = (r: Roof): { pts: Vec2[]; off: number; bulge?: number[] }[] => {
     let off = 0;
-    return [r.outline, ...(r.holes ?? [])].map((pts) => {
-      const ring = { pts, off };
+    const bulges = [r.outlineBulge, ...(r.holes ?? []).map((_, i) => r.holesBulge?.[i])];
+    return [r.outline, ...(r.holes ?? [])].map((pts, i) => {
+      const ring = { pts, off, bulge: bulges[i] };
       off += pts.length;
       return ring;
     });
@@ -325,18 +328,33 @@ export function useGripEditing(opts: {
    */
   const pushInsertGrips = (
     out: Vec2[],
-    rings: { pts: Vec2[]; off: number }[],
+    rings: { pts: Vec2[]; off: number; bulge?: number[] }[],
     ring: { kind: RingKind; id: string },
     owner: { drawingId?: string } = {},
     keep?: (seg: number) => boolean,
   ) => {
     const start = out.length;
-    for (const { pts, off } of rings) {
+    for (const { pts, off, bulge } of rings) {
       pts.forEach((a, i) => {
         if (keep && !keep(off + i)) return;
         const b = pts[(i + 1) % pts.length];
-        out.push({ x: a.x + (b.x - a.x) * INSERT_AT, y: a.y + (b.y - a.y) * INSERT_AT, insert: true } as Vec2);
+        // [191] Bogenkante: die Raute sitzt auf dem Bogen (Viertel des Teilbogens bis zum Scheitel).
+        const q = bulge?.[i] ? arcApex(a, arcApex(a, b, bulge[i]), Math.tan(Math.atan(bulge[i]) / 2)) : { x: a.x + (b.x - a.x) * INSERT_AT, y: a.y + (b.y - a.y) * INSERT_AT };
+        out.push({ ...q, insert: true } as Vec2);
         gripOwners.push({ ...owner, localIndex: -1, insertSeg: off + i, ring });
+      });
+    }
+    for (let i = start; i < out.length; i++) gripOwnerRange.push([start, out.length - 1]);
+  };
+  /** [191] Scheitel-Griffe der Bogenkanten (Ziehen ändert die Pfeilhöhe; auf die Sehne gezogen = gerade). */
+  const pushArcGrips = (out: Vec2[], rings: { pts: Vec2[]; off: number; bulge?: number[] }[], ring: { kind: RingKind; id: string }) => {
+    const start = out.length;
+    for (const { pts, off, bulge } of rings) {
+      pts.forEach((a, i) => {
+        const b = bulge?.[i];
+        if (!b || !Number.isFinite(b) || Math.abs(b) < 1e-9) return;
+        out.push(arcApex(a, pts[(i + 1) % pts.length], b));
+        gripOwners.push({ localIndex: -1, arcSeg: off + i, ring });
       });
     }
     for (let i = start; i < out.length; i++) gripOwnerRange.push([start, out.length - 1]);
@@ -397,6 +415,7 @@ export function useGripEditing(opts: {
         pts.forEach((q, i) => { out.push(q); gripOwners.push({ localIndex: off + i }); gripOwnerRange.push([off, off + pts.length - 1]); });
       }
       pushInsertGrips(out, roofRings(selectedRoof), { kind: "roof", id: selectedRoof.id });
+      pushArcGrips(out, roofRings(selectedRoof), { kind: "roof", id: selectedRoof.id });
       return out;
     }
     // [68] Baugrube: Umriss-Ecken + Sohlen-Griff (Lage: Schwerpunkt, y um die Sohlenhöhe versetzt).
@@ -411,7 +430,11 @@ export function useGripEditing(opts: {
     if (modelEditable && selectedCeiling && effectiveDrawingIds.length === 0 && selectedWallIds.length === 0) {
       const pts = [...selectedCeiling.outline];
       pts.forEach((_, i) => { gripOwners.push({ localIndex: i }); gripOwnerRange.push([0, pts.length - 1]); });
-      if (!selectedCeiling.locked) pushInsertGrips(pts, [{ pts: selectedCeiling.outline, off: 0 }], { kind: "ceiling", id: selectedCeiling.id });
+      if (!selectedCeiling.locked) {
+        const rings = [{ pts: selectedCeiling.outline, off: 0, bulge: selectedCeiling.outlineBulge }];
+        pushInsertGrips(pts, rings, { kind: "ceiling", id: selectedCeiling.id });
+        pushArcGrips(pts, rings, { kind: "ceiling", id: selectedCeiling.id });
+      }
       return pts;
     }
     // Raum: die Umriss-Vertices als Griffe (nur bei genau einem gewählten Raum).
@@ -424,7 +447,11 @@ export function useGripEditing(opts: {
     ) {
       const pts = [...selectedRoom.boundary];
       pts.forEach((_, i) => { gripOwners.push({ localIndex: i }); gripOwnerRange.push([0, pts.length - 1]); });
-      if (!selectedRoom.locked) pushInsertGrips(pts, [{ pts: selectedRoom.boundary, off: 0 }], { kind: "room", id: selectedRoom.id });
+      if (!selectedRoom.locked) {
+        const rings = [{ pts: selectedRoom.boundary, off: 0, bulge: selectedRoom.boundaryBulge }];
+        pushInsertGrips(pts, rings, { kind: "room", id: selectedRoom.id });
+        pushArcGrips(pts, rings, { kind: "room", id: selectedRoom.id });
+      }
       return pts;
     }
     // Mehrfachauswahl (Regel- UND Standardfall): je gewähltem 2D-Element bzw.
@@ -540,8 +567,8 @@ export function useGripEditing(opts: {
     // ringEdges/openEdges/polylineEdgeGrips: Kern (`geometry/grips.ts`, `grips.rs`).
     // [26] Dach: Kanten von Umriss und Höfen, Indizes im flachen Ecken-Index.
     if (roofGripsOn && selectedRoof) {
-      return roofRings(selectedRoof).flatMap(({ pts, off }) =>
-        ringEdges(pts, {}).map((e) => ({ ...e, aIndex: e.aIndex + off, bIndex: e.bIndex + off })),
+      return roofRings(selectedRoof).flatMap(({ pts, off, bulge }) =>
+        ringEdges(pts, {}, bulge ?? []).map((e) => ({ ...e, aIndex: e.aIndex + off, bIndex: e.bIndex + off })),
       );
     }
     if (modelEditable && selectedExcavation && !selectedCeiling && effectiveDrawingIds.length === 0 && selectedWallIds.length === 0) {
@@ -549,7 +576,7 @@ export function useGripEditing(opts: {
     }
     // Decke: geschlossener Ring aus dem Umriss (Auswahl exklusiv, wie bei grips).
     if (modelEditable && selectedCeiling && effectiveDrawingIds.length === 0 && selectedWallIds.length === 0) {
-      return ringEdges(selectedCeiling.outline, {});
+      return ringEdges(selectedCeiling.outline, {}, selectedCeiling.outlineBulge ?? []);
     }
     // Raum: geschlossener Ring aus dem Umriss.
     if (
@@ -559,7 +586,7 @@ export function useGripEditing(opts: {
       selectedWallIds.length === 0 &&
       !selectedCeiling
     ) {
-      return ringEdges(selectedRoom.boundary, {});
+      return ringEdges(selectedRoom.boundary, {}, selectedRoom.boundaryBulge ?? []);
     }
     const out: EdgeGrip[] = [];
     for (const id of gripDrawingIds) {
@@ -756,7 +783,7 @@ export function useGripEditing(opts: {
   // Wand/Öffnung/Treppe haben keine Polygon-Nachbarn → null.
   const resolvePolygonRing = (index: number): { pts: Vec2[]; index: number; closed: boolean } | null => {
     const owner = gripOwners[index];
-    if (owner?.insertSeg != null) return null;
+    if (owner?.insertSeg != null || owner?.arcSeg != null) return null;
     if (roofGripsOn && selectedRoof && !owner?.drawingId && !owner?.wallId) {
       const ring = roofRings(selectedRoof).find((rg) => index >= rg.off && index < rg.off + rg.pts.length);
       return ring ? { pts: ring.pts, index: index - ring.off, closed: true } : null;
@@ -984,6 +1011,11 @@ export function useGripEditing(opts: {
       return;
     }
     const ins = gripOwners[index];
+    // [191] Scheitel-Griff einer Bogenkante: Bulge live, ein Undo-Schritt je Zug.
+    if (modelEditable && ins?.arcSeg != null && ins.ring && ins.ring.kind !== "excavation" && ins.ring.kind !== "polyline") {
+      storeState().setRingArc(ins.ring.kind, ins.ring.id, ins.arcSeg, pt);
+      return;
+    }
     if (modelEditable && ins?.insertSeg != null && ins.ring) {
       const key = `ringInsert:${ins.ring.id}:${Date.now()}`;
       ringDragRef.current = { ...ins.ring, key, midIndex: index, vertex: ins.insertSeg + 1 };
@@ -1100,22 +1132,21 @@ export function useGripEditing(opts: {
   /** Vorschau-Form des ausstehenden Eckpunkt-Zugs (leer, wenn keiner läuft). */
   const gripPreviewShapes = (): DraftShape[] => {
     const pa = pendingAreaGripRef.current;
+    // [191] Bogenkanten in der Vorschau als Bogen (Bulge bleibt beim Eck-Zug).
     if (pa?.kind === "roof" && selectedRoof) {
-      return roofRings(selectedRoof).map(({ pts, off }) => ({
+      return roofRings(selectedRoof).map(({ pts, off, bulge }) => ({
         kind: "poly" as const,
-        pts: pts.map((q, i) => (off + i === pa.index ? pa.pt : q)),
+        pts: bulgePolylinePoints(pts.map((q, i) => (off + i === pa.index ? pa.pt : q)), bulge, true),
         closed: true,
       }));
     }
     if (pa) {
-      const ring =
-        pa.kind === "room"
-          ? (project.rooms ?? []).find((r) => r.id === pa.id)?.boundary
-          : pa.kind === "excavation"
-          ? selectedExcavation?.outline
-          : (project.ceilings ?? []).find((c) => c.id === pa.id)?.outline;
+      const room = pa.kind === "room" ? (project.rooms ?? []).find((r) => r.id === pa.id) : undefined;
+      const ceiling = pa.kind === "ceiling" ? (project.ceilings ?? []).find((c) => c.id === pa.id) : undefined;
+      const ring = room?.boundary ?? (pa.kind === "excavation" ? selectedExcavation?.outline : ceiling?.outline);
       if (!ring) return [];
-      return [{ kind: "poly", pts: ring.map((q, i) => (i === pa.index ? pa.pt : q)), closed: true }];
+      const bulge = room?.boundaryBulge ?? ceiling?.outlineBulge;
+      return [{ kind: "poly", pts: bulgePolylinePoints(ring.map((q, i) => (i === pa.index ? pa.pt : q)), bulge, true), closed: true }];
     }
     const pw = pendingWallGripRef.current;
     if (pw) {

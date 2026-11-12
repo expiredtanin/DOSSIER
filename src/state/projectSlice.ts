@@ -401,6 +401,8 @@ export interface ProjectSlice {
   insertRingVertex: (kind: RingKind, id: string, seg: number, pt: Vec2, coalesceKey?: string) => void;
   /** [26] Ecke löschen (mind. 3 bleiben); ein Undo-Schritt. */
   deleteRingVertex: (kind: RingKind, id: string, index: number) => void;
+  /** [191] Bogen-Scheitel der Kante `seg` (Dach: flacher Index) ziehen: setzt den Bulge über die Pfeilhöhe. */
+  setRingArc: (kind: "roof" | "ceiling" | "room", id: string, seg: number, pt: Vec2, coalesceKey?: string) => void;
   /** [26] Nach dem Ziehen: Ecke auf Nachbar bzw. Gerade zwischen den Nachbarn entfällt. */
   tidyRingVertex: (kind: RingKind, id: string, index: number, coalesceKey?: string, tol?: number) => void;
   moveExcavationEdge: (id: string, aIndex: number, bIndex: number, delta: Vec2) => void;
@@ -1281,6 +1283,7 @@ export function createProjectSlice(
       applyGrip(kind === "polyline" ? { op: "insertPoint", id, seg, pt: gripPt(pt) } : { op: "ringInsert", kind, id, seg, pt: gripPt(pt) }, coalesceKey),
     deleteRingVertex: (kind, id, index) =>
       applyGrip(kind === "polyline" ? { op: "deletePoint", id, index } : { op: "ringDelete", kind, id, index }),
+    setRingArc: (kind, id, seg, pt, coalesceKey) => applyGrip({ op: "ringArc", kind, id, seg, pt: gripPt(pt) }, coalesceKey ?? `ringArc:${kind}:${id}:${seg}`),
     tidyRingVertex: (kind, id, index, coalesceKey, tol) =>
       applyGrip({ op: "ringTidy", kind, id, index, ...(tol != null ? { tol } : {}) }, coalesceKey),
     tidySectionLine: (id, coalesceKey, tol) => applyGrip({ op: "sectionLineTidy", id, ...(tol != null ? { tol } : {}) }, coalesceKey),

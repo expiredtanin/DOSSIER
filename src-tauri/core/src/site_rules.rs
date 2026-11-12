@@ -543,7 +543,7 @@ fn projection_parts(p: &Project) -> Vec<ProjectionPart> {
     }
     for c in p.ceilings.as_deref().unwrap_or(&[]) {
         if c.site_projection == Some(true) && c.outline.len() >= 3 {
-            out.push(ProjectionPart { poly: vec![c.outline.iter().map(|v| [v.x, v.y]).collect()], share_limited: true });
+            out.push(ProjectionPart { poly: vec![c.ring_xy()], share_limited: true });
         }
     }
     for s in p.extruded_solids.as_deref().unwrap_or(&[]) {

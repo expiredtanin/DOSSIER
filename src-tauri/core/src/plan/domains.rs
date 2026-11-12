@@ -563,8 +563,9 @@ fn ceilings(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) -> Result<()
     let fps = wall_footprints(c);
     for (ce, zone) in list {
         let out_start = out.len();
-        for q in &ce.outline {
-            bounds.acc(q.x, q.y);
+        let pts: Vec<[f64; 2]> = ce.ring_xy();
+        for q in &pts {
+            bounds.acc(q[0], q[1]);
         }
         let ov = c.overrides(Some(ceiling_kind(p, ce)), &ce.category_code, ceiling_type_name(p, ce));
         let color = ov.color.as_deref().or(ce.color.as_deref());
@@ -574,7 +575,6 @@ fn ceilings(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) -> Result<()
         if ce.outline.len() < 3 {
             continue;
         }
-        let pts: Vec<[f64; 2]> = ce.outline.iter().map(|v| [v.x, v.y]).collect();
         let holes: Vec<Vec<[f64; 2]>> = crate::opening_shape::ceiling_hole_rings(p, ce).iter().map(|h| h.iter().map(|v| [v.x, v.y]).collect()).collect();
         let merged = crate::polygon_holes::merge_holes(&pts, &holes, 1e-4);
         let layers = ceiling_layers(p, ce)?;
@@ -1294,7 +1294,8 @@ fn place_stamp(ring: &[[f64; 2]], candidates: &[Vec2], obst: &super::stamp_place
 
 fn rooms(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds, obstacles: &super::stamp_place::Obstacles) {
     for room in c.p.rooms.as_deref().unwrap_or(&[]).iter().filter(|r| r.floor_id == c.a.floor && c.vis(&r.category_code, &r.id)) {
-        for q in &room.boundary {
+        let ring = room.ring();
+        for q in ring.iter() {
             bounds.acc(q.x, q.y);
         }
         let ov = c.overrides(Some("room"), &room.category_code, Some(&room.name));
@@ -1303,9 +1304,9 @@ fn rooms(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds, obstacles: &sup
         if room.boundary.len() < 3 {
             continue;
         }
-        let pts: Vec<[f64; 2]> = room.boundary.iter().map(|v| [v.x, v.y]).collect();
-        let res = crate::room_area::evaluate(&pts, 0.0);
-        out.push(polygon(room.boundary.clone(), &with_alpha(color, ROOM_FILL_ALPHA), color, LAYER_LINE_MM * c.a.detail.layer_factor(), no_hatch(), greyed, None, Pick::Room(&room.id)));
+        let pts: Vec<[f64; 2]> = ring.iter().map(|v| [v.x, v.y]).collect();
+        let res = crate::ring_arc::evaluate(&room.boundary, room.boundary_bulge.as_deref(), 0.0);
+        out.push(polygon(ring.into_owned(), &with_alpha(color, ROOM_FILL_ALPHA), color, LAYER_LINE_MM * c.a.detail.layer_factor(), no_hatch(), greyed, None, Pick::Room(&room.id)));
         if c.a.detail == Detail::Grob && !c.a.auto_coarse {
             continue;
         }
@@ -1771,7 +1772,7 @@ fn outside_stamps(c: &Ctx, rooms: &[Primitive]) -> Vec<Vec<[f64; 2]>> {
     for q in rooms {
         let Primitive::Text { at, doc, extra_lines, base_pt, room_id: Some(id), .. } = q else { continue };
         let Some(room) = c.p.rooms.as_deref().unwrap_or(&[]).iter().find(|r| &r.id == id) else { continue };
-        let ring: Vec<[f64; 2]> = room.boundary.iter().map(|v| [v.x, v.y]).collect();
+        let ring: Vec<[f64; 2]> = room.ring_xy();
         if ring.len() < 3 || crate::surface_pattern::point_in([at.x, at.y], &ring) {
             continue;
         }

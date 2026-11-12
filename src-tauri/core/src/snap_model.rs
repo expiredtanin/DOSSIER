@@ -151,20 +151,20 @@ pub fn collect_model_at(p: &Project, level: &str, codes: &HashSet<String>, skip:
     let mut anchors = Vec::new();
     for r in p.rooms.as_deref().unwrap_or(&[]) {
         if vis_el(&r.id, &r.floor_id, &r.category_code) {
-            closed_poly(&r.boundary, &mut segs);
+            closed_poly(&r.ring(), &mut segs);
         }
     }
     for c in p.ceilings.as_deref().unwrap_or(&[]) {
         if vis_el(&c.id, &c.floor_id, &c.category_code) {
-            closed_poly(&c.outline, &mut segs);
-            for hole in c.openings.as_deref().unwrap_or(&[]) {
-                closed_poly(hole, &mut segs);
+            closed_poly(&c.ring(), &mut segs);
+            for hole in c.hole_rings() {
+                closed_poly(&hole, &mut segs);
             }
         }
     }
     for r in p.roofs.as_deref().unwrap_or(&[]) {
         if vis_el(&r.id, &r.floor_id, &r.category_code) {
-            closed_poly(&r.outline, &mut segs);
+            closed_poly(&r.ring(), &mut segs);
         }
     }
     // [115] Freie Körper (Profil-Extrusion): Umriss wie im Plan; Klasse und Ausnahmen wie bei jedem Bauteil.
@@ -212,7 +212,7 @@ pub fn collect_model_at(p: &Project, level: &str, codes: &HashSet<String>, skip:
             anchors.push(match r.stamp_anchor.as_ref().or_else(|| stamps.get(&r.id)) {
                 Some(a) => (a.x, a.y),
                 None => {
-                    let c = crate::room_area::label_point(&r.boundary.iter().map(|p| [p.x, p.y]).collect::<Vec<_>>());
+                    let c = crate::room_area::label_point(&r.ring_xy());
                     (c[0], c[1])
                 }
             });

@@ -23,7 +23,7 @@ import { downloadCsv } from "./downloadFile";
 function roomAreas(rooms: Room[]): { category: Room["siaCategory"]; area: number }[] {
   return rooms.map((r) => ({
     category: r.siaCategory,
-    area: evaluateRoom(r.boundary, r.siaCategory).netArea,
+    area: evaluateRoom(r.boundary, r.siaCategory, { bulge: r.boundaryBulge }).netArea,
   }));
 }
 
@@ -61,7 +61,7 @@ export function RoomBalancePanel() {
         name: roomDisplayName(r),
         level: floorNameOf(levels, r.floorId),
         category: r.siaCategory,
-        area: evaluateRoom(r.boundary, r.siaCategory).netArea,
+        area: evaluateRoom(r.boundary, r.siaCategory, { bulge: r.boundaryBulge }).netArea,
       })),
     );
     downloadCsv("flaechenbilanz.csv", csv);
@@ -95,7 +95,7 @@ export function RoomBalancePanel() {
       <div className="balance-section-label">{t("balance.rooms")}</div>
       <div className="balance-table">
         {rooms.map((r) => {
-          const res = evaluateRoom(r.boundary, r.siaCategory);
+          const res = evaluateRoom(r.boundary, r.siaCategory, { bulge: r.boundaryBulge });
           return (
             <div key={r.id} className="balance-row">
               <span className="balance-name">{roomDisplayName(r)}</span>

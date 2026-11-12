@@ -25,7 +25,6 @@ use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 
-use crate::flat_read::signed_area;
 use crate::model::{Project, SiaCategory};
 
 pub const DEFAULT_TOLERANCE: f64 = 0.05;
@@ -182,10 +181,9 @@ pub fn compare(p: &Project) -> Compare {
         .unwrap_or(&[])
         .iter()
         .map(|r| {
-            let pts: Vec<[f64; 2]> = r.boundary.iter().map(|v| [v.x, v.y]).collect();
             let norm = norm_name(&r.name);
             let base = strip_trailing_number(&norm).to_string();
-            RoomRef { id: r.id.clone(), name: r.name.clone(), norm, base, cat: r.sia_category, area: finite(signed_area(&pts).abs()) }
+            RoomRef { id: r.id.clone(), name: r.name.clone(), norm, base, cat: r.sia_category, area: finite(r.area()) }
         })
         .collect();
     let program = p.room_program.as_deref().unwrap_or(&[]);

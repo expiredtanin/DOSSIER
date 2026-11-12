@@ -251,9 +251,22 @@ fn polygon_area(v: Option<&Value>) -> f64 {
 }
 
 /// Deckenfläche `|signedArea|` (kernel2d).
-fn ceiling_area(v: Option<&Value>) -> f64 {
-    let p: Vec<kernel2d::Vec2> = pts_of(v).into_iter().map(|(x, y)| kernel2d::Vec2::new(x, y)).collect();
-    kernel2d::signed_area(&p).abs()
+/// [191] Umriss-Ring samt Bögen (`bulge_key`) eines Elements.
+fn arc_ring(e: &Value, key: &str, bulge_key: &str) -> (Vec<crate::model::Vec2>, Vec<f64>) {
+    let pts = pts_of(field(e, key)).into_iter().map(|(x, y)| crate::model::Vec2 { x, y }).collect();
+    (pts, arr(field(e, bulge_key)).iter().map(|b| b.as_f64().unwrap_or(0.0)).collect())
+}
+
+/// Fläche des Umrisses `key` exakt (Bögen aus `bulge_key`).
+fn ring_area(e: &Value, key: &str, bulge_key: &str) -> f64 {
+    let (pts, b) = arc_ring(e, key, bulge_key);
+    crate::ring_arc::signed_area(&pts, Some(&b)).abs()
+}
+
+/// bbox des fein geteilten Umrisses.
+fn ring_bbox(e: &Value, key: &str, bulge_key: &str) -> [f64; 4] {
+    let (pts, b) = arc_ring(e, key, bulge_key);
+    bbox_of(crate::ring_arc::densify(&pts, Some(&b)).iter().map(|q| (q.x, q.y)).collect::<Vec<_>>())
 }
 
 /// Summe der Schichtdicken (`wallTypeThickness`, `reduce` ab 0).
@@ -547,14 +560,14 @@ fn ceiling_selection(root: &Map<String, Value>, c: &Value) -> Result<J, String> 
     let cat = category(root, field(c, "categoryCode"));
     let color = color_of(c, cat, WALL_FALLBACK_COLOR);
     let weight = lw_or(field(c, "strokeWeight"), cat, WALL_FALLBACK_MM);
-    let bb = bbox_of(pts_of(field(c, "outline")));
+    let bb = ring_bbox(c, "outline", "outlineBulge");
     let wt = ceiling_type(root, c)?;
     let thickness = ceiling_thickness(root, c);
     let outer = component(root, arr(field(wt, "layers")).first().and_then(|l| field(l, "componentId")))?;
     let (fg, bg, hatch) = effective(c, Some(outer), cat);
     let floor = level(root, field(c, "floorId"));
     let (zb, zt) = ceiling_extent(root, c, thickness);
-    let area = ceiling_area(field(c, "outline"));
+    let area = ring_area(c, "outline", "outlineBulge");
     let openings: Vec<J> = arr(field(c, "openings"))
         .iter()
         .map(|hole| {
@@ -988,9 +1001,10 @@ fn room_selection(root: &Map<String, Value>, r: &Value) -> J {
     let cat = category(root, field(r, "categoryCode"));
     let color = color_of(r, cat, WALL_FALLBACK_COLOR);
     let weight = lw_or(None, cat, WALL_FALLBACK_MM);
-    let ev = crate::room_area::evaluate(&ring(field(r, "boundary")), 0.0);
+    let (pts, bulge) = arc_ring(r, "boundary", "boundaryBulge");
+    let ev = crate::ring_arc::evaluate(&pts, Some(&bulge), 0.0);
     let floor = level(root, field(r, "floorId"));
-    let bb = bbox_of(pts_of(field(r, "boundary")));
+    let bb = ring_bbox(r, "boundary", "boundaryBulge");
     let info = O::default()
         .raw("name", r, "name")
         .raw("siaCategory", r, "siaCategory")

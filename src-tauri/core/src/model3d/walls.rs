@@ -602,7 +602,7 @@ pub(crate) fn floor_context_with(p: &Project, floor_id: &str, with_ceilings: boo
             let layers: Option<Vec<(f64, Option<f64>)>> = ceiling_layers(p, c).map(|ls| ls.iter().map(|l| (l.thickness, p.component(&l.component_id).map(|k| k.join_priority))).collect());
             let outlines: Vec<Vec<KVec>> = match bearing.get(ci).cloned().flatten() {
                 Some(polys) => polys.iter().map(|poly| poly[0].iter().map(|q| KVec::new(q[0], q[1])).collect()).collect(),
-                None => vec![c.outline.iter().map(|v| kv(*v)).collect()],
+                None => vec![c.ring().iter().map(|v| kv(*v)).collect()],
             };
             outlines.into_iter().map(move |outline| CeilingIn { z_bottom, z_top, outline, layers: layers.clone() })
         })

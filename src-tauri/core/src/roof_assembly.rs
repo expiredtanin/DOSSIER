@@ -156,7 +156,7 @@ pub fn neighbors_rc(p: &Project) -> Rc<Vec<Vec<usize>>> {
     let roofs = p.roofs.as_deref().unwrap_or(&[]);
     let mut h = ContentHash::default();
     for r in roofs {
-        h.json(&r.outline).json(&r.holes).json(&r.edge_pitch_deg).str(&format!("{:?}{:?}", r.shape, r.ridge_axis)).f64(r.pitch_deg).f64(r.overhang).f64(r.overhang_gable.unwrap_or(-1.0)).f64(r.thickness).f64(p.roof_base_elevation(r));
+        h.json(&r.outline).json(&r.holes).json(&r.outline_bulge).json(&r.holes_bulge).json(&r.edge_pitch_deg).str(&format!("{:?}{:?}", r.shape, r.ridge_axis)).f64(r.pitch_deg).f64(r.overhang).f64(r.overhang_gable.unwrap_or(-1.0)).f64(r.thickness).f64(p.roof_base_elevation(r));
         h.json(&r.pitch_upper_deg).json(&r.mansard_type).json(&r.mansard_knee_ratio).json(&r.half_hip_ratio).json(&r.roof_type_id);
     }
     h.json(&p.roof_types);

@@ -67,7 +67,7 @@ pub fn schedule_rows(p: &Project) -> Vec<ScheduleRow> {
             length: None,
             height_m: None,
             thickness: Some(p.ceiling_thickness(c)),
-            area: Some(polygon_area(&c.outline)),
+            area: Some(c.outline_area()),
         });
     }
     for o in p.openings.as_deref().unwrap_or(&[]) {
@@ -131,7 +131,7 @@ pub fn schedule_rows(p: &Project) -> Vec<ScheduleRow> {
             length: None,
             height_m: None,
             thickness: Some(r.thickness),
-            area: Some(polygon_area(&r.outline)),
+            area: Some(r.outline_area()),
         });
         // Gauben ([G5]): Breite, Stirnhöhe, Wanddicke, Grundfläche des Ausschnitts im Hauptdach.
         for d in r.dormers.as_deref().unwrap_or(&[]) {
