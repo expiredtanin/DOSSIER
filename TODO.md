@@ -10,7 +10,7 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   stehen im Archiv („Bewusst nicht übernommen“).
 - **Grösse** (eine Person mit Agenten): S ≤ 1 Tag · M ≤ 1 Woche · L ≤ 1 Monat · XL > 1 Monat.
   Steht keine Grösse im Archiv, ist sie hier geschätzt.
-- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 214);
+- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 215);
   nie eine ID wiederverwenden oder umnummerieren. Präfix-IDs (`[K]`, `[G]`, `[T]`, `[B]`, `[C]`) bleiben.
 - **Pro Punkt:** was fehlt · wo im Code · Grösse. Höchstens ein bis drei Sätze je Punkt;
   Messwerte und Befunde gehören in den Commit.
@@ -101,9 +101,13 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   (`src/model/sample*`), Tastaturkürzel-Übersicht im Hilfemenü. · M
 - Release 1.0.0: Tag, signierte Pakete, Release-Notes (ehrlich: was nicht geht), Download-Seite.
 
-- ○ **[212]** Eigener GPU-Pathtracer in `render3d` (nach 1.0): progressiv, BVH, PBR-Materialien (diffus/glänzend/Glas), Himmel + Sonne
-  aus dem Sonnenstand, Entrauscher (z. B. Intel Open Image Denoise, Apache-2.0), WebGPU + Metal; ersetzt die Blender-Brücke [211] als
-  Standard, Blender bleibt als Option. · L
+- ○ **[212]** Eigener GPU-Pathtracer in `render3d` als progressive Vorschau im Viewport (Entscheid Maintainer 12.11.: „beides“ —
+  eigener Pathtracer für die schnelle Vorschau, Cycles [215] für Endbilder): BVH, PBR-Materialien (diffus/glänzend/Glas), Himmel + Sonne
+  aus dem Sonnenstand, Entrauscher (Intel Open Image Denoise, Apache-2.0), WebGPU + Metal, läuft auch im Browser. Nach 1.0. · L
+- ○ **[215]** Cycles eingebaut für Endbilder (nach 1.0): Cycles-Standalone (Apache-2.0, aus dem Blender-Projekt) als mitgeliefertes
+  Hilfsprogramm (Sidecar) der Desktop-App, Metal auf Apple Silicon, OIDN-Entrauscher; liest dasselbe renderer-neutrale Szenenformat
+  (GLB + Szenen-JSON) wie die Blender-Brücke [211], die als Option bleibt. Build-Kette macOS (C++, Abhängigkeiten) in CI, Herkunft in
+  `NOTICE` ([51]); App wird ca. 100–200 MB grösser. · L
 
 ### Nicht in 1.0 (bewusst später)
 Ausführungsplanung 1:50/1:20-Details, [42] Varianten, [11] Bibliothek per GUID, [88] Web-Link, [G7] Booleans-Ausbau,
