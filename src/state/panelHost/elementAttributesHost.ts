@@ -3,19 +3,38 @@
 // Handler wirkt nur bei passender Auswahl (`selection.kind`) und schreibt über die Projekt-Aktionen
 // bzw. `applyChange`.
 
-import { patchItem, patchItems, removeRoofHole, setRoofEdge } from "../../core";
+import { patchItems, removeRoofHole, setRoofEdge } from "../../core";
+import type { EntityOf } from "../../core";
 import { getState } from "../appStore";
 import type { FlatHostOpts, HostPart } from "./types";
 
-type MultiCollection = "walls" | "ceilings" | "roofs" | "openings";
+/** Auswahl-Arten mit Mehrfach-Setzen (Schlüssel in `Selection`). */
+type MultiCollection = "walls" | "ceilings" | "roofs" | "openings" | "stairs" | "rooms" | "columns" | "solids";
+
+/** Projekt-Liste zur Auswahl-Art (Körper heissen im Modell `extrudedSolids`). */
+const PROJECT_LIST = {
+  walls: "walls",
+  ceilings: "ceilings",
+  roofs: "roofs",
+  openings: "openings",
+  stairs: "stairs",
+  rooms: "rooms",
+  columns: "columns",
+  solids: "extrudedSolids",
+} as const;
 
 /**
  * [195b] Ziele einer Änderung: bei Mehrfachauswahl gleicher Art alle gewählten Elemente (in einem Undo-Schritt
- * zu setzen), sonst nur das Objekt der Objekt-Info.
+ * zu setzen), sonst nur das Objekt der Objekt-Info. Öffnungen: nur die GLEICHER Art (Fenster/Tür) wie `id` —
+ * Typ, Flügel, Anschlag u. a. gelten nur dort.
  */
 function targetIds(collection: MultiCollection, id: string): string[] {
   const ids = getState().selection[collection];
-  return ids.length > 1 && ids.includes(id) ? [...ids] : [id];
+  if (!(ids.length > 1 && ids.includes(id))) return [id];
+  if (collection !== "openings") return [...ids];
+  const openings = getState().project.openings ?? [];
+  const kind = openings.find((o) => o.id === id)?.kind;
+  return ids.filter((x) => openings.find((o) => o.id === x)?.kind === kind);
 }
 
 /** Dach-Felder, die bei Mehrfachauswahl für alle gewählten Dächer gelten (Rest: nur das erste). */
@@ -23,51 +42,56 @@ const ROOF_MULTI_KEYS: ReadonlySet<string> = new Set(["roofTypeId", "pitchDeg"])
 
 export function buildElementAttributesHost(c: FlatHostOpts) {
   const { applyChange, onOpenStampEditor, onToggleSection3dCut, openResources, patchLevel, project, section3dCutId, sectionLine, selection, patchDoorType, patchWindowType, saveOpeningStyle, setCeilingThickness, setWallThickness, slideOpening, updateCeiling, updateOpening, updateRoof, updateRoom, updateStair, updateWall } = c;
+  /** Wie {@link patchAll}, aber mit Änderungsfunktion je Element (z. B. Stützen-Profil). */
+  function mapAll<K extends MultiCollection>(collection: K, id: string, fn: (e: EntityOf<(typeof PROJECT_LIST)[K]>) => EntityOf<(typeof PROJECT_LIST)[K]>, coalesceKey?: string): void {
+    const ids = targetIds(collection, id);
+    applyChange((p) => patchItems(p, PROJECT_LIST[collection], ids, fn), coalesceKey);
+  }
   /** Patch auf alle Ziele (s. {@link targetIds}); ein Element: wie bisher über die Einzel-Aktion. */
   function patchAll<K extends MultiCollection>(collection: K, id: string, patch: Record<string, unknown>, coalesceKey?: string): void {
     const ids = targetIds(collection, id);
-    if (ids.length > 1) applyChange((p) => patchItems(p, collection, ids, (e) => ({ ...(e as object), ...patch }) as typeof e), coalesceKey);
+    if (ids.length > 1) mapAll(collection, id, (e) => ({ ...(e as object), ...patch }) as typeof e, coalesceKey);
     else if (collection === "walls") updateWall(id, patch, coalesceKey);
     else if (collection === "ceilings") updateCeiling(id, patch);
     else if (collection === "roofs") updateRoof(id, patch, coalesceKey);
-    else updateOpening(id, patch);
+    else if (collection === "openings") updateOpening(id, patch);
+    else if (collection === "stairs") updateStair(id, patch);
+    else if (collection === "rooms") updateRoom(id, patch);
+    else mapAll(collection, id, (e) => ({ ...(e as object), ...patch }) as typeof e, coalesceKey);
   }
   return {
     // ── Wand-Attribute (nur bei selektierter Wand) ─────────────────────────
     onSetWallReferenceLine: (ref) => {
       if (selection?.kind === "wall")
         // Benannte Linie gewählt ⇒ freien Fugen-Versatz löschen (er übersteuert sonst).
-        updateWall(selection.id, { referenceLine: ref, referenceOffset: undefined });
+        patchAll("walls", selection.id, { referenceLine: ref, referenceOffset: undefined });
     },
     onSetWallReferenceOffset: (offset) => {
-      if (selection?.kind === "wall")
-        updateWall(selection.id, { referenceOffset: offset ?? undefined });
+      if (selection?.kind === "wall") patchAll("walls", selection.id, { referenceOffset: offset ?? undefined });
     },
     onSetSurfacePatternPlacement: (patch) => {
-      if (selection?.kind === "wall") updateWall(selection.id, patch, "surface-pattern");
-      else if (selection?.kind === "roof") updateRoof(selection.id, patch, "surface-pattern");
+      if (selection?.kind === "wall") patchAll("walls", selection.id, patch, "surface-pattern");
+      else if (selection?.kind === "roof") patchAll("roofs", selection.id, patch, "surface-pattern");
     },
     onSetWallSliceTermination: (termination) => {
       if (selection?.kind === "wall")
         // "both" ist der Default ⇒ als undefined speichern (Alt-Projekt-Parität).
-        updateWall(selection.id, {
-          sliceTermination: termination === "both" ? undefined : termination,
-        });
+        patchAll("walls", selection.id, { sliceTermination: termination === "both" ? undefined : termination });
     },
     onSetWallRoofAttach: (attach) => {
       if (selection?.kind === "wall")
         // "auto" ist der Default ⇒ als undefined speichern.
-        updateWall(selection.id, { roofAttach: attach === "auto" ? undefined : attach === "on" });
+        patchAll("walls", selection.id, { roofAttach: attach === "auto" ? undefined : attach === "on" });
     },
     onSetBuildingFlags: (flags) => {
       const patch: { isExternal?: boolean; loadBearing?: boolean } = {};
       if (flags.isExternal !== undefined) patch.isExternal = flags.isExternal || undefined;
       if (flags.loadBearing !== undefined) patch.loadBearing = flags.loadBearing || undefined;
-      if (selection?.kind === "wall") updateWall(selection.id, patch);
-      else if (selection?.kind === "ceiling") updateCeiling(selection.id, patch);
+      if (selection?.kind === "wall") patchAll("walls", selection.id, patch);
+      else if (selection?.kind === "ceiling") patchAll("ceilings", selection.id, patch);
     },
     onSetCeilingEdgeAtOutline: (edgeAtOutline) => {
-      if (selection?.kind === "ceiling") updateCeiling(selection.id, { edgeAtOutline: edgeAtOutline || undefined });
+      if (selection?.kind === "ceiling") patchAll("ceilings", selection.id, { edgeAtOutline: edgeAtOutline || undefined });
     },
     onSetWallType: (wallTypeId) => {
       // [195b] Mehrfachauswahl: alle gewählten Wände bekommen den Typ (ein Undo-Schritt).
@@ -137,52 +161,60 @@ export function buildElementAttributesHost(c: FlatHostOpts) {
     },
     onSetOpeningSwingAngle: (swingAngle) => {
       if (selection?.kind === "opening" && swingAngle > 0)
-        updateOpening(selection.id, { swingAngle });
+        patchAll("openings", selection.id, { swingAngle });
     },
     onSetOpeningHinge: (hinge) => {
-      if (selection?.kind === "opening") updateOpening(selection.id, { hinge });
+      if (selection?.kind === "opening") patchAll("openings", selection.id, { hinge });
     },
     onSetOpeningSwing: (swing) => {
-      if (selection?.kind === "opening") updateOpening(selection.id, { swing });
+      if (selection?.kind === "opening") patchAll("openings", selection.id, { swing });
     },
     onSetOpeningDir: (openingDir) => {
-      if (selection?.kind === "opening") updateOpening(selection.id, { openingDir });
+      if (selection?.kind === "opening") patchAll("openings", selection.id, { openingDir });
     },
     onSetOpeningWingCount: (wingCount) => {
       if (selection?.kind === "opening")
-        updateOpening(selection.id, { wingCount: Math.max(1, Math.min(4, Math.round(wingCount))) });
+        patchAll("openings", selection.id, { wingCount: Math.max(1, Math.min(4, Math.round(wingCount))) });
     },
     onSetOpeningDoorType: (doorType) => {
-      if (selection?.kind === "opening") updateOpening(selection.id, { doorType });
+      if (selection?.kind === "opening") patchAll("openings", selection.id, { doorType });
     },
     onSetOpeningLintelLines: (lintelLines) => {
-      if (selection?.kind === "opening") updateOpening(selection.id, { lintelLines });
+      if (selection?.kind === "opening") patchAll("openings", selection.id, { lintelLines });
     },
     onSetOpeningDisplay: (patch) => {
-      if (selection?.kind === "opening") updateOpening(selection.id, patch);
+      if (selection?.kind === "opening") patchAll("openings", selection.id, patch);
     },
+    // Lage eines Dach-/Deckenfensters ist elementspezifisch (Punkt/Winkel in der Wirtsfläche) ⇒ bewusst nur das erste Element.
     onSetOpeningHost: (patch) => {
       if (selection?.kind === "opening") updateOpening(selection.id, patch);
     },
     onSetOpeningDetailLevel: (detailLevel) => {
-      if (selection?.kind === "opening") updateOpening(selection.id, { detailLevel });
+      if (selection?.kind === "opening") patchAll("openings", selection.id, { detailLevel });
     },
     onSetOpeningFrameLine: (v) => {
-      if (selection?.kind === "opening") updateOpening(selection.id, { frameLine: v });
+      if (selection?.kind === "opening") patchAll("openings", selection.id, { frameLine: v });
     },
     onSetOpeningFrameViewLine: (v) => {
-      if (selection?.kind === "opening") updateOpening(selection.id, { frameViewLine: v });
+      if (selection?.kind === "opening") patchAll("openings", selection.id, { frameViewLine: v });
     },
     onSetOpeningSashLine: (v) => {
-      if (selection?.kind === "opening") updateOpening(selection.id, { sashLine: v });
+      if (selection?.kind === "opening") patchAll("openings", selection.id, { sashLine: v });
     },
     onSetOpeningSillLineStyle: (v) => {
-      if (selection?.kind === "opening") updateOpening(selection.id, { sillLineStyle: v });
+      if (selection?.kind === "opening") patchAll("openings", selection.id, { sillLineStyle: v });
     },
     // Typ-Zuweisung (Bibliothek): Tür-/Fenstertyp per typeId; leerer String löst
     // die Zuweisung wieder (Inline-Verhalten).
     onSetOpeningType: (typeId) => {
       if (selection?.kind === "opening") patchAll("openings", selection.id, { typeId: typeId || undefined });
+    },
+    // Öffnungs-Editor (Fenster-/Türeditor): Instanz-Felder gelten für alle gewählten Öffnungen gleicher Art; die Position
+    // ist je Öffnung verschieden (Kern klemmt an der Wand) ⇒ nur das erste Element.
+    onPatchOpening: (patch) => {
+      if (selection?.kind !== "opening") return;
+      if ("position" in patch) updateOpening(selection.id, patch);
+      else patchAll("openings", selection.id, patch);
     },
     onEditOpeningType: (kind) => {
       openResources(kind === "door" ? "doorStyles" : "windowStyles");
@@ -197,6 +229,9 @@ export function buildElementAttributesHost(c: FlatHostOpts) {
       if (multi) patchAll("roofs", selection.id, patch, coalesceKey);
       else updateRoof(selection.id, patch, coalesceKey);
     },
+    // Kanten (Index in den Umriss), Höfe und Gauben gehören zu GENAU EINEM Dach (Indizes/Ids sind dachspezifisch,
+    // andere Dächer haben andere Umrisse): bewusst nur das erste Element; die Abschnitte erscheinen deshalb bei
+    // Mehrfachauswahl nicht (`RoofSections`, `useMulti`).
     onSetRoofEdge: (index, spec) => {
       if (selection?.kind !== "roof") return;
       const r = (project.roofs ?? []).find((x) => x.id === selection.id);
@@ -222,149 +257,128 @@ export function buildElementAttributesHost(c: FlatHostOpts) {
     onToggleSection3dCut,
     // ── Treppen-Attribute (nur bei selektierter Treppe) ────────────────────
     onSetStairShape: (shape) => {
-      if (selection?.kind === "stair") updateStair(selection.id, { shape });
+      if (selection?.kind === "stair") patchAll("stairs", selection.id, { shape });
     },
     onSetStairWidth: (width) => {
       if (selection?.kind === "stair" && width > 0)
-        updateStair(selection.id, { width });
+        patchAll("stairs", selection.id, { width });
     },
     onSetStairSteps: (stepCount) => {
       if (selection?.kind === "stair" && stepCount >= 2)
-        updateStair(selection.id, { stepCount: Math.round(stepCount) });
+        patchAll("stairs", selection.id, { stepCount: Math.round(stepCount) });
     },
     onSetStairRise: (totalRise) => {
       if (selection?.kind === "stair" && totalRise > 0)
-        updateStair(selection.id, { totalRise });
+        patchAll("stairs", selection.id, { totalRise });
     },
     onSetStairBaseOffset: (baseOffset) => {
-      if (selection?.kind === "stair" && Number.isFinite(baseOffset)) updateStair(selection.id, { baseOffset });
+      if (selection?.kind === "stair" && Number.isFinite(baseOffset)) patchAll("stairs", selection.id, { baseOffset });
     },
     onSetStairUp: (up) => {
-      if (selection?.kind === "stair") updateStair(selection.id, { up });
+      if (selection?.kind === "stair") patchAll("stairs", selection.id, { up });
     },
     onSetStairArrowStyle: (arrowStyle) => {
-      if (selection?.kind === "stair") updateStair(selection.id, { arrowStyle });
+      if (selection?.kind === "stair") patchAll("stairs", selection.id, { arrowStyle });
     },
     onSetStairColumn: (radius) => {
       if (selection?.kind === "stair")
-        updateStair(selection.id, { centerColumn: radius > 0 ? radius : undefined });
+        patchAll("stairs", selection.id, { centerColumn: radius > 0 ? radius : undefined });
     },
     onSetStairReferenz: (referenz) => {
-      if (selection?.kind === "stair") updateStair(selection.id, { referenz });
+      if (selection?.kind === "stair") patchAll("stairs", selection.id, { referenz });
     },
     onSetStairPatch: (patch) => {
-      if (selection?.kind === "stair") updateStair(selection.id, patch);
+      if (selection?.kind === "stair") patchAll("stairs", selection.id, patch);
     },
     // Typ-Zuweisung (Bibliothek): Treppentyp per typeId; leerer String löst die
     // Zuweisung (Inline-Verhalten). Treibt u. a. die 3D-Tragart (massiv/offen).
     onSetStairType: (typeId) => {
       if (selection?.kind === "stair")
-        updateStair(selection.id, { typeId: typeId || undefined });
+        patchAll("stairs", selection.id, { typeId: typeId || undefined });
     },
     // ── Raum-Attribute (nur bei selektiertem Raum) ─────────────────────────
     onSetRoomName: (name) => {
+      // Raumnamen sind je Raum verschieden ⇒ bewusst nur das erste Element (das Feld ist bei Mehrfachauswahl gesperrt).
       if (selection?.kind === "room") updateRoom(selection.id, { name });
     },
     onSetRoomSia: (category) => {
-      if (selection?.kind === "room") updateRoom(selection.id, { siaCategory: category });
+      if (selection?.kind === "room") patchAll("rooms", selection.id, { siaCategory: category });
     },
     onEditRoomStamp: (roomId) => onOpenStampEditor(roomId),
     // ── Extrusions-Attribute (truck-Integration; nur bei selektiertem Körper) ──
     onSetExtrudedSolidHeight: (height) => {
       if (selection?.kind !== "extrudedSolid" || !(height > 0)) return;
-      const id = selection.id;
-      applyChange((p) => patchItem(p, "extrudedSolids", id, { height }));
+      patchAll("solids", selection.id, { height });
     },
     onSetExtrudedSolidTaper: (taper) => {
       if (selection?.kind !== "extrudedSolid") return;
       const clamped = Math.min(1, Math.max(0, taper));
-      const id = selection.id;
-      applyChange((p) => patchItem(p, "extrudedSolids", id, { taper: clamped }));
+      patchAll("solids", selection.id, { taper: clamped });
     },
     onSetExtrudedSolidCornerRadius: (radius) => {
       if (selection?.kind !== "extrudedSolid") return;
       const r = Math.max(0, radius);
-      const id = selection.id;
-      applyChange((p) => patchItem(p, "extrudedSolids", id, { cornerRadius: r > 0 ? r : undefined }));
+      patchAll("solids", selection.id, { cornerRadius: r > 0 ? r : undefined });
     },
     onSetExtrudedSolidChamfer: (chamfer) => {
       if (selection?.kind !== "extrudedSolid") return;
       const c = Math.max(0, chamfer);
-      const id = selection.id;
-      applyChange((p) => patchItem(p, "extrudedSolids", id, { chamfer: c > 0 ? c : undefined }));
+      patchAll("solids", selection.id, { chamfer: c > 0 ? c : undefined });
     },
     onSetExtrudedSolidSubtract: (subtract) => {
       if (selection?.kind !== "extrudedSolid") return;
-      const id = selection.id;
-      applyChange((p) => patchItem(p, "extrudedSolids", id, { operation: subtract ? ("subtract" as const) : undefined }));
+      patchAll("solids", selection.id, { operation: subtract ? ("subtract" as const) : undefined });
     },
     onSetExtrudedSolidBaseOffset: (offset) => {
       if (selection?.kind !== "extrudedSolid" || !Number.isFinite(offset)) return;
-      const id = selection.id;
-      applyChange((p) => patchItem(p, "extrudedSolids", id, { baseOffset: Math.abs(offset) > 1e-9 ? offset : undefined }));
+      patchAll("solids", selection.id, { baseOffset: Math.abs(offset) > 1e-9 ? offset : undefined });
     },
     onSetExtrudedSolidComponent: (componentId) => {
       if (selection?.kind !== "extrudedSolid") return;
-      const id = selection.id;
-      applyChange((p) => patchItem(p, "extrudedSolids", id, { componentId: componentId || undefined }));
+      patchAll("solids", selection.id, { componentId: componentId || undefined });
     },
     // ── Stützen-Attribute (Tragwerk; nur bei selektierter Stütze) ──────────
     onSetColumnProfileKind: (kind) => {
       if (selection?.kind !== "column") return;
-      const id = selection.id;
-      applyChange((p) =>
-        patchItem(p, "columns", id, (c) => {
-          if (kind === c.profile.kind) return c;
-          // Profil-Typ wechseln: sinnvolles Mass aus dem bisherigen ableiten.
-          if (kind === "round") {
-            const r =
-              c.profile.kind === "rect"
-                ? Math.max(c.profile.width, c.profile.depth) / 2
-                : c.profile.radius;
-            return { ...c, profile: { kind: "round" as const, radius: r } };
-          }
-          const side = c.profile.kind === "round" ? c.profile.radius * 2 : 0.3;
-          return { ...c, profile: { kind: "rect" as const, width: side, depth: side } };
-        }),
-      );
+      mapAll("columns", selection.id, (c) => {
+        if (kind === c.profile.kind) return c;
+        // Profil-Typ wechseln: sinnvolles Mass aus dem bisherigen ableiten.
+        if (kind === "round") {
+          const r =
+            c.profile.kind === "rect"
+              ? Math.max(c.profile.width, c.profile.depth) / 2
+              : c.profile.radius;
+          return { ...c, profile: { kind: "round" as const, radius: r } };
+        }
+        const side = c.profile.kind === "round" ? c.profile.radius * 2 : 0.3;
+        return { ...c, profile: { kind: "rect" as const, width: side, depth: side } };
+      });
     },
     onSetColumnWidth: (width) => {
       if (selection?.kind !== "column" || !(width > 0)) return;
-      const id = selection.id;
-      applyChange((p) =>
-        patchItem(p, "columns", id, (c) =>
-          c.profile.kind === "rect" ? { ...c, profile: { ...c.profile, width } } : c,
-        ),
+      mapAll("columns", selection.id, (c) =>
+        c.profile.kind === "rect" ? { ...c, profile: { ...c.profile, width } } : c,
       );
     },
     onSetColumnDepth: (depth) => {
       if (selection?.kind !== "column" || !(depth > 0)) return;
-      const id = selection.id;
-      applyChange((p) =>
-        patchItem(p, "columns", id, (c) =>
-          c.profile.kind === "rect" ? { ...c, profile: { ...c.profile, depth } } : c,
-        ),
+      mapAll("columns", selection.id, (c) =>
+        c.profile.kind === "rect" ? { ...c, profile: { ...c.profile, depth } } : c,
       );
     },
     onSetColumnRadius: (radius) => {
       if (selection?.kind !== "column" || !(radius > 0)) return;
-      const id = selection.id;
-      applyChange((p) =>
-        patchItem(p, "columns", id, (c) =>
-          c.profile.kind === "round" ? { ...c, profile: { ...c.profile, radius } } : c,
-        ),
+      mapAll("columns", selection.id, (c) =>
+        c.profile.kind === "round" ? { ...c, profile: { ...c.profile, radius } } : c,
       );
     },
     onSetColumnHeight: (height) => {
       if (selection?.kind !== "column" || !(height > 0)) return;
-      const id = selection.id;
-      applyChange((p) => patchItem(p, "columns", id, { height }));
+      patchAll("columns", selection.id, { height });
     },
     onSetColumnRotation: (deg) => {
       if (selection?.kind !== "column" || !Number.isFinite(deg)) return;
-      const id = selection.id;
-      const rotation = (deg * Math.PI) / 180;
-      applyChange((p) => patchItem(p, "columns", id, { rotation }));
+      patchAll("columns", selection.id, { rotation: (deg * Math.PI) / 180 });
     },
   } satisfies HostPart;
 }

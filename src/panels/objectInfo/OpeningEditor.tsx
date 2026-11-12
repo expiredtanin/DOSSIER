@@ -45,15 +45,16 @@ type CatId =
 /** Abschnitt „Fenster-/Türeditor" der Objekt-Info: Projekt aus dem Store, Änderungen über die Host-Handler. */
 export function OpeningEditorSection({ openingId, host }: { openingId: string; host: ReturnType<typeof usePanelHost> }) {
   const project = useStore((st) => st.project);
-  const updateOpening = useStore((st) => st.updateOpening);
+  // [195b] Mehrfachauswahl: Instanz-Felder und Typ-Zuweisung gelten für alle gewählten Öffnungen gleicher Art
+  // (Host-Handler, ein Undo-Schritt); Typ-Felder wirken ohnehin auf alle Öffnungen des Stils.
   return (
     <OpeningEditor
       openingId={openingId}
       project={project}
       onPatchWindowType={host.onPatchWindowType}
       onPatchDoorType={host.onPatchDoorType}
-      onPatchOpening={(patch) => updateOpening(openingId, patch)}
-      onSetOpeningType={(typeId) => updateOpening(openingId, { typeId: typeId || undefined })}
+      onPatchOpening={host.onPatchOpening}
+      onSetOpeningType={host.onSetOpeningType}
       onSaveAsStyle={(name) => host.onSaveOpeningStyle(openingId, name)}
     />
   );

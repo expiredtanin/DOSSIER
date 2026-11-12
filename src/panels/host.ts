@@ -491,6 +491,8 @@ export interface PanelHostValue {
   onSetOpeningSashLine: (v: { color?: string; weight?: number } | undefined) => void;
   /** Übersteuert Farbe/Strichstärke der Auf-/Untersicht-Andeutung (Sims). */
   onSetOpeningSillLineStyle: (v: { color?: string; weight?: number } | undefined) => void;
+  /** Öffnungs-Editor: Instanz-Felder der gewählten Öffnung(en) gleicher Art (Position nur das erste Element). */
+  onPatchOpening: (patch: Partial<import("../model/types").Opening>) => void;
   /** Weist der Öffnung einen Tür-/Fenstertyp (Bibliothek) zu; "" löst die Zuweisung. */
   onSetOpeningType: (typeId: string) => void;
   /**

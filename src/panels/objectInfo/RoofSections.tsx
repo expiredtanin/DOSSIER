@@ -339,12 +339,14 @@ export function RoofSection({
 
       {/* Kanten: Neigung je Kante (leer = Standard) und Giebel ([26]). Wirkt bei Sattel/Walm/
           Mansarde/Zelt; Flach und Pult ignorieren sie. */}
-      {roof.shape !== "flach" && roof.shape !== "pult" && (
+      {/* [195b] Kanten, Gauben und Innenhöfe gehören zu genau einem Dach (Indizes/Ids sind dachspezifisch): bei
+          Mehrfachauswahl nicht angeboten (`multi`), die Host-Setter wirken dort ohnehin nur auf das erste Dach. */}
+      {!multi && roof.shape !== "flach" && roof.shape !== "pult" && (
         <RoofEdgesSection roof={roof} host={host} />
       )}
       {/* Innenhöfe: Liste mit Entfernen, Hinzufügen über den Befehl „Dachhof“. */}
-      <DormersSection roof={roof} host={host} />
-      {roof.shape !== "pult" && (
+      {!multi && <DormersSection roof={roof} host={host} />}
+      {!multi && roof.shape !== "pult" && (
         <>
           <div className="objinfo-sep" />
           <div className="objinfo-section-label">{t("objinfo.roof.courts")}</div>

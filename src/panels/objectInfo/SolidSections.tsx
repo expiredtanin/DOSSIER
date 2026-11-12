@@ -6,7 +6,9 @@ import type { ExtrudedSolidInfo, ColumnInfo, SolidProps } from "../../state/sele
 import { usePanelHost } from "../host";
 import { useStore } from "../../state/appStore";
 import { Dropdown } from "../../ui/Dropdown";
-import { DimensionField } from "./fields";
+import { selectionColumnValues, selectionSolidValues } from "../../state/mixedValues";
+import { DimensionField, MixedMark } from "./fields";
+import { useMulti } from "./useMulti";
 
 /** Volumen/Oberfläche/Schwerpunkt aus dem Kern-Netz des Körpers (Manifold, dasselbe Netz wie im 3D). */
 function SolidPropsRows({ props }: { props: SolidProps | null }) {
@@ -44,6 +46,8 @@ export function ExtrudedSolidSection({
   host: ReturnType<typeof usePanelHost>;
 }) {
   const components = useStore((st) => st.project.components);
+  // [195b] Mehrfachauswahl: Höhe und die übrigen Setter gelten für alle gewählten Körper.
+  const multi = useMulti("solids", selectionSolidValues);
   return (
     <>
       <div className="objinfo-sep" />
@@ -64,6 +68,7 @@ export function ExtrudedSolidSection({
           }}
           title={t("objinfo.extrudedSolid.height")}
         />
+        <MixedMark on={multi?.height.mixed} what="height" />
       </div>
 
       <SolidPropsRows props={solid.props} />
@@ -205,6 +210,8 @@ export function ColumnSection({
   column: ColumnInfo;
   host: ReturnType<typeof usePanelHost>;
 }) {
+  // [195b] Mehrfachauswahl: Profil, Masse, Höhe und Drehung gelten für alle gewählten Stützen.
+  const multi = useMulti("columns", selectionColumnValues);
   return (
     <>
       <div className="objinfo-sep" />
@@ -252,6 +259,7 @@ export function ColumnSection({
         value={column.height}
         onCommit={(v) => host.onSetColumnHeight(v)}
       />
+      <MixedMark on={multi?.height.mixed} what="height" />
 
       {/* Drehung (Grad). */}
       <div className="objinfo-field">

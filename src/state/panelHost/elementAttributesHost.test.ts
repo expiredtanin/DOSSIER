@@ -36,6 +36,9 @@ function hostFor(kind: string, id: string): Host {
     updateCeiling: s.updateCeiling,
     updateOpening: s.updateOpening,
     updateRoof: s.updateRoof,
+    project: s.project,
+    updateStair: s.updateStair,
+    updateRoom: s.updateRoom,
     setWallThickness: s.setWallThickness,
     setCeilingThickness: s.setCeilingThickness,
     selection: { kind, id },
@@ -45,7 +48,7 @@ function hostFor(kind: string, id: string): Host {
 describe("Mehrfachauswahl setzt alle gewählten Elemente in einem Schritt [195b]", () => {
   it("Öffnungen: Breite und Brüstung gelten für alle, je ein Undo-Schritt", () => {
     getState().loadProject(buildComplexSampleProject());
-    const [a, b] = getState().project.openings!;
+    const [a, b] = getState().project.openings!.filter((o) => o.kind === "window");
     setState({ selection: { ...EMPTY_SELECTION, openings: [a.id, b.id] } });
     const host = hostFor("opening", a.id);
     const depth = getState().undoDepth;
@@ -99,5 +102,80 @@ describe("Mehrfachauswahl setzt alle gewählten Elemente in einem Schritt [195b]
     const depth = getState().undoDepth;
     (host.onSetWallThickness as (x: number) => void)(0.29);
     expect(getState().undoDepth).toBe(depth + 1);
+  });
+
+  it("Öffnungen: Zusatzfelder und Editor-Patch nur für Öffnungen GLEICHER Art", () => {
+    getState().loadProject(buildComplexSampleProject());
+    const os = getState().project.openings!;
+    const doors = os.filter((o) => o.kind === "door");
+    const win = os.find((o) => o.kind === "window")!;
+    setState({ selection: { ...EMPTY_SELECTION, openings: [doors[0].id, doors[1].id, win.id] } });
+    const host = hostFor("opening", doors[0].id);
+    const depth = getState().undoDepth;
+    (host.onSetOpeningHinge as (x: string) => void)("end");
+    const after = getState().project.openings!;
+    expect(after.find((o) => o.id === doors[1].id)!.hinge).toBe("end");
+    expect(after.find((o) => o.id === win.id)!.hinge).toBe(os.find((o) => o.id === win.id)!.hinge);
+    expect(getState().undoDepth).toBe(depth + 1);
+    // Editor: Instanz-Patch für alle Türen, die Position nur für das erste Element.
+    (host.onPatchOpening as (x: object) => void)({ frameDetail: undefined, shape: "bogen" });
+    expect(getState().project.openings!.find((o) => o.id === doors[1].id)!.shape).toBe("bogen");
+    expect(getState().project.openings!.find((o) => o.id === win.id)!.shape).not.toBe("bogen");
+    expect(getState().undoDepth).toBe(depth + 2);
+  });
+
+  it("Wände: Referenzlinie für alle in einem Schritt", () => {
+    getState().loadProject(buildComplexSampleProject());
+    const [a, b] = getState().project.walls;
+    setState({ selection: { ...EMPTY_SELECTION, walls: [a.id, b.id] } });
+    const host = hostFor("wall", a.id);
+    const depth = getState().undoDepth;
+    (host.onSetWallReferenceLine as (x: string) => void)("right");
+    expect(getState().project.walls.find((w) => w.id === b.id)!.referenceLine).toBe("right");
+    expect(getState().undoDepth).toBe(depth + 1);
+  });
+
+  it("Treppen, Räume, Stützen, Körper: Setter wirken auf alle, Raumname nur auf das erste", () => {
+    getState().loadProject(buildComplexSampleProject());
+    const p = getState().project;
+    const [s1, s2] = p.stairs!;
+    setState({ selection: { ...EMPTY_SELECTION, stairs: [s1.id, s2.id] } });
+    let depth = getState().undoDepth;
+    (hostFor("stair", s1.id).onSetStairWidth as (x: number) => void)(1.37);
+    expect(getState().project.stairs!.find((s) => s.id === s2.id)!.width).toBe(1.37);
+    expect(getState().undoDepth).toBe(depth + 1);
+
+    const [r1, r2] = p.rooms!;
+    setState({ selection: { ...EMPTY_SELECTION, rooms: [r1.id, r2.id] } });
+    depth = getState().undoDepth;
+    const sia = r1.siaCategory === "NNF" ? "VF" : "NNF";
+    (hostFor("room", r1.id).onSetRoomSia as (x: string) => void)(sia);
+    expect(getState().project.rooms!.find((r) => r.id === r2.id)!.siaCategory).toBe(sia);
+    expect(getState().undoDepth).toBe(depth + 1);
+    (hostFor("room", r1.id).onSetRoomName as (x: string) => void)("Eigenname");
+    expect(getState().project.rooms!.find((r) => r.id === r2.id)!.name).not.toBe("Eigenname");
+
+    const [c1, c2] = p.columns!;
+    setState({ selection: { ...EMPTY_SELECTION, columns: [c1.id, c2.id] } });
+    depth = getState().undoDepth;
+    (hostFor("column", c1.id).onSetColumnHeight as (x: number) => void)(3.3);
+    expect(getState().project.columns!.find((c) => c.id === c2.id)!.height).toBe(3.3);
+    expect(getState().undoDepth).toBe(depth + 1);
+
+    const [e1, e2] = p.extrudedSolids!;
+    setState({ selection: { ...EMPTY_SELECTION, solids: [e1.id, e2.id] } });
+    depth = getState().undoDepth;
+    (hostFor("extrudedSolid", e1.id).onSetExtrudedSolidHeight as (x: number) => void)(2.2);
+    expect(getState().project.extrudedSolids!.find((e) => e.id === e2.id)!.height).toBe(2.2);
+    expect(getState().undoDepth).toBe(depth + 1);
+  });
+
+  it("Dach: Kanten bleiben beim ersten Dach", () => {
+    getState().loadProject(buildComplexSampleProject());
+    const [a, b] = getState().project.roofs!;
+    setState({ selection: { ...EMPTY_SELECTION, roofs: [a.id, b.id] } });
+    const before = JSON.stringify(b);
+    (hostFor("roof", a.id).onSetRoofEdge as (i: number, s: object) => void)(0, { kind: "pitch", pitchDeg: 51 });
+    expect(JSON.stringify(getState().project.roofs!.find((r) => r.id === b.id))).toBe(before);
   });
 });

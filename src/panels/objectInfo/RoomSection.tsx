@@ -6,10 +6,13 @@ import { usePanelHost } from "../host";
 import { t } from "../../i18n";
 import { Dropdown } from "../../ui/Dropdown";
 import type { SiaCategory, Project, Room } from "../../model/types";
-import { SIA_CATEGORIES, siaLabelFull, patchItem, roomBook, ROOM_USAGES, usageLabel } from "../../core";
+import { SIA_CATEGORIES, siaLabelFull, patchItems, roomBook, ROOM_USAGES, usageLabel } from "../../core";
 import { formatM } from "../../model/types";
 import { useStore } from "../../state/appStore";
 import type { TranslationKey } from "../../i18n";
+import { selectionRoomValues } from "../../state/mixedValues";
+import { MixedMark } from "./fields";
+import { useMulti } from "./useMulti";
 
 // ── Raum-Attribut-Abschnitt ──────────────────────────────────────────────────
 // Editierbarer Name, SIA-416-Kategorie (5 Blatt-Kategorien), abgeleitete Fläche
@@ -24,6 +27,9 @@ export function RoomSection({
   roomId: string;
   host: ReturnType<typeof usePanelHost>;
 }) {
+  // [195b] Mehrfachauswahl: SIA-Kategorie und Oberflächen gelten für alle gewählten Räume; der Name bleibt je Raum
+  // eigen (Feld gesperrt).
+  const multi = useMulti("rooms", selectionRoomValues);
   return (
     <>
       <div className="objinfo-sep" />
@@ -36,6 +42,7 @@ export function RoomSection({
           type="text"
           className="objinfo-text"
           value={room.name}
+          disabled={multi != null}
           onChange={(e) => host.onSetRoomName(e.target.value)}
           title={t("objinfo.room.name")}
         />
@@ -54,6 +61,7 @@ export function RoomSection({
           title={t("objinfo.room.sia")}
           width={170}
         />
+        <MixedMark on={multi?.siaCategory.mixed} what="sia" />
       </div>
 
       {/* Fläche + Umfang (read-only, abgeleitet). */}
@@ -96,14 +104,18 @@ type RoomFinishField = "floorFinish" | "wallFinish" | "ceilingFinish" | "floorBu
 function RoomFinishFields({ roomId }: { roomId: string }) {
   const storeProject = useStore((st) => st.project);
   const applyChange = useStore((s) => s.applyChange);
+  const selectedRooms = useStore((s) => s.selection.rooms);
   const project = storeProject;
   const room = (project.rooms ?? []).find((r) => r.id === roomId);
   if (!room) return null;
   const comps = project.components;
   const listId = `room-finish-materials-${roomId}`;
   const shown = (v: string | undefined) => comps.find((c) => c.id === v)?.name ?? v ?? "";
-  const set = (field: RoomFinishField | "usage", value: string | undefined) =>
-    applyChange((p: Project) => patchItem(p, "rooms", roomId, { [field]: value } as Partial<Room>), `room:${roomId}:${field}`);
+  // [195b] Mehrfachauswahl: Nutzung und Oberflächen gelten für alle gewählten Räume (ein Undo-Schritt).
+  const set = (field: RoomFinishField | "usage", value: string | undefined) => {
+    const ids = selectedRooms.length > 1 && selectedRooms.includes(roomId) ? [...selectedRooms] : [roomId];
+    applyChange((p: Project) => patchItems(p, "rooms", ids, (r) => ({ ...r, [field]: value }) as Room), `room:${roomId}:${field}`);
+  };
   const setFinish = (field: RoomFinishField, text: string) => {
     const v = text.trim();
     if (!v) return set(field, undefined);

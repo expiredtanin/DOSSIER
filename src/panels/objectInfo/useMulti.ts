@@ -6,7 +6,7 @@ import type { Project } from "../../model/types";
 import { useStore } from "../../state/appStore";
 import type { Selection } from "../../state/selection";
 
-export function useMulti<T>(kind: "walls" | "ceilings" | "roofs" | "openings", compute: (p: Project, sel: Selection) => T): T | null {
+export function useMulti<T>(kind: "walls" | "ceilings" | "roofs" | "openings" | "stairs" | "rooms" | "columns" | "solids", compute: (p: Project, sel: Selection) => T): T | null {
   const project = useStore((s) => s.project);
   const selection = useStore((s) => s.selection);
   // `compute` ist je Aufrufstelle eine Modul-Funktion (stabil).
