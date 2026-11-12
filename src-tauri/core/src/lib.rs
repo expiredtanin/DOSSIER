@@ -107,6 +107,7 @@ pub mod reorder;
 pub use dossier_hatch::ugrid;
 pub mod wasm_alloc;
 pub mod text_layout;
+pub mod text_metrics;
 pub mod grips;
 pub mod grip_drag;
 pub mod sheet_height;

@@ -17,17 +17,19 @@ pub struct GlyphLine {
     pub align: TextAlign,
     /// `STYLE_BOLD` | `STYLE_ITALIC`.
     pub style: u32,
+    /// Schriftfamilie ([226]): 0 = Inter (eingebettet), sonst Kennung der gebuendelten Familie.
+    pub family: u32,
 }
 
 impl From<&crate::types::Text> for GlyphLine {
     fn from(t: &crate::types::Text) -> Self {
-        GlyphLine { x: t.pos[0] as f64, y: t.pos[1] as f64, content: t.content.clone(), size_mm: t.size_mm, color: t.color, align: t.align, style: t.style }
+        GlyphLine { x: t.pos[0] as f64, y: t.pos[1] as f64, content: t.content.clone(), size_mm: t.size_mm, color: t.color, align: t.align, style: t.style, family: t.family }
     }
 }
 
 /// Zeilen aus dem Format der Kern-Bindung `plan_screen_texts` (f64, little-endian):
 /// `[n, (x, y, sizeMm, r, g, b, a, code, nUtf16)*, UTF-16-Einheiten…]`, `code` = Ausrichtung |
-/// Schnitt << 8. `None` bei kaputtem Puffer (nie Panic).
+/// Schnitt << 8 | Familie << 16. `None` bei kaputtem Puffer (nie Panic).
 pub fn lines_from_f64(f: &[f64]) -> Option<Vec<GlyphLine>> {
     let n = *f.first()?;
     if !(n.is_finite() && n >= 0.0 && n.fract() == 0.0) {
@@ -64,6 +66,7 @@ pub fn lines_from_f64(f: &[f64]) -> Option<Vec<GlyphLine>> {
             color: [r[3] as f32, r[4] as f32, r[5] as f32, r[6] as f32],
             align,
             style: (code >> 8) & (STYLE_BOLD | STYLE_ITALIC),
+            family: (code >> 16) & 0xff,
         });
     }
     Some(out)
@@ -89,7 +92,7 @@ mod tests {
 
     #[test]
     fn zeilen_aus_kern_puffer() {
-        let (a, ua) = rec(1.0, 1.0 + 256.0, "Wohnen");
+        let (a, ua) = rec(1.0, 1.0 + 256.0 + (15 << 16) as f64, "Wohnen");
         let (b, ub) = rec(2_600_000.25, 2.0, "17.01 m²");
         let mut f = vec![2.0];
         f.extend(a);
@@ -100,6 +103,8 @@ mod tests {
         assert_eq!(l.len(), 2);
         assert_eq!((l[0].content.as_str(), l[0].align, l[0].style), ("Wohnen", TextAlign::Center, STYLE_BOLD));
         assert_eq!((l[1].content.as_str(), l[1].align, l[1].style), ("17.01 m²", TextAlign::Right, 0));
+        // [226] Familie ab Bit 16 des Codes.
+        assert_eq!((l[0].family, l[1].family), (15, 0));
         // Landeskoordinaten bleiben in doppelter Genauigkeit.
         assert_eq!(l[1].x, 2_600_000.25);
         let bytes: Vec<u8> = f.iter().flat_map(|v| v.to_le_bytes()).collect();

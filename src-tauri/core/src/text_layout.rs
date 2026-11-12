@@ -638,13 +638,64 @@ pub fn text_width_em(text: &str, bold: bool) -> f64 {
     w as f64 / 1000.0 * if bold { 1.05 } else { 1.0 }
 }
 
+/// [226] Gebündelte Schriftfamilien in der Reihenfolge von `src/text/fontList.ts` (`TEXT_FONTS`; ein Test gleicht
+/// beide ab). Kennung im Szenenformat = Index + 1, 0 = Inter/unbekannt (der Glyphen-Pass von render2d zeichnet
+/// Inter, wenn eine Familie fehlt).
+pub const FONT_FAMILIES: [&str; 15] = [
+    "Inter", "Work Sans", "IBM Plex Sans", "IBM Plex Mono", "Source Sans 3", "Space Grotesk", "Manrope", "Outfit", "DM Sans", "Public Sans", "Karla",
+    "Rubik", "Jost", "Archivo", "Source Serif 4",
+];
+
+/// [226] Kennung der gebündelten Familie zu einem Namen (ohne Beachtung der Gross-/Kleinschreibung); 0 für Inter,
+/// keinen Namen und alles Unbekannte (Arial, Helvetica …).
+pub fn font_family_id(name: Option<&str>) -> u32 {
+    let Some(n) = name else { return 0 };
+    match FONT_FAMILIES.iter().position(|f| f.eq_ignore_ascii_case(n.trim())) {
+        Some(0) | None => 0,
+        Some(i) => i as u32 + 1,
+    }
+}
+
+/// [226] Breite eines Texts in em in der Schrift `family` (CSS-Familie oder Name; `None`/Inter/unbekannt: Inter,
+/// [`text_width_em`]). Gleiche Metrik wie der Glyphen-Pass (Tabelle `hmtx` der gebündelten Datei, ohne Kerning),
+/// damit Kasten und Freistellung zur gezeichneten Schrift passen. Zeichen ausserhalb der Tabelle:
+/// [`CHAR_WIDTH_FACTOR`].
+pub fn text_width_em_in(text: &str, bold: bool, italic: bool, family: Option<&str>) -> f64 {
+    let id = font_family_id(font_name_of(family).as_deref());
+    if id < 2 {
+        return text_width_em(text, bold);
+    }
+    let row = &crate::text_metrics::WIDTHS[(id as usize - 2) * 4 + bold as usize + 2 * italic as usize];
+    let w: u32 = text
+        .chars()
+        .map(|ch| {
+            let c = ch as u32;
+            let col = match c {
+                0x20..=0x7e => Some((c - 0x20) as usize),
+                0xa0..=0xff => Some((c - 0xa0) as usize + 95),
+                _ => crate::text_metrics::EXTRA_CHARS.iter().position(|&e| e == c).map(|i| i + 191),
+            };
+            match col.map(|i| row[i]) {
+                Some(w) if w > 0 => w as u32,
+                _ => (CHAR_WIDTH_FACTOR * 1000.0) as u32,
+            }
+        })
+        .sum();
+    w as f64 / 1000.0
+}
+
+/// [226] Breite eines Laufs (Tspan) in em in seiner eigenen Schrift.
+fn tspan_width_em(t: &Tspan) -> f64 {
+    text_width_em_in(&t.text, t.bold, t.italic, t.font_family.as_deref())
+}
+
 /// [140] Waagrechte Lage jeder Zeile eines Raumstempels relativ zum Anker (gleiche Einheiten wie die Zeilen):
 /// der Block ist so breit wie seine breiteste Zeile ([`stamp_block_size`]) und um den Anker zentriert; eine
 /// linksbündige Zeile beginnt am linken Blockrand (−Breite/2), eine rechtsbündige endet am rechten (+Breite/2),
 /// eine zentrierte steht am Anker. So liegt der gezeichnete Stempel im gemessenen Rechteck, mit dem
 /// `plan::domains` ihn im Raum einpasst (vorher begann eine linksbündige Namenszeile am Anker).
 pub fn stamp_line_offsets(placed: &[Placed]) -> Vec<f64> {
-    let width = |p: &Placed| p.line.tspans.iter().map(|t| text_width_em(&t.text, t.bold) * t.font_size).sum::<f64>();
+    let width = |p: &Placed| p.line.tspans.iter().map(|t| tspan_width_em(t) * t.font_size).sum::<f64>();
     let w = placed.iter().map(width).fold(0.0, f64::max);
     placed
         .iter()
@@ -664,7 +715,7 @@ pub fn stamp_block_size(doc: &RichTextDoc, extra: &[ExtraRow], base_pt: f64, uni
     if placed.is_empty() {
         return (0.0, 0.0);
     }
-    let w = placed.iter().map(|p| p.line.tspans.iter().map(|t| text_width_em(&t.text, t.bold) * t.font_size).sum::<f64>()).fold(0.0, f64::max);
+    let w = placed.iter().map(|p| p.line.tspans.iter().map(|t| tspan_width_em(t) * t.font_size).sum::<f64>()).fold(0.0, f64::max);
     // [199] Erste Zeile nach ihrer grössten Schrift (wie die Zentrierung in [`stamp_block_refs`]).
     let first = placed[0].line.tspans.iter().map(|t| t.font_size).fold(base_pt * unit_per_pt, f64::max);
     let h = first + placed[1..].iter().map(|p| p.line.line_height).sum::<f64>();
@@ -690,6 +741,35 @@ mod tests {
 
     fn texts(lines: &[Line]) -> Vec<String> {
         lines.iter().map(Line::content).collect()
+    }
+
+    /// [226] Familienliste = `TEXT_FONTS` der Oberfläche (gleiche Reihenfolge: Kennung = Index + 1).
+    #[test]
+    fn schriftfamilien_wie_in_der_oberflaeche() {
+        let ts = include_str!("../../../src/text/fontList.ts");
+        let body = ts.split("TEXT_FONTS: string[] = [").nth(1).unwrap().split("];").next().unwrap();
+        let names: Vec<&str> = body.lines().filter_map(|l| l.trim().strip_prefix('"')?.strip_suffix("\",")).collect();
+        assert_eq!(names, FONT_FAMILIES);
+        assert_eq!(font_family_id(Some("Source Serif 4")), 15);
+        assert_eq!(font_family_id(Some("work sans")), 2);
+        assert_eq!((font_family_id(Some("Inter")), font_family_id(Some("Arial")), font_family_id(None)), (0, 0, 0));
+    }
+
+    /// [226] Breiten je Familie: Inter bleibt die alte Tabelle, andere Familien messen mit ihrer eigenen Schrift.
+    #[test]
+    fn breite_je_schriftfamilie() {
+        let t = "Wohnen 17.01 m²";
+        assert_eq!(text_width_em_in(t, false, false, None), text_width_em(t, false));
+        assert_eq!(text_width_em_in(t, true, true, Some("\"Inter\", sans-serif")), text_width_em(t, true));
+        assert_eq!(text_width_em_in(t, false, false, Some("Arial")), text_width_em(t, false));
+        let serif = text_width_em_in(t, false, false, Some("Source Serif 4"));
+        let mono = text_width_em_in(t, false, false, Some("IBM Plex Mono"));
+        assert!((serif - text_width_em(t, false)).abs() > 0.05, "{serif}");
+        // Nichtproportional: jedes Zeichen 600/1000 em.
+        assert!((mono - 0.6 * t.chars().count() as f64).abs() < 1e-9, "{mono}");
+        assert!(text_width_em_in(t, true, false, Some("Source Serif 4")) > serif);
+        // Fehlendes Zeichen: Schätzung statt 0.
+        assert!(text_width_em_in("日", false, false, Some("Rubik")) > 0.5);
     }
 
     #[test]

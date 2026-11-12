@@ -16,6 +16,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Plan } from "../../core";
 import { planSceneBin } from "../../core";
+import { loadFontFile } from "../../text/glyphFonts";
 import { type WebPlanRendererLike, WasmPlanRendererSession } from "./wasmRendererSession";
 
 interface ViewBox {
@@ -73,6 +74,7 @@ function sessionFor(canvas: HTMLCanvasElement): CanvasSession {
     const session = new WasmPlanRendererSession<Plan>({
       create: () => createRenderer(canvas),
       encode: (plan) => planSceneBin(plan),
+      loadFont: (key) => loadFontFile(key),
       onReadyChange: (r) => listeners.forEach((l) => l(r)),
     });
     cs = { session, listeners };

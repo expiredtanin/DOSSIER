@@ -25,7 +25,7 @@ fn texts_of(segs: &[f64], greyed: &[f64], paper_scale_n: f64, screen: Option<Scr
 }
 
 /// Textzeilen als `[n, (x, y, sizeMm, r, g, b, a, code, nUtf16)*, UTF-16-Einheiten…]`; `code` =
-/// Ausrichtung (unteres Byte) | Schnitt << 8, nur mit `style`.
+/// Ausrichtung (unteres Byte) | Schnitt << 8 | Familie << 16 ([226]), nur mit `style`.
 fn texts_f64(texts: &[SText], style: bool) -> Vec<f64> {
     let mut out = Vec::with_capacity(1 + texts.len() * 12);
     out.push(texts.len() as f64);
@@ -34,7 +34,7 @@ fn texts_f64(texts: &[SText], style: bool) -> Vec<f64> {
         let s = String::from_utf8_lossy(&t.content);
         let n0 = units.len();
         units.extend(s.encode_utf16().map(f64::from));
-        let code = if style { t.align | (t.style << 8) } else { t.align };
+        let code = if style { t.align | (t.style << 8) | (t.family << 16) } else { t.align };
         out.extend_from_slice(&[t.pos.x, t.pos.y, t.size_mm, t.color[0], t.color[1], t.color[2], t.color[3], code as f64, (units.len() - n0) as f64]);
     }
     out.extend(units);
@@ -68,7 +68,7 @@ pub fn plan_scene_texts(segs: &[f64], greyed: &[f64], paper_scale_n: f64) -> Vec
 }
 
 /// Textzeilen der BILDSCHIRM-Szene für die native Fläche ([194], `native2d_scene_texts`): Format wie
-/// `plan_scene_texts`, Kennung = Ausrichtung | Schnitt << 8 (Bit 0 fett, Bit 1 kursiv); ohne gedrehte
+/// `plan_scene_texts`, Kennung = Ausrichtung | Schnitt << 8 (Bit 0 fett, Bit 1 kursiv) | Familie << 16 ([226]); ohne gedrehte
 /// Einzeltexte und ohne den Eintrag mit Plan-Index `skip` (Text im Editor; < 0 = keiner). Leer = Fehler.
 #[wasm_bindgen]
 pub fn plan_screen_texts(segs: &[f64], greyed: &[f64], paper_scale_n: f64, skip: f64) -> Vec<f64> {

@@ -430,6 +430,7 @@ mod tests {
             color: [0.0, 0.0, 0.0, 1.0],
             align,
             style,
+            family: 0,
         };
         // Ansicht: x 0..4 m, y −1..1 m auf 360x180 px (1 Einheit = 1 px); 5 mm bei 1:100 = 0.5 m = 45 px.
         // Tinte = Abdunklung gegenueber dem Blatt (Rot-Kanal der Ecke oben links).
@@ -458,6 +459,60 @@ mod tests {
         let zoomed = render(vec![line(0.5, 0, TextAlign::Left)], 180.0);
         let ratio = ink(&zoomed, 0, 360) as f64 / n as f64;
         assert!((3.0..5.0).contains(&ratio), "Zoom-Verhaeltnis {ratio}");
+    }
+
+    /// [226] Schriftfamilien im Szenen-Pfad (Browser/WebGPU): dieselbe Zeile in Inter, einer Serifen- und einer
+    /// Festbreitenschrift sieht verschieden aus; eine nicht geladene Familie faellt auf Inter zurueck (pixelgleich).
+    /// Mit `DOSSIER_SHOTS=<Ordner>` schreibt der Test das Bild (`schriftfamilien.png`) zum Ansehen.
+    #[test]
+    fn schriftfamilien_im_glyphen_pass() {
+        use crate::glyph::font_key;
+        use crate::types::{Text, TextAlign, STYLE_BOLD, STYLE_ITALIC};
+        let mut r = match HeadlessRenderer::new() {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("uebersprungen, kein Headless-Adapter: {e}");
+                return;
+            }
+        };
+        let font = |slug: &str, w: u32, it: &str| std::fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../../public/fonts/{slug}/{slug}-{w}-{it}.woff2"))).unwrap();
+        let text = |y: f32, family: u32, style: u32, s: &str| Text { pos: [0.2, y], content: s.into(), size_mm: 5.0, color: [0.0, 0.0, 0.0, 1.0], align: TextAlign::Left, style, family };
+        let img = |r: &mut HeadlessRenderer, texts: Vec<Text>| r.render_to_image(&Scene { texts, ..Default::default() }, 540, 330, ViewBox::new(0.0, -288.0, 540.0, 330.0), 100.0);
+        let ink_w = |i: &RgbaImage, y0: u32, y1: u32| {
+            let cols: Vec<u32> = (0..i.width).filter(|&x| (y0..y1).any(|y| i.pixels[((y * i.width + x) * 4) as usize] < 128)).collect();
+            cols.last().map_or(0, |l| l - cols[0])
+        };
+        let s = "Hamburgefons 17 m²";
+        let rows = |fam: [u32; 5]| vec![text(2.8, fam[0], 0, s), text(2.2, fam[1], 0, s), text(1.6, fam[2], 0, s), text(1.0, fam[3], STYLE_ITALIC, s), text(0.4, fam[4], STYLE_BOLD, s)];
+        // Noch nichts geladen: alles Inter.
+        let before = img(&mut r, rows([0, 15, 4, 15, 15]));
+        for (fam, style, file) in [(15, 0, ("source-serif-4", 400, "normal")), (4, 0, ("ibm-plex-mono", 400, "normal")), (15, STYLE_ITALIC, ("source-serif-4", 400, "italic")), (15, STYLE_BOLD, ("source-serif-4", 700, "normal"))] {
+            assert!(r.renderer.add_font(font_key(fam, style), &font(file.0, file.1, file.2)));
+        }
+        assert!(r.renderer.needed_fonts().is_empty());
+        let after = img(&mut r, rows([0, 15, 4, 15, 15]));
+        if let Ok(dir) = std::env::var("DOSSIER_SHOTS") {
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(std::path::Path::new(&dir).join("schriftfamilien.png"), after.encode_png()).unwrap();
+        }
+        // Zeilenband je Zeile (5 mm bei 1:100 = 0.5 m = 45 px; Grundlinien bei 36 + 54 k px).
+        let band = |i: &RgbaImage, k: u32| ink_w(i, 2 + 54 * k, 48 + 54 * k);
+        let (inter0, inter1, inter2) = (band(&before, 0), band(&before, 1), band(&before, 2));
+        assert_eq!((inter0, inter0), (inter1, inter2), "ungeladene Familien = Inter");
+        let (a0, a1, a2) = (band(&after, 0), band(&after, 1), band(&after, 2));
+        assert_eq!(a0, inter0, "Inter bleibt");
+        assert!(a1 != inter0 && a2 != inter0 && a1 != a2, "Serif {a1}, Mono {a2}, Inter {a0}");
+        // Metrik des Kerns = Breite des Gezeichneten (Abweichung durch Kerning/Rundung < 4 %).
+        // Gleiche Quelle wie die Kern-Tabellen (`hmtx`, scripts/gen-text-metrics.py).
+        let adv_em = |slug: &str| {
+            let sfnt = crate::woff2::to_sfnt(&font(slug, 400, "normal")).unwrap();
+            let face = ttf_parser::Face::parse(&sfnt, 0).unwrap();
+            s.chars().map(|c| face.glyph_hor_advance(face.glyph_index(c).unwrap()).unwrap() as f64).sum::<f64>() / face.units_per_em() as f64
+        };
+        for (px, slug, fam) in [(a1, "source-serif-4", "Source Serif 4"), (a2, "ibm-plex-mono", "IBM Plex Mono")] {
+            let want = adv_em(slug) * 0.5 * 90.0;
+            assert!((px as f64 - want).abs() < want * 0.04, "{fam}: gezeichnet {px} px, gemessen {want}");
+        }
     }
 
     #[test]
