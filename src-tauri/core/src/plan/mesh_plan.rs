@@ -166,7 +166,7 @@ fn component_occluders(c: &Ctx, range: &ViewRange, out: &mut Vec<crate::hlr::Fac
             continue;
         }
         if let Some(d) = depth(zb, zt) {
-            let ring: Vec<[f64; 2]> = ce.outline.iter().map(|q| [q.x, q.y]).collect();
+            let ring: Vec<[f64; 2]> = ce.ring_xy();
             out.extend(occluder(&ring, d));
         }
     }

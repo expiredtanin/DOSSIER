@@ -136,7 +136,7 @@ fn room_label(r: &Room) -> String {
 }
 
 fn room_at(p: &Project, floor_id: &str, x: f64, y: f64) -> Option<String> {
-    p.rooms.as_deref().unwrap_or(&[]).iter().find(|r| r.floor_id == floor_id && in_ring(x, y, &r.boundary)).map(room_label)
+    p.rooms.as_deref().unwrap_or(&[]).iter().find(|r| r.floor_id == floor_id && in_ring(x, y, &r.ring())).map(room_label)
 }
 
 /// Prüfpunkte links/rechts der Wand an der Achsposition `at` (Meter ab Wandanfang), je eine halbe

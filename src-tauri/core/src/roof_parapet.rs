@@ -45,7 +45,16 @@ pub fn parapet(roof: &Roof, geo: &RoofGeometry) -> Option<Parapet> {
         }
         let n = outer.len();
         let len = |i: usize| (outer[(i + 1) % n][0] - outer[i][0]).hypot(outer[(i + 1) % n][1] - outer[i][1]);
-        let k = (0..n).min_by(|&a, &b| len(a).total_cmp(&len(b)))?;
+        // [191] Zuerst die Kanten, die beim Versatz umklappen (fein geteilte Bögen haben viele kurze, aber
+        // gutartige Kanten); sonst die kürzeste.
+        let cw: Vec<P2> = outer.iter().rev().copied().collect();
+        let mut raw = offset_ring(&cw, Offset::Const(w));
+        raw.reverse();
+        let flips = |i: usize| {
+            let j = (i + 1) % n;
+            raw.len() == n && (raw[j][0] - raw[i][0]) * (outer[j][0] - outer[i][0]) + (raw[j][1] - raw[i][1]) * (outer[j][1] - outer[i][1]) < 0.0
+        };
+        let k = (0..n).filter(|&i| flips(i)).min_by(|&a, &b| len(a).total_cmp(&len(b))).or_else(|| (0..n).min_by(|&a, &b| len(a).total_cmp(&len(b))))?;
         if n <= 3 || len(k) >= 3.0 * w {
             return None;
         }
@@ -145,6 +154,26 @@ mod tests {
             .collect();
         let pp = of(&p).expect("Attika trotz kurzer Kante");
         assert!(pp.inner.len() >= 6 && signed_area(&pp.inner) > 0.5);
+    }
+
+    /// [191] Erker-Dach mit echtem Bogen (r = 2.345, fein geteilt): der Innenring folgt dem Kreis r − 0.2, die
+    /// Reparatur der kurzen Ansatzkante zerstört den Bogen nicht.
+    #[test]
+    fn bogen_umriss_innenring_bleibt_kreis() {
+        let mut p = project(r#","parapetHeight":0.5,"parapetWidth":0.2"#);
+        let r = &mut p.roofs.as_mut().unwrap()[0];
+        let (c, rr, a) = ([15.0, 5.0], 2.345, std::f64::consts::FRAC_PI_2 - 0.09);
+        r.outline = [[15.195, 2.8], [c[0] + rr * a.cos(), c[1] - rr * a.sin()], [c[0] + rr * a.cos(), c[1] + rr * a.sin()], [15.195, 7.2]]
+            .iter()
+            .map(|q| crate::model::Vec2 { x: q[0], y: q[1] })
+            .collect();
+        r.outline_bulge = Some(vec![0.0, -((std::f64::consts::PI - 0.18) / 4.0).tan(), 0.0, 0.0]);
+        let pp = of(&p).expect("Attika");
+        let on_arc: Vec<&P2> = pp.inner.iter().filter(|q| q[0] > 15.6).collect();
+        assert!(on_arc.len() > 30, "{}", on_arc.len());
+        for q in on_arc {
+            assert!(((q[0] - c[0]).hypot(q[1] - c[1]) - (rr - 0.2)).abs() < 1e-3, "{q:?}");
+        }
     }
 
     #[test]

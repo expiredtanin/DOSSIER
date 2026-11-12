@@ -519,6 +519,8 @@ fn room_ops(p: &Project, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
     if boundary.len() < 3 || e.gross < 1e-4 {
         return Vec::new();
     }
+    // [191] Raum an Bogenwänden: der Sehnenzug der Wandfläche wird ein echter Bogen (Kreis der Wandfläche).
+    let (boundary, bulge) = if opt_p(v, "at").is_some() { room_arcs(p, ctx.level, &boundary) } else { (boundary, Vec::new()) };
     let code = if has_category(p, "60") { "60" } else { ctx.cat };
     let name = format!("Raum {}", p.rooms.as_ref().map_or(0, Vec::len) + 1);
     let doc = json!({ "version": 1, "paragraphs": [{ "runs": [{ "text": name, "marks": {} }], "align": "center" }] });
@@ -534,8 +536,30 @@ fn room_ops(p: &Project, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
             ("boundary", pvs(&boundary)),
             ("color", category_color(p, code, "#4a4a4a")),
             ("stampDoc", doc),
-        ])],
+        ]
+        .into_iter()
+        .chain(bulge.iter().any(|b| *b != 0.0).then(|| ("boundaryBulge", Value::Array(bulge.iter().map(|b| crate::json_util::js_num(*b)).collect()))))
+        .collect())],
     )
+}
+
+/// [191] Bögen des lichten Raums aus den Bogenwänden des Geschosses (Ecken in gleichem Abstand vom Mittelpunkt
+/// einer Bogenwand, innerhalb ihrer Dicke ± 5 cm); `bulge` leer, wenn keine Bogenwand anliegt.
+fn room_arcs(p: &Project, level: &str, boundary: &[V]) -> (Vec<V>, Vec<f64>) {
+    let mut circles = Vec::new();
+    for w in p.walls.iter().filter(|w| w.floor_id == level) {
+        let Some(a) = crate::wall_arc::WallArc::of_wall(w) else { continue };
+        let t = p.wall_types.iter().find(|t| t.id == w.wall_type_id).map_or(0.2, |t| t.layers.iter().fold(0.0, |s, l| s + l.thickness));
+        let c = crate::model::Vec2 { x: a.center.x, y: a.center.y };
+        // Raumseite der Wand: Band über die ganze Wanddicke (die Zelle liegt je nach Erkennung knapp innerhalb).
+        circles.push((c, (a.r - t / 2.0 - 0.05).max(1e-3), a.r + t / 2.0 + 0.05));
+    }
+    if circles.is_empty() {
+        return (boundary.to_vec(), Vec::new());
+    }
+    let ring: Vec<crate::model::Vec2> = boundary.iter().map(|q| crate::model::Vec2 { x: q.0, y: q.1 }).collect();
+    let (pts, bulge) = crate::ring_arc::fit_arcs(&ring, &circles, 2e-3);
+    (pts.iter().map(|q| (q.x, q.y)).collect(), bulge)
 }
 
 // ── Treppe ───────────────────────────────────────────────────────────────────

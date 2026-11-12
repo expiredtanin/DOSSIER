@@ -209,7 +209,7 @@ pub fn element_schedule(p: &Project) -> Vec<ElementRow> {
         if c.outline.len() < 3 {
             continue;
         }
-        let holes: f64 = c.openings.iter().flatten().map(|h| crate::ifc_quantities::ring_area(h)).sum();
+        let holes: f64 = c.openings_area();
         let uv = ceiling_u_value(p, c);
         let tref = crate::model3d::ceiling_type_ref(p, c);
         rows.push(ElementRow {
@@ -218,7 +218,7 @@ pub fn element_schedule(p: &Project) -> Vec<ElementRow> {
             type_name: tref.map(|(_, n, _)| n.to_string()).unwrap_or_default(),
             floor: level_name(p, &c.floor_id),
             floor_id: c.floor_id.clone(),
-            area: (crate::ifc_quantities::ring_area(&c.outline) - holes).max(0.0),
+            area: (c.outline_area() - holes).max(0.0),
             thickness: tref.map_or(c.thickness.unwrap_or(0.0), |(_, _, l)| Project::type_thickness(l)),
             u: uv.as_ref().and_then(|x| x.u),
             complete: uv.as_ref().is_some_and(|x| x.complete),

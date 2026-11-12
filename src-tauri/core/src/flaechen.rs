@@ -212,7 +212,7 @@ fn room_polygons(p: &Project, level_id: &str, keep: impl Fn(usize) -> bool) -> V
         .iter()
         .filter(|r| r.floor_id == level_id && r.boundary.len() >= 3 && keep(area_kind(r)))
         .filter(|r| r.boundary.iter().all(|v| v.x.is_finite() && v.y.is_finite()))
-        .map(|r| vec![r.boundary.iter().map(|v| [v.x, v.y]).collect()])
+        .map(|r| vec![r.ring_xy()])
         .collect()
 }
 
@@ -254,7 +254,7 @@ pub fn area_table(p: &Project) -> AreaTable {
         .as_deref()
         .unwrap_or(&[])
         .iter()
-        .filter_map(|r| idx.get(r.floor_id.as_str()).map(|&level| RoomIn { level, category: area_kind(r), boundary: r.boundary.iter().map(|v| [v.x, v.y]).collect() }))
+        .filter_map(|r| idx.get(r.floor_id.as_str()).map(|&level| RoomIn { level, category: area_kind(r), boundary: r.ring_xy(), area: Some(r.area()) }))
         .collect();
     let solids = solids_in(p);
     let sums = kennzahlen::area_sums(floors.len(), &rooms, &solids, f64::NAN, &[]);

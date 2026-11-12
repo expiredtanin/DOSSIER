@@ -396,7 +396,7 @@ pub fn host_rect_plan(f: &HostFrame, w: f64, h: f64) -> [V3; 4] {
 
 /// Aussparungen einer Decke: gezeichnete (`openings`) und die der gehosteten Öffnungen.
 pub fn ceiling_hole_rings(p: &Project, c: &Ceiling) -> Vec<Vec<Vec2>> {
-    let mut out: Vec<Vec<Vec2>> = c.openings.clone().unwrap_or_default();
+    let mut out: Vec<Vec<Vec2>> = c.hole_rings().into_iter().map(|h| h.into_owned()).collect();
     for o in p.openings.as_deref().unwrap_or(&[]) {
         if o.host_ceiling_id.as_deref() != Some(c.id.as_str()) {
             continue;

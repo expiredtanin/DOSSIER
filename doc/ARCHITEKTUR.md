@@ -295,7 +295,11 @@ Beispiel: Die Plan-Ansicht zeigt das Erdgeschoss im Massstab 1:100.
 
 Runde Formen (Stütze, Bogenwand, Bogen-Umrisse) reisen im Puffer als Vielecke; die Ausgaben erkennen die Bögen
 darin (`plan/arc_fit.rs`) und schreiben Kreise, SVG-`A`-Pfade bzw. DXF-Bulges, der Bildschirm tesselliert sie fein
-nach ([169]). Ebenso Ellipsenbögen (schräg gesehene Rund-/Rundbogenfenster in der Ansicht: SVG-`A` mit zwei Radien,
+nach ([169]). Umriss-Ringe von Decke, Dach und Raum tragen Bögen je Kante im Modell (`outlineBulge`, `openingsBulge`,
+`holesBulge`, `boundaryBulge`, [191]); die Ableitungen lesen sie über `ring_arc.rs` (`Ceiling::ring()`,
+`Roof::ring()`/`params()`, `Room::ring()`: Stützpunkte plus fein geteilte Bögen, ≥ 48 Teile je Halbkreis, Punkte
+exakt auf dem Kreis), Flächen exakt (`ring_arc::signed_area`, `evaluate`). Wer neu einen Umriss liest, nimmt
+`ring()`, nicht `outline` — sonst fehlen die Bögen. Ebenso Ellipsenbögen (schräg gesehene Rund-/Rundbogenfenster in der Ansicht: SVG-`A` mit zwei Radien,
 DXF ELLIPSE), verrauschte Ringe (auf mm gerundete Umrisse, Versatz) stückweise als Ausgleichskreise, und
 Schraffur-Ränder als Polylinien mit Bulges (HATCH).
 
@@ -649,6 +653,7 @@ schreibt `src-tauri/src/atomic_save.rs` die Datei absturzsicher.
 | **Projekt** (`Project`) | Das eine Modell. Alles andere ist abgeleitet. | `model/generated.rs`, `src/model/types.generated.ts` |
 | **Dokument** | Das Projekt im Kern als JSON-Baum, mit typisierter Sicht, Verlauf und Caches. | `document.rs`, `src/core/document.ts` |
 | **Leseansicht** | Kopie des Projekts in TS, nur über angenommene Ops nachgeführt. | `applyOps()` in `src/core/ops.ts` |
+| **Bulge** | Bogen einer Kante: `tan(Öffnungswinkel/4)`, positiv = Scheitel links der Kante a → b (Bogenwand, Polylinie, Umriss-Ringe von Decke/Dach/Raum [191]); fehlt/0 = Gerade. | `kernel2d/src/bulge.rs`, `wall_arc.rs`, `ring_arc.rs` |
 | **Op** | Eine Änderung am Projekt: `add`, `replace`, `remove`, `reorder`, `setField`. | `ops.rs`, `src/core/ops.ts`, Helfer `src/core/opsBuild.ts` |
 | **coalesceKey** | Schlüssel, unter dem schnelle Folgeänderungen (Regler, Tippen, Griff-Zug) zu einem Undo-Schritt verschmelzen. | `COALESCE_WINDOW_MS` in `ops.rs` |
 | **Abfrage**, **Wurzel-Abfrage** | Benannte Rechnung auf dem Dokument. Wurzel-Abfragen lesen den rohen JSON-Baum und tauschen ganze Elemente. | `queries.rs` |

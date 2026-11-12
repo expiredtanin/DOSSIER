@@ -80,7 +80,7 @@ fn level_of<'a>(p: &'a Project, id: &str) -> Option<&'a DrawingLevel> {
 
 fn in_ceiling(ce: &Ceiling, x: f64, y: f64) -> bool {
     use crate::opening_schedule::in_ring;
-    ce.outline.len() >= 3 && in_ring(x, y, &ce.outline) && !ce.openings.as_deref().unwrap_or(&[]).iter().any(|h| h.len() >= 3 && in_ring(x, y, h))
+    ce.outline.len() >= 3 && in_ring(x, y, &ce.ring()) && !ce.hole_rings().iter().any(|h| h.len() >= 3 && in_ring(x, y, h))
 }
 
 /// Höhenbereich des Raums (Z unten, Z oben): von der Oberkante der Decke unter dem Raum (bis 0.3 m unter
@@ -90,7 +90,7 @@ pub fn clear_range(p: &Project, r: &Room) -> (f64, f64) {
     let lvl = level_of(p, &r.floor_id);
     let base = lvl.and_then(|l| l.base_elevation).filter(|v| v.is_finite()).unwrap_or(0.0);
     let fh = lvl.and_then(|l| l.floor_height).filter(|h| h.is_finite() && *h > 0.0).unwrap_or(2.5);
-    let ring: Vec<[f64; 2]> = r.boundary.iter().map(|v| [v.x, v.y]).collect();
+    let ring: Vec<[f64; 2]> = r.ring_xy();
     if ring.len() < 3 {
         return (base, base + fh);
     }
@@ -176,7 +176,8 @@ pub fn height_bands(p: &Project, r: &Room, roofs: &RoofPlanes, net_area: f64) ->
     if roofs.floor_id != r.floor_id || roofs.roofs.is_empty() || r.boundary.len() < 3 || r.boundary.iter().any(|v| !v.x.is_finite() || !v.y.is_finite()) {
         return flat(top);
     }
-    let (x0, y0, x1, y1) = r.boundary.iter().fold((f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY), |b, v| (b.0.min(v.x), b.1.min(v.y), b.2.max(v.x), b.3.max(v.y)));
+    let ring = r.ring();
+    let (x0, y0, x1, y1) = ring.iter().fold((f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY), |b, v| (b.0.min(v.x), b.1.min(v.y), b.2.max(v.x), b.3.max(v.y)));
     let step = (((x1 - x0) * (y1 - y0)) / 40_000.0).sqrt().max(0.05);
     let (nx, ny) = ((((x1 - x0) / step).ceil() as usize).max(1), (((y1 - y0) / step).ceil() as usize).max(1));
     let (mut n, mut sum, mut min) = (0usize, 0.0, f64::INFINITY);
@@ -184,7 +185,7 @@ pub fn height_bands(p: &Project, r: &Room, roofs: &RoofPlanes, net_area: f64) ->
     for j in 0..ny {
         for i in 0..nx {
             let (x, y) = (x0 + (i as f64 + 0.5) * step, y0 + (j as f64 + 0.5) * step);
-            if !in_ring(x, y, &r.boundary) {
+            if !in_ring(x, y, &ring) {
                 continue;
             }
             let mut h = top;
@@ -211,13 +212,14 @@ pub fn height_bands(p: &Project, r: &Room, roofs: &RoofPlanes, net_area: f64) ->
 fn room_openings<'a>(p: &'a Project, r: &Room) -> Vec<(&'a Opening, &'a Wall)> {
     use crate::opening_schedule::{in_ring, side_points};
     let mut out = Vec::new();
+    let ring = r.ring();
     for o in p.openings.as_deref().unwrap_or(&[]) {
         if crate::opening_shape::is_surface_hosted(o) {
             continue;
         }
         let Some(w) = p.walls.iter().find(|w| w.id == o.host_wall_id && w.floor_id == r.floor_id) else { continue };
         let Some((a, b)) = side_points(p, w, o.position + o.width / 2.0) else { continue };
-        if in_ring(a[0], a[1], &r.boundary) || in_ring(b[0], b[1], &r.boundary) {
+        if in_ring(a[0], a[1], &ring) || in_ring(b[0], b[1], &ring) {
             let area = o.width * o.height;
             if area.is_finite() && area > 0.0 {
                 out.push((o, w));
@@ -257,7 +259,7 @@ pub struct WallSide {
 /// Höhe `height`: Stützstellen alle ~10 cm entlang des Kantenstücks, je Stelle die Dachunterkante über
 /// dem Boden (höchstens `height`), s. [`edge_mean_height`].
 pub fn wall_sides(p: &Project, r: &Room, height: f64, roofs: Option<&RoofPlanes>) -> Vec<WallSide> {
-    let b = &r.boundary;
+    let b: &[crate::model::Vec2] = &r.ring();
     let floor_z = clear_range(p, r).0;
     let mean_h = |a: [f64; 2], c: [f64; 2]| edge_mean_height(r, roofs, floor_z, height, a, c);
     let openings = room_openings(p, r);
@@ -339,14 +341,15 @@ fn edge_mean_height(r: &Room, roofs: Option<&RoofPlanes>, floor_z: f64, top: f64
     }
     let n = ((len / 0.1).ceil() as usize).clamp(1, 200);
     let (nx, ny) = (-dy / len * 0.01, dx / len * 0.01);
+    let ring = r.ring();
     let mut sum = 0.0;
     for i in 0..n {
         let t = (i as f64 + 0.5) / n as f64;
         let (mut x, mut y) = (a[0] + t * dx, a[1] + t * dy);
-        if in_ring(x + nx, y + ny, &r.boundary) {
+        if in_ring(x + nx, y + ny, &ring) {
             x += nx;
             y += ny;
-        } else if in_ring(x - nx, y - ny, &r.boundary) {
+        } else if in_ring(x - nx, y - ny, &ring) {
             x -= nx;
             y -= ny;
         }
@@ -467,8 +470,7 @@ pub fn room_book(p: &Project) -> RoomBook {
         if r.boundary.len() < 3 {
             continue;
         }
-        let ring: Vec<[f64; 2]> = r.boundary.iter().map(|v| [v.x, v.y]).collect();
-        let ev = crate::room_area::evaluate(&ring, 0.0);
+        let ev = crate::ring_arc::evaluate(&r.boundary, r.boundary_bulge.as_deref(), 0.0);
         let area = if ev.net.is_finite() { ev.net } else { 0.0 };
         let perimeter = if ev.perimeter.is_finite() { ev.perimeter } else { 0.0 };
         let h = clear_height(p, r);

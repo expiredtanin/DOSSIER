@@ -36,6 +36,7 @@ pub mod wall_arc;
 pub mod grid;
 pub mod room_area;
 pub mod room_boundary;
+pub mod ring_arc;
 pub mod magic_wand;
 pub mod polygon_holes;
 pub mod js_fmt;

@@ -93,7 +93,6 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
 - ○ **[195b]** Objekteinstellungen als ECHTES Nebenfenster (Wunsch Maintainer, 12.11.): heute schwebendes Panel im Hauptfenster ([195]); natives Fenster braucht eine Store-Spiegelung über die Sync-Brücke (Projekt-Leseansicht per applyOps + Auswahl hin, Ops zurück) ohne zweite Abschnitts-Implementierung — Architektur-Entscheid, Opus. Danach Mehrfachwerte für Füllung/Typ/Masse; OpeningEditorDialog in den Bereich „Objekt“ übernehmen. · L
 - ○ **[195]** Objekt-Einstellungsfenster (12.11., Maintainer): T öffnet ein EIGENES Fenster (macOS-Nebenfenster wie Einstellungen/Ressourcen über die Sync-Brücke, Browser: verschiebbares Fenster), für ALLE Bauteile (Wand, Decke, Dach, Treppe, Stütze, Öffnung, Raum, Körper, Gelände/Baugrube, 2D, Bemassung), mit Abschnitten Objektspezifisch (Typ/Aufbau/Masse/Parameter) + Darstellung (Stift, Füllung, Schraffur, Linienstil, Modelldarstellung). Mehrfachauswahl gleicher Art, live mit Undo je Änderung; dieselben Abschnitts-Komponenten wie Objekt-Info (keine Doppelspur). Ersetzt den bisherigen Öffnungs-Dialog bei T. · L
 - ○ **[194]** Texte exakt synchron beim Zoomen (12.11., Maintainer Mac: Texte immer leicht verzögert, Bewegung sonst smooth; Nachfolger [145]): alle Texte (Raumstempel, Textfelder, Beschriftungen) und möglichst Griffe in der nativen Metal-Fläche im selben Frame zeichnen — glyphon-Textpfad aus render2d (WebGPU) auch für `native2d` (mehrzeilig, fett, Ausrichtung), Overlay nur noch für Interaktion. Prüfbar im Container nur mit Software-Vulkan; Urteil auf dem Mac. Opus. · M
-- ○ **[191]** Runde Decken/Dächer (12.11., Maintainer-Screenshot Erker 3D): Decken-/Dachumrisse sind Polygone (Beispiel: `arcPts(…, 14)`) → facettierte Kanten; Bogenwände ohne Deckenauflager [178] → Decke ragt durch die runde Wand (Flackern/Linien). Umsetzen: Bögen im Umriss (Bulge je Kante wie Wände) für Decken/Dächer/Räume oder Ableitung aus angrenzenden Bogenwänden, feine Tessellierung + weiche Normalen im 3D, echte Bögen in Plan/Schnitt/Export; [178] auch an Bogenwänden; Beispielprojekt auf echte Bögen umstellen. Opus. · L
 - ◐ **[190]** Verbinden wie Archicad + Kürzel (12.11., Wunsch Maintainer). Umgesetzt (12.11.): Cmd/Ctrl+J („join") schliesst bei
   gewählten Wänden auch Ecken: nicht parallele gerade Wände eines Geschosses, deren Enden bis 0.5 m (bzw. 2 × Wanddicke)
   vom Achsschnittpunkt liegen (Lücke oder Überstand), werden dort verlängert/gekürzt (L-Ecke, beide Enden); Ende nahe einer
@@ -116,6 +115,18 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   Offen: Bogenwände werden nicht verbunden; „Auswahl ausblenden" im Grundriss
   schaltet Ebenen (persistent, undo-bar), nicht einzelne Elemente temporär; kein Cmd+E/F2 (keine Funktion dahinter);
   nicht in der Tauri-App geprüft. · S
+- ◐ **[191]** Runde Decken/Dächer (12.11., Maintainer-Screenshot Erker 3D). 11.11.: Umriss-Ringe tragen Bögen je Kante
+  (`Ceiling.outlineBulge`/`openingsBulge`, `Roof.outlineBulge`/`holesBulge`, `Room.boundaryBulge`); Ableitungen über
+  `ring_arc.rs` (fein geteilt ≥ 48/Halbkreis, Pfeilhöhe ≤ 0.25 mm, Punkte exakt auf dem Kreis → Plan/Schnitt/SVG/PDF/DXF
+  als echte Bögen über `arc_fit`), Flächen exakt (Objekt-Info, Bauteil-/Wärmeschutzliste, Raum, Kennzahlen, Flächenbilanz),
+  3D-Plattenrand mit geteilten Normalen (`render3d::extrude_slab`, Knick < 10°, Kanten ≤ 1 m), Griffe: Scheitel-Griff
+  (`ringArc`), Einfügen teilt/Löschen fügt Bögen zusammen, Spiegeln kehrt sie; Raum „innen" an Bogenwänden übernimmt den
+  Bogen (`ring_arc::fit_arcs`); Attika-Innenring bleibt am Bogen rund; Musterhaus komplex: Erker-Decken, Spindel-Loch,
+  Erker-Dach und die drei Erker-Räume als echte Bögen. Offen:
+  Baugrube ohne Bögen; IFC-Profil als Linienzug (kein IfcCompositeCurve); Dach-Kantenneigung an Bogen-Teilkanten nur
+  geerbt (Kanten-Griffe/Objekt-Info kennen den Bogen als eine Kante, die Dach-Geometrie in TS für 3D-Griffe nicht);
+  Bogenwände im 3D weiter 7.5°-Sehnen (Plattenrand feiner); keine Kante gerade → Bogen per Objekt-Info; nicht in der
+  Tauri-App/auf dem Mac geprüft. · L
 - ○ **[189]** Panels neu ordnen + Einstellungsdialog (12.11., Maintainer): Attribute-Panel unten links nur Gestaltung (Stift, Füllung, Linienstil, Schraffur); BIM-/Bauteil-Infos (Typ, Schichten, Masse, Kennwerte, IFC/Psets, Material …) in die Objekt-Info. Taste T bei Auswahl öffnet direkt den Einstellungsdialog des Objekts (wie Archicad Cmd+T), v. a. für Fenster/Türen, deren Einstellungen heute nur über das Attribute-Panel erreichbar sind. · M
 - ◐ **[187]** Griffe im Schnitt/in der Ansicht (12.11., Maintainer): angewählte Elemente haben dort kaum Fasspunkte (Decken, Gelände, Dächer …). Wie Archicad: Decke OK/UK (Höhe/Dicke), Wand OK (Höhe), Öffnung Brüstung/Sturz, Dach Traufe/First bzw. Neigung, Treppe An-/Austritt, Gelände-Profilpunkte (falls Modell es erlaubt); ein Undo-Schritt je Zug, Fang + Tab-Eingabe wie im Grundriss. · L
   Teil 1 (12.11.): Höhen-Griffe im Schnitt/in der Ansicht für Decke (OK = Höhenlage über die `top`-Bindung, bei gebundener UK ändert sie die Dicke; UK = Dicke über den Deckentyp wie in der Objekt-Info bzw. UK-Bindung), Wand (OK, neu UK mit festgehaltener OK) und Öffnung (Brüstung, Sturz). Rechnung im Kern (`sheet_height.rs`, Griff-Anfrage `sheetHeight`, ein Undo-Schritt je Zug, Mindestmasse, gesperrte Bauteile ohne Griffe), Fang auf Geschoss-Koten (8 px) und Geometrie des Schnitts, Tab tippt die Kote (absolutes Z), Zug-Anzeige „Kote · Höhe". Offen (Teil 2): Dach (Traufe/First bzw. Neigung), Treppe (An-/Austritt), Gelände-Profilpunkte; Wand-UK-Griff ändert nur die Bindung `bottom` (Verbund mit Nachbarwänden/Geschosswechsel nicht bedacht); nicht in der Tauri-App geprüft. · L
@@ -390,8 +401,8 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   ([33] `layer_positions`), Aussendämmung/Putz laufen an der Stirn durch — abgeleitet, Umriss bleibt
   (`model3d/bearing.rs`: Platten-Umriss minus Aussenschicht-Streifen, wo vor der Wand keine Decke liegt → `emit_slabs`
   für 3D/Schnitt/Ansicht und `floor_context` für die 3D-Wandbänder). Schalter je Decke `Ceiling.edgeAtOutline`
-  (Objekt-Info „Auflager bis Kern“, aus = wie Umriss). Offen: Deckenkante im Grundriss folgt noch dem Umriss;
-  Bogenwände unverändert; Platte ohne Wand in gleicher Höhe (UG-Decke über Lichtschacht/kurzer Fundamentwand im
+  (Objekt-Info „Auflager bis Kern“, aus = wie Umriss). Bogenwände seit 11.11. ([191]: Kreisringsektor bis Kern,
+  2 cm über die Aussenfläche). Offen: Deckenkante im Grundriss folgt noch dem Umriss; Platte ohne Wand in gleicher Höhe (UG-Decke über Lichtschacht/kurzer Fundamentwand im
   Musterhaus komplex) bleibt bis Umriss; nicht in der Tauri-App/auf dem Mac geprüft. · S
 - ◐ **[G4]** Exakte Sichtbarkeit (HLR, Kern `hlr.rs`). 11.11.: Füllungen der Ansicht aus der exakten Sichtbarkeit
   (`hlr_fill.rs`: je Fläche Umriss minus die näheren Teile der anderen, Halbebene der Tiefendifferenz, i_overlay;

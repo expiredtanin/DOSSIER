@@ -3051,6 +3051,16 @@ pub struct Ceiling {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub openings: Option<Vec<Vec<Vec2>>>,
+    /// [191] Bögen im Umriss: `outlineBulge[i]` krümmt die Kante `outline[i] → outline[i+1]` (letzte: zum
+    /// Start) zum Kreisbogen, `bulge = tan(Öffnungswinkel/4)`, positiv = Scheitel links der Kante (wie
+    /// `Wall.bulge`/Polylinien). Fehlt/kürzer/0 = gerade Kante. Ableitungen rechnen über `ring_arc`.
+    #[serde(rename = "outlineBulge", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub outline_bulge: Option<Vec<f64>>,
+    /// [191] Bögen der Aussparungen, je Loch wie `outlineBulge` (Index wie `openings`).
+    #[serde(rename = "openingsBulge", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub openings_bulge: Option<Vec<Vec<f64>>>,
     /// LEGACY-Verweis auf einen Aufbau-Typ aus `wallTypes` (Rückwärtskompatibilität
     /// für Projekte von vor den dedizierten Deckenstilen). Nur wirksam, wenn
     /// `ceilingTypeId` fehlt.
@@ -3224,6 +3234,15 @@ pub struct Roof {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub holes: Option<Vec<Vec<Vec2>>>,
+    /// [191] Bögen im Umriss je Kante wie `Ceiling.outlineBulge`. Eine Bogenkante bleibt EINE Kante
+    /// (Neigung/Giebel aus `edgePitchDeg` gilt für den ganzen Bogen).
+    #[serde(rename = "outlineBulge", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub outline_bulge: Option<Vec<f64>>,
+    /// [191] Bögen der Höfe, je Ring wie `outlineBulge` (Index wie `holes`).
+    #[serde(rename = "holesBulge", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub holes_bulge: Option<Vec<Vec<f64>>>,
     /// Neigung je Umrisskante in Grad. Nummerierung: erst die Kanten von `outline` (Kante i =
     /// Punkt i → i+1, in der gespeicherten Reihenfolge), danach die Kanten der `holes` Ring für
     /// Ring. Eintrag `null` = Giebel (senkrechte Wand, Kante läuft nicht nach innen), eine Zahl
@@ -4205,6 +4224,10 @@ pub struct Room {
     /// Schlusspunkt wird NICHT dupliziert (die letzte Kante läuft von boundary[n-1]
     /// zu boundary[0]).
     pub boundary: Vec<Vec2>,
+    /// [191] Bögen im Umriss je Kante wie `Ceiling.outlineBulge`.
+    #[serde(rename = "boundaryBulge", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub boundary_bulge: Option<Vec<f64>>,
     /// Strich-/Füllfarbe des Raums (hex).
     pub color: String,
     /// Stift-Kopplung von `color` (s. `Component.colorPenId`-Doku).

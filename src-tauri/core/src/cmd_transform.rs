@@ -339,16 +339,33 @@ fn mv_context(e: &Value, xf: &Xf) -> Value {
     }
 }
 
+/// [191] Bögen der Umriss-Ringe (`outlineBulge` …): eine Spiegelung kehrt jeden Bogen um.
+fn flip_bulges<'a>(e: &Value, xf: &Xf, flat: &[&'a str], nested: &[&'a str]) -> Vec<(&'a str, Value)> {
+    if !xf.reverses() {
+        return Vec::new();
+    }
+    let neg = |l: &Value| Value::Array(arr(Some(l)).iter().map(|b| js_num(-num_of(Some(b)))).collect());
+    let mut f: Vec<(&str, Value)> = flat.iter().filter_map(|k| field(e, k).filter(|v| v.is_array()).map(|v| (*k, neg(v)))).collect();
+    f.extend(nested.iter().filter_map(|k| field(e, k).filter(|v| v.is_array()).map(|v| (*k, Value::Array(arr(Some(v)).iter().map(neg).collect())))));
+    f
+}
+
 fn mv_ceiling(c: &Value, xf: &Xf) -> Value {
     let mut f = vec![("outline", xf.pts(field(c, "outline")))];
     if truthy(field(c, "openings")) {
         f.push(("openings", Value::Array(arr(field(c, "openings")).iter().map(|h| xf.pts(Some(h))).collect())));
     }
+    f.extend(flip_bulges(c, xf, &["outlineBulge"], &["openingsBulge"]));
     with_all(c, f)
 }
 
 fn mv_roof(r: &Value, xf: &Xf) -> Value {
-    with(r, "outline", xf.pts(field(r, "outline")))
+    let mut f = vec![("outline", xf.pts(field(r, "outline")))];
+    if truthy(field(r, "holes")) {
+        f.push(("holes", Value::Array(arr(field(r, "holes")).iter().map(|h| xf.pts(Some(h))).collect())));
+    }
+    f.extend(flip_bulges(r, xf, &["outlineBulge"], &["holesBulge"]));
+    with_all(r, f)
 }
 
 /// Dach-/Deckenöffnung ([103]): Mittelpunkt `hostPoint` und (falls gesetzt) Breitenrichtung `hostAngle`
@@ -514,6 +531,7 @@ fn move_delta(pts: &[(f64, f64)], t: f64) -> (f64, f64) {
 
 fn mv_room(r: &Value, xf: &Xf) -> Value {
     let mut f = vec![("boundary", xf.pts(field(r, "boundary")))];
+    f.extend(flip_bulges(r, xf, &["boundaryBulge"], &[]));
     if truthy(field(r, "stampAnchor")) {
         f.push(("stampAnchor", xf.pt_of(field(r, "stampAnchor"))));
     }

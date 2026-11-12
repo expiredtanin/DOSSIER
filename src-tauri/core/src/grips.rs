@@ -382,6 +382,20 @@ pub fn run(lk: &Lookup, req: &Request) -> Result<GripResult, String> {
             let kind = r.s("kind").unwrap_or("");
             patch(coll, r.s("id"), &|e| ring_edit(e, kind, index, &edit)).into()
         }
+        // [191] Bogen-Scheitel einer Umriss-Kante (Decke, Raum, Dach samt Höfen; `seg` wie bei `ringInsert`): der
+        // Griff liegt im Scheitel, Ziehen setzt den Bulge über die Pfeilhöhe (senkrecht zur Sehne; auf der Sehne =
+        // gerade Kante).
+        "ringArc" => {
+            let (seg, (x, y)) = (r.n("seg"), r.p("pt"));
+            let coll = match r.s("kind") {
+                Some("roof") => "roofs",
+                Some("ceiling") => "ceilings",
+                Some("room") => "rooms",
+                _ => return Ok(GripResult::default()),
+            };
+            let kind = r.s("kind").unwrap_or("");
+            patch(coll, r.s("id"), &|e| ring_arc_edit(e, kind, seg, x, y)).into()
+        }
         "stairBy" => {
             let (dx, dy) = r.p("delta");
             patch("stairs", r.s("id"), &|s| {
@@ -1300,33 +1314,100 @@ enum EdgeShift {
     Drop(usize),
 }
 
-/// Neuer Ring nach `edit` an Ecke/Kante `i`; mindestens 3 Ecken bleiben.
-fn ring_apply(ring: &[Value], i: usize, edit: &RingEdit) -> Option<(Vec<Value>, EdgeShift)> {
+fn v2(v: &Value) -> crate::model::Vec2 {
+    let (x, y) = xy(v);
+    crate::model::Vec2 { x, y }
+}
+
+/// [191] Bögen eines Rings (`bulge`, je Kante; kürzer = gerade) auf `n` Einträge gebracht.
+fn ring_bulges(bulge: &[Value], n: usize) -> Vec<f64> {
+    (0..n).map(|i| bulge.get(i).and_then(Value::as_f64).filter(|b| b.is_finite()).unwrap_or(0.0)).collect()
+}
+
+/// Liegen die Bögen a→b (`b1`) und b→c (`b2`) auf demselben Kreis? Dann der Bulge des Gesamtbogens a→c.
+fn merged_arc(a: crate::model::Vec2, b: crate::model::Vec2, c: crate::model::Vec2, b1: f64, b2: f64) -> Option<f64> {
+    use crate::ring_arc::arc_of;
+    let (k1, k2) = (arc_of(a, b, b1)?, arc_of(b, c, b2)?);
+    let tol = 1e-6 * k1.1.max(1.0);
+    let same = hypot2(k1.0.x - k2.0.x, k1.0.y - k2.0.y) < tol && (k1.1 - k2.1).abs() < tol && k1.3 * k2.3 > 0.0;
+    let q = b1.atan() + b2.atan();
+    (same && q.abs() < std::f64::consts::PI * 0.999).then(|| q.tan())
+}
+
+/// Neuer Ring nach `edit` an Ecke/Kante `i`; mindestens 3 Ecken bleiben. [191] `bulge` (je Kante, auf die
+/// Eckenzahl gebracht) läuft mit: Einfügen auf einem Bogen teilt ihn (beide Teile auf demselben Kreis),
+/// Löschen verbindet die Nachbarn gerade, ausser beide Bögen liegen auf einem Kreis (dann ein Bogen).
+/// Aufräumen nur, wo beide Kanten gerade sind oder auf einem Kreis liegen.
+fn ring_apply(ring: &[Value], bulge: &[f64], i: usize, edit: &RingEdit) -> Option<(Vec<Value>, Vec<f64>, EdgeShift)> {
     let n = ring.len();
     let mut v = ring.to_vec();
+    let mut bl = bulge.to_vec();
+    let merge = |bl: &mut Vec<f64>| {
+        let prev = (i + n - 1) % n;
+        let (a, b, c) = (v2(&ring[prev]), v2(&ring[i]), v2(&ring[(i + 1) % n]));
+        let m = if bl[prev] == 0.0 && bl[i] == 0.0 { Some(0.0) } else { merged_arc(a, b, c, bl[prev], bl[i]) };
+        bl[prev] = m.unwrap_or(0.0);
+        bl.remove(i);
+        m.is_some()
+    };
     match *edit {
         RingEdit::Insert(x, y) => {
             if !(x.is_finite() && y.is_finite()) {
                 return None;
             }
+            let (a, b) = (v2(&ring[i]), v2(&ring[(i + 1) % n]));
+            let f = crate::ring_arc::arc_fraction(a, b, bl[i], crate::model::Vec2 { x, y });
+            let (b1, b2) = crate::ring_arc::split_bulge(bl[i], f);
+            bl[i] = b1;
+            bl.insert(i + 1, b2);
             v.insert(i + 1, pt(x, y));
-            Some((v, EdgeShift::Dup(i)))
+            Some((v, bl, EdgeShift::Dup(i)))
         }
         RingEdit::Delete => {
             if n <= 3 {
                 return None;
             }
+            merge(&mut bl);
             v.remove(i);
-            Some((v, EdgeShift::Drop(i)))
+            Some((v, bl, EdgeShift::Drop(i)))
         }
         RingEdit::Tidy(tol) => {
-            if n <= 3 || !point_near_neighbors(ring, i, tol) {
+            if n <= 3 {
+                return None;
+            }
+            let prev = (i + n - 1) % n;
+            let straight = bl[prev] == 0.0 && bl[i] == 0.0;
+            if straight && !point_near_neighbors(ring, i, tol) {
+                return None;
+            }
+            if !merge(&mut bl) {
                 return None;
             }
             v.remove(i);
-            Some((v, EdgeShift::Drop(i)))
+            Some((v, bl, EdgeShift::Drop(i)))
         }
     }
+}
+
+/// Bogen-Liste `key` nach einer Ring-Änderung schreiben: fehlte sie und ist alles gerade, bleibt sie weg.
+fn put_bulges(e: Value, key: &str, bl: &[f64]) -> Value {
+    if field(&e, key).is_none() && bl.iter().all(|b| *b == 0.0) {
+        return e;
+    }
+    with(&e, key, Value::Array(bl.iter().map(|b| js_num(*b)).collect()))
+}
+
+/// Wie [`put_bulges`] für die Bögen eines Lochs/Hofs (`key` = Liste je Ring, Ring `k` von `n_rings`).
+fn put_hole_bulges(e: Value, key: &str, k: usize, n_rings: usize, bl: &[f64]) -> Value {
+    if field(&e, key).is_none() && bl.iter().all(|b| *b == 0.0) {
+        return e;
+    }
+    let mut all: Vec<Value> = arr(field(&e, key)).to_vec();
+    while all.len() < n_rings {
+        all.push(Value::Array(vec![]));
+    }
+    all[k] = Value::Array(bl.iter().map(|b| js_num(*b)).collect());
+    with(&e, key, Value::Array(all))
 }
 
 /// Liegt Ecke `i` des Rings näher als `tol` an der Strecke zwischen ihren Nachbarn (Nachbarpunkt eingeschlossen)?
@@ -1399,10 +1480,11 @@ fn ring_edit(e: &Value, kind: &str, flat: f64, edit: &RingEdit) -> Option<Value>
     if truthy(field(e, "locked")) {
         return None;
     }
-    let simple = |name: &str| -> Option<Value> {
+    let simple = |name: &str, bulge_key: &str| -> Option<Value> {
         let ring = field(e, name)?.as_array()?;
-        let (v, shift) = ring_apply(ring, index_in(flat, ring.len())?, edit)?;
-        let out = with(e, name, Value::Array(v));
+        let bl = ring_bulges(arr(field(e, bulge_key)), ring.len());
+        let (v, bl, shift) = ring_apply(ring, &bl, index_in(flat, ring.len())?, edit)?;
+        let out = put_bulges(with(e, name, Value::Array(v)), bulge_key, &bl);
         Some(if kind == "excavation" {
             shift_edge_list(shift_edge_list(out, "edgeSlopes", 0, &shift), "edgeShoring", 0, &shift)
         } else {
@@ -1410,9 +1492,9 @@ fn ring_edit(e: &Value, kind: &str, flat: f64, edit: &RingEdit) -> Option<Value>
         })
     };
     match kind {
-        "ceiling" => simple("outline"),
-        "excavation" => simple("outline"),
-        "room" => simple("boundary"),
+        "ceiling" => simple("outline", "outlineBulge"),
+        "excavation" => simple("outline", "outlineBulge"),
+        "room" => simple("boundary", "boundaryBulge"),
         "polyline" => polyline_ring_edit(e, flat, edit),
         "roof" => {
             let outline = field(e, "outline")?.as_array()?;
@@ -1421,15 +1503,64 @@ fn ring_edit(e: &Value, kind: &str, flat: f64, edit: &RingEdit) -> Option<Value>
             for ring_no in 0..=holes.len() {
                 let ring: &[Value] = if ring_no == 0 { outline } else { holes[ring_no - 1] };
                 if let Some(i) = index_in(flat - off as f64, ring.len()) {
-                    let (v, shift) = ring_apply(ring, i, edit)?;
+                    let bl = if ring_no == 0 { ring_bulges(arr(field(e, "outlineBulge")), ring.len()) } else { ring_bulges(arr(arr(field(e, "holesBulge")).get(ring_no - 1)), ring.len()) };
+                    let (v, bl, shift) = ring_apply(ring, &bl, i, edit)?;
                     let out = if ring_no == 0 {
-                        with(e, "outline", Value::Array(v))
+                        put_bulges(with(e, "outline", Value::Array(v)), "outlineBulge", &bl)
                     } else {
                         let mut hs: Vec<Value> = arr(field(e, "holes")).to_vec();
                         hs[ring_no - 1] = Value::Array(v);
-                        with(e, "holes", Value::Array(hs))
+                        put_hole_bulges(with(e, "holes", Value::Array(hs)), "holesBulge", ring_no - 1, holes.len(), &bl)
                     };
                     return Some(shift_edge_list(out, "edgePitchDeg", off, &shift));
+                }
+                off += ring.len();
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+/// [191] Bulge der Kante `flat` (Dach: flacher Index über Umriss + Höfe) aus dem gezogenen Scheitel `(x, y)`.
+fn ring_arc_edit(e: &Value, kind: &str, flat: f64, x: f64, y: f64) -> Option<Value> {
+    if truthy(field(e, "locked")) || !(x.is_finite() && y.is_finite()) {
+        return None;
+    }
+    let bulge_of = |ring: &[Value], i: usize| -> f64 {
+        let (a, b) = (xy(&ring[i]), xy(&ring[(i + 1) % ring.len()]));
+        let v = crate::bulge::from_sagitta_point(a.0, a.1, b.0, b.1, x, y);
+        // Fast gerade (Pfeilhöhe < 1 mm) = gerade Kante.
+        let chord = hypot2(b.0 - a.0, b.1 - a.1);
+        if (v * chord / 2.0).abs() < 1e-3 { 0.0 } else { v.clamp(-1e3, 1e3) }
+    };
+    let simple = |name: &str, bulge_key: &str| -> Option<Value> {
+        let ring = field(e, name)?.as_array()?;
+        let i = index_in(flat, ring.len())?;
+        if ring.len() < 3 {
+            return None;
+        }
+        let mut bl = ring_bulges(arr(field(e, bulge_key)), ring.len());
+        bl[i] = bulge_of(ring, i);
+        Some(put_bulges(e.clone(), bulge_key, &bl))
+    };
+    match kind {
+        "ceiling" => simple("outline", "outlineBulge"),
+        "room" => simple("boundary", "boundaryBulge"),
+        "roof" => {
+            let outline = field(e, "outline")?.as_array()?;
+            let holes: Vec<&Vec<Value>> = arr(field(e, "holes")).iter().filter_map(|h| h.as_array()).collect();
+            let mut off = 0usize;
+            for ring_no in 0..=holes.len() {
+                let ring: &[Value] = if ring_no == 0 { outline } else { holes[ring_no - 1] };
+                if let Some(i) = index_in(flat - off as f64, ring.len()) {
+                    if ring.len() < 3 {
+                        return None;
+                    }
+                    let src = if ring_no == 0 { arr(field(e, "outlineBulge")) } else { arr(arr(field(e, "holesBulge")).get(ring_no - 1)) };
+                    let mut bl = ring_bulges(src, ring.len());
+                    bl[i] = bulge_of(ring, i);
+                    return Some(if ring_no == 0 { put_bulges(e.clone(), "outlineBulge", &bl) } else { put_hole_bulges(e.clone(), "holesBulge", ring_no - 1, holes.len(), &bl) });
                 }
                 off += ring.len();
             }
@@ -2031,6 +2162,51 @@ mod tests {
     }
 
     /// [26] Ecke einfügen/löschen/aufräumen an Umriss-Ringen; Kanten-Neigung des Dachs läuft mit.
+    /// [191] Bögen in Umriss-Ringen: Scheitel-Griff setzt den Bulge, Einfügen teilt den Bogen auf demselben
+    /// Kreis, Löschen/Aufräumen fügt ihn wieder zusammen; ohne Bögen kein neues Feld.
+    #[test]
+    fn ring_boegen_scheitel_teilen_zusammenfuegen() {
+        let sq = json!([{"x": 0, "y": 0}, {"x": 4, "y": 0}, {"x": 4, "y": 4}, {"x": 0, "y": 4}]);
+        let r = root(json!({"ceilings": [{"id": "C", "outline": sq}], "rooms": [{"id": "Rm", "boundary": sq}],
+            "roofs": [{"id": "R", "outline": sq, "holes": [[{"x": 1, "y": 1}, {"x": 2, "y": 1}, {"x": 2, "y": 2}]]}]}));
+        let ent = |r: &Map<String, Value>, v: Value| run(&Lookup::plain(r), &rq(v)).unwrap().ops.first().map(|o| o.to_json()["entity"].clone());
+        // Kante 1 (x = 4) nach aussen zum Halbkreis: Scheitel bei (6, 2), Bulge −1 (Scheitel rechts der Kante).
+        let e = ent(&r, json!({"op": "ringArc", "kind": "ceiling", "id": "C", "seg": 1, "pt": [6, 2]})).unwrap();
+        assert_eq!(e["outlineBulge"], json!([0, -1, 0, 0]));
+        let e2 = ent(&r, json!({"op": "ringArc", "kind": "room", "id": "Rm", "seg": 3, "pt": [0.0005, 2]}));
+        assert!(e2.is_none() || e2.unwrap().get("boundaryBulge").is_none(), "fast gerade bleibt gerade, ohne Feld");
+        // Dach: Hof-Kante (flacher Index 4 + 1 = 5).
+        let e3 = ent(&r, json!({"op": "ringArc", "kind": "roof", "id": "R", "seg": 5, "pt": [1.8, 1.8]})).unwrap();
+        assert_eq!(e3["holesBulge"][0].as_array().unwrap().len(), 3);
+        assert!(e3["holesBulge"][0][1].as_f64().unwrap() != 0.0 && e3.get("outlineBulge").is_none());
+        // Ecke auf dem Bogen einfügen: zwei Viertelbögen desselben Kreises.
+        let r2 = root(json!({"ceilings": [e.clone()]}));
+        let ins = ent(&r2, json!({"op": "ringInsert", "kind": "ceiling", "id": "C", "seg": 1, "pt": [6, 2]})).unwrap();
+        let q = (std::f64::consts::PI / 8.0).tan();
+        let b = ins["outlineBulge"].as_array().unwrap().iter().map(|v| v.as_f64().unwrap()).collect::<Vec<_>>();
+        assert_eq!(b.len(), 5);
+        assert!((b[1] + q).abs() < 1e-9 && (b[2] + q).abs() < 1e-9, "{b:?}");
+        // Fläche bleibt (Halbkreis r = 2).
+        let area = |e: &Value, k: &str| {
+            let c: crate::model::Ceiling = serde_json::from_value(e.clone()).unwrap();
+            let _ = k;
+            c.outline_area()
+        };
+        assert!((area(&ins, "") - (16.0 + 2.0 * std::f64::consts::PI)).abs() < 1e-9);
+        // Aufräumen der eingefügten Ecke auf dem Kreis: wieder ein Halbkreis.
+        let r3 = root(json!({"ceilings": [ins.clone()]}));
+        let tidy = ent(&r3, json!({"op": "ringTidy", "kind": "ceiling", "id": "C", "index": 2})).unwrap();
+        let b = tidy["outlineBulge"].as_array().unwrap().iter().map(|v| v.as_f64().unwrap()).collect::<Vec<_>>();
+        assert_eq!(tidy["outline"].as_array().unwrap().len(), 4);
+        assert!((b[1] + 1.0).abs() < 1e-9 && b[0] == 0.0 && b[2] == 0.0, "{b:?}");
+        // Löschen einer Ecke zwischen Gerade und Bogen: gerade Verbindung.
+        let del = ent(&r2, json!({"op": "ringDelete", "kind": "ceiling", "id": "C", "index": 2})).unwrap();
+        assert_eq!(del["outlineBulge"], json!([0, 0, 0]));
+        // Ohne Bögen bleibt das Feld weg.
+        let plain = ent(&r, json!({"op": "ringInsert", "kind": "ceiling", "id": "C", "seg": 0, "pt": [2, -1]})).unwrap();
+        assert!(plain.get("outlineBulge").is_none());
+    }
+
     #[test]
     fn ring_ecken_einfuegen_loeschen() {
         let roof = json!({"id": "R", "type": "roof", "shape": "walm",

@@ -48,6 +48,8 @@ export type GripRequest =
   | { op: "ringInsert"; kind: RingKind; id: string; seg: number; pt: P }
   | { op: "ringDelete"; kind: RingKind; id: string; index: number }
   | { op: "ringTidy"; kind: RingKind; id: string; index: number; tol?: number }
+  // [191] Bogen-Scheitel einer Umriss-Kante (Decke, Raum, Dach samt Höfen; `seg` wie bei `ringInsert`).
+  | { op: "ringArc"; kind: "roof" | "ceiling" | "room"; id: string; seg: number; pt: P }
   // [151] Parameter-Griff einer Podesttreppe (Kern `grip_drag::stair_param_drag`).
   | { op: "stairParam"; id: string; index: number; pt: P }
   | { op: "excavationEdge"; id: string; a: number; b: number; delta: P }
@@ -117,9 +119,18 @@ function edges(verts: readonly Vec2[], closed: boolean, bulge: readonly number[]
   return out;
 }
 
-/** Geschlossener Ring → Kanten-Griffe mit Aussennormale (vom Eckpunkt-Mittel weg), inkl. Schlusskante. */
-export function ringEdges(verts: readonly Vec2[], owner: Owner): EdgeGrip[] {
-  return edges(verts, true, null, owner);
+/**
+ * Geschlossener Ring → Kanten-Griffe mit Aussennormale (vom Eckpunkt-Mittel weg), inkl. Schlusskante.
+ * [191] `bulge` (je Kante): Bogenkanten haben keinen Kanten-Griff (sie haben ihren Scheitel-Griff).
+ */
+export function ringEdges(verts: readonly Vec2[], owner: Owner, bulge?: readonly number[]): EdgeGrip[] {
+  return edges(verts, true, bulge ?? null, owner);
+}
+
+/** [191] Scheitel (Bogenmitte) der Kante a → b mit `bulge`; gerade: Kantenmitte. */
+export function arcApex(a: Vec2, b: Vec2, bulge: number | undefined): Vec2 {
+  const k = Number.isFinite(bulge) ? (bulge as number) / 2 : 0;
+  return { x: (a.x + b.x) / 2 - (b.y - a.y) * k, y: (a.y + b.y) / 2 + (b.x - a.x) * k };
 }
 
 /**

@@ -130,6 +130,8 @@ export interface RoomAreaOptions {
    * dem SIA-416-Grenzwert, die nicht zur anrechenbaren Fläche zählen. Default 0.
    */
   deduction?: number;
+  /** [191] Bögen je Kante (`Room.boundaryBulge`): Fläche und Umfang exakt. */
+  bulge?: readonly number[];
 }
 
 /**
@@ -141,7 +143,7 @@ export function evaluateRoom(
   category: SiaCategory,
   options: RoomAreaOptions = {},
 ): RoomAreaResult {
-  const r = core().room_evaluate(new FlatWriter().pts(polygon).done(), options.deduction ?? 0);
+  const r = core().room_evaluate(new FlatWriter().pts(polygon).done(), options.deduction ?? 0, Float64Array.from(options.bulge ?? []));
   return {
     grossArea: r[0],
     netArea: r[1],

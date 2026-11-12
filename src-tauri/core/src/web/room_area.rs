@@ -5,10 +5,12 @@ use crate::flat_read::pairs;
 use crate::room_area as ra;
 use wasm_bindgen::prelude::wasm_bindgen;
 
-/// Ring `[x0, y0, …]`, Abzug (m²) → `[brutto, netto, umfang, schwerpunktX, schwerpunktY]`.
+/// Ring `[x0, y0, …]`, Abzug (m²), [191] Bögen je Kante (leer = gerade) → `[brutto, netto, umfang,
+/// schwerpunktX, schwerpunktY]`; Fläche und Umfang mit Bögen exakt.
 #[wasm_bindgen]
-pub fn room_evaluate(pts: &[f64], deduction: f64) -> Vec<f64> {
-    let e = ra::evaluate(&pairs(pts), deduction);
+pub fn room_evaluate(pts: &[f64], deduction: f64, bulge: &[f64]) -> Vec<f64> {
+    let ring: Vec<crate::model::Vec2> = pairs(pts).iter().map(|q| crate::model::Vec2 { x: q[0], y: q[1] }).collect();
+    let e = crate::ring_arc::evaluate(&ring, Some(bulge), deduction);
     vec![e.gross, e.net, e.perimeter, e.centroid[0], e.centroid[1]]
 }
 
