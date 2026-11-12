@@ -7,7 +7,7 @@ import { INFO_GROUP_TITLE, type InfoGroupId } from "./groups";
 import { clearInfoGroupFocus, getInfoGroupState, subscribeInfoGroups, toggleInfoGroup } from "./infoGroupState";
 
 export function InfoGroup({ id, children }: { id: InfoGroupId; children: ReactNode }) {
-  const st = useSyncExternalStore(subscribeInfoGroups, getInfoGroupState);
+  const st = useSyncExternalStore(subscribeInfoGroups, getInfoGroupState, getInfoGroupState);
   const open = !st.collapsed.has(id);
   const head = useRef<HTMLButtonElement>(null);
   useEffect(() => {

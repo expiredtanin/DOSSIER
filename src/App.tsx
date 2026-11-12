@@ -60,6 +60,8 @@ import { useCommandEngineHost } from "./state/useCommandEngineHost";
 import { TRANSFORM_COMMANDS, useToolInput } from "./state/useToolInput";
 import { useSelectionCommands } from "./state/useSelectionCommands";
 import { openObjectSettings } from "./state/objectSettings";
+import { openObjectSettingsWindowNative, useObjectSettingsWindowHost } from "./native/objectSettingsWindow";
+import { isTauriRuntime } from "./native/projectFile";
 import {
   useActiveToolKeys,
   useElementClipboardShortcut,
@@ -499,11 +501,15 @@ export default function App() {
     pa,
   });
 
-  // [195] Taste T / Menü „Objekteinstellungen…": schwebendes Fenster (state/objectSettings.ts).
+  // [195] Taste T / Menü „Objekteinstellungen…" (state/objectSettings.ts): unter Tauri natives Nebenfenster ([195b]),
+  // sonst schwebendes Panel.
   const openSettingsOfObject = () =>
     openObjectSettings({
       activeTool,
-      revealObjectSettings: () => setLayout((l) => revealPanel(l, "object-settings", { x: 96, y: 96, w: 360, h: 560 })),
+      revealObjectSettings: (group) =>
+        isTauriRuntime()
+          ? void openObjectSettingsWindowNative(group)
+          : setLayout((l) => revealPanel(l, "object-settings", { x: 96, y: 96, w: 360, h: 560 })),
     });
   useObjectSettingsShortcut(shortcutOverrides, engineRef, openSettingsOfObject);
 
@@ -677,6 +683,9 @@ export default function App() {
     dialogState: { setActiveLayoutId, setOpeningEditorId },
     contextMenuState: { setMenu },
   });
+
+  // [195b] Natives Fenster „Objekteinstellungen": Spiegel hin, Ops/Host-Handler zurück (no-op ausserhalb von Tauri).
+  useObjectSettingsWindowHost(baseHost);
 
   // ── Stabile Handler + memoisierte Kinder ([121]) ─────────────────────────
   // Handler für memoisierte Kinder als EIN Bündel mit stabiler Identität (`useEventBundle`): ein

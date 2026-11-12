@@ -8860,6 +8860,16 @@ body {
   padding: 16px 8px;
   text-align: center;
 }
+/* [195b] Natives Nebenfenster: Kopfzeile zum Ziehen, darunter das Panel über die volle Höhe. */
+.objset-window {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--panel, var(--bg));
+}
+.objset-window > .objset-panel {
+  flex: 1 1 auto;
+}
 .attr-mixed {
   color: var(--muted);
   font-size: 11px;

@@ -9,6 +9,7 @@
 // RootState (siehe appStore.ts), wir greifen punktuell auf View-Felder zu.
 
 import { applyOps } from "../core/ops";
+import { changeSink } from "./changeSink";
 import type { CoreOp } from "../core/ops";
 import type { ProjectMutation } from "../core";
 import { withDocument } from "../core";
@@ -557,12 +558,25 @@ export function createProjectSlice(
   // von den paar bekannten Hochfrequenz-Aktionen (Grip-Drag & Co.) gesetzt — alle anderen Aktionen
   // rufen ohne Key auf und pushen damit IMMER diskret. Das Projekt ändert sich NUR über Ops: der Kern
   // prüft (NaN, doppelte ids), wendet an und zeichnet den Undo-Schritt auf ([K4] S3).
-  const setProject = (next: ProjectMutation, coalesceKey?: string) =>
-    next.coreReq ? applyCmd(next.coreReq, coalesceKey) : set((s) => commitOps(s, next.toOps(s.project), coalesceKey));
+  const setProject = (next: ProjectMutation, coalesceKey?: string) => {
+    if (forwarded(() => (next.coreReq ? storeDocument(get().project).cmdOps(next.coreReq) : next.toOps(get().project)), coalesceKey)) return;
+    if (next.coreReq) applyCmd(next.coreReq, coalesceKey);
+    else set((s) => commitOps(s, next.toOps(s.project), coalesceKey));
+  };
+
+  // [195b] Nebenfenster (`changeSink.ts`): Ops auf dem Spiegel rechnen und ans Hauptfenster abgeben statt anwenden.
+  const forwarded = (ops: () => readonly CoreOp[], coalesceKey: string | undefined): boolean => {
+    const sink = changeSink();
+    if (!sink) return false;
+    const list = ops();
+    if (list.length > 0) sink(list, coalesceKey);
+    return true;
+  };
 
   // Befehl ([K4] S3, `commands.rs`): der Kern rechnet ihn auf dem Dokument und wendet ihn im selben
   // Aufruf an (`cmdMutation`); Prüfung, Verlauf und Meldungen wie `commitOps`.
   const applyCmd = (req: object, coalesceKey?: string) => {
+    if (forwarded(() => storeDocument(get().project).cmdOps(req), coalesceKey)) return;
     let notice: string | undefined;
     set((s) => {
       const doc = storeDocument(s.project);
@@ -589,7 +603,10 @@ export function createProjectSlice(
   const applyChange = (
     ops: readonly CoreOp[] | ((p: Project) => readonly CoreOp[]),
     coalesceKey?: string,
-  ) => set((s) => commitOps(s, typeof ops === "function" ? ops(s.project) : ops, coalesceKey));
+  ) => {
+    if (forwarded(() => (typeof ops === "function" ? ops(get().project) : ops), coalesceKey)) return;
+    set((s) => commitOps(s, typeof ops === "function" ? ops(s.project) : ops, coalesceKey));
+  };
 
   // Hinweis aus dem Kern (i18n-Schlüssel) melden — derselbe höchstens alle 2 s (Griff-Zug: je Mausschritt).
   let lastNotice = { key: "", at: 0 };
@@ -607,6 +624,7 @@ export function createProjectSlice(
   // Griff-Änderung ([K4] S3): der Kern rechnet sie auf dem Dokument und wendet sie im selben Aufruf an
   // (`grips.rs`, ein WASM-Aufruf je Mausschritt); Prüfung, Verlauf und Meldungen wie `commitOps`.
   const applyGrip = (req: GripRequest, coalesceKey?: string) => {
+    if (forwarded(() => storeDocument(get().project).gripOps(req).ops, coalesceKey)) return;
     let notice: string | undefined;
     set((s) => {
       const doc = storeDocument(s.project);

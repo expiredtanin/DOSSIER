@@ -1,7 +1,9 @@
 // Abschnitt „Wand" der Attribute ([165] aus `ObjectInfoPanel.tsx`): Referenzlinie, Aufbau, Geschoss, Unter-
 // und Oberkante. Gerufen von `AttributesPanel`.
 
+import { useMemo } from "react";
 import { useStore } from "../../state/appStore";
+import { selectionWallValues } from "../../state/mixedValues";
 import type { WallInfo } from "../../state/selectionInfo";
 import { usePanelHost } from "../host";
 import { t } from "../../i18n";
@@ -22,6 +24,14 @@ export function WallSection({
   host: ReturnType<typeof usePanelHost>;
 }) {
   const storeProject = useStore((st) => st.project);
+  const selection = useStore((st) => st.selection);
+  // [195b] Mehrfachauswahl: abweichender Typ/abweichende Dicke als „gemischt" kennzeichnen.
+  const multi = useMemo(
+    () => (selection.walls.length > 1 ? selectionWallValues(storeProject, selection) : null),
+    [storeProject, selection],
+  );
+  const mixedMark = (on: boolean | undefined, what: string) =>
+    on ? <span className="attr-mixed" data-mixed={what}>{t("objsettings.mixed")}</span> : null;
   // Aufbau-Typ-Segment: einschichtig vs. mehrschichtig. Aus dem Modell
   // abgeleitet (singleLayer); der Umschalter auf „mehrschichtig" wählt einen
   // mehrschichtigen Wandtyp-Preset (erster mit >1 Schicht), auf „einschichtig"
@@ -134,11 +144,14 @@ export function WallSection({
 
       {/* Einschichtig → Dicke-Zahlfeld. Mehrschichtig → Preset-Dropdown. */}
       {isSingle ? (
-        <DimensionField
-          label={t("objinfo.wall.thickness")}
-          value={wall.thickness}
-          onCommit={(v) => host.onSetWallThickness(v)}
-        />
+        <>
+          <DimensionField
+            label={t("objinfo.wall.thickness")}
+            value={wall.thickness}
+            onCommit={(v) => host.onSetWallThickness(v)}
+          />
+          {mixedMark(multi?.thickness.mixed, "thickness")}
+        </>
       ) : (
         <div className="objinfo-field">
           <span className="objinfo-flabel">{t("objinfo.wall.preset")}</span>
@@ -153,6 +166,7 @@ export function WallSection({
             title={t("objinfo.wall.preset")}
             width={150}
           />
+          {mixedMark(multi?.wallTypeId.mixed, "wallType")}
         </div>
       )}
 

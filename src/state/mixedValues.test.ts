@@ -1,7 +1,7 @@
 // [195] Mehrfach-Werte: gleiche Werte → ein Wert, abweichende → leer (gemischt).
 import { describe, expect, it } from "vitest";
 import { buildComplexSampleProject } from "../model/sampleProjectComplex";
-import { commonValue, selectionAppearance, selectedCount } from "./mixedValues";
+import { commonValue, selectionAppearance, selectionWallValues, selectedCount } from "./mixedValues";
 import { EMPTY_SELECTION, mergeSelection } from "./selection";
 
 describe("commonValue [195]", () => {
@@ -35,5 +35,28 @@ describe("selectionAppearance [195]", () => {
   it("Zählung ohne Gruppen und Lage-Marker", () => {
     const sel = mergeSelection(EMPTY_SELECTION, { walls: [w[0]], groups: ["g"], site: ["sunStudy"] });
     expect(selectedCount(sel)).toBe(1);
+  });
+});
+
+describe("Mehrfachwerte Füllung/Typ/Masse [195b]", () => {
+  const p = buildComplexSampleProject();
+  const [a, b] = p.walls;
+  const other = p.wallTypes.find((t) => t.id !== a.wallTypeId)!;
+  const same = { ...p, walls: p.walls.map((w) => (w.id === b.id ? { ...w, wallTypeId: a.wallTypeId } : w)) };
+  const sel = mergeSelection(EMPTY_SELECTION, { walls: [a.id, b.id] });
+
+  it("gleicher Wandtyp → ein Wert; anderer Typ → Typ gemischt", () => {
+    const v = selectionWallValues(same, sel);
+    expect(v.wallTypeId).toEqual({ value: a.wallTypeId, mixed: false });
+    expect(v.thickness.mixed).toBe(false);
+    const changed = { ...p, walls: p.walls.map((w) => (w.id === b.id ? { ...w, wallTypeId: other.id } : w)) };
+    expect(selectionWallValues(changed, sel).wallTypeId.mixed).toBe(true);
+  });
+
+  it("Schraffur: gleich → Wert, abweichend → gemischt", () => {
+    expect(selectionAppearance(same, sel).hatch.mixed).toBe(false);
+    const [h1, h2] = p.hatches.filter((x) => x.pattern !== "none");
+    const changed = { ...same, walls: same.walls.map((w) => (w.id === a.id ? { ...w, hatchId: h1.id } : w.id === b.id ? { ...w, hatchId: h2.id } : w)) };
+    expect(selectionAppearance(changed, sel).hatch.mixed).toBe(true);
   });
 });
