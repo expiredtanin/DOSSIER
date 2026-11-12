@@ -23,7 +23,7 @@ export function openObjectSettings(deps: ObjectSettingsDeps): boolean {
   const sel = selectionInfoFor(project, selection);
   let target = objectSettingsTarget(sel, deps.activeTool, isGridDrawing(sel?.kind === "drawing2d" ? sel.id : undefined));
   // Baum, Lage-Darstellung und Schnittlinie sind keine `SelectionInfo`, haben aber ihre Felder in der Objekt-Info.
-  if (!target && (selection.trees.length > 0 || selection.site.length > 0 || selection.sectionLines.length > 0)) {
+  if (!target && (selection.trees.length > 0 || selection.cameras.length > 0 || selection.site.length > 0 || selection.sectionLines.length > 0)) {
     target = { group: selection.sectionLines.length > 0 ? "sectionLine" : null };
   }
   if (!target) return false;

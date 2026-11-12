@@ -60,7 +60,8 @@ export type ShortcutId =
   | "showAllLayers"
   | "fitAll"
   | "fitSelection"
-  | "isolateLayer";
+  | "isolateLayer"
+  | "walkMode";
 
 export type ShortcutCategory =
   | "general"
@@ -233,6 +234,9 @@ export const SHORTCUT_DEFS: ShortcutDef[] = [
   { id: "fitSelection", category: "navigation", labelKey: "shortcut.fitSelection", defaultCombo: "mod+shift+f" },
   // [192] Ebenen schnell schalten (Cmd/Ctrl+Shift+I ist der Boolean-Schnitt, daher L = Layer).
   { id: "isolateLayer", category: "navigation", labelKey: "shortcut.isolateLayer", defaultCombo: "mod+shift+l" },
+  // [213] Begehen im 3D (WASD): Umschalt+F schaltet den Begehen-Modus; die Bewegungstasten selbst (W/A/S/D, Q/E, Pfeile) gelten nur
+  // darin, damit sie nicht mit „s" (Spiegeln), „d" (Drehen) und „q" (Messen) kollidieren (`viewport/walk.ts`).
+  { id: "walkMode", category: "navigation", labelKey: "shortcut.walkMode", defaultCombo: "shift+f" },
 ];
 
 const DEFS_BY_ID = new Map<ShortcutId, ShortcutDef>(SHORTCUT_DEFS.map((d) => [d.id, d]));

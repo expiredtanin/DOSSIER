@@ -34,7 +34,7 @@ export interface SelectionAppearance {
 
 /** Zahl der gewählten Elemente (ohne Gruppen, Schnittlinien, Lage-Darstellung, Bäume). */
 export function selectedCount(sel: Selection): number {
-  return ELEMENT_KINDS.filter((k) => k !== "sectionLines" && k !== "site" && k !== "trees").reduce((n, k) => n + sel[k].length, 0);
+  return ELEMENT_KINDS.filter((k) => k !== "sectionLines" && k !== "site" && k !== "trees" && k !== "cameras").reduce((n, k) => n + sel[k].length, 0);
 }
 
 /** Effektive Strichstärke und Farbe über die gewählten Wände/Decken/2D-Elemente. */

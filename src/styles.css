@@ -2077,6 +2077,36 @@ body {
   height: 100% !important;
 }
 
+/* [213] Begehen und Kamera anlegen: kleine Knöpfe oben rechts im 3D-Viewport. */
+.viewport3d-tools {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 6;
+  display: flex;
+  gap: 6px;
+}
+.viewport3d-tool {
+  padding: 3px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--label);
+  font-size: 11px;
+  cursor: pointer;
+  opacity: 0.85;
+}
+.viewport3d-tool:hover {
+  background: var(--panel-2);
+  opacity: 1;
+}
+.viewport3d-tool.is-on {
+  background: var(--active-dim);
+  border-color: var(--active-light);
+  color: var(--active-light);
+  opacity: 1;
+}
+
 .viewport-fallback {
   position: absolute;
   inset: 0;

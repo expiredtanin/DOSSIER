@@ -363,13 +363,16 @@ pub const AUTO_DIM_CATEGORY: &str = "81";
 pub const LEVEL_MARK_CATEGORY: &str = "82";
 /// Schnitt- und Ansichtsmarken im Grundriss (Schnittführung mit Pfeilen und Beschriftung).
 pub const SECTION_MARK_CATEGORY: &str = "91";
+/// Kameras ([213]): Symbol mit Sichtkegel im Grundriss (Element `Project.cameras`, Klasse je Element änderbar).
+pub const CAMERA_CATEGORY: &str = "92";
 
 /// Die Klassen der abgeleiteten Darstellung (Code, Name, Farbe, Strichstärke).
-pub const DERIVED_CATEGORIES: [(&str, &str, &str, f64); 4] = [
+pub const DERIVED_CATEGORIES: [(&str, &str, &str, f64); 5] = [
     (SHADOW_CATEGORY, "Schatten", "#707078", 0.13),
     (AUTO_DIM_CATEGORY, "Auto-Bemassung", "#303038", 0.13),
     (LEVEL_MARK_CATEGORY, "Höhenkoten", "#1a1a1a", 0.13),
     (SECTION_MARK_CATEGORY, "Schnittmarken", "#1a1a1a", 0.18),
+    (CAMERA_CATEGORY, "Kameras", "#1a1a1a", 0.18),
 ];
 
 pub fn derived_categories() -> Vec<Value> {
@@ -841,7 +844,7 @@ mod tests {
         // Andere Kategorien bleiben, die neue kommt ans Ende.
         own.insert("layers".into(), json!([{"code": "20", "name": "Wände", "color": "#000", "lw": 0.35, "visible": true, "locked": false}]));
         let op = merge_ops(&own).into_iter().find(|o| o["key"] == "layers").unwrap();
-        assert_eq!(op["value"].as_array().unwrap().iter().map(|l| l["code"].as_str().unwrap()).collect::<Vec<_>>(), ["20", "65", "08", "81", "82", "91"]);
+        assert_eq!(op["value"].as_array().unwrap().iter().map(|l| l["code"].as_str().unwrap()).collect::<Vec<_>>(), ["20", "65", "08", "81", "82", "91", "92"]);
     }
 
     /// [180] Klassen der abgeleiteten Darstellung: „Standards laden" legt sie an, einmal; vorhandene (Code oder Name) bleiben.
@@ -857,7 +860,7 @@ mod tests {
         own.insert("layers".into(), json!([{"code": "77", "name": "schatten", "color": "#000", "lw": 0.13, "visible": true, "locked": false}]));
         let op = merge_ops(&own).into_iter().find(|o| o["key"] == "layers").unwrap();
         let codes: Vec<&str> = op["value"].as_array().unwrap().iter().map(|l| l["code"].as_str().unwrap()).collect();
-        assert_eq!(codes, ["77", "65", "81", "82", "91"]);
+        assert_eq!(codes, ["77", "65", "81", "82", "91", "92"]);
         // Sichtbar, solange die Klasse fehlt; sonst nach der Klassen-Sichtbarkeit.
         assert!(derived_visible(&p, SHADOW_CATEGORY, |c| c == SHADOW_CATEGORY));
         assert!(!derived_visible(&p, SHADOW_CATEGORY, |_| false));

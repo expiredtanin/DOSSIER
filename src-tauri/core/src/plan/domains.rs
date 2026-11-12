@@ -1744,6 +1744,16 @@ fn domains_after(c: &Ctx, out: &mut DomainPrims, bounds: &mut Bounds) {
     }
     // Räume vor dem Kontext: Stempel ausserhalb ihres Raums (eigener Anker im Gelände) sind Hindernisse der
     // Höhenlinien-Beschriftungen; Stempel im Raum liegen im Fussabdruck, wo keine Beschriftung steht.
+    // [213] Kameras: Planzeichen mit Sichtkegel obenauf (Gruppe der Schnittführungen).
+    let first_camera = out.sections.len();
+    super::cameras::plan_cameras(c, &mut out.sections);
+    // Das Symbol (Kegel, Ziel) gehört zum Ausmass, damit es beim Einpassen nicht abgeschnitten wird.
+    for q in &out.sections[first_camera..] {
+        if let Primitive::Line { a, b, .. } = q {
+            bounds.acc(a.x, a.y);
+            bounds.acc(b.x, b.y);
+        }
+    }
     let obstacles = stamp_obstacles_with(out, drawn.clone());
     rooms(c, &mut out.rooms, bounds, &obstacles);
     if c.a.global {

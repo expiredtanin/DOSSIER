@@ -4885,6 +4885,71 @@ pub struct Tree {
     pub extra: Extra,
 }
 
+/// Projektion einer Kamera ([213]): Perspektive, Axonometrie (Parallelprojektion mit schrägem Blick, z. B.
+/// Isometrie) oder Parallelprojektion (frei ausgerichtet). Axonometrie und Parallel zeichnen im 3D orthografisch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+pub enum CameraProjection {
+    #[default]
+    #[serde(rename = "perspective")]
+    Perspective,
+    #[serde(rename = "axonometric")]
+    Axonometric,
+    #[serde(rename = "parallel")]
+    Parallel,
+    #[serde(other)]
+    #[ts(skip)]
+    Unknown,
+}
+
+/// Eine Kamera ([213]) — gespeicherter Standpunkt für die 3D-Ansicht (und das Rendering): Standpunkt im
+/// Grundriss mit Augenhöhe über dem Geschoss, Ziel (Grundriss und absolute Höhe), Bildwinkel, Projektion
+/// und optional Datum/Uhrzeit für den Sonnenstand. Im Grundriss als Symbol mit Sichtkegel auf der Klasse
+/// „Kameras" (Vorgabe "92"); „Kamera öffnen" setzt die 3D-Ansicht exakt.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct Camera {
+    pub id: String,
+    #[ts(type = "\"camera\"")]
+    pub r#type: String,
+    pub name: String,
+    /// Geschoss, auf dem das Symbol im Grundriss steht und auf das sich die Augenhöhe bezieht.
+    #[serde(rename = "floorId")]
+    pub floor_id: String,
+    /// Klasse (Ebene), Vorgabe "92" (Kameras).
+    #[serde(rename = "categoryCode")]
+    pub category_code: String,
+    /// Objekt-Sperre, analog `Wall.locked`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub locked: Option<bool>,
+    /// Standpunkt im Grundriss (Meter).
+    pub position: Vec2,
+    /// Augenhöhe über OK Fertigboden des Geschosses (m).
+    #[serde(rename = "eyeHeight")]
+    pub eye_height: f64,
+    /// Ziel im Grundriss (Meter); der Abstand Standpunkt–Ziel ist die Länge des Sichtkegels.
+    pub target: Vec2,
+    /// Höhe des Ziels (m, absolut, z des Modells).
+    #[serde(rename = "targetHeight")]
+    pub target_height: f64,
+    /// Vertikaler Bildwinkel (Grad, perspektivisch). Die Kleinbild-Brennweite folgt daraus (24-mm-Sensorhöhe).
+    #[serde(rename = "fovDeg")]
+    pub fov_deg: f64,
+    pub projection: CameraProjection,
+    /// Sichthöhe in Metern (volle Bildhöhe) bei Axonometrie/Parallel; fehlt = 10 m.
+    #[serde(rename = "orthoHeight", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub ortho_height: Option<f64>,
+    /// Zeitpunkt für den Sonnenstand (ISO-8601 in UTC wie `SunStudy.when`); „Kamera öffnen" setzt ihn in der
+    /// Sonnenstudie. Fehlt er, bleibt die Sonne der Studie.
+    #[serde(rename = "sunWhen", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub sun_when: Option<String>,
+    #[serde(flatten)]
+    #[ts(skip)]
+    pub extra: Extra,
+}
+
 /// Gruppe (Vectorworks-artig) — reine Mitgliedschaft je Elementart, siehe
 /// {@link Project.groups}. Alle ID-Listen sind additiv; ein Element gehört
 /// NIE zu mehr als einer Gruppe auf derselben Ebene (das Werkzeug/der Befehl
@@ -5919,6 +5984,11 @@ pub struct Project {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub trees: Option<Vec<Tree>>,
+    /// Kameras ([213]) — gespeicherte Standpunkte für 3D-Ansicht und Rendering, siehe {@link Camera}. Optional
+    /// (Default: leer behandeln).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub cameras: Option<Vec<Camera>>,
     /// Gruppen (Vectorworks-artig: Cmd+G fasst die Auswahl zu einer Einheit
     /// zusammen; Doppelklick betritt die Gruppe zum Bearbeiten, alles andere
     /// wird dabei gedimmt/gesperrt — s. `state/useGroupState.ts`). Eine Gruppe

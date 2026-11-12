@@ -282,6 +282,19 @@ pub fn run(lk: &Lookup, req: &Request) -> Result<GripResult, String> {
                 .into()
             }
         }
+        // [213] Kamera: Griff 0 Standpunkt, 1 Ziel, 2 Bildwinkel/Sichtbreite; `cameraBy` verschiebt Standpunkt und Ziel.
+        "cameraGrip" | "cameraBy" => {
+            let (index, (x, y), (dx, dy)) = (r.n("index"), r.p("pt"), r.p("delta"));
+            patch("cameras", r.s("id"), &|e| {
+                if truthy(field(e, "locked")) {
+                    return None;
+                }
+                let cam: crate::model::Camera = serde_json::from_value(e.clone()).ok()?;
+                let next = if op == "cameraGrip" { crate::camera::grip_edit(&cam, index, x, y)? } else { crate::camera::moved(&cam, dx, dy)? };
+                serde_json::to_value(next).ok()
+            })
+            .into()
+        }
         "ceilingGrip" | "roomGrip" => {
             let (coll, field) = if op == "ceilingGrip" { ("ceilings", "outline") } else { ("rooms", "boundary") };
             let (index, (x, y)) = (r.n("index"), r.p("pt"));

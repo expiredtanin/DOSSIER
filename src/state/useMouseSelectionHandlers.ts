@@ -215,6 +215,7 @@ export function useMouseSelectionHandlers(opts: {
         context: "contextObjects",
         site: "site",
         tree: "trees",
+        camera: "cameras",
       } as const satisfies Record<string, SelectionKind>;
       type Kind = keyof typeof channels;
       const target: { kind: Kind; id: string } | null = sel.sectionLineId
@@ -235,6 +236,8 @@ export function useMouseSelectionHandlers(opts: {
                       ? { kind: "solid", id: sel.extrudedSolidId }
                       : sel.treeId
                         ? { kind: "tree", id: sel.treeId }
+                        : sel.cameraId
+                        ? { kind: "camera", id: sel.cameraId }
                         : sel.columnId
                         ? { kind: "column", id: sel.columnId }
                         : sel.roofId
@@ -301,7 +304,9 @@ export function useMouseSelectionHandlers(opts: {
                             ? ["site", sel.siteId]
                             : sel.treeId
                               ? ["trees", sel.treeId]
-                              : null;
+                              : sel.cameraId
+                                ? ["cameras", sel.cameraId]
+                                : null;
     setSelection({ ...clearKinds(), groups: [], ...(one ? { [one[0]]: [one[1]] } : {}) });
   };
   // Links-Drag (Marquee) im Grundriss: die getroffene Wand-MENGE übernehmen
@@ -353,6 +358,7 @@ export function useMouseSelectionHandlers(opts: {
       stairs: expanded.stairIds,
       rooms: expanded.roomIds,
       trees: expanded.treeIds,
+      cameras: sel.cameraIds ?? [],
       groups: groupIds,
     });
   };

@@ -15,8 +15,10 @@ export const AUTO_DIM_CATEGORY = "81";
 export const LEVEL_MARK_CATEGORY = "82";
 /** Schnitt- und Ansichtsmarken im Grundriss. */
 export const SECTION_MARK_CATEGORY = "91";
+/** Kameras ([213]): Symbol mit Sichtkegel im Grundriss. */
+export const CAMERA_CATEGORY = "92";
 
-export const DERIVED_CATEGORY_CODES: readonly string[] = [SHADOW_CATEGORY, AUTO_DIM_CATEGORY, LEVEL_MARK_CATEGORY, SECTION_MARK_CATEGORY];
+export const DERIVED_CATEGORY_CODES: readonly string[] = [SHADOW_CATEGORY, AUTO_DIM_CATEGORY, LEVEL_MARK_CATEGORY, SECTION_MARK_CATEGORY, CAMERA_CATEGORY];
 
 /** Abgeleitete Darstellung der Klasse `code` sichtbar: Klasse eingeblendet (`shown`) oder im Projekt nicht vorhanden. */
 export function derivedVisible(layers: LayerCategory[], code: string, shown: (code: string) => boolean): boolean {

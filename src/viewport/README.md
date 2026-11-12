@@ -11,6 +11,8 @@ kommt als Teile aus dem Kern (`src/plan/toWalls3d.ts`). Weg eines Modells in den
 | `Wasm3DViewport.tsx` | die 3D-Ansicht: Canvas, Maus und Tastatur, Auswahl, Griffe, Cursor-HUD, Live-Schnitt |
 | `Viewport3D.tsx` | Zugang zur Ansicht (`Viewport3D = Wasm3DViewport`) und die geteilten Typen (`RenderDisplay`, `DisplayResolver`) |
 | `useWasm3dRenderer.ts` | Hook: lädt render3d, hält Modell, Kamera und Punktwolken, zeichnet; Typ `Camera3d` |
+| `cameraView.ts` | [213] Kamera-Element (`Project.cameras`) ↔ Sicht des Viewports: `cameraToView`, `cameraFromView`, Brennweite, Geschoss zur Höhe |
+| `walk.ts` | [213] Begehen (WASD): Bewegung und Umschauen als reine Funktionen auf dem Orbit-Zustand |
 | `cameraBridge.ts` | Kamera von aussen lesen und setzen, Bild-Schnappschuss, Live-Schnittebene (für BCF-Viewpoints) |
 
 ## Abgleich mit render3d

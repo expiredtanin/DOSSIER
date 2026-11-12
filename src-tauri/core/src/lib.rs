@@ -20,6 +20,7 @@ pub mod roof_parapet;
 pub mod flat_read;
 pub mod sun;
 pub mod tree;
+pub mod camera;
 pub mod site_rules;
 pub mod auto_dimensions;
 pub mod kennzahlen;

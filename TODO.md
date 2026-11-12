@@ -10,7 +10,7 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   stehen im Archiv („Bewusst nicht übernommen“).
 - **Grösse** (eine Person mit Agenten): S ≤ 1 Tag · M ≤ 1 Woche · L ≤ 1 Monat · XL > 1 Monat.
   Steht keine Grösse im Archiv, ist sie hier geschätzt.
-- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 202);
+- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 214);
   nie eine ID wiederverwenden oder umnummerieren. Präfix-IDs (`[K]`, `[G]`, `[T]`, `[B]`, `[C]`) bleiben.
 - **Pro Punkt:** was fehlt · wo im Code · Grösse. Höchstens ein bis drei Sätze je Punkt;
   Messwerte und Befunde gehören in den Commit.
@@ -44,6 +44,18 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
 
 ## Grundriss
 
+- ◐ **[213]** Kameras und Begehen im 3D (12.11., Wunsch Maintainer; ersetzt den offenen Eintrag in „Release 1.0“). Umgesetzt: Modell `Project.cameras`
+  (Rust `Camera`: Name, Geschoss, Standpunkt + Augenhöhe über Geschoss, Ziel + Zielhöhe, Bildwinkel/Brennweite, Perspektive/Axonometrie/Parallel,
+  Sichthöhe, Sonnenstand als ISO-Zeit; Klasse „Kameras“ Code 92, `standards::CAMERA_CATEGORY`); Ops über die gewöhnlichen Helfer. Grundriss-Symbol im Kern
+  (`plan/cameras.rs`: Gehäuse mit Objektiv, Sichtkegel bzw. Streifen, Ziel mit Blicklinie, Name; Pick-Bänder `@camera:<id>`, nur Gehäuse/Kanten/Ziel,
+  nicht der ganze Kegel); Griffe im Kern (`camera.rs`/`grips.rs`: Standpunkt, Ziel, Bildwinkel bzw. Sichtbreite, `cameraGrip`/`cameraBy`);
+  Objekt-Info-Abschnitt `CameraSection` (Werte, Brennweite ↔ Bildwinkel, Sonne, „Kamera öffnen“, „Aus aktueller Ansicht“, „Isometrisch“); Liste mit Anlegen/Öffnen/Löschen im
+  Panel „Ausschnitte“ (`CamerasGroup`); 3D: Knopf „Kamera+“ legt aus der aktuellen Ansicht an, Doppelklick auf das Symbol im Grundriss bzw. „Kamera öffnen“ setzt die 3D-Ansicht
+  exakt (Reiterwechsel, Sonnenstudie übernimmt `sunWhen`); `viewport/cameraView.ts::cameraToView(project, camera)` liefert dieselbe `ViewCamera` wie `getCamera()`
+  (Anschluss für das Rendering [211]: `cameraToView` statt der Live-Ansicht). Begehen: Umschalt+F bzw. Knopf „Begehen“, darin W/A/S/D und Pfeile gehen (horizontal, Augenhöhe bleibt),
+  Q/E runter/hoch, Umschalt ×4, Alt ×0.25, Maus (links oder rechts) schaut um den Augpunkt, Esc beendet; die Tasten gelten nur im Modus (sonst kollidieren sie mit S/D/Q, [190]), pro Frame mit
+  gekapptem Zeitschritt (`viewport/walk.ts`). Beispiel: Kamera „Südost“ im Musterhaus komplex. Offen: nicht in der Tauri-App geprüft (3D headless leer, Kamera-Brücke nur per Zustand); nativer Mac-3D ohne
+  Begehen/Kameras (`native.rs` ist Linux/winit); Kameras fehlen in Verschieben/Kopieren/Gruppen/IFC/Zwischenablage; Stil „Sonne am Tag“ (Datum/Uhrzeit-Dialog) und Animation entlang mehrerer Kameras. · M
 - ○ **[205]** Pausfolie/Referenz wie Archicad „Trace & Reference“ (12.11., Wunsch Maintainer): hinter die aktive Ansicht (Grundriss, Schnitt, Ansicht, Zeichnungsblatt/Layout) eine beliebige andere Ansicht als halbtransparente Pause legen — anderes Geschoss, Schnitt, Ansicht, Detail, Blatt; Quelle frei wählbar (nicht nur „Andere grau“ aller Geschosse, [203]), Farbe/Deckkraft, verschieben/drehen der Pause (ohne das Modell zu ändern), ein/aus per Kürzel und in der Ansichtsleiste; Pause nicht anwählbar; auch umgekehrt Grundriss hinter Schnitt (Höhenbezug) prüfen. Opus. · L
 - ◐ **[182]** Tabs/Ansichten wie Archicad (11.11., Wunsch Maintainer). Umgesetzt: Reiter-Arten Grundriss · 3D · Schnitt · Ansicht ·
   2D-Zeichnung/Layout werden nie gemischt (`navigateToLevel`/`switchViewKind` in `state/viewTabs.ts`, Anwendung in

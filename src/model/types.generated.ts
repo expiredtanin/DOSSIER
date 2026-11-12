@@ -46,6 +46,50 @@ export type BlockDef = { id: string; name: string; geom2d: Array<Drawing2DGeom> 
  */
 export type BuiltinPaletteBanks = { simple?: boolean; tango?: boolean; material?: boolean; ral?: boolean };
 
+/**
+ * Eine Kamera ([213]) — gespeicherter Standpunkt für die 3D-Ansicht (und das Rendering): Standpunkt im
+ * Grundriss mit Augenhöhe über dem Geschoss, Ziel (Grundriss und absolute Höhe), Bildwinkel, Projektion
+ * und optional Datum/Uhrzeit für den Sonnenstand. Im Grundriss als Symbol mit Sichtkegel auf der Klasse
+ * „Kameras" (Vorgabe "92"); „Kamera öffnen" setzt die 3D-Ansicht exakt.
+ */
+export type Camera = {
+  id: string;
+  type: "camera";
+  name: string;
+  /** Geschoss, auf dem das Symbol im Grundriss steht und auf das sich die Augenhöhe bezieht. */
+  floorId: string;
+  /** Klasse (Ebene), Vorgabe "92" (Kameras). */
+  categoryCode: string;
+  /** Objekt-Sperre, analog `Wall.locked`. */
+  locked?: boolean;
+  /** Standpunkt im Grundriss (Meter). */
+  position: Vec2;
+  /** Augenhöhe über OK Fertigboden des Geschosses (m). */
+  eyeHeight: number;
+  /** Ziel im Grundriss (Meter); der Abstand Standpunkt–Ziel ist die Länge des Sichtkegels. */
+  target: Vec2;
+  /** Höhe des Ziels (m, absolut, z des Modells). */
+  targetHeight: number;
+  /**
+   * Vertikaler Bildwinkel (Grad, perspektivisch). Die Kleinbild-Brennweite folgt daraus (24-mm-Sensorhöhe).
+   */
+  fovDeg: number;
+  projection: CameraProjection;
+  /** Sichthöhe in Metern (volle Bildhöhe) bei Axonometrie/Parallel; fehlt = 10 m. */
+  orthoHeight?: number;
+  /**
+   * Zeitpunkt für den Sonnenstand (ISO-8601 in UTC wie `SunStudy.when`); „Kamera öffnen" setzt ihn in der
+   * Sonnenstudie. Fehlt er, bleibt die Sonne der Studie.
+   */
+  sunWhen?: string;
+};
+
+/**
+ * Projektion einer Kamera ([213]): Perspektive, Axonometrie (Parallelprojektion mit schrägem Blick, z. B.
+ * Isometrie) oder Parallelprojektion (frei ausgerichtet). Axonometrie und Parallel zeichnen im 3D orthografisch.
+ */
+export type CameraProjection = "perspective" | "axonometric" | "parallel";
+
 /** Bekleidung einer Tür ([105]): auf der Aufschlagseite, der Gegenseite, beidseitig oder keine. */
 export type CasingSides = "beide" | "aufschlag" | "gegen" | "keine";
 
@@ -2851,6 +2895,11 @@ export type Project = {
    * bestehende Projekte ohne `trees` gültig bleiben (Default: leer behandeln).
    */
   trees?: Array<Tree>;
+  /**
+   * Kameras ([213]) — gespeicherte Standpunkte für 3D-Ansicht und Rendering, siehe {@link Camera}. Optional
+   * (Default: leer behandeln).
+   */
+  cameras?: Array<Camera>;
   /**
    * Gruppen (Vectorworks-artig: Cmd+G fasst die Auswahl zu einer Einheit
    * zusammen; Doppelklick betritt die Gruppe zum Bearbeiten, alles andere

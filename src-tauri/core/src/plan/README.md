@@ -26,6 +26,7 @@ Herkunft, kein Wegweiser.
 | `floor_finish.rs` | Bodenbelag-Muster nach Massstab |
 | `model_view.rs` | Modelldarstellung ([173]): Optionen je Bauteilart über dem Detailgrad, Rangfolge Element > Typ > Stufe > Basis |
 | `trees.rs` | Bäume in Grundriss, Schnitt und Ansicht |
+| `cameras.rs` | [213] Kameras im Grundriss: Gehäuse, Sichtkegel, Ziel, Name, Pick-Bänder (Klasse „Kameras“) |
 | `stamp_place.rs` | Hindernisse für die Lage der Raumstempel |
 | `view_range.rs` | Ansichtsbereich: Schnitthöhe, Ober- und Unterkante der Sicht |
 | `extras.rs` | Zutaten: Schatten und Baurecht, Abzugskörper, Strichstärken nach Massstab, Schwarz-Weiss, Ausmass |

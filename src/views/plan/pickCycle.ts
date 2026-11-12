@@ -35,6 +35,7 @@ const KIND_FIELD: Record<PickKind, SelectionKind> = {
   drawing: "drawings",
   solid: "solids",
   tree: "trees",
+  camera: "cameras",
   ceiling: "ceilings",
   stair: "stairs",
   room: "rooms",

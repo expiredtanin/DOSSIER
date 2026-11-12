@@ -8,7 +8,7 @@ import { flattenCategories } from "../model/types";
 /** Art eines auswählbaren Objekts an einer Klickstelle (Reihenfolge = Standard-Priorität). */
 export type PickKind =
   | "section" | "opening" | "wall" | "column" | "drawing" | "solid"
-  | "tree" | "ceiling" | "stair" | "room" | "roof" | "site" | "context";
+  | "tree" | "camera" | "ceiling" | "stair" | "room" | "roof" | "site" | "context";
 
 type WithCategory = { id: string; categoryCode?: string };
 
@@ -26,6 +26,7 @@ function collection(project: Project, kind: PickKind): readonly WithCategory[] {
     case "context": return p.context ?? [];
     case "solid": return p.extrudedSolids ?? [];
     case "tree": return p.trees ?? [];
+    case "camera": return p.cameras ?? [];
     case "section":
     case "site": return [];
   }
