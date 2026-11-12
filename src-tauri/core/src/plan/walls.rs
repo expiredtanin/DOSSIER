@@ -1072,6 +1072,8 @@ pub fn plan_walls(c: &Ctx, reference_lines: bool, out: &mut Vec<Primitive>, boun
             }
         }
     }
+    // [198] Ab hier die Wand-Primitive: danach Linien zwischen gleichen Flächen verschiedener Wände streichen.
+    let fuse_from = out.len();
     // Bei doppelten Wand-ids gewinnt in TS (Map) die letzte Verschneidung.
     let mut cut_by_id: HashMap<&str, &WallCuts> = HashMap::new();
     for (e, k) in walls.iter().zip(&cuts) {
@@ -1218,6 +1220,8 @@ pub fn plan_walls(c: &Ctx, reference_lines: bool, out: &mut Vec<Primitive>, boun
             super::view_range::restyle(out, out_start, d);
         }
     }
+    let tail = out.split_off(fuse_from);
+    out.extend(super::seams::fuse_wall_plan(tail));
     Ok(())
 }
 
