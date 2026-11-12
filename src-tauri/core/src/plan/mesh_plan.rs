@@ -202,13 +202,74 @@ pub fn plan_meshes(c: &Ctx, out: &mut Vec<Primitive>) -> bool {
         return true;
     }
     draw_items(c, &range, &items, out);
-    // Pick-Flächen (Hüllbox) zuletzt: Klick wählt das Netz.
+    // Pick-Flächen zuletzt: je zusammenhängendem Teil des Netzes eine Hüllbox (nicht eine Box über alles — sonst
+    // wählt ein Klick in den Garten zwischen mehreren Nachbarbauten eines Netzes das Netz, [204]/[207]).
     for it in &items {
-        let b = &it.m.info.bbox;
-        let pts = vec![Vec2 { x: b[0], y: b[1] }, Vec2 { x: b[3], y: b[1] }, Vec2 { x: b[3], y: b[4] }, Vec2 { x: b[0], y: b[4] }];
-        out.push(super::context::pick_band(pts, Some(&it.m.mesh.id), None));
+        for b in part_boxes(&it.m.mesh.positions, &it.m.mesh.indices) {
+            let pts = vec![Vec2 { x: b[0], y: b[1] }, Vec2 { x: b[2], y: b[1] }, Vec2 { x: b[2], y: b[3] }, Vec2 { x: b[0], y: b[3] }];
+            out.push(super::context::pick_band(pts, Some(&it.m.mesh.id), None));
+        }
     }
     true
+}
+
+/// Hüllboxen `[x0, y0, x1, y1]` der zusammenhängenden Teile eines Netzes (Dreiecke mit gemeinsamer Ecke gehören
+/// zusammen; Union-Find über die Indizes, linear). Kaputte Indizes/Koordinaten werden übersprungen.
+pub(crate) fn part_boxes(positions: &[f64], indices: &[f64]) -> Vec<[f64; 4]> {
+    let n = positions.len() / 3;
+    let mut parent: Vec<usize> = (0..n).collect();
+    fn find(p: &mut [usize], mut i: usize) -> usize {
+        while p[i] != i {
+            p[i] = p[p[i]];
+            i = p[i];
+        }
+        i
+    }
+    let ok = |i: f64| i >= 0.0 && i.fract() == 0.0 && (i as usize) < n;
+    let mut used = vec![false; n];
+    for t in indices.chunks_exact(3) {
+        if !t.iter().all(|i| ok(*i)) {
+            continue;
+        }
+        let (a, b, c) = (t[0] as usize, t[1] as usize, t[2] as usize);
+        for v in [a, b, c] {
+            used[v] = true;
+        }
+        let (ra, rb) = (find(&mut parent, a), find(&mut parent, b));
+        parent[rb] = ra;
+        let (ra, rc) = (find(&mut parent, a), find(&mut parent, c));
+        parent[rc] = ra;
+    }
+    let mut boxes: std::collections::BTreeMap<usize, [f64; 4]> = std::collections::BTreeMap::new();
+    for v in (0..n).filter(|v| used[*v]) {
+        let (x, y) = (positions[3 * v], positions[3 * v + 1]);
+        if !(x.is_finite() && y.is_finite()) {
+            continue;
+        }
+        let r = find(&mut parent, v);
+        let b = boxes.entry(r).or_insert([x, y, x, y]);
+        b[0] = b[0].min(x);
+        b[1] = b[1].min(y);
+        b[2] = b[2].max(x);
+        b[3] = b[3].max(y);
+    }
+    boxes.into_values().collect()
+}
+
+#[cfg(test)]
+mod part_box_tests {
+    use super::part_boxes;
+
+    /// Zwei getrennte Dreiecke ⇒ zwei Boxen (der Raum dazwischen ist nicht anwählbar); kaputte Indizes ⇒ übersprungen.
+    #[test]
+    fn getrennte_teile_eigene_boxen() {
+        let pos = [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 10.0, 10.0, 0.0, 11.0, 10.0, 0.0, 10.0, 11.0, 0.0];
+        let mut b = part_boxes(&pos, &[0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 9.0, 1.0, f64::NAN]);
+        b.sort_by(|a, c| a[0].total_cmp(&c[0]));
+        assert_eq!(b, vec![[0.0, 0.0, 1.0, 1.0], [10.0, 10.0, 11.0, 11.0]]);
+        // verbundene Dreiecke (gemeinsame Ecke) ⇒ eine Box
+        assert_eq!(part_boxes(&pos[..12], &[0.0, 1.0, 2.0, 1.0, 3.0, 2.0]).len(), 1);
+    }
 }
 
 /// [G1] Freie Körper des Geschosses über ihr Kern-Netz (`solid_mesh::body_mesh`), wie importierte Netze:
