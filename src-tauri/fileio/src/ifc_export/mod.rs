@@ -47,6 +47,9 @@
 //                 Linienzüge in Welt-XY (Bögen schon in Sehnen zerlegt); Placement der Trägerstruktur, ohne Darstellung.
 //   CEILING     = 3, structure, id, name, TYPEREF, PSETS, PTS, n_inner, PTS × n_inner, z_rel, depth
 //                 (innere Ringe = Deckenaussparungen, IfcArbitraryProfileDefWithVoids)
+//   CEILING_ARC = 21 ([191] Decke mit Bogenkanten): wie CEILING, aber jeder Ring als BPTS = n, (x, y, bulge) × n
+//                 (bulge zur nächsten Ecke, DXF-Sinn); Profil als IfcCompositeCurve (Bögen: IfcTrimmedCurve auf IfcCircle)
+//   SPACE_ARC   = 22 ([191]): wie SPACE (7), Umriss als BPTS
 //   OPENING     = 4, wall_id, structure, opening_id, is_door (0/1), fill_name, PTS (Öffnungskörper), z_rel,
 //                 depth, width, FILL, PSETS
 //     FILL (Parameter aus dem Modell; Körper, Placement und OperationType/PartitioningType rechnet
@@ -152,6 +155,8 @@ pub const REC_WALL_ARC_SOLID: f64 = 17.0;
 pub const REC_GRID: f64 = 18.0;
 pub const REC_TREE: f64 = 19.0;
 pub const REC_COLUMN_PIECES: f64 = 20.0;
+pub const REC_CEILING_ARC: f64 = 21.0;
+pub const REC_SPACE_ARC: f64 = 22.0;
 
 mod format;
 mod reader;
@@ -173,6 +178,8 @@ fn rec_name(code: f64) -> &'static str {
         c if c == REC_WALL_ARC => "WALL_ARC",
         c if c == REC_WALL_ARC_SOLID => "WALL_ARC_SOLID",
         c if c == REC_CEILING => "CEILING",
+        c if c == REC_CEILING_ARC => "CEILING_ARC",
+        c if c == REC_SPACE_ARC => "SPACE_ARC",
         c if c == REC_OPENING => "OPENING",
         c if c == REC_OPENING_SOLID => "OPENING_SOLID",
         c if c == REC_CLASSIFICATION => "CLASSIFICATION",
@@ -556,21 +563,28 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
                 let entity = w.finish_typed("IFCWALL", format!("wall/{id}"), &name, &ty, &psets, structure, placement, shape, None, true);
                 w.walls.insert(id, (entity, placement, Frame::WORLD));
             }
-            c if c == REC_CEILING => {
+            c if c == REC_CEILING || c == REC_CEILING_ARC => {
+                let arcs = c == REC_CEILING_ARC;
                 let structure = r.structure(n_storeys)?;
                 let id = r.string()?;
                 let name = r.string()?;
                 let ty = r.type_ref()?;
                 let psets = r.psets()?;
-                let pts = r.pts()?;
+                let pts = if arcs { r.bpts()? } else { r.pts()?.into_iter().map(|p| (p.0, p.1, 0.0)).collect() };
                 let n_inner = r.idx()?;
                 let mut inner = Vec::new();
                 for _ in 0..n_inner {
-                    inner.push(r.pts()?);
+                    inner.push(if arcs { r.bpts()? } else { r.pts()?.into_iter().map(|p| (p.0, p.1, 0.0)).collect::<Vec<_>>() });
                 }
                 let z_rel = r.f()?;
                 let depth = r.f()?;
-                let (placement, shape) = w.emit_box_product_voids(&pts, &inner, z_rel, depth, w.placement_of(structure));
+                let (placement, shape) = if arcs {
+                    w.emit_box_product_voids_arcs(&pts, &inner, z_rel, depth, w.placement_of(structure))
+                } else {
+                    let plain: Vec<(f64, f64)> = pts.iter().map(|p| (p.0, p.1)).collect();
+                    let plain_inner: Vec<Vec<(f64, f64)>> = inner.iter().map(|ring| ring.iter().map(|p| (p.0, p.1)).collect()).collect();
+                    w.emit_box_product_voids(&plain, &plain_inner, z_rel, depth, w.placement_of(structure))
+                };
                 w.finish_typed("IFCSLAB", format!("slab/{id}"), &name, &ty, &psets, structure, placement, shape, Some(enum_("FLOOR")), true);
             }
             c if c == REC_OPENING => {
@@ -839,19 +853,25 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
                 w.add_to_containment(structure, entity);
                 w.elements.insert(format!("extrusion/{id}"), entity);
             }
-            c if c == REC_SPACE => {
+            c if c == REC_SPACE || c == REC_SPACE_ARC => {
+                let arcs = c == REC_SPACE_ARC;
                 let structure = r.structure(n_storeys)?;
                 let id = r.string()?;
                 let name = r.string()?;
                 let long_name = r.string()?;
                 let external = r.flag()?;
                 let height = r.f()?;
-                let pts = r.pts()?;
+                let pts = if arcs { r.bpts()? } else { r.pts()?.into_iter().map(|p| (p.0, p.1, 0.0)).collect() };
                 let net = r.f()?;
                 let gross = r.f()?;
                 let sia = r.string()?;
                 let psets = r.psets()?;
-                let (placement, shape) = w.emit_box_product(&pts, 0.0, height, w.placement_of(structure));
+                let (placement, shape) = if arcs {
+                    w.emit_box_product_voids_arcs(&pts, &[], 0.0, height, w.placement_of(structure))
+                } else {
+                    let plain: Vec<(f64, f64)> = pts.iter().map(|p| (p.0, p.1)).collect();
+                    w.emit_box_product(&plain, 0.0, height, w.placement_of(structure))
+                };
                 let g = w.gid(&format!("space/{id}"));
                 let space = w.add(
                     "IFCSPACE",

@@ -11,6 +11,7 @@ import "../engine/fileioWasm.setup";
 import { exportIfcSpf, ifcGuid } from "./exportIfc";
 import { wallMeshVolumes } from "./meshScene.testutil";
 import { sampleProject } from "../model/sampleProject";
+import { buildComplexSampleProject } from "../model/sampleProjectComplex";
 import type { Project } from "../model/types";
 
 const hasIfcOpenShell = spawnSync("python3", ["-c", "import ifcopenshell, ifcopenshell.validate, _pytest"]).status === 0;
@@ -163,6 +164,14 @@ describe.skipIf(!hasIfcOpenShell)("IFC-Export gegen ifcopenshell", { timeout: 60
     expect(r.out).toContain("0 Befunde");
     expect(r.status).toBe(0);
   });
+  it("[191] Decken/Räume mit Bogenkanten: IfcCompositeCurve mit IfcTrimmedCurve, gültig", () => {
+    const ifc = exportIfcSpf(buildComplexSampleProject());
+    expect(ifc).toContain("IFCCOMPOSITECURVE(");
+    expect(ifc).toContain("IFCTRIMMEDCURVE(");
+    const r = validate("komplex-boegen", ifc);
+    expect(r.out).toContain("0 Befunde");
+    expect(r.status).toBe(0);
+  }, 240_000);
   it("[98] Pset_Door/Window/Wall/SlabCommon mit Kennwerten: gültig", () => {
     const p: Project = {
       ...sampleProject,

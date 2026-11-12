@@ -210,3 +210,15 @@ describe("roofUndersideAt — Dach-Unterkante an einem Grundriss-Punkt", () => {
     expect(roofUndersideAt(g, -0.5, 3, 0)).toBeCloseTo(10, 6);
   });
 });
+
+describe("roofGeometry — Bogenkanten ([191])", () => {
+  it("Traufe folgt dem Bogen (3D-Griffe sehen dieselbe Geometrie wie der Kern), Kantenneigung bleibt lesbar", () => {
+    // Rechteck 6×4, rechte Kante (6,0)→(6,4) als Halbkreis nach aussen (Scheitel rechts der Kante: Bulge −1).
+    const g = roofGeometry(roof({ shape: "flach", pitchDeg: 0, outlineBulge: [0, -1, 0, 0] }), E);
+    expect(Math.max(...g.eaves.map((p) => p.x))).toBeCloseTo(8, 6);
+    expect(g.eaves.length).toBeGreaterThan(48);
+    expect(roofGeometry(roof({ shape: "flach", pitchDeg: 0 }), E).eaves.length).toBe(4);
+    const withEdges = roofGeometry(roof({ shape: "pult", outlineBulge: [0, -1, 0, 0], edgePitchDeg: [10, 10, 10, 10] }), E);
+    expect(withEdges.planes.length).toBeGreaterThan(0);
+  });
+});

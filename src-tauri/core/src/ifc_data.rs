@@ -52,6 +52,8 @@ const REC_WALL_ARC_SOLID: f64 = 17.0;
 const REC_GRID: f64 = 18.0;
 const REC_TREE: f64 = 19.0;
 const REC_COLUMN_PIECES: f64 = 20.0;
+const REC_CEILING_ARC: f64 = 21.0;
+const REC_SPACE_ARC: f64 = 22.0;
 
 /// Toleranz des Kerns (`wall_bands.rs::EPS`) für „Öffnung trifft Band".
 const BAND_EPS: f64 = 1e-4;
@@ -131,6 +133,14 @@ fn w_pts(f: &mut Flat, pts: &[Vec2]) {
     f.num(pts.len() as f64);
     for p in pts {
         f.nums(&[p.x, p.y]);
+    }
+}
+
+/// [191] Ring mit Bögen: `n, (x, y, bulge) × n` (Bulge zur nächsten Ecke; fehlend = gerade).
+fn w_bpts(f: &mut Flat, pts: &[Vec2], bulge: Option<&[f64]>) {
+    f.num(pts.len() as f64);
+    for (i, p) in pts.iter().enumerate() {
+        f.nums(&[p.x, p.y, crate::ring_arc::bulge_at(bulge, i)]);
     }
 }
 
@@ -1162,16 +1172,32 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
         // Aussparungen (wie im 3D) als innere Ringe des Profils; Netto zieht sie ab.
         let hole_rings = crate::opening_shape::ceiling_hole_rings(&p, c);
         let inner: Vec<&[Vec2]> = hole_rings.iter().filter(|r| r.len() >= 3).map(|r| r.as_slice()).collect();
-        // [191] Bögen im Umriss: fein geteilt (Profil als Linienzug).
+        // [191] Bögen im Umriss: Mengen auf dem fein geteilten Ring, Profil mit echten Bögen (s. unten).
         let outline = c.ring();
         psets.extend(qto("Qto_SlabBaseQuantities", qty::slab_quantities(&outline, &inner, z_top - z_bottom)));
-        w_head(&mut f, REC_CEILING, structure, &c.id, &name);
+        // Mit Bögen: Profil als IfcCompositeCurve (CEILING_ARC); die gehosteten Fensteröffnungen sind gerade.
+        let arcs = c.has_arcs();
+        w_head(&mut f, if arcs { REC_CEILING_ARC } else { REC_CEILING }, structure, &c.id, &name);
         w_type(&mut f, ty.as_ref().map(|t| type_ref(t, 1.0, "FLOOR")).as_ref());
         w_psets(&mut f, &psets);
-        w_pts(&mut f, &outline);
-        f.num(inner.len() as f64);
-        for r in &inner {
-            w_pts(&mut f, r);
+        if arcs {
+            w_bpts(&mut f, &c.outline, c.outline_bulge.as_deref());
+            let drawn = c.openings.as_deref().unwrap_or(&[]);
+            let rest = hole_rings.iter().skip(drawn.len()).filter(|r| r.len() >= 3);
+            let n = drawn.iter().filter(|r| r.len() >= 3).count() + rest.clone().count();
+            f.num(n as f64);
+            for (i, h) in drawn.iter().enumerate().filter(|(_, h)| h.len() >= 3) {
+                w_bpts(&mut f, h, c.openings_bulge.as_deref().and_then(|b| b.get(i)).map(Vec::as_slice));
+            }
+            for r in rest {
+                w_bpts(&mut f, r, None);
+            }
+        } else {
+            w_pts(&mut f, &outline);
+            f.num(inner.len() as f64);
+            for r in &inner {
+                w_pts(&mut f, r);
+            }
         }
         f.nums(&[z_bottom - base_of(structure), z_top - z_bottom]);
     }
@@ -1290,8 +1316,13 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
         }
         common.push(Prop::Bool("IsExternal", external));
         let (id, name, long) = (f.str(&room.id), f.str(number.unwrap_or(&room.id)), f.str(&room.name));
-        f.nums(&[REC_SPACE, structure, id, name, long, if external { 1.0 } else { 0.0 }, height]);
-        w_pts(&mut f, &room.ring());
+        let arcs = crate::ring_arc::has_arcs(room.boundary_bulge.as_deref(), room.boundary.len());
+        f.nums(&[if arcs { REC_SPACE_ARC } else { REC_SPACE }, structure, id, name, long, if external { 1.0 } else { 0.0 }, height]);
+        if arcs {
+            w_bpts(&mut f, &room.boundary, room.boundary_bulge.as_deref());
+        } else {
+            w_pts(&mut f, &room.ring());
+        }
         let cat = f.str(&sia_key(room.sia_category));
         f.nums(&[area.net, area.gross, cat]);
         // [158] Raumbuch: Oberflächen als Pset_SpaceCoveringRequirements (IFC2x3: in Pset_SpaceCommon),
@@ -1729,6 +1760,30 @@ mod tests {
         let q = qty::dormer_quantities(&d);
         assert_eq!(q.len(), 5);
         assert!(qty::dormer_quantities(&[]).is_empty());
+    }
+
+    /// [191] Decke und Raum mit Bogenkante: eigene Datensätze CEILING_ARC/SPACE_ARC mit Bulge je Ecke
+    /// (statt fein geteiltem Linienzug); ohne Bögen bleiben CEILING/SPACE.
+    #[test]
+    fn decke_und_raum_mit_bogenkante_als_bulge_datensatz() {
+        let mut p = sample();
+        let c = &mut p.ceilings.as_mut().unwrap()[0];
+        let n = c.outline.len();
+        let mut b = vec![0.0; n];
+        b[0] = 0.5;
+        let first = c.outline[0];
+        c.outline_bulge = Some(b);
+        let r = &mut p.rooms.as_mut().unwrap()[0];
+        let mut rb = vec![0.0; r.boundary.len()];
+        rb[0] = -0.5;
+        r.boundary_bulge = Some(rb);
+        let f = ifc_export_data(&p, &IfcOptions::default()).unwrap();
+        for rec in [REC_CEILING_ARC, REC_SPACE_ARC] {
+            assert!(f.nums.contains(&rec), "{rec}");
+        }
+        // Die Bulge-Werte stehen im Datensatz (Ring: x, y, bulge).
+        assert!(f.nums.windows(3).any(|w| w[0] == first.x && w[1] == first.y && w[2] == 0.5));
+        assert!(f.nums.iter().any(|&v| v == -0.5));
     }
 
     /// [T2] Bogenwand: Datensatz WALL_ARC_SOLID mit Kreisachse (Mitte, Radius, Startwinkel, Schwenk) und
