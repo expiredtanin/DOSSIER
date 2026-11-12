@@ -10,7 +10,7 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   stehen im Archiv („Bewusst nicht übernommen“).
 - **Grösse** (eine Person mit Agenten): S ≤ 1 Tag · M ≤ 1 Woche · L ≤ 1 Monat · XL > 1 Monat.
   Steht keine Grösse im Archiv, ist sie hier geschätzt.
-- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 213);
+- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 214);
   nie eine ID wiederverwenden oder umnummerieren. Präfix-IDs (`[K]`, `[G]`, `[T]`, `[B]`, `[C]`) bleiben.
 - **Pro Punkt:** was fehlt · wo im Code · Grösse. Höchstens ein bis drei Sätze je Punkt;
   Messwerte und Befunde gehören in den Commit.
@@ -80,6 +80,12 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   Öffnungswinkel; Klasse „Kameras“ nach [180]), Liste im Navigator; „Aus aktueller Ansicht anlegen“, „Kamera öffnen“, Rendering [211]
   wählt eine Kamera. 3D-Navigation: WASD/Pfeile laufen, Q/E hoch/runter, Maus schauen, Shift schneller (Begehen-Modus wie Archicad/Spiele),
   Augenhöhe halten; auch im nativen Mac-3D. · M
+- ○ **[214]** 3D-Engine optimieren (12.11., Wunsch Maintainer: „render3d hat sich sehr früh entwickelt, Leistung könnte besser sein“).
+  Zuerst messen (Bildzeit, Draw-Calls, Upload-Zeit, Neu-Vernetzen je Änderung, Speicher; Musterhaus komplex + Grossgebäude
+  `buildBigSampleProject` + grosser Kontext-Import), dann der Reihe nach: nur geänderte Elemente neu vernetzen/hochladen (statt ganzes
+  Modell, auch Geisterschicht [180]), Puffer wiederverwenden, Draw-Calls bündeln (ein Puffer je Material/Durchgang, Instancing für
+  Wiederholtes wie Fenster/Bäume), Sichtkegel-Culling, Schatten-Map nur bei Änderung von Licht/Modell, Kantenpass günstiger, LOD für
+  Kontext/Gelände. Messbar machen (Bench in `dossier-cli bench` bzw. render3d-Test) und vorher/nachher belegen. Opus. · L
 
 ### Phase 3 (27.11.–3.12.): Vorprojekt
 - ○ **[209]** Kostenschätzung grob (Vorprojekt ±15–25 %): Kennwerte je m³ GV (SIA 416) bzw. je m² GF und eBKP-H-Hauptgruppen,
