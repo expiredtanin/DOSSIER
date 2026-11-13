@@ -1293,16 +1293,7 @@ pub fn textured_from_mesh(mesh: &Mesh) -> TexturedMesh {
         // Komponente der Normale unterscheiden. Waende sind vertikal extrudiert,
         // ihre Mantelnormale ist streng horizontal (ny == 0) — die Schwelle 0.5
         // trennt sauber Deckel/Boden (|ny| == 1) von Mantelflaechen (ny == 0).
-        let (u, v) = if ny.abs() > 0.5 {
-            // Grundriss-Projektion: u = x, v = z (Meter).
-            (px, pz)
-        } else {
-            // Horizontale Flaechen-Tangente t = (-n.z, 0, n.x): u = Weglaenge
-            // entlang t, v = Hoehe. `t` ist ein Einheitsvektor, weil (n.x, n.z)
-            // fuer Mantelflaechen normiert ist.
-            let u = px * (-nz) + pz * nx;
-            (u, py)
-        };
+        let [u, v] = planar_uv([px, py, pz], [nx, ny, nz]);
         verts.extend_from_slice(&[px, py, pz, nx, ny, nz, u, v]);
     }
     TexturedMesh {
@@ -1311,6 +1302,29 @@ pub fn textured_from_mesh(mesh: &Mesh) -> TexturedMesh {
         // Ohne Material-Zuordnung: leer -> die GPU-Schicht bindet einen konstanten
         // `-1`-Ebenenpuffer (Fallback-Schachbrett fuer alle Vertices).
         layers: Vec::new(),
+    }
+}
+
+/// Weltmassstaebliche UV (Meter) eines Vertex aus Lage `p` und Normale `n` (world, Y oben) — dieselbe Regel wie der
+/// texturierte Shader (`wall_uv`) und der Pathtracer ([212] Etappe 3): Deckel/Boden (|n.y| > 0.5) im Grundriss
+/// (u = x, v = z), Mantelflaechen laengs der horizontalen Tangente t = (-n.z, 0, n.x) und nach der Hoehe. Waende
+/// sind vertikal extrudiert, ihre Mantelnormale ist streng horizontal, `t` dort ein Einheitsvektor.
+pub fn planar_uv(p: [f32; 3], n: [f32; 3]) -> [f32; 2] {
+    if n[1].abs() > 0.5 {
+        [p[0], p[2]]
+    } else {
+        [p[0] * (-n[2]) + p[2] * n[0], p[1]]
+    }
+}
+
+/// Material-Ebene je Vertex eines Kontext-Meshes: eigene Textur-Ebene (`material_index`), sonst beim Gelaende ohne
+/// Luftbild-Farben die Ebene „Wiese“ des Pathtracers (`pt_material::TERRAIN_LAYER`, [212] Etappe 3; der texturierte
+/// Stil klemmt negative Ebenen wie `-1` aufs Schachbrett), sonst `-1`.
+pub fn mesh_layer(m: &MeshInput) -> f32 {
+    match m.material_index {
+        Some(i) => i as f32,
+        None if matches!(m.kind, MeshKind::Terrain) && m.vertex_colors.is_empty() => crate::pt_material::TERRAIN_LAYER as f32,
+        None => -1.0,
     }
 }
 
@@ -1352,8 +1366,8 @@ pub fn build_scene_mesh_textured(
         let before = mesh.vertex_count();
         append_context_mesh(&mut mesh, m);
         // Material-Ebene des Kontext-Meshes (aktuell nur Daecher setzen sie,
-        // s. `MeshInput::material_index`); ohne -> Fallback-Schachbrett.
-        let layer = m.material_index.map(|i| i as f32).unwrap_or(-1.0);
+        // s. `MeshInput::material_index`); ohne -> Fallback-Schachbrett (Gelaende: Wiese im Pathtracer).
+        let layer = mesh_layer(m);
         fill(&mesh, &mut layers, before, layer);
     }
 

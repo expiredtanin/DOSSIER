@@ -4,7 +4,7 @@
 // [213]). Danach speichern oder ins Layout einsetzen ([208], wie der Rendering-Dialog). Registriert sich als Öffner
 // (`state/imageExportDialogHook`); Befehl `bild3d`, Menü Ansicht. Overlay wie `RenderDialog` (kein window.prompt).
 
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { t } from "../i18n";
 import { paperPixels } from "../core";
 import { getState } from "../state/appStore";
@@ -49,6 +49,9 @@ export const ImageExportDialogHost = memo(function ImageExportDialogHost() {
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [layoutTarget, setLayoutTarget] = useState("");
   const [aspect, setAspect] = useState(16 / 9);
+  // [212] Etappe 3: Fortschritt der Samples und Abbruch beim Export im Stil Pathtracing.
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     setImageExportDialogOpener(() => {
@@ -120,9 +123,25 @@ export const ImageExportDialogHost = memo(function ImageExportDialogHost() {
     }
     setPhase("working");
     setMessage("");
+    setProgress(null);
+    const ctl = new AbortController();
+    abortRef.current = ctl;
     // Dem Browser einen Frame lassen, damit „Arbeite …" erscheint, bevor das Zeichnen den Hauptthread belegt.
     await new Promise((r) => requestAnimationFrame(() => r(null)));
-    const img = await captureImage({ width: dims.width, height: dims.height, transparent, ...(camera ? { camera } : {}), ...(pathtrace ? { samples: exportSamples(samples) } : {}) });
+    const img = await captureImage({
+      width: dims.width,
+      height: dims.height,
+      transparent,
+      ...(camera ? { camera } : {}),
+      ...(pathtrace ? { samples: exportSamples(samples), onProgress: (done: number, total: number) => setProgress({ done, total }), signal: ctl.signal } : {}),
+    });
+    abortRef.current = null;
+    setProgress(null);
+    if (ctl.signal.aborted) {
+      setPhase("setup");
+      setMessage(t("render.cancelled"));
+      return;
+    }
     if (!img) {
       setPhase("error");
       setMessage(viewportAvailable() ? t("image3d.empty") : t("image3d.noViewport"));
@@ -212,8 +231,18 @@ export const ImageExportDialogHost = memo(function ImageExportDialogHost() {
 
           {busy && (
             <section className="imp-section" data-testid="image3d-progress">
-              <progress style={{ width: "100%" }} />
+              {progress ? <progress style={{ width: "100%" }} max={progress.total} value={progress.done} /> : <progress style={{ width: "100%" }} />}
               <div className="imp-note">{t("image3d.working", { width: effective.width, height: effective.height })}</div>
+              {progress && (
+                <div className="imp-note" data-testid="image3d-samples-progress">
+                  {t("image3d.progress", { done: progress.done, total: progress.total })}
+                </div>
+              )}
+              {pathtrace && (
+                <button className="imp-btn" data-testid="image3d-abort" style={{ marginTop: 6 }} onClick={() => abortRef.current?.abort()}>
+                  {t("render.abort")}
+                </button>
+              )}
             </section>
           )}
 

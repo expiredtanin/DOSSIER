@@ -10,7 +10,13 @@
 // Looks nach Schlüsselwörtern im Baustoffnamen und Bildkarten-Pfad, angelehnt an den Blender-Leser [211]
 // (`scripts/blender/render_dossier.py`, `ROOF_LOOKS`/`BUILDING_LOOKS`): Farbe nur, wenn das Bauteil keine eigene hat
 // (Vertexfarbe weiss = nicht gesetzt). Hat der Viewer die Bildkarten dekodiert (`set_material_textures`), gilt deren
-// mittlere Farbe vor der Tabellenfarbe (der Pathtracer liest noch keine Texturen).
+// mittlere Farbe vor der Tabellenfarbe.
+//
+// Etappe 3: Bildkarten im Pathtracer. Die Tabelle sagt je Dreieck, ob es eine Bildkarte liest (Ebene ≥ 1 mit geladener
+// Karte, `tex_for`), mit welcher Kachelgrösse (`size` je Eintrag = `ComponentMaterial.sizeM`, Standard 1 m) und welche
+// prozedurale Ersatz-Textur gilt, wenn keine Karte da ist (Wiese, Kies, Asphalt: `PROC_*`). Gelände ohne Material
+// (`TERRAIN_LAYER`, gesetzt von `mesh::mesh_layer`) bekommt die Wiese wie im Blender-Leser [211]. Baustoffe mit
+// „Leuchte“/„Lampe“ im Namen leuchten (`MAT_EMISSIVE`, warmes Licht; sichtbar vor allem bei Nacht).
 
 use serde::Deserialize;
 
@@ -21,6 +27,19 @@ pub const MAT_DIFFUSE: u32 = 0;
 pub const MAT_GLOSSY: u32 = 1;
 /// Glas: dünne Scheibe (Fresnel-Spiegelung, sonst gerader Durchgang mit leichter Tönung).
 pub const MAT_GLASS: u32 = 2;
+/// Leuchte: strahlt ihre Grundfarbe ab (Shader `EMISSION` · Farbe), reflektiert nichts.
+pub const MAT_EMISSIVE: u32 = 3;
+
+/// Prozedurale Textur (Bits 16..24 von `GpuTriTex::tex`), wenn keine Bildkarte geladen ist.
+pub const PROC_NONE: u32 = 0;
+pub const PROC_GRASS: u32 = 1;
+pub const PROC_GRAVEL: u32 = 2;
+pub const PROC_ASPHALT: u32 = 3;
+
+/// Material-Ebene des Geländes ohne eigenes Material und ohne Luftbild-Farben (`mesh::mesh_layer`): Wiese.
+pub const TERRAIN_LAYER: i32 = -2;
+/// Wiesengrün (sRGB) wie der Blender-Leser [211] (`GRASS_SRGB`).
+pub const GRASS_SRGB: [f32; 3] = [0.33, 0.45, 0.18];
 
 /// Unter dieser Rauigkeit bekommt ein dielektrischer Baustoff die glänzende Schicht (sonst rein diffus).
 const GLOSSY_BELOW: f32 = 0.75;
@@ -33,44 +52,56 @@ pub struct PtMaterial {
     pub metal: f32,
     /// Grundfarbe sRGB 0..1, wenn das Bauteil keine eigene hat (Vertexfarbe weiss).
     pub color: Option<[f32; 3]>,
+    /// Prozedurale Textur ohne Bildkarte (`PROC_*`).
+    pub proc: u32,
 }
 
 impl PtMaterial {
-    pub const DIFFUSE: PtMaterial = PtMaterial { kind: MAT_DIFFUSE, rough: 1.0, metal: 0.0, color: None };
+    pub const DIFFUSE: PtMaterial = PtMaterial { kind: MAT_DIFFUSE, rough: 1.0, metal: 0.0, color: None, proc: PROC_NONE };
+    /// Wiese (Gelände ohne Material).
+    pub const GRASS: PtMaterial = PtMaterial { kind: MAT_DIFFUSE, rough: 0.95, metal: 0.0, color: Some(GRASS_SRGB), proc: PROC_GRASS };
+    const GLASS: PtMaterial = PtMaterial { kind: MAT_GLASS, rough: 0.0, metal: 0.0, color: None, proc: PROC_NONE };
 
-    fn look(color: Option<[f32; 3]>, rough: f32, metal: f32) -> Self {
+    fn look(color: Option<[f32; 3]>, rough: f32, metal: f32, proc: u32) -> Self {
         let kind = if metal > 0.5 || rough < GLOSSY_BELOW { MAT_GLOSSY } else { MAT_DIFFUSE };
-        PtMaterial { kind, rough, metal, color }
+        PtMaterial { kind, rough, metal, color, proc }
     }
 }
 
+/// Warmweiss einer Leuchte ohne eigene Farbe (sRGB, ≈ 3000 K).
+const LAMP_SRGB: [f32; 3] = [1.0, 0.85, 0.62];
+
 /// (Schlüsselwörter, Farbe sRGB oder None = Bauteilfarbe, Rauigkeit, Metall). Reihenfolge zählt: spezielle Wörter
 /// zuerst („Stahlbeton“ ist Beton, „Tonziegel“/Dachziegel sind Dachziegel, „Ziegel“ allein Backstein).
-type Look = (&'static [&'static str], Option<[f32; 3]>, f32, f32);
+type Look = (&'static [&'static str], Option<[f32; 3]>, f32, f32, u32);
 const LOOKS: &[Look] = &[
-    (&["roofingtiles", "tonziegel", "dachziegel", "biber", "dachstein"], Some([0.56, 0.25, 0.16]), 0.7, 0.0),
-    (&["schindel"], Some([0.40, 0.28, 0.18]), 0.85, 0.0),
-    (&["faserzement", "eternit", "schiefer"], Some([0.22, 0.23, 0.25]), 0.8, 0.0),
-    (&["beton", "concrete", "estrich"], Some([0.52, 0.52, 0.50]), 0.85, 0.0),
-    (&["blech", "zink", "titan", "kupfer", "alu", "stehfalz", "stahl", "metal"], Some([0.55, 0.57, 0.58]), 0.35, 1.0),
-    (&["kies", "gravel"], Some([0.46, 0.44, 0.41]), 0.95, 0.0),
-    (&["begr", "substrat", "gras"], Some([0.30, 0.42, 0.18]), 0.95, 0.0),
-    (&["bitumen", "abdicht", "sperrschicht", "folie"], Some([0.10, 0.10, 0.10]), 0.7, 0.0),
-    (&["backstein", "ziegel", "klinker", "brick"], Some([0.60, 0.31, 0.22]), 0.8, 0.0),
-    (&["holz", "parkett", "lattung", "schalung", "brettsperr", "bsp", "wood"], Some([0.56, 0.40, 0.24]), 0.65, 0.0),
-    (&["naturstein", "marmor", "granit", "marble"], Some([0.62, 0.60, 0.57]), 0.5, 0.0),
-    (&["keramik", "fliese", "tiles"], Some([0.75, 0.74, 0.72]), 0.3, 0.0),
-    (&["erdreich", "ground"], Some([0.40, 0.33, 0.25]), 0.95, 0.0),
-    (&["putz", "gips", "plaster"], None, 0.9, 0.0),
+    (&["roofingtiles", "tonziegel", "dachziegel", "biber", "dachstein"], Some([0.56, 0.25, 0.16]), 0.7, 0.0, PROC_NONE),
+    (&["schindel"], Some([0.40, 0.28, 0.18]), 0.85, 0.0, PROC_NONE),
+    (&["faserzement", "eternit", "schiefer"], Some([0.22, 0.23, 0.25]), 0.8, 0.0, PROC_NONE),
+    (&["beton", "concrete", "estrich"], Some([0.52, 0.52, 0.50]), 0.85, 0.0, PROC_NONE),
+    (&["blech", "zink", "titan", "kupfer", "alu", "stehfalz", "stahl", "metal"], Some([0.55, 0.57, 0.58]), 0.35, 1.0, PROC_NONE),
+    (&["kies", "gravel"], Some([0.46, 0.44, 0.41]), 0.95, 0.0, PROC_GRAVEL),
+    (&["asphalt", "teer", "bitumenbelag"], Some([0.20, 0.20, 0.21]), 0.9, 0.0, PROC_ASPHALT),
+    (&["wiese", "rasen", "begr", "substrat", "gras"], Some([0.30, 0.42, 0.18]), 0.95, 0.0, PROC_GRASS),
+    (&["bitumen", "abdicht", "sperrschicht", "folie"], Some([0.10, 0.10, 0.10]), 0.7, 0.0, PROC_NONE),
+    (&["backstein", "ziegel", "klinker", "brick"], Some([0.60, 0.31, 0.22]), 0.8, 0.0, PROC_NONE),
+    (&["holz", "parkett", "lattung", "schalung", "brettsperr", "bsp", "wood"], Some([0.56, 0.40, 0.24]), 0.65, 0.0, PROC_NONE),
+    (&["naturstein", "marmor", "granit", "marble"], Some([0.62, 0.60, 0.57]), 0.5, 0.0, PROC_NONE),
+    (&["keramik", "fliese", "tiles"], Some([0.75, 0.74, 0.72]), 0.3, 0.0, PROC_NONE),
+    (&["erdreich", "ground"], Some([0.40, 0.33, 0.25]), 0.95, 0.0, PROC_NONE),
+    (&["putz", "gips", "plaster"], None, 0.9, 0.0, PROC_NONE),
 ];
 
 /// Look eines Baustoffs aus Name und Bildkarten-Pfad (klein geschrieben durchsucht). Glas über „glas“/„glass“.
 pub fn look_for(name: &str, map: &str) -> Option<PtMaterial> {
     let text = format!("{} {}", name, map).to_lowercase();
-    if text.contains("glas") {
-        return Some(PtMaterial { kind: MAT_GLASS, rough: 0.0, metal: 0.0, color: None });
+    if ["leuchte", "lampe", "leuchtmittel"].iter().any(|w| text.contains(w)) {
+        return Some(PtMaterial { kind: MAT_EMISSIVE, rough: 1.0, metal: 0.0, color: Some(LAMP_SRGB), proc: PROC_NONE });
     }
-    LOOKS.iter().find(|(words, ..)| words.iter().any(|w| text.contains(w))).map(|&(_, c, r, m)| PtMaterial::look(c, r, m))
+    if text.contains("glas") {
+        return Some(PtMaterial::GLASS);
+    }
+    LOOKS.iter().find(|(words, ..)| words.iter().any(|w| text.contains(w))).map(|&(_, c, r, m, p)| PtMaterial::look(c, r, m, p))
 }
 
 /// Eintrag der Eingabe-Liste (JSON `{ name, map }`; Index i = Material-Ebene i + 1).
@@ -82,24 +113,46 @@ pub struct PtMaterialEntry {
     /// Pfad der Farbkarte (ambientCG-Ordnername verrät den Stoff).
     #[serde(default)]
     pub map: String,
+    /// Kantenlänge einer Bildkarten-Kachel in Metern (`ComponentMaterial.sizeM`; fehlt = 1 m).
+    #[serde(default)]
+    pub size: Option<f32>,
 }
 
 /// Tabelle Material-Ebene (1-basiert) → Look.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PtMaterialTable {
     looks: Vec<Option<PtMaterial>>,
+    /// Kachelgrösse je Ebene (m).
+    sizes: Vec<f32>,
     /// Mittlere Farbe der Bildkarte je Ebene (sRGB), aus `set_material_textures`.
     means: Vec<Option<[f32; 3]>>,
+}
+
+/// Texturzugriff eines Dreiecks (s. `PtMaterialTable::tex_for`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PtTex {
+    /// Ebene im Textur-Array (≥ 1), 0 = keine Bildkarte.
+    pub layer: u32,
+    /// Prozedurale Textur ohne Bildkarte (`PROC_*`).
+    pub proc: u32,
+    /// UV-Massstab (1 / Kachelgrösse in m).
+    pub scale: f32,
+}
+
+impl PtTex {
+    pub const NONE: PtTex = PtTex { layer: 0, proc: PROC_NONE, scale: 1.0 };
 }
 
 impl PtMaterialTable {
     /// Aus der Eingabe-Liste (s. Moduldoc; JSON-Lesen beim Aufrufer: `web.rs`, `render_png`).
     pub fn from_entries(entries: &[PtMaterialEntry]) -> Self {
-        Self::from_names(entries.iter().map(|e| (e.name.as_str(), e.map.as_str())))
+        let mut t = Self::from_names(entries.iter().map(|e| (e.name.as_str(), e.map.as_str())));
+        t.sizes = entries.iter().map(|e| e.size.filter(|s| s.is_finite() && *s >= 0.01 && *s <= 1000.0).unwrap_or(1.0)).collect();
+        t
     }
 
     pub fn from_names<'a>(entries: impl IntoIterator<Item = (&'a str, &'a str)>) -> Self {
-        PtMaterialTable { looks: entries.into_iter().map(|(n, m)| look_for(n, m)).collect(), means: Vec::new() }
+        PtMaterialTable { looks: entries.into_iter().map(|(n, m)| look_for(n, m)).collect(), sizes: Vec::new(), means: Vec::new() }
     }
 
     /// Übernimmt die mittleren Bildkarten-Farben einer anderen Tabelle (neue Namen, gleiche Bilder).
@@ -121,6 +174,9 @@ impl PtMaterialTable {
     /// (`classify_color`).
     pub fn resolve(&self, layer: i32, color: [f32; 3]) -> (PtMaterial, [f32; 3]) {
         let base = classify_color(color);
+        if layer == TERRAIN_LAYER {
+            return (PtMaterial::GRASS, GRASS_SRGB);
+        }
         if layer < 1 {
             return (base, color);
         }
@@ -135,9 +191,45 @@ impl PtMaterialTable {
         if base.kind == MAT_GLASS {
             m = base;
         }
-        let unset = color.iter().all(|c| *c >= 0.999);
+        // Ungesetzt: weiss (Bauteil ohne Farbe) oder die Grundfarbe des Geländes (Kern `TERRAIN_RGB`), damit Gelände mit
+        // Material dessen Farbe bekommt.
+        let terrain = crate::types::MeshKind::Terrain.default_color();
+        let unset = color.iter().all(|c| *c >= 0.999) || (0..3).all(|k| (color[k] - terrain[k]).abs() < 2e-3);
         let c = if unset { mean.or(m.color).unwrap_or(color) } else { color };
         (m, c)
+    }
+
+    /// Texturzugriff für ein Dreieck mit Ebene `layer` und aufgelöstem Material `m` (aus `resolve`): Bildkarte, wenn
+    /// die Ebene eine geladene Karte hat (mittlere Farbe bekannt), sonst die prozedurale Textur des Looks. Glas und
+    /// Leuchten ohne Textur.
+    pub fn tex_for(&self, layer: i32, m: &PtMaterial) -> PtTex {
+        if m.kind == MAT_GLASS || m.kind == MAT_EMISSIVE {
+            return PtTex::NONE;
+        }
+        if layer >= 1 {
+            let i = (layer - 1) as usize;
+            let scale = 1.0 / self.sizes.get(i).copied().unwrap_or(1.0);
+            if self.means.get(i).copied().flatten().is_some() {
+                return PtTex { layer: layer as u32, proc: PROC_NONE, scale };
+            }
+            return PtTex { layer: 0, proc: m.proc, scale };
+        }
+        PtTex { layer: 0, proc: m.proc, scale: 1.0 }
+    }
+
+    /// Kehrwert der mittleren Bildkarten-Farbe je Textur-Ebene (linear; Index = Ebene, 0 und fehlende = 1). Der Shader
+    /// rechnet Albedo = Grundfarbe · Texel / Mittel: ungesetzte Bauteile (Grundfarbe = Mittel) zeigen die Karte, gesetzte
+    /// Farben behalten ihren Ton und bekommen die Struktur der Karte.
+    pub fn inv_means(&self) -> Vec<[f32; 4]> {
+        std::iter::once([1.0; 4])
+            .chain(self.means.iter().map(|m| match m {
+                Some(c) => {
+                    let l = c.map(|v| srgb_to_linear(v).max(0.02));
+                    [1.0 / l[0], 1.0 / l[1], 1.0 / l[2], 1.0]
+                }
+                None => [1.0; 4],
+            }))
+            .collect()
     }
 }
 
@@ -175,9 +267,9 @@ pub const STEEL_RGB: [f32; 3] = [0.25, 0.27, 0.3];
 pub fn classify_color(color: [f32; 3]) -> PtMaterial {
     let near = |c: [f32; 3]| (0..3).all(|k| (color[k] - c[k]).abs() < 1e-3);
     if near(GLASS_RGB) {
-        PtMaterial { kind: MAT_GLASS, rough: 0.0, metal: 0.0, color: None }
+        PtMaterial::GLASS
     } else if near(STEEL_RGB) {
-        PtMaterial { kind: MAT_GLOSSY, rough: 0.3, metal: 0.0, color: None }
+        PtMaterial { kind: MAT_GLOSSY, rough: 0.3, metal: 0.0, color: None, proc: PROC_NONE }
     } else {
         PtMaterial::DIFFUSE
     }
@@ -278,5 +370,53 @@ mod tests {
         // Gemischt in linearem Licht: schwarz/weiss → mittleres Grau ≈ 0.735 sRGB (nicht 0.5).
         let m = texture_means(&[0, 0, 0, 255, 255, 255, 255, 255], 8, 1)[0].unwrap();
         assert!((m[0] - 0.735).abs() < 0.01, "{m:?}");
+    }
+
+    /// [212] Etappe 3: Bildkarte nur mit geladener Karte (Kachelgrösse aus der Tabelle), sonst prozedurale Textur des
+    /// Looks; Gelände ohne Material = Wiese; Asphalt, Leuchten; Kehrwert der Kartenmittel je Ebene.
+    #[test]
+    fn texturzugriff_gelaende_und_leuchte() {
+        let mut t = PtMaterialTable::from_json(
+            r#"[{"name":"Backstein","map":"/a/Bricks104/color.jpg","size":0.5},{"name":"Kies"},{"name":"Asphaltbelag"},{"name":"Deckenleuchte"},{"name":"Wiese","size":-3}]"#,
+        );
+        let white = [1.0; 3];
+        // Ohne geladene Karten: keine Bildkarte; Kies und Asphalt prozedural, Backstein ohne.
+        let tex = |t: &PtMaterialTable, l: i32| t.tex_for(l, &t.resolve(l, white).0);
+        assert_eq!(tex(&t, 1), PtTex { layer: 0, proc: PROC_NONE, scale: 2.0 });
+        assert_eq!(tex(&t, 2).proc, PROC_GRAVEL);
+        assert_eq!(tex(&t, 3).proc, PROC_ASPHALT);
+        assert_eq!(t.resolve(3, white).1, [0.20, 0.20, 0.21]);
+        // Kachelgrösse ungültig (≤ 0) → 1 m.
+        assert_eq!(tex(&t, 5), PtTex { layer: 0, proc: PROC_GRASS, scale: 1.0 });
+        // Leuchte: strahlt, ohne Textur.
+        let (lamp, c) = t.resolve(4, white);
+        assert_eq!(lamp.kind, MAT_EMISSIVE);
+        assert!(c[0] > c[2], "warmweiss");
+        assert_eq!(t.tex_for(4, &lamp), PtTex::NONE);
+        // Karten geladen (Ebene 1 und 2 nicht schwarz): Bildkarte statt Prozedur, Massstab bleibt.
+        let px = |c: u8| [c, c, c, 255].repeat(4);
+        let rgba = [px(180), px(120), px(0), px(0), px(0)].concat();
+        t.set_texture_means(&rgba, 16, 5);
+        assert_eq!(tex(&t, 1), PtTex { layer: 1, proc: PROC_NONE, scale: 2.0 });
+        assert_eq!(tex(&t, 2), PtTex { layer: 2, proc: PROC_NONE, scale: 1.0 });
+        assert_eq!(tex(&t, 3).layer, 0, "schwarze Ebene = nicht geladen");
+        // Gelände mit Material (Grundfarbe des Geländes gilt als ungesetzt): Farbe des Looks.
+        assert_eq!(t.resolve(3, crate::types::MeshKind::Terrain.default_color()).1, [0.20, 0.20, 0.21]);
+        // Kehrwert der Mittel: Ebene 0 und ungeladene = 1, sonst 1 / linear.
+        let inv = t.inv_means();
+        assert_eq!(inv.len(), 6);
+        assert_eq!(inv[0], [1.0; 4]);
+        assert!((inv[1][0] - 1.0 / srgb_to_linear(180.0 / 255.0)).abs() < 1e-3, "{:?}", inv[1]);
+        assert_eq!(inv[3], [1.0; 4]);
+        // Gelände ohne Material: Wiese, auch ohne Tabelle; Glas bleibt Glas.
+        let empty = PtMaterialTable::default();
+        let (g, gc) = empty.resolve(TERRAIN_LAYER, [0.66, 0.69, 0.64]);
+        assert_eq!((g.kind, g.proc, gc), (MAT_DIFFUSE, PROC_GRASS, GRASS_SRGB));
+        assert_eq!(empty.tex_for(TERRAIN_LAYER, &g).proc, PROC_GRASS);
+        assert_eq!(empty.tex_for(-1, &empty.resolve(-1, GLASS_RGB).0), PtTex::NONE);
+        // Wiese/Kies/Asphalt nach Bildkarten-Ordner wie der Blender-Leser.
+        assert_eq!(look_for("", "/assets/materials/Grass005/color.jpg").unwrap().proc, PROC_GRASS);
+        assert_eq!(look_for("", "/assets/materials/Gravel043/color.jpg").unwrap().proc, PROC_GRAVEL);
+        assert_eq!(look_for("Bitumenbahn", "").unwrap().proc, PROC_NONE, "Abdichtung ist kein Asphalt");
     }
 }

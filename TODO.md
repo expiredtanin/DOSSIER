@@ -315,6 +315,31 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   Samples/s, vorher 3.2; der Entrauscher kostet wenig). **Offen:** echte GPU und Mac/Metal, Dialog-Feld nicht im Browser geklickt,
   Bildkarten/Texturen im Pathtracer (nur mittlere Farbe), Glas mit Brechung, Schnitt/Geisterschicht/Linien im Pathtracing,
   Gelände ohne Material (Wiese wie [211] fehlt), Nachthimmel ohne Lichter/Mond, BVH-Teil-Update, OIDN.
+  **Stand 13.11. (Etappe 3, schöner):** (1) Bildkarten im Pathtracer: dasselbe Textur-Array wie der Stil „textured“
+  (group 1 im Compute-Shader, Sampler mit Wiederholung), UV je Dreieck im Parallel-Puffer `bvh::GpuTriTex` (32 B, nur beim
+  Treffer gelesen; UV der Ecken in Metern nach `mesh::planar_uv`, derselben Regel wie der Shader der schattierten Ansicht,
+  baryzentrisch interpoliert), Massstab 1 / `sizeM` (neu `size` in `pathtraceMaterials`; die schattierte Ansicht kachelt
+  weiter 1 m). Albedo = Grundfarbe · Texel / Kartenmittel (ungesetzte Bauteile zeigen die Karte, gesetzte Farben behalten
+  ihren Ton); der Entrauscher demoduliert mit der texturierten Albedo der ersten Fläche (auch hinter Glas) — Ziegelfugen und
+  Holzmaserung bleiben scharf. Headless: `render_png --textures public` liest die JPEG-Karten (zune-jpeg, nur Feature `png`,
+  Flächenmittel auf 256²), `--test-texture` erzeugt eine Mauerwerks-Karte. (2) Gelände: ohne Material und ohne Luftbild Wiese
+  (`mesh::mesh_layer` → Ebene −2, der Stil „textured“ klemmt sie wie −1 aufs Schachbrett), Looks Wiese/Kies/Asphalt mit
+  prozeduraler Textur, wenn keine Bildkarte da ist; Gelände mit `materialIndex` bekommt Farbe und Look der Tabelle (die
+  Geländefarbe des Kerns gilt als ungesetzt). (3) Glas: Schattenstrahlen werden je Glasfläche auf 0.9 gedämpft statt
+  verlustfrei; Brechung bewusst nicht — die Scheiben sind dünne planparallele Platten, der Strahl tritt nur um Millimeter
+  versetzt aus. (4) Nacht: warmes Innenlicht auf Flächen hinter Glas (`Sky::room_light`, erleuchtete Fenster als Stimmung)
+  und Leuchten (`MAT_EMISSIVE`: Baustoff mit „Leuchte“/„Lampe“ im Namen). (5) Bild-Export Pathtracing in Häppchen
+  (`renderPathtraceChunks`, ≈ 250 ms je Häppchen, `web::gpu_idle` wartet auf die GPU), Fortschritt „Sample x von y“ und
+  „Rendering abbrechen“ im Dialog; das letzte Häppchen läuft wie bisher im selben Task wie das Auslesen, das Fenster-Zeichnen
+  pausiert so lange. Geprüft: `cargo test --release` render3d (auch `--features png` mit lavapipe: Streifen-Karte erscheint
+  als Streifen, Kachel 2 m, Wiese grün mit Struktur; UV-Interpolation, Texturzugriff, Materialzuordnung Gelände, Innenlicht),
+  WGSL nach MSL, `cargo check --features window`, render3d-WASM gebaut, tsc, vitest (Export-Häppchen mit Abbruch,
+  `pathtraceMaterials`, Viewport, i18n, Goldens unverändert), Bilder Musterhaus komplex mit lavapipe (800×520, 64 Samples:
+  Iso ≈ 2.4 Samples/s wie vorher, Nahsicht mit Karten ≈ 1.6 statt 2.2 — Texturzugriff in Software-Vulkan). **Offen:** echte
+  GPU und Mac/Metal, Dialog-Abbruch und Fortschritt nicht im Browser geklickt (WebGPU headless ohne Bild), Rauigkeits-/
+  Normalenkarten, Gelände-Material im Modell (`TerrainMesh` hat kein Material-Feld; render3d nimmt `materialIndex` am
+  Gelände schon an), Wiesen-Bildkarte `Grass005` fürs Gelände (heute prozedural), Mipmaps (ferne Karten flimmern nur ohne
+  Akkumulation), Innenlicht bei Kamera im Haus, Mond, BVH-Teil-Update, OIDN.
 - ○ **[215]** Cycles eingebaut für Endbilder (nach 1.0): Cycles-Standalone (Apache-2.0, aus dem Blender-Projekt) als mitgeliefertes
   Hilfsprogramm (Sidecar) der Desktop-App, Metal auf Apple Silicon, OIDN-Entrauscher; liest dasselbe renderer-neutrale Szenenformat
   (GLB + Szenen-JSON) wie die Blender-Brücke [211], die als Option bleibt. Build-Kette macOS (C++, Abhängigkeiten) in CI, Herkunft in

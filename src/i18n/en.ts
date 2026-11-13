@@ -3956,6 +3956,7 @@ export const en: Record<TranslationKey, string> = {
   "image3d.cameraBad": "The chosen camera is unusable (position equals target).",
   "image3d.noTransparency": "Transparent background is not possible with this renderer: image created with background.",
   "image3d.saved": "3D image saved",
+  "image3d.progress": "Sample {done} of {total}",
   "menu.view.rendering": "Render with Blender …",
   "render.title": "Render with Blender",
   "render.intro": "Photorealistic image of the active 3D view with Blender/Cycles (installed Blender, runs as a separate process).",

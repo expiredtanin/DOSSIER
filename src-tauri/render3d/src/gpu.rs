@@ -2130,7 +2130,8 @@ impl Renderer {
             let start = i as usize * bytes_per_layer;
             write_layer(i + 1, &rgba[start..start + bytes_per_layer]);
         }
-        // [212] Pathtracer: mittlere Farbe je Bildkarte (er liest noch keine Texturen); Baum neu.
+        // [212] Pathtracer: mittlere Farbe je Bildkarte (Kartenmittel für Grundfarbe und Texel / Mittel); Baum und
+        // Textur-Bindung neu (`render_pathtrace`).
         self.pt_materials.set_texture_means(rgba, bytes_per_layer, material_layers as usize);
         self.pt_dirty = true;
 
@@ -2734,6 +2735,9 @@ impl Renderer {
                 crate::bvh::tris_from_mesh(&d.mesh.verts, &d.mesh.indices, &d.layers, &mut tris);
             }
             pt.set_bvh(device, &crate::bvh::Bvh::build_with(&tris, &self.pt_materials));
+            // [212] Etappe 3: dasselbe Textur-Array wie der Stil „textured“ (Ebene = Material-Ebene).
+            let view = self.texture.create_view(&wgpu::TextureViewDescriptor { dimension: Some(wgpu::TextureViewDimension::D2Array), ..Default::default() });
+            pt.set_textures(device, &view, &self.texture_sampler, &self.pt_materials.inv_means());
             self.pt_dirty = false;
         }
         pt.denoise = self.pt_denoise;
@@ -3049,7 +3053,7 @@ mod shadow_gpu_tests {
         let cam = Camera { eye: [20.0, 15.0, 20.0], target: [4.0, 2.0, 3.0], ..Camera::default() };
         r.set_render_style(RenderStyle::Pathtrace);
         r.upload_walls(&device, &walls());
-        r.set_pathtrace_materials(&[crate::pt_material::PtMaterialEntry { name: "Trapezblech".into(), map: String::new() }]);
+        r.set_pathtrace_materials(&[crate::pt_material::PtMaterialEntry { name: "Trapezblech".into(), map: String::new(), size: None }]);
         r.set_material_textures(&device, &queue, &[], 0);
         r.set_pathtrace_batch(2);
         r.render(&device, &queue, &view, &cam, (32, 24));
@@ -3067,5 +3071,105 @@ mod shadow_gpu_tests {
         r.render(&device, &queue, &view, &cam, (32, 24));
         r.set_pathtrace_max_pixels(0);
         let _ = device.poll(wgpu::PollType::wait_indefinitely());
+    }
+
+    /// Bild im Stil Pathtracing rendern und als RGBA8 (sRGB) zurücklesen (w muss × 4 ein Vielfaches von 256 sein).
+    fn pathtrace_pixels(r: &mut Renderer, device: &wgpu::Device, queue: &wgpu::Queue, cam: &Camera, w: u32, h: u32) -> Vec<u8> {
+        let format = wgpu::TextureFormat::Rgba8UnormSrgb;
+        let tex = device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let view = tex.create_view(&Default::default());
+        r.render(device, queue, &view, cam, (w, h));
+        let buf = device.create_buffer(&wgpu::BufferDescriptor { label: None, size: (w * h * 4) as u64, usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ, mapped_at_creation: false });
+        let mut enc = device.create_command_encoder(&Default::default());
+        enc.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo { texture: &tex, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+            wgpu::TexelCopyBufferInfo { buffer: &buf, layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(w * 4), rows_per_image: Some(h) } },
+            wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+        );
+        queue.submit([enc.finish()]);
+        buf.slice(..).map_async(wgpu::MapMode::Read, |_| {});
+        let _ = device.poll(wgpu::PollType::wait_indefinitely());
+        let data = buf.slice(..).get_mapped_range().to_vec();
+        data
+    }
+
+    /// [212] Etappe 3: Der Pathtracer liest die Bildkarte am Treffer (UV weltmassstäblich wie die schattierte Ansicht,
+    /// Kachelgrösse aus der Tabelle): eine erzeugte Streifen-Karte erscheint als Streifen, ohne Karte bleibt die Fläche
+    /// gleichmässig; Gelände ohne Material wird Wiese (grün), mit prozeduraler Struktur.
+    #[test]
+    fn pathtracer_liest_bildkarten_und_wiese() {
+        let Some((device, queue)) = device() else {
+            eprintln!("kein GPU-Adapter: Test übersprungen");
+            return;
+        };
+        use crate::types::{MeshInput, MeshKind};
+        let format = wgpu::TextureFormat::Rgba8UnormSrgb;
+        let (w, h) = (64u32, 48u32);
+        // Waagerechte Platte 8 × 8 m (Modell z = Höhe), Material-Ebene 1, von oben orthografisch gesehen.
+        let plate = |kind: MeshKind, material_index: Option<u32>| MeshInput {
+            positions: vec![0.0, -4.0, 0.0, 8.0, -4.0, 0.0, 8.0, 4.0, 0.0, 0.0, 4.0, 0.0],
+            indices: vec![0, 1, 2, 0, 2, 3],
+            kind,
+            color: Some([1.0, 1.0, 1.0]),
+            material_index,
+            vertex_colors: Vec::new(),
+            crease_angle: None,
+        };
+        let cam = Camera { eye: [4.0, 20.0, 0.01], target: [4.0, 0.0, 0.0], up: [0.0, 0.0, -1.0], projection: crate::types::Projection::Orthographic, ortho_half_height: 3.0, ..Camera::default() };
+        // Streifen-Karte: 0.5 m hell, 0.5 m dunkel längs u (= Welt-x).
+        let size = super::TEXTURE_SIZE as usize;
+        let mut stripes = vec![255u8; size * size * 4];
+        for y in 0..size {
+            for x in 0..size {
+                let v = if x < size / 2 { 230 } else { 25 };
+                stripes[(y * size + x) * 4..(y * size + x) * 4 + 3].copy_from_slice(&[v, v, v]);
+            }
+        }
+        let row_contrast = |px: &[u8]| {
+            let y = h as usize / 2;
+            let lum: Vec<f32> = (8..w as usize - 8).map(|x| px[(y * w as usize + x) * 4 + 1] as f32).collect();
+            lum.iter().cloned().fold(0.0f32, f32::max) - lum.iter().cloned().fold(255.0f32, f32::min)
+        };
+        let mut r = Renderer::new(&device, format);
+        r.set_render_style(RenderStyle::Pathtrace);
+        r.set_pathtrace_denoise(false);
+        r.set_sun(crate::shadow::sun_dir_world(180.0, 70.0), true);
+        r.upload_model(&device, &[], &[], &[plate(MeshKind::Imported, Some(1))]);
+        r.set_pathtrace_batch(6);
+        let plain = pathtrace_pixels(&mut r, &device, &queue, &cam, w, h);
+        assert!(row_contrast(&plain) < 40.0, "ohne Karte gleichmässig: {}", row_contrast(&plain));
+        r.set_material_textures(&device, &queue, &stripes, 1);
+        let striped = pathtrace_pixels(&mut r, &device, &queue, &cam, w, h);
+        assert!(row_contrast(&striped) > 100.0, "Streifen sichtbar: {}", row_contrast(&striped));
+        // Periode 1 m = 8 px: Pixel im Abstand 4 px (halbe Periode) unterscheiden sich deutlich.
+        let y = h as usize / 2;
+        let g = |x: usize| striped[(y * w as usize + x) * 4 + 1] as i32;
+        let diffs: Vec<i32> = (10..40).map(|x| (g(x) - g(x + 4)).abs()).collect();
+        assert!(diffs.iter().filter(|d| **d > 60).count() > 10, "{diffs:?}");
+        // Kachel 2 m (Tabelle): Periode 16 px.
+        r.set_pathtrace_materials(&[crate::pt_material::PtMaterialEntry { name: String::new(), map: String::new(), size: Some(2.0) }]);
+        let wide = pathtrace_pixels(&mut r, &device, &queue, &cam, w, h);
+        let g2 = |x: usize| wide[(y * w as usize + x) * 4 + 1] as i32;
+        assert!((10..40).filter(|&x| (g2(x) - g2(x + 8)).abs() > 60).count() > 10, "Kachel 2 m");
+        // Gelände ohne Material: Wiese — grün, mit Struktur.
+        r.upload_model(&device, &[], &[], &[plate(MeshKind::Terrain, None)]);
+        let grass = pathtrace_pixels(&mut r, &device, &queue, &cam, w, h);
+        let mut sum = [0u64; 3];
+        for p in grass.chunks_exact(4) {
+            for k in 0..3 {
+                sum[k] += p[k] as u64;
+            }
+        }
+        assert!(sum[1] > sum[0] && sum[1] > sum[2], "grün: {sum:?}");
+        assert!(row_contrast(&grass) > 15.0, "prozedurale Struktur: {}", row_contrast(&grass));
     }
 }

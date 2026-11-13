@@ -65,3 +65,46 @@ export function isBlankImage(rgba: Uint8ClampedArray): boolean {
 export function imageFileName(projectName: string, width: number, height: number): string {
   return `${(projectName || "projekt").replace(/[^\w.-]+/g, "_")}-3d-${width}x${height}.png`;
 }
+
+/** [212] Fortschritt und Abbruch des Bild-Exports im Stil Pathtracing (Samples fertig / gesamt). */
+export interface ExportProgress {
+  onProgress?: (done: number, total: number) => void;
+  signal?: AbortSignal;
+}
+
+/** Der Teil von render3d, den das Rechnen in Häppchen braucht (`web::gpu_idle` wartet auf die GPU). */
+export interface ChunkRenderer {
+  render(): void;
+  pathtrace_samples(): number;
+  set_pathtrace_batch(n: number): void;
+  gpu_idle(): Promise<unknown>;
+}
+
+/** Zieldauer eines Häppchens (ms): kurz genug für Fortschritt und Abbruch, lang genug gegen Leerlauf zwischen den Aufrufen. */
+const CHUNK_MS = 250;
+
+/**
+ * [212] Etappe 3: rechnet die Samples des Exports bis auf das letzte Häppchen in Häppchen (Grösse nach gemessener Dauer,
+ * Ziel `CHUNK_MS`), wartet nach jedem auf die GPU (`gpu_idle`), meldet den Fortschritt und prüft den Abbruch. Das letzte
+ * Häppchen bleibt dem Aufrufer: es muss im selben Task wie das Auslesen des Canvas gezeichnet werden. Rückgabe: Samples,
+ * die noch fehlen (≥ 1), oder null bei Abbruch. Stockt die Zahl (Obergrenze im Renderer), endet die Schleife.
+ */
+export async function renderPathtraceChunks(r: ChunkRenderer, total: number, p: ExportProgress = {}, now: () => number = () => performance.now()): Promise<number | null> {
+  let batch = 1;
+  let last = -1;
+  while (r.pathtrace_samples() + batch < total) {
+    if (p.signal?.aborted) return null;
+    const before = r.pathtrace_samples();
+    if (before === last) break;
+    last = before;
+    r.set_pathtrace_batch(batch);
+    const t0 = now();
+    r.render();
+    await r.gpu_idle();
+    const dt = Math.max(1, now() - t0);
+    p.onProgress?.(r.pathtrace_samples(), total);
+    batch = Math.max(1, Math.min(64, Math.round((batch * CHUNK_MS) / dt)));
+  }
+  if (p.signal?.aborted) return null;
+  return Math.max(1, total - r.pathtrace_samples());
+}

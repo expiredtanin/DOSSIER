@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { IMAGE_MAX_EDGE, PT_EXPORT_MAX_SAMPLES, PT_EXPORT_SAMPLES, clampImageSize, exportSamples, imageFileName, isBlankImage, matteFromBlackWhite } from "./imageExport";
+import { IMAGE_MAX_EDGE, PT_EXPORT_MAX_SAMPLES, PT_EXPORT_SAMPLES, clampImageSize, exportSamples, imageFileName, isBlankImage, matteFromBlackWhite, renderPathtraceChunks, type ChunkRenderer } from "./imageExport";
 
 describe("[212] Bild-Export im Pathtracing-Stil", () => {
   it("rechnet N Samples (Vorgabe 64, 1 … 1024)", () => {
@@ -9,6 +9,55 @@ describe("[212] Bild-Export im Pathtracing-Stil", () => {
     expect(exportSamples(0)).toBe(1);
     expect(exportSamples(-5)).toBe(1);
     expect(exportSamples(5000)).toBe(PT_EXPORT_MAX_SAMPLES);
+  });
+
+  /** Ersatz-Renderer: jedes `render` rechnet `batch` Samples (höchstens bis `cap`), jedes Sample kostet `ms` Zeit. */
+  function fake(cap = 1024, ms = 10) {
+    const st = { samples: 0, batch: 1, clock: 0, renders: 0 };
+    const r: ChunkRenderer = {
+      render: () => {
+        const n = Math.min(st.batch, cap - st.samples);
+        st.samples += n;
+        st.clock += n * ms;
+        st.renders++;
+      },
+      pathtrace_samples: () => st.samples,
+      set_pathtrace_batch: (n) => {
+        st.batch = n;
+      },
+      gpu_idle: () => Promise.resolve(),
+    };
+    return { r, st, now: () => st.clock };
+  }
+
+  it("Etappe 3: rechnet in Häppchen mit Fortschritt, das letzte bleibt dem Aufrufer", async () => {
+    const { r, st, now } = fake();
+    const seen: number[] = [];
+    const left = await renderPathtraceChunks(r, 256, { onProgress: (d, t) => { expect(t).toBe(256); seen.push(d); } }, now);
+    expect(left).not.toBeNull();
+    expect(st.samples + (left ?? 0)).toBe(256);
+    expect(left).toBeGreaterThanOrEqual(1);
+    expect(seen.length).toBeGreaterThan(3);
+    expect(seen).toEqual([...seen].sort((a, b) => a - b));
+    // Häppchen wachsen auf ≈ 250 ms (25 Samples à 10 ms).
+    expect(Math.max(...seen.slice(1).map((d, i) => d - seen[i]))).toBeGreaterThanOrEqual(20);
+  });
+
+  it("Etappe 3: Abbruch und stockende Obergrenze beenden die Schleife", async () => {
+    const ctl = new AbortController();
+    const { r } = fake();
+    const left = await renderPathtraceChunks(r, 1024, { onProgress: (d) => { if (d > 50) ctl.abort(); }, signal: ctl.signal }, () => 0);
+    expect(left).toBeNull();
+    expect(r.pathtrace_samples()).toBeLessThan(1024);
+    // Renderer hält bei 40 an: kein Endlos-Warten.
+    const stuck = fake(40);
+    const rest = await renderPathtraceChunks(stuck.r, 512, {}, stuck.now);
+    expect(stuck.st.samples).toBe(40);
+    expect(rest).toBe(512 - 40);
+    // Ein Sample: nichts vorab, das Häppchen bleibt dem Aufrufer.
+    const one = fake();
+    expect(await renderPathtraceChunks(one.r, 1, {}, one.now)).toBe(1);
+    expect(one.st.renders).toBe(0);
   });
 });
 
