@@ -58,6 +58,11 @@ interface WebModelRendererLike {
    *  Optional — ältere WASM-Builds. */
   pathtrace_samples?(): number;
   pathtrace_done?(): boolean;
+  /** [212] Etappe 5: Modell zu gross für die Puffergrenzen des Geräts (Pathtracer zeigt nur den Himmel). */
+  pathtrace_too_big?(): boolean;
+  /** [212] Etappe 5: Belichtungskorrektur (EV) und Belichtungsautomatik; Raumlicht bei Nacht. */
+  set_pathtrace_exposure?(ev: number, auto: boolean): void;
+  set_pathtrace_room_light?(on: boolean): void;
   set_view_preset(preset: string): void;
   /** [223] Hintergrundfarbe (0..1) für den Bild-Export mit transparentem Hintergrund. Optional — ältere WASM-Builds. */
   set_clear_color?(r: number, g: number, b: number): void;
@@ -518,13 +523,25 @@ export function useWasm3dRenderer(
   }, []);
 
   /** [212] Stand des Pathtracers: Samples je Pixel und ob das Bild fertig ist; null ohne Renderer/alter Build. */
-  const pathtraceStatus = useCallback((): { samples: number; done: boolean } | null => {
+  const pathtraceStatus = useCallback((): { samples: number; done: boolean; tooBig: boolean } | null => {
     const r = rendererRef.current;
     if (!r?.pathtrace_samples) return null;
     try {
-      return { samples: r.pathtrace_samples(), done: r.pathtrace_done?.() ?? false };
+      return { samples: r.pathtrace_samples(), done: r.pathtrace_done?.() ?? false, tooBig: r.pathtrace_too_big?.() ?? false };
     } catch {
       return null;
+    }
+  }, []);
+
+  /** [212] Etappe 5: Belichtung (EV, Automatik) und Raumlicht des Pathtracers; wirkt beim nächsten `render`. */
+  const setPathtraceLook = useCallback((ev: number, autoExposure: boolean, roomLight: boolean) => {
+    const r = rendererRef.current;
+    if (!r) return;
+    try {
+      r.set_pathtrace_exposure?.(ev, autoExposure);
+      r.set_pathtrace_room_light?.(roomLight);
+    } catch (e) {
+      console.warn("render3d Pathtracing-Einstellung fehlgeschlagen:", e);
     }
   }, []);
 
@@ -835,6 +852,7 @@ export function useWasm3dRenderer(
     updateModel,
     setRenderStyle,
     pathtraceStatus,
+    setPathtraceLook,
     setSun,
     applyViewPreset,
     viewFit,

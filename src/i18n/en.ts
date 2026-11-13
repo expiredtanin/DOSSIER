@@ -100,6 +100,12 @@ export const en: Record<TranslationKey, string> = {
   "display.style.hidden": "Hidden line",
   "display.style.pathtrace": "Path tracing (preview)",
   "viewport.pathtrace.status": "Path tracing: {samples} samples · {rate}/s",
+  "viewport.pathtrace.tooBig": "Path tracing: model too large for this graphics card – sky only",
+  "viewport.pathtrace.exposure": "Exposure",
+  "viewport.pathtrace.exposureHint": "Exposure compensation in stops (double-click: 0)",
+  "viewport.pathtrace.autoExposure": "Auto",
+  "viewport.pathtrace.roomLight": "Room light",
+  "viewport.pathtrace.roomLightHint": "At night light falls from the room ceilings when the model has no light fixtures",
   "viewport.pathtrace.done": "Path tracing: {samples} samples (done)",
 
   "topbar.referenceLinesGroup": "Reference lines",

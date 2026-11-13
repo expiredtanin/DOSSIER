@@ -2,7 +2,7 @@
 // derselbe Ablauf wie die Mac-Abnahme-Checkliste `doc/RELEASE-1.0.md`, so weit er im Browser geht.
 // Ein durchgehender Test (leeres Projekt → Kataster → Baurecht → Volumen → Raumprogramm → Pläne →
 // Flächen/Kennzahlen → Kostenschätzung → Abgabe-PDF → DXF/IFC), jeder Schritt ein `test.step` mit Prüfung des Ergebnisses.
-// Schritte, die noch fehlen, stehen als eigene `test.fixme` mit TODO-ID unten (derzeit nur [212] Pathtracer-Zähler) — nicht
+// Schritte, die noch fehlen, stehen als eigene `test.fixme` mit TODO-ID unten (derzeit keine; [212] Pathtracer-Zähler läuft seit 13.11. wieder) — nicht
 // weglassen, damit sichtbar bleibt, was für 1.0 fehlt. [207] [208] [211] sind seit 13.11. echte Tests (eigene `test`-Blöcke unten).
 // Netzabrufe (swisstopo/geo.admin) gibt es offline nicht: Grundstück und Nachbarbauten kommen aus der
 // Kataster-Fixture (`fixtures/kataster.dxf`, LV95).
@@ -483,11 +483,11 @@ test("[211] Rendering-Dialog im Browser erzeugt das Export-Paket (model.glb + sc
 
 // [212] Pathtracing-Stil der 3D-Ansicht: Zähler „Pathtracing: N Samples" zählt hoch. Das Canvas-Bild ist headless nicht lesbar —
 // geprüft werden nur Zähler und Konsole (Fixture meldet unerwartete Fehler).
-// Stand 13.11.: im Playwright-Chromium (WebGPU über SwiftShader, Adapter „google/swiftshader") initialisiert der 3D-Viewport,
-// aber der Pathtracer-Stil bricht beim ersten Bild mit einem Panic in wgpu `create_buffer` ab (webgpu.rs:2331, wohl ein Puffer über
-// den SwiftShader-Limits) — der Zähler erscheint nie. Darum nur mit DOSSIER_PATHTRACE=1 aktiv, sonst `fixme`.
+// Bis 13.11. brach der Stil im Playwright-Chromium (WebGPU über SwiftShader) beim ersten Bild mit einem Panic in wgpu
+// `create_buffer` ab (Puffer mit `mappedAtCreation`, webgpu.rs:2331). Seit [212] Etappe 5 legt der Pathtracer seine Puffer ohne
+// `mappedAtCreation` an und prüft sie gegen die Gerätegrenzen (zu gross: Hinweis statt Absturz) — der Test läuft wieder immer.
 // Auf dem Mac (Metal) wird der Stil von Hand geprüft (`doc/RELEASE-1.0.md`, 13.1).
-const pathtraceTest = process.env.DOSSIER_PATHTRACE ? test : test.fixme;
+const pathtraceTest = test;
 pathtraceTest("[212] Pathtracer-Stil: Sample-Zähler zählt hoch", async ({ page }) => {
   test.setTimeout(180_000);
   await startNewProject(page);

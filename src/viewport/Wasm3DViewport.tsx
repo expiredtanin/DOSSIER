@@ -655,6 +655,7 @@ export function Wasm3DViewport({
     updateModel,
     setRenderStyle,
     pathtraceStatus,
+    setPathtraceLook,
     setSun,
     applyViewPreset,
     viewFit,
@@ -836,7 +837,16 @@ export function Wasm3DViewport({
   // [212] Pathtracing (Vorschau): progressiv — solange der Stil aktiv und das Bild nicht fertig ist, je Animationsbild
   // ein Sample dazurechnen (der Renderer beginnt bei Kamera-/Modell-/Sonnenänderung selbst von vorn). Zähler und
   // Samples/s unten links; die Rate ist über ~1 s gemittelt.
-  const [ptStatus, setPtStatus] = useState<{ samples: number; rate: number; done: boolean } | null>(null);
+  const [ptStatus, setPtStatus] = useState<{ samples: number; rate: number; done: boolean; tooBig: boolean } | null>(null);
+  // [212] Etappe 5: Belichtung (Korrektur in Blenden, Automatik) und Raumlicht bei Nacht — Ansichtszustand, kein Op.
+  const [ptEv, setPtEv] = useState(0);
+  const [ptAuto, setPtAuto] = useState(true);
+  const [ptRoom, setPtRoom] = useState(true);
+  useEffect(() => {
+    if (!ready) return;
+    setPathtraceLook(ptEv, ptAuto, ptRoom);
+    redrawRef.current();
+  }, [ready, ptEv, ptAuto, ptRoom, setPathtraceLook]);
   useEffect(() => {
     if (!ready || renderMode !== "pathtrace") {
       setPtStatus(null);
@@ -855,10 +865,10 @@ export function Wasm3DViewport({
         if (now - last.t >= 1000) {
           last = { t: now, samples: cur.samples, rate: ((cur.samples - last.samples) * 1000) / (now - last.t) };
         }
-        const key = `${cur.samples}|${cur.done}|${last.rate.toFixed(1)}`;
+        const key = `${cur.samples}|${cur.done}|${last.rate.toFixed(1)}|${cur.tooBig}`;
         if (key !== shown) {
           shown = key;
-          setPtStatus({ samples: cur.samples, rate: last.rate, done: cur.done });
+          setPtStatus({ samples: cur.samples, rate: last.rate, done: cur.done, tooBig: cur.tooBig });
         }
       }
       raf = requestAnimationFrame(tick);
@@ -1880,9 +1890,53 @@ export function Wasm3DViewport({
             pointerEvents: "none",
           }}
         >
-          {ptStatus.done
-            ? t("viewport.pathtrace.done", { samples: ptStatus.samples })
-            : t("viewport.pathtrace.status", { samples: ptStatus.samples, rate: ptStatus.rate.toFixed(1) })}
+          {ptStatus.tooBig
+            ? t("viewport.pathtrace.tooBig")
+            : ptStatus.done
+              ? t("viewport.pathtrace.done", { samples: ptStatus.samples })
+              : t("viewport.pathtrace.status", { samples: ptStatus.samples, rate: ptStatus.rate.toFixed(1) })}
+        </div>
+      )}
+      {ptStatus && (
+        <div
+          data-testid="pathtrace-look"
+          style={{
+            position: "absolute",
+            left: 10,
+            bottom: 38,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "3px 8px",
+            borderRadius: 6,
+            background: "rgba(20,20,24,0.65)",
+            color: "#f2f2f2",
+            fontSize: 12,
+          }}
+        >
+          <label title={t("viewport.pathtrace.exposureHint")} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            {t("viewport.pathtrace.exposure")}
+            <input
+              type="range"
+              min={-3}
+              max={3}
+              step={0.25}
+              value={ptEv}
+              data-testid="pathtrace-ev"
+              onChange={(e) => setPtEv(Number(e.target.value))}
+              onDoubleClick={() => setPtEv(0)}
+              style={{ width: 90 }}
+            />
+            <span style={{ minWidth: 34 }}>{`${ptEv > 0 ? "+" : ""}${ptEv.toFixed(2)}`}</span>
+          </label>
+          <label style={{ display: "flex", alignItems: "center", gap: 3 }}>
+            <input type="checkbox" checked={ptAuto} data-testid="pathtrace-auto" onChange={(e) => setPtAuto(e.target.checked)} />
+            {t("viewport.pathtrace.autoExposure")}
+          </label>
+          <label title={t("viewport.pathtrace.roomLightHint")} style={{ display: "flex", alignItems: "center", gap: 3 }}>
+            <input type="checkbox" checked={ptRoom} data-testid="pathtrace-room" onChange={(e) => setPtRoom(e.target.checked)} />
+            {t("viewport.pathtrace.roomLight")}
+          </label>
         </div>
       )}
       {/* [213] Begehen (WASD) und Kamera aus der aktuellen Ansicht anlegen. */}

@@ -17,6 +17,7 @@
 pub mod bvh;
 pub mod denoise;
 pub mod edges;
+pub mod exposure;
 pub mod ghost;
 pub mod grid;
 pub mod math;
@@ -24,6 +25,7 @@ pub mod mesh;
 pub mod pathtrace;
 pub mod pattern_lines;
 pub mod points;
+pub mod pt_lights;
 pub mod pt_material;
 pub mod pt_texture;
 pub(crate) mod openings;

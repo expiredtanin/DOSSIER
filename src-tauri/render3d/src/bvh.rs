@@ -109,6 +109,11 @@ pub fn classify_material(color: [f32; 3]) -> (u32, f32) {
 /// Höchste Albedo (energieerhaltend, wie der Blender-Leser [211]: ≤ 0.8).
 const MAX_ALBEDO: f32 = 0.8;
 
+/// Grundfarbe linear (0..1) aus `GpuTri::mat` (wie `unpack_albedo` im Shader).
+pub fn unpack_linear(mat: u32) -> [f32; 3] {
+    [(mat & 0xFF) as f32 / 255.0, ((mat >> 8) & 0xFF) as f32 / 255.0, ((mat >> 16) & 0xFF) as f32 / 255.0]
+}
+
 fn pack_mat(color: [f32; 3], kind: u32) -> u32 {
     let mut out = kind << 24;
     for (k, c) in color.iter().enumerate() {
@@ -159,7 +164,18 @@ pub struct Bvh {
     pub tris: Vec<GpuTri>,
     /// Texturdaten je Dreieck (gleiche Reihenfolge wie `tris`).
     pub tex: Vec<GpuTriTex>,
+    /// [212] Etappe 5: Lichtliste (Portale, Leuchten, Raumlicht; `pt_lights.rs`).
+    pub lights: crate::pt_lights::LightList,
+    /// Platz im Baum je Eingabe-Dreieck (`NO_SLOT` = verworfen) — für `refit`.
+    slots: Vec<u32>,
+    /// SAH-Kosten nach dem Bau (Vergleich nach `refit`).
+    sah_built: f32,
 }
+
+/// Eingabe-Dreieck ohne Platz im Baum (nicht endlich, entartet oder Doppelseite).
+const NO_SLOT: u32 = u32::MAX;
+/// Nach einem `refit` darf der Baum höchstens so viel teurer sein (SAH) als frisch gebaut, sonst Neubau.
+pub const REFIT_MAX_COST: f32 = 1.3;
 
 fn sub(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
     [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
@@ -208,6 +224,31 @@ fn tri_key(v: &[[f32; 3]; 3]) -> [[i64; 3]; 3] {
     k
 }
 
+/// Welche Eingabe-Dreiecke in den Baum kommen: endlich, nicht entartet, je Doppelseite das erste.
+fn kept_inputs(input: &[PtTri]) -> Vec<bool> {
+    let mut seen: HashSet<[[i64; 3]; 3]> = HashSet::with_capacity(input.len());
+    input
+        .iter()
+        .map(|t| {
+            if !t.v.iter().flatten().all(|c| c.is_finite() && c.abs() < 1e7) {
+                return false;
+            }
+            let n = cross(sub(t.v[1], t.v[0]), sub(t.v[2], t.v[0]));
+            dot(n, n) > 1e-18 && seen.insert(tri_key(&t.v))
+        })
+        .collect()
+}
+
+/// GPU-Dreieck und Texturdaten eines Eingabe-Dreiecks (Material aus Tabelle und Vertexfarbe).
+fn gpu_tri(t: &PtTri, table: &PtMaterialTable) -> (GpuTri, GpuTriTex) {
+    let (m, color) = table.resolve(t.layer, t.color);
+    let tx = table.tex_for(t.layer, &m);
+    (
+        GpuTri { v0: t.v[0], mat: pack_mat(color, m.kind), e1: sub(t.v[1], t.v[0]), rough: m.rough, e2: sub(t.v[2], t.v[0]), metal: m.metal },
+        GpuTriTex { uv0: t.uv[0], uv1: t.uv[1], uv2: t.uv[2], tex: (tx.layer & 0xFFFF) | ((tx.proc & 0xFF) << 16) | ((tx.detail as u32) << 24), scale: tx.scale },
+    )
+}
+
 impl Bvh {
     pub fn tri_count(&self) -> usize {
         self.tris.len()
@@ -221,22 +262,10 @@ impl Bvh {
     /// Baut den Baum (Binned-SAH). Ungültige Dreiecke fallen weg (s. Moduldoc); leer → leerer Baum. Material je
     /// Dreieck aus `table` (Ebene) und Vertexfarbe aufgelöst.
     pub fn build_with(input: &[PtTri], table: &PtMaterialTable) -> Bvh {
-        let mut seen: HashSet<[[i64; 3]; 3]> = HashSet::with_capacity(input.len());
-        let mut tris: Vec<PtTri> = Vec::with_capacity(input.len());
-        for t in input {
-            if !t.v.iter().flatten().all(|c| c.is_finite() && c.abs() < 1e7) {
-                continue;
-            }
-            let n = cross(sub(t.v[1], t.v[0]), sub(t.v[2], t.v[0]));
-            if !(dot(n, n) > 1e-18) {
-                continue;
-            }
-            if seen.insert(tri_key(&t.v)) {
-                tris.push(*t);
-            }
-        }
+        let keep = kept_inputs(input);
+        let tris: Vec<PtTri> = input.iter().zip(&keep).filter(|(_, k)| **k).map(|(t, _)| *t).collect();
         if tris.is_empty() {
-            return Bvh::default();
+            return Bvh { slots: vec![NO_SLOT; input.len()], ..Bvh::default() };
         }
         let bounds: Vec<Aabb> = tris
             .iter()
@@ -360,13 +389,88 @@ impl Bvh {
         let mut gpu_tris = Vec::with_capacity(order.len());
         let mut gpu_tex = Vec::with_capacity(order.len());
         for &i in &order {
-            let t = &tris[i as usize];
-            let (m, color) = table.resolve(t.layer, t.color);
-            let tx = table.tex_for(t.layer, &m);
-            gpu_tris.push(GpuTri { v0: t.v[0], mat: pack_mat(color, m.kind), e1: sub(t.v[1], t.v[0]), rough: m.rough, e2: sub(t.v[2], t.v[0]), metal: m.metal });
-            gpu_tex.push(GpuTriTex { uv0: t.uv[0], uv1: t.uv[1], uv2: t.uv[2], tex: (tx.layer & 0xFFFF) | ((tx.proc & 0xFF) << 16) | ((tx.detail as u32) << 24), scale: tx.scale });
+            let (g, x) = gpu_tri(&tris[i as usize], table);
+            gpu_tris.push(g);
+            gpu_tex.push(x);
         }
-        Bvh { nodes, tris: gpu_tris, tex: gpu_tex }
+        // Platz je Eingabe: k-tes behaltene Dreieck liegt an der Stelle, an der `order` es nennt.
+        let mut slot_of_kept = vec![0u32; tris.len()];
+        for (slot, &k) in order.iter().enumerate() {
+            slot_of_kept[k as usize] = slot as u32;
+        }
+        let mut slots = Vec::with_capacity(input.len());
+        let mut k = 0usize;
+        for &kept in &keep {
+            if kept {
+                slots.push(slot_of_kept[k]);
+                k += 1;
+            } else {
+                slots.push(NO_SLOT);
+            }
+        }
+        let mut bvh = Bvh { nodes, tris: gpu_tris, tex: gpu_tex, lights: Default::default(), slots, sah_built: 0.0 };
+        bvh.sah_built = bvh.sah_cost();
+        bvh.lights = crate::pt_lights::build_lights(&mut bvh);
+        bvh
+    }
+
+    /// [212] Etappe 5, Teil-Update: dieselben Eingabe-Dreiecke an neuer Lage (gleiche Zahl, gleiche verworfene — z. B. ein
+    /// verschobenes Objekt) bekommen die alte Baumstruktur mit neu gerechneten Hüllen (Refit, von den Blättern zur
+    /// Wurzel), Material und UV neu aufgelöst, Lichtliste neu. `false` (Baum unverändert) = Neubau nötig: andere Topologie
+    /// oder der Baum wäre um mehr als `REFIT_MAX_COST` teurer als frisch gebaut.
+    pub fn refit(&mut self, input: &[PtTri], table: &PtMaterialTable) -> bool {
+        if input.len() != self.slots.len() || self.tris.is_empty() {
+            return false;
+        }
+        let keep = kept_inputs(input);
+        if keep.iter().zip(&self.slots).any(|(k, s)| *k != (*s != NO_SLOT)) {
+            return false;
+        }
+        let (old_nodes, old_tris, old_tex) = (self.nodes.clone(), self.tris.clone(), self.tex.clone());
+        for (t, &s) in input.iter().zip(&self.slots) {
+            if s != NO_SLOT {
+                let (g, x) = gpu_tri(t, table);
+                self.tris[s as usize] = g;
+                self.tex[s as usize] = x;
+            }
+        }
+        // Kinder liegen immer hinter dem Elternknoten (Bau-Reihenfolge): rückwärts sind sie fertig, bevor er dran ist.
+        for ni in (0..self.nodes.len()).rev() {
+            let n = self.nodes[ni];
+            let mut b = Aabb::EMPTY;
+            if n.count > 0 {
+                for t in &self.tris[n.left_first as usize..(n.left_first + n.count) as usize] {
+                    b.grow_p(t.v0);
+                    b.grow_p([t.v0[0] + t.e1[0], t.v0[1] + t.e1[1], t.v0[2] + t.e1[2]]);
+                    b.grow_p([t.v0[0] + t.e2[0], t.v0[1] + t.e2[1], t.v0[2] + t.e2[2]]);
+                }
+            } else {
+                for c in [n.left_first as usize, n.left_first as usize + 1] {
+                    b.grow(&Aabb { min: self.nodes[c].min, max: self.nodes[c].max });
+                }
+            }
+            self.nodes[ni].min = b.min;
+            self.nodes[ni].max = b.max;
+        }
+        if self.sah_cost() > self.sah_built * REFIT_MAX_COST {
+            self.nodes = old_nodes;
+            self.tris = old_tris;
+            self.tex = old_tex;
+            return false;
+        }
+        self.lights = crate::pt_lights::build_lights(self);
+        true
+    }
+
+    /// SAH-Kosten des Baums relativ zur Wurzel (Knoten 1, Dreieckstest 1): Σ Fläche(Knoten)/Fläche(Wurzel) · (innen:
+    /// `TRAVERSAL_COST`, Blatt: Zahl der Dreiecke). Mass der Baumgüte (Refit-Grenze, Tests).
+    pub fn sah_cost(&self) -> f32 {
+        let Some(root) = self.nodes.first() else { return 0.0 };
+        let ra = Aabb { min: root.min, max: root.max }.area().max(1e-12);
+        self.nodes
+            .iter()
+            .map(|n| Aabb { min: n.min, max: n.max }.area() / ra * if n.count > 0 { n.count as f32 } else { TRAVERSAL_COST })
+            .sum()
     }
 
     /// Strahl gegen ein Dreieck (Möller–Trumbore); `t` im offenen Intervall (`tmin`, `tmax`).

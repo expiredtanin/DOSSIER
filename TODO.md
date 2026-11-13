@@ -365,6 +365,10 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   Normalenkarten, Gelände-Material im Modell (`TerrainMesh` hat kein Material-Feld; render3d nimmt `materialIndex` am
   Gelände schon an), Wiesen-Bildkarte `Grass005` fürs Gelände (heute prozedural), Mipmaps (ferne Karten flimmern nur ohne
   Akkumulation), Innenlicht bei Kamera im Haus, Mond, BVH-Teil-Update, OIDN.
+  **Stand 13.11. (Etappe 5, Innenräume und Tempo; in Arbeit):** Absturz im Browser behoben (Chromium/SwiftShader: Panic in wgpu
+  `create_buffer` beim ersten Bild — Puffer mit `mappedAtCreation` wirft im Browser synchron): der Pathtracer legt alle Puffer ohne
+  `mappedAtCreation` an und prüft sie gegen `max_buffer_size`/`max_storage_buffer_binding_size`; zu gross = nur Himmel und Hinweis im
+  Viewport. e2e `release10` [212] läuft wieder (mit altem render3d-WASM rot, mit neuem grün), Test mit künstlich kleinen Grenzen.
   **Stand 13.11. (Etappe 4, Oberflächen):** (1) Normalen- und Rauigkeitskarten (`ComponentMaterial.normal`/`.roughness`,
   OpenGL-Konvention wie `normal.jpg`/`…_NormalGL`): `pathtraceMaterials` gibt sie je Ebene mit (`normal`, `rough`), der
   Viewer dekodiert sie neben den Farbkarten (`materialTextures.ts`, `web::set_material_detail_textures`), render3d packt sie
