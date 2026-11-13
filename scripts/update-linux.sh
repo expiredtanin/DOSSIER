@@ -7,6 +7,9 @@
 #   ./scripts/update-linux.sh --start       … und danach Dossier starten (npm run electron)
 #   ./scripts/update-linux.sh --appimage    … und zusätzlich ein AppImage bauen (release/)
 #   ./scripts/update-linux.sh --keep-build  Rust-Zwischendateien behalten (nächster Build schneller, ~3–8 GB)
+#   ./scripts/update-linux.sh --tester      Test-Rechner: AppImage bauen, danach ALLES zum Bauen Nötige löschen
+#                                           (node_modules, dist, npm-/Cargo-Caches); `dossier` startet dann das AppImage.
+#                                           Bleibt: Quellcode (git), release/Dossier-*.AppImage, die Rust-Toolchain.
 #   ./scripts/update-linux.sh --branch X    anderen Zweig statt master
 #
 # Was bleibt: node_modules (Start der App), src/engine/pkg* (gebaute WASM-Pakete, ~40 MB), die Rust-Toolchain.
@@ -19,13 +22,15 @@ BRANCH="master"
 START=0
 APPIMAGE=0
 KEEP_BUILD=0
+TESTER=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --start) START=1 ;;
     --appimage) APPIMAGE=1 ;;
     --keep-build) KEEP_BUILD=1 ;;
+    --tester) TESTER=1; APPIMAGE=1 ;;
     --branch) shift; BRANCH="${1:?--branch braucht einen Namen}" ;;
-    -h|--help) sed -n '2,15p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,19p' "$0"; exit 0 ;;
     *) echo "Unbekannte Option: $1 (siehe --help)" >&2; exit 2 ;;
   esac
   shift
@@ -95,10 +100,24 @@ if [ "$KEEP_BUILD" = 0 ]; then
 fi
 rm -rf "${CARGO_HOME:-$HOME/.cargo}/registry/cache" "${CARGO_HOME:-$HOME/.cargo}/git/checkouts" dist-test test-results
 echo "Cargo-Download-Cache, dist-test/ und test-results/ gelöscht."
-du -sh node_modules src/engine 2>/dev/null | sed 's/^/  bleibt: /'
+if [ "$TESTER" = 1 ]; then
+  # Nur zum Bauen nötig — das AppImage enthält alles, was die App braucht.
+  rm -rf node_modules dist release/*-unpacked release/builder-*.yml release/latest*.yml
+  npm cache clean --force >/dev/null 2>&1 || true
+  rm -rf "${CARGO_HOME:-$HOME/.cargo}/registry/src" "${CARGO_HOME:-$HOME/.cargo}/registry/index"
+  rm -rf "$HOME/.cache/puppeteer" "$HOME/.cache/ms-playwright" "$HOME/.cache/electron-builder"
+  echo "Test-Rechner: node_modules, dist, npm-/Cargo-/Browser-Caches gelöscht (beim nächsten Update wieder geladen)."
+  du -sh release/*.AppImage 2>/dev/null | sed 's/^/  bleibt: /'
+else
+  du -sh node_modules src/engine 2>/dev/null | sed 's/^/  bleibt: /'
+fi
 
 say "Fertig: $(git log -1 --format='%h %s')"
-if [ "$START" = 1 ]; then
+if [ "$TESTER" = 1 ]; then
+  app=$(ls -1t release/Dossier-*.AppImage 2>/dev/null | head -1)
+  [ "$START" = 1 ] && exec "$app"
+  echo "Starten mit: $app   (oder: dossier)"
+elif [ "$START" = 1 ]; then
   exec npm run electron
 else
   echo "Starten mit: npm run electron"
