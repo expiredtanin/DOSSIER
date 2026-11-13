@@ -203,8 +203,19 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   Lösung: eine robuste Fassung `hatchgen/src/ear_clip.rs` für alle drei (flache/doppelte Ecken vorab und nach jedem Ohr entfernen,
   Diagonal-Test mit Spiel, zweite Stufe streng, erst dann erzwungen; Spiel = Ausdehnung·1e-7); Probe danach 0 Fehler in f64 und f32. Tests `ear_clip::tests`.
   Geprüft nur im Linux-Container (Probe + Tests), nicht auf dem Mac. · S
-- ○ **[231]** 3D: Fenster im Giebel nicht sauber eingeschnitten (13.11., Maintainer, Musterhaus komplex): über dem Fenster laufen senkrechte
-  Kanten bis zum Dach (Wand in Streifen zerlegt), rundes Giebelfenster nur teilweise ausgeschnitten. · M
+- ✓ **[231]** Fenster im Giebel in 3D sauber eingeschnitten (13.11., Maintainer, Musterhaus komplex: Ost-/Westgiebel DG, Anbau-Giebel).
+  Ursache: (1) Unter einer Dachfläche zerlegte `wall_bands::emit_top_piece` die Wand um jede Rechteck-Öffnung in Pfeiler/Brüstung/Sturz
+  mit eigener schräger Oberkante (sichtbare Fugen von der Öffnung bis zum Dach); (2) im [216]-Wandkörper wurden die Stücke je einzeln
+  unterteilt und um 0,1 mm vergrössert — die Stossfläche am First blieb als innere Fläche stehen (Oculus: Streifen bis zum Boden, Bogen
+  halb). Lösung: Jede gerade Wand mit Öffnungen unter einer Dachebene bekommt den Körper je Schicht (`model3d/wall_body.rs`); die
+  Stücke dafür rechnet `wall_pieces_with(plain)` mit `WallIn::keep_holes` (Löcher statt Teilung); `band_solid` vereinigt Stücke mit
+  Dachebene genau (gleiche Schnittlinie → Manifold verschmilzt), unterteilt erst danach, schneidet dann die Löcher; Leibungsstücke des
+  Schichteinzugs kommen vergrössert danach dazu; Bänder ganz ohne Dachebene wie bisher. Tests: Rust `giebelwand_mit_rechteckfenster_ein_koerper`,
+  `giebelwand_mit_rundfenster_auf_dem_first_ohne_fuge` (keine inneren Flächen, Lochfläche = Öffnungsfläche), vitest
+  `toWalls3d.giebel.test.ts` (Komplex: dg-aw-w, dg-aw-o, og-anbau-n ohne Stücke, Aussenschicht fugenlos); Golden `komplex-model3d` neu.
+  Geprüft: render_png (Linux/lavapipe) vorher/nachher, verdeckt + schattiert. **Offen:** Mac/Metal nicht angesehen; Bogenwände unter
+  Dach behalten die Streifen; Leibungsstücke berühren innere Schichten an einzelnen Kanten; zwei schwache Scheinkanten auf der OG-Südwand
+  in der Fernsicht (verdeckt); `emit_walls` Komplex ≈ 100 → 180 ms (Cache je Wand). · S
 - ○ **[232]** 3D: Netzlinien (Fächer der Triangulierung) auf den Dachflächen sichtbar, v. a. in Schwarz-Weiss und von weitem (13.11.). · S
 - ○ **[233]** 3D: Oberflächenmuster-Striche (Fassadenschalung/Dachziegel) ragen über Dachrand und Traufe hinaus (13.11.). · S
 ### Phase 3 (27.11.–3.12.): Vorprojekt

@@ -120,8 +120,9 @@ describe("3D nach Klassen ([180])", () => {
   it("[185] Element-Auswahl: `only` zeigt nur die Wand (samt ihren Öffnungen), `hideIds` blendet sie aus — Modell, Teile und Pick", () => {
     const host = (p.openings ?? [])[0].hostWallId;
     const hostOf = new Map((p.openings ?? []).map((o) => [o.id, o.hostWallId]));
-    // [216] Wände mit Formöffnung zeigt der Viewer als Körper-Mesh, nicht als Wand-Stück.
-    const shapedHosts = new Set((p.openings ?? []).filter((o) => o.shape && o.shape !== "rechteck").map((o) => o.hostWallId));
+    // [216]/[231] Wände mit Formöffnung bzw. mit Öffnungen unter dem Dach zeigt der Viewer als Körper-Mesh, nicht als Wand-Stück.
+    const full = new Set(projectToModel3d(p).walls.map((w) => w.wallId));
+    const shapedHosts = new Set(p.walls.map((w) => w.id).filter((id) => !full.has(id)));
     const others = p.walls.filter((w) => w.id !== host && !shapedHosts.has(w.id)).length;
     const wallIds = (m: ReturnType<typeof projectToModel3d>) => new Set(m.walls.map((w) => w.wallId));
     const only = projectToModel3d(p, { hide: { only: [host] } });

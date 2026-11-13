@@ -1,4 +1,5 @@
-//! [216] Wandkörper mit Formöffnungen ([G3]: Rund, Rundbogen, Segmentbogen …) für die 3D-Anzeige.
+//! [216] Wandkörper mit Formöffnungen ([G3]: Rund, Rundbogen, Segmentbogen …) und [231] Öffnungen unter dem Dach für
+//! die 3D-Anzeige.
 //!
 //! Die Wand-Stücke (`wall_pieces`) tragen für eine Formöffnung ein Rechteck-Loch; der Rest zwischen Rechteck
 //! und Umriss kam bisher als Füllkörper dazu — viele schmale Quader, deren Kanten im 3D als Streifen und als
@@ -11,8 +12,13 @@
 //! render3d statt der Stücke das Netz als Mesh.
 //! Schnitt, Ansicht, Exporte und Auswahl rechnen mit den unveränderten Stücken weiter.
 //!
-//! Nur gerade Wände (Bogenwände behalten die Füllkörper); schlägt ein Boolean fehl, bleibt die Wand wie vorher
-//! (Rechteck-Loch) — nie Panik.
+//! [231] Ebenso jede gerade Wand mit Öffnungen, deren Stücke unter einer Dachfläche liegen (Giebel, Kniestock): dort
+//! zerfiel die Wand um jede Öffnung in Pfeiler, Brüstung und Sturz mit je eigener schräger Oberkante (Fugen von der
+//! Öffnung bis zum Dach). Für den Körper rechnet `wall_pieces` die Stücke ein zweites Mal mit `keep_holes` (Stücke
+//! unter dem Dach behalten ihre Rechteck-Löcher), [`band_solid`] schneidet die Löcher aus und vereinigt.
+//!
+//! Nur gerade Wände (Bogenwände behalten die Füllkörper bzw. die Streifen unter dem Dach); schlägt ein Boolean fehl,
+//! bleibt die Wand wie vorher (Rechteck-Loch) — nie Panik.
 
 use super::*;
 use crate::opening_shape as os;
@@ -56,76 +62,135 @@ fn axis_box(f: &Frame, s0: f64, s1: f64, z0: f64, z1: f64, n0: f64, n1: f64) -> 
     outline_prism(f, &ring, 0.0, 0.0, n0, n1)
 }
 
-/// Überlappung benachbarter Stücke (m): Stücke, die genau an einer Fläche zusammenstossen, vereinigt Manifold nicht
-/// zu einem Körper — die innere Fläche bleibt (Stossfuge, im 3D als Linie sichtbar). Jedes Stück um `LAP` grösser
-/// (alle Seiten, Ebene der Oberkante hoch) überlappt die Nachbarn; die Aussenflächen aller Stücke liegen weiter
-/// in einer Ebene.
-const LAP: f64 = 1e-4;
-
-/// Stück um [`LAP`] nach allen Seiten vergrössert.
-fn inflated(q: &RWall) -> RWall {
-    let mut r = q.clone();
-    let (dx, dy) = (q.end[0] - q.start[0], q.end[1] - q.start[1]);
-    let l = hypot2(dx, dy);
-    if !(l > 1e-9) {
-        return r;
-    }
-    let (ux, uy) = (dx / l, dy / l);
-    r.start = [q.start[0] - ux * LAP, q.start[1] - uy * LAP];
-    r.end = [q.end[0] + ux * LAP, q.end[1] + uy * LAP];
-    r.thickness += 2.0 * LAP;
-    r.base_elevation -= LAP;
-    r.height += 2.0 * LAP;
-    if let Some(t) = r.top_plane.as_mut() {
-        t[0] += LAP - (t[1] * ux + t[2] * uy) * LAP;
-    }
-    r
-}
-
-/// Teilung je Kante, damit die Dreiecke etwa [`CELL`] gross werden (mindestens 1, höchstens 10).
-fn refine_steps(m: &Mesh) -> i32 {
-    let longest = m.bounds().map_or(0.0, |(lo, hi)| (0..3).map(|k| hi[k] - lo[k]).fold(0.0, f64::max));
-    ((longest / CELL).ceil() as i32).clamp(1, 10)
-}
-
 /// Ziel-Kantenlänge (m) der unterteilten Wandflächen.
 const CELL: f64 = 1.2;
 
+/// Überlappung (m) der Leibungsstücke mit ihren Nachbarn (s. [`band_solid`]).
+const LAP: f64 = 1e-4;
+
+/// Achslänge eines Stücks.
+fn piece_len(q: &RWall) -> f64 {
+    hypot2(q.end[0] - q.start[0], q.end[1] - q.start[1])
+}
+
+/// Querlage `[von, bis]` (auf mm/1000 gerundet) des Stücks `q` im Rahmen des Stücks `main` (linke Normale).
+fn lateral_range(main: &RWall, q: &RWall) -> Option<[i64; 2]> {
+    let l = piece_len(main);
+    if !(l > 1e-9) {
+        return None;
+    }
+    let n = [-(main.end[1] - main.start[1]) / l, (main.end[0] - main.start[0]) / l];
+    let o = (q.start[0] - main.start[0]) * n[0] + (q.start[1] - main.start[1]) * n[1];
+    let r = |v: f64| (v * 1e6).round() as i64;
+    Some([r(o - q.thickness / 2.0), r(o + q.thickness / 2.0)])
+}
+
+/// Stück um [`LAP`] quer, an Enden ohne Schnittlinie längs und nach oben/unten vergrössert (nur ohne Dachebene, s.
+/// [`band_solid`]).
+fn inflated(q: &RWall) -> RWall {
+    let mut r = q.clone();
+    let l = piece_len(q);
+    if !(l > 1e-9) {
+        return r;
+    }
+    let (ux, uy) = ((q.end[0] - q.start[0]) / l, (q.end[1] - q.start[1]) / l);
+    if q.start_cut.is_none() {
+        r.start = [q.start[0] - ux * LAP, q.start[1] - uy * LAP];
+    }
+    if q.end_cut.is_none() {
+        r.end = [q.end[0] + ux * LAP, q.end[1] + uy * LAP];
+    }
+    r.thickness += 2.0 * LAP;
+    r.base_elevation -= LAP;
+    r.height += 2.0 * LAP;
+    r
+}
+
 /// Körper der Stücke `pieces` eines Bandes minus ihre Rechteck-Löcher; `None`, wenn nichts übrig bleibt.
+///
+/// [231] Die Stücke werden genau so vereinigt, wie sie sind: Nachbarn stossen an derselben Fläche zusammen (gleiche
+/// Schnittlinie am First, gleiches Achsmass), Manifold verschmilzt sie ohne innere Fläche. Dann wird unterteilt (je Stück
+/// unterteilt, lägen die Ecken der gemeinsamen Fläche nicht mehr aufeinander, und sie bliebe als Fuge im Körper), dann
+/// kommen die Löcher. Eine frühere Überlappung um 0,1 mm (jedes Stück vergrössert) liess am First Kerben und
+/// Splitter-Dreiecke stehen, weil die Ebene des einen Stücks über das andere hinaus steigt — daher bleiben die Stücke
+/// eines Bandes mit Dachebene genau; ein Band ganz ohne Dachebene wird wie früher vergrössert. Stücke neben dem Band
+/// (Leibungsstücke des Schichteinzugs [106]) berühren ihre Nachbarn bloss auf einem Teil einer Fläche — die verschmilzt
+/// Manifold nicht; sie kommen um [`LAP`] vergrössert ([`inflated`]) erst nach den Löchern dazu (die Löcher reichen quer
+/// über das Band hinaus und schnitten sie sonst weg).
 fn band_solid(pieces: &[&RWall]) -> Option<Solid> {
+    let main = pieces.iter().max_by(|a, b| piece_len(a).total_cmp(&piece_len(b)))?;
+    let main_range = lateral_range(main, main);
+    // Leibungsstücke: ebene Stücke quer neben dem Band oder im (um den Schichteinzug erweiterten) Loch eines anderen.
+    let holes: Vec<([f64; 3], [f64; 3])> = pieces.iter().flat_map(|q| hole_boxes(q, 0.0)).filter_map(|m| m.bounds()).collect();
+    let inside = |q: &RWall| {
+        wall_piece_mesh(q).and_then(|m| m.bounds()).is_some_and(|(a, b)| holes.iter().any(|(c, d)| (0..3).all(|k| a[k] < d[k] - 1e-6 && b[k] > c[k] + 1e-6)))
+    };
+    let is_side = |q: &RWall| q.top_plane.is_none() && (lateral_range(main, q) != main_range || inside(q));
+    let (side, band): (Vec<&RWall>, Vec<&RWall>) = pieces.iter().copied().partition(|q| is_side(q));
     let mut acc = Solid::empty();
-    for q in pieces {
+    let (mut lo, mut hi) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
+    // Band ganz ohne Dachebene: wie vor [231] um LAP vergrössert (die Aussenfläche liegt 0,1 mm vor anderen Bauteilen in
+    // derselben Ebene, z. B. Kniestock darüber — sonst verwechselt die Kantenerkennung im 3D deren Ecken: gestrichelte
+    // Scheinkanten). Mit Dachebene bleiben alle Stücke genau (s. oben).
+    let flat = band.iter().all(|q| q.top_plane.is_none());
+    for q in &band {
+        let Some(m) = (if flat { wall_piece_mesh(&inflated(q)) } else { wall_piece_mesh(q) }) else { continue };
+        if let Some((a, b)) = m.bounds() {
+            for k in 0..3 {
+                lo[k] = lo[k].min(a[k]);
+                hi[k] = hi[k].max(b[k]);
+            }
+        }
+        acc = acc.union(&Solid::new(&m).ok()?).ok()?;
+    }
+    // Kleine, gleichförmige Dreiecke: ein Loch in der grossen Wandfläche soll keine langen Dreiecke bis in die Ecken der
+    // Fläche ziehen (deren Normalen sind für die Kantenerkennung zu ungenau: gestrichelte Scheinkanten).
+    let longest = (0..3).map(|k| hi[k] - lo[k]).fold(0.0, f64::max);
+    if !acc.is_empty() {
+        acc = acc.refined(((longest / CELL).ceil() as i32).clamp(1, 10));
+    }
+    for q in &band {
+        for b in hole_boxes(q, EDGE) {
+            acc = acc.difference(&Solid::new(&b).ok()?).ok()?;
+        }
+    }
+    for q in &side {
         let Some(m) = wall_piece_mesh(&inflated(q)) else { continue };
-        let Ok(mut s) = Solid::new(&m) else { return None };
-        // Kleine, gleichförmige Dreiecke: ein Loch in der grossen Wandfläche soll keine langen Dreiecke bis in die Ecken
-        // der Fläche ziehen (deren Normalen sind für die Kantenerkennung zu ungenau).
-        s = s.refined(refine_steps(&m));
-        if let Some(hs) = q.holes.as_deref().filter(|h| !h.is_empty()) {
-            let (dx, dy) = (q.end[0] - q.start[0], q.end[1] - q.start[1]);
-            let l = hypot2(dx, dy);
-            if !(l > 1e-9) {
-                continue;
-            }
-            let f = Frame { origin: q.start, u: [dx / l, dy / l], n: [-dy / l, dx / l] };
-            let top = q.base_elevation + q.height;
-            for h in hs {
-                // Löcher am Rand des Stücks reichen darüber hinaus (keine zusammenfallenden Flächen).
-                let (a, b) = (if h.from <= 1e-6 { h.from - OVER } else { h.from }, if h.to >= l - 1e-6 { h.to + OVER } else { h.to });
-                let (z0, z1) = (if h.z_bottom <= q.base_elevation + 1e-6 { h.z_bottom - OVER } else { h.z_bottom }, if h.z_top >= top - 1e-6 { h.z_top + OVER } else { h.z_top });
-                let lat = q.thickness / 2.0 + OVER;
-                let cutter = Solid::new(&axis_box(&f, a, b, z0, z1, -lat, lat)).ok()?;
-                s = s.difference(&cutter).ok()?;
-            }
+        let mut s = Solid::new(&m).ok()?;
+        for b in hole_boxes(q, OVER) {
+            s = s.difference(&Solid::new(&b).ok()?).ok()?;
         }
         acc = acc.union(&s).ok()?;
     }
     (!acc.is_empty()).then_some(acc)
 }
 
+/// Überstand (m) eines Lochs im vereinigten Band, dessen Rand genau auf dem Rand seines Stücks liegt: klein, weil der
+/// Nachbar jenseits dieses Randes (Stück unter/neben einer Tasche, an einer Stütze) zum selben Körper gehört.
+const EDGE: f64 = 1e-3;
+
+/// Quader der Rechteck-Löcher des Stücks `q`. Ein Lochrand genau auf dem Rand des Stücks reicht um `over` darüber hinaus
+/// (keine zusammenfallenden Flächen), einer jenseits davon (Öffnung über den First) bleibt, wo er ist; quer immer
+/// [`OVER`] über die Dicke hinaus.
+fn hole_boxes(q: &RWall, over: f64) -> Vec<Mesh> {
+    let Some(hs) = q.holes.as_deref().filter(|h| !h.is_empty()) else { return Vec::new() };
+    let l = piece_len(q);
+    if !(l > 1e-9) {
+        return Vec::new();
+    }
+    let (dx, dy) = (q.end[0] - q.start[0], q.end[1] - q.start[1]);
+    let f = Frame { origin: q.start, u: [dx / l, dy / l], n: [-dy / l, dx / l] };
+    let (base, top) = (q.base_elevation, q.base_elevation + q.height);
+    let lo = |v: f64, edge: f64| if (v - edge).abs() <= 1e-6 { edge - over } else { v };
+    let hi = |v: f64, edge: f64| if (v - edge).abs() <= 1e-6 { edge + over } else { v };
+    let lat = q.thickness / 2.0 + OVER;
+    hs.iter().map(|h| axis_box(&f, lo(h.from, 0.0), hi(h.to, l), lo(h.z_bottom, base), hi(h.z_top, top), -lat, lat)).collect()
+}
+
 /// Körper der Bänder an die Stücke `out[first..]` hängen (s. Modulkopf). `plain` = die Stücke derselben Wand ohne
 /// die Formöffnungen `shaped`.
 pub(crate) fn attach_bodies(p: &Project, wall: &Wall, shaped: &[&Opening], plain: &[RWall], bands: usize, stacked: bool, out: &mut [RWall]) {
-    if shaped.is_empty() || plain.is_empty() || out.is_empty() {
+    if plain.is_empty() || out.is_empty() {
         return;
     }
     let wr = wall_ref(p, wall);
@@ -165,7 +230,7 @@ pub(crate) fn attach_bodies(p: &Project, wall: &Wall, shaped: &[&Opening], plain
         }
         cuts.push(Cut { from, bottom, poly, shift });
     }
-    if cuts.is_empty() {
+    if cuts.len() < shaped.len() {
         return;
     }
     let mut done = vec![false; bands];

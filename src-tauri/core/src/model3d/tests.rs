@@ -741,3 +741,68 @@ fn wandkoerper_mit_kaputter_hoehe_ohne_panic() {
     w.base_elevation = f64::NAN;
     let _ = wall_piece_mesh(&w);
 }
+
+/// [231] Ganze Giebelwand (W6 über die volle Hausbreite, First bei y = 2 mitten in der Wand) mit einem Fenster über dem
+/// First; `shape` = Form der Öffnung (`None` = Rechteck). Liefert das Projekt, die Fläche der Öffnung und das Volumen
+/// der Wand ohne Öffnung.
+fn gable_with_window(shape: Option<&str>) -> (Project, f64, f64) {
+    let mut p = sample();
+    p.ceilings = Some(vec![]);
+    p.walls.retain(|w| w.id == "W6");
+    p.walls[0].end.y = 4.0;
+    p.walls[0].height = 6.0;
+    p.walls[0].roof_attach = Some(true);
+    p.openings = Some(vec![]);
+    let plain: f64 = emit_walls(&p, true).unwrap().iter().map(wall_piece_volume).sum();
+    let mut o = serde_json::json!({
+        "id": "F1", "type": "opening", "hostWallId": "W6", "categoryCode": "21", "kind": "window", "typeId": "",
+        "position": 1.4, "width": 1.2, "height": 1.2, "sillHeight": 1.0
+    });
+    if let Some(s) = shape {
+        o["shape"] = serde_json::json!(s);
+    }
+    let o: Opening = serde_json::from_value(o).unwrap();
+    let area = match crate::opening_shape::opening_outline(&o, 1.2, 1.2) {
+        Some(r) => (0..r.len()).map(|i| r[i][0] * r[(i + 1) % r.len()][1] - r[(i + 1) % r.len()][0] * r[i][1]).sum::<f64>().abs() / 2.0,
+        None => 1.2 * 1.2,
+    };
+    p.openings = Some(vec![o]);
+    (p, area, plain)
+}
+
+/// [231] Prüft die Giebelwand aus [`gable_with_window`]: kein Stück wird mehr extrudiert, je Schicht EIN Körper ohne
+/// innere Flächen (keine Fuge von der Öffnung bis zum Dach, keine am First), und das Loch hat die Fläche der Öffnung.
+fn assert_gable_body(p: &Project, area: f64, plain: f64) {
+    let walls = emit_walls(p, true).unwrap();
+    assert!(walls.iter().any(|w| w.top_plane.is_some()), "Giebel mit schräger Oberkante");
+    assert!(walls.iter().all(|w| w.no_mesh), "alle Stücke ohne eigene Extrusion (keine Pfeiler/Sturz-Streifen)");
+    let bodies: Vec<&WallBody> = walls.iter().filter_map(|w| w.body.as_ref()).collect();
+    let wt = p.wall_type(&p.walls[0]).unwrap();
+    assert_eq!(bodies.len(), wt.layers.len(), "ein Körper je Schicht");
+    let mut vol = 0.0;
+    for b in &bodies {
+        assert!(body_without_seams(b), "innere Flächen (Fugen) im Giebel-Körper");
+        let m = crate::solid_bool::Mesh { positions: b.positions.clone(), indices: b.indices.clone() };
+        assert!(m.is_closed());
+        vol += m.volume().abs();
+    }
+    let total = Project::type_thickness(&wt.layers);
+    assert!((plain - vol - area * total).abs() < 1e-3, "Loch {} soll {}", (plain - vol) / total, area);
+}
+
+/// [231] Rechteckfenster in der Giebelwand über dem First: früher in Pfeiler, Brüstung und Sturz mit je eigener
+/// Oberkante zerlegt (zwei senkrechte Fugen vom Fenster bis zum Dach), jetzt ein Körper je Schicht mit Rechteck-Loch.
+#[test]
+fn giebelwand_mit_rechteckfenster_ein_koerper() {
+    let (p, area, plain) = gable_with_window(None);
+    assert_gable_body(&p, area, plain);
+}
+
+/// [231] Rundfenster mitten auf dem First der ganzen Giebelwand: die beiden Stücke links/rechts des Firsts stossen an
+/// derselben Schnittlinie zusammen; je Stück unterteilt blieb die Stossfläche als Fuge (Rechteck-Streifen bis zum Boden,
+/// Bogen nur halb sichtbar). Jetzt ein Körper je Schicht mit rundem Loch.
+#[test]
+fn giebelwand_mit_rundfenster_auf_dem_first_ohne_fuge() {
+    let (p, area, plain) = gable_with_window(Some("rund"));
+    assert_gable_body(&p, area, plain);
+}
