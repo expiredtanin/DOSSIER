@@ -207,7 +207,10 @@ export function useGripEditing(opts: {
     : null;
   // [193] Aktiver Netzpunkt und sichtbarer Ausschnitt (nur für Netze über der Griff-Grenze abonniert).
   const activeMeshPoint = useStore((st) => st.activeMeshPoint);
-  const meshViewport = useSyncExternalStore(subscribePlanViewport, () => (selectedMesh && selectedMesh.positions.length / 3 > 600 ? getPlanViewport() : null));
+  const contourPointCount = selectedContourSet ? selectedContourSet.contours.reduce((n, c) => n + c.pts.length, 0) : 0;
+  const meshViewport = useSyncExternalStore(subscribePlanViewport, () =>
+    (selectedMesh && selectedMesh.positions.length / 3 > 600) || contourPointCount > 600 ? getPlanViewport() : null,
+  );
   const selectedTreeId = single(selection, "trees");
   const selectedTree = selectedTreeId ? (project.trees ?? []).find((x) => x.id === selectedTreeId) : undefined;
   // [213] Kamera: Griffe an Standpunkt, Ziel und Sichtkegel-Rand (Bildwinkel); nur auf dem Geschoss der Kamera.
@@ -545,7 +548,13 @@ export function useGripEditing(opts: {
     if (selectedContourSet && !selectedCeiling && effectiveDrawingIds.length === 0 && selectedWallIds.length === 0) {
       const lines = selectedContourSet.contours;
       const pts: Vec2[] = lines.flatMap((c) => c.pts);
-      if (pts.length > MAX_CONTOUR_GRIPS) return [];
+      // Grosse Sätze (verlängerte Höhenlinien, Kataster): Griffe nur im sichtbaren Ausschnitt, wie beim Gelände-Netz.
+      if (pts.length > MAX_CONTOUR_GRIPS) {
+        const flat = pts.flatMap((q) => [q.x, q.y, 0]);
+        const idx = meshGripIndices(flat, meshViewport ? growRect(meshViewport, 0.5) : null, MAX_CONTOUR_GRIPS);
+        idx.forEach((i) => { gripOwners.push({ localIndex: i }); gripOwnerRange.push([0, pts.length - 1]); });
+        return idx.map((i) => pts[i]);
+      }
       pts.forEach((_, i) => { gripOwners.push({ localIndex: i }); gripOwnerRange.push([0, pts.length - 1]); });
       if (pts.length <= MAX_INSERT_GRIP_POINTS) {
         let off = 0;
@@ -1196,7 +1205,7 @@ export function useGripEditing(opts: {
       const ins = gripOwners[index];
       pendingContourRef.current = ins?.insertSeg != null
         ? { id: selectedContourSet.id, index: ins.insertSeg + 1, pt, insertSeg: ins.insertSeg }
-        : { id: selectedContourSet.id, index, pt };
+        : { id: selectedContourSet.id, index: ins?.localIndex ?? index, pt };
       return;
     }
     // [26] Einfüge-Raute am Umriss (Dach, Decke, Raum, Baugrube, geschlossene Polylinie): der erste Zug fügt die Ecke
