@@ -134,9 +134,24 @@ aktuelle Ansicht legst du als Kamera ab („Kamera aus aktueller Ansicht anlegen
 **Ausschnitte**) und öffnest sie später wieder. Ein 3D-Bild in Abgabeauflösung (z. B. A3 bei 300 dpi) erzeugt *Ansicht → 3D-Bild exportieren …* (Befehl
 `bild3d`); es lässt sich speichern oder ins Layout einsetzen.
 
+**Begehen mit Kollision.** Beim Begehen hält dich das Modell auf: Wände und Fensterglas sperren, du gleitest an ihnen
+entlang. Türöffnungen sind frei. Treppen, Stufen und Kanten steigst du mit (bis 25 cm ohne Hindernis), der Boden folgt
+Decken, Gelände und Dächern. Die Taste G oder der Knopf „Geist (Wände durchlaufen)“ schaltet die Kollision aus und
+wieder ein; im Geist-Modus gehst du durch Wände und Böden. Esc beendet das Begehen.
+
+**Kamerafahrt.** Hast du mindestens zwei Kameras, fährt der Knopf **Kamerafahrt** (Gruppe **Kameras** im Panel
+**Ausschnitte**) im 3D-Viewport in Listenreihenfolge durch alle Kameras; die Kameras selbst bleiben unverändert. Esc oder
+ein Klick bricht die Fahrt ab. **Video …** öffnet den Dialog „Kamerafahrt“: „Dauer je Abschnitt (s)“ (0,5 bis 60 Sekunden;
+die Gesamtdauer steht darunter), „Fahrt“ als „Flüssig (Spline durch alle Kameras)“ oder „Geglättet (sanfter Halt an jeder
+Kamera)“ und das „Format“ (WebM, MP4 nur, wenn die Grafikumgebung es aufnehmen kann). Die Auflösung ist die Grösse des
+3D-Viewports. **Aufnehmen** zeichnet die Fahrt auf, danach „Video speichern …“ oder „Neu aufnehmen“; „Abspielen“ fährt ohne
+Aufnahme, „Abbrechen“ stoppt. Im Stil Pathtracing zeigt die Fahrt nur Vorschau-Qualität.
+
 *Hier fehlen die Bilder: Das 3D läuft nur mit WebGPU (Browser) oder Metal (Mac), nicht im Linux-Container.*
 
-**Pathtracing-Vorschau:** In der Oberleiste unter **Darstellung** (Perspektive) wählst du „Pathtracing (Vorschau)“. Der
+**Pathtracing-Vorschau:** In der Oberleiste öffnet **Darstellung** das Menü der Darstellungsarten, gegliedert in
+„Linien“ (Drahtgitter, Kanten, Nur Konturen), „Flächen“ (Schattiert, Schattiert mit Kanten, Texturiert, Weiss) und
+„Rendern“. Dort, als einziger Eintrag der Gruppe „Rendern“, steht „Pathtracing (Vorschau)“. Der
 Viewport rechnet dann Bild für Bild weiter und wird sauberer; ein Zähler „Pathtracing: n Samples · x/s“ läuft, bis
 „(fertig)“ dasteht. Die Sonne der Sonnenstudie liefert Licht und Himmel; steht sie unter dem Horizont, wird es Nacht, und
 in den Räumen brennt ein Raumlicht (unten links abschaltbar). Die Belichtung stellt Dossier selbst ein („Auto“); unten links
