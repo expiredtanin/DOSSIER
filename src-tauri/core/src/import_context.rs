@@ -73,15 +73,20 @@ pub fn known_context_class(layer: &str) -> Option<&'static str> {
 }
 
 /// [207] Bezeichnung zu einem rein numerischen DXF-Layer-Namen (Code der amtlichen Vermessung bzw. des Kantons),
-/// z. B. „1110" → „Gebäude"; Kategorie heisst dann „1110 Gebäude". Nur belegte Codes: im Repo gab es keine Tabelle,
-/// 1110 = Gebäude nennt der Maintainer (nicht gegen die DM.01-AV-Liste geprüft). Alles andere (auch Layer mit
-/// Buchstaben, die schon sprechen) bleibt unverändert; weitere Codes hier ergänzen, sobald belegt.
-const NUMERIC_LAYER_LABELS: [(&str, &str); 1] = [("1110", "Gebäude")];
+/// Kategorie heisst dann „Code Bezeichnung". Die Tabelle ist noch LEER: Codes erst eintragen, wenn die Layer-Liste
+/// eines echten Kataster-DXF (Kanton/Anbieter) vorliegt — nichts raten. Alles andere (auch Layer mit Buchstaben, die
+/// schon sprechen) bleibt unverändert.
+const NUMERIC_LAYER_LABELS: [(&str, &str); 0] = [];
 
 /// Kategorie-Name für einen Layer: bei bekanntem Zahlen-Code „Code Bezeichnung", sonst der Layer-Name.
 pub fn layer_display_name(layer: &str) -> String {
+    layer_display_name_in(layer, &NUMERIC_LAYER_LABELS)
+}
+
+/// Wie [`layer_display_name`] mit eigener Tabelle (Tests).
+pub(crate) fn layer_display_name_in(layer: &str, table: &[(&str, &str)]) -> String {
     let t = layer.trim();
-    match NUMERIC_LAYER_LABELS.iter().find(|(c, _)| *c == t) {
+    match table.iter().find(|(c, _)| *c == t) {
         Some((c, label)) => format!("{c} {label}"),
         None => layer.to_string(),
     }

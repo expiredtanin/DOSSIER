@@ -457,19 +457,14 @@ fn landeskoordinaten_setzen_den_projekt_nullpunkt() {
 
 #[test]
 fn zahlen_layer_mit_bezeichnung() {
-    use crate::import_context::layer_display_name;
-    assert_eq!(layer_display_name("1110"), "1110 Gebäude");
-    assert_eq!(layer_display_name("9999"), "9999", "unbekannter Code bleibt");
-    assert_eq!(layer_display_name("Gebaeude"), "Gebaeude", "sprechender Name nichts doppelt");
-    let d = DrawingImport {
-        contours: vec![line("1110", 0.0, &[[0.0, 0.0], [1.0, 0.0]]), line("9999", 0.0, &[[0.0, 0.0], [2.0, 0.0]])],
-        ..Default::default()
-    };
-    let dec = decision(json!({"target": {"kind": "new", "name": "K"}, "categoryMode": "byLayer", "activeCategoryCode": "20", "parentName": "Import k"}));
-    let ops: Vec<Value> = import_ops(&project(), &d, &dec, 1000.0).ops.iter().map(Op::to_json).collect();
-    let layers = ops.iter().find(|o| o["key"] == json!("layers")).unwrap()["value"].as_array().unwrap().clone();
-    let names: Vec<String> = crate::layers::flatten(&layers).iter().filter_map(|c| c["name"].as_str().map(String::from)).collect();
-    assert!(names.contains(&"1110 Gebäude".to_string()) && names.contains(&"9999".to_string()), "{names:?}");
+    use crate::import_context::{layer_display_name, layer_display_name_in};
+    let table = [("4711", "Testklasse")];
+    assert_eq!(layer_display_name_in("4711", &table), "4711 Testklasse");
+    assert_eq!(layer_display_name_in(" 4711 ", &table), "4711 Testklasse");
+    assert_eq!(layer_display_name_in("9999", &table), "9999", "unbekannter Code bleibt");
+    assert_eq!(layer_display_name_in("Gebaeude", &table), "Gebaeude", "sprechender Name nichts doppelt");
+    // Ausgelieferte Tabelle ist leer (Codes erst mit echter Layer-Liste): nichts wird umbenannt
+    assert_eq!(layer_display_name("1110"), "1110");
 }
 
 #[test]
