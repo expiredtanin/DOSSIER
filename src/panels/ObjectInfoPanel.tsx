@@ -36,7 +36,7 @@ import { ViewShadowsInfo, MeasurementSection } from "./objectInfo/InfoBlocks";
 import { DimensionField, RotateField } from "./objectInfo/fields";
 import { elementDimensions } from "./objectInfo/elementDims";
 import { InfoGroups, hasInfoGroups } from "./objectInfo/InfoGroups";
-import { InfoGroup } from "./objectInfo/InfoGroup";
+import { infoGroupFrame, useInfoGroupState } from "./objectInfo/InfoGroup";
 
 // ── Bezugspunkt-Raster ───────────────────────────────────────────────────────
 // Neun Anker als 3×3-Raster. Zeile 0 = oben (fy=0), Spalte 0 = links (fx=0).
@@ -63,6 +63,8 @@ function toDeg360(rad: number): number {
 export function ObjectInfoPanel({ showPlacement = true }: { showPlacement?: boolean } = {}) {
   const host = usePanelHost();
   const storeProject = useStore((st) => st.project);
+  // [121] Abschnitts-Rahmen ohne eigene Komponente (kein Render je Abschnitt bei Inhaltsänderung).
+  const gst = useInfoGroupState();
   const sel = useSelectionInfo();
 
   // Gewählter Bezugspunkt — Default Mitte (Vectorworks-Standardanker beim
@@ -194,7 +196,7 @@ export function ObjectInfoPanel({ showPlacement = true }: { showPlacement?: bool
 
       {showPlacement && (
         <>
-          <InfoGroup id="refpoint">
+          {infoGroupFrame(gst, "refpoint", <>
           {/* Bezugspunkt-Würfel (3×3, immer quadratisch) links, X/Y/Z als Spalte
               rechts daneben (Nutzer-Wunsch). */}
           <div className="objinfo-refrow">
@@ -248,9 +250,9 @@ export function ObjectInfoPanel({ showPlacement = true }: { showPlacement?: bool
               <RotateField onCommit={(deg) => host.onRotateSelectionAround(px, py, deg)} />
             </div>
           </div>
-          </InfoGroup>
+          </>)}
 
-          <InfoGroup id="dimensions">
+          {infoGroupFrame(gst, "dimensions", <>
           {/* Maße (editierbar) — Commit auf blur/Enter skaliert um den Anker. */}
           {elementDims ? (
             // [204a] Wand: Länge/Dicke/Höhe, Öffnung: Breite/Höhe/Brüstung (nur Anzeige).
@@ -351,7 +353,7 @@ export function ObjectInfoPanel({ showPlacement = true }: { showPlacement?: bool
               />
             </>
           )}
-          </InfoGroup>
+          </>)}
         </>
       )}
       {/* Gelände-/Umgebungs-Element (Netzkörper, Gelände, Höhenlinien …): Art, Herkunft (nur Auskunft, [181]),
@@ -359,7 +361,7 @@ export function ObjectInfoPanel({ showPlacement = true }: { showPlacement?: bool
           georeferenziert importiert wurde (Nutzer-Wunsch zum Prüfen). */}
       {sel.contextObject && (
         <>
-          <InfoGroup id="contextProps">
+          {infoGroupFrame(gst, "contextProps", <>
             <div className="objinfo-field">
               <span className="objinfo-flabel">{t("objinfo.contextObject.type")}</span>
               <span className="objinfo-fval">{t(`objinfo.contextObject.type.${sel.contextObject.objType}`)}</span>
@@ -369,9 +371,9 @@ export function ObjectInfoPanel({ showPlacement = true }: { showPlacement?: bool
                 <ContextObjectProps obj={ctxObj} quantities={quantities} />
               </div>
             )}
-          </InfoGroup>
+          </>)}
           {/* [239] Herkunft und LV95 stehen in eigener Gruppe (Standard zugeklappt: nur Auskunft). */}
-          <InfoGroup id="georef">
+          {infoGroupFrame(gst, "georef", <>
             {sel.contextObject.source && (
               <div className="objinfo-field">
                 <span className="objinfo-flabel">{t("objinfo.contextObject.source")}</span>
@@ -394,7 +396,7 @@ export function ObjectInfoPanel({ showPlacement = true }: { showPlacement?: bool
                 <span className="objinfo-fval objinfo-muted">{t("objinfo.contextObject.noAnchor")}</span>
               </div>
             )}
-          </InfoGroup>
+          </>)}
         </>
       )}
       {/* [189] Bauteil-/BIM-Abschnitte (Wand, Decke, Öffnung, Treppe, Raum …) als einklappbare Gruppen. */}
