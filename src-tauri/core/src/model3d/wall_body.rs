@@ -17,8 +17,10 @@
 //! Öffnung bis zum Dach). Für den Körper rechnet `wall_pieces` die Stücke ein zweites Mal mit `keep_holes` (Stücke
 //! unter dem Dach behalten ihre Rechteck-Löcher), [`band_solid`] schneidet die Löcher aus und vereinigt.
 //!
-//! Nur gerade Wände (Bogenwände behalten die Füllkörper bzw. die Streifen unter dem Dach); schlägt ein Boolean fehl,
-//! bleibt die Wand wie vorher (Rechteck-Loch) — nie Panik.
+//! [216] Bogenwände ([T2]) bekommen ebenso einen Körper je Band: ihre Sehnen-Stücke stossen an radialen Gehrungen
+//! zusammen, deren Stirnflächen im 3D als senkrechte Linien je Sehne sichtbar waren. Formöffnungen in Bogenwänden behalten
+//! Rechteck-Loch und Füllkörper (kein Umriss-Prisma entlang des Bogens). Schlägt ein Boolean fehl, bleibt die Wand wie
+//! vorher (Stücke, Rechteck-Loch) — nie Panik.
 
 use super::*;
 use crate::opening_shape as os;
@@ -73,6 +75,21 @@ fn piece_len(q: &RWall) -> f64 {
     hypot2(q.end[0] - q.start[0], q.end[1] - q.start[1])
 }
 
+/// Raster (m), auf das die Ecken der Stücke vor der Vereinigung gelegt werden.
+const SNAP: f64 = 1e-7;
+
+/// Körper eines Stücks; bei `snap` mit Ecken auf dem Raster [`SNAP`] (Bogenwand): Nachbar-Sehnen rechnen die Ecken
+/// ihrer gemeinsamen Gehrung je für sich und treffen sie nur bis aufs Rundungsrauschen — Manifold verschmilzt die
+/// Stirnflächen nur bei gleichen Ecken, sonst bleiben sie als innere Fläche (Stossfuge) im Körper. Gerade Wände bleiben
+/// ungerastert (gerastert lägen die Seitenflächen kollinearer Stücke nicht mehr genau in einer Ebene).
+fn piece_solid(m: &Mesh, snap: bool) -> Option<Solid> {
+    if !snap {
+        return Solid::new(m).ok();
+    }
+    let positions = m.positions.iter().map(|v| (v / SNAP).round() * SNAP).collect();
+    Solid::new(&Mesh { positions, indices: m.indices.clone() }).ok()
+}
+
 /// Querlage `[von, bis]` (auf mm/1000 gerundet) des Stücks `q` im Rahmen des Stücks `main` (linke Normale).
 fn lateral_range(main: &RWall, q: &RWall) -> Option<[i64; 2]> {
     let l = piece_len(main);
@@ -117,7 +134,9 @@ fn inflated(q: &RWall) -> RWall {
 /// (Leibungsstücke des Schichteinzugs [106]) berühren ihre Nachbarn bloss auf einem Teil einer Fläche — die verschmilzt
 /// Manifold nicht; sie kommen um [`LAP`] vergrössert ([`inflated`]) erst nach den Löchern dazu (die Löcher reichen quer
 /// über das Band hinaus und schnitten sie sonst weg).
-fn band_solid(pieces: &[&RWall]) -> Option<Solid> {
+/// `arc` = Sehnen-Stücke einer Bogenwand: gerastert vereinigt ([`piece_solid`]), nicht unterteilt (die Sehnen sind schon
+/// schmal).
+fn band_solid(pieces: &[&RWall], arc: bool) -> Option<Solid> {
     let main = pieces.iter().max_by(|a, b| piece_len(a).total_cmp(&piece_len(b)))?;
     let main_range = lateral_range(main, main);
     // Leibungsstücke: ebene Stücke quer neben dem Band oder im (um den Schichteinzug erweiterten) Loch eines anderen.
@@ -141,12 +160,12 @@ fn band_solid(pieces: &[&RWall]) -> Option<Solid> {
                 hi[k] = hi[k].max(b[k]);
             }
         }
-        acc = acc.union(&Solid::new(&m).ok()?).ok()?;
+        acc = acc.union(&piece_solid(&m, arc)?).ok()?;
     }
     // Kleine, gleichförmige Dreiecke: ein Loch in der grossen Wandfläche soll keine langen Dreiecke bis in die Ecken der
     // Fläche ziehen (deren Normalen sind für die Kantenerkennung zu ungenau: gestrichelte Scheinkanten).
     let longest = (0..3).map(|k| hi[k] - lo[k]).fold(0.0, f64::max);
-    if !acc.is_empty() {
+    if !arc && !acc.is_empty() {
         acc = acc.refined(((longest / CELL).ceil() as i32).clamp(1, 10));
     }
     for q in &band {
@@ -156,7 +175,7 @@ fn band_solid(pieces: &[&RWall]) -> Option<Solid> {
     }
     for q in &side {
         let Some(m) = wall_piece_mesh(&inflated(q)) else { continue };
-        let mut s = Solid::new(&m).ok()?;
+        let mut s = piece_solid(&m, arc)?;
         for b in hole_boxes(q, OVER) {
             s = s.difference(&Solid::new(&b).ok()?).ok()?;
         }
@@ -201,6 +220,7 @@ pub(crate) fn attach_bodies(p: &Project, wall: &Wall, shaped: &[&Opening], plain
         return;
     }
     let f = Frame { origin: [wall.start.x, wall.start.y], u: [dx / len, dy / len], n: [-dy / len, dx / len] };
+    let arc = crate::wall_arc::WallArc::of_wall(wall).is_some();
     let lat = wr.total + 0.4;
     // Je Band: Umrisse der Formöffnungen mit Schichteinzug.
     struct Cut {
@@ -240,7 +260,7 @@ pub(crate) fn attach_bodies(p: &Project, wall: &Wall, shaped: &[&Opening], plain
         if pieces.is_empty() {
             continue;
         }
-        let Some(mut solid) = band_solid(&pieces) else { continue };
+        let Some(mut solid) = band_solid(&pieces, arc) else { continue };
         let mut ok = true;
         for c in &cuts {
             let s = c.shift[band];

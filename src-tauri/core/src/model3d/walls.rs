@@ -704,7 +704,10 @@ fn wall_pieces_with(p: &Project, maps: &[String], wall: &Wall, ctx: &FloorContex
     let shaped: Vec<&Opening> = if layered && !plain { super::wall_body::body_openings(wall, openings) } else { Vec::new() };
     // [231] Auch Rechteck-Öffnungen unter einer Dachfläche (Giebel): die Stücke würden dort in Pfeiler/Brüstung/Sturz
     // mit je eigener Oberkante zerfallen (Fugen von der Öffnung bis zum Dach) — Körper je Band wie bei Formöffnungen.
-    let body_cuts = (layered && !plain && !openings.is_empty() && crate::wall_arc::WallArc::of_wall(wall).is_none()).then(|| cuts.clone());
+    // [216] Bogenwand: immer ein Körper je Band (die Sehnen-Stücke stossen sonst an radialen Stirnflächen zusammen, im 3D
+    // als senkrechte Linie je Sehne sichtbar).
+    let is_arc = crate::wall_arc::WallArc::of_wall(wall).is_some();
+    let body_cuts = (layered && !plain && (is_arc || !openings.is_empty())).then(|| cuts.clone());
     {
         let (bands, stacked) = resolve_wall_bands(p, maps, wall, layered);
         let (z_bottom, z_top) = p.wall_vertical_extent(wall);
@@ -796,10 +799,10 @@ fn wall_pieces_with(p: &Project, maps: &[String], wall: &Wall, ctx: &FloorContex
         }
     }
     carve_at_columns(out, carve_from, &carves);
-    // Körper nur, wo Formöffnungen da sind oder ein Stück unter einer Dachfläche liegt (sonst tragen die Stücke ihre
-    // Rechteck-Löcher selbst, ohne Teilung).
+    // Körper nur, wo Formöffnungen da sind, ein Stück unter einer Dachfläche liegt oder die Wand ein Bogen ist (sonst tragen
+    // die Stücke ihre Rechteck-Löcher selbst, ohne Teilung).
     let sloped = || out[carve_from..].iter().any(|q| q.top_plane.is_some());
-    if let Some(body_cuts) = body_cuts.filter(|_| !shaped.is_empty() || sloped()) {
+    if let Some(body_cuts) = body_cuts.filter(|_| is_arc || !shaped.is_empty() || sloped()) {
         let plain_ops: Vec<&Opening> = openings.iter().copied().filter(|o| !shaped.iter().any(|s| std::ptr::eq(*s, *o))).collect();
         let mut pieces = Vec::new();
         wall_pieces_with(p, maps, wall, ctx, &plain_ops, body_cuts, true, pockets, true, &mut pieces);
