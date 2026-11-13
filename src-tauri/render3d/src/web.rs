@@ -450,6 +450,22 @@ impl WebModelRenderer {
         self.renderer.set_sun(dir, shadows);
     }
 
+    /// [212] Samples je Pixel des laufenden Pathtracing-Bildes (Stil `"pathtrace"`; 0 sonst). Der Viewport
+    /// zeigt die Zahl an und zeichnet weiter, bis `pathtrace_done`.
+    pub fn pathtrace_samples(&self) -> u32 {
+        self.renderer.pathtrace_samples()
+    }
+
+    /// [212] Pathtracing-Bild fertig (Obergrenze erreicht)? Dann braucht es keine weiteren Bilder.
+    pub fn pathtrace_done(&self) -> bool {
+        self.renderer.pathtrace_done()
+    }
+
+    /// [212] Obergrenze der Samples je Pixel (Standard 1024; 0 → 1).
+    pub fn set_pathtrace_max_samples(&mut self, n: u32) {
+        self.renderer.set_pathtrace_max_samples(n);
+    }
+
     /// Kantenlaenge der Schattentextur (Standard 2048, geklemmt 256…8192).
     pub fn set_shadow_map_size(&mut self, size: u32) {
         self.renderer.set_shadow_map_size(size);

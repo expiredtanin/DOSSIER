@@ -18,6 +18,8 @@ Browser-Bindung. Das 3D-Modell kommt als Teile aus dem Kern (`src-tauri/core/src
 | `math.rs` | 4x4-Matrizen, Kamera (Perspektive und Orthografie, Presets), Orbit |
 | `edges.rs`, `grid.rs` | Modell-Kanten für Drahtgitter und verdeckte Kanten; Bodenraster |
 | `shadow.rs` | Sonnenrichtung und Licht-Matrix für Schatten |
+| `bvh.rs` | `[212]` Hüllkörper-Baum (Binned-SAH) aus den Szenen-Dreiecken als flache GPU-Arrays, Material aus der Vertexfarbe (Glas, Stahl, diffus) |
+| `pathtrace.rs` | `[212]` Pathtracer ohne GPU: Parameter-Block, Himmel/Sonne aus dem Sonnenstand, Kamera-Basis, WGSL (Pfadverfolgung, Anzeige mit ACES) |
 
 ## Schnitt
 
@@ -40,7 +42,8 @@ Browser-Bindung. Das 3D-Modell kommt als Teile aus dem Kern (`src-tauri/core/src
 | Datei | Inhalt |
 |---|---|
 | `shaders.rs` | WGSL-Quellen (Fläche, texturiert, Luftbild, Raster, Schnittfläche, Geist, Schatten) |
+| `gpu_pathtrace.rs` | `[212]` Pathtracer auf der GPU: Compute-Pipeline, Akkumulation über Bilder (Neustart bei Kamera/Modell/Sonne), Anzeige; vom `Renderer` im Stil `Pathtrace` erst bei Bedarf angelegt |
 | `gpu.rs` | wgpu-Pipelines und der `Renderer`: Puffer je Klumpen (texturiert nur die Material-Ebene, UV im Shader), unveränderte Linien/Hülle nicht neu hochgeladen (Inhalts-Schlüssel), Zahlen je Bild (`frame_stats`, `gpu_bytes`) — `[214]`; `gpu_points.rs`: Pipeline der Punktwolken im selben Pass |
 | `web.rs` | Browser-Bindung (Feature `web`): `set_parts()`, Kamera, Stil, Schnitt, Sonne, Punktwolken |
-| `bin/render_png.rs` | Headless-Bild in eine PNG-Datei (`npm run build:render-png`); siehe `CLAUDE.md`, „Ergebnis ansehen"; `--bench <ordner>` misst die Engine (`bin/bench3d/`, Eingaben aus `src/viewport/render3d.bench.test.ts`, `[214]`) |
+| `bin/render_png.rs` | Headless-Bild in eine PNG-Datei (`npm run build:render-png`); siehe `CLAUDE.md`, „Ergebnis ansehen"; `--style pathtrace --samples N` rechnet mit dem Pathtracer (`[212]`) und meldet Samples/s; `--bench <ordner>` misst die Engine (`bin/bench3d/`, Eingaben aus `src/viewport/render3d.bench.test.ts`, `[214]`) |
 | `bin/spike3d.rs` | winit-Fenster mit Orbit-Kamera zur visuellen Prüfung (Feature `window`) |

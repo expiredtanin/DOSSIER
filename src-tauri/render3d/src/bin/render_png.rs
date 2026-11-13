@@ -4,6 +4,10 @@
 //
 //   cargo run --release --features png --bin render_png -- modell.json aus.png [--view iso] [--style shaded] [--size 1200x800] [--target x,y,z] [--dist 12] [--sun 135,30]
 //     [--points wolke.txt] [--point-size 3] [--point-color rgb|intensity|class|height]
+//     [--style pathtrace --samples 64]
+//
+// `--style pathtrace` ([212]): GPU-Pathtracer statt Rasterbild, `--samples N` Samples je Pixel (Standard 64);
+// meldet Zeit und Samples/s auf stderr. Ohne `--sun` gilt das Standardlicht als Sonne.
 //
 // `--points` ([27]): Textdatei mit einem Punkt je Zeile `x y z [r g b [intensitaet [klasse]]]` in
 // Modell-Metern (x = Ost, y = Nord, z = Hoehe) — dieselbe Punkt-Pipeline wie im Browser-Viewport.
@@ -340,7 +344,34 @@ fn main() {
 
     let tex = target_texture(&device, format, w, h);
     let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
-    renderer.render(&device, &queue, &view, &camera, (w, h));
+    if flag("--style", "shaded") == "pathtrace" {
+        let samples: u32 = flag("--samples", "64").parse().unwrap_or(64).max(1);
+        renderer.set_pathtrace_max_samples(samples);
+        // Erstes Bild: Baum bauen + 1 Sample (Aufbau getrennt von der Sample-Zeit messen).
+        let t0 = std::time::Instant::now();
+        renderer.set_pathtrace_batch(1);
+        renderer.render(&device, &queue, &view, &camera, (w, h));
+        let _ = device.poll(wgpu::PollType::wait_indefinitely());
+        let t1 = std::time::Instant::now();
+        renderer.set_pathtrace_batch(samples);
+        renderer.render(&device, &queue, &view, &camera, (w, h));
+        let _ = device.poll(wgpu::PollType::wait_indefinitely());
+        let dt = t1.elapsed().as_secs_f64();
+        let n = renderer.pathtrace_samples().saturating_sub(1).max(1);
+        eprintln!(
+            "pathtrace: {} Dreiecke, Aufbau + 1. Sample {:.2} s, {} Samples in {:.2} s = {:.2} Samples/s ({:.2} Mio. Pfade/s bei {}x{})",
+            renderer.pathtrace_tri_count(),
+            (t1 - t0).as_secs_f64(),
+            n,
+            dt,
+            n as f64 / dt,
+            n as f64 * w as f64 * h as f64 / dt / 1e6,
+            w,
+            h
+        );
+    } else {
+        renderer.render(&device, &queue, &view, &camera, (w, h));
+    }
 
     read_back(&device, &queue, &tex, w, h, pos[1]);
 }
