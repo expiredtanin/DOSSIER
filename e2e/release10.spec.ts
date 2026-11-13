@@ -2,14 +2,16 @@
 // derselbe Ablauf wie die Mac-Abnahme-Checkliste `doc/RELEASE-1.0.md`, so weit er im Browser geht.
 // Ein durchgehender Test (leeres Projekt → Kataster → Baurecht → Volumen → Raumprogramm → Pläne →
 // Flächen/Kennzahlen → Kostenschätzung → Abgabe-PDF → DXF/IFC), jeder Schritt ein `test.step` mit Prüfung des Ergebnisses.
-// Schritte, die noch fehlen, stehen als eigene `test.fixme` mit TODO-ID unten — nicht weglassen, damit
-// sichtbar bleibt, was für 1.0 fehlt.
+// Schritte, die noch fehlen, stehen als eigene `test.fixme` mit TODO-ID unten (derzeit nur [212] Pathtracer-Zähler) — nicht
+// weglassen, damit sichtbar bleibt, was für 1.0 fehlt. [207] [208] [211] sind seit 13.11. echte Tests (eigene `test`-Blöcke unten).
 // Netzabrufe (swisstopo/geo.admin) gibt es offline nicht: Grundstück und Nachbarbauten kommen aus der
 // Kataster-Fixture (`fixtures/kataster.dxf`, LV95).
 // Mit DOSSIER_SHOTS=<ordner> entsteht je Schritt ein Bildschirmfoto.
 import { readFile, writeFile } from "node:fs/promises";
 import type { Page } from "@playwright/test";
 import { blurFocus, discardIfAsked, elementRows, expect, fileMenu, finishCommand, openTab, startNewProject, test, typeCommand } from "./app";
+import { pdfStreams } from "./pdf";
+import type {} from "../src/state/testHooks"; // Typ von window.__dossierTest
 import { KATASTER_DXF } from "./paths";
 
 const E0 = 2_600_000;
@@ -377,7 +379,50 @@ test("[222] Volumenstudie: Wände/Decken/Dach aus einem Volumen (Körper) erzeug
   await expect(floors).toHaveCount(floorsBefore);
 });
 
-test.fixme("[207] Situation 1:500 / Schwarzplan als Ansichtsvorlage „Situation WBW“", async () => {});
+/** Ressourcen → Ansichtsvorlagen: Vorlage `name` wählen und einmal auf die aktive Ansicht anwenden. */
+async function applyViewTemplate(page: Page, name: RegExp): Promise<void> {
+  await page.getByRole("button", { name: "Fenster", exact: true }).first().click();
+  await page.getByRole("option", { name: /Ressourcen/ }).click();
+  await page.getByRole("tab", { name: "Ansichtsvorlagen" }).click();
+  await page.getByTestId("view-template-row").filter({ hasText: name }).first().click();
+  await page.getByTestId("view-template-apply-once").click();
+  await page.locator(".res-window").getByRole("button", { name: "Schließen" }).first().click();
+}
+
+const templateFills = (page: Page, id: string) => page.evaluate((i) => window.__dossierTest!.templateFills(i), id);
+
+// [207] Ansichtsvorlage „Situation WBW": eigenes Gebäude schwarz gefüllt, Kontext grau; Kataster-Gebäude aus dem DXF-Import gefüllt.
+// Geprüft über die Plan-Primitive des Kerns (Füllfarbe), nicht über Pixel.
+test("[207] Situation 1:500 / Schwarzplan als Ansichtsvorlage „Situation WBW“", async ({ page }) => {
+  test.setTimeout(180_000);
+  await page.goto("/?dossierTest"); // Test-Naht `__dossierTest.templateFills`
+  await page.getByRole("button", { name: /Neues Projekt/ }).first().click();
+  await expect(page.getByRole("group", { name: "Befehlszeile" })).toBeVisible();
+
+  await test.step("Kataster-DXF: Gebäude des Imports sind mit der Vorlage gefüllt", async () => {
+    await importKataster(page);
+    await expect(page.locator("footer.statusbar")).toBeVisible();
+    await applyViewTemplate(page, /Situation WBW/);
+    const fills = await templateFills(page, "std-vt-situation-wbw");
+    // Die HATCH-Gebäude des Katasters (Zeichnungen `dxf2d-…`) bleiben gefüllt.
+    expect(fills.filter((f) => f.ids.some((i) => i.startsWith("drawingId=dxf2d-"))).length, JSON.stringify(fills.slice(0, 6))).toBeGreaterThanOrEqual(1);
+  });
+
+  await test.step("Musterhaus komplex: eigenes Gebäude schwarz, Nachbarn grau, keine Bauteile", async () => {
+    await fileMenu(page, /Musterhaus \(komplex\)/);
+    await discardIfAsked(page);
+    await expect(page.locator(".project-name")).toHaveText("Musterhaus komplex", { timeout: 30_000 });
+    await applyViewTemplate(page, /Situation WBW/);
+    const fills = await templateFills(page, "std-vt-situation-wbw");
+    expect(fills.filter((f) => f.fill === "#000000").length).toBeGreaterThanOrEqual(1);
+    expect(fills.filter((f) => f.fill === "#b8b8b8").length).toBe(5);
+    expect(fills.some((f) => f.ids.some((i) => i.startsWith("wallId")))).toBe(false);
+    // Schwarzplan: alles schwarz.
+    const sw = await templateFills(page, "std-vt-schwarzplan");
+    expect(sw.filter((f) => f.fill === "#b8b8b8").length).toBe(0);
+    expect(sw.filter((f) => f.fill === "#000000").length).toBeGreaterThan(5);
+  });
+});
 
 // [223] Headless liefert WebGPU kein Bild: `__dossierImageMock` (cameraBridge.captureImage) ersetzt das Offscreen-Zeichnen;
 // geprüft werden Dialog, Zielgrösse, Optionen, Ergebnis und Einsetzen ins Layout — nicht die Pixel.
@@ -411,7 +456,54 @@ test("[223] 3D-Bild für die Abgabe: Auflösung wählen, exportieren, ins Layout
   }
 });
 
-test.fixme("[211] Rendering mit Blender/Cycles aus der 3D-Ansicht", async () => {});
+// [211] Rendering mit Blender/Cycles: im Browser gibt es kein Blender (Host `null`), der Dialog bietet nur das Export-Paket
+// (ZIP mit `model.glb`, `scene.json`, `textures/`, Anleitung). Geprüft: Dialog, Kamera/Sonne, ZIP-Inhalt. Der Lauf mit
+// Blender/Cycles selbst (Fortschritt, Bild, „Als .blend") ist nur auf dem Mac prüfbar (Checkliste `doc/RELEASE-1.0.md`).
+test("[211] Rendering-Dialog im Browser erzeugt das Export-Paket (model.glb + scene.json)", async ({ page }) => {
+  test.setTimeout(180_000);
+  await startNewProject(page);
+  await fileMenu(page, /Musterhaus \(komplex\)/);
+  await discardIfAsked(page);
+  await expect(page.locator(".project-name")).toHaveText("Musterhaus komplex", { timeout: 30_000 });
+  await typeCommand(page, "rendering");
+  const dialog = page.getByRole("dialog", { name: "Rendering mit Blender" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByTestId("render-camera")).toBeVisible();
+  await expect(dialog.getByTestId("render-sun")).toBeVisible();
+  // Ohne Blender: kein Start-Knopf, nur das Paket.
+  await expect(dialog.getByTestId("render-start")).toHaveCount(0);
+  const zip = await download(page, () => dialog.getByTestId("render-zip").click());
+  expect(zip.name).toMatch(/-render\.zip$/);
+  expect(zip.bytes.subarray(0, 2).toString("latin1")).toBe("PK");
+  // Dateinamen stehen unkomprimiert im lokalen ZIP-Kopf bzw. Zentralverzeichnis.
+  const names = zip.bytes.toString("latin1");
+  expect(names).toContain("model.glb");
+  expect(names).toContain("scene.json");
+});
+
+// [212] Pathtracing-Stil der 3D-Ansicht: Zähler „Pathtracing: N Samples" zählt hoch. Das Canvas-Bild ist headless nicht lesbar —
+// geprüft werden nur Zähler und Konsole (Fixture meldet unerwartete Fehler).
+// Stand 13.11.: im Playwright-Chromium (WebGPU über SwiftShader, Adapter „google/swiftshader") initialisiert der 3D-Viewport,
+// aber der Pathtracer-Stil bricht beim ersten Bild mit einem Panic in wgpu `create_buffer` ab (webgpu.rs:2331, wohl ein Puffer über
+// den SwiftShader-Limits) — der Zähler erscheint nie. Darum nur mit DOSSIER_PATHTRACE=1 aktiv, sonst `fixme`.
+// Auf dem Mac (Metal) wird der Stil von Hand geprüft (`doc/RELEASE-1.0.md`, 13.1).
+const pathtraceTest = process.env.DOSSIER_PATHTRACE ? test : test.fixme;
+pathtraceTest("[212] Pathtracer-Stil: Sample-Zähler zählt hoch", async ({ page }) => {
+  test.setTimeout(180_000);
+  await startNewProject(page);
+  await fileMenu(page, /Musterhaus \(komplex\)/);
+  await discardIfAsked(page);
+  await expect(page.locator(".project-name")).toHaveText("Musterhaus komplex", { timeout: 30_000 });
+  await page.getByRole("button", { name: "Axonometrie", exact: true }).click();
+  await page.getByRole("button", { name: "Darstellungsart der aktiven Ansicht" }).click();
+  await page.getByRole("option", { name: /Pathtracing/ }).click();
+  const status = page.getByTestId("pathtrace-status");
+  await expect(status).toBeVisible({ timeout: 30_000 });
+  const samples = async () => Number((await status.innerText()).match(/(\d+) Samples/)?.[1] ?? 0);
+  await expect.poll(samples, { timeout: 60_000 }).toBeGreaterThan(0);
+  const first = await samples();
+  await expect.poll(samples, { timeout: 60_000 }).toBeGreaterThan(first);
+});
 
 
 test("[224] Präsentationsplan: leere Geschosse nicht vorgewählt, Massstab 1:200, Plakat als Ziel", async ({ page }) => {
@@ -438,4 +530,38 @@ test("[224] Präsentationsplan: leere Geschosse nicht vorgewählt, Massstab 1:20
   await expect(page.locator("[data-viewport-id]").first()).toBeVisible({ timeout: 20_000 });
 });
 
-test.fixme("[208] Wettbewerbs-Plakat A0/A1 mit Kennwort, anonymes PDF (keine Büro-Metadaten)", async () => {});
+// [208] Wettbewerbs-Plakat im Referenz-Ablauf, schlank (Bild, Zuschnitt, Raster: `competition.spec.ts`): Plakat A1 aus der
+// Vorlage, Kennwort setzen, PDF des WBW-Satzes — ohne Projektname in Titel, Inhalt und Dateiname.
+test("[208] Wettbewerbs-Plakat A1 mit Kennwort, anonymes PDF ohne Projektnamen", async ({ page }) => {
+  test.setTimeout(120_000);
+  await startNewProject(page);
+  const projectName = (await page.locator(".project-name").innerText()).trim();
+  expect(projectName.length).toBeGreaterThan(2);
+  await openTab(page, "Mappe");
+  await page.getByRole("button", { name: "Layout erstellen" }).first().click();
+  await page.locator("[data-testid=newlayout-poster]").check();
+  await expect(page.locator("[data-testid=newlayout-poster-select]")).toHaveValue("poster-a1-landscape");
+  await page.getByRole("button", { name: "Erstellen", exact: true }).click();
+  await page.keyboard.press("Enter");
+  await page.locator(".nav-row", { hasText: "Layout" }).first().dblclick();
+  await expect(page.locator("[data-poster-header]")).toBeAttached();
+
+  await page.locator("[data-testid=publish-add-wbw]").click();
+  const run = () => download(page, () => page.locator("[data-publish-set] [data-publish-run]").first().click());
+  // Gegenprobe: nicht anonym trägt das PDF den Projektnamen im Titel.
+  const open = await run();
+  expect(pdfStreams(open.bytes) + open.bytes.toString("latin1")).toContain(projectName);
+
+  await page.locator("[data-testid=competition-anonymous]").check();
+  await page.locator("[data-testid=competition-keyword]").fill("FALKE 7");
+  const anon = await run();
+  expect(anon.name).toBe("FALKE 7_WBW-Abgabe.pdf");
+  const raw = anon.bytes.toString("latin1");
+  const all = raw + pdfStreams(anon.bytes);
+  expect(raw.slice(0, 5)).toBe("%PDF-");
+  expect(raw).toMatch(/\/MediaBox \[0 0 2383\.93\d* 1683\.7\d*/); // A1 quer
+  expect(raw).toContain("/Title (FALKE 7)");
+  expect(all).toContain("(FALKE 7)");
+  expect(all).not.toContain(projectName);
+  expect(anon.name).not.toContain(projectName);
+});

@@ -59,9 +59,9 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   oben ein Test; was fehlt, wird hier als Aufgabe eingetragen. · M
   Umgesetzt (12.11.): `e2e/release10.spec.ts` spielt leeres Projekt → Kataster-DXF (LV95) → Baurecht → Wände/Decke/Dach → Raum +
   Raumprogramm → SIA 416/Kennzahlen (CSV/PDF) → 1:200 → Schnitt → Axonometrie/Schatten → Präsentationsplan A1 → Publikation PDF → DXF/IFC
-  → Speichern in 13 Schritten durch; fehlende Schritte als `test.fixme` ([207] [208] [211]; [222] [223] [224] seit 13.11. aktiv; [209], [221] und [225] seit 12.11. aktiv). Behoben: GV in der
+  → Speichern in 13 Schritten durch; fehlende Schritte als `test.fixme` ([207] [208] [211] [222] [223] [224] seit 13.11. aktiv; [209], [221] und [225] seit 12.11. aktiv). 13.11.: [207] (Situation WBW/Schwarzplan: Füllfarben im Kern über Test-Naht `templateFills`, Kataster-DXF-Gebäude gefüllt), [208] (Plakat, Kennwort, anonymes PDF ohne Projektnamen, Gegenprobe; PDF-Helfer in `e2e/pdf.ts`) und [211] (Dialog im Browser: ZIP-Paket mit `model.glb` + `scene.json`) als echte Tests; Pathtracer-Zähler ([212]) als `fixme` (SwiftShader: Panic in wgpu `create_buffer` beim ersten Pathtrace-Bild, nur mit `DOSSIER_PATHTRACE=1` aktiv). `doc/RELEASE-1.0.md` um Abschnitt 13 (Mac-Prüfschritte) ergänzt. Behoben: GV in der
   Kennzahlenleiste war ohne freie Körper 0 m³, neue Decken bekamen den Aussenwand-Aufbau statt eines Deckentyps. Offen: Durchlauf
-  der Checkliste auf dem Mac (Maintainer); 3D-Bild headless nicht prüfbar (kein WebGPU).
+  der Checkliste auf dem Mac (Maintainer); 3D-Bild headless nicht prüfbar; Blender-Lauf von [211] nur auf dem Mac; Pathtracer unter SwiftShader (s. o.).
 
 - ✓ **[217]** Kern-Panics aus dem Robustheitstest (12.11.): `wall_top_at` nutzte `f64::clamp(base, base+height)` — bei negativer/NaN-Höhe
   min > max bzw. NaN → Panic in `wall_piece_mesh` (und über 3D/Exporte, u. a. `exportIfcSpf`). Neu `jsnum::clamp_safe`/`ClampSafe`

@@ -7,7 +7,8 @@ import { getState } from "./appStore";
 import { runSelectionAction, type SelectionActionId } from "./selectionActions";
 import { storeDocument } from "./historySlice";
 import { ceilingThickness } from "../model/types";
-import { computeSection, generatePlan, generateVisibleLevelsPlan, materializeGreyed, materializeUnderlay, verticalExtents, generateSectionPlan, pickGeometry, projectToModel3d } from "../core";
+import { computeSection, generatePlan, generateVisibleLevelsPlan, materializeGreyed, materializeUnderlay, verticalExtents, generateSectionPlan, pickGeometry, projectToModel3d, projectWithTemplate } from "../core";
+import { withDocument } from "../core/document";
 import { collectVisibleCodes } from "../model/layers";
 import { tracePlan } from "../core";
 import { getViewStateBridge } from "./viewTabs";
@@ -63,6 +64,8 @@ declare global {
       planFills: () => number;
       /** [193] Höhe (z) des ersten Gelände-Netz-Punkts. */
       terrainZ: () => number;
+      /** [207] Grundriss der aktiven Ebene mit der Ansichtsvorlage `templateId` (Klassen der Vorlage, Massstab 1:500): gefüllte Flächen mit Füllfarbe und Element-Ids. */
+      templateFills: (templateId: string) => { fill: string; ids: string[] }[];
       /** [185] Darstellungszustand der Plan-Ansicht: aktive Ebene, Bildmitte (Modell-m), Zoom (px/m), Massstab. */
       viewCamera: () => { levelId: string; center: { x: number; y: number } | null; pxPerMeter: number | null; scale: number };
       /** [192] Sichtbare Ebenen-Codes und Zahl der Plan-Primitive (gesamt / mit Wand-Bezug) der aktiven Ebene. */
@@ -171,6 +174,26 @@ export function installTestHooks(): void {
           // nur Füllungen von Elementen (Pfeilspitzen der Schnittmarken u. ä. tragen keine Element-Id)
           Object.entries(q).some(([k, v]) => k.endsWith("Id") && !!v),
       ).length;
+    },
+    templateFills: (templateId) => {
+      const s = getState();
+      const tpl = (s.project.viewTemplates ?? []).find((x) => x.id === templateId);
+      if (!tpl) return [];
+      const codes = new Set<string>();
+      const walk = (cs: { code: string; children?: unknown[] }[]): void => {
+        for (const c of cs) {
+          if (tpl.layerVisibility?.[c.code] !== false) codes.add(c.code);
+          walk((c.children ?? []) as { code: string; children?: unknown[] }[]);
+        }
+      };
+      walk(s.project.layers);
+      const tp = projectWithTemplate(s.project, s.activeLevelId, tpl);
+      const prims = withDocument(tp, () => generatePlan(tp, s.activeLevelId, codes, undefined, "grob", false, true, true, 500).primitives);
+      return prims.flatMap((q) =>
+        q.kind === "polygon" && q.fill && q.fill !== "none"
+          ? [{ fill: q.fill as string, ids: Object.entries(q).filter(([k, v]) => k.endsWith("Id") && !!v).map(([k, v]) => `${k}=${String(v)}`) }]
+          : [],
+      );
     },
     terrainZ: () => {
       const t = (getState().project.context ?? []).find((c) => c.type === "terrainMesh");

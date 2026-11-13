@@ -5,8 +5,8 @@ Tauri-App auf dem Mac von einem leeren Projekt bis zur PDF-Abgabe durch. **Besta
 Datenverlust, kein Umweg über ein anderes Programm. Jeder Befund kommt als Eintrag mit Reproduktion in `TODO.md`
 unter „Release 1.0“.
 
-Derselbe Ablauf läuft automatisch im Browser: `e2e/release10.spec.ts` (ein Test mit 13 Schritten, fehlende
-Schritte als `test.fixme` mit TODO-ID). Starten mit eigenem Port und Bildern je Schritt:
+Derselbe Ablauf läuft automatisch im Browser: `e2e/release10.spec.ts` (ein Test mit 13 Schritten, dazu je ein Test für
+[207] Situation, [208] Plakat, [211] Rendering-Paket, [212] Pathtracer, [222]–[224]; Schritte ohne Umsetzung stehen als `test.fixme` mit TODO-ID). Starten mit eigenem Port und Bildern je Schritt:
 
 ```
 E2E_PORT=5189 DOSSIER_SHOTS=shots/release10 npx playwright test e2e/release10.spec.ts
@@ -83,7 +83,7 @@ E 2'600'048 / N 1'200'046 und E 2'600'060 / N 1'200'056. Raumprogramm als CSV (`
 
 | # | Schritt in Dossier | Erwartet | Status |
 |---|---|---|---|
-| 6.1 | Ansichtsvorlage „Situation WBW“ | Gebäude schwarz, Nachbarn grau, Parzelle, Nordpfeil, Massstabsbalken | ❌ **[207]** (Musterhaus komplex hat eine „Situation 1:500“ als Vorbild) |
+| 6.1 | Ansichtsvorlage „Situation WBW“ | Gebäude schwarz, Nachbarn grau, Parzelle, Nordpfeil, Massstabsbalken | ✅ **[207]** (Spec: Füllfarben im Kern geprüft, Kataster-Gebäude aus dem DXF-Import gefüllt; Bild auf dem Mac prüfen, s. 13) |
 
 ## 7. 3D-Bilder, Axonometrie, Schatten, Rendering
 
@@ -92,7 +92,7 @@ E 2'600'048 / N 1'200'046 und E 2'600'060 / N 1'200'056. Raumprogramm als CSV (`
 | 7.1 | Kopfleiste „Axonometrie“ | eigener Reiter „3D · Erdgeschoss“ | ✅ (Spec 9; Bild nur auf dem Mac prüfbar) |
 | 7.2 | Gelände → „Schatten im 3D zeigen“, Datum 21.03./21.06./21.12., Uhrzeit | Schatten im 3D und (Haken) im Grundriss | ◐ Schalter geprüft, Bild nur auf dem Mac |
 | 7.3 | 3D-Bild als PNG in Abgabeauflösung | PNG-Datei, z. B. 6000 px breit | ✓ **[223]** Befehl `bild3d` (Mac: Metal-Gegenprobe offen) |
-| 7.4 | „Rendering …“ (Blender/Cycles) | PNG zurück, ins Layout einsetzbar | ❌ **[211]** |
+| 7.4 | „Rendering …“ (Blender/Cycles) | PNG zurück, ins Layout einsetzbar | ◐ **[211]** Browser: Dialog erzeugt das Paket `model.glb` + `scene.json` (Spec); Lauf mit Blender nur auf dem Mac (s. 13) |
 
 ## 8. Flächen und Volumen SIA 416, Kennzahlen
 
@@ -117,7 +117,7 @@ E 2'600'048 / N 1'200'046 und E 2'600'060 / N 1'200'056. Raumprogramm als CSV (`
 |---|---|---|---|
 | 10.1 | Panel **Mappe** → „Präsentationsplan erstellen“ (Befehl `praesentationsplan`), Schnitt B, A1 | Blatt mit Grundrissen, Ansicht, Schnitt, Nordpfeil, Massstabsbalken, gemeinsamer Massstab | ✓ geht (Spec 10) — [224] erledigt (leere Geschosse nicht vorgewählt, 1:200, Plakat als Ziel) |
 | 10.2 | Mappe → Publikation → ＋ Satz, Blatt anhaken, „Publizieren“ | ein PDF (A1, 1 Seite), Index im Titelblock | ✅ (Spec 11) |
-| 10.3 | Plakat A0/A1 mit Raster, Kennwort-Feld, anonym (kein Büroname, PDF-Metadaten leer), Bilder im Layout | WBW-Plakat als PDF | ❌ **[208]** |
+| 10.3 | Plakat A0/A1 mit Raster, Kennwort-Feld, anonym (kein Büroname, PDF-Metadaten leer), Bilder im Layout | WBW-Plakat als PDF | ✅ **[208]** (Spec `competition` und Referenz-Ablauf: Kennwort, anonymes PDF ohne Projektnamen; Aussehen auf dem Mac prüfen, s. 13) |
 
 ## 11. Austausch mit Fachplanern
 
@@ -133,6 +133,22 @@ E 2'600'048 / N 1'200'046 und E 2'600'060 / N 1'200'056. Raumprogramm als CSV (`
 |---|---|---|---|
 | 12.1 | ⌘S, App beenden, Datei öffnen (⌘O) | alles wieder da: Volumen, Raum, Baurecht, Raumprogramm, Blatt, Publikationssatz | ✅ Inhalt der Datei (Spec 13); Wiederöffnen auf dem Mac offen ([116]) |
 | 12.2 | App während der Arbeit hart beenden, neu starten | Autosave bietet Wiederherstellen an | ◐ nur auf dem Mac |
+
+## 13. Neu seit 13.11. — Prüfschritte nur für den Mac
+
+Diese Punkte sind im Browser nicht oder nur teilweise prüfbar (kein WebGPU/Metal, kein Blender). Bitte in der Tauri-App durchspielen
+und Befunde in `TODO.md` eintragen.
+
+| # | Schritt auf dem Mac | Erwartet |
+|---|---|---|
+| 13.1 | **Pathtracer:** 3D-Reiter (Axonometrie), Darstellung „Pathtracing (Vorschau)“, Kamera drehen, Sonne ändern | Bild wird nach jeder Änderung neu und körnig, dann glatter; unten links „Pathtracing: N Samples · x/s“ zählt hoch, am Ende „(fertig)“; Fenster bleibt bedienbar; andere Darstellung zurück: normales Bild |
+| 13.2 | **Rendering mit Blender (Cycles):** Befehl `rendering`, Blender-Pfad, Kamera „Südost“, Start; danach „Als .blend speichern“ | Fortschritt „Sample x von y“, Abbrechen geht, Bild erscheint und lässt sich speichern bzw. ins Layout einsetzen; Berechtigungen (Temp-Ordner), Metal-GPU |
+| 13.3 | **Volumen → Bauteile:** Körper `koerper` → Quader, `koerperinbauteile`, ⌘Z | Wände/Decken/Dach je Geschoss, eine Meldung, ⌘Z nimmt alles in einem Schritt zurück |
+| 13.4 | **Hilfslinien/Zuschnitt (Plakat):** Mappe → Layout erstellen → Plakat A1 quer; Bild einsetzen, Zuschnitt in den Prozentfeldern, Bild verschieben | Raster-Hilfslinien nur am Bildschirm (nicht im PDF), Kopfzeile mit Kennwort-Feld, Bild-Zuschnitt und dpi-Anzeige stimmen, Rahmen bleibt im Blatt |
+| 13.5 | **Kataster-Schwarzplan:** Kataster-DXF importieren, Ansicht auf „Situation WBW 1:500“ (Ressourcen → Ansichtsvorlagen → anwenden), danach „Schwarzplan 1:500“ | Eigenes Gebäude schwarz, Kataster-Gebäude und Nachbarn gefüllt (Situation grau, Schwarzplan alles schwarz), Parzelle, Nordpfeil, Massstabsbalken; Klassen 12/83/84 lassen sich ausschalten; Metal-Bild gleich wie der SVG-Export |
+| 13.6 | **Anonymität aller Exporte:** Mappe → Publikation → „Anonyme Abgabe“, Kennwort `FALKE 7`; dann PDF, DXF, IFC, SVG, CSV, 3D-Bild, Rendering-Paket, STEP exportieren | In keiner Datei Projektname, Büro, Bearbeiter:in, Adresse oder Benutzername; nur „FALKE 7“; PDF-Eigenschaften (Autor, Thema, Stichwörter) leer; Dateinamen beginnen mit dem Kennwort. Gegenprobe ohne Anonymität: Name steht drin. Frei getippte Texte und Ebenennamen prüft die App nicht — von Hand durchsehen |
+| 13.7 | **Tastaturkürzel-Hilfe:** Menü Hilfe → Tastaturkürzel … (Browser-Leiste und natives Menü) | Overlay mit allen Kürzeln und Befehls-Aliassen, durchsuchbar, Esc schliesst; Liste stimmt mit der tatsächlichen Belegung überein |
+| 13.8 | **Vorlage Wettbewerb:** Datei → Neu aus Vorlage → Wettbewerb | Mehrfamilienhaus (3 Geschosse, Flachdach), Baurecht, Raumprogramm 30 Räume, Schnitte/Ansichten, Situation, Präsentationsplan A1; Kurzanleitung `doc/KURZANLEITUNG.md` Schritt für Schritt durchspielen |
 
 ---
 
