@@ -201,7 +201,7 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   (dreifach vorhanden: Kern `gpu_compile`, `render2d`, `render3d`) brach bei den abgetasteten Geländeschatten-Stücken (viele fast kollineare
   Ecken, Ring berührt sich längs einer Geraden) ab und liess den Rest leer — 651 von 4149 Stücken im Musterhaus komplex über ein Jahr.
   Lösung: eine robuste Fassung `hatchgen/src/ear_clip.rs` für alle drei (flache/doppelte Ecken vorab und nach jedem Ohr entfernen,
-  Diagonal-Test mit Spiel, zweite Stufe streng, erst dann erzwungen); Probe danach 0 Fehler in f64 und f32. Tests `ear_clip::tests`.
+  Diagonal-Test mit Spiel, zweite Stufe streng, erst dann erzwungen; Spiel = Ausdehnung·1e-7); Probe danach 0 Fehler in f64 und f32. Tests `ear_clip::tests`.
   Geprüft nur im Linux-Container (Probe + Tests), nicht auf dem Mac. · S
 - ○ **[231]** 3D: Fenster im Giebel nicht sauber eingeschnitten (13.11., Maintainer, Musterhaus komplex): über dem Fenster laufen senkrechte
   Kanten bis zum Dach (Wand in Streifen zerlegt), rundes Giebelfenster nur teilweise ausgeschnitten. · M

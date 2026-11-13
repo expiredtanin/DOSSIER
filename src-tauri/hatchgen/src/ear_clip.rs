@@ -36,10 +36,10 @@ pub fn triangulate(pts: &[[f64; 2]]) -> Vec<u32> {
         let (dx, dy) = (pts[a][0] - pts[b][0], pts[a][1] - pts[b][1]);
         dx * dx + dy * dy <= eps_len2
     };
-    // Flach (kollinear oder Spitze, die zurückläuft): `b` liegt höchstens `size·1e-6` neben der Geraden a–c (bzw. den
+    // Flach (kollinear oder Spitze, die zurückläuft): `b` liegt höchstens `size·1e-7` neben der Geraden a–c (bzw. den
     // Kanten), also unter dem Rundungsrauschen von f32-Koordinaten (render2d) — sonst kreuzen sich fast kollineare
     // Abtastkanten nach dem Runden und das Ohr-Schneiden überlappt.
-    let tol = size * 1e-6;
+    let tol = size * 1e-7;
     let flat = |a: usize, b: usize, c: usize| {
         if same(a, b) || same(b, c) {
             return true;

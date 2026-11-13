@@ -168,8 +168,10 @@ describe('triangulate', () => {
     const t0 = performance.now();
     const idx = triangulate(big);
     const ms = performance.now() - t0;
-    expect(idx.length).toBe((n - 2) * 3);
-    expect(triArea(big, idx)).toBeCloseTo(polyArea(big), 0);
+    // [230] (fast) flache Ecken fallen ohne Dreieck weg — es zählt, dass die Fläche ganz gedeckt ist.
+    expect(idx.length).toBeGreaterThan((n - 10) * 3);
+    expect(idx.length).toBeLessThanOrEqual((n - 2) * 3);
+    expect(triArea(big, idx)).toBeCloseTo(polyArea(big), 3);
     expect(ms).toBeLessThan(1000);
   });
 });
