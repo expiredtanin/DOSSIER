@@ -21,10 +21,12 @@ pub struct Membership {
     pub opening_ids: Vec<String>,
     /// [149] Bäume.
     pub tree_ids: Vec<String>,
+    /// [213] Kameras.
+    pub camera_ids: Vec<String>,
 }
 
 /// Elementart (`MemberKind` in TS: `"wallIds"` …).
-pub const KINDS: [&str; 9] = ["wallIds", "drawingIds", "ceilingIds", "roomIds", "stairIds", "columnIds", "roofIds", "openingIds", "treeIds"];
+pub const KINDS: [&str; 10] = ["wallIds", "drawingIds", "ceilingIds", "roomIds", "stairIds", "columnIds", "roofIds", "openingIds", "treeIds", "cameraIds"];
 
 impl Membership {
     pub fn list(&self, kind: &str) -> Option<&Vec<String>> {
@@ -38,6 +40,7 @@ impl Membership {
             "roofIds" => &self.roof_ids,
             "openingIds" => &self.opening_ids,
             "treeIds" => &self.tree_ids,
+            "cameraIds" => &self.camera_ids,
             _ => return None,
         })
     }
@@ -53,6 +56,7 @@ impl Membership {
             "roofIds" => &mut self.roof_ids,
             "openingIds" => &mut self.opening_ids,
             "treeIds" => &mut self.tree_ids,
+            "cameraIds" => &mut self.camera_ids,
             _ => return None,
         })
     }
@@ -68,6 +72,7 @@ impl Membership {
             roof_ids: g.roof_ids.clone(),
             opening_ids: g.opening_ids.clone(),
             tree_ids: g.tree_ids.clone().unwrap_or_default(),
+            camera_ids: g.camera_ids.clone().unwrap_or_default(),
         }
     }
 
@@ -208,5 +213,19 @@ mod tests {
         let raw = Membership { tree_ids: vec!["b1".into()], ..Default::default() };
         let (e, ids) = expand_to_groups(&p, &raw, &[]);
         assert_eq!((e.wall_ids, e.tree_ids, ids), (vec!["w1".to_string()], vec!["b1".to_string(), "b2".to_string()], vec!["t".to_string()]));
+    }
+
+    /// [213] Kameras gehören zu Gruppen wie die übrigen Arten (Feld fehlt in älteren Dateien).
+    #[test]
+    fn kameras_in_gruppen() {
+        let mut t = g("t", &["w1"], &[]);
+        t["cameraIds"] = json!(["k1", "k2"]);
+        let p = project(json!([t, g("alt", &["w2"], &[])]));
+        assert_eq!(transitive_membership(&p, "t").camera_ids, ["k1", "k2"]);
+        assert!(transitive_membership(&p, "alt").camera_ids.is_empty());
+        assert_eq!(containing_group_id(&p, "cameraIds", "k2", &[]), Some("t".into()));
+        let raw = Membership { camera_ids: vec!["k1".into()], ..Default::default() };
+        let (e, ids) = expand_to_groups(&p, &raw, &[]);
+        assert_eq!((e.wall_ids, e.camera_ids, ids), (vec!["w1".to_string()], vec!["k1".to_string(), "k2".to_string()], vec!["t".to_string()]));
     }
 }

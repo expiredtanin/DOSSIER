@@ -10,7 +10,7 @@ import type { Plan, UnderlayGroup } from "../core";
 import { uniqueId } from "../tools/types";
 import type { Primitive } from "../core";
 import type { CoreOp } from "../core";
-import { addItems, removeItems } from "../core";
+import { addItems, patchItems, removeItems } from "../core";
 import { EMPTY_MEMBERSHIP, expandToGroups, transitiveMembership } from "../core";
 import type { GroupMembership, MemberKind } from "../core";
 
@@ -27,6 +27,7 @@ const KEYS: MemberKind[] = [
   "roofIds",
   "openingIds",
   "treeIds",
+  "cameraIds",
 ];
 
 /** Vereinigung je Art (erste Vorkommen in Reihenfolge) — für Auswahl-Mengen in der Hülle. */
@@ -60,6 +61,8 @@ export function pick3dGroup(project: Project, kind: string, id: string, groupPat
 
 /** [149] Präfix der Baum-Pick-Id im Feld `contextObjectId` (Kern `tree::TREE_PICK_PREFIX`). */
 const TREE_PICK = "@tree:";
+/** [213] Präfix der Kamera-Pick-Id im Feld `contextObjectId` (Kern `plan/cameras.rs`). */
+const CAMERA_PICK = "@camera:";
 
 /** Primitiv-ID-Feld → zugehörige `MemberKind` (Reihenfolge irrelevant). */
 const ID_FIELD_TO_KIND: [string, MemberKind][] = [
@@ -100,6 +103,7 @@ export function applyGroupDimming(
     roofIds: new Set(mem.roofIds),
     openingIds: new Set(mem.openingIds),
     treeIds: new Set(mem.treeIds),
+    cameraIds: new Set(mem.cameraIds),
   };
   return primitives.map((p) => {
     const rec = p as unknown as Record<string, unknown>;
@@ -116,6 +120,11 @@ export function applyGroupDimming(
     if (typeof ctx === "string" && ctx.startsWith(TREE_PICK)) {
       hasId = true;
       if (sets.treeIds.has(ctx.slice(TREE_PICK.length))) inside = true;
+    }
+    // [213] Kameras: `contextObjectId = "@camera:<id>"`.
+    if (typeof ctx === "string" && ctx.startsWith(CAMERA_PICK)) {
+      hasId = true;
+      if (sets.cameraIds.has(ctx.slice(CAMERA_PICK.length))) inside = true;
     }
     return hasId && !inside ? { ...p, greyed: true } : p;
   });
@@ -169,6 +178,7 @@ export function groupSelection(
     roofIds: sel.roofIds,
     openingIds: sel.openingIds,
     ...(sel.treeIds.length ? { treeIds: sel.treeIds } : {}),
+    ...(sel.cameraIds.length ? { cameraIds: sel.cameraIds } : {}),
     groupIds: [...selectedGroupIds],
   };
   return { ops: addItems("groups", [g]), groupId: id };
@@ -199,7 +209,25 @@ export function ungroup(
       roofIds: g.roofIds,
       openingIds: g.openingIds,
       treeIds: g.treeIds ?? [],
+      cameraIds: g.cameraIds ?? [],
     },
     subGroupIds: g.groupIds,
   };
+}
+
+/**
+ * Nimmt gelöschte Elemente aus den Listen ihrer Gruppen: eine `replace`-Op je tatsächlich geänderter
+ * Gruppe (leer, wenn kein Mitglied betroffen ist). Verschachtelte Gruppen bleiben, auch wenn sie leer werden.
+ */
+export function pruneGroupMembers(project: Project, removed: Partial<Record<MemberKind, ReadonlySet<string>>>): CoreOp[] {
+  const kinds = KEYS.filter((k) => (removed[k]?.size ?? 0) > 0);
+  if (kinds.length === 0 || !project.groups?.length) return [];
+  return patchItems(project, "groups", () => true, (g) => {
+    const next: Group = { ...g };
+    for (const k of kinds) {
+      const list = g[k];
+      if (list?.some((id) => removed[k]!.has(id))) next[k] = list.filter((id) => !removed[k]!.has(id));
+    }
+    return next;
+  });
 }

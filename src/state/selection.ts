@@ -187,9 +187,9 @@ export interface SelectionIdLists {
   contextObjectIds: string[];
   sectionLineIds: string[];
   groupIds: string[];
-  /** [149] Bäume (nicht gruppierbar; Zwischenablage, Nachauswahl). */
+  /** [149] Bäume (Gruppen, Zwischenablage, Nachauswahl). */
   treeIds?: string[];
-  /** [213] Kameras (nicht gruppierbar). */
+  /** [213] Kameras (gruppierbar wie Bäume). */
   cameraIds?: string[];
 }
 
@@ -227,7 +227,7 @@ export function fromIdLists(lists: Partial<SelectionIdLists>): Partial<Selection
   return out;
 }
 
-/** Auswahl → Gruppen-Mitgliedschaft (die acht gruppierbaren Arten). */
+/** Auswahl → Gruppen-Mitgliedschaft (die gruppierbaren Arten). */
 export function toMembership(sel: Selection): GroupMembership {
   return {
     wallIds: sel.walls,
@@ -239,5 +239,6 @@ export function toMembership(sel: Selection): GroupMembership {
     roofIds: sel.roofs,
     openingIds: sel.openings,
     treeIds: sel.trees,
+    cameraIds: sel.cameras,
   };
 }
