@@ -241,7 +241,7 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   Geisterschicht, je Wand cachen, Schlüssel inkl. Geschoss-Kontext); (b) Geisterschicht beim Geschosswechsel immer noch 1.5 s (gross,
   nativ): Kanten-Index (≈ 0.7 s für 2.8 M Beiträge) und Entscheid aller Kanten; (c) GPU-Bildzeit nur auf lavapipe gemessen, Culling/LOD/
   Instancing erst nach Messung auf echter GPU (Mac); (d) Draw-Calls der Geisterschicht je Klumpen (gross 465), ggf. bündeln; (e) Pathtracer
-  baut nach jeder Modelländerung im Stil `Pathtrace` den ganzen Baum neu (ein `refit` gibt es in `bvh.rs` auf diesem Stand nicht). · M
+  nutzt seit [212] Etappe 5 `Bvh::refit` bei gleicher Topologie; ändert sich die Topologie (Gehrungen der Nachbarwände), baut er den Baum neu. · M
 
 ### Phase 3 (27.11.–3.12.): Vorprojekt
 - ◐ **[234]** 3D: Rundbogen-Fenster der OG-Südwand (`og-f1`, Musterhaus komplex) ragte mit dem Bogenscheitel über die Wandoberkante ins
