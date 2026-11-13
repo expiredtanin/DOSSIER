@@ -56,7 +56,7 @@ E 2'600'048 / N 1'200'046 und E 2'600'060 / N 1'200'056. Raumprogramm als CSV (`
 | 3.2 | Befehl `wand` (Kürzel `w`), Punkte tippen `2600048,1200046` … zurück zum Start, Enter | 4 Aussenwände, Ecken verbunden (getippte Landeskoordinaten landen lokal bei 48/46) | ✅ (Spec 3) |
 | 3.3 | Befehl `decke` (`d`), 4 Ecken, Enter | eine Decke mit Deckentyp „Geschossdecke mehrschichtig“ | ✅ (Spec 3; vorher Aussenwand-Aufbau, in [206] behoben) |
 | 3.4 | Befehl `dach` (`rf`), zwei Ecken | Satteldach 30°, Vorsprung 0.4 m | ✅ (Spec 3) |
-| 3.5 | Volumen als Körper (`koerper`) und daraus Wände/Decken/Dach | Bauteile je Geschoss aus dem Körper | ❌ **[222]** (Körper geht, Umwandlung fehlt) |
+| 3.5 | Volumen als Körper (`koerper`, Form Quader), dann `koerperinbauteile` und in den Körper klicken (oder Körper wählen, dann Befehl) | Aussenwände je Geschoss (aussen bündig mit dem Körper), Decken, Flachdach auf Körper-OK, fehlende Geschosse obenauf; Meldung mit Anzahl; ⌘Z nimmt alles zurück | ✅ (Spec [222]; geneigte/Kugel-/Kegelkörper werden mit Meldung abgelehnt) |
 | 3.6 | Obergeschoss: Wände kopieren (⌘5/⌘6 Geschoss wechseln) | OG mit Wänden, GF steigt | ◐ nicht in der Spec |
 
 ## 4. Raumprogramm gegen Modell

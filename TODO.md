@@ -59,7 +59,7 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   oben ein Test; was fehlt, wird hier als Aufgabe eingetragen. · M
   Umgesetzt (12.11.): `e2e/release10.spec.ts` spielt leeres Projekt → Kataster-DXF (LV95) → Baurecht → Wände/Decke/Dach → Raum +
   Raumprogramm → SIA 416/Kennzahlen (CSV/PDF) → 1:200 → Schnitt → Axonometrie/Schatten → Präsentationsplan A1 → Publikation PDF → DXF/IFC
-  → Speichern in 13 Schritten durch; fehlende Schritte als `test.fixme` ([207] [208] [211] [222]; [223] [224] seit 13.11. aktiv; [209], [221] und [225] seit 12.11. aktiv). Behoben: GV in der
+  → Speichern in 13 Schritten durch; fehlende Schritte als `test.fixme` ([207] [208] [211]; [222] [223] [224] seit 13.11. aktiv; [209], [221] und [225] seit 12.11. aktiv). Behoben: GV in der
   Kennzahlenleiste war ohne freie Körper 0 m³, neue Decken bekamen den Aussenwand-Aufbau statt eines Deckentyps. Offen: Durchlauf
   der Checkliste auf dem Mac (Maintainer); 3D-Bild headless nicht prüfbar (kein WebGPU).
 
@@ -188,8 +188,18 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   lavapipe gemessen (komplex ~150–570 ms Software), Culling/LOD/Instancing erst nach Messung auf echter GPU (Mac); (5) Draw-Calls der
   Geisterschicht je Klumpen (gross 275 → 465), ggf. bündeln. · M
 
-- ○ **[222]** Volumenstudie → Bauteile (12.11., aus [206]): gewählten Körper (Massenmodell) in Aussenwände je Geschoss, Decken und Flachdach
-  umwandeln, Geschosse aus der Körperhöhe; heute nur Zeichnen von Wand/Decke/Dach oder GV aus Körpern. Ort: neuer Befehl, Kern `cmd_create.rs`. · M
+- ✓ **[222]** Volumenstudie → Bauteile (12.11., aus [206]; umgesetzt 13.11.): Befehl `solidtoparts` (`koerperinbauteile`, Werkzeuge 3D
+  neben „Körper verschneiden“) wandelt den gewählten Körper (sonst Klick in den Körper) in einem Undo-Schritt um: je Geschoss eine
+  Aussenwand je Umrisskante (aktiver Wandtyp, Referenz „left“ = Aussenfläche auf der Körperkante, wächst nach innen, `isExternal`),
+  Decken zwischen den Geschossen (Deckentyp wie beim Zeichnen), Flachdach ohne Vorsprung bündig mit der Körper-OK; der Körper entfällt
+  (GV sonst doppelt). Geschosse: Körper-UK muss auf einem Geschoss oder der Stapel-OK stehen; bestehende Geschosse werden genutzt, fehlende
+  obenauf angelegt (Höhe des obersten, gleichmässig auf den Rest verteilt), Reste < 0.5 m verlängern das oberste. Prismen auch nicht-
+  rechteckig/konkav, dazu Quader/Zylinder des Befehls „Körper“. Abgelehnt mit Meldung: verjüngt, Kugel/Kegel/Torus/Rotation/Verschneidung,
+  verrundete/gefaste Ecken, Abzugskörper, selbstschneidender Grundriss, UK zwischen Geschossen, < 0.5 m. Kern `cmd_massing.rs` (Decke/Dach
+  über `ceiling_item`/`roof_item` aus `cmd_create.rs`), Befehl `commands/cmds/solidToParts.ts`. Tests: Rust `cmd_massing::tests` (5),
+  vitest `solidToParts.test.ts`, e2e `release10.spec.ts` [222] (aus fixme). Angesehen: CLI-Plan/Schnitt eines L-Körpers mit schräger Kante,
+  Browser-App (Linux). Offen: Mac/Tauri nicht geprüft; keine Bodenplatte unter dem untersten Geschoss; keine Innenwände/Öffnungen;
+  Körper mit Löchern (gibt es im Modell nicht) und Bogenkanten (Zylinder wird zum 48-Eck aus Einzelwänden). · M
 - ✓ **[229]** Cycles-Rendering: Streifen/Dreiecke auf der Hauptdachfläche (12.11., Maintainer, Musterhaus komplex Iso). Ursache: Das GLB hat keine
   UVs; der Normal-Map-Knoten (Tangentenraum) bekam je Dreieck einen anderen Tangentenrahmen und zeichnete die Gauben-Fan-Triangulierung als
   helle/dunkle Diagonalen. Nicht im Netz: GLB geprüft (Normalen der Dachdreiecke an der Oberseite max. 0.0002 rad neben der Flächennormalen,

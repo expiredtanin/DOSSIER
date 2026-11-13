@@ -308,6 +308,14 @@ export const CommandIcon = memo(function CommandIcon({ name }: { name: string })
           <circle cx="10" cy="9.5" r="3.6" />
         </svg>
       );
+    case "solidtoparts":
+      // [222] Körper → Bauteile: Quader mit Geschosslinien und Dachplatte.
+      return (
+        <svg {...common}>
+          <rect x="3.5" y="4.5" width="9" height="9" />
+          <path d="M2.5 3.5 H13.5 M3.5 7.5 H12.5 M3.5 10.5 H12.5" />
+        </svg>
+      );
     case "solid":
       // Körper: Kugel mit Äquator (B-Rep-Grundkörper).
       return (

@@ -345,7 +345,37 @@ test("Referenz-Ablauf WBW/Vorprojekt: leeres Projekt bis Abgabe", async ({ page 
 
 // ── Was für 1.0 noch fehlt (je ein Test, bis der Schritt geht; Reproduktion in TODO.md) ──────────────────────
 
-test.fixme("[222] Volumenstudie: Wände/Decken/Dach aus einem Volumen (Körper) erzeugen", async () => {});
+// [222] Quader-Körper (Befehl „Körper“) 12 × 10 × 8 m im EG, dann „Körper in Bauteile umwandeln“ per Klick (getippter
+// Punkt): Aussenwände je Geschoss, Decken, Flachdach, fehlende Geschosse obenauf; Strg+Z nimmt alles in einem Schritt zurück.
+test("[222] Volumenstudie: Wände/Decken/Dach aus einem Volumen (Körper) erzeugen", async ({ page }) => {
+  await startNewProject(page);
+  await openTab(page, "Zeichnungsebenen");
+  await page.getByText("Erdgeschoss", { exact: true }).first().click();
+  const floors = page.getByText(/^Geschoss \d+$/);
+  const floorsBefore = await floors.count();
+  await typeCommand(page, "koerper");
+  await typeCommand(page, "cuboid");
+  await expect(page.locator(".cmdline-prompt")).toHaveText("Mittelpunkt bzw. erste Ecke:");
+  await typeCommand(page, "0,0");
+  await typeCommand(page, "12,10");
+  await typeCommand(page, "8");
+  await expect(page.locator(".cmdline-prompt")).toHaveText("Befehl:");
+  await typeCommand(page, "koerperinbauteile");
+  await expect(page.locator(".cmdline-prompt")).toHaveText("Körper wählen (Massenmodell):");
+  await typeCommand(page, "6,5");
+  const done = page.locator(".toast-message").filter({ hasText: /Geschosse \(\d+ neu\): \d+ Aussenwände, \d+ Decken und Flachdach erzeugt/ });
+  await expect(done).toBeVisible();
+  const [, stories, fresh, walls, ceilings] = (await done.first().innerText()).match(/(\d+) Geschosse \((\d+) neu\): (\d+) Aussenwände, (\d+) Decken/)!.map(Number);
+  expect(stories).toBeGreaterThanOrEqual(2);
+  expect(walls).toBe(4 * stories);
+  expect(ceilings).toBe(stories - 1);
+  await expect(floors).toHaveCount(floorsBefore + fresh);
+  await shot(page, "222-bauteile");
+  // Ein Undo-Schritt: neue Geschosse wieder weg.
+  await blurFocus(page);
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(floors).toHaveCount(floorsBefore);
+});
 
 test.fixme("[207] Situation 1:500 / Schwarzplan als Ansichtsvorlage „Situation WBW“", async () => {});
 

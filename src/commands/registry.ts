@@ -17,6 +17,7 @@ import { circlesToTreesCommand, treeCommand } from "./cmds/tree";
 import { roofCommand } from "./cmds/roof";
 import { solidCommand } from "./cmds/solid";
 import { solidBoolCommand } from "./cmds/solidbool";
+import { solidToPartsCommand } from "./cmds/solidToParts";
 import { voidBoxCommand } from "./cmds/voidbox";
 import { ceilingOpeningCommand } from "./cmds/ceilingOpening";
 import { roofWindowCommand } from "./cmds/roofWindow";
@@ -93,6 +94,7 @@ export const COMMANDS: Record<string, Command> = {
   roof: roofCommand,
   solid: solidCommand,
   solidbool: solidBoolCommand,
+  solidtoparts: solidToPartsCommand,
   voidbox: voidBoxCommand,
   ceilingopening: ceilingOpeningCommand,
   roofwindow: roofWindowCommand,
@@ -186,6 +188,8 @@ export const ALIASES: Record<string, string> = {
   stütze: "column",
   baum: "tree",
   kreiseinbaeume: "circlestotrees",
+  koerperinbauteile: "solidtoparts",
+  volumenzubauteilen: "solidtoparts",
   dach: "roof",
   koerper: "solid",
   durchbruch: "voidbox",
