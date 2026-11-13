@@ -433,6 +433,10 @@ fn shaped_wall_fill(p: &Project, wall: &Wall, op: &Opening, total: f64, w: f64, 
         }
         n_hi -= b.thickness;
     }
+    // [216] Mit Körper der Wand (Anzeige) laufen die Zusatzstücke als je ein Körper je Kantenzug ([`reveal_meshes`]).
+    if !with_fill {
+        return out;
+    }
     for b in &bands {
         for &(side, [x0, x1, o0, o1]) in &b.pieces {
             if !(x1 - x0 > 1e-9 && o1 - o0 > 1e-9) {
@@ -442,6 +446,50 @@ fn shaped_wall_fill(p: &Project, wall: &Wall, op: &Opening, total: f64, w: f64, 
             for (i, q) in os::ring_quads(&outer, &inner).into_iter().enumerate() {
                 if os::edge_side(&poly, i) == side {
                     out.push((q, half - o1, half - o0, b.color));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// [216] Zusatzstücke des Schichteinzugs [106] einer Formöffnung für die Anzeige: je Stück und Seite EIN Körper über dem
+/// zusammenhängenden Kantenzug dieser Seite (Aussen- und Innenumriss des Stücks als ein Polygon), statt eines Quaders je
+/// Umriss-Kante. Die Quader zeigten im 3D auf Leibung und Sturz ein Stein-/Streifenmuster aus lauter Stossfugen. Glatt
+/// schattiert ([`RING_CREASE_DEG`]); schlägt ein Zug fehl (entartet), bleiben seine Quader.
+fn reveal_meshes(p: &Project, wall: &Wall, op: &Opening, total: f64, w: f64, h: f64, map: &impl Fn(f64, f64, f64) -> [f64; 3]) -> Vec<RMesh> {
+    use crate::opening_shape as os;
+    let Some(poly) = os::opening_outline(op, w, h) else { return Vec::new() };
+    let half = total / 2.0;
+    let mut out = Vec::new();
+    for b in shaped_fill_bands(p, wall, op, total) {
+        for &(side, [x0, x1, o0, o1]) in &b.pieces {
+            if !(x1 - x0 > 1e-9 && o1 - o0 > 1e-9) {
+                continue;
+            }
+            let (outer, inner) = (os::inset(&poly, x0), os::inset(&poly, x1));
+            let n = outer.len().min(inner.len()).min(poly.len());
+            let on_side: Vec<bool> = (0..n).map(|i| os::edge_side(&poly, i) == side).collect();
+            let (n0, n1) = (half - o1, half - o0);
+            let boxes = |i: usize, out: &mut Vec<RMesh>| {
+                let q = os::ring_quads(&outer, &inner)[i];
+                out.push(box_mesh(os::quad_box(&q, n0, n1, map), b.color));
+            };
+            if on_side.iter().all(|s| *s) {
+                // Ganzer Umriss auf einer Seite (Rund): kein Anfang des Kantenzugs.
+                (0..n).for_each(|i| boxes(i, &mut out));
+                continue;
+            }
+            for start in (0..n).filter(|&i| on_side[i] && !on_side[(i + n - 1) % n]) {
+                let len = (0..n).take_while(|k| on_side[(start + k) % n]).count();
+                let mut ring: Vec<os::P> = (0..=len).map(|k| outer[(start + k) % n]).collect();
+                ring.extend((0..=len).rev().map(|k| inner[(start + k) % n]));
+                match prism_mesh(&ring, n0, n1, map, b.color) {
+                    Some(mut m) => {
+                        m.crease_angle = Some(RING_CREASE_DEG);
+                        out.push(m);
+                    }
+                    None => (0..len).for_each(|k| boxes((start + k) % n, &mut out)),
                 }
             }
         }
@@ -484,6 +532,9 @@ pub(crate) fn shaped_wall_opening_meshes_with(p: &Project, wall: &Wall, wr: &Wal
     let half = wr.total / 2.0;
     // Wandkörper je Schicht (aussen = +half) in deren Farbe.
     let mut out: Vec<RMesh> = shaped_wall_fill(p, wall, op, wr.total, w, h, with_fill).into_iter().map(|(q, n0, n1, rgb)| box_mesh(os::quad_box(&q, n0, n1, &map), rgb)).collect();
+    if !with_fill {
+        out.extend(reveal_meshes(p, wall, op, wr.total, w, h, &map));
+    }
     let door = op.kind == ElementKind::Door;
     let ty = if door {
         p.door_type(op).map(|t| (t.frame_depth, t.inset_from_face.or_else(|| crate::opening_detail::default_frame_inset(p, op)), t.inset_face == Some(DoorTypeInsetFace::Innen), t.inset_face == Some(DoorTypeInsetFace::Mitte), t.frame_width))

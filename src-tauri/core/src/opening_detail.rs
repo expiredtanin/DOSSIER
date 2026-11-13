@@ -1141,6 +1141,31 @@ mod tests {
         assert!(walls.iter().all(|w| w.holes.is_some() || (w.end[0] - w.start[0] - 1.2).abs() > 1e-6), "Rechteck-Sturzstück bei Formöffnung");
     }
 
+    /// [216] Anzeige (Wandkörper nach dem Umriss, ohne Füllkörper): die Leibungsstücke des Schichteinzugs laufen dem Bogen
+    /// entlang als EIN Körper je zusammenhängendem Kantenzug einer Seite — nicht als ein Quader je Bogenkante (im 3D als
+    /// Stein-/Streifenmuster auf Leibung und Sturz sichtbar). Je Stück höchstens ein Körper je Seite, alle geschlossen.
+    #[test]
+    fn formoeffnung_leibungsstuecke_ein_koerper_je_kantenzug() {
+        let reveals = vec![LayerReveal { layer: -1.0, mode: RevealMode::Zurueck, amount: Some(0.05), ..Default::default() }, LayerReveal { layer: 0.0, mode: RevealMode::Leibung, ..Default::default() }];
+        let mut p = wand_mit(Some(WindowType { id: "t".into(), inset_from_face: Some(0.18), frame_depth: Some(0.08), layer_reveals: Some(reveals), ..Default::default() }), None);
+        p.openings.as_mut().unwrap()[0].shape = Some(OpeningShape::Rundbogen);
+        let o = p.openings.as_ref().unwrap()[0].clone();
+        let wr = crate::opening_geom::WallRef { start: crate::opening_geom::v(0.0, 0.0), end: crate::opening_geom::v(5.0, 0.0), total: 0.345, ref_off: 0.0 };
+        let rect = [1.0, 2.2, 0.9, 2.3];
+        let boxes = crate::model3d::shaped_wall_opening_meshes(&p, &p.walls[0], &wr, &o, rect);
+        let display = crate::model3d::shaped_wall_opening_meshes_with(&p, &p.walls[0], &wr, &o, rect, false);
+        // Rahmen-Ring und Glasplatte stehen am Ende; davor die Leibungsstücke.
+        let pieces = &display[..display.len() - 2];
+        assert!(!pieces.is_empty(), "Leibungsstücke fehlen");
+        assert!(pieces.len() <= 8, "{} Körper statt je Kantenzug einer", pieces.len());
+        assert!(boxes.len() > 20 + display.len(), "Quader-Fassung hat viele Einzelquader: {}", boxes.len());
+        for m in pieces {
+            let mesh = crate::solid_bool::Mesh { positions: m.positions.clone(), indices: m.indices.clone() };
+            assert!(mesh.is_closed(), "Leibungskörper geschlossen");
+            assert!(m.crease_angle.is_some(), "Bogenfacetten glatt");
+        }
+    }
+
     /// [106] Schnitt parallel zur Wand durch den Innenputz: Rücksprung 5 cm weitet das Loch je Seite,
     /// die Schnittfläche wird um (2 × 1.5 + 2 × 1.2) × 0.05 m² kleiner (mit Ecken) (links, rechts, oben, unten).
     #[test]
