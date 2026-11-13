@@ -975,6 +975,7 @@ export const de = {
   // ── Extrusions-Attribute (truck-Integration, Object-Info-Panel) ─────────
   "objinfo.sectionLine.section": "Schnittlinie",
   "objinfo.dimText.section": "Masszahl",
+  "objinfo.contextObject.props": "Einstellungen",
   "objinfo.group.toggle": "Abschnitt ein-/ausklappen",
   "objinfo.detailRef.section": "Detail-/Schnitt-Verweis",
   "objinfo.dimRefs.section": "Assoziative Bemassung",

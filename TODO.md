@@ -10,7 +10,7 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   stehen im Archiv („Bewusst nicht übernommen“).
 - **Grösse** (eine Person mit Agenten): S ≤ 1 Tag · M ≤ 1 Woche · L ≤ 1 Monat · XL > 1 Monat.
   Steht keine Grösse im Archiv, ist sie hier geschätzt.
-- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 238);
+- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 239);
   nie eine ID wiederverwenden oder umnummerieren. Präfix-IDs (`[K]`, `[G]`, `[T]`, `[B]`, `[C]`) bleiben.
 - **Pro Punkt:** was fehlt · wo im Code · Grösse. Höchstens ein bis drei Sätze je Punkt;
   Messwerte und Befunde gehören in den Commit.
@@ -251,6 +251,15 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   `add_textures`: keine Normalenkarte, stattdessen Rauigkeitskarte als Höhenfeld (Bump, Stärke 0.3, rahmenfrei). Test:
   `blenderRender.test.ts` (Skript ohne Normal-Map-Knoten). Geprüft: echter Lauf `bpy` 5.3 (CPU) vorher/nachher. Offen: Mac/Blender 3.6/4.x;
   echte Normalenkarten bräuchten UVs im GLB-Export. · S
+- ✓ **[239]** Objekt-Info mit einklappbaren Abschnitten durchgängig (13.11., UI-Sichtprüfung): Wand/Decke/Dach … waren schon Gruppen ([189]), aber
+  Bezugspunkt, Masse und beim Gelände Einstellungen (Material, Höhenversatz, Netzpunkt, Zuschneiden) + Georeferenzierung (LV95) waren feste
+  Blöcke — beim Gelände musste man scrollen. Jetzt alle `InfoGroup` (Klick/Enter/Leertaste auf den Kopf, Pfeil, `aria-expanded`); neue Gruppen
+  `refpoint`, `dimensions`, `contextProps`, `georef` (`objectInfo/groups.ts`). Zustand je Abschnitts-Art in localStorage `dossier.objinfo.groups`
+  (nur Abweichungen vom Standard; `infoGroupState.ts`), nicht im Projekt. Standard: alles offen ausser „Georeferenzierung“ (`georef`: Herkunft +
+  LV95 — reine Auskunft, selten gebraucht, Kopf bleibt sichtbar); Bedienbares und Masse bleiben offen. Das Fenster Objekteinstellungen nutzt
+  dasselbe `ObjectInfoPanel` (ohne Bezugspunkt/Masse) und damit dieselben Gruppen und denselben Zustand. Geprüft: vitest `src/panels src/ui
+  src/i18n` (neu `infoGroupState.test.ts`), tsc, e2e objectSettings/objectSettingsWindow/roomStamp218, Screenshots hell/dunkel (Gelände,
+  Wand; Tastatur Enter/Leertaste). Nicht geprüft: Mac/Tauri, natives Nebenfenster. · S
 - ✓ **[235]** `update-dossier` brach nach der Commit-Liste stumm ab (13.11., Maintainer, Void): `git log … | head -20` lieferte bei mehr als 20 neuen
   Commits SIGPIPE, mit `set -euo pipefail` endete das Skript ohne Meldung — weder WASM noch AppImage wurden gebaut, `dossier` startete das alte
   AppImage. Lösung: `git log -20`; `dossier` warnt, wenn das AppImage älter ist als der Checkout. Geprüft: Ursache nachgestellt (Exit 141), Syntax. · S
