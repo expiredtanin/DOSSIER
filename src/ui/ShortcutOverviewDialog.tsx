@@ -7,6 +7,7 @@ import { setShortcutOverviewOpener } from "../state/shortcutOverviewHook";
 import { buildShortcutOverview } from "../state/shortcutOverview";
 import { loadShortcutOverrides } from "../state/keyboardShortcuts";
 import { loadAliasOverrides } from "../state/commandAliasOverrides";
+import { useModalFocus } from "./modalFocus";
 
 export const ShortcutOverviewDialogHost = memo(function ShortcutOverviewDialogHost() {
   const [open, setOpen] = useState(false);
@@ -20,14 +21,8 @@ export const ShortcutOverviewDialogHost = memo(function ShortcutOverviewDialogHo
     return () => setShortcutOverviewOpener(null);
   }, []);
 
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open]);
+  // [249] Fokus ins Suchfeld, Tab-Falle, Esc, Fokus zurück zum Auslöser (Hilfe-Menü).
+  const dialogRef = useModalFocus({ onEscape: () => setOpen(false) });
 
   const overview = useMemo(() => (open ? buildShortcutOverview(loadShortcutOverrides(), loadAliasOverrides()) : null), [open]);
   if (!open || !overview) return null;
@@ -43,7 +38,7 @@ export const ShortcutOverviewDialogHost = memo(function ShortcutOverviewDialogHo
 
   return (
     <div className="imp-overlay" onClick={() => setOpen(false)}>
-      <div className="imp-dialog" role="dialog" aria-modal="true" aria-label={t("help.shortcuts.title")} data-testid="shortcut-overview" onClick={(e) => e.stopPropagation()}>
+      <div ref={dialogRef} className="imp-dialog" role="dialog" aria-modal="true" aria-label={t("help.shortcuts.title")} data-testid="shortcut-overview" onClick={(e) => e.stopPropagation()}>
         <header className="imp-head">
           <span className="imp-head-title">{t("help.shortcuts.title")}</span>
           <button className="imp-close" onClick={() => setOpen(false)} aria-label={t("export.close")}>
@@ -55,7 +50,7 @@ export const ShortcutOverviewDialogHost = memo(function ShortcutOverviewDialogHo
           <input
             className="imp-input imp-input-flush"
             type="search"
-            autoFocus
+            data-autofocus
             value={filter}
             placeholder={t("help.shortcuts.filter")}
             aria-label={t("help.shortcuts.filter")}

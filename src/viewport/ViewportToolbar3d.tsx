@@ -63,7 +63,10 @@ function useThrottledValue<T>(value: T, ms: number, force: boolean): T {
 
 function ToolButton(props: {
   icon: string;
+  /** Tooltip (Zustandstext, z. B. „Begehen beenden“). */
   label: string;
+  /** [249] Stabiler Name für Screenreader; Umschalter melden den Zustand über `aria-pressed`, nicht über wechselnde Namen. */
+  name?: string;
   testId: string;
   on?: boolean;
   pressed?: boolean;
@@ -73,7 +76,7 @@ function ToolButton(props: {
     <button
       type="button"
       className={`vp3t-btn${props.on ? " is-on" : ""}`}
-      aria-label={props.label}
+      aria-label={props.name ?? props.label}
       aria-pressed={props.pressed}
       data-tip={props.label}
       data-testid={props.testId}
@@ -155,6 +158,7 @@ export function ViewportToolbar3d({ walkMode, onToggleWalk, ghost = false, onTog
           <ToolButton
             icon="directions_walk"
             label={walkMode ? t("walk.tip.off") : t("walk.tip.on")}
+            name={t("walk.toggle")}
             testId="walk-toggle"
             on={walkMode}
             pressed={walkMode}
@@ -164,6 +168,7 @@ export function ViewportToolbar3d({ walkMode, onToggleWalk, ghost = false, onTog
             <ToolButton
               icon="ghost"
               label={ghost ? t("walk.tip.ghostOff") : t("walk.tip.ghostOn")}
+              name={t("walk.help.ghost")}
               testId="walk-ghost"
               on={ghost}
               pressed={ghost}

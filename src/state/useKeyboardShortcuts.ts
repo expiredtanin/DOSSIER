@@ -34,13 +34,15 @@ import type { ElementClipboard, ElementSelectionIds, PastedIds } from "../editor
 import { parseClipboardText, serializeClipboardText } from "../editors/elementClipboardSerialize";
 import { matchesShortcut, type ShortcutId, type ShortcutOverrides } from "./keyboardShortcuts";
 import { isolateSelectionLayerCodes, showAllLayerCodes } from "./layerIsolate";
+import { isInModalDialog } from "./modalScope";
 import { toggleTraceAction } from "./traceActions";
 import { joinCurrentSelection } from "./selectionJoin";
 import { hideSelectionIn3d, showSelectionIn3d, stepActiveFloor } from "./tabNavigation";
 
 const isEditableTarget = (e: KeyboardEvent): boolean => {
   const el = e.target as HTMLElement | null;
-  return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);
+  // [249] Auch ein Knopf/Text im modalen Dialog gehört dem Dialog, nicht den App-Kürzeln.
+  return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable || isInModalDialog(el));
 };
 
 /**
@@ -123,6 +125,8 @@ export function useCommandTabShortcut(
       if (inInput) {
         return;
       }
+      // [249] In einer Werkzeugleiste (3D-Leiste) bleibt Tab die normale Tastaturnavigation zwischen ihren Knöpfen.
+      if ((e.target as HTMLElement | null)?.closest?.('[role="toolbar"]')) return;
       e.preventDefault();
       const eng = engineRef.current;
       if (eng?.isActive() && eng.hasFields()) {
@@ -196,6 +200,7 @@ export function useToolNumberShortcuts(
       if (gripDragInfoRef?.current) return;
       if (edgeDragInfoRef?.current) return;
       const el = e.target as HTMLElement | null;
+      if (isInModalDialog(el)) return;
       const isInput =
         !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);
       if (isInput) {

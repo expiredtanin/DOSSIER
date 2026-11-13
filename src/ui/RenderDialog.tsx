@@ -6,6 +6,7 @@
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { t } from "../i18n";
+import { useModalFocus } from "./modalFocus";
 import {
   BLENDER_DOWNLOAD_URL,
   BlenderMissingError,
@@ -113,14 +114,13 @@ export const RenderDialogHost = memo(function RenderDialogHost() {
     setPng(null);
   }, []);
 
+  // [249] Fokus ins erste Feld, Tab-Falle, Esc (nicht während der Arbeit), Enter im Feld = Starten, Fokus zurück.
+  const startRef = useRef<() => void>(() => {});
+  const dialogRef = useModalFocus({ onEscape: busy ? undefined : close, onEnter: () => startRef.current() });
+  // Während der Arbeit ist „Starten" gesperrt: der Fokus wandert auf „Abbrechen".
   useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !busy) close();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, busy, close]);
+    if (busy) document.querySelector<HTMLElement>('[data-testid="render-abort"]')?.focus();
+  }, [busy]);
 
   const date = useMemo(() => {
     const d = new Date(when);
@@ -283,10 +283,15 @@ export const RenderDialogHost = memo(function RenderDialogHost() {
 
   const camLabel = cameraKey !== "live" ? t("render.camera.saved", { name: cameras.find((c) => c.id === cameraKey)?.name ?? "" }) : "preset" in camera ? t("render.camera.preset", { name: t(`view3d.${camera.preset === "right" ? "side" : camera.preset}` as never) }) : t("render.camera.view");
   const browserOnly = host === null;
+  startRef.current = () => {
+    if (phase === "done" || phase === "missing" || host === undefined) return;
+    if (browserOnly) void saveZip();
+    else void start();
+  };
 
   return (
     <div className="imp-overlay" onClick={() => !busy && close()}>
-      <div className="imp-dialog render-dialog" role="dialog" aria-modal="true" aria-label={t("render.title")} onClick={(e) => e.stopPropagation()}>
+      <div ref={dialogRef} className="imp-dialog render-dialog" role="dialog" aria-modal="true" aria-label={t("render.title")} onClick={(e) => e.stopPropagation()}>
         <header className="imp-head">
           <span className="imp-head-title">{t("render.title")}</span>
           <button className="imp-close" onClick={close} aria-label={t("export.close")} disabled={busy}>
@@ -301,7 +306,7 @@ export const RenderDialogHost = memo(function RenderDialogHost() {
           {phase !== "done" && cameras.length > 0 && (
             <section className="imp-section">
               <div className="imp-section-title">{t("render.camera.title")}</div>
-              <select className="imp-select" data-testid="render-camera-select" value={cameraKey} disabled={busy} onChange={(e) => pickCamera(e.target.value)}>
+              <select className="imp-select" aria-label={t("render.camera.title")} data-testid="render-camera-select" value={cameraKey} disabled={busy} onChange={(e) => pickCamera(e.target.value)}>
                 <option value="live">{t("render.camera.live")}</option>
                 {cameras.map((c) => (
                   <option key={c.id} value={c.id}>
@@ -316,7 +321,7 @@ export const RenderDialogHost = memo(function RenderDialogHost() {
             <>
               <section className="imp-section">
                 <div className="imp-section-title">{t("render.size")}</div>
-                <select className="imp-select" data-testid="render-size" value={size} disabled={busy} onChange={(e) => pickSize(e.target.value as SizeId)}>
+                <select className="imp-select" aria-label={t("render.size")} data-testid="render-size" value={size} disabled={busy} onChange={(e) => pickSize(e.target.value as SizeId)}>
                   {(["hd", "uhd", "a4", "a3", "a2", "custom"] as SizeId[]).map((id) => (
                     <option key={id} value={id}>
                       {t(`render.size.${id}`)}
@@ -336,7 +341,7 @@ export const RenderDialogHost = memo(function RenderDialogHost() {
               </section>
               <section className="imp-section">
                 <div className="imp-section-title">{t("render.quality")}</div>
-                <select className="imp-select" data-testid="render-quality" value={quality} disabled={busy} onChange={(e) => setQuality(e.target.value as typeof quality)}>
+                <select className="imp-select" aria-label={t("render.quality")} data-testid="render-quality" value={quality} disabled={busy} onChange={(e) => setQuality(e.target.value as typeof quality)}>
                   {RENDER_QUALITY_PRESETS.map((q) => (
                     <option key={q.id} value={q.id}>
                       {t(`render.quality.${q.id}`)}
@@ -346,7 +351,7 @@ export const RenderDialogHost = memo(function RenderDialogHost() {
               </section>
               <section className="imp-section">
                 <div className="imp-section-title">{t("render.time")}</div>
-                <input className="imp-input imp-input-flush" type="datetime-local" data-testid="render-time" value={when} disabled={busy} onChange={(e) => setWhen(e.target.value)} />
+                <input className="imp-input imp-input-flush" type="datetime-local" aria-label={t("render.time")} data-testid="render-time" value={when} disabled={busy} onChange={(e) => setWhen(e.target.value)} />
                 {sun && (
                   <div className="imp-note" data-testid="render-sun">
                     {t("render.sun", { az: sun.azimuth.toFixed(0), el: sun.elevation.toFixed(0) })}
@@ -366,6 +371,7 @@ export const RenderDialogHost = memo(function RenderDialogHost() {
                   <input
                     className="imp-input imp-input-flush"
                     type="text"
+                    aria-label={t("render.blenderPath")}
                     data-testid="render-blender-path"
                     style={{ width: "100%" }}
                     placeholder={t("render.blenderPath.placeholder")}
@@ -455,7 +461,7 @@ export const RenderDialogHost = memo(function RenderDialogHost() {
               >
                 {t("render.toLayout")}
               </button>
-              <button className="imp-btn primary" data-testid="render-save" onClick={() => void savePng()}>
+              <button className="imp-btn primary" data-testid="render-save" data-autofocus onClick={() => void savePng()}>
                 {t("render.save")}
               </button>
             </>

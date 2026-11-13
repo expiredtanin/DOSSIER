@@ -49,6 +49,7 @@ in `ProjectSync`.
 | `useMouseSelectionHandlers.ts` | Auswahl und Kontextmenü aus Grundriss und 3D |
 | `useKeyboardShortcuts.ts`, `keyboardShortcuts.ts`, `commandKeys.ts` | Tastenkürzel, Esc/Enter laufender Befehle |
 | `shortcutOverview.ts`, `shortcutOverviewHook.ts` | [210] Kürzel-Übersicht (Hilfe → Tastaturkürzel …): Liste aus `SHORTCUT_DEFS` und der Befehls-Registry abgeleitet, nichts von Hand gepflegt; Anzeige `ui/ShortcutOverviewDialog.tsx` |
+| `modalScope.ts` | [249] `isInModalDialog`: Ziele in `aria-modal`-Dialogen gehören dem Dialog, nicht den App-Kürzeln |
 | `sheetGuides.ts`, `layoutImageActions.ts` | [208] Hilfslinien am Masterlayout und Aktionen für Bilder auf dem Blatt |
 | `objectSettings.ts` | Taste T / Menü „Objekteinstellungen…" ([195]): öffnet das schwebende Fenster `object-settings` und klappt den passenden Abschnitt der Objekt-Info auf; `mixedValues.ts`: gemeinsamer Wert über die Mehrfachauswahl (abweichend = leer) |
 | `useDisplayResolvers.ts` | sichtbar, gedimmt, gesperrt je Ebene und Kategorie |
