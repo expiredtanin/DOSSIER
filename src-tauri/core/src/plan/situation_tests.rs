@@ -147,3 +147,60 @@ fn baurecht_nur_parzellengrenze() {
     let normal = plan(&p, &all, "mittel");
     assert!(normal.iter().filter(|q| matches!(q, Primitive::Line { cls, .. } if cls == "site-allowed")).count() > 0, "im gewöhnlichen Grundriss schon");
 }
+
+fn poly2d(id: &str, code: &str, pts: &[(f64, f64)]) -> Value {
+    json!({"id": id, "type": "drawing2d", "levelId": "eg", "categoryCode": code, "geom": {"shape": "polyline", "closed": true, "pts": pts.iter().map(|(x, y)| json!({"x": x, "y": y})).collect::<Vec<_>>()}})
+}
+
+fn rect_pts(x0: f64, y0: f64, x1: f64, y1: f64) -> [(f64, f64); 4] {
+    [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+}
+
+/// Kataster: Haus mit Innenhof (zwei geschlossene Polylinien), Nachbarhaus, Gewässer auf Klasse „17".
+fn cadastre_project() -> Project {
+    let p = project();
+    let mut v = serde_json::to_value(&p).unwrap();
+    v["context"] = json!([]);
+    v["layers"].as_array_mut().unwrap().push(json!({"code": "17", "name": "Gewässer", "color": "#909090", "lw": 0.13, "visible": true, "locked": false}));
+    let d = v["drawings2d"].as_array_mut().unwrap();
+    d.push(poly2d("k-haus", "12", &rect_pts(30.0, -20.0, 60.0, 0.0)));
+    d.push(poly2d("k-hof", "12", &rect_pts(40.0, -14.0, 50.0, -6.0)));
+    d.push(poly2d("k-nachbar", "12", &rect_pts(70.0, -20.0, 80.0, -10.0)));
+    d.push(poly2d("k-see", "17", &rect_pts(30.0, 10.0, 60.0, 30.0)));
+    serde_json::from_value(v).unwrap()
+}
+
+#[test]
+fn kataster_gebaeude_gefuellt_hof_als_loch() {
+    let p = cadastre_project();
+    let ps = plan(&p, &codes(&p), "std-mv-situation-wbw");
+    let grey: Vec<&Primitive> = fills(&ps, "#b8b8b8").into_iter().filter(|q| matches!(q, Primitive::Polygon { context_object_id: None, .. })).collect();
+    assert_eq!(grey.len(), 2, "Haus mit Hof und Nachbar, je eine Fläche");
+    // Haus: 30 x 20 minus Hof 10 x 8 = 520 m2; der Hof ist ein Loch (Brückenring).
+    let areas: Vec<f64> = grey.iter().map(|q| if let Primitive::Polygon { pts, .. } = q { ring_area(pts) } else { 0.0 }).collect();
+    assert!(areas.iter().any(|a| (a - 520.0).abs() < 0.5), "Haus abzüglich Hof: {areas:?}");
+    assert!(areas.iter().any(|a| (a - 100.0).abs() < 1e-6), "Nachbarhaus: {areas:?}");
+    // Brückenkanten ohne Strich, kein weisser Hof darüber.
+    assert!(grey.iter().any(|q| matches!(q, Primitive::Polygon { no_stroke_edges: Some(e), .. } if !e.is_empty())), "Brücke zum Hof");
+    assert!(fills(&ps, "#ffffff").iter().all(|q| matches!(q, Primitive::Polygon { stroke_width_mm, .. } if *stroke_width_mm != 0.1)), "keine weisse Fläche über dem Hof");
+    // Gewässer hellblau.
+    let water = fills(&ps, "#cfe3f1");
+    assert_eq!(water.len(), 1);
+    let Primitive::Polygon { pts, .. } = water[0] else { unreachable!() };
+    assert!((ring_area(pts) - 600.0).abs() < 1e-6);
+}
+
+#[test]
+fn kataster_schwarzplan_und_klassen() {
+    let p = cadastre_project();
+    let all = codes(&p);
+    let sp = plan(&p, &all, "std-mv-schwarzplan");
+    let black = sp.iter().filter(|q| matches!(q, Primitive::Polygon { context_object_id: None, fill, stroke_width_mm, .. } if fill == "#000000" && *stroke_width_mm == 0.1)).count();
+    assert_eq!(black, 3, "eigenes Gebäude + Haus + Nachbar schwarz");
+    let no12 = plan(&p, &without(&all, "12"), "std-mv-situation-wbw");
+    assert!(fills(&no12, "#b8b8b8").is_empty(), "Klasse Gebäude schaltet die Kataster-Flächen");
+    let no17 = plan(&p, &without(&all, "17"), "std-mv-situation-wbw");
+    assert!(fills(&no17, "#cfe3f1").is_empty(), "Klasse Gewässer schaltet das Gewässer");
+    let normal = plan(&p, &all, "mittel");
+    assert!(fills(&normal, "#b8b8b8").is_empty() && fills(&normal, "#cfe3f1").is_empty());
+}

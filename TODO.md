@@ -145,8 +145,20 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   Schnittmarken über die Klassen der Vorlage aus, Parzelle, Strassen, Höhenlinien (enden an den Gebäuden) und Bäume bleiben. Standard-
   Ressourcen „Situation WBW 1:500"/„Schwarzplan 1:500" (Vorlagen + Modelldarstellungen, Ressourcen-Tab „Modelldarstellung"),
   Musterhaus komplex: Ausschnitt „Situation 1:500" nutzt sie, mit fünf Nachbargebäuden (Schnitte/Ansichten blenden Klasse 12 aus); CLI `plan --snapshot "Situation 1:500" --hatch`.
-  Offen: geschlossene Kataster-Polylinien (Klasse „Gebäude", nur 2D) bleiben Linien (gefüllt werden die Netze); Innenhöfe als weisse
-  Fläche statt Loch; Strassennamen/Gewässer nur als gewöhnliche Zeichnungen; nicht in der Tauri-App/auf dem Mac geprüft. · M
+  Kataster 2D (13.11.): geschlossene Polylinien/Rechtecke der Klasse „Gebäude" (Code „12" oder Name mit Gebäude/Building) werden wie
+  Kontextgebäude gefüllt (grau, im Schwarzplan schwarz), die der Klasse „Gewässer" („17") hellblau; Ring ganz in einem anderen derselben
+  Klasse = Innenhof als echtes Loch (gerade/ungerade, `polygon_bool::nest_even_odd`, i_overlay), auch bei eigenem Gebäude und Netzen
+  jetzt Brücken-Ring statt weisser Fläche darüber. DXF-Import: Layer „Gebaeude/Gebäude", „Strassen/Strassennamen", „Gewaesser/Gewässer"
+  (u. ä., `import_context::known_context_class`) landen auf den Klassen 12/11/17 (gleichnamige Projekt-Kategorie geht vor);
+  Strassennamen = Text auf der Klasse „Strasse" (kein eigener Code: TS-Tabelle `contextCategories.ts` müsste mit). Test: Fixture
+  `src/io/testdata/kataster.dxf`, Rust (`situation_tests`, `import_drawing_tests`, `polygon_bool`), vitest `katasterImport.test.ts`.
+  Benennung Zahlen-Layer (13.11.): rein numerische Layer-Namen bekommen beim Import „Code Bezeichnung"
+  (`import_context::layer_display_name`, Tabelle `NUMERIC_LAYER_LABELS`); belegt ist nur „1110 Gebäude" (Angabe Maintainer, nicht gegen
+  DM.01-AV geprüft) — weitere Codes erst eintragen, wenn die Liste vorliegt (nichts erfunden); Bezeichnung ist Projektdaten-Text
+  (Rust, kein `t()`/en). Ein zweiter Import mit gleichem Zahlen-Layer legt die Kategorie nochmals an (Abgleich nur über den Roh-Namen).
+  Offen: Linien der gefüllten Kataster-Gebäude liegen weiter über der Füllung (Umriss in Klassenfarbe); Strassennamen nicht
+  entlang gekrümmter Achsen gesetzt (nur die Textdrehung aus dem DXF); echte Kataster-DXF (Layer-Namen je Kanton) nicht geprüft;
+  nicht in der Tauri-App/auf dem Mac geprüft. · M
 - ◐ **[208]** Wettbewerbs-Abgabe (12.11.). Umgesetzt: **Bild-Element im Layout** (`Layout.images`, `LayoutImage`: PNG/JPEG als Data-URL wie
   `ContextImage.src`, Rahmen in Papier-mm, Zuschnitt als Anteile; Kern `layout_image.rs`: Dateikopf, Seitenverhältnis, Zeichen-/Klipp-Rechteck,
   dpi; Blatt: Knopf „Bild“, verschieben, Ecke skalieren mit festem Seitenverhältnis, HUD mit Breite, Zuschnitt, dpi-Warnung unter 100;

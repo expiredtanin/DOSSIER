@@ -12,7 +12,11 @@
 //! Wände, Treppen, Räume, Stützen, Körper, Bodenbeläge und Schnittmarken entfallen (`domains.rs`); Parzelle,
 //! Strassen, Höhenlinien und Beschriftungen sind gewöhnliche Zeichnungen/Kontext auf ihren Klassen und
 //! bleiben, solange die Klasse sichtbar ist (Ansichtsvorlage „Situation WBW", `standards.rs`).
-//! Löcher (Innenhöfe) der Umrisse füllt eine weisse Fläche darüber.
+//! - **Kataster-Zeichnungen** (2D, aus dem DXF-Import): geschlossene Polylinien/Rechtecke der Klasse „Gebäude"
+//!   werden wie Kontextgebäude gefüllt, die der Klasse „Gewässer" hellblau. Liegt ein Ring ganz in einem anderen
+//!   derselben Klasse, ist er ein Loch (Innenhof; gerade/ungerade, `polygon_bool::nest_even_odd`).
+//! Löcher (Innenhöfe) der Umrisse sind echte Löcher: ein Ring mit Brücken (`polygon_holes`, Brückenkanten ohne
+//! Strich), Füllung und Strich bleiben korrekt, nichts liegt weiss darüber.
 
 use super::domains::{Bounds, Ctx};
 use super::drawings::mm_to_model;
@@ -28,6 +32,8 @@ pub const SYMBOL_CATEGORY: &str = crate::standards::SYMBOL_CATEGORY;
 
 const BLACK: (&str, &str) = ("#000000", "#000000");
 const GREY: (&str, &str) = ("#b8b8b8", "#7c7c7c");
+/// Gewässer aus dem Kataster: hellblau gefüllt.
+const WATER: (&str, &str) = ("#cfe3f1", "#7fa8c7");
 const OUTLINE_MM: f64 = 0.1;
 /// Eine Dreiecksfläche unter 1 cm² trägt nichts zur Aufsicht bei (senkrechte Wände, Splitter).
 const MIN_TRI_AREA: f64 = 1e-4;
@@ -182,14 +188,54 @@ pub fn mesh_polygons(positions: &[f64], indices: &[f64]) -> Vec<Polygon> {
     crate::polygon_bool::union(&tris)
 }
 
-/// Gefüllte Flächen: Aussenring in der Füllung, jedes Loch als weisse Fläche darüber.
+/// Gefüllte Flächen: ein Polygon je Fläche; Löcher sind über Brücken eingebunden (Brückenkanten ohne Strich).
 fn fill_polygons(polys: &[Polygon], f: (&str, &str), context_id: Option<&str>, greyed: bool, out: &mut Vec<Primitive>) {
     for poly in polys {
         let Some(outer) = poly.first().filter(|r| r.len() >= 3) else { continue };
-        out.push(polygon(outer.iter().map(|q| v2(*q)).collect(), f.0, f.1, OUTLINE_MM, context_id, greyed));
-        for hole in poly.iter().skip(1).filter(|r| r.len() >= 3) {
-            out.push(polygon(hole.iter().map(|q| v2(*q)).collect(), "#ffffff", f.1, OUTLINE_MM, None, greyed));
+        let holes: Vec<Ring> = poly.iter().skip(1).filter(|r| r.len() >= 3).cloned().collect();
+        if holes.is_empty() {
+            out.push(polygon(outer.iter().map(|q| v2(*q)).collect(), f.0, f.1, OUTLINE_MM, context_id, greyed));
+            continue;
         }
+        let merged = crate::polygon_holes::merge_holes(outer, &holes, 1e-4);
+        let mut prim = polygon(merged.ring.iter().map(|q| v2(*q)).collect(), f.0, f.1, OUTLINE_MM, context_id, greyed);
+        if let Primitive::Polygon { no_stroke_edges, .. } = &mut prim {
+            *no_stroke_edges = (!merged.bridge_edges.is_empty()).then(|| merged.bridge_edges.iter().map(|&k| k as f64).collect());
+        }
+        out.push(prim);
+    }
+}
+
+/// Klasse „Gebäude" des Katasters: Code „12" oder ein Name mit „Gebäude"/„Building" (ohne die abgeleitete Klasse
+/// „83 Situation Gebäude").
+fn is_building_class(c: &Ctx, code: &str) -> bool {
+    code != OWN_CATEGORY && (code == "12" || name_has(c, code, &["gebäude", "gebaeude", "building"]))
+}
+
+/// Klasse „Gewässer": Code „17" oder ein Name mit „Gewässer"/„Water".
+fn is_water_class(c: &Ctx, code: &str) -> bool {
+    code == "17" || name_has(c, code, &["gewässer", "gewaesser", "water"])
+}
+
+fn name_has(c: &Ctx, code: &str, words: &[&str]) -> bool {
+    c.cat(code).is_some_and(|k| {
+        let n = k.name.to_lowercase();
+        words.iter().any(|w| n.contains(w))
+    })
+}
+
+/// Kataster-Flächen aus 2D-Zeichnungen: Gebäude (Kontextfüllung, grau bzw. schwarz) und Gewässer (hellblau), auf
+/// der Klasse der Zeichnung (die Klasse bestimmt über [`super::drawings::closed_rings_by_class`], ob sie erscheinen).
+/// Innenhöfe sind Löcher. Unterhalb der Zeichnungen; deren Linien bleiben darüber.
+pub fn cadastre_prims(c: &Ctx, s: &Opts, out: &mut Vec<Primitive>) {
+    let fills = |kind: fn(&Ctx, &str) -> bool| super::drawings::closed_rings_by_class(c, |code| kind(c, code));
+    if let Some(f) = colors(s.context) {
+        for (code, rings) in fills(is_building_class) {
+            fill_polygons(&crate::polygon_bool::nest_even_odd(&rings), f, None, c.greyed(&code), out);
+        }
+    }
+    for (code, rings) in fills(is_water_class) {
+        fill_polygons(&crate::polygon_bool::nest_even_odd(&rings), WATER, None, c.greyed(&code), out);
     }
 }
 
@@ -251,6 +297,9 @@ pub fn symbol_prims(c: &Ctx, s: &Opts, out: &mut Vec<Primitive>, bounds: &mut Bo
     acc_polys(&own_polygons(c.p), &mut bb);
     for m in imported_meshes(c) {
         acc_polys(&mesh_polygons(&m.positions, &m.indices), &mut bb);
+    }
+    for (_, rings) in super::drawings::closed_rings_by_class(c, |code| is_building_class(c, code)) {
+        rings.iter().flatten().for_each(|q| bb.acc(q[0], q[1]));
     }
     if let Some(r) = c.p.site_rules.as_ref().map(|r| &r.parcel) {
         for q in r {

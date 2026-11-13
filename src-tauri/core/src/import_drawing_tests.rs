@@ -454,3 +454,61 @@ fn landeskoordinaten_setzen_den_projekt_nullpunkt() {
     assert_eq!(lv95_origin(&project(), [2_600_999.0, 1_200_001.0], "").unwrap().0, [2_600_000.0, 1_200_000.0]);
     assert!(lv95_origin(&project(), [600_000.0, 200_000.0], "").is_none());
 }
+
+#[test]
+fn zahlen_layer_mit_bezeichnung() {
+    use crate::import_context::layer_display_name;
+    assert_eq!(layer_display_name("1110"), "1110 Gebäude");
+    assert_eq!(layer_display_name("9999"), "9999", "unbekannter Code bleibt");
+    assert_eq!(layer_display_name("Gebaeude"), "Gebaeude", "sprechender Name nichts doppelt");
+    let d = DrawingImport {
+        contours: vec![line("1110", 0.0, &[[0.0, 0.0], [1.0, 0.0]]), line("9999", 0.0, &[[0.0, 0.0], [2.0, 0.0]])],
+        ..Default::default()
+    };
+    let dec = decision(json!({"target": {"kind": "new", "name": "K"}, "categoryMode": "byLayer", "activeCategoryCode": "20", "parentName": "Import k"}));
+    let ops: Vec<Value> = import_ops(&project(), &d, &dec, 1000.0).ops.iter().map(Op::to_json).collect();
+    let layers = ops.iter().find(|o| o["key"] == json!("layers")).unwrap()["value"].as_array().unwrap().clone();
+    let names: Vec<String> = crate::layers::flatten(&layers).iter().filter_map(|c| c["name"].as_str().map(String::from)).collect();
+    assert!(names.contains(&"1110 Gebäude".to_string()) && names.contains(&"9999".to_string()), "{names:?}");
+}
+
+#[test]
+fn kataster_layer_auf_kontext_klassen() {
+    use crate::import_context::known_context_class;
+    assert_eq!(known_context_class("Gebaeude"), Some("12"));
+    assert_eq!(known_context_class("GEBÄUDE"), Some("12"));
+    assert_eq!(known_context_class("Strassennamen"), Some("11"));
+    assert_eq!(known_context_class("Gewässer"), Some("17"));
+    assert_eq!(known_context_class("Gebäudenummer"), None, "Beschriftungs-Layer bleibt eigener Layer");
+    let closed = |layer: &str, pts: &[[f64; 2]]| Contour { closed: true, ..line(layer, 0.0, pts) };
+    let d = DrawingImport {
+        contours: vec![
+            closed("Gebaeude", &[[0.0, 0.0], [10.0, 0.0], [10.0, 8.0], [0.0, 8.0]]),
+            closed("Gewaesser", &[[20.0, 0.0], [30.0, 0.0], [30.0, 8.0]]),
+            closed("Parzellen", &[[0.0, 0.0], [40.0, 0.0], [40.0, 30.0]]),
+        ],
+        texts: vec![text("Strassennamen", "Bahnhofstrasse", 5.0, 5.0)],
+        ..Default::default()
+    };
+    let dec = decision(json!({"target": {"kind": "new", "name": "K"}, "categoryMode": "byLayer", "activeCategoryCode": "20", "parentName": "Import k"}));
+    let r = import_ops(&project(), &d, &dec, 1000.0);
+    let ops: Vec<Value> = r.ops.iter().map(Op::to_json).collect();
+    let items = ops.iter().find(|o| o["collection"] == json!("drawings2d")).unwrap()["items"].as_array().unwrap().clone();
+    assert_eq!(items[0]["categoryCode"], json!("12"), "Gebaeude → Klasse Gebäude");
+    assert_eq!(items[1]["categoryCode"], json!("17"), "Gewaesser → Klasse Gewässer");
+    assert_ne!(items[2]["categoryCode"], json!("12"), "unbekannte Layer bleiben eigene Kategorien");
+    assert_eq!(items[3]["categoryCode"], json!("11"), "Strassennamen als Text auf der Klasse Strasse");
+    let layers = ops.iter().find(|o| o["key"] == json!("layers")).unwrap()["value"].as_array().unwrap().clone();
+    let flat = crate::layers::flatten(&layers);
+    for (code, name) in [("12", "Gebäude"), ("11", "Strasse"), ("17", "Gewässer")] {
+        assert!(flat.iter().any(|c| c["code"] == json!(code) && c["name"] == json!(name)), "{code} {name} angelegt");
+    }
+    let parzellen = items[2]["categoryCode"].as_str().unwrap();
+    assert!(flat.iter().any(|c| c["code"] == json!(parzellen) && c["name"] == json!("Parzellen")));
+    // Gleichnamige Kategorie im Projekt geht vor.
+    let mut root = project();
+    root.get_mut("layers").unwrap().as_array_mut().unwrap().push(json!({"code": "77", "name": "gebaeude", "color": "#000", "lw": 0.5, "visible": true, "locked": false}));
+    let r2 = import_ops(&root, &d, &dec, 1000.0);
+    let items2 = r2.ops.iter().map(Op::to_json).find(|o| o["collection"] == json!("drawings2d")).unwrap()["items"].as_array().unwrap().clone();
+    assert_eq!(items2[0]["categoryCode"], json!("77"));
+}
