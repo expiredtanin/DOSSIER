@@ -24,7 +24,12 @@ export type InfoGroupId =
   | "detailRef"
   | "dimRefs"
   | "dimText"
-  | "grid";
+  | "grid"
+  // [239] Abschnitte, die das Panel selbst hält (Platzierung, Masse, Gelände/Umgebung) — nicht in `infoGroups()`.
+  | "refpoint"
+  | "dimensions"
+  | "contextProps"
+  | "georef";
 
 export const INFO_GROUP_TITLE: Record<InfoGroupId, TranslationKey> = {
   newComponent: "attr.newComponent",
@@ -44,7 +49,17 @@ export const INFO_GROUP_TITLE: Record<InfoGroupId, TranslationKey> = {
   dimRefs: "objinfo.dimRefs.section",
   dimText: "objinfo.dimText.section",
   grid: "attr.grid.section",
+  refpoint: "objinfo.refpoint",
+  dimensions: "objinfo.dimensions",
+  contextProps: "objinfo.contextObject.props",
+  georef: "objinfo.contextObject.section",
 };
+
+/**
+ * [239] Standardmässig zugeklappt: nur Auskunft ohne Eingabe (Herkunft, LV95-Mittelpunkt) — selten gebraucht,
+ * bei Geländen aber lang. Alles, was man bedient oder ständig prüft, bleibt offen. Der Kopf bleibt sichtbar.
+ */
+export const INFO_GROUP_DEFAULT_COLLAPSED: ReadonlySet<InfoGroupId> = new Set<InfoGroupId>(["georef"]);
 
 export interface InfoGroupContext {
   sel: SelectionInfo | null;

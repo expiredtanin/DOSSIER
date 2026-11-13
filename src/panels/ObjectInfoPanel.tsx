@@ -36,6 +36,7 @@ import { ViewShadowsInfo, MeasurementSection } from "./objectInfo/InfoBlocks";
 import { DimensionField, RotateField } from "./objectInfo/fields";
 import { elementDimensions } from "./objectInfo/elementDims";
 import { InfoGroups, hasInfoGroups } from "./objectInfo/InfoGroups";
+import { InfoGroup } from "./objectInfo/InfoGroup";
 
 // ── Bezugspunkt-Raster ───────────────────────────────────────────────────────
 // Neun Anker als 3×3-Raster. Zeile 0 = oben (fy=0), Spalte 0 = links (fx=0).
@@ -193,10 +194,9 @@ export function ObjectInfoPanel({ showPlacement = true }: { showPlacement?: bool
 
       {showPlacement && (
         <>
-          <div className="objinfo-sep" />
+          <InfoGroup id="refpoint">
           {/* Bezugspunkt-Würfel (3×3, immer quadratisch) links, X/Y/Z als Spalte
               rechts daneben (Nutzer-Wunsch). */}
-          <div className="objinfo-section-label">{t("objinfo.refpoint")}</div>
           <div className="objinfo-refrow">
             <div className="objinfo-cube" role="group" aria-label={t("objinfo.refpoint")}>
               {FRACTIONS.map((fy) =>
@@ -248,11 +248,10 @@ export function ObjectInfoPanel({ showPlacement = true }: { showPlacement?: bool
               <RotateField onCommit={(deg) => host.onRotateSelectionAround(px, py, deg)} />
             </div>
           </div>
+          </InfoGroup>
 
-          <div className="objinfo-sep" />
-
+          <InfoGroup id="dimensions">
           {/* Maße (editierbar) — Commit auf blur/Enter skaliert um den Anker. */}
-          <div className="objinfo-section-label">{t("objinfo.dimensions")}</div>
           {elementDims ? (
             // [204a] Wand: Länge/Dicke/Höhe, Öffnung: Breite/Höhe/Brüstung (nur Anzeige).
             elementDims.map((d) => (
@@ -352,6 +351,7 @@ export function ObjectInfoPanel({ showPlacement = true }: { showPlacement?: bool
               />
             </>
           )}
+          </InfoGroup>
         </>
       )}
       {/* Gelände-/Umgebungs-Element (Netzkörper, Gelände, Höhenlinien …): Art, Herkunft (nur Auskunft, [181]),
@@ -359,39 +359,42 @@ export function ObjectInfoPanel({ showPlacement = true }: { showPlacement?: bool
           georeferenziert importiert wurde (Nutzer-Wunsch zum Prüfen). */}
       {sel.contextObject && (
         <>
-          <div className="objinfo-sep" />
-          <div className="objinfo-section-label">{t("objinfo.contextObject.section")}</div>
-          <div className="objinfo-field">
-            <span className="objinfo-flabel">{t("objinfo.contextObject.type")}</span>
-            <span className="objinfo-fval">{t(`objinfo.contextObject.type.${sel.contextObject.objType}`)}</span>
-          </div>
-          {sel.contextObject.source && (
+          <InfoGroup id="contextProps">
             <div className="objinfo-field">
-              <span className="objinfo-flabel">{t("objinfo.contextObject.source")}</span>
-              <span className="objinfo-fval" data-testid="context-source">{sel.contextObject.source}</span>
+              <span className="objinfo-flabel">{t("objinfo.contextObject.type")}</span>
+              <span className="objinfo-fval">{t(`objinfo.contextObject.type.${sel.contextObject.objType}`)}</span>
             </div>
-          )}
-          {ctxObj && (
-            <div className="site-panel objinfo-site">
-              <ContextObjectProps obj={ctxObj} quantities={quantities} />
-            </div>
-          )}
-          {sel.contextObject.lv95Center ? (
-            <>
-              <div className="objinfo-field">
-                <span className="objinfo-flabel">{t("objinfo.contextObject.lv95E")}</span>
-                <span className="objinfo-fval">{sel.contextObject.lv95Center.e.toFixed(1)}</span>
+            {ctxObj && (
+              <div className="site-panel objinfo-site">
+                <ContextObjectProps obj={ctxObj} quantities={quantities} />
               </div>
+            )}
+          </InfoGroup>
+          {/* [239] Herkunft und LV95 stehen in eigener Gruppe (Standard zugeklappt: nur Auskunft). */}
+          <InfoGroup id="georef">
+            {sel.contextObject.source && (
               <div className="objinfo-field">
-                <span className="objinfo-flabel">{t("objinfo.contextObject.lv95N")}</span>
-                <span className="objinfo-fval">{sel.contextObject.lv95Center.n.toFixed(1)}</span>
+                <span className="objinfo-flabel">{t("objinfo.contextObject.source")}</span>
+                <span className="objinfo-fval" data-testid="context-source">{sel.contextObject.source}</span>
               </div>
-            </>
-          ) : (
-            <div className="objinfo-field">
-              <span className="objinfo-fval objinfo-muted">{t("objinfo.contextObject.noAnchor")}</span>
-            </div>
-          )}
+            )}
+            {sel.contextObject.lv95Center ? (
+              <>
+                <div className="objinfo-field">
+                  <span className="objinfo-flabel">{t("objinfo.contextObject.lv95E")}</span>
+                  <span className="objinfo-fval">{sel.contextObject.lv95Center.e.toFixed(1)}</span>
+                </div>
+                <div className="objinfo-field">
+                  <span className="objinfo-flabel">{t("objinfo.contextObject.lv95N")}</span>
+                  <span className="objinfo-fval">{sel.contextObject.lv95Center.n.toFixed(1)}</span>
+                </div>
+              </>
+            ) : (
+              <div className="objinfo-field">
+                <span className="objinfo-fval objinfo-muted">{t("objinfo.contextObject.noAnchor")}</span>
+              </div>
+            )}
+          </InfoGroup>
         </>
       )}
       {/* [189] Bauteil-/BIM-Abschnitte (Wand, Decke, Öffnung, Treppe, Raum …) als einklappbare Gruppen. */}
