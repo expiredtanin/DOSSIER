@@ -25,6 +25,9 @@ export const PT_STATUS_THROTTLE_MS = 250;
 export interface ViewportToolbar3dProps {
   walkMode: boolean;
   onToggleWalk: () => void;
+  /** [245] Geist: Kollision und Bodenfolge im Begehen aus. Ohne `onToggleGhost` kein Knopf. */
+  ghost?: boolean;
+  onToggleGhost?: () => void;
   onCreateCamera: () => void;
   /** null = Pathtracing aus. */
   pathtrace: PathtraceStatus3d | null;
@@ -114,6 +117,7 @@ function WalkHelp({ visible }: { visible: boolean }) {
   const rows: Array<[string, string]> = [
     ["W A S D", t("walk.help.move")],
     ["Q / E", t("walk.help.updown")],
+    ["G", t("walk.help.ghost")],
     ["⇧ / Alt", t("walk.help.speed")],
     [t("walk.help.mouseKey"), t("walk.help.look")],
     ["Esc", t("walk.help.exit")],
@@ -131,7 +135,7 @@ function WalkHelp({ visible }: { visible: boolean }) {
   );
 }
 
-export function ViewportToolbar3d({ walkMode, onToggleWalk, onCreateCamera, pathtrace }: ViewportToolbar3dProps) {
+export function ViewportToolbar3d({ walkMode, onToggleWalk, ghost = false, onToggleGhost, onCreateCamera, pathtrace }: ViewportToolbar3dProps) {
   // Tastenhilfe: beim Einschalten sichtbar, nach ein paar Sekunden aus.
   const [helpOn, setHelpOn] = useState(false);
   useEffect(() => {
@@ -156,6 +160,16 @@ export function ViewportToolbar3d({ walkMode, onToggleWalk, onCreateCamera, path
             pressed={walkMode}
             onClick={onToggleWalk}
           />
+          {walkMode && onToggleGhost && (
+            <ToolButton
+              icon="ghost"
+              label={ghost ? t("walk.tip.ghostOff") : t("walk.tip.ghostOn")}
+              testId="walk-ghost"
+              on={ghost}
+              pressed={ghost}
+              onClick={onToggleGhost}
+            />
+          )}
         </div>
         <div className="vp3t-group" role="group" aria-label={t("viewport3d.toolbar.cameras")}>
           <ToolButton icon="add_a_photo" label={t("viewport3d.camera.create")} testId="camera-create-3d" onClick={onCreateCamera} />

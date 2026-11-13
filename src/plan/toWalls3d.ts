@@ -301,6 +301,8 @@ export interface Model3dOptions {
    * Cache, Umschalten rechnet keine Wand neu). [185] Auch als {@link Filter3d} mit Element-Auswahl.
    */
   hide?: Hide3d;
+  /** [245] Begehen mit Kollision: ohne Öffnungs-Einbauteile (Türflügel, Rahmen, Glas; Löcher in den Wänden genügen) und ohne Handläufe. */
+  forWalk?: boolean;
 }
 
 /** Das volle 3D-Modell: Wände (mit Öffnungen) + Deckenplatten + Kontext-Meshes. */
@@ -319,9 +321,9 @@ export function projectToModel3d(project: Project, opts: Model3dOptions = {}): R
   const meshes: RMesh[] = [...parts.contextMeshes];
   for (const m of parts.solidMeshes) meshes.push(m);
   for (const m of parts.columnMeshes) meshes.push(m);
-  for (const m of parts.openingMeshes) meshes.push(m);
+  if (!opts.forWalk) for (const m of parts.openingMeshes) meshes.push(m);
   for (const m of parts.stairMeshes) meshes.push(m);
-  for (const m of parts.stairRailings) meshes.push(m);
+  if (!opts.forWalk) for (const m of parts.stairRailings) meshes.push(m);
   for (const m of parts.roofMeshes) meshes.push(m);
   const model: RModel3d = {
     walls: parts.walls,

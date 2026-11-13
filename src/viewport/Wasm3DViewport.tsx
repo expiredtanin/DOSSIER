@@ -82,7 +82,8 @@ import {
   type OrbitState,
   type V3 as CamV3,
 } from "./cameraBridge";
-import { NO_KEYS, WALK_SPEED, anyKey, lookAround, speedFactor, stepWalk, walkKeyAllowed, walkKeyOf, type WalkKeys } from "./walk";
+import { NO_KEYS, WALK_SPEED, anyKey, bodySettling, initBody, lookAround, orbitEye, speedFactor, stepWalk, stepWalkCollide, walkKeyAllowed, walkKeyOf, type WalkBody, type WalkKeys } from "./walk";
+import { WalkWorld } from "./walkCollision";
 import { loadShortcutOverrides, matchesShortcut } from "../state/keyboardShortcuts";
 import { createCameraFromView } from "../state/cameraActions";
 import { ViewportToolbar3d } from "./ViewportToolbar3d";
@@ -603,6 +604,14 @@ export function Wasm3DViewport({
   const [walkMode, setWalkMode] = useState(false);
   const walkModeRef = useRef(false);
   walkModeRef.current = walkMode;
+  // [245] Kollision und Bodenfolge im Begehen; G = Geist (ohne). Welt (Raster aus den 3D-Teilen) je Projektstand einmal gebaut.
+  const [walkGhost, setWalkGhost] = useState(false);
+  const walkGhostRef = useRef(false);
+  walkGhostRef.current = walkGhost;
+  const walkBodyRef = useRef<WalkBody | null>(null);
+  const walkSyncRef = useRef<[number, number, number] | null>(null);
+  const walkWorldRef = useRef<{ p: unknown; h: unknown; ex: unknown; w: WalkWorld | null } | null>(null);
+  const walkKickRef = useRef<(() => void) | null>(null);
   const onWorkplanePointRef = useRef(onWorkplanePoint);
   onWorkplanePointRef.current = onWorkplanePoint;
   const onWorkplaneConfirmRef = useRef(onWorkplaneConfirm);
@@ -1472,17 +1481,51 @@ export function Wasm3DViewport({
       };
       redrawRef.current();
     };
+    // [245] Welt für die Kollision: nur neu bauen, wenn sich Projekt, Ausblendung oder Explosion geändert haben.
+    const walkWorld = (): WalkWorld | null => {
+      const p = projectRef.current;
+      const h = hideRef.current;
+      const ex = explodeRef.current;
+      const c = walkWorldRef.current;
+      if (c && c.p === p && c.h === h && c.ex === ex) return c.w;
+      let w: WalkWorld | null = null;
+      try {
+        w = new WalkWorld(projectToModel3d(p, { hide: h, explode: ex, forWalk: true }));
+      } catch {
+        w = null; // Kollision nicht möglich: Begehen läuft wie im Geist-Modus weiter.
+      }
+      walkWorldRef.current = { p, h, ex, w };
+      return w;
+    };
     const tick = (now: number) => {
       raf = 0;
-      if (!walkModeRef.current || !anyKey(keys)) return;
+      if (!walkModeRef.current) return;
+      const world = walkGhostRef.current ? null : walkWorld();
+      const moving = anyKey(keys);
+      if (!moving && !world) return;
       const o = orbitRef.current;
+      let settling = false;
       if (o) {
         const dt = last ? (now - last) / 1000 : 0;
-        orbitRef.current = stepWalk(o, keys, dt, WALK_SPEED * speedFactor(mods.shift, mods.alt));
+        const speed = WALK_SPEED * speedFactor(mods.shift, mods.alt);
+        if (world) {
+          // Wurde die Kamera sonst bewegt (Schwenk, Kamera öffnen), den Boden unter dem neuen Augpunkt neu suchen.
+          const eye = orbitEye(o);
+          const sync = walkSyncRef.current;
+          let body = walkBodyRef.current;
+          if (!body || !sync || Math.hypot(eye[0] - sync[0], eye[1] - sync[1], eye[2] - sync[2]) > 1e-6) body = initBody(o, world);
+          const r = stepWalkCollide(o, body, keys, dt, speed, world);
+          orbitRef.current = r.orbit;
+          walkBodyRef.current = r.body;
+          walkSyncRef.current = orbitEye(r.orbit);
+          settling = bodySettling(r.body);
+        } else {
+          orbitRef.current = stepWalk(o, keys, dt, speed);
+        }
         redrawOrbit();
       }
       last = now;
-      raf = requestAnimationFrame(tick);
+      if (moving || settling) raf = requestAnimationFrame(tick);
     };
     const start = () => {
       if (raf === 0) {
@@ -1490,6 +1533,7 @@ export function Wasm3DViewport({
         raf = requestAnimationFrame(tick);
       }
     };
+    walkKickRef.current = start;
     const release = () => {
       Object.assign(keys, NO_KEYS);
     };
@@ -1508,6 +1552,15 @@ export function Wasm3DViewport({
       if (e.key === "Escape") {
         setWalkMode(false);
         release();
+        return;
+      }
+      // [245] G: Geist (Kollision und Bodenfolge aus/an).
+      if (e.code === "KeyG" && !e.repeat && !e.shiftKey && !e.altKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        walkBodyRef.current = null;
+        setWalkGhost((g) => !g);
+        start();
         return;
       }
       const k = walkKeyOf(e.code);
@@ -1534,8 +1587,16 @@ export function Wasm3DViewport({
       window.removeEventListener("keyup", onKeyUp, true);
       window.removeEventListener("blur", release);
       cancelAnimationFrame(raf);
+      walkKickRef.current = null;
     };
   }, [ready, render]);
+
+  // [245] Beim Einschalten des Begehens (und beim Wechsel Geist ↔ Kollision) Boden neu suchen und gegebenenfalls absetzen.
+  useEffect(() => {
+    walkBodyRef.current = null;
+    walkSyncRef.current = null;
+    if (walkMode && !walkGhost) walkKickRef.current?.();
+  }, [walkMode, walkGhost]);
 
   // Maus-Navigation (LINKS = Orbit, MITTE/RECHTS = Pan, RAD = Zoom, s.
   // Datei-Kommentar MAUS-SCHEMA). Verlässt damit IMMER die Praeset-Kamera und
@@ -1922,6 +1983,8 @@ export function Wasm3DViewport({
       <ViewportToolbar3d
         walkMode={walkMode}
         onToggleWalk={() => setWalkMode((w) => !w)}
+        ghost={walkGhost}
+        onToggleGhost={() => setWalkGhost((g) => !g)}
         onCreateCamera={() => createCameraFromView()}
         pathtrace={ptStatus}
       />
