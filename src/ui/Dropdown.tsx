@@ -26,6 +26,14 @@ export interface DropdownOption {
   label: string;
   /** Ausgegraut, nicht wählbar. */
   disabled?: boolean;
+  /** [244] Material-Symbols-Name (z. B. "view_in_ar") vor dem Label. */
+  icon?: string;
+  /** [244] Zweitzeile (kurze Erklärung); zugleich Tooltip der Zeile. */
+  hint?: string;
+  /** [244] Kürzel, rechts als Taste angezeigt. */
+  shortcut?: string;
+  /** [244] Gruppentitel: aufeinanderfolgende Optionen mit gleicher Gruppe stehen unter einer Überschrift mit Trennlinie. */
+  group?: string;
 }
 
 /**
@@ -46,6 +54,93 @@ export interface DropdownItem {
   active?: boolean;
   /** Reiner Trenner (1px Linie); ignoriert alle anderen Felder. */
   divider?: boolean;
+  /** [244] Gruppenüberschrift (nicht wählbar). */
+  heading?: string;
+  /** [244] Material-Symbols-Name vor dem Label. */
+  icon?: string;
+  /** [244] Zweitzeile + Tooltip. */
+  hint?: string;
+  /** [244] Kürzel rechts. */
+  shortcut?: string;
+}
+
+/** Nicht wählbare Zeile (Trenner, Überschrift). */
+const isInert = (r: DropdownItem) => !!r.divider || r.heading !== undefined;
+
+/** Zeilenliste aus Optionen; bei `group` mit Überschrift und Trennlinie dazwischen ([244]). */
+export function optionRows(options: DropdownOption[], value?: string, onChange?: (v: string) => void): DropdownItem[] {
+  const rows: DropdownItem[] = [];
+  let group: string | undefined;
+  for (const o of options) {
+    if (o.group !== undefined && o.group !== group) {
+      if (rows.length > 0) rows.push({ divider: true });
+      rows.push({ heading: o.group });
+    }
+    group = o.group;
+    rows.push({
+      label: o.label,
+      disabled: o.disabled,
+      active: o.value === value,
+      icon: o.icon,
+      hint: o.hint,
+      shortcut: o.shortcut,
+      onSelect: () => onChange?.(o.value),
+    });
+  }
+  return rows;
+}
+
+/** Die Zeilen des Popovers (rein darstellend, damit testbar). */
+export function DropdownRows({
+  rows,
+  activeIdx,
+  onHover,
+  onSelect,
+}: {
+  rows: DropdownItem[];
+  activeIdx: number;
+  onHover: (i: number) => void;
+  onSelect: (row: DropdownItem) => void;
+}) {
+  return (
+    <>
+      {rows.map((row, i) =>
+        row.divider ? (
+          <div key={`div-${i}`} className="ctx-divider" role="separator" />
+        ) : row.heading !== undefined ? (
+          <div key={`head-${i}`} className="tb-dd-heading" role="presentation">
+            {row.heading}
+          </div>
+        ) : (
+          <button
+            key={`row-${i}`}
+            type="button"
+            role="option"
+            aria-selected={!!row.active}
+            title={row.hint}
+            className={`ctx-item tb-dd-item${row.danger ? " danger" : ""}${row.hint ? " has-hint" : ""}${
+              i === activeIdx ? " is-active" : ""
+            }`}
+            disabled={row.disabled}
+            onMouseEnter={() => !row.disabled && onHover(i)}
+            onClick={() => onSelect(row)}
+          >
+            <span className="tb-dd-check-slot">{row.active && <Check />}</span>
+            {row.icon && (
+              <span className="material-symbols-outlined tb-dd-icon" aria-hidden="true">
+                {row.icon}
+              </span>
+            )}
+            <span className="tb-dd-text">
+              <span className="ctx-item-label">{row.label}</span>
+              {row.hint && <span className="tb-dd-hint">{row.hint}</span>}
+            </span>
+            {row.shortcut && <kbd className="tb-dd-kbd">{row.shortcut}</kbd>}
+          </button>
+        ),
+      )}
+    </>
+  );
 }
 
 export interface DropdownProps {
@@ -146,21 +241,14 @@ export function Dropdown({
 
   // Einheitliche Zeilenliste: im Wert-Modus aus `options`, im Aktions-Modus aus
   // `items`. So teilen beide Modi dieselbe Render-/Tastatur-Logik.
-  const rows: DropdownItem[] = items
-    ? items
-    : (options ?? []).map((o) => ({
-        label: o.label,
-        disabled: o.disabled,
-        active: o.value === value,
-        onSelect: () => onChange?.(o.value),
-      }));
+  const rows: DropdownItem[] = items ? items : optionRows(options ?? [], value, onChange);
 
   // Trigger-Label: Wert-Modus → Label der aktiven Option; sonst `placeholder`.
   const current = options?.find((o) => o.value === value);
   const triggerLabel = current?.label ?? placeholder ?? "";
 
   // Index der ersten auswählbaren Zeile (für Tastatur-Start).
-  const firstSelectable = rows.findIndex((r) => !r.divider && !r.disabled);
+  const firstSelectable = rows.findIndex((r) => !isInert(r) && !r.disabled);
 
   const place = () => {
     const r = btnRef.current?.getBoundingClientRect();
@@ -183,7 +271,7 @@ export function Dropdown({
   };
 
   const selectRow = (row: DropdownItem) => {
-    if (row.disabled || row.divider) return;
+    if (row.disabled || isInert(row)) return;
     row.onSelect?.();
     close();
   };
@@ -244,7 +332,7 @@ export function Dropdown({
     for (let n = 0; n < rows.length; n++) {
       i = (i + dir + rows.length) % rows.length;
       const row = rows[i];
-      if (row && !row.divider && !row.disabled) {
+      if (row && !isInert(row) && !row.disabled) {
         setActiveIdx(i);
         return;
       }
@@ -283,27 +371,7 @@ export function Dropdown({
       style={{ left: pos.left, top: pos.top, minWidth: pos.minWidth }}
       onContextMenu={(e) => e.preventDefault()}
     >
-      {rows.map((row, i) =>
-        row.divider ? (
-          <div key={`div-${i}`} className="ctx-divider" role="separator" />
-        ) : (
-          <button
-            key={`row-${i}`}
-            type="button"
-            role="option"
-            aria-selected={!!row.active}
-            className={`ctx-item tb-dd-item${row.danger ? " danger" : ""}${
-              i === activeIdx ? " is-active" : ""
-            }`}
-            disabled={row.disabled}
-            onMouseEnter={() => !row.disabled && setActiveIdx(i)}
-            onClick={() => selectRow(row)}
-          >
-            <span className="tb-dd-check-slot">{row.active && <Check />}</span>
-            <span className="ctx-item-label">{row.label}</span>
-          </button>
-        ),
-      )}
+      <DropdownRows rows={rows} activeIdx={activeIdx} onHover={setActiveIdx} onSelect={selectRow} />
     </div>
   ) : null;
 

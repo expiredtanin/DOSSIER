@@ -10,7 +10,7 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   stehen im Archiv („Bewusst nicht übernommen“).
 - **Grösse** (eine Person mit Agenten): S ≤ 1 Tag · M ≤ 1 Woche · L ≤ 1 Monat · XL > 1 Monat.
   Steht keine Grösse im Archiv, ist sie hier geschätzt.
-- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 242);
+- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 244);
   nie eine ID wiederverwenden oder umnummerieren. Präfix-IDs (`[K]`, `[G]`, `[T]`, `[B]`, `[C]`) bleiben.
 - **Pro Punkt:** was fehlt · wo im Code · Grösse. Höchstens ein bis drei Sätze je Punkt;
   Messwerte und Befunde gehören in den Commit.
@@ -1252,6 +1252,7 @@ Einzeilig mit ID, Titel, Datum (2026). Kleine Reste erledigter Punkte (z. B. [T7
 exakte Durchdringung, [61] Zuordnung per Hand, [63] Profil je Kante, [70] Flächentabelle als Layout-Element,
 [80] Einzelplan-PDF ohne Ebenen, [82] Legende per Ziehen) stehen im Archiv beim jeweiligen Eintrag.
 
+- [244] Darstellungsarten-Menü im 3D übersichtlicher (13.11., Wunsch Maintainer, folgt auf [240]): gemeinsames `Dropdown` rückwärtskompatibel erweitert (optionale `group`, `icon`, `hint`, `shortcut` je Option; `optionRows`/`DropdownRows` exportiert, Überschriften und Trennlinien, Zweitzeile + Tooltip, Kürzel rechts). 3D-Menü (`renderModeOptions` in `TopBar.tsx`): Linien (Drahtgitter, Kanten, Nur Konturen) · Flächen (Schattiert, mit Kanten, Texturiert, Weiss) · Rendern (Pathtracing) mit Material-Symbols-Icons und Erklärung („Pathtracing: Physikalisch, rechnet fortlaufend“); de + en. Kürzel gibt es für die Stile keine. 2D-Plan (Farbig/Tusche) unverändert. Geprüft: tsc, vitest `src/ui src/i18n src/viewport`, e2e overridesTab, roomStamp218, viewTemplates, [212]-Pathtracer-Test (Chromium, Port 5194), Screenshots hell/dunkel vorher/nachher. Nicht in der Tauri-App/macOS geprüft.
 - [243] Qualität der neuen UI-Texte seit 12.11. (13.11.): Durchsicht aller neuen de/en-Schlüssel ([209] Kosten, [211] Blender, 3D-Bild, Hilfslinien, Körper→Bauteile, Raumstempel …). en: „building parts“ → „components“ (wie übriges en.ts), Kosten-Texte (Subtotal, Key figure, excluding land, attic storeys …), 3D-Bild-Fehler (graphics card returned no image, eye point and target coincide), „Automatic/Common scale“, „To change:“ u. a.; de: „Alt schaltet den Fang aus“, „Standpunkt und Ziel fallen zusammen“, „nicht als Bildschirmfoto“, „Ansichtsvorlage „Präsentation““, „MwSt. (Z)“. Platzhalter de/en geprüft (alle gleich), Schlüssel unverändert. Offen: `vitest src/i18n` und volles tsc im Worktree mangels WASM-Paketen nicht gelaufen
 - [240] 3D-Viewport: Knöpfe und Anzeigen schöner (13.11., Wunsch Maintainer). Neue Komponente `src/viewport/ViewportToolbar3d.tsx` (eigener CSS-Block `.vp3t-*`;
   `Wasm3DViewport.tsx` bindet nur noch ein): Icon-Knöpfe (Material Symbols `directions_walk`, `add_a_photo`) in zwei Gruppen oben rechts mit Tooltip
