@@ -52,6 +52,27 @@ pub struct GpuNode {
     pub count: u32,
 }
 
+/// [212] Etappe 5: breiter Knoten für den Shader, 64 Byte, 1:1 zum WGSL-`WNode`: die Hüllen BEIDER Kinder liegen im
+/// Elternknoten, ein Schritt der Traversierung lädt einen Knoten statt drei (Eltern + zwei Kinder). Kind-Verweis
+/// `left`/`right` = Index des breiten Knotens, oder bei gesetztem `LEAF_BIT` in `lcount`/`rcount` der erste Dreiecks-Index
+/// mit der Zahl in den unteren Bits (0 Dreiecke = leeres Kind).
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[cfg_attr(feature = "render", derive(bytemuck::Pod, bytemuck::Zeroable))]
+pub struct GpuWideNode {
+    pub lmin: [f32; 3],
+    pub left: u32,
+    pub lmax: [f32; 3],
+    pub lcount: u32,
+    pub rmin: [f32; 3],
+    pub right: u32,
+    pub rmax: [f32; 3],
+    pub rcount: u32,
+}
+
+/// Kind ist ein Blatt (`GpuWideNode::lcount`/`rcount`).
+pub const LEAF_BIT: u32 = 0x8000_0000;
+
 /// Dreieck, 48 Byte, 1:1 zum WGSL-`Tri`: Ecke `v0`, Kanten `e1 = v1 − v0`, `e2 = v2 − v0` (Möller–Trumbore),
 /// `mat` = Grundfarbe linear RGB8 (Bits 0..24) + Art (Bits 24..32), `rough` = GGX-Rauigkeit, `metal` = Metall-Anteil
 /// der glänzenden Schicht (0 dielektrisch, 1 Metall; aus der Materialtabelle).
@@ -109,6 +130,11 @@ pub fn classify_material(color: [f32; 3]) -> (u32, f32) {
 /// Höchste Albedo (energieerhaltend, wie der Blender-Leser [211]: ≤ 0.8).
 const MAX_ALBEDO: f32 = 0.8;
 
+/// Grundfarbe linear (0..1) aus `GpuTri::mat` (wie `unpack_albedo` im Shader).
+pub fn unpack_linear(mat: u32) -> [f32; 3] {
+    [(mat & 0xFF) as f32 / 255.0, ((mat >> 8) & 0xFF) as f32 / 255.0, ((mat >> 16) & 0xFF) as f32 / 255.0]
+}
+
 fn pack_mat(color: [f32; 3], kind: u32) -> u32 {
     let mut out = kind << 24;
     for (k, c) in color.iter().enumerate() {
@@ -159,7 +185,18 @@ pub struct Bvh {
     pub tris: Vec<GpuTri>,
     /// Texturdaten je Dreieck (gleiche Reihenfolge wie `tris`).
     pub tex: Vec<GpuTriTex>,
+    /// [212] Etappe 5: Lichtliste (Portale, Leuchten, Raumlicht; `pt_lights.rs`).
+    pub lights: crate::pt_lights::LightList,
+    /// Platz im Baum je Eingabe-Dreieck (`NO_SLOT` = verworfen) — für `refit`.
+    slots: Vec<u32>,
+    /// SAH-Kosten nach dem Bau (Vergleich nach `refit`).
+    sah_built: f32,
 }
+
+/// Eingabe-Dreieck ohne Platz im Baum (nicht endlich, entartet oder Doppelseite).
+const NO_SLOT: u32 = u32::MAX;
+/// Nach einem `refit` darf der Baum höchstens so viel teurer sein (SAH) als frisch gebaut, sonst Neubau.
+pub const REFIT_MAX_COST: f32 = 1.3;
 
 fn sub(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
     [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
@@ -208,6 +245,31 @@ fn tri_key(v: &[[f32; 3]; 3]) -> [[i64; 3]; 3] {
     k
 }
 
+/// Welche Eingabe-Dreiecke in den Baum kommen: endlich, nicht entartet, je Doppelseite das erste.
+fn kept_inputs(input: &[PtTri]) -> Vec<bool> {
+    let mut seen: HashSet<[[i64; 3]; 3]> = HashSet::with_capacity(input.len());
+    input
+        .iter()
+        .map(|t| {
+            if !t.v.iter().flatten().all(|c| c.is_finite() && c.abs() < 1e7) {
+                return false;
+            }
+            let n = cross(sub(t.v[1], t.v[0]), sub(t.v[2], t.v[0]));
+            dot(n, n) > 1e-18 && seen.insert(tri_key(&t.v))
+        })
+        .collect()
+}
+
+/// GPU-Dreieck und Texturdaten eines Eingabe-Dreiecks (Material aus Tabelle und Vertexfarbe).
+fn gpu_tri(t: &PtTri, table: &PtMaterialTable) -> (GpuTri, GpuTriTex) {
+    let (m, color) = table.resolve(t.layer, t.color);
+    let tx = table.tex_for(t.layer, &m);
+    (
+        GpuTri { v0: t.v[0], mat: pack_mat(color, m.kind), e1: sub(t.v[1], t.v[0]), rough: m.rough, e2: sub(t.v[2], t.v[0]), metal: m.metal },
+        GpuTriTex { uv0: t.uv[0], uv1: t.uv[1], uv2: t.uv[2], tex: (tx.layer & 0xFFFF) | ((tx.proc & 0xFF) << 16) | ((tx.detail as u32) << 24), scale: tx.scale },
+    )
+}
+
 impl Bvh {
     pub fn tri_count(&self) -> usize {
         self.tris.len()
@@ -221,22 +283,10 @@ impl Bvh {
     /// Baut den Baum (Binned-SAH). Ungültige Dreiecke fallen weg (s. Moduldoc); leer → leerer Baum. Material je
     /// Dreieck aus `table` (Ebene) und Vertexfarbe aufgelöst.
     pub fn build_with(input: &[PtTri], table: &PtMaterialTable) -> Bvh {
-        let mut seen: HashSet<[[i64; 3]; 3]> = HashSet::with_capacity(input.len());
-        let mut tris: Vec<PtTri> = Vec::with_capacity(input.len());
-        for t in input {
-            if !t.v.iter().flatten().all(|c| c.is_finite() && c.abs() < 1e7) {
-                continue;
-            }
-            let n = cross(sub(t.v[1], t.v[0]), sub(t.v[2], t.v[0]));
-            if !(dot(n, n) > 1e-18) {
-                continue;
-            }
-            if seen.insert(tri_key(&t.v)) {
-                tris.push(*t);
-            }
-        }
+        let keep = kept_inputs(input);
+        let tris: Vec<PtTri> = input.iter().zip(&keep).filter(|(_, k)| **k).map(|(t, _)| *t).collect();
         if tris.is_empty() {
-            return Bvh::default();
+            return Bvh { slots: vec![NO_SLOT; input.len()], ..Bvh::default() };
         }
         let bounds: Vec<Aabb> = tris
             .iter()
@@ -360,13 +410,192 @@ impl Bvh {
         let mut gpu_tris = Vec::with_capacity(order.len());
         let mut gpu_tex = Vec::with_capacity(order.len());
         for &i in &order {
-            let t = &tris[i as usize];
-            let (m, color) = table.resolve(t.layer, t.color);
-            let tx = table.tex_for(t.layer, &m);
-            gpu_tris.push(GpuTri { v0: t.v[0], mat: pack_mat(color, m.kind), e1: sub(t.v[1], t.v[0]), rough: m.rough, e2: sub(t.v[2], t.v[0]), metal: m.metal });
-            gpu_tex.push(GpuTriTex { uv0: t.uv[0], uv1: t.uv[1], uv2: t.uv[2], tex: (tx.layer & 0xFFFF) | ((tx.proc & 0xFF) << 16) | ((tx.detail as u32) << 24), scale: tx.scale });
+            let (g, x) = gpu_tri(&tris[i as usize], table);
+            gpu_tris.push(g);
+            gpu_tex.push(x);
         }
-        Bvh { nodes, tris: gpu_tris, tex: gpu_tex }
+        // Platz je Eingabe: k-tes behaltene Dreieck liegt an der Stelle, an der `order` es nennt.
+        let mut slot_of_kept = vec![0u32; tris.len()];
+        for (slot, &k) in order.iter().enumerate() {
+            slot_of_kept[k as usize] = slot as u32;
+        }
+        let mut slots = Vec::with_capacity(input.len());
+        let mut k = 0usize;
+        for &kept in &keep {
+            if kept {
+                slots.push(slot_of_kept[k]);
+                k += 1;
+            } else {
+                slots.push(NO_SLOT);
+            }
+        }
+        let mut bvh = Bvh { nodes, tris: gpu_tris, tex: gpu_tex, lights: Default::default(), slots, sah_built: 0.0 };
+        bvh.sah_built = bvh.sah_cost();
+        bvh.lights = crate::pt_lights::build_lights(&mut bvh);
+        bvh
+    }
+
+    /// [212] Etappe 5, Teil-Update: dieselben Eingabe-Dreiecke an neuer Lage (gleiche Zahl, gleiche verworfene — z. B. ein
+    /// verschobenes Objekt) bekommen die alte Baumstruktur mit neu gerechneten Hüllen (Refit, von den Blättern zur
+    /// Wurzel), Material und UV neu aufgelöst, Lichtliste neu. `false` (Baum unverändert) = Neubau nötig: andere Topologie
+    /// oder der Baum wäre um mehr als `REFIT_MAX_COST` teurer als frisch gebaut.
+    pub fn refit(&mut self, input: &[PtTri], table: &PtMaterialTable) -> bool {
+        if input.len() != self.slots.len() || self.tris.is_empty() {
+            return false;
+        }
+        let keep = kept_inputs(input);
+        if keep.iter().zip(&self.slots).any(|(k, s)| *k != (*s != NO_SLOT)) {
+            return false;
+        }
+        let (old_nodes, old_tris, old_tex) = (self.nodes.clone(), self.tris.clone(), self.tex.clone());
+        for (t, &s) in input.iter().zip(&self.slots) {
+            if s != NO_SLOT {
+                let (g, x) = gpu_tri(t, table);
+                self.tris[s as usize] = g;
+                self.tex[s as usize] = x;
+            }
+        }
+        // Kinder liegen immer hinter dem Elternknoten (Bau-Reihenfolge): rückwärts sind sie fertig, bevor er dran ist.
+        for ni in (0..self.nodes.len()).rev() {
+            let n = self.nodes[ni];
+            let mut b = Aabb::EMPTY;
+            if n.count > 0 {
+                for t in &self.tris[n.left_first as usize..(n.left_first + n.count) as usize] {
+                    b.grow_p(t.v0);
+                    b.grow_p([t.v0[0] + t.e1[0], t.v0[1] + t.e1[1], t.v0[2] + t.e1[2]]);
+                    b.grow_p([t.v0[0] + t.e2[0], t.v0[1] + t.e2[1], t.v0[2] + t.e2[2]]);
+                }
+            } else {
+                for c in [n.left_first as usize, n.left_first as usize + 1] {
+                    b.grow(&Aabb { min: self.nodes[c].min, max: self.nodes[c].max });
+                }
+            }
+            self.nodes[ni].min = b.min;
+            self.nodes[ni].max = b.max;
+        }
+        if self.sah_cost() > self.sah_built * REFIT_MAX_COST {
+            self.nodes = old_nodes;
+            self.tris = old_tris;
+            self.tex = old_tex;
+            return false;
+        }
+        self.lights = crate::pt_lights::build_lights(self);
+        true
+    }
+
+    /// [212] Etappe 5: der Baum als breite Knoten für den Shader (`GpuWideNode`; Wurzel = Index 0). Ein Baum aus nur einem
+    /// Blatt wird ein Knoten mit diesem Blatt links und einem leeren Blatt rechts; leer = leer.
+    pub fn wide_nodes(&self) -> Vec<GpuWideNode> {
+        if self.nodes.is_empty() {
+            return Vec::new();
+        }
+        let child = |i: u32, map: &[u32]| -> (u32, u32) {
+            let n = &self.nodes[i as usize];
+            if n.count > 0 {
+                (n.left_first, LEAF_BIT | n.count)
+            } else {
+                (map[i as usize], 0)
+            }
+        };
+        let root = &self.nodes[0];
+        if root.count > 0 {
+            return vec![GpuWideNode { lmin: root.min, left: root.left_first, lmax: root.max, lcount: LEAF_BIT | root.count, rcount: LEAF_BIT, ..Default::default() }];
+        }
+        // Innere Knoten in Baum-Reihenfolge durchnummerieren (Eltern vor Kindern).
+        let mut map = vec![u32::MAX; self.nodes.len()];
+        let mut k = 0u32;
+        for (i, n) in self.nodes.iter().enumerate() {
+            if n.count == 0 {
+                map[i] = k;
+                k += 1;
+            }
+        }
+        let mut out = Vec::with_capacity(k as usize);
+        for n in self.nodes.iter().filter(|n| n.count == 0) {
+            let (a, b) = (n.left_first, n.left_first + 1);
+            let (l, lc) = child(a, &map);
+            let (r, rc) = child(b, &map);
+            let (na, nb) = (&self.nodes[a as usize], &self.nodes[b as usize]);
+            out.push(GpuWideNode { lmin: na.min, left: l, lmax: na.max, lcount: lc, rmin: nb.min, right: r, rmax: nb.max, rcount: rc });
+        }
+        out
+    }
+
+    /// Nächster Treffer über die breiten Knoten — dieselbe Traversierung wie der Shader (Blätter sofort, dann das nähere
+    /// innere Kind, das fernere auf den Stapel).
+    pub fn intersect_wide(&self, wide: &[GpuWideNode], o: [f32; 3], d: [f32; 3], tmax: f32) -> Option<(f32, usize)> {
+        if wide.is_empty() || self.tris.is_empty() {
+            return None;
+        }
+        let inv = d.map(|c| if c.abs() > 1e-20 { 1.0 / c } else { 1e30f32.copysign(c) });
+        let mut tbest = tmax;
+        let mut best = None;
+        let mut stack: Vec<u32> = Vec::new();
+        let mut ni = 0u32;
+        loop {
+            let n = &wide[ni as usize];
+            let bx = |min, max, t| Self::hit_box(&GpuNode { min, max, ..Default::default() }, o, inv, t);
+            let mut t0 = bx(n.lmin, n.lmax, tbest);
+            let mut t1 = bx(n.rmin, n.rmax, tbest);
+            for (hit, first, cnt) in [(&mut t0, n.left, n.lcount), (&mut t1, n.right, n.rcount)] {
+                if hit.is_some() && cnt & LEAF_BIT != 0 {
+                    for ti in first..first + (cnt & !LEAF_BIT) {
+                        if let Some(t) = Self::hit_tri(&self.tris[ti as usize], o, d, 1e-6, tbest) {
+                            tbest = t;
+                            best = Some((t, ti as usize));
+                        }
+                    }
+                    *hit = None;
+                }
+            }
+            let t0 = t0.filter(|t| *t <= tbest);
+            let t1 = t1.filter(|t| *t <= tbest);
+            let next = match (t0, t1) {
+                (Some(a), Some(b)) => {
+                    let (near, far) = if b < a { (n.right, n.left) } else { (n.left, n.right) };
+                    stack.push(far);
+                    Some(near)
+                }
+                (Some(_), None) => Some(n.left),
+                (None, Some(_)) => Some(n.right),
+                (None, None) => None,
+            };
+            match next {
+                Some(c) => ni = c,
+                None => match stack.pop() {
+                    Some(c) => ni = c,
+                    None => return best,
+                },
+            }
+        }
+    }
+
+    /// [212] Etappe 5: Steht der Punkt in einem Raum? Ja, wenn jeder Strahl in die obere Halbkugel (Zenit und zwei Ringe
+    /// zu je 6 Richtungen, 60° und 30° hoch) innert 50 m etwas trifft (Decke, Dach, Glas). Für die Portale im Shader.
+    pub fn encloses(&self, p: [f32; 3]) -> bool {
+        if self.tris.is_empty() || !p.iter().all(|v| v.is_finite()) {
+            return false;
+        }
+        let mut dirs = vec![[0.0f32, 1.0, 0.0]];
+        for (el, k0) in [(60f32, 0.0f32), (30.0, 0.5)] {
+            for k in 0..6 {
+                let az = (k as f32 + k0) * std::f32::consts::TAU / 6.0;
+                let (ce, se) = (el.to_radians().cos(), el.to_radians().sin());
+                dirs.push([ce * az.cos(), se, ce * az.sin()]);
+            }
+        }
+        dirs.iter().all(|d| self.intersect(p, *d, 50.0).is_some())
+    }
+
+    /// SAH-Kosten des Baums relativ zur Wurzel (Knoten 1, Dreieckstest 1): Σ Fläche(Knoten)/Fläche(Wurzel) · (innen:
+    /// `TRAVERSAL_COST`, Blatt: Zahl der Dreiecke). Mass der Baumgüte (Refit-Grenze, Tests).
+    pub fn sah_cost(&self) -> f32 {
+        let Some(root) = self.nodes.first() else { return 0.0 };
+        let ra = Aabb { min: root.min, max: root.max }.area().max(1e-12);
+        self.nodes
+            .iter()
+            .map(|n| Aabb { min: n.min, max: n.max }.area() / ra * if n.count > 0 { n.count as f32 } else { TRAVERSAL_COST })
+            .sum()
     }
 
     /// Strahl gegen ein Dreieck (Möller–Trumbore); `t` im offenen Intervall (`tmin`, `tmax`).
@@ -527,6 +756,32 @@ mod tests {
         assert!(hits > 100, "zu wenige Treffer im Test ({hits})");
     }
 
+    /// [212] Etappe 5: breite Knoten treffen wie Brute-Force (auch ein Baum aus einem Blatt und der leere).
+    #[test]
+    fn breite_knoten_wie_brute_force() {
+        for (n, seed) in [(3000usize, 11u64), (2, 4), (1, 9)] {
+            let bvh = Bvh::build(&soup(n, seed));
+            let wide = bvh.wide_nodes();
+            let inner = bvh.nodes.iter().filter(|x| x.count == 0).count();
+            assert_eq!(wide.len(), inner.max(1));
+            let mut r = Rng(seed + 1);
+            for _ in 0..1500 {
+                let o = r.v(40.0);
+                let mut d = r.v(2.0);
+                let l = dot(d, d).sqrt().max(1e-6);
+                d = d.map(|c| c / l);
+                let a = bvh.intersect_wide(&wide, o, d, f32::INFINITY).map(|h| h.0);
+                let b = bvh.intersect_brute(o, d, f32::INFINITY).map(|h| h.0);
+                match (a, b) {
+                    (Some(x), Some(y)) => assert!((x - y).abs() < 1e-4, "{x} vs {y}"),
+                    (None, None) => {}
+                    _ => panic!("breit {a:?} ≠ Brute-Force {b:?} (n = {n})"),
+                }
+            }
+        }
+        assert!(Bvh::default().wide_nodes().is_empty());
+    }
+
     #[test]
     fn achsparallele_strahlen_und_wuerfel() {
         // Würfel aus 12 Dreiecken plus Boden: Strahlen genau entlang der Achsen (inv = ±∞ in zwei Komponenten).
@@ -543,6 +798,9 @@ mod tests {
         let bvh = Bvh::build(&tris);
         let (t, _) = bvh.intersect([0.5, 5.0, 0.5], [0.0, -1.0, 0.0], f32::INFINITY).expect("Würfel von oben");
         assert!((t - 4.0).abs() < 1e-5);
+        let wide = bvh.wide_nodes();
+        assert_eq!(bvh.intersect_wide(&wide, [0.5, 5.0, 0.5], [0.0, -1.0, 0.0], f32::INFINITY).map(|h| h.0), Some(t));
+        assert!(bvh.intersect_wide(&wide, [3.0, -0.5, 0.5], [-1.0, 0.0, 0.0], f32::INFINITY).is_none());
         // Unter dem Würfel durch, parallel zum Boden: kein Treffer.
         assert!(bvh.intersect([3.0, -0.5, 0.5], [-1.0, 0.0, 0.0], f32::INFINITY).is_none());
         assert!(bvh.intersect_brute([3.0, -0.5, 0.5], [-1.0, 0.0, 0.0], f32::INFINITY).is_none());
@@ -712,6 +970,61 @@ mod tests {
         let mut out = Vec::new();
         tris_from_mesh(&bad, &[0, 1, 2], &[], &mut out);
         assert_eq!(out[0].uv, NO_UV);
+    }
+
+    /// [212] Etappe 5: Refit statt Neubau — gleiche Dreiecke an neuer Lage (ein Teil verschoben) behalten die Struktur,
+    /// treffen danach wie Brute-Force; grosse Verschiebungen (Baum zu schlecht) und andere Topologie verlangen den Neubau.
+    #[test]
+    fn refit_bei_kleiner_aenderung() {
+        let mut input = soup(2000, 3);
+        let mut bvh = Bvh::build(&input);
+        let nodes = bvh.nodes.len();
+        let cost0 = bvh.sah_cost();
+        // Ein „Objekt“ (die ersten 50 Dreiecke) um 0.3 m verschieben.
+        for t in input.iter_mut().take(50) {
+            for v in t.v.iter_mut() {
+                v[0] += 0.3;
+            }
+        }
+        assert!(bvh.refit(&input, &PtMaterialTable::default()), "kleine Verschiebung: Refit");
+        assert_eq!(bvh.nodes.len(), nodes, "Struktur bleibt");
+        assert!(bvh.sah_cost() <= cost0 * REFIT_MAX_COST);
+        let fresh = Bvh::build(&input);
+        let mut r = Rng(5);
+        for _ in 0..1500 {
+            let o = r.v(40.0);
+            let mut d = r.v(2.0);
+            let l = dot(d, d).sqrt().max(1e-6);
+            d = d.map(|c| c / l);
+            let a = bvh.intersect(o, d, f32::INFINITY).map(|h| h.0);
+            let b = bvh.intersect_brute(o, d, f32::INFINITY).map(|h| h.0);
+            let c = fresh.intersect(o, d, f32::INFINITY).map(|h| h.0);
+            match (a, b, c) {
+                (Some(x), Some(y), Some(z)) => assert!((x - y).abs() < 1e-4 && (x - z).abs() < 1e-4),
+                (None, None, None) => {}
+                _ => panic!("Refit {a:?}, Brute-Force {b:?}, Neubau {c:?}"),
+            }
+        }
+        // Halbe Szene weit weg: Hüllen überlappen stark → Neubau verlangt, Baum unverändert.
+        let before = bvh.nodes.clone();
+        let mut far = input.clone();
+        for (i, t) in far.iter_mut().enumerate() {
+            if i % 2 == 0 {
+                for v in t.v.iter_mut() {
+                    v[1] += 200.0;
+                }
+            }
+        }
+        assert!(!bvh.refit(&far, &PtMaterialTable::default()));
+        assert_eq!(bvh.nodes, before);
+        // Andere Zahl oder ein Dreieck entartet: Neubau.
+        assert!(!bvh.refit(&input[..1999], &PtMaterialTable::default()));
+        let mut degen = input.clone();
+        degen[7].v[1] = degen[7].v[0];
+        degen[7].v[2] = degen[7].v[0];
+        assert!(!bvh.refit(&degen, &PtMaterialTable::default()));
+        // Leerer Baum: nie Refit.
+        assert!(!Bvh::default().refit(&input, &PtMaterialTable::default()));
     }
 
     /// Baryzentrische Koordinaten wie der Shader (`tri_bary`).

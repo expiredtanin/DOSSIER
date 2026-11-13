@@ -18,9 +18,11 @@ Browser-Bindung. Das 3D-Modell kommt als Teile aus dem Kern (`src-tauri/core/src
 | `math.rs` | 4x4-Matrizen, Kamera (Perspektive und Orthografie, Presets), Orbit |
 | `edges.rs`, `grid.rs` | Modell-Kanten für Drahtgitter und verdeckte Kanten; Bodenraster |
 | `shadow.rs` | Sonnenrichtung und Licht-Matrix für Schatten |
-| `bvh.rs` | `[212]` Hüllkörper-Baum (Binned-SAH) aus den Szenen-Dreiecken als flache GPU-Arrays; Material je Dreieck aus Tabelle und Vertexfarbe aufgelöst (Art, Farbe, Rauigkeit, Metall) |
+| `bvh.rs` | `[212]` Hüllkörper-Baum (Binned-SAH) aus den Szenen-Dreiecken als flache GPU-Arrays (für den Shader breite Knoten mit beiden Kinder-Hüllen, Etappe 5); Refit statt Neubau bei gleicher Topologie; Material je Dreieck aus Tabelle und Vertexfarbe aufgelöst (Art, Farbe, Rauigkeit, Metall) |
 | `pt_material.rs` | `[212]` Materialtabelle des Pathtracers: Material-Ebene der Szene (`materialIndex`) → Look nach Baustoffname/Bildkarte (wie der Blender-Leser [211]), mittlere Bildkarten-Farbe; Glas und Stahl aus der Vertexfarbe |
 | `pathtrace.rs` | `[212]` Pathtracer ohne GPU: Parameter-Block, Himmel/Sonne aus dem Sonnenstand, Nachthimmel, Kamera-Basis, WGSL (Pfadverfolgung mit Hilfspuffern für den Entrauscher, Glas mit fester Fresnel-Spiegelung, Anzeige mit Entrauscher-Mischung und ACES) |
+| `pt_lights.rs` | `[212]` Etappe 5: Lichtliste für Next-Event-Estimation — Fensterscheiben als Portale des Himmels, Leuchten, Raumlicht an Deckenuntersichten (nur nachts, ohne Leuchten im Modell); Auswahlgewichte als CPU-Referenz des Shaders, MIS mit der BRDF |
+| `exposure.rs` | `[212]` Etappe 5: Belichtungsautomatik (Histogramm über log-Luminanz, 40.–95. Perzentil, sanft nachgeführt), CPU-Referenz und WGSL-Pass |
 | `denoise.rs` | `[212]` Entrauscher: À-trous nach SVGF ohne Zeit-Reprojektion (Albedo demoduliert, Gewichte aus Normale/Tiefe/Luminanz-Varianz), Referenz auf der CPU (Tests) und WGSL; Mischgewicht nach Sample-Zahl |
 
 ## Schnitt
@@ -47,5 +49,5 @@ Browser-Bindung. Das 3D-Modell kommt als Teile aus dem Kern (`src-tauri/core/src
 | `gpu_pathtrace.rs` | `[212]` Pathtracer auf der GPU: Compute-Pipeline, Akkumulation und Hilfspuffer über Bilder (Neustart bei Kamera/Modell/Sonne/Nacht), Entrauscher-Pässe (prep + 5 × À-trous), Anzeige; vom `Renderer` im Stil `Pathtrace` erst bei Bedarf angelegt |
 | `gpu.rs` | wgpu-Pipelines und der `Renderer`: Puffer je Klumpen (texturiert nur die Material-Ebene, UV im Shader), unveränderte Linien/Hülle nicht neu hochgeladen (Inhalts-Schlüssel), Zahlen je Bild (`frame_stats`, `gpu_bytes`) — `[214]`; `gpu_points.rs`: Pipeline der Punktwolken im selben Pass |
 | `web.rs` | Browser-Bindung (Feature `web`): `set_parts()`, Kamera, Stil, Schnitt, Sonne, Punktwolken |
-| `bin/render_png.rs` | Headless-Bild in eine PNG-Datei (`npm run build:render-png`); siehe `CLAUDE.md`, „Ergebnis ansehen"; `--style pathtrace --samples N [--denoise off] [--pt-goal 1024]` rechnet mit dem Pathtracer (`[212]`) und meldet Samples/s; `--bench <ordner>` misst die Engine (`bin/bench3d/`, Eingaben aus `src/viewport/render3d.bench.test.ts`, `[214]`) |
+| `bin/render_png.rs` | Headless-Bild in eine PNG-Datei (`npm run build:render-png`); siehe `CLAUDE.md`, „Ergebnis ansehen"; `--style pathtrace --samples N [--denoise off] [--pt-goal 1024]` rechnet mit dem Pathtracer (`[212]`) und meldet Samples/s; `--eye x,y,z --target x,y,z --fov 65` freie Kamera (Innenansicht), `--timing` GPU-Zeitstempel je Abschnitt, `--portals off`, `--room-light off`, `--exposure EV`, `--auto-exposure off`; `--bench <ordner>` misst die Engine (`bin/bench3d/`, Eingaben aus `src/viewport/render3d.bench.test.ts`, `[214]`) |
 | `bin/spike3d.rs` | winit-Fenster mit Orbit-Kamera zur visuellen Prüfung (Feature `window`) |

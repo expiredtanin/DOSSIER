@@ -22,6 +22,12 @@
 // bleiben Ziegelkanten damit scharf, mit der geometrischen verschmiert er sie; Rauschen gleich); die geometrische
 // Normale für Versatz und Sichtbarkeit.
 //
+// Etappe 5 (Innenräume und Tempo): Next-Event-Estimation auf eine Lichtliste (`pt_lights.rs`) — Fensterscheiben als
+// Portale des Himmels (wie das „Portal“ in Cycles), Leuchten, nachts ein Raumlicht an den Deckenuntersichten (statt der
+// selbst leuchtenden Flächen hinter Glas der Etappe 3) —, kombiniert mit der BRDF-Wahl über die Power-Heuristik (MIS),
+// Portale und Raumlicht nur „drinnen“ (Kamera im Raum XOR ungerade Zahl gekreuzter Portale). Belichtungsautomatik
+// (`exposure.rs`) und Korrektur in Blenden in der Anzeige. Baum als breite Knoten (`bvh::GpuWideNode`).
+//
 // Bildmodell (Etappe 1): progressive Akkumulation, je Aufruf ein Sample je Pixel; Pfade mit höchstens
 // `MAX_BOUNCES` Abprallern und Russian Roulette ab dem dritten; Next-Event-Estimation zur Sonne (Kegel mit
 // `SUN_ANGULAR_RADIUS_DEG`, weiche Schatten); Glas als dünne Scheibe (Fresnel-Spiegelung oder gerader Durchgang,
@@ -42,7 +48,7 @@ const SUN_IRRADIANCE: f32 = 3.0;
 /// Belichtung vor dem Tonemapping.
 pub const DEFAULT_EXPOSURE: f32 = 0.85;
 
-/// Parameter-Block, 192 Byte, 1:1 zum WGSL-`Params` (nur `vec4`, std140-sicher).
+/// Parameter-Block, 240 Byte, 1:1 zum WGSL-`Params` (nur `vec4`, std140-sicher).
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 #[cfg_attr(feature = "render", derive(bytemuck::Pod, bytemuck::Zeroable))]
@@ -67,10 +73,62 @@ pub struct PtParams {
     pub dims: [u32; 4],
     /// Dreiecke, Breite, Höhe (Anzeige), 1 = sRGB im Shader kodieren.
     pub info: [u32; 4],
-    /// Entrauscher in der Anzeige: x = Mischgewicht (0 = roh, 1 = gefiltert, `denoise::blend_weight`); y = Innenlicht
-    /// hinter Glas (`Sky::room_light`).
+    /// Entrauscher in der Anzeige: x = Mischgewicht (0 = roh, 1 = gefiltert, `denoise::blend_weight`); y = Strahldichte
+    /// des Raumlichts (`Sky::room_light`, nur wenn eingeschaltet).
     pub dn: [f32; 4],
+    /// [212] Etappe 5: Lichtliste (`pt_lights.rs`): Zahl der Gruppen mit Portalen, Leuchten, Deckenlichtern; w = Schalter
+    /// (`F_PORTALS` | `F_EMITTERS` | `F_ROOM` | `F_NO_TEX`).
+    pub lights: [u32; 4],
+    /// Leistung für die Lichtwahl: x = Himmel durch Portale, y = Raumlicht; z, w frei.
+    pub light_pow: [f32; 4],
+    /// Belichtung (Etappe 5): x = Faktor 2^EV, y = Nachführung der Automatik je Bild (0 = aus, 1 = sofort), z/w = Grenzen
+    /// der Automatik.
+    pub expo: [f32; 4],
 }
+
+/// Schalter in `PtParams::lights.w`.
+pub const F_PORTALS: u32 = 1;
+pub const F_EMITTERS: u32 = 2;
+pub const F_ROOM: u32 = 4;
+/// Kamera steht in einem Raum (oben überall Decke): Portale gelten an den ersten Ecken (s. Shader `radiance`).
+pub const F_CAM_INSIDE: u32 = 8;
+/// Messung: Bildkarten aus (Kosten der Texturen, `render_png --pt-notex`).
+pub const F_NO_TEX: u32 = 16;
+
+/// Einstellungen des Pathtracers jenseits von Kamera und Himmel (Etappe 5).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PtOptions {
+    /// Zahl der Lichtgruppen je Art (`LightList::cluster_counts`).
+    pub light_counts: [u32; 3],
+    /// Fenster als Lichtportale (NEE auf den Himmel).
+    pub portals: bool,
+    /// Raumlicht bei Nacht (nur ohne Leuchten im Modell).
+    pub room_light: bool,
+    /// Belichtungskorrektur in Blenden (EV).
+    pub ev: f32,
+    /// Nachführung der Belichtungsautomatik je Bild (0 = aus, 1 = sofort).
+    pub auto_exposure: f32,
+    /// Abpraller je Pfad.
+    pub bounces: u32,
+    /// Messung: Bildkarten aus.
+    pub no_tex: bool,
+    /// Kamera in einem Raum (`F_CAM_INSIDE`, vom Renderer je Kamera bestimmt).
+    pub cam_inside: bool,
+}
+
+impl Default for PtOptions {
+    fn default() -> Self {
+        PtOptions { light_counts: [0; 3], portals: true, room_light: true, ev: 0.0, auto_exposure: 0.0, bounces: MAX_BOUNCES, no_tex: false, cam_inside: false }
+    }
+}
+
+/// Grenzen der Belichtungsautomatik relativ zur Belichtung des Himmels: Tag bis 32× heller (Innenraum), Nacht nicht heller
+/// (der dunkle Himmel soll dunkel bleiben), nie unter ¼.
+pub const AUTO_EXPOSURE_MIN: f32 = 0.25;
+pub const AUTO_EXPOSURE_MAX_DAY: f32 = 32.0;
+pub const AUTO_EXPOSURE_MAX_NIGHT: f32 = 1.0;
+/// Nachführung der Automatik je Bild im Viewport (sanft: ≈ 15 Bilder bis zum Ziel).
+pub const AUTO_EXPOSURE_RATE: f32 = 0.15;
 
 /// Himmel und Sonne aus der Richtung ZUR Sonne (world, Y oben).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -83,13 +141,14 @@ pub struct Sky {
     pub ground: [f32; 3],
     /// Belichtung vor dem Tonemapping.
     pub exposure: f32,
-    /// Warmes Innenlicht hinter Glas (Strahldichte, 0 = aus; nur bei Nacht, Etappe 3).
+    /// Raumlicht bei Nacht (Strahldichte der Deckenlichter, 0 = Tag; Etappe 5, vorher Innenlicht hinter Glas).
     pub room_light: f32,
 }
 
-/// Innenlicht bei Nacht: Flächen hinter Glas strahlen mit `ROOM_LIGHT` · Albedo (warmweiss, `ROOM_RGB` im Shader) —
-/// erleuchtete Fenster als Stimmung, ohne Leuchten im Modell.
-pub const ROOM_LIGHT: f32 = 0.06;
+/// Raumlicht bei Nacht (Etappe 5, `pt_lights.rs`): Strahldichte der Deckenuntersichten (warmweiss, `ROOM_RGB`) — der
+/// Raum wird beleuchtet, durchs Glas sieht man erleuchtete Fenster. Ersetzt das Innenlicht der Etappe 3 (Flächen hinter
+/// Glas strahlten selbst).
+pub const ROOM_LIGHT: f32 = 0.12;
 
 /// Belichtung bei Nacht (der Himmel ist um Grössenordnungen dunkler; das Bild soll das Gebäude noch zeigen).
 pub const NIGHT_EXPOSURE: f32 = 14.0;
@@ -181,14 +240,42 @@ pub fn camera_basis(cam: &Camera, aspect: f32) -> Option<([f32; 4], [f32; 4], [f
     ))
 }
 
-/// Füllt den Parameter-Block. None bei unbrauchbarer Kamera (dann zeichnet der Pathtracer nicht). `denoise` =
-/// Mischgewicht des Entrauschers in der Anzeige.
+/// Füllt den Parameter-Block mit den Standard-Optionen (ohne Lichtliste, Belichtung fest). None bei unbrauchbarer
+/// Kamera (dann zeichnet der Pathtracer nicht). `denoise` = Mischgewicht des Entrauschers in der Anzeige.
 #[allow(clippy::too_many_arguments)]
 pub fn build_params(cam: &Camera, sky: &Sky, internal: (u32, u32), display: (u32, u32), frame: u32, tri_count: u32, srgb_encode: bool, denoise: f32) -> Option<PtParams> {
+    build_params_with(cam, sky, internal, display, frame, tri_count, srgb_encode, denoise, &PtOptions::default())
+}
+
+fn lum(c: [f32; 3]) -> f32 {
+    0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
+}
+
+/// Wie `build_params`, mit Lichtliste, Raumlicht, Belichtung und Abprallern aus `opt` (Etappe 5).
+#[allow(clippy::too_many_arguments)]
+pub fn build_params_with(cam: &Camera, sky: &Sky, internal: (u32, u32), display: (u32, u32), frame: u32, tri_count: u32, srgb_encode: bool, denoise: f32, opt: &PtOptions) -> Option<PtParams> {
     let aspect = display.0 as f32 / display.1.max(1) as f32;
     let (cam_pos, cam_fwd, cam_right, cam_up) = camera_basis(cam, aspect)?;
     let cos_r = SUN_ANGULAR_RADIUS_DEG.to_radians().cos();
     let v4 = |c: [f32; 3], w: f32| [c[0], c[1], c[2], w];
+    // Nacht = Himmel ohne Sonne mit Raumlicht-Stärke (`night_sky`); Portale nur am Tag (der Nachthimmel ist dunkel),
+    // Raumlicht nur bei Nacht, eingeschaltet und ohne Leuchten im Modell.
+    let night = sky.room_light > 0.0;
+    let room_on = night && opt.room_light && opt.light_counts[1] == 0 && opt.light_counts[2] > 0;
+    let room = if room_on { sky.room_light.max(0.0) } else { 0.0 };
+    let mut flags = F_EMITTERS;
+    if opt.portals && !night && opt.light_counts[0] > 0 {
+        flags |= F_PORTALS;
+    }
+    if room_on {
+        flags |= F_ROOM;
+    }
+    if opt.no_tex {
+        flags |= F_NO_TEX;
+    }
+    if opt.cam_inside {
+        flags |= F_CAM_INSIDE;
+    }
     Some(PtParams {
         cam_pos,
         cam_fwd,
@@ -199,11 +286,22 @@ pub fn build_params(cam: &Camera, sky: &Sky, internal: (u32, u32), display: (u32
         sky_zenith: v4(sky.zenith, 0.0),
         sky_horizon: v4(sky.horizon, 0.0),
         ground: v4(sky.ground, sky.exposure),
-        dims: [internal.0, internal.1, frame, MAX_BOUNCES],
+        dims: [internal.0, internal.1, frame, opt.bounces.clamp(1, 16)],
         info: [tri_count, display.0, display.1, srgb_encode as u32],
-        dn: [if denoise.is_finite() { denoise.clamp(0.0, 1.0) } else { 0.0 }, sky.room_light.max(0.0), 0.0, 0.0],
+        dn: [if denoise.is_finite() { denoise.clamp(0.0, 1.0) } else { 0.0 }, room, 0.0, 0.0],
+        lights: [opt.light_counts[0], opt.light_counts[1], opt.light_counts[2], flags],
+        light_pow: [0.5 * (lum(sky.zenith) + lum(sky.horizon)), room * lum(ROOM_RGB), 0.0, 0.0],
+        expo: [
+            if opt.ev.is_finite() { 2f32.powf(opt.ev.clamp(-10.0, 10.0)) } else { 1.0 },
+            if opt.auto_exposure.is_finite() { opt.auto_exposure.clamp(0.0, 1.0) } else { 0.0 },
+            sky.exposure * AUTO_EXPOSURE_MIN,
+            sky.exposure * if night { AUTO_EXPOSURE_MAX_NIGHT } else { AUTO_EXPOSURE_MAX_DAY },
+        ],
     })
 }
+
+/// Farbe des Raumlichts (warmweiss ≈ 2700 K; 1:1 `ROOM_RGB` im Shader).
+pub const ROOM_RGB: [f32; 3] = [1.0, 0.72, 0.42];
 
 /// Höchstzahl Pixel, die je Sample verfolgt werden (grössere Ansichten rechnen verkleinert und werden in der
 /// Anzeige bilinear hochgezogen — Retina-Ansichten wären sonst zu langsam für die Vorschau).
@@ -220,8 +318,10 @@ pub fn internal_size(w: u32, h: u32, max_pixels: u64) -> (u32, u32) {
     (((w as f64 * s).floor() as u32).max(1), ((h as f64 * s).floor() as u32).max(1))
 }
 
-/// Compute-Shader der Pfadverfolgung: ein Sample je Pixel, aufaddiert in `accum` (rgb Summe, w Zahl).
-pub const PT_WGSL: &str = r#"
+/// WGSL-`Params` (1:1 `PtParams`), gemeinsam für Pfad, Anzeige und Belichtung.
+macro_rules! wgsl_params {
+    () => {
+        r#"
 struct Params {
     cam_pos: vec4<f32>,
     cam_fwd: vec4<f32>,
@@ -235,14 +335,25 @@ struct Params {
     dims: vec4<u32>,
     info: vec4<u32>,
     dn: vec4<f32>,
+    lights: vec4<u32>,
+    light_pow: vec4<f32>,
+    expo: vec4<f32>,
 };
-struct Node { bmin: vec3<f32>, left_first: u32, bmax: vec3<f32>, count: u32 };
+"#
+    };
+}
+pub(crate) use wgsl_params;
+
+/// Compute-Shader der Pfadverfolgung: ein Sample je Pixel, aufaddiert in `accum` (rgb Summe, w Zahl).
+pub const PT_WGSL: &str = concat!(wgsl_params!(), r#"
+// Breiter Knoten (Etappe 5, `bvh::GpuWideNode`): Hüllen beider Kinder; Verweis = Knoten oder (LEAF_BIT) Dreiecksbereich.
+struct WNode { lmin: vec3<f32>, left: u32, lmax: vec3<f32>, lcount: u32, rmin: vec3<f32>, right: u32, rmax: vec3<f32>, rcount: u32 };
 struct Tri { v0: vec3<f32>, mat: u32, e1: vec3<f32>, rough: f32, e2: vec3<f32>, metal: f32 };
 // Texturdaten je Dreieck (parallel zu `tris`, `bvh::GpuTriTex`): UV der Ecken (m), Ebene | Prozedur << 16, 1/Kachel.
 struct TriTex { uv0: vec2<f32>, uv1: vec2<f32>, uv2: vec2<f32>, tex: u32, scale: f32 };
 
 @group(0) @binding(0) var<uniform> P: Params;
-@group(0) @binding(1) var<storage, read> nodes: array<Node>;
+@group(0) @binding(1) var<storage, read> nodes: array<WNode>;
 @group(0) @binding(2) var<storage, read> tris: array<Tri>;
 @group(0) @binding(3) var<storage, read_write> accum: array<vec4<f32>>;
 // Entrauscher-Hilfspuffer (Summen über die Samples): (Albedo, Luminanz²), (Normale, Tiefe) des ersten Treffers.
@@ -256,6 +367,12 @@ struct TriTex { uv0: vec2<f32>, uv1: vec2<f32>, uv2: vec2<f32>, tex: u32, scale:
 @group(1) @binding(1) var mat_samp: sampler;
 @group(1) @binding(2) var<storage, read> layer_inv: array<vec4<f32>>;
 @group(1) @binding(3) var det_tex: texture_2d_array<f32>;
+// Etappe 5: Lichtliste (`pt_lights.rs`): vorgerechnete Lichter in Gruppen zu CLUSTER, Bereiche Portale | Leuchten |
+// Raumlicht; `P.lights.xyz` = Zahl der Gruppen je Art.
+// Ein Puffer (Grenze: 8 Speicher-Puffer je Stufe): zuerst die Gruppen im selben Satz-Format (`tri` = erstes Licht,
+// `pad0` = Zahl), dahinter die Lichter (`pt_lights::LightList::gpu_records`).
+struct Light { c: vec3<f32>, area: f32, n: vec3<f32>, r: f32, tri: u32, kind: u32, pad0: u32, pad1: u32 };
+@group(0) @binding(7) var<storage, read> lights: array<Light>;
 
 const NONE: u32 = 0xffffffffu;
 const MISS: f32 = 1e30;
@@ -272,20 +389,51 @@ const MAX_GLASS: u32 = 8u;
 const GLASS_SHADOW_T: f32 = 0.9;
 // Strahldichte einer Leuchte je Einheit Grundfarbe.
 const EMISSION: f32 = 1.0;
-// Farbe des Innenlichts bei Nacht (warmweiss, ≈ 2700 K).
+// Farbe des Raumlichts bei Nacht (warmweiss, ≈ 2700 K; `pathtrace::ROOM_RGB`).
 const ROOM_RGB: vec3<f32> = vec3<f32>(1.0, 0.72, 0.42);
 // Bildkarten bis zu diesem Abpraller (0 = Blickstrahl, 1 = erster Abpraller), danach Grundfarbe = Kartenmittel.
 const TEX_BOUNCES: u32 = 2u;
 // Kegelöffnung nach einem diffusen Abpraller (`pt_texture::DIFFUSE_SPREAD`).
 const DIFFUSE_SPREAD: f32 = 0.3;
+// Etappe 5 (`pt_lights.rs`): Arten der Lichtliste, Bit „gelistet“ in `TriTex.tex`, Schalter in `P.lights.w`.
+const L_PORTAL: u32 = 0u;
+const L_EMIT: u32 = 1u;
+const L_CEIL: u32 = 2u;
+const LISTED: u32 = 0x2000000u;
+const CLUSTER: u32 = 16u;
+// Reichweite des Raumlichts (m; `pt_lights::CEILING_RANGE`).
+const CEIL_RANGE: f32 = 8.0;
+// Leistung einer Leuchten-Gruppe für die Gruppenwahl (je Leuchte zählt ihre Farbe).
+const EMIT_GROUP_POWER: f32 = 0.5;
+const F_NO_TEX: u32 = 16u;
+const F_CAM_INSIDE: u32 = 8u;
+const LUM: vec3<f32> = vec3<f32>(0.2126, 0.7152, 0.0722);
+// Strahlverfolgung: nächster Treffer; Sonne (beliebiger Treffer, Glas × GLASS_SHADOW_T); Strecke bis tmax (Glas wie
+// im Pfad durchlässig, `sh_rgb`); Portal (bis ins Unendliche, dazu die Licht-Dichte der gekreuzten Portale `sh_pdf`).
+const MODE_CLOSEST: u32 = 0u;
+const MODE_SUN: u32 = 1u;
+const MODE_SEG: u32 = 2u;
+const MODE_PORTAL: u32 = 3u;
+const LEAF_BIT: u32 = 0x80000000u;
 
 var<private> rng: u32;
 // Erster Treffer des Blickstrahls (für den Entrauscher): Albedo, Normale (zur Kamera), Tiefe; Himmel = (1, 0, 0).
 var<private> g_albedo: vec3<f32>;
 var<private> g_normal: vec3<f32>;
 var<private> g_depth: f32;
-// Durchlass der zuletzt verfolgten Schattenstrahlen durch Glas (`trace` mit `shadow`).
+// Durchlass der zuletzt verfolgten Schattenstrahlen durch Glas (`trace` im Modus Sonne).
 var<private> sh_tr: f32;
+// Modus Strecke/Portal: Durchlass (wie der Pfad durch Glas) und Summe der Portal-Dichten (ohne 1/W).
+var<private> sh_rgb: vec3<f32>;
+var<private> sh_pdf: f32;
+// Empfänger der Lichtwahl (Punkt, geometrische Normale) für `sh_pdf`.
+var<private> rc_p: vec3<f32>;
+var<private> rc_n: vec3<f32>;
+var<private> rc_w: f32;
+// Lichtarten, die an der Ecke der Lichtwahl galten (Bits wie `P.lights.w`; Portale nur drinnen).
+var<private> rc_mask: u32;
+// Summe der Auswahlgewichte W der letzten Lichtwahl (`nee_lights`; 0 = keine).
+var<private> nee_w: f32;
 
 fn pcg(v: u32) -> u32 {
     let s = v * 747796405u + 2891336453u;
@@ -326,65 +474,109 @@ fn tri_hit(tr: Tri, o: vec3<f32>, d: vec3<f32>, tmax: f32) -> f32 {
     return -1.0;
 }
 
-// Nächster Treffer; `shadow` = beliebiger Treffer (Glas durchsichtig), Abbruch beim ersten.
-fn trace(o: vec3<f32>, d: vec3<f32>, shadow: bool) -> Hit {
+// Durchlass einer Glasfläche (dünne Scheibe: Fresnel beider Grenzflächen, leichte Tönung) — derselbe Faktor im Pfad
+// und in den Schattenstrahlen der Lichtwahl (sonst wichen die beiden MIS-Wege voneinander ab).
+fn glass_t(tr: Tri, d: vec3<f32>) -> vec3<f32> {
+    let nn = normalize(cross(tr.e1, tr.e2));
+    let f = fresnel(vec3<f32>(0.04), abs(dot(d, nn))).x;
+    let rt = 2.0 * f / (1.0 + f);
+    let a = unpack_albedo(tr.mat);
+    let tint = a / max(max(a.x, max(a.y, a.z)), 1e-3);
+    return (1.0 - rt) * mix(vec3<f32>(1.0), tint, 0.15);
+}
+
+// Treffer der laufenden Verfolgung (`trace`/`leaf`).
+var<private> th_t: f32;
+var<private> th_tri: u32;
+
+// Dreiecke eines Blattes gegen den Strahl; true = Schattenstrahl verdeckt (Verfolgung zu Ende).
+fn leaf(first: u32, count: u32, o: vec3<f32>, d: vec3<f32>, mode: u32) -> bool {
+    let shadow = mode != MODE_CLOSEST;
+    for (var i = first; i < first + count; i = i + 1u) {
+        let tr = tris[i];
+        if (shadow && (tr.mat >> 24u) == MAT_GLASS) {
+            // Glas dämpft den Schattenstrahl, hält ihn aber nicht auf (jedes Dreieck nur einmal im Baum).
+            let tg = tri_hit(tr, o, d, th_t);
+            if (tg > 0.0) {
+                if (mode == MODE_SUN) {
+                    sh_tr = sh_tr * GLASS_SHADOW_T;
+                } else {
+                    sh_rgb = sh_rgb * glass_t(tr, d);
+                    let tx = tri_tex[i].tex;
+                    if (mode == MODE_PORTAL && (tx & LISTED) != 0u) {
+                        sh_pdf = sh_pdf + light_pdf(tx & 0xffffu, o + d * tg, d);
+                    }
+                }
+            }
+            continue;
+        }
+        let t = tri_hit(tr, o, d, th_t);
+        if (t > 0.0) {
+            th_t = t;
+            th_tri = i;
+            if (shadow) { return true; }
+        }
+    }
+    return false;
+}
+
+// Strahl (o, d) bis `tmax` im Modus `mode` (s. MODE_*). Ausser MODE_CLOSEST endet er am ersten undurchsichtigen
+// Treffer (Rückgabe mit `tri` ≠ NONE = verdeckt); Glas hält ihn nicht auf. Etappe 5: breite Knoten (ein Ladevorgang je
+// Schritt), Blätter sofort geprüft, das fernere innere Kind auf den Stapel (dieselbe Traversierung wie
+// `Bvh::intersect_wide`). Ein Stapel mit Eintrittsabständen (zurückgestellte Knoten hinter dem Treffer überspringen) war
+// mit lavapipe nicht schneller (doppelter Privatspeicher) und ist darum weggelassen.
+fn trace(o: vec3<f32>, d: vec3<f32>, mode: u32, tmax: f32) -> Hit {
     var h: Hit;
     h.t = MISS;
     h.tri = NONE;
+    th_t = tmax;
+    th_tri = NONE;
     sh_tr = 1.0;
+    sh_rgb = vec3<f32>(1.0);
+    sh_pdf = 0.0;
     if (P.info.x == 0u) { return h; }
     let inv = vec3<f32>(
         select(select(1e30, -1e30, d.x < 0.0), 1.0 / d.x, abs(d.x) > 1e-20),
         select(select(1e30, -1e30, d.y < 0.0), 1.0 / d.y, abs(d.y) > 1e-20),
         select(select(1e30, -1e30, d.z < 0.0), 1.0 / d.z, abs(d.z) > 1e-20));
-    let root = nodes[0];
-    if (box_hit(root.bmin, root.bmax, o, inv, h.t) >= MISS) { return h; }
     var stack: array<u32, 64>;
     var sp: u32 = 0u;
     var ni: u32 = 0u;
     loop {
         let n = nodes[ni];
-        if (n.count > 0u) {
-            for (var i = n.left_first; i < n.left_first + n.count; i = i + 1u) {
-                let tr = tris[i];
-                if (shadow && (tr.mat >> 24u) == MAT_GLASS) {
-                    // Glas dämpft den Schattenstrahl, hält ihn aber nicht auf (jedes Dreieck nur einmal im Baum).
-                    if (tri_hit(tr, o, d, MISS) > 0.0) { sh_tr = sh_tr * GLASS_SHADOW_T; }
-                    continue;
-                }
-                let t = tri_hit(tr, o, d, h.t);
-                if (t > 0.0) {
-                    h.t = t;
-                    h.tri = i;
-                    if (shadow) { return h; }
-                }
-            }
-            if (sp == 0u) { break; }
-            sp = sp - 1u;
-            ni = stack[sp];
-            continue;
+        var t0 = box_hit(n.lmin, n.lmax, o, inv, th_t);
+        var t1 = box_hit(n.rmin, n.rmax, o, inv, th_t);
+        if (t0 < MISS && (n.lcount & LEAF_BIT) != 0u) {
+            if (leaf(n.left, n.lcount & ~LEAF_BIT, o, d, mode)) { break; }
+            t0 = MISS;
         }
-        var c0 = n.left_first;
-        var c1 = c0 + 1u;
-        let n0 = nodes[c0];
-        let n1 = nodes[c1];
-        var t0 = box_hit(n0.bmin, n0.bmax, o, inv, h.t);
-        var t1 = box_hit(n1.bmin, n1.bmax, o, inv, h.t);
+        if (t1 < MISS && (n.rcount & LEAF_BIT) != 0u) {
+            if (leaf(n.right, n.rcount & ~LEAF_BIT, o, d, mode)) { break; }
+            t1 = MISS;
+        }
+        if (t0 > th_t) { t0 = MISS; }
+        if (t1 > th_t) { t1 = MISS; }
+        var c0 = n.left;
+        var c1 = n.right;
         if (t1 < t0) {
             let tt = t0; t0 = t1; t1 = tt;
             let cc = c0; c0 = c1; c1 = cc;
         }
-        if (t0 >= MISS) {
-            if (sp == 0u) { break; }
-            sp = sp - 1u;
-            ni = stack[sp];
+        if (t0 < MISS) {
+            ni = c0;
+            if (t1 < MISS && sp < 64u) {
+                stack[sp] = c1;
+                sp = sp + 1u;
+            }
             continue;
         }
-        ni = c0;
-        if (t1 < MISS && sp < 64u) {
-            stack[sp] = c1;
-            sp = sp + 1u;
-        }
+        if (sp == 0u) { break; }
+        sp = sp - 1u;
+        ni = stack[sp];
+    }
+    if (th_tri != NONE) {
+        h.t = th_t;
+        h.tri = th_tri;
     }
     return h;
 }
@@ -533,7 +725,8 @@ fn surface(ti: u32, tr: Tri, o: vec3<f32>, d: vec3<f32>, ng: vec3<f32>, w: f32, 
     s.n = ng;
     s.rough = tr.rough;
     let tt = tri_tex[ti];
-    let layer = tt.tex & 0xffffu;
+    // Gelistete Lichter (Glas, Leuchten) tragen in den unteren Bits ihren Licht-Index statt einer Bildkarte.
+    let layer = select(tt.tex & 0xffffu, 0u, (tt.tex & LISTED) != 0u);
     let pk = (tt.tex >> 16u) & 0xffu;
     if (!use_tex || (layer == 0u && pk == 0u)) { return s; }
     let uv = tri_uv(tt, tri_bary(tr, o, d));
@@ -609,6 +802,179 @@ fn brdf(kind: u32, albedo: vec3<f32>, rough: f32, metal: f32, n: vec3<f32>, wo: 
     return diffuse;
 }
 
+// Dichte der BRDF-Wahl (Raumwinkel) für die Richtung wi — dieselbe Mischung wie die Richtungswahl in `radiance`
+// (glänzend: Spiegel-Lobe mit `p_spec`, sonst Kosinus).
+fn bsdf_pdf(kind: u32, rough: f32, ns: vec3<f32>, wo: vec3<f32>, wi: vec3<f32>, p_spec: f32) -> f32 {
+    let pd = max(dot(ns, wi), 0.0) / PI;
+    if (kind != MAT_GLOSSY) { return pd; }
+    let a = max(rough * rough, 0.002);
+    let h = normalize(wo + wi);
+    let noh = max(dot(ns, h), 1e-4);
+    let voh = max(dot(wo, h), 1e-4);
+    return p_spec * ggx_d(noh, a) * noh / (4.0 * voh) + (1.0 - p_spec) * pd;
+}
+
+// Leistung je Art für die Lichtwahl.
+fn kpower(k: u32) -> f32 {
+    if (k == L_CEIL) { return P.light_pow.y; }
+    if (k == L_EMIT) { return EMIT_GROUP_POWER; }
+    return P.light_pow.x;
+}
+
+// Auswahlgewicht eines Lichts für den Empfänger p (geometrische Normale n), 1:1 `pt_lights::light_weight`.
+fn lweight(l: Light, p: vec3<f32>, n: vec3<f32>) -> f32 {
+    if (!(l.area > 0.0)) { return 0.0; }
+    let dv = l.c - p;
+    if (!(dot(dv, n) + l.r > 0.0)) { return 0.0; }
+    var power = P.light_pow.x;
+    if (l.kind == L_PORTAL) {
+        // Portale wirken nur nach innen (n zeigt zum Himmel).
+        if (!(dot(dv, l.n) > 0.0)) { return 0.0; }
+    } else if (l.kind == L_CEIL) {
+        let nd = select(l.n, -l.n, l.n.y > 0.0);
+        if (!(dot(-dv, nd) > 0.0) || dot(dv, dv) > CEIL_RANGE * CEIL_RANGE) { return 0.0; }
+        power = P.light_pow.y;
+    } else if (l.kind == L_EMIT) {
+        power = max(dot(unpack_albedo(tris[l.tri].mat) * EMISSION, LUM), 1e-4);
+    }
+    let d2 = max(dot(dv, dv), 1e-12);
+    let d = sqrt(d2);
+    let cl = abs(dot(l.n, dv)) / d;
+    let cr = max(dot(n, dv) / d, 0.0);
+    return power * l.area * max(cl, 0.1) / max(d2, l.area) * (0.25 + cr);
+}
+
+// Gruppengewicht, 1:1 `pt_lights::cluster_weight`.
+fn cweight(g: Light, p: vec3<f32>, n: vec3<f32>) -> f32 {
+    if (!(g.area > 0.0)) { return 0.0; }
+    let dv = g.c - p;
+    if (!(dot(dv, n) + g.r > 0.0)) { return 0.0; }
+    let d2 = max(dot(dv, dv), 1e-12);
+    if (g.kind == L_CEIL && sqrt(d2) - g.r > CEIL_RANGE) { return 0.0; }
+    let cr = max(dot(n, dv) / sqrt(d2), 0.0);
+    return kpower(g.kind) * g.area / max(d2, g.area) * (0.25 + cr);
+}
+
+// Wahrscheinlichkeit, Licht `li` für den Empfänger `rc_p`/`rc_n` zu wählen (W = `rc_w`): Gruppe · Licht in der Gruppe.
+fn light_pick(li: u32) -> f32 {
+    let ncl = P.lights.x + P.lights.y + P.lights.z;
+    if (li < ncl) { return 0.0; }
+    let g = lights[(li - ncl) / CLUSTER];
+    if ((rc_mask & (1u << g.kind)) == 0u || !(rc_w > 0.0)) { return 0.0; }
+    let gw = cweight(g, rc_p, rc_n);
+    if (!(gw > 0.0)) { return 0.0; }
+    var sum = 0.0;
+    var own = 0.0;
+    for (var j = g.tri; j < g.tri + g.pad0; j = j + 1u) {
+        let w = lweight(lights[j], rc_p, rc_n);
+        sum = sum + w;
+        if (j == li) { own = w; }
+    }
+    if (!(sum > 0.0)) { return 0.0; }
+    return gw / rc_w * own / sum;
+}
+
+// Licht-Dichte (Raumwinkel) des gelisteten Lichts `li`, getroffen im Punkt y in Richtung d: Wahl · d² / (cos · A).
+fn light_pdf(li: u32, y: vec3<f32>, d: vec3<f32>) -> f32 {
+    let l = lights[li];
+    let cl = abs(dot(l.n, d));
+    if (cl < 1e-4 || !(l.area > 0.0)) { return 0.0; }
+    let dd = y - rc_p;
+    return light_pick(li) * dot(dd, dd) / (cl * l.area);
+}
+
+// Next-Event-Estimation auf die Lichtliste (Etappe 5, `pt_lights.rs`): Gruppe nach Gruppengewicht, darin ein Licht nach
+// Gewicht (je ein Durchgang, Reservoir mit einer Zufallszahl), Punkt gleichverteilt darauf, Schattenstrahl; Portale
+// bringen den Himmel dahinter, Leuchten ihre Farbe (beide mit Power-Heuristik gegen die BRDF), das Raumlicht ist nur
+// hierüber sichtbar. Rückgabe ohne Pfad-Durchsatz; setzt `nee_w` (Summe der Gruppengewichte) für die MIS des nächsten
+// BRDF-Strahls. `last` = letzte Ecke des Pfades (kein BRDF-Strahl mehr): volles Gewicht für die Lichtwahl.
+fn nee_lights(p: vec3<f32>, n: vec3<f32>, ns: vec3<f32>, wo: vec3<f32>, kind: u32, albedo: vec3<f32>, rough: f32, metal: f32, p_spec: f32, eps: f32, last: bool, mask: u32) -> vec3<f32> {
+    nee_w = 0.0;
+    rc_mask = mask;
+    if (mask == 0u) { return vec3<f32>(0.0); }
+    var u = rnd();
+    var wsum = 0.0;
+    var gpick = NONE;
+    var gpw = 0.0;
+    var start = 0u;
+    for (var k = 0u; k < 3u; k = k + 1u) {
+        let cnt = P.lights[k];
+        if ((mask & (1u << k)) != 0u) {
+            for (var i = start; i < start + cnt; i = i + 1u) {
+                let w = cweight(lights[i], p, n);
+                if (w > 0.0) {
+                    wsum = wsum + w;
+                    let pr = w / wsum;
+                    if (u < pr) {
+                        gpick = i;
+                        gpw = w;
+                        u = u / pr;
+                    } else {
+                        u = (u - pr) / max(1.0 - pr, 1e-7);
+                    }
+                }
+            }
+        }
+        start = start + cnt;
+    }
+    nee_w = wsum;
+    if (gpick == NONE) { return vec3<f32>(0.0); }
+    let g = lights[gpick];
+    var u2 = rnd();
+    var lsum = 0.0;
+    var pick = NONE;
+    var pw = 0.0;
+    for (var j = g.tri; j < g.tri + g.pad0; j = j + 1u) {
+        let w = lweight(lights[j], p, n);
+        if (w > 0.0) {
+            lsum = lsum + w;
+            let pr = w / lsum;
+            if (u2 < pr) {
+                pick = j;
+                pw = w;
+                u2 = u2 / pr;
+            } else {
+                u2 = (u2 - pr) / max(1.0 - pr, 1e-7);
+            }
+        }
+    }
+    if (pick == NONE) { return vec3<f32>(0.0); }
+    let l = lights[pick];
+    let pk = l.kind;
+    let tr = tris[l.tri];
+    let r1 = rnd();
+    let r2 = rnd();
+    let sq = sqrt(r1);
+    let y = tr.v0 + tr.e1 * (sq * (1.0 - r2)) + tr.e2 * (sq * r2);
+    let dv = y - p;
+    let dist = length(dv);
+    if (!(dist > 1e-5)) { return vec3<f32>(0.0); }
+    let wi = dv / dist;
+    let ndl = dot(ns, wi);
+    if (ndl <= 0.0 || dot(n, wi) <= 0.0) { return vec3<f32>(0.0); }
+    let cl = abs(dot(l.n, wi));
+    if (cl < 1e-4) { return vec3<f32>(0.0); }
+    let own = gpw / wsum * pw / lsum * dist * dist / (cl * l.area);
+    let f = brdf(kind, albedo, rough, metal, ns, wo, wi) * ndl;
+    let o = p + n * eps;
+    rc_p = p;
+    rc_n = n;
+    rc_w = wsum;
+    if (pk == L_PORTAL) {
+        if (trace(o, wi, MODE_PORTAL, MISS).tri != NONE) { return vec3<f32>(0.0); }
+        let pl = max(sh_pdf, own);
+        let pb = select(bsdf_pdf(kind, rough, ns, wo, wi, p_spec), 0.0, last);
+        return f * sky(wi, false, false) * sh_rgb * (pl / (pl * pl + pb * pb));
+    }
+    if (pk == L_CEIL && dot(select(l.n, -l.n, l.n.y > 0.0), wi) >= 0.0) { return vec3<f32>(0.0); }
+    if (trace(o, wi, MODE_SEG, max(dist - max(dist * 1e-3, 4.0 * eps), 0.0)).tri != NONE) { return vec3<f32>(0.0); }
+    if (pk == L_EMIT) {
+        let pb = select(bsdf_pdf(kind, rough, ns, wo, wi, p_spec), 0.0, last);
+        return f * unpack_albedo(tr.mat) * EMISSION * sh_rgb * (own / (own * own + pb * pb));
+    }
+    return f * ROOM_RGB * P.dn.y * sh_rgb / own;
+}
+
 // Himmel; `primary` = Blickstrahl: unter dem Horizont Dunst statt Boden (heller Hintergrund wie die übrigen Stile).
 fn sky(d: vec3<f32>, with_sun: bool, primary: bool) -> vec3<f32> {
     let s = P.sun_dir.xyz;
@@ -630,20 +996,20 @@ fn sky(d: vec3<f32>, with_sun: bool, primary: bool) -> vec3<f32> {
 // getroffene Fläche mit Sonnenlicht (ein Schattenstrahl) und gleichmässigem Himmelslicht — statt Schwarz, wenn die
 // Spiegelung auf Boden oder Nachbarbau fällt (Blick von oben auf eine Fassade).
 fn reflected(o: vec3<f32>, d: vec3<f32>, cw: f32, cs: f32) -> vec3<f32> {
-    let h = trace(o, d, false);
+    let h = trace(o, d, MODE_CLOSEST, MISS);
     if (h.tri == NONE) { return sky(d, false, false); }
     let tr = tris[h.tri];
     if ((tr.mat >> 24u) == MAT_GLASS) { return sky(d, false, false); }
     var n = normalize(cross(tr.e1, tr.e2));
     if (dot(n, d) > 0.0) { n = -n; }
-    let albedo = surface(h.tri, tr, o, d, n, cw + cs * h.t, true).albedo;
+    let albedo = surface(h.tri, tr, o, d, n, cw + cs * h.t, (P.lights.w & F_NO_TEX) == 0u).albedo;
     if ((tr.mat >> 24u) == MAT_EMISSIVE) { return albedo * EMISSION; }
     let p = o + d * h.t;
     let eps = 1e-4 * max(1.0, max(abs(p.x), max(abs(p.y), abs(p.z))));
     var c = albedo * (0.5 * (P.sky_zenith.rgb + P.sky_horizon.rgb)) * (0.5 + 0.5 * max(n.y, 0.0));
     if (P.sun_irr.w > 0.5) {
         let ndl = dot(n, P.sun_dir.xyz);
-        if (ndl > 0.0 && trace(p + n * eps, P.sun_dir.xyz, true).tri == NONE) {
+        if (ndl > 0.0 && trace(p + n * eps, P.sun_dir.xyz, MODE_SUN, MISS).tri == NONE) {
             c = c + albedo * (1.0 / PI) * P.sun_irr.rgb * ndl * sh_tr;
         }
     }
@@ -662,15 +1028,28 @@ fn radiance(o_in: vec3<f32>, d_in: vec3<f32>, cw0: f32, cs0: f32) -> vec3<f32> {
     var first = true;
     var b = 0u;
     var glass_n = 0u;
+    // Gekreuzte Portale (eine Fläche je Scheibe gelistet): drinnen = Kamera drinnen XOR ungerade Zahl (Etappe 5).
+    var portal_n = 0u;
+    var mis_mask = 0u;
     var albedo_set = false;
+    // MIS-Zustand der letzten Ecke mit Lichtwahl (Etappe 5): W, Punkt, Normale, BRDF-Dichte der gewählten Richtung,
+    // gesammelte Portal-Dichte der seither gekreuzten Scheiben.
+    var mis_w = 0.0;
+    var mis_p = vec3<f32>(0.0);
+    var mis_n = vec3<f32>(0.0);
+    var mis_pb = 0.0;
+    var mis_pl = 0.0;
     g_albedo = vec3<f32>(1.0);
     g_normal = vec3<f32>(0.0);
     g_depth = 0.0;
     loop {
         if (b >= P.dims.w) { break; }
-        let h = trace(o, d, false);
+        let h = trace(o, d, MODE_CLOSEST, MISS);
         if (h.tri == NONE) {
-            l = l + tp * sky(d, specular, b == 0u);
+            // Himmel durch Portale: BRDF-Anteil der Power-Heuristik gegen die Lichtwahl der letzten Ecke.
+            var wgt = 1.0;
+            if (mis_w > 0.0 && mis_pl > 0.0) { wgt = mis_pb * mis_pb / (mis_pb * mis_pb + mis_pl * mis_pl); }
+            l = l + tp * sky(d, specular, b == 0u) * wgt;
             break;
         }
         let tr = tris[h.tri];
@@ -678,7 +1057,7 @@ fn radiance(o_in: vec3<f32>, d_in: vec3<f32>, cw0: f32, cs0: f32) -> vec3<f32> {
         var n = normalize(cross(tr.e1, tr.e2));
         if (dot(n, d) > 0.0) { n = -n; }
         let w = cw + cs * h.t;
-        let sf = surface(h.tri, tr, o, d, n, w, b < TEX_BOUNCES);
+        let sf = surface(h.tri, tr, o, d, n, w, b < TEX_BOUNCES && (P.lights.w & F_NO_TEX) == 0u);
         let albedo = sf.albedo;
         let ns = sf.n;
         let p = o + d * h.t;
@@ -694,11 +1073,32 @@ fn radiance(o_in: vec3<f32>, d_in: vec3<f32>, cw0: f32, cs0: f32) -> vec3<f32> {
             albedo_set = true;
             g_albedo = albedo;
         }
+        let txh = tri_tex[h.tri].tex;
+        let listed = (txh & LISTED) != 0u;
         if (kind == MAT_EMISSIVE) {
-            l = l + tp * albedo * EMISSION;
+            var wgt = 1.0;
+            if (mis_w > 0.0 && listed && (mis_mask & 2u) != 0u) {
+                rc_p = mis_p;
+                rc_n = mis_n;
+                rc_w = mis_w;
+                rc_mask = mis_mask;
+                let pl = light_pdf(txh & 0xffffu, p, d);
+                wgt = mis_pb * mis_pb / (mis_pb * mis_pb + pl * pl);
+            }
+            l = l + tp * albedo * EMISSION * wgt;
             break;
         }
         if (kind == MAT_GLASS) {
+            if (listed) {
+                portal_n = portal_n + 1u;
+            }
+            if (mis_w > 0.0 && listed && (mis_mask & 1u) != 0u) {
+                rc_p = mis_p;
+                rc_n = mis_n;
+                rc_w = mis_w;
+                rc_mask = mis_mask;
+                mis_pl = mis_pl + light_pdf(txh & 0xffffu, p, d);
+            }
             // Dünne Scheibe: Spiegelung mit Fresnel (beide Grenzflächen) fest als Anteil statt Zufallswahl (kein
             // Salz-und-Pfeffer-Rauschen), ausgewertet ohne weiteren Pfad (`reflected`); der Rest geht leicht getönt
             // durch. Durchgänge zählen nicht als Abpraller und nicht für Russian Roulette.
@@ -706,8 +1106,7 @@ fn radiance(o_in: vec3<f32>, d_in: vec3<f32>, cw0: f32, cs0: f32) -> vec3<f32> {
             let rt = 2.0 * f / (1.0 + f);
             let rd = reflect(d, n);
             l = l + tp * rt * reflected(p + n * eps, rd, w, cs);
-            let tint = albedo / max(max(albedo.x, max(albedo.y, albedo.z)), 1e-3);
-            tp = tp * (1.0 - rt) * mix(vec3<f32>(1.0), tint, 0.15);
+            tp = tp * glass_t(tr, d);
             o = p - n * eps;
             cw = w;
             glass_n = glass_n + 1u;
@@ -720,16 +1119,11 @@ fn radiance(o_in: vec3<f32>, d_in: vec3<f32>, cw0: f32, cs0: f32) -> vec3<f32> {
             let ls = cone_dir(P.sun_dir.xyz, P.sun_dir.w);
             let ndl = dot(ns, ls);
             if (ndl > 0.0 && dot(n, ls) > 0.0) {
-                let sh = trace(p + n * eps, ls, true);
+                let sh = trace(p + n * eps, ls, MODE_SUN, MISS);
                 if (sh.tri == NONE) {
                     l = l + tp * brdf(kind, albedo, sf.rough, tr.metal, ns, wo, ls) * P.sun_irr.rgb * ndl * sh_tr;
                 }
             }
-        }
-        // Nacht: warmes Innenlicht auf Flächen, die der Pfad durch Glas erreicht hat (erleuchtete Räume, Licht, das
-        // aus den Fenstern auf Boden und Fassade fällt).
-        if (P.dn.y > 0.0 && glass_n > 0u) {
-            l = l + tp * albedo * ROOM_RGB * P.dn.y;
         }
         // Nächste Richtung. Glänzend: Spiegel-Lobe mit Wahrscheinlichkeit nach Fresnel (Metall: immer) wählen, sonst
         // diffus (Gewicht / Wahl).
@@ -737,6 +1131,14 @@ fn radiance(o_in: vec3<f32>, d_in: vec3<f32>, cw0: f32, cs0: f32) -> vec3<f32> {
         let f0 = spec_f0(albedo, tr.metal);
         let p_d = clamp(fresnel(vec3<f32>(0.04), nov0).x * 4.0, 0.1, 0.9);
         let p_spec = select(0.0, clamp(mix(p_d, 1.0, tr.metal), 0.1, 1.0), kind == MAT_GLOSSY);
+        // Etappe 5: Lichtwahl (Fenster als Portale des Himmels, Leuchten, Raumlicht bei Nacht).
+        // Portale und Raumlicht nur drinnen: Kamera drinnen (`F_CAM_INSIDE`) und gerade Zahl gekreuzter Portale, oder
+        // umgekehrt — draussen sieht man den Himmel ohnehin, ein Schattenstrahl ins Haus brächte nichts (das Raumlicht fällt
+        // damit nicht aus den Fenstern auf Gelände und Fassade; die erleuchteten Räume sieht man durchs Glas).
+        let inside = ((P.lights.w & F_CAM_INSIDE) != 0u) != ((portal_n & 1u) == 1u);
+        let mask = (P.lights.w & 7u) & select(2u, 7u, inside);
+        l = l + tp * nee_lights(p, n, ns, wo, kind, albedo, sf.rough, tr.metal, p_spec, eps, b + 1u >= P.dims.w, mask);
+        let w_lights = nee_w;
         if (kind == MAT_GLOSSY && rnd() < p_spec) {
             let a = max(sf.rough * sf.rough, 0.002);
             let r1 = rnd();
@@ -763,6 +1165,12 @@ fn radiance(o_in: vec3<f32>, d_in: vec3<f32>, cw0: f32, cs0: f32) -> vec3<f32> {
             if (kind == MAT_GLOSSY) { tp = tp * (1.0 - 0.04) * (1.0 - tr.metal); }
             cs = max(cs, DIFFUSE_SPREAD);
         }
+        mis_w = w_lights;
+        mis_mask = mask;
+        mis_p = p;
+        mis_n = n;
+        mis_pb = bsdf_pdf(kind, sf.rough, ns, wo, d, p_spec);
+        mis_pl = 0.0;
         cw = w;
         o = p + n * eps;
         specular = false;
@@ -817,30 +1225,18 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     aux_a[idx] = pa + vec4<f32>(g_albedo, lu * lu);
     aux_b[idx] = pb + vec4<f32>(g_normal, g_depth);
 }
-"#;
+"#);
 
 /// Anzeige: Vollbild-Dreieck, liest die Akkumulation (bilinear auf die Anzeigegrösse), Mittel, Belichtung,
 /// ACES (Narkowicz 2015) und — bei Ziel ohne sRGB-Format (WebGPU-Canvas) — sRGB-Kodierung.
-pub const PT_DISPLAY_WGSL: &str = r#"
-struct Params {
-    cam_pos: vec4<f32>,
-    cam_fwd: vec4<f32>,
-    cam_right: vec4<f32>,
-    cam_up: vec4<f32>,
-    sun_dir: vec4<f32>,
-    sun_irr: vec4<f32>,
-    sky_zenith: vec4<f32>,
-    sky_horizon: vec4<f32>,
-    ground: vec4<f32>,
-    dims: vec4<u32>,
-    info: vec4<u32>,
-    dn: vec4<f32>,
-};
+pub const PT_DISPLAY_WGSL: &str = concat!(wgsl_params!(), r#"
 @group(0) @binding(0) var<uniform> P: Params;
 @group(0) @binding(1) var<storage, read> accum: array<vec4<f32>>;
 // Entrauscher ([212] Etappe 2): gefiltertes Licht (`denoise.rs`) und Albedo-Summe; Mischgewicht `P.dn.x`.
 @group(0) @binding(2) var<storage, read> filt: array<vec4<f32>>;
 @group(0) @binding(3) var<storage, read> aux_a: array<vec4<f32>>;
+// Etappe 5: Belichtung der Automatik (`exposure.rs`): x = aktuell, y = gültig.
+@group(0) @binding(4) var<storage, read> expo: array<vec4<f32>>;
 
 @vertex
 fn vs_main(@builtin(vertex_index) i: u32) -> @builtin(position) vec4<f32> {
@@ -884,11 +1280,14 @@ fn fs_main(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
     let tx = fx - floor(fx);
     let ty = fy - floor(fy);
     let c = mix(mix(texel(x0, y0), texel(x0 + 1, y0), tx), mix(texel(x0, y0 + 1), texel(x0 + 1, y0 + 1), tx), ty);
-    var m = aces(c * P.ground.w);
+    // Belichtung: Automatik (nachgeführt, `exposure.rs`) oder die des Himmels, dazu die Korrektur 2^EV.
+    var e = P.ground.w;
+    if (P.expo.y > 0.0 && expo[0].y > 0.5) { e = expo[0].x; }
+    var m = aces(c * (e * P.expo.x));
     if (P.info.w == 1u) { m = to_srgb(m); }
     return vec4<f32>(m, 1.0);
 }
-"#;
+"#);
 
 #[cfg(test)]
 mod tests {
@@ -932,8 +1331,9 @@ mod tests {
 
     #[test]
     fn parameter_block_passt_zum_shader() {
-        assert_eq!(std::mem::size_of::<PtParams>(), 192);
+        assert_eq!(std::mem::size_of::<PtParams>(), 240);
         assert_eq!(std::mem::size_of::<crate::bvh::GpuNode>(), 32);
+        assert_eq!(std::mem::size_of::<crate::bvh::GpuWideNode>(), 64);
         assert_eq!(std::mem::size_of::<crate::bvh::GpuTri>(), 48);
         assert_eq!(std::mem::size_of::<crate::bvh::GpuTriTex>(), 32);
     }
@@ -958,7 +1358,21 @@ mod tests {
         // Innenlicht hinter Glas nur bei Nacht, im Parameter-Block dn.y.
         assert!(n.room_light > 0.0 && high.room_light == 0.0);
         let p = build_params(&Camera::default(), &n, (4, 4), (4, 4), 0, 1, false, 0.5).unwrap();
+        assert_eq!(p.dn, [0.5, 0.0, 0.0, 0.0], "ohne Deckenlichter kein Raumlicht");
+        // Etappe 5: Raumlicht nur mit Deckenlichtern, ohne Leuchten, eingeschaltet; Portale nur am Tag.
+        let opt = |counts: [u32; 3], room: bool| PtOptions { light_counts: counts, room_light: room, ..PtOptions::default() };
+        let p = build_params_with(&Camera::default(), &n, (4, 4), (4, 4), 0, 1, false, 0.5, &opt([3, 0, 2], true)).unwrap();
         assert_eq!(p.dn, [0.5, ROOM_LIGHT, 0.0, 0.0]);
+        assert_eq!(p.lights, [3, 0, 2, F_EMITTERS | F_ROOM]);
+        let off = build_params_with(&Camera::default(), &n, (4, 4), (4, 4), 0, 1, false, 0.5, &opt([3, 0, 2], false)).unwrap();
+        assert_eq!((off.dn[1], off.lights[3]), (0.0, F_EMITTERS));
+        let lamps = build_params_with(&Camera::default(), &n, (4, 4), (4, 4), 0, 1, false, 0.5, &opt([3, 1, 2], true)).unwrap();
+        assert_eq!(lamps.lights[3], F_EMITTERS, "Leuchten im Modell: kein Raumlicht");
+        let day = build_params_with(&Camera::default(), &high, (4, 4), (4, 4), 0, 1, false, 0.5, &opt([3, 0, 2], true)).unwrap();
+        assert_eq!(day.lights[3], F_EMITTERS | F_PORTALS);
+        assert!(day.light_pow[0] > 0.0 && day.expo[0] == 1.0 && day.expo[3] > day.expo[2]);
+        let ev = build_params_with(&Camera::default(), &high, (4, 4), (4, 4), 0, 1, false, 0.5, &PtOptions { ev: 1.0, ..PtOptions::default() }).unwrap();
+        assert_eq!(ev.expo[0], 2.0);
         assert!(n.zenith.iter().zip(&low.zenith).all(|(a, b)| a < b));
         // Keine/kaputte Sonne: bedeckt, ohne Sonne.
         for d in [None, Some([f32::NAN, 1.0, 0.0]), Some([0.0, -1.0, 0.0]), Some([0.0; 3])] {

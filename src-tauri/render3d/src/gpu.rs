@@ -616,6 +616,30 @@ pub struct Renderer {
     pt_max_pixels: u64,
     /// [212] Etappe 4: Detail-Ebenen (Normale/Rauigkeit) parallel zum Material-Array; None = keine (Platzhalter).
     pt_detail: Option<wgpu::Texture>,
+    /// [212] Etappe 5, Teil-Update: Dreiecke je Klumpen (nur geänderte Klumpen neu gelesen), der zuletzt gebaute Baum
+    /// (Refit statt Neubau bei gleicher Topologie, `Bvh::refit`), Stand des letzten Aufbaus.
+    pt_chunk_tris: Vec<Option<Vec<crate::bvh::PtTri>>>,
+    pt_bvh: crate::bvh::Bvh,
+    pt_build: PtBuildStats,
+    /// Nur die Bildkarten neu binden (kein Baum).
+    pt_tex_dirty: bool,
+    /// Etappe 5: Portale, Raumlicht, Belichtung (EV, Automatik), Abpraller, Messschalter; Zeitstempel.
+    pt_options: crate::pathtrace::PtOptions,
+    pt_auto_exposure: bool,
+    pt_timing: bool,
+}
+
+/// [212] Etappe 5: Stand des letzten Baum-Aufbaus des Pathtracers (Messung, `render_png --timing`).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct PtBuildStats {
+    /// Dreiecke im Baum.
+    pub tris: u32,
+    /// Neu gelesene Klumpen.
+    pub chunks_read: u32,
+    /// Refit statt Neubau.
+    pub refit: bool,
+    /// Zeit (ms) für Lesen + Baum + Lichtliste (0 im Browser: keine Uhr in WASM).
+    pub ms: f64,
 }
 
 /// [180]/[214] GPU-Puffer eines Klumpens der Geisterschicht (Formate wie `set_ghost`).
@@ -1529,6 +1553,13 @@ impl Renderer {
             pt_night: false,
             pt_max_pixels: crate::pathtrace::MAX_PIXELS,
             pt_detail: None,
+            pt_chunk_tris: Vec::new(),
+            pt_bvh: crate::bvh::Bvh::default(),
+            pt_build: PtBuildStats::default(),
+            pt_tex_dirty: true,
+            pt_options: crate::pathtrace::PtOptions::default(),
+            pt_auto_exposure: true,
+            pt_timing: false,
         }
     }
 
@@ -1620,6 +1651,16 @@ impl Renderer {
         let ch = self.scene.apply(upd);
         self.shadow_dirty = true;
         self.pt_dirty = true;
+        // [212] Etappe 5: nur geänderte Klumpen neu lesen.
+        if ch.reset {
+            self.pt_chunk_tris.clear();
+        }
+        self.pt_chunk_tris.resize_with(self.scene.chunk_count(), || None);
+        for &c in &ch.dirty_chunks {
+            if let Some(slot) = self.pt_chunk_tris.get_mut(c) {
+                *slot = None;
+            }
+        }
         // Silhouette-Cache verwerfen (neues Modell) — wird bei Bedarf neu gebaut.
         self.silhouette = None;
         self.silhouette_key = None;
@@ -2150,6 +2191,7 @@ impl Renderer {
         // Textur-Bindung neu (`render_pathtrace`).
         self.pt_materials.set_texture_means(rgba, bytes_per_layer, material_layers as usize);
         self.pt_dirty = true;
+        self.pt_tex_dirty = true;
 
         let view = texture.create_view(&wgpu::TextureViewDescriptor {
             dimension: Some(wgpu::TextureViewDimension::D2Array),
@@ -2745,12 +2787,38 @@ impl Renderer {
         let pt = self.pathtracer.get_or_insert_with(|| crate::gpu_pathtrace::PathTracer::new(device, self.color_format));
         pt.max_samples = self.pt_max_samples;
         if self.pt_dirty {
-            let mut tris = Vec::new();
-            for c in 0..self.scene.chunk_count() {
-                let d = self.scene.chunk_data(c);
-                crate::bvh::tris_from_mesh(&d.mesh.verts, &d.mesh.indices, &d.layers, &mut tris);
+            // [212] Etappe 5, Teil-Update: nur Klumpen ohne Zwischenstand neu lesen; gleiche Topologie (Zahl und Lage der
+            // Dreiecke je Eingabe gleich, etwa ein verschobenes Objekt oder neue Materialien) = Refit des alten Baums,
+            // sonst Neubau.
+            #[cfg(not(target_arch = "wasm32"))]
+            let t0 = std::time::Instant::now();
+            let n = self.scene.chunk_count();
+            self.pt_chunk_tris.resize_with(n, || None);
+            let mut read = 0u32;
+            for c in 0..n {
+                if self.pt_chunk_tris[c].is_none() {
+                    let d = self.scene.chunk_data(c);
+                    let mut tris = Vec::new();
+                    crate::bvh::tris_from_mesh(&d.mesh.verts, &d.mesh.indices, &d.layers, &mut tris);
+                    self.pt_chunk_tris[c] = Some(tris);
+                    read += 1;
+                }
             }
-            pt.set_bvh(device, &crate::bvh::Bvh::build_with(&tris, &self.pt_materials));
+            let tris: Vec<crate::bvh::PtTri> = self.pt_chunk_tris.iter().flatten().flatten().copied().collect();
+            let refit = self.pt_bvh.refit(&tris, &self.pt_materials);
+            if !refit {
+                self.pt_bvh = crate::bvh::Bvh::build_with(&tris, &self.pt_materials);
+            }
+            pt.set_bvh(device, queue, &self.pt_bvh);
+            #[cfg(not(target_arch = "wasm32"))]
+            let ms = t0.elapsed().as_secs_f64() * 1e3;
+            #[cfg(target_arch = "wasm32")]
+            let ms = 0.0;
+            self.pt_build = PtBuildStats { tris: self.pt_bvh.tri_count() as u32, chunks_read: read, refit, ms };
+            self.pt_dirty = false;
+            self.pt_tex_dirty = true;
+        }
+        if self.pt_tex_dirty {
             // [212] Etappe 3: dasselbe Textur-Array wie der Stil „textured“ (Ebene = Material-Ebene).
             let view = self.texture.create_view(&wgpu::TextureViewDescriptor { dimension: Some(wgpu::TextureViewDimension::D2Array), ..Default::default() });
             // Etappe 4: Detail-Ebenen; ohne Karten ein leerer Platzhalter (der Shader liest ihn nicht, `GpuTriTex` Bit 24).
@@ -2763,15 +2831,71 @@ impl Renderer {
                 }
             };
             let dview = detail.create_view(&wgpu::TextureViewDescriptor { dimension: Some(wgpu::TextureViewDimension::D2Array), ..Default::default() });
-            pt.set_textures(device, &view, &dview, &self.texture_sampler, &self.pt_materials.inv_means());
-            self.pt_dirty = false;
+            pt.set_textures(device, queue, &view, &dview, &self.texture_sampler, &self.pt_materials.inv_means());
+            self.pt_tex_dirty = false;
         }
         pt.denoise = self.pt_denoise;
         pt.max_pixels = self.pt_max_pixels;
+        // [212] Etappe 5: Kamera im Raum (perspektivisch, oben überall etwas) — Portale ab der ersten Ecke.
+        pt.options = crate::pathtrace::PtOptions {
+            cam_inside: matches!(camera.projection, crate::types::Projection::Perspective) && self.pt_bvh.encloses(camera.eye),
+            ..self.pt_options
+        };
+        pt.auto_exposure = self.pt_auto_exposure;
+        pt.set_timing(device, queue, self.pt_timing);
         let night = self.pt_night && self.sun.is_none();
         let sun = self.sun.or(Some([self.base_light[0], self.base_light[1], self.base_light[2]]));
         pt.render(device, queue, target, camera, sun, night, viewport, self.pt_batch);
         self.frame_stats = FrameStats::default();
+    }
+
+    /// [212] Etappe 5: Belichtungskorrektur in Blenden (EV, −10…10) und Belichtungsautomatik (Standard an). Wirkt nur
+    /// auf die Anzeige; die Summe läuft weiter.
+    pub fn set_pathtrace_exposure(&mut self, ev: f32, auto: bool) {
+        self.pt_options.ev = if ev.is_finite() { ev.clamp(-10.0, 10.0) } else { 0.0 };
+        self.pt_auto_exposure = auto;
+    }
+
+    /// [212] Etappe 5: Raumlicht bei Nacht an den Deckenuntersichten (Standard an; nur ohne Leuchten im Modell).
+    pub fn set_pathtrace_room_light(&mut self, on: bool) {
+        self.pt_options.room_light = on;
+    }
+
+    /// [212] Etappe 5: Fenster als Lichtportale des Himmels (Standard an; aus = wie Etappe 4, für Vergleiche).
+    pub fn set_pathtrace_portals(&mut self, on: bool) {
+        self.pt_options.portals = on;
+    }
+
+    /// [212] Etappe 5, Messung: Abpraller je Pfad (1…16, 0 = Standard) und Bildkarten aus.
+    pub fn set_pathtrace_debug(&mut self, bounces: u32, no_tex: bool) {
+        self.pt_options.bounces = if bounces == 0 { crate::pathtrace::MAX_BOUNCES } else { bounces.min(16) };
+        self.pt_options.no_tex = no_tex;
+    }
+
+    /// [212] Etappe 5, Messung: Zeitstempel je Abschnitt (nur mit `TIMESTAMP_QUERY`; headless).
+    pub fn set_pathtrace_timing(&mut self, on: bool) {
+        self.pt_timing = on;
+    }
+
+    /// [212] Zeitstempel des letzten Bildes (wartet auf die GPU).
+    pub fn pathtrace_timings(&self, device: &wgpu::Device) -> Option<crate::gpu_pathtrace::PtTimings> {
+        self.pathtracer.as_ref()?.read_timings(device)
+    }
+
+    /// [212] Belichtung der Automatik (aktuell, gültig, Ziel, Mittel log2; wartet auf die GPU).
+    pub fn pathtrace_exposure(&self, device: &wgpu::Device, queue: &wgpu::Queue) -> Option<[f32; 4]> {
+        Some(self.pathtracer.as_ref()?.read_exposure(device, queue))
+    }
+
+    /// [212] Etappe 5: Szene zu gross für die Puffergrenzen des Geräts (der Pathtracer zeigt nur den Himmel; der
+    /// Viewport meldet es statt abzustürzen).
+    pub fn pathtrace_scene_too_big(&self) -> bool {
+        self.pathtracer.as_ref().is_some_and(|p| p.scene_too_big())
+    }
+
+    /// [212] Stand des letzten Baum-Aufbaus und Zahl der Lichter je Art (Portale, Leuchten, Raumlicht).
+    pub fn pathtrace_build(&self) -> (PtBuildStats, [u32; 3]) {
+        (self.pt_build, self.pathtracer.as_ref().map_or([0; 3], |p| p.light_counts()))
     }
 
     /// [212] Samples je `render` im Stil `Pathtrace` (Standard 1; headless mehr auf einmal). 0 → 1.
@@ -2804,6 +2928,7 @@ impl Renderer {
             (0..layer_count.min(4096) as usize).map(|i| crate::pt_texture::pack_detail(layer(normal, i).as_deref(), layer(rough, i).as_deref(), px)).collect();
         self.pt_materials.set_detail(&layers);
         self.pt_dirty = true;
+        self.pt_tex_dirty = true;
         if !layers.iter().any(|d| d.present) {
             self.pt_detail = None;
             return;
@@ -3003,6 +3128,58 @@ mod shadow_gpu_tests {
         assert_eq!(r.shadow_pass_count(), 3);
     }
 
+    /// [212] Etappe 5, Teil-Update: ein verschobenes Objekt (gleiche Topologie) liest nur seinen Klumpen neu und passt den
+    /// Baum per Refit an; ein neues Teil (andere Dreieckszahl) baut neu.
+    #[test]
+    fn pathtracer_refit_bei_verschobenem_objekt() {
+        let Some((device, queue)) = device() else {
+            eprintln!("kein GPU-Adapter: Test übersprungen");
+            return;
+        };
+        let format = wgpu::TextureFormat::Rgba8UnormSrgb;
+        let mut r = Renderer::new(&device, format);
+        let tex = device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d { width: 16, height: 16, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let view = tex.create_view(&Default::default());
+        let cam = Camera { eye: [20.0, 15.0, 20.0], target: [4.0, 2.0, 3.0], ..Camera::default() };
+        let cube = |x: f32| -> crate::scene::PartEntry {
+            let json = format!(
+                r#"{{"id":"kiste","meshes":[{{"positions":[{a},0,0, {b},0,0, {b},1,0, {a},1,0, {a},0,1, {b},0,1, {b},1,1, {a},1,1],
+                "indices":[0,1,2,0,2,3,4,6,5,4,7,6,0,4,5,0,5,1,1,5,6,1,6,2,2,6,7,2,7,3,3,7,4,3,4,0],"kind":"imported","color":[0.6,0.5,0.4]}}]}}"#,
+                a = x,
+                b = x + 1.0
+            );
+            serde_json::from_str(&json).unwrap()
+        };
+        let walls = crate::scene::PartEntry::new("waende", crate::scene::PartInput { walls: walls(), ..Default::default() });
+        r.set_render_style(RenderStyle::Pathtrace);
+        r.update_parts(&device, crate::scene::PartsUpdate { reset: true, remove: Vec::new(), upsert: vec![walls, cube(2.0)] });
+        r.render(&device, &queue, &view, &cam, (16, 16));
+        let (b0, _) = r.pathtrace_build();
+        assert!(!b0.refit && b0.chunks_read == 2 && b0.tris > 0, "{b0:?}");
+        r.update_parts(&device, crate::scene::PartsUpdate { upsert: vec![cube(2.3)], ..Default::default() });
+        r.render(&device, &queue, &view, &cam, (16, 16));
+        let (b1, _) = r.pathtrace_build();
+        assert!(b1.refit && b1.chunks_read == 1 && b1.tris == b0.tris, "{b1:?}");
+        assert_eq!(r.pathtrace_samples(), 1, "neue Lage: Summe von vorn");
+        // Zweite Kiste (mehr Dreiecke): Neubau.
+        let mut other = cube(5.0);
+        other.id = "kiste2".into();
+        r.update_parts(&device, crate::scene::PartsUpdate { upsert: vec![other], ..Default::default() });
+        r.render(&device, &queue, &view, &cam, (16, 16));
+        let (b2, _) = r.pathtrace_build();
+        assert!(!b2.refit && b2.tris > b1.tris, "{b2:?}");
+        let _ = device.poll(wgpu::PollType::wait_indefinitely());
+    }
+
     /// [212] Pathtracer: akkumuliert über Bilder, beginnt bei Kamera-/Modelländerung von vorn, leere Szene und
     /// unbrauchbare Kamera ohne Panic; die übrigen Stile zeichnen danach unverändert weiter.
     #[test]
@@ -3109,6 +3286,7 @@ mod shadow_gpu_tests {
         r.render(&device, &queue, &view, &cam, (32, 24));
         assert_eq!(r.pathtrace_samples(), 2);
         r.set_pathtrace_denoise(false);
+        r.set_pathtrace_exposure(0.0, false);
         r.render(&device, &queue, &view, &cam, (32, 24));
         assert_eq!(r.pathtrace_samples(), 4, "Schalter beginnt nicht von vorn");
         // Nacht nur ohne Sonne: Sonne unter dem Horizont = Nachthimmel, Summe von vorn.
@@ -3192,6 +3370,7 @@ mod shadow_gpu_tests {
         let mut r = Renderer::new(&device, format);
         r.set_render_style(RenderStyle::Pathtrace);
         r.set_pathtrace_denoise(false);
+        r.set_pathtrace_exposure(0.0, false);
         r.set_sun(crate::shadow::sun_dir_world(180.0, 70.0), true);
         r.upload_model(&device, &[], &[], &[plate(MeshKind::Imported, Some(1))]);
         r.set_pathtrace_batch(6);
@@ -3255,6 +3434,7 @@ mod shadow_gpu_tests {
         let mut r = Renderer::new(&device, format);
         r.set_render_style(RenderStyle::Pathtrace);
         r.set_pathtrace_denoise(false);
+        r.set_pathtrace_exposure(0.0, false);
         let sun = crate::shadow::sun_dir_world(180.0, 35.0).unwrap();
         r.set_sun(Some(sun), true);
         r.upload_model(&device, &[], &[], &[plate]);

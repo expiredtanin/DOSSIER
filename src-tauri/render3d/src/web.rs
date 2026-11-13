@@ -463,6 +463,22 @@ impl WebModelRenderer {
         self.renderer.pathtrace_done()
     }
 
+    /// [212] Etappe 5: Modell zu gross für die Puffergrenzen des Geräts — der Pathtracer zeigt nur den Himmel, der
+    /// Viewport meldet es (statt eines Panics, der das WASM-Modul lahmlegt).
+    pub fn pathtrace_too_big(&self) -> bool {
+        self.renderer.pathtrace_scene_too_big()
+    }
+
+    /// [212] Etappe 5: Belichtungskorrektur in Blenden (EV) und Belichtungsautomatik des Pathtracers.
+    pub fn set_pathtrace_exposure(&mut self, ev: f64, auto: bool) {
+        self.renderer.set_pathtrace_exposure(ev as f32, auto);
+    }
+
+    /// [212] Etappe 5: Raumlicht bei Nacht (Deckenuntersichten; nur ohne Leuchten im Modell).
+    pub fn set_pathtrace_room_light(&mut self, on: bool) {
+        self.renderer.set_pathtrace_room_light(on);
+    }
+
     /// [212] Etappe 3: Promise, das sich erfüllt, wenn die GPU alle bis jetzt abgeschickte Arbeit erledigt hat. Der
     /// Bild-Export rechnet viele Samples in Häppchen und wartet dazwischen hierauf (Fortschritt, Abbruch, Hauptthread
     /// frei), statt alles auf einmal einzureihen.

@@ -3,6 +3,13 @@
 // Dient Referenzbildern und der Prüfung des 3D ohne Nutzer-App.
 //
 //   cargo run --release --features png --bin render_png -- modell.json aus.png [--view iso] [--style shaded] [--size 1200x800] [--target x,y,z] [--dist 12] [--sun 135,30]
+//     [--eye x,y,z --target x,y,z [--fov 50]]
+//     [--portals off] [--room-light off] [--exposure EV] [--auto-exposure off] [--timing] [--pt-bounces N] [--pt-notex]
+//
+// [212] Etappe 5: `--portals off` ohne Fenster-Portale (Vergleich), `--room-light off` ohne Raumlicht bei Nacht,
+// `--exposure EV` Belichtungskorrektur, `--auto-exposure off` feste Belichtung des Himmels (sonst Automatik wie im
+// Viewport, hier sofort eingestellt); `--timing` misst je Abschnitt (GPU-Zeitstempel, wenn das Gerät sie kann, sonst nur
+// Wanduhr) und meldet Baum-Aufbau, Lichtliste und Belichtung; `--pt-bounces N` / `--pt-notex` nur zur Messung.
 //     [--points wolke.txt] [--point-size 3] [--point-color rgb|intensity|class|height]
 //     [--style pathtrace --samples 64 [--denoise off] [--pt-goal 1024]] [--textures public] [--test-texture]
 //
@@ -329,7 +336,8 @@ pub(crate) fn new_device() -> (wgpu::Device, wgpu::Queue) {
     .expect("kein GPU-Adapter");
     pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
         label: Some("render_png.device"),
-        required_features: wgpu::Features::empty(),
+        // [212] Etappe 5: Zeitstempel für `--timing`, wenn der Adapter sie kann.
+        required_features: adapter.features() & wgpu::Features::TIMESTAMP_QUERY,
         required_limits: wgpu::Limits::default(),
         experimental_features: wgpu::ExperimentalFeatures::disabled(),
         memory_hints: wgpu::MemoryHints::Performance,
@@ -436,6 +444,12 @@ fn main() {
     }
     renderer.set_pathtrace_materials(&model.pt_materials);
     renderer.set_pathtrace_denoise(flag("--denoise", "on") != "off");
+    renderer.set_pathtrace_portals(flag("--portals", "on") != "off");
+    renderer.set_pathtrace_room_light(flag("--room-light", "on") != "off");
+    renderer.set_pathtrace_exposure(flag("--exposure", "0").parse().unwrap_or(0.0), flag("--auto-exposure", "on") != "off");
+    renderer.set_pathtrace_debug(flag("--pt-bounces", "0").parse().unwrap_or(0), args.iter().any(|a| a == "--pt-notex"));
+    let timing = args.iter().any(|a| a == "--timing");
+    renderer.set_pathtrace_timing(timing);
     let tex_dir = flag("--textures", "");
     let test_tex = args.iter().any(|a| a == "--test-texture");
     if (!tex_dir.is_empty() || test_tex) && !model.pt_materials.is_empty() {
@@ -479,7 +493,16 @@ fn main() {
         .map(|v| [v[0], v[1], v[2]])
         .unwrap_or(target);
     let dist = flag("--dist", "").parse::<f32>().unwrap_or(dist);
-    let camera = preset_camera(preset(&flag("--view", "iso")), target, dist);
+    let mut camera = preset_camera(preset(&flag("--view", "iso")), target, dist);
+    // [212] Etappe 5: freier Augpunkt (world x, Höhe, y wie `bounds`) mit `--target` als Blickziel, z. B. eine
+    // Innenansicht; `--fov` = vertikaler Bildwinkel in Grad (Standard 50).
+    let eye = flag("--eye", "").split(',').map(|v| v.trim().parse::<f32>()).collect::<Result<Vec<_>, _>>().ok().filter(|v| v.len() == 3);
+    if let Some(e) = eye {
+        camera = render3d::types::Camera { eye: [e[0], e[1], e[2]], target, ..render3d::types::Camera::default() };
+    }
+    if let Some(fov) = flag("--fov", "").parse::<f32>().ok().filter(|f| f.is_finite() && *f > 1.0 && *f < 170.0) {
+        camera.fov_y = fov.to_radians();
+    }
 
     let tex = target_texture(&device, format, w, h);
     let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
@@ -500,6 +523,33 @@ fn main() {
         let _ = device.poll(wgpu::PollType::wait_indefinitely());
         let dt = t1.elapsed().as_secs_f64();
         let n = renderer.pathtrace_samples().saturating_sub(1).max(1);
+        if timing {
+            let (b, lights) = renderer.pathtrace_build();
+            eprintln!(
+                "Baum: {} Dreiecke aus {} Klumpen, {} in {:.1} ms; Lichter: {} Portale, {} Leuchten, {} Deckenlichter",
+                b.tris,
+                b.chunks_read,
+                if b.refit { "Refit" } else { "Neubau" },
+                b.ms,
+                lights[0],
+                lights[1],
+                lights[2]
+            );
+            if let Some(t) = renderer.pathtrace_timings(&device) {
+                eprintln!(
+                    "GPU-Zeit: Samples {:.1} ms ({:.2} ms je Sample), Entrauscher {:.2} ms, Belichtung + Anzeige {:.2} ms",
+                    t.samples_ms,
+                    t.samples_ms / (samples.saturating_sub(1).max(1)) as f64,
+                    t.denoise_ms,
+                    t.display_ms
+                );
+            } else {
+                eprintln!("GPU-Zeit: keine Zeitstempel (Gerät ohne TIMESTAMP_QUERY)");
+            }
+            if let Some(e) = renderer.pathtrace_exposure(&device, &queue) {
+                eprintln!("Belichtung: {:.3} (Ziel {:.3}, Mittel log2 {:.2})", e[0], e[2], e[3]);
+            }
+        }
         eprintln!(
             "pathtrace: {} Dreiecke, Aufbau + 1. Sample {:.2} s, {} Samples in {:.2} s = {:.2} Samples/s ({:.2} Mio. Pfade/s bei {}x{})",
             renderer.pathtrace_tri_count(),

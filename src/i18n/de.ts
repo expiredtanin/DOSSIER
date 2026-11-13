@@ -102,6 +102,12 @@ export const de = {
   "display.style.pathtrace": "Pathtracing (Vorschau)",
   "viewport.pathtrace.status": "Pathtracing: {samples} Samples · {rate}/s",
   "viewport.pathtrace.done": "Pathtracing: {samples} Samples (fertig)",
+  "viewport.pathtrace.tooBig": "Pathtracing: Modell zu gross für diese Grafikkarte – nur Himmel",
+  "viewport.pathtrace.exposure": "Belichtung",
+  "viewport.pathtrace.exposureHint": "Belichtungskorrektur in Blenden (Doppelklick: 0)",
+  "viewport.pathtrace.autoExposure": "Auto",
+  "viewport.pathtrace.roomLight": "Raumlicht",
+  "viewport.pathtrace.roomLightHint": "Bei Nacht fällt Licht von den Decken der Räume, wenn das Modell keine Leuchten hat",
 
   "topbar.referenceLinesGroup": "Referenzlinien",
   "topbar.referenceLines": "Referenzlinien",

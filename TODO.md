@@ -399,6 +399,42 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   **Offen:** echte GPU und Mac/Metal, im Browser nicht angesehen (Detail-Karten im Viewer nur über den Build geprüft),
   texturierte Ansicht zeigt für Gelände ohne Material weiter kein Gras, Höhen-/AO-Karten, Anisotropie (Böden sehr flach
   gesehen leicht unscharf), Innenlicht bei Kamera im Haus, Mond, BVH-Teil-Update, OIDN.
+  **Stand 13.11. (Etappe 5, Innenräume und Tempo):** (1) Absturz im Browser behoben (Chromium/SwiftShader: Panic in wgpu
+  `create_buffer` beim ersten Bild — Puffer mit `mappedAtCreation` wirft im Browser synchron und legt das WASM-Modul lahm): der
+  Pathtracer legt alle Puffer leer an und füllt sie per `write_buffer`, Grössen gegen `max_buffer_size`/`max_storage_buffer_binding_size`
+  geprüft; zu gross = nur Himmel und Hinweis „Modell zu gross“ im Viewport; höchstens 8 Speicher-Puffer je Stufe (WebGPU-Vorgabe).
+  e2e `release10` [212] wieder aktiv (mit altem render3d-WASM rot, mit neuem grün, prüft jetzt auch die Regler), Rust-Test mit
+  künstlich kleinen Grenzen. (2) Innenraum: Next-Event-Estimation auf eine Lichtliste (`render3d/src/pt_lights.rs`): Fensterscheiben
+  als Portale des Himmels wie Cycles' „Portal“ (je Scheibe eine Fläche, Normale zum Himmel per Probestrahlen, Glas ohne Himmel fällt
+  weg), Leuchten (`MAT_EMISSIVE`), nachts Raumlicht an den Deckenuntersichten je Geschoss (waagrecht/geneigt nach unten mit 1.8…6 m
+  freiem Raum darunter — nicht die verdeckten Schichten des Deckenpakets, nicht Tische/Gelände; nur NEE, für Blick und BRDF unsichtbar,
+  Reichweite 8 m; nur ohne Leuchten im Modell; Schalter „Raumlicht“). Ersetzt das Innenlicht hinter Glas der Etappe 3. Auswahl in zwei
+  Stufen (räumlich sortierte Gruppen zu 16, vorgerechnete Lichtsätze), Power-Heuristik gegen die BRDF (Portal-Dichte über alle
+  gekreuzten Scheiben, Licht-Index im Dreieck); Portale und Raumlicht nur „drinnen“ (Kamera im Raum per CPU-Probestrahlen XOR
+  ungerade Zahl gekreuzter Portale), letzte Pfad-Ecke mit vollem Lichtgewicht. (3) Belichtungsautomatik (`render3d/src/exposure.rs`:
+  Histogramm über log-Luminanz, 40.–95. Perzentil, Ziel `KEY`/Mittel, Tag ¼…32×, Nacht ¼…1× der Himmelsbelichtung, im Viewport je
+  Bild sanft nachgeführt, Export/headless sofort) und im Viewport unten links „Belichtung“ (−3…+3 Blenden, Doppelklick 0), „Auto“,
+  „Raumlicht“ (Ansichtszustand, kein Op; de/en). (4) Tempo: Zeitstempel je Abschnitt (`render_png --timing`; lavapipe kann sie):
+  Samples ≫ Entrauscher (6 Pässe ≈ 5–10 % eines Samples, einmal je Bild) ≫ Belichtung + Anzeige (≈ 10 ms); Bildkarten kosten nicht
+  messbar (`--pt-notex` gleich), Abpraller ab dem zweiten den Grossteil (1 Abpraller ≈ 22 % der Zeit). Baum als breite Knoten
+  (`GpuWideNode`, Hüllen beider Kinder im Elternknoten, ein Ladevorgang je Schritt; Wanduhr −17 %, in CPU-Zeit nicht sicher von
+  Rauschen zu trennen); Stapel mit Eintrittsabständen ausprobiert, nicht schneller, verworfen. Lichtwahl zuerst über alle Lichter:
+  nachts aussen 3× langsamer → Gruppen + „nur drinnen“: aussen bei Nacht wie vorher, am Tag +25 %, innen +40 % je Sample bei
+  deutlich weniger Rauschen (Innenraum ohne Sonne im Raum, 32 Samples roh: relatives Rauschen 0.233 → 0.153, also Varianz /2.3 bei
+  1.4× Zeit; mit Sonne im Raum 0.170 → 0.129 — das indirekte Licht der Sonnenflecken bleibt der Hauptteil). Messung über die
+  CPU-Zeit von lavapipe (die Maschine war durch Parallel-Builds stark belastet, Wanduhr ±50 %). (5) Teil-Update des Baums:
+  Dreiecke je Klumpen zwischengespeichert (nur geänderte Klumpen neu gelesen), `Bvh::refit` bei gleicher Topologie (Hüllen neu,
+  Neubau wenn SAH > 1.3× oder Topologie anders), Bildkarten-Wechsel ohne Baum. Neubau Musterhaus komplex (165 k Dreiecke, inkl.
+  Lichtliste) ≈ 0.5 s. `render_png --eye/--fov` (Innenansicht), `--portals off`, `--room-light off`, `--exposure`,
+  `--auto-exposure off`, `--timing`. Geprüft: `cargo test --release` render3d (auch `--features png` mit lavapipe: Portale
+  Erwartungswert gleich bis 0.02 %, Varianz /3.9, auch mit Kamera draussen; GPU-Belichtung = CPU-Referenz; Refit eines verschobenen
+  Objekts, kleine Grenzen; breite Knoten = Brute-Force), WGSL nach MSL, `cargo check --features window`, render3d-WASM (`--no-opt`),
+  tsc, vitest (Viewport, i18n), e2e [212] in Chromium/SwiftShader, Bilder Musterhaus komplex mit lavapipe (Innen Tag/Nacht/ohne
+  Sonne, Aussen Tag/Nacht, je 32 Samples vorher/nachher). **Offen:** echte GPU und Mac/Metal; im Browser nur der e2e-Klickweg, Bild
+  nicht angesehen; Raumlicht fällt nicht aus den Fenstern aufs Gelände (Absicht, Tempo), erleuchtete Fenster von aussen bei wenigen
+  Samples körnig; indirektes Licht der Sonnenflecken (NEE auf beleuchtete Flächen, Cache) fehlt; Refit greift selten (Wände ändern
+  beim Verschieben meist die Gehrungen der Nachbarn = andere Topologie); Leuchten im Modell (Bibliothek) gibt es nur über den
+  Baustoffnamen; AO-/Höhenkarten (`*_AmbientOcclusion`, `*_Displacement`) nicht angefangen; Mond, OIDN.
 - ○ **[215]** Cycles eingebaut für Endbilder (nach 1.0): Cycles-Standalone (Apache-2.0, aus dem Blender-Projekt) als mitgeliefertes
   Hilfsprogramm (Sidecar) der Desktop-App, Metal auf Apple Silicon, OIDN-Entrauscher; liest dasselbe renderer-neutrale Szenenformat
   (GLB + Szenen-JSON) wie die Blender-Brücke [211], die als Option bleibt. Build-Kette macOS (C++, Abhängigkeiten) in CI, Herkunft in
