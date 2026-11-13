@@ -6794,6 +6794,11 @@ pub struct TerrainMesh {
     #[serde(rename = "sourceId", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub source_id: Option<String>,
+    /// [212] Bauteil (Component Manager) als Material der Oberfläche: Farbe und Bildkarten im 3D (texturierte
+    /// Ansicht, Pathtracer, Blender-Paket [211]). Fehlt = Gelände-Grundfarbe bzw. Wiese.
+    #[serde(rename = "componentId", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub component_id: Option<String>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,

@@ -16,7 +16,8 @@
 // `/assets/materials/Bricks104/color.jpg`) unter diesem Ordner lesen (im Repo `public`), JPEG dekodieren, auf 256 × 256
 // mitteln und wie im Viewer als Textur-Array hochladen (`set_material_textures`) — für die Stile `textured` und
 // `pathtrace`. Nicht lesbare Karten bleiben schwarz (= ohne Karte). `--test-texture`: statt der Dateien eine erzeugte
-// Mauerwerks-Karte für jede Ebene (Prüfbild ohne Bilddateien).
+// Mauerwerks-Karte für jede Ebene (Prüfbild ohne Bilddateien). Etappe 4: dazu die Normalen- und Rauigkeitskarten
+// (`ptMaterials[i].normal`/`.rough`) für den Pathtracer; `--detail off` lässt sie weg (Vergleichsbild).
 //
 // `--points` ([27]): Textdatei mit einem Punkt je Zeile `x y z [r g b [intensitaet [klasse]]]` in
 // Modell-Metern (x = Ost, y = Nord, z = Hoehe) — dieselbe Punkt-Pipeline wie im Browser-Viewport.
@@ -237,6 +238,30 @@ fn load_textures(dir: &str, test: bool, entries: &[render3d::pt_material::PtMate
     (data, loaded)
 }
 
+/// [212] Etappe 4: Normalen- und Rauigkeitskarten (`ptMaterials[i].normal`/`.rough`) als gepackte Ebenen wie
+/// `load_textures`; fehlende bleiben schwarz (= keine Karte). Rückgabe (Normalen, Rauigkeit, Zahl geladener Karten).
+fn load_detail(dir: &str, entries: &[render3d::pt_material::PtMaterialEntry]) -> (Vec<u8>, Vec<u8>, usize) {
+    let layer = TEX_SIZE * TEX_SIZE * 4;
+    let mut normal = vec![0u8; entries.len() * layer];
+    let mut rough = vec![0u8; entries.len() * layer];
+    let mut loaded = 0;
+    for (i, e) in entries.iter().enumerate() {
+        for (path, out) in [(&e.normal, &mut normal), (&e.rough, &mut rough)] {
+            if path.is_empty() {
+                continue;
+            }
+            match load_map(dir, path) {
+                Some(px) => {
+                    out[i * layer..(i + 1) * layer].copy_from_slice(&px);
+                    loaded += 1;
+                }
+                None => eprintln!("Detail-Karte nicht lesbar: {path}"),
+            }
+        }
+    }
+    (normal, rough, loaded)
+}
+
 /// Minimaler PNG-Schreiber (RGBA8, unkomprimierte Deflate-Blöcke) — keine zusätzliche Abhängigkeit.
 fn write_png(path: &str, w: u32, h: u32, rgba: &[u8]) -> std::io::Result<()> {
     fn crc32(data: &[u8]) -> u32 {
@@ -417,6 +442,11 @@ fn main() {
         let (data, loaded) = load_textures(&tex_dir, test_tex, &model.pt_materials);
         renderer.set_material_textures(&device, &queue, &data, model.pt_materials.len() as u32);
         eprintln!("Bildkarten: {loaded} von {} geladen{}", model.pt_materials.len(), if test_tex { " (Prüf-Karte)" } else { "" });
+        if !test_tex && flag("--detail", "on") != "off" {
+            let (normal, rough, n) = load_detail(&tex_dir, &model.pt_materials);
+            renderer.set_material_detail_textures(&device, &queue, &normal, &rough, model.pt_materials.len() as u32);
+            eprintln!("Normalen-/Rauigkeitskarten: {n} geladen");
+        }
     }
     let points_path = flag("--points", "");
     if !points_path.is_empty() {

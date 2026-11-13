@@ -14,6 +14,14 @@
 // Brechung bleibt weg: die Scheiben sind dünne planparallele Platten — ein Strahl tritt parallel versetzt (wenige
 // Millimeter) wieder aus, sichtbar wäre das nicht; gekrümmtes oder dickes Glas gibt das Modell nicht her.
 //
+// Etappe 4: Normalen- und Rauigkeitskarten (Detail-Ebene in group 1, binding 3; Packung, Tangentenrahmen und Formeln in
+// `pt_texture.rs`), Mip-Stufe je Abfrage nach Strahlkegel (Breite am Augpunkt + Öffnung je Meter, nach diffusen
+// Abprallern breit) — ferne Ziegel rauschen nicht mehr, die prozeduralen Texturen blenden ihre feinen Frequenzen nach
+// dem Fussabdruck aus. Bildkarten nur bis zum ersten Abpraller (`TEX_BOUNCES`), danach die Grundfarbe (= Kartenmittel,
+// die oberste Mip-Stufe). Shading-Normale für BRDF, NEE, Richtungswahl und den Entrauscher (im Vergleich bei 8 Samples
+// bleiben Ziegelkanten damit scharf, mit der geometrischen verschmiert er sie; Rauschen gleich); die geometrische
+// Normale für Versatz und Sichtbarkeit.
+//
 // Bildmodell (Etappe 1): progressive Akkumulation, je Aufruf ein Sample je Pixel; Pfade mit höchstens
 // `MAX_BOUNCES` Abprallern und Russian Roulette ab dem dritten; Next-Event-Estimation zur Sonne (Kegel mit
 // `SUN_ANGULAR_RADIUS_DEG`, weiche Schatten); Glas als dünne Scheibe (Fresnel-Spiegelung oder gerader Durchgang,
@@ -242,10 +250,12 @@ struct TriTex { uv0: vec2<f32>, uv1: vec2<f32>, uv2: vec2<f32>, tex: u32, scale:
 @group(0) @binding(5) var<storage, read_write> aux_b: array<vec4<f32>>;
 @group(0) @binding(6) var<storage, read> tri_tex: array<TriTex>;
 // Bildkarten (Etappe 3): dasselbe Textur-Array wie die schattierte Ansicht (Ebene 0 = Schachbrett, ungenutzt), Sampler
-// mit Wiederholung, Kehrwert der mittleren Kartenfarbe je Ebene (`PtMaterialTable::inv_means`).
+// mit Wiederholung, Kehrwert der mittleren Kartenfarbe je Ebene (`PtMaterialTable::inv_means`; w = Kehrwert der
+// mittleren Rauigkeit). Etappe 4: Mip-Stufen, Detail-Ebenen (Normale xy, Rauigkeit, Normale z; `pt_texture.rs`).
 @group(1) @binding(0) var mat_tex: texture_2d_array<f32>;
 @group(1) @binding(1) var mat_samp: sampler;
 @group(1) @binding(2) var<storage, read> layer_inv: array<vec4<f32>>;
+@group(1) @binding(3) var det_tex: texture_2d_array<f32>;
 
 const NONE: u32 = 0xffffffffu;
 const MISS: f32 = 1e30;
@@ -264,6 +274,10 @@ const GLASS_SHADOW_T: f32 = 0.9;
 const EMISSION: f32 = 1.0;
 // Farbe des Innenlichts bei Nacht (warmweiss, ≈ 2700 K).
 const ROOM_RGB: vec3<f32> = vec3<f32>(1.0, 0.72, 0.42);
+// Bildkarten bis zu diesem Abpraller (0 = Blickstrahl, 1 = erster Abpraller), danach Grundfarbe = Kartenmittel.
+const TEX_BOUNCES: u32 = 2u;
+// Kegelöffnung nach einem diffusen Abpraller (`pt_texture::DIFFUSE_SPREAD`).
+const DIFFUSE_SPREAD: f32 = 0.3;
 
 var<private> rng: u32;
 // Erster Treffer des Blickstrahls (für den Entrauscher): Albedo, Normale (zur Kamera), Tiefe; Himmel = (1, 0, 0).
@@ -451,16 +465,28 @@ fn fbm(p: vec2<f32>) -> f32 {
     return s / 0.9375;
 }
 
+// Anteil einer Frequenz `f` (1/m) bei Fussabdruck `fp` (m): 1 solange ein Pixel weniger als eine halbe Periode deckt,
+// 0 ab einer ganzen (dann gilt das Mittel statt Rauschen).
+fn band(f: f32, fp: f32) -> f32 {
+    return clamp(2.0 - 2.0 * fp * f, 0.0, 1.0);
+}
+
 // Prozedurale Textur als Faktor auf die Grundfarbe (Mittel ≈ 1), uv in Metern: Wiese (Flecken, Halme, trockene
 // Stellen), Kies (Körner ≈ 2 cm mit dunklen Zwischenräumen, Ton je Korn), Asphalt (feines Korn, helle Splitter).
-fn proc_tex(kind: u32, uv: vec2<f32>) -> vec3<f32> {
+// `fp` = Fussabdruck des Pixels in m (Etappe 4): feine Frequenzen blenden in der Ferne zum Mittel aus.
+// Grosse Flecken und trockene Stellen der Wiese (Meter-Massstab), auch über der Bildkarte `Grass005`, die alle 4 m
+// kachelt (Etappe 4).
+fn grass_macro(uv: vec2<f32>) -> vec3<f32> {
+    let spots = fbm(uv * 0.25);
+    let dry = smoothstep(0.58, 0.8, fbm(uv * 0.12 + vec2<f32>(31.0, 7.0)));
+    return vec3<f32>(0.72 + 0.56 * spots) * mix(vec3<f32>(1.0), vec3<f32>(1.35, 1.12, 0.65), dry);
+}
+
+fn proc_tex(kind: u32, uv: vec2<f32>, fp: f32) -> vec3<f32> {
     if (kind == PROC_GRASS) {
-        let spots = fbm(uv * 0.25);
-        let mid = vnoise(uv * 3.0);
-        let fine = vnoise(uv * 40.0) * 0.6 + vnoise(uv * 110.0) * 0.4;
-        var c = vec3<f32>((0.72 + 0.56 * spots) * (0.85 + 0.3 * mid) * (0.65 + 0.7 * fine));
-        let dry = smoothstep(0.58, 0.8, fbm(uv * 0.12 + vec2<f32>(31.0, 7.0)));
-        return c * mix(vec3<f32>(1.0), vec3<f32>(1.35, 1.12, 0.65), dry);
+        let mid = mix(0.5, vnoise(uv * 3.0), band(3.0, fp));
+        let fine = mix(0.5, vnoise(uv * 40.0), band(40.0, fp)) * 0.6 + mix(0.5, vnoise(uv * 110.0), band(110.0, fp)) * 0.4;
+        return grass_macro(uv) * (0.85 + 0.3 * mid) * (0.65 + 0.7 * fine);
     }
     if (kind == PROC_GRAVEL) {
         let g = uv * 45.0;
@@ -470,34 +496,81 @@ fn proc_tex(kind: u32, uv: vec2<f32>) -> vec3<f32> {
         let f = fract(g) - vec2<f32>(0.5) - (vec2<f32>(h, h2) - vec2<f32>(0.5)) * 0.3;
         let stone = smoothstep(0.52, 0.32, length(f) + 0.15 * vnoise(g * 3.0));
         let tint = mix(vec3<f32>(1.0), vec3<f32>(1.12, 1.0, 0.86), h2);
-        return tint * (0.6 + 0.8 * h) * mix(0.45, 1.12, stone);
+        // Mittel über viele Körner (Monte-Carlo der Formel): Ton 1.06/1/0.93, Korn-Anteil ≈ 0.71.
+        return mix(vec3<f32>(0.75, 0.71, 0.66), tint * (0.6 + 0.8 * h) * mix(0.45, 1.12, stone), band(45.0, fp));
     }
     if (kind == PROC_ASPHALT) {
-        let n = vnoise(uv * 90.0) * 0.5 + vnoise(uv * 260.0) * 0.5;
-        let speck = step(0.93, hash2(vec2<i32>(floor(uv * 300.0))));
+        let n = mix(0.5, vnoise(uv * 90.0), band(90.0, fp)) * 0.5 + mix(0.5, vnoise(uv * 260.0), band(260.0, fp)) * 0.5;
+        let speck = mix(0.07, step(0.93, hash2(vec2<i32>(floor(uv * 300.0)))), band(300.0, fp));
         return vec3<f32>((0.75 + 0.5 * n) * (0.9 + 0.2 * fbm(uv * 0.4)) + speck * 1.2);
     }
     return vec3<f32>(1.0);
 }
 
-// Albedo am Treffer: Grundfarbe, mit Bildkarte (Texel / Kartenmittel) oder prozeduraler Textur; ≤ 0.9.
-fn surface_albedo(ti: u32, tr: Tri, o: vec3<f32>, d: vec3<f32>) -> vec3<f32> {
+// Oberfläche am Treffer (Etappe 4): Albedo, Shading-Normale, Rauigkeit.
+struct Surf { albedo: vec3<f32>, n: vec3<f32>, rough: f32 };
+
+// Mip-Stufe nach Kegelbreite `w` (m), Einfallswinkel, UV-Massstab und Texel je Kachel (`pt_texture::texture_lod`).
+fn tex_lod(w: f32, cosv: f32, scale: f32, ts: f32) -> f32 {
+    let texels = w * scale * ts / sqrt(max(cosv, 0.05));
+    return log2(max(texels, 1.0));
+}
+
+// Rauigkeit mit Toksvig-Anteil aus der Länge der gemittelten Karten-Normale (`pt_texture::toksvig_rough`).
+fn toksvig(rough: f32, len: f32) -> f32 {
+    let l = clamp(len, 0.05, 1.0);
+    let a = rough * rough;
+    return clamp(sqrt(sqrt(a * a + (1.0 - l) / l)), 0.0, 1.0);
+}
+
+// Oberfläche: Grundfarbe, mit Bildkarte (Texel / Kartenmittel) oder prozeduraler Textur (≤ 0.9); mit Detail-Ebene
+// gestörte Normale (Tangentenrahmen der planaren UV, `pt_texture::uv_tangent_frame`) und Rauigkeit je Texel. `ng` =
+// geometrische Normale zur Blickseite, `w` = Kegelbreite am Treffer, `use_tex` = Bildkarten lesen (`TEX_BOUNCES`).
+fn surface(ti: u32, tr: Tri, o: vec3<f32>, d: vec3<f32>, ng: vec3<f32>, w: f32, use_tex: bool) -> Surf {
+    var s: Surf;
     let base = unpack_albedo(tr.mat);
+    s.albedo = base;
+    s.n = ng;
+    s.rough = tr.rough;
     let tt = tri_tex[ti];
     let layer = tt.tex & 0xffffu;
     let pk = (tt.tex >> 16u) & 0xffu;
-    if (layer == 0u && pk == 0u) { return base; }
+    if (!use_tex || (layer == 0u && pk == 0u)) { return s; }
     let uv = tri_uv(tt, tri_bary(tr, o, d));
-    var a = base;
+    let cosv = abs(dot(d, ng));
     if (layer > 0u) {
         if (layer < textureNumLayers(mat_tex) && layer < arrayLength(&layer_inv)) {
-            let t = textureSampleLevel(mat_tex, mat_samp, uv, i32(layer), 0.0).rgb;
-            a = base * t * layer_inv[layer].rgb;
+            let lod = tex_lod(w, cosv, tt.scale, f32(textureDimensions(mat_tex).x));
+            let inv = layer_inv[layer];
+            let t = textureSampleLevel(mat_tex, mat_samp, uv, i32(layer), lod).rgb;
+            s.albedo = base * t * inv.rgb;
+            if (pk == PROC_GRASS && tt.scale > 0.0) { s.albedo = s.albedo * grass_macro(uv / tt.scale); }
+            if (((tt.tex >> 24u) & 1u) == 1u && layer < textureNumLayers(det_tex)) {
+                let dt = textureSampleLevel(det_tex, mat_samp, uv, i32(layer), lod);
+                let tn = vec3<f32>(dt.r, dt.g, dt.a) * 2.0 - vec3<f32>(1.0);
+                s.rough = toksvig(clamp(tr.rough * dt.b * inv.w, 0.03, 1.0), length(tn));
+                let duv1 = tt.uv1 - tt.uv0;
+                let duv2 = tt.uv2 - tt.uv0;
+                let det = duv1.x * duv2.y - duv2.x * duv1.y;
+                if (abs(det) > 1e-12) {
+                    let r = 1.0 / det;
+                    let dpdu = (tr.e1 * duv2.y - tr.e2 * duv1.y) * r;
+                    let dpdv = (tr.e2 * duv1.x - tr.e1 * duv2.x) * r;
+                    let nn = normalize(cross(dpdv, dpdu));
+                    let tg = normalize(dpdu - nn * dot(nn, dpdu));
+                    let bu = cross(nn, tg);
+                    var pn = normalize(tg * tn.x + bu * tn.y + nn * max(tn.z, 0.0));
+                    if (dot(nn, ng) < 0.0) { pn = -pn; }
+                    // Nur Normalen zur Blickseite (sonst schwarze Säume an flachen Blickwinkeln).
+                    if (dot(pn, -d) > 0.0 && pn.x == pn.x) { s.n = pn; }
+                }
+            }
         }
     } else {
-        a = base * proc_tex(pk, uv);
+        s.albedo = base * proc_tex(pk, uv, w / sqrt(max(cosv, 0.05)));
     }
-    return clamp(a, vec3<f32>(0.0), vec3<f32>(0.9));
+    s.albedo = clamp(s.albedo, vec3<f32>(0.0), vec3<f32>(0.9));
+    return s;
 }
 
 fn fresnel(f0: vec3<f32>, c: f32) -> vec3<f32> {
@@ -556,15 +629,15 @@ fn sky(d: vec3<f32>, with_sun: bool, primary: bool) -> vec3<f32> {
 // Was eine Glasscheibe spiegelt, ohne weiteren Pfad: frei = Himmel (ohne Sonnenscheibe gegen Ausreisser), sonst die
 // getroffene Fläche mit Sonnenlicht (ein Schattenstrahl) und gleichmässigem Himmelslicht — statt Schwarz, wenn die
 // Spiegelung auf Boden oder Nachbarbau fällt (Blick von oben auf eine Fassade).
-fn reflected(o: vec3<f32>, d: vec3<f32>) -> vec3<f32> {
+fn reflected(o: vec3<f32>, d: vec3<f32>, cw: f32, cs: f32) -> vec3<f32> {
     let h = trace(o, d, false);
     if (h.tri == NONE) { return sky(d, false, false); }
     let tr = tris[h.tri];
     if ((tr.mat >> 24u) == MAT_GLASS) { return sky(d, false, false); }
-    let albedo = surface_albedo(h.tri, tr, o, d);
-    if ((tr.mat >> 24u) == MAT_EMISSIVE) { return albedo * EMISSION; }
     var n = normalize(cross(tr.e1, tr.e2));
     if (dot(n, d) > 0.0) { n = -n; }
+    let albedo = surface(h.tri, tr, o, d, n, cw + cs * h.t, true).albedo;
+    if ((tr.mat >> 24u) == MAT_EMISSIVE) { return albedo * EMISSION; }
     let p = o + d * h.t;
     let eps = 1e-4 * max(1.0, max(abs(p.x), max(abs(p.y), abs(p.z))));
     var c = albedo * (0.5 * (P.sky_zenith.rgb + P.sky_horizon.rgb)) * (0.5 + 0.5 * max(n.y, 0.0));
@@ -577,9 +650,12 @@ fn reflected(o: vec3<f32>, d: vec3<f32>) -> vec3<f32> {
     return c;
 }
 
-fn radiance(o_in: vec3<f32>, d_in: vec3<f32>) -> vec3<f32> {
+// `cw0`, `cs0` = Strahlkegel des Blickstrahls (Breite am Augpunkt in m, Öffnung je m; `pt_texture::primary_cone`).
+fn radiance(o_in: vec3<f32>, d_in: vec3<f32>, cw0: f32, cs0: f32) -> vec3<f32> {
     var o = o_in;
     var d = d_in;
+    var cw = cw0;
+    var cs = cs0;
     var tp = vec3<f32>(1.0);
     var l = vec3<f32>(0.0);
     var specular = true;
@@ -599,14 +675,17 @@ fn radiance(o_in: vec3<f32>, d_in: vec3<f32>) -> vec3<f32> {
         }
         let tr = tris[h.tri];
         let kind = tr.mat >> 24u;
-        let albedo = surface_albedo(h.tri, tr, o, d);
         var n = normalize(cross(tr.e1, tr.e2));
         if (dot(n, d) > 0.0) { n = -n; }
+        let w = cw + cs * h.t;
+        let sf = surface(h.tri, tr, o, d, n, w, b < TEX_BOUNCES);
+        let albedo = sf.albedo;
+        let ns = sf.n;
         let p = o + d * h.t;
         let eps = 1e-4 * max(1.0, max(abs(p.x), max(abs(p.y), abs(p.z))));
         if (first) {
             first = false;
-            g_normal = n;
+            g_normal = ns;
             g_depth = h.t;
         }
         // Albedo für den Entrauscher: erste Fläche hinter der Glaskette des Blickstrahls (Textur bleibt scharf, auch
@@ -626,10 +705,11 @@ fn radiance(o_in: vec3<f32>, d_in: vec3<f32>) -> vec3<f32> {
             let f = fresnel(vec3<f32>(0.04), abs(dot(d, n))).x;
             let rt = 2.0 * f / (1.0 + f);
             let rd = reflect(d, n);
-            l = l + tp * rt * reflected(p + n * eps, rd);
+            l = l + tp * rt * reflected(p + n * eps, rd, w, cs);
             let tint = albedo / max(max(albedo.x, max(albedo.y, albedo.z)), 1e-3);
             tp = tp * (1.0 - rt) * mix(vec3<f32>(1.0), tint, 0.15);
             o = p - n * eps;
+            cw = w;
             glass_n = glass_n + 1u;
             if (glass_n > MAX_GLASS) { break; }
             continue;
@@ -638,11 +718,11 @@ fn radiance(o_in: vec3<f32>, d_in: vec3<f32>) -> vec3<f32> {
         // Next-Event-Estimation zur Sonne (Kegel → weiche Schatten).
         if (P.sun_irr.w > 0.5) {
             let ls = cone_dir(P.sun_dir.xyz, P.sun_dir.w);
-            let ndl = dot(n, ls);
-            if (ndl > 0.0) {
+            let ndl = dot(ns, ls);
+            if (ndl > 0.0 && dot(n, ls) > 0.0) {
                 let sh = trace(p + n * eps, ls, true);
                 if (sh.tri == NONE) {
-                    l = l + tp * brdf(kind, albedo, tr.rough, tr.metal, n, wo, ls) * P.sun_irr.rgb * ndl * sh_tr;
+                    l = l + tp * brdf(kind, albedo, sf.rough, tr.metal, ns, wo, ls) * P.sun_irr.rgb * ndl * sh_tr;
                 }
             }
         }
@@ -653,31 +733,37 @@ fn radiance(o_in: vec3<f32>, d_in: vec3<f32>) -> vec3<f32> {
         }
         // Nächste Richtung. Glänzend: Spiegel-Lobe mit Wahrscheinlichkeit nach Fresnel (Metall: immer) wählen, sonst
         // diffus (Gewicht / Wahl).
-        let nov0 = max(dot(n, wo), 1e-4);
+        let nov0 = max(dot(ns, wo), 1e-4);
         let f0 = spec_f0(albedo, tr.metal);
         let p_d = clamp(fresnel(vec3<f32>(0.04), nov0).x * 4.0, 0.1, 0.9);
         let p_spec = select(0.0, clamp(mix(p_d, 1.0, tr.metal), 0.1, 1.0), kind == MAT_GLOSSY);
         if (kind == MAT_GLOSSY && rnd() < p_spec) {
-            let a = max(tr.rough * tr.rough, 0.002);
+            let a = max(sf.rough * sf.rough, 0.002);
             let r1 = rnd();
             let r2 = rnd();
             let ct = sqrt((1.0 - r1) / (1.0 + (a * a - 1.0) * r1));
             let st = sqrt(max(0.0, 1.0 - ct * ct));
             let phi = 2.0 * PI * r2;
-            let hv = normalize(basis(n) * vec3<f32>(st * cos(phi), st * sin(phi), ct));
+            let hv = normalize(basis(ns) * vec3<f32>(st * cos(phi), st * sin(phi), ct));
             let wi = reflect(-wo, hv);
-            let nol = dot(n, wi);
-            if (nol <= 0.0) { break; }
-            let nov = max(dot(n, wo), 1e-4);
+            let nol = dot(ns, wi);
+            if (nol <= 0.0 || dot(n, wi) <= 0.0) { break; }
+            let nov = max(dot(ns, wo), 1e-4);
             let voh = max(dot(wo, hv), 1e-4);
-            let noh = max(dot(n, hv), 1e-4);
+            let noh = max(dot(ns, hv), 1e-4);
             tp = tp * fresnel(f0, voh) * smith_g(nov, nol, a) * voh / (noh * nov) / p_spec;
             d = wi;
+            cs = cs + 2.0 * a;
         } else {
-            d = cosine_dir(n);
+            d = cosine_dir(ns);
+            // Gestörte Normale: Richtungen unter die geometrische Fläche zurückspiegeln.
+            let dn = dot(d, n);
+            if (dn <= 0.0) { d = normalize(d - 2.0 * dn * n); }
             tp = tp * albedo / max(1.0 - p_spec, 1e-3);
             if (kind == MAT_GLOSSY) { tp = tp * (1.0 - 0.04) * (1.0 - tr.metal); }
+            cs = max(cs, DIFFUSE_SPREAD);
         }
+        cw = w;
         o = p + n * eps;
         specular = false;
         if (b >= 2u) {
@@ -701,14 +787,20 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let sy = 1.0 - ((f32(gid.y) + rnd()) / f32(h)) * 2.0;
     var o = P.cam_pos.xyz;
     var d = P.cam_fwd.xyz;
+    // Strahlkegel (`pt_texture::primary_cone`): Pixelgrösse bzw. Pixelwinkel.
+    let px = 2.0 * P.cam_fwd.w / f32(h);
+    var cw = 0.0;
+    var cs = px;
     if (P.cam_pos.w > 0.5) {
+        cw = px;
+        cs = 0.0;
         let hh = P.cam_fwd.w;
         o = o + P.cam_right.xyz * (sx * hh * P.cam_right.w) + P.cam_up.xyz * (sy * hh);
     } else {
         let th = P.cam_fwd.w;
         d = normalize(P.cam_fwd.xyz + P.cam_right.xyz * (sx * th * P.cam_right.w) + P.cam_up.xyz * (sy * th));
     }
-    var c = radiance(o, d);
+    var c = radiance(o, d, cw, cs);
     // Ausreisser (Sonnenspiegelungen über mehrere Abpraller) begrenzen; NaN verwerfen.
     c = clamp(c, vec3<f32>(0.0), vec3<f32>(64.0));
     if (!(c.x == c.x && c.y == c.y && c.z == c.z)) { c = vec3<f32>(0.0); }

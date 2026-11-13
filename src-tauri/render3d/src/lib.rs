@@ -25,6 +25,7 @@ pub mod pathtrace;
 pub mod pattern_lines;
 pub mod points;
 pub mod pt_material;
+pub mod pt_texture;
 pub(crate) mod openings;
 pub mod roof_cut;
 pub mod scene;

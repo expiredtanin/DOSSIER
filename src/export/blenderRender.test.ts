@@ -28,6 +28,7 @@ import {
   renderCameraOf,
   splitRoofMaterials,
   TERRAIN_MATERIAL,
+  terrainRenderMaterial,
   type BlenderHost,
   type RenderOptions,
 } from "./blenderRender";
@@ -364,6 +365,20 @@ describe("Materialzuordnung Gelände und Dach ([211])", () => {
     const t2 = bare.scene.materials.find((m) => m.name === "Gelaende")!;
     expect(t2.role).toBe("terrain");
     expect(t2.textures).toBeUndefined();
+  });
+
+  it("[212] Gelände mit Bauteil: dessen Bildkarten statt der Wiese", async () => {
+    const kies = (mk.components ?? []).find((c) => c.material?.color?.includes("Gravel043"))!;
+    expect(kies).toBeDefined();
+    const withComp: Project = { ...mk, context: (mk.context ?? []).map((o) => (o.type === "terrainMesh" ? { ...o, componentId: kies.id } : o)) };
+    expect(terrainRenderMaterial(withComp)).toBe(kies.material);
+    expect(terrainRenderMaterial(mk)).toBe(TERRAIN_MATERIAL);
+    const loaded: string[] = [];
+    const pkg = await buildRenderPackage(withComp, opts(), async (url) => (loaded.push(url), new Uint8Array([1])));
+    const terrain = pkg.scene.materials.find((m) => m.role === "terrain")!;
+    expect(terrain.textures?.color).toBeDefined();
+    expect(loaded).toContain(kies.material!.color);
+    expect(loaded).not.toContain(TERRAIN_MATERIAL.color);
   });
 
   it("Glas und Öffnungsteile haben ihre Rolle, Wände „building“", async () => {

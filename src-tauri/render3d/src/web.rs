@@ -634,6 +634,14 @@ impl WebModelRenderer {
         Ok(())
     }
 
+    /// [212] Etappe 4: Normalen- (OpenGL) und Rauigkeitskarten für den Pathtracer, je `layer_count` Ebenen à 256×256
+    /// RGBA8 in derselben Reihenfolge wie `set_material_textures` (schwarze Ebene = keine Karte;
+    /// `Renderer::set_material_detail_textures`). Wirkt beim nächsten Bild im Stil Pathtracing.
+    pub fn set_material_detail_textures(&mut self, normal: &[u8], rough: &[u8], layer_count: u32) -> Result<(), JsValue> {
+        self.renderer.set_material_detail_textures(&self.device, &self.queue, normal, rough, layer_count);
+        Ok(())
+    }
+
     /// Setzt/ersetzt das aufs Gelaende drapierte Luftbild (SWISSIMAGE). `rgba` =
     /// dicht gepackte RGBA8-Bytes (`width*height*4`, zeilenweise von OBEN = Nord),
     /// die der JS-Aufrufer aus der Bild-Data-URL dekodiert (siehe

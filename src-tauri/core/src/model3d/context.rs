@@ -31,6 +31,10 @@ pub fn emit_context_meshes(p: &Project) -> Vec<RMesh> {
     let mut out = Vec::new();
     // [T6]/[114] Ebenen-Sichtbarkeit: ein ausgeblendetes Gelände (Kategorie „02") verschwindet auch im 3D.
     let hidden = hidden_category_codes(&p.layers);
+    // [212] Gelände mit Bauteil: Textur-Ebene seiner Farbkarte (nur ermitteln, wenn ein Gelände eines hat).
+    let terrain_comp = |m: &crate::model::TerrainMesh| m.component_id.as_deref().filter(|c| !c.is_empty()).map(str::to_owned);
+    let any_comp = p.context.as_deref().unwrap_or(&[]).iter().any(|o| matches!(o, ContextObject::TerrainMesh(m) if terrain_comp(m).is_some()));
+    let maps = if any_comp { material_color_maps(p, None) } else { Vec::new() };
     for (ci, obj) in p.context.as_deref().unwrap_or(&[]).iter().enumerate() {
         // [181] Sichtbarkeit allein über die Klasse.
         if hidden.contains(obj.category_code()) {
@@ -40,14 +44,16 @@ pub fn emit_context_meshes(p: &Project) -> Vec<RMesh> {
             ContextObject::TerrainMesh(m) if m.positions.len() >= 9 && m.indices.len() >= 3 => {
                 // [T6] Baugruben schneiden das Gelände; Höhen im Modellbezug (Luftbild-Farben auf das geänderte Netz übertragen).
                 let (pos, idx, _) = crate::excavation::terrain_model_mesh(p, m);
+                let comp = terrain_comp(m);
+                let color = comp.as_deref().and_then(|c| p.component(c)).map_or(TERRAIN_RGB, |c| hex_to_rgb(&c.color, TERRAIN_RGB));
                 out.push(RMesh {
                     crease_angle: None,
                     positions: pos.into_owned(),
                     indices: indices_u32(&idx),
                     kind: "terrain",
-                    color: TERRAIN_RGB,
+                    color,
                     vertex_colors: crate::excavation::terrain_vertex_colors(p, m),
-                    material_index: None,
+                    material_index: comp.as_deref().and_then(|c| material_layer(p, &maps, c)),
                     owner: Owner::Context(ci),
                 })
             }
