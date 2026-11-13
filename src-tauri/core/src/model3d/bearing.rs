@@ -273,31 +273,71 @@ pub(crate) fn bearing_outlines(p: &Project, only: impl Fn(&Ceiling) -> bool, kno
         }
     }
     let none = WallCuts::default();
+    let cuts_of = |w: &Wall| known.and_then(|k| k.get(&w.id)).or_else(|| joins.get(w.id.as_str())).unwrap_or(&none);
     for ci in todo {
-        let c = &ceilings[ci];
-        let ring: Vec<[f64; 2]> = c.ring_xy();
-        let cb = bbox_of(ring.iter().copied());
-        let cutters: Vec<crate::flat::Polygon> = walls
-            .iter()
-            .flat_map(|&(w, f)| wall_cutters_with(p, w, f, known.and_then(|k| k.get(&w.id)).or_else(|| joins.get(w.id.as_str())).unwrap_or(&none), c))
-            .filter(|s| {
-                let b = bbox_of(s.iter().copied());
-                b[0] < cb[2] && b[2] > cb[0] && b[1] < cb[3] && b[3] > cb[1]
-            })
-            .map(|s| vec![s])
-            .collect();
-        if cutters.is_empty() {
-            continue;
-        }
-        let rest = crate::polygon_bool::difference(&[vec![ring.clone()]], &cutters);
-        let rest: Vec<crate::flat::Polygon> = rest.into_iter().filter(|poly| poly.first().is_some_and(|r| r.len() >= 3)).collect();
-        // Streifen nur berührt (Umriss endet schon am Kern): Umriss exakt behalten (kein Raster-Runden).
-        let area = |poly: &crate::flat::Polygon| poly.iter().enumerate().map(|(i, r)| if i == 0 { ring_area(r) } else { -ring_area(r) }).sum::<f64>();
-        if (rest.iter().map(area).sum::<f64>() - ring_area(&ring)).abs() < 1e-6 {
-            continue;
-        }
-        out[ci] = Some(rest);
+        out[ci] = ceiling_bearing(p, &ceilings[ci], &walls, &cuts_of);
     }
+    out
+}
+
+/// Platten-Umriss EINER Decke aus den Aussenwänden `walls` (mit ihren Aussenflächen) und ihren Schnittlinien.
+fn ceiling_bearing<'c>(p: &Project, c: &Ceiling, walls: &[(&Wall, OuterFaces)], cuts_of: &dyn Fn(&Wall) -> &'c WallCuts) -> Option<Vec<crate::flat::Polygon>> {
+    let ring: Vec<[f64; 2]> = c.ring_xy();
+    let cb = bbox_of(ring.iter().copied());
+    let cutters: Vec<crate::flat::Polygon> = walls
+        .iter()
+        .flat_map(|&(w, f)| wall_cutters_with(p, w, f, cuts_of(w), c))
+        .filter(|s| {
+            let b = bbox_of(s.iter().copied());
+            b[0] < cb[2] && b[2] > cb[0] && b[1] < cb[3] && b[3] > cb[1]
+        })
+        .map(|s| vec![s])
+        .collect();
+    if cutters.is_empty() {
+        return None;
+    }
+    let rest = crate::polygon_bool::difference(&[vec![ring.clone()]], &cutters);
+    let rest: Vec<crate::flat::Polygon> = rest.into_iter().filter(|poly| poly.first().is_some_and(|r| r.len() >= 3)).collect();
+    // Streifen nur berührt (Umriss endet schon am Kern): Umriss exakt behalten (kein Raster-Runden).
+    let area = |poly: &crate::flat::Polygon| poly.iter().enumerate().map(|(i, r)| if i == 0 { ring_area(r) } else { -ring_area(r) }).sum::<f64>();
+    if (rest.iter().map(area).sum::<f64>() - ring_area(&ring)).abs() < 1e-6 {
+        return None;
+    }
+    Some(rest)
+}
+
+/// [214] Gemerkte Platten-Umrisse je Decke (3D-Cache, Index wie `Project::ceilings`): Schlüssel = Stand und
+/// Schnittlinien der Wände, die die Platte in der Höhe überlappen (nur sie gehen in [`ceiling_bearing`] ein).
+pub(crate) type BearingMemo = HashMap<usize, (Vec<(u64, WallCuts)>, Option<Vec<crate::flat::Polygon>>)>;
+
+/// Wie [`bearing_outlines`] für alle Decken mit bekannten Schnittlinien `known`; Decken, deren Wände (Stand
+/// `stamps[i]` je Wand, Schnittlinien) gleich geblieben sind, aus `memo`. Der Aufrufer verwirft `memo`, wenn sich
+/// etwas anderes als Wände/Öffnungen ändert (Decken, Typen, Geschosse …).
+pub(crate) fn bearing_outlines_memo(p: &Project, known: &HashMap<String, WallCuts>, stamps: &[u64], memo: &mut BearingMemo) -> Vec<Option<Vec<crate::flat::Polygon>>> {
+    let ceilings = p.ceilings.as_deref().unwrap_or(&[]);
+    let mut out = vec![None; ceilings.len()];
+    let mut fresh = BearingMemo::new();
+    let ext: Vec<(f64, f64)> = p.walls.iter().map(|w| p.wall_vertical_extent(w)).collect();
+    let none = WallCuts::default();
+    let cuts_of = |w: &Wall| known.get(&w.id).unwrap_or(&none);
+    for (ci, c) in ceilings.iter().enumerate() {
+        if c.edge_at_outline == Some(true) || c.outline.len() < 3 {
+            continue;
+        }
+        let (cb, ct) = p.ceiling_vertical_extent(c);
+        let near: Vec<usize> = (0..p.walls.len()).filter(|&i| ext[i].1.min(ct) - ext[i].0.max(cb) > Z_EPS).collect();
+        let key: Vec<(u64, WallCuts)> = near.iter().map(|&i| (stamps.get(i).copied().unwrap_or(0), cuts_of(&p.walls[i]).clone())).collect();
+        let v = match memo.remove(&ci) {
+            Some((k, v)) if k == key => v,
+            _ => {
+                let walls: Vec<(&Wall, OuterFaces)> = near.iter().filter_map(|&i| Some((&p.walls[i], outer_faces(p, &p.walls[i])?))).collect();
+                if walls.is_empty() { None } else { ceiling_bearing(p, c, &walls, &cuts_of) }
+            }
+        };
+        out[ci] = v.clone();
+        fresh.insert(ci, (key, v));
+    }
+    *memo = fresh;
     out
 }
 

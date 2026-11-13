@@ -18,6 +18,11 @@ pub fn run_doc(d: &mut crate::document::Document, name: &str, args: &[f64], text
     // [173] Mit Modelldarstellung (`text`) ohne den Cache (eigene Teile, s. `model3d_mv`).
     if (name == "model3dParts" || delta.is_some()) && args.len() >= 3 && !explode && model3d_mv_id(text).is_none() {
         let voids = args.get(3).is_some_and(|v| *v != 0.0);
+        // [214] Ohne Abzugskörper braucht es die Wände/Decken nicht als Werte (spart das Kopieren): leere `voidMeshes`.
+        if voids && crate::plan::extras::void_prisms(d.project()?).is_empty() {
+            let out = d.model3d_parts_with(args[0] != 0.0, args[1], args[2] != 0.0, false, delta, text)?;
+            return with_void_meshes(out.json, &crate::solid_specs::VoidMeshes::default());
+        }
         let out = d.model3d_parts_with(args[0] != 0.0, args[1], args[2] != 0.0, voids, delta, text)?;
         if voids {
             let p = d.project()?;

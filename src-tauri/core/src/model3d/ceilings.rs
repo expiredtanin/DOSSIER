@@ -31,15 +31,20 @@ pub fn emit_slabs(p: &Project) -> Vec<RSlab> {
 /// Wie [`emit_slabs`]; `joins`: schon gerechnete Schnittlinien je Wand-id (3D-Cache, [214]: sonst rechnet das
 /// Deckenauflager die Verschneidung aller Geschosse neu).
 pub fn emit_slabs_with(p: &Project, joins: Option<&HashMap<String, WallCuts>>) -> Vec<RSlab> {
-    let mut ceilings: Vec<(usize, &Ceiling)> = Vec::new();
-    let mut layers_of: Vec<Option<&[Layer]>> = Vec::new();
-    let mut w = FlatWriter::new();
-    let count = w.slot();
     // [178] Auflager an Aussenwänden: Platte bis Aussenkante Kern (abgeleiteter Umriss, Modell unverändert).
     let bearing = match joins {
         Some(j) => super::bearing::bearing_outlines(p, |_| true, Some(j)),
         None => super::bearing::ceiling_bearing_outlines(p),
     };
+    emit_slabs_from(p, &bearing)
+}
+
+/// Wie [`emit_slabs_with`] mit schon gerechneten Platten-Umrissen je Decke ([214] 3D-Cache, `bearing_outlines_memo`).
+pub(crate) fn emit_slabs_from(p: &Project, bearing: &[Option<Vec<crate::flat::Polygon>>]) -> Vec<RSlab> {
+    let mut ceilings: Vec<(usize, &Ceiling)> = Vec::new();
+    let mut layers_of: Vec<Option<&[Layer]>> = Vec::new();
+    let mut w = FlatWriter::new();
+    let count = w.slot();
     let v2 = |r: &[[f64; 2]]| -> Vec<Vec2> { r.iter().map(|q| Vec2 { x: q[0], y: q[1] }).collect() };
     for (ci, c) in p.ceilings.as_deref().unwrap_or(&[]).iter().enumerate() {
         if c.outline.len() < 3 {

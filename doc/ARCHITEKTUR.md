@@ -513,7 +513,10 @@ Offen: Bauzonen sind kein eigener Planinhalt (nur Baurecht-Einstellungen); „gr
    `gpu.rs` zeichnet. Die Geisterschicht grauer Klassen/Geschosse ([180]) reist genauso als Teile
    (`GhostLayerSync` in `src/viewport/ghostSync.ts`, `set_ghost_parts()`) in eine eigene Szene. Der Kern-Cache hält
    auch die übrigen Gruppen (Decken, Dächer, Kontext …), solange keine Wand/Öffnung und kein anderes Feld sich
-   ändert — die zweite Abfrage mit dem Geister-Filter rechnet nichts neu ([214]). Messung:
+   ändert — die zweite Abfrage mit dem Geister-Filter rechnet nichts neu ([214]); jede übrige Gruppe und der
+   Öffnungs-Rest tragen eine Laufnummer (`restKeys`, `tailKey`, gleicher Inhalt = gleiche Nummer, auch über Filter
+   und verworfenen Cache hinweg), reisen nur neu aus dem Kern und sind im Viewer unveränderliche Teile; das
+   Deckenauflager rechnet der Cache je Decke nur neu, wenn sich die Wände in ihrem Höhenbereich ändern. Messung:
    `src/viewport/render3d.bench.test.ts` (Kern/TS) und `render_png --bench` (Engine).
 5. Freie Körper (`extrudedSolids`) und Abzugskörper rechnet der Kern synchron ([115]): `model3d/solids.rs`
    (`emit_solids`, Teil `solidMeshes`, Netz aus `solid_mesh::body_mesh_3d`, Farbe/Textur aus `componentId`,

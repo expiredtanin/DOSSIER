@@ -101,9 +101,75 @@ pub struct Model3dCache {
     /// [214] Übrige Gruppen (Decken, Treppen, Kontext, Körper, Stützen, Dächer) ungefiltert zum letzten Stand: gleich,
     /// solange keine Wand/Öffnung und kein anderes Feld (`sig`) sich ändert — die Geisterschicht fragt im selben
     /// Durchgang mit anderem Klassen-Filter, Ein-/Ausblenden ändert nur den Filter.
-    rest: Option<(RestKey, Parts)>,
+    /// Je Schnitt-Variante der Treppen (`for_section`) ein Eintrag.
+    rest: [Option<(RestKey, Parts)>; 2],
     /// [214] Statistik (Tests): ob der letzte Aufruf die übrigen Gruppen aus `rest` nahm.
     pub last_rest_hit: bool,
+    /// [214] Je übrige Gruppe (Reihenfolge wie [`ClassFilter::rest_masks`]): Laufnummer des ungefilterten Inhalts und
+    /// die ausgegebenen Fassungen je Filter-Maske. Überlebt das Verwerfen (`validate`): Neu gerechnete Gruppen werden
+    /// dem Wert nach verglichen, gleiche behalten ihre Laufnummer — der Viewer bekommt sie nicht noch einmal.
+    groups: [[RestGroup; 8]; 2],
+    /// [214] Statistik (Tests): Gruppen, deren Inhalt sich im letzten Aufruf geändert hat (Bit je Gruppe).
+    pub last_groups_changed: u8,
+    /// [214] Rest der Öffnungs-Einbauteile (Dach-/Deckenfenster, bei Bogenwänden alle) der letzten Antworten: Inhalt,
+    /// Laufnummer, JSON ohne Klammern (gleicher Inhalt → gleiche Nummer, der Viewer bekommt ihn nicht noch einmal).
+    tails: Vec<(Vec<RMesh>, u64, String)>,
+    /// [214] Platten-Umrisse (Deckenauflager) je Decke, gültig bei gleichen Wänden im Höhenbereich der Platte: für die
+    /// Geschoss-Kontexte und die Decken — eine Wand-Änderung rechnet nur die Decken neu, die sie berührt.
+    bearing: crate::model3d::bearing::BearingMemo,
+}
+
+/// [214] Eine übrige Gruppe: Stand des ungefilterten Inhalts und die zuletzt ausgegebenen gefilterten Fassungen.
+#[derive(Debug, Default)]
+struct RestGroup {
+    base: u64,
+    outs: Vec<RestOut>,
+}
+
+/// [214] Ausgegebene Fassung einer übrigen Gruppe: zum Inhalt `base` mit Filter-Maske `mask` (`None` = alles).
+#[derive(Debug)]
+struct RestOut {
+    base: u64,
+    mask: Option<Vec<bool>>,
+    serial: u64,
+    json: String,
+}
+
+/// Höchstens so viele gefilterte Fassungen je übrige Gruppe (Hauptmodell, Geisterschicht, …; älteste fällt weg).
+const MAX_REST_OUTS: usize = 4;
+
+/// Gleicher Inhalt der übrigen Gruppe `i` (Reihenfolge wie [`ClassFilter::rest_masks`]).
+fn group_eq(i: usize, a: &Parts, b: &Parts) -> bool {
+    match i {
+        0 => a.slabs == b.slabs,
+        1 => a.context_meshes == b.context_meshes,
+        2 => a.column_meshes == b.column_meshes,
+        3 => a.stair_meshes == b.stair_meshes,
+        4 => a.stair_railings == b.stair_railings,
+        5 => a.roof_meshes == b.roof_meshes,
+        6 => a.roof_layers == b.roof_layers,
+        _ => a.solid_meshes == b.solid_meshes,
+    }
+}
+
+/// JSON der übrigen Gruppe `i`, nur die Einträge der Maske (wie `retain_rest` + `serde_json::to_string`).
+fn group_json(i: usize, p: &Parts, mask: Option<&[bool]>) -> Result<String, String> {
+    fn masked<T: serde::Serialize>(v: &[T], mask: Option<&[bool]>) -> Result<String, String> {
+        match mask {
+            None => js(&v),
+            Some(m) => js(&v.iter().zip(m).filter(|(_, &k)| k).map(|(x, _)| x).collect::<Vec<&T>>()),
+        }
+    }
+    match i {
+        0 => masked(&p.slabs, mask),
+        1 => masked(&p.context_meshes, mask),
+        2 => masked(&p.column_meshes, mask),
+        3 => masked(&p.stair_meshes, mask),
+        4 => masked(&p.stair_railings, mask),
+        5 => masked(&p.roof_meshes, mask),
+        6 => masked(&p.roof_layers, mask),
+        _ => masked(&p.solid_meshes, mask),
+    }
 }
 
 /// [214] Schlüssel der übrigen Gruppen: Schnitt-Variante der Treppen und Element-Stände der Wände/Öffnungen.
@@ -141,9 +207,16 @@ impl Model3dCache {
         let sig = (revs.epoch(), revs.max_except(NOT_GLOBAL));
         let maps = model3d::wall_material_color_maps(p);
         if self.sig != Some(sig) || self.maps != maps {
+            // [214] Übrige Gruppen behalten (zum Vergleich), aber nicht als Treffer: `RestKey` ohne Stände.
+            let rest = std::mem::take(&mut self.rest).map(|r| r.map(|(k, r)| (RestKey { for_section: k.for_section, walls: Vec::new(), openings: vec![u64::MAX] }, r)));
+            let groups = std::mem::take(&mut self.groups);
+            let tails = std::mem::take(&mut self.tails);
             *self = Model3dCache {
                 sig: Some(sig),
                 maps,
+                rest,
+                groups,
+                tails,
                 ..Default::default()
             };
         }
@@ -208,13 +281,14 @@ impl Model3dCache {
         let mut contexts: HashMap<&str, crate::wall_bands::FloorContext> = HashMap::new();
         // [178] Geschoss-Kontexte vorab (Deckenrand aus den Wänden): geänderte Decken-Eingabe → Geschoss neu.
         let mut ctx_changed: std::collections::HashSet<&str> = std::collections::HashSet::new();
-        if layered {
+        let mut bearing = layered.then(|| crate::model3d::bearing::bearing_outlines_memo(p, &joins, wall_stamps, &mut self.bearing));
+        if let Some(bearing) = &bearing {
             let mut prev = std::mem::take(&mut self.ceilings[1]);
             for wall in &p.walls {
                 if contexts.contains_key(wall.floor_id.as_str()) {
                     continue;
                 }
-                let ctx = model3d::floor_context_with(p, &wall.floor_id, true, Some(&joins));
+                let ctx = model3d::floor_context_from(p, &wall.floor_id, true, bearing);
                 let inputs = ctx.ceiling_inputs();
                 if prev.remove(&wall.floor_id).as_ref() != Some(&inputs) {
                     ctx_changed.insert(wall.floor_id.as_str());
@@ -323,9 +397,12 @@ impl Model3dCache {
         // [214] Übrige Gruppen: aus `rest`, solange Stände und Variante gleich sind (sonst neu, mit den schon
         // bekannten Schnittlinien fürs Deckenauflager).
         let key = RestKey { for_section, walls: wall_stamps.to_vec(), openings: opening_stamps.to_vec() };
-        self.last_rest_hit = matches!(&self.rest, Some((k, _)) if *k == key);
+        let var = for_section as usize;
+        self.last_rest_hit = matches!(&self.rest[var], Some((k, _)) if *k == key);
+        self.last_groups_changed = 0;
         if !self.last_rest_hit {
-            let mut slabs = model3d::emit_slabs_with(p, Some(&joins));
+            let bearing = bearing.get_or_insert_with(|| crate::model3d::bearing::bearing_outlines_memo(p, &joins, wall_stamps, &mut self.bearing));
+            let mut slabs = model3d::emit_slabs_from(p, bearing);
             slabs.extend(model3d::emit_stairs(p, for_section));
             let all = Parts {
                 walls: Vec::new(),
@@ -339,10 +416,46 @@ impl Model3dCache {
                 roof_meshes: model3d::emit_roofs(p, None)?,
                 roof_layers: model3d::emit_roof_cut_layers(p)?,
             };
-            self.rest = Some((key, all));
+            // [214] Je Gruppe dem Wert nach vergleichen: Gleiches behält Laufnummer und ausgegebenes JSON.
+            let old = self.rest[var].take();
+            for (i, g) in self.groups[var].iter_mut().enumerate() {
+                if g.base == 0 || !old.as_ref().is_some_and(|(_, o)| group_eq(i, o, &all)) {
+                    *g = RestGroup { base: next_serial(), outs: Vec::new() };
+                    self.last_groups_changed |= 1 << i;
+                }
+            }
+            self.rest[var] = Some((key, all));
         }
-        let mut parts = self.rest.as_ref().map(|(_, r)| r.clone()).expect("gerade gesetzt");
-        filter.retain_rest(p, &mut parts);
+        let all = &self.rest[var].as_ref().expect("gerade gesetzt").1;
+        // [214] Gefilterte Fassung je Gruppe: aus dem Cache, wenn Inhalt und Maske gleich sind (sonst einmal schreiben).
+        let group_masks = filter.rest_masks(p, all);
+        let mut rest_out: Vec<(u64, &str)> = Vec::with_capacity(8);
+        for (i, (g, mask)) in self.groups[var].iter_mut().zip(group_masks).enumerate() {
+            let at = match g.outs.iter().position(|o| o.base == g.base && o.mask == mask) {
+                Some(at) => at,
+                None => {
+                    let json = group_json(i, all, mask.as_deref())?;
+                    // Gefiltert gleich wie eine frühere Fassung (etwa die Geisterschicht, wenn sich nur Gezeigtes
+                    // geändert hat): deren Laufnummer, der Viewer hat sie schon.
+                    let serial = match g.outs.iter().position(|o| o.json == json) {
+                        Some(at) => g.outs[at].serial,
+                        None => next_serial(),
+                    };
+                    if g.outs.len() >= MAX_REST_OUTS {
+                        g.outs.remove(0);
+                    }
+                    g.outs.push(RestOut { base: g.base, mask, serial, json });
+                    g.outs.len() - 1
+                }
+            };
+            let o = &g.outs[at];
+            rest_out.push((o.serial, o.json.as_str()));
+        }
+        let mut parts = Parts::default();
+        if structs {
+            parts = all.clone();
+            filter.retain_rest(p, &mut parts);
+        }
         // JSON in einem Zug (wie `serde_json::to_string(&parts)`): Bruchstücke sammeln, dann einmal kopieren.
         // [180] Ausgeblendete Einträge bleiben beim Aufrufer (`keep`), damit Einblenden nichts neu schickt.
         let mut wall_entries: Vec<&WallEntry> = Vec::with_capacity(p.walls.len());
@@ -378,20 +491,26 @@ impl Model3dCache {
             }
         }
         let surface = if arcs { Vec::new() } else { model3d::surface_window_meshes_with(p, &|o| filter.keep_opening(o)) };
-        let opening_tail = match &arc_meshes {
-            Some(m) => inner_json(m),
-            None => inner_json(&surface),
+        // [214] Gleicher Inhalt wie eine der letzten Antworten: dieselbe Laufnummer (der Viewer hat ihn schon).
+        let tail: &[RMesh] = arc_meshes.as_deref().unwrap_or(&surface);
+        let (tail_serial, opening_tail) = match self.tails.iter().position(|t| t.0 == tail) {
+            Some(i) => {
+                let t = self.tails.remove(i);
+                let out = (t.1, t.2.clone());
+                self.tails.push(t);
+                out
+            }
+            None => {
+                let t = (tail.to_vec(), next_serial(), inner_json(tail));
+                let out = (t.1, t.2.clone());
+                if self.tails.len() >= MAX_REST_OUTS {
+                    self.tails.remove(0);
+                }
+                self.tails.push(t);
+                out
+            }
         };
-        let rest = [
-            js(&parts.slabs)?,
-            js(&parts.context_meshes)?,
-            js(&parts.column_meshes)?,
-            js(&parts.stair_meshes)?,
-            js(&parts.stair_railings)?,
-            js(&parts.roof_meshes)?,
-            js(&parts.roof_layers)?,
-            js(&parts.solid_meshes)?,
-        ];
+        let rest: [&str; 8] = std::array::from_fn(|i| rest_out[i].1);
         let mut json = String::new();
         if let Some(mark) = delta {
             fn w<'a>(v: &[&'a WallEntry]) -> Vec<(u64, &'a str)> {
@@ -400,32 +519,33 @@ impl Model3dCache {
             fn o<'a>(v: &[OpenOut<'a>]) -> Vec<(u64, &'a [String; 5])> {
                 v.iter().map(|e| (e.serial, e.json)).collect()
             }
-            json = write_delta(mark, [&w(&wall_entries), &w(&wall_keep)], [&o(&open_entries), &o(&open_keep)], &opening_tail, &rest);
+            let rest_d: [(u64, &str); 8] = std::array::from_fn(|i| rest_out[i]);
+            json = write_delta(mark, [&w(&wall_entries), &w(&wall_keep)], [&o(&open_entries), &o(&open_keep)], (tail_serial, &opening_tail), &rest_d);
         } else {
             let walls_frag = wall_entries.iter().map(|e| e.json.as_str());
             let opening_frags = (0..5).flat_map(|k| open_entries.iter().map(move |e| e.json[k].as_str())).chain([opening_tail.as_str()]);
-            let cap = walls_frag.clone().chain(opening_frags.clone()).map(|s| s.len() + 1).sum::<usize>() + rest.iter().map(String::len).sum::<usize>() + 256;
+            let cap = walls_frag.clone().chain(opening_frags.clone()).map(|s| s.len() + 1).sum::<usize>() + rest.iter().map(|r| r.len()).sum::<usize>() + 256;
             json.reserve(cap);
             json.push_str("{\"walls\":[");
             join_json(&mut json, walls_frag);
             json.push_str("],\"slabs\":");
-            json.push_str(&rest[0]);
+            json.push_str(rest[0]);
             json.push_str(",\"contextMeshes\":");
-            json.push_str(&rest[1]);
+            json.push_str(rest[1]);
             json.push_str(",\"columnMeshes\":");
-            json.push_str(&rest[2]);
+            json.push_str(rest[2]);
             json.push_str(",\"openingMeshes\":[");
             join_json(&mut json, opening_frags);
             json.push_str("],\"stairMeshes\":");
-            json.push_str(&rest[3]);
+            json.push_str(rest[3]);
             json.push_str(",\"stairRailings\":");
-            json.push_str(&rest[4]);
+            json.push_str(rest[4]);
             json.push_str(",\"roofMeshes\":");
-            json.push_str(&rest[5]);
+            json.push_str(rest[5]);
             json.push_str(",\"roofLayers\":");
-            json.push_str(&rest[6]);
+            json.push_str(rest[6]);
             json.push_str(",\"solidMeshes\":");
-            json.push_str(&rest[7]);
+            json.push_str(rest[7]);
             json.push('}');
         }
         if structs {
@@ -459,11 +579,13 @@ struct OpenOut<'a> {
 /// Änderungs-JSON ([58], TS `ProjectDocument.model3dParts`): statt `walls`/`openingMeshes` die Laufnummern
 /// je Wand (`wallKeys`, `openingKeys`, Modell-Reihenfolge) und nur die Einträge mit Laufnummer > `mark`
 /// ausgeschrieben (`wallNew`: `[nr, [Körper…]]`, `openingNew`: `[nr, 3 Durchgänge, Zargen, Formöffnungen]`);
-/// `openingTail` = Dach-/Deckenfenster (bzw. alles bei Bogenwänden), `mark` = Stand für die nächste Frage.
+/// `openingTail` = Dach-/Deckenfenster (bzw. alles bei Bogenwänden; [214] mit Laufnummer `tailKey`, `null` = schon
+/// geschickt), übrige Gruppen mit Laufnummer je Gruppe (`restKeys`, Inhalt `null` = schon geschickt),
+/// `mark` = Stand für die nächste Frage.
 /// [180] `wallKeep`/`openingKeep` (nur wenn nicht leer): Einträge ausgeblendeter Klassen, die der Aufrufer
 /// behält, aber nicht zeigt (je `[gezeigt, behalten]` übergeben). Gültig nur, wenn der Aufrufer die Einträge
 /// ≤ `mark` aus seiner letzten Antwort hat (sonst `mark` 0).
-fn write_delta(mark: u64, walls: [&[(u64, &str)]; 2], openings: [&[(u64, &[String; 5])]; 2], opening_tail: &str, rest: &[String; 8]) -> String {
+fn write_delta(mark: u64, walls: [&[(u64, &str)]; 2], openings: [&[(u64, &[String; 5])]; 2], opening_tail: (u64, &str), rest: &[(u64, &str); 8]) -> String {
     use std::fmt::Write;
     let fresh = |serial: u64| mark == 0 || serial > mark || mark > current_serial();
     let cap = walls.iter().flat_map(|v| v.iter()).filter(|e| fresh(e.0)).map(|e| e.1.len() + 32).sum::<usize>()
@@ -474,8 +596,8 @@ fn write_delta(mark: u64, walls: [&[(u64, &str)]; 2], openings: [&[(u64, &[Strin
             .map(|e| e.1.iter().map(|j| j.len() + 4).sum::<usize>() + 32)
             .sum::<usize>()
         + (walls[0].len() + walls[1].len() + openings[0].len() + openings[1].len()) * 12
-        + opening_tail.len()
-        + rest.iter().map(String::len).sum::<usize>()
+        + opening_tail.1.len()
+        + rest.iter().filter(|r| fresh(r.0)).map(|r| r.1.len()).sum::<usize>()
         + 512;
     let mut out = String::with_capacity(cap);
     let keys = |out: &mut String, name: &str, serials: &mut dyn Iterator<Item = u64>| {
@@ -511,13 +633,24 @@ fn write_delta(mark: u64, walls: [&[(u64, &str)]; 2], openings: [&[(u64, &[Strin
         out.push(']');
         first = false;
     }
-    let _ = write!(
-        out,
-        "],\"openingTail\":[{opening_tail}],\"slabs\":{},\"contextMeshes\":{},\"columnMeshes\":{},\"stairMeshes\":{},\"stairRailings\":{},\"roofMeshes\":{},\"roofLayers\":{},\"solidMeshes\":{}}}",
-        rest[0], rest[1], rest[2], rest[3], rest[4], rest[5], rest[6], rest[7]
-    );
+    // [214] Rest der Öffnungs-Einbauteile wie eine übrige Gruppe: Laufnummer `tailKey`, Inhalt nur wenn neu (sonst `null`).
+    if fresh(opening_tail.0) {
+        let _ = write!(out, "],\"tailKey\":{},\"openingTail\":[{}],", opening_tail.0, opening_tail.1);
+    } else {
+        let _ = write!(out, "],\"tailKey\":{},\"openingTail\":null,", opening_tail.0);
+    }
+    // [214] Übrige Gruppen: Laufnummer je Gruppe (`restKeys`), Inhalt nur, wenn neuer als `mark` (sonst `null`).
+    keys(&mut out, "restKeys", &mut rest.iter().map(|r| r.0));
+    out.pop();
+    for (name, (serial, json)) in REST_NAMES.iter().zip(rest) {
+        let _ = write!(out, ",\"{name}\":{}", if fresh(*serial) { json } else { "null" });
+    }
+    out.push('}');
     out
 }
+
+/// Namen der übrigen Gruppen im JSON (Reihenfolge wie [`ClassFilter::rest_masks`]).
+const REST_NAMES: [&str; 8] = ["slabs", "contextMeshes", "columnMeshes", "stairMeshes", "stairRailings", "roofMeshes", "roofLayers", "solidMeshes"];
 
 fn js<T: serde::Serialize>(v: &T) -> Result<String, String> {
     serde_json::to_string(v).map_err(|e| e.to_string())
@@ -553,7 +686,11 @@ mod tests {
             let mut da = a.to_vec();
             da.push(c.mark as f64);
             let delta = crate::queries::run_doc(d, "model3dPartsDelta", &da, text).unwrap();
-            let got = c.apply(&delta);
+            let got = c.apply(&delta).unwrap_or_else(|| {
+                // Wie TS: Eintrag fehlt → einmal alles neu.
+                da[5] = 0.0;
+                c.apply(&crate::queries::run_doc(d, "model3dPartsDelta", &da, text).unwrap()).expect("volle Antwort")
+            });
             let want: Value = serde_json::from_str(&full).unwrap();
             assert!(got == want, "{step}: model3dPartsDelta {a:?} weicht ab");
         }
@@ -565,12 +702,21 @@ mod tests {
         mark: u64,
         walls: std::collections::HashMap<u64, Vec<Value>>,
         openings: std::collections::HashMap<u64, Vec<Vec<Value>>>,
+        /// [214] Übrige Gruppen der letzten beiden Antworten (Laufnummer → Inhalt), wie TS.
+        rest: [std::collections::HashMap<u64, Value>; 2],
     }
 
     impl Client {
-        fn apply(&mut self, json: &str) -> Value {
+        /// `None`: eine übrige Gruppe fehlt (wie TS: dann alles neu anfordern, `mark` 0).
+        fn apply(&mut self, json: &str) -> Option<Value> {
             let r: Value = serde_json::from_str(json).unwrap();
             let key = |v: &Value| v.as_u64().unwrap();
+            // [214] Übrige Gruppen: neu geschickt oder aus den letzten Antworten nach Laufnummer.
+            let mut rest = std::collections::HashMap::new();
+            for (name, k) in super::REST_NAMES.iter().zip(r["restKeys"].as_array().unwrap().iter().map(key)) {
+                let v = if r[*name].is_null() { self.rest.iter().find_map(|m| m.get(&k)).cloned()? } else { r[*name].clone() };
+                rest.insert(k, v);
+            }
             let arr = |v: &Value| v.as_array().unwrap().clone();
             let mut wn: std::collections::HashMap<u64, Vec<Value>> = r["wallNew"].as_array().unwrap().iter().map(|e| (key(&e[0]), arr(&e[1]))).collect();
             let mut on: std::collections::HashMap<u64, Vec<Vec<Value>>> = r["openingNew"].as_array().unwrap().iter().map(|e| (key(&e[0]), (1..6).map(|k| arr(&e[k])).collect())).collect();
@@ -601,20 +747,29 @@ mod tests {
                     meshes.extend(no[k][l].iter().cloned());
                 }
             }
-            meshes.extend(arr(&r["openingTail"]));
+            let tail = match r["openingTail"].as_array() {
+                Some(a) => a.clone(),
+                None => self.rest.iter().find_map(|m| m.get(&key(&r["tailKey"]))).and_then(Value::as_array).cloned()?,
+            };
+            meshes.extend(tail.iter().cloned());
+            rest.insert(key(&r["tailKey"]), Value::Array(tail));
             (self.mark, self.walls, self.openings) = (key(&r["mark"]), nw, no);
             let mut out = serde_json::Map::new();
             out.insert("walls".into(), Value::Array(walls));
+            let rest_of = |name: &str| rest[&key(&r["restKeys"][super::REST_NAMES.iter().position(|n| *n == name).unwrap()])].clone();
             for k in ["slabs", "contextMeshes", "columnMeshes"] {
-                out.insert(k.into(), r[k].clone());
+                out.insert(k.into(), rest_of(k));
             }
             out.insert("openingMeshes".into(), Value::Array(meshes));
-            for k in ["stairMeshes", "stairRailings", "roofMeshes", "roofLayers", "solidMeshes", "voidMeshes"] {
-                if let Some(v) = r.get(k) {
-                    out.insert(k.into(), v.clone());
-                }
+            for k in ["stairMeshes", "stairRailings", "roofMeshes", "roofLayers", "solidMeshes"] {
+                out.insert(k.into(), rest_of(k));
             }
-            Value::Object(out)
+            if let Some(v) = r.get("voidMeshes") {
+                out.insert("voidMeshes".into(), v.clone());
+            }
+            let prev = std::mem::take(&mut self.rest[0]);
+            self.rest = [rest, prev];
+            Some(Value::Object(out))
         }
     }
 
@@ -889,6 +1044,59 @@ mod tests {
         assert!(!d.model3d_rest_hit(), "Wand geändert");
     }
 
+    /// [214] Übrige Gruppen mit Laufnummer: Eine Wand-Änderung schickt nur Gruppen, deren Inhalt sich geändert hat
+    /// (sonst `null`), ein zweiter Filter (Geisterschicht) im Wechsel schickt nichts noch einmal, und eine Änderung an
+    /// anderer Stelle (Typen, Geschosse …: Cache verworfen) behält gleiche Gruppen. Zusammengesetzt = voll (`check`).
+    #[test]
+    fn uebrige_gruppen_mit_laufnummer() {
+        let mut d = sample();
+        let house = json!({"type": "importedMesh", "id": "nachbar", "name": "Nachbar", "categoryCode": "12",
+            "positions": [20.0, 0.0, 0.0, 26.0, 0.0, 0.0, 26.0, 6.0, 0.0, 20.0, 0.0, 5.0], "indices": [0, 1, 2, 0, 2, 3]});
+        d.commit(vec![Op::SetField { key: "context".into(), value: Some(json!([house])), at: None }], None, 0.0, false).unwrap();
+        let mut clients: [Client; 4] = Default::default();
+        let ghost = r#"{"grey":["30"],"ghost":true}"#;
+        check(&mut d, &mut clients, "start");
+        check_with(&mut d, &mut clients, "Geisterschicht", ghost);
+        let delta = |d: &mut Document, c: &Client, text: &str| -> Value {
+            let mut a = ARGS[0].to_vec();
+            a.push(c.mark as f64);
+            serde_json::from_str(&crate::queries::run_doc(d, "model3dPartsDelta", &a, text).unwrap()).unwrap()
+        };
+        // Im Wechsel ohne Änderung: keine Gruppe neu.
+        for text in ["", ghost, ""] {
+            let r = delta(&mut d, &clients[0], text);
+            for name in super::REST_NAMES {
+                assert!(r[name].is_null(), "{name} ohne Änderung neu geschickt ({text})");
+            }
+            assert!(r["openingTail"].is_null(), "Öffnungs-Rest ohne Änderung neu geschickt ({text})");
+            clients[0].apply(&serde_json::to_string(&r).unwrap()).expect("Gruppen da");
+        }
+        // Wand verschieben: Kontext, Körper usw. bleiben `null`; Ergebnis = voll.
+        let mut w = list(&d, "walls")[1].clone();
+        w["start"]["x"] = json!(w["start"]["x"].as_f64().unwrap() + 0.05);
+        d.commit(vec![Op::Replace { collection: "walls".into(), entity: w }], None, 0.0, false).unwrap();
+        let r = delta(&mut d, &clients[0], "");
+        assert!(r["contextMeshes"].is_null(), "Kontext neu geschickt");
+        assert!(r["solidMeshes"].is_null(), "Körper neu geschickt");
+        let changed = d.model3d_groups_changed();
+        assert_eq!(changed & 0b10, 0, "Kontext als geändert gemeldet");
+        let full: Value = serde_json::from_str(&crate::queries::run(d.project().unwrap(), "model3dParts", &ARGS[0], "").unwrap()).unwrap();
+        assert_eq!(full["contextMeshes"].as_array().map(Vec::len), Some(1), "Nachbar im Modell");
+        assert!(clients[0].apply(&serde_json::to_string(&r).unwrap()) == Some(full));
+        check(&mut d, &mut clients, "Wand verschoben");
+        check_with(&mut d, &mut clients, "Wand verschoben, Geisterschicht", ghost);
+        // Geschoss-Höhe ändern (Cache verworfen): Kontext bleibt gleich, Ergebnis = voll.
+        let mut f = list(&d, "drawingLevels").into_iter().find(|l| l["kind"] == "floor").unwrap();
+        f["floorHeight"] = json!(f["floorHeight"].as_f64().unwrap() + 0.1);
+        d.commit(vec![Op::Replace { collection: "drawingLevels".into(), entity: f }], None, 0.0, false).unwrap();
+        let r = delta(&mut d, &clients[0], "");
+        assert!(r["contextMeshes"].is_null(), "Kontext nach Verwerfen neu geschickt");
+        assert_ne!(d.model3d_groups_changed(), 0, "Decken sollten sich ändern");
+        clients[0].apply(&serde_json::to_string(&r).unwrap()).expect("Gruppen da");
+        check(&mut d, &mut clients, "Geschoss geändert");
+        check_with(&mut d, &mut clients, "Geschoss geändert, Geisterschicht", ghost);
+    }
+
     /// [214] Messung (von Hand): wo die Zeit einer Teil-Abfrage nach einer Wand-Änderung bleibt.
     /// `BENCH_FILE=gross.obp cargo test --release --lib model3d_cache::tests::bench214 -- --ignored --nocapture`
     /// (`gross.obp` aus `dossier-cli :gross migrate --out gross.obp`).
@@ -911,7 +1119,7 @@ mod tests {
             w["end"]["x"] = json!(x + 0.01);
             d.apply(&[Op::Replace { collection: "walls".into(), entity: w }]).unwrap();
             let t = Instant::now();
-            d.model3d_parts(true, 2.0, false, true, Some(0)).unwrap();
+            d.model3d_parts(true, 2.0, false, false, Some(0)).unwrap();
             runs.push(ms(t));
         }
         println!("nach Wand-Änderung: {runs:.1?} ms, neu: {:?}", d.model3d_rebuilt());
