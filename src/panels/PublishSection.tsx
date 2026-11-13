@@ -195,7 +195,7 @@ export function PublishSection() {
           />
         </label>
         {project.competition?.anonymous === true && <div style={{ color: "var(--muted)" }}>{t("publish.competition.hint")}</div>}
-        <button className="nav-add" style={{ justifySelf: "start", whiteSpace: "nowrap", padding: "1px 6px", fontSize: 12 }} data-testid="publish-add-wbw" onClick={() => setOpen(host.onAddWbwSet())}>
+        <button className="nav-add" style={{ justifySelf: "start", width: "auto", maxWidth: "100%", whiteSpace: "nowrap", padding: "1px 6px", fontSize: 12 }} data-testid="publish-add-wbw" onClick={() => setOpen(host.onAddWbwSet())}>
           ＋ {t("publish.wbw.add")}
         </button>
       </div>

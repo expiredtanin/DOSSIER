@@ -7461,7 +7461,7 @@ body {
 .layout-sheet-name {
   font-size: 11px;
   font-weight: 600;
-  color: var(--fg, #ddd);
+  color: var(--ink);
   margin-left: 4px;
   white-space: nowrap;
   overflow: hidden;
@@ -7609,7 +7609,7 @@ body {
 .layout-sheet-hud-title {
   font-size: 11px;
   font-weight: 600;
-  color: var(--fg, #ddd);
+  color: var(--ink);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
