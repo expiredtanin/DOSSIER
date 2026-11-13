@@ -8,7 +8,7 @@ import { describe, it, expect } from "vitest";
 import { collectElementClipboard, pasteElementClipboard, isClipboardEmpty } from "./elementClipboard";
 import { applyOps } from "../core/ops";
 import type { ElementSelectionIds } from "./elementClipboard";
-import type { Project, Wall, Opening, Ceiling } from "../model/types";
+import type { Project, Wall, Opening, Ceiling, Camera } from "../model/types";
 
 function emptySel(): ElementSelectionIds {
   return {
@@ -149,5 +149,33 @@ describe("pasteElementClipboard", () => {
     pasteElementClipboard(p, clip, "og");
     expect(p.walls.length).toBe(1);
     expect(p.walls[0].id).toBe("w1");
+  });
+});
+
+describe("[213] Kameras in der Zwischenablage", () => {
+  const cam = (id: string, name: string): Camera => ({
+    id, type: "camera", name, floorId: "eg", categoryCode: "92",
+    position: { x: 1, y: 2 }, eyeHeight: 1.6, target: { x: 6, y: 2 }, targetHeight: 1.4,
+    fovDeg: 55, projection: "perspective",
+  });
+
+  it("kopiert und fügt Kameras mit neuer id, Namen „… Kopie“ und auf dem aktiven Geschoss ein", () => {
+    const p = { ...project(), cameras: [cam("k1", "Süd")] };
+    const clip = collectElementClipboard(p, { ...emptySel(), cameraIds: ["k1"] })!;
+    expect(clip).not.toBeNull();
+    expect(isClipboardEmpty(clip)).toBe(false);
+    const { ops, pastedIds } = pasteElementClipboard(p, clip, "og");
+    const next = applyOps(p, ops);
+    expect(next.cameras!.length).toBe(2);
+    const c = next.cameras!.find((x) => x.id === pastedIds.cameraIds[0])!;
+    expect(c.id).not.toBe("k1");
+    expect(c.floorId).toBe("og");
+    expect(c.name).toBe("Süd Kopie");
+    expect(c.position).toEqual({ x: 1, y: 2 });
+    expect(c.target).toEqual({ x: 6, y: 2 });
+    expect(c.fovDeg).toBe(55);
+    // Zweites Einfügen: Namen bleiben eindeutig.
+    const again = applyOps(next, pasteElementClipboard(next, clip, "og").ops);
+    expect(again.cameras!.map((x) => x.name).sort()).toEqual(["Süd", "Süd Kopie", "Süd Kopie 2"]);
   });
 });

@@ -287,6 +287,28 @@ fn mv_tree(t: &Value, xf: &Xf) -> Value {
     with(t, "position", pt(n.0, n.1))
 }
 
+/// [213] Kamera: Standpunkt und Ziel werden abgebildet (Drehen dreht beide um den Drehpunkt, Spiegeln spiegelt
+/// beide); Augenhöhe, Zielhöhe, Bildwinkel und Sichthöhe bleiben (Skalieren: Abstand Standpunkt–Ziel skaliert mit).
+fn mv_camera(c: &Value, xf: &Xf) -> Value {
+    let (px, py) = xy(field(c, "position").unwrap_or(&Value::Null));
+    let (tx, ty) = xy(field(c, "target").unwrap_or(&Value::Null));
+    let (p, t) = (xf.apply(px, py), xf.apply(tx, ty));
+    with_all(c, vec![("position", pt(p.0, p.1)), ("target", pt(t.0, t.1))])
+}
+
+/// [213] Name einer Kopie: „Name Kopie“, bei Kollision „Name Kopie 2“, „Name Kopie 3“ …; `used` wächst mit.
+pub fn copy_name(name: &str, used: &mut std::collections::HashSet<String>) -> String {
+    let base = if name.is_empty() { "Kamera".to_string() } else { name.to_string() };
+    let mut cand = format!("{base} Kopie");
+    let mut n = 2;
+    while used.contains(&cand) {
+        cand = format!("{base} Kopie {n}");
+        n += 1;
+    }
+    used.insert(cand.clone());
+    cand
+}
+
 /// [193] Gelände-/Umgebungs-Element (`Project.context`): alle x/y abbilden, z bleibt. Netze (`importedMesh`,
 /// `terrainMesh`): Positionen (x,y,z flach), bei Spiegelung Dreiecks-Umlauf umkehren; Höhenlinien: Punkte
 /// (eine wahre Kurve `curve` fällt weg, ausser bei reiner Verschiebung); Baugrube: Umriss; Luftbild: Rahmen.
@@ -680,6 +702,8 @@ pub struct Sel {
     pub opening_ids: Option<Vec<String>>,
     /// [149] Gewählte Bäume.
     pub tree_ids: Option<Vec<String>>,
+    /// [213] Gewählte Kameras (Standpunkt und Ziel werden transformiert).
+    pub camera_ids: Option<Vec<String>>,
     /// [193] Gewählte Gelände-/Umgebungs-Elemente (`Project.context`).
     pub context_ids: Option<Vec<String>>,
 }
@@ -737,6 +761,7 @@ enum Kind {
     Stair,
     Room,
     Tree,
+    Camera,
     Context,
 }
 
@@ -773,6 +798,7 @@ fn gather<'a>(root: &'a Map<String, Value>, sel: &Sel, op: &str, ignore_lock: bo
     each("stairs", Ids::opt(&sel.stair_ids), Kind::Stair);
     each("rooms", Ids::opt(&sel.room_ids), Kind::Room);
     each("trees", Ids::opt(&sel.tree_ids), Kind::Tree);
+    each("cameras", Ids::opt(&sel.camera_ids), Kind::Camera);
     each("context", Ids::opt(&sel.context_ids), Kind::Context);
     out
 }
@@ -959,6 +985,10 @@ pub fn transform_result(root: &Map<String, Value>, p: &Project, req: &TransformR
         if !trees.is_empty() {
             patch("trees", &|t| trees.has(t) && !locked(t), &|t| mv_tree(t, &xf));
         }
+        let cams = Ids::opt(&sel.camera_ids);
+        if !cams.is_empty() {
+            patch("cameras", &|c| cams.has(c) && !locked(c), &|c| mv_camera(c, &xf));
+        }
         let ctx = Ids::opt(&sel.context_ids);
         if !ctx.is_empty() {
             patch("context", &|c| ctx.has(c), &|c| mv_context(c, &xf));
@@ -979,8 +1009,10 @@ pub fn transform_result(root: &Map<String, Value>, p: &Project, req: &TransformR
 
     // Kopien (Kopie/Reihe/Verteilen bzw. gespiegelte Kopie).
     let mut ids = IdGen::new(&req.stamp);
-    let mut new: [Vec<Value>; 10] = Default::default();
+    let mut new: [Vec<Value>; 11] = Default::default();
     let mut new_openings = Vec::new();
+    // [213] Namen der vorhandenen Kameras (Kopien heissen „… Kopie“, nummeriert bei Kollision).
+    let mut cam_names: std::collections::HashSet<String> = list(root, "cameras").iter().filter_map(|c| field(c, "name").and_then(Value::as_str).map(String::from)).collect();
     for t in copy_ts(op, &req.mode, req.count.0) {
         let xf = Xf::of(op, &pts, t);
         let prefixes: Vec<&str> = items
@@ -995,6 +1027,7 @@ pub fn transform_result(root: &Map<String, Value>, p: &Project, req: &TransformR
                 Kind::Stair => "ST",
                 Kind::Room => "RM",
                 Kind::Tree => "tree",
+                Kind::Camera => "camera",
                 Kind::Context => "ctx",
             })
             .collect();
@@ -1021,9 +1054,15 @@ pub fn transform_result(root: &Map<String, Value>, p: &Project, req: &TransformR
                 Kind::Stair => (6, mv_stair(e, &xf, k_at(t))),
                 Kind::Room => (7, mv_room(e, &xf)),
                 Kind::Tree => (8, mv_tree(e, &xf)),
+                Kind::Camera => (10, mv_camera(e, &xf)),
                 Kind::Context => (9, mv_context(e, &xf)),
             };
-            new[slot].push(with(&as_copy(&v), "id", Value::String(new_id.clone())));
+            let mut v = with(&as_copy(&v), "id", Value::String(new_id.clone()));
+            if matches!(kind, Kind::Camera) {
+                let name = copy_name(field(e, "name").and_then(Value::as_str).unwrap_or(""), &mut cam_names);
+                v = with(&v, "name", Value::String(name));
+            }
+            new[slot].push(v);
         }
         // Öffnungen kopierter Dächer/Decken ([103]) mit neuem Wirt mitkopieren.
         for o in list(root, "openings") {
@@ -1043,7 +1082,7 @@ pub fn transform_result(root: &Map<String, Value>, p: &Project, req: &TransformR
             }
         }
     }
-    let keys = ["walls", "drawings2d", "extrudedSolids", "columns", "ceilings", "roofs", "stairs", "rooms", "trees", "context"];
+    let keys = ["walls", "drawings2d", "extrudedSolids", "columns", "ceilings", "roofs", "stairs", "rooms", "trees", "context", "cameras"];
     for (key, items) in keys.iter().zip(new) {
         ops.extend(add(key, items));
     }
@@ -1359,6 +1398,15 @@ fn item_preview(p: &Project, kind: Kind, e: &Value, xf: &Xf, out: &mut Pending) 
             let ring: Vec<(f64, f64)> = crate::tree::circle([c.0, c.1], d / 2.0, 24).into_iter().map(|q| (q[0], q[1])).collect();
             s.poly(&ring);
         }
+        Kind::Camera => {
+            // [213] Gehäuse am neuen Standpunkt und die Blicklinie zum neuen Ziel.
+            let (px, py) = pt("position");
+            let (tx, ty) = pt("target");
+            let (a, b) = (xf.apply(px, py), xf.apply(tx, ty));
+            s.line(a, b);
+            let ring: Vec<(f64, f64)> = crate::tree::circle([a.0, a.1], 0.25, 12).into_iter().map(|q| (q[0], q[1])).collect();
+            s.poly(&ring);
+        }
         Kind::Context => {
             // [193] Baugrube: Umriss; Netze, Höhenlinien, Bild: Rahmen der abgebildeten Punkte.
             let pts: Vec<(f64, f64)> = match field(e, "type").and_then(Value::as_str) {
@@ -1589,6 +1637,34 @@ mod tests {
         assert_eq!(ops[0]["collection"], "trees");
         assert_eq!(ops[0]["items"][0]["id"], "tree-s-1");
         assert_eq!(ops[0]["items"][0]["position"], json!({"x":4,"y":3}));
+    }
+
+    /// [213] Kameras: Standpunkt und Ziel werden abgebildet, Höhen und Bildwinkel bleiben; Kopien heissen „… Kopie“.
+    #[test]
+    fn kameras_transformieren() {
+        let cam = json!({"id":"k","type":"camera","name":"Süd","floorId":"eg","position":{"x":1,"y":0},"target":{"x":5,"y":0},"eyeHeight":1.6,"targetHeight":1.2,"fovDeg":50,"orthoHeight":8});
+        let r = root(json!({"cameras":[cam, {"id":"z","name":"Fest","position":{"x":0,"y":0},"target":{"x":1,"y":0},"locked":true}]}));
+        let run = |op: &str, mode: &str, pts: Value| {
+            let req: TransformReq = serde_json::from_value(json!({"sel":{"wallIds":[],"cameraIds":["k","z"]},"op":op,"pts":pts,"mode":mode,"count":1,"stamp":"s"})).unwrap();
+            transform_ops(&r, &Project::default(), &req).iter().map(|o| o.to_json()).collect::<Vec<_>>()
+        };
+        let ops = run("move", "move", json!([[0, 0], [3, 1]]));
+        assert_eq!(ops.len(), 1, "gesperrte Kamera bleibt");
+        let e = &ops[0]["entity"];
+        assert_eq!((&e["position"], &e["target"]), (&json!({"x":4,"y":1}), &json!({"x":8,"y":1})));
+        assert_eq!((&e["eyeHeight"], &e["targetHeight"], &e["fovDeg"], &e["orthoHeight"]), (&json!(1.6), &json!(1.2), &json!(50), &json!(8)));
+        // Drehen um den Ursprung um 90 Grad (Punkte: Drehpunkt, Start, Ziel).
+        let ops = run("rotate", "move", json!([[0, 0], [1, 0], [0, 1]]));
+        let e = &ops[0]["entity"];
+        let near = |v: &Value, x: f64, y: f64| (v["x"].as_f64().unwrap() - x).abs() < 1e-9 && (v["y"].as_f64().unwrap() - y).abs() < 1e-9;
+        assert!(near(&e["position"], 0.0, 1.0) && near(&e["target"], 0.0, 5.0), "{e}");
+        // Spiegeln an der y-Achse (Spiegellinie x = 0): x wechselt das Vorzeichen, Kopie mit neuem Namen.
+        let ops = run("mirror", "copy", json!([[0, 0], [0, 1]]));
+        assert_eq!(ops.len(), 1);
+        assert_eq!(ops[0]["collection"], "cameras");
+        let c = &ops[0]["items"][0];
+        assert!(near(&c["position"], -1.0, 0.0) && near(&c["target"], -5.0, 0.0), "{c}");
+        assert_eq!((&c["id"], &c["name"], &c["fovDeg"]), (&json!("camera-s-1"), &json!("Süd Kopie"), &json!(50)));
     }
 
     /// [193] Gelände-/Umgebungs-Elemente verschieben: Baugrube (Umriss), Höhenlinien, Gelände-Netz (z bleibt), Spiegeln kehrt den Netz-Umlauf um.
