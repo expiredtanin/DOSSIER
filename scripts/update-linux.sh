@@ -50,9 +50,13 @@ rustup target list --installed 2>/dev/null | grep -q wasm32-unknown-unknown || {
 }
 
 say "Neuster Stand von $BRANCH holen"
+# Was npm/Build selbst verändern (z. B. package-lock.json nach npm install), ist keine eigene Arbeit: zurücksetzen.
+for f in package-lock.json src/model/types.generated.ts; do
+  git diff --quiet -- "$f" 2>/dev/null || { echo "setze $f zurück (vom Build verändert)"; git checkout -q -- "$f"; }
+done
 if ! git diff --quiet || ! git diff --cached --quiet; then
   git status --short
-  die "Im Checkout gibt es lokale Änderungen (oben). Bitte sichern oder verwerfen (git stash), dann erneut starten."
+  die "Im Checkout gibt es lokale Änderungen (oben). Sichern: git stash   — oder verwerfen: git checkout -- <datei> (alles: git reset --hard). Dann erneut starten."
 fi
 git fetch --prune origin "$BRANCH"
 git checkout -q "$BRANCH"
