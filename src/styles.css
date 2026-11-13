@@ -5088,6 +5088,19 @@ body {
   height: 100%;
   min-height: 0;
   font-size: 12px;
+  padding-bottom: 20px;
+}
+/* [238] Auslaufender Rand unten: zeigt, dass unter der letzten sichtbaren Zeile noch Felder folgen (Gelände: Material,
+   Höhenversatz …), statt dass die Zeile wie abgeschnitten wirkt. Klebt am unteren Rand, liegt am Ende im Polster (kein Inhalt verdeckt). */
+.objinfo-panel::after {
+  content: "";
+  flex: 0 0 auto;
+  position: sticky;
+  bottom: 0;
+  height: 18px;
+  margin: 0 -8px -18px;
+  background: linear-gradient(transparent, var(--panel));
+  pointer-events: none;
 }
 /* Gelände/Baugrube/Schatten in der Objekt-Info: der Abschnitt wächst mit seinem Inhalt (sonst schrumpft er in der
    Flex-Spalte auf eine Zeile Höhe und verdeckt die Felder, `.site-panel` ist sonst ein eigener Scroll-Bereich). */
@@ -7499,6 +7512,14 @@ body {
   border-radius: 4px;
   gap: 4px;
   white-space: nowrap;
+  font-size: 12px; /* [238] wie die übrigen Werkzeugleisten (sonst 15 px vom Basis-Knopf) */
+}
+.layout-sheet-toolbar .nav-add .material-symbols-outlined {
+  font-size: 16px;
+}
+.layout-sheet-toolbar .res-select {
+  width: auto;
+  min-width: 0;
 }
 
 .layout-sheet-name {
@@ -7679,6 +7700,26 @@ body {
   width: 64px;
 }
 
+/* Bild-HUD ([238]): feste Breite und feste Knopfposition (Zuschneiden ↔ Fertig springt nicht). */
+.layout-sheet-hud-image {
+  width: 240px;
+  box-sizing: border-box;
+}
+.layout-sheet-hud-image .layout-sheet-hud-title {
+  max-width: none;
+}
+.layout-sheet-hud-image .layout-sheet-hud-title .sheet-crop-toggle {
+  flex: 0 0 auto;
+  min-width: 96px;
+  justify-content: center;
+}
+.layout-sheet-hud-image .sheet-crop-hint {
+  min-height: 2.6em;
+}
+.layout-sheet-hud-image .sheet-crop-hint.is-idle {
+  visibility: hidden;
+}
+
 .layout-sheet-hud-size {
   font-size: 10px;
   color: var(--muted, #6e6e6e);
@@ -7730,6 +7771,7 @@ body {
 .layout-sheet-hud-actions .nav-add,
 .layout-sheet-hud-title .nav-add,
 .layout-sheet-guides .nav-add {
+  font-size: 12px;
   width: auto;
   min-width: 20px;
   height: 24px;

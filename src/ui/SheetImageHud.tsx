@@ -60,7 +60,7 @@ export function SheetImageHud({
     />
   );
   return (
-    <div className="layout-sheet-hud" data-sheet-ui data-image-hud data-testid="image-hud">
+    <div className="layout-sheet-hud layout-sheet-hud-image" data-sheet-ui data-image-hud data-testid="image-hud">
       <div className="layout-sheet-hud-title">{image.name || t("sheetImage.title")}</div>
       <div className="layout-sheet-hud-row">
         <span>X / Y mm</span>
@@ -83,7 +83,7 @@ export function SheetImageHud({
       <div className="layout-sheet-hud-title" style={{ marginTop: 6, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
         <span>{t("sheetImage.crop")}</span>
         {onToggleCrop && (
-          <button className={`nav-add${cropping ? " active" : ""}`} data-testid="image-crop-toggle" onClick={onToggleCrop} title={t("sheetImage.cropHint")}>
+          <button className={`nav-add sheet-crop-toggle${cropping ? " active" : ""}`} data-testid="image-crop-toggle" onClick={onToggleCrop} title={t("sheetImage.cropHint")}>
             {cropping ? t("sheetImage.cropDone") : t("sheetImage.cropStart")}
           </button>
         )}
@@ -96,7 +96,7 @@ export function SheetImageHud({
           </span>
         </div>
       ))}
-      {cropping && <div className="layout-sheet-hud-size">{t("sheetImage.cropHint")}</div>}
+      <div className={`layout-sheet-hud-size sheet-crop-hint${cropping ? "" : " is-idle"}`} aria-hidden={!cropping}>{t("sheetImage.cropHint")}</div>
       <div className="layout-sheet-hud-actions">
         {image.crop && (
           <button className="nav-add" data-testid="image-crop-reset" onClick={() => onPatch(cropImage(image, undefined))} title={t("sheetImage.cropReset")}>

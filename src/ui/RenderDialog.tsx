@@ -324,13 +324,13 @@ export const RenderDialogHost = memo(function RenderDialogHost() {
                   ))}
                 </select>
                 <div style={{ display: "flex", gap: 8, marginTop: 6, alignItems: "center" }}>
-                  <label>
+                  <label className="imp-field-label">
                     {t("render.width")}{" "}
-                    <input className="imp-input" type="number" min={16} max={MAX_EDGE} style={{ width: 90 }} value={dims.width} disabled={busy} onChange={(e) => { setSize("custom"); setDims({ ...dims, width: Number(e.target.value) }); }} />
+                    <input className="imp-input imp-input-flush" type="number" min={16} max={MAX_EDGE} style={{ width: 90 }} value={dims.width} disabled={busy} onChange={(e) => { setSize("custom"); setDims({ ...dims, width: Number(e.target.value) }); }} />
                   </label>
-                  <label>
+                  <label className="imp-field-label">
                     {t("render.height")}{" "}
-                    <input className="imp-input" type="number" min={16} max={MAX_EDGE} style={{ width: 90 }} value={dims.height} disabled={busy} onChange={(e) => { setSize("custom"); setDims({ ...dims, height: Number(e.target.value) }); }} />
+                    <input className="imp-input imp-input-flush" type="number" min={16} max={MAX_EDGE} style={{ width: 90 }} value={dims.height} disabled={busy} onChange={(e) => { setSize("custom"); setDims({ ...dims, height: Number(e.target.value) }); }} />
                   </label>
                 </div>
               </section>
@@ -346,7 +346,7 @@ export const RenderDialogHost = memo(function RenderDialogHost() {
               </section>
               <section className="imp-section">
                 <div className="imp-section-title">{t("render.time")}</div>
-                <input className="imp-input" type="datetime-local" data-testid="render-time" value={when} disabled={busy} onChange={(e) => setWhen(e.target.value)} />
+                <input className="imp-input imp-input-flush" type="datetime-local" data-testid="render-time" value={when} disabled={busy} onChange={(e) => setWhen(e.target.value)} />
                 {sun && (
                   <div className="imp-note" data-testid="render-sun">
                     {t("render.sun", { az: sun.azimuth.toFixed(0), el: sun.elevation.toFixed(0) })}
@@ -355,7 +355,7 @@ export const RenderDialogHost = memo(function RenderDialogHost() {
                 )}
               </section>
               <section className="imp-section">
-                <label>
+                <label className="imp-field-label">
                   <input type="checkbox" data-testid="render-backfilled" checked={backfilled} disabled={busy} onChange={(e) => setBackfilled(e.target.checked)} /> {t("render.backfilled")}
                 </label>
                 <div className="imp-note">{t("render.backfilled.hint")}</div>
@@ -364,7 +364,7 @@ export const RenderDialogHost = memo(function RenderDialogHost() {
                 <section className="imp-section">
                   <div className="imp-section-title">{t("render.blenderPath")}</div>
                   <input
-                    className="imp-input"
+                    className="imp-input imp-input-flush"
                     type="text"
                     data-testid="render-blender-path"
                     style={{ width: "100%" }}
@@ -411,7 +411,7 @@ export const RenderDialogHost = memo(function RenderDialogHost() {
               <div className="imp-note">{t("render.done", { width: dims.width, height: dims.height })}</div>
               <img src={imageUrl} alt={t("render.title")} style={{ maxWidth: "100%", maxHeight: 360, display: "block", marginTop: 6 }} />
               {(getState().project.layouts ?? []).length > 0 && (
-                <label style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 8 }}>
+                <label className="imp-field-label" style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 8 }}>
                   <span>{t("render.toLayout.target")}</span>
                   <select className="imp-select" data-testid="render-layout-target" value={layoutTarget} onChange={(e) => setLayoutTarget(e.target.value)}>
                     {(getState().project.layouts ?? []).map((l) => (
