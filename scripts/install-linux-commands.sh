@@ -23,8 +23,8 @@ cat >"$bin/dossier" <<EOF
 cd "$repo"
 # Ohne node_modules (Test-Rechner, update-dossier --tester) das zuletzt gebaute AppImage, sonst aus dem Quellcode.
 app=\$(ls -1t release/Dossier-*.AppImage 2>/dev/null | head -1)
-# Wayland: WebGPU/Vulkan nur über XWayland.
-oz=\${DOSSIER_OZONE:-}; if [ -z "\$oz" ] && { [ -n "\${WAYLAND_DISPLAY:-}" ] || [ "\${XDG_SESSION_TYPE:-}" = wayland ]; }; then oz=x11; fi
+# Wayland: nativ (über XWayland schwarzer Rand in runden Fensterecken); GPU-Modus „minimal“ setzt electron-main.cjs.
+oz=\${DOSSIER_OZONE:-}; if [ -z "\$oz" ] && { [ -n "\${WAYLAND_DISPLAY:-}" ] || [ "\${XDG_SESSION_TYPE:-}" = wayland ]; }; then oz=wayland; fi
 if [ ! -d node_modules ] && [ -n "\$app" ]; then exec "\$app" \${oz:+--ozone-platform=\$oz} "\$@"; fi
 exec npm run electron -- "\$@"
 EOF

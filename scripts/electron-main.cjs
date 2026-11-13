@@ -20,16 +20,17 @@ Menu.setApplicationMenu(null);
 // Gleiche Flags wie scripts/chromium-shell.sh — WebGPU liegt unter Linux
 // hinter --enable-unsafe-webgpu, und WebGPU braucht das Vulkan-Backend.
 app.commandLine.appendSwitch("enable-unsafe-webgpu");
-// DOSSIER_GPU: „vulkan“ (Vorgabe, wie bisher: Skia + ANGLE über Vulkan), „angle“ (nur ANGLE über Vulkan, Skia/Compositor
-// auf GL — hilft, wenn „Failed to create vulkan surface“ erscheint und das Fenster leer bleibt), „minimal“ (nur WebGPU
-// freigeben, sonst Chromium-Vorgaben). Zum Ausprobieren: DOSSIER_GPU=angle dossier.
-const gpu = process.env.DOSSIER_GPU || "vulkan";
+// Unter Wayland läuft Dossier nativ (`--ozone-platform=wayland`) mit GPU-Modus „minimal“: Chromiums Vulkan-Compositor
+// verträgt sich nicht mit Wayland („not compatible with Vulkan“), und über XWayland zeigt der Compositor einen
+// schwarzen Rand in abgerundeten Fensterecken (Test Maintainer, Void/Wayland, 13.11.). Übersteuerbar: DOSSIER_OZONE=wayland|x11.
+const wayland = !!(process.env.WAYLAND_DISPLAY || process.env.XDG_SESSION_TYPE === "wayland");
+const ozone = process.env.DOSSIER_OZONE || (wayland ? "wayland" : "");
+// DOSSIER_GPU: „vulkan“ (Vorgabe ausser unter Wayland: Skia + ANGLE über Vulkan), „angle“ (nur ANGLE über Vulkan, Skia/
+// Compositor auf GL), „minimal“ (nur WebGPU freigeben, sonst Chromium-Vorgaben; Vorgabe unter nativem Wayland).
+const gpu = process.env.DOSSIER_GPU || (ozone === "wayland" ? "minimal" : "vulkan");
 if (gpu === "vulkan") app.commandLine.appendSwitch("enable-features", "Vulkan,VulkanFromANGLE,DefaultANGLEVulkan");
 else if (gpu === "angle") app.commandLine.appendSwitch("enable-features", "VulkanFromANGLE,DefaultANGLEVulkan");
-console.log(`[dossier] GPU-Modus: ${gpu}`);
-// Unter Wayland verträgt sich Chromiums Vulkan nicht mit `--ozone-platform=wayland` („not compatible with Vulkan“,
-// das Fenster geht sofort wieder zu) → über XWayland (x11) starten. Übersteuerbar: DOSSIER_OZONE=wayland|x11.
-const ozone = process.env.DOSSIER_OZONE || (process.env.WAYLAND_DISPLAY || process.env.XDG_SESSION_TYPE === "wayland" ? "x11" : "");
+console.log(`[dossier] GPU-Modus: ${gpu}${ozone ? `, Plattform: ${ozone}` : ""}`);
 if (ozone) app.commandLine.appendSwitch("ozone-platform", ozone);
 
 const DEV_URL = "http://localhost:5187";
