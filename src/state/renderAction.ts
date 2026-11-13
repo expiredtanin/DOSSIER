@@ -7,8 +7,11 @@ import {
   BlenderMissingError,
   buildRenderPackage,
   loadFileio,
+  runBlenderOpen,
   runBlenderRender,
+  runBlenderSave,
   type RenderCameraSpec,
+  type BlendResult,
   type RenderOptions,
   type RenderPackage,
   type RenderResult,
@@ -75,9 +78,21 @@ export async function buildPackage(project: Project, req: RenderRequest): Promis
 export async function renderWithBlender(
   host: BlenderHost,
   pkg: RenderPackage,
-  hooks: { onProgress?: (e: { fraction: number; stage: string; done: number; total: number }) => void; onLine?: (l: string) => void; signal?: AbortSignal },
+  hooks: RenderHooks,
 ): Promise<RenderResult> {
   return runBlenderRender(host, pkg, { script: RENDER_SCRIPT, blenderPath: getBlenderPath(), ...hooks });
+}
+
+type RenderHooks = { onProgress?: (e: { fraction: number; stage: string; done: number; total: number }) => void; onLine?: (l: string) => void; signal?: AbortSignal };
+
+/** [228] Baut die Szene in Blender (ohne Rendern) und liefert die .blend-Datei; das Paket mit `mode: "save"` bauen. */
+export async function saveBlendWithBlender(host: BlenderHost, pkg: RenderPackage, hooks: RenderHooks): Promise<BlendResult> {
+  return runBlenderSave(host, pkg, { script: RENDER_SCRIPT, blenderPath: getBlenderPath(), ...hooks });
+}
+
+/** [228] Wie {@link saveBlendWithBlender}, danach Blender mit Oberfläche auf die Datei starten (kein Warten auf dessen Ende). */
+export async function openInBlender(host: BlenderHost, pkg: RenderPackage, hooks: RenderHooks): Promise<{ dir: string; path: string }> {
+  return runBlenderOpen(host, pkg, { script: RENDER_SCRIPT, blenderPath: getBlenderPath(), ...hooks });
 }
 
 /** Ob in dieser Umgebung ein Blender gesucht werden kann (Tauri/Electron); im Browser nicht. */
@@ -87,7 +102,7 @@ export async function renderHost(): Promise<BlenderHost | null> {
 
 /** Anleitung im ZIP des Browsers (Sprache der Oberfläche). */
 function zipReadme(): string {
-  return [t("render.zip.readme.title"), "", t("render.zip.readme.steps"), "", "    blender -b --python render_dossier.py -- scene.json", "", t("render.zip.readme.result")].join("\n");
+  return [t("render.zip.readme.title"), "", t("render.zip.readme.steps"), "", "    blender -b --python render_dossier.py -- scene.json", "", t("render.zip.readme.result"), "", t("render.zip.readme.blend"), "", "    blender -b --python render_dossier.py -- scene.json --mode save", "", t("render.zip.readme.blend.result")].join("\n");
 }
 
 /** Browser: Paket + Skript + Anleitung als ZIP (Blender läuft dort nicht von der Seite aus). */

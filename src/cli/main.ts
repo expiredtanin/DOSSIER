@@ -38,6 +38,7 @@
 //                                                  ins Geschoss); Bericht als JSON. Z. B. convert plan.dxf p.obp --cmd "erkennen --out e.obp"
 //   dossier-cli <projekt.obp> render --out bild.png [--view iso|perspective|front|back|left|right|top] [--when 2026-06-21T10:00Z]
 //                                                  [--camera Name|id] [--samples 128] [--size 1920x1080] [--cpu] [--excavation] [--blender pfad] [--keep]   [211] [227] (--excavation: Baugrube im Bild lassen) Rendering mit Blender/Cycles
+//   dossier-cli <projekt.obp> blend --out x.blend [--view …] [--camera …] [--when …] [--samples 128] [--size 1920x1080] [--cpu] [--excavation] [--blender pfad] [--keep]   [228] Szene als .blend (Collections nach Bauteil, Bilder eingepackt, Kamera «Dossier-Kamera»), ohne zu rendern
 //   dossier-cli <projekt.obp> model3d [--explode 3] [--hide …] [--grey …] [--out modell.json]   3D-Modell fürs Headless-Rendern (render_png)
 //   dossier-cli pointcloud-info <datei.las|laz|e57|ply|xyz|pts> [--voxel 0.05] [--max 2000000]
 //                                                  Punktwolke lesen ([B9]) und Bericht als JSON (ohne Projekt)
@@ -148,6 +149,7 @@ import {
   recognizeSourceLevels,
   buildRenderPackage,
   runBlenderRender,
+  runBlenderSave,
   defaultRenderTime,
   BlenderMissingError,
   BLENDER_CANDIDATES,
@@ -156,7 +158,7 @@ import {
   findRenderCamera,
   projectRenderCameras,
 } from "../core";
-import type { BlenderHost, Filter3d, Project, RenderViewPreset, TextureLoader, ViewTemplate } from "../core";
+import type { BlenderHost, Filter3d, Project, RenderMode, RenderPackage, RenderViewPreset, TextureLoader, ViewTemplate } from "../core";
 import { serveStdio } from "./mcp";
 import { startBridge } from "./mcpBridge";
 
@@ -458,7 +460,7 @@ export async function run(argv: string[]): Promise<number> {
   if (file === "mcp" && args.flags.has("app")) return runAppBridge(args);
   if (!file || (!command && args.cmds.length === 0)) {
     process.stderr.write(
-      "Aufruf: dossier-cli <projekt.obp> <info|validate|migrate|plan|section|elevation|dxf|dwg|ifc|import-ifc|import-mesh|erkennen|step|obj [--no-mtl]|stl|glb|gltf|schedule|kennzahlen|raumprogramm|sun|model3d|render> [Optionen]\n" +
+      "Aufruf: dossier-cli <projekt.obp> <info|validate|migrate|plan|section|elevation|dxf|dwg|ifc|import-ifc|import-mesh|erkennen|step|obj [--no-mtl]|stl|glb|gltf|schedule|kennzahlen|raumprogramm|sun|model3d|render|blend> [Optionen]\n" +
         "        dossier-cli convert <eingabe.dxf|dwg|ifc|pdf|obj|stl|gltf|glb|ply|obp> <ausgabe.obp|dxf|dwg|ifc|obj|stl|glb|gltf|step> [--cmd \"befehl …\"]…\n" +
         "        dossier-cli <projekt.obp> --cmd \"befehl …\" [--cmd …]   ({last} = zuletzt geschriebene Datei)\n" +
         "        dossier-cli pointcloud-info <datei> [--voxel 0.05] [--max 2000000]\n" +
@@ -761,12 +763,15 @@ function nodeBlenderHost(keep: boolean): BlenderHost {
     async readFile(path) {
       return new Uint8Array(readFileSync(path));
     },
+    async launch(exe, argv) {
+      spawn(exe, argv, { detached: true, stdio: "ignore" }).unref();
+    },
     join: (d, r) => join(d, r),
   };
 }
 
-/** `dossier-cli … render`: Paket bauen, Blender starten, Bild nach `--out`. Rückgabe = Exit-Code. */
-async function runRender(project: Project, args: Args): Promise<number> {
+/** Optionen von `render` und `blend` ([211] [228]): Kamera, Zeit, Grösse, Samples → Paket (bei ungültigen Optionen beendet `fail()` den Prozess). */
+async function buildCliPackage(project: Project, args: Args, mode: RenderMode): Promise<RenderPackage> {
   const view = (args.flags.get("view") ?? "iso") as RenderViewPreset;
   if (!(RENDER_VIEW_PRESETS as readonly string[]).includes(view)) return fail(`--view: ${RENDER_VIEW_PRESETS.join("|")}`);
   // [213] `--camera <Name|id>`: gespeicherte Kamera (Standpunkt, Ziel, Bildwinkel; Sonnenzeit der Kamera, falls `--when` fehlt).
@@ -784,10 +789,26 @@ async function runRender(project: Project, args: Args): Promise<number> {
   await loadFileio();
   const pkg = await buildRenderPackage(
     project,
-    { width: Number(m[1]), height: Number(m[2]), samples, when, camera: choice ? choice.camera : { preset: view }, device: args.flags.has("cpu") ? "cpu" : "auto", backfilled: !args.flags.has("excavation") },
+    { mode, width: Number(m[1]), height: Number(m[2]), samples, when, camera: choice ? choice.camera : { preset: view }, device: args.flags.has("cpu") ? "cpu" : "auto", backfilled: !args.flags.has("excavation") },
     localTextureLoader(),
   );
   if (pkg.missingTextures.length > 0) process.stderr.write(`Hinweis: ${pkg.missingTextures.length} Bildkarten nicht lesbar (Material erscheint einfarbig)\n`);
+  return pkg;
+}
+
+/** Fehlermeldung eines Blender-Laufs → Exit-Code (3 = Blender fehlt). */
+function blenderFailure(e: unknown): number {
+  if (e instanceof BlenderMissingError) {
+    process.stderr.write(`Blender nicht gefunden. Installieren (${BLENDER_DOWNLOAD_URL}) oder --blender <pfad> angeben.\n`);
+    return 3;
+  }
+  process.stderr.write(`dossier-cli: ${e instanceof Error ? e.message : String(e)}\n`);
+  return 1;
+}
+
+/** `dossier-cli … render`: Paket bauen, Blender starten, Bild nach `--out`. Rückgabe = Exit-Code. */
+async function runRender(project: Project, args: Args): Promise<number> {
+  const pkg = await buildCliPackage(project, args, "render");
   const target = args.flags.get("out") ?? `${project.name || "projekt"}.png`;
   try {
     const res = await runBlenderRender(nodeBlenderHost(args.flags.has("keep")), pkg, {
@@ -803,12 +824,26 @@ async function runRender(project: Project, args: Args): Promise<number> {
     process.stderr.write(`geschrieben: ${target} (${res.png.length} Bytes)\n`);
     return 0;
   } catch (e) {
-    if (e instanceof BlenderMissingError) {
-      process.stderr.write(`Blender nicht gefunden. Installieren (${BLENDER_DOWNLOAD_URL}) oder --blender <pfad> angeben.\n`);
-      return 3;
-    }
-    process.stderr.write(`dossier-cli: ${e instanceof Error ? e.message : String(e)}\n`);
-    return 1;
+    return blenderFailure(e);
+  }
+}
+
+/** [228] `dossier-cli … blend`: Szene wie fürs Rendering aufbauen und als .blend nach `--out` speichern (nicht rendern). */
+async function runBlend(project: Project, args: Args): Promise<number> {
+  const pkg = await buildCliPackage(project, args, "save");
+  const target = args.flags.get("out") ?? `${project.name || "projekt"}.blend`;
+  try {
+    const res = await runBlenderSave(nodeBlenderHost(args.flags.has("keep")), pkg, {
+      script: renderScript(args),
+      blenderPath: args.flags.get("blender"),
+      onLine: args.flags.has("verbose") ? (l) => process.stderr.write(`  ${l}\n`) : undefined,
+    });
+    writeFileSync(target, res.blend);
+    lastOutput = target;
+    process.stderr.write(`geschrieben: ${target} (${res.blend.length} Bytes)\n`);
+    return 0;
+  } catch (e) {
+    return blenderFailure(e);
   }
 }
 
@@ -1184,6 +1219,9 @@ async function execute(project: Project, file: string, command: string, rest: st
     case "render":
       // [211] Rendering mit Blender/Cycles (Paket + Blender-Prozess, `export/blenderRender.ts`)
       return runRender(project, args);
+    case "blend":
+      // [228] Szene als .blend (Skript im Modus save, `export/blenderRender.ts`)
+      return runBlend(project, args);
     case "model3d":
     {
       // `--explode <m>`: Explosionsaxonometrie ([65]), Geschosse um Index × Abstand angehoben. `--hide`: Klassen aus ([180]).

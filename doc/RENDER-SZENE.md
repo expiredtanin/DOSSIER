@@ -19,6 +19,7 @@ nach z-oben zurück, `scene.json` braucht keine Umrechnung.
 ## `scene.json` (Typ `RenderScene`, Version 1)
 
 - `model`, `output`: Dateinamen (`model.glb`, `render.png`).
+- `mode` [228]: `"render"` (Standard: Bild rechnen) oder `"save"` (Szene aufbauen und als Blender-Datei `blend` (Standard `dossier.blend`) speichern, nicht rendern; Bilder eingepackt). `output` bleibt als Voreinstellung der Datei.
 - `resolution {width, height}` in Pixeln; `samples` je Pixel; `denoise` (bool); `device` `"auto"` oder `"cpu"`.
 - `backfilled` (bool, nur Hinweis): das Gelände im `model.glb` ist das gewachsene, ohne Baugruben (hinterfüllt, bis an die Fassade geschlossen);
   false = mit Aushub wie im 3D. Der Leser setzt dazu nichts um, die Geometrie steckt im GLB.
@@ -66,8 +67,20 @@ Farbkarte sRGB, Rauheit/Metall/Normal linear (Non-Color), Normalen im OpenGL-Sti
 
 `glass: true`: Alpha ignorieren, Transmission und IOR setzen, Rauheit klein, Basisfarbe nur leicht getönt.
 
+## Bauteil-Zuordnung (Knotennamen) [228]
+
+Das GLB trägt die Zuordnung schon, `scene.json` braucht sie nicht: ein Knoten je Bauteil, Name `<Art>_<id>` (`Wand_eg-aw-s`, `Decke_…`, `Dach_…`,
+`Fenster_…`, `Tuer_…`, `Treppe_…`, `Stuetze_…`, `Baum_…`, `Extrusion_…`, `Gelaende_…`, `Kontext_…`), `extras {type, id}`
+(`type` = `wall` `slab` `roof` `window` `door` `stair` `column` `tree` `extrusion` `terrain` `context`; Geschoss-Knoten `level`), Geschosse als
+Eltern-Knoten, Material = Baustoff-Name. Ein Leser, der die Szene für Menschen aufbaut (Modus `save`), ordnet danach in Sammlungen
+(Wände, Decken, Dächer, Fenster und Türen, Treppen, Stützen, Extrusionen, Bäume, Gelände, Kontext, Geschosse) und benennt lesbar
+(`Wand eg-aw-s`). Eigene Objekte des Lesers: Kamera `Dossier-Kamera`, Himmel `Dossier-Himmel`, Boden in «Gelände».
+
 ## Leser
 
 Blender: `blender -b --python scripts/blender/render_dossier.py -- scene.json`. Meldungen auf stdout:
 `DOSSIER_STAGE`, `DOSSIER_DONE <png>`, `DOSSIER_ERROR <text>`, dazu Cycles' `Sample x/y` (Fortschritt).
+`.blend` [228]: `blender -b --python scripts/blender/render_dossier.py -- scene.json --mode save [--blend datei.blend]` baut dieselbe Szene,
+ordnet sie, packt die Bilder ein (`pack_all`) und speichert; das 3D-Fenster der Datei steht auf Material-Vorschau und Blick durch die Kamera.
+«In Blender öffnen» der App = diese Datei bauen, dann `blender datei.blend` (mit Oberfläche, ohne `-b`) starten. CLI: `dossier-cli <projekt> blend --out x.blend`.
 Ein anderer Leser sollte dieselben Marken ausgeben, dann bleibt die App-Seite unverändert.

@@ -1,7 +1,14 @@
 # Dossier -> Blender/Cycles ([211]): rendert das exportierte 3D-Modell fotorealistisch.
 #
 # Aufruf (Blender laeuft als eigener Prozess, nichts davon wird in Dossier eingebunden):
-#     blender -b --python render_dossier.py -- <szene.json>
+#     blender -b --python render_dossier.py -- <szene.json> [--mode render|save] [--blend <datei.blend>]
+#
+# Zwei Modi ([228]), in `szene.json` als `"mode"` (Voreinstellung "render"), auf der Kommandozeile uebersteuerbar:
+#     render   Szene aufbauen und das Bild rechnen (`output`).
+#     save     Szene genauso aufbauen, aber nicht rendern: Objekte in Collections nach Bauteil ordnen, Bilder einpacken
+#              (`bpy.ops.file.pack_all()`) und als .blend speichern (`"blend"`, Voreinstellung "dossier.blend"). Die Datei
+#              oeffnet sich mit Kamera "Dossier-Kamera", Cycles und Material-Vorschau im 3D-Fenster; die App startet fuer
+#              "In Blender oeffnen" Blender mit dieser Datei (mit Oberflaeche, ohne -b).
 #
 # Die Szenenbeschreibung (`szene.json`, geschrieben von `src/export/blenderRender.ts`) liegt neben dem
 # Modell (`model.glb`) und dem Texturordner. Alle Pfade darin sind relativ zur JSON-Datei.
@@ -37,8 +44,8 @@
 #   * Umgebungsverdeckung leicht (Cycles-Weltoption `ao_factor`), dazu die globale Beleuchtung mit 8 Abprallern.
 #
 # Ausgabe: Blender schreibt auf stdout "Sample x/y" (Cycles), dazu meldet das Skript Marken, die Dossier liest:
-#     DOSSIER_STAGE <name>        Phase (import, materials, render, denoise)
-#     DOSSIER_DONE <pfad.png>     fertig
+#     DOSSIER_STAGE <name>        Phase (import, materials, camera, sky, organize, save, render, denoise)
+#     DOSSIER_DONE <pfad>         fertig (Bild bzw. .blend)
 #     DOSSIER_ERROR <text>        Abbruch mit Grund (Exit-Code 1)
 
 import json
@@ -375,11 +382,14 @@ def camera_basis(direction, up):
     return Matrix(((x.x, y.x, z.x), (x.y, y.y, z.y), (x.z, y.z, z.z)))
 
 
+CAMERA_NAME = "Dossier-Kamera"
+
+
 def make_camera(spec, objects, width, height):
     stage("camera")
     scene = bpy.context.scene
-    cam_data = bpy.data.cameras.new("Dossier")
-    cam = bpy.data.objects.new("Dossier", cam_data)
+    cam_data = bpy.data.cameras.new(CAMERA_NAME)
+    cam = bpy.data.objects.new(CAMERA_NAME, cam_data)
     scene.collection.objects.link(cam)
     scene.camera = cam
     aspect = width / float(height)
@@ -428,11 +438,12 @@ def make_sky(sun):
     """Nishita-Himmel mit der Sonne an Azimut/Hoehe des Projekts. Cycles beleuchtet die Szene ueber die Sonnenscheibe."""
     stage("sky")
     scene = bpy.context.scene
-    world = bpy.data.worlds.new("Dossier")
+    world = bpy.data.worlds.new("Dossier-Himmel")
     scene.world = world
     nt = ensure_nodes(world)
     nt.nodes.clear()
     sky = nt.nodes.new("ShaderNodeTexSky")
+    sky.name = sky.label = "Sonne und Himmel"
     # Nishita (bis Blender 4.5) heisst ab 5.0 "Mehrfachstreuung" (MULTIPLE_SCATTERING), gleiche Parameter.
     for kind in ("NISHITA", "MULTIPLE_SCATTERING"):
         try:
@@ -482,6 +493,7 @@ def add_ground(objects):
     set_input(bsdf, ("Base Color",), (*lin((0.40, 0.46, 0.28)), 1.0))
     set_input(bsdf, ("Roughness",), 0.95)
     obj.data.materials.append(mat)
+    return obj
 
 
 # ---------------------------------------------------------------- Cycles
@@ -577,24 +589,157 @@ def setup_cycles(spec):
     return scene
 
 
+# ---------------------------------------------------------------- Ordnung fuer die .blend-Datei ([228])
+
+# Bauteilart (`extras.type` des GLB-Knotens, sonst Namenspraefix `Wand_<id>`) -> (Collection, Anzeigename-Praefix).
+KINDS = {
+    "wall": ("Wände", "Wand"),
+    "slab": ("Decken", "Decke"),
+    "roof": ("Dächer", "Dach"),
+    "window": ("Fenster und Türen", "Fenster"),
+    "door": ("Fenster und Türen", "Tür"),
+    "stair": ("Treppen", "Treppe"),
+    "column": ("Stützen", "Stütze"),
+    "tree": ("Bäume", "Baum"),
+    "extrusion": ("Extrusionen", "Extrusion"),
+    "terrain": ("Gelände", "Gelände"),
+    "context": ("Kontext", "Kontext"),
+}
+NAME_PREFIX_KINDS = {
+    "Wand": "wall", "Decke": "slab", "Dach": "roof", "Fenster": "window", "Tuer": "door", "Treppe": "stair",
+    "Stuetze": "column", "Baum": "tree", "Extrusion": "extrusion", "Gelaende": "terrain", "Kontext": "context",
+}
+COLLECTION_ORDER = ("Geschosse", "Wände", "Decken", "Dächer", "Fenster und Türen", "Treppen", "Stützen", "Extrusionen", "Bäume", "Gelände", "Kontext", "Dossier")
+
+
+def kind_of(obj):
+    """Bauteilart eines importierten Objekts: `extras.type` (Eigenschaft `type`), sonst Praefix des Knotennamens."""
+    t = obj.get("type") if hasattr(obj, "get") else None
+    if isinstance(t, str) and (t in KINDS or t == "level"):
+        return t
+    return NAME_PREFIX_KINDS.get(strip_suffix(obj.name).split("_", 1)[0])
+
+
+def readable_name(obj, kind):
+    """`Wand_eg-aw-s` -> `Wand eg-aw-s`, Geschoss `EG` -> `Geschoss EG`."""
+    base = strip_suffix(obj.name)
+    if kind == "level":
+        return "Geschoss " + base
+    rest = base.split("_", 1)[1] if "_" in base else base
+    label = KINDS[kind][1]
+    return "%s %s" % (label, rest) if rest and rest != label else label
+
+
+def organize(extra_objects):
+    """Objekte nach Bauteilart in Collections (Wände, Decken, Dächer, ...), lesbare Namen. `extra_objects`: (Objekt, Collection)."""
+    stage("organize")
+    scene = bpy.context.scene
+    cols = {}
+
+    def collection(name):
+        if name not in cols:
+            c = bpy.data.collections.new(name)
+            scene.collection.children.link(c)
+            cols[name] = c
+        return cols[name]
+
+    def move(obj, name):
+        for c in list(obj.users_collection):
+            c.objects.unlink(obj)
+        collection(name).objects.link(obj)
+
+    for obj in list(scene.objects):
+        kind = kind_of(obj)
+        if kind == "level":
+            move(obj, "Geschosse")
+        elif kind in KINDS:
+            move(obj, KINDS[kind][0])
+        else:
+            continue
+        obj.name = readable_name(obj, kind)
+        if obj.type == "MESH" and obj.data is not None:
+            obj.data.name = obj.name
+    for obj, name in extra_objects:
+        move(obj, name)
+    # Leere Sammel-Collections des Imports entfernen, die eigenen in feste Reihenfolge bringen.
+    for c in list(scene.collection.children):
+        if c.name not in cols and not c.objects and not c.children:
+            bpy.data.collections.remove(c)
+    for c in list(scene.collection.children):
+        scene.collection.children.unlink(c)
+    for name in COLLECTION_ORDER:
+        if name in cols:
+            scene.collection.children.link(cols[name])
+
+
+def setup_viewport():
+    """3D-Fenster der Datei: Material-Vorschau, Blick durch die Szenenkamera, grosse Sichtweite. Der Bildschirmaufbau steht in
+    der .blend-Datei, so oeffnet Blender sie damit."""
+    for screen in bpy.data.screens:
+        for area in screen.areas:
+            if area.type != "VIEW_3D":
+                continue
+            for space in area.spaces:
+                if space.type != "VIEW_3D":
+                    continue
+                try:
+                    space.shading.type = "MATERIAL"
+                    space.clip_end = 5000.0
+                    space.region_3d.view_perspective = "CAMERA"
+                except Exception as e:  # Teile der Ansicht fehlen im Hintergrundbetrieb: dann bleibt Blenders Standard
+                    print("DOSSIER_NOTE 3D-Fenster nicht eingerichtet: %s" % e, flush=True)
+
+
+def save_blend(path):
+    """Bilder einpacken (die Datei ist danach allein lauffaehig, auch ohne den Arbeitsordner) und speichern."""
+    stage("save")
+    try:
+        bpy.ops.file.pack_all()
+    except Exception as e:
+        print("DOSSIER_NOTE Bilder nicht eingepackt: %s" % e, flush=True)
+    bpy.context.scene.render.filepath = "//dossier-render.png"
+    bpy.ops.wm.save_as_mainfile(filepath=path, compress=True)
+    if not os.path.exists(path):
+        raise RuntimeError("Blender hat die .blend-Datei nicht geschrieben")
+
+
+def option(args, name, default=None):
+    """Wert hinter `--name` in den Skript-Argumenten."""
+    flag = "--" + name
+    return args[args.index(flag) + 1] if flag in args and args.index(flag) + 1 < len(args) else default
+
+
 def main():
     args = script_args()
     if not args:
-        raise RuntimeError("Aufruf: blender -b --python render_dossier.py -- <szene.json>")
+        raise RuntimeError("Aufruf: blender -b --python render_dossier.py -- <szene.json> [--mode render|save] [--blend <datei.blend>]")
     scene_path = os.path.abspath(args[0])
     base_dir = os.path.dirname(scene_path)
     with open(scene_path, "r", encoding="utf-8") as f:
         spec = json.load(f)
+    mode = option(args, "mode", spec.get("mode", "render"))
+    if mode not in ("render", "save"):
+        raise RuntimeError("Unbekannter Modus: " + str(mode))
 
     reset_scene()
     objects = import_model(os.path.join(base_dir, spec.get("model", "model.glb")))
     apply_materials(spec.get("materials") or [], base_dir)
     scene = setup_cycles(spec)
     res = spec.get("resolution") or {}
-    make_camera(spec.get("camera") or {"preset": "iso"}, objects, int(res.get("width", 1920)), int(res.get("height", 1080)))
+    cam = make_camera(spec.get("camera") or {"preset": "iso"}, objects, int(res.get("width", 1920)), int(res.get("height", 1080)))
     make_sky(spec.get("sun") or {})
+    extra = [(cam, "Dossier")]
     if spec.get("ground", True):
-        add_ground(objects)
+        extra.append((add_ground(objects), "Gelände"))
+
+    if mode == "save":
+        organize(extra)
+        setup_viewport()
+        blend = option(args, "blend", spec.get("blend", "dossier.blend"))
+        blend = blend if os.path.isabs(blend) else os.path.join(base_dir, blend)
+        save_blend(blend)
+        print("DOSSIER_DONE " + blend, flush=True)
+        return
 
     out = os.path.join(base_dir, spec.get("output", "render.png"))
     scene.render.filepath = out

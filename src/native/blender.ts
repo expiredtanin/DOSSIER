@@ -17,6 +17,8 @@ export interface DossierBlenderApi {
   start: (jobId: string, exe: string, args: string[]) => Promise<void>;
   cancel: (jobId: string) => void;
   readFile: (path: string) => Promise<Uint8Array>;
+  /** [228] Blender mit Oberfläche starten, ohne zu warten. */
+  open: (exe: string, args: string[]) => Promise<void>;
   onLine: (cb: (e: { jobId: string; line: string }) => void) => () => void;
   onExit: (cb: (e: { jobId: string; code: number }) => void) => () => void;
 }
@@ -37,7 +39,7 @@ const newJobId = (): string => `render-${Date.now().toString(36)}-${counter++}`;
 const join = (dir: string, rel: string): string => `${dir.replace(/[\\/]+$/, "")}/${rel}`;
 
 /**
- * Tauri-Gastgeber. Befehle: `blender_find`, `blender_job_dir`, `blender_start`, `blender_cancel`;
+ * Tauri-Gastgeber. Befehle: `blender_find`, `blender_job_dir`, `blender_start`, `blender_cancel`, `blender_open` ([228], Blender mit Oberfläche, ohne Warten);
  * Ereignisse `blender://line` und `blender://exit` mit der Auftragskennung.
  */
 async function tauriHost(): Promise<BlenderHost> {
@@ -84,6 +86,7 @@ async function tauriHost(): Promise<BlenderHost> {
       return { done, cancel: () => void invoke("blender_cancel", { jobId }).catch(() => undefined) };
     },
     readFile: (path) => fs.readFile(path),
+    launch: (exe, args) => invoke<void>("blender_open", { exe, args }),
     join,
   };
 }
@@ -113,6 +116,7 @@ function electronHost(api: DossierBlenderApi): BlenderHost {
       return { done, cancel: () => api.cancel(jobId) };
     },
     readFile: (path) => api.readFile(path),
+    launch: (exe, args) => api.open(exe, args),
     join,
   };
 }
