@@ -99,17 +99,17 @@ fn ceiling_rings(ce: &Ceiling) -> Option<(Vec<P>, Vec<Vec<P>>)> {
     Some((outer, holes))
 }
 
-struct Sink {
+struct Sink<'a> {
     out: Vec<f32>,
     /// Explosionsversatz ([65]) des aktuellen Bauteils (Höhe, m).
     dz: f64,
     /// Geschoss-Kontexte (Decken, Dächer) für die Wand-Oberkante unter dem Dach, je Geschoss einmal.
-    ctx: HashMap<String, crate::wall_bands::FloorContext>,
+    ctx: &'a mut HashMap<String, crate::wall_bands::FloorContext>,
     /// Farb-Karten-Liste der Wände (`wall_material_color_maps`), von `wall_pieces` gebraucht.
-    maps: Vec<String>,
+    maps: &'a [String],
 }
 
-impl Sink {
+impl Sink<'_> {
     fn push(&mut self, a: [f64; 3], b: [f64; 3], rgb: [f64; 3], mask: u8) {
         // Plan (x, y, z) → Welt (x, z, y).
         for v in [a[0], a[2] + self.dz, a[1], b[0], b[2] + self.dz, b[1], rgb[0], rgb[1], rgb[2], mask as f64] {
@@ -129,10 +129,13 @@ pub fn pattern_lines_3d_exploded(p: &Project, gap: f64) -> Vec<f32> {
 }
 
 /// Wie [`pattern_lines_3d_exploded`], ohne die Muster der Bauteile ausgeblendeter Klassen ([180]).
+/// Ohne Zwischenspeicher (Tests, Vergleich); das Dokument nutzt [`PatternCache`].
 pub fn pattern_lines_3d_filtered(p: &Project, gap: f64, filter: &crate::model3d::ClassFilter) -> Vec<f32> {
     let ex = crate::explode3d::Explode::new(p, gap);
     let dz_of = |id: &str| ex.as_ref().map_or(0.0, |e| e.of(id));
-    let mut s = Sink { out: Vec::new(), dz: 0.0, ctx: HashMap::new(), maps: crate::model3d::wall_material_color_maps(p) };
+    let maps = crate::model3d::wall_material_color_maps(p);
+    let mut ctx = HashMap::new();
+    let mut s = Sink { out: Vec::new(), dz: 0.0, ctx: &mut ctx, maps: &maps };
     for w in p.walls.iter().filter(|w| !filter.hides(&w.id)) {
         s.dz = dz_of(&w.id);
         wall_lines(p, w, &mut s);
@@ -143,35 +146,199 @@ pub fn pattern_lines_3d_filtered(p: &Project, gap: f64, filter: &crate::model3d:
     }
     for roof in p.roofs.as_deref().unwrap_or(&[]).iter().filter(|r| !filter.hides(&r.id)) {
         s.dz = dz_of(&roof.id);
-        let Some((pat, comp, spec)) = spec_for(p.roof_layers(roof).first().and_then(|l| p.component(&l.component_id)), roof.surface_pattern_angle.unwrap_or(0.0)) else { continue };
-        let rgb = ink_rgb(pat, comp);
-        let off = roof.surface_pattern_offset.as_ref().map_or([0.0, 0.0], |o| [o.x, o.y]);
-        let g = crate::roof::roof_geometry(&roof.params(), p.roof_base_elevation(roof));
-        for plane in &g.planes {
-            let n = newell(plane);
-            let n = if n[2] < 0.0 { [-n[0], -n[1], -n[2]] } else { n };
-            let lift = |q: [f64; 3]| [q[0] + n[0] * LIFT, q[1] + n[1] * LIFT, q[2] + n[2] * LIFT];
-            let mut idx: HashMap<[i64; 6], usize> = HashMap::new();
-            let mut segs: Vec<([f64; 3], [f64; 3], u8)> = Vec::new();
-            let q = |v: f64| (v * 1e5).round() as i64;
-            for (i, &sc) in LOD_SCALES.iter().enumerate() {
-                for (a, b) in sp::segments_3d(plane, &spec, off, sc) {
-                    let key = [q(a[0]), q(a[1]), q(a[2]), q(b[0]), q(b[1]), q(b[2])];
-                    match idx.get(&key) {
-                        Some(&k) => segs[k].2 |= 1 << i,
-                        None => {
-                            idx.insert(key, segs.len());
-                            segs.push((a, b, 1 << i));
+        roof_lines(p, roof, &mut s);
+    }
+    s.out
+}
+
+/// Felder, die das Muster nicht liest oder die der Zwischenspeicher je Element verfolgt (wie `model3d_cache`,
+/// dazu Decken und Dächer: ihre Muster hängen nur am eigenen Element, die Wand-Oberkante unter dem Dach am
+/// Geschoss-Kontext, s. [`PatternCache`]).
+const NOT_GLOBAL: &[&str] = &["walls", "openings", "ceilings", "roofs", "drawings2d", "viewSnapshots", "viewSnapshotFolders", "viewTemplates", "layers"];
+
+#[derive(Clone, Debug)]
+struct WallPat {
+    dz: u64,
+    openings: Vec<u64>,
+    /// Stand des Geschoss-Kontexts, soweit die Wand ihn liest (sonst 0).
+    ctx_gen: u64,
+    lines: Vec<f32>,
+}
+
+#[derive(Clone, Debug)]
+struct FacePat {
+    dz: u64,
+    lines: Vec<f32>,
+}
+
+/// [214] Zwischenspeicher der Flächenmuster je Wand, Decke und Dach (Schlüssel: Element-Stand, `Revs::items`).
+/// Neu gerechnet wird nur, was sich ändert: die Wand selbst (samt gehosteter Öffnungen), eine Wand, deren Geschoss-
+/// Kontext (Decken-Eingabe, Dächer) sich ändert, und Decke bzw. Dach selbst. Jede andere Änderung (Typen, Baustoffe,
+/// Geschosse …) verwirft alles. Einträge ausgeblendeter Klassen bleiben (die Geisterschicht fragt mit anderem Filter);
+/// Einträge verschwundener Elemente fallen weg. Ergebnis gleich [`pattern_lines_3d_filtered`] (Test).
+#[derive(Debug, Default)]
+pub struct PatternCache {
+    sig: Option<(u64, u64)>,
+    maps: Vec<String>,
+    ctx: HashMap<String, crate::wall_bands::FloorContext>,
+    ctx_gen: HashMap<String, u64>,
+    counter: u64,
+    walls: HashMap<u64, WallPat>,
+    ceilings: HashMap<u64, FacePat>,
+    roofs: HashMap<u64, FacePat>,
+    /// Statistik (Tests): im letzten Aufruf neu gerechnete Wände / Decken / Dächer.
+    pub last_rebuilt: (usize, usize, usize),
+}
+
+impl Clone for PatternCache {
+    fn clone(&self) -> Self {
+        PatternCache::default()
+    }
+}
+
+impl PatternCache {
+    /// Wie [`pattern_lines_3d_filtered`], mit Element-Ständen der Wände, Öffnungen, Decken und Dächer.
+    #[allow(clippy::too_many_arguments)]
+    pub fn lines(&mut self, p: &Project, revs: &crate::document::Revs, wall_stamps: &[u64], opening_stamps: &[u64], ceiling_stamps: &[u64], roof_stamps: &[u64], gap: f64, filter: &crate::model3d::ClassFilter) -> Vec<f32> {
+        let openings = p.openings.as_deref().unwrap_or(&[]);
+        let ceilings = p.ceilings.as_deref().unwrap_or(&[]);
+        let roofs = p.roofs.as_deref().unwrap_or(&[]);
+        if wall_stamps.len() != p.walls.len() || opening_stamps.len() != openings.len() || ceiling_stamps.len() != ceilings.len() || roof_stamps.len() != roofs.len() {
+            return pattern_lines_3d_filtered(p, gap, filter);
+        }
+        // Ohne ein einziges Muster im Projekt gibt es nichts zu rechnen oder zu merken.
+        if !p.components.iter().any(|c| c.surface_pattern.is_some()) {
+            self.last_rebuilt = (0, 0, 0);
+            return Vec::new();
+        }
+        let sig = (revs.epoch(), revs.max_except(NOT_GLOBAL));
+        let maps = crate::model3d::wall_material_color_maps(p);
+        if self.sig != Some(sig) || self.maps != maps {
+            *self = PatternCache { sig: Some(sig), maps, ..Default::default() };
+        }
+        let ex = crate::explode3d::Explode::new(p, gap);
+        let dz_of = |id: &str| ex.as_ref().map_or(0.0, |e| e.of(id));
+        let mut by_wall: HashMap<&str, Vec<usize>> = HashMap::new();
+        for (i, o) in openings.iter().enumerate() {
+            by_wall.entry(o.host_wall_id.as_str()).or_default().push(i);
+        }
+        // Geschoss-Kontexte (nur mit Dächern gelesen): ändert sich die Eingabe, neuer Stand → Wände des Geschosses neu.
+        if !roofs.is_empty() {
+            let mut floors: Vec<&str> = Vec::new();
+            for w in p.walls.iter().filter(|w| !filter.hides(&w.id) && w.roof_attach != Some(false) && wall_patterned(p, w)) {
+                if !floors.contains(&w.floor_id.as_str()) {
+                    floors.push(w.floor_id.as_str());
+                }
+            }
+            for f in floors {
+                let fresh = crate::model3d::floor_context_with(p, f, true, None);
+                if self.ctx.get(f).is_none_or(|old| !old.same_input(&fresh)) {
+                    self.counter += 1;
+                    self.ctx_gen.insert(f.to_owned(), self.counter);
+                    self.ctx.insert(f.to_owned(), fresh);
+                }
+            }
+        }
+        let mut rebuilt = (0, 0, 0);
+        let mut out: Vec<f32> = Vec::new();
+        let mut old_walls = std::mem::take(&mut self.walls);
+        let mut fresh_walls: HashMap<u64, WallPat> = HashMap::with_capacity(p.walls.len());
+        for (wi, w) in p.walls.iter().enumerate() {
+            let stamp = wall_stamps[wi];
+            let hidden = filter.hides(&w.id);
+            let entry = old_walls.remove(&stamp);
+            let dz = dz_of(&w.id);
+            let os: Vec<u64> = by_wall.get(w.id.as_str()).map_or(&[][..], |v| v.as_slice()).iter().map(|&i| opening_stamps[i]).collect();
+            // Liest die Wand den Geschoss-Kontext? (wie `wall_top_profile`; Bogenwände nie)
+            let reads_ctx = !roofs.is_empty() && w.roof_attach != Some(false) && crate::wall_arc::WallArc::of_wall(w).is_none();
+            let gen = if reads_ctx { self.ctx_gen.get(&w.floor_id).copied().unwrap_or(0) } else { 0 };
+            let e = match entry {
+                Some(e) if hidden || (e.dz == dz.to_bits() && e.openings == os && e.ctx_gen == gen) => e,
+                _ if hidden => continue,
+                _ => {
+                    rebuilt.0 += 1;
+                    let mut s = Sink { out: Vec::new(), dz, ctx: &mut self.ctx, maps: &self.maps };
+                    wall_lines(p, w, &mut s);
+                    WallPat { dz: dz.to_bits(), openings: os, ctx_gen: gen, lines: s.out }
+                }
+            };
+            if !hidden {
+                out.extend_from_slice(&e.lines);
+            }
+            fresh_walls.insert(stamp, e);
+        }
+        self.walls = fresh_walls;
+        // Decken, dann Dächer (Reihenfolge wie im ungepufferten Pfad).
+        for kind in 0..2 {
+            let (stamps, old_map) = if kind == 0 { (ceiling_stamps, &mut self.ceilings) } else { (roof_stamps, &mut self.roofs) };
+            let mut old = std::mem::take(old_map);
+            let mut fresh: HashMap<u64, FacePat> = HashMap::with_capacity(stamps.len());
+            for (i, &stamp) in stamps.iter().enumerate() {
+                let id = if kind == 0 { ceilings[i].id.as_str() } else { roofs[i].id.as_str() };
+                let hidden = filter.hides(id);
+                let dz = dz_of(id);
+                let e = match old.remove(&stamp) {
+                    Some(e) if hidden || e.dz == dz.to_bits() => e,
+                    _ if hidden => continue,
+                    _ => {
+                        let mut s = Sink { out: Vec::new(), dz, ctx: &mut self.ctx, maps: &self.maps };
+                        if kind == 0 {
+                            rebuilt.1 += 1;
+                            ceiling_lines(p, &ceilings[i], &mut s);
+                        } else {
+                            rebuilt.2 += 1;
+                            roof_lines(p, &roofs[i], &mut s);
                         }
+                        FacePat { dz: dz.to_bits(), lines: s.out }
+                    }
+                };
+                if !hidden {
+                    out.extend_from_slice(&e.lines);
+                }
+                fresh.insert(stamp, e);
+            }
+            *(if kind == 0 { &mut self.ceilings } else { &mut self.roofs }) = fresh;
+        }
+        self.last_rebuilt = rebuilt;
+        out
+    }
+}
+
+/// Hat eine Seite der Wand ein Flächenmuster? (Nur dann liest `wall_lines` den Geschoss-Kontext.)
+fn wall_patterned(p: &Project, w: &Wall) -> bool {
+    let Some(wt) = p.wall_type(w) else { return false };
+    [wt.layers.first(), wt.layers.last()].into_iter().flatten().any(|l| spec_for(p.component(&l.component_id), w.surface_pattern_angle.unwrap_or(0.0)).is_some())
+}
+
+/// Muster der Dachflächen (Schicht 1 des Dachaufbaus).
+fn roof_lines(p: &Project, roof: &crate::model::Roof, s: &mut Sink) {
+    let Some((pat, comp, spec)) = spec_for(p.roof_layers(roof).first().and_then(|l| p.component(&l.component_id)), roof.surface_pattern_angle.unwrap_or(0.0)) else { return };
+    let rgb = ink_rgb(pat, comp);
+    let off = roof.surface_pattern_offset.as_ref().map_or([0.0, 0.0], |o| [o.x, o.y]);
+    let g = crate::roof::roof_geometry(&roof.params(), p.roof_base_elevation(roof));
+    for plane in &g.planes {
+        let n = newell(plane);
+        let n = if n[2] < 0.0 { [-n[0], -n[1], -n[2]] } else { n };
+        let lift = |q: [f64; 3]| [q[0] + n[0] * LIFT, q[1] + n[1] * LIFT, q[2] + n[2] * LIFT];
+        let mut idx: HashMap<[i64; 6], usize> = HashMap::new();
+        let mut segs: Vec<([f64; 3], [f64; 3], u8)> = Vec::new();
+        let q = |v: f64| (v * 1e5).round() as i64;
+        for (i, &sc) in LOD_SCALES.iter().enumerate() {
+            for (a, b) in sp::segments_3d(plane, &spec, off, sc) {
+                let key = [q(a[0]), q(a[1]), q(a[2]), q(b[0]), q(b[1]), q(b[2])];
+                match idx.get(&key) {
+                    Some(&k) => segs[k].2 |= 1 << i,
+                    None => {
+                        idx.insert(key, segs.len());
+                        segs.push((a, b, 1 << i));
                     }
                 }
             }
-            for (a, b, m) in segs {
-                s.push(lift(a), lift(b), rgb, m);
-            }
+        }
+        for (a, b, m) in segs {
+            s.push(lift(a), lift(b), rgb, m);
         }
     }
-    s.out
 }
 
 fn newell(poly: &[[f64; 3]]) -> [f64; 3] {
@@ -270,14 +437,14 @@ fn profile_at(top: &[P], x: f64) -> f64 {
 /// Oberkante der Wand entlang der Linie im Abstand `d` links der Achse (Wandseite) als Linie `[x ab Wandanfang, Höhe ab UK]`: die Körper der Wand unter
 /// den Dächern (Giebel, Pultwand, Kniestock) zeigen ihre Oberkante an der Dach-Unterkante; die Musterlinien
 /// einer Wandseite dürfen nicht darüber hinausragen. `None` ohne Körper (die Wand zeigt dann das Rechteck).
-fn wall_top_profile(p: &Project, w: &Wall, s: &mut Sink, len: f64, d: f64) -> Option<Vec<P>> {
+fn wall_top_profile(p: &Project, w: &Wall, s: &mut Sink<'_>, len: f64, d: f64) -> Option<Vec<P>> {
     let (z0, z1) = p.wall_vertical_extent(w);
     if !p.roofs.as_deref().is_some_and(|r| !r.is_empty()) || w.roof_attach == Some(false) {
         return Some(vec![[0.0, z1 - z0], [len, z1 - z0]]);
     }
     let ctx = s.ctx.entry(w.floor_id.clone()).or_insert_with(|| crate::model3d::floor_context_with(p, &w.floor_id, true, None));
     let mut pieces = Vec::new();
-    crate::model3d::wall_pieces(p, &s.maps, w, ctx, &[], crate::joins::WallCuts::default(), true, false, &mut pieces);
+    crate::model3d::wall_pieces(p, s.maps, w, ctx, &[], crate::joins::WallCuts::default(), true, false, &mut pieces);
     if pieces.is_empty() {
         return None;
     }
@@ -520,7 +687,8 @@ mod tests {
         }
         let mut checked = 0;
         for w in &p.walls {
-            let mut s = Sink { out: Vec::new(), dz: 0.0, ctx: HashMap::new(), maps: crate::model3d::wall_material_color_maps(&p) };
+            let (mut ctx, maps) = (HashMap::new(), crate::model3d::wall_material_color_maps(&p));
+            let mut s = Sink { out: Vec::new(), dz: 0.0, ctx: &mut ctx, maps: &maps };
             wall_lines(&p, w, &mut s);
             if s.out.is_empty() {
                 continue;
@@ -572,5 +740,123 @@ mod tests {
         let v = pattern_lines_3d(&p);
         let (_, z1) = p.ceiling_vertical_extent(&ce);
         assert!(v.chunks(PATTERN_STRIDE).any(|c| (c[1] as f64 - z1).abs() < 0.01));
+    }
+
+    /// [214] Zwischenspeicher: nach jeder Änderung (Wand, Öffnung, Decke, Dach, Typ, Hinzufügen/Entfernen, Undo/Redo, Klassen-Filter,
+    /// Explosion) gleich dem Neubau ohne Zwischenspeicher; eine Wandänderung rechnet nur diese Wand neu.
+    #[test]
+    fn zwischenspeicher_gleich_neubau() {
+        use crate::document::Document;
+        use crate::ops::Op;
+        use serde_json::{json, Value};
+        let mut v: Value = serde_json::from_str(include_str!("../tests/fixtures/sample_project.json")).unwrap();
+        for c in v["components"].as_array_mut().unwrap() {
+            c["surfacePattern"] = json!({"kind": "lines", "direction": "vertical", "spacing": 0.2});
+        }
+        let mut d = Document::from_json(&v.to_string()).unwrap();
+        let list = |d: &Document, key: &str| d.root().get(key).and_then(Value::as_array).cloned().unwrap_or_default();
+        let filters = ["", r#"{"hide":["20"]}"#, r#"{"hide":["30","31"]}"#];
+        let check = |d: &mut Document, step: &str| {
+            for (i, text) in filters.iter().enumerate() {
+                for gap in [0.0, 1.5] {
+                    let inc = d.surface_pattern_lines(gap, text).unwrap();
+                    let p = d.project().unwrap().clone();
+                    let full = pattern_lines_3d_filtered(&p, gap, &crate::model3d::ClassFilter::from_text(&p, text));
+                    assert!(inc == full, "{step}: Filter {i}, Abstand {gap}: {} / {} Werte", inc.len(), full.len());
+                }
+            }
+        };
+        check(&mut d, "start");
+        let all = d.surface_pattern_lines(0.0, "").unwrap();
+        assert!(all.len() > 1000);
+        // Eine Wand ändern: nur sie wird neu gerechnet.
+        let mut w = list(&d, "walls")[1].clone();
+        w["surfacePatternOffset"] = json!({"x": 0.05, "y": 0.0});
+        d.commit(vec![Op::Replace { collection: "walls".into(), entity: w }], None, 0.0, false).unwrap();
+        d.surface_pattern_lines(0.0, "").unwrap();
+        assert_eq!(d.pattern_rebuilt(), (1, 0, 0), "nur die geänderte Wand");
+        d.surface_pattern_lines(0.0, "").unwrap();
+        assert_eq!(d.pattern_rebuilt(), (0, 0, 0), "unverändert: nichts neu");
+        d.surface_pattern_lines(0.0, filters[1]).unwrap();
+        assert_eq!(d.pattern_rebuilt(), (0, 0, 0), "anderer Klassen-Filter: nichts neu");
+        check(&mut d, "Wand-Versatz");
+        let mut seed: u64 = 0x214;
+        let mut rnd = |n: usize| {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            ((seed >> 33) as usize) % n.max(1)
+        };
+        let mut kinds = [0usize; 11];
+        for step in 0..60 {
+            let walls = list(&d, "walls");
+            let openings = list(&d, "openings");
+            let kind = rnd(11);
+            let ops: Vec<Op> = match kind {
+                0 => {
+                    let mut w = walls[rnd(walls.len())].clone();
+                    w["height"] = json!(w["height"].as_f64().unwrap_or(2.6) + 0.1);
+                    vec![Op::Replace { collection: "walls".into(), entity: w }]
+                }
+                1 => {
+                    let mut w = walls[rnd(walls.len())].clone();
+                    w["end"]["x"] = json!(w["end"]["x"].as_f64().unwrap_or(0.0) + 0.05);
+                    vec![Op::Replace { collection: "walls".into(), entity: w }]
+                }
+                2 if !openings.is_empty() => {
+                    let mut o = openings[rnd(openings.len())].clone();
+                    o["width"] = json!(o["width"].as_f64().unwrap_or(1.0) * 0.9);
+                    vec![Op::Replace { collection: "openings".into(), entity: o }]
+                }
+                3 if !openings.is_empty() => {
+                    let mut o = openings[rnd(openings.len())].clone();
+                    o["hostWallId"] = walls[rnd(walls.len())]["id"].clone();
+                    vec![Op::Replace { collection: "openings".into(), entity: o }]
+                }
+                4 => {
+                    let mut w = walls[rnd(walls.len())].clone();
+                    w["id"] = json!(format!("neu{step}"));
+                    w["start"]["y"] = json!(w["start"]["y"].as_f64().unwrap_or(0.0) + 0.3);
+                    vec![Op::Add { collection: "walls".into(), items: vec![w], at: Some(rnd(walls.len())) }]
+                }
+                5 if walls.len() > 3 => vec![Op::Remove { collection: "walls".into(), ids: vec![walls[rnd(walls.len())]["id"].as_str().unwrap().to_owned()] }],
+                6 => {
+                    // Decke: Umriss verschieben (ändert Geschoss-Kontext und damit die Wände unter dem Dach).
+                    let mut c = list(&d, "ceilings")[0].clone();
+                    let x = c["outline"][2]["x"].as_f64().unwrap();
+                    c["outline"][2]["x"] = json!(x + 0.1);
+                    vec![Op::Replace { collection: "ceilings".into(), entity: c }]
+                }
+                7 => {
+                    let mut r = list(&d, "roofs")[0].clone();
+                    r["surfacePatternAngle"] = json!(0.1 * step as f64);
+                    vec![Op::Replace { collection: "roofs".into(), entity: r }]
+                }
+                8 => {
+                    if d.undo().is_some() {
+                        kinds[kind] += 1;
+                        check(&mut d, &format!("Schritt {step} (undo)"));
+                    }
+                    continue;
+                }
+                9 => {
+                    if d.redo().is_some() {
+                        kinds[kind] += 1;
+                        check(&mut d, &format!("Schritt {step} (redo)"));
+                    }
+                    continue;
+                }
+                _ => {
+                    let mut ts = list(&d, "wallTypes");
+                    let t = rnd(ts.len());
+                    if let Some(l) = ts[t]["layers"].get_mut(0) {
+                        l["thickness"] = json!(l["thickness"].as_f64().unwrap_or(0.1) + 0.01);
+                    }
+                    vec![Op::Replace { collection: "wallTypes".into(), entity: ts.swap_remove(t) }]
+                }
+            };
+            kinds[kind] += 1;
+            d.commit(ops, None, step as f64, false).unwrap_or_else(|e| panic!("Schritt {step}: {e:?}"));
+            check(&mut d, &format!("Schritt {step} (Art {kind})"));
+        }
+        assert!([0, 1, 4, 5, 6, 7, 8, 10].iter().all(|&k| kinds[k] > 0), "{kinds:?}");
     }
 }

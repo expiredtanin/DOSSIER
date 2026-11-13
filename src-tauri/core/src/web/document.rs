@@ -317,7 +317,7 @@ pub fn doc_drawing_line_verts(h: u32, explode: f64, hide: &str) -> Vec<f32> {
 /// [180] `hide` wie bei [`doc_drawing_line_verts`].
 #[wasm_bindgen]
 pub fn doc_surface_pattern_lines(h: u32, explode: f64, hide: &str) -> Vec<f32> {
-    with_doc(h, |d| d.project().ok().map(|p| crate::surface_pattern3d::pattern_lines_3d_filtered(p, explode, &crate::model3d::ClassFilter::from_text(p, hide)))).flatten().unwrap_or_default()
+    with_doc(h, |d| d.surface_pattern_lines(explode, hide).ok()).flatten().unwrap_or_default()
 }
 
 /// Das Projekt als Datei-Text (Formatversion vorn, Einrückung 2); leer, wenn das Dokument nicht offen ist.

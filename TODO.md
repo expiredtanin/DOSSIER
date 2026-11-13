@@ -220,7 +220,13 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   877 → 141), komplex 146 → 176 (Rauschen, Geisterschicht 74 → 79), kontext 253 → 277 (Rauschen); GPU-Puffer komplex 57 → 42 MB,
   kontext 175 → 123, gross 131 → 118; Aufbau render3d komplex 517 → 263 ms, gross 396 → 203. Schattenpass lief schon nur bei Änderung,
   Bild-CPU je Frame 0.3–1.5 ms (Draw-Calls 64/275). Bilder byte-gleich, Geisterschicht ≤ 8/255 auf ~1 % (Mischreihenfolge der
-  durchscheinenden Flächen je Klumpen). Nicht auf dem Mac/Metal und nicht in der App angesehen. Offen, nach Messwert: (1) Rest-Gruppen ohne
+  durchscheinenden Flächen je Klumpen). Nicht auf dem Mac/Metal und nicht in der App angesehen.
+  Flächenmuster-Cache (13.11., `surface_pattern3d::PatternCache`, `Document::surface_pattern_lines`): Linien je Wand/Decke/Dach unter dem
+  Element-Stand, Wand zusätzlich nach gehosteten Öffnungen und Geschoss-Kontext (Decken-Eingabe, Dächer: Oberkante unter dem Dach); Hauptmodell
+  und Geisterschicht (anderer Klassen-Filter) teilen die Einträge. Wand verschieben, Flächenmuster je Änderung (WASM, Container, beide
+  Aufrufe): komplex 24 → 1,5–2 ms, kontext 8 → 1,5 ms (Rauschen ±), gross unverändert ~1 ms (keine Muster). Test
+  `zwischenspeicher_gleich_neubau` (60 gemischte Änderungen, Undo/Redo, Filter, Explosion: gleich dem Neubau; Wandänderung rechnet 1 Wand).
+  Offen, nach Messwert: (1) Rest-Gruppen ohne
   JSON-Rundreise (Laufnummer je Gruppe statt `JSON.stringify`-Vergleich: kontext 69 ms, komplex 27 ms je Änderung); (2) Kern: Geschoss-
   Kontexte aller Geschosse je Abfrage (gross 29 ms nativ, zweimal je Änderung), Kontext-Netze je Objekt als Teil statt eine Gruppe;
   (3) Vernetzen in render3d (komplex 324 ms/147k Dreiecke kalt, Geisterschicht gross 2 s beim Geschosswechsel); (4) GPU-Bildzeit nur auf
