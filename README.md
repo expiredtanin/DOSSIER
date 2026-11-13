@@ -101,7 +101,7 @@ npm run electron      # Linux
 npm run dev           # nur im Browser, für Entwicklung
 ```
 
-Linux: `./scripts/update-linux.sh` holt den neusten `master`, baut nur die veralteten WASM-Pakete, löscht danach die
+Linux: `./scripts/install-linux-commands.sh` legt die Befehle `dossier` (starten) und `update-dossier` an. `./scripts/update-linux.sh` holt den neusten `master`, baut nur die veralteten WASM-Pakete, löscht danach die
 Rust-Zwischendateien und Caches (`--start` startet Dossier anschliessend, `--keep-build` behält die Zwischendateien
 für schnellere nächste Builds, `--appimage` baut zusätzlich ein AppImage).
 
