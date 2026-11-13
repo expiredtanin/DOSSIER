@@ -1980,7 +1980,7 @@ export const de = {
   "cmd.solidtoparts.label": "Körper in Bauteile umwandeln",
   "cmd.solidtoparts.pick": "Körper wählen (Massenmodell):",
   "cmd.solidtoparts.noSolid": "Hier liegt kein Körper.",
-  "cmd.solidtoparts.done": "{stories} Geschosse ({newFloors} neu): {walls} Aussenwände, {ceilings} Decken und Flachdach erzeugt.",
+  "cmd.solidtoparts.done": "Erzeugt: Geschosse {stories} ({newFloors} neu) · Aussenwände {walls} · Decken {ceilings} · Flachdach.",
   "cmd.solidtoparts.reject.none": "Kein Körper gewählt.",
   "cmd.solidtoparts.reject.tapered": "Nur senkrechte Körper: verjüngte oder geneigte Körper lassen sich nicht umwandeln.",
   "cmd.solidtoparts.reject.brep": "Nur Körper aus Grundriss × Höhe (auch Quader, Zylinder): Kugel, Kegel, Torus, Rotations- und verschnittene Körper lassen sich nicht umwandeln.",

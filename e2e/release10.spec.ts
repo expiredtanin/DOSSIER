@@ -365,9 +365,9 @@ test("[222] Volumenstudie: Wände/Decken/Dach aus einem Volumen (Körper) erzeug
   await typeCommand(page, "koerperinbauteile");
   await expect(page.locator(".cmdline-prompt")).toHaveText("Körper wählen (Massenmodell):");
   await typeCommand(page, "6,5");
-  const done = page.locator(".toast-message").filter({ hasText: /Geschosse \(\d+ neu\): \d+ Aussenwände, \d+ Decken und Flachdach erzeugt/ });
+  const done = page.locator(".toast-message").filter({ hasText: /Erzeugt: Geschosse \d+ \(\d+ neu\) · Aussenwände \d+ · Decken \d+ · Flachdach/ });
   await expect(done).toBeVisible();
-  const [, stories, fresh, walls, ceilings] = (await done.first().innerText()).match(/(\d+) Geschosse \((\d+) neu\): (\d+) Aussenwände, (\d+) Decken/)!.map(Number);
+  const [, stories, fresh, walls, ceilings] = (await done.first().innerText()).match(/Geschosse (\d+) \((\d+) neu\) · Aussenwände (\d+) · Decken (\d+)/)!.map(Number);
   expect(stories).toBeGreaterThanOrEqual(2);
   expect(walls).toBe(4 * stories);
   expect(ceilings).toBe(stories - 1);
