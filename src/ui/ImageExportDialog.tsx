@@ -5,6 +5,7 @@
 // (`state/imageExportDialogHook`); Befehl `bild3d`, Menü Ansicht. Overlay wie `RenderDialog` (kein window.prompt).
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useModalFocus } from "./modalFocus";
 import { t } from "../i18n";
 import { paperPixels } from "../core";
 import { getState } from "../state/appStore";
@@ -86,14 +87,13 @@ export const ImageExportDialogHost = memo(function ImageExportDialogHost() {
     setResult(null);
   }, []);
 
+  // [249] Fokus ins erste Feld, Tab-Falle, Esc (nicht während der Arbeit), Enter im Feld = Starten, Fokus zurück.
+  const startRef = useRef<() => void>(() => {});
+  const dialogRef = useModalFocus({ onEscape: busy ? undefined : close, onEnter: () => startRef.current() });
+  // Während der Arbeit ist „Starten" gesperrt: der Fokus wandert auf „Abbrechen" (nur im Stil Pathtracing vorhanden).
   useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !busy) close();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, busy, close]);
+    if (busy) document.querySelector<HTMLElement>('[data-testid="image3d-abort"]')?.focus();
+  }, [busy]);
 
   const cameras = useMemo(() => (open ? (getState().project.cameras ?? []) : []), [open]);
   if (!open) return null;
@@ -107,6 +107,9 @@ export const ImageExportDialogHost = memo(function ImageExportDialogHost() {
   const canStart = validDims && !busy;
   const layouts = getState().project.layouts ?? [];
 
+  startRef.current = () => {
+    if (phase !== "done") void start();
+  };
   const start = async () => {
     if (!canStart) return;
     const st = getState();
@@ -167,7 +170,7 @@ export const ImageExportDialogHost = memo(function ImageExportDialogHost() {
 
   return (
     <div className="imp-overlay" onClick={() => !busy && close()}>
-      <div className="imp-dialog render-dialog" role="dialog" aria-modal="true" aria-label={t("image3d.title")} data-testid="image3d-dialog" onClick={(e) => e.stopPropagation()}>
+      <div ref={dialogRef} className="imp-dialog render-dialog" role="dialog" aria-modal="true" aria-label={t("image3d.title")} data-testid="image3d-dialog" onClick={(e) => e.stopPropagation()}>
         <header className="imp-head">
           <span className="imp-head-title">{t("image3d.title")}</span>
           <button className="imp-close" onClick={close} aria-label={t("export.close")} disabled={busy}>
@@ -180,7 +183,7 @@ export const ImageExportDialogHost = memo(function ImageExportDialogHost() {
               <p className="imp-note">{t("image3d.intro")}</p>
               <section className="imp-section">
                 <div className="imp-section-title">{t("render.camera.title")}</div>
-                <select className="imp-select" data-testid="image3d-camera" value={cameraKey} disabled={busy} onChange={(e) => setCameraKey(e.target.value)}>
+                <select className="imp-select" aria-label={t("render.camera.title")} data-testid="image3d-camera" value={cameraKey} disabled={busy} onChange={(e) => setCameraKey(e.target.value)}>
                   <option value="live">{t("render.camera.live")}</option>
                   {cameras.map((c) => (
                     <option key={c.id} value={c.id}>
@@ -191,7 +194,7 @@ export const ImageExportDialogHost = memo(function ImageExportDialogHost() {
               </section>
               <section className="imp-section">
                 <div className="imp-section-title">{t("render.size")}</div>
-                <select className="imp-select" data-testid="image3d-size" value={size} disabled={busy} onChange={(e) => pickSize(e.target.value as SizeId)}>
+                <select className="imp-select" aria-label={t("render.size")} data-testid="image3d-size" value={size} disabled={busy} onChange={(e) => pickSize(e.target.value as SizeId)}>
                   {SIZE_IDS.map((id) => (
                     <option key={id} value={id}>
                       {t(`image3d.size.${id}`)}
@@ -299,7 +302,7 @@ export const ImageExportDialogHost = memo(function ImageExportDialogHost() {
               >
                 {t("render.toLayout")}
               </button>
-              <button className="imp-btn primary" data-testid="image3d-save" onClick={() => void save()}>
+              <button className="imp-btn primary" data-testid="image3d-save" data-autofocus onClick={() => void save()}>
                 {t("render.save")}
               </button>
             </>

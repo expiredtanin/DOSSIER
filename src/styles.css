@@ -9272,3 +9272,34 @@ body {
   font-size: 11px;
   font-style: italic;
 }
+
+/* ── [249] Sichtbarer Fokusring in hell und dunkel ───────────────────────────────────────────────────────────
+   Bisher zeigten Dialog-Knöpfe nur den Browser-Standard (im Dark-Modus kaum sichtbar), Eingabefelder meist nur eine
+   20-%-Kontur und die Blatt-HUDs nichts. Ein Token, eine Regel für Dialoge, Blatt-HUDs, Objekt-Info-Gruppen und
+   Dropdown-Trigger; nur Tastaturfokus (`:focus-visible`), Mausklicks bleiben ruhig. */
+:root {
+  --focus-ring: #1f5fbf;
+}
+:root[data-theme="dark"] {
+  --focus-ring: #8ab4ff;
+}
+.imp-dialog :is(button, input, select, textarea, summary, [tabindex]):focus-visible,
+.layout-sheet-hud :is(button, input, select, textarea, [tabindex]):focus-visible,
+.layout-sheet-bind :is(button, input, select, textarea):focus-visible,
+.objinfo-group-head:focus-visible,
+.tb-dd-trigger:focus-visible,
+.tb-btn:focus-visible,
+.nav-add:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+.imp-dialog:focus,
+.imp-dialog:focus-visible {
+  outline: none;
+}
+/* [249] Viele Hilfslinien: die Liste scrollt im Panel, Titel und Schliessen-Knopf bleiben im Blatt sichtbar. */
+.layout-sheet-guides {
+  max-height: calc(100% - 24px);
+  overflow-y: auto;
+  box-sizing: border-box;
+}

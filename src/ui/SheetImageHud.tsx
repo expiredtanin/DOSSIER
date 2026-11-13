@@ -46,9 +46,10 @@ export function SheetImageHud({
 }) {
   const e = edges(image);
   const dpi = Math.round(imageGeometry(image).dpi);
-  const num = (v: number, set: (n: number) => void, testId?: string) => (
+  const num = (v: number, set: (n: number) => void, testId?: string, label?: string) => (
     <input
       type="number"
+      aria-label={label}
       className="res-input mono num"
       step={1}
       data-testid={testId}
@@ -60,18 +61,39 @@ export function SheetImageHud({
     />
   );
   return (
-    <div className="layout-sheet-hud layout-sheet-hud-image" data-sheet-ui data-image-hud data-testid="image-hud">
+    <div
+      className="layout-sheet-hud layout-sheet-hud-image"
+      data-sheet-ui
+      data-image-hud
+      data-testid="image-hud"
+      role="group"
+      aria-label={image.name || t("sheetImage.title")}
+      onKeyDown={(ev) => {
+        // [249] Esc im Feld: Zuschnitt beenden, sonst den Fokus aus dem Feld nehmen (zweites Esc hebt die Auswahl auf).
+        if (ev.key !== "Escape" || ev.ctrlKey || ev.metaKey || ev.altKey) return;
+        const el = ev.target as HTMLElement;
+        if (cropping && onToggleCrop) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          onToggleCrop();
+        } else if (el.tagName === "INPUT" || el.tagName === "SELECT") {
+          ev.preventDefault();
+          ev.stopPropagation();
+          el.blur();
+        }
+      }}
+    >
       <div className="layout-sheet-hud-title">{image.name || t("sheetImage.title")}</div>
       <div className="layout-sheet-hud-row">
         <span>X / Y mm</span>
         <span className="layout-sheet-hud-scale">
-          {num(image.xMm, (xMm) => onPatch({ xMm }), "image-x")}
-          {num(image.yMm, (yMm) => onPatch({ yMm }), "image-y")}
+          {num(image.xMm, (xMm) => onPatch({ xMm }), "image-x", t("sheetImage.x"))}
+          {num(image.yMm, (yMm) => onPatch({ yMm }), "image-y", t("sheetImage.y"))}
         </span>
       </div>
       <div className="layout-sheet-hud-row">
         <span>{t("sheetImage.width")}</span>
-        <span className="layout-sheet-hud-scale">{num(image.widthMm, (w) => onPatch(resizeImageWidth(image, w)), "image-width")}</span>
+        <span className="layout-sheet-hud-scale">{num(image.widthMm, (w) => onPatch(resizeImageWidth(image, w)), "image-width", t("sheetImage.width"))}</span>
       </div>
       <div className="layout-sheet-hud-size">
         {Math.round(image.widthMm)} × {Math.round(image.heightMm)} mm · {image.pixelWidth} × {image.pixelHeight} px
@@ -92,7 +114,7 @@ export function SheetImageHud({
         <div key={k} className="layout-sheet-hud-row">
           <span>{t(`sheetImage.crop.${k}`)}</span>
           <span className="layout-sheet-hud-scale">
-            {num(e[k], (v) => onPatch(cropImage(image, cropFromEdges({ ...e, [k]: v }))), `image-crop-${k}`)}%
+            {num(e[k], (v) => onPatch(cropImage(image, cropFromEdges({ ...e, [k]: v }))), `image-crop-${k}`, t("sheetImage.cropEdge", { edge: t(`sheetImage.crop.${k}`) }))}%
           </span>
         </div>
       ))}
@@ -103,7 +125,7 @@ export function SheetImageHud({
             {t("sheetImage.cropReset")}
           </button>
         )}
-        <button className="nav-add" data-testid="image-remove" onClick={onRemove} title={t("sheetImage.remove")}>
+        <button className="nav-add" data-testid="image-remove" onClick={onRemove} title={t("sheetImage.remove")} aria-label={t("sheetImage.remove")}>
           <span className="material-symbols-outlined" aria-hidden="true">delete</span>
         </button>
       </div>

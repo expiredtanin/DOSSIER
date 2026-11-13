@@ -19,7 +19,8 @@ describe("ViewportToolbar3d", () => {
     const h = html(false);
     expect(h).toContain('role="toolbar"');
     expect(h).toContain('aria-pressed="false"');
-    expect(h).toContain(`aria-label="${t("walk.tip.on")}"`);
+    // [249] Stabiler Name + aria-pressed (kein wechselnder aria-label), der Zustandstext steht im Tooltip.
+    expect(h).toContain(`aria-label="${t("walk.toggle")}"`);
     expect(h).toContain(`data-tip="${t("walk.tip.on")}"`);
     expect(h).not.toContain("walk-help");
     expect(h).not.toContain("is-on");

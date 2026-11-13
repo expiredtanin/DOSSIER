@@ -32,13 +32,18 @@ export function infoGroupFrame(st: GroupState, id: InfoGroupId, children: ReactN
         type="button"
         className="objinfo-group-head"
         aria-expanded={open}
+        aria-controls={open ? `objinfo-group-${id}` : undefined}
         title={t("objinfo.group.toggle")}
         onClick={() => toggleInfoGroup(id)}
       >
         <span className="objinfo-group-chev" aria-hidden="true">{open ? "▾" : "▸"}</span>
         {t(INFO_GROUP_TITLE[id])}
       </button>
-      {open && <div className="objinfo-group-body">{children}</div>}
+      {open && (
+        <div className="objinfo-group-body" id={`objinfo-group-${id}`}>
+          {children}
+        </div>
+      )}
     </section>
   );
 }

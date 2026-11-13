@@ -114,7 +114,9 @@ export function walkKeyAllowed(e: { ctrlKey: boolean; metaKey: boolean }, active
   if (!active) return true;
   const tag = active.tagName;
   if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return false;
-  return !(active as HTMLElement).isContentEditable;
+  if ((active as HTMLElement).isContentEditable) return false;
+  // [249] Liegt der Fokus in einem modalen Dialog, gehören die Tasten dem Dialog (kein Gehen im Hintergrund).
+  return !(typeof active.closest === "function" && active.closest('[aria-modal="true"]'));
 }
 
 // ── [245] Kollision und Bodenfolge ─────────────────────────────────────────────────────────────────────────────

@@ -16,7 +16,7 @@
 // Reine Darstellung + Callbacks; voll gesteuert. Identifier englisch, UI-Text
 // kommt als Props (i18n) herein (CONVENTIONS.md).
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { ReactNode } from "react";
 
@@ -96,51 +96,74 @@ export function DropdownRows({
   activeIdx,
   onHover,
   onSelect,
+  idPrefix,
 }: {
   rows: DropdownItem[];
   activeIdx: number;
   onHover: (i: number) => void;
   onSelect: (row: DropdownItem) => void;
+  /** [249] Ids der Zeilen (`<prefix>-<Index>`) für `aria-activedescendant` des Triggers. */
+  idPrefix?: string;
 }) {
-  return (
-    <>
-      {rows.map((row, i) =>
-        row.divider ? (
-          <div key={`div-${i}`} className="ctx-divider" role="separator" />
-        ) : row.heading !== undefined ? (
-          <div key={`head-${i}`} className="tb-dd-heading" role="presentation">
+  const option = (row: DropdownItem, i: number) => (
+    <button
+      key={`row-${i}`}
+      id={idPrefix ? `${idPrefix}-${i}` : undefined}
+      type="button"
+      role="option"
+      tabIndex={-1}
+      aria-selected={!!row.active}
+      title={row.hint}
+      className={`ctx-item tb-dd-item${row.danger ? " danger" : ""}${row.hint ? " has-hint" : ""}${i === activeIdx ? " is-active" : ""}`}
+      disabled={row.disabled}
+      onMouseEnter={() => !row.disabled && onHover(i)}
+      onClick={() => onSelect(row)}
+    >
+      <span className="tb-dd-check-slot">{row.active && <Check />}</span>
+      {row.icon && (
+        <span className="material-symbols-outlined tb-dd-icon" aria-hidden="true">
+          {row.icon}
+        </span>
+      )}
+      <span className="tb-dd-text">
+        <span className="ctx-item-label">{row.label}</span>
+        {row.hint && <span className="tb-dd-hint">{row.hint}</span>}
+      </span>
+      {row.shortcut && <kbd className="tb-dd-kbd">{row.shortcut}</kbd>}
+    </button>
+  );
+  // [249] Überschrift + folgende Optionen = eine benannte Gruppe (`role="group"`, Name = Überschrift), damit
+  // Screenreader „Linien, Drahtgitter …" ansagen; Trenner stehen zwischen den Gruppen.
+  const out: ReactNode[] = [];
+  let i = 0;
+  while (i < rows.length) {
+    const row = rows[i]!;
+    if (row.divider) {
+      out.push(<div key={`div-${i}`} className="ctx-divider" role="separator" />);
+      i++;
+    } else if (row.heading !== undefined) {
+      const headId = `${idPrefix ?? "dd"}-head-${i}`;
+      const members: ReactNode[] = [];
+      let k = i + 1;
+      while (k < rows.length && !isInert(rows[k]!)) {
+        members.push(option(rows[k]!, k));
+        k++;
+      }
+      out.push(
+        <div key={`grp-${i}`} role="group" aria-labelledby={headId}>
+          <div id={headId} className="tb-dd-heading">
             {row.heading}
           </div>
-        ) : (
-          <button
-            key={`row-${i}`}
-            type="button"
-            role="option"
-            aria-selected={!!row.active}
-            title={row.hint}
-            className={`ctx-item tb-dd-item${row.danger ? " danger" : ""}${row.hint ? " has-hint" : ""}${
-              i === activeIdx ? " is-active" : ""
-            }`}
-            disabled={row.disabled}
-            onMouseEnter={() => !row.disabled && onHover(i)}
-            onClick={() => onSelect(row)}
-          >
-            <span className="tb-dd-check-slot">{row.active && <Check />}</span>
-            {row.icon && (
-              <span className="material-symbols-outlined tb-dd-icon" aria-hidden="true">
-                {row.icon}
-              </span>
-            )}
-            <span className="tb-dd-text">
-              <span className="ctx-item-label">{row.label}</span>
-              {row.hint && <span className="tb-dd-hint">{row.hint}</span>}
-            </span>
-            {row.shortcut && <kbd className="tb-dd-kbd">{row.shortcut}</kbd>}
-          </button>
-        ),
-      )}
-    </>
-  );
+          {members}
+        </div>,
+      );
+      i = k;
+    } else {
+      out.push(option(row, i));
+      i++;
+    }
+  }
+  return <>{out}</>;
 }
 
 export interface DropdownProps {
@@ -238,6 +261,9 @@ export function Dropdown({
   const [activeIdx, setActiveIdx] = useState(-1);
   const btnRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  // [249] Ids für aria-controls/aria-activedescendant (der Fokus bleibt auf dem Trigger).
+  const uid = useId().replace(/:/g, "");
+  const menuId = `dd-${uid}`;
 
   // Einheitliche Zeilenliste: im Wert-Modus aus `options`, im Aktions-Modus aus
   // `items`. So teilen beide Modi dieselbe Render-/Tastatur-Logik.
@@ -272,6 +298,9 @@ export function Dropdown({
 
   const selectRow = (row: DropdownItem) => {
     if (row.disabled || isInert(row)) return;
+    // [249] Fokus zuerst zum Trigger (nach einem Mausklick liegt er sonst auf der Zeile, die gleich verschwindet):
+    // ein von der Aktion geöffneter Dialog merkt sich ihn als Rückkehrziel.
+    btnRef.current?.focus({ preventScroll: true });
     row.onSelect?.();
     close();
   };
@@ -314,10 +343,20 @@ export function Dropdown({
       close();
     };
     const onScrollOrResize = () => close();
+    // [249] Esc auch, wenn der Fokus nicht (mehr) auf dem Trigger liegt; Tab verlässt das Menü.
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !e.defaultPrevented) {
+        e.preventDefault();
+        close();
+        btnRef.current?.focus({ preventScroll: true });
+      } else if (e.key === "Tab") close();
+    };
+    window.addEventListener("keydown", onKey);
     window.addEventListener("pointerdown", onPointerDown, true);
     window.addEventListener("scroll", onScrollOrResize, true);
     window.addEventListener("resize", onScrollOrResize);
     return () => {
+      window.removeEventListener("keydown", onKey);
       window.removeEventListener("pointerdown", onPointerDown, true);
       window.removeEventListener("scroll", onScrollOrResize, true);
       window.removeEventListener("resize", onScrollOrResize);
@@ -349,6 +388,7 @@ export function Dropdown({
     }
     if (e.key === "Escape") {
       e.preventDefault();
+      e.stopPropagation();
       close();
     } else if (e.key === "ArrowDown") {
       e.preventDefault();
@@ -356,6 +396,11 @@ export function Dropdown({
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       step(-1);
+    } else if (e.key === "Home" || e.key === "End") {
+      e.preventDefault();
+      const order = e.key === "Home" ? rows.map((_, i) => i) : rows.map((_, i) => rows.length - 1 - i);
+      const to = order.find((i) => !isInert(rows[i]!) && !rows[i]!.disabled);
+      if (to !== undefined) setActiveIdx(to);
     } else if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
       const row = rows[activeIdx];
@@ -366,12 +411,14 @@ export function Dropdown({
   const menu = open ? (
     <div
       ref={menuRef}
+      id={menuId}
       className="ctx-menu tb-dd-menu"
       role="listbox"
+      aria-label={title ?? triggerLabel}
       style={{ left: pos.left, top: pos.top, minWidth: pos.minWidth }}
       onContextMenu={(e) => e.preventDefault()}
     >
-      <DropdownRows rows={rows} activeIdx={activeIdx} onHover={setActiveIdx} onSelect={selectRow} />
+      <DropdownRows rows={rows} activeIdx={activeIdx} onHover={setActiveIdx} onSelect={selectRow} idPrefix={menuId} />
     </div>
   ) : null;
 
@@ -389,6 +436,8 @@ export function Dropdown({
         aria-label={title}
         aria-haspopup="listbox"
         aria-expanded={open}
+        aria-controls={open ? menuId : undefined}
+        aria-activedescendant={open && activeIdx >= 0 ? `${menuId}-${activeIdx}` : undefined}
         onClick={() => (open ? close() : openMenu())}
         onKeyDown={onTriggerKeyDown}
       >

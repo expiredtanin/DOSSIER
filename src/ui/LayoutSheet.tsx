@@ -30,6 +30,7 @@ import type {
 import { createTable, PX_PER_M, sheetTables, TABLE_SOURCES, snapshotMono, snapshotOverrideRuleIds, snapshotTemplate, tableSourceLabel, viewportLevelPlan } from "../core";
 import type { TableOut } from "../core";
 import { SheetTableHud } from "./SheetTableHud";
+import { isInModalDialog } from "../state/modalScope";
 import { SheetImageHud } from "./SheetImageHud";
 import { SheetGuidesHud } from "./SheetGuidesHud";
 import {
@@ -346,6 +347,7 @@ export function LayoutSheetPane({
   const [cropPreview, setCropPreview] = useState<{ id: string; clip: RectMm; draw: RectMm } | null>(null);
   // Hilfslinien ([208]): Panel offen, laufender Zug (Lineal / bestehende Linie) und gerade gefangene Linien.
   const [guidesOpen, setGuidesOpen] = useState(false);
+  const guidesToggleRef = useRef<HTMLButtonElement | null>(null);
   const [guideDrag, setGuideDrag] = useState<{ index: number; axis: "x" | "y"; posMm: number } | null>(null);
   const [snapHits, setSnapHits] = useState<GuideHit[]>([]);
   // [137] Schriftfeld angeklickt → Felder bearbeiten.
@@ -403,6 +405,7 @@ export function LayoutSheetPane({
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement | null;
       if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return;
+      if (isInModalDialog(el)) return; // [249] Dialog über dem Blatt: Entf/Esc gehören ihm
       if (cropId && (e.key === "Escape" || e.key === "Enter")) {
         setCropId(null);
       } else if (e.key === "Escape") {
@@ -1119,6 +1122,7 @@ export function LayoutSheetPane({
           }}
         />
         <button
+          ref={guidesToggleRef}
           className={`nav-add${guidesOpen ? " active" : ""}`}
           data-guides-toggle
           disabled={!canGuides}
@@ -1162,7 +1166,11 @@ export function LayoutSheetPane({
             onMove={(i, posMm) => setGuidesNow(moveGuide(guides, i, posMm), `sheetGuide:${layout.id}:${i}`)}
             onRemove={(i) => setGuidesNow(removeGuide(guides, i))}
             onClear={() => setGuidesNow([])}
-            onClose={() => setGuidesOpen(false)}
+            onClose={() => {
+              setGuidesOpen(false);
+              // [249] Fokus zurück zum Knopf, der das Panel geöffnet hat.
+              requestAnimationFrame(() => guidesToggleRef.current?.focus());
+            }}
           />
         )}
 

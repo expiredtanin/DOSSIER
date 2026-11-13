@@ -4,6 +4,7 @@
 // Esc oder Klick in den Viewport brechen ebenfalls ab). Zustand: `cameraTourDialogState.ts`; Öffner `state/cameraTourDialogHook`.
 
 import { memo, useCallback, useEffect, useMemo, useReducer, useRef } from "react";
+import { useModalFocus } from "./modalFocus";
 import { t } from "../i18n";
 import { getState } from "../state/appStore";
 import { cancelCameraTour, currentTourKeys, getTourSettings, playCameraTour, recordCameraTour, setTourSettings } from "../state/cameraTourActions";
@@ -37,14 +38,10 @@ export const CameraTourDialogHost = memo(function CameraTourDialogHost() {
   }, []);
 
   const close = useCallback(() => dispatch({ type: "close" }), []);
-  useEffect(() => {
-    if (!s.open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && s.phase !== "running") close();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [s.open, s.phase, close]);
+  // [249] Fokus ins erste Feld (Dauer; nach der Aufnahme „Speichern"), Tab-Falle, Esc, Enter = Hauptaktion, Fokus zurück.
+  // Esc während der Fahrt bricht die Fahrt ab (cameraTourPlayer); die Leiste ist kein modaler Dialog.
+  const primaryRef = useRef<() => void>(() => {});
+  const dialogRef = useModalFocus({ onEscape: close, onEnter: () => primaryRef.current() });
 
   if (!s.open) return null;
 
@@ -91,6 +88,12 @@ export const CameraTourDialogHost = memo(function CameraTourDialogHost() {
     }
   };
 
+  primaryRef.current = () => {
+    if (s.phase === "done") void save();
+    else if (canRecord(s)) void record();
+    else if (canStart(s)) void play();
+  };
+
   if (s.phase === "running") {
     return (
       <div
@@ -115,7 +118,7 @@ export const CameraTourDialogHost = memo(function CameraTourDialogHost() {
   const res = resultRef.current;
   return (
     <div className="imp-overlay" data-tour-ui onClick={close}>
-      <div className="imp-dialog render-dialog" role="dialog" aria-modal="true" aria-label={t("tour.title")} data-testid="tour-dialog" onClick={(e) => e.stopPropagation()}>
+      <div ref={dialogRef} className="imp-dialog render-dialog" role="dialog" aria-modal="true" aria-label={t("tour.title")} data-testid="tour-dialog" onClick={(e) => e.stopPropagation()}>
         <header className="imp-head">
           <span className="imp-head-title">{t("tour.title")}</span>
           <button className="imp-close" onClick={close} aria-label={t("export.close")}>
@@ -197,7 +200,7 @@ export const CameraTourDialogHost = memo(function CameraTourDialogHost() {
               <button className="imp-btn" onClick={() => dispatch({ type: "again" })}>
                 {t("tour.again")}
               </button>
-              <button className="imp-btn primary" data-testid="tour-save" onClick={() => void save()}>
+              <button className="imp-btn primary" data-testid="tour-save" data-autofocus onClick={() => void save()}>
                 {t("tour.save")}
               </button>
             </>

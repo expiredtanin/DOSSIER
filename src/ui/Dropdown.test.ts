@@ -31,6 +31,19 @@ describe("Dropdown [244]", () => {
     expect(h).toContain(">G1<");
   });
 
+  it("[249] Gruppen sind benannte role=group (Name = Überschrift), Optionen nicht per Tab erreichbar, Ids für activedescendant", () => {
+    const rows = optionRows([
+      { value: "a", label: "A", group: "G1" }, { value: "b", label: "B", group: "G1" }, { value: "c", label: "C", group: "G2" },
+    ]);
+    const h = renderToStaticMarkup(createElement(DropdownRows, { rows, activeIdx: 2, onHover: () => {}, onSelect: () => {}, idPrefix: "dd-x" }));
+    expect(h.match(/role="group"/g)).toHaveLength(2);
+    expect(h).toContain('aria-labelledby="dd-x-head-0"');
+    expect(h).toContain('id="dd-x-head-0"');
+    expect(h).toContain('id="dd-x-2"'); // Index in der flachen Zeilenliste (Überschrift 0, A 1, B 2 …)
+    expect(h.match(/tabindex="-1"/g)).toHaveLength(3);
+    expect(h).toContain("tb-dd-item is-active");
+  });
+
   it("Icon, Zweitzeile, Tooltip, Kürzel und Häkchen", () => {
     const h = html(optionRows([{ value: "a", label: "A", icon: "view_in_ar", hint: "Erklärung", shortcut: "W" }], "a"));
     expect(h).toContain("material-symbols-outlined tb-dd-icon");

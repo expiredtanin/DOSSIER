@@ -21,6 +21,7 @@ liegen in `src/panels`, Befehle in `src/commands`.
 |---|---|
 | `PromptDialog.tsx`, `UnsavedChangesDialog.tsx`, `RecoverAutosaveDialog.tsx`, `LockConflictDialog.tsx` | Ersatz für `window.prompt/confirm`: Eingabe, ungespeicherte Änderungen, Autosave, gesperrte Datei |
 | `ContextMenu.tsx`, `Dropdown.tsx`, `EditorField.tsx`, `EyeIcon.tsx` | Kontextmenü, Auswahlliste, beschriftetes Feld, Sichtbarkeits-Symbol |
+| `modalFocus.ts` | [249] `useModalFocus`: Fokus-Hülle der Overlay-Dialoge (Fokus beim Öffnen, Tab-Falle, Esc, Enter, Fokus zurück) |
 | `SettingsDialog.tsx`, `AiAccessSection.tsx`, `AiActivityPanel.tsx`, `LayoutMenu.tsx` | Einstellungen, KI-Zugriff und sein Protokoll (`[9]`), Arbeitsumgebungen |
 | `ColorMixer.tsx`, `SpectrumPicker.tsx`, `FreeColorPicker.tsx`, `ColorHexField.tsx`, `ColorSwatchCell.tsx`, `PenColorField.tsx`, `PenSwatchPicker.tsx` | Farbwahl: Mischer, Spektrum, freie Paletten, Stiftfarben |
 | `hatchPreview.tsx`, `MotifEditor.tsx` | Vorschau von Schraffuren und Linienstilen, Editor eines Wiederhol-Motivs |
