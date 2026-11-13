@@ -199,13 +199,13 @@ export const ImageExportDialogHost = memo(function ImageExportDialogHost() {
                   ))}
                 </select>
                 <div style={{ display: "flex", gap: 8, marginTop: 6, alignItems: "center" }}>
-                  <label>
+                  <label className="imp-field-label">
                     {t("render.width")}{" "}
-                    <input className="imp-input" type="number" min={16} style={{ width: 90 }} data-testid="image3d-width" value={dims.width} disabled={busy} onChange={(e) => { setSize("custom"); setDims({ ...dims, width: Number(e.target.value) }); }} />
+                    <input className="imp-input imp-input-flush" type="number" min={16} style={{ width: 90 }} data-testid="image3d-width" value={dims.width} disabled={busy} onChange={(e) => { setSize("custom"); setDims({ ...dims, width: Number(e.target.value) }); }} />
                   </label>
-                  <label>
+                  <label className="imp-field-label">
                     {t("render.height")}{" "}
-                    <input className="imp-input" type="number" min={16} style={{ width: 90 }} data-testid="image3d-height" value={dims.height} disabled={busy} onChange={(e) => { setSize("custom"); setDims({ ...dims, height: Number(e.target.value) }); }} />
+                    <input className="imp-input imp-input-flush" type="number" min={16} style={{ width: 90 }} data-testid="image3d-height" value={dims.height} disabled={busy} onChange={(e) => { setSize("custom"); setDims({ ...dims, height: Number(e.target.value) }); }} />
                   </label>
                 </div>
                 {validDims && effective.clamped && (
@@ -220,9 +220,9 @@ export const ImageExportDialogHost = memo(function ImageExportDialogHost() {
                   {t("image3d.transparent")}
                 </label>
                 {pathtrace && (
-                  <label style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 6 }}>
+                  <label className="imp-field-label" style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 6 }}>
                     {t("image3d.samples")}{" "}
-                    <input className="imp-input" type="number" min={1} max={PT_EXPORT_MAX_SAMPLES} style={{ width: 90 }} data-testid="image3d-samples" value={samples} disabled={busy} onChange={(e) => setSamples(Number(e.target.value))} />
+                    <input className="imp-input imp-input-flush" type="number" min={1} max={PT_EXPORT_MAX_SAMPLES} style={{ width: 90 }} data-testid="image3d-samples" value={samples} disabled={busy} onChange={(e) => setSamples(Number(e.target.value))} />
                   </label>
                 )}
               </section>

@@ -1969,7 +1969,7 @@ export const en: Record<TranslationKey, string> = {
   "cmd.solidtoparts.label": "Convert solid to building parts",
   "cmd.solidtoparts.pick": "Select solid (massing model):",
   "cmd.solidtoparts.noSolid": "No solid here.",
-  "cmd.solidtoparts.done": "{stories} floors ({newFloors} new): created {walls} exterior walls, {ceilings} slabs and a flat roof.",
+  "cmd.solidtoparts.done": "Created: floors {stories} ({newFloors} new) · exterior walls {walls} · slabs {ceilings} · flat roof.",
   "cmd.solidtoparts.reject.none": "No solid selected.",
   "cmd.solidtoparts.reject.tapered": "Vertical solids only: tapered or sloped solids cannot be converted.",
   "cmd.solidtoparts.reject.brep": "Only footprint × height solids (including boxes and cylinders): spheres, cones, tori, revolved and boolean solids cannot be converted.",

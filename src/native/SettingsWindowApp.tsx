@@ -74,7 +74,7 @@ export function SettingsWindowApp() {
           alignItems: "center",
           justifyContent: "center",
           height: "100vh",
-          color: "var(--ink-dim, #8a8a8a)",
+          color: "var(--muted)",
           fontSize: 13,
         }}
       >

@@ -53,7 +53,7 @@ export const ShortcutOverviewDialogHost = memo(function ShortcutOverviewDialogHo
         <div className="imp-body" style={{ maxHeight: "70vh", overflowY: "auto" }}>
           <p className="imp-note">{t("help.shortcuts.intro")}</p>
           <input
-            className="imp-input"
+            className="imp-input imp-input-flush"
             type="search"
             autoFocus
             value={filter}

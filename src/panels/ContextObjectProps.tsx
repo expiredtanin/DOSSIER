@@ -302,7 +302,7 @@ function KindFields({ obj, quantities }: { obj: ContextObject; quantities: reado
         <NumField label={t("site.contourIndexEvery")} value={obj.contourIndexEvery} step={1} min={1} placeholder="5" onChange={patch("contourIndexEvery")} />
         <NumField label={t("site.earthDepth")} value={obj.earthDepth} step={0.5} min={0.1} placeholder="1.5" onChange={patch("earthDepth")} />
         {/* [212] Material der Oberfläche (Bauteil): Farbe und Bildkarten im 3D, Pathtracer und Blender-Paket. */}
-        <label className="site-prop" title={t("site.terrain.material.hint")}>
+        <label className="site-prop site-prop-wide" title={t("site.terrain.material.hint")}>
           <span>{t("site.terrain.material")}</span>
           <select
             data-testid="terrain-material"

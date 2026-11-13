@@ -316,12 +316,13 @@ export function buildWettbewerbSampleProject(): Project {
   };
 
   // Präsentationsplan A1 (Mappe → Präsentationsplan): Grundrisse, Ansichten und Schnitt A-A im gemeinsamen Massstab 1:200.
-  const res = presentationSheetOps(
+  // `planPresentationSheet` fragt das Kern-Dokument ab: das neue Projekt dafür ausdrücklich öffnen (sonst Fehlermeldung in der Konsole).
+  const res = withDocument(p, () => presentationSheetOps(
     p,
     { ...presentationDefaults(p), scale: 200 },
     { sheetName: "Präsentationsplan", masterName: "Planrahmen A1 quer", north: "N", northGroup: "Nordpfeil", scaleBarGroup: "Massstabsbalken" },
     "wb",
-  );
+  ));
   if (!res) throw new Error("Wettbewerb: Präsentationsplan nicht erzeugt");
   return applyOps(p, res.ops);
 }

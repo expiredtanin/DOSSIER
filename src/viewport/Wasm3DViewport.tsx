@@ -1955,7 +1955,7 @@ export function Wasm3DViewport({
                 background: "rgba(44,44,44,0.94)",
                 border: "1px solid #4a4a4a",
                 pointerEvents: "none",
-                fontFamily: "var(--mono, ui-monospace, monospace)",
+                fontFamily: "var(--font-mono)",
                 fontSize: 12,
                 whiteSpace: "nowrap",
                 zIndex: 5,

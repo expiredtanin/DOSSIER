@@ -596,7 +596,7 @@ body {
 .tb-menubar-item.tb-dd-trigger {
   border: none;
   background: none;
-  color: var(--ink-dim, #8a8a8a);
+  color: var(--muted);
   font-weight: 500;
   padding: 3px 6px;
   border-radius: 6px;
@@ -1305,8 +1305,8 @@ body {
   margin-right: 5px;
   padding: 0 4px;
   border-radius: 3px;
-  background: var(--panel-3, var(--panel));
-  color: var(--ink-dim, var(--ink));
+  background: var(--field-bg);
+  color: var(--muted);
   font-family: var(--font-mono);
   font-size: 10px;
   font-weight: 600;
@@ -1465,6 +1465,18 @@ body {
 .level-cat-add:hover {
   background: var(--accent-dim);
   color: var(--ink);
+}
+/* „+"-Knopf mit Beschriftung (Publikation): Breite nach Text statt 20-px-Kreis, nie abgeschnitten. */
+.nav-add.nav-add-text {
+  width: auto;
+  height: auto;
+  min-width: 20px;
+  min-height: 20px;
+  max-width: 100%;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  white-space: nowrap;
 }
 .nav-add .material-symbols-outlined {
   font-size: 15px;
@@ -2487,7 +2499,7 @@ body {
 }
 .plan-svg .plan-hud-text {
   fill: #2a2926;
-  font-family: var(--mono, ui-monospace, monospace);
+  font-family: var(--font-mono);
   font-weight: 600;
 }
 /* Aktives Tab-Feld im HUD: leicht abgesenkte Pille, dunklerer Text. */
@@ -2545,7 +2557,7 @@ body {
 .plan-svg .plan-ruler-text,
 .plan-ruler-overlay .plan-ruler-text {
   fill: #3c3a36;
-  font-family: var(--mono, ui-monospace, monospace);
+  font-family: var(--font-mono);
   font-weight: 500;
 }
 .plan-svg .plan-ruler-cursor,
@@ -2592,7 +2604,7 @@ body {
 }
 .plan-svg .plan-angle-badge-text {
   fill: #e8e8e8;
-  font-family: var(--mono, ui-monospace, monospace);
+  font-family: var(--font-mono);
   font-weight: 600;
 }
 
@@ -2950,7 +2962,7 @@ body {
 .res-wallstyle-head {
   font-size: 12px;
   font-weight: 600;
-  color: var(--text);
+  color: var(--ink);
   padding: 2px 2px 0;
 }
 
@@ -5006,7 +5018,7 @@ body {
 .site-panel .site-props {
   flex: 1 0 100%;
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 4px 8px;
   font-size: 11px;
 }
@@ -5016,12 +5028,21 @@ body {
   justify-content: space-between;
   gap: 4px;
 }
+.site-panel .site-prop-wide {
+  grid-column: 1 / -1;
+}
+/* Auswahlfelder (Glättung, Material) dürfen schmaler werden als ihre längste Option, sonst läuft die Spalte über. */
+.site-panel .site-prop select {
+  min-width: 0;
+  flex: 1 1 0;
+  max-width: 100%;
+}
 .site-panel .site-prop input {
   width: 64px;
 }
 .site-panel .site-qty {
   grid-column: 1 / -1;
-  color: var(--text-dim, inherit);
+  color: var(--muted);
 }
 .site-panel .site-warn {
   color: #d6001c;
@@ -5068,6 +5089,18 @@ body {
   min-height: 0;
   font-size: 12px;
 }
+/* Gelände/Baugrube/Schatten in der Objekt-Info: der Abschnitt wächst mit seinem Inhalt (sonst schrumpft er in der
+   Flex-Spalte auf eine Zeile Höhe und verdeckt die Felder, `.site-panel` ist sonst ein eigener Scroll-Bereich). */
+.objinfo-panel > .objinfo-site {
+  flex: 0 0 auto;
+  height: auto;
+  min-height: auto;
+  overflow: visible;
+  padding: 0;
+}
+.objinfo-panel > .objinfo-site .site-props {
+  flex: 0 0 auto;
+}
 .objinfo-empty {
   color: var(--muted);
   font-size: 12px;
@@ -5110,13 +5143,13 @@ body {
   border: 1px solid var(--border, #444);
   border-radius: 4px;
   background: transparent;
-  color: var(--fg, inherit);
+  color: var(--ink);
   cursor: pointer;
   font-size: 12px;
   line-height: 1;
 }
 .objinfo-typebtn:hover {
-  background: var(--hover, rgba(127, 127, 127, 0.18));
+  background: var(--accent-dim);
 }
 
 /* Mess-Werkzeug: Live-Messwerte im Objekt-Info-Panel. */
@@ -5557,7 +5590,7 @@ body {
   flex: 0 0 auto;
 }
 .attr-color-clear:hover {
-  color: var(--text);
+  color: var(--ink);
   border-color: var(--accent-border);
 }
 
@@ -5783,6 +5816,16 @@ body {
   color: var(--ink);
   margin-left: 22px;
   width: calc(100% - 22px);
+}
+.imp-field-label {
+  font-size: 13px;
+  color: var(--ink);
+}
+/* Suchfeld ohne Checkbox-Einrückung (Kürzel-Übersicht). */
+.imp-input.imp-input-flush {
+  margin-left: 0;
+  width: 100%;
+  box-sizing: border-box;
 }
 /* Freitext-Massstab im PDF-Export-Dialog, direkt unter dem Preset-Dropdown —
    `.imp-input` ist sonst für Checkbox-eingerückte Felder gedacht (22px
@@ -6260,7 +6303,7 @@ body {
   flex: 1;
 }
 .settings-alias-key {
-  font-family: var(--mono, ui-monospace, monospace);
+  font-family: var(--font-mono);
   font-weight: 600;
   min-width: 3ch;
   color: var(--ink);
@@ -6337,7 +6380,7 @@ body {
   color: var(--ink);
 }
 .settings-shortcut-combo {
-  font-family: var(--mono, ui-monospace, monospace);
+  font-family: var(--font-mono);
   font-weight: 600;
   min-width: 8ch;
   text-align: center;
@@ -7989,7 +8032,7 @@ body {
   border: 1px solid var(--border);
   border-radius: 10px;
   box-shadow: var(--shadow-3);
-  color: var(--text);
+  color: var(--ink);
 }
 .busy-spinner {
   width: 18px;
@@ -8016,12 +8059,12 @@ body {
   border-radius: 8px;
   box-shadow: var(--shadow-3);
   font-size: 12px;
-  color: var(--text);
+  color: var(--ink);
 }
 .pick-list-head {
   padding: 4px 8px 6px;
   font-weight: 600;
-  color: var(--text-dim, var(--text));
+  color: var(--muted);
 }
 .pick-list-item {
   display: block;
@@ -8034,8 +8077,8 @@ body {
   color: inherit;
   cursor: pointer;
 }
-.pick-list-item:hover { background: var(--hover, rgba(128, 128, 128, 0.15)); }
-.pick-list-item.is-current { background: var(--accent-soft, rgba(255, 140, 0, 0.22)); font-weight: 600; }
+.pick-list-item:hover { background: var(--accent-dim); }
+.pick-list-item.is-current { background: var(--active-dim); font-weight: 600; }
 .pick-list-hint {
   padding: 6px 8px 2px;
   opacity: 0.65;
