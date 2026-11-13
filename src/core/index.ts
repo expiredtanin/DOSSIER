@@ -270,5 +270,6 @@ export { hiddenClassCodes } from "../plan/toWalls3d";
 export { filter3d } from "../plan/toWalls3d";
 export { ghostFilter3d } from "../plan/toWalls3d";
 export type { Filter3d, Hide3d } from "../plan/toWalls3d";
+export type { PtMaterialEntry } from "../plan/toWalls3d";
 
 export * from "./extra";

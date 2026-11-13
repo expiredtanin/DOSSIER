@@ -124,6 +124,9 @@ interface WebModelRendererLike {
   /** [212] Materialtabelle des Pathtracers (`web::set_pathtrace_materials`): JSON `[{ name, map }]` je Textur-Ebene
    *  (gleiche Reihenfolge wie `set_material_textures`). Optional — ältere WASM-Builds. */
   set_pathtrace_materials?(json: string): void;
+  /** [212] Etappe 4: Normalen- und Rauigkeitskarten des Pathtracers (`web::set_material_detail_textures`), Ebenen wie
+   *  `set_material_textures` (leere Puffer = keine Karten). Optional — ältere WASM-Builds. */
+  set_material_detail_textures?(normal: Uint8Array, rough: Uint8Array, layerCount: number): void;
   /** [212] Samples je `render` (Bild-Export rechnet N auf einmal), Entrauscher an/aus, Pixel je Sample (0 = Standard). */
   set_pathtrace_batch?(n: number): void;
   set_pathtrace_denoise?(on: boolean): void;
@@ -392,6 +395,9 @@ export function useWasm3dRenderer(
         if (!cur || typeof cur.set_material_textures !== "function") return;
         if (decoded) cur.set_material_textures(decoded.data, decoded.count);
         else cur.set_material_textures(new Uint8Array(0), 0); // zurück auf Schachbrett
+        // [212] Normalen-/Rauigkeitskarten des Pathtracers (gleiche Ebenen; leere Puffer = keine).
+        const none = new Uint8Array(0);
+        cur.set_material_detail_textures?.(decoded?.normal ?? none, decoded?.rough ?? none, decoded?.count ?? 0);
       } catch (e) {
         console.warn("render3d set_material_textures fehlgeschlagen:", e);
       }

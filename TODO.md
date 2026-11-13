@@ -348,6 +348,32 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   Normalenkarten, Gelände-Material im Modell (`TerrainMesh` hat kein Material-Feld; render3d nimmt `materialIndex` am
   Gelände schon an), Wiesen-Bildkarte `Grass005` fürs Gelände (heute prozedural), Mipmaps (ferne Karten flimmern nur ohne
   Akkumulation), Innenlicht bei Kamera im Haus, Mond, BVH-Teil-Update, OIDN.
+  **Stand 13.11. (Etappe 4, Oberflächen):** (1) Normalen- und Rauigkeitskarten (`ComponentMaterial.normal`/`.roughness`,
+  OpenGL-Konvention wie `normal.jpg`/`…_NormalGL`): `pathtraceMaterials` gibt sie je Ebene mit (`normal`, `rough`), der
+  Viewer dekodiert sie neben den Farbkarten (`materialTextures.ts`, `web::set_material_detail_textures`), render3d packt sie
+  zu einem zweiten Textur-Array (`render3d/src/pt_texture.rs`: RG = Normale xy, B = Rauigkeit, A = Normale z; group 1
+  binding 3). Tangentenrahmen aus den UV-Ableitungen der planaren Projektion (eindeutig, beide Windungen gleich; Rückseite
+  kippt), Rauigkeit je Texel = Tabelle · Karte / Kartenmittel, Toksvig aus der Länge der gemittelten Normale; eine Ebene mit
+  Detail-Karte bekommt die glänzende Schicht. Der Entrauscher nimmt die gestörte Normale (Vergleich bei 8 Samples: Ziegelkanten
+  scharf, mit der geometrischen verschmiert; Rauschen gleich). (2) Mip-Stufen für beide Arrays (Farbkarten in linearem
+  Licht gemittelt), LOD je Abfrage nach Strahlkegel (Pixelwinkel bzw. Pixelgrösse ortho, nach diffusem Abpraller breit,
+  √cos-Verzerrung); die prozeduralen Texturen blenden feine Frequenzen nach dem Fussabdruck zum Mittel aus. Nebenwirkung
+  gewollt: der Stil „textured“ sampelt die Karten jetzt mit Mip-Stufen (ruhiger in der Ferne). (3) Gelände-Material:
+  `TerrainMesh.componentId` (Rust-Modell, `npm run gen:types`), Objekt-Info des Geländes „Material“ (Bauteil-Auswahl,
+  Standard Wiese), Kern setzt Farbe und `materialIndex` (Farbkarte hinten in `materialMaps`, Gebäude-Ebenen unverändert) →
+  texturierte Ansicht und Pathtracer; Blender-Paket nimmt die Karten des Bauteils statt der Wiese (`terrainRenderMaterial`).
+  Gelände ohne Material: `pathtraceMaterials` hängt die Wiese `Grass005` (Kachel 4 m, `terrain: true`) an; geladen ersetzt sie
+  die prozedurale Wiese (Grundfarbe Wiesengrün, Struktur aus der Karte, dazu die grossen Flecken der prozeduralen Wiese gegen
+  sichtbares Kacheln). (4) Leistung (lavapipe, 800×520, 32 Samples, abwechselnd je zweimal gemessen, Maschine durch
+  Parallel-Build belastet): nah 2.47/2.54 → 2.53/2.54 Samples/s, fern 3.39/3.27 → 3.43/3.32 — unverändert; Bildkarten
+  trotzdem nur bis zum ersten Abpraller (`TEX_BOUNCES`), danach Grundfarbe (= Kartenmittel). Geprüft: `cargo test --release`
+  render3d (auch `--features png` mit lavapipe: Mip-Stufe nach Strahlkegel, Normalenkarte zur Sonne heller, ohne Karte wie
+  flach; Tangenten, LOD, Packung, Materialzuordnung, Gelände-Bildkarte), WGSL nach MSL, `cargo check --features window`,
+  `cargo test` Kern (Gelände-Material im 3D), Kern- und render3d-WASM gebaut (`--no-opt`), tsc, vitest (Tabelle, Rundreise
+  Datei, Objekt-Info-Op mit Undo, Blender-Paket, Viewport, Goldens unverändert), Bilder Musterhaus komplex mit lavapipe.
+  **Offen:** echte GPU und Mac/Metal, im Browser nicht angesehen (Detail-Karten im Viewer nur über den Build geprüft),
+  texturierte Ansicht zeigt für Gelände ohne Material weiter kein Gras, Höhen-/AO-Karten, Anisotropie (Böden sehr flach
+  gesehen leicht unscharf), Innenlicht bei Kamera im Haus, Mond, BVH-Teil-Update, OIDN.
 - ○ **[215]** Cycles eingebaut für Endbilder (nach 1.0): Cycles-Standalone (Apache-2.0, aus dem Blender-Projekt) als mitgeliefertes
   Hilfsprogramm (Sidecar) der Desktop-App, Metal auf Apple Silicon, OIDN-Entrauscher; liest dasselbe renderer-neutrale Szenenformat
   (GLB + Szenen-JSON) wie die Blender-Brücke [211], die als Option bleibt. Build-Kette macOS (C++, Abhängigkeiten) in CI, Herkunft in

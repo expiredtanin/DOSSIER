@@ -194,6 +194,47 @@ fn gelaende_nach_klasse_ausblenden() {
     assert_eq!(emit_context_meshes(&p).len(), 1);
 }
 
+/// [212] Gelände mit Bauteil: Farbe des Bauteils und Textur-Ebene seiner Farbkarte (hinter den Gebäude-Karten, deren
+/// Ebenen bleiben); ohne Bauteil, mit unbekanntem oder ohne Karte: Grundfarbe, keine Ebene.
+#[test]
+fn gelaende_material_aus_bauteil() {
+    let mut p = sample();
+    let before = wall_material_color_maps(&p);
+    let mut comps = p.components.clone();
+    comps.push(serde_json::from_value(serde_json::json!({
+        "id": "rasen", "name": "Rasen", "color": "#4a7a30",
+        "material": { "color": "/assets/materials/Grass005/color.jpg", "sizeM": 4 }
+    })).unwrap());
+    comps.push(serde_json::from_value(serde_json::json!({ "id": "ohne", "name": "Ohne Karte", "color": "#808080" })).unwrap());
+    p.components = comps;
+    let terrain = |comp: Option<&str>| ContextObject::TerrainMesh(TerrainMesh {
+        id: "t".into(),
+        positions: vec![0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 10.0, 10.0, 1.0],
+        indices: vec![0.0, 1.0, 2.0],
+        category_code: "02".into(),
+        component_id: comp.map(str::to_owned),
+        ..Default::default()
+    });
+    let mesh = |p: &Project| emit_context_meshes(p).into_iter().find(|m| m.kind == "terrain").unwrap();
+    p.context = Some(vec![terrain(None)]);
+    assert_eq!(mesh(&p).material_index, None);
+    assert_eq!(wall_material_color_maps(&p), before);
+    p.context = Some(vec![terrain(Some("rasen"))]);
+    let maps = wall_material_color_maps(&p);
+    assert_eq!(&maps[..before.len()], &before[..], "Gebäude-Ebenen unverändert");
+    assert_eq!(maps.last().map(String::as_str), Some("/assets/materials/Grass005/color.jpg"));
+    let m = mesh(&p);
+    assert_eq!(m.material_index, Some(maps.len() as f64));
+    assert!((m.color[1] - 0x7a as f64 / 255.0).abs() < 1e-9, "Farbe des Bauteils: {:?}", m.color);
+    for comp in ["ohne", "gibtsnicht", ""] {
+        p.context = Some(vec![terrain(Some(comp))]);
+        assert_eq!(mesh(&p).material_index, None, "{comp}");
+    }
+    // Rundreise JSON: `componentId`.
+    let js = serde_json::to_value(TerrainMesh { component_id: Some("rasen".into()), ..Default::default() }).unwrap();
+    assert_eq!(js["componentId"], serde_json::json!("rasen"));
+}
+
 /// [T4] Import-Mesh glatt: Knickwinkel geht ans 3D (Vorgabe 30°), kantig ohne; JSON `creaseAngle`.
 #[test]
 fn import_mesh_glatt_mit_knickwinkel() {

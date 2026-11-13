@@ -3965,6 +3965,11 @@ export type TerrainMesh = {
   smooth?: number;
   /** [137] Quelle: Id des Höhenlinien-Satzes (`contourSet`), aus dem das Netz erzeugt wurde. */
   sourceId?: string;
+  /**
+   * [212] Bauteil (Component Manager) als Material der Oberfläche: Farbe und Bildkarten im 3D (texturierte
+   * Ansicht, Pathtracer, Blender-Paket [211]). Fehlt = Gelände-Grundfarbe bzw. Wiese.
+   */
+  componentId?: string;
 };
 
 /** Ein zusammenhängender Textabschnitt mit einheitlicher Formatierung. */

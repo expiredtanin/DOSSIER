@@ -68,8 +68,8 @@ pub struct GpuTri {
 }
 
 /// Texturdaten je Dreieck, 32 Byte, 1:1 zum WGSL-`TriTex`, parallel zu `GpuTri`: UV der Ecken (Meter), `tex` =
-/// Textur-Ebene (Bits 0..16, 0 = keine Bildkarte) + prozedurale Textur (Bits 16..24, `pt_material::PROC_*`), `scale` =
-/// 1 / Kachelgrösse.
+/// Textur-Ebene (Bits 0..16, 0 = keine Bildkarte) + prozedurale Textur (Bits 16..24, `pt_material::PROC_*`) + Detail-
+/// Ebene lesen (Bit 24, Normalen-/Rauigkeitskarte, Etappe 4), `scale` = 1 / Kachelgrösse.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 #[cfg_attr(feature = "render", derive(bytemuck::Pod, bytemuck::Zeroable))]
@@ -87,6 +87,9 @@ impl GpuTriTex {
     }
     pub fn proc(&self) -> u32 {
         (self.tex >> 16) & 0xFF
+    }
+    pub fn detail(&self) -> bool {
+        (self.tex >> 24) & 1 == 1
     }
 }
 
@@ -361,7 +364,7 @@ impl Bvh {
             let (m, color) = table.resolve(t.layer, t.color);
             let tx = table.tex_for(t.layer, &m);
             gpu_tris.push(GpuTri { v0: t.v[0], mat: pack_mat(color, m.kind), e1: sub(t.v[1], t.v[0]), rough: m.rough, e2: sub(t.v[2], t.v[0]), metal: m.metal });
-            gpu_tex.push(GpuTriTex { uv0: t.uv[0], uv1: t.uv[1], uv2: t.uv[2], tex: (tx.layer & 0xFFFF) | ((tx.proc & 0xFF) << 16), scale: tx.scale });
+            gpu_tex.push(GpuTriTex { uv0: t.uv[0], uv1: t.uv[1], uv2: t.uv[2], tex: (tx.layer & 0xFFFF) | ((tx.proc & 0xFF) << 16) | ((tx.detail as u32) << 24), scale: tx.scale });
         }
         Bvh { nodes, tris: gpu_tris, tex: gpu_tex }
     }
@@ -625,8 +628,8 @@ mod tests {
     fn materialtabelle_im_baum() {
         let tri = |x: f32, layer: i32| PtTri { v: [[x, 0.0, 0.0], [x + 1.0, 0.0, 0.0], [x, 1.0, 0.0]], color: [1.0; 3], layer, uv: NO_UV };
         let table = PtMaterialTable::from_entries(&[
-            crate::pt_material::PtMaterialEntry { name: "Trapezblech".into(), map: String::new(), size: None },
-            crate::pt_material::PtMaterialEntry { name: "Backstein".into(), map: String::new(), size: None },
+            crate::pt_material::PtMaterialEntry { name: "Trapezblech".into(), map: String::new(), size: None, ..Default::default() },
+            crate::pt_material::PtMaterialEntry { name: "Backstein".into(), map: String::new(), size: None, ..Default::default() },
         ]);
         let bvh = Bvh::build_with(&[tri(0.0, 1), tri(5.0, 2), tri(10.0, -1)], &table);
         let at = |x: f32| bvh.tris.iter().find(|t| t.v0[0] == x).unwrap();
@@ -675,7 +678,7 @@ mod tests {
         let table = PtMaterialTable::from_entries(&[
             crate::pt_material::PtMaterialEntry::default(),
             crate::pt_material::PtMaterialEntry::default(),
-            crate::pt_material::PtMaterialEntry { name: "Backstein".into(), map: String::new(), size: Some(0.5) },
+            crate::pt_material::PtMaterialEntry { name: "Backstein".into(), map: String::new(), size: Some(0.5), ..Default::default() },
         ]);
         let bvh = Bvh::build_with(&tris, &table);
         assert_eq!(bvh.tex.len(), bvh.tris.len());

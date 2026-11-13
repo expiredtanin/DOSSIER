@@ -128,6 +128,14 @@ pub fn material_color_maps(p: &Project, only_roof: Option<&str>) -> Vec<String> 
                 consider(c);
             }
         }
+        // [212] Gelände mit Bauteil (Material der Oberfläche) — nach allen Gebäudeteilen, deren Ebenen bleiben gleich.
+        for o in p.context.as_deref().unwrap_or(&[]) {
+            if let crate::model::ContextObject::TerrainMesh(m) = o {
+                if let Some(c) = m.component_id.as_deref().filter(|c| !c.is_empty()) {
+                    consider(c);
+                }
+            }
+        }
     }
     list
 }

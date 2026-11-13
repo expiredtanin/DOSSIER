@@ -24,6 +24,7 @@ import type { Camera, ComponentMaterial, LayoutOrientation, LayoutPaperFormat, P
 import { projectLatLon, sunPosition } from "../analysis/sun";
 import { sheetSizeMm } from "../model/layoutModel";
 import { exportGlb } from "./exportMesh";
+import { TERRAIN_GRASS_MATERIAL, terrainComponentMaterial, terrainMeshes } from "../materials/terrainMaterial";
 
 /** Kamera in Modell-Koordinaten (gleiche Form wie `ViewCamera` der 3D-Ansicht, `viewport/cameraBridge.ts`). */
 export interface RenderCamera {
@@ -335,13 +336,16 @@ function extensionOf(url: string): string {
 }
 
 /** Wiese für das Gelände (ambientCG Grass005, im Material-Katalog `public/assets/materials`); Kachel 4 m. */
-export const TERRAIN_MATERIAL: ComponentMaterial = {
-  libraryId: "Grass005",
-  color: "/assets/materials/Grass005/color.jpg",
-  normal: "/assets/materials/Grass005/normal.jpg",
-  roughness: "/assets/materials/Grass005/roughness.jpg",
-  sizeM: 4,
-};
+export const TERRAIN_MATERIAL: ComponentMaterial = TERRAIN_GRASS_MATERIAL;
+
+/** [212] Material des Geländes: Bauteil des ersten Geländes mit Bildkarten (`TerrainMesh.componentId`), sonst die Wiese. */
+export function terrainRenderMaterial(project: Project): ComponentMaterial {
+  for (const t of terrainMeshes(project)) {
+    const m = terrainComponentMaterial(project, t);
+    if (m) return m;
+  }
+  return TERRAIN_MATERIAL;
+}
 
 /** Bauteil-Materialkarten nach glTF-Materialname (erste Komponente gleichen Namens mit Farbkarte gewinnt). */
 function componentMaterials(project: Project): Map<string, ComponentMaterial> {
@@ -361,12 +365,14 @@ export async function buildRenderPackage(project: Project, opts: RenderOptions, 
   const files: RenderPackage["files"] = [{ path: "model.glb", bytes: glb }];
   const materials = glbMaterials(glb);
   const comp = componentMaterials(project);
+  const terrain = terrainRenderMaterial(project);
   const missing: string[] = [];
   const stored = new Map<string, string>();
 
   for (const mat of materials) {
-    // Gelände hat im Modell kein Material: Wiese aus der mitgelieferten Bibliothek (ohne Bildkarten übernimmt der Leser eine Wiesenfarbe).
-    const cm = mat.role === "terrain" ? TERRAIN_MATERIAL : comp.get(mat.component ?? mat.name);
+    // Gelände: Bauteil mit Bildkarten ([212] `TerrainMesh.componentId`), sonst die Wiese aus der mitgelieferten Bibliothek
+    // (ohne Bildkarten übernimmt der Leser eine Wiesenfarbe).
+    const cm = mat.role === "terrain" ? terrain : comp.get(mat.component ?? mat.name);
     if (!cm || mat.glass || !loadTexture) continue;
     const textures: Partial<Record<TextureKind, string>> = {};
     for (const kind of TEXTURE_KINDS) {

@@ -12,11 +12,15 @@
  * `materialIndex` je Wand-Band ableitet (1-basiert; Ebene 0 = Fallback-
  * Schachbrett). So zeigt Band-Index i+1 auf die (i)-te dekodierte Ebene, ohne
  * dass eine explizite Zuordnungstabelle zwischen JS und Rust wandern muss.
+ *
+ * [212] Etappe 4: Die Ebenen folgen {@link pathtraceMaterials} (= {@link wallMaterialColorMaps}, dahinter evtl. die
+ * Wiese des Geländes ohne Material). Dazu je Ebene die Normalen- und Rauigkeitskarte des Bauteils für den Pathtracer
+ * (`set_material_detail_textures`; fehlende bleiben schwarz = keine Karte).
  */
 
 import { netFetch } from "../net/net";
 import type { Project } from "../model/types";
-import { wallMaterialColorMaps } from "../core";
+import { pathtraceMaterials, type PtMaterialEntry } from "../core";
 
 /** Kantenlänge einer Textur-Ebene in Texeln (muss zu render3d `TEXTURE_SIZE`). */
 const TEX_SIZE = 256;
@@ -25,8 +29,12 @@ const TEX_SIZE = 256;
 export interface DecodedMaterialTextures {
   /** `count * TEX_SIZE * TEX_SIZE * 4` Bytes: je Material eine 256×256-RGBA-Ebene. */
   data: Uint8Array;
-  /** Anzahl Material-Ebenen (== `wallMaterialColorMaps(project).length`). */
+  /** Anzahl Material-Ebenen (== `pathtraceMaterials(project).length`). */
   count: number;
+  /** [212] Normalenkarten (gleiches Format wie `data`), null ohne jede Karte. */
+  normal: Uint8Array | null;
+  /** [212] Rauigkeitskarten (gleiches Format wie `data`), null ohne jede Karte. */
+  rough: Uint8Array | null;
   /** Signatur (die URL-Liste), um unveränderte Material-Mengen nicht neu zu dekodieren. */
   signature: string;
 }
@@ -42,7 +50,8 @@ export async function decodeMaterialTextures(
   project: Project,
 ): Promise<DecodedMaterialTextures | null> {
   if (typeof document === "undefined") return null;
-  const urls = wallMaterialColorMaps(project);
+  const entries = pathtraceMaterials(project);
+  const urls = entries.map((e) => e.map);
   if (urls.length === 0) return null;
 
   const canvas = document.createElement("canvas");
@@ -52,21 +61,35 @@ export async function decodeMaterialTextures(
   if (!ctx) return null;
 
   const bytesPerLayer = TEX_SIZE * TEX_SIZE * 4;
-  const data = new Uint8Array(urls.length * bytesPerLayer);
-  for (let i = 0; i < urls.length; i++) {
+  const decodeInto = async (url: string, out: Uint8Array, i: number): Promise<void> => {
     try {
-      const img = await loadImage(urls[i]);
+      const img = await loadImage(url);
       ctx.clearRect(0, 0, TEX_SIZE, TEX_SIZE);
       // Auf 256×256 skalieren (die Ebenen eines Arrays müssen gleich groß sein).
       ctx.drawImage(img, 0, 0, TEX_SIZE, TEX_SIZE);
       const pixels = ctx.getImageData(0, 0, TEX_SIZE, TEX_SIZE);
-      data.set(pixels.data, i * bytesPerLayer);
+      out.set(pixels.data, i * bytesPerLayer);
     } catch {
       // Fehlgeschlagenes Bild: Ebene bleibt schwarz (0) — render3d klemmt bei
       // Bedarf ohnehin auf gültige Ebenen; die übrigen Materialien stimmen.
     }
-  }
-  return { data, count: urls.length, signature: urls.join("") };
+  };
+  const data = new Uint8Array(urls.length * bytesPerLayer);
+  for (let i = 0; i < urls.length; i++) await decodeInto(urls[i], data, i);
+  // [212] Normalen- und Rauigkeitskarten nur, wenn mindestens ein Eintrag sie hat (sonst kein Speicher).
+  const detail = async (pick: (e: PtMaterialEntry) => string | undefined): Promise<Uint8Array | null> => {
+    if (!entries.some((e) => pick(e))) return null;
+    const out = new Uint8Array(urls.length * bytesPerLayer);
+    for (let i = 0; i < entries.length; i++) {
+      const url = pick(entries[i]);
+      if (url) await decodeInto(url, out, i);
+    }
+    return out;
+  };
+  const normal = await detail((e) => e.normal);
+  const rough = await detail((e) => e.rough);
+  const signature = entries.map((e) => `${e.map}|${e.normal ?? ""}|${e.rough ?? ""}`).join("\n");
+  return { data, count: urls.length, signature, normal, rough };
 }
 
 /**

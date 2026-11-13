@@ -40,7 +40,8 @@
 // freie Körper, freie 2D-Geometrie) rechnet der Kern (`src-tauri/core/src/model3d/`);
 // `toWalls3d/` hält nur noch das gemeinsame Vokabular und die Abzugskörper-Netze.
 
-import type { Project, Vec2 } from "../model/types";
+import type { ComponentMaterial, Project, Vec2 } from "../model/types";
+import { TERRAIN_GRASS_MATERIAL, terrainComponentMaterial, terrainMeshes } from "../materials/terrainMaterial";
 import { collectVisibleCodes, flattenCategories } from "../model/types";
 import type { DetailLevel } from "../model/viewTypes";
 import { documentFor } from "../core/document";
@@ -198,19 +199,54 @@ export function wallMaterialColorMaps(project: Project): string[] {
   return maps;
 }
 
+/** Eintrag der Pathtracer-Materialtabelle ({@link pathtraceMaterials}, render3d `PtMaterialEntry`). */
+export interface PtMaterialEntry {
+  name: string;
+  /** Farbkarte. */
+  map: string;
+  /** Kachelgrösse in m (`sizeM`). */
+  size?: number;
+  /** Normalenkarte (OpenGL), Etappe 4. */
+  normal?: string;
+  /** Rauigkeitskarte, Etappe 4. */
+  rough?: string;
+  /** Bildkarte des Geländes ohne eigenes Material (Wiese). */
+  terrain?: true;
+}
+
+function ptEntry(name: string, map: string, mat: ComponentMaterial | undefined): PtMaterialEntry {
+  const size = mat?.sizeM;
+  return {
+    name,
+    map,
+    ...(typeof size === "number" && Number.isFinite(size) && size > 0 ? { size } : {}),
+    ...(mat?.normal ? { normal: mat.normal } : {}),
+    ...(mat?.roughness ? { rough: mat.roughness } : {}),
+  };
+}
+
 /**
  * [212] Materialtabelle des Pathtracers: je Textur-Ebene ({@link wallMaterialColorMaps}, gleiche Reihenfolge) der
  * Baustoff-Name (erstes Bauteil mit dieser Farbkarte), die Farbkarte und die Kachelgrösse in Metern (`sizeM`, nur wenn
  * gesetzt; Etappe 3: Massstab der Bildkarte im Pathtracer). render3d ordnet daraus Rauigkeit, Metall und Glas zu
- * (`render3d/src/pt_material.rs`, wie der Blender-Leser [211]).
+ * (`render3d/src/pt_material.rs`, wie der Blender-Leser [211]). Etappe 4: Normalen- und Rauigkeitskarte des Bauteils;
+ * hat ein Gelände kein Material, hängt hinten die Wiese ({@link TERRAIN_GRASS_MATERIAL}, `terrain: true`) an — die
+ * Textur-Ebenen davor bleiben gleich, die Bildkarten lädt der Viewer in derselben Reihenfolge
+ * (`viewport/materialTextures.ts`).
  */
-export function pathtraceMaterials(project: Project): { name: string; map: string; size?: number }[] {
+export function pathtraceMaterials(project: Project): PtMaterialEntry[] {
   const comps = project.components ?? [];
-  return wallMaterialColorMaps(project).map((map) => {
+  const out = wallMaterialColorMaps(project).map((map) => {
     const comp = comps.find((c) => c.material?.color === map);
-    const size = comp?.material?.sizeM;
-    return { name: comp?.name ?? "", map, ...(typeof size === "number" && Number.isFinite(size) && size > 0 ? { size } : {}) };
+    return ptEntry(comp?.name ?? "", map, comp?.material);
   });
+  if (terrainMeshes(project).some((t) => !terrainComponentMaterial(project, t))) {
+    const grass = TERRAIN_GRASS_MATERIAL;
+    const i = out.findIndex((e) => e.map === grass.color);
+    if (i >= 0) out[i] = { ...out[i], terrain: true };
+    else out.push({ ...ptEntry("Wiese", grass.color!, grass), terrain: true });
+  }
+  return out;
 }
 
 /**

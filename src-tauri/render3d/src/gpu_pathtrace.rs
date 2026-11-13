@@ -14,6 +14,9 @@
 // Texturen (Etappe 3): Texturdaten je Dreieck (`GpuTriTex`) als siebter Puffer neben dem Baum; das Textur-Array der
 // schattierten Ansicht samt Sampler und der Kehrwert der Kartenmittel als eigene Bindungsgruppe (group 1,
 // `set_textures`), damit ein Kartenwechsel die Pfad-Puffer nicht neu bindet.
+//
+// Etappe 4: zweites Textur-Array mit den Detail-Ebenen (Normale/Rauigkeit, `pt_texture.rs`) in derselben Gruppe
+// (binding 3); beide Arrays mit Mip-Stufen, der Shader wählt die Stufe nach Strahlkegel.
 
 use wgpu::util::DeviceExt;
 
@@ -130,6 +133,16 @@ impl PathTracer {
                 },
                 wgpu::BindGroupLayoutEntry { binding: 1, visibility: cs, ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering), count: None },
                 storage_entry(2, true, cs),
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: cs,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2Array,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
             ],
         });
         let display_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -247,10 +260,10 @@ impl PathTracer {
         (n, t, x)
     }
 
-    /// Bildkarten für den Pfad: Textur-Array (D2Array, wie `Renderer::set_material_textures`), Sampler mit Wiederholung
-    /// und je Ebene der Kehrwert der mittleren Kartenfarbe (`PtMaterialTable::inv_means`, Index = Ebene). Die Summe
-    /// beginnt von vorn.
-    pub fn set_textures(&mut self, device: &wgpu::Device, view: &wgpu::TextureView, sampler: &wgpu::Sampler, inv_means: &[[f32; 4]]) {
+    /// Bildkarten für den Pfad: Textur-Array (D2Array, wie `Renderer::set_material_textures`), Detail-Array (Normale/
+    /// Rauigkeit, gleiche Ebenen-Nummern; Etappe 4), Sampler mit Wiederholung und je Ebene der Kehrwert der mittleren
+    /// Kartenfarbe (`PtMaterialTable::inv_means`, Index = Ebene). Die Summe beginnt von vorn.
+    pub fn set_textures(&mut self, device: &wgpu::Device, view: &wgpu::TextureView, detail: &wgpu::TextureView, sampler: &wgpu::Sampler, inv_means: &[[f32; 4]]) {
         let one = [[1.0f32; 4]];
         let inv: &[[f32; 4]] = if inv_means.is_empty() { &one } else { inv_means };
         let buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("pathtrace.layer_inv"), contents: bytemuck::cast_slice(inv), usage: wgpu::BufferUsages::STORAGE });
@@ -261,6 +274,7 @@ impl PathTracer {
                 wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(view) },
                 wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(sampler) },
                 wgpu::BindGroupEntry { binding: 2, resource: buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(detail) },
             ],
         }));
         self.scene_gen = self.scene_gen.wrapping_add(1);

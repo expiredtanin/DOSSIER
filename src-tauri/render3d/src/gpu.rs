@@ -226,7 +226,42 @@ struct AerialBuffers {
 }
 
 /// Kantenlaenge der prozeduralen Test-Textur (Schachbrett), in Texeln.
-const TEXTURE_SIZE: u32 = 256;
+const TEXTURE_SIZE: u32 = crate::pt_texture::TEX_SIZE;
+
+/// [212] Etappe 4: eine Ebene samt Mip-Kette (`pt_texture::mip_chain`) in ein Textur-Array schreiben. `srgb` = in
+/// linearem Licht mitteln (Farbkarten), sonst arithmetisch (Detail-Ebenen). Hat die Textur weniger Stufen, werden nur
+/// diese geschrieben.
+fn write_layer_mips(queue: &wgpu::Queue, texture: &wgpu::Texture, layer: u32, level0: &[u8], srgb: bool) {
+    let size = TEXTURE_SIZE as usize;
+    if level0.len() < size * size * 4 {
+        return;
+    }
+    let chain = crate::pt_texture::mip_chain(level0, size, srgb);
+    let levels = std::iter::once(&level0[..size * size * 4]).chain(chain.iter().map(|v| v.as_slice()));
+    for (mip, data) in levels.enumerate().take(texture.mip_level_count() as usize) {
+        let s = (TEXTURE_SIZE >> mip).max(1);
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo { texture, mip_level: mip as u32, origin: wgpu::Origin3d { x: 0, y: 0, z: layer }, aspect: wgpu::TextureAspect::All },
+            data,
+            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(4 * s), rows_per_image: Some(s) },
+            wgpu::Extent3d { width: s, height: s, depth_or_array_layers: 1 },
+        );
+    }
+}
+
+/// [212] Etappe 4: Textur-Array der Detail-Ebenen (RGBA8 linear, Mip-Stufen bis 1 × 1); `size` 1 = Platzhalter.
+fn detail_texture(device: &wgpu::Device, size: u32, layers: u32) -> wgpu::Texture {
+    device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("pathtrace.detail_array"),
+        size: wgpu::Extent3d { width: size, height: size, depth_or_array_layers: layers.max(1) },
+        mip_level_count: crate::pt_texture::mip_count(size),
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    })
+}
 
 /// Erzeugt ein 256x256-RGBA-Schachbrett IM CODE (kein Asset, keine `image`-Crate):
 /// 8x8 Felder abwechselnd hell/dunkel, mit einem duennen Raster als Kachel-Grenze.
@@ -579,6 +614,8 @@ pub struct Renderer {
     pt_denoise: bool,
     pt_night: bool,
     pt_max_pixels: u64,
+    /// [212] Etappe 4: Detail-Ebenen (Normale/Rauigkeit) parallel zum Material-Array; None = keine (Platzhalter).
+    pt_detail: Option<wgpu::Texture>,
 }
 
 /// [180]/[214] GPU-Puffer eines Klumpens der Geisterschicht (Formate wie `set_ghost`).
@@ -1278,7 +1315,9 @@ impl Renderer {
             address_mode_w: wgpu::AddressMode::Repeat,
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+            // [212] Etappe 4: Mip-Stufen der Material-Karten (Pathtracer wählt die Stufe nach Strahlkegel, die
+            // texturierte Ansicht nach den Bildschirm-Ableitungen).
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
             ..Default::default()
         });
         let texture_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -1489,6 +1528,7 @@ impl Renderer {
             pt_denoise: true,
             pt_night: false,
             pt_max_pixels: crate::pathtrace::MAX_PIXELS,
+            pt_detail: None,
         }
     }
 
@@ -2090,7 +2130,8 @@ impl Renderer {
                 height: TEXTURE_SIZE,
                 depth_or_array_layers: total_layers,
             },
-            mip_level_count: 1,
+            // [212] Etappe 4: mit Mip-Stufen (ferne Karten flimmern/rauschen sonst).
+            mip_level_count: crate::pt_texture::mip_count(TEXTURE_SIZE),
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba8UnormSrgb,
@@ -2100,35 +2141,10 @@ impl Renderer {
 
         // Ebene 0: Schachbrett-Fallback.
         let checker = build_checker_texture();
-        let write_layer = |layer: u32, data: &[u8]| {
-            queue.write_texture(
-                wgpu::TexelCopyTextureInfo {
-                    texture: &texture,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d {
-                        x: 0,
-                        y: 0,
-                        z: layer,
-                    },
-                    aspect: wgpu::TextureAspect::All,
-                },
-                data,
-                wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(4 * TEXTURE_SIZE),
-                    rows_per_image: Some(TEXTURE_SIZE),
-                },
-                wgpu::Extent3d {
-                    width: TEXTURE_SIZE,
-                    height: TEXTURE_SIZE,
-                    depth_or_array_layers: 1,
-                },
-            );
-        };
-        write_layer(0, &checker);
+        write_layer_mips(queue, &texture, 0, &checker, true);
         for i in 0..material_layers {
             let start = i as usize * bytes_per_layer;
-            write_layer(i + 1, &rgba[start..start + bytes_per_layer]);
+            write_layer_mips(queue, &texture, i + 1, &rgba[start..start + bytes_per_layer], true);
         }
         // [212] Pathtracer: mittlere Farbe je Bildkarte (Kartenmittel für Grundfarbe und Texel / Mittel); Baum und
         // Textur-Bindung neu (`render_pathtrace`).
@@ -2737,7 +2753,17 @@ impl Renderer {
             pt.set_bvh(device, &crate::bvh::Bvh::build_with(&tris, &self.pt_materials));
             // [212] Etappe 3: dasselbe Textur-Array wie der Stil „textured“ (Ebene = Material-Ebene).
             let view = self.texture.create_view(&wgpu::TextureViewDescriptor { dimension: Some(wgpu::TextureViewDimension::D2Array), ..Default::default() });
-            pt.set_textures(device, &view, &self.texture_sampler, &self.pt_materials.inv_means());
+            // Etappe 4: Detail-Ebenen; ohne Karten ein leerer Platzhalter (der Shader liest ihn nicht, `GpuTriTex` Bit 24).
+            let placeholder;
+            let detail = match &self.pt_detail {
+                Some(t) => t,
+                None => {
+                    placeholder = detail_texture(device, 1, 1);
+                    &placeholder
+                }
+            };
+            let dview = detail.create_view(&wgpu::TextureViewDescriptor { dimension: Some(wgpu::TextureViewDimension::D2Array), ..Default::default() });
+            pt.set_textures(device, &view, &dview, &self.texture_sampler, &self.pt_materials.inv_means());
             self.pt_dirty = false;
         }
         pt.denoise = self.pt_denoise;
@@ -2764,6 +2790,30 @@ impl Renderer {
         let means = std::mem::take(&mut self.pt_materials);
         self.pt_materials = crate::pt_material::PtMaterialTable::from_entries(entries).with_means_of(means);
         self.pt_dirty = true;
+    }
+
+    /// [212] Etappe 4: Normalen- und Rauigkeitskarten des Pathtracers, Ebenen in derselben Reihenfolge wie
+    /// `set_material_textures` (je `TEXTURE_SIZE²` RGBA8, dicht gepackt; schwarze/fehlende Ebene = keine Karte). Packt
+    /// sie zu Detail-Ebenen (`pt_texture::pack_detail`) samt Mip-Stufen; zu kurze Puffer zählen als fehlend. Baum und
+    /// Bindung neu (die Tabelle macht Ebenen mit Karte glänzend).
+    pub fn set_material_detail_textures(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, normal: &[u8], rough: &[u8], layer_count: u32) {
+        let px = (TEXTURE_SIZE * TEXTURE_SIZE) as usize;
+        let bpl = px * 4;
+        let layer = |buf: &'_ [u8], i: usize| -> Option<Vec<u8>> { buf.get(i * bpl..(i + 1) * bpl).map(|s| s.to_vec()) };
+        let layers: Vec<crate::pt_texture::DetailLayer> =
+            (0..layer_count.min(4096) as usize).map(|i| crate::pt_texture::pack_detail(layer(normal, i).as_deref(), layer(rough, i).as_deref(), px)).collect();
+        self.pt_materials.set_detail(&layers);
+        self.pt_dirty = true;
+        if !layers.iter().any(|d| d.present) {
+            self.pt_detail = None;
+            return;
+        }
+        let texture = detail_texture(device, TEXTURE_SIZE, layers.len() as u32 + 1);
+        write_layer_mips(queue, &texture, 0, &crate::pt_texture::NEUTRAL_DETAIL.repeat(px), false);
+        for (i, d) in layers.iter().enumerate() {
+            write_layer_mips(queue, &texture, i as u32 + 1, &d.rgba, false);
+        }
+        self.pt_detail = Some(texture);
     }
 
     /// [212] Entrauscher in der Anzeige an/aus (Standard an; blendet mit wachsender Sample-Zahl aus, am Ziel aus).
@@ -3053,7 +3103,7 @@ mod shadow_gpu_tests {
         let cam = Camera { eye: [20.0, 15.0, 20.0], target: [4.0, 2.0, 3.0], ..Camera::default() };
         r.set_render_style(RenderStyle::Pathtrace);
         r.upload_walls(&device, &walls());
-        r.set_pathtrace_materials(&[crate::pt_material::PtMaterialEntry { name: "Trapezblech".into(), map: String::new(), size: None }]);
+        r.set_pathtrace_materials(&[crate::pt_material::PtMaterialEntry { name: "Trapezblech".into(), map: String::new(), size: None, ..Default::default() }]);
         r.set_material_textures(&device, &queue, &[], 0);
         r.set_pathtrace_batch(2);
         r.render(&device, &queue, &view, &cam, (32, 24));
@@ -3156,7 +3206,7 @@ mod shadow_gpu_tests {
         let diffs: Vec<i32> = (10..40).map(|x| (g(x) - g(x + 4)).abs()).collect();
         assert!(diffs.iter().filter(|d| **d > 60).count() > 10, "{diffs:?}");
         // Kachel 2 m (Tabelle): Periode 16 px.
-        r.set_pathtrace_materials(&[crate::pt_material::PtMaterialEntry { name: String::new(), map: String::new(), size: Some(2.0) }]);
+        r.set_pathtrace_materials(&[crate::pt_material::PtMaterialEntry { name: String::new(), map: String::new(), size: Some(2.0), ..Default::default() }]);
         let wide = pathtrace_pixels(&mut r, &device, &queue, &cam, w, h);
         let g2 = |x: usize| wide[(y * w as usize + x) * 4 + 1] as i32;
         assert!((10..40).filter(|&x| (g2(x) - g2(x + 8)).abs() > 60).count() > 10, "Kachel 2 m");
@@ -3171,5 +3221,74 @@ mod shadow_gpu_tests {
         }
         assert!(sum[1] > sum[0] && sum[1] > sum[2], "grün: {sum:?}");
         assert!(row_contrast(&grass) > 15.0, "prozedurale Struktur: {}", row_contrast(&grass));
+    }
+
+    /// [212] Etappe 4: (1) Mip-Stufe nach Strahlkegel — eine Karte mit Streifen von 1 Texel Breite (viel feiner als ein
+    /// Pixel) gibt schon mit einem Sample eine gleichmässige Fläche statt Zufallsmuster; (2) Normalenkarte — zur Sonne
+    /// geneigt (nach der CPU-Referenz `pt_texture::perturb`) heller als von ihr weg; ohne Detail-Karte wie flach.
+    #[test]
+    fn pathtracer_mips_und_normalenkarte() {
+        let Some((device, queue)) = device() else {
+            eprintln!("kein GPU-Adapter: Test übersprungen");
+            return;
+        };
+        use crate::types::{MeshInput, MeshKind};
+        let format = wgpu::TextureFormat::Rgba8UnormSrgb;
+        let (w, h) = (64u32, 48u32);
+        let plate = MeshInput {
+            positions: vec![0.0, -4.0, 0.0, 8.0, -4.0, 0.0, 8.0, 4.0, 0.0, 0.0, 4.0, 0.0],
+            indices: vec![0, 1, 2, 0, 2, 3],
+            kind: MeshKind::Imported,
+            color: Some([1.0, 1.0, 1.0]),
+            material_index: Some(1),
+            vertex_colors: Vec::new(),
+            crease_angle: None,
+        };
+        let cam = Camera { eye: [4.0, 20.0, 0.01], target: [4.0, 0.0, 0.0], up: [0.0, 0.0, -1.0], projection: crate::types::Projection::Orthographic, ortho_half_height: 3.0, ..Camera::default() };
+        let size = super::TEXTURE_SIZE as usize;
+        let px = size * size;
+        let mut fine = vec![255u8; px * 4];
+        for i in 0..px {
+            let v = if i % 2 == 0 { 230 } else { 25 };
+            fine[i * 4..i * 4 + 3].copy_from_slice(&[v, v, v]);
+        }
+        let mut r = Renderer::new(&device, format);
+        r.set_render_style(RenderStyle::Pathtrace);
+        r.set_pathtrace_denoise(false);
+        let sun = crate::shadow::sun_dir_world(180.0, 35.0).unwrap();
+        r.set_sun(Some(sun), true);
+        r.upload_model(&device, &[], &[], &[plate]);
+        r.set_material_textures(&device, &queue, &fine, 1);
+        r.set_pathtrace_batch(1);
+        let one = pathtrace_pixels(&mut r, &device, &queue, &cam, w, h);
+        let y = h as usize / 2;
+        let lum: Vec<f32> = (8..w as usize - 8).map(|x| one[(y * w as usize + x) * 4 + 1] as f32).collect();
+        let (lo, hi) = (lum.iter().cloned().fold(255.0f32, f32::min), lum.iter().cloned().fold(0.0f32, f32::max));
+        assert!(hi - lo < 40.0, "1 Sample, feine Streifen gemittelt: {lo}..{hi}");
+        assert!(lo > 40.0, "Mittel, nicht schwarz: {lo}");
+
+        // Normalenkarte: konstante Neigung (Tangentenraum) einmal +y, einmal −y; die Platte (Deckel) hat T = +X,
+        // B↑ = −Z, N = +Y (`pt_texture::uv_tangent_frame`).
+        let gray = [150u8, 150, 150, 255].repeat(px);
+        r.set_material_textures(&device, &queue, &gray, 1);
+        let mean_green = |p: &[u8]| p.chunks_exact(4).map(|c| c[1] as f64).sum::<f64>() / (p.len() / 4) as f64;
+        r.set_pathtrace_batch(8);
+        let flat = mean_green(&pathtrace_pixels(&mut r, &device, &queue, &cam, w, h));
+        let frame = ([1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]);
+        let mut shade = Vec::new();
+        for gy in [210u8, 45] {
+            let nmap = [128u8, gy, 200, 255].repeat(px);
+            let rough = [230u8, 230, 230, 255].repeat(px);
+            r.set_material_detail_textures(&device, &queue, &nmap, &rough, 1);
+            let tn = [0.0, gy as f32 / 127.5 - 1.0, 200.0 / 127.5 - 1.0];
+            let wn = crate::pt_texture::perturb(frame, tn, [0.0, 1.0, 0.0]).unwrap();
+            shade.push((wn[0] * sun[0] + wn[1] * sun[1] + wn[2] * sun[2], mean_green(&pathtrace_pixels(&mut r, &device, &queue, &cam, w, h))));
+        }
+        let (toward, away) = if shade[0].0 > shade[1].0 { (shade[0].1, shade[1].1) } else { (shade[1].1, shade[0].1) };
+        assert!(toward > away + 8.0, "zur Sonne geneigt heller: {shade:?}, flach {flat}");
+        // Keine Detail-Karte (schwarze Ebenen): wieder flach.
+        r.set_material_detail_textures(&device, &queue, &[], &[], 1);
+        let back = mean_green(&pathtrace_pixels(&mut r, &device, &queue, &cam, w, h));
+        assert!((back - flat).abs() < 6.0, "ohne Karte wie flach: {back} / {flat}");
     }
 }

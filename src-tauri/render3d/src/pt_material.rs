@@ -17,6 +17,12 @@
 // prozedurale Ersatz-Textur gilt, wenn keine Karte da ist (Wiese, Kies, Asphalt: `PROC_*`). Gelände ohne Material
 // (`TERRAIN_LAYER`, gesetzt von `mesh::mesh_layer`) bekommt die Wiese wie im Blender-Leser [211]. Baustoffe mit
 // „Leuchte“/„Lampe“ im Namen leuchten (`MAT_EMISSIVE`, warmes Licht; sichtbar vor allem bei Nacht).
+//
+// Etappe 4: Normalen- und Rauigkeitskarten je Eintrag (`normal`, `rough`; Detail-Ebene `pt_texture.rs`). Eine Ebene
+// mit geladener Detail-Karte bekommt die glänzende Schicht auch bei hoher Rauigkeit (die Karte gibt der Fläche erst
+// ihr Glanzbild; Rauigkeit je Texel = Tabelle · Karte / Kartenmittel), `PtTex::detail` sagt dem Shader, ob er die
+// Detail-Ebene liest. Ein Eintrag mit `terrain: true` (die Wiese `Grass005`, von `pathtraceMaterials` angehängt) ist
+// die Bildkarte des Geländes ohne Material: ist sie geladen, ersetzt sie die prozedurale Wiese.
 
 use serde::Deserialize;
 
@@ -116,6 +122,15 @@ pub struct PtMaterialEntry {
     /// Kantenlänge einer Bildkarten-Kachel in Metern (`ComponentMaterial.sizeM`; fehlt = 1 m).
     #[serde(default)]
     pub size: Option<f32>,
+    /// Normalenkarte (OpenGL, `ComponentMaterial.normal`; Etappe 4), leer = keine.
+    #[serde(default)]
+    pub normal: String,
+    /// Rauigkeitskarte (`ComponentMaterial.roughness`), leer = keine.
+    #[serde(default)]
+    pub rough: String,
+    /// Bildkarte des Geländes ohne eigenes Material (Wiese, s. Moduldoc).
+    #[serde(default)]
+    pub terrain: bool,
 }
 
 /// Tabelle Material-Ebene (1-basiert) → Look.
@@ -126,6 +141,12 @@ pub struct PtMaterialTable {
     sizes: Vec<f32>,
     /// Mittlere Farbe der Bildkarte je Ebene (sRGB), aus `set_material_textures`.
     means: Vec<Option<[f32; 3]>>,
+    /// Detail-Karte (Normale/Rauigkeit) geladen je Ebene (Etappe 4, `set_detail`).
+    detail: Vec<bool>,
+    /// Mittlere Rauigkeit der Rauigkeitskarte je Ebene.
+    rough_means: Vec<Option<f32>>,
+    /// Eintrag (0-basiert) der Gelände-Bildkarte.
+    terrain: Option<usize>,
 }
 
 /// Texturzugriff eines Dreiecks (s. `PtMaterialTable::tex_for`).
@@ -137,10 +158,12 @@ pub struct PtTex {
     pub proc: u32,
     /// UV-Massstab (1 / Kachelgrösse in m).
     pub scale: f32,
+    /// Detail-Ebene (Normale/Rauigkeit) lesen (Etappe 4).
+    pub detail: bool,
 }
 
 impl PtTex {
-    pub const NONE: PtTex = PtTex { layer: 0, proc: PROC_NONE, scale: 1.0 };
+    pub const NONE: PtTex = PtTex { layer: 0, proc: PROC_NONE, scale: 1.0, detail: false };
 }
 
 impl PtMaterialTable {
@@ -148,17 +171,32 @@ impl PtMaterialTable {
     pub fn from_entries(entries: &[PtMaterialEntry]) -> Self {
         let mut t = Self::from_names(entries.iter().map(|e| (e.name.as_str(), e.map.as_str())));
         t.sizes = entries.iter().map(|e| e.size.filter(|s| s.is_finite() && *s >= 0.01 && *s <= 1000.0).unwrap_or(1.0)).collect();
+        t.terrain = entries.iter().position(|e| e.terrain);
         t
     }
 
     pub fn from_names<'a>(entries: impl IntoIterator<Item = (&'a str, &'a str)>) -> Self {
-        PtMaterialTable { looks: entries.into_iter().map(|(n, m)| look_for(n, m)).collect(), sizes: Vec::new(), means: Vec::new() }
+        PtMaterialTable { looks: entries.into_iter().map(|(n, m)| look_for(n, m)).collect(), ..Default::default() }
     }
 
-    /// Übernimmt die mittleren Bildkarten-Farben einer anderen Tabelle (neue Namen, gleiche Bilder).
+    /// Übernimmt die mittleren Bildkarten-Farben und Detail-Angaben einer anderen Tabelle (neue Namen, gleiche Bilder).
     pub fn with_means_of(mut self, other: PtMaterialTable) -> Self {
         self.means = other.means;
+        self.detail = other.detail;
+        self.rough_means = other.rough_means;
         self
+    }
+
+    /// Detail-Karten je Ebene (Etappe 4): geladen ja/nein und mittlere Rauigkeit (aus `pt_texture::pack_detail`).
+    pub fn set_detail(&mut self, layers: &[crate::pt_texture::DetailLayer]) {
+        self.detail = layers.iter().map(|d| d.present).collect();
+        self.rough_means = layers.iter().map(|d| d.rough_mean).collect();
+    }
+
+    /// Material-Ebene der Gelände-Bildkarte, wenn sie geladen ist (sonst bleibt die prozedurale Wiese).
+    pub fn terrain_layer(&self) -> Option<i32> {
+        let i = self.terrain?;
+        self.means.get(i).copied().flatten().map(|_| i as i32 + 1)
     }
 
     pub fn is_empty(&self) -> bool {
@@ -175,7 +213,17 @@ impl PtMaterialTable {
     pub fn resolve(&self, layer: i32, color: [f32; 3]) -> (PtMaterial, [f32; 3]) {
         let base = classify_color(color);
         if layer == TERRAIN_LAYER {
-            return (PtMaterial::GRASS, GRASS_SRGB);
+            // Wiese: mit geladener Bildkarte deren Ebene (Look der Wiese, Farbe = Kartenmittel), sonst prozedural.
+            return match self.terrain_layer() {
+                // Grundfarbe bleibt das Wiesengrün (die Karte gibt die Struktur: Texel / Kartenmittel), damit die Wiese mit
+                // und ohne Bildkarten gleich satt wirkt.
+                Some(l) => {
+                    let (m, _) = self.resolve(l, crate::types::MeshKind::Terrain.default_color());
+                    let m = if self.looks.get(l as usize - 1).copied().flatten().is_some() { m } else { PtMaterial { color: None, ..PtMaterial::GRASS } };
+                    (m, GRASS_SRGB)
+                }
+                None => (PtMaterial::GRASS, GRASS_SRGB),
+            };
         }
         if layer < 1 {
             return (base, color);
@@ -190,6 +238,10 @@ impl PtMaterialTable {
         };
         if base.kind == MAT_GLASS {
             m = base;
+        }
+        // Detail-Karte geladen: glänzende Schicht auch bei hoher Rauigkeit (Rauigkeit je Texel aus der Karte).
+        if m.kind == MAT_DIFFUSE && self.detail.get(i).copied().unwrap_or(false) {
+            m.kind = MAT_GLOSSY;
         }
         // Ungesetzt: weiss (Bauteil ohne Farbe) oder die Grundfarbe des Geländes (Kern `TERRAIN_RGB`), damit Gelände mit
         // Material dessen Farbe bekommt.
@@ -206,28 +258,37 @@ impl PtMaterialTable {
         if m.kind == MAT_GLASS || m.kind == MAT_EMISSIVE {
             return PtTex::NONE;
         }
+        let layer = if layer == TERRAIN_LAYER { self.terrain_layer().unwrap_or(layer) } else { layer };
         if layer >= 1 {
             let i = (layer - 1) as usize;
             let scale = 1.0 / self.sizes.get(i).copied().unwrap_or(1.0);
             if self.means.get(i).copied().flatten().is_some() {
-                return PtTex { layer: layer as u32, proc: PROC_NONE, scale };
+                let detail = self.detail.get(i).copied().unwrap_or(false);
+                // Wiese mit Bildkarte: dazu die grossen Flecken der prozeduralen Wiese (die Karte kachelt alle paar Meter).
+                let proc = if m.proc == PROC_GRASS { PROC_GRASS } else { PROC_NONE };
+                return PtTex { layer: layer as u32, proc, scale, detail };
             }
-            return PtTex { layer: 0, proc: m.proc, scale };
+            return PtTex { layer: 0, proc: m.proc, scale, detail: false };
         }
-        PtTex { layer: 0, proc: m.proc, scale: 1.0 }
+        PtTex { layer: 0, proc: m.proc, scale: 1.0, detail: false }
     }
 
     /// Kehrwert der mittleren Bildkarten-Farbe je Textur-Ebene (linear; Index = Ebene, 0 und fehlende = 1). Der Shader
     /// rechnet Albedo = Grundfarbe · Texel / Mittel: ungesetzte Bauteile (Grundfarbe = Mittel) zeigen die Karte, gesetzte
-    /// Farben behalten ihren Ton und bekommen die Struktur der Karte.
+    /// Farben behalten ihren Ton und bekommen die Struktur der Karte. `w` = Kehrwert der mittleren Rauigkeit der
+    /// Rauigkeitskarte (Etappe 4; Rauigkeit je Texel = Tabelle · Karte / Mittel), ohne Karte 1.
     pub fn inv_means(&self) -> Vec<[f32; 4]> {
+        let n = self.means.len().max(self.rough_means.len());
         std::iter::once([1.0; 4])
-            .chain(self.means.iter().map(|m| match m {
-                Some(c) => {
-                    let l = c.map(|v| srgb_to_linear(v).max(0.02));
-                    [1.0 / l[0], 1.0 / l[1], 1.0 / l[2], 1.0]
+            .chain((0..n).map(|i| {
+                let w = self.rough_means.get(i).copied().flatten().map_or(1.0, |r| 1.0 / r.max(0.02));
+                match self.means.get(i).copied().flatten() {
+                    Some(c) => {
+                        let l = c.map(|v| srgb_to_linear(v).max(0.02));
+                        [1.0 / l[0], 1.0 / l[1], 1.0 / l[2], w]
+                    }
+                    None => [1.0, 1.0, 1.0, w],
                 }
-                None => [1.0; 4],
             }))
             .collect()
     }
@@ -382,12 +443,12 @@ mod tests {
         let white = [1.0; 3];
         // Ohne geladene Karten: keine Bildkarte; Kies und Asphalt prozedural, Backstein ohne.
         let tex = |t: &PtMaterialTable, l: i32| t.tex_for(l, &t.resolve(l, white).0);
-        assert_eq!(tex(&t, 1), PtTex { layer: 0, proc: PROC_NONE, scale: 2.0 });
+        assert_eq!(tex(&t, 1), PtTex { layer: 0, proc: PROC_NONE, scale: 2.0, detail: false });
         assert_eq!(tex(&t, 2).proc, PROC_GRAVEL);
         assert_eq!(tex(&t, 3).proc, PROC_ASPHALT);
         assert_eq!(t.resolve(3, white).1, [0.20, 0.20, 0.21]);
         // Kachelgrösse ungültig (≤ 0) → 1 m.
-        assert_eq!(tex(&t, 5), PtTex { layer: 0, proc: PROC_GRASS, scale: 1.0 });
+        assert_eq!(tex(&t, 5), PtTex { layer: 0, proc: PROC_GRASS, scale: 1.0, detail: false });
         // Leuchte: strahlt, ohne Textur.
         let (lamp, c) = t.resolve(4, white);
         assert_eq!(lamp.kind, MAT_EMISSIVE);
@@ -397,8 +458,8 @@ mod tests {
         let px = |c: u8| [c, c, c, 255].repeat(4);
         let rgba = [px(180), px(120), px(0), px(0), px(0)].concat();
         t.set_texture_means(&rgba, 16, 5);
-        assert_eq!(tex(&t, 1), PtTex { layer: 1, proc: PROC_NONE, scale: 2.0 });
-        assert_eq!(tex(&t, 2), PtTex { layer: 2, proc: PROC_NONE, scale: 1.0 });
+        assert_eq!(tex(&t, 1), PtTex { layer: 1, proc: PROC_NONE, scale: 2.0, detail: false });
+        assert_eq!(tex(&t, 2), PtTex { layer: 2, proc: PROC_NONE, scale: 1.0, detail: false });
         assert_eq!(tex(&t, 3).layer, 0, "schwarze Ebene = nicht geladen");
         // Gelände mit Material (Grundfarbe des Geländes gilt als ungesetzt): Farbe des Looks.
         assert_eq!(t.resolve(3, crate::types::MeshKind::Terrain.default_color()).1, [0.20, 0.20, 0.21]);
@@ -418,5 +479,46 @@ mod tests {
         assert_eq!(look_for("", "/assets/materials/Grass005/color.jpg").unwrap().proc, PROC_GRASS);
         assert_eq!(look_for("", "/assets/materials/Gravel043/color.jpg").unwrap().proc, PROC_GRAVEL);
         assert_eq!(look_for("Bitumenbahn", "").unwrap().proc, PROC_NONE, "Abdichtung ist kein Asphalt");
+    }
+    /// [212] Etappe 4: Detail-Karten machen die Ebene glänzend und lassen den Shader die Detail-Ebene lesen; mittlere
+    /// Rauigkeit als Kehrwert in `inv_means().w`; die Gelände-Bildkarte ersetzt die prozedurale Wiese, sobald sie geladen
+    /// ist.
+    #[test]
+    fn detailkarten_und_gelaende_bildkarte() {
+        let mut t = PtMaterialTable::from_json(
+            r#"[{"name":"Beton","map":"/a/Concrete048/color.jpg","normal":"/a/Concrete048/normal.jpg","rough":"/a/Concrete048/roughness.jpg"},
+                {"name":"Putz","map":"/a/Plaster001/color.jpg"},
+                {"name":"Wiese","map":"/a/Grass005/color.jpg","size":4,"terrain":true}]"#,
+        );
+        let white = [1.0; 3];
+        let terrain = crate::types::MeshKind::Terrain.default_color();
+        // Ohne geladene Karten: Gelände prozedural, Beton diffus.
+        assert_eq!(t.terrain_layer(), None);
+        assert_eq!(t.resolve(TERRAIN_LAYER, terrain), (PtMaterial::GRASS, GRASS_SRGB));
+        assert_eq!(t.tex_for(TERRAIN_LAYER, &PtMaterial::GRASS).proc, PROC_GRASS);
+        assert_eq!(t.resolve(1, white).0.kind, MAT_DIFFUSE);
+        // Farbkarten geladen (Wiese grün), Detail nur für Beton (Rauigkeit im Mittel 0.5).
+        let px = |c: [u8; 3]| [c[0], c[1], c[2], 255].repeat(4);
+        t.set_texture_means(&[px([128, 128, 128]), px([230, 230, 225]), px([60, 110, 30])].concat(), 16, 3);
+        let none = crate::pt_texture::DetailLayer { rgba: Vec::new(), present: false, rough_mean: None };
+        let beton = crate::pt_texture::DetailLayer { rgba: Vec::new(), present: true, rough_mean: Some(0.5) };
+        t.set_detail(&[beton, none.clone(), none]);
+        let (m, _) = t.resolve(1, white);
+        assert_eq!((m.kind, m.rough), (MAT_GLOSSY, 0.85), "Detail-Karte: glänzend, Rauigkeit der Tabelle als Mittel");
+        assert!(t.tex_for(1, &m).detail);
+        assert!(!t.tex_for(2, &t.resolve(2, white).0).detail);
+        let inv = t.inv_means();
+        assert_eq!((inv[1][3], inv[2][3]), (2.0, 1.0));
+        // Gelände ohne Material: Bildkarte der Wiese (Ebene 3, Kachel 4 m).
+        assert_eq!(t.terrain_layer(), Some(3));
+        let (g, c) = t.resolve(TERRAIN_LAYER, terrain);
+        assert_eq!(g.proc, PROC_GRASS);
+        assert_eq!(c, GRASS_SRGB, "Wiesengrün, Struktur aus der Karte");
+        let tx = t.tex_for(TERRAIN_LAYER, &g);
+        assert_eq!((tx.layer, tx.proc, tx.scale), (3, PROC_GRASS, 0.25), "Karte + grosse Flecken");
+        // Bildkarten-Tabelle mit neuen Namen behält Mittel und Detail.
+        let u = PtMaterialTable::from_json(r#"[{"name":"Beton"},{"name":"Putz"},{"name":"Wiese","terrain":true}]"#).with_means_of(t);
+        assert!(u.tex_for(1, &u.resolve(1, white).0).detail);
+        assert_eq!(u.terrain_layer(), Some(3));
     }
 }
