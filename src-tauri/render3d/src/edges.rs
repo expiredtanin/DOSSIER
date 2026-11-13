@@ -53,6 +53,55 @@ pub(crate) type Key = [i64; 3];
 /// Kanonischer Kanten-Schlüssel (sortiertes Endpunkt-Paar).
 pub(crate) type EdgeKey = (Key, Key);
 
+/// [214] Schneller Hasher für die Kanten-Schlüssel (ganze Zahlen, kein Angreifer): Multiplikation je Wort wie FxHash,
+/// zum Schluss durchmischt (fmix64). Der Standard-Hasher (SipHash) kostete beim Aufbau grosser Szenen den Grossteil
+/// der Kanten-Zeit; die Reihenfolge einer Hash-Tabelle bestimmt keine Ausgabe (Klumpen sortieren ihre Kanten).
+#[derive(Default, Clone, Copy)]
+pub(crate) struct KeyHasher(u64);
+
+impl std::hash::Hasher for KeyHasher {
+    fn write(&mut self, bytes: &[u8]) {
+        let mut it = bytes.chunks_exact(8);
+        for c in &mut it {
+            self.add(u64::from_le_bytes([c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7]]));
+        }
+        let rest = it.remainder();
+        if !rest.is_empty() {
+            let mut b = [0u8; 8];
+            b[..rest.len()].copy_from_slice(rest);
+            self.add(u64::from_le_bytes(b));
+        }
+    }
+    fn write_u64(&mut self, v: u64) {
+        self.add(v);
+    }
+    fn write_i64(&mut self, v: i64) {
+        self.add(v as u64);
+    }
+    fn write_usize(&mut self, v: usize) {
+        self.add(v as u64);
+    }
+    fn finish(&self) -> u64 {
+        let mut h = self.0;
+        h ^= h >> 33;
+        h = h.wrapping_mul(0xff51_afd7_ed55_8ccd);
+        h ^= h >> 33;
+        h = h.wrapping_mul(0xc4ce_b9fe_1a85_ec53);
+        h ^ (h >> 33)
+    }
+}
+
+impl KeyHasher {
+    #[inline]
+    fn add(&mut self, w: u64) {
+        self.0 = (self.0.rotate_left(5) ^ w).wrapping_mul(0x517c_c1b7_2722_0a95);
+    }
+}
+
+/// Hash-Tabelle bzw. -Menge mit Kanten-Schlüsseln ([`KeyHasher`]).
+pub(crate) type EdgeMap<V> = HashMap<EdgeKey, V, std::hash::BuildHasherDefault<KeyHasher>>;
+pub(crate) type EdgeSet = std::collections::HashSet<EdgeKey, std::hash::BuildHasherDefault<KeyHasher>>;
+
 fn key_of(p: [f32; 3]) -> Key {
     [
         (p[0] * QUANT).round() as i64,
@@ -110,7 +159,7 @@ pub struct EdgeAdj {
 /// berechnet und gecacht (die Silhouette wird daraus je Blickwinkel neu abgeleitet).
 pub fn build_edge_adjacency(mesh: &Mesh) -> Vec<EdgeAdj> {
     // Kanten-Schluessel (kanonisch sortiertes Endpunkt-Paar) -> Datensatz.
-    let mut edges: HashMap<EdgeKey, EdgeRec> = HashMap::new();
+    let mut edges: EdgeMap<EdgeRec> = EdgeMap::default();
     for_each_tri_edge(mesh, |key, p0, p1, n| {
         edges
             .entry(key)

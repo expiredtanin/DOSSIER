@@ -128,7 +128,7 @@ pub const DEFAULT_CREASE_DEG: f64 = 30.0;
 
 
 /// Das 3D-Modell in Teilen.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Parts {
     pub walls: Vec<RWall>,

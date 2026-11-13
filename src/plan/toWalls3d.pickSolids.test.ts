@@ -59,9 +59,9 @@ describe("[137] 3D-Pick freie Körper und Stützen", () => {
     expect(Math.min(...zs)).toBeCloseTo(3.1, 9);
     expect(Math.max(...zs)).toBeCloseTo(4.6, 9);
     const parts = projectToModel3dParts(base)!;
-    expect(parts.find((p) => p.id === "solids")?.meshes?.length).toBe(1);
+    expect(parts.find((p) => p.id.startsWith("solids:"))?.meshes?.length).toBe(1);
     const hidden = projectToModel3dParts(base, { hide: ["20"] })!;
-    expect(hidden.find((p) => p.id === "solids")?.meshes ?? []).toEqual([]);
+    expect(hidden.find((p) => p.id.startsWith("solids:"))?.meshes ?? []).toEqual([]);
   });
 
   it("Stütze lagerichtig: Welt-z = +y (wie gezeichnet), nicht gespiegelt", () => {

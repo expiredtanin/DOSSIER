@@ -68,15 +68,26 @@ interface Model3dDelta {
   /** [180] Wie `wallKeep`. */
   openingKeep?: number[];
   openingNew: [number, unknown[], unknown[], unknown[], unknown[], unknown[]][];
-  openingTail: unknown[];
+  /** Dach-/Deckenfenster (bei Bogenwänden alle Einbauteile); [214] `null` = schon gehalten (Laufnummer `tailKey`). */
+  openingTail: unknown[] | null;
+  tailKey: number;
+  /** [214] Laufnummer je übrige Gruppe (Reihenfolge {@link REST_NAMES}); Inhalt `null` = schon gehalten. */
+  restKeys: number[];
   [rest: string]: unknown;
 }
+
+/** [214] Übrige Gruppen der Antwort (Kern `model3d_cache::REST_NAMES`). */
+const REST_NAMES = ["slabs", "contextMeshes", "columnMeshes", "stairMeshes", "stairRailings", "roofMeshes", "roofLayers", "solidMeshes"] as const;
+/** [214] So viele letzte Antworten hält der Cache übrige Gruppen (Hauptmodell und Geisterschicht im Wechsel). */
+const REST_ANSWERS = 3;
 
 /** Gelesene Einträge der letzten Antwort (Laufnummer → Wandkörper bzw. 5 Listen Einbauteile). */
 interface Model3dDeltaCache {
   mark: number;
   walls: Map<number, unknown[]>;
   openings: Map<number, unknown[][]>;
+  /** [214] Übrige Gruppen der letzten Antworten (neueste zuerst): Laufnummer → Inhalt. */
+  rest: Map<number, unknown>[];
 }
 
 /** Setzt die Teile aus Antwort und gehaltenen Einträgen zusammen; `null`, wenn ein Eintrag fehlt. */
@@ -85,12 +96,33 @@ export interface Model3dKeyed {
   wallEntries: (readonly [number, unknown[]])[];
   openingEntries: (readonly [number, unknown[][]])[];
   openingTail: unknown[];
+  /** [214] Laufnummer je übrige Gruppe (Name → Nummer): gleiche Nummer = gleicher Inhalt (Teil-id im Viewer). */
+  restKeys: Record<string, number>;
 }
 
 function assembleModel3dDelta(
   r: Model3dDelta,
   cache: Model3dDeltaCache | undefined,
 ): { parts: Record<string, unknown>; keyed: Model3dKeyed; cache: Model3dDeltaCache } | null {
+  // [214] Übrige Gruppen zuerst (ohne Eintrag sofort `null`, bevor etwas gelesen ist).
+  const restNow = new Map<number, unknown>();
+  const restKeys: Record<string, number> = {};
+  const restVals: Record<string, unknown> = {};
+  const held = (k: number) => restNow.get(k) ?? cache?.rest.map((m) => m.get(k)).find((v) => v !== undefined);
+  for (let i = 0; i < REST_NAMES.length; i++) {
+    const name = REST_NAMES[i];
+    const k = r.restKeys?.[i];
+    if (k === undefined) return null;
+    const v = r[name] ?? held(k);
+    if (v === undefined) return null;
+    restNow.set(k, v);
+    restKeys[name] = k;
+    restVals[name] = v;
+  }
+  const openingTail = r.openingTail ?? (held(r.tailKey) as unknown[] | undefined);
+  if (!openingTail) return null;
+  restNow.set(r.tailKey, openingTail);
+  restKeys.openingTail = r.tailKey;
   const wallNew = new Map(r.wallNew);
   const walls: unknown[] = [];
   const wallMap = new Map<number, unknown[]>();
@@ -121,15 +153,17 @@ function assembleModel3dDelta(
   }
   const openingMeshes: unknown[] = [];
   for (let l = 0; l < 5; l++) for (const e of entries) for (const x of e[l]) openingMeshes.push(x);
-  for (const x of r.openingTail) openingMeshes.push(x);
-  const { mark, wallKeys: _wk, wallKeep: _wp, wallNew: _wn, openingKeys: _ok, openingKeep: _op, openingNew: _on, openingTail, ...rest } = r;
+  for (const x of openingTail) openingMeshes.push(x);
+  const { mark, wallKeys: _wk, wallKeep: _wp, wallNew: _wn, openingKeys: _ok, openingKeep: _op, openingNew: _on, openingTail: _ot, tailKey: _tk, restKeys: _rk, ...rest } = r;
   // Einträge mit Laufnummer zusätzlich, für den 3D-Viewer (Teil-Updates, `toWalls3d.projectToModel3dParts`).
   const keyed: Model3dKeyed = {
     wallEntries: r.wallKeys.map((k) => [k, wallMap.get(k)!] as const),
     openingEntries: r.openingKeys.map((k) => [k, openMap.get(k)!] as const),
     openingTail,
+    restKeys,
   };
-  return { parts: { ...rest, walls, openingMeshes }, keyed, cache: { mark, walls: wallMap, openings: openMap } };
+  const restCache = [restNow, ...(cache?.rest ?? [])].slice(0, REST_ANSWERS);
+  return { parts: { ...rest, ...restVals, walls, openingMeshes }, keyed, cache: { mark, walls: wallMap, openings: openMap, rest: restCache } };
 }
 
 /** Ergebnis des Ladens einer Projektdatei ({@link ProjectDocument.loadFile}). */
@@ -337,8 +371,9 @@ export class ProjectDocument {
         if (this.m3d.size > 4) this.m3d.delete(this.m3d.keys().next().value!);
         return { parts: out.parts as T, keyed: out.keyed };
       }
-      // Ein Eintrag fehlt (sollte nicht vorkommen): einmal alles neu anfordern.
-      cache = undefined;
+      // Ein Eintrag fehlt (etwa eine übrige Gruppe nach mehreren Filtern im Wechsel): einmal alles neu anfordern.
+      // [214] Die gehaltenen übrigen Gruppen bleiben (Laufnummer = Inhalt, global eindeutig).
+      cache = cache && { mark: 0, walls: new Map(), openings: new Map(), rest: cache.rest };
     }
     throw new Error("Kern-Abfrage „model3dPartsDelta“: Einträge fehlen");
   }

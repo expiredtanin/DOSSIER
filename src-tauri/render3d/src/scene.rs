@@ -20,7 +20,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use serde::Deserialize;
 
-use crate::edges::{draws_crease, for_each_tri_edge, push_edge, representatives, EdgeAdj, EdgeKey};
+use crate::edges::{draws_crease, for_each_tri_edge, push_edge, representatives, EdgeAdj, EdgeKey, EdgeMap, EdgeSet};
 use crate::math::{merge_bounds, Bounds3};
 use crate::mesh::{
     append_context_mesh, compute_free_wall_ends, compute_wall_miters, extrude_slab, extrude_wall_with_miters,
@@ -158,7 +158,7 @@ struct Chunk {
 pub struct Scene {
     parts: BTreeMap<String, Part>,
     chunks: Vec<Chunk>,
-    edges: HashMap<EdgeKey, EdgeEntry>,
+    edges: EdgeMap<EdgeEntry>,
     next_slot: u32,
     terrain: Mesh,
     bounds: Option<Bounds3>,
@@ -233,7 +233,7 @@ impl Scene {
     pub fn apply(&mut self, upd: PartsUpdate) -> SceneChange {
         let mut ch = SceneChange::default();
         let mut dirty: BTreeSet<usize> = BTreeSet::new();
-        let mut touched: HashSet<EdgeKey> = HashSet::new();
+        let mut touched: EdgeSet = EdgeSet::default();
         // Vollaufbau: berührte Kanten nicht einzeln merken, am Ende alle entscheiden.
         let bulk = upd.reset;
         if upd.reset {
@@ -423,7 +423,7 @@ impl Scene {
         best
     }
 
-    fn unlink_edges(&mut self, p: &Part, touched: &mut HashSet<EdgeKey>) {
+    fn unlink_edges(&mut self, p: &Part, touched: &mut EdgeSet) {
         for k in &p.edge_keys {
             if let Some(e) = self.edges.get_mut(k) {
                 e.normals.retain(|x| x.0 != p.slot);
@@ -432,16 +432,26 @@ impl Scene {
         }
     }
 
-    fn link_edges(&mut self, p: &mut Part, mut touched: Option<&mut HashSet<EdgeKey>>) {
-        let mut keys: Vec<EdgeKey> = Vec::new();
+    fn link_edges(&mut self, p: &mut Part, mut touched: Option<&mut EdgeSet>) {
+        // [214] Beiträge erst sammeln und nach Kante ordnen, dann je Kante EIN Zugriff auf den Index (statt je Beitrag):
+        // gleiche Einträge wie zuvor (Normalen je Teil in Dreiecks-Reihenfolge, Lage vom ersten Beitrag). Geordnet wird
+        // nach (Hash des Schlüssels, Beitrag) — klein und schnell; gleiche Hashes verschiedener Kanten trennt der Schlüssel.
+        let mut at: Vec<(EdgeKey, [f32; 3], [f32; 3], [f32; 3])> = Vec::with_capacity(p.mesh.indices.len());
+        for_each_tri_edge(&p.mesh, |key, p0, p1, nrm| at.push((key, p0, p1, nrm)));
+        let bh = std::hash::BuildHasherDefault::<crate::edges::KeyHasher>::default();
+        let keys_in: Vec<EdgeKey> = at.iter().map(|a| a.0).collect();
+        let (seqs, groups) = edge_groups(&keys_in, &|k| std::hash::BuildHasher::hash_one(&bh, k));
+        drop(keys_in);
         let edges = &mut self.edges;
         let slot = p.slot;
-        let mut seq = 0u32;
-        for_each_tri_edge(&p.mesh, |key, p0, p1, n| {
+        let mut keys: Vec<EdgeKey> = Vec::new();
+        for &(start, len) in &groups {
+            let group = &seqs[start as usize..(start + len) as usize];
+            let (key, p0, p1, _) = at[group[0] as usize];
             let e = edges.entry(key).or_insert_with(|| EdgeEntry {
                 p0,
                 p1,
-                normals: Vec::with_capacity(2),
+                normals: Vec::with_capacity(len as usize),
                 owner: slot,
                 draw: false,
                 drawn_in: NONE,
@@ -451,17 +461,43 @@ impl Scene {
                 e.p0 = p0;
                 e.p1 = p1;
             }
-            e.normals.push((slot, seq, n));
-            seq += 1;
+            e.normals.extend(group.iter().map(|&seq| (slot, seq, at[seq as usize].3)));
             keys.push(key);
             if let Some(t) = touched.as_deref_mut() {
                 t.insert(key);
             }
-        });
+        }
+        // Kanten-Liste wie zuvor nach Schlüssel (bestimmt die Reihenfolge der Kanten im Klumpen).
         keys.sort_unstable();
-        keys.dedup();
         p.edge_keys = keys;
     }
+}
+
+/// [214] Beiträge (Index in `keys`) je Kante: `seqs` nach Kante gruppiert, je Kante aufsteigend; `groups` = (Anfang,
+/// Länge) in `seqs`. Geordnet nach (Hash, Index) — kleine Sortier-Einträge; Läufe gleichen Hashes mit verschiedenen
+/// Schlüsseln (Kollision) werden nach Schlüssel getrennt.
+fn edge_groups(keys: &[EdgeKey], hash: &dyn Fn(&EdgeKey) -> u64) -> (Vec<u32>, Vec<(u32, u32)>) {
+    let mut order: Vec<(u64, u32)> = keys.iter().enumerate().map(|(i, k)| (hash(k), i as u32)).collect();
+    order.sort_unstable();
+    let mut seqs: Vec<u32> = Vec::with_capacity(order.len());
+    let mut groups: Vec<(u32, u32)> = Vec::new();
+    let mut split: Vec<(EdgeKey, u32)> = Vec::new();
+    for run in order.chunk_by(|a, b| a.0 == b.0) {
+        let k0 = &keys[run[0].1 as usize];
+        if run.iter().all(|c| keys[c.1 as usize] == *k0) {
+            groups.push((seqs.len() as u32, run.len() as u32));
+            seqs.extend(run.iter().map(|c| c.1));
+            continue;
+        }
+        split.clear();
+        split.extend(run.iter().map(|c| (keys[c.1 as usize], c.1)));
+        split.sort_unstable();
+        for g in split.chunk_by(|a, b| a.0 == b.0) {
+            groups.push((seqs.len() as u32, g.len() as u32));
+            seqs.extend(g.iter().map(|c| c.1));
+        }
+    }
+    (seqs, groups)
 }
 
 /// Entscheidet eine Kante neu (Reihenfolge der Normalen, Rand/Knick, Besitzer, zeichnender Klumpen).
@@ -839,6 +875,22 @@ mod tests {
     }
 
     /// Schatten ([64]): das Licht-Frustum passt seitlich auf die eigenen Bauteile, nicht aufs Gelände.
+    /// [214] Gruppen der Kanten-Beiträge: mit echtem Hash und mit lauter Kollisionen (konstanter Hash) dieselben Gruppen
+    /// (je Kante die Beiträge aufsteigend), nur ggf. anders geordnet.
+    #[test]
+    fn kanten_gruppen_auch_bei_hash_kollision() {
+        let k = |a: i64, b: i64| -> EdgeKey { ([a, 0, 0], [b, 0, 0]) };
+        let keys = vec![k(1, 2), k(3, 4), k(1, 2), k(5, 6), k(3, 4), k(1, 2), k(7, 8)];
+        let bh = std::hash::BuildHasherDefault::<crate::edges::KeyHasher>::default();
+        let norm = |(seqs, groups): (Vec<u32>, Vec<(u32, u32)>)| -> BTreeSet<Vec<u32>> {
+            groups.iter().map(|&(s, l)| seqs[s as usize..(s + l) as usize].to_vec()).collect()
+        };
+        let want: BTreeSet<Vec<u32>> = [vec![0, 2, 5], vec![1, 4], vec![3], vec![6]].into_iter().collect();
+        assert_eq!(norm(edge_groups(&keys, &|key| std::hash::BuildHasher::hash_one(&bh, key))), want);
+        assert_eq!(norm(edge_groups(&keys, &|_| 7)), want);
+        assert_eq!(norm(edge_groups(&keys, &|key| (key.0[0] % 2) as u64)), want);
+    }
+
     #[test]
     fn schatten_ausdehnung_ohne_gelaende() {
         let terrain: MeshInput = serde_json::from_str(
@@ -880,3 +932,5 @@ mod tests {
         assert!(s.shadow_bounds().is_none());
     }
 }
+
+

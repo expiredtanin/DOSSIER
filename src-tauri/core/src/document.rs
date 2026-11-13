@@ -844,6 +844,11 @@ impl Document {
         self.model3d_cache.last_rest_hit
     }
 
+    /// [214] Letzte Statistik des 3D-Caches (Tests): übrige Gruppen mit geändertem Inhalt (Bit je Gruppe).
+    pub fn model3d_groups_changed(&self) -> u8 {
+        self.model3d_cache.last_groups_changed
+    }
+
     /// Letzte Statistik des 3D-Caches (Tests): neu gerechnete Wände / Öffnungs-Wände.
     pub fn model3d_rebuilt(&self) -> (usize, usize) {
         self.model3d_cache.last_rebuilt

@@ -260,6 +260,26 @@ impl ClassFilter {
         parts.roof_layers.retain(|l| self.keep_owner(p, l.owner));
     }
 
+    /// [214] Wie [`Self::retain_rest`] als Masken (`true` = bleibt) je übrige Gruppe, in der Reihenfolge
+    /// Decken, Kontext, Stützen, Treppen-Netze, Handläufe, Dächer, Dachschichten, Körper; `None` = alles bleibt.
+    pub fn rest_masks(&self, p: &Project, parts: &Parts) -> [Option<Vec<bool>>; 8] {
+        if self.is_empty() {
+            return Default::default();
+        }
+        let norm = |m: Vec<bool>| (!m.iter().all(|&k| k)).then_some(m);
+        let meshes = |v: &[RMesh]| norm(v.iter().map(|m| self.keep_owner(p, m.owner)).collect());
+        [
+            norm(parts.slabs.iter().map(|s| !self.hides(&s.ceiling_id)).collect()),
+            meshes(&parts.context_meshes),
+            meshes(&parts.column_meshes),
+            meshes(&parts.stair_meshes),
+            meshes(&parts.stair_railings),
+            meshes(&parts.roof_meshes),
+            norm(parts.roof_layers.iter().map(|l| self.keep_owner(p, l.owner)).collect()),
+            meshes(&parts.solid_meshes),
+        ]
+    }
+
     /// Wandkörper filtern.
     pub fn retain_walls(&self, parts: &mut Parts) {
         if !self.is_empty() {

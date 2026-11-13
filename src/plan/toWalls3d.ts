@@ -342,8 +342,8 @@ export function projectToModel3d(project: Project, opts: Model3dOptions = {}): R
 
 /**
  * Ein Teil des 3D-Modells für Teil-Updates im Viewer ([58], render3d `set_parts`). `fixed`: der Inhalt
- * zur `id` ändert sich nie (Wand-/Öffnungs-Eintrag des Kern-Caches, Laufnummer in der id) — der Viewer
- * schickt ihn nur einmal; sonst entscheidet der Inhalt (Rest-Gruppen: Decken, Dächer, Kontext …).
+ * zur `id` ändert sich nie (Wand-/Öffnungs-Eintrag des Kern-Caches, [214] auch die übrigen Gruppen wie Decken,
+ * Dächer, Kontext: Laufnummer in der id) — der Viewer schickt ihn nur einmal; sonst entscheidet der Inhalt.
  */
 export interface Model3dPart {
   id: string;
@@ -357,7 +357,8 @@ export interface Model3dPart {
 /**
  * Das 3D-Modell wie {@link projectToModel3d} (gleiche Wände, Decken, Meshes — nur anders gruppiert), aber
  * in Teilen ([58]): je Wand-Eintrag des Kern-Caches (`w…`) und je Öffnungs-Eintrag (`o…`) ein
- * unveränderlicher Teil, dazu Rest-Gruppen. `null` mit Explosion (dort kein Cache): dann das ganze Modell.
+ * unveränderlicher Teil, dazu die übrigen Gruppen (ebenso unveränderlich, id mit der Laufnummer des Kerns).
+ * `null` mit Explosion (dort kein Cache): dann das ganze Modell.
  */
 export function projectToModel3dParts(project: Project, opts: Model3dOptions = {}): Model3dPart[] | null {
   const layered = opts.layeredWalls ?? true;
@@ -398,14 +399,18 @@ export function projectToModel3dParts(project: Project, opts: Model3dOptions = {
     const meshes = lists.flat();
     if (meshes.length) out.push({ id: `o${ns}${k}`, fixed: true, meshes });
   }
-  const rest = (id: string, p: Omit<Model3dPart, "id" | "fixed">) => out.push({ id, fixed: false, ...p });
-  rest("slabs", { slabs, meshes: slabMeshes });
-  rest("context", { meshes: parts.contextMeshes });
-  rest("solids", { meshes: parts.solidMeshes });
-  rest("columns", { meshes: parts.columnMeshes });
-  rest("openingTail", { meshes: keyed.openingTail as RMesh[] });
-  rest("stairs", { meshes: [...parts.stairMeshes, ...parts.stairRailings] });
-  rest("roofs", { meshes: parts.roofMeshes, roofLayers: parts.roofLayers });
+  // [214] Übrige Gruppen mit der Laufnummer des Kerns in der id (gleiche Nummer = gleicher Inhalt): unveränderlich wie
+  // die Wand-Einträge, der Abgleich vergleicht keinen Inhalt. Geschnittene Decken: Index und Schlüssel des Netzes dazu.
+  const rk = keyed.restKeys;
+  const slabCutKey = (parts.voidMeshes?.slabs ?? []).map(([i, key]) => `.${i}m${key}`).join("");
+  const fixed = (group: string, key: string, p: Omit<Model3dPart, "id" | "fixed">) => out.push({ id: `${group}:${ns}${key}`, fixed: true, ...p });
+  fixed("slabs", `${rk.slabs}${slabCutKey}`, { slabs, meshes: slabMeshes });
+  fixed("context", `${rk.contextMeshes}`, { meshes: parts.contextMeshes });
+  fixed("solids", `${rk.solidMeshes}`, { meshes: parts.solidMeshes });
+  fixed("columns", `${rk.columnMeshes}`, { meshes: parts.columnMeshes });
+  fixed("openingTail", `${rk.openingTail}`, { meshes: keyed.openingTail as RMesh[] });
+  fixed("stairs", `${rk.stairMeshes}.${rk.stairRailings}`, { meshes: [...parts.stairMeshes, ...parts.stairRailings] });
+  fixed("roofs", `${rk.roofMeshes}.${rk.roofLayers}`, { meshes: parts.roofMeshes, roofLayers: parts.roofLayers });
   return out;
 }
 

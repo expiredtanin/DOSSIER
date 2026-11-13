@@ -1,8 +1,8 @@
 /**
  * Teil-Updates des 3D-Modells für render3d ([58], `web::set_parts`): merkt, welche Teile der Viewer schon
  * hat, und schreibt nur neue, geänderte und entfernte Teile als JSON. Unveränderliche Teile (`fixed`,
- * Wand-/Öffnungs-Einträge des Kern-Caches mit Laufnummer in der id) reisen genau einmal; Rest-Gruppen
- * (Decken, Dächer, Kontext …) werden über ihren JSON-Text verglichen.
+ * Wand-/Öffnungs-Einträge und [214] übrige Gruppen wie Decken, Dächer, Kontext des Kern-Caches mit Laufnummer
+ * in der id) reisen genau einmal; übrige Teile (Dach-/Deckenfenster) werden über ihren JSON-Text verglichen.
  */
 
 import type { Model3dPart } from "../core";

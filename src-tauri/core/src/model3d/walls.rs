@@ -618,6 +618,13 @@ pub(crate) fn floor_context_with(p: &Project, floor_id: &str, with_ceilings: boo
     let only = |c: &Ceiling| with_ceilings && c.floor_id == floor_id && c.outline.len() >= 3;
     // [178] Platte bis Aussenkante Kern: die Aussenschicht-Bänder der Aussenwand liegen ausserhalb und laufen durch.
     let bearing = if with_ceilings { super::bearing::bearing_outlines(p, only, joins) } else { Vec::new() };
+    floor_context_from(p, floor_id, with_ceilings, &bearing)
+}
+
+/// Wie [`floor_context_with`] mit schon gerechneten Platten-Umrissen je Decke (`bearing`, Index wie
+/// `Project::ceilings`, s. `bearing::bearing_outlines_memo`; [214] 3D-Cache).
+pub(crate) fn floor_context_from(p: &Project, floor_id: &str, with_ceilings: bool, bearing: &[Option<Vec<crate::flat::Polygon>>]) -> FloorContext {
+    let only = |c: &Ceiling| with_ceilings && c.floor_id == floor_id && c.outline.len() >= 3;
     let ceilings: Vec<CeilingIn> = p
         .ceilings
         .as_deref()

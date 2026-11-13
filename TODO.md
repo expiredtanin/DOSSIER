@@ -220,12 +220,28 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   877 → 141), komplex 146 → 176 (Rauschen, Geisterschicht 74 → 79), kontext 253 → 277 (Rauschen); GPU-Puffer komplex 57 → 42 MB,
   kontext 175 → 123, gross 131 → 118; Aufbau render3d komplex 517 → 263 ms, gross 396 → 203. Schattenpass lief schon nur bei Änderung,
   Bild-CPU je Frame 0.3–1.5 ms (Draw-Calls 64/275). Bilder byte-gleich, Geisterschicht ≤ 8/255 auf ~1 % (Mischreihenfolge der
-  durchscheinenden Flächen je Klumpen). Nicht auf dem Mac/Metal und nicht in der App angesehen. Offen, nach Messwert: (1) Rest-Gruppen ohne
-  JSON-Rundreise (Laufnummer je Gruppe statt `JSON.stringify`-Vergleich: kontext 69 ms, komplex 27 ms je Änderung); (2) Kern: Geschoss-
-  Kontexte aller Geschosse je Abfrage (gross 29 ms nativ, zweimal je Änderung), Kontext-Netze je Objekt als Teil statt eine Gruppe;
-  (3) Vernetzen in render3d (komplex 324 ms/147k Dreiecke kalt, Geisterschicht gross 2 s beim Geschosswechsel); (4) GPU-Bildzeit nur auf
-  lavapipe gemessen (komplex ~150–570 ms Software), Culling/LOD/Instancing erst nach Messung auf echter GPU (Mac); (5) Draw-Calls der
-  Geisterschicht je Klumpen (gross 275 → 465), ggf. bündeln. · M
+  durchscheinenden Flächen je Klumpen). Nicht auf dem Mac/Metal und nicht in der App angesehen.
+  Weiter (13.11.): (1) Übrige Gruppen (Decken, Kontext, Stützen, Treppen, Dächer, Körper) und der Öffnungs-Rest (Dach-/Deckenfenster) mit
+  Laufnummer (`restKeys`, `tailKey` in `model3dPartsDelta`): der Kern vergleicht neu gerechnete Gruppen dem Wert nach (auch über einen
+  verworfenen Cache hinweg), merkt je Gruppe die gefilterten Fassungen (Maske je Klassen-Filter, gleicher Inhalt = gleiche Nummer) und
+  schickt nur Neues; TS hält die Gruppen der letzten drei Antworten, der Viewer bekommt sie als unveränderliche Teile (kein `JSON.stringify`-
+  Vergleich). Ohne Abzugskörper keine Wand-/Decken-Kopie für `voidMeshes`. (2) Deckenauflager je Decke gemerkt (`bearing_outlines_memo`,
+  Schlüssel = Stand + Schnittlinien der Wände im Höhenbereich der Platte), für Geschoss-Kontexte und Decken. (3) render3d: Kanten-Index mit
+  schnellem Hasher, Beiträge je Teil nach (Hash, Beitrag) sortiert und je Kante einmal eingetragen. Wand verschieben, Kern/TS je Änderung
+  (WASM, Container; Summe mit Geisterschicht als Teile): komplex 120 → 53 ms (Teile 43 → 13, Abgleich 20 → 0.5, Geisterschicht 49 → 31),
+  gross 155 → 41 (Teile 89 → 20, Geisterschicht 64 → 18), kontext 234 → 63 (Teile 112 → 23, Abgleich 54 → 0.6, Geisterschicht 59 → 32);
+  Kern nativ gross (`bench214`) 65 → 15 ms. Engine (`render_png --bench`, nativ, lavapipe-Container, verrauscht): Aufbau Renderer komplex
+  291 → 215 ms, gross 204 → 165, kontext 962 → 813; Geisterschicht als Teile gross 1979 → 1546 ms (Geschosswechsel), komplex 276 → 210;
+  Änderung parsen + Renderer gross 13 → 7 ms. Bilder byte-gleich (`render_png --bench … --png`, alt/neu, drei Szenen). Pathtracer [212]: im
+  normalen Stil keine Kosten (Baum nur beim ersten Bild im Stil `Pathtrace`, ein Teil-Update setzt nur `pt_dirty`; Materialtabelle 0.2 ms).
+  Tests: Kern `model3d_cache::tests::uebrige_gruppen_mit_laufnummer` (+ Gegenstelle mit Rückfall wie TS), vitest
+  `toWalls3d.incremental.test.ts` (Viewer-Stand nach Teil-Updates = Neubau, Haupt/Geist im Wechsel), render3d
+  `scene::tests::kanten_gruppen_auch_bei_hash_kollision`; e2e `renderCount`, `views` u. a. grün (Linux, Chromium). Nicht auf dem Mac/Metal,
+  nicht auf echter GPU, nicht in der Tauri-App. Offen, nach Messwert: (a) Flächenmuster je Änderung ganz neu (komplex 8 ms Haupt + 15 ms
+  Geisterschicht, je Wand cachen, Schlüssel inkl. Geschoss-Kontext); (b) Geisterschicht beim Geschosswechsel immer noch 1.5 s (gross,
+  nativ): Kanten-Index (≈ 0.7 s für 2.8 M Beiträge) und Entscheid aller Kanten; (c) GPU-Bildzeit nur auf lavapipe gemessen, Culling/LOD/
+  Instancing erst nach Messung auf echter GPU (Mac); (d) Draw-Calls der Geisterschicht je Klumpen (gross 465), ggf. bündeln; (e) Pathtracer
+  baut nach jeder Modelländerung im Stil `Pathtrace` den ganzen Baum neu (ein `refit` gibt es in `bvh.rs` auf diesem Stand nicht). · M
 
 ### Phase 3 (27.11.–3.12.): Vorprojekt
 - ◐ **[234]** 3D: Rundbogen-Fenster der OG-Südwand (`og-f1`, Musterhaus komplex) ragte mit dem Bogenscheitel über die Wandoberkante ins
