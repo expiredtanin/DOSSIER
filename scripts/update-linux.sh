@@ -71,7 +71,8 @@ fi
 
 say "Node-Pakete"
 if [ ! -d node_modules ] || [ package-lock.json -nt node_modules ] || ! git diff --quiet "$before" "$after" -- package.json package-lock.json; then
-  npm install --no-audit --no-fund
+  # npm ci: installiert genau nach package-lock.json und verändert sie nicht (npm install schrieb sie je nach npm-Version um)
+  npm ci --no-audit --no-fund
 else
   echo "unverändert."
 fi
