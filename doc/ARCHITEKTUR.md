@@ -33,7 +33,7 @@ Vorschlag für die ersten zwei Tage:
    erzeugen und ansehen.
 3. Den Weg eines Grundrisses im Code mitlesen: `src/plan/generatePlan.ts`, dann
    `src-tauri/core/src/plan/domains.rs`.
-4. Einen Befehl mitlesen: `src/commands/cmds/wall.ts`, dann `src-tauri/core/src/cmd_create.rs`.
+4. Einen Befehl mitlesen: `src/commands/cmds/wall.ts`, dann `src-tauri/core/src/cmd_create.rs`. Ein Befehl, der aus einem Körper Bauteile macht: `src/commands/cmds/solidToParts.ts` → `src-tauri/core/src/cmd_massing.rs` ([222]).
 5. Eine Einstiegsaufgabe aus „Wo fange ich an?" wählen.
 
 ---
@@ -127,9 +127,9 @@ flowchart TB
 |---|---|---|
 | `core` (`dossier-core`) | Dokument, Ops, Verlauf, Projektformat, alle Ableitungen | `src/engine/pkgCore` |
 | `kernel2d` | 2D-Geometrie: Offset, Trim, Extend, Fillet, Split, Join | im Kern eingebunden |
-| `hatchgen` (`dossier-hatch`) | Schraffur- und Linienmuster, JS-Zahlsemantik (`jsnum`, `jsmath`) | im Kern eingebunden |
+| `hatchgen` (`dossier-hatch`) | Schraffur- und Linienmuster, Ear-Clipping (`ear_clip.rs`), JS-Zahlsemantik (`jsnum`, `jsmath`) | im Kern eingebunden |
 | `render2d` | Plan-Anzeige | `src/engine/pkg` |
-| `render3d` | 3D-Anzeige, analytischer Prismen-Schnitt (auch vom Kern genutzt) | `src/engine/pkg3d` |
+| `render3d` | 3D-Anzeige inkl. GPU-Pathtracer, analytischer Prismen-Schnitt (auch vom Kern genutzt); Überblick `src-tauri/render3d/README.md` | `src/engine/pkg3d` |
 | `fileio` | Dateiformate: DXF/DWG (acadrust), IFC, PDF, Meshes, Punktwolken, Tabellen | `src/engine/pkgFileIo` |
 | `trucksolid` | B-Rep-Körper über truck: Booleans, STEP, Kollision | `src/engine/pkgTruck` |
 | `src` (Tauri-App) | Fenster, Menü, atomares Speichern, Dateisperre, native Metal-Fläche | keines |
@@ -293,6 +293,7 @@ Beispiel: Die Plan-Ansicht zeigt das Erdgeschoss im Massstab 1:100.
 | PDF eines Plans | `src/export/exportPdf.ts`: `planToRenderScene()` → `sceneToPrintSvg()` (`src/export/sceneToPrintSvg.ts`) | `plan_scene_f64()` in `plan/scene.rs` | jsPDF und svg2pdf.js |
 | Layout-Blatt, Blatt-PDF | `planToPrintSvg()` in `src/export/planToPrintSvg.ts`, aufgerufen von `src/ui/LayoutSheet.tsx` und `src/export/layoutPdf.ts` | `plan_print_svg_ops()` → `print_svg_ops()` in `plan/print_svg.rs` | SVG-Knoten in Papier-mm |
 | Bild auf dem Layout-Blatt, Plakat-Vorlage ([208]) | `src/model/layoutImages.ts` (Data-URL, Zuschnitt), `src/model/posterTemplates.ts`, Bildzeichnen in `layoutPdf.ts` (`drawImagesPdf`, JPEG ohne Neukompression), `LayoutSheet.tsx` | `layout_image.rs`, `layout_poster.rs` über `layout_call` | `Layout.images`, Master mit Raster/Kopfzeile |
+| Anonyme Abgabe ([208]) | zentral `src/export/competitionIdentity.ts` (Kennwort statt Projekt/Autor, `identityLeaks` als Gegenprobe), `src/export/pdfInfo.ts`; alle Exporter holen Name und Zeitstempel hier | `competition.rs` (Kennwort, neutraler Zeitstempel für IFC-Sammler und DXF-Blattnamen) | `fileio`: leerer Zeitstempel im IFC-Schreiber = anonym |
 | Kostenschätzung grob ([209]) | Panel `src/panels/CostEstimateSection.tsx`, Fassade `src/analysis/costEstimate.ts`, Bericht `src/export/costReport.ts`, Blatt-Tabelle Quelle `costs` | `kosten.rs` (Abfragen `costEstimate`, `costDefaults`; Mengen aus `flaechen.rs`), `sheet_table.rs` | `Project.costEstimate`; CSV/PDF wie Flächen-Nachweis |
 | DXF, DWG | `src/export/exportDxf.ts` | `plan_dxf_flat()` → `collect()`, `encode()` in `plan/dxf.rs` | `fileio`: `export_dxf()`, `export_dwg()` in `src-tauri/fileio/src/export.rs` |
 
@@ -551,6 +552,10 @@ Es gibt drei Schatten, alle aus derselben Sonnenstudie (`Project.sunStudy`, Ort 
   „textured“, UV je Dreieck im Parallel-Puffer `GpuTriTex` (gleiche Meter-UV wie `mesh::planar_uv`, Kachel `sizeM`);
   ohne Karte prozedural (Wiese/Kies/Asphalt), Gelände ohne Material = Wiese (`mesh::mesh_layer`, Ebene −2).
   Headless: `render_png --textures public`.
+  Belichtung und Raumlicht sind keine eigenen Dateien: `Sky.exposure` (Tag `DEFAULT_EXPOSURE`, Nacht `NIGHT_EXPOSURE`) und
+  `Sky.room_light` (Innenlicht hinter Glas) stecken in `pathtrace.rs` und gehen als Uniform an `gpu_pathtrace.rs`.
+  Bild-Export mit N Samples: Hilfen in `src/viewport/imageExport.ts` (`exportSamples`), Zeichnen in Häppchen mit Fortschritt
+  und Abbruch über `useWasm3dRenderer.exportImage`, Dialog `src/ui/ImageExportDialog.tsx`. Der Stil wird in der Oberleiste (Darstellungsart, Perspektive) gewählt.
 
 Im Grundriss gilt nur das Gebäudeinnere als abgedeckt (Decken/Dächer innerhalb der Hülle der geschnittenen
 Wände); unter Dachvorsprung, Balkon und Vordach liegt der echte Schatten, er schliesst an die Fassade an ([186]).

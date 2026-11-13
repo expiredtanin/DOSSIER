@@ -10,7 +10,7 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   stehen im Archiv („Bewusst nicht übernommen“).
 - **Grösse** (eine Person mit Agenten): S ≤ 1 Tag · M ≤ 1 Woche · L ≤ 1 Monat · XL > 1 Monat.
   Steht keine Grösse im Archiv, ist sie hier geschätzt.
-- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 241);
+- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 242);
   nie eine ID wiederverwenden oder umnummerieren. Präfix-IDs (`[K]`, `[G]`, `[T]`, `[B]`, `[C]`) bleiben.
 - **Pro Punkt:** was fehlt · wo im Code · Grösse. Höchstens ein bis drei Sätze je Punkt;
   Messwerte und Befunde gehören in den Commit.
@@ -63,11 +63,6 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   Kennzahlenleiste war ohne freie Körper 0 m³, neue Decken bekamen den Aussenwand-Aufbau statt eines Deckentyps. Offen: Durchlauf
   der Checkliste auf dem Mac (Maintainer); 3D-Bild headless nicht prüfbar; Blender-Lauf von [211] nur auf dem Mac; Pathtracer unter SwiftShader (s. o.).
 
-- ✓ **[217]** Kern-Panics aus dem Robustheitstest (12.11.): `wall_top_at` nutzte `f64::clamp(base, base+height)` — bei negativer/NaN-Höhe
-  min > max bzw. NaN → Panic in `wall_piece_mesh` (und über 3D/Exporte, u. a. `exportIfcSpf`). Neu `jsnum::clamp_safe`/`ClampSafe`
-  (Grenzen tauschen, NaN wie JS); 28 weitere `.clamp(` mit berechneten Grenzen in Kern-Modulen umgestellt. „Zufall 13“-Timeout war
-  Last (je Fall < 1 s, ganze Datei ~30 s), keine Endlosschleife. Regressionstests: Rust `wandkoerper_mit_kaputter_hoehe_ohne_panic`,
-  `jsnum::clamp_ohne_panic`, vitest in `robustness.test.ts`. Offen: ganzzahlige `usize::clamp` mit berechneten Grenzen nicht einzeln geprüft.
 - [30] Release-Workflow lauffähig: macOS universal signiert/notarisiert, Updater, Versionsnummer 1.0.0-beta; [57]/[120] CI auf GitHub grün.
 - „Mac-Gegenprobe“ (Sammelpunkt unten) für alles im Referenz-Ablauf abarbeiten (Maintainer), Befunde sofort beheben;
   [194] Texte synchron, [195b] Objektfenster, [190] Cmd+J auf dem Mac bestätigen.
@@ -232,82 +227,6 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   lavapipe gemessen (komplex ~150–570 ms Software), Culling/LOD/Instancing erst nach Messung auf echter GPU (Mac); (5) Draw-Calls der
   Geisterschicht je Klumpen (gross 275 → 465), ggf. bündeln. · M
 
-- ✓ **[222]** Volumenstudie → Bauteile (12.11., aus [206]; umgesetzt 13.11.): Befehl `solidtoparts` (`koerperinbauteile`, Werkzeuge 3D
-  neben „Körper verschneiden“) wandelt den gewählten Körper (sonst Klick in den Körper) in einem Undo-Schritt um: je Geschoss eine
-  Aussenwand je Umrisskante (aktiver Wandtyp, Referenz „left“ = Aussenfläche auf der Körperkante, wächst nach innen, `isExternal`),
-  Decken zwischen den Geschossen (Deckentyp wie beim Zeichnen), Flachdach ohne Vorsprung bündig mit der Körper-OK; der Körper entfällt
-  (GV sonst doppelt). Geschosse: Körper-UK muss auf einem Geschoss oder der Stapel-OK stehen; bestehende Geschosse werden genutzt, fehlende
-  obenauf angelegt (Höhe des obersten, gleichmässig auf den Rest verteilt), Reste < 0.5 m verlängern das oberste. Prismen auch nicht-
-  rechteckig/konkav, dazu Quader/Zylinder des Befehls „Körper“. Abgelehnt mit Meldung: verjüngt, Kugel/Kegel/Torus/Rotation/Verschneidung,
-  verrundete/gefaste Ecken, Abzugskörper, selbstschneidender Grundriss, UK zwischen Geschossen, < 0.5 m. Kern `cmd_massing.rs` (Decke/Dach
-  über `ceiling_item`/`roof_item` aus `cmd_create.rs`), Befehl `commands/cmds/solidToParts.ts`. Tests: Rust `cmd_massing::tests` (5),
-  vitest `solidToParts.test.ts`, e2e `release10.spec.ts` [222] (aus fixme). Angesehen: CLI-Plan/Schnitt eines L-Körpers mit schräger Kante,
-  Browser-App (Linux). Offen: Mac/Tauri nicht geprüft; keine Bodenplatte unter dem untersten Geschoss; keine Innenwände/Öffnungen;
-  Körper mit Löchern (gibt es im Modell nicht) und Bogenkanten (Zylinder wird zum 48-Eck aus Einzelwänden). · M
-- ✓ **[229]** Cycles-Rendering: Streifen/Dreiecke auf der Hauptdachfläche (12.11., Maintainer, Musterhaus komplex Iso). Ursache: Das GLB hat keine
-  UVs; der Normal-Map-Knoten (Tangentenraum) bekam je Dreieck einen anderen Tangentenrahmen und zeichnete die Gauben-Fan-Triangulierung als
-  helle/dunkle Diagonalen. Nicht im Netz: GLB geprüft (Normalen der Dachdreiecke an der Oberseite max. 0.0002 rad neben der Flächennormalen,
-  keine verdrehte Wicklung, Schichten 12 mm Abstand ohne Koplanarität); Rendern ohne Normalenkarte beseitigt es. Lösung `render_dossier.py`
-  `add_textures`: keine Normalenkarte, stattdessen Rauigkeitskarte als Höhenfeld (Bump, Stärke 0.3, rahmenfrei). Test:
-  `blenderRender.test.ts` (Skript ohne Normal-Map-Knoten). Geprüft: echter Lauf `bpy` 5.3 (CPU) vorher/nachher. Offen: Mac/Blender 3.6/4.x;
-  echte Normalenkarten bräuchten UVs im GLB-Export. · S
-- ✓ **[239]** Objekt-Info mit einklappbaren Abschnitten durchgängig (13.11., UI-Sichtprüfung): Wand/Decke/Dach … waren schon Gruppen ([189]), aber
-  Bezugspunkt, Masse und beim Gelände Einstellungen (Material, Höhenversatz, Netzpunkt, Zuschneiden) + Georeferenzierung (LV95) waren feste
-  Blöcke — beim Gelände musste man scrollen. Jetzt alle `InfoGroup` (Klick/Enter/Leertaste auf den Kopf, Pfeil, `aria-expanded`); neue Gruppen
-  `refpoint`, `dimensions`, `contextProps`, `georef` (`objectInfo/groups.ts`). Zustand je Abschnitts-Art in localStorage `dossier.objinfo.groups`
-  (nur Abweichungen vom Standard; `infoGroupState.ts`), nicht im Projekt. Standard: alles offen ausser „Georeferenzierung“ (`georef`: Herkunft +
-  LV95 — reine Auskunft, selten gebraucht, Kopf bleibt sichtbar); Bedienbares und Masse bleiben offen. Das Fenster Objekteinstellungen nutzt
-  dasselbe `ObjectInfoPanel` (ohne Bezugspunkt/Masse) und damit dieselben Gruppen und denselben Zustand. Geprüft: vitest `src/panels src/ui
-  src/i18n` (neu `infoGroupState.test.ts`), tsc, e2e objectSettings/objectSettingsWindow/roomStamp218, Screenshots hell/dunkel (Gelände,
-  Wand; Tastatur Enter/Leertaste). Nicht geprüft: Mac/Tauri, natives Nebenfenster. · S
-- ✓ **[241]** Objekt-Info Gelände/Kontextobjekte, Kamera, Baum: Raster wie die übrigen Gruppen (13.11., Chromium hell/dunkel, Musterhaus komplex; Mac/Tauri
-  nicht geprüft). Befund: „Höhe des Punkts (m)“ vierzeilig, Felder 64 px; Ursache auch, dass `.objinfo-site` (nur `> `-Kind-Selektor) seit der Gruppierung ([239])
-  nicht mehr griff — der Gelände-Block hatte wieder eigenen Scroll und 8 px Polster, Zeilen („Material“, Verbau) waren abgeschnitten. Jetzt Zeilen als
-  `.objinfo-field` (Label 104 px | Feld | Einheit hinter dem Feld, `ContextObjectProps.tsx`), kurze Labels (Einheit nicht mehr im Label, Hinweise als
-  Tooltip: `site.earthDepth.hint`, `site.excavation.shoringEmbed.hint`), Knöpfe umbrechend in `.site-actions`, Verbau-Kanten umbrechend; Gleitkomma-Rauschen
-  im Feld (0,0499999…) auf 12 Stellen gerundet (nur Anzeige). Kamera: Labels gekürzt (Augenhöhe, Bildwinkel vert., Brennweite KB, Sonne), Label-Spalte
-  104 px statt 56 px (auch `.objinfo-tree`). Gemessen (Playwright): Gelände, Höhenlinien, Baugrube, Nachbargebäude, Kamera ohne mehrzeilige/abgeschnittene
-  Labels, `scrollWidth ≤ clientWidth`. Funktion unverändert. Geprüft: tsc, vitest `src/panels src/ui src/i18n`. Nicht visuell geprüft: Baum (im
-  Musterhaus keiner; nur dieselbe CSS-Regel wie Kamera). · S
-- ✓ **[235]** `update-dossier` brach nach der Commit-Liste stumm ab (13.11., Maintainer, Void): `git log … | head -20` lieferte bei mehr als 20 neuen
-  Commits SIGPIPE, mit `set -euo pipefail` endete das Skript ohne Meldung — weder WASM noch AppImage wurden gebaut, `dossier` startete das alte
-  AppImage. Lösung: `git log -20`; `dossier` warnt, wenn das AppImage älter ist als der Checkout. Geprüft: Ursache nachgestellt (Exit 141), Syntax. · S
-- ✓ **[230]** Sonnenschatten im Grundriss mit weissen Löchern, je nach Uhrzeit (13.11., Maintainer, Linux). Ursache: Das Ear-Clipping
-  (dreifach vorhanden: Kern `gpu_compile`, `render2d`, `render3d`) brach bei den abgetasteten Geländeschatten-Stücken (viele fast kollineare
-  Ecken, Ring berührt sich längs einer Geraden) ab und liess den Rest leer — 651 von 4149 Stücken im Musterhaus komplex über ein Jahr.
-  Lösung: eine robuste Fassung `hatchgen/src/ear_clip.rs` für alle drei (flache/doppelte Ecken vorab und nach jedem Ohr entfernen,
-  Diagonal-Test mit Spiel, zweite Stufe streng, erst dann erzwungen; Spiel = Ausdehnung·1e-7); Probe danach 0 Fehler in f64 und f32. Tests `ear_clip::tests`.
-  Geprüft nur im Linux-Container (Probe + Tests), nicht auf dem Mac. · S
-- ✓ **[231]** Fenster im Giebel in 3D sauber eingeschnitten (13.11., Maintainer, Musterhaus komplex: Ost-/Westgiebel DG, Anbau-Giebel).
-  Ursache: (1) Unter einer Dachfläche zerlegte `wall_bands::emit_top_piece` die Wand um jede Rechteck-Öffnung in Pfeiler/Brüstung/Sturz
-  mit eigener schräger Oberkante (sichtbare Fugen von der Öffnung bis zum Dach); (2) im [216]-Wandkörper wurden die Stücke je einzeln
-  unterteilt und um 0,1 mm vergrössert — die Stossfläche am First blieb als innere Fläche stehen (Oculus: Streifen bis zum Boden, Bogen
-  halb). Lösung: Jede gerade Wand mit Öffnungen unter einer Dachebene bekommt den Körper je Schicht (`model3d/wall_body.rs`); die
-  Stücke dafür rechnet `wall_pieces_with(plain)` mit `WallIn::keep_holes` (Löcher statt Teilung); `band_solid` vereinigt Stücke mit
-  Dachebene genau (gleiche Schnittlinie → Manifold verschmilzt), unterteilt erst danach, schneidet dann die Löcher; Leibungsstücke des
-  Schichteinzugs kommen vergrössert danach dazu; Bänder ganz ohne Dachebene wie bisher. Tests: Rust `giebelwand_mit_rechteckfenster_ein_koerper`,
-  `giebelwand_mit_rundfenster_auf_dem_first_ohne_fuge` (keine inneren Flächen, Lochfläche = Öffnungsfläche), vitest
-  `toWalls3d.giebel.test.ts` (Komplex: dg-aw-w, dg-aw-o, og-anbau-n ohne Stücke, Aussenschicht fugenlos); Golden `komplex-model3d` neu.
-  Geprüft: render_png (Linux/lavapipe) vorher/nachher, verdeckt + schattiert. **Offen:** Mac/Metal nicht angesehen; Bogenwände unter
-  Dach behalten die Streifen; Leibungsstücke berühren innere Schichten an einzelnen Kanten; zwei schwache Scheinkanten auf der OG-Südwand
-  in der Fernsicht (verdeckt); `emit_walls` Komplex ≈ 100 → 180 ms (Cache je Wand). · S
-- ✓ **[232]** 3D: Netzlinien (Fächer der Triangulierung) auf den Dachflächen sichtbar, v. a. in Schwarz-Weiss und von weitem (13.11.).
-  Ursache: nicht die Triangulierung der Fläche (koplanare Dreiecke wurden richtig unterdrückt), sondern die FUGE zweier übereinanderliegender
-  Schichten (Dach-, Deckenschichten sind je ein geschlossener Körper): Oberseite der unteren und Unterseite der oberen Schicht liegen
-  deckungsgleich mit +n/−n und galten in `render3d/edges.rs` (`draws_crease`, Silhouette) als 180°-Knick — die Diagonalen der Fugenfläche
-  (Fächer der Ohrenzerlegung mit Dachfenster-/Gaubenlöchern) wurden als Kante gezeichnet und scheinen mit dem Linien-Tiefenversatz von
-  weitem durch die Oberfläche. Lösung: Knickwinkel über den Betrag des Skalarprodukts (entgegengesetzte deckungsgleiche Flächen = koplanar);
-  Silhouette überspringt Kanten, deren Flächen alle koplanar sind und gegensinnig stehen. Test `edges::double_sided_tests::stacked_layers_do_not_draw_interface_diagonals`
-  (vorher 21 statt 20 Kanten). Geprüft: Wireframe-Draufsicht Musterhaus komplex vorher/nachher (Fächer weg, Wendeltreppe/Wände ruhiger),
-  `cargo test` render3d (144 grün). Nicht geprüft: Mac/Metal, Tauri-App, Vergleich in der App von weitem. · S
-- ✓ **[233]** 3D: Oberflächenmuster-Striche (Fassadenschalung/Dachziegel) ragen über Dachrand und Traufe hinaus (13.11.).
-  Ursache: `surface_pattern3d::wall_top_profile` mass die Wandoberkante unter dem Dach auf der Wandachse; die geneigte Dachfläche
-  schneidet die Wand aber quer zur Achse an Aussen- und Innenseite verschieden hoch — auf der Traufseite ragten die senkrechten Striche
-  bis 15 cm (dg-aw-s/-n im Musterhaus komplex, 5 cm bei og-anbau) über den Wandkörper. Lösung: Profil und Fläche je Wandseite
-  (Messlinie im Abstand der Seite). Test `wandmuster_endet_an_der_wandseite_unter_dem_dach` (vorher 0,10 m Überstand, nachher 0).
-  Dachziegel-Muster geprüft: Linien enden an den Dachflächen-Polygonen (Ansichten, keine Abweichung gefunden). Geprüft: Probe über alle
-  Wände des Musterhauses komplex (0 Wände mit Überstand), `cargo test` Kern (surface_pattern, 15 grün). Nicht geprüft: Bild nachher
-  (WASM-Kern im Container nicht neu gebaut, Platte knapp), Mac/Metal, Tauri-App. · S
 ### Phase 3 (27.11.–3.12.): Vorprojekt
 - ◐ **[234]** 3D: Rundbogen-Fenster der OG-Südwand (`og-f1`, Musterhaus komplex) ragte mit dem Bogenscheitel über die Wandoberkante ins
   Gesims/Deckenband darüber. Stand 13.11.: Ursache war das Beispiel, nicht der Kern: Brüstung 0,9 + Höhe 1,6 = 2,5 m, die Decke c-og
@@ -1277,6 +1196,88 @@ Einzeilig mit ID, Titel, Datum (2026). Kleine Reste erledigter Punkte (z. B. [T7
 exakte Durchdringung, [61] Zuordnung per Hand, [63] Profil je Kante, [70] Flächentabelle als Layout-Element,
 [80] Einzelplan-PDF ohne Ebenen, [82] Legende per Ziehen) stehen im Archiv beim jeweiligen Eintrag.
 
+- [242] Doku nachgeführt (13.11.): `src-tauri/render3d/README.md` neu (Pathtracer-Module, Belichtung/Raumlicht als `Sky`-Felder in `pathtrace.rs`), Crate-Tabellen (`ear_clip.rs`, Pathtracer), Anonymitäts-Zeile in ARCHITEKTUR 3.4, READMEs `viewport`/`state`/`ui` (`imageExport`, `shortcutOverview`, `sheetSnap`, Blatt-HUDs); `doc/KURZANLEITUNG.md` um Volumen → Bauteile, Pathtracing, Plakat-Hilfslinien/Zuschnitt, anonyme Abgabe, Kataster-Schwarzplan ergänzt; erledigte ✓-Einträge des Release-Abschnitts nach „Erledigt“ verschoben. Offen: `ViewportToolbar3d.tsx` ([240]) liegt nicht in diesem Stand und ist nicht dokumentiert.
+- [217] Kern-Panics aus dem Robustheitstest (12.11.): `wall_top_at` nutzte `f64::clamp(base, base+height)` — bei negativer/NaN-Höhe
+  min > max bzw. NaN → Panic in `wall_piece_mesh` (und über 3D/Exporte, u. a. `exportIfcSpf`). Neu `jsnum::clamp_safe`/`ClampSafe`
+  (Grenzen tauschen, NaN wie JS); 28 weitere `.clamp(` mit berechneten Grenzen in Kern-Modulen umgestellt. „Zufall 13“-Timeout war
+  Last (je Fall < 1 s, ganze Datei ~30 s), keine Endlosschleife. Regressionstests: Rust `wandkoerper_mit_kaputter_hoehe_ohne_panic`,
+  `jsnum::clamp_ohne_panic`, vitest in `robustness.test.ts`. Offen: ganzzahlige `usize::clamp` mit berechneten Grenzen nicht einzeln geprüft.
+- [222] Volumenstudie → Bauteile (12.11., aus [206]; umgesetzt 13.11.): Befehl `solidtoparts` (`koerperinbauteile`, Werkzeuge 3D
+  neben „Körper verschneiden“) wandelt den gewählten Körper (sonst Klick in den Körper) in einem Undo-Schritt um: je Geschoss eine
+  Aussenwand je Umrisskante (aktiver Wandtyp, Referenz „left“ = Aussenfläche auf der Körperkante, wächst nach innen, `isExternal`),
+  Decken zwischen den Geschossen (Deckentyp wie beim Zeichnen), Flachdach ohne Vorsprung bündig mit der Körper-OK; der Körper entfällt
+  (GV sonst doppelt). Geschosse: Körper-UK muss auf einem Geschoss oder der Stapel-OK stehen; bestehende Geschosse werden genutzt, fehlende
+  obenauf angelegt (Höhe des obersten, gleichmässig auf den Rest verteilt), Reste < 0.5 m verlängern das oberste. Prismen auch nicht-
+  rechteckig/konkav, dazu Quader/Zylinder des Befehls „Körper“. Abgelehnt mit Meldung: verjüngt, Kugel/Kegel/Torus/Rotation/Verschneidung,
+  verrundete/gefaste Ecken, Abzugskörper, selbstschneidender Grundriss, UK zwischen Geschossen, < 0.5 m. Kern `cmd_massing.rs` (Decke/Dach
+  über `ceiling_item`/`roof_item` aus `cmd_create.rs`), Befehl `commands/cmds/solidToParts.ts`. Tests: Rust `cmd_massing::tests` (5),
+  vitest `solidToParts.test.ts`, e2e `release10.spec.ts` [222] (aus fixme). Angesehen: CLI-Plan/Schnitt eines L-Körpers mit schräger Kante,
+  Browser-App (Linux). Offen: Mac/Tauri nicht geprüft; keine Bodenplatte unter dem untersten Geschoss; keine Innenwände/Öffnungen;
+  Körper mit Löchern (gibt es im Modell nicht) und Bogenkanten (Zylinder wird zum 48-Eck aus Einzelwänden). · M
+- [229] Cycles-Rendering: Streifen/Dreiecke auf der Hauptdachfläche (12.11., Maintainer, Musterhaus komplex Iso). Ursache: Das GLB hat keine
+  UVs; der Normal-Map-Knoten (Tangentenraum) bekam je Dreieck einen anderen Tangentenrahmen und zeichnete die Gauben-Fan-Triangulierung als
+  helle/dunkle Diagonalen. Nicht im Netz: GLB geprüft (Normalen der Dachdreiecke an der Oberseite max. 0.0002 rad neben der Flächennormalen,
+  keine verdrehte Wicklung, Schichten 12 mm Abstand ohne Koplanarität); Rendern ohne Normalenkarte beseitigt es. Lösung `render_dossier.py`
+  `add_textures`: keine Normalenkarte, stattdessen Rauigkeitskarte als Höhenfeld (Bump, Stärke 0.3, rahmenfrei). Test:
+  `blenderRender.test.ts` (Skript ohne Normal-Map-Knoten). Geprüft: echter Lauf `bpy` 5.3 (CPU) vorher/nachher. Offen: Mac/Blender 3.6/4.x;
+  echte Normalenkarten bräuchten UVs im GLB-Export. · S
+- [239] Objekt-Info mit einklappbaren Abschnitten durchgängig (13.11., UI-Sichtprüfung): Wand/Decke/Dach … waren schon Gruppen ([189]), aber
+  Bezugspunkt, Masse und beim Gelände Einstellungen (Material, Höhenversatz, Netzpunkt, Zuschneiden) + Georeferenzierung (LV95) waren feste
+  Blöcke — beim Gelände musste man scrollen. Jetzt alle `InfoGroup` (Klick/Enter/Leertaste auf den Kopf, Pfeil, `aria-expanded`); neue Gruppen
+  `refpoint`, `dimensions`, `contextProps`, `georef` (`objectInfo/groups.ts`). Zustand je Abschnitts-Art in localStorage `dossier.objinfo.groups`
+  (nur Abweichungen vom Standard; `infoGroupState.ts`), nicht im Projekt. Standard: alles offen ausser „Georeferenzierung“ (`georef`: Herkunft +
+  LV95 — reine Auskunft, selten gebraucht, Kopf bleibt sichtbar); Bedienbares und Masse bleiben offen. Das Fenster Objekteinstellungen nutzt
+  dasselbe `ObjectInfoPanel` (ohne Bezugspunkt/Masse) und damit dieselben Gruppen und denselben Zustand. Geprüft: vitest `src/panels src/ui
+  src/i18n` (neu `infoGroupState.test.ts`), tsc, e2e objectSettings/objectSettingsWindow/roomStamp218, Screenshots hell/dunkel (Gelände,
+  Wand; Tastatur Enter/Leertaste). Nicht geprüft: Mac/Tauri, natives Nebenfenster. · S
+- [241] Objekt-Info Gelände/Kontextobjekte, Kamera, Baum: Raster wie die übrigen Gruppen (13.11., Chromium hell/dunkel, Musterhaus komplex; Mac/Tauri
+  nicht geprüft). Befund: „Höhe des Punkts (m)“ vierzeilig, Felder 64 px; Ursache auch, dass `.objinfo-site` (nur `> `-Kind-Selektor) seit der Gruppierung ([239])
+  nicht mehr griff — der Gelände-Block hatte wieder eigenen Scroll und 8 px Polster, Zeilen („Material“, Verbau) waren abgeschnitten. Jetzt Zeilen als
+  `.objinfo-field` (Label 104 px | Feld | Einheit hinter dem Feld, `ContextObjectProps.tsx`), kurze Labels (Einheit nicht mehr im Label, Hinweise als
+  Tooltip: `site.earthDepth.hint`, `site.excavation.shoringEmbed.hint`), Knöpfe umbrechend in `.site-actions`, Verbau-Kanten umbrechend; Gleitkomma-Rauschen
+  im Feld (0,0499999…) auf 12 Stellen gerundet (nur Anzeige). Kamera: Labels gekürzt (Augenhöhe, Bildwinkel vert., Brennweite KB, Sonne), Label-Spalte
+  104 px statt 56 px (auch `.objinfo-tree`). Gemessen (Playwright): Gelände, Höhenlinien, Baugrube, Nachbargebäude, Kamera ohne mehrzeilige/abgeschnittene
+  Labels, `scrollWidth ≤ clientWidth`. Funktion unverändert. Geprüft: tsc, vitest `src/panels src/ui src/i18n`. Nicht visuell geprüft: Baum (im
+  Musterhaus keiner; nur dieselbe CSS-Regel wie Kamera). · S
+- [235] `update-dossier` brach nach der Commit-Liste stumm ab (13.11., Maintainer, Void): `git log … | head -20` lieferte bei mehr als 20 neuen
+  Commits SIGPIPE, mit `set -euo pipefail` endete das Skript ohne Meldung — weder WASM noch AppImage wurden gebaut, `dossier` startete das alte
+  AppImage. Lösung: `git log -20`; `dossier` warnt, wenn das AppImage älter ist als der Checkout. Geprüft: Ursache nachgestellt (Exit 141), Syntax. · S
+- [230] Sonnenschatten im Grundriss mit weissen Löchern, je nach Uhrzeit (13.11., Maintainer, Linux). Ursache: Das Ear-Clipping
+  (dreifach vorhanden: Kern `gpu_compile`, `render2d`, `render3d`) brach bei den abgetasteten Geländeschatten-Stücken (viele fast kollineare
+  Ecken, Ring berührt sich längs einer Geraden) ab und liess den Rest leer — 651 von 4149 Stücken im Musterhaus komplex über ein Jahr.
+  Lösung: eine robuste Fassung `hatchgen/src/ear_clip.rs` für alle drei (flache/doppelte Ecken vorab und nach jedem Ohr entfernen,
+  Diagonal-Test mit Spiel, zweite Stufe streng, erst dann erzwungen; Spiel = Ausdehnung·1e-7); Probe danach 0 Fehler in f64 und f32. Tests `ear_clip::tests`.
+  Geprüft nur im Linux-Container (Probe + Tests), nicht auf dem Mac. · S
+- [231] Fenster im Giebel in 3D sauber eingeschnitten (13.11., Maintainer, Musterhaus komplex: Ost-/Westgiebel DG, Anbau-Giebel).
+  Ursache: (1) Unter einer Dachfläche zerlegte `wall_bands::emit_top_piece` die Wand um jede Rechteck-Öffnung in Pfeiler/Brüstung/Sturz
+  mit eigener schräger Oberkante (sichtbare Fugen von der Öffnung bis zum Dach); (2) im [216]-Wandkörper wurden die Stücke je einzeln
+  unterteilt und um 0,1 mm vergrössert — die Stossfläche am First blieb als innere Fläche stehen (Oculus: Streifen bis zum Boden, Bogen
+  halb). Lösung: Jede gerade Wand mit Öffnungen unter einer Dachebene bekommt den Körper je Schicht (`model3d/wall_body.rs`); die
+  Stücke dafür rechnet `wall_pieces_with(plain)` mit `WallIn::keep_holes` (Löcher statt Teilung); `band_solid` vereinigt Stücke mit
+  Dachebene genau (gleiche Schnittlinie → Manifold verschmilzt), unterteilt erst danach, schneidet dann die Löcher; Leibungsstücke des
+  Schichteinzugs kommen vergrössert danach dazu; Bänder ganz ohne Dachebene wie bisher. Tests: Rust `giebelwand_mit_rechteckfenster_ein_koerper`,
+  `giebelwand_mit_rundfenster_auf_dem_first_ohne_fuge` (keine inneren Flächen, Lochfläche = Öffnungsfläche), vitest
+  `toWalls3d.giebel.test.ts` (Komplex: dg-aw-w, dg-aw-o, og-anbau-n ohne Stücke, Aussenschicht fugenlos); Golden `komplex-model3d` neu.
+  Geprüft: render_png (Linux/lavapipe) vorher/nachher, verdeckt + schattiert. **Offen:** Mac/Metal nicht angesehen; Bogenwände unter
+  Dach behalten die Streifen; Leibungsstücke berühren innere Schichten an einzelnen Kanten; zwei schwache Scheinkanten auf der OG-Südwand
+  in der Fernsicht (verdeckt); `emit_walls` Komplex ≈ 100 → 180 ms (Cache je Wand). · S
+- [232] 3D: Netzlinien (Fächer der Triangulierung) auf den Dachflächen sichtbar, v. a. in Schwarz-Weiss und von weitem (13.11.).
+  Ursache: nicht die Triangulierung der Fläche (koplanare Dreiecke wurden richtig unterdrückt), sondern die FUGE zweier übereinanderliegender
+  Schichten (Dach-, Deckenschichten sind je ein geschlossener Körper): Oberseite der unteren und Unterseite der oberen Schicht liegen
+  deckungsgleich mit +n/−n und galten in `render3d/edges.rs` (`draws_crease`, Silhouette) als 180°-Knick — die Diagonalen der Fugenfläche
+  (Fächer der Ohrenzerlegung mit Dachfenster-/Gaubenlöchern) wurden als Kante gezeichnet und scheinen mit dem Linien-Tiefenversatz von
+  weitem durch die Oberfläche. Lösung: Knickwinkel über den Betrag des Skalarprodukts (entgegengesetzte deckungsgleiche Flächen = koplanar);
+  Silhouette überspringt Kanten, deren Flächen alle koplanar sind und gegensinnig stehen. Test `edges::double_sided_tests::stacked_layers_do_not_draw_interface_diagonals`
+  (vorher 21 statt 20 Kanten). Geprüft: Wireframe-Draufsicht Musterhaus komplex vorher/nachher (Fächer weg, Wendeltreppe/Wände ruhiger),
+  `cargo test` render3d (144 grün). Nicht geprüft: Mac/Metal, Tauri-App, Vergleich in der App von weitem. · S
+- [233] 3D: Oberflächenmuster-Striche (Fassadenschalung/Dachziegel) ragen über Dachrand und Traufe hinaus (13.11.).
+  Ursache: `surface_pattern3d::wall_top_profile` mass die Wandoberkante unter dem Dach auf der Wandachse; die geneigte Dachfläche
+  schneidet die Wand aber quer zur Achse an Aussen- und Innenseite verschieden hoch — auf der Traufseite ragten die senkrechten Striche
+  bis 15 cm (dg-aw-s/-n im Musterhaus komplex, 5 cm bei og-anbau) über den Wandkörper. Lösung: Profil und Fläche je Wandseite
+  (Messlinie im Abstand der Seite). Test `wandmuster_endet_an_der_wandseite_unter_dem_dach` (vorher 0,10 m Überstand, nachher 0).
+  Dachziegel-Muster geprüft: Linien enden an den Dachflächen-Polygonen (Ansichten, keine Abweichung gefunden). Geprüft: Probe über alle
+  Wände des Musterhauses komplex (0 Wände mit Überstand), `cargo test` Kern (surface_pattern, 15 grün). Nicht geprüft: Bild nachher
+  (WASM-Kern im Container nicht neu gebaut, Platte knapp), Mac/Metal, Tauri-App. · S
 - [210] Kurzanleitung und Wettbewerbs-Beispiel (13.11.): `doc/KURZANLEITUNG.md` (deutsch, Schritt für Schritt entlang [206], Bilder in `doc/kurzanleitung/`: Plan EG/OG 1:200, Situation 1:500, Schnitt, Ansicht); Beispielprojekt `src/model/sampleProjectWettbewerb.ts` (Mehrfamilienhaus, 3 Geschosse, Flachdach, Baurecht, 30 Räume mit Raumprogramm, Schnitte/Ansichten, Situation, Präsentationsplan A1; Datei → Neu aus Vorlage → Wettbewerb, CLI `:wettbewerb`; Test `sampleProjectWettbewerb.test.ts`); Hilfe → Tastaturkürzel … (Overlay `ShortcutOverviewDialog`, Liste aus `SHORTCUT_DEFS` und `ALIASES` abgeleitet, `state/shortcutOverview.ts`, Test dazu; neues Hilfe-Menü in Browser-Leiste und nativem Menü). Offen: keine 3D- und keine Präsentationsplan-Bilder (Linux-Container ohne WebGPU/Metal), Hilfe-Menü und Dialog nicht in der Tauri-App/auf dem Mac geprüft, Anleitung nicht von einer zweiten Person durchgespielt
 - [209] Kostenschätzung grob (12.11.): Kennwert-Methode Menge × Kennwert je eBKP-H-Hauptgruppe B–J (Bezug m³ GV oder m² GF je Methode, wahlweise HNF/Fassade/Dach/pauschal), Honorare/Reserve/MwSt in %, Genauigkeit ±, Region- und Index-Faktor, Preisstand; `Project.costEstimate`, Kern `kosten.rs` (Mengen aus der SIA-416-Flächentabelle, eine Quelle mit [225]). Panel im Flächenbilanz-Panel, Blatt-Tabelle Quelle „costs", CSV/PDF wie der Flächen-Nachweis; e2e-Schritte 5b/10b in `release10.spec.ts`. Vorgaben sind Beispielwerte (≈ 800 CHF/m³ GV bzw. 2'600 CHF/m² GF, keine offizielle Quelle) und als solche markiert; belegt nur MwSt 8.1 % und die SIA-102-Genauigkeiten. Offen: Varianten nebeneinander, Kennwerte aus einer echten Quelle (Büro/CRB), Mac-Gegenprobe
 - [185] Navigation wie Archicad (12.11.): Geschosswechsel behält den Ausschnitt, Cmd+5/6 Geschoss runter/hoch, Cmd+3 „3D · Auswahl", Cmd+4 Auswahl im 3D ausblenden.

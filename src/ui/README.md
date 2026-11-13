@@ -38,6 +38,7 @@ liegen in `src/panels`, Befehle in `src/commands`.
 | Datei | Inhalt |
 |---|---|
 | `LayoutSheet.tsx`, `layoutSheetMath.ts`, `LayoutCreateDialogs.tsx`, `SheetTableHud.tsx` | Layout-Blatt im Haupt-Viewport, Treffer- und Resize-Rechnung der Viewports, Erstell-Dialoge, Eigenschaften einer Blatt-Tabelle |
+| `sheetSnap.ts`, `SheetGuidesHud.tsx`, `SheetImageHud.tsx` | [208] Plakat: Fang auf Hilfslinien (8 px, Alt = aus), Hilfslinien-Panel, Bild-HUD mit Zuschnitt durch Ziehen (reine Zahlen in `sheetSnap.ts`) |
 | `OpeningDetailPanels.tsx`, `ElevationPreview.tsx` | Detail-Panels des Fenster-/Türeditors (der Editor selbst: `panels/objectInfo/OpeningEditor.tsx`), Ansichtsvorschau |
 
 ## Unterordner
