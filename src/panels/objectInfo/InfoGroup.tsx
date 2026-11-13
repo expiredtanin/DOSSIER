@@ -4,11 +4,11 @@
 import { useEffect, useRef, useSyncExternalStore, type ReactNode } from "react";
 import { t } from "../../i18n";
 import { INFO_GROUP_TITLE, type InfoGroupId } from "./groups";
-import { clearInfoGroupFocus, getInfoGroupState, subscribeInfoGroups, toggleInfoGroup } from "./infoGroupState";
+import { clearInfoGroupFocus, getInfoGroupState, isInfoGroupOpen, subscribeInfoGroups, toggleInfoGroup } from "./infoGroupState";
 
 export function InfoGroup({ id, children }: { id: InfoGroupId; children: ReactNode }) {
   const st = useSyncExternalStore(subscribeInfoGroups, getInfoGroupState, getInfoGroupState);
-  const open = !st.collapsed.has(id);
+  const open = isInfoGroupOpen(st, id);
   const head = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (st.focus?.id !== id) return;

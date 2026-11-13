@@ -965,6 +965,7 @@ export const en: Record<TranslationKey, string> = {
   // ── Extruded solid attributes (truck integration, object info panel) ────
   "objinfo.sectionLine.section": "Section line",
   "objinfo.dimText.section": "Dimension text",
+  "objinfo.contextObject.props": "Settings",
   "objinfo.group.toggle": "Expand/collapse section",
   "objinfo.detailRef.section": "Detail/section reference",
   "objinfo.dimRefs.section": "Associative dimension",
