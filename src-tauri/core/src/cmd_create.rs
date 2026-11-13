@@ -273,7 +273,7 @@ fn active_wall_type<'a>(root: &'a Map<String, Value>, ctx: &Ctx) -> Option<&'a V
 }
 
 /// id des aktiven Wandtyps (Fallback: erster Typ, sonst die id aus dem Kontext).
-fn active_wall_type_id(p: &Project, ctx: &Ctx) -> Value {
+pub(crate) fn active_wall_type_id(p: &Project, ctx: &Ctx) -> Value {
     let t = p.wall_types.iter().find(|t| t.id == ctx.wall_type).or(p.wall_types.first());
     s(t.map_or(ctx.wall_type, |t| t.id.as_str()))
 }
@@ -448,19 +448,24 @@ fn ceiling_ops(p: &Project, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
     if abs_area(&outline) < 1e-4 {
         return Vec::new();
     }
+    add_op("ceilings", vec![ceiling_item(p, ctx.level, &outline, ctx, ids)])
+}
+
+/// Neue Decke auf Geschoss `floor` mit dem Umriss `outline` (Aufbau wie beim Zeichnen; auch [222]).
+pub(crate) fn ceiling_item(p: &Project, floor: &str, outline: &[V], ctx: &Ctx, ids: &mut IdGen) -> Value {
     let mut fields = vec![
         ("id", s(&ids.next("C"))),
         ("type", s("ceiling")),
-        ("floorId", s(ctx.level)),
+        ("floorId", s(floor)),
         ("categoryCode", category_or(p, "30", ctx)),
-        ("outline", pvs(&outline)),
+        ("outline", pvs(outline)),
         ("wallTypeId", active_wall_type_id(p, ctx)),
     ];
     // Eigener Deckentyp (erster des Projekts); `wallTypeId` bleibt als Pflichtfeld/Rückfall ([206]).
     if let Some(ct) = p.ceiling_types.as_deref().and_then(|l| l.first()) {
         fields.push(("ceilingTypeId", s(&ct.id)));
     }
-    add_op("ceilings", vec![obj(fields)])
+    obj(fields)
 }
 
 /// Wände des Geschosses als `[n, (ax, ay, bx, by, dicke)…]` für die Raumerkennung.
@@ -911,22 +916,27 @@ fn roof_ops(p: &Project, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
     if w < 0.1 || d < 0.1 {
         return Vec::new();
     }
-    let shape = s_of(v, "shape");
-    add_op(
-        "roofs",
-        vec![obj(vec![
-            ("id", s(&ids.next("RF"))),
-            ("type", s("roof")),
-            ("floorId", s(ctx.level)),
-            ("categoryCode", category_or(p, "31", ctx)),
-            ("outline", pvs(&rect_corners(a, b))),
-            ("shape", s(shape)),
-            ("pitchDeg", js_num(if shape == "flach" { 0.0 } else { 30.0 })),
-            ("overhang", js_num(0.4)),
-            ("ridgeAxis", s(if w >= d { "x" } else { "y" })),
-            ("thickness", js_num(0.2)),
-        ])],
-    )
+    add_op("roofs", vec![roof_item(p, ctx.level, &rect_corners(a, b), s_of(v, "shape"), 0.4, ctx, ids)])
+}
+
+/// Neues Dach auf Geschoss `floor` über `outline` (Vorgaben wie beim Zeichnen: 30° bzw. flach, 20 cm; auch [222]).
+pub(crate) fn roof_item(p: &Project, floor: &str, outline: &[V], shape: &str, overhang: f64, ctx: &Ctx, ids: &mut IdGen) -> Value {
+    let (mut x0, mut x1, mut y0, mut y1) = (f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY);
+    for q in outline {
+        (x0, x1, y0, y1) = (x0.min(q.0), x1.max(q.0), y0.min(q.1), y1.max(q.1));
+    }
+    obj(vec![
+        ("id", s(&ids.next("RF"))),
+        ("type", s("roof")),
+        ("floorId", s(floor)),
+        ("categoryCode", category_or(p, "31", ctx)),
+        ("outline", pvs(outline)),
+        ("shape", s(shape)),
+        ("pitchDeg", js_num(if shape == "flach" { 0.0 } else { 30.0 })),
+        ("overhang", js_num(overhang)),
+        ("ridgeAxis", s(if x1 - x0 >= y1 - y0 { "x" } else { "y" })),
+        ("thickness", js_num(0.2)),
+    ])
 }
 
 /// Stützen-Profil: rund (Durchmesser `size`) oder quadratisch (Kante `size`).
@@ -1144,6 +1154,8 @@ pub fn ops(root: &Map<String, Value>, p: &Project, v: &Value) -> Option<Vec<Op>>
         "tree" => tree_ops(p, v, &ctx, ids),
         "circlesToTrees" => circles_to_trees_ops(root, p, v, &ctx, ids),
         "extrude" => extrude_ops(root, v, &ctx, ids),
+        // [222] Volumenstudie → Bauteile.
+        "solidToParts" => crate::cmd_massing::ops(root, p, v, &ctx, ids),
         _ => return crate::cmd_draw::ops(root, p, v, &ctx, ids).or_else(|| crate::cmd_solid::ops(root, p, v, &ctx, ids)),
     })
 }
@@ -1263,6 +1275,7 @@ pub fn query(root: &Map<String, Value>, p: &Project, v: &Value) -> Option<Result
             None => json!({ "hit": null }),
         },
         "recognize" => crate::drawing_recognize::report(p, v),
+        "solidToParts" => crate::cmd_massing::check(p, v),
         "pickProfile" => json!({ "hit": pick_profile(root, level, at).map_or(Value::Null, profile_json) }),
         "profile" => json!({ "hit": find(root, "drawings2d", s_of(v, "id")).map_or(Value::Null, profile_json) }),
         _ => return crate::cmd_draw::query(root, p, v).or_else(|| crate::cmd_solid::query(root, p, v)).map(Ok),

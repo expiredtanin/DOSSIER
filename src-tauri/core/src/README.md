@@ -71,6 +71,7 @@ Neues Modul: `<modul>.rs` und `mod` in `lib.rs`, Bindungen in `web/<modul>.rs` u
 |---|---|
 | `commands.rs` | Einstieg der Befehle: `ops()` verteilt eine Anfrage `{cmd, …}` |
 | `cmd_create.rs` | Zeichenbefehle für Bauteile: neue Elemente, Vorschau, Treffer |
+| `cmd_massing.rs` | [222] Volumenstudie → Bauteile: Körper zu Aussenwänden je Geschoss, Decken, Flachdach (fehlende Geschosse obenauf) |
 | `cmd_draw.rs`, `cmd_edit.rs`, `cmd_split.rs`, `cmd_paste.rs` | 2D zeichnen und bemassen, bearbeiten, teilen, einfügen |
 | `cmd_transform.rs`, `cmd_wall_edit.rs`, `cmd_solid.rs` | Transformieren; Wände bearbeiten; Körper, Gelände, Sonderbefehle |
 | `cmd_context.rs` | [193] Höhenversatz und Höhe je Höhenlinie von Gelände-/Umgebungs-Elementen (`contextOffset`, `contourZ`) |

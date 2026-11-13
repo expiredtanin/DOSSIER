@@ -118,6 +118,7 @@ pub mod commands;
 pub mod cmd_transform;
 pub mod cmd_edit;
 pub mod cmd_create;
+pub mod cmd_massing;
 pub mod cmd_draw;
 #[cfg(test)]
 mod cmd_autodim_tests;
