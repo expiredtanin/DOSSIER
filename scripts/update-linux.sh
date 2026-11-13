@@ -71,7 +71,8 @@ after=$(git rev-parse HEAD)
 if [ "$before" = "$after" ]; then
   echo "Schon aktuell ($(git log -1 --format='%h %s'))."
 else
-  git log --oneline "$before..$after" | head -20
+  # ohne `| head`: mit pipefail bricht git log bei >20 Commits mit SIGPIPE ab und set -e beendet das Skript stumm
+  git log --oneline -20 "$before..$after"
 fi
 
 say "Node-Pakete"
@@ -114,7 +115,7 @@ fi
 
 say "Fertig: $(git log -1 --format='%h %s')"
 if [ "$TESTER" = 1 ]; then
-  app=$(ls -1t release/Dossier-*.AppImage 2>/dev/null | head -1)
+  app=$(ls -1t release/Dossier-*.AppImage 2>/dev/null | sed -n 1p || true)
   [ "$START" = 1 ] && exec "$app"
   echo "Starten mit: $app   (oder: dossier)"
 elif [ "$START" = 1 ]; then

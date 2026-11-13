@@ -25,7 +25,10 @@ cd "$repo"
 app=\$(ls -1t release/Dossier-*.AppImage 2>/dev/null | head -1)
 # Wayland: nativ (über XWayland schwarzer Rand in runden Fensterecken); GPU-Modus „minimal“ setzt electron-main.cjs.
 oz=\${DOSSIER_OZONE:-}; if [ -z "\$oz" ] && { [ -n "\${WAYLAND_DISPLAY:-}" ] || [ "\${XDG_SESSION_TYPE:-}" = wayland ]; }; then oz=wayland; fi
-if [ ! -d node_modules ] && [ -n "\$app" ]; then exec "\$app" \${oz:+--ozone-platform=\$oz} "\$@"; fi
+if [ ! -d node_modules ] && [ -n "\$app" ]; then
+  # Warnung, wenn das AppImage älter ist als der Checkout (update-dossier nicht durchgelaufen)
+  [ "\$(stat -c %Y "\$app")" -lt "\$(git log -1 --format=%ct 2>/dev/null || echo 0)" ] && echo "[dossier] Hinweis: \$app ist älter als der Checkout — update-dossier erneut laufen lassen." >&2
+  exec "\$app" \${oz:+--ozone-platform=\$oz} "\$@"; fi
 exec npm run electron -- "\$@"
 EOF
 
