@@ -101,6 +101,10 @@ npm run electron      # Linux
 npm run dev           # nur im Browser, für Entwicklung
 ```
 
+Linux: `./scripts/update-linux.sh` holt den neusten `master`, baut nur die veralteten WASM-Pakete, löscht danach die
+Rust-Zwischendateien und Caches (`--start` startet Dossier anschliessend, `--keep-build` behält die Zwischendateien
+für schnellere nächste Builds, `--appimage` baut zusätzlich ein AppImage).
+
 Prüfen: `npm run check` (TypeScript, Vitest und die Rust-Tests aller Crates),
 `npm run e2e` für die Oberflächentests mit Playwright.
 
