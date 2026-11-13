@@ -10,7 +10,7 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   stehen im Archiv („Bewusst nicht übernommen“).
 - **Grösse** (eine Person mit Agenten): S ≤ 1 Tag · M ≤ 1 Woche · L ≤ 1 Monat · XL > 1 Monat.
   Steht keine Grösse im Archiv, ist sie hier geschätzt.
-- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 242);
+- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 247);
   nie eine ID wiederverwenden oder umnummerieren. Präfix-IDs (`[K]`, `[G]`, `[T]`, `[B]`, `[C]`) bleiben.
 - **Pro Punkt:** was fehlt · wo im Code · Grösse. Höchstens ein bis drei Sätze je Punkt;
   Messwerte und Befunde gehören in den Commit.
@@ -1236,6 +1236,7 @@ Einzeilig mit ID, Titel, Datum (2026). Kleine Reste erledigter Punkte (z. B. [T7
 exakte Durchdringung, [61] Zuordnung per Hand, [63] Profil je Kante, [70] Flächentabelle als Layout-Element,
 [80] Einzelplan-PDF ohne Ebenen, [82] Legende per Ziehen) stehen im Archiv beim jeweiligen Eintrag.
 
+- [247] Kurzanleitung passt zur App (13.11.): Bedienangaben in `doc/KURZANLEITUNG.md` gegen de.ts, Menüs (`appMenu.ts`, `AppMenuBar`), Befehls-Registry und Kürzel belegt; Test `src/i18n/kurzanleitung.test.ts` prüft Menüpfade, fette/„quotierte“ Bedienelemente, Befehle in Backticks und ⌘-Kürzel. Korrigiert: Browser-Menü (kürzer, anders benannt), „Vorsprünge bis“, Dachform „Flachdach“ als Auswahlfeld im Panel Objekt-Info (+ Wahl in der Befehlszeile `rf`), Geschoss kopieren per ⌘C/⌘6/⌘V (⌘D dupliziert nur mit Versatz auf demselben Geschoss), „Objekt-Info“, Ressourcen als Fenster. Ergänzt: Begehen (Umschalt+F) und Kameras. Offen: Begehen mit Kollision/Geist (G), Kamerafahrt/Video und Gruppen im Darstellungs-Menü stehen in diesem Stand nicht im Code und fehlen in der Anleitung. Geprüft: tsc, vitest `src/i18n`; nicht in der App angesehen.
 - [243] Qualität der neuen UI-Texte seit 12.11. (13.11.): Durchsicht aller neuen de/en-Schlüssel ([209] Kosten, [211] Blender, 3D-Bild, Hilfslinien, Körper→Bauteile, Raumstempel …). en: „building parts“ → „components“ (wie übriges en.ts), Kosten-Texte (Subtotal, Key figure, excluding land, attic storeys …), 3D-Bild-Fehler (graphics card returned no image, eye point and target coincide), „Automatic/Common scale“, „To change:“ u. a.; de: „Alt schaltet den Fang aus“, „Standpunkt und Ziel fallen zusammen“, „nicht als Bildschirmfoto“, „Ansichtsvorlage „Präsentation““, „MwSt. (Z)“. Platzhalter de/en geprüft (alle gleich), Schlüssel unverändert. Offen: `vitest src/i18n` und volles tsc im Worktree mangels WASM-Paketen nicht gelaufen
 - [240] 3D-Viewport: Knöpfe und Anzeigen schöner (13.11., Wunsch Maintainer). Neue Komponente `src/viewport/ViewportToolbar3d.tsx` (eigener CSS-Block `.vp3t-*`;
   `Wasm3DViewport.tsx` bindet nur noch ein): Icon-Knöpfe (Material Symbols `directions_walk`, `add_a_photo`) in zwei Gruppen oben rechts mit Tooltip
