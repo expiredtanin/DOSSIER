@@ -93,9 +93,18 @@ def main(path: str) -> int:
     blocks = {}
     for b in doc.blocks:
         n = {}
+        pens = []
         for be in b:
             n[be.dxftype()] = n.get(be.dxftype(), 0) + 1
-        blocks[b.name] = {"entities": n, "anonymous": b.name.startswith("*D")}
+            # [200] Stift der Blockinhalte: eigene Farbe (420) und Strichstärke (370), sonst nach Ebene.
+            pens.append(
+                {
+                    "type": be.dxftype(),
+                    "trueColor": list(be.rgb) if be.dxf.hasattr("true_color") and be.dxftype() != "HATCH" else None,
+                    "lineweight": be.dxf.lineweight if be.dxf.hasattr("lineweight") else None,
+                }
+            )
+        blocks[b.name] = {"entities": n, "anonymous": b.name.startswith("*D"), "pens": pens}
     styles = {st.dxf.name: (st.dxf.font if st.dxf.hasattr("font") else None) for st in doc.styles}
     ttf = {}
     for st in doc.styles:

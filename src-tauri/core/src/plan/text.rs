@@ -255,6 +255,7 @@ pub fn dxf_text(t: &TextPrim, scale: f64, default_font: &str) -> TextIn {
                 height: p.height_m,
                 wrap: p.wrap_width.unwrap_or(f64::NAN),
                 style,
+                color: marks.and_then(|m| m.color.clone()).or_else(|| p.color.clone()).unwrap_or_else(|| "#000000".to_string()),
                 paras: paras.into_iter().map(|q| { let w = split_ws(&q).into_iter().map(str::to_string).collect(); (q, w) }).collect(),
             }
         }
@@ -286,6 +287,7 @@ fn stamp_lines(p: &StampText, scale: f64, family: &dyn Fn(Option<&str>) -> Strin
             height: line.max_size().unwrap_or(f64::NAN),
             align: line.align.code() as f64,
             style: TextStyleIn { family: family(first.font_family.as_deref()), bold: first.bold, italic: first.italic },
+            color: first.fill.clone(),
             down: y,
             dx,
             text,

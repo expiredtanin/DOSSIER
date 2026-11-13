@@ -108,13 +108,13 @@ pub struct Scene {
 
 // ── Farben (wie `toRgba`/`withOpacity` der TS-Fassung) ──────────────────────────────────────────
 
-const DEFAULT_LINE: &str = "#1a1a1a";
+pub(crate) const DEFAULT_LINE: &str = "#1a1a1a";
 const INK: Rgba = [0.1, 0.1, 0.1, 1.0];
 /// Fester Grauton gedimmter Primitive (wie `GREY_RGB` in `gpu_compile.rs`).
 const GREY_RGB: f64 = 0.549;
 
 /// CSS-Strichfarbe je Linienklasse (Spiegel der `.plan-svg .<cls>`-Regeln in styles.css).
-fn cls_stroke(cls: Option<&str>) -> Option<&'static str> {
+pub(crate) fn cls_stroke(cls: Option<&str>) -> Option<&'static str> {
     match cls? {
         "door-leaf" | "door-swing" | "door-frame" | "window-glass" => Some("#1a1a1a"),
         "wall-axis" => Some("#4a453e"),

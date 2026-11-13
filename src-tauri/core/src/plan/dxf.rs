@@ -118,6 +118,8 @@ pub struct StampLine {
     /// 0 links, 1 Mitte, 2 rechts.
     pub align: f64,
     pub style: TextStyleIn,
+    /// [200] Textfarbe (CSS-Hex der ersten Textstrecke der Zeile, wie die Anzeige).
+    pub color: String,
     /// Versatz der Grundlinie vom Anker nach unten (Meter).
     pub down: f64,
     /// [140] Versatz der Zeile vom Anker nach rechts (Meter; Block um den Anker zentriert,
@@ -132,7 +134,8 @@ pub enum TextIn {
     Stamp { at: V2, lines: Vec<StampLine> },
     /// `drawingText`: Anker, Winkel, Höhe, Spaltenbreite (NaN = keine), Schrift und Absätze
     /// (Text des Absatzes, Wörter nach `split(/\s+/)`).
-    Single { at: V2, angle: f64, height: f64, wrap: f64, style: TextStyleIn, paras: Vec<(String, Vec<String>)> },
+    /// `color` [200]: Textfarbe (Hex).
+    Single { at: V2, angle: f64, height: f64, wrap: f64, style: TextStyleIn, color: String, paras: Vec<(String, Vec<String>)> },
 }
 
 /// Ergebnis: Zahlen und Zeichenketten der flachen Zeichnung, Entitäten je Art (Modell, Blöcke).
@@ -174,6 +177,8 @@ struct Flat {
     layer_defaults: HashMap<String, (Option<f64>, f64)>,
     /// [200] Stift des gerade ausgegebenen Primitivs (vom Sammelschritt gesetzt).
     pen: Pen,
+    /// [200] In Blöcken: Ebene, gegen deren Standard der Stift verglichen wird (die der Einfügung, nicht „0").
+    pen_ref: Option<String>,
     ltypes: HashMap<String, usize>,
     styles: HashMap<String, usize>,
     dim_styles: HashMap<String, usize>,
@@ -192,6 +197,7 @@ impl Flat {
             layers: HashMap::new(),
             layer_defaults: HashMap::new(),
             pen: Pen::default(),
+            pen_ref: None,
             ltypes: HashMap::new(),
             styles: HashMap::new(),
             dim_styles: HashMap::new(),
@@ -244,7 +250,7 @@ impl Flat {
     /// [200] Den Stift des aktuellen Primitivs auf `layer` setzen: Werte, die dem Ebenen-Standard gleichen, bleiben
     /// „nach Ebene" (−1); abweichende gehen als eigene Farbe bzw. Strichstärke an die Entitäten.
     fn apply_pen(&mut self, b: &mut Buf, layer: &str) {
-        let (dc, dl) = self.layer_defaults.get(layer).copied().unwrap_or((None, f64::NAN));
+        let (dc, dl) = self.layer_defaults.get(self.pen_ref.as_deref().unwrap_or(layer)).copied().unwrap_or((None, f64::NAN));
         let color = match self.pen.color {
             Some(c) if dc != Some(c) => c,
             _ => -1.0,
@@ -734,7 +740,7 @@ enum Prim {
     Polygon { pts: Vec<V2>, fill: String, stroke: String, hatch: Option<HatchIn> },
     Circle { center: V2, r: f64, dash: Vec<f64> },
     DrawingArc { center: V2, r: f64, a0: f64, a1: f64, dash: Vec<f64> },
-    Single { at: V2, angle: f64, height: f64, wrap: f64, style: TextStyleIn, paras: Vec<(String, Vec<String>)> },
+    Single { at: V2, angle: f64, height: f64, wrap: f64, style: TextStyleIn, color: String, paras: Vec<(String, Vec<String>)> },
     Stamp { at: V2, lines: Vec<StampLine> },
     /// Textpfad, Bild, Platzhalter: nichts zu schreiben.
     Other,
@@ -846,15 +852,24 @@ fn read_entry(part: &mut Part, i: usize, hatches: &[(i32, Hatch, i32)], text: Op
             _ => Prim::Other,
         },
         T_DRAWING_TEXT => match text {
-            Some(TextIn::Single { at, angle, height, wrap, style, paras }) => {
-                Prim::Single { at: *at, angle: *angle, height: *height, wrap: *wrap, style: style.clone(), paras: paras.clone() }
+            Some(TextIn::Single { at, angle, height, wrap, style, color, paras }) => {
+                Prim::Single { at: *at, angle: *angle, height: *height, wrap: *wrap, style: style.clone(), color: color.clone(), paras: paras.clone() }
             }
             _ => Prim::Other,
         },
         _ => Prim::Other,
     };
     let pen = match rec.tag {
-        T_POLYGON | T_LINE | T_ARC | T_CIRCLE => Pen::of(&s(f[1])?, f[2]),
+        // [200] Linie/Bogen ohne eigene Farbe: Klassen-Farbe, sonst Tinte — wie die Anzeige (`scene::stroke_color_for`).
+        T_LINE | T_ARC => {
+            let own = s(f[1])?;
+            let cls = s(f[0])?;
+            let color = crate::plan::scene::cls_stroke(Some(&cls)).map(str::to_string).unwrap_or_else(|| {
+                if js_trim(&own).is_empty() { crate::plan::scene::DEFAULT_LINE.to_string() } else { own }
+            });
+            Pen::of(&color, f[2])
+        }
+        T_POLYGON | T_CIRCLE => Pen::of(&s(f[1])?, f[2]),
         T_DRAWING_ARC => Pen::of(&s(f[0])?, f[1]),
         _ => Pen::default(),
     };
@@ -904,13 +919,14 @@ fn to_local(p: &Prim, f: Frame) -> Option<Prim> {
         },
         Prim::Circle { center, r, dash } => Prim::Circle { center: f.local(*center), r: r / f.scale, dash: dash.clone() },
         Prim::DrawingArc { center, r, a0, a1, dash } => Prim::DrawingArc { center: f.local(*center), r: r / f.scale, a0: a0 - f.rot, a1: a1 - f.rot, dash: dash.clone() },
-        Prim::Single { at, angle, height, wrap, style, paras } => Prim::Single {
+        Prim::Single { at, angle, height, wrap, style, color, paras } => Prim::Single {
             at: f.local(*at),
             angle: angle - f.rot,
             height: height / f.scale,
             // `p.wrapWidth && p.wrapWidth / f.scale`: 0/NaN bleiben.
             wrap: if *wrap != 0.0 && !wrap.is_nan() { wrap / f.scale } else { *wrap },
             style: style.clone(),
+            color: color.clone(),
             paras: paras.clone(),
         },
         _ => return None,
@@ -1016,10 +1032,31 @@ impl Ctx<'_> {
         self.flat.add_text_style(&name, &family, bold, italic)
     }
 
+    /// [200] Blockinhalt auf Ebene „0" (schwimmt mit der Einfügung): Farbe und Strichstärke der Elemente (Klassen-Stil
+    /// aufgelöst) stehen an den Entitäten, soweit sie vom Standard der Ebene der Einfügung abweichen.
+    fn block_content(&mut self, content: &mut Buf, members: &[&Entry], frame: Frame, insert_layer: &str) {
+        self.flat.pen_ref = Some(insert_layer.to_string());
+        for m in members {
+            if let Some(lp) = to_local(&m.prim, frame) {
+                self.flat.pen = m.pen;
+                self.emit(content, &lp, LAYER_ZERO, LAYER_ZERO);
+                self.flat.pen = Pen::default();
+            }
+        }
+        self.flat.pen_ref = None;
+    }
+
     /// [200] Ein Plan-Eintrag mit dem Stift seines Elements.
     fn emit_pen(&mut self, b: &mut Buf, e: &Entry, layer: &str) {
         self.flat.pen = e.pen;
         self.emit(b, &e.prim, layer, LAYER_HATCH);
+        self.flat.pen = Pen::default();
+    }
+
+    /// [200] Textfarbe: gleicht sie der Ebenenfarbe, bleibt der Text nach Ebene, sonst eigene Farbe (Stärke nie).
+    fn text_pen(&mut self, b: &mut Buf, color: &str, layer: &str) {
+        self.flat.pen = Pen { color: rgb_or_null(color), lw: None };
+        self.flat.apply_pen(b, layer);
         self.flat.pen = Pen::default();
     }
 
@@ -1071,8 +1108,7 @@ impl Ctx<'_> {
                 self.flat.apply_pen(b, layer);
                 self.flat.add_arc(b, layer, *center, *r, *a0, *a1);
             }
-            Prim::Single { at, angle, height, wrap, style, paras } => {
-                self.flat.set_epen(b, -1.0, -1.0);
+            Prim::Single { at, angle, height, wrap, style, color, paras } => {
                 let dir = V2 { x: jsnum::sin(*angle), y: -jsnum::cos(*angle) };
                 for (text, down) in single_lines(*height, *wrap, paras) {
                     if js_trim(&text).is_empty() || !(*height > 0.0) {
@@ -1080,13 +1116,14 @@ impl Ctx<'_> {
                     }
                     let p = V2 { x: at.x + dir.x * down, y: at.y + dir.y * down };
                     let st = self.style_of(Some(style));
+                    self.text_pen(b, color, layer);
                     self.flat.add_text2(b, layer, p, *height, *angle, &text, 0.0, st);
                 }
             }
             Prim::Stamp { at, lines } => {
-                self.flat.set_epen(b, -1.0, -1.0);
                 for l in lines {
                     let st = self.style_of(Some(&l.style));
+                    self.text_pen(b, &l.color, layer);
                     self.flat.add_text2(b, layer, V2 { x: at.x + l.dx, y: at.y - l.down }, l.height, 0.0, &l.text, l.align, st);
                 }
             }
@@ -1201,7 +1238,7 @@ impl Ctx<'_> {
     }
 
     /// Blockinstanz → BLOCK je Definition + INSERT (`emitBlockInstance`); `false` = als lose Primitive.
-    fn block_instance(&mut self, b: &mut Buf, d: &Drawing2D, prims: &[&Prim], layer: &str, names: &mut BlockNames) -> bool {
+    fn block_instance(&mut self, b: &mut Buf, d: &Drawing2D, members: &[&Entry], layer: &str, names: &mut BlockNames) -> bool {
         let Drawing2DGeom::Block { block_def_id, at, rotation, scale, .. } = &d.geom else { return false };
         let Some(def) = self.project.block_defs.as_ref().and_then(|l| l.iter().find(|x| &x.id == block_def_id)) else { return false };
         let s = scale.unwrap_or(1.0);
@@ -1215,11 +1252,7 @@ impl Ctx<'_> {
         if fresh {
             let frame = Frame { origin: at, rot: *rotation, scale: s };
             let mut content = Buf::block();
-            for p in prims {
-                if let Some(lp) = to_local(p, frame) {
-                    self.emit(&mut content, &lp, LAYER_ZERO, LAYER_ZERO);
-                }
-            }
+            self.block_content(&mut content, members, frame, layer);
             self.flat.set_pen(&mut content, -1.0);
             let desc = def.name.clone();
             self.flat.define_block(b, &name, &desc, &[], content);
@@ -1229,7 +1262,7 @@ impl Ctx<'_> {
     }
 
     /// Tür/Fenster → BLOCK in Wandrichtung + INSERT mit Attributen (`emitOpening`).
-    fn opening(&mut self, b: &mut Buf, o: &Opening, prims: &[&Prim], layer: &str, names: &mut BlockNames) -> bool {
+    fn opening(&mut self, b: &mut Buf, o: &Opening, members: &[&Entry], layer: &str, names: &mut BlockNames) -> bool {
         let Some(wall) = self.project.walls.iter().find(|w| w.id == o.host_wall_id) else { return false };
         let len = hypot(&[wall.end.x - wall.start.x, wall.end.y - wall.start.y]);
         if len < 1e-6 || !o.position.is_finite() {
@@ -1241,11 +1274,7 @@ impl Ctx<'_> {
         let rot = jsnum::atan2(uy, ux);
         let frame = Frame { origin, rot, scale: 1.0 };
         let mut content = Buf::block();
-        for p in prims {
-            if let Some(lp) = to_local(p, frame) {
-                self.emit(&mut content, &lp, LAYER_ZERO, LAYER_ZERO);
-            }
-        }
+        self.block_content(&mut content, members, frame, layer);
         self.flat.set_pen(&mut content, -1.0);
         let is_door = o.kind == ElementKind::Door;
         let wall_opening = o.door_type == Some(OpeningDoorType::Wandoeffnung);
@@ -1531,7 +1560,6 @@ fn emit_entries(cx: &mut Ctx, main: &mut Buf, entries: &[Entry], layer_by_code: 
             }
             cx.flat.set_epen(main, -1.0, -1.0);
             let members: Vec<&Entry> = groups.get(key).map(|l| l.iter().map(|&k| &entries[k]).collect()).unwrap_or_default();
-            let prims: Vec<&Prim> = members.iter().map(|m| &m.prim).collect();
             let id = key.1.as_str();
             match key.0 {
                 b'd' => {
@@ -1542,7 +1570,7 @@ fn emit_entries(cx: &mut Ctx, main: &mut Buf, entries: &[Entry], layer_by_code: 
                 b'b' => {
                     let d = block_by_id[id];
                     let layer = drawing_layer(Some(&d.id), LAYER_DEFAULT);
-                    if !cx.block_instance(main, d, &prims, &layer, &mut names) {
+                    if !cx.block_instance(main, d, &members, &layer, &mut names) {
                         for m in &members {
                             let l = layer_for(m);
                             cx.emit_pen(main, m, &l);
@@ -1552,7 +1580,7 @@ fn emit_entries(cx: &mut Ctx, main: &mut Buf, entries: &[Entry], layer_by_code: 
                 _ => {
                     let op = opening_by_id[id];
                     let layer = layer_by_code.get(op.category_code.as_str()).cloned().unwrap_or_else(|| LAYER_SYMBOLS.to_string());
-                    if !cx.opening(main, op, &prims, &layer, &mut names) {
+                    if !cx.opening(main, op, &members, &layer, &mut names) {
                         for m in &members {
                             let l = layer_for(m);
                             cx.emit_pen(main, m, &l);
@@ -1846,6 +1874,56 @@ mod tests {
         assert_eq!(pens.last().map(|w| (w[1], w[2])), Some((-1.0, -1.0)), "am Ende wieder nach Ebene");
     }
 
+    /// [200] Linien ohne eigene Farbe tragen den aufgelösten Klassen-Stil (Tür-/Achslinie: Klassenfarbe, sonst Tinte),
+    /// Texte ihre Farbe; in Blöcken gleich.
+    #[test]
+    fn klassen_stil_und_textfarbe_im_dxf() {
+        use crate::model::Vec2;
+        use crate::plan::buf::Writer;
+        use crate::plan::prim::Primitive;
+        let v = |x: f64, y: f64| Vec2 { x, y };
+        let line = |cls: &str, color: Option<&str>, w: f64, y: f64| Primitive::Line {
+            a: v(0.0, y), b: v(1.0, y), cls: cls.into(), weight_mm: w, dash: None, zigzag: None, motif: None,
+            color: color.map(Into::into), drawing_id: None, opening_id: None, stair_id: None, greyed: None, opacity: None,
+        };
+        let text = |color: &str, y: f64| Primitive::DrawingText {
+            at: v(0.0, y), text: "Hallo".into(), height_m: 0.25, angle: 0.0, color: color.into(), marks: None, wrap_width: None, doc: None,
+            drawing_id: None, greyed: None, opacity: None,
+        };
+        let mut w = Writer::new(false);
+        w.push(&line("door-swing", None, 0.35, 0.0));
+        w.push(&line("wall-axis", None, 0.13, 1.0));
+        w.push(&line("misc", None, 0.25, 2.0));
+        w.push(&line("misc", Some("#336699"), 0.5, 3.0));
+        w.push(&text("#c03020", 4.0));
+        w.push(&text("#336699", 5.0));
+        let bytes = w.finish();
+        let p: Project = serde_json::from_value(crate::sheet_viewports::tests::json()).unwrap();
+        let view = View::parse(&bytes).unwrap();
+        let n = view.len();
+        let mut parts = [Part::new(view, 0, n).unwrap()];
+        let o = DxfOptions { scale: 100.0, include_hatches: true, dim_cm: false, paper_layout: false, bounds: [0.0, 0.0, 10.0, 6.0], default_font: "Arial".into(), floor: "eg".into(), table_labels: String::new() };
+        let f = collect(&mut parts, &p, &o).unwrap();
+        // Satzfolge ab dem ersten Linien-/Textsatz: (Stift davor, Art der Entität).
+        let mut seq: Vec<(f64, f64, f64)> = Vec::new();
+        let (mut col, mut lw) = (-1.0, -1.0);
+        for (i, x) in f.nums.iter().enumerate() {
+            if *x == REC_ENTITY_PEN && f.nums.get(i + 3).is_some_and(|k| *k == REC_LINE || *k == REC_TEXT2) {
+                (col, lw) = (f.nums[i + 1], f.nums[i + 2]);
+                seq.push((f.nums[i + 3], col, lw));
+            }
+        }
+        let _ = (col, lw);
+        let line_pens: Vec<(f64, f64)> = seq.iter().filter(|s| s.0 == REC_LINE).map(|s| (s.1, s.2)).collect();
+        assert!(line_pens.contains(&(0x1a1a1a as f64, 35.0)), "Türlinie: Tinte, 0,35 mm: {line_pens:?}");
+        assert!(line_pens.contains(&(0x4a453e as f64, 13.0)), "Achslinie: Klassenfarbe: {line_pens:?}");
+        assert!(line_pens.contains(&(0x1a1a1a as f64, 25.0)) || line_pens.iter().any(|p| p.0 == 0x1a1a1a as f64), "{line_pens:?}");
+        assert!(line_pens.contains(&(0x336699 as f64, 50.0)), "eigene Farbe bleibt: {line_pens:?}");
+        let text_pens: Vec<f64> = seq.iter().filter(|s| s.0 == REC_TEXT2).map(|s| s.1).collect();
+        assert_eq!(text_pens, vec![0xc03020 as f64, 0x336699 as f64], "Texte mit eigener Farbe, ohne Strichstärke");
+        assert!(seq.iter().filter(|s| s.0 == REC_TEXT2).all(|s| s.2 == -1.0));
+    }
+
     #[test]
     fn strichstaerke_rastet_auf_cad_stufen() {
         assert_eq!(snap_lweight(35.0), 35.0);
@@ -1916,7 +1994,7 @@ mod tests {
         // 4 m in Richtung +y = lokale +x, durch Skalierung 2.
         assert!((b.x - 2.0).abs() < 1e-12 && b.y.abs() < 1e-12);
         let style = TextStyleIn { family: "Arial".into(), bold: false, italic: false };
-        let Some(Prim::Single { height, angle, wrap, .. }) = to_local(&Prim::Single { at: V2 { x: 10.0, y: 5.0 }, angle: PI / 2.0, height: 0.4, wrap: 0.0, style, paras: vec![] }, f) else { panic!() };
+        let Some(Prim::Single { height, angle, wrap, .. }) = to_local(&Prim::Single { at: V2 { x: 10.0, y: 5.0 }, angle: PI / 2.0, height: 0.4, wrap: 0.0, style, color: "#000".into(), paras: vec![] }, f) else { panic!() };
         assert!((height - 0.2).abs() < 1e-12 && angle.abs() < 1e-12 && wrap == 0.0);
         let Some(Prim::Circle { center, r, .. }) = to_local(&Prim::Circle { center: V2 { x: 10.0, y: 7.0 }, r: 1.0, dash: vec![] }, f) else { panic!() };
         assert!((r - 0.5).abs() < 1e-12 && (center.x - 1.0).abs() < 1e-12);
