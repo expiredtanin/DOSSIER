@@ -11,9 +11,12 @@ ansehen, den Präsentationsplan auf A1 legen und PDF, DXF und IFC ausgeben.
 Schnitte A-A und B-B, Ansichten, Situation 1:500 und ein Präsentationsplan A1. Auf der Kommandozeile:
 `node dist-cli/dossier-cli.mjs :wettbewerb kennzahlen`.
 
-Die Menüpfade gelten für die macOS-App (Hauptplattform). Im Browser-Build stehen dieselben Punkte in der Menüleiste
-oben („Datei“, „Bearbeiten“, „Ansicht“, „Fenster“, „Hilfe“). Alle Tastenkürzel zeigt *Hilfe → Tastaturkürzel …*;
-dort stehen auch die Kürzel für die Befehlszeile.
+Die Menüpfade gelten für die macOS-App (Hauptplattform). Im Browser-Build steht eine kürzere Menüleiste oben („Datei“,
+„Bearbeiten“, „Ansicht“, „Fenster“, „Hilfe“); sie heisst dort teils anders (Datei: „Neues Projekt“, „Projekt speichern“,
+„Neu aus Vorlage: Wettbewerb“, „Exportieren: DXF“). Es fehlen *Bearbeiten → Kennzahlen und Raumprogramm …* (stattdessen
+das Panel **Flächenbilanz**) und *Fenster → Standort importieren* (stattdessen die Schaltfläche **Standort importieren**
+im Panel **Gelände**). Alle Tastenkürzel zeigt *Hilfe → Tastaturkürzel …*; dort stehen auch die Kürzel für die
+Befehlszeile.
 
 > **Stand der Bilder:** Sie stammen aus dem Linux-Container (CLI-Ausgabe, mit Schraffur, als SVG im Chromium
 > aufgenommen). 3D-Bilder fehlen, weil es dort kein WebGPU/Metal gibt. Die Mac-Ansicht (Metal) kann in Strichstärke
@@ -31,7 +34,7 @@ Wichtige Kürzel: `w` (`wand`) Wand · `d` (`decke`) Decke · `rf` (`dach`) Dach
 
 ## 1. Leeres Projekt
 
-*Datei → Neu* (⌘N). Das neue Projekt hat Erdgeschoss, Obergeschoss, Schnitt A und Ansicht Süd. Gleich speichern:
+*Datei → Neu* (⌘N; im Browser „Neues Projekt“). Das neue Projekt hat Erdgeschoss, Obergeschoss, Schnitt A und Ansicht Süd. Gleich speichern:
 *Datei → Speichern unter …* (⇧⌘S), z. B. `wettbewerb.obp`. Danach genügt ⌘S.
 
 ## 2. Kataster-DXF laden (LV95)
@@ -41,7 +44,7 @@ Wichtige Kürzel: `w` (`wand`) Wand · `d` (`decke`) Decke · `rf` (`dach`) Dach
 LV95-Punkt; die Statusleiste zeigt lokale und LV95-Koordinaten. Parzellen und Gebäude liegen auf der neuen
 Zeichnungsebene (Panel **Zeichnungsebenen**). Mit „Auf Plan einpassen“ (⌘0, „Alles einpassen“) siehst du alles.
 
-Online lädt *Fenster → Standort importieren* Gebäude, Gelände und Luftbild von swisstopo. Das ist im Container nicht
+Online lädt *Fenster → Standort importieren* (Browser: Panel **Gelände**) Gebäude, Gelände und Luftbild von swisstopo. Das ist im Container nicht
 geprüft.
 
 ## 3. Baurecht
@@ -50,7 +53,7 @@ geprüft.
 2. Panel **Gelände** → Abschnitt „Baurecht der Parzelle“ → **Parzelle aus Auswahl**. Es erscheint z. B.
    „Parzelle 880 m² · zulässig …“.
 3. **Grenzabstand** setzen, bei Bedarf je Kante, **Baulinie aus Auswahl** für die Strassenseite.
-4. **Gesamthöhe max.** eintragen, optional **Profilwinkel** und **Vorsprünge**. Mit „Hülle im 3D“ zeigt Dossier die
+4. **Gesamthöhe max.** eintragen, optional **Profilwinkel** und **Vorsprünge bis**. Mit „Hülle im 3D“ zeigt Dossier die
    zulässige Hülle durchscheinend; Verstösse sind rot.
 
 Die Prüfung steht darunter („Gebäude innerhalb der zulässigen Fläche“, „Höhe 9.50 m ≤ 12.00 m“). Im Beispiel:
@@ -62,10 +65,13 @@ Zuerst das Geschoss wählen (Panel **Zeichnungsebenen**, „Erdgeschoss“; ⌘5
 
 - **Wände:** `w`, Ecken klicken oder als LV95 tippen, mit dem Startpunkt schliessen, Enter.
 - **Decke:** `d`, die vier Ecken, Enter. Die Decke bekommt den Deckentyp des Projekts.
-- **Dach:** `rf`, zwei Ecken; vorgegeben ist ein Satteldach. Ein Flachdach mit Attika stellst du in den
-  Objekt-Informationen ein (Dachform „flach“), wie im Beispiel.
-- Obergeschosse: Wände auf das nächste Geschoss kopieren (⌘D dupliziert die Auswahl) und mit ⌘6 das Geschoss
-  wechseln.
+- **Dach:** `rf`, zwei Ecken; vorgegeben ist ein Satteldach. Die Dachform lässt sich schon in der
+  Befehlszeile wählen („Flachdach“ unter den Optionen). Nachträglich: Dach wählen, Panel **Objekt-Info** → Abschnitt „Dach“
+  → **Dachform** „Flachdach“; dann erscheint **Attika Höhe (m)** (0 = keine Attika), wie im Beispiel. Die Dachform ist ein
+  Auswahlfeld, kein Schalter.
+- Obergeschosse: Wände wählen, ⌘C, mit ⌘6 („Geschoss höher“) das Geschoss wechseln, ⌘V: Die Kopie liegt auf dem aktiven
+  Geschoss an denselben Koordinaten. (⌘D „Duplizieren“ legt dagegen eine Kopie mit Versatz von 0.5 m auf demselben
+  Geschoss an, nicht auf einem anderen.)
 
 **Volumen → Bauteile:** Hast du die Volumenstudie als freien Körper gezeichnet (`koerper`, senkrechter Quader, Zylinder
 oder Prisma), wandelt der Befehl `solidtoparts` („Körper in Bauteile umwandeln“, auch `koerperinbauteile`; im Panel
@@ -76,7 +82,7 @@ Unterkante zwischen zwei Geschossen), lehnt der Befehl mit einer Meldung ab.
 
 ## 5. Räume und Raumprogramm
 
-1. `rm`, ins Gebäude klicken: Dossier erkennt den Raum aus den Wänden. Name und Nummer in den Objekt-Informationen
+1. `rm`, ins Gebäude klicken: Dossier erkennt den Raum aus den Wänden. Name und Nummer im Panel **Objekt-Info**
    setzen.
 2. Panel **Flächenbilanz** → **Raumprogramm importieren …**: CSV mit den Spalten
    `Raum;Fläche [m²];Anzahl;Flächenart;Gruppe` wählen, Spalten zuordnen, **Importieren**. Das Programm erscheint als
@@ -122,7 +128,10 @@ Süd“ aus dem leeren Projekt folgen dem Gebauten, bis du ihre Linien verschieb
 
 Kopfleiste **Axonometrie** öffnet einen Reiter „3D · Erdgeschoss“. Im Panel **Gelände** schaltest du **Schatten im
 3D zeigen** ein (auch „Schatten im Grundriss zeigen“) und wählst Datum (Tagundnachtgleiche, Sommer-, Wintersonnenwende)
-und Uhrzeit. Ein 3D-Bild in Abgabeauflösung (z. B. A3 bei 300 dpi) erzeugt *Ansicht → 3D-Bild exportieren …* (Befehl
+und Uhrzeit. Mit **Begehen** (Umschalt+F, Knopf in der 3D-Werkzeugleiste „Navigation“) gehst du in Augenhöhe durchs Modell: W/A/S/D
+oder Pfeile gehen, Q/E runter und hoch, Umschalt schneller, Alt langsamer, mit gedrückter Maustaste umschauen. Die
+aktuelle Ansicht legst du als Kamera ab („Kamera aus aktueller Ansicht anlegen“, Gruppe **Kameras** im Panel
+**Ausschnitte**) und öffnest sie später wieder. Ein 3D-Bild in Abgabeauflösung (z. B. A3 bei 300 dpi) erzeugt *Ansicht → 3D-Bild exportieren …* (Befehl
 `bild3d`); es lässt sich speichern oder ins Layout einsetzen.
 
 *Hier fehlen die Bilder: Das 3D läuft nur mit WebGPU (Browser) oder Metal (Mac), nicht im Linux-Container.*
@@ -169,7 +178,7 @@ fasst alle Plakate in einen Publikationssatz. **Nicht geprüft** werden frei get
 Blocknamen, Textobjekte, Blattnamen): vor der Abgabe von Hand durchsehen.
 
 **Kataster-Schwarzplan.** Nach dem Kataster-Import (Schritt 2) stellst du die Ansicht auf die Ansichtsvorlage „Situation
-WBW 1:500“ oder „Schwarzplan 1:500“ (Panel **Ressourcen** → Ansichtsvorlagen). Das eigene Gebäude erscheint als gefüllter
+WBW 1:500“ oder „Schwarzplan 1:500“ (*Fenster → Ressourcen*, Ansichtsvorlagen). Das eigene Gebäude erscheint als gefüllter
 Umriss über alle Geschosse, die Kataster-Gebäude und Nachbarn als gefüllte Grundfläche (Situation: grau, Schwarzplan: alles
 schwarz), dazu Parzelle, Strassen, Höhenlinien, Nordpfeil und Massstabsbalken. Raster, Wände, Möbel, Text, Masse und
 Schnittmarken sind aus. Alle Teile liegen auf Klassen (83 Situation Gebäude, 84 Planzeichen) und lassen sich dort
