@@ -10,7 +10,7 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   stehen im Archiv („Bewusst nicht übernommen“).
 - **Grösse** (eine Person mit Agenten): S ≤ 1 Tag · M ≤ 1 Woche · L ≤ 1 Monat · XL > 1 Monat.
   Steht keine Grösse im Archiv, ist sie hier geschätzt.
-- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 235);
+- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 236);
   nie eine ID wiederverwenden oder umnummerieren. Präfix-IDs (`[K]`, `[G]`, `[T]`, `[B]`, `[C]`) bleiben.
 - **Pro Punkt:** was fehlt · wo im Code · Grösse. Höchstens ein bis drei Sätze je Punkt;
   Messwerte und Befunde gehören in den Commit.
@@ -891,7 +891,10 @@ Punktwolken/BCF-Ausbau, Windows-Paket, [C5]/[C7]/[15] Kern-Umbauten — ausser s
   gerechnet (Cache ohne Abstand fehlt). (11.11.) Absturzsicherung ([155]) wandert mit dem Geschoss der Decke mit dem
   Loch, nicht mit dem der Treppe. · S
 - ◐ **[67]** Skizzenstil (`plan/sketch.rs`). Kompakte Linien-Unterlage (grosse DXF-Unterlagen), Bögen und Kreise bleiben
-  exakt; keine Intensitäts-Einstellung; keine Hand-Schraffur. · S
+  exakt; keine Intensitäts-Einstellung; keine Hand-Schraffur. (13.11., [236]) Meldung „Text doppelt, Schatten/Baumkronen schwarz“ im
+  Skizzenstil am Stand master NICHT reproduziert (Musterhaus komplex EG: CLI-SVG und App im Browser/SwiftShader zeigen Text einfach,
+  Schatten durchscheinend, Füllungen wie ohne Skizze); vermutlich älteres AppImage. Regressionstest `src/plan/sketchStyle.test.ts`.
+  Nicht geprüft: Mac/Metal. · S
 - ◐ **[152]** Importierte Netze in Schnitt, Ansicht, Grundriss (`core/src/mesh_view.rs`). Der Archiv-Eintrag nennt keinen
   ausdrücklichen „Offen“-Teil. (11.11., [181]) IFC-Gelände wird beim Import ein Gelände-Element und läuft damit in Grundriss,
   Schnitt, Ansicht und 3D als Gelände; offen: Baugruben auf geschlossenen Gelände-Netzen (Platte) nicht geprüft, Grundriss
