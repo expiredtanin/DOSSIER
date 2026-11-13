@@ -21,6 +21,10 @@ Menu.setApplicationMenu(null);
 // hinter --enable-unsafe-webgpu, und WebGPU braucht das Vulkan-Backend.
 app.commandLine.appendSwitch("enable-unsafe-webgpu");
 app.commandLine.appendSwitch("enable-features", "Vulkan,VulkanFromANGLE,DefaultANGLEVulkan");
+// Unter Wayland verträgt sich Chromiums Vulkan nicht mit `--ozone-platform=wayland` („not compatible with Vulkan“,
+// das Fenster geht sofort wieder zu) → über XWayland (x11) starten. Übersteuerbar: DOSSIER_OZONE=wayland|x11.
+const ozone = process.env.DOSSIER_OZONE || (process.env.WAYLAND_DISPLAY || process.env.XDG_SESSION_TYPE === "wayland" ? "x11" : "");
+if (ozone) app.commandLine.appendSwitch("ozone-platform", ozone);
 
 const DEV_URL = "http://localhost:5187";
 const isDev = !app.isPackaged && !process.env.DOSSIER_USE_DIST; // DOSSIER_USE_DIST=1: gebautes dist ohne Paket prüfen
