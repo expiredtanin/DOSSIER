@@ -806,3 +806,60 @@ fn giebelwand_mit_rundfenster_auf_dem_first_ohne_fuge() {
     let (p, area, plain) = gable_with_window(Some("rund"));
     assert_gable_body(&p, area, plain);
 }
+
+/// [216] Bogenwand (Sehnen-Stücke mit radialen Gehrungen): je Band EIN Körper ohne senkrechte innere Flächen an den
+/// Gehrungen (im 3D war jede Sehne als Linie sichtbar); das Fenster bleibt offen, die Stücke zeigt render3d nicht mehr.
+#[test]
+fn bogenwand_ein_koerper_ohne_sehnen_fugen() {
+    for bulge in [0.4, -1.0] {
+        let mut p = sample();
+        p.walls.retain(|w| w.id == "W1");
+        p.walls[0].bulge = Some(bulge);
+        let walls = emit_walls(&p, true).unwrap();
+        assert!(walls.iter().all(|w| w.no_mesh), "{bulge}: alle Stücke ohne eigene Extrusion");
+        let n_bands = walls.iter().map(|w| w.band).max().unwrap() + 1;
+        let bodies: Vec<(usize, &WallBody)> = walls.iter().filter_map(|w| w.body.as_ref().map(|b| (w.band, b))).collect();
+        assert_eq!(bodies.len(), n_bands, "{bulge}: ein Körper je Band");
+        for (band, b) in bodies {
+            let m = crate::solid_bool::Mesh { positions: b.positions.clone(), indices: b.indices.clone() };
+            assert!(m.is_closed());
+            // Volumen = Summe der Stücke ohne ihre Löcher (bis auf die Überlappung der Leibungsstücke um 0,1 mm).
+            let hole = |w: &RWall| w.holes.iter().flatten().map(|h| (h.to - h.from) * (h.z_top - h.z_bottom) * w.thickness).sum::<f64>();
+            let sum: f64 = walls.iter().filter(|w| w.band == band).map(|w| wall_piece_volume(w) - hole(w)).sum();
+            assert!((m.volume().abs() - sum).abs() < 0.03 * sum, "{bulge} Band {band}: {} soll {sum}", m.volume().abs());
+            // Keine senkrechte Kante mit mehr als zwei Dreiecken (Stirnflächen zweier Sehnen an der Gehrung).
+            let key = |i: u32| -> [i64; 3] {
+                let c = &b.positions[i as usize * 3..i as usize * 3 + 3];
+                [(c[0] * 1e5).round() as i64, (c[1] * 1e5).round() as i64, (c[2] * 1e5).round() as i64]
+            };
+            let mut n: std::collections::HashMap<([i64; 3], [i64; 3]), usize> = std::collections::HashMap::new();
+            for t in b.indices.chunks_exact(3) {
+                for k in 0..3 {
+                    let (u, v) = (key(t[k]), key(t[(k + 1) % 3]));
+                    if u != v {
+                        *n.entry((u.min(v), u.max(v))).or_default() += 1;
+                    }
+                }
+            }
+            // Ecken der Sehnen-Gehrungen: Ende eines Stücks mit Schnittlinie, an dem das nächste gleich hohe und gleich lange
+            // mit ihr beginnt. An den Laibungen stossen Pfeiler, Brüstung, Sturz und Leibungsstücke wie bei geraden Wänden
+            // zusammen; zwischen ungleich langen Sehnen ist die radiale Gehrung nicht ihre Winkelhalbierende, die Bänder
+            // treffen sie um ~1e-5 m versetzt (Stirnflächen nur teilweise deckungsgleich, auch bei den Stücken).
+            let ps: Vec<&RWall> = walls.iter().filter(|w| w.band == band).collect();
+            let plen = |q: &RWall| hypot2(q.end[0] - q.start[0], q.end[1] - q.start[1]);
+            let mut corners: Vec<[f64; 2]> = Vec::new();
+            for a in &ps {
+                let same = |b: &&&RWall| (b.base_elevation - a.base_elevation).abs() < 1e-9 && (b.height - a.height).abs() < 1e-9 && (plen(b) - plen(a)).abs() < 1e-6;
+                let Some(c) = a.end_cut.filter(|c| ps.iter().filter(same).any(|b| b.start_cut == Some(*c))) else { continue };
+                let l = hypot2(c[2], c[3]);
+                for s in [-1.0, 1.0] {
+                    corners.push([a.end[0] + s * c[2] / l * a.thickness / 2.0, a.end[1] + s * c[3] / l * a.thickness / 2.0]);
+                }
+            }
+            assert!(corners.len() > 4, "{bulge} Band {band}: Gehrungen");
+            let at_joint = |u: &[i64; 3]| corners.iter().any(|c| (c[0] - u[0] as f64 * 1e-5).abs() < 1e-3 && (c[1] - u[1] as f64 * 1e-5).abs() < 1e-3);
+            let joints = n.iter().filter(|((u, v), c)| **c != 2 && u[0] == v[0] && u[1] == v[1] && at_joint(u)).count();
+            assert_eq!(joints, 0, "{bulge} Band {band}: innere Stirnflächen an den Gehrungen");
+        }
+    }
+}
