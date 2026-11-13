@@ -8,11 +8,18 @@
 //
 // Hindernisse sind senkrechte „Kapseln": eine Strecke in der XZ-Ebene mit Halbdicke `h` und Höhenband [y0, y1].
 //  • Wand = Strecke entlang der Achse (Halbdicke = halbe Wandstärke), in Stücke ausserhalb der Löcher geteilt;
-//    über und unter einem Loch bleiben Sturz bzw. Brüstung. Ein Loch bis zur Wand-UK ist eine Tür (frei),
-//    ein Loch mit Brüstung ein Fenster: dort sperrt zusätzlich die Glasebene (nicht passierbar).
+//    über und unter einem Loch bleiben Sturz bzw. Brüstung. Tür oder Fenster entscheidet die Öffnungsart im Modell
+//    (`Opening.kind`, über `walkInputFrom` am Loch vermerkt: `door`): Türen sind frei — auch Schiebe-/Hebeschiebetüren
+//    („Fenstertüren“ sind im Modell Türen) und Türen mit Rund-/Bogenform, deren Loch das umschreibende Rechteck ist —,
+//    Fenster sperren mit ihrer Glasebene, auch mit Brüstung 0. Ohne Vermerk (synthetische Eingabe, Bogenwand, Loch
+//    keiner Öffnung zuzuordnen) gilt die Höhe: Loch bis zur Wand-UK = Tür, mit Brüstung = Fenster.
+//  • Decken (nicht Treppentritte): die Unterseite begrenzt den Kopf, ausser über Löchern (Treppenauge, Schacht: der
+//    Umriss trägt sie als Brücke, gerade/ungerade-Regel); so stösst man im Raum an, im Treppenhaus nicht.
 //  • Decken-/Trittkante = Polygonkante über [zBottom, zTop]; senkrechte Dreiecke der Netze (Stützen, Körper) ebenso.
 // Böden sind die Oberseiten der Decken/Tritte (Polygon, Höhe zTop) und alle Dreiecke mit nach oben zeigender Normale
 // (Gelände, Dächer, Körper).
+
+import type { Opening, Project } from "../model/types";
 
 /** Person: Radius und Körperhöhe (m); Stufen bis `STEP_UP` steigt man ohne Hindernis. */
 export const PERSON_RADIUS = 0.25;
@@ -34,12 +41,14 @@ export interface WalkWall {
   thickness: number;
   height: number;
   baseElevation: number;
-  holes?: ReadonlyArray<{ from: number; to: number; zBottom: number; zTop: number }>;
+  holes?: ReadonlyArray<{ from: number; to: number; zBottom: number; zTop: number; door?: boolean }>;
 }
 export interface WalkSlab {
   outline: ReadonlyArray<V2>;
   zBottom: number;
   zTop: number;
+  /** Decke des Modells (Unterseite begrenzt den Kopf); Treppentritte, Stützen u. a. nicht. */
+  ceiling?: boolean;
 }
 export interface WalkMesh {
   /** Flach (x, y, z=Höhe) in Modell-Metern. */
@@ -84,6 +93,9 @@ export class WalkWorld {
   private floorCells = new Map<number, number[]>();
   private bigObstacles: number[] = [];
   private bigFloors: number[] = [];
+  private ceilings: Array<{ poly: ReadonlyArray<V2>; y: number }> = [];
+  private ceilingCells = new Map<number, number[]>();
+  private bigCeilings: number[] = [];
   /** Zahl der Dreiecke aus Netzen, die nicht mehr aufgenommen wurden. */
   skippedTris = 0;
 
@@ -162,7 +174,7 @@ export class WalkWorld {
       this.addObstacle({ x0: p[0], z0: p[1], x1: q[0], z1: q[1], h, y0, y1 });
     };
     const holes = [...(w.holes ?? [])]
-      .map((o) => ({ from: Math.max(0, Math.min(o.from, o.to)), to: Math.min(len, Math.max(o.from, o.to)), zBottom: o.zBottom, zTop: o.zTop }))
+      .map((o) => ({ from: Math.max(0, Math.min(o.from, o.to)), to: Math.min(len, Math.max(o.from, o.to)), zBottom: o.zBottom, zTop: o.zTop, door: o.door }))
       .filter((o) => o.to - o.from > EPS)
       .sort((a, b) => a.from - b.from);
     let cursor = 0;
@@ -171,8 +183,8 @@ export class WalkWorld {
       // Brüstung unter und Sturz über dem Loch.
       piece(o.from, o.to, base, Math.min(top, o.zBottom));
       piece(o.from, o.to, Math.max(base, o.zTop), top);
-      // Fenster (Loch mit Brüstung): die Glasebene sperrt, auch wo die Brüstung niedriger als die Stufenhöhe ist.
-      if (o.zBottom > base + EPS) {
+      // Fenster: die Glasebene sperrt, auch wo die Brüstung niedriger als die Stufenhöhe oder 0 ist.
+      if (!(o.door ?? o.zBottom <= base + EPS)) {
         const m = (o.from + o.to) / 2;
         const half = (o.to - o.from) / 2;
         const p = at(m - half);
@@ -198,6 +210,11 @@ export class WalkWorld {
       maxZ = Math.max(maxZ, p[1]);
     }
     this.addFloor({ poly: pts, y: s.zTop }, minX, minZ, maxX, maxZ);
+    if (s.ceiling) {
+      const id = this.ceilings.length;
+      this.ceilings.push({ poly: pts, y: s.zBottom });
+      this.index(this.ceilingCells, this.bigCeilings, id, minX, minZ, maxX, maxZ);
+    }
     for (let i = 0; i < pts.length; i++) {
       const a = pts[i];
       const b = pts[(i + 1) % pts.length];
@@ -302,8 +319,27 @@ export class WalkWorld {
       px += sx;
       pz += sz;
       [px, pz] = this.pushOut(px, pz, prevX, prevZ, feetY, radius);
+      // Kopf unter einer Decke: nicht hineingehen (wer schon darunter steht, bleibt beweglich).
+      if (this.headBlocked(px, pz, feetY) && !this.headBlocked(prevX, prevZ, feetY)) {
+        px = prevX;
+        pz = prevZ;
+      }
     }
     return [px, pz];
+  }
+
+  /** Stösst der Kopf bei (x, z) an eine Deckenunterseite (Decke über den Füssen, tiefer als die Körperhöhe, kein Loch)? */
+  headBlocked(x: number, z: number, feetY: number): boolean {
+    const hi = feetY + PERSON_HEIGHT;
+    let blocked = false;
+    const test = (id: number) => {
+      const c = this.ceilings[id];
+      if (c.y > feetY + EPS && c.y < hi && pointInPoly(x, z, c.poly)) blocked = true;
+    };
+    const cell = this.ceilingCells.get(key(Math.floor(x / CELL), Math.floor(z / CELL)));
+    if (cell) for (const id of cell) test(id);
+    for (const id of this.bigCeilings) test(id);
+    return blocked;
   }
 
   /** Ist die Person an dieser Stelle frei (kein Hindernis im Körperband)? */
@@ -415,4 +451,56 @@ function triHeight(t: Tri3, x: number, z: number): number | null {
   const tol = -1e-6;
   if (l1 < tol || l2 < tol || l3 < tol) return null;
   return l1 * ay + l2 * by + l3 * cy;
+}
+
+// ── Eingabe aus dem 3D-Modell ───────────────────────────────────────────────────────────────────────────────────
+
+/** Mindestanteil, mit dem sich Loch und Öffnung entlang der Achse überdecken müssen (Schnitt / Vereinigung). */
+const HOLE_MATCH = 0.5;
+
+/**
+ * Das 3D-Modell (`projectToModel3d(…, { forWalk: true })`) als Kollisionseingabe, ergänzt um das, was nur das Projekt
+ * weiss: je Wandloch, ob die zugehörige Öffnung eine Tür ist (`Opening.kind`), und welche Platten Decken sind.
+ * Das Loch wird der Öffnung derselben Wand über die Achslage zugeordnet (Loch ab Stückanfang, projiziert auf die
+ * Wandachse; Schichtbänder weichen um den Einzug leicht ab). Bogenwände und Löcher ohne Treffer bleiben ohne Vermerk.
+ */
+export function walkInputFrom(
+  model: { walls: ReadonlyArray<WalkWall & { wallId?: string }>; slabs: ReadonlyArray<WalkSlab & { ceilingId?: string }>; meshes: ReadonlyArray<WalkMesh> },
+  project: Pick<Project, "walls" | "openings" | "ceilings">,
+): WalkModelInput {
+  const wallById = new Map((project.walls ?? []).map((w) => [w.id, w]));
+  const byWall = new Map<string, Opening[]>();
+  for (const o of project.openings ?? []) {
+    if (!o.hostWallId || !(o.width > 0) || !Number.isFinite(o.position)) continue;
+    const l = byWall.get(o.hostWallId);
+    if (l) l.push(o);
+    else byWall.set(o.hostWallId, [o]);
+  }
+  const ceilingIds = new Set((project.ceilings ?? []).map((c) => c.id));
+  const walls = model.walls.map((w): WalkWall => {
+    const pw = w.wallId ? wallById.get(w.wallId) : undefined;
+    const ops = w.wallId ? byWall.get(w.wallId) : undefined;
+    if (!w.holes?.length || !pw || !ops || pw.bulge) return w;
+    const len = Math.hypot(pw.end.x - pw.start.x, pw.end.y - pw.start.y);
+    if (!(len > EPS)) return w;
+    const s0 = ((w.start[0] - pw.start.x) * (pw.end.x - pw.start.x) + (w.start[1] - pw.start.y) * (pw.end.y - pw.start.y)) / len;
+    const holes = w.holes.map((h) => {
+      const a = s0 + Math.min(h.from, h.to);
+      const b = s0 + Math.max(h.from, h.to);
+      let best: Opening | undefined;
+      let bestScore = HOLE_MATCH;
+      for (const o of ops) {
+        const inter = Math.min(b, o.position + o.width) - Math.max(a, o.position);
+        const union = Math.max(b, o.position + o.width) - Math.min(a, o.position);
+        if (inter > 0 && union > 0 && inter / union >= bestScore) {
+          best = o;
+          bestScore = inter / union;
+        }
+      }
+      return best ? { ...h, door: best.kind === "door" } : h;
+    });
+    return { ...w, holes };
+  });
+  const slabs = model.slabs.map((s): WalkSlab => (s.ceilingId && ceilingIds.has(s.ceilingId) ? { ...s, ceiling: true } : s));
+  return { walls, slabs, meshes: model.meshes };
 }

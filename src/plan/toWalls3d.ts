@@ -336,6 +336,9 @@ export function projectToModel3d(project: Project, opts: Model3dOptions = {}): R
   };
   if (parts.voidMeshes) applyVoidMeshes(model, parts.voidMeshes);
   // [216] Wände mit Formöffnungen: der Körper des Kerns statt der Stücke.
+  // [245] Begehen: die Stücke samt Rechteck-Löchern statt der Körper (ein Körper mit Formöffnung wäre für die Kollision
+  // eine volle Wand); die Stücke ohne Netz sind für den Kollisions-Aufbau gleichwertig, `noMesh` bleibt gesetzt.
+  if (opts.forWalk) return model;
   const bodies = splitWallBodies(model.walls);
   model.walls = bodies.walls;
   for (const m of bodies.meshes) model.meshes.push(m);

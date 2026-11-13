@@ -2,7 +2,10 @@
 import { describe, expect, it } from "vitest";
 import type { OrbitState } from "./cameraBridge";
 import { EYE_HEIGHT, NO_KEYS, bodySettling, initBody, orbitEye, stepWalkCollide, type WalkKeys } from "./walk";
-import { PERSON_RADIUS, STEP_UP, WalkWorld, type WalkModelInput, type WalkSlab, type WalkWall } from "./walkCollision";
+import { sampleProject } from "../model/sampleProject";
+import type { Project } from "../model/types";
+import { projectToModel3d } from "../plan/toWalls3d";
+import { PERSON_HEIGHT, PERSON_RADIUS, STEP_UP, WalkWorld, walkInputFrom, type WalkModelInput, type WalkSlab, type WalkWall } from "./walkCollision";
 
 /** Wand entlang der x-Achse bei z = 0, 10 m lang, 0.2 m dick, 2.6 m hoch. */
 const wall = (holes: WalkWall["holes"] = []): WalkWall => ({ start: [-5, 0], end: [5, 0], thickness: 0.2, height: 2.6, baseElevation: 0, holes });
@@ -75,6 +78,109 @@ describe("Kollision", () => {
     const w = world({ meshes: [{ positions: pos, indices }] });
     expect(w.move(0.05, -2, 0, 4, 0)[1]).toBeLessThan(-0.4);
     expect(w.move(1, -2, 0, 4, 0)[1]).toBeGreaterThan(1);
+  });
+});
+
+describe("[245] Tür oder Fenster nach Öffnungsart", () => {
+  it("Fenster mit Brüstung 0 sperrt (Vermerk door:false), eine Tür mit Vermerk ist frei", () => {
+    const w = world({
+      walls: [wall([{ from: 1, to: 2, zBottom: 0, zTop: 2.1, door: false }, { from: 6, to: 7, zBottom: 0, zTop: 2.1, door: true }])],
+    });
+    expect(w.move(-3.5, -1, 0, 2, 0)[1]).toBeLessThan(0); // Fenster x = -4 … -3
+    expect(w.move(1.5, -1, 0, 2, 0)[1]).toBeGreaterThan(0.5); // Tür
+  });
+
+  it("ohne Vermerk gilt wie bisher die Höhe (Loch bis zur Wand-UK = Tür)", () => {
+    const w = world({ walls: [wall([{ from: 1, to: 2, zBottom: 0, zTop: 2.1 }])] });
+    expect(w.move(-3.5, -1, 0, 2, 0)[1]).toBeGreaterThan(0.5);
+  });
+
+  it("Fenstertür (Tür mit Brüstung 0.1 im Modell) ist passierbar, Brüstung unter der Stufe", () => {
+    const w = world({ walls: [wall([{ from: 6, to: 7.4, zBottom: 0.1, zTop: 2.2, door: true }])] });
+    expect(w.move(1.7, -1, 0, 2, 0)[1]).toBeGreaterThan(0.5);
+  });
+
+  /** Echte Modell-Pipeline (Kern): die Wand W1 des Beispielprojekts mit Tür D1 (x 0.8 … 1.7) und Fenster O1 (x 3.2 … 4.2). */
+  const withOpenings = (fix: (o: NonNullable<Project["openings"]>[number]) => object): Project => ({
+    ...sampleProject,
+    openings: sampleProject.openings!.map((o) => ({ ...o, ...fix(o) })),
+  });
+  const walkOf = (p: Project) => new WalkWorld(walkInputFrom(projectToModel3d(p, { forWalk: true }), p));
+  // Aussenseite der Südwand (y < 0) → hinein (y > 0), auf Höhe des Erdgeschosses.
+  // Nur bis hinter die Wand (z = 0.2): bei x 3 … 4.2 steht innen die Beispieltreppe.
+  const through = (w: WalkWorld, x: number) => w.move(x, -1, 0, 1.2, 0)[1];
+
+  it("Rundbogentür ist über ihr umschreibendes Rechteck passierbar, daneben bleibt die Wand", () => {
+    const w = walkOf(withOpenings((o) => (o.id === "D1" ? { shape: "rundbogen" } : {})));
+    expect(through(w, 1.25)).toBeGreaterThan(0.1);
+    expect(through(w, 0.3)).toBeLessThan(0);
+  });
+
+  it("Runde Öffnung als Fenster (Brüstung 0 im Modell) bleibt gesperrt", () => {
+    const w = walkOf(withOpenings((o) => (o.id === "O1" ? { shape: "rund", sillHeight: 0, height: 1 } : {})));
+    expect(through(w, 3.7)).toBeLessThan(0);
+  });
+
+  it("Fenster mit Brüstung 0 im Modell sperrt, die Tür daneben nicht", () => {
+    const w = walkOf(withOpenings((o) => (o.id === "O1" ? { sillHeight: 0, height: 2.1 } : {})));
+    expect(through(w, 3.7)).toBeLessThan(0);
+    expect(through(w, 1.25)).toBeGreaterThan(0.1);
+  });
+
+  it("Tür-Typ im Modell entscheidet: eine Schiebetür (kind door) mit Brüstung 0 ist frei", () => {
+    const w = walkOf(withOpenings((o) => (o.id === "O1" ? { kind: "door", typeId: "door-standard", sillHeight: 0, height: 2.1 } : {})));
+    expect(through(w, 3.7)).toBeGreaterThan(0.1);
+  });
+});
+
+describe("[245] Decken-Unterseite begrenzt den Kopf", () => {
+  // Decke 2.6 … 2.9 über 10 × 10 m mit Treppenloch x 2 … 4, z −1 … 1 (Brücke im Umriss wie im Kern).
+  const ceilingWithHole: WalkSlab = {
+    outline: [[-5, -5], [5, -5], [5, 5], [-5, 5], [-5, 0], [2, -1], [4, -1], [4, 1], [2, 1], [2, -1], [-5, 0]],
+    zBottom: 2.6,
+    zTop: 2.9,
+    ceiling: true,
+  };
+  const low: WalkSlab = { ...ceilingWithHole, zBottom: 2.6 };
+
+  it("im Raum (Füsse am Boden, Decke über Kopfhöhe) kein Anstossen", () => {
+    expect(2.6).toBeGreaterThan(PERSON_HEIGHT);
+    const w = world({ slabs: [low] });
+    expect(w.headBlocked(-3, 3, 0)).toBe(false);
+  });
+
+  it("auf halber Treppe stösst der Kopf an die Deckenunterseite, über dem Loch nicht", () => {
+    const w = world({ slabs: [low] });
+    expect(w.headBlocked(-3, 3, 1.2)).toBe(true); // 1.2 + 1.8 > 2.6
+    expect(w.headBlocked(3, 0, 1.2)).toBe(false); // Treppenloch
+    // Gehen: unter die Decke hinein ist gesperrt (Deckenkante), im Loch frei.
+    const [x] = w.move(-6, 3, 4, 0, 1.2);
+    expect(x).toBeLessThan(-4.9);
+    const [hx] = w.move(2.6, 0, 0.8, 0, 1.2);
+    expect(hx).toBeCloseTo(3.4, 6);
+  });
+
+  it("auf der Decke selbst (Füsse oben) oder in ihrer Dicke stört die Decke nicht", () => {
+    const w = world({ slabs: [low] });
+    expect(w.headBlocked(-3, 3, 2.9)).toBe(false);
+    expect(w.headBlocked(-3, 3, 2.7)).toBe(false);
+  });
+
+  it("Treppentritte (ohne ceiling) begrenzen den Kopf nicht", () => {
+    const w = world({ slabs: [{ ...low, ceiling: false }] });
+    expect(w.headBlocked(-3, 3, 1.2)).toBe(false);
+  });
+
+  it("Kern-Modell: Decke mit Aussparung — Kopf stösst an, über der Aussparung nicht", () => {
+    const p: Project = {
+      ...sampleProject,
+      ceilings: sampleProject.ceilings!.map((c) => ({ ...c, openings: [[{ x: 3.5, y: 1 }, { x: 4.5, y: 1 }, { x: 4.5, y: 3 }, { x: 3.5, y: 3 }]] })),
+    };
+    const w = new WalkWorld(walkInputFrom(projectToModel3d(p, { forWalk: true }), p));
+    const top = 2.6; // Decke über dem EG
+    expect(w.headBlocked(1, 2, top - 1.2)).toBe(true);
+    expect(w.headBlocked(4, 2, top - 1.2)).toBe(false);
+    expect(w.headBlocked(1, 2, 0)).toBe(false);
   });
 });
 
