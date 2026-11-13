@@ -116,7 +116,7 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   Spalt talseitig); Befehl `contextToTerrain {ids}` (`cmd_context.rs`, ein `Replace` je Netz); Store `groundContextObjects`; Knopf „Aufs
   Gelände setzen“ in der Objekt-Info der Netze (`ContextObjectProps`); beim Hinzufügen eines Geo-Imports (Kataster/swisstopo/OSM,
   `isGeoBuildingMesh`) automatisch im selben Undo-Schritt wie der Import (`siteSlice.addToContext`). Musterhaus komplex: Nachbarn ruhen auf dem
-  Gelände; die Höhenlinien reichen dafür bis x −44 … 54 (vorher −16 … 32, Nachbarn lagen ausserhalb des Netzes; Goldens `komplex-*` neu). (2)
+  Gebäude ganz ausserhalb des Netzes (bis 50 m) nehmen die Randhöhe des nächsten Netzrands (13.11.); Gelände; die Höhenlinien reichen dafür bis x −44 … 54 (vorher −16 … 32, Nachbarn lagen ausserhalb des Netzes; Goldens `komplex-*` neu). (2)
   Rendering: Option „Baugrube ausblenden (hinterfüllt)“ (Vorgabe an; `RenderOptions.backfilled`, `scene.backfilled`, CLI `--excavation` lässt
   sie stehen): das Paket enthält das gewachsene Gelände ohne Aushub (`MeshOptions.backfilled`, Kern `mesh_data.rs`, 4. Argument von
   `meshExportData`, `excavation::terrain_original_mesh`), das normale 3D und die Klasse „07 Baugrube“ bleiben unberührt. Geprüft: Rust-Tests

@@ -3,9 +3,9 @@
 //! unter dem Grundriss liegt. Auf der Hangseite verschwindet der Sockel im Boden, talseitig bleibt kein Spalt.
 //! Gelände = gewachsenes Terrain im Modellbezug (`excavation::terrain_z_many`), Baugruben zählen nicht.
 
-use crate::excavation::terrain_z_many;
+use crate::excavation::{site_terrain, terrain_z_many, terrains};
 use crate::model::Project;
-use crate::terrain::P2;
+use crate::terrain::{Tin, P2};
 use serde_json::Value;
 use std::collections::HashMap;
 
@@ -13,6 +13,51 @@ use std::collections::HashMap;
 const MAX_GRID: f64 = 40.0;
 /// Fusshöhe: Punkte höchstens so viel über dem tiefsten Punkt gehören zum Fuss.
 const FOOT_TOL: f64 = 0.05;
+/// Liegt der Grundriss ganz ausserhalb des Geländenetzes, gilt die Höhe des nächsten Randpunkts, aber nur bis zu
+/// dieser Entfernung (m); weiter weg bleibt das Gebäude unverändert.
+const MAX_EXTRAPOLATE: f64 = 50.0;
+
+/// Nächster Randpunkt des Netzes (Kanten mit nur einem Dreieck) zu `q`: (Abstand, Höhe).
+fn nearest_boundary(t: &Tin, edges: &[(usize, usize)], q: P2) -> Option<(f64, f64)> {
+    let mut best: Option<(f64, f64)> = None;
+    for &(a, b) in edges {
+        let (pa, pb) = (t.xy[a], t.xy[b]);
+        let (dx, dy) = (pb[0] - pa[0], pb[1] - pa[1]);
+        let l2 = dx * dx + dy * dy;
+        let f = if l2 > 0.0 { (((q[0] - pa[0]) * dx + (q[1] - pa[1]) * dy) / l2).clamp(0.0, 1.0) } else { 0.0 };
+        let d = (q[0] - (pa[0] + dx * f)).hypot(q[1] - (pa[1] + dy * f));
+        if best.is_none_or(|(bd, _)| d < bd) {
+            best = Some((d, t.z[a] + (t.z[b] - t.z[a]) * f));
+        }
+    }
+    best
+}
+
+/// Tiefste Randhöhe des gewachsenen Geländes unter den Punkten `q` (Modellbezug), die höchstens `MAX_EXTRAPOLATE`
+/// vom Netz entfernt sind; `None`, wenn kein Punkt so nah liegt.
+fn edge_z(p: &Project, q: &[P2]) -> Option<f64> {
+    let mut out: Option<f64> = None;
+    for t in terrains(p) {
+        let st = site_terrain(p, t);
+        let mut count: HashMap<(usize, usize), u32> = HashMap::new();
+        for tri in &st.orig.tris {
+            for k in 0..3 {
+                let (a, b) = (tri[k] as usize, tri[(k + 1) % 3] as usize);
+                *count.entry((a.min(b), a.max(b))).or_default() += 1;
+            }
+        }
+        let edges: Vec<(usize, usize)> = count.into_iter().filter(|(_, c)| *c == 1).map(|(e, _)| e).collect();
+        for &pt in q {
+            if let Some((d, z)) = nearest_boundary(&st.orig, &edges, pt) {
+                if d <= MAX_EXTRAPOLATE {
+                    let z = z - st.datum;
+                    out = Some(out.map_or(z, |o| o.min(z)));
+                }
+            }
+        }
+    }
+    out
+}
 
 fn find(parent: &mut [usize], mut a: usize) -> usize {
     while parent[a] != a {
@@ -103,7 +148,11 @@ pub fn ground_offsets(p: &Project, pos: &[f64], idx: &[f64]) -> Vec<f64> {
             }
             x += step;
         }
-        let zt = terrain_z_many(p, &q).iter().filter_map(|(orig, _)| *orig).fold(f64::INFINITY, f64::min);
+        let mut zt = terrain_z_many(p, &q).iter().filter_map(|(orig, _)| *orig).fold(f64::INFINITY, f64::min);
+        if !zt.is_finite() {
+            // Ganz ausserhalb des Netzes: Höhe vom nächsten Netzrand übernehmen.
+            zt = edge_z(p, &q).unwrap_or(f64::INFINITY);
+        }
         if zt.is_finite() {
             let dz = zt - zmin;
             for &i in verts {
@@ -181,6 +230,20 @@ mod tests {
         let z = zs(&ground_element(&sloped(), &e).unwrap());
         // Westhaus auf x = -30 (z = -3), Osthaus auf x = 20 (z = 2).
         assert!((z[0] + 3.0).abs() < 1e-9 && (z[8] - 2.0).abs() < 1e-9, "{z:?}");
+    }
+
+    #[test]
+    fn ausserhalb_nimmt_randhoehe() {
+        // Gelände reicht bis y = 50; Haus bei y = 60..66 (10 m daneben) bekommt die Höhe des Randes bei x = 10 (z = 1).
+        let shift = |mut e: Value, dy: f64| {
+            let pos: Vec<Value> = e["positions"].as_array().unwrap().chunks(3).flat_map(|c| [c[0].clone(), serde_json::json!(c[1].as_f64().unwrap() + dy), c[2].clone()]).collect();
+            e["positions"] = Value::Array(pos);
+            e
+        };
+        let z = zs(&ground_element(&sloped(), &shift(house(10.0, 20.0, 8.0), 60.0)).unwrap());
+        assert!((z.iter().cloned().fold(f64::INFINITY, f64::min) - 1.0).abs() < 1e-9, "{z:?}");
+        // mehr als 50 m weg: unverändert.
+        assert!(ground_element(&sloped(), &shift(house(10.0, 20.0, 8.0), 200.0)).is_none());
     }
 
     #[test]
