@@ -267,7 +267,7 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   Geprüft: `cargo test` render3d (auch `--features render` mit lavapipe: Akkumulation/Neustart/Grenzen), WGSL mit naga validiert und
   nach MSL übersetzt (Metal-Tauglichkeit ohne Mac), Chromium-WebGPU (SwiftShader) kompiliert und rechnet ohne Fehler (Bild headless
   nicht auslesbar), Bilder Musterhaus komplex mit lavapipe (≈ 2–5 Samples/s bei 800×520). **Offen:** echte GPU und Mac/Metal
-  (`native3d` reicht nur den Stil durch, nicht geprüft), Klick im Browser/Electron, Entrauscher (OIDN oder A-Trous), Bildkarten/Texturen und
+  (`native3d` reicht nur den Stil durch; `cargo check --features native3d` unter Linux grün, auf dem Mac nicht gebaut), Klick im Browser/Electron, Entrauscher (OIDN oder A-Trous), Bildkarten/Texturen und
   Materialtabelle (Rauigkeit/Metall je Baustoff wie [211]), Glas mit Brechung, Schnitt, Geisterschicht und Linien im Pathtracing,
   Nacht/Sonne unter dem Horizont (heute Standardlicht), Bild-Export [223] rechnet nur 1 Sample, BVH-Neubau bei jeder Änderung (Teil-Update).
 - ○ **[215]** Cycles eingebaut für Endbilder (nach 1.0): Cycles-Standalone (Apache-2.0, aus dem Blender-Projekt) als mitgeliefertes
