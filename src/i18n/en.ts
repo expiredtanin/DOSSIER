@@ -3947,6 +3947,7 @@ export const en: Record<TranslationKey, string> = {
   "image3d.size.custom": "Custom size",
   "image3d.clamped": "The graphics card allows at most {max} px per side: the image will be {width} × {height} px.",
   "image3d.transparent": "Transparent background",
+  "image3d.samples": "Samples per pixel (path tracing)",
   "image3d.working": "Drawing {width} × {height} px …",
   "image3d.done": "Image {width} × {height} px created",
   "image3d.start": "Create image",

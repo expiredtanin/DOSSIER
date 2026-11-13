@@ -4,10 +4,13 @@
 //
 //   cargo run --release --features png --bin render_png -- modell.json aus.png [--view iso] [--style shaded] [--size 1200x800] [--target x,y,z] [--dist 12] [--sun 135,30]
 //     [--points wolke.txt] [--point-size 3] [--point-color rgb|intensity|class|height]
-//     [--style pathtrace --samples 64]
+//     [--style pathtrace --samples 64 [--denoise off] [--pt-goal 1024]]
 //
 // `--style pathtrace` ([212]): GPU-Pathtracer statt Rasterbild, `--samples N` Samples je Pixel (Standard 64);
-// meldet Zeit und Samples/s auf stderr. Ohne `--sun` gilt das Standardlicht als Sonne.
+// meldet Zeit und Samples/s auf stderr. Ohne `--sun` gilt das Standardlicht als Sonne; `--sun AZ,HÖHE` mit Höhe ≤ 0
+// zeigt den Nachthimmel. Entrauscher wie im Viewport (Standard an, `--denoise off` roh): Mischgewicht nach N und dem
+// Ziel der Vorschau `--pt-goal` (Standard 1024 wie im Viewport; `--pt-goal N` = am Ziel, also roh). Materialtabelle aus
+// `ptMaterials` im Modell (`dossier-cli … model3d`).
 //
 // `--points` ([27]): Textdatei mit einem Punkt je Zeile `x y z [r g b [intensitaet [klasse]]]` in
 // Modell-Metern (x = Ost, y = Nord, z = Hoehe) — dieselbe Punkt-Pipeline wie im Browser-Viewport.
@@ -47,6 +50,9 @@ struct ModelInput {
     /// Flächenmuster des Modells (`PATTERN_STRIDE` je Linie, `emitSurfacePatternLines`), nur oberste Ebene.
     #[serde(default, rename = "patternLines")]
     pattern_lines: Vec<f32>,
+    /// [212] Materialtabelle des Pathtracers (Eintrag i = Material-Ebene i + 1), nur oberste Ebene.
+    #[serde(default, rename = "ptMaterials")]
+    pt_materials: Vec<render3d::pt_material::PtMaterialEntry>,
 }
 
 fn bounds(m: &ModelInput) -> Option<([f32; 3], [f32; 3])> {
@@ -308,7 +314,10 @@ fn main() {
     let sun: Vec<f64> = flag("--sun", "").split(',').filter_map(|v| v.trim().parse().ok()).collect();
     if sun.len() == 2 {
         renderer.set_sun(render3d::shadow::sun_dir_world(sun[0], sun[1]), true);
+        renderer.set_night(sun[1].is_finite() && sun[1] <= 0.0);
     }
+    renderer.set_pathtrace_materials(&model.pt_materials);
+    renderer.set_pathtrace_denoise(flag("--denoise", "on") != "off");
     let points_path = flag("--points", "");
     if !points_path.is_empty() {
         let cloud = read_points_txt(&points_path);
@@ -346,15 +355,18 @@ fn main() {
     let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
     if flag("--style", "shaded") == "pathtrace" {
         let samples: u32 = flag("--samples", "64").parse().unwrap_or(64).max(1);
-        renderer.set_pathtrace_max_samples(samples);
+        let goal: u32 = flag("--pt-goal", "1024").parse().unwrap_or(1024).max(samples);
+        renderer.set_pathtrace_max_samples(goal);
         // Erstes Bild: Baum bauen + 1 Sample (Aufbau getrennt von der Sample-Zeit messen).
         let t0 = std::time::Instant::now();
         renderer.set_pathtrace_batch(1);
         renderer.render(&device, &queue, &view, &camera, (w, h));
         let _ = device.poll(wgpu::PollType::wait_indefinitely());
         let t1 = std::time::Instant::now();
-        renderer.set_pathtrace_batch(samples);
-        renderer.render(&device, &queue, &view, &camera, (w, h));
+        renderer.set_pathtrace_batch(samples.saturating_sub(1).max(1));
+        if samples > 1 {
+            renderer.render(&device, &queue, &view, &camera, (w, h));
+        }
         let _ = device.poll(wgpu::PollType::wait_indefinitely());
         let dt = t1.elapsed().as_secs_f64();
         let n = renderer.pathtrace_samples().saturating_sub(1).max(1);

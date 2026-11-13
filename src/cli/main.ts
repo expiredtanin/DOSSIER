@@ -124,6 +124,7 @@ import {
   viewportLevelPlan,
   planToRenderScene,
   projectToModel3d,
+  pathtraceMaterials,
   emitDrawingLineVerts,
   emitSurfacePatternLines,
   ghostFilter3d,
@@ -1238,6 +1239,8 @@ async function execute(project: Project, file: string, command: string, rest: st
         ...projectToModel3d(project, { explode, hide: filter }),
         // Flächenmuster ([100]) des Modells (render_png zeichnet sie in den Kanten-Stilen).
         patternLines: Array.from(emitSurfacePatternLines(project, explode, filter)),
+        // [212] Materialtabelle des Pathtracers (render_png `--style pathtrace`).
+        ptMaterials: pathtraceMaterials(project),
       };
       // Geisterschicht: Modell, dazu gedämpfte 2D-Spuren und Flächenmuster (render_png `ghostDrawing`/`ghostPattern`).
       const json = ghost

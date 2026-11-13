@@ -199,6 +199,16 @@ export function wallMaterialColorMaps(project: Project): string[] {
 }
 
 /**
+ * [212] Materialtabelle des Pathtracers: je Textur-Ebene ({@link wallMaterialColorMaps}, gleiche Reihenfolge) der
+ * Baustoff-Name (erstes Bauteil mit dieser Farbkarte) und die Farbkarte. render3d ordnet daraus Rauigkeit, Metall und
+ * Glas zu (`render3d/src/pt_material.rs`, wie der Blender-Leser [211]).
+ */
+export function pathtraceMaterials(project: Project): { name: string; map: string }[] {
+  const comps = project.components ?? [];
+  return wallMaterialColorMaps(project).map((map) => ({ name: comps.find((c) => c.material?.color === map)?.name ?? "", map }));
+}
+
+/**
  * Dach-Meshes (geschlossene, geschichtete Körper je Dachschicht); `onlyRoofId` beschränkt auf ein
  * Dach (IFC-Export). Rechnet der Kern.
  */

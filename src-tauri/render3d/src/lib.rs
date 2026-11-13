@@ -15,6 +15,7 @@
 // GPU-freien Schichten und ist damit unabhaengig von einer Display-Session.
 
 pub mod bvh;
+pub mod denoise;
 pub mod edges;
 pub mod ghost;
 pub mod grid;
@@ -23,6 +24,7 @@ pub mod mesh;
 pub mod pathtrace;
 pub mod pattern_lines;
 pub mod points;
+pub mod pt_material;
 pub(crate) mod openings;
 pub mod roof_cut;
 pub mod scene;

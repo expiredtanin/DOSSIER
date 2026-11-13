@@ -573,6 +573,12 @@ pub struct Renderer {
     pt_dirty: bool,
     pt_batch: u32,
     pt_max_samples: u32,
+    /// [212] Etappe 2: Materialtabelle (Ebene → Rauigkeit/Metall/Glas, `pt_material.rs`), Entrauscher-Schalter,
+    /// Nacht (Sonne der Studie unter dem Horizont), Pixel-Obergrenze je Sample (Bild-Export höher).
+    pt_materials: crate::pt_material::PtMaterialTable,
+    pt_denoise: bool,
+    pt_night: bool,
+    pt_max_pixels: u64,
 }
 
 /// [180]/[214] GPU-Puffer eines Klumpens der Geisterschicht (Formate wie `set_ghost`).
@@ -1479,6 +1485,10 @@ impl Renderer {
             pt_dirty: true,
             pt_batch: 1,
             pt_max_samples: crate::gpu_pathtrace::DEFAULT_MAX_SAMPLES,
+            pt_materials: crate::pt_material::PtMaterialTable::default(),
+            pt_denoise: true,
+            pt_night: false,
+            pt_max_pixels: crate::pathtrace::MAX_PIXELS,
         }
     }
 
@@ -2120,6 +2130,9 @@ impl Renderer {
             let start = i as usize * bytes_per_layer;
             write_layer(i + 1, &rgba[start..start + bytes_per_layer]);
         }
+        // [212] Pathtracer: mittlere Farbe je Bildkarte (er liest noch keine Texturen); Baum neu.
+        self.pt_materials.set_texture_means(rgba, bytes_per_layer, material_layers as usize);
+        self.pt_dirty = true;
 
         let view = texture.create_view(&wgpu::TextureViewDescriptor {
             dimension: Some(wgpu::TextureViewDimension::D2Array),
@@ -2718,13 +2731,16 @@ impl Renderer {
             let mut tris = Vec::new();
             for c in 0..self.scene.chunk_count() {
                 let d = self.scene.chunk_data(c);
-                crate::bvh::tris_from_mesh(&d.mesh.verts, &d.mesh.indices, &mut tris);
+                crate::bvh::tris_from_mesh(&d.mesh.verts, &d.mesh.indices, &d.layers, &mut tris);
             }
-            pt.set_bvh(device, &crate::bvh::Bvh::build(&tris));
+            pt.set_bvh(device, &crate::bvh::Bvh::build_with(&tris, &self.pt_materials));
             self.pt_dirty = false;
         }
+        pt.denoise = self.pt_denoise;
+        pt.max_pixels = self.pt_max_pixels;
+        let night = self.pt_night && self.sun.is_none();
         let sun = self.sun.or(Some([self.base_light[0], self.base_light[1], self.base_light[2]]));
-        pt.render(device, queue, target, camera, sun, viewport, self.pt_batch);
+        pt.render(device, queue, target, camera, sun, night, viewport, self.pt_batch);
         self.frame_stats = FrameStats::default();
     }
 
@@ -2736,6 +2752,34 @@ impl Renderer {
     /// [212] Obergrenze der Samples je Pixel (danach steht das Bild). 0 → 1.
     pub fn set_pathtrace_max_samples(&mut self, n: u32) {
         self.pt_max_samples = n.max(1);
+    }
+
+    /// [212] Materialtabelle des Pathtracers: Eintrag i gilt für die Material-Ebene i + 1 (Reihenfolge wie
+    /// `set_material_textures`). Baut den Baum neu; mittlere Bildkarten-Farben bleiben.
+    pub fn set_pathtrace_materials(&mut self, entries: &[crate::pt_material::PtMaterialEntry]) {
+        let means = std::mem::take(&mut self.pt_materials);
+        self.pt_materials = crate::pt_material::PtMaterialTable::from_entries(entries).with_means_of(means);
+        self.pt_dirty = true;
+    }
+
+    /// [212] Entrauscher in der Anzeige an/aus (Standard an; blendet mit wachsender Sample-Zahl aus, am Ziel aus).
+    pub fn set_pathtrace_denoise(&mut self, on: bool) {
+        self.pt_denoise = on;
+    }
+
+    pub fn pathtrace_denoise(&self) -> bool {
+        self.pt_denoise
+    }
+
+    /// [212] Sonne der Studie unter dem Horizont: der Pathtracer zeigt einen Nachthimmel statt des Standardlichts
+    /// (gilt nur, solange keine Sonne gesetzt ist; die übrigen Stile bleiben beim Standardlicht).
+    pub fn set_night(&mut self, night: bool) {
+        self.pt_night = night;
+    }
+
+    /// [212] Höchstzahl Pixel je Sample (Standard `pathtrace::MAX_PIXELS`; Bild-Export höher). 0 → Standard.
+    pub fn set_pathtrace_max_pixels(&mut self, n: u64) {
+        self.pt_max_pixels = if n == 0 { crate::pathtrace::MAX_PIXELS } else { n };
     }
 
     /// [212] Aufsummierte Samples je Pixel des aktuellen Bildes (0 ohne Pathtracer).
@@ -2953,6 +2997,75 @@ mod shadow_gpu_tests {
         r.render(&device, &queue, &view, &cam, (0, 0));
         r.set_render_style(RenderStyle::Shaded);
         r.render(&device, &queue, &view, &cam, (32, 24));
+        let _ = device.poll(wgpu::PollType::wait_indefinitely());
+    }
+
+    /// [212] Etappe 2: Entrauscher auf der GPU rechnet wie die Referenz (`denoise.rs`); Materialtabelle, Nacht und
+    /// Entrauscher-Schalter im Renderer ohne Panic, Summe zählt weiter.
+    #[test]
+    fn pathtracer_entrauscher_wie_referenz() {
+        let Some((device, queue)) = device() else {
+            eprintln!("kein GPU-Adapter: Test übersprungen");
+            return;
+        };
+        let format = wgpu::TextureFormat::Rgba8UnormSrgb;
+        let (w, h) = (40usize, 28usize);
+        let (acc, aa, ab) = crate::denoise::tests::scene(
+            w,
+            h,
+            3,
+            0.8,
+            |x, y| if x < 20 { 0.3 } else if y < 10 { 1.2 } else { 0.7 },
+            |x, _| if x < 20 { [1.0, 0.0, 0.0] } else { [0.0, 1.0, 0.0] },
+            |x, _| if x % 6 < 3 { [0.7, 0.3, 0.2] } else { [0.4, 0.5, 0.6] },
+        );
+        let mut pt = crate::gpu_pathtrace::PathTracer::new(&device, format);
+        let gpu = pt.denoise_for_test(&device, &queue, w as u32, h as u32, [&acc, &aa, &ab]);
+        let f = crate::denoise::Frame { w, h, accum: &acc, aux_a: &aa, aux_b: &ab };
+        let mut cpu = crate::denoise::prep(&f);
+        for it in 0..crate::denoise::ITERATIONS {
+            cpu = crate::denoise::atrous(&f, &cpu, 1 << it);
+        }
+        let mut worst = 0.0f32;
+        for (g, c) in gpu.iter().zip(&cpu) {
+            for k in 0..3 {
+                worst = worst.max((g[k] - c[k]).abs() / c[k].abs().max(0.1));
+            }
+        }
+        assert!(worst < 2e-3, "GPU weicht von der Referenz ab: {worst}");
+
+        let mut r = Renderer::new(&device, format);
+        let tex = device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d { width: 32, height: 24, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let view = tex.create_view(&Default::default());
+        let cam = Camera { eye: [20.0, 15.0, 20.0], target: [4.0, 2.0, 3.0], ..Camera::default() };
+        r.set_render_style(RenderStyle::Pathtrace);
+        r.upload_walls(&device, &walls());
+        r.set_pathtrace_materials(&[crate::pt_material::PtMaterialEntry { name: "Trapezblech".into(), map: String::new() }]);
+        r.set_material_textures(&device, &queue, &[], 0);
+        r.set_pathtrace_batch(2);
+        r.render(&device, &queue, &view, &cam, (32, 24));
+        assert_eq!(r.pathtrace_samples(), 2);
+        r.set_pathtrace_denoise(false);
+        r.render(&device, &queue, &view, &cam, (32, 24));
+        assert_eq!(r.pathtrace_samples(), 4, "Schalter beginnt nicht von vorn");
+        // Nacht nur ohne Sonne: Sonne unter dem Horizont = Nachthimmel, Summe von vorn.
+        r.set_sun(crate::shadow::sun_dir_world(200.0, -10.0), true);
+        r.set_night(true);
+        r.set_pathtrace_denoise(true);
+        r.render(&device, &queue, &view, &cam, (32, 24));
+        assert_eq!(r.pathtrace_samples(), 2, "Nacht: von vorn");
+        r.set_pathtrace_max_pixels(100);
+        r.render(&device, &queue, &view, &cam, (32, 24));
+        r.set_pathtrace_max_pixels(0);
         let _ = device.poll(wgpu::PollType::wait_indefinitely());
     }
 }

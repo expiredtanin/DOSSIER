@@ -2,6 +2,11 @@
 // Sonnenstand, Kamera-Basis und die WGSL-Quellen (Compute-Shader der Pfadverfolgung, Anzeige mit Tonemapping).
 // Die wgpu-Seite liegt in `gpu_pathtrace.rs` (Feature `render`), der Baum in `bvh.rs`.
 //
+// Etappe 2: Entrauscher-Hilfspuffer (Albedo, Normale, Tiefe des ersten Treffers, Luminanz²; `denoise.rs`), Material
+// je Dreieck aus der Tabelle (`pt_material.rs`: Rauigkeit, Metall, Glas je Baustoff), Glas mit fester Fresnel-Spiegelung
+// des Himmels (Splitting statt Zufallswahl) und Durchlicht, das keinen Abpraller verbraucht, Nachthimmel bei Sonne unter
+// dem Horizont.
+//
 // Bildmodell (Etappe 1): progressive Akkumulation, je Aufruf ein Sample je Pixel; Pfade mit höchstens
 // `MAX_BOUNCES` Abprallern und Russian Roulette ab dem dritten; Next-Event-Estimation zur Sonne (Kegel mit
 // `SUN_ANGULAR_RADIUS_DEG`, weiche Schatten); Glas als dünne Scheibe (Fresnel-Spiegelung oder gerader Durchgang,
@@ -22,7 +27,7 @@ const SUN_IRRADIANCE: f32 = 3.0;
 /// Belichtung vor dem Tonemapping.
 pub const DEFAULT_EXPOSURE: f32 = 0.85;
 
-/// Parameter-Block, 176 Byte, 1:1 zum WGSL-`Params` (nur `vec4`, std140-sicher).
+/// Parameter-Block, 192 Byte, 1:1 zum WGSL-`Params` (nur `vec4`, std140-sicher).
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 #[cfg_attr(feature = "render", derive(bytemuck::Pod, bytemuck::Zeroable))]
@@ -47,6 +52,8 @@ pub struct PtParams {
     pub dims: [u32; 4],
     /// Dreiecke, Breite, Höhe (Anzeige), 1 = sRGB im Shader kodieren.
     pub info: [u32; 4],
+    /// Entrauscher in der Anzeige: x = Mischgewicht (0 = roh, 1 = gefiltert, `denoise::blend_weight`).
+    pub dn: [f32; 4],
 }
 
 /// Himmel und Sonne aus der Richtung ZUR Sonne (world, Y oben).
@@ -58,6 +65,25 @@ pub struct Sky {
     pub zenith: [f32; 3],
     pub horizon: [f32; 3],
     pub ground: [f32; 3],
+    /// Belichtung vor dem Tonemapping.
+    pub exposure: f32,
+}
+
+/// Belichtung bei Nacht (der Himmel ist um Grössenordnungen dunkler; das Bild soll das Gebäude noch zeigen).
+pub const NIGHT_EXPOSURE: f32 = 14.0;
+
+/// Nachthimmel ([212] Etappe 2), wenn die Sonne der Studie unter dem Horizont steht: dunkles Blau, kein Sonnenlicht,
+/// etwas hellerer Horizont (Dämmerung/Streulicht), höhere Belichtung.
+pub fn night_sky() -> Sky {
+    Sky {
+        sun_dir: [0.0, 1.0, 0.0],
+        sun_irr: [0.0; 3],
+        sun_on: false,
+        zenith: [0.0035, 0.0055, 0.0130],
+        horizon: [0.0110, 0.0120, 0.0160],
+        ground: [0.0030, 0.0030, 0.0032],
+        exposure: NIGHT_EXPOSURE,
+    }
 }
 
 /// Himmel nach Sonnenstand: Sonnenfarbe über die Luftmasse (Kasten–Young) mit einer einfachen spektralen Dämpfung
@@ -76,6 +102,7 @@ pub fn sky_for_sun(dir_to_sun: Option<[f32; 3]>) -> Sky {
             zenith: [0.55, 0.58, 0.62],
             horizon: [0.62, 0.64, 0.66],
             ground: [0.20, 0.19, 0.18],
+            exposure: DEFAULT_EXPOSURE,
         };
     };
     let el_deg = d[1].clamp(-1.0, 1.0).asin().to_degrees();
@@ -93,7 +120,7 @@ pub fn sky_for_sun(dir_to_sun: Option<[f32; 3]>) -> Sky {
         (0.70 + 0.05 * warm * t[1]) * k * 0.85,
         (0.76 - 0.20 * warm) * k * 0.85,
     ];
-    Sky { sun_dir: d, sun_irr, sun_on: true, zenith, horizon, ground: [0.18 * k, 0.17 * k, 0.15 * k] }
+    Sky { sun_dir: d, sun_irr, sun_on: true, zenith, horizon, ground: [0.18 * k, 0.17 * k, 0.15 * k], exposure: DEFAULT_EXPOSURE }
 }
 
 fn sub(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
@@ -130,8 +157,10 @@ pub fn camera_basis(cam: &Camera, aspect: f32) -> Option<([f32; 4], [f32; 4], [f
     ))
 }
 
-/// Füllt den Parameter-Block. None bei unbrauchbarer Kamera (dann zeichnet der Pathtracer nicht).
-pub fn build_params(cam: &Camera, sky: &Sky, internal: (u32, u32), display: (u32, u32), frame: u32, tri_count: u32, srgb_encode: bool) -> Option<PtParams> {
+/// Füllt den Parameter-Block. None bei unbrauchbarer Kamera (dann zeichnet der Pathtracer nicht). `denoise` =
+/// Mischgewicht des Entrauschers in der Anzeige.
+#[allow(clippy::too_many_arguments)]
+pub fn build_params(cam: &Camera, sky: &Sky, internal: (u32, u32), display: (u32, u32), frame: u32, tri_count: u32, srgb_encode: bool, denoise: f32) -> Option<PtParams> {
     let aspect = display.0 as f32 / display.1.max(1) as f32;
     let (cam_pos, cam_fwd, cam_right, cam_up) = camera_basis(cam, aspect)?;
     let cos_r = SUN_ANGULAR_RADIUS_DEG.to_radians().cos();
@@ -145,9 +174,10 @@ pub fn build_params(cam: &Camera, sky: &Sky, internal: (u32, u32), display: (u32
         sun_irr: v4(sky.sun_irr, if sky.sun_on { 1.0 } else { 0.0 }),
         sky_zenith: v4(sky.zenith, 0.0),
         sky_horizon: v4(sky.horizon, 0.0),
-        ground: v4(sky.ground, DEFAULT_EXPOSURE),
+        ground: v4(sky.ground, sky.exposure),
         dims: [internal.0, internal.1, frame, MAX_BOUNCES],
         info: [tri_count, display.0, display.1, srgb_encode as u32],
+        dn: [if denoise.is_finite() { denoise.clamp(0.0, 1.0) } else { 0.0 }, 0.0, 0.0, 0.0],
     })
 }
 
@@ -180,22 +210,32 @@ struct Params {
     ground: vec4<f32>,
     dims: vec4<u32>,
     info: vec4<u32>,
+    dn: vec4<f32>,
 };
 struct Node { bmin: vec3<f32>, left_first: u32, bmax: vec3<f32>, count: u32 };
-struct Tri { v0: vec3<f32>, mat: u32, e1: vec3<f32>, rough: f32, e2: vec3<f32>, pad: u32 };
+struct Tri { v0: vec3<f32>, mat: u32, e1: vec3<f32>, rough: f32, e2: vec3<f32>, metal: f32 };
 
 @group(0) @binding(0) var<uniform> P: Params;
 @group(0) @binding(1) var<storage, read> nodes: array<Node>;
 @group(0) @binding(2) var<storage, read> tris: array<Tri>;
 @group(0) @binding(3) var<storage, read_write> accum: array<vec4<f32>>;
+// Entrauscher-Hilfspuffer (Summen über die Samples): (Albedo, Luminanz²), (Normale, Tiefe) des ersten Treffers.
+@group(0) @binding(4) var<storage, read_write> aux_a: array<vec4<f32>>;
+@group(0) @binding(5) var<storage, read_write> aux_b: array<vec4<f32>>;
 
 const NONE: u32 = 0xffffffffu;
 const MISS: f32 = 1e30;
 const PI: f32 = 3.14159265;
 const MAT_GLOSSY: u32 = 1u;
 const MAT_GLASS: u32 = 2u;
+// Glas-Durchgänge je Pfad (zählen nicht als Abpraller).
+const MAX_GLASS: u32 = 8u;
 
 var<private> rng: u32;
+// Erster Treffer des Blickstrahls (für den Entrauscher): Albedo, Normale (zur Kamera), Tiefe; Himmel = (1, 0, 0).
+var<private> g_albedo: vec3<f32>;
+var<private> g_normal: vec3<f32>;
+var<private> g_depth: f32;
 
 fn pcg(v: u32) -> u32 {
     let s = v * 747796405u + 2891336453u;
@@ -243,9 +283,9 @@ fn trace(o: vec3<f32>, d: vec3<f32>, shadow: bool) -> Hit {
     h.tri = NONE;
     if (P.info.x == 0u) { return h; }
     let inv = vec3<f32>(
-        select(1e30 * sign(d.x), 1.0 / d.x, abs(d.x) > 1e-20),
-        select(1e30 * sign(d.y), 1.0 / d.y, abs(d.y) > 1e-20),
-        select(1e30 * sign(d.z), 1.0 / d.z, abs(d.z) > 1e-20));
+        select(select(1e30, -1e30, d.x < 0.0), 1.0 / d.x, abs(d.x) > 1e-20),
+        select(select(1e30, -1e30, d.y < 0.0), 1.0 / d.y, abs(d.y) > 1e-20),
+        select(select(1e30, -1e30, d.z < 0.0), 1.0 / d.z, abs(d.z) > 1e-20));
     let root = nodes[0];
     if (box_hit(root.bmin, root.bmax, o, inv, h.t) >= MISS) { return h; }
     var stack: array<u32, 64>;
@@ -341,9 +381,14 @@ fn smith_g(nov: f32, nol: f32, a: f32) -> f32 {
     return (nov / (nov * (1.0 - k) + k)) * (nol / (nol * (1.0 - k) + k));
 }
 
-// BRDF (für NEE): diffus Lambert; glänzend = Lambert mit dielektrischer GGX-Schicht (F0 0.04, Rauigkeit je
-// Dreieck) — lackierte/beschichtete Oberflächen wie Fensterrahmen.
-fn brdf(kind: u32, albedo: vec3<f32>, rough: f32, n: vec3<f32>, wo: vec3<f32>, wi: vec3<f32>) -> vec3<f32> {
+// F0 der glänzenden Schicht: dielektrisch 0.04, zum Metall hin die Grundfarbe.
+fn spec_f0(albedo: vec3<f32>, metal: f32) -> vec3<f32> {
+    return mix(vec3<f32>(0.04), albedo, metal);
+}
+
+// BRDF (für NEE): diffus Lambert; glänzend = Lambert mit GGX-Schicht (Rauigkeit und Metall je Dreieck aus der
+// Materialtabelle): dielektrisch wie Lack, Holz, Keramik; Metall ohne diffusen Anteil (Blech, Stahl).
+fn brdf(kind: u32, albedo: vec3<f32>, rough: f32, metal: f32, n: vec3<f32>, wo: vec3<f32>, wi: vec3<f32>) -> vec3<f32> {
     let diffuse = albedo * (1.0 / PI);
     if (kind == MAT_GLOSSY) {
         let a = max(rough * rough, 0.002);
@@ -351,8 +396,8 @@ fn brdf(kind: u32, albedo: vec3<f32>, rough: f32, n: vec3<f32>, wo: vec3<f32>, w
         let nov = max(dot(n, wo), 1e-4);
         let nol = max(dot(n, wi), 1e-4);
         let noh = max(dot(n, h), 0.0);
-        let f = fresnel(vec3<f32>(0.04), max(dot(wo, h), 0.0));
-        return diffuse * (1.0 - 0.04) + f * ggx_d(noh, a) * smith_g(nov, nol, a) / (4.0 * nov * nol);
+        let f = fresnel(spec_f0(albedo, metal), max(dot(wo, h), 0.0));
+        return diffuse * (1.0 - 0.04) * (1.0 - metal) + f * ggx_d(noh, a) * smith_g(nov, nol, a) / (4.0 * nov * nol);
     }
     return diffuse;
 }
@@ -374,13 +419,43 @@ fn sky(d: vec3<f32>, with_sun: bool, primary: bool) -> vec3<f32> {
     return c;
 }
 
+// Was eine Glasscheibe spiegelt, ohne weiteren Pfad: frei = Himmel (ohne Sonnenscheibe gegen Ausreisser), sonst die
+// getroffene Fläche mit Sonnenlicht (ein Schattenstrahl) und gleichmässigem Himmelslicht — statt Schwarz, wenn die
+// Spiegelung auf Boden oder Nachbarbau fällt (Blick von oben auf eine Fassade).
+fn reflected(o: vec3<f32>, d: vec3<f32>) -> vec3<f32> {
+    let h = trace(o, d, false);
+    if (h.tri == NONE) { return sky(d, false, false); }
+    let tr = tris[h.tri];
+    if ((tr.mat >> 24u) == MAT_GLASS) { return sky(d, false, false); }
+    let albedo = unpack_albedo(tr.mat);
+    var n = normalize(cross(tr.e1, tr.e2));
+    if (dot(n, d) > 0.0) { n = -n; }
+    let p = o + d * h.t;
+    let eps = 1e-4 * max(1.0, max(abs(p.x), max(abs(p.y), abs(p.z))));
+    var c = albedo * (0.5 * (P.sky_zenith.rgb + P.sky_horizon.rgb)) * (0.5 + 0.5 * max(n.y, 0.0));
+    if (P.sun_irr.w > 0.5) {
+        let ndl = dot(n, P.sun_dir.xyz);
+        if (ndl > 0.0 && trace(p + n * eps, P.sun_dir.xyz, true).tri == NONE) {
+            c = c + albedo * (1.0 / PI) * P.sun_irr.rgb * ndl;
+        }
+    }
+    return c;
+}
+
 fn radiance(o_in: vec3<f32>, d_in: vec3<f32>) -> vec3<f32> {
     var o = o_in;
     var d = d_in;
     var tp = vec3<f32>(1.0);
     var l = vec3<f32>(0.0);
     var specular = true;
-    for (var b = 0u; b < P.dims.w; b = b + 1u) {
+    var first = true;
+    var b = 0u;
+    var glass_n = 0u;
+    g_albedo = vec3<f32>(1.0);
+    g_normal = vec3<f32>(0.0);
+    g_depth = 0.0;
+    loop {
+        if (b >= P.dims.w) { break; }
         let h = trace(o, d, false);
         if (h.tri == NONE) {
             l = l + tp * sky(d, specular, b == 0u);
@@ -393,18 +468,25 @@ fn radiance(o_in: vec3<f32>, d_in: vec3<f32>) -> vec3<f32> {
         if (dot(n, d) > 0.0) { n = -n; }
         let p = o + d * h.t;
         let eps = 1e-4 * max(1.0, max(abs(p.x), max(abs(p.y), abs(p.z))));
+        if (first) {
+            first = false;
+            g_normal = n;
+            g_depth = h.t;
+            if (kind != MAT_GLASS) { g_albedo = albedo; }
+        }
         if (kind == MAT_GLASS) {
-            // Dünne Scheibe: Spiegelung mit Fresnel (beide Grenzflächen), sonst gerader Durchgang, leicht getönt.
+            // Dünne Scheibe: Spiegelung mit Fresnel (beide Grenzflächen) fest als Anteil statt Zufallswahl (kein
+            // Salz-und-Pfeffer-Rauschen), ausgewertet ohne weiteren Pfad (`reflected`); der Rest geht leicht getönt
+            // durch. Durchgänge zählen nicht als Abpraller und nicht für Russian Roulette.
             let f = fresnel(vec3<f32>(0.04), abs(dot(d, n))).x;
             let rt = 2.0 * f / (1.0 + f);
-            if (rnd() < rt) {
-                d = reflect(d, n);
-                o = p + n * eps;
-            } else {
-                o = p - n * eps;
-                let tint = albedo / max(max(albedo.x, max(albedo.y, albedo.z)), 1e-3);
-                tp = tp * mix(vec3<f32>(1.0), tint, 0.15);
-            }
+            let rd = reflect(d, n);
+            l = l + tp * rt * reflected(p + n * eps, rd);
+            let tint = albedo / max(max(albedo.x, max(albedo.y, albedo.z)), 1e-3);
+            tp = tp * (1.0 - rt) * mix(vec3<f32>(1.0), tint, 0.15);
+            o = p - n * eps;
+            glass_n = glass_n + 1u;
+            if (glass_n > MAX_GLASS) { break; }
             continue;
         }
         let wo = -d;
@@ -415,14 +497,16 @@ fn radiance(o_in: vec3<f32>, d_in: vec3<f32>) -> vec3<f32> {
             if (ndl > 0.0) {
                 let sh = trace(p + n * eps, ls, true);
                 if (sh.tri == NONE) {
-                    l = l + tp * brdf(kind, albedo, tr.rough, n, wo, ls) * P.sun_irr.rgb * ndl;
+                    l = l + tp * brdf(kind, albedo, tr.rough, tr.metal, n, wo, ls) * P.sun_irr.rgb * ndl;
                 }
             }
         }
-        // Nächste Richtung.
-        // Glänzend: Spiegel-Lobe mit Wahrscheinlichkeit nach Fresnel wählen, sonst diffus (Gewicht / Wahl).
+        // Nächste Richtung. Glänzend: Spiegel-Lobe mit Wahrscheinlichkeit nach Fresnel (Metall: immer) wählen, sonst
+        // diffus (Gewicht / Wahl).
         let nov0 = max(dot(n, wo), 1e-4);
-        let p_spec = select(0.0, clamp(fresnel(vec3<f32>(0.04), nov0).x * 4.0, 0.1, 0.9), kind == MAT_GLOSSY);
+        let f0 = spec_f0(albedo, tr.metal);
+        let p_d = clamp(fresnel(vec3<f32>(0.04), nov0).x * 4.0, 0.1, 0.9);
+        let p_spec = select(0.0, clamp(mix(p_d, 1.0, tr.metal), 0.1, 1.0), kind == MAT_GLOSSY);
         if (kind == MAT_GLOSSY && rnd() < p_spec) {
             let a = max(tr.rough * tr.rough, 0.002);
             let r1 = rnd();
@@ -437,12 +521,12 @@ fn radiance(o_in: vec3<f32>, d_in: vec3<f32>) -> vec3<f32> {
             let nov = max(dot(n, wo), 1e-4);
             let voh = max(dot(wo, hv), 1e-4);
             let noh = max(dot(n, hv), 1e-4);
-            tp = tp * fresnel(vec3<f32>(0.04), voh) * smith_g(nov, nol, a) * voh / (noh * nov) / p_spec;
+            tp = tp * fresnel(f0, voh) * smith_g(nov, nol, a) * voh / (noh * nov) / p_spec;
             d = wi;
         } else {
             d = cosine_dir(n);
-            tp = tp * albedo / (1.0 - p_spec);
-            if (kind == MAT_GLOSSY) { tp = tp * (1.0 - 0.04); }
+            tp = tp * albedo / max(1.0 - p_spec, 1e-3);
+            if (kind == MAT_GLOSSY) { tp = tp * (1.0 - 0.04) * (1.0 - tr.metal); }
         }
         o = p + n * eps;
         specular = false;
@@ -451,6 +535,7 @@ fn radiance(o_in: vec3<f32>, d_in: vec3<f32>) -> vec3<f32> {
             if (rnd() > q) { break; }
             tp = tp / q;
         }
+        b = b + 1u;
     }
     return l;
 }
@@ -478,8 +563,17 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     c = clamp(c, vec3<f32>(0.0), vec3<f32>(64.0));
     if (!(c.x == c.x && c.y == c.y && c.z == c.z)) { c = vec3<f32>(0.0); }
     var prev = vec4<f32>(0.0);
-    if (P.dims.z > 0u) { prev = accum[idx]; }
+    var pa = vec4<f32>(0.0);
+    var pb = vec4<f32>(0.0);
+    if (P.dims.z > 0u) {
+        prev = accum[idx];
+        pa = aux_a[idx];
+        pb = aux_b[idx];
+    }
+    let lu = dot(c, vec3<f32>(0.2126, 0.7152, 0.0722));
     accum[idx] = prev + vec4<f32>(c, 1.0);
+    aux_a[idx] = pa + vec4<f32>(g_albedo, lu * lu);
+    aux_b[idx] = pb + vec4<f32>(g_normal, g_depth);
 }
 "#;
 
@@ -498,9 +592,13 @@ struct Params {
     ground: vec4<f32>,
     dims: vec4<u32>,
     info: vec4<u32>,
+    dn: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> P: Params;
 @group(0) @binding(1) var<storage, read> accum: array<vec4<f32>>;
+// Entrauscher ([212] Etappe 2): gefiltertes Licht (`denoise.rs`) und Albedo-Summe; Mischgewicht `P.dn.x`.
+@group(0) @binding(2) var<storage, read> filt: array<vec4<f32>>;
+@group(0) @binding(3) var<storage, read> aux_a: array<vec4<f32>>;
 
 @vertex
 fn vs_main(@builtin(vertex_index) i: u32) -> @builtin(position) vec4<f32> {
@@ -514,8 +612,13 @@ fn texel(x: i32, y: i32) -> vec3<f32> {
     let h = i32(P.dims.y);
     let cx = clamp(x, 0, w - 1);
     let cy = clamp(y, 0, h - 1);
-    let a = accum[u32(cy * w + cx)];
-    return a.rgb / max(a.w, 1.0);
+    let i = u32(cy * w + cx);
+    let a = accum[i];
+    let cnt = max(a.w, 1.0);
+    let raw = a.rgb / cnt;
+    if (P.dn.x <= 0.0) { return raw; }
+    let dn = filt[i].rgb * max(aux_a[i].rgb / cnt, vec3<f32>(0.02));
+    return mix(raw, dn, P.dn.x);
 }
 
 fn aces(x: vec3<f32>) -> vec3<f32> {
@@ -564,6 +667,9 @@ mod tests {
         assert!(m.entry_points.iter().any(|e| e.name == "main"));
         let m = validate(PT_DISPLAY_WGSL, "pathtrace.display");
         assert_eq!(m.entry_points.len(), 2);
+        // Achsparallele Strahlen (orthografisch vorn/oben): Kehrwert von 0 muss ±gross sein, nicht 0 (`sign(0) = 0`
+        // liess die Box-Tests scheitern, Etappe 1).
+        assert!(!PT_WGSL.contains("sign(d."), "Kehrwert der Richtung ohne sign()");
     }
 
     /// Metal ist auf dem Linux-Container nicht prüfbar; die Übersetzung nach MSL (wie wgpu sie auf dem Mac macht)
@@ -584,7 +690,7 @@ mod tests {
 
     #[test]
     fn parameter_block_passt_zum_shader() {
-        assert_eq!(std::mem::size_of::<PtParams>(), 176);
+        assert_eq!(std::mem::size_of::<PtParams>(), 192);
         assert_eq!(std::mem::size_of::<crate::bvh::GpuNode>(), 32);
         assert_eq!(std::mem::size_of::<crate::bvh::GpuTri>(), 48);
     }
@@ -603,6 +709,10 @@ mod tests {
                 assert!(v.is_finite() && *v >= 0.0);
             }
         }
+        // Nacht: kein Sonnenlicht, dunkler als jeder Tageshimmel, höhere Belichtung.
+        let n = night_sky();
+        assert!(!n.sun_on && n.exposure > high.exposure);
+        assert!(n.zenith.iter().zip(&low.zenith).all(|(a, b)| a < b));
         // Keine/kaputte Sonne: bedeckt, ohne Sonne.
         for d in [None, Some([f32::NAN, 1.0, 0.0]), Some([0.0, -1.0, 0.0]), Some([0.0; 3])] {
             let s = sky_for_sun(d);

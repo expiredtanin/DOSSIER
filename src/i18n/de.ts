@@ -3961,6 +3961,7 @@ export const de = {
   "image3d.size.custom": "Eigene Grösse",
   "image3d.clamped": "Die Grafikkarte erlaubt höchstens {max} px je Seite: das Bild wird {width} × {height} px.",
   "image3d.transparent": "Transparenter Hintergrund",
+  "image3d.samples": "Samples je Pixel (Pathtracing)",
   "image3d.working": "Zeichne {width} × {height} px …",
   "image3d.done": "Bild {width} × {height} px erstellt",
   "image3d.start": "Bild erzeugen",

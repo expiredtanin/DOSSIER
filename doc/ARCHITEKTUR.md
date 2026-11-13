@@ -545,7 +545,9 @@ Es gibt drei Schatten, alle aus derselben Sonnenstudie (`Project.sunStudy`, Ort 
   eigenen Bauteile; Tiefenpass nur, wenn sich Sonne, Modell oder die (gerasterte) Ausschnitt-Box ändern.
 - **3D, Pathtracing** ([212]): Stil „Pathtracing (Vorschau)“ nimmt dieselbe Sonne als Richtungslicht (Kegel, weiche
   Schatten) und leitet daraus Himmel und Sonnenfarbe ab (`render3d/src/pathtrace.rs`, `sky_for_sun`); Baum der Dreiecke
-  in `bvh.rs`, GPU-Seite `gpu_pathtrace.rs`.
+  in `bvh.rs`, GPU-Seite `gpu_pathtrace.rs`. Sonne unter dem Horizont (Studie aktiv): Nachthimmel (`night_sky`,
+  `Renderer::set_night`). Material je Baustoff über die Textur-Ebene (`pathtraceMaterials` → `pt_material.rs`),
+  Entrauscher `denoise.rs`.
 
 Im Grundriss gilt nur das Gebäudeinnere als abgedeckt (Decken/Dächer innerhalb der Hülle der geschnittenen
 Wände); unter Dachvorsprung, Balkon und Vordach liegt der echte Schatten, er schliesst an die Fassade an ([186]).

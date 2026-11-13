@@ -444,10 +444,12 @@ impl WebModelRenderer {
     /// Sonne der Sonnenstudie ([64]): Azimut (° von Nord im Uhrzeigersinn) und Hoehe (°) aus dem
     /// Kern (`sun_position`), `shadows` = Schatten im 3D zeichnen. `active = false` (keine Studie)
     /// oder Sonne unter dem Horizont: Standardlicht, keine Schatten. Der Schattenpass laeuft nur
-    /// nach einer Aenderung, nicht je Kamera-Frame. Wirkt beim naechsten `render`.
+    /// nach einer Aenderung, nicht je Kamera-Frame. Wirkt beim naechsten `render`. [212] Studie aktiv und
+    /// Sonne unter dem Horizont: der Pathtracer zeigt einen Nachthimmel.
     pub fn set_sun(&mut self, active: bool, azimuth_deg: f64, elevation_deg: f64, shadows: bool) {
         let dir = if active { crate::shadow::sun_dir_world(azimuth_deg, elevation_deg) } else { None };
         self.renderer.set_sun(dir, shadows);
+        self.renderer.set_night(active && elevation_deg.is_finite() && elevation_deg <= 0.0);
     }
 
     /// [212] Samples je Pixel des laufenden Pathtracing-Bildes (Stil `"pathtrace"`; 0 sonst). Der Viewport
@@ -464,6 +466,29 @@ impl WebModelRenderer {
     /// [212] Obergrenze der Samples je Pixel (Standard 1024; 0 → 1).
     pub fn set_pathtrace_max_samples(&mut self, n: u32) {
         self.renderer.set_pathtrace_max_samples(n);
+    }
+
+    /// [212] Samples je `render` (Standard 1; Bild-Export rechnet N auf einmal). 0 → 1.
+    pub fn set_pathtrace_batch(&mut self, n: u32) {
+        self.renderer.set_pathtrace_batch(n);
+    }
+
+    /// [212] Entrauscher des Pathtracers in der Anzeige an/aus (Standard an).
+    pub fn set_pathtrace_denoise(&mut self, on: bool) {
+        self.renderer.set_pathtrace_denoise(on);
+    }
+
+    /// [212] Höchstzahl Pixel je Sample (0 = Standard ≈ 1.2 MPx; Bild-Export höher).
+    pub fn set_pathtrace_max_pixels(&mut self, n: f64) {
+        let n = if n.is_finite() && n > 0.0 { n.min(1e9) as u64 } else { 0 };
+        self.renderer.set_pathtrace_max_pixels(n);
+    }
+
+    /// [212] Materialtabelle des Pathtracers als JSON `[{ "name": Baustoff, "map": Farbkarte }, …]`, Eintrag i =
+    /// Material-Ebene i + 1 (Reihenfolge wie `set_material_textures`). Kaputtes JSON = leere Tabelle.
+    pub fn set_pathtrace_materials(&mut self, json: &str) {
+        let entries: Vec<crate::pt_material::PtMaterialEntry> = serde_json::from_str(json).unwrap_or_default();
+        self.renderer.set_pathtrace_materials(&entries);
     }
 
     /// Kantenlaenge der Schattentextur (Standard 2048, geklemmt 256…8192).

@@ -13,7 +13,7 @@ import { defaultTargetLayout, placeImageOnLayout } from "../state/layoutImageAct
 import { saveBinaryFile } from "../native/saveFile";
 import { captureImage, getCamera, viewportAvailable, type ViewCamera } from "../viewport/cameraBridge";
 import { cameraToView } from "../viewport/cameraView";
-import { IMAGE_MAX_EDGE, clampImageSize, imageFileName } from "../viewport/imageExport";
+import { IMAGE_MAX_EDGE, PT_EXPORT_MAX_SAMPLES, PT_EXPORT_SAMPLES, clampImageSize, exportSamples, imageFileName } from "../viewport/imageExport";
 
 type SizeId = "view" | "hd" | "uhd" | "a4" | "a3" | "a2" | "custom";
 const SIZE_IDS: SizeId[] = ["view", "hd", "uhd", "a4", "a3", "a2", "custom"];
@@ -39,6 +39,9 @@ export const ImageExportDialogHost = memo(function ImageExportDialogHost() {
   const [size, setSize] = useState<SizeId>("uhd");
   const [dims, setDims] = useState({ width: 3840, height: 2160 });
   const [transparent, setTransparent] = useState(false);
+  // [212] Samples je Pixel, wenn die 3D-Ansicht im Stil „Pathtracing (Vorschau)“ steht.
+  const [samples, setSamples] = useState(PT_EXPORT_SAMPLES);
+  const [pathtrace, setPathtrace] = useState(false);
   const [cameraKey, setCameraKey] = useState("live");
   const [phase, setPhase] = useState<Phase>("setup");
   const [message, setMessage] = useState("");
@@ -53,6 +56,7 @@ export const ImageExportDialogHost = memo(function ImageExportDialogHost() {
       const a = getCamera()?.aspect;
       const asp = a && Number.isFinite(a) && a > 0 ? a : 16 / 9;
       setAspect(asp);
+      setPathtrace(st.renderMode === "pathtrace");
       setCameraKey("live");
       setPhase("setup");
       setMessage("");
@@ -118,7 +122,7 @@ export const ImageExportDialogHost = memo(function ImageExportDialogHost() {
     setMessage("");
     // Dem Browser einen Frame lassen, damit „Arbeite …" erscheint, bevor das Zeichnen den Hauptthread belegt.
     await new Promise((r) => requestAnimationFrame(() => r(null)));
-    const img = await captureImage({ width: dims.width, height: dims.height, transparent, ...(camera ? { camera } : {}) });
+    const img = await captureImage({ width: dims.width, height: dims.height, transparent, ...(camera ? { camera } : {}), ...(pathtrace ? { samples: exportSamples(samples) } : {}) });
     if (!img) {
       setPhase("error");
       setMessage(viewportAvailable() ? t("image3d.empty") : t("image3d.noViewport"));
@@ -196,6 +200,12 @@ export const ImageExportDialogHost = memo(function ImageExportDialogHost() {
                   <input type="checkbox" data-testid="image3d-transparent" checked={transparent} disabled={busy} onChange={(e) => setTransparent(e.target.checked)} />
                   {t("image3d.transparent")}
                 </label>
+                {pathtrace && (
+                  <label style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 6 }}>
+                    {t("image3d.samples")}{" "}
+                    <input className="imp-input" type="number" min={1} max={PT_EXPORT_MAX_SAMPLES} style={{ width: 90 }} data-testid="image3d-samples" value={samples} disabled={busy} onChange={(e) => setSamples(Number(e.target.value))} />
+                  </label>
+                )}
               </section>
             </>
           )}

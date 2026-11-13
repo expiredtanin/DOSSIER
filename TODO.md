@@ -290,6 +290,31 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   (`native3d` reicht nur den Stil durch; `cargo check --features native3d` unter Linux grün, auf dem Mac nicht gebaut), Klick im Browser/Electron, Entrauscher (OIDN oder A-Trous), Bildkarten/Texturen und
   Materialtabelle (Rauigkeit/Metall je Baustoff wie [211]), Glas mit Brechung, Schnitt, Geisterschicht und Linien im Pathtracing,
   Nacht/Sonne unter dem Horizont (heute Standardlicht), Bild-Export [223] rechnet nur 1 Sample, BVH-Neubau bei jeder Änderung (Teil-Update).
+  **Stand 13.11. (Etappe 2, Vorschau brauchbar):** (1) Entrauscher `render3d/src/denoise.rs`: À-trous nach SVGF ohne
+  Zeit-Reprojektion als Compute-Pässe (prep + 5 × À-trous, Schritt 1…16); der erste Treffer schreibt Hilfspuffer (Albedo,
+  Normale, Tiefe, Luminanz² als Summen), gefiltert wird das demodulierte Licht (Texturfarbe/Kanten der Grundfarbe bleiben),
+  Gewichte Normale/Tiefe-Gradient/Luminanz-Varianz (aus den Samples, bei < 4 räumlich). Nur in der Anzeige (Akkumulation
+  unberührt), bis 32 Samples voll, dann log2 ausgeblendet bis zum Ziel (am Ziel roh). Schalter `Renderer::set_pathtrace_denoise`
+  / `web::set_pathtrace_denoise` (Standard an; keine UI). OIDN für Endbilder bleibt für später ([215]). (2) Materialtabelle
+  `pt_material.rs`: Transport über die schon vorhandene Material-Ebene je Vertex (`materialIndex`, Reihenfolge
+  `wallMaterialColorMaps`) — kein neues Feld im Modell, Goldens unverändert; Tabelle `[{name, map}]` aus `pathtraceMaterials`
+  (`plan/toWalls3d.ts`) über `web::set_pathtrace_materials` bzw. `ptMaterials` im CLI-`model3d`. Looks nach Baustoffname und
+  Bildkarten-Ordner wie der Blender-Leser [211] (Ziegel, Blech/Stahl metallisch, Beton, Holz, Kies, Putz …), aufgelöst ins
+  BVH-Dreieck (Art, Rauigkeit, Metall statt Füllfeld); Farbe nur für ungesetzte (weisse) Bauteile: mittlere Farbe der dekodierten
+  Bildkarte, sonst die der Tabelle. BRDF mit Metall-Anteil (F0 = Grundfarbe). (3) Glas: Fresnel-Spiegelung als fester Anteil
+  (kein Zufall) mit `reflected` (Himmel, oder getroffene Fläche mit Sonne + Himmelslicht statt Schwarz), Durchlicht getönt;
+  Glas-Durchgänge verbrauchen keinen Abpraller und kein Russian Roulette (≤ 8 je Pfad). (4) Bild-Export [223] im Stil Pathtracing:
+  N Samples in einem `render` (Dialog-Feld „Samples je Pixel“, Vorgabe 64, 1…1024; `imageExport.exportSamples`), intern bis
+  4 MPx statt 1.2, ohne Transparenz (Hintergrund ist der Himmel). (5) Sonne der Studie unter dem Horizont: Nachthimmel
+  (`night_sky`, Belichtung 14) statt Standardlicht. Nebenbei behoben: achsparallele Strahlen (orthografische Ansichten
+  vorn/hinten/oben) trafen im Shader nichts (`1e30 · sign(0) = 0`). `render_png --denoise off`, `--pt-goal` (Ziel wie im Viewport,
+  Standard 1024). Geprüft: `cargo test --release` render3d (auch `--features png` mit lavapipe: GPU-Entrauscher = CPU-Referenz,
+  Tests Kante/Fläche/Himmel, Materialzuordnung, Nacht), WGSL nach MSL, `cargo check --features window` (was `native3d` zieht;
+  die Tauri-App selbst wegen Platte nicht gebaut), tsc, vitest (Viewport, UI, CLI, i18n, Goldens unverändert), Chromium-WebGPU
+  (SwiftShader) ohne Konsolenfehler (Bild headless nicht auslesbar), Bilder Musterhaus komplex mit lavapipe (800×520, nah ≈ 2.8
+  Samples/s, vorher 3.2; der Entrauscher kostet wenig). **Offen:** echte GPU und Mac/Metal, Dialog-Feld nicht im Browser geklickt,
+  Bildkarten/Texturen im Pathtracer (nur mittlere Farbe), Glas mit Brechung, Schnitt/Geisterschicht/Linien im Pathtracing,
+  Gelände ohne Material (Wiese wie [211] fehlt), Nachthimmel ohne Lichter/Mond, BVH-Teil-Update, OIDN.
 - ○ **[215]** Cycles eingebaut für Endbilder (nach 1.0): Cycles-Standalone (Apache-2.0, aus dem Blender-Projekt) als mitgeliefertes
   Hilfsprogramm (Sidecar) der Desktop-App, Metal auf Apple Silicon, OIDN-Entrauscher; liest dasselbe renderer-neutrale Szenenformat
   (GLB + Szenen-JSON) wie die Blender-Brücke [211], die als Option bleibt. Build-Kette macOS (C++, Abhängigkeiten) in CI, Herkunft in
