@@ -952,6 +952,7 @@ pub fn import_ops(root: &Map<String, Value>, d: &DrawingImport, dec: &Decision, 
             by_name.insert(name.to_lowercase(), code.to_string());
         }
     }
+    crate::layers::add_code_prefixes(&mut by_name, &layer_list(root));
     let active = dec.active_category_code.as_str();
     let code_for = |layer: &str| -> String {
         if !(by_layer && !layer.is_empty()) {
@@ -1072,6 +1073,21 @@ pub fn import_ops(root: &Map<String, Value>, d: &DrawingImport, dec: &Decision, 
         }
     }
     if layers_changed {
+        // [207] Ausschnitte kennen nur die Klassen, die es beim Anlegen gab (fehlt ein Code, ist die Klasse dort aus):
+        // neu angelegte Klassen (z. B. „17 Gewässer" durch den Kataster-Import) in allen Ausschnitten einblenden.
+        let old: HashSet<String> = crate::layers::flatten(&layer_list(root)).iter().filter_map(|c| c.get("code").and_then(Value::as_str).map(String::from)).collect();
+        let fresh: Vec<String> = crate::layers::flatten(&layers).iter().filter_map(|c| c.get("code").and_then(Value::as_str)).filter(|c| !old.contains(*c)).map(String::from).collect();
+        for snap in root.get("viewSnapshots").and_then(Value::as_array).into_iter().flatten() {
+            let mut snap = snap.clone();
+            let Some(vis) = snap.get_mut("layerVisibility").and_then(Value::as_object_mut) else { continue };
+            let before = vis.len();
+            for code in &fresh {
+                vis.entry(code.clone()).or_insert(Value::Bool(true));
+            }
+            if vis.len() != before {
+                ops.push(Op::Replace { collection: "viewSnapshots".into(), entity: snap });
+            }
+        }
         ops.push(Op::SetField { key: "layers".into(), value: Some(Value::Array(layers)), at: None });
     }
     ImportResult { ops, level_id, drawings: n_drawings, meshes: n_meshes, terrain_contours: det.lines.len(), shift: [dx, dy] }

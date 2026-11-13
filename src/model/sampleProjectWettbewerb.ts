@@ -306,7 +306,7 @@ export function buildWettbewerbSampleProject(): Project {
   p = {
     ...p,
     viewSnapshots: [
-      snap("vs-situation", "Situation 1:500", "eg", 500, P(10, 6), { detail: "grob", templateId: "std-vt-situation-wbw", templateLinked: true, layerVisibility: visHidden(SITUATION_HIDDEN) }),
+      snap("vs-situation", "Situation 1:500", "eg", 500, P(10, 6), { detail: "grob", templateId: "std-vt-situation-wbw", templateLinked: true, layerVisibility: { ...visHidden(SITUATION_HIDDEN), "17": true } }),
       snap("vs-schnitt-a", "Schnitt A-A", "schnitt-a", 200, P(8, 4.5), { layerVisibility: noNeighbours }),
       snap("vs-schnitt-b", "Schnitt B-B", "schnitt-b", 200, P(8, 4.5), { layerVisibility: noNeighbours }),
     ],

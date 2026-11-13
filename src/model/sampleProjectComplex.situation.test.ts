@@ -28,6 +28,15 @@ describe("Situation 1:500 im Musterhaus komplex", () => {
     for (const [code, v] of Object.entries(tpl?.layerVisibility ?? {})) expect(snap?.layerVisibility[code], code).toBe(v);
   });
 
+  it("Ausschnitt zeigt Strasse (11), Gebäude (12) und Gewässer (17, Kataster-Import)", () => {
+    for (const code of ["11", "12", "17"]) expect(snap?.layerVisibility[code], code).toBe(true);
+    // Die Standard-Vorlagen blenden diese Klassen nicht aus (fehlende Codes bleiben unverändert).
+    for (const id of ["std-vt-situation-wbw", "std-vt-schwarzplan"]) {
+      const t = p.viewTemplates?.find((v) => v.id === id);
+      for (const code of ["11", "12", "17"]) expect(t?.layerVisibility?.[code], `${id} ${code}`).not.toBe(false);
+    }
+  });
+
   it("eigenes Gebäude schwarz, Nachbarn grau, keine Bauteile", () => {
     const ps = polys(planOf());
     expect(ps.some((q) => q.wallId)).toBe(false);
