@@ -270,6 +270,30 @@ fn formoeffnung_fuellkoerper_rahmen_glas() {
     assert!(meshes.iter().any(|m| m.color == PART_RGB[0]) && meshes.iter().any(|m| m.color == PART_RGB[1]));
 }
 
+/// [234] Eine Formöffnung, die über die Wandoberkante reicht (Brüstung + Höhe > Wandhöhe), wird an der Oberkante
+/// gekappt wie das Rechteck: weder Leibung, Rahmen und Glas noch der Wandkörper ragen über die Wand.
+#[test]
+fn formoeffnung_ueber_wandoberkante_ragt_nicht_ueber_die_wand() {
+    let mut p = sample();
+    let w1 = p.walls.iter().find(|w| w.id == "W1").unwrap().clone();
+    let (_, zt) = p.wall_vertical_extent(&w1);
+    for shape in [None, Some(OpeningShape::Rundbogen), Some(OpeningShape::Spitzbogen)] {
+        for o in p.openings.iter_mut().flatten().filter(|o| o.id == "O1") {
+            o.shape = shape;
+            o.sill_height = 0.9;
+            o.height = zt + 1.0;
+        }
+        let max_z = |ms: &[RMesh]| ms.iter().flat_map(|m| m.positions.chunks_exact(3).map(|c| c[2])).fold(f64::NEG_INFINITY, f64::max);
+        let meshes = emit_opening_meshes(&p, 2.0);
+        assert!(max_z(&meshes) <= zt + 1e-6, "{shape:?}: Öffnungsteile bis {} über Wandoberkante {zt}", max_z(&meshes));
+        let walls = emit_walls(&p, true).unwrap();
+        for b in walls.iter().filter(|w| w.wall_id == "W1").filter_map(|w| w.body.as_ref()) {
+            let top = b.positions.chunks_exact(3).map(|c| c[2]).fold(f64::NEG_INFINITY, f64::max);
+            assert!(top <= zt + 1e-3, "{shape:?}: Wandkörper bis {top} über {zt}");
+        }
+    }
+}
+
 /// [103] Dachfenster: jede Dachschicht bleibt ein geschlossener Körper mit Loch; Fensterteile kommen dazu.
 #[test]
 fn dachfenster_schneidet_alle_schichten() {

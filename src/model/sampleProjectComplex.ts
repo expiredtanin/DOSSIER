@@ -364,7 +364,7 @@ door("eg-t-red", "eg-iw-y75", "mk-tu-futter", 3.2, 0.8, 2.0, { hinge: "end" });
 door("eg-t-gard", "eg-anbau-iw2", "mk-tu-schiebe", 0.5, 0.9, 2.1);
 
 // OG: Rundbogenfenster, Fenstertür, Bandfenster; Treppenhaus-Türen.
-win("og-f1", "og-aw-s", "mk-fe-dk", 2.0, 1.2, 1.6, 0.9, { shape: "rundbogen", shapeRise: 0.6 });
+win("og-f1", "og-aw-s", "mk-fe-dk", 2.0, 1.2, 1.5, 0.9, { shape: "rundbogen", shapeRise: 0.6 });
 win("og-f2", "og-aw-s", "mk-fe-dk", 7.4, 1.2, 1.5, 0.9);
 win("og-f3", "og-aw-s", "mk-fe-dk2", 11.2, 2.0, 2.2, 0.1, { notes: "Fenstertür mit Absturzsicherung" });
 win("og-f4", "og-aw-w", "mk-fe-dk", 2.0, 1.2, 1.4, 0.9);

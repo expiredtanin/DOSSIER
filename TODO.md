@@ -258,9 +258,12 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   Wände des Musterhauses komplex (0 Wände mit Überstand), `cargo test` Kern (surface_pattern, 15 grün). Nicht geprüft: Bild nachher
   (WASM-Kern im Container nicht neu gebaut, Platte knapp), Mac/Metal, Tauri-App. · S
 ### Phase 3 (27.11.–3.12.): Vorprojekt
-- ○ **[234]** 3D: Rundbogen-Fenster der OG-Südwand (`og-f1`, Musterhaus komplex) ragt mit dem Bogenscheitel über die Wandoberkante ins
-  Gesims/Deckenband darüber (Leibungskörper sichtbar über der Wand, Bild 13.11. nach [216](3)). Prüfen: Öffnungshöhe im Beispiel vs. Wandhöhe,
-  sonst Leibung an der Wand-Oberkante kappen. · S
+- ◐ **[234]** 3D: Rundbogen-Fenster der OG-Südwand (`og-f1`, Musterhaus komplex) ragte mit dem Bogenscheitel über die Wandoberkante ins
+  Gesims/Deckenband darüber. Stand 13.11.: Ursache war das Beispiel, nicht der Kern: Brüstung 0,9 + Höhe 1,6 = 2,5 m, die Decke c-og
+  beginnt aber schon bei 2,43 m (Wandoberkante 2,8 m); jetzt Höhe 1,5 (wie `og-f2`, Oberkante 2,4 m). Der Kern kappt Formöffnungen
+  (Leibung, Rahmen, Glas, Wandkörper) wie Rechtecke an der Wandoberkante; Test `formoeffnung_ueber_wandoberkante_ragt_nicht_ueber_die_wand`
+  (Rund-/Spitzbogen, Höhe 1 m über der Wand). Goldens (Ansicht Süd, Schnitt A, 3D-Modell) nachgeführt. Offen: Öffnungen, die in eine Decke
+  hineinragen (unter der Wandoberkante), werden nicht gekappt; Bild der Ansicht aus [216](3) nicht identisch nachgestellt. · S
 - 1:100-Pläne in Abgabequalität (Bemassung, Koten, Raumstempel, Öffnungen nach Detailgrad) — Plan-Review-Runde 4 nach [199].
 - Fachplaner-Austausch: DXF/DWG je Geschoss/Schnitt/Ansicht ([200]), IFC mit Räumen/Psets ([201]); Rundreise in Archicad/Revit einmal
   real prüfen ([C9]).

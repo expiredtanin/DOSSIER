@@ -10,7 +10,7 @@ meshes[].indices [1284]
 meshes[].indices [12960]
 meshes[].indices [1428]
 meshes[].indices [144] x55
-meshes[].indices [15102]
+meshes[].indices [15264]
 meshes[].indices [1530]
 meshes[].indices [1548]
 meshes[].indices [1560]
@@ -40,7 +40,7 @@ meshes[].indices [3414]
 meshes[].indices [348] x6
 meshes[].indices [36] x1012
 meshes[].indices [396]
-meshes[].indices [4020]
+meshes[].indices [4092]
 meshes[].indices [4812] x2
 meshes[].indices [4860] x3
 meshes[].indices [4872]
@@ -82,7 +82,7 @@ meshes[].positions [16428]
 meshes[].positions [1755]
 meshes[].positions [180] x9
 meshes[].positions [1890] x3
-meshes[].positions [2010]
+meshes[].positions [2040]
 meshes[].positions [216]
 meshes[].positions [234]
 meshes[].positions [2412] x2
@@ -111,7 +111,7 @@ meshes[].positions [648]
 meshes[].positions [7050]
 meshes[].positions [720]
 meshes[].positions [72] x2
-meshes[].positions [7575]
+meshes[].positions [7650]
 meshes[].positions [783]
 meshes[].positions [78] x55
 meshes[].positions [792]
@@ -153,4 +153,4 @@ walls[].start [2] x439
 walls[].startCut [4] x270
 walls[].topDrop [2] x22
 walls[].topPlane [3] x22
-hash aa6c0e70615547fc
+hash dbb576d85f8fea00
