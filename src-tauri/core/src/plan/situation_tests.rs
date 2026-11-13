@@ -204,3 +204,42 @@ fn kataster_schwarzplan_und_klassen() {
     let normal = plan(&p, &all, "mittel");
     assert!(fills(&normal, "#b8b8b8").is_empty() && fills(&normal, "#cfe3f1").is_empty());
 }
+
+/// [207] Gewässer: hellblau mit feiner Parallelschraffur; in Tusche bleibt die Schraffur (Fläche weiss, Linien Tinte),
+/// sonst wäre das Wasser auf dem Papier unsichtbar.
+#[test]
+fn kataster_gewaesser_mit_schraffur_auch_in_tusche() {
+    use crate::plan::extras::Post;
+    let p = cadastre_project();
+    let ps = plan(&p, &codes(&p), "std-mv-situation-wbw");
+    let water = fills(&ps, "#cfe3f1");
+    let Primitive::Polygon { hatch, .. } = water[0] else { unreachable!() };
+    assert_eq!(hatch.pattern, HatchPattern::Diagonal);
+    assert_eq!(hatch.angle, 90.0, "waagrechte Linien (Musterwinkel 0 = senkrecht)");
+    assert!(hatch.line_weight <= 0.1, "fein: {}", hatch.line_weight);
+    // Abstand 1.2 mm auf dem Papier bei 1:500: 8 · scale / 90 m = 0.6 m.
+    assert!((8.0 * hatch.scale / 90.0 - 0.6).abs() < 1e-9, "Abstand {}", 8.0 * hatch.scale / 90.0);
+    let mut q = water[0].clone();
+    Post { mono: true, lw: 1.0, sketch: 0.0 }.apply(&mut q);
+    let Primitive::Polygon { fill, hatch, .. } = &q else { unreachable!() };
+    assert_eq!(fill, "#ffffff");
+    assert_eq!(hatch.pattern, HatchPattern::Diagonal);
+    assert_eq!(hatch.color, crate::plan::style::MONO_INK, "Schraffur in Tusche");
+    // Gebäude behalten keine Schraffur.
+    assert!(fills(&ps, "#b8b8b8").iter().all(|q| matches!(q, Primitive::Polygon { hatch, .. } if hatch.pattern == HatchPattern::None)));
+}
+
+/// [207] Gefüllte Kataster-Flächen tragen ihren Umriss selbst (wie die Kontextnetze): die Zeichnungs-Linien der
+/// Ringe liegen nicht noch einmal darüber. Im gewöhnlichen Grundriss bleiben sie.
+#[test]
+fn kataster_umrisse_nicht_doppelt() {
+    let p = cadastre_project();
+    let all = codes(&p);
+    let kat_lines = |ps: &[Primitive]| ps.iter().filter(|q| matches!(q, Primitive::Line { drawing_id: Some(id), .. } if id.starts_with("k-"))).count();
+    assert_eq!(kat_lines(&plan(&p, &all, "std-mv-situation-wbw")), 0);
+    assert_eq!(kat_lines(&plan(&p, &all, "std-mv-schwarzplan")), 0);
+    assert!(kat_lines(&plan(&p, &all, "mittel")) > 0, "gewöhnlicher Grundriss zeichnet sie");
+    // Schwarzplan: Umriss der gefüllten Gebäude schwarz wie die Füllung.
+    let sp = plan(&p, &all, "std-mv-schwarzplan");
+    assert!(sp.iter().filter(|q| matches!(q, Primitive::Polygon { fill, .. } if fill == "#000000")).all(|q| matches!(q, Primitive::Polygon { stroke, .. } if stroke == "#000000")));
+}

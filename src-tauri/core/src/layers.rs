@@ -297,6 +297,18 @@ pub struct ImportPlan {
     pub code_by_layer: Vec<(String, String)>,
 }
 
+/// [207] Kategorie „4711 Bezeichnung" (so benennt der Import Zahlen-Layer) ist auch unter dem Roh-Namen „4711" zu
+/// finden: ergänzt `by_name` um den Zahlen-Anfang, ohne einen gleichnamigen Eintrag zu überschreiben.
+pub fn add_code_prefixes(by_name: &mut std::collections::HashMap<String, String>, existing: &[Value]) {
+    for c in flatten(existing) {
+        let (Some(code), Some(name)) = (code_of(c), c.get("name").and_then(Value::as_str)) else { continue };
+        let first = name.trim().split_whitespace().next().unwrap_or("");
+        if !first.is_empty() && first.len() < name.trim().len() && first.chars().all(|ch| ch.is_ascii_digit()) {
+            by_name.entry(first.to_lowercase()).or_insert_with(|| code.to_string());
+        }
+    }
+}
+
 pub fn plan_import(layer_names: &[String], existing: &[Value], colors: &Map<String, Value>, weights: &Map<String, Value>) -> ImportPlan {
     let mut used = used_codes(existing);
     // Namensvergleich ohne Gross-/Kleinschreibung; spätere gleichnamige Kategorien überschreiben frühere.
@@ -306,6 +318,7 @@ pub fn plan_import(layer_names: &[String], existing: &[Value], colors: &Map<Stri
             by_name.insert(name.to_lowercase(), code.to_string());
         }
     }
+    add_code_prefixes(&mut by_name, existing);
     let mut next = max_numeric(&used).map_or(0.0, |m| m.max(0.0)) + 1.0;
     let mut allocate = |used: &mut HashSet<String>| -> String {
         while used.contains(&pad2(next)) {
@@ -472,5 +485,21 @@ mod tests {
         let none = plan_import(&["wände".into()], &t, &Map::new(), &Map::new());
         assert!(none.children.is_empty());
         assert!(none.parent_code.is_empty());
+    }
+
+    /// [207] Zweiter Import mit demselben Zahlen-Layer: die vorhandene Kategorie „Code Bezeichnung" wird wiederverwendet.
+    #[test]
+    fn import_plan_code_kategorie_wiederverwenden() {
+        let t = vec![cat("05", "Import", true, None), cat("21", "4711 Testklasse", true, None), cat("22", "4711x", true, None)];
+        let plan = plan_import(&["4711".into(), "4711x".into(), "4712".into()], &t, &Map::new(), &Map::new());
+        assert_eq!(plan.code_by_layer[0], ("4711".into(), "21".into()), "Zahl vor dem Namen");
+        assert_eq!(plan.code_by_layer[1], ("4711x".into(), "22".into()), "ganzer Name geht vor");
+        assert_eq!(plan.children.len(), 1, "nur 4712 ist neu");
+        // Eine Kategorie, die genau so heisst, geht dem Zahl-Präfix vor.
+        let t2 = vec![cat("21", "4711 Testklasse", true, None), cat("22", "4711", true, None)];
+        assert_eq!(plan_import(&["4711".into()], &t2, &Map::new(), &Map::new()).code_by_layer[0].1, "22");
+        // Kein Treffer bei Namen mit Buchstaben im Layer (nur Zahlen-Layer).
+        let t3 = vec![cat("21", "Wand Aussen", true, None)];
+        assert_eq!(plan_import(&["Wand".into()], &t3, &Map::new(), &Map::new()).children.len(), 1);
     }
 }

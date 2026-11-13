@@ -467,6 +467,37 @@ fn zahlen_layer_mit_bezeichnung() {
     assert_eq!(layer_display_name("1110"), "1110");
 }
 
+/// [207] Zweiter Import mit demselben Zahlen-Layer: die Kategorie „4711 Testklasse" aus dem ersten Import wird
+/// wiederverwendet, es entsteht weder eine zweite Kategorie noch eine neue Elternkategorie.
+#[test]
+fn zweiter_import_zahlen_layer_nutzt_vorhandene_code_kategorie() {
+    let mut root = project();
+    root.get_mut("layers").unwrap().as_array_mut().unwrap().push(json!({"code": "41", "name": "4711 Testklasse", "color": "#000", "lw": 0.5, "visible": true, "locked": false}));
+    let d = DrawingImport { contours: vec![line("4711", 0.0, &[[0.0, 0.0], [1.0, 0.0]])], ..Default::default() };
+    let dec = decision(json!({"target": {"kind": "new", "name": "K"}, "categoryMode": "byLayer", "activeCategoryCode": "20", "parentName": "Import k"}));
+    let ops: Vec<Value> = import_ops(&root, &d, &dec, 1000.0).ops.iter().map(Op::to_json).collect();
+    assert!(!ops.iter().any(|o| o["key"] == json!("layers")), "keine neue Kategorie: {ops:?}");
+    let added = ops.iter().find(|o| o["collection"] == json!("drawings2d")).expect("Zeichnung");
+    assert_eq!(added["items"][0]["categoryCode"], json!("41"));
+}
+
+/// [207] Ausschnitte kennen nur die Klassen von damals; neu angelegte (hier „17 Gewässer") werden eingeblendet,
+/// ausgeblendete bleiben aus.
+#[test]
+fn neue_klassen_in_ausschnitten_sichtbar() {
+    let mut root = project();
+    root.insert("viewSnapshots".into(), json!([{"id": "s1", "name": "Situation", "layerVisibility": {"20": true, "30": false}}, {"id": "s2", "name": "ohne"}]));
+    let d = DrawingImport { contours: vec![line("Gewaesser", 0.0, &[[0.0, 0.0], [1.0, 0.0]])], ..Default::default() };
+    let dec = decision(json!({"target": {"kind": "new", "name": "K"}, "categoryMode": "byLayer", "activeCategoryCode": "20", "parentName": "Import k"}));
+    let ops: Vec<Value> = import_ops(&root, &d, &dec, 1000.0).ops.iter().map(Op::to_json).collect();
+    let snaps: Vec<&Value> = ops.iter().filter(|o| o["collection"] == json!("viewSnapshots")).collect();
+    assert_eq!(snaps.len(), 1, "nur Ausschnitte mit Sichtbarkeitsliste: {ops:?}");
+    let vis = &snaps[0]["entity"]["layerVisibility"];
+    assert_eq!(vis["17"], json!(true));
+    assert_eq!(vis["30"], json!(false));
+    assert_eq!(vis["20"], json!(true));
+}
+
 #[test]
 fn kataster_layer_auf_kontext_klassen() {
     use crate::import_context::known_context_class;

@@ -719,6 +719,8 @@ const codesOf = (ls: LayerCategory[]): string[] => ls.flatMap((l) => [l.code, ..
 const vis = (hidden: string[] = []): Record<string, boolean> => Object.fromEntries(codesOf(LAYERS).map((c) => [c, !hidden.includes(c)]));
 /** [207] Schnitte und Ansichten ohne die Nachbargebäude (Klasse „12 Gebäude"): sie weiten sonst den Ausschnitt weit über das Haus. */
 const NO_NEIGHBOURS = vis(["12"]);
+/** [207] Klassen, die ein Kataster-Import anlegt (Gewässer „17"): im Ausschnitt eingeblendet, auch wenn es sie im Beispiel noch nicht gibt (fehlender Code = aus). */
+const KATASTER_VISIBLE: Record<string, boolean> = { "17": true };
 /** [207] Klassen, die die Ansichtsvorlage „Situation WBW" ausblendet (`standards.rs::SITUATION_HIDDEN`; Test `sampleProjectComplex.situation.test.ts`). */
 const SITUATION_HIDDEN = ["00", "07", "20", "21", "22", "25", "30", "35", "40", "50", "60", "80", "81", "82", "85", "90", "91", "99"];
 const LEVEL_VIS: Record<string, boolean> = Object.fromEntries(LEVELS.map((l) => [l.id, true]));
@@ -755,7 +757,7 @@ function views(): Pick<Project, "viewTemplates" | "viewSnapshots" | "viewSnapsho
       snap("vs-dg", "DG 1:100", "dg", 100, P(7.5, 5), { folderId: "vf-gr", templateId: "vt-gr100", templateLinked: true }),
       snap("vs-eg50", "EG 1:50 Ausschnitt Wohnen", "eg", 50, P(10, 3.5), { folderId: "vf-gr", templateId: "vt-gr50", templateLinked: true }),
       // [207] Situationsplan: Ansichtsvorlage „Situation WBW 1:500" (Standard-Ressource, Modelldarstellung „Situation WBW").
-      snap("vs-situation", "Situation 1:500", "eg", 500, P(7, 5), { folderId: "vf-gr", detail: "grob", templateId: "std-vt-situation-wbw", templateLinked: true, layerVisibility: vis(SITUATION_HIDDEN) }),
+      snap("vs-situation", "Situation 1:500", "eg", 500, P(7, 5), { folderId: "vf-gr", detail: "grob", templateId: "std-vt-situation-wbw", templateLinked: true, layerVisibility: { ...vis(SITUATION_HIDDEN), ...KATASTER_VISIBLE } }),
       snap("vs-brand", "EG Brandschutz", "eg", 100, P(7.5, 6), { folderId: "vf-gr", templateId: "vt-brand", templateLinked: true, enabledOverrideRuleIds: ["or-brand"] }),
       snap("vs-schnitt-a", "Schnitt A-A", "schnitt-a", 100, P(6, 3.3), { folderId: "vf-sa", layerVisibility: NO_NEIGHBOURS }),
       snap("vs-schnitt-b", "Schnitt B-B", "schnitt-b", 100, P(6, 3.3), { folderId: "vf-sa", layerVisibility: NO_NEIGHBOURS }),

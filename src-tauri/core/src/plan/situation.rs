@@ -20,7 +20,7 @@
 
 use super::domains::{Bounds, Ctx};
 use super::drawings::mm_to_model;
-use super::prim::Primitive;
+use super::prim::{HatchRender, Primitive};
 use super::style::no_hatch;
 use crate::flat::{Polygon, Ring};
 use crate::model::*;
@@ -35,6 +35,9 @@ const GREY: (&str, &str) = ("#b8b8b8", "#7c7c7c");
 /// Gewässer aus dem Kataster: hellblau gefüllt.
 const WATER: (&str, &str) = ("#cfe3f1", "#7fa8c7");
 const OUTLINE_MM: f64 = 0.1;
+/// Linienabstand und Strichstärke der Wasser-Schraffur (Papier-mm).
+const WATER_HATCH_MM: f64 = 1.2;
+const WATER_HATCH_LINE_MM: f64 = 0.05;
 /// Eine Dreiecksfläche unter 1 cm² trägt nichts zur Aufsicht bei (senkrechte Wände, Splitter).
 const MIN_TRI_AREA: f64 = 1e-4;
 
@@ -235,8 +238,30 @@ pub fn cadastre_prims(c: &Ctx, s: &Opts, out: &mut Vec<Primitive>) {
         }
     }
     for (code, rings) in fills(is_water_class) {
+        let from = out.len();
         fill_polygons(&crate::polygon_bool::nest_even_odd(&rings), WATER, None, c.greyed(&code), out);
+        for q in &mut out[from..] {
+            if let Primitive::Polygon { hatch, .. } = q {
+                *hatch = Box::new(water_hatch(c.a.scale));
+            }
+        }
     }
+}
+
+/// Wasser als feine waagrechte Parallelschraffur (Plangrafik-Brauch für Gewässer): bleibt in Tusche erhalten, wo die
+/// hellblaue Fläche weiss wird (`extras::Post`: bunte Fläche → Papier, bunte Schraffur → Tinte). Abstand auf dem
+/// Papier fest ([`WATER_HATCH_MM`]), unabhängig vom Massstab; Musterabstand = 8 · scale / 90 m.
+fn water_hatch(plan_scale: f64) -> HatchRender {
+    let scale = mm_to_model(WATER_HATCH_MM, plan_scale) * 90.0 / 8.0;
+    HatchRender { pattern: HatchPattern::Diagonal, scale, angle: 90.0, color: WATER.1.into(), line_weight: WATER_HATCH_LINE_MM, ..no_hatch() }
+}
+
+/// Wird diese Zeichnung im Situationsplan als gefüllte Fläche gezeigt (Kataster-Gebäude, Gewässer)? Dann trägt die
+/// Fläche den Umriss selbst (wie die Kontextnetze: fein, in der Farbe der Fläche, im Schwarzplan schwarz) und die
+/// Linien der Zeichnung entfallen — sonst läge der Klassen-Umriss (grau, 0.18 mm) über der Füllung.
+pub fn drawing_is_filled(c: &Ctx, d: &Drawing2D) -> bool {
+    matches!(d.geom, Drawing2DGeom::Polyline { closed: true, .. } | Drawing2DGeom::Rect { .. })
+        && opts(c).is_some_and(|s| (colors(s.context).is_some() && is_building_class(c, &d.category_code)) || is_water_class(c, &d.category_code))
 }
 
 fn acc_polys(polys: &[Polygon], bounds: &mut Bounds) {

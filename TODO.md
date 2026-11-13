@@ -155,8 +155,16 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   Benennung Zahlen-Layer (13.11.): rein numerische Layer-Namen bekommen beim Import „Code Bezeichnung"
   (`import_context::layer_display_name`, Tabelle `NUMERIC_LAYER_LABELS`); Tabelle noch LEER (das Beispiel „1110 Gebäude“ stammte vom
   Koordinator, nicht vom Maintainer, und ist nicht belegt) — Codes erst eintragen, wenn die Layer-Liste eines echten Kataster-DXF vorliegt; Bezeichnung ist Projektdaten-Text
-  (Rust, kein `t()`/en). Ein zweiter Import mit gleichem Zahlen-Layer legt die Kategorie nochmals an (Abgleich nur über den Roh-Namen).
-  Offen: Linien der gefüllten Kataster-Gebäude liegen weiter über der Füllung (Umriss in Klassenfarbe); Strassennamen nicht
+  (Rust, kein `t()`/en). Zweiter Import (13.11.): der Abgleich findet
+  eine Kategorie „4711 Bezeichnung" auch unter dem Roh-Layer „4711" (`layers::add_code_prefixes`, ganzer Name geht vor), keine Doppelanlage.
+  Reste (13.11.): Gewässer als feine waagrechte Parallelschraffur (1.2 mm Abstand auf dem Papier, Diagonal-Muster Winkel 90, `situation::water_hatch`) —
+  in Tusche bleibt die Schraffur (Post: bunte Fläche → Papier, bunte Linien → Tinte), farbig hellblau mit blauer Schraffur; Begründung: Plangrafik-Brauch
+  für Wasser, und Tusche kennt sonst nur Grau/Schwarz/Weiss (Grau würde mit Kontext-Gebäuden verwechselt). Kataster-Umrisse: gefüllte Ringe
+  (Gebäude, Gewässer) zeichnen im Situationsplan keine Zeichnungslinien mehr (`situation::drawing_is_filled`), die Fläche trägt den feinen
+  Umriss wie die Kontextnetze (Situation grau 0.1 mm, Schwarzplan schwarz). Ausschnitte: neu angelegte Klassen (z. B. 17 durch den
+  Kataster-Import) werden im Import in allen `viewSnapshots` eingeblendet (fehlender Code = aus), Beispiel-Ausschnitte „Situation 1:500" mit „17";
+  die Standard-Vorlagen „Situation WBW"/„Schwarzplan" blenden 11/12/17 nicht aus (Test). Strassennamen = Text auf Klasse 11, sichtbar mit ihr.
+  Offen: Strassennamen nicht
   entlang gekrümmter Achsen gesetzt (nur die Textdrehung aus dem DXF); echte Kataster-DXF (Layer-Namen je Kanton) nicht geprüft;
   nicht in der Tauri-App/auf dem Mac geprüft. · M
 - ◐ **[208]** Wettbewerbs-Abgabe (12.11.). Umgesetzt: **Bild-Element im Layout** (`Layout.images`, `LayoutImage`: PNG/JPEG als Data-URL wie

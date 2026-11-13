@@ -1913,6 +1913,11 @@ pub fn plan_drawings(c: &Ctx, sink: &mut Sink, bounds: &mut Bounds) -> Result<()
         if !m.shown {
             continue;
         }
+        if super::situation::drawing_is_filled(c, d) {
+            // [207] Die gefüllte Fläche (situation.rs) trägt den Umriss.
+            acc_bounds(&d.geom, bounds);
+            continue;
+        }
         sink.keep = if c.a.compact && compact_eligible(d) { Keep::NoLines } else { Keep::All };
         emit(c, d, Attrs::with(d, &m.ov, m.cat), &d.geom, m.greyed, c.a.scale, sink, 0)?;
         acc_bounds(&d.geom, bounds);
@@ -2132,6 +2137,10 @@ pub fn plan_drawings_chunked(c: &Ctx, stamps: &[u64], cache: &mut super::cache::
         }
         let m = memo.get(c, d);
         if !m.shown {
+            continue;
+        }
+        if super::situation::drawing_is_filled(c, d) {
+            acc_bounds(&d.geom, bounds);
             continue;
         }
         let keep = if c.a.compact && compact_eligible(d) { Keep::NoLines } else { Keep::All };
