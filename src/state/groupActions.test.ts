@@ -14,6 +14,7 @@ import {
   groupSelection,
   isInsideActiveGroup,
   pick3dGroup,
+  pruneGroupMembers,
   transitiveMembership,
   ungroup,
 } from "./groupActions";
@@ -34,6 +35,7 @@ const EMPTY_MEM = {
   roofIds: [] as string[],
   openingIds: [] as string[],
   treeIds: [] as string[],
+  cameraIds: [] as string[],
 };
 
 function project(groups: Group[]): Project {
@@ -201,6 +203,36 @@ describe("[149] Bäume in Gruppen", () => {
     const outside = { kind: "polygon", pts: [], contextObjectId: "@tree:b9" } as unknown as Primitive;
     const out = applyGroupDimming([inside, outside], p, [res!.groupId]);
     expect([out[0].greyed, out[1].greyed]).toEqual([undefined, true]);
+  });
+});
+
+describe("[213] Kameras in Gruppen", () => {
+  it("gruppieren, erweitern, auflösen und dimmen", () => {
+    const res = groupSelection({ ...EMPTY_MEM, wallIds: ["w1"], cameraIds: ["k1", "k2"] }, []);
+    expect(res).not.toBeNull();
+    const p = applyOps(project([]), res!.ops);
+    expect(p.groups![0].cameraIds).toEqual(["k1", "k2"]);
+    // Gruppe ohne Kameras schreibt kein leeres Feld.
+    expect(applyOps(project([]), groupSelection({ ...EMPTY_MEM, wallIds: ["w1", "w2"] }, [])!.ops).groups![0].cameraIds).toBeUndefined();
+    // Eine Kamera in der Auswahl zieht die ganze Gruppe nach.
+    const { expanded, groupIds } = expandToGroups(p, { ...EMPTY_MEM, cameraIds: ["k2"] }, []);
+    expect([expanded.wallIds, expanded.cameraIds, groupIds]).toEqual([["w1"], ["k1", "k2"], [res!.groupId]]);
+    expect(ungroup(p, res!.groupId)!.members.cameraIds).toEqual(["k1", "k2"]);
+    const inside = { kind: "polygon", pts: [], contextObjectId: "@camera:k1" } as unknown as Primitive;
+    const outside = { kind: "polygon", pts: [], contextObjectId: "@camera:k9" } as unknown as Primitive;
+    const out = applyGroupDimming([inside, outside], p, [res!.groupId]);
+    expect([out[0].greyed, out[1].greyed]).toEqual([undefined, true]);
+  });
+
+  it("Löschen nimmt Kameras aus der Gruppe; andere Gruppen bleiben unberührt", () => {
+    const g = (id: string, cams: string[]): Group => ({ id, wallIds: ["w1"], drawingIds: [], ceilingIds: [], roomIds: [], stairIds: [], columnIds: [], roofIds: [], openingIds: [], cameraIds: cams, groupIds: [] });
+    const p = project([g("a", ["k1", "k2"]), g("b", ["k3"])]);
+    const ops = pruneGroupMembers(p, { cameraIds: new Set(["k1"]) });
+    expect(ops).toHaveLength(1);
+    const out = applyOps(p, ops);
+    expect([out.groups![0].cameraIds, out.groups![1].cameraIds, out.groups![0].wallIds]).toEqual([["k2"], ["k3"], ["w1"]]);
+    expect(pruneGroupMembers(p, { cameraIds: new Set(["zz"]) })).toEqual([]);
+    expect(pruneGroupMembers(p, {})).toEqual([]);
   });
 });
 

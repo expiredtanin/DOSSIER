@@ -157,7 +157,7 @@ pub fn dangling_refs(p: &Project) -> Vec<String> {
     // Gruppen: Mitglieder und Zyklen.
     let groups = p.groups.as_deref().unwrap_or(&[]);
     let group_ids = ids(groups, |g| g.id.as_str());
-    let members: [(&str, HashSet<&str>); 8] = [
+    let members: [(&str, HashSet<&str>); 9] = [
         ("Zeichnung", ids(&p.drawings2d, |d| d.id.as_str())),
         ("Decke", ids(p.ceilings.as_deref().unwrap_or(&[]), |x| x.id.as_str())),
         ("Raum", ids(p.rooms.as_deref().unwrap_or(&[]), |x| x.id.as_str())),
@@ -166,13 +166,14 @@ pub fn dangling_refs(p: &Project) -> Vec<String> {
         ("Dach", ids(p.roofs.as_deref().unwrap_or(&[]), |x| x.id.as_str())),
         ("Öffnung", ids(p.openings.as_deref().unwrap_or(&[]), |x| x.id.as_str())),
         ("Baum", ids(p.trees.as_deref().unwrap_or(&[]), |x| x.id.as_str())),
+        ("Kamera", ids(p.cameras.as_deref().unwrap_or(&[]), |x| x.id.as_str())),
     ];
     for g in groups {
         for w in &g.wall_ids {
             miss(&mut out, "Gruppe", &g.id, "Wand", w, &walls);
         }
-        let no_trees = Vec::new();
-        let lists = [&g.drawing_ids, &g.ceiling_ids, &g.room_ids, &g.stair_ids, &g.column_ids, &g.roof_ids, &g.opening_ids, g.tree_ids.as_ref().unwrap_or(&no_trees)];
+        let none = Vec::new();
+        let lists = [&g.drawing_ids, &g.ceiling_ids, &g.room_ids, &g.stair_ids, &g.column_ids, &g.roof_ids, &g.opening_ids, g.tree_ids.as_ref().unwrap_or(&none), g.camera_ids.as_ref().unwrap_or(&none)];
         for (list, (kind, known)) in lists.into_iter().zip(&members) {
             for id in list {
                 miss(&mut out, "Gruppe", &g.id, kind, id, known);
@@ -266,6 +267,20 @@ mod tests {
         assert!(has("Gruppe „g1\" enthält sich selbst"));
         assert!(has("Layout-Ordner „a\" ist sein eigener Vorfahre.") && has("Layout-Ordner „c\""));
         assert!(has("Vorgabe verwendet: walls[1].height"));
+    }
+
+    /// [213] Kameras als Gruppenmitglieder: vorhandene sind in Ordnung, fehlende werden gemeldet.
+    #[test]
+    fn gruppe_mit_kameras() {
+        let r = root(json!({
+            "id": "p", "walls": [], "wallTypes": [], "components": [],
+            "drawingLevels": [{"id": "eg"}],
+            "cameras": [{"id": "k1", "type": "camera", "name": "Süd", "floorId": "eg", "position": {"x": 0, "y": 0}, "target": {"x": 1, "y": 0}, "eyeHeight": 1.6, "targetHeight": 1.2, "fovDeg": 50, "projection": "perspective", "categoryCode": "92"}],
+            "groups": [{"id": "g1", "cameraIds": ["k1", "k9"], "wallIds": []}]
+        }));
+        let w = project_warnings(&r);
+        assert!(w.iter().any(|x| x.contains("Gruppe „g1\": Kamera „k9\" fehlt.")), "{w:#?}");
+        assert!(!w.iter().any(|x| x.contains("„k1\" fehlt")), "{w:#?}");
     }
 
     #[test]

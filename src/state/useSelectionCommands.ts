@@ -23,7 +23,7 @@ import { registerSelectionActions } from "./selectionActions";
 import { joinCurrentSelection } from "./selectionJoin";
 import { transformOps } from "../tools/transform";
 import { addedIds, type PastedIds } from "../editors/elementClipboard";
-import { containingGroupId, EMPTY_MEMBERSHIP } from "./groupActions";
+import { containingGroupId, EMPTY_MEMBERSHIP, pruneGroupMembers } from "./groupActions";
 import type { GroupMembership, MemberKind } from "./groupActions";
 import { isLocked, lockMembersOps } from "./objectLock";
 import { selectionCategoryCodes } from "./selectionLayers";
@@ -178,6 +178,18 @@ export function useSelectionCommands(opts: {
         ...removeItems(p, "context", ctxids),
         ...removeItems(p, "trees", treeids),
         ...removeItems(p, "cameras", camids),
+        // Gelöschte Elemente verlassen ihre Gruppen.
+        ...pruneGroupMembers(p, {
+          drawingIds: dids,
+          wallIds: wids,
+          ceilingIds: cids,
+          roofIds: rfids,
+          stairIds: stids,
+          roomIds: rmids,
+          columnIds: colids,
+          treeIds: treeids,
+          cameraIds: camids,
+        }),
       ]),
     );
   };

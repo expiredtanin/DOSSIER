@@ -5075,6 +5075,10 @@ pub struct Group {
     #[serde(rename = "treeIds", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub tree_ids: Option<Vec<String>>,
+    /// [213] Kameras (fehlt in älteren Dateien).
+    #[serde(rename = "cameraIds", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub camera_ids: Option<Vec<String>>,
     /// Verschachtelte Gruppen (diese Gruppe enthält andere Gruppen als Ganzes).
     #[serde(rename = "groupIds")]
     pub group_ids: Vec<String>,
@@ -7187,6 +7191,12 @@ impl Project {
             "trees" => {
                 self.trees = match v {
                     Some(v) => <Option<Vec<Tree>>>::deserialize(v).map_err(|e| e.to_string())?,
+                    None => Default::default(),
+                };
+            }
+            "cameras" => {
+                self.cameras = match v {
+                    Some(v) => <Option<Vec<Camera>>>::deserialize(v).map_err(|e| e.to_string())?,
                     None => Default::default(),
                 };
             }

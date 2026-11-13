@@ -1606,6 +1606,8 @@ export type Group = {
   openingIds: Array<string>;
   /** [149] Bäume (fehlt in älteren Dateien). */
   treeIds?: Array<string>;
+  /** [213] Kameras (fehlt in älteren Dateien). */
+  cameraIds?: Array<string>;
   /** Verschachtelte Gruppen (diese Gruppe enthält andere Gruppen als Ganzes). */
   groupIds: Array<string>;
 };

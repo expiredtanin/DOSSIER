@@ -40,6 +40,7 @@ function selHit(sel: PlanSelection): { kind: MemberKind; id: string } | null {
   if (sel.columnId) return { kind: "columnIds", id: sel.columnId };
   if (sel.roofId) return { kind: "roofIds", id: sel.roofId };
   if (sel.treeId) return { kind: "treeIds", id: sel.treeId };
+  if (sel.cameraId) return { kind: "cameraIds", id: sel.cameraId };
   return null;
 }
 
@@ -328,6 +329,7 @@ export function useMouseSelectionHandlers(opts: {
       roofIds: [],
       openingIds: [],
       treeIds: sel.treeIds ?? [],
+      cameraIds: sel.cameraIds ?? [],
     };
     // Gruppen-Isolation: ausserhalb der aktiven Gruppe getroffene Elemente
     // sind gesperrt (werden ignoriert), wie beim Einzelklick.
@@ -344,6 +346,7 @@ export function useMouseSelectionHandlers(opts: {
             roofIds: [],
             openingIds: [],
             treeIds: raw.treeIds.filter((id) => isInsideActiveGroup(project, "treeIds", id, groupPath)),
+            cameraIds: raw.cameraIds.filter((id) => isInsideActiveGroup(project, "cameraIds", id, groupPath)),
           };
     // Gruppen-Erweiterung: jedes getroffene Element, das zu einer sichtbaren
     // Gruppe gehört, zieht deren ganze (transitive) Mitgliedschaft nach.
@@ -360,7 +363,7 @@ export function useMouseSelectionHandlers(opts: {
       stairs: expanded.stairIds,
       rooms: expanded.roomIds,
       trees: expanded.treeIds,
-      cameras: sel.cameraIds ?? [],
+      cameras: expanded.cameraIds,
       groups: groupIds,
     });
   };
