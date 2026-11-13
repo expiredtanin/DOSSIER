@@ -13,7 +13,8 @@ kommt als Teile aus dem Kern (`src/plan/toWalls3d.ts`). Weg eines Modells in den
 | `Viewport3D.tsx` | Zugang zur Ansicht (`Viewport3D = Wasm3DViewport`) und die geteilten Typen (`RenderDisplay`, `DisplayResolver`) |
 | `useWasm3dRenderer.ts` | Hook: lädt render3d, hält Modell, Kamera und Punktwolken, zeichnet; Typ `Camera3d` |
 | `cameraView.ts` | [213] Kamera-Element (`Project.cameras`) ↔ Sicht des Viewports: `cameraToView`, `cameraFromView`, Brennweite, Geschoss zur Höhe |
-| `walk.ts` | [213] Begehen (WASD): Bewegung und Umschauen als reine Funktionen auf dem Orbit-Zustand |
+| `walk.ts` | [213] Begehen (WASD): Bewegung und Umschauen als reine Funktionen auf dem Orbit-Zustand; [245] `stepWalkCollide` (Kollision, Bodenfolge) |
+| `walkCollision.ts` | [245] Raster aus Wänden, Decken/Tritten und Netzen: Gleiten an Hindernissen, Boden unter der Person |
 | `imageExport.ts` | 3D-Bild in Abgabeauflösung; beim Pathtracing in Häppchen mit N Samples, Fortschritt und Abbruch ([212], [223]) |
 | `imageExport.ts` | [223] Hilfen für den 3D-Bild-Export (Zielgrösse, transparenter Hintergrund); Samples je Pixel im Stil Pathtracing (`exportSamples`, [212]); gezeichnet wird in `useWasm3dRenderer.exportImage` |
 | `cameraBridge.ts` | Kamera von aussen lesen und setzen, Bild-Schnappschuss, Live-Schnittebene (für BCF-Viewpoints) |

@@ -7,6 +7,7 @@
 
 import { PITCH_LIMIT } from "./cameraBridge";
 import type { OrbitState, V3 } from "./cameraBridge";
+import { STEP_UP, type WalkWorld } from "./walkCollision";
 
 /** Gedrückte Bewegungstasten. */
 export interface WalkKeys {
@@ -114,4 +115,79 @@ export function walkKeyAllowed(e: { ctrlKey: boolean; metaKey: boolean }, active
   const tag = active.tagName;
   if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return false;
   return !(active as HTMLElement).isContentEditable;
+}
+
+// ── [245] Kollision und Bodenfolge ─────────────────────────────────────────────────────────────────────────────
+
+/** Standard-Augenhöhe über dem Boden (m) und erlaubter Bereich für Q/E. */
+export const EYE_HEIGHT = 1.6;
+export const EYE_MIN = 0.5;
+export const EYE_MAX = 2.3;
+/** Glättung der Fusshöhe (1/s): Aufstieg zügig, Abstieg sanfter; höchste Fallgeschwindigkeit (m/s). */
+const RISE_RATE = 14;
+const FALL_RATE = 6;
+const MAX_FALL_SPEED = 5;
+/** Unter dieser Restdifferenz (m) gilt die Fusshöhe als angekommen. */
+const SETTLE = 0.002;
+
+/** Zustand der Person im Begehen mit Kollision. */
+export interface WalkBody {
+  /** Fusshöhe (geglättet, daraus ergibt sich die Augenhöhe). */
+  feetY: number;
+  /** Höhe des Bodens unter der Person (ungeglättet, Bezug für Stufen und Kollision). */
+  groundY: number;
+  /** Auge über den Füssen (Q/E ändern sie). */
+  eyeHeight: number;
+}
+
+/** Person aus dem aktuellen Augpunkt: Boden darunter suchen; ohne Boden bleibt die Höhe stehen. */
+export function initBody(o: OrbitState, world: WalkWorld): WalkBody {
+  const eye = orbitEye(o);
+  const ground = world.groundAt(eye[0], eye[2], eye[1]);
+  const eyeHeight = ground !== null && eye[1] - ground >= EYE_MIN && eye[1] - ground <= EYE_MAX ? eye[1] - ground : EYE_HEIGHT;
+  const feetY = eye[1] - eyeHeight;
+  return { feetY, groundY: ground !== null ? ground : feetY, eyeHeight };
+}
+
+/** Ist die Fusshöhe noch unterwegs zum Boden (dann läuft der Takt auch ohne Taste weiter)? */
+export const bodySettling = (b: WalkBody): boolean => Math.abs(b.feetY - b.groundY) > SETTLE;
+
+/** Fusshöhe auf den Boden zu: nach oben schnell, nach unten sanft mit Fallgrenze; ohne Ruckeln bei Stufen. */
+function smoothFeet(feet: number, ground: number, dt: number): number {
+  const diff = ground - feet;
+  if (Math.abs(diff) <= SETTLE) return ground;
+  if (diff > 0) return feet + diff * (1 - Math.exp(-RISE_RATE * dt));
+  const drop = Math.min(-diff * (1 - Math.exp(-FALL_RATE * dt)), MAX_FALL_SPEED * dt, -diff);
+  return feet - drop;
+}
+
+/**
+ * Ein Zeitschritt des Begehens mit Kollision: horizontal gleitend an Wänden, Fusshöhe folgt dem Boden (Stufen bis
+ * `STEP_UP` geglättet, Absturz sanft), Q/E ändern die Augenhöhe. Der Augpunkt wandert um denselben Vektor wie das Ziel
+ * (Blickrichtung bleibt). Ohne Taste und ohne offene Höhenanpassung derselbe Zustand.
+ */
+export function stepWalkCollide(
+  o: OrbitState,
+  body: WalkBody,
+  keys: WalkKeys,
+  dt: number,
+  speed: number,
+  world: WalkWorld,
+): { orbit: OrbitState; body: WalkBody } {
+  if (!(dt > 0) || !Number.isFinite(dt) || !(speed > 0)) return { orbit: o, body };
+  const s = Math.min(dt, MAX_DT);
+  const eye = orbitEye(o);
+  const v = walkVelocity(keys, o.yaw, speed);
+  let x = eye[0];
+  let z = eye[2];
+  if (v[0] !== 0 || v[2] !== 0) [x, z] = world.move(x, z, v[0] * s, v[2] * s, body.groundY);
+  // Boden an der neuen Stelle: höchstens eine Stufe höher als bisher; fällt der Boden weg, der nächste darunter.
+  const g = world.groundAt(x, z, body.groundY + STEP_UP);
+  const groundY = g !== null ? g : body.groundY;
+  const eyeHeight = Math.max(EYE_MIN, Math.min(EYE_MAX, body.eyeHeight + v[1] * s));
+  const feetY = smoothFeet(body.feetY, groundY, s);
+  const ny = feetY + eyeHeight;
+  const d: V3 = [x - eye[0], ny - eye[1], z - eye[2]];
+  const orbit = d[0] === 0 && d[1] === 0 && d[2] === 0 ? o : { ...o, target: [o.target[0] + d[0], o.target[1] + d[1], o.target[2] + d[2]] as V3 };
+  return { orbit, body: { feetY, groundY, eyeHeight } };
 }

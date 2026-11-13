@@ -34,6 +34,20 @@ describe("ViewportToolbar3d", () => {
     for (const k of ["W A S D", "Q / E", "Esc"]) expect(h).toContain(k);
   });
 
+  it("[245] Geist: Knopf nur im Begehen und mit Handler, Taste G in der Tastenhilfe", () => {
+    setLanguage("de");
+    const withGhost = (walkMode: boolean, ghost: boolean) =>
+      renderToStaticMarkup(createElement(ViewportToolbar3d, { walkMode, onToggleWalk: noop, ghost, onToggleGhost: noop, onCreateCamera: noop, pathtrace: null }));
+    expect(withGhost(false, false)).not.toContain("walk-ghost");
+    expect(html(true)).not.toContain("walk-ghost");
+    const on = withGhost(true, true);
+    expect(on).toContain('data-testid="walk-ghost"');
+    expect(on).toContain(t("walk.tip.ghostOff"));
+    expect(withGhost(true, false)).toContain(t("walk.tip.ghostOn"));
+    expect(on).toContain(t("walk.help.ghost"));
+    expect(on).toContain("<kbd>G</kbd>");
+  });
+
   it("Kamera-Knopf hat Label und Test-ID", () => {
     const h = html(false);
     expect(h).toContain('data-testid="camera-create-3d"');
