@@ -10,7 +10,7 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   stehen im Archiv („Bewusst nicht übernommen“).
 - **Grösse** (eine Person mit Agenten): S ≤ 1 Tag · M ≤ 1 Woche · L ≤ 1 Monat · XL > 1 Monat.
   Steht keine Grösse im Archiv, ist sie hier geschätzt.
-- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 239);
+- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 240);
   nie eine ID wiederverwenden oder umnummerieren. Präfix-IDs (`[K]`, `[G]`, `[T]`, `[B]`, `[C]`) bleiben.
 - **Pro Punkt:** was fehlt · wo im Code · Grösse. Höchstens ein bis drei Sätze je Punkt;
   Messwerte und Befunde gehören in den Commit.
@@ -299,6 +299,14 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   Dachziegel-Muster geprüft: Linien enden an den Dachflächen-Polygonen (Ansichten, keine Abweichung gefunden). Geprüft: Probe über alle
   Wände des Musterhauses komplex (0 Wände mit Überstand), `cargo test` Kern (surface_pattern, 15 grün). Nicht geprüft: Bild nachher
   (WASM-Kern im Container nicht neu gebaut, Platte knapp), Mac/Metal, Tauri-App. · S
+- ✓ **[240]** 3D-Viewport: Knöpfe und Anzeigen schöner (13.11., Wunsch Maintainer). Neue Komponente `src/viewport/ViewportToolbar3d.tsx` (eigener CSS-Block `.vp3t-*`;
+  `Wasm3DViewport.tsx` bindet nur noch ein): Icon-Knöpfe (Material Symbols `directions_walk`, `add_a_photo`) in zwei Gruppen oben rechts mit Tooltip
+  (Hover und Tastaturfokus, Text + Kürzel über `t()`) und `aria-label`; Begehen mit `aria-pressed` und deutlich aktivem Zustand. Pathtracer-Zähler als
+  Statuszeile unten links mit Fortschrittsbalken (Samples / 1024), Zahl höchstens 4× pro Sekunde aktualisiert (kein Flackern). Begehen: Tastenhilfe
+  (W A S D, Q/E, Umschalt/Alt, Maus, Esc) blendet nach 6 s aus. Grund halbtransparent mit Unschärfe, Farben hell/dunkel über Variablen; Bewegung entfällt bei
+  „weniger Bewegung“. Test `ViewportToolbar3d.test.ts`. Geprüft: tsc, vitest `src/viewport src/ui src/i18n`, Playwright-Screenshots hell/dunkel
+  (Chromium, ohne WebGPU: 3D-Fläche leer, Pathtracer-Zeile dort aus denselben Klassen nachgebaut). Nicht geprüft: Mac/Tauri/Metal, echte 3D-Anzeige,
+  Kontrast über echtem 3D-Bild. Das Darstellungsarten-Dropdown in der Oberleiste (`TopBar`, geteilt mit 2D) blieb unverändert. · S
 ### Phase 3 (27.11.–3.12.): Vorprojekt
 - ◐ **[234]** 3D: Rundbogen-Fenster der OG-Südwand (`og-f1`, Musterhaus komplex) ragte mit dem Bogenscheitel über die Wandoberkante ins
   Gesims/Deckenband darüber. Stand 13.11.: Ursache war das Beispiel, nicht der Kern: Brüstung 0,9 + Höhe 1,6 = 2,5 m, die Decke c-og
