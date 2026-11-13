@@ -99,6 +99,9 @@ export const de = {
   "display.style.textured": "Texturiert",
   "display.style.wireframe": "Drahtgitter",
   "display.style.hidden": "Kanten",
+  "display.style.pathtrace": "Pathtracing (Vorschau)",
+  "viewport.pathtrace.status": "Pathtracing: {samples} Samples · {rate}/s",
+  "viewport.pathtrace.done": "Pathtracing: {samples} Samples (fertig)",
 
   "topbar.referenceLinesGroup": "Referenzlinien",
   "topbar.referenceLines": "Referenzlinien",

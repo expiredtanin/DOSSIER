@@ -14,11 +14,13 @@
 // Standard-Build (`cargo test`/`cargo build` ohne Features) enthaelt nur die
 // GPU-freien Schichten und ist damit unabhaengig von einer Display-Session.
 
+pub mod bvh;
 pub mod edges;
 pub mod ghost;
 pub mod grid;
 pub mod math;
 pub mod mesh;
+pub mod pathtrace;
 pub mod pattern_lines;
 pub mod points;
 pub(crate) mod openings;
@@ -35,6 +37,8 @@ pub mod types;
 pub mod gpu;
 #[cfg(feature = "render")]
 pub mod gpu_points;
+#[cfg(feature = "render")]
+pub mod gpu_pathtrace;
 
 // Browser-Bindings (wasm32 + WebGPU), nur mit Feature "web". Setzt "render" voraus
 // (dieselbe GPU-Schicht wie das native Fenster), fuegt aber KEINE winit-Abhaengigkeit

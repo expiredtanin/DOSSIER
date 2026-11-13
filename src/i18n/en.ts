@@ -98,6 +98,9 @@ export const en: Record<TranslationKey, string> = {
   "display.style.textured": "Textured",
   "display.style.wireframe": "Wireframe",
   "display.style.hidden": "Hidden line",
+  "display.style.pathtrace": "Path tracing (preview)",
+  "viewport.pathtrace.status": "Path tracing: {samples} samples · {rate}/s",
+  "viewport.pathtrace.done": "Path tracing: {samples} samples (done)",
 
   "topbar.referenceLinesGroup": "Reference lines",
   "topbar.referenceLines": "Reference lines",

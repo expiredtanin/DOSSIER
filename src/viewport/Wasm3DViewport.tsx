@@ -654,6 +654,7 @@ export function Wasm3DViewport({
     render,
     updateModel,
     setRenderStyle,
+    pathtraceStatus,
     setSun,
     applyViewPreset,
     viewFit,
@@ -822,6 +823,40 @@ export function Wasm3DViewport({
     setRenderStyle(renderMode);
     redrawRef.current();
   }, [ready, renderMode, setRenderStyle]);
+
+  // [212] Pathtracing (Vorschau): progressiv — solange der Stil aktiv und das Bild nicht fertig ist, je Animationsbild
+  // ein Sample dazurechnen (der Renderer beginnt bei Kamera-/Modell-/Sonnenänderung selbst von vorn). Zähler und
+  // Samples/s unten links; die Rate ist über ~1 s gemittelt.
+  const [ptStatus, setPtStatus] = useState<{ samples: number; rate: number; done: boolean } | null>(null);
+  useEffect(() => {
+    if (!ready || renderMode !== "pathtrace") {
+      setPtStatus(null);
+      return;
+    }
+    let raf = 0;
+    let last = { t: performance.now(), samples: 0, rate: 0 };
+    let shown = "";
+    const tick = () => {
+      const st = pathtraceStatus();
+      if (st && !st.done) redrawRef.current();
+      const now = performance.now();
+      const cur = pathtraceStatus() ?? st;
+      if (cur) {
+        if (cur.samples < last.samples) last = { t: now, samples: 0, rate: last.rate };
+        if (now - last.t >= 1000) {
+          last = { t: now, samples: cur.samples, rate: ((cur.samples - last.samples) * 1000) / (now - last.t) };
+        }
+        const key = `${cur.samples}|${cur.done}|${last.rate.toFixed(1)}`;
+        if (key !== shown) {
+          shown = key;
+          setPtStatus({ samples: cur.samples, rate: last.rate, done: cur.done });
+        }
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [ready, renderMode, pathtraceStatus]);
 
   // Sonne + Schatten im 3D ([64]) aus der Sonnenstudie: der Zeitregler im Lage-Panel ändert
   // `sunStudy.when`, hier wird neu gesetzt und gezeichnet. Der Schlüssel hält Modelländerungen ohne
@@ -1821,6 +1856,26 @@ export function Wasm3DViewport({
           Darstellungsart kommen von der Oberleiste (TopBar); das Grid-Overlay
           unten ist der einzige eigene Umschalter hier. */}
       <canvas ref={canvasRef} data-engine="render3d" />
+      {ptStatus && (
+        <div
+          data-testid="pathtrace-status"
+          style={{
+            position: "absolute",
+            left: 10,
+            bottom: 10,
+            padding: "3px 8px",
+            borderRadius: 6,
+            background: "rgba(20,20,24,0.65)",
+            color: "#f2f2f2",
+            fontSize: 12,
+            pointerEvents: "none",
+          }}
+        >
+          {ptStatus.done
+            ? t("viewport.pathtrace.done", { samples: ptStatus.samples })
+            : t("viewport.pathtrace.status", { samples: ptStatus.samples, rate: ptStatus.rate.toFixed(1) })}
+        </div>
+      )}
       {/* [213] Begehen (WASD) und Kamera aus der aktuellen Ansicht anlegen. */}
       <div className="viewport3d-tools" data-testid="viewport3d-tools">
         <button

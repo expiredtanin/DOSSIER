@@ -1,0 +1,580 @@
+// [212] Hüllkörper-Baum (BVH) für den Pathtracer: auf der CPU aus den Dreiecken der Szene gebaut (dieselben Netze
+// wie die schattierte Ansicht, `Scene::chunk_data`), Binned-SAH, als flache Arrays für die GPU (`GpuNode`, `GpuTri`).
+// GPU-frei (Standard-Schicht), headless per `cargo test` prüfbar; die Traversierung hier ist dieselbe wie im
+// Compute-Shader (`pathtrace_wgsl.rs`) und dient den Tests (Treffer gegen Brute-Force).
+//
+// Eingaben werden geprüft, nie mit Panic verworfen: nicht endliche Koordinaten, entartete Dreiecke (Fläche 0) und
+// Indizes ausserhalb des Puffers fallen weg; leere Eingabe = leerer Baum (`tri_count() == 0`, Shader verfolgt nichts).
+// Doppelseitige Netze (Kontext, Glas, Dächer: `mesh.rs` legt jedes Dreieck zweimal mit umgekehrter Windung ab)
+// bleiben einmal im Baum: der Pathtracer dreht die Normale ohnehin zur Blickseite.
+
+use std::collections::HashSet;
+
+use crate::shadow::GLASS_RGB;
+
+/// Material-Art je Dreieck (Bits 24..32 von `GpuTri::mat`).
+pub const MAT_DIFFUSE: u32 = 0;
+/// Glänzend: diffuse Grundfarbe unter einer dielektrischen GGX-Schicht (F0 0.04) mit Rauigkeit `GpuTri::rough`.
+pub const MAT_GLOSSY: u32 = 1;
+/// Glas: dünne Scheibe (Fresnel-Spiegelung, sonst gerader Durchgang mit leichter Tönung).
+pub const MAT_GLASS: u32 = 2;
+
+/// Stahlrahmen der Öffnungen (Kern `model3d/openings.rs`, `PART_RGB[4]`): glänzend (beschichtet).
+pub const STEEL_RGB: [f32; 3] = [0.25, 0.27, 0.3];
+
+/// Höchstens so viele Dreiecke je Blatt, wenn die SAH nicht weiter teilt.
+const MAX_LEAF: usize = 8;
+/// Zahl der Fächer je Achse beim Binned-SAH.
+const BINS: usize = 12;
+/// Grenze der Baumtiefe (Stapel im Shader: 64 Einträge).
+const MAX_DEPTH: usize = 48;
+/// Kosten einer Knoten-Traversierung relativ zu einem Dreieckstest.
+const TRAVERSAL_COST: f32 = 1.0;
+
+/// Ein Dreieck der Eingabe: Ecken (world, Y oben) und Grundfarbe (Vertexfarbe, wie im Shader 0..1).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PtTri {
+    pub v: [[f32; 3]; 3],
+    pub color: [f32; 3],
+}
+
+/// Knoten, 32 Byte, 1:1 zum WGSL-`Node`: `count > 0` = Blatt mit Dreiecken `[left_first, left_first + count)`,
+/// sonst innen mit Kindern `left_first` und `left_first + 1`.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[cfg_attr(feature = "render", derive(bytemuck::Pod, bytemuck::Zeroable))]
+pub struct GpuNode {
+    pub min: [f32; 3],
+    pub left_first: u32,
+    pub max: [f32; 3],
+    pub count: u32,
+}
+
+/// Dreieck, 48 Byte, 1:1 zum WGSL-`Tri`: Ecke `v0`, Kanten `e1 = v1 − v0`, `e2 = v2 − v0` (Möller–Trumbore),
+/// `mat` = Grundfarbe linear RGB8 (Bits 0..24) + Art (Bits 24..32), `rough` = GGX-Rauigkeit.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[cfg_attr(feature = "render", derive(bytemuck::Pod, bytemuck::Zeroable))]
+pub struct GpuTri {
+    pub v0: [f32; 3],
+    pub mat: u32,
+    pub e1: [f32; 3],
+    pub rough: f32,
+    pub e2: [f32; 3],
+    pub pad: u32,
+}
+
+/// Material aus der Vertexfarbe ([212]): Glas über die Kern-Farbe der Verglasung (wie `shadow::caster_indices`),
+/// Stahlrahmen glänzend, alles andere diffus. Rückgabe (Art, Rauigkeit).
+pub fn classify_material(color: [f32; 3]) -> (u32, f32) {
+    let near = |c: [f32; 3]| (0..3).all(|k| (color[k] - c[k]).abs() < 1e-3);
+    if near(GLASS_RGB) {
+        (MAT_GLASS, 0.0)
+    } else if near(STEEL_RGB) {
+        (MAT_GLOSSY, 0.3)
+    } else {
+        (MAT_DIFFUSE, 1.0)
+    }
+}
+
+/// sRGB-Wert (0..1) nach linear.
+pub fn srgb_to_linear(c: f32) -> f32 {
+    if c <= 0.04045 {
+        c / 12.92
+    } else {
+        ((c + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+/// Höchste Albedo (energieerhaltend, wie der Blender-Leser [211]: ≤ 0.8).
+const MAX_ALBEDO: f32 = 0.8;
+
+fn pack_mat(color: [f32; 3], kind: u32) -> u32 {
+    let mut out = kind << 24;
+    for (k, c) in color.iter().enumerate() {
+        let lin = if c.is_finite() { srgb_to_linear(c.clamp(0.0, 1.0)).min(MAX_ALBEDO) } else { 0.5 };
+        out |= ((lin * 255.0).round() as u32 & 0xFF) << (8 * k);
+    }
+    out
+}
+
+/// Liest Dreiecke aus einem `Mesh`-Puffer (`[pos, normal, color]` je Ecke, `FLOATS_PER_VERTEX`) und hängt sie an.
+/// Kaputte Indizes und nicht endliche Ecken fallen weg. Farbe = Mittel der drei Ecken (Luftbild-Vertexfarben).
+pub fn tris_from_mesh(verts: &[f32], indices: &[u32], out: &mut Vec<PtTri>) {
+    let stride = crate::types::FLOATS_PER_VERTEX;
+    let n = verts.len() / stride;
+    for t in indices.chunks_exact(3) {
+        if t.iter().any(|&i| i as usize >= n) {
+            continue;
+        }
+        let at = |i: u32, o: usize| {
+            let b = i as usize * stride + o;
+            [verts[b], verts[b + 1], verts[b + 2]]
+        };
+        let v = [at(t[0], 0), at(t[1], 0), at(t[2], 0)];
+        let c = [at(t[0], 6), at(t[1], 6), at(t[2], 6)];
+        // Glas/Stahl nur bei gleicher Farbe an allen Ecken (sonst Mittelwert, z. B. Luftbild).
+        let color = if c[0] == c[1] && c[1] == c[2] {
+            c[0]
+        } else {
+            [(c[0][0] + c[1][0] + c[2][0]) / 3.0, (c[0][1] + c[1][1] + c[2][1]) / 3.0, (c[0][2] + c[1][2] + c[2][2]) / 3.0]
+        };
+        out.push(PtTri { v, color });
+    }
+}
+
+/// Der gebaute Baum.
+#[derive(Clone, Debug, Default)]
+pub struct Bvh {
+    pub nodes: Vec<GpuNode>,
+    pub tris: Vec<GpuTri>,
+}
+
+fn sub(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+}
+fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+}
+fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
+#[derive(Clone, Copy)]
+struct Aabb {
+    min: [f32; 3],
+    max: [f32; 3],
+}
+
+impl Aabb {
+    const EMPTY: Aabb = Aabb { min: [f32::INFINITY; 3], max: [f32::NEG_INFINITY; 3] };
+    fn grow_p(&mut self, p: [f32; 3]) {
+        for k in 0..3 {
+            self.min[k] = self.min[k].min(p[k]);
+            self.max[k] = self.max[k].max(p[k]);
+        }
+    }
+    fn grow(&mut self, b: &Aabb) {
+        for k in 0..3 {
+            self.min[k] = self.min[k].min(b.min[k]);
+            self.max[k] = self.max[k].max(b.max[k]);
+        }
+    }
+    fn area(&self) -> f32 {
+        let e = sub(self.max, self.min);
+        if e.iter().any(|v| *v < 0.0) {
+            return 0.0;
+        }
+        2.0 * (e[0] * e[1] + e[1] * e[2] + e[2] * e[0])
+    }
+}
+
+/// Schlüssel eines Dreiecks unabhängig von Eckenfolge und Windung (Doppelseiten erkennen): gerundete Ecken, sortiert.
+fn tri_key(v: &[[f32; 3]; 3]) -> [[i64; 3]; 3] {
+    let q = |p: [f32; 3]| [(p[0] as f64 * 1e5).round() as i64, (p[1] as f64 * 1e5).round() as i64, (p[2] as f64 * 1e5).round() as i64];
+    let mut k = [q(v[0]), q(v[1]), q(v[2])];
+    k.sort();
+    k
+}
+
+impl Bvh {
+    pub fn tri_count(&self) -> usize {
+        self.tris.len()
+    }
+
+    /// Baut den Baum (Binned-SAH). Ungültige Dreiecke fallen weg (s. Moduldoc); leer → leerer Baum.
+    pub fn build(input: &[PtTri]) -> Bvh {
+        let mut seen: HashSet<[[i64; 3]; 3]> = HashSet::with_capacity(input.len());
+        let mut tris: Vec<PtTri> = Vec::with_capacity(input.len());
+        for t in input {
+            if !t.v.iter().flatten().all(|c| c.is_finite() && c.abs() < 1e7) {
+                continue;
+            }
+            let n = cross(sub(t.v[1], t.v[0]), sub(t.v[2], t.v[0]));
+            if !(dot(n, n) > 1e-18) {
+                continue;
+            }
+            if seen.insert(tri_key(&t.v)) {
+                tris.push(*t);
+            }
+        }
+        if tris.is_empty() {
+            return Bvh::default();
+        }
+        let bounds: Vec<Aabb> = tris
+            .iter()
+            .map(|t| {
+                let mut b = Aabb::EMPTY;
+                t.v.iter().for_each(|p| b.grow_p(*p));
+                b
+            })
+            .collect();
+        let cent: Vec<[f32; 3]> = bounds.iter().map(|b| [(b.min[0] + b.max[0]) * 0.5, (b.min[1] + b.max[1]) * 0.5, (b.min[2] + b.max[2]) * 0.5]).collect();
+        let mut order: Vec<u32> = (0..tris.len() as u32).collect();
+        let mut nodes: Vec<GpuNode> = Vec::with_capacity(tris.len() * 2 / MAX_LEAF.max(1) + 2);
+        nodes.push(GpuNode::default());
+        // Stapel: (Knoten, erster, Anzahl, Tiefe)
+        let mut stack: Vec<(usize, usize, usize, usize)> = vec![(0, 0, tris.len(), 0)];
+        while let Some((ni, first, count, depth)) = stack.pop() {
+            let idx = &mut order[first..first + count];
+            let mut nb = Aabb::EMPTY;
+            let mut cb = Aabb::EMPTY;
+            for &i in idx.iter() {
+                nb.grow(&bounds[i as usize]);
+                cb.grow_p(cent[i as usize]);
+            }
+            nodes[ni].min = nb.min;
+            nodes[ni].max = nb.max;
+            let leaf = |nodes: &mut Vec<GpuNode>| {
+                nodes[ni].left_first = first as u32;
+                nodes[ni].count = count as u32;
+            };
+            if count <= 2 || depth >= MAX_DEPTH {
+                leaf(&mut nodes);
+                continue;
+            }
+            // Binned-SAH über alle drei Achsen.
+            let mut best: Option<(usize, usize, f32)> = None; // (Achse, Grenz-Fach, Kosten)
+            for axis in 0..3 {
+                let lo = cb.min[axis];
+                let ext = cb.max[axis] - lo;
+                if !(ext > 1e-9) {
+                    continue;
+                }
+                let scale = BINS as f32 / ext;
+                let mut bin_b = [Aabb::EMPTY; BINS];
+                let mut bin_n = [0usize; BINS];
+                for &i in idx.iter() {
+                    let b = (((cent[i as usize][axis] - lo) * scale) as usize).min(BINS - 1);
+                    bin_n[b] += 1;
+                    bin_b[b].grow(&bounds[i as usize]);
+                }
+                // Präfix von links, Suffix von rechts.
+                let mut left_area = [0.0f32; BINS];
+                let mut left_n = [0usize; BINS];
+                let (mut acc, mut n) = (Aabb::EMPTY, 0usize);
+                for b in 0..BINS - 1 {
+                    acc.grow(&bin_b[b]);
+                    n += bin_n[b];
+                    left_area[b] = acc.area();
+                    left_n[b] = n;
+                }
+                let (mut acc, mut n) = (Aabb::EMPTY, 0usize);
+                for b in (1..BINS).rev() {
+                    acc.grow(&bin_b[b]);
+                    n += bin_n[b];
+                    let l = b - 1;
+                    if left_n[l] == 0 || n == 0 {
+                        continue;
+                    }
+                    let cost = left_area[l] * left_n[l] as f32 + acc.area() * n as f32;
+                    if best.map_or(true, |(_, _, c)| cost < c) {
+                        best = Some((axis, b, cost));
+                    }
+                }
+            }
+            let parent_area = nb.area().max(1e-12);
+            let split = best.filter(|&(_, _, c)| {
+                let split_cost = TRAVERSAL_COST + c / parent_area;
+                split_cost < count as f32 || count > MAX_LEAF
+            });
+            let Some((axis, bin, _)) = split else {
+                // Kein sinnvoller Schnitt (alle Mitten gleich): bei vielen Dreiecken halbieren, sonst Blatt.
+                if count > MAX_LEAF * 4 && depth < MAX_DEPTH {
+                    let half = count / 2;
+                    let c = nodes.len();
+                    nodes.push(GpuNode::default());
+                    nodes.push(GpuNode::default());
+                    nodes[ni].left_first = c as u32;
+                    nodes[ni].count = 0;
+                    stack.push((c, first, half, depth + 1));
+                    stack.push((c + 1, first + half, count - half, depth + 1));
+                } else {
+                    leaf(&mut nodes);
+                }
+                continue;
+            };
+            let lo = cb.min[axis];
+            let scale = BINS as f32 / (cb.max[axis] - lo);
+            // Partition: Fach < bin links.
+            let mut i = 0usize;
+            let mut j = count;
+            while i < j {
+                let b = (((cent[idx[i] as usize][axis] - lo) * scale) as usize).min(BINS - 1);
+                if b < bin {
+                    i += 1;
+                } else {
+                    j -= 1;
+                    idx.swap(i, j);
+                }
+            }
+            if i == 0 || i == count {
+                leaf(&mut nodes);
+                continue;
+            }
+            let c = nodes.len();
+            nodes.push(GpuNode::default());
+            nodes.push(GpuNode::default());
+            nodes[ni].left_first = c as u32;
+            nodes[ni].count = 0;
+            stack.push((c, first, i, depth + 1));
+            stack.push((c + 1, first + i, count - i, depth + 1));
+        }
+        let gpu_tris = order
+            .iter()
+            .map(|&i| {
+                let t = &tris[i as usize];
+                let (kind, rough) = classify_material(t.color);
+                GpuTri { v0: t.v[0], mat: pack_mat(t.color, kind), e1: sub(t.v[1], t.v[0]), rough, e2: sub(t.v[2], t.v[0]), pad: 0 }
+            })
+            .collect();
+        Bvh { nodes, tris: gpu_tris }
+    }
+
+    /// Strahl gegen ein Dreieck (Möller–Trumbore); `t` im offenen Intervall (`tmin`, `tmax`).
+    fn hit_tri(t: &GpuTri, o: [f32; 3], d: [f32; 3], tmin: f32, tmax: f32) -> Option<f32> {
+        let p = cross(d, t.e2);
+        let det = dot(t.e1, p);
+        if det.abs() < 1e-12 {
+            return None;
+        }
+        let inv = 1.0 / det;
+        let s = sub(o, t.v0);
+        let u = dot(s, p) * inv;
+        if !(0.0..=1.0).contains(&u) {
+            return None;
+        }
+        let q = cross(s, t.e1);
+        let v = dot(d, q) * inv;
+        if v < 0.0 || u + v > 1.0 {
+            return None;
+        }
+        let tt = dot(t.e2, q) * inv;
+        (tt > tmin && tt < tmax).then_some(tt)
+    }
+
+    fn hit_box(n: &GpuNode, o: [f32; 3], inv: [f32; 3], tmax: f32) -> Option<f32> {
+        let (mut t0, mut t1) = (0.0f32, tmax);
+        for k in 0..3 {
+            let a = (n.min[k] - o[k]) * inv[k];
+            let b = (n.max[k] - o[k]) * inv[k];
+            let (lo, hi) = if a < b { (a, b) } else { (b, a) };
+            // NaN (0 · ∞ bei Strahl in der Ebene der Box) lässt die Grenze stehen.
+            if lo > t0 {
+                t0 = lo;
+            }
+            if hi < t1 {
+                t1 = hi;
+            }
+        }
+        (t0 <= t1).then_some(t0)
+    }
+
+    /// Nächster Treffer (t, Dreiecks-Index) — dieselbe Traversierung wie der Shader.
+    pub fn intersect(&self, o: [f32; 3], d: [f32; 3], tmax: f32) -> Option<(f32, usize)> {
+        if self.tris.is_empty() || self.nodes.is_empty() {
+            return None;
+        }
+        let inv = d.map(|c| if c.abs() > 1e-20 { 1.0 / c } else { 1e30f32.copysign(c) });
+        let mut best: Option<(f32, usize)> = None;
+        let mut tbest = tmax;
+        Self::hit_box(&self.nodes[0], o, inv, tbest)?;
+        let mut stack: Vec<u32> = vec![0];
+        while let Some(ni) = stack.pop() {
+            let n = &self.nodes[ni as usize];
+            if Self::hit_box(n, o, inv, tbest).is_none() {
+                continue;
+            }
+            if n.count > 0 {
+                for ti in n.left_first..n.left_first + n.count {
+                    if let Some(t) = Self::hit_tri(&self.tris[ti as usize], o, d, 1e-6, tbest) {
+                        tbest = t;
+                        best = Some((t, ti as usize));
+                    }
+                }
+            } else {
+                stack.push(n.left_first);
+                stack.push(n.left_first + 1);
+            }
+        }
+        best
+    }
+
+    /// Brute-Force-Treffer über alle Dreiecke (Referenz der Tests).
+    pub fn intersect_brute(&self, o: [f32; 3], d: [f32; 3], tmax: f32) -> Option<(f32, usize)> {
+        let mut best: Option<(f32, usize)> = None;
+        let mut tbest = tmax;
+        for (i, t) in self.tris.iter().enumerate() {
+            if let Some(tt) = Self::hit_tri(t, o, d, 1e-6, tbest) {
+                tbest = tt;
+                best = Some((tt, i));
+            }
+        }
+        best
+    }
+
+    /// Größte Baumtiefe (Test: Stapel im Shader reicht).
+    pub fn depth(&self) -> usize {
+        if self.nodes.is_empty() {
+            return 0;
+        }
+        let mut max = 0;
+        let mut stack = vec![(0u32, 1usize)];
+        while let Some((ni, d)) = stack.pop() {
+            max = max.max(d);
+            let n = &self.nodes[ni as usize];
+            if n.count == 0 {
+                stack.push((n.left_first, d + 1));
+                stack.push((n.left_first + 1, d + 1));
+            }
+        }
+        max
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Deterministischer Zufall (xorshift) für reproduzierbare Tests.
+    struct Rng(u64);
+    impl Rng {
+        fn f(&mut self) -> f32 {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            (self.0 >> 40) as f32 / (1u64 << 24) as f32
+        }
+        fn v(&mut self, s: f32) -> [f32; 3] {
+            [(self.f() - 0.5) * s, (self.f() - 0.5) * s, (self.f() - 0.5) * s]
+        }
+    }
+
+    fn soup(n: usize, seed: u64) -> Vec<PtTri> {
+        let mut r = Rng(seed);
+        (0..n)
+            .map(|_| {
+                let c = r.v(20.0);
+                let a = r.v(1.5);
+                let b = r.v(1.5);
+                let d = r.v(1.5);
+                PtTri { v: [[c[0] + a[0], c[1] + a[1], c[2] + a[2]], [c[0] + b[0], c[1] + b[1], c[2] + b[2]], [c[0] + d[0], c[1] + d[1], c[2] + d[2]]], color: [0.5, 0.5, 0.5] }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn treffer_wie_brute_force() {
+        let bvh = Bvh::build(&soup(3000, 7));
+        assert_eq!(bvh.tri_count(), 3000);
+        assert!(bvh.depth() <= MAX_DEPTH + 1, "Tiefe {}", bvh.depth());
+        let mut r = Rng(99);
+        let mut hits = 0;
+        for _ in 0..2000 {
+            let o = r.v(40.0);
+            let mut d = r.v(2.0);
+            let l = dot(d, d).sqrt().max(1e-6);
+            d = d.map(|c| c / l);
+            let a = bvh.intersect(o, d, f32::INFINITY);
+            let b = bvh.intersect_brute(o, d, f32::INFINITY);
+            match (a, b) {
+                (Some((ta, _)), Some((tb, _))) => {
+                    assert!((ta - tb).abs() < 1e-4, "{ta} vs {tb}");
+                    hits += 1;
+                }
+                (None, None) => {}
+                _ => panic!("BVH {a:?} ≠ Brute-Force {b:?}"),
+            }
+        }
+        assert!(hits > 100, "zu wenige Treffer im Test ({hits})");
+    }
+
+    #[test]
+    fn achsparallele_strahlen_und_wuerfel() {
+        // Würfel aus 12 Dreiecken plus Boden: Strahlen genau entlang der Achsen (inv = ±∞ in zwei Komponenten).
+        let p = |x: f32, y: f32, z: f32| [x, y, z];
+        let q = |a, b, c, d| [PtTri { v: [a, b, c], color: [0.8; 3] }, PtTri { v: [a, c, d], color: [0.8; 3] }];
+        let mut tris = Vec::new();
+        tris.extend(q(p(0., 0., 0.), p(1., 0., 0.), p(1., 1., 0.), p(0., 1., 0.)));
+        tris.extend(q(p(0., 0., 1.), p(1., 0., 1.), p(1., 1., 1.), p(0., 1., 1.)));
+        tris.extend(q(p(0., 0., 0.), p(0., 1., 0.), p(0., 1., 1.), p(0., 0., 1.)));
+        tris.extend(q(p(1., 0., 0.), p(1., 1., 0.), p(1., 1., 1.), p(1., 0., 1.)));
+        tris.extend(q(p(0., 0., 0.), p(1., 0., 0.), p(1., 0., 1.), p(0., 0., 1.)));
+        tris.extend(q(p(0., 1., 0.), p(1., 1., 0.), p(1., 1., 1.), p(0., 1., 1.)));
+        tris.extend(q(p(-5., -1., -5.), p(5., -1., -5.), p(5., -1., 5.), p(-5., -1., 5.)));
+        let bvh = Bvh::build(&tris);
+        let (t, _) = bvh.intersect([0.5, 5.0, 0.5], [0.0, -1.0, 0.0], f32::INFINITY).expect("Würfel von oben");
+        assert!((t - 4.0).abs() < 1e-5);
+        // Unter dem Würfel durch, parallel zum Boden: kein Treffer.
+        assert!(bvh.intersect([3.0, -0.5, 0.5], [-1.0, 0.0, 0.0], f32::INFINITY).is_none());
+        assert!(bvh.intersect_brute([3.0, -0.5, 0.5], [-1.0, 0.0, 0.0], f32::INFINITY).is_none());
+        let (t, _) = bvh.intersect([0.5, 0.5, -3.0], [0.0, 0.0, 1.0], f32::INFINITY).expect("Würfel von vorn");
+        assert!((t - 3.0).abs() < 1e-5);
+        assert!(bvh.intersect([0.5, 0.5, -3.0], [0.0, 0.0, 1.0], 2.0).is_none(), "tmax begrenzt");
+        let (t, _) = bvh.intersect([0.5, -0.5, 0.5], [0.0, -1.0, 0.0], f32::INFINITY).expect("Boden");
+        assert!((t - 0.5).abs() < 1e-5, "{t}");
+    }
+
+    #[test]
+    fn leere_und_kaputte_eingaben_ohne_panic() {
+        let empty = Bvh::build(&[]);
+        assert_eq!(empty.tri_count(), 0);
+        assert!(empty.intersect([0.0; 3], [0.0, 0.0, 1.0], f32::INFINITY).is_none());
+        let bad = [
+            PtTri { v: [[f32::NAN, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], color: [0.5; 3] },
+            PtTri { v: [[0.0; 3], [0.0; 3], [0.0; 3]], color: [0.5; 3] },
+            PtTri { v: [[0.0; 3], [1.0, 1.0, 1.0], [2.0, 2.0, 2.0]], color: [0.5; 3] },
+            PtTri { v: [[f32::INFINITY, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], color: [f32::NAN; 3] },
+        ];
+        let b = Bvh::build(&bad);
+        assert_eq!(b.tri_count(), 0, "alle verworfen");
+        assert!(b.intersect([0.0; 3], [f32::NAN, 0.0, 1.0], 1.0).is_none());
+        // Kaputte Indizes / zu kurze Puffer im Netz-Leser.
+        let mut out = Vec::new();
+        tris_from_mesh(&[0.0; 10], &[0, 1, 2, 5, 9, 99], &mut out);
+        assert!(out.is_empty());
+        tris_from_mesh(&[], &[0, 0, 0], &mut out);
+        assert!(out.is_empty());
+        // Gleiche Mitte bei vielen Dreiecken (alle Mitten gleich) → kein endloses Teilen.
+        let same: Vec<PtTri> = (0..500)
+            .map(|i| {
+                let s = 1.0 + i as f32 * 0.01;
+                PtTri { v: [[-s, 0.0, 0.0], [s, 0.0, 0.1 * s], [0.0, 0.0, -0.1 * s]], color: [0.5; 3] }
+            })
+            .collect();
+        let b = Bvh::build(&same);
+        assert_eq!(b.tri_count(), 500);
+        assert!(b.depth() <= MAX_DEPTH + 1);
+        let t = b.intersect([0.0, 3.0, 0.0], [0.0, -1.0, 0.0], f32::INFINITY).expect("Treffer").0;
+        assert!((t - 3.0).abs() < 1e-5, "{t}");
+    }
+
+    #[test]
+    fn doppelseiten_einmal_und_material() {
+        let a = PtTri { v: [[0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], color: GLASS_RGB };
+        let b = PtTri { v: [[0.0; 3], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]], color: GLASS_RGB };
+        let bvh = Bvh::build(&[a, b]);
+        assert_eq!(bvh.tri_count(), 1);
+        assert_eq!(bvh.tris[0].mat >> 24, MAT_GLASS);
+        assert_eq!(classify_material(STEEL_RGB).0, MAT_GLOSSY);
+        assert_eq!(classify_material([0.85, 0.85, 0.83]).0, MAT_DIFFUSE);
+        // Albedo linear und gekappt.
+        let w = pack_mat([1.0, 1.0, 1.0], MAT_DIFFUSE);
+        assert_eq!(w & 0xFF, (MAX_ALBEDO * 255.0).round() as u32);
+    }
+
+    #[test]
+    fn netz_leser_nimmt_vertexfarben() {
+        // Ein Dreieck im Mesh-Format [pos, normal, color].
+        let mut v = Vec::new();
+        for p in [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]] {
+            v.extend_from_slice(&p);
+            v.extend_from_slice(&[0.0, 1.0, 0.0]);
+            v.extend_from_slice(&STEEL_RGB);
+        }
+        let mut out = Vec::new();
+        tris_from_mesh(&v, &[0, 1, 2], &mut out);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].color, STEEL_RGB);
+    }
+}

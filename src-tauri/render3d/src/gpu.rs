@@ -57,6 +57,9 @@ pub enum RenderStyle {
     /// inneren Knickkanten (Dachgrate). Die Silhouette wird je Kamera aus der
     /// gecachten Kanten-Adjazenz neu abgeleitet (siehe `edges::build_silhouette_edges`).
     Contour,
+    /// [212] „Pathtracing (Vorschau)": progressive Pfadverfolgung auf der GPU (`gpu_pathtrace.rs`), Himmel und
+    /// Sonne aus dem Sonnenstand. Zeichnet nur das Modell (keine Kanten, Linien, Geisterschicht, kein Schnitt).
+    Pathtrace,
 }
 
 impl RenderStyle {
@@ -69,6 +72,7 @@ impl RenderStyle {
             "hidden" => RenderStyle::Hidden,
             "shaded-edges" => RenderStyle::ShadedEdges,
             "contour" => RenderStyle::Contour,
+            "pathtrace" => RenderStyle::Pathtrace,
             _ => RenderStyle::Shaded,
         }
     }
@@ -563,6 +567,12 @@ pub struct Renderer {
     frame_stats: FrameStats,
     /// [214] Inhalts-Schluessel der zuletzt gesetzten Linien/Huelle: Gleiches wird nicht neu hochgeladen.
     keys: DataKeys,
+    /// [212] Pathtracer, erst beim ersten Bild im Stil `Pathtrace` angelegt; `pt_dirty` = Baum aus der Szene neu
+    /// bauen (nach jedem Teil-Update), `pt_batch` = Samples je `render` (Viewport 1, `render_png --samples`).
+    pathtracer: Option<crate::gpu_pathtrace::PathTracer>,
+    pt_dirty: bool,
+    pt_batch: u32,
+    pt_max_samples: u32,
 }
 
 /// [180]/[214] GPU-Puffer eines Klumpens der Geisterschicht (Formate wie `set_ghost`).
@@ -1465,6 +1475,10 @@ impl Renderer {
             },
             frame_stats: FrameStats::default(),
             keys: DataKeys::default(),
+            pathtracer: None,
+            pt_dirty: true,
+            pt_batch: 1,
+            pt_max_samples: crate::gpu_pathtrace::DEFAULT_MAX_SAMPLES,
         }
     }
 
@@ -1555,6 +1569,7 @@ impl Renderer {
     pub fn update_parts(&mut self, device: &wgpu::Device, upd: PartsUpdate) -> SceneChange {
         let ch = self.scene.apply(upd);
         self.shadow_dirty = true;
+        self.pt_dirty = true;
         // Silhouette-Cache verwerfen (neues Modell) — wird bei Bedarf neu gebaut.
         self.silhouette = None;
         self.silhouette_key = None;
@@ -2313,6 +2328,10 @@ impl Renderer {
         camera: &Camera,
         viewport: (u32, u32),
     ) {
+        if self.style == RenderStyle::Pathtrace {
+            self.render_pathtrace(device, queue, target, camera, viewport);
+            return;
+        }
         let (w, h) = viewport;
         let aspect = if h > 0 { w as f32 / h as f32 } else { 1.0 };
         let vp: Mat4 = view_projection(camera, aspect);
@@ -2690,6 +2709,50 @@ impl Renderer {
     }
 
     /// [214] Zahlen des letzten `render` (Messung, `render_png --bench`).
+    /// [212] Ein Bild im Stil `Pathtrace`: Baum bei Bedarf neu (alle Klumpen der Szene, dieselben Netze wie die
+    /// schattierte Ansicht), dann `pt_batch` Samples dazu und anzeigen. Sonne der Studie, sonst das Standardlicht.
+    fn render_pathtrace(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, target: &wgpu::TextureView, camera: &Camera, viewport: (u32, u32)) {
+        let pt = self.pathtracer.get_or_insert_with(|| crate::gpu_pathtrace::PathTracer::new(device, self.color_format));
+        pt.max_samples = self.pt_max_samples;
+        if self.pt_dirty {
+            let mut tris = Vec::new();
+            for c in 0..self.scene.chunk_count() {
+                let d = self.scene.chunk_data(c);
+                crate::bvh::tris_from_mesh(&d.mesh.verts, &d.mesh.indices, &mut tris);
+            }
+            pt.set_bvh(device, &crate::bvh::Bvh::build(&tris));
+            self.pt_dirty = false;
+        }
+        let sun = self.sun.or(Some([self.base_light[0], self.base_light[1], self.base_light[2]]));
+        pt.render(device, queue, target, camera, sun, viewport, self.pt_batch);
+        self.frame_stats = FrameStats::default();
+    }
+
+    /// [212] Samples je `render` im Stil `Pathtrace` (Standard 1; headless mehr auf einmal). 0 → 1.
+    pub fn set_pathtrace_batch(&mut self, n: u32) {
+        self.pt_batch = n.clamp(1, 1 << 16);
+    }
+
+    /// [212] Obergrenze der Samples je Pixel (danach steht das Bild). 0 → 1.
+    pub fn set_pathtrace_max_samples(&mut self, n: u32) {
+        self.pt_max_samples = n.max(1);
+    }
+
+    /// [212] Aufsummierte Samples je Pixel des aktuellen Bildes (0 ohne Pathtracer).
+    pub fn pathtrace_samples(&self) -> u32 {
+        self.pathtracer.as_ref().map_or(0, |p| p.samples())
+    }
+
+    /// [212] Ist die Summe am Ziel (`set_pathtrace_max_samples`)? Dann muss der Viewport nicht weiter zeichnen.
+    pub fn pathtrace_done(&self) -> bool {
+        self.pathtracer.as_ref().is_some_and(|p| p.samples() >= self.pt_max_samples)
+    }
+
+    /// [212] Dreiecke im Baum des Pathtracers (Diagnose; 0 = noch nicht gebaut oder leer).
+    pub fn pathtrace_tri_count(&self) -> u32 {
+        self.pathtracer.as_ref().map_or(0, |p| p.tri_count())
+    }
+
     pub fn frame_stats(&self) -> FrameStats {
         self.frame_stats
     }
@@ -2733,6 +2796,7 @@ mod render_style_tests {
     #[test]
     fn unknown_style_falls_back_to_shaded() {
         assert_eq!(RenderStyle::from_str_or_shaded("bogus"), RenderStyle::Shaded);
+        assert_eq!(RenderStyle::from_str_or_shaded("pathtrace"), RenderStyle::Pathtrace);
     }
 
     #[test]
@@ -2839,5 +2903,56 @@ mod shadow_gpu_tests {
         assert!(!r.shadows_active(), "Sonne unter dem Horizont");
         frame(&mut r, &cam);
         assert_eq!(r.shadow_pass_count(), 3);
+    }
+
+    /// [212] Pathtracer: akkumuliert über Bilder, beginnt bei Kamera-/Modelländerung von vorn, leere Szene und
+    /// unbrauchbare Kamera ohne Panic; die übrigen Stile zeichnen danach unverändert weiter.
+    #[test]
+    fn pathtracer_akkumuliert_und_beginnt_neu() {
+        let Some((device, queue)) = device() else {
+            eprintln!("kein GPU-Adapter: Test übersprungen");
+            return;
+        };
+        let format = wgpu::TextureFormat::Rgba8UnormSrgb;
+        let mut r = Renderer::new(&device, format);
+        let tex = device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d { width: 32, height: 24, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let view = tex.create_view(&Default::default());
+        let mut cam = Camera { eye: [20.0, 15.0, 20.0], target: [4.0, 2.0, 3.0], ..Camera::default() };
+        r.set_render_style(RenderStyle::Pathtrace);
+        // Leere Szene: nur Himmel.
+        r.render(&device, &queue, &view, &cam, (32, 24));
+        assert_eq!(r.pathtrace_samples(), 1);
+        assert_eq!(r.pathtrace_tri_count(), 0);
+        r.upload_walls(&device, &walls());
+        r.set_sun(crate::shadow::sun_dir_world(135.0, 30.0), true);
+        r.render(&device, &queue, &view, &cam, (32, 24));
+        assert_eq!(r.pathtrace_samples(), 1, "neue Szene: von vorn");
+        assert!(r.pathtrace_tri_count() > 0);
+        r.set_pathtrace_batch(3);
+        r.render(&device, &queue, &view, &cam, (32, 24));
+        assert_eq!(r.pathtrace_samples(), 4);
+        r.set_pathtrace_max_samples(5);
+        r.render(&device, &queue, &view, &cam, (32, 24));
+        assert_eq!(r.pathtrace_samples(), 5, "Obergrenze");
+        assert!(r.pathtrace_done());
+        cam.eye[0] += 1.0;
+        r.render(&device, &queue, &view, &cam, (32, 24));
+        assert_eq!(r.pathtrace_samples(), 3, "Kamera bewegt: von vorn");
+        // Unbrauchbare Kamera: kein Panic.
+        let bad = Camera { eye: [f32::NAN, 0.0, 0.0], ..cam };
+        r.render(&device, &queue, &view, &bad, (32, 24));
+        r.render(&device, &queue, &view, &cam, (0, 0));
+        r.set_render_style(RenderStyle::Shaded);
+        r.render(&device, &queue, &view, &cam, (32, 24));
+        let _ = device.poll(wgpu::PollType::wait_indefinitely());
     }
 }
