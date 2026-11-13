@@ -83,7 +83,7 @@ import {
   type V3 as CamV3,
 } from "./cameraBridge";
 import { NO_KEYS, WALK_SPEED, anyKey, bodySettling, initBody, lookAround, orbitEye, speedFactor, stepWalk, stepWalkCollide, walkKeyAllowed, walkKeyOf, type WalkBody, type WalkKeys } from "./walk";
-import { WalkWorld } from "./walkCollision";
+import { WalkWorld, walkInputFrom } from "./walkCollision";
 import { loadShortcutOverrides, matchesShortcut } from "../state/keyboardShortcuts";
 import { createCameraFromView } from "../state/cameraActions";
 import { ViewportToolbar3d } from "./ViewportToolbar3d";
@@ -1491,7 +1491,7 @@ export function Wasm3DViewport({
       if (c && c.p === p && c.h === h && c.ex === ex) return c.w;
       let w: WalkWorld | null = null;
       try {
-        w = new WalkWorld(projectToModel3d(p, { hide: h, explode: ex, forWalk: true }));
+        w = new WalkWorld(walkInputFrom(projectToModel3d(p, { hide: h, explode: ex, forWalk: true }), p));
       } catch {
         w = null; // Kollision nicht möglich: Begehen läuft wie im Geist-Modus weiter.
       }

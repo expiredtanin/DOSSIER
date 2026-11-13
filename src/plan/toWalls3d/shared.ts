@@ -216,6 +216,8 @@ export type RMeshKind = "terrain" | "imported" | "extrusion";
 export interface RMesh {
   /** [216] Wand, deren Körper (Formöffnung) dieses Netz ist; sonst leer. */
   wallId?: string;
+  /** [245] Nur im Modell für das Begehen (`forWalk`): Dachnetz. Nie an den Renderer. */
+  roof?: boolean;
   positions: number[];
   indices: number[];
   kind: RMeshKind;

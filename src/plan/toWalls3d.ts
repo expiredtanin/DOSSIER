@@ -324,7 +324,8 @@ export function projectToModel3d(project: Project, opts: Model3dOptions = {}): R
   if (!opts.forWalk) for (const m of parts.openingMeshes) meshes.push(m);
   for (const m of parts.stairMeshes) meshes.push(m);
   if (!opts.forWalk) for (const m of parts.stairRailings) meshes.push(m);
-  for (const m of parts.roofMeshes) meshes.push(m);
+  // [245] Für das Begehen sind Dachnetze als solche gekennzeichnet (Dachschräge begrenzt den Kopf); nie an den Renderer.
+  for (const m of parts.roofMeshes) meshes.push(opts.forWalk ? { ...m, roof: true } : m);
   const model: RModel3d = {
     walls: parts.walls,
     // Decken + Treppen (Treppentritte als extrudierte Slabs), Kontext-Meshes, Öffnungs-Einbauteile,
@@ -336,6 +337,9 @@ export function projectToModel3d(project: Project, opts: Model3dOptions = {}): R
   };
   if (parts.voidMeshes) applyVoidMeshes(model, parts.voidMeshes);
   // [216] Wände mit Formöffnungen: der Körper des Kerns statt der Stücke.
+  // [245] Begehen: die Stücke samt Rechteck-Löchern statt der Körper (ein Körper mit Formöffnung wäre für die Kollision
+  // eine volle Wand); die Stücke ohne Netz sind für den Kollisions-Aufbau gleichwertig, `noMesh` bleibt gesetzt.
+  if (opts.forWalk) return model;
   const bodies = splitWallBodies(model.walls);
   model.walls = bodies.walls;
   for (const m of bodies.meshes) model.meshes.push(m);
