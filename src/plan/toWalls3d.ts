@@ -324,7 +324,8 @@ export function projectToModel3d(project: Project, opts: Model3dOptions = {}): R
   if (!opts.forWalk) for (const m of parts.openingMeshes) meshes.push(m);
   for (const m of parts.stairMeshes) meshes.push(m);
   if (!opts.forWalk) for (const m of parts.stairRailings) meshes.push(m);
-  for (const m of parts.roofMeshes) meshes.push(m);
+  // [245] Für das Begehen sind Dachnetze als solche gekennzeichnet (Dachschräge begrenzt den Kopf); nie an den Renderer.
+  for (const m of parts.roofMeshes) meshes.push(opts.forWalk ? { ...m, roof: true } : m);
   const model: RModel3d = {
     walls: parts.walls,
     // Decken + Treppen (Treppentritte als extrudierte Slabs), Kontext-Meshes, Öffnungs-Einbauteile,

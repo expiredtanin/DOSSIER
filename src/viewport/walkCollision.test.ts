@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import type { OrbitState } from "./cameraBridge";
 import { EYE_HEIGHT, NO_KEYS, bodySettling, initBody, orbitEye, stepWalkCollide, type WalkKeys } from "./walk";
 import { sampleProject } from "../model/sampleProject";
+import { buildComplexSampleProject } from "../model/sampleProjectComplex";
+import { bulgeArc, bulgeArcPoints } from "../geometry/bulge";
 import type { Project } from "../model/types";
 import { projectToModel3d } from "../plan/toWalls3d";
 import { PERSON_HEIGHT, PERSON_RADIUS, STEP_UP, WalkWorld, walkInputFrom, type WalkModelInput, type WalkSlab, type WalkWall } from "./walkCollision";
@@ -295,5 +297,190 @@ describe("Begehen mit Bodenfolge", () => {
     const r = run(w, orbitAt(0, EYE_HEIGHT, 0), fwd, 3);
     expect(r.eye[0]).toBeCloseTo(3 - 0.1 - PERSON_RADIUS, 2);
     expect(r.orbit.yaw).toBe(Math.PI);
+  });
+});
+
+describe("[245] Dachschrägen begrenzen den Kopf", () => {
+  /**
+   * Satteldach über x −6 … 6, First bei y = 0 (Höhe 3.2), Traufe bei y = ±4 (Höhe 0.8): Steigung 0.6, die Unterseite
+   * liegt ab |y| = 2.33 unter 1.8 m (Kniestock). Raster aus Zellen, `skip` lässt Zellen aus (Aussparung).
+   */
+  function roofUnderside(skip: (cx: number, cy: number) => boolean = () => false): WalkModelInput["meshes"][number] {
+    const under = (y: number) => 3.2 - 0.6 * Math.abs(y);
+    const positions: number[] = [];
+    const indices: number[] = [];
+    const tri = (a: number[], b: number[], c: number[]) => {
+      // Unterseite: Normale (Modell, z = Höhe) zeigt nach unten, also im Uhrzeigersinn von oben gesehen.
+      const nh = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+      const t = nh > 0 ? [a, c, b] : [a, b, c];
+      const n = positions.length / 3;
+      for (const v of t) positions.push(...v);
+      indices.push(n, n + 1, n + 2);
+    };
+    for (let x = -6; x < 6; x += 0.5) {
+      for (let y = -4; y < 4; y += 0.5) {
+        if (skip(x + 0.25, y + 0.25)) continue;
+        const q = [[x, y, under(y)], [x + 0.5, y, under(y)], [x + 0.5, y + 0.5, under(y + 0.5)], [x, y + 0.5, under(y + 0.5)]];
+        tri(q[0], q[1], q[2]);
+        tri(q[0], q[2], q[3]);
+      }
+    }
+    return { positions, indices, kind: "extrusion", roof: true };
+  }
+  /** Gaube: Aussparung x −1 … 1, y 2 … 3.5 mit eigenem, höherem Dach (Unterseite 3.0). */
+  const dormerHole = (cx: number, cy: number) => Math.abs(cx) < 1 && cy > 2 && cy < 3.5;
+  const dormerRoof: WalkModelInput["meshes"][number] = {
+    positions: [-1, 2, 3, 1, 3.5, 3, 1, 2, 3, -1, 2, 3, -1, 3.5, 3, 1, 3.5, 3],
+    indices: [0, 1, 2, 3, 4, 5],
+    kind: "extrusion",
+    roof: true,
+  };
+
+  it("unter der Schräge mit Kopfhöhe unter 1.8 m (Kniestock) ist der Kopf blockiert, im First frei", () => {
+    const w = world({ meshes: [roofUnderside()] });
+    expect(w.headBlocked(0, 3.5, 0)).toBe(true); // Unterseite 1.1
+    expect(w.headBlocked(0, -3.5, 0)).toBe(true);
+    expect(w.headBlocked(0, 2, 0)).toBe(false); // 2.0
+    expect(w.headBlocked(0, 0, 0)).toBe(false);
+    expect(w.headBlocked(0, 3.5, 2)).toBe(false); // Füsse über der Unterseite (Galerie)
+  });
+
+  it("ein Schritt in den Kniestock wird zurückgenommen; entlang der Traufe gleitet man weiter", () => {
+    const w = world({ meshes: [roofUnderside()] });
+    let [x, y] = [0, 0];
+    for (let i = 0; i < 80; i++) [x, y] = w.move(x, y, 0, 0.1, 0);
+    expect(y).toBeGreaterThan(2.1);
+    expect(y).toBeLessThan(2.4);
+    expect(w.headBlocked(x, y, 0)).toBe(false);
+    expect(w.move(0, 2.2, 3, 0, 0)[0]).toBeCloseTo(3, 6);
+  });
+
+  it("wer schon unter der Schräge steht, bleibt beweglich", () => {
+    const w = world({ meshes: [roofUnderside()] });
+    expect(w.headBlocked(0, 3.5, 0)).toBe(true);
+    const [x, y] = w.move(0, 3.5, 0.4, 0.2, 0);
+    expect(x).toBeCloseTo(0.4, 6);
+    expect(y).toBeCloseTo(3.7, 6);
+  });
+
+  it("Gaube: im Loch des Dachs bleibt der Kopf frei, wo das Gaubendach hoch genug liegt; daneben sperrt die Schräge", () => {
+    const w = world({ meshes: [roofUnderside(dormerHole), dormerRoof] });
+    expect(w.headBlocked(0, 3, 0)).toBe(false); // Gaubendach 3.0 (Hauptdach hier 1.4, ausgespart)
+    expect(w.headBlocked(2, 3, 0)).toBe(true); // neben der Gaube
+    expect(w.move(0, 1.8, 0, 1.4, 0)[1]).toBeCloseTo(3.2, 6);
+    expect(w.move(2, 1.8, 0, 1.4, 0)[1]).toBeLessThan(2.4);
+  });
+
+  it("Netze ohne Dach-Kennzeichen (Treppen, Körper) und nach oben zeigende Dachhaut begrenzen den Kopf nicht", () => {
+    const m = roofUnderside();
+    expect(world({ meshes: [{ ...m, roof: undefined }] }).headBlocked(0, 3.5, 0)).toBe(false);
+    const flipped = { ...m, indices: m.indices.map((_, i, a) => (i % 3 === 1 ? a[i + 1] : i % 3 === 2 ? a[i - 1] : a[i])) };
+    expect(world({ meshes: [flipped] }).headBlocked(0, 3.5, 0)).toBe(false);
+  });
+
+  /** Echter Kern: DG des Beispiels komplex (Satteldach, zwei Gauben, Dachfenster), Füsse auf dem DG-Boden. */
+  describe("Kern-Modell (Beispiel komplex)", () => {
+    const base = buildComplexSampleProject();
+    const dgZ = base.drawingLevels!.find((l) => l.id === "dg")!.baseElevation!;
+    const walkOf = (p: Project) => new WalkWorld(walkInputFrom(projectToModel3d(p, { forWalk: true }), p));
+
+    it("DG wie gebaut (Kniestock 1.8 m): Kopf nirgends unter dem Dach", () => {
+      const w = walkOf(base);
+      for (const [x, y] of [[1, 1], [1, 5], [8, 5], [14, 9], [7, 2.5], [3, 3]]) expect(w.headBlocked(x, y, dgZ)).toBe(false);
+    });
+
+    it("Traufe 1 m tiefer (Kniestock 0.8 m): Rand gesperrt, Mitte frei, Schritte dorthin werden zurückgenommen", () => {
+      const p: Project = { ...base, roofs: base.roofs!.map((r, i) => (i === 0 ? { ...r, baseElevation: 6.3 } : r)) };
+      const w = walkOf(p);
+      expect(w.headBlocked(8, 0.4, dgZ)).toBe(true);
+      expect(w.headBlocked(8, 5, dgZ)).toBe(false);
+      let [x, y] = [8, 4];
+      for (let i = 0; i < 60; i++) [x, y] = w.move(x, y, 0, -0.1, dgZ);
+      expect(w.headBlocked(x, y, dgZ)).toBe(false);
+      expect(y).toBeGreaterThan(0.6);
+      expect(y).toBeLessThan(3.5);
+    });
+
+    it("Gaube ist im Kern-Netz ausgespart: auf einer Galerie bleibt der Kopf in der Schleppgaube frei, daneben nicht", () => {
+      const w = walkOf(base);
+      const feet = 8.0; // Kopf bis 9.8: Hauptdach bei y = 2 liegt bei 9.0, das Gaubendach über 10.4
+      expect(w.headBlocked(8, 2, feet)).toBe(true);
+      expect(w.headBlocked(3, 2, feet)).toBe(false);
+      expect(w.headBlocked(3, 1.0, feet)).toBe(true); // vor der Gaube noch Hauptdach
+    });
+  });
+});
+
+describe("[245] Bogenwände: Öffnungsart nach Bogenlänge", () => {
+  // Halbkreiswand von (0,0) nach (4,0), Bulge −1, r = 2, Bogenlänge 2π.
+  const arcWall = { id: "A1", start: { x: 0, y: 0 }, end: { x: 4, y: 0 }, bulge: -1 };
+  const op = (id: string, kind: "door" | "window", position: number, width: number) =>
+    ({ id, hostWallId: "A1", kind, position, width, height: 2, sillHeight: 0 }) as unknown as NonNullable<Project["openings"]>[number];
+  const arc = bulgeArc(arcWall.start, arcWall.end, -1)!;
+  const dir = arc.sweep >= 0 ? 1 : -1;
+  const at = (s: number, r = arc.r): [number, number] => {
+    const a = arc.a0 + (dir * s) / arc.r;
+    return [arc.center.x + r * Math.cos(a), arc.center.y + r * Math.sin(a)];
+  };
+
+  /** Das 3D-Modell einer Bogenwand: Sehnenstücke entlang des Bogens, Löcher je Stück (Achsmeter ab Stückanfang). */
+  function arcModel(holes: Array<{ from: number; to: number; zBottom: number; zTop: number }>) {
+    const pts = bulgeArcPoints(arcWall.start, arcWall.end, -1);
+    const walls: Array<WalkWall & { wallId: string }> = [];
+    let s = 0;
+    for (let i = 0; i + 1 < pts.length; i++) {
+      const a = pts[i];
+      const b = pts[i + 1];
+      const l = Math.hypot(b.x - a.x, b.y - a.y);
+      const here = holes
+        .filter((h) => h.to > s && h.from < s + l)
+        .map((h) => ({ ...h, from: Math.max(h.from, s) - s, to: Math.min(h.to, s + l) - s }));
+      walls.push({ wallId: "A1", start: [a.x, a.y], end: [b.x, b.y], thickness: 0.3, height: 2.6, baseElevation: 0, holes: here });
+      s += l;
+    }
+    return { walls, slabs: [], meshes: [] };
+  }
+  const inputFor = (kinds: Array<["door" | "window", number, number, number]>) => {
+    const holes = kinds.map(([, from, to, zb]) => ({ from, to, zBottom: zb, zTop: zb + 2 }));
+    const project = { walls: [arcWall], openings: kinds.map(([k, f, t], i) => op(`O${i}`, k, f, t - f)), ceilings: [] } as unknown as Pick<Project, "walls" | "openings" | "ceilings">;
+    return walkInputFrom(arcModel(holes), project);
+  };
+  /** Von aussen (r = 2.7) radial nach innen (r = 1.3) an der Bogenstelle s; liefert den erreichten Radius. */
+  const cross = (w: WalkWorld, s: number) => {
+    const [x0, y0] = at(s, 2.7);
+    const [x1, y1] = at(s, 1.3);
+    const [x, y] = w.move(x0, y0, x1 - x0, y1 - y0, 0);
+    return Math.hypot(x - arc.center.x, y - arc.center.y);
+  };
+
+  it("Löcher der Bogenwand bekommen die Öffnungsart über die Bogenlänge", () => {
+    const flags = inputFor([["door", 1, 2.2, 0.1], ["window", 4, 5, 0]]).walls.flatMap((w) => w.holes ?? []).map((h) => h.door);
+    expect(flags.filter((d) => d === true).length).toBeGreaterThan(0);
+    expect(flags.filter((d) => d === false).length).toBeGreaterThan(0);
+    expect(flags.every((d) => d !== undefined)).toBe(true);
+  });
+
+  it("Fenstertür (Brüstung 0.1) im Bogen ist frei, Fenster mit Brüstung 0 sperrt, daneben ist die Wand", () => {
+    const w = new WalkWorld(inputFor([["door", 1, 2.2, 0.1], ["window", 4, 5, 0]]));
+    expect(cross(w, 1.6)).toBeLessThan(1.7);
+    expect(cross(w, 4.5)).toBeGreaterThan(2.1);
+    expect(cross(w, 3.1)).toBeGreaterThan(2.1);
+  });
+
+  it("Kern: Erker im Beispiel komplex — Fenster mit Brüstung 0 sperrt auch in der Bogenwand", () => {
+    const base = buildComplexSampleProject();
+    const p: Project = { ...base, openings: base.openings!.map((o) => (o.id === "eg-f5" ? { ...o, sillHeight: 0, height: 2.1 } : o)) };
+    const inp = walkInputFrom(projectToModel3d(p, { forWalk: true }), p);
+    const holes = inp.walls.filter((w) => (w as WalkWall & { wallId?: string }).wallId === "eg-aw-erker").flatMap((w) => w.holes ?? []);
+    expect(holes.length).toBeGreaterThan(0);
+    expect(holes.every((h) => h.door === false)).toBe(true);
+    // eg-aw-erker: (15,3) → (15,7), Bulge −1; Fenster bei Bogenlänge 1.2 … 2.2.
+    const a = bulgeArc({ x: 15, y: 3 }, { x: 15, y: 7 }, -1)!;
+    const ang = a.a0 + ((a.sweep >= 0 ? 1 : -1) * 1.7) / a.r;
+    const pt = (r: number): [number, number] => [a.center.x + r * Math.cos(ang), a.center.y + r * Math.sin(ang)];
+    const [x0, y0] = pt(2.8);
+    const [x1, y1] = pt(1.3);
+    const [x, y] = new WalkWorld(inp).move(x0, y0, x1 - x0, y1 - y0, 0);
+    expect(Math.hypot(x - a.center.x, y - a.center.y)).toBeGreaterThan(2);
   });
 });

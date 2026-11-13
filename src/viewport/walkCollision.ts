@@ -11,14 +11,18 @@
 //    über und unter einem Loch bleiben Sturz bzw. Brüstung. Tür oder Fenster entscheidet die Öffnungsart im Modell
 //    (`Opening.kind`, über `walkInputFrom` am Loch vermerkt: `door`): Türen sind frei — auch Schiebe-/Hebeschiebetüren
 //    („Fenstertüren“ sind im Modell Türen) und Türen mit Rund-/Bogenform, deren Loch das umschreibende Rechteck ist —,
-//    Fenster sperren mit ihrer Glasebene, auch mit Brüstung 0. Ohne Vermerk (synthetische Eingabe, Bogenwand, Loch
+//    Fenster sperren mit ihrer Glasebene, auch mit Brüstung 0. Ohne Vermerk (synthetische Eingabe, Loch
 //    keiner Öffnung zuzuordnen) gilt die Höhe: Loch bis zur Wand-UK = Tür, mit Brüstung = Fenster.
 //  • Decken (nicht Treppentritte): die Unterseite begrenzt den Kopf, ausser über Löchern (Treppenauge, Schacht: der
 //    Umriss trägt sie als Brücke, gerade/ungerade-Regel); so stösst man im Raum an, im Treppenhaus nicht.
+//  • Dachschrägen: die nach unten zeigenden Dreiecke der Dachnetze (`roof`, Unterseite der untersten Schicht; Gauben- und
+//    Dachfenster-Aussparungen fehlen im Netz und sind damit offen) begrenzen den Kopf wie die Deckenunterseite: wo das
+//    Dach unter Fusshöhe + Körperhöhe liegt (Kniestock), kommt man nicht hin; wer schon darunter steht, bleibt beweglich.
 //  • Decken-/Trittkante = Polygonkante über [zBottom, zTop]; senkrechte Dreiecke der Netze (Stützen, Körper) ebenso.
 // Böden sind die Oberseiten der Decken/Tritte (Polygon, Höhe zTop) und alle Dreiecke mit nach oben zeigender Normale
 // (Gelände, Dächer, Körper).
 
+import { bulgeArc } from "../core";
 import type { Opening, Project } from "../model/types";
 
 /** Person: Radius und Körperhöhe (m); Stufen bis `STEP_UP` steigt man ohne Hindernis. */
@@ -56,6 +60,8 @@ export interface WalkMesh {
   indices: ReadonlyArray<number>;
   /** `terrain`/`imported`: world-z = −y. */
   kind?: string;
+  /** Dachnetz: nach unten zeigende Dreiecke (Dachschräge) begrenzen den Kopf. Die Dreiecke müssen nach aussen orientiert sein. */
+  roof?: boolean;
 }
 export interface WalkModelInput {
   walls: ReadonlyArray<WalkWall>;
@@ -93,7 +99,7 @@ export class WalkWorld {
   private floorCells = new Map<number, number[]>();
   private bigObstacles: number[] = [];
   private bigFloors: number[] = [];
-  private ceilings: Array<{ poly: ReadonlyArray<V2>; y: number }> = [];
+  private ceilings: Array<{ poly?: ReadonlyArray<V2>; tri?: Tri3; y: number }> = [];
   private ceilingCells = new Map<number, number[]>();
   private bigCeilings: number[] = [];
   /** Zahl der Dreiecke aus Netzen, die nicht mehr aufgenommen wurden. */
@@ -248,6 +254,15 @@ export class WalkWorld {
       if (!(nl > 1e-12)) continue;
       // Das Modell ist rechtshändig (x, y, z=Höhe); in world (x, z, y) kippt die Orientierung: Betrag zählt, nicht das Vorzeichen.
       const upness = Math.abs(ny) / nl;
+      // Dachschräge: Unterseite (Normale nach unten, Modell-Orientierung gegen den Uhrzeigersinn von aussen gesehen) als Kopfgrenze.
+      if (m.roof && flip === 1) {
+        // world (x, Höhe, y) spiegelt das Modell: die Höhenkomponente der Modell-Normalen ist −ny, „nach unten“ also ny > 0.
+        if (ny / nl > 0.3) {
+          const id = this.ceilings.length;
+          this.ceilings.push({ tri: [x[0], y[0], z[0], x[1], y[1], z[1], x[2], y[2], z[2]], y: 0 });
+          this.index(this.ceilingCells, this.bigCeilings, id, Math.min(...x), Math.min(...z), Math.max(...x), Math.max(...z));
+        }
+      }
       if (upness > 0.5) {
         // Dreieck als Boden. Ohne Orientierung gilt jede flache Fläche als begehbar (auch Unterseiten): die Bodenabfrage
         // nimmt ohnehin nur Flächen bis Fusshöhe + Stufe, Dächer und Decken darüber bleiben aussen vor.
@@ -334,7 +349,9 @@ export class WalkWorld {
     let blocked = false;
     const test = (id: number) => {
       const c = this.ceilings[id];
-      if (c.y > feetY + EPS && c.y < hi && pointInPoly(x, z, c.poly)) blocked = true;
+      if (blocked) return;
+      const y = c.poly ? (pointInPoly(x, z, c.poly) ? c.y : null) : c.tri ? triHeight(c.tri, x, z) : null;
+      if (y !== null && y > feetY + EPS && y < hi) blocked = true;
     };
     const cell = this.ceilingCells.get(key(Math.floor(x / CELL), Math.floor(z / CELL)));
     if (cell) for (const id of cell) test(id);
@@ -455,14 +472,36 @@ function triHeight(t: Tri3, x: number, z: number): number | null {
 
 // ── Eingabe aus dem 3D-Modell ───────────────────────────────────────────────────────────────────────────────────
 
-/** Mindestanteil, mit dem sich Loch und Öffnung entlang der Achse überdecken müssen (Schnitt / Vereinigung). */
+/**
+ * Mindestanteil des Lochs (entlang der Achse), den die Öffnung überdecken muss. Der Anteil am Loch, nicht Schnitt/Vereinigung:
+ * ein Loch in einem Sehnenstück einer Bogenwand ist oft nur ein Teil der Öffnung.
+ */
 const HOLE_MATCH = 0.5;
+
+/** Lage eines Punktes entlang der Wandachse (m ab Wandanfang): bei Geraden die Projektion, bei Bogenwänden die Bogenlänge. */
+function axisPosition(pw: Pick<Project["walls"][number], "start" | "end" | "bulge">): ((x: number, y: number) => number) | null {
+  const len = Math.hypot(pw.end.x - pw.start.x, pw.end.y - pw.start.y);
+  if (!(len > EPS)) return null;
+  if (pw.bulge) {
+    const arc = bulgeArc(pw.start, pw.end, pw.bulge);
+    if (arc) {
+      const dir = arc.sweep >= 0 ? 1 : -1;
+      return (x, y) => {
+        // Winkel gegen den Anfang in Schwenkrichtung, auf (−π, π] gebracht (Schichtbänder liegen leicht vor dem Anfang).
+        let d = (Math.atan2(y - arc.center.y, x - arc.center.x) - arc.a0) * dir;
+        d -= 2 * Math.PI * Math.round(d / (2 * Math.PI));
+        return d * arc.r;
+      };
+    }
+  }
+  return (x, y) => ((x - pw.start.x) * (pw.end.x - pw.start.x) + (y - pw.start.y) * (pw.end.y - pw.start.y)) / len;
+}
 
 /**
  * Das 3D-Modell (`projectToModel3d(…, { forWalk: true })`) als Kollisionseingabe, ergänzt um das, was nur das Projekt
  * weiss: je Wandloch, ob die zugehörige Öffnung eine Tür ist (`Opening.kind`), und welche Platten Decken sind.
  * Das Loch wird der Öffnung derselben Wand über die Achslage zugeordnet (Loch ab Stückanfang, projiziert auf die
- * Wandachse; Schichtbänder weichen um den Einzug leicht ab). Bogenwände und Löcher ohne Treffer bleiben ohne Vermerk.
+ * Wandachse; Schichtbänder weichen um den Einzug leicht ab). Bei Bogenwänden zählt die Bogenlänge. Löcher ohne Treffer bleiben ohne Vermerk.
  */
 export function walkInputFrom(
   model: { walls: ReadonlyArray<WalkWall & { wallId?: string }>; slabs: ReadonlyArray<WalkSlab & { ceilingId?: string }>; meshes: ReadonlyArray<WalkMesh> },
@@ -480,21 +519,27 @@ export function walkInputFrom(
   const walls = model.walls.map((w): WalkWall => {
     const pw = w.wallId ? wallById.get(w.wallId) : undefined;
     const ops = w.wallId ? byWall.get(w.wallId) : undefined;
-    if (!w.holes?.length || !pw || !ops || pw.bulge) return w;
-    const len = Math.hypot(pw.end.x - pw.start.x, pw.end.y - pw.start.y);
-    if (!(len > EPS)) return w;
-    const s0 = ((w.start[0] - pw.start.x) * (pw.end.x - pw.start.x) + (w.start[1] - pw.start.y) * (pw.end.y - pw.start.y)) / len;
+    if (!w.holes?.length || !pw || !ops) return w;
+    // Lage auf der Wandachse: gerade = Projektion, Bogenwand = Bogenlänge (Öffnungen liegen auf dem Bogen).
+    const axisPos = axisPosition(pw);
+    if (!axisPos) return w;
+    const dx = w.end[0] - w.start[0];
+    const dz = w.end[1] - w.start[1];
+    const clen = Math.hypot(dx, dz);
+    if (!(clen > EPS)) return w;
     const holes = w.holes.map((h) => {
-      const a = s0 + Math.min(h.from, h.to);
-      const b = s0 + Math.max(h.from, h.to);
+      // Das Loch liegt auf der Strecke des Stücks (bei Bogenwänden eine Sehne des Bogens): Endpunkte auf die Achse bringen.
+      const pa = axisPos(w.start[0] + (dx / clen) * Math.min(h.from, h.to), w.start[1] + (dz / clen) * Math.min(h.from, h.to));
+      const pb = axisPos(w.start[0] + (dx / clen) * Math.max(h.from, h.to), w.start[1] + (dz / clen) * Math.max(h.from, h.to));
+      const a = Math.min(pa, pb);
+      const b = Math.max(pa, pb);
       let best: Opening | undefined;
       let bestScore = HOLE_MATCH;
       for (const o of ops) {
         const inter = Math.min(b, o.position + o.width) - Math.max(a, o.position);
-        const union = Math.max(b, o.position + o.width) - Math.min(a, o.position);
-        if (inter > 0 && union > 0 && inter / union >= bestScore) {
+        if (inter > 0 && b - a > EPS && inter / (b - a) >= bestScore) {
           best = o;
-          bestScore = inter / union;
+          bestScore = inter / (b - a);
         }
       }
       return best ? { ...h, door: best.kind === "door" } : h;
