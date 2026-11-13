@@ -219,6 +219,10 @@ pub fn build_silhouette_edges<A: std::borrow::Borrow<EdgeAdj>>(
                 } else {
                     [-forward[0], -forward[1], -forward[2]]
                 };
+                // [232] Fuge zweier deckungsgleicher Schichten (+n/-n, sonst nichts Gewinkeltes): innen, nie Kontur.
+                if a.reps.iter().all(|x| a.reps.iter().all(|y| dot(*x, *y).abs() >= CREASE_COS)) && a.reps.iter().any(|x| a.reps.iter().any(|y| dot(*x, *y) < 0.0)) {
+                    continue;
+                }
                 let mut front = false;
                 let mut back = false;
                 for n in &a.reps {
@@ -289,7 +293,9 @@ pub(crate) fn draws_crease(reps: &[[f32; 3]]) -> bool {
         _ => {
             for i in 0..reps.len() {
                 for j in (i + 1)..reps.len() {
-                    if dot(reps[i], reps[j]) < CREASE_COS {
+                    // [232] Betrag: zwei deckungsgleiche Flächen mit entgegengesetzter Normale (Fuge zweier
+                    // übereinanderliegender Schichten, je Körper geschlossen) sind koplanar, kein 180°-Knick.
+                    if dot(reps[i], reps[j]).abs() < CREASE_COS {
                         return true;
                     }
                 }
@@ -537,6 +543,50 @@ mod double_sided_tests {
         // Ein Quader hat 12 echte Kanten (Silhouette); bei korrekter Diagonalen-
         // Unterdrueckung sollten es GENAU 12 sein (nicht 12+6 Diagonalen=18).
         assert_eq!(segment_count(&e), 12, "erwartet 12 Kanten (Quader-Silhouette), keine Flaechendiagonalen");
+    }
+
+    /// [232] Zwei übereinanderliegende Schichten (Dach-/Deckenschichten sind je ein geschlossener Körper):
+    /// Ober- und Unterseite der Fuge liegen deckungsgleich mit entgegengesetzter Normale (+n/-n, je doppelseitig).
+    /// Das galt als 180°-Knick: die Diagonalen der Fugenfläche wurden gezeichnet (Netzlinien, scheinen von
+    /// weitem durch die Oberfläche). Zu sehen sein dürfen nur die echten Kanten: 3 Ringe + 8 Eckkanten.
+    #[test]
+    fn stacked_layers_do_not_draw_interface_diagonals() {
+        #[rustfmt::skip]
+        let box_idx: [u32; 36] = [
+            0,3,2, 0,2,1, 4,5,6, 4,6,7, 0,1,5, 0,5,4, 3,7,6, 3,6,2, 0,4,7, 0,7,3, 1,2,6, 1,6,5,
+        ];
+        let corners = |z0: f32, z1: f32| {
+            [[0.0, 0.0, z0], [1.0, 0.0, z0], [1.0, 1.0, z0], [0.0, 1.0, z0], [0.0, 0.0, z1], [1.0, 0.0, z1], [1.0, 1.0, z1], [0.0, 1.0, z1]]
+        };
+        let mut verts = Vec::new();
+        let mut indices = Vec::new();
+        for (k, (z0, z1)) in [(0.0f32, 1.0f32), (1.0, 2.0)].into_iter().enumerate() {
+            let base = (k * 8) as u32;
+            for p in corners(z0, z1) {
+                verts.extend_from_slice(&[p[0], p[1], p[2], 0.0, 1.0, 0.0, 0.8, 0.8, 0.8]);
+            }
+            for tri in box_idx.chunks_exact(3) {
+                indices.extend_from_slice(&[base + tri[0], base + tri[1], base + tri[2]]);
+                indices.extend_from_slice(&[base + tri[0], base + tri[2], base + tri[1]]);
+            }
+        }
+        let m = Mesh { verts, indices };
+        let e = build_mesh_edges(&m);
+        assert_eq!(segment_count(&e), 20, "3 Ringe zu je 4 + 8 Eckkanten, keine Diagonalen der Fuge");
+        for seg in e.chunks_exact(2 * EDGE_FLOATS_PER_VERTEX) {
+            let d = [seg[0] - seg[6], seg[1] - seg[7], seg[2] - seg[8]];
+            assert_eq!(d.iter().filter(|v| v.abs() > 1e-4).count(), 1, "Kante nicht achsparallel: {d:?}");
+        }
+        // Auch die Silhouette (Kontur-Stil) zeigt die Fuge nicht: Würfel-Sechseck der Gesamtform = 6 Kanten + Fugenring-Stücke
+        // der Seitenflächen sind keine Silhouette; die Diagonalen der Fuge dürfen nie dabei sein.
+        let adj = build_edge_adjacency(&m);
+        let eye = [5.0, 6.0, 7.0];
+        let fwd = normalize(sub([0.5, 0.5, 1.0], eye));
+        let sil = build_silhouette_edges(&adj, eye, fwd, true);
+        for seg in sil.chunks_exact(2 * EDGE_FLOATS_PER_VERTEX) {
+            let d = [seg[0] - seg[6], seg[1] - seg[7], seg[2] - seg[8]];
+            assert_eq!(d.iter().filter(|v| v.abs() > 1e-4).count(), 1, "Silhouette nicht achsparallel: {d:?}");
+        }
     }
 
     #[test]

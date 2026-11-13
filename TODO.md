@@ -205,8 +205,23 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   Geprüft nur im Linux-Container (Probe + Tests), nicht auf dem Mac. · S
 - ○ **[231]** 3D: Fenster im Giebel nicht sauber eingeschnitten (13.11., Maintainer, Musterhaus komplex): über dem Fenster laufen senkrechte
   Kanten bis zum Dach (Wand in Streifen zerlegt), rundes Giebelfenster nur teilweise ausgeschnitten. · M
-- ○ **[232]** 3D: Netzlinien (Fächer der Triangulierung) auf den Dachflächen sichtbar, v. a. in Schwarz-Weiss und von weitem (13.11.). · S
-- ○ **[233]** 3D: Oberflächenmuster-Striche (Fassadenschalung/Dachziegel) ragen über Dachrand und Traufe hinaus (13.11.). · S
+- ✓ **[232]** 3D: Netzlinien (Fächer der Triangulierung) auf den Dachflächen sichtbar, v. a. in Schwarz-Weiss und von weitem (13.11.).
+  Ursache: nicht die Triangulierung der Fläche (koplanare Dreiecke wurden richtig unterdrückt), sondern die FUGE zweier übereinanderliegender
+  Schichten (Dach-, Deckenschichten sind je ein geschlossener Körper): Oberseite der unteren und Unterseite der oberen Schicht liegen
+  deckungsgleich mit +n/−n und galten in `render3d/edges.rs` (`draws_crease`, Silhouette) als 180°-Knick — die Diagonalen der Fugenfläche
+  (Fächer der Ohrenzerlegung mit Dachfenster-/Gaubenlöchern) wurden als Kante gezeichnet und scheinen mit dem Linien-Tiefenversatz von
+  weitem durch die Oberfläche. Lösung: Knickwinkel über den Betrag des Skalarprodukts (entgegengesetzte deckungsgleiche Flächen = koplanar);
+  Silhouette überspringt Kanten, deren Flächen alle koplanar sind und gegensinnig stehen. Test `edges::double_sided_tests::stacked_layers_do_not_draw_interface_diagonals`
+  (vorher 21 statt 20 Kanten). Geprüft: Wireframe-Draufsicht Musterhaus komplex vorher/nachher (Fächer weg, Wendeltreppe/Wände ruhiger),
+  `cargo test` render3d (144 grün). Nicht geprüft: Mac/Metal, Tauri-App, Vergleich in der App von weitem. · S
+- ✓ **[233]** 3D: Oberflächenmuster-Striche (Fassadenschalung/Dachziegel) ragen über Dachrand und Traufe hinaus (13.11.).
+  Ursache: `surface_pattern3d::wall_top_profile` mass die Wandoberkante unter dem Dach auf der Wandachse; die geneigte Dachfläche
+  schneidet die Wand aber quer zur Achse an Aussen- und Innenseite verschieden hoch — auf der Traufseite ragten die senkrechten Striche
+  bis 15 cm (dg-aw-s/-n im Musterhaus komplex, 5 cm bei og-anbau) über den Wandkörper. Lösung: Profil und Fläche je Wandseite
+  (Messlinie im Abstand der Seite). Test `wandmuster_endet_an_der_wandseite_unter_dem_dach` (vorher 0,10 m Überstand, nachher 0).
+  Dachziegel-Muster geprüft: Linien enden an den Dachflächen-Polygonen (Ansichten, keine Abweichung gefunden). Geprüft: Probe über alle
+  Wände des Musterhauses komplex (0 Wände mit Überstand), `cargo test` Kern (surface_pattern, 15 grün). Nicht geprüft: Bild nachher
+  (WASM-Kern im Container nicht neu gebaut, Platte knapp), Mac/Metal, Tauri-App. · S
 ### Phase 3 (27.11.–3.12.): Vorprojekt
 - 1:100-Pläne in Abgabequalität (Bemassung, Koten, Raumstempel, Öffnungen nach Detailgrad) — Plan-Review-Runde 4 nach [199].
 - Fachplaner-Austausch: DXF/DWG je Geschoss/Schnitt/Ansicht ([200]), IFC mit Räumen/Psets ([201]); Rundreise in Archicad/Revit einmal
