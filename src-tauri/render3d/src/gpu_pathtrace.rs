@@ -26,7 +26,7 @@
 #[cfg(test)]
 use wgpu::util::DeviceExt;
 
-use crate::bvh::{Bvh, GpuNode, GpuTri, GpuTriTex};
+use crate::bvh::{Bvh, GpuTri, GpuTriTex, GpuWideNode};
 use crate::denoise::{blend_weight, DN_WGSL, ITERATIONS, SIGMA_L, SIGMA_N, SIGMA_Z};
 use crate::exposure::EXPOSE_WGSL;
 use crate::pathtrace::{build_params_with, internal_size, night_sky, sky_for_sun, PtOptions, PtParams, AUTO_EXPOSURE_RATE, MAX_PIXELS, PT_DISPLAY_WGSL, PT_WGSL};
@@ -83,9 +83,11 @@ pub struct PathTracer {
     nodes: wgpu::Buffer,
     tris: wgpu::Buffer,
     tri_tex: wgpu::Buffer,
-    /// Etappe 5: Lichtliste (Dreiecks-Indizes) und Zahl je Art.
+    /// Etappe 5: Lichtgruppen und Lichter (ein Puffer, `LightList::gpu_records`), Zahl der Gruppen je Art
+    /// (Parameter-Block) und der Lichter je Art (Diagnose).
     lights: wgpu::Buffer,
     light_counts: [u32; 3],
+    cluster_counts: [u32; 3],
     expose: wgpu::ComputePipeline,
     expose_layout: wgpu::BindGroupLayout,
     expose_bind: Option<wgpu::BindGroup>,
@@ -235,7 +237,7 @@ impl PathTracer {
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         });
-        let lights = Self::light_buffer(device, None, &[]);
+        let lights = Self::storage_with(device, None, "pathtrace.lights", &[]);
         let display = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("pathtrace.display"),
             layout: Some(&dlayout),
@@ -284,6 +286,7 @@ impl PathTracer {
             tri_tex,
             lights,
             light_counts: [0; 3],
+            cluster_counts: [0; 3],
             expose,
             expose_layout,
             expose_bind: None,
@@ -318,7 +321,7 @@ impl PathTracer {
     /// `write_buffer` gefüllt landen Fehler höchstens als Validierungsmeldung; die Grösse prüft `fits` vorher.
     /// Ohne `queue` (beim Anlegen) bleibt er genullt.
     fn storage_with(device: &wgpu::Device, queue: Option<&wgpu::Queue>, label: &str, bytes: &[u8]) -> wgpu::Buffer {
-        let size = (bytes.len() as u64).max(16).next_multiple_of(wgpu::COPY_BUFFER_ALIGNMENT);
+        let size = (bytes.len() as u64).max(64).next_multiple_of(wgpu::COPY_BUFFER_ALIGNMENT);
         let buf = device.create_buffer(&wgpu::BufferDescriptor { label: Some(label), size, usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
         if let Some(q) = queue {
             if !bytes.is_empty() {
@@ -349,9 +352,10 @@ impl PathTracer {
     /// Puffer für Baum, Dreiecke und Texturdaten; leer = je ein Platzhalter-Eintrag (Bindungen dürfen nicht leer sein).
     /// Texturdaten in anderer Länge als die Dreiecke (kein Fall des Baums) werden mit „ohne Textur“ aufgefüllt.
     fn scene_buffers(device: &wgpu::Device, queue: Option<&wgpu::Queue>, bvh: &Bvh) -> (wgpu::Buffer, wgpu::Buffer, wgpu::Buffer) {
-        let node0 = [GpuNode::default()];
+        let wide = bvh.wide_nodes();
+        let node0 = [GpuWideNode::default()];
         let tri0 = [GpuTri::default()];
-        let nodes: &[GpuNode] = if bvh.nodes.is_empty() { &node0 } else { &bvh.nodes };
+        let nodes: &[GpuWideNode] = if wide.is_empty() { &node0 } else { &wide };
         let tris: &[GpuTri] = if bvh.tris.is_empty() { &tri0 } else { &bvh.tris };
         let mut tex: Vec<GpuTriTex> = bvh.tex.iter().copied().take(tris.len()).collect();
         tex.resize(tris.len(), GpuTriTex { scale: 1.0, ..GpuTriTex::default() });
@@ -361,10 +365,6 @@ impl PathTracer {
         (n, t, x)
     }
 
-    /// Lichtliste als Puffer (leer = ein Platzhalter-Eintrag, die Zahlen im Parameter-Block sind dann 0).
-    fn light_buffer(device: &wgpu::Device, queue: Option<&wgpu::Queue>, idx: &[u32]) -> wgpu::Buffer {
-        Self::storage_with(device, queue, "pathtrace.lights", bytemuck::cast_slice(idx))
-    }
 
     /// Zeitstempel je Abschnitt an/aus (nur wenn das Gerät `TIMESTAMP_QUERY` kann; sonst bleibt es aus). Rückgabe: an?
     pub fn set_timing(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, on: bool) -> bool {
@@ -441,9 +441,9 @@ impl PathTracer {
     pub fn set_bvh(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, bvh: &Bvh) {
         let sizes = [
             bvh.tris.len() * std::mem::size_of::<GpuTri>(),
-            bvh.nodes.len() * std::mem::size_of::<GpuNode>(),
+            bvh.nodes.len() / 2 * std::mem::size_of::<GpuWideNode>(),
             bvh.tris.len() * std::mem::size_of::<GpuTriTex>(),
-            bvh.lights.idx.len() * 4,
+            (bvh.lights.lights.len() + bvh.lights.clusters.len()) * std::mem::size_of::<crate::pt_lights::GpuLight>(),
         ];
         let too_big = sizes.iter().any(|&b| !self.fits(b as u64));
         self.too_big = too_big;
@@ -454,8 +454,9 @@ impl PathTracer {
         self.tris = t;
         self.tri_tex = x;
         self.tri_count = use_bvh.tris.len() as u32;
-        self.lights = Self::light_buffer(device, Some(queue), &use_bvh.lights.idx);
-        self.light_counts = if use_bvh.lights.idx.is_empty() { [0; 3] } else { use_bvh.lights.counts };
+        self.lights = Self::storage_with(device, Some(queue), "pathtrace.lights", bytemuck::cast_slice(&use_bvh.lights.gpu_records()));
+        self.light_counts = use_bvh.lights.counts;
+        self.cluster_counts = use_bvh.lights.cluster_counts;
         self.scene_gen = self.scene_gen.wrapping_add(1);
         self.compute_bind = None;
         self.key = None;
@@ -648,7 +649,7 @@ impl PathTracer {
         let (tri_count, srgb) = (self.tri_count, self.srgb_encode);
         // Belichtung: Automatik im Viewport sanft (je Bild), bei mehreren Samples auf einmal (Export, headless) sofort.
         let opt = PtOptions {
-            light_counts: self.light_counts,
+            light_counts: self.cluster_counts,
             auto_exposure: if !self.auto_exposure { 0.0 } else if batch > 1 { 1.0 } else { AUTO_EXPOSURE_RATE },
             ..self.options
         };
@@ -858,6 +859,8 @@ mod tests {
             let mut pt = tracer(&device, &queue);
             pt.set_bvh(&device, &queue, &bvh);
             pt.options.portals = portals;
+            pt.options.cam_inside = bvh.encloses(CAM.eye);
+            assert!(pt.options.cam_inside, "Kamera im Raum");
             // Viele Abpraller: die Abschneidung des Pfades (die NEE der letzten Ecke reicht ein Segment weiter) fällt
             // nicht ins Gewicht.
             pt.options.bounces = 16;
@@ -873,6 +876,25 @@ mod tests {
         assert!(m_off > 0.0 && m_on > 0.0);
         assert!((m_on - m_off).abs() / m_off < 0.01, "Erwartungswert: {m_on} vs {m_off}");
         assert!(v_on < v_off * 0.5, "Varianz: {v_on} vs {v_off}");
+        // Kamera draussen, Blick durchs Fenster: Portale erst nach dem Durchgang (gerade/ungerade Zahl gekreuzter Portale);
+        // Erwartungswert ebenso gleich.
+        let outside = Camera { eye: [2.0, 1.4, -2.5], target: [2.0, 1.0, 2.0], ..CAM };
+        let run_out = |portals: bool| {
+            let mut pt = tracer(&device, &queue);
+            pt.set_bvh(&device, &queue, &bvh);
+            pt.options.portals = portals;
+            pt.options.bounces = 16;
+            pt.options.cam_inside = bvh.encloses(outside.eye);
+            pt.max_samples = 512;
+            pt.render(&device, &queue, &view, &outside, None, false, (w, h), 512);
+            let (acc, aux) = pt.read_sums(&device, &queue);
+            stats(&acc, &aux)
+        };
+        let (mo_off, vo_off) = run_out(false);
+        let (mo_on, vo_on) = run_out(true);
+        eprintln!("draussen ohne Portale: Mittel {mo_off:.5}, Varianz {vo_off:.6}; mit: Mittel {mo_on:.5}, Varianz {vo_on:.6}");
+        assert!((mo_on - mo_off).abs() / mo_off < 0.01, "Erwartungswert draussen: {mo_on} vs {mo_off}");
+        assert!(vo_on <= vo_off * 1.02, "Varianz draussen: {vo_on} vs {vo_off}");
     }
 
     /// [212] Etappe 5: Belichtungsautomatik auf der GPU wie die CPU-Referenz (`exposure::measure`), Stapel > 1 stellt

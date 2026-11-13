@@ -2836,7 +2836,11 @@ impl Renderer {
         }
         pt.denoise = self.pt_denoise;
         pt.max_pixels = self.pt_max_pixels;
-        pt.options = self.pt_options;
+        // [212] Etappe 5: Kamera im Raum (perspektivisch, oben überall etwas) — Portale ab der ersten Ecke.
+        pt.options = crate::pathtrace::PtOptions {
+            cam_inside: matches!(camera.projection, crate::types::Projection::Perspective) && self.pt_bvh.encloses(camera.eye),
+            ..self.pt_options
+        };
         pt.auto_exposure = self.pt_auto_exposure;
         pt.set_timing(device, queue, self.pt_timing);
         let night = self.pt_night && self.sun.is_none();
@@ -2887,13 +2891,6 @@ impl Renderer {
     /// Viewport meldet es statt abzustürzen).
     pub fn pathtrace_scene_too_big(&self) -> bool {
         self.pathtracer.as_ref().is_some_and(|p| p.scene_too_big())
-    }
-
-    /// Test: Puffergrenze des Pathtracers künstlich verkleinern (legt ihn bei Bedarf an).
-    #[cfg(test)]
-    pub(crate) fn pathtrace_limit_for_test(&mut self, device: &wgpu::Device, bytes: u64) {
-        let pt = self.pathtracer.get_or_insert_with(|| crate::gpu_pathtrace::PathTracer::new(device, self.color_format));
-        pt.limit_for_test(bytes);
     }
 
     /// [212] Stand des letzten Baum-Aufbaus und Zahl der Lichter je Art (Portale, Leuchten, Raumlicht).
@@ -3129,6 +3126,58 @@ mod shadow_gpu_tests {
         assert!(!r.shadows_active(), "Sonne unter dem Horizont");
         frame(&mut r, &cam);
         assert_eq!(r.shadow_pass_count(), 3);
+    }
+
+    /// [212] Etappe 5, Teil-Update: ein verschobenes Objekt (gleiche Topologie) liest nur seinen Klumpen neu und passt den
+    /// Baum per Refit an; ein neues Teil (andere Dreieckszahl) baut neu.
+    #[test]
+    fn pathtracer_refit_bei_verschobenem_objekt() {
+        let Some((device, queue)) = device() else {
+            eprintln!("kein GPU-Adapter: Test übersprungen");
+            return;
+        };
+        let format = wgpu::TextureFormat::Rgba8UnormSrgb;
+        let mut r = Renderer::new(&device, format);
+        let tex = device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d { width: 16, height: 16, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let view = tex.create_view(&Default::default());
+        let cam = Camera { eye: [20.0, 15.0, 20.0], target: [4.0, 2.0, 3.0], ..Camera::default() };
+        let cube = |x: f32| -> crate::scene::PartEntry {
+            let json = format!(
+                r#"{{"id":"kiste","meshes":[{{"positions":[{a},0,0, {b},0,0, {b},1,0, {a},1,0, {a},0,1, {b},0,1, {b},1,1, {a},1,1],
+                "indices":[0,1,2,0,2,3,4,6,5,4,7,6,0,4,5,0,5,1,1,5,6,1,6,2,2,6,7,2,7,3,3,7,4,3,4,0],"kind":"imported","color":[0.6,0.5,0.4]}}]}}"#,
+                a = x,
+                b = x + 1.0
+            );
+            serde_json::from_str(&json).unwrap()
+        };
+        let walls = crate::scene::PartEntry::new("waende", crate::scene::PartInput { walls: walls(), ..Default::default() });
+        r.set_render_style(RenderStyle::Pathtrace);
+        r.update_parts(&device, crate::scene::PartsUpdate { reset: true, remove: Vec::new(), upsert: vec![walls, cube(2.0)] });
+        r.render(&device, &queue, &view, &cam, (16, 16));
+        let (b0, _) = r.pathtrace_build();
+        assert!(!b0.refit && b0.chunks_read == 2 && b0.tris > 0, "{b0:?}");
+        r.update_parts(&device, crate::scene::PartsUpdate { upsert: vec![cube(2.3)], ..Default::default() });
+        r.render(&device, &queue, &view, &cam, (16, 16));
+        let (b1, _) = r.pathtrace_build();
+        assert!(b1.refit && b1.chunks_read == 1 && b1.tris == b0.tris, "{b1:?}");
+        assert_eq!(r.pathtrace_samples(), 1, "neue Lage: Summe von vorn");
+        // Zweite Kiste (mehr Dreiecke): Neubau.
+        let mut other = cube(5.0);
+        other.id = "kiste2".into();
+        r.update_parts(&device, crate::scene::PartsUpdate { upsert: vec![other], ..Default::default() });
+        r.render(&device, &queue, &view, &cam, (16, 16));
+        let (b2, _) = r.pathtrace_build();
+        assert!(!b2.refit && b2.tris > b1.tris, "{b2:?}");
+        let _ = device.poll(wgpu::PollType::wait_indefinitely());
     }
 
     /// [212] Pathtracer: akkumuliert über Bilder, beginnt bei Kamera-/Modelländerung von vorn, leere Szene und

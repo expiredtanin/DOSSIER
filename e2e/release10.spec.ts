@@ -503,6 +503,16 @@ pathtraceTest("[212] Pathtracer-Stil: Sample-Zähler zählt hoch", async ({ page
   await expect.poll(samples, { timeout: 60_000 }).toBeGreaterThan(0);
   const first = await samples();
   await expect.poll(samples, { timeout: 60_000 }).toBeGreaterThan(first);
+  // Etappe 5: Belichtung (Regler, Automatik) und Raumlicht — Bedienelemente da, Rechnung läuft danach weiter.
+  const look = page.getByTestId("pathtrace-look");
+  await expect(look).toBeVisible();
+  await look.getByTestId("pathtrace-auto").uncheck();
+  await look.getByTestId("pathtrace-ev").fill("1");
+  await expect(look).toContainText("+1.00");
+  await look.getByTestId("pathtrace-room").uncheck();
+  const after = await samples();
+  await expect.poll(samples, { timeout: 60_000 }).toBeGreaterThan(after);
+  await expect(status).not.toContainText("zu gross");
 });
 
 

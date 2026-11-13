@@ -4,7 +4,7 @@
 // Messung: 64 × 64 gleichmässig verteilte Pixel des Mittelbildes (Akkumulation / Zahl), Luminanz in ein Histogramm von
 // 64 Fächern über log2 ∈ [−14, 6]; gemittelt wird log2 zwischen dem 40. und 95. Perzentil (die dunkelsten Ecken und die
 // hellsten Spitzen — Sonnenflecken, Himmel im Fenster — bestimmen die Belichtung nicht allein, wie das Histogramm-
-// Verfahren gängiger Engines). Ziel: `KEY / 2^Mittel`, begrenzt auf [¼, 32] (Nacht [¼, 4]) × Belichtung des Himmels.
+// Verfahren gängiger Engines). Ziel: `KEY / 2^Mittel`, begrenzt auf [¼, 32] (Nacht [¼, 1]: der Nachthimmel bleibt dunkel) × Belichtung des Himmels.
 // Nachgeführt wird im log-Raum: neu = 2^mix(log2 alt, log2 Ziel, Rate) je Bild (Viewport sanft, Export/headless sofort).
 // Der Belichtungsregler (EV) multipliziert danach.
 
@@ -19,7 +19,7 @@ pub const PCT_LO: f32 = 0.4;
 pub const PCT_HI: f32 = 0.95;
 /// Ziel-Helligkeit: so gewählt, dass die Aussenansicht des Musterhauses am Tag etwa die feste Belichtung
 /// (`pathtrace::DEFAULT_EXPOSURE`) bekommt.
-pub const KEY: f32 = 0.12;
+pub const KEY: f32 = 0.22;
 
 /// Fach einer Luminanz (≤ 0 und NaN ins unterste).
 pub fn bin_of(lum: f32) -> usize {
@@ -100,7 +100,7 @@ const LOG_MAX: f32 = 6.0;
 const GRID: u32 = 64u;
 const PCT_LO: f32 = 0.4;
 const PCT_HI: f32 = 0.95;
-const KEY: f32 = 0.12;
+const KEY: f32 = 0.22;
 
 var<workgroup> hist: array<atomic<u32>, 64>;
 
