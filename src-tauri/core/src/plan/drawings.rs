@@ -1930,8 +1930,13 @@ pub fn plan_drawings(c: &Ctx, sink: &mut Sink, bounds: &mut Bounds) -> Result<()
 /// auf Klassen, die `pred` (Klassen-Code) wählt und die der Plan zeigt; je Klasse in Projekt-Reihenfolge. Quelle der
 /// gefüllten Kataster-Gebäude und -Gewässer im Situationsplan (`situation.rs`).
 pub fn closed_rings_by_class(c: &Ctx, pred: impl Fn(&str) -> bool) -> Vec<(String, Vec<Vec<[f64; 2]>>)> {
+    closed_rings_by_class_ids(c, pred).into_iter().map(|(k, v)| (k, v.into_iter().map(|(_, r)| r).collect())).collect()
+}
+
+/// Wie [`closed_rings_by_class`], aber jeder Ring trägt die Id seiner Zeichnung (Anwahl der gefüllten Flächen).
+pub fn closed_rings_by_class_ids(c: &Ctx, pred: impl Fn(&str) -> bool) -> Vec<(String, Vec<(String, Vec<[f64; 2]>)>)> {
     let mut memo = Memo::default();
-    let mut out: Vec<(String, Vec<Vec<[f64; 2]>>)> = Vec::new();
+    let mut out: Vec<(String, Vec<(String, Vec<[f64; 2]>)>)> = Vec::new();
     for d in &c.p.drawings2d {
         if !matches!(d.geom, Drawing2DGeom::Polyline { closed: true, .. } | Drawing2DGeom::Rect { .. }) || !pred(&d.category_code) || !on_floor(c, d) {
             continue;
@@ -1952,9 +1957,10 @@ pub fn closed_rings_by_class(c: &Ctx, pred: impl Fn(&str) -> bool) -> Vec<(Strin
         if rings.is_empty() {
             continue;
         }
+        let rings = rings.into_iter().map(|r| (d.id.clone(), r));
         match out.iter_mut().find(|(k, _)| *k == d.category_code) {
             Some((_, v)) => v.extend(rings),
-            None => out.push((d.category_code.clone(), rings)),
+            None => out.push((d.category_code.clone(), rings.collect())),
         }
     }
     out

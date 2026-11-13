@@ -193,12 +193,31 @@ pub fn mesh_polygons(positions: &[f64], indices: &[f64]) -> Vec<Polygon> {
 
 /// Gefüllte Flächen: ein Polygon je Fläche; Löcher sind über Brücken eingebunden (Brückenkanten ohne Strich).
 fn fill_polygons(polys: &[Polygon], f: (&str, &str), context_id: Option<&str>, greyed: bool, out: &mut Vec<Primitive>) {
+    fill_polygons_of(polys, f, context_id, greyed, out, |_| None)
+}
+
+/// Wie [`fill_polygons`]; `drawing_of` nennt je Polygon die Zeichnung, der es gehört (Anwahl im Plan).
+fn fill_polygons_of(polys: &[Polygon], f: (&str, &str), context_id: Option<&str>, greyed: bool, out: &mut Vec<Primitive>, drawing_of: impl Fn(&Polygon) -> Option<String>) {
     for poly in polys {
-        let Some(outer) = poly.first().filter(|r| r.len() >= 3) else { continue };
+        let from = out.len();
+        fill_polygon(poly, f, context_id, greyed, out);
+        if let Some(id) = drawing_of(poly) {
+            for q in &mut out[from..] {
+                if let Primitive::Polygon { drawing_id, .. } = q {
+                    *drawing_id = Some(id.clone());
+                }
+            }
+        }
+    }
+}
+
+fn fill_polygon(poly: &Polygon, f: (&str, &str), context_id: Option<&str>, greyed: bool, out: &mut Vec<Primitive>) {
+    {
+        let Some(outer) = poly.first().filter(|r| r.len() >= 3) else { return };
         let holes: Vec<Ring> = poly.iter().skip(1).filter(|r| r.len() >= 3).cloned().collect();
         if holes.is_empty() {
             out.push(polygon(outer.iter().map(|q| v2(*q)).collect(), f.0, f.1, OUTLINE_MM, context_id, greyed));
-            continue;
+            return;
         }
         let merged = crate::polygon_holes::merge_holes(outer, &holes, 1e-4);
         let mut prim = polygon(merged.ring.iter().map(|q| v2(*q)).collect(), f.0, f.1, OUTLINE_MM, context_id, greyed);
@@ -231,21 +250,41 @@ fn name_has(c: &Ctx, code: &str, words: &[&str]) -> bool {
 /// der Klasse der Zeichnung (die Klasse bestimmt über [`super::drawings::closed_rings_by_class`], ob sie erscheinen).
 /// Innenhöfe sind Löcher. Unterhalb der Zeichnungen; deren Linien bleiben darüber.
 pub fn cadastre_prims(c: &Ctx, s: &Opts, out: &mut Vec<Primitive>) {
-    let fills = |kind: fn(&Ctx, &str) -> bool| super::drawings::closed_rings_by_class(c, |code| kind(c, code));
+    let fills = |kind: fn(&Ctx, &str) -> bool| super::drawings::closed_rings_by_class_ids(c, |code| kind(c, code));
     if let Some(f) = colors(s.context) {
         for (code, rings) in fills(is_building_class) {
-            fill_polygons(&crate::polygon_bool::nest_even_odd(&rings), f, None, c.greyed(&code), out);
+            let (polys, owner) = nest_with_owner(&rings);
+            fill_polygons_of(&polys, f, None, c.greyed(&code), out, owner);
         }
     }
     for (code, rings) in fills(is_water_class) {
         let from = out.len();
-        fill_polygons(&crate::polygon_bool::nest_even_odd(&rings), WATER, None, c.greyed(&code), out);
+        let (polys, owner) = nest_with_owner(&rings);
+        fill_polygons_of(&polys, WATER, None, c.greyed(&code), out, owner);
         for q in &mut out[from..] {
             if let Primitive::Polygon { hatch, .. } = q {
                 *hatch = Box::new(water_hatch(c.a.scale));
             }
         }
     }
+}
+
+/// Verschachtelt die Ringe (gerade/ungerade) und liefert dazu die Zuordnung Polygon → Zeichnung: Der Aussenring eines
+/// Polygons gehört der Zeichnung, deren Ring denselben Eckpunkt hat (kleinster Flächenunterschied bei mehreren).
+fn nest_with_owner(rings: &[(String, Ring)]) -> (Vec<Polygon>, impl Fn(&Polygon) -> Option<String> + '_) {
+    let plain: Vec<Ring> = rings.iter().map(|(_, r)| r.clone()).collect();
+    let area = |r: &Ring| (0..r.len()).map(|i| r[i][0] * r[(i + 1) % r.len()][1] - r[(i + 1) % r.len()][0] * r[i][1]).sum::<f64>().abs() / 2.0;
+    let owner = move |poly: &Polygon| -> Option<String> {
+        let outer = poly.first()?;
+        let a = area(outer);
+        let p0 = *outer.first()?;
+        rings
+            .iter()
+            .filter(|(_, r)| r.contains(&p0))
+            .min_by(|x, y| (area(&x.1) - a).abs().total_cmp(&(area(&y.1) - a).abs()))
+            .map(|(id, _)| id.clone())
+    };
+    (crate::polygon_bool::nest_even_odd(&plain), owner)
 }
 
 /// Wasser als feine waagrechte Parallelschraffur (Plangrafik-Brauch für Gewässer): bleibt in Tusche erhalten, wo die
