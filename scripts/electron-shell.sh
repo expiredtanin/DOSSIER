@@ -47,7 +47,7 @@ cleanup() {
 trap cleanup EXIT
 
 echo "electron-shell: öffne Electron-Fenster …"
-# Unter Wayland: Chromiums Vulkan (WebGPU) läuft nur über XWayland (`--ozone-platform=x11`); DOSSIER_OZONE übersteuert.
+# Unter Wayland nativ (`--ozone-platform=wayland`, GPU-Modus „minimal“ in electron-main.cjs); DOSSIER_OZONE übersteuert.
 OZONE="${DOSSIER_OZONE:-}"
-if [ -z "$OZONE" ] && { [ -n "${WAYLAND_DISPLAY:-}" ] || [ "${XDG_SESSION_TYPE:-}" = "wayland" ]; }; then OZONE=x11; fi
+if [ -z "$OZONE" ] && { [ -n "${WAYLAND_DISPLAY:-}" ] || [ "${XDG_SESSION_TYPE:-}" = "wayland" ]; }; then OZONE=wayland; fi
 npx electron ${OZONE:+--ozone-platform=$OZONE} "$(dirname "$0")/electron-main.cjs"
