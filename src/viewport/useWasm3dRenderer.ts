@@ -20,7 +20,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ContextImage, Project } from "../model/types";
 import { GhostLayerSync } from "./ghostSync";
-import { emitDrawingLineVerts, emitSurfacePatternLines, filter3d, ghostFilter3d, hiddenClassCodes, projectToModel3d, projectToModel3dParts, siteEnvelope3d } from "../core";
+import { emitDrawingLineVerts, emitSurfacePatternLines, filter3d, ghostFilter3d, hiddenClassCodes, pathtraceMaterials, projectToModel3d, projectToModel3dParts, siteEnvelope3d } from "../core";
 import type { Hide3d } from "../core";
 import { Model3dPartsSync } from "./model3dPartsSync";
 import type { DetailLevel } from "../model/viewTypes";
@@ -28,7 +28,7 @@ import { loadEngine3d } from "../engine/engine3d";
 import { decodeMaterialTextures } from "./materialTextures";
 import { decodeImageToRgba } from "../io/swissImage";
 import { planPointCloudSync } from "./pointCloudSync";
-import { clampImageSize, isBlankImage, matteFromBlackWhite } from "./imageExport";
+import { PT_EXPORT_MAX_PIXELS, clampImageSize, exportSamples, isBlankImage, matteFromBlackWhite } from "./imageExport";
 import type { PointCloudSyncItem, UploadedPointCloud } from "./pointCloudSync";
 
 /** Fertige Kamera für einen Frame (world-Meter, Y-up — wie render3d::types::Camera). */
@@ -121,6 +121,13 @@ interface WebModelRendererLike {
    * die Karten belegen Ebenen 1..N (siehe `WallInput.materialIndex`). Optional —
    * ältere WASM-Builds ohne diesen Export lassen den Aufrufer still zurückfallen. */
   set_material_textures?(rgba: Uint8Array, layerCount: number): void;
+  /** [212] Materialtabelle des Pathtracers (`web::set_pathtrace_materials`): JSON `[{ name, map }]` je Textur-Ebene
+   *  (gleiche Reihenfolge wie `set_material_textures`). Optional — ältere WASM-Builds. */
+  set_pathtrace_materials?(json: string): void;
+  /** [212] Samples je `render` (Bild-Export rechnet N auf einmal), Entrauscher an/aus, Pixel je Sample (0 = Standard). */
+  set_pathtrace_batch?(n: number): void;
+  set_pathtrace_denoise?(on: boolean): void;
+  set_pathtrace_max_pixels?(n: number): void;
   /** Luftbild aufs Gelände drapieren (`web::set_aerial_texture`): `rgba` =
    *  gepackte RGBA8-Bytes (`width*height*4`, zeilenweise von oben = Nord), plus
    *  Modell-Meter-Bbox (min/max, x=Ost/y=Nord). render3d legt es pixelscharf als
@@ -280,6 +287,9 @@ export function useWasm3dRenderer(
   // erneutes (teures) Dekodieren/Hochladen, wenn sich die Materialien nicht
   // geändert haben (updateModel läuft bei JEDER Projektänderung).
   const materialSigRef = useRef<string | null>(null);
+  // [212] Zuletzt gesetzte Materialtabelle des Pathtracers (JSON) und Darstellungsart (Bild-Export).
+  const ptMaterialsRef = useRef<string | null>(null);
+  const styleRef = useRef<string>("shaded");
   // [180]/[214] Was render3d an Geisterschicht hat (`ghostSync.ts`).
   const ghostSyncRef = useRef(new GhostLayerSync());
   // Signatur des zuletzt hochgeladenen Drape-Luftbilds (src + Bbox) — verhindert
@@ -348,6 +358,18 @@ export function useWasm3dRenderer(
         r.set_pattern_lines(emitSurfacePatternLines(project, explode, hide));
       } catch (e) {
         console.warn("render3d set_pattern_lines fehlgeschlagen:", e);
+      }
+    }
+    // [212] Materialtabelle des Pathtracers (Rauigkeit/Metall/Glas je Baustoff), nur bei Änderung (baut den Baum neu).
+    if (typeof r.set_pathtrace_materials === "function") {
+      try {
+        const json = JSON.stringify(pathtraceMaterials(project));
+        if (json !== ptMaterialsRef.current) {
+          ptMaterialsRef.current = json;
+          r.set_pathtrace_materials(json);
+        }
+      } catch (e) {
+        console.warn("render3d set_pathtrace_materials fehlgeschlagen:", e);
       }
     }
     // Material-Farbkarten (Stil „textured") ASYNCHRON dekodieren + hochladen.
@@ -477,6 +499,7 @@ export function useWasm3dRenderer(
   const setRenderStyle = useCallback((style: string) => {
     const r = rendererRef.current;
     if (!r) return;
+    styleRef.current = style;
     try {
       r.set_render_style(style);
     } catch (e) {
@@ -665,12 +688,14 @@ export function useWasm3dRenderer(
    * WebGPU-Canvas liefert seinen Inhalt nur dort); danach stellt `restore` das Fenster-Bild wieder her. Null bei leerem Bild.
    */
   const exportImage = useCallback(
-    async (opts: { camera: Camera3d; width: number; height: number; transparent: boolean; restore: () => void }): Promise<{ png: Uint8Array; width: number; height: number; transparent: boolean } | null> => {
+    async (opts: { camera: Camera3d; width: number; height: number; transparent: boolean; samples?: number; restore: () => void }): Promise<{ png: Uint8Array; width: number; height: number; transparent: boolean } | null> => {
       const canvas = canvasRef.current;
       const r = rendererRef.current;
       if (!canvas || !r) return null;
       const { width: W, height: H } = clampImageSize(opts.width, opts.height);
-      const canMatte = opts.transparent && typeof r.set_clear_color === "function";
+      // [212] Pathtracing: N Samples in einem `render` (statt 1), feiner gerechnet; Hintergrund ist der Himmel (keine Transparenz).
+      const pt = styleRef.current === "pathtrace" && typeof r.set_pathtrace_batch === "function";
+      const canMatte = !pt && opts.transparent && typeof r.set_clear_color === "function";
       const prevW = canvas.width;
       const prevH = canvas.height;
       const out = document.createElement("canvas");
@@ -683,6 +708,10 @@ export function useWasm3dRenderer(
         canvas.width = W;
         canvas.height = H;
         r.resize(W, H);
+        if (pt) {
+          r.set_pathtrace_max_pixels?.(PT_EXPORT_MAX_PIXELS);
+          r.set_pathtrace_batch?.(exportSamples(opts.samples));
+        }
         const c = opts.camera;
         const shot = (bg: number | null): ImageData => {
           if (bg !== null) r.set_clear_color?.(bg, bg, bg);
@@ -705,6 +734,10 @@ export function useWasm3dRenderer(
         image = null;
       } finally {
         try {
+          if (pt) {
+            r.set_pathtrace_batch?.(1);
+            r.set_pathtrace_max_pixels?.(0);
+          }
           r.set_clear_color?.(0.961, 0.961, 0.961);
           canvas.width = prevW;
           canvas.height = prevH;

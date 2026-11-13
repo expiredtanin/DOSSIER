@@ -10,17 +10,7 @@
 
 use std::collections::HashSet;
 
-use crate::shadow::GLASS_RGB;
-
-/// Material-Art je Dreieck (Bits 24..32 von `GpuTri::mat`).
-pub const MAT_DIFFUSE: u32 = 0;
-/// Glänzend: diffuse Grundfarbe unter einer dielektrischen GGX-Schicht (F0 0.04) mit Rauigkeit `GpuTri::rough`.
-pub const MAT_GLOSSY: u32 = 1;
-/// Glas: dünne Scheibe (Fresnel-Spiegelung, sonst gerader Durchgang mit leichter Tönung).
-pub const MAT_GLASS: u32 = 2;
-
-/// Stahlrahmen der Öffnungen (Kern `model3d/openings.rs`, `PART_RGB[4]`): glänzend (beschichtet).
-pub const STEEL_RGB: [f32; 3] = [0.25, 0.27, 0.3];
+pub use crate::pt_material::{classify_color, srgb_to_linear, PtMaterialTable, GLASS_RGB, MAT_DIFFUSE, MAT_GLASS, MAT_GLOSSY, STEEL_RGB};
 
 /// Höchstens so viele Dreiecke je Blatt, wenn die SAH nicht weiter teilt.
 const MAX_LEAF: usize = 8;
@@ -31,11 +21,13 @@ const MAX_DEPTH: usize = 48;
 /// Kosten einer Knoten-Traversierung relativ zu einem Dreieckstest.
 const TRAVERSAL_COST: f32 = 1.0;
 
-/// Ein Dreieck der Eingabe: Ecken (world, Y oben) und Grundfarbe (Vertexfarbe, wie im Shader 0..1).
+/// Ein Dreieck der Eingabe: Ecken (world, Y oben), Grundfarbe (Vertexfarbe, wie im Shader 0..1) und Material-Ebene
+/// der Szene (`ChunkData::layers`, ≥ 1 = Bildkarte/Baustoff, sonst keine; s. `pt_material.rs`).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PtTri {
     pub v: [[f32; 3]; 3],
     pub color: [f32; 3],
+    pub layer: i32,
 }
 
 /// Knoten, 32 Byte, 1:1 zum WGSL-`Node`: `count > 0` = Blatt mit Dreiecken `[left_first, left_first + count)`,
@@ -51,7 +43,8 @@ pub struct GpuNode {
 }
 
 /// Dreieck, 48 Byte, 1:1 zum WGSL-`Tri`: Ecke `v0`, Kanten `e1 = v1 − v0`, `e2 = v2 − v0` (Möller–Trumbore),
-/// `mat` = Grundfarbe linear RGB8 (Bits 0..24) + Art (Bits 24..32), `rough` = GGX-Rauigkeit.
+/// `mat` = Grundfarbe linear RGB8 (Bits 0..24) + Art (Bits 24..32), `rough` = GGX-Rauigkeit, `metal` = Metall-Anteil
+/// der glänzenden Schicht (0 dielektrisch, 1 Metall; aus der Materialtabelle).
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 #[cfg_attr(feature = "render", derive(bytemuck::Pod, bytemuck::Zeroable))]
@@ -61,29 +54,13 @@ pub struct GpuTri {
     pub e1: [f32; 3],
     pub rough: f32,
     pub e2: [f32; 3],
-    pub pad: u32,
+    pub metal: f32,
 }
 
-/// Material aus der Vertexfarbe ([212]): Glas über die Kern-Farbe der Verglasung (wie `shadow::caster_indices`),
-/// Stahlrahmen glänzend, alles andere diffus. Rückgabe (Art, Rauigkeit).
+/// Material aus der Vertexfarbe (Etappe 1; Rückgabe Art, Rauigkeit) — s. `pt_material::classify_color`.
 pub fn classify_material(color: [f32; 3]) -> (u32, f32) {
-    let near = |c: [f32; 3]| (0..3).all(|k| (color[k] - c[k]).abs() < 1e-3);
-    if near(GLASS_RGB) {
-        (MAT_GLASS, 0.0)
-    } else if near(STEEL_RGB) {
-        (MAT_GLOSSY, 0.3)
-    } else {
-        (MAT_DIFFUSE, 1.0)
-    }
-}
-
-/// sRGB-Wert (0..1) nach linear.
-pub fn srgb_to_linear(c: f32) -> f32 {
-    if c <= 0.04045 {
-        c / 12.92
-    } else {
-        ((c + 0.055) / 1.055).powf(2.4)
-    }
+    let m = classify_color(color);
+    (m.kind, m.rough)
 }
 
 /// Höchste Albedo (energieerhaltend, wie der Blender-Leser [211]: ≤ 0.8).
@@ -100,7 +77,8 @@ fn pack_mat(color: [f32; 3], kind: u32) -> u32 {
 
 /// Liest Dreiecke aus einem `Mesh`-Puffer (`[pos, normal, color]` je Ecke, `FLOATS_PER_VERTEX`) und hängt sie an.
 /// Kaputte Indizes und nicht endliche Ecken fallen weg. Farbe = Mittel der drei Ecken (Luftbild-Vertexfarben).
-pub fn tris_from_mesh(verts: &[f32], indices: &[u32], out: &mut Vec<PtTri>) {
+/// `layers` = Material-Ebene je Vertex (`ChunkData::layers`; leer/zu kurz = keine).
+pub fn tris_from_mesh(verts: &[f32], indices: &[u32], layers: &[f32], out: &mut Vec<PtTri>) {
     let stride = crate::types::FLOATS_PER_VERTEX;
     let n = verts.len() / stride;
     for t in indices.chunks_exact(3) {
@@ -119,7 +97,8 @@ pub fn tris_from_mesh(verts: &[f32], indices: &[u32], out: &mut Vec<PtTri>) {
         } else {
             [(c[0][0] + c[1][0] + c[2][0]) / 3.0, (c[0][1] + c[1][1] + c[2][1]) / 3.0, (c[0][2] + c[1][2] + c[2][2]) / 3.0]
         };
-        out.push(PtTri { v, color });
+        let layer = layers.get(t[0] as usize).filter(|l| l.is_finite() && **l >= 1.0 && **l < 1e6).map_or(-1, |l| l.round() as i32);
+        out.push(PtTri { v, color, layer });
     }
 }
 
@@ -182,8 +161,14 @@ impl Bvh {
         self.tris.len()
     }
 
-    /// Baut den Baum (Binned-SAH). Ungültige Dreiecke fallen weg (s. Moduldoc); leer → leerer Baum.
+    /// Baut den Baum (Binned-SAH) ohne Materialtabelle (Material aus der Vertexfarbe).
     pub fn build(input: &[PtTri]) -> Bvh {
+        Self::build_with(input, &PtMaterialTable::default())
+    }
+
+    /// Baut den Baum (Binned-SAH). Ungültige Dreiecke fallen weg (s. Moduldoc); leer → leerer Baum. Material je
+    /// Dreieck aus `table` (Ebene) und Vertexfarbe aufgelöst.
+    pub fn build_with(input: &[PtTri], table: &PtMaterialTable) -> Bvh {
         let mut seen: HashSet<[[i64; 3]; 3]> = HashSet::with_capacity(input.len());
         let mut tris: Vec<PtTri> = Vec::with_capacity(input.len());
         for t in input {
@@ -324,8 +309,8 @@ impl Bvh {
             .iter()
             .map(|&i| {
                 let t = &tris[i as usize];
-                let (kind, rough) = classify_material(t.color);
-                GpuTri { v0: t.v[0], mat: pack_mat(t.color, kind), e1: sub(t.v[1], t.v[0]), rough, e2: sub(t.v[2], t.v[0]), pad: 0 }
+                let (m, color) = table.resolve(t.layer, t.color);
+                GpuTri { v0: t.v[0], mat: pack_mat(color, m.kind), e1: sub(t.v[1], t.v[0]), rough: m.rough, e2: sub(t.v[2], t.v[0]), metal: m.metal }
             })
             .collect();
         Bvh { nodes, tris: gpu_tris }
@@ -458,7 +443,7 @@ mod tests {
                 let a = r.v(1.5);
                 let b = r.v(1.5);
                 let d = r.v(1.5);
-                PtTri { v: [[c[0] + a[0], c[1] + a[1], c[2] + a[2]], [c[0] + b[0], c[1] + b[1], c[2] + b[2]], [c[0] + d[0], c[1] + d[1], c[2] + d[2]]], color: [0.5, 0.5, 0.5] }
+                PtTri { v: [[c[0] + a[0], c[1] + a[1], c[2] + a[2]], [c[0] + b[0], c[1] + b[1], c[2] + b[2]], [c[0] + d[0], c[1] + d[1], c[2] + d[2]]], color: [0.5, 0.5, 0.5], layer: -1 }
             })
             .collect()
     }
@@ -493,7 +478,7 @@ mod tests {
     fn achsparallele_strahlen_und_wuerfel() {
         // Würfel aus 12 Dreiecken plus Boden: Strahlen genau entlang der Achsen (inv = ±∞ in zwei Komponenten).
         let p = |x: f32, y: f32, z: f32| [x, y, z];
-        let q = |a, b, c, d| [PtTri { v: [a, b, c], color: [0.8; 3] }, PtTri { v: [a, c, d], color: [0.8; 3] }];
+        let q = |a, b, c, d| [PtTri { v: [a, b, c], color: [0.8; 3], layer: -1 }, PtTri { v: [a, c, d], color: [0.8; 3], layer: -1 }];
         let mut tris = Vec::new();
         tris.extend(q(p(0., 0., 0.), p(1., 0., 0.), p(1., 1., 0.), p(0., 1., 0.)));
         tris.extend(q(p(0., 0., 1.), p(1., 0., 1.), p(1., 1., 1.), p(0., 1., 1.)));
@@ -521,25 +506,25 @@ mod tests {
         assert_eq!(empty.tri_count(), 0);
         assert!(empty.intersect([0.0; 3], [0.0, 0.0, 1.0], f32::INFINITY).is_none());
         let bad = [
-            PtTri { v: [[f32::NAN, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], color: [0.5; 3] },
-            PtTri { v: [[0.0; 3], [0.0; 3], [0.0; 3]], color: [0.5; 3] },
-            PtTri { v: [[0.0; 3], [1.0, 1.0, 1.0], [2.0, 2.0, 2.0]], color: [0.5; 3] },
-            PtTri { v: [[f32::INFINITY, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], color: [f32::NAN; 3] },
+            PtTri { v: [[f32::NAN, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], color: [0.5; 3], layer: -1 },
+            PtTri { v: [[0.0; 3], [0.0; 3], [0.0; 3]], color: [0.5; 3], layer: -1 },
+            PtTri { v: [[0.0; 3], [1.0, 1.0, 1.0], [2.0, 2.0, 2.0]], color: [0.5; 3], layer: -1 },
+            PtTri { v: [[f32::INFINITY, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], color: [f32::NAN; 3], layer: -1 },
         ];
         let b = Bvh::build(&bad);
         assert_eq!(b.tri_count(), 0, "alle verworfen");
         assert!(b.intersect([0.0; 3], [f32::NAN, 0.0, 1.0], 1.0).is_none());
         // Kaputte Indizes / zu kurze Puffer im Netz-Leser.
         let mut out = Vec::new();
-        tris_from_mesh(&[0.0; 10], &[0, 1, 2, 5, 9, 99], &mut out);
+        tris_from_mesh(&[0.0; 10], &[0, 1, 2, 5, 9, 99], &[], &mut out);
         assert!(out.is_empty());
-        tris_from_mesh(&[], &[0, 0, 0], &mut out);
+        tris_from_mesh(&[], &[0, 0, 0], &[f32::NAN], &mut out);
         assert!(out.is_empty());
         // Gleiche Mitte bei vielen Dreiecken (alle Mitten gleich) → kein endloses Teilen.
         let same: Vec<PtTri> = (0..500)
             .map(|i| {
                 let s = 1.0 + i as f32 * 0.01;
-                PtTri { v: [[-s, 0.0, 0.0], [s, 0.0, 0.1 * s], [0.0, 0.0, -0.1 * s]], color: [0.5; 3] }
+                PtTri { v: [[-s, 0.0, 0.0], [s, 0.0, 0.1 * s], [0.0, 0.0, -0.1 * s]], color: [0.5; 3], layer: -1 }
             })
             .collect();
         let b = Bvh::build(&same);
@@ -551,8 +536,8 @@ mod tests {
 
     #[test]
     fn doppelseiten_einmal_und_material() {
-        let a = PtTri { v: [[0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], color: GLASS_RGB };
-        let b = PtTri { v: [[0.0; 3], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]], color: GLASS_RGB };
+        let a = PtTri { v: [[0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], color: GLASS_RGB, layer: -1 };
+        let b = PtTri { v: [[0.0; 3], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]], color: GLASS_RGB, layer: -1 };
         let bvh = Bvh::build(&[a, b]);
         assert_eq!(bvh.tri_count(), 1);
         assert_eq!(bvh.tris[0].mat >> 24, MAT_GLASS);
@@ -573,8 +558,41 @@ mod tests {
             v.extend_from_slice(&STEEL_RGB);
         }
         let mut out = Vec::new();
-        tris_from_mesh(&v, &[0, 1, 2], &mut out);
+        tris_from_mesh(&v, &[0, 1, 2], &[], &mut out);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].color, STEEL_RGB);
+        assert_eq!(out[0].layer, -1);
+        // Material-Ebene je Vertex (Ebene des ersten Ecks); 0, NaN und negative = keine.
+        for (layers, want) in [(vec![2.0, 2.0, 2.0], 2), (vec![0.0; 3], -1), (vec![f32::NAN; 3], -1), (vec![-1.0; 3], -1)] {
+            out.clear();
+            tris_from_mesh(&v, &[0, 1, 2], &layers, &mut out);
+            assert_eq!(out[0].layer, want, "{layers:?}");
+        }
+    }
+
+    /// [212] Etappe 2: Material je Dreieck aus der Tabelle (Ebene), aufgelöst ins GPU-Dreieck.
+    #[test]
+    fn materialtabelle_im_baum() {
+        let tri = |x: f32, layer: i32| PtTri { v: [[x, 0.0, 0.0], [x + 1.0, 0.0, 0.0], [x, 1.0, 0.0]], color: [1.0; 3], layer };
+        let table = PtMaterialTable::from_entries(&[
+            crate::pt_material::PtMaterialEntry { name: "Trapezblech".into(), map: String::new() },
+            crate::pt_material::PtMaterialEntry { name: "Backstein".into(), map: String::new() },
+        ]);
+        let bvh = Bvh::build_with(&[tri(0.0, 1), tri(5.0, 2), tri(10.0, -1)], &table);
+        let at = |x: f32| bvh.tris.iter().find(|t| t.v0[0] == x).unwrap();
+        assert_eq!(at(0.0).mat >> 24, MAT_GLOSSY);
+        assert_eq!(at(0.0).metal, 1.0);
+        assert!((at(0.0).rough - 0.35).abs() < 1e-6);
+        // Backstein: diffus, Farbe aus der Tabelle (linear gepackt), nicht weiss.
+        let b = at(5.0);
+        assert_eq!(b.mat >> 24, MAT_DIFFUSE);
+        assert_eq!(b.mat & 0xFF, (srgb_to_linear(0.60) * 255.0).round() as u32);
+        assert!((b.mat >> 8) & 0xFF < b.mat & 0xFF, "rötlich");
+        // Ohne Ebene: weiss diffus wie bisher.
+        assert_eq!(at(10.0).mat, pack_mat([1.0; 3], MAT_DIFFUSE));
+        assert_eq!(at(10.0).metal, 0.0);
+        // Ohne Tabelle (Etappe 1): alles aus der Vertexfarbe.
+        let plain = Bvh::build(&[tri(0.0, 1)]);
+        assert_eq!(plain.tris[0].mat >> 24, MAT_DIFFUSE);
     }
 }

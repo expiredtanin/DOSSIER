@@ -5,6 +5,18 @@
 /** Längste Bildkante (px): WebGPU-Standardgrenze für 2D-Texturen (`maxTextureDimension2D`). */
 export const IMAGE_MAX_EDGE = 8192;
 
+/** [212] Samples je Pixel des Bild-Exports im Stil „Pathtracing (Vorschau)“: Vorgabe und Obergrenze (= Ziel der Vorschau). */
+export const PT_EXPORT_SAMPLES = 64;
+export const PT_EXPORT_MAX_SAMPLES = 1024;
+/** [212] Pixel je Sample beim Export (die Vorschau rechnet ≤ 1.2 MPx und zieht hoch; das Bild feiner, Speicher ≈ 80 B/px). */
+export const PT_EXPORT_MAX_PIXELS = 4_000_000;
+
+/** [212] Samples des Exports: ganzzahlig 1 … `PT_EXPORT_MAX_SAMPLES`, sonst die Vorgabe. */
+export function exportSamples(n: number | undefined): number {
+  if (n === undefined || !Number.isFinite(n)) return PT_EXPORT_SAMPLES;
+  return Math.min(PT_EXPORT_MAX_SAMPLES, Math.max(1, Math.round(n)));
+}
+
 export interface ImageSize {
   width: number;
   height: number;

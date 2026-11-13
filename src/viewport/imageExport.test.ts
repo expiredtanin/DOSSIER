@@ -1,5 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { IMAGE_MAX_EDGE, clampImageSize, imageFileName, isBlankImage, matteFromBlackWhite } from "./imageExport";
+import { IMAGE_MAX_EDGE, PT_EXPORT_MAX_SAMPLES, PT_EXPORT_SAMPLES, clampImageSize, exportSamples, imageFileName, isBlankImage, matteFromBlackWhite } from "./imageExport";
+
+describe("[212] Bild-Export im Pathtracing-Stil", () => {
+  it("rechnet N Samples (Vorgabe 64, 1 … 1024)", () => {
+    expect(exportSamples(undefined)).toBe(PT_EXPORT_SAMPLES);
+    expect(exportSamples(Number.NaN)).toBe(PT_EXPORT_SAMPLES);
+    expect(exportSamples(16.4)).toBe(16);
+    expect(exportSamples(0)).toBe(1);
+    expect(exportSamples(-5)).toBe(1);
+    expect(exportSamples(5000)).toBe(PT_EXPORT_MAX_SAMPLES);
+  });
+});
 
 describe("[223] Bild-Export 3D", () => {
   it("Zielgrösse: unverändert, begrenzt mit Seitenverhältnis, Unsinn wird 16 px", () => {

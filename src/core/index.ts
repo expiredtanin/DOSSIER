@@ -263,6 +263,7 @@ export {
   projectToModel3dParts,
   selectionHighlightLines,
   wallMaterialColorMaps,
+  pathtraceMaterials,
 } from "../plan/toWalls3d";
 export type { Model3dPart } from "../plan/toWalls3d";
 export { hiddenClassCodes } from "../plan/toWalls3d";
