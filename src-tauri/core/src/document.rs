@@ -42,6 +42,8 @@ pub struct Document {
     plan_cache: crate::plan::cache::PlanCache,
     /// Cache der 3D-Ableitung ([58], `model3d_cache`), gültig über [`Revs`].
     model3d_cache: crate::model3d_cache::Model3dCache,
+    /// Cache der Flächenmuster für render3d ([214], `surface_pattern3d::PatternCache`), gültig über [`Revs`].
+    pattern_cache: crate::surface_pattern3d::PatternCache,
     /// id → Position je Liste über die Aufrufe hinweg (s. [`PosCache`]); in einer `RefCell`, damit auch
     /// lesende Abfragen ([`Lookup`]) den Index bauen und nutzen.
     pos: RefCell<PosCache>,
@@ -832,6 +834,24 @@ impl Document {
         let openings = self.revs.items("openings", n_open).to_vec();
         let filter = crate::model3d::ClassFilter::from_text(p, text);
         self.model3d_cache.parts(p, &self.revs, &walls, &openings, layered, detail, for_section, structs, delta, &filter)
+    }
+
+    /// Flächenmuster-Linien für render3d ([214]) wie `surface_pattern3d::pattern_lines_3d_filtered`, je Wand/Decke/Dach
+    /// aus dem Zwischenspeicher; `text` = Klassen-Filter ([180], s. [`Self::model3d_parts_with`]).
+    pub fn surface_pattern_lines(&mut self, gap: f64, text: &str) -> Result<Vec<f32>, String> {
+        self.project()?;
+        let p = self.typed.as_ref().expect("gerade gelesen");
+        let walls = self.revs.items("walls", p.walls.len()).to_vec();
+        let openings = self.revs.items("openings", p.openings.as_ref().map_or(0, Vec::len)).to_vec();
+        let ceilings = self.revs.items("ceilings", p.ceilings.as_ref().map_or(0, Vec::len)).to_vec();
+        let roofs = self.revs.items("roofs", p.roofs.as_ref().map_or(0, Vec::len)).to_vec();
+        let filter = crate::model3d::ClassFilter::from_text(p, text);
+        Ok(self.pattern_cache.lines(p, &self.revs, &walls, &openings, &ceilings, &roofs, gap, &filter))
+    }
+
+    /// [214] Letzte Statistik des Flächenmuster-Caches (Tests): neu gerechnete Wände / Decken / Dächer.
+    pub fn pattern_rebuilt(&self) -> (usize, usize, usize) {
+        self.pattern_cache.last_rebuilt
     }
 
     /// [180] Letzte Statistik des 3D-Caches (Tests): neu gerechnete Öffnungs-Varianten des Klassen-Filters.

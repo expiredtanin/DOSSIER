@@ -210,6 +210,14 @@ impl FloorContext {
         self.ceilings.iter().map(|c| c.0.clone()).collect()
     }
 
+    /// Gleiche Eingabe (Decken und Dächer)? Die Hüllen folgen daraus.
+    pub fn same_input(&self, o: &FloorContext) -> bool {
+        self.ceilings.len() == o.ceilings.len()
+            && self.roofs.len() == o.roofs.len()
+            && self.ceilings.iter().zip(&o.ceilings).all(|(a, b)| a.0 == b.0)
+            && self.roofs.iter().zip(&o.roofs).all(|(a, b)| a.0 == b.0)
+    }
+
     pub fn new(ceilings: Vec<CeilingIn>, roofs: Vec<RoofIn>) -> Self {
         FloorContext {
             ceilings: ceilings

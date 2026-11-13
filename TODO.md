@@ -242,6 +242,17 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   nativ): Kanten-Index (≈ 0.7 s für 2.8 M Beiträge) und Entscheid aller Kanten; (c) GPU-Bildzeit nur auf lavapipe gemessen, Culling/LOD/
   Instancing erst nach Messung auf echter GPU (Mac); (d) Draw-Calls der Geisterschicht je Klumpen (gross 465), ggf. bündeln; (e) Pathtracer
   nutzt seit [212] Etappe 5 `Bvh::refit` bei gleicher Topologie; ändert sich die Topologie (Gehrungen der Nachbarwände), baut er den Baum neu. · M
+  Flächenmuster-Cache (13.11., `surface_pattern3d::PatternCache`, `Document::surface_pattern_lines`): Linien je Wand/Decke/Dach unter dem
+  Element-Stand, Wand zusätzlich nach gehosteten Öffnungen und Geschoss-Kontext (Decken-Eingabe, Dächer: Oberkante unter dem Dach); Hauptmodell
+  und Geisterschicht (anderer Klassen-Filter) teilen die Einträge. Wand verschieben, Flächenmuster je Änderung (WASM, Container, beide
+  Aufrufe): komplex 24 → 1,5–2 ms, kontext 8 → 1,5 ms (Rauschen ±), gross unverändert ~1 ms (keine Muster). Test
+  `zwischenspeicher_gleich_neubau` (60 gemischte Änderungen, Undo/Redo, Filter, Explosion: gleich dem Neubau; Wandänderung rechnet 1 Wand).
+  Offen, nach Messwert: (1) Rest-Gruppen ohne
+  JSON-Rundreise (Laufnummer je Gruppe statt `JSON.stringify`-Vergleich: kontext 69 ms, komplex 27 ms je Änderung); (2) Kern: Geschoss-
+  Kontexte aller Geschosse je Abfrage (gross 29 ms nativ, zweimal je Änderung), Kontext-Netze je Objekt als Teil statt eine Gruppe;
+  (3) Vernetzen in render3d (komplex 324 ms/147k Dreiecke kalt, Geisterschicht gross 2 s beim Geschosswechsel); (4) GPU-Bildzeit nur auf
+  lavapipe gemessen (komplex ~150–570 ms Software), Culling/LOD/Instancing erst nach Messung auf echter GPU (Mac); (5) Draw-Calls der
+  Geisterschicht je Klumpen (gross 275 → 465), ggf. bündeln. · M
 
 ### Phase 3 (27.11.–3.12.): Vorprojekt
 - ◐ **[234]** 3D: Rundbogen-Fenster der OG-Südwand (`og-f1`, Musterhaus komplex) ragte mit dem Bogenscheitel über die Wandoberkante ins
