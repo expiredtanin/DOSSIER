@@ -88,6 +88,62 @@ pub fn intersection(a: &[Polygon], b: &[Polygon]) -> Vec<Polygon> {
     run(a, b, OverlayRule::Intersect)
 }
 
+/// Gerade/ungerade Verschachtelung ([207], Kataster: Innenhöfe): Liegt ein Ring vollständig in einem anderen
+/// (kein Schnitt, die meisten Punkte innen), ist er ein Loch des kleinsten umschliessenden Rings; ein Ring in
+/// einem Loch ist wieder eine Fläche usw. (Tiefe gerade = Aussenring, ungerade = Loch). Sich nur überlappende
+/// Ringe sind nicht verschachtelt, sie werden vereinigt. Ergebnis wie [`union`] (i_overlay, Aussenring gegen,
+/// Löcher im Uhrzeigersinn).
+pub fn nest_even_odd(rings: &[Ring]) -> Vec<Polygon> {
+    use crate::roof_skeleton::{point_in_ring, rings_cross};
+    type Entry = (f64, [f64; 4], Ring);
+    let mut rs: Vec<Entry> = rings
+        .iter()
+        .filter_map(clean_ring)
+        .map(|r| {
+            let b = r.iter().fold([f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY], |b, p| [b[0].min(p[0]), b[1].min(p[1]), b[2].max(p[0]), b[3].max(p[1])]);
+            (signed_area(&r).abs(), b, r)
+        })
+        .collect();
+    // Grosse zuerst: ein Umschliessender steht immer vor dem Umschlossenen.
+    rs.sort_by(|a, b| b.0.total_cmp(&a.0));
+    let contains = |o: &Entry, i: &Entry| -> bool {
+        o.1[0] <= i.1[0] && o.1[1] <= i.1[1] && o.1[2] >= i.1[2] && o.1[3] >= i.1[3] && {
+            let inside = i.2.iter().filter(|p| point_in_ring(**p, &o.2)).count();
+            inside * 2 > i.2.len() && !rings_cross(&o.2, &i.2)
+        }
+    };
+    let n = rs.len();
+    // Je Ring der engste umschliessende (Index) und die Tiefe.
+    let mut parent: Vec<Option<usize>> = vec![None; n];
+    let mut depth = vec![0usize; n];
+    for i in 0..n {
+        // Umschliessende stehen vor i; von hinten (klein) nach vorn: der erste Treffer ist der engste.
+        for j in (0..i).rev() {
+            if rs[j].0 > rs[i].0 && contains(&rs[j], &rs[i]) {
+                parent[i] = Some(j);
+                depth[i] = depth[j] + 1;
+                break;
+            }
+        }
+    }
+    let mut polys: Vec<Polygon> = Vec::new();
+    let mut slot: Vec<Option<usize>> = vec![None; n];
+    for i in 0..n {
+        if depth[i] % 2 == 0 {
+            slot[i] = Some(polys.len());
+            polys.push(vec![rs[i].2.clone()]);
+        }
+    }
+    for i in 0..n {
+        if depth[i] % 2 == 1 {
+            if let Some(k) = parent[i].and_then(|j| slot[j]) {
+                polys[k].push(rs[i].2.clone());
+            }
+        }
+    }
+    union(&polys)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -145,5 +201,21 @@ mod tests {
         assert_eq!(u.len(), 1);
         assert_eq!(u[0].len(), 1);
         assert!((area(&u) - 2.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn verschachtelung_gerade_ungerade() {
+        let sq = |x0: f64, y0: f64, x1: f64, y1: f64| rect(x0, y0, x1, y1).remove(0);
+        // Hof im Gebäude, darin ein Pavillon, daneben ein einzelnes Haus.
+        let u = nest_even_odd(&[sq(0.0, 0.0, 20.0, 20.0), sq(5.0, 5.0, 15.0, 15.0), sq(8.0, 8.0, 12.0, 12.0), sq(30.0, 0.0, 40.0, 10.0)]);
+        assert_eq!(u.len(), 3, "Gebäude mit Hof, Pavillon im Hof, Einzelhaus");
+        let with_hole = u.iter().find(|p| p.len() == 2).expect("Hof als Loch");
+        assert!((signed_area(&with_hole[0]) - 400.0).abs() < 1e-6 && (signed_area(&with_hole[1]).abs() - 100.0).abs() < 1e-6);
+        assert!((area(&u) - (400.0 - 100.0 + 16.0 + 100.0)).abs() < 1e-6);
+        // Nur überlappend (nicht verschachtelt): vereinigt, kein Loch.
+        let v = nest_even_odd(&[sq(0.0, 0.0, 10.0, 10.0), sq(5.0, 5.0, 15.0, 15.0)]);
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].len(), 1);
+        assert!((area(&v) - 175.0).abs() < 1e-6);
     }
 }

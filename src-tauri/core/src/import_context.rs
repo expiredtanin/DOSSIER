@@ -49,6 +49,44 @@ fn category(d: &Def) -> Value {
     json!({"code": d.code, "name": d.name, "color": d.color, "lw": d.lw, "visible": true, "locked": false})
 }
 
+/// [207] Bekannte Layer-Namen amtlicher Kataster-/Vermessungs-DXF auf die Kontext-Klassen: Gebäude → „12", Strassen
+/// samt Strassennamen → „11", Gewässer → „17". Vergleich ohne Gross-/Kleinschreibung, Umlaute (ä → ae …), Leer- und
+/// Trennzeichen; nur ganze Namen (Beschriftungs-Layer wie „Gebäudenummer" bleiben eigene Layer).
+pub fn known_context_class(layer: &str) -> Option<&'static str> {
+    let mut n = String::new();
+    for ch in layer.to_lowercase().chars() {
+        match ch {
+            'ä' => n.push_str("ae"),
+            'ö' => n.push_str("oe"),
+            'ü' => n.push_str("ue"),
+            'ß' => n.push_str("ss"),
+            c if c.is_alphanumeric() => n.push(c),
+            _ => {}
+        }
+    }
+    match n.as_str() {
+        "gebaeude" | "gebaeudegrundriss" | "gebaeudeumriss" | "gebaeudeumrisse" | "building" | "buildings" | "haus" | "haeuser" => Some("12"),
+        "strasse" | "strassen" | "strassenachse" | "strassenachsen" | "strassennamen" | "strassenname" | "road" | "roads" | "streetnames" | "streetname" => Some("11"),
+        "gewaesser" | "fliessgewaesser" | "water" | "waterbodies" => Some("17"),
+        _ => None,
+    }
+}
+
+/// [207] Bezeichnung zu einem rein numerischen DXF-Layer-Namen (Code der amtlichen Vermessung bzw. des Kantons),
+/// z. B. „1110" → „Gebäude"; Kategorie heisst dann „1110 Gebäude". Nur belegte Codes: im Repo gab es keine Tabelle,
+/// 1110 = Gebäude nennt der Maintainer (nicht gegen die DM.01-AV-Liste geprüft). Alles andere (auch Layer mit
+/// Buchstaben, die schon sprechen) bleibt unverändert; weitere Codes hier ergänzen, sobald belegt.
+const NUMERIC_LAYER_LABELS: [(&str, &str); 1] = [("1110", "Gebäude")];
+
+/// Kategorie-Name für einen Layer: bei bekanntem Zahlen-Code „Code Bezeichnung", sonst der Layer-Name.
+pub fn layer_display_name(layer: &str) -> String {
+    let t = layer.trim();
+    match NUMERIC_LAYER_LABELS.iter().find(|(c, _)| *c == t) {
+        Some((c, label)) => format!("{c} {label}"),
+        None => layer.to_string(),
+    }
+}
+
 /// Ergänzt `layers` um jede fehlende Kontext-Kategorie aus `codes` (vorhandene Codes, auch umbenannte, bleiben).
 /// Fehlende Kinder landen unter „05 Kontext" (bei Bedarf angelegt), „31 Dächer" oben. `true` = geändert.
 pub fn ensure_context_categories<'a>(layers: &mut Vec<Value>, codes: impl IntoIterator<Item = &'a str>) -> bool {

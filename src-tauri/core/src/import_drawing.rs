@@ -908,9 +908,31 @@ pub fn import_ops(root: &Map<String, Value>, d: &DrawingImport, dec: &Decision, 
     let by_layer = dec.category_mode == "byLayer";
     let mut code_by_layer: HashMap<String, String> = HashMap::new();
     if by_layer {
-        let names = import_layers(d);
-        let plan = crate::layers::plan_import(&names, &layers, &d.layer_colors, &d.layer_line_weights);
-        code_by_layer = plan.code_by_layer.into_iter().collect();
+        let mut names = import_layers(d);
+        // [207] Kataster-Layer (Gebäude, Strassen, Gewässer) auf die Kontext-Klassen „12"/„11"/„17", ausser das Projekt
+        // hat schon eine gleichnamige Kategorie. Vor dem Plan, damit dessen neue Codes die Kontext-Codes nicht belegen.
+        let existing_names: HashSet<String> = crate::layers::flatten(&layers).iter().filter_map(|c| c.get("name").and_then(Value::as_str).map(str::to_lowercase)).collect();
+        let mut known: Vec<&'static str> = Vec::new();
+        names.retain(|n| match crate::import_context::known_context_class(n).filter(|_| !existing_names.contains(&n.to_lowercase())) {
+            Some(code) => {
+                code_by_layer.insert(n.clone(), code.to_string());
+                known.push(code);
+                false
+            }
+            None => true,
+        });
+        if crate::import_context::ensure_context_categories(&mut layers, known.iter().copied()) {
+            layers_changed = true;
+        }
+        let mut plan = crate::layers::plan_import(&names, &layers, &d.layer_colors, &d.layer_line_weights);
+        code_by_layer.extend(std::mem::take(&mut plan.code_by_layer));
+        // [207] Zahlen-Layer (amtliche Codes) mit Bezeichnung benennen, Zuordnung bleibt über den Layer-Namen.
+        for ch in plan.children.iter_mut() {
+            let n = ch.get("name").and_then(Value::as_str).map(crate::import_context::layer_display_name);
+            if let (Some(n), Some(o)) = (n, ch.as_object_mut()) {
+                o.insert("name".into(), n.into());
+            }
+        }
         if !plan.children.is_empty() {
             let parent = json!({"code": plan.parent_code, "name": dec.parent_name, "color": "#707078", "lw": 0.18, "visible": true, "locked": false, "children": plan.children});
             ensure_layers_with_parent(&mut layers, Some(parent));

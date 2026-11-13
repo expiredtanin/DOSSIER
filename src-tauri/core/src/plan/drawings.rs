@@ -1921,6 +1921,40 @@ pub fn plan_drawings(c: &Ctx, sink: &mut Sink, bounds: &mut Bounds) -> Result<()
     Ok(())
 }
 
+/// [207] Geschlossene Ringe der gezeichneten Zeichnungen des Geschosses (geschlossene Polylinie samt Inseln, Rechteck)
+/// auf Klassen, die `pred` (Klassen-Code) wählt und die der Plan zeigt; je Klasse in Projekt-Reihenfolge. Quelle der
+/// gefüllten Kataster-Gebäude und -Gewässer im Situationsplan (`situation.rs`).
+pub fn closed_rings_by_class(c: &Ctx, pred: impl Fn(&str) -> bool) -> Vec<(String, Vec<Vec<[f64; 2]>>)> {
+    let mut memo = Memo::default();
+    let mut out: Vec<(String, Vec<Vec<[f64; 2]>>)> = Vec::new();
+    for d in &c.p.drawings2d {
+        if !matches!(d.geom, Drawing2DGeom::Polyline { closed: true, .. } | Drawing2DGeom::Rect { .. }) || !pred(&d.category_code) || !on_floor(c, d) {
+            continue;
+        }
+        if !memo.get(c, d).shown {
+            continue;
+        }
+        let mut rings: Vec<Vec<[f64; 2]>> = Vec::new();
+        match &d.geom {
+            Drawing2DGeom::Rect { min, max } => rings.push(vec![[min.x, min.y], [max.x, min.y], [max.x, max.y], [min.x, max.y]]),
+            Drawing2DGeom::Polyline { pts, bulge, holes, .. } if pts.len() > 2 => {
+                rings.push(bulge_polyline_points(pts, bulge.as_deref(), true).iter().map(|q| [q.x, q.y]).collect());
+                rings.extend(holes.iter().flatten().filter(|h| h.len() >= 3).map(|h| h.iter().map(|q| [q.x, q.y]).collect::<Vec<_>>()));
+            }
+            _ => continue,
+        }
+        rings.retain(|r| r.iter().all(|q| q[0].is_finite() && q[1].is_finite()));
+        if rings.is_empty() {
+            continue;
+        }
+        match out.iter_mut().find(|(k, _)| *k == d.category_code) {
+            Some((_, v)) => v.extend(rings),
+            None => out.push((d.category_code.clone(), rings)),
+        }
+    }
+    out
+}
+
 /// [140] Zeichnungsarten, denen Raumstempel ausweichen (Bemassung, Koten, Texte, Symbole/Möbel als Blöcke,
 /// Detailverweise, Punktmarken). Linien, Flächen, Raster und Bilder nicht: sie laufen oft durch ganze Räume.
 pub fn is_stamp_obstacle(g: &Drawing2DGeom) -> bool {

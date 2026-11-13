@@ -1827,6 +1827,7 @@ fn domains_before(c: &Ctx, out: &mut DomainPrims, bounds: &mut Bounds) -> Result
     }
     // [207] Situationsplan: das eigene Gebäude als gefüllter Umriss statt der Bauteile (nur Bäume bleiben).
     if let Some(s) = super::situation::opts(c) {
+        super::situation::cadastre_prims(c, &s, &mut out.roofs);
         super::situation::own_prims(c, &s, &mut out.roofs, bounds);
         super::trees::plan_trees(c, &mut out.columns);
         return Ok(());
