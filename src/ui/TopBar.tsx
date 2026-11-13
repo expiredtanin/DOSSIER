@@ -199,6 +199,26 @@ function ComboMenu({
 /** Die vier oberen Iso-Oktanten (untere vier bleiben im Hochbau ungenutzt). */
 const ISO_VARIANTS: View3d[] = ["iso", "isoFrontLeft", "isoBackRight", "isoBackLeft"];
 
+/** [244] Darstellungsarten im 3D: gruppiert, mit Icon und Kurzerklärung. */
+export function renderModeOptions(): DropdownOption[] {
+  const lines = t("display.group.lines");
+  const faces = t("display.group.faces");
+  const render = t("display.group.render");
+  const o = (value: RenderMode, key: string, icon: string, group: string): DropdownOption => ({
+    value, label: t(`display.style.${key}`), hint: t(`display.style.${key}.tip`), icon, group,
+  });
+  return [
+    o("wireframe", "wireframe", "deployed_code", lines),
+    o("hidden", "hidden", "visibility_off", lines),
+    o("contour", "contour", "border_style", lines),
+    o("shaded", "shaded", "view_in_ar", faces),
+    o("shaded-edges", "shadedEdges", "select_all", faces),
+    o("textured", "textured", "texture", faces),
+    o("white", "white", "circle", faces),
+    o("pathtrace", "pathtrace", "auto_awesome", render),
+  ];
+}
+
 /** Häkchen vor der aktiven Iso-Zeile (gleiche Glyphe wie `Dropdown`s Check). */
 function IsoCheck() {
   return (
@@ -1257,16 +1277,7 @@ export const ViewRibbonTab = memo(function ViewRibbonTab({
               disabled={!renderModeEnabled}
               onChange={(v) => onRenderMode(v as RenderMode)}
               title={t("display.style.hint")}
-              options={[
-                { value: "shaded", label: t("display.style.shaded") },
-                { value: "shaded-edges", label: t("display.style.shadedEdges") },
-                { value: "white", label: t("display.style.white") },
-                { value: "contour", label: t("display.style.contour") },
-                { value: "textured", label: t("display.style.textured") },
-                { value: "wireframe", label: t("display.style.wireframe") },
-                { value: "hidden", label: t("display.style.hidden") },
-                { value: "pathtrace", label: t("display.style.pathtrace") },
-              ]}
+              options={renderModeOptions()}
             />
           ) : (
             <Dropdown

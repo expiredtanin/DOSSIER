@@ -4462,6 +4462,43 @@ body {
 .tb-dd-check {
   display: block;
 }
+/* [244] Gruppen, Icons, Zweitzeile, Kürzel */
+.tb-dd-heading {
+  padding: 6px 12px 2px;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  opacity: 0.55;
+}
+.tb-dd-icon {
+  flex: 0 0 auto;
+  font-size: 18px;
+  opacity: 0.85;
+}
+.tb-dd-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1 1 auto;
+  text-align: left;
+}
+.tb-dd-hint {
+  font-size: 11px;
+  opacity: 0.6;
+  white-space: normal;
+  line-height: 1.25;
+}
+.tb-dd-item.has-hint {
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
+.tb-dd-kbd {
+  flex: 0 0 auto;
+  margin-left: 12px;
+  font: inherit;
+  font-size: 11px;
+  opacity: 0.55;
+}
 
 /* ── Kontextmenü (generisch, wiederverwendbar) ───────────────────────────────
    1:1 nach DOSSIER (docs/design/context-menu.md): fixe Position mit
