@@ -5,6 +5,8 @@
 import { removeItems } from "../core";
 import { t } from "../i18n";
 import { createCameraFromView, openCamera } from "../state/cameraActions";
+import { playCameraTour } from "../state/cameraTourActions";
+import { openCameraTourDialog } from "../state/cameraTourDialogHook";
 import { getState, useStore } from "../state/appStore";
 import { fromIds } from "../state/selection";
 
@@ -18,6 +20,13 @@ export function CamerasGroup() {
       <header className="nav-group-head">
         <span className="nav-group-title">{t("camera.title")}</span>
         <span className="nav-group-actions">
+          {/* [246] Kamerafahrt: Abspielen mit den zuletzt gewählten Einstellungen; „Video …" öffnet den Dialog */}
+          <button className="nav-add" style={{ display: "inline-flex", padding: "1px 5px" }} title={t("tour.buttonHint")} data-testid="camera-tour" disabled={list.length === 0} onClick={() => void playCameraTour()}>
+            ▶ {t("tour.button")}
+          </button>
+          <button className="nav-add" style={{ display: "inline-flex", padding: "1px 5px" }} title={t("tour.videoButtonHint")} data-testid="camera-tour-video" disabled={list.length === 0} onClick={() => openCameraTourDialog()}>
+            {t("tour.videoButton")}
+          </button>
           <button className="nav-add" style={{ display: "inline-flex", padding: "1px 5px" }} title={t("camera.createFromView")} data-testid="camera-create" onClick={() => createCameraFromView()}>
             +
           </button>
