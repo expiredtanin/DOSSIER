@@ -10,7 +10,7 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   stehen im Archiv („Bewusst nicht übernommen“).
 - **Grösse** (eine Person mit Agenten): S ≤ 1 Tag · M ≤ 1 Woche · L ≤ 1 Monat · XL > 1 Monat.
   Steht keine Grösse im Archiv, ist sie hier geschätzt.
-- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 240);
+- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 241);
   nie eine ID wiederverwenden oder umnummerieren. Präfix-IDs (`[K]`, `[G]`, `[T]`, `[B]`, `[C]`) bleiben.
 - **Pro Punkt:** was fehlt · wo im Code · Grösse. Höchstens ein bis drei Sätze je Punkt;
   Messwerte und Befunde gehören in den Commit.
@@ -260,6 +260,15 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   dasselbe `ObjectInfoPanel` (ohne Bezugspunkt/Masse) und damit dieselben Gruppen und denselben Zustand. Geprüft: vitest `src/panels src/ui
   src/i18n` (neu `infoGroupState.test.ts`), tsc, e2e objectSettings/objectSettingsWindow/roomStamp218, Screenshots hell/dunkel (Gelände,
   Wand; Tastatur Enter/Leertaste). Nicht geprüft: Mac/Tauri, natives Nebenfenster. · S
+- ✓ **[241]** Objekt-Info Gelände/Kontextobjekte, Kamera, Baum: Raster wie die übrigen Gruppen (13.11., Chromium hell/dunkel, Musterhaus komplex; Mac/Tauri
+  nicht geprüft). Befund: „Höhe des Punkts (m)“ vierzeilig, Felder 64 px; Ursache auch, dass `.objinfo-site` (nur `> `-Kind-Selektor) seit der Gruppierung ([239])
+  nicht mehr griff — der Gelände-Block hatte wieder eigenen Scroll und 8 px Polster, Zeilen („Material“, Verbau) waren abgeschnitten. Jetzt Zeilen als
+  `.objinfo-field` (Label 104 px | Feld | Einheit hinter dem Feld, `ContextObjectProps.tsx`), kurze Labels (Einheit nicht mehr im Label, Hinweise als
+  Tooltip: `site.earthDepth.hint`, `site.excavation.shoringEmbed.hint`), Knöpfe umbrechend in `.site-actions`, Verbau-Kanten umbrechend; Gleitkomma-Rauschen
+  im Feld (0,0499999…) auf 12 Stellen gerundet (nur Anzeige). Kamera: Labels gekürzt (Augenhöhe, Bildwinkel vert., Brennweite KB, Sonne), Label-Spalte
+  104 px statt 56 px (auch `.objinfo-tree`). Gemessen (Playwright): Gelände, Höhenlinien, Baugrube, Nachbargebäude, Kamera ohne mehrzeilige/abgeschnittene
+  Labels, `scrollWidth ≤ clientWidth`. Funktion unverändert. Geprüft: tsc, vitest `src/panels src/ui src/i18n`. Nicht visuell geprüft: Baum (im
+  Musterhaus keiner; nur dieselbe CSS-Regel wie Kamera). · S
 - ✓ **[235]** `update-dossier` brach nach der Commit-Liste stumm ab (13.11., Maintainer, Void): `git log … | head -20` lieferte bei mehr als 20 neuen
   Commits SIGPIPE, mit `set -euo pipefail` endete das Skript ohne Meldung — weder WASM noch AppImage wurden gebaut, `dossier` startete das alte
   AppImage. Lösung: `git log -20`; `dossier` warnt, wenn das AppImage älter ist als der Checkout. Geprüft: Ursache nachgestellt (Exit 141), Syntax. · S

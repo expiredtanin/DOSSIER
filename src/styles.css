@@ -5164,31 +5164,42 @@ body {
   background: var(--line);
   margin: 2px 0;
 }
-/* [T6]/[68] Felder von Gelände und Baugrube (Objekt-Info). */
+/* [T6]/[68] Felder von Gelände und Baugrube (Objekt-Info): Zeilen als `.objinfo-field` (Label | Feld | Einheit),
+   wie die übrigen Gruppen ([241]); hier nur, was sie nicht mitbringen. */
 .site-panel .site-props {
   flex: 1 0 100%;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 4px 8px;
   font-size: 11px;
 }
-.site-panel .site-prop {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+.site-panel .objinfo-field .objinfo-unit {
+  flex: 0 0 14px;
+}
+.site-panel .objinfo-field select.objinfo-input {
+  text-align: left;
+}
+.site-panel .objinfo-field .site-check {
+  margin: 0;
+}
+.site-panel .site-actions {
+  flex-wrap: wrap;
   gap: 4px;
+  padding: 3px 2px;
 }
-.site-panel .site-prop-wide {
-  grid-column: 1 / -1;
+.site-panel .site-actions button {
+  flex: 1 1 auto;
 }
-/* Auswahlfelder (Glättung, Material) dürfen schmaler werden als ihre längste Option, sonst läuft die Spalte über. */
-.site-panel .site-prop select {
-  min-width: 0;
-  flex: 1 1 0;
-  max-width: 100%;
+.site-panel .site-edges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
 }
-.site-panel .site-prop input {
-  width: 64px;
+.site-panel .site-edges label {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.site-panel .site-contours {
+  max-height: 180px;
+  overflow-y: auto;
 }
 .site-panel .site-qty {
   grid-column: 1 / -1;
@@ -5202,6 +5213,9 @@ body {
   align-items: center;
   gap: 3px;
   font-size: 11px;
+}
+.site-panel .objinfo-field .site-check {
+  flex: 0 0 auto;
 }
 .site-panel .site-remove {
   flex: 0 0 auto;
@@ -5254,14 +5268,14 @@ body {
 }
 /* Gelände/Baugrube/Schatten in der Objekt-Info: der Abschnitt wächst mit seinem Inhalt (sonst schrumpft er in der
    Flex-Spalte auf eine Zeile Höhe und verdeckt die Felder, `.site-panel` ist sonst ein eigener Scroll-Bereich). */
-.objinfo-panel > .objinfo-site {
+.objinfo-panel .objinfo-site {
   flex: 0 0 auto;
   height: auto;
   min-height: auto;
   overflow: visible;
   padding: 0;
 }
-.objinfo-panel > .objinfo-site .site-props {
+.objinfo-panel .objinfo-site .site-props {
   flex: 0 0 auto;
 }
 .objinfo-empty {
@@ -5445,7 +5459,9 @@ body {
    Balken, Zeilentrenner, einheitliche Label-Spalte, linksbündig füllende Felder.
    Das eigenständige ObjectInfo-Panel (Bezugspunkt/Masse) bleibt unberührt. */
 .attr-panel .objinfo-section-label,
-.objinfo-group-body .objinfo-section-label {
+.objinfo-group-body .objinfo-section-label,
+.objinfo-camera .objinfo-section-label,
+.objinfo-tree .objinfo-section-label {
   color: var(--label);
   font-weight: 700;
   text-transform: uppercase;
@@ -5458,12 +5474,16 @@ body {
 }
 /* Sektion-Balken trennen bereits → die dünnen Extra-Striche entfallen. */
 .attr-panel .objinfo-sep,
-.objinfo-group-body .objinfo-sep {
+.objinfo-group-body .objinfo-sep,
+.objinfo-camera .objinfo-sep,
+.objinfo-tree .objinfo-sep {
   display: none;
 }
 /* Zeile: Label-Spalte | Wert/Control, mit dezentem Zeilentrenner (wie .attr-*). */
 .attr-panel .objinfo-field,
-.objinfo-group-body .objinfo-field {
+.objinfo-group-body .objinfo-field,
+.objinfo-camera .objinfo-field,
+.objinfo-tree .objinfo-field {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -5471,7 +5491,9 @@ body {
   border-bottom: 1px solid var(--line);
 }
 .attr-panel .objinfo-flabel,
-.objinfo-group-body .objinfo-flabel {
+.objinfo-group-body .objinfo-flabel,
+.objinfo-camera .objinfo-flabel,
+.objinfo-tree .objinfo-flabel {
   flex: 0 0 104px;
   width: 104px;
   white-space: nowrap;
@@ -5482,16 +5504,22 @@ body {
 }
 /* Werte/Controls füllen die Zelle linksbündig (statt rechtsbündig). */
 .attr-panel .objinfo-fval,
-.objinfo-group-body .objinfo-fval {
+.objinfo-group-body .objinfo-fval,
+.objinfo-camera .objinfo-fval,
+.objinfo-tree .objinfo-fval {
   flex: 1 1 auto;
   text-align: left;
 }
 .attr-panel .objinfo-input,
-.objinfo-group-body .objinfo-input {
+.objinfo-group-body .objinfo-input,
+.objinfo-camera .objinfo-input,
+.objinfo-tree .objinfo-input {
   text-align: left;
 }
 .attr-panel .objinfo-field .tb-dd-trigger,
-.objinfo-group-body .objinfo-field .tb-dd-trigger {
+.objinfo-group-body .objinfo-field .tb-dd-trigger,
+.objinfo-camera .objinfo-field .tb-dd-trigger,
+.objinfo-tree .objinfo-field .tb-dd-trigger {
   flex: 1 1 auto;
   min-width: 0;
   justify-content: space-between;
@@ -5499,8 +5527,12 @@ body {
 /* Segment-Umschalter + verschachtelte Felder füllen ebenfalls die Wert-Spalte. */
 .attr-panel .objinfo-segment,
 .objinfo-group-body .objinfo-segment,
+.objinfo-camera .objinfo-segment,
+.objinfo-tree .objinfo-segment,
 .attr-panel .objinfo-subfield,
-.objinfo-group-body .objinfo-subfield {
+.objinfo-group-body .objinfo-subfield,
+.objinfo-camera .objinfo-subfield,
+.objinfo-tree .objinfo-subfield {
   flex: 1 1 auto;
   min-width: 0;
 }
