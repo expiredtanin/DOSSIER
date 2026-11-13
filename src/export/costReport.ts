@@ -2,6 +2,7 @@
 // dieselben Ausgaben (CSV über `areaReportToCsv`, Vektor-PDF über `buildAreaReportPdf`). Gerechnet wird im
 // Kern (`analysis/costEstimate.ts` → `kosten.rs`); hier nur Aufbau und Beschriftung mit `t()`.
 
+import { reportHead } from "./competitionIdentity";
 import type { Project } from "../model/types";
 import { t } from "../i18n/translate";
 import { computeCostEstimate, formatChf } from "../analysis/costEstimate";
@@ -48,7 +49,7 @@ export function buildCostReport(project: Project, result: CostResult = computeCo
 
   return {
     title: t("costs.title"),
-    projectName: project.name ?? "",
+    ...reportHead(project),
     sections: [
       {
         heading: `${t("costs.table")} · ${t(`costs.method.${r.method}`)}`,

@@ -3,6 +3,7 @@
 // `elementSchedule` und `uValue`); hier nur Beschriftung mit `t()` und das Berichtsmodell für CSV/SVG/PDF
 // (wie die Fenster-/Türliste, `openingSchedule.ts`).
 
+import { reportHead } from "./competitionIdentity";
 import type { Layer, Project } from "../model/types";
 import { t } from "../i18n/translate";
 import { documentFor } from "../core/document";
@@ -71,5 +72,5 @@ export function buildElementReport(project: Project): AreaReport {
       widths: [4, 1.6, 1.4, 1.3, 1.3, 1.4],
       rows: g.list.map((r): ReportRow => ({ cells: [r.typeName, r.floor, num(r.area, 2), num(r.thickness * 100, 1), r.u === null ? t("elemSchedule.incomplete") : num(r.u, 2), externalText(r.external)] })),
     }));
-  return { title: t("elemSchedule.title"), projectName: project.name ?? "", sections, notes: [t("elemSchedule.foot")] };
+  return { title: t("elemSchedule.title"), ...reportHead(project), sections, notes: [t("elemSchedule.foot")] };
 }

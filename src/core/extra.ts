@@ -43,6 +43,8 @@ export { sheetTables, createTable, drawTablesPdf, tableCatalog, tableLabels, tab
 export type { TableOut, TablePrim, TableColumn } from "../export/sheetTable";
 export { computeAreaTable, computeIvhb } from "../analysis/areaTable";
 export type { AreaTable, AreaRow, Ivhb, IvhbOptions, AgfBasis } from "../analysis/areaTable";
+export { exportProjectName, competitionIdentity, isAnonymous, competitionKeyword, identityLeaks, NEUTRAL_DATE, NEUTRAL_ISO } from "../export/competitionIdentity";
+export type { CompetitionIdentity } from "../export/competitionIdentity";
 export { buildAreaReport, areaReportToCsv, parseAreaReportCsv, areaReportToSvg, buildAreaReportPdf } from "../export/areaReport";
 export type { AreaReport, AreaReportOptions } from "../export/areaReport";
 export { sunPosition, shadowPolygons, shadowOfPrism, projectLatLon } from "../analysis/sun";

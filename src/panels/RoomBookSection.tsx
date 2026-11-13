@@ -5,7 +5,7 @@
 
 import { useMemo } from "react";
 import { t } from "../i18n";
-import { areaReportToCsv, buildAreaReportPdf, buildRoomBookReport, hasSlope, roomBook, usageLabel } from "../core";
+import { exportProjectName, areaReportToCsv, buildAreaReportPdf, buildRoomBookReport, hasSlope, roomBook, usageLabel } from "../core";
 import { downloadCsv } from "./downloadFile";
 import { useStore } from "../state/appStore";
 
@@ -16,7 +16,7 @@ export function RoomBookSection() {
   const notify = useStore((s) => s.notify);
   const book = useMemo(() => roomBook(project), [project]);
   const sloped = book.rows.some(hasSlope);
-  const stem = `${project.name || "projekt"}-raumbuch`;
+  const stem = `${exportProjectName(project) || "projekt"}-raumbuch`;
 
   const exportPdf = () => {
     try {

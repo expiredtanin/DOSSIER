@@ -158,10 +158,15 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   nur Titel = Kennwort, Producer/Datum längengleich neutralisiert (`export/pdfInfo.ts`; jsPDF schreibt sie sonst immer), Dateinamen und
   Schriftfeld des Einzelplan-PDF mit Kennwort. **Publikationssatz „WBW-Abgabe“** (Knopf in der Publikation): alle Plakate als ein PDF,
   Format über den Satz-Editor auf Einzeldateien umstellbar. Tests: Rust (`layout_image`, `layout_poster`, Titelblock anonym), vitest
-  (`layoutImages`, `posterTemplates`, `layoutPdf.images`), e2e `competition` (A1 quer aus Vorlage, Bild, anonym, PDF). Offen: Hilfslinien nicht
-  als Fang und nicht frei setzbar; Bild-Zuschnitt nur per Prozentfeldern (kein Ziehen), Bild in DXF/IFC-Exporten nicht; Anonymität nur im PDF und
-  in Dateinamen (IFC/DXF/SVG-Metadaten, Layer-/Blattnamen mit Büroangaben prüft niemand); Berichts-PDF (`areaReport`)
-  noch nicht anonymisiert (Blatt-, Ordner- und Satz-PDF sind es); Download-Namen im Browser ohne Tauri-Dialog; grosse Bilder: jede
+  (`layoutImages`, `posterTemplates`, `layoutPdf.images`), e2e `competition` (A1 quer aus Vorlage, Bild, anonym, PDF). Anonymität vollständig (13.11., zentral `export/competitionIdentity.ts` + Kern `competition.rs`): Berichte (Fläche, Raumbuch, Kosten,
+  Öffnungen, Bauteile, Programm) mit Kennwort im Kopf/CSV und anonymem PDF; IFC4/2x3 (Kern-Sammler: Kennwort statt Projektname in
+  IfcProject/IfcBuilding und Dateiname, fester Zeitstempel; Schreiber `fileio/ifc_export`: leerer Zeitstempel = anonym → Organisation/Person/
+  Anwendung „-“, Kopf ohne Autor/Programm), DXF/DWG (Header war schon neutral, Blattnamen der Projekt-Layouts → „Blatt n“), STEP (Zeitstempel fest),
+  Blender-`scene.json`, Dateinamen (Panels, CLI, Export-Dialog). Geprüft ohne Befund: SVG, Druck-SVG, OBJ/MTL/STL/glTF/GLB, CSV-Bauteilliste, PNG (Bild-Export
+  schreibt keine tEXt-Chunks). Test `competitionAnonymous.test.ts` (alle Formate, Gegenprobe ohne Anonymität). Offen: Hilfslinien nicht
+  als Fang und nicht frei setzbar; Bild-Zuschnitt nur per Prozentfeldern (kein Ziehen), Bild in DXF/IFC-Exporten nicht; frei eingegebene Texte
+  (Layer-/Ebenen-, Raum-, Geschoss-, Blockbezeichnungen, Textobjekte, Blattnamen im PDF) prüft niemand — der Satz „Anonym“ gilt für
+  Projekt-Stammdaten, nicht für Freitext; Eigenschaftssatz-Namen `Dossier_Qto_…` im IFC (Programmkonvention) bleiben; Download-Namen im Browser ohne Tauri-Dialog; grosse Bilder: jede
   Blatt-Änderung (Viewport verschieben …) ersetzt das ganze Layout samt Data-URL im Op und im Verlauf (wie `ContextImage`) — bei vielen MB Bilder
   in eine eigene Sammlung auslagern; nicht in der Tauri-App/auf dem Mac geprüft. · M
 - [61] Raumprogramm gegen Modell und Flächennachweis SIA 416 als Tabelle/Layout-Element ([70]); Kennzahlen (GF, GV, HNF/GF, Fassadenanteil).

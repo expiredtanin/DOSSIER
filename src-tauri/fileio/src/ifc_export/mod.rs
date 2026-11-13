@@ -9,7 +9,8 @@
 // Zeichenkette, Teile durch `\0` getrennt; im Zahlenpuffer steht ihr Index (−1 = keine).
 //
 //   [FLAT_VERSION, META, Datensatz, Datensatz, …]
-//   META     = project_id, project_name, now (Sekunden, ganzzahlig), iso (Zeitstempel, Text), has_geo (0/1),
+//   META     = project_id, project_name, now (Sekunden, ganzzahlig), iso (Zeitstempel, Text; leer = anonyme Abgabe [208]:
+//              neutrale Programm-/Personenangaben, fester Kopf-Zeitstempel), has_geo (0/1),
 //              ref_elevation (NaN = keine), ref_lat, ref_lon (WGS84-Grad, NaN = keine; nur IFC2x3),
 //              schema (0 = IFC4, 1 = IFC2x3), n_storeys, (id, name, base) × n_storeys
 //   PTS      = n, x0, y0, …, x(n−1), y(n−1)                   (Profil, offen; Rust schliesst es)
@@ -227,6 +228,9 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
     }
     let now = now_f as i64;
     let iso = r.string()?;
+    // Leerer Zeitstempel = anonyme Abgabe ([208]): neutrale Erzeuger-/Autorangaben, fester Kopf-Zeitstempel.
+    let anon = iso.is_empty();
+    let iso = if anon { "2000-01-01T00:00:00".to_string() } else { iso };
     let has_geo = r.flag()?;
     let ref_elevation = r.raw()?;
     let (ref_lat, ref_lon) = (r.raw()?, r.raw()?);
@@ -279,17 +283,20 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
     w.extrude_dir = w.add("IFCDIRECTION", list(&[fmt_real(0.0), fmt_real(0.0), fmt_real(1.0)]));
     w.identity_axis = w.add("IFCAXIS2PLACEMENT3D", format!("#{origin},$,$"));
 
-    // Owner-History (minimal, aber vorhanden — manche Importer verlangen sie).
-    let org = w.add("IFCORGANIZATION", format!("$,{},$,$,$", ifc_string("dossier")));
+    // Owner-History (minimal, aber vorhanden — manche Importer verlangen sie). Anonyme Abgabe ([208], leerer
+    // Zeitstempel in META): keine Angabe zu Programm, Person oder Organisation — nur der Strich als Pflichtwert.
+    let who = if anon { "-" } else { "dossier" };
+    let app_version = if anon { "-" } else { "1.0" };
+    let org = w.add("IFCORGANIZATION", format!("$,{},$,$,$", ifc_string(who)));
     // IFC2x3 verlangt FamilyName oder GivenName (WR1), IFC4 genügt die Kennung.
     let person = w.add(
         "IFCPERSON",
-        if v2 { format!("{0},{0},$,$,$,$,$,$", ifc_string("dossier")) } else { format!("{},$,$,$,$,$,$,$", ifc_string("dossier")) },
+        if v2 { format!("{0},{0},$,$,$,$,$,$", ifc_string(who)) } else { format!("{},$,$,$,$,$,$,$", ifc_string(who)) },
     );
     let person_org = w.add("IFCPERSONANDORGANIZATION", format!("#{person},#{org},$"));
     let app = w.add(
         "IFCAPPLICATION",
-        format!("#{org},{},{},{}", ifc_string("1.0"), ifc_string("dossier"), ifc_string("dossier")),
+        format!("#{org},{},{},{}", ifc_string(app_version), ifc_string(who), ifc_string(who)),
     );
     // ChangeAction ADDED verlangt ein LastModifiedDate (IFC4-Regel IfcOwnerHistory.CorrectChangeAction).
     w.owner_history = w.add(
@@ -1260,10 +1267,10 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
         "FILE_NAME({},{},{},{},{},{},{});\n",
         ifc_string(&file_name),
         ifc_string(&iso),
-        list(&[ifc_string("dossier")]),
-        list(&[ifc_string("dossier")]),
-        ifc_string("dossier"),
-        ifc_string("dossier"),
+        list(&[ifc_string(if anon { "" } else { "dossier" })]),
+        list(&[ifc_string(if anon { "" } else { "dossier" })]),
+        ifc_string(if anon { "" } else { "dossier" }),
+        ifc_string(if anon { "" } else { "dossier" }),
         ifc_string("")
     ));
     out.push_str(&format!("FILE_SCHEMA(('{}'));\nENDSEC;\n\nDATA;\n", if v2 { "IFC2X3" } else { "IFC4" }));

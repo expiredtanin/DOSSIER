@@ -11,7 +11,7 @@ import { t } from "../i18n";
 import type { TranslationKey } from "../i18n";
 import { usePanelHost } from "./host";
 import { useStore } from "../state/appStore";
-import { addProgramSheetOps, areaReportToCsv, buildAreaReportPdf, buildProgramReport, buildProgramSheet, compareRoomProgram, defaultSheetLabels, DEFAULT_PROGRAM_TOLERANCE, setFieldIfChanged } from "../core";
+import { exportProjectName, addProgramSheetOps, areaReportToCsv, buildAreaReportPdf, buildProgramReport, buildProgramSheet, compareRoomProgram, defaultSheetLabels, DEFAULT_PROGRAM_TOLERANCE, setFieldIfChanged } from "../core";
 import type { CompareRow, CompareSum, Light } from "../core";
 import type { Project } from "../model/types";
 import { downloadCsv } from "./downloadFile";
@@ -45,7 +45,7 @@ export function ProgramCompareSection({ statusLabel }: { statusLabel: (status: C
   const notify = useStore((s) => s.notify);
   const c = compareRoomProgram(project);
   if (c.rows.length === 0) return null;
-  const stem = `${project.name || "projekt"}-raumprogramm`;
+  const stem = `${exportProjectName(project) || "projekt"}-raumprogramm`;
   const hasGroups = c.groups.some((g) => g.key !== "");
   const hasKinds = c.kinds.some((k) => k.key !== "");
 

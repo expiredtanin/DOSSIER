@@ -4,7 +4,7 @@
 
 import { useMemo } from "react";
 import { t } from "../i18n";
-import { areaReportToCsv, buildAreaReportPdf, buildElementReport, elementSchedule } from "../core";
+import { exportProjectName, areaReportToCsv, buildAreaReportPdf, buildElementReport, elementSchedule } from "../core";
 import { downloadCsv } from "./downloadFile";
 import { useStore } from "../state/appStore";
 
@@ -12,7 +12,7 @@ export function ElementScheduleSection() {
   const project = useStore((s) => s.project);
   const notify = useStore((s) => s.notify);
   const rows = useMemo(() => elementSchedule(project), [project]);
-  const stem = `${project.name || "projekt"}-bauteile`;
+  const stem = `${exportProjectName(project) || "projekt"}-bauteile`;
   const exportPdf = () => {
     try {
       buildAreaReportPdf(buildElementReport(project)).save(`${stem}.pdf`);

@@ -22,6 +22,7 @@ import { emptyImport, type ParsedImport } from "../io/importSource";
 import { beginBusy, endBusy } from "./busyStore";
 import type { ImportDecision, PdfImportOptions } from "../ui/ImportDialog";
 import { isPdfFile, pdfImport, readPdfVector, type PdfRead } from "../io/pdfVector";
+import { exportProjectName } from "../export/competitionIdentity";
 import { exportScheduleCsv } from "../export/exportSchedule";
 import { exportIfcSpf, type IfcExportOptions } from "../export/exportIfc";
 import { loadFileio } from "../engine/fileioWasm";
@@ -572,7 +573,7 @@ export function useProjectFileActions(
   ) => {
     void saveTextFile(content, filename, mime);
   };
-  const projectFileName = () => getState().project.name || "modell";
+  const projectFileName = () => exportProjectName(getState().project) || "modell";
   // Führt den gewählten Direkt-Export (CSV/IFC/OBJ/STL) mit dem im Dialog
   // gewählten Dateinamen aus. Erzeugung aus dem jeweiligen reinen Kern, Download
   // über den robusten Helfer.

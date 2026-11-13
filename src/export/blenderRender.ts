@@ -19,6 +19,7 @@
 // Achsen in `scene.json`: Modell-Koordinaten (x Ost, y Nord, z oben, Meter) — Blenders glTF-Import dreht das
 // Y-oben-GLB genau dorthin zurück, Kamera und Sonne brauchen im Skript keine Umrechnung.
 
+import { exportProjectName } from "./competitionIdentity";
 import type { Camera, ComponentMaterial, LayoutOrientation, LayoutPaperFormat, Project } from "../model/types";
 import { projectLatLon, sunPosition } from "../analysis/sun";
 import { sheetSizeMm } from "../model/layoutModel";
@@ -392,7 +393,7 @@ export async function buildRenderPackage(project: Project, opts: RenderOptions, 
 
   const scene: RenderScene = {
     version: 1,
-    project: project.name || "projekt",
+    project: exportProjectName(project) || "projekt",
     model: "model.glb",
     output: "render.png",
     resolution: { width: Math.round(opts.width), height: Math.round(opts.height) },

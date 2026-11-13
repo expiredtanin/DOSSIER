@@ -2,6 +2,7 @@
 // (`areaReport.ts`), damit CSV, SVG und PDF dieselbe Quelle und denselben Seitenaufbau haben.
 // Die Zahlen rechnet der Kern (`analysis/roomProgram.ts`); hier nur die Beschriftung mit `t()`.
 
+import { reportHead } from "./competitionIdentity";
 import type { Project } from "../model/types";
 import { t } from "../i18n/translate";
 import { compareRoomProgram } from "../analysis/roomProgram";
@@ -75,5 +76,5 @@ export function buildProgramReport(project: Project): AreaReport {
   const notes = [t("program.report.note.tolerance", { pct: (c.tolerance * 100).toFixed(0), pct2: (c.tolerance * 200).toFixed(0) })];
   if (c.kinds.some((k) => k.key !== "")) notes.push(t("program.report.note.sia"));
   if (c.extra.length > 0) notes.push(t("program.compare.extra", { n: c.extra.length, area: c.extraArea.toFixed(1) }));
-  return { title: t("program.report.title"), projectName: project.name ?? "", sections, notes };
+  return { title: t("program.report.title"), ...reportHead(project), sections, notes };
 }

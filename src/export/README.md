@@ -17,6 +17,7 @@ Abschnitt 3.4).
 | `layoutPdf.ts` | alle Layouts eines Ordners als Mehrseiten-PDF |
 | `pdfLayers.ts` | PDF-Ebenen (Optional Content Groups, `[80]`) |
 | `pdfInfo.ts` | PDF-Info-Wörterbuch; bei anonymer Wettbewerbs-Abgabe nur das Kennwort, Producer/Datum längengleich neutralisiert (`[208]`) |
+| `competitionIdentity.ts` | Anonyme Abgabe ([208]): `competitionIdentity`, `exportProjectName`, `reportHead`, Gegenprüfer `identityLeaks`; alle Exporter holen Name/Autor/Zeitstempel hier. Test `competitionAnonymous.test.ts` |
 | `exportDxf.ts` | DXF/DWG des Grundrisses in Modellmetern; Schreiben in `src-tauri/fileio/src/export.rs` |
 | `legendSvg.ts` | Legende als Plan-/Druck-SVG (`[82]`) |
 
