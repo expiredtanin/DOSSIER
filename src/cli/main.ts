@@ -51,7 +51,8 @@
 //   dossier-cli bench --big [--floors 8 --apartments 15]   dasselbe am parametrischen Grossgebäude (`:gross`, [20])
 //
 // Statt einer Datei nimmt `:beispiel` das eingebaute Demo-Haus (sampleProject), `:musterhaus-komplex` das
-// grosse Beispiel (model/sampleProjectComplex.ts; als Datei: `dossier-cli :musterhaus-komplex migrate --out mk.obp`).
+// grosse Beispiel (model/sampleProjectComplex.ts; als Datei: `dossier-cli :musterhaus-komplex migrate --out mk.obp`),
+// `:wettbewerb` das Wettbewerbs-Beispiel der Kurzanleitung (model/sampleProjectWettbewerb.ts, [210]).
 //
 // WASM-Pakete (src/engine/pkg*) werden aus DOSSIER_WASM_DIR bzw. `<repo>/src/engine` gelesen.
 
@@ -137,6 +138,7 @@ import {
   projectWarnings,
   sampleProject,
   buildComplexSampleProject,
+  buildWettbewerbSampleProject,
   buildBigSampleProject,
   withDocument,
   AI_BRIDGE_DEFAULT_PORT,
@@ -215,6 +217,7 @@ function fail(msg: string): never {
 function loadProject(path: string, args: Args): Project {
   if (path === ":beispiel") return sampleProject;
   if (path === ":musterhaus-komplex") return buildComplexSampleProject();
+  if (path === ":wettbewerb") return buildWettbewerbSampleProject();
   if (path === ":gross") return buildBigSampleProject({ floors: Number(args.flags.get("floors") ?? 8), apartments: Number(args.flags.get("apartments") ?? 15) });
   let text: string;
   try {
@@ -538,7 +541,7 @@ function importDoc(project: Project) {
 /** Liest Eingabe nach Endung in ein Projekt: obp direkt, dxf/dwg als 2D-Zeichnung + Meshes, ifc als Kontext-Meshes (`--elements`: Bauteile). */
 async function importAny(path: string, args: Args): Promise<Project> {
   const ext = extOf(path);
-  if (ext === "obp" || ext === "json" || path === ":beispiel" || path === ":musterhaus-komplex") return loadProject(path, args);
+  if (ext === "obp" || ext === "json" || path === ":beispiel" || path === ":musterhaus-komplex" || path === ":wettbewerb") return loadProject(path, args);
   let bytes: Uint8Array;
   try {
     bytes = new Uint8Array(readFileSync(path));

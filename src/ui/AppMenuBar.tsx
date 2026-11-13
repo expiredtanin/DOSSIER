@@ -12,6 +12,7 @@ import type { DropdownItem } from "./Dropdown";
 import { t } from "../i18n";
 import type { View3d, ViewType } from "../model/viewTypes";
 import { openRenderDialog } from "../state/renderDialogHook";
+import { openShortcutOverview } from "../state/shortcutOverviewHook";
 import { openImageExportDialog } from "../state/imageExportDialogHook";
 
 export interface AppMenuBarProps {
@@ -19,6 +20,7 @@ export interface AppMenuBarProps {
   onNewProject: () => void;
   onNewProjectFromSample: () => void;
   onNewProjectFromComplexSample: () => void;
+  onNewProjectFromWettbewerbSample: () => void;
   onNewProjectFromTemplate: () => void;
   onOpenProject: () => void;
   onSaveProject: () => void;
@@ -65,6 +67,7 @@ export const AppMenuBar = memo(function AppMenuBar({
   onNewProject,
   onNewProjectFromSample,
   onNewProjectFromComplexSample,
+  onNewProjectFromWettbewerbSample,
   onNewProjectFromTemplate,
   onOpenProject,
   onSaveProject,
@@ -98,6 +101,7 @@ export const AppMenuBar = memo(function AppMenuBar({
     { label: t("file.new"), onSelect: onNewProject },
     { label: t("file.newFromSample"), onSelect: onNewProjectFromSample },
     { label: t("file.newFromComplexSample"), onSelect: onNewProjectFromComplexSample },
+    { label: t("file.newFromWettbewerbSample"), onSelect: onNewProjectFromWettbewerbSample },
     { label: t("file.newFromTemplateFile"), onSelect: onNewProjectFromTemplate },
     { divider: true },
     { label: t("file.open"), onSelect: onOpenProject },
@@ -177,6 +181,8 @@ export const AppMenuBar = memo(function AppMenuBar({
     { label: t("menu.window.settings"), onSelect: onOpenSettings },
   ];
 
+  const helpItems: DropdownItem[] = [{ label: t("menu.help.shortcuts"), onSelect: openShortcutOverview }];
+
   return (
     <div className="tb-menubar" role="menubar">
       <Dropdown
@@ -201,6 +207,12 @@ export const AppMenuBar = memo(function AppMenuBar({
         items={windowItems}
         placeholder={t("menu.window")}
         title={t("menu.window")}
+        triggerClassName="tb-menubar-item"
+      />
+      <Dropdown
+        items={helpItems}
+        placeholder={t("menu.help")}
+        title={t("menu.help")}
         triggerClassName="tb-menubar-item"
       />
     </div>

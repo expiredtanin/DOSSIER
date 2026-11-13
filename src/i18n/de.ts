@@ -4132,6 +4132,16 @@ export const de = {
   "costs.foot.priceBase": "Preisstand {base}; Region-Faktor {region}, Index-Faktor {index}.",
   "costs.foot.ebkp": "Gliederung nach eBKP-H (SN 506 511); ohne Grundstück (A). Honorare (V) auf B–J, Reserve (Y) auf B–J + V, MwSt (Z) auf das Total.",
   "costs.export.fail": "Export der Kostenschätzung fehlgeschlagen.",
+  "menu.help": "Hilfe",
+  "menu.help.shortcuts": "Tastaturkürzel …",
+  "help.shortcuts.title": "Tastaturkürzel",
+  "help.shortcuts.intro": "Tastenkombinationen und Befehlskürzel, wie sie gerade gelten (inklusive eigener Änderungen aus den Einstellungen).",
+  "help.shortcuts.filter": "Suchen …",
+  "help.shortcuts.keys": "Tastenkombinationen",
+  "help.shortcuts.commands": "Befehlskürzel",
+  "help.shortcuts.commandsHint": "In die Befehlszeile tippen, dann Enter. Ändern: Einstellungen → Tastenkürzel.",
+  "file.newFromWettbewerbSample": "Neu aus Vorlage: Wettbewerb",
+  "menu.native.newFromWettbewerbSample": "Wettbewerb",
 } as const;
 
 export type TranslationKey = keyof typeof de;

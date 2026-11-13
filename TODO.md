@@ -241,8 +241,6 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
 
 ### Phase 4 (4.–12.12.): Härten und veröffentlichen
 - Nur noch Fehler aus dem Referenz-Ablauf; Leistung mit grossen Kontext-Importen; keine neuen Funktionen.
-- ○ **[210]** Kurzanleitung „Erster Wettbewerb mit Dossier“ (deutsch, Bilder) + Beispielprojekt „Wettbewerb“ als Vorlage
-  (`src/model/sample*`), Tastaturkürzel-Übersicht im Hilfemenü. · M
 - Release 1.0.0: Tag, signierte Pakete, Release-Notes (ehrlich: was nicht geht), Download-Seite.
 
 - ○ **[212]** Eigener GPU-Pathtracer in `render3d` als progressive Vorschau im Viewport (Entscheid Maintainer 12.11.: „beides“ —
@@ -1094,7 +1092,7 @@ Punktwolken/BCF-Ausbau, Windows-Paket, [C5]/[C7]/[15] Kern-Umbauten — ausser s
 
 Auf dem Mac (Tauri/Metal) noch nicht angesehen oder geprüft; bisher nur Linux-Container, CLI-SVG, Chromium oder
 Unit-Tests: [116] (atomares Speichern), [117] (CSP unter `tauri://`), [118], [122], [123], [126], [110], [101],
-[102], [131], [133], [136], [140], [145], [194], [146], [153], [64], [T2], [T4], [34], [108], [65], [169], [113], [181], [G1], [214], [209]. Je Punkt ansehen, dann hier und
+[102], [131], [133], [136], [140], [145], [194], [146], [153], [64], [T2], [T4], [34], [108], [65], [169], [113], [181], [G1], [214], [209], [210]. Je Punkt ansehen, dann hier und
 im jeweiligen Eintrag streichen. · M (gesamt)
 
 ---
@@ -1105,6 +1103,7 @@ Einzeilig mit ID, Titel, Datum (2026). Kleine Reste erledigter Punkte (z. B. [T7
 exakte Durchdringung, [61] Zuordnung per Hand, [63] Profil je Kante, [70] Flächentabelle als Layout-Element,
 [80] Einzelplan-PDF ohne Ebenen, [82] Legende per Ziehen) stehen im Archiv beim jeweiligen Eintrag.
 
+- [210] Kurzanleitung und Wettbewerbs-Beispiel (13.11.): `doc/KURZANLEITUNG.md` (deutsch, Schritt für Schritt entlang [206], Bilder in `doc/kurzanleitung/`: Plan EG/OG 1:200, Situation 1:500, Schnitt, Ansicht); Beispielprojekt `src/model/sampleProjectWettbewerb.ts` (Mehrfamilienhaus, 3 Geschosse, Flachdach, Baurecht, 30 Räume mit Raumprogramm, Schnitte/Ansichten, Situation, Präsentationsplan A1; Datei → Neu aus Vorlage → Wettbewerb, CLI `:wettbewerb`; Test `sampleProjectWettbewerb.test.ts`); Hilfe → Tastaturkürzel … (Overlay `ShortcutOverviewDialog`, Liste aus `SHORTCUT_DEFS` und `ALIASES` abgeleitet, `state/shortcutOverview.ts`, Test dazu; neues Hilfe-Menü in Browser-Leiste und nativem Menü). Offen: keine 3D- und keine Präsentationsplan-Bilder (Linux-Container ohne WebGPU/Metal), Hilfe-Menü und Dialog nicht in der Tauri-App/auf dem Mac geprüft, Anleitung nicht von einer zweiten Person durchgespielt
 - [209] Kostenschätzung grob (12.11.): Kennwert-Methode Menge × Kennwert je eBKP-H-Hauptgruppe B–J (Bezug m³ GV oder m² GF je Methode, wahlweise HNF/Fassade/Dach/pauschal), Honorare/Reserve/MwSt in %, Genauigkeit ±, Region- und Index-Faktor, Preisstand; `Project.costEstimate`, Kern `kosten.rs` (Mengen aus der SIA-416-Flächentabelle, eine Quelle mit [225]). Panel im Flächenbilanz-Panel, Blatt-Tabelle Quelle „costs", CSV/PDF wie der Flächen-Nachweis; e2e-Schritte 5b/10b in `release10.spec.ts`. Vorgaben sind Beispielwerte (≈ 800 CHF/m³ GV bzw. 2'600 CHF/m² GF, keine offizielle Quelle) und als solche markiert; belegt nur MwSt 8.1 % und die SIA-102-Genauigkeiten. Offen: Varianten nebeneinander, Kennwerte aus einer echten Quelle (Büro/CRB), Mac-Gegenprobe
 - [185] Navigation wie Archicad (12.11.): Geschosswechsel behält den Ausschnitt, Cmd+5/6 Geschoss runter/hoch, Cmd+3 „3D · Auswahl", Cmd+4 Auswahl im 3D ausblenden.
 - [195] Objekt-Einstellungsfenster (12.11.): Taste T öffnet die Objekteinstellungen (Objekt + Darstellung) für alle Bauteile; Weiterführung als natives Nebenfenster in [195b].

@@ -30,6 +30,7 @@ import { LockConflictDialog } from "./LockConflictDialog";
 import { PresentationDialogHost } from "./PresentationDialog";
 import { RenderDialogHost } from "./RenderDialog";
 import { ImageExportDialogHost } from "./ImageExportDialog";
+import { ShortcutOverviewDialogHost } from "./ShortcutOverviewDialog";
 import { PromptDialog } from "./PromptDialog";
 import { RecoverAutosaveDialog } from "./RecoverAutosaveDialog";
 import { ResourceManager, type ResourceManagerHandlers } from "./ResourceManager";
@@ -163,6 +164,8 @@ export function AppDialogs(props: {
     <RenderDialogHost />
     {/* [223] 3D-Bild exportieren (Befehl `bild3d`, Menü Ansicht) */}
     <ImageExportDialogHost />
+    {/* [210] Kürzel-Übersicht (Menü Hilfe) */}
+    <ShortcutOverviewDialogHost />
     {importState && (
       <ImportDialog
         fileName={importState.fileName}

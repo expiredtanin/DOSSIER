@@ -395,7 +395,7 @@ export default function App() {
   );
   const {
     projectFileInputRef, projectTemplateFileInputRef, openImportForFile, onSaveProject, onSaveProjectAs,
-    onNewProject, onNewProjectFromSample, onNewProjectFromComplexSample, onNewProjectFromTemplate,
+    onNewProject, onNewProjectFromSample, onNewProjectFromComplexSample, onNewProjectFromWettbewerbSample, onNewProjectFromTemplate,
     onProjectTemplateFileChosen, onExportIfc, onExportObj, onExportStl, onOpenProject, onProjectFileChosen,
   } = files;
 
@@ -700,6 +700,7 @@ export default function App() {
     onNewProject,
     onNewProjectFromSample,
     onNewProjectFromComplexSample,
+    onNewProjectFromWettbewerbSample,
     onNewProjectFromTemplate,
     onOpenProject,
     onSaveProject,

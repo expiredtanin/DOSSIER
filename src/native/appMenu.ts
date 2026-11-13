@@ -16,6 +16,7 @@ import { useEffect, useRef } from "react";
 import { isTauriRuntime } from "./projectFile";
 import { t } from "../i18n";
 import { openRenderDialog } from "../state/renderDialogHook";
+import { openShortcutOverview } from "../state/shortcutOverviewHook";
 import { openImageExportDialog } from "../state/imageExportDialogHook";
 import { APP_VERSION } from "../ui/TopBar";
 import type { View3d, ViewType } from "../model/viewTypes";
@@ -26,6 +27,7 @@ export interface NativeAppMenuHandlers {
   onNewProject: () => void;
   onNewProjectFromSample: () => void;
   onNewProjectFromComplexSample: () => void;
+  onNewProjectFromWettbewerbSample: () => void;
   onNewProjectFromTemplate: () => void;
   onOpenProject: () => void;
   onSaveProject: () => void;
@@ -173,6 +175,10 @@ export function useNativeAppMenu(
               await MenuItem.new({
                 text: t("menu.native.newFromComplexSample"),
                 action: () => handlersRef.current.onNewProjectFromComplexSample(),
+              }),
+              await MenuItem.new({
+                text: t("menu.native.newFromWettbewerbSample"),
+                action: () => handlersRef.current.onNewProjectFromWettbewerbSample(),
               }),
               await MenuItem.new({
                 text: t("menu.native.newFromTemplateFile"),
@@ -486,6 +492,17 @@ export function useNativeAppMenu(
         ],
       });
 
+      // [210] Hilfe → Tastaturkürzel (Overlay-Dialog in der App).
+      const helpMenu = await Submenu.new({
+        text: t("menu.help"),
+        items: [
+          await MenuItem.new({
+            text: t("menu.help.shortcuts"),
+            action: () => openShortcutOverview(),
+          }),
+        ],
+      });
+
       // macOS: der allererste Eintrag ist das App-Menü (Über/Beenden). Ohne ihn
       // rutscht „Datei" an die Stelle, an der macOS sonst den App-Namen zeigt.
       // „Über dossier" nutzt das NATIVE macOS-Info-Fenster (PredefinedMenuItem
@@ -518,7 +535,7 @@ export function useNativeAppMenu(
 
       if (disposed) return;
       const menu = await Menu.new({
-        items: [appMenu, fileMenu, editMenu, viewMenu, windowMenu],
+        items: [appMenu, fileMenu, editMenu, viewMenu, windowMenu, helpMenu],
       });
       await menu.setAsAppMenu();
     })().catch((e) => {
