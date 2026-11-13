@@ -247,6 +247,22 @@ export function useActiveToolKeys(
 }
 
 /**
+ * Esc hebt die Auswahl erst nach dem Ereignis (Task) auf (s. u.). Wurde sie dazwischen geändert — z. B. ein
+ * Klick unmittelbar nach Esc —, gilt die neue Auswahl und nicht der längst vergangene Esc (sonst verschwindet
+ * die frisch gewählte Auswahl wieder).
+ */
+export function clearSelectionAfterEscape(
+  atKey: Selection,
+  current: Selection,
+  setSelection: (patch: Partial<Selection>) => void,
+): boolean {
+  if (current !== atKey) return false;
+  if (isEmpty(current, { withGroups: false })) return false;
+  setSelection(clearKinds());
+  return true;
+}
+
+/**
  * Tastatur im Auswahl-Werkzeug: Ctrl/Cmd+A = alles auf der aktiven Ebene
  * wählen; Entf/Backspace = ALLE Selektierten (Wände + 2D-Elemente) löschen.
  * `hasSelectionToDelete`/`deleteSelection` bleiben in App.tsx (auch vom Menü
@@ -285,10 +301,10 @@ export function useSelectAllAndDeleteShortcut(opts: {
       // (Esc gehört dann dem Dialog, die Auswahl dahinter bleibt wie in Archicad).
       if (e.key === "Escape" && !e.ctrlKey && !e.metaKey && !e.altKey) {
         if (document.querySelector("[aria-modal='true']")) return;
+        const atKey = getState().selection;
         setTimeout(() => {
           if (e.defaultPrevented) return;
-          if (isEmpty(opts.selection, { withGroups: false })) return;
-          setSelection(clearKinds());
+          clearSelectionAfterEscape(atKey, getState().selection, setSelection);
         });
         return;
       }
