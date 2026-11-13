@@ -20,6 +20,9 @@ import {
   parseBlenderLine,
   renderSun,
   runBlenderRender,
+  runBlenderSave,
+  runBlenderOpen,
+  blendOpenArgs,
   findRenderCamera,
   projectRenderCameras,
   renderCameraOf,
@@ -143,6 +146,7 @@ describe("Blender-Ausgabe", () => {
 function fakeHost(lines: string[], o: { code?: number; png?: boolean; exe?: string | null; hang?: boolean } = {}) {
   const written: { path: string; bytes: Uint8Array }[] = [];
   const calls: { exe: string; args: string[] }[] = [];
+  const launched: { exe: string; args: string[] }[] = [];
   let cancelled = false;
   const host: BlenderHost = {
     find: async (custom) => (o.exe === undefined ? (custom ?? "/usr/bin/blender") : o.exe),
@@ -166,13 +170,16 @@ function fakeHost(lines: string[], o: { code?: number; png?: boolean; exe?: stri
       }
       return { done, cancel };
     },
-    readFile: async () => {
+    readFile: async (path) => {
       if (o.png === false) throw new Error("fehlt");
-      return new Uint8Array([137, 80, 78, 71]);
+      return path.endsWith(".blend") ? new TextEncoder().encode("BLENDER-v405") : new Uint8Array([137, 80, 78, 71]);
+    },
+    launch: async (exe, args) => {
+      launched.push({ exe, args });
     },
     join: (d, r) => `${d}/${r}`,
   };
-  return { host, written, calls, wasCancelled: () => cancelled };
+  return { host, written, calls, launched, wasCancelled: () => cancelled };
 }
 
 describe("Prozess-Fassade (gemockt)", () => {
@@ -225,12 +232,78 @@ describe("Prozess-Fassade (gemockt)", () => {
   });
 });
 
+describe(".blend speichern / in Blender öffnen ([228])", () => {
+  it("Paket im Modus „save“: scene.mode und Dateiname; Standard bleibt „render“ ohne blend", async () => {
+    const save = await buildRenderPackage(sampleProject, opts({ mode: "save" }));
+    expect(save.scene.mode).toBe("save");
+    expect(save.scene.blend).toBe("dossier.blend");
+    const json = JSON.parse(new TextDecoder().decode(save.files.find((f) => f.path === "scene.json")!.bytes));
+    expect(json.mode).toBe("save");
+    const render = await buildRenderPackage(sampleProject, opts());
+    expect(render.scene.mode).toBe("render");
+    expect(render.scene.blend).toBeUndefined();
+  });
+
+  it("GLB trägt die Zuordnung: Knotenname „Wand_<id>“, extras.type/id, Geschoss-Knoten, Baustoff als Materialname", async () => {
+    const glb = exportGlb(buildComplexSampleProject());
+    const dv = new DataView(glb.buffer, glb.byteOffset, glb.byteLength);
+    const json = JSON.parse(new TextDecoder().decode(glb.subarray(20, 20 + dv.getUint32(12, true))));
+    const nodes = json.nodes as { name: string; mesh?: number; extras?: { type: string; id: string } }[];
+    const wall = nodes.find((n) => n.extras?.type === "wall")!;
+    expect(wall.name).toMatch(/^Wand_/);
+    expect(wall.name).toBe(`Wand_${wall.extras!.id}`);
+    for (const type of ["slab", "roof", "window", "door", "terrain", "level"]) expect(nodes.some((n) => n.extras?.type === type), type).toBe(true);
+  });
+
+  it("Blender-Aufruf wie beim Rendern (-b), der Modus steht in scene.json; Ergebnis = .blend", async () => {
+    const pkg = await buildRenderPackage(sampleProject, opts({ mode: "save" }));
+    const f = fakeHost(["DOSSIER_STAGE import", "DOSSIER_STAGE organize", "DOSSIER_STAGE save", "DOSSIER_DONE /tmp/job/dossier.blend"]);
+    const stages: string[] = [];
+    const res = await runBlenderSave(f.host, pkg, { script: "x", onProgress: (e) => stages.push(e.stage) });
+    expect(f.calls[0].args).toEqual(blenderArgs("/tmp/job/render_dossier.py", "/tmp/job/scene.json"));
+    expect(res.path).toBe("/tmp/job/dossier.blend");
+    expect(new TextDecoder().decode(res.blend)).toBe("BLENDER-v405");
+    expect(stages).toEqual(["import", "organize", "save", "done"]);
+  });
+
+  it("Paket im Modus „render“ lässt sich nicht speichern", async () => {
+    const pkg = await buildRenderPackage(sampleProject, opts());
+    await expect(runBlenderSave(fakeHost([]).host, pkg, { script: "" })).rejects.toThrow(/save/);
+  });
+
+  it("In Blender öffnen: erst speichern (-b), dann Blender MIT Oberfläche (ohne -b) auf die Datei starten, ohne zu warten", async () => {
+    const pkg = await buildRenderPackage(sampleProject, opts({ mode: "save" }));
+    const f = fakeHost(["DOSSIER_DONE /tmp/job/dossier.blend"]);
+    const res = await runBlenderOpen(f.host, pkg, { script: "x", blenderPath: "/opt/Blender" });
+    expect(f.calls).toHaveLength(1);
+    expect(f.calls[0].args).toContain("-b");
+    expect(f.launched).toEqual([{ exe: "/opt/Blender", args: ["/tmp/job/dossier.blend"] }]);
+    expect(f.launched[0].args).not.toContain("-b");
+    expect(blendOpenArgs("/a/b.blend")).toEqual(["/a/b.blend"]);
+    expect(res.path).toBe("/tmp/job/dossier.blend");
+  });
+
+  it("Öffnen ohne Blender: BlenderMissingError; Fehler beim Speichern verhindert den Start", async () => {
+    const pkg = await buildRenderPackage(sampleProject, opts({ mode: "save" }));
+    await expect(runBlenderOpen(fakeHost([], { exe: null }).host, pkg, { script: "" })).rejects.toBeInstanceOf(BlenderMissingError);
+    const f = fakeHost(["DOSSIER_ERROR kaputt"], { code: 1 });
+    await expect(runBlenderOpen(f.host, pkg, { script: "" })).rejects.toThrow("kaputt");
+    expect(f.launched).toEqual([]);
+  });
+});
+
 describe("Blender-Skript", () => {
   const path = join(process.cwd(), "scripts", "blender", "render_dossier.py");
   const script = readFileSync(path, "utf8");
 
   it("enthält die Schritte: glTF-Import, Himmel mit Sonne, Cycles mit Entrauscher, PNG", () => {
     for (const marker of ["import_scene.gltf", "ShaderNodeTexSky", "sun_rotation", "OPENIMAGEDENOISE", "METAL", "render.render(write_still=True)", "DOSSIER_DONE"]) {
+      expect(script).toContain(marker);
+    }
+  });
+
+  it("hat die Modi „render“ und „save“: Collections, Kamera «Dossier-Kamera», Bilder einpacken, .blend speichern ([228])", () => {
+    for (const marker of ["pack_all()", "save_as_mainfile", "Dossier-Kamera", "Dossier-Himmel", "\"Wände\"", "\"Fenster und Türen\"", "MATERIAL", "view_perspective", "--mode"]) {
       expect(script).toContain(marker);
     }
   });

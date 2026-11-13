@@ -25,6 +25,7 @@ contextBridge.exposeInMainWorld("dossierBlender", {
   start: (jobId, exe, args) => ipcRenderer.invoke("blender:start", jobId, exe, args),
   cancel: (jobId) => ipcRenderer.send("blender:cancel", jobId),
   readFile: (path) => ipcRenderer.invoke("blender:read", path),
+  open: (exe, args) => ipcRenderer.invoke("blender:open", exe, args),
   onLine: (callback) => {
     const listener = (_event, payload) => callback(payload);
     ipcRenderer.on("blender:line", listener);

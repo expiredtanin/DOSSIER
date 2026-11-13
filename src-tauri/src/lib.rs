@@ -82,6 +82,13 @@ fn blender_start(
     )
 }
 
+/// [228] Startet Blender mit Oberfläche (ohne `-b`), z. B. auf eine .blend-Datei, und kehrt sofort zurück. Nur Programme,
+/// die nach Blender heissen.
+#[tauri::command]
+fn blender_open(exe: String, args: Vec<String>) -> Result<(), String> {
+    blender::open(&PathBuf::from(exe), &args)
+}
+
 /// Bricht ein laufendes Rendering ab.
 #[tauri::command]
 fn blender_cancel(job_id: String, state: State<blender::Jobs>) {
@@ -410,7 +417,8 @@ pub fn run() {
         blender_find,
         blender_job_dir,
         blender_start,
-        blender_cancel
+        blender_cancel,
+        blender_open
     ]);
     #[cfg(not(any(feature = "native2d", feature = "native3d")))]
     let builder = builder.invoke_handler(tauri::generate_handler![
@@ -433,7 +441,8 @@ pub fn run() {
         blender_find,
         blender_job_dir,
         blender_start,
-        blender_cancel
+        blender_cancel,
+        blender_open
     ]);
 
     builder

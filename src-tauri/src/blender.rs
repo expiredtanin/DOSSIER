@@ -2,7 +2,7 @@
 // abbrechen. Blender ist GPL und bleibt ein fremdes Programm — Dossier ruft nur die Programmdatei auf.
 //
 // Nur `std`, damit die Logik ohne Tauri-Toolchain testbar ist (`rustc --test src/blender.rs`); die Tauri-Befehle
-// (`blender_find`, `blender_job_dir`, `blender_start`, `blender_cancel`) stehen in `lib.rs` und leiten Ereignisse
+// (`blender_find`, `blender_job_dir`, `blender_start`, `blender_cancel`, `blender_open`) stehen in `lib.rs` und leiten Ereignisse
 // `blender://line` / `blender://exit` an die Webview. Die Dateien des Pakets schreibt die Webview über das
 // fs-Plugin in den Ordner von `blender_job_dir` (Berechtigung `$TEMP/dossier-render/**`, `capabilities/default.json`).
 
@@ -172,6 +172,26 @@ pub fn start(
     Ok(())
 }
 
+/// [228] Startet Blender MIT Oberfläche (z. B. auf eine .blend-Datei) und wartet nicht: ein eigener Prozess, den die App
+/// nicht überwacht (Ausgabe verworfen). Ein Wächter-Thread holt den Exit-Status ab, damit kein Zombie bleibt. Nur Programme, die
+/// nach Blender heissen (wie {@link start}); wirft der Start, kommt die Meldung zurück.
+pub fn open(exe: &Path, args: &[String]) -> Result<(), String> {
+    if !looks_like_blender(exe) {
+        return Err(format!("keine Blender-Programmdatei: {}", exe.display()));
+    }
+    let mut child = Command::new(exe)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| format!("Blender lässt sich nicht starten: {e}"))?;
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(())
+}
+
 /// Bricht einen Auftrag ab (Prozess beenden). Unbekannte Kennung: nichts.
 pub fn cancel(jobs: &Jobs, id: &str) {
     let child = jobs.0.lock().ok().and_then(|mut t| t.remove(id));
@@ -238,6 +258,36 @@ mod tests {
         let lines = std::cell::RefCell::new(Vec::new());
         pump_lines(&b"Sample 1/4\rSample 2/4\r\nDOSSIER_DONE x\nrest"[..], |l| lines.borrow_mut().push(l));
         assert_eq!(*lines.borrow(), vec!["Sample 1/4", "Sample 2/4", "DOSSIER_DONE x", "rest"]);
+    }
+
+    #[test]
+    fn oeffnen_nur_blender() {
+        let d = tmp("oeffnen-name");
+        let other = d.join("python");
+        std::fs::write(&other, "").unwrap();
+        assert!(open(&other, &[]).is_err());
+        assert!(open(&d.join("blender-gibt-es-nicht"), &[]).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn oeffnen_startet_ohne_zu_warten_mit_den_argumenten() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = tmp("oeffnen");
+        let exe = d.join("blender");
+        let seen = d.join("args.txt");
+        std::fs::write(&exe, format!("#!/bin/sh\necho \"$@\" > \"{}\"\nsleep 3\n", seen.display())).unwrap();
+        std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let t0 = std::time::Instant::now();
+        open(&exe, &["/tmp/x/dossier.blend".to_string()]).unwrap();
+        assert!(t0.elapsed() < Duration::from_secs(2), "open darf nicht auf das Ende warten");
+        for _ in 0..100 {
+            if seen.is_file() && std::fs::read_to_string(&seen).map(|t| !t.is_empty()).unwrap_or(false) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert_eq!(std::fs::read_to_string(&seen).unwrap().trim(), "/tmp/x/dossier.blend");
     }
 
     #[cfg(unix)]

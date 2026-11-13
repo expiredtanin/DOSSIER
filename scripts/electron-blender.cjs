@@ -108,6 +108,19 @@ function register(ipcMain) {
     });
   });
 
+  // [228] Blender mit Oberfläche (z. B. auf eine .blend-Datei): eigener, abgelöster Prozess, kein Warten. Nur Programme namens Blender.
+  ipcMain.handle("blender:open", (_e, exe, args) => {
+    if (!isFile(exe) || !/blender/i.test(path.basename(exe))) throw new Error(`keine Blender-Programmdatei: ${exe}`);
+    return new Promise((resolve, reject) => {
+      const child = spawn(exe, Array.isArray(args) ? args.map(String) : [], { detached: true, stdio: "ignore" });
+      child.once("error", (e) => reject(new Error(`Blender lässt sich nicht starten: ${e.message}`)));
+      child.once("spawn", () => {
+        child.unref();
+        resolve();
+      });
+    });
+  });
+
   ipcMain.on("blender:cancel", (_e, jobId) => {
     jobs.get(jobId)?.kill();
   });

@@ -22,7 +22,7 @@ import {
 import { getState } from "../state/appStore";
 import { setRenderDialogOpener } from "../state/renderDialogHook";
 import { getBlenderPath, setBlenderPath } from "../state/blenderSettings";
-import { buildPackage, currentRenderCamera, packageAsZip, renderHost, renderWithBlender } from "../state/renderAction";
+import { buildPackage, currentRenderCamera, openInBlender, packageAsZip, renderHost, renderWithBlender, saveBlendWithBlender } from "../state/renderAction";
 import { openExternalUrl } from "../native/blender";
 import { saveBinaryFile } from "../native/saveFile";
 import { defaultTargetLayout, placeImageOnLayout } from "../state/layoutImageActions";
@@ -35,6 +35,9 @@ const SIZES: Record<Exclude<SizeId, "custom">, () => { width: number; height: nu
   a3: () => paperPixels("a3", "landscape", 300),
   a2: () => paperPixels("a2", "landscape", 300),
 };
+
+/** [228] Was gerade läuft: Bild rechnen, .blend speichern, in Blender öffnen. */
+type Job = "render" | "save" | "open";
 
 type Phase = "setup" | "preparing" | "running" | "done" | "error" | "missing";
 
@@ -63,6 +66,7 @@ export const RenderDialogHost = memo(function RenderDialogHost() {
   const [lastLine, setLastLine] = useState("");
   const [host, setHost] = useState<BlenderHost | null | undefined>(undefined);
   const [phase, setPhase] = useState<Phase>("setup");
+  const [job, setJob] = useState<Job>("render");
   const [status, setStatus] = useState("");
   const [fraction, setFraction] = useState(0);
   const [message, setMessage] = useState("");
@@ -145,10 +149,30 @@ export const RenderDialogHost = memo(function RenderDialogHost() {
     if (choice.sunWhen) setWhen(toInputValue(choice.sunWhen));
   };
   const request = () => ({ width: dims.width, height: dims.height, samples, when: date!, camera, backfilled });
+  const stageText = (e: { stage: string; done: number; total: number }) =>
+    e.stage === "render"
+      ? t("render.stage.render", { done: e.done, total: e.total })
+      : e.stage === "done"
+        ? t("render.stage.done")
+        : e.stage === "import" || e.stage === "materials" || e.stage === "camera" || e.stage === "sky" || e.stage === "organize" || e.stage === "save"
+          ? t(`render.stage.${e.stage}`)
+          : e.stage;
+  const failWith = (err: unknown) => {
+    if (err instanceof RenderCancelled) {
+      setPhase("setup");
+      setMessage(t("render.cancelled"));
+    } else if (err instanceof BlenderMissingError) {
+      setPhase("missing");
+    } else {
+      setPhase("error");
+      setMessage(t("render.error", { message: err instanceof Error ? err.message : String(err) }));
+    }
+  };
 
   const start = async () => {
     if (!canStart) return;
     const st = getState();
+    setJob("render");
     setPhase("preparing");
     setStatus(t("render.working"));
     setFraction(0);
@@ -170,29 +194,54 @@ export const RenderDialogHost = memo(function RenderDialogHost() {
         },
         onProgress: (e) => {
           setFraction(e.fraction);
-          setStatus(
-            e.stage === "render"
-              ? t("render.stage.render", { done: e.done, total: e.total })
-              : e.stage === "done"
-                ? t("render.stage.done")
-                : e.stage === "import" || e.stage === "materials" || e.stage === "camera" || e.stage === "sky"
-                  ? t(`render.stage.${e.stage}`)
-                  : e.stage,
-          );
+          setStatus(stageText(e));
         },
       });
       setPng(res.png);
       setPhase("done");
     } catch (err) {
-      if (err instanceof RenderCancelled) {
-        setPhase("setup");
-        setMessage(t("render.cancelled"));
-      } else if (err instanceof BlenderMissingError) {
-        setPhase("missing");
+      failWith(err);
+    } finally {
+      abort.current = null;
+    }
+  };
+
+  // [228] Statt eines Bildes die Szene als Blender-Datei: speichern (nativer Dialog) oder direkt in Blender öffnen.
+  const blendJob = async (kind: "save" | "open") => {
+    if (!canStart || !host) return;
+    const st = getState();
+    setJob(kind);
+    setPhase("preparing");
+    setStatus(t("render.working"));
+    setFraction(0);
+    setMessage("");
+    setPng(null);
+    const ac = new AbortController();
+    abort.current = ac;
+    try {
+      const pkg = await buildPackage(st.project, { ...request(), mode: "save" });
+      if (pkg.missingTextures.length > 0) st.notify(t("render.missingTextures", { n: pkg.missingTextures.length }), "warning");
+      setPhase("running");
+      setLastLine("");
+      const hooks = {
+        signal: ac.signal,
+        onLine: (l: string) => {
+          const v = l.trim();
+          if (v) setLastLine(v.length > 160 ? `${v.slice(0, 157)}…` : v);
+        },
+        onProgress: (e: { stage: string; done: number; total: number }) => setStatus(stageText(e)),
+      };
+      if (kind === "open") {
+        await openInBlender(host, pkg, hooks);
+        st.notify(t("render.blend.opened"), "info");
       } else {
-        setPhase("error");
-        setMessage(t("render.error", { message: err instanceof Error ? err.message : String(err) }));
+        const res = await saveBlendWithBlender(host, pkg, hooks);
+        const name = `${(st.project.name || "projekt").replace(/[^\w.-]+/g, "_")}.blend`;
+        if (await saveBinaryFile(res.blend, name, "application/octet-stream")) st.notify(t("render.blend.saved"), "info");
       }
+      setPhase("setup");
+    } catch (err) {
+      failWith(err);
     } finally {
       abort.current = null;
     }
@@ -333,10 +382,11 @@ export const RenderDialogHost = memo(function RenderDialogHost() {
           )}
 
           {browserOnly && phase !== "done" && <p className="imp-note">{t("render.browser.text")}</p>}
+          {!browserOnly && phase !== "done" && !busy && <p className="imp-note" data-testid="render-blend-hint">{t("render.blend.hint")}</p>}
 
           {busy && (
             <section className="imp-section" data-testid="render-progress">
-              <progress max={1} value={phase === "running" ? fraction : undefined} style={{ width: "100%" }} />
+              <progress max={1} value={phase === "running" && job === "render" ? fraction : undefined} style={{ width: "100%" }} />
               <div className="imp-note">{status}</div>
               {lastLine && (
                 <div className="imp-note" data-testid="render-last-line" style={{ fontFamily: "ui-monospace, monospace", fontSize: 11, opacity: 0.7, overflowWrap: "anywhere" }}>
@@ -414,9 +464,17 @@ export const RenderDialogHost = memo(function RenderDialogHost() {
               {t("render.zip.save")}
             </button>
           ) : (
-            <button className="imp-btn primary" data-testid="render-start" disabled={!canStart || host === undefined} onClick={() => void start()}>
-              {t("render.start")}
-            </button>
+            <>
+              <button className="imp-btn" data-testid="render-blend-save" disabled={!canStart || host === undefined} title={t("render.blend.hint")} onClick={() => void blendJob("save")}>
+                {t("render.blend.save")}
+              </button>
+              <button className="imp-btn" data-testid="render-blend-open" disabled={!canStart || host === undefined} title={t("render.blend.hint")} onClick={() => void blendJob("open")}>
+                {t("render.blend.open")}
+              </button>
+              <button className="imp-btn primary" data-testid="render-start" disabled={!canStart || host === undefined} onClick={() => void start()}>
+                {t("render.start")}
+              </button>
+            </>
           )}
         </footer>
       </div>

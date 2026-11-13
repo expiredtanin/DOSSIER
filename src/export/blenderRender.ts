@@ -70,7 +70,18 @@ export function paperPixels(paper: LayoutPaperFormat, orientation: LayoutOrienta
   return { width: Math.max(1, Math.round((w / 25.4) * dpi)), height: Math.max(1, Math.round((h / 25.4) * dpi)) };
 }
 
+/**
+ * Was das Skript tut ([228]): `render` = Bild rechnen, `save` = Szene aufbauen, ordnen (Collections nach Bauteil), Bilder einpacken
+ * und als .blend speichern (kein Rendern); Grundlage für „Als .blend speichern" und „In Blender öffnen".
+ */
+export type RenderMode = "render" | "save";
+
+/** Dateiname der .blend im Arbeitsordner (Modus `save`). */
+export const BLEND_FILE = "dossier.blend";
+
 export interface RenderOptions {
+  /** Modus des Skripts (Standard: `render`). */
+  mode?: RenderMode;
   width: number;
   height: number;
   samples: number;
@@ -129,6 +140,10 @@ export interface RenderScene {
   samples: number;
   denoise: boolean;
   device: "auto" | "cpu";
+  /** [228] Modus des Skripts. */
+  mode: RenderMode;
+  /** [228] Name der .blend-Datei (nur Modus `save`), relativ zu `scene.json`. */
+  blend?: string;
   /** [227] Gelände im Paket ohne Baugruben (hinterfüllt); nur Hinweis, der Leser setzt nichts um. */
   backfilled: boolean;
   camera: RenderCameraSpec;
@@ -384,6 +399,8 @@ export async function buildRenderPackage(project: Project, opts: RenderOptions, 
     samples: Math.max(1, Math.round(opts.samples)),
     denoise: opts.denoise ?? true,
     device: opts.device ?? "auto",
+    mode: opts.mode ?? "render",
+    ...(opts.mode === "save" ? { blend: BLEND_FILE } : {}),
     backfilled: opts.backfilled ?? true,
     camera: opts.camera,
     sun: renderSun(project, opts.when),
@@ -495,6 +512,11 @@ export interface BlenderHost {
   /** Startet Blender; `onLine` für jede Ausgabezeile (stdout und stderr). */
   spawn(exe: string, args: string[], onLine: (line: string) => void): { done: Promise<number>; cancel(): void };
   readFile(path: string): Promise<Uint8Array>;
+  /**
+   * [228] Startet Blender MIT Oberfläche (ohne `-b`) und wartet nicht auf sein Ende; Fehler beim Start werfen. Läuft als eigener,
+   * von der App unabhängiger Prozess (Ausgabe verworfen).
+   */
+  launch(exe: string, args: string[]): Promise<void>;
   /** Pfad zu `dir/rel`. */
   join(dir: string, rel: string): string;
 }
@@ -531,11 +553,8 @@ export interface RenderResult {
   path: string;
 }
 
-/**
- * Packt das Paket aus, startet Blender, meldet den Fortschritt und liest das Bild. Wirft
- * {@link BlenderMissingError}, {@link RenderCancelled} oder einen Fehler mit der Meldung des Skripts.
- */
-export async function runBlenderRender(host: BlenderHost, pkg: RenderPackage, opts: RenderRunOptions): Promise<RenderResult> {
+/** Gemeinsamer Ablauf: Paket auspacken, Blender im Hintergrund laufen lassen, Fortschritt melden, Ergebnisdatei lesen. */
+async function runJob(host: BlenderHost, pkg: RenderPackage, opts: RenderRunOptions, outputRel: string, missingText: string): Promise<{ exe: string; bytes: Uint8Array; dir: string; path: string }> {
   const exe = await host.find(opts.blenderPath);
   if (!exe) throw new BlenderMissingError();
   const dir = await host.prepare([...pkg.files, { path: "render_dossier.py", bytes: new TextEncoder().encode(opts.script) }]);
@@ -570,11 +589,58 @@ export async function runBlenderRender(host: BlenderHost, pkg: RenderPackage, op
   }
   if (opts.signal?.aborted) throw new RenderCancelled();
   if (code !== 0) throw new Error(error || `Blender beendet mit Code ${code}: ${lastLines.slice(-3).join(" | ")}`);
-  const path = host.join(dir, pkg.scene.output);
-  const png = await host.readFile(path).catch(() => null);
-  if (!png || png.length === 0) throw new Error(error || "Blender hat kein Bild geschrieben");
+  const path = host.join(dir, outputRel);
+  const bytes = await host.readFile(path).catch(() => null);
+  if (!bytes || bytes.length === 0) throw new Error(error || missingText);
   opts.onProgress?.({ fraction: 1, stage: "done", done: total, total });
-  return { png, dir, path };
+  return { exe, bytes, dir, path };
+}
+
+/**
+ * Packt das Paket aus, startet Blender, meldet den Fortschritt und liest das Bild. Wirft
+ * {@link BlenderMissingError}, {@link RenderCancelled} oder einen Fehler mit der Meldung des Skripts.
+ */
+export async function runBlenderRender(host: BlenderHost, pkg: RenderPackage, opts: RenderRunOptions): Promise<RenderResult> {
+  const r = await runJob(host, pkg, opts, pkg.scene.output, "Blender hat kein Bild geschrieben");
+  return { png: r.bytes, dir: r.dir, path: r.path };
+}
+
+export interface BlendResult {
+  /** Inhalt der .blend-Datei (Bilder eingepackt). */
+  blend: Uint8Array;
+  dir: string;
+  /** Pfad der .blend im Arbeitsordner. */
+  path: string;
+}
+
+/** [228] Kommandozeile für Blender MIT Oberfläche: nur die Datei (ohne `-b`, ohne Skript). */
+export function blendOpenArgs(blendPath: string): string[] {
+  return [blendPath];
+}
+
+function requireSave(pkg: RenderPackage): string {
+  if (pkg.scene.mode !== "save" || !pkg.scene.blend) throw new Error("Paket nicht im Modus save gebaut (buildRenderPackage mit mode: \"save\")");
+  return pkg.scene.blend;
+}
+
+/**
+ * [228] Baut die Szene in Blender (Hintergrund, ohne Rendern), ordnet sie in Collections, packt die Bilder ein und liefert die
+ * .blend-Datei. Das Paket muss mit `mode: "save"` gebaut sein. Fehler wie {@link runBlenderRender}.
+ */
+export async function runBlenderSave(host: BlenderHost, pkg: RenderPackage, opts: RenderRunOptions): Promise<BlendResult> {
+  const r = await runJob(host, pkg, opts, requireSave(pkg), "Blender hat keine .blend-Datei geschrieben");
+  return { blend: r.bytes, dir: r.dir, path: r.path };
+}
+
+/**
+ * [228] „In Blender öffnen": die .blend wie bei {@link runBlenderSave} bauen (Hintergrundprozess, abbrechbar), dann Blender mit
+ * Oberfläche auf diese Datei starten, ohne auf dessen Ende zu warten. Die Datei liegt im Arbeitsordner; wer in Blender weiterarbeitet,
+ * speichert sie dort über „Speichern unter".
+ */
+export async function runBlenderOpen(host: BlenderHost, pkg: RenderPackage, opts: RenderRunOptions): Promise<{ dir: string; path: string }> {
+  const r = await runJob(host, pkg, opts, requireSave(pkg), "Blender hat keine .blend-Datei geschrieben");
+  await host.launch(r.exe, blendOpenArgs(r.path));
+  return { dir: r.dir, path: r.path };
 }
 
 /** Übliche Blender-Orte, in Suchreihenfolge (macOS-App, Linux-Pakete). `blender` im PATH prüft der Gastgeber zuerst. */
