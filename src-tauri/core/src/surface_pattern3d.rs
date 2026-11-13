@@ -211,38 +211,39 @@ fn wall_lines(p: &Project, w: &Wall, s: &mut Sink) {
     let ref_off = crate::joins::reference_offset(crate::model3d::wall_reference(w), total);
     let (ux, uy) = (dx / len, dy / len);
     let (nx, ny) = (-uy, ux); // linke Normale
-    // Wandfläche in Wand-Koordinaten (x ab Wandanfang, y ab UK): Oberkante entlang der Achse wie der Körper
-    // (Giebel, Pultwand unter dem Dach), Löcher nach dem Umriss der Öffnung (Rund, Bogen …).
-    let top = wall_top_profile(p, w, s, len).unwrap_or_else(|| vec![[0.0, z1 - z0], [len, z1 - z0]]);
-    let top_at = |x: f64| profile_at(&top, x);
-    let mut holes: Vec<Vec<P>> = Vec::new();
-    for o in p.openings.as_deref().unwrap_or(&[]).iter().filter(|o| o.host_wall_id == w.id) {
-        let from = o.position.max(0.0).min(len);
-        let to = (o.position + o.width).max(from).min(len);
-        let b = o.sill_height.max(0.0);
-        let t = (b + o.height).min(z1 - z0);
-        if !(to - from > 1e-4 && t - b > 1e-4) {
-            continue;
-        }
-        // Öffnung, die in die Dachschräge ragt: ihre Lage am Rand der Fläche lässt sich nicht als Loch im Ring
-        // führen, die Musterlinien laufen dort bis zum Rand (wie vor der Dachkante).
-        if top_at(from).min(top_at(to)) <= t + 1e-4 {
-            continue;
-        }
-        match crate::opening_shape::opening_outline(o, to - from, t - b) {
-            Some(poly) => holes.push(poly.iter().map(|q| [from + q[0], b + q[1]]).collect()),
-            None => holes.push(vec![[from, b], [to, b], [to, t], [from, t]]),
-        }
-    }
-    let mut outer: Vec<P> = vec![[0.0, 0.0], [len, 0.0]];
-    outer.extend(top.iter().rev().map(|q| [q[0], q[1].max(1e-6)]));
-    let face = ring_with_holes(&outer, &holes);
     let off = w.surface_pattern_offset.as_ref().map_or([0.0, 0.0], |o| [o.x, o.y]);
     for (layer, side) in [(wt.layers.first(), -1.0), (wt.layers.last(), 1.0)] {
         let Some((pat, comp, spec)) = spec_for(layer.and_then(|l| p.component(&l.component_id)), w.surface_pattern_angle.unwrap_or(0.0)) else { continue };
         let rgb = ink_rgb(pat, comp);
         // Wandmitte = Achse − n·ref_off; Seite ± halbe Dicke (+ Abstand gegen Z-Fighting).
         let d = -ref_off + side * (total / 2.0 + LIFT);
+        // Wandfläche in Wand-Koordinaten (x ab Wandanfang, y ab UK): Oberkante wie der Körper (Giebel, Pultwand unter dem
+        // Dach) und zwar AN DIESER SEITE: die Dachfläche schneidet die Wand quer zur Achse in unterschiedlicher Höhe
+        // ([233]: auf der Achse gemessen ragten die Striche auf der Traufseite bis 15 cm über den Körper hinaus).
+        let top = wall_top_profile(p, w, s, len, d).unwrap_or_else(|| vec![[0.0, z1 - z0], [len, z1 - z0]]);
+        let top_at = |x: f64| profile_at(&top, x);
+        let mut holes: Vec<Vec<P>> = Vec::new();
+        for o in p.openings.as_deref().unwrap_or(&[]).iter().filter(|o| o.host_wall_id == w.id) {
+            let from = o.position.max(0.0).min(len);
+            let to = (o.position + o.width).max(from).min(len);
+            let b = o.sill_height.max(0.0);
+            let t = (b + o.height).min(z1 - z0);
+            if !(to - from > 1e-4 && t - b > 1e-4) {
+                continue;
+            }
+            // Öffnung, die in die Dachschräge ragt: ihre Lage am Rand der Fläche lässt sich nicht als Loch im Ring
+            // führen, die Musterlinien laufen dort bis zum Rand (wie vor der Dachkante).
+            if top_at(from).min(top_at(to)) <= t + 1e-4 {
+                continue;
+            }
+            match crate::opening_shape::opening_outline(o, to - from, t - b) {
+                Some(poly) => holes.push(poly.iter().map(|q| [from + q[0], b + q[1]]).collect()),
+                None => holes.push(vec![[from, b], [to, b], [to, t], [from, t]]),
+            }
+        }
+        let mut outer: Vec<P> = vec![[0.0, 0.0], [len, 0.0]];
+        outer.extend(top.iter().rev().map(|q| [q[0], q[1].max(1e-6)]));
+        let face = ring_with_holes(&outer, &holes);
         let (ox, oy) = (w.start.x + nx * d, w.start.y + ny * d);
         for (a, b, m) in lod_segments(|sc| sp::segments(&face, &spec, off, sc)) {
             let at = |q: P| [ox + ux * q[0], oy + uy * q[0], z0 + q[1]];
@@ -266,10 +267,10 @@ fn profile_at(top: &[P], x: f64) -> f64 {
     top.last().map_or(0.0, |q| q[1])
 }
 
-/// Oberkante der Wand entlang ihrer Achse als Linie `[x ab Wandanfang, Höhe ab UK]`: die Körper der Wand unter
+/// Oberkante der Wand entlang der Linie im Abstand `d` links der Achse (Wandseite) als Linie `[x ab Wandanfang, Höhe ab UK]`: die Körper der Wand unter
 /// den Dächern (Giebel, Pultwand, Kniestock) zeigen ihre Oberkante an der Dach-Unterkante; die Musterlinien
 /// einer Wandseite dürfen nicht darüber hinausragen. `None` ohne Körper (die Wand zeigt dann das Rechteck).
-fn wall_top_profile(p: &Project, w: &Wall, s: &mut Sink, len: f64) -> Option<Vec<P>> {
+fn wall_top_profile(p: &Project, w: &Wall, s: &mut Sink, len: f64, d: f64) -> Option<Vec<P>> {
     let (z0, z1) = p.wall_vertical_extent(w);
     if !p.roofs.as_deref().is_some_and(|r| !r.is_empty()) || w.roof_attach == Some(false) {
         return Some(vec![[0.0, z1 - z0], [len, z1 - z0]]);
@@ -289,7 +290,7 @@ fn wall_top_profile(p: &Project, w: &Wall, s: &mut Sink, len: f64) -> Option<Vec
     }
     xs.sort_by(f64::total_cmp);
     xs.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
-    // Höhe an Stelle x: höchste Oberkante der Körper, die x überdecken (auf der Mittellinie der Wand).
+    // Höhe an Stelle x: höchste Oberkante der Körper, die x überdecken (auf der Linie im Abstand `d` links der Achse, also an der Wandseite).
     let height_at = |x: f64| -> Option<f64> {
         let mut best: Option<f64> = None;
         for pc in &pieces {
@@ -298,7 +299,7 @@ fn wall_top_profile(p: &Project, w: &Wall, s: &mut Sink, len: f64) -> Option<Vec
             if x < lo - 1e-6 || x > hi + 1e-6 {
                 continue;
             }
-            let q = [w.start.x + ux * x, w.start.y + uy * x];
+            let q = [w.start.x + ux * x - uy * d, w.start.y + uy * x + ux * d];
             let mut z = crate::model3d::wall_top_at(pc, q);
             if pc.top_plane.is_none() {
                 if let Some(d) = pc.top_drop {
@@ -497,6 +498,64 @@ mod tests {
         assert!(ridge - eave > 0.6, "Traufe {eave}, First {ridge}");
         // Keine Linie über dem First der Dachfläche (Wandhöhe 6 m wäre z0 + 6).
         assert!(ridge < z0 as f32 + 5.0, "{ridge}");
+    }
+
+    /// [233] Die Musterlinien einer Wandseite enden an der Oberkante des Wandkörpers AN DIESER SEITE: unter einer geneigten
+    /// Dachfläche liegt sie auf der Aussen- und der Innenseite verschieden hoch (auf der Achse gemessen ragten die Striche
+    /// der Traufseite über den Körper hinaus, „senkrechte Striche über der Dachkante").
+    #[test]
+    fn wandmuster_endet_an_der_wandseite_unter_dem_dach() {
+        let mut p = sample();
+        p.openings = Some(vec![]);
+        p.ceilings = Some(vec![]);
+        // Traufwände (parallel zum First, W5/W7) bis ins Dach hochgezogen: die Dachfläche schneidet sie quer zur Achse.
+        p.walls.retain(|w| w.id == "W5" || w.id == "W7");
+        for w in &mut p.walls {
+            w.height = 6.0;
+            w.roof_attach = Some(true);
+        }
+        let ids: Vec<String> = p.components.iter().map(|c| c.id.clone()).collect();
+        for id in &ids {
+            with_pattern(&mut p, id, 0.1);
+        }
+        let mut checked = 0;
+        for w in &p.walls {
+            let mut s = Sink { out: Vec::new(), dz: 0.0, ctx: HashMap::new(), maps: crate::model3d::wall_material_color_maps(&p) };
+            wall_lines(&p, w, &mut s);
+            if s.out.is_empty() {
+                continue;
+            }
+            let ctx = s.ctx.entry(w.floor_id.clone()).or_insert_with(|| crate::model3d::floor_context_with(&p, &w.floor_id, true, None)).clone();
+            let mut pieces = Vec::new();
+            crate::model3d::wall_pieces(&p, &s.maps, w, &ctx, &[], crate::joins::WallCuts::default(), true, false, &mut pieces);
+            let mut worst = 0.0f64;
+            let mut at = [0.0; 3];
+            for c in s.out.chunks_exact(PATTERN_STRIDE) {
+                for (x, h, y) in [(c[0], c[1], c[2]), (c[3], c[4], c[5])] {
+                    let q = [x as f64, y as f64];
+                    let mut top: Option<f64> = None;
+                    for pc in &pieces {
+                        let (dx, dy) = (pc.end[0] - pc.start[0], pc.end[1] - pc.start[1]);
+                        let l2 = dx * dx + dy * dy;
+                        let t = if l2 > 1e-12 { ((q[0] - pc.start[0]) * dx + (q[1] - pc.start[1]) * dy) / l2 } else { 0.0 };
+                        if t < -1e-6 || t > 1.0 + 1e-6 {
+                            continue;
+                        }
+                        let z = crate::model3d::wall_top_at(pc, q);
+                        top = Some(top.map_or(z, |b: f64| b.max(z)));
+                    }
+                    if let Some(top) = top {
+                        if h as f64 - top > worst {
+                            worst = h as f64 - top;
+                            at = [x as f64, h as f64, y as f64];
+                        }
+                    }
+                }
+            }
+            checked += pieces.iter().filter(|pc| pc.top_plane.is_some()).count();
+            assert!(worst < 0.01, "Wand {}: Muster {worst:.3} m über dem Wandkörper bei {at:?}", w.id);
+        }
+        assert!(checked > 0, "kein Wandstück mit geneigter Oberkante im Beispiel");
     }
 
     #[test]
