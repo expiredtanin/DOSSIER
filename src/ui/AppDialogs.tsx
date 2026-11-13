@@ -29,6 +29,7 @@ import { ImportDialog } from "./ImportDialog";
 import { LockConflictDialog } from "./LockConflictDialog";
 import { PresentationDialogHost } from "./PresentationDialog";
 import { RenderDialogHost } from "./RenderDialog";
+import { CameraTourDialogHost } from "./CameraTourDialog";
 import { ImageExportDialogHost } from "./ImageExportDialog";
 import { ShortcutOverviewDialogHost } from "./ShortcutOverviewDialog";
 import { PromptDialog } from "./PromptDialog";
@@ -164,6 +165,8 @@ export function AppDialogs(props: {
     <RenderDialogHost />
     {/* [223] 3D-Bild exportieren (Befehl `bild3d`, Menü Ansicht) */}
     <ImageExportDialogHost />
+    {/* [246] Kamerafahrt abspielen und als Video aufnehmen (Panel Ausschnitte, Gruppe Kameras) */}
+    <CameraTourDialogHost />
     {/* [210] Kürzel-Übersicht (Menü Hilfe) */}
     <ShortcutOverviewDialogHost />
     {importState && (

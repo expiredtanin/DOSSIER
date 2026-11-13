@@ -37,7 +37,7 @@ export function createCameraFromView(): string | null {
 }
 
 /** Wartet (höchstens `timeoutMs`), bis der 3D-Viewport Kamera-Zugriff meldet — nach dem Wechsel in den 3D-Reiter. */
-function whenViewportReady(timeoutMs = 3000): Promise<boolean> {
+export function whenViewportReady(timeoutMs = 3000): Promise<boolean> {
   if (viewportAvailable()) return Promise.resolve(true);
   return new Promise((resolve) => {
     const t0 = performance.now();

@@ -819,6 +819,7 @@ export function Wasm3DViewport({
       },
       section: (plane) => setExtSection(plane),
       fit: () => fitCameraRef.current(),
+      canvas: () => canvas ?? null,
     });
     return () => {
       cancelAnimationFrame(animRef.current);

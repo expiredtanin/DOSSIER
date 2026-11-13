@@ -222,6 +222,8 @@ export interface ViewportCameraApi {
   section(plane: { point: V3; normal: V3 } | null): void;
   /** Kamera auf Modell und sichtbare Punktwolken einpassen (aktuelles Preset). */
   fit(): void;
+  /** [246] Der Zeichen-Canvas (für die Videoaufnahme der Kamerafahrt), oder null. */
+  canvas?(): HTMLCanvasElement | null;
 }
 
 let api: ViewportCameraApi | null = null;
@@ -252,6 +254,11 @@ function exposeForDebug(on: boolean): void {
 
 /** Ist ein 3D-Viewport mit Kamera-Zugriff angemeldet? */
 export const viewportAvailable = (): boolean => api !== null;
+
+/** [246] Zeichen-Canvas des 3D-Viewports (für `captureStream`), oder null ohne Viewport. */
+export function getViewportCanvas(): HTMLCanvasElement | null {
+  return api?.canvas?.() ?? null;
+}
 
 /** Aktuelle Kamera in Modell-Koordinaten, oder null ohne Viewport. */
 export function getCamera(): ViewCamera | null {
