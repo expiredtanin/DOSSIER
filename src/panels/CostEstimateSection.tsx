@@ -9,7 +9,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { t } from "../i18n";
-import { areaReportToCsv, buildAreaReportPdf, buildCostReport, computeCostEstimate, costGroupLabel, costUnitLabel, defaultCostEstimate, formatChf, setField } from "../core";
+import { exportProjectName, areaReportToCsv, buildAreaReportPdf, buildCostReport, computeCostEstimate, costGroupLabel, costUnitLabel, defaultCostEstimate, formatChf, setField } from "../core";
 import type { CostBasis, CostEstimate, CostGroup, CostMethod, CostResult } from "../core";
 import type { Project } from "../model/types";
 import { downloadCsv } from "./downloadFile";
@@ -65,7 +65,7 @@ export function CostEstimateSection() {
   const notify = useStore((s) => s.notify);
   const res = useMemo(() => computeCostEstimate(project), [project]);
   const est: CostEstimate = useMemo(() => project.costEstimate ?? defaultCostEstimate(project, "gv"), [project]);
-  const stem = `${project.name || "projekt"}-kosten`;
+  const stem = `${exportProjectName(project) || "projekt"}-kosten`;
 
   const update = (next: (e: CostEstimate) => CostEstimate, key: string) =>
     applyChange((p: Project) => [setField("costEstimate", next(p.costEstimate ?? defaultCostEstimate(p, "gv")))], `costEstimate.${key}`);

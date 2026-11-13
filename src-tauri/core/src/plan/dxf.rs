@@ -1599,7 +1599,8 @@ fn sheets(cx: &mut Ctx, main: &mut Buf, layer_by_code: &HashMap<&str, String>) {
         .and_then(|v| crate::layout_model::effective_sheet_size(&v));
         let Some((pw, ph)) = size else { continue };
         // Eindeutiger Name (gleichnamige Blätter, Kollision mit dem Plan-Layout).
-        let base = if js_trim(&layout.name).is_empty() { format!("Blatt {}", n + 1) } else { layout.name.clone() };
+        // Anonyme Abgabe ([208]): Blattnamen sind frei wählbar und können Büro- oder Projektangaben tragen.
+        let base = if js_trim(&layout.name).is_empty() || crate::competition::anonymous_keyword(p).is_some() { format!("Blatt {}", n + 1) } else { layout.name.clone() };
         let mut name = base.clone();
         let mut k = 2;
         while used.contains(&name) {
@@ -1776,6 +1777,27 @@ mod tests {
         let mut parts = [Part::new(view, 0, len).unwrap()];
         let f2 = collect(&mut parts, &p, &o2).unwrap();
         assert!(!f2.nums.windows(2).any(|w| w[0] == REC_SHEET_VP && f2.strings.get(w[1] as usize).is_some_and(|s| s == "Blatt")));
+    }
+
+    /// [208] Anonyme Abgabe: Blattnamen (frei wählbar) kommen nicht in die Datei, das Blatt heisst „Blatt n".
+    #[test]
+    fn anonyme_abgabe_blattnamen() {
+        let mut p: Project = serde_json::from_value(crate::sheet_viewports::tests::json()).unwrap();
+        p.layouts.as_mut().unwrap()[0].name = "BUEROXY Plan".into();
+        let a = crate::plan::domains::PlanArgs::parse(1.0, r#"{"floor":"eg","show":["20"],"scale":100}"#).unwrap();
+        let buf = crate::plan::domains::plan_domains_buf(&p, &a).unwrap();
+        let o = DxfOptions { scale: 100.0, include_hatches: true, dim_cm: false, paper_layout: true, bounds: [0.0, 0.0, 10.0, 4.0], default_font: "Arial".into(), floor: "eg".into(), table_labels: String::new() };
+        let run = |p: &Project| {
+            let view = View::parse(&buf).unwrap();
+            let len = view.len();
+            let mut parts = [Part::new(view, 0, len).unwrap()];
+            collect(&mut parts, p, &o).unwrap().strings
+        };
+        assert!(run(&p).iter().any(|s| s == "BUEROXY Plan"));
+        p.competition = Some(crate::model::CompetitionSettings { anonymous: true, keyword: "FALKE 7".into(), ..Default::default() });
+        let s = run(&p);
+        assert!(!s.iter().any(|x| x.contains("BUEROXY")), "{s:?}");
+        assert!(s.iter().any(|x| x == "Blatt 1"));
     }
 
     /// [111] Blatt-Tabelle als Block mit Text und Linien, eingefügt oben links.

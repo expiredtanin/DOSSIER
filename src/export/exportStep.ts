@@ -13,6 +13,7 @@
 //
 // Koordinaten: Modell-Meter, X/Y = Grundriss, Z = Höhe (wie die Eingabe von render3d).
 
+import { exportProjectName, isAnonymous, neutralizeStepText } from "./competitionIdentity";
 import type { Project } from "../model/types";
 import { documentFor } from "../core/document";
 import { exportStepSolids } from "../engine/truckSolid";
@@ -52,8 +53,8 @@ export async function exportProjectStep(project: Project, fileName = ""): Promis
   const skipped: StepExportResult["skipped"] = [];
   // Erst alle zusammen versuchen (Normalfall); nur bei Fehler einzeln prüfen.
   try {
-    const text = await exportStepSolids(specs, fileName || project.name);
-    return { text, count: specs.length, skipped };
+    const text = await exportStepSolids(specs, fileName || exportProjectName(project));
+    return { text: isAnonymous(project) ? neutralizeStepText(text) : text, count: specs.length, skipped };
   } catch {
     /* einzeln weiter */
   }
@@ -76,6 +77,6 @@ export async function exportProjectStep(project: Project, fileName = ""): Promis
       skipped.push({ index: i, error: e instanceof Error ? e.message : String(e) });
     }
   }
-  const text = await exportStepSolids(good, fileName || project.name);
-  return { text, count: good.length, skipped };
+  const text = await exportStepSolids(good, fileName || exportProjectName(project));
+  return { text: isAnonymous(project) ? neutralizeStepText(text) : text, count: good.length, skipped };
 }

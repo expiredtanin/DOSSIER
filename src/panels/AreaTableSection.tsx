@@ -8,7 +8,7 @@
 
 import { useMemo, useState } from "react";
 import { t } from "../i18n";
-import { areaReportToCsv, buildAreaReport, buildAreaReportPdf } from "../core";
+import { exportProjectName, areaReportToCsv, buildAreaReport, buildAreaReportPdf } from "../core";
 import type { AgfBasis } from "../core";
 import { DEFAULT_AREA_INPUTS, ivhbOptionsOf, type AreaInputs } from "./areaInputs";
 import { downloadCsv } from "./downloadFile";
@@ -26,7 +26,7 @@ export function AreaTableSection() {
     [project, inputs],
   );
   const set = (patch: Partial<AreaInputs>) => setInputs((i) => ({ ...i, ...patch }));
-  const stem = `${project.name || "projekt"}-flaechen`;
+  const stem = `${exportProjectName(project) || "projekt"}-flaechen`;
 
   const exportPdf = () => {
     try {

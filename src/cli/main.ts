@@ -95,6 +95,7 @@ import {
   areaReportToCsv,
   areaReportToSvg,
   buildAreaReportPdf,
+  exportProjectName,
   sunPosition,
   shadowPolygons,
   projectLatLon,
@@ -813,7 +814,7 @@ function blenderFailure(e: unknown): number {
 /** `dossier-cli … render`: Paket bauen, Blender starten, Bild nach `--out`. Rückgabe = Exit-Code. */
 async function runRender(project: Project, args: Args): Promise<number> {
   const pkg = await buildCliPackage(project, args, "render");
-  const target = args.flags.get("out") ?? `${project.name || "projekt"}.png`;
+  const target = args.flags.get("out") ?? `${exportProjectName(project) || "projekt"}.png`;
   try {
     const res = await runBlenderRender(nodeBlenderHost(args.flags.has("keep")), pkg, {
       script: renderScript(args),
@@ -835,7 +836,7 @@ async function runRender(project: Project, args: Args): Promise<number> {
 /** [228] `dossier-cli … blend`: Szene wie fürs Rendering aufbauen und als .blend nach `--out` speichern (nicht rendern). */
 async function runBlend(project: Project, args: Args): Promise<number> {
   const pkg = await buildCliPackage(project, args, "save");
-  const target = args.flags.get("out") ?? `${project.name || "projekt"}.blend`;
+  const target = args.flags.get("out") ?? `${exportProjectName(project) || "projekt"}.blend`;
   try {
     const res = await runBlenderSave(nodeBlenderHost(args.flags.has("keep")), pkg, {
       script: renderScript(args),
@@ -992,16 +993,16 @@ async function execute(project: Project, file: string, command: string, rest: st
     case "ifc":
       await loadFileio();
       // --ebkph: eBKP-H-Hauptgruppen je Bauteilart; --ebenen: Ebene (categoryCode) des Modells als Klassifikation.
-      out(args, exportIfcSpf(project, { ebkph: args.flags.has("ebkph"), layerCodes: args.flags.has("ebenen"), schema: ifcSchemaFlag(args) }), `${project.name || "projekt"}.ifc`);
+      out(args, exportIfcSpf(project, { ebkph: args.flags.has("ebkph"), layerCodes: args.flags.has("ebenen"), schema: ifcSchemaFlag(args) }), `${exportProjectName(project) || "projekt"}.ifc`);
       return 0;
     case "obj":
       await loadFileio();
       // [201] Mit MTL (Farben) daneben: `--out haus.obj` schreibt auch `haus.mtl`; `--out -` oder `--no-mtl`: nur das OBJ
       // (Farben dann als Kommentar im Kopf).
       {
-        const target = args.flags.get("out") ?? `${project.name || "projekt"}.obj`;
+        const target = args.flags.get("out") ?? `${exportProjectName(project) || "projekt"}.obj`;
         if (target === "-" || args.flags.has("no-mtl")) {
-          out(args, exportObj(project), `${project.name || "projekt"}.obj`);
+          out(args, exportObj(project), `${exportProjectName(project) || "projekt"}.obj`);
         } else {
           const mtlPath = target.replace(/\.obj$/i, "") + ".mtl";
           out(args, exportObj(project, {}, basename(mtlPath)), target);
@@ -1012,15 +1013,15 @@ async function execute(project: Project, file: string, command: string, rest: st
       return 0;
     case "stl":
       await loadFileio();
-      out(args, exportStl(project), `${project.name || "projekt"}.stl`);
+      out(args, exportStl(project), `${exportProjectName(project) || "projekt"}.stl`);
       return 0;
     case "glb":
       await loadFileio();
-      out(args, exportGlb(project, { byLevel: !args.flags.has("flat") }), `${project.name || "projekt"}.glb`);
+      out(args, exportGlb(project, { byLevel: !args.flags.has("flat") }), `${exportProjectName(project) || "projekt"}.glb`);
       return 0;
     case "gltf":
       await loadFileio();
-      out(args, exportGltf(project, { byLevel: !args.flags.has("flat") }), `${project.name || "projekt"}.gltf`);
+      out(args, exportGltf(project, { byLevel: !args.flags.has("flat") }), `${exportProjectName(project) || "projekt"}.gltf`);
       return 0;
     case "kennzahlen": {
       // --sia416 / --ivhb: Flächentabelle bzw. IVHB-Kennziffern [70]; --format json|csv|svg|pdf (Default json).
@@ -1038,7 +1039,7 @@ async function execute(project: Project, file: string, command: string, rest: st
         const wantAreas = args.flags.has("sia416");
         const wantIvhb = args.flags.has("ivhb");
         const format = args.flags.get("format") ?? "json";
-        const stem = `${project.name || "projekt"}-flaechen`;
+        const stem = `${exportProjectName(project) || "projekt"}-flaechen`;
         if (format === "json") {
           const json = { ...(wantAreas ? { flaechentabelle: computeAreaTable(project) } : {}), ...(wantIvhb ? { ivhb: computeIvhb(project, ivhbOptions) } : {}) };
           out(args, JSON.stringify(json, null, 2), `${stem}.json`);
@@ -1056,7 +1057,7 @@ async function execute(project: Project, file: string, command: string, rest: st
       const baurecht = checkSiteRules(project);
       // [68] Erdarbeiten je Baugrube (Abtrag/Auftrag/Hinterfüllung, m³).
       const erdarbeiten = excavationQuantities(project);
-      out(args, JSON.stringify({ kennzahlen: k, raumprogramm: prog, baurecht, erdarbeiten }, null, 2), `${project.name || "projekt"}-kennzahlen.json`);
+      out(args, JSON.stringify({ kennzahlen: k, raumprogramm: prog, baurecht, erdarbeiten }, null, 2), `${exportProjectName(project) || "projekt"}-kennzahlen.json`);
       return 0;
     }
     case "raumprogramm": {
@@ -1114,14 +1115,14 @@ async function execute(project: Project, file: string, command: string, rest: st
       if (Number.isNaN(when.getTime())) throw new Error("--when: ungültiges Datum");
       const { lat, lon } = projectLatLon(project);
       const sun = sunPosition(lat, lon, when);
-      out(args, JSON.stringify({ when: when.toISOString(), lat, lon, sun, shadows: shadowPolygons(project, sun) }, null, 2), `${project.name || "projekt"}-sonne.json`);
+      out(args, JSON.stringify({ when: when.toISOString(), lat, lon, sun, shadows: shadowPolygons(project, sun) }, null, 2), `${exportProjectName(project) || "projekt"}-sonne.json`);
       return 0;
     }
     case "schedule": {
       // --openings: Fenster- und Türliste statt Bauteilliste [--format json|csv|svg|pdf] (Default csv)
       if (args.flags.has("openings")) {
         const format = args.flags.get("format") ?? "csv";
-        const stem = `${project.name || "projekt"}-fenster-tueren`;
+        const stem = `${exportProjectName(project) || "projekt"}-fenster-tueren`;
         if (format === "json") out(args, JSON.stringify(openingSchedule(project), null, 2), `${stem}.json`);
         else {
           const report = buildOpeningReport(project);
@@ -1135,7 +1136,7 @@ async function execute(project: Project, file: string, command: string, rest: st
       // --rooms: Raumbuch mit Oberflächen und Mengen ([158]) [--format json|csv|svg|pdf] (Default csv)
       if (args.flags.has("rooms")) {
         const format = args.flags.get("format") ?? "csv";
-        const stem = `${project.name || "projekt"}-raumbuch`;
+        const stem = `${exportProjectName(project) || "projekt"}-raumbuch`;
         if (format === "json") out(args, JSON.stringify(roomBook(project), null, 2), `${stem}.json`);
         else {
           const report = buildRoomBookReport(project);
@@ -1149,7 +1150,7 @@ async function execute(project: Project, file: string, command: string, rest: st
       // --elements: Bauteilliste mit U-Werten aus den Schichten ([71]) [--format json|csv|svg|pdf] (Default csv)
       if (args.flags.has("elements")) {
         const format = args.flags.get("format") ?? "csv";
-        const stem = `${project.name || "projekt"}-bauteile`;
+        const stem = `${exportProjectName(project) || "projekt"}-bauteile`;
         if (format === "json") out(args, JSON.stringify(elementSchedule(project), null, 2), `${stem}.json`);
         else {
           const report = buildElementReport(project);
@@ -1160,13 +1161,13 @@ async function execute(project: Project, file: string, command: string, rest: st
         }
         return 0;
       }
-      out(args, exportScheduleCsv(project), `${project.name || "projekt"}-liste.csv`);
+      out(args, exportScheduleCsv(project), `${exportProjectName(project) || "projekt"}-liste.csv`);
       return 0;
     }
     case "step": {
       const r = await exportProjectStep(project, project.name || "projekt");
       if (r.skipped.length) process.stderr.write(`${r.skipped.length} Körper übersprungen/ungeschnitten.\n`);
-      out(args, r.text, `${project.name || "projekt"}.stp`);
+      out(args, r.text, `${exportProjectName(project) || "projekt"}.stp`);
       return 0;
     }
     case "import-ifc": {
@@ -1251,7 +1252,7 @@ async function execute(project: Project, file: string, command: string, rest: st
             ghostPattern: Array.from(emitSurfacePatternLines(project, explode, ghost)),
           }
         : model;
-      out(args, JSON.stringify(json), `${project.name || "projekt"}.model3d.json`);
+      out(args, JSON.stringify(json), `${exportProjectName(project) || "projekt"}.model3d.json`);
       return 0;
     }
     case "bench": {

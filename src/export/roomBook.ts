@@ -3,6 +3,7 @@
 // Beschriftung mit `t()` und der Berichtsaufbau, damit CSV, SVG und PDF dieselbe Quelle haben wie die
 // Fenster-/Türliste (`openingSchedule.ts`). Die Blatt-Tabelle (Quelle `roomBook`) rechnet der Kern selbst.
 
+import { reportHead } from "./competitionIdentity";
 import type { Project, RoomUsage } from "../model/types";
 import { t } from "../i18n/translate";
 import type { TranslationKey } from "../i18n/translate";
@@ -131,5 +132,5 @@ export function buildRoomBookReport(project: Project): AreaReport {
   const sections: ReportSection[] = [];
   if (b.rows.length) sections.push(roomSection(b.rows));
   if (b.quantities.length) sections.push(quantitySection(b.quantities));
-  return { title: t("roomBook.title"), projectName: project.name ?? "", sections, notes: [t("roomBook.foot")] };
+  return { title: t("roomBook.title"), ...reportHead(project), sections, notes: [t("roomBook.foot")] };
 }

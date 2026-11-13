@@ -3,6 +3,7 @@
 // und der Berichtsaufbau, damit CSV, SVG und PDF dieselbe Quelle haben wie der Flächennachweis
 // (`areaReport.ts`: `areaReportToCsv` / `areaReportToSvg` / `buildAreaReportPdf`).
 
+import { reportHead } from "./competitionIdentity";
 import type { Project } from "../model/types";
 import { t } from "../i18n/translate";
 import { documentFor } from "../core/document";
@@ -141,5 +142,5 @@ export function buildOpeningReport(project: Project): AreaReport {
   const doors = rows.filter((r) => r.kind === "door");
   if (windows.length) sections.push(windowSection(windows));
   if (doors.length) sections.push(doorSection(doors));
-  return { title: t("openings.title"), projectName: project.name ?? "", sections, notes: rows.some((r) => r.revealAreas?.length) ? [t("openings.foot"), t("openings.revealFoot")] : [t("openings.foot")] };
+  return { title: t("openings.title"), ...reportHead(project), sections, notes: rows.some((r) => r.revealAreas?.length) ? [t("openings.foot"), t("openings.revealFoot")] : [t("openings.foot")] };
 }

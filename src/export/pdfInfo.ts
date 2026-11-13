@@ -7,26 +7,40 @@
 
 import type { jsPDF } from "jspdf";
 import type { Project } from "../model/types";
+import { competitionKeyword, exportProjectName, isAnonymous } from "./competitionIdentity";
 
-/** Ist die Abgabe anonym? */
-export function isAnonymous(project: Pick<Project, "competition">): boolean {
-  return project.competition?.anonymous === true;
-}
-
-/** Kennwort der Abgabe (getrimmt, leer ohne Wettbewerb). */
-export function competitionKeyword(project: Pick<Project, "competition">): string {
-  return (project.competition?.keyword ?? "").trim();
-}
-
-/** Projektname für Schriftfelder und Dateinamen der Exporte: bei anonymer Abgabe das Kennwort. */
-export function exportProjectName(project: Pick<Project, "name" | "competition">): string {
-  return isAnonymous(project) ? competitionKeyword(project) : (project.name ?? "");
-}
+export { isAnonymous, competitionKeyword, exportProjectName };
 
 /** Info-Felder, die ins PDF gehören: anonym nur das Kennwort als Titel, sonst Projektname und Autor des Titelblocks. */
 export function pdfInfoFields(project: Pick<Project, "name" | "competition">, author?: string): { title: string; author: string; subject: string; keywords: string; creator: string } {
   if (isAnonymous(project)) return { title: competitionKeyword(project), author: "", subject: "", keywords: "", creator: "" };
   return { title: project.name ?? "", author: author ?? "", subject: "", keywords: "", creator: "Dossier" };
+}
+
+/**
+ * Anonymes jsPDF-Dokument: Info-Felder nur mit Kennwort, und `output("arraybuffer"|"blob")` sowie `save()` liefern die
+ * nachbearbeiteten Bytes (jsPDF schreibt Producer und Datum selbst). So bleiben die Aufrufer (`doc.save(name)`) gleich.
+ */
+export function anonymizeJsPdf(doc: jsPDF, keyword: string): void {
+  const project = { name: "", competition: { anonymous: true, keyword } };
+  applyPdfInfo(doc, project);
+  type Output = (type?: string, options?: unknown) => unknown;
+  const output = (doc.output as unknown as Output).bind(doc);
+  const bytes = () => finishPdfBytes(project, new Uint8Array(output("arraybuffer") as ArrayBuffer));
+  (doc as unknown as { output: Output }).output = (type, options) => {
+    if (type === "arraybuffer") return bytes().slice().buffer;
+    if (type === "blob") return new Blob([bytes() as BlobPart], { type: "application/pdf" });
+    return output(type, options);
+  };
+  doc.save = ((fileName?: string) => {
+    const url = URL.createObjectURL(new Blob([bytes() as BlobPart], { type: "application/pdf" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = fileName ?? "bericht.pdf";
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    return doc;
+  }) as typeof doc.save;
 }
 
 /** Setzt die Info-Felder auf dem jsPDF-Dokument. */

@@ -9,6 +9,8 @@
 //
 // Die Flächenarten folgen SIA 416, die Kennziffern der IVHB; Herleitung im Kern (`flaechen.rs`).
 
+import { reportHead } from "./competitionIdentity";
+import { anonymizeJsPdf } from "./pdfInfo";
 import { jsPDF } from "jspdf";
 import type { Project } from "../model/types";
 import { t } from "../i18n/translate";
@@ -36,6 +38,8 @@ export interface ReportSection {
 export interface AreaReport {
   title: string;
   projectName: string;
+  /** Anonyme Wettbewerbs-Abgabe ([208]): `projectName` ist das Kennwort; das PDF trägt keine Erzeuger- und Datumsangaben. */
+  anonymous?: boolean;
   sections: ReportSection[];
   /** Fussnoten (Quellen, Annahmen). */
   notes: string[];
@@ -111,7 +115,7 @@ export function buildAreaReport(project: Project, opts: AreaReportOptions = {}):
     notes.push(t("areas.foot.ivhb"));
     addNotes(v.notes);
   }
-  return { title: t("areas.title"), projectName: project.name ?? "", sections, notes };
+  return { title: t("areas.title"), ...reportHead(project), sections, notes };
 }
 
 // ── CSV, Seitenaufteilung, SVG: rechnet der Kern (`core/src/area_report.rs`, Bericht als JSON) ─────────────
@@ -185,5 +189,6 @@ export function buildAreaReportPdf(report: AreaReport, o: ReportLayoutOptions = 
       }
     }
   });
+  if (report.anonymous) anonymizeJsPdf(doc, report.projectName);
   return doc;
 }

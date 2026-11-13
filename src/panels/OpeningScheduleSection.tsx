@@ -7,7 +7,7 @@
 import { useMemo } from "react";
 import { t } from "../i18n";
 import { usePanelHost } from "./host";
-import { areaReportToCsv, buildAreaReportPdf, buildOpeningReport, externalText, openingSchedule, patchItem, revealArea, revealColumns, roomsText, swingText } from "../core";
+import { exportProjectName, areaReportToCsv, buildAreaReportPdf, buildOpeningReport, externalText, openingSchedule, patchItem, revealArea, revealColumns, roomsText, swingText } from "../core";
 import type { OpeningScheduleRow } from "../core";
 import type { Opening, Project } from "../model/types";
 import { downloadCsv } from "./downloadFile";
@@ -25,7 +25,7 @@ export function OpeningScheduleSection() {
   const rows = useMemo(() => openingSchedule(project), [project]);
   // [106] Leibungsflächen je Schicht: Spalten nur, wenn eine Öffnung Schichteinzug hat.
   const reveals = useMemo(() => revealColumns(rows), [rows]);
-  const stem = `${project.name || "projekt"}-fenster-tueren`;
+  const stem = `${exportProjectName(project) || "projekt"}-fenster-tueren`;
 
   const patch = (id: string, change: Partial<Opening>, field: string) =>
     applyChange((p: Project) => patchItem(p, "openings", id, change), `opening:${id}:${field}`);

@@ -881,12 +881,15 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
     // Kopf: RefElevation = reale Datumshöhe (informativ), RefLatitude/-Longitude des Bezugspunkts.
     let anchor = p.geo_anchor.clone();
     let lat_lon = anchor.as_ref().map(|a| (a.lv95.e, a.lv95.n)).filter(|(e, n)| e.is_finite() && n.is_finite()).map(|(e, n)| lv95_to_wgs84(e, n)).filter(|(la, lo)| la.is_finite() && lo.is_finite());
-    let (pid, pname) = (f.str(&p.id), f.str(&p.name));
-    let iso = f.str(&opt.iso);
+    // Anonyme Abgabe ([208]): Kennwort statt Projektname, fester Zeitstempel; leerer `iso` heisst für den Schreiber
+    // „anonym" (neutrale Erzeuger-/Autorangaben, `fileio/ifc_export`).
+    let anon = crate::competition::anonymous_keyword(&p);
+    let (pid, pname) = (f.str(&p.id), f.str(anon.as_deref().unwrap_or(&p.name)));
+    let (now, iso) = if anon.is_some() { (crate::competition::NEUTRAL_EPOCH, f.str("")) } else { (opt.now, f.str(&opt.iso)) };
     f.nums(&[
         pid,
         pname,
-        opt.now,
+        now,
         iso,
         if anchor.is_some() { 1.0 } else { 0.0 },
         anchor.as_ref().and_then(|a| a.height).unwrap_or(f64::NAN),
@@ -1723,6 +1726,23 @@ mod tests {
     fn strings(f: &Flat) -> Vec<String> {
         let (_, text) = from_bytes(&f.to_bytes()).unwrap();
         text.split('\0').map(String::from).collect()
+    }
+
+    /// [208] Anonyme Abgabe: Kopf trägt Kennwort, festen Zeitstempel und leeren ISO-Text, nie den Projektnamen.
+    #[test]
+    fn anonyme_abgabe_kopf() {
+        let mut p = sample();
+        p.name = "BUEROXY Haus".into();
+        let opt = IfcOptions { now: 1_794_583_435.0, iso: "2026-11-13T15:23:55".into(), ..Default::default() };
+        let plain = ifc_export_data(&p, &opt).unwrap();
+        assert!(strings(&plain).iter().any(|s| s == "BUEROXY Haus"));
+        p.competition = Some(crate::model::CompetitionSettings { anonymous: true, keyword: "FALKE 7".into(), ..Default::default() });
+        let f = ifc_export_data(&p, &opt).unwrap();
+        let s = strings(&f);
+        assert!(!s.iter().any(|x| x.contains("BUEROXY")), "{s:?}");
+        assert!(s.iter().any(|x| x == "FALKE 7"));
+        assert!(!s.iter().any(|x| x.starts_with("2026-")));
+        assert_eq!(f.nums[3], crate::competition::NEUTRAL_EPOCH);
     }
 
     /// [149] Baum als eigener Datensatz (nach den Stützen): Name = Art, Netz Stamm + Krone relativ zur

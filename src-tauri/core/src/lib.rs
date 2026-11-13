@@ -4,6 +4,7 @@
 //!
 //! Datenübergabe: flache `f64`-Puffer (s. [`flat`]), kein JSON — schnell und ohne Serde-Kosten.
 
+pub mod competition;
 pub mod export_schedule;
 pub mod opening_schedule;
 pub mod room_book;

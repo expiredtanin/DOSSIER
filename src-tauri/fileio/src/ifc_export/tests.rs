@@ -1187,6 +1187,23 @@ fn leeres_projekt_ist_gueltig() {
     assert_eq!(count(&ifc, "IFCRELAGGREGATES"), 2);
 }
 
+/// [208] Leerer Zeitstempel = anonyme Abgabe: weder Programm noch Person noch aktuelle Zeit im Kopf und in der Owner-History.
+#[test]
+fn anonyme_abgabe_ohne_erzeuger_und_zeit() {
+    let mut b = B::new();
+    b.str("p");
+    b.str("FALKE 7");
+    b.n(&[946_684_800.0]);
+    b.str("");
+    b.meta_tail(false, f64::NAN, 0.0);
+    let ifc = build(&b).unwrap();
+    check_structure(&ifc);
+    assert!(!ifc.to_lowercase().contains("dossier"), "{ifc}");
+    assert!(ifc.contains("FILE_NAME('FALKE 7.ifc','2000-01-01T00:00:00',(''),(''),'','',''"));
+    assert!(ifc.contains("IFCORGANIZATION($,'-'") && ifc.contains("IFCAPPLICATION(#"));
+    assert!(ifc.contains("IFCPROJECT('") && ifc.contains("'FALKE 7'"));
+}
+
 #[test]
 fn oeffnung_ohne_wirtswand_wird_uebersprungen() {
     let mut b = B::new();
