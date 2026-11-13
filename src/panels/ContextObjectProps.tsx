@@ -21,17 +21,21 @@ export function NumField(props: {
   step: number;
   min?: number;
   placeholder?: string;
+  /** Einheit hinter dem Feld (nicht im Label). */
+  unit?: string;
+  title?: string;
   onChange: (v: number | undefined) => void;
 }) {
   return (
-    <label className="site-prop">
-      <span>{props.label}</span>
+    <label className="objinfo-field" title={props.title}>
+      <span className="objinfo-flabel">{props.label}</span>
       <input
+        className="objinfo-input"
         type="number"
         step={props.step}
         min={props.min}
         placeholder={props.placeholder}
-        value={props.value ?? ""}
+        value={props.value === undefined ? "" : Number(props.value.toPrecision(12))}
         onChange={(e) => {
           const raw = e.target.value.trim();
           if (raw === "") return props.onChange(undefined);
@@ -39,6 +43,7 @@ export function NumField(props: {
           if (Number.isFinite(v)) props.onChange(v);
         }}
       />
+      <span className="objinfo-unit">{props.unit}</span>
     </label>
   );
 }
@@ -85,16 +90,17 @@ function MeshPointFields({ obj }: { obj: Extract<ContextObject, { positions: num
   const valid = Number.isFinite(i) && i >= 0 && i < n;
   return (
     <>
-      <label className="site-prop" title={t("site.meshPoint.hint", { n })}>
-        <span>{t("site.meshPoint")}</span>
-        <input type="number" min={1} max={n} step={1} style={{ width: 90 }} data-testid="mesh-point-nr" value={nr} onChange={(e) => setNr(e.target.value)} />
+      <label className="objinfo-field" title={t("site.meshPoint.hint", { n })}>
+        <span className="objinfo-flabel">{t("site.meshPoint")}</span>
+        <input className="objinfo-input" type="number" min={1} max={n} step={1} data-testid="mesh-point-nr" value={nr} onChange={(e) => setNr(e.target.value)} />
+        <span className="objinfo-unit" />
       </label>
-      <label className="site-prop">
-        <span>{t("site.meshPoint.z")}</span>
+      <label className="objinfo-field">
+        <span className="objinfo-flabel">{t("site.meshPoint.z")}</span>
         <input
+          className="objinfo-input"
           type="number"
           step={0.1}
-          style={{ width: 90 }}
           data-testid="mesh-point-z"
           disabled={!valid}
           value={valid ? obj.positions[3 * i + 2] : ""}
@@ -102,7 +108,9 @@ function MeshPointFields({ obj }: { obj: Extract<ContextObject, { positions: num
             if (valid && e.target.value.trim() !== "") setMeshPointHeight(obj.id, i, Number(e.target.value), `site-${obj.id}-meshZ-${i}`);
           }}
         />
+        <span className="objinfo-unit">m</span>
       </label>
+      <div className="site-actions">
       <button
         type="button"
         data-testid="mesh-point-delete"
@@ -128,6 +136,7 @@ function MeshPointFields({ obj }: { obj: Extract<ContextObject, { positions: num
       <button type="button" data-testid="mesh-crop-polygon" title={t("site.meshCrop.draw.hint")} onClick={() => host.onRunCommand("meshcrop")}>
         {t("site.meshCrop.draw")}
       </button>
+      </div>
     </>
   );
 }
@@ -147,9 +156,10 @@ function HeightFields({ obj }: { obj: ContextObject }) {
   };
   return (
     <>
-      <label className="site-prop" title={t("site.heightOffset.hint")}>
-        <span>{t("site.heightOffset")}</span>
+      <label className="objinfo-field" title={t("site.heightOffset.hint")}>
+        <span className="objinfo-flabel">{t("site.heightOffset")}</span>
         <input
+          className="objinfo-input"
           type="text"
           inputMode="decimal"
           data-testid="context-height-offset"
@@ -159,9 +169,11 @@ function HeightFields({ obj }: { obj: ContextObject }) {
           onKeyDown={(e) => e.key === "Enter" && apply()}
           onBlur={apply}
         />
+        <span className="objinfo-unit">m</span>
       </label>
       {obj.type === "importedMesh" && (
         // [227] Kontextgebäude auf den tiefsten Geländepunkt unter dem Grundriss setzen.
+        <div className="site-actions">
         <button
           type="button"
           data-testid="context-ground"
@@ -173,24 +185,26 @@ function HeightFields({ obj }: { obj: ContextObject }) {
         >
           {t("site.ground")}
         </button>
+        </div>
       )}
       {(obj.type === "terrainMesh" || obj.type === "importedMesh") && <MeshPointFields obj={obj} />}
       {obj.type === "contourSet" && (
-        <div className="site-prop" data-testid="contour-heights" style={{ display: "block", maxHeight: 180, overflowY: "auto" }}>
-          <span>{t("site.contours", { n: obj.contours.length })}</span>
+        <div className="site-contours" data-testid="contour-heights">
+          <div className="objinfo-section-label">{t("site.contours", { n: obj.contours.length })}</div>
           {obj.contours.map((c, i) => (
-            <label key={i} style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              <span style={{ flex: 1 }}>{`${i + 1} · ${t("site.contour.points", { n: c.pts.length })}`}</span>
+            <label key={i} className="objinfo-field">
+              <span className="objinfo-flabel" title={t("site.contour.points", { n: c.pts.length })}>{`${i + 1} · ${t("site.contour.points", { n: c.pts.length })}`}</span>
               <input
+                className="objinfo-input"
                 type="number"
                 step={0.5}
-                style={{ width: 90 }}
                 data-testid={`contour-z-${i}`}
                 value={c.z}
                 onChange={(e) => {
                   if (e.target.value.trim() !== "") setContourHeight(obj.id, i, Number(e.target.value), `site-${obj.id}-contourZ-${i}`);
                 }}
               />
+              <span className="objinfo-unit">m</span>
             </label>
           ))}
         </div>
@@ -226,16 +240,17 @@ function KindFields({ obj, quantities }: { obj: ContextObject; quantities: reado
     // [T4] Glatt oder kantig schattieren, Knickwinkel je Mesh (Vorgabe 30°).
     return (
       <div className="site-props">
-        <label className="site-check">
+        <label className="objinfo-field">
+          <span className="objinfo-flabel">{t("site.smoothShading")}</span>
           <input
+            className="site-check"
             type="checkbox"
             checked={obj.smoothShading === true}
             onChange={(e) => host.onPatchContextObject(obj.id, { smoothShading: e.target.checked }, `site-${obj.id}-smoothShading`)}
           />
-          {t("site.smoothShading")}
         </label>
         {obj.smoothShading === true && (
-          <NumField label={t("site.creaseAngle")} value={obj.creaseAngle} step={5} min={1} placeholder="30" onChange={patch("creaseAngle")} />
+          <NumField label={t("site.creaseAngle")} unit="°" value={obj.creaseAngle} step={5} min={1} placeholder="30" onChange={patch("creaseAngle")} />
         )}
       </div>
     );
@@ -247,15 +262,16 @@ function KindFields({ obj, quantities }: { obj: ContextObject; quantities: reado
     return (
       <div className="site-props">
         {cat && (
-          <label className="site-check" title={t("site.terrain.visible.hint", { name: `${cat.code} ${cat.name}` })}>
-            <input type="checkbox" data-testid="terrain-visible" checked={cat.visible} onChange={() => host.onToggleCategory(cat.code)} />
-            {t("site.terrain.visible")}
+          <label className="objinfo-field" title={t("site.terrain.visible.hint", { name: `${cat.code} ${cat.name}` })}>
+            <span className="objinfo-flabel">{t("site.terrain.visible")}</span>
+            <input className="site-check" type="checkbox" data-testid="terrain-visible" checked={cat.visible} onChange={() => host.onToggleCategory(cat.code)} />
           </label>
         )}
         {hasSource && (
-          <label className="site-prop" title={t("site.terrain.smooth.hint")}>
-            <span>{t("site.terrain.smooth")}</span>
+          <label className="objinfo-field" title={t("site.terrain.smooth.hint")}>
+            <span className="objinfo-flabel">{t("site.terrain.smooth")}</span>
             <select
+              className="objinfo-input"
               data-testid="terrain-smooth"
               value={obj.smooth === undefined ? "" : String(obj.smooth)}
               onChange={(e) => {
@@ -274,9 +290,10 @@ function KindFields({ obj, quantities }: { obj: ContextObject; quantities: reado
           </label>
         )}
         {!hasSource && (
-          <label className="site-prop" title={isGrid ? t("site.terrain.resmooth.hint") : t("site.terrain.resmooth.unavailable")}>
-            <span>{t("site.terrain.smooth")}</span>
+          <label className="objinfo-field" title={isGrid ? t("site.terrain.resmooth.hint") : t("site.terrain.resmooth.unavailable")}>
+            <span className="objinfo-flabel">{t("site.terrain.smooth")}</span>
             <select
+              className="objinfo-input"
               data-testid="terrain-resmooth"
               disabled={!isGrid}
               value=""
@@ -298,13 +315,14 @@ function KindFields({ obj, quantities }: { obj: ContextObject; quantities: reado
             </select>
           </label>
         )}
-        <NumField label={t("site.contourInterval")} value={obj.contourInterval} step={0.5} min={0} placeholder="—" onChange={patch("contourInterval")} />
+        <NumField label={t("site.contourInterval")} unit="m" value={obj.contourInterval} step={0.5} min={0} placeholder="—" onChange={patch("contourInterval")} />
         <NumField label={t("site.contourIndexEvery")} value={obj.contourIndexEvery} step={1} min={1} placeholder="5" onChange={patch("contourIndexEvery")} />
-        <NumField label={t("site.earthDepth")} value={obj.earthDepth} step={0.5} min={0.1} placeholder="1.5" onChange={patch("earthDepth")} />
+        <NumField label={t("site.earthDepth")} title={t("site.earthDepth.hint")} unit="m" value={obj.earthDepth} step={0.5} min={0.1} placeholder="1.5" onChange={patch("earthDepth")} />
         {/* [212] Material der Oberfläche (Bauteil): Farbe und Bildkarten im 3D, Pathtracer und Blender-Paket. */}
-        <label className="site-prop site-prop-wide" title={t("site.terrain.material.hint")}>
-          <span>{t("site.terrain.material")}</span>
+        <label className="objinfo-field" title={t("site.terrain.material.hint")}>
+          <span className="objinfo-flabel">{t("site.terrain.material")}</span>
           <select
+            className="objinfo-input"
             data-testid="terrain-material"
             value={obj.componentId ?? ""}
             onChange={(e) => host.onPatchContextObject(obj.id, { componentId: e.target.value || undefined })}
@@ -324,17 +342,17 @@ function KindFields({ obj, quantities }: { obj: ContextObject; quantities: reado
   if (obj.type === "excavation") {
     return (
       <div className="site-props">
-        <NumField label={t("site.excavation.bottom")} value={obj.bottom} step={0.05} onChange={(v) => v !== undefined && patch("bottom")(v)} />
-        <NumField label={t("site.excavation.slope")} value={obj.slope} step={5} min={5} placeholder="45" onChange={patch("slope")} />
-        <NumField label={t("site.excavation.fillSlope")} value={obj.fillSlope} step={5} min={5} placeholder="33.7" onChange={patch("fillSlope")} />
-        <NumField label={t("site.excavation.bermWidth")} value={obj.bermWidth} step={0.25} min={0} placeholder="—" onChange={patch("bermWidth")} />
-        <NumField label={t("site.excavation.bermHeight")} value={obj.bermHeight} step={0.5} min={0} placeholder="—" onChange={patch("bermHeight")} />
-        <NumField label={t("site.excavation.workingSpace")} value={obj.workingSpace} step={0.1} min={0} placeholder="0" onChange={patch("workingSpace")} />
-        <div className="site-prop" title={t("site.excavation.shoringHint")}>
-          <span>{t("site.excavation.shoring")}</span>
-          <span>
+        <NumField label={t("site.excavation.bottom")} unit="m" value={obj.bottom} step={0.05} onChange={(v) => v !== undefined && patch("bottom")(v)} />
+        <NumField label={t("site.excavation.slope")} unit="°" value={obj.slope} step={5} min={5} placeholder="45" onChange={patch("slope")} />
+        <NumField label={t("site.excavation.fillSlope")} unit="°" value={obj.fillSlope} step={5} min={5} placeholder="33.7" onChange={patch("fillSlope")} />
+        <NumField label={t("site.excavation.bermWidth")} unit="m" value={obj.bermWidth} step={0.25} min={0} placeholder="—" onChange={patch("bermWidth")} />
+        <NumField label={t("site.excavation.bermHeight")} unit="m" value={obj.bermHeight} step={0.5} min={0} placeholder="—" onChange={patch("bermHeight")} />
+        <NumField label={t("site.excavation.workingSpace")} unit="m" value={obj.workingSpace} step={0.1} min={0} placeholder="0" onChange={patch("workingSpace")} />
+        <div className="objinfo-field" title={t("site.excavation.shoringHint")}>
+          <span className="objinfo-flabel">{t("site.excavation.shoring")}</span>
+          <span className="site-edges">
             {obj.outline.map((_, i) => (
-              <label key={i} style={{ marginRight: 6 }}>
+              <label key={i}>
                 <input
                   type="checkbox"
                   data-testid={`excavation-shoring-${i}`}
@@ -351,9 +369,10 @@ function KindFields({ obj, quantities }: { obj: ContextObject; quantities: reado
         </div>
         {obj.edgeShoring?.some(Boolean) && (
           <>
-            <label className="site-prop">
-              <span>{t("site.excavation.shoringKind")}</span>
+            <label className="objinfo-field">
+              <span className="objinfo-flabel">{t("site.excavation.shoringKind")}</span>
               <select
+                className="objinfo-input"
                 data-testid="excavation-shoring-kind"
                 value={obj.shoringKind ?? "sheetPile"}
                 onChange={(e) => host.onPatchContextObject(obj.id, { shoringKind: e.target.value }, `site-${obj.id}-shoringKind`)}
@@ -363,8 +382,8 @@ function KindFields({ obj, quantities }: { obj: ContextObject; quantities: reado
                 <option value="borePile">{t("site.excavation.shoringKind.borePile")}</option>
               </select>
             </label>
-            <NumField label={t("site.excavation.shoringThickness")} value={obj.shoringThickness} step={0.05} min={0.05} placeholder={obj.shoringKind === "borePile" ? "0.6" : obj.shoringKind === "soldierPile" ? "0.3" : "0.2"} onChange={patch("shoringThickness")} />
-            <NumField label={t("site.excavation.shoringEmbed")} value={obj.shoringEmbed} step={0.1} min={0} placeholder="1" onChange={patch("shoringEmbed")} />
+            <NumField label={t("site.excavation.shoringThickness")} unit="m" value={obj.shoringThickness} step={0.05} min={0.05} placeholder={obj.shoringKind === "borePile" ? "0.6" : obj.shoringKind === "soldierPile" ? "0.3" : "0.2"} onChange={patch("shoringThickness")} />
+            <NumField label={t("site.excavation.shoringEmbed")} title={t("site.excavation.shoringEmbed.hint")} unit="m" value={obj.shoringEmbed} step={0.1} min={0} placeholder="1" onChange={patch("shoringEmbed")} />
           </>
         )}
         <ExcavationQty q={quantities.find((x) => x.id === obj.id)} />
