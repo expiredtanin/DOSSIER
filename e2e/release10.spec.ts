@@ -9,7 +9,7 @@
 // Mit DOSSIER_SHOTS=<ordner> entsteht je Schritt ein Bildschirmfoto.
 import { readFile, writeFile } from "node:fs/promises";
 import type { Page } from "@playwright/test";
-import { blurFocus, elementRows, expect, fileMenu, finishCommand, openTab, startNewProject, test, typeCommand } from "./app";
+import { blurFocus, discardIfAsked, elementRows, expect, fileMenu, finishCommand, openTab, startNewProject, test, typeCommand } from "./app";
 import { KATASTER_DXF } from "./paths";
 
 const E0 = 2_600_000;
@@ -349,11 +349,63 @@ test.fixme("[222] Volumenstudie: Wände/Decken/Dach aus einem Volumen (Körper) 
 
 test.fixme("[207] Situation 1:500 / Schwarzplan als Ansichtsvorlage „Situation WBW“", async () => {});
 
-test.fixme("[223] 3D-Bild für die Abgabe: hochaufgelöster PNG-Export (Perspektive/Axonometrie, mit Schatten)", async () => {});
+// [223] Headless liefert WebGPU kein Bild: `__dossierImageMock` (cameraBridge.captureImage) ersetzt das Offscreen-Zeichnen;
+// geprüft werden Dialog, Zielgrösse, Optionen, Ergebnis und Einsetzen ins Layout — nicht die Pixel.
+test("[223] 3D-Bild für die Abgabe: Auflösung wählen, exportieren, ins Layout einsetzen", async ({ page }) => {
+  test.setTimeout(120_000);
+  await startNewProject(page);
+  await fileMenu(page, /Musterhaus \(komplex\)/);
+  await discardIfAsked(page);
+  await expect(page.locator(".project-name")).toHaveText("Musterhaus komplex", { timeout: 30_000 });
+  await page.evaluate(() => {
+    const png = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="), (c) => c.charCodeAt(0));
+    (globalThis as { __dossierImageMock?: unknown }).__dossierImageMock = async (o: { width: number; height: number; transparent: boolean }) => ({ png, width: o.width, height: o.height, transparent: o.transparent });
+  });
+  await typeCommand(page, "bild3d");
+  const dialog = page.getByTestId("image3d-dialog");
+  await expect(dialog).toBeVisible();
+  // A3 bei 300 dpi.
+  await dialog.getByTestId("image3d-size").selectOption("a3");
+  await expect(dialog.getByTestId("image3d-width")).toHaveValue("4961");
+  await expect(dialog.getByTestId("image3d-height")).toHaveValue("3508");
+  await dialog.getByTestId("image3d-size").selectOption("uhd");
+  await expect(dialog.getByTestId("image3d-width")).toHaveValue("3840");
+  await dialog.getByTestId("image3d-transparent").check();
+  await dialog.getByTestId("image3d-start").click();
+  await expect(dialog.getByTestId("image3d-result")).toBeVisible({ timeout: 20_000 });
+  await expect(dialog.getByTestId("image3d-save")).toBeVisible();
+  const toLayout = dialog.getByTestId("image3d-to-layout");
+  if (await toLayout.isEnabled()) {
+    await toLayout.click();
+    await expect(page.getByText(/eingesetzt|Layout/).first()).toBeVisible();
+  }
+});
 
 test.fixme("[211] Rendering mit Blender/Cycles aus der 3D-Ansicht", async () => {});
 
 
-test.fixme("[224] Präsentationsplan: leere Geschosse nicht vorgewählt, Ansichten N/O/W aus dem Gebäude", async () => {});
+test("[224] Präsentationsplan: leere Geschosse nicht vorgewählt, Massstab 1:200, Plakat als Ziel", async ({ page }) => {
+  test.setTimeout(120_000);
+  await startNewProject(page);
+  await fileMenu(page, /Musterhaus \(komplex\)/);
+  await discardIfAsked(page);
+  await expect(page.locator(".project-name")).toHaveText("Musterhaus komplex", { timeout: 30_000 });
+  await typeCommand(page, "praesentation");
+  const dialog = page.getByRole("dialog", { name: "Präsentationsplan" });
+  await expect(dialog).toBeVisible();
+  // Vorgabe 1:200, Plakat-Vorlage wählbar, nur vorhandene Ansichten.
+  await expect(dialog.getByTestId("presentation-scale")).toHaveValue("200");
+  expect(await dialog.getByTestId("presentation-target").locator("option").count()).toBeGreaterThan(1);
+  // Leere Geschosse (Markierung „leer“) sind nicht vorgewählt.
+  const floors = dialog.locator("input[data-floor]");
+  for (let i = 0; i < (await floors.count()); i++) {
+    const label = floors.nth(i).locator("xpath=..");
+    const isEmpty = /leer/i.test((await label.textContent()) ?? "");
+    if (isEmpty) await expect(floors.nth(i)).not.toBeChecked();
+  }
+  await dialog.getByTestId("presentation-create").click();
+  await expect(dialog).toBeHidden();
+  await expect(page.locator("[data-viewport-id]").first()).toBeVisible({ timeout: 20_000 });
+});
 
 test.fixme("[208] Wettbewerbs-Plakat A0/A1 mit Kennwort, anonymes PDF (keine Büro-Metadaten)", async () => {});

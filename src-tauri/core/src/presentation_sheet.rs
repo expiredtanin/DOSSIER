@@ -40,18 +40,34 @@ pub struct Sheet {
     pub w: f64,
     pub h: f64,
     pub title_block: Option<[f64; 4]>,
+    /// Rand links/rechts/unten (mm).
+    pub margin: f64,
+    /// Obere Kante der Inhaltsfläche (mm); bei Plakaten unter der Kopfzeile ([224]).
+    pub top: f64,
 }
 
 impl Sheet {
     pub fn new(w: f64, h: f64, title_block: bool) -> Sheet {
         let [tw, th, pad] = TITLE_BLOCK_MM;
-        Sheet { w, h, title_block: title_block.then(|| [w - tw - pad, h - th - pad, tw, th]) }
+        Sheet { w, h, title_block: title_block.then(|| [w - tw - pad, h - th - pad, tw, th]), margin: MARGIN_MM, top: MARGIN_MM }
+    }
+
+    /// Eigene Ränder (Plakat-Vorlage): `margin` seitlich/unten, `top` oben. Unsinn (NaN, negativ, zu gross) bleibt beim Standard.
+    pub fn with_area(mut self, margin: Option<f64>, top: Option<f64>) -> Sheet {
+        let ok = |v: f64| v.is_finite() && v >= 0.0 && v < self.w.min(self.h) / 2.0;
+        if let Some(m) = margin.filter(|v| ok(*v)) {
+            self.margin = m;
+        }
+        if let Some(t) = top.filter(|v| ok(*v)) {
+            self.top = t;
+        }
+        self
     }
 }
 
 /// Zeilen ab `y0` füllen; `strict`: `None`, wenn eine Zeile oder der Block nicht aufs Blatt passt.
 fn pack_from(items: &[(u32, f64, f64)], sheet: &Sheet, y0: f64, strict: bool) -> Option<(Vec<Rect>, f64)> {
-    let (l, r, b) = (MARGIN_MM, sheet.w - MARGIN_MM, sheet.h - MARGIN_MM);
+    let (l, r, b) = (sheet.margin, sheet.w - sheet.margin, sheet.h - sheet.margin);
     let mut out = vec![Rect::default(); items.len()];
     let mut y = y0;
     let mut i = 0;
@@ -91,7 +107,7 @@ fn pack_from(items: &[(u32, f64, f64)], sheet: &Sheet, y0: f64, strict: bool) ->
 /// reihenfolge; `None`, wenn sie nicht aufs Blatt passen. Der Block wird senkrecht zentriert, wenn das
 /// die Zeilen nicht verändert.
 pub fn pack(items: &[(u32, f64, f64)], sheet: &Sheet) -> Option<Vec<Rect>> {
-    let (top, b) = (MARGIN_MM, sheet.h - MARGIN_MM);
+    let (top, b) = (sheet.top, sheet.h - sheet.margin);
     let (first, bottom) = pack_from(items, sheet, top, true)?;
     let off = (b - bottom) / 2.0;
     if off > 0.0 {
@@ -119,7 +135,17 @@ pub fn choose(mut sizes_at: impl FnMut(f64) -> Vec<(u32, f64, f64)>, sheet: &She
         }
     }
     let s = SCALES[SCALES.len() - 1];
-    let rects = pack_from(&sizes_at(s), sheet, MARGIN_MM, false).map(|r| r.0).unwrap_or_default();
+    let rects = pack_from(&sizes_at(s), sheet, sheet.top, false).map(|r| r.0).unwrap_or_default();
+    Choice { scale: s, fits: false, rects }
+}
+
+/// Fester Massstab `s` ([224]): passt es, `fits = true`, sonst überlaufende Zeilen (`fits = false`).
+pub fn choose_fixed(mut sizes_at: impl FnMut(f64) -> Vec<(u32, f64, f64)>, sheet: &Sheet, s: f64) -> Choice {
+    let sizes = sizes_at(s);
+    if let Some(rects) = pack(&sizes, sheet) {
+        return Choice { scale: s, fits: true, rects };
+    }
+    let rects = pack_from(&sizes, sheet, sheet.top, false).map(|r| r.0).unwrap_or_default();
     Choice { scale: s, fits: false, rects }
 }
 
@@ -138,6 +164,13 @@ pub struct Request {
     pub title_block: bool,
     /// Schatten der Ansichten (Vorlage „Präsentation").
     pub shadows: bool,
+    /// [224] Fester gemeinsamer Massstab (1:N); fehlt er, wählt der Kern den grössten, der passt.
+    pub scale: Option<f64>,
+    /// [224] Massstab je Ebene (übersteuert den gemeinsamen).
+    pub scales: BTreeMap<String, f64>,
+    /// [224] Eigener Rand/obere Kante (Plakat-Vorlage, unter der Kopfzeile).
+    pub margin_mm: Option<f64>,
+    pub top_mm: Option<f64>,
 }
 
 /// Abfrage `presentationSheet`: Massstab und Rahmen für die Ebenen; Ebenen ohne Inhalt stehen unter
@@ -167,22 +200,28 @@ pub fn query(p: &Project, text: &str) -> Result<Value, String> {
         }
     }
     kept.sort_by_key(|k| k.1);
-    let sheet = Sheet::new(req.sheet_w, req.sheet_h, req.title_block);
-    let choice = choose(
-        |s| {
-            kept.iter()
-                .map(|(id, g)| {
-                    let b = bounds_at(id, s).unwrap_or([0.0, 0.0, 1.0, 1.0]);
-                    (*g, (b[2] - b[0]) * 1000.0 / s, (b[3] - b[1]) * 1000.0 / s)
-                })
-                .collect()
-        },
-        &sheet,
-    );
+    let sheet = Sheet::new(req.sheet_w, req.sheet_h, req.title_block).with_area(req.margin_mm, req.top_mm);
+    let valid = |v: f64| v.is_finite() && v > 0.0;
+    let own = |id: &str| req.scales.get(id).copied().filter(|v| valid(*v));
+    let sizes_at = |s: f64| -> Vec<(u32, f64, f64)> {
+        kept.iter()
+            .map(|(id, g)| {
+                let sc = own(id).unwrap_or(s);
+                let b = bounds_at(id, sc).unwrap_or([0.0, 0.0, 1.0, 1.0]);
+                (*g, (b[2] - b[0]) * 1000.0 / sc, (b[3] - b[1]) * 1000.0 / sc)
+            })
+            .collect()
+    };
+    let all_own = !kept.is_empty() && kept.iter().all(|(id, _)| own(id).is_some());
+    let choice = match req.scale.filter(|v| valid(*v)) {
+        Some(s) => choose_fixed(sizes_at, &sheet, s),
+        None if all_own => choose_fixed(sizes_at, &sheet, 100.0),
+        None => choose(sizes_at, &sheet),
+    };
     let items: Vec<Value> = kept
         .iter()
         .zip(&choice.rects)
-        .map(|((id, g), r)| json!({"levelId": id, "group": g, "xMm": r.x_mm, "yMm": r.y_mm, "widthMm": r.width_mm, "heightMm": r.height_mm}))
+        .map(|((id, g), r)| json!({"levelId": id, "group": g, "scale": own(id).unwrap_or(choice.scale), "xMm": r.x_mm, "yMm": r.y_mm, "widthMm": r.width_mm, "heightMm": r.height_mm}))
         .collect();
     Ok(json!({"scale": choice.scale, "fits": choice.fits, "items": items, "skipped": skipped}))
 }
@@ -260,6 +299,24 @@ mod tests {
         let r = pack(&items, &s).expect("passt");
         check(&r, &s);
         assert_eq!(pack(&[], &s), Some(vec![]));
+    }
+
+    /// [224] Fester Massstab 1:200 (Wettbewerb) wird eingehalten, passt es; sonst `fits = false`. Plakat-Rand und
+    /// obere Kante begrenzen die Fläche.
+    #[test]
+    fn fester_massstab_und_plakatflaeche() {
+        let s = Sheet::new(841.0, 594.0, false);
+        let sizes = |sc: f64| (0..3).map(|_| (0, 12000.0 / sc, 10000.0 / sc)).collect::<Vec<_>>();
+        let c = choose_fixed(sizes, &s, 200.0);
+        assert!(c.fits && c.scale == 200.0 && c.rects.len() == 3);
+        let tiny = choose_fixed(sizes, &s, 10.0);
+        assert!(!tiny.fits && tiny.scale == 10.0);
+        let poster = Sheet::new(841.0, 594.0, false).with_area(Some(20.0), Some(78.0));
+        let r = pack(&sizes(200.0), &poster).expect("passt");
+        assert!(r.iter().all(|f| f.y_mm >= 78.0 - 1e-9 && f.x_mm >= 20.0 - 1e-9 && f.x_mm + f.width_mm <= 841.0 - 20.0 + 1e-9));
+        // Unsinn bleibt beim Standard.
+        let bad = Sheet::new(841.0, 594.0, false).with_area(Some(f64::NAN), Some(-3.0));
+        assert_eq!((bad.margin, bad.top), (MARGIN_MM, MARGIN_MM));
     }
 
     #[test]

@@ -72,6 +72,7 @@ import { sun3dFor, sun3dKey } from "./sun3d";
 import { useStore } from "../state/appStore";
 import { projectGeoOrigin } from "../core";
 import {
+  camera3dFromViewCamera,
   FOV_Y,
   PITCH_LIMIT,
   lerpOrbit,
@@ -658,6 +659,7 @@ export function Wasm3DViewport({
     viewFit,
     readRustCamera,
     snapshotPng,
+    exportImage,
     setGroundGrid,
     setSectionPlane,
     setHighlightLines,
@@ -794,6 +796,15 @@ export function Wasm3DViewport({
         return true;
       },
       snapshot: (maxEdge) => snapshotPng(draw, maxEdge),
+      image: (o) => {
+        const cur = orbitRef.current;
+        const rect = canvas?.getBoundingClientRect();
+        if (!cur || !rect) return Promise.resolve(null);
+        // Gespeicherte Kamera ([213]) oder die Live-Kamera; das Blickziel liegt im Abstand der Live-Kamera.
+        const cam = o.camera ? camera3dFromViewCamera(o.camera, cur.dist) : orbitCamera(cur);
+        if (!cam) return Promise.resolve(null);
+        return exportImage({ camera: cam, width: o.width, height: o.height, transparent: o.transparent, restore: draw });
+      },
       section: (plane) => setExtSection(plane),
       fit: () => fitCameraRef.current(),
     });
@@ -801,7 +812,7 @@ export function Wasm3DViewport({
       cancelAnimationFrame(animRef.current);
       off();
     };
-  }, [ready, render, snapshotPng, canvasRef]);
+  }, [ready, render, snapshotPng, exportImage, canvasRef]);
 
   // Darstellungsart (volle RenderMode-Union) an den Renderer weiterreichen,
   // sobald sie wechselt oder der Renderer bereit wird — dann mit der aktuell

@@ -29,6 +29,7 @@ import { ImportDialog } from "./ImportDialog";
 import { LockConflictDialog } from "./LockConflictDialog";
 import { PresentationDialogHost } from "./PresentationDialog";
 import { RenderDialogHost } from "./RenderDialog";
+import { ImageExportDialogHost } from "./ImageExportDialog";
 import { PromptDialog } from "./PromptDialog";
 import { RecoverAutosaveDialog } from "./RecoverAutosaveDialog";
 import { ResourceManager, type ResourceManagerHandlers } from "./ResourceManager";
@@ -160,6 +161,8 @@ export function AppDialogs(props: {
     <PresentationDialogHost onCreated={setActiveLayoutId} />
     {/* [211] Rendering mit Blender/Cycles (Befehl `rendering`, Menü Ansicht) */}
     <RenderDialogHost />
+    {/* [223] 3D-Bild exportieren (Befehl `bild3d`, Menü Ansicht) */}
+    <ImageExportDialogHost />
     {importState && (
       <ImportDialog
         fileName={importState.fileName}

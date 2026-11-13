@@ -25,6 +25,7 @@ import { documentFor } from "../core/document";
 import { addedItems, addItems, patchItem } from "../core/opsBuild";
 import { standardsMergeOps } from "../model/standards";
 import { createLayout, createMasterLayout, createSheetLevel, sheetMmToModel, sheetSizeMm } from "../model/layoutModel";
+import { createPosterMaster, findPosterMaster, posterMetrics, posterTemplate } from "../model/posterTemplates";
 
 /** Id der Standard-Ansichtsvorlage „Präsentation" (`standards.rs`). */
 export const PRESENTATION_TEMPLATE_ID = "std-vt-praesentation";
@@ -34,18 +35,31 @@ const FRAME_PAD_MM = 4;
 export interface PresentationOptions {
   /** Geschosse (Ebenen der Art `floor`) in Blattreihenfolge. */
   floors: string[];
-  /** Alle Ansichten (Ebenen der Art `elevation`) aufnehmen. */
-  elevations: boolean;
+  /** Gewählte Ansichten (Ebenen der Art `elevation`) in Blattreihenfolge. */
+  elevationIds: string[];
   /** Ein Schnitt (Ebene der Art `section`) oder keiner. */
   sectionId: string | null;
   paper: LayoutPaperFormat;
   orientation: LayoutOrientation;
   /** Skizzenstil ([67]) für die gezeigten Ebenen. */
   sketch: boolean;
+  /** [224] Gemeinsamer Massstab (1:N); `null` = der grösste, der aufs Blatt passt. Vorgabe 1:200 (Wettbewerb). */
+  scale: number | null;
+  /** [224] Massstab je Ebene (übersteuert `scale`). */
+  scales?: Record<string, number>;
+  /** [224] Plakat-Vorlage ([208], Schlüssel in `POSTER_TEMPLATES`) als Ziel; fehlt sie, gilt `paper`/`orientation`. */
+  poster?: string;
 }
+
+/** Massstäbe zur Wahl im Dialog (wie `SCALES` im Kern). */
+export const PRESENTATION_SCALES = [50, 100, 200, 500, 1000] as const;
+/** Vorgabe-Massstab für den Wettbewerb (WBW 1:200, Vorprojekt 1:100). */
+export const PRESENTATION_DEFAULT_SCALE = 200;
 
 export interface PresentationItem {
   levelId: string;
+  /** Massstab dieses Viewports (gemeinsam oder je Ebene gewählt). */
+  scale: number;
   group: number;
   xMm: number;
   yMm: number;
@@ -73,7 +87,16 @@ export interface PresentationLabels {
 
 const isFloor = (l: DrawingLevel) => l.kind === "floor" && !l.layoutId;
 
-/** Vorschlag für den Dialog: alle Geschosse, Ansichten, erster Schnitt; Blatt des meistgenutzten Masters, sonst A1 quer. */
+/** [224] Hat die Ebene Bauteile oder Zeichnungen? Leere Geschosse (z. B. ein OG ohne Bauteile) werden nicht vorgewählt. */
+export function levelHasContent(project: Project, levelId: string): boolean {
+  for (const [key, v] of Object.entries(project as unknown as Record<string, unknown>)) {
+    if (key === "drawingLevels" || !Array.isArray(v)) continue;
+    if (v.some((it) => typeof it === "object" && it !== null && (it as { levelId?: string }).levelId === levelId)) return true;
+  }
+  return false;
+}
+
+/** Vorschlag für den Dialog: Geschosse mit Inhalt, alle Ansichten, erster Schnitt, 1:200; Blatt des meistgenutzten Masters, sonst A1 quer. */
 export function presentationDefaults(project: Project): PresentationOptions {
   const levels = project.drawingLevels;
   const masters = project.masterLayouts ?? [];
@@ -82,13 +105,20 @@ export function presentationDefaults(project: Project): PresentationOptions {
   const master = [...masters].sort((a, b) => (uses.get(b.id) ?? 0) - (uses.get(a.id) ?? 0))[0];
   const usable = master && !master.customWidthMm;
   return {
-    floors: levels.filter(isFloor).map((l) => l.id),
-    elevations: levels.some((l) => l.kind === "elevation"),
+    floors: levels.filter((l) => isFloor(l) && levelHasContent(project, l.id)).map((l) => l.id),
+    elevationIds: levels.filter((l) => l.kind === "elevation").map((l) => l.id),
     sectionId: levels.find((l) => l.kind === "section")?.id ?? null,
     paper: usable ? master.paper : "a1",
     orientation: usable ? master.orientation : "landscape",
     sketch: false,
+    scale: PRESENTATION_DEFAULT_SCALE,
   };
+}
+
+/** Blattgrösse und Master-Papier der Wahl: Plakat-Vorlage, sonst `paper`/`orientation`. */
+function targetSheet(o: PresentationOptions): { paper: LayoutPaperFormat; orientation: LayoutOrientation } {
+  const tpl = o.poster ? posterTemplate(o.poster) : undefined;
+  return tpl ? { paper: tpl.paper, orientation: tpl.orientation } : { paper: o.paper, orientation: o.orientation };
 }
 
 /** Die Vorlage „Präsentation" des Projekts bzw. aus den Standards (dann muss sie mit angelegt werden). */
@@ -146,22 +176,27 @@ function chosenLevels(project: Project, o: PresentationOptions): { id: string; g
   const byId = new Map(project.drawingLevels.map((l) => [l.id, l]));
   const out: { id: string; group: number }[] = [];
   for (const id of o.floors) if (byId.get(id) && isFloor(byId.get(id)!)) out.push({ id, group: 0 });
-  if (o.elevations) for (const l of project.drawingLevels) if (l.kind === "elevation") out.push({ id: l.id, group: 1 });
+  for (const id of o.elevationIds) if (byId.get(id)?.kind === "elevation") out.push({ id, group: 1 });
   if (o.sectionId && byId.get(o.sectionId)?.kind === "section") out.push({ id: o.sectionId, group: 2 });
   return out;
 }
 
 /** Master des Blatts: einer mit gleichem Format und gleicher Ausrichtung, sonst ein neuer. */
 function masterFor(project: Project, o: PresentationOptions): MasterLayout | undefined {
+  const tpl = o.poster ? posterTemplate(o.poster) : undefined;
+  if (tpl) return findPosterMaster(project, tpl.key);
   return (project.masterLayouts ?? []).find(
-    (m) => m.paper === o.paper && m.orientation === o.orientation && m.customWidthMm === undefined,
+    (m) => m.paper === o.paper && m.orientation === o.orientation && m.customWidthMm === undefined && !m.template,
   );
 }
 
 /** Massstab und Rahmen aus dem Kern (ohne das Projekt zu ändern). */
 export function planPresentationSheet(project: Project, o: PresentationOptions): PresentationPlan {
   const { template } = presentationTemplate(project);
-  const size = sheetSizeMm(o.paper, o.orientation);
+  const { paper, orientation } = targetSheet(o);
+  const size = sheetSizeMm(paper, orientation);
+  // Plakat: Kopfzeile und Ränder der Vorlage, kein Schriftfeld des Masters.
+  const poster = o.poster && posterTemplate(o.poster) ? posterMetrics(size.w, size.h) : null;
   const levels = chosenLevels(project, o);
   const vis = presentationVisibility(project, template);
   const text = JSON.stringify({
@@ -171,8 +206,11 @@ export function planPresentationSheet(project: Project, o: PresentationOptions):
     detail: (template.detail ?? "mittel") satisfies DetailLevel,
     sheetW: size.w,
     sheetH: size.h,
-    titleBlock: true,
+    titleBlock: !poster,
     shadows: template.shadows ?? false,
+    ...(o.scale ? { scale: o.scale } : {}),
+    scales: o.scales ?? {},
+    ...(poster ? { marginMm: poster.marginMm, topMm: poster.contentTopMm } : {}),
   });
   return documentFor(project).query<PresentationPlan>("presentationSheet", [], text);
 }
@@ -256,14 +294,19 @@ export function presentationSheetOps(
   const { template, isNew } = presentationTemplate(project);
   const ops: CoreOp[] = [];
   if (isNew) ops.push(...addItems("viewTemplates", [template]));
+  const sheet = targetSheet(o);
+  const tpl = o.poster ? posterTemplate(o.poster) : undefined;
   let master = masterFor(project, o);
-  if (!master) {
+  if (!master && tpl) {
+    master = createPosterMaster(`mas-${tpl.key}`, tpl);
+    ops.push(...addItems("masterLayouts", [master]));
+  } else if (!master) {
     const first = (project.masterLayouts ?? [])[0];
-    master = { ...createMasterLayout(`mas-pres-${stamp}`, labels.masterName, o.paper, o.orientation), titleBlock: { ...(first?.titleBlock ?? {}) } };
+    master = { ...createMasterLayout(`mas-pres-${stamp}`, labels.masterName, sheet.paper, sheet.orientation), titleBlock: { ...(first?.titleBlock ?? {}) } };
     ops.push(...addItems("masterLayouts", [master]));
   }
   const layoutId = `lay-pres-${stamp}`;
-  const layout: Layout = { ...createLayout(layoutId, labels.sheetName, o.paper, o.orientation), masterId: master.id };
+  const layout: Layout = { ...createLayout(layoutId, labels.sheetName, sheet.paper, sheet.orientation), masterId: master.id };
   const sheetLevel = createSheetLevel(`sheet-${layoutId}`, layout);
   const vis = presentationVisibility(project, template);
   const cat = annotationCategory(project);
@@ -283,7 +326,7 @@ export function presentationSheetOps(
       name: `${level.name} · ${template.name}`,
       viewType: "grundriss",
       view3d: "top",
-      scaleDenominator: plan.scale,
+      scaleDenominator: it.scale,
       detail: template.detail ?? "mittel",
       activeLevelId: level.id,
       layerVisibility: vis,
@@ -292,9 +335,9 @@ export function presentationSheetOps(
       templateId: template.id,
       templateLinked: true,
     } as ViewSnapshot);
-    vps.push({ id: `vp-pres-${stamp}-${i}`, snapshotId: snapId, xMm: it.xMm, yMm: it.yMm, widthMm: it.widthMm, heightMm: it.heightMm, scaleDenominator: plan.scale });
+    vps.push({ id: `vp-pres-${stamp}-${i}`, snapshotId: snapId, xMm: it.xMm, yMm: it.yMm, widthMm: it.widthMm, heightMm: it.heightMm, scaleDenominator: it.scale });
     drawings.push(
-      sheetText(`d-pres-${stamp}-t${i}`, sheetLevel.id, cat, it.xMm + FRAME_PAD_MM, it.yMm + it.heightMm + 6, `${level.name}   1:${plan.scale}`, 4, true),
+      sheetText(`d-pres-${stamp}-t${i}`, sheetLevel.id, cat, it.xMm + FRAME_PAD_MM, it.yMm + it.heightMm + 6, tpl ? level.name : `${level.name}   1:${it.scale}`, 4, true),
     );
   });
   // Nordpfeil rechts neben dem Titel des ersten Grundrisses.
@@ -306,7 +349,7 @@ export function presentationSheetOps(
     drawings.push(...north);
     group(`grp-pres-${stamp}-n`, labels.northGroup, north);
     // Massstabsbalken links vom Nordpfeil, sofern er den Titel nicht berührt (Breite grob 0.65 × Schrifthöhe je Zeichen).
-    const bar = scaleBar(stamp, sheetLevel.id, cat, cx - 3.6 - 10, cy - 1, plan.scale);
+    const bar = scaleBar(stamp, sheetLevel.id, cat, cx - 3.6 - 10, cy - 1, firstFloor.scale);
     const title = byId.get(firstFloor.levelId)!.name;
     const titleEnd = firstFloor.xMm + FRAME_PAD_MM + (title.length + 8) * 4 * 0.65;
     const barLeft = Math.min(...bar.flatMap((d) => (d.geom.shape === "polyline" ? d.geom.pts.map((p) => p.x * 1000) : [])));

@@ -77,6 +77,7 @@ import { defblockCommand } from "./cmds/defblock";
 import { presentationCommand } from "./cmds/presentation";
 import { traceMoveCommand, traceRotateCommand } from "./cmds/tracemove";
 import { renderingCommand } from "./cmds/rendering";
+import { imageExportCommand } from "./cmds/imageExport";
 
 /** Alle bekannten Befehle, Schlüssel = Befehlsname (lowercase). */
 export const COMMANDS: Record<string, Command> = {
@@ -151,6 +152,7 @@ export const COMMANDS: Record<string, Command> = {
   import: importCommand,
   praesentation: presentationCommand,
   rendering: renderingCommand,
+  bild3d: imageExportCommand,
   terrain: terrainCommand,
   excavation: excavationCommand,
   meshcrop: meshCropCommand,
@@ -206,6 +208,9 @@ export const ALIASES: Record<string, string> = {
   render: "rendering",
   blender: "rendering",
   rendern: "rendering",
+  image3d: "bild3d",
+  "3dbild": "bild3d",
+  bildexport: "bild3d",
   lukarne: "dormer",
   dachhof: "roofhole",
   lichthof: "roofhole",

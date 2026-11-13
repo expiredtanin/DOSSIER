@@ -194,6 +194,18 @@ export function isVerticalSection(s: ViewSection): boolean {
 
 // ── Registrierung des Viewports ─────────────────────────────────────────────
 
+/** Kamera für den Bild-Export: in Modell-Koordinaten (gespeicherte Kamera, `cameraToView`). */
+export type Camera3dSource = ViewCamera;
+
+/** Ergebnis von `captureImage`: PNG und tatsächliche Grösse (kann kleiner als angefragt sein, `IMAGE_MAX_EDGE`). */
+export interface CapturedImage {
+  png: Uint8Array;
+  width: number;
+  height: number;
+  /** Hintergrund tatsächlich durchsichtig? */
+  transparent: boolean;
+}
+
 export interface ViewportCameraApi {
   /** Aktuelle Kamera (world) und Bildverhältnis, oder null (Renderer nicht bereit). */
   read(): { camera: Camera3d; aspect: number } | null;
@@ -201,6 +213,8 @@ export interface ViewportCameraApi {
   write(cam: Camera3d, animate: boolean): boolean;
   /** Aktuelles 3D-Bild als PNG, höchstens `maxEdge` Pixel auf der langen Seite. */
   snapshot(maxEdge: number): Promise<Uint8Array | null>;
+  /** [223] Bild in Zielgrösse (render3d zeichnet direkt in `width` × `height`), mit Live- oder gegebener Kamera. */
+  image(opts: { width: number; height: number; transparent: boolean; camera?: Camera3dSource }): Promise<CapturedImage | null>;
   /** Live-Schnitt von aussen setzen (world) oder aufheben (null). */
   section(plane: { point: V3; normal: V3 } | null): void;
   /** Kamera auf Modell und sichtbare Punktwolken einpassen (aktuelles Preset). */
@@ -226,7 +240,7 @@ export function registerViewportCamera(next: ViewportCameraApi | null): () => vo
 function exposeForDebug(on: boolean): void {
   try {
     const g = globalThis as { __dossierCamera?: unknown };
-    if (on) g.__dossierCamera = { getCamera, setCamera, captureSnapshot, setSection, viewportAvailable };
+    if (on) g.__dossierCamera = { getCamera, setCamera, captureSnapshot, captureImage, setSection, viewportAvailable };
     else delete g.__dossierCamera;
   } catch {
     /* ohne globalThis-Zugriff kein Debug-Handle */
@@ -298,6 +312,22 @@ export async function captureSnapshot(opts: { maxEdge?: number } = {}): Promise<
   if (!api) return null;
   try {
     return await api.snapshot(opts.maxEdge ?? 1024);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * [223] Bild des 3D-Viewports in Zielgrösse als PNG (Offscreen-Render in render3d), oder null ohne Viewport bzw. bei
+ * leerem Bild. Ohne `camera` zeichnet die Live-Kamera. Test-Hook: `globalThis.__dossierImageMock` ersetzt das Zeichnen
+ * (headless liefert WebGPU kein Bild; e2e prüft damit den Dialog und das Einsetzen).
+ */
+export async function captureImage(opts: { width: number; height: number; transparent?: boolean; camera?: ViewCamera }): Promise<CapturedImage | null> {
+  const mock = (globalThis as { __dossierImageMock?: (o: { width: number; height: number; transparent: boolean }) => Promise<CapturedImage | null> }).__dossierImageMock;
+  if (typeof mock === "function") return mock({ width: opts.width, height: opts.height, transparent: opts.transparent === true });
+  if (!api) return null;
+  try {
+    return await api.image({ width: opts.width, height: opts.height, transparent: opts.transparent === true, ...(opts.camera ? { camera: opts.camera } : {}) });
   } catch {
     return null;
   }

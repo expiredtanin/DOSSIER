@@ -91,7 +91,7 @@ E 2'600'048 / N 1'200'046 und E 2'600'060 / N 1'200'056. Raumprogramm als CSV (`
 |---|---|---|---|
 | 7.1 | Kopfleiste „Axonometrie“ | eigener Reiter „3D · Erdgeschoss“ | ✅ (Spec 9; Bild nur auf dem Mac prüfbar) |
 | 7.2 | Gelände → „Schatten im 3D zeigen“, Datum 21.03./21.06./21.12., Uhrzeit | Schatten im 3D und (Haken) im Grundriss | ◐ Schalter geprüft, Bild nur auf dem Mac |
-| 7.3 | 3D-Bild als PNG in Abgabeauflösung | PNG-Datei, z. B. 6000 px breit | ❌ **[223]** |
+| 7.3 | 3D-Bild als PNG in Abgabeauflösung | PNG-Datei, z. B. 6000 px breit | ✓ **[223]** Befehl `bild3d` (Mac: Metal-Gegenprobe offen) |
 | 7.4 | „Rendering …“ (Blender/Cycles) | PNG zurück, ins Layout einsetzbar | ❌ **[211]** |
 
 ## 8. Flächen und Volumen SIA 416, Kennzahlen
@@ -115,7 +115,7 @@ E 2'600'048 / N 1'200'046 und E 2'600'060 / N 1'200'056. Raumprogramm als CSV (`
 
 | # | Schritt in Dossier | Erwartet | Status |
 |---|---|---|---|
-| 10.1 | Panel **Mappe** → „Präsentationsplan erstellen“ (Befehl `praesentationsplan`), Schnitt B, A1 | Blatt mit Grundrissen, Ansicht, Schnitt, Nordpfeil, Massstabsbalken, gemeinsamer Massstab | ◐ geht (Spec 10), aber leeres OG als leerer Viewport, nur „Ansicht Süd“ → **[224]** |
+| 10.1 | Panel **Mappe** → „Präsentationsplan erstellen“ (Befehl `praesentationsplan`), Schnitt B, A1 | Blatt mit Grundrissen, Ansicht, Schnitt, Nordpfeil, Massstabsbalken, gemeinsamer Massstab | ✓ geht (Spec 10) — [224] erledigt (leere Geschosse nicht vorgewählt, 1:200, Plakat als Ziel) |
 | 10.2 | Mappe → Publikation → ＋ Satz, Blatt anhaken, „Publizieren“ | ein PDF (A1, 1 Seite), Index im Titelblock | ✅ (Spec 11) |
 | 10.3 | Plakat A0/A1 mit Raster, Kennwort-Feld, anonym (kein Büroname, PDF-Metadaten leer), Bilder im Layout | WBW-Plakat als PDF | ❌ **[208]** |
 
