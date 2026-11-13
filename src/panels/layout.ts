@@ -43,7 +43,9 @@ import type {
 // v12: Werkzeug-Palette ZURÜCK ins Default-Layout (Nutzer-Entscheid: Werkzeuge
 // gehören in ein andockbares Panel statt ins Ribbon-Band) — wieder oben links,
 // Attribute darunter (Vectorworks-Bild aus v6, vor dem Ribbon-UI-Phase-3-Bump).
-export const LAYOUT_VERSION = 12;
+// v13 ([238]): rechts oben (Objekt-Info/Flächenbilanz) bekommt mehr Höhe: Gewichte 1,6 : 1 statt 1 : 1,5 (die
+// Flächenbilanz mit Raumprogramm war nur ~300 px hoch). Die Höhe merkt sich der Gruppen-Splitter (`resizeGroups`).
+export const LAYOUT_VERSION = 13;
 
 /** localStorage-Schlüssel des zuletzt benutzten Layouts. */
 const CURRENT_KEY = "cad.layout";
@@ -75,11 +77,11 @@ const DEFAULT_LEFT_GROUPS: DockGroup[] = [
   { tabs: ["attributes"], activeTab: "attributes", weight: 1 },
 ];
 const DEFAULT_RIGHT_GROUPS: DockGroup[] = [
-  { tabs: ["object-info", "room-balance"], activeTab: "object-info", weight: 1 },
+  { tabs: ["object-info", "room-balance"], activeTab: "object-info", weight: 1.6 },
   {
     tabs: ["drawing-levels", "layers", "site", "elements", "view-snapshots", "layouts"],
     activeTab: "drawing-levels",
-    weight: 1.5,
+    weight: 1,
   },
 ];
 
