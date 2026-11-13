@@ -3,10 +3,10 @@
 // passende `npm run build:*`. Sonst passen TS-Oberfläche und Kern nicht zusammen (z. B. „Plan-Puffer
 // unlesbar“ nach einem `git pull` mit Formatänderung). Aufruf: `node scripts/wasm-fresh.mjs` (auch aus
 // `tauri-native.mjs`, `scripts/update-linux.sh`); Opt-out: DOSSIER_NO_WASM_CHECK=1. `--no-opt` (oder
-// DOSSIER_WASM_NO_OPT=1) baut ohne wasm-opt; scheitert ein Build, wird er einmal ohne wasm-opt wiederholt
+// DOSSIER_WASM_NO_OPT=1) baut ohne wasm-opt, `--all` baut alle Pakete; scheitert ein Build, wird er einmal ohne wasm-opt wiederholt
 // (zu altes System-`wasm-opt` bricht Module mit `Table.grow`).
 import { spawnSync } from "node:child_process";
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -53,9 +53,23 @@ export function stalePackages(base = root) {
   });
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1] && !process.env.DOSSIER_NO_WASM_CHECK) {
+/** Direkt aufgerufen? Über realpath verglichen: liegt der Checkout hinter einem Symlink (z. B. /home → /usr/home),
+ *  löst Node `import.meta.url` auf, `argv[1]` aber nicht — der Vergleich schlug fehl und das Skript tat stumm nichts. */
+function isMain() {
+  if (!process.argv[1]) return false;
+  try {
+    return realpathSync(fileURLToPath(import.meta.url)) === realpathSync(process.argv[1]);
+  } catch {
+    return false;
+  }
+}
+
+if (isMain() && !process.env.DOSSIER_NO_WASM_CHECK) {
   const noOpt = process.argv.includes("--no-opt") || process.env.DOSSIER_WASM_NO_OPT === "1";
-  for (const p of stalePackages()) {
+  // `--all`: alle Pakete neu bauen (falls die Zeitstempel täuschen, z. B. nach Kopieren/Entpacken des Checkouts)
+  const todo = process.argv.includes("--all") ? PACKAGES : stalePackages();
+  if (todo.length === 0) console.log("[wasm-fresh] alle WASM-Pakete aktuell.");
+  for (const p of todo) {
     console.log(`[wasm-fresh] ${p.wasm} ist veraltet → ${p.script}${noOpt ? " (ohne wasm-opt)" : ""}`);
     if (build(p, noOpt)) continue;
     if (!noOpt) {
