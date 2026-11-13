@@ -1265,6 +1265,7 @@ export const ViewRibbonTab = memo(function ViewRibbonTab({
                 { value: "textured", label: t("display.style.textured") },
                 { value: "wireframe", label: t("display.style.wireframe") },
                 { value: "hidden", label: t("display.style.hidden") },
+                { value: "pathtrace", label: t("display.style.pathtrace") },
               ]}
             />
           ) : (

@@ -19,5 +19,7 @@ export type RenderMode =
   | "textured"
   | "wireframe"
   | "hidden"
-  | "shaded-edges";
+  | "shaded-edges"
+  // [212] Progressive GPU-Pfadverfolgung (render3d `gpu_pathtrace.rs`), Vorschau; Endbilder über Blender/Cycles.
+  | "pathtrace";
 

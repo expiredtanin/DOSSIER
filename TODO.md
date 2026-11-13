@@ -253,9 +253,23 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
 - Nur noch Fehler aus dem Referenz-Ablauf; Leistung mit grossen Kontext-Importen; keine neuen Funktionen.
 - Release 1.0.0: Tag, signierte Pakete, Release-Notes (ehrlich: was nicht geht), Download-Seite.
 
-- ○ **[212]** Eigener GPU-Pathtracer in `render3d` als progressive Vorschau im Viewport (Entscheid Maintainer 12.11.: „beides“ —
+- ◐ **[212]** Eigener GPU-Pathtracer in `render3d` als progressive Vorschau im Viewport (Entscheid Maintainer 12.11.: „beides“ —
   eigener Pathtracer für die schnelle Vorschau, Cycles [215] für Endbilder): BVH, PBR-Materialien (diffus/glänzend/Glas), Himmel + Sonne
   aus dem Sonnenstand, Entrauscher (Intel Open Image Denoise, Apache-2.0), WebGPU + Metal, läuft auch im Browser. Nach 1.0. · L
+  **Stand 13.11. (Etappe 1):** Darstellungsart „Pathtracing (Vorschau)“ (Oberleiste, `RenderMode` `"pathtrace"`, render3d
+  `RenderStyle::Pathtrace`). BVH auf der CPU aus denselben Szenen-Dreiecken wie die schattierte Ansicht (`render3d/src/bvh.rs`,
+  Binned-SAH, flache Arrays, Doppelseiten einmal; Tests gegen Brute-Force, leere/kaputte Eingaben), WGSL-Compute (`pathtrace.rs`,
+  `gpu_pathtrace.rs`): ≤ 5 Abpraller, Russian Roulette, Akkumulation über Bilder mit Neustart bei Kamera/Modell/Sonne/Grösse, Obergrenze
+  1024 Samples, grosse Ansichten intern ≤ 1.2 MPx, ACES + sRGB. Materialien aus der Vertexfarbe: diffus, glänzend (Lambert unter GGX,
+  Rauigkeit 0.3, heute nur Stahlrahmen `PART_RGB[4]`), Glas als dünne Scheibe ohne Brechung (Fresnel, für Schattenstrahlen durchsichtig).
+  Sonne der Sonnenstudie (sonst Standardlicht) als Kegel 0.5° mit NEE, Himmel als Gradient mit Aureole, Farbe nach Luftmasse. Viewport:
+  Zähler „Samples · /s“ unten links, zeichnet je Bild ein Sample bis fertig. Headless: `render_png --style pathtrace --samples N`.
+  Geprüft: `cargo test` render3d (auch `--features render` mit lavapipe: Akkumulation/Neustart/Grenzen), WGSL mit naga validiert und
+  nach MSL übersetzt (Metal-Tauglichkeit ohne Mac), Chromium-WebGPU (SwiftShader) kompiliert und rechnet ohne Fehler (Bild headless
+  nicht auslesbar), Bilder Musterhaus komplex mit lavapipe (≈ 2–5 Samples/s bei 800×520). **Offen:** echte GPU und Mac/Metal
+  (`native3d` reicht nur den Stil durch, nicht geprüft), Klick im Browser/Electron, Entrauscher (OIDN oder A-Trous), Bildkarten/Texturen und
+  Materialtabelle (Rauigkeit/Metall je Baustoff wie [211]), Glas mit Brechung, Schnitt, Geisterschicht und Linien im Pathtracing,
+  Nacht/Sonne unter dem Horizont (heute Standardlicht), Bild-Export [223] rechnet nur 1 Sample, BVH-Neubau bei jeder Änderung (Teil-Update).
 - ○ **[215]** Cycles eingebaut für Endbilder (nach 1.0): Cycles-Standalone (Apache-2.0, aus dem Blender-Projekt) als mitgeliefertes
   Hilfsprogramm (Sidecar) der Desktop-App, Metal auf Apple Silicon, OIDN-Entrauscher; liest dasselbe renderer-neutrale Szenenformat
   (GLB + Szenen-JSON) wie die Blender-Brücke [211], die als Option bleibt. Build-Kette macOS (C++, Abhängigkeiten) in CI, Herkunft in

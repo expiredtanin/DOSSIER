@@ -54,6 +54,10 @@ interface WebModelRendererLike {
    * "textured" (deckt die volle `RenderMode`-Union der Oberleiste ab;
    * "textured" faellt engine-seitig vorerst auf "shaded" zurueck). */
   set_render_style(style: string): void;
+  /** [212] Pathtracing (Stil "pathtrace"): Samples je Pixel des laufenden Bildes und ob die Obergrenze erreicht ist.
+   *  Optional — ältere WASM-Builds. */
+  pathtrace_samples?(): number;
+  pathtrace_done?(): boolean;
   set_view_preset(preset: string): void;
   /** [223] Hintergrundfarbe (0..1) für den Bild-Export mit transparentem Hintergrund. Optional — ältere WASM-Builds. */
   set_clear_color?(r: number, g: number, b: number): void;
@@ -480,6 +484,17 @@ export function useWasm3dRenderer(
     }
   }, []);
 
+  /** [212] Stand des Pathtracers: Samples je Pixel und ob das Bild fertig ist; null ohne Renderer/alter Build. */
+  const pathtraceStatus = useCallback((): { samples: number; done: boolean } | null => {
+    const r = rendererRef.current;
+    if (!r?.pathtrace_samples) return null;
+    try {
+      return { samples: r.pathtrace_samples(), done: r.pathtrace_done?.() ?? false };
+    } catch {
+      return null;
+    }
+  }, []);
+
   /** Sonne + Schatten im 3D setzen ([64], s. `sun3d.ts`). Wirkt erst beim nächsten `render`. */
   const setSun = useCallback((active: boolean, azimuthDeg: number, elevationDeg: number) => {
     const r = rendererRef.current;
@@ -757,6 +772,7 @@ export function useWasm3dRenderer(
     render,
     updateModel,
     setRenderStyle,
+    pathtraceStatus,
     setSun,
     applyViewPreset,
     viewFit,
