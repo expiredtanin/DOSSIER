@@ -28,6 +28,7 @@ import { loadEngine3d } from "../engine/engine3d";
 import { decodeMaterialTextures } from "./materialTextures";
 import { decodeImageToRgba } from "../io/swissImage";
 import { planPointCloudSync } from "./pointCloudSync";
+import { clampImageSize, isBlankImage, matteFromBlackWhite } from "./imageExport";
 import type { PointCloudSyncItem, UploadedPointCloud } from "./pointCloudSync";
 
 /** Fertige Kamera für einen Frame (world-Meter, Y-up — wie render3d::types::Camera). */
@@ -54,6 +55,8 @@ interface WebModelRendererLike {
    * "textured" faellt engine-seitig vorerst auf "shaded" zurueck). */
   set_render_style(style: string): void;
   set_view_preset(preset: string): void;
+  /** [223] Hintergrundfarbe (0..1) für den Bild-Export mit transparentem Hintergrund. Optional — ältere WASM-Builds. */
+  set_clear_color?(r: number, g: number, b: number): void;
   /** Sonne der Sonnenstudie ([64], `web::set_sun`): Azimut/Höhe in Grad, `shadows` = Schatten im 3D.
    *  `active=false` oder Sonne unter dem Horizont: Standardlicht, keine Schatten. Optional — ältere WASM-Builds. */
   set_sun?(active: boolean, azimuthDeg: number, elevationDeg: number, shadows: boolean): void;
@@ -640,6 +643,71 @@ export function useWasm3dRenderer(
   );
 
   /**
+   * [223] Bild für die Abgabe: render3d zeichnet mit `cam` direkt in der Zielgrösse `width` × `height` (nicht das Fenster
+   * skaliert), mit der aktuellen Darstellung (Schatten, Kanten, Texturen, Pausen/Graustufen). `transparent`: Hintergrund
+   * durchsichtig (zwei Durchgänge auf Schwarz und Weiss, `matteFromBlackWhite`); ohne `set_clear_color` im Build bleibt der
+   * Hintergrund deckend (`transparent: false` im Ergebnis). Alles Zeichnen und Auslesen läuft synchron im selben Task (ein
+   * WebGPU-Canvas liefert seinen Inhalt nur dort); danach stellt `restore` das Fenster-Bild wieder her. Null bei leerem Bild.
+   */
+  const exportImage = useCallback(
+    async (opts: { camera: Camera3d; width: number; height: number; transparent: boolean; restore: () => void }): Promise<{ png: Uint8Array; width: number; height: number; transparent: boolean } | null> => {
+      const canvas = canvasRef.current;
+      const r = rendererRef.current;
+      if (!canvas || !r) return null;
+      const { width: W, height: H } = clampImageSize(opts.width, opts.height);
+      const canMatte = opts.transparent && typeof r.set_clear_color === "function";
+      const prevW = canvas.width;
+      const prevH = canvas.height;
+      const out = document.createElement("canvas");
+      out.width = W;
+      out.height = H;
+      const ctx = out.getContext("2d", { willReadFrequently: true });
+      if (!ctx) return null;
+      let image: ImageData | null = null;
+      try {
+        canvas.width = W;
+        canvas.height = H;
+        r.resize(W, H);
+        const c = opts.camera;
+        const shot = (bg: number | null): ImageData => {
+          if (bg !== null) r.set_clear_color?.(bg, bg, bg);
+          r.set_camera(c.eye[0], c.eye[1], c.eye[2], c.target[0], c.target[1], c.target[2], c.up[0], c.up[1], c.up[2], c.perspective, c.fovY, c.orthoHalfHeight);
+          r.render();
+          ctx.clearRect(0, 0, W, H);
+          ctx.drawImage(canvas, 0, 0);
+          return ctx.getImageData(0, 0, W, H);
+        };
+        if (canMatte) {
+          const black = shot(0);
+          const white = shot(1);
+          matteFromBlackWhite(black.data, white.data);
+          image = black;
+        } else {
+          image = shot(null);
+        }
+      } catch (e) {
+        console.warn("render3d Bild-Export fehlgeschlagen:", e);
+        image = null;
+      } finally {
+        try {
+          r.set_clear_color?.(0.961, 0.961, 0.961);
+          canvas.width = prevW;
+          canvas.height = prevH;
+          r.resize(prevW, prevH);
+        } catch {
+          /* Renderer weg: nichts zurückzustellen */
+        }
+        opts.restore();
+      }
+      if (!image || isBlankImage(image.data)) return null;
+      ctx.putImageData(image, 0, 0);
+      const blob: Blob | null = await new Promise((res) => out.toBlob(res, "image/png"));
+      return blob ? { png: new Uint8Array(await blob.arrayBuffer()), width: W, height: H, transparent: canMatte } : null;
+    },
+    [canvasRef],
+  );
+
+  /**
    * Einen Frame zeichnen (Canvas-Größe + DPR abgleichen). `cam` = null lässt
    * die zuletzt in Rust gesetzte Kamera unverändert — Fall für `render(null)`
    * direkt nach `applyViewPreset` (die Kamera kommt dann aus `preset_camera`,
@@ -694,6 +762,7 @@ export function useWasm3dRenderer(
     viewFit,
     readRustCamera,
     snapshotPng,
+    exportImage,
     setGroundGrid,
     setSectionPlane,
     setHighlightLines,

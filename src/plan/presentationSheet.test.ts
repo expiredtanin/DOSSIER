@@ -2,7 +2,8 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { buildComplexSampleProject } from "../model/sampleProjectComplex";
 import { getState } from "../state/appStore";
 import { sheetSizeMm } from "../model/layoutModel";
-import { PRESENTATION_TEMPLATE_ID, presentationDefaults, presentationSheetOps } from "./presentationSheet";
+import { posterMetrics } from "../model/posterTemplates";
+import { PRESENTATION_TEMPLATE_ID, levelHasContent, presentationDefaults, presentationSheetOps } from "./presentationSheet";
 import type { Project } from "../model/types";
 
 const LABELS = { sheetName: "Präsentationsplan", masterName: "Planrahmen", north: "N", northGroup: "Nordpfeil", scaleBarGroup: "Massstabsbalken" };
@@ -23,7 +24,7 @@ describe("[66] Präsentationsplan", () => {
   it("Vorschlag: alle Geschosse, Ansichten, ein Schnitt, A1 quer (Master)", () => {
     const d = presentationDefaults(project);
     expect(d.floors.length).toBeGreaterThanOrEqual(4);
-    expect(d.elevations).toBe(true);
+    expect(d.elevationIds.length).toBeGreaterThan(0);
     expect(d.sectionId).not.toBeNull();
     expect([d.paper, d.orientation]).toEqual(["a1", "landscape"]);
     expect(d.sketch).toBe(false);
@@ -83,7 +84,7 @@ describe("[66] Präsentationsplan", () => {
 
   it("gewählte Geschosse, ohne Ansichten/Schnitt, Skizze an, A3: kleinerer Massstab", () => {
     const floors = project.drawingLevels.filter((l) => l.kind === "floor" && !l.layoutId).slice(0, 2).map((l) => l.id);
-    const res = presentationSheetOps(project, { floors, elevations: false, sectionId: null, paper: "a3", orientation: "landscape", sketch: true }, LABELS, "t2")!;
+    const res = presentationSheetOps(project, { floors, elevationIds: [], scale: null, sectionId: null, paper: "a3", orientation: "landscape", sketch: true }, LABELS, "t2")!;
     expect(res.plan.items.map((i) => i.levelId)).toEqual(floors);
     expect(res.plan.scale).toBeGreaterThanOrEqual(100);
     st().applyChange(res.ops);
@@ -93,6 +94,40 @@ describe("[66] Präsentationsplan", () => {
   });
 
   it("nichts gewählt ⇒ null, Projekt unverändert", () => {
-    expect(presentationSheetOps(project, { floors: [], elevations: false, sectionId: null, paper: "a1", orientation: "landscape", sketch: false }, LABELS, "t3")).toBeNull();
+    expect(presentationSheetOps(project, { floors: [], elevationIds: [], scale: null, sectionId: null, paper: "a1", orientation: "landscape", sketch: false }, LABELS, "t3")).toBeNull();
   });
+
+  it("[224] Vorschlag: leere Geschosse nicht vorgewählt, Vorgabe 1:200", () => {
+    const floor = project.drawingLevels.find((l) => l.kind === "floor" && !l.layoutId)!;
+    const withEmpty = { ...project, drawingLevels: [...project.drawingLevels, { ...floor, id: "lv-leer", name: "OG leer", baseElevation: 99 }] };
+    const d = presentationDefaults(withEmpty);
+    expect(d.floors).not.toContain("lv-leer");
+    expect(d.floors).toContain(floor.id);
+    expect(d.scale).toBe(200);
+    expect(levelHasContent(withEmpty, "lv-leer")).toBe(false);
+    expect(levelHasContent(withEmpty, floor.id)).toBe(true);
+  });
+
+  it("[224] fester Massstab und Massstab je Viewport landen in Ausschnitt und Viewport", () => {
+    const floors = project.drawingLevels.filter((l) => l.kind === "floor" && !l.layoutId).slice(0, 2).map((l) => l.id);
+    const res = presentationSheetOps(project, { floors, elevationIds: [], scale: 200, scales: { [floors[1]]: 100 }, sectionId: null, paper: "a1", orientation: "landscape", sketch: false }, LABELS, "t4")!;
+    expect(res.plan.scale).toBe(200);
+    expect(res.plan.items.map((i) => i.scale)).toEqual([200, 100]);
+    st().applyChange(res.ops);
+    const lay = st().project.layouts!.find((l) => l.id === res.layoutId)!;
+    expect(lay.viewports.map((v) => v.scaleDenominator)).toEqual([200, 100]);
+    expect(st().project.viewSnapshots!.filter((v) => v.id.startsWith("vs-pres-t4")).map((v) => v.scaleDenominator)).toEqual([200, 100]);
+  });
+
+  it("[224] Plakat-Vorlage als Ziel: Master der Vorlage, Viewports unter der Kopfzeile", () => {
+    const floors = project.drawingLevels.filter((l) => l.kind === "floor" && !l.layoutId).slice(0, 2).map((l) => l.id);
+    const res = presentationSheetOps(project, { floors, elevationIds: [], scale: 200, sectionId: null, paper: "a4", orientation: "portrait", sketch: false, poster: "poster-a1-landscape" }, LABELS, "t5")!;
+    st().applyChange(res.ops);
+    const p = st().project;
+    const lay = p.layouts!.find((l) => l.id === res.layoutId)!;
+    const master = p.masterLayouts!.find((m) => m.id === lay.masterId)!;
+    expect([master.template, lay.paper, lay.orientation]).toEqual(["poster-a1-landscape", "a1", "landscape"]);
+    const top = posterMetrics(841, 594).contentTopMm;
+    for (const v of lay.viewports) expect(v.yMm).toBeGreaterThanOrEqual(top - 1e-6);
+  }, 60_000);
 });

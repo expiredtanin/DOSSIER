@@ -658,6 +658,20 @@ impl WebModelRenderer {
         self.renderer.clear_point_clouds();
     }
 
+    /// [223] Hintergrundfarbe (0..1) setzen; Standard #f5f5f5. Der Bild-Export rendert damit zweimal
+    /// (schwarz/weiss) und rechnet daraus einen transparenten Hintergrund. NaN wird verworfen.
+    pub fn set_clear_color(&mut self, r: f32, g: f32, b: f32) {
+        if ![r, g, b].iter().all(|v| v.is_finite()) {
+            return;
+        }
+        self.renderer.clear_color = wgpu::Color {
+            r: r.clamp(0.0, 1.0) as f64,
+            g: g.clamp(0.0, 1.0) as f64,
+            b: b.clamp(0.0, 1.0) as f64,
+            a: 1.0,
+        };
+    }
+
     /// Surface an eine neue Pixelgroesse anpassen (DPR beachtet der Aufrufer).
     pub fn resize(&mut self, width: u32, height: u32) {
         let (w, h) = (width.max(1), height.max(1));

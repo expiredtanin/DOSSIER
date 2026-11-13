@@ -4,6 +4,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { projectToModel3d, sampleProject } from "../core";
 import {
+  captureImage,
   FOV_Y,
   focusCamera,
   focusedCamera,
@@ -185,6 +186,7 @@ describe("Registrierung", () => {
         return true;
       },
       snapshot: async () => new Uint8Array([0x89, 0x50]),
+      image: async (o) => ({ png: new Uint8Array([0x89, 0x50]), width: o.width, height: o.height, transparent: o.transparent }),
       section: (p) => {
         state.section = p;
       },
@@ -226,6 +228,19 @@ describe("Registrierung", () => {
       return d.map((x) => x / l);
     };
     close(dir(state.written!), dir(before));
+  });
+
+  it("[223] captureImage: ohne Viewport null, sonst Zielgrösse und Optionen durchreichen, Mock ersetzt das Zeichnen", async () => {
+    expect(await captureImage({ width: 100, height: 50 })).toBeNull();
+    const { a } = fakeViewport();
+    registerViewportCamera(a);
+    expect(await captureImage({ width: 3840, height: 2160, transparent: true })).toMatchObject({ width: 3840, height: 2160, transparent: true });
+    (globalThis as { __dossierImageMock?: unknown }).__dossierImageMock = async (o: { width: number }) => ({ png: new Uint8Array([1]), width: o.width, height: 1, transparent: false });
+    try {
+      expect(await captureImage({ width: 7, height: 1 })).toMatchObject({ width: 7 });
+    } finally {
+      delete (globalThis as { __dossierImageMock?: unknown }).__dossierImageMock;
+    }
   });
 
   it("Schnitt setzen und aufheben, Snapshot durchreichen", async () => {

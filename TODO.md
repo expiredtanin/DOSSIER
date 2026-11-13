@@ -59,7 +59,7 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   oben ein Test; was fehlt, wird hier als Aufgabe eingetragen. · M
   Umgesetzt (12.11.): `e2e/release10.spec.ts` spielt leeres Projekt → Kataster-DXF (LV95) → Baurecht → Wände/Decke/Dach → Raum +
   Raumprogramm → SIA 416/Kennzahlen (CSV/PDF) → 1:200 → Schnitt → Axonometrie/Schatten → Präsentationsplan A1 → Publikation PDF → DXF/IFC
-  → Speichern in 13 Schritten durch; fehlende Schritte als `test.fixme` ([207] [208] [211] [222]–[224]; [209], [221] und [225] seit 12.11. aktiv). Behoben: GV in der
+  → Speichern in 13 Schritten durch; fehlende Schritte als `test.fixme` ([207] [208] [211] [222]; [223] [224] seit 13.11. aktiv; [209], [221] und [225] seit 12.11. aktiv). Behoben: GV in der
   Kennzahlenleiste war ohne freie Körper 0 m³, neue Decken bekamen den Aussenwand-Aufbau statt eines Deckentyps. Offen: Durchlauf
   der Checkliste auf dem Mac (Maintainer); 3D-Bild headless nicht prüfbar (kein WebGPU).
 
@@ -190,14 +190,6 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
 
 - ○ **[222]** Volumenstudie → Bauteile (12.11., aus [206]): gewählten Körper (Massenmodell) in Aussenwände je Geschoss, Decken und Flachdach
   umwandeln, Geschosse aus der Körperhöhe; heute nur Zeichnen von Wand/Decke/Dach oder GV aus Körpern. Ort: neuer Befehl, Kern `cmd_create.rs`. · M
-- ○ **[223]** 3D-Bild für die Abgabe (12.11., aus [206]; Punkt „3D-Bilder für die Abgabe“ oben): Befehl/Menü „3D-Bild exportieren …“ mit
-  Pixelgrösse (z. B. 6000 px), Perspektive/Axonometrie mit Schatten als PNG-Download bzw. Datei. Heute gibt es `snapshotPng` nur für BCF
-  (`viewport/Wasm3DViewport.tsx`), keinen Export für den Menschen; nativ über `render_png`. · S
-- ○ **[224]** Präsentationsplan für den Wettbewerb (12.11., aus [206]): leere Geschosse (z. B. OG ohne Bauteile) sind im Dialog vorgewählt
-  und geben leere Viewports; es gibt nur die vorhandenen Ansichten (leeres Projekt: nur „Ansicht Süd“) — fehlende Ansichten N/O/W aus dem
-  Gebäudeumriss anbieten; Massstab wählbar (heute der grösste passende, im Testgebäude auf A1 1:50 statt 1:200 für den Wettbewerb).
-  Ort: `ui/PresentationDialog.tsx`, `commands/cmds/presentation.ts`. · S
-
 - ✓ **[229]** Cycles-Rendering: Streifen/Dreiecke auf der Hauptdachfläche (12.11., Maintainer, Musterhaus komplex Iso). Ursache: Das GLB hat keine
   UVs; der Normal-Map-Knoten (Tangentenraum) bekam je Dreieck einen anderen Tangentenrahmen und zeichnete die Gauben-Fan-Triangulierung als
   helle/dunkle Diagonalen. Nicht im Netz: GLB geprüft (Normalen der Dachdreiecke an der Oberseite max. 0.0002 rad neben der Flächennormalen,
@@ -1144,6 +1136,16 @@ exakte Durchdringung, [61] Zuordnung per Hand, [63] Profil je Kante, [70] Fläch
 
 - **[192]** Ebenen schnell schalten (11.11.): Rechtsklick auf eine Zeile im Ebenen-Panel „Nur diese Ebene anzeigen“ / „Diese Ebene ausblenden“ / „Alle Ebenen einblenden“; im Kontextmenü von Objekt und leerer Fläche (Plan, Schnitt, Ansicht, 3D) „Ebene des Objekts isolieren/ausblenden“ und „Alle Ebenen einblenden“. Sichtbarkeit bleibt `layers[].visible` über Ops (`state/layerIsolate.ts`, ein Undo-Schritt je Aktion); Isolieren lässt Elternklassen an; „Alle einblenden“ stellt den Zustand vor dem ersten Isolieren wieder her (gemerkt je Sitzung/Projekt-Epoche), sonst alles an. Kürzel (umbelegbar): Cmd/Ctrl+Shift+L Ebene der Auswahl isolieren (Cmd+Shift+I ist Boolean-Schnitt), Cmd/Ctrl+Shift+E alle Ebenen einblenden. Test: vitest `layerIsolate.test.ts`, e2e `layerIsolate.spec.ts` (Linux-Chromium; nicht in der Tauri-App geprüft; das native Menü hat keinen Eintrag).
 - **[51]** Herkunft übernommenen Codes (12.11.): Inventur; `NOTICE` ergänzt um delaunator/robust-predicates (`core/delaunay.rs`), polylabel (Verfahren, `room_area.rs`), Manifold (Urheber, `solid_bool.rs`), ambientCG-Texturen (CC0), Tango-/Material-Farbwerte; Dateiköpfe `Herkunft:` in `delaunay.rs`, `solid_bool.rs`, `ifc_nurbs.rs` (csg.rs, skeleton.rs hatten ihn schon); Test `src/core/notice.test.ts` (Datei mit `Herkunft:` im Kopf muss in NOTICE stehen, NOTICE-Pfade existieren, jede Schrift hat OFL.txt). Offen/ungeklärt: Herkunft und Lizenz der App-Icons (`src-tauri/icons`) und der Website-Bilder nicht belegt; Mapbox-Copyright ohne Jahr übernommen (die LICENSE im Upstream nennt ein Jahr, das nach Vorlage aussieht); Lizenztexte der Rust-/npm-Abhängigkeiten liegen nur in den Paketen (cargo-deny prüft die Lizenzart, keine Attribution-Datei im Produkt).
+- **[223]** 3D-Bild für die Abgabe (13.11.): Befehl `bild3d` (Alias `3dbild`, `bildexport`) und Menü Ansicht → „3D-Bild exportieren …“ öffnen
+  `ui/ImageExportDialog.tsx`: Auflösung Ansicht / Full HD / 4K / A4–A2 bei 300 dpi / eigene Grösse, transparenter Hintergrund, Kamera live
+  oder gespeichert ([213], `cameraToView`), Speichern als PNG oder „Ins Layout einsetzen“ (`layoutImageActions`, wie [211]). render3d
+  zeichnet direkt in der Zielgrösse (`useWasm3dRenderer.exportImage`, Kante begrenzt auf `IMAGE_MAX_EDGE`), mit der aktuellen
+  Darstellung; Transparenz aus zwei Durchgängen auf Schwarz/Weiss (`imageExport.matteFromBlackWhite`, `WebModelRenderer::set_clear_color`).
+  Nicht in Tauri/Metal geprüft; headless kein WebGPU-Bild → e2e (`release10.spec.ts`) prüft Dialog/Grössen/Einsetzen über `__dossierImageMock`.
+- **[224]** Präsentationsplan für den Wettbewerb (13.11.): leere Geschosse nicht vorgewählt (Markierung „leer“), nur vorhandene Ansichten
+  (einzeln wählbar) und Schnitte, Massstab gemeinsam (Vorgabe 1:200) und je Viewport wählbar, Plakat-Vorlage ([208]) als Ziel
+  (eigener Rand/obere Kante unter der Kopfzeile); Kern `presentation_sheet.rs` (`choose_fixed`, `scale`/`scales`/`marginMm`/`topMm`). Fehlende
+  Ansichten N/O/W werden nicht automatisch erzeugt (Befehl `viewline` von Hand). e2e `release10.spec.ts` und `presentationSheet.spec.ts`.
 - **[221]** LV95-Projekte (12.11.): Entscheid: das Modell bleibt lokal um einen Projekt-Nullpunkt, statt Landeskoordinaten
   (≈ 2.6 Mio. m) im Modell zu führen — f32 in 3D/GPU (≈ 25 cm Raster bei LV95), das Ganzzahlraster der Booleans und alle
   Ausmass-Rechnungen vertragen das nicht. Der DXF/DWG-Import „an DXF-Koordinaten" in LV95 setzt ohne Standort-Bezug den
