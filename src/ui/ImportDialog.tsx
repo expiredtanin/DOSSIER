@@ -16,6 +16,7 @@
 
 import { useEffect, useState } from "react";
 import { t } from "../i18n";
+import { useModalFocus } from "./modalFocus";
 import type { TranslationKey } from "../i18n";
 import type { DrawingLevelKind, Project } from "../model/types";
 import type { ImportDiagnostics, ParsedImport } from "../io/importSource";
@@ -156,6 +157,7 @@ export function ImportDialog({
   onClose,
 }: ImportDialogProps) {
   // Esc schließt den Dialog (wie ResourceManager).
+  const dialogRef = useModalFocus({});
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -232,7 +234,7 @@ export function ImportDialog({
     <div className="imp-overlay" onClick={onClose}>
       <div
         className="imp-dialog"
-        role="dialog"
+        ref={dialogRef} role="dialog"
         aria-modal="true"
         aria-label={pdf ? t("import.pdf.title") : t("import.title")}
         onClick={(e) => e.stopPropagation()}

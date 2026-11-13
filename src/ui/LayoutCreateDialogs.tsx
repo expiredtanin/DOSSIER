@@ -9,6 +9,7 @@
 
 import { useEffect, useState } from "react";
 import { t } from "../i18n";
+import { useModalFocus } from "./modalFocus";
 import type {
   LayoutOrientation,
   LayoutPaperFormat,
@@ -79,6 +80,7 @@ function SizePicker({
         <div className="imp-section-title">{t("layouts.size.format")}</div>
         <select
           className="imp-select"
+          aria-label={t("layouts.size.format")}
           value={mode}
           onChange={(e) => setMode(e.target.value as SizeMode)}
         >
@@ -157,6 +159,7 @@ function DialogFrame({
   onConfirm: () => void;
   children: React.ReactNode;
 }) {
+  const dialogRef = useModalFocus({});
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -170,7 +173,7 @@ function DialogFrame({
     <div className="imp-overlay" onClick={onClose}>
       <div
         className="imp-dialog"
-        role="dialog"
+        ref={dialogRef} role="dialog"
         aria-modal="true"
         aria-label={title}
         onClick={(e) => e.stopPropagation()}
@@ -298,7 +301,7 @@ export function NewLayoutDialog({
 
       {source === "poster" ? (
         <section className="imp-section">
-          <select className="imp-select" data-testid="newlayout-poster-select" value={posterKey} onChange={(e) => setPosterKey(e.target.value)}>
+          <select className="imp-select" data-testid="newlayout-poster-select" aria-label={t("layouts.newLayout.poster")} value={posterKey} onChange={(e) => setPosterKey(e.target.value)}>
             {POSTER_TEMPLATES.map((p) => (
               <option key={p.key} value={p.key}>
                 {posterTemplateLabel(p)}
@@ -312,6 +315,7 @@ export function NewLayoutDialog({
           {hasMasters ? (
             <select
               className="imp-select"
+              aria-label={t("layouts.master")}
               value={masterId}
               onChange={(e) => setMasterId(e.target.value)}
             >

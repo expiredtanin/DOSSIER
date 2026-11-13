@@ -9,6 +9,7 @@
 
 import { useEffect, useState } from "react";
 import { t } from "../i18n";
+import { useModalFocus } from "./modalFocus";
 import { Dropdown } from "./Dropdown";
 import type { IfcExportOptions, IfcSchema } from "../export/exportIfc";
 
@@ -48,6 +49,7 @@ export function ExportSaveDialog({
   onSave,
   onClose,
 }: ExportSaveDialogProps) {
+  const dialogRef = useModalFocus({});
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -72,7 +74,7 @@ export function ExportSaveDialog({
     <div className="imp-overlay" onClick={onClose}>
       <div
         className="imp-dialog"
-        role="dialog"
+        ref={dialogRef} role="dialog"
         aria-modal="true"
         aria-label={t("exportSave.title")}
         onClick={(e) => e.stopPropagation()}
@@ -134,8 +136,9 @@ export function ExportSaveDialog({
             <input
               className="settings-num-input"
               type="text"
+              aria-label={t("exportSave.filename")}
               value={name}
-              autoFocus
+              data-autofocus
               spellCheck={false}
               onChange={(e) => setName(e.target.value)}
               onKeyDown={(e) => {

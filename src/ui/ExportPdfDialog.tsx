@@ -9,6 +9,7 @@
 
 import { useEffect, useState } from "react";
 import { t } from "../i18n";
+import { useModalFocus } from "./modalFocus";
 import { Dropdown } from "./Dropdown";
 import { SCALE_PRESETS, parseScaleInput } from "./TopBar";
 import type { Orientation, PaperFormat } from "../export/exportPdf";
@@ -57,6 +58,7 @@ export function ExportPdfDialog({
   onExportSvg,
   onClose,
 }: ExportPdfDialogProps) {
+  const dialogRef = useModalFocus({});
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -115,7 +117,7 @@ export function ExportPdfDialog({
     <div className="imp-overlay" onClick={onClose}>
       <div
         className="imp-dialog"
-        role="dialog"
+        ref={dialogRef} role="dialog"
         aria-modal="true"
         aria-label={t("export.title")}
         onClick={(e) => e.stopPropagation()}
@@ -152,6 +154,7 @@ export function ExportPdfDialog({
               <input
                 className="imp-input"
                 type="text"
+                aria-label={t("export.scale")}
                 placeholder={t("export.scale.customPlaceholder")}
                 value={customScaleText}
                 onChange={(e) => setCustomScaleText(e.target.value)}

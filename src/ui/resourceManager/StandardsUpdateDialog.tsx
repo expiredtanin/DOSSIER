@@ -8,6 +8,7 @@ import { createPortal } from "react-dom";
 import type { Project } from "../../model/types";
 import { standardsChangeKey, standardsUpdatePlan } from "../../model/standards";
 import { t } from "../../i18n";
+import { useModalFocus } from "../modalFocus";
 
 const COLLECTION_ORDER = ["components", "hatches", "lineStyles", "wallTypes", "ceilingTypes", "roofTypes", "viewTemplates"];
 
@@ -24,6 +25,7 @@ export function StandardsUpdateDialog({
   const [selected, setSelected] = useState<Set<string>>(
     () => new Set(plan.changes.filter((c) => !c.renamed).map(standardsChangeKey)),
   );
+  const dialogRef = useModalFocus({});
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -45,7 +47,7 @@ export function StandardsUpdateDialog({
 
   return createPortal(
     <div className="imp-overlay" onClick={onClose}>
-      <div className="imp-dialog" role="dialog" aria-modal="true" aria-label={t("resources.updateStandards")} style={{ maxWidth: 560 }} onClick={(e) => e.stopPropagation()}>
+      <div className="imp-dialog" ref={dialogRef} role="dialog" aria-modal="true" aria-label={t("resources.updateStandards")} style={{ maxWidth: 560 }} onClick={(e) => e.stopPropagation()}>
         <header className="imp-head">
           <span className="imp-head-title">{t("resources.updateStandards")}</span>
           <button className="imp-close" onClick={onClose} aria-label={t("export.close")}>

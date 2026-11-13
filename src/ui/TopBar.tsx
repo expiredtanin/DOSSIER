@@ -10,6 +10,7 @@
 
 import { TEXT_FONTS } from "../text/fontList";
 import { t } from "../i18n";
+import { useModalFocus } from "./modalFocus";
 import { checkForUpdate } from "../update/checkForUpdate";
 import { getRunningVersion } from "../update/version";
 import { memo, useEffect, useRef, useState } from "react";
@@ -942,6 +943,7 @@ function AboutDialog({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     void getRunningVersion().then(setRunningVersion);
   }, []);
+  const dialogRef = useModalFocus({});
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -961,7 +963,7 @@ function AboutDialog({ onClose }: { onClose: () => void }) {
     <div className="about-overlay" onMouseDown={onClose}>
       <div
         className="about-dialog"
-        role="dialog"
+        ref={dialogRef} role="dialog"
         aria-modal="true"
         aria-label={t("about.title")}
         onMouseDown={(e) => e.stopPropagation()}

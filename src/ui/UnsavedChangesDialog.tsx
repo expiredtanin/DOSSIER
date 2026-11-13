@@ -5,6 +5,7 @@
 
 import { useEffect, useState } from "react";
 import { t } from "../i18n";
+import { useModalFocus } from "./modalFocus";
 
 export interface UnsavedChangesDialogProps {
   /** Speichert das aktuelle Projekt; liefert `true` nur bei echtem Erfolg
@@ -18,6 +19,7 @@ export interface UnsavedChangesDialogProps {
 export function UnsavedChangesDialog({ onSave, onDiscard, onCancel }: UnsavedChangesDialogProps) {
   const [saving, setSaving] = useState(false);
 
+  const dialogRef = useModalFocus({});
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onCancel();
@@ -39,7 +41,7 @@ export function UnsavedChangesDialog({ onSave, onDiscard, onCancel }: UnsavedCha
     <div className="imp-overlay" onClick={onCancel}>
       <div
         className="imp-dialog"
-        role="dialog"
+        ref={dialogRef} role="dialog"
         aria-modal="true"
         aria-label={t("unsaved.title")}
         onClick={(e) => e.stopPropagation()}

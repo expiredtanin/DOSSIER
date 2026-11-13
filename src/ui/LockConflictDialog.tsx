@@ -5,6 +5,7 @@
 
 import { useEffect } from "react";
 import { t } from "../i18n";
+import { useModalFocus } from "./modalFocus";
 import type { LockInfo } from "../native/projectFile";
 
 export interface LockConflictDialogProps {
@@ -23,6 +24,7 @@ export function LockConflictDialog({
   onForceOpen,
   onCancel,
 }: LockConflictDialogProps) {
+  const dialogRef = useModalFocus({});
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onCancel();
@@ -35,7 +37,7 @@ export function LockConflictDialog({
     <div className="imp-overlay" onClick={onCancel}>
       <div
         className="imp-dialog"
-        role="dialog"
+        ref={dialogRef} role="dialog"
         aria-modal="true"
         aria-label={t("lock.title")}
         onClick={(e) => e.stopPropagation()}

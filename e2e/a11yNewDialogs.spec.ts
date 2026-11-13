@@ -391,3 +391,98 @@ test("Objekt-Info: Gruppenköpfe per Tastatur auf- und zuklappen, aria-controls,
   await shot(page, "objinfo-gruppe-dunkel");
   await setTheme(page, "light");
 });
+
+// [250] Ältere Overlay-Dialoge auf dieselbe Hülle (`useModalFocus`): Fokus beim Öffnen im Dialog, Tab-Falle, Esc
+// (wie bisher über den Dialog selbst), Fokus zurück zum Auslöser, Hintergrund-Kürzel gesperrt.
+
+test("Export-Dialoge (IFC, DXF): Fokus im Dialog, Dateiname fokussiert, Tab-Falle, Esc, Fokus zurück zum Datei-Menü", async ({ page }) => {
+  test.setTimeout(150_000);
+  await startWithHooks(page);
+  await openSample(page);
+  await selectAllWalls(page);
+  const fileBtn = page.getByRole("button", { name: "Datei", exact: true });
+  await fileMenu(page, "Exportieren: IFC");
+  const ifc = page.getByRole("dialog", { name: "Exportieren" });
+  await expect(ifc).toBeVisible();
+  await expect(ifc.getByRole("textbox", { name: "Dateiname" })).toBeFocused();
+  await expectTrapped(page, ifc);
+  await expectNoBackgroundShortcuts(page, ifc);
+  await page.keyboard.press("Escape");
+  await expect(ifc).toHaveCount(0);
+  await expect(fileBtn).toBeFocused();
+  await fileMenu(page, "Exportieren: DXF");
+  const dxf = page.getByRole("dialog", { name: "DXF/DWG exportieren" });
+  await expect(dxf).toBeVisible();
+  expect(await focusInside(dxf)).toBe(true);
+  await expectTrapped(page, dxf);
+  await expectNoBackgroundShortcuts(page, dxf);
+  await page.keyboard.press("Escape");
+  await expect(dxf).toHaveCount(0);
+  await expect(fileBtn).toBeFocused();
+});
+
+test("Ungespeicherte Änderungen: Fokus auf Abbrechen (nie auf Verwerfen), Enter bricht ab, Tab-Falle, Esc", async ({ page }) => {
+  test.setTimeout(150_000);
+  await startWithHooks(page);
+  await openSample(page);
+  // Eine Änderung (Wände löschen), damit die Rückfrage kommt.
+  await selectAllWalls(page);
+  await page.keyboard.press("Delete");
+  const fileBtn = page.getByRole("button", { name: "Datei", exact: true });
+  await fileMenu(page, /^Neu aus Vorlage: Musterhaus$/);
+  const dlg = page.getByRole("dialog", { name: "Ungespeicherte Änderungen" });
+  await expect(dlg).toBeVisible();
+  await expect(dlg.getByRole("button", { name: "Abbrechen" })).toBeFocused();
+  await expectTrapped(page, dlg);
+  await dlg.getByRole("button", { name: "Abbrechen" }).focus();
+  await page.keyboard.press("Enter");
+  await expect(dlg).toHaveCount(0);
+  await expect(page.locator(".project-name")).toHaveText("Demo-Haus");
+  await fileMenu(page, /^Neu aus Vorlage: Musterhaus$/);
+  await expect(dlg).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(dlg).toHaveCount(0);
+  await expect(fileBtn).toBeFocused();
+});
+
+test("Einstellungen: Fokus im Dialog, Tab-Falle, Esc, Fokus zurück", async ({ page }) => {
+  test.setTimeout(120_000);
+  await startWithHooks(page);
+  const menu = page.getByRole("menubar").getByRole("button", { name: "Fenster", exact: true });
+  await menu.click();
+  await page.getByRole("option", { name: "Einstellungen" }).click();
+  const dlg = page.getByRole("dialog", { name: "Einstellungen" });
+  await expect(dlg).toBeVisible();
+  expect(await focusInside(dlg)).toBe(true);
+  await expectTrapped(page, dlg);
+  await expectNoBackgroundShortcuts(page, dlg);
+  await page.keyboard.press("Escape");
+  await expect(dlg).toHaveCount(0);
+  await expect(menu).toBeFocused();
+});
+
+test("Neues Layout und Präsentationsplan: Fokus im Dialog, beschriftete Auswahlfelder, Tab-Falle, Esc", async ({ page }) => {
+  test.setTimeout(150_000);
+  await startWithHooks(page);
+  await openSample(page);
+  await openTab(page, "Mappe");
+  const opener = page.getByRole("button", { name: "Layout erstellen" }).first();
+  await opener.click();
+  const dlg = page.getByRole("dialog", { name: "Neues Layout" });
+  await expect(dlg).toBeVisible();
+  expect(await focusInside(dlg)).toBe(true);
+  await dlg.getByTestId("newlayout-poster").check();
+  await expect(dlg.getByTestId("newlayout-poster-select")).toHaveAccessibleName(/\S/);
+  await expectTrapped(page, dlg);
+  await page.keyboard.press("Escape");
+  await expect(dlg).toHaveCount(0);
+  await typeCommand(page, "praesentation");
+  const pres = page.getByRole("dialog", { name: "Präsentationsplan" });
+  await expect(pres).toBeVisible();
+  expect(await focusInside(pres)).toBe(true);
+  await expect(pres.getByTestId("presentation-paper")).toHaveAccessibleName("Papierformat");
+  await expect(pres.getByTestId("presentation-scale")).toHaveAccessibleName("Massstab");
+  await expectTrapped(page, pres);
+  await page.keyboard.press("Escape");
+  await expect(pres).toHaveCount(0);
+});

@@ -11,6 +11,7 @@
 
 import { useEffect, useState } from "react";
 import { t, type TranslationKey } from "../i18n";
+import { useModalFocus } from "./modalFocus";
 import { ACCENT_SWATCHES } from "../theme/accents";
 import { ColorHexField } from "./ColorHexField";
 import { LayoutMenu } from "./LayoutMenu";
@@ -161,6 +162,7 @@ export function SettingsDialog({
     });
   }, []);
 
+  const dialogRef = useModalFocus({});
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -196,7 +198,7 @@ export function SettingsDialog({
   const dialog = (
       <div
         className={`imp-dialog${windowed ? " imp-dialog-embedded" : ""}`}
-        role="dialog"
+        ref={dialogRef} role="dialog"
         aria-modal="true"
         aria-label={t("settings.title")}
         onClick={windowed ? undefined : (e) => e.stopPropagation()}
@@ -523,6 +525,7 @@ function AliasRemapSection({ onChange }: { onChange?: (overrides: Record<string,
               <span className="settings-alias-arrow">→</span>
               <select
                 className="settings-select"
+                aria-label={t("settings.shortcuts.pickCommand")}
                 value={cmd}
                 onChange={(e) => commit({ ...overrides, [key]: e.target.value })}
               >
@@ -548,6 +551,7 @@ function AliasRemapSection({ onChange }: { onChange?: (overrides: Record<string,
       <div className="settings-alias-row settings-alias-new">
         <input
           type="text"
+          aria-label={t("settings.shortcuts.newKey")}
           className="settings-num-input settings-alias-key-input"
           value={newKey}
           onChange={(e) => setNewKey(e.target.value)}
@@ -556,6 +560,7 @@ function AliasRemapSection({ onChange }: { onChange?: (overrides: Record<string,
         <span className="settings-alias-arrow">→</span>
         <select
           className="settings-select"
+          aria-label={t("settings.shortcuts.pickCommand")}
           value={newCommand}
           onChange={(e) => setNewCommand(e.target.value)}
         >
