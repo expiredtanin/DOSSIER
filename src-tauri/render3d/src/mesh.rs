@@ -1554,85 +1554,11 @@ fn signed_area(pts: &[Point2]) -> f32 {
     a * 0.5
 }
 
-/// Kreuzprodukt (b-a) x (c-a) im Grundriss.
-#[inline]
-fn cross2(a: Point2, b: Point2, c: Point2) -> f32 {
-    (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
-}
-
-/// Liegt p im (a,b,c)-Dreieck? (CCW-orientiert).
-fn point_in_tri(a: Point2, b: Point2, c: Point2, p: Point2) -> bool {
-    let d1 = cross2(a, b, p);
-    let d2 = cross2(b, c, p);
-    let d3 = cross2(c, a, p);
-    let has_neg = d1 < 0.0 || d2 < 0.0 || d3 < 0.0;
-    let has_pos = d1 > 0.0 || d2 > 0.0 || d3 > 0.0;
-    !(has_neg && has_pos)
-}
-
-/// Ear-Clipping-Triangulierung eines einfachen (lochfreien) Polygons. Robust fuer
-/// konvexe UND konkave Ringe. O(n^2) — fuer Decken-Umrisse (wenige Ecken) voellig
-/// ausreichend. Liefert Dreiecks-Indizes (0-basiert auf `pts`); leer bei <3 Ecken
-/// oder Degeneration. 1:1-Port von `render2d::tessellate::triangulate`.
+/// Ear-Clipping eines einfachen Umrisses (Indizes auf `pts`); gemeinsame robuste Fassung in
+/// `dossier_hatch::ear_clip` ([230]).
 pub fn triangulate(pts: &[Point2]) -> Vec<u32> {
-    let n = pts.len();
-    if n < 3 {
-        return Vec::new();
-    }
-    // Ohr-Test unten nutzt cross>0 = konvex (setzt CCW voraus). CW-Polygone drehen.
-    let mut idx: Vec<usize> = (0..n).collect();
-    if signed_area(pts) < 0.0 {
-        idx.reverse();
-    }
-
-    let mut tris: Vec<u32> = Vec::new();
-    let mut guard = 0usize;
-    let max_guard = n * n + 16;
-
-    while idx.len() > 3 && guard < max_guard {
-        guard += 1;
-        let mut clipped = false;
-        let m = idx.len();
-        for i in 0..m {
-            let i_prev = idx[(i + m - 1) % m];
-            let i_cur = idx[i];
-            let i_next = idx[(i + 1) % m];
-            let a = pts[i_prev];
-            let b = pts[i_cur];
-            let c = pts[i_next];
-            if cross2(a, b, c) <= 0.0 {
-                continue; // konkav/kollinear -> kein Ohr
-            }
-            let mut contains = false;
-            for &vi in &idx {
-                if vi == i_prev || vi == i_cur || vi == i_next {
-                    continue;
-                }
-                if point_in_tri(a, b, c, pts[vi]) {
-                    contains = true;
-                    break;
-                }
-            }
-            if contains {
-                continue;
-            }
-            tris.push(i_prev as u32);
-            tris.push(i_cur as u32);
-            tris.push(i_next as u32);
-            idx.remove(i);
-            clipped = true;
-            break;
-        }
-        if !clipped {
-            break;
-        }
-    }
-    if idx.len() == 3 {
-        tris.push(idx[0] as u32);
-        tris.push(idx[1] as u32);
-        tris.push(idx[2] as u32);
-    }
-    tris
+    let p: Vec<[f64; 2]> = pts.iter().map(|q| [q[0] as f64, q[1] as f64]).collect();
+    dossier_hatch::ear_clip::triangulate(&p)
 }
 
 /// Haengt ein Dreieck (drei world-Ecken) mit fester Flaechen-Normale + Farbe an.

@@ -3997,6 +3997,7 @@ dependencies = [
  "brotli-decompressor",
  "bytemuck",
  "console_error_panic_hook",
+ "dossier-hatch",
  "env_logger",
  "fontdb",
  "glyphon",

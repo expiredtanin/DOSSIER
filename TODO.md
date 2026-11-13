@@ -10,7 +10,7 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   stehen im Archiv („Bewusst nicht übernommen“).
 - **Grösse** (eine Person mit Agenten): S ≤ 1 Tag · M ≤ 1 Woche · L ≤ 1 Monat · XL > 1 Monat.
   Steht keine Grösse im Archiv, ist sie hier geschätzt.
-- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 229);
+- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 233);
   nie eine ID wiederverwenden oder umnummerieren. Präfix-IDs (`[K]`, `[G]`, `[T]`, `[B]`, `[C]`) bleiben.
 - **Pro Punkt:** was fehlt · wo im Code · Grösse. Höchstens ein bis drei Sätze je Punkt;
   Messwerte und Befunde gehören in den Commit.
@@ -197,6 +197,16 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   `add_textures`: keine Normalenkarte, stattdessen Rauigkeitskarte als Höhenfeld (Bump, Stärke 0.3, rahmenfrei). Test:
   `blenderRender.test.ts` (Skript ohne Normal-Map-Knoten). Geprüft: echter Lauf `bpy` 5.3 (CPU) vorher/nachher. Offen: Mac/Blender 3.6/4.x;
   echte Normalenkarten bräuchten UVs im GLB-Export. · S
+- ✓ **[230]** Sonnenschatten im Grundriss mit weissen Löchern, je nach Uhrzeit (13.11., Maintainer, Linux). Ursache: Das Ear-Clipping
+  (dreifach vorhanden: Kern `gpu_compile`, `render2d`, `render3d`) brach bei den abgetasteten Geländeschatten-Stücken (viele fast kollineare
+  Ecken, Ring berührt sich längs einer Geraden) ab und liess den Rest leer — 651 von 4149 Stücken im Musterhaus komplex über ein Jahr.
+  Lösung: eine robuste Fassung `hatchgen/src/ear_clip.rs` für alle drei (flache/doppelte Ecken vorab und nach jedem Ohr entfernen,
+  Diagonal-Test mit Spiel, zweite Stufe streng, erst dann erzwungen); Probe danach 0 Fehler in f64 und f32. Tests `ear_clip::tests`.
+  Geprüft nur im Linux-Container (Probe + Tests), nicht auf dem Mac. · S
+- ○ **[231]** 3D: Fenster im Giebel nicht sauber eingeschnitten (13.11., Maintainer, Musterhaus komplex): über dem Fenster laufen senkrechte
+  Kanten bis zum Dach (Wand in Streifen zerlegt), rundes Giebelfenster nur teilweise ausgeschnitten. · M
+- ○ **[232]** 3D: Netzlinien (Fächer der Triangulierung) auf den Dachflächen sichtbar, v. a. in Schwarz-Weiss und von weitem (13.11.). · S
+- ○ **[233]** 3D: Oberflächenmuster-Striche (Fassadenschalung/Dachziegel) ragen über Dachrand und Traufe hinaus (13.11.). · S
 ### Phase 3 (27.11.–3.12.): Vorprojekt
 - 1:100-Pläne in Abgabequalität (Bemassung, Koten, Raumstempel, Öffnungen nach Detailgrad) — Plan-Review-Runde 4 nach [199].
 - Fachplaner-Austausch: DXF/DWG je Geschoss/Schnitt/Ansicht ([200]), IFC mit Räumen/Psets ([201]); Rundreise in Archicad/Revit einmal

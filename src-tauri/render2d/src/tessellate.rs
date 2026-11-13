@@ -402,24 +402,6 @@ fn stroke_dashed_or_solid(
     }
 }
 
-/// Signierte Flaeche (Shoelace); >0 = CCW (Modell-Y nach oben).
-fn signed_area(pts: &[Point]) -> f32 {
-    let mut a = 0.0f32;
-    let n = pts.len();
-    let mut j = n - 1;
-    for i in 0..n {
-        a += pts[j][0] * pts[i][1] - pts[i][0] * pts[j][1];
-        j = i;
-    }
-    a / 2.0
-}
-
-/// Kreuzprodukt (b-a) x (c-a).
-#[inline]
-fn cross(a: Point, b: Point, c: Point) -> f32 {
-    (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
-}
-
 /// Einheits-Richtung von `from` nach `to` (Bildschirm-Raum); None bei Nulllaenge.
 #[inline]
 fn unit_dir(from: Point, to: Point) -> Option<Point> {
@@ -439,88 +421,11 @@ fn left_normal_of(d: Point) -> Point {
     [-d[1], d[0]]
 }
 
-/// Liegt p im (a,b,c)-Dreieck? (CCW-orientiert).
-fn point_in_tri(a: Point, b: Point, c: Point, p: Point) -> bool {
-    let d1 = cross(a, b, p);
-    let d2 = cross(b, c, p);
-    let d3 = cross(c, a, p);
-    let has_neg = d1 < 0.0 || d2 < 0.0 || d3 < 0.0;
-    let has_pos = d1 > 0.0 || d2 > 0.0 || d3 > 0.0;
-    !(has_neg && has_pos)
-}
-
-/// Ear-Clipping-Triangulierung eines einfachen (lochfreien) Polygons. Robust fuer
-/// konvexe UND konkave Ringe. O(n^2) — fuer Plan-Polygone (wenige Ecken) voellig
-/// ausreichend. Gibt Dreiecks-Indizes (0-basiert auf `pts`) zurueck; leer bei <3
-/// Ecken oder Degeneration.
+/// Ear-Clipping eines einfachen (lochfreien) Polygons (Indizes auf `pts`); gemeinsame robuste Fassung in
+/// `dossier_hatch::ear_clip` ([230]: doppelte/kollineare Ecken, kein Abbruch mit Loch).
 pub fn triangulate(pts: &[Point]) -> Vec<u32> {
-    let n = pts.len();
-    if n < 3 {
-        return Vec::new();
-    }
-
-    // Ohr-Test unten nutzt cross>0 = konvex, was CCW voraussetzt. Bei CW-Polygonen
-    // die Index-Reihenfolge umdrehen (Triangulierung ist raum-affin-invariant, die
-    // Indizes gelten danach auch fuer die Bildschirm-Raum-Vertices).
-    let mut idx: Vec<usize> = (0..n).collect();
-    if signed_area(pts) < 0.0 {
-        idx.reverse(); // <0 = CW -> auf CCW drehen
-    }
-
-    let mut tris: Vec<u32> = Vec::new();
-    let mut guard = 0usize;
-    let max_guard = n * n + 16;
-
-    while idx.len() > 3 && guard < max_guard {
-        guard += 1;
-        let mut clipped = false;
-        let m = idx.len();
-        for i in 0..m {
-            let i_prev = idx[(i + m - 1) % m];
-            let i_cur = idx[i];
-            let i_next = idx[(i + 1) % m];
-            let a = pts[i_prev];
-            let b = pts[i_cur];
-            let c = pts[i_next];
-
-            // Konvexe Ecke? (bei CCW: cross > 0)
-            if cross(a, b, c) <= 0.0 {
-                continue;
-            }
-
-            // Kein anderer Vertex im Ohr?
-            let mut contains = false;
-            for &vi in &idx {
-                if vi == i_prev || vi == i_cur || vi == i_next {
-                    continue;
-                }
-                if point_in_tri(a, b, c, pts[vi]) {
-                    contains = true;
-                    break;
-                }
-            }
-            if contains {
-                continue;
-            }
-
-            // Ohr abschneiden.
-            tris.push(i_prev as u32);
-            tris.push(i_cur as u32);
-            tris.push(i_next as u32);
-            idx.remove(i);
-            clipped = true;
-            break;
-        }
-        if !clipped {
-            break; // Degeneriert -> abbrechen (kein Absturz).
-        }
-    }
-    if idx.len() == 3 {
-        tris.push(idx[0] as u32);
-        tris.push(idx[1] as u32);
-        tris.push(idx[2] as u32);
-    }
-    tris
+    let p: Vec<[f64; 2]> = pts.iter().map(|q| [q[0] as f64, q[1] as f64]).collect();
+    dossier_hatch::ear_clip::triangulate(&p)
 }
 
 /// Pipeline-Art eines Batches in der Maler-Reihenfolge (`GpuGeometry::draw_sequence`).

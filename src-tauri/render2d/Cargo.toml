@@ -61,6 +61,8 @@ headless = ["render", "dep:image"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
+# Gemeinsames robustes Ear-Clipping (hatchgen/src/ear_clip.rs, [230]).
+dossier-hatch = { path = "../hatchgen" }
 # WOFF2-Schriften fuer den Glyphen-Pass (src/woff2.rs, [226]); reiner Rust-Dekoder, auch wasm.
 brotli-decompressor = "5"
 

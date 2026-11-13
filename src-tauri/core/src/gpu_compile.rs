@@ -105,132 +105,11 @@ pub struct GpuOut {
 
 // ── Triangulierung ─────────────────────────────────────────────────────────
 
-fn signed_area(pts: &[V2]) -> f64 {
-    let n = pts.len();
-    let mut a = 0.0;
-    let mut j = n - 1;
-    for i in 0..n {
-        a += pts[j].x * pts[i].y - pts[i].x * pts[j].y;
-        j = i;
-    }
-    a / 2.0
-}
-
-#[inline]
-fn cross(a: V2, b: V2, c: V2) -> f64 {
-    (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
-}
-
-#[inline]
-fn point_in_tri(a: V2, b: V2, c: V2, p: V2) -> bool {
-    let d1 = cross(a, b, p);
-    let d2 = cross(b, c, p);
-    let d3 = cross(c, a, p);
-    let has_neg = d1 < 0.0 || d2 < 0.0 || d3 < 0.0;
-    let has_pos = d1 > 0.0 || d2 > 0.0 || d3 > 0.0;
-    !(has_neg && has_pos)
-}
-
-/// Ear-Clipping eines einfachen (lochfreien) Polygons, konvex oder konkav. Indizes auf `pts`;
-/// leer bei < 3 Ecken. Enthalten-Test nur gegen reflexe Ecken, Ohren per verketteter Liste.
+/// Ear-Clipping eines einfachen (lochfreien) Polygons, konvex oder konkav (Indizes auf `pts`); gemeinsame
+/// robuste Fassung in `dossier_hatch::ear_clip` ([230]).
 pub fn triangulate(pts: &[V2]) -> Vec<u32> {
-    let n = pts.len();
-    if n < 3 {
-        return Vec::new();
-    }
-    let mut order: Vec<usize> = (0..n).collect();
-    if signed_area(pts) < 0.0 {
-        order.reverse();
-    }
-    let mut next = vec![0usize; n];
-    let mut prev = vec![0usize; n];
-    for i in 0..n {
-        next[order[i]] = order[(i + 1) % n];
-        prev[order[i]] = order[(i + n - 1) % n];
-    }
-    // Reflex-Menge: Liste + Position (Reihenfolge ist für das Ergebnis belanglos — nur „liegt
-    // irgendeine reflexe Ecke im Ohr?“ zählt).
-    let mut reflex: Vec<usize> = Vec::new();
-    let mut pos = vec![usize::MAX; n];
-    let is_reflex = |i: usize, prev: &[usize], next: &[usize]| cross(pts[prev[i]], pts[i], pts[next[i]]) <= 0.0;
-    fn add(i: usize, reflex: &mut Vec<usize>, pos: &mut [usize]) {
-        if pos[i] == usize::MAX {
-            pos[i] = reflex.len();
-            reflex.push(i);
-        }
-    }
-    fn del(i: usize, reflex: &mut Vec<usize>, pos: &mut [usize]) {
-        let p = pos[i];
-        if p != usize::MAX {
-            let last = *reflex.last().unwrap();
-            reflex.swap_remove(p);
-            if last != i {
-                pos[last] = p;
-            }
-            pos[i] = usize::MAX;
-        }
-    }
-    for &i in &order {
-        if is_reflex(i, &prev, &next) {
-            add(i, &mut reflex, &mut pos);
-        }
-    }
-    let mut tris: Vec<u32> = Vec::new();
-    let mut remaining = n;
-    let mut i = order[0];
-    let mut no_ear_streak = 0usize;
-    let mut guard: u64 = 0;
-    let max_guard = (n as u64) * (n as u64) + 16;
-    while remaining > 3 && {
-        let g = guard;
-        guard += 1;
-        g < max_guard
-    } {
-        let a = prev[i];
-        let b = i;
-        let c = next[i];
-        let mut is_ear = pos[b] == usize::MAX;
-        if is_ear {
-            for &vi in &reflex {
-                if vi == a || vi == b || vi == c {
-                    continue;
-                }
-                if point_in_tri(pts[a], pts[b], pts[c], pts[vi]) {
-                    is_ear = false;
-                    break;
-                }
-            }
-        }
-        if is_ear {
-            tris.extend_from_slice(&[a as u32, b as u32, c as u32]);
-            next[a] = c;
-            prev[c] = a;
-            del(b, &mut reflex, &mut pos);
-            remaining -= 1;
-            if is_reflex(a, &prev, &next) {
-                add(a, &mut reflex, &mut pos);
-            } else {
-                del(a, &mut reflex, &mut pos);
-            }
-            if is_reflex(c, &prev, &next) {
-                add(c, &mut reflex, &mut pos);
-            } else {
-                del(c, &mut reflex, &mut pos);
-            }
-            i = a;
-            no_ear_streak = 0;
-        } else {
-            i = c;
-            no_ear_streak += 1;
-            if no_ear_streak > remaining {
-                break;
-            }
-        }
-    }
-    if remaining == 3 {
-        tris.extend_from_slice(&[prev[i] as u32, i as u32, next[i] as u32]);
-    }
-    tris
+    let p: Vec<[f64; 2]> = pts.iter().map(|q| [q.x, q.y]).collect();
+    dossier_hatch::ear_clip::triangulate(&p)
 }
 
 // ── Farben ─────────────────────────────────────────────────────────────────
@@ -1184,7 +1063,10 @@ mod tests {
         let l = [v2(0.0, 0.0), v2(2.0, 0.0), v2(2.0, 1.0), v2(1.0, 1.0), v2(1.0, 2.0), v2(0.0, 2.0)];
         let t = triangulate(&l);
         assert_eq!(t.len(), 12);
-        let area: f64 = t.chunks(3).map(|c| cross(l[c[0] as usize], l[c[1] as usize], l[c[2] as usize]).abs() / 2.0).sum();
+        let area: f64 = t.chunks(3).map(|c| {
+            let (a, b, d) = (l[c[0] as usize], l[c[1] as usize], l[c[2] as usize]);
+            ((b.x - a.x) * (d.y - a.y) - (b.y - a.y) * (d.x - a.x)).abs() / 2.0
+        }).sum();
         assert!((area - 3.0).abs() < 1e-12);
         let mut cw = l;
         cw.reverse();
