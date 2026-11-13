@@ -4,13 +4,19 @@
 //
 //   cargo run --release --features png --bin render_png -- modell.json aus.png [--view iso] [--style shaded] [--size 1200x800] [--target x,y,z] [--dist 12] [--sun 135,30]
 //     [--points wolke.txt] [--point-size 3] [--point-color rgb|intensity|class|height]
-//     [--style pathtrace --samples 64 [--denoise off] [--pt-goal 1024]]
+//     [--style pathtrace --samples 64 [--denoise off] [--pt-goal 1024]] [--textures public] [--test-texture]
 //
 // `--style pathtrace` ([212]): GPU-Pathtracer statt Rasterbild, `--samples N` Samples je Pixel (Standard 64);
 // meldet Zeit und Samples/s auf stderr. Ohne `--sun` gilt das Standardlicht als Sonne; `--sun AZ,HÖHE` mit Höhe ≤ 0
 // zeigt den Nachthimmel. Entrauscher wie im Viewport (Standard an, `--denoise off` roh): Mischgewicht nach N und dem
 // Ziel der Vorschau `--pt-goal` (Standard 1024 wie im Viewport; `--pt-goal N` = am Ziel, also roh). Materialtabelle aus
 // `ptMaterials` im Modell (`dossier-cli … model3d`).
+//
+// `--textures <ordner>` ([212] Etappe 3): Bildkarten der Materialtabelle (`ptMaterials[i].map`, z. B.
+// `/assets/materials/Bricks104/color.jpg`) unter diesem Ordner lesen (im Repo `public`), JPEG dekodieren, auf 256 × 256
+// mitteln und wie im Viewer als Textur-Array hochladen (`set_material_textures`) — für die Stile `textured` und
+// `pathtrace`. Nicht lesbare Karten bleiben schwarz (= ohne Karte). `--test-texture`: statt der Dateien eine erzeugte
+// Mauerwerks-Karte für jede Ebene (Prüfbild ohne Bilddateien).
 //
 // `--points` ([27]): Textdatei mit einem Punkt je Zeile `x y z [r g b [intensitaet [klasse]]]` in
 // Modell-Metern (x = Ost, y = Nord, z = Hoehe) — dieselbe Punkt-Pipeline wie im Browser-Viewport.
@@ -142,6 +148,93 @@ pub(crate) fn preset(name: &str) -> CameraPreset {
         "perspective" => CameraPreset::Persp,
         _ => CameraPreset::Iso,
     }
+}
+
+/// Kantenlänge einer Textur-Ebene (wie `gpu::TEXTURE_SIZE` und `materialTextures.ts`).
+const TEX_SIZE: usize = 256;
+
+/// RGB(A)-Bild `w × h` (`ch` Kanäle) auf `TEX_SIZE²` RGBA mitteln (Flächenmittel; Vergrösserung = nächster Nachbar).
+fn resample_rgba(src: &[u8], w: usize, h: usize, ch: usize) -> Option<Vec<u8>> {
+    if w == 0 || h == 0 || ch < 3 || src.len() < w * h * ch {
+        return None;
+    }
+    let mut out = vec![255u8; TEX_SIZE * TEX_SIZE * 4];
+    for oy in 0..TEX_SIZE {
+        let (y0, y1) = (oy * h / TEX_SIZE, ((oy + 1) * h / TEX_SIZE).max(oy * h / TEX_SIZE + 1).min(h));
+        for ox in 0..TEX_SIZE {
+            let (x0, x1) = (ox * w / TEX_SIZE, ((ox + 1) * w / TEX_SIZE).max(ox * w / TEX_SIZE + 1).min(w));
+            let mut sum = [0u32; 3];
+            for y in y0..y1 {
+                for x in x0..x1 {
+                    let b = (y * w + x) * ch;
+                    for k in 0..3 {
+                        sum[k] += src[b + k] as u32;
+                    }
+                }
+            }
+            let n = ((y1 - y0) * (x1 - x0)).max(1) as u32;
+            let o = (oy * TEX_SIZE + ox) * 4;
+            for k in 0..3 {
+                out[o + k] = (sum[k] / n) as u8;
+            }
+        }
+    }
+    Some(out)
+}
+
+/// Eine Bildkarte lesen (JPEG) und auf `TEX_SIZE²` RGBA bringen; None, wenn nicht lesbar.
+fn load_map(dir: &str, map: &str) -> Option<Vec<u8>> {
+    let rel = map.trim_start_matches('/');
+    if rel.is_empty() || rel.contains("..") || map.contains(':') {
+        return None;
+    }
+    let bytes = std::fs::read(std::path::Path::new(dir).join(rel)).ok()?;
+    let opts = zune_core::options::DecoderOptions::default().jpeg_set_out_colorspace(zune_core::colorspace::ColorSpace::RGB);
+    let mut dec = zune_jpeg::JpegDecoder::new_with_options(zune_core::bytestream::ZCursor::new(&bytes), opts);
+    let px = dec.decode().ok()?;
+    let (w, h) = dec.dimensions()?;
+    resample_rgba(&px, w, h, 3)
+}
+
+/// Erzeugte Prüf-Karte: Mauerwerk (Läuferverband, Steine 25 × 6.5 cm bei 1 m Kachel, helle Fugen 1 cm).
+fn test_texture() -> Vec<u8> {
+    let mut out = vec![255u8; TEX_SIZE * TEX_SIZE * 4];
+    let s = TEX_SIZE as f32;
+    for y in 0..TEX_SIZE {
+        for x in 0..TEX_SIZE {
+            let (u, v) = (x as f32 / s, y as f32 / s);
+            let row = (v / 0.075).floor();
+            let fv = v / 0.075 - row;
+            let shift = if row as i32 % 2 == 0 { 0.0 } else { 0.125 };
+            let fu = ((u + shift) / 0.25).fract();
+            let joint = fv < 0.13 || fu < 0.04;
+            let tone = 0.85 + 0.15 * (((row as i32 * 7 + ((u + shift) / 0.25).floor() as i32 * 13) % 5) as f32 / 4.0);
+            let c = if joint { [200.0, 195.0, 185.0] } else { [165.0 * tone, 80.0 * tone, 55.0 * tone] };
+            let o = (y * TEX_SIZE + x) * 4;
+            for k in 0..3 {
+                out[o + k] = c[k] as u8;
+            }
+        }
+    }
+    out
+}
+
+/// Bildkarten der Materialtabelle als gepackte Ebenen (Reihenfolge wie `ptMaterials`), Anzahl geladener Karten.
+fn load_textures(dir: &str, test: bool, entries: &[render3d::pt_material::PtMaterialEntry]) -> (Vec<u8>, usize) {
+    let layer = TEX_SIZE * TEX_SIZE * 4;
+    let mut data = vec![0u8; entries.len() * layer];
+    let mut loaded = 0;
+    for (i, e) in entries.iter().enumerate() {
+        let px = if test { Some(test_texture()) } else { load_map(dir, &e.map) };
+        match px {
+            Some(px) => {
+                data[i * layer..(i + 1) * layer].copy_from_slice(&px);
+                loaded += 1;
+            }
+            None => eprintln!("Bildkarte nicht lesbar: {}", e.map),
+        }
+    }
+    (data, loaded)
 }
 
 /// Minimaler PNG-Schreiber (RGBA8, unkomprimierte Deflate-Blöcke) — keine zusätzliche Abhängigkeit.
@@ -318,6 +411,13 @@ fn main() {
     }
     renderer.set_pathtrace_materials(&model.pt_materials);
     renderer.set_pathtrace_denoise(flag("--denoise", "on") != "off");
+    let tex_dir = flag("--textures", "");
+    let test_tex = args.iter().any(|a| a == "--test-texture");
+    if (!tex_dir.is_empty() || test_tex) && !model.pt_materials.is_empty() {
+        let (data, loaded) = load_textures(&tex_dir, test_tex, &model.pt_materials);
+        renderer.set_material_textures(&device, &queue, &data, model.pt_materials.len() as u32);
+        eprintln!("Bildkarten: {loaded} von {} geladen{}", model.pt_materials.len(), if test_tex { " (Prüf-Karte)" } else { "" });
+    }
     let points_path = flag("--points", "");
     if !points_path.is_empty() {
         let cloud = read_points_txt(&points_path);

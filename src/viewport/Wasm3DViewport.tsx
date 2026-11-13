@@ -804,7 +804,16 @@ export function Wasm3DViewport({
         // Gespeicherte Kamera ([213]) oder die Live-Kamera; das Blickziel liegt im Abstand der Live-Kamera.
         const cam = o.camera ? camera3dFromViewCamera(o.camera, cur.dist) : orbitCamera(cur);
         if (!cam) return Promise.resolve(null);
-        return exportImage({ camera: cam, width: o.width, height: o.height, transparent: o.transparent, ...(o.samples !== undefined ? { samples: o.samples } : {}), restore: draw });
+        return exportImage({
+          camera: cam,
+          width: o.width,
+          height: o.height,
+          transparent: o.transparent,
+          ...(o.samples !== undefined ? { samples: o.samples } : {}),
+          ...(o.onProgress ? { onProgress: o.onProgress } : {}),
+          ...(o.signal ? { signal: o.signal } : {}),
+          restore: draw,
+        });
       },
       section: (plane) => setExtSection(plane),
       fit: () => fitCameraRef.current(),

@@ -3970,6 +3970,7 @@ export const de = {
   "image3d.cameraBad": "Die gewählte Kamera ist unbrauchbar (Standpunkt gleich Ziel).",
   "image3d.noTransparency": "Transparenter Hintergrund ist mit diesem Renderer nicht möglich: Bild mit Hintergrund erstellt.",
   "image3d.saved": "3D-Bild gespeichert",
+  "image3d.progress": "Sample {done} von {total}",
   "menu.view.rendering": "Rendering mit Blender …",
   "render.title": "Rendering mit Blender",
   "render.intro": "Fotorealistisches Bild der aktiven 3D-Ansicht mit Blender/Cycles (installiertes Blender, läuft als eigener Prozess).",

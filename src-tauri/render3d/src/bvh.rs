@@ -7,10 +7,15 @@
 // Indizes ausserhalb des Puffers fallen weg; leere Eingabe = leerer Baum (`tri_count() == 0`, Shader verfolgt nichts).
 // Doppelseitige Netze (Kontext, Glas, Dächer: `mesh.rs` legt jedes Dreieck zweimal mit umgekehrter Windung ab)
 // bleiben einmal im Baum: der Pathtracer dreht die Normale ohnehin zur Blickseite.
+//
+// Etappe 3 (Texturen): je Dreieck die UV seiner drei Ecken in einem Parallel-Puffer (`GpuTriTex`, gleiche Reihenfolge
+// wie `GpuTri`, nur beim Treffer gelesen — die Traversierung bleibt schlank). Die UV sind dieselben weltmassstäblichen
+// Meter wie in der schattierten Ansicht (`mesh::planar_uv` aus Ecke und Ecken-Normale); der Shader interpoliert sie
+// baryzentrisch (`interp_uv`) und skaliert mit 1 / Kachelgrösse.
 
 use std::collections::HashSet;
 
-pub use crate::pt_material::{classify_color, srgb_to_linear, PtMaterialTable, GLASS_RGB, MAT_DIFFUSE, MAT_GLASS, MAT_GLOSSY, STEEL_RGB};
+pub use crate::pt_material::{classify_color, srgb_to_linear, PtMaterialTable, GLASS_RGB, MAT_DIFFUSE, MAT_EMISSIVE, MAT_GLASS, MAT_GLOSSY, STEEL_RGB, TERRAIN_LAYER};
 
 /// Höchstens so viele Dreiecke je Blatt, wenn die SAH nicht weiter teilt.
 const MAX_LEAF: usize = 8;
@@ -21,14 +26,19 @@ const MAX_DEPTH: usize = 48;
 /// Kosten einer Knoten-Traversierung relativ zu einem Dreieckstest.
 const TRAVERSAL_COST: f32 = 1.0;
 
-/// Ein Dreieck der Eingabe: Ecken (world, Y oben), Grundfarbe (Vertexfarbe, wie im Shader 0..1) und Material-Ebene
-/// der Szene (`ChunkData::layers`, ≥ 1 = Bildkarte/Baustoff, sonst keine; s. `pt_material.rs`).
+/// Ein Dreieck der Eingabe: Ecken (world, Y oben), Grundfarbe (Vertexfarbe, wie im Shader 0..1), Material-Ebene
+/// der Szene (`ChunkData::layers`, ≥ 1 = Bildkarte/Baustoff, `TERRAIN_LAYER` = Gelände ohne Material, sonst keine;
+/// s. `pt_material.rs`) und die UV der Ecken in Metern (`mesh::planar_uv`).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PtTri {
     pub v: [[f32; 3]; 3],
     pub color: [f32; 3],
     pub layer: i32,
+    pub uv: [[f32; 2]; 3],
 }
+
+/// UV ohne Zuordnung (Tests, Eingaben ohne Normale).
+pub const NO_UV: [[f32; 2]; 3] = [[0.0; 2]; 3];
 
 /// Knoten, 32 Byte, 1:1 zum WGSL-`Node`: `count > 0` = Blatt mit Dreiecken `[left_first, left_first + count)`,
 /// sonst innen mit Kindern `left_first` und `left_first + 1`.
@@ -57,6 +67,36 @@ pub struct GpuTri {
     pub metal: f32,
 }
 
+/// Texturdaten je Dreieck, 32 Byte, 1:1 zum WGSL-`TriTex`, parallel zu `GpuTri`: UV der Ecken (Meter), `tex` =
+/// Textur-Ebene (Bits 0..16, 0 = keine Bildkarte) + prozedurale Textur (Bits 16..24, `pt_material::PROC_*`), `scale` =
+/// 1 / Kachelgrösse.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[cfg_attr(feature = "render", derive(bytemuck::Pod, bytemuck::Zeroable))]
+pub struct GpuTriTex {
+    pub uv0: [f32; 2],
+    pub uv1: [f32; 2],
+    pub uv2: [f32; 2],
+    pub tex: u32,
+    pub scale: f32,
+}
+
+impl GpuTriTex {
+    pub fn layer(&self) -> u32 {
+        self.tex & 0xFFFF
+    }
+    pub fn proc(&self) -> u32 {
+        (self.tex >> 16) & 0xFF
+    }
+}
+
+/// UV am Punkt mit den baryzentrischen Koordinaten (u, v) von Möller–Trumbore (Gewicht u auf Ecke 1, v auf Ecke 2),
+/// mit `scale` — wie der Shader (`tri_uv`).
+pub fn interp_uv(t: &GpuTriTex, u: f32, v: f32) -> [f32; 2] {
+    let w = 1.0 - u - v;
+    [(t.uv0[0] * w + t.uv1[0] * u + t.uv2[0] * v) * t.scale, (t.uv0[1] * w + t.uv1[1] * u + t.uv2[1] * v) * t.scale]
+}
+
 /// Material aus der Vertexfarbe (Etappe 1; Rückgabe Art, Rauigkeit) — s. `pt_material::classify_color`.
 pub fn classify_material(color: [f32; 3]) -> (u32, f32) {
     let m = classify_color(color);
@@ -76,7 +116,8 @@ fn pack_mat(color: [f32; 3], kind: u32) -> u32 {
 }
 
 /// Liest Dreiecke aus einem `Mesh`-Puffer (`[pos, normal, color]` je Ecke, `FLOATS_PER_VERTEX`) und hängt sie an.
-/// Kaputte Indizes und nicht endliche Ecken fallen weg. Farbe = Mittel der drei Ecken (Luftbild-Vertexfarben).
+/// Kaputte Indizes fallen weg (nicht endliche Ecken verwirft der Baum). Farbe = Mittel der drei Ecken (Luftbild-
+/// Vertexfarben); UV je Ecke wie die schattierte Ansicht (`mesh::planar_uv`).
 /// `layers` = Material-Ebene je Vertex (`ChunkData::layers`; leer/zu kurz = keine).
 pub fn tris_from_mesh(verts: &[f32], indices: &[u32], layers: &[f32], out: &mut Vec<PtTri>) {
     let stride = crate::types::FLOATS_PER_VERTEX;
@@ -90,6 +131,8 @@ pub fn tris_from_mesh(verts: &[f32], indices: &[u32], layers: &[f32], out: &mut 
             [verts[b], verts[b + 1], verts[b + 2]]
         };
         let v = [at(t[0], 0), at(t[1], 0), at(t[2], 0)];
+        let n = [at(t[0], 3), at(t[1], 3), at(t[2], 3)];
+        let uv = [crate::mesh::planar_uv(v[0], n[0]), crate::mesh::planar_uv(v[1], n[1]), crate::mesh::planar_uv(v[2], n[2])];
         let c = [at(t[0], 6), at(t[1], 6), at(t[2], 6)];
         // Glas/Stahl nur bei gleicher Farbe an allen Ecken (sonst Mittelwert, z. B. Luftbild).
         let color = if c[0] == c[1] && c[1] == c[2] {
@@ -97,8 +140,12 @@ pub fn tris_from_mesh(verts: &[f32], indices: &[u32], layers: &[f32], out: &mut 
         } else {
             [(c[0][0] + c[1][0] + c[2][0]) / 3.0, (c[0][1] + c[1][1] + c[2][1]) / 3.0, (c[0][2] + c[1][2] + c[2][2]) / 3.0]
         };
-        let layer = layers.get(t[0] as usize).filter(|l| l.is_finite() && **l >= 1.0 && **l < 1e6).map_or(-1, |l| l.round() as i32);
-        out.push(PtTri { v, color, layer });
+        let layer = layers
+            .get(t[0] as usize)
+            .filter(|l| l.is_finite() && ((**l >= 1.0 && **l < 1e6) || **l == TERRAIN_LAYER as f32))
+            .map_or(-1, |l| l.round() as i32);
+        let uv = if uv.iter().flatten().all(|c| c.is_finite()) { uv } else { NO_UV };
+        out.push(PtTri { v, color, layer, uv });
     }
 }
 
@@ -107,6 +154,8 @@ pub fn tris_from_mesh(verts: &[f32], indices: &[u32], layers: &[f32], out: &mut 
 pub struct Bvh {
     pub nodes: Vec<GpuNode>,
     pub tris: Vec<GpuTri>,
+    /// Texturdaten je Dreieck (gleiche Reihenfolge wie `tris`).
+    pub tex: Vec<GpuTriTex>,
 }
 
 fn sub(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
@@ -305,15 +354,16 @@ impl Bvh {
             stack.push((c, first, i, depth + 1));
             stack.push((c + 1, first + i, count - i, depth + 1));
         }
-        let gpu_tris = order
-            .iter()
-            .map(|&i| {
-                let t = &tris[i as usize];
-                let (m, color) = table.resolve(t.layer, t.color);
-                GpuTri { v0: t.v[0], mat: pack_mat(color, m.kind), e1: sub(t.v[1], t.v[0]), rough: m.rough, e2: sub(t.v[2], t.v[0]), metal: m.metal }
-            })
-            .collect();
-        Bvh { nodes, tris: gpu_tris }
+        let mut gpu_tris = Vec::with_capacity(order.len());
+        let mut gpu_tex = Vec::with_capacity(order.len());
+        for &i in &order {
+            let t = &tris[i as usize];
+            let (m, color) = table.resolve(t.layer, t.color);
+            let tx = table.tex_for(t.layer, &m);
+            gpu_tris.push(GpuTri { v0: t.v[0], mat: pack_mat(color, m.kind), e1: sub(t.v[1], t.v[0]), rough: m.rough, e2: sub(t.v[2], t.v[0]), metal: m.metal });
+            gpu_tex.push(GpuTriTex { uv0: t.uv[0], uv1: t.uv[1], uv2: t.uv[2], tex: (tx.layer & 0xFFFF) | ((tx.proc & 0xFF) << 16), scale: tx.scale });
+        }
+        Bvh { nodes, tris: gpu_tris, tex: gpu_tex }
     }
 
     /// Strahl gegen ein Dreieck (Möller–Trumbore); `t` im offenen Intervall (`tmin`, `tmax`).
@@ -443,7 +493,7 @@ mod tests {
                 let a = r.v(1.5);
                 let b = r.v(1.5);
                 let d = r.v(1.5);
-                PtTri { v: [[c[0] + a[0], c[1] + a[1], c[2] + a[2]], [c[0] + b[0], c[1] + b[1], c[2] + b[2]], [c[0] + d[0], c[1] + d[1], c[2] + d[2]]], color: [0.5, 0.5, 0.5], layer: -1 }
+                PtTri { v: [[c[0] + a[0], c[1] + a[1], c[2] + a[2]], [c[0] + b[0], c[1] + b[1], c[2] + b[2]], [c[0] + d[0], c[1] + d[1], c[2] + d[2]]], color: [0.5, 0.5, 0.5], layer: -1, uv: NO_UV }
             })
             .collect()
     }
@@ -478,7 +528,7 @@ mod tests {
     fn achsparallele_strahlen_und_wuerfel() {
         // Würfel aus 12 Dreiecken plus Boden: Strahlen genau entlang der Achsen (inv = ±∞ in zwei Komponenten).
         let p = |x: f32, y: f32, z: f32| [x, y, z];
-        let q = |a, b, c, d| [PtTri { v: [a, b, c], color: [0.8; 3], layer: -1 }, PtTri { v: [a, c, d], color: [0.8; 3], layer: -1 }];
+        let q = |a, b, c, d| [PtTri { v: [a, b, c], color: [0.8; 3], layer: -1, uv: NO_UV }, PtTri { v: [a, c, d], color: [0.8; 3], layer: -1, uv: NO_UV }];
         let mut tris = Vec::new();
         tris.extend(q(p(0., 0., 0.), p(1., 0., 0.), p(1., 1., 0.), p(0., 1., 0.)));
         tris.extend(q(p(0., 0., 1.), p(1., 0., 1.), p(1., 1., 1.), p(0., 1., 1.)));
@@ -506,10 +556,10 @@ mod tests {
         assert_eq!(empty.tri_count(), 0);
         assert!(empty.intersect([0.0; 3], [0.0, 0.0, 1.0], f32::INFINITY).is_none());
         let bad = [
-            PtTri { v: [[f32::NAN, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], color: [0.5; 3], layer: -1 },
-            PtTri { v: [[0.0; 3], [0.0; 3], [0.0; 3]], color: [0.5; 3], layer: -1 },
-            PtTri { v: [[0.0; 3], [1.0, 1.0, 1.0], [2.0, 2.0, 2.0]], color: [0.5; 3], layer: -1 },
-            PtTri { v: [[f32::INFINITY, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], color: [f32::NAN; 3], layer: -1 },
+            PtTri { v: [[f32::NAN, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], color: [0.5; 3], layer: -1, uv: NO_UV },
+            PtTri { v: [[0.0; 3], [0.0; 3], [0.0; 3]], color: [0.5; 3], layer: -1, uv: NO_UV },
+            PtTri { v: [[0.0; 3], [1.0, 1.0, 1.0], [2.0, 2.0, 2.0]], color: [0.5; 3], layer: -1, uv: NO_UV },
+            PtTri { v: [[f32::INFINITY, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], color: [f32::NAN; 3], layer: -1, uv: NO_UV },
         ];
         let b = Bvh::build(&bad);
         assert_eq!(b.tri_count(), 0, "alle verworfen");
@@ -524,7 +574,7 @@ mod tests {
         let same: Vec<PtTri> = (0..500)
             .map(|i| {
                 let s = 1.0 + i as f32 * 0.01;
-                PtTri { v: [[-s, 0.0, 0.0], [s, 0.0, 0.1 * s], [0.0, 0.0, -0.1 * s]], color: [0.5; 3], layer: -1 }
+                PtTri { v: [[-s, 0.0, 0.0], [s, 0.0, 0.1 * s], [0.0, 0.0, -0.1 * s]], color: [0.5; 3], layer: -1, uv: NO_UV }
             })
             .collect();
         let b = Bvh::build(&same);
@@ -536,8 +586,8 @@ mod tests {
 
     #[test]
     fn doppelseiten_einmal_und_material() {
-        let a = PtTri { v: [[0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], color: GLASS_RGB, layer: -1 };
-        let b = PtTri { v: [[0.0; 3], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]], color: GLASS_RGB, layer: -1 };
+        let a = PtTri { v: [[0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], color: GLASS_RGB, layer: -1, uv: NO_UV };
+        let b = PtTri { v: [[0.0; 3], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]], color: GLASS_RGB, layer: -1, uv: NO_UV };
         let bvh = Bvh::build(&[a, b]);
         assert_eq!(bvh.tri_count(), 1);
         assert_eq!(bvh.tris[0].mat >> 24, MAT_GLASS);
@@ -573,10 +623,10 @@ mod tests {
     /// [212] Etappe 2: Material je Dreieck aus der Tabelle (Ebene), aufgelöst ins GPU-Dreieck.
     #[test]
     fn materialtabelle_im_baum() {
-        let tri = |x: f32, layer: i32| PtTri { v: [[x, 0.0, 0.0], [x + 1.0, 0.0, 0.0], [x, 1.0, 0.0]], color: [1.0; 3], layer };
+        let tri = |x: f32, layer: i32| PtTri { v: [[x, 0.0, 0.0], [x + 1.0, 0.0, 0.0], [x, 1.0, 0.0]], color: [1.0; 3], layer, uv: NO_UV };
         let table = PtMaterialTable::from_entries(&[
-            crate::pt_material::PtMaterialEntry { name: "Trapezblech".into(), map: String::new() },
-            crate::pt_material::PtMaterialEntry { name: "Backstein".into(), map: String::new() },
+            crate::pt_material::PtMaterialEntry { name: "Trapezblech".into(), map: String::new(), size: None },
+            crate::pt_material::PtMaterialEntry { name: "Backstein".into(), map: String::new(), size: None },
         ]);
         let bvh = Bvh::build_with(&[tri(0.0, 1), tri(5.0, 2), tri(10.0, -1)], &table);
         let at = |x: f32| bvh.tris.iter().find(|t| t.v0[0] == x).unwrap();
@@ -594,5 +644,79 @@ mod tests {
         // Ohne Tabelle (Etappe 1): alles aus der Vertexfarbe.
         let plain = Bvh::build(&[tri(0.0, 1)]);
         assert_eq!(plain.tris[0].mat >> 24, MAT_DIFFUSE);
+    }
+
+    /// [212] Etappe 3: UV je Dreieck wie die schattierte Ansicht, im Parallel-Puffer in der Reihenfolge des Baums,
+    /// baryzentrisch interpoliert gleich der UV des Trefferpunkts; Gelände-Ebene bleibt erhalten und wird Wiese.
+    #[test]
+    fn uv_je_dreieck_und_interpolation() {
+        // Senkrechte Wand in der Ebene z = 2 (Normale +z) und ein Bodenstück (Normale +y), Mesh-Format.
+        let mut v = Vec::new();
+        let mut push = |p: [f32; 3], n: [f32; 3]| {
+            v.extend_from_slice(&p);
+            v.extend_from_slice(&n);
+            v.extend_from_slice(&[1.0, 1.0, 1.0]);
+        };
+        for p in [[1.0, 0.0, 2.0], [4.0, 0.0, 2.0], [4.0, 3.0, 2.0]] {
+            push(p, [0.0, 0.0, 1.0]);
+        }
+        for p in [[0.0, -1.0, 0.0], [5.0, -1.0, 0.0], [0.0, -1.0, 5.0]] {
+            push(p, [0.0, 1.0, 0.0]);
+        }
+        let mut tris = Vec::new();
+        tris_from_mesh(&v, &[0, 1, 2, 3, 4, 5], &[3.0, 3.0, 3.0, -2.0, -2.0, -2.0], &mut tris);
+        assert_eq!(tris.len(), 2);
+        // Wand: u längs der Tangente (-n.z, 0, n.x) = (-1, 0, 0) → u = -x, v = Höhe.
+        assert_eq!(tris[0].uv, [[-1.0, 0.0], [-4.0, 0.0], [-4.0, 3.0]]);
+        assert_eq!(tris[0].layer, 3);
+        // Boden: Grundriss (x, z); Gelände-Ebene erhalten.
+        assert_eq!(tris[1].uv, [[0.0, 0.0], [5.0, 0.0], [0.0, 5.0]]);
+        assert_eq!(tris[1].layer, TERRAIN_LAYER);
+        let table = PtMaterialTable::from_entries(&[
+            crate::pt_material::PtMaterialEntry::default(),
+            crate::pt_material::PtMaterialEntry::default(),
+            crate::pt_material::PtMaterialEntry { name: "Backstein".into(), map: String::new(), size: Some(0.5) },
+        ]);
+        let bvh = Bvh::build_with(&tris, &table);
+        assert_eq!(bvh.tex.len(), bvh.tris.len());
+        // Parallel-Puffer in Baum-Reihenfolge: UV von Ecke 0 gehört zu `v0` desselben Dreiecks.
+        for (t, x) in bvh.tris.iter().zip(&bvh.tex) {
+            let n = if t.e1[1] == 0.0 && t.e2[1] == 0.0 { [0.0, 1.0, 0.0] } else { [0.0, 0.0, 1.0] };
+            assert_eq!(x.uv0, crate::mesh::planar_uv(t.v0, n));
+        }
+        let wall = bvh.tex.iter().position(|x| x.uv0 == [-1.0, 0.0]).unwrap();
+        // Backstein ohne geladene Karte: keine Bildkarte, keine Prozedur, Massstab 1 / 0.5 m.
+        assert_eq!((bvh.tex[wall].layer(), bvh.tex[wall].proc(), bvh.tex[wall].scale), (0, 0, 2.0));
+        let ground = 1 - wall;
+        assert_eq!(bvh.tex[ground].proc(), crate::pt_material::PROC_GRASS);
+        assert_eq!(bvh.tris[ground].mat >> 24, MAT_DIFFUSE);
+        // Interpolation: Strahl auf die Wand trifft (x, y) = (3, 1) → UV (-3, 1) · 2.
+        let (t, i) = bvh.intersect([3.0, 1.0, 10.0], [0.0, 0.0, -1.0], f32::INFINITY).expect("Wand");
+        assert!((t - 8.0).abs() < 1e-5);
+        let tr = &bvh.tris[i];
+        let (u, w) = bary(tr, [3.0, 1.0, 10.0], [0.0, 0.0, -1.0]);
+        let uv = interp_uv(&bvh.tex[i], u, w);
+        assert!((uv[0] - -6.0).abs() < 1e-5 && (uv[1] - 2.0).abs() < 1e-5, "{uv:?}");
+        // Ecken: Gewichte (0,0), (1,0), (0,1) liefern die Ecken-UV.
+        let x = &bvh.tex[i];
+        assert_eq!(interp_uv(x, 0.0, 0.0), x.uv0.map(|c| c * x.scale));
+        assert_eq!(interp_uv(x, 1.0, 0.0), x.uv1.map(|c| c * x.scale));
+        assert_eq!(interp_uv(x, 0.0, 1.0), x.uv2.map(|c| c * x.scale));
+        // Nicht endliche Normale: UV verworfen statt NaN.
+        let mut bad = v.clone();
+        bad[3] = f32::NAN;
+        bad[4] = f32::NAN;
+        let mut out = Vec::new();
+        tris_from_mesh(&bad, &[0, 1, 2], &[], &mut out);
+        assert_eq!(out[0].uv, NO_UV);
+    }
+
+    /// Baryzentrische Koordinaten wie der Shader (`tri_bary`).
+    fn bary(t: &GpuTri, o: [f32; 3], d: [f32; 3]) -> (f32, f32) {
+        let p = cross(d, t.e2);
+        let inv = 1.0 / dot(t.e1, p);
+        let s = sub(o, t.v0);
+        let q = cross(s, t.e1);
+        (dot(s, p) * inv, dot(d, q) * inv)
     }
 }

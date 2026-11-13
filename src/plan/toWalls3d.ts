@@ -200,12 +200,17 @@ export function wallMaterialColorMaps(project: Project): string[] {
 
 /**
  * [212] Materialtabelle des Pathtracers: je Textur-Ebene ({@link wallMaterialColorMaps}, gleiche Reihenfolge) der
- * Baustoff-Name (erstes Bauteil mit dieser Farbkarte) und die Farbkarte. render3d ordnet daraus Rauigkeit, Metall und
- * Glas zu (`render3d/src/pt_material.rs`, wie der Blender-Leser [211]).
+ * Baustoff-Name (erstes Bauteil mit dieser Farbkarte), die Farbkarte und die Kachelgrösse in Metern (`sizeM`, nur wenn
+ * gesetzt; Etappe 3: Massstab der Bildkarte im Pathtracer). render3d ordnet daraus Rauigkeit, Metall und Glas zu
+ * (`render3d/src/pt_material.rs`, wie der Blender-Leser [211]).
  */
-export function pathtraceMaterials(project: Project): { name: string; map: string }[] {
+export function pathtraceMaterials(project: Project): { name: string; map: string; size?: number }[] {
   const comps = project.components ?? [];
-  return wallMaterialColorMaps(project).map((map) => ({ name: comps.find((c) => c.material?.color === map)?.name ?? "", map }));
+  return wallMaterialColorMaps(project).map((map) => {
+    const comp = comps.find((c) => c.material?.color === map);
+    const size = comp?.material?.sizeM;
+    return { name: comp?.name ?? "", map, ...(typeof size === "number" && Number.isFinite(size) && size > 0 ? { size } : {}) };
+  });
 }
 
 /**

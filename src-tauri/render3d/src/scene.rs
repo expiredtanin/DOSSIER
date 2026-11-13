@@ -506,7 +506,7 @@ fn build_part_mesh(p: &mut Part) {
     for m in &p.input.meshes {
         let from = mesh.vertex_count();
         append_context_mesh(&mut mesh, m);
-        fill(&mesh, &mut layers, m.material_index.map(|i| i as f32).unwrap_or(-1.0));
+        fill(&mesh, &mut layers, crate::mesh::mesh_layer(m));
         if !matches!(m.kind, MeshKind::Terrain | MeshKind::Imported) {
             let b = crate::shadow::verts_bounds(&mesh.verts, from);
             p.shadow_meshes.extend(b);

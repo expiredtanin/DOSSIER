@@ -546,8 +546,11 @@ Es gibt drei Schatten, alle aus derselben Sonnenstudie (`Project.sunStudy`, Ort 
 - **3D, Pathtracing** ([212]): Stil „Pathtracing (Vorschau)“ nimmt dieselbe Sonne als Richtungslicht (Kegel, weiche
   Schatten) und leitet daraus Himmel und Sonnenfarbe ab (`render3d/src/pathtrace.rs`, `sky_for_sun`); Baum der Dreiecke
   in `bvh.rs`, GPU-Seite `gpu_pathtrace.rs`. Sonne unter dem Horizont (Studie aktiv): Nachthimmel (`night_sky`,
-  `Renderer::set_night`). Material je Baustoff über die Textur-Ebene (`pathtraceMaterials` → `pt_material.rs`),
-  Entrauscher `denoise.rs`.
+  `Renderer::set_night`, bei Nacht warmes Innenlicht hinter Glas). Material je Baustoff über die Textur-Ebene
+  (`pathtraceMaterials` → `pt_material.rs`), Entrauscher `denoise.rs`. Bildkarten: dasselbe Textur-Array wie der Stil
+  „textured“, UV je Dreieck im Parallel-Puffer `GpuTriTex` (gleiche Meter-UV wie `mesh::planar_uv`, Kachel `sizeM`);
+  ohne Karte prozedural (Wiese/Kies/Asphalt), Gelände ohne Material = Wiese (`mesh::mesh_layer`, Ebene −2).
+  Headless: `render_png --textures public`.
 
 Im Grundriss gilt nur das Gebäudeinnere als abgedeckt (Decken/Dächer innerhalb der Hülle der geschnittenen
 Wände); unter Dachvorsprung, Balkon und Vordach liegt der echte Schatten, er schliesst an die Fassade an ([186]).

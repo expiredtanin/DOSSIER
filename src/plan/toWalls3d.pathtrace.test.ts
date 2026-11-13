@@ -21,6 +21,15 @@ describe("[212] pathtraceMaterials", () => {
     }
   });
 
+  it("gibt die Kachelgrösse der Bildkarte mit (Etappe 3)", () => {
+    const table = pathtraceMaterials(sampleProjectComplex);
+    for (const e of table) {
+      const comp = (sampleProjectComplex.components ?? []).find((c) => c.material?.color === e.map);
+      expect(e.size).toBe(comp?.material?.sizeM);
+    }
+    expect(table.some((e) => e.size !== undefined)).toBe(true);
+  });
+
   it("leer ohne Farbkarten", () => {
     const bare = { ...sampleProjectComplex, components: (sampleProjectComplex.components ?? []).map((c) => ({ ...c, material: undefined })) };
     expect(pathtraceMaterials(bare)).toEqual([]);

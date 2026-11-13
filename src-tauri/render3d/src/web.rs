@@ -463,6 +463,26 @@ impl WebModelRenderer {
         self.renderer.pathtrace_done()
     }
 
+    /// [212] Etappe 3: Promise, das sich erfüllt, wenn die GPU alle bis jetzt abgeschickte Arbeit erledigt hat. Der
+    /// Bild-Export rechnet viele Samples in Häppchen und wartet dazwischen hierauf (Fortschritt, Abbruch, Hauptthread
+    /// frei), statt alles auf einmal einzureihen.
+    pub fn gpu_idle(&self) -> js_sys::Promise {
+        /// Rückruf-Hülle: wgpu verlangt `Send`, im Browser (WASM ohne Threads) läuft alles auf einem Faden.
+        struct Resolve(js_sys::Function);
+        // SAFETY: wasm32 ohne Atomics ist einfädig; der Rückruf läuft auf demselben Faden wie dieser Aufruf.
+        unsafe impl Send for Resolve {}
+        impl Resolve {
+            fn call(self) {
+                let _ = self.0.call0(&JsValue::UNDEFINED);
+            }
+        }
+        let queue = self.queue.clone();
+        js_sys::Promise::new(&mut |resolve, _reject| {
+            let r = Resolve(resolve);
+            queue.on_submitted_work_done(move || r.call());
+        })
+    }
+
     /// [212] Obergrenze der Samples je Pixel (Standard 1024; 0 → 1).
     pub fn set_pathtrace_max_samples(&mut self, n: u32) {
         self.renderer.set_pathtrace_max_samples(n);

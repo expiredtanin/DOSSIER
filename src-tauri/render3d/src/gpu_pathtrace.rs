@@ -10,10 +10,14 @@
 // `prep` + 5 × `atrous` (Compute) das demodulierte Licht in zwei Pingpong-Puffer; die Anzeige mischt es nach
 // `denoise::blend_weight` zum rohen Mittel. Die Akkumulation bleibt unberührt; gefiltert wird nur einmal je neuer
 // Sample-Zahl.
+//
+// Texturen (Etappe 3): Texturdaten je Dreieck (`GpuTriTex`) als siebter Puffer neben dem Baum; das Textur-Array der
+// schattierten Ansicht samt Sampler und der Kehrwert der Kartenmittel als eigene Bindungsgruppe (group 1,
+// `set_textures`), damit ein Kartenwechsel die Pfad-Puffer nicht neu bindet.
 
 use wgpu::util::DeviceExt;
 
-use crate::bvh::{Bvh, GpuNode, GpuTri};
+use crate::bvh::{Bvh, GpuNode, GpuTri, GpuTriTex};
 use crate::denoise::{blend_weight, DN_WGSL, ITERATIONS, SIGMA_L, SIGMA_N, SIGMA_Z};
 use crate::pathtrace::{build_params, internal_size, night_sky, sky_for_sun, PtParams, MAX_PIXELS, PT_DISPLAY_WGSL, PT_WGSL};
 use crate::types::{Camera, Projection};
@@ -50,6 +54,10 @@ pub struct PathTracer {
     params: wgpu::Buffer,
     nodes: wgpu::Buffer,
     tris: wgpu::Buffer,
+    tri_tex: wgpu::Buffer,
+    tex_layout: wgpu::BindGroupLayout,
+    /// Bildkarten (group 1); None bis `set_textures` (dann zeichnet er nicht).
+    tex_bind: Option<wgpu::BindGroup>,
     tri_count: u32,
     frame_bufs: Option<Frame>,
     internal: (u32, u32),
@@ -104,6 +112,24 @@ impl PathTracer {
                 storage_entry(3, false, cs),
                 storage_entry(4, false, cs),
                 storage_entry(5, false, cs),
+                storage_entry(6, true, cs),
+            ],
+        });
+        let tex_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("pathtrace.textures.layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: cs,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2Array,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry { binding: 1, visibility: cs, ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering), count: None },
+                storage_entry(2, true, cs),
             ],
         });
         let display_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -124,7 +150,7 @@ impl PathTracer {
         let cmod = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("pathtrace.wgsl"), source: wgpu::ShaderSource::Wgsl(PT_WGSL.into()) });
         let dmod = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("pathtrace.display.wgsl"), source: wgpu::ShaderSource::Wgsl(PT_DISPLAY_WGSL.into()) });
         let nmod = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("pathtrace.denoise.wgsl"), source: wgpu::ShaderSource::Wgsl(DN_WGSL.into()) });
-        let clayout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("pathtrace.compute.pl"), bind_group_layouts: &[Some(&compute_layout)], immediate_size: 0 });
+        let clayout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("pathtrace.compute.pl"), bind_group_layouts: &[Some(&compute_layout), Some(&tex_layout)], immediate_size: 0 });
         let dlayout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("pathtrace.display.pl"), bind_group_layouts: &[Some(&display_layout)], immediate_size: 0 });
         let nlayout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("pathtrace.denoise.pl"), bind_group_layouts: &[Some(&dn_layout)], immediate_size: 0 });
         let compute_pipe = |label: &str, layout: &wgpu::PipelineLayout, module: &wgpu::ShaderModule, entry: &str| {
@@ -172,7 +198,7 @@ impl PathTracer {
                 })
             })
             .collect();
-        let (nodes, tris) = Self::scene_buffers(device, &Bvh::default());
+        let (nodes, tris, tri_tex) = Self::scene_buffers(device, &Bvh::default());
         Self {
             compute,
             compute_layout,
@@ -185,6 +211,9 @@ impl PathTracer {
             params,
             nodes,
             tris,
+            tri_tex,
+            tex_layout,
+            tex_bind: None,
             tri_count: 0,
             frame_bufs: None,
             internal: (0, 0),
@@ -203,15 +232,39 @@ impl PathTracer {
         }
     }
 
-    /// Puffer für Baum und Dreiecke; leer = je ein Platzhalter-Eintrag (Bindungen dürfen nicht leer sein).
-    fn scene_buffers(device: &wgpu::Device, bvh: &Bvh) -> (wgpu::Buffer, wgpu::Buffer) {
+    /// Puffer für Baum, Dreiecke und Texturdaten; leer = je ein Platzhalter-Eintrag (Bindungen dürfen nicht leer sein).
+    /// Texturdaten in anderer Länge als die Dreiecke (kein Fall des Baums) werden mit „ohne Textur“ aufgefüllt.
+    fn scene_buffers(device: &wgpu::Device, bvh: &Bvh) -> (wgpu::Buffer, wgpu::Buffer, wgpu::Buffer) {
         let node0 = [GpuNode::default()];
         let tri0 = [GpuTri::default()];
         let nodes: &[GpuNode] = if bvh.nodes.is_empty() { &node0 } else { &bvh.nodes };
         let tris: &[GpuTri] = if bvh.tris.is_empty() { &tri0 } else { &bvh.tris };
+        let mut tex: Vec<GpuTriTex> = bvh.tex.iter().copied().take(tris.len()).collect();
+        tex.resize(tris.len(), GpuTriTex { scale: 1.0, ..GpuTriTex::default() });
         let n = device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("pathtrace.nodes"), contents: bytemuck::cast_slice(nodes), usage: wgpu::BufferUsages::STORAGE });
         let t = device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("pathtrace.tris"), contents: bytemuck::cast_slice(tris), usage: wgpu::BufferUsages::STORAGE });
-        (n, t)
+        let x = device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("pathtrace.tri_tex"), contents: bytemuck::cast_slice(&tex), usage: wgpu::BufferUsages::STORAGE });
+        (n, t, x)
+    }
+
+    /// Bildkarten für den Pfad: Textur-Array (D2Array, wie `Renderer::set_material_textures`), Sampler mit Wiederholung
+    /// und je Ebene der Kehrwert der mittleren Kartenfarbe (`PtMaterialTable::inv_means`, Index = Ebene). Die Summe
+    /// beginnt von vorn.
+    pub fn set_textures(&mut self, device: &wgpu::Device, view: &wgpu::TextureView, sampler: &wgpu::Sampler, inv_means: &[[f32; 4]]) {
+        let one = [[1.0f32; 4]];
+        let inv: &[[f32; 4]] = if inv_means.is_empty() { &one } else { inv_means };
+        let buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("pathtrace.layer_inv"), contents: bytemuck::cast_slice(inv), usage: wgpu::BufferUsages::STORAGE });
+        self.tex_bind = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("pathtrace.textures.bind"),
+            layout: &self.tex_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(view) },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(sampler) },
+                wgpu::BindGroupEntry { binding: 2, resource: buf.as_entire_binding() },
+            ],
+        }));
+        self.scene_gen = self.scene_gen.wrapping_add(1);
+        self.key = None;
     }
 
     /// Neue Szene hochladen; die Summe beginnt von vorn. Zu grosse Szenen (über dem Bindungs-Limit des Geräts)
@@ -221,9 +274,10 @@ impl PathTracer {
             || (bvh.nodes.len() * std::mem::size_of::<GpuNode>()) as u64 > self.max_binding;
         let empty = Bvh::default();
         let use_bvh = if too_big { &empty } else { bvh };
-        let (n, t) = Self::scene_buffers(device, use_bvh);
+        let (n, t, x) = Self::scene_buffers(device, use_bvh);
         self.nodes = n;
         self.tris = t;
+        self.tri_tex = x;
         self.tri_count = use_bvh.tris.len() as u32;
         self.scene_gen = self.scene_gen.wrapping_add(1);
         self.compute_bind = None;
@@ -309,6 +363,7 @@ impl PathTracer {
                     wgpu::BindGroupEntry { binding: 3, resource: fb.accum.as_entire_binding() },
                     wgpu::BindGroupEntry { binding: 4, resource: fb.aux_a.as_entire_binding() },
                     wgpu::BindGroupEntry { binding: 5, resource: fb.aux_b.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 6, resource: self.tri_tex.as_entire_binding() },
                 ],
             }));
         }
@@ -393,7 +448,7 @@ impl PathTracer {
         let internal = self.internal;
         let (tri_count, srgb) = (self.tri_count, self.srgb_encode);
         let params = |frame: u32, dn: f32| build_params(camera, &sky, internal, (w, h), frame, tri_count, srgb, dn);
-        if params(0, 0.0).is_none() {
+        if params(0, 0.0).is_none() || self.tex_bind.is_none() {
             return;
         }
         // Samples: je eines mit eigenem Parameter-Block (Schreiben + Abschicken in Reihenfolge).
@@ -406,6 +461,7 @@ impl PathTracer {
                 let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("pathtrace.compute"), timestamp_writes: None });
                 pass.set_pipeline(&self.compute);
                 pass.set_bind_group(0, self.compute_bind.as_ref(), &[]);
+                pass.set_bind_group(1, self.tex_bind.as_ref(), &[]);
                 pass.dispatch_workgroups(internal.0.div_ceil(8), internal.1.div_ceil(8), 1);
             }
             queue.submit([enc.finish()]);

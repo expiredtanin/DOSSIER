@@ -18,6 +18,7 @@
 // `getCamera`/`captureSnapshot` null und `setCamera` false — kein Fehler.
 
 import type { Camera3d } from "./useWasm3dRenderer";
+import type { ExportProgress } from "./imageExport";
 
 export type V3 = [number, number, number];
 
@@ -214,8 +215,9 @@ export interface ViewportCameraApi {
   /** Aktuelles 3D-Bild als PNG, höchstens `maxEdge` Pixel auf der langen Seite. */
   snapshot(maxEdge: number): Promise<Uint8Array | null>;
   /** [223] Bild in Zielgrösse (render3d zeichnet direkt in `width` × `height`), mit Live- oder gegebener Kamera.
-   *  [212] `samples`: Samples je Pixel im Stil „Pathtracing (Vorschau)“ (sonst ohne Wirkung). */
-  image(opts: { width: number; height: number; transparent: boolean; camera?: Camera3dSource; samples?: number }): Promise<CapturedImage | null>;
+   *  [212] `samples`: Samples je Pixel im Stil „Pathtracing (Vorschau)“ (sonst ohne Wirkung); `onProgress`/`signal`:
+   *  Fortschritt der Samples und Abbruch (dann null). */
+  image(opts: { width: number; height: number; transparent: boolean; camera?: Camera3dSource; samples?: number } & ExportProgress): Promise<CapturedImage | null>;
   /** Live-Schnitt von aussen setzen (world) oder aufheben (null). */
   section(plane: { point: V3; normal: V3 } | null): void;
   /** Kamera auf Modell und sichtbare Punktwolken einpassen (aktuelles Preset). */
@@ -323,12 +325,20 @@ export async function captureSnapshot(opts: { maxEdge?: number } = {}): Promise<
  * leerem Bild. Ohne `camera` zeichnet die Live-Kamera. Test-Hook: `globalThis.__dossierImageMock` ersetzt das Zeichnen
  * (headless liefert WebGPU kein Bild; e2e prüft damit den Dialog und das Einsetzen).
  */
-export async function captureImage(opts: { width: number; height: number; transparent?: boolean; camera?: ViewCamera; samples?: number }): Promise<CapturedImage | null> {
+export async function captureImage(opts: { width: number; height: number; transparent?: boolean; camera?: ViewCamera; samples?: number } & ExportProgress): Promise<CapturedImage | null> {
   const mock = (globalThis as { __dossierImageMock?: (o: { width: number; height: number; transparent: boolean }) => Promise<CapturedImage | null> }).__dossierImageMock;
   if (typeof mock === "function") return mock({ width: opts.width, height: opts.height, transparent: opts.transparent === true });
   if (!api) return null;
   try {
-    return await api.image({ width: opts.width, height: opts.height, transparent: opts.transparent === true, ...(opts.camera ? { camera: opts.camera } : {}), ...(opts.samples !== undefined ? { samples: opts.samples } : {}) });
+    return await api.image({
+      width: opts.width,
+      height: opts.height,
+      transparent: opts.transparent === true,
+      ...(opts.camera ? { camera: opts.camera } : {}),
+      ...(opts.samples !== undefined ? { samples: opts.samples } : {}),
+      ...(opts.onProgress ? { onProgress: opts.onProgress } : {}),
+      ...(opts.signal ? { signal: opts.signal } : {}),
+    });
   } catch {
     return null;
   }

@@ -34,8 +34,9 @@ default = []
 # puffer, View-Projektions-Uniform und ein Directional-Light im Fragment-Shader.
 render = ["dep:wgpu", "dep:bytemuck", "dep:pollster"]
 
-# Headless-PNG-Renderer (`bin/render_png.rs`): GPU-Schicht + JSON-Modell, ohne Fenster.
-png = ["render", "dep:serde_json"]
+# Headless-PNG-Renderer (`bin/render_png.rs`): GPU-Schicht + JSON-Modell, ohne Fenster. JPEG-Leser für die
+# Bildkarten (`--textures <ordner>`, [212] Etappe 3); im Viewer dekodiert der Browser.
+png = ["render", "dep:serde_json", "dep:zune-jpeg", "dep:zune-core"]
 
 # Fenster-Spike (winit) inkl. lauffaehigem Binary mit Orbit-Kamera. Braucht
 # Wayland/X11 + eine Display-Session zur visuellen Verifikation.
@@ -71,6 +72,10 @@ serde_json = { version = "1", optional = true }
 wgpu = { version = "29", optional = true }
 bytemuck = { version = "1", optional = true, features = ["derive"] }
 pollster = { version = "0.4", optional = true }
+
+# --- Bildkarten headless (nur mit Feature "png") -----------------------------
+zune-jpeg = { version = "0.5", optional = true }
+zune-core = { version = "0.5", optional = true }
 
 # --- Fenster (nur mit Feature "window") --------------------------------------
 winit = { version = "0.30", optional = true }

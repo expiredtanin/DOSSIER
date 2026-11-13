@@ -7,6 +7,13 @@
 // des Himmels (Splitting statt Zufallswahl) und Durchlicht, das keinen Abpraller verbraucht, Nachthimmel bei Sonne unter
 // dem Horizont.
 //
+// Etappe 3: Bildkarten je Dreieck (Textur-Array der schattierten Ansicht in group 1, UV aus `bvh::GpuTriTex`
+// baryzentrisch interpoliert, Albedo = Grundfarbe · Texel / Kartenmittel), prozedurale Wiese/Kies/Asphalt ohne
+// Bildkarte (Gelände ohne Material = Wiese), Leuchten (`MAT_EMISSIVE`), Glas lässt Sonnenlicht gedämpft durch
+// (`GLASS_SHADOW_T` je Fläche statt verlustfrei), bei Nacht warmes Innenlicht hinter Glas (`Sky::room_light`).
+// Brechung bleibt weg: die Scheiben sind dünne planparallele Platten — ein Strahl tritt parallel versetzt (wenige
+// Millimeter) wieder aus, sichtbar wäre das nicht; gekrümmtes oder dickes Glas gibt das Modell nicht her.
+//
 // Bildmodell (Etappe 1): progressive Akkumulation, je Aufruf ein Sample je Pixel; Pfade mit höchstens
 // `MAX_BOUNCES` Abprallern und Russian Roulette ab dem dritten; Next-Event-Estimation zur Sonne (Kegel mit
 // `SUN_ANGULAR_RADIUS_DEG`, weiche Schatten); Glas als dünne Scheibe (Fresnel-Spiegelung oder gerader Durchgang,
@@ -52,7 +59,8 @@ pub struct PtParams {
     pub dims: [u32; 4],
     /// Dreiecke, Breite, Höhe (Anzeige), 1 = sRGB im Shader kodieren.
     pub info: [u32; 4],
-    /// Entrauscher in der Anzeige: x = Mischgewicht (0 = roh, 1 = gefiltert, `denoise::blend_weight`).
+    /// Entrauscher in der Anzeige: x = Mischgewicht (0 = roh, 1 = gefiltert, `denoise::blend_weight`); y = Innenlicht
+    /// hinter Glas (`Sky::room_light`).
     pub dn: [f32; 4],
 }
 
@@ -67,7 +75,13 @@ pub struct Sky {
     pub ground: [f32; 3],
     /// Belichtung vor dem Tonemapping.
     pub exposure: f32,
+    /// Warmes Innenlicht hinter Glas (Strahldichte, 0 = aus; nur bei Nacht, Etappe 3).
+    pub room_light: f32,
 }
+
+/// Innenlicht bei Nacht: Flächen hinter Glas strahlen mit `ROOM_LIGHT` · Albedo (warmweiss, `ROOM_RGB` im Shader) —
+/// erleuchtete Fenster als Stimmung, ohne Leuchten im Modell.
+pub const ROOM_LIGHT: f32 = 0.06;
 
 /// Belichtung bei Nacht (der Himmel ist um Grössenordnungen dunkler; das Bild soll das Gebäude noch zeigen).
 pub const NIGHT_EXPOSURE: f32 = 14.0;
@@ -83,6 +97,7 @@ pub fn night_sky() -> Sky {
         horizon: [0.0110, 0.0120, 0.0160],
         ground: [0.0030, 0.0030, 0.0032],
         exposure: NIGHT_EXPOSURE,
+        room_light: ROOM_LIGHT,
     }
 }
 
@@ -103,6 +118,7 @@ pub fn sky_for_sun(dir_to_sun: Option<[f32; 3]>) -> Sky {
             horizon: [0.62, 0.64, 0.66],
             ground: [0.20, 0.19, 0.18],
             exposure: DEFAULT_EXPOSURE,
+            room_light: 0.0,
         };
     };
     let el_deg = d[1].clamp(-1.0, 1.0).asin().to_degrees();
@@ -120,7 +136,7 @@ pub fn sky_for_sun(dir_to_sun: Option<[f32; 3]>) -> Sky {
         (0.70 + 0.05 * warm * t[1]) * k * 0.85,
         (0.76 - 0.20 * warm) * k * 0.85,
     ];
-    Sky { sun_dir: d, sun_irr, sun_on: true, zenith, horizon, ground: [0.18 * k, 0.17 * k, 0.15 * k], exposure: DEFAULT_EXPOSURE }
+    Sky { sun_dir: d, sun_irr, sun_on: true, zenith, horizon, ground: [0.18 * k, 0.17 * k, 0.15 * k], exposure: DEFAULT_EXPOSURE, room_light: 0.0 }
 }
 
 fn sub(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
@@ -177,7 +193,7 @@ pub fn build_params(cam: &Camera, sky: &Sky, internal: (u32, u32), display: (u32
         ground: v4(sky.ground, sky.exposure),
         dims: [internal.0, internal.1, frame, MAX_BOUNCES],
         info: [tri_count, display.0, display.1, srgb_encode as u32],
-        dn: [if denoise.is_finite() { denoise.clamp(0.0, 1.0) } else { 0.0 }, 0.0, 0.0, 0.0],
+        dn: [if denoise.is_finite() { denoise.clamp(0.0, 1.0) } else { 0.0 }, sky.room_light.max(0.0), 0.0, 0.0],
     })
 }
 
@@ -214,6 +230,8 @@ struct Params {
 };
 struct Node { bmin: vec3<f32>, left_first: u32, bmax: vec3<f32>, count: u32 };
 struct Tri { v0: vec3<f32>, mat: u32, e1: vec3<f32>, rough: f32, e2: vec3<f32>, metal: f32 };
+// Texturdaten je Dreieck (parallel zu `tris`, `bvh::GpuTriTex`): UV der Ecken (m), Ebene | Prozedur << 16, 1/Kachel.
+struct TriTex { uv0: vec2<f32>, uv1: vec2<f32>, uv2: vec2<f32>, tex: u32, scale: f32 };
 
 @group(0) @binding(0) var<uniform> P: Params;
 @group(0) @binding(1) var<storage, read> nodes: array<Node>;
@@ -222,20 +240,38 @@ struct Tri { v0: vec3<f32>, mat: u32, e1: vec3<f32>, rough: f32, e2: vec3<f32>, 
 // Entrauscher-Hilfspuffer (Summen über die Samples): (Albedo, Luminanz²), (Normale, Tiefe) des ersten Treffers.
 @group(0) @binding(4) var<storage, read_write> aux_a: array<vec4<f32>>;
 @group(0) @binding(5) var<storage, read_write> aux_b: array<vec4<f32>>;
+@group(0) @binding(6) var<storage, read> tri_tex: array<TriTex>;
+// Bildkarten (Etappe 3): dasselbe Textur-Array wie die schattierte Ansicht (Ebene 0 = Schachbrett, ungenutzt), Sampler
+// mit Wiederholung, Kehrwert der mittleren Kartenfarbe je Ebene (`PtMaterialTable::inv_means`).
+@group(1) @binding(0) var mat_tex: texture_2d_array<f32>;
+@group(1) @binding(1) var mat_samp: sampler;
+@group(1) @binding(2) var<storage, read> layer_inv: array<vec4<f32>>;
 
 const NONE: u32 = 0xffffffffu;
 const MISS: f32 = 1e30;
 const PI: f32 = 3.14159265;
 const MAT_GLOSSY: u32 = 1u;
 const MAT_GLASS: u32 = 2u;
+const MAT_EMISSIVE: u32 = 3u;
+const PROC_GRASS: u32 = 1u;
+const PROC_GRAVEL: u32 = 2u;
+const PROC_ASPHALT: u32 = 3u;
 // Glas-Durchgänge je Pfad (zählen nicht als Abpraller).
 const MAX_GLASS: u32 = 8u;
+// Durchlass einer Glasfläche für Schattenstrahlen (eine Scheibe = zwei Flächen ≈ 0.81).
+const GLASS_SHADOW_T: f32 = 0.9;
+// Strahldichte einer Leuchte je Einheit Grundfarbe.
+const EMISSION: f32 = 1.0;
+// Farbe des Innenlichts bei Nacht (warmweiss, ≈ 2700 K).
+const ROOM_RGB: vec3<f32> = vec3<f32>(1.0, 0.72, 0.42);
 
 var<private> rng: u32;
 // Erster Treffer des Blickstrahls (für den Entrauscher): Albedo, Normale (zur Kamera), Tiefe; Himmel = (1, 0, 0).
 var<private> g_albedo: vec3<f32>;
 var<private> g_normal: vec3<f32>;
 var<private> g_depth: f32;
+// Durchlass der zuletzt verfolgten Schattenstrahlen durch Glas (`trace` mit `shadow`).
+var<private> sh_tr: f32;
 
 fn pcg(v: u32) -> u32 {
     let s = v * 747796405u + 2891336453u;
@@ -281,6 +317,7 @@ fn trace(o: vec3<f32>, d: vec3<f32>, shadow: bool) -> Hit {
     var h: Hit;
     h.t = MISS;
     h.tri = NONE;
+    sh_tr = 1.0;
     if (P.info.x == 0u) { return h; }
     let inv = vec3<f32>(
         select(select(1e30, -1e30, d.x < 0.0), 1.0 / d.x, abs(d.x) > 1e-20),
@@ -296,7 +333,11 @@ fn trace(o: vec3<f32>, d: vec3<f32>, shadow: bool) -> Hit {
         if (n.count > 0u) {
             for (var i = n.left_first; i < n.left_first + n.count; i = i + 1u) {
                 let tr = tris[i];
-                if (shadow && (tr.mat >> 24u) == MAT_GLASS) { continue; }
+                if (shadow && (tr.mat >> 24u) == MAT_GLASS) {
+                    // Glas dämpft den Schattenstrahl, hält ihn aber nicht auf (jedes Dreieck nur einmal im Baum).
+                    if (tri_hit(tr, o, d, MISS) > 0.0) { sh_tr = sh_tr * GLASS_SHADOW_T; }
+                    continue;
+                }
                 let t = tri_hit(tr, o, d, h.t);
                 if (t > 0.0) {
                     h.t = t;
@@ -366,6 +407,99 @@ fn unpack_albedo(m: u32) -> vec3<f32> {
     return vec3<f32>(f32(m & 255u), f32((m >> 8u) & 255u), f32((m >> 16u) & 255u)) * (1.0 / 255.0);
 }
 
+// Baryzentrische Koordinaten (u auf Ecke 1, v auf Ecke 2) des Treffers wie in `tri_hit`.
+fn tri_bary(tr: Tri, o: vec3<f32>, d: vec3<f32>) -> vec2<f32> {
+    let p = cross(d, tr.e2);
+    let det = dot(tr.e1, p);
+    if (abs(det) < 1e-12) { return vec2<f32>(0.0); }
+    let inv = 1.0 / det;
+    let s = o - tr.v0;
+    let q = cross(s, tr.e1);
+    return clamp(vec2<f32>(dot(s, p) * inv, dot(d, q) * inv), vec2<f32>(0.0), vec2<f32>(1.0));
+}
+
+// UV am Treffer (`bvh::interp_uv`).
+fn tri_uv(tt: TriTex, b: vec2<f32>) -> vec2<f32> {
+    let w = 1.0 - b.x - b.y;
+    return (tt.uv0 * w + tt.uv1 * b.x + tt.uv2 * b.y) * tt.scale;
+}
+
+// Gitter-Zufall 0..1 und Wertrauschen für die prozeduralen Texturen.
+fn hash2(c: vec2<i32>) -> f32 {
+    return f32(pcg((bitcast<u32>(c.x) * 1597334677u) ^ pcg(bitcast<u32>(c.y) + 0x9e3779b9u)) >> 8u) * (1.0 / 16777216.0);
+}
+fn vnoise(p: vec2<f32>) -> f32 {
+    let i = floor(p);
+    let f = p - i;
+    let u = f * f * (3.0 - 2.0 * f);
+    let c = vec2<i32>(i);
+    let a = hash2(c);
+    let b = hash2(c + vec2<i32>(1, 0));
+    let e = hash2(c + vec2<i32>(0, 1));
+    let g = hash2(c + vec2<i32>(1, 1));
+    return mix(mix(a, b, u.x), mix(e, g, u.x), u.y);
+}
+fn fbm(p: vec2<f32>) -> f32 {
+    var s = 0.0;
+    var a = 0.5;
+    var q = p;
+    for (var i = 0; i < 4; i = i + 1) {
+        s = s + a * vnoise(q);
+        q = q * 2.03 + vec2<f32>(17.1, 9.7);
+        a = a * 0.5;
+    }
+    return s / 0.9375;
+}
+
+// Prozedurale Textur als Faktor auf die Grundfarbe (Mittel ≈ 1), uv in Metern: Wiese (Flecken, Halme, trockene
+// Stellen), Kies (Körner ≈ 2 cm mit dunklen Zwischenräumen, Ton je Korn), Asphalt (feines Korn, helle Splitter).
+fn proc_tex(kind: u32, uv: vec2<f32>) -> vec3<f32> {
+    if (kind == PROC_GRASS) {
+        let spots = fbm(uv * 0.25);
+        let mid = vnoise(uv * 3.0);
+        let fine = vnoise(uv * 40.0) * 0.6 + vnoise(uv * 110.0) * 0.4;
+        var c = vec3<f32>((0.72 + 0.56 * spots) * (0.85 + 0.3 * mid) * (0.65 + 0.7 * fine));
+        let dry = smoothstep(0.58, 0.8, fbm(uv * 0.12 + vec2<f32>(31.0, 7.0)));
+        return c * mix(vec3<f32>(1.0), vec3<f32>(1.35, 1.12, 0.65), dry);
+    }
+    if (kind == PROC_GRAVEL) {
+        let g = uv * 45.0;
+        let cid = vec2<i32>(floor(g));
+        let h = hash2(cid);
+        let h2 = hash2(cid + vec2<i32>(57, 113));
+        let f = fract(g) - vec2<f32>(0.5) - (vec2<f32>(h, h2) - vec2<f32>(0.5)) * 0.3;
+        let stone = smoothstep(0.52, 0.32, length(f) + 0.15 * vnoise(g * 3.0));
+        let tint = mix(vec3<f32>(1.0), vec3<f32>(1.12, 1.0, 0.86), h2);
+        return tint * (0.6 + 0.8 * h) * mix(0.45, 1.12, stone);
+    }
+    if (kind == PROC_ASPHALT) {
+        let n = vnoise(uv * 90.0) * 0.5 + vnoise(uv * 260.0) * 0.5;
+        let speck = step(0.93, hash2(vec2<i32>(floor(uv * 300.0))));
+        return vec3<f32>((0.75 + 0.5 * n) * (0.9 + 0.2 * fbm(uv * 0.4)) + speck * 1.2);
+    }
+    return vec3<f32>(1.0);
+}
+
+// Albedo am Treffer: Grundfarbe, mit Bildkarte (Texel / Kartenmittel) oder prozeduraler Textur; ≤ 0.9.
+fn surface_albedo(ti: u32, tr: Tri, o: vec3<f32>, d: vec3<f32>) -> vec3<f32> {
+    let base = unpack_albedo(tr.mat);
+    let tt = tri_tex[ti];
+    let layer = tt.tex & 0xffffu;
+    let pk = (tt.tex >> 16u) & 0xffu;
+    if (layer == 0u && pk == 0u) { return base; }
+    let uv = tri_uv(tt, tri_bary(tr, o, d));
+    var a = base;
+    if (layer > 0u) {
+        if (layer < textureNumLayers(mat_tex) && layer < arrayLength(&layer_inv)) {
+            let t = textureSampleLevel(mat_tex, mat_samp, uv, i32(layer), 0.0).rgb;
+            a = base * t * layer_inv[layer].rgb;
+        }
+    } else {
+        a = base * proc_tex(pk, uv);
+    }
+    return clamp(a, vec3<f32>(0.0), vec3<f32>(0.9));
+}
+
 fn fresnel(f0: vec3<f32>, c: f32) -> vec3<f32> {
     return f0 + (vec3<f32>(1.0) - f0) * pow(clamp(1.0 - c, 0.0, 1.0), 5.0);
 }
@@ -427,7 +561,8 @@ fn reflected(o: vec3<f32>, d: vec3<f32>) -> vec3<f32> {
     if (h.tri == NONE) { return sky(d, false, false); }
     let tr = tris[h.tri];
     if ((tr.mat >> 24u) == MAT_GLASS) { return sky(d, false, false); }
-    let albedo = unpack_albedo(tr.mat);
+    let albedo = surface_albedo(h.tri, tr, o, d);
+    if ((tr.mat >> 24u) == MAT_EMISSIVE) { return albedo * EMISSION; }
     var n = normalize(cross(tr.e1, tr.e2));
     if (dot(n, d) > 0.0) { n = -n; }
     let p = o + d * h.t;
@@ -436,7 +571,7 @@ fn reflected(o: vec3<f32>, d: vec3<f32>) -> vec3<f32> {
     if (P.sun_irr.w > 0.5) {
         let ndl = dot(n, P.sun_dir.xyz);
         if (ndl > 0.0 && trace(p + n * eps, P.sun_dir.xyz, true).tri == NONE) {
-            c = c + albedo * (1.0 / PI) * P.sun_irr.rgb * ndl;
+            c = c + albedo * (1.0 / PI) * P.sun_irr.rgb * ndl * sh_tr;
         }
     }
     return c;
@@ -451,6 +586,7 @@ fn radiance(o_in: vec3<f32>, d_in: vec3<f32>) -> vec3<f32> {
     var first = true;
     var b = 0u;
     var glass_n = 0u;
+    var albedo_set = false;
     g_albedo = vec3<f32>(1.0);
     g_normal = vec3<f32>(0.0);
     g_depth = 0.0;
@@ -463,7 +599,7 @@ fn radiance(o_in: vec3<f32>, d_in: vec3<f32>) -> vec3<f32> {
         }
         let tr = tris[h.tri];
         let kind = tr.mat >> 24u;
-        let albedo = unpack_albedo(tr.mat);
+        let albedo = surface_albedo(h.tri, tr, o, d);
         var n = normalize(cross(tr.e1, tr.e2));
         if (dot(n, d) > 0.0) { n = -n; }
         let p = o + d * h.t;
@@ -472,7 +608,16 @@ fn radiance(o_in: vec3<f32>, d_in: vec3<f32>) -> vec3<f32> {
             first = false;
             g_normal = n;
             g_depth = h.t;
-            if (kind != MAT_GLASS) { g_albedo = albedo; }
+        }
+        // Albedo für den Entrauscher: erste Fläche hinter der Glaskette des Blickstrahls (Textur bleibt scharf, auch
+        // hinter Fenstern).
+        if (!albedo_set && kind != MAT_GLASS && b == 0u) {
+            albedo_set = true;
+            g_albedo = albedo;
+        }
+        if (kind == MAT_EMISSIVE) {
+            l = l + tp * albedo * EMISSION;
+            break;
         }
         if (kind == MAT_GLASS) {
             // Dünne Scheibe: Spiegelung mit Fresnel (beide Grenzflächen) fest als Anteil statt Zufallswahl (kein
@@ -497,9 +642,14 @@ fn radiance(o_in: vec3<f32>, d_in: vec3<f32>) -> vec3<f32> {
             if (ndl > 0.0) {
                 let sh = trace(p + n * eps, ls, true);
                 if (sh.tri == NONE) {
-                    l = l + tp * brdf(kind, albedo, tr.rough, tr.metal, n, wo, ls) * P.sun_irr.rgb * ndl;
+                    l = l + tp * brdf(kind, albedo, tr.rough, tr.metal, n, wo, ls) * P.sun_irr.rgb * ndl * sh_tr;
                 }
             }
+        }
+        // Nacht: warmes Innenlicht auf Flächen, die der Pfad durch Glas erreicht hat (erleuchtete Räume, Licht, das
+        // aus den Fenstern auf Boden und Fassade fällt).
+        if (P.dn.y > 0.0 && glass_n > 0u) {
+            l = l + tp * albedo * ROOM_RGB * P.dn.y;
         }
         // Nächste Richtung. Glänzend: Spiegel-Lobe mit Wahrscheinlichkeit nach Fresnel (Metall: immer) wählen, sonst
         // diffus (Gewicht / Wahl).
@@ -693,6 +843,7 @@ mod tests {
         assert_eq!(std::mem::size_of::<PtParams>(), 192);
         assert_eq!(std::mem::size_of::<crate::bvh::GpuNode>(), 32);
         assert_eq!(std::mem::size_of::<crate::bvh::GpuTri>(), 48);
+        assert_eq!(std::mem::size_of::<crate::bvh::GpuTriTex>(), 32);
     }
 
     #[test]
@@ -712,6 +863,10 @@ mod tests {
         // Nacht: kein Sonnenlicht, dunkler als jeder Tageshimmel, höhere Belichtung.
         let n = night_sky();
         assert!(!n.sun_on && n.exposure > high.exposure);
+        // Innenlicht hinter Glas nur bei Nacht, im Parameter-Block dn.y.
+        assert!(n.room_light > 0.0 && high.room_light == 0.0);
+        let p = build_params(&Camera::default(), &n, (4, 4), (4, 4), 0, 1, false, 0.5).unwrap();
+        assert_eq!(p.dn, [0.5, ROOM_LIGHT, 0.0, 0.0]);
         assert!(n.zenith.iter().zip(&low.zenith).all(|(a, b)| a < b));
         // Keine/kaputte Sonne: bedeckt, ohne Sonne.
         for d in [None, Some([f32::NAN, 1.0, 0.0]), Some([0.0, -1.0, 0.0]), Some([0.0; 3])] {

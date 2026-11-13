@@ -1175,6 +1175,16 @@ mod tests {
         let m2 = MeshInput { material_index: None, ..m };
         let tex2 = build_scene_mesh_textured(&[], &[], std::slice::from_ref(&m2));
         assert!(tex2.layers.iter().all(|&l| l == -1.0));
+
+        // [212] Etappe 3: Gelände ohne Material und ohne Luftbild-Farben trägt die Ebene „Wiese“ des Pathtracers
+        // (der texturierte Stil klemmt sie wie -1 aufs Schachbrett); mit Luftbild bleibt -1, mit Material die Ebene.
+        let terrain = MeshInput { kind: MeshKind::Terrain, ..m2.clone() };
+        assert_eq!(crate::mesh::mesh_layer(&terrain), crate::pt_material::TERRAIN_LAYER as f32);
+        let t3 = build_scene_mesh_textured(&[], &[], std::slice::from_ref(&terrain));
+        assert!(t3.layers.iter().all(|&l| l == -2.0));
+        let aerial = MeshInput { vertex_colors: vec![0.5; 9], ..terrain.clone() };
+        assert_eq!(crate::mesh::mesh_layer(&aerial), -1.0);
+        assert_eq!(crate::mesh::mesh_layer(&MeshInput { material_index: Some(4), ..terrain }), 4.0);
     }
 
     #[test]

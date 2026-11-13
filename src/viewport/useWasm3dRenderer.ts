@@ -28,7 +28,7 @@ import { loadEngine3d } from "../engine/engine3d";
 import { decodeMaterialTextures } from "./materialTextures";
 import { decodeImageToRgba } from "../io/swissImage";
 import { planPointCloudSync } from "./pointCloudSync";
-import { PT_EXPORT_MAX_PIXELS, clampImageSize, exportSamples, isBlankImage, matteFromBlackWhite } from "./imageExport";
+import { PT_EXPORT_MAX_PIXELS, clampImageSize, exportSamples, isBlankImage, matteFromBlackWhite, renderPathtraceChunks, type ExportProgress } from "./imageExport";
 import type { PointCloudSyncItem, UploadedPointCloud } from "./pointCloudSync";
 
 /** Fertige Kamera für einen Frame (world-Meter, Y-up — wie render3d::types::Camera). */
@@ -128,6 +128,8 @@ interface WebModelRendererLike {
   set_pathtrace_batch?(n: number): void;
   set_pathtrace_denoise?(on: boolean): void;
   set_pathtrace_max_pixels?(n: number): void;
+  /** [212] Etappe 3: erfüllt sich, wenn die GPU die abgeschickte Arbeit erledigt hat (Export in Häppchen). */
+  gpu_idle?(): Promise<unknown>;
   /** Luftbild aufs Gelände drapieren (`web::set_aerial_texture`): `rgba` =
    *  gepackte RGBA8-Bytes (`width*height*4`, zeilenweise von oben = Nord), plus
    *  Modell-Meter-Bbox (min/max, x=Ost/y=Nord). render3d legt es pixelscharf als
@@ -247,6 +249,8 @@ export function useWasm3dRenderer(
   enabled: boolean,
 ) {
   const rendererRef = useRef<WebModelRendererLike | null>(null);
+  /** [212] Bild-Export in Häppchen läuft: das Fenster-Zeichnen (`render`) pausiert, sonst setzte es Grösse und Summe zurück. */
+  const exportingRef = useRef(false);
   // Was an Punktwolken im Renderer liegt ([27], s. pointCloudSync.ts).
   const pointCloudsRef = useRef<Map<number, UploadedPointCloud>>(new Map());
   const [ready, setReady] = useState(false);
@@ -686,9 +690,11 @@ export function useWasm3dRenderer(
    * durchsichtig (zwei Durchgänge auf Schwarz und Weiss, `matteFromBlackWhite`); ohne `set_clear_color` im Build bleibt der
    * Hintergrund deckend (`transparent: false` im Ergebnis). Alles Zeichnen und Auslesen läuft synchron im selben Task (ein
    * WebGPU-Canvas liefert seinen Inhalt nur dort); danach stellt `restore` das Fenster-Bild wieder her. Null bei leerem Bild.
+   * [212] Etappe 3: im Stil Pathtracing rechnet er die Samples vorher in Häppchen (`renderPathtraceChunks`: Fortschritt
+   * `onProgress`, Abbruch über `signal` → null); nur das letzte Häppchen läuft im selben Task wie das Auslesen.
    */
   const exportImage = useCallback(
-    async (opts: { camera: Camera3d; width: number; height: number; transparent: boolean; samples?: number; restore: () => void }): Promise<{ png: Uint8Array; width: number; height: number; transparent: boolean } | null> => {
+    async (opts: { camera: Camera3d; width: number; height: number; transparent: boolean; samples?: number; restore: () => void } & ExportProgress): Promise<{ png: Uint8Array; width: number; height: number; transparent: boolean } | null> => {
       const canvas = canvasRef.current;
       const r = rendererRef.current;
       if (!canvas || !r) return null;
@@ -708,14 +714,30 @@ export function useWasm3dRenderer(
         canvas.width = W;
         canvas.height = H;
         r.resize(W, H);
-        if (pt) {
-          r.set_pathtrace_max_pixels?.(PT_EXPORT_MAX_PIXELS);
-          r.set_pathtrace_batch?.(exportSamples(opts.samples));
-        }
         const c = opts.camera;
+        const setCam = () => r.set_camera(c.eye[0], c.eye[1], c.eye[2], c.target[0], c.target[1], c.target[2], c.up[0], c.up[1], c.up[2], c.perspective, c.fovY, c.orthoHalfHeight);
+        if (pt) {
+          const total = exportSamples(opts.samples);
+          r.set_pathtrace_max_pixels?.(PT_EXPORT_MAX_PIXELS);
+          r.set_pathtrace_batch?.(total);
+          const gpuIdle = r.gpu_idle;
+          if (typeof gpuIdle === "function" && typeof r.pathtrace_samples === "function" && total > 1) {
+            exportingRef.current = true;
+            setCam();
+            const samples = r.pathtrace_samples.bind(r);
+            const left = await renderPathtraceChunks(
+              { render: () => r.render(), pathtrace_samples: samples, set_pathtrace_batch: (n) => r.set_pathtrace_batch?.(n), gpu_idle: () => gpuIdle.call(r) },
+              total,
+              opts,
+            );
+            if (left === null) return null;
+            r.set_pathtrace_batch?.(left);
+            opts.onProgress?.(total, total);
+          }
+        }
         const shot = (bg: number | null): ImageData => {
           if (bg !== null) r.set_clear_color?.(bg, bg, bg);
-          r.set_camera(c.eye[0], c.eye[1], c.eye[2], c.target[0], c.target[1], c.target[2], c.up[0], c.up[1], c.up[2], c.perspective, c.fovY, c.orthoHalfHeight);
+          setCam();
           r.render();
           ctx.clearRect(0, 0, W, H);
           ctx.drawImage(canvas, 0, 0);
@@ -733,6 +755,7 @@ export function useWasm3dRenderer(
         console.warn("render3d Bild-Export fehlgeschlagen:", e);
         image = null;
       } finally {
+        exportingRef.current = false;
         try {
           if (pt) {
             r.set_pathtrace_batch?.(1);
@@ -766,7 +789,7 @@ export function useWasm3dRenderer(
     (cam: Camera3d | null) => {
       const r = rendererRef.current;
       const canvas = canvasRef.current;
-      if (!r || !canvas) return;
+      if (!r || !canvas || exportingRef.current) return;
       const rect = canvas.getBoundingClientRect();
       const dpr = window.devicePixelRatio || 1;
       const w = Math.max(1, Math.round(rect.width * dpr));
