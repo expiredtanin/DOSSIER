@@ -67,7 +67,12 @@ Zuerst das Geschoss wählen (Panel **Zeichnungsebenen**, „Erdgeschoss“; ⌘5
 - Obergeschosse: Wände auf das nächste Geschoss kopieren (⌘D dupliziert die Auswahl) und mit ⌘6 das Geschoss
   wechseln.
 
-Die Volumenstudie als freier Körper (`koerper`) wird noch nicht automatisch in Wände und Decken umgewandelt ([222]).
+**Volumen → Bauteile:** Hast du die Volumenstudie als freien Körper gezeichnet (`koerper`, senkrechter Quader, Zylinder
+oder Prisma), wandelt der Befehl `solidtoparts` („Körper in Bauteile umwandeln“, auch `koerperinbauteile`; im Panel
+**Werkzeuge** in der Gruppe 3D neben „Körper verschneiden“) ihn um: Körper wählen (oder in ihn klicken), und es entstehen je
+Geschoss Aussenwände, Decken zwischen den Geschossen und ein Flachdach; fehlende Geschosse legt Dossier obenauf an, der
+Körper entfällt. Alles ist ein Undo-Schritt. Was nicht geht (verjüngte oder geneigte Körper, Kugel, Kegel, Verschneidungen,
+Unterkante zwischen zwei Geschossen), lehnt der Befehl mit einer Meldung ab.
 
 ## 5. Räume und Raumprogramm
 
@@ -122,6 +127,16 @@ und Uhrzeit. Ein 3D-Bild in Abgabeauflösung (z. B. A3 bei 300 dpi) erzeugt *Ans
 
 *Hier fehlen die Bilder: Das 3D läuft nur mit WebGPU (Browser) oder Metal (Mac), nicht im Linux-Container.*
 
+**Pathtracing-Vorschau:** In der Oberleiste unter **Darstellung** (Perspektive) wählst du „Pathtracing (Vorschau)“. Der
+Viewport rechnet dann Bild für Bild weiter und wird sauberer; ein Zähler „Pathtracing: n Samples · x/s“ läuft, bis
+„(fertig)“ dasteht. Die Sonne der Sonnenstudie liefert Licht und Himmel; steht sie unter dem Horizont, wird es Nacht, und
+in den Räumen brennt ein Raumlicht (unten links abschaltbar). Die Belichtung stellt Dossier selbst ein („Auto“); unten links
+im 3D gibt es dazu einen Regler von −3 bis +3 Blenden. Steht die Kamera im Raum, holt Dossier das Tageslicht gezielt durch
+die Fenster. Materialien und Bildkarten
+folgen den Baustoffen der Bauteile. Für die Abgabe: *Ansicht → 3D-Bild exportieren …* mit **Samples je Pixel
+(Pathtracing)**; das Bild rechnet mit Fortschrittsanzeige und lässt sich abbrechen. Mehr Samples = weniger Rauschen, dafür
+längere Rechenzeit. Es bleibt eine Vorschau; Endbilder gehen über das Rendering mit Blender.
+
 ## 10. Präsentationsplan
 
 Panel **Mappe** → **Präsentationsplan erstellen** (oder Befehl `praesentation`). Im Dialog Geschosse, Ansichten und den
@@ -136,13 +151,37 @@ Massstab, mit Titeln, Nordpfeil, Massstabsbalken und Schriftfeld. Das Beispiel e
 - **DXF:** Geschoss wählen, *Datei → Exportieren → DXF* (Browser: „Exportieren: DXF“). LV95, Layer je Kategorie.
 - **IFC:** *Datei → Exportieren → IFC* (IFC4 mit Wänden, Decken, Räumen).
 
+**Plakat: Hilfslinien und Bild-Zuschnitt.** Im Panel **Mappe** ein Layout anlegen, im Dialog „Neues Layout“ die
+**Plakat-Vorlage (Wettbewerb)** wählen (A0/A1, hoch oder quer): Dossier legt ein Raster aus Hilfslinien, eine Kopfzeile mit
+Kennwort-Feld und „Plan x/n“ sowie den Massstab unter jeden Viewport. Eigene **Hilfslinien** ziehst du aus dem Lineal auf
+das Blatt (Doppelklick auf eine Linie löscht sie; das Panel „Hilfslinien“ hat Zahlenfelder). Sie gehören zum Masterlayout,
+gelten für alle Blätter dieses Masters und erscheinen nur am Bildschirm, nicht im PDF. Beim Ziehen rasten Kanten und
+Mitten ein (8 Pixel; **Alt** hält den Fang aus). Ein **Bild** (PNG/JPEG) setzt der Knopf „Bild“ auf das Blatt, oder im
+3D-Bild-Dialog „Ins Layout einsetzen“. Verschieben, an der Ecke skalieren (Seitenverhältnis bleibt); **Zuschneiden**
+(Knopf) zeigt Griffe am Ausschnitt, die Felder Links/Rechts/Oben/Unten geben den Zuschnitt, „Zuschnitt aufheben“ stellt
+das Original wieder her. Unter 100 dpi warnt das Bild-HUD („niedrige Auflösung“).
+
+**Anonyme Abgabe.** Im Panel **Mappe**, Abschnitt Publikation, „Wettbewerb (anonym)“ einschalten und das **Kennwort**
+eintragen. Dann zeigen Plankopf und Dateinamen nur das Kennwort, und diese Ausgaben enthalten keinen Projekt-, Büro- oder
+Bearbeiternamen: PDF (Titel = Kennwort; Autor, Programm und Datum neutral), Berichte (Fläche, Raumbuch, Kosten, Öffnungen,
+Bauteile, Programm), IFC, DXF/DWG (Blattnamen „Blatt n“), STEP und das Rendering-Paket für Blender. „WBW-Abgabe anlegen“
+fasst alle Plakate in einen Publikationssatz. **Nicht geprüft** werden frei getippte Texte (Ebenen-, Raum-, Geschoss- und
+Blocknamen, Textobjekte, Blattnamen): vor der Abgabe von Hand durchsehen.
+
+**Kataster-Schwarzplan.** Nach dem Kataster-Import (Schritt 2) stellst du die Ansicht auf die Ansichtsvorlage „Situation
+WBW 1:500“ oder „Schwarzplan 1:500“ (Panel **Ressourcen** → Ansichtsvorlagen). Das eigene Gebäude erscheint als gefüllter
+Umriss über alle Geschosse, die Kataster-Gebäude und Nachbarn als gefüllte Grundfläche (Situation: grau, Schwarzplan: alles
+schwarz), dazu Parzelle, Strassen, Höhenlinien, Nordpfeil und Massstabsbalken. Raster, Wände, Möbel, Text, Masse und
+Schnittmarken sind aus. Alle Teile liegen auf Klassen (83 Situation Gebäude, 84 Planzeichen) und lassen sich dort
+ausschalten.
+
 Zum Schluss ⌘S. Das Projekt (`.obp`) enthält Volumen, Räume, Baurecht, Raumprogramm, Blätter und Publikationssätze.
 
 ---
 
 ## Noch offen
 
-Das Wettbewerbsplakat A0/A1 mit Kennwort-Feld und anonymem PDF ist erst teilweise fertig ([208] in `TODO.md`), das
-Rendering mit Blender (*Ansicht → Rendering mit Blender …*, [211]) ist auf dem Mac noch nicht geprüft, und die
-Umwandlung eines Volumenkörpers in Wände und Decken fehlt ([222]). Der Ablauf wurde im Browser-Build automatisch
+Das Wettbewerbsplakat ist erst teilweise fertig ([208] in `TODO.md`: Freitext wird bei der Anonymität nicht geprüft), das
+Rendering mit Blender (*Ansicht → Rendering mit Blender …*, [211]) und der Pathtracer ([212]) sind auf dem Mac noch nicht
+geprüft. Der Ablauf wurde im Browser-Build automatisch
 geprüft (`e2e/release10.spec.ts`); der Durchlauf auf dem Mac steht noch aus (`doc/RELEASE-1.0.md`).

@@ -9,10 +9,13 @@ kommt als Teile aus dem Kern (`src/plan/toWalls3d.ts`). Weg eines Modells in den
 | Datei | Inhalt |
 |---|---|
 | `Wasm3DViewport.tsx` | die 3D-Ansicht: Canvas, Maus und Tastatur, Auswahl, Griffe, Cursor-HUD, Live-Schnitt |
+| `ViewportToolbar3d.tsx` | schwebende 3D-Leiste ([240]): Begehen, Kamera+, Pathtracer-Statuszeile mit Fortschritt, Tastenhilfe beim Begehen |
 | `Viewport3D.tsx` | Zugang zur Ansicht (`Viewport3D = Wasm3DViewport`) und die geteilten Typen (`RenderDisplay`, `DisplayResolver`) |
 | `useWasm3dRenderer.ts` | Hook: lädt render3d, hält Modell, Kamera und Punktwolken, zeichnet; Typ `Camera3d` |
 | `cameraView.ts` | [213] Kamera-Element (`Project.cameras`) ↔ Sicht des Viewports: `cameraToView`, `cameraFromView`, Brennweite, Geschoss zur Höhe |
 | `walk.ts` | [213] Begehen (WASD): Bewegung und Umschauen als reine Funktionen auf dem Orbit-Zustand |
+| `imageExport.ts` | 3D-Bild in Abgabeauflösung; beim Pathtracing in Häppchen mit N Samples, Fortschritt und Abbruch ([212], [223]) |
+| `imageExport.ts` | [223] Hilfen für den 3D-Bild-Export (Zielgrösse, transparenter Hintergrund); Samples je Pixel im Stil Pathtracing (`exportSamples`, [212]); gezeichnet wird in `useWasm3dRenderer.exportImage` |
 | `cameraBridge.ts` | Kamera von aussen lesen und setzen, Bild-Schnappschuss, Live-Schnittebene (für BCF-Viewpoints) |
 
 ## Abgleich mit render3d
