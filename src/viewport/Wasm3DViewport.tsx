@@ -85,6 +85,7 @@ import {
 import { NO_KEYS, WALK_SPEED, anyKey, lookAround, speedFactor, stepWalk, walkKeyAllowed, walkKeyOf, type WalkKeys } from "./walk";
 import { loadShortcutOverrides, matchesShortcut } from "../state/keyboardShortcuts";
 import { createCameraFromView } from "../state/cameraActions";
+import { ViewportToolbar3d } from "./ViewportToolbar3d";
 
 /** Ein per 3D-Klick getroffenes Bauteil, oder null (Leerraum). */
 export type Pick3dHit =
@@ -1865,50 +1866,13 @@ export function Wasm3DViewport({
           Darstellungsart kommen von der Oberleiste (TopBar); das Grid-Overlay
           unten ist der einzige eigene Umschalter hier. */}
       <canvas ref={canvasRef} data-engine="render3d" />
-      {ptStatus && (
-        <div
-          data-testid="pathtrace-status"
-          style={{
-            position: "absolute",
-            left: 10,
-            bottom: 10,
-            padding: "3px 8px",
-            borderRadius: 6,
-            background: "rgba(20,20,24,0.65)",
-            color: "#f2f2f2",
-            fontSize: 12,
-            pointerEvents: "none",
-          }}
-        >
-          {ptStatus.done
-            ? t("viewport.pathtrace.done", { samples: ptStatus.samples })
-            : t("viewport.pathtrace.status", { samples: ptStatus.samples, rate: ptStatus.rate.toFixed(1) })}
-        </div>
-      )}
-      {/* [213] Begehen (WASD) und Kamera aus der aktuellen Ansicht anlegen. */}
-      <div className="viewport3d-tools" data-testid="viewport3d-tools">
-        <button
-          type="button"
-          className={`viewport3d-tool${walkMode ? " is-on" : ""}`}
-          aria-pressed={walkMode}
-          title={t("walk.hint")}
-          data-testid="walk-toggle"
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={() => setWalkMode((w) => !w)}
-        >
-          {t("walk.toggle")}
-        </button>
-        <button
-          type="button"
-          className="viewport3d-tool"
-          title={t("viewport3d.camera.create")}
-          data-testid="camera-create-3d"
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={() => createCameraFromView()}
-        >
-          {t("camera.defaultName")}+
-        </button>
-      </div>
+      {/* [240] Werkzeugleiste (Begehen, Kamera+), Pathtracer-Status und Tastenhilfe: eigene Komponente. */}
+      <ViewportToolbar3d
+        walkMode={walkMode}
+        onToggleWalk={() => setWalkMode((w) => !w)}
+        onCreateCamera={() => createCameraFromView()}
+        pathtrace={ptStatus}
+      />
       {/* Achsen-Lock-Führungslinie (Pfeiltasten während eines Endpunkt-/
           Verschiebe-Griff-Drags, s. `axisLockRef`-Dateikommentar) — SketchUp-
           Vorbild: eine durchgezogene farbige Linie durch den Anker markiert

@@ -2089,34 +2089,184 @@ body {
   height: 100% !important;
 }
 
-/* [213] Begehen und Kamera anlegen: kleine Knöpfe oben rechts im 3D-Viewport. */
-.viewport3d-tools {
+/* [240] 3D-Werkzeugleiste, Pathtracer-Status und Tastenhilfe (ViewportToolbar3d.tsx). Schwebende Gruppen oben rechts,
+   Status unten links; Grund leicht durchscheinend mit Unschärfe, damit sie über hellem wie dunklem 3D-Bild lesbar bleiben. */
+.viewport {
+  --vp3t-bg: rgba(250, 247, 241, 0.84);
+  --vp3t-fg: var(--ink);
+  --vp3t-fg-dim: var(--muted);
+  --vp3t-border: rgba(26, 26, 24, 0.2);
+  --vp3t-hover: rgba(26, 26, 24, 0.09);
+  --vp3t-on: var(--active);
+  --vp3t-on-fg: #f5f2ec;
+}
+:root[data-theme="dark"] .viewport {
+  --vp3t-bg: rgba(20, 20, 24, 0.74);
+  --vp3t-fg: #f2f2f2;
+  --vp3t-fg-dim: #a8a8a8;
+  --vp3t-border: rgba(255, 255, 255, 0.16);
+  --vp3t-hover: rgba(255, 255, 255, 0.1);
+  --vp3t-on: rgba(255, 255, 255, 0.9);
+  --vp3t-on-fg: #141418;
+}
+.vp3t-bar-wrap {
   position: absolute;
-  top: 8px;
-  right: 8px;
+  top: 10px;
+  right: 10px;
+  z-index: 7;
+  display: flex;
+  gap: 8px;
+}
+.vp3t-group {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 9px;
+  border: 1px solid var(--vp3t-border);
+  background: var(--vp3t-bg);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
+}
+.vp3t-btn {
+  position: relative;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--vp3t-fg);
+  cursor: pointer;
+}
+.vp3t-btn .material-symbols-outlined {
+  font-size: 19px;
+}
+.vp3t-btn:hover {
+  background: var(--vp3t-hover);
+}
+.vp3t-btn:focus-visible {
+  outline: 2px solid var(--vp3t-fg);
+  outline-offset: 1px;
+}
+.vp3t-btn.is-on {
+  background: var(--vp3t-on);
+  color: var(--vp3t-on-fg);
+}
+/* Tooltip unter dem Knopf (Hover und Tastaturfokus), rechtsbündig, damit er nicht aus dem Viewport ragt. */
+.vp3t-btn::after {
+  content: attr(data-tip);
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: rgba(20, 20, 24, 0.94);
+  color: #f2f2f2;
+  font-size: 11px;
+  line-height: 1.3;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.12s ease 0.35s;
+}
+.vp3t-btn:hover::after,
+.vp3t-btn:focus-visible::after {
+  opacity: 1;
+}
+.vp3t-status {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
   z-index: 6;
   display: flex;
-  gap: 6px;
-}
-.viewport3d-tool {
-  padding: 3px 9px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--panel);
-  color: var(--label);
+  flex-direction: column;
+  gap: 5px;
+  min-width: 190px;
+  padding: 6px 10px 7px;
+  border-radius: 8px;
+  border: 1px solid var(--vp3t-border);
+  background: var(--vp3t-bg);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  color: var(--vp3t-fg);
   font-size: 11px;
-  cursor: pointer;
-  opacity: 0.85;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
 }
-.viewport3d-tool:hover {
-  background: var(--panel-2);
-  opacity: 1;
+.vp3t-status.is-done .vp3t-status-text {
+  color: var(--vp3t-fg-dim);
 }
-.viewport3d-tool.is-on {
-  background: var(--active-dim);
-  border-color: var(--active-light);
-  color: var(--active-light);
+.vp3t-bar {
+  display: block;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--vp3t-hover);
+  overflow: hidden;
+}
+.vp3t-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--vp3t-fg);
+  transition: width 0.25s linear;
+}
+.vp3t-help {
+  position: absolute;
+  top: 52px;
+  right: 10px;
+  z-index: 6;
+  min-width: 190px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--vp3t-border);
+  background: var(--vp3t-bg);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  color: var(--vp3t-fg);
+  font-size: 11px;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity 0.4s ease, transform 0.4s ease;
+}
+.vp3t-help.is-visible {
   opacity: 1;
+  transform: none;
+}
+.vp3t-help-title {
+  margin-bottom: 4px;
+  font-weight: 600;
+}
+.vp3t-help-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 0;
+}
+.vp3t-help-row span {
+  color: var(--vp3t-fg-dim);
+}
+.vp3t-help kbd {
+  min-width: 18px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--vp3t-border);
+  background: var(--vp3t-hover);
+  font-family: var(--font-mono);
+  font-size: inherit;
+  text-align: center;
+}
+@media (prefers-reduced-motion: reduce) {
+  .vp3t-help,
+  .vp3t-bar-fill,
+  .vp3t-btn::after {
+    transition: none;
+  }
 }
 
 .viewport-fallback {
