@@ -10,7 +10,7 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   stehen im Archiv („Bewusst nicht übernommen“).
 - **Grösse** (eine Person mit Agenten): S ≤ 1 Tag · M ≤ 1 Woche · L ≤ 1 Monat · XL > 1 Monat.
   Steht keine Grösse im Archiv, ist sie hier geschätzt.
-- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 234);
+- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 235);
   nie eine ID wiederverwenden oder umnummerieren. Präfix-IDs (`[K]`, `[G]`, `[T]`, `[B]`, `[C]`) bleiben.
 - **Pro Punkt:** was fehlt · wo im Code · Grösse. Höchstens ein bis drei Sätze je Punkt;
   Messwerte und Befunde gehören in den Commit.
@@ -221,6 +221,9 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   `add_textures`: keine Normalenkarte, stattdessen Rauigkeitskarte als Höhenfeld (Bump, Stärke 0.3, rahmenfrei). Test:
   `blenderRender.test.ts` (Skript ohne Normal-Map-Knoten). Geprüft: echter Lauf `bpy` 5.3 (CPU) vorher/nachher. Offen: Mac/Blender 3.6/4.x;
   echte Normalenkarten bräuchten UVs im GLB-Export. · S
+- ✓ **[235]** `update-dossier` brach nach der Commit-Liste stumm ab (13.11., Maintainer, Void): `git log … | head -20` lieferte bei mehr als 20 neuen
+  Commits SIGPIPE, mit `set -euo pipefail` endete das Skript ohne Meldung — weder WASM noch AppImage wurden gebaut, `dossier` startete das alte
+  AppImage. Lösung: `git log -20`; `dossier` warnt, wenn das AppImage älter ist als der Checkout. Geprüft: Ursache nachgestellt (Exit 141), Syntax. · S
 - ✓ **[230]** Sonnenschatten im Grundriss mit weissen Löchern, je nach Uhrzeit (13.11., Maintainer, Linux). Ursache: Das Ear-Clipping
   (dreifach vorhanden: Kern `gpu_compile`, `render2d`, `render3d`) brach bei den abgetasteten Geländeschatten-Stücken (viele fast kollineare
   Ecken, Ring berührt sich längs einer Geraden) ab und liess den Rest leer — 651 von 4149 Stücken im Musterhaus komplex über ein Jahr.
