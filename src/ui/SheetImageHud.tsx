@@ -32,10 +32,15 @@ function cropFromEdges(e: Record<Edge, number>): LayoutImage["crop"] {
 
 export function SheetImageHud({
   image,
+  cropping = false,
+  onToggleCrop,
   onPatch,
   onRemove,
 }: {
   image: LayoutImage;
+  /** Zuschnitt-Modus ([208]): Griffe am Ausschnitt auf dem Blatt. */
+  cropping?: boolean;
+  onToggleCrop?: () => void;
   onPatch: (patch: Partial<Omit<LayoutImage, "id">>) => void;
   onRemove: () => void;
 }) {
@@ -75,7 +80,14 @@ export function SheetImageHud({
         {dpi > 0 ? t("sheetImage.dpi", { dpi }) : ""}
         {dpi > 0 && dpi < LOW_DPI ? ` · ${t("sheetImage.lowDpi")}` : ""}
       </div>
-      <div className="layout-sheet-hud-title" style={{ marginTop: 6 }}>{t("sheetImage.crop")}</div>
+      <div className="layout-sheet-hud-title" style={{ marginTop: 6, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+        <span>{t("sheetImage.crop")}</span>
+        {onToggleCrop && (
+          <button className={`nav-add${cropping ? " active" : ""}`} data-testid="image-crop-toggle" onClick={onToggleCrop} title={t("sheetImage.cropHint")}>
+            {cropping ? t("sheetImage.cropDone") : t("sheetImage.cropStart")}
+          </button>
+        )}
+      </div>
       {(["left", "right", "top", "bottom"] as Edge[]).map((k) => (
         <div key={k} className="layout-sheet-hud-row">
           <span>{t(`sheetImage.crop.${k}`)}</span>
@@ -84,6 +96,7 @@ export function SheetImageHud({
           </span>
         </div>
       ))}
+      {cropping && <div className="layout-sheet-hud-size">{t("sheetImage.cropHint")}</div>}
       <div className="layout-sheet-hud-actions">
         {image.crop && (
           <button className="nav-add" data-testid="image-crop-reset" onClick={() => onPatch(cropImage(image, undefined))} title={t("sheetImage.cropReset")}>

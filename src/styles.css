@@ -7641,9 +7641,58 @@ body {
   color: var(--muted, #6e6e6e);
 }
 
+/* Hilfslinien ([208]): Lineal-Griffe über den Lineal-Leisten (20 px) der Blatt-Ansicht. */
+.layout-sheet-ruler-grab {
+  position: absolute;
+  z-index: 4;
+  background: transparent;
+}
+.layout-sheet-ruler-top {
+  left: 20px;
+  right: 0;
+  top: 0;
+  height: 20px;
+  cursor: ns-resize;
+}
+.layout-sheet-ruler-left {
+  left: 0;
+  top: 20px;
+  bottom: 0;
+  width: 20px;
+  cursor: ew-resize;
+}
+.layout-sheet-guides {
+  width: 270px;
+  min-width: 0;
+  left: auto;
+  right: 12px;
+  top: 36px;
+  bottom: auto;
+  max-height: 60%;
+  overflow: auto;
+}
+
+.layout-sheet-guides .res-input.num {
+  width: 92px;
+}
+.layout-sheet-guides .layout-sheet-hud-size {
+  white-space: normal;
+}
+
 .layout-sheet-hud-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 5px;
+}
+.layout-sheet-hud-actions .nav-add,
+.layout-sheet-hud-title .nav-add,
+.layout-sheet-guides .nav-add {
+  width: auto;
+  min-width: 20px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 4px;
+  white-space: nowrap;
 }
 
 /* Tabellen-Eigenschaften ([111]): rechts oben, damit das Blatt links frei bleibt. */

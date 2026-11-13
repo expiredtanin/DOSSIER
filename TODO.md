@@ -163,8 +163,13 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   IfcProject/IfcBuilding und Dateiname, fester Zeitstempel; Schreiber `fileio/ifc_export`: leerer Zeitstempel = anonym → Organisation/Person/
   Anwendung „-“, Kopf ohne Autor/Programm), DXF/DWG (Header war schon neutral, Blattnamen der Projekt-Layouts → „Blatt n“), STEP (Zeitstempel fest),
   Blender-`scene.json`, Dateinamen (Panels, CLI, Export-Dialog). Geprüft ohne Befund: SVG, Druck-SVG, OBJ/MTL/STL/glTF/GLB, CSV-Bauteilliste, PNG (Bild-Export
-  schreibt keine tEXt-Chunks). Test `competitionAnonymous.test.ts` (alle Formate, Gegenprobe ohne Anonymität). Offen: Hilfslinien nicht
-  als Fang und nicht frei setzbar; Bild-Zuschnitt nur per Prozentfeldern (kein Ziehen), Bild in DXF/IFC-Exporten nicht; frei eingegebene Texte
+  schreibt keine tEXt-Chunks). Test `competitionAnonymous.test.ts` (alle Formate, Gegenprobe ohne Anonymität). Blatt-Oberfläche (13.11.): **Hilfslinien als Fang** (Viewport, Bild, Tabelle,
+  Aufziehen: Kanten und Mitten rasten auf Linien ein, 8 Bildschirm-Pixel, Alt = aus; gefangene Linie hervorgehoben; `ui/sheetSnap.ts`),
+  **frei setzbar** (aus dem Lineal ziehen, Zug ausserhalb des Blatts oder Doppelklick löscht, Panel „Hilfslinien“ mit Zahlenfeldern;
+  am Masterlayout gespeichert, `MasterLayout.guides` — kein neues Modellfeld, gilt für alle Blätter des Masters, ohne Master nicht setzbar),
+  **Bild-Zuschnitt durch Ziehen** (Knopf „Zuschneiden“ oder Doppelklick, Griffe am Ausschnitt, Original bleibt stehen, ein Undo-Schritt je Zug).
+  Tests: vitest `sheetSnap`, `sheetGuides`, e2e `competition`. Offen: Fang für Texte (es gibt keine freien Text-Elemente auf dem Blatt) und
+  Legenden-Verschieben (Legende hat keinen Zug am Blatt); Hilfslinien je Blatt statt je Master; Bild in DXF/IFC-Exporten nicht; frei eingegebene Texte
   (Layer-/Ebenen-, Raum-, Geschoss-, Blockbezeichnungen, Textobjekte, Blattnamen im PDF) prüft niemand — der Satz „Anonym“ gilt für
   Projekt-Stammdaten, nicht für Freitext; Eigenschaftssatz-Namen `Dossier_Qto_…` im IFC (Programmkonvention) bleiben; Download-Namen im Browser ohne Tauri-Dialog; grosse Bilder: jede
   Blatt-Änderung (Viewport verschieben …) ersetzt das ganze Layout samt Data-URL im Op und im Verlauf (wie `ContextImage`) — bei vielen MB Bilder

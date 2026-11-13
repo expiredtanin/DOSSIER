@@ -133,6 +133,56 @@ test("Plakat A1 quer aus Vorlage, Bild einsetzen, anonym als WBW-Abgabe exportie
   await page.locator("[data-testid=image-x]").fill("570");
   await page.locator("[data-testid=image-y]").fill("70");
 
+  // Hilfslinien frei setzen: aus dem oberen Lineal ziehen (waagrecht), per Zahl (senkrecht), löschbar.
+  const pxPerMm = paper.width / 841;
+  const ruler = (await page.locator("[data-ruler-grab=y]").boundingBox())!;
+  await page.mouse.move(ruler.x + ruler.width / 2, ruler.y + ruler.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(paper.x + paper.width / 2, paper.y + paper.height * 0.5, { steps: 5 });
+  await expect(page.locator("[data-guide-new]")).toBeAttached();
+  await page.mouse.up();
+  await expect(page.locator("[data-guides] line")).toHaveCount(17);
+  await page.locator("[data-guides-toggle]").click();
+  await page.locator("[data-testid=guide-pos]").fill("600");
+  await page.locator("[data-testid=guide-add]").click();
+  await expect(page.locator("[data-guides] line")).toHaveCount(18);
+  if (process.env.DOSSIER_SHOTS) {
+    await mkdir(process.env.DOSSIER_SHOTS, { recursive: true });
+    await page.screenshot({ path: `${process.env.DOSSIER_SHOTS}/plakat-hilfslinien.png` });
+  }
+  await page.locator("[data-guides-toggle]").click(); // Panel zu, damit es das Bild nicht verdeckt
+  // Fang: das Bild (links bei 570) 28 mm nach rechts ziehen → linke Kante rastet bei 600 ein, nicht bei 598.
+  const body2 = (await page.locator("[data-image-body]").boundingBox())!;
+  await page.mouse.move(body2.x + body2.width / 2, body2.y + body2.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(body2.x + body2.width / 2 + 28 * pxPerMm, body2.y + body2.height / 2, { steps: 6 });
+  await page.mouse.up();
+  await expect.poll(async () => Number(await page.locator("[data-testid=image-x]").inputValue())).toBe(600);
+  // Löschen: die neue Linie per Knopf im Panel (die zuletzt angelegte steht am Ende der Liste).
+  await page.locator("[data-guides-toggle]").click();
+  await page.locator("[data-guide-row] [data-guide-remove]").last().click();
+  await expect(page.locator("[data-guides] line")).toHaveCount(17);
+  await page.locator("[data-guides-toggle]").click();
+  await page.locator("[data-testid=image-x]").fill("570");
+  await page.locator("[data-testid=image-y]").fill("70");
+
+  // Zuschneiden durch Ziehen: das Original bleibt stehen, der Ausschnitt schrumpft (linker Rand 25 % → mehr).
+  const cropLeft0 = Number(await page.locator("[data-testid=image-crop-left]").inputValue());
+  await page.locator("[data-testid=image-crop-toggle]").click();
+  await expect(page.locator("[data-crop-original]")).toBeAttached();
+  const grip = (await page.locator("[data-crop-grip=w]").boundingBox())!;
+  await page.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(grip.x + grip.width / 2 + 40 * pxPerMm, grip.y + grip.height / 2, { steps: 5 });
+  await page.mouse.up();
+  await expect.poll(async () => Number(await page.locator("[data-testid=image-crop-left]").inputValue())).toBeGreaterThan(cropLeft0 + 5);
+  if (process.env.DOSSIER_SHOTS) {
+    await mkdir(process.env.DOSSIER_SHOTS, { recursive: true });
+    await page.screenshot({ path: `${process.env.DOSSIER_SHOTS}/plakat-zuschnitt.png` });
+  }
+  await page.locator("[data-testid=image-crop-toggle]").click();
+  await expect(page.locator("[data-crop-original]")).toHaveCount(0);
+
   // Anonyme Abgabe mit Kennwort; Plankopf zeigt nur das Kennwort.
   await page.locator("[data-testid=competition-anonymous]").check();
   await page.locator("[data-testid=competition-keyword]").fill("FALKE 7");

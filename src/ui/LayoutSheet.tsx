@@ -15,6 +15,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent, ReactNode, RefObject } from "react";
 import type {
   Layout,
+  LayoutGuide,
   LayoutImage,
   LayoutLegend,
   LayoutTitleBlock,
@@ -30,6 +31,17 @@ import { createTable, PX_PER_M, sheetTables, TABLE_SOURCES, snapshotMono, snapsh
 import type { TableOut } from "../core";
 import { SheetTableHud } from "./SheetTableHud";
 import { SheetImageHud } from "./SheetImageHud";
+import { SheetGuidesHud } from "./SheetGuidesHud";
+import {
+  SNAP_PX,
+  addGuide,
+  clipToCrop,
+  dragCropClip,
+  moveGuide,
+  removeGuide,
+  snapRectToGuides,
+  type GuideHit,
+} from "./sheetSnap";
 import { createLayoutImage, imageAspect, imageGeometry } from "../model/layoutImages";
 import { posterHeaderItems, viewportScaleLabel } from "../model/posterTemplates";
 import { planToPrintSvg } from "../export/planToPrintSvg";
@@ -241,6 +253,8 @@ export interface LayoutSheetHandlers {
   /** Ändert ein Bild (Lage, Breite, Zuschnitt); gleiche `coalesceKey` = ein Undo-Schritt. */
   onPatchImage: (imageId: string, patch: Partial<Omit<LayoutImage, "id">>, coalesceKey?: string) => void;
   onRemoveImage: (imageId: string) => void;
+  /** Setzt die Hilfslinien des Masters ([208]); gleiche `coalesceKey` = ein Undo-Schritt. Ohne Master wirkungslos. */
+  onSetGuides?: (guides: LayoutGuide[], coalesceKey?: string) => void;
   /**
    * [137] Schriftfeld bearbeiten: Blattname/Plan-Nr./Index am Blatt, Projekt/Bearbeiter/Datum am Master
    * (gleiche `coalesceKey` = ein Undo-Schritt beim Tippen).
@@ -327,6 +341,13 @@ export function LayoutSheetPane({
   const [selectedImageId, setSelectedImageId] = useState<string | null>(null);
   const [imagePreview, setImagePreview] = useState<{ id: string; rect: RectMm } | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
+  // Zuschnitt-Modus ([208]): Bild-Id; während des Ziehens der Ausschnitt (mm) und das feststehende Original.
+  const [cropId, setCropId] = useState<string | null>(null);
+  const [cropPreview, setCropPreview] = useState<{ id: string; clip: RectMm; draw: RectMm } | null>(null);
+  // Hilfslinien ([208]): Panel offen, laufender Zug (Lineal / bestehende Linie) und gerade gefangene Linien.
+  const [guidesOpen, setGuidesOpen] = useState(false);
+  const [guideDrag, setGuideDrag] = useState<{ index: number; axis: "x" | "y"; posMm: number } | null>(null);
+  const [snapHits, setSnapHits] = useState<GuideHit[]>([]);
   // [137] Schriftfeld angeklickt → Felder bearbeiten.
   const [titleBlockSelected, setTitleBlockSelected] = useState(false);
   // Tabellen-Verschiebung läuft (Versatz in mm), sonst null.
@@ -353,6 +374,9 @@ export function LayoutSheetPane({
   const selectedTable = layoutTables.find((tb) => tb.id === selectedTableId) ?? null;
   const layoutImages = layout.images ?? [];
   const selectedImage = layoutImages.find((i) => i.id === selectedImageId) ?? null;
+  const cropping = !!selectedImage && cropId === selectedImage.id;
+  const guides = master?.guides;
+  const canGuides = !!master && !!handlers.onSetGuides;
 
   // Gelöschter Viewport / anderes Blatt → Auswahl und laufendes Platzieren verwerfen.
   useEffect(() => {
@@ -360,6 +384,7 @@ export function LayoutSheetPane({
     setSelectedLegendId(null);
     setSelectedTableId(null);
     setSelectedImageId(null);
+    setCropId(null);
     setTitleBlockSelected(false);
     setPlacing(false);
     setPendingRect(null);
@@ -378,7 +403,9 @@ export function LayoutSheetPane({
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement | null;
       if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return;
-      if (e.key === "Escape") {
+      if (cropId && (e.key === "Escape" || e.key === "Enter")) {
+        setCropId(null);
+      } else if (e.key === "Escape") {
         setSelectedId(null);
         setSelectedTableId(null);
         setSelectedImageId(null);
@@ -402,7 +429,7 @@ export function LayoutSheetPane({
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [selectedVp, selectedTable, selectedImage, placing, handlers]);
+  }, [selectedVp, selectedTable, selectedImage, placing, handlers, cropId]);
 
   // Client-Pixel → Blatt-mm über die Bildschirm-Matrix der Blatt-Gruppe (enthält Pan/Zoom).
   const toMm = (clientX: number, clientY: number): { xMm: number; yMm: number } | null => {
@@ -410,6 +437,57 @@ export function LayoutSheetPane({
     if (!m) return null;
     const p = new DOMPoint(clientX, clientY).matrixTransform(m.inverse());
     return { xMm: p.x, yMm: p.y };
+  };
+
+  // Fang-Toleranz in mm: SNAP_PX Bildschirm-Pixel, über den Massstab der Blatt-Gruppe umgerechnet.
+  const snapTolMm = (): number => {
+    const m = gRef.current?.getScreenCTM();
+    const pxPerMm = m ? Math.hypot(m.a, m.b) : 0;
+    return pxPerMm > 0 ? SNAP_PX / pxPerMm : 0;
+  };
+  // Alt hält den Fang aus; ohne Hilfslinien tut er nichts.
+  const snapOf = (rect: RectMm, handle: Handle, ev: PointerEvent, opts?: { minMm?: number; keepAspect?: number }) => {
+    if (ev.altKey) {
+      setSnapHits([]);
+      return rect;
+    }
+    const s = snapRectToGuides(rect, handle, guides, snapTolMm(), opts);
+    setSnapHits(s.hits);
+    return s.rect;
+  };
+
+  const setGuidesNow = (next: LayoutGuide[], key?: string) => handlers.onSetGuides?.(next, key);
+
+  // Hilfslinie ziehen: neu aus dem Lineal (index -1) oder eine bestehende; loslassen ausserhalb des Blatts löscht sie.
+  const startGuideDrag = (e: ReactPointerEvent<Element>, axis: "x" | "y", index: number) => {
+    if (e.button !== 0 || !canGuides) return;
+    e.stopPropagation();
+    e.preventDefault();
+    let pos = index >= 0 && guides ? guides[index].posMm : NaN;
+    const move = (ev: PointerEvent) => {
+      const mm = toMm(ev.clientX, ev.clientY);
+      if (!mm) return;
+      pos = Math.round((axis === "x" ? mm.xMm : mm.yMm) * 10) / 10;
+      setGuideDrag({ index, axis, posMm: pos });
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+      setGuideDrag(null);
+      if (!Number.isFinite(pos)) return;
+      const inside = pos >= 0 && pos <= (axis === "x" ? sheet.w : sheet.h);
+      if (index < 0) {
+        if (inside) setGuidesNow(addGuide(guides, axis, pos));
+      } else if (!inside) {
+        setGuidesNow(removeGuide(guides, index));
+      } else {
+        setGuidesNow(moveGuide(guides, index, pos));
+      }
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
   };
 
   const startDrag = (e: ReactPointerEvent<SVGElement>, drag: Drag) => {
@@ -423,9 +501,10 @@ export function LayoutSheetPane({
       const mm = toMm(ev.clientX, ev.clientY);
       if (!mm) return;
       if (drag.mode === "place") {
-        last = normalizeRect(drag.x0, drag.y0, mm.xMm, mm.yMm);
+        const q = snapOf({ xMm: mm.xMm, yMm: mm.yMm, widthMm: 0, heightMm: 0 }, "body", ev);
+        last = normalizeRect(drag.x0, drag.y0, q.xMm, q.yMm);
       } else {
-        const r = applyHandleDrag(drag.start, drag.handle, mm.xMm - drag.grab.xMm, mm.yMm - drag.grab.yMm, MIN_VP_MM);
+        const r = snapOf(applyHandleDrag(drag.start, drag.handle, mm.xMm - drag.grab.xMm, mm.yMm - drag.grab.yMm, MIN_VP_MM), drag.handle, ev, { minMm: MIN_VP_MM });
         last = drag.handle === "body" ? clampRectToSheet(r, sheet.w, sheet.h) : r;
       }
       setPreview({ drag, rect: last });
@@ -435,6 +514,7 @@ export function LayoutSheetPane({
       window.removeEventListener("pointerup", up);
       window.removeEventListener("pointercancel", up);
       setPreview(null);
+      setSnapHits([]);
       if (drag.mode === "place") {
         setPlacing(false);
         if (last.widthMm >= MIN_PLACE_MM && last.heightMm >= MIN_PLACE_MM) {
@@ -474,6 +554,11 @@ export function LayoutSheetPane({
       const mm = toMm(ev.clientX, ev.clientY);
       if (!mm) return;
       last = { dx: mm.xMm - grab.xMm, dy: mm.yMm - grab.yMm };
+      const tb = tables.find((x) => x.id === table.id);
+      if (tb) {
+        const q = snapOf({ xMm: table.xMm + last.dx, yMm: table.yMm + last.dy, widthMm: tb.widthMm, heightMm: Math.max(tb.heightMm, 4) }, "body", ev);
+        last = { dx: q.xMm - table.xMm, dy: q.yMm - table.yMm };
+      }
       setTableDrag({ id: table.id, ...last });
     };
     const up = () => {
@@ -481,6 +566,7 @@ export function LayoutSheetPane({
       window.removeEventListener("pointerup", up);
       window.removeEventListener("pointercancel", up);
       setTableDrag(null);
+      setSnapHits([]);
       if (last.dx === 0 && last.dy === 0) return;
       handlers.onPatchTable(table.id, { xMm: round1(table.xMm + last.dx), yMm: round1(table.yMm + last.dy) });
     };
@@ -505,10 +591,10 @@ export function LayoutSheetPane({
       const dx = mm.xMm - grab.xMm;
       const dy = mm.yMm - grab.yMm;
       if (handle === "body") {
-        last = { xMm: img.xMm + dx, yMm: img.yMm + dy, widthMm: img.widthMm, heightMm: img.heightMm };
+        last = snapOf({ xMm: img.xMm + dx, yMm: img.yMm + dy, widthMm: img.widthMm, heightMm: img.heightMm }, "body", ev);
       } else {
         const w = Math.max(MIN_VP_MM, img.widthMm + dx);
-        last = { xMm: img.xMm, yMm: img.yMm, widthMm: w, heightMm: w / aspect };
+        last = snapOf({ xMm: img.xMm, yMm: img.yMm, widthMm: w, heightMm: w / aspect }, "se", ev, { minMm: MIN_VP_MM, keepAspect: aspect });
       }
       setImagePreview({ id: img.id, rect: last });
     };
@@ -517,12 +603,56 @@ export function LayoutSheetPane({
       window.removeEventListener("pointerup", up);
       window.removeEventListener("pointercancel", up);
       setImagePreview(null);
+      setSnapHits([]);
       if (last.xMm === img.xMm && last.yMm === img.yMm && last.widthMm === img.widthMm) return;
       handlers.onPatchImage(img.id, { xMm: round1(last.xMm), yMm: round1(last.yMm), widthMm: round1(last.widthMm), heightMm: round1(last.heightMm) });
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
     window.addEventListener("pointercancel", up);
+  };
+
+  // Zuschneiden ([208]): das Original (draw) bleibt stehen, der Ausschnitt (clip) wandert; beim Loslassen ein Patch
+  // mit neuem Rahmen + Zuschnitt (ein Undo-Schritt je Zug).
+  const startCropDrag = (e: ReactPointerEvent<SVGElement>, img: LayoutImage, handle: Handle) => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    e.preventDefault();
+    const grab = toMm(e.clientX, e.clientY);
+    if (!grab) return;
+    const g = imageGeometry(img);
+    const draw: RectMm = { xMm: g.draw.x, yMm: g.draw.y, widthMm: g.draw.w, heightMm: g.draw.h };
+    const clip0: RectMm = { xMm: img.xMm, yMm: img.yMm, widthMm: img.widthMm, heightMm: img.heightMm };
+    let last = clip0;
+    const move = (ev: PointerEvent) => {
+      const mm = toMm(ev.clientX, ev.clientY);
+      if (!mm) return;
+      last = dragCropClip(draw, clip0, handle, mm.xMm - grab.xMm, mm.yMm - grab.yMm);
+      setCropPreview({ id: img.id, clip: last, draw });
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+      setCropPreview(null);
+      if (last === clip0) return;
+      const r2 = (v: number) => Math.round(v * 100) / 100;
+      handlers.onPatchImage(
+        img.id,
+        { crop: clipToCrop(draw, last), xMm: r2(last.xMm), yMm: r2(last.yMm), widthMm: r2(last.widthMm), heightMm: r2(last.heightMm) },
+        `sheetImageCrop:${img.id}:${Date.now()}`,
+      );
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+  };
+
+  // Bild mit laufendem Zuschnitt-Zug (Ausschnitt live).
+  const effImage = (img: LayoutImage): LayoutImage => {
+    if (!cropPreview || cropPreview.id !== img.id) return img;
+    const c = cropPreview.clip;
+    return { ...img, crop: clipToCrop(cropPreview.draw, c), xMm: c.xMm, yMm: c.yMm, widthMm: c.widthMm, heightMm: c.heightMm };
   };
 
   const imageRect = (img: LayoutImage): RectMm =>
@@ -618,12 +748,31 @@ export function LayoutSheetPane({
             </g>
           );
         })}
+        {/* Hilfslinien greifbar machen ([208]): breite, unsichtbare Trefferlinien unter allen Griffen; Doppelklick löscht. */}
+        {canGuides && editable && !placing && (
+          <g data-guide-hits>
+            {(guides ?? []).map((gd, i) => {
+              const w = hair * 8;
+              return gd.axis === "x" ? (
+                <line key={i} x1={gd.posMm} y1={0} x2={gd.posMm} y2={sheet.h} stroke="transparent" strokeWidth={w} style={{ cursor: "ew-resize" }} data-guide-hit={i} onPointerDown={(e) => startGuideDrag(e, "x", i)} onDoubleClick={() => setGuidesNow(removeGuide(guides, i))} />
+              ) : (
+                <line key={i} x1={0} y1={gd.posMm} x2={sheet.w} y2={gd.posMm} stroke="transparent" strokeWidth={w} style={{ cursor: "ns-resize" }} data-guide-hit={i} onPointerDown={(e) => startGuideDrag(e, "y", i)} onDoubleClick={() => setGuidesNow(removeGuide(guides, i))} />
+              );
+            })}
+          </g>
+        )}
         {/* Bilder ([208]): über den Viewports, unter Legenden und Tabellen. */}
-        {layoutImages.map((img) => {
+        {layoutImages.map((img0) => {
+          const img = effImage(img0);
           const r = imageRect(img);
           const g = imageGeometry({ ...img, xMm: r.xMm, yMm: r.yMm, widthMm: r.widthMm, heightMm: r.heightMm });
+          // Im Zuschnitt-Modus: das ganze Original blass dahinter (es bleibt stehen).
+          const orig = cropPreview && cropPreview.id === img.id ? cropPreview.draw : { xMm: g.draw.x, yMm: g.draw.y, widthMm: g.draw.w, heightMm: g.draw.h };
           return (
             <g key={img.id} data-image-id={img.id}>
+              {cropping && img.id === cropId && (
+                <image href={img.src} x={orig.xMm} y={orig.yMm} width={orig.widthMm} height={orig.heightMm} preserveAspectRatio="none" opacity={0.3} pointerEvents="none" data-crop-original />
+              )}
               <svg x={g.clip.x} y={g.clip.y} width={g.clip.w} height={g.clip.h} viewBox={`${g.clip.x} ${g.clip.y} ${g.clip.w} ${g.clip.h}`} overflow="hidden" pointerEvents="none">
                 <image href={img.src} x={g.draw.x} y={g.draw.y} width={g.draw.w} height={g.draw.h} preserveAspectRatio="none" />
               </svg>
@@ -732,8 +881,8 @@ export function LayoutSheetPane({
             ))}
           </g>
         )}
-        {/* Gewähltes Bild: Körper verschieben, Ecke unten rechts skalieren. */}
-        {selectedImage && editable && (
+        {/* Gewähltes Bild: Körper verschieben, Ecke unten rechts skalieren; im Zuschnitt-Modus Griffe am Ausschnitt. */}
+        {selectedImage && editable && !cropping && (
           <g>
             <rect
               {...rectAttrs(imageRect(selectedImage))}
@@ -741,6 +890,7 @@ export function LayoutSheetPane({
               style={{ cursor: "move" }}
               data-image-body
               onPointerDown={(e) => startImageDrag(e, selectedImage, "body")}
+              onDoubleClick={() => setCropId(selectedImage.id)}
             />
             <rect
               x={imageRect(selectedImage).xMm + imageRect(selectedImage).widthMm - grip / 2}
@@ -756,17 +906,68 @@ export function LayoutSheetPane({
             />
           </g>
         )}
-        {/* Hilfslinien des Gestaltungsrasters ([208]): nur am Bildschirm, nie im Druck. */}
-        {(master?.guides ?? []).length > 0 && (
+        {selectedImage && editable && cropping && (() => {
+          const clip = effImage(selectedImage);
+          const cr: RectMm = { xMm: clip.xMm, yMm: clip.yMm, widthMm: clip.widthMm, heightMm: clip.heightMm };
+          const og = imageGeometry(selectedImage);
+          const dr: RectMm = cropPreview?.draw ?? { xMm: og.draw.x, yMm: og.draw.y, widthMm: og.draw.w, heightMm: og.draw.h };
+          return (
+            <g data-image-crop>
+              <rect {...rectAttrs(dr)} fill="none" stroke={ACCENT} strokeWidth={hair} strokeDasharray={`${hair * 4} ${hair * 3}`} pointerEvents="none" />
+              <rect
+                {...rectAttrs(cr)}
+                fill="transparent"
+                stroke={ACCENT}
+                strokeWidth={hair * 1.5}
+                style={{ cursor: "move" }}
+                data-crop-body
+                onPointerDown={(e) => startCropDrag(e, selectedImage, "body")}
+              />
+              {handleAnchors(cr).map((a) => (
+                <rect
+                  key={a.handle}
+                  x={a.xMm - grip / 2}
+                  y={a.yMm - grip / 2}
+                  width={grip}
+                  height={grip}
+                  fill="#ffffff"
+                  stroke={ACCENT}
+                  strokeWidth={hair * 1.5}
+                  style={{ cursor: handleCursor(a.handle) }}
+                  data-crop-grip={a.handle}
+                  onPointerDown={(e) => startCropDrag(e, selectedImage, a.handle)}
+                />
+              ))}
+            </g>
+          );
+        })()}
+        {/* Hilfslinien des Gestaltungsrasters ([208]): nur am Bildschirm, nie im Druck; gefangene Linie kräftiger. */}
+        {((guides ?? []).length > 0 || guideDrag) && (
           <g pointerEvents="none" data-guides>
-            {(master?.guides ?? []).map((gd, i) =>
-              gd.axis === "x" ? (
-                <line key={i} x1={gd.posMm} y1={0} x2={gd.posMm} y2={sheet.h} stroke="#06b6d4" strokeWidth={hair} strokeDasharray={`${hair * 6} ${hair * 4}`} opacity={0.7} />
+            {(guides ?? []).map((gd, i) => {
+              const moving = guideDrag && guideDrag.index === i;
+              const pos = moving ? guideDrag.posMm : gd.posMm;
+              const hit = snapHits.some((h) => h.axis === gd.axis && h.posMm === gd.posMm);
+              const common = { stroke: hit ? "#0e7490" : "#06b6d4", strokeWidth: hair * (hit ? 2 : 1), strokeDasharray: hit ? undefined : `${hair * 6} ${hair * 4}`, opacity: hit ? 1 : 0.7 };
+              return gd.axis === "x" ? (
+                <line key={i} x1={pos} y1={0} x2={pos} y2={sheet.h} {...common} />
               ) : (
-                <line key={i} x1={0} y1={gd.posMm} x2={sheet.w} y2={gd.posMm} stroke="#06b6d4" strokeWidth={hair} strokeDasharray={`${hair * 6} ${hair * 4}`} opacity={0.7} />
-              ),
-            )}
+                <line key={i} x1={0} y1={pos} x2={sheet.w} y2={pos} {...common} />
+              );
+            })}
           </g>
+        )}
+        {guideDrag && guideDrag.index < 0 && (
+          <line
+            data-guide-new
+            x1={guideDrag.axis === "x" ? guideDrag.posMm : 0}
+            x2={guideDrag.axis === "x" ? guideDrag.posMm : sheet.w}
+            y1={guideDrag.axis === "y" ? guideDrag.posMm : 0}
+            y2={guideDrag.axis === "y" ? guideDrag.posMm : sheet.h}
+            stroke="#06b6d4"
+            strokeWidth={hair * 1.5}
+            pointerEvents="none"
+          />
         )}
         {/* Viewport aufziehen: das ganze Blatt fängt den Zug. */}
         {placing && editable && (
@@ -917,6 +1118,15 @@ export function LayoutSheetPane({
             if (f) void addImageFile(f);
           }}
         />
+        <button
+          className={`nav-add${guidesOpen ? " active" : ""}`}
+          data-guides-toggle
+          disabled={!canGuides}
+          title={canGuides ? t("sheetGuides.title") : t("sheetGuides.needMaster")}
+          onClick={() => setGuidesOpen((v) => !v)}
+        >
+          {t("sheetGuides.title")}
+        </button>
         <span style={{ flex: 1 }} />
         <button className="nav-add" onClick={() => planViewRef.current?.fit()} title={t("layouts.fit")}>
           {t("layouts.fit")}
@@ -925,6 +1135,36 @@ export function LayoutSheetPane({
 
       <div className="layout-sheet-stage">
         {children({ backdrop, fitBounds, onPlanSelect: onSheetSelect })}
+
+        {/* Hilfslinien aus dem Lineal ziehen ([208]): oben → waagrechte, links → senkrechte Linie. */}
+        {canGuides && !toolInputActive && (
+          <>
+            <div
+              className="layout-sheet-ruler-grab layout-sheet-ruler-top"
+              data-sheet-ui
+              data-ruler-grab="y"
+              title={t("sheetGuides.dragHint")}
+              onPointerDown={(e) => startGuideDrag(e, "y", -1)}
+            />
+            <div
+              className="layout-sheet-ruler-grab layout-sheet-ruler-left"
+              data-sheet-ui
+              data-ruler-grab="x"
+              title={t("sheetGuides.dragHint")}
+              onPointerDown={(e) => startGuideDrag(e, "x", -1)}
+            />
+          </>
+        )}
+        {guidesOpen && canGuides && (
+          <SheetGuidesHud
+            guides={guides ?? []}
+            onAdd={(axis, posMm) => setGuidesNow(addGuide(guides, axis, posMm))}
+            onMove={(i, posMm) => setGuidesNow(moveGuide(guides, i, posMm), `sheetGuide:${layout.id}:${i}`)}
+            onRemove={(i) => setGuidesNow(removeGuide(guides, i))}
+            onClear={() => setGuidesNow([])}
+            onClose={() => setGuidesOpen(false)}
+          />
+        )}
 
         {/* Eigenschaften des gewählten Viewports (Massstab/Grösse/Löschen). */}
         {selectedVp && (
@@ -1021,6 +1261,8 @@ export function LayoutSheetPane({
         {selectedImage && !selectedVp && !selectedTable && (
           <SheetImageHud
             image={selectedImage}
+            cropping={cropping}
+            onToggleCrop={() => setCropId(cropping ? null : selectedImage.id)}
             onPatch={(patch) => handlers.onPatchImage(selectedImage.id, patch, `sheetImage:${selectedImage.id}`)}
             onRemove={() => {
               handlers.onRemoveImage(selectedImage.id);

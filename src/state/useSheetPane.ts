@@ -5,7 +5,7 @@
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
 import { useEffect, useMemo, useRef } from "react";
-import type { Layout, LayoutImage, LayoutLegend, LayoutTable, LayoutTitleBlock, LayoutViewport } from "../model/types";
+import type { Layout, LayoutGuide, LayoutImage, LayoutLegend, LayoutTable, LayoutTitleBlock, LayoutViewport } from "../model/types";
 import { useStore } from "./appStore";
 import { addItems, patchItem } from "../core";
 import type { ProjectSlice } from "./projectSlice";
@@ -24,6 +24,7 @@ import {
 import { addImage, patchImage, removeImage } from "../model/layoutImages";
 import { addLegend, patchLegend, removeLegend } from "../analysis/legend";
 import { useEventBundle } from "./useEvent";
+import { setSheetGuidesOps } from "./sheetGuides";
 
 export function useSheetPane(opts: {
   activeLayoutId: string | null;
@@ -112,6 +113,11 @@ export function useSheetPane(opts: {
     onPatchLegend: (legendId: string, patch: Partial<Omit<LayoutLegend, "id">>) =>
       patchOpenLayout(openId(), (l) => patchLegend(l, legendId, patch), `legend-${legendId}`),
     onRemoveLegend: (legendId: string) => patchOpenLayout(openId(), (l) => removeLegend(l, legendId)),
+    // [208] Hilfslinien am Master des offenen Blatts (gleicher coalesceKey = ein Undo-Schritt, z. B. ein Zug).
+    onSetGuides: (guides: LayoutGuide[], coalesceKey?: string) => {
+      const id = openId();
+      applyChange((p) => setSheetGuidesOps(p, id, guides), coalesceKey);
+    },
     // [137] Schriftfeld: Blatt-Felder am Layout, gemeinsame am Master (Tippen = ein Undo-Schritt je Feld).
     onPatchTitleBlock: (layoutPatch: Partial<Pick<Layout, "name" | "planNumber" | "revision">>, masterPatch?: Partial<LayoutTitleBlock>) => {
       const id = openId();
