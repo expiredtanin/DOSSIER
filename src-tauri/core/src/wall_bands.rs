@@ -190,6 +190,10 @@ pub struct WallIn {
     /// Dach-Unterkante, wo ihre Krone darüber liegt), `Some(true)` = zusätzlich bis unter das Dach
     /// verlängert, `Some(false)` = Dächer schneiden die Wand nicht.
     pub roof_attach: Option<bool>,
+    /// [231] Unter einer Dachfläche die Löcher im Stück behalten, statt es in Pfeiler/Brüstung/Sturz mit je
+    /// eigener Oberkante zu teilen — für den Wandkörper per Boolean (`model3d/wall_body.rs`), der die Löcher
+    /// selbst ausschneidet. Sonst `false`.
+    pub keep_holes: bool,
 }
 
 /// Decken und Dächer eines Geschosses — einmal je Geschoss gelesen, für alle seine Wände; die
@@ -870,7 +874,7 @@ fn emit_top_piece(em: &mut Emitter, li: usize, band_th: f64, tp: &TopPiece, u: V
         push_top_piece(em, li, band_th, tp, 0.0, len, zb, tp.top, None, holes);
         return;
     };
-    if holes.is_empty() {
+    if holes.is_empty() || w.keep_holes {
         push_top_piece(em, li, band_th, tp, 0.0, len, zb, tp.top, Some(c), holes);
         return;
     }
@@ -1231,6 +1235,7 @@ mod tests {
             cuts: WallCuts::default(),
             reveals: vec![],
             roof_attach: None,
+            keep_holes: false,
         }
     }
     fn band(t: f64, p: f64) -> BandIn {

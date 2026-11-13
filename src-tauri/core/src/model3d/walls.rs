@@ -54,7 +54,8 @@ pub struct RWall {
     /// [169] Sehnen-Teilkörper einer Bogenwand: Mittelpunkt des Bogens (render3d `arcCenter`, glatt schattiert).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub arc_center: Option<[f64; 2]>,
-    /// [216] Wand mit Formöffnungen ([G3], gerade Wand): fertiger Körper dieses Bandes (Manifold: Stücke ohne
+    /// [216] Wand mit Formöffnungen ([G3], gerade Wand) bzw. [231] mit Öffnungen unter einer Dachfläche (Giebel):
+    /// fertiger Körper dieses Bandes (Manifold: Stücke ohne
     /// Stossfugen, Öffnung nach dem Umriss), am ersten Stück des Bandes; die TS-Fassade (`splitWallBodies`) gibt
     /// render3d statt der Stücke (`noMesh`) sein Netz als Mesh. Schnitt, Ansicht, Exporte rechnen mit den Stücken.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -686,6 +687,13 @@ pub fn emit_walls_with(p: &Project, layered: bool, pockets: bool) -> Result<Vec<
 /// behält das Ergebnis je Wand.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn wall_pieces(p: &Project, maps: &[String], wall: &Wall, ctx: &FloorContext, openings: &[&Opening], cuts: WallCuts, layered: bool, pockets: bool, out: &mut Vec<RWall>) {
+    wall_pieces_with(p, maps, wall, ctx, openings, cuts, layered, pockets, false, out);
+}
+
+/// Wie [`wall_pieces`]; `plain` = zweite Rechnung für den Wandkörper ([`super::wall_body`]): unter Dachflächen
+/// behalten die Stücke ihre Löcher (`WallIn::keep_holes`), und es entsteht kein weiterer Körper.
+#[allow(clippy::too_many_arguments)]
+fn wall_pieces_with(p: &Project, maps: &[String], wall: &Wall, ctx: &FloorContext, openings: &[&Opening], cuts: WallCuts, layered: bool, pockets: bool, plain: bool, out: &mut Vec<RWall>) {
     // [141] Ganz in einer kollinearen Wand gleichen Typs: deren Körper zeigt sie mit (nicht doppelt).
     if cuts.covered {
         return;
@@ -693,8 +701,10 @@ pub(crate) fn wall_pieces(p: &Project, maps: &[String], wall: &Wall, ctx: &Floor
     let carves = cuts.column_carves.clone();
     let carve_from = out.len();
     // [216] Formöffnungen der geraden Wand: Körper je Band ([`super::wall_body`]); die Schnitte für die zweite Rechnung.
-    let shaped: Vec<&Opening> = if layered { super::wall_body::body_openings(wall, openings) } else { Vec::new() };
-    let body_cuts = (!shaped.is_empty()).then(|| cuts.clone());
+    let shaped: Vec<&Opening> = if layered && !plain { super::wall_body::body_openings(wall, openings) } else { Vec::new() };
+    // [231] Auch Rechteck-Öffnungen unter einer Dachfläche (Giebel): die Stücke würden dort in Pfeiler/Brüstung/Sturz
+    // mit je eigener Oberkante zerfallen (Fugen von der Öffnung bis zum Dach) — Körper je Band wie bei Formöffnungen.
+    let body_cuts = (layered && !plain && !openings.is_empty() && crate::wall_arc::WallArc::of_wall(wall).is_none()).then(|| cuts.clone());
     {
         let (bands, stacked) = resolve_wall_bands(p, maps, wall, layered);
         let (z_bottom, z_top) = p.wall_vertical_extent(wall);
@@ -717,6 +727,7 @@ pub(crate) fn wall_pieces(p: &Project, maps: &[String], wall: &Wall, ctx: &Floor
             cuts,
             roof_attach: wall.roof_attach,
             reveals: if layered && stacked { wall_reveals(p, wall, openings, bands.len()) } else { Vec::new() },
+            keep_holes: plain,
         };
         // Bogenwand ([T2]): Sehnen-Teilwände mit radialen Gehrungen.
         let arc = crate::wall_arc::WallArc::of_wall(wall);
@@ -785,12 +796,15 @@ pub(crate) fn wall_pieces(p: &Project, maps: &[String], wall: &Wall, ctx: &Floor
         }
     }
     carve_at_columns(out, carve_from, &carves);
-    if let Some(body_cuts) = body_cuts {
+    // Körper nur, wo Formöffnungen da sind oder ein Stück unter einer Dachfläche liegt (sonst tragen die Stücke ihre
+    // Rechteck-Löcher selbst, ohne Teilung).
+    let sloped = || out[carve_from..].iter().any(|q| q.top_plane.is_some());
+    if let Some(body_cuts) = body_cuts.filter(|_| !shaped.is_empty() || sloped()) {
         let plain_ops: Vec<&Opening> = openings.iter().copied().filter(|o| !shaped.iter().any(|s| std::ptr::eq(*s, *o))).collect();
-        let mut plain = Vec::new();
-        wall_pieces(p, maps, wall, ctx, &plain_ops, body_cuts, true, pockets, &mut plain);
+        let mut pieces = Vec::new();
+        wall_pieces_with(p, maps, wall, ctx, &plain_ops, body_cuts, true, pockets, true, &mut pieces);
         let (bands, stacked) = resolve_wall_bands(p, maps, wall, true);
-        super::wall_body::attach_bodies(p, wall, &shaped, &plain, bands.len(), stacked, &mut out[carve_from..]);
+        super::wall_body::attach_bodies(p, wall, &shaped, &pieces, bands.len(), stacked, &mut out[carve_from..]);
     }
 }
 

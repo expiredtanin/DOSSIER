@@ -1,76 +1,104 @@
-meshes [1212]
-meshes[].color [3] x1212
+meshes [1233]
+meshes[].color [3] x1233
+meshes[].indices [1056]
 meshes[].indices [108] x6
 meshes[].indices [1152] x3
 meshes[].indices [1224]
 meshes[].indices [1236]
 meshes[].indices [1248] x3
+meshes[].indices [1284]
 meshes[].indices [12960]
-meshes[].indices [1326]
-meshes[].indices [1392]
 meshes[].indices [144] x55
+meshes[].indices [15102]
 meshes[].indices [1584]
 meshes[].indices [168450]
 meshes[].indices [1716]
 meshes[].indices [180]
+meshes[].indices [1860]
+meshes[].indices [1884]
+meshes[].indices [1896]
 meshes[].indices [204]
-meshes[].indices [2118]
-meshes[].indices [2124] x2
-meshes[].indices [2130]
+meshes[].indices [2184] x2
+meshes[].indices [2262]
 meshes[].indices [2376]
-meshes[].indices [2676] x2
+meshes[].indices [2496]
+meshes[].indices [2556]
 meshes[].indices [31104]
 meshes[].indices [312]
 meshes[].indices [348] x6
 meshes[].indices [36] x1090
-meshes[].indices [3840]
 meshes[].indices [396]
-meshes[].indices [4086]
-meshes[].indices [5496]
+meshes[].indices [4020]
+meshes[].indices [4812] x2
+meshes[].indices [4860] x3
+meshes[].indices [4872]
+meshes[].indices [492]
+meshes[].indices [5160]
+meshes[].indices [5166]
+meshes[].indices [5412] x4
 meshes[].indices [564] x4
 meshes[].indices [60] x9
+meshes[].indices [624]
 meshes[].indices [648]
+meshes[].indices [672]
 meshes[].indices [72]
-meshes[].indices [7332]
 meshes[].indices [7632]
+meshes[].indices [7728]
+meshes[].indices [8280] x2
 meshes[].indices [84] x2
 meshes[].indices [9288]
+meshes[].indices [930]
+meshes[].indices [948] x2
 meshes[].indices [96] x6
 meshes[].positions [1044] x6
-meshes[].positions [1083]
-meshes[].positions [1086] x2
-meshes[].positions [1089]
 meshes[].positions [108] x30
+meshes[].positions [1092] x2
+meshes[].positions [1131]
 meshes[].positions [1188]
 meshes[].positions [120]
+meshes[].positions [1260]
+meshes[].positions [1278]
 meshes[].positions [132]
-meshes[].positions [1368] x2
 meshes[].positions [162]
 meshes[].positions [16428]
 meshes[].positions [180] x9
 meshes[].positions [1890] x3
-meshes[].positions [1908]
-meshes[].positions [2031]
+meshes[].positions [2010]
 meshes[].positions [216]
+meshes[].positions [234]
+meshes[].positions [2412] x2
+meshes[].positions [2430] x3
+meshes[].positions [2436]
 meshes[].positions [24] x1058
 meshes[].positions [252] x2
+meshes[].positions [2580]
+meshes[].positions [2583]
 meshes[].positions [264]
-meshes[].positions [2772]
+meshes[].positions [2706] x4
 meshes[].positions [288] x10
+meshes[].positions [300]
 meshes[].positions [324] x7
-meshes[].positions [3666]
+meshes[].positions [342]
+meshes[].positions [3876]
 meshes[].positions [4128]
+meshes[].positions [4146] x2
+meshes[].positions [471]
 meshes[].positions [4746]
+meshes[].positions [474] x2
+meshes[].positions [534]
 meshes[].positions [576] x3
 meshes[].positions [618] x2
-meshes[].positions [663]
+meshes[].positions [648]
 meshes[].positions [7050]
-meshes[].positions [714]
 meshes[].positions [72] x2
+meshes[].positions [7575]
 meshes[].positions [78] x55
 meshes[].positions [798]
 meshes[].positions [84735]
 meshes[].positions [864]
+meshes[].positions [942]
+meshes[].positions [948]
+meshes[].positions [960]
 roofLayers [59]
 roofLayers[].color [3] x59
 roofLayers[].normal [3] x59
@@ -88,17 +116,17 @@ slabs[].outline [26] x5
 slabs[].outline [270] x5
 slabs[].outline [4] x49
 slabs[].outline[] [2] x2748
-walls [1192]
+walls [1052]
 walls[].arcCenter [2] x613
-walls[].color [3] x1192
-walls[].end [2] x1192
-walls[].endCut [4] x831
-walls[].holes [1] x81
+walls[].color [3] x1052
+walls[].end [2] x1052
+walls[].endCut [4] x777
+walls[].holes [1] x75
 walls[].holes [2] x25
 walls[].holes [3] x8
-walls[].layers [0] x1192
-walls[].start [2] x1192
-walls[].startCut [4] x832
-walls[].topDrop [2] x89
-walls[].topPlane [3] x245
-hash a365408761bb22d0
+walls[].layers [0] x1052
+walls[].start [2] x1052
+walls[].startCut [4] x778
+walls[].topDrop [2] x22
+walls[].topPlane [3] x178
+hash 2ef0af3fc06bbeb9

@@ -197,6 +197,19 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   `add_textures`: keine Normalenkarte, stattdessen Rauigkeitskarte als Höhenfeld (Bump, Stärke 0.3, rahmenfrei). Test:
   `blenderRender.test.ts` (Skript ohne Normal-Map-Knoten). Geprüft: echter Lauf `bpy` 5.3 (CPU) vorher/nachher. Offen: Mac/Blender 3.6/4.x;
   echte Normalenkarten bräuchten UVs im GLB-Export. · S
+- ✓ **[231]** Fenster im Giebel in 3D sauber eingeschnitten (13.11., Maintainer, Musterhaus komplex: Ost-/Westgiebel DG, Anbau-Giebel).
+  Ursache: (1) Unter einer Dachfläche zerlegte `wall_bands::emit_top_piece` die Wand um jede Rechteck-Öffnung in Pfeiler/Brüstung/Sturz
+  mit eigener schräger Oberkante (sichtbare Fugen von der Öffnung bis zum Dach); (2) im [216]-Wandkörper wurden die Stücke je einzeln
+  unterteilt und um 0,1 mm vergrössert — die Stossfläche am First blieb als innere Fläche stehen (Oculus: Streifen bis zum Boden, Bogen
+  halb). Lösung: Jede gerade Wand mit Öffnungen unter einer Dachebene bekommt den Körper je Schicht (`model3d/wall_body.rs`); die
+  Stücke dafür rechnet `wall_pieces_with(plain)` mit `WallIn::keep_holes` (Löcher statt Teilung); `band_solid` vereinigt Stücke mit
+  Dachebene genau (gleiche Schnittlinie → Manifold verschmilzt), unterteilt erst danach, schneidet dann die Löcher; Leibungsstücke des
+  Schichteinzugs kommen vergrössert danach dazu; Bänder ganz ohne Dachebene wie bisher. Tests: Rust `giebelwand_mit_rechteckfenster_ein_koerper`,
+  `giebelwand_mit_rundfenster_auf_dem_first_ohne_fuge` (keine inneren Flächen, Lochfläche = Öffnungsfläche), vitest
+  `toWalls3d.giebel.test.ts` (Komplex: dg-aw-w, dg-aw-o, og-anbau-n ohne Stücke, Aussenschicht fugenlos); Golden `komplex-model3d` neu.
+  Geprüft: render_png (Linux/lavapipe) vorher/nachher, verdeckt + schattiert. **Offen:** Mac/Metal nicht angesehen; Bogenwände unter
+  Dach behalten die Streifen; Leibungsstücke berühren innere Schichten an einzelnen Kanten; zwei schwache Scheinkanten auf der OG-Südwand
+  in der Fernsicht (verdeckt); `emit_walls` Komplex ≈ 100 → 180 ms (Cache je Wand). · S
 ### Phase 3 (27.11.–3.12.): Vorprojekt
 - 1:100-Pläne in Abgabequalität (Bemassung, Koten, Raumstempel, Öffnungen nach Detailgrad) — Plan-Review-Runde 4 nach [199].
 - Fachplaner-Austausch: DXF/DWG je Geschoss/Schnitt/Ansicht ([200]), IFC mit Räumen/Psets ([201]); Rundreise in Archicad/Revit einmal
