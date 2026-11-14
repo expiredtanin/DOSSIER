@@ -96,6 +96,10 @@ export interface PresentationItem {
   yMm: number;
   widthMm: number;
   heightMm: number;
+  /** [208] Bildmitte im Modell (Plakat): Grundrisse gemeinsam (deckungsgleich), Schnitte/Ansichten mit gemeinsamer Höhenmitte. */
+  center?: { x: number; y: number };
+  /** [208] Laufende Zeile auf dem Plakat (über alle Blätter). */
+  line?: number;
 }
 
 /** [208] Tabelle oder Bild-Rahmen auf dem Plakat (Papier-mm, `heightMm` mit Titelband oben bei Tabellen). */
@@ -476,7 +480,16 @@ export function presentationSheetOps(
       templateId: t.id,
       templateLinked: true,
     } as ViewSnapshot);
-    vps[page].push({ id: `vp-pres-${stamp}-${i}`, snapshotId: snapId, xMm: it.xMm, yMm: it.yMm, widthMm: it.widthMm, heightMm: it.heightMm, scaleDenominator: it.scale });
+    vps[page].push({
+      id: `vp-pres-${stamp}-${i}`,
+      snapshotId: snapId,
+      xMm: it.xMm,
+      yMm: it.yMm,
+      widthMm: it.widthMm,
+      heightMm: it.heightMm,
+      scaleDenominator: it.scale,
+      ...(it.center ? { center: { ...it.center } } : {}),
+    });
     const title = isSit ? (labels.situation ?? level.name) : level.name;
     // Plakat: die Massstabsangabe des Masters steht links unter dem Viewport (Grundlinie `scaleLabelMetrics`);
     // der Titel folgt rechts daneben auf derselben Linie, sonst überdecken sich beide.

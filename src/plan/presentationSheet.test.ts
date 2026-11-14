@@ -158,13 +158,94 @@ describe("[66] Präsentationsplan", () => {
     const show = new Set(Object.entries(q.viewSnapshots!.find((v) => v.id === "vs-pres-t6-0")!.layerVisibility).filter(([, v]) => v).map(([k]) => k));
     for (const it of res.plan.items.filter((i) => i.group === 0)) {
       const b = generatePlan(q, it.levelId, show, undefined, tpl.detail, false, true, true, 200, false, false).bounds;
-      expect(it.widthMm).toBeGreaterThanOrEqual(((b.maxX - b.minX) * 1000) / 200 - 1e-6);
-      expect(it.heightMm).toBeGreaterThanOrEqual(((b.maxY - b.minY) * 1000) / 200 - 1e-6);
+      // Rahmen um die eigene Bildmitte (deckungsgleiche Grundrisse) umfasst das ganze Ausmass (hier ohne fernen Kontext).
+      const c = it.center!;
+      expect(((c.x - b.minX) * 1000) / 200).toBeLessThanOrEqual(it.widthMm / 2 + 1e-6);
+      expect(((b.maxX - c.x) * 1000) / 200).toBeLessThanOrEqual(it.widthMm / 2 + 1e-6);
+      expect(((c.y - b.minY) * 1000) / 200).toBeLessThanOrEqual(it.heightMm / 2 + 1e-6);
+      expect(((b.maxY - c.y) * 1000) / 200).toBeLessThanOrEqual(it.heightMm / 2 + 1e-6);
     }
   }, 60_000);
 
+  // [208] Plakat wie eine Architektin: strenge Zeilen (Situation + Bild | Grundrisse | Schnitte + Ansichten | Tabellen), Grundrisse
+  // deckungsgleich, ±0.00 auf einer Linie, Rahmen eng um den Inhalt an Spaltenkanten.
+  for (const [name, build] of [["Wettbewerb", buildWettbewerbSampleProject], ["Musterhaus komplex", buildComplexSampleProject]] as const) {
+    it(`[208] Plakat-Zeilen ${name}: Gruppen je Zeile, deckungsgleiche Grundrisse, gleiche ±0.00, enge Rahmen`, () => {
+      st().loadProject(build());
+      const p = st().project;
+      const o = { ...presentationDefaults(p), scale: 200, poster: "poster-a1-landscape", extras: POSTER_EXTRAS_DEFAULT };
+      const plan = planPresentationSheet(p, o);
+      expect(plan.fits).toBe(true);
+      const m = posterMetrics(841, 594);
+      const band = plan.bandMm!;
+      const colW = (841 - 2 * m.marginMm - (m.columns - 1) * m.gutterMm) / m.columns;
+      const colEdges = Array.from({ length: m.columns }, (_, k) => m.marginMm + k * (colW + m.gutterMm));
+      const sit = plan.items.filter((i) => i.kind === "situation");
+      const floors = plan.items.filter((i) => i.kind === "view" && i.group === 0);
+      const views = plan.items.filter((i) => i.kind === "view" && i.group > 0);
+      expect(sit).toHaveLength(1);
+      expect(floors.length).toBeGreaterThanOrEqual(3);
+      expect(views.length).toBeGreaterThanOrEqual(4);
+      // Strenge Zeilen: jede Gruppe beginnt unter der vorigen (gleiches Blatt) oder auf einem späteren Blatt.
+      const order = [sit, floors, views];
+      for (let k = 1; k < order.length; k++) {
+        for (const a of order[k - 1])
+          for (const b of order[k]) {
+            const pa = a.page ?? 0;
+            const pb = b.page ?? 0;
+            expect(pb).toBeGreaterThanOrEqual(pa);
+            if (pa === pb) expect(b.yMm).toBeGreaterThanOrEqual(a.yMm + a.heightMm + band - 1e-6);
+          }
+      }
+      // Zeilen: gleiche Zeile ⇒ gleiche Oberkante; jeder Rahmen beginnt an einer Spaltenkante.
+      for (const a of plan.items) {
+        expect(colEdges.some((x) => Math.abs(x - a.xMm) < 1e-6)).toBe(true);
+        for (const b of plan.items) if (a.line === b.line) expect(b.yMm).toBeCloseTo(a.yMm, 6);
+      }
+      // Bild neben der Situation, Tabellen nach den Ansichten.
+      expect(plan.image!.yMm).toBeCloseTo(sit[0].yMm, 6);
+      const lastViewTop = Math.max(...views.filter((v) => (v.page ?? 0) === Math.max(...views.map((w) => w.page ?? 0))).map((v) => v.yMm));
+      for (const t of plan.tables!) expect(t.page > (views[0].page ?? 0) || t.yMm >= lastViewTop - 1e-6).toBe(true);
+      // Grundrisse deckungsgleich: gleiche Rahmengrösse und gleiche Bildmitte.
+      for (const f of floors) {
+        expect([f.widthMm, f.heightMm, f.center!.x, f.center!.y]).toEqual([floors[0].widthMm, floors[0].heightMm, floors[0].center!.x, floors[0].center!.y]);
+      }
+      // Schnitte/Ansichten: ±0.00 (Modell-y 0) liegt in jeder Zeile auf derselben Papierhöhe.
+      const zeroY = (v: (typeof views)[number]) => v.yMm + v.heightMm / 2 + (v.center!.y * 1000) / v.scale;
+      for (const a of views) for (const b of views) if (a.line === b.line) expect(zeroY(b)).toBeCloseTo(zeroY(a), 6);
+      // Enge Rahmen: nicht breiter als der Inhalt samt Rand, und der gemeinsame Inhalt aller Grundrisse füllt den Rahmen
+      // (Weissraum im Rahmen < 15 %); ferner Kontext wird beschnitten statt den Rahmen aufzublasen.
+      const res = presentationSheetOps(p, o, LABELS, "z")!;
+      st().applyChange(res.ops);
+      const q = st().project;
+      const pad = 4;
+      const frame = (f: (typeof floors)[number]) => {
+        const hw = (f.widthMm * f.scale) / 2000;
+        const hh = (f.heightMm * f.scale) / 2000;
+        return { minX: f.center!.x - hw, minY: f.center!.y - hh, maxX: f.center!.x + hw, maxY: f.center!.y + hh };
+      };
+      let u = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+      for (const f of floors) {
+        const i = plan.items.indexOf(f);
+        const snap = q.viewSnapshots!.find((v) => v.id === `vs-pres-z-${i}`)!;
+        const vis = new Set(Object.entries(snap.layerVisibility).filter(([, v]) => v).map(([k]) => k));
+        const b = generatePlan(q, f.levelId, vis, undefined, snap.detail, false, true, true, 200, false, false).bounds;
+        u = { minX: Math.min(u.minX, b.minX), minY: Math.min(u.minY, b.minY), maxX: Math.max(u.maxX, b.maxX), maxY: Math.max(u.maxY, b.maxY) };
+      }
+      // Gemeinsamer Rahmen nicht grösser als der gemeinsame Inhalt aller Geschosse samt Rand.
+      expect(floors[0].widthMm).toBeLessThanOrEqual(((u.maxX - u.minX) * 1000) / 200 + 2 * pad + 1e-6);
+      expect(floors[0].heightMm).toBeLessThanOrEqual(((u.maxY - u.minY) * 1000) / 200 + 2 * pad + 1e-6);
+      const fr = frame(floors[0]);
+      const inside = (Math.min(u.maxX, fr.maxX) - Math.max(u.minX, fr.minX)) * (Math.min(u.maxY, fr.maxY) - Math.max(u.minY, fr.minY));
+      expect(inside / ((fr.maxX - fr.minX) * (fr.maxY - fr.minY))).toBeGreaterThan(0.85);
+      // Viewports übernehmen die Bildmitte.
+      const vps = q.layouts!.filter((l) => res.layoutIds.includes(l.id)).flatMap((l) => l.viewports);
+      expect(vps.every((v) => v.center && Number.isFinite(v.center.x))).toBe(true);
+    }, 120_000);
+  }
+
   // [208] Plakat als abgabefähiges Grundgerüst: Situation 1:500, Pläne 1:200, Tabellen, Bild-Rahmen auf dem 6-Spalten-Raster.
-  it("[208] Plakat mit Situation, Tabellen und Bild-Rahmen: alles im Satzspiegel, ohne Überlappung, feste Massstäbe, ≥ 70 % belegt", () => {
+  it("[208] Plakat mit Situation, Tabellen und Bild-Rahmen: alles im Satzspiegel, ohne Überlappung, feste Massstäbe, Blatt bis unten gefüllt", () => {
     st().loadProject(buildWettbewerbSampleProject());
     const p = st().project;
     const o = { ...presentationDefaults(p), scale: 200, poster: "poster-a1-landscape", extras: POSTER_EXTRAS_DEFAULT };
@@ -196,8 +277,9 @@ describe("[66] Präsentationsplan", () => {
       expect(b.yMm + b.heightMm).toBeLessThanOrEqual(bottom + 1e-6);
       for (const c of boxes.slice(k + 1)) expect(overlaps(b, c)).toBe(false);
     }
-    const used = boxes.reduce((a, b) => a + b.widthMm * b.heightMm, 0);
-    expect(used / ((right - left) * (bottom - m.contentTopMm))).toBeGreaterThanOrEqual(0.7);
+    // Rahmen sind eng um den Inhalt (kein Flächenmass mehr); die Zeilen füllen den Satzspiegel bis unten.
+    const lowest = Math.max(...boxes.map((b) => b.yMm + b.heightMm));
+    expect((lowest - m.contentTopMm) / (bottom - m.contentTopMm)).toBeGreaterThanOrEqual(0.85);
     // Ops: ein Blatt, Viewports, zwei Blatt-Tabellen, Platzhalter-Beschriftung, Master ohne eigenes Schriftfeld nötig (posterHeader).
     const res = presentationSheetOps(p, o, LABELS, "p1")!;
     st().applyChange(res.ops);

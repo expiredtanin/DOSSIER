@@ -23,10 +23,17 @@ pub struct Col {
     pub numeric: bool,
     /// In den Standard-Spalten.
     pub default: bool,
+    /// [208] Mittig gesetzt (kurze Ja/Nein-Werte): steht sonst als linksbündiger Kopf direkt am rechtsbündigen Nachbarn.
+    pub center: bool,
 }
 
 const fn c(id: &'static str, key: &'static str, w: f64, numeric: bool, default: bool) -> Col {
-    Col { id, key, w, numeric, default }
+    Col { id, key, w, numeric, default, center: false }
+}
+
+/// Mittig gesetzte Spalte (Ja/Nein).
+const fn cc(id: &'static str, key: &'static str, w: f64, default: bool) -> Col {
+    Col { id, key, w, numeric: false, default, center: true }
 }
 
 const OPENINGS: &[Col] = &[
@@ -136,7 +143,7 @@ const SITE_PROOF: &[Col] = &[
     c("allowed", "siteProof.col.allowed", 1.5, true, true),
     c("actual", "siteProof.col.actual", 1.4, true, true),
     c("reserve", "siteProof.col.reserveShort", 1.5, true, true),
-    c("ok", "siteProof.col.ok", 1.35, false, true),
+    cc("ok", "siteProof.col.ok", 1.35, true),
 ];
 
 /// [158] Raumbuch-Spalten, die nur erscheinen, wenn ein Raum eine Dachschräge hat.
@@ -517,9 +524,14 @@ fn cell_text(c: &Cell) -> String {
 }
 
 /// Text auf die Spaltenbreite kürzen (≈ 0.5 em je Zeichen, fett etwas breiter).
+/// Innenabstand einer Zelle (mm): mindestens [`PAD`], mit grosser Schrift ein Drittel der Schrifthöhe.
+fn cell_pad(size: f64) -> f64 {
+    (size / 3.0).max(PAD)
+}
+
 fn fit(s: &str, width: f64, size: f64, bold: bool) -> String {
     let per = size * if bold { 0.56 } else { 0.5 };
-    let max = ((width - 2.0 * PAD) / per).floor().max(1.0) as usize;
+    let max = ((width - 2.0 * cell_pad(size)) / per).floor().max(1.0) as usize;
     let chars: Vec<char> = s.chars().collect();
     if chars.len() <= max {
         return s.to_string();
@@ -611,19 +623,18 @@ pub fn render(p: &Project, layout: &Layout, lb: &Labels) -> Vec<TableOut> {
         let hline = |prims: &mut Vec<TPrim>, y: f64, w: f64| prims.push(TPrim::Line { x1: t.x_mm, y1: y, x2: t.x_mm + t.width_mm, y2: y, w });
         let base = |top: f64| top + rh / 2.0 + size * 0.35;
         let mut y = t.y_mm;
+        // [208] Innenabstand mit der Schrift: bei Plakat-Schriften (13 pt) stünden rechtsbündige Köpfe sonst fast am Nachbarn.
+        let pad = cell_pad(size);
         let cell = |prims: &mut Vec<TPrim>, ci: usize, s: &str, top: f64, bold: bool| {
             let k = &cat[idx[ci]];
-            let right = k.numeric;
-            prims.push(TPrim::Text {
-                x: if right { xs[ci + 1] - PAD } else { xs[ci] + PAD },
-                y: base(top),
-                s: fit(s, xs[ci + 1] - xs[ci], size, bold),
-                size,
-                bold,
-                italic,
-                font: family,
-                align: if right { "r" } else { "l" },
-            });
+            let (x, align) = if k.center {
+                ((xs[ci] + xs[ci + 1]) / 2.0, "c")
+            } else if k.numeric {
+                (xs[ci + 1] - pad, "r")
+            } else {
+                (xs[ci] + pad, "l")
+            };
+            prims.push(TPrim::Text { x, y: base(top), s: fit(s, xs[ci + 1] - xs[ci], size, bold), size, bold, italic, font: family, align });
         };
         if has_head {
             for ci in 0..idx.len() {
@@ -913,5 +924,30 @@ mod tests {
                 assert!(tx.contains(&h.to_string()), "Kopf {h} gekürzt: {tx:?}");
             }
         }
+    }
+
+    /// [208] Plakat (13 pt, Tabelle 2 Spalten des A1-Rasters ≈ 260 mm): Köpfe ungekürzt, „Erfüllt“ mittig, zwischen dem Ende von
+    /// „Reserve“ (rechtsbündig) und dem Anfang von „Erfüllt“ mindestens eine Schrifthöhe Luft.
+    #[test]
+    fn baurecht_tabelle_plakat_koepfe_mit_luft() {
+        let mut t = table("n", None);
+        t.source = LayoutTableSource::SiteProof;
+        t.width_mm = 260.0;
+        t.font_size_pt = Some(13.0);
+        let p = project(0, vec![t]);
+        let lb = Labels::parse(&json!({"siteProof.col.item": "Prüfgrösse", "siteProof.col.allowed": "Zulässig", "siteProof.col.actual": "Projekt", "siteProof.col.reserveShort": "Reserve", "siteProof.col.ok": "Erfüllt"}));
+        let r = render(&p, &p.layouts.as_ref().unwrap()[0], &lb);
+        let head = |name: &str| {
+            r[0].prims.iter().find_map(|pr| match pr {
+                TPrim::Text { s, x, size, align, .. } if s == name => Some((*x, *size, *align)),
+                _ => None,
+            })
+        };
+        let (rx, size, ra) = head("Reserve").expect("Reserve ungekürzt");
+        let (ox, _, oa) = head("Erfüllt").expect("Erfüllt ungekürzt");
+        assert_eq!((ra, oa), ("r", "c"));
+        // Halbe Breite von „Erfüllt“ (fett ≈ 0.56 × Schrifthöhe je Zeichen).
+        let half = 7.0 * 0.56 * size / 2.0;
+        assert!(ox - half - rx >= size, "Abstand {:.1} mm < Schrift {size:.1} mm", ox - half - rx);
     }
 }

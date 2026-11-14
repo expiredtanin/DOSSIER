@@ -12,7 +12,7 @@ import { documentFor } from "../core/document";
 export type { LayoutTable, LayoutTableSource };
 
 export type TablePrim =
-  | { k: "text"; x: number; y: number; s: string; size: number; bold: boolean; italic: boolean; font: "sans" | "serif" | "mono"; align: "l" | "r" }
+  | { k: "text"; x: number; y: number; s: string; size: number; bold: boolean; italic: boolean; font: "sans" | "serif" | "mono"; align: "l" | "r" | "c" }
   | { k: "line"; x1: number; y1: number; x2: number; y2: number; w: number };
 
 export interface TableOut {
@@ -91,7 +91,7 @@ export function drawTablesPdf(doc: jsPDF, tables: readonly TableOut[]): void {
       } else {
         setPdfFont(doc, PDF_TABLE_FONT[p.font], p.bold, p.italic);
         doc.setFontSize(p.size * PT_PER_MM);
-        doc.text(p.s, p.x, p.y, { align: p.align === "r" ? "right" : "left" });
+        doc.text(p.s, p.x, p.y, { align: p.align === "r" ? "right" : p.align === "c" ? "center" : "left" });
       }
     }
   }
