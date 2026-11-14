@@ -9,7 +9,7 @@
 
 import { useEffect, useState } from "react";
 import { t } from "../i18n";
-import { useModalFocus } from "./modalFocus";
+import { enterConfirmsDialog, useModalFocus } from "./modalFocus";
 import type {
   LayoutOrientation,
   LayoutPaperFormat,
@@ -163,7 +163,7 @@ function DialogFrame({
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
-      else if (e.key === "Enter") onConfirm();
+      else if (e.key === "Enter" && enterConfirmsDialog(e.target)) onConfirm();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
