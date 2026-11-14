@@ -148,6 +148,12 @@ Liste der Zeichnungsebenen; anklicken zeigt den Schnitt mit Wänden, Decken, Dac
 Süd“ aus dem leeren Projekt folgen dem Gebauten, bis du ihre Linien verschiebst. Weitere Ansichten mit
 `ansichtslinie` (Nord, Ost, West).
 
+In Ansicht und Schnitt zieht Dossier eine kräftige Bodenlinie auf ±0.00; sie ragt beidseits etwas über das Gezeichnete hinaus
+und gehört zur Klasse 02 Gelände (ausgeschaltet entfällt sie). Die automatischen Höhenkoten sind in Papiergrösse gesetzt
+(2 mm Schrift), auch im Blatt. Fenster zeigen in der Ansicht 1:200 Rahmen, Flügel und Glas, auch mit der Vorlage „Wettbewerb 1:200“;
+nur im Grundriss und im Schnitt sind sie dort bewusst vereinfacht (Linien). Passt eine Masszahl nicht ins Segment, rückt sie zur
+Seite oder nach aussen aus, statt in der Wand zu stehen. Senkrechte Masszahlen lesen immer von unten nach oben.
+
 ![Schnitt A-A 1:200](kurzanleitung/schnitt.png)
 
 ![Ansicht Süd 1:200](kurzanleitung/ansicht.png)
@@ -219,10 +225,12 @@ eingebettet, damit die Druckerei sie nicht ersetzen muss.
 - **DXF:** Geschoss wählen, *Datei → Exportieren → DXF* (Browser: „Exportieren: DXF“). LV95, Layer je Kategorie.
 - **IFC:** *Datei → Exportieren → IFC* (IFC4 mit Wänden, Decken, Räumen). Für Fachplaner:innen liegt die Geometrie lokal
   um den Projekt-Nullpunkt; die LV95-Lage steht als Georeferenz in der Datei (Versatz des Ursprungs, ±0.00 in m ü. M.).
-  Räume tragen Nummer, Name, Fläche und die SIA-416-Kategorie, das Geschoss die Flächen und Rauminhalte. Die Option
+  Räume tragen Nummer, Name, Fläche und die SIA-416-Kategorie, das Geschoss die Flächen und Rauminhalte; Raumhöhe und
+  Raumkörper entsprechen der lichten Höhe des Raumbuchs (unter Dachschrägen mit mittlerer und kleinster Höhe). Jedes Bauteil
+  liegt auf einer IFC-Ebene mit dem Namen seiner Klasse wie im DXF (z. B. 20_Wände). Die Option
   „Kontext mitgeben (Gelände, Nachbargebäude)“ im Export-Dialog (Vorgabe aus; Kommandozeile `--kontext`) legt das Gelände und
   die Kontext-Netze am Grundstück mit ab. Die Objektbibliothek (Möbel, Sanitär) kommt nicht ins IFC. Nicht in Archicad
-  oder Revit geöffnet.
+  oder Revit geöffnet (auch die Ebenen nicht).
 
 **Plakat: Hilfslinien und Bild-Zuschnitt.** Im Panel **Mappe** ein Layout anlegen, im Dialog „Neues Layout“ die
 **Plakat-Vorlage (Wettbewerb)** wählen (A0/A1, hoch oder quer): Dossier legt ein Raster aus Hilfslinien, eine Kopfzeile mit

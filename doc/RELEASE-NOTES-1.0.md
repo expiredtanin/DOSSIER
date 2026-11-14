@@ -69,7 +69,7 @@ in `doc/KURZANLEITUNG.md`):
     («Weitere Angaben») sowie E-Mail-Adressen und Telefonnummern; der Dialog «Anonymität prüfen» nennt Bereich, Element, Feld und Begriff
     der Fundstelle. «Trotzdem exportieren» bzw. `--ignore-anonymity` übergeht ihn. Die Prüfung findet nur, was sie kennt (siehe unten).
 12. **Austausch.** DXF/DWG (Geschoss, Schnitt, Ansicht; LV95), IFC4/IFC2x3 mit Wänden, Decken, Dächern, Räumen, Öffnungen, Treppen und
-    Psets (inkl. `CH_Qto_SIA416`), STEP, OBJ/STL/glTF, SVG, PDF. **IFC für Fachplaner:innen:** Geometrie lokal um den Projekt-Nullpunkt,
+    Psets (inkl. `CH_Qto_SIA416`; Bauteile auf IFC-Ebenen je Klasse, Raumhöhe = lichte Höhe), STEP, OBJ/STL/glTF, SVG, PDF. **IFC für Fachplaner:innen:** Geometrie lokal um den Projekt-Nullpunkt,
     LV95-Lage als Georeferenz (Versatz und ±0.00 m ü. M.), Räume mit Nummer, Name, Fläche und SIA-416-Kategorie, Geschossflächen und
     Gebäudesummen; Mengen stimmen mit der Geometrie überein (mit ifcopenshell gegengeprüft, alle drei Beispielprojekte ohne Befund). Option
     «Kontext mitgeben (Gelände, Nachbargebäude)» im Export-Dialog bzw. `--kontext` (Vorgabe aus). Die Objektbibliothek (Möbel, Sanitär) wird nicht ins IFC geschrieben. Was in welche Richtung verloren geht, steht in `doc/DATEIFORMATE.md`.
@@ -158,14 +158,18 @@ Ehrlich vorweg: **Der Durchlauf des ganzen Referenz-Ablaufs auf dem Mac ist noch
   Tabellen und Bild ist nicht von Hand festzuhalten (Neuberechnung nur durch Neuerstellen). Schriften sind eingebettet, aber Zeichen ausserhalb der
   Latin-Teilmenge (z. B. Σ) werden ersetzt oder bleiben leer; PDF/X und Plotter-Ebenen nicht prüfbar. Alles nur im Linux-Container mit Chromium
   geprüft (PDF mit `pdffonts`/`pdftoppm`), nicht in der Tauri-App.
+- **Ansicht und Schnitt 1:200** ([208], Abgabe-Review): Bodenlinie auf ±0.00 mit Überstand (Klasse «02 Gelände»), Höhenkoten in Papiergrösse (2 mm),
+  Fenster in der Ansicht mit Rahmen und Glas, ausweichende und rauschfest lesbare Masszahlen sind behoben. **Bewusst vereinfacht:** mit der Vorlage
+  «Wettbewerb 1:200» zeigen Grundriss und Schnitt die Fenster als Linien (nur die Ansicht zeigt Rahmen/Glas). Nur im Linux-Container (CLI-SVG in Chromium,
+  PDF mit Poppler `pdftotext`/`pdftoppm`) angesehen, nicht auf dem Mac.
 - Kostenschätzung: Kennwerte sind Beispielwerte; keine Varianten nebeneinander, keine Kennwerte aus Büro- oder CRB-Quelle ([209]).
 - Volumen → Bauteile: nur gerade Prismen und Quader/Zylinder; verjüngte Körper, Kugel/Kegel/Torus u. a. werden mit Meldung abgelehnt; keine
   Bodenplatte, keine Innenwände ([222]).
 - **Baurecht-Nachweis** ([255]): Fassadenhöhe nur über ±0.00 (Näherung); Grünfläche und aGSF nur per Eingabe; die Blatt-Tabelle übernimmt nur
   Parzellenfläche und -grenze, nicht aGSF/Grünfläche aus den Panel-Eingaben; Grenzabstand als Verstossfläche, nicht als kleinster Abstand;
   auf dem Mac nicht geprüft.
-- **IFC für Fachplaner** ([259]): **nicht in Archicad, Revit, Solibri oder BIMcollab geöffnet**, nur mit ifcopenshell (0 Befunde). Raumhöhe = Geschosshöhe
-  statt lichter Höhe; keine IFC-Ebenenzuweisung (Ebenen nur als Klassifikation); Dächer als Netz; IFC2x3 nur über die bestehenden Tests; Datei
+- **IFC für Fachplaner** ([259]): **nicht in Archicad, Revit, Solibri oder BIMcollab geöffnet**, nur mit ifcopenshell (0 Befunde). **IFC-Ebenen** (eine je Klasse, ohne Sichtbarkeit) **sind in Archicad/Revit nicht geöffnet**; der
+  Dachraum-Körper füllt die Schräge nicht aus (Höhe = lichte Höhe); Dächer als Netz; IFC2x3 nur über die bestehenden Tests; Datei
   des Stress-Beispiels gross (19.8 MB, ca. 6 s).
 - **Plandarstellung 1:100** ([256]): Fenster über der Schnitthöhe hell auf schwarzer Wand wartet auf den Entscheid des Maintainers
   (**[Frage M: Darstellung Fenster über Schnitt — hell auf schwarz (jetzt Vorgabe, abschaltbar) oder Schnitthöhe/Bemassung ändern?]**). Offen: Sonnenschatten
