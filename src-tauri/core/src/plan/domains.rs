@@ -149,6 +149,8 @@ pub struct Ctx<'a> {
     house: std::cell::OnceCell<Vec<Vec<Vec2>>>,
     drawn_obst: std::cell::OnceCell<(super::stamp_place::Obstacles, super::stamp_place::Obstacles)>,
     bubble_obst: std::cell::OnceCell<super::stamp_place::Obstacles>,
+    /// [207] Linienzüge der Strassen-Klasse („11“) je Geschoss für Strassennamen entlang der Achse (`plan/text_curve.rs`).
+    road_axes: std::cell::OnceCell<Vec<(String, Vec<crate::model::Vec2>)>>,
 }
 
 impl<'a> Ctx<'a> {
@@ -160,7 +162,7 @@ impl<'a> Ctx<'a> {
         let hidden = overrides::hidden_elements(p, overrides::RuleView::at(a.scale, a.rules.as_ref()).view("plan"));
         let mv_sel = super::model_view::selected_id(p, &a.floor, a.model_view.as_deref()).and_then(|id| super::model_view::find(p, id));
         let mv = super::model_view::resolve(mv_sel, a.detail, a.scale);
-        Ctx { p, a, cats, hidden, mv_sel, mv, house: Default::default(), drawn_obst: Default::default(), bubble_obst: Default::default() }
+        Ctx { p, a, cats, hidden, mv_sel, mv, house: Default::default(), drawn_obst: Default::default(), bubble_obst: Default::default(), road_axes: Default::default() }
     }
 
     /// [179] Aussenringe der Gebäudegrundfläche (`context::building_rings`), einmal je Plan.
@@ -176,6 +178,11 @@ impl<'a> Ctx<'a> {
     /// [179] Hindernisse der Zeichnungen des Geschosses (Bemassung, Koten, Texte, Symbole).
     pub(super) fn drawn_obstacles(&self) -> &super::stamp_place::Obstacles {
         &self.drawn_obst.get_or_init(|| super::drawings::drawn_and_dimension_obstacles(self)).0
+    }
+
+    /// [207] Strassenachsen und -ränder (Linie, Polylinie, Bogen auf der Klasse „11“) als Linienzüge mit ihrer Ebene.
+    pub(super) fn road_axes(&self) -> &[(String, Vec<Vec2>)] {
+        self.road_axes.get_or_init(|| super::drawings::road_axes(self))
     }
 
     /// [179] Blasen und Beschriftungen der Achsraster als Hindernisse.

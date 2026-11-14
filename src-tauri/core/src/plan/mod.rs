@@ -24,6 +24,7 @@ pub mod section_bands;
 pub mod dxf;
 pub mod svg;
 pub mod text;
+pub mod text_curve;
 pub mod wall_poche;
 pub mod print_svg;
 pub mod scene;

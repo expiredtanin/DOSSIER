@@ -225,9 +225,14 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   Umriss wie die Kontextnetze (Situation grau 0.1 mm, Schwarzplan schwarz). Ausschnitte: neu angelegte Klassen (z. B. 17 durch den
   Kataster-Import) werden im Import in allen `viewSnapshots` eingeblendet (fehlender Code = aus), Beispiel-Ausschnitte „Situation 1:500" mit „17";
   die Standard-Vorlagen „Situation WBW"/„Schwarzplan" blenden 11/12/17 nicht aus (Test). Strassennamen = Text auf Klasse 11, sichtbar mit ihr.
-  Offen: Strassennamen nicht
-  entlang gekrümmter Achsen gesetzt (nur die Textdrehung aus dem DXF); echte Kataster-DXF (Layer-Namen je Kanton) nicht geprüft;
-  nicht in der Tauri-App/auf dem Mac geprüft. · M
+  Strassennamen entlang der Achse (14.11.): Einzeltext auf Klasse „11“ mit Linie/Polylinie/Bogen derselben Klasse und Ebene in der Nähe
+  (≤ 4 Schrifthöhen, Richtung ≤ 35° von der DXF-Drehung) wird in `plan/text_curve.rs` Zeichen für Zeichen auf die Kurve gesetzt (mittig auf dem
+  nächsten Abschnitt, Grundlinie parallel im DXF-Abstand, nie kopfüber, Vorschub = Schriftbreite) und von `plan/drawings.rs` als gedrehte
+  `drawingText`-Primitive je Zeichen ausgegeben: Szene, SVG, Druck-SVG/PDF und DXF lesen dasselbe; gerade Achse, keine Achse, Mehrzeiler/Spalte/Hinweislinie
+  bleiben ein gerader Text. Schrifthöhe wie bisher (`paperHeight` oder DXF-Höhe). Test: `text_curve::tests`, `drawings::tests::strassenname_folgt_der_achse`.
+  Offen: Bildschirm-Szene der nativen Fläche zeichnet gedrehte Einzeltexte nicht im Glyphen-Pass ([194], Webview/Vektor-Glyphen springen ein; nicht auf dem Mac
+  geprüft); Plan-Cache der Zeichnungen (`plan_drawings_chunked`) kennt die Abhängigkeit Text → Achse nicht (Achse ändern, Text bleibt bis zu seiner eigenen Änderung);
+  echte Kataster-DXF (Layer-Namen je Kanton) nicht geprüft; nicht in der Tauri-App/auf dem Mac geprüft. · M
 - ◐ **[208]** Wettbewerbs-Abgabe (12.11.). Umgesetzt: **Bild-Element im Layout** (`Layout.images`, `LayoutImage`: PNG/JPEG als Data-URL wie
   `ContextImage.src`, Rahmen in Papier-mm, Zuschnitt als Anteile; Kern `layout_image.rs`: Dateikopf, Seitenverhältnis, Zeichen-/Klipp-Rechteck,
   dpi; Blatt: Knopf „Bild“, verschieben, Ecke skalieren mit festem Seitenverhältnis, HUD mit Breite, Zuschnitt, dpi-Warnung unter 100;
