@@ -10,7 +10,7 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   stehen im Archiv („Bewusst nicht übernommen“).
 - **Grösse** (eine Person mit Agenten): S ≤ 1 Tag · M ≤ 1 Woche · L ≤ 1 Monat · XL > 1 Monat.
   Steht keine Grösse im Archiv, ist sie hier geschätzt.
-- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 252);
+- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 253);
   nie eine ID wiederverwenden oder umnummerieren. Präfix-IDs (`[K]`, `[G]`, `[T]`, `[B]`, `[C]`) bleiben.
 - **Pro Punkt:** was fehlt · wo im Code · Grösse. Höchstens ein bis drei Sätze je Punkt;
   Messwerte und Befunde gehören in den Commit.
@@ -55,6 +55,7 @@ Raumprogramm gegen Modell → Grundrisse/Schnitte/Ansichten 1:200 (Vorprojekt 1:
 Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
 
 #- ○ **[252]** Entscheide Maintainer 14.11.: (1) „Geschoss“ heisst im Englischen durchgehend **floor** (en.ts vereinheitlichen, „storey“ ersetzen; Fachbegriffe wie „storey height“ → „floor height“). (2) **Tab bleibt immer für die Befehlszeile** (kein Tab-Durchlauf durch Dock-Knöpfe); **Ctrl+Tab / Ctrl+Umschalt+Tab** springt durch die Reiter (Grundriss/3D/Schnitt …). · S
+- ○ **[253]** Standard-Objektbibliothek 2D (14.11., Wunsch Maintainer): Sanitär (WC, Lavabo, Dusche, Wanne, Urinal, WM/Tumbler), Küche (Schweizer Küchennorm 55er-Raster, T 60: Unterbau, Spüle, Kochfeld, GS, Kühlschrank, Hochschrank, Zeile/L/Insel), Tische, Stühle, Sofa, Betten 90–180×200, Schränke T 60/35, Auto+Parkfeld, Velo, Rollstuhl-Wendekreis Ø 150; als `BlockDef`s aus dem Kern erzeugt (abstrakter Strich, 1:100/1:200), Klassen „Möbel“/„Sanitär“, Palette zum Einsetzen. Vorgaben ohne Antwort des Maintainers: abstrakt, nur 55er-Raster, nur 2D (3D nach 1.0). · M
 
 ## Phase 1 (13.–19.11.): Stabil und baubar
 - ◐ **[206]** Referenz-Ablauf als e2e-Spec (Browser) und als Checkliste für die Mac-Abnahme (`doc/RELEASE-1.0.md`): jeder Schritt
