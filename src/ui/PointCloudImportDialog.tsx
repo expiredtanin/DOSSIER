@@ -9,6 +9,7 @@
 import { memo, useEffect, useState } from "react";
 import { useStore } from "../state/appStore";
 import { t } from "../i18n";
+import { useModalFocus } from "./modalFocus";
 import type { TranslationKey } from "../i18n";
 import { Dropdown } from "./Dropdown";
 import { DEFAULT_MAX_POINTS, POINT_CLOUD_EXTENSIONS, readPointCloud } from "../io/pointCloud";
@@ -58,6 +59,7 @@ function PointCloudImportDialog({ file, project }: { file: File; project: Projec
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<PointCloudData | null>(null);
 
+  const dialogRef = useModalFocus({});
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") closePointCloudImport();
@@ -104,7 +106,7 @@ function PointCloudImportDialog({ file, project }: { file: File; project: Projec
     <div className="imp-overlay" onClick={() => closePointCloudImport()}>
       <div
         className="imp-dialog"
-        role="dialog"
+        ref={dialogRef} role="dialog"
         aria-modal="true"
         aria-label={t("pointCloud.title")}
         onClick={(e) => e.stopPropagation()}

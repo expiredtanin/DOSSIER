@@ -8,6 +8,7 @@
 
 import { useEffect, useRef, useState, memo } from "react";
 import { t } from "../i18n";
+import { useModalFocus } from "./modalFocus";
 import { Dropdown } from "./Dropdown";
 import {
   MESH_EXTENSIONS,
@@ -53,6 +54,7 @@ function MeshImportDialog({ req, onImport, notify }: { req: MeshImportRequest } 
   // Dateiinhalt einmal laden, nicht bei jeder Änderung.
   const cache = useRef<{ main: Uint8Array; files: { name: string; bytes: Uint8Array }[] } | null>(null);
 
+  const dialogRef = useModalFocus({});
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") closeMeshImport();
@@ -107,7 +109,7 @@ function MeshImportDialog({ req, onImport, notify }: { req: MeshImportRequest } 
 
   return (
     <div className="imp-overlay" onClick={() => closeMeshImport()}>
-      <div className="imp-dialog" role="dialog" aria-modal="true" aria-label={t("mesh.import.title")} onClick={(e) => e.stopPropagation()}>
+      <div className="imp-dialog" ref={dialogRef} role="dialog" aria-modal="true" aria-label={t("mesh.import.title")} onClick={(e) => e.stopPropagation()}>
         <header className="imp-head">
           <span className="imp-head-title">{t("mesh.import.title")}</span>
           <button className="imp-close" onClick={() => closeMeshImport()} aria-label={t("export.close")}>

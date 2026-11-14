@@ -11,6 +11,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { t } from "../i18n";
+import { useModalFocus } from "./modalFocus";
 import { geocode, fetchBuildings } from "../io/swissTopo";
 import type { GeocodeCandidate } from "../io/swissTopo";
 import { fetchBuildings3d } from "../io/swissBuildings3d";
@@ -102,6 +103,7 @@ export function ContextImportDialog({
   onSetGeoAnchor,
   windowed = false,
 }: ContextImportDialogProps) {
+  const dialogRef = useModalFocus({});
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -357,7 +359,7 @@ export function ContextImportDialog({
   const dialog = (
       <div
         className={`imp-dialog${windowed ? " imp-dialog-embedded" : ""}`}
-        role="dialog"
+        ref={dialogRef} role="dialog"
         aria-modal="true"
         aria-label={t("ctxImport.title")}
         onClick={windowed ? undefined : (e) => e.stopPropagation()}

@@ -4,6 +4,7 @@
 
 import { useEffect } from "react";
 import { t } from "../i18n";
+import { useModalFocus } from "./modalFocus";
 
 export interface RecoverAutosaveDialogProps {
   /** Dateipfad der Kopie (null = nie gespeichertes Projekt). */
@@ -15,6 +16,7 @@ export interface RecoverAutosaveDialogProps {
 }
 
 export function RecoverAutosaveDialog({ path, savedAt, onRestore, onDiscard, onLater }: RecoverAutosaveDialogProps) {
+  const dialogRef = useModalFocus({});
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onLater();
@@ -30,7 +32,7 @@ export function RecoverAutosaveDialog({ path, savedAt, onRestore, onDiscard, onL
     <div className="imp-overlay recover-overlay" onClick={onLater}>
       <div
         className="imp-dialog"
-        role="dialog"
+        ref={dialogRef} role="dialog"
         aria-modal="true"
         aria-label={t("recover.title")}
         onClick={(e) => e.stopPropagation()}

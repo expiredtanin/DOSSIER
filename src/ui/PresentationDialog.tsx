@@ -5,6 +5,7 @@
 
 import { memo, useCallback, useEffect, useState } from "react";
 import { t } from "../i18n";
+import { useModalFocus } from "./modalFocus";
 import { PRESENTATION_SCALES, levelHasContent, presentationDefaults, type PresentationOptions } from "../core";
 import type { LayoutOrientation, LayoutPaperFormat } from "../model/types";
 import { PAPER_FORMAT_GROUPS } from "../model/layoutModel";
@@ -36,6 +37,7 @@ export const PresentationDialogHost = memo(function PresentationDialogHost({
     if (id) onCreated(id);
   }, [opts, onCreated]);
 
+  const dialogRef = useModalFocus({});
   useEffect(() => {
     if (!opts) return;
     const onKey = (e: KeyboardEvent) => {
@@ -68,7 +70,7 @@ export const PresentationDialogHost = memo(function PresentationDialogHost({
     set({ scales: next });
   };
   const scaleSelect = (id: string) => (
-    <select className="imp-select" style={{ marginLeft: "auto" }} data-testid={`presentation-scale-${id}`} value={scaleOf(id)} onChange={(e) => setScaleOf(id, e.target.value)}>
+    <select className="imp-select" style={{ marginLeft: "auto" }} data-testid={`presentation-scale-${id}`} aria-label={`${t("export.scale")} ${drawingLevels.find((l) => l.id === id)?.name ?? ""}`.trim()} value={scaleOf(id)} onChange={(e) => setScaleOf(id, e.target.value)}>
       <option value="">{t("presentation.scale.common")}</option>
       {PRESENTATION_SCALES.map((n) => (
         <option key={n} value={n}>{`1:${n}`}</option>
@@ -81,6 +83,7 @@ export const PresentationDialogHost = memo(function PresentationDialogHost({
     <div className="imp-overlay" onClick={close}>
       <div
         className="imp-dialog presentation-dialog"
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label={t("presentation.title")}
@@ -130,6 +133,7 @@ export const PresentationDialogHost = memo(function PresentationDialogHost({
             <select
               className="imp-select"
               data-testid="presentation-section"
+              aria-label={t("presentation.section")}
               value={opts.sectionId ?? ""}
               onChange={(e) => set({ sectionId: e.target.value || null })}
             >
@@ -148,6 +152,7 @@ export const PresentationDialogHost = memo(function PresentationDialogHost({
               <select
                 className="imp-select"
                 data-testid="presentation-target"
+                aria-label={t("presentation.sheet")}
                 value={opts.poster ?? ""}
                 onChange={(e) => set({ poster: e.target.value || undefined })}
               >
@@ -161,6 +166,7 @@ export const PresentationDialogHost = memo(function PresentationDialogHost({
               <select
                 className="imp-select"
                 data-testid="presentation-scale"
+                aria-label={t("export.scale")}
                 value={opts.scale ?? ""}
                 onChange={(e) => set({ scale: e.target.value ? Number(e.target.value) : null })}
               >
@@ -174,6 +180,7 @@ export const PresentationDialogHost = memo(function PresentationDialogHost({
               <select
                 className="imp-select"
                 data-testid="presentation-paper"
+                aria-label={t("export.paper")}
                 value={opts.paper}
                 disabled={poster}
                 onChange={(e) => set({ paper: e.target.value as LayoutPaperFormat })}

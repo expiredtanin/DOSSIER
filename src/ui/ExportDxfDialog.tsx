@@ -8,6 +8,7 @@
 
 import { useEffect, useState } from "react";
 import { t } from "../i18n";
+import { useModalFocus } from "./modalFocus";
 import { Dropdown } from "./Dropdown";
 import type { CadExportFormat } from "../export/exportDxf";
 import { SCALE_PRESETS } from "./TopBar";
@@ -48,6 +49,7 @@ export function ExportDxfDialog({
   onExport,
   onClose,
 }: ExportDxfDialogProps) {
+  const dialogRef = useModalFocus({});
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -82,7 +84,7 @@ export function ExportDxfDialog({
     <div className="imp-overlay" onClick={onClose}>
       <div
         className="imp-dialog"
-        role="dialog"
+        ref={dialogRef} role="dialog"
         aria-modal="true"
         aria-label={t("exportDxf.title")}
         onClick={(e) => e.stopPropagation()}

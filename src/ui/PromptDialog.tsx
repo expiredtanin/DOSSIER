@@ -8,6 +8,7 @@
 
 import { useEffect, useState } from "react";
 import { t } from "../i18n";
+import { useModalFocus } from "./modalFocus";
 
 export interface PromptDialogProps {
   /** Kopfzeile des Dialogs. */
@@ -32,6 +33,7 @@ export function PromptDialog({
 }: PromptDialogProps) {
   const [value, setValue] = useState(defaultValue);
 
+  const dialogRef = useModalFocus({});
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -49,7 +51,7 @@ export function PromptDialog({
     <div className="imp-overlay" onClick={onClose}>
       <div
         className="imp-dialog"
-        role="dialog"
+        ref={dialogRef} role="dialog"
         aria-modal="true"
         aria-label={title}
         onClick={(e) => e.stopPropagation()}
@@ -67,7 +69,8 @@ export function PromptDialog({
             <input
               className="settings-num-input"
               type={type}
-              autoFocus
+              aria-label={label}
+              data-autofocus
               spellCheck={false}
               value={value}
               onChange={(e) => setValue(e.target.value)}

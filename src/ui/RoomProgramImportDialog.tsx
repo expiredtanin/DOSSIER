@@ -8,6 +8,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { t } from "../i18n";
+import { useModalFocus } from "./modalFocus";
 import type { TranslationKey } from "../i18n";
 import { roomProgramOps, cellText, importedRows, mapRows, PROGRAM_FIELDS, readSheetFile, suggestMapping } from "../core";
 import type { CoreOp, ImportMode, Mapping, ProgramField, SheetData, SkipReason } from "../core";
@@ -61,6 +62,7 @@ export function RoomProgramImportDialog({ fileName, sheets, existing, onImport, 
   const [skipSums, setSkipSums] = useState(true);
   const [mode, setMode] = useState<ImportMode>(existing > 0 ? "append" : "replace");
 
+  const dialogRef = useModalFocus({});
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -94,7 +96,7 @@ export function RoomProgramImportDialog({ fileName, sheets, existing, onImport, 
 
   const dialog = (
     <div className="imp-overlay" onClick={onClose}>
-      <div className="imp-dialog rpi-dialog" role="dialog" aria-modal="true" aria-label={t("program.import.title")} onClick={(e) => e.stopPropagation()}>
+      <div className="imp-dialog rpi-dialog" ref={dialogRef} role="dialog" aria-modal="true" aria-label={t("program.import.title")} onClick={(e) => e.stopPropagation()}>
         <header className="imp-head">
           <span className="imp-head-title">{t("program.import.title")}</span>
           <button className="imp-close" onClick={onClose} aria-label={t("export.close")}>

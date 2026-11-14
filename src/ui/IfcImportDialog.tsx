@@ -3,6 +3,7 @@
 
 import { useEffect, useState } from "react";
 import { t } from "../i18n";
+import { useModalFocus } from "./modalFocus";
 import type { IfcElementsSummary } from "../io/ifcImport";
 
 export type IfcImportMode = "mesh" | "elements";
@@ -16,6 +17,7 @@ export interface IfcImportDialogProps {
 export function IfcImportDialog({ fileName, onImport, onCancel }: IfcImportDialogProps) {
   const [mode, setMode] = useState<IfcImportMode>("mesh");
 
+  const dialogRef = useModalFocus({});
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onCancel();
@@ -28,7 +30,7 @@ export function IfcImportDialog({ fileName, onImport, onCancel }: IfcImportDialo
     <div className="imp-overlay" onClick={onCancel}>
       <div
         className="imp-dialog"
-        role="dialog"
+        ref={dialogRef} role="dialog"
         aria-modal="true"
         aria-label={t("ifc.importDialog.title")}
         onClick={(e) => e.stopPropagation()}
@@ -97,6 +99,7 @@ export function IfcImportReportDialog({
   summary: IfcElementsSummary;
   onClose: () => void;
 }) {
+  const dialogRef = useModalFocus({});
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape" || e.key === "Enter") onClose();
@@ -111,7 +114,7 @@ export function IfcImportReportDialog({
     <div className="imp-overlay" onClick={onClose}>
       <div
         className="imp-dialog"
-        role="dialog"
+        ref={dialogRef} role="dialog"
         aria-modal="true"
         aria-label={t("ifc.importReport.title")}
         onClick={(e) => e.stopPropagation()}
