@@ -22,7 +22,8 @@ Wer Dateien verschiebt oder umbenennt, führt diese Doku im selben Commit nach.
 6. **Ehrlich berichten:** was geprüft wurde und was nicht (z. B. „nicht in der Tauri-App getestet").
 
 ```
-npm run check            # tsc, vitest, cargo test aller 6 Crates  (--fast: ohne Rust)
+npm run check            # tsc, vitest, cargo test aller 7 Crates + core `--features web` (robustness_web)  (--fast: ohne Rust)
+                         # IFC-Prüfungen in vitest nur mit `pip install ifcopenshell pytest numpy` (sonst übersprungen)
 npm run build:cli        # nötig für dossier-cli, wenn src/cli oder der Kern geändert wurde
 ```
 

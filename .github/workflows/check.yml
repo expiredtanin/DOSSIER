@@ -33,8 +33,8 @@ jobs:
       - uses: taiki-e/install-action@v2
         with: { tool: wasm-pack }
       - run: npm ci || (sleep 30 && npm ci) || (sleep 90 && npm ci)  # Netz-Aussetzer (z. B. 504 beim wasm-pack-Download)
-      # IFC-Prüfung in exportIfc.validate.test.ts ([B1]); ohne ifcopenshell würde sie übersprungen.
-      - run: pip install ifcopenshell pytest ezdxf
+      # IFC-Prüfung in exportIfc.{validate,quantities,fachplaner}.test.ts ([B1], [259]; numpy für die Mengenprüfung); ohne ifcopenshell würde sie übersprungen.
+      - run: pip install ifcopenshell pytest ezdxf numpy
       - name: WASM-Pakete bauen
         run: |
           # Fällt das mitgelieferte wasm-opt um (alte Binaryen-Version, Table.grow), ohne Optimierung neu bauen.
