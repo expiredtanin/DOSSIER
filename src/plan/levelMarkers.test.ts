@@ -34,6 +34,21 @@ describe("levelMarkerPrimitives", () => {
     expect(texts(marks)).toEqual(["±0.00", "+2.60", "+6.20"]);
   });
 
+  it("[256] Nachbargebäude (Kontext-Netz auf Klasse 12 Gebäude) zählen nicht zum Gebauten, ein Netz auf eigener Klasse schon", () => {
+    const mesh = (id: string, categoryCode: string) => ({ type: "importedMesh", id, name: id, categoryCode, positions: [], indices: [] });
+    const project = { ...sampleProject, context: [...(sampleProject.context ?? []), mesh("nachbarn", "12"), mesh("ifc", "60")] } as typeof sampleProject;
+    const poly = (x0: number, x1: number, top: number, contextObjectId?: string): Primitive =>
+      ({ kind: "polygon", pts: [{ x: x0, y: 0 }, { x: x1, y: 0 }, { x: x1, y: top }, { x: x0, y: top }], fill: "#000", stroke: "#000", strokeWidthMm: 0.5, contextObjectId }) as unknown as Primitive;
+    const line = (ax: number, ay: number, bx: number, by: number): Primitive =>
+      ({ kind: "line", a: { x: ax, y: ay }, b: { x: bx, y: by }, cls: "section-cut-outline", weightMm: 0.5 }) as unknown as Primitive;
+    const house = poly(0, 5, 6.2);
+    const marks = levelMarkerPrimitives(project, { minX: -20, minY: -0.3, maxX: 5, maxY: 9 }, [house, poly(-20, -8, 9, "nachbarn"), line(-20, 9, -8, 9)]);
+    expect(texts(marks)).toEqual(["±0.00", "+2.60", "+6.20"]);
+    for (const p of marks) if (p.kind === "line") expect(Math.min(p.a.x, p.b.x)).toBeGreaterThan(-3);
+    const own = levelMarkerPrimitives(project, { minX: -20, minY: -0.3, maxX: 5, maxY: 9 }, [house, poly(-3, -1, 9, "ifc")]);
+    expect(texts(own)).toEqual(["±0.00", "+2.60", "+9.00"]);
+  });
+
   it("standardmässig an, abschaltbar", () => {
     const lv = sampleProject.drawingLevels.find((l) => l.kind === "section")!;
     expect(levelMarksEnabled(lv)).toBe(true);

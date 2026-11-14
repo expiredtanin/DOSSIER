@@ -45,6 +45,12 @@ const NESTED: [Def; 11] = [
     Def { code: "07", name: "Baugrube", color: "#4a4a4a", lw: 0.18 },
 ];
 
+/// [256] Ist `code` eine Umgebungsklasse („05 Kontext" und ihre Kinder: Gelände, Situation, Gebäude, Strasse …)?
+/// Netze darauf sind Kontext (Nachbarn, Kataster), nicht das eigene Gebäude.
+pub fn is_context_class(code: &str) -> bool {
+    code == CONTEXT_PARENT.code || NESTED.iter().any(|d| d.code == code)
+}
+
 fn category(d: &Def) -> Value {
     json!({"code": d.code, "name": d.name, "color": d.color, "lw": d.lw, "visible": true, "locked": false})
 }

@@ -72,6 +72,7 @@ const WINDOW_TYPES: WindowType[] = [
 ];
 const DOOR_TYPES: DoorType[] = [
   { id: "wb-tu", name: "Wohnungstür", kind: "dreh", leafCount: 1, leafStyle: "glatt", frameThickness: 0.05, frameKind: "umfassungszarge", frameWidth: 0.05, defaultWidth: 0.9, defaultHeight: 2.1 },
+  { id: "wb-tu-innen", name: "Zimmertür", kind: "dreh", leafCount: 1, leafStyle: "glatt", frameThickness: 0.05, frameKind: "umfassungszarge", frameWidth: 0.05, defaultWidth: 0.8, defaultHeight: 2.1 },
   { id: "wb-tu-haus", name: "Haustür Glas", kind: "dreh", leafCount: 1, leafStyle: "glas", glazingRatio: 0.4, frameThickness: 0.08, frameKind: "blockrahmen", frameWidth: 0.09, threshold: true, defaultWidth: 1.2, defaultHeight: 2.3 },
 ];
 const STAIR_TYPES = [{ id: "wb-tr-beton", name: "Ortbetontreppe mit Geländer rechts", structure: "beton" as const, closedRisers: true, treadThickness: 0.03, nosing: 0.02, railing: "rechts" as const, defaultWidth: 1.1 }];
@@ -127,7 +128,14 @@ for (const f of FLOORS) {
   else win(`${i}-f-n3`, `${i}-aw-n`, 10, 1.2, 1.4, 0.9);
   door(`${i}-t-th`, `${i}-iw-th`, "wb-tu", 2, 1.0, 2.1);
   door(`${i}-t-wohnung-w`, `${i}-iw-x8`, "wb-tu", 3.5, 0.9, 2.1, { fireRating: "EI30" });
-  door(`${i}-t-wohnung-o`, `${i}-iw-x12`, "wb-tu", 3.5, 0.9, 2.1, { fireRating: "EI30" });
+  door(`${i}-t-wohnung-o`, `${i}-iw-x12`, "wb-tu", 3.5, 0.9, 2.1, { fireRating: "EI30", swing: "right" });
+  // [256] Innentüren je Wohnung: Wohnen → Diele, Diele → Zimmer und Bad (Plan-Review 1:100: Zimmer/Bad ohne Zugang).
+  for (const side of ["w", "o"] as const) {
+    const o = side === "o";
+    door(`${i}-t-${side}-diele`, `${i}-iw-${side}-y7`, "wb-tu-innen", o ? 2 : 6, 0.9, 2.1);
+    door(`${i}-t-${side}-zimmer`, `${i}-iw-${side}-zimmer`, "wb-tu-innen", 1.25, 0.8, 2.1, o ? { swing: "right" } : {});
+    door(`${i}-t-${side}-bad`, `${i}-iw-${side}-bad`, "wb-tu-innen", 2, 0.8, 2.1, o ? { swing: "right" } : {});
+  }
 }
 
 // ── Decken, Treppen, Dach ───────────────────────────────────────────────────
