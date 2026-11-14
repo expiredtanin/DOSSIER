@@ -353,6 +353,20 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   Offen: Rahmen sind so breit wie der Inhalt samt Masskette/Kontext (Musterhaus komplex: 2 Spalten je Grundriss, viel Weissraum im Rahmen, 2 Blätter); Anordnung mischt
   Gruppen (Pläne neben Situation, Ansichten darunter) statt strenger Zeilen; Tabellen-Spaltenköpfe „Reserve/Erfüllt“ eng; Baurecht-Zeilen mit „—“ bei fehlenden Vorgaben;
   Lage der Tabellen/des Bildes nicht von Hand fixiert (Neuberechnung nur durch Neuerstellen); nicht in der Tauri-App geprüft.
+  **Abgabe-Review d) behoben (14.11., Ansichten/Grundrisse 1:200, CLI-SVG `--hatch` in Chromium, nur Linux)**: (1) Bodenlinie der Ansicht ohne Geländenetz
+  kräftig (0.5, bei 1:200 mit Massstabs-Stärken 0.38 mm; auch die Gelände-Silhouette) auf ±0.00 (Bezugsgeschoss), beidseits 10 mm Papier (mind. 2 m) über
+  das Gezeichnete hinaus; Sockel/UG darunter weiss gedeckt; auf Klasse „02 Gelände" (ausgeblendet ⇒ ohne). Vorher dünn auf der Unterkante des Baus = unsichtbar
+  (`elevation/mod.rs::ground_line`, Test `bodenlinie_auf_null_mit_ueberstand`). (2) Automatische Höhenkoten in Papiergrösse (2 mm Schrift wie das Element
+  `kote`, vorher fest 0.2 m = 1 mm bei 1:200): `level_markers(…, scale)`, Abfrage `levelMarkers` mit 5. Argument, `levelMarkerPrimitives(…, scale)`,
+  Blatt-Viewports (`sheet_viewports`); Test `hoehenkoten_in_papiergroesse`. (3) Fenster der Ansicht 1:200 mit Rahmen, Flügel, Glas und Laibungsschatten
+  ([184] „mittel"): Ursache war die automatische Vergröberung des Grundrisses (mittel ab 1:200 = grob, [140]); in der Ansicht gilt sie erst ab 1:500, bei 1:200
+  entfallen nur die gestrichelten Öffnungssymbole; Test `ansicht_fenster_bei_1_200_mit_rahmen`. (4) Masszahl „1.20" (Fenster Treppenhaus, Wettbewerb OG Süd)
+  stand eine Zeile höher in der Wand: passt eine Zahl weder ins Segment noch daneben, rückt jetzt die Zahl des Nachbarsegments in dessen Segment weg
+  („1.20 3.00"); geht auch das nicht und läge „eine Zeile höher" zum Gebäude hin (Ketten Süd/Ost), steht sie unter der Linie (`dim_auto_offsets*` mit
+  `offset`, gleich in Plan, Griffen, DXF; Test `masszahl_weicht_nach_aussen_statt_in_die_wand`). Goldens: Ansicht muster (Ausmass +2 m je Seite) und komplex
+  (Linienstärke). Offen: „12.39"/„4.80" links liessen sich weder im CLI-SVG noch in den Viewport-Plänen des Präsentationsplans nachstellen (Abstand 1.4 m,
+  kein Überlapp; vermutlich Textsatz des PDF, svg2pdf mit gedrehten Texten — im Browser-PDF prüfen); Schnitt: Bodenlinie weiter dünn an der Unterkante
+  (nicht auf ±0.00); Modelldarstellung „Wettbewerb 1:200" (`windows.simplified`) macht die Ansichtsfenster weiter grob; nicht in der Tauri-App/auf dem Mac.
 - [61] Raumprogramm gegen Modell und Flächennachweis SIA 416 als Tabelle/Layout-Element ([70]); Kennzahlen (GF, GV, HNF/GF, Fassadenanteil).
 - 3D-Bilder für die Abgabe: hochaufgelöster PNG-Export (Perspektive, Axonometrie, Schatten), Sonnenstand; [205] Pausfolie.
 - [199]/[204] Plan- und App-Review-Reste im Darstellungsbereich 1:500/1:200 schliessen.
@@ -1104,6 +1118,7 @@ Punktwolken/BCF-Ausbau, Windows-Paket, [C5]/[C7]/[15] Kern-Umbauten — ausser s
   (`autodim-<Ebene>-radius-<Wand>`, Klasse 81, an der Wand verankert; entfällt, wenn die Wand schon ein eigenes Radiusmass hat;
   in „Aussen/Gesamtmass"-Ansicht ausgeblendet wie das Bogenmass); eine auf eine andere Klasse gelegte Auto-Kette bleibt beim
   erneuten `autodim` auf ihrer Klasse. Offen: nicht in der App geklickt. · S
+  (14.11., [208]) Zu kurze Segmente: Nachbarzahl rückt im eigenen Segment weg, sonst unter die Linie statt in die Wand (s. [208] Abgabe-Review d).
 - ◐ **[172]** Masszahl der Bemassung „snappy" und mittig. (10.11.) Vorgabe: Zahl wirklich mittig (bisher hing sie mit ihrem Anfang an der Segmentmitte, jetzt
   um die Breite halbiert zurückgesetzt, auch Bogenlänge) über jedem Segment im festen Abstand (Grundlinie 0.6 Schrifthöhe); passt sie nicht zwischen die Hilfslinien, weicht sie nach aussen (erstes Segment links, letztes rechts,
   mittlere zum längeren Nachbarn, bei Überdeckung eine Zeile höher) — `dim_auto_offsets` in `plan/drawings.rs`, gilt für
@@ -1139,6 +1154,7 @@ Punktwolken/BCF-Ausbau, Windows-Paket, [C5]/[C7]/[15] Kern-Umbauten — ausser s
   Rahmen, Fensterbank, Teilung, Laibungsschatten, Flügelsymbole), mittel = Rahmen + Teilung und Laibungsschatten, aber ohne Fensterbank, fein wie bisher;
   Storenkasten über der Öffnung nur mit `windows.shadingBox`. Ressourcen-Tab: „Schnittdetail Tür/Fenster" als Wahl „Wie Detailgrad /
   Voll / Vereinfacht" mit Tooltip. Nicht in der Tauri-App geprüft.
+  (14.11., [208]) Ansicht: Vergröberung mittel → grob erst ab 1:500 (1:200 zeigt Rahmen/Flügel/Glas, ohne Öffnungssymbole).
 - ◐ **[178]** Deckenauflager an Aussenwänden (11.11., Wunsch Maintainer). Decke endet an der Aussenkante des Kerns
   ([33] `layer_positions`), Aussendämmung/Putz laufen an der Stirn durch — abgeleitet, Umriss bleibt
   (`model3d/bearing.rs`: Platten-Umriss minus Aussenschicht-Streifen, wo vor der Wand keine Decke liegt → `emit_slabs`

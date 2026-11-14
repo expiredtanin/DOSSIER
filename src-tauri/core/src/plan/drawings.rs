@@ -852,7 +852,7 @@ fn emit_inner(c: &Ctx, d: &Drawing2D, attrs: Attrs, geom: &Drawing2DGeom, greyed
                 };
                 dimension_round(&mut em, pts, *offset, *k, &st);
             }
-            let auto = if kind.is_none() && arc_center.is_none() { dim_auto_offsets_marks(pts, mm(text_height_mm.unwrap_or(DIM_TEXT_HEIGHT_MM)), &layout.blocked, &layout.marks) } else { Vec::new() };
+            let auto = if kind.is_none() && arc_center.is_none() { dim_auto_offsets_marks(pts, mm(text_height_mm.unwrap_or(DIM_TEXT_HEIGHT_MM)), &layout.blocked, &layout.marks, *offset) } else { Vec::new() };
             for i in 0..(if kind.is_some() { 0 } else { pts.len().saturating_sub(1) }) {
                 let st = DimStyle {
                     gap: mm(gap_mm.unwrap_or(DIM_GAP_MM)),
@@ -1146,22 +1146,26 @@ pub fn dim_text_below(h: f64) -> f64 {
 /// Mitte über dem Massstrich (Modell-Meter). Passt die Zahl zwischen die Hilfslinien, ist es (0, 0); sonst
 /// rückt sie nach aussen (links vom Segment, rechts davon, bei mittleren Segmenten auf die Seite des längeren
 /// Nachbarn), auf die erste Seite ohne Überdeckung, notfalls eine Zeile höher. Für Plan und Griffe gleich.
-pub fn dim_auto_offsets(pts: &[Vec2], h: f64) -> Vec<(f64, f64)> {
-    dim_auto_offsets_avoiding(pts, h, &[])
+///
+/// `offset`: Abstand der Masslinie von den Punkten (Vorzeichen = Seite, wie `Dimension.offset`). [208] Liegt die Zahl
+/// „über der Linie" zwischen Masslinie und Gebautem (Ketten Süd/Ost), rückt sie im Notfall nicht eine Zeile höher (in
+/// die Wand), sondern unter die Linie, also nach aussen.
+pub fn dim_auto_offsets(pts: &[Vec2], h: f64, offset: f64) -> Vec<(f64, f64)> {
+    dim_auto_offsets_avoiding(pts, h, &[], offset)
 }
 
 /// Wie [`dim_auto_offsets`]; dazu stehen ausweichende Zahlen nicht auf den Stellen `blocked` (entlang der Kette ab
 /// dem ersten Punkt, Modell-m) — [199] Hilfslinien äusserer Ketten, die das Zahlenband queren. Sind links und rechts
 /// direkt neben dem Segment belegt, rückt die Zahl weiter hinaus hinter das nächste Hindernis (höchstens drei
 /// Zahlbreiten), erst dann eine Zeile höher.
-pub fn dim_auto_offsets_avoiding(pts: &[Vec2], h: f64, blocked: &[f64]) -> Vec<(f64, f64)> {
-    dim_auto_offsets_marks(pts, h, blocked, &[])
+pub fn dim_auto_offsets_avoiding(pts: &[Vec2], h: f64, blocked: &[f64], offset: f64) -> Vec<(f64, f64)> {
+    dim_auto_offsets_marks(pts, h, blocked, &[], offset)
 }
 
 /// Wie [`dim_auto_offsets_avoiding`]; dazu [199] Streifen `marks` (von, bis; entlang der Kette ab dem ersten Punkt,
 /// Modell-m), die keine Zahl überdecken soll (Schnittmarken). Eine Zahl, die in ihr Segment passt, rückt innerhalb des
 /// Segments neben den Streifen (nächste freie Stelle), sonst bleibt sie in der Mitte; ausweichende Zahlen meiden sie.
-pub fn dim_auto_offsets_marks(pts: &[Vec2], h: f64, blocked: &[f64], marks: &[(f64, f64)]) -> Vec<(f64, f64)> {
+pub fn dim_auto_offsets_marks(pts: &[Vec2], h: f64, blocked: &[f64], marks: &[(f64, f64)], offset: f64) -> Vec<(f64, f64)> {
     let n = pts.len().saturating_sub(1);
     let mut out = vec![(0.0, 0.0); n];
     if n == 0 || !(h.is_finite() && h > 0.0) || pts.iter().any(|q| !(q.x.is_finite() && q.y.is_finite())) {
@@ -1226,16 +1230,55 @@ pub fn dim_auto_offsets_marks(pts: &[Vec2], h: f64, blocked: &[f64], marks: &[(f
             cands.sort_by(|a, b| (a - mid).abs().total_cmp(&(b - mid).abs()));
             cands.into_iter().find(|c| free(*c, w, &taken))
         });
+        // [208] Sonst die Zahl direkt neben das Segment und die Zahl des Nachbarsegments (passt, steht mittig) in dessen
+        // Segment so weit wegrücken, dass beide Platz haben (wie von Hand; Wettbewerb OG Süd: „1.20" neben „3.00").
+        let found = found.or_else(|| {
+            let sides = if prefer_left { [true, false] } else { [false, true] };
+            for to_left in sides {
+                let (c, j) = if to_left { (left, i.checked_sub(1)) } else { (right, Some(i + 1).filter(|j| *j < n)) };
+                let Some(j) = j else { continue };
+                let Some(old) = centre[j] else { continue };
+                let wj = widths[j];
+                let (lo, hi) = (starts[j] + pad + wj / 2.0, starts[j] + lens[j] - pad - wj / 2.0);
+                let cj = if to_left { c - w / 2.0 - pad - wj / 2.0 - eps } else { c + w / 2.0 + pad + wj / 2.0 + eps };
+                if cj < lo - eps || cj > hi + eps {
+                    continue;
+                }
+                let others: Vec<(f64, f64)> = taken.iter().copied().filter(|t| (t.0 - (old - wj / 2.0)).abs() > eps || (t.1 - (old + wj / 2.0)).abs() > eps).collect();
+                if !free(c, w, &others) {
+                    continue;
+                }
+                let mut with_i = others.clone();
+                with_i.push((c - w / 2.0, c + w / 2.0));
+                if !free(cj, wj, &with_i) {
+                    continue;
+                }
+                taken = others;
+                taken.push((cj - wj / 2.0, cj + wj / 2.0));
+                centre[j] = Some(cj);
+                let (_, read_j, _, _) = dim_text_frame(pts[j], pts[j + 1], 0.0, h);
+                let uj = v((pts[j + 1].x - pts[j].x) / lens[j], (pts[j + 1].y - pts[j].y) / lens[j]);
+                let sj = if read_j.x * uj.x + read_j.y * uj.y >= 0.0 { 1.0 } else { -1.0 };
+                out[j] = (sj * (cj - starts[j] - lens[j] / 2.0), 0.0);
+                return Some(c);
+            }
+            None
+        });
+        // Entlang a→b in die Leserichtung umrechnen (der Text liest nie kopfüber).
+        let (_, read, up, _) = dim_text_frame(pts[i], pts[i + 1], 0.0, h);
+        let u = v((pts[i + 1].x - pts[i].x) / lens[i], (pts[i + 1].y - pts[i].y) / lens[i]);
+        // [208] Zeigt „über der Linie" zu den gemessenen Punkten (Gebautes), steht die Zahl im Notfall mittig unter der
+        // Linie (aussen): eine Zeile höher stünde sie in der Wand (Wettbewerb, „1.20" im Treppenhaus).
+        let toward_body = (up.x * -u.y + up.y * u.x) * offset < 0.0;
         let (centre, row) = match found {
             Some(c) => (c, 0.0),
+            None if toward_body => ((s0 + s1) / 2.0, dim_text_below(h)),
             None => (order[0], dim_text_row(h)),
         };
         taken.push((centre - w / 2.0, centre + w / 2.0));
-        // Entlang a→b in die Leserichtung umrechnen (der Text liest nie kopfüber).
-        let (_, read, _, _) = dim_text_frame(pts[i], pts[i + 1], 0.0, h);
-        let u = v((pts[i + 1].x - pts[i].x) / lens[i], (pts[i + 1].y - pts[i].y) / lens[i]);
         let s = if read.x * u.x + read.y * u.y >= 0.0 { 1.0 } else { -1.0 };
-        out[i] = (s * (centre - starts[i] - lens[i] / 2.0), row);
+        let along = s * (centre - starts[i] - lens[i] / 2.0);
+        out[i] = (if along.abs() < eps { 0.0 } else { along }, row);
     }
     out
 }
@@ -2515,10 +2558,13 @@ pub fn level_marker_bounds(p: &Project, prims: &[Primitive], b: [f64; 4]) -> [f6
 
 /// Automatische Höhenkoten im Schnitt/in der Ansicht (`levelMarkers.ts`): je Geschoss OK fertig
 /// Boden plus die oberste Kante, links neben der Zeichnung mit kurzer Bezugslinie.
-pub fn level_markers(p: &Project, b: [f64; 4]) -> Vec<Primitive> {
+///
+/// [208] `scale` = Massstabszahl der Zeichnung: Symbol, Schrift und Abstände in Papiergrösse wie das 2D-Element `kote`
+/// (2 mm Schrift bei jedem Massstab; vorher fest 0.2 m, also 1 mm bei 1:200). Ungültig = 1:100.
+pub fn level_markers(p: &Project, b: [f64; 4], scale: f64) -> Vec<Primitive> {
     const INK: &str = "#1f242c";
-    const MARK_OFFSET_M: f64 = 1.2;
-    const LEADER_GAP_M: f64 = 0.15;
+    let f = if scale.is_finite() && scale > 0.0 { scale / DEFAULT_SCALE_DENOMINATOR } else { 1.0 };
+    let (mark_offset, leader_gap) = (1.2 * f, 0.15 * f);
     let [min_x, min_y, max_x, max_y] = b;
     if !(max_x > min_x) || !(max_y > min_y) {
         return Vec::new();
@@ -2555,16 +2601,16 @@ pub fn level_markers(p: &Project, b: [f64; 4]) -> Vec<Primitive> {
         .collect();
     // [256] Die Zahl steht rechts vom Dreieck über der Bezugslinie: eine lange Kote („±0.00 = 441.30") ragte bei festem
     // Abstand ins Gebaute. Die Reihe rückt so weit nach links, dass der längste Text vor der Bezugslinien-Lücke endet.
-    let text_w = labels.iter().map(|(_, l)| crate::text_layout::text_width_em(l, false) * KOTE_TEXT_HEIGHT_M).fold(0.0, f64::max);
-    let x = (min_x - MARK_OFFSET_M).min(min_x - LEADER_GAP_M - 0.1 - KOTE_TRI_HALF_W_M - KOTE_TEXT_GAP_M - text_w);
+    let text_w = labels.iter().map(|(_, l)| crate::text_layout::text_width_em(l, false) * KOTE_TEXT_HEIGHT_M * f).fold(0.0, f64::max);
+    let x = (min_x - mark_offset).min(min_x - leader_gap - (0.1 + KOTE_TRI_HALF_W_M + KOTE_TEXT_GAP_M) * f - text_w);
     let mut out = Out::default();
     let mut sink = Sink::new(Target::Vec(&mut out), Keep::All);
     for (z, label) in labels {
         sink.line(
-            LineRef { a: v(x - 0.3, z), b: v(min_x - LEADER_GAP_M, z), cls: "section-level-leader", weight_mm: 0.13, dash: None, zigzag: None, motif: None, color: Some(INK), drawing_id: None, opening_id: None, stair_id: None, greyed: None, opacity: None },
+            LineRef { a: v(x - 0.3 * f, z), b: v(min_x - leader_gap, z), cls: "section-level-leader", weight_mm: 0.13, dash: None, zigzag: None, motif: None, color: Some(INK), drawing_id: None, opening_id: None, stair_id: None, greyed: None, opacity: None },
             0,
         );
-        push_kote_labeled(&mut sink, v(x, z), label, KoteKind::OkFertig, INK, 0.18, false, None, 1.0);
+        push_kote_labeled(&mut sink, v(x, z), label, KoteKind::OkFertig, INK, 0.18, false, None, f);
     }
     out.prims
 }
@@ -2978,9 +3024,9 @@ mod tests {
         let pts = [v(0.0, 0.0), v(0.0, 19.24)];
         let h = 0.35;
         let w = dim_text_width(19.24, h);
-        assert_eq!(dim_auto_offsets_marks(&pts, h, &[], &[]), vec![(0.0, 0.0)]);
+        assert_eq!(dim_auto_offsets_marks(&pts, h, &[], &[], 1.0), vec![(0.0, 0.0)]);
         let mark = (9.62 - 0.6, 9.62 + 0.6);
-        let o = dim_auto_offsets_marks(&pts, h, &[], &[mark]);
+        let o = dim_auto_offsets_marks(&pts, h, &[], &[mark], 1.0);
         let centre = 9.62 + o[0].0 * if o[0].0 != 0.0 { 1.0 } else { 0.0 };
         // Leserichtung der senkrechten Kette ist abwärts/aufwärts: das Vorzeichen egal, die Zahl liegt frei vom Streifen.
         let c1 = 9.62 + o[0].0;
@@ -2988,9 +3034,61 @@ mod tests {
         let free = |c: f64| c + w / 2.0 <= mark.0 || c - w / 2.0 >= mark.1;
         assert!(o[0].0.abs() > 0.1 && o[0].1 == 0.0 && (free(c1) || free(c2)), "{o:?} {centre}");
         // Streifen über dem ganzen Segment: nichts frei, die Zahl bleibt mittig.
-        assert_eq!(dim_auto_offsets_marks(&pts, h, &[], &[(-1.0, 25.0)]), vec![(0.0, 0.0)]);
+        assert_eq!(dim_auto_offsets_marks(&pts, h, &[], &[(-1.0, 25.0)], 1.0), vec![(0.0, 0.0)]);
         // Streifen fern der Zahl: unverändert.
-        assert_eq!(dim_auto_offsets_marks(&pts, h, &[], &[(1.0, 1.5)]), vec![(0.0, 0.0)]);
+        assert_eq!(dim_auto_offsets_marks(&pts, h, &[], &[(1.0, 1.5)], 1.0), vec![(0.0, 0.0)]);
+    }
+
+    /// [208] Wettbewerb OG Süd: „1.20" (Fenster Treppenhaus) zwischen „2.60" und „3.00" passt weder ins Segment noch
+    /// daneben und stand eine Zeile höher in der Wand. Jetzt rückt die Nachbarzahl in ihrem Segment weg; geht das nicht und
+    /// steht „über der Linie" zum Gebäude hin (Kette Süd), kommt die Zahl unter die Linie statt in die Wand.
+    #[test]
+    fn masszahl_weicht_nach_aussen_statt_in_die_wand() {
+        let h = 0.5;
+        // Kette Süd wie im Beispiel: 2.39 · 1.60 · 2.00 · 1.60 · 2.60 · 1.20 · 3.00 · 1.60 · 2.00 · 1.60 · 0.79.
+        let mut x = 0.0;
+        let pts: Vec<Vec2> = std::iter::once(v(0.0, 0.0))
+            .chain([2.39, 1.6, 2.0, 1.6, 2.6, 1.2, 3.0, 1.6, 2.0, 1.6, 0.79].into_iter().map(|l| {
+                x += l;
+                v(x, 0.0)
+            }))
+            .collect();
+        // Die Zahl steht auf der Masslinie rechts neben dem Segment, „3.00" rückt in seinem Segment nach rechts; alle Zahlen
+        // frei voneinander und zwischen den Hilfslinien ihres Segments bzw. ausserhalb des zu kurzen.
+        for side in [-1.0, 1.0] {
+            let o = dim_auto_offsets(&pts, h, side);
+            assert!(o.iter().all(|q| q.1 == 0.0), "auf der Linie: {o:?}");
+            let iv: Vec<(f64, f64)> = (0..pts.len() - 1)
+                .map(|i| {
+                    let c = (pts[i].x + pts[i + 1].x) / 2.0 + o[i].0;
+                    let w = dim_text_width(pts[i + 1].x - pts[i].x, h);
+                    (c - w / 2.0, c + w / 2.0)
+                })
+                .collect();
+            for a in 0..iv.len() {
+                for b in a + 1..iv.len() {
+                    assert!(iv[a].1 <= iv[b].0 || iv[b].1 <= iv[a].0, "{a} {b}: {iv:?}");
+                }
+            }
+            assert!(iv[5].0 >= pts[6].x, "„1.20“ rechts neben dem Segment: {iv:?}");
+            assert!(iv[6].0 > iv[5].1 && iv[6].1 <= pts[7].x, "„3.00“ in seinem Segment: {iv:?}");
+        }
+        // Kein Platz, auch nicht durch Wegrücken (Nachbarn zu kurz): unter die Linie statt in die Wand; an der Nordkette
+        // (Zahl schon aussen) die Zeile darüber.
+        let mut x = 0.0;
+        let tight: Vec<Vec2> = std::iter::once(v(0.0, 0.0))
+            .chain([1.5, 1.5, 1.5, 1.5, 1.2, 1.5, 1.5, 1.5, 1.5].into_iter().map(|l| {
+                x += l;
+                v(x, 0.0)
+            }))
+            .collect();
+        let south = dim_auto_offsets(&tight, h, -1.0);
+        assert_eq!(south[4], (0.0, dim_text_below(h)), "{south:?}");
+        assert_eq!(dim_auto_offsets(&tight, h, 1.0)[4].1, dim_text_row(h));
+        // Unter der Linie: Oberkante der Zahl 0.6 h unter der Masslinie, also nicht zwischen Linie und Wand.
+        let (base, _, up, _) = dim_text_frame(tight[4], tight[5], -1.0, h);
+        let baseline = base.y + up.y * south[4].1;
+        assert!(baseline + 0.75 * h < -1.0, "{baseline}");
     }
 
     /// [199] Achslinie B auf der Gesamtmass-Zahl (komplex UG Ost, „19.24“ / „4.37“): senkrechte Achse quert die Masslinie,
@@ -3015,9 +3113,9 @@ mod tests {
         assert!(axis_cross_strips(&[bare], 0.5, (0.0, -3.2), (1.0, 0.0), 20.0, 0.1).is_empty());
         // Mit der Zahl daneben: Masszahl weicht aus.
         let pts = [v(0.0, 0.0), v(20.0, 0.0)];
-        let o = dim_auto_offsets_marks(&pts, 0.35, &[], &[(4.9, 5.1)]);
+        let o = dim_auto_offsets_marks(&pts, 0.35, &[], &[(4.9, 5.1)], 1.0);
         assert_eq!(o, vec![(0.0, 0.0)], "Zahl in der Mitte (10) liegt nicht auf der Achse");
-        let o = dim_auto_offsets_marks(&pts, 0.35, &[], &[(9.9, 10.1)]);
+        let o = dim_auto_offsets_marks(&pts, 0.35, &[], &[(9.9, 10.1)], 1.0);
         assert!(o[0].0.abs() > 0.1);
     }
 
@@ -3176,10 +3274,10 @@ mod tests {
         let p = project(serde_json::json!({ "drawingLevels": [
             {"id": "eg", "name": "EG", "kind": "floor", "visible": true, "locked": false, "floorHeight": 3, "cutHeight": 1, "baseElevation": 0},
             {"id": "og", "name": "OG", "kind": "floor", "visible": true, "locked": false, "floorHeight": 3, "cutHeight": 1, "baseElevation": 3}] }));
-        let out = level_markers(&p, [0.0, 0.0, 10.0, 6.0]);
+        let out = level_markers(&p, [0.0, 0.0, 10.0, 6.0], 100.0);
         // je Höhe (0, 3, 6): Bezugslinie, Dreieck, Zahl
         assert_eq!(out.len(), 9);
-        assert!(level_markers(&p, [0.0, 0.0, 0.0, 6.0]).is_empty());
+        assert!(level_markers(&p, [0.0, 0.0, 0.0, 6.0], 100.0).is_empty());
     }
 
     /// [199] Oberste Kote am Gebauten: Achsraster (Stummel, Blase), Bäume und Gelände über/neben dem Haus zählen nicht.
@@ -3250,7 +3348,7 @@ mod tests {
     fn kotentext_endet_vor_dem_gebauten() {
         let p = project(serde_json::json!({ "referenceElevationMasl": 441.3, "drawingLevels": [
             {"id": "eg", "name": "EG", "kind": "floor", "visible": true, "locked": false, "floorHeight": 3, "baseElevation": 0, "zeroLevel": true}] }));
-        let out = level_markers(&p, [0.0, -1.0, 10.0, 3.0]);
+        let out = level_markers(&p, [0.0, -1.0, 10.0, 3.0], 100.0);
         let mut right = f64::NEG_INFINITY;
         for q in &out {
             if let Primitive::DrawingText { at, text, height_m, .. } = q {
@@ -3261,8 +3359,27 @@ mod tests {
         // Kurze Koten bleiben am gewohnten Abstand (1.2 m).
         let p2 = project(serde_json::json!({ "drawingLevels": [
             {"id": "eg", "name": "EG", "kind": "floor", "visible": true, "locked": false, "floorHeight": 3, "baseElevation": 0}] }));
-        let tri = level_markers(&p2, [0.0, -1.0, 10.0, 3.0]).into_iter().find_map(|q| if let Primitive::Polygon { pts, .. } = q { Some(pts[0].x) } else { None });
+        let tri = level_markers(&p2, [0.0, -1.0, 10.0, 3.0], 100.0).into_iter().find_map(|q| if let Primitive::Polygon { pts, .. } = q { Some(pts[0].x) } else { None });
         assert_eq!(tri, Some(-1.2));
+    }
+
+    /// [208] Abgabe-Review: Kotenschrift in der Ansicht 1:200 unter 1 mm. Koten in Papiergrösse wie das 2D-Element
+    /// `kote`: 2 mm Schrift bei 1:100, 1:200 und 1:50; der Abstand zum Gebauten wächst mit.
+    #[test]
+    fn hoehenkoten_in_papiergroesse() {
+        let p = project(serde_json::json!({ "drawingLevels": [
+            {"id": "eg", "name": "EG", "kind": "floor", "visible": true, "locked": false, "floorHeight": 3, "baseElevation": 0}] }));
+        for scale in [50.0, 100.0, 200.0] {
+            let out = level_markers(&p, [0.0, -1.0, 10.0, 3.0], scale);
+            let hs: Vec<f64> = out.iter().filter_map(|q| if let Primitive::DrawingText { height_m, .. } = q { Some(*height_m) } else { None }).collect();
+            assert!(!hs.is_empty());
+            for h in &hs {
+                let paper_mm = h / scale * 1000.0;
+                assert!((paper_mm - 2.0).abs() < 1e-9, "1:{scale}: {paper_mm} mm");
+            }
+            let tri = out.iter().find_map(|q| if let Primitive::Polygon { pts, .. } = q { Some(pts[0].x) } else { None });
+            assert_eq!(tri, Some(-1.2 * scale / 100.0), "1:{scale}");
+        }
     }
 
     /// [131] Untergeschoss unter ±0.00: negative Kote; mit `referenceElevationMasl` trägt ±0.00 die Meereshöhe.
@@ -3271,7 +3388,7 @@ mod tests {
         let p = project(serde_json::json!({ "referenceElevationMasl": 512.4, "drawingLevels": [
             {"id": "ug", "name": "UG", "kind": "floor", "visible": true, "locked": false, "floorHeight": 2.8, "baseElevation": -2.8},
             {"id": "eg", "name": "EG", "kind": "floor", "visible": true, "locked": false, "floorHeight": 3, "baseElevation": 0, "zeroLevel": true}] }));
-        let texts: Vec<String> = level_markers(&p, [0.0, -3.0, 10.0, 3.0])
+        let texts: Vec<String> = level_markers(&p, [0.0, -3.0, 10.0, 3.0], 100.0)
             .into_iter()
             .filter_map(|q| if let Primitive::DrawingText { text, .. } = q { Some(text) } else { None })
             .collect();

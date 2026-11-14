@@ -332,10 +332,11 @@ pub fn run_bin(p: &Project, name: &str, args: &[f64], text: &str) -> Result<Vec<
             let c = domains::Ctx::new(p, &a);
             buf_of(|sink| drawings::emit(&c, &d, drawings::Attrs::of(&c, &d), &d.geom, false, args[0], sink, 0))
         }
-        // Automatische Höhenkoten im Schnitt/in der Ansicht für das Ausmass `[minX, minY, maxX, maxY]`.
-        ("levelMarkers", 4) => {
+        // Automatische Höhenkoten im Schnitt/in der Ansicht für das Ausmass `[minX, minY, maxX, maxY]`, [208] dazu
+        // die Massstabszahl (fehlt = 1:100).
+        ("levelMarkers", 4 | 5) => {
             let mut w = crate::plan::buf::Writer::new(false);
-            w.group(&drawings::level_markers(p, [args[0], args[1], args[2], args[3]]));
+            w.group(&drawings::level_markers(p, [args[0], args[1], args[2], args[3]], args.get(4).copied().unwrap_or(100.0)));
             Ok(w.finish())
         }
         // Umriss-Linien der 3D-Auswahl (`highlight3d.rs`): `text` = JSON der ids je Art + `rgb`; Antwort f32-LE.

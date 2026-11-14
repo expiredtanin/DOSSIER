@@ -1051,3 +1051,80 @@ fn gaubenwange_in_der_seitenansicht() {
         assert!(matches!(top, Some(Primitive::Polygon { fill, .. }) if fill == "#d9d4cc"), "{kind}: Wange fehlt: {top:?}");
     }
 }
+
+/// [208] Abgabe-Review „Ansichten: keine Terrain-/Bodenlinie": ohne Geländenetz liegt die Bodenlinie kräftig auf ±0.00 und
+/// läuft beidseits über das Gebäude hinaus (10 mm Papier, mindestens 2 m); was darunter liegt, deckt eine weisse Fläche.
+/// Auf der Klasse „Gelände" (02): ausgeblendet ⇒ ohne Bodenlinie.
+#[test]
+fn bodenlinie_auf_null_mit_ueberstand() {
+    let mut p = sample();
+    // EG-Wände reichen 0.4 m unter ±0.00 (Sockel): die Bodenlinie bleibt auf ±0.00, nicht an der Unterkante.
+    for w in p.walls.iter_mut().filter(|w| w.floor_id == "eg") {
+        w.bottom = Some(VerticalAnchor::Floor { floor_id: "eg".into(), offset: Some(-0.4) });
+    }
+    let l = p.drawing_levels.iter().find(|l| l.id == "ansicht-sued").unwrap();
+    let level = LevelSpec::from_json(&serde_json::to_value(l).unwrap());
+    let ground = |p: &Project, vis: &Visibility, scale: f64| {
+        let (prims, _) = elevation_primitives(p, &level, false, false, vis, scale).unwrap().unwrap();
+        // Ausmass des Gezeichneten (ohne Bodenlinie und Deckfläche), Unterkante der Wände.
+        let built = prims
+            .iter()
+            .filter_map(|q| match q {
+                Primitive::Polygon { pts, fill, stroke, .. } if !(fill == "#ffffff" && stroke == "none") => Some(pts.clone()),
+                Primitive::Line { a, b, cls, .. } if cls != "elevation-ground" => Some(vec![*a, *b]),
+                _ => None,
+            })
+            .flatten()
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), q| (a.min(q.x), b.max(q.x)));
+        let bottom = prims.iter().filter_map(|q| match q { Primitive::Polygon { wall_id: Some(_), pts, .. } => Some(pts.clone()), _ => None }).flatten().fold(f64::INFINITY, |c, q| c.min(q.y));
+        let built = (built.0, built.1, bottom);
+        let line = prims.iter().find_map(|q| match q {
+            Primitive::Line { a, b, cls, weight_mm, .. } if cls == "elevation-ground" => Some((*a, *b, *weight_mm)),
+            _ => None,
+        });
+        let masked = prims.iter().any(|q| matches!(q, Primitive::Polygon { fill, stroke, wall_id: None, context_object_id: None, pts, .. } if fill == "#ffffff" && stroke == "none" && pts.iter().all(|v| v.y <= 1e-9)));
+        (built, line, masked)
+    };
+    let ((x0, x1, bottom), line, masked) = ground(&p, &Visibility::default(), 100.0);
+    assert!(bottom < -0.3, "Wände unter ±0.00: {bottom}");
+    let (a, b, w) = line.expect("Bodenlinie");
+    assert!(a.y.abs() < 1e-9 && b.y.abs() < 1e-9, "auf ±0.00: {a:?} {b:?}");
+    assert!((x0 - a.x.min(b.x) - 2.0).abs() < 1e-6 && (a.x.max(b.x) - x1 - 2.0).abs() < 1e-6, "Überstand 2 m: {a:?} {b:?} ({x0}, {x1})");
+    assert!(w > SILHOUETTE_MM, "kräftig: {w}");
+    assert!(masked, "Sockel unter dem Boden gedeckt");
+    // 1:500: Überstand 10 mm Papier = 5 m.
+    let (_, line, _) = ground(&p, &Visibility::default(), 500.0);
+    let (a, b, _) = line.unwrap();
+    assert!((x0 - a.x.min(b.x) - 5.0).abs() < 1e-6 && (a.x.max(b.x) - x1 - 5.0).abs() < 1e-6);
+    // Klasse „Gelände" ausgeblendet ⇒ keine Bodenlinie; fehlt die Klasse im Projekt, bleibt sie.
+    let hidden = Visibility { has_vis: true, invisible: ["02".to_string()].into_iter().collect(), ..Default::default() };
+    assert!(ground(&p, &hidden, 100.0).1.is_some());
+    p.layers.push(serde_json::from_value(serde_json::json!({"code": "02", "name": "Gelände", "color": "#808080", "lw": 0.13, "visible": true, "locked": false})).unwrap());
+    assert!(ground(&p, &hidden, 100.0).1.is_none());
+    assert!(ground(&p, &Visibility::default(), 100.0).1.is_some());
+}
+
+/// [208] Abgabe-Review „Fenster in der Ansicht nur grau" (Wettbewerb 1:200): bei 1:200 Rahmen und Glas (und Teilung) wie
+/// „mittel", ohne die gestrichelten Öffnungssymbole; erst die Übersicht ab 1:500 zeigt nur den gefüllten Umriss (grob).
+#[test]
+fn ansicht_fenster_bei_1_200_mit_rahmen() {
+    let p = sample();
+    let l = p.drawing_levels.iter().find(|l| l.id == "ansicht-sued").unwrap();
+    let level = LevelSpec::from_json(&serde_json::to_value(l).unwrap());
+    let windows: Vec<String> = p.openings.iter().flatten().filter(|o| o.kind == ElementKind::Window).map(|o| o.id.clone()).collect();
+    assert!(!windows.is_empty());
+    let parts = |scale: f64| {
+        let (prims, _) = elevation_primitives(&p, &level, false, false, &Visibility::default(), scale).unwrap().unwrap();
+        let polys = prims.iter().filter(|q| matches!(q, Primitive::Polygon { opening_id: Some(id), .. } if windows.contains(id))).count();
+        let symbols = prims.iter().filter(|q| matches!(q, Primitive::Line { cls, .. } if cls == "elevation-opening-symbol")).count();
+        (polys, symbols)
+    };
+    let (p100, s100) = parts(100.0);
+    let (p200, s200) = parts(200.0);
+    let (p500, _) = parts(500.0);
+    let n = windows.len();
+    assert!(p500 <= n, "1:500 grob: ein Umriss je Fenster ({p500} für {n})");
+    assert!(p200 > p500, "1:200 mit Rahmen und Glas ({p200} / 1:500 {p500})");
+    assert_eq!(p200, p100, "1:200 wie 1:100 (mittel)");
+    assert!(s100 > 0 && s200 == 0, "Öffnungssymbole nur ab 1:100 ({s100} / {s200})");
+}

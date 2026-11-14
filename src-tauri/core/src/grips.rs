@@ -1917,7 +1917,7 @@ pub fn drawing_vertices(g: &Value, scale: f64) -> Option<Vec<(f64, f64)>> {
             let h = dim_height(g, scale);
             let offs = arr(field(g, "textOffsetsMm"));
             // [172] Ohne gespeicherte Abweichung steht der Griff dort, wo der Plan die Zahl zeichnet.
-            let auto = crate::plan::drawings::dim_auto_offsets(&out[..n].iter().map(|q| crate::model::Vec2 { x: q.0, y: q.1 }).collect::<Vec<_>>(), h);
+            let auto = crate::plan::drawings::dim_auto_offsets(&out[..n].iter().map(|q| crate::model::Vec2 { x: q.0, y: q.1 }).collect::<Vec<_>>(), h, offset);
             for i in 0..n.saturating_sub(1) {
                 let stored = match offs.get(i) {
                     Some(o) if truthy(Some(o)) => (num_of(field(o, "along")), num_of(field(o, "perp"))),

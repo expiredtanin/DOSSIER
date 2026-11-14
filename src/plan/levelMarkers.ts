@@ -38,11 +38,13 @@ export function levelMarksEnabled(
 /**
  * Kote-Primitive für eine Zeichnung mit den Grenzen `bounds` (u, Höhe). Höhen
  * ausserhalb der Zeichnung (Geschosse, die der Schnitt nicht zeigt) entfallen.
+ * [208] `scaleDenominator`: Koten in Papiergrösse (2 mm Schrift; Standard 1:100).
  */
 export function levelMarkerPrimitives(
   project: Project,
   bounds: { minX: number; minY: number; maxX: number; maxY: number },
   primitives?: readonly Primitive[],
+  scaleDenominator = 100,
 ): Primitive[] {
   if (!(bounds.maxX > bounds.minX) || !(bounds.maxY > bounds.minY)) return [];
   const minX = primitives ? Math.max(bounds.minX, builtMinX(project, primitives)) : bounds.minX;
@@ -50,7 +52,7 @@ export function levelMarkerPrimitives(
   // komplex: „+13.13" 1.4 m über dem First), über Bäume und Texte.
   const top = primitives ? Math.min(bounds.maxY, builtMaxY(project, primitives)) : bounds.maxY;
   const maxY = top > bounds.minY ? top : bounds.maxY;
-  return decodePlanBuf(documentFor(project).queryBin("levelMarkers", [minX < bounds.maxX ? minX : bounds.minX, bounds.minY, bounds.maxX, maxY])).prims;
+  return decodePlanBuf(documentFor(project).queryBin("levelMarkers", [minX < bounds.maxX ? minX : bounds.minX, bounds.minY, bounds.maxX, maxY, scaleDenominator])).prims;
 }
 
 // [171] Gelände (Schnittfläche, Profil- und Grundlinie) zählt nicht zur Lage der Koten: sie stehen neben dem
