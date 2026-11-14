@@ -1,5 +1,5 @@
 # Abhängigkeiten
-node_modules/
+node_modules
 
 # Build-Ausgaben (npm run build*, vite build --outDir dist-test, build:cli)
 dist/
