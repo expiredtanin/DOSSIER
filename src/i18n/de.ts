@@ -1174,6 +1174,8 @@ export const de = {
   "editor.color": "Farbe",
   "editor.pen": "Stift",
   "editor.lineWeight": "Linienstärke",
+  "editor.fill": "Füllung",
+  "editor.fillNone": "keine",
   "editor.hatch": "Schraffur",
   "editor.floorHeight": "Geschosshöhe",
   "editor.cutHeight": "Schnitthöhe",

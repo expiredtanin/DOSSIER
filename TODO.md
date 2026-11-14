@@ -309,8 +309,9 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   liegen ebenfalls über 1.0 m): nicht zu bemassen hätte auch diese Bad-Fenster aus den EG/OG-Ketten genommen — Entscheid nötig (hell auf
   schwarz zeichnen oder Schnitthöhe/Bemassung); Wettbewerb: Geschosse ohne Vorlage, Schatten kommt vom eingeschalteten Sonnenstand
   (`sunStudy.show`), unverändert; Wettbewerb-Schnitt ohne Gelände: Nachbar bleibt (hellgrau) weit neben dem Haus; `levelMarkers.ts`-Doppelspur
-  (braucht eine Kern-Abfrage mit Plan-Puffer als Eingabe); Stempel „Schlafen" DG 80 %; Klassen-Füllung im Klassen-Dialog noch nicht
-  editierbar. · M
+  (braucht eine Kern-Abfrage mit Plan-Puffer als Eingabe); Stempel „Schlafen" DG 80 %. **14.11. (spät):** Klassen-Füllung im Klassen-Dialog
+  editierbar (Farbwähler + „keine", Inline-Editor und macOS-Ebenenfenster; Ziehen = ein Undo-Schritt; Test `categoryFill.test.ts`); nur vitest/tsc,
+  nicht in der Tauri-App angesehen. · M
 - Fachplaner-Austausch: DXF/DWG je Geschoss/Schnitt/Ansicht ([200]), IFC mit Räumen/Psets ([201]); Rundreise in Archicad/Revit einmal
   real prüfen ([C9]).
 - ◐ **[255]** Baurecht-Nachweis: Ausnützung gegen Modell als Tabelle (14.11.). Kern `site_proof.rs` (Abfrage `siteProof`) stellt die Vorgaben

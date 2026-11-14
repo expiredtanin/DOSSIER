@@ -863,7 +863,11 @@ export function createProjectSlice(
       }),
 
     patchCategory: (code, patch) =>
-      applyChange((p) => fieldOps(p, "layers", patchCategoryByCode(p.layers, code, patch))),
+      applyChange(
+        (p) => fieldOps(p, "layers", patchCategoryByCode(p.layers, code, patch)),
+        // [256] Ziehen im Farbwähler der Klassen-Füllung = ein Undo-Schritt.
+        Object.keys(patch).length === 1 && "fill" in patch ? `layer-fill:${code}` : undefined,
+      ),
 
     addSubCategory: (parentCode) =>
       applyChange((p) => {
