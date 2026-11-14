@@ -1,7 +1,7 @@
 // [249] Reine Logik der Dialog-Fokushülle: Tab-Falle, Enter-Felder, Hintergrund-Kürzel-Sperre, Walk-Sperre im Dialog.
 // Ohne DOM (Umgebung node): Elemente sind Attrappen mit `closest`/`tagName`.
 import { describe, expect, it } from "vitest";
-import { enterTriggersPrimary, trapTarget } from "./modalFocus";
+import { enterConfirmsDialog, enterTriggersPrimary, trapTarget } from "./modalFocus";
 import { isInModalDialog } from "../state/modalScope";
 import { walkKeyAllowed } from "../viewport/walk";
 
@@ -54,5 +54,19 @@ describe("Hintergrund-Kürzel im modalen Dialog", () => {
     const k = { ctrlKey: false, metaKey: false };
     expect(walkKeyAllowed(k, el("BUTTON", true))).toBe(false);
     expect(walkKeyAllowed(k, el("BUTTON", false))).toBe(true);
+  });
+});
+
+describe("enterConfirmsDialog ([251])", () => {
+  const inside = (tag: string, withinButton = false) =>
+    ({ tagName: tag, closest: (sel: string) => (withinButton && sel.includes("button") ? {} : null) }) as unknown as Element;
+  it("Eingabe-, Auswahlfeld und Dokument bestätigen", () => {
+    expect(enterConfirmsDialog(inside("INPUT"))).toBe(true);
+    expect(enterConfirmsDialog(inside("SELECT"))).toBe(true);
+    expect(enterConfirmsDialog(null)).toBe(true);
+  });
+  it("Knöpfe (auch Kinder darin) behalten ihre eigene Aktion", () => {
+    expect(enterConfirmsDialog(inside("BUTTON", true))).toBe(false);
+    expect(enterConfirmsDialog(inside("SPAN", true))).toBe(false);
   });
 });

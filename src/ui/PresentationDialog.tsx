@@ -5,7 +5,7 @@
 
 import { memo, useCallback, useEffect, useState } from "react";
 import { t } from "../i18n";
-import { useModalFocus } from "./modalFocus";
+import { enterConfirmsDialog, useModalFocus } from "./modalFocus";
 import { PRESENTATION_SCALES, levelHasContent, presentationDefaults, type PresentationOptions } from "../core";
 import type { LayoutOrientation, LayoutPaperFormat } from "../model/types";
 import { PAPER_FORMAT_GROUPS } from "../model/layoutModel";
@@ -44,7 +44,7 @@ export const PresentationDialogHost = memo(function PresentationDialogHost({
       // Enter aus der Befehlszeile (die den Dialog eben geöffnet hat) bestätigt nicht.
       if (e.target instanceof Element && e.target.closest("input, textarea") && !e.target.closest(".presentation-dialog")) return;
       if (e.key === "Escape") close();
-      else if (e.key === "Enter") confirm();
+      else if (e.key === "Enter" && enterConfirmsDialog(e.target)) confirm();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);

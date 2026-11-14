@@ -486,3 +486,121 @@ test("Neues Layout und Präsentationsplan: Fokus im Dialog, beschriftete Auswahl
   await page.keyboard.press("Escape");
   await expect(pres).toHaveCount(0);
 });
+
+// [251] Enter löst die Hauptaktion nur im Eingabefeld/Auswahlfeld oder auf dem Hauptknopf aus; auf „Abbrechen“ gilt dessen Aktion.
+for (const kind of ["Layout", "Masterlayout"] as const) {
+  test(`Neues ${kind}: Enter auf „Abbrechen“ erstellt nichts, Enter auf „Erstellen“ erstellt`, async ({ page }) => {
+    test.setTimeout(150_000);
+    await startWithHooks(page);
+    await openSample(page);
+    await openTab(page, "Mappe");
+    const opener = page.getByRole("button", { name: kind === "Layout" ? "Layout erstellen" : "Masterlayout erstellen" }).first();
+    const dlg = page.getByRole("dialog", { name: kind === "Layout" ? "Neues Layout" : "Neues Masterlayout" });
+    const count = () => page.evaluate(() => window.__dossierTest!.counts().coreJson);
+    const before = await count();
+    // Enter auf „Abbrechen“: schliesst, erstellt nichts.
+    await opener.click();
+    await expect(dlg).toBeVisible();
+    await dlg.getByRole("button", { name: "Abbrechen" }).focus();
+    await page.keyboard.press("Enter");
+    await expect(dlg).toHaveCount(0);
+    await page.waitForTimeout(300);
+    expect(await count()).toBe(before);
+    // Enter auf dem Schliessen-Kreuz: schliesst ebenfalls ohne Erstellen.
+    await opener.click();
+    await dlg.getByRole("button", { name: "Schliessen" }).focus();
+    await page.keyboard.press("Enter");
+    await expect(dlg).toHaveCount(0);
+    await page.waitForTimeout(300);
+    expect(await count()).toBe(before);
+    // Enter auf dem Hauptknopf erstellt.
+    await opener.click();
+    await dlg.getByRole("button", { name: "Erstellen", exact: true }).focus();
+    await page.keyboard.press("Enter");
+    await expect(dlg).toHaveCount(0);
+    await expect.poll(count).not.toBe(before);
+  });
+}
+
+test("Präsentationsplan: Enter auf „Abbrechen“ erstellt nichts", async ({ page }) => {
+  test.setTimeout(150_000);
+  await startWithHooks(page);
+  await openSample(page);
+  await typeCommand(page, "praesentation");
+  const pres = page.getByRole("dialog", { name: "Präsentationsplan" });
+  await expect(pres).toBeVisible();
+  const before = await page.evaluate(() => window.__dossierTest!.counts().coreJson);
+  await pres.getByRole("button", { name: "Abbrechen" }).focus();
+  await page.keyboard.press("Enter");
+  await expect(pres).toHaveCount(0);
+  await page.waitForTimeout(300);
+  expect(await page.evaluate(() => window.__dossierTest!.counts().coreJson)).toBe(before);
+});
+
+// Dialoge ohne Datei erreichbar: Eingabe-Dialog (Kopien-Anzahl), Über, Standards-Update, Raumprogramm-Import (Datei aus dem Speicher), Kontext-Import.
+test("Eingabe-Dialog, Über, Standards-Update: Fokus im Dialog, Tab-Falle, Esc, Fokus zurück", async ({ page }) => {
+  test.setTimeout(150_000);
+  await startWithHooks(page);
+  await openSample(page);
+  // Über dossier: Fokus zurück zur Wortmarke.
+  const brand = page.locator(".brand-word");
+  await brand.click();
+  const about = page.getByRole("dialog", { name: "Über dossier" });
+  await expect(about).toBeVisible();
+  expect(await focusInside(about)).toBe(true);
+  await expectTrapped(page, about);
+  await page.keyboard.press("Escape");
+  await expect(about).toHaveCount(0);
+  await expect(brand).toBeFocused();
+  // Eingabe-Dialog über „N Kopien".
+  await selectAllWalls(page);
+  await typeCommand(page, "move");
+  await expect(page.locator(".cmdline-prompt")).toHaveText(/Basispunkt/);
+  await page.locator(".cmdline-option", { hasText: "N Kopien" }).click();
+  const prompt = page.getByRole("dialog", { name: "N Kopien" });
+  await expect(prompt).toBeVisible();
+  expect(await focusInside(prompt)).toBe(true);
+  await expectTrapped(page, prompt);
+  await expectNoBackgroundShortcuts(page, prompt);
+  await page.keyboard.press("Escape");
+  await expect(prompt).toHaveCount(0);
+  // Standards-Update im Ressourcen-Fenster.
+  await page.getByRole("button", { name: "Fenster", exact: true }).first().click();
+  await page.getByRole("option", { name: /Ressourcen/ }).click();
+  const upd = page.locator(".res-update-standards");
+  await upd.click();
+  const dlg = page.getByRole("dialog", { name: "Standards aktualisieren" });
+  await expect(dlg).toBeVisible();
+  expect(await focusInside(dlg)).toBe(true);
+  await expectTrapped(page, dlg);
+  await page.keyboard.press("Escape");
+  await expect(dlg).toHaveCount(0);
+  // Esc schliesst hier zugleich das Ressourcen-Fenster dahinter (bestehendes Verhalten): der Fokus kehrt nur zurück, wenn der Auslöser bleibt.
+  if (await upd.count()) await expect(upd).toBeFocused();
+});
+
+test("Raumprogramm-Import und Kontext-Import: Fokus im Dialog, Tab-Falle, Esc, Fokus zurück", async ({ page }) => {
+  test.setTimeout(150_000);
+  await startWithHooks(page);
+  await openSample(page);
+  await openTab(page, "Flächenbilanz");
+  const csv = "Raum;Fläche [m²];Anzahl;Flächenart;Gruppe\nWohnen;17,0;1;HNF;Wohnen\nBad;6,0;2;NNF;Nebenräume\n";
+  await page.getByTestId("program-import-file").setInputFiles({ name: "programm.csv", mimeType: "text/csv", buffer: Buffer.from(csv, "utf8") });
+  const rp = page.getByRole("dialog", { name: "Raumprogramm importieren" });
+  await expect(rp).toBeVisible();
+  expect(await focusInside(rp)).toBe(true);
+  await expectTrapped(page, rp);
+  await expectNoBackgroundShortcuts(page, rp);
+  await page.keyboard.press("Escape");
+  await expect(rp).toHaveCount(0);
+  await openTab(page, "Gelände");
+  const opener = page.getByRole("button", { name: "Standort importieren" });
+  await opener.click();
+  const ctx = page.getByRole("dialog").filter({ has: page.locator(".imp-head") }).last();
+  await expect(ctx).toBeVisible();
+  expect(await focusInside(ctx)).toBe(true);
+  await expectTrapped(page, ctx);
+  await page.keyboard.press("Escape");
+  await expect(ctx).toHaveCount(0);
+  await expect(opener).toBeFocused();
+});

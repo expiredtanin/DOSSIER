@@ -43,6 +43,17 @@ export function enterTriggersPrimary(el: Element | null): boolean {
   return type === "text" || type === "number" || type === "search" || type === "email" || type === "url";
 }
 
+/**
+ * [251] Darf ein `window`-Enter-Listener eines Dialogs die Hauptaktion auslösen? Nicht, wenn der Fokus auf einem Knopf,
+ * Link, mehrzeiligen Text oder Aufklapper liegt: dort gilt Enters eigene Aktion (Knopf = Klick, auch beim Hauptknopf, dessen
+ * Klick die Aktion schon auslöst). Eingabefelder, Auswahlfelder, Haken und das Dokument lösen aus.
+ */
+export function enterConfirmsDialog(target: EventTarget | null): boolean {
+  const el = target as Element | null;
+  if (!el || typeof el.closest !== "function") return true;
+  return !el.closest("button, a, textarea, summary, [role='button'], [contenteditable='true']");
+}
+
 export interface ModalFocusOptions {
   /** Esc schliesst; läuft gerade eine Aktion, die Esc nicht verlassen soll, `undefined` lassen. */
   onEscape?: () => void;
