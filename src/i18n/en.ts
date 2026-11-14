@@ -3806,6 +3806,7 @@ export const en: Record<TranslationKey, string> = {
   "history.op.reorder": "Reorder {what}",
   "history.op.setField": "Change {what}",
   "history.cmd.arc": "Arc",
+  "history.cmd.contextToTerrain": "Set on terrain",
   "history.cmd.autodim": "Auto dimensions",
   "history.cmd.bezier": "Bezier curve",
   "history.cmd.block": "Insert block",

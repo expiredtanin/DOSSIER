@@ -63,6 +63,9 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   buildPlanDxf,
+  buildContextCadastreDxf,
+  buildContextContoursDxf,
+  buildContextBuildingsObj,
   buildPlanDwg,
   buildPlanDxfBinary,
   loadFileio,
@@ -77,6 +80,7 @@ import {
   sharedDocument,
   projectToWorldCoords,
   computeSection,
+  prepareSection,
   exportIfcSpf,
   exportObj,
   exportMtl,
@@ -541,6 +545,32 @@ function importDoc(project: Project) {
   return doc;
 }
 
+/** Geparste DXF/DWG/PDF-Zeichnung wie die App übernehmen („Layer als Kategorien", ein Undo-Schritt im Kern). */
+function importParsedDrawing(base: Project, parsed: ReturnType<typeof parseDxf>, fileName: string): Project {
+  const level = base.drawingLevels.find((l) => l.kind === "floor");
+  if (!level) return fail("kein Geschoss für den Import");
+  // Wie die App („Layer als Kategorien", ein Undo-Schritt im Kern): fehlende Layer als Unterkategorien einer
+  // neuen Elternkategorie, Linienstile der PDF-Strichmuster, Meshes als Kontext.
+  const r = importDoc(base).importDrawing(
+    base,
+    parsed.src,
+    {
+      target: { kind: "existing", levelId: level.id },
+      categoryMode: "byLayer",
+      activeCategoryCode: base.layers[0].code,
+      importMeshes: true,
+      terrainContours: (parsed.summary.terrainContours ?? 0) > 0,
+      terrainName: "Höhenlinien",
+      parentName: `Import ${fileName}`,
+      dashStyleTemplate: "PDF-Strich {pattern} mm",
+      geoLabel: fileName,
+    },
+    Date.now(),
+  );
+  if ("problems" in r) return fail(`${fileName}: ${r.problems.join("; ")}`);
+  return r.project;
+}
+
 /** Liest Eingabe nach Endung in ein Projekt: obp direkt, dxf/dwg als 2D-Zeichnung + Meshes, ifc als Kontext-Meshes (`--elements`: Bauteile). */
 async function importAny(path: string, args: Args): Promise<Project> {
   const ext = extOf(path);
@@ -568,28 +598,7 @@ async function importAny(path: string, args: Args): Promise<Project> {
     } catch (e) {
       return fail(`${path}: ${e instanceof Error ? e.message : String(e)}`);
     }
-    const level = base.drawingLevels.find((l) => l.kind === "floor");
-    if (!level) return fail("kein Geschoss für den Import");
-    // Wie die App („Layer als Kategorien", ein Undo-Schritt im Kern): fehlende Layer als Unterkategorien einer
-    // neuen Elternkategorie, Linienstile der PDF-Strichmuster, Meshes als Kontext.
-    const r = importDoc(base).importDrawing(
-      base,
-      parsed.src,
-      {
-        target: { kind: "existing", levelId: level.id },
-        categoryMode: "byLayer",
-        activeCategoryCode: base.layers[0].code,
-        importMeshes: true,
-        terrainContours: (parsed.summary.terrainContours ?? 0) > 0,
-        terrainName: "Höhenlinien",
-        parentName: `Import ${fileName}`,
-        dashStyleTemplate: "PDF-Strich {pattern} mm",
-        geoLabel: fileName,
-      },
-      Date.now(),
-    );
-    if ("problems" in r) return fail(`${path}: ${r.problems.join("; ")}`);
-    return r.project;
+    return importParsedDrawing(base, parsed, fileName);
   }
   return fail(`Eingabeformat nicht unterstützt: .${ext} (obp, dxf, dwg, ifc, pdf, obj, stl, gltf, glb, ply)`);
 }
@@ -853,9 +862,58 @@ async function runBlend(project: Project, args: Args): Promise<number> {
   }
 }
 
+/**
+ * [257] Synthetischer Wettbewerbs-Kontext (`bench --context [--footprints N --buildings N --triangles N]`): Kataster-DXF,
+ * Höhenlinien-DXF, Gebäudenetze (OBJ) wie die App importieren (Parser, Kern-Import, Aufs-Gelände-Setzen), Zeiten in `rows`.
+ */
+async function importSyntheticContext(base: Project, args: Args, rows: Array<[string, number]>): Promise<Project> {
+  const num = (k: string): number | undefined => (args.flags.has(k) ? Number(args.flags.get(k)) : undefined);
+  const opts = { footprints: num("footprints"), buildings: num("buildings"), triangles: num("triangles"), extent: num("extent") };
+  await loadFileio();
+  const enc = new TextEncoder();
+  const lap = async <T,>(name: string, f: () => T | Promise<T>): Promise<T> => {
+    const t0 = performance.now();
+    const r = await f();
+    rows.push([name, performance.now() - t0]);
+    return r;
+  };
+  let cur = base;
+  const dxfs: Array<[string, string]> = [["Kataster.dxf", buildContextCadastreDxf(opts)], ["Hoehenlinien.dxf", buildContextContoursDxf(opts)]];
+  for (const [name, text] of dxfs) {
+    const bytes = enc.encode(text);
+    const parsed = await lap(`Import ${name}: lesen (${(bytes.length / 1024).toFixed(0)} KB)`, () => parseDxf(bytes));
+    cur = await lap(`Import ${name}: in den Kern`, () => importParsedDrawing(cur, parsed, name));
+  }
+  // Gelände aus den Höhenlinien erzeugen (Befehl „terrain", wie in der App), danach die Gebäudenetze.
+  const tops = await lap("Gelände aus Höhenlinien", () => importDoc(cur).cmdOps({ cmd: "terrain" }));
+  if (tops.length) {
+    const c = importDoc(cur).commit(cur, tops, undefined, Date.now());
+    if ("project" in c) cur = c.project;
+  }
+  const obj = enc.encode(buildContextBuildingsObj(opts));
+  const read = await lap(`Import Gebäudenetz: lesen (${(obj.length / 1024).toFixed(0)} KB)`, () => readMesh(obj, "Gebaeude.obj", { unit: "m", up: "z", files: [] }));
+  const r = await lap("Import Gebäudenetz: in den Kern", () => importDoc(cur).importMesh(cur, read.flat, { fileName: "Gebaeude.obj", placement: "original" }, Date.now()));
+  if ("problems" in r) return fail(`Gebaeude.obj: ${r.problems.join("; ")}`);
+  cur = r.project;
+  const ids = (cur.context ?? []).filter((o) => o.type === "importedMesh").map((o) => o.id);
+  // Wie die App (`groundContextObjects`): der Befehl wird im Kern gerechnet und gleich angewendet, die Ops kehren nur
+  // als Spiegel-Nachführung zurück.
+  const g = await lap(`Aufs Gelände setzen (${ids.length} Netze)`, () => importDoc(cur).commitCmd(cur, { cmd: "contextToTerrain", ids }, undefined, Date.now()));
+  if ("project" in g) cur = g.project;
+  return cur;
+}
+
 /** Führt EINEN Befehl gegen ein geladenes Projekt aus (Rückgabe = Exit-Code). */
 async function execute(project: Project, file: string, command: string, rest: string[], args: Args): Promise<number> {
   const scale = Number(args.flags.get("scale") ?? 100);
+  // [257] `bench --context`: vorher synthetische Kontext-Importe (Kataster, Höhenlinien, Gebäudenetze) ins Projekt laden.
+  const contextRows: Array<[string, number]> = [];
+  if (command === "bench" && args.flags.has("context")) {
+    project = await importSyntheticContext(project, args, contextRows);
+    // `--save-obp datei`: das Projekt mit Kontext für native Messungen (`src-tauri/core/tests/bench257.rs`) ablegen.
+    const keep = args.flags.get("save-obp");
+    if (keep) writeFileSync(keep, serializeProject(project));
+  }
   // Alle Ebenen-Codes inkl. verschachtelter (z. B. „10 Situation" unter „05 Kontext").
   const allCodes = new Set<string>();
   const collectCodes = (ls: Project["layers"]): void => {
@@ -1262,7 +1320,7 @@ async function execute(project: Project, file: string, command: string, rest: st
       const floor = findLevel(project, ["floor"], undefined);
       const sec = findLevel(project, ["section"], undefined);
       const elev = findLevel(project, ["elevation"], undefined);
-      const rows: Array<[string, number]> = [];
+      const rows: Array<[string, number]> = [...contextRows];
       process.stdout.write(`${project.name}: ${project.walls.length} Wände, ${(project.openings?.length ?? 0)} Öffnungen, ${(project.rooms?.length ?? 0)} Räume, ${project.stairs?.length ?? 0} Treppen\n`);
       const time = async (name: string, f: () => unknown | Promise<unknown>, n = runs) => {
         await f(); // Aufwärmen (füllt Caches wie roofGeometry)
@@ -1306,6 +1364,14 @@ async function execute(project: Project, file: string, command: string, rest: st
         const world = projectToWorldCoords(project);
         await loadFileio();
         await time("DXF (1 Geschoss)", () => buildPlanDxf(generatePlan(world, floor.id, allCodes), world, { scaleDenominator: scale, levelId: floor.id }), Math.max(3, runs / 2));
+      }
+      // [257] Speichern/Laden mit Kontext: Projektdatei schreiben, lesen, ins Dokument laden (wie „Öffnen").
+      {
+        const text = serializeProject(project);
+        await time(`Speichern (serializeProject, ${(text.length / 1048576).toFixed(1)} MB)`, () => serializeProject(project), Math.max(2, runs / 2));
+        await time("Laden: parseProjectFile", () => parseProjectFile(text), Math.max(2, runs / 2));
+        const parsed = parseProjectFile(text);
+        if (parsed.ok) await time("Laden: ins Dokument", () => sharedDocument().load(parsed.project), Math.max(2, runs / 2));
       }
       await loadFileio();
       await time("IFC (Modell)", () => exportIfcSpf(project, {}), Math.max(2, runs / 5));
@@ -1353,6 +1419,19 @@ async function execute(project: Project, file: string, command: string, rest: st
                 });
               }
             }
+          }
+          // [257] Schnitt und Ansicht nach einer Änderung am eigenen Haus (der Kontext bleibt gleich).
+          for (const [label, lvl] of [["Schnitt", sec], ["Ansicht", elev]] as const) {
+            if (!lvl || !movers[0]) continue;
+            lap(`${label} nach Wand verschieben`, () => {
+              const w = cur.walls.find((x) => x.id === movers[0].id)!;
+              const r = doc.commit(cur, patchItem(cur, "walls", w.id, { start: { x: w.start.x + 0.01, y: w.start.y }, end: { x: w.end.x + 0.01, y: w.end.y } }), undefined, Date.now());
+              if ("project" in r) cur = r.project;
+              if (lvl === sec) {
+                const o = prepareSection(cur, lvl);
+                if (o) generateSectionPlan(o, false, { visibleCodes: allCodes });
+              } else generateElevationPlan(cur, lvl);
+            }, Math.max(2, runs / 2));
           }
           // [58] Inkrementelle 3D-Ableitung (Cache im Dokument, Änderungs-Antworten): eine Änderung, dann das ganze
           // 3D-Modell neu abfragen; zum Vergleich die volle Abfrage ohne Cache-Weg in TS.

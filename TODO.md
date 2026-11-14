@@ -10,7 +10,7 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   stehen im Archiv („Bewusst nicht übernommen“).
 - **Grösse** (eine Person mit Agenten): S ≤ 1 Tag · M ≤ 1 Woche · L ≤ 1 Monat · XL > 1 Monat.
   Steht keine Grösse im Archiv, ist sie hier geschätzt.
-- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 256);
+- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 257);
   nie eine ID wiederverwenden oder umnummerieren. Präfix-IDs (`[K]`, `[G]`, `[T]`, `[B]`, `[C]`) bleiben.
 - **Pro Punkt:** was fehlt · wo im Code · Grösse. Höchstens ein bis drei Sätze je Punkt;
   Messwerte und Befunde gehören in den Commit.
@@ -326,6 +326,23 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
 - Nur noch Fehler aus dem Referenz-Ablauf; Leistung mit grossen Kontext-Importen; keine neuen Funktionen.
 - Release 1.0.0: Tag, signierte Pakete, Release-Notes (ehrlich: was nicht geht), Download-Seite.
 
+- ◐ **[257]** Leistung mit grossen Kontext-Importen (14.11., Phase 4). Messung: `dossier-cli :beispiel bench --context [--footprints N --buildings N --triangles N --extent m] [--save-obp datei]`
+  importiert synthetischen Wettbewerbs-Kontext (`model/sampleContext.ts`, deterministisch, keine echten Daten: Kataster-DXF mit Parzellen/Umrissen/Strassen,
+  Höhenlinien-DXF → Gelände, Gebäudenetze als OBJ, Standard 300 Gebäude/100k Dreiecke/900 Umrisse) wie die App (Parser, Kern-Import, „Gelände erzeugen“, „Aufs
+  Gelände setzen“) und misst Import, Grundriss 1:100/1:50, Schnitt, Ansicht, 3D, Undo/Redo und Ableitungen nach einer Wandänderung, Speichern/Laden; Test
+  `cli/contextBench.test.ts` (kleine Grösse, Schwellen ≥ 10-fach, fängt Quadratisches). Hotspots (Profil Node-CPU + native Zeitmessung): (1) `hlr::intersection_edges`
+  prüfte in Ansichten alle Flächen-Paare im Raster, auch zwischen Hunderten Kontextgebäuden, die sich nicht berühren (Ansicht 300k Dreiecke: 380 ms) — jetzt
+  Vorfilter über die 3D-Hüllen der Körper (`near_solids`), Ausgabe unverändert; (2) „Aufs Gelände setzen“: je Gebäude Raster × Dreiecke und je Gebäude das Gelände neu
+  abgefragt/gehasht (`context_ground.rs`: Raster über die Dreiecks-Hüllen, `Grounder` einmal je Befehl, Id-Tabelle statt linearer Suche) und die Ops reisten als
+  JSON zweimal durch JS (`groundContextObjects` nimmt jetzt `commitCmd`). Messwerte (Median von 3 Läufen, Container unter Last, ms; vorher → nachher): 100k Dreiecke:
+  Aufs Gelände setzen 830 → 340, Ansicht 435 → 354, Ansicht nach Wandänderung 539 → 438; 300k Dreiecke: Ansicht 1630 → 1258, nach Wandänderung 1580 → 1191, Gelände
+  setzen (Rust) 1197 → 704. Unverändert: Plan/Schnitt/Ansicht/3D/Projektdatei byte-gleich (CLI-Ausgaben vor/nach), Goldens. Kein Neurechnen des Kontexts bei
+  Änderungen am eigenen Haus: Undo/Redo 0.1 ms, 3D nach Wandänderung ≈ 4 ms (100k) / 15 ms (300k), Grundriss ohne Gelände 3 ms. **Offen:** `HLR` (feature_edges, Sichtbarkeit)
+  bleibt linear in den Kontext-Flächen (Schnitt 120–170 ms bei 100k, 620 ms bei 300k, jede Änderung rechnet es neu: Teil-Cache des Kontexts wäre der nächste Schritt);
+  `Silhouette::of` (Raster) und `mesh_faces_needed` ≈ 100–230 ms bei 300k; Grundriss mit Gelände nach Änderung am Fussabdruck 50–60 ms (Höhenlinien neu beschnitten);
+  DXF-Export eines Geschosses mit Gelände 2.7 s (`arc_fit::try_ell`, quadratisch je Linienzug, nur Export); „Gelände aus Höhenlinien“ 250–300 ms (5000 Punkte);
+  Netz-Import/Ops tragen ganze Netze als JSON (300k: Import 550 ms + Gelände annehmen 650 ms); synthetische Fassaden sind feiner unterteilt als echte swissBUILDINGS3D;
+  Mac/Metal nicht gemessen (Anzeige-Engines), keine echten Daten, Tauri-App nicht geprüft. · M
 - ◐ **[212]** Eigener GPU-Pathtracer in `render3d` als progressive Vorschau im Viewport (Entscheid Maintainer 12.11.: „beides“ —
   eigener Pathtracer für die schnelle Vorschau, Cycles [215] für Endbilder): BVH, PBR-Materialien (diffus/glänzend/Glas), Himmel + Sonne
   aus dem Sonnenstand, Entrauscher (Intel Open Image Denoise, Apache-2.0), WebGPU + Metal, läuft auch im Browser. Nach 1.0. · L

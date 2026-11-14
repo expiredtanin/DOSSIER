@@ -797,8 +797,12 @@ fn intersection_edges(faces: &[Face], prep: &[Option<Prep>], covered: &[bool], o
         let c = ((x - lo[k]) / (hi[k] - lo[k]) * side as f64).floor();
         if c.is_nan() { 0 } else { c.clamp(0.0, (side - 1) as f64) as usize }
     };
+    let near = near_solids(faces, &cand, &bb, opts.tol);
     let mut grid: Vec<Vec<u32>> = vec![Vec::new(); side * side];
     for (k, b) in bb.iter().enumerate() {
+        if !near[k] {
+            continue;
+        }
         for y in cell(b[1] - opts.tol, 1)..=cell(b[4] + opts.tol, 1) {
             for x in cell(b[0] - opts.tol, 0)..=cell(b[3] + opts.tol, 0) {
                 grid[y * side + x].push(k as u32);
@@ -830,6 +834,38 @@ fn intersection_edges(faces: &[Face], prep: &[Option<Prep>], covered: &[bool], o
         }
     }
     out
+}
+
+/// [257] Welche Kandidaten gehören zu einem Körper, dessen 3D-Hülle die Hülle eines anderen Körpers berührt? Nur
+/// deren Flächen können einander durchdringen (die Hülle des Körpers umfasst die seiner Flächen, die Paarprüfung
+/// verlangt dieselbe Überlappung): Hunderte Kontextgebäude, die einander und das eigene Haus nicht berühren, fallen
+/// so aus dem Quadrat der Zellen heraus. Sweep über die Anfänge in `x`.
+fn near_solids(faces: &[Face], cand: &[usize], bb: &[[f64; 6]], t: f64) -> Vec<bool> {
+    let mut hull: FxMap<u32, [f64; 6]> = FxMap::default();
+    for (k, &i) in cand.iter().enumerate() {
+        let b = &bb[k];
+        let h = hull.entry(faces[i].solid).or_insert([f64::INFINITY, f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY]);
+        for a in 0..3 {
+            h[a] = h[a].min(b[a]);
+            h[a + 3] = h[a + 3].max(b[a + 3]);
+        }
+    }
+    let mut order: Vec<(u32, [f64; 6])> = hull.into_iter().collect();
+    order.sort_unstable_by(|a, b| a.1[0].total_cmp(&b.1[0]).then(a.0.cmp(&b.0)));
+    let mut near: FxMap<u32, ()> = FxMap::default();
+    for (x, (sa, a)) in order.iter().enumerate() {
+        for (sb, b) in &order[x + 1..] {
+            if b[0] > a[3] + t {
+                break;
+            }
+            if a[1] > b[4] + t || b[1] > a[4] + t || a[2] > b[5] + t || b[2] > a[5] + t {
+                continue;
+            }
+            near.insert(*sa, ());
+            near.insert(*sb, ());
+        }
+    }
+    cand.iter().map(|&i| near.contains_key(&faces[i].solid)).collect()
 }
 
 /// Schnittstrecken der Flächen `a` und `b` (Umlauf-Normalen `na`, `nb`) im Innern beider.
@@ -1140,6 +1176,49 @@ mod tests {
             let s = scene(a, b);
             assert!(at(&s, 1.7) < 1e-9 && at(&s, 2.3) < 1e-9, "{a} {b}: {s:?}");
         }
+    }
+
+    /// [257] Viele Körper, die einander nicht berühren (Kontextgebäude), ändern die Durchdringungslinien der übrigen
+    /// nicht (der Vorfilter über die Hüllen der Körper lässt nur Körper mit berührender Hülle ins Paarraster).
+    #[test]
+    fn entfernte_koerper_aendern_durchdringung_nicht() {
+        let crossing = || {
+            let mut f = boxf(0.0, 4.0, 0.0, 2.0, 1.0, 2.0, 1);
+            f.iter_mut().for_each(|x| x.solid = 1);
+            let q = [[2.0, 0.7], [1.5, 1.2], [2.0, 1.7], [2.5, 1.2]];
+            for i in 0..4 {
+                let (a, b) = (q[i], q[(i + 1) % 4]);
+                let n = [-(b[1] - a[1]), 0.0, b[0] - a[0]];
+                let mut x = Face::new(vec![[a[0], 0.5, a[1]], [b[0], 0.5, b[1]], [b[0], 1.5, b[1]], [a[0], 1.5, a[1]]], n, 2);
+                x.solid = 2;
+                f.push(x);
+            }
+            let mut top = Face::new(q.iter().rev().map(|p| [p[0], 1.5, p[1]]).collect(), [0.0, 1.0, 0.0], 2);
+            let mut bot = Face::new(q.iter().map(|p| [p[0], 0.5, p[1]]).collect(), [0.0, -1.0, 0.0], 2);
+            top.solid = 2;
+            bot.solid = 2;
+            f.extend([top, bot]);
+            f
+        };
+        let mut with_far = crossing();
+        // 60 Körper nebeneinander (in u getrennt, in der Tiefe versetzt) und einer weit dahinter im selben Ausschnitt.
+        for k in 0..60u32 {
+            let mut b = boxf(10.0 + 3.0 * k as f64, 11.5 + 3.0 * k as f64, 0.0, 2.0, 1.0 + (k % 3) as f64, 2.0 + (k % 3) as f64, 10 + k);
+            b.iter_mut().for_each(|x| x.solid = 10 + k);
+            with_far.extend(b);
+        }
+        let mut behind = boxf(0.0, 4.0, 0.0, 2.0, 20.0, 21.0, 99);
+        behind.iter_mut().for_each(|x| x.solid = 99);
+        with_far.extend(behind);
+        let own = |f: &[Face]| {
+            let mut s: Vec<_> = hidden_lines(f, &opts(false)).into_iter().filter(|x| x.owner <= 2).collect();
+            s.sort_by(|a, b| (a.owner, a.a[0], a.a[1], a.b[0], a.b[1]).partial_cmp(&(b.owner, b.a[0], b.a[1], b.b[0], b.b[1])).unwrap());
+            s
+        };
+        let (alone, crowd) = (own(&crossing()), own(&with_far));
+        assert_eq!(alone, crowd);
+        // und die Durchdringung ist da (Kontrolle gegen leeres Ergebnis).
+        assert!(alone.iter().any(|x| (x.a[0] - 1.7).abs() < 1e-9 && (x.b[0] - 1.7).abs() < 1e-9), "{alone:?}");
     }
 
     /// Flächen, die sich nur auf einem Rand berühren (Wand auf Wand, Gaube bis an die Dachfläche), liefern keine

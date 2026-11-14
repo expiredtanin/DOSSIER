@@ -11,10 +11,12 @@
 import { generateTerrainFromContours, resmoothGridTerrain, type TerrainOptions } from "../model/terrain";
 import type { ContextObject, Drawing2D, Project, Vec2 } from "../model/types";
 import { isGeoBuildingMesh, type ImportedLine } from "../io/geoContext";
-import { documentFor } from "../core/document";
+import { cmdMutation, documentFor } from "../core/document";
+import { changeSink } from "./changeSink";
 import { transformOps } from "../tools/transform";
 import { addItems, fieldOps, patchItem, removeItems } from "../core/opsBuild";
 import type { CoreOp } from "../core/ops";
+import type { ProjectMutation } from "../core/opsBuild";
 import { ensureContextCategories } from "../model/contextCategories";
 import type { StoreApi } from "./store";
 
@@ -89,6 +91,7 @@ type SiteSliceDeps = {
   activeLevelId: string;
   applyChange: (ops: readonly CoreOp[] | ((p: Project) => readonly CoreOp[]), coalesceKey?: string) => void;
   groupChanges: (fn: () => void, key?: string) => void;
+  setProject: (next: ProjectMutation, coalesceKey?: string) => void;
 };
 
 export function createSiteSlice(
@@ -127,10 +130,17 @@ export function createSiteSlice(
     addContextObjects: (objs, lines) => addToContext(objs, lines),
 
     groundContextObjects: (ids) => {
-      const ops = documentFor(get().project).cmdOps({ cmd: "contextToTerrain", ids });
-      if (ops.length === 0) return false;
-      get().applyChange(ops);
-      return true;
+      // Nebenfenster: Ops rechnen und abgeben (`changeSink`); sonst [257] rechnet der Kern den Befehl und wendet ihn in
+      // einem Aufruf an (Hunderte Gebäude: die Ops – ganze Netze – reisen sonst als JSON zweimal durch JS).
+      if (changeSink()) {
+        const ops = documentFor(get().project).cmdOps({ cmd: "contextToTerrain", ids });
+        if (ops.length === 0) return false;
+        get().applyChange(ops);
+        return true;
+      }
+      const before = get().project;
+      get().setProject(cmdMutation({ cmd: "contextToTerrain", ids }));
+      return get().project !== before;
     },
 
     removeContextObject: (id) => get().applyChange((p) => removeItems(p, "context", [id])),
