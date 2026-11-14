@@ -451,13 +451,12 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   TERRAIN, Netze auf Umgebungsklassen → Proxy „Kontext", am IfcSite. Entscheid: 2D-Objektbibliothek ([253]) wird NICHT exportiert (kein
   falscher Körper, kein geometrieloses IfcFurniture). Grösse/Zeit (Linux, unter Last): komplex 1.6 MB / 2.5 s, Wettbewerb 0.9 MB / 0.5 s,
   Stress-Beispiel `sampleProjectBig` 19.8 MB / 5.8 s. **Offen:** nicht in Archicad/Revit/Solibri/BIMcollab geöffnet (Prüfzeile 13.14 in
-  `doc/RELEASE-1.0.md`); Raumhöhe = Geschosshöhe statt lichter Höhe; keine `IfcPresentationLayerAssignment`
-  (Ebenen nur als Klassifikation); IFC2x3 nur über die bestehenden Tests. **14.11. (spät):** Anbauwand OG Ost (komplex, unter dem
+  `doc/RELEASE-1.0.md`); IFC2x3 nur über die bestehenden Tests. **14.11. (spät):** Anbauwand OG Ost (komplex, unter dem
   Pultdach mit Fenster) behoben — ihre Stücke um das Fenster (je eigene Dach-Oberkante) lagen als verschweisste Schalen im Face-Set (Kanten
   3–4-fach), ifcopenshell rechnete beim Abzug 30.4 statt 7.5 m³. Jetzt der vereinigte 3D-Körper je Band (`RWall::body`, `union_bodies`), Ecken auf das 1e-6-Ausgaberaster gelegt (sonst
   blieb zwischen Nachbarbändern ein Spalt von 1e-15 m und zwei Schalen, Wettbewerb OG2 Ost), dicht nach dem Verschweissen geprüft, sonst Schalen wie bisher;
   `--known` aus der Prüfung entfernt, komplex 0 Befunde; zwei weitere Dachwände und eine Wand mit Formöffnung genauer (Abweichung NetVolume ↔
-  Geometrie 0.9 % → 0). Test `wand_unter_dem_dach_mit_fenster_als_ein_koerper`. · M
+  Geometrie 0.9 % → 0). Test `wand_unter_dem_dach_mit_fenster_als_ein_koerper`. **15.11.:** (a) Ebenen: `IfcPresentationLayerAssignment` je Klasse (`20_Wände` wie im DXF; ohne Sichtbarkeit, `IfcPresentationLayerWithStyle` verlangt in IFC4 Geometrie-Items), alle Darstellungen eines Bauteils samt Treppenteilen auf genau einer Ebene (Prüfung in `check-ifc-fachplaner.py`); (b) Raum: Körper und `Qto_SpaceBaseQuantities.Height` = lichte Höhe wie Raumbuch, `FinishCeilingHeight` und `Dossier_Qto_RoomBook.ClearHeightMean` = mittlere, `ClearHeightMin` = kleinste Höhe unter Dachschrägen, Boden an der Oberkante der Decke darunter; Test gegen `roomBook` ±1 cm. Offen: Archicad/Revit/Solibri-Sicht der Ebenen ungeprüft; Dachraum-Körper füllt die Schräge nicht aus. · M
 - ◐ **[255]** Baurecht-Nachweis: Ausnützung gegen Modell als Tabelle (14.11.). Kern `site_proof.rs` (Abfrage `siteProof`) stellt die Vorgaben
   der Parzelle den Kennzahlen gegenüber: GFZ, AZ, BMZ, ÜZ, GZ (min.), Gesamt-/Fassadenhöhe, Grundfläche ausserhalb Grenzabstand/Baulinie,
   Gebäudeprofil; je Zeile zulässig · Projekt · Reserve/Überschreitung · erfüllt, fehlende Vorgabe als „—“ (nichts erfunden), dazu Grundlagen

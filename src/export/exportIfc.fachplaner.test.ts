@@ -16,6 +16,7 @@ import { sampleProject } from "../model/sampleProject";
 import { buildComplexSampleProject } from "../model/sampleProjectComplex";
 import { buildWettbewerbSampleProject } from "../model/sampleProjectWettbewerb";
 import type { Drawing2D, Project } from "../model/types";
+import { roomBook } from "./roomBook";
 
 const hasIfcOpenShell = spawnSync("python3", ["-c", "import ifcopenshell, ifcopenshell.validate, ifcopenshell.util.shape, _pytest"]).status === 0;
 
@@ -27,7 +28,7 @@ function writeIfc(name: string, ifc: string): string {
 
 interface Check {
   problems: string[];
-  stats: Record<string, unknown> & { counts: Record<string, number>; context: number; far: number; known: string[]; map?: number[]; storeyQto?: Record<string, Record<string, number>> };
+  stats: Record<string, unknown> & { spaceHeights?: Record<string, { Height: number; FinishCeilingHeight: number; ClearHeightMin?: number; ClearHeightMean?: number }>; layers: string[]; layered: number; counts: Record<string, number>; context: number; far: number; known: string[]; map?: number[]; storeyQto?: Record<string, Record<string, number>> };
 }
 
 /** Beide Prüfskripte; liefert die Kennwerte der inhaltlichen Prüfung. */
@@ -41,6 +42,22 @@ function check(name: string, ifc: string, flags: string[]): Check {
   expect(out.problems).toEqual([]);
   expect(r.status).toBe(0);
   return out;
+}
+
+/** [259] Lichte Raumhöhe = Raumbuch ±1 cm (Height = höchste Stelle, FinishCeilingHeight/Mittel unter Schrägen), Ebenen. */
+function expectRoomHeightsAndLayers(p: Project, c: Check) {
+  const rows = roomBook(p).rows;
+  expect(rows.length).toBeGreaterThan(0);
+  for (const row of rows) {
+    const h = c.stats.spaceHeights![row.number || row.id];
+    expect(h, row.number).toBeDefined();
+    expect(Math.abs(h.Height - row.clearHeight)).toBeLessThan(0.01);
+    expect(Math.abs(h.FinishCeilingHeight - row.heightMean)).toBeLessThan(0.01);
+    expect(Math.abs(h.ClearHeightMin! - row.heightMin)).toBeLessThan(0.01);
+    expect(Math.abs(h.ClearHeightMean! - row.heightMean)).toBeLessThan(0.01);
+  }
+  expect(c.stats.layered).toBeGreaterThan(0);
+  expect(c.stats.layers.some((n) => /^20_/.test(n))).toBe(true); // Wände wie die DXF-Ebene „20_…"
 }
 
 /** Export mit festem Zeitstempel (Vergleich zweier Dateien). */
@@ -59,6 +76,7 @@ describe.skipIf(!hasIfcOpenShell)("[259] IFC für Fachplaner (ifcopenshell)", { 
     const c = check("musterhaus", exportIfcSpf(sampleProject), []);
     expect(c.stats.counts.IfcWall).toBe(sampleProject.walls.length);
     expect(c.stats.context).toBe(0);
+    expectRoomHeightsAndLayers(sampleProject, c);
   });
 
   it("Wettbewerb: georeferenziert (lokal + IfcMapConversion, ±0.00 = 441.30), Geschoss-GF mit Konstruktionsfläche", () => {
@@ -69,6 +87,7 @@ describe.skipIf(!hasIfcOpenShell)("[259] IFC für Fachplaner (ifcopenshell)", { 
     const eg = c.stats.storeyQto!.Erdgeschoss;
     expect(eg.GrossFloorArea).toBeGreaterThan(eg.NetFloorArea);
     expect(c.stats.spaces).toBe(p.rooms!.length);
+    expectRoomHeightsAndLayers(p, c);
   });
 
   it("Wettbewerb mit Kontext: Nachbargebäude am IfcSite, sonst nichts geändert", () => {
@@ -83,6 +102,7 @@ describe.skipIf(!hasIfcOpenShell)("[259] IFC für Fachplaner (ifcopenshell)", { 
     // (vereinigt) statt verschweisster Schalen — ifcopenshell zieht die Öffnung richtig ab (vorher 30.4 statt 7.5 m³).
     const k = check("komplex", exportIfcSpf(p), ["--geo"]);
     expect(k.stats.known).toEqual([]);
+    expectRoomHeightsAndLayers(p, k);
     const c = check("komplex-kontext", exportIfcSpf(p, { context: true }), ["--geo", "--context"]);
     expect(c.stats.counts.IfcGeographicElement).toBeGreaterThanOrEqual(1); // Gelände (TERRAIN)
     expect(c.stats.context).toBe(2); // Gelände + Nachbargebäude; Höhenlinien und Baugrube nicht

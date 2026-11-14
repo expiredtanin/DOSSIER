@@ -14,6 +14,10 @@ Ergänzt `scripts/validate-ifc.py` (Schema, Express-Regeln, Geometrie) um inhalt
   • Wände: IfcMaterialLayerSetUsage mit Materialnamen, Schichtsumme = Wanddicke; NetVolume ±1 % gegen die Geometrie;
     Decken: PredefinedType, NetVolume ±1 %;
   • Geschoss-Mengen: GrossFloorArea ≥ NetFloorArea;
+  • Ebenen: jedes Bauteil (Wand, Decke, Dach, Stütze, Treppe samt Teilen, Tür/Fenster, Raum) hat Darstellungen auf GENAU EINER
+    IfcPresentationLayerAssignment; Ebenennamen `Code_Bezeichnung` (wie im DXF);
+  • Räume: Height = Geometrie ±1 cm, `stats.spaceHeights` (Nummer → Height, FinishCeilingHeight, ClearHeightMin/Mean) für den
+    Vergleich mit dem Raumbuch im Test;
   • keine Objekte der 2D-Objektbibliothek als 3D-Körper (IfcFurniture/IfcSanitaryTerminal …).
 
 Aufruf: python3 scripts/check-ifc-fachplaner.py datei.ifc [--geo] [--context] [--json] [--known=GlobalId,…]
@@ -189,6 +193,16 @@ def check(path, want_geo, want_context, known=()):
         h = us.get_z(sh.geometry)
         if "Height" in q and abs(q["Height"] - h) > 0.01:
             problems.append(f"{label}: Height {q['Height']:.3f} ≠ Geometrie {h:.3f}")
+        book = ps.get("Dossier_Qto_RoomBook", {})
+        stats.setdefault("spaceHeights", {})[sp.Name] = {
+            "Height": q.get("Height"),
+            "FinishCeilingHeight": q.get("FinishCeilingHeight"),
+            "ClearHeightMin": book.get("ClearHeightMin"),
+            "ClearHeightMean": book.get("ClearHeightMean"),
+            "geometry": h,
+        }
+        if "FinishCeilingHeight" not in q:
+            problems.append(f"{label}: Qto_SpaceBaseQuantities.FinishCeilingHeight fehlt")
 
     # ── Wände: Schichten und Volumen ──
     walls = m.by_type("IfcWall")
@@ -236,6 +250,45 @@ def check(path, want_geo, want_context, known=()):
         if q and has_walls and q.get("GrossFloorArea", 0) <= q.get("NetFloorArea", 0) + 1e-6:
             problems.append(f"Geschoss {st.Name}: GrossFloorArea = NetFloorArea trotz Wänden (Konstruktionsfläche fehlt)")
         stats.setdefault("storeyQto", {})[st.Name] = {k: v for k, v in q.items() if k != "id"}
+
+    # ── Ebenen (IfcPresentationLayerAssignment) ──
+    layer_of = {}  # Darstellung -> Ebenen
+    for la in m.by_type("IfcPresentationLayerAssignment"):
+        for item in la.AssignedItems:
+            layer_of.setdefault(item.id(), []).append(la.Name)
+    stats["layers"] = sorted({la.Name for la in m.by_type("IfcPresentationLayerAssignment")})
+
+    def parts(e):
+        yield e
+        for r in getattr(e, "IsDecomposedBy", None) or []:
+            for c in r.RelatedObjects:
+                yield from parts(c)
+
+    stats["layered"] = 0
+    for cls in ("IfcWall", "IfcSlab", "IfcRoof", "IfcColumn", "IfcStair", "IfcDoor", "IfcWindow", "IfcSpace"):
+        for e in m.by_type(cls):
+            if cls == "IfcGeographicElement":
+                continue
+            names = set()
+            n_reps = 0
+            for part in parts(e):
+                if part.Representation is None:
+                    continue
+                for rep in part.Representation.Representations:
+                    n_reps += 1
+                    ls = layer_of.get(rep.id(), [])
+                    if len(ls) != 1:
+                        problems.append(f"{cls} {e.Name!r} #{e.id()}: Darstellung {rep.RepresentationIdentifier} auf {len(ls)} Ebenen")
+                    names.update(ls)
+            if len(names) > 1:
+                problems.append(f"{cls} {e.Name!r} #{e.id()}: Darstellungen auf mehreren Ebenen {sorted(names)}")
+            if n_reps and names:
+                stats["layered"] += 1
+    if stats["layered"] == 0 and m.by_type("IfcWall"):
+        problems.append("keine Ebenen (IfcPresentationLayerAssignment) im Modell")
+    for la in m.by_type("IfcPresentationLayerAssignment"):
+        if not la.Name or "_" not in la.Name and not la.Name.isalnum():
+            problems.append(f"Ebene {la.Name!r}: unerwarteter Name")
 
     # ── Pset_*Common ──
     for cls, pset in (("IfcWall", "Pset_WallCommon"), ("IfcSlab", "Pset_SlabCommon"), ("IfcDoor", "Pset_DoorCommon"), ("IfcWindow", "Pset_WindowCommon")):

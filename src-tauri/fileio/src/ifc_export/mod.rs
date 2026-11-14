@@ -81,7 +81,8 @@
 //     Mit mindestens einem Lauf/Podest/Geländer ist die IfcStair selbst ohne Darstellung und fasst Läufe,
 //     Podest und Geländer per IfcRelAggregates zusammen (nur die Treppe liegt im Geschoss).
 //   EXTRUSION   = 6, structure, id, PTS, z_rel, depth
-//   SPACE       = 7, structure, id, name, long_name, external (0/1), height, PTS, net_area, gross_area,
+//   SPACE       = 7, structure, id, name, long_name, external (0/1), height (lichte Höhe), z_rel (Oberkante Boden über Geschoss),
+//                 ceiling_height (FinishCeilingHeight, mittlere lichte Höhe), PTS, net_area, gross_area,
 //                 sia_category, PSETS
 //   END_SPACES  = 8   (bündelt die Räume je Geschoss zu IfcRelAggregates)
 //   ROOF        = 9, structure, id, name, predefined (Text), TYPEREF, PSETS, MESH
@@ -91,6 +92,10 @@
 //                 Profil; EIN IfcColumn mit n Extrusionen in einer SweptSolid-Darstellung, Placement auf dem tiefsten
 //                 Abschnitt; Material und Materialzuordnung wie COLUMN; die Mengen stehen fertig in PSETS)
 //   END_COLUMNS = 11  (Materialzuordnung der Stützen)
+//   LAYERS      = 25, n_refs, (key, layer_name) x n_refs   ([259]) IfcPresentationLayerAssignment je Ebene (Name =
+//                 "Code_Bezeichnung" wie im DXF); alle Darstellungen des Bauteils `key` (wie bei CLASSIFICATION, samt
+//                 aggregierter Teile) liegen auf genau einer Ebene. (IFC4 erlaubt bei IfcPresentationLayerWithStyle nur
+//                 Geometrie-Items; Sichtbarkeit/Sperre der Klasse wird daher nicht geschrieben.)
 //   CLASSIFICATION = 12, name, source, edition (Text, leer = keine), n_refs, (key, code, ref_name) × n_refs
 //                 ([B5], 28.10.) Ein Klassifikationssystem (IfcClassification) mit je Code einer
 //                 IfcClassificationReference und EINER IfcRelAssociatesClassification für alle Bauteile mit
@@ -167,6 +172,7 @@ pub const REC_GRID: f64 = 18.0;
 pub const REC_GUIDS: f64 = 23.0;
 pub const REC_TREE: f64 = 19.0;
 pub const REC_CONTEXT: f64 = 24.0;
+pub const REC_LAYERS: f64 = 25.0;
 pub const REC_COLUMN_PIECES: f64 = 20.0;
 pub const REC_CEILING_ARC: f64 = 21.0;
 pub const REC_SPACE_ARC: f64 = 22.0;
@@ -202,6 +208,7 @@ fn rec_name(code: f64) -> &'static str {
         c if c == REC_GUIDS => "GUIDS",
         c if c == REC_TREE => "TREE",
         c if c == REC_CONTEXT => "CONTEXT",
+        c if c == REC_LAYERS => "LAYERS",
         c if c == REC_COLUMN_PIECES => "COLUMN_PIECES",
         _ => "?",
     }
@@ -219,6 +226,80 @@ fn compound_angle(deg: f64, limit: f64) -> String {
     let sg = if neg { -1 } else { 1 };
     format!("({},{},{},{})", sg * d, sg * m, sg * s, sg * micro)
 }
+
+/// Zerlegt die Parameter einer Entity-Zeile `#n=TYPE(a,b,...);` auf oberster Ebene (Klammern und Strings beachtet).
+fn split_args(line: &str) -> (String, Vec<String>) {
+    let Some(open) = line.find('(') else { return (String::new(), vec![]) };
+    let ty = line[line.find('=').map_or(0, |i| i + 1)..open].to_string();
+    let body = line[open + 1..].trim_end_matches(';').trim_end_matches(')');
+    let (mut out, mut cur, mut depth, mut quote) = (Vec::new(), String::new(), 0i32, false);
+    for ch in body.chars() {
+        match ch {
+            '\'' => {
+                quote = !quote;
+                cur.push(ch);
+            }
+            '(' if !quote => {
+                depth += 1;
+                cur.push(ch);
+            }
+            ')' if !quote => {
+                depth -= 1;
+                cur.push(ch);
+            }
+            ',' if !quote && depth == 0 => out.push(std::mem::take(&mut cur)),
+            _ => cur.push(ch),
+        }
+    }
+    out.push(cur);
+    (ty, out)
+}
+
+fn ref_ids(arg: &str) -> Vec<usize> {
+    arg.split('#').skip(1).filter_map(|t| t.split(|c: char| !c.is_ascii_digit()).next()?.parse().ok()).collect()
+}
+
+/// IfcRelAggregates: Eltern-Entitaet -> Teile.
+fn aggregate_children(lines: &[String]) -> HashMap<usize, Vec<usize>> {
+    let mut out: HashMap<usize, Vec<usize>> = HashMap::new();
+    for l in lines.iter().filter(|l| l.contains("=IFCRELAGGREGATES(")) {
+        let (_, a) = split_args(l);
+        if let (Some(parent), Some(kids)) = (a.get(4).and_then(|x| ref_ids(x).first().copied()), a.get(5)) {
+            out.entry(parent).or_default().extend(ref_ids(kids));
+        }
+    }
+    out
+}
+
+/// Alle IfcShapeRepresentation eines Bauteils samt seiner aggregierten Teile (Treppenlaeufe ...).
+fn shape_reps_of(lines: &[String], agg: &HashMap<usize, Vec<usize>>, entity: usize) -> Vec<usize> {
+    let mut out = Vec::new();
+    let mut todo = vec![entity];
+    let mut guard = 0;
+    while let Some(e) = todo.pop() {
+        guard += 1;
+        if guard > 10_000 {
+            break;
+        }
+        if let Some(l) = lines.get(e.wrapping_sub(1)) {
+            let (_, a) = split_args(l);
+            // Product: GlobalId, OwnerHistory, Name, Description, ObjectType, ObjectPlacement, Representation
+            if let Some(def) = a.get(6).and_then(|x| ref_ids(x).first().copied()) {
+                if let Some(dl) = lines.get(def.wrapping_sub(1)) {
+                    let (ty, da) = split_args(dl);
+                    if ty == "IFCPRODUCTDEFINITIONSHAPE" {
+                        out.extend(da.get(2).map(|x| ref_ids(x)).unwrap_or_default());
+                    }
+                }
+            }
+        }
+        if let Some(kids) = agg.get(&e) {
+            todo.extend(kids.iter().copied());
+        }
+    }
+    out
+}
+
 
 /// Baut aus dem flachen Puffer die STEP-Datei (IFC4 oder IFC2x3, je nach META). Fehler als Text.
 pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
@@ -892,16 +973,18 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
                 let long_name = r.string()?;
                 let external = r.flag()?;
                 let height = r.f()?;
+                let z_rel = r.f()?;
+                let ceiling_height = r.f()?;
                 let pts = if arcs { r.bpts()? } else { r.pts()?.into_iter().map(|p| (p.0, p.1, 0.0)).collect() };
                 let net = r.f()?;
                 let gross = r.f()?;
                 let sia = r.string()?;
                 let psets = r.psets()?;
                 let (placement, shape) = if arcs {
-                    w.emit_box_product_voids_arcs(&pts, &[], 0.0, height, w.placement_of(structure))
+                    w.emit_box_product_voids_arcs(&pts, &[], z_rel, height, w.placement_of(structure))
                 } else {
                     let plain: Vec<(f64, f64)> = pts.iter().map(|p| (p.0, p.1)).collect();
-                    w.emit_box_product(&plain, 0.0, height, w.placement_of(structure))
+                    w.emit_box_product(&plain, z_rel, height, w.placement_of(structure))
                 };
                 let g = w.gid(&format!("space/{id}"));
                 let space = w.add(
@@ -924,6 +1007,7 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
                 let q_net = w.emit_quantity("IFCQUANTITYAREA", "NetFloorArea", net);
                 let q_gross = w.emit_quantity("IFCQUANTITYAREA", "GrossFloorArea", gross);
                 let q_height = w.emit_quantity("IFCQUANTITYLENGTH", "Height", height);
+                let q_ceiling = w.emit_quantity("IFCQUANTITYLENGTH", "FinishCeilingHeight", ceiling_height);
                 let g = w.gid(&format!("space/{id}/qto"));
                 let qto = w.add(
                     "IFCELEMENTQUANTITY",
@@ -931,7 +1015,7 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
                         "{g},#{},{},$,$,{}",
                         w.owner_history,
                         ifc_string("Qto_SpaceBaseQuantities"),
-                        refs(&[q_net, q_gross, q_height])
+                        refs(&[q_net, q_gross, q_height, q_ceiling])
                     ),
                 );
                 let g = w.gid(&format!("space/{id}/qto-rel"));
@@ -1121,6 +1205,31 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
                             format!("{g},#{},$,$,{},#{reference}", w.owner_history, refs(&ids)),
                         );
                     }
+                }
+            }
+            c if c == REC_LAYERS => {
+                let n = r.idx()?;
+                // Je Ebene in Reihenfolge des ersten Auftretens: (Name, Flags, Darstellungen); jede Darstellung nur einmal.
+                let mut by_layer: Vec<(String, Vec<usize>)> = Vec::new();
+                let mut seen: std::collections::HashSet<usize> = std::collections::HashSet::new();
+                let agg = aggregate_children(&w.lines);
+                for _ in 0..n {
+                    let key = r.string()?;
+                    let name = r.string()?;
+                    let Some(&entity) = w.elements.get(&key) else { continue };
+                    let reps: Vec<usize> = shape_reps_of(&w.lines, &agg, entity).into_iter().filter(|x| seen.insert(*x)).collect();
+                    if reps.is_empty() {
+                        continue;
+                    }
+                    if let Some((_, v)) = by_layer.iter_mut().find(|(c, _)| *c == name) {
+                        v.extend(reps);
+                    } else {
+                        by_layer.push((name, reps));
+                    }
+                }
+                for (name, items) in by_layer {
+                    // IfcPresentationLayerAssignment: Name, Description, AssignedItems, Identifier
+                    w.add("IFCPRESENTATIONLAYERASSIGNMENT", format!("{},$,{},$", ifc_string(&name), refs(&items)));
                 }
             }
             c if c == REC_ZONE => {

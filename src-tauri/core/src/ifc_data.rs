@@ -57,6 +57,7 @@ const REC_CEILING_ARC: f64 = 21.0;
 const REC_SPACE_ARC: f64 = 22.0;
 const REC_GUIDS: f64 = 23.0;
 const REC_CONTEXT: f64 = 24.0;
+const REC_LAYERS: f64 = 25.0;
 
 /// Toleranz des Kerns (`wall_bands.rs::EPS`) für „Öffnung trifft Band".
 const BAND_EPS: f64 = 1e-4;
@@ -1521,12 +1522,23 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
 
     // ── Räume → IfcSpace (im Geschoss aggregiert), Basismengen, SIA-416-Kategorie ──
     let mut room_areas: Vec<(String, String, SiaCategory, f64)> = Vec::new();
+    let mut roof_cache: Vec<(String, crate::room_book::RoofPlanes)> = Vec::new();
     for room in p.rooms.as_deref().unwrap_or(&[]) {
         if room.boundary.len() < 3 {
             continue;
         }
         let structure = structure_of(&room.floor_id);
-        let height = floors.iter().find(|fl| fl.id == room.floor_id).and_then(|fl| fl.floor_height).filter(|h| *h != 0.0 && !h.is_nan() && *h > 0.0).unwrap_or(2.5);
+        // [259] Lichte Höhe wie im Raumbuch ([158]): Oberkante Boden bis Unterkante Decke darüber (`clear_range`); das
+        // Geschossmass bleibt am IfcBuildingStorey. Unter Dachschrägen: Höhe = höchste Stelle (Körper), FinishCeilingHeight
+        // = mittlere lichte Höhe, kleinste und mittlere Höhe zusätzlich in `Dossier_RoomBook`.
+        let (range_lo, range_hi) = crate::room_book::clear_range(&p, room);
+        let height = range_hi - range_lo;
+        let storey_base_z = floors.iter().find(|fl| fl.id == room.floor_id).and_then(|fl| fl.base_elevation).filter(|v| v.is_finite()).unwrap_or(0.0);
+        let z_rel = range_lo - storey_base_z;
+        if !roof_cache.iter().any(|x| x.0 == room.floor_id) {
+            roof_cache.push((room.floor_id.clone(), crate::room_book::roof_planes(&p, &room.floor_id)));
+        }
+        let roofs = &roof_cache.iter().find(|x| x.0 == room.floor_id).unwrap().1;
         let external = room.sia_category == SiaCategory::AGF;
         let area = crate::ring_arc::evaluate(&room.boundary, room.boundary_bulge.as_deref(), 0.0);
         room_areas.push((room.id.clone(), room.floor_id.clone(), room.sia_category, area.net));
@@ -1538,8 +1550,9 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
         }
         common.push(Prop::Bool("IsExternal", external));
         let (id, name, long) = (f.str(&room.id), f.str(number.unwrap_or(&room.id)), f.str(&room.name));
+        let bands = crate::room_book::height_bands(&p, room, roofs, area.net);
         let arcs = crate::ring_arc::has_arcs(room.boundary_bulge.as_deref(), room.boundary.len());
-        f.nums(&[if arcs { REC_SPACE_ARC } else { REC_SPACE }, structure, id, name, long, if external { 1.0 } else { 0.0 }, height]);
+        f.nums(&[if arcs { REC_SPACE_ARC } else { REC_SPACE }, structure, id, name, long, if external { 1.0 } else { 0.0 }, height, z_rel, bands.mean]);
         if arcs {
             w_bpts(&mut f, &room.boundary, room.boundary_bulge.as_deref());
         } else {
@@ -1571,6 +1584,11 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
         if !book.is_empty() {
             psets.push(Pset { name: "Dossier_RoomBook", props: book });
         }
+        // [259] Lichte Höhe unter Dachschrägen: kleinste und mittlere Höhe (Raumbuch [158]) als eigene Menge.
+        psets.push(Pset {
+            name: "Dossier_Qto_RoomBook",
+            props: vec![Prop::Qty("ClearHeightMin", QtyKind::Length, bands.min), Prop::Qty("ClearHeightMean", QtyKind::Length, bands.mean)],
+        });
         w_psets(&mut f, &psets);
     }
     f.num(REC_END_SPACES);
@@ -1874,6 +1892,25 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
         let refs: Vec<(String, String, String)> =
             classified.iter().filter_map(|(key, _, code)| layer_classification(&p, code).map(|(c, n)| (key.clone(), c, n))).collect();
         w_classification(&mut f, ("Dossier-Ebenen", "Dossier", ""), &refs);
+    }
+    // [259] Ebenen als IfcPresentationLayerAssignment (immer; Name wie die DXF-Ebene `Code_Bezeichnung`).
+    let layered: Vec<(&String, String)> = classified
+        .iter()
+        .filter_map(|(key, _, code)| {
+            let code = js_trim(code);
+            if code.is_empty() {
+                return None;
+            }
+            let name = p.layer_category(code).map_or_else(|| code.to_string(), |l| format!("{}_{}", l.code, l.name));
+            Some((key, name))
+        })
+        .collect();
+    if !layered.is_empty() {
+        f.nums(&[REC_LAYERS, layered.len() as f64]);
+        for (key, name) in &layered {
+            let (a, b) = (f.str(key), f.str(name));
+            f.nums(&[a, b]);
+        }
     }
     Ok(f)
 }
@@ -2265,7 +2302,7 @@ mod tests {
         p = sample();
         p.walls[0].wall_type_id = "fehlt".into();
         let f = ifc_export_data(&p, &IfcOptions::default()).unwrap();
-        assert_eq!(f.nums.last(), Some(&REC_END_COLUMNS));
+        assert!(f.nums.contains(&REC_END_COLUMNS));
     }
 
     #[test]
@@ -2352,6 +2389,25 @@ mod tests {
         // Hebeschiebetür behält das Rahmenband des Typs.
         p.door_types = Some(vec![DoorType { id: "dt".into(), kind: DoorTypeKind::Hebeschiebe, frame_depth: Some(0.16), ..Default::default() }]);
         assert_eq!(fill_params(&p, &opening(ElementKind::Door, Some("dt"))).frame_depth, Some(0.16));
+    }
+
+    /// [259] Ebenen im IFC (Datensatz LAYERS, Name wie die DXF-Ebene) und lichte Raumhöhe (Datensatz SPACE).
+    #[test]
+    fn ebenen_datensatz_und_lichte_raumhoehe() {
+        let p = sample();
+        let f = ifc_export_data(&p, &IfcOptions::default()).unwrap();
+        let at = f.nums.iter().rposition(|v| *v == REC_LAYERS).expect("LAYERS");
+        assert!(f.nums[at + 1] > 0.0);
+        let name = f.strings[f.nums[at + 3] as usize].as_str();
+        assert!(name.contains('_') || name.chars().all(|c| c.is_ascii_digit()), "{name}");
+        // SPACE: height, z_rel, mittlere Höhe hinter `external`.
+        let room = &p.rooms.as_ref().unwrap()[0];
+        let at = (0..f.nums.len() - 9)
+            .find(|&i| (f.nums[i] == REC_SPACE || f.nums[i] == REC_SPACE_ARC) && f.strings.get(f.nums[i + 2] as usize) == Some(&room.id))
+            .expect("SPACE");
+        let (h, z, mean) = (f.nums[at + 6], f.nums[at + 7], f.nums[at + 8]);
+        let (lo, hi) = crate::room_book::clear_range(&p, room);
+        assert!((h - (hi - lo)).abs() < 1e-9 && mean > 0.0 && mean <= h + 1e-9, "{h} {z} {mean}");
     }
 
     #[test]
