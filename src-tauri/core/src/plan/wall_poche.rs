@@ -1112,7 +1112,7 @@ mod tests {
             });
             let c = core.unwrap();
             let mut ends = [c[0].x, c[3].x];
-            ends.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            ends.sort_by(|a, b| a.total_cmp(b));
             assert!((c[0].y - merge).abs() < 1e-9 && (c[3].y - merge).abs() < 1e-9, "{deg}°");
             assert!((ends[0] - xb0).abs() < 1e-9 && (ends[1] - xb1).abs() < 1e-9, "{deg}° {ends:?} {xb0} {xb1}");
             // Fugen beidseits des Kerns laufen bis zur Rückgrat-Fläche (Kern gegen Nah-Putz), die

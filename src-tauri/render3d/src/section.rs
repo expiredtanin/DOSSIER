@@ -516,7 +516,7 @@ fn footprint_u_intervals(plane: &SectionPlane, footprint: &[Point2]) -> Vec<(f32
             crossings.push(u_of([px, py]));
         }
     }
-    crossings.sort_by(|x, y| x.partial_cmp(y).unwrap());
+    crossings.sort_by(|x, y| x.total_cmp(y));
     crossings.dedup_by(|x, y| (*x - *y).abs() < eps);
 
     let mut out = Vec::new();
@@ -755,7 +755,7 @@ fn intersect_ranges(a: Option<(f32, f32)>, b: Option<(f32, f32)>) -> Option<(f32
 /// disjunkten Liste.
 fn merge_intervals(mut ivs: Vec<(f32, f32)>) -> Vec<(f32, f32)> {
     ivs.retain(|(s, e)| *e - *s > MIN_SPAN);
-    ivs.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+    ivs.sort_by(|a, b| a.0.total_cmp(&b.0));
     let mut out: Vec<(f32, f32)> = Vec::new();
     for (s, e) in ivs {
         if let Some(last) = out.last_mut() {

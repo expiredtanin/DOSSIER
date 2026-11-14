@@ -536,7 +536,7 @@ mod tests {
             }
         }
         for (_, mut v) in rows {
-            v.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+            v.sort_by(|a, b| a.0.total_cmp(&b.0));
             for w in v.windows(2) {
                 assert!(w[0].1 <= w[1].0, "Überlappung {:?}", w);
             }
