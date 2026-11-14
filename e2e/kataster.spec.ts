@@ -52,6 +52,25 @@ async function clickModel(page: Page, dx: number, dy: number): Promise<void> {
   await page.mouse.click(p.x, p.y);
 }
 
+/**
+ * Element am Modellpunkt wählen und warten, bis die Objekt-Info es zeigt („Breite“-Feld). Ein Klick direkt nach dem
+ * Import kann ins Leere gehen (Plan-Puffer/Ansicht noch nicht fertig, unter Last: viewBox ändert sich zwischen
+ * Umrechnung und Klick) — dann wird nach Festschreiben der Ansicht erneut geklickt, bis die Auswahl steht.
+ */
+async function selectAt(page: Page, dx: number, dy: number): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        if ((await widthField(page).count()) > 0) return true;
+        await settledViewBox(page);
+        await clickModel(page, dx, dy);
+        return (await widthField(page).count()) > 0;
+      },
+      { message: `Objekt-Info zeigt das Element bei ${dx}/${dy}`, intervals: [200, 400, 800], timeout: 20_000 },
+    )
+    .toBe(true);
+}
+
 /** Abstand (px) des nächsten gezeichneten Griffs zum Bildschirmort des Modellpunkts. */
 async function gripOffset(page: Page, dx: number, dy: number): Promise<number> {
   const want = await screenOf(page, dx, dy);
@@ -176,7 +195,7 @@ test("Kataster: einzeln gewähltes Element mit über 600 Stützpunkten bekommt G
   const text = (await readFile(KATASTER_DXF, "utf8")).replace(/0\nENDSEC\n0\nEOF\n?$/, `${wald}\n0\nENDSEC\n0\nEOF\n`);
   await importDxf(page, "kataster-wald.dxf", text);
 
-  await clickModel(page, 140 + 20, 30); // Stützpunkt k = 0 des Waldrands
+  await selectAt(page, 140 + 20, 30); // Stützpunkt k = 0 des Waldrands
   await expect(widthField(page)).toHaveValue(/^4\d\.\d{3}$/);
   const grips = page.locator(".plan-grip:not(.plan-grip-insert)");
   await expect.poll(() => grips.count()).toBeGreaterThan(50);
