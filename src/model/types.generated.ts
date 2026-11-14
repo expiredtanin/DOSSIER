@@ -2462,6 +2462,11 @@ export type ModelViewWalls = {
   reveals?: boolean;
   /** Schnittflächen ab 1:100 schraffiert statt schwarz (die Ebene geht vor; Basis: schwarz). */
   cutHatch?: boolean;
+  /**
+   * [256] Öffnungen über/unter der Schnittebene in geschlossener Wand: der Teil auf schwarzer Schnittfläche hell
+   * (weiss) statt dunkel, damit das strichpunktierte Symbol lesbar bleibt (Basis: ja).
+   */
+  contrastOnSolid?: boolean;
 };
 
 /** [173] Fenster in der Modelldarstellung (fehlt ⇒ wie Basis). */

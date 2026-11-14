@@ -1350,6 +1350,7 @@ export const de = {
   "resources.modelViews.opt.walls.thinLayerMm": "Dünne Schichten zusammenfassen unter",
   "resources.modelViews.opt.walls.reveals": "Schichteinzug",
   "resources.modelViews.opt.walls.cutHatch": "Schnittflächen ab 1:100 schraffiert",
+  "resources.modelViews.opt.walls.contrastOnSolid": "Öffnungen über/unter Schnitt hell auf schwarzer Wand",
   "resources.modelViews.opt.slabs.floorFinish": "Bodenbelag",
   "resources.modelViews.opt.sectionMarks.style": "Markentyp der Schnitte",
   "resources.modelViews.val.arrow": "Pfeil",
