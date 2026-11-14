@@ -524,6 +524,10 @@ pub fn faces(rings: &[Vec<P2>], speeds: &[f64], budget: Option<usize>) -> Result
         }
         budget = budget.checked_sub(1).ok_or(SkeletonError::Budget)?;
         w.step(e);
+        // Ecken wachsen höchstens linear mit n; darüber läuft die Front in einen Rundungs-Zyklus ([258]).
+        if w.corners.len() > 32 * n + 256 {
+            w.broken = true;
+        }
     }
     let left: Vec<&Corner> = w.corners.iter().filter(|c| c.alive).collect();
     if !w.broken && !left.is_empty() && left.iter().all(|c| w.edges[c.left].speed <= 0.0 && w.edges[c.right].speed <= 0.0) {

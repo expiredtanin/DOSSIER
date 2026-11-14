@@ -147,7 +147,8 @@ pub mod dim_assoc;
 pub mod opening_slide;
 
 #[cfg(feature = "web")]
-mod web;
+#[doc(hidden)]
+pub mod web;
 pub mod presentation_sheet;
 pub mod drawing_recognize;
 pub mod kosten;

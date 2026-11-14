@@ -303,7 +303,9 @@ fn split_steps(body: i64, run1: f64, run2: f64, run1_steps: Option<i64>) -> (i64
     let s1 = match run1_steps {
         Some(n) => n.min(body - 1).max(1),
         None => {
-            let v = ((body as f64 * run1) / (run1 + run2)).round() as i64;
+            // `as i64` sättigt bei ∞ (Lauflänge f64::MAX: Summe/Produkt laufen über) → i64::MAX Stufen, Speicher-Abbruch
+            // ([258]); im Normalfall liegt v unter body, die Begrenzung ändert dort nichts.
+            let v = (((body as f64 * run1) / (run1 + run2)).round() as i64).min(body.max(1));
             if v < 1 { 1 } else { v }
         }
     };

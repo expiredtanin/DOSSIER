@@ -478,7 +478,7 @@ pub fn decode_mesh(f: &[f64], strings: &[String]) -> Result<(Vec<MeshObject>, Va
         let color = (h[2] == 1.0).then(|| vec![h[3], h[4], h[5], h[6]]);
         let (np, ni) = (h[7], h[8]);
         at += 9;
-        if !(np.fract() == 0.0 && ni.fract() == 0.0 && np >= 0.0 && ni >= 0.0) || at + np as usize + ni as usize > f.len() {
+        if !(np.fract() == 0.0 && ni.fract() == 0.0 && np >= 0.0 && ni >= 0.0) || np + ni > (f.len() - at) as f64 {
             return Err("Mesh-Import: Puffer beschädigt".into());
         }
         let positions: Vec<f64> = f[at..at + np as usize].to_vec();
@@ -617,7 +617,7 @@ pub fn decode_step(f: &[f64]) -> Result<Vec<(Vec<f32>, Vec<f64>)>, String> {
         let h = f.get(at..at + 2).ok_or_else(bad)?;
         let (np, ni) = (h[0], h[1]);
         at += 2;
-        if !(np.fract() == 0.0 && ni.fract() == 0.0 && np >= 0.0 && ni >= 0.0) || at + np as usize + ni as usize > f.len() {
+        if !(np.fract() == 0.0 && ni.fract() == 0.0 && np >= 0.0 && ni >= 0.0) || np + ni > (f.len() - at) as f64 {
             return Err(bad());
         }
         let positions = f[at..at + np as usize].iter().map(|&x| x as f32).collect();
@@ -656,6 +656,16 @@ pub fn step_meshes(bodies: &[(Vec<f32>, Vec<f64>)], file_name: &str, now: f64) -
 #[cfg(test)]
 mod step_tests {
     use super::*;
+
+    /// [258] Zähler 1e300 / 1e19 (saturieren zu usize::MAX, Summe lief über): Fehler statt Slice-Panic.
+    #[test]
+    fn regression_decode_step_riesige_zaehler() {
+        for n in [1e300, 1e19, 9.3e18] {
+            assert!(decode_step(&[1.0, 1.0, n, 0.0, 1.0]).is_err());
+            assert!(decode_step(&[1.0, 1.0, 1.0, n, 1.0]).is_err());
+            assert!(decode_step(&[1.0, 1.0, n, n, 1.0]).is_err());
+        }
+    }
 
     fn flat() -> Vec<f64> {
         // zwei Körper: Dreieck mit 0.1f32 (nicht exakt in f64), Dreieck mit ganzen Zahlen

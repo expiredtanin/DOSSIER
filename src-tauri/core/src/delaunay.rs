@@ -314,7 +314,9 @@ impl State<'_> {
 
 pub fn triangulate(coords: &[f64]) -> Vec<u32> {
     let n = coords.len() >> 1;
-    if n < 3 || coords.len() != 2 * n || coords.iter().any(|v| !v.is_finite()) {
+    // Obergrenze der Koordinaten ([258]): darüber laufen Abstandsquadrate/Umkreisprodukte über (∞/NaN), die Hülle
+    // wird inkonsistent und die Suchschleifen drehen endlos. Kartenkoordinaten bleiben weit darunter.
+    if n < 3 || coords.len() != 2 * n || coords.iter().any(|v| !(v.abs() <= 1e60)) {
         return Vec::new();
     }
     let max_triangles = if n * 2 >= 5 { 2 * n - 5 } else { 0 };
@@ -520,6 +522,14 @@ mod tests {
     fn quadrat_ergibt_zwei_dreiecke() {
         let t = triangulate(&[0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0]);
         assert_eq!(t.len(), 6);
+    }
+
+    /// [258] Riesige Koordinaten (Quadrate laufen über): leer statt Endlosschleife.
+    #[test]
+    fn regression_riesige_koordinaten() {
+        assert!(triangulate(&[0.0, 0.0, 1e300, 0.0, 0.0, 1e300, 1e300, 1e300, 5e299, 5e299]).is_empty());
+        assert!(triangulate(&[0.0, 0.0, f64::MAX, 0.0, 0.0, f64::MAX, 1.0, 1.0]).is_empty());
+        assert_eq!(triangulate(&[0.0, 0.0, 1e6, 0.0, 0.0, 1e6]).len(), 3);
     }
 
     #[test]

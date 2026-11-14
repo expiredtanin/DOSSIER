@@ -1020,7 +1020,7 @@ pub fn datum(reference_masl: Option<f64>, z: &[f64]) -> f64 {
 /// Binomialfilters [1 2 1]/4 je Achse. Fehlende Nachbarn zählen nicht (Gewichte werden renormiert), fehlende
 /// Zellen bleiben fehlend. Falsche Grösse → Eingabe unverändert.
 pub fn smooth_grid(z: &[f64], nx: usize, ny: usize, passes: u32) -> Vec<f64> {
-    if nx == 0 || ny == 0 || z.len() != nx * ny {
+    if nx == 0 || ny == 0 || nx.checked_mul(ny) != Some(z.len()) {
         return z.to_vec();
     }
     let mut cur = z.to_vec();
@@ -1100,6 +1100,15 @@ pub fn resmooth_grid_mesh(positions: &[f64], passes: u32) -> Option<Vec<f64>> {
 
 #[cfg(test)]
 mod tests {
+    /// [258] Rastergrösse nx · ny läuft über (usize-Wrap passte zur Länge → Index-Panic): Eingabe unverändert.
+    #[test]
+    fn regression_smooth_grid_ueberlauf() {
+        let z = [1.0, 2.0];
+        assert_eq!(smooth_grid(&z, (1usize << 63) + 1, 2, 1), z.to_vec());
+        assert_eq!(smooth_grid(&z, usize::MAX, usize::MAX, 1), z.to_vec());
+        assert_eq!(smooth_grid(&z, 3, 1, 1), z.to_vec());
+    }
+
     use super::*;
 
     /// [137] Raster-Gelände neu glätten: Raster erkannt, nur z ändert sich, Spitze wird flacher; additiv
