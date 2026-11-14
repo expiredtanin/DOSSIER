@@ -46,7 +46,7 @@
 //              — alle Entitätsdatensätze bis BLOCK_END gehören in die Blockdefinition (Koordinaten blocklokal)
 //   BLOCK_END= 17
 //   INSERT   = 18, layer, name_idx, x, y, rotation, sx, sy, n_att, (tag_idx, value_idx) × n_att
-//   ENTPEN   = 27, rgb (−1 = nach Ebene), lineweight (1/100 mm, −1 = nach Ebene)   gilt für alle folgenden Entitäten bis zum nächsten ENTPEN
+//   ENTPEN   = 27, rgb (−1 = nach Ebene), lineweight (1/100 mm, −1 = nach Ebene), alpha (Deckkraft 0–255, −1 = nach Ebene → Gruppe 440)   gilt für alle folgenden Entitäten bis zum nächsten ENTPEN
 //   LAYOUT   = 19, name_idx, paper_w, paper_h (mm), vp_cx, vp_cy, vp_w, vp_h (mm), view_cx, view_cy (Modell-m), scale_denominator
 //
 // `layer` ist der Index des LAYER-Datensatzes (Reihenfolge des Auftretens, ab 0), er muss vorher
@@ -73,7 +73,7 @@ use acadrust::tables::{BlockRecord, LineType, LineTypeElement, TextStyle};
 use acadrust::types::Handle;
 use acadrust::{
     Arc, CadDocument, Circle, Color, DwgWriter, DxfVersion, DxfWriter, Ellipse, EntityType, Layer, Line,
-    LineWeight, LwPolyline, Text, Vector2, Vector3,
+    LineWeight, LwPolyline, Text, Transparency, Vector2, Vector3,
 };
 
 use crate::export_dim::{build_aligned, into_entity, make_dimstyle, DimStyleDef};
@@ -118,9 +118,10 @@ pub const REC_HATCH_BULGE: f64 = 25.0;
 /// [169] Ellipsenbogen: `[Ebene, Mitte x, y, Hauptachse x, y, Verhältnis, Startparameter, Endparameter]`
 /// (Parameter gegen den Uhrzeiger, Bogenmass; Kern `plan/arc_fit.rs::pieces`).
 pub const REC_ELLIPSE: f64 = 26.0;
-/// [200] Stift der folgenden Entitäten: `[rgb (0xRRGGBB, −1 = nach Ebene), Strichstärke (1/100 mm, −1 = nach Ebene)]`.
+/// [200] Stift der folgenden Entitäten: `[rgb (0xRRGGBB, −1 = nach Ebene), Strichstärke (1/100 mm, −1 = nach Ebene), Deckkraft (0–255, −1 = nach Ebene)]`.
 /// Gilt bis zum nächsten Satz; ein Block beginnt „nach Ebene" und gibt am Ende den Stand davor zurück. Die Entität
-/// trägt dann True-Color (Gruppe 420, mit nächster ACI-Farbe 62) und Strichstärke (370, auf CAD-Stufe gerastet).
+/// trägt dann True-Color (Gruppe 420, mit nächster ACI-Farbe 62), Strichstärke (370, auf CAD-Stufe gerastet) und
+/// Transparenz (440, `0x02000000 | Deckkraft`; gedimmte Elemente und Objekt-Deckkraft).
 /// Schraffuren mit eigener Farbe behalten sie.
 pub const REC_ENTITY_PEN: f64 = 27.0;
 
@@ -404,7 +405,8 @@ pub fn build_document(flat: &[f64], strings: &str) -> Result<CadDocument, String
     // [200] Stift (Farbe, Strichstärke) der folgenden Entitäten; Stand vor einem Block.
     let mut cur_color = Color::ByLayer;
     let mut cur_lw = LineWeight::ByLayer;
-    let mut saved_pen: Option<(Color, LineWeight)> = None;
+    let mut cur_tr = Transparency::ByLayer;
+    let mut saved_pen: Option<(Color, LineWeight, Transparency)> = None;
     let mut cur_block: Option<Handle> = None;
     let mut dim_counter = 0usize;
 
@@ -491,8 +493,10 @@ pub fn build_document(flat: &[f64], strings: &str) -> Result<CadDocument, String
         if tag == REC_ENTITY_PEN {
             let rgb = r.f()?;
             let lw = r.f()?;
+            let alpha = r.f()?;
             cur_color = if rgb.is_finite() && (0.0..=16_777_215.0).contains(&rgb) { layer_color(rgb) } else { Color::ByLayer };
             cur_lw = if lw.is_finite() && lw >= 0.0 { line_weight(lw) } else { LineWeight::ByLayer };
+            cur_tr = if alpha.is_finite() && (0.0..=255.0).contains(&alpha) { Transparency::from_alpha_value(0x0200_0000 | alpha as u32) } else { Transparency::ByLayer };
             continue;
         }
         if tag == REC_STYLE {
@@ -561,8 +565,8 @@ pub fn build_document(flat: &[f64], strings: &str) -> Result<CadDocument, String
             if n_att > MAX_BLOCK_ATTS {
                 return Err(format!("zu viele Attribute ({n_att}) bei {}", r.pos - 1));
             }
-            saved_pen = Some((cur_color, cur_lw));
-            (cur_color, cur_lw) = (Color::ByLayer, LineWeight::ByLayer);
+            saved_pen = Some((cur_color, cur_lw, cur_tr));
+            (cur_color, cur_lw, cur_tr) = (Color::ByLayer, LineWeight::ByLayer, Transparency::ByLayer);
             let h = new_block_record(&mut doc, &name, false)?;
             if let Some(br) = doc.block_records.get_mut(&name) {
                 br.description = desc;
@@ -598,7 +602,7 @@ pub fn build_document(flat: &[f64], strings: &str) -> Result<CadDocument, String
             if cur_block.take().is_none() {
                 return Err(format!("BLOCK_END ohne BLOCK bei {}", r.pos - 1));
             }
-            (cur_color, cur_lw) = saved_pen.take().unwrap_or((Color::ByLayer, LineWeight::ByLayer));
+            (cur_color, cur_lw, cur_tr) = saved_pen.take().unwrap_or((Color::ByLayer, LineWeight::ByLayer, Transparency::ByLayer));
             continue;
         }
         if tag == REC_LAYOUT {
@@ -833,6 +837,9 @@ pub fn build_document(flat: &[f64], strings: &str) -> Result<CadDocument, String
             }
             if matches!(e.common_mut().line_weight, LineWeight::ByLayer) {
                 e.common_mut().line_weight = cur_lw;
+            }
+            if matches!(e.common_mut().transparency, Transparency::ByLayer) {
+                e.common_mut().transparency = cur_tr;
             }
             if let Some(owner) = cur_block {
                 e.common_mut().owner_handle = owner;
@@ -1613,16 +1620,16 @@ mod tests {
             FLAT_VERSION,
             REC_LAYER, 0.0, 0x11_11_11 as f64, 25.0,
             REC_LINE, 0.0, 0.0, 0.0, 1.0, 0.0,
-            REC_ENTITY_PEN, 0xc0_30_20 as f64, 50.0,
+            REC_ENTITY_PEN, 0xc0_30_20 as f64, 50.0, -1.0,
             REC_LINE, 0.0, 0.0, 1.0, 1.0, 1.0,
             REC_CIRCLE, 0.0, 5.0, 5.0, 1.0,
             REC_BLOCK, 0.0, -1.0, 0.0,
             REC_LINE, 0.0, 0.0, 0.0, 0.5, 0.0,
             REC_BLOCK_END,
             REC_LINE, 0.0, 0.0, 2.0, 1.0, 2.0,
-            REC_ENTITY_PEN, -1.0, 18.0,
+            REC_ENTITY_PEN, -1.0, 18.0, -1.0,
             REC_LINE, 0.0, 0.0, 3.0, 1.0, 3.0,
-            REC_ENTITY_PEN, f64::NAN, -1.0,
+            REC_ENTITY_PEN, f64::NAN, -1.0, f64::NAN,
             REC_LINE, 0.0, 0.0, 4.0, 1.0, 4.0,
         ];
         let strings = "Wand\0Blk";
@@ -1654,6 +1661,39 @@ mod tests {
         assert_eq!(lines.windows(2).filter(|w| w[0] == "420" && w[1] == "12595232").count(), 3);
         assert!(has("370", "50") && has("370", "18"));
         assert!(has("62", "22"), "nächste ACI-Farbe");
+    }
+
+    /// [200] Gedimmt/Deckkraft: ENTPEN-Deckkraft → Transparenz (Gruppe 440 = 0x02000000 | Deckkraft); ein Block beginnt
+    /// undurchsichtig-nach-Ebene; −1/NaN heisst nach Ebene (keine 440).
+    #[test]
+    fn deckkraft_je_element_als_transparenz() {
+        let flat = vec![
+            FLAT_VERSION,
+            REC_LAYER, 0.0, 0x11_11_11 as f64, 25.0,
+            REC_LINE, 0.0, 0.0, 0.0, 1.0, 0.0,
+            REC_ENTITY_PEN, -1.0, -1.0, 77.0,
+            REC_LINE, 0.0, 0.0, 1.0, 1.0, 1.0,
+            REC_ENTITY_PEN, -1.0, -1.0, -1.0,
+            REC_LINE, 0.0, 0.0, 2.0, 1.0, 2.0,
+        ];
+        let strings = "Wand";
+        for doc in [read_dxf(export_dxf(&flat, strings).unwrap()), read_dwg(export_dwg(&flat, strings).unwrap())] {
+            let tr = |y: f64| -> Transparency {
+                doc.entities()
+                    .find_map(|e| match e {
+                        EntityType::Line(l) if (l.start.y - y).abs() < 1e-9 => Some(l.common.transparency),
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| panic!("Linie y={y}"))
+            };
+            assert_eq!(tr(0.0), Transparency::ByLayer);
+            assert_eq!(tr(1.0), Transparency::from_alpha_value(0x0200_004d));
+            assert_eq!(tr(2.0), Transparency::ByLayer);
+        }
+        let txt = String::from_utf8(export_dxf(&flat, strings).unwrap()).unwrap();
+        let lines: Vec<&str> = txt.lines().map(str::trim).collect();
+        assert_eq!(lines.windows(2).filter(|w| w[0] == "440").count(), 1, "nur die gedimmte Linie");
+        assert!(lines.windows(2).any(|w| w[0] == "440" && w[1] == (0x0200_004du32 as i32).to_string()), "440 = 0x0200004d");
     }
 
     #[test]

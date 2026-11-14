@@ -17,8 +17,8 @@ use crate::jsmath::hypot;
 use crate::jsnum;
 use crate::model::{Drawing2D, Drawing2DGeom, ElementKind, LayerCategory, LineStyle, LineStyleKind, Opening, OpeningDoorType, Project};
 use crate::plan::overrides::js_trim;
-use crate::plan::buf::{whole, View, F_DASH_NULL, T_ARC, T_CIRCLE, T_DRAWING_ARC, T_DRAWING_TEXT, T_LINE, T_POLYGON, T_TEXT};
-use crate::plan::parts::{pick_ids, Part};
+use crate::plan::buf::{whole, View, F_DASH_NULL, F_OPACITY, T_ARC, T_CIRCLE, T_DRAWING_ARC, T_DRAWING_TEXT, T_LINE, T_POLYGON, T_TEXT};
+use crate::plan::parts::{greyed_of, pick_ids, Part};
 use std::collections::{HashMap, HashSet};
 use std::f64::consts::PI;
 
@@ -154,16 +154,16 @@ struct Buf {
     nums: Option<Vec<f64>>,
     pen: f64,
     /// [200] Stift (Farbe, Strichstärke) der zuletzt geschriebenen Entität; (−1, −1) = nach Ebene.
-    epen: (f64, f64),
+    epen: (f64, f64, f64),
     counts: [u32; 8],
 }
 
 impl Buf {
     fn main() -> Buf {
-        Buf { nums: None, pen: -1.0, epen: (-1.0, -1.0), counts: [0; 8] }
+        Buf { nums: None, pen: -1.0, epen: (-1.0, -1.0, -1.0), counts: [0; 8] }
     }
     fn block() -> Buf {
-        Buf { nums: Some(Vec::new()), pen: -1.0, epen: (-1.0, -1.0), counts: [0; 8] }
+        Buf { nums: Some(Vec::new()), pen: -1.0, epen: (-1.0, -1.0, -1.0), counts: [0; 8] }
     }
 }
 
@@ -239,12 +239,12 @@ impl Flat {
     }
 
     /// [200] Stift (Farbe, Strichstärke) der nächsten Entitäten setzen; schreibt nur bei Änderung.
-    fn set_epen(&mut self, b: &mut Buf, color: f64, lw: f64) {
-        if b.epen == (color, lw) {
+    fn set_epen(&mut self, b: &mut Buf, color: f64, lw: f64, alpha: f64) {
+        if b.epen == (color, lw, alpha) {
             return;
         }
-        b.epen = (color, lw);
-        self.push(b, &[REC_ENTITY_PEN, color, lw]);
+        b.epen = (color, lw, alpha);
+        self.push(b, &[REC_ENTITY_PEN, color, lw, alpha]);
     }
 
     /// [200] Den Stift des aktuellen Primitivs auf `layer` setzen: Werte, die dem Ebenen-Standard gleichen, bleiben
@@ -259,7 +259,7 @@ impl Flat {
             Some(w) if w != dl => w,
             _ => -1.0,
         };
-        self.set_epen(b, color, lw);
+        self.set_epen(b, color, lw, self.pen.alpha.unwrap_or(-1.0));
     }
 
     fn layer(&mut self, name: &str) -> f64 {
@@ -710,6 +710,8 @@ struct HatchIn {
 struct Pen {
     color: Option<f64>,
     lw: Option<f64>,
+    /// Deckkraft 0–255 (nur wenn unter voll: gedimmt und/oder Objekt-Deckkraft); Gruppe 440.
+    alpha: Option<f64>,
 }
 
 /// Genormte CAD-Strichstärken (1/100 mm), wie `fileio/export.rs`.
@@ -728,7 +730,7 @@ fn snap_lweight(v: f64) -> f64 {
 impl Pen {
     /// Farbe aus dem CSS-Text (Hex), Strichstärke aus Papier-mm (NaN/fehlt → nach Ebene).
     fn of(color: &str, weight_mm: f64) -> Pen {
-        Pen { color: rgb_or_null(color), lw: weight_mm.is_finite().then(|| snap_lweight(mm_to_lwe(weight_mm))) }
+        Pen { color: rgb_or_null(color), lw: weight_mm.is_finite().then(|| snap_lweight(mm_to_lwe(weight_mm))), alpha: None }
     }
 }
 
@@ -872,6 +874,21 @@ fn read_entry(part: &mut Part, i: usize, hatches: &[(i32, Hatch, i32)], text: Op
         T_POLYGON | T_CIRCLE => Pen::of(&s(f[1])?, f[2]),
         T_DRAWING_ARC => Pen::of(&s(f[0])?, f[1]),
         _ => Pen::default(),
+    };
+    // Gedimmt (0,3, wie `print_svg::opacity_of`) mal Objekt-Deckkraft → DXF-Transparenz (Gruppe 440).
+    let obj_at = match rec.tag {
+        T_POLYGON => Some(4),
+        T_LINE | T_ARC | T_CIRCLE => Some(3),
+        T_DRAWING_ARC => Some(2),
+        _ => None,
+    };
+    let pen = match obj_at {
+        Some(at) => {
+            let obj = if rec.flags & F_OPACITY != 0 { f[at] } else { 1.0 };
+            let combined = (if greyed_of(&rec, false) == Some(true) { 0.3 } else { 1.0 }) * jsnum::max(0.0, obj);
+            Pen { alpha: (combined < 1.0).then(|| jsnum::round(combined * 255.0).clamp(0.0, 255.0)), ..pen }
+        }
+        None => pen,
     };
     Some(Entry { prim, pen, ids, tag: rec.tag })
 }
@@ -1055,7 +1072,7 @@ impl Ctx<'_> {
 
     /// [200] Textfarbe: gleicht sie der Ebenenfarbe, bleibt der Text nach Ebene, sonst eigene Farbe (Stärke nie).
     fn text_pen(&mut self, b: &mut Buf, color: &str, layer: &str) {
-        self.flat.pen = Pen { color: rgb_or_null(color), lw: None };
+        self.flat.pen = Pen { color: rgb_or_null(color), lw: None, alpha: None };
         self.flat.apply_pen(b, layer);
         self.flat.pen = Pen::default();
     }
@@ -1137,7 +1154,8 @@ impl Ctx<'_> {
                     return;
                 }
                 let include = self.o.include_hatches;
-                self.flat.set_epen(b, -1.0, -1.0);
+                let alpha = self.flat.pen.alpha.unwrap_or(-1.0);
+                self.flat.set_epen(b, -1.0, -1.0, alpha);
                 if let (true, Some(h)) = (include && kind == HatchKind::Gradient && pts.len() >= 3, hatch) {
                     if let Some(g) = &h.gradient {
                         if let (Some(c1), Some(c2)) = (rgb_or_null(&g.color1), rgb_or_null(&g.color2)) {
@@ -1394,7 +1412,7 @@ pub fn collect(parts: &mut [Part], project: &Project, o: &DxfOptions) -> Option<
 
     emit_entries(&mut cx, &mut main, &entries, &layer_by_code, true);
     cx.flat.set_pen(&mut main, -1.0);
-    cx.flat.set_epen(&mut main, -1.0, -1.0);
+    cx.flat.set_epen(&mut main, -1.0, -1.0, -1.0);
 
     // 5) Papierbereich (optional): Layout mit Ansichtsfenster im Planmassstab.
     if o.paper_layout {
@@ -1570,7 +1588,7 @@ fn emit_entries(cx: &mut Ctx, main: &mut Buf, entries: &[Entry], layer_by_code: 
             if !done.insert(key) {
                 continue;
             }
-            cx.flat.set_epen(main, -1.0, -1.0);
+            cx.flat.set_epen(main, -1.0, -1.0, -1.0);
             let members: Vec<&Entry> = groups.get(key).map(|l| l.iter().map(|&k| &entries[k]).collect()).unwrap_or_default();
             let id = key.1.as_str();
             match key.0 {
@@ -1908,11 +1926,11 @@ mod tests {
         let f = collect(&mut parts, &p, &o).unwrap();
         // Satzfolge der Hauptzeichnung nach den Ebenen: (Satzart, Farbe/Ebene, Strichstärke/x1).
         let at = f.nums.iter().position(|x| *x == REC_ENTITY_PEN).expect("ENTPEN-Satz");
-        assert_eq!(&f.nums[at..at + 3], &[REC_ENTITY_PEN, 0xc03020 as f64, 35.0]);
-        assert_eq!(f.nums[at + 3], REC_LINE, "Stift gilt für die folgende Linie");
-        assert_eq!(&f.nums[at + 5..at + 9], &[0.0, 0.0, 10.0, 0.0]);
+        assert_eq!(&f.nums[at..at + 4], &[REC_ENTITY_PEN, 0xc03020 as f64, 35.0, -1.0]);
+        assert_eq!(f.nums[at + 4], REC_LINE, "Stift gilt für die folgende Linie");
+        assert_eq!(&f.nums[at + 6..at + 10], &[0.0, 0.0, 10.0, 0.0]);
         // Die zweite Linie trägt Standard-Werte der Ebene: zurück auf „nach Ebene", nie eine eigene Farbe/Stärke.
-        let pens: Vec<&[f64]> = f.nums.windows(3).filter(|w| w[0] == REC_ENTITY_PEN).collect();
+        let pens: Vec<&[f64]> = f.nums.windows(4).filter(|w| w[0] == REC_ENTITY_PEN).collect();
         assert!(pens.iter().all(|w| w[1] == 0xc03020 as f64 || w[1] == -1.0), "{pens:?}");
         assert_eq!(pens.last().map(|w| (w[1], w[2])), Some((-1.0, -1.0)), "am Ende wieder nach Ebene");
     }
@@ -1951,9 +1969,9 @@ mod tests {
         let mut seq: Vec<(f64, f64, f64)> = Vec::new();
         let (mut col, mut lw) = (-1.0, -1.0);
         for (i, x) in f.nums.iter().enumerate() {
-            if *x == REC_ENTITY_PEN && f.nums.get(i + 3).is_some_and(|k| *k == REC_LINE || *k == REC_TEXT2) {
+            if *x == REC_ENTITY_PEN && f.nums.get(i + 4).is_some_and(|k| *k == REC_LINE || *k == REC_TEXT2) {
                 (col, lw) = (f.nums[i + 1], f.nums[i + 2]);
-                seq.push((f.nums[i + 3], col, lw));
+                seq.push((f.nums[i + 4], col, lw));
             }
         }
         let _ = (col, lw);
@@ -1967,6 +1985,55 @@ mod tests {
         assert!(seq.iter().filter(|s| s.0 == REC_TEXT2).all(|s| s.2 == -1.0));
     }
 
+    /// [200] Gedimmte Elemente (0,3) und Objekt-Deckkraft landen als Deckkraft 0–255 im ENTPEN-Satz (Gruppe 440);
+    /// ein normales Element bleibt ohne (−1).
+    #[test]
+    fn gedimmt_und_deckkraft_im_dxf() {
+        use crate::model::Vec2;
+        use crate::plan::buf::Writer;
+        use crate::plan::prim::Primitive;
+        let v = |x: f64, y: f64| Vec2 { x, y };
+        let line = |y: f64, greyed: Option<bool>, opacity: Option<f64>| Primitive::Line {
+            a: v(0.0, y), b: v(1.0, y), cls: "misc".into(), weight_mm: 0.25, dash: None, zigzag: None, motif: None,
+            color: Some("#336699".into()), drawing_id: None, opening_id: None, stair_id: None, greyed, opacity,
+        };
+        let mut w = Writer::new(false);
+        w.push(&line(0.0, None, None));
+        w.push(&line(1.0, Some(true), None));
+        w.push(&line(2.0, None, Some(0.5)));
+        w.push(&line(3.0, Some(true), Some(0.5)));
+        w.push(&line(4.0, Some(false), None));
+        let bytes = w.finish();
+        let p: Project = serde_json::from_value(crate::sheet_viewports::tests::json()).unwrap();
+        let view = View::parse(&bytes).unwrap();
+        let n = view.len();
+        let mut parts = [Part::new(view, 0, n).unwrap()];
+        let o = DxfOptions { scale: 100.0, include_hatches: true, dim_cm: false, paper_layout: false, bounds: [0.0, 0.0, 10.0, 6.0], default_font: "Arial".into(), floor: "eg".into(), table_labels: String::new() };
+        let f = collect(&mut parts, &p, &o).unwrap();
+        // Je Linie (nach y) die Deckkraft des zuletzt gesetzten Stifts.
+        let mut alpha = -1.0;
+        let mut by_y: Vec<(f64, f64)> = Vec::new();
+        // Nach den Kopfsätzen (Ebenen) beginnen: dort kommen Zahlen vor, die wie Satzarten aussehen.
+        let mut i = f.nums.iter().position(|x| *x == REC_ENTITY_PEN).unwrap();
+        while i < f.nums.len() {
+            if f.nums[i] == REC_ENTITY_PEN {
+                alpha = f.nums[i + 3];
+                i += 4;
+            } else if f.nums[i] == REC_LINE {
+                by_y.push((f.nums[i + 3], alpha));
+                i += 6;
+            } else {
+                i += 1;
+            }
+        }
+        let a = |y: f64| by_y.iter().find(|p| (p.0 - y).abs() < 1e-9).map(|p| p.1).unwrap_or_else(|| panic!("Linie y={y}: {by_y:?}"));
+        assert_eq!(a(0.0), -1.0, "normal: keine Transparenz");
+        assert_eq!(a(1.0), 77.0, "gedimmt = 0,3");
+        assert_eq!(a(2.0), 128.0, "Deckkraft 0,5");
+        assert_eq!(a(3.0), 38.0, "gedimmt · 0,5");
+        assert_eq!(a(4.0), -1.0, "ausdrücklich nicht gedimmt");
+    }
+
     #[test]
     fn strichstaerke_rastet_auf_cad_stufen() {
         assert_eq!(snap_lweight(35.0), 35.0);
@@ -1974,7 +2041,7 @@ mod tests {
         assert_eq!(snap_lweight(10.0), 9.0);
         assert_eq!(snap_lweight(500.0), 211.0);
         assert_eq!(snap_lweight(f64::NAN), -3.0);
-        assert_eq!(Pen::of("#112233", 0.25), Pen { color: Some(0x112233 as f64), lw: Some(25.0) });
+        assert_eq!(Pen::of("#112233", 0.25), Pen { color: Some(0x112233 as f64), lw: Some(25.0), alpha: None });
         assert_eq!(Pen::of("none", f64::NAN), Pen::default());
     }
 
