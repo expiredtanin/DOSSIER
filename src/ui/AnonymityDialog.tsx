@@ -6,16 +6,30 @@ import { memo, useEffect, useSyncExternalStore } from "react";
 import { getLanguage, t } from "../i18n";
 import { getAnonymityRequest, subscribeAnonymityRequest } from "../state/anonymityGate";
 import { useModalFocus } from "./modalFocus";
+import { anonymityPlaceParts } from "./anonymityPlace";
 
 const AREA_KEYS = new Set([
   "rooms", "drawingLevels", "layers", "groups", "blockDefs", "layouts", "masterLayouts", "drawings2d", "walls", "openings",
   "stairs", "columns", "context", "extrudedSolids", "viewSnapshots", "viewSnapshotFolders", "viewTemplates", "layoutFolders",
   "publishSets", "roomProgram", "export", "cameras", "components", "wallTypes", "textStyles", "ceilings", "roofs", "trees",
-  "hatches", "lineStyles",
+  "hatches", "lineStyles", "materials",
 ]);
 
 function areaLabel(area: string): string {
   return AREA_KEYS.has(area) ? t(`anonymity.area.${area}`) : area;
+}
+
+/** Fundstelle lesbar: Elementart „Name“ · Feld (z. B. Material „Wärmedämmung“ · Name). */
+function FindingPlace({ area, place }: { area: string; place: string }) {
+  const p = anonymityPlaceParts(area, place);
+  const q = (s: string) => (getLanguage() === "en" ? `\u201C${s}\u201D` : `\u201E${s}\u201C`);
+  return (
+    <>
+      <b>{p.kind || areaLabel(area)}</b>
+      {p.item ? <b> {q(p.item)}</b> : null}
+      {p.field ? <span style={{ color: "var(--muted)" }}> · {p.field}</span> : null}
+    </>
+  );
 }
 
 const DialogBody = memo(function DialogBody() {
@@ -46,8 +60,7 @@ const DialogBody = memo(function DialogBody() {
             <ul data-testid="anonymity-findings" style={{ margin: "6px 0 0", paddingLeft: 18, maxHeight: 280, overflow: "auto", fontSize: 12 }}>
               {findings.map((f, i) => (
                 <li key={i} data-kind={f.kind} style={{ marginBottom: 4 }}>
-                  <b>{areaLabel(f.area)}</b>
-                  {f.place ? <span style={{ color: "var(--muted)" }}> · {f.place}</span> : null}
+                  <FindingPlace area={f.area} place={f.place} />
                   <div>
                     {getLanguage() === "en" ? `\u201C${f.text}\u201D` : `\u201E${f.text}\u201C`} — {t(`anonymity.kind.${f.kind}`)}: <span className="mono">{f.term}</span>
                   </div>

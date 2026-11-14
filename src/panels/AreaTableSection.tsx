@@ -73,11 +73,11 @@ export function AreaTableSection() {
                     {r.cells.map((c, ci) =>
                       typeof c === "string" ? (
                         // Kurze Textzellen in Zahlenspalten (Strich, ja/nein) stehen wie die Zahlen rechts.
-                        <td key={ci} className={ci > 0 && c.length <= 4 ? "num" : undefined}>
+                        <td key={ci} data-label={ci > 0 ? s.columns[ci] : undefined} className={ci > 0 && c.length <= 4 ? "num" : undefined}>
                           {c}
                         </td>
                       ) : (
-                        <td key={ci} className="num">
+                        <td key={ci} data-label={ci > 0 ? s.columns[ci] : undefined} className="num">
                           {c.n === null ? "–" : c.n.toFixed(c.d)}
                         </td>
                       ),
