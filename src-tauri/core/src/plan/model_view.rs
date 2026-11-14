@@ -249,6 +249,8 @@ pub struct WallOpts {
     pub reveals: bool,
     /// Schnittflächen schraffiert (die Ebene geht vor, s. [`Options::cut_hatch`]).
     pub cut_hatch_mv: Option<bool>,
+    /// [256] Öffnungs-Symbole über/unter Schnitt auf schwarzer Wand hell (Basis: ja).
+    pub contrast_on_solid: bool,
 }
 
 /// Decken und Böden.
@@ -525,6 +527,7 @@ pub fn resolve(mv: Option<&ModelViewOption>, detail: Detail, scale: f64) -> Opti
             thin_mm: wl.and_then(|w| w.thin_layer_mm).filter(|t| t.is_finite() && *t >= 0.0).unwrap_or(THIN_LAYER_PAPER_MM),
             reveals: wl.and_then(|w| w.reveals).unwrap_or(true),
             cut_hatch_mv: wl.and_then(|w| w.cut_hatch),
+            contrast_on_solid: wl.and_then(|w| w.contrast_on_solid).unwrap_or(true),
         },
         slab: SlabOpts {
             layers: layer_mode(sl.and_then(|s| s.layers)),

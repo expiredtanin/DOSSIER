@@ -1074,6 +1074,8 @@ pub fn plan_walls(c: &Ctx, reference_lines: bool, out: &mut Vec<Primitive>, boun
     }
     // [198] Ab hier die Wand-Primitive: danach Linien zwischen gleichen Flächen verschiedener Wände streichen.
     let fuse_from = out.len();
+    // [256] Öffnungs-Symbole über/unter Schnitt in geschlossener Wand (Bereiche in `out`), für den Kontrast danach.
+    let mut closed_syms: Vec<(usize, usize)> = Vec::new();
     // Bei doppelten Wand-ids gewinnt in TS (Map) die letzte Verschneidung.
     let mut cut_by_id: HashMap<&str, &WallCuts> = HashMap::new();
     for (e, k) in walls.iter().zip(&cuts) {
@@ -1214,10 +1216,19 @@ pub fn plan_walls(c: &Ctx, reference_lines: bool, out: &mut Vec<Primitive>, boun
             }
             if let Some(d) = dash {
                 super::view_range::restyle(out, sym_start, d);
+                closed_syms.push((sym_start, out.len()));
             }
         }
         if let Some(d) = range.restyle_dash(zone) {
             super::view_range::restyle(out, out_start, d);
+        }
+    }
+    // [256] Auf schwarzer Sammelfläche (ab 1:100) verschwände das Symbol: der Teil in der Fläche wird hell
+    // (Modelldarstellung `walls.contrastOnSolid`, Basis an). Hinten anfangen, die Bereiche verschieben sich.
+    if c.mv().wall.contrast_on_solid && !closed_syms.is_empty() {
+        let dark = super::contrast::DarkRings::collect(&out[fuse_from..], |q| matches!(q, Primitive::Polygon { wall_id: Some(_), opening_id: None, .. }));
+        for &(a, b) in closed_syms.iter().rev() {
+            super::contrast::light_on_dark(out, a, b, &dark);
         }
     }
     let tail = out.split_off(fuse_from);

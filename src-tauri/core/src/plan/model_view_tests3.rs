@@ -282,3 +282,45 @@ fn mitgelieferte_stufen_aus_den_standards() {
     p.drawing_levels.iter_mut().find(|l| l.id == "eg").unwrap().model_view_option_id = Some("std-mv-wettbewerb-200".into());
     assert_ne!(heute, buf(&p, 100.0));
 }
+
+/// [256] Oberlicht über der Schnittebene in geschlossener Wand: ab 1:100 (schwarze Sammelfläche) wird der Teil
+/// des strichpunktierten Symbols in der Wand weiss, damit es lesbar bleibt; 1:50 (Schichten, hell) und mit
+/// `walls.contrastOnSolid: false` bleibt alles dunkel. Die Wandfläche selbst bleibt gleich.
+#[test]
+fn ueber_schnitt_hell_auf_schwarzer_wand() {
+    let mut p = sample();
+    let o1 = p.openings.as_mut().unwrap().iter_mut().find(|o| o.id == "O1").unwrap();
+    (o1.sill_height, o1.height) = (1.5, 0.6);
+    p.drawing_levels.iter_mut().find(|l| l.id == "eg").unwrap().view_top = Some(2.5);
+    let codes: Vec<String> = p.walls.iter().map(|w| w.category_code.clone()).chain(p.openings.iter().flatten().map(|o| o.category_code.clone())).collect();
+    let run = |p: &Project, scale: f64| -> DomainPrims {
+        let t = serde_json::json!({"floor": "eg", "show": codes, "scale": scale}).to_string();
+        plan_domains(p, &PlanArgs::parse_in(p, 1.0, &t).unwrap()).unwrap()
+    };
+    let light = |d: &DomainPrims| -> Vec<(Vec2, Vec2)> {
+        d.walls.iter().filter_map(|q| match q {
+            Primitive::Line { a, b, color: Some(c), cls, .. } if c == crate::plan::contrast::CONTRAST_INK && cls == "view-range" => Some((*a, *b)),
+            _ => None,
+        }).collect()
+    };
+    let dark_polys = |d: &DomainPrims| d.walls.iter().filter(|q| matches!(q, Primitive::Polygon { fill, .. } if fill == crate::plan::style::HATCH_INK)).count();
+    let d100 = run(&p, 100.0);
+    let l = light(&d100);
+    assert!(l.len() >= 2, "helle Stücke des Oberlichts: {l:?}");
+    // Alle hellen Stücke liegen in der Wand W1 (Hüllrechteck, Wanddicke grosszügig).
+    let w1 = p.walls.iter().find(|w| w.id == "W1").unwrap();
+    let (x0, x1) = (w1.start.x.min(w1.end.x) - 0.5, w1.start.x.max(w1.end.x) + 0.5);
+    let (y0, y1) = (w1.start.y.min(w1.end.y) - 0.5, w1.start.y.max(w1.end.y) + 0.5);
+    assert!(l.iter().all(|(a, b)| [a, b].iter().all(|q| q.x >= x0 && q.x <= x1 && q.y >= y0 && q.y <= y1)), "{l:?}");
+    // Die hellen Stücke liegen nach allen schwarzen Flächen (darüber gezeichnet).
+    let last_dark = d100.walls.iter().rposition(|q| matches!(q, Primitive::Polygon { fill, .. } if fill == crate::plan::style::HATCH_INK)).unwrap();
+    let first_light = d100.walls.iter().position(|q| matches!(q, Primitive::Line { color: Some(c), .. } if c == crate::plan::contrast::CONTRAST_INK)).unwrap();
+    assert!(first_light > last_dark);
+    // Abschaltbar; die Wand bleibt dieselbe.
+    let off = with_mv(p.clone(), serde_json::json!({"baseDetail": "mittel", "walls": {"contrastOnSolid": false}}));
+    let d_off = run(&off, 100.0);
+    assert!(light(&d_off).is_empty());
+    assert_eq!(dark_polys(&d_off), dark_polys(&d100));
+    // 1:50: Schichten mit heller Füllung, nichts wird weiss.
+    assert!(light(&run(&p, 50.0)).is_empty());
+}

@@ -10,7 +10,7 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   stehen im Archiv („Bewusst nicht übernommen“).
 - **Grösse** (eine Person mit Agenten): S ≤ 1 Tag · M ≤ 1 Woche · L ≤ 1 Monat · XL > 1 Monat.
   Steht keine Grösse im Archiv, ist sie hier geschätzt.
-- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 258);
+- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 259);
   nie eine ID wiederverwenden oder umnummerieren. Präfix-IDs (`[K]`, `[G]`, `[T]`, `[B]`, `[C]`) bleiben.
 - **Pro Punkt:** was fehlt · wo im Code · Grösse. Höchstens ein bis drei Sätze je Punkt;
   Messwerte und Befunde gehören in den Commit.
@@ -340,7 +340,12 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   (`sunStudy.show`), unverändert; Wettbewerb-Schnitt ohne Gelände: Nachbar bleibt (hellgrau) weit neben dem Haus; `levelMarkers.ts`-Doppelspur
   (braucht eine Kern-Abfrage mit Plan-Puffer als Eingabe); Stempel „Schlafen" DG 80 %. **14.11. (spät):** Klassen-Füllung im Klassen-Dialog
   editierbar (Farbwähler + „keine", Inline-Editor und macOS-Ebenenfenster; Ziehen = ein Undo-Schritt; Test `categoryFill.test.ts`); nur vitest/tsc,
-  nicht in der Tauri-App angesehen. · M
+  nicht in der Tauri-App angesehen. **14.11. (Befund 6, Vorschlag umschaltbar, Entscheid Maintainer offen):** Öffnungen über/unter der
+  Schnitthöhe in geschlossener Wand (DG-Rundfenster 1.8 m, EG-Bad-Fenster, EG-Rundfenster) bleiben strichpunktiert, der Teil auf der
+  schwarzen 1:100-Sammelfläche wird weiss (SIA-Praxis), ausserhalb unverändert, Bemassung bleibt. Über die Plan-Primitive (`plan/contrast.rs`:
+  Linien/Bögen an dunklen Flächen zerlegt, helle Stücke über allen Füllungen) — Bildschirm, Plan-SVG, Druck-SVG/PDF, DXF (Echtfarbe weiss)
+  bekommen dieselben Stücke; 1:50 (helle Schichten) unverändert. Abschaltbar: Modelldarstellung `walls.contrastOnSolid` (Basis an).
+  Tests `contrast::tests`, `ueber_schnitt_hell_auf_schwarzer_wand`; Goldens nachgeführt. Geprüft nur Linux/CLI-SVG `--hatch` in Chromium. · M
 - Fachplaner-Austausch: DXF/DWG je Geschoss/Schnitt/Ansicht ([200]), IFC mit Räumen/Psets ([201]); Rundreise in Archicad/Revit einmal
   real prüfen ([C9]).
 - ◐ **[259]** IFC-Export für Fachplaner (Vorprojekt, 14.11.). Alle drei Beispielprojekte mit ifcopenshell 0.9 geprüft: `validate-ifc.py`

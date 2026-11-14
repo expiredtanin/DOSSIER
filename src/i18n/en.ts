@@ -1344,6 +1344,7 @@ export const en: Record<TranslationKey, string> = {
   "resources.modelViews.opt.walls.thinLayerMm": "Merge thin layers below",
   "resources.modelViews.opt.walls.reveals": "Layer reveal",
   "resources.modelViews.opt.walls.cutHatch": "Hatch cut faces from 1:100",
+  "resources.modelViews.opt.walls.contrastOnSolid": "Openings above/below cut drawn light on solid walls",
   "resources.modelViews.opt.slabs.floorFinish": "Floor finish",
   "resources.modelViews.opt.sectionMarks.style": "Section marker type",
   "resources.modelViews.val.arrow": "Arrow",
