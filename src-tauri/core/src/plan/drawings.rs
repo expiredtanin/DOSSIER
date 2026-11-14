@@ -228,6 +228,7 @@ pub fn shape_name(g: &Drawing2DGeom) -> &'static str {
         Drawing2DGeom::Grid { .. } => "grid",
         Drawing2DGeom::Text { .. } => "text",
         Drawing2DGeom::Block { .. } => "block",
+        Drawing2DGeom::Libobj { .. } => "libobj",
         Drawing2DGeom::Image { .. } => "image",
     }
 }
@@ -951,6 +952,21 @@ fn emit_inner(c: &Ctx, d: &Drawing2D, attrs: Attrs, geom: &Drawing2DGeom, greyed
                 emit(c, d, attrs, &g2, greyed, scale, em.sink, depth + 1)?;
             }
         }
+        Drawing2DGeom::Libobj { lib_id, at, rotation, params, seed } => {
+            // [253] Objekt der Bibliothek: Linien nach Detailgrad erzeugen, drehen, verschieben, wie ein Block ausgeben.
+            if depth >= MAX_BLOCK_DEPTH {
+                return Ok(());
+            }
+            let none = std::collections::BTreeMap::new();
+            let local = crate::furniture_lib::geometry_for(lib_id, params.as_ref().unwrap_or(&none), c.a.detail, seed.unwrap_or(0));
+            let (cs, sn) = (jsnum::cos(*rotation), jsnum::sin(*rotation));
+            let at = *at;
+            let xf = move |q: Vec2| v(at.x + q.x * cs - q.y * sn, at.y + q.x * sn + q.y * cs);
+            for sub in &local {
+                let g2 = scale_geom(sub, &xf, 1.0);
+                emit(c, d, attrs, &g2, greyed, scale, em.sink, depth + 1)?;
+            }
+        }
         Drawing2DGeom::Image { min, max, src, opacity } => {
             em.sink.push(Primitive::DrawingImage { min: *min, max: *max, src: src.clone(), opacity: opacity.unwrap_or(1.0), drawing_id: Some(d.id.clone()), greyed: Some(greyed) }, 0);
         }
@@ -1510,6 +1526,12 @@ pub fn mv_geom(g: &Drawing2DGeom, f: &dyn Fn(Vec2) -> Vec2) -> Drawing2DGeom {
             let nt = f(tip);
             G::Block { block_def_id: block_def_id.clone(), at: nb, rotation: jsnum::atan2(nt.y - nb.y, nt.x - nb.x), scale: *scale }
         }
+        G::Libobj { lib_id, at, rotation, params, seed } => {
+            let tip = v(at.x + jsnum::cos(*rotation), at.y + jsnum::sin(*rotation));
+            let nb = f(*at);
+            let nt = f(tip);
+            G::Libobj { lib_id: lib_id.clone(), at: nb, rotation: jsnum::atan2(nt.y - nb.y, nt.x - nb.x), params: params.clone(), seed: *seed }
+        }
         G::Image { min, max, src, opacity } => {
             let old = v((min.x + max.x) / 2.0, (min.y + max.y) / 2.0);
             let new = f(old);
@@ -1547,6 +1569,18 @@ pub fn scale_geom(g: &Drawing2DGeom, f: &dyn Fn(Vec2) -> Vec2, k: f64) -> Drawin
         }
         G::Scalebar { segment_length, .. } => *segment_length *= k,
         G::Block { scale, .. } => *scale = Some(scale.unwrap_or(1.0) * k),
+        G::Libobj { params, .. } => {
+            // Masse (Längen) wachsen mit; Anzahl, Flags, Unordnung bleiben.
+            if let Some(m) = params {
+                for key in ["w", "d"] {
+                    if let Some(x) = m.get_mut(key) {
+                        if let Some(n) = x.as_f64() {
+                            *x = serde_json::json!(n * k);
+                        }
+                    }
+                }
+            }
+        }
         _ => {}
     }
     out
@@ -1635,7 +1669,7 @@ fn acc_bounds(g: &Drawing2DGeom, b: &mut Bounds) {
             acc(at);
             acc(&v(at.x + segment_length * segments, at.y));
         }
-        G::Xline { .. } | G::Ray { .. } | G::Block { .. } => {}
+        G::Xline { .. } | G::Ray { .. } | G::Block { .. } | G::Libobj { .. } => {}
     }
 }
 
@@ -1969,7 +2003,7 @@ pub fn closed_rings_by_class_ids(c: &Ctx, pred: impl Fn(&str) -> bool) -> Vec<(S
 /// [140] Zeichnungsarten, denen Raumstempel ausweichen (Bemassung, Koten, Texte, Symbole/Möbel als Blöcke,
 /// Detailverweise, Punktmarken). Linien, Flächen, Raster und Bilder nicht: sie laufen oft durch ganze Räume.
 pub fn is_stamp_obstacle(g: &Drawing2DGeom) -> bool {
-    matches!(g, Drawing2DGeom::Dimension { .. } | Drawing2DGeom::Kote { .. } | Drawing2DGeom::Text { .. } | Drawing2DGeom::Block { .. } | Drawing2DGeom::Detailref { .. } | Drawing2DGeom::Pointmarker { .. })
+    matches!(g, Drawing2DGeom::Dimension { .. } | Drawing2DGeom::Kote { .. } | Drawing2DGeom::Text { .. } | Drawing2DGeom::Block { .. } | Drawing2DGeom::Libobj { .. } | Drawing2DGeom::Detailref { .. } | Drawing2DGeom::Pointmarker { .. })
 }
 
 /// [140] Primitive der gezeichneten Zeichnungen des Geschosses, denen Raumstempel ausweichen
@@ -2029,7 +2063,15 @@ fn prims_where(c: &Ctx, pred: impl Fn(&Drawing2DGeom) -> bool) -> Vec<Primitive>
 pub fn block_footprints(c: &Ctx) -> Vec<Vec<[f64; 2]>> {
     let mut memo = Memo::default();
     let mut res = Vec::new();
-    for d in c.p.drawings2d.iter().filter(|d| matches!(d.geom, Drawing2DGeom::Block { .. }) && on_floor(c, d)) {
+    for d in c.p.drawings2d.iter().filter(|d| {
+        // [253] Objekte der Bibliothek ausser Aussenraum (Auto, Parkfeld, Wendekreis) sparen den Belag aus.
+        let drawn = match &d.geom {
+            Drawing2DGeom::Block { .. } => true,
+            Drawing2DGeom::Libobj { lib_id, .. } => crate::furniture_lib::find(lib_id).is_none_or(|o| o.def().cat != crate::furniture_lib::Cat::Outdoor),
+            _ => false,
+        };
+        drawn && on_floor(c, d)
+    }) {
         let m = memo.get(c, d);
         if !m.shown {
             continue;
@@ -2708,6 +2750,32 @@ mod tests {
         let s = serde_json::to_string(&out[1]).unwrap();
         assert!(s.contains("\"color\":\"#0a0a0a\"") && s.contains("\"weightMm\":0.5") && s.contains("\"dash\":null"), "{s}");
         assert!(matches!(out[0], Primitive::Polygon { .. }));
+    }
+
+    /// [253] Objekt der Bibliothek: Detailgrad (grob < mittel < fein) wie bei Fenstern/Türen, Lage und Drehung,
+    /// unbekannte Id = Platzhalter, ein Objekt mit Parametern ändert das Mass.
+    #[test]
+    fn libobj_nach_detailgrad_lage_und_platzhalter() {
+        let p = project(serde_json::json!({}));
+        let lines_at = |detail: f64, geom: serde_json::Value| -> Vec<Primitive> {
+            let d: Drawing2D = serde_json::from_value(drawing(geom)).unwrap();
+            let a = PlanArgs::parse(detail, r#"{"floor":"eg","show":["20"],"scale":100}"#).unwrap();
+            let c = Ctx::new(&p, &a);
+            let mut out = Out::default();
+            emit(&c, &d, Attrs::of(&c, &d), &d.geom, false, 100.0, &mut Sink::new(Target::Vec(&mut out), Keep::All), 0).unwrap();
+            out.prims.into_iter().filter(|q| matches!(q, Primitive::Line { .. })).collect()
+        };
+        let wc = |detail: f64| lines_at(detail, serde_json::json!({"shape": "libobj", "libId": "lib:wc-wand", "at": {"x": 5, "y": 5}, "rotation": 0}));
+        let (g, m, f) = (wc(0.0).len(), wc(1.0).len(), wc(2.0).len());
+        assert!(g > 0 && g <= m && m < f, "{g} {m} {f}");
+        // Gedreht um 90°: die Tiefe 0.55 liegt nun in x (Wandseite bei x = 5, Bug nach links).
+        let rot = lines_at(1.0, serde_json::json!({"shape": "libobj", "libId": "lib:wc-wand", "at": {"x": 5, "y": 5}, "rotation": std::f64::consts::FRAC_PI_2}));
+        let xs: Vec<f64> = rot.iter().filter_map(|q| if let Primitive::Line { a, b, .. } = q { Some([a.x, b.x]) } else { None }).flatten().collect();
+        let (lo, hi) = xs.iter().fold((f64::MAX, f64::MIN), |(l, h), x| (l.min(*x), h.max(*x)));
+        assert!((hi - 5.0).abs() < 1e-6 && (lo - 4.45).abs() < 1e-3, "{lo} {hi}");
+        // Unbekannte Id: Rahmen mit Diagonalen statt Fehler.
+        let ghost = lines_at(1.0, serde_json::json!({"shape": "libobj", "libId": "lib:zukunft", "at": {"x": 0, "y": 0}, "rotation": 0}));
+        assert_eq!(ghost.len(), 6);
     }
 
     #[test]

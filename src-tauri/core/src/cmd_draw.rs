@@ -880,6 +880,30 @@ fn block_ops(v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
     )
 }
 
+/// [253] Objekt der Bibliothek setzen: Instanz `{shape: "libobj", libId, at, rotation, params, seed}` auf der Klasse
+/// des Objekts (Möbel, Sanitär, Fahrzeuge & Freiflächen); fehlt die Klasse im Projekt, kommt sie im selben Schritt dazu
+/// (ein Undo-Schritt). Der Seed folgt aus der Element-Id (gleiche Id = gleiche Stühle).
+fn libobj_ops(root: &Map<String, Value>, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
+    let lib = s_of(v, "lib");
+    let Some(def) = crate::furniture_lib::find(lib).map(|o| o.def()) else { return Vec::new() };
+    let id = id_or_new(v, ids);
+    let seed = id.bytes().fold(2166136261u32, |h, b| (h ^ b as u32).wrapping_mul(16777619));
+    let mut f = vec![("shape", s("libobj")), ("libId", s(lib)), ("at", pt_val(v, "at")), ("rotation", js_num(n_of(v, "rotation"))), ("seed", js_num(seed as f64))];
+    if let Some(m) = v.get("params").filter(|m| m.as_object().is_some_and(|o| !o.is_empty())) {
+        f.push(("params", m.clone()));
+    }
+    let c = Ctx { level: ctx.level, floor_height: ctx.floor_height, cat: def.cat.code(), wall_type: ctx.wall_type, text_height: ctx.text_height, symbol: ctx.symbol };
+    let mut ops = add_op("drawings2d", vec![drawing(id, &c, obj(f))]);
+    let layers = arr(root.get("layers"));
+    if !crate::standards::has_category(layers, def.cat.code(), &def.cat.name().to_lowercase()) {
+        let (_, code, name, color, lw) = crate::furniture_lib::CATEGORIES.iter().find(|c| c.0 == def.cat).copied().unwrap_or(crate::furniture_lib::CATEGORIES[0]);
+        let mut all = layers.to_vec();
+        all.push(json!({"code": code, "name": name, "color": color, "lw": lw, "visible": true, "locked": false}));
+        ops.push(Op::SetField { key: "layers".into(), value: Some(Value::Array(all)), at: None });
+    }
+    ops
+}
+
 // ═════════════════════════════════════════════════════════════════════════════
 // Bemassung
 // ═════════════════════════════════════════════════════════════════════════════
@@ -1350,6 +1374,7 @@ pub fn ops(root: &Map<String, Value>, p: &Project, v: &Value, ctx: &Ctx, ids: &m
         ),
         "pointmarker" => add_drawing(v, ctx, ids, obj(vec![("shape", s("pointmarker")), ("at", pt_val(v, "at"))])),
         "block" => block_ops(v, ctx, ids),
+        "libobj" => libobj_ops(root, v, ctx, ids),
         "grid" => match grid_geom(v) {
             Some(g) => add_drawing(v, ctx, ids, g),
             None => Vec::new(),

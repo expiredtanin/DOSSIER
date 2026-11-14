@@ -34,6 +34,7 @@ import { TreeSection } from "./objectInfo/TreeSection";
 import { CameraSection } from "./objectInfo/CameraSection";
 import { ViewShadowsInfo, MeasurementSection } from "./objectInfo/InfoBlocks";
 import { DimensionField, RotateField } from "./objectInfo/fields";
+import { LibObjectSection } from "./objectInfo/LibObjectSection";
 import { elementDimensions } from "./objectInfo/elementDims";
 import { InfoGroups, hasInfoGroups } from "./objectInfo/InfoGroups";
 import { infoGroupFrame, useInfoGroupState } from "./objectInfo/InfoGroup";
@@ -262,6 +263,9 @@ export function ObjectInfoPanel({ showPlacement = true }: { showPlacement?: bool
                 <span className="objinfo-fval">{len(d.value).toFixed(u.digits)} {u.suffix}</span>
               </div>
             ))
+          ) : rawDrawing?.geom.shape === "libobj" ? (
+            // [253] Bibliotheks-Objekt: Masse und Parameter generisch aus dem Katalog.
+            <LibObjectSection drawing={rawDrawing} geom={rawDrawing.geom} />
           ) : (
             <>
               <DimensionField

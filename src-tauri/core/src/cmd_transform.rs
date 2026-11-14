@@ -202,13 +202,21 @@ pub fn mv_geom(g: &Value, xf: &Xf) -> Option<Value> {
             }
             with_opt(g, f)
         }
-        "block" => {
+        "block" | "libobj" => {
             // Winkel aus einem mit abgebildeten Richtungspunkt: Drehen/Spiegeln nehmen die Ausrichtung mit.
             let (ax, ay) = xy(field(g, "at").unwrap_or(&Value::Null));
             let rot = num_of(field(g, "rotation"));
             let nb = xf.apply(ax, ay);
             let nt = xf.apply(ax + jsnum::cos(rot), ay + jsnum::sin(rot));
-            with_all(g, vec![("at", pt(nb.0, nb.1)), ("rotation", js_num(jsnum::atan2(nt.1 - nb.1, nt.0 - nb.0)))])
+            let mut f = vec![("at", pt(nb.0, nb.1)), ("rotation", js_num(jsnum::atan2(nt.1 - nb.1, nt.0 - nb.0)))];
+            // [253] Eine Spiegelung kehrt das Objekt um (Parameter `mirror`).
+            if shape(g) == "libobj" && xf.reverses() {
+                let mut params = field(g, "params").and_then(Value::as_object).cloned().unwrap_or_default();
+                let on = params.get("mirror").is_some_and(|v| v.as_bool() == Some(true));
+                params.insert("mirror".into(), Value::Bool(!on));
+                f.push(("params", Value::Object(params)));
+            }
+            with_all(g, f)
         }
         "image" => {
             // Nur die Lage folgt (die Box bleibt achsparallel und unverzerrt).
@@ -252,6 +260,18 @@ pub fn scale_geom(g: &Value, xf: &Xf, k: f64) -> Option<Value> {
         }
         "scalebar" => with(&g, "segmentLength", times("segmentLength")),
         "block" => with(&g, "scale", js_num(num_or(field(&g, "scale"), 1.0) * k)),
+        "libobj" => {
+            // [253] Längen-Parameter (Breite, Tiefe) wachsen mit.
+            let mut params = field(&g, "params").and_then(Value::as_object).cloned().unwrap_or_default();
+            let def = field(&g, "libId").and_then(Value::as_str).and_then(crate::furniture_lib::find).map(|o| o.def());
+            for key in ["w", "d"] {
+                let dflt = def.and_then(|d| d.params.iter().find(|q| q.key == key)).map(|q| q.default);
+                if let Some(x) = params.get(key).and_then(Value::as_f64).or(dflt) {
+                    params.insert(key.into(), js_num(x * k));
+                }
+            }
+            with(&g, "params", Value::Object(params))
+        }
         _ => g,
     })
 }

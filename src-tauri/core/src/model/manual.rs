@@ -599,6 +599,25 @@ pub enum Drawing2DGeom {
         #[ts(optional)]
         scale: Option<f64>,
     },
+    /// Objekt der Bibliothek ([253], `furniture_lib.rs`): Katalog-Id + offene Parameter-Map; der Kern erzeugt die
+    /// Linien zur Plan-Zeit nach Detailgrad. Keine objektspezifischen Felder (spätere eigene Objekte [254]);
+    /// unbekannte `libId` zeichnet einen Platzhalter-Rahmen. `at` = Einfügepunkt (je Objekt Wandseite Mitte oder
+    /// Mittelpunkt), `rotation` in Radiant (CCW).
+    #[serde(rename = "libobj")]
+    Libobj {
+        #[serde(rename = "libId")]
+        lib_id: String,
+        at: Vec2,
+        rotation: f64,
+        /// Parameter (Name → Zahl/Bool/Text), z. B. `w`, `d`, `n`, `mirror`, `mess`; fehlend = Vorgabe des Objekts.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional, type = "Record<string, number | boolean | string>")]
+        params: Option<std::collections::BTreeMap<String, serde_json::Value>>,
+        /// Seed für zufällige Anteile (Unordnung der Stühle): gleicher Seed = gleiche Geometrie.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        seed: Option<u32>,
+    },
     #[serde(rename = "image")]
     Image {
         /// Obere-linke Ecke der Bild-Box (Modell-Meter).

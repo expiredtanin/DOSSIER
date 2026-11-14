@@ -47,6 +47,7 @@ mod area_report;
 mod rich_text;
 mod geo_mesh;
 mod opening_presets;
+mod furniture_lib;
 mod solid_bool;
 mod line_pattern;
 

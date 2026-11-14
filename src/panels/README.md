@@ -28,6 +28,7 @@ Kern; hier stehen Eingabe und Darstellung. Zustand über den Store (`src/state`)
 | `SitePanel.tsx` | Aktionen zu Gelände und Lage (Import, Gelände erzeugen, Baugrube; keine Import-Liste, [181]), mit `SiteRulesSection.tsx` (Baurecht), `SunStudySection.tsx` (Schatten) und `PointCloudSection.tsx` |
 | `BcfPanel.tsx`, `ClashPanel.tsx` | BCF-Themen und Kollisionsliste; Sitzungszustand in `bcfSession.ts` und `clashSession.ts` |
 | `HistoryPanel.tsx` | Undo-Verlauf mit Sprung auf einen Schritt |
+| `ObjectLibraryPanel.tsx` | Palette „Objekte" ([253]): Standard-Symbole 2D nach Gruppen, Klick startet den Befehl `libobj`; Parameter später in `objectInfo/LibObjectSection.tsx` |
 
 ## Reine Helfer
 

@@ -45,7 +45,8 @@ import type {
 // Attribute darunter (Vectorworks-Bild aus v6, vor dem Ribbon-UI-Phase-3-Bump).
 // v13 ([238]): rechts oben (Objekt-Info/Flächenbilanz) bekommt mehr Höhe: Gewichte 1,6 : 1 statt 1 : 1,5 (die
 // Flächenbilanz mit Raumprogramm war nur ~300 px hoch). Die Höhe merkt sich der Gruppen-Splitter (`resizeGroups`).
-export const LAYOUT_VERSION = 13;
+// v14 ([253]): Objekt-Bibliothek ("object-library") als Tab neben den Werkzeugen links oben.
+export const LAYOUT_VERSION = 14;
 
 /** localStorage-Schlüssel des zuletzt benutzten Layouts. */
 const CURRENT_KEY = "cad.layout";
@@ -73,7 +74,7 @@ const NAMED_PREFIX = "cad.layouts.";
 // der Attribute-Palette darunter (Vectorworks-Bild). Das Ribbon-Band bleibt als
 // Reiter erreichbar, ist aber nicht mehr der primäre Weg zu den Werkzeugen.
 const DEFAULT_LEFT_GROUPS: DockGroup[] = [
-  { tabs: ["tools"], activeTab: "tools", weight: 1 },
+  { tabs: ["tools", "object-library"], activeTab: "tools", weight: 1 },
   { tabs: ["attributes"], activeTab: "attributes", weight: 1 },
 ];
 const DEFAULT_RIGHT_GROUPS: DockGroup[] = [
