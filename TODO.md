@@ -196,8 +196,12 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   sie stehen): das Paket enthält das gewachsene Gelände ohne Aushub (`MeshOptions.backfilled`, Kern `mesh_data.rs`, 4. Argument von
   `meshExportData`, `excavation::terrain_original_mesh`), das normale 3D und die Klasse „07 Baugrube“ bleiben unberührt. Geprüft: Rust-Tests
   (`context_ground`, `mesh_data`), vitest (Paket, Szene, Store, Beispielprojekt), echter Cycles-Lauf mit `bpy` (CPU) vorher/nachher.
-  **Offen:** Nachbarn ausserhalb des Geländenetzes (Musterhaus: Nordhäuser, ≤ 0.3 m über dem Hang) bleiben auf z = 0; Gelände im Rendering ist das
-  gewachsene Terrain, auch innerhalb des Grundrisses (steigt es dort über die Bodenplatte, schneidet es durch); nicht in der Tauri-App/auf dem
+  14.11.: Nordhäuser des Musterhauses stehen bereits auf der Randhöhe (−0.35 m, Netzrand y = 21, Häuser bei y 34–43; Angabe „z = 0“ war veraltet);
+  Test „teilweise ausserhalb“ ergänzt (nur der Teil im Netz bestimmt den Fuss). Hinterfüllt schneidet das Gelände nicht mehr durchs Haus:
+  `terrain_original_mesh` schneidet es innerhalb der untersten Bodenplatten (Decken mit UK ≤ tiefste UK + 1 m) senkrecht auf deren UK aus
+  (`excavate` mit künstlicher Spundwand-Baugrube; Test `hinterfuellt_schneidet_nicht_durchs_haus`). **Offen:** Fortsetzung des Geländes
+  ausserhalb des Netzes ist flach (Randhöhe), keine Neigungsfortsetzung; Bodenplatten mit Löchern/Wand-Fundamente schneiden nicht aus;
+  nicht in der Tauri-App/auf dem
   Mac, Dialog nicht im Browser geklickt. · S
 - ◐ **[207]** Schwarzplan / Situationsplan 1:500 (12.11.): Modelldarstellung mit `situation` (`ModelViewOption.situation`, Kern
   `plan/situation.rs`) ersetzt im Grundriss die Bauteile durch den gefüllten Umriss des eigenen Gebäudes (Wände/Decken/Körper ab

@@ -928,10 +928,57 @@ pub fn terrain_model_mesh<'a>(p: &Project, t: &'a TerrainMesh) -> (std::borrow::
     (Cow::Owned(pos), Cow::Owned(idx), st.modified.is_some())
 }
 
-/// [227] Das gewachsene Gelände-Netz im Modellbezug, ohne Baugruben (hinterfüllt, z. B. für Bilder).
+/// [227] Bodenplatten, die das Gelände im hinterfüllten Rendering ausschneiden: Decken, deren UK höchstens
+/// `SLAB_BAND` über der tiefsten Decken-UK liegt; (Umriss gegen den Uhrzeigersinn, UK im Modellbezug).
+const SLAB_BAND: f64 = 1.0;
+
+fn ground_slabs(p: &Project) -> Vec<(Vec<P2>, f64)> {
+    let cs: Vec<(Vec<P2>, f64)> = p
+        .ceilings
+        .as_deref()
+        .unwrap_or(&[])
+        .iter()
+        .filter_map(|c| {
+            let mut ring = c.ring_xy();
+            let uk = p.ceiling_vertical_extent(c).0;
+            (ring.len() >= 3 && uk.is_finite() && ring.iter().all(|v| v[0].is_finite() && v[1].is_finite()) && signed_area(&ring).abs() > 1e-6).then(|| {
+                if signed_area(&ring) < 0.0 {
+                    ring.reverse();
+                }
+                (ring, uk)
+            })
+        })
+        .collect();
+    let low = cs.iter().map(|c| c.1).fold(f64::INFINITY, f64::min);
+    cs.into_iter().filter(|c| c.1 <= low + SLAB_BAND).collect()
+}
+
+/// [227] Das gewachsene Gelände-Netz im Modellbezug, ohne Baugruben (hinterfüllt, z. B. für Bilder). Innerhalb der
+/// untersten Bodenplatten liegt das Gelände höchstens auf deren UK (senkrecht ausgeschnitten), damit es nicht durchs Haus schneidet.
 pub fn terrain_original_mesh(p: &Project, t: &TerrainMesh) -> (std::borrow::Cow<'static, [f64]>, std::borrow::Cow<'static, [f64]>, bool) {
     let st = site_terrain(p, t);
-    let (pos, idx) = st.orig.to_flat(-st.datum);
+    let mut cur: Option<Tin> = None;
+    for (ring, uk) in ground_slabs(p) {
+        let n = ring.len();
+        let spec = ExSpec {
+            smooth: vec![false; n],
+            bottom: uk + st.datum,
+            cut_tan: vec![tan_deg(89.5); n],
+            shored: vec![true; n],
+            shore_kind: "sheetPile",
+            shore_t: 0.0,
+            base: ring.clone(),
+            ring,
+            ws: 0.0,
+            fill_tan: tan_deg(89.5),
+            berm_w: 0.0,
+            berm_h: 0.0,
+        };
+        if let Some(r) = excavate(cur.as_ref().unwrap_or(&st.orig), &spec) {
+            cur = Some(r.tin);
+        }
+    }
+    let (pos, idx) = cur.as_ref().unwrap_or(&st.orig).to_flat(-st.datum);
     (std::borrow::Cow::Owned(pos), std::borrow::Cow::Owned(idx), false)
 }
 
@@ -1281,6 +1328,36 @@ mod tests {
             slope: Some(45.0),
             ..Default::default()
         }
+    }
+
+    /// [227] Hinterfüllt: das Gelände liegt innerhalb der untersten Bodenplatte nicht über deren UK, ausserhalb unverändert.
+    #[test]
+    fn hinterfuellt_schneidet_nicht_durchs_haus() {
+        let mut p: Project = serde_json::from_str(include_str!("../tests/fixtures/sample_project.json")).unwrap();
+        let (uk, _) = p.ceiling_vertical_extent(&p.ceilings.as_ref().unwrap()[0]);
+        // Gelände 1.5 m über der Plattenunterkante, 100 × 100 m.
+        let h = uk + 1.5;
+        let pos = vec![-50.0, -50.0, h, 50.0, -50.0, h, 50.0, 50.0, h, -50.0, 50.0, h];
+        let t = TerrainMesh { id: "g".into(), positions: pos, indices: vec![0.0, 1.0, 2.0, 0.0, 2.0, 3.0], ..Default::default() };
+        p.context = Some(vec![ContextObject::TerrainMesh(t.clone())]);
+        let (pos, idx, _) = terrain_original_mesh(&p, &t);
+        let tin = Tin::from_flat(&pos, &idx);
+        let ix = TinIndex::new(&tin);
+        // Innerhalb (Platte 0..5 × 0..4): höchstens UK (kein Dreieck darüber).
+        for (x, y) in [(0.3, 0.3), (2.5, 2.0), (4.7, 3.7), (1.0, 3.5)] {
+            let z = ix.z_at(x, y).unwrap();
+            assert!(z <= uk + 1e-6, "({x},{y}) z={z} uk={uk}");
+        }
+        // Alle Dreiecke, deren Schwerpunkt im Grundriss liegt, nicht über UK.
+        for tr in &tin.tris {
+            let c = tr.iter().fold([0.0, 0.0, 0.0], |a, &k| [a[0] + tin.xy[k as usize][0] / 3.0, a[1] + tin.xy[k as usize][1] / 3.0, a[2].max(tin.z[k as usize])]);
+            if c[0] > 0.01 && c[0] < 4.99 && c[1] > 0.01 && c[1] < 3.99 {
+                assert!(c[2] <= uk + 1e-6, "Dreieck über UK: {c:?}");
+            }
+        }
+        // Ausserhalb unverändert.
+        assert!((ix.z_at(20.0, 20.0).unwrap() - h).abs() < 1e-9);
+        assert!((ix.z_at(-8.0, 2.0).unwrap() - h).abs() < 1e-9);
     }
 
     #[test]
