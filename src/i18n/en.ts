@@ -2498,7 +2498,7 @@ export const en: Record<TranslationKey, string> = {
   "cmd.join.met": "Nothing to join: the walls already meet.",
   "cmd.join.cross": "Nothing to join: the walls cross each other.",
   "cmd.join.parallel": "Nothing to join: the walls are parallel.",
-  "cmd.join.arc": "Nothing to join: curved walls are not joined at corners.",
+  "cmd.join.arc": "Nothing to join: the curved wall and the other wall do not meet, even when extended.",
   "cmd.join.locked": "Nothing to join: the walls are locked.",
   "cmd.join.floors": "Nothing to join: the walls are on different floors.",
   "edit.cutSegment.label": "Delete segment",
