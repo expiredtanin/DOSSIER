@@ -10,7 +10,7 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   stehen im Archiv („Bewusst nicht übernommen“).
 - **Grösse** (eine Person mit Agenten): S ≤ 1 Tag · M ≤ 1 Woche · L ≤ 1 Monat · XL > 1 Monat.
   Steht keine Grösse im Archiv, ist sie hier geschätzt.
-- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 251);
+- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 252);
   nie eine ID wiederverwenden oder umnummerieren. Präfix-IDs (`[K]`, `[G]`, `[T]`, `[B]`, `[C]`) bleiben.
 - **Pro Punkt:** was fehlt · wo im Code · Grösse. Höchstens ein bis drei Sätze je Punkt;
   Messwerte und Befunde gehören in den Commit.
@@ -54,7 +54,9 @@ Raumprogramm gegen Modell → Grundrisse/Schnitte/Ansichten 1:200 (Vorprojekt 1:
 3D-Bilder/Axonometrie/Schatten → Flächen/Volumen SIA 416 und Kennzahlen → Kostenschätzung grob → Abgabe-Layouts (Plakate A0/A1,
 Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
 
-### Phase 1 (13.–19.11.): Stabil und baubar
+#- ○ **[252]** Entscheide Maintainer 14.11.: (1) „Geschoss“ heisst im Englischen durchgehend **floor** (en.ts vereinheitlichen, „storey“ ersetzen; Fachbegriffe wie „storey height“ → „floor height“). (2) **Tab bleibt immer für die Befehlszeile** (kein Tab-Durchlauf durch Dock-Knöpfe); **Ctrl+Tab / Ctrl+Umschalt+Tab** springt durch die Reiter (Grundriss/3D/Schnitt …). · S
+
+## Phase 1 (13.–19.11.): Stabil und baubar
 - ◐ **[206]** Referenz-Ablauf als e2e-Spec (Browser) und als Checkliste für die Mac-Abnahme (`doc/RELEASE-1.0.md`): jeder Schritt
   oben ein Test; was fehlt, wird hier als Aufgabe eingetragen. · M
   Umgesetzt (12.11.): `e2e/release10.spec.ts` spielt leeres Projekt → Kataster-DXF (LV95) → Baurecht → Wände/Decke/Dach → Raum +
