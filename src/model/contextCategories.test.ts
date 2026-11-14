@@ -111,7 +111,7 @@ describe("ensureContextCategories", () => {
 
   it("Tabelle im Kern = Definitionen hier (alle Codes)", () => {
     const nested = [TERRAIN_CATEGORY, IMAGE_CATEGORY, GENERIC_IMPORT_CATEGORY, ...Object.values(GEO_CATEGORY_DEFS)];
-    const cat = (c: { code: string; name: string; color: string; lw: number }) => ({ code: c.code, name: c.name, color: c.color, lw: c.lw, visible: true, locked: false });
+    const cat = (c: { code: string; name: string; color: string; lw: number; fill?: string }) => ({ code: c.code, name: c.name, color: c.color, lw: c.lw, visible: true, locked: false, ...(c.fill ? { fill: c.fill } : {}) });
     const out = ensureContextCategories([], [...nested.map((c) => c.code), IMPORTED_ROOF_CATEGORY.code]);
     expect(out).toEqual([{ ...cat(CONTEXT_PARENT_CATEGORY), children: nested.map(cat) }, cat(IMPORTED_ROOF_CATEGORY)]);
   });

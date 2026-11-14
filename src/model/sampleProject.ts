@@ -386,7 +386,7 @@ export const sampleProject: Project = {
       children: [
         { code: "10", name: "Situation", color: "#909090", lw: 0.18, visible: true, locked: false },
         { code: "11", name: "Strasse", color: "#808080", lw: 0.18, visible: true, locked: false },
-        { code: "12", name: "Gebäude", color: "#888888", lw: 0.18, visible: true, locked: false },
+        { code: "12", name: "Gebäude", color: "#888888", lw: 0.18, fill: "#d9d9d9", visible: true, locked: false },
         { code: "13", name: "Bäume", color: "#808080", lw: 0.13, visible: true, locked: false },
         { code: "14", name: "Höhenlinien", color: "#808080", lw: 0.18, visible: true, locked: false },
       ],

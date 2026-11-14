@@ -290,7 +290,27 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   (grau/Umriss?); Sonnenschatten im 1:100-Grundriss (Wettbewerb, komplex); DG-Fenster über der Schnitthöhe bemasst, aber nicht gezeigt (gestrichelt?);
   Stempel „Schlafen" DG auf 80 %; Treppe im Grundriss ohne Schnitt-Bruchlinie über die Laufbreite; Höhenlinien-Koten/Revisionstext auf Masszahlen
   (komplex EG Süd); Kotenwerte doppelt gerechnet in TS und Kern (`levelMarkers.ts` ↔ `level_marker_bounds`, Doppelspur seit [199]). Nicht in der
-  Tauri-App/auf dem Mac angesehen. · M
+  Tauri-App/auf dem Mac angesehen.
+  **14.11. (Fortsetzung):** (a) Nachbargebäude über den Klassen-Stil: neues Modellfeld `LayerCategory.fill` (Vorgabe-Füllung der Klasse),
+  „12 Gebäude" hellgrau `#d9d9d9` (Kern-Tabelle `import_context`, TS `contextCategories.ts`, Beispiele); geschnittene Netze auf einer Klasse mit
+  Füllung im Grundriss (`mesh_plan`) und Schnitt (`CutRules::class`) hellgrau mit Umriss in Klassenfarbe/-stärke statt schwarz, ohne schwere
+  Schnittkante; eine Füllungs-Regel ([33]) geht vor; Situation/Schwarzplan unverändert. Höhenlinien enden an gefüllten Nachbarn
+  (`filled_context_rings`). Im Schnitt enden Netze auf Umgebungsklassen am Geländeende (`clip_context_meshes_to_terrain`; komplex: der
+  schwebende Nachbar entfällt). Tests `nachbargebaeude_im_grundriss_nach_klassenstil`, `nachbargebaeude_hellgrau_und_nur_ueber_dem_gelaende`,
+  `hoehenlinien_enden_am_gefuellten_nachbarn`. (b) Treppen-Bruchlinie war da, aber ihr Zickzack (fest ≤ 6 cm) las sich bei 1:100 als
+  weitere Trittkante: jetzt in Papiergrösse (2 × 1.5 mm, `RunOpts::break_mm`, Test `bruchlinie_zickzack_in_papiergroesse`). (c) Geländekote und
+  Revisionstext im Beispiel komplex lagen von Hand auf den (später erzeugten) Auto-Massketten — unter die Ketten verschoben (vitest
+  `sampleProjectComplex.test.ts`); Höhenlinien-Beschriftungen wichen den Massen schon aus. Von Hand gesetzte Texte verschiebt der Kern
+  bewusst nicht. (d) Standard-Vorlagen: Kameras (92) aus in Präsentation, Eingabe, Ausführung, Situation, Schwarzplan; Sonnenschatten (08) aus
+  in Eingabe/Ausführung, an in der Präsentation (Test `abgabe_vorlagen_ohne_kameras_schatten_nur_praesentation`); komplex: „Grundriss 1:100/1:50"
+  und „Brandschutzplan" ohne 08/92, der Arbeitsplan ohne Vorlage zeigt beides. Goldens (komplex Grundrisse, Situation, Schwarzplan, muster
+  EG, CLI-Grundriss) nachgeführt. Geprüft nur Linux/CLI-SVG in Chromium. **Offen:** DG-Fenster über der Schnitthöhe — sie werden
+  „über Schnitt" strichpunktiert gezeichnet, aber in der schwarzen 1:100-Wand unsichtbar (DG Rundfenster 1.8 m; EG Bad 1.1 m, Rundfenster 1.2 m
+  liegen ebenfalls über 1.0 m): nicht zu bemassen hätte auch diese Bad-Fenster aus den EG/OG-Ketten genommen — Entscheid nötig (hell auf
+  schwarz zeichnen oder Schnitthöhe/Bemassung); Wettbewerb: Geschosse ohne Vorlage, Schatten kommt vom eingeschalteten Sonnenstand
+  (`sunStudy.show`), unverändert; Wettbewerb-Schnitt ohne Gelände: Nachbar bleibt (hellgrau) weit neben dem Haus; `levelMarkers.ts`-Doppelspur
+  (braucht eine Kern-Abfrage mit Plan-Puffer als Eingabe); Stempel „Schlafen" DG 80 %; Klassen-Füllung im Klassen-Dialog noch nicht
+  editierbar. · M
 - Fachplaner-Austausch: DXF/DWG je Geschoss/Schnitt/Ansicht ([200]), IFC mit Räumen/Psets ([201]); Rundreise in Archicad/Revit einmal
   real prüfen ([C9]).
 - ◐ **[255]** Baurecht-Nachweis: Ausnützung gegen Modell als Tabelle (14.11.). Kern `site_proof.rs` (Abfrage `siteProof`) stellt die Vorgaben

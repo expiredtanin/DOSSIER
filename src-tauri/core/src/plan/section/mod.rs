@@ -290,6 +290,9 @@ pub struct CutRules {
     pub terrain_hatch: Option<HatchRender>,
     /// [152] Linien-Aktionen (Farbe, Stärke, Linienstil) je importiertem Netz (`Output::meshes`-Index).
     pub mesh: HashMap<usize, MeshLineStyle>,
+    /// [256] Vorgabe-Stil der Klasse je importiertem Netz (`Output::meshes`-Index): Füllung, Umrissfarbe, -stärke
+    /// (`style::class_cut_style`, z. B. Nachbargebäude hellgrau statt schwarz).
+    pub class: HashMap<usize, (String, String, f64)>,
 }
 
 impl CutRules {
@@ -313,7 +316,8 @@ impl CutRules {
             }
             mesh = rules.into_iter().enumerate().filter_map(|(i, r)| r.filter(|r| r.0.any()).map(|r| (i, MeshLineStyle { color: r.0.color.clone(), weight: r.0.lineweight.filter(|w| w.is_finite() && *w >= 0.0), dash: super::overrides::linetype_dash(p, r.0.linetype_id.as_deref()) }))).collect();
         }
-        CutRules { loose: loose_fill_components(p), ov, terrain, terrain_dash, terrain_hatch, mesh }
+        let class = out.meshes.iter().enumerate().filter_map(|(i, m)| m.category.as_deref().and_then(|k| super::style::class_cut_style(p, k)).map(|s| (i, s))).collect();
+        CutRules { loose: loose_fill_components(p), ov, terrain, terrain_dash, terrain_hatch, mesh, class }
     }
 }
 
@@ -649,6 +653,7 @@ pub(super) fn compute_plane(p: &Project, level: &LevelSpec, bodies: &[BodyMesh],
     let meshes = meshes.iter().map(|m| MeshMeta { id: m.mesh.id.clone(), name: m.mesh.name.clone(), category: Some(m.mesh.category_code.clone()) }).collect();
     let mut out = Output { cuts, visible, hidden, profiles: Vec::new(), earth: Vec::new(), shoring: Vec::new(), terrain_id: None, meshes, mesh_lines, edge_cats };
     append_terrain_profiles(&mut out, p, base, u);
+    clip_context_meshes_to_terrain(&mut out);
     if let Some(s) = strip {
         unfold::clip_output(&mut out, s);
     }

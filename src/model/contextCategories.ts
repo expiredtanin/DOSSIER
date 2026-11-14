@@ -32,6 +32,8 @@ export interface ContextCategoryDef {
   name: string;
   color: string;
   lw: number;
+  /** [256] Vorgabe-Füllung der Klasse (geschnittene Netze, z. B. Nachbargebäude hellgrau). */
+  fill?: string;
 }
 
 /**
@@ -105,7 +107,7 @@ export const IMPORTED_ROOF_CATEGORY: ContextCategoryDef = {
  * als auch die echten swissBUILDINGS3D-Meshes ab (`building`).
  */
 export const GEO_CATEGORY_DEFS: Record<GeoCategory, ContextCategoryDef> = {
-  building: { code: "12", name: "Gebäude", color: "#888888", lw: 0.25 },
+  building: { code: "12", name: "Gebäude", color: "#888888", lw: 0.25, fill: "#d9d9d9" },
   road: { code: "11", name: "Strasse", color: "#808080", lw: 0.18 },
   forest: { code: "04", name: "Wald", color: "#909090", lw: 0.13 },
   parking: { code: "15", name: "Parkplätze", color: "#a0a0a0", lw: 0.13 },

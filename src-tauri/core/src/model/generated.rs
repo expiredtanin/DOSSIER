@@ -2817,6 +2817,12 @@ pub struct LayerCategory {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub hatch: Option<String>,
+    /// [256] Füllfarbe der Klasse (hex) für geschnittene Netzkörper ohne eigene Regel (Grundriss und Schnitt),
+    /// mit Umriss in Klassenfarbe und -stärke — z. B. Nachbargebäude „12 Gebäude" hellgrau statt schwarz.
+    /// Fehlt sie, gilt die Körper-Konvention (ab 1:100 schwarz). Situation/Schwarzplan färben selbst ([207]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub fill: Option<String>,
     /// Unterkategorien (Baum).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]

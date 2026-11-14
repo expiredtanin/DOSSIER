@@ -83,6 +83,8 @@ pub fn plan_context_with(c: &Ctx, out: &mut Vec<Primitive>, drawing_obstacles: &
                 if let Some(s) = &sit {
                     h.extend(super::situation::own_rings(c.p));
                     h.extend(super::situation::context_rings(c, s));
+                } else {
+                    h.extend(filled_context_rings(c));
                 }
                 h
             })
@@ -177,6 +179,24 @@ pub fn plan_context_with(c: &Ctx, out: &mut Vec<Primitive>, drawing_obstacles: &
         }
     }
     out.append(&mut late);
+}
+
+/// [256] Grundflächen der sichtbaren Netze auf Klassen mit Füllung (Nachbargebäude hellgrau, `style::class_cut_style`):
+/// die Höhenlinien enden an ihnen wie am eigenen Haus, statt über die graue Fläche zu laufen.
+fn filled_context_rings(c: &Ctx) -> Vec<Vec<Vec2>> {
+    let mut out = Vec::new();
+    for o in c.p.context.as_deref().unwrap_or(&[]) {
+        let ContextObject::ImportedMesh(m) = o else { continue };
+        if !c.shown(&m.category_code) || super::style::class_cut_style(c.p, &m.category_code).is_none() {
+            continue;
+        }
+        for poly in super::situation::mesh_polygons(&m.positions, &m.indices) {
+            if let Some(r) = poly.first().filter(|r| r.len() >= 3) {
+                out.push(r.iter().map(|q| v2(q[0], q[1])).collect());
+            }
+        }
+    }
+    out
 }
 
 /// [157] Sohle und Böschungsoberkante der Baugruben, die dieser Grundriss zeigt (Gelände sichtbar, Kategorie
@@ -1439,6 +1459,26 @@ mod tests {
         let mut out = Vec::new();
         plan_context(&Ctx::new(&p, &a), &mut out);
         assert!(out.is_empty(), "Gelände samt Höhenlinien und Pick-Fläche ausgeblendet");
+    }
+
+    /// [256] Nachbargebäude auf einer Klasse mit Füllung (hellgrau): die Höhenlinien enden an ihnen; ohne Füllung
+    /// (Umriss) laufen sie weiter.
+    #[test]
+    fn hoehenlinien_enden_am_gefuellten_nachbarn() {
+        let t = TerrainMesh { id: "t".into(), category_code: "02".into(), positions: vec![0.0, 0.0, 0.0, 30.0, 0.0, 3.0, 30.0, 10.0, 3.0, 0.0, 10.0, 0.0], indices: vec![0.0, 1.0, 2.0, 0.0, 2.0, 3.0], contour_interval: Some(0.5), ..Default::default() };
+        let (positions, indices) = crate::mesh_view::tests::cube(12.0, 18.0, -2.0, 12.0, 0.0, 6.0);
+        let nb = ContextObject::ImportedMesh(ImportedMesh { id: "n".into(), category_code: "12".into(), positions, indices, ..Default::default() });
+        let mut p = Project { context: Some(vec![ContextObject::TerrainMesh(t), nb]), ..Default::default() };
+        p.layers = vec![LayerCategory { code: "12".into(), name: "Gebäude".into(), color: "#888888".into(), lw: 0.25, visible: true, fill: Some("#d9d9d9".into()), ..Default::default() }];
+        let a = super::super::domains::PlanArgs::parse(1.0, r#"{"show": ["02", "12"], "scale": 100}"#).unwrap();
+        let inside = |p: &Project| {
+            let mut out = Vec::new();
+            plan_context(&Ctx::new(p, &a), &mut out);
+            out.iter().any(|q| matches!(q, Primitive::Line { a, b, color: Some(c), .. } if c == TERRAIN_INK && (a.x - 15.0).abs() < 1e-6 && (a.y + b.y) / 2.0 > 0.0 && (a.y + b.y) / 2.0 < 10.0))
+        };
+        assert!(!inside(&p), "Höhenlinie im gefüllten Nachbarn");
+        p.layers[0].fill = None;
+        assert!(inside(&p), "ohne Füllung läuft sie durch");
     }
 
     /// [140] Steile Stellen (Stützmauer, Böschung): Höhenlinien enger als 0.6 mm auf dem Papier werden

@@ -126,6 +126,57 @@ pub(super) fn append_mesh_sections(cuts: &mut Vec<Cut>, lines: &mut Vec<(usize, 
     }
 }
 
+/// [256] Netze auf Umgebungsklassen (Nachbargebäude) nur, wo Gelände ist: Schnittflächen, offene Züge und Kanten
+/// enden am Geländeende (u-Bereich der Geländelinie), sonst schweben sie neben dem Gelände. Ohne Geländelinie unverändert.
+pub(super) fn clip_context_meshes_to_terrain(out: &mut Output) {
+    let (lo, hi) = out.profiles.iter().flat_map(|p| p.pts.iter()).fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), q| (lo.min(q[0]), hi.max(q[0])));
+    if !(lo.is_finite() && hi.is_finite() && hi > lo) {
+        return;
+    }
+    let ctx: Vec<bool> = out.meshes.iter().map(|m| m.category.as_deref().is_some_and(crate::import_context::is_context_class)).collect();
+    if !ctx.iter().any(|&c| c) {
+        return;
+    }
+    let is_ctx = |k: Kind, i: usize| k == Kind::Mesh && ctx.get(i).copied().unwrap_or(false);
+    out.cuts = std::mem::take(&mut out.cuts)
+        .into_iter()
+        .filter_map(|mut c| {
+            if !is_ctx(c.kind, c.index) {
+                return Some(c);
+            }
+            let (pts, nse) = unfold::clip_poly_u(&c.pts, c.nse.as_deref(), lo, hi)?;
+            (pts.len() >= 3).then(|| {
+                c.pts = pts;
+                c.nse = nse;
+                c
+            })
+        })
+        .collect();
+    out.mesh_lines = std::mem::take(&mut out.mesh_lines)
+        .into_iter()
+        .flat_map(|(k, pts)| if ctx.get(k).copied().unwrap_or(false) { clip_line_to_u(&pts, lo, hi) } else { vec![pts] }.into_iter().map(move |p| (k, p)))
+        .collect();
+    let clip_edges = |v: Vec<Edge>| -> Vec<Edge> {
+        v.into_iter()
+            .filter_map(|mut e| {
+                if !is_ctx(e.kind, e.index) {
+                    return Some(e);
+                }
+                let (a, b) = if e.a[0] <= e.b[0] { (e.a, e.b) } else { (e.b, e.a) };
+                if b[0] < lo || a[0] > hi {
+                    return None;
+                }
+                let at = |x: f64| if (b[0] - a[0]).abs() < 1e-12 { a } else { [x, a[1] + (b[1] - a[1]) * (x - a[0]) / (b[0] - a[0])] };
+                e.a = if a[0] < lo { at(lo) } else { a };
+                e.b = if b[0] > hi { at(hi) } else { b };
+                Some(e)
+            })
+            .collect()
+    };
+    out.visible = clip_edges(std::mem::take(&mut out.visible));
+    out.hidden = clip_edges(std::mem::take(&mut out.hidden));
+}
+
 /// [152] Oberkante eines Rings (u rechts, Höhe oben): Kanten, über denen aussen liegt — gegen den Uhrzeigersinn die
 /// nach links laufenden —, zu Zügen verkettet (von links nach rechts).
 fn upper_edge(ring: &[[f64; 2]]) -> Vec<Vec<[f64; 2]>> {

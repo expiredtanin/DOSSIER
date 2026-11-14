@@ -502,8 +502,12 @@ pub fn section_primitives_mv(out: &Output, mono: bool, hidden_lines: bool, vis: 
             Some(_) => false,
             None => black && !loose_cut(cp, loose),
         };
-        let black = base_black && !ov.is_some_and(|o| o.styles());
-        let (mut fill, mut hatch) = if black {
+        // [256] Netz auf einer Klasse mit Füllung (Nachbargebäude): Klassen-Stil statt schwarz, eine Füllungs-Regel geht vor.
+        let class = (cp.kind == Kind::Mesh).then(|| rules.class.get(&cp.index)).flatten().filter(|_| ov.is_none_or(|o| o.fill.is_none()));
+        let black = base_black && !ov.is_some_and(|o| o.styles()) && class.is_none();
+        let (mut fill, mut hatch) = if let Some((f, _, _)) = class {
+            (f.clone(), no_hatch())
+        } else if black {
             (HATCH_INK.to_string(), no_hatch())
         } else if cf == Some(CutFill::Empty) {
             (HATCH_PAPER.to_string(), no_hatch())
@@ -543,7 +547,11 @@ pub fn section_primitives_mv(out: &Output, mono: bool, hidden_lines: bool, vis: 
                 late_joints.push(l);
             }
         }
-        let mut pr = if stroked && dash.is_none() { polygon(pts, &fill, SECTION_INK, SECTION_JOINT_MM, hatch) } else { polygon(pts, &fill, "none", 0.0, hatch) };
+        let mut pr = match class {
+            Some((_, k, w)) if stroked && dash.is_none() => polygon(pts, &fill, k, *w, hatch),
+            _ if stroked && dash.is_none() => polygon(pts, &fill, SECTION_INK, SECTION_JOINT_MM, hatch),
+            _ => polygon(pts, &fill, "none", 0.0, hatch),
+        };
         if let Primitive::Polygon { wall_id, ceiling_id, roof_id, stair_id, extruded_solid_id, no_stroke_edges, greyed, context_object_id, .. } = &mut pr {
             // [152] Importiertes Netz: Pick über die Kontext-Id.
             *context_object_id = if cp.kind == Kind::Mesh { src.clone() } else { None };
@@ -555,7 +563,10 @@ pub fn section_primitives_mv(out: &Output, mono: bool, hidden_lines: bool, vis: 
             *no_stroke_edges = cp.nse.clone();
             *greyed = Some(cp.category.as_deref().is_some_and(|c| vis.greyed(c)));
         }
-        cut_rings.push(vec![cp.pts.clone()]);
+        // [256] Klassen-Stil: eigener Umriss, nicht in der schweren Schnittkante des Gebäudes.
+        if class.is_none() {
+            cut_rings.push(vec![cp.pts.clone()]);
+        }
         prims.push(pr);
     }
     prims.append(&mut late_joints);

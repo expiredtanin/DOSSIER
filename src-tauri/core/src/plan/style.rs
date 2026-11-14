@@ -92,6 +92,15 @@ pub fn solid_cut(detail: Detail, scale: f64, cut_hatch: bool) -> bool {
     detail == Detail::Grob || (!cut_hatch && detail != Detail::Fein && scale.is_finite() && scale >= SOLID_CUT_FROM)
 }
 
+/// [256] Vorgabe-Stil der Klasse `code` für geschnittene Netzkörper: (Füllung, Umrissfarbe, Umrissstärke mm), wenn
+/// die Klasse eine Füllung trägt (`LayerCategory.fill`, z. B. „12 Gebäude" hellgrau). Regeln ([33]) gehen vor.
+pub fn class_cut_style(p: &Project, code: &str) -> Option<(String, String, f64)> {
+    let k = p.layer_category(code)?;
+    let fill = k.fill.as_deref().map(str::trim).filter(|f| !f.is_empty())?;
+    let lw = if k.lw.is_finite() && k.lw >= 0.0 { k.lw } else { 0.13 };
+    Some((fill.to_string(), k.color.clone(), lw))
+}
+
 /// [140] Ist eine Schicht der Dicke `thickness_m` (Meter) bei 1:`scale` auf dem Papier dünn
 /// (unter [`THIN_LAYER_PAPER_MM`])? Nur zusammen mit [`simplify_thin_layers`] verwenden.
 pub fn is_thin_layer(thickness_m: f64, scale: f64) -> bool {
