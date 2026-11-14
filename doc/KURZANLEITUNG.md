@@ -46,7 +46,8 @@ deren Feldern.
 *Datei → Importieren …* (im Browser „DXF/DWG importieren…“) und die Kataster-Datei wählen. Im Dialog die Vorgaben lassen
 (neue Zeichnungsebene, Landeskoordinaten) und **Importieren**. Der Projekt-Nullpunkt liegt dann auf einem runden
 LV95-Punkt; die Statusleiste zeigt lokale und LV95-Koordinaten. Parzellen und Gebäude liegen auf der neuen
-Zeichnungsebene (Panel **Zeichnungsebenen**). Mit „Auf Plan einpassen“ (⌘0, „Alles einpassen“) siehst du alles.
+Zeichnungsebene (Panel **Zeichnungsebenen**). Mit „Auf Plan einpassen“ (⌘0, „Alles einpassen“) siehst du alles. Strassennamen (Text auf Klasse 11) stehen entlang der
+Strassenachse, wenn in der Nähe eine Linie, Polylinie oder ein Bogen derselben Klasse und Ebene liegt; ohne Achse bleiben sie gerade.
 
 Online lädt *Fenster → Standort importieren* (Browser: Panel **Gelände**) Gebäude, Gelände und Luftbild von swisstopo. Das ist im Container nicht
 geprüft.
@@ -67,7 +68,9 @@ Abstände 4/4/5/4 m, 12 m Gesamthöhe, Parzelle 880 m².
 
 Zuerst das Geschoss wählen (Panel **Zeichnungsebenen**, „Erdgeschoss“; ⌘5/⌘6 wechseln das Geschoss).
 
-- **Wände:** `w`, Ecken klicken oder als LV95 tippen, mit dem Startpunkt schliessen, Enter.
+- **Wände:** `w`, Ecken klicken oder als LV95 tippen, mit dem Startpunkt schliessen, Enter. In Bogenwänden folgen Fenster und Türen
+  dem Bogen (ausser bei Schichteinzug), Rundbogen- und andere Formöffnungen schneiden ihre echte Form, auch im 3D-Live-Schnitt.
+  Eine Öffnung, die in eine Decke ragt, endet an der Deckenunterkante.
 - **Decke:** `d`, die vier Ecken, Enter. Die Decke bekommt den Deckentyp des Projekts.
 - **Dach:** `rf`, zwei Ecken; vorgegeben ist ein Satteldach. Die Dachform lässt sich schon in der
   Befehlszeile wählen („Flachdach“ unter den Optionen). Nachträglich: Dach wählen, Panel **Objekt-Info** → Abschnitt „Dach“
@@ -89,7 +92,8 @@ Unterkante zwischen zwei Geschossen), lehnt der Befehl mit einer Meldung ab.
 **Möbel und Sanitär: Objekte.** Das Panel **Objekte** (neben den Werkzeugen) enthält die 2D-Objektbibliothek: Sanitär, Küche,
 Tische, Sitzen, Schlafen, Schränke, Aussenraum (Auto mit Parkfeld, Velo, Rollstuhl-Wendekreis). Objekt wählen, im Plan den
 Einfügepunkt klicken (Befehl `libobj`); vor dem Klick dreht R das Objekt, M spiegelt es. Die Vorschau hängt am Cursor.
-Ziehen aus der Palette gibt es nicht. Ein gesetztes Objekt wählst du an und änderst es im Panel **Objekt-Info** (Abschnitt
+Statt zu klicken, kannst du ein Objekt auch aus der Palette auf die Zeichenfläche ziehen: R und M wirken unterwegs, der Fang greift
+wie im Befehl, Loslassen setzt es; Loslassen über dem Panel oder Esc bricht ab. Ein gesetztes Objekt wählst du an und änderst es im Panel **Objekt-Info** (Abschnitt
 „Objekt“): **Breite**, **Tiefe**, **Anzahl** und weitere Parameter; bei Esstischen mit Stühlen regelt
 **Unordnung**, wie schief die Stühle stehen, **Neu würfeln** zieht eine neue Anordnung (gleiche Zahl = gleiche Stühle). Die Zeichnung
 folgt dem Detailgrad der Ansicht (grob, mittel, fein). Möbel liegen auf der Klasse 22, Sanitär auf 23, Fahrzeuge und
@@ -198,6 +202,15 @@ Panel **Mappe** → **Präsentationsplan erstellen** (oder Befehl `praesentation
 Schnitt wählen, Papier **A1**, Massstab 1:200 (Vorgabe) und **Erstellen**. Dossier ordnet alles im gemeinsamen
 Massstab, mit Titeln, Nordpfeil, Massstabsbalken und Schriftfeld. Das Beispiel enthält so ein Blatt (3 Grundrisse,
 4 Ansichten, Schnitt A-A). Die Ausschnitte folgen der Vorlage „Präsentation“.
+
+**Plakat aus einem Schritt.** Ist als Papier eine Plakat-Vorlage gewählt, ordnet Dossier den Inhalt auf dem Spaltenraster an:
+die Situation 1:500 zuerst oben links, dann Grundrisse, Ansichten und Schnitt im festen Massstab, dazu die Tabellen
+„Kennzahlen (SIA 416)“ und „Baurecht-Nachweis“ und ein Rahmen „3D-Bild hier einsetzen“. Den Rahmen füllst du später im
+Rendering-Dialog mit „Ins Layout einsetzen“ oder mit dem Knopf „Bild“ im Blatt; nichts wird erfunden. Was aufs Plakat soll,
+wählst du im Dialog im Abschnitt „Plakat-Inhalt“ (Situation 1:500, Kennzahlen, Baurecht-Nachweis, Rahmen fürs 3D-Bild; je abwählbar).
+Reicht der Platz nicht, entsteht ein zweites Plakat (Plan 2/2); der Massstab wird nie verkleinert. Das Schriftfeld des
+Masters entfällt bei Plakat-Vorlagen, die Kopfzeile mit Kennwort und „Plan x/n“ genügt. Alle Schriften werden ins PDF
+eingebettet, damit die Druckerei sie nicht ersetzen muss.
 
 ## 11. Abgabe: PDF, DXF, IFC
 

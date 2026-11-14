@@ -59,7 +59,9 @@ in `doc/KURZANLEITUNG.md`):
    Bandbreite; CSV/PDF und als lebendige Tabelle auf dem Blatt. **Die Kennwerte sind Beispielwerte (rund 800 CHF/m³ GV bzw.
    2'600 CHF/m² GF), keine offizielle Quelle; sie sind in der Tabelle als solche markiert.**
 10. **Abgabe.** Layout-Blätter mit Viewports, Legenden, Tabellen; Präsentationsplan A1 in einem Schritt; Plakat-Vorlagen A0/A1 (hoch/quer)
-    mit Raster-Hilfslinien (nur am Bildschirm), Kennwort-Feld und Bild-Element mit Zuschnitt; Publikationssätze als ein PDF
+    mit Raster-Hilfslinien (nur am Bildschirm), Kennwort-Feld und Bild-Element mit Zuschnitt; der Präsentationsplan füllt ein Plakat auf dem Spaltenraster
+    (Situation 1:500, Pläne, Ansichten, Schnitt, Tabellen Kennzahlen und Baurecht-Nachweis, Rahmen fürs 3D-Bild; «Plakat-Inhalt» im Dialog, bei Platzmangel
+    ein zweites Plakat statt kleinerem Massstab, ohne Schriftfeld); alle PDF-Schriften sind eingebettet; Publikationssätze als ein PDF
     (mit PDF-Ebenen), «WBW-Abgabe» für alle Plakate.
 11. **Anonyme Abgabe.** Mit «Wettbewerb (anonym)» und Kennwort zeigen Plankopf und Dateinamen nur das Kennwort. Geprüft für PDF,
     Berichte, IFC, DXF/DWG, STEP, SVG, OBJ/STL/glTF und das Blender-Paket. **Freitext-Prüfung:** Vor jedem Export (Oberfläche und Kommandozeile) sucht
@@ -122,13 +124,16 @@ Ehrlich vorweg: **Der Durchlauf des ganzen Referenz-Ablaufs auf dem Mac ist noch
 **Grundstück, Situation**
 - Echte Kataster-DXF verschiedener Kantone sind nicht geprüft; Layer-Zuordnung (Gebäude, Strassen, Gewässer) folgt gängigen Namen, rein
   numerische Layer bekommen noch keine Bezeichnung ([207]).
-- Strassennamen folgen gekrümmten Achsen nicht, sie stehen nur mit der Drehung aus dem DXF ([207]).
+- Strassennamen folgen der Achse (Linie, Polylinie, Bogen derselben Klasse und Ebene in Schrifthöhen-Nähe); ohne Achse stehen sie gerade mit der Drehung
+  aus dem DXF. Nur im Container und im CLI-SVG angesehen ([207]).
 - Standort-Import (swisstopo/OSM) braucht Netz und ist im Container nicht geprüft ([206]).
-- Nachbarhäuser ausserhalb des Geländenetzes stehen auf Höhe 0 statt auf dem Gelände ([227]).
+- Nachbarhäuser ausserhalb des Geländenetzes nehmen die Randhöhe des Netzes, das Gelände setzt sich nicht geneigt fort; im Rendering «hinterfüllt» schneidet
+  das Gelände nur innerhalb der untersten Bodenplatten aus (keine Platten mit Löchern, keine Fundamente) ([227]).
 
 **3D, Darstellung**
-- Bekannte Darstellungsfehler im 3D (Musterhaus): Formöffnungen in Bogenwänden behalten ein Rechteck-Loch; Dachmuster an Kehlen sind nicht
-  beschnitten; Öffnungen, die in eine Decke hineinragen, werden nicht gekappt ([216], [234]).
+- Bogenwände und Formöffnungen ([216], [234]): Formöffnungen schneiden die echte Form, Fenster folgen dem Bogen (mit Schichteinzug stehen sie gerade auf der
+  Sehne), Öffnungen enden an der Deckenunterkante, der 3D-Live-Schnitt zeigt die echte Öffnungsform. Nur per Rust-Test und im Container geprüft: kein Metal, der
+  Live-Schnitt ist nicht angesehen, keine Mac-Gegenprobe; Rahmen und Glas schmaler Öffnungen bleiben gerade.
 - Schriftfamilien in Stempeln und Textfeldern erscheinen in SVG/PDF/DXF; im GPU-Plan ist die Mac-Variante nicht kompiliert/geprüft, und
   gedrehte Textfelder zeigen noch die Systemschrift ([226], [218]).
 - Begehen: Decken-Unterseiten begrenzen den Kopf nicht; Formöffnungen zählen als volle Wand ([245]). Kamerafahrt-Video: Aufnahme unter
@@ -148,6 +153,11 @@ Ehrlich vorweg: **Der Durchlauf des ganzen Referenz-Ablaufs auf dem Mac ist noch
   per Code-Abgleich geprüft, nicht in der Tauri-App.
 - Plakat: Hilfslinien gehören zum Masterlayout, nicht zum Blatt; kein Fang für Legenden; Bilder werden als Data-URL im Projekt gespeichert
   (Dateigrösse und Verlauf wachsen bei grossen Bildern); Bild erscheint nicht in DXF/IFC ([208]).
+- Plakat aus dem Präsentationsplan ([208]): Die Rahmen sind so breit wie der Inhalt samt Masskette und Kontext (bei grossen Häusern viel Weissraum, zwei Blätter);
+  die Anordnung mischt Gruppen (Pläne neben der Situation, Ansichten darunter) statt strenger Zeilen; Tabellen-Spaltenköpfe («Reserve/Erfüllt») sind eng; die Lage von
+  Tabellen und Bild ist nicht von Hand festzuhalten (Neuberechnung nur durch Neuerstellen). Schriften sind eingebettet, aber Zeichen ausserhalb der
+  Latin-Teilmenge (z. B. Σ) werden ersetzt oder bleiben leer; PDF/X und Plotter-Ebenen nicht prüfbar. Alles nur im Linux-Container mit Chromium
+  geprüft (PDF mit `pdffonts`/`pdftoppm`), nicht in der Tauri-App.
 - Kostenschätzung: Kennwerte sind Beispielwerte; keine Varianten nebeneinander, keine Kennwerte aus Büro- oder CRB-Quelle ([209]).
 - Volumen → Bauteile: nur gerade Prismen und Quader/Zylinder; verjüngte Körper, Kugel/Kegel/Torus u. a. werden mit Meldung abgelehnt; keine
   Bodenplatte, keine Innenwände ([222]).
@@ -165,7 +175,7 @@ Ehrlich vorweg: **Der Durchlauf des ganzen Referenz-Ablaufs auf dem Mac ist noch
   ausgegraut (ohne Sicherung nur ein Hinweis); bei sehr grossen Projekten serialisiert die Kopie im Hauptfaden.
 - **Seitenleiste** ([255], [253]): Karten-Tabellen in der schmalen Seitenleiste nur in Chromium (de/en, 303–340 px) angesehen, nicht in der Tauri-App; Namen der
   Objekt-Klassen bleiben auch im englischen UI deutsch.
-- **Objektbibliothek** ([253]): nur 2D, nur abstrakte Symbole im 55er-Raster; kein Ziehen aus der Palette (nur Klick); im DXF ohne Attribute
+- **Objektbibliothek** ([253]): nur 2D, nur abstrakte Symbole im 55er-Raster; Ziehen aus der Palette geht über Zeigerereignisse (nur im Chromium geprüft, nicht mit nativem Metal); im DXF ohne Attribute
   (Id und Parameter stehen nur im Blocknamen); Symbole nur im Chromium/CLI-SVG angesehen, nicht in der Tauri-App. Eigene Objekte [254] gibt es erst nach 1.0.
 - **Tastatur** ([252], [190]): Ctrl+Tab/Ctrl+Umschalt+Tab auf dem Mac nicht geprüft (das System oder die Webview könnte die Tasten abfangen);
   Cmd+J bei Bogenwänden: die Schraffurflächen von Bogen und gerader Wand bleiben getrennt.
