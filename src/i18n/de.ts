@@ -2510,7 +2510,7 @@ export const de = {
   "cmd.join.met": "Nichts zu verbinden: die Wände treffen sich bereits.",
   "cmd.join.cross": "Nichts zu verbinden: die Wände kreuzen sich.",
   "cmd.join.parallel": "Nichts zu verbinden: die Wände sind parallel.",
-  "cmd.join.arc": "Nichts zu verbinden: Bogenwände werden nicht an Ecken verbunden.",
+  "cmd.join.arc": "Nichts zu verbinden: Bogen und Wand treffen sich auch verlängert nicht.",
   "cmd.join.locked": "Nichts zu verbinden: die Wände sind gesperrt.",
   "cmd.join.floors": "Nichts zu verbinden: die Wände liegen auf verschiedenen Geschossen.",
   "edit.cutSegment.label": "Segment löschen",
