@@ -65,6 +65,7 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   Kennzahlenleiste war ohne freie Körper 0 m³, neue Decken bekamen den Aussenwand-Aufbau statt eines Deckentyps. Offen: Durchlauf
   der Checkliste auf dem Mac (Maintainer); 3D-Bild headless nicht prüfbar; Blender-Lauf von [211] nur auf dem Mac; Pathtracer unter SwiftShader (s. o.).
 
+- Release-Notes-Entwurf `doc/RELEASE-NOTES-1.0.md` (14.11.), offene Fragen an den Maintainer dort markiert (`**[Frage M: …]**`); nach dem Mac-Durchlauf [206] Einschränkungen nachführen.
 - [30] Release-Workflow lauffähig: macOS universal signiert/notarisiert, Updater, Versionsnummer 1.0.0-beta; [57]/[120] CI auf GitHub grün.
 - „Mac-Gegenprobe“ (Sammelpunkt unten) für alles im Referenz-Ablauf abarbeiten (Maintainer), Befunde sofort beheben;
   [194] Texte synchron, [195b] Objektfenster, [190] Cmd+J auf dem Mac bestätigen.
