@@ -3,6 +3,37 @@
 
 use super::*;
 
+/// [259] Ecken mit gleicher Ausgabe (6 Nachkommastellen) zusammenlegen, Dreiecke ohne Fläche (doppelte Ecke) weglassen.
+/// Die Kern-Netze sind Dreieckssuppen (jede Ecke je Dreieck neu); ifcopenshell/OpenCASCADE nähte sie beim Abzug der
+/// Öffnungen nicht zusammen (Volumen einer Anbauwand 30 statt 7.5 m³), und Revit/Archicad lesen ein verbundenes Netz
+/// robuster. Nebenbei kleinere Dateien.
+pub(super) fn weld(mesh: &Mesh) -> Mesh {
+    let key = |i: usize| -> [String; 3] {
+        let c = &mesh.positions[i * 3..i * 3 + 3];
+        [fmt_real(c[0]), fmt_real(c[1]), fmt_real(c[2])]
+    };
+    let mut index: HashMap<[String; 3], usize> = HashMap::new();
+    let mut positions = Vec::with_capacity(mesh.positions.len());
+    let mut indices = Vec::with_capacity(mesh.indices.len());
+    for t in mesh.indices.chunks_exact(3) {
+        let k = [key(t[0]), key(t[1]), key(t[2])];
+        if k[0] == k[1] || k[1] == k[2] || k[0] == k[2] {
+            continue;
+        }
+        for (j, kj) in k.into_iter().enumerate() {
+            let at = *index.entry(kj).or_insert_with(|| {
+                positions.extend_from_slice(&mesh.positions[t[j] * 3..t[j] * 3 + 3]);
+                positions.len() / 3 - 1
+            });
+            indices.push(at);
+        }
+    }
+    Mesh { positions, indices, closed: mesh.closed }
+}
+
+/// Struktur-Nummer des Grundstücks (IfcSite, [259] Kontext); −1 = Gebäude, ≥ 0 = Geschoss.
+pub(super) const SITE: i64 = -2;
+
 /// Entitäten-Schreiber mit allem Zustand, den die TS-Fassung in Closures hielt.
 pub(super) struct Builder {
     pub(super) lines: Vec<String>,
@@ -14,6 +45,9 @@ pub(super) struct Builder {
     pub(super) extrude_dir: usize,
     pub(super) building_entity: usize,
     pub(super) building_placement: usize,
+    /// [259] Grundstück: Träger des Kontexts (Struktur `SITE`).
+    pub(super) site_entity: usize,
+    pub(super) site_placement: usize,
     pub(super) storeys: Vec<Storey>,
     /// Eingliederung je Struktur (−1 = Gebäude), in Reihenfolge des ersten Auftretens.
     pub(super) containment: Vec<(i64, Vec<usize>)>,
@@ -62,7 +96,9 @@ impl Builder {
     }
 
     pub(super) fn placement_of(&self, structure: i64) -> usize {
-        if structure < 0 {
+        if structure == SITE {
+            self.site_placement
+        } else if structure < 0 {
             self.building_placement
         } else {
             self.storeys[structure as usize].placement
@@ -70,7 +106,9 @@ impl Builder {
     }
 
     pub(super) fn entity_of(&self, structure: i64) -> usize {
-        if structure < 0 {
+        if structure == SITE {
+            self.site_entity
+        } else if structure < 0 {
             self.building_entity
         } else {
             self.storeys[structure as usize].entity
@@ -78,7 +116,9 @@ impl Builder {
     }
 
     pub(super) fn key_of(&self, structure: i64) -> String {
-        if structure < 0 {
+        if structure == SITE {
+            "site".to_string()
+        } else if structure < 0 {
             "building".to_string()
         } else {
             format!("storey/{}", self.storeys[structure as usize].id)
@@ -337,7 +377,22 @@ impl Builder {
                 let c = self.add("IFCCARTESIANPOINT", list(&[fmt_real(cx), fmt_real(cy)]));
                 let pl = self.add("IFCAXIS2PLACEMENT2D", format!("#{c},$"));
                 let circle = self.add("IFCCIRCLE", format!("#{pl},{}", fmt_real(r)));
-                self.add("IFCTRIMMEDCURVE", format!("#{circle},(#{p0}),(#{p1}),{},{}", if b > 0.0 { ".T." } else { ".F." }, enum_("CARTESIAN")))
+                // [259] Beide Trimmungen (Punkt und Winkel im Bogenmass, Einheit RADIAN), massgebend der Winkel: mit nur
+                // kartesischer Trimmung liess ifcopenshell/OpenCASCADE den Bogen fallen (Sehne statt Bogen, Raumfläche
+                // und Deckenvolumen nach der Geometrie ≠ Mengen); Revit/Archicad lesen den Parameter zuverlässiger.
+                let tau = std::f64::consts::TAU;
+                let ang = |x: f64, y: f64| (((y - cy).atan2(x - cx) % tau) + tau) % tau;
+                let (t0, t1) = (ang(x0, y0), ang(x1, y1));
+                self.add(
+                    "IFCTRIMMEDCURVE",
+                    format!(
+                        "#{circle},(#{p0},IFCPARAMETERVALUE({})),(#{p1},IFCPARAMETERVALUE({})),{},{}",
+                        fmt_real(t0),
+                        fmt_real(t1),
+                        if b > 0.0 { ".T." } else { ".F." },
+                        enum_("PARAMETER")
+                    ),
+                )
             };
             segs.push(self.add("IFCCOMPOSITECURVESEGMENT", format!("{},.T.,#{curve}", enum_("CONTINUOUS"))));
         }
@@ -407,6 +462,7 @@ impl Builder {
     }
 
     pub(super) fn emit_face_set(&mut self, mesh: &Mesh) -> usize {
+        let mesh = &weld(mesh);
         let coords: Vec<String> = mesh
             .positions
             .chunks_exact(3)
@@ -427,6 +483,7 @@ impl Builder {
     /// aussen orientiertes Netz = IfcFacetedBrep über IfcClosedShell, sonst IfcShellBasedSurfaceModel über
     /// IfcOpenShell. Dreiecke mit doppelter Ecke (ohne Fläche) entfallen. Liefert (Körper, Darstellungsart).
     pub(super) fn emit_face_brep(&mut self, mesh: &Mesh) -> (usize, &'static str) {
+        let mesh = &weld(mesh);
         let points: Vec<usize> = mesh
             .positions
             .chunks_exact(3)

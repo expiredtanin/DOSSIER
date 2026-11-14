@@ -11,7 +11,8 @@
 //   [FLAT_VERSION, META, Datensatz, Datensatz, …]
 //   META     = project_id, project_name, now (Sekunden, ganzzahlig), iso (Zeitstempel, Text; leer = anonyme Abgabe [208]:
 //              neutrale Programm-/Personenangaben, fester Kopf-Zeitstempel), has_geo (0/1),
-//              ref_elevation (NaN = keine), ref_lat, ref_lon (WGS84-Grad, NaN = keine; nur IFC2x3),
+//              ref_elevation (m ü. M. von Modell-z 0 = ±0.00, NaN = keine), ref_lat, ref_lon (WGS84-Grad des
+//              Modell-Ursprungs, NaN = keine; nur IFC2x3), eastings, northings (LV95 des Modell-Ursprungs, [259]),
 //              schema (0 = IFC4, 1 = IFC2x3), n_storeys, (id, name, base) × n_storeys
 //   PTS      = n, x0, y0, …, x(n−1), y(n−1)                   (Profil, offen; Rust schliesst es)
 //   MESH     = n_verts, x, y, z, …, n_tris, i0, i1, i2, …, closed (0/1)      (Indizes 0-basiert)
@@ -108,6 +109,10 @@
 //   TREE        = 19 ([149] Baum), structure, id, name, PSETS, MESH (Stamm + Krone, Welt rel. Geschoss-UK)
 //                 IFC4: IfcGeographicElement (ObjectType „Baum", PredefinedType USERDEFINED); IFC2x3 (kennt die
 //                 Klasse nicht): IfcBuildingElementProxy mit ObjectType „Baum". GlobalId aus `tree/<id>`.
+//   CONTEXT     = 24 ([259] Kontext, nur mit Option), kind (0 Netz auf Umgebungsklasse, 1 Gelände), id, name, class
+//                 (Klasse als Text, leer = keine), MESH (Modell-Koordinaten, z absolut). Am IfcSite eingegliedert (nicht
+//                 im Geschoss); Gelände: IfcGeographicElement TERRAIN, sonst IfcBuildingElementProxy (ObjectType „Kontext",
+//                 USERDEFINED); IFC2x3 beides als Proxy. Description = Klasse. GlobalId aus `context/<id>`.
 //
 // Schema IFC2x3 (Coordination View 2.0, TC1; [B5] 28.10.): gleiche Datensätze, GUIDs, Psets und Mengen, aber
 // die Entitäten des Schemas — Netze als IfcFacetedBrep (dicht) bzw. IfcShellBasedSurfaceModel (offen) statt
@@ -131,7 +136,8 @@ use crate::ifc_openings::{fill_geometry, DoorKind, FillParams, FillPart, Sash, M
 
 /// Version der flachen Kodierung (erstes Element des Puffers). 3 seit 28.10.: Basismengen (Pset-Arten 3–5), Deckenaussparungen, Treppen mit Läufen.
 /// 4 seit 28.10.: Schema-Wahl und Breite/Länge im META.
-pub const FLAT_VERSION: f64 = 4.0;
+/// 5 seit 14.11. ([259]): Versatz des Modell-Ursprungs in LV95 im META, Geometrie bleibt lokal.
+pub const FLAT_VERSION: f64 = 5.0;
 
 /// IFC-Schema der Ausgabe.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -160,6 +166,7 @@ pub const REC_WALL_ARC_SOLID: f64 = 17.0;
 pub const REC_GRID: f64 = 18.0;
 pub const REC_GUIDS: f64 = 23.0;
 pub const REC_TREE: f64 = 19.0;
+pub const REC_CONTEXT: f64 = 24.0;
 pub const REC_COLUMN_PIECES: f64 = 20.0;
 pub const REC_CEILING_ARC: f64 = 21.0;
 pub const REC_SPACE_ARC: f64 = 22.0;
@@ -194,6 +201,7 @@ fn rec_name(code: f64) -> &'static str {
         c if c == REC_GRID => "GRID",
         c if c == REC_GUIDS => "GUIDS",
         c if c == REC_TREE => "TREE",
+        c if c == REC_CONTEXT => "CONTEXT",
         c if c == REC_COLUMN_PIECES => "COLUMN_PIECES",
         _ => "?",
     }
@@ -234,6 +242,8 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
     let has_geo = r.flag()?;
     let ref_elevation = r.raw()?;
     let (ref_lat, ref_lon) = (r.raw()?, r.raw()?);
+    let (eastings, northings) = (r.f()?, r.f()?);
+    let orthogonal_height = if ref_elevation.is_finite() { ref_elevation } else { 0.0 };
     let schema = match r.idx()? {
         0 => Schema::Ifc4,
         1 => Schema::Ifc2x3,
@@ -258,6 +268,8 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
         extrude_dir: 0,
         building_entity: 0,
         building_placement: 0,
+        site_entity: 0,
+        site_placement: 0,
         storeys: Vec::new(),
         containment: Vec::new(),
         psets: Vec::new(),
@@ -320,9 +332,10 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
         format!("$,{},3,{},#{},$", ifc_string("Model"), fmt_real(0.00001), w.identity_axis),
     );
 
-    // Georeferenz: Geometrie liegt schon in LV95-Weltkoordinaten (TS), die Abbildung ist die Identität;
-    // das Koordinatensystem wird trotzdem deklariert (IFC4 IfcProjectedCRS + IfcMapConversion; IFC2x3 kennt
-    // beide nicht und bekommt ePSet_ProjectedCRS/ePSet_MapConversion am IfcProject, s. unten).
+    // Georeferenz ([259]): die Geometrie bleibt lokal (Modell-Meter, z 0 = ±0.00), IfcMapConversion verschiebt den
+    // Ursprung nach LV95 (Eastings/Northings) und auf die Meereshöhe von ±0.00 (OrthogonalHeight); keine Drehung (das
+    // Modell ist nach Norden ausgerichtet, x = Ost). IFC2x3 kennt beide Entitäten nicht und bekommt
+    // ePSet_ProjectedCRS/ePSet_MapConversion am IfcProject (s. unten).
     if has_geo && !v2 {
         let crs = w.add(
             "IFCPROJECTEDCRS",
@@ -339,9 +352,9 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
             format!(
                 "#{},#{crs},{},{},{},{},{},{}",
                 w.context,
-                fmt_real(0.0),
-                fmt_real(0.0),
-                fmt_real(0.0),
+                fmt_real(eastings),
+                fmt_real(northings),
+                fmt_real(orthogonal_height),
                 fmt_real(1.0),
                 fmt_real(0.0),
                 fmt_real(1.0)
@@ -394,6 +407,10 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
             enum_("ELEMENT")
         ),
     );
+    // Schlüssel für Mengen am Gebäude (ATTACH „building“, [259]) und die Kontext-Eingliederung am Grundstück.
+    w.elements.insert("building".to_string(), w.building_entity);
+    w.site_entity = site_entity;
+    w.site_placement = site_placement;
     let g = w.gid("aggregates/site");
     w.add(
         "IFCRELAGGREGATES",
@@ -406,7 +423,7 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
     );
 
     // IFC2x3-Georeferenz (Konvention buildingSMART): Koordinatensystem und Abbildung als Eigenschaftssätze am
-    // IfcProject. Die Geometrie liegt schon in LV95, die Abbildung ist die Identität.
+    // IfcProject, mit demselben Versatz wie IfcMapConversion.
     if v2 && has_geo {
         let txt = |name: &str, ty: &str, v: &str| (name.to_string(), format!("{ty}({})", ifc_string(v)));
         let num = |name: &str, ty: &str, v: f64| (name.to_string(), format!("{ty}({})", fmt_real(v)));
@@ -418,9 +435,9 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
             txt("MapUnit", "IFCLABEL", "METRE"),
         ];
         let conversion = [
-            num("Eastings", "IFCLENGTHMEASURE", 0.0),
-            num("Northings", "IFCLENGTHMEASURE", 0.0),
-            num("OrthogonalHeight", "IFCLENGTHMEASURE", 0.0),
+            num("Eastings", "IFCLENGTHMEASURE", eastings),
+            num("Northings", "IFCLENGTHMEASURE", northings),
+            num("OrthogonalHeight", "IFCLENGTHMEASURE", orthogonal_height),
             num("XAxisAbscissa", "IFCREAL", 1.0),
             num("XAxisOrdinate", "IFCREAL", 0.0),
             num("Scale", "IFCREAL", 1.0),
@@ -969,6 +986,29 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
                 for p in &psets {
                     w.add_pset(p, entity, &key);
                 }
+            }
+            c if c == REC_CONTEXT => {
+                // [259] Kontext am IfcSite: Gelände als IfcGeographicElement TERRAIN, Nachbarn als Proxy (IFC2x3: beide Proxy).
+                let terrain = r.idx()? == 1;
+                let id = r.string()?;
+                let name = r.string()?;
+                let class = r.string()?;
+                let mesh = r.mesh()?;
+                let (placement, shape) = w.emit_triangulated_product(&mesh, w.site_placement);
+                let key = format!("context/{id}");
+                let g = w.gid(&key);
+                let description = if class.is_empty() { "$".to_string() } else { ifc_string(&class) };
+                let object_type = ifc_string(if terrain { "Gelände" } else { "Kontext" });
+                let head = format!("{g},#{},{},{description},{object_type},#{placement},#{shape},$", w.owner_history, ifc_string(&name));
+                let entity = if terrain && !w.v2() {
+                    w.add("IFCGEOGRAPHICELEMENT", format!("{head},{}", enum_("TERRAIN")))
+                } else if w.v2() {
+                    w.add("IFCBUILDINGELEMENTPROXY", format!("{head},$"))
+                } else {
+                    w.add("IFCBUILDINGELEMENTPROXY", format!("{head},{}", enum_("USERDEFINED")))
+                };
+                w.add_to_containment(SITE, entity);
+                w.elements.insert(key, entity);
             }
             c if c == REC_ROOF => {
                 let structure = r.structure(n_storeys)?;

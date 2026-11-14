@@ -66,9 +66,10 @@ export function ExportSaveDialog({
   // IFC-Klassifikation (Schweizer Praxis): beides aus, bis die Nutzerin es wählt.
   const [ebkph, setEbkph] = useState(false);
   const [layerCodes, setLayerCodes] = useState(false);
+  const [context, setContext] = useState(false);
   // IFC-Schema: IFC4 (Standard) oder IFC2x3 für ältere Fachplaner-Programme.
   const [schema, setSchema] = useState<IfcSchema>("IFC4");
-  const onConfirm = () => onSave(format, filename, format === "ifc" ? { schema, ebkph, layerCodes } : undefined);
+  const onConfirm = () => onSave(format, filename, format === "ifc" ? { schema, ebkph, layerCodes, context } : undefined);
 
   return (
     <div className="imp-overlay" onClick={onClose}>
@@ -127,6 +128,11 @@ export function ExportSaveDialog({
                 <span>{t("exportSave.ifc.layers")}</span>
               </label>
               <div className="imp-note">{t("exportSave.ifc.layersHint")}</div>
+              <label className="imp-check">
+                <input type="checkbox" checked={context} onChange={(e) => setContext(e.target.checked)} />
+                <span>{t("exportSave.ifc.context")}</span>
+              </label>
+              <div className="imp-note">{t("exportSave.ifc.contextHint")}</div>
               <div className="imp-note">{t("exportSave.ifc.zonesNote")}</div>
             </section>
           )}
