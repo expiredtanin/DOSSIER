@@ -299,8 +299,9 @@ pub fn run_bin(p: &Project, name: &str, args: &[f64], text: &str) -> Result<Vec<
     match (name, args.len()) {
         ("planDomains", 1) => crate::plan::domains::plan_domains_buf(p, &crate::plan::domains::PlanArgs::parse_in(p, args[0], text)?),
         // Export-Sammler ([K4], [B5], [C11]): flacher Puffer für `fileio` (Byte-Hülle `export_flat.rs`).
-        ("ifcExportData", 4) => {
-            let opt = crate::ifc_data::IfcOptions { now: args[0], ifc2x3: args[1] != 0.0, ebkph: args[2] != 0.0, layer_codes: args[3] != 0.0, iso: text.to_string() };
+        ("ifcExportData", 4 | 5) => {
+            // 5. Argument [259]: Kontext (Gelände, Nachbarn) mitgeben.
+            let opt = crate::ifc_data::IfcOptions { now: args[0], ifc2x3: args[1] != 0.0, ebkph: args[2] != 0.0, layer_codes: args[3] != 0.0, context: args.get(4).is_some_and(|v| *v != 0.0), iso: text.to_string() };
             crate::ifc_data::ifc_export_data(p, &opt).map(|f| f.to_bytes())
         }
         ("meshExportData", 3 | 4) => {

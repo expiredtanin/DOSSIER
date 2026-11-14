@@ -3172,6 +3172,8 @@ export const en: Record<TranslationKey, string> = {
   "exportSave.ifc.ebkphHint": "Main group per element type: wall, slab, column, stair = C, roof = F, window = E; doors stay unclassified. A suggestion for cost planning (CRB, eBKP-H, SN 506 511) — the model does not tell exterior from interior walls or know sub-groups.",
   "exportSave.ifc.layers": "Model layer (category code) as classification",
   "exportSave.ifc.layersHint": "System “Dossier-Ebenen”: code and name of each element's graphic layer (not a cost plan).",
+  "exportSave.ifc.context": "Include context (terrain, neighbouring buildings)",
+  "exportSave.ifc.contextHint": "Terrain as IfcGeographicElement, meshes on context classes (e.g. 12 Buildings) as IfcBuildingElementProxy “Kontext”, placed on the site instead of a storey. Usually leave off for consultants: they only need the building.",
   "exportSave.ifc.zonesNote": "SIA 416 zones (HNF, NNF …) and floor areas are always included when rooms exist.",
   "exportSave.ifc.schema": "IFC schema",
   "exportSave.ifc.schema4": "IFC4 (default)",

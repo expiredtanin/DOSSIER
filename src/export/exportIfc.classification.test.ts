@@ -49,10 +49,13 @@ describe("IFC-Export: Zonen und Geschoss-Kennwerte (SIA 416)", () => {
     expect(lines(ifc, "IFCCLASSIFICATION")).toHaveLength(0);
   });
 
-  it("ohne Räume keine Zonen und keine Geschoss-Mengen", () => {
+  it("ohne Räume keine Zonen; Geschoss-Mengen nur aus der Konstruktionsfläche der Wände ([259])", () => {
     const ifc = exportIfcSpf({ ...sampleProject, rooms: [] });
     expect(lines(ifc, "IFCZONE")).toHaveLength(0);
-    expect(ifc).not.toContain("Qto_BuildingStoreyBaseQuantities");
+    expect(ifc).toContain("Qto_BuildingStoreyBaseQuantities");
+    expect(ifc).toMatch(/IFCQUANTITYAREA\('NetFloorArea',\$,\$,0\.0,\$\)/);
+    // Ohne Wände und Räume: gar keine Geschoss-Mengen.
+    expect(exportIfcSpf({ ...sampleProject, rooms: [], walls: [], openings: [] })).not.toContain("Qto_BuildingStoreyBaseQuantities");
   });
 
   it("GUIDs der Zonen und der übrigen Bauteile bleiben stabil (zweimal exportiert gleich)", () => {

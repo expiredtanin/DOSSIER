@@ -347,6 +347,23 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   nicht in der Tauri-App angesehen. · M
 - Fachplaner-Austausch: DXF/DWG je Geschoss/Schnitt/Ansicht ([200]), IFC mit Räumen/Psets ([201]); Rundreise in Archicad/Revit einmal
   real prüfen ([C9]).
+- ◐ **[259]** IFC-Export für Fachplaner (Vorprojekt, 14.11.). Alle drei Beispielprojekte mit ifcopenshell 0.9 geprüft: `validate-ifc.py`
+  0 Befunde, neue inhaltliche Prüfung `scripts/check-ifc-fachplaner.py` (Project → Site → Building → Storey, jedes Bauteil genau einmal
+  eingeordnet, Öffnungen gefüllt und im Geschoss des Wirts, Räume mit Nummer/Name/Psets/Qto/SIA-416, Wandschichten, Mengen ±1 % gegen die
+  Geometrie, Georeferenz) in `src/export/exportIfc.fachplaner.test.ts`. Behoben: (1) Geometrie lag in LV95-Millionen — jetzt lokal,
+  `IfcMapConversion` mit Versatz des Ursprungs und OrthogonalHeight = ±0.00 m ü. M. (`referenceElevationMasl`, = `IfcSite.RefElevation`);
+  (2) Bögen in Decken-/Raumumrissen an der Sehne gespiegelt (Bulge-Vorzeichen Modell ↔ DXF-Sinn) und mit nur kartesischer Trimmung von
+  ifcopenshell als Sehne gelesen — jetzt Punkt + Winkel, PARAMETER (Erker komplex: Raum 51.5 → 57.4 m² = Flächenbilanz); (3) Geschoss-GF
+  war gleich NGF (KGF 0) — jetzt aus der Flächentabelle mit Konstruktionsfläche, dazu GrossHeight/GrossVolume und Gebäudesummen
+  (`Qto_BuildingBaseQuantities`); (4) Wandmengen: Bogenwände (volle Höhe über alle Schichten, +5 bis +23 %) und Formöffnungen (Rechteck statt
+  Umriss) neu; (5) Netz-Wände mit mehreren Bändern bzw. Formöffnungs-Füllkörpern als ein Körper (Manifold), Füllkörper nach aussen gewickelt,
+  Netze verschweisst (kleinere Dateien). Neu: Option „Kontext mitgeben" (Dialog, CLI `--kontext`, Vorgabe aus): Gelände → `IfcGeographicElement`
+  TERRAIN, Netze auf Umgebungsklassen → Proxy „Kontext", am IfcSite. Entscheid: 2D-Objektbibliothek ([253]) wird NICHT exportiert (kein
+  falscher Körper, kein geometrieloses IfcFurniture). Grösse/Zeit (Linux, unter Last): komplex 1.6 MB / 2.5 s, Wettbewerb 0.9 MB / 0.5 s,
+  Stress-Beispiel `sampleProjectBig` 19.8 MB / 5.8 s. **Offen:** nicht in Archicad/Revit/Solibri/BIMcollab geöffnet (Prüfzeile 13.14 in
+  `doc/RELEASE-1.0.md`); Anbauwand OG Ost (komplex, Netz unter dem Pultdach mit Fenster): ifcopenshell scheitert am Abzug der Öffnung
+  (30.4 statt 7.5 m³, als bekannt in der Prüfung); Raumhöhe = Geschosshöhe statt lichter Höhe; keine `IfcPresentationLayerAssignment`
+  (Ebenen nur als Klassifikation); IFC2x3 nur über die bestehenden Tests. · M
 - ◐ **[255]** Baurecht-Nachweis: Ausnützung gegen Modell als Tabelle (14.11.). Kern `site_proof.rs` (Abfrage `siteProof`) stellt die Vorgaben
   der Parzelle den Kennzahlen gegenüber: GFZ, AZ, BMZ, ÜZ, GZ (min.), Gesamt-/Fassadenhöhe, Grundfläche ausserhalb Grenzabstand/Baulinie,
   Gebäudeprofil; je Zeile zulässig · Projekt · Reserve/Überschreitung · erfüllt, fehlende Vorgabe als „—“ (nichts erfunden), dazu Grundlagen
