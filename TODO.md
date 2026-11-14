@@ -362,9 +362,13 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   TERRAIN, Netze auf Umgebungsklassen → Proxy „Kontext", am IfcSite. Entscheid: 2D-Objektbibliothek ([253]) wird NICHT exportiert (kein
   falscher Körper, kein geometrieloses IfcFurniture). Grösse/Zeit (Linux, unter Last): komplex 1.6 MB / 2.5 s, Wettbewerb 0.9 MB / 0.5 s,
   Stress-Beispiel `sampleProjectBig` 19.8 MB / 5.8 s. **Offen:** nicht in Archicad/Revit/Solibri/BIMcollab geöffnet (Prüfzeile 13.14 in
-  `doc/RELEASE-1.0.md`); Anbauwand OG Ost (komplex, Netz unter dem Pultdach mit Fenster): ifcopenshell scheitert am Abzug der Öffnung
-  (30.4 statt 7.5 m³, als bekannt in der Prüfung); Raumhöhe = Geschosshöhe statt lichter Höhe; keine `IfcPresentationLayerAssignment`
-  (Ebenen nur als Klassifikation); IFC2x3 nur über die bestehenden Tests. · M
+  `doc/RELEASE-1.0.md`); Raumhöhe = Geschosshöhe statt lichter Höhe; keine `IfcPresentationLayerAssignment`
+  (Ebenen nur als Klassifikation); IFC2x3 nur über die bestehenden Tests. **14.11. (spät):** Anbauwand OG Ost (komplex, unter dem
+  Pultdach mit Fenster) behoben — ihre Stücke um das Fenster (je eigene Dach-Oberkante) lagen als verschweisste Schalen im Face-Set (Kanten
+  3–4-fach), ifcopenshell rechnete beim Abzug 30.4 statt 7.5 m³. Jetzt der vereinigte 3D-Körper je Band (`RWall::body`, `union_bodies`), Ecken auf das 1e-6-Ausgaberaster gelegt (sonst
+  blieb zwischen Nachbarbändern ein Spalt von 1e-15 m und zwei Schalen, Wettbewerb OG2 Ost), dicht nach dem Verschweissen geprüft, sonst Schalen wie bisher;
+  `--known` aus der Prüfung entfernt, komplex 0 Befunde; zwei weitere Dachwände und eine Wand mit Formöffnung genauer (Abweichung NetVolume ↔
+  Geometrie 0.9 % → 0). Test `wand_unter_dem_dach_mit_fenster_als_ein_koerper`. · M
 - ◐ **[255]** Baurecht-Nachweis: Ausnützung gegen Modell als Tabelle (14.11.). Kern `site_proof.rs` (Abfrage `siteProof`) stellt die Vorgaben
   der Parzelle den Kennzahlen gegenüber: GFZ, AZ, BMZ, ÜZ, GZ (min.), Gesamt-/Fassadenhöhe, Grundfläche ausserhalb Grenzabstand/Baulinie,
   Gebäudeprofil; je Zeile zulässig · Projekt · Reserve/Überschreitung · erfüllt, fehlende Vorgabe als „—“ (nichts erfunden), dazu Grundlagen
