@@ -1450,7 +1450,7 @@ fn merge_arc_walls(inp: &Input, arcs: Vec<ArcW>, used: &[bool], door_arcs: &[usi
             let gap = wrap2pi(a.a0 - end);
             let total = cur.sweep + gap + a.sweep;
             let len_gap = gap * cur.r;
-            let merge = total < 2.0 * PI - 1e-6 && (len_gap <= GAP_FREE || (len_gap <= GAP_MAX && window_in(&cur, end, end + gap)));
+            let merge = total < 2.0 * PI - 1e-6 && (len_gap <= GAP_FREE || (len_gap <= GAP_MAX && (window_in(&cur, end, end + gap) || chord_window(&inp.segs, &cur, end, end + gap).is_some())));
             if merge {
                 if len_gap >= MIN_OPENING {
                     gaps.push((end, end + gap));
@@ -1488,13 +1488,51 @@ fn merge_arc_walls(inp: &Input, arcs: Vec<ArcW>, used: &[bool], door_arcs: &[usi
                 taken[i] = true;
                 RKind::Door { hinge_end, swing_right, leaves: 1 }
             }
-            None if window_in(w, g0, g1) => RKind::Window,
+            None if window_in(w, g0, g1) || chord_window(&inp.segs, w, g0, g1).is_some() => RKind::Window,
             None => RKind::Void,
         };
         let r6 = |x: f64| (x * 1e6).round() / 1e6;
-        openings.push((k, r6((g0 - w.a0) * w.r), r6((g1 - g0) * w.r), kind));
+        let (mut pos, mut width) = ((g0 - w.a0) * w.r, (g1 - g0) * w.r);
+        // Fenster auf der Sehne (Schichteinzug): Pfosten aus den Fensterlinien statt aus dem Zonenrand.
+        if matches!(kind, RKind::Window) {
+            if let Some((a, b)) = chord_window(&inp.segs, w, g0, g1) {
+                (pos, width) = (pos + a, b - a);
+            }
+        }
+        openings.push((k, r6(pos), r6(width), kind));
     }
     (walls, openings)
+}
+
+/// [216] Fenster mit Schichteinzug liegen in der Bogenwand gerade auf der Sehne der Lücke `[g0, g1]` (Winkel): das
+/// Fenstersymbol besteht dort aus Linien parallel zur Sehne (Rahmen-/Brüstungslinien) im Wandband, die die Lücke
+/// ausser an den Rändern (Einzugs-Zuschlag) ausfüllen. Ergebnis: Anfang und Ende des Fensters als Bogenlänge ab `g0`
+/// (Sehnenlage auf die Bogenlänge der Lücke gestreckt), sonst `None`. Wandkanten und Schichtgrenzen enden an den
+/// Zonenrändern bzw. sind kurz und zählen nicht.
+fn chord_window(segs: &[Seg], w: &ArcW, g0: f64, g1: f64) -> Option<(f64, f64)> {
+    let (p0, p1) = (w.at(g0), w.at(g1));
+    let l = len(sub(p1, p0));
+    if l < MIN_OPENING {
+        return None;
+    }
+    let u = mul(sub(p1, p0), 1.0 / l);
+    let sin_tol = PAR_TOL.sin();
+    let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+    for s in segs {
+        let d = sub(s.b, s.a);
+        let sl = len(d);
+        if sl < MIN_OPENING || cross(mul(d, 1.0 / sl), u).abs() > sin_tol {
+            continue;
+        }
+        let (t0, t1) = (dot(sub(s.a, p0), u), dot(sub(s.b, p0), u));
+        let n = (cross(u, sub(s.a, p0)) + cross(u, sub(s.b, p0))) / 2.0;
+        let (a, b) = (t0.min(t1), t0.max(t1));
+        if n.abs() < w.t / 2.0 - 0.005 && a > 0.03 && b < l - 0.03 && b - a >= 0.5 * l * 0.5 {
+            lo = lo.min(a);
+            hi = hi.max(b);
+        }
+    }
+    (hi > lo).then(|| (lo * (g1 - g0) * w.r / l, hi * (g1 - g0) * w.r / l))
 }
 
 fn arc_walls(inp: &Input, use_arc: &[bool], out: &mut Vec<ArcW>) -> Vec<bool> {

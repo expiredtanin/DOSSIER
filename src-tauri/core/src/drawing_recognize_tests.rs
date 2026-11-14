@@ -601,6 +601,32 @@ fn tuer_mit_zarge_breiter_als_bogen() {
 }
 
 #[test]
+fn fenster_auf_der_sehne_in_bogenwand() {
+    // [216] Fenster mit Schichteinzug liegen in der Bogenwand gerade auf der Sehne der Zone (Wand r = 5, 30 cm,
+    // 0°–90° mit Zone 30°–45°): das Fenster als zwei Linien parallel zur Sehne, 20 cm von den
+    // Zonenrändern. Erkannt: Wand mit einem Fenster, Pfosten an den Fensterlinien (Sehnenlage auf die Bogenlänge gestreckt).
+    let (ri, ro) = (4.85, 5.15);
+    let mut b = B::new();
+    for (r0, a0, sw) in [(ri, 0.0, 30.0), (ro, 0.0, 30.0), (ri, 45.0, 45.0), (ro, 45.0, 45.0)] {
+        b.arc("Wand", (0.0, 0.0), r0, a0, sw);
+    }
+    let at = |r: f64, deg: f64| (r * deg.to_radians().cos(), r * deg.to_radians().sin());
+    let (p0, p1) = (at(5.0, 30.0), at(5.0, 45.0));
+    let l = len(sub(p1, p0));
+    let u = mul(sub(p1, p0), 1.0 / l);
+    let n = (-u.1, u.0);
+    let on = |t: f64, off: f64| add(add(p0, mul(u, t)), mul(n, off));
+    b.line("Fenster", on(0.2, 0.05), on(l - 0.2, 0.05)).line("Fenster", on(0.2, -0.05), on(l - 0.2, -0.05));
+    let r = analyze(&b.inp);
+    assert_eq!(r.walls.len(), 1, "{:#?}", r.walls);
+    assert_eq!(r.openings.len(), 1, "{:?} {:?}", r.openings, r.unclear);
+    let o = &r.openings[0];
+    assert!(matches!(o.kind, RKind::Window), "{o:?}");
+    let k = 5.0 * (15f64.to_radians()) / l;
+    assert!((o.pos - (5.0 * 30f64.to_radians() + 0.2 * k)).abs() < 1e-6 && (o.width - (l - 0.4) * k).abs() < 1e-6, "{o:?}");
+}
+
+#[test]
 fn tuer_in_bogenwand() {
     // Bogenwand r = 5 (30 cm), 0°–90° mit Lücke 30°–40° (≈ 0.87 m); Tür: Scharnier am Pfosten bei 30°,
     // Blatt schlägt nach innen (zum Mittelpunkt) auf.
