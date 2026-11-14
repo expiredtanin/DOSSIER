@@ -10,7 +10,7 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   stehen im Archiv („Bewusst nicht übernommen“).
 - **Grösse** (eine Person mit Agenten): S ≤ 1 Tag · M ≤ 1 Woche · L ≤ 1 Monat · XL > 1 Monat.
   Steht keine Grösse im Archiv, ist sie hier geschätzt.
-- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 253);
+- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 254);
   nie eine ID wiederverwenden oder umnummerieren. Präfix-IDs (`[K]`, `[G]`, `[T]`, `[B]`, `[C]`) bleiben.
 - **Pro Punkt:** was fehlt · wo im Code · Grösse. Höchstens ein bis drei Sätze je Punkt;
   Messwerte und Befunde gehören in den Commit.
@@ -1084,6 +1084,7 @@ Punktwolken/BCF-Ausbau, Windows-Paket, [C5]/[C7]/[15] Kern-Umbauten — ausser s
   1:100 sehr dicht. · M
 - ◐ **[102]** Linientypen SIA 400 / ISO 128. CPU-Rückfall (> 8 Einträge) verliert Punkte. · S
 - ○ **[11]** Bibliothek per GUID. · M
+- ○ **[254]** Eigene parametrische Objekte (nach 1.0, Wunsch Maintainer 14.11., Vorbild Archicad-GDL): Objekte mit Parametern, 2D je Detailstufe grob/mittel/fein und später 3D selbst beschreiben (einfache Beschreibungssprache oder Editor), Ausbau der festen Kern-Objekte aus [253]. GDL-Dateien (.gsm) einlesen eher nicht (Format nicht offen, Interpreter nötig); Austausch über IFC/DXF. · L
 - ○ **[42]** Varianten. · L
 - ○ **[39]** Auswahl gehört zum Modell. · M
 
