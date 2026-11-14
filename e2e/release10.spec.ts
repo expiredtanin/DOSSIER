@@ -9,7 +9,7 @@
 // Mit DOSSIER_SHOTS=<ordner> entsteht je Schritt ein Bildschirmfoto.
 import { readFile, writeFile } from "node:fs/promises";
 import type { Page } from "@playwright/test";
-import { blurFocus, discardIfAsked, elementRows, expect, fileMenu, finishCommand, openTab, startNewProject, test, typeCommand } from "./app";
+import { blurFocus, discardIfAsked, drawingTabs, elementRows, expect, fileMenu, finishCommand, openTab, startNewProject, test, typeCommand } from "./app";
 import { pdfStreams } from "./pdf";
 import type {} from "../src/state/testHooks"; // Typ von window.__dossierTest
 import { KATASTER_DXF } from "./paths";
@@ -71,8 +71,10 @@ async function importKataster(page: Page): Promise<void> {
 }
 
 test("Referenz-Ablauf WBW/Vorprojekt: leeres Projekt bis Abgabe", async ({ page }) => {
-  test.setTimeout(300_000);
-  await startNewProject(page);
+  test.setTimeout(420_000);
+  await page.goto("/?dossierTest"); // Test-Naht `__dossierTest` (Objektbibliothek, Auswahl)
+  await page.getByRole("button", { name: /Neues Projekt/ }).first().click();
+  await expect(page.getByRole("group", { name: "Befehlszeile" })).toBeVisible();
 
   await test.step("1 Grundstück/Kontext: Kataster-DXF (LV95) importieren", async () => {
     await importKataster(page);
@@ -150,6 +152,31 @@ test("Referenz-Ablauf WBW/Vorprojekt: leeres Projekt bis Abgabe", async ({ page 
     await shot(page, "04-raumprogramm");
   });
 
+  await test.step("4b Objekte ([253]): WC und Esstisch mit Stühlen aus dem Panel „Objekte“ setzen", async () => {
+    const prompt = page.locator(".cmdline-prompt");
+    const libobjs = () => page.evaluate(() => window.__dossierTest!.libobjs());
+    const place = async (group: string, name: string, dx: number, dy: number) => {
+      await openTab(page, "Objekte");
+      const btn = page.getByRole("button", { name, exact: true });
+      if (!(await btn.isVisible())) await page.locator("summary", { hasText: group }).click();
+      await btn.click();
+      await expect(prompt).toHaveText("Einfügepunkt:");
+      await typeCommand(page, lv(dx, dy));
+      await expect(prompt).toHaveText("Befehl:");
+    };
+    expect((await libobjs()).items).toHaveLength(0);
+    await place("Sanitär", "WC wandhängend", B.x0 + 2, B.y0 + 2);
+    await place("Tische", "Tisch 80×140 mit Stühlen", B.x0 + 6, B.y0 + 5);
+    await expect.poll(async () => (await libobjs()).items.map((o) => o.libId).sort()).toEqual(["lib:tisch-80x140", "lib:wc-wand"]);
+    const items = (await libobjs()).items;
+    // Plan-Ausgabe: beide Objekte liefern Linien im Grundriss (Klasse im selben Schritt angelegt).
+    for (const o of items) expect(o.lines, o.libId).toBeGreaterThan(0);
+    expect((await libobjs()).layers).toEqual(expect.arrayContaining(items.map((o) => o.categoryCode)));
+    // Der Raum bleibt unverändert der eine gezeichnete.
+    expect(await page.evaluate(() => window.__dossierTest!.roomCenters().length)).toBe(1);
+    await shot(page, "04b-objekte");
+  });
+
   await test.step("5 Flächen/Volumen SIA 416 und Kennzahlen (GF, GV, AZ, ÜZ), Tabelle als CSV/PDF", async () => {
     const tile = (label: string) => page.locator(".kz-tile").filter({ has: page.locator(".kz-tile-label", { hasText: new RegExp(`^${label}$`) }) }).locator(".kz-tile-value");
     await expect(tile("GF")).toHaveText(/^1\d\d\.\d m²$/);
@@ -219,6 +246,31 @@ test("Referenz-Ablauf WBW/Vorprojekt: leeres Projekt bis Abgabe", async ({ page 
     await shot(page, "06-baurecht-pruefung");
   });
 
+  await test.step("6b Baurecht-Nachweis ([255]): Vorgaben eintragen, Tabelle in der Flächenbilanz (erfüllt/Reserve)", async () => {
+    await openTab(page, "Gelände");
+    const field = (label: RegExp) => page.locator("label.kz-parcel").filter({ hasText: label }).locator("input").first();
+    for (const [label, value] of [[/^AZ max\./, "0.5"], [/^ÜZ max\./, "0.6"], [/^Fassadenhöhe max\./, "12"]] as const) {
+      await field(label).fill(value);
+      await field(label).press("Enter");
+      await expect(field(label)).toHaveValue(value);
+    }
+    await openTab(page, "Flächenbilanz");
+    const proof = page.locator(".area-block").filter({ hasText: "Nachweis gegen das Baurecht" });
+    await proof.scrollIntoViewIfNeeded();
+    const az = proof.locator("tr").filter({ hasText: /^AZ Ausnützungsziffer/ });
+    await expect(az).toContainText("0.50");
+    await expect(az).toContainText("ja");
+    // Reserve = zulässig − Projekt (positiv, da die AZ weit unter 0.5 liegt).
+    const cells = (await az.locator("td").allTextContents()).map((c) => c.trim());
+    const [allowed, actual, reserve] = [cells[1], cells[2], cells[3]].map(Number);
+    expect(allowed).toBeCloseTo(0.5, 2);
+    expect(reserve).toBeGreaterThan(0);
+    expect(Math.abs(allowed - actual - reserve)).toBeLessThan(0.011);
+    // Vorgabe ohne Eintrag (GFZ) erscheint als „—“, nicht erfunden.
+    await expect(proof.locator("tr").filter({ hasText: /^GFZ/ }).first()).toContainText("—");
+    await shot(page, "06b-baurecht-nachweis");
+  });
+
   await test.step("7 Grundriss 1:200 (Wettbewerb) bzw. 1:100 (Vorprojekt)", async () => {
     await page.getByTitle("Papier-Massstab 1:N anwenden").click();
     await page.getByRole("option", { name: "1:200", exact: true }).click();
@@ -247,6 +299,17 @@ test("Referenz-Ablauf WBW/Vorprojekt: leeres Projekt bis Abgabe", async ({ page 
     await page.getByLabel("Schatten im 3D zeigen").check();
     await expect(page.getByLabel("Schatten im 3D zeigen")).toBeChecked();
     await shot(page, "09-3d");
+    // [252] Ctrl+Tab / Ctrl+Umschalt+Tab springt zyklisch durch die Ansichts-Reiter (Schnitt B, 3D, …).
+    await blurFocus(page);
+    const tabs = drawingTabs(page).getByRole("tab");
+    const nTabs = await tabs.count();
+    expect(nTabs).toBeGreaterThanOrEqual(2);
+    const selected = () => tabs.evaluateAll((els) => els.findIndex((e) => e.getAttribute("aria-selected") === "true"));
+    const start = await selected();
+    await page.keyboard.press("Control+Tab");
+    await expect.poll(selected).toBe((start + 1) % nTabs);
+    await page.keyboard.press("Control+Shift+Tab");
+    await expect.poll(selected).toBe(start);
     await page.getByRole("button", { name: "Grundriss", exact: true }).click();
   });
 
@@ -280,6 +343,14 @@ test("Referenz-Ablauf WBW/Vorprojekt: leeres Projekt bis Abgabe", async ({ page 
       });
       await writeFile(`${process.env.DOSSIER_SHOTS}/10b-kosten-tabelle.svg`, svg);
     }
+  });
+
+  await test.step("10c Baurecht-Nachweis als Blatt-Tabelle aufs Abgabeplakat ([255])", async () => {
+    await page.locator("[data-table-add]").selectOption({ label: "Baurecht-Nachweis (AZ, ÜZ, Höhen)" });
+    await expect(page.locator("[data-table-id] text", { hasText: /^AZ Ausnützungsziffer/ })).toHaveCount(1);
+    // Dieselben Werte wie in der Flächenbilanz: Zeile „AZ“ trägt „ja“ (erfüllt).
+    await expect(page.locator("[data-table-id] text", { hasText: /^ja$/ }).first()).toBeAttached();
+    await shot(page, "10c-baurecht-blatt");
   });
 
   await test.step("11 Abgabe als PDF: Publikationssatz mit dem Blatt → PDF-Datei", async () => {
@@ -316,6 +387,43 @@ test("Referenz-Ablauf WBW/Vorprojekt: leeres Projekt bis Abgabe", async ({ page 
     expect(text).toMatch(/IFCSPACE/);
   });
 
+  await test.step("12b Anonymität ([208]): Raumname = Projektname → Dialog → Abbrechen → umbenennen → Export ohne Dialog", async () => {
+    const dialog = page.getByTestId("anonymity-dialog");
+    const room = (await page.evaluate(() => window.__dossierTest!.roomCenters()))[0];
+    // Raum wählen, in der Objekt-Info den Projektnamen als Raumnamen eintragen.
+    await page.evaluate((id) => window.__dossierTest!.select({ rooms: [id] }), room.id);
+    await openTab(page, "Objekt-Info");
+    const nameInput = page.locator("#objinfo-group-room").getByRole("textbox", { name: "Name", exact: true });
+    await nameInput.fill("Leeres Projekt Atelier");
+    await expect.poll(async () => (await page.evaluate(() => window.__dossierTest!.roomCenters()))[0].name).toBe("Leeres Projekt Atelier");
+
+    await openTab(page, "Mappe");
+    await page.locator("[data-testid=competition-anonymous]").check();
+    await page.locator("[data-testid=competition-keyword]").fill("FALKE 7");
+    const run = page.locator("[data-publish-set] [data-publish-run]").first();
+    await run.click();
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByTestId("anonymity-findings").locator("li").first()).toContainText("Leeres Projekt");
+    await page.getByTestId("anonymity-cancel").click();
+    await expect(dialog).toHaveCount(0);
+
+    // Raum umbenennen (Esc hebt die Auswahl verzögert auf [204]: auf leere Auswahl warten, sonst bleibt das Feld offen).
+    await page.evaluate((id) => window.__dossierTest!.select({ rooms: [id] }), room.id);
+    await openTab(page, "Objekt-Info");
+    await nameInput.fill("Atelier A");
+    await expect.poll(async () => (await page.evaluate(() => window.__dossierTest!.roomCenters()))[0].name).toBe("Atelier A");
+    await blurFocus(page);
+    await page.keyboard.press("Escape");
+    await expect.poll(() => page.evaluate(() => Object.values(JSON.parse(window.__dossierTest!.selected().all) as Record<string, unknown>).flat().length)).toBe(0);
+
+    await openTab(page, "Mappe");
+    const anon = await download(page, () => run.click());
+    await expect(dialog).toHaveCount(0);
+    expect(anon.bytes.subarray(0, 5).toString("latin1")).toBe("%PDF-");
+    expect(anon.name).not.toContain("Leeres Projekt");
+    expect(pdfStreams(anon.bytes) + anon.bytes.toString("latin1")).not.toContain("Leeres Projekt");
+  });
+
   await test.step("13 Speichern: .obp mit Volumen, Raum, Baurecht und Raumprogramm", async () => {
     const saved = await download(page, () => fileMenu(page, "Projekt speichern"));
     const j = JSON.parse(saved.bytes.toString("utf8"));
@@ -326,6 +434,11 @@ test("Referenz-Ablauf WBW/Vorprojekt: leeres Projekt bis Abgabe", async ({ page 
     expect(j.rooms).toHaveLength(1);
     expect(j.siteRules.parcel).toHaveLength(4);
     expect(j.siteRules.maxHeight).toBe(12);
+    expect(j.siteRules.maxAz).toBe(0.5);
+    expect(j.siteRules.maxUz).toBe(0.6);
+    expect(j.siteRules.maxFacadeHeight).toBe(12);
+    expect(j.drawings2d.filter((d: { geom: { shape: string } }) => d.geom.shape === "libobj")).toHaveLength(2);
+    expect(j.rooms[0].name).toBe("Atelier A");
     expect(j.roomProgram).toHaveLength(2);
     // [221] Projekt-Nullpunkt aus dem Kataster: Modell lokal, Landeskoordinaten im Standort-Bezug.
     expect(j.geoAnchor.lv95).toEqual({ e: E0, n: N0 });
