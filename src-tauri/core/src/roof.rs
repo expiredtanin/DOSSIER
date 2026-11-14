@@ -661,7 +661,7 @@ pub fn decode_params(buf: &[f64]) -> Option<RoofParams> {
     if !(n.is_finite() && n >= 0.0 && n.fract() == 0.0) {
         return None;
     }
-    let end = 10 + 2 * n as usize;
+    let end = (n as usize).checked_mul(2)?.checked_add(10)?;
     let pts = buf.get(10..end)?;
     let (mut holes, mut edge_pitch_deg, bulges) = decode_extra(buf.get(end..).unwrap_or(&[]))?;
     let mut outline: Vec<P2> = pts.chunks_exact(2).map(|c| [c[0], c[1]]).collect();

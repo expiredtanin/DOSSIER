@@ -62,9 +62,11 @@ pub fn geo_extrude_footprints(data: &[f64]) -> Vec<f64> {
     for _ in 0..n as usize {
         let (Some(&h), Some(&np)) = (data.get(at), data.get(at + 1)) else { return Vec::new() };
         let np = np as usize;
-        let Some(pts) = data.get(at + 2..at + 2 + np * 2) else { return Vec::new() };
+        // Gesättigte Zähler (1e300 → usize::MAX) dürfen nicht überlaufen ([258]).
+        let Some(next) = np.checked_mul(2).and_then(|k| k.checked_add(at + 2)) else { return Vec::new() };
+        let Some(pts) = data.get(at + 2..next) else { return Vec::new() };
         rings.push((h, pts.chunks_exact(2).map(|c| [c[0], c[1]]).collect()));
-        at += 2 + np * 2;
+        at = next;
     }
     encode(&gm::extrude_rings(&rings))
 }
