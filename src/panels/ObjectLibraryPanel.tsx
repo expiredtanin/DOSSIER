@@ -2,11 +2,12 @@
 // mit Vorschau-Symbol je Objekt. Klick wählt das Objekt und startet den Befehl `libobj` (Einfügepunkt klicken,
 // R = drehen, M = spiegeln). Der Katalog kommt aus dem Rust-Kern; die Vorschau zeichnet der Kern (grob).
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { t } from "../i18n";
 import type { TranslationKey } from "../i18n";
 import { usePanelHostAction } from "./host";
 import { setActiveLibObject } from "../commands/cmds/libobj";
+import { createPaletteDrag, currentPlanDropTarget } from "../state/planDropTarget";
 import {
   libCatalog,
   libDefaultParams,
@@ -77,6 +78,18 @@ export function ObjectLibraryPanel() {
     onRunCommand("libobj");
   };
 
+  // Ziehen in den Plan: Zeigerdruck startet den Befehl wie ein Klick; Bewegen über der Zeichenfläche führt die
+  // Vorschau nach, Loslassen dort setzt den Punkt, Loslassen daneben oder Esc bricht ab. Ohne Ziehen bleibt es ein Klick.
+  const drag = useRef(createPaletteDrag(currentPlanDropTarget)).current;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") drag.abort();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [drag]);
+  const mods = (e: React.PointerEvent) => ({ shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey, alt: e.altKey });
+
   if (catalog.objects.length === 0) {
     return <div style={{ padding: 10, fontSize: 12, color: "var(--muted)" }}>{t("lib.empty")}</div>;
   }
@@ -97,7 +110,25 @@ export function ObjectLibraryPanel() {
                     type="button"
                     title={name.replace(/\u00AD/g, "")}
                     aria-label={name.replace(/\u00AD/g, "")}
-                    onClick={() => place(o)}
+                    onPointerDown={(e) => {
+                      if (e.button !== 0) return;
+                      place(o);
+                      if (e.pointerType === "touch") return; // Touch scrollt das Panel: nur Klick
+                      try {
+                        e.currentTarget.setPointerCapture(e.pointerId);
+                      } catch {
+                        /* ohne Capture: Ziehen entfällt, der Klick-Weg bleibt */
+                      }
+                      drag.down(e.clientX, e.clientY);
+                    }}
+                    onPointerMove={(e) => drag.move(e.clientX, e.clientY, mods(e))}
+                    onPointerUp={(e) => {
+                      drag.up(e.clientX, e.clientY, mods(e));
+                      if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+                    }}
+                    onPointerCancel={() => drag.abort()}
+                    // Tastatur (Enter/Leertaste, detail 0): Zeigerdruck hat den Befehl schon gestartet.
+                    onClick={(e) => { if (e.detail === 0) place(o); }}
                     style={{
                       display: "flex",
                       flexDirection: "column",

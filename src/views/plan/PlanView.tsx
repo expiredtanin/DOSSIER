@@ -42,6 +42,7 @@ import { usePlanEngine } from "./planView/usePlanEngine";
 import { usePlanCoords } from "./planView/usePlanCoords";
 import { usePlanPicking } from "./planView/usePlanPicking";
 import { usePlanPointer } from "./planView/usePlanPointer";
+import { usePlanDropTarget } from "./planView/usePlanDropTarget";
 import { usePlanPickCycle } from "./planView/usePlanPickCycle";
 import { usePlanZoomInput } from "./planView/usePlanZoomInput";
 import { usePlanHighlights } from "./planView/usePlanHighlights";
@@ -422,6 +423,8 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     pickSiteAt,
     pickContextObject,
   });
+  // [253] Ablageziel für das Ziehen aus der Objekt-Palette.
+  usePlanDropTarget({ enabled: true, svgRef, toolHandlers, rawModelAt, currentPxPerMeter });
   // [165] Durchschalten übereinanderliegender Objekte (Liste, Zyklus) und Pointer-Up.
   const {
     pickList,

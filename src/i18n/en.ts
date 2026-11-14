@@ -4489,7 +4489,7 @@ export const en: Record<TranslationKey, string> = {
   "lib.p.field": "Parking bay",
   "lib.p.mirror": "Mirror",
   "lib.title": "Objects",
-  "lib.hint": "Pick an object, then click the insertion point in the plan (R = rotate, M = mirror).",
+  "lib.hint": "Pick an object, then click the insertion point in the plan or drag the object into it (R = rotate, M = mirror, Esc = cancel).",
   "lib.empty": "No objects available.",
   "lib.params": "Defaults",
   "lib.reroll": "Re-roll",

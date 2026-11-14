@@ -94,3 +94,58 @@ test("Objektbibliothek: WC und Esstisch setzen, Parameter ändern, Undo", async 
   // Die für das WC angelegte Klasse ist mit zurückgenommen.
   expect((await libobjs(page)).layers).toEqual(before.layers);
 });
+
+test("Objektbibliothek: aus der Palette in den Plan ziehen und loslassen", async ({ page }) => {
+  test.setTimeout(120_000);
+  await page.goto("/?dossierTest&gl=0");
+  await page.getByRole("button", { name: /Neues Projekt/ }).first().click();
+  await expect(page.getByRole("group", { name: "Befehlszeile" })).toBeVisible();
+  expect((await libobjs(page)).items).toHaveLength(0);
+
+  await openTab(page, "Objekte");
+  const wc = page.getByRole("button", { name: "WC wandhängend", exact: true });
+  if (!(await wc.isVisible())) await page.locator("summary", { hasText: "Sanitär" }).click();
+  const canvas = (await page.locator("svg.plan-svg").first().boundingBox())!;
+  const from = (await wc.boundingBox())!;
+  const sx = from.x + from.width / 2;
+  const sy = from.y + from.height / 2;
+
+  // Ziehen und über der Fläche loslassen: ein Objekt, der Befehl ist beendet.
+  await page.mouse.move(sx, sy);
+  await page.mouse.down();
+  await expect(prompt(page)).toHaveText("Einfügepunkt:");
+  await page.mouse.move(canvas.x + 200, canvas.y + 200, { steps: 8 });
+  await page.mouse.up();
+  await expect(prompt(page)).toHaveText("Befehl:");
+  let s = await libobjs(page);
+  expect(s.items).toHaveLength(1);
+  expect(s.items[0].libId).toBe("lib:wc-wand");
+
+  // Loslassen ausserhalb der Fläche (zurück über der Palette): abgebrochen, nichts gesetzt.
+  await page.mouse.move(sx, sy);
+  await page.mouse.down();
+  await expect(prompt(page)).toHaveText("Einfügepunkt:");
+  await page.mouse.move(canvas.x + 300, canvas.y + 220, { steps: 6 });
+  await page.mouse.move(sx + 2, sy + 40, { steps: 6 });
+  await page.mouse.up();
+  await expect(prompt(page)).toHaveText("Befehl:");
+  expect((await libobjs(page)).items).toHaveLength(1);
+
+  // Esc während des Ziehens bricht ab; das Loslassen über der Fläche setzt nichts.
+  await page.mouse.move(sx, sy);
+  await page.mouse.down();
+  await page.mouse.move(canvas.x + 320, canvas.y + 260, { steps: 6 });
+  await page.keyboard.press("Escape");
+  await page.mouse.up();
+  await expect(prompt(page)).toHaveText("Befehl:");
+  expect((await libobjs(page)).items).toHaveLength(1);
+
+  // Normaler Klick ohne Ziehen: Befehl läuft, Klick im Plan setzt.
+  await wc.click();
+  await expect(prompt(page)).toHaveText("Einfügepunkt:");
+  await page.mouse.move(canvas.x + 400, canvas.y + 250);
+  await page.mouse.click(canvas.x + 400, canvas.y + 250);
+  await expect(prompt(page)).toHaveText("Befehl:");
+  s = await libobjs(page);
+  expect(s.items).toHaveLength(2);
+});

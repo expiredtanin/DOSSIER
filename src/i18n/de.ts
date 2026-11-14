@@ -4503,7 +4503,7 @@ export const de = {
   "lib.p.field": "Parkfeld",
   "lib.p.mirror": "Spiegeln",
   "lib.title": "Objekte",
-  "lib.hint": "Objekt wählen, dann im Plan den Einfügepunkt klicken (R = drehen, M = spiegeln).",
+  "lib.hint": "Objekt wählen, dann im Plan den Einfügepunkt klicken oder das Objekt in den Plan ziehen (R = drehen, M = spiegeln; Esc = abbrechen).",
   "lib.empty": "Keine Objekte verfügbar.",
   "lib.params": "Vorgaben",
   "lib.reroll": "Neu würfeln",
