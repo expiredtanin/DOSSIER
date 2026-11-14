@@ -351,6 +351,14 @@ mod tests {
     }
 
     #[test]
+    fn teilweise_ausserhalb_nutzt_nur_die_innere_hoehe() {
+        // Gelände reicht bis x = 50 (z = 5); Haus x = 45..55: der Teil im Netz bestimmt den Fuss (tiefster Punkt bei x = 45, z = 4.5),
+        // der Teil ausserhalb (Randhöhe 5) zieht ihn nicht hoch.
+        let z = zs(&ground_element(&sloped(), &house(45.0, 55.0, 8.0)).unwrap());
+        assert!((z.iter().cloned().fold(f64::INFINITY, f64::min) - 4.5).abs() < 1e-9, "{z:?}");
+    }
+
+    #[test]
     fn ohne_gelaende_oder_art_keine_aenderung() {
         assert!(ground_element(&Project::default(), &house(0.0, 5.0, 3.0)).is_none());
         assert!(ground_element(&sloped(), &serde_json::json!({"type":"terrainMesh","id":"g"})).is_none());
