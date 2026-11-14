@@ -1,6 +1,7 @@
 // Ablauf des WASM-render2d-Renderers ohne GPU: ein Schein-Renderer, der wie die wasm-bindgen-Fassade
 // reagiert (überlappender Aufruf → „recursive use …", nach einem Abbruch bleibt das Objekt gesperrt).
 import { describe, expect, it } from "vitest";
+import { GpuRecovery } from "../../engine/gpuRecovery";
 import { type PlanFrame, type WebPlanRendererLike, WasmPlanRendererSession } from "./wasmRendererSession";
 
 type Scene = { name: string };
@@ -122,9 +123,8 @@ function setup(opts: { maxRecoveries?: number; failCreate?: () => boolean; now?:
     onReadyChange: (r) => ready.push(r),
     loadFont: opts.loadFont,
     warn: (m) => warnings.push(m),
-    maxRecoveries: opts.maxRecoveries,
-    recoveryWindowMs: 1000,
-    now: opts.now ?? (() => 0),
+    info: () => {},
+    recovery: new GpuRecovery({ maxLosses: opts.maxRecoveries ?? 3, windowMs: 1000, baseDelayMs: 0, now: opts.now ?? (() => 0) }),
   });
   /** Ausstehende `create`-Aufrufe erfüllen und die Mikrotasks abarbeiten. */
   const settle = async () => {
@@ -286,6 +286,45 @@ describe("WasmPlanRendererSession", () => {
     expect(made).toHaveLength(5);
     expect(ready.at(-1)).toBe(true);
     expect(made[4].calls.at(-1)).toBe("render");
+  });
+
+  it("[206] Verlust-Rückruf wird erst im nächsten Takt verarbeitet (nie verschachtelt)", async () => {
+    const { session, made, settle, ready } = setup();
+    session.start();
+    await settle();
+    made[0].lost = true;
+    made[0].lostCb?.();
+    expect(ready).toEqual([true]); // noch nichts verworfen
+    expect(made[0].freed).toBe(false);
+    await settle();
+    expect(made[0].freed).toBe(true);
+    expect(made).toHaveLength(2);
+  });
+
+  it("[206] Rust-Result::Err (Zeichenkette) ist kein Abbruch: kein Neuaufbau", async () => {
+    const { session, made, settle, warnings } = setup();
+    session.start();
+    await settle();
+    made[0].set_scene_bin = () => {
+      throw "Szene lesen: fremde Version";
+    };
+    session.setScene({ name: "A" });
+    await settle();
+    expect(made).toHaveLength(1);
+    expect(session.ready).toBe(true);
+    expect(warnings.some((w) => /abgelehnt/.test(w))).toBe(true);
+  });
+
+  it("[206] scheitert der Neuaufbau, zählt das als weiterer Verlust (nicht endgültig)", async () => {
+    let k = 0;
+    const { session, made, settle } = setup({ failCreate: () => k++ === 1 });
+    session.start();
+    await settle();
+    made[0].lostCb?.();
+    await settle();
+    await settle();
+    expect(made).toHaveLength(2);
+    expect(session.ready).toBe(true);
   });
 
   it("scheitert der Aufbau, bleibt ready aus", async () => {

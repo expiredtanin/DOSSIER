@@ -11,7 +11,7 @@ import { expect, test as base, type Page } from "@playwright/test";
 const ALLOWED_CONSOLE_ERRORS: { re: RegExp; why: string }[] = [
   {
     re: /createBuffer failed|wgpu-.*webgpu\.rs/,
-    why: "render2d/render3d: SwiftShader verliert das WebGPU-Gerät beim Präsentieren, createBuffer(mappedAtCreation) wirft, wgpu paniert (nur headless). render2d baut dann neu auf bzw. fällt auf SVG zurück (planEngine.spec.ts).",
+    why: "render2d/render3d: SwiftShader verliert das WebGPU-Gerät beim Präsentieren, createBuffer(mappedAtCreation) wirft, wgpu paniert (nur headless). render2d baut dann neu auf bzw. fällt auf SVG zurück (planEngine.spec.ts). [206] Seit 14.11. prüfen beide Renderer den Verlust vorher (0 Vorkommen in der ganzen Suite); bleibt erlaubt für den Wettlauf „Gerät schon tot, `device.lost` noch nicht gemeldet“ (die Hülle `guardRenderer` baut dann neu auf). Geprüft in gpuDeviceLost206.spec.ts.",
   },
   {
     re: /WebSocket connection to 'ws:\/\/127\.0\.0\.1:\d+\/' failed/,
@@ -34,13 +34,17 @@ export const test = base.extend<{ errors: string[] }>({
         if (!ALLOWED_CONSOLE_ERRORS.some((a) => a.re.test(text))) errors.push(text.slice(0, 400));
       };
       page.on("console", (m) => {
+        // Mit E2E_WARN_LOG auch Fehler (z. B. erlaubte wgpu-Panics) mitschreiben, Feld `type`.
+        if ((m.type() === "warning" || m.type() === "error") && process.env.E2E_WARN_LOG)
+          appendFileSync(process.env.E2E_WARN_LOG, JSON.stringify({ test: base.info().title, type: m.type(), text: m.text().slice(0, 600) }) + "\n");
         if (m.type() === "error") take(m.text());
-        else if (m.type() === "warning") {
-          if (process.env.E2E_WARN_LOG) appendFileSync(process.env.E2E_WARN_LOG, JSON.stringify({ test: base.info().title, text: m.text().slice(0, 600) }) + "\n");
-          if (FATAL_WARNINGS.test(m.text())) take(`Warnung: ${m.text()}`);
-        }
+        else if (m.type() === "warning" && FATAL_WARNINGS.test(m.text())) take(`Warnung: ${m.text()}`);
       });
-      page.on("pageerror", (e) => take(`pageerror: ${e.message}`));
+      page.on("pageerror", (e) => {
+        if (process.env.E2E_WARN_LOG)
+          appendFileSync(process.env.E2E_WARN_LOG, JSON.stringify({ test: base.info().title, type: "pageerror", text: e.message.slice(0, 600) }) + "\n");
+        take(`pageerror: ${e.message}`);
+      });
       await use(errors);
       // Nach dem Test: kein unerwarteter Fehler in der Konsole.
       expect(errors, "unerwartete Konsolenfehler").toEqual([]);

@@ -13,6 +13,7 @@
 // GPU-freien Schichten und ist damit unabhaengig von einer Display-Session.
 
 pub mod demo;
+pub mod device_health;
 pub mod ortho;
 pub mod scene_bin;
 pub mod shaders;

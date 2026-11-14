@@ -13,12 +13,13 @@
 // Szenenformat = Binaerpuffer (`scene_bin.rs`), dekodiert zu render2d::types::Scene. Pan/Zoom aendern nur die ViewBox (kein Re-Tess).
 
 use std::cell::RefCell;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
 
+use crate::device_health::DeviceHealth;
 use crate::gpu::Renderer;
 use crate::scene_bin::decode_scene;
 use crate::types::ViewBox;
@@ -31,7 +32,10 @@ thread_local! {
 }
 static NEXT_RENDERER_ID: AtomicU32 = AtomicU32::new(1);
 
-fn notify_lost(id: u32) {
+/// Meldet den Verlust an JS (Argument: Grund + Meldung des Browsers). Laeuft im Promise-Takt von `device.lost`,
+/// nie innerhalb einer Renderer-Methode; der JS-Rueckruf baut trotzdem erst ausserhalb neu auf
+/// (`wasmRendererSession.ts`), damit nichts in dieses Objekt zurueckruft.
+fn notify_lost(id: u32, why: &str) {
     // Funktion zuerst herausnehmen: ein Rueckruf darf selbst wieder Renderer anlegen.
     let f = LOST_CALLBACKS.with(|c| {
         let mut c = c.borrow_mut();
@@ -39,7 +43,7 @@ fn notify_lost(id: u32) {
         Some(c.swap_remove(pos).1)
     });
     if let Some(f) = f {
-        let _ = f.call0(&JsValue::NULL);
+        let _ = f.call1(&JsValue::NULL, &JsValue::from_str(why));
     }
 }
 
@@ -55,16 +59,20 @@ pub struct WebPlanRenderer {
     view_box: ViewBox,
     /// Nummer fuer den Rueckruf bei Geraeteverlust.
     id: u32,
-    /// Gesetzt aus `device.lost`. Danach ruft KEINE Methode mehr wgpu auf: auf einem
-    /// verlorenen Geraet wirft z. B. `createBuffer(mappedAtCreation)` (auch in glyphon),
-    /// wgpu macht daraus einen Panic, und das Objekt bliebe fuer immer gesperrt.
-    lost: Arc<AtomicBool>,
+    /// Geraetezustand (`device_health.rs`), gesetzt aus `device.lost`. Danach ruft KEINE Methode mehr
+    /// wgpu auf: auf einem verlorenen Geraet wirft z. B. `createBuffer(mappedAtCreation)` (auch in
+    /// glyphon), wgpu macht daraus einen Panic, und das Objekt bliebe fuer immer gesperrt.
+    health: Arc<DeviceHealth>,
 }
 
 impl Drop for WebPlanRenderer {
     fn drop(&mut self) {
         let id = self.id;
         LOST_CALLBACKS.with(|c| c.borrow_mut().retain(|(i, _)| *i != id));
+        // GPU-Speicher sofort freigeben (wgpus WebGPU-Drop tut das nicht, das Geraet lebte bis zur
+        // JS-Speicherbereinigung weiter). Der folgende „Destroyed“-Verlust ist gewollt und bleibt still.
+        self.health.retire();
+        self.device.destroy();
     }
 }
 
@@ -145,23 +153,26 @@ impl WebPlanRenderer {
         };
         surface.configure(&device, &config);
 
-        // Geraeteverlust merken (und JS melden, s. `set_lost_callback`).
+        // Geraeteverlust nur merken und JS melden (s. `set_lost_callback`); geloggt wird einmal auf der TS-Seite.
         let id = NEXT_RENDERER_ID.fetch_add(1, Ordering::Relaxed);
-        let lost = Arc::new(AtomicBool::new(false));
+        let health = Arc::new(DeviceHealth::new());
         {
-            let lost = lost.clone();
+            let health = health.clone();
             device.set_device_lost_callback(move |reason, msg| {
-                lost.store(true, Ordering::SeqCst);
-                web_sys::console::warn_1(&JsValue::from_str(&format!(
-                    "render2d: WebGPU-Geraet verloren ({reason:?}): {msg}"
-                )));
-                notify_lost(id);
+                if health.on_lost() {
+                    notify_lost(id, &format!("{reason:?}: {msg}"));
+                }
             });
         }
-        // Validierungsfehler melden statt paniken (wgpus Vorgabe-Handler paniert).
-        device.on_uncaptured_error(Arc::new(|e: wgpu::Error| {
-            web_sys::console::warn_1(&JsValue::from_str(&format!("render2d WebGPU-Fehler: {e}")));
-        }));
+        // Validierungsfehler melden statt paniken (wgpus Vorgabe-Handler paniert); nach einem Verlust still.
+        {
+            let health = health.clone();
+            device.on_uncaptured_error(Arc::new(move |e: wgpu::Error| {
+                if health.should_report_error() {
+                    web_sys::console::warn_1(&JsValue::from_str(&format!("render2d WebGPU-Fehler: {e}")));
+                }
+            }));
+        }
 
         let mut renderer = Renderer::new(&device, format);
         // Font einspielen: uebergebene Bytes ODER die eingebettete Inter-Schrift.
@@ -184,17 +195,17 @@ impl WebPlanRenderer {
             // Platzhalter bis set_view_box; verhindert Division durch 0.
             view_box: ViewBox::new(0.0, 0.0, width as f32, height as f32),
             id,
-            lost,
+            health,
         })
     }
 
     /// true, sobald das WebGPU-Geraet verloren ist: dann zeichnet dieser Renderer nichts
     /// mehr, der Aufrufer baut einen neuen (`src/views/plan/wasmRendererSession.ts`).
     pub fn is_lost(&self) -> bool {
-        self.lost.load(Ordering::SeqCst)
+        self.health.is_lost()
     }
 
-    /// JS-Funktion, die beim Geraeteverlust (einmal) gerufen wird.
+    /// JS-Funktion, die beim Geraeteverlust (einmal) gerufen wird; Argument: Grund und Meldung.
     pub fn set_lost_callback(&self, f: js_sys::Function) {
         let id = self.id;
         LOST_CALLBACKS.with(|c| {

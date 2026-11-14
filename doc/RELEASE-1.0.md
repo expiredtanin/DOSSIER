@@ -206,6 +206,10 @@ Speichern, Autosave und Schliessen sind im Browser und in Unit-Tests geprüft (`
 - Natives Menü (Datei → Exportieren → PDF/DXF, „Kennzahlen und Raumprogramm …“), native Speicher-/Öffnen-Dialoge.
 - Standort-Import über swisstopo/geo.admin (Netz) im eigenen Fenster.
 - Leistung mit grossem Kontext-Import ([214]).
+- WebGPU-Geräteverlust ([206]/[118], 14.11.): 3D-Ansicht offen (und Plan mit `?native=0`), Mac in den Ruhezustand und wieder wecken bzw.
+  Grafik wechseln/eGPU abziehen → nach ca. 0,5 s zeichnet das 3D wieder (gleiches Modell, gleiche Kamera, Stil, Schnitt), Konsole (Safari-Webinspektor)
+  höchstens eine Zeile „render3d: WebGPU-Gerät verloren, Neuaufbau in 500 ms“, kein „unreachable“/„recursive use“. Nur headless (SwiftShader) und mit
+  erzwungenem `GPUDevice.destroy()` geprüft (`e2e/gpuDeviceLost206.spec.ts`), nicht unter WKWebView/Metal.
 
 ## Bekannt aus dem Browser-Lauf (nicht Mac-relevant)
 

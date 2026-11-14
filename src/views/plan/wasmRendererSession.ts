@@ -14,13 +14,18 @@
  *  - Szene und Ausschnitt werden nur gemerkt und in `flush` angewandt — die letzte Szene gewinnt,
  *    gleiche Szene (Objekt-Identität) wird nicht erneut hochgeladen (render2d ist zoomunabhängig).
  *  - Ein Aufruf während eines laufenden (Rückruf aus dem Renderer) wird nachgeholt, nie verschachtelt.
- *  - Wirft ein Aufruf oder meldet der Renderer „Gerät verloren", wird das Objekt verworfen (ein
+ *  - Bricht ein Aufruf ab (Panic, WebGPU-Ausnahme; ein Rust-`Result::Err` als Zeichenkette zählt nicht, s.
+ *    `isRendererAbort`) oder meldet der Renderer „Gerät verloren", wird das Objekt verworfen (ein
  *    gesperrtes nicht mehr angefasst), `ready` geht aus (SVG zeichnet den Plan) und ein neuer Renderer
- *    entsteht; danach werden letzte Szene und letzter Ausschnitt erneut angewandt. Höchstens
- *    `maxRecoveries` Neuaufbauten je Zeitfenster — sonst bleibt der SVG-Rückfall.
+ *    entsteht nach einer Wartezeit; danach werden letzte Szene und letzter Ausschnitt erneut angewandt.
+ *  - [206]/[118] Der Verlust-Rückruf aus Rust wird erst im nächsten Takt verarbeitet (nie verschachtelt).
+ *    Wartezeit und Budget teilen sich alle Renderer der Seite (`engine/gpuRecovery.ts`: 0,5 s, 2 s, 8 s,
+ *    dann bleibt WebGPU aus und der Plan beim SVG-Rückfall); ein gescheiterter Neuaufbau zählt als Verlust.
  *
  * Rein (ohne React/DOM) und mit einem Schein-Renderer getestet (`wasmRendererSession.test.ts`).
  */
+
+import { GpuRecovery, gpuRecovery, isRendererAbort } from "../../engine/gpuRecovery";
 
 /** Was die Sitzung vom wasm-bindgen-Objekt `WebPlanRenderer` braucht. */
 export interface WebPlanRendererLike {
@@ -40,8 +45,8 @@ export interface WebPlanRendererLike {
   mark_font_unavailable?(key: number): void;
   /** true, sobald das WebGPU-Gerät verloren ist (dann zeichnet der Renderer nichts mehr). */
   is_lost(): boolean;
-  /** Rückruf beim Geräteverlust (aus dem `device.lost`-Promise). */
-  set_lost_callback?(f: () => void): void;
+  /** Rückruf beim Geräteverlust (aus dem `device.lost`-Promise); Argument: Grund und Meldung. */
+  set_lost_callback?(f: (why?: string) => void): void;
   free?(): void;
 }
 
@@ -66,11 +71,12 @@ export interface SessionOptions<S> {
   /** Bereitschaft geändert (false → Aufrufer zeichnet über SVG). */
   onReadyChange(ready: boolean): void;
   warn?(msg: string, e?: unknown): void;
-  /** Neuaufbauten je Zeitfenster, danach endgültig SVG (Vorgabe 3 je 60 s). */
-  maxRecoveries?: number;
-  recoveryWindowMs?: number;
-  /** Uhr in ms (Vorgabe `performance.now`; im Test austauschbar). */
-  now?(): number;
+  /** Weitere Neuaufbauten im selben Zeitfenster (Vorgabe `console.info`). */
+  info?(msg: string, e?: unknown): void;
+  /** Budget und Wartezeiten der Neuaufbauten (Vorgabe: das gemeinsame `gpuRecovery` der Seite). */
+  recovery?: GpuRecovery;
+  /** Zeitgeber (Vorgabe `setTimeout`); liefert eine Abbruch-Funktion. */
+  schedule?(fn: () => void, ms: number): () => void;
 }
 
 export class WasmPlanRendererSession<S> {
@@ -86,15 +92,23 @@ export class WasmPlanRendererSession<S> {
   private started = false;
   private failed = false;
   private disposed = false;
-  /** Zeitpunkte der Neuaufbauten im laufenden Fenster. */
-  private recoveries: number[] = [];
+  /** Ein Neuaufbau läuft (ein Init-Fehler zählt dann als weiterer Verlust, nicht als „kein WebGPU“). */
+  private recovering = false;
+  private cancelTimer: (() => void) | null = null;
   /** [226] Schriftdateien, die gerade geladen werden. */
   private fontsLoading = new Set<number>();
   private _ready = false;
-  private readonly maxRecoveries: number;
+  private readonly recovery: GpuRecovery;
+  private readonly schedule: (fn: () => void, ms: number) => () => void;
 
   constructor(private readonly opts: SessionOptions<S>) {
-    this.maxRecoveries = opts.maxRecoveries ?? 3;
+    this.recovery = opts.recovery ?? gpuRecovery;
+    this.schedule =
+      opts.schedule ??
+      ((fn, ms) => {
+        const h = setTimeout(fn, ms);
+        return () => clearTimeout(h);
+      });
   }
 
   get ready(): boolean {
@@ -105,6 +119,11 @@ export class WasmPlanRendererSession<S> {
   start(): void {
     if (this.started || this.disposed) return;
     this.started = true;
+    // WebGPU für diese Seite schon aufgegeben (zu viele Verluste): gleich SVG, ohne Meldung.
+    if (this.recovery.disabled) {
+      this.failed = true;
+      return;
+    }
     this.spawn();
   }
 
@@ -122,6 +141,8 @@ export class WasmPlanRendererSession<S> {
 
   dispose(): void {
     this.disposed = true;
+    this.cancelTimer?.();
+    this.cancelTimer = null;
     this.setReady(false);
     this.release(this.renderer, true);
     this.renderer = null;
@@ -158,19 +179,29 @@ export class WasmPlanRendererSession<S> {
           return;
         }
         this.renderer = r;
+        this.recovering = false;
         this.uploaded = undefined;
         this.fontsLoading.clear();
-        r.set_lost_callback?.(() => {
-          if (this.renderer === r) this.fail(new Error("WebGPU-Gerät verloren"), true);
-        });
+        // Im nächsten Takt verarbeiten: der Rückruf kommt aus Rust (wasm-Stapel), nie dorthin zurückrufen.
+        r.set_lost_callback?.((why) =>
+          this.schedule(() => {
+            if (this.renderer === r) this.fail(new Error(`WebGPU-Gerät verloren (${why ?? "?"})`), true);
+          }, 0),
+        );
         this.setReady(true);
         this.flush(this.frame !== null);
       },
       (e) => {
         this.creating = false;
+        if (this.disposed) return;
+        if (this.recovering) {
+          // Neuaufbau gescheitert (z. B. kurz nach dem Verlust noch kein Adapter): wie ein weiterer Verlust.
+          this.retry(e);
+          return;
+        }
         this.failed = true;
         this.setReady(false);
-        if (!this.disposed) this.warn("render2d WASM/WebGPU-Init fehlgeschlagen → SVG", e);
+        this.warn("render2d WASM/WebGPU-Init fehlgeschlagen → SVG", e);
       },
     );
   }
@@ -206,8 +237,11 @@ export class WasmPlanRendererSession<S> {
       if (!bytes || !r.add_font?.(key, bytes)) r.mark_font_unavailable?.(key);
     } catch (e) {
       this.inCall = false;
-      this.fail(e, false);
-      return;
+      if (isRendererAbort(e)) {
+        this.fail(e, false);
+        return;
+      }
+      this.warn("render2d: Schrift einspielen fehlgeschlagen", e);
     }
     this.inCall = false;
     this.requestFonts(r);
@@ -222,17 +256,32 @@ export class WasmPlanRendererSession<S> {
     this.release(old, healthy);
     this.setReady(false);
     if (this.disposed) return;
-    const now = (this.opts.now ?? (() => performance.now()))();
-    const windowMs = this.opts.recoveryWindowMs ?? 60_000;
-    this.recoveries = this.recoveries.filter((t) => now - t < windowMs);
-    if (this.recoveries.length >= this.maxRecoveries) {
+    this.retry(e);
+  }
+
+  /** Neuaufbau nach Wartezeit planen, oder (Budget erschöpft) endgültig beim SVG bleiben. */
+  private retry(e: unknown): void {
+    const delay = this.recovery.noteLoss();
+    if (delay === null) {
       this.failed = true;
       this.warn("render2d: WebGPU wiederholt ausgefallen → Plan über SVG", e);
       return;
     }
-    this.recoveries.push(now);
-    this.warn("render2d: Renderer ausgefallen, wird neu aufgebaut", e);
-    this.spawn();
+    this.recovering = true;
+    const msg = `render2d: Renderer ausgefallen, Neuaufbau in ${Math.round(delay)} ms`;
+    // Erster Verlust im Zeitfenster als Warnung, weitere nur als Info (die Aufgabe wieder als Warnung).
+    if (this.recovery.recentLosses <= 1) this.warn(msg, e);
+    else (this.opts.info ?? ((m: string, x?: unknown) => console.info(m, x)))(msg, e);
+    this.cancelTimer?.();
+    this.cancelTimer = this.schedule(() => {
+      this.cancelTimer = null;
+      // Inzwischen hat ein anderer Renderer der Seite das Budget erschöpft: beim SVG bleiben (still).
+      if (this.recovery.disabled) {
+        this.failed = true;
+        return;
+      }
+      this.spawn();
+    }, delay);
   }
 
   private flush(drawFrame: boolean): void {
@@ -278,6 +327,12 @@ export class WasmPlanRendererSession<S> {
     } catch (e) {
       this.inCall = false;
       this.pending = null;
+      if (!isRendererAbort(e)) {
+        // Rust-`Result::Err` (z. B. „Szene lesen: …“): Objekt intakt, Szene nicht erneut versuchen.
+        this.warn("render2d: Aufruf abgelehnt", e);
+        this.uploaded = scene;
+        return;
+      }
       this.fail(e, false);
       return;
     }

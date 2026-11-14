@@ -679,6 +679,8 @@ export function Wasm3DViewport({
     ready,
     failed,
   } = useWasm3dRenderer(canvasRef, true);
+  /** Tastatur des Begehens aktiv: Renderer da oder endgültig ohne GPU ([206]; nicht während eines Neuaufbaus). */
+  const walkInput = ready || failed;
   // Punktwolken ([27]) aus dem UI-Store (nicht im Projekt). Die Lage folgt dem Standort-Bezug.
   const pointClouds = usePointClouds();
   const geoOrigin = projectGeoOrigin(project);
@@ -1470,8 +1472,9 @@ export function Wasm3DViewport({
   // Pro Frame (rAF) mit gekapptem Zeitschritt; Textfelder und Befehls-Modifikatoren (Strg/Cmd) sperren. Rechnung rein
   // in `walk.ts`. Die Handler laufen in der Capture-Phase und verbrauchen die Bewegungstasten, damit globale Kürzel
   // nicht zusätzlich feuern.
+  // [206] Auch ohne GPU (WebGPU aus/wiederholt verloren, `failed`): Tasten und Kamera laufen weiter, nur das Bild fehlt.
   useEffect(() => {
-    if (!ready) return;
+    if (!walkInput) return;
     const keys: WalkKeys = { ...NO_KEYS };
     const mods = { shift: false, alt: false };
     let raf = 0;
@@ -1590,7 +1593,7 @@ export function Wasm3DViewport({
       cancelAnimationFrame(raf);
       walkKickRef.current = null;
     };
-  }, [ready, render]);
+  }, [walkInput, render]);
 
   // [245] Beim Einschalten des Begehens (und beim Wechsel Geist ↔ Kollision) Boden neu suchen und gegebenenfalls absetzen.
   useEffect(() => {
