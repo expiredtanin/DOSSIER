@@ -147,6 +147,6 @@ describe("3D-Modell inkrementell", () => {
       if (u) cur = u;
       check("Undo", sent);
     });
-  });
+  }, 120_000); // unter Last (parallele Builds) dauert der Wechsel über 30 s
 });
 
