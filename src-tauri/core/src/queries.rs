@@ -80,6 +80,11 @@ pub fn run(p: &Project, name: &str, args: &[f64], text: &str) -> Result<String, 
             let opt: flaechen::IvhbOptions = if text.trim().is_empty() { Default::default() } else { serde_json::from_str(text).map_err(|e| format!("ivhb: {e}"))? };
             json(&flaechen::ivhb(p, &opt))
         }
+        // [255] Baurecht-Nachweis (Vorgaben der Parzelle gegen Kennzahlen); Text = `IvhbOptions` als JSON.
+        ("siteProof", _) => {
+            let opt: flaechen::IvhbOptions = if text.trim().is_empty() { Default::default() } else { serde_json::from_str(text).map_err(|e| format!("siteProof: {e}"))? };
+            json(&crate::site_proof::site_proof(p, &opt))
+        }
         ("programCompare", _) => json(&room_program::compare(p)),
         ("programLayout", _) => {
             let opt: room_program::LayoutOptions = if text.trim().is_empty() { Default::default() } else { serde_json::from_str(text).map_err(|e| format!("programLayout: {e}"))? };

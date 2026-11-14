@@ -3,6 +3,7 @@
 // Grundriss entsteht aus `Project.siteRules` (`plan/generatePlan/siteRules.ts`).
 
 import { t } from "../i18n";
+import type { TranslationKey } from "../i18n";
 import { useSelectionInfo } from "../state/useSelectionInfo";
 import { useStore } from "../state/appStore";
 import { checkSiteRules, patchItem, setField } from "../core";
@@ -43,6 +44,16 @@ function withProjection<T extends { siteProjection?: boolean }>(e: T, on: boolea
   const { siteProjection: _old, ...rest } = e;
   return (on ? { ...rest, siteProjection: true } : rest) as T;
 }
+
+/** Zulässige Ziffern/Höhen für den Baurecht-Nachweis ([255]); leer oder 0 = keine Vorgabe. */
+const PROOF_FIELDS: { field: "maxFacadeHeight" | "maxGfz" | "maxAz" | "maxBmz" | "maxUz" | "minGz"; label: TranslationKey; step: number; unit: string }[] = [
+  { field: "maxFacadeHeight", label: "siteRules.maxFacadeHeight", step: 0.5, unit: "m" },
+  { field: "maxGfz", label: "siteRules.maxGfz", step: 0.05, unit: "" },
+  { field: "maxAz", label: "siteRules.maxAz", step: 0.05, unit: "" },
+  { field: "maxBmz", label: "siteRules.maxBmz", step: 0.1, unit: "m" },
+  { field: "maxUz", label: "siteRules.maxUz", step: 0.05, unit: "" },
+  { field: "minGz", label: "siteRules.minGz", step: 0.05, unit: "" },
+];
 
 export function SiteRulesSection() {
   const project = useStore((s) => s.project);
@@ -169,6 +180,29 @@ export function SiteRulesSection() {
         />
         <span>m</span>
       </label>
+
+      {PROOF_FIELDS.map((f) => (
+        <label key={f.field} className="kz-parcel" title={t("siteRules.ratios.hint")}>
+          <span>{t(f.label)}</span>
+          <input
+            type="number"
+            min={0}
+            step={f.step}
+            className="kz-input kz-num"
+            value={rules[f.field] ?? ""}
+            placeholder="–"
+            onChange={(e) => {
+              const v = parseLen(e.target.value);
+              if (v === null) return;
+              write((r) => {
+                const { [f.field]: _old, ...rest } = r;
+                return v === undefined || v === 0 ? rest : { ...rest, [f.field]: v };
+              }, `siteRules:${f.field}`);
+            }}
+          />
+          <span>{f.unit}</span>
+        </label>
+      ))}
 
       <label className="kz-parcel" title={t("siteRules.profileAngle.hint")}>
         <span>{t("siteRules.profileAngle")}</span>

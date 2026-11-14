@@ -128,6 +128,15 @@ const COSTS: &[Col] = &[
     c("amount", "sheetTable.col.amount", 1.8, true, true),
 ];
 
+/// [255] Baurecht-Nachweis.
+const SITE_PROOF: &[Col] = &[
+    c("item", "siteProof.col.item", 4.6, false, true),
+    c("allowed", "siteProof.col.allowed", 1.4, true, true),
+    c("actual", "siteProof.col.actual", 1.4, true, true),
+    c("reserve", "siteProof.col.reserve", 1.8, true, true),
+    c("ok", "siteProof.col.ok", 1.0, false, true),
+];
+
 /// [158] Raumbuch-Spalten, die nur erscheinen, wenn ein Raum eine Dachschräge hat.
 const SLOPE_COLS: &[&str] = &["heightMin", "heightMean", "areaUnder1", "area1To15"];
 
@@ -178,6 +187,18 @@ pub const VALUE_KEYS: &[&str] = &[
     "costs.row.vat",
     "costs.row.gross",
     "costs.lump",
+    "siteProof.ok.yes",
+    "siteProof.ok.no",
+    "siteProof.none",
+    "siteProof.row.gfz",
+    "siteProof.row.az",
+    "siteProof.row.bmz",
+    "siteProof.row.uz",
+    "siteProof.row.gz",
+    "siteProof.row.totalHeight",
+    "siteProof.row.facadeHeight",
+    "siteProof.row.setback",
+    "siteProof.row.profile",
 ];
 
 pub fn catalog(source: LayoutTableSource) -> &'static [Col] {
@@ -189,6 +210,7 @@ pub fn catalog(source: LayoutTableSource) -> &'static [Col] {
         LayoutTableSource::Earthworks => EARTHWORKS,
         LayoutTableSource::RoomBook => ROOM_BOOK,
         LayoutTableSource::Costs => COSTS,
+        LayoutTableSource::SiteProof => SITE_PROOF,
     }
 }
 
@@ -196,7 +218,7 @@ pub fn catalog(source: LayoutTableSource) -> &'static [Col] {
 pub fn catalog_json() -> Value {
     let one = |s: &[Col]| s.iter().map(|k| json!({"id": k.id, "key": k.key, "numeric": k.numeric, "default": k.default})).collect::<Vec<_>>();
     json!({
-        "sources": {"openings": one(OPENINGS), "areas": one(AREAS), "rooms": one(ROOMS), "elements": one(ELEMENTS), "earthworks": one(EARTHWORKS), "roomBook": one(ROOM_BOOK), "costs": one(COSTS)},
+        "sources": {"openings": one(OPENINGS), "areas": one(AREAS), "rooms": one(ROOMS), "elements": one(ELEMENTS), "earthworks": one(EARTHWORKS), "roomBook": one(ROOM_BOOK), "costs": one(COSTS), "siteProof": one(SITE_PROOF)},
         "valueKeys": VALUE_KEYS,
     })
 }
@@ -333,6 +355,7 @@ fn data_of(p: &Project, t: &LayoutTable, lb: &Labels) -> Data {
         LayoutTableSource::Earthworks => earthworks_data(p, lb),
         LayoutTableSource::RoomBook => room_book_data(p, lb),
         LayoutTableSource::Costs => costs_data(p, lb),
+        LayoutTableSource::SiteProof => site_proof_data(p, lb),
     }
 }
 
@@ -393,6 +416,27 @@ fn costs_data(p: &Project, lb: &Labels) -> Data {
     rows.push(vec![txt("Z"), txt(pct("costs.row.vat", r.vat_pct)), empty(), empty(), empty(), chf(r.vat)]);
     rows.push(vec![empty(), txt(format!("{} (±{} %)", lb.get("costs.row.gross"), to_fixed(r.accuracy_pct, 0))), empty(), empty(), empty(), chf(r.gross)]);
     Data { rows, sloped: false, total_last: true }
+}
+
+/// [255] Baurecht-Nachweis: eine Zeile je Prüfgrösse; fehlende Vorgabe/Projektwert als „—“. Ohne Angaben aus dem
+/// Dokument (IVHB-Optionen) rechnet der Nachweis mit Parzellenfläche bzw. Parzellengrenze.
+fn site_proof_data(p: &Project, lb: &Labels) -> Data {
+    let pr = crate::site_proof::site_proof(p, &Default::default());
+    let dash = || txt(lb.get("siteProof.none"));
+    let val = |v: Option<f64>, d: usize| v.filter(|x| x.is_finite()).map_or_else(dash, |x| num(x, d));
+    let rows = pr
+        .rows
+        .iter()
+        .map(|r| {
+            let ok = match r.ok {
+                Some(true) => txt(lb.get("siteProof.ok.yes")),
+                Some(false) => txt(lb.get("siteProof.ok.no")),
+                None => dash(),
+            };
+            vec![txt(lb.get(&format!("siteProof.row.{}", r.key))), val(r.allowed, r.decimals), val(r.actual, r.decimals), val(r.reserve, r.decimals), ok]
+        })
+        .collect();
+    Data { rows, sloped: false, total_last: false }
 }
 
 /// [68] Erdarbeiten je Baugrube (m³ gegen das gewachsene Terrain) mit Summenzeile.
@@ -829,5 +873,27 @@ mod tests {
         assert_eq!(crate::area_report::fmt_num(1234567.5, 2, true), "1'234'567.50");
         assert_eq!(crate::area_report::fmt_num(-999.0, 0, true), "-999");
         assert_eq!(crate::area_report::fmt_num(-1000.0, 0, true), "-1'000");
+    }
+    /// [255] Baurecht-Nachweis als Blatt-Tabelle: ohne Vorgaben überall „—“, mit Vorgabe zulässig/Projekt/Reserve/ja-nein.
+    #[test]
+    fn baurecht_nachweis_tabelle() {
+        let mut t = table("n", None);
+        t.source = LayoutTableSource::SiteProof;
+        let mut p = project(0, vec![t]);
+        p.parcel_area = Some(400.0);
+        let lb = Labels::parse(&json!({"siteProof.none": "—", "siteProof.ok.yes": "ja", "siteProof.ok.no": "nein", "siteProof.row.az": "AZ", "siteProof.row.totalHeight": "Gesamthöhe"}));
+        let r = render(&p, &p.layouts.as_ref().unwrap()[0], &lb);
+        assert_eq!(r[0].total, 8, "7 Ziffern/Höhen + Grenzabstand");
+        let tx = texts(&r[0]);
+        assert!(tx.contains(&"AZ".to_string()) && tx.contains(&"—".to_string()), "{tx:?}");
+        assert!(!tx.contains(&"ja".to_string()) && !tx.contains(&"nein".to_string()), "ohne Vorgaben nichts erfüllt/verletzt: {tx:?}");
+        // Mit Vorgabe AZ 0.001 (überschritten, falls das Projekt Flächen hat) bzw. Höhe 100 m.
+        let mut rules = crate::model::SiteRules::default();
+        rules.max_height = Some(100.0);
+        p.site_rules = Some(rules);
+        let tx = texts(&render(&p, &p.layouts.as_ref().unwrap()[0], &lb)[0]);
+        assert!(tx.contains(&"100.00".to_string()), "{tx:?}");
+        assert_eq!(serde_json::to_value(LayoutTableSource::SiteProof).unwrap(), "siteProof");
+        assert!(catalog_json()["sources"]["siteProof"].as_array().unwrap().len() == 5);
     }
 }

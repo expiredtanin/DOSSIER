@@ -21,7 +21,7 @@ export function AreaTableSection() {
   const [inputs, setInputs] = useState<AreaInputs>(DEFAULT_AREA_INPUTS);
   const notify = useStore((s) => s.notify);
   const report = useMemo(
-    () => buildAreaReport(project, { areas: true, ivhb: true, ivhbOptions: ivhbOptionsOf(inputs) }),
+    () => buildAreaReport(project, { areas: true, ivhb: true, siteProof: true, ivhbOptions: ivhbOptionsOf(inputs) }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [project, inputs],
   );

@@ -2733,6 +2733,30 @@ pub struct SiteRules {
     #[serde(rename = "maxHeight", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub max_height: Option<f64>,
+    /// Zulässige Fassadenhöhe (m, höchste Wandoberkante über ±0.00) für den Baurecht-Nachweis.
+    #[serde(rename = "maxFacadeHeight", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub max_facade_height: Option<f64>,
+    /// Zulässige Geschossflächenziffer GFZ (IVHB) für den Baurecht-Nachweis.
+    #[serde(rename = "maxGfz", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub max_gfz: Option<f64>,
+    /// Zulässige Ausnützungsziffer AZ (aGF / aGSF) für den Baurecht-Nachweis.
+    #[serde(rename = "maxAz", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub max_az: Option<f64>,
+    /// Zulässige Baumassenziffer BMZ (m³/m²) für den Baurecht-Nachweis.
+    #[serde(rename = "maxBmz", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub max_bmz: Option<f64>,
+    /// Zulässige Überbauungsziffer ÜZ (aGbF / aGSF) für den Baurecht-Nachweis.
+    #[serde(rename = "maxUz", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub max_uz: Option<f64>,
+    /// Mindest-Grünflächenziffer GZ für den Baurecht-Nachweis.
+    #[serde(rename = "minGz", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub min_gz: Option<f64>,
     /// Parzelle, zulässige Fläche und Verstösse im Grundriss zeigen (Default: ja).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -5570,6 +5594,9 @@ pub enum LayoutTableSource {
     /// [209] Kostenschätzung grob (eBKP-H-Hauptgruppen, Zuschläge, Total).
     #[serde(rename = "costs")]
     Costs,
+    /// [255] Baurecht-Nachweis (AZ/ÜZ/Höhen: zulässig, Projekt, Reserve, erfüllt).
+    #[serde(rename = "siteProof")]
+    SiteProof,
     #[serde(other)]
     #[ts(skip)]
     Unknown,

@@ -2059,7 +2059,8 @@ export type LayoutTableSource =
   | "elements"
   | "earthworks"
   | "roomBook"
-  | "costs";
+  | "costs"
+  | "siteProof";
 
 /**
  * Einfache Textfelder des Titelblocks (Master). Alle optional — leere Felder
@@ -3656,6 +3657,20 @@ export type SiteRules = {
   buildingLines?: Array<{ a: Vec2; b: Vec2 }>;
   /** Zulässige Gesamthöhe über ±0.00 (m). */
   maxHeight?: number;
+  /**
+   * Zulässige Fassadenhöhe (m, höchste Wandoberkante über ±0.00) für den Baurecht-Nachweis.
+   */
+  maxFacadeHeight?: number;
+  /** Zulässige Geschossflächenziffer GFZ (IVHB) für den Baurecht-Nachweis. */
+  maxGfz?: number;
+  /** Zulässige Ausnützungsziffer AZ (aGF / aGSF) für den Baurecht-Nachweis. */
+  maxAz?: number;
+  /** Zulässige Baumassenziffer BMZ (m³/m²) für den Baurecht-Nachweis. */
+  maxBmz?: number;
+  /** Zulässige Überbauungsziffer ÜZ (aGbF / aGSF) für den Baurecht-Nachweis. */
+  maxUz?: number;
+  /** Mindest-Grünflächenziffer GZ für den Baurecht-Nachweis. */
+  minGz?: number;
   /** Parzelle, zulässige Fläche und Verstösse im Grundriss zeigen (Default: ja). */
   show?: boolean;
   /**

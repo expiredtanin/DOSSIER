@@ -10,7 +10,7 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   stehen im Archiv („Bewusst nicht übernommen“).
 - **Grösse** (eine Person mit Agenten): S ≤ 1 Tag · M ≤ 1 Woche · L ≤ 1 Monat · XL > 1 Monat.
   Steht keine Grösse im Archiv, ist sie hier geschätzt.
-- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 254);
+- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 255);
   nie eine ID wiederverwenden oder umnummerieren. Präfix-IDs (`[K]`, `[G]`, `[T]`, `[B]`, `[C]`) bleiben.
 - **Pro Punkt:** was fehlt · wo im Code · Grösse. Höchstens ein bis drei Sätze je Punkt;
   Messwerte und Befunde gehören in den Commit.
@@ -278,7 +278,14 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
 - 1:100-Pläne in Abgabequalität (Bemassung, Koten, Raumstempel, Öffnungen nach Detailgrad) — Plan-Review-Runde 4 nach [199].
 - Fachplaner-Austausch: DXF/DWG je Geschoss/Schnitt/Ansicht ([200]), IFC mit Räumen/Psets ([201]); Rundreise in Archicad/Revit einmal
   real prüfen ([C9]).
-- Baurecht-Hülle/Ausnützung (AZ/ÜZ) gegen Modell als Nachweis-Tabelle.
+- ◐ **[255]** Baurecht-Nachweis: Ausnützung gegen Modell als Tabelle (14.11.). Kern `site_proof.rs` (Abfrage `siteProof`) stellt die Vorgaben
+  der Parzelle den Kennzahlen gegenüber: GFZ, AZ, BMZ, ÜZ, GZ (min.), Gesamt-/Fassadenhöhe, Grundfläche ausserhalb Grenzabstand/Baulinie,
+  Gebäudeprofil; je Zeile zulässig · Projekt · Reserve/Überschreitung · erfüllt, fehlende Vorgabe als „—“ (nichts erfunden), dazu Grundlagen
+  (aGSF, zulässige Fläche, GF, aGF, aGbF, Baumasse, Grünfläche) mit Quelle. Neue Modellfelder `SiteRules.maxGfz/maxAz/maxBmz/maxUz/minGz/
+  maxFacadeHeight` (Eingabe im Lage-Panel, Baurecht). Ausgabe: Flächenbilanz-Panel (zwei Abschnitte im Berichtsmodell, daher auch CSV/PDF/SVG),
+  Blatt-Tabelle Quelle „siteProof“ (wie [209]), CLI `kennzahlen --nachweis`. Tests: `site_proof::tests`, `sheet_table::tests::baurecht_nachweis_tabelle`,
+  `src/analysis/siteProof.test.ts`. Offen: Blatt-Tabelle nimmt aGSF/Grünfläche nicht aus den Panel-Eingaben (nur Parzellenfläche/-grenze),
+  Grünfläche nur per Eingabe, Grenzabstand als Verstossfläche statt kleinster Abstand, Fassadenhöhe nur über ±0.00, Mac/Tauri nicht geprüft. · S
 
 ### Phase 4 (4.–12.12.): Härten und veröffentlichen
 - Nur noch Fehler aus dem Referenz-Ablauf; Leistung mit grossen Kontext-Importen; keine neuen Funktionen.
