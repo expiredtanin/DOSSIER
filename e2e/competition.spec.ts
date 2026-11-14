@@ -163,3 +163,35 @@ test("Plakat A1 quer aus Vorlage, Bild einsetzen, anonym als WBW-Abgabe exportie
     await page.screenshot({ path: `${process.env.DOSSIER_SHOTS}/plakat-a1-quer-blatt.png` });
   }
 });
+
+// Anonymitäts-Prüfung des Freitexts: eine Angabe aus der Liste „Weitere Angaben" steht im Projekt (hier ein Schraffur-/
+// Bauteilname) → vor dem Export erscheint der Dialog mit Fundstelle; Abbrechen exportiert nichts, „Trotzdem exportieren"
+// läuft weiter. Ohne Treffer kein Dialog.
+test("Anonymitäts-Prüfung: Dialog bei Treffer im Freitext, Abbrechen / Trotzdem exportieren", async ({ page }) => {
+  await startNewProject(page);
+  await openSample(page);
+  await openTab(page, "Mappe");
+  await page.locator("[data-testid=competition-anonymous]").check();
+  await page.locator("[data-testid=competition-keyword]").fill("FALKE 7");
+  await page.locator("[data-testid=publish-add-wbw]").click();
+  await expect(page.locator("[data-publish-set]")).toHaveCount(1);
+
+  // Ohne Angaben aus der Liste: kein Treffer, kein Dialog.
+  await page.locator("[data-publish-set] [data-publish-run]").click();
+  await expect(page.locator("[data-testid=anonymity-dialog]")).toHaveCount(0);
+
+  // „Wärmedämmung" kommt im Beispielprojekt als Name vor: Dialog listet Fundstelle und Begriff.
+  await page.locator("[data-testid=competition-identifiers]").fill("Wärmedämmung");
+  await page.locator("[data-publish-set] [data-publish-run]").click();
+  const dialog = page.locator("[data-testid=anonymity-dialog]");
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator("[data-testid=anonymity-findings] li").first()).toContainText("Wärmedämmung");
+  await page.locator("[data-testid=anonymity-cancel]").click();
+  await expect(dialog).toHaveCount(0);
+
+  // „Trotzdem exportieren": der Export läuft weiter (Dialog weg).
+  await page.locator("[data-publish-set] [data-publish-run]").click();
+  await expect(dialog).toBeVisible();
+  await page.locator("[data-testid=anonymity-proceed]").click();
+  await expect(dialog).toHaveCount(0);
+});

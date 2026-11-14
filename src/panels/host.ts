@@ -802,7 +802,7 @@ export interface PanelHostValue {
   /** Setzt die Projektnummer (Dateinamen-Muster `{Projektnummer}`). */
   onSetProjectNumber: (value: string) => void;
   /** Wettbewerb ([208]): anonyme Abgabe und Kennwort setzen (Teil-Patch). */
-  onSetCompetition: (patch: { anonymous?: boolean; keyword?: string }) => void;
+  onSetCompetition: (patch: { anonymous?: boolean; keyword?: string; identifiers?: string }) => void;
   /** Legt den Publikationssatz „WBW-Abgabe" mit allen Plakaten an; liefert dessen Id. */
   onAddWbwSet: () => string;
 }
