@@ -1535,13 +1535,18 @@ fn emit_entries(cx: &mut Ctx, main: &mut Buf, entries: &[Entry], layer_by_code: 
     // 4) Jedes Primitiv in Entitäten übersetzen.
     let plain = |e: &Entry| matches!(&e.prim, Prim::Line { zigzag: None, motif: None, .. });
     let mut skip_to = 0usize;
+    // [257] Offener Zug ohne Bogen (`fail_end` = Ende, `fail_last` = letzter Punkt): jeder Rest davon ist ebenfalls
+    // bogenlos (arc_fit prüft je Anfangspunkt nur den Zug dahinter) — nicht je Einzel-Linie neu anpassen (quadratisch).
+    let mut fail_end = 0usize;
+    let mut fail_last = V2 { x: f64::NAN, y: f64::NAN };
     for (i, e) in entries.iter().enumerate() {
         if i < skip_to {
             continue;
         }
         // [169] Aneinander anschliessende Einzel-Linien gleicher Ebene und gleichen Musters (Ansichtskante einer
         // runden Stütze, Umriss-Linien an Bogenwänden): erkannte Bögen als CIRCLE bzw. LWPOLYLINE mit Bulges.
-        if keys[i].is_none() && plain(e) {
+        let rest_of_failed = i < fail_end && matches!(&e.prim, Prim::Line { a, .. } if !((a.x - fail_last.x).abs() <= 1e-9 && (a.y - fail_last.y).abs() <= 1e-9));
+        if keys[i].is_none() && plain(e) && !rest_of_failed {
             let l = layer_for(e);
             let Prim::Line { a, b: q, dash, .. } = &e.prim else { unreachable!() };
             let mut pts = vec![*a, *q];
@@ -1581,6 +1586,10 @@ fn emit_entries(cx: &mut Ctx, main: &mut Buf, entries: &[Entry], layer_by_code: 
                     cx.flat.plinegen = false;
                     skip_to = j;
                     continue;
+                }
+                if shape.is_none() && !closed && !fitted {
+                    fail_end = j;
+                    fail_last = pts[pts.len() - 1];
                 }
             }
         }
@@ -1795,6 +1804,34 @@ mod tests {
         assert_eq!(kurz[9], 1.0, "ausgewichen: Textposition gesetzt");
         assert!(kurz[10] < -1e-6, "links vom Segment, x = {}", kurz[10]);
         assert_eq!(lang[9], 0.0, "passt: Vorgabe");
+    }
+
+    /// [257] Lange Kette aus Einzel-Linien ohne Bogen (Höhenlinie, tausende Punkte): linear viele Anpassungen, nicht je Linie
+    /// eine neue (vorher quadratisch: 2.7 s im Export mit Gelände). Ausgabe: je Strecke eine LINE.
+    #[test]
+    fn lange_kette_ohne_bogen_ist_schnell() {
+        let n = 6000;
+        let pts: Vec<serde_json::Value> = (0..n).map(|i| {
+            let t = i as f64 * 0.01;
+            serde_json::json!({"x": t * 3.0, "y": 2.0 * (t * 1.3).sin() + 0.7 * (t * 4.1).sin() + 0.01 * ((i * 7) % 5) as f64})
+        }).collect();
+        let mut v = crate::sheet_viewports::tests::json();
+        v["drawings2d"].as_array_mut().unwrap().push(serde_json::json!(
+            {"id": "hl", "levelId": "eg", "categoryCode": "20", "geom": {"shape": "polyline", "closed": false, "pts": pts}}
+        ));
+        let p: Project = serde_json::from_value(v).unwrap();
+        let a = crate::plan::domains::PlanArgs::parse(1.0, r#"{"floor":"eg","show":["20"],"scale":100}"#).unwrap();
+        let buf = crate::plan::domains::plan_domains_buf(&p, &a).unwrap();
+        let view = View::parse(&buf).unwrap();
+        let len = view.len();
+        let mut parts = [Part::new(view, 0, len).unwrap()];
+        let o = DxfOptions { scale: 100.0, include_hatches: true, dim_cm: false, paper_layout: false, bounds: [0.0, 0.0, 10.0, 4.0], default_font: "Arial".into(), floor: "eg".into(), table_labels: String::new() };
+        let t = std::time::Instant::now();
+        let f = collect(&mut parts, &p, &o).unwrap();
+        let ms = t.elapsed().as_secs_f64() * 1000.0;
+        let lines = f.nums.chunks(1).filter(|w| w[0] == REC_LINE).count();
+        assert!(lines >= 1, "Linien vorhanden");
+        assert!(ms < 1500.0, "Export der langen Kette dauert {ms} ms");
     }
 
     /// [93] Mit Papierbereich: das Projekt-Layout als Blatt, sein Ansichtsfenster auf das exportierte
