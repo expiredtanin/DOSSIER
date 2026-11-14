@@ -106,6 +106,14 @@ export function useWasmPlanRenderer(
       cs.listeners.delete(setReady);
       setSession(null);
       setReady(false);
+      // [206] Canvas wirklich weg (kein Wiedereinhängen wie beim StrictMode-Doppelmount): Renderer freigeben,
+      // sonst lebte das WebGPU-Gerät bis zur Speicherbereinigung weiter.
+      setTimeout(() => {
+        if (cs.listeners.size === 0 && sessions.get(canvas) === cs) {
+          sessions.delete(canvas);
+          cs.session.dispose();
+        }
+      }, 0);
     };
   }, [enabled, canvasRef]);
 

@@ -603,6 +603,9 @@ test("[211] Rendering-Dialog im Browser erzeugt das Export-Paket (model.glb + sc
 // `create_buffer` ab (Puffer mit `mappedAtCreation`, webgpu.rs:2331). Seit [212] Etappe 5 legt der Pathtracer seine Puffer ohne
 // `mappedAtCreation` an und prüft sie gegen die Gerätegrenzen (zu gross: Hinweis statt Absturz) — der Test läuft wieder immer.
 // Auf dem Mac (Metal) wird der Stil von Hand geprüft (`doc/RELEASE-1.0.md`, 13.1).
+// [206] 14.11.: Headless verliert SwiftShader das Gerät beim ersten Präsentieren; bis dahin zählte der Pathtracer auf dem
+// toten Gerät weiter (Scheinlauf). Seit der Verlust-Behandlung baut die App nach Backoff neu auf und schaltet WebGPU nach
+// wiederholtem Verlust ab (3D-Hinweis) — dann wird der Test übersprungen statt auf einem toten Gerät zu „zählen“.
 const pathtraceTest = test;
 pathtraceTest("[212] Pathtracer-Stil: Sample-Zähler zählt hoch", async ({ page }) => {
   test.setTimeout(180_000);
@@ -614,7 +617,9 @@ pathtraceTest("[212] Pathtracer-Stil: Sample-Zähler zählt hoch", async ({ page
   await page.getByRole("button", { name: "Darstellungsart der aktiven Ansicht" }).click();
   await page.getByRole("option", { name: /Pathtracing/ }).click();
   const status = page.getByTestId("pathtrace-status");
-  await expect(status).toBeVisible({ timeout: 30_000 });
+  const noGpu = page.locator(".viewport-fallback");
+  await expect(status.or(noGpu)).toBeVisible({ timeout: 30_000 });
+  test.skip(await noGpu.isVisible(), "WebGPU nach Geräteverlust abgeschaltet (headless SwiftShader), kein Pathtracer-Lauf möglich");
   const samples = async () => Number((await status.innerText()).match(/(\d+) Samples/)?.[1] ?? 0);
   await expect.poll(samples, { timeout: 60_000 }).toBeGreaterThan(0);
   const first = await samples();

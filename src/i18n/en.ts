@@ -3474,7 +3474,7 @@ export const en: Record<TranslationKey, string> = {
   // ── 3D viewport (native engine, WASM/WebGPU) ────────────────────────────────
   "viewport3d.engineUnavailable": "3D engine unavailable",
   "viewport3d.engineUnavailableHint":
-    "WebGPU could not be initialized. Switch to WebGL2 in the status bar to keep using the 3D view.",
+    "WebGPU is unavailable or failed repeatedly (device lost). Save the project and restart the app.",
   "viewport3d.grid.show": "Show ground grid",
   "viewport3d.grid.hide": "Hide ground grid",
   "viewport3d.explode.on": "Exploded axonometric: pull floors apart",

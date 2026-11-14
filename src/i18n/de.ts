@@ -3487,7 +3487,7 @@ export const de = {
   // ── 3D-Viewport (native Engine, WASM/WebGPU) ────────────────────────────────
   "viewport3d.engineUnavailable": "3D-Engine nicht verfügbar",
   "viewport3d.engineUnavailableHint":
-    "WebGPU konnte nicht initialisiert werden. In der Statusleiste auf WebGL2 umschalten, um die 3D-Ansicht weiter zu nutzen.",
+    "WebGPU ist nicht verfügbar oder wiederholt ausgefallen (Gerät verloren). Projekt speichern und die App neu starten.",
   "viewport3d.grid.show": "Bodenraster einblenden",
   "viewport3d.grid.hide": "Bodenraster ausblenden",
   "viewport3d.explode.on": "Explosionsaxonometrie: Geschosse auseinanderziehen",

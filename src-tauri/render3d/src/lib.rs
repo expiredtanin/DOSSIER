@@ -16,6 +16,7 @@
 
 pub mod bvh;
 pub mod denoise;
+pub mod device_health;
 pub mod edges;
 pub mod exposure;
 pub mod ghost;

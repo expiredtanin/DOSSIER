@@ -25,6 +25,7 @@ import type { Hide3d } from "../core";
 import { Model3dPartsSync } from "./model3dPartsSync";
 import type { DetailLevel } from "../model/viewTypes";
 import { loadEngine3d } from "../engine/engine3d";
+import { GpuRendererSlot } from "../engine/gpuRendererSlot";
 import { decodeMaterialTextures } from "./materialTextures";
 import { decodeImageToRgba } from "../io/swissImage";
 import { planPointCloudSync } from "./pointCloudSync";
@@ -195,32 +196,38 @@ interface WebModelRendererLike {
   ): void;
   resize(w: number, h: number): void;
   render(): void;
+  /** [206] Gerät verloren (Rust `web::is_lost`); dann zeichnet der Renderer nichts mehr. Optional — ältere WASM-Builds. */
+  is_lost?(): boolean;
+  /** [206] Rückruf beim Geräteverlust (Argument: Grund + Meldung). Optional — ältere WASM-Builds. */
+  set_lost_callback?(f: (why?: string) => void): void;
+  free?(): void;
+}
+
+/** Neuen Renderer auf dem Canvas erzeugen (auch nach Geräteverlust: derselbe Canvas-Kontext). */
+async function createRenderer(canvas: HTMLCanvasElement): Promise<WebModelRendererLike> {
+  const mod = await loadEngine3d();
+  // Canvas VOR dem Surface-Erzeugen auf die Zielpixel (DPR) bringen.
+  const rect = canvas.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.max(1, Math.round(rect.width * dpr));
+  canvas.height = Math.max(1, Math.round(rect.height * dpr));
+  return (await mod.WebModelRenderer.new(canvas)) as WebModelRendererLike;
 }
 
 /**
- * Renderer je Canvas EINMAL erzeugen (memoisiert). Ein Canvas kann nur EINEN
- * WebGPU-Kontext tragen; ein zweiter `WebModelRenderer.new` auf demselben
- * Canvas (StrictMode-Remount) würde kollidieren — die gecachte Promise lässt
- * den Doppelmount denselben Renderer teilen.
+ * Renderer-Besitzer je Canvas EINMAL (memoisiert). Ein Canvas kann nur EINEN WebGPU-Kontext tragen; ein
+ * zweiter `WebModelRenderer.new` auf demselben Canvas (StrictMode-Remount) würde kollidieren. Der Slot
+ * ({@link GpuRendererSlot}) baut nach Geräteverlust/Abbruch mit Backoff neu auf ([206]/[118]) und gibt den
+ * Renderer frei, wenn das Canvas wirklich verschwindet.
  */
-const rendererCache = new WeakMap<HTMLCanvasElement, Promise<WebModelRendererLike>>();
-function getRenderer(canvas: HTMLCanvasElement): Promise<WebModelRendererLike> {
-  let p = rendererCache.get(canvas);
-  if (!p) {
-    p = (async () => {
-      const mod = await loadEngine3d();
-      // Canvas VOR dem Surface-Erzeugen auf die Zielpixel (DPR) bringen.
-      const rect = canvas.getBoundingClientRect();
-      const dpr = window.devicePixelRatio || 1;
-      canvas.width = Math.max(1, Math.round(rect.width * dpr));
-      canvas.height = Math.max(1, Math.round(rect.height * dpr));
-      return (await mod.WebModelRenderer.new(canvas)) as WebModelRendererLike;
-    })();
-    rendererCache.set(canvas, p);
-    // Bei Fehlschlag den Cache leeren, damit ein späterer Versuch neu startet.
-    p.catch(() => rendererCache.delete(canvas));
+const slots = new WeakMap<HTMLCanvasElement, { slot: GpuRendererSlot<WebModelRendererLike>; users: number }>();
+function slotFor(canvas: HTMLCanvasElement): { slot: GpuRendererSlot<WebModelRendererLike>; users: number } {
+  let e = slots.get(canvas);
+  if (!e) {
+    e = { slot: new GpuRendererSlot<WebModelRendererLike>({ label: "render3d", create: () => createRenderer(canvas) }), users: 0 };
+    slots.set(canvas, e);
   }
-  return p;
+  return e;
 }
 
 /** Was jeder Renderer schon an Modell-Teilen hat ([58]). */
@@ -264,34 +271,48 @@ export function useWasm3dRenderer(
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
 
-  // WASM-Renderer an das Canvas binden (memoisiert, StrictMode-fest).
+  // WASM-Renderer an das Canvas binden (memoisiert, StrictMode-fest). Nach Geräteverlust liefert der Slot
+  // einen NEUEN Renderer: `ready` geht kurz aus und wieder an, die Effekte des Viewports spielen Modell,
+  // Kamera, Stil usw. erneut ein; hier werden die Merker „schon hochgeladen“ zurückgesetzt.
   useEffect(() => {
     if (!enabled || !canvasRef.current) {
       setReady(false);
       return;
     }
-    let disposed = false;
     const canvas = canvasRef.current;
-    void (async () => {
-      try {
-        const renderer = await getRenderer(canvas);
-        if (disposed) return;
-        rendererRef.current = renderer;
+    const entry = slotFor(canvas);
+    entry.users++;
+    const { slot } = entry;
+    const sync = () => {
+      const r = slot.renderer;
+      if (r !== rendererRef.current) {
+        rendererRef.current = r;
         ghostSyncRef.current.reset();
-        // Neuer (oder wiederverwendeter) Renderer: Punktwolken neu abgleichen.
+        // Neuer Renderer: Punktwolken, Materialien, Luftbild und Pathtracer-Tabelle neu abgleichen.
         pointCloudsRef.current = new Map();
-        setReady(true);
-        setFailed(false);
-      } catch (e) {
-        console.warn("render3d WASM/WebGPU-Init fehlgeschlagen", e);
-        rendererRef.current = null;
-        setReady(false);
-        if (!disposed) setFailed(true);
+        materialSigRef.current = null;
+        aerialSigRef.current = null;
+        ptMaterialsRef.current = null;
       }
-    })();
+      setReady(r !== null);
+      setFailed(slot.failed);
+    };
+    const unsubscribe = slot.subscribe(sync);
+    sync();
+    slot.start();
     return () => {
-      disposed = true;
+      unsubscribe();
+      entry.users--;
+      rendererRef.current = null;
       setReady(false);
+      // Canvas wirklich weg (kein Wiedereinhängen wie beim StrictMode-Doppelmount): Renderer freigeben,
+      // sonst lebte das WebGPU-Gerät bis zur Speicherbereinigung weiter.
+      setTimeout(() => {
+        if (entry.users === 0 && slots.get(canvas) === entry) {
+          slots.delete(canvas);
+          slot.dispose();
+        }
+      }, 0);
     };
   }, [enabled, canvasRef]);
 

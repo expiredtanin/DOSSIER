@@ -26,10 +26,15 @@
 // MODELL-FORMAT: JSON-Struct { walls: WallInput[], slabs: SlabInput[] } — identisch
 // zu `RModel3d` (src/plan/toWalls3d.ts) und zum nativen Tauri-Push (nativeSync.ts).
 
+use std::cell::RefCell;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
+
 use serde::Deserialize;
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
 
+use crate::device_health::DeviceHealth;
 use crate::gpu::Renderer;
 use crate::math::preset_camera;
 use crate::section::{cut_section, SectionPlane};
@@ -92,6 +97,26 @@ pub fn cut_section_json(
         .map_err(|e| JsValue::from_str(&format!("SectionOutput serialisieren: {e}")))
 }
 
+// Geraeteverlust (`device.lost`), [206]/[118], wie render2d/src/web.rs: wgpu verlangt einen `Send`-Rueckruf,
+// eine JS-Funktion ist das nicht. Der Rueckruf traegt nur die Renderer-Nummer; die JS-Funktion liegt hier
+// (WASM ist einfaedig, der Rueckruf laeuft im Promise-Takt des Browsers, nie in einer Renderer-Methode).
+thread_local! {
+    static LOST_CALLBACKS: RefCell<Vec<(u32, js_sys::Function)>> = const { RefCell::new(Vec::new()) };
+}
+static NEXT_RENDERER_ID: AtomicU32 = AtomicU32::new(1);
+
+fn notify_lost(id: u32, why: &str) {
+    // Funktion zuerst herausnehmen: der Rueckruf darf selbst wieder Renderer anlegen.
+    let f = LOST_CALLBACKS.with(|c| {
+        let mut c = c.borrow_mut();
+        let pos = c.iter().position(|(i, _)| *i == id)?;
+        Some(c.swap_remove(pos).1)
+    });
+    if let Some(f) = f {
+        let _ = f.call1(&JsValue::NULL, &JsValue::from_str(why));
+    }
+}
+
 /// Der Browser-Renderer: haelt Surface + Device/Queue + den geteilten `Renderer`
 /// und die aktuelle Kamera. Wird per `WebModelRenderer.new(canvas)` aus JS erzeugt.
 #[wasm_bindgen]
@@ -113,6 +138,22 @@ pub struct WebModelRenderer {
     /// Aktueller Live-Schnitt-Zustand: aktiv? + Ebene (point/normal). Gemerkt,
     /// damit ein `set_model` bei aktivem Schnitt die Caps automatisch neu baut.
     section: Option<([f32; 3], [f32; 3])>,
+    /// Nummer fuer den Rueckruf bei Geraeteverlust.
+    id: u32,
+    /// Geraetezustand (`device_health.rs`). Nach einem Verlust ruft KEINE Methode mehr wgpu auf (auf
+    /// einem verlorenen Geraet wirft z. B. `createBuffer(mappedAtCreation)`, wgpu paniert, „unreachable“,
+    /// und das wasm-bindgen-Objekt bliebe gesperrt: „recursive use of an object …“).
+    health: Arc<DeviceHealth>,
+}
+
+impl Drop for WebModelRenderer {
+    fn drop(&mut self) {
+        let id = self.id;
+        LOST_CALLBACKS.with(|c| c.borrow_mut().retain(|(i, _)| *i != id));
+        // GPU-Speicher sofort freigeben (wgpus WebGPU-Drop tut das nicht); der „Destroyed“-Verlust bleibt still.
+        self.health.retire();
+        self.device.destroy();
+    }
 }
 
 impl WebModelRenderer {
@@ -212,6 +253,27 @@ impl WebModelRenderer {
         };
         surface.configure(&device, &config);
 
+        // Geraeteverlust nur merken und JS melden (`set_lost_callback`); geloggt wird einmal auf der TS-Seite.
+        let id = NEXT_RENDERER_ID.fetch_add(1, Ordering::Relaxed);
+        let health = Arc::new(DeviceHealth::new());
+        {
+            let health = health.clone();
+            device.set_device_lost_callback(move |reason, msg| {
+                if health.on_lost() {
+                    notify_lost(id, &format!("{reason:?}: {msg}"));
+                }
+            });
+        }
+        // Validierungsfehler melden statt paniken (wgpus Vorgabe-Handler paniert); nach einem Verlust still.
+        {
+            let health = health.clone();
+            device.on_uncaptured_error(Arc::new(move |e: wgpu::Error| {
+                if health.should_report_error() {
+                    web_sys::console::warn_1(&JsValue::from_str(&format!("render3d WebGPU-Fehler: {e}")));
+                }
+            }));
+        }
+
         let renderer = Renderer::new(&device, format);
 
         web_sys::console::log_1(&JsValue::from_str(&format!(
@@ -229,7 +291,25 @@ impl WebModelRenderer {
             bounds: None,
             section_inputs: None,
             section: None,
+            id,
+            health,
         })
+    }
+
+    /// true, sobald das WebGPU-Geraet verloren ist: dann zeichnet dieser Renderer nichts mehr,
+    /// der Aufrufer baut einen neuen (`src/viewport/useWasm3dRenderer.ts`).
+    pub fn is_lost(&self) -> bool {
+        self.health.is_lost()
+    }
+
+    /// JS-Funktion, die beim Geraeteverlust (einmal) gerufen wird; Argument: Grund und Meldung.
+    pub fn set_lost_callback(&self, f: js_sys::Function) {
+        let id = self.id;
+        LOST_CALLBACKS.with(|c| {
+            let mut c = c.borrow_mut();
+            c.retain(|(i, _)| *i != id);
+            c.push((id, f));
+        });
     }
 
     /// Setzt/aktualisiert das darzustellende Modell aus einem JSON-String
@@ -237,6 +317,9 @@ impl WebModelRenderer {
     /// nativen Push) — als einziger Teil der Szene, alle GPU-Puffer neu. Ruft NICHT selbst `render`.
     /// Merkt sich zusaetzlich die Bounding-Box (fuer `set_view_preset`).
     pub fn set_model(&mut self, json: &str) -> Result<(), JsValue> {
+        if self.is_lost() {
+            return Ok(());
+        }
         let model: ModelInput = serde_json::from_str(json)
             .map_err(|e| JsValue::from_str(&format!("Modell parsen: {e}")))?;
         let part = PartInput { walls: model.walls, slabs: model.slabs, meshes: model.meshes, roof_layers: model.roof_layers };
@@ -249,6 +332,9 @@ impl WebModelRenderer {
     /// nur die betroffenen GPU-Klumpen neu hoch; `reset` leert vorher. Ruft NICHT selbst `render`.
     /// Gibt die Zahl der neu vernetzten Teile zurueck (Diagnose).
     pub fn set_parts(&mut self, json: &str) -> Result<u32, JsValue> {
+        if self.is_lost() {
+            return Ok(0);
+        }
         let upd: PartsUpdate =
             serde_json::from_str(json).map_err(|e| JsValue::from_str(&format!("Teile parsen: {e}")))?;
         Ok(self.apply_parts(upd) as u32)
@@ -275,6 +361,9 @@ impl WebModelRenderer {
         let point = [px, py, pz];
         let normal = [nx, ny, nz];
         self.section = if active { Some((point, normal)) } else { None };
+        if self.is_lost() {
+            return Ok(());
+        }
         self.refresh_section(active, point, normal);
         Ok(())
     }
@@ -493,6 +582,10 @@ impl WebModelRenderer {
                 let _ = self.0.call0(&JsValue::UNDEFINED);
             }
         }
+        if self.is_lost() {
+            // Totes Geraet: nichts mehr ausstehend (sonst wartete der Bild-Export ewig).
+            return js_sys::Promise::resolve(&JsValue::UNDEFINED);
+        }
         let queue = self.queue.clone();
         js_sys::Promise::new(&mut |resolve, _reject| {
             let r = Resolve(resolve);
@@ -552,6 +645,9 @@ impl WebModelRenderer {
         extent_m: f32,
         spacing_m: f32,
     ) -> Result<(), JsValue> {
+        if self.is_lost() {
+            return Ok(());
+        }
         self.renderer
             .set_ground_grid(&self.device, visible, elevation_m, extent_m, spacing_m);
         Ok(())
@@ -565,6 +661,9 @@ impl WebModelRenderer {
     /// Tiefentest immer sichtbar obenauf (scheinen auch hinter Waenden durch).
     /// Wirkt erst beim naechsten `render`.
     pub fn set_highlight_lines(&mut self, vertices: &[f32]) -> Result<(), JsValue> {
+        if self.is_lost() {
+            return Ok(());
+        }
         self.renderer.set_highlight_lines(&self.device, vertices);
         Ok(())
     }
@@ -573,6 +672,9 @@ impl WebModelRenderer {
     /// `[nDreieckWerte, Dreiecke (x y z r g b a)…, Kanten (x y z r g b)…]` (world-Meter). Leer
     /// oder ungueltig loescht. Wirkt erst beim naechsten `render`.
     pub fn set_ghost(&mut self, data: &[f32]) -> Result<(), JsValue> {
+        if self.is_lost() {
+            return Ok(());
+        }
         let (head, rest) = data.split_first().map_or((0.0, &[][..]), |(h, r)| (*h, r));
         let n = if head.is_finite() && head >= 0.0 { (head as usize).min(rest.len()) } else { 0 };
         self.renderer.set_ghost(&self.device, &rest[..n], &rest[n..]);
@@ -583,6 +685,9 @@ impl WebModelRenderer {
     /// ueber dem Modell (`ghost.rs`). `json` = Modell wie bei `set_model` (vom Kern nur aus den grauen Elementen
     /// gebaut); leer oder ungueltig loescht. Wirkt erst beim naechsten `render`.
     pub fn set_ghost_model(&mut self, json: &str) -> Result<(), JsValue> {
+        if self.is_lost() {
+            return Ok(());
+        }
         let part = if json.trim().is_empty() {
             PartInput::default()
         } else {
@@ -601,6 +706,9 @@ impl WebModelRenderer {
     /// [180]/[214] Teil-Update der Geisterschicht, Format wie `set_parts` (`{ reset?, remove?, upsert? }`, Teile vom Kern
     /// nur aus den grauen Elementen): vernetzt und laedt nur Geaendertes. Gibt die Zahl der neu vernetzten Teile zurueck.
     pub fn set_ghost_parts(&mut self, json: &str) -> Result<u32, JsValue> {
+        if self.is_lost() {
+            return Ok(0);
+        }
         let upd: PartsUpdate =
             serde_json::from_str(json).map_err(|e| JsValue::from_str(&format!("Geisterschicht-Teile parsen: {e}")))?;
         Ok(self.renderer.update_ghost_parts(&self.device, upd).remeshed as u32)
@@ -609,6 +717,9 @@ impl WebModelRenderer {
     /// [180] 2D-Spuren (`drawing`, `[x y z r g b]` je Vertex) und Flaechenmuster (`pattern`, wie `set_pattern_lines`) der
     /// grauen Klassen, gedaempft in der Geisterschicht (`ghost::mute_lines`/`mute_pattern`); leer loescht.
     pub fn set_ghost_lines(&mut self, drawing: &[f32], pattern: &[f32]) -> Result<(), JsValue> {
+        if self.is_lost() {
+            return Ok(());
+        }
         self.renderer.set_ghost_lines(&self.device, drawing, pattern);
         Ok(())
     }
@@ -633,6 +744,9 @@ impl WebModelRenderer {
     /// JS-`Float32Array`: roher Byte-Kopiervorgang, keine Textkodierung, keine
     /// Laengengrenze. Wirkt erst beim naechsten `render`.
     pub fn set_drawing_lines(&mut self, vertices: &[f32]) -> Result<(), JsValue> {
+        if self.is_lost() {
+            return Ok(());
+        }
         self.renderer.set_drawing_lines(&self.device, vertices);
         Ok(())
     }
@@ -646,6 +760,9 @@ impl WebModelRenderer {
     /// oder zu kleine Daten setzen auf das reine Schachbrett zurueck. Wirkt erst beim
     /// naechsten `render`.
     pub fn set_material_textures(&mut self, rgba: &[u8], layer_count: u32) -> Result<(), JsValue> {
+        if self.is_lost() {
+            return Ok(());
+        }
         self.renderer
             .set_material_textures(&self.device, &self.queue, rgba, layer_count);
         Ok(())
@@ -655,6 +772,9 @@ impl WebModelRenderer {
     /// RGBA8 in derselben Reihenfolge wie `set_material_textures` (schwarze Ebene = keine Karte;
     /// `Renderer::set_material_detail_textures`). Wirkt beim nächsten Bild im Stil Pathtracing.
     pub fn set_material_detail_textures(&mut self, normal: &[u8], rough: &[u8], layer_count: u32) -> Result<(), JsValue> {
+        if self.is_lost() {
+            return Ok(());
+        }
         self.renderer.set_material_detail_textures(&self.device, &self.queue, normal, rough, layer_count);
         Ok(())
     }
@@ -676,6 +796,9 @@ impl WebModelRenderer {
         max_x: f32,
         max_y: f32,
     ) -> Result<(), JsValue> {
+        if self.is_lost() {
+            return Ok(());
+        }
         self.renderer.set_aerial_texture(
             &self.device,
             &self.queue,
@@ -713,6 +836,9 @@ impl WebModelRenderer {
         point_size: f32,
         visible: bool,
     ) -> u32 {
+        if self.is_lost() {
+            return 0;
+        }
         let cpu = crate::points::PointCloudCpu::from_raw(xyz, rgb, intensity, classification, [ox, oy, oz]);
         let style = crate::gpu_points::PointStyle {
             mode: crate::points::PointColorMode::from_str_or_rgb(color_mode),
@@ -726,6 +852,9 @@ impl WebModelRenderer {
     /// Nur Darstellung der Punktwolke `id` aendern (ohne Neu-Hochladen der Positionen).
     /// `false`, wenn die Wolke unbekannt ist (dann `set_point_cloud` aufrufen).
     pub fn set_point_cloud_style(&mut self, id: u32, color_mode: &str, point_size: f32, visible: bool) -> bool {
+        if self.is_lost() {
+            return false;
+        }
         let style = crate::gpu_points::PointStyle {
             mode: crate::points::PointColorMode::from_str_or_rgb(color_mode),
             size_px: point_size,
@@ -761,7 +890,7 @@ impl WebModelRenderer {
     /// Surface an eine neue Pixelgroesse anpassen (DPR beachtet der Aufrufer).
     pub fn resize(&mut self, width: u32, height: u32) {
         let (w, h) = (width.max(1), height.max(1));
-        if self.config.width == w && self.config.height == h {
+        if self.is_lost() || (self.config.width == w && self.config.height == h) {
             return;
         }
         self.config.width = w;
@@ -771,6 +900,9 @@ impl WebModelRenderer {
 
     /// Zeichnet EINEN Frame in die Surface-Textur.
     pub fn render(&mut self) {
+        if self.is_lost() {
+            return;
+        }
         // wgpu 29: `get_current_texture` liefert ein Enum statt eines Results —
         // Suboptimal ist weiterhin praesentierbar, Lost/Outdated -> rekonfigurieren.
         let frame = match self.surface.get_current_texture() {
