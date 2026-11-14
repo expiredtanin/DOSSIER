@@ -10,7 +10,7 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   stehen im Archiv („Bewusst nicht übernommen“).
 - **Grösse** (eine Person mit Agenten): S ≤ 1 Tag · M ≤ 1 Woche · L ≤ 1 Monat · XL > 1 Monat.
   Steht keine Grösse im Archiv, ist sie hier geschätzt.
-- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 258);
+- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 259);
   nie eine ID wiederverwenden oder umnummerieren. Präfix-IDs (`[K]`, `[G]`, `[T]`, `[B]`, `[C]`) bleiben.
 - **Pro Punkt:** was fehlt · wo im Code · Grösse. Höchstens ein bis drei Sätze je Punkt;
   Messwerte und Befunde gehören in den Commit.
@@ -74,7 +74,7 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   Umgesetzt (12.11.): `e2e/release10.spec.ts` spielt leeres Projekt → Kataster-DXF (LV95) → Baurecht → Wände/Decke/Dach → Raum +
   Raumprogramm → SIA 416/Kennzahlen (CSV/PDF) → 1:200 → Schnitt → Axonometrie/Schatten → Präsentationsplan A1 → Publikation PDF → DXF/IFC
   → Speichern in 13 Schritten durch; fehlende Schritte als `test.fixme` ([207] [208] [211] [222] [223] [224] seit 13.11. aktiv; [209], [221] und [225] seit 12.11. aktiv). 13.11.: [207] (Situation WBW/Schwarzplan: Füllfarben im Kern über Test-Naht `templateFills`, Kataster-DXF-Gebäude gefüllt), [208] (Plakat, Kennwort, anonymes PDF ohne Projektnamen, Gegenprobe; PDF-Helfer in `e2e/pdf.ts`) und [211] (Dialog im Browser: ZIP-Paket mit `model.glb` + `scene.json`) als echte Tests; Pathtracer-Zähler ([212]) als `fixme` (SwiftShader: Panic in wgpu `create_buffer` beim ersten Pathtrace-Bild, nur mit `DOSSIER_PATHTRACE=1` aktiv). `doc/RELEASE-1.0.md` um Abschnitt 13 (Mac-Prüfschritte) ergänzt. Behoben: GV in der
-  Kennzahlenleiste war ohne freie Körper 0 m³, neue Decken bekamen den Aussenwand-Aufbau statt eines Deckentyps. Offen: Durchlauf
+  Kennzahlenleiste war ohne freie Körper 0 m³, neue Decken bekamen den Aussenwand-Aufbau statt eines Deckentyps. 14.11.: Spec um [253] (Schritt 4b: WC und Esstisch aus dem Panel „Objekte“, Plan-Linien), [255] (6b: AZ/ÜZ/Fassadenhöhe max. → Nachweis in der Flächenbilanz mit erfüllt/Reserve; 10c: Blatt-Tabelle aufs Plakat), [208] (12b: Raum = Projektname → Anonymitäts-Dialog → Abbrechen → umbenennen → Export ohne Dialog) und [252] (Ctrl+Tab im Schritt 9) ergänzt; Checkliste 13.15/13.16. Offen: Durchlauf
   der Checkliste auf dem Mac (Maintainer); 3D-Bild headless nicht prüfbar; Blender-Lauf von [211] nur auf dem Mac; Pathtracer unter SwiftShader (s. o.).
 
 - ◐ **[258]** Robustheit: kein Kern-Panic im Referenz-Ablauf (14.11.). `src-tauri/core/tests/robustness.rs`, deterministisch, Release < 1 min: (1) die vier
