@@ -1084,7 +1084,7 @@ Punktwolken/BCF-Ausbau, Windows-Paket, [C5]/[C7]/[15] Kern-Umbauten — ausser s
   1:100 sehr dicht. · M
 - ◐ **[102]** Linientypen SIA 400 / ISO 128. CPU-Rückfall (> 8 Einträge) verliert Punkte. · S
 - ○ **[11]** Bibliothek per GUID. · M
-- ○ **[254]** Eigene parametrische Objekte (nach 1.0, Wunsch Maintainer 14.11., Vorbild Archicad-GDL): Objekte mit Parametern, 2D je Detailstufe grob/mittel/fein und später 3D selbst beschreiben (einfache Beschreibungssprache oder Editor), Ausbau der festen Kern-Objekte aus [253]. GDL-Dateien (.gsm) einlesen eher nicht (Format nicht offen, Interpreter nötig); Austausch über IFC/DXF. · L
+- ○ **[254]** Eigene parametrische Objekte (nach 1.0, Wunsch Maintainer 14.11., Vorbild Archicad-GDL/Grasshopper): Objekte mit Parametern, 2D je Detailstufe grob/mittel/fein und später 3D **einfach selbst bauen** — als Knoten-Editor mit logischen Bausteinen (Grasshopper-artig: Parameter, Zahl/Rechnen, Linie, Rechteck, Kreis, Bogen, Reihe/Array, Spiegeln, Wenn/Detailstufe, Zufall mit Seed); der Graph wird als Daten im Projekt gespeichert und im Rust-Kern ausgewertet (gleiche Schnittstelle wie die eingebauten Objekte aus [253]). Textform als zweiter Weg: eingebettete Skriptsprache im Kern (z. B. Rhai, reines Rust, WASM-tauglich, abgeschottet) und/oder Python über `dossier-cli`/MCP; Python in der App (Pyodide) nur, falls Grösse/Tempo vertretbar. GDL-Dateien (.gsm) werden nicht eingelesen (Entscheid Maintainer). · L
 - ○ **[42]** Varianten. · L
 - ○ **[39]** Auswahl gehört zum Modell. · M
 
