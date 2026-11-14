@@ -2807,6 +2807,26 @@ mod tests {
         assert_eq!(ghost.len(), 6);
     }
 
+    /// [156] [253] Möbel und Sanitär aus der Bibliothek sparen den Bodenbelag aus (Grundfläche = Hülle der Striche),
+    /// Fahrzeuge und Aussenraum (Auto, Parkfeld, Wendekreis) nicht.
+    #[test]
+    fn libobj_spart_belag_aus_ausser_aussenraum() {
+        let mut p = project(serde_json::json!({}));
+        let a = PlanArgs::parse(1.0, r#"{"floor":"eg","show":["20","22","23","24"],"scale":50}"#).unwrap();
+        let at = |lib: &str, cat: &str, x: f64| -> Drawing2D {
+            serde_json::from_value(serde_json::json!({"id": format!("o-{lib}"), "type": "drawing2d", "levelId": "eg", "categoryCode": cat,
+                "geom": {"shape": "libobj", "libId": lib, "at": {"x": x, "y": 0}, "rotation": 0}})).unwrap()
+        };
+        let count = |p: &Project| block_footprints(&Ctx::new(p, &a)).len();
+        assert_eq!(count(&p), 0);
+        for (lib, cat, x, expect) in [("lib:wc-wand", "23", 0.0, 1), ("lib:sofa-2", "22", 5.0, 2), ("lib:auto", "24", 10.0, 2), ("lib:parkfeld", "24", 15.0, 2), ("lib:wendekreis", "24", 20.0, 2)] {
+            p.drawings2d.push(at(lib, cat, x));
+            assert_eq!(count(&p), expect, "{lib}");
+        }
+        let fp = block_footprints(&Ctx::new(&p, &a));
+        assert!(fp.iter().all(|h| h.len() >= 3 && h.iter().all(|q| q[0] < 8.0)), "nur WC und Sofa: {fp:?}");
+    }
+
     #[test]
     fn block_mit_selbstbezug_endet() {
         let p = project(serde_json::json!({ "blockDefs": [{ "id": "b", "name": "B", "geom2d": [

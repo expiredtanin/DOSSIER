@@ -63,9 +63,10 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   Garderobe, Regal, Auto+Parkfeld, Velo, Wendekreis Ø 150 (gestrichelt). Klassen Möbel „22“, Sanitär „23“, Fahrzeuge & Freiflächen „24“
   (Standards laden ergänzt sie, Setzen legt sie im selben Undo-Schritt an); Möbel/Sanitär sparen den Belag aus ([156]). Palette: Dock-Panel
   „Objekte“ (Tab neben den Werkzeugen), Befehl `libobj` (R drehen, M spiegeln, Vorschau am Cursor); Objekt-Info baut die Felder generisch aus
-  der Parameterliste („Neu würfeln“). Unbekannte Id = Platzhalter-Rahmen. Offen: auf dem Mac nicht geprüft; Ziehen aus der Palette (nur Klick);
-  3D nach 1.0 (Trait hat Platz für `geometry3d`); Symbole nur im CLI-SVG/Chromium angesehen, nicht in der Tauri-App; DXF gibt die erzeugten Linien lose aus
-  (kein BLOCK/INSERT). Vorgaben ohne Antwort des Maintainers: abstrakt, nur 55er-Raster, nur 2D. · M
+  der Parameterliste („Neu würfeln“). Unbekannte Id = Platzhalter-Rahmen. 14.11. (später): e2e `e2e/objectLibrary253.spec.ts` (Palette, WC + Esstisch, R/M, Objekt-Info, Breite,
+  Neu würfeln, Undo samt Klasse; Test-Naht `libobjs`), Rust-Test Belag-Aussparen ([156]: Möbel/Sanitär ja, Auto/Parkfeld/Wendekreis nein),
+  DXF als `BLOCK` `DOSSIER_<id>_<hash>` + `INSERT` (gleiche Parameter = ein Block, `doc/DATEIFORMATE.md`). Offen: auf dem Mac nicht geprüft; Ziehen aus der Palette (nur Klick);
+  3D nach 1.0 (Trait hat Platz für `geometry3d`); Symbole nur im CLI-SVG/Chromium angesehen, nicht in der Tauri-App; DXF-Block ohne Attribute (Id/Parameter nur im Blocknamen). Vorgaben ohne Antwort des Maintainers: abstrakt, nur 55er-Raster, nur 2D. · M
 
 ## Phase 1 (13.–19.11.): Stabil und baubar
 - ◐ **[206]** Referenz-Ablauf als e2e-Spec (Browser) und als Checkliste für die Mac-Abnahme (`doc/RELEASE-1.0.md`): jeder Schritt

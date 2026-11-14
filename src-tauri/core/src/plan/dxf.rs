@@ -1238,26 +1238,38 @@ impl Ctx<'_> {
     }
 
     /// Blockinstanz → BLOCK je Definition + INSERT (`emitBlockInstance`); `false` = als lose Primitive.
+    /// [253] Objekte der Bibliothek (`Libobj`): ein Block je Objekt-Id und Parametersatz (`DOSSIER_<id>_<hash>`,
+    /// bei Objekten mit Zufall zusätzlich je Seed), Inhalt = erzeugte Linien in Objektlage.
     fn block_instance(&mut self, b: &mut Buf, d: &Drawing2D, members: &[&Entry], layer: &str, names: &mut BlockNames) -> bool {
-        let Drawing2DGeom::Block { block_def_id, at, rotation, scale, .. } = &d.geom else { return false };
-        let Some(def) = self.project.block_defs.as_ref().and_then(|l| l.iter().find(|x| &x.id == block_def_id)) else { return false };
-        let s = scale.unwrap_or(1.0);
+        let (at, rotation, s, key, wish, desc) = match &d.geom {
+            Drawing2DGeom::Block { block_def_id, at, rotation, scale, .. } => {
+                let Some(def) = self.project.block_defs.as_ref().and_then(|l| l.iter().find(|x| &x.id == block_def_id)) else { return false };
+                let trimmed = js_trim(&def.name);
+                (at, *rotation, scale.unwrap_or(1.0), format!("blockdef:{}", def.id), if trimmed.is_empty() { "Block".to_string() } else { trimmed.to_string() }, def.name.clone())
+            }
+            Drawing2DGeom::Libobj { lib_id, at, rotation, params, seed } => {
+                let seeded = crate::furniture_lib::find(lib_id).is_some_and(|o| o.def().seeded);
+                let pj = serde_json::to_string(&params.clone().unwrap_or_default()).unwrap_or_default();
+                let key = format!("libobj:{lib_id}:{pj}{}", if seeded { format!(":{}", seed.unwrap_or(0)) } else { String::new() });
+                let h = key.bytes().fold(2166136261u32, |h, c| (h ^ c as u32).wrapping_mul(16777619));
+                let id: String = lib_id.trim_start_matches("lib:").chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect();
+                (at, *rotation, 1.0, key, format!("DOSSIER_{id}_{h:08X}"), format!("Objektbibliothek {lib_id}"))
+            }
+            _ => return false,
+        };
         if !(s > 0.0) || !s.is_finite() || !rotation.is_finite() || !at.x.is_finite() || !at.y.is_finite() {
             return false;
         }
-        let trimmed = js_trim(&def.name);
-        let wish = if trimmed.is_empty() { "Block" } else { trimmed };
-        let (name, fresh) = names.name(&format!("blockdef:{}", def.id), wish);
+        let (name, fresh) = names.name(&key, &wish);
         let at = V2 { x: at.x, y: at.y };
         if fresh {
-            let frame = Frame { origin: at, rot: *rotation, scale: s };
+            let frame = Frame { origin: at, rot: rotation, scale: s };
             let mut content = Buf::block();
             self.block_content(&mut content, members, frame, layer);
             self.flat.set_pen(&mut content, -1.0);
-            let desc = def.name.clone();
             self.flat.define_block(b, &name, &desc, &[], content);
         }
-        self.flat.add_insert(b, layer, &name, at, *rotation, s, &[]);
+        self.flat.add_insert(b, layer, &name, at, rotation, s, &[]);
         true
     }
 
@@ -1466,7 +1478,7 @@ fn emit_entries(cx: &mut Ctx, main: &mut Buf, entries: &[Entry], layer_by_code: 
             Drawing2DGeom::Dimension { kind: None, arc_center: None, .. } => {
                 dim_by_id.insert(d.id.as_str(), d);
             }
-            Drawing2DGeom::Block { .. } => {
+            Drawing2DGeom::Block { .. } | Drawing2DGeom::Libobj { .. } => {
                 block_by_id.insert(d.id.as_str(), d);
             }
             _ => {}
@@ -1844,6 +1856,37 @@ mod tests {
         assert!(f.strings.iter().any(|s| s == "SHEETTAB_1"), "Tabellen-Block");
         assert!(f.strings.iter().any(|s| s == "Nr."), "Kopf beschriftet");
         assert!(f.nums.contains(&REC_TEXT2) && f.nums.contains(&REC_LINE));
+    }
+
+    /// [253] Objekte der Bibliothek gehen als BLOCK + INSERT hinaus: gleiche Id und Parameter teilen einen Block
+    /// (`DOSSIER_<id>_<hash>`), andere Parameter bekommen einen eigenen; die Einfügung trägt Lage und Drehung.
+    #[test]
+    fn libobj_als_block_und_insert() {
+        let mut v = crate::sheet_viewports::tests::json();
+        let lo = |id: &str, x: f64, rot: f64, params: serde_json::Value| serde_json::json!({"id": id, "type": "drawing2d", "levelId": "eg", "categoryCode": "20",
+            "geom": {"shape": "libobj", "libId": "lib:wc-wand", "at": {"x": x, "y": 2.0}, "rotation": rot, "params": params}});
+        let d = v["drawings2d"].as_array_mut().unwrap();
+        d.push(lo("w1", 1.0, 0.0, serde_json::json!({})));
+        d.push(lo("w2", 3.0, std::f64::consts::FRAC_PI_2, serde_json::json!({})));
+        d.push(lo("w3", 5.0, 0.0, serde_json::json!({"w": 0.45})));
+        let p: Project = serde_json::from_value(v).unwrap();
+        let a = crate::plan::domains::PlanArgs::parse(1.0, r#"{"floor":"eg","show":["20"],"scale":50}"#).unwrap();
+        let buf = crate::plan::domains::plan_domains_buf(&p, &a).unwrap();
+        let view = View::parse(&buf).unwrap();
+        let len = view.len();
+        let mut parts = [Part::new(view, 0, len).unwrap()];
+        let o = DxfOptions { scale: 50.0, include_hatches: true, dim_cm: false, paper_layout: false, bounds: [0.0, 0.0, 10.0, 4.0], default_font: "Arial".into(), floor: "eg".into(), table_labels: String::new() };
+        let f = collect(&mut parts, &p, &o).unwrap();
+        let blocks: Vec<&String> = f.strings.iter().filter(|s| s.starts_with("DOSSIER_wc_wand_")).collect();
+        assert_eq!(blocks.len(), 2, "gleiche Parameter ein Block, andere Breite ein zweiter: {blocks:?}");
+        assert_eq!(f.nums.iter().filter(|x| **x == REC_BLOCK).count(), 2);
+        let is_lib = |w: &&[f64]| f.strings.get(w[2] as usize).is_some_and(|n| n.starts_with("DOSSIER_wc_wand_"));
+        let inserts: Vec<&[f64]> = f.nums.windows(9).filter(|w| w[0] == REC_INSERT).filter(is_lib).collect();
+        assert_eq!(inserts.len(), 3);
+        let rot = inserts.iter().find(|w| (w[3] - 3.0).abs() < 1e-9).expect("INSERT w2");
+        assert!((rot[4] - 2.0).abs() < 1e-9 && (rot[5] - std::f64::consts::FRAC_PI_2).abs() < 1e-9, "{rot:?}");
+        // Keine losen Linien ausserhalb der Blöcke: nur Blockinhalt (Ebene „0") trägt die Symbol-Linien.
+        assert!(f.nums.contains(&REC_LINE));
     }
 
     /// [200] Stift je Element: weicht Farbe/Strichstärke einer Zeichnungslinie vom Ebenen-Standard ab, steht davor ein

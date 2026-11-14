@@ -78,6 +78,8 @@ declare global {
       walls: () => { id: string; start: { x: number; y: number }; end: { x: number; y: number } }[];
       /** [185] 3D-Element-Filter (Store) und die Wand-ids des 3D-Modells bzw. der Pick-Geometrie mit ihm. */
       view3d: () => { only: string[] | null; hidden: string[]; walls: string[]; pickWalls: string[]; floors: string[]; pickOpenings: { id: string; host: string }[] };
+      /** [253] Objekte der Bibliothek im Projekt (Id, Lage, Drehung, Parameter, Seed, Klasse) mit Ausmass ihrer Plan-Linien (1:50) im aktiven Geschoss; dazu die Klassen-Codes des Projekts. */
+      libobjs: () => { items: { id: string; libId: string; at: { x: number; y: number }; rotation: number; params: Record<string, number | boolean | string>; seed: number | undefined; categoryCode: string; lines: number; w: number; h: number }[]; layers: string[] };
       /** [202] Treppe (Antritt, Zentrum), erster Punkt des ersten Lochs der Decke `ceilingId` und Zahl der Plan-Linien der Treppe im aktiven Geschoss. */
       stairHole: (stairId: string, ceilingId: string) => { start: { x: number; y: number }; center: { x: number; y: number } | null; hole0: { x: number; y: number } | null; lines: number };
       /** [203] Grundriss der aktiven Ebene wie in der Ansicht (Geschoss-Überlagerung nach Zeichnungsebenen-Modus): Raumstempel je Geschoss (gesamt/gedimmt) und Zahl der Achs-Beschriftungen `axis`. */
@@ -293,6 +295,29 @@ export function installTestHooks(): void {
         if (len > best) [best, probe] = [len, { x: (q.a.x + q.b.x) / 2, y: (q.a.y + q.b.y) / 2 }];
       }
       return { trace: s.trace, n: prims.length, colors, withIds, bounds: plan?.bounds ?? null, probe };
+    },
+    libobjs: () => {
+      const s = getState();
+      const codes = new Set<string>();
+      const walk = (cs: { code: string; children?: unknown[] }[]): void => {
+        for (const c of cs) {
+          codes.add(c.code);
+          walk((c.children ?? []) as { code: string; children?: unknown[] }[]);
+        }
+      };
+      walk(s.project.layers);
+      const prims = generatePlan(s.project, s.activeLevelId, codes, undefined, s.detail, false, false, true, 50).primitives;
+      const items = s.project.drawings2d.flatMap((d) => {
+        if (d.geom.shape !== "libobj") return [];
+        let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, n = 0;
+        for (const q of prims) {
+          if (q.kind !== "line" || (q as { drawingId?: string }).drawingId !== d.id) continue;
+          n++;
+          for (const p of [q.a, q.b]) [x0, y0, x1, y1] = [Math.min(x0, p.x), Math.min(y0, p.y), Math.max(x1, p.x), Math.max(y1, p.y)];
+        }
+        return [{ id: d.id, libId: d.geom.libId, at: { ...d.geom.at }, rotation: d.geom.rotation, params: { ...(d.geom.params ?? {}) }, seed: d.geom.seed, categoryCode: d.categoryCode, lines: n, w: n ? x1 - x0 : 0, h: n ? y1 - y0 : 0 }];
+      });
+      return { items, layers: [...codes] };
     },
     layerView: () => {
       const s = getState();
