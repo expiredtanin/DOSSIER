@@ -1366,10 +1366,7 @@ fn dim_text_frame(a: V2, b: V2, offset: f64, text_height: f64) -> (V2, V2, V2) {
     let nx = -dy / len;
     let ny = dx / len;
     let mid = V2 { x: (a.x + b.x) / 2.0 + nx * offset, y: (a.y + b.y) / 2.0 + ny * offset };
-    let mut angle = jsnum::atan2(dy, dx);
-    if jsnum::cos(angle) < 0.0 {
-        angle += PI;
-    }
+    let angle = super::drawings::dim_read_angle(dx, dy);
     let read = V2 { x: jsnum::cos(angle), y: jsnum::sin(angle) };
     let up = V2 { x: -jsnum::sin(angle), y: jsnum::cos(angle) };
     (V2 { x: mid.x + up.x * text_height * 0.6, y: mid.y + up.y * text_height * 0.6 }, read, up)

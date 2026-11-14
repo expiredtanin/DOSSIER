@@ -1061,6 +1061,21 @@ struct DimStyle {
     text_offset: (f64, f64),
 }
 
+/// Leserichtung einer Masszahl (nie kopfüber): Richtung der Masslinie, nach rechts gedreht. [208] Senkrechte Linien
+/// (|cos| < 1e-9) gelten als genau senkrecht und lesen in ihrer Zeichenrichtung (aufwärts +90°, abwärts −90°): Rauschen
+/// von 1e-13 m in x entschied sonst über das Vorzeichen von cos und damit über Leserichtung und Seite der Zahl (eine
+/// Kette abwärts gelesen, die Nachbarkette aufwärts — die Zahlen sassen dann Rücken an Rücken im Zwischenraum).
+pub fn dim_read_angle(dx: f64, dy: f64) -> f64 {
+    let mut angle = jsnum::atan2(dy, dx);
+    if jsnum::cos(angle).abs() < 1e-9 {
+        angle = if dy < 0.0 { -std::f64::consts::FRAC_PI_2 } else { std::f64::consts::FRAC_PI_2 };
+    }
+    if jsnum::cos(angle) < 0.0 {
+        angle += std::f64::consts::PI;
+    }
+    angle
+}
+
 /// Lage der Masszahl (`dimTextFrame`): Basis, Leserichtung, Querachse, Winkel (nie kopfüber).
 pub fn dim_text_frame(a: Vec2, b: Vec2, offset: f64, text_height: f64) -> (Vec2, Vec2, Vec2, f64) {
     let dx = b.x - a.x;
@@ -1070,10 +1085,7 @@ pub fn dim_text_frame(a: Vec2, b: Vec2, offset: f64, text_height: f64) -> (Vec2,
     let nx = -dy / len;
     let ny = dx / len;
     let mid = v((a.x + b.x) / 2.0 + nx * offset, (a.y + b.y) / 2.0 + ny * offset);
-    let mut angle = jsnum::atan2(dy, dx);
-    if jsnum::cos(angle) < 0.0 {
-        angle += std::f64::consts::PI;
-    }
+    let angle = dim_read_angle(dx, dy);
     let read = v(jsnum::cos(angle), jsnum::sin(angle));
     let up = v(-jsnum::sin(angle), jsnum::cos(angle));
     (v(mid.x + up.x * text_height * 0.6, mid.y + up.y * text_height * 0.6), read, up, angle)
@@ -1097,9 +1109,10 @@ pub fn round_label(kind: DimKind, pts: &[Vec2], offset: f64) -> Option<RoundLabe
     }
     let upright = |a: f64| if jsnum::cos(a) < 0.0 { a + std::f64::consts::PI } else { a };
     let ang = jsnum::atan2(p.y - c.y, p.x - c.x);
+    let along = dim_read_angle(p.x - c.x, p.y - c.y); // Radius/Durchmesser: senkrecht ohne Vorzeichen-Rauschen
     Some(match kind {
-        DimKind::Radius => RoundLabel { at: v((c.x + p.x) / 2.0, (c.y + p.y) / 2.0), angle: upright(ang), len: r, text: format!("R {}", to_fixed(r, 2)) },
-        DimKind::Diameter => RoundLabel { at: c, angle: upright(ang), len: 2.0 * r, text: format!("\u{d8} {}", to_fixed(2.0 * r, 2)) },
+        DimKind::Radius => RoundLabel { at: v((c.x + p.x) / 2.0, (c.y + p.y) / 2.0), angle: along, len: r, text: format!("R {}", to_fixed(r, 2)) },
+        DimKind::Diameter => RoundLabel { at: c, angle: along, len: 2.0 * r, text: format!("\u{d8} {}", to_fixed(2.0 * r, 2)) },
         DimKind::Arc => {
             let p1 = *pts.get(2)?;
             let a1 = jsnum::atan2(p1.y - c.y, p1.x - c.x);
@@ -3171,6 +3184,31 @@ mod tests {
         assert!((t[0].1.x - 1.5).abs() < 1e-9 && (t[1].1.x - 5.0).abs() < 1e-9, "{t:?}");
         // Ketten-Offset 1 m nach links der Richtung (+y), Zahl 0.6 h darüber.
         assert!((t[0].1.y - (1.0 + 0.6 * h)).abs() < 1e-9, "{t:?}");
+    }
+
+    /// [208] Senkrechte Kette: Leserichtung und Seite der Zahl hängen nicht am Rauschen in x (1e-13 m). Sonst las die
+    /// Zahl einer Kette abwärts und stand auf der anderen Seite der Linie als die Nachbarkette (Plakat: „12.39“ klebte
+    /// an „4.80“ statt aussen).
+    #[test]
+    fn masszahl_senkrecht_unabhaengig_vom_rauschen() {
+        let p = project(serde_json::json!({}));
+        let texts = |x1: f64, y1: f64| {
+            let out = render(&p, drawing(serde_json::json!({"shape": "dimension", "pts": [{"x": 0, "y": 0}, {"x": x1, "y": y1}], "offset": 1.0})), 100.0);
+            out.iter()
+                .filter_map(|pr| match pr {
+                    Primitive::DrawingText { at, angle, height_m, text, .. } => Some((at.x + super::dim_text_width(text.parse().unwrap(), *height_m) * angle.cos() / 2.0, *angle)),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        let pi2 = std::f64::consts::FRAC_PI_2;
+        for dx in [0.0, 1e-13, -1e-13] {
+            let up = texts(dx, 5.0);
+            assert_eq!(up.len(), 1);
+            assert!((up[0].1 - pi2).abs() < 1e-9, "aufwärts gezeichnet liest aufwärts (dx {dx}): {up:?}");
+            let down = texts(dx, -5.0);
+            assert!((down[0].1 + pi2).abs() < 1e-9, "abwärts gezeichnet liest abwärts (dx {dx}): {down:?}");
+        }
     }
 
     /// [172] Zu schmales Segment: Zahl nach aussen; erstes links, letztes rechts, mittleres zum längeren Nachbarn.

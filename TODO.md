@@ -373,8 +373,11 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   stand eine Zeile höher in der Wand: passt eine Zahl weder ins Segment noch daneben, rückt jetzt die Zahl des Nachbarsegments in dessen Segment weg
   („1.20 3.00"); geht auch das nicht und läge „eine Zeile höher" zum Gebäude hin (Ketten Süd/Ost), steht sie unter der Linie (`dim_auto_offsets*` mit
   `offset`, gleich in Plan, Griffen, DXF; Test `masszahl_weicht_nach_aussen_statt_in_die_wand`). Goldens: Ansicht muster (Ausmass +2 m je Seite) und komplex
-  (Linienstärke). Offen: „12.39"/„4.80" links liessen sich weder im CLI-SVG noch in den Viewport-Plänen des Präsentationsplans nachstellen (Abstand 1.4 m,
-  kein Überlapp; vermutlich Textsatz des PDF, svg2pdf mit gedrehten Texten — im Browser-PDF prüfen); nicht in der Tauri-App/auf dem Mac.
+  (Linienstärke). „12.39"/„4.80" links (14.11., BEHOBEN): nicht svg2pdf — gedrehte Texte landen im PDF genau wie im Druck-SVG (geprüft mit Testseite und
+  `pdftotext -bbox`). Ursache im Kern: `dim_text_frame` wählte die Leserichtung senkrechter Ketten nach dem Vorzeichen von `cos` (≈ ±6e-17); schon
+  1e-13 m Rauschen in x machte aus „aufwärts, Zahl links der Linie“ ein „abwärts, Zahl rechts“ — die Zahl der äusseren Kette sass im Zwischenraum Rücken an
+  Rücken mit der Nachbarzahl (nur im Viewport-Plan, im CLI-SVG war x exakt). Jetzt `plan::drawings::dim_read_angle` (|cos| < 1e-9 = senkrecht, liest in
+  Zeichenrichtung; auch DXF-Export und Radius-/Durchmessermass); Test `masszahl_senkrecht_unabhaengig_vom_rauschen`. Goldens unverändert. Nicht in der Tauri-App/auf dem Mac.
   **Nachtrag 14.11.**: (5) Schnitt: Bodenlinie ohne Geländenetz wie in der Ansicht kräftig (0.5) auf ±0.00 mit Überstand (gemeinsame Logik
   `elevation::ground_ref/ground_extent/ground_stroke`, `Output.ground`; Klasse „02 Gelände" ausgeblendet ⇒ ohne); UG/Sockel darunter bleibt geschnitten
   (keine weisse Fläche im Schnitt); Geländeschnittlinie mit Netz ebenfalls 0.5 (`SECTION_GROUND_MM`); Test `section::tests::bodenlinie_auf_null_mit_ueberstand`.
