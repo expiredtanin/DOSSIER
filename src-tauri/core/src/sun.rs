@@ -866,7 +866,7 @@ const ARC_PIECE: f64 = 0.25;
 /// [142] Lichtdurchlässige Lücken einer Wand: je Öffnung `[u0, u1, z0, z1]` (entlang der Achse ab Wandanfang,
 /// absolute Höhe), über die volle Wanddicke — Fenster (auch verglast) und Türen lassen Licht durch. Formöffnungen
 /// ([G3]) als senkrechte Streifen mit der kleinsten Höhe des Umrisses im Streifen (eher zu wenig Licht als zu viel).
-fn wall_gaps(os: &[&crate::model::Opening], axis: f64, zb: f64, zt: f64) -> Vec<[f64; 4]> {
+fn wall_gaps(p: &Project, wall: &crate::model::Wall, os: &[&crate::model::Opening], axis: f64, zb: f64, zt: f64) -> Vec<[f64; 4]> {
     const MIN_GAP: f64 = 1e-4;
     let mut out = Vec::new();
     for o in os {
@@ -877,7 +877,7 @@ fn wall_gaps(os: &[&crate::model::Opening], axis: f64, zb: f64, zt: f64) -> Vec<
         let from = pos.min(axis).max(0.0);
         let to = (pos + w).min(axis).max(from);
         let ob = zb + o.sill_height.max(0.0);
-        let ot = zt.min(ob + h);
+        let ot = p.opening_top_under_ceilings(wall, o, ob, zt.min(ob + h));
         if to - from < MIN_GAP || !(ot - ob > MIN_GAP) {
             continue;
         }
@@ -1002,7 +1002,7 @@ fn collect(p: &Project, k: [f64; 2], cut: Option<f64>, ground: Option<&Ground>) 
         let (z_wall, z_top) = p.wall_vertical_extent(w);
         let thick = p.wall_thickness(w, 0.2);
         // Öffnungen (Brüstung) ab der Wand-Unterkante, der Werfer ab dem Sockel ([`plinth_bottom`]).
-        let gaps = openings.get(w.id.as_str()).map_or_else(Vec::new, |os| wall_gaps(os, crate::wall_arc::axis_length(w), z_wall, z_top));
+        let gaps = openings.get(w.id.as_str()).map_or_else(Vec::new, |os| wall_gaps(p, w, os, crate::wall_arc::axis_length(w), z_wall, z_top));
         let in_cut = cut.is_some_and(|c| z_wall <= c + 1e-9 && c < z_top);
         // Bogenwand ([T2]): Kreisringsektor als Prisma.
         if let Some(arc) = crate::wall_arc::WallArc::of_wall(w) {

@@ -247,7 +247,7 @@ fn wall_openings(p: &Project, w: &Wall, openings: &[&Opening], with_recess: bool
     for &o in openings {
         let Some((from, to)) = opening_geom::opening_interval(&wr, o.position, o.width) else { continue };
         let o_bottom = zb + o.sill_height.max(0.0);
-        let o_top = zt.min(o_bottom + o.height);
+        let o_top = p.opening_top_under_ceilings(w, o, o_bottom, zt.min(o_bottom + o.height));
         let recess = with_recess && o.kind == ElementKind::Window && p.window_type(o).and_then(|t| t.inner_layer_recess) == Some(true);
         out.push(OpeningIn { from, to, z_bottom: o_bottom, z_top: o_top, recess_inner_layer: recess });
     }
@@ -265,7 +265,7 @@ fn wall_reveals(p: &Project, w: &Wall, openings: &[&Opening], n_bands: usize) ->
             continue;
         }
         let o_bottom = zb + o.sill_height.max(0.0);
-        let o_top = zt.min(o_bottom + o.height);
+        let o_top = p.opening_top_under_ceilings(w, o, o_bottom, zt.min(o_bottom + o.height));
         let mut shifts = vec![[0.0; 4]; n_bands];
         let mut pieces = Vec::new();
         for (k, side) in r.sides.iter().enumerate() {
@@ -864,7 +864,7 @@ pub(crate) fn wall_pocket_cuts(p: &Project, w: &Wall, openings: &[&Opening]) -> 
         let count = crate::jsnum::max(1.0, crate::jsnum::round(dt.leaf_count));
         let hinge_end = o.hinge.is_some_and(|s| s != OpeningHinge::Start);
         let z0 = zb + o.sill_height.max(0.0);
-        let z1 = zt.min(z0 + o.height);
+        let z1 = p.opening_top_under_ceilings(w, o, z0, zt.min(z0 + o.height));
         if z1 - z0 <= 1e-6 {
             continue;
         }

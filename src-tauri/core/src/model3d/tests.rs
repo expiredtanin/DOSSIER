@@ -1018,3 +1018,103 @@ fn formoeffnung_in_bogenwand_mit_echter_form() {
         assert!(!meshes.is_empty() && meshes.len() <= 10, "{shape}/{reveal}: {} Öffnungsteile (Quader?)", meshes.len());
     }
 }
+
+/// [234] Öffnung, die unter der Wandoberkante in eine Decke ragt (Musterhaus komplex `og-f1` vor der Korrektur: Brüstung 0,9 +
+/// Höhe 1,6 = 2,5 m, Decke ab 2,43 m, Wand bis 2,8 m): Leibung, Rahmen, Glas und Wandloch enden an der Deckenunterkante wie an
+/// der Wandoberkante — Rechteck und Rundbogen, gerade und Bogenwand; ohne Decke darüber bleibt die volle Höhe.
+#[test]
+fn oeffnung_in_die_decke_endet_an_der_deckenunterkante() {
+    for (shape, bulge) in [(None, None), (Some(OpeningShape::Rundbogen), None), (None, Some(-0.3)), (Some(OpeningShape::Rundbogen), Some(-0.3))] {
+        let mut p = sample();
+        p.walls.retain(|w| w.id == "W1");
+        p.walls[0].height = 2.8;
+        p.walls[0].bulge = bulge;
+        for f in p.drawing_levels.iter_mut().filter(|f| f.id == "eg") {
+            f.floor_height = Some(2.8);
+        }
+        let c = &mut p.ceilings.as_mut().unwrap()[0];
+        c.thickness = Some(0.37);
+        // Umriss über die ganze (auch gebogene) Wand.
+        c.outline = vec![Vec2 { x: -1.0, y: -3.0 }, Vec2 { x: 6.0, y: -3.0 }, Vec2 { x: 6.0, y: 4.0 }, Vec2 { x: -1.0, y: 4.0 }];
+        assert!((p.ceiling_vertical_extent(&p.ceilings.as_ref().unwrap()[0]).0 - 2.43).abs() < 1e-9);
+        p.openings.as_mut().unwrap().retain(|o| o.id == "O1");
+        let o = &mut p.openings.as_mut().unwrap()[0];
+        (o.sill_height, o.height, o.shape) = (0.9, 1.6, shape);
+        let max_z = |ms: &[RMesh]| ms.iter().flat_map(|m| m.positions.chunks_exact(3).map(|c| c[2])).fold(f64::NEG_INFINITY, f64::max);
+        let top = max_z(&emit_opening_meshes(&p, 2.0));
+        assert!((top - 2.43).abs() < 1e-6, "{shape:?}/{bulge:?}: Öffnungsteile bis {top} statt 2,43");
+        let w = &p.walls[0];
+        let o = &p.openings.as_ref().unwrap()[0];
+        assert!((crate::plan::view_range::opening_vertical_extent(&p, w, o).1 - 2.43).abs() < 1e-9, "Plan/Schnitt");
+        let walls = emit_walls(&p, true).unwrap();
+        let hole_top = walls.iter().flat_map(|w| w.holes.iter().flatten()).map(|h| h.z_top).fold(f64::NEG_INFINITY, f64::max);
+        // Wandloch (Rechteck; bei Formöffnungen das Loch der Stücke, das der Körper nach dem Umriss schneidet).
+        assert!((hole_top - 2.43).abs() < 1e-6, "{shape:?}/{bulge:?}: Wandloch bis {hole_top}");
+        // Ohne Decke über der Öffnung (Umriss daneben): volle Höhe bis 2,5.
+        p.ceilings.as_mut().unwrap()[0].outline = vec![Vec2 { x: 10.0, y: 0.0 }, Vec2 { x: 12.0, y: 0.0 }, Vec2 { x: 12.0, y: 2.0 }, Vec2 { x: 10.0, y: 2.0 }];
+        let top = max_z(&emit_opening_meshes(&p, 2.0));
+        assert!((top - 2.5).abs() < 1e-6, "{shape:?}/{bulge:?}: ohne Decke bis {top} statt 2,5");
+    }
+}
+
+/// [216] Rahmen, Flügel, Glas und Fensterbank in der Bogenwand (Erker, r = 2,5 m, Fenster 1,2 m: Pfeilhöhe ≈ 7 cm) folgen
+/// dem Bogen: jeder Punkt eines Teils (Ecken, Dreiecks-Schwerpunkte, Kantenmitten) liegt quer zur Wand im Bereich seiner
+/// Ecken — kein Versatz der geraden Sehne zur Leibung in Brüstungsmitte. Rechteck und Formöffnung, Teile dicht.
+/// Schmale Öffnungen (Pfeilhöhe ≤ 1 cm) bleiben gerade.
+#[test]
+fn fenster_in_bogenwand_folgt_dem_bogen() {
+    assert!(follows_arc(2.0, 1.2) && follows_arc(2.0, 0.6) && !follows_arc(2.0, 0.3) && !follows_arc(20.0, 1.2));
+    for shape in [None, Some(OpeningShape::Rund), Some(OpeningShape::Rundbogen)] {
+        let mut p = sample();
+        p.walls.retain(|w| w.id == "W1");
+        p.walls[0].bulge = Some(-1.0);
+        p.openings.as_mut().unwrap().retain(|o| o.id == "O1");
+        let o = &mut p.openings.as_mut().unwrap()[0];
+        (o.position, o.width, o.height, o.shape) = (2.0, 1.2, 1.2, shape);
+        // Ohne Schichteinzug (mit [106]/[168] liegen Wandloch und Teile gerade auf einer Sehne, `reveal_zone`).
+        o.layer_reveals = Some(Vec::new());
+        let a = crate::wall_arc::WallArc::of_wall(&p.walls[0]).unwrap();
+        let meshes = emit_opening_meshes(&p, 2.0);
+        assert!(meshes.iter().any(|m| m.color == PART_RGB[0]) && meshes.iter().any(|m| m.color == PART_RGB[1]), "{shape:?}: Rahmen und Glas");
+        for m in &meshes {
+            let v = |i: u32| [m.positions[i as usize * 3], m.positions[i as usize * 3 + 1], m.positions[i as usize * 3 + 2]];
+            let n_of = |q: [f64; 3]| a.local(kernel2d::Vec2::new(q[0], q[1])).1;
+            let ns: Vec<f64> = (0..m.positions.len() as u32 / 3).map(|i| n_of(v(i))).collect();
+            let (lo, hi) = (ns.iter().copied().fold(f64::INFINITY, f64::min), ns.iter().copied().fold(f64::NEG_INFINITY, f64::max));
+            for t in m.indices.chunks_exact(3) {
+                let (p0, p1, p2) = (v(t[0]), v(t[1]), v(t[2]));
+                let mid = |a: [f64; 3], b: [f64; 3]| [(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0, 0.0];
+                for q in [[(p0[0] + p1[0] + p2[0]) / 3.0, (p0[1] + p1[1] + p2[1]) / 3.0, 0.0], mid(p0, p1), mid(p1, p2), mid(p2, p0)] {
+                    let n = n_of(q);
+                    assert!(n > lo - 2e-3 && n < hi + 2e-3, "{shape:?}: Teil (Farbe {:?}) quer {n} ausserhalb {lo} … {hi} (Sehne?)", m.color);
+                }
+            }
+            // Dicht ohne T-Stösse: jede Kante (verschweisst, ohne Richtung — die Quader sind nicht einheitlich orientiert)
+            // gehört genau zwei Dreiecken.
+            let key = |i: u32| [0, 1, 2].map(|k| (m.positions[i as usize * 3 + k] * 1e7).round() as i64);
+            let mut edges: std::collections::HashMap<([i64; 3], [i64; 3]), usize> = std::collections::HashMap::new();
+            for t in m.indices.chunks_exact(3) {
+                for k in 0..3 {
+                    let (u, w) = (key(t[k]), key(t[(k + 1) % 3]));
+                    if u != w {
+                        *edges.entry((u.min(w), u.max(w))).or_default() += 1;
+                    }
+                }
+            }
+            assert!(edges.values().all(|c| *c == 2), "{shape:?}: Teil {:?} offen", m.color);
+        }
+    }
+}
+
+/// [216] `slice_x`: ein Quader, an zwei Ebenen zerschnitten, bleibt geschlossen und behält sein Volumen; alle Ecken an
+/// den Teilstellen.
+#[test]
+fn slice_x_quader_bleibt_geschlossen() {
+    let b = crate::solid_bool::Mesh::prism(&[[0.0, 0.0], [1.0, 0.0], [1.0, 0.5], [0.0, 0.5]], 0.0, 0.3);
+    let (pos, idx) = slice_x(&b.positions, &b.indices, &[-1.0, 0.25, 0.6, 2.0]);
+    let m = crate::solid_bool::Mesh { positions: pos, indices: idx };
+    assert!(m.is_closed());
+    assert!((m.volume().abs() - 0.15).abs() < 1e-12);
+    assert!(m.positions.chunks_exact(3).all(|c| [0.0, 0.25, 0.6, 1.0].iter().any(|x| (c[0] - x).abs() < 1e-12)));
+    assert!(m.positions.chunks_exact(3).any(|c| c[0] == 0.25) && m.positions.chunks_exact(3).any(|c| c[0] == 0.6));
+}

@@ -158,6 +158,57 @@ impl Project {
         heights::element(floor_base, self.resolve_anchor(w.bottom.as_ref()), self.resolve_anchor(w.top.as_ref()), w.height)
     }
 
+    /// [234] Sturz einer Öffnung der Wand `w` mit Brüstung `bottom` (absolut) und Sturz `top` (schon an der
+    /// Wandoberkante gekappt): zusätzlich an der Unterkante einer Decke gekappt, in die die Öffnung hineinragt
+    /// (Decken-UK über der Brüstung und unter dem Sturz, Wand an Anfang, Mitte oder Ende der Öffnung
+    /// im Deckenumriss und nicht in einer Aussparung). So enden Leibung, Rahmen, Glas und Wandloch unter der
+    /// Decke wie unter der Wandoberkante.
+    pub fn opening_top_under_ceilings(&self, w: &Wall, o: &Opening, bottom: f64, top: f64) -> f64 {
+        let ceilings = self.ceilings.as_deref().unwrap_or(&[]);
+        if ceilings.is_empty() || !(top - bottom > 1e-6) || !o.position.is_finite() || !o.width.is_finite() {
+            return top;
+        }
+        let total = self.wall_thickness(w, 0.2);
+        let off = crate::joins::reference_offset(crate::model3d::wall_reference(w), total);
+        let arc = crate::wall_arc::WallArc::of_wall(w);
+        let (dx, dy) = (w.end.x - w.start.x, w.end.y - w.start.y);
+        let len = match &arc {
+            Some(a) => a.length(),
+            None => dx.hypot(dy),
+        };
+        if !(len > 1e-9) {
+            return top;
+        }
+        let from = o.position.min(len).max(0.0);
+        let to = (o.position + o.width).min(len).max(from);
+        let probe = |s: f64, n: f64| -> kernel2d::Vec2 {
+            match &arc {
+                Some(a) => a.point(s, n),
+                None => kernel2d::Vec2::new(w.start.x + (dx * s - dy * n) / len, w.start.y + (dy * s + dx * n) / len),
+            }
+        };
+        // Je Anfang, Mitte, Ende der Öffnung: Wandmitte und knapp innerhalb beider Wandflächen (eine Achse auf dem
+        // Deckenrand liegt sonst je nach Rundung drin oder draussen).
+        let e = ((to - from) / 2.0).min(0.02);
+        let q = (total / 2.0 - (total / 4.0).min(0.01)).max(0.0);
+        let probes: Vec<kernel2d::Vec2> = [from + e, (from + to) / 2.0, to - e].into_iter().flat_map(|s| [probe(s, off), probe(s, off - q), probe(s, off + q)]).collect();
+        let ring = |r: &[Vec2]| -> Vec<kernel2d::Vec2> { r.iter().map(|q| kernel2d::Vec2::new(q.x, q.y)).collect() };
+        let mut cap = top;
+        for c in ceilings {
+            let (cb, ct) = self.ceiling_vertical_extent(c);
+            if !(cb > bottom + 1e-6 && cb < cap - 1e-6 && ct > cb) || c.outline.len() < 3 {
+                continue;
+            }
+            let outline = ring(&c.outline);
+            let holes: Vec<Vec<kernel2d::Vec2>> = c.openings.iter().flatten().map(|h| ring(h)).collect();
+            let under = probes.iter().any(|&q| kernel2d::point_in_outline(q, &outline) && !holes.iter().any(|h| h.len() >= 3 && kernel2d::point_in_outline(q, h)));
+            if under {
+                cap = cb;
+            }
+        }
+        cap
+    }
+
     pub fn ceiling_vertical_extent(&self, c: &Ceiling) -> (f64, f64) {
         let floor_top = self.floor(&c.floor_id).map_or(0.0, |f| f.base_elevation.unwrap_or(0.0) + f.floor_height.unwrap_or(0.0));
         heights::ceiling(floor_top, self.resolve_anchor(c.bottom.as_ref()), self.resolve_anchor(c.top.as_ref()), || self.ceiling_thickness(c))

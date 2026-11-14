@@ -100,7 +100,7 @@ pub(super) fn collect_openings(p: &Project, frame: &[f64; 9], win: &crate::plan:
             };
             let (zb, zt) = p.wall_vertical_extent(wall);
             let ob = zb + max(0.0, op.sill_height);
-            let ot = min(zt, ob + op.height);
+            let ot = p.opening_top_under_ceilings(wall, op, ob, min(zt, ob + op.height));
             let door = op.kind == ElementKind::Door;
             let dt = if door { p.door_type(op) } else { None };
             let wt = if door { None } else { p.window_type(op) };

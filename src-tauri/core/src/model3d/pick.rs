@@ -133,7 +133,7 @@ pub fn pick_openings(p: &Project) -> Vec<PickBox> {
         let thickness = Project::type_thickness(&p.wall_type_or_fallback(wall).layers);
         let (zb, zt) = p.wall_vertical_extent(wall);
         let o_bottom = zb + o.sill_height.max(0.0);
-        let o_top = zt.min(o_bottom + o.height);
+        let o_top = p.opening_top_under_ceilings(wall, o, o_bottom, zt.min(o_bottom + o.height));
         if o_top - o_bottom <= 0.0 {
             continue;
         }

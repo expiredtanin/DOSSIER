@@ -171,8 +171,9 @@ fn write_opening(w: &mut FlatWriter, p: &Project, op: &Opening) {
 }
 
 /// Öffnungs-Einbauteile als Quader-Meshes (`emitOpeningMeshes`); `detail`: 0 grob, 1 mittel, 2 fein.
-/// Bogenwände ([T2]): je Wand auf der abgewickelten Ersatzwand gerechnet und die Ecken gebogen — die
-/// Einbauteile bleiben gerade (Sehne zwischen den Laibungen), ihre Enden sitzen radial in der Laibung.
+/// Bogenwände ([T2]): je Wand auf der abgewickelten Ersatzwand gerechnet und auf den Bogen gelegt — breite Öffnungen
+/// folgen dem Bogen ([216], [`follows_arc`]), schmale bleiben gerade (Sehne zwischen den Laibungen), Öffnungen mit
+/// Schichteinzug liegen gerade auf ihrer Sehne (`reveal_zone`); die Enden sitzen radial in der Laibung.
 pub fn emit_opening_meshes(p: &Project, detail: f64) -> Vec<RMesh> {
     emit_opening_meshes_with(p, detail, &|_| true)
 }
@@ -200,7 +201,13 @@ pub fn emit_opening_meshes_with(p: &Project, detail: f64, keep: &dyn Fn(&Opening
             Some(crate::wall_arc::reveal_zone(r.from, r.to, ms, arc.length()))
         };
         let (zoned, bent): (Vec<Opening>, Vec<Opening>) = own.into_iter().partition(|o| zone(o).is_some());
-        q.openings = Some(bent);
+        // [216] Breite Öffnungen folgen dem Bogen (Rahmen, Flügel, Glas, Fensterbank in der Wandflucht), schmale bleiben
+        // gerade zwischen den Leibungen (Pfeilhöhe ≤ `BEND_SAGITTA`).
+        let total = p.wall_thickness(&p.walls[i], 0.2);
+        let off = crate::joins::reference_offset(super::wall_reference(&p.walls[i]), total);
+        let r_out = arc.r_max(off - total / 2.0, off + total / 2.0);
+        let (follow, straight): (Vec<Opening>, Vec<Opening>) = bent.into_iter().partition(|o| follows_arc(r_out, o.width));
+        q.openings = Some(straight);
         for mut m in emit_opening_meshes_plain(&q, detail, &|_| true) {
             for c in m.positions.chunks_exact_mut(3) {
                 let w = arc.point(c[0], c[1]);
@@ -208,6 +215,13 @@ pub fn emit_opening_meshes_with(p: &Project, detail: f64, keep: &dyn Fn(&Opening
                 c[1] = w.y;
             }
             out.push(m);
+        }
+        if !follow.is_empty() {
+            let stations = arc_stations(&arc, r_out, p.openings.as_deref().unwrap_or(&[]).iter().filter(|o| o.host_wall_id == p.walls[i].id));
+            q.openings = Some(follow);
+            for m in emit_opening_meshes_plain(&q, detail, &|_| true) {
+                out.extend(bend_on_arc(m, &arc, &stations));
+            }
         }
         for o in zoned {
             let Some((sa, sb)) = zone(&o) else { continue };
@@ -225,6 +239,160 @@ pub fn emit_opening_meshes_with(p: &Project, detail: f64, keep: &dyn Fn(&Opening
         }
     }
     out
+}
+
+/// [216] Pfeilhöhe (m), ab der die Einbauteile einer Öffnung in der Bogenwand dem Bogen folgen; darunter bleiben sie
+/// gerade zwischen den Leibungen (der Versatz zur Wandflucht ist dann kleiner als ein Zentimeter).
+pub(crate) const BEND_SAGITTA: f64 = 0.01;
+
+/// Folgen die Einbauteile einer Öffnung der Breite `width` dem Bogen mit (Aussen-)Radius `r`? Pfeilhöhe der Sehne
+/// grösser als [`BEND_SAGITTA`] (bei r = 2 m ab ≈ 0,4 m Breite).
+pub(crate) fn follows_arc(r: f64, width: f64) -> bool {
+    if !(r > 1e-9 && width > 0.0) {
+        return false;
+    }
+    let half = (width / 2.0).min(r);
+    r - (r * r - half * half).max(0.0).sqrt() > BEND_SAGITTA
+}
+
+/// Teilstellen (Bogenlänge, aufsteigend) einer Bogenwand für gebogene Einbauteile: die gleichmässige Teilung der Wand
+/// ([`crate::wall_arc::WallArc::stations`], wie `chord_walls`) und die Laibungen der Öffnungen `openings` — so liegen
+/// Rahmen, Glas und Fensterbank auf denselben Sehnen wie die Wandflächen.
+fn arc_stations<'a>(arc: &crate::wall_arc::WallArc, r_max: f64, openings: impl Iterator<Item = &'a Opening>) -> Vec<f64> {
+    let len = arc.length();
+    let mut st = arc.stations(0.0, len, r_max);
+    for o in openings {
+        let from = o.position.min(len).max(0.0);
+        let to = (o.position + o.width).min(len).max(from);
+        st.extend([from, to].into_iter().filter(|s| s.is_finite()));
+    }
+    st.retain(|s| s.is_finite());
+    st.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    st.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
+    st
+}
+
+/// Netz der abgewickelten Wand (x = Bogenlänge, y = Querlage links, z) an den Ebenen x = `cuts` zerschneiden: jedes
+/// Dreieck, das eine Teilstelle quert, wird in konvexe Stücke geteilt und neu aufgefächert. Schnittpunkte auf einer Kante
+/// werden einmal angelegt (Schlüssel Kante + Teilstelle) und aus den Kanten-Enden in fester Reihenfolge gerechnet, die
+/// Nachbardreiecke teilen sie (keine T-Stösse, geschlossene Körper bleiben geschlossen).
+pub(crate) fn slice_x(positions: &[f64], indices: &[u32], cuts: &[f64]) -> (Vec<f64>, Vec<u32>) {
+    const EPS: f64 = 1e-9;
+    let mut pos: Vec<[f64; 3]> = positions.chunks_exact(3).map(|c| [c[0], c[1], c[2]]).collect();
+    let n0 = pos.len() as u32;
+    let mut cache: std::collections::HashMap<(u32, u32, usize), u32> = std::collections::HashMap::new();
+    let mut out: Vec<u32> = Vec::with_capacity(indices.len());
+    // Polygon-Ecke: Index in `pos` und die Original-Kante, auf der sie liegt (Ecke: (i, i)).
+    #[derive(Clone, Copy)]
+    struct Corner {
+        id: u32,
+        on: (u32, u32),
+    }
+    let edge_of = |a: Corner, b: Corner| -> Option<(u32, u32)> {
+        let ea = if a.on.0 == a.on.1 { None } else { Some(a.on) };
+        let eb = if b.on.0 == b.on.1 { None } else { Some(b.on) };
+        match (ea, eb) {
+            (None, None) => Some((a.on.0.min(b.on.0), a.on.0.max(b.on.0))),
+            (Some(e), None) if e.0 == b.on.0 || e.1 == b.on.0 => Some(e),
+            (None, Some(e)) if e.0 == a.on.0 || e.1 == a.on.0 => Some(e),
+            (Some(e), Some(f)) if e == f => Some(e),
+            _ => None,
+        }
+    };
+    for t in indices.chunks_exact(3) {
+        if t.iter().any(|&k| k >= n0) {
+            continue;
+        }
+        let xs = [pos[t[0] as usize][0], pos[t[1] as usize][0], pos[t[2] as usize][0]];
+        let (lo, hi) = (xs[0].min(xs[1]).min(xs[2]), xs[0].max(xs[1]).max(xs[2]));
+        let mut polys: Vec<Vec<Corner>> = vec![t.iter().map(|&k| Corner { id: k, on: (k, k) }).collect()];
+        for (ci, &c) in cuts.iter().enumerate() {
+            if !(c > lo + EPS && c < hi - EPS) {
+                continue;
+            }
+            let mut next = Vec::with_capacity(polys.len() * 2);
+            for poly in polys {
+                let side = |pos: &[[f64; 3]], k: &Corner| {
+                    let d = pos[k.id as usize][0] - c;
+                    if d.abs() <= EPS {
+                        0
+                    } else if d < 0.0 {
+                        -1
+                    } else {
+                        1
+                    }
+                };
+                if poly.iter().all(|k| side(&pos, k) <= 0) || poly.iter().all(|k| side(&pos, k) >= 0) {
+                    next.push(poly);
+                    continue;
+                }
+                let (mut left, mut right) = (Vec::new(), Vec::new());
+                for j in 0..poly.len() {
+                    let (a, b) = (poly[j], poly[(j + 1) % poly.len()]);
+                    let (sa, sb) = (side(&pos, &a), side(&pos, &b));
+                    if sa <= 0 {
+                        left.push(a);
+                    }
+                    if sa >= 0 {
+                        right.push(a);
+                    }
+                    if sa * sb < 0 {
+                        let Some(e) = edge_of(a, b) else { continue };
+                        let id = *cache.entry((e.0, e.1, ci)).or_insert_with(|| {
+                            let (p0, p1) = (pos[e.0 as usize], pos[e.1 as usize]);
+                            let (a0, a1) = if p0[0] <= p1[0] { (p0, p1) } else { (p1, p0) };
+                            let f = (c - a0[0]) / (a1[0] - a0[0]);
+                            pos.push([c, a0[1] + (a1[1] - a0[1]) * f, a0[2] + (a1[2] - a0[2]) * f]);
+                            pos.len() as u32 - 1
+                        });
+                        let k = Corner { id, on: e };
+                        left.push(k);
+                        right.push(k);
+                    }
+                }
+                next.extend([left, right].into_iter().filter(|q| q.len() >= 3));
+            }
+            polys = next;
+        }
+        for poly in polys {
+            for j in 1..poly.len() - 1 {
+                out.extend([poly[0].id, poly[j].id, poly[j + 1].id]);
+            }
+        }
+    }
+    (pos.into_iter().flatten().collect(), out)
+}
+
+/// [216] Einbauteil der abgewickelten Wand dem Bogen nach legen: an den Teilstellen `stations` zerschnitten
+/// ([`slice_x`]) und stückweise linear abgebildet (zwischen zwei Teilstellen auf der Sehne der Versatzlinie, wie die
+/// Sehnen-Stücke der Wand) — Rahmen, Flügel, Glas und Fensterbank laufen in gleichem Abstand zur Wandflucht.
+fn bend_on_arc(mut m: RMesh, arc: &crate::wall_arc::WallArc, stations: &[f64]) -> Option<RMesh> {
+    if stations.len() < 2 {
+        return None;
+    }
+    let (positions, indices) = slice_x(&m.positions, &m.indices, stations);
+    if indices.is_empty() {
+        return None;
+    }
+    let last = stations.len() - 2;
+    let map = |x: f64, y: f64| -> [f64; 2] {
+        let k = stations.partition_point(|s| *s <= x).saturating_sub(1).min(last);
+        let (s0, s1) = (stations[k], stations[k + 1]);
+        let (a, b) = (arc.point(s0, y), arc.point(s1, y));
+        let t = if s1 - s0 > 1e-12 { (x - s0) / (s1 - s0) } else { 0.0 };
+        [a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t]
+    };
+    m.positions = positions
+        .chunks_exact(3)
+        .flat_map(|c| {
+            let w = map(c[0], c[1]);
+            [w[0], w[1], c[2]]
+        })
+        .collect();
+    m.indices = indices;
+    // Die Sehnen-Facetten glatt, die Kanten der Teile hart.
+    m.crease_angle.get_or_insert(RING_CREASE_DEG);
+    Some(m)
 }
 
 fn emit_opening_meshes_plain(p: &Project, detail: f64, keep: &dyn Fn(&Opening) -> bool) -> Vec<RMesh> {
@@ -295,7 +463,7 @@ pub(crate) fn wall_opening_meshes(p: &Project, wall: &Wall, openings: &[&Opening
         for &op in openings {
             let Some((from, to)) = opening_geom::opening_interval(&wr, op.position, op.width) else { continue };
             let o_bottom = zb + op.sill_height.max(0.0);
-            let o_top = zt.min(o_bottom + op.height);
+            let o_top = p.opening_top_under_ceilings(wall, op, o_bottom, zt.min(o_bottom + op.height));
             let t = *thickness.get_or_insert_with(|| p.wall_thickness(wall, 0.2));
             // Formöffnung ([G3]): Füllkörper, Rahmen und Glas entlang des Umrisses statt der Quader-Teile.
             if crate::opening_shape::is_shaped(op) {
