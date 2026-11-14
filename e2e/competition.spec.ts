@@ -3,7 +3,7 @@
 // „WBW-Abgabe" → ein PDF ohne Büro-/Autor-Metadaten. Mit DOSSIER_SHOTS=<ordner> entstehen PDF und Screenshot.
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import type { Page } from "@playwright/test";
-import { pdfStreams, testPng } from "./pdf";
+import { pdfStreams, skipWithoutPoppler, testPng } from "./pdf";
 import { expect, openSample, openTab, startNewProject, test } from "./app";
 
 async function paperBox(page: Page) {
@@ -11,6 +11,7 @@ async function paperBox(page: Page) {
 }
 
 test("Plakat A1 quer aus Vorlage, Bild einsetzen, anonym als WBW-Abgabe exportieren", async ({ page }) => {
+  skipWithoutPoppler();
   await startNewProject(page);
   await openSample(page);
 

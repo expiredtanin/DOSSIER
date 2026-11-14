@@ -10,7 +10,7 @@ import { createPosterMaster, posterTemplate } from "../model/posterTemplates";
 import { buildAreaReport, buildAreaReportPdf } from "./areaReport";
 import { buildPagesPdf, layoutPages, pdfBytes } from "./layoutPdf";
 import { ensurePdfFonts, prepareSvgFonts, resolvePdfFamily, setPdfFont, setPdfFontLoader } from "./pdfFonts";
-import { HAVE_POPPLER, pdfVisibleText, withPdfFile } from "./pdfText.testing";
+import { RUN_POPPLER_TESTS, pdfVisibleText, withPdfFile } from "./pdfText.testing";
 
 const SPECIAL = "Größe Ø 12 ± 3 m² m³ – „Bürgenstock“ ß Äöü";
 const EMB = /\byes\s+(yes|no)\s+(yes|no)\s+\d+\s+\d+\s*$/; // Spalte „emb“ = yes
@@ -64,7 +64,7 @@ describe("PDF-Schriften", () => {
     expect(root.getAttribute("font-family")).toBe("Inter");
   });
 
-  it.runIf(HAVE_POPPLER)("Bericht-PDF: Schrift eingebettet, Sonderzeichen im Text", async () => {
+  it.runIf(RUN_POPPLER_TESTS)("Bericht-PDF: Schrift eingebettet, Sonderzeichen im Text", async () => {
     const report = buildAreaReport(sampleProject, { areas: true });
     report.title = SPECIAL;
     const doc = await buildAreaReportPdf(report);
@@ -77,7 +77,7 @@ describe("PDF-Schriften", () => {
     expect(pdfVisibleText(bytes).replace(/\s+/g, " ")).toContain(SPECIAL);
   });
 
-  it.runIf(HAVE_POPPLER)("Blatt-PDF: Plakat-Kopfzeile in Inter, Sonderzeichen im Text", async () => {
+  it.runIf(RUN_POPPLER_TESTS)("Blatt-PDF: Plakat-Kopfzeile in Inter, Sonderzeichen im Text", async () => {
     const master = createPosterMaster("m1", posterTemplate("poster-a1-landscape")!);
     master.titleBlock = { projectName: SPECIAL, author: "Zoë Müller" };
     const lay: Layout = { id: "l1", name: "Grundriss", paper: "a1", orientation: "landscape", masterId: "m1", viewports: [] };

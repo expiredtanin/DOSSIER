@@ -10,7 +10,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import type { Page } from "@playwright/test";
 import { blurFocus, discardIfAsked, drawingTabs, elementRows, expect, fileMenu, finishCommand, openTab, startNewProject, test, typeCommand } from "./app";
-import { pdfStreams } from "./pdf";
+import { HAVE_POPPLER, needPoppler, pdfStreams, skipWithoutPoppler } from "./pdf";
 import type {} from "../src/state/testHooks"; // Typ von window.__dossierTest
 import { KATASTER_DXF } from "./paths";
 
@@ -421,7 +421,10 @@ test("Referenz-Ablauf WBW/Vorprojekt: leeres Projekt bis Abgabe", async ({ page 
     await expect(dialog).toHaveCount(0);
     expect(anon.bytes.subarray(0, 5).toString("latin1")).toBe("%PDF-");
     expect(anon.name).not.toContain("Leeres Projekt");
-    expect(pdfStreams(anon.bytes) + anon.bytes.toString("latin1")).not.toContain("Leeres Projekt");
+    // Der Text steht als Glyphen-Nummern im PDF: ohne Poppler wäre diese Prüfung wirkungslos (CI: hart rot, lokal: Hinweis).
+    needPoppler();
+    if (HAVE_POPPLER) expect(pdfStreams(anon.bytes) + anon.bytes.toString("latin1")).not.toContain("Leeres Projekt");
+    else test.info().annotations.push({ type: "skip-teil", description: "PDF-Text-Prüfung ohne pdftotext übersprungen" });
   });
 
   await test.step("13 Speichern: .obp mit Volumen, Raum, Baurecht und Raumprogramm", async () => {
@@ -656,6 +659,7 @@ test("[224] Präsentationsplan: leere Geschosse nicht vorgewählt, Massstab 1:20
 // [208] Wettbewerbs-Plakat im Referenz-Ablauf, schlank (Bild, Zuschnitt, Raster: `competition.spec.ts`): Plakat A1 aus der
 // Vorlage, Kennwort setzen, PDF des WBW-Satzes — ohne Projektname in Titel, Inhalt und Dateiname.
 test("[208] Wettbewerbs-Plakat A1 mit Kennwort, anonymes PDF ohne Projektnamen", async ({ page }) => {
+  skipWithoutPoppler();
   test.setTimeout(120_000);
   await startNewProject(page);
   const projectName = (await page.locator(".project-name").innerText()).trim();

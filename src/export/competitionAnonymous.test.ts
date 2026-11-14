@@ -18,7 +18,7 @@ import { exportIfcSpf } from "./exportIfc";
 import { exportGlb, exportGltf, exportMtl, exportObj, exportStl } from "./exportMesh";
 import { exportScheduleCsv } from "./exportSchedule";
 import { exportProjectStep } from "./exportStep";
-import { pdfVisibleText } from "./pdfText.testing";
+import { captureJsPdfText, pdfVisibleText } from "./pdfText.testing";
 import { buildPagesPdf, layoutPages, pdfBytes } from "./layoutPdf";
 import { planToSvgString } from "./planToSvgString";
 import { areaReportToCsv, buildAreaReport, buildAreaReportPdf } from "./areaReport";
@@ -56,7 +56,7 @@ function project(anonymous: boolean | null): Project {
 const latin1 = (b: Uint8Array): string => Buffer.from(b).toString("latin1");
 
 /** Seiteninhalt (Flate-Streams) des PDF entpackt, hintereinander. */
-function streamsText(bytes: Uint8Array): string {
+function streamsText(bytes: Uint8Array, captured = ""): string {
   const all = Buffer.from(bytes);
   const text = all.toString("latin1");
   let out = "";
@@ -69,7 +69,8 @@ function streamsText(bytes: Uint8Array): string {
       // kein Flate-Stream
     }
   }
-  return out + "\n" + pdfVisibleText(bytes);
+  // `captured`: die an jsPDF übergebenen Zeichenketten — gilt auch ohne Poppler (`pdftotext`), das den Glyphen-Text liest.
+  return out + "\n" + pdfVisibleText(bytes) + "\n" + captured;
 }
 
 /** Alle Ausgaben, die ohne Browser/GPU entstehen: Name → Text (Binärformate als latin1). */
@@ -77,19 +78,23 @@ async function allOutputs(p: Project): Promise<Record<string, string>> {
   const plan = generatePlan(p, "eg", new Set(flattenCategories(p.layers).map((l) => l.code)));
   const out: Record<string, string> = {};
   // PDF: Blatt (Info + Seiteninhalt) und Berichte (Info + Inhalt)
+  const cap = captureJsPdfText();
+  let mark = cap.mark();
   const doc = await buildPagesPdf(p, layoutPages(p, ["l1"]));
   const sheet = pdfBytes(p, doc!);
   out["PDF-Blatt"] = latin1(sheet);
-  out["PDF-Blatt-Text"] = streamsText(sheet);
+  out["PDF-Blatt-Text"] = streamsText(sheet, cap.since(mark));
   out["PDF-Blatt-Info"] = pdfInfoText(sheet);
   const reports = { Flaechen: buildAreaReport(p, { ivhb: true }), Programm: buildProgramReport(p), Raumbuch: buildRoomBookReport(p), Oeffnungen: buildOpeningReport(p), Bauteile: buildElementReport(p), Kosten: buildCostReport(p) };
   for (const [name, report] of Object.entries(reports)) {
     out[`CSV-${name}`] = areaReportToCsv(report);
+    mark = cap.mark();
     const bytes = new Uint8Array((await buildAreaReportPdf(report)).output("arraybuffer"));
     out[`PDF-${name}`] = latin1(bytes);
-    out[`PDF-${name}-Text`] = streamsText(bytes);
+    out[`PDF-${name}-Text`] = streamsText(bytes, cap.since(mark));
     out[`PDF-${name}-Info`] = pdfInfoText(bytes);
   }
+  cap.restore();
   // IFC
   out["IFC4"] = exportIfcSpf(p);
   out["IFC2x3"] = exportIfcSpf(p, { schema: "IFC2X3" });

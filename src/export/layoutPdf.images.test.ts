@@ -6,7 +6,7 @@ import type { Layout, Project } from "../model/types";
 import { createPosterMaster, posterTemplate } from "../model/posterTemplates";
 import { addImage, createLayoutImage } from "../model/layoutImages";
 import { JPEG_64X48, PNG_40X30, PNG_40X30_ALPHA } from "../model/layoutImages.testing";
-import { pdfVisibleText } from "./pdfText.testing";
+import { captureJsPdfText, pdfVisibleText } from "./pdfText.testing";
 import { buildPagesPdf, layoutPages, pdfBytes } from "./layoutPdf";
 import { pdfInfoText } from "./pdfInfo";
 
@@ -17,7 +17,7 @@ const latin1 = (b: Uint8Array): string => {
 };
 
 /** Alle Flate-Streams des PDF entpackt, hintereinander (Seiteninhalt ist komprimiert). */
-function streamsText(bytes: Uint8Array): string {
+function streamsText(bytes: Uint8Array, captured = ""): string {
   const all = Buffer.from(bytes);
   const text = all.toString("latin1");
   let out = "";
@@ -30,7 +30,8 @@ function streamsText(bytes: Uint8Array): string {
       // kein Flate-Stream (z. B. JPEG)
     }
   }
-  return out + "\n" + pdfVisibleText(bytes);
+  // `captured`: an jsPDF übergebene Zeichenketten — gilt auch ohne Poppler.
+  return out + "\n" + pdfVisibleText(bytes) + "\n" + captured;
 }
 
 function indexOfBytes(hay: Uint8Array, needle: Uint8Array): number {
@@ -70,10 +71,11 @@ describe("Blatt-PDF mit Bild", () => {
 
   it("Blattgrösse A1 quer, Plakat-Kopfzeile mit Kennwort und Plan x/n", async () => {
     const p = poster({ competition: { anonymous: false, keyword: "FALKE 7" } });
-    const doc = await buildPagesPdf(p, layoutPages(p, ["l1"]));
+    const cap = captureJsPdfText();
+    const doc = await buildPagesPdf(p, layoutPages(p, ["l1"])).finally(() => cap.restore());
     const bytes = pdfBytes(p, doc!);
     expect(latin1(bytes)).toMatch(/\/MediaBox \[0 0 2383\.93\d* 1683\.7\d*/); // 841 × 594 mm in pt
-    const content = streamsText(bytes);
+    const content = streamsText(bytes, cap.strings());
     expect(content).toContain("Kennwort");
     expect(content).toContain("FALKE 7");
     expect(content).toContain("Plan 1/1");
@@ -81,7 +83,8 @@ describe("Blatt-PDF mit Bild", () => {
 
   it("anonyme Abgabe: keine Büro-/Autor-Angaben, Info nur mit Kennwort, kein jsPDF-Producer", async () => {
     const p = poster({ competition: { anonymous: true, keyword: "FALKE 7" } });
-    const doc = await buildPagesPdf(p, layoutPages(p, ["l1"]));
+    const cap = captureJsPdfText();
+    const doc = await buildPagesPdf(p, layoutPages(p, ["l1"])).finally(() => cap.restore());
     const bytes = pdfBytes(p, doc!);
     const info = pdfInfoText(bytes);
     expect(info).toContain("/Title (FALKE 7)");
@@ -89,7 +92,7 @@ describe("Blatt-PDF mit Bild", () => {
     expect(info).not.toContain("/Author");
     expect(info).not.toContain("/Creator");
     expect(info).toContain("D:20000101000000");
-    const all = latin1(bytes) + streamsText(bytes);
+    const all = latin1(bytes) + streamsText(bytes, cap.strings());
     expect(all).not.toContain("Büro Muster");
     expect(all).not.toContain("Maria Muster");
     expect(all).not.toContain("Haus Muster");

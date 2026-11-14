@@ -3,7 +3,21 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { test } from "@playwright/test";
 import { deflateSync, inflateSync } from "node:zlib";
+
+export const HAVE_POPPLER = spawnSync("pdftotext", ["-v"]).error === undefined;
+
+/** Wirft in der CI, wenn Poppler fehlt (die Prüfungen am PDF-Text wären sonst wirkungslos). */
+export function needPoppler(): void {
+  if (!HAVE_POPPLER && process.env.CI) throw new Error("pdftotext (poppler-utils) fehlt in der CI");
+}
+
+/** Am Anfang eines Tests, der PDF-Text prüft: lokal überspringen ohne Poppler, in der CI hart fehlschlagen. */
+export function skipWithoutPoppler(): void {
+  needPoppler();
+  test.skip(!HAVE_POPPLER, "pdftotext fehlt");
+}
 
 /** PNG (Verlauf, Standard 160 × 90 px), im Test erzeugt: kein Fixture, nur die Pflicht-Chunks. */
 export function testPng(w = 160, h = 90): Buffer {
@@ -46,6 +60,7 @@ export function testPng(w = 160, h = 90): Buffer {
  * Nummern (Identity-H), er steht nicht mehr als `(Text)` im Inhaltsstrom; ohne Poppler leer.
  */
 export function pdfText(buf: Buffer): string {
+  needPoppler();
   const dir = mkdtempSync(join(tmpdir(), "dossier-e2e-pdf-"));
   try {
     const file = join(dir, "t.pdf");

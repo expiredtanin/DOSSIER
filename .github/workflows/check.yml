@@ -32,6 +32,9 @@ jobs:
             src-tauri/hatchgen
       - uses: taiki-e/install-action@v2
         with: { tool: wasm-pack }
+      # Poppler (pdftotext, pdffonts): Text der PDFs steht als Glyphen-Nummern, die PDF-Text-/Anonymitäts-Prüfungen ([208])
+      # lesen ihn damit. Fehlt es, scheitern diese Tests in der CI hart (CI=true), sie laufen nie still leer durch.
+      - run: sudo apt-get update && sudo apt-get install -y poppler-utils
       - run: npm ci || (sleep 30 && npm ci) || (sleep 90 && npm ci)  # Netz-Aussetzer (z. B. 504 beim wasm-pack-Download)
       # IFC-Prüfung in exportIfc.{validate,quantities,fachplaner}.test.ts ([B1], [259]; numpy für die Mengenprüfung); ohne ifcopenshell würde sie übersprungen.
       - run: pip install ifcopenshell pytest ezdxf numpy
@@ -81,6 +84,9 @@ jobs:
           shared-key: e2e
       - uses: taiki-e/install-action@v2
         with: { tool: wasm-pack }
+      # Poppler (pdftotext, pdffonts): Text der PDFs steht als Glyphen-Nummern, die PDF-Text-/Anonymitäts-Prüfungen ([208])
+      # lesen ihn damit. Fehlt es, scheitern diese Tests in der CI hart (CI=true), sie laufen nie still leer durch.
+      - run: sudo apt-get update && sudo apt-get install -y poppler-utils
       - run: npm ci || (sleep 30 && npm ci) || (sleep 90 && npm ci)  # Netz-Aussetzer (z. B. 504 beim wasm-pack-Download)
       - name: WASM-Pakete bauen
         run: |

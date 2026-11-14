@@ -4,7 +4,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import type { Page } from "@playwright/test";
 import { blurFocus, elementRows, expect, openSample, openTab, startNewProject, test } from "./app";
-import { pdfStreams } from "./pdf";
+import { pdfStreams, skipWithoutPoppler } from "./pdf";
 
 /** Layout in einem neuen Ordner anlegen und öffnen. */
 async function openNewLayoutInFolder(page: Page) {
@@ -27,6 +27,7 @@ async function tableMarks(page: Page): Promise<string[]> {
 }
 
 test("Tabelle auf dem Blatt: lebendig, mit Spaltenwahl, im PDF als Vektortext", async ({ page }) => {
+  skipWithoutPoppler();
   await startNewProject(page);
   await openSample(page);
   await openNewLayoutInFolder(page);
