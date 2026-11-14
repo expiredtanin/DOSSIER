@@ -1030,3 +1030,6 @@ fn regression_strichmuster_winzig() {
         item(m, "walls", 0)["start"]["x"] = json!(-1e9);
     });
 }
+
+#[path = "robustness/op_fuzz.rs"]
+mod op_fuzz;

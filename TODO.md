@@ -100,9 +100,18 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   Rundungszyklus (Ecken-Obergrenze `32·n+256` → Degeneration/Rückfall); Treppe: `split_steps` sättigte bei Lauflänge `f64::MAX` zu `i64::MAX` Tritten (Speicher-Abbruch);
   Delaunay: Koordinaten > 1e60 (Hülle inkonsistent, Endlosschleife). Dazu `render2d/tests/robustness.rs` (Szene lesen → `compile_scene`, Textzeilen, WOFF2, Zerlegung, Strichphase)
   und `render3d/tests/robustness.rs` (verdorbenes Teile-Update → `Scene::apply`/`chunk_data`/`cut_section`): beide sauber (100000 bzw. 30000 Läufe je Seed), keine Befunde.
+  **Op-Fuzzer 14.11.** (`tests/robustness/op_fuzz.rs`, Test `op_fuzzer`, ~30 s Release; `FUZZ_STEPS/EPISODES/SEED/DERIVE/ONLY/TRACE`): zustandsbehaftet, aus dem
+  aktuellen Dokument heraus gültige Ops aller Arten (add mit `at`, replace/Patch mehrerer Felder, remove samt Abhängigen, reorder auch Teilmenge, setField für
+  Klassen/Skalare/Objekte/neues Feld mit Position/Liste, Gruppen, add+replace+remove in einem Commit, `replace` unbekannter Elemente) und ungültige (doppelte id, NaN-Marke,
+  gültige Op + doppelte id), über `Document::commit`/`undo`/`redo`/`history_jump`/`begin_group_keyed`, mit Coalesce-Schlüsseln. Nach jedem Schritt: Verlaufsmodell
+  (Dokument bei jeder Undo-Tiefe exakt wie gemerkt, Verschmelzung genau wie erwartet, Redo-Rest gelöscht, Abgelehntes ohne Spur in Dokument und Verlauf), `validate_project`,
+  keine neuen hängenden Verweise (`dangling_refs`); alle 6 Schritte: fortgeschriebenes Dokument = frisch gelesenes (typisierte Sicht, Plan als SVG, Kennzahlen, 3D),
+  Speichern → Laden, alle Ableitungen; am Ende Undo bis zum Anfang = Ausgangsdokument, Redo bis zum Ende = Endzustand. Befund (behoben, `regression_absturzsicherung_riesiges_loch`):
+  Deckenloch mit Eckpunkt bei y = 1e5 → Absturzsicherung mit Hunderten Millionen Rohren (Speicher-Abbruch beim 3D-Modell, `stairs3d::guard_mesh` jetzt begrenzt). Sonst keine
+  Verstösse des Kerns (Läufe mit 8 Seeds, bis 300 Schritte × 10 Episoden). Nicht abgedeckt: Ops, die nur die TS-Leseansicht betreffen; Wurzelfeld-Reihenfolge nach Laden (Datei schreibt `formatVersion` zuerst, gewollt).
   **Offen:** Speicher-Abbruch (`handle_alloc_error`) lässt sich nicht per `catch_unwind` fangen (der Test bricht dann den ganzen Lauf ab; im WASM ein Trap wie ein Panic);
   `WebModelRenderer`/`WebRenderer` (GPU, Canvas: `set_model`, `set_scene_bin` …) nur über ihre GPU-freien Leser abgedeckt, nicht als Ganzes; die Ausgangsdaten der Bindungsläufe sind
-  flach/zufällig (Tiefenprüfung der Dokument-Ops mit gültigen Op-Strukturen fehlt); TS-Seite nicht abgedeckt; Rust-Panic im WASM selbst nicht gemessen ([118] bleibt Wiederanlauf). · M
+  flach/zufällig; TS-Seite nicht abgedeckt; Rust-Panic im WASM selbst nicht gemessen ([118] bleibt Wiederanlauf). · M
 - ◐ **[116]** Datensicherheit, Audit (14.11.): Speichern/Autosave/Wiederherstellen/Schliessen. Test zuerst, Befunde behoben: (1) **Schliessen ohne Rückfrage:**
   Fenster zu, Cmd+Q, Electron-Schliessen und Browser-Tab verwarfen ungespeicherte Änderungen (nur die 30-s-Kopie blieb). Jetzt `registerCloseGuard`
   (`native/projectFile.ts`): Tauri `onCloseRequested` → Overlay „Ungespeicherte Änderungen" (wie Neu/Öffnen), danach `destroy`; Cmd+Q ist ein eigener

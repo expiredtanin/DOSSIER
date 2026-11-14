@@ -890,6 +890,10 @@ fn railings_in(buf: &[f64], thin: Option<f64>) -> Vec<Mesh> {
 /// Stababstand der Füllung der Absturzsicherung (lichtes Mass ≤ 12 cm) und Pfostenabstand.
 const GUARD_BALUSTER_GAP: f64 = 0.11;
 const GUARD_POST_GAP: f64 = 1.2;
+/// [258] Obergrenzen für Pfosten und Stäbe einer Absturzsicherung: ein Deckenloch von 100 km Umfang (Eingabefehler,
+/// Randwert) erzeugte sonst Hunderte Millionen Rohre (Speicher-Abbruch beim Serialisieren des 3D-Modells).
+const GUARD_MAX_POSTS: f64 = 5_000.0;
+const GUARD_MAX_BALUSTERS: f64 = 20_000.0;
 
 /// [155] Körper der Absturzsicherung am Deckenloch über den Achsen aus [`crate::stair_guard`] (Standhöhe `z`):
 /// Pfosten an den Ecken und im Abstand, Handlauf in [`crate::stair_rail::RAIL_HEIGHT`], Stäbe als Füllung —
@@ -899,6 +903,11 @@ pub fn guard_mesh(axes: &[Vec<P>], z: f64, src: usize, spec: &RailSpec) -> Optio
     let half = RAIL_THICK / 2.0;
     let (rail_sec, post_sec) = (spec.rail_section(), spec.post_section());
     let mut tubes: Vec<(Vec<f64>, Vec<u32>)> = Vec::new();
+    let total: f64 = axes.iter().flat_map(|a| a.windows(2)).map(|w| hypot2(w[1][0] - w[0][0], w[1][1] - w[0][1])).filter(|l| l.is_finite()).sum();
+    if !total.is_finite() || total / GUARD_POST_GAP > GUARD_MAX_POSTS {
+        return None;
+    }
+    let with_balusters = total / GUARD_BALUSTER_GAP <= GUARD_MAX_BALUSTERS;
     for axis in axes {
         if axis.len() < 2 || axis.iter().any(|q| !q[0].is_finite() || !q[1].is_finite()) {
             continue;
@@ -919,7 +928,7 @@ pub fn guard_mesh(axes: &[Vec<P>], z: f64, src: usize, spec: &RailSpec) -> Optio
                 post_at(at(k as f64 / n_post as f64), &post_sec, dir, z + h, &mut tubes);
             }
             let n_bal = (len / GUARD_BALUSTER_GAP).round().max(1.0) as usize;
-            for k in 1..n_bal {
+            for k in 1..if with_balusters { n_bal } else { 0 } {
                 let t = k as f64 / n_bal as f64;
                 if (t * n_post as f64).fract().min(1.0 - (t * n_post as f64).fract()) * len / n_post as f64 > 0.04 {
                     post_at(at(t), &bal_sec, None, z + h - half, &mut tubes);
@@ -1423,6 +1432,19 @@ mod tests {
             v.iter().cloned().fold(f64::MIN, f64::max) - v.iter().cloned().fold(f64::MAX, f64::min)
         };
         assert!((span(0) - 0.04).abs() < 1e-9 && (span(1) - 0.01).abs() < 1e-9, "{} {}", span(0), span(1));
+    }
+
+    /// [258] Op-Fuzzer: ein Deckenloch mit einem Eckpunkt bei y = 1e5 gab ein Geländer von 200 km Länge (Hunderte Millionen
+    /// Rohre, Speicher-Abbruch). Sehr lange Züge bekommen keine Absturzsicherung, lange nur keine Stäbe; Normalfall unverändert.
+    #[test]
+    fn regression_absturzsicherung_riesiges_loch() {
+        let huge = vec![vec![[9.4, 1.3], [10.6, 1.3], [10.6, 5.8], [9.4, 1e5], [9.4, 1.3]]];
+        assert!(guard_mesh(&huge, 0.0, 0, &RailSpec::default()).is_none());
+        let long = vec![vec![[0.0, 0.0], [1000.0, 0.0]]];
+        let m = guard_mesh(&long, 0.0, 0, &RailSpec::default()).expect("lang, aber begrenzt");
+        assert!(m.indices.len() < 3_000_000, "{}", m.indices.len());
+        let normal = vec![vec![[0.0, 0.0], [4.0, 0.0], [4.0, 3.0], [0.0, 3.0], [0.0, 0.0]]];
+        assert!(guard_mesh(&normal, 0.0, 0, &RailSpec::default()).is_some());
     }
 
     /// [155] Geschlossener Zug (freier Lochring): ohne Deckel, Naht ohne Lücke.
