@@ -192,3 +192,31 @@ fn geschlossenes_gelaende_als_gelaendelinie() {
     assert_eq!(mesh_cuts(&o).len(), 1);
     assert!(o.profiles.is_empty());
 }
+
+/// [256] Nachbargebäude (Netz auf „12 Gebäude", Klasse mit Füllung): im Schnitt hellgrau mit Umriss in Klassenfarbe
+/// statt schwarz, nicht in der schweren Schnittkante; ohne Füllung der Klasse wie bisher schwarz. Über das Geländeende
+/// hinaus nichts (Gelände u 1 … 12): der Nachbar rechts davon entfällt, einer über dem Rand wird beschnitten.
+#[test]
+fn nachbargebaeude_hellgrau_und_nur_ueber_dem_gelaende() {
+    let (positions, indices) = cube(-4.0, 7.0, -3.0, 3.0, -1.0, 0.0);
+    let terrain = ContextObject::TerrainMesh(TerrainMesh { id: "g".into(), name: "Site".into(), category_code: "02".into(), positions, indices, ..Default::default() });
+    let nb = |id: &str, x0: f64, x1: f64| ContextObject::ImportedMesh(ImportedMesh { id: id.into(), name: id.into(), category_code: "12".into(), positions: cube(x0, x1, -1.0, 2.0, 0.0, 6.0).0, indices: cube(x0, x1, -1.0, 2.0, 0.0, 6.0).1, ..Default::default() });
+    let mut p = with(vec![terrain, nb("innen", 0.0, 2.0), nb("rand", 6.0, 9.0), nb("weg", 10.0, 12.0)]);
+    p.layers = vec![LayerCategory { code: "12".into(), name: "Gebäude".into(), color: "#888888".into(), lw: 0.25, visible: true, fill: Some("#d9d9d9".into()), ..Default::default() }];
+    let o = compute_section(&p, &lv(false), &[]).unwrap().unwrap();
+    let ids = |o: &Output| mesh_cuts(o).iter().filter_map(|c| c.source_id.clone()).collect::<Vec<_>>();
+    assert_eq!(ids(&o), ["innen", "rand"], "rechts vom Gelände kein Schnitt");
+    let rand = mesh_cuts(&o).into_iter().find(|c| c.source_id.as_deref() == Some("rand")).unwrap();
+    assert!((bbox(&rand.pts)[1] - 12.0).abs() < 1e-9, "endet am Geländeende u = 12: {:?}", rand.pts);
+    assert!(o.visible.iter().chain(&o.hidden).all(|e| e.kind != Kind::Mesh || (e.a[0] <= 12.0 + 1e-9 && e.b[0] <= 12.0 + 1e-9)), "Kanten enden am Gelände");
+    let rules = CutRules::of(&p, &o, RuleView::at(100.0, None));
+    let (prims, _) = section_primitives_at(&o, true, false, &Visibility::default(), 100.0, Detail::Mittel, false, &rules);
+    let poly = |id: &str| prims.iter().find_map(|q| match q { Primitive::Polygon { fill, stroke, stroke_width_mm, context_object_id: Some(i), .. } if i == id => Some((fill.clone(), stroke.clone(), *stroke_width_mm)), _ => None }).unwrap();
+    assert_eq!(poly("innen"), ("#d9d9d9".to_string(), "#888888".to_string(), 0.25));
+    assert!(!prims.iter().any(|q| matches!(q, Primitive::Line { cls, a, .. } if cls == "section-cut-outline" && a.x > 4.9 && a.x < 7.1)), "keine schwere Schnittkante um den Nachbarn");
+    // Klasse ohne Füllung: schwarz wie freie Körper.
+    p.layers[0].fill = None;
+    let rules = CutRules::of(&p, &o, RuleView::at(100.0, None));
+    let (prims, _) = section_primitives_at(&o, true, false, &Visibility::default(), 100.0, Detail::Mittel, false, &rules);
+    assert!(prims.iter().any(|q| matches!(q, Primitive::Polygon { fill, context_object_id: Some(i), .. } if i == "innen" && fill == HATCH_INK)));
+}

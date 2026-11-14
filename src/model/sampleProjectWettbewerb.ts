@@ -245,7 +245,7 @@ function addRooms(p: Project): Project {
 const codesOf = (ls: Project["layers"]): string[] => ls.flatMap((l) => [l.code, ...codesOf(l.children ?? [])]);
 const visHidden = (hidden: string[]): Record<string, boolean> => Object.fromEntries(codesOf(sampleProject.layers).map((c) => [c, !hidden.includes(c)]));
 /** Klassen, die die Situation ausblendet (wie `standards.rs::SITUATION_HIDDEN`). */
-const SITUATION_HIDDEN = ["00", "07", "20", "21", "22", "25", "30", "35", "40", "50", "60", "80", "81", "82", "85", "90", "91", "99"];
+const SITUATION_HIDDEN = ["00", "07", "20", "21", "22", "25", "30", "35", "40", "50", "60", "80", "81", "82", "85", "90", "91", "92", "99"];
 const LEVEL_VIS: Record<string, boolean> = Object.fromEntries(LEVELS.map((l) => [l.id, true]));
 const pxPerMeterAt = (scale: number) => Math.round(((96 / 25.4) * 1000) / scale * 100) / 100;
 

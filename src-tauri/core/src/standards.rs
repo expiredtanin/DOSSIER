@@ -271,16 +271,16 @@ pub fn roof_types() -> Vec<Value> {
 /// Alle Standard-Ressourcen je Projekt-Liste, in Abhängigkeitsreihenfolge.
 /// [66] Ansichtsvorlagen für Pläne „mit einem Klick" (an Geschoss/Schnitt/Ansicht binden oder anwenden):
 /// Präsentation (Tusche wie alle Pläne [140], Farbe über `mono: false` wählbar; Schatten, ohne Referenz- und
-/// Konstruktionslinien), Eingabe 1:100 und Ausführung 1:50
+/// Konstruktionslinien und Kameras), Eingabe 1:100 und Ausführung 1:50 (ohne Sonnenschatten und Kameras, [256])
 /// (schwarz-weiss nach SIA 400).
 pub fn view_templates() -> Vec<Value> {
     vec![
         json!({"id": "std-vt-praesentation", "name": "Präsentation", "detail": "mittel", "mono": true, "shadows": true, "hiddenLines": false,
-               "layerVisibility": {"90": false, "91": false, "99": false}}),
+               "layerVisibility": {"90": false, "91": false, "92": false, "99": false}}),
         json!({"id": "std-vt-eingabe-100", "name": "Eingabeplan 1:100", "detail": "mittel", "scaleDenominator": 100, "mono": true, "shadows": false,
-               "layerVisibility": {"99": false}}),
+               "layerVisibility": {"08": false, "92": false, "99": false}}),
         json!({"id": "std-vt-ausfuehrung-50", "name": "Ausführungsplan 1:50", "detail": "fein", "scaleDenominator": 50, "mono": true, "shadows": false,
-               "scaleLineWeights": true, "layerVisibility": {"99": false}}),
+               "scaleLineWeights": true, "layerVisibility": {"08": false, "92": false, "99": false}}),
         // [207] Situationsplan 1:500 für Wettbewerbe: eigenes Gebäude schwarz, Kontext grau (bzw. alles schwarz im Schwarzplan);
         // ohne Raster, Bauteil-Zeichnungen, Text, Bemassung, Koten und Referenzen. Parzelle, Strassen, Höhenlinien und Bäume bleiben.
         json!({"id": "std-vt-situation-wbw", "name": "Situation WBW 1:500", "detail": "grob", "scaleDenominator": 500, "mono": true, "shadows": false,
@@ -291,8 +291,8 @@ pub fn view_templates() -> Vec<Value> {
 }
 
 /// [207] Klassen, die der Situationsplan ausblendet: Raster, Wände (samt Türen/Fenster, Möbel, Stützen), Decken, Dächer,
-/// Träger, Treppen, Baugrube, Text, Räume, Bemassung, Auto-Bemassung, Höhenkoten, Details, Referenzen, Schnittmarken, Konstruktion.
-const SITUATION_HIDDEN: [&str; 18] = ["00", "07", "20", "21", "22", "25", "30", "35", "40", "50", "60", "80", "81", "82", "85", "90", "91", "99"];
+/// Träger, Treppen, Baugrube, Text, Räume, Bemassung, Auto-Bemassung, Höhenkoten, Details, Referenzen, Schnittmarken, Kameras ([256]), Konstruktion.
+const SITUATION_HIDDEN: [&str; 19] = ["00", "07", "20", "21", "22", "25", "30", "35", "40", "50", "60", "80", "81", "82", "85", "90", "91", "92", "99"];
 
 /// [173] Stufen der Modelldarstellung als Vorlagen (≙ Archicad „Modelldarstellung"): Wettbewerb 1:200 (Wände als
 /// Fläche, Räume mit Name und Fläche ohne Nummer, nur das Gesamtmass, ohne Koten), Baueingabe 1:100 (SIA-Kategorie,
@@ -810,6 +810,19 @@ pub fn override_rules() -> Vec<Value> {
 mod tests {
     use super::*;
     use crate::model::Project;
+
+    /// [256] Abgabe-Vorlagen ohne Kamera-Sichtkegel (Klasse 92); Sonnenschatten (Klasse 08) nur in der Präsentation —
+    /// Eingabe- und Ausführungsplan blenden ihn aus, Situation/Schwarzplan zeichnen ohnehin keinen.
+    #[test]
+    fn abgabe_vorlagen_ohne_kameras_schatten_nur_praesentation() {
+        let vt = view_templates();
+        let hidden = |id: &str, code: &str| vt.iter().find(|t| t["id"] == id).unwrap()["layerVisibility"][code] == json!(false);
+        for id in ["std-vt-praesentation", "std-vt-eingabe-100", "std-vt-ausfuehrung-50", "std-vt-situation-wbw", "std-vt-schwarzplan"] {
+            assert!(hidden(id, CAMERA_CATEGORY), "{id}: Kameras aus");
+        }
+        assert!(!hidden("std-vt-praesentation", SHADOW_CATEGORY), "Präsentation mit Schatten");
+        assert!(hidden("std-vt-eingabe-100", SHADOW_CATEGORY) && hidden("std-vt-ausfuehrung-50", SHADOW_CATEGORY));
+    }
 
     fn empty_root() -> Map<String, Value> {
         json!({"id": "p", "name": "P", "lineStyles": [], "hatches": [], "components": [], "wallTypes": [], "drawingLevels": [],

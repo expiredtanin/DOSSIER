@@ -22,27 +22,32 @@ struct Def {
     name: &'static str,
     color: &'static str,
     lw: f64,
+    /// [256] Vorgabe-Füllung der Klasse (`LayerCategory.fill`).
+    fill: Option<&'static str>,
 }
+
+/// [256] Nachbargebäude im Grundriss/Schnitt hellgrau mit grauem Umriss (Schweizer Praxis; schwarz nur im Schwarzplan).
+pub const BUILDING_FILL: &str = "#d9d9d9";
 
 /// [140] Kontext in Grautönen (Tusche-Standard), Farbe nur, wo der Nutzer sie setzt.
 /// „05 Kontext" — Elternkategorie der Kontext-Kategorien.
-const CONTEXT_PARENT: Def = Def { code: "05", name: "Kontext", color: "#707078", lw: 0.13 };
+const CONTEXT_PARENT: Def = Def { code: "05", name: "Kontext", color: "#707078", lw: 0.13, fill: None };
 /// „31 Dächer" bleibt oberste Ebene.
-const IMPORTED_ROOF: Def = Def { code: "31", name: "Dächer", color: "#4a4a4a", lw: 0.18 };
+const IMPORTED_ROOF: Def = Def { code: "31", name: "Dächer", color: "#4a4a4a", lw: 0.18, fill: None };
 /// Kinder von „05 Kontext", in dieser Reihenfolge (`NESTED_CONTEXT_CATEGORIES`).
 const NESTED: [Def; 11] = [
-    Def { code: "02", name: "Gelände", color: "#808080", lw: 0.13 },
-    Def { code: "03", name: "Luftbild", color: "#707078", lw: 0.13 },
-    Def { code: "10", name: "Situation", color: "#909090", lw: 0.18 },
-    Def { code: "12", name: "Gebäude", color: "#888888", lw: 0.25 },
-    Def { code: "11", name: "Strasse", color: "#808080", lw: 0.18 },
-    Def { code: "04", name: "Wald", color: "#909090", lw: 0.13 },
-    Def { code: "15", name: "Parkplätze", color: "#a0a0a0", lw: 0.13 },
-    Def { code: "16", name: "Bahn", color: "#606060", lw: 0.18 },
-    Def { code: "17", name: "Gewässer", color: "#909090", lw: 0.13 },
-    Def { code: "18", name: "Grünflächen", color: "#a0a0a0", lw: 0.13 },
+    Def { code: "02", name: "Gelände", color: "#808080", lw: 0.13, fill: None },
+    Def { code: "03", name: "Luftbild", color: "#707078", lw: 0.13, fill: None },
+    Def { code: "10", name: "Situation", color: "#909090", lw: 0.18, fill: None },
+    Def { code: "12", name: "Gebäude", color: "#888888", lw: 0.25, fill: Some(BUILDING_FILL) },
+    Def { code: "11", name: "Strasse", color: "#808080", lw: 0.18, fill: None },
+    Def { code: "04", name: "Wald", color: "#909090", lw: 0.13, fill: None },
+    Def { code: "15", name: "Parkplätze", color: "#a0a0a0", lw: 0.13, fill: None },
+    Def { code: "16", name: "Bahn", color: "#606060", lw: 0.18, fill: None },
+    Def { code: "17", name: "Gewässer", color: "#909090", lw: 0.13, fill: None },
+    Def { code: "18", name: "Grünflächen", color: "#a0a0a0", lw: 0.13, fill: None },
     // [143] Baugruben eigene Kategorie: Grundrisse blenden „02 Gelände" oft aus, die Baugrube soll bleiben.
-    Def { code: "07", name: "Baugrube", color: "#4a4a4a", lw: 0.18 },
+    Def { code: "07", name: "Baugrube", color: "#4a4a4a", lw: 0.18, fill: None },
 ];
 
 /// [256] Ist `code` eine Umgebungsklasse („05 Kontext" und ihre Kinder: Gelände, Situation, Gebäude, Strasse …)?
@@ -52,7 +57,11 @@ pub fn is_context_class(code: &str) -> bool {
 }
 
 fn category(d: &Def) -> Value {
-    json!({"code": d.code, "name": d.name, "color": d.color, "lw": d.lw, "visible": true, "locked": false})
+    let mut v = json!({"code": d.code, "name": d.name, "color": d.color, "lw": d.lw, "visible": true, "locked": false});
+    if let Some(f) = d.fill {
+        v["fill"] = json!(f);
+    }
+    v
 }
 
 /// [207] Bekannte Layer-Namen amtlicher Kataster-/Vermessungs-DXF auf die Kontext-Klassen: Gebäude → „12", Strassen

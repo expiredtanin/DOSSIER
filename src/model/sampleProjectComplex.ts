@@ -609,7 +609,8 @@ function annotations(): Drawing2D[] {
 
   // Höhenkoten (absolut, wie die Koten in Schnitt/Ansicht).
   add("kote-eg", "eg", "80", { shape: "kote", at: P(3, 2.5), value: Z.eg, kind: "okFertig", rotation: 0 });
-  add("kote-eg-terrain", "eg", "80", { shape: "kote", at: P(8.5, -3), value: r3(terrainZ(8.5, -1)), kind: "okFertig", rotation: 0 });
+  // [256] Geländekote unter den Massketten und Achsblasen (vorher auf der Gesamtmasszahl „17.39“).
+  add("kote-eg-terrain", "eg", "80", { shape: "kote", at: P(12.5, -5.6), value: r3(terrainZ(12.5, -5.6)), kind: "okFertig", rotation: 0 });
   add("kote-ug", "ug", "80", { shape: "kote", at: P(3, 2.5), value: Z.ug, kind: "okFertig", rotation: 0 });
   add("kote-og", "og", "80", { shape: "kote", at: P(3, 2.5), value: Z.og, kind: "okFertig", rotation: 0 });
   add("kote-dg", "dg", "80", { shape: "kote", at: P(3, 3.5), value: Z.dg, kind: "okFertig", rotation: 0 });
@@ -629,7 +630,8 @@ function annotations(): Drawing2D[] {
   // Revisionswolke (Bögen nach aussen: negativer Bulge bei Gegenuhrzeigersinn).
   const cloud = [...arcPts(P(12.6, 0), 1.9, -Math.PI, Math.PI, 18).slice(0, 18)].map((q) => P(q.x, r3(q.y * 0.6)));
   add("revision-a", "eg", "90", { shape: "polyline", closed: true, pts: cloud, bulge: cloud.map(() => -0.45) }, { color: "#c0392b", weightMm: 0.35 });
-  add("revision-a-text", "eg", "90", { shape: "text", at: P(14.6, -1.4), text: "△A  Pfosten-Riegel statt Fenstertür", height: 0.22, angle: 0 }, { color: "#c0392b" });
+  // [256] Revisionstext neben dem Hinweis unter den Massketten (vorher auf den Masszahlen der zweiten Kette).
+  add("revision-a-text", "eg", "90", { shape: "text", at: P(11.5, -4.5), text: "△A  Pfosten-Riegel statt Fenstertür", height: 0.22, angle: 0 }, { color: "#c0392b" });
   // [157] Nordpfeil am Ostrand der Parzelle zwischen den Bäumen (vorher auf „Kat.-Nr. 2417“ und der Ansichtslinie Ost).
   add("nordpfeil", "eg", "50", { shape: "block", blockDefId: "blk-nord", at: P(26.8, 2.5), rotation: 0, scale: 1.2 });
 
@@ -722,12 +724,14 @@ const NO_NEIGHBOURS = vis(["12"]);
 /** [207] Klassen, die ein Kataster-Import anlegt (Gewässer „17"): im Ausschnitt eingeblendet, auch wenn es sie im Beispiel noch nicht gibt (fehlender Code = aus). */
 const KATASTER_VISIBLE: Record<string, boolean> = { "17": true };
 /** [207] Klassen, die die Ansichtsvorlage „Situation WBW" ausblendet (`standards.rs::SITUATION_HIDDEN`; Test `sampleProjectComplex.situation.test.ts`). */
-const SITUATION_HIDDEN = ["00", "07", "20", "21", "22", "25", "30", "35", "40", "50", "60", "80", "81", "82", "85", "90", "91", "99"];
+const SITUATION_HIDDEN = ["00", "07", "20", "21", "22", "25", "30", "35", "40", "50", "60", "80", "81", "82", "85", "90", "91", "92", "99"];
 const LEVEL_VIS: Record<string, boolean> = Object.fromEntries(LEVELS.map((l) => [l.id, true]));
 /** Grundrisse auf Blättern: ohne Kataster, Strasse, Höhenlinien und Gelände. */
 const PLAN_VIS = vis(["01", "02", "10", "11", "13", "14"]);
 /** Kontext (Gelände, Baugrube, Höhenlinien, Kataster, Raster) aus — für das Detail. */
 const HIDE_SITE = vis(["00", "01", "02", "07", "10", "11", "13", "14"]);
+/** [256] Vorlagen der Arbeits-/Abgabepläne: Sonnenschatten (08) und Kameras (92) aus. */
+const NO_SUN_CAMERA: Record<string, boolean> = { "08": false, "92": false };
 /** Bildschirm-px je Meter, bei denen die Ansicht genau im Papier-Massstab 1:`scale` steht (96 dpi, wie `geometry.ts::dpi`). */
 const pxPerMeterAt = (scale: number) => Math.round((96 / 25.4) * 1000 / scale * 100) / 100;
 const snap = (id: string, name: string, level: string, scale: number, center: Vec2, extra: Partial<NonNullable<Project["viewSnapshots"]>[number]> = {}) => ({
@@ -741,13 +745,14 @@ function views(): Pick<Project, "viewTemplates" | "viewSnapshots" | "viewSnapsho
       { id: "or-brand", name: "Brandschutztüren rot", enabled: false, condition: { type: "layer_name", operator: "contains", value: "Türen" }, actions: { color: "#c0392b", lineweight: 0.35 } },
     ],
     viewTemplates: [
-      { id: "vt-gr100", name: "Grundriss 1:100", detail: "mittel", scaleDenominator: 100, scaleLineWeights: true, cutHeight: 1.0 },
-      { id: "vt-gr50", name: "Grundriss 1:50 fein", detail: "fein", scaleDenominator: 50, scaleLineWeights: true },
+      // [256] Arbeits-/Vorprojekt-Grundrisse ohne Sonnenschatten (08) und Kamera-Sichtkegel (92); beides zeigt der Arbeitsplan ohne Vorlage.
+      { id: "vt-gr100", name: "Grundriss 1:100", detail: "mittel", scaleDenominator: 100, scaleLineWeights: true, cutHeight: 1.0, layerVisibility: NO_SUN_CAMERA },
+      { id: "vt-gr50", name: "Grundriss 1:50 fein", detail: "fein", scaleDenominator: 50, scaleLineWeights: true, layerVisibility: NO_SUN_CAMERA },
       // [157] Schnitte zeigen nur die sichtbare Projektion; verdeckte Kanten über die eigene Vorlage.
       { id: "vt-schnitt", name: "Schnitt 1:100", detail: "mittel", scaleDenominator: 100 },
       { id: "vt-schnitt-verdeckt", name: "Schnitt mit verdeckten Kanten", detail: "mittel", scaleDenominator: 100, hiddenLines: true },
       { id: "vt-ansicht", name: "Ansicht 1:100 mit Schatten", detail: "mittel", scaleDenominator: 100, shadows: true },
-      { id: "vt-brand", name: "Brandschutzplan", detail: "grob", scaleDenominator: 100, enabledOverrideRuleIds: ["or-brand"], mono: true },
+      { id: "vt-brand", name: "Brandschutzplan", detail: "grob", scaleDenominator: 100, enabledOverrideRuleIds: ["or-brand"], mono: true, layerVisibility: NO_SUN_CAMERA },
     ],
     viewSnapshotFolders: [{ id: "vf-gr", name: "Grundrisse" }, { id: "vf-sa", name: "Schnitte und Ansichten" }, { id: "vf-3d", name: "3D" }],
     viewSnapshots: [

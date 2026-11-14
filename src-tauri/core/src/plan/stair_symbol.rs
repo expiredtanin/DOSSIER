@@ -337,6 +337,9 @@ pub struct RunOpts {
     pub rail_half: f64,
     /// [G1] Untersicht: ohne Bruchlinie, alles über der Schnitthöhe gestrichelt (Schnitthöhe unter dem Treppenfuss).
     pub no_break: bool,
+    /// [256] Meter je Papier-mm (Massstab/1000) für das Zickzack der Bruchlinie (2 mm breit, 1.5 mm hoch); 0 = feste
+    /// Modellgrösse (≤ 8 × 6 cm), bei 1:100 kaum sichtbar.
+    pub break_mm: f64,
 }
 
 /// [173] Schnittparameter des Strahls `a + t·d` mit der Geraden durch `c`–`e` (`None` = parallel).
@@ -527,8 +530,11 @@ pub fn plan_stair_run(params: &[f64], total_rise: f64, cut_rise: f64, lw_mm: f64
         if w > 1e-6 {
             let c = mul(d, 1.0 / w);
             let m = mid(b.a, b.b);
-            let z = 0.08_f64.min(w * 0.15);
-            let h = 0.06_f64.min(b.depth * 0.8);
+            let (z, h) = if run.break_mm > 0.0 && run.break_mm.is_finite() {
+                ((2.0 * run.break_mm).min(w * 0.25), (1.5 * run.break_mm).min(b.depth * 1.6))
+            } else {
+                (0.08_f64.min(w * 0.15), 0.06_f64.min(b.depth * 0.8))
+            };
             let pts = [b.a, sub(m, mul(c, z)), add(sub(m, mul(c, z / 3.0)), mul(b.up, h)), sub(add(m, mul(c, z / 3.0)), mul(b.up, h)), add(m, mul(c, z)), b.b];
             for k in 0..pts.len() - 1 {
                 o.line(CLS_BREAK, pts[k], pts[k + 1], w_outline, false);
@@ -816,6 +822,20 @@ mod tests {
         assert!(all.iter().all(|l| !l.1) && all.iter().all(|l| l.0 != CLS_BREAK));
     }
 
+    /// [256] Zickzack der Bruchlinie in Papiergrösse (`RunOpts::break_mm`): bei 1:100 gut 1 mm hoch, sonst liest sich die
+    /// Bruchlinie quer über den Lauf wie eine weitere Trittkante; ohne Massstab wie bisher (≤ 6 cm).
+    #[test]
+    fn bruchlinie_zickzack_in_papiergroesse() {
+        let x_break = 5.5 * 3.0 / 16.0;
+        let height = |run: &RunOpts| {
+            let b = plan_stair_run(&straight(), 2.8, 1.0, 0.25, false, 0.0, 3, false, &[], run);
+            lines_w(&b).into_iter().filter(|l| l.0 == CLS_BREAK).flat_map(|l| [l.2[0], l.3[0]]).map(|x| (x - x_break).abs()).fold(0.0, f64::max)
+        };
+        assert!(height(&RunOpts::default()) <= 0.06 + 1e-9);
+        let h = height(&RunOpts { break_mm: 0.1, ..Default::default() });
+        assert!(h >= 0.1 - 1e-9, "1:100: Zickzack {h} m");
+    }
+
     /// [155] Podest über der Schnitthöhe als erstes Element: Bruchlinie auf dem Podest, Lauf 1 ganz ausgezogen.
     #[test]
     fn bruch_auf_dem_podest() {
@@ -988,7 +1008,7 @@ mod tests {
             assert!(l(&g.run_line) >= l(&raw.run_line) - 1e-9, "{name}: nicht kürzer als vorher");
             assert!(len(sub(g.arrow.head.1, g.run_line[n - 1])) < 1e-9, "{name}: Pfeil am Ende");
             let mut h = stair_geometry(&sp, 2.8);
-            run_line_to_edges(&mut h, spiral, &RunOpts { start: 0.1, end: 0.2, start_mark: None, rail_half: 0.0, no_break: false });
+            run_line_to_edges(&mut h, spiral, &RunOpts { start: 0.1, end: 0.2, start_mark: None, rail_half: 0.0, no_break: false, break_mm: 0.0 });
             assert!((l(&g.run_line) - l(&h.run_line) - 0.3).abs() < 1e-6, "{name}: Versatz 0.1 + 0.2");
             assert!(len(sub(h.arrow.head.1, h.run_line[h.run_line.len() - 1])) < 1e-9);
         }

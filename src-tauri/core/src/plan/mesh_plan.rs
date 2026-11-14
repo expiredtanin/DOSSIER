@@ -346,11 +346,15 @@ fn draw_items(c: &Ctx, range: &ViewRange, items: &[Item], out: &mut Vec<Primitiv
             if pts.len() < 3 {
                 continue;
             }
-            let (fill, hatch) = match &comp {
-                Some((f, h)) => (f.clone(), h.clone()),
-                None => (ov.and_then(|o| o.fill.clone()).unwrap_or_else(|| solid_fill.clone()), ov.and_then(|o| o.hatch.clone()).map_or_else(|| solid_hatch.clone(), |h| h.unwrap_or_else(no_hatch))),
+            // [256] Ohne Bauteil und ohne Füllungs-Regel: Vorgabe-Stil der Klasse (Nachbargebäude hellgrau, grauer Umriss).
+            let class = comp.is_none().then(|| class_cut_style(c.p, &m.mesh.category_code)).flatten().filter(|_| ov.is_none_or(|o| o.fill.is_none()));
+            let (fill, hatch) = match (&comp, &class) {
+                (Some((f, h)), _) => (f.clone(), h.clone()),
+                (None, Some((f, _, _))) => (f.clone(), ov.and_then(|o| o.hatch.clone()).flatten().unwrap_or_else(no_hatch)),
+                (None, None) => (ov.and_then(|o| o.fill.clone()).unwrap_or_else(|| solid_fill.clone()), ov.and_then(|o| o.hatch.clone()).map_or_else(|| solid_hatch.clone(), |h| h.unwrap_or_else(no_hatch))),
             };
-            let mut q = super::section::polygon(pts.iter().map(|q| Vec2 { x: q[0], y: q[1] }).collect(), &fill, POCHE_STROKE, WALL_FALLBACK_MM, hatch);
+            let (stroke, stroke_mm) = class.as_ref().map_or((POCHE_STROKE, WALL_FALLBACK_MM), |(_, k, w)| (k.as_str(), *w));
+            let mut q = super::section::polygon(pts.iter().map(|q| Vec2 { x: q[0], y: q[1] }).collect(), &fill, stroke, stroke_mm, hatch);
             if let Primitive::Polygon { context_object_id, extruded_solid_id, no_stroke_edges, greyed: g, .. } = &mut q {
                 match it.solid {
                     Some(s) => *extruded_solid_id = Some(s.id.clone()),
@@ -450,6 +454,25 @@ mod tests {
             }
             _ => None,
         }).sum()
+    }
+
+    /// [256] Nachbargebäude auf einer Klasse mit Füllung („12 Gebäude"): im Grundriss hellgrau mit Umriss in Klassenfarbe
+    /// und -stärke statt schwarz; eine Füllungs-Regel ([33]) geht vor.
+    #[test]
+    fn nachbargebaeude_im_grundriss_nach_klassenstil() {
+        let m = ContextObject::ImportedMesh(ImportedMesh { id: "n".into(), name: "Nachbar".into(), category_code: "12".into(), positions: cube(0.0, 8.0, 0.0, 6.0, 0.0, 7.0).0, indices: cube(0.0, 8.0, 0.0, 6.0, 0.0, 7.0).1, ..Default::default() });
+        let mut p = project(vec![m]);
+        p.layers = vec![LayerCategory { code: "12".into(), name: "Gebäude".into(), color: "#888888".into(), lw: 0.25, visible: true, fill: Some("#d9d9d9".into()), ..Default::default() }];
+        let a = PlanArgs::parse(1.0, &serde_json::json!({"floor": "eg", "show": ["12"], "global": true, "scale": 100.0}).to_string()).unwrap();
+        let draw = |p: &Project| {
+            let c = Ctx::new(p, &a);
+            let mut out = Vec::new();
+            plan_meshes(&c, &mut out);
+            out.into_iter().find_map(|q| match q { Primitive::Polygon { fill, stroke, stroke_width_mm, context_object_id: Some(i), .. } if i == "n" && fill != "none" => Some((fill, stroke, stroke_width_mm)), _ => None }).unwrap()
+        };
+        assert_eq!(draw(&p), ("#d9d9d9".to_string(), "#888888".to_string(), 0.25));
+        p.layers[0].fill = None;
+        assert_eq!(draw(&p).0, HATCH_INK, "ohne Klassen-Füllung schwarz");
     }
 
     #[test]

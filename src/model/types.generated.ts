@@ -1814,6 +1814,12 @@ export type LayerCategory = {
   locked: boolean;
   /** Optionale Standard-Schraffur der Kategorie. */
   hatch?: string;
+  /**
+   * [256] Füllfarbe der Klasse (hex) für geschnittene Netzkörper ohne eigene Regel (Grundriss und Schnitt),
+   * mit Umriss in Klassenfarbe und -stärke — z. B. Nachbargebäude „12 Gebäude" hellgrau statt schwarz.
+   * Fehlt sie, gilt die Körper-Konvention (ab 1:100 schwarz). Situation/Schwarzplan färben selbst ([207]).
+   */
+  fill?: string;
   /** Unterkategorien (Baum). */
   children?: Array<LayerCategory>;
 };

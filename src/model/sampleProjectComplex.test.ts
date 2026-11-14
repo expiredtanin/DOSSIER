@@ -74,6 +74,21 @@ describe("Musterhaus komplex", () => {
     }
   });
 
+  it("[256] EG 1:100: Geländekote und Revisionstext stehen nicht auf Masszahlen", () => {
+    const plan = generatePlan(p, "eg", codes, undefined, "mittel", false, false, true, 100);
+    const texts = plan.primitives.flatMap((q) => (q.kind === "drawingText" ? [q] : []));
+    // Grosszügige Box (Anker unbekannt: links, Mitte oder rechts) um den Text.
+    const box = (t: (typeof texts)[number]) => {
+      const w = 0.6 * t.heightM * t.text.length;
+      return [t.at.x - w, t.at.y - t.heightM, t.at.x + w, t.at.y + t.heightM];
+    };
+    const hit = (a: number[], b: number[]) => a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3];
+    const dims = texts.filter((t) => /^\d+\.\d\d$/.test(t.text)).map(box);
+    const labels = texts.filter((t) => t.text.includes("Pfosten-Riegel") || /^[-+]\d+\.\d\d$/.test(t.text));
+    expect(labels.length).toBeGreaterThanOrEqual(2);
+    for (const t of labels) expect(dims.some((d) => hit(box(t), d)), t.text).toBe(false);
+  });
+
   it("Schnitte und Ansichten rechnen", async () => {
     for (const l of p.drawingLevels.filter((x) => x.kind === "section")) {
       const o = await computeSection(p, l);

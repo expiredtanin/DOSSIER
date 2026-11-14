@@ -255,7 +255,7 @@ fn step_numbers(out: &mut Vec<Primitive>, geo: &kernel2d::StairGeometry, cut_hei
 /// (Halbmesser 0.75 mm Papier, nur mit Lauflinie).
 fn run_opts(o: &super::model_view::StairOpts, scale: f64, s: &Stair) -> crate::plan::stair_symbol::RunOpts {
     let m = |mm: f64| if scale.is_finite() && scale > 0.0 { mm * scale / 1000.0 } else { 0.0 };
-    crate::plan::stair_symbol::RunOpts { start: m(o.run_start_mm), end: m(o.run_end_mm), start_mark: (o.start_mark && o.walk_line).then(|| m(0.75)).filter(|r| *r > 0.0), rail_half: rail_half(s), no_break: false }
+    crate::plan::stair_symbol::RunOpts { start: m(o.run_start_mm), end: m(o.run_end_mm), start_mark: (o.start_mark && o.walk_line).then(|| m(0.75)).filter(|r| *r > 0.0), rail_half: rail_half(s), no_break: false, break_mm: m(1.0) }
 }
 
 /// [T3] Halbe Handlaufbreite der Treppe (Meter).
