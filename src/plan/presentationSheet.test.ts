@@ -1,12 +1,25 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { buildComplexSampleProject } from "../model/sampleProjectComplex";
+import { buildWettbewerbSampleProject } from "../model/sampleProjectWettbewerb";
+import { generatePlan } from "./generatePlan";
 import { getState } from "../state/appStore";
 import { sheetSizeMm } from "../model/layoutModel";
 import { posterMetrics } from "../model/posterTemplates";
-import { PRESENTATION_TEMPLATE_ID, levelHasContent, presentationDefaults, presentationSheetOps } from "./presentationSheet";
+import { POSTER_EXTRAS_DEFAULT, PRESENTATION_TEMPLATE_ID, levelHasContent, planPresentationSheet, presentationDefaults, presentationSheetOps } from "./presentationSheet";
 import type { Project } from "../model/types";
 
-const LABELS = { sheetName: "Präsentationsplan", masterName: "Planrahmen", north: "N", northGroup: "Nordpfeil", scaleBarGroup: "Massstabsbalken" };
+const LABELS = {
+  sheetName: "Präsentationsplan",
+  masterName: "Planrahmen",
+  north: "N",
+  northGroup: "Nordpfeil",
+  scaleBarGroup: "Massstabsbalken",
+  situation: "Situation",
+  tableAreas: "Kennzahlen (SIA 416)",
+  tableSiteProof: "Baurecht-Nachweis",
+  imagePlaceholder: "3D-Bild hier einsetzen",
+  imageHint: "Hinweis",
+};
 const st = () => getState();
 
 function overlaps(a: { xMm: number; yMm: number; widthMm: number; heightMm: number }, b: typeof a): boolean {
@@ -129,5 +142,93 @@ describe("[66] Präsentationsplan", () => {
     expect([master.template, lay.paper, lay.orientation]).toEqual(["poster-a1-landscape", "a1", "landscape"]);
     const top = posterMetrics(841, 594).contentTopMm;
     for (const v of lay.viewports) expect(v.yMm).toBeGreaterThanOrEqual(top - 1e-6);
+  }, 60_000);
+
+  // Abgabe-Review [208]: Der Rahmen eines Grundrisses muss den ganzen Inhalt umfassen, auch die Schattenstudie des Projekts
+  // (Wettbewerb-Beispiel: Studie eingeschaltet) — sonst wird der Grundriss im Viewport links/oben beschnitten.
+  it("[208] Rahmen der Grundrisse umfasst Inhalt samt Schattenstudie", () => {
+    st().loadProject(buildWettbewerbSampleProject());
+    const p = st().project;
+    expect(p.sunStudy?.show).toBe(true);
+    const o = { ...presentationDefaults(p), scale: 200, poster: "poster-a1-landscape" };
+    const res = presentationSheetOps(p, o, LABELS, "t6")!;
+    st().applyChange(res.ops);
+    const q = st().project;
+    const tpl = q.viewTemplates!.find((t) => t.id === PRESENTATION_TEMPLATE_ID)!;
+    const show = new Set(Object.entries(q.viewSnapshots!.find((v) => v.id === "vs-pres-t6-0")!.layerVisibility).filter(([, v]) => v).map(([k]) => k));
+    for (const it of res.plan.items.filter((i) => i.group === 0)) {
+      const b = generatePlan(q, it.levelId, show, undefined, tpl.detail, false, true, true, 200, false, false).bounds;
+      expect(it.widthMm).toBeGreaterThanOrEqual(((b.maxX - b.minX) * 1000) / 200 - 1e-6);
+      expect(it.heightMm).toBeGreaterThanOrEqual(((b.maxY - b.minY) * 1000) / 200 - 1e-6);
+    }
+  }, 60_000);
+
+  // [208] Plakat als abgabefähiges Grundgerüst: Situation 1:500, Pläne 1:200, Tabellen, Bild-Rahmen auf dem 6-Spalten-Raster.
+  it("[208] Plakat mit Situation, Tabellen und Bild-Rahmen: alles im Satzspiegel, ohne Überlappung, feste Massstäbe, ≥ 70 % belegt", () => {
+    st().loadProject(buildWettbewerbSampleProject());
+    const p = st().project;
+    const o = { ...presentationDefaults(p), scale: 200, poster: "poster-a1-landscape", extras: POSTER_EXTRAS_DEFAULT };
+    const plan = planPresentationSheet(p, o);
+    expect(plan.pages ?? 1).toBe(1);
+    expect(plan.fits).toBe(true);
+    const m = posterMetrics(841, 594);
+    const band = plan.bandMm!;
+    type Box = { xMm: number; yMm: number; widthMm: number; heightMm: number };
+    const boxes: Box[] = [
+      ...plan.items.map((i) => ({ ...i, heightMm: i.heightMm + band })),
+      ...plan.tables!,
+      plan.image!,
+    ];
+    expect(plan.items.filter((i) => i.kind === "situation")).toHaveLength(1);
+    expect(plan.tables!.map((t) => t.id)).toEqual(["areas", "siteProof"]);
+    expect(plan.image).toBeTruthy();
+    for (const i of plan.items) expect(i.scale).toBe(i.kind === "situation" ? 500 : 200);
+    // Situation steht am Anfang (oben links).
+    const sit = plan.items.find((i) => i.kind === "situation")!;
+    expect([sit.xMm, sit.yMm]).toEqual([m.marginMm, m.contentTopMm]);
+    const left = m.marginMm;
+    const right = 841 - m.marginMm;
+    const bottom = 594 - m.marginMm;
+    for (const [k, b] of boxes.entries()) {
+      expect(b.xMm).toBeGreaterThanOrEqual(left - 1e-6);
+      expect(b.xMm + b.widthMm).toBeLessThanOrEqual(right + 1e-6);
+      expect(b.yMm).toBeGreaterThanOrEqual(m.contentTopMm - 1e-6);
+      expect(b.yMm + b.heightMm).toBeLessThanOrEqual(bottom + 1e-6);
+      for (const c of boxes.slice(k + 1)) expect(overlaps(b, c)).toBe(false);
+    }
+    const used = boxes.reduce((a, b) => a + b.widthMm * b.heightMm, 0);
+    expect(used / ((right - left) * (bottom - m.contentTopMm))).toBeGreaterThanOrEqual(0.7);
+    // Ops: ein Blatt, Viewports, zwei Blatt-Tabellen, Platzhalter-Beschriftung, Master ohne eigenes Schriftfeld nötig (posterHeader).
+    const res = presentationSheetOps(p, o, LABELS, "p1")!;
+    st().applyChange(res.ops);
+    const q = st().project;
+    const lay = q.layouts!.find((l) => l.id === res.layoutId)!;
+    expect(lay.viewports).toHaveLength(plan.items.length);
+    expect(lay.tables!.map((t) => t.source)).toEqual(["areas", "siteProof"]);
+    const sheet = q.drawingLevels.find((l) => l.layoutId === lay.id)!;
+    const texts = q.drawings2d.filter((d) => d.levelId === sheet.id && d.geom.shape === "text").map((d) => (d.geom as { text: string }).text);
+    expect(texts).toContain("3D-Bild hier einsetzen");
+    expect(texts).toContain("Situation");
+    expect(q.masterLayouts!.find((x) => x.id === lay.masterId)!.posterHeader).toBe(true);
+    expect(q.viewSnapshots!.find((v) => v.id === lay.viewports[0].snapshotId)!.templateId).toBe("std-vt-situation-wbw");
+  }, 90_000);
+
+  it("[208] zu viele Grundrisse für ein Blatt: zweites Plakat statt kleinerem Massstab", () => {
+    const o = { ...presentationDefaults(project), scale: 100, poster: "poster-a1-landscape", extras: POSTER_EXTRAS_DEFAULT };
+    const res = presentationSheetOps(project, o, LABELS, "p2")!;
+    expect(res.plan.pages).toBeGreaterThanOrEqual(2);
+    expect(res.layoutIds.length).toBe(res.plan.pages);
+    expect(res.plan.items.filter((i) => i.kind !== "situation").every((i) => i.scale === 100)).toBe(true);
+    st().applyChange(res.ops);
+    const lays = st().project.layouts!.filter((l) => res.layoutIds.includes(l.id));
+    expect(lays.every((l) => l.viewports.length > 0 || (l.tables ?? []).length > 0)).toBe(true);
+  }, 90_000);
+
+  it("[208] Plakat ohne Zusatzinhalt bleibt auf dem Raster (nur Pläne)", () => {
+    const o = { ...presentationDefaults(project), scale: 200, poster: "poster-a1-landscape" };
+    const plan = planPresentationSheet(project, o);
+    expect(plan.items.every((i) => i.kind === "view")).toBe(true);
+    expect(plan.tables).toEqual([]);
+    expect(plan.image ?? null).toBeNull();
   }, 60_000);
 });

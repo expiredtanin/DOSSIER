@@ -83,7 +83,7 @@ Neues Modul: `<modul>.rs` und `mod` in `lib.rs`, Bindungen in `web/<modul>.rs` u
 | `selection_info.rs`, `selection_filter.rs` | Objekt-Info der Auswahl; Export „nur Auswahl" |
 | `dim_assoc.rs`, `magic_wand.rs`, `polyline_vertex.rs`, `drawing_recognize.rs` | assoziative Bemassung, Zauberstab, Punkttypen, Bauteile aus Zeichnung erkennen |
 | `layers.rs`, `levels.rs`, `groups.rs`, `pens.rs`, `reorder.rs`, `folder_tree.rs` | Ebenen, Geschosse, Gruppen, Stiftsätze, Z-Reihenfolge, Ordner |
-| `layout_model.rs`, `sheet_viewports.rs`, `sheet_table.rs`, `presentation_sheet.rs` | Layout-Blätter, Viewports, Tabellen, Präsentationsplan |
+| `layout_model.rs`, `sheet_viewports.rs`, `sheet_table.rs`, `presentation_sheet.rs`, `presentation_poster.rs` | Layout-Blätter, Viewports, Tabellen, Präsentationsplan (Plakat: Spaltenraster, Situation, Tabellen, 3D-Bild-Rahmen, mehrere Blätter) |
 | `layout_image.rs`, `layout_poster.rs` | Bilder auf Blättern (Dateikopf, Zuschnitt, dpi) und Plakat-Vorlagen mit Raster und Kopfzeile ([208]) |
 | `competition.rs` | Anonyme Abgabe ([208]): `anonymous_keyword`, neutraler Zeitstempel für IFC-Sammler und DXF-Blattnamen (TS-Gegenstück `export/competitionIdentity.ts`) |
 | `parametric_walls.rs`, `geo_translate.rs`, `geo_rebase.rs` | parametrische Wände; Projekt verschieben; Ursprung für Exporte |
