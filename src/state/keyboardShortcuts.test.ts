@@ -5,6 +5,7 @@ import {
   findConflict,
   formatCombo,
   isReservedCombo,
+  tabKeyAction,
   matchesShortcut,
   resolveCombo,
   SHORTCUT_DEFS,
@@ -171,3 +172,20 @@ describe("formatCombo", () => {
 // commandAliasOverrides.test.ts) — ohne dediziertes Unit-Test (window/
 // localStorage im "node"-Vitest-Environment nicht vorhanden); beide sind
 // bewusst defensiv (try/catch, No-op statt Absturz).
+
+describe("[252] tabKeyAction", () => {
+  const ev = (o: Partial<KeyboardEvent>) => ({ key: "Tab", ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, ...o });
+  it("Tab und Umschalt+Tab gehören der Befehlszeile", () => {
+    expect(tabKeyAction(ev({}))).toBe("commandLine");
+    expect(tabKeyAction(ev({ shiftKey: true }))).toBe("commandLine");
+  });
+  it("Ctrl+Tab vorwärts, Ctrl+Umschalt+Tab rückwärts", () => {
+    expect(tabKeyAction(ev({ ctrlKey: true }))).toBe("nextViewTab");
+    expect(tabKeyAction(ev({ ctrlKey: true, shiftKey: true }))).toBe("prevViewTab");
+  });
+  it("Cmd+Tab und Alt+Tab gehören dem System, andere Tasten nicht", () => {
+    expect(tabKeyAction(ev({ metaKey: true }))).toBeNull();
+    expect(tabKeyAction(ev({ altKey: true }))).toBeNull();
+    expect(tabKeyAction(ev({ key: "a", ctrlKey: true }))).toBeNull();
+  });
+});

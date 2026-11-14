@@ -32,11 +32,11 @@ import {
 } from "../editors/elementClipboard";
 import type { ElementClipboard, ElementSelectionIds, PastedIds } from "../editors/elementClipboard";
 import { parseClipboardText, serializeClipboardText } from "../editors/elementClipboardSerialize";
-import { matchesShortcut, type ShortcutId, type ShortcutOverrides } from "./keyboardShortcuts";
+import { matchesShortcut, tabKeyAction, type ShortcutId, type ShortcutOverrides } from "./keyboardShortcuts";
 import { isolateSelectionLayerCodes, showAllLayerCodes } from "./layerIsolate";
 import { toggleTraceAction } from "./traceActions";
 import { joinCurrentSelection } from "./selectionJoin";
-import { hideSelectionIn3d, showSelectionIn3d, stepActiveFloor } from "./tabNavigation";
+import { cycleViewTab, hideSelectionIn3d, showSelectionIn3d, stepActiveFloor } from "./tabNavigation";
 
 const isEditableTarget = (e: KeyboardEvent): boolean => {
   const el = e.target as HTMLElement | null;
@@ -119,7 +119,16 @@ export function useCommandTabShortcut(
         commandLineRef.current?.beginTyping(e.key);
         return;
       }
-      if (e.key !== "Tab") return;
+      const tabAction = tabKeyAction(e);
+      if (!tabAction) return;
+      // Overlay-Dialoge nutzen Tab für ihre eigenen Felder.
+      if ((e.target as HTMLElement | null)?.closest?.('[role="dialog"], [aria-modal="true"]')) return;
+      if (tabAction !== "commandLine") {
+        // [252] Ctrl+Tab / Ctrl+Umschalt+Tab: Ansichts-Reiter, zyklisch (auch aus Eingabefeldern).
+        e.preventDefault();
+        cycleViewTab(tabAction === "nextViewTab" ? 1 : -1);
+        return;
+      }
       if (inInput) {
         return;
       }

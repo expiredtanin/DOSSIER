@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildShortcutOverview } from "./shortcutOverview";
+import { buildShortcutOverview, FIXED_COMBO_ROWS } from "./shortcutOverview";
 import { ALIASES, COMMANDS } from "../commands/registry";
 import { SHORTCUT_DEFS } from "./keyboardShortcuts";
 import { t } from "../i18n";
@@ -10,9 +10,15 @@ describe("[210] Kürzel-Übersicht", () => {
 
   it("listet jede Tastenkombination der Registry genau einmal", () => {
     const n = ov.combos.reduce((s, g) => s + g.rows.length, 0);
-    expect(n).toBe(SHORTCUT_DEFS.length);
+    expect(n).toBe(SHORTCUT_DEFS.length + FIXED_COMBO_ROWS.length);
     const undo = ov.combos.flatMap((g) => g.rows).find((r) => r.labelKey === "shortcut.undo");
     expect(undo?.combo).toBe("⌘Z");
+  });
+
+  it("[252] Ctrl+Tab / Ctrl+Umschalt+Tab stehen fest in der Übersicht (auf dem Mac Ctrl)", () => {
+    const rows = ov.combos.flatMap((g) => g.rows);
+    expect(rows.find((r) => r.labelKey === "shortcut.nextViewTab")?.combo).toBe("⌃Tab");
+    expect(buildShortcutOverview({}, {}, false).combos.flatMap((g) => g.rows).find((r) => r.labelKey === "shortcut.prevViewTab")?.combo).toBe("Strg+Umschalt+Tab");
   });
 
   it("zeigt Nutzer-Kombinationen statt der Vorgabe", () => {

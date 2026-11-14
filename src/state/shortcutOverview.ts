@@ -40,17 +40,27 @@ export interface ShortcutOverview {
 
 const CATEGORY_ORDER: ShortcutCategory[] = ["general", "selection", "edit", "boolean", "transform", "group", "tools", "navigation"];
 
+/** [252] Fest verdrahtete Kürzel (nicht umbelegbar): Ctrl bleibt auch auf dem Mac Ctrl, Cmd+Tab gehört dem System. */
+export const FIXED_COMBO_ROWS: { category: ShortcutCategory; labelKey: string; combo: (mac: boolean) => string }[] = [
+  { category: "navigation", labelKey: "shortcut.nextViewTab", combo: (mac) => (mac ? "⌃Tab" : "Strg+Tab") },
+  { category: "navigation", labelKey: "shortcut.prevViewTab", combo: (mac) => (mac ? "⌃⇧Tab" : "Strg+Umschalt+Tab") },
+];
+
 export function buildShortcutOverview(
   comboOverrides: ShortcutOverrides = {},
   aliasOverrides: Record<string, string> = {},
   mac?: boolean,
 ): ShortcutOverview {
+  const isMac = mac ?? (typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent || ""));
   const combos: ComboGroup[] = CATEGORY_ORDER.map((category) => ({
     category,
-    rows: SHORTCUT_DEFS.filter((d) => d.category === category).map((d) => ({
-      labelKey: d.labelKey,
-      combo: formatCombo(resolveCombo(d.id, comboOverrides), mac),
-    })),
+    rows: [
+      ...SHORTCUT_DEFS.filter((d) => d.category === category).map((d) => ({
+        labelKey: d.labelKey,
+        combo: formatCombo(resolveCombo(d.id, comboOverrides), mac),
+      })),
+      ...FIXED_COMBO_ROWS.filter((f) => f.category === category).map((f) => ({ labelKey: f.labelKey, combo: f.combo(isMac) })),
+    ],
   })).filter((g) => g.rows.length > 0);
 
   // Nutzer-Kürzel überschreiben eingebaute mit gleichem Schlüssel (wie `resolveCommand`).

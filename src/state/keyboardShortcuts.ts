@@ -354,6 +354,18 @@ export function isReservedCombo(combo: string): boolean {
   return RESERVED_BARE_COMBOS.has(combo);
 }
 
+/**
+ * [252] Fest verdrahtetes Tab-Verhalten (nicht umbelegbar): Tab gehört immer der Befehlszeile; Ctrl+Tab /
+ * Ctrl+Umschalt+Tab (auch auf dem Mac Ctrl, Cmd+Tab gehört dem System) springt durch die Ansichts-Reiter.
+ * `null` = keine Tab-Taste bzw. Cmd/Alt+Tab (System).
+ */
+export type TabKeyAction = "nextViewTab" | "prevViewTab" | "commandLine";
+export function tabKeyAction(e: Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey" | "altKey" | "shiftKey">): TabKeyAction | null {
+  if (e.key !== "Tab" || e.metaKey || e.altKey) return null;
+  if (e.ctrlKey) return e.shiftKey ? "prevViewTab" : "nextViewTab";
+  return "commandLine";
+}
+
 function isMacPlatform(): boolean {
   if (typeof navigator === "undefined") return false;
   return /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent || "");
