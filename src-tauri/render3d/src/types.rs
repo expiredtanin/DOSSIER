@@ -437,6 +437,20 @@ pub struct MeshInput {
     /// Punkte gleicher Lage gelten als verschweisst. Fehlt er: kantig (Flächennormale je Dreieck).
     #[serde(default, rename = "creaseAngle")]
     pub crease_angle: Option<f32>,
+    /// [216] Geschlossener Bauteil-Körper (Wandschicht mit Formöffnung, Bogenwand, Wand unter dem Dach — Kern
+    /// `model3d/wall_body.rs`): der 3D-Live-Schnitt zeigt seinen Schnitt als Fläche mit Schraffur und Umriss
+    /// (`section_mesh.rs`). Fehlt: das Netz wird nur gekappt (Kontext, Einbauteile, Dächer).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub section: Option<MeshSection>,
+}
+
+/// [216] Schnitt-Stil eines Körper-Netzes (wie `WallInput::hatch`/`cut` der Wandschicht).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct MeshSection {
+    #[serde(default)]
+    pub hatch: Option<Hatch>,
+    #[serde(default)]
+    pub cut: Option<CutBandMeta>,
 }
 
 impl MeshInput {

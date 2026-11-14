@@ -33,6 +33,7 @@ Browser-Bindung. Das 3D-Modell kommt als Teile aus dem Kern (`src-tauri/core/src
 | `roof_cut.rs` | Schnitt einer geneigten Dachschicht mit einer senkrechten Ebene |
 | `section_fill.rs` | Schnittflächen als Dreiecke für den Live-Schnitt |
 | `section_boolean.rs` | Verdeckung der Schnittflächen, dieselbe Rechnung wie im 2D-Schnitt |
+| `section_mesh.rs` | `[216]` Schnitt geschlossener Körper-Netze (Wände mit Formöffnung, Bogenwände, Giebel): Netz × Ebene → Strecken, Fläche als Trapeze (gerade-ungerade), Umriss ohne Fugen; höhere Priorität schneidet weg |
 
 ## Punktwolken und Muster
 

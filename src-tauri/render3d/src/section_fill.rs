@@ -33,10 +33,11 @@
 //! werden in EINEM `draw` gezeichnet). Ein Cut-Polygon ist stets ein konvexes
 //! Rechteck (4 Ecken, siehe `section.rs`) — Fan-Triangulierung genuegt.
 
-use crate::section::{cut_polygons, CutPolygon, SectionPlane};
+use crate::section::{cut_polygons, ComponentKind, ComponentRef, CutPolygon, SectionPlane};
+use crate::section_mesh::{even_odd_trapezoids, slice_mesh, subtract_rect, subtract_rect_seg, Rect};
 use dossier_hatch::hatch::{build_hatch_runs, v2, Hatch as GenHatch, HatchKind, Pattern};
 use crate::section_boolean::subtract_dominant_bands;
-use crate::types::{RoofLayerInput, SlabInput, WallInput};
+use crate::types::{CutBandMeta, MeshInput, RoofLayerInput, SlabInput, WallInput};
 
 /// f32 pro Cap-Vertex: [pos.x, pos.y, pos.z, u, v, pattern, angle_rad, scale,
 /// line_weight_mm]. Spiegel des Vertex-Layouts der `cap_pipeline` (gpu.rs) und des
@@ -111,17 +112,80 @@ fn cut_cap_polys(
     walls: &[WallInput],
     slabs: &[SlabInput],
     roofs: &[RoofLayerInput],
-) -> Vec<CutPolygon> {
-    subtract_dominant_bands(cut_polygons(plane, walls, slabs, roofs))
+    bodies: &[MeshInput],
+) -> CapSet {
+    let polys = subtract_dominant_bands(cut_polygons(plane, walls, slabs, roofs));
+    let outlined = polys.len();
+    let mut set = CapSet { polys, outlined, body_lines: Vec::new() };
+    // [216] Körper-Netze: Schnitt des Netzes (echte Öffnungsform), Bänder STRIKT höherer Priorität schneiden weg.
+    let cutters: Vec<(i32, Rect)> = set.polys[..outlined]
+        .iter()
+        .filter(|p| p.component.kind != ComponentKind::Roof)
+        .filter_map(|p| {
+            let prio = p.cut.as_ref()?.join_priority?;
+            let r = p.pts.iter().fold([f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY], |r, q| {
+                [r[0].min(q[0] as f64), r[1].max(q[0] as f64), r[2].min(q[1] as f64), r[3].max(q[1] as f64)]
+            });
+            Some((prio, r))
+        })
+        .collect();
+    for (i, m) in bodies.iter().enumerate() {
+        let Some(sec) = &m.section else { continue };
+        let segs = slice_mesh(plane, m);
+        if segs.is_empty() {
+            continue;
+        }
+        let prio = sec.cut.as_ref().and_then(|c| c.join_priority);
+        let above: Vec<Rect> = cutters.iter().filter(|(p, _)| prio.is_some_and(|q| *p > q)).map(|(_, r)| *r).collect();
+        let mut pieces: Vec<Vec<[f64; 2]>> = even_odd_trapezoids(&segs).into_iter().map(|t| t.to_vec()).collect();
+        let mut lines = segs;
+        for r in &above {
+            pieces = pieces.into_iter().flat_map(|p| subtract_rect(&p, *r)).collect();
+            lines = lines.into_iter().flat_map(|s| subtract_rect_seg(s, *r)).collect();
+        }
+        let color = m.effective_color();
+        for p in pieces {
+            set.polys.push(CutPolygon {
+                component: ComponentRef { kind: ComponentKind::Wall, index: i },
+                color,
+                hatch: sec.hatch,
+                pts: p.iter().map(|q| [q[0] as f32, q[1] as f32]).collect(),
+                cut: sec.cut.clone(),
+            });
+        }
+        set.body_lines.extend(lines.into_iter().map(|(a, b)| (sec.cut.clone(), [a[0] as f32, a[1] as f32], [b[0] as f32, b[1] as f32])));
+    }
+    set
 }
 
+/// Schnittflächen einer Ebene: Rechteck-Bänder (Umriss je Polygon) und Trapeze der Körper-Netze (ohne eigenen
+/// Umriss; ihr Umriss sind die Schnittstrecken `body_lines`, damit keine Fugen zwischen den Trapezen erscheinen).
+struct CapSet {
+    polys: Vec<CutPolygon>,
+    /// `polys[..outlined]` zeichnen ihren Umriss.
+    outlined: usize,
+    body_lines: Vec<(Option<CutBandMeta>, [f32; 2], [f32; 2])>,
+}
+
+/// Wie [`build_cut_caps_with`] ohne Körper-Netze.
 pub fn build_cut_caps(
     plane: &SectionPlane,
     walls: &[WallInput],
     slabs: &[SlabInput],
     roofs: &[RoofLayerInput],
 ) -> Vec<f32> {
-    let polys = cut_cap_polys(plane, walls, slabs, roofs);
+    build_cut_caps_with(plane, walls, slabs, roofs, &[])
+}
+
+/// Cut-Caps samt den Schnittflächen der Körper-Netze `bodies` (nur Netze mit `section`, [216]).
+pub fn build_cut_caps_with(
+    plane: &SectionPlane,
+    walls: &[WallInput],
+    slabs: &[SlabInput],
+    roofs: &[RoofLayerInput],
+    bodies: &[MeshInput],
+) -> Vec<f32> {
+    let polys = cut_cap_polys(plane, walls, slabs, roofs, bodies).polys;
     let point = plane.point;
     let u_axis = plane.u_axis();
     // (u, v) -> Welt: horizontale Lage aus point + u*u_axis, Hoehe = v.
@@ -196,7 +260,19 @@ pub fn build_cut_cap_lines(
     slabs: &[SlabInput],
     roofs: &[RoofLayerInput],
 ) -> Vec<f32> {
-    let polys = cut_cap_polys(plane, walls, slabs, roofs);
+    build_cut_cap_lines_with(plane, walls, slabs, roofs, &[])
+}
+
+/// Schnitt-Umrisslinien samt denen der Körper-Netze `bodies` ([216]).
+pub fn build_cut_cap_lines_with(
+    plane: &SectionPlane,
+    walls: &[WallInput],
+    slabs: &[SlabInput],
+    roofs: &[RoofLayerInput],
+    bodies: &[MeshInput],
+) -> Vec<f32> {
+    let set = cut_cap_polys(plane, walls, slabs, roofs, bodies);
+    let polys = &set.polys;
     let point = plane.point;
     let u_axis = plane.u_axis();
     let normal = plane.normal;
@@ -214,29 +290,37 @@ pub fn build_cut_cap_lines(
         ]
     };
 
-    let mut verts: Vec<f32> = Vec::new();
-    for poly in &polys {
-        let n = poly.pts.len();
-        if n < 2 {
-            continue;
-        }
-        // Stil aus den Band-Metadaten (oder Default).
-        let (color, weight_mm) = match &poly.cut {
+    // Stil aus den Band-Metadaten (oder Default).
+    let style = |cut: &Option<CutBandMeta>| {
+        let (color, weight_mm) = match cut {
             Some(meta) => (
                 meta.line_color.unwrap_or(DEFAULT_CUT_LINE_COLOR),
                 meta.line_weight.unwrap_or(DEFAULT_CUT_LINE_WEIGHT_MM),
             ),
             None => (DEFAULT_CUT_LINE_COLOR, DEFAULT_CUT_LINE_WEIGHT_MM),
         };
-        let half_w = (weight_mm.max(0.0) * CUT_LINE_MM_TO_WORLD * 0.5).max(1e-4);
-
-        // Die tatsaechlichen Polygon-Ecken (u,v) im Umlauf; je Kante ein Ribbon.
-        for k in 0..n {
-            let a = to_world(poly.pts[k]);
-            let b = to_world(poly.pts[(k + 1) % n]);
-            push_line_ribbon(&mut verts, a, b, normal, half_w, color);
+        (color, (weight_mm.max(0.0) * CUT_LINE_MM_TO_WORLD * 0.5).max(1e-4))
+    };
+    let mut verts: Vec<f32> = Vec::new();
+    for (i, poly) in polys.iter().enumerate() {
+        let n = poly.pts.len();
+        if n < 2 {
+            continue;
+        }
+        // Die tatsaechlichen Polygon-Ecken (u,v) im Umlauf; je Kante ein Ribbon (Körper-Trapeze: Umriss unten).
+        if i < set.outlined {
+            let (color, half_w) = style(&poly.cut);
+            for k in 0..n {
+                let a = to_world(poly.pts[k]);
+                let b = to_world(poly.pts[(k + 1) % n]);
+                push_line_ribbon(&mut verts, a, b, normal, half_w, color);
+            }
         }
         push_generated_hatch(&mut verts, poly, &to_world, normal);
+    }
+    for (cut, a, b) in &set.body_lines {
+        let (color, half_w) = style(cut);
+        push_line_ribbon(&mut verts, to_world(*a), to_world(*b), normal, half_w, color);
     }
     verts
 }

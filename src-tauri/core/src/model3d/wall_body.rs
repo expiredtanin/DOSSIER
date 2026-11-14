@@ -10,7 +10,8 @@
 //! um den Schichteinzug [106] versetzt) und minus die Rechteck-Löcher der übrigen Öffnungen. Das Netz hängt
 //! als `body` am ersten Stück des Bandes, alle Stücke dieser Bänder sind `no_mesh`: die TS-Fassade (`splitWallBodies`) gibt
 //! render3d statt der Stücke das Netz als Mesh.
-//! Schnitt, Ansicht, Exporte und Auswahl rechnen mit den unveränderten Stücken weiter.
+//! Schnitt, Ansicht, Exporte und Auswahl rechnen mit den unveränderten Stücken weiter; der 3D-Live-Schnitt schneidet das Netz
+//! selbst (render3d `section_mesh.rs`, Schnitt-Stil der Schicht über `MeshInput.section`), zeigt also die echte Form.
 //!
 //! [231] Ebenso jede gerade Wand mit Öffnungen, deren Stücke unter einer Dachfläche liegen (Giebel, Kniestock): dort
 //! zerfiel die Wand um jede Öffnung in Pfeiler, Brüstung und Sturz mit je eigener schräger Oberkante (Fugen von der

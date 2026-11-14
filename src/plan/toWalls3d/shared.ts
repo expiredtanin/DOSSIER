@@ -235,6 +235,11 @@ export interface RMesh {
   /** [T4] Glatt schattieren mit Knickwinkel (Grad); fehlt = kantig. Matcht
    *  `render3d::types::MeshInput.creaseAngle`. */
   creaseAngle?: number;
+  /**
+   * [216] Geschlossener Wandkörper (Formöffnung, Bogenwand, Giebel): Schnitt-Stil der Schicht für den 3D-Live-Schnitt
+   * (render3d schneidet das Netz, `section_mesh.rs`). Matcht `render3d::types::MeshInput.section`.
+   */
+  section?: { hatch?: RHatch; cut?: RCutMeta };
 }
 
 /**

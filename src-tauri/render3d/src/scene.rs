@@ -224,6 +224,11 @@ impl Scene {
         (w, s, r)
     }
 
+    /// [216] Körper-Netze mit Schnitt-Stil (`MeshInput::section`) aller Teile, für die Schnittflächen des Live-Schnitts.
+    pub fn collect_section_bodies(&self) -> Vec<MeshInput> {
+        self.parts.values().flat_map(|p| p.input.meshes.iter().filter(|m| m.section.is_some()).cloned()).collect()
+    }
+
     /// Ein ganzes Modell als einziger Teil (voller Pfad `set_model`).
     pub fn set_model(&mut self, part: PartInput) -> SceneChange {
         self.apply(PartsUpdate { reset: true, remove: Vec::new(), upsert: vec![PartEntry::new("", part)] })

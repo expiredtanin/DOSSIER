@@ -172,6 +172,19 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   konstantem Querversatz als Bögen, `bend_prims`) und Schnitt ([157] tangential an der Schnittstelle) zeigten das Symbol schon im
   Bogen. Nur per Rust-Test geprüft (Linux, kein Metal, nicht angesehen). Offen: Mac-Gegenprobe; mit Schichteinzug zeigt der
   Grundriss das Symbol gebogen, 3D gerade auf der Sehne.
+  Stand 14.11. (spät): (a) 3D-Live-Schnitt durch Wandkörper: die Körper-Wände (Formöffnung, Bogenwand, Giebel [231]) erreichten
+  render3d nur als Netz — ihre Stücke fehlten im Schnitt ganz (keine Schnittfläche, Wand hohl). Jetzt trägt das Netz den
+  Schnitt-Stil der Schicht (`MeshInput.section` = Schraffur + `cut`, TS `splitWallBodies`), und render3d schneidet das Netz selbst
+  (`section_mesh.rs`: Dreieck × Ebene → Strecken, Fläche gerade-ungerade als waagrechte Trapeze, Umriss = die Strecken, ohne Fugen):
+  echte Öffnungsform (rund, Bogen, Spitzbogen, frei, gebogen in Bogenwänden) in jeder Schnittrichtung. Bänder STRIKT höherer
+  Priorität (Decke) schneiden Fläche und Umriss weg; der Körper schneidet umgekehrt keine Bänder (Rechteck-Dominanz). Tests
+  `laengsschnitt_zeigt_rundes_loch`, `querschnitt_neben_der_mitte_folgt_dem_kreis`, `live_schnitt_mit_koerper_netz_und_dominanz`
+  (Punkt-in-Fläche). (b) Grundriss mit Schichteinzug in Bogenwänden wie das 3D: `Unroll` kennt die Sehnen-Zonen (`reveal_zone`),
+  Wand und Symbol liegen dort gerade auf der Sehne (Lage linear, quer senkrecht zur Sehne; an den Zonenenden radial gehrt, ≈ 2 mm
+  Stufe zum Bogen), Linien an den Zonengrenzen geteilt (Bogen/Gerade). Test
+  `fenster_mit_schichteinzug_in_bogenwand_gerade_auf_der_sehne`. Nur Linux (Rust-Tests, WASM gebaut), Live-Schnitt nicht im
+  Browser/Metal angesehen. Offen: Mac-Gegenprobe; Schnitt/Ansicht (2D) zeigen Erker-Fenster mit Schichteinzug weiter gebogen
+  (tangential, [157]).
 - ◐ **[228]** In Blender öffnen / .blend speichern (12.11., Wunsch Maintainer; Stand 13.11.: umgesetzt und mit bpy 5.3 im Linux-Container geprüft, Mac-Gegenprobe offen). Skript `render_dossier.py` hat Modus `save` (`scene.json` `mode`, Argument `--mode`): Szene wie fürs Rendering bauen, Objekte in Collections nach Bauteil (Geschosse, Wände, Decken, Dächer, Fenster und Türen, Treppen, Stützen, Extrusionen, Bäume, Gelände, Kontext, Dossier) mit lesbaren Namen (`Wand eg-aw-s`; Zuordnung aus Knotenname/`extras` des GLB, keine Export-Änderung nötig, `doc/RENDER-SZENE.md`), Kamera `Dossier-Kamera`, Himmel `Dossier-Himmel`, `pack_all`, `save_as_mainfile`; 3D-Fenster der Datei in Material-Vorschau mit Blick durch die Kamera. Dialog: «Als .blend speichern …» (Blender im Hintergrund, dann nativer Speichern-Dialog) und «In Blender öffnen» (Datei im Arbeitsordner bauen, dann Blender MIT Oberfläche auf die Datei, ohne Warten); Browser: ZIP mit Anleitung für `--mode save`. Neuer Tauri-Befehl `blender_open`, Electron `blender:open`. CLI `dossier-cli … blend --out x.blend`. Abweichung: «Öffnen» startet Blender nicht mit dem Skript, sondern mit der fertigen .blend (zuverlässiger, selbe Datei wie «Speichern», Layout steckt in der Datei). Offen: Mac/Windows-Gegenprobe der Start-Befehle (`blender_open` nur im Linux-Container kompiliert/getestet), Blender-GUI nicht gesehen (Linux ohne Anzeige); Datei liegt nach «Öffnen» im Temp-Ordner (in Blender «Speichern unter»). · S
 - ◐ **[227]** Kontextgebäude auf dem Gelände, Baugrube im Rendering ausblenden (12.11., Befunde der Mac-Gegenprobe [211]). (1) Kern
   `context_ground.rs`: jedes zusammenhängende Gebäude eines Netzes (`importedMesh`, auch mehrere Häuser in einem Netz) wird senkrecht auf den

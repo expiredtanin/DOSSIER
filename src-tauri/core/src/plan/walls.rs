@@ -1147,6 +1147,13 @@ pub fn plan_walls(c: &Ctx, reference_lines: bool, out: &mut Vec<Primitive>, boun
                 let total = p.wall_thickness(w, 0.2);
                 let ro = joins::reference_offset(crate::model3d::wall_reference(w), total);
                 let mut u = Unroll::new(*arc);
+                // [216] Öffnungen mit Schichteinzug liegen im 3D gerade auf einer Sehne (`reveal_zone`): Wand und Symbol
+                // dort ebenso gerade.
+                u.set_zones(p.openings_of_wall(&w.id).filter_map(|o| {
+                    let r = crate::opening_detail::opening_reveal(p, w, o)?;
+                    let ms = r.sides[..2].iter().flatten().map(|a| a.shift).fold(0.0f64, f64::max);
+                    Some(crate::wall_arc::reveal_zone(r.from, r.to, ms, arc.length()))
+                }).collect());
                 let cu = unroll_cuts(&mut u, cut, ro - total / 2.0, ro + total / 2.0);
                 (Some(u), cu)
             }
@@ -1622,42 +1629,22 @@ fn bend_prims(u: &Unroll, prims: Vec<Primitive>, out: &mut Vec<Primitive>) {
                     *no_stroke_edges = Some(ns);
                 }
             }
-            Primitive::Line { a, b, cls, weight_mm, dash, color, opening_id, greyed, opacity, .. } => {
-                if u.is_arc_edge(kv(*a), kv(*b)) {
-                    let c = mv(u.arc.center);
-                    let r = u.arc.radius_at(a.y);
-                    let (pa, pb) = (bmap(u, *a), bmap(u, *b));
-                    let (fa, fb) = crate::wall_arc::arc_angles(kv(c), kv(pa), kv(pb));
-                    let est = u.arc.sigma() * (b.x - a.x) / u.arc.r;
-                    let mut d = (fb - fa) - est;
-                    d = d - (d / (2.0 * std::f64::consts::PI)).round() * 2.0 * std::f64::consts::PI;
-                    let sweep = est + d;
-                    let k = ((sweep.abs() / (std::f64::consts::PI / 2.0)).ceil() as usize).max(1);
-                    for i in 0..k {
-                        let t0 = fa + sweep * i as f64 / k as f64;
-                        let t1 = fa + sweep * (i + 1) as f64 / k as f64;
-                        let (lo, hi) = if t1 >= t0 { (t0, t1) } else { (t1, t0) };
-                        let at = |t: f64| v2(c.x + r * t.cos(), c.y + r * t.sin());
-                        // Exakte Endpunkte (eingerastet) an den Enden.
-                        let q0 = if (lo - fa).abs() < 1e-12 { pa } else if (lo - (fa + sweep)).abs() < 1e-12 { pb } else { at(lo) };
-                        let q1 = if (hi - fa).abs() < 1e-12 { pa } else if (hi - (fa + sweep)).abs() < 1e-12 { pb } else { at(hi) };
-                        out.push(Primitive::Arc {
-                            center: c,
-                            from: q0,
-                            to: q1,
-                            r,
-                            cls: cls.clone(),
-                            weight_mm: *weight_mm,
-                            dash: dash.clone(),
-                            color: color.clone(),
-                            opening_id: opening_id.clone(),
-                            stair_id: None,
-                            greyed: *greyed,
-                            opacity: *opacity,
-                        });
+            Primitive::Line { a, b, .. } if u.is_arc_edge(kv(*a), kv(*b)) => {
+                // [216] An den Sehnen-Zonen (Schichteinzug) geteilt: dort gerade, sonst Bögen.
+                for (ra, rb, straight) in u.runs(kv(*a), kv(*b)) {
+                    let mut q = p.clone();
+                    if let Primitive::Line { a, b, .. } = &mut q {
+                        (*a, *b) = if straight { (bmap(u, mv(ra)), bmap(u, mv(rb))) } else { (mv(ra), mv(rb)) };
                     }
-                    continue;
+                    if straight {
+                        out.push(q);
+                    } else {
+                        bend_arc_line(u, &q, out);
+                    }
                 }
+                continue;
+            }
+            Primitive::Line { a, b, .. } => {
                 *a = bmap(u, *a);
                 *b = bmap(u, *b);
             }
@@ -1669,6 +1656,43 @@ fn bend_prims(u: &Unroll, prims: Vec<Primitive>, out: &mut Vec<Primitive>) {
             _ => {}
         }
         out.push(p);
+    }
+}
+
+/// Linie konstanten Querversatzes (abgewickelt) als Bögen ≤ 90° (Gegenuhrzeigersinn).
+fn bend_arc_line(u: &Unroll, p: &Primitive, out: &mut Vec<Primitive>) {
+    let Primitive::Line { a, b, cls, weight_mm, dash, color, opening_id, greyed, opacity, .. } = p else { return };
+    let c = mv(u.arc.center);
+    let r = u.arc.radius_at(a.y);
+    let (pa, pb) = (bmap(u, *a), bmap(u, *b));
+    let (fa, fb) = crate::wall_arc::arc_angles(kv(c), kv(pa), kv(pb));
+    let est = u.arc.sigma() * (b.x - a.x) / u.arc.r;
+    let mut d = (fb - fa) - est;
+    d = d - (d / (2.0 * std::f64::consts::PI)).round() * 2.0 * std::f64::consts::PI;
+    let sweep = est + d;
+    let k = ((sweep.abs() / (std::f64::consts::PI / 2.0)).ceil() as usize).max(1);
+    for i in 0..k {
+        let t0 = fa + sweep * i as f64 / k as f64;
+        let t1 = fa + sweep * (i + 1) as f64 / k as f64;
+        let (lo, hi) = if t1 >= t0 { (t0, t1) } else { (t1, t0) };
+        let at = |t: f64| v2(c.x + r * t.cos(), c.y + r * t.sin());
+        // Exakte Endpunkte (eingerastet) an den Enden.
+        let q0 = if (lo - fa).abs() < 1e-12 { pa } else if (lo - (fa + sweep)).abs() < 1e-12 { pb } else { at(lo) };
+        let q1 = if (hi - fa).abs() < 1e-12 { pa } else if (hi - (fa + sweep)).abs() < 1e-12 { pb } else { at(hi) };
+        out.push(Primitive::Arc {
+            center: c,
+            from: q0,
+            to: q1,
+            r,
+            cls: cls.clone(),
+            weight_mm: *weight_mm,
+            dash: dash.clone(),
+            color: color.clone(),
+            opening_id: opening_id.clone(),
+            stair_id: None,
+            greyed: *greyed,
+            opacity: *opacity,
+        });
     }
 }
 
@@ -1893,6 +1917,59 @@ pub(crate) mod tests {
         assert!(!inside(arc.point(0.5, 0.001)));
         assert!(inside(arc.point(3.5, 0.001)));
         assert!(inside(arc.point(0.5, 0.05)) && inside(arc.point(0.5, -0.07)));
+    }
+
+    /// [216] Fenster mit Schichteinzug [106] in der Bogenwand: im 3D liegen Loch und Einbauteile gerade auf der Sehne über
+    /// `reveal_zone` — der Grundriss zeigt das Symbol ebenso gerade (keine Bögen, Linien parallel zur Sehne) und die Wand dort
+    /// gerade (Wandflächen-Punkte im Bereich auf der Sehnen-Parallelen); ohne Schichteinzug bleibt alles gebogen.
+    #[test]
+    fn fenster_mit_schichteinzug_in_bogenwand_gerade_auf_der_sehne() {
+        for reveal in [true, false] {
+            let mut p: Project = serde_json::from_str(include_str!("../../tests/fixtures/sample_project.json")).unwrap();
+            p.walls.retain(|w| w.id == "W1");
+            p.walls[0].bulge = Some(-1.0);
+            let mut o = serde_json::json!({
+                "id": "R1", "type": "opening", "hostWallId": "W1", "categoryCode": "21", "kind": "window", "typeId": "",
+                "position": 2.0, "width": 1.2, "height": 1.2, "sillHeight": 0.9
+            });
+            if reveal {
+                o["layerReveals"] = serde_json::json!([{ "layer": -1, "mode": "zurueck", "amount": 0.05 }, { "layer": 0, "mode": "leibung" }]);
+            } else {
+                o["layerReveals"] = serde_json::json!([]);
+            }
+            p.openings = Some(vec![serde_json::from_value(o).unwrap()]);
+            let t = serde_json::json!({ "floor": "eg", "show": ["20", "21"], "grey": [] }).to_string();
+            let prims = super::super::domains::plan_domains(&p, &super::super::domains::PlanArgs::parse(1.0, &t).unwrap()).unwrap().walls;
+            let arc = crate::wall_arc::WallArc::of_wall(&p.walls[0]).unwrap();
+            let own = |id: &Option<String>| id.as_deref() == Some("R1");
+            let arcs = prims.iter().filter(|q| matches!(q, Primitive::Arc { opening_id, .. } if own(opening_id))).count();
+            let lines: Vec<(Vec2, Vec2)> = prims.iter().filter_map(|q| match q { Primitive::Line { a, b, opening_id, .. } if own(opening_id) => Some((*a, *b)), _ => None }).collect();
+            if !reveal {
+                assert!(arcs > 0, "ohne Schichteinzug gebogen");
+                continue;
+            }
+            assert_eq!(arcs, 0, "Symbol mit Schichteinzug gerade");
+            let r = crate::opening_detail::opening_reveal(&p, &p.walls[0], &p.openings.as_ref().unwrap()[0]).unwrap();
+            let ms = r.sides[..2].iter().flatten().map(|a| a.shift).fold(0.0f64, f64::max);
+            let (sa, sb) = crate::wall_arc::reveal_zone(r.from, r.to, ms, arc.length());
+            let (_, u, _) = crate::wall_arc::chord_of(&arc, sa, sb);
+            let long: Vec<&(Vec2, Vec2)> = lines.iter().filter(|(a, b)| (b.x - a.x).hypot(b.y - a.y) > 0.5).collect();
+            assert!(!long.is_empty(), "Glas-/Rahmenlinien längs");
+            for (a, b) in long {
+                let (dx, dy) = (b.x - a.x, b.y - a.y);
+                assert!((dx * u.y - dy * u.x).abs() / dx.hypot(dy) < 1e-6, "Linie {a:?}→{b:?} nicht parallel zur Sehne");
+            }
+            // Wand: kein Bogenstück der Wandflächen innerhalb der Zone (Polygonpunkte dort auf Sehnen-Parallelen).
+            let (pa, _, _) = crate::wall_arc::chord_of(&arc, sa, sb);
+            let n_of = |q: Vec2| (q.x - pa.x) * -u.y + (q.y - pa.y) * u.x;
+            let t_of = |q: Vec2| (q.x - pa.x) * u.x + (q.y - pa.y) * u.y;
+            let (_, _, chord) = crate::wall_arc::chord_of(&arc, sa, sb);
+            let mut ns: Vec<f64> = prims.iter().filter_map(|q| match q { Primitive::Polygon { pts, wall_id: Some(_), opening_id: None, .. } => Some(pts.clone()), _ => None }).flatten()
+                .filter(|q| t_of(*q) > 0.02 && t_of(*q) < chord - 0.02).map(n_of).collect();
+            ns.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            ns.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
+            assert!(ns.len() <= 12, "Wandpunkte in der Zone auf {} Querlagen (gebogen?): {ns:?}", ns.len());
+        }
     }
 
     /// [G3] Projekt wie [`pocket_project`], statt der Tür ein Fenster 1.0..2.2 (Breite 1.2) mit Form.
