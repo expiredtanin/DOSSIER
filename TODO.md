@@ -1454,6 +1454,8 @@ Punktwolken/BCF-Ausbau, Windows-Paket, [C5]/[C7]/[15] Kern-Umbauten — ausser s
   nachführen, wenn `kernel2d/src/lib.rs` und `fileio/src/ifc_export.rs` aufgeteilt sind. · S
 - ◐ **[49]** UI-Tests wie ein Mensch (`e2e/`). Debug-Hook für den Store fehlt (`window.__dossierStore` nur bei `?e2e`);
   Pixel/Rendering headless nicht prüfbar; Strichstärken, Text, Block, Raum, PDF-Export, Schnitt/Ansicht ohne UI-Test. · M
+  14.11.: Begehen/Pathtracer rot wegen `pkg3d` ohne Feature `web` (480-Byte-Stub, 3D-Init „reading 'new'“); `globalSetup` und
+  `loadEngine3d` brechen jetzt mit Bauhinweis ab (`npm run build:engine3d`).
 - ◐ **[C10]** Kleinigkeiten: Log-Rotation über `RUST_LOG`, isoliertes Profil per Umgebungsvariable. · S
 - ○ **[55]** `IDEAS.md`. · S
 
