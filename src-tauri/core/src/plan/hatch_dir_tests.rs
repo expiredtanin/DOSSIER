@@ -209,6 +209,24 @@ fn plan_case(p: &Project, scale: f64, what: &str) -> usize {
             }
         }
     }
+    // [198] Bänder in einer vereinigten Dämmfläche: ihre Pick-Fläche (Wand-Id, Geometrie des Bandes) mit der Achse ihrer Wand.
+    let unions: Vec<Vec<V2>> = prims
+        .iter()
+        .filter(|q| super::wall_join_tests::is_union(q))
+        .filter_map(|q| match q {
+            Primitive::Polygon { pts, hatch, .. } if hatch.pattern == HatchPattern::Diagonal => Some(pts.iter().map(|q| V2 { x: q.x, y: q.y }).collect()),
+            _ => None,
+        })
+        .collect();
+    for q in prims.iter().filter(|q| super::wall_join_tests::is_pick_band(q)) {
+        if let Primitive::Polygon { pts, wall_id: Some(id), .. } = q {
+            let c = V2 { x: pts.iter().map(|p| p.x).sum::<f64>() / pts.len() as f64, y: pts.iter().map(|p| p.y).sum::<f64>() / pts.len() as f64 };
+            if unions.iter().any(|u| inside(u, c)) {
+                let w = p.walls.iter().find(|w| &w.id == id).unwrap();
+                bands.push((pts.iter().map(|q| V2 { x: q.x, y: q.y }).collect(), wall_axis(w)));
+            }
+        }
+    }
     assert!(!bands.is_empty(), "{what}: keine Dämm-Bänder");
     for (out, segs) in rendered(&prims, scale) {
         check(&bands, &segs, &format!("{what} 1:{scale} {out}"));

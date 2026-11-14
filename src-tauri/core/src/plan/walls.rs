@@ -1221,7 +1221,8 @@ pub fn plan_walls(c: &Ctx, reference_lines: bool, out: &mut Vec<Primitive>, boun
         }
     }
     let tail = out.split_off(fuse_from);
-    out.extend(super::seams::fuse_wall_plan(tail));
+    let curved: std::collections::HashSet<&str> = p.walls.iter().filter(|w| w.floor_id == c.a.floor && crate::wall_arc::WallArc::of_wall(w).is_some()).map(|w| w.id.as_str()).collect();
+    out.extend(super::seams::fuse_wall_plan(tail, &|id: &str| curved.contains(id)));
     Ok(())
 }
 

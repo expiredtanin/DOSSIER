@@ -2,13 +2,19 @@
 //! Stils (gleiche Füllung und Schraffur) verschiedener Bauteile trennt, entfällt — Innenputz an Innenputz
 //! beim T-Stoss, Mauerwerk an Mauerwerk. Linien bleiben nur am Materialwechsel (und am Rand der Masse).
 //!
-//! Die Flächen selbst bleiben einzeln (kein Boolean, die Löcher einer Vereinigung hätten im Polygon
-//! keinen Platz); sie stossen ohne Fuge aneinander. Entfernt werden nur Strecken, deren beide Seiten
-//! (Probe in 0.2 mm Abstand) in Flächen gleichen Stils mit verschiedenem Besitzer liegen. Teilstücke einer
-//! Polygonkante werden zu eigenen Linien der Klasse `piece_cls`. Gleicher Besitzer (eigene Schichten einer
-//! Wand) behält seine Fugen.
+//! Linien ([`fuse_wall_plan`] im Grundriss, [`fuse_section`] im Schnitt): entfernt werden Strecken, deren
+//! beide Seiten (Probe in 0.2 mm Abstand; oberste, zuletzt gezeichnete Fläche) gleichen Stil zeigen und die
+//! entweder auf dem Rand zweier Flächen verschiedener Besitzer liegen (Stoss) oder quer durch eine Fläche
+//! laufen (Überlappung durchlaufender, nicht verbundener Wände). Teilstücke einer Polygonkante werden zu
+//! eigenen Linien der Klasse `piece_cls`. Gleicher Besitzer (eigene Schichten einer Wand) behält seine Fugen.
 //!
-//! Grundriss: `walls.rs` (Bänder, Umriss, Fugen). Schnitt: `section/primitives.rs` (feine Fugen).
+//! Flächen ([`union_bands`], nur Grundriss, nach Abzugskörpern und Stützen-Aussparung): die Schichtbänder
+//! gleichen Stoffs verschiedener Wände werden per Boolean (i_overlay, [`crate::polygon_bool::union`]) zu EINER
+//! Fläche vereinigt — eine Füllung, eine durchgehende Schraffur mit Lage und Ursprung der Hauptwand (grösster
+//! Anteil), Löcher über Brücken im Ring. Die Bänder bleiben als unsichtbare Pick-Flächen (Wand-Id, ohne
+//! Füllung) für Auswahl, Rahmen-Auswahl und Hervorhebung.
+//!
+//! Grundriss: `walls.rs` (Bänder, Umriss, Fugen), `domains.rs` (Vereinigung). Schnitt: `section/primitives.rs`.
 
 use super::prim::{Primitive, Sstr};
 use crate::model::Vec2;
@@ -31,16 +37,25 @@ pub(crate) struct Region {
     pub pts: Vec<Vec2>,
     pub key: String,
     pub owner: String,
+    /// Zeichenreihenfolge (Index im Primitiv-Strom): die oberste Fläche an einem Punkt ist die sichtbare.
+    z: usize,
+    /// Sehnen-Näherung einer Bogenwand: eine Linie im Innern der Fläche kann der gezeichnete Bogen-Umriss einer
+    /// Nachbarwand sein (Sehnenpfeil) — sie entfällt nur am Stoss zweier Flächen.
+    curved: bool,
     bbox: [f64; 4],
 }
 
 impl Region {
     pub fn new(pts: Vec<Vec2>, key: String, owner: String) -> Region {
+        Region::at(pts, key, owner, 0)
+    }
+
+    fn at(pts: Vec<Vec2>, key: String, owner: String, z: usize) -> Region {
         let mut bbox = [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY];
         for p in &pts {
             bbox = [bbox[0].min(p.x), bbox[1].min(p.y), bbox[2].max(p.x), bbox[3].max(p.y)];
         }
-        Region { pts, key, owner, bbox }
+        Region { pts, key, owner, z, curved: false, bbox }
     }
 
     /// Liegt `p` höchstens [`TOUCH`] vom Rand der Fläche entfernt?
@@ -84,7 +99,7 @@ fn kept(a: Vec2, b: Vec2, regions: &[Region]) -> Option<Vec<(f64, f64)>> {
     let m = 2.0 * PROBE;
     let bb = [a.x.min(b.x) - m, a.y.min(b.y) - m, a.x.max(b.x) + m, a.y.max(b.y) + m];
     let cands: Vec<&Region> = regions.iter().filter(|r| r.bbox[0] <= bb[2] && r.bbox[2] >= bb[0] && r.bbox[1] <= bb[3] && r.bbox[3] >= bb[1]).collect();
-    if cands.len() < 2 {
+    if cands.is_empty() {
         return None;
     }
     let mut ts = vec![0.0, len];
@@ -113,9 +128,23 @@ fn kept(a: Vec2, b: Vec2, regions: &[Region]) -> Option<Vec<(f64, f64)>> {
     for w in ts.windows(2) {
         let t = (w[0] + w[1]) / 2.0;
         let mid = Vec2 { x: a.x + u.x * t, y: a.y + u.y * t };
-        let side = |s: f64| -> Vec<&Region> { cands.iter().filter(|r| r.contains(Vec2 { x: mid.x + n.x * s * PROBE, y: mid.y + n.y * s * PROBE }) && r.touches(mid)).copied().collect() };
-        let (l, r) = (side(1.0), side(-1.0));
-        let fused = l.iter().any(|x| r.iter().any(|y| x.key == y.key && x.owner != y.owner));
+        let probe = |s: f64| Vec2 { x: mid.x + n.x * s * PROBE, y: mid.y + n.y * s * PROBE };
+        let (pl, pr) = (probe(1.0), probe(-1.0));
+        // Oberste (zuletzt gezeichnete) Fläche je Seite.
+        let top = |p: Vec2| cands.iter().filter(|r| r.contains(p)).max_by_key(|r| r.z).copied();
+        let fused = match (top(pl), top(pr)) {
+            (Some(l), Some(r)) if l.key == r.key => {
+                // Linie quer durch eine Fläche (nicht auf ihrem Rand) bzw. Stoss zweier Flächen verschiedener
+                // Besitzer: jede liegt mit dem Rand an der Linie oder überdeckt sie ganz (Überlappung).
+                let holds = |x: &Region| x.touches(mid) || (!x.curved && x.contains(pl) && x.contains(pr));
+                if l.z == r.z {
+                    !l.curved && !l.touches(mid)
+                } else {
+                    l.owner != r.owner && holds(l) && holds(r)
+                }
+            }
+            _ => false,
+        };
         parts.push((w[0], w[1], fused));
     }
     // Schmale Reste neben einem entfallenden Stück (schräge Kanten: Probe-Versatz) entfallen mit.
@@ -149,7 +178,7 @@ fn lerp(a: Vec2, b: Vec2, t: f64) -> Vec2 {
 /// `is_line`: Linien, die betroffen sein dürfen; `is_poly`: gestrichene Polygone (Kanten ausser
 /// `no_stroke_edges`); `piece_cls`: Klasse der Linien, in die eine nur teilweise entfallende Polygonkante zerfällt.
 pub(crate) fn fuse(prims: Vec<Primitive>, regions: &[Region], is_line: &dyn Fn(&Primitive) -> bool, is_poly: &dyn Fn(&Primitive) -> bool, piece_cls: &str) -> Vec<Primitive> {
-    if regions.len() < 2 {
+    if regions.is_empty() {
         return prims;
     }
     let mut out: Vec<Primitive> = Vec::with_capacity(prims.len());
@@ -218,11 +247,11 @@ pub(crate) fn style_key(fill: &str, greyed: Option<bool>, hatch: &super::prim::H
 /// (`section-cut-outline`, Vereinigung aller Flächen) bleibt unberührt.
 pub(crate) fn fuse_section(prims: Vec<Primitive>) -> Vec<Primitive> {
     let mut regions: Vec<Region> = Vec::new();
-    for q in &prims {
+    for (z, q) in prims.iter().enumerate() {
         if let Primitive::Polygon { pts, fill, hatch, greyed, wall_id, ceiling_id, roof_id, stair_id, extruded_solid_id, context_object_id, .. } = q {
             let owner = [("w", wall_id), ("c", ceiling_id), ("r", roof_id), ("s", stair_id), ("x", extruded_solid_id), ("o", context_object_id)].into_iter().find_map(|(k, id)| id.as_ref().map(|id| format!("{k}{id}")));
             if let (Some(owner), true, true) = (owner, fill != "none", pts.len() >= 3) {
-                regions.push(Region::new(pts.clone(), style_key(fill, *greyed, hatch), owner));
+                regions.push(Region::at(pts.clone(), style_key(fill, *greyed, hatch), owner, z));
             }
         }
     }
@@ -232,23 +261,181 @@ pub(crate) fn fuse_section(prims: Vec<Primitive>) -> Vec<Primitive> {
 }
 
 /// Grundriss-Wände ([198]): Schichtbänder (und schwarze Sammelflächen) je Wand sind die Flächen; entfallen
-/// die Umriss-/Fugenlinien zwischen gleichen Flächen verschiedener Wände (T-Stoss, Kreuzung, Ecke).
-pub(crate) fn fuse_wall_plan(prims: Vec<Primitive>) -> Vec<Primitive> {
+/// die Umriss-/Fugenlinien zwischen gleichen Flächen verschiedener Wände (T-Stoss, Kreuzung, Ecke) bzw. quer
+/// durch eine gleich gestaltete Fläche (Überlappung). `curved`: Wand-Id einer Bogenwand (Bänder als Sehnenzug).
+pub(crate) fn fuse_wall_plan(prims: Vec<Primitive>, curved: &dyn Fn(&str) -> bool) -> Vec<Primitive> {
     #[cfg(test)]
     if OFF.with(|o| o.get()) {
         return prims;
     }
     let mut regions: Vec<Region> = Vec::new();
-    for q in &prims {
+    for (z, q) in prims.iter().enumerate() {
         if let Primitive::Polygon { pts, fill, stroke, stroke_width_mm, hatch, greyed, wall_id: Some(w), opening_id: None, .. } = q {
             let band = stroke == "none" && fill != "none";
             let grob = fill == super::style::HATCH_INK && stroke != "none" && *stroke_width_mm > 0.0;
             if (band || grob) && pts.len() >= 3 {
-                regions.push(Region::new(pts.clone(), style_key(fill, *greyed, hatch), w.clone()));
+                let mut r = Region::at(pts.clone(), style_key(fill, *greyed, hatch), w.clone(), z);
+                r.curved = curved(w);
+                regions.push(r);
             }
         }
     }
     let is_line = |q: &Primitive| matches!(q, Primitive::Line { cls, opening_id: None, .. } if matches!(&**cls, "wall-outline" | "layer-joint" | "layer-joint-l"));
     let is_poly = |q: &Primitive| matches!(q, Primitive::Polygon { stroke, stroke_width_mm, wall_id: Some(_), opening_id: None, .. } if stroke != "none" && *stroke_width_mm > 0.0);
     fuse(prims, &regions, &is_line, &is_poly, "wall-outline")
+}
+
+/// Gerichtete Bandmuster (Dämmschlange, Zickzack, Welle, Holzkreuz): ihre Lage hängt an Wandrichtung und
+/// Schichtdicke — nur gleich ausgerichtete Bänder werden vereinigt.
+fn directed(p: crate::model::HatchPattern) -> bool {
+    use crate::model::HatchPattern as H;
+    matches!(p, H::Insulation | H::InsulationHard | H::InsulationWave | H::Timber)
+}
+
+/// Schlüssel der Vereinigung: Füllung, Ausgegraut, Deckkraft und Schraffur MIT Richtung (Winkel, polare
+/// Bogen-Schraffur) — die Richtung trägt Bedeutung (Dämm-Striche quer zur Wand, [166]); verschieden
+/// ausgerichtete Schraffur bleibt getrennt (mit Linie). Der Ursprung zählt nicht: die vereinigte Fläche nimmt
+/// den der Hauptwand. Flächige Linienmuster sind um 180° symmetrisch (Winkel modulo 180°), ohne Muster zählt
+/// der Winkel nicht. `None`: nicht vereinigen (Bild, Verlauf).
+fn merge_key(fill: &str, greyed: Option<bool>, opacity: Option<f64>, h: &super::prim::HatchRender) -> Option<String> {
+    use crate::model::{HatchPattern as H, HatchStyleKind as K};
+    if h.kind.is_some_and(|k| k != K::Vector) || h.image.is_some() || h.gradient.is_some() {
+        return None;
+    }
+    let angle = match h.pattern {
+        H::None | H::Solid => 0.0,
+        p if directed(p) => h.angle,
+        _ => {
+            let a = (h.angle.rem_euclid(180.0) * 1e6).round() / 1e6;
+            if a >= 180.0 { 0.0 } else { a }
+        }
+    };
+    let polar = if matches!(h.pattern, H::None | H::Solid) { None } else { h.polar };
+    let key = style_key(fill, greyed, &super::prim::HatchRender { angle, polar, ..h.clone() });
+    Some(format!("{key}|{opacity:?}"))
+}
+
+fn ring_area(r: &[[f64; 2]]) -> f64 {
+    let n = r.len();
+    (0..n).map(|i| r[i][0] * r[(i + 1) % n][1] - r[(i + 1) % n][0] * r[i][1]).sum::<f64>() / 2.0
+}
+
+fn in_ring(r: &[[f64; 2]], p: [f64; 2]) -> bool {
+    let n = r.len();
+    let mut c = false;
+    for i in 0..n {
+        let (a, b) = (r[i], r[(i + 1) % n]);
+        if (a[1] > p[1]) != (b[1] > p[1]) && p[0] < a[0] + (p[1] - a[1]) / (b[1] - a[1]) * (b[0] - a[0]) {
+            c = !c;
+        }
+    }
+    c
+}
+
+/// Ein Punkt sicher im Innern des Rings (knapp innen neben einer der längsten Kanten).
+fn interior_point(r: &[[f64; 2]]) -> Option<[f64; 2]> {
+    let s = ring_area(r).signum();
+    let n = r.len();
+    let len = |i: usize| (r[(i + 1) % n][0] - r[i][0]).hypot(r[(i + 1) % n][1] - r[i][1]);
+    let mut edges: Vec<usize> = (0..n).collect();
+    edges.sort_by(|a, b| len(*b).total_cmp(&len(*a)));
+    for i in edges.into_iter().take(8) {
+        let (a, b, l) = (r[i], r[(i + 1) % n], len(i));
+        if !(l > 1e-6) {
+            break;
+        }
+        let m = [(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0];
+        // Linke Normale zeigt im Gegenuhrzeigersinn nach innen.
+        let nin = [-s * (b[1] - a[1]) / l, s * (b[0] - a[0]) / l];
+        for d in [1e-5, 1e-4, 1e-3] {
+            let p = [m[0] + nin[0] * d, m[1] + nin[1] * d];
+            if in_ring(r, p) {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+/// [198] Schichtbänder gleichen Stoffs verschiedener Wände zu einer Fläche vereinigen (T-Stoss, Ecke, Kreuzung,
+/// Überlappung durchlaufender Wände, Bogen an gerader Wand). Die vereinigte Fläche steht an der Stelle des ersten
+/// Bandes (später Gezeichnetes bleibt darüber), ohne Wand-Id, mit Füllung/Schraffur des grössten Bandes
+/// (Hauptwand: Lage, Ursprung); die Bänder bleiben als unsichtbare Pick-Flächen (Füllung „none", ohne
+/// Schraffur). Nur Zusammenhänge aus mindestens zwei Wänden; was i_overlay nicht zusammenbringt, bleibt wie es war.
+/// Läuft nach den Abzugskörpern und der Stützen-Aussparung (die nur Flächen mit Wand-Id bearbeiten).
+pub(crate) fn union_bands(mut prims: Vec<Primitive>) -> Vec<Primitive> {
+    #[cfg(test)]
+    if OFF.with(|o| o.get()) {
+        return prims;
+    }
+    use std::collections::BTreeMap;
+    // Schlüssel → (Index, Ring, Wand)
+    type Band = (usize, Vec<[f64; 2]>, String);
+    let mut groups: BTreeMap<String, Vec<Band>> = BTreeMap::new();
+    for (i, q) in prims.iter().enumerate() {
+        if let Primitive::Polygon { pts, fill, stroke, hatch, greyed, opacity, wall_id: Some(w), opening_id: None, .. } = q {
+            if stroke != "none" || fill == "none" || pts.len() < 3 || pts.iter().any(|p| !p.x.is_finite() || !p.y.is_finite()) {
+                continue;
+            }
+            if let Some(k) = merge_key(fill, *greyed, *opacity, hatch) {
+                groups.entry(k).or_default().push((i, pts.iter().map(|p| [p.x, p.y]).collect(), w.clone()));
+            }
+        }
+    }
+    // (Einfügestelle, neue Fläche, aufgehobene Bänder)
+    let mut merged: Vec<(usize, Primitive, Vec<usize>)> = Vec::new();
+    for g in groups.into_values() {
+        if g.len() < 2 || g.iter().all(|x| x.2 == g[0].2) {
+            continue;
+        }
+        let u = crate::polygon_bool::union(&g.iter().map(|x| vec![x.1.clone()]).collect::<Vec<_>>());
+        if u.len() >= g.len() {
+            continue;
+        }
+        let probes: Vec<Option<[f64; 2]>> = g.iter().map(|x| interior_point(&x.1)).collect();
+        for pl in &u {
+            let members: Vec<usize> = (0..g.len()).filter(|&k| probes[k].is_some_and(|p| in_ring(&pl[0], p) && !pl[1..].iter().any(|h| in_ring(h, p)))).collect();
+            if members.len() < 2 || members.iter().all(|&k| g[k].2 == g[members[0]].2) {
+                continue;
+            }
+            // Hauptwand: grösstes Band, gerade Wände vor Bogenwänden (deren polare Schraffur passt nur zum Bogen).
+            let polar = |k: usize| matches!(&prims[g[k].0], Primitive::Polygon { hatch, .. } if hatch.polar.is_some());
+            let rank = |k: usize| (!polar(k), ring_area(&g[k].1).abs());
+            let main = members.iter().copied().max_by(|&a, &b| rank(a).partial_cmp(&rank(b)).unwrap_or(std::cmp::Ordering::Equal)).unwrap_or(members[0]);
+            let holes: Vec<Vec<[f64; 2]>> = pl[1..].iter().filter(|h| ring_area(h).abs() > 1e-10).cloned().collect();
+            let ring = crate::polygon_holes::merge_holes(&pl[0], &holes, 1e-5).ring;
+            if ring.len() < 3 {
+                continue;
+            }
+            let mut poly = prims[g[main].0].clone();
+            if let Primitive::Polygon { pts, no_stroke_edges, wall_id, .. } = &mut poly {
+                *pts = ring.iter().map(|p| Vec2 { x: p[0], y: p[1] }).collect();
+                *no_stroke_edges = None;
+                *wall_id = None;
+            }
+            let first = members.iter().map(|&k| g[k].0).min().unwrap_or(0);
+            merged.push((first, poly, members.iter().map(|&k| g[k].0).collect()));
+        }
+    }
+    if merged.is_empty() {
+        return prims;
+    }
+    merged.sort_by_key(|m| m.0);
+    for (_, _, gone) in &merged {
+        for &i in gone {
+            if let Primitive::Polygon { fill, hatch, .. } = &mut prims[i] {
+                *fill = "none".into();
+                **hatch = super::style::no_hatch();
+            }
+        }
+    }
+    let mut out: Vec<Primitive> = Vec::with_capacity(prims.len() + merged.len());
+    let mut it = merged.into_iter().peekable();
+    for (i, q) in prims.into_iter().enumerate() {
+        while let Some(m) = it.next_if(|m| m.0 == i) {
+            out.push(m.1);
+        }
+        out.push(q);
+    }
+    out
 }

@@ -1799,7 +1799,14 @@ pub fn plan_domains(p: &Project, a: &PlanArgs) -> Result<DomainPrims, String> {
     domains_after(&c, &mut out, &mut bounds, &mut marks);
     merge_marks(&mut bounds, &marks);
     out.bounds = bounds.get();
+    merge_wall_bands(&mut out);
     Ok(out)
+}
+
+/// [198] Schichtbänder gleichen Stoffs verschiedener Wände zu einer Fläche vereinigen (`seams::union_bands`) —
+/// zuletzt, nach Abzugskörpern und Stützen-Aussparung (die nur Flächen mit Wand-Id bearbeiten).
+fn merge_wall_bands(d: &mut DomainPrims) {
+    d.walls = super::seams::union_bands(std::mem::take(&mut d.walls));
 }
 
 /// [157]/[221] Schnitt- und Ansichtsmarken zählen zum Ausmass (sonst beim Einpassen abgeschnitten), aber nur in
@@ -1988,6 +1995,7 @@ pub fn plan_domains_buf(p: &Project, a: &PlanArgs) -> Result<Vec<u8>, String> {
     let (under, violations) = extras_of(p, a);
     group_refs(&mut w, &under);
     apply_voids(p, a, &mut d);
+    merge_wall_bands(&mut d);
     for g in [&d.ceilings, &d.roofs, &d.rooms, &d.walls, &d.stairs, &d.columns] {
         w.group(g);
     }
@@ -2141,7 +2149,8 @@ fn assemble_cached(c: &Ctx, revs: &crate::document::Revs, cc: &mut super::cache:
         let (under, violations) = extras_of(c.p, c.a);
         let extra = super::extras::extra_bounds(c.p, &under, |k| c.shown(k));
         apply_voids(c.p, c.a, &mut d);
-        let plain = |g: Vec<Primitive>| g.into_iter().map(|q| (q, 0)).collect::<Vec<_>>();
+        merge_wall_bands(&mut d);
+        let plain =|g: Vec<Primitive>| g.into_iter().map(|q| (q, 0)).collect::<Vec<_>>();
         let mut lists = vec![under];
         for g in [d.ceilings, d.roofs, d.rooms, d.walls, d.stairs, d.columns, d.solids, d.context, d.sections] {
             lists.push(plain(g));
@@ -2822,7 +2831,8 @@ mod tests {
             let t = serde_json::json!({ "floor": "eg", "show": ["20"], "grey": [], "scale": scale }).to_string();
             plan_domains(p, &PlanArgs::parse(1.0, &t).unwrap()).unwrap().walls
         };
-        let fills = |prims: &[Primitive]| prims.iter().filter_map(|q| match q { Primitive::Polygon { fill, hatch, .. } => Some((fill.clone(), hatch.pattern)), _ => None }).collect::<Vec<_>>();
+        // [198] Sichtbare Flächen: ohne die unsichtbaren Pick-Flächen der vereinigten Bänder.
+        let fills = |prims: &[Primitive]| prims.iter().filter(|q| !crate::plan::wall_join_tests::is_pick_band(q)).filter_map(|q| match q { Primitive::Polygon { fill, hatch, .. } => Some((fill.clone(), hatch.pattern)), _ => None }).collect::<Vec<_>>();
         let before100 = fills(&run(&p, 100.0));
         let before50 = fills(&run(&p, 50.0));
         let mut rule: OverrideRule = serde_json::from_value(serde_json::json!({"id": "d", "name": "Dämmung weiss", "enabled": false,
@@ -2841,9 +2851,13 @@ mod tests {
         // Fugen nur an der weissen Schicht (Backstein|Putz schwarz an schwarz ohne Fuge).
         let joints = r100.iter().filter(|q| matches!(q, Primitive::Line { cls, .. } if cls == "layer-joint")).count();
         assert!(joints > 0);
+        // 1:50: die Dämmschicht weiss ohne Schraffur statt der Dämmschlange (Zahl der Flächen hängt an der
+        // [198]-Vereinigung gleicher Schichten und ist daher kein Vergleich mehr).
         let f50 = fills(&run(&p, 50.0));
-        assert_eq!(f50.len(), before50.len());
-        assert!(f50.iter().zip(&before50).any(|(a, b)| a.0 == "#ffffff" && a.1 == HatchPattern::None && b.1 != HatchPattern::None));
+        let white = |f: &[(String, HatchPattern)]| f.iter().any(|(c, h)| c == "#ffffff" && *h == HatchPattern::None);
+        let hatched = |f: &[(String, HatchPattern)]| f.iter().filter(|(_, h)| *h != HatchPattern::None).count();
+        assert!(!white(&before50) && white(&f50), "Dämmschicht weiss ohne Schraffur");
+        assert!(hatched(&f50) < hatched(&before50), "weniger schraffierte Flächen: {} → {}", hatched(&before50), hatched(&f50));
     }
 
     /// [33] „Ausblenden“ im Grundriss: Wände samt ihren Öffnungen (Symbole) weg, Decken/Räume bleiben; eine
@@ -2899,7 +2913,8 @@ mod tests {
             d.walls
                 .iter()
                 .filter_map(|q| match q {
-                    Primitive::Polygon { pts, wall_id: Some(_), fill, .. } if fill != "none" => Some(pts),
+                    // [198] Bänder in einer Vereinigung: unsichtbare Pick-Fläche (ohne Füllung und Strich).
+                    Primitive::Polygon { pts, wall_id: Some(_), fill, stroke, .. } if fill != "none" || stroke == "none" => Some(pts),
                     _ => None,
                 })
                 .map(|pts| (0..pts.len()).map(|i| { let (a, b) = (&pts[i], &pts[(i + 1) % pts.len()]); a.x * b.y - b.x * a.y }).sum::<f64>().abs() / 2.0)
