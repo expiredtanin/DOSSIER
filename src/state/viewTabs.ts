@@ -88,6 +88,18 @@ export function activateTab(
   return { next: { ...stored, activeId: id }, apply: target.state ?? null };
 }
 
+/** Ctrl+Tab / Ctrl+Umschalt+Tab: nächster bzw. vorheriger Reiter, zyklisch (ein Reiter: nichts zu tun). */
+export function cycleTab(
+  s: ViewTabsState,
+  dir: 1 | -1,
+  live: ViewSnapshotState,
+): { next: ViewTabsState; apply: ViewSnapshotState | null } {
+  const n = s.tabs.length;
+  if (n <= 1) return { next: s, apply: null };
+  const i = Math.max(0, s.tabs.findIndex((t) => t.id === s.activeId));
+  return activateTab(s, s.tabs[(i + dir + n) % n].id, live);
+}
+
 /** Schliesst einen Reiter (nie den letzten). War er aktiv, wird der rechte (sonst linke) Nachbar aktiv;
  *  dessen gemerkter Zustand ist anzuwenden. Ausschnitte bleiben unberührt. */
 export function closeTab(

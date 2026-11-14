@@ -3303,6 +3303,8 @@ export const de = {
   "shortcut.toolRoom": "Werkzeug: Raum",
   "shortcut.floorDown": "Geschoss tiefer",
   "shortcut.floorUp": "Geschoss höher",
+  "shortcut.nextViewTab": "Nächster Reiter (Ansicht)",
+  "shortcut.prevViewTab": "Voriger Reiter (Ansicht)",
   "shortcut.showSelection3d": "Auswahl in 3D zeigen (ohne Auswahl: alles)",
   "shortcut.objectSettings": "Einstellungen des gewählten Objekts öffnen (ohne Auswahl: Werkzeug-Voreinstellung)",
   "shortcut.hideSelection3d": "Auswahl im 3D ausblenden",

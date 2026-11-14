@@ -17,6 +17,7 @@ import {
   adjacentFloorId,
   planFitKey,
   stepFloor,
+  cycleTab,
   isPlanKindActive,
   openTab,
   restoreViewTabs,
@@ -349,5 +350,24 @@ describe("Geschoss-Navigation wie Archicad [185]", () => {
     expect(planFitKey(levels[0], 1)).not.toBe(planFitKey(levels[0], 2));
     expect(planFitKey(levels[1], 1)).not.toBe(planFitKey(levels[0], 1));
     expect(planFitKey({ id: "x", kind: "drawing" }, 1)).not.toBe(planFitKey({ id: "y", kind: "drawing" }, 1));
+  });
+});
+
+describe("[252] cycleTab — Ctrl+Tab durch die Reiter", () => {
+  const mk = (n: number, active: number) => {
+    const tabs = Array.from({ length: n }, (_, i) => ({ id: `t${i}`, state: st(`l${i}`) }));
+    return { tabs, activeId: `t${active}` };
+  };
+  it("vorwärts und rückwärts, zyklisch", () => {
+    expect(cycleTab(mk(3, 0), 1, st("l0")).next.activeId).toBe("t1");
+    expect(cycleTab(mk(3, 2), 1, st("l2")).next.activeId).toBe("t0");
+    expect(cycleTab(mk(3, 0), -1, st("l0")).next.activeId).toBe("t2");
+    expect(cycleTab(mk(3, 2), -1, st("l2")).apply?.activeLevelId).toBe("l1");
+  });
+  it("ein Reiter: nichts zu tun", () => {
+    const s = mk(1, 0);
+    const r = cycleTab(s, 1, st("l0"));
+    expect(r.next).toBe(s);
+    expect(r.apply).toBeNull();
   });
 });

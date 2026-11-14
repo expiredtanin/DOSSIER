@@ -6,7 +6,7 @@ import type { ViewType } from "../model/viewTypes";
 import { sheetLevelOf } from "../model/layoutModel";
 import { getState } from "./appStore";
 import type { ViewSnapshotState } from "./viewSnapshots";
-import { getViewStateBridge, getViewTabs, navigateToLevel, setViewTabs, stepFloor, switchViewKind, type TabNav } from "./viewTabs";
+import { cycleTab, getViewStateBridge, getViewTabs, navigateToLevel, setViewTabs, stepFloor, switchViewKind, type TabNav } from "./viewTabs";
 import { getView3dFilter, hideSelection3d, selectionIds3d, setView3dFilter, showSelection3d } from "./view3dFilter";
 import { clearKinds } from "./selection";
 
@@ -41,6 +41,16 @@ export function switchViewType(want: ViewType): void {
 export function openLayoutTab(layoutId: string): void {
   const sheet = sheetLevelOf(getState().project, layoutId);
   if (sheet) openLevel(sheet.id);
+}
+
+/** [252] Ctrl+Tab (+1) / Ctrl+Umschalt+Tab (−1): durch die Ansichts-Reiter springen, zyklisch. */
+export function cycleViewTab(dir: 1 | -1): void {
+  const bridge = getViewStateBridge();
+  if (!bridge) return;
+  const r = cycleTab(getViewTabs(), dir, bridge.live());
+  if (r.next === getViewTabs()) return;
+  setViewTabs(r.next);
+  if (r.apply) bridge.apply(r.apply);
 }
 
 /** [185] Cmd/Ctrl+5 (−1) bzw. Cmd/Ctrl+6 (+1): im Grundriss-/3D-Reiter ein Geschoss tiefer/höher (Zoom bleibt). */
