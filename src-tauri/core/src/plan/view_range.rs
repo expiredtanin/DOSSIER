@@ -97,7 +97,7 @@ impl ViewRange {
 pub fn opening_vertical_extent(p: &Project, w: &Wall, o: &Opening) -> (f64, f64) {
     let (zb, zt) = p.wall_vertical_extent(w);
     let ob = zb + crate::jsnum::max(0.0, o.sill_height);
-    (ob, crate::jsnum::min(zt, ob + o.height))
+    (ob, p.opening_top_under_ceilings(w, o, ob, crate::jsnum::min(zt, ob + o.height)))
 }
 
 /// Primitive ab `from` als „über/unter Schnitt“ umzeichnen: Flächen verlieren Füllung, Schraffur und

@@ -205,6 +205,17 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   Puffer-Auswertung geprüft, nicht angesehen (Linux ohne Metal). Offen: Mac-Gegenprobe; 3D-Live-Schnitt durch Formfenster zeigt
   Rechteck-Loch (`render3d/section.rs` schneidet die Stücke, nicht den Körper); Rahmen/Glas gebogener Formöffnungen bleiben
   Sehnen zwischen den Ecken (wie Rechteck-Einbauteile in Bogenwänden).
+  Stand 14.11. (abends): Einbauteile in Bogenwänden nach Modell entschieden (kein Feld gebogen/gerade): mit Schichteinzug [106]
+  liegen Wandloch UND Teile gerade auf der Sehne über `reveal_zone` (gerades Fenster mit sauberem Anschluss, wie bisher — so die
+  Erker-Fenster im Musterhaus komplex, `mk-fe-dk` hat `layerReveals`); ohne Schichteinzug folgen Rahmen, Flügel, Glas, Fensterbank
+  (Rechteck- und Formöffnungen) dem Bogen, sobald die Pfeilhöhe der Öffnung am Aussenradius > 1 cm ist (`follows_arc`,
+  `BEND_SAGITTA`; r = 2 m ab ≈ 0,4 m Breite), schmalere bleiben gerade. Umsetzung `openings.rs`: Netze der abgewickelten Wand an den
+  Teilstellen der Wand (gleiche Teilung wie `chord_walls` + Laibungen) zerschnitten (`slice_x`, ohne T-Stösse) und stückweise
+  linear auf die Sehnen gelegt (`bend_on_arc`), Facetten glatt (Knickwinkel 20°). Tests `fenster_in_bogenwand_folgt_dem_bogen`
+  (jeder Punkt eines Teils quer im Bereich seiner Ecken, dicht), `slice_x_quader_bleibt_geschlossen`. Grundriss (Linien mit
+  konstantem Querversatz als Bögen, `bend_prims`) und Schnitt ([157] tangential an der Schnittstelle) zeigten das Symbol schon im
+  Bogen. Nur per Rust-Test geprüft (Linux, kein Metal, nicht angesehen). Offen: Mac-Gegenprobe; mit Schichteinzug zeigt der
+  Grundriss das Symbol gebogen, 3D gerade auf der Sehne.
 - ◐ **[228]** In Blender öffnen / .blend speichern (12.11., Wunsch Maintainer; Stand 13.11.: umgesetzt und mit bpy 5.3 im Linux-Container geprüft, Mac-Gegenprobe offen). Skript `render_dossier.py` hat Modus `save` (`scene.json` `mode`, Argument `--mode`): Szene wie fürs Rendering bauen, Objekte in Collections nach Bauteil (Geschosse, Wände, Decken, Dächer, Fenster und Türen, Treppen, Stützen, Extrusionen, Bäume, Gelände, Kontext, Dossier) mit lesbaren Namen (`Wand eg-aw-s`; Zuordnung aus Knotenname/`extras` des GLB, keine Export-Änderung nötig, `doc/RENDER-SZENE.md`), Kamera `Dossier-Kamera`, Himmel `Dossier-Himmel`, `pack_all`, `save_as_mainfile`; 3D-Fenster der Datei in Material-Vorschau mit Blick durch die Kamera. Dialog: «Als .blend speichern …» (Blender im Hintergrund, dann nativer Speichern-Dialog) und «In Blender öffnen» (Datei im Arbeitsordner bauen, dann Blender MIT Oberfläche auf die Datei, ohne Warten); Browser: ZIP mit Anleitung für `--mode save`. Neuer Tauri-Befehl `blender_open`, Electron `blender:open`. CLI `dossier-cli … blend --out x.blend`. Abweichung: «Öffnen» startet Blender nicht mit dem Skript, sondern mit der fertigen .blend (zuverlässiger, selbe Datei wie «Speichern», Layout steckt in der Datei). Offen: Mac/Windows-Gegenprobe der Start-Befehle (`blender_open` nur im Linux-Container kompiliert/getestet), Blender-GUI nicht gesehen (Linux ohne Anzeige); Datei liegt nach «Öffnen» im Temp-Ordner (in Blender «Speichern unter»). · S
 - ◐ **[227]** Kontextgebäude auf dem Gelände, Baugrube im Rendering ausblenden (12.11., Befunde der Mac-Gegenprobe [211]). (1) Kern
   `context_ground.rs`: jedes zusammenhängende Gebäude eines Netzes (`importedMesh`, auch mehrere Häuser in einem Netz) wird senkrecht auf den
@@ -365,7 +376,14 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   beginnt aber schon bei 2,43 m (Wandoberkante 2,8 m); jetzt Höhe 1,5 (wie `og-f2`, Oberkante 2,4 m). Der Kern kappt Formöffnungen
   (Leibung, Rahmen, Glas, Wandkörper) wie Rechtecke an der Wandoberkante; Test `formoeffnung_ueber_wandoberkante_ragt_nicht_ueber_die_wand`
   (Rund-/Spitzbogen, Höhe 1 m über der Wand). Goldens (Ansicht Süd, Schnitt A, 3D-Modell) nachgeführt. Offen: Öffnungen, die in eine Decke
-  hineinragen (unter der Wandoberkante), werden nicht gekappt; Bild der Ansicht aus [216](3) nicht identisch nachgestellt. · S
+  hineinragen (unter der Wandoberkante), werden nicht gekappt; Bild der Ansicht aus [216](3) nicht identisch nachgestellt.
+  Stand 14.11. (abends): Öffnungen, die unter der Wandoberkante in eine Decke ragen, enden an der Deckenunterkante
+  (`Project::opening_top_under_ceilings`: Decke mit UK über der Brüstung und unter dem Sturz, Wand an Anfang/Mitte/Ende der Öffnung
+  — Mitte und knapp innerhalb beider Flächen — im Deckenumriss, nicht in einer Aussparung). Gilt überall, wo der Sturz an der
+  Wandoberkante gekappt wurde: 3D-Wandloch, Wandkörper, Einbauteile, Pick, Taschen, Schichteinzug, Flächenmuster, Plan/Schnitt
+  (`view_range`, `section/bands`), Ansicht, IFC, Sonne. Test `oeffnung_in_die_decke_endet_an_der_deckenunterkante` (Beispiel
+  `og-f1`: Brüstung 0,9 + 1,6 bei Decke ab 2,43 m; Rechteck/Rundbogen, gerade/Bogenwand; ohne Decke volle Höhe). Formöffnungen werden
+  wie an der Wandoberkante gestaucht (Umriss über die gekappte Höhe), nicht abgeschnitten. · S
 - 1:100-Pläne in Abgabequalität (Bemassung, Koten, Raumstempel, Öffnungen nach Detailgrad) — Plan-Review-Runde 4 nach [199].
 - ◐ **[256]** Plan-Review Runde 4 (1:100 Vorprojekt, 14.11., beide Musterhäuser + Wettbewerb, alle Grundrisse, Schnitt A-A, Ansicht Süd, 1:200
   Gegenprobe; CLI-SVG `--hatch` in Chromium, nur Linux). Behoben: (1) Raumstempel im Ersatz (Grundschrift/umbrochen/Nummer/gekürzt) verloren

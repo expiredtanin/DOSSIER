@@ -273,7 +273,7 @@ pub(crate) fn attach_bodies(p: &Project, wall: &Wall, shaped: &[&Opening], plain
     for o in shaped {
         let Some((from, to)) = opening_geom::opening_interval(&wr, o.position, o.width) else { continue };
         let bottom = zb + o.sill_height.max(0.0);
-        let top = zt.min(bottom + o.height);
+        let top = p.opening_top_under_ceilings(wall, o, bottom, zt.min(bottom + o.height));
         let (w, h) = (to - from, top - bottom);
         let Some(poly) = os::opening_outline(o, w, h) else { continue };
         let mut shift = vec![[0.0; 4]; bands];

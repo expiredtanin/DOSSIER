@@ -484,7 +484,7 @@ fn wall_lines(p: &Project, w: &Wall, s: &mut Sink) {
             let from = o.position.max(0.0).min(len);
             let to = (o.position + o.width).max(from).min(len);
             let b = o.sill_height.max(0.0);
-            let t = (b + o.height).min(z1 - z0);
+            let t = p.opening_top_under_ceilings(w, o, z0 + b, z0 + (b + o.height).min(z1 - z0)) - z0;
             if !(to - from > 1e-4 && t - b > 1e-4) {
                 continue;
             }
@@ -609,7 +609,7 @@ fn arc_wall_lines(p: &Project, w: &Wall, arc: &crate::wall_arc::WallArc, s: &mut
                 let from = o.position.max(0.0).min(len) * k;
                 let to = (o.position + o.width).min(len) * k;
                 let b = o.sill_height.max(0.0);
-                let t = (b + o.height).min(z1 - z0);
+                let t = p.opening_top_under_ceilings(w, o, z0 + b, z0 + (b + o.height).min(z1 - z0)) - z0;
                 (to - from > 1e-4 && t - b > 1e-4).then(|| vec![[from, b], [to, b], [to, t], [from, t]])
             })
             .collect();

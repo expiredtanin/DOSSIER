@@ -1138,7 +1138,7 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
                 continue;
             }
             let bottom = zb + max(0.0, o.sill_height);
-            let top = min(zt, bottom + o.height);
+            let top = p.opening_top_under_ceilings(wall, o, bottom, min(zt, bottom + o.height));
             out.push((k, Cutout { from, to, z_bottom: bottom, z_top: top }));
         }
         out

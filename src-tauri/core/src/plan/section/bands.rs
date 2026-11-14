@@ -9,7 +9,7 @@ pub(super) fn opening_extent(p: &Project, w: &Wall, o: &Opening) -> (f64, f64) {
     let (zb, zt) = p.wall_vertical_extent(w);
     let sill = max(0.0, o.sill_height);
     let ob = zb + sill;
-    (ob, min(zt, ob + o.height))
+    (ob, p.opening_top_under_ceilings(w, o, ob, min(zt, ob + o.height)))
 }
 
 /// [T2] Öffnung in der Bogenwand als gerade Ersatzwand: Sehne der Achse zwischen den Laibungen,
