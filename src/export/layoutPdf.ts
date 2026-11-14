@@ -34,6 +34,7 @@ import {
   resolveTitleBlock,
   resolveViewportScale,
   SHEET_SCALE_DENOMINATOR,
+  viewportCenterBounds,
   sheetLevelOf,
   sheetMmToModel,
   visibleCodesFromSnapshot,
@@ -230,10 +231,21 @@ async function renderPage(
       const ruleIds = snapshotOverrideRuleIds(project, snap);
       const template = snapshotTemplate(project, snap);
       const planOf = (visible: Set<string>) => viewportLevelPlan(project, snap.activeLevelId, visible, snap.detail, scaleN, true, snapshotMono(project, snap), ruleIds, template, snap.modelViewOptionId);
+      // [208] Eigene Bildmitte (Plakat): Ausschnitt um die Mitte; was darüber hinausgeht, schneidet der Rahmen ab.
+      const centered = viewportCenterBounds(vp, scaleN);
       const draw = async (plan: Plan, transparent: boolean, bounds?: Plan["bounds"]) => {
-        const print = planToPrintSvg(plan, { scaleDenominator: scaleN, pageWidthMm: vp.widthMm, pageHeightMm: vp.heightMm, transparent, bounds });
+        const print = planToPrintSvg(plan, { scaleDenominator: scaleN, pageWidthMm: vp.widthMm, pageHeightMm: vp.heightMm, transparent, bounds: centered ?? bounds });
         await prepareSvgFonts(doc, print.svg);
+        if (!centered) {
+          await doc.svg(print.svg, { x: vp.xMm, y: vp.yMm, width: vp.widthMm, height: vp.heightMm });
+          return;
+        }
+        doc.saveGraphicsState();
+        doc.rect(vp.xMm, vp.yMm, vp.widthMm, vp.heightMm, null);
+        doc.clip();
+        doc.discardPath();
         await doc.svg(print.svg, { x: vp.xMm, y: vp.yMm, width: vp.widthMm, height: vp.heightMm });
+        doc.restoreGraphicsState();
       };
       const full = await planOf(codes);
       if (!ctx.layers) {

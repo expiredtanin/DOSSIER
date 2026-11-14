@@ -353,6 +353,19 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   Offen: Rahmen sind so breit wie der Inhalt samt Masskette/Kontext (Musterhaus komplex: 2 Spalten je Grundriss, viel Weissraum im Rahmen, 2 Blätter); Anordnung mischt
   Gruppen (Pläne neben Situation, Ansichten darunter) statt strenger Zeilen; Tabellen-Spaltenköpfe „Reserve/Erfüllt“ eng; Baurecht-Zeilen mit „—“ bei fehlenden Vorgaben;
   Lage der Tabellen/des Bildes nicht von Hand fixiert (Neuberechnung nur durch Neuerstellen); nicht in der Tauri-App geprüft.
+  **Plakat in strengen Zeilen (14.11., zu den Offen-Punkten oben)**: `presentation_poster.rs` neu: Zeile 1 Situation (3D-Bild rechts daneben), Zeile 2 Grundrisse,
+  Zeile 3 Schnitte + Ansichten, Tabellen rechts neben der letzten Zeile (sonst eigene Zeile); Gruppen brechen ausgeglichen um (4 Grundrisse ⇒ 2 + 2), passt eine
+  Gruppe nicht mehr aufs angefangene Blatt, beginnt sie ganz auf dem nächsten. Rahmen so breit wie der Inhalt, links an einer Spaltenkante (nicht volle Spalten).
+  Neues Modellfeld **`LayoutViewport.center`** (Bildmitte im Modell; Kern `viewport_center`, Blatt `LayoutSheet`, PDF `layoutPdf` mit Klipp auf den Rahmen):
+  Grundrisse haben gleiche Rahmengrösse und gemeinsame Mitte (deckungsgleich), Schnitte/Ansichten gleiche Höhe und Höhenmitte (±0.00 einer Zeile auf einer Linie).
+  Ausschnitt = Inhalt, beschnitten auf Bauteile (`house`-Ausmass des Plan-Puffers) ± 20 mm Papier (Bemassung), Situation ± 80 mm um das Haus (1:500 ⇒ 40 m) —
+  Kontext/Gelände wird beschnitten statt den Rahmen aufzublasen. Baurecht-Tabelle: „Erfüllt“ mittig (`Col.center`, Ausrichtung „c“ in Blatt/PDF/DXF), Zellen-Innenabstand
+  wächst mit der Schrift. Tests: Rust `presentation_poster` (Zeilen, Umbruch, Gruppen nicht zerreissen), `presentation_sheet` (Ausschnitt, deckungsgleich/gleiche Höhe),
+  `sheet_viewports::eigene_bildmitte`, `sheet_table::baurecht_tabelle_plakat_koepfe_mit_luft`; vitest `presentationSheet.test.ts` (Wettbewerb + Musterhaus komplex: Gruppen je Zeile,
+  Spaltenkanten, deckungsgleich, ±0.00, Weissraum im gemeinsamen Grundriss-Rahmen < 15 %). Angesehen: Wettbewerb-PDF A1 vorher/nachher (Chromium, `pdftoppm`), Musterhaus komplex am Blatt
+  (2 Plakate: Situation + Bild, Grundrisse 2 × 2 | Ansichten, Schnitt, Tabellen). Offen: Musterhaus komplex — Grundrisse ~164 mm breit belegen je 2 von 6 Spalten, rechts bleibt ein
+  Drittel frei (feineres Raster oder 8 Spalten prüfen); Plakat 2 nur halb gefüllt; Situation/Bild-Verhältnis fest (Bild nimmt den Rest der Zeile); Plakat-Inhalte weiter nur
+  beim Erstellen berechnet; Baurecht-Zeilen mit „—“; nur Linux/Chromium, nicht in der Tauri-App.
   **Schriften im PDF eingebettet (14.11., zu c)**: alle jsPDF-Ausgaben (Blatt-/Plakat-/Ordner-PDF `layoutPdf.ts`, Einzelplan `exportPdf.ts`, Berichte `areaReport.ts`,
   Blatt-Tabellen) betten Inter und die im SVG gewählten Familien aus `public/fonts` ein (OFL, `NOTICE`): `export/pdfFonts.ts` lädt die WOFF2 (App: `fetch` auf App-Dateien,
   CLI/Tests: `setPdfFontLoader`), der Kern wandelt sie in TTF (`woff2_to_sfnt`, `core/src/woff2.rs` — Datei von render2d mitbenutzt, nicht doppelt), jsPDF bettet nur die

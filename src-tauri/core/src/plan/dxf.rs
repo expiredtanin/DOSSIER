@@ -1738,7 +1738,7 @@ fn sheets(cx: &mut Ctx, main: &mut Buf, layer_by_code: &HashMap<&str, String>) {
                                 _ => cx.o.default_font.clone(),
                             };
                             let st = cx.flat.add_text_style(&format!("TABELLE_{font}{}{}", if *bold { "_B" } else { "" }, if *italic { "_I" } else { "" }), &family, *bold, *italic);
-                            cx.flat.add_text2(&mut content, "TABELLE", V2 { x: x / 1000.0, y: -y / 1000.0 }, size / 1000.0, 0.0, s, if *align == "r" { 2.0 } else { 0.0 }, st);
+                            cx.flat.add_text2(&mut content, "TABELLE", V2 { x: x / 1000.0, y: -y / 1000.0 }, size / 1000.0, 0.0, s, match *align { "r" => 2.0, "c" => 1.0, _ => 0.0 }, st);
                         }
                     }
                 }

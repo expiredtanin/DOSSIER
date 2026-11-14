@@ -56,6 +56,7 @@ import {
   resolveViewportScale,
   sheetMmToModel,
   sheetModelToMm,
+  viewportCenterBounds,
   visibleCodesFromSnapshot,
 } from "../model/layoutModel";
 import {
@@ -114,6 +115,8 @@ export function ViewportPlanSvg({
           scaleDenominator: scaleN,
           pageWidthMm: viewport.widthMm,
           pageHeightMm: viewport.heightMm,
+          // [208] Eigene Bildmitte (Plakat): Ausschnitt um die Mitte, Kontext ausserhalb wird beschnitten.
+          bounds: viewportCenterBounds(viewport, scaleN),
         });
         el.replaceChildren(print.svg);
         placeInner(el, rectRef.current);
@@ -124,7 +127,7 @@ export function ViewportPlanSvg({
     return () => {
       disposed = true;
     };
-  }, [project, viewport.snapshotId, viewport.widthMm, viewport.heightMm, viewport.scaleDenominator]);
+  }, [project, viewport.snapshotId, viewport.widthMm, viewport.heightMm, viewport.scaleDenominator, viewport.center?.x, viewport.center?.y]);
   // Lage/Grösse über die Attribute des inneren SVG (folgt auch dem Ghost beim Ziehen).
   useEffect(() => {
     if (ref.current) placeInner(ref.current, rect);
@@ -825,7 +828,7 @@ export function LayoutSheetPane({
                     fontFamily={p.font === "serif" ? "Times, serif" : p.font === "mono" ? "Courier, monospace" : "Helvetica, Arial, sans-serif"}
                     fontWeight={p.bold ? "bold" : "normal"}
                     fontStyle={p.italic ? "italic" : "normal"}
-                    textAnchor={p.align === "r" ? "end" : "start"}
+                    textAnchor={p.align === "r" ? "end" : p.align === "c" ? "middle" : "start"}
                     fill="#111111"
                     pointerEvents="none"
                   >

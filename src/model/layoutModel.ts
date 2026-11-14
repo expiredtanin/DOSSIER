@@ -508,6 +508,21 @@ export function resolveViewportScale(
   return viewport.scaleDenominator ?? snapshot?.scaleDenominator ?? fallback;
 }
 
+/**
+ * [208] Modell-Bereich, den ein Viewport mit eigener Bildmitte (`center`) zeigt: genau das Rahmenrechteck um die Mitte
+ * (für `planToPrintSvg({ bounds })`); ohne Mitte `undefined` (Inhalt zentriert wie bisher, `viewport_center` im Kern).
+ */
+export function viewportCenterBounds(
+  viewport: LayoutViewport,
+  scale: number,
+): { minX: number; minY: number; maxX: number; maxY: number } | undefined {
+  const c = viewport.center;
+  if (!c || !Number.isFinite(c.x) || !Number.isFinite(c.y) || !(scale > 0)) return undefined;
+  const hw = (viewport.widthMm * scale) / 2000;
+  const hh = (viewport.heightMm * scale) / 2000;
+  return { minX: c.x - hw, minY: c.y - hh, maxX: c.x + hw, maxY: c.y + hh };
+}
+
 /** Aufgelöste Titelblock-Werte (alle Felder gefüllt) für die Darstellung. */
 export interface ResolvedTitleBlock {
   projectName: string;

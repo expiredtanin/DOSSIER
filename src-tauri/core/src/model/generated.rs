@@ -5575,6 +5575,12 @@ pub struct LayoutViewport {
     #[serde(rename = "scaleDenominator", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub scale_denominator: Option<f64>,
+    /// [208] Bildmitte im Modell (Meter; Schnitt/Ansicht: x längs, y Höhe), die in der Rahmenmitte liegt; fehlt sie,
+    /// die Mitte des Plan-Ausmasses. Ein Plakat setzt sie, damit Grundrisse deckungsgleich und Schnitte/Ansichten auf
+    /// gleicher ±0.00 stehen und Kontext ausserhalb des Rahmens beschnitten wird.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub center: Option<Vec2>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,

@@ -2099,6 +2099,12 @@ export type LayoutViewport = {
   heightMm: number;
   /** Optionaler Massstab-Nenner (1:N); übersteuert `snapshot.scaleDenominator`. */
   scaleDenominator?: number;
+  /**
+   * [208] Bildmitte im Modell (Meter; Schnitt/Ansicht: x längs, y Höhe), die in der Rahmenmitte liegt; fehlt sie,
+   * die Mitte des Plan-Ausmasses. Ein Plakat setzt sie, damit Grundrisse deckungsgleich und Schnitte/Ansichten auf
+   * gleicher ±0.00 stehen und Kontext ausserhalb des Rahmens beschnitten wird.
+   */
+  center?: Vec2;
 };
 
 /** Linienenden aller Striche im Plan/Schnitt/Ansicht und in den Exporten ([146]); fehlt = flach. */

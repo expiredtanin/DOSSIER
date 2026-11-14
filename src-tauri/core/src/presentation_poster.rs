@@ -1,13 +1,13 @@
-//! [208] Plakat-Anordnung des Präsentationsplans: Inhalte (Situation 1:500, Grundrisse/Schnitt/Ansichten, Tabellen,
-//! Platzhalter fürs 3D-Bild) auf dem Spaltenraster der Plakat-Vorlage (`layout_poster.rs`).
+//! [208] Plakat-Anordnung des Präsentationsplans: Inhalte (Situation 1:500, Grundrisse, Schnitte/Ansichten, Tabellen,
+//! 3D-Bild) auf dem Spaltenraster der Plakat-Vorlage (`layout_poster.rs`), wie eine Architektin ein Wettbewerbsplakat setzt.
 //!
-//! Jeder Viewport belegt ganze Spalten (Rahmenbreite = Spaltenbreite, Inhalt bleibt mittig im Rahmen), der Massstab
-//! bleibt fest: passt etwas nicht mehr aufs Blatt, kommt es auf ein weiteres Blatt (Plan 2/2), nie in einen
-//! kleineren Massstab. Gepackt wird als „Skyline“: jede Spalte merkt sich, bis wohin sie belegt ist; ein Inhalt
-//! geht an die Stelle mit dem kleinsten y (bei Gleichstand links), dadurch entstehen Zeilen gleich hoher Rahmen,
-//! und neben einem hohen Rahmen (Situation) stapeln sich die kleinen. Tabellen füllen danach Lücken, das 3D-Bild
-//! bekommt das grösste freie Rechteck.
-
+//! Strenge Zeilen nach Gruppen: zuerst die Situation (das 3D-Bild daneben), dann die Grundrisse nebeneinander, dann Schnitte
+//! und Ansichten, zuletzt die Tabellen. Jede Gruppe beginnt eine neue Zeile; reicht eine Zeile nicht, bricht die Gruppe in
+//! ausgeglichene Zeilen um (4 Grundrisse auf 2 Zeilen ⇒ 2 + 2, nicht 3 + 1). Ein Rahmen beginnt an einer Spaltenkante und ist so
+//! breit wie sein Inhalt (nicht zwingend volle Spalten); der nächste Rahmen beginnt an der nächsten freien Spaltenkante.
+//! Passt eine Gruppe nicht mehr auf das angefangene Blatt, aber auf ein leeres, beginnt sie dort (Gruppen nicht zerreissen); der
+//! Massstab bleibt fest — mehr Inhalt ⇒ weiteres Blatt (Plan 2/2), nie ein kleinerer Massstab. Tabellen stehen rechts neben der
+//! letzten Zeile, wenn dort Spalten frei sind, sonst in einer eigenen Zeile darunter.
 
 use crate::presentation_sheet::Rect;
 
@@ -41,13 +41,35 @@ impl Grid {
         let k = ((w + self.gutter) / (self.col_w + self.gutter) - 1e-9).ceil();
         if k.is_finite() { (k.max(1.0) as usize).min(self.cols) } else { 1 }
     }
+    /// Höhe des Satzspiegels.
+    pub fn height(&self) -> f64 {
+        self.bottom - self.top
+    }
 }
 
-/// Ein Viewport-Inhalt: Spalten und Rahmenhöhe (ohne Titelband).
+/// Ein Viewport-Inhalt: belegte Spalten, Rahmenbreite (≤ Spaltenbreite × `span`) und Rahmenhöhe (ohne Titelband).
 #[derive(Clone, Copy, Debug)]
 pub struct Cell {
     pub span: usize,
+    pub w: f64,
     pub h: f64,
+}
+
+impl Cell {
+    /// Rahmen der Breite `w` (mm) und Höhe `h`: Spalten nach Breite, Breite höchstens die ganze Satzspiegelbreite.
+    pub fn sized(g: &Grid, w: f64, h: f64) -> Cell {
+        let w = if w.is_finite() { w } else { 1.0 };
+        let span = g.span_for(w);
+        Cell { span, w: w.min(g.span_w(span)).max(1.0), h: if h.is_finite() { h.max(1.0) } else { 1.0 } }
+    }
+}
+
+/// Eine Gruppe (eine Zeile oder mehrere umgebrochene): Situation, Grundrisse, Schnitte + Ansichten.
+#[derive(Clone, Debug, Default)]
+pub struct Group {
+    pub cells: Vec<Cell>,
+    /// Das 3D-Bild steht rechts neben der ersten Zeile dieser Gruppe (Situation), sofern dort mindestens 2 Spalten frei sind.
+    pub image_beside: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -56,142 +78,174 @@ pub struct Placed {
     pub rect: Rect,
     /// Wurde nicht ordentlich untergebracht (grösser als ein leeres Blatt): `fits = false`.
     pub forced: bool,
+    /// Laufende Zeile (über alle Blätter); Tabellen und Bild neben einer Zeile tragen deren Nummer.
+    pub line: usize,
 }
 
 #[derive(Clone, Debug, Default)]
 pub struct Result {
     pub pages: usize,
+    /// Rahmen in der Reihenfolge der Gruppen und ihrer Zellen.
     pub items: Vec<Placed>,
-    /// Pro Tabelle: Rahmen samt Titelband oben (`h` = Band + Tabellenhöhe); `None`, wenn sie auf keinem Blatt Platz hat.
+    /// Pro Tabelle: Rahmen samt Titelband oben (`h` = Band + Tabellenhöhe).
     pub tables: Vec<Placed>,
     pub image: Option<Placed>,
 }
 
-struct Pages<'a> {
+/// Zeilen einer Gruppe: so wenige wie nötig, gleichmässig gefüllt (Anzahl je Zeile ausgeglichen).
+fn split_lines(cells: &[Cell], cols: usize) -> Vec<std::ops::Range<usize>> {
+    let greedy = |cap: usize| {
+        let mut out = Vec::new();
+        let (mut a, mut used) = (0, 0);
+        for (i, c) in cells.iter().enumerate() {
+            let s = c.span.clamp(1, cols);
+            if i > a && (used + s > cols || i - a >= cap) {
+                out.push(a..i);
+                a = i;
+                used = 0;
+            }
+            used += s;
+        }
+        if a < cells.len() {
+            out.push(a..cells.len());
+        }
+        out
+    };
+    let first = greedy(usize::MAX);
+    if first.len() > 1 {
+        let even = greedy(cells.len().div_ceil(first.len()));
+        if even.len() == first.len() {
+            return even;
+        }
+    }
+    first
+}
+
+/// Platz rechts neben der zuletzt gesetzten Zeile (für Tabellen und das Bild).
+#[derive(Clone, Copy)]
+struct Side {
+    line: usize,
+    /// Erste freie Spalte.
+    col: usize,
+    /// Oberkante des nächsten Elements daneben.
+    y: f64,
+}
+
+struct State<'a> {
     g: &'a Grid,
-    sky: Vec<Vec<f64>>,
+    page: usize,
+    /// Oberkante der nächsten Zeile.
+    y: f64,
+    line: usize,
+    side: Option<Side>,
 }
 
-impl<'a> Pages<'a> {
-    fn new(g: &'a Grid) -> Pages<'a> {
-        Pages { g, sky: vec![vec![g.top; g.cols]] }
+impl State<'_> {
+    fn empty(&self) -> bool {
+        self.y <= self.g.top + 1e-9
     }
-    fn empty(&self, page: usize) -> bool {
-        self.sky[page].iter().all(|y| *y <= self.g.top + 1e-9)
+    fn new_page(&mut self) {
+        self.page += 1;
+        self.y = self.g.top;
+        self.side = None;
     }
-    /// Stelle mit dem kleinsten y für `span` Spalten und Höhe `h` auf `page`.
-    fn find(&self, page: usize, span: usize, h: f64) -> Option<(usize, f64)> {
-        let sky = &self.sky[page];
-        let mut best: Option<(usize, f64)> = None;
-        for a in 0..=(self.g.cols - span) {
-            let y = sky[a..a + span].iter().copied().fold(self.g.top, f64::max);
-            if y + h > self.g.bottom + 1e-9 {
-                continue;
-            }
-            if best.is_none_or(|(_, by)| y < by - 1e-9) {
-                best = Some((a, y));
-            }
-        }
-        best
-    }
-    fn commit(&mut self, page: usize, a: usize, span: usize, y: f64, h: f64) -> Rect {
-        for c in a..a + span {
-            self.sky[page][c] = y + h + self.g.gutter;
-        }
-        Rect { x_mm: self.g.col_x(a), y_mm: y, width_mm: self.g.span_w(span), height_mm: h }
-    }
-    fn new_page(&mut self) -> usize {
-        self.sky.push(vec![self.g.top; self.g.cols]);
-        self.sky.len() - 1
-    }
-    /// Grösstes freies Rechteck (mindestens `min_span` Spalten, `min_h` hoch) über alle Blätter.
-    fn largest_free(&self, min_span: usize, min_h: f64) -> Option<(usize, usize, usize, f64)> {
-        let mut best: Option<(usize, usize, usize, f64, f64)> = None;
-        for (page, sky) in self.sky.iter().enumerate() {
-            for a in 0..self.g.cols {
-                for b in a + min_span.min(self.g.cols)..=self.g.cols {
-                    let y = sky[a..b].iter().copied().fold(self.g.top, f64::max);
-                    let h = self.g.bottom - y;
-                    if h + 1e-9 < min_h {
-                        continue;
-                    }
-                    let area = self.g.span_w(b - a) * h;
-                    if best.is_none_or(|(.., ba)| area > ba + 1e-6) {
-                        best = Some((page, a, b - a, y, area));
-                    }
-                }
-            }
-        }
-        best.map(|(p, a, s, y, _)| (p, a, s, y))
+    fn fits(&self, h: f64) -> bool {
+        self.y + h <= self.g.bottom + 1e-9
     }
 }
 
-/// Inhalte anordnen. `items`: Rahmen in Lesereihenfolge; `tables`: (bevorzugte Spalten, Höhe der Tabelle ohne Titelband);
-/// `image`: Platzhalter fürs 3D-Bild gewünscht (Mindestgrösse 2 Spalten × `min_image_h`).
-pub fn layout(g: &Grid, items: &[Cell], tables: &[(usize, f64)], image: bool, min_image_h: f64) -> Result {
-    let mut pg = Pages::new(g);
+/// Inhalte anordnen. `groups` in Lesereihenfolge; `tables`: (bevorzugte Spalten, Höhe der Tabelle ohne Titelband);
+/// `image`: Rahmen fürs 3D-Bild (neben der Situation, sonst die grösste freie Fläche, mindestens 2 Spalten × `min_image_h`).
+pub fn layout(g: &Grid, groups: &[Group], tables: &[(usize, f64)], image: bool, min_image_h: f64) -> Result {
+    let mut st = State { g, page: 0, y: g.top, line: 0, side: None };
     let mut out = Result::default();
-    let mut cur = 0;
-    for c in items {
-        let span = c.span.clamp(1, g.cols);
-        let h = c.h + g.band;
-        let (page, a, y, forced) = loop {
-            if let Some((a, y)) = pg.find(cur, span, h) {
-                break (cur, a, y, false);
+    for grp in groups.iter().filter(|gr| !gr.cells.is_empty()) {
+        let lines = split_lines(&grp.cells, g.cols);
+        let line_h: Vec<f64> = lines.iter().map(|r| grp.cells[r.clone()].iter().fold(0.0_f64, |m, c| m.max(c.h)) + g.band).collect();
+        let total = line_h.iter().sum::<f64>() + g.gutter * (lines.len() as f64 - 1.0);
+        // Gruppe nicht zerreissen: passt sie auf ein neues Blatt ganz, beginnt sie dort.
+        if !st.empty() && !st.fits(total) && total <= g.height() + 1e-9 {
+            st.new_page();
+        }
+        for (k, (r, lh)) in lines.iter().zip(&line_h).enumerate() {
+            if !st.empty() && !st.fits(*lh) {
+                st.new_page();
             }
-            if pg.empty(cur) {
-                break (cur, 0, g.top, true);
+            let forced = !st.fits(*lh);
+            let mut col = 0;
+            for c in &grp.cells[r.clone()] {
+                let span = c.span.clamp(1, g.cols);
+                let rect = Rect { x_mm: g.col_x(col), y_mm: st.y, width_mm: c.w.min(g.span_w(span)), height_mm: c.h };
+                out.items.push(Placed { page: st.page, rect, forced, line: st.line });
+                col += span;
             }
-            cur = pg.new_page();
-        };
-        out.items.push(Placed { page, rect: pg.commit(page, a, span, y, h - g.band), forced });
-        // Titelband gehört zur belegten Höhe.
-        for col in a..a + span {
-            pg.sky[page][col] = y + h + g.gutter;
+            if grp.image_beside && k == 0 && image && out.image.is_none() && g.cols >= col + 2 {
+                let rect = Rect { x_mm: g.col_x(col), y_mm: st.y, width_mm: g.span_w(g.cols - col), height_mm: lh - g.band };
+                out.image = Some(Placed { page: st.page, rect, forced: false, line: st.line });
+                col = g.cols;
+            }
+            st.side = Some(Side { line: st.line, col, y: st.y });
+            st.y += lh + g.gutter;
+            st.line += 1;
         }
     }
-    // Tabellen: erstes Blatt mit Platz, zuerst in der bevorzugten Breite, dann schmaler (mindestens 2 Spalten); sonst neues Blatt.
+    // Tabellen: rechts neben der letzten Zeile (rechtsbündig, untereinander), sonst in eigenen Zeilen.
+    let mut row: Option<(usize, f64, f64)> = None; // (nächste Spalte, Oberkante, Höhe) der Tabellenzeile
     for &(pref, th) in tables {
         let h = g.band + th;
-        let widths: Vec<usize> = (2.min(g.cols)..=pref.clamp(1, g.cols)).rev().collect();
+        let pref = pref.clamp(1, g.cols);
         let mut placed = None;
-        'search: for &span in &widths {
-            for page in 0..pg.sky.len() {
-                if let Some((a, y)) = pg.find(page, span, h) {
-                    placed = Some(Placed { page, rect: pg.commit(page, a, span, y, h), forced: false });
-                    break 'search;
-                }
+        if let Some(sd) = st.side.as_mut() {
+            let span = pref.min(g.cols - sd.col);
+            if span >= 2.min(pref) && sd.y + h <= g.bottom + 1e-9 {
+                let rect = Rect { x_mm: g.col_x(g.cols - span), y_mm: sd.y, width_mm: g.span_w(span), height_mm: h };
+                placed = Some(Placed { page: st.page, rect, forced: false, line: sd.line });
+                sd.y += h + g.gutter;
+                st.y = st.y.max(sd.y);
             }
         }
         if placed.is_none() {
-            let span = pref.clamp(1, g.cols);
-            let page = pg.new_page();
-            let (a, y, forced) = match pg.find(page, span, h) {
-                Some((a, y)) => (a, y, false),
-                None => (0, g.top, true),
-            };
-            placed = Some(Placed { page, rect: pg.commit(page, a, span, y, h), forced });
+            let (mut col, mut y, mut rh) = row.unwrap_or((0, st.y, 0.0));
+            if col + pref > g.cols {
+                st.y = y + rh + g.gutter;
+                (col, y, rh) = (0, st.y, 0.0);
+            }
+            if y + h > g.bottom + 1e-9 && !(col == 0 && st.empty()) {
+                st.new_page();
+                (col, y, rh) = (0, st.y, 0.0);
+            }
+            if col == 0 {
+                st.side = None;
+            }
+            let forced = y + h > g.bottom + 1e-9;
+            let rect = Rect { x_mm: g.col_x(col), y_mm: y, width_mm: g.span_w(pref), height_mm: h };
+            placed = Some(Placed { page: st.page, rect, forced, line: st.line });
+            row = Some((col + pref, y, rh.max(h)));
         }
         out.tables.push(placed.unwrap());
     }
-    if image {
-        let free = pg.largest_free(2, min_image_h).or_else(|| {
-            let page = pg.new_page();
-            pg.largest_free(2, min_image_h).filter(|f| f.0 == page)
-        });
-        if let Some((page, a, span, y)) = free {
-            let rect = Rect { x_mm: g.col_x(a), y_mm: y, width_mm: g.span_w(span), height_mm: g.bottom - y };
-            for c in a..a + span {
-                pg.sky[page][c] = g.bottom + g.gutter;
-            }
-            out.image = Some(Placed { page, rect, forced: false });
+    if let Some((col, y, rh)) = row {
+        st.y = st.y.max(y + rh + g.gutter);
+        st.side = Some(Side { line: st.line, col, y });
+        st.line += 1;
+    }
+    if image && out.image.is_none() && g.cols >= 2 {
+        // Grösste freie Fläche: rechts neben der letzten Zeile (bis zum Fuss) oder die ganze Breite darunter, sonst ein eigenes Blatt.
+        let mut cands: Vec<Placed> = Vec::new();
+        if let Some(sd) = st.side.filter(|sd| g.cols >= sd.col + 2) {
+            let rect = Rect { x_mm: g.col_x(sd.col), y_mm: sd.y, width_mm: g.span_w(g.cols - sd.col), height_mm: g.bottom - sd.y };
+            cands.push(Placed { page: st.page, rect, forced: false, line: sd.line });
         }
+        let rect = Rect { x_mm: g.left, y_mm: st.y, width_mm: g.span_w(g.cols), height_mm: g.bottom - st.y };
+        cands.push(Placed { page: st.page, rect, forced: false, line: st.line });
+        let area = |p: &Placed| p.rect.width_mm * p.rect.height_mm;
+        let best = cands.into_iter().filter(|p| p.rect.height_mm + 1e-9 >= min_image_h).max_by(|a, b| area(a).total_cmp(&area(b)));
+        out.image = Some(best.unwrap_or_else(|| {
+            st.new_page();
+            Placed { page: st.page, rect: Rect { x_mm: g.left, y_mm: g.top, width_mm: g.span_w(g.cols), height_mm: g.height() }, forced: false, line: st.line }
+        }));
     }
-    // Leere letzte Blätter (nur durch das Suchen nach Platz entstanden) fallen weg.
-    while pg.sky.len() > 1 && pg.empty(pg.sky.len() - 1) {
-        pg.sky.pop();
-    }
-    out.pages = pg.sky.len();
+    out.pages = out.items.iter().chain(&out.tables).chain(&out.image).map(|p| p.page + 1).max().unwrap_or(1);
     out
 }
 
@@ -204,8 +258,25 @@ mod tests {
         Grid::new(841.0, 594.0, 20.0, 58.0, 6, 10.0, 8.0)
     }
 
-    fn overlap(a: &Rect, b: &Rect, band: f64) -> bool {
-        a.x_mm < b.x_mm + b.width_mm - 1e-6 && b.x_mm < a.x_mm + a.width_mm - 1e-6 && a.y_mm < b.y_mm + b.height_mm + band - 1e-6 && b.y_mm < a.y_mm + a.height_mm + band - 1e-6
+    fn overlap(a: &Rect, b: &Rect) -> bool {
+        a.x_mm < b.x_mm + b.width_mm - 1e-6 && b.x_mm < a.x_mm + a.width_mm - 1e-6 && a.y_mm < b.y_mm + b.height_mm - 1e-6 && b.y_mm < a.y_mm + a.height_mm - 1e-6
+    }
+
+    /// Alle belegten Rechtecke (Rahmen samt Titelband) je Blatt: im Satzspiegel, ohne Überlappung.
+    fn check(g: &Grid, r: &Result) {
+        let mut rects: Vec<(usize, Rect)> = r.items.iter().map(|p| (p.page, Rect { height_mm: p.rect.height_mm + g.band, ..p.rect })).collect();
+        rects.extend(r.tables.iter().chain(&r.image).map(|p| (p.page, p.rect)));
+        for (i, (pa, a)) in rects.iter().enumerate() {
+            assert!(a.x_mm >= g.left - 1e-6 && a.x_mm + a.width_mm <= g.col_x(g.cols - 1) + g.col_w + 1e-6, "{a:?} seitlich");
+            assert!(a.y_mm >= g.top - 1e-6 && a.y_mm + a.height_mm <= g.bottom + 1e-6, "{a:?} vertikal");
+            for (pb, b) in &rects[i + 1..] {
+                assert!(pa != pb || !overlap(a, b), "{a:?} überlappt {b:?}");
+            }
+        }
+    }
+
+    fn cells(n: usize, span: usize, w: f64, h: f64) -> Vec<Cell> {
+        (0..n).map(|_| Cell { span, w, h }).collect()
     }
 
     #[test]
@@ -217,73 +288,101 @@ mod tests {
         assert_eq!(g.span_for(g.col_w + 0.5), 2);
         assert_eq!(g.span_for(1e9), 6);
         assert_eq!(g.span_for(f64::NAN), 1);
+        let c = Cell::sized(&g, 160.0, 120.0);
+        assert_eq!((c.span, c.w), (2, 160.0));
+        assert_eq!(Cell::sized(&g, 5000.0, 1.0).w, 801.0);
     }
 
-    /// Situation 3 Spalten hoch, daneben stapeln sich Grundrisse; Tabellen und Bild füllen den Rest, alles im Satzspiegel.
+    /// Strenge Zeilen: Situation (Bild daneben), darunter die Grundrisse, darunter Schnitte + Ansichten; Rahmen so breit wie der
+    /// Inhalt, links an Spaltenkanten; jede Gruppe unter der vorigen; Tabellen rechts neben der letzten Zeile.
     #[test]
-    fn alles_im_satzspiegel_ohne_ueberlappung_und_flaeche_genutzt() {
+    fn strenge_zeilen_nach_gruppen() {
         let g = a1();
-        let mut items = vec![Cell { span: 3, h: 190.0 }];
-        items.extend((0..4).map(|_| Cell { span: 1, h: 60.0 }));
-        items.extend((0..4).map(|_| Cell { span: 1, h: 50.0 }));
-        items.push(Cell { span: 1, h: 50.0 });
-        let r = layout(&g, &items, &[(3, 80.0), (3, 70.0)], true, 70.0);
+        let groups = vec![
+            Group { cells: vec![Cell { span: 2, w: 200.0, h: 150.0 }], image_beside: true },
+            Group { cells: cells(3, 2, 150.0, 100.0), image_beside: false },
+            Group { cells: vec![Cell { span: 2, w: 140.0, h: 60.0 }, Cell { span: 2, w: 140.0, h: 60.0 }, Cell { span: 2, w: 140.0, h: 60.0 }, Cell { span: 2, w: 140.0, h: 60.0 }, Cell { span: 1, w: 90.0, h: 60.0 }], image_beside: false },
+        ];
+        let r = layout(&g, &groups, &[(3, 50.0), (3, 60.0)], true, 70.0);
         assert_eq!(r.pages, 1);
-        let mut rects: Vec<(Rect, f64)> = r.items.iter().map(|p| (p.rect, g.band)).collect();
-        rects.extend(r.tables.iter().map(|p| (p.rect, 0.0)));
-        rects.push((r.image.expect("Bild").rect, 0.0));
-        for (i, (a, ba)) in rects.iter().enumerate() {
-            assert!(a.x_mm >= g.left - 1e-6 && a.x_mm + a.width_mm <= 841.0 - 20.0 + 1e-6, "{a:?} seitlich");
-            assert!(a.y_mm >= g.top - 1e-6 && a.y_mm + a.height_mm + ba <= g.bottom + 1e-6, "{a:?} vertikal");
-            for (b, bb) in &rects[i + 1..] {
-                assert!(!overlap(a, b, ba.max(*bb)), "{a:?} überlappt {b:?}");
-            }
-        }
-        let used: f64 = rects.iter().map(|(r, b)| r.width_mm * (r.height_mm + b)).sum();
-        let area = (841.0 - 40.0) * (g.bottom - g.top);
-        assert!(used / area >= 0.7, "Flächenanteil {:.2}", used / area);
-        // Rahmen liegen an Spalten (Breite = Spaltenbreite oder Vielfache).
-        for p in &r.items {
-            let k = ((p.rect.width_mm + g.gutter) / (g.col_w + g.gutter)).round();
-            assert!((p.rect.width_mm - g.span_w(k as usize)).abs() < 1e-6);
-        }
+        check(&g, &r);
+        let it = &r.items;
+        // Bild neben der Situation, gleiche Oberkante, Rest der Breite.
+        let img = r.image.expect("Bild");
+        assert_eq!((img.rect.y_mm, img.rect.x_mm), (it[0].rect.y_mm, g.col_x(2)));
+        // Grundrisse: eine Zeile, gleiche Oberkante, unter der Situation, an Spaltenkanten, so breit wie der Inhalt.
+        assert!(it[1..4].iter().all(|p| p.rect.y_mm == it[1].rect.y_mm && p.rect.width_mm == 150.0));
+        assert_eq!(it[1..4].iter().map(|p| p.rect.x_mm).collect::<Vec<_>>(), vec![g.col_x(0), g.col_x(2), g.col_x(4)]);
+        assert!(it[1].rect.y_mm >= it[0].rect.y_mm + 150.0 + g.band + g.gutter - 1e-9);
+        // Schnitte/Ansichten: ausgeglichen 3 + 2, unter den Grundrissen.
+        let ys: Vec<f64> = it[4..].iter().map(|p| p.rect.y_mm).collect();
+        assert!(ys[0] == ys[1] && ys[1] == ys[2] && ys[3] == ys[4] && ys[3] > ys[0]);
+        assert!(ys[0] >= it[1].rect.y_mm + 100.0 + g.band + g.gutter - 1e-9);
+        // Tabellen rechts neben der letzten Zeile (3 Spalten frei), untereinander.
+        assert_eq!(r.tables[0].rect.x_mm, g.col_x(3));
+        assert_eq!(r.tables[0].rect.y_mm, ys[3]);
+        assert!(r.tables[1].rect.y_mm > r.tables[0].rect.y_mm);
     }
 
-    /// Zu viele Grundrisse für ein Blatt: zweites Blatt, nichts wird kleiner (Rahmen bleiben unverändert).
+    /// Vier Grundrisse à 2 Spalten auf 6 Spalten: 2 + 2 statt 3 + 1.
+    #[test]
+    fn ausgeglichene_zeilen() {
+        let g = a1();
+        let r = layout(&g, &[Group { cells: cells(4, 2, 160.0, 100.0), image_beside: false }], &[], false, 70.0);
+        let lines: Vec<usize> = r.items.iter().map(|p| p.line).collect();
+        assert_eq!(lines, vec![0, 0, 1, 1]);
+        check(&g, &r);
+    }
+
+    /// Eine Gruppe, die auf dem angefangenen Blatt keinen Platz mehr hat, beginnt ganz auf dem nächsten (nicht zerrissen);
+    /// Rahmen behalten ihre Grösse (kein kleinerer Massstab).
+    #[test]
+    fn gruppe_nicht_zerreissen() {
+        let g = a1();
+        let groups = vec![Group { cells: vec![Cell { span: 3, w: 380.0, h: 300.0 }], image_beside: false }, Group { cells: cells(6, 2, 200.0, 110.0), image_beside: false }];
+        let r = layout(&g, &groups, &[(3, 60.0)], false, 70.0);
+        assert_eq!(r.pages, 2);
+        assert!(r.items[1..].iter().all(|p| p.page == 1 && p.rect.height_mm == 110.0 && !p.forced));
+        check(&g, &r);
+    }
+
+    /// Mehr als ein Blatt einer Gruppe: sie bricht auf das nächste Blatt um.
     #[test]
     fn zweites_blatt_statt_verkleinern() {
         let g = a1();
-        let items: Vec<Cell> = (0..30).map(|_| Cell { span: 2, h: 110.0 }).collect();
-        let r = layout(&g, &items, &[(3, 60.0)], true, 70.0);
+        let r = layout(&g, &[Group { cells: cells(30, 2, 250.0, 110.0), image_beside: false }], &[(3, 60.0)], true, 70.0);
         assert!(r.pages >= 2);
         assert!(r.items.iter().all(|p| (p.rect.height_mm - 110.0).abs() < 1e-9 && !p.forced));
-        assert!(r.items.iter().any(|p| p.page == 1));
-        let last = r.items.last().unwrap().page;
-        assert_eq!(last, r.pages - 1);
+        check(&g, &r);
     }
 
     /// Ein Rahmen, der höher ist als das Blatt, wird erzwungen (kein Absturz) und gemeldet.
     #[test]
     fn zu_hoher_rahmen_wird_gemeldet() {
         let g = a1();
-        let r = layout(&g, &[Cell { span: 1, h: 900.0 }], &[], false, 70.0);
+        let r = layout(&g, &[Group { cells: vec![Cell { span: 1, w: 100.0, h: 900.0 }], image_beside: false }], &[], false, 70.0);
         assert!(r.items[0].forced);
         assert_eq!(r.pages, 1);
     }
 
-    /// Tabelle, die neben vollen Blättern nirgends Platz hat, bekommt ein eigenes Blatt.
+    /// Tabelle ohne Platz neben vollen Zeilen: eigenes Blatt.
     #[test]
     fn tabelle_ohne_platz_neues_blatt() {
         let g = a1();
-        let items = vec![Cell { span: 6, h: 440.0 }];
-        let r = layout(&g, &items, &[(3, 80.0)], false, 70.0);
+        let r = layout(&g, &[Group { cells: vec![Cell { span: 6, w: 801.0, h: 440.0 }], image_beside: false }], &[(3, 80.0)], false, 70.0);
         assert_eq!(r.pages, 2);
         assert_eq!(r.tables[0].page, 1);
+        check(&g, &r);
     }
 
+    /// Ohne Situation: das Bild nimmt die grösste freie Fläche; nichts gewählt ⇒ ein leeres Blatt.
     #[test]
-    fn kein_bild_ohne_platz_und_nichts_gewaehlt() {
+    fn bild_ohne_situation_und_leer() {
         let g = a1();
+        let r = layout(&g, &[Group { cells: cells(2, 2, 200.0, 100.0), image_beside: false }], &[], true, 70.0);
+        let img = r.image.expect("Bild");
+        assert!(img.rect.width_mm >= g.span_w(2) - 1e-9 && img.rect.height_mm >= 70.0);
+        check(&g, &r);
         let r = layout(&g, &[], &[], false, 70.0);
         assert_eq!((r.pages, r.items.len(), r.image.is_none()), (1, 0, true));
     }

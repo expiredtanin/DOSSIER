@@ -240,6 +240,7 @@ pub fn query(p: &Project, text: &str) -> Result<Value, String> {
         _ => p,
     };
     let bounds_at = |level: &str, s: f64| crate::sheet_viewports::snapshot_bounds(p, &snap(level), s, Some(req.shadows));
+    let extents_at = |level: &str, s: f64| crate::sheet_viewports::snapshot_extents(p, &snap(level), s, Some(req.shadows));
     // Ebenen ohne Inhalt fallen weg (geprüft beim mittleren Massstab).
     let mut kept: Vec<(String, u32)> = Vec::new();
     let mut skipped: Vec<String> = Vec::new();
@@ -254,7 +255,7 @@ pub fn query(p: &Project, text: &str) -> Result<Value, String> {
     kept.sort_by_key(|k| k.1);
     let sheet = Sheet::new(req.sheet_w, req.sheet_h, req.title_block).with_area(req.margin_mm, req.top_mm);
     if let Some(po) = &req.poster {
-        return Ok(poster_plan(p, &req, po, &sheet, &kept, &skipped, &bounds_at));
+        return Ok(poster_plan(p, &req, po, &sheet, &kept, &skipped, &extents_at));
     }
     let valid = |v: f64| v.is_finite() && v > 0.0;
     let own = |id: &str| req.scales.get(id).copied().filter(|v| valid(*v));
@@ -308,16 +309,89 @@ fn table_heights(p: &Project, tables: &[TableReq]) -> Vec<f64> {
     tables.iter().enumerate().map(|(i, _)| out.iter().find(|o| o.id == format!("probe{i}")).map_or(0.0, |o| o.height_mm)).collect()
 }
 
-/// [208] Plakat: Inhalte auf dem Spaltenraster, Massstäbe fest; mehr Inhalt als ein Blatt ⇒ weitere Blätter.
-fn poster_plan(p: &Project, req: &Request, po: &PosterReq, sheet: &Sheet, kept: &[(String, u32)], skipped: &[String], bounds_at: &dyn Fn(&str, f64) -> Option<[f64; 4]>) -> Value {
-    use crate::presentation_poster::{layout, Cell, Grid};
+/// [208] Rand um die Bauteile eines Grundrisses (Papier-mm), in dem Bemassung und Beschriftung liegen; was weiter aussen
+/// liegt (Umgebung, Gelände, Wege), beschneidet der Rahmen.
+pub const PLAN_MARGIN_MM: f64 = 20.0;
+/// [208] Rand um das Haus im Situationsplan (Papier-mm; 1:500 ⇒ 40 m Umgebung).
+pub const SITUATION_MARGIN_MM: f64 = 80.0;
+
+/// [208] Ausschnitt eines Inhalts (Modell-Meter): das Ausmass `b`, beschnitten auf die Bauteile `house` ± `margin`;
+/// ohne Bauteile (Schnitt/Ansicht) das ganze Ausmass.
+pub fn crop(b: [f64; 4], house: Option<[f64; 4]>, margin: f64) -> [f64; 4] {
+    let Some(h) = house.filter(|h| h.iter().all(|v| v.is_finite()) && margin.is_finite() && margin >= 0.0) else { return b };
+    let c = [b[0].max(h[0] - margin), b[1].max(h[1] - margin), b[2].min(h[2] + margin), b[3].min(h[3] + margin)];
+    if c[2] > c[0] && c[3] > c[1] {
+        c
+    } else {
+        b
+    }
+}
+
+fn union(a: Option<[f64; 4]>, b: [f64; 4]) -> [f64; 4] {
+    match a {
+        Some(a) => [a[0].min(b[0]), a[1].min(b[1]), a[2].max(b[2]), a[3].max(b[3])],
+        None => b,
+    }
+}
+
+/// Rahmen eines Inhalts: Breite/Höhe (Papier-mm, ohne Rand) und Bildmitte (Modell-Meter).
+#[derive(Clone, Copy, Debug)]
+struct Frame {
+    w: f64,
+    h: f64,
+    cx: f64,
+    cy: f64,
+}
+
+impl Frame {
+    fn of(r: [f64; 4], scale: f64) -> Frame {
+        Frame { w: (r[2] - r[0]) * 1000.0 / scale, h: (r[3] - r[1]) * 1000.0 / scale, cx: (r[0] + r[2]) / 2.0, cy: (r[1] + r[3]) / 2.0 }
+    }
+}
+
+/// [208] Rahmen je Ebene: Grundrisse (Gruppe 0) alle gleich gross mit gemeinsamer Bildmitte (deckungsgleich), Schnitte und
+/// Ansichten (Gruppen 1, 2) gleich hoch mit gemeinsamer Höhenmitte (±0.00 auf einer Linie), je eigene Breite.
+fn view_frames(kept: &[(String, u32)], scale_of: &dyn Fn(&str) -> f64, extents_at: &dyn Fn(&str, f64) -> Option<([f64; 4], Option<[f64; 4]>)>) -> Vec<Frame> {
+    let crops: Vec<[f64; 4]> = kept
+        .iter()
+        .map(|(id, _)| {
+            let sc = scale_of(id);
+            let (b, house) = extents_at(id, sc).unwrap_or(([0.0, 0.0, 1.0, 1.0], None));
+            crop(b, house, PLAN_MARGIN_MM * sc / 1000.0)
+        })
+        .collect();
+    let mut plans: Option<[f64; 4]> = None;
+    let mut heights: Option<[f64; 4]> = None;
+    for ((_, grp), c) in kept.iter().zip(&crops) {
+        if *grp == 0 {
+            plans = Some(union(plans, *c));
+        } else {
+            heights = Some(union(heights, *c));
+        }
+    }
+    kept.iter()
+        .zip(&crops)
+        .map(|((id, grp), c)| {
+            let sc = scale_of(id);
+            match (*grp, plans, heights) {
+                (0, Some(u), _) => Frame::of(u, sc),
+                (_, _, Some(u)) if *grp > 0 => Frame::of([c[0], u[1], c[2], u[3]], sc),
+                _ => Frame::of(*c, sc),
+            }
+        })
+        .collect()
+}
+
+/// [208] Plakat: Inhalte in strengen Zeilen auf dem Spaltenraster, Massstäbe fest; mehr Inhalt als ein Blatt ⇒ weitere Blätter.
+fn poster_plan(p: &Project, req: &Request, po: &PosterReq, sheet: &Sheet, kept: &[(String, u32)], skipped: &[String], extents_at: &dyn Fn(&str, f64) -> Option<([f64; 4], Option<[f64; 4]>)>) -> Value {
+    use crate::presentation_poster::{layout, Cell, Grid, Group};
     let valid = |v: f64| v.is_finite() && v > 0.0;
     let gutter = if po.gutter_mm.is_finite() && po.gutter_mm >= 0.0 && po.gutter_mm < sheet.w / 4.0 { po.gutter_mm } else { GAP_MM };
     let band = if valid(po.band_mm) { po.band_mm } else { TITLE_MM };
     let g = Grid::new(sheet.w, sheet.h, sheet.margin, sheet.top, po.columns.max(1), gutter, band);
     let own = |id: &str| req.scales.get(id).copied().filter(|v| valid(*v));
 
-    // Situation: eigener Ausschnitt (Vorlage „Situation WBW“, Umgebung sichtbar), eigener Massstab.
+    // Situation: eigener Ausschnitt (Vorlage „Situation WBW“, Umgebung sichtbar), eigener Massstab, um das Haus beschnitten.
     let situation = po.situation.as_ref().filter(|s| valid(s.scale) && p.drawing_levels.iter().any(|l| l.id == s.level_id)).and_then(|s| {
         let with_tpl;
         let q = match &s.template {
@@ -338,8 +412,23 @@ fn poster_plan(p: &Project, req: &Request, po: &PosterReq, sheet: &Sheet, kept: 
             template_linked: s.template.as_ref().map(|_| true),
             ..Default::default()
         };
-        let b = crate::sheet_viewports::snapshot_bounds(q, &snap, s.scale, Some(false))?;
-        b.iter().all(|v| v.is_finite()).then_some((s, b))
+        let (b, house) = crate::sheet_viewports::snapshot_extents(q, &snap, s.scale, Some(false))?;
+        if !b.iter().all(|v| v.is_finite()) {
+            return None;
+        }
+        let mut f = Frame::of(crop(b, house, SITUATION_MARGIN_MM * s.scale / 1000.0), s.scale);
+        // Höchstens die halbe Breite und knapp die halbe Höhe des Satzspiegels; beschnitten bleibt das Haus in der Mitte.
+        let (max_w, max_h) = (g.span_w(g.cols.div_ceil(2)) - 2.0 * FRAME_PAD_MM, (g.height() - g.band) * 0.45 - 2.0 * FRAME_PAD_MM);
+        let hc = house.map(|h| ((h[0] + h[2]) / 2.0, (h[1] + h[3]) / 2.0));
+        if f.w > max_w {
+            f.w = max_w;
+            f.cx = hc.map_or(f.cx, |c| c.0);
+        }
+        if f.h > max_h {
+            f.h = max_h;
+            f.cy = hc.map_or(f.cy, |c| c.1);
+        }
+        Some((s, f))
     });
 
     let heights = table_heights(p, &po.tables);
@@ -347,29 +436,17 @@ fn poster_plan(p: &Project, req: &Request, po: &PosterReq, sheet: &Sheet, kept: 
     let tables: Vec<(usize, f64)> = heights.iter().map(|h| (pref, *h)).collect();
     let min_image = ((g.bottom - g.top) * MIN_IMAGE_SHARE).max(60.0);
 
-    // Rahmengrössen je Gruppe: grösster Inhalt der Gruppe plus Rand, auf ganze Spalten gerundet.
-    let cells_at = |s: f64| -> Vec<Cell> {
-        let mut dims: BTreeMap<u32, (f64, f64)> = BTreeMap::new();
-        for (id, grp) in kept {
-            let sc = own(id).unwrap_or(s);
-            let b = bounds_at(id, sc).unwrap_or([0.0, 0.0, 1.0, 1.0]);
-            let e = dims.entry(*grp).or_insert((0.0, 0.0));
-            e.0 = e.0.max((b[2] - b[0]) * 1000.0 / sc);
-            e.1 = e.1.max((b[3] - b[1]) * 1000.0 / sc);
+    // Gruppen: Situation | Grundrisse | Schnitte + Ansichten.
+    let frames_at = |s: f64| view_frames(kept, &|id: &str| own(id).unwrap_or(s), extents_at);
+    let groups_at = |frames: &[Frame]| -> Vec<Group> {
+        let cell = |f: &Frame| Cell::sized(&g, f.w + 2.0 * FRAME_PAD_MM, f.h + 2.0 * FRAME_PAD_MM);
+        let mut out = Vec::new();
+        if let Some((_, f)) = &situation {
+            out.push(Group { cells: vec![cell(f)], image_beside: true });
         }
-        let mut cells = Vec::new();
-        if let Some((sit, b)) = &situation {
-            let w = (b[2] - b[0]) * 1000.0 / sit.scale + 2.0 * FRAME_PAD_MM;
-            let h = (b[3] - b[1]) * 1000.0 / sit.scale + 2.0 * FRAME_PAD_MM;
-            // Sehr grosse Umgebung: Ausschnitt begrenzen (Frame kleiner als der Inhalt, der Viewport zeigt die Mitte).
-            let span = g.span_for(w).min(g.cols.div_ceil(2));
-            cells.push(Cell { span, h: h.min((g.bottom - g.top - g.band) * 0.45) });
-        }
-        for (_, grp) in kept {
-            let (w, h) = dims[grp];
-            cells.push(Cell { span: g.span_for(w + 2.0 * FRAME_PAD_MM), h: h + 2.0 * FRAME_PAD_MM });
-        }
-        cells
+        out.push(Group { cells: kept.iter().zip(frames).filter(|((_, grp), _)| *grp == 0).map(|(_, f)| cell(f)).collect(), image_beside: false });
+        out.push(Group { cells: kept.iter().zip(frames).filter(|((_, grp), _)| *grp > 0).map(|(_, f)| cell(f)).collect(), image_beside: false });
+        out
     };
     let scale = match req.scale.filter(|v| valid(*v)) {
         Some(s) => s,
@@ -377,21 +454,32 @@ fn poster_plan(p: &Project, req: &Request, po: &PosterReq, sheet: &Sheet, kept: 
             .iter()
             .copied()
             .find(|s| {
-                let r = layout(&g, &cells_at(*s), &tables, false, min_image);
+                let r = layout(&g, &groups_at(&frames_at(*s)), &tables, false, min_image);
                 r.pages == 1 && r.items.iter().all(|i| !i.forced)
             })
             .unwrap_or(SCALES[SCALES.len() - 1]),
     };
-    let r = layout(&g, &cells_at(scale), &tables, po.image, min_image);
+    let frames = frames_at(scale);
+    let r = layout(&g, &groups_at(&frames), &tables, po.image, min_image);
     let mut items: Vec<Value> = Vec::new();
     let mut placed = r.items.iter();
-    if let Some((sit, _)) = &situation {
+    let rect_json = |pl: &crate::presentation_poster::Placed, f: &Frame| {
+        json!({"page": pl.page, "line": pl.line, "xMm": pl.rect.x_mm, "yMm": pl.rect.y_mm, "widthMm": pl.rect.width_mm, "heightMm": pl.rect.height_mm, "center": {"x": f.cx, "y": f.cy}})
+    };
+    let merge = |mut a: Value, b: Value| {
+        if let (Some(a), Some(b)) = (a.as_object_mut(), b.as_object()) {
+            a.extend(b.clone());
+        }
+        a
+    };
+    if let Some((sit, f)) = &situation {
         if let Some(pl) = placed.next() {
-            items.push(json!({"levelId": sit.level_id, "kind": "situation", "group": SITUATION_GROUP, "scale": sit.scale, "page": pl.page, "xMm": pl.rect.x_mm, "yMm": pl.rect.y_mm, "widthMm": pl.rect.width_mm, "heightMm": pl.rect.height_mm}));
+            items.push(merge(json!({"levelId": sit.level_id, "kind": "situation", "group": SITUATION_GROUP, "scale": sit.scale}), rect_json(pl, f)));
         }
     }
-    for ((id, grp), pl) in kept.iter().zip(placed) {
-        items.push(json!({"levelId": id, "kind": "view", "group": grp, "scale": own(id).unwrap_or(scale), "page": pl.page, "xMm": pl.rect.x_mm, "yMm": pl.rect.y_mm, "widthMm": pl.rect.width_mm, "heightMm": pl.rect.height_mm}));
+    // Reihenfolge der Rahmen = Gruppen: Grundrisse, dann Schnitte/Ansichten (wie `kept`, nach Gruppe sortiert).
+    for (((id, grp), f), pl) in kept.iter().zip(&frames).zip(placed) {
+        items.push(merge(json!({"levelId": id, "kind": "view", "group": grp, "scale": own(id).unwrap_or(scale)}), rect_json(pl, f)));
     }
     let tables_out: Vec<Value> = po
         .tables
@@ -402,7 +490,7 @@ fn poster_plan(p: &Project, req: &Request, po: &PosterReq, sheet: &Sheet, kept: 
         .collect();
     let image = r.image.map(|pl| json!({"page": pl.page, "xMm": pl.rect.x_mm, "yMm": pl.rect.y_mm, "widthMm": pl.rect.width_mm, "heightMm": pl.rect.height_mm}));
     let forced = r.items.iter().chain(&r.tables).any(|i| i.forced);
-    json!({"scale": scale, "fits": !forced, "pages": r.pages, "items": items, "skipped": skipped, "tables": tables_out, "image": image, "bandMm": g.band})
+    json!({"scale": scale, "fits": !forced, "pages": r.pages, "items": items, "skipped": skipped, "tables": tables_out, "image": image, "bandMm": g.band, "padMm": FRAME_PAD_MM})
 }
 
 #[cfg(test)]
@@ -496,6 +584,41 @@ mod tests {
         // Unsinn bleibt beim Standard.
         let bad = Sheet::new(841.0, 594.0, false).with_area(Some(f64::NAN), Some(-3.0));
         assert_eq!((bad.margin, bad.top), (MARGIN_MM, MARGIN_MM));
+    }
+
+    /// [208] Ausschnitt: Kontext weit draussen wird auf Bauteile ± Rand beschnitten, Inhalt näher dran bleibt ganz;
+    /// ohne Bauteile (Schnitt/Ansicht) und mit Unsinn das ganze Ausmass.
+    #[test]
+    fn ausschnitt_um_die_bauteile() {
+        let b = [-40.0, -30.0, 60.0, 45.0];
+        let house = Some([0.0, 0.0, 20.0, 12.0]);
+        assert_eq!(crop(b, house, 4.0), [-4.0, -4.0, 24.0, 16.0]);
+        assert_eq!(crop([-1.0, -2.0, 21.0, 13.0], house, 4.0), [-1.0, -2.0, 21.0, 13.0]);
+        assert_eq!(crop(b, None, 4.0), b);
+        assert_eq!(crop(b, Some([f64::NAN, 0.0, 1.0, 1.0]), 4.0), b);
+        assert_eq!(crop(b, house, f64::NAN), b);
+    }
+
+    /// [208] Grundrisse gleich gross mit gemeinsamer Mitte; Schnitte/Ansichten gleich hoch mit gemeinsamer Höhenmitte.
+    #[test]
+    fn rahmen_deckungsgleich_und_gleiche_hoehe() {
+        let kept: Vec<(String, u32)> = vec![("eg".into(), 0), ("og".into(), 0), ("a".into(), 1), ("s".into(), 2)];
+        let ext = |id: &str, _s: f64| -> Option<([f64; 4], Option<[f64; 4]>)> {
+            Some(match id {
+                "eg" => ([-50.0, -50.0, 60.0, 50.0], Some([0.0, 0.0, 20.0, 12.0])),
+                "og" => ([-3.0, -3.0, 18.0, 15.0], Some([0.0, 0.0, 15.0, 12.0])),
+                "a" => ([-2.0, -1.0, 22.0, 9.0], None),
+                _ => ([1.0, -4.0, 13.0, 10.0], None),
+            })
+        };
+        let f = view_frames(&kept, &|_| 200.0, &ext);
+        let m = PLAN_MARGIN_MM * 200.0 / 1000.0;
+        // Grundrisse: Vereinigung der Ausschnitte (EG beschnitten auf ± 4 m), beide gleich.
+        assert_eq!((f[0].w, f[0].h, f[0].cx, f[0].cy), (f[1].w, f[1].h, f[1].cx, f[1].cy));
+        assert!((f[0].w - (20.0 + 2.0 * m) * 5.0).abs() < 1e-9 && (f[0].h - (12.0 + 2.0 * m) * 5.0).abs() < 1e-9);
+        // Ansicht und Schnitt: Höhe −4 … 10 gemeinsam, Breite je eigen.
+        assert_eq!((f[2].h, f[2].cy), (f[3].h, f[3].cy));
+        assert!((f[2].h - 70.0).abs() < 1e-9 && (f[2].w - 120.0).abs() < 1e-9 && (f[3].w - 60.0).abs() < 1e-9);
     }
 
     #[test]

@@ -167,19 +167,36 @@ pub fn viewport_maps(p: &Project, layout: &Layout) -> Vec<VpMap> {
         let scale = viewport_scale(vp, Some(snap));
         let Some(buf) = snapshot_buf(p, snap, scale, None) else { continue };
         let Some(b) = crate::plan::buf::View::parse(&buf).and_then(|v| v.bounds()) else { continue };
+        let (cx, cy) = viewport_center(vp, b);
         out.push(VpMap {
             x_mm: vp.x_mm,
             y_mm: vp.y_mm,
             w_mm: vp.width_mm,
             h_mm: vp.height_mm,
-            cx: (b[0] + b[2]) / 2.0,
-            cy: (b[1] + b[3]) / 2.0,
+            cx,
+            cy,
             scale,
             level: snap.active_level_id.clone(),
             buf,
         });
     }
     out
+}
+
+/// Bildmitte eines Viewports (Modell-Meter): [`LayoutViewport::center`] ([208]), sonst die Mitte des Plan-Ausmasses `b`.
+pub fn viewport_center(vp: &LayoutViewport, b: [f64; 4]) -> (f64, f64) {
+    match vp.center {
+        Some(c) if c.x.is_finite() && c.y.is_finite() => (c.x, c.y),
+        _ => ((b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0),
+    }
+}
+
+/// [208] Ausmass des Inhalts und der Bauteile (Wände, Decken, Dächer, Räume, Treppen; nur Grundrisse) eines Ausschnitts.
+pub fn snapshot_extents(p: &Project, snap: &ViewSnapshot, scale: f64, shadows: Option<bool>) -> Option<([f64; 4], Option<[f64; 4]>)> {
+    let buf = snapshot_buf(p, snap, scale, shadows)?;
+    let v = crate::plan::buf::View::parse(&buf)?;
+    let house = v.house().filter(|h| h.iter().all(|x| x.is_finite()) && h[2] > h[0] && h[3] > h[1]);
+    Some((v.bounds()?, house))
 }
 
 /// Plan-Puffer des Inhalts eines Ausschnitts beim Massstab 1:`scale` (Grundriss bzw. Schnitt/Ansicht wie
@@ -409,6 +426,23 @@ pub(crate) mod tests {
         // 1 m bei 1:100 = 10 mm; Modell-y nach oben = Papier-y nach unten.
         let (x1, y1) = m.to_mm(m.cx + 1.0, m.cy + 1.0);
         assert!((x1 - 210.0).abs() < 1e-9 && (y1 - 90.0).abs() < 1e-9);
+    }
+
+    /// [208] Eigene Bildmitte des Viewports (Plakat: deckungsgleiche Grundrisse) übersteuert die Mitte des Ausmasses.
+    #[test]
+    fn eigene_bildmitte() {
+        let mut p = project();
+        let id = layout_of_level(&p, "sh").expect("Layout").id.clone();
+        let l = p.layouts.as_mut().unwrap().iter_mut().find(|l| l.id == id).unwrap();
+        l.viewports[0].center = Some(crate::model::Vec2 { x: 0.0, y: 0.0 });
+        let l = layout_of_level(&p, "sh").unwrap();
+        let m = &viewport_maps(&p, l)[0];
+        assert_eq!((m.cx, m.cy), (0.0, 0.0));
+        let (x, y) = m.to_mm(0.0, 0.0);
+        assert!((x - 200.0).abs() < 1e-9 && (y - 100.0).abs() < 1e-9);
+        // Unsinn fällt auf die Mitte des Ausmasses zurück.
+        let vp = LayoutViewport { center: Some(crate::model::Vec2 { x: f64::NAN, y: 1.0 }), ..Default::default() };
+        assert_eq!(viewport_center(&vp, [0.0, 0.0, 4.0, 2.0]), (2.0, 1.0));
     }
 
     #[test]
