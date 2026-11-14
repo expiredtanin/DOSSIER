@@ -107,12 +107,36 @@ pub fn outline(shape: OpeningShape, rise: Option<f64>, w: f64, h: f64) -> Option
     (pts.len() >= 3).then_some(pts)
 }
 
-/// Umriss einer Öffnung (Form aus dem Modell), sonst `None`.
+/// Umriss einer Öffnung (Form aus dem Modell), sonst `None`. [234] Ist `h` kleiner als die Höhe der Öffnung (gekappt an
+/// der Wandoberkante oder an der Unterkante einer Decke, `Project::opening_top_under_ceilings`), bleibt die Form der
+/// vollen Höhe und wird auf `h` abgeschnitten (gerade Oberkante) — nicht auf `h` gestaucht.
 pub fn opening_outline(o: &Opening, w: f64, h: f64) -> Option<Vec<P>> {
     if !is_shaped(o) {
         return None;
     }
-    outline(o.shape.unwrap_or_default(), o.shape_rise, w, h)
+    let shape = o.shape.unwrap_or_default();
+    if o.height.is_finite() && h > MIN && o.height > h + MIN {
+        return cut_top(&outline(shape, o.shape_rise, w, o.height)?, h);
+    }
+    outline(shape, o.shape_rise, w, h)
+}
+
+/// Konvexer Umriss unterhalb von `v = h` (Sutherland-Hodgman an einer waagrechten Geraden).
+fn cut_top(poly: &[P], h: f64) -> Option<Vec<P>> {
+    let mut out = Vec::new();
+    for i in 0..poly.len() {
+        let (a, b) = (poly[i], poly[(i + 1) % poly.len()]);
+        let (ia, ib) = (a[1] <= h, b[1] <= h);
+        if ia {
+            out.push(a);
+        }
+        if ia != ib {
+            let t = (h - a[1]) / (b[1] - a[1]);
+            out.push([a[0] + (b[0] - a[0]) * t, h]);
+        }
+    }
+    let out = dedup(out);
+    (out.len() >= 3).then_some(out)
 }
 
 /// Senkrechte Ausdehnung `[v_lo, v_hi]` eines konvexen Umrisses bei `u`; ausserhalb ⇒ `None`.

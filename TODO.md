@@ -339,7 +339,12 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   Wandoberkante gekappt wurde: 3D-Wandloch, Wandkörper, Einbauteile, Pick, Taschen, Schichteinzug, Flächenmuster, Plan/Schnitt
   (`view_range`, `section/bands`), Ansicht, IFC, Sonne. Test `oeffnung_in_die_decke_endet_an_der_deckenunterkante` (Beispiel
   `og-f1`: Brüstung 0,9 + 1,6 bei Decke ab 2,43 m; Rechteck/Rundbogen, gerade/Bogenwand; ohne Decke volle Höhe). Formöffnungen werden
-  wie an der Wandoberkante gestaucht (Umriss über die gekappte Höhe), nicht abgeschnitten. · S
+  wie an der Wandoberkante gestaucht (Umriss über die gekappte Höhe), nicht abgeschnitten.
+  Stand 14.11. (spät): gekappte Formöffnungen (Wandoberkante wie Deckenunterkante) werden ABGESCHNITTEN: `opening_outline` baut die
+  Form über die volle Höhe der Öffnung und schneidet sie bei der gekappten Höhe gerade ab (konvex bleibt konvex) — eine Stelle für
+  3D-Wandkörper, Einbauteile, Grundriss-Sehne, Schnitt, Ansicht, Flächenmuster, IFC und Mengen. Test
+  `formoeffnung_in_der_decke_wird_abgeschnitten_nicht_gestaucht` (Rundbogen: Kämpfer bleibt auf 1,1 m, Breite an der Oberkante
+  wie der volle Bogen, Punkt-in-Körper). Die Breite wird nicht gekappt (Öffnung über das Wandende hinaus bleibt gestaucht). · S
 - 1:100-Pläne in Abgabequalität (Bemassung, Koten, Raumstempel, Öffnungen nach Detailgrad) — Plan-Review-Runde 4 nach [199].
 - ◐ **[256]** Plan-Review Runde 4 (1:100 Vorprojekt, 14.11., beide Musterhäuser + Wettbewerb, alle Grundrisse, Schnitt A-A, Ansicht Süd, 1:200
   Gegenprobe; CLI-SVG `--hatch` in Chromium, nur Linux). Behoben: (1) Raumstempel im Ersatz (Grundschrift/umbrochen/Nummer/gekürzt) verloren
