@@ -54,7 +54,6 @@ Raumprogramm gegen Modell → Grundrisse/Schnitte/Ansichten 1:200 (Vorprojekt 1:
 3D-Bilder/Axonometrie/Schatten → Flächen/Volumen SIA 416 und Kennzahlen → Kostenschätzung grob → Abgabe-Layouts (Plakate A0/A1,
 Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
 
-#- ○ **[252]** Entscheide Maintainer 14.11.: (1) „Geschoss“ heisst im Englischen durchgehend **floor** (en.ts vereinheitlichen, „storey“ ersetzen; Fachbegriffe wie „storey height“ → „floor height“). (2) **Tab bleibt immer für die Befehlszeile** (kein Tab-Durchlauf durch Dock-Knöpfe); **Ctrl+Tab / Ctrl+Umschalt+Tab** springt durch die Reiter (Grundriss/3D/Schnitt …). · S
 - ○ **[253]** Standard-Objektbibliothek 2D (14.11., Wunsch Maintainer): Sanitär (WC, Lavabo, Dusche, Wanne, Urinal, WM/Tumbler), Küche (Schweizer Küchennorm 55er-Raster, T 60: Unterbau, Spüle, Kochfeld, GS, Kühlschrank, Hochschrank, Zeile/L/Insel), Tische, Stühle, Sofa, Betten 90–180×200, Schränke T 60/35, Auto+Parkfeld, Velo, Rollstuhl-Wendekreis Ø 150; als `BlockDef`s aus dem Kern erzeugt (abstrakter Strich, 1:100/1:200), Klassen „Möbel“/„Sanitär“, Palette zum Einsetzen. Nachtrag Maintainer: Masse je Element anpassbar (parametrisch, Objekt-Info), Strich je Detailstufe grob/mittel/fein (abstrakt → detailliert). Vorgaben: nur 55er-Raster, nur 2D (3D nach 1.0). · M
 
 ## Phase 1 (13.–19.11.): Stabil und baubar
