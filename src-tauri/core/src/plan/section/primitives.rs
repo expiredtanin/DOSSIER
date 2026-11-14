@@ -675,7 +675,10 @@ pub fn section_primitives_mv(out: &Output, mono: bool, hidden_lines: bool, vis: 
     }
     // Mit Gelände ersetzt die Geländelinie die Grundlinie ([T6]).
     if acc.min_x.is_finite() && acc.max_x > acc.min_x && !(terrain_shown && !out.profiles.is_empty()) {
-        prims.push(line(v2(acc.min_x, acc.min_y), v2(acc.max_x, acc.min_y), "section-ground", SECTION_GROUND_MM, SECTION_INK));
+        // [208] Wie in der Ansicht: kräftig auf ±0.00 (Bezugsgeschoss) mit Überstand; Sockel/UG darunter bleiben geschnitten sichtbar.
+        if let Some((y, x0, x1)) = super::super::elevation::ground_extent(out.ground, (acc.min_y, acc.max_y), (acc.min_x, acc.max_x), scale) {
+            prims.push(super::super::elevation::ground_stroke("section-ground", y, x0, x1));
+        }
     }
     (prims, acc.bounds())
 }

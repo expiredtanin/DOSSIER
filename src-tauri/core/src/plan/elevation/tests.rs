@@ -1128,3 +1128,25 @@ fn ansicht_fenster_bei_1_200_mit_rahmen() {
     assert_eq!(p200, p100, "1:200 wie 1:100 (mittel)");
     assert!(s100 > 0 && s200 == 0, "Öffnungssymbole nur ab 1:100 ({s100} / {s200})");
 }
+
+/// [208] Modelldarstellung „Wettbewerb 1:200" (Fenster „vereinfacht" = 3 Linien im Grundriss) macht die Ansicht nicht grob:
+/// bei 1:200 Rahmen und Glas wie ohne Vorlage; erst ab 1:500 (Übersicht) nur der Umriss.
+#[test]
+fn ansicht_wettbewerb_vorlage_zeigt_rahmen() {
+    let mut p = sample();
+    p.model_view_options = Some(crate::standards::model_views().into_iter().map(|v| serde_json::from_value(v).unwrap()).collect());
+    let l = p.drawing_levels.iter().find(|l| l.id == "ansicht-sued").unwrap();
+    let mut v = serde_json::to_value(l).unwrap();
+    let plain = LevelSpec::from_json(&v);
+    v["modelViewOptionId"] = serde_json::json!("std-mv-wettbewerb-200");
+    let mv = LevelSpec::from_json(&v);
+    assert_eq!(mv.model_view.as_deref(), Some("std-mv-wettbewerb-200"));
+    let windows: Vec<String> = p.openings.iter().flatten().filter(|o| o.kind == ElementKind::Window).map(|o| o.id.clone()).collect();
+    let polys = |level: &LevelSpec, scale: f64| {
+        let (prims, _) = elevation_primitives(&p, level, false, false, &Visibility::default(), scale).unwrap().unwrap();
+        prims.iter().filter(|q| matches!(q, Primitive::Polygon { opening_id: Some(id), .. } if windows.contains(id))).count()
+    };
+    assert!(polys(&mv, 200.0) > windows.len(), "Rahmen und Glas bei 1:200");
+    assert_eq!(polys(&mv, 200.0), polys(&plain, 200.0));
+    assert!(polys(&mv, 500.0) <= windows.len(), "1:500 grob");
+}

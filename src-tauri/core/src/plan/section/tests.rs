@@ -1329,3 +1329,49 @@ fn gewachsenes_gelaende_nicht_durch_gebaeude() {
     }
     assert!(nat.iter().any(|pr| pr.pts.iter().any(|q| q[0] <= lo + 1e-6)), "vor dem Haus bleibt es");
 }
+
+/// [208] Abgabe-Review „Schnitt: Bodenlinie dünn an der Unterkante": ohne Geländenetz liegt die Bodenlinie kräftig auf ±0.00
+/// (Bezugsgeschoss) und läuft wie in der Ansicht beidseits über den Bau hinaus (10 mm Papier, mindestens 2 m); Sockel/UG darunter
+/// bleibt geschnitten (keine weisse Abdeckung). Klasse „Gelände" (02) ausgeblendet ⇒ ohne Bodenlinie.
+#[test]
+fn bodenlinie_auf_null_mit_ueberstand() {
+    let mut p = sample();
+    for w in p.walls.iter_mut().filter(|w| w.floor_id == "eg") {
+        w.bottom = Some(VerticalAnchor::Floor { floor_id: "eg".into(), offset: Some(-0.4) });
+    }
+    let l = level(&p, "schnitt-a");
+    let ground = |p: &Project, vis: &Visibility, scale: f64| {
+        let out = compute_section_vis(p, &l, &[], vis).unwrap().unwrap();
+        let (prims, _) = section_primitives_at(&out, true, false, vis, scale, Detail::Mittel, false, &CutRules::of(p, &out, RuleView::at(scale, None)));
+        let built = prims
+            .iter()
+            .filter_map(|q| match q {
+                Primitive::Polygon { pts, wall_id: Some(_), .. } => Some(pts.clone()),
+                _ => None,
+            })
+            .flatten()
+            .fold((f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY), |(a, b, c), q| (a.min(q.x), b.max(q.x), c.min(q.y)));
+        let line = prims.iter().find_map(|q| match q {
+            Primitive::Line { a, b, cls, weight_mm, .. } if cls == "section-ground" => Some((*a, *b, *weight_mm)),
+            _ => None,
+        });
+        let white = prims.iter().any(|q| matches!(q, Primitive::Polygon { fill, stroke, wall_id: None, ceiling_id: None, pts, .. } if fill == "#ffffff" && stroke == "none" && pts.iter().all(|v| v.y <= 1e-9)));
+        (built, line, white)
+    };
+    let ((x0, x1, bottom), line, white) = ground(&p, &Visibility::default(), 100.0);
+    assert!(bottom < -0.3, "Wände unter ±0.00 geschnitten: {bottom}");
+    let (a, b, w) = line.expect("Bodenlinie");
+    assert!(a.y.abs() < 1e-9 && b.y.abs() < 1e-9, "auf ±0.00: {a:?} {b:?}");
+    assert!(a.x.min(b.x) <= x0 - 2.0 + 1e-6 && a.x.max(b.x) >= x1 + 2.0 - 1e-6, "Überstand mind. 2 m: {a:?} {b:?} ({x0}, {x1})");
+    assert!(w >= 0.5 - 1e-9, "kräftig: {w}");
+    assert!(!white, "UG im Schnitt nicht abdecken");
+    let (_, line, _) = ground(&p, &Visibility::default(), 500.0);
+    let (a, b, _) = line.unwrap();
+    assert!(a.x.min(b.x) <= x0 - 5.0 + 1e-6 && a.x.max(b.x) >= x1 + 5.0 - 1e-6);
+    // Klasse „Gelände" ausgeblendet ⇒ keine Bodenlinie; fehlt die Klasse im Projekt, bleibt sie.
+    let hidden = Visibility { has_vis: true, invisible: ["02".to_string()].into_iter().collect(), ..Default::default() };
+    assert!(ground(&p, &hidden, 100.0).1.is_some());
+    p.layers.push(serde_json::from_value(serde_json::json!({"code": "02", "name": "Gelände", "color": "#808080", "lw": 0.13, "visible": true, "locked": false})).unwrap());
+    assert!(ground(&p, &hidden, 100.0).1.is_none());
+    assert!(ground(&p, &Visibility::default(), 100.0).1.is_some());
+}

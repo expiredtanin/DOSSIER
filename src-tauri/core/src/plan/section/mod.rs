@@ -66,7 +66,8 @@ const SECTION_CUT_OUTLINE_MM: f64 = 0.25;
 /// [140] Fugen zwischen Schichten/Bauteilen innerhalb der geschnittenen Masse: fein.
 const SECTION_JOINT_MM: f64 = 0.13;
 const SECTION_VISIBLE_MM: f64 = 0.18;
-const SECTION_GROUND_MM: f64 = 0.25;
+/// Geländeschnittlinie (mit Netz) kräftig wie die Bodenlinie ([208], `elevation::GROUND_MM`).
+const SECTION_GROUND_MM: f64 = 0.5;
 const SECTION_HIDDEN_MM: f64 = 0.13;
 const SECTION_HIDDEN_DASH: [f64; 2] = super::line_pattern::HIDDEN;
 /// [T6] gewachsenes Terrain im Schnitt: gestrichelt, dünner als das gestaltete.
@@ -517,6 +518,8 @@ pub struct Output {
     pub mesh_lines: Vec<(usize, Vec<[f64; 2]>)>,
     /// [180] Klasse der Bauteile hinter den Projektionskanten (`Edge::kind`, `Edge::index`; Netze über `meshes`).
     pub edge_cats: HashMap<(Kind, usize), String>,
+    /// [208] ±0.00 und „Gelände"-Klasse ausgeblendet? (Bodenlinie ohne Geländenetz, `elevation::ground_ref`); Standard: 0 / nein.
+    pub ground: (f64, bool),
 }
 
 /// [180] Klassen der Projektions-Besitzer: Wände (Index in `walls_r`), Platten (Decken, Treppen, Stützen; Index in
@@ -651,7 +654,7 @@ pub(super) fn compute_plane(p: &Project, level: &LevelSpec, bodies: &[BodyMesh],
     let (mut visible, hidden) = projection_edges(p, &plane, &walls_r, &wi, &slabs_r, &bodies, &meshes, &cuts, level.hidden_lines, level.depth, strip.map_or(&[][..], |s| &s.half[..]), &skip);
     shaped_projection(&mut visible, p, &walls_r, &plane);
     let meshes = meshes.iter().map(|m| MeshMeta { id: m.mesh.id.clone(), name: m.mesh.name.clone(), category: Some(m.mesh.category_code.clone()) }).collect();
-    let mut out = Output { cuts, visible, hidden, profiles: Vec::new(), earth: Vec::new(), shoring: Vec::new(), terrain_id: None, meshes, mesh_lines, edge_cats };
+    let mut out = Output { cuts, visible, hidden, profiles: Vec::new(), earth: Vec::new(), shoring: Vec::new(), terrain_id: None, meshes, mesh_lines, edge_cats, ground: super::elevation::ground_ref(p, &|c| vis.visible(c) && vis.render(c)) };
     append_terrain_profiles(&mut out, p, base, u);
     clip_context_meshes_to_terrain(&mut out);
     if let Some(s) = strip {

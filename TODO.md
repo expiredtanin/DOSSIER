@@ -374,8 +374,13 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   („1.20 3.00"); geht auch das nicht und läge „eine Zeile höher" zum Gebäude hin (Ketten Süd/Ost), steht sie unter der Linie (`dim_auto_offsets*` mit
   `offset`, gleich in Plan, Griffen, DXF; Test `masszahl_weicht_nach_aussen_statt_in_die_wand`). Goldens: Ansicht muster (Ausmass +2 m je Seite) und komplex
   (Linienstärke). Offen: „12.39"/„4.80" links liessen sich weder im CLI-SVG noch in den Viewport-Plänen des Präsentationsplans nachstellen (Abstand 1.4 m,
-  kein Überlapp; vermutlich Textsatz des PDF, svg2pdf mit gedrehten Texten — im Browser-PDF prüfen); Schnitt: Bodenlinie weiter dünn an der Unterkante
-  (nicht auf ±0.00); Modelldarstellung „Wettbewerb 1:200" (`windows.simplified`) macht die Ansichtsfenster weiter grob; nicht in der Tauri-App/auf dem Mac.
+  kein Überlapp; vermutlich Textsatz des PDF, svg2pdf mit gedrehten Texten — im Browser-PDF prüfen); nicht in der Tauri-App/auf dem Mac.
+  **Nachtrag 14.11.**: (5) Schnitt: Bodenlinie ohne Geländenetz wie in der Ansicht kräftig (0.5) auf ±0.00 mit Überstand (gemeinsame Logik
+  `elevation::ground_ref/ground_extent/ground_stroke`, `Output.ground`; Klasse „02 Gelände" ausgeblendet ⇒ ohne); UG/Sockel darunter bleibt geschnitten
+  (keine weisse Fläche im Schnitt); Geländeschnittlinie mit Netz ebenfalls 0.5 (`SECTION_GROUND_MM`); Test `section::tests::bodenlinie_auf_null_mit_ueberstand`.
+  Goldens: komplex-/muster-schnitt-a (komplex: Klasse „Gelände" dort aus ⇒ Bodenlinie entfällt wie in der Ansicht). (6) „Wettbewerb 1:200": `windows.simplified`
+  (3 Linien) ist Absicht für den Grundriss (und Schnitt: Fenster als Linie); die Ansicht ignoriert die Option unter 1:500 und zeigt Rahmen/Glas wie ohne Vorlage
+  (`elevation/mod.rs`, Test `ansicht_wettbewerb_vorlage_zeigt_rahmen`). Nur Linux, CLI-SVG in Chromium geprüft.
 - [61] Raumprogramm gegen Modell und Flächennachweis SIA 416 als Tabelle/Layout-Element ([70]); Kennzahlen (GF, GV, HNF/GF, Fassadenanteil).
 - 3D-Bilder für die Abgabe: hochaufgelöster PNG-Export (Perspektive, Axonometrie, Schatten), Sonnenstand; [205] Pausfolie.
 - [199]/[204] Plan- und App-Review-Reste im Darstellungsbereich 1:500/1:200 schliessen.
