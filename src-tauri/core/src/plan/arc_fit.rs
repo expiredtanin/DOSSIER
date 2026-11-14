@@ -1128,6 +1128,38 @@ mod tests {
         assert!(ring_bulges(&schraeges_rundbogenfenster().0, TOL).is_none());
     }
 
+    /// Höhenlinie: glatte, geschlossene Kurve mit `n` Punkten, auf mm gerundet.
+    fn contour(n: usize, seed: f64) -> Vec<V2> {
+        (0..n).map(|i| {
+            let t = 2.0 * PI * i as f64 / n as f64;
+            let r = 200.0 + 30.0 * (3.0 * t + seed).sin() + 10.0 * (7.0 * t).cos();
+            V2 { x: ((r * t.cos()) * 1000.0).round() / 1000.0, y: ((r * t.sin()) * 1000.0).round() / 1000.0 }
+        }).collect()
+    }
+
+    /// [257] Der DXF-Export prüft einen offenen Zug ohne Bogen nicht je Rest neu: `fit` entscheidet je Anfangspunkt nur
+    /// über den Zug dahinter, ohne Bogen im Ganzen gibt es auch in keinem offenen Rest einen.
+    #[test]
+    fn offener_zug_ohne_bogen_hat_keinen_bogen_im_rest() {
+        let mut zuege: Vec<Vec<V2>> = Vec::new();
+        // Verrauschte Höhenlinie, Zickzack, gerade Strecke mit Knick, leicht geknicktes Band, Spirale mit wachsendem Radius.
+        zuege.push((0..80).map(|i| V2 { x: i as f64 * 0.7, y: 0.002 * ((i * 7) % 5) as f64 + 0.01 * (i as f64 * 0.1).sin() }).collect());
+        zuege.push((0..60).map(|i| V2 { x: i as f64, y: if i % 2 == 0 { 0.0 } else { 1.0 } }).collect());
+        zuege.push((0..40).map(|i| V2 { x: i as f64, y: (i as f64 - 20.0).abs() * 0.3 }).collect());
+        zuege.push((0..50).map(|i| { let t = i as f64 * 0.15; V2 { x: (1.0 + t) * t.cos(), y: (1.0 + t) * t.sin() } }).collect());
+        zuege.push((0..70).map(|i| { let t = i as f64 * 0.09; V2 { x: 40.0 * t.cos() + 0.03 * ((i * 13) % 7) as f64, y: 25.0 * t.sin() } }).collect());
+        let mut gesamt = 0;
+        for z in &zuege {
+            if fit(z, false, TOL).is_none() {
+                gesamt += 1;
+                for s in 1..z.len() {
+                    assert!(fit(&z[s..], false, TOL).is_none(), "Rest ab {s} von {} Punkten", z.len());
+                }
+            }
+        }
+        assert!(gesamt >= 3, "genug Fälle ohne Bogen ({gesamt})");
+    }
+
     #[test]
     fn unsinn_ergibt_nichts() {
         let nan = vec![V2 { x: f64::NAN, y: 0.0 }; 6];
