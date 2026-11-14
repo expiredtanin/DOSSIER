@@ -4,6 +4,7 @@
 // Räumen); die Kennwert-Felder sind direkt in der Tabelle editierbar (Ops mit coalesceKey: Tippen = ein
 // Undo-Schritt). CSV und PDF kommen aus demselben Berichtsmodell wie der Flächennachweis.
 
+import { CardTable } from "./CardTable";
 import { useMemo } from "react";
 import { t } from "../i18n";
 import { usePanelHost } from "./host";
@@ -71,7 +72,7 @@ export function OpeningScheduleSection() {
         <div className="balance-empty">{t("openings.empty")}</div>
       ) : (
         <div className="area-scroll">
-          <table className="area-table opening-table">
+          <CardTable className="opening-table">
             <thead>
               <tr>
                 <th>{t("openings.col.mark")}</th>
@@ -154,7 +155,7 @@ export function OpeningScheduleSection() {
                 );
               })}
             </tbody>
-          </table>
+          </CardTable>
         </div>
       )}
       <ul className="area-notes">

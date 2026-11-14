@@ -3,6 +3,7 @@
 // (`roomBook`); bearbeitet werden die Angaben in der Objekt-Info des Raums. CSV und PDF kommen aus
 // demselben Berichtsmodell wie die Fenster-/Türliste.
 
+import { CardTable } from "./CardTable";
 import { useMemo } from "react";
 import { t } from "../i18n";
 import { exportProjectName, areaReportToCsv, buildAreaReportPdf, buildRoomBookReport, hasSlope, roomBook, usageLabel } from "../core";
@@ -48,7 +49,7 @@ export function RoomBookSection() {
         <div className="balance-empty">{t("roomBook.empty")}</div>
       ) : (
         <div className="area-scroll">
-          <table className="area-table opening-table room-book-table">
+          <CardTable className="opening-table room-book-table">
             <thead>
               <tr>
                 <th>{t("openings.col.floor")}</th>
@@ -99,9 +100,9 @@ export function RoomBookSection() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </CardTable>
           {book.quantities.length > 0 && (
-            <table className="area-table opening-table room-book-table">
+            <CardTable className="opening-table room-book-table">
               <thead>
                 <tr>
                   <th>{t("roomBook.col.surface")}</th>
@@ -120,7 +121,7 @@ export function RoomBookSection() {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </CardTable>
           )}
         </div>
       )}

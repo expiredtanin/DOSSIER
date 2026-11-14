@@ -8910,9 +8910,9 @@ body {
   font-weight: 700;
   border-top: 1px solid var(--ink-2);
 }
-/* Breite Tabelle (> 6 Spalten) in schmaler Dock-Spalte: jede Zeile als Karte — Name oben, darunter die Kennwerte
+/* Gemeinsames Muster `.area-table.wide` (AreaTableSection, Komponente CardTable: Fenster-/Türliste, Raumbuch): Breite Tabelle (> 6 Spalten) in schmaler Dock-Spalte: jede Zeile als Karte — Name oben, darunter die Kennwerte
    als Raster (5 Spalten) „Kopf über Zahl“ (data-label der Zelle). Kein waagrechtes Scrollen, nichts abgeschnitten. */
-.area-block {
+.area-scroll {
   container-type: inline-size;
 }
 @container (max-width: 460px) {
@@ -8950,6 +8950,27 @@ body {
     font-weight: 600;
     min-width: 0;
   }
+  .area-table.wide td[data-span="2"] {
+    grid-column: span 2;
+  }
+  .area-table.wide td[data-span="3"] {
+    grid-column: span 3;
+  }
+  .area-table.wide td select,
+  .area-table.wide td input {
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+  }
+  .area-table.wide td:empty {
+    display: none;
+  }
+  .area-table.wide .opening-input,
+  .area-table.wide .opening-input.opening-short,
+  .area-table.wide .opening-input.opening-mark {
+    width: 100%;
+    min-width: 0;
+  }
   .area-table.wide td[data-label]::before {
     content: attr(data-label);
     display: block;
@@ -8958,6 +8979,11 @@ body {
     font-weight: 600;
     color: var(--ink-2);
     text-align: right;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .area-table.wide td:not(.num)[data-label]::before {
+    text-align: left;
   }
 }
 .area-inputs {
