@@ -2208,8 +2208,17 @@ fn assemble_cached(c: &Ctx, revs: &crate::document::Revs, cc: &mut super::cache:
     // [140] Achsraster enden an der Gebäudegrundfläche: ihr Stand folgt auch Wänden, Körpern und Dächern.
     let stamps = revs.item_stamps("drawings2d").unwrap_or(&[]);
     let house_rev = ["walls", "extrudedSolids", "roofs"].iter().fold(0u64, |h, k| (h ^ revs.field(k)).wrapping_mul(0x0000_0100_0000_01b3));
-    let stamps: std::borrow::Cow<[u64]> = if house_rev != 0 && c.p.drawings2d.iter().any(|d| matches!(d.geom, crate::model::Drawing2DGeom::Grid { .. })) {
-        c.p.drawings2d.iter().zip(stamps).map(|(d, &st)| if matches!(d.geom, crate::model::Drawing2DGeom::Grid { .. }) { st ^ house_rev.rotate_left(17) } else { st }).collect::<Vec<_>>().into()
+    let has_grid = house_rev != 0 && c.p.drawings2d.iter().any(|d| matches!(d.geom, crate::model::Drawing2DGeom::Grid { .. }));
+    // [207] Strassennamen (Einzeltext der Strassen-Klasse) folgen den Achsen ihrer Ebene: deren Stände gehören zum Stand des Textes.
+    let road = super::drawings::road_axes_stamp(c.p, stamps);
+    let stamps: std::borrow::Cow<[u64]> = if has_grid || !road.is_empty() {
+        c.p.drawings2d.iter().zip(stamps).map(|(d, &st)| match &d.geom {
+            crate::model::Drawing2DGeom::Grid { .. } if has_grid => st ^ house_rev.rotate_left(17),
+            crate::model::Drawing2DGeom::Text { .. } if d.category_code == super::drawings::ROAD_CLASS => {
+                st ^ road.get(d.level_id.as_str()).map_or(0, |h| h.rotate_left(23))
+            }
+            _ => st,
+        }).collect::<Vec<_>>().into()
     } else {
         stamps.into()
     };

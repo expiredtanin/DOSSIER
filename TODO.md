@@ -230,8 +230,11 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   nächsten Abschnitt, Grundlinie parallel im DXF-Abstand, nie kopfüber, Vorschub = Schriftbreite) und von `plan/drawings.rs` als gedrehte
   `drawingText`-Primitive je Zeichen ausgegeben: Szene, SVG, Druck-SVG/PDF und DXF lesen dasselbe; gerade Achse, keine Achse, Mehrzeiler/Spalte/Hinweislinie
   bleiben ein gerader Text. Schrifthöhe wie bisher (`paperHeight` oder DXF-Höhe). Test: `text_curve::tests`, `drawings::tests::strassenname_folgt_der_achse`.
+  14.11. Zeichnungs-Cache: der Stand eines Einzeltexts der Klasse „11“ schliesst den Stand aller Achs-Kandidaten (Klasse „11", Linie/Polylinie/Bogen) seiner Ebene ein
+  (`drawings::road_axes_stamp`, in `domains.rs` wie bei Achsrastern): Achse ändern/dazu/weg rechnet den Namen neu, Wand verschieben lässt alle Stücke stehen
+  (Test `cache::tests::strassenname_folgt_achse_im_cache`; Goldens unverändert).
   Offen: Bildschirm-Szene der nativen Fläche zeichnet gedrehte Einzeltexte nicht im Glyphen-Pass ([194], Webview/Vektor-Glyphen springen ein; nicht auf dem Mac
-  geprüft); Plan-Cache der Zeichnungen (`plan_drawings_chunked`) kennt die Abhängigkeit Text → Achse nicht (Achse ändern, Text bleibt bis zu seiner eigenen Änderung);
+  geprüft);
   echte Kataster-DXF (Layer-Namen je Kanton) nicht geprüft; nicht in der Tauri-App/auf dem Mac geprüft. · M
 - ◐ **[208]** Wettbewerbs-Abgabe (12.11.). Umgesetzt: **Bild-Element im Layout** (`Layout.images`, `LayoutImage`: PNG/JPEG als Data-URL wie
   `ContextImage.src`, Rahmen in Papier-mm, Zuschnitt als Anteile; Kern `layout_image.rs`: Dateikopf, Seitenverhältnis, Zeichen-/Klipp-Rechteck,
