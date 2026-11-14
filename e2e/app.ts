@@ -1,6 +1,7 @@
 // Gemeinsame Bausteine der UI-Suite ([49]): `test` mit Konsolen-Wächter und Bedien-Helfer.
 // Geprüft wird über sichtbare UI (Text, Panel-Werte, Elemente-Baum) — nie über Pixel: Die
 // WebGPU-Engines zeichnen headless nichts Verlässliches.
+import { appendFileSync } from "node:fs";
 import { expect, test as base, type Page } from "@playwright/test";
 
 /**
@@ -18,6 +19,13 @@ const ALLOWED_CONSOLE_ERRORS: { re: RegExp; why: string }[] = [
   },
 ];
 
+/**
+ * [206] Warnungen, die wie Fehler zählen: React-Entwicklungswarnungen (nur gegen `vite dev` sichtbar, nicht im
+ * Produktions-Build der Standard-Suite) und veraltete APIs. Alle übrigen Warnungen ändern den Ausgang nicht;
+ * mit `E2E_WARN_LOG=<datei>` landen sie (eine JSON-Zeile je Meldung) zur Auswertung in einer Datei.
+ */
+const FATAL_WARNINGS = /Each child in a list should have a unique "key"|Cannot update a component|Cannot update during an existing state transition|not wrapped in act\(|Warning: |is deprecated|findDOMNode|Maximum update depth/;
+
 export const test = base.extend<{ errors: string[] }>({
   errors: [
     async ({ page }, use) => {
@@ -27,6 +35,10 @@ export const test = base.extend<{ errors: string[] }>({
       };
       page.on("console", (m) => {
         if (m.type() === "error") take(m.text());
+        else if (m.type() === "warning") {
+          if (process.env.E2E_WARN_LOG) appendFileSync(process.env.E2E_WARN_LOG, JSON.stringify({ test: base.info().title, text: m.text().slice(0, 600) }) + "\n");
+          if (FATAL_WARNINGS.test(m.text())) take(`Warnung: ${m.text()}`);
+        }
       });
       page.on("pageerror", (e) => take(`pageerror: ${e.message}`));
       await use(errors);
