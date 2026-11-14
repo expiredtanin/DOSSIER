@@ -43,6 +43,35 @@ fn save_atomic(path: String, content: String) -> Result<(), String> {
     atomic_save::save_atomic_impl(&PathBuf::from(path), content.as_bytes())
 }
 
+/// Export schreiben ([116], PDF/DXF/IFC/PNG …): Bytes als Rohkörper, Zielpfad prozent-kodiert im Header `x-path`;
+/// atomar (Temp + fsync + Umbenennen), das Ziel bleibt bei Fehler heil. Keine `~`-Sicherung.
+#[tauri::command]
+fn save_export(request: tauri::ipc::Request<'_>) -> Result<(), String> {
+    let path = request
+        .headers()
+        .get("x-path")
+        .and_then(|v| v.to_str().ok())
+        .map(atomic_save::percent_decode)
+        .filter(|p| !p.is_empty())
+        .ok_or_else(|| "Zielpfad fehlt".to_string())?;
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("Inhalt fehlt".to_string());
+    };
+    atomic_save::export_atomic_impl(&PathBuf::from(path), bytes)
+}
+
+/// Gibt es zur Projektdatei eine Sicherung der Vorversion (`<pfad>~`)? ([116])
+#[tauri::command]
+fn backup_exists(path: String) -> bool {
+    atomic_save::backup_exists_impl(&PathBuf::from(path))
+}
+
+/// Inhalt der Sicherung der Vorversion (`<pfad>~`), falls vorhanden ([116]).
+#[tauri::command]
+fn read_backup(path: String) -> Option<String> {
+    atomic_save::read_backup_impl(&PathBuf::from(path))
+}
+
 /// Blender-Programmdatei ([211]): eigene Angabe aus den Einstellungen, sonst PATH und die üblichen Orte. `None` = nicht gefunden.
 #[tauri::command]
 fn blender_find(custom: Option<String>) -> Option<String> {
@@ -414,6 +443,9 @@ pub fn run() {
         acquire_project_lock,
         release_project_lock,
         save_atomic,
+        save_export,
+        backup_exists,
+        read_backup,
         blender_find,
         blender_job_dir,
         blender_start,
@@ -438,6 +470,9 @@ pub fn run() {
         acquire_project_lock,
         release_project_lock,
         save_atomic,
+        save_export,
+        backup_exists,
+        read_backup,
         blender_find,
         blender_job_dir,
         blender_start,

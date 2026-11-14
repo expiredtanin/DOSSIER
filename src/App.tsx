@@ -394,7 +394,7 @@ export default function App() {
     planViewRef,
   );
   const {
-    projectFileInputRef, projectTemplateFileInputRef, openImportForFile, onSaveProject, onSaveProjectAs,
+    projectFileInputRef, projectTemplateFileInputRef, openImportForFile, onSaveProject, onSaveProjectAs, onRestoreBackup,
     onNewProject, onNewProjectFromSample, onNewProjectFromComplexSample, onNewProjectFromWettbewerbSample, onNewProjectFromTemplate,
     onProjectTemplateFileChosen, onExportIfc, onExportObj, onExportStl, onOpenProject, onProjectFileChosen,
   } = files;
@@ -705,6 +705,7 @@ export default function App() {
     onOpenProject,
     onSaveProject,
     onSaveProjectAs,
+    onRestoreBackup,
     onImport: () => dxfInputRef.current?.click(),
     onImportPointCloud: () => openPointCloudFileDialog(),
     onImportMesh: () => openMeshFileDialog(),

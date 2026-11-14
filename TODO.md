@@ -107,8 +107,16 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   Geprüft ohne Befund: `save_atomic` (Temp + fsync + Umbenennen + `~`; 3 neue Rust-Tests), Fehler → `SaveError` → `notify`, Projekt bleibt ungespeichert;
   Rundreise aller Beispiele und der Robustheits-Fixtures samt Libobj/`fill`/`identifiers`/Baurecht (`src/io/projectRoundtrip.test.ts`); Autosave `sampleProjectBig`
   (1.7 MB) Serialisieren ≈ 35 ms, Prüfen ≈ 33 ms (headless gemessen). Tests: `autosave.test.ts`, `closeGuard.test.ts`, `saveFile.test.ts`, `e2e/datensicherheit116.spec.ts`
-  (Browser). **Offen:** nichts davon in der Tauri-App geprüft — `doc/RELEASE-1.0.md` Abschnitt 14 (Mac); Exporte (`saveBinaryFile`, PDF/DXF) schreiben weiter nicht atomar;
-  Electron schreibt Projektdateien als Download (kein atomares Überschreiben möglich), `.obp~` ohne Wiederherstellungs-UI; Autosave ist ein Fenster-Zustand der Webview
+  (Browser). **Fortsetzung 14.11. (8):** (8) **Exporte atomar** (Tauri): `saveBinaryFile`/`saveTextFile`/OBJ+MTL schreiben über den Rust-Befehl `save_export`
+  (Rohkörper, Pfad prozent-kodiert im Header; Temp + fsync + Umbenennen, keine `~`), vorher `writeFile`/`writeTextFile` des Plugins; Fehler → `setExportErrorReporter`
+  (in `useProjectFileActions` an `notify` gehängt, `export.save.failed`), kein Download-Ersatz, Ziel bleibt heil. (9) **Electron:** Projekt-Speichern atomar im
+  Hauptprozess (`scripts/electron-files.cjs`, `window.dossierFiles`: `saveAtomic`, `saveAs` mit Dialog, `backupExists`, `readBackup`, `pathForFile`); Pfad aus
+  Kommandozeilen-Start oder gewählter Datei, sonst Dialog. (10) **`.obp~`-Wiederherstellung:** lässt sich die Datei nicht laden, die Sicherung aber, bietet
+  `BackupOfferDialog` „Vorige Fassung (.obp~) öffnen" (Lock bleibt bis zur Antwort; geöffnete Sicherung gilt als ungespeichert); Datei-Menü „Vorige Fassung
+  wiederherstellen …" (AppMenuBar + natives Menü, immer aktiv, ohne Sicherung Hinweis `backup.none`); Rust `backup_exists`/`read_backup`. Tests: `atomic_save.rs`
+  (Export, Prozent-Dekodierung, Sicherung lesen), `saveFile.export.test.ts`, `electronFiles.test.ts`, `projectBackup.test.ts`. **Offen:** nichts davon in der
+  Tauri-App/Electron geprüft — `doc/RELEASE-1.0.md` Abschnitt 14 (14.14–14.19; Mac); Fenster für Dialoge/Menü nur per tsc; Menüpunkt nicht ausgegraut; Electron-Kommandozeilen-
+  Start setzt keine Zuletzt-geöffnet-Einträge; Autosave ist ein Fenster-Zustand der Webview
   (Löschen der Webview-Daten löscht die Kopien); Autosave serialisiert im Hauptfaden (≈ 35 ms bei Grossgebäude, bei viel grösseren Projekten Worker erwägen). · S
 - Release-Notes-Entwurf `doc/RELEASE-NOTES-1.0.md` (14.11.), offene Fragen an den Maintainer dort markiert (`**[Frage M: …]**`); nach dem Mac-Durchlauf [206] Einschränkungen nachführen.
 - [30] Release-Workflow lauffähig: macOS universal signiert/notarisiert, Updater, Versionsnummer 1.0.0-beta; [57]/[120] CI auf GitHub grün.

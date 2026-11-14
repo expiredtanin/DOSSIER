@@ -4,11 +4,12 @@
 // (render2d-WASM-Engine, ?engine=wasm) zuverlässig läuft. Kein Rust-Backend
 // nötig: compute_joins hat einen TS-Fallback (src/compute/index.ts).
 
-const { app, BrowserWindow, Menu, ipcMain, protocol, session } = require("electron");
+const { app, BrowserWindow, Menu, ipcMain, protocol, session, dialog } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
 const { buildCsp } = require("./csp.cjs");
 require("./electron-blender.cjs").register(ipcMain); // [211] Blender als eigener Prozess
+require("./electron-files.cjs").register(ipcMain, dialog, () => mainWindow); // [116] Projekt atomar speichern, Sicherung lesen
 
 // Randloses App-Fenster wie chromium-shell.sh (--app=…): keine native
 // Menüleiste (File/Edit/View/Window), kein Fensterrahmen. Minimieren/

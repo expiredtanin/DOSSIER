@@ -12,7 +12,7 @@
 // normalen Schliessen. Nur unter Tauri relevant: im reinen Browser gibt es
 // keinen echten Dateipfad (Blob-Download), daher entfällt der Lock dort.
 
-import { saveTextFile } from "./saveFile";
+import { saveTextFile, SaveError } from "./saveFile";
 
 /** Datei-Endung für Projektdateien (ohne Punkt). Einzige Änderungsstelle. */
 export const PROJECT_EXT = "obp";
@@ -37,6 +37,57 @@ export const PROJECT_TEMPLATE_DIALOG_FILTERS = [
 /** Erkennt Tauri wie an anderen Stellen (saveFile.ts, nativeSync.ts). */
 export function isTauriRuntime(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+}
+
+/** Brücke des Electron-Hauptprozesses für Projektdateien ([116], `scripts/electron-files.cjs`, `electron-preload.cjs`). */
+export interface DossierFiles {
+  saveAtomic: (path: string, text: string) => Promise<boolean>;
+  /** Speichern-Dialog + atomar schreiben; `null` = abgebrochen. */
+  saveAs: (defaultName: string, text: string, filters?: { name: string; extensions: string[] }[]) => Promise<string | null>;
+  backupExists: (path: string) => Promise<boolean>;
+  readBackup: (path: string) => Promise<string | null>;
+  /** Pfad einer vom Nutzer gewählten Datei (Electron), sonst `null`. */
+  pathForFile: (file: File) => string | null;
+}
+declare global {
+  interface Window {
+    dossierFiles?: DossierFiles;
+  }
+}
+
+/** Electron-Dateibrücke, falls vorhanden. */
+export function electronFiles(): DossierFiles | null {
+  return typeof window !== "undefined" && window.dossierFiles ? window.dossierFiles : null;
+}
+
+const errMsg = (err: unknown): string => (err instanceof Error ? err.message : String(err));
+
+/** Gibt es zur Projektdatei `path` eine Sicherung der Vorversion (`<path>~`)? Ohne Dateisystem (Browser) immer `false`. */
+export async function backupAvailable(path: string): Promise<boolean> {
+  try {
+    if (isTauriRuntime()) {
+      const { invoke } = await import("@tauri-apps/api/core");
+      return (await invoke("backup_exists", { path })) === true;
+    }
+    return (await electronFiles()?.backupExists(path)) === true;
+  } catch {
+    return false;
+  }
+}
+
+/** Inhalt der Sicherung `<path>~`; `null`, wenn es keine gibt (oder ohne Dateisystem). */
+export async function readBackupText(path: string): Promise<string | null> {
+  try {
+    if (isTauriRuntime()) {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const text = await invoke("read_backup", { path });
+      return typeof text === "string" ? text : null;
+    }
+    const text = await electronFiles()?.readBackup(path);
+    return typeof text === "string" ? text : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Ergebnis eines erfolgreichen nativen Öffnen-Vorgangs. */
@@ -134,6 +185,18 @@ export async function saveProjectFile(
     return true;
   }
   const filename = `${projectName || "projekt"}.${PROJECT_EXT}`;
+  // Electron ([116]): atomar über den Hauptprozess (Temp + Umbenennen, Vorversion als `~`); ohne bekannten Pfad Dialog dort.
+  const ef = electronFiles();
+  if (ef && !isTauriRuntime()) {
+    try {
+      const path = knownPath ? ((await ef.saveAtomic(knownPath, json)), knownPath) : await ef.saveAs(filename, json, PROJECT_DIALOG_FILTERS);
+      if (!path) return false; // Dialog abgebrochen
+      onSavedPath?.(path);
+      return true;
+    } catch (err) {
+      throw new SaveError(errMsg(err));
+    }
+  }
   return saveTextFile(json, filename, "application/json", PROJECT_DIALOG_FILTERS, onSavedPath, true);
 }
 

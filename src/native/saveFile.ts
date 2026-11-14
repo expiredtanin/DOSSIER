@@ -32,6 +32,30 @@ export async function writeFileAtomic(path: string, content: string): Promise<vo
   }
 }
 
+/** Export atomar schreiben ([116]): Rust-Befehl `save_export` (Temp-Datei + fsync + Umbenennen, keine `~`-Sicherung);
+ *  Bytes als Rohkörper, der Pfad prozent-kodiert im Header. Wirft {@link SaveError}. */
+async function writeExportAtomic(path: string, bytes: Uint8Array): Promise<void> {
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("save_export", bytes, { headers: { "x-path": encodeURIComponent(path) } });
+  } catch (err) {
+    throw new SaveError(err instanceof Error ? err.message : String(err));
+  }
+}
+
+let exportErrorReporter: ((message: string) => void) | null = null;
+
+/** Meldet gescheiterte Export-Schreibvorgänge (die App hängt `notify` ein); ohne Melder: Konsole. */
+export function setExportErrorReporter(fn: ((message: string) => void) | null): void {
+  exportErrorReporter = fn;
+}
+
+function reportExportError(err: unknown): void {
+  const msg = err instanceof Error ? err.message : String(err);
+  console.error("Export schreiben fehlgeschlagen:", err);
+  exportErrorReporter?.(msg);
+}
+
 /** Datei-Endungsfilter fuer den nativen Speichern-/Oeffnen-Dialog (Tauri). */
 export interface FileDialogFilter {
   name: string;
@@ -40,7 +64,7 @@ export interface FileDialogFilter {
 
 /**
  * Speichert Text-Inhalt in eine Datei.
- * - Unter Tauri: nativer Save-Dialog (Ordner + Name) → `writeTextFile`.
+ * - Unter Tauri: nativer Save-Dialog (Ordner + Name) → atomar schreiben (`save_export`, [116]); Fehler → Melder, kein Download.
  * - Im Browser: Blob + Anchor-Download in den Download-Ordner.
  *
  * @param filters Optionale Datei-Endungsfilter fuer den nativen Dialog (z. B.
@@ -70,8 +94,13 @@ export async function saveTextFile(
       if (!path) return false; // Nutzer hat abgebrochen
       if (atomic) await writeFileAtomic(path, content);
       else {
-        const { writeTextFile } = await import("@tauri-apps/plugin-fs");
-        await writeTextFile(path, content);
+        // Export ([116]): atomar; bei Fehler melden, nie als Download ausgeben, das Ziel bleibt heil.
+        try {
+          await writeExportAtomic(path, new TextEncoder().encode(content));
+        } catch (err) {
+          reportExportError(err);
+          return false;
+        }
       }
       onSavedPath?.(path);
       return true;
@@ -96,7 +125,7 @@ export async function saveTextFile(
  * Speichert Binaer-Inhalt (z. B. ein PDF) in eine Datei — gleiches Tauri-/
  * Browser-Muster wie {@link saveTextFile}, nur mit `writeFile` (Bytes) statt
  * `writeTextFile`.
- * - Unter Tauri: nativer Save-Dialog → `writeFile(path, bytes)`.
+ * - Unter Tauri: nativer Save-Dialog → atomar schreiben (`save_export`, [116]).
  * - Im Browser: Blob + Anchor-Download.
  *
  * @returns `true` wenn geschrieben/geladen wurde, `false` bei Abbruch.
@@ -111,8 +140,12 @@ export async function saveBinaryFile(
       const { save } = await import("@tauri-apps/plugin-dialog");
       const path = await save({ defaultPath: defaultName });
       if (!path) return false; // Nutzer hat abgebrochen
-      const { writeFile } = await import("@tauri-apps/plugin-fs");
-      await writeFile(path, bytes);
+      try {
+        await writeExportAtomic(path, bytes);
+      } catch (err) {
+        reportExportError(err);
+        return false;
+      }
       return true;
     } catch (err) {
       if (!warnedFallback) {
@@ -176,14 +209,19 @@ export async function saveTextWithCompanion(
   if (isTauri()) {
     try {
       const { save } = await import("@tauri-apps/plugin-dialog");
-      const { writeTextFile } = await import("@tauri-apps/plugin-fs");
+      const enc = new TextEncoder();
       const path = await save({ defaultPath: defaultName, filters });
       if (!path) return false;
       const companionName = `${stemOf(path)}.${companionExt}`;
       const files = build(companionName);
-      await writeTextFile(path, files.main);
-      const companionPath = await save({ defaultPath: path.replace(/[^\\/]*$/, companionName), filters: companionFilters });
-      if (companionPath) await writeTextFile(companionPath, files.companion);
+      try {
+        await writeExportAtomic(path, enc.encode(files.main));
+        const companionPath = await save({ defaultPath: path.replace(/[^\\/]*$/, companionName), filters: companionFilters });
+        if (companionPath) await writeExportAtomic(companionPath, enc.encode(files.companion));
+      } catch (err) {
+        reportExportError(err);
+        return false;
+      }
       return true;
     } catch (err) {
       if (!warnedFallback) {

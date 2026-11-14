@@ -34,6 +34,8 @@ export interface NativeAppMenuHandlers {
   onOpenProject: () => void;
   onSaveProject: () => void;
   onSaveProjectAs: () => void;
+  /** Datei: vorige Fassung (.obp~) der aktuellen Datei wiederherstellen ([116]). */
+  onRestoreBackup: () => void;
   onImport: () => void;
   onExportPdf: () => void;
   onExportDxf: () => void;
@@ -203,6 +205,10 @@ export function useNativeAppMenu(
             text: t("menu.native.saveAs"),
             accelerator: "CmdOrCtrl+Shift+S",
             action: () => handlersRef.current.onSaveProjectAs(),
+          }),
+          await MenuItem.new({
+            text: t("menu.native.restoreBackup"),
+            action: () => handlersRef.current.onRestoreBackup(),
           }),
           await MenuItem.new({
             text: t("menu.native.import"),
