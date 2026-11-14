@@ -35,6 +35,7 @@ Neues Modul: `<modul>.rs` und `mod` in `lib.rs`, Bindungen in `web/<modul>.rs` u
 | `standards.rs` | Standard-Bibliothek: Baustoffe mit SIA-400-Schraffur und Kennwerten, Linientypen, Standard-Aufbauten |
 | `furniture_lib.rs` | Objektbibliothek 2D ([253]): Katalog der Standard-Symbole mit Parametern (Definition) und Zeichenfunktionen nach Detailgrad (Erzeugung), Register, Platzhalter für unbekannte Ids; s. `doc/ARCHITEKTUR.md` 3.7 |
 | `text_layout.rs`, `rich_text.rs` | Text-Layout (Zeilen, Umbruch) und Bearbeiten von Rich-Text |
+| `woff2.rs` | WOFF2 → TTF/SFNT (nur untransformierte Pakete), `woff2_to_sfnt` für die PDF-Schriften ([208], `src/export/pdfFonts.ts`); render2d bindet dieselbe Datei per `#[path]` ein (Glyphen-Pass [226]) |
 
 ## 3D
 

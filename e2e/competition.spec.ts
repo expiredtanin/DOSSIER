@@ -153,8 +153,8 @@ test("Plakat A1 quer aus Vorlage, Bild einsetzen, anonym als WBW-Abgabe exportie
   expect(text).not.toContain("Demo-Haus");
   expect(text).toContain("/Subtype /Image");
   const content = pdfStreams(bytes);
-  expect(content).toContain("(FALKE 7)");
-  expect(content).toContain("(Kennwort)");
+  expect(content).toContain("FALKE 7");
+  expect(content).toContain("Kennwort");
   expect(content).not.toContain("Demo-Haus");
 
   if (process.env.DOSSIER_SHOTS) {

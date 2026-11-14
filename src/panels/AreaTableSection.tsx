@@ -30,9 +30,9 @@ export function AreaTableSection() {
   const stem = `${exportProjectName(project) || "projekt"}-flaechen`;
 
   const exportPdf = () => {
-    runWithAnonymityGate(project, [`${stem}.pdf`], () => {
+    runWithAnonymityGate(project, [`${stem}.pdf`], async () => {
       try {
-        buildAreaReportPdf(report).save(`${stem}.pdf`);
+        (await buildAreaReportPdf(report)).save(`${stem}.pdf`);
       } catch {
         notify(t("areas.exportPdf.fail"));
       }

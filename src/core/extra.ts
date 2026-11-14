@@ -50,6 +50,7 @@ export type { CompetitionIdentity } from "../export/competitionIdentity";
 export { anonymityFindings } from "../export/competitionCheck";
 export type { AnonymityFinding, AnonymityKind } from "../export/competitionCheck";
 export { buildAreaReport, areaReportToCsv, parseAreaReportCsv, areaReportToSvg, buildAreaReportPdf } from "../export/areaReport";
+export { setPdfFontLoader } from "../export/pdfFonts";
 export type { AreaReport, AreaReportOptions } from "../export/areaReport";
 export { sunPosition, shadowPolygons, shadowOfPrism, projectLatLon } from "../analysis/sun";
 export type { SunPosition } from "../analysis/sun";

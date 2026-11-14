@@ -1,4 +1,8 @@
 // Gemeinsame PDF-/PNG-Helfer der e2e-Specs (Wettbewerb [208], Referenz-Ablauf [206]).
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { deflateSync, inflateSync } from "node:zlib";
 
 /** PNG (Verlauf, Standard 160 × 90 px), im Test erzeugt: kein Fixture, nur die Pflicht-Chunks. */
@@ -37,7 +41,23 @@ export function testPng(w = 160, h = 90): Buffer {
   return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk("IHDR", ihdr), chunk("IDAT", idat), chunk("IEND", Buffer.alloc(0))]);
 }
 
-/** Text aller Inhaltsströme eines PDFs (Flate entpackt). */
+/**
+ * Sichtbarer Text des PDFs (`pdftotext`, Poppler). Die eingebetteten Schriften ([208]) kodieren Text als Glyphen-
+ * Nummern (Identity-H), er steht nicht mehr als `(Text)` im Inhaltsstrom; ohne Poppler leer.
+ */
+export function pdfText(buf: Buffer): string {
+  const dir = mkdtempSync(join(tmpdir(), "dossier-e2e-pdf-"));
+  try {
+    const file = join(dir, "t.pdf");
+    writeFileSync(file, buf);
+    const r = spawnSync("pdftotext", ["-layout", file, "-"], { encoding: "utf8" });
+    return r.status === 0 ? r.stdout : "";
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/** Text aller Inhaltsströme eines PDFs (Flate entpackt) plus der sichtbare Text (`pdfText`, ohne Klammern). */
 export function pdfStreams(buf: Buffer): string {
   const src = buf.toString("latin1");
   let out = src;
@@ -51,6 +71,6 @@ export function pdfStreams(buf: Buffer): string {
       /* kein Flate-Strom */
     }
   }
-  return out;
+  return out + "\n" + pdfText(buf);
 }
 

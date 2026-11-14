@@ -39,9 +39,9 @@ export function OpeningScheduleSection() {
   const setExternal = (id: string, value: string) => patch(id, { isExternal: value === "" ? undefined : value === "ext" }, "isExternal");
 
   const exportPdf = () => {
-    runWithAnonymityGate(project, [`${stem}.pdf`], () => {
+    runWithAnonymityGate(project, [`${stem}.pdf`], async () => {
       try {
-        buildAreaReportPdf(buildOpeningReport(project)).save(`${stem}.pdf`);
+        (await buildAreaReportPdf(buildOpeningReport(project))).save(`${stem}.pdf`);
       } catch {
         notify(t("openings.exportPdf.fail"));
       }

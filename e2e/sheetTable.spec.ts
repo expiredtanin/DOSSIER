@@ -2,9 +2,9 @@
 // (Fenster löschen → Zeile weg, Rückgängig → Zeile wieder da) und steht als Vektortext im Ordner-PDF.
 // Mit DOSSIER_SHOTS=<ordner> entsteht zusätzlich ein Screenshot des Blatts für die Abnahme.
 import { readFile, writeFile } from "node:fs/promises";
-import { inflateSync } from "node:zlib";
 import type { Page } from "@playwright/test";
 import { blurFocus, elementRows, expect, openSample, openTab, startNewProject, test } from "./app";
+import { pdfStreams } from "./pdf";
 
 /** Layout in einem neuen Ordner anlegen und öffnen. */
 async function openNewLayoutInFolder(page: Page) {
@@ -24,23 +24,6 @@ async function openNewLayoutInFolder(page: Page) {
 async function tableMarks(page: Page): Promise<string[]> {
   const texts = await page.locator("[data-table-id] text").allTextContents();
   return texts.filter((s) => /^F\d\.\d\d$/.test(s));
-}
-
-/** Text aller Inhaltsströme eines PDFs (Flate entpackt). */
-function pdfStreams(buf: Buffer): string {
-  const src = buf.toString("latin1");
-  let out = src;
-  for (const m of src.matchAll(/stream\r?\n/g)) {
-    const start = m.index! + m[0].length;
-    const end = src.indexOf("endstream", start);
-    if (end < 0) continue;
-    try {
-      out += inflateSync(buf.subarray(start, end)).toString("latin1");
-    } catch {
-      /* kein Flate-Strom */
-    }
-  }
-  return out;
 }
 
 test("Tabelle auf dem Blatt: lebendig, mit Spaltenwahl, im PDF als Vektortext", async ({ page }) => {
@@ -95,6 +78,6 @@ test("Tabelle auf dem Blatt: lebendig, mit Spaltenwahl, im PDF als Vektortext", 
   const bytes = await readFile((await dl.path())!);
   if (shots) await writeFile(`${shots}/blatt-tabelle.pdf`, bytes);
   const text = pdfStreams(bytes);
-  expect(text).toContain("(F1.01)");
-  expect(text).toContain("(Räume)");
+  expect(text).toContain("F1.01");
+  expect(text).toContain("Räume");
 });

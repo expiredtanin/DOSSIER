@@ -76,9 +76,9 @@ export function CostEstimateSection() {
 
   const exportCsv = () => runWithAnonymityGate(project, [`${stem}.csv`], () => downloadCsv(`${stem}.csv`, areaReportToCsv(buildCostReport(project, res))));
   const exportPdf = () => {
-    runWithAnonymityGate(project, [`${stem}.pdf`], () => {
+    runWithAnonymityGate(project, [`${stem}.pdf`], async () => {
       try {
-        buildAreaReportPdf(buildCostReport(project, res)).save(`${stem}.pdf`);
+        (await buildAreaReportPdf(buildCostReport(project, res))).save(`${stem}.pdf`);
       } catch {
         notify(t("costs.export.fail"));
       }

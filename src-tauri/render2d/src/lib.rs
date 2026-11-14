@@ -19,6 +19,8 @@ pub mod shaders;
 pub mod tessellate;
 pub mod text_lines;
 pub mod types;
+// Eine Datei fuer beide Crates: der PDF-Export ([208]) braucht denselben Entpacker im Kern.
+#[path = "../../core/src/woff2.rs"]
 pub mod woff2;
 
 #[cfg(feature = "render")]

@@ -60,9 +60,9 @@ export function ProgramCompareSection({ statusLabel }: { statusLabel: (status: C
   };
 
   const exportPdf = () => {
-    runWithAnonymityGate(project, [`${stem}.pdf`], () => {
+    runWithAnonymityGate(project, [`${stem}.pdf`], async () => {
       try {
-        buildAreaReportPdf(buildProgramReport(project)).save(`${stem}.pdf`);
+        (await buildAreaReportPdf(buildProgramReport(project))).save(`${stem}.pdf`);
       } catch {
         notify(t("program.compare.exportPdf.fail"));
       }

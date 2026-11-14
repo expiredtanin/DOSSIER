@@ -13,6 +13,7 @@
 
 import { jsPDF } from "jspdf";
 import "svg2pdf.js";
+import { ensurePdfFonts, PDF_DEFAULT_FONT, prepareSvgFonts, setPdfFont } from "./pdfFonts";
 import type { Plan } from "../plan/generatePlan";
 import { planToRenderScene } from "../plan/toRenderScene";
 import { sceneToPrintSvg } from "./sceneToPrintSvg";
@@ -88,11 +89,14 @@ export async function buildPlanPdf(
     format: [pageW, pageH],
     orientation: opts.orientation,
     compress: true,
+    putOnlyUsedFonts: true,
   });
 
   // SVG → PDF (Vektor). Die viewBox des SVG ist in mm (Papier-Benutzereinheiten)
   // und deckungsgleich mit der Blattgröße; svg2pdf bildet sie 1:1 auf das mm-Ziel
   // (Blattbreite/-höhe) ab.
+  await ensurePdfFonts(doc, [PDF_DEFAULT_FONT]);
+  await prepareSvgFonts(doc, print.svg);
   await doc.svg(print.svg, { x: 0, y: 0, width: pageW, height: pageH });
   // Info-Wörterbuch ([208]): anonym nur das Kennwort.
   doc.setProperties(pdfInfoFields({ name: opts.subtitle ?? opts.title, competition: opts.competition }));
@@ -124,17 +128,17 @@ function drawTitleBlock(
   doc.line(x, y + boxH - 7, x + boxW, y + boxH - 7);
 
   doc.setTextColor(17, 17, 17);
-  doc.setFont("helvetica", "bold");
+  setPdfFont(doc, PDF_DEFAULT_FONT, true);
   doc.setFontSize(10);
   doc.text(clip(opts.title, 30), x + 3, y + 6);
 
   if (opts.subtitle) {
-    doc.setFont("helvetica", "normal");
+    setPdfFont(doc, PDF_DEFAULT_FONT);
     doc.setFontSize(7);
     doc.text(clip(opts.subtitle, 40), x + 3, y + 11);
   }
 
-  doc.setFont("helvetica", "normal");
+  setPdfFont(doc, PDF_DEFAULT_FONT);
   doc.setFontSize(9);
   doc.text(`1:${opts.scaleDenominator}`, x + 3, y + boxH - 2.2);
   const fmt = `${opts.paper.toUpperCase()} ${

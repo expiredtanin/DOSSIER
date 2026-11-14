@@ -18,6 +18,7 @@ import { exportIfcSpf } from "./exportIfc";
 import { exportGlb, exportGltf, exportMtl, exportObj, exportStl } from "./exportMesh";
 import { exportScheduleCsv } from "./exportSchedule";
 import { exportProjectStep } from "./exportStep";
+import { pdfVisibleText } from "./pdfText.testing";
 import { buildPagesPdf, layoutPages, pdfBytes } from "./layoutPdf";
 import { planToSvgString } from "./planToSvgString";
 import { areaReportToCsv, buildAreaReport, buildAreaReportPdf } from "./areaReport";
@@ -68,7 +69,7 @@ function streamsText(bytes: Uint8Array): string {
       // kein Flate-Stream
     }
   }
-  return out;
+  return out + "\n" + pdfVisibleText(bytes);
 }
 
 /** Alle Ausgaben, die ohne Browser/GPU entstehen: Name → Text (Binärformate als latin1). */
@@ -84,7 +85,7 @@ async function allOutputs(p: Project): Promise<Record<string, string>> {
   const reports = { Flaechen: buildAreaReport(p, { ivhb: true }), Programm: buildProgramReport(p), Raumbuch: buildRoomBookReport(p), Oeffnungen: buildOpeningReport(p), Bauteile: buildElementReport(p), Kosten: buildCostReport(p) };
   for (const [name, report] of Object.entries(reports)) {
     out[`CSV-${name}`] = areaReportToCsv(report);
-    const bytes = new Uint8Array(buildAreaReportPdf(report).output("arraybuffer"));
+    const bytes = new Uint8Array((await buildAreaReportPdf(report)).output("arraybuffer"));
     out[`PDF-${name}`] = latin1(bytes);
     out[`PDF-${name}-Text`] = streamsText(bytes);
     out[`PDF-${name}-Info`] = pdfInfoText(bytes);
@@ -124,7 +125,8 @@ describe("anonyme Wettbewerbs-Abgabe in allen Ausgaben", () => {
       ["IFC4", NAME],
       ["CSV-Flaechen", NAME],
       ["PDF-Flaechen-Text", NAME],
-      ["PDF-Blatt-Text", AUTHOR],
+      ["PDF-Blatt-Text", NAME],
+      ["PDF-Blatt-Info", AUTHOR],
       ["Blender-scene.json", NAME],
     ] as const) {
       expect(o[where], where).toContain(what);
@@ -144,7 +146,7 @@ describe("anonyme Wettbewerbs-Abgabe in allen Ausgaben", () => {
 
   it("anonym: das Kennwort steht, wo es stehen soll", async () => {
     const o = await allOutputs(project(true));
-    expect(o["PDF-Blatt-Text"]).toContain(`(${KEYWORD})`);
+    expect(o["PDF-Blatt-Text"]).toContain(KEYWORD);
     expect(o["PDF-Blatt-Info"]).toContain(`/Title (${KEYWORD})`);
     expect(o["PDF-Flaechen-Info"]).toContain(`/Title (${KEYWORD})`);
     expect(o["PDF-Flaechen-Text"]).toContain(KEYWORD);

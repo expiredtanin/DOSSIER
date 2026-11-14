@@ -19,8 +19,9 @@ import { categoryLayerGroups, enablePdfLayers, type PdfLayers } from "./pdfLayer
 import { generatePlan, type Plan } from "../plan/generatePlan";
 import { snapshotMono, snapshotOverrideRuleIds, snapshotTemplate, viewportLevelPlan } from "../plan/viewportPlan";
 import { planToPrintSvg } from "./planToPrintSvg";
-import { drawTablesPdf, sheetTables } from "./sheetTable";
+import { drawTablesPdf, PDF_TABLE_FONT, sheetTables } from "./sheetTable";
 import { applyPdfInfo, finishPdfBytes } from "./pdfInfo";
+import { ensurePdfFonts, PDF_DEFAULT_FONT, prepareSvgFonts, setPdfFont } from "./pdfFonts";
 import { imageGeometry } from "../model/layoutImages";
 import { posterHeaderItems, viewportScaleLabel } from "../model/posterTemplates";
 import { collectVisibleCodes } from "../model/types";
@@ -68,12 +69,12 @@ function drawTitleBlock(
   doc.line(x, y + boxH - 7, x + boxW, y + boxH - 7);
 
   doc.setTextColor(17, 17, 17);
-  doc.setFont("helvetica", "bold");
+  setPdfFont(doc, PDF_DEFAULT_FONT, true);
   doc.setFontSize(9);
   doc.text(clip(tb.projectName, 28), x + 3, y + 5.6);
   doc.text(tb.planNumber, x + boxW - 3, y + 5.6, { align: "right" });
 
-  doc.setFont("helvetica", "normal");
+  setPdfFont(doc, PDF_DEFAULT_FONT);
   doc.setFontSize(8);
   doc.text(clip(tb.sheetName, 36), x + 3, y + 13);
   if (showRevision && tb.revision) {
@@ -129,6 +130,7 @@ async function renderSheetDrawing(doc: jsPDF, project: Project, layout: Layout, 
     bounds: { minX: a.x, minY: a.y, maxX: b.x, maxY: b.y },
     transparent: true,
   });
+  await prepareSvgFonts(doc, print.svg);
   await doc.svg(print.svg, { x: 0, y: 0, width: widthMm, height: heightMm });
 }
 
@@ -179,7 +181,7 @@ function drawImagesPdf(doc: jsPDF, layout: Layout): void {
 /** Massstabsangabe unter jedem Viewport ([208], Master `viewportScaleLabels`). */
 function drawScaleLabelsPdf(doc: jsPDF, project: Project, layout: Layout, sheet: { w: number; h: number }, scaleOverride?: number): void {
   doc.setTextColor(17, 17, 17);
-  doc.setFont("helvetica", "normal");
+  setPdfFont(doc, PDF_DEFAULT_FONT);
   for (const vp of layout.viewports) {
     const l = viewportScaleLabel(project, vp, sheet, scaleOverride);
     if (!l) continue;
@@ -197,7 +199,7 @@ function drawPosterHeaderPdf(doc: jsPDF, project: Project, layout: Layout, maste
       doc.setLineWidth(it.stroke);
       doc.rect(it.x, it.y, it.w, it.h);
     } else {
-      doc.setFont("helvetica", it.bold ? "bold" : "normal");
+      setPdfFont(doc, PDF_DEFAULT_FONT, it.bold);
       doc.setFontSize(it.sizeMm * MM_TO_PT);
       doc.text(it.text, it.x, it.y, { align: it.align });
     }
@@ -230,6 +232,7 @@ async function renderPage(
       const planOf = (visible: Set<string>) => viewportLevelPlan(project, snap.activeLevelId, visible, snap.detail, scaleN, true, snapshotMono(project, snap), ruleIds, template, snap.modelViewOptionId);
       const draw = async (plan: Plan, transparent: boolean, bounds?: Plan["bounds"]) => {
         const print = planToPrintSvg(plan, { scaleDenominator: scaleN, pageWidthMm: vp.widthMm, pageHeightMm: vp.heightMm, transparent, bounds });
+        await prepareSvgFonts(doc, print.svg);
         await doc.svg(print.svg, { x: vp.xMm, y: vp.yMm, width: vp.widthMm, height: vp.heightMm });
       };
       const full = await planOf(codes);
@@ -269,7 +272,9 @@ async function renderPage(
       const lp = legendPlan(project, layout, lg);
       if (!lp) continue;
       await inLayer(ctx, t("pdfLayers.legend"), async () => {
-        await doc.svg(legendPrintSvg(lp), { x: lp.xMm, y: lp.yMm, width: lp.widthMm, height: lp.heightMm });
+        const legendSvg = legendPrintSvg(lp);
+        await prepareSvgFonts(doc, legendSvg);
+        await doc.svg(legendSvg, { x: lp.xMm, y: lp.yMm, width: lp.widthMm, height: lp.heightMm });
       });
     } catch {
       // Eine Legende, die nicht rendert, darf die Seite nicht killen.
@@ -292,7 +297,9 @@ async function renderPage(
 
   // Lebendige Tabellen ([111]): Vektortext + Linien wie in der Blattansicht.
   try {
-    await inLayer(ctx, t("pdfLayers.tables"), () => drawTablesPdf(doc, sheetTables(project, layout.id)));
+    const tables = sheetTables(project, layout.id);
+    await ensurePdfFonts(doc, tables.flatMap((tb) => tb.prims.flatMap((p) => (p.k === "text" ? [PDF_TABLE_FONT[p.font]] : []))));
+    await inLayer(ctx, t("pdfLayers.tables"), () => drawTablesPdf(doc, tables));
   } catch {
     // Eine Tabelle, die nicht rechnet, darf die Seite nicht killen.
   }
@@ -326,7 +333,8 @@ export async function buildPagesPdf(project: Project, pages: FolderPdfPage[], op
   const orientOf = (s: { w: number; h: number }) => (s.w > s.h ? "landscape" : "portrait");
 
   const first = sizeOf(pages[0]);
-  const doc = new jsPDF({ unit: "mm", format: [first.w, first.h], orientation: orientOf(first), compress: true });
+  const doc = new jsPDF({ unit: "mm", format: [first.w, first.h], orientation: orientOf(first), compress: true, putOnlyUsedFonts: true });
+  await ensurePdfFonts(doc, [PDF_DEFAULT_FONT]);
   // Info-Wörterbuch: anonym nur das Kennwort ([208]); sonst Projektname und Bearbeiter des ersten Blatts.
   const firstMaster = findMaster(project, pages[0].layout);
   applyPdfInfo(doc, project, firstMaster ? resolveTitleBlock(project, pages[0].layout, firstMaster).author : undefined);

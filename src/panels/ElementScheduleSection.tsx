@@ -15,9 +15,9 @@ export function ElementScheduleSection() {
   const rows = useMemo(() => elementSchedule(project), [project]);
   const stem = `${exportProjectName(project) || "projekt"}-bauteile`;
   const exportPdf = () => {
-    runWithAnonymityGate(project, [`${stem}.pdf`], () => {
+    runWithAnonymityGate(project, [`${stem}.pdf`], async () => {
       try {
-        buildAreaReportPdf(buildElementReport(project)).save(`${stem}.pdf`);
+        (await buildAreaReportPdf(buildElementReport(project))).save(`${stem}.pdf`);
       } catch {
         notify(t("openings.exportPdf.fail"));
       }

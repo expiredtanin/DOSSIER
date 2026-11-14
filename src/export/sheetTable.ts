@@ -3,6 +3,7 @@
 // (`src-tauri/core/src/sheet_table.rs`, Abfrage `sheetTables`); hier nur die Beschriftung mit `t()`, die Kern-
 // Fassade und das Zeichnen ins jsPDF (Vektortext) — dieselben Primitive wie Blattansicht und DXF.
 
+import { setPdfFont } from "./pdfFonts";
 import type { jsPDF } from "jspdf";
 import type { Layout, LayoutTable, LayoutTableSource, Project } from "../model/types";
 import { t } from "../i18n/translate";
@@ -74,7 +75,8 @@ export function createTable(id: string, source: LayoutTableSource, sheetW: numbe
   return { id, source, xMm: 10, yMm: y, widthMm: width };
 }
 
-const PDF_FONT = { sans: "helvetica", serif: "times", mono: "courier" } as const;
+/** Gebündelte Familien der drei Tabellenschriften ([208]: eingebettet statt Helvetica/Times/Courier). */
+export const PDF_TABLE_FONT = { sans: "Inter", serif: "Source Serif 4", mono: "IBM Plex Mono" } as const;
 const PT_PER_MM = 72 / 25.4;
 
 /** Zeichnet die Tabellen eines Blatts als Vektor (Text + Linien) auf die aktuelle jsPDF-Seite. */
@@ -87,7 +89,7 @@ export function drawTablesPdf(doc: jsPDF, tables: readonly TableOut[]): void {
         doc.setLineWidth(p.w);
         doc.line(p.x1, p.y1, p.x2, p.y2);
       } else {
-        doc.setFont(PDF_FONT[p.font], p.bold && p.italic ? "bolditalic" : p.bold ? "bold" : p.italic ? "italic" : "normal");
+        setPdfFont(doc, PDF_TABLE_FONT[p.font], p.bold, p.italic);
         doc.setFontSize(p.size * PT_PER_MM);
         doc.text(p.s, p.x, p.y, { align: p.align === "r" ? "right" : "left" });
       }

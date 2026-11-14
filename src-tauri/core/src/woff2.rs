@@ -193,8 +193,8 @@ mod tests {
 
     #[test]
     fn rohes_sfnt_geht_durch_und_muell_wird_abgelehnt() {
-        let ttf = include_bytes!("../assets/Inter.ttf");
-        assert_eq!(to_sfnt(ttf).unwrap(), ttf);
+        let ttf = to_sfnt(&std::fs::read(fonts_dir().join("inter/inter-400-normal.woff2")).unwrap()).unwrap();
+        assert_eq!(to_sfnt(&ttf).unwrap(), ttf);
         assert!(to_sfnt(b"").is_err());
         assert!(to_sfnt(b"wOF2").is_err());
         assert!(to_sfnt(b"wOF2\0\0\0\0aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").is_err());

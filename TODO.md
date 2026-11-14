@@ -339,7 +339,7 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   setzt nur Grundrisse, Ansichten, Schnitt; Situation und Tabelle müssten als Viewport/Tabelle mit ins Plakat ([207], [255]). b) Anordnung nutzt das Raster
   nicht: Inhalt klein und mittig geballt, grosse Leerflächen (A1 bei 1:200 ≈ 40 % belegt), Zeilen nicht an Spalten ausgerichtet; Schriftfeld des Masters
   (70 × 30 mm, Text ~2 mm) steht zusätzlich zur Plakat-Kopfzeile unten rechts und ist redundant. c) Schriften nicht eingebettet (jsPDF Standard-14: Helvetica/Times/
-  Courier ohne Einbettung; Druckereien verlangen oft eingebettet); keine PDF-Ebenen-Prüfung am Plotter. d) Ansichten: keine Terrain-/Bodenlinie, Kotenmarken
+  Courier ohne Einbettung; Druckereien verlangen oft eingebettet; BEHOBEN 14.11., s. unten); keine PDF-Ebenen-Prüfung am Plotter. d) Ansichten: keine Terrain-/Bodenlinie, Kotenmarken
   winzig (< 1 mm Schrift), Fenster grau ohne Rahmenzeichnung; Massketten im Grundriss überlagern sich vereinzelt („12.39“/„4.80“ links, „1.20“ in der Wand E.09).
   e) Anonymitäts-Dialog zu Recht bei „Hofwiesenstrasse“ in der Kontext-Zeichnung des Beispiels (Adresse) — Beispiel enthält die Adresse im Klartext.
   f) Schwarzplan/Nachbarn grau nicht beurteilbar (Situation nicht auf dem Plakat). Dateigrösse 98 KB (ohne Bild), Rand/Satzspiegel (Raster 6 Spalten) in Ordnung,
@@ -353,6 +353,14 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   Offen: Rahmen sind so breit wie der Inhalt samt Masskette/Kontext (Musterhaus komplex: 2 Spalten je Grundriss, viel Weissraum im Rahmen, 2 Blätter); Anordnung mischt
   Gruppen (Pläne neben Situation, Ansichten darunter) statt strenger Zeilen; Tabellen-Spaltenköpfe „Reserve/Erfüllt“ eng; Baurecht-Zeilen mit „—“ bei fehlenden Vorgaben;
   Lage der Tabellen/des Bildes nicht von Hand fixiert (Neuberechnung nur durch Neuerstellen); nicht in der Tauri-App geprüft.
+  **Schriften im PDF eingebettet (14.11., zu c)**: alle jsPDF-Ausgaben (Blatt-/Plakat-/Ordner-PDF `layoutPdf.ts`, Einzelplan `exportPdf.ts`, Berichte `areaReport.ts`,
+  Blatt-Tabellen) betten Inter und die im SVG gewählten Familien aus `public/fonts` ein (OFL, `NOTICE`): `export/pdfFonts.ts` lädt die WOFF2 (App: `fetch` auf App-Dateien,
+  CLI/Tests: `setPdfFontLoader`), der Kern wandelt sie in TTF (`woff2_to_sfnt`, `core/src/woff2.rs` — Datei von render2d mitbenutzt, nicht doppelt), jsPDF bettet nur die
+  benutzten Glyphen ein (`putOnlyUsedFonts`: auch die 14 Standardschriften entfallen); `font-family`-Listen im Druck-SVG werden auf die erste gebündelte Familie, sonst Inter,
+  abgebildet. `buildAreaReportPdf` ist jetzt `async`. `pdffonts`: Inter „emb yes“, Umlaute/ß/²/³/±/Ø/–/„“ per `pdftotext` geprüft (vitest `pdfFonts.test.ts`). Plakat
+  e2e: 59,6 KB (vorher ~48 KB, +11 KB für Inter normal+fett). Text steht im PDF nur noch als Glyphen-Nummern: e2e-/vitest-Prüfungen lesen ihn über `pdftotext`
+  (`e2e/pdf.ts`, `export/pdfText.testing.ts`). Offen: kein Schnitt-/Kursiv-Rückfall für Glyphen ausserhalb der Latin-Teilmenge (z. B. Σ ≈ − im Bericht werden ersetzt, im SVG-Text
+  fehlende Zeichen bleiben leer); PDF/X-Prüfung am Plotter nicht möglich; nur im Linux-Container/Chromium geprüft, nicht in der Tauri-App.
 - [61] Raumprogramm gegen Modell und Flächennachweis SIA 416 als Tabelle/Layout-Element ([70]); Kennzahlen (GF, GV, HNF/GF, Fassadenanteil).
 - 3D-Bilder für die Abgabe: hochaufgelöster PNG-Export (Perspektive, Axonometrie, Schatten), Sonnenstand; [205] Pausfolie.
 - [199]/[204] Plan- und App-Review-Reste im Darstellungsbereich 1:500/1:200 schliessen.

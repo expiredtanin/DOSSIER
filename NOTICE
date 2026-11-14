@@ -90,6 +90,8 @@ Schriften (public/fonts/*, je Ordner mit OFL.txt), SIL Open Font License 1.1, lo
   Public Sans, Rubik, Source Sans 3 und Source Serif 4 (Adobe), Space Grotesk, Work Sans.
   [226] Dieselben Dateien liest auch der GPU-Glyphen-Pass (render2d); die WOFF2-Container sind ohne Transformation
   neu gepackt (fontTools, Schriftdaten unverändert), die Breitentabellen im Kern (core/src/text_metrics.rs) stammen aus ihrer Tabelle hmtx.
+  [208] Auch die PDF-Exporte betten diese Schriften ein (Layout-/Plakat-PDF, Berichte; export/pdfFonts.ts): OFL 1.1 erlaubt
+  das Einbetten in Dokumente; die Schriftdaten bleiben unverändert (WOFF2 -> TTF nur umgepackt, core/src/woff2.rs).
 
 Website (website/static/fonts, Lizenztexte OFL-*.txt daneben), SIL Open Font License 1.1, Quelle google/fonts:
   Schibsted Grotesk (The Schibsted-Grotesk Project Authors), Schnitte 600 und 800, auf Latein beschnitten;

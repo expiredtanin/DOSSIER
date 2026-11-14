@@ -100,6 +100,7 @@ import {
   areaReportToCsv,
   areaReportToSvg,
   buildAreaReportPdf,
+  setPdfFontLoader,
   exportProjectName,
   isAnonymous,
   anonymityFindings,
@@ -210,6 +211,12 @@ function wasmDir(): string {
   // dist-cli/dossier-cli.mjs → ../src/engine
   return resolve(dirname(fileURLToPath(import.meta.url)), "..", "src", "engine");
 }
+
+// Schriften fürs PDF ([208]): `public/fonts` neben dem Quellbaum (dist-cli/ → ../public); fehlen sie, bleibt es bei Helvetica.
+setPdfFontLoader(async (url) => {
+  const f = process.env.DOSSIER_FONT_DIR ? join(process.env.DOSSIER_FONT_DIR, url.replace(/^\/fonts\//, "")) : join(dirname(wasmDir()), "..", "public", url);
+  return existsSync(f) ? new Uint8Array(readFileSync(f)) : null;
+});
 
 const WASM_FILES: Record<string, string> = {
   core: "pkgCore/core_bg.wasm",
@@ -1138,7 +1145,7 @@ async function execute(project: Project, file: string, command: string, rest: st
         const report = buildAreaReport(project, { areas: wantAreas, ivhb: wantIvhb, siteProof: wantProof, ivhbOptions });
         if (format === "csv") out(args, areaReportToCsv(report), `${stem}.csv`);
         else if (format === "svg") out(args, areaReportToSvg(report), `${stem}.svg`);
-        else if (format === "pdf") out(args, new Uint8Array(buildAreaReportPdf(report).output("arraybuffer")), `${stem}.pdf`);
+        else if (format === "pdf") out(args, new Uint8Array((await buildAreaReportPdf(report)).output("arraybuffer")), `${stem}.pdf`);
         else throw new Error("--format: json, csv, svg oder pdf");
         return 0;
       }
@@ -1194,7 +1201,7 @@ async function execute(project: Project, file: string, command: string, rest: st
         const report = buildProgramReport(next);
         if (format === "csv") out(args, areaReportToCsv(report), `${stem}.csv`);
         else if (format === "svg") out(args, areaReportToSvg(report), `${stem}.svg`);
-        else if (format === "pdf") out(args, new Uint8Array(buildAreaReportPdf(report).output("arraybuffer")), `${stem}.pdf`);
+        else if (format === "pdf") out(args, new Uint8Array((await buildAreaReportPdf(report)).output("arraybuffer")), `${stem}.pdf`);
         else throw new Error("--format: json, csv, svg oder pdf");
       }
       return 0;
@@ -1218,7 +1225,7 @@ async function execute(project: Project, file: string, command: string, rest: st
           const report = buildOpeningReport(project);
           if (format === "csv") out(args, areaReportToCsv(report), `${stem}.csv`);
           else if (format === "svg") out(args, areaReportToSvg(report), `${stem}.svg`);
-          else if (format === "pdf") out(args, new Uint8Array(buildAreaReportPdf(report).output("arraybuffer")), `${stem}.pdf`);
+          else if (format === "pdf") out(args, new Uint8Array((await buildAreaReportPdf(report)).output("arraybuffer")), `${stem}.pdf`);
           else throw new Error("--format: json, csv, svg oder pdf");
         }
         return 0;
@@ -1232,7 +1239,7 @@ async function execute(project: Project, file: string, command: string, rest: st
           const report = buildRoomBookReport(project);
           if (format === "csv") out(args, areaReportToCsv(report), `${stem}.csv`);
           else if (format === "svg") out(args, areaReportToSvg(report), `${stem}.svg`);
-          else if (format === "pdf") out(args, new Uint8Array(buildAreaReportPdf(report).output("arraybuffer")), `${stem}.pdf`);
+          else if (format === "pdf") out(args, new Uint8Array((await buildAreaReportPdf(report)).output("arraybuffer")), `${stem}.pdf`);
           else throw new Error("--format: json, csv, svg oder pdf");
         }
         return 0;
@@ -1246,7 +1253,7 @@ async function execute(project: Project, file: string, command: string, rest: st
           const report = buildElementReport(project);
           if (format === "csv") out(args, areaReportToCsv(report), `${stem}.csv`);
           else if (format === "svg") out(args, areaReportToSvg(report), `${stem}.svg`);
-          else if (format === "pdf") out(args, new Uint8Array(buildAreaReportPdf(report).output("arraybuffer")), `${stem}.pdf`);
+          else if (format === "pdf") out(args, new Uint8Array((await buildAreaReportPdf(report)).output("arraybuffer")), `${stem}.pdf`);
           else throw new Error("--format: json, csv, svg oder pdf");
         }
         return 0;

@@ -6,6 +6,7 @@ import type { Layout, Project } from "../model/types";
 import { createPosterMaster, posterTemplate } from "../model/posterTemplates";
 import { addImage, createLayoutImage } from "../model/layoutImages";
 import { JPEG_64X48, PNG_40X30, PNG_40X30_ALPHA } from "../model/layoutImages.testing";
+import { pdfVisibleText } from "./pdfText.testing";
 import { buildPagesPdf, layoutPages, pdfBytes } from "./layoutPdf";
 import { pdfInfoText } from "./pdfInfo";
 
@@ -29,7 +30,7 @@ function streamsText(bytes: Uint8Array): string {
       // kein Flate-Stream (z. B. JPEG)
     }
   }
-  return out;
+  return out + "\n" + pdfVisibleText(bytes);
 }
 
 function indexOfBytes(hay: Uint8Array, needle: Uint8Array): number {
@@ -73,9 +74,9 @@ describe("Blatt-PDF mit Bild", () => {
     const bytes = pdfBytes(p, doc!);
     expect(latin1(bytes)).toMatch(/\/MediaBox \[0 0 2383\.93\d* 1683\.7\d*/); // 841 × 594 mm in pt
     const content = streamsText(bytes);
-    expect(content).toContain("(Kennwort)");
-    expect(content).toContain("(FALKE 7)");
-    expect(content).toContain("(Plan 1/1)");
+    expect(content).toContain("Kennwort");
+    expect(content).toContain("FALKE 7");
+    expect(content).toContain("Plan 1/1");
   });
 
   it("anonyme Abgabe: keine Büro-/Autor-Angaben, Info nur mit Kennwort, kein jsPDF-Producer", async () => {
@@ -92,7 +93,7 @@ describe("Blatt-PDF mit Bild", () => {
     expect(all).not.toContain("Büro Muster");
     expect(all).not.toContain("Maria Muster");
     expect(all).not.toContain("Haus Muster");
-    expect(all).toContain("(FALKE 7)");
+    expect(all).toContain("FALKE 7");
   });
 
   it("nicht anonym: Projektname im Titel, Bearbeiter im Info-Wörterbuch", async () => {

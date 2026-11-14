@@ -684,7 +684,7 @@ test("[208] Wettbewerbs-Plakat A1 mit Kennwort, anonymes PDF ohne Projektnamen",
   expect(raw.slice(0, 5)).toBe("%PDF-");
   expect(raw).toMatch(/\/MediaBox \[0 0 2383\.93\d* 1683\.7\d*/); // A1 quer
   expect(raw).toContain("/Title (FALKE 7)");
-  expect(all).toContain("(FALKE 7)");
+  expect(all).toContain("FALKE 7");
   expect(all).not.toContain(projectName);
   expect(anon.name).not.toContain(projectName);
 });

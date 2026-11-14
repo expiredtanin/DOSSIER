@@ -95,13 +95,13 @@ describe("Bericht", () => {
     expect(parseAreaReportCsv(areaReportToCsv(r)).projectName).toBe('Haus "A"; Süd');
   });
 
-  it("SVG und PDF entstehen aus derselben Seitenaufteilung", () => {
+  it("SVG und PDF entstehen aus derselben Seitenaufteilung", async () => {
     const svg = areaReportToSvg(report);
     expect(svg.startsWith("<svg")).toBe(true);
     expect(svg).toContain("NGF");
     const lay = layoutAreaReport(report);
     expect(lay.pages.length).toBeGreaterThanOrEqual(1);
-    const pdf = buildAreaReportPdf(report);
+    const pdf = await buildAreaReportPdf(report);
     expect(pdf.getNumberOfPages()).toBe(lay.pages.length);
     expect(pdf.output("arraybuffer").byteLength).toBeGreaterThan(1000);
   });

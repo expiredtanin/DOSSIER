@@ -153,5 +153,6 @@ pub mod presentation_poster;
 pub mod presentation_sheet;
 pub mod drawing_recognize;
 pub mod kosten;
+pub mod woff2;
 #[cfg(test)]
 mod wall_join3d_tests;

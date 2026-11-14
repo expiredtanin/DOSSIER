@@ -51,6 +51,7 @@ pub mod opening_presets;
 pub mod furniture_lib;
 pub mod solid_bool;
 pub mod line_pattern;
+pub mod fonts;
 
 use wasm_bindgen::prelude::wasm_bindgen;
 

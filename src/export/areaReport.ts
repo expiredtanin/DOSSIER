@@ -15,6 +15,7 @@ import { jsPDF } from "jspdf";
 import type { Project } from "../model/types";
 import { t } from "../i18n/translate";
 import { core } from "../engine/coreWasm";
+import { ensurePdfFonts, hasPdfFont, PDF_DEFAULT_FONT, setPdfFont } from "./pdfFonts";
 import { computeAreaTable, computeIvhb } from "../analysis/areaTable";
 import type { AreaRow, IvhbOptions } from "../analysis/areaTable";
 import { computeSiteProof } from "../analysis/siteProof";
@@ -192,15 +193,18 @@ export function areaReportToSvg(report: AreaReport, page = 0, o: ReportLayoutOpt
   return core().area_report_svg(JSON.stringify(report), Math.max(0, page), JSON.stringify(o));
 }
 
-/** Die eingebaute Helvetica kennt nur WinAnsi: Zeichen ausserhalb ersetzen. */
-function pdfSafe(s: string): string {
-  return s.replace(/Σ/g, "Sum").replace(/≈/g, "~").replace(/[–−]/g, "-");
+/** Zeichen ausserhalb der eingebetteten Latin-Teilmenge ersetzen; die Rückfall-Helvetica kennt nur WinAnsi (auch –). */
+function pdfSafe(s: string, embedded: boolean): string {
+  const r = s.replace(/Σ/g, "Sum").replace(/≈/g, "~").replace(/−/g, "-");
+  return embedded ? r : r.replace(/–/g, "-");
 }
 
 /** Vektor-PDF des Berichts (A4 quer, eine oder mehrere Seiten). */
-export function buildAreaReportPdf(report: AreaReport, o: ReportLayoutOptions = {}): jsPDF {
+export async function buildAreaReportPdf(report: AreaReport, o: ReportLayoutOptions = {}): Promise<jsPDF> {
   const lay = layoutAreaReport(report, o);
-  const doc = new jsPDF({ unit: "mm", format: [lay.width, lay.height], orientation: lay.width > lay.height ? "landscape" : "portrait", compress: true });
+  const doc = new jsPDF({ unit: "mm", format: [lay.width, lay.height], orientation: lay.width > lay.height ? "landscape" : "portrait", compress: true, putOnlyUsedFonts: true });
+  await ensurePdfFonts(doc, [PDF_DEFAULT_FONT]);
+  const embedded = hasPdfFont(doc);
   lay.pages.forEach((prims, i) => {
     if (i > 0) doc.addPage([lay.width, lay.height], lay.width > lay.height ? "landscape" : "portrait");
     doc.setTextColor(17, 17, 17);
@@ -210,9 +214,9 @@ export function buildAreaReportPdf(report: AreaReport, o: ReportLayoutOptions = 
         doc.setLineWidth(p.w);
         doc.line(p.x1, p.y1, p.x2, p.y2);
       } else {
-        doc.setFont("helvetica", p.bold ? "bold" : "normal");
+        setPdfFont(doc, PDF_DEFAULT_FONT, !!p.bold);
         doc.setFontSize(p.size);
-        doc.text(pdfSafe(p.s), p.x, p.y, { align: p.align ?? "left" });
+        doc.text(pdfSafe(p.s, embedded), p.x, p.y, { align: p.align ?? "left" });
       }
     }
   });

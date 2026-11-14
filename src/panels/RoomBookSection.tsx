@@ -21,9 +21,9 @@ export function RoomBookSection() {
   const stem = `${exportProjectName(project) || "projekt"}-raumbuch`;
 
   const exportPdf = () => {
-    runWithAnonymityGate(project, [`${stem}.pdf`], () => {
+    runWithAnonymityGate(project, [`${stem}.pdf`], async () => {
       try {
-        buildAreaReportPdf(buildRoomBookReport(project)).save(`${stem}.pdf`);
+        (await buildAreaReportPdf(buildRoomBookReport(project))).save(`${stem}.pdf`);
       } catch {
         notify(t("roomBook.exportPdf.fail"));
       }
