@@ -62,10 +62,11 @@ impl B {
     fn v2() -> Self {
         B { schema: 1.0, ..B::new() }
     }
-    /// META ab `has_geo`: Geo-Flag, Höhe, Breite/Länge (nur mit Geo), Schema, Anzahl Geschosse.
+    /// META ab `has_geo`: Geo-Flag, Höhe, Breite/Länge (nur mit Geo), Versatz LV95 ([259]), Schema, Anzahl Geschosse.
     fn meta_tail(&mut self, geo: bool, elevation: f64, storeys: f64) {
         let (lat, lon) = if geo { (47.376_9, 8.541_7) } else { (f64::NAN, f64::NAN) };
-        self.f.extend([if geo { 1.0 } else { 0.0 }, elevation, lat, lon, self.schema, storeys]);
+        let (e, n) = if geo { (2_683_000.0, 1_247_000.0) } else { (0.0, 0.0) };
+        self.f.extend([if geo { 1.0 } else { 0.0 }, elevation, lat, lon, e, n, self.schema, storeys]);
     }
     fn s(&mut self, x: &str) -> f64 {
         self.s.push(x.to_string());
@@ -366,6 +367,8 @@ fn volles_haus_ist_wohlgeformt() {
     assert_eq!(count(&ifc, "IFCBUILDINGSTOREY"), 1);
     assert_eq!(count(&ifc, "IFCPROJECTEDCRS"), 1);
     assert_eq!(count(&ifc, "IFCMAPCONVERSION"), 1);
+    // [259] Versatz des lokalen Ursprungs nach LV95, Höhe von ±0.00 = RefElevation.
+    assert!(ifc.contains(",2683000.0,1247000.0,421.5,1.0,0.0,1.0);"), "IfcMapConversion mit Versatz");
     assert!(ifc.contains(",421.5,$,$);"), "RefElevation");
     assert!(ifc.contains("'Haus \\X2\\00C4\\X0\\'"));
     // Gleiche Wandtypen teilen Typ, Materialschichten und Pset.
@@ -560,7 +563,7 @@ fn bogenwand_als_bogenprofil() {
     assert_eq!(count(&ifc, "IFCCOMPOSITECURVESEGMENT"), 4);
     assert_eq!(count(&ifc, "IFCCIRCLE"), 3, "zwei Profilbögen und die Achse");
     assert!(ifc.contains(",2.6);") && ifc.contains(",2.4);"), "Radien 2.6 und 2.4");
-    assert!(ifc.contains(".F.,.CARTESIAN.") && ifc.contains(".T.,.CARTESIAN."));
+    assert!(ifc.contains(".F.,.PARAMETER.") && ifc.contains(".T.,.PARAMETER."));
     assert!(ifc.contains("'Body','SweptSolid'") && ifc.contains("'Axis','Curve2D'"));
     // Kaputtes Profil: Fehler statt Panik.
     let mut b = mini();
@@ -798,7 +801,9 @@ fn decke_mit_bogenkante_hat_zusammengesetzte_kurve() {
     assert_eq!(count(&ifc, "IFCTRIMMEDCURVE"), 1);
     // Aussparung ohne Bögen bleibt Linienzug.
     assert_eq!(count(&ifc, "IFCPOLYLINE"), 4);
-    assert!(first_line(&ifc, "IFCTRIMMEDCURVE").contains(".F.,.CARTESIAN."));
+    // [259] Punkt und Winkel als Trimmung, massgebend der Winkel (ifcopenshell liess den Bogen sonst fallen).
+    let t = first_line(&ifc, "IFCTRIMMEDCURVE");
+    assert!(t.contains(",IFCPARAMETERVALUE(") && t.ends_with(".F.,.PARAMETER.);"), "{t}");
 }
 
 /// Treppe mit zwei Läufen (Prismen), Podest und Geländer (Mesh).
@@ -1117,6 +1122,40 @@ fn baum_als_geografisches_element() {
     }
 }
 
+/// [259] Kontext: Gelände als IfcGeographicElement TERRAIN, Nachbar als Proxy „Kontext"; beide am IfcSite (eigene
+/// Eingliederung, nicht im Gebäude/Geschoss), Klasse als Beschreibung. IFC2x3: beide als Proxy.
+#[test]
+fn kontext_am_grundstueck() {
+    for v2 in [false, true] {
+        let mut b = mini_in(if v2 { B::v2() } else { B::new() });
+        for (kind, id, name, class) in [(1.0, "T", "Gelände", "02 Gelände"), (0.0, "N", "Nachbargebäude", "12 Gebäude")] {
+            b.n(&[REC_CONTEXT, kind]);
+            b.str(id);
+            b.str(name);
+            b.str(class);
+            b.n(&[3.0, 0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0, 10.0, 1.0]);
+            b.n(&[1.0, 0.0, 1.0, 2.0, 0.0]);
+        }
+        let ifc = build(&b).unwrap();
+        check_structure(&ifc);
+        let site = ifc.lines().find(|l| l.contains("=IFCSITE(")).unwrap().split('=').next().unwrap().to_string();
+        let terrain = ifc.lines().find(|l| l.contains(&ifc_string("Gelände")) && l.contains(&ifc_guid("t/context/T"))).unwrap();
+        let neighbour = ifc.lines().find(|l| l.contains(&ifc_guid("t/context/N"))).unwrap();
+        if v2 {
+            assert!(terrain.contains("=IFCBUILDINGELEMENTPROXY(") && terrain.ends_with(",$);"), "{terrain}");
+            assert_eq!(count(&ifc, "IFCGEOGRAPHICELEMENT"), 0);
+        } else {
+            assert!(terrain.contains("=IFCGEOGRAPHICELEMENT(") && terrain.ends_with(".TERRAIN.);"), "{terrain}");
+            assert!(neighbour.contains("=IFCBUILDINGELEMENTPROXY(") && neighbour.ends_with(".USERDEFINED.);"), "{neighbour}");
+        }
+        assert!(neighbour.contains(&format!("{},'Kontext'", ifc_string("12 Gebäude"))), "{neighbour}");
+        let contains: Vec<&str> = ifc.lines().filter(|l| l.contains("=IFCRELCONTAINEDINSPATIALSTRUCTURE(")).collect();
+        assert_eq!(contains.len(), 1, "nur der Kontext ist eingegliedert");
+        assert!(contains[0].ends_with(&format!(",{site});")), "{}", contains[0]);
+        assert!(contains[0].contains(&ifc_guid("t/contains/site")));
+    }
+}
+
 #[test]
 fn ifc2x3_fenster_stil_klassifikation_zone_treppe() {
     let mut b = full_house_in(B::v2(), false);
@@ -1253,9 +1292,9 @@ fn kaputte_puffer_ergeben_fehler_nie_panic() {
         }
     }
     // Unbekannter Datensatz, Geschoss-Index ausserhalb, Dreiecks-Index ausserhalb.
-    let mut g = vec![FLAT_VERSION, 0.0, 0.0, 1.0, 0.0, 0.0, f64::NAN, f64::NAN, f64::NAN, 0.0, 0.0, 99.0];
+    let mut g = vec![FLAT_VERSION, 0.0, 0.0, 1.0, 0.0, 0.0, f64::NAN, f64::NAN, f64::NAN, 0.0, 0.0, 0.0, 0.0, 99.0];
     assert!(build_ifc(&g, "a").is_err());
-    g[11] = REC_STAIR;
+    g[13] = REC_STAIR;
     g.extend([3.0]);
     assert!(build_ifc(&g, "a").is_err());
     let mut m = B::new();
@@ -1301,4 +1340,18 @@ fn stuetze_mit_hoehenabschnitten() {
     assert_eq!(count(&ifc, "IFCRELASSOCIATESMATERIAL"), 1);
     // Zweiter Abschnitt sitzt 1.5 m über dem ersten.
     assert!(ifc.contains("IFCCARTESIANPOINT((0.0,0.0,1.5))"), "Versatz des oberen Abschnitts");
+}
+
+/// [259] Dreieckssuppe → verbundenes Netz: gleiche Ecken (auf 6 Stellen) einmal, Dreieck mit doppelter Ecke fällt weg.
+#[test]
+fn netz_wird_verschweisst() {
+    let soup = Mesh {
+        positions: vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.000_000_1, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 5.0, 5.0, 5.0],
+        indices: vec![0, 1, 2, 3, 4, 5, 6, 7, 8],
+        closed: true,
+    };
+    let m = weld(&soup);
+    assert_eq!(m.positions.len() / 3, 4, "{:?}", m.positions);
+    assert_eq!(m.indices, vec![0, 1, 2, 1, 3, 2]);
+    assert!(m.closed);
 }

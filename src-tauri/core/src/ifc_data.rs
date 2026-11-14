@@ -1,7 +1,7 @@
 //! IFC-Export: Sammler im Kern ([K4] S2, [B5]; vorher `src/export/exportIfc.ts`, `ifcOpenings.ts`,
 //! `ifcClassification.ts`). Liest das Projekt-Dokument und erzeugt den flachen Puffer, den der
 //! Schreiber in `src-tauri/fileio/src/ifc_export/mod.rs` zur STEP-Datei macht (Kodierung dort im Kopf,
-//! FLAT_VERSION 4). TS gibt nur noch Optionen (Schema, Klassifikation) und den Zeitstempel weiter und
+//! FLAT_VERSION 5). TS gibt nur noch Optionen (Schema, Klassifikation) und den Zeitstempel weiter und
 //! reicht die Bytes an `fileio` (zwei WASM-Module, keine gemischten Crates).
 //!
 //! Abbildung (Einzelheiten im Kopf von `ifc_export/mod.rs` und in `TODO.md` [B5]):
@@ -17,11 +17,12 @@
 //!     Wand/Decke/Stütze/Treppe = C, Dach = F, Fenster = E, Tür und Raum ohne — nicht geraten) und/oder
 //!     die Ebene des Modells als System „Dossier-Ebenen" (Code = `categoryCode`, Name = Ebenenname).
 //!     Das Modell führt KEINEN eBKP-H-Code; `categoryCode` ist die Grafik-Ebene.
-//! Georeferenz: mit `geoAnchor` liegt die ganze Geometrie in LV95 (`geo_rebase`).
+//! Georeferenz ([259]): die Geometrie bleibt lokal; `geoAnchor` ergibt den Versatz des Modell-Ursprungs in LV95
+//! (IfcMapConversion Eastings/Northings), `referenceElevationMasl` die Höhe von ±0.00 (OrthogonalHeight).
 //! Zahlsemantik und Reihenfolge wie die frühere TS-Fassung: die Dateien bleiben zeichengleich.
 
 use crate::export_flat::{js_trim, Flat};
-use crate::geo_rebase::{lv95_to_wgs84, project_to_world_coords};
+use crate::geo_rebase::lv95_to_wgs84;
 use crate::ifc_quantities::{self as qty, Cutout, Qty, QtyKind};
 use crate::ifc_stairs::{stair_parts, FlightBody, StairParts};
 use crate::jsmath::hypot2;
@@ -31,7 +32,7 @@ use crate::model3d::{self, RWall};
 use crate::wall_mesh_cut::{is_watertight, wall_cut_mesh_checked, CutWall};
 use std::collections::HashMap;
 
-const FLAT_VERSION: f64 = 4.0;
+const FLAT_VERSION: f64 = 5.0;
 const REC_WALL_SOLIDS: f64 = 1.0;
 const REC_WALL_MESH: f64 = 2.0;
 const REC_CEILING: f64 = 3.0;
@@ -55,6 +56,7 @@ const REC_COLUMN_PIECES: f64 = 20.0;
 const REC_CEILING_ARC: f64 = 21.0;
 const REC_SPACE_ARC: f64 = 22.0;
 const REC_GUIDS: f64 = 23.0;
+const REC_CONTEXT: f64 = 24.0;
 
 /// Toleranz des Kerns (`wall_bands.rs::EPS`) für „Öffnung trifft Band".
 const BAND_EPS: f64 = 1e-4;
@@ -70,6 +72,9 @@ pub struct IfcOptions {
     pub ebkph: bool,
     /// `categoryCode` als System „Dossier-Ebenen".
     pub layer_codes: bool,
+    /// [259] Kontext mitgeben: Gelände-Netze (IfcGeographicElement TERRAIN) und Netze auf Umgebungsklassen
+    /// (Nachbargebäude → IfcBuildingElementProxy), am IfcSite. Fachplaner wollen oft nur das Gebäude: Vorgabe aus.
+    pub context: bool,
     /// Zeitstempel (Sekunden seit 1970) und dieselbe Zeit als ISO-Text ohne Sekundenbruchteil.
     pub now: f64,
     pub iso: String,
@@ -137,11 +142,14 @@ fn w_pts(f: &mut Flat, pts: &[Vec2]) {
     }
 }
 
-/// [191] Ring mit Bögen: `n, (x, y, bulge) × n` (Bulge zur nächsten Ecke; fehlend = gerade).
+/// [191] Ring mit Bögen: `n, (x, y, bulge) × n` (Bulge zur nächsten Ecke; fehlend = gerade). Der Schreiber liest den
+/// Bulge im DXF-Sinn (positiv = Gegenuhrzeigersinn, Scheitel rechts der Kante); das Modell zählt umgekehrt
+/// (`ring_arc`: positiv = Scheitel links, wie bei Wänden) — daher das Vorzeichen ([259]: vorher lagen die Bögen von
+/// Decken und Räumen gespiegelt an der Sehne, Fläche/Volumen nach ifcopenshell ≠ Mengen).
 fn w_bpts(f: &mut Flat, pts: &[Vec2], bulge: Option<&[f64]>) {
     f.num(pts.len() as f64);
     for (i, p) in pts.iter().enumerate() {
-        f.nums(&[p.x, p.y, crate::ring_arc::bulge_at(bulge, i)]);
+        f.nums(&[p.x, p.y, -crate::ring_arc::bulge_at(bulge, i)]);
     }
 }
 
@@ -398,8 +406,11 @@ fn reveal_frame_slice(p: &Project, wall: &Wall, o: &Opening) -> Option<(f64, f64
 
 /// [168] Bänder einer Wand als EIN Körper (Manifold, exakt): je Band der volle Quader (Enden an den
 /// Schnittlinien wie das 3D) minus die Löcher, dann alle vereinigt — IFC-Koordinaten (x, y, z − `base`).
-/// `None` bei Bändern mit schräger Oberkante oder wenn Manifold ablehnt (dann bleibt das Schalen-Netz).
-fn union_bands(bands: &[&RWall], base: f64) -> Option<(Vec<f64>, Vec<u32>)> {
+/// [259] Auch die Füllkörper von Formöffnungen (`boxes`, Quader wie `push_box`) und jede Wand mit mehreren Bändern:
+/// sonst lagen mehrere sich berührende Schalen in einem Face-Set (Kanten 4- bis 8-fach), und ifcopenshell rechnete
+/// beim Abzug der Öffnungen falsch (Füllkörper waren zudem verdreht gewickelt). `None` bei Bändern mit schräger oder
+/// ebener Dach-Oberkante (`top_drop`, `top_plane`) oder wenn Manifold ablehnt (dann bleibt das Schalen-Netz).
+fn union_bands(bands: &[&RWall], base: f64, boxes: &[[f64; 24]]) -> Option<(Vec<f64>, Vec<u32>)> {
     use crate::solid_bool::{Mesh, Solid};
     let solid = |w: &CutWall, shift: Option<&RWall>| -> Option<Solid> {
         let mut cut = wall_cut_mesh_checked(w);
@@ -411,8 +422,20 @@ fn union_bands(bands: &[&RWall], base: f64) -> Option<(Vec<f64>, Vec<u32>)> {
         Solid::new(&Mesh { positions, indices: (0..n).collect() }).ok()
     };
     let mut acc: Option<Solid> = None;
+    let mut add = |acc: &mut Option<Solid>, m: Solid| -> Option<()> {
+        *acc = Some(match acc.take() {
+            None => m,
+            Some(a) => a.union(&m).ok()?,
+        });
+        Some(())
+    };
     for b in bands {
-        if b.top_plane.is_some() || b.top_drop.is_some_and(|d| d[0].abs() > 1e-9 || d[1].abs() > 1e-9) {
+        if b.top_drop.is_some_and(|d| d[0].abs() > 1e-9 || d[1].abs() > 1e-9) {
+            return None;
+        }
+        // Ebene Oberkante unter einem Dach: nicht vereinigt (die Prismen berühren die Nachbarbänder nur an Kanten;
+        // der vereinigte Körper war dicht, aber ifcopenshell scheiterte am Abzug der Öffnung — Volumen 0).
+        if b.top_plane.is_some() {
             return None;
         }
         let mut m = solid(&CutWall { start: b.start, end: b.end, thickness: b.thickness, base_elevation: b.base_elevation, height: b.height, holes: vec![] }, Some(b))?;
@@ -431,10 +454,12 @@ fn union_bands(bands: &[&RWall], base: f64) -> Option<(Vec<f64>, Vec<u32>)> {
             let hole = solid(&CutWall { start: at(h.from), end: at(h.to), thickness: b.thickness + 0.1, base_elevation: lo, height: hi - lo, holes: vec![] }, None)?;
             m = m.difference(&hole).ok()?;
         }
-        acc = Some(match acc {
-            None => m,
-            Some(a) => a.union(&m).ok()?,
-        });
+        add(&mut acc, m)?;
+    }
+    for b in boxes {
+        let positions: Vec<f64> = b.chunks_exact(3).flat_map(|c| [c[0], c[1], c[2] - base]).collect();
+        let solid = Solid::new(&Mesh { positions, indices: box_tris_outward(b).to_vec() }).ok()?;
+        add(&mut acc, solid)?;
     }
     let m = acc?.to_mesh();
     (!m.indices.is_empty()).then_some((m.positions, m.indices))
@@ -687,8 +712,6 @@ struct SolidOpening {
     depth: f64,
 }
 
-/// Dreiecke eines 8-Ecken-Quaders wie `model3d::OPENING_BOX_TRIS`.
-const BOX_TRIS: [u32; 36] = [0, 1, 3, 0, 3, 2, 4, 5, 7, 4, 7, 6, 0, 1, 5, 0, 5, 4, 2, 3, 7, 2, 7, 6, 0, 2, 6, 0, 6, 4, 1, 3, 7, 1, 7, 5];
 
 /// Gauben eines Dachs (Index) für die Mengen ([G5]): je Gaube Breite, Stirnhöhe, geneigte Fläche des
 /// Ausschnitts im Hauptdach, Volumen der Wände (Stirn/Wangen) und des Gaubendachs aus den Körpern.
@@ -734,12 +757,74 @@ fn dormer_parts(p: &Project, ri: usize, roof: &Roof) -> Vec<qty::DormerIn> {
         .collect()
 }
 
+/// [259] Formöffnungen ([G3]) in den Wandmengen: die Rechteck-Rechnung zieht das ganze Rechteck ab, geschnitten wird
+/// aber der Umriss (Rund-/Spitzbogen, Kreis). Liefert (Fläche, Volumen) zwischen Rechteck und Umriss, die netto
+/// wieder dazukommen — dann stimmen die Mengen mit dem Körper nach ifcopenshell überein (±1 %).
+fn shaped_cut_back(p: &Project, wall: &Wall, cutouts: &[(usize, Cutout)], openings: &[Opening]) -> (f64, f64) {
+    let total = p.wall_thickness(wall, 0.2);
+    let mut area = 0.0;
+    for &(k, c) in cutouts {
+        let (w, h) = (c.to - c.from, c.z_top - c.z_bottom);
+        if let Some(poly) = crate::opening_shape::opening_outline(&openings[k], w, h) {
+            let pts: Vec<Vec2> = poly.iter().map(|q| Vec2 { x: q[0], y: q[1] }).collect();
+            area += max(0.0, w * h - qty::ring_area(&pts));
+        }
+    }
+    (area, area * total)
+}
+
+/// [259] Formöffnungs-Rückgabe ([`shaped_cut_back`]) auf NetSideArea/NetVolume (Brutto mindestens netto).
+fn add_back(quantities: &mut [Qty], (area, volume): (f64, f64)) {
+    for q in quantities.iter_mut() {
+        match q.name {
+            "NetSideArea" => q.value += area,
+            "NetVolume" => q.value += volume,
+            _ => {}
+        }
+    }
+    let net = quantities.iter().find(|q| q.name == "NetVolume").map_or(0.0, |q| q.value);
+    if let Some(g) = quantities.iter_mut().find(|q| q.name == "GrossVolume") {
+        g.value = max(g.value, net);
+    }
+}
+
 fn push_box(positions: &mut Vec<f64>, indices: &mut Vec<u32>, b: &[f64; 24], base: f64) {
     let at = (positions.len() / 3) as u32;
     for c in b.chunks_exact(3) {
         positions.extend_from_slice(&[c[0], c[1], c[2] - base]);
     }
-    indices.extend(BOX_TRIS.iter().map(|i| at + i));
+    indices.extend(box_tris_outward(b).iter().map(|i| at + i));
+}
+
+/// Sechsfaches Volumen mit Vorzeichen (positiv = nach aussen gewickelt; `mesh_volume` liefert den Betrag).
+fn signed_volume6(positions: &[f64], indices: &[u32]) -> f64 {
+    let p = |i: u32| [positions[i as usize * 3], positions[i as usize * 3 + 1], positions[i as usize * 3 + 2]];
+    indices
+        .chunks_exact(3)
+        .map(|x| {
+            let (a, c, d) = (p(x[0]), p(x[1]), p(x[2]));
+            a[0] * (c[1] * d[2] - c[2] * d[1]) - a[1] * (c[0] * d[2] - c[2] * d[0]) + a[2] * (c[0] * d[1] - c[1] * d[0])
+        })
+        .sum()
+}
+
+/// [259] Dreiecke eines 8-Ecken-Quaders (Ecke i = Bits Achse 0/1/2 wie `model3d::OPENING_BOX_TRIS`) einheitlich nach
+/// aussen gewickelt. `OPENING_BOX_TRIS` (3D, beidseitig gezeichnet; vorher auch hier) wickelt gegenüberliegende Flächen gleich — als Körper nicht
+/// geschlossen: Manifold lehnt ab, IFC-Leser sehen eine verdrehte Schale.
+fn box_tris_outward(b: &[f64; 24]) -> [u32; 36] {
+    // Je Fläche das Viereck im Umlauf; die erste der Paar-Flächen liegt bei Bit = 0 und wird umgedreht.
+    const QUADS: [([u32; 4], bool); 6] = [([0, 1, 3, 2], true), ([4, 5, 7, 6], false), ([0, 1, 5, 4], false), ([2, 3, 7, 6], true), ([0, 2, 6, 4], true), ([1, 3, 7, 5], false)];
+    let mut t = [0u32; 36];
+    for (k, (q, flip)) in QUADS.iter().enumerate() {
+        let tri = if *flip { [q[0], q[2], q[1], q[0], q[3], q[2]] } else { [q[0], q[1], q[2], q[0], q[2], q[3]] };
+        t[k * 6..k * 6 + 6].copy_from_slice(&tri);
+    }
+    if signed_volume6(b, &t) < 0.0 {
+        for tri in t.chunks_exact_mut(3) {
+            tri.swap(1, 2);
+        }
+    }
+    t
 }
 
 /// Füllung (Rahmen, Glas/Blatt) einer Formöffnung als Netz, Z relativ zur Geschoss-UK.
@@ -820,6 +905,8 @@ enum Kind {
     Window,
     Door,
     Space,
+    /// [259] Kontext (Gelände, Nachbargebäude): keine eBKP-H-Gruppe, nur die Ebene.
+    Context,
 }
 
 /// eBKP-H-Hauptgruppe zur Bauteilart, oder `None` (Tür, Raum: nicht eindeutig).
@@ -828,7 +915,7 @@ fn ebkph_group(k: Kind) -> Option<(&'static str, &'static str)> {
         Kind::Wall | Kind::Slab | Kind::Column | Kind::Stair => Some(("C", "Konstruktion Gebäude")),
         Kind::Roof => Some(("F", "Bedachung Gebäude")),
         Kind::Window => Some(("E", "Äussere Wandbekleidung Gebäude")),
-        Kind::Door | Kind::Space => None,
+        Kind::Door | Kind::Space | Kind::Context => None,
     }
 }
 
@@ -864,8 +951,9 @@ const SIA_CATEGORIES: [SiaCategory; 6] = [SiaCategory::HNF, SiaCategory::NNF, Si
 
 /// Der flache IFC-Puffer aus dem Projekt (s. Modulkopf).
 pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> {
-    // Georeferenziert: die ganze Geometrie auf die echten LV95-Koordinaten (ohne Bezug unverändert).
-    let mut p = project_to_world_coords(src);
+    // [259] Geometrie bleibt lokal (Modell-Meter); die Georeferenz trägt IfcMapConversion (Versatz zu LV95 und
+    // Höhe von ±0.00). LV95-Millionen in der Geometrie lassen Revit/Archicad warnen und kosten Genauigkeit.
+    let mut p = src.clone();
     let mut f = Flat::new(FLAT_VERSION);
 
     // Je "floor"-Ebene ein IfcBuildingStorey (Elevation = baseElevation).
@@ -879,8 +967,10 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
     let base_of = |structure: f64| -> f64 { if structure < 0.0 { 0.0 } else { storey_base[structure as usize] } };
 
     // Kopf: RefElevation = reale Datumshöhe (informativ), RefLatitude/-Longitude des Bezugspunkts.
-    let anchor = p.geo_anchor.clone();
-    let lat_lon = anchor.as_ref().map(|a| (a.lv95.e, a.lv95.n)).filter(|(e, n)| e.is_finite() && n.is_finite()).map(|(e, n)| lv95_to_wgs84(e, n)).filter(|(la, lo)| la.is_finite() && lo.is_finite());
+    let anchor = p.geo_anchor.clone().filter(|a| a.lv95.e.is_finite() && a.lv95.n.is_finite() && a.model.x.is_finite() && a.model.y.is_finite());
+    // Höhe von Modell-z 0 (±0.00) über Meer: `referenceElevationMasl` ([131]), sonst die Höhe des Bezugspunkts.
+    let ref_elevation = p.reference_elevation_masl.or_else(|| anchor.as_ref().and_then(|a| a.height)).filter(|h| h.is_finite()).unwrap_or(f64::NAN);
+    let lat_lon = anchor.as_ref().map(|a| (a.lv95.e - a.model.x, a.lv95.n - a.model.y)).filter(|(e, n)| e.is_finite() && n.is_finite()).map(|(e, n)| lv95_to_wgs84(e, n)).filter(|(la, lo)| la.is_finite() && lo.is_finite());
     // Anonyme Abgabe ([208]): Kennwort statt Projektname, fester Zeitstempel; leerer `iso` heisst für den Schreiber
     // „anonym" (neutrale Erzeuger-/Autorangaben, `fileio/ifc_export`).
     let anon = crate::competition::anonymous_keyword(&p);
@@ -892,9 +982,11 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
         now,
         iso,
         if anchor.is_some() { 1.0 } else { 0.0 },
-        anchor.as_ref().and_then(|a| a.height).unwrap_or(f64::NAN),
+        ref_elevation,
         lat_lon.map_or(f64::NAN, |x| x.0),
         lat_lon.map_or(f64::NAN, |x| x.1),
+        anchor.as_ref().map_or(0.0, |a| a.lv95.e - a.model.x),
+        anchor.as_ref().map_or(0.0, |a| a.lv95.n - a.model.y),
         if opt.ifc2x3 { 1.0 } else { 0.0 },
         floors.len() as f64,
     ]);
@@ -1020,7 +1112,9 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
             continue;
         }
         let structure = structure_of(&wall.floor_id);
-        let (name, ty, psets) = wall_ident(&p, wall, qty::wall_quantities(wall.start, wall.end, &bands, &plain, None));
+        let mut quantities = qty::wall_quantities(wall.start, wall.end, &bands, &plain, None);
+        add_back(&mut quantities, shaped_cut_back(&p, wall, cutouts_by_wall.get(&wall.id).map_or(&[][..], |v| v.as_slice()), &openings));
+        let (name, ty, psets) = wall_ident(&p, wall, quantities);
         // Wandsystem: Placement am Wandanfang, X = Achse, Y = linke Normale; IfcMaterialLayerSetUsage nur,
         // wenn die Typ-Schichten den Querschnitt der Bänder füllen (sonst wäre der Offset gelogen).
         let extent = cross_extent(wall, &bands);
@@ -1062,7 +1156,29 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
                 let ro = crate::joins::reference_offset(model3d::wall_reference(wall), total);
                 let (zb, zt) = p.wall_vertical_extent(wall);
                 let plain: Vec<Cutout> = cutouts_by_wall.get(&wall.id).map_or_else(Vec::new, |v| v.iter().map(|x| x.1).collect());
-                let (name, ty, psets) = wall_ident(&p, wall, qty::arc_wall_quantities(&a, ro - total / 2.0, ro + total / 2.0, zb, zt, &plain, None));
+                // [259] Mengen aus den geschriebenen Profilen (Schichten enden an der Decke, Eckstücke): Brutto = Σ
+                // Profilfläche × Höhe (exakt mit Bögen; Profil-Bulge im DXF-Sinn → Modell-Sinn), netto abzüglich der
+                // Öffnungen als Ringsektoren — vorher volle Wandhöhe über alle Schichten (Erker 5 % zu viel).
+                let gross: f64 = profiles
+                    .iter()
+                    .map(|(ring, _, depth)| {
+                        let pts: Vec<Vec2> = ring.iter().map(|v| Vec2 { x: v[0], y: v[1] }).collect();
+                        let bulge: Vec<f64> = ring.iter().map(|v| -v[2]).collect();
+                        crate::ring_arc::signed_area(&pts, Some(&bulge)).abs() * depth
+                    })
+                    .sum();
+                let mut quantities = qty::arc_wall_quantities(&a, ro - total / 2.0, ro + total / 2.0, zb, zt, &plain, None);
+                let exact = qty::arc_wall_quantities(&a, ro - total / 2.0, ro + total / 2.0, zb, zt, &[], None);
+                let full = exact.iter().find(|q| q.name == "GrossVolume").map_or(0.0, |q| q.value);
+                let cut = full - quantities.iter().find(|q| q.name == "NetVolume").map_or(full, |q| q.value);
+                for q in quantities.iter_mut() {
+                    match q.name {
+                        "GrossVolume" => q.value = gross,
+                        "NetVolume" => q.value = max(0.0, gross - cut),
+                        _ => {}
+                    }
+                }
+                let (name, ty, psets) = wall_ident(&p, wall, quantities);
                 w_head(&mut f, REC_WALL_ARC_SOLID, structure, &wall.id, &name);
                 w_type(&mut f, ty.as_ref().map(|t| type_ref(t, 0.0, "STANDARD")).as_ref());
                 w_psets(&mut f, &psets);
@@ -1118,14 +1234,9 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
         // [168] Schichteinzug-Stücke (Überdämmung, Leibungsputz) berühren die Bänder nur teilweise: dann die
         // Bänder zu EINEM Körper vereinigen (Manifold, exakt) — mehrere sich teilweise berührende Schalen
         // verrechnet ein IFC-Leser beim Abzug der Öffnungskörper (ifcopenshell: Volumen falsch).
-        let pieces = arc.is_none() && openings.iter().any(|o| o.host_wall_id == wall.id && reveal_frame_slice(&p, wall, o).is_some());
-        if pieces {
-            if let Some((up, ui)) = union_bands(bands, base) {
-                (positions, indices) = (up, ui);
-            }
-        }
         // Formöffnungen ([G3]): Füllkörper zwischen Rechteck-Loch und Umriss gehören zur Wand (nicht bei
         // Bogenwänden: dort bleibt das Rechteck-Loch).
+        let mut boxes: Vec<[f64; 24]> = Vec::new();
         for &(k, c) in cutouts_by_wall.get(&wall.id).map_or(&[][..], |v| v.as_slice()).iter().filter(|_| arc.is_none()) {
             let o = &openings[k];
             let n = model3d::shaped_fill_count(&p, wall, o, c.to - c.from, c.z_top - c.z_bottom);
@@ -1141,7 +1252,17 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
             };
             for m in model3d::shaped_wall_opening_meshes(&p, wall, &wr, o, [c.from, c.to, c.z_bottom, c.z_top]).iter().take(n) {
                 if let Ok(b) = <[f64; 24]>::try_from(m.positions.as_slice()) {
-                    push_box(&mut positions, &mut indices, &b, base);
+                    boxes.push(b);
+                }
+            }
+        }
+        // [259] Mehrere Schalen (Bänder, Stücke, Füllkörper) zu einem Körper; lehnt Manifold ab, bleiben die Schalen.
+        let shells = bands.len() + boxes.len();
+        match (arc.is_none() && shells > 1).then(|| union_bands(bands, base, &boxes)).flatten() {
+            Some((up, ui)) => (positions, indices) = (up, ui),
+            None => {
+                for b in &boxes {
+                    push_box(&mut positions, &mut indices, b, base);
                 }
             }
         }
@@ -1157,8 +1278,22 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
         let mut quantities = match &arc {
             Some(a) => {
                 let (zb, zt) = p.wall_vertical_extent(wall);
-                // Exakt aus dem Kreis statt aus dem Sehnen-Netz.
-                qty::arc_wall_quantities(a, ro - total / 2.0, ro + total / 2.0, zb, zt, &plain, None)
+                // Längen/Flächen exakt aus dem Kreis. [259] Volumen: dichtes Netz = geschriebener Körper (Schichten enden
+                // an der Decke; vorher volle Höhe über alle Schichten, Erker OG 23 % zu viel), Brutto = netto + Öffnungen.
+                let mut q = qty::arc_wall_quantities(a, ro - total / 2.0, ro + total / 2.0, zb, zt, &plain, None);
+                if let Some(nv) = net {
+                    let full = qty::arc_wall_quantities(a, ro - total / 2.0, ro + total / 2.0, zb, zt, &[], None);
+                    let gross = full.iter().find(|x| x.name == "GrossVolume").map_or(0.0, |x| x.value);
+                    let cut = gross - q.iter().find(|x| x.name == "NetVolume").map_or(gross, |x| x.value);
+                    for x in q.iter_mut() {
+                        match x.name {
+                            "GrossVolume" => x.value = nv + cut,
+                            "NetVolume" => x.value = nv,
+                            _ => {}
+                        }
+                    }
+                }
+                q
             }
             None => qty::wall_quantities(wall.start, wall.end, bands, &plain, net),
         };
@@ -1167,6 +1302,11 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
             if let Some(nv) = quantities.iter_mut().find(|x| x.name == "NetVolume") {
                 nv.value = max(0.0, gross - qty::hole_volume(bands));
             }
+        }
+        if arc.is_none() {
+            // Geschlossenes Netz: Volumen enthält die Füllkörper der Formöffnung schon, nur die Ansichtsfläche nicht.
+            let (area, volume) = shaped_cut_back(&p, wall, cutouts_by_wall.get(&wall.id).map_or(&[][..], |v| v.as_slice()), &openings);
+            add_back(&mut quantities, (area, if net.is_some() { 0.0 } else { volume }));
         }
         let (name, ty, psets) = wall_ident(&p, wall, quantities);
         w_head(&mut f, if arc.is_some() { REC_WALL_ARC } else { REC_WALL_MESH }, structure, &wall.id, &name);
@@ -1407,34 +1547,43 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
             ],
         );
     }
-    // Geschoss-Kennwerte: GF/NGF als Basismenge des IfcBuildingStorey, alle SIA-416-Flächen als CH_Qto_SIA416.
-    for fl in &floors {
-        let rooms: Vec<(usize, f64)> = room_areas.iter().filter(|r| r.1 == fl.id).map(|r| (SIA_CATEGORIES.iter().position(|c| *c == r.2).unwrap_or(usize::MAX), r.3)).collect();
-        if rooms.is_empty() {
+    // Geschoss-Kennwerte ([259]: aus der Flächentabelle wie Kennzahlen/Flächenbilanz, GF = NGF + KF mit der
+    // Konstruktionsfläche der Wände): GF/NGF/Höhe/GV als Basismenge des IfcBuildingStorey, alle SIA-416-Flächen als
+    // CH_Qto_SIA416; Summen am IfcBuilding.
+    let table = crate::flaechen::area_table(&p);
+    for row in &table.levels {
+        if row.rooms == 0 && row.kf <= 0.0 {
             continue;
         }
-        let b = crate::room_area::balance(&rooms);
-        let by_key = |k: &str| -> f64 {
-            match k {
-                "NF" => b.agg_area[0],
-                "NGF" => b.agg_area[1],
-                "GF" => b.agg_area[2],
-                _ => crate::room_area::CATEGORIES.iter().position(|c| *c == k).map_or(0.0, |i| b.leaf_area[i]),
-            }
-        };
-        let key = f.str(&format!("storey/{}", fl.id));
+        let key = f.str(&format!("storey/{}", row.level_id));
         f.nums(&[REC_ATTACH, key]);
+        let mut base = vec![Prop::Qty("GrossFloorArea", QtyKind::Area, max(0.0, row.gf)), Prop::Qty("NetFloorArea", QtyKind::Area, max(0.0, row.ngf))];
+        if row.height > 0.0 {
+            base.push(Prop::Qty("GrossHeight", QtyKind::Length, row.height));
+            base.push(Prop::Qty("GrossVolume", QtyKind::Volume, max(0.0, row.gv)));
+        }
+        let sia = [("HNF", row.hnf), ("NNF", row.nnf), ("NF", row.nf), ("VF", row.vf), ("FF", row.ff), ("NGF", row.ngf), ("KGF", row.kf), ("AGF", row.agf), ("GF", row.gf)];
+        w_psets(
+            &mut f,
+            &[
+                Pset { name: "Qto_BuildingStoreyBaseQuantities", props: base },
+                Pset { name: "CH_Qto_SIA416", props: sia.iter().map(|(k, v)| Prop::Qty(k, QtyKind::Area, max(0.0, *v))).collect() },
+            ],
+        );
+    }
+    if table.total.gf > 0.0 {
+        let key = f.str("building");
+        f.nums(&[REC_ATTACH, key]);
+        let t = &table.total;
+        let sia = [("HNF", t.hnf), ("NNF", t.nnf), ("NF", t.nf), ("VF", t.vf), ("FF", t.ff), ("NGF", t.ngf), ("KGF", t.kf), ("AGF", t.agf), ("GF", t.gf), ("GV", table.gv)];
         w_psets(
             &mut f,
             &[
                 Pset {
-                    name: "Qto_BuildingStoreyBaseQuantities",
-                    props: vec![Prop::Qty("GrossFloorArea", QtyKind::Area, max(0.0, by_key("GF"))), Prop::Qty("NetFloorArea", QtyKind::Area, max(0.0, by_key("NGF")))],
+                    name: "Qto_BuildingBaseQuantities",
+                    props: vec![Prop::Qty("GrossFloorArea", QtyKind::Area, max(0.0, t.gf)), Prop::Qty("NetFloorArea", QtyKind::Area, max(0.0, t.ngf)), Prop::Qty("GrossVolume", QtyKind::Volume, max(0.0, table.gv))],
                 },
-                Pset {
-                    name: "CH_Qto_SIA416",
-                    props: ["HNF", "NNF", "NF", "VF", "FF", "NGF", "KGF", "AGF", "GF"].iter().map(|k| Prop::Qty(k, QtyKind::Area, max(0.0, by_key(k)))).collect(),
-                },
+                Pset { name: "CH_Qto_SIA416", props: sia.iter().map(|(k, v)| Prop::Qty(k, if *k == "GV" { QtyKind::Volume } else { QtyKind::Area }, max(0.0, *v))).collect() },
             ],
         );
     }
@@ -1612,6 +1761,35 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
         w_mesh(&mut f, &positions, &indices, false);
     }
 
+    // ── [259] Kontext (Option): Gelände und Nachbarn am IfcSite, Höhen absolut (Modell-z, ±0.00 = 0) ──
+    if opt.context {
+        for c in p.context.iter().flatten() {
+            let (kind, id, name, code, positions, indices) = match c {
+                ContextObject::TerrainMesh(m) => (1.0, &m.id, &m.name, &m.category_code, &m.positions, &m.indices),
+                ContextObject::ImportedMesh(m) if crate::import_context::is_context_class(&m.category_code) => (0.0, &m.id, &m.name, &m.category_code, &m.positions, &m.indices),
+                _ => continue,
+            };
+            let n = positions.len() / 3;
+            if n < 3 || indices.len() < 3 || positions.iter().any(|v| !v.is_finite()) {
+                continue;
+            }
+            let tris: Vec<u32> = indices
+                .chunks_exact(3)
+                .filter(|t| t.iter().all(|i| i.is_finite() && *i >= 0.0 && (*i as usize) < n) && t[0] != t[1] && t[1] != t[2] && t[0] != t[2])
+                .flat_map(|t| t.iter().map(|i| *i as u32).collect::<Vec<_>>())
+                .collect();
+            if tris.is_empty() {
+                continue;
+            }
+            classified.push((format!("context/{id}"), Kind::Context, code.clone()));
+            // Klasse als Beschreibung („12 Gebäude"), damit sie im Fremdprogramm ohne Klassifikation lesbar bleibt.
+            let class = layer_classification(&p, code).map(|(c, n)| format!("{c} {n}")).unwrap_or_default();
+            let (a, b, c) = (f.str(id), f.str(if name.is_empty() { id } else { name }), f.str(&class));
+            f.nums(&[REC_CONTEXT, kind, a, b, c]);
+            w_mesh(&mut f, &positions[..n * 3], &tris, false);
+        }
+    }
+
     // ── Achsraster ([112]) → IfcGrid (U-/V-Achsen als Linienzüge in Welt-XY) ──
     for d in &p.drawings2d {
         let Some(spec) = crate::grid::Spec::of(&d.geom) else { continue };
@@ -1728,6 +1906,74 @@ mod tests {
         text.split('\0').map(String::from).collect()
     }
 
+    /// [259] Kontext nur mit Option: Gelände (jede Klasse) und Netze auf Umgebungsklassen; ein Netz auf einer
+    /// Bauteil-Klasse (z. B. importierte Möblierung) bleibt draussen, ebenso kaputte Dreiecke.
+    #[test]
+    fn kontext_nur_mit_option() {
+        let mut p = sample();
+        let tri = |id: &str, code: &str| ImportedMesh { id: id.into(), name: format!("Netz {id}"), category_code: code.into(), positions: vec![0.0, 0.0, 0.0, 9.0, 0.0, 0.0, 0.0, 9.0, 3.0], indices: vec![0.0, 1.0, 2.0, 0.0, 0.0, 1.0, 0.0, 1.0, 7.0], ..Default::default() };
+        let terrain = TerrainMesh { id: "gel".into(), name: "Gelände".into(), category_code: "02".into(), positions: vec![0.0, 0.0, -1.0, 50.0, 0.0, -1.0, 0.0, 50.0, 0.5], indices: vec![0.0, 1.0, 2.0], ..Default::default() };
+        p.context = Some(vec![ContextObject::ImportedMesh(tri("nb", "12")), ContextObject::ImportedMesh(tri("moebel", "20")), ContextObject::TerrainMesh(terrain)]);
+        let count = |f: &Flat| f.nums.iter().filter(|v| **v == REC_CONTEXT).count();
+        let off = ifc_export_data(&p, &IfcOptions::default()).unwrap();
+        assert!(!strings(&off).iter().any(|s| s == "nb" || s == "gel"));
+        let on = ifc_export_data(&p, &IfcOptions { context: true, ..Default::default() }).unwrap();
+        let s = strings(&on);
+        assert!(count(&on) >= 2);
+        for want in ["nb", "Netz nb", "12 Gebäude", "gel", "Gelände"] {
+            assert!(s.iter().any(|x| x == want), "fehlt: {want}");
+        }
+        assert!(!s.iter().any(|x| x == "moebel"), "Netz auf Bauteil-Klasse ist kein Kontext");
+        // Datei: Nachbar mit einem gültigen Dreieck (die beiden kaputten fallen weg), Gelände am Grundstück.
+        let (nums, text) = from_bytes(&on.to_bytes()).unwrap();
+        let ifc = fileio_like_check(&nums, &text);
+        assert_eq!(ifc, 2);
+    }
+
+    /// Zählt die CONTEXT-Datensätze mit gültigem Dreiecksnetz im Puffer (Kopf: 24, kind, id, name, class, MESH).
+    fn fileio_like_check(nums: &[f64], text: &str) -> usize {
+        let strs: Vec<&str> = text.split('\0').collect();
+        let mut n = 0;
+        for i in 0..nums.len().saturating_sub(6) {
+            if nums[i] == REC_CONTEXT && (nums[i + 1] == 0.0 || nums[i + 1] == 1.0) && strs.get(nums[i + 2] as usize).is_some_and(|s| *s == "nb" || *s == "gel") {
+                let nv = nums[i + 5] as usize;
+                let nt = nums[i + 6 + nv * 3] as usize;
+                assert_eq!(nt, 1, "ein Dreieck je Netz");
+                n += 1;
+            }
+        }
+        n
+    }
+
+    /// [259] Geschoss-Mengen wie die Flächentabelle: GF = NGF + Konstruktionsfläche (Wände), nicht nur die Räume.
+    #[test]
+    fn geschoss_mengen_mit_konstruktionsflaeche() {
+        let p = sample();
+        let t = crate::flaechen::area_table(&p);
+        let row = t.levels.iter().find(|r| r.kf > 0.0 && r.rooms > 0).expect("Geschoss mit Wänden und Räumen");
+        let f = ifc_export_data(&p, &IfcOptions::default()).unwrap();
+        let (nums, _) = from_bytes(&f.to_bytes()).unwrap();
+        assert!(row.gf > row.ngf);
+        assert!(nums.iter().any(|v| (*v - row.gf).abs() < 1e-9), "GF {} fehlt", row.gf);
+        assert!(nums.iter().any(|v| (*v - row.kf).abs() < 1e-9), "KGF {} fehlt", row.kf);
+        let s = strings(&f);
+        assert!(s.iter().any(|x| x == "building") && s.iter().any(|x| x == "Qto_BuildingBaseQuantities"));
+    }
+
+    /// [259] Quader der Formöffnungs-Füllkörper: einheitlich nach aussen gewickelt (dicht, Volumen positiv), auch
+    /// bei gespiegelter Eckenreihenfolge.
+    #[test]
+    fn quader_nach_aussen_gewickelt() {
+        let corner = |i: usize, sx: f64| [sx * (i & 1) as f64 * 2.0, ((i >> 1) & 1) as f64 * 3.0, ((i >> 2) & 1) as f64 * 0.5];
+        for sx in [1.0, -1.0] {
+            let b: [f64; 24] = std::array::from_fn(|k| corner(k / 3, sx)[k % 3]);
+            let t = box_tris_outward(&b);
+            assert!((crate::export_flat::mesh_volume(&b, &t) - 3.0).abs() < 1e-12);
+            assert!(is_watertight(&b, &t, 1e-9));
+            assert!(crate::solid_bool::Solid::new(&crate::solid_bool::Mesh { positions: b.to_vec(), indices: t.to_vec() }).is_ok());
+        }
+    }
+
     /// [208] Anonyme Abgabe: Kopf trägt Kennwort, festen Zeitstempel und leeren ISO-Text, nie den Projektnamen.
     #[test]
     fn anonyme_abgabe_kopf() {
@@ -1830,9 +2076,9 @@ mod tests {
         for rec in [REC_CEILING_ARC, REC_SPACE_ARC] {
             assert!(f.nums.contains(&rec), "{rec}");
         }
-        // Die Bulge-Werte stehen im Datensatz (Ring: x, y, bulge).
-        assert!(f.nums.windows(3).any(|w| w[0] == first.x && w[1] == first.y && w[2] == 0.5));
-        assert!(f.nums.iter().any(|&v| v == -0.5));
+        // Die Bulge-Werte stehen im Datensatz (Ring: x, y, bulge), im DXF-Sinn des Schreibers (Vorzeichen gedreht).
+        assert!(f.nums.windows(3).any(|w| w[0] == first.x && w[1] == first.y && w[2] == -0.5));
+        assert!(f.nums.iter().any(|&v| v == 0.5));
     }
 
     /// [T2] Bogenwand: Datensatz WALL_ARC_SOLID mit Kreisachse (Mitte, Radius, Startwinkel, Schwenk) und
@@ -1919,11 +2165,18 @@ mod tests {
         let mut p = sample();
         p.geo_anchor = Some(ProjectGeoAnchor { lv95: ProjectGeoAnchorLv95 { e: 2_683_000.0, n: 1_247_000.0, ..Default::default() }, model: Vec2 { x: 0.0, y: 0.0 }, height: Some(400.0), ..Default::default() });
         let f = ifc_export_data(&p, &IfcOptions::default()).unwrap();
-        // Kopf: [Version, id, name, now, iso, hasGeo, refElevation, lat, lon, schema, nStoreys …]
+        // Kopf: [Version, id, name, now, iso, hasGeo, refElevation, lat, lon, eastings, northings, schema, nStoreys …]
         assert_eq!(f.nums[5], 1.0);
         assert_eq!(f.nums[6], 400.0);
         assert!((f.nums[7] - 47.37).abs() < 0.1 && (f.nums[8] - 8.54).abs() < 0.1, "{} {}", f.nums[7], f.nums[8]);
-        assert!(f.nums.iter().any(|v| *v > 2_683_000.0));
+        assert_eq!((f.nums[9], f.nums[10]), (2_683_000.0, 1_247_000.0));
+        // [259] Geometrie bleibt lokal: keine LV95-Millionen im Puffer ausser dem Versatz.
+        assert_eq!(f.nums.iter().filter(|v| v.abs() > 1_000_000.0).count(), 2);
+        // Bezugspunkt nicht im Ursprung: Versatz des Ursprungs; Höhe von ±0.00 vor der Höhe des Bezugspunkts.
+        p.geo_anchor.as_mut().unwrap().model = Vec2 { x: 10.0, y: -5.0 };
+        p.reference_elevation_masl = Some(441.3);
+        let f = ifc_export_data(&p, &IfcOptions::default()).unwrap();
+        assert_eq!((f.nums[6], f.nums[9], f.nums[10]), (441.3, 2_682_990.0, 1_247_005.0));
     }
 
     #[test]
@@ -2086,7 +2339,7 @@ mod tests {
             })
             .sum();
         assert!(bands.iter().any(|b| b.holes.as_ref().is_none_or(|h| h.is_empty()) && b.thickness < 0.2), "Stücke fehlen");
-        let (pos, idx) = union_bands(&bands, 0.0).expect("ein Körper");
+        let (pos, idx) = union_bands(&bands, 0.0, &[]).expect("ein Körper");
         assert!(is_watertight(&pos, &idx, 1e-6));
         let v = crate::export_flat::mesh_volume(&pos, &idx);
         assert!((v - shells).abs() < 1e-6, "{v} vs {shells}");

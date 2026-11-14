@@ -47,25 +47,30 @@ Alte `.json`-Projekte bleiben lesbar (Kopf von `src/state/useProjectFileActions.
 
 ## IFC (Export)
 
-Schema IFC4 (Vorgabe) oder IFC2x3; optional eBKP-H- und Ebenen-Klassifikation. Sammler `ifc_data.rs::ifc_export_data`,
-Schreiber `fileio/src/ifc_export/mod.rs`, Aufruf `src/export/exportIfc.ts`.
+Schema IFC4 (Vorgabe) oder IFC2x3; optional eBKP-H- und Ebenen-Klassifikation und Kontext. Sammler `ifc_data.rs::ifc_export_data`,
+Schreiber `fileio/src/ifc_export/mod.rs`, Aufruf `src/export/exportIfc.ts`. Zielgruppe ([259]): Bauingenieur, HLK-, Kostenplaner —
+Struktur IfcProject → IfcSite → IfcBuilding → IfcBuildingStorey, jedes Bauteil genau einmal eingeordnet.
 
 | Modell | Wird zu | Verlust / Vereinfachung | Beleg |
 |---|---|---|---|
-| Geschosse (`floor`) | `IfcBuildingStorey`; verwaiste Bauteile am Gebäude | Zeichnungs-Ebenen (`kind: drawing`) fehlen | `ifc_data.rs` (Kopf) |
+| Geschosse (`floor`) | `IfcBuildingStorey` (Name, Elevation); verwaiste Bauteile am Gebäude. Mengen wie die Flächentabelle: `Qto_BuildingStoreyBaseQuantities` (GF = NGF + Konstruktionsfläche der Wände, NGF, Höhe, GV) und `CH_Qto_SIA416`; Summen am Gebäude (`Qto_BuildingBaseQuantities`) | Zeichnungs-Ebenen (`kind: drawing`) fehlen | `ifc_data.rs` (Kopf), `flaechen::area_table` |
 | Wände | Extrusion je Schichtband + `IfcOpeningElement`; sonst öffnungsgenaues Netz | Bogenwand: Profil-Extrusion mit Kreisachse, sonst Netz; Wandtyp nur als Materialschichten | `ifc_data.rs::emit_walls`-Abschnitt, Datensätze `WALL_SOLIDS`/`WALL_MESH`/`WALL_ARC_SOLID` |
-| Decken, Räume | `IfcSlab`, `IfcSpace` (SIA 416, Raumbuch-Psets) | Bögen im Umriss bleiben echte Bögen (`CEILING_ARC`, `SPACE_ARC`) | `ifc_data.rs`, Tests `exportIfc.test.ts` |
+| Decken, Räume | `IfcSlab` (FLOOR/LANDING), `IfcSpace` (Name = Nummer, LongName = Name, Extrusion über die Geschosshöhe, `Pset_SpaceCommon`, `Qto_SpaceBaseQuantities`, SIA-416-Kategorie in `CH_Raum.SIA416` und als `IfcZone`, Raumbuch-Psets) | Bögen im Umriss bleiben echte Bögen (`CEILING_ARC`, `SPACE_ARC`; vor [259] an der Sehne gespiegelt); Raumhöhe = Geschosshöhe, nicht lichte Höhe | `ifc_data.rs`, Tests `exportIfc.test.ts`, `exportIfc.fachplaner.test.ts` |
 | Türen, Fenster | `IfcDoor`/`IfcWindow` mit Rahmen, Blatt, Glas als getrennte Körper | nur die im Modell parametrisierten Teile; ohne Teile (Wandöffnung) keine Füllung | `fileio/src/ifc_openings.rs`, Kopf `ifc_export/mod.rs` |
 | Treppen | `IfcStair` mit Läufen, Podesten, Geländern (`IfcRelAggregates`); Ersatzquader nur ohne Teile | – | `ifc_stairs.rs` |
 | Dächer | `IfcRoof`, ein Netz je Dach | **Netz statt Parametrik**: Neigung, Typ, Traufe nicht rückholbar | `ifc_data.rs` (Dächer), Datensatz `ROOF` |
 | Stützen, Bäume, Achsraster, Extrusionskörper | `IfcColumn`, `IfcGeographicElement` (IFC2x3: Proxy), `IfcGrid`, `IfcBuildingElementProxy` | Baum: zwei Netze Stamm + Krone | `ifc_data.rs` |
 | Psets / Mengen | `Pset_*Common` und `Qto_*BaseQuantities` nur mit **Modellwerten**; `CH_Qto_SIA416`, `Dossier_*` | keine frei definierbaren Eigenschaften | Kopf `ifc_data.rs`, Pset-Namen dort und in `ifc_quantities.rs` |
-| Georeferenz | ganze Geometrie in LV95, wenn `geoAnchor` gesetzt | – | `geo_rebase`, Kopf `ifc_data.rs` |
+| Georeferenz | Geometrie **lokal** (Modell-Meter, z 0 = ±0.00); mit `geoAnchor` `IfcMapConversion` auf `IfcProjectedCRS` EPSG:2056 (Eastings/Northings = LV95 des Modell-Ursprungs, OrthogonalHeight = `referenceElevationMasl`, sonst Höhe des Bezugspunkts; = `IfcSite.RefElevation`); IFC2x3: `ePSet_MapConversion` + RefLatitude/-Longitude | keine Drehung (Modell nordausgerichtet). Vor [259] lag die Geometrie in LV95-Millionen (Revit/Archicad warnen) | Kopf `ifc_data.rs`, `ifc_export/mod.rs` |
 | GUIDs | `ifcGlobalId` des Bauteils, wenn gesetzt (Import, [201]; Wand, Decke, Dach, Stütze, Treppe, Raum, Extrusion, Tür/Fenster); sonst deterministisch aus der Modell-id. Doppelte oder ungültige GlobalIds fallen auf die abgeleitete zurück | Bäume, `IfcOpeningElement` und Beziehungen bleiben abgeleitet | `ifc_data.rs` (Datensatz `GUIDS`), `ifc_export::ifc_guid` |
-| **Nicht exportiert** | 2D-Zeichnungen (ausser Raster), Texte, Bemassungen, Schraffuren, Layouts/Blätter, Ebenen als Sichtbarkeit, Stifte, Gruppen, Gelände, Netzkörper, Möbel/Blöcke, Ansichtsausschnitte | Im Sammler wird nur über Bauteile iteriert, `context` und `drawings2d` (ausser `Grid`) kommen nicht vor | `ifc_data.rs` (`grep context` leer) |
+| Kontext (Option „Kontext mitgeben", CLI `--kontext`; Vorgabe aus) | Gelände-Netz → `IfcGeographicElement` TERRAIN, Netze auf Umgebungsklassen (z. B. „12 Gebäude") → `IfcBuildingElementProxy` „Kontext"; am `IfcSite`, Klasse als Description (IFC2x3: beide Proxy) | Höhenlinien, Baugrube, Luftbild nicht; Netze auf Bauteil-Klassen nicht | `ifc_data.rs` (Datensatz `CONTEXT`) |
+| 2D-Objektbibliothek ([253], `libobj`) | **nicht exportiert** (Entscheid [259]): reine 2D-Symbole ohne Höhe; ein erfundener Körper oder ein `IfcFurniture`/`IfcSanitaryTerminal` ohne Geometrie würde in Revit/Archicad unsichtbar bleiben oder Mengen verfälschen. Kommt mit 3D-Objekten nach 1.0 | – | Test „2D-Objektbibliothek im IFC" |
+| **Nicht exportiert** | 2D-Zeichnungen (ausser Raster), Texte, Bemassungen, Schraffuren, Layouts/Blätter, Ebenen als Sichtbarkeit (kein `IfcPresentationLayerAssignment`), Stifte, Gruppen, Netzkörper ausserhalb des Kontexts, Möbel/Blöcke, Ansichtsausschnitte | Im Sammler wird nur über Bauteile iteriert, `drawings2d` (ausser `Grid`) kommen nicht vor | `ifc_data.rs` |
 
-Geprüft mit IfcOpenShell nur, wenn `ifcopenshell` installiert ist (`src/export/exportIfc.validate.test.ts`); ob
-Revit/ArchiCAD alles wie gewünscht lesen: ungeprüft.
+Geprüft mit IfcOpenShell nur, wenn `ifcopenshell` installiert ist (`src/export/exportIfc.validate.test.ts`, für alle drei
+Beispielprojekte zusätzlich `scripts/check-ifc-fachplaner.py` in `exportIfc.fachplaner.test.ts`: Struktur, Eingliederung,
+Georeferenz, Öffnungen gefüllt und im Geschoss des Wirts, Raum-/Wand-/Deckenmengen ±1 % gegen die Geometrie); ob
+Revit/Archicad/Solibri/BIMcollab alles wie gewünscht lesen: ungeprüft (Prüfzeile 13.14 in `doc/RELEASE-1.0.md`).
 
 ## IFC (Import)
 
