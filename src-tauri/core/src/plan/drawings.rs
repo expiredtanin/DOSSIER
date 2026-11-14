@@ -318,6 +318,43 @@ pub fn compact_eligible(d: &Drawing2D) -> bool {
     }
 }
 
+/// [207] Klasse „Strasse“: Strassenachsen/-ränder (Linie, Polylinie mit Bögen, Bogen) als Linienzüge, mit der Ebene der Zeichnung.
+pub(super) fn road_axes(c: &Ctx) -> Vec<(String, Vec<Vec2>)> {
+    use super::text_curve::arc_points;
+    let mut out = Vec::new();
+    for d in c.p.drawings2d.iter().filter(|d| d.category_code == ROAD_CLASS && on_floor(c, d)) {
+        let pts = match &d.geom {
+            Drawing2DGeom::Line { a, b } => vec![*a, *b],
+            Drawing2DGeom::Polyline { pts, closed, bulge, .. } => {
+                let mut q = bulge_polyline_points(pts, bulge.as_deref(), *closed);
+                if *closed && q.len() > 1 {
+                    q.push(q[0]);
+                }
+                q
+            }
+            Drawing2DGeom::Arc { center, r, a0, a1 } => arc_points(*center, *r, *a0, *a1),
+            _ => continue,
+        };
+        if pts.len() >= 2 && pts.iter().all(|q| q.x.is_finite() && q.y.is_finite()) {
+            out.push((d.level_id.clone(), pts));
+        }
+    }
+    out
+}
+
+const ROAD_CLASS: &str = "11";
+
+/// [207] Zeichen eines Strassennamens entlang der nächstgelegenen Achse derselben Ebene (`None`: kein einfacher Text auf der
+/// Strassen-Klasse oder keine passende Achse, dann bleibt der Text gerade).
+#[allow(clippy::too_many_arguments)]
+fn street_name_on_axis(c: &Ctx, d: &Drawing2D, text: &str, height: f64, at: Vec2, angle: f64, width: &Option<f64>, doc: &Option<RichTextDoc>, leader: bool) -> Option<Vec<super::text_curve::CurveChar>> {
+    if d.category_code != ROAD_CLASS || leader || doc.is_some() || width.is_some_and(|w| w > 0.0) {
+        return None;
+    }
+    let axes: Vec<&[Vec2]> = c.road_axes().iter().filter(|(l, _)| *l == d.level_id).map(|(_, p)| p.as_slice()).collect();
+    super::text_curve::text_on_curve(&axes, text, height, at, angle)
+}
+
 /// Primitive EINES Elements: Hülle um [`emit_inner`] mit der Objekt-Transparenz (`opacity`, alle
 /// Primitive) und der Flächen-Transparenz (`fillOpacity`, Polygone) als Rahmen der Senke — so
 /// trifft sie auch die rekursiv erzeugte Block-Geometrie (dort mehrfach, wie in TS).
@@ -906,6 +943,26 @@ fn emit_inner(c: &Ctx, d: &Drawing2D, attrs: Attrs, geom: &Drawing2DGeom, greyed
                     Primitive::DrawingTextPath { path_pts: path.clone(), text: s.clone(), height_m: *height, color, drawing_id: Some(d.id.clone()), greyed: Some(greyed), opacity: None },
                     0,
                 );
+            } else if let Some(chars) = street_name_on_axis(c, d, s, *height, *at, *angle, width, doc, leader_target.is_some()) {
+                // [207] Strassenname entlang der Achse: ein Zeichen je Primitiv, gedreht; Szene, SVG, Druck und DXF lesen dasselbe.
+                for ch in chars {
+                    em.sink.push(
+                        Primitive::DrawingText {
+                            at: ch.at,
+                            text: ch.ch.to_string(),
+                            height_m: *height,
+                            angle: ch.angle,
+                            color: color.clone(),
+                            marks: marks.clone(),
+                            wrap_width: None,
+                            doc: None,
+                            drawing_id: Some(d.id.clone()),
+                            greyed: Some(greyed),
+                            opacity: None,
+                        },
+                        0,
+                    );
+                }
             } else {
                 em.sink.push(
                     Primitive::DrawingText {
@@ -2858,6 +2915,45 @@ mod tests {
         assert!((h(paper, 50.0) - 0.125).abs() < 1e-12);
         let model = serde_json::json!({"shape": "text", "at": {"x": 0, "y": 0}, "text": "A", "height": 0.3, "angle": 0});
         assert!((h(model, 50.0) - 0.3).abs() < 1e-12);
+    }
+
+    /// [207] Strassenname auf der Klasse „Strasse“ folgt der gekrümmten Achse (ein Zeichen je Primitiv, gedreht);
+    /// ohne Achse, auf anderer Klasse oder mit gerader Achse bleibt es ein einziger gerader Text.
+    #[test]
+    fn strassenname_folgt_der_achse() {
+        let arc_pts: Vec<serde_json::Value> = super::super::text_curve::arc_points(v(0.0, 0.0), 40.0, 20f64.to_radians(), 80f64.to_radians()).iter().map(|q| serde_json::json!({"x": q.x, "y": q.y})).collect();
+        let axis = |cat: &str, pts: Vec<serde_json::Value>| {
+            let mut d = drawing(serde_json::json!({"shape": "polyline", "pts": pts, "closed": false}));
+            d["id"] = serde_json::json!("achse");
+            d["categoryCode"] = serde_json::json!(cat);
+            d
+        };
+        let ang = 50f64.to_radians() + std::f64::consts::FRAC_PI_2;
+        let w = "Bahnhofstrasse".chars().map(|c| crate::text_layout::text_width_em(&c.to_string(), false) * 1.0).sum::<f64>();
+        let (cx, cy) = (40.0 * 50f64.to_radians().cos(), 40.0 * 50f64.to_radians().sin());
+        let at = serde_json::json!({"x": cx - ang.cos() * w / 2.0 + ang.sin() * 0.5, "y": cy - ang.sin() * w / 2.0 - ang.cos() * 0.5});
+        let name = |cat: &str| {
+            let mut d = drawing(serde_json::json!({"shape": "text", "at": at, "text": "Bahnhofstrasse", "height": 1.0, "angle": ang}));
+            d["categoryCode"] = serde_json::json!(cat);
+            d
+        };
+        let texts = |p: &Project, d: serde_json::Value| -> Vec<(String, f64)> {
+            render(p, d, 500.0).iter().filter_map(|q| if let Primitive::DrawingText { text, angle, .. } = q { Some((text.clone(), *angle)) } else { None }).collect()
+        };
+        let layers = serde_json::json!({"layers": [{"code": "11", "name": "Strasse", "color": "#808080", "lw": 0.18, "visible": true, "locked": false}]});
+        let mut with_axis = project(layers.clone());
+        with_axis.drawings2d.push(serde_json::from_value(axis("11", arc_pts.clone())).unwrap());
+        let on_curve = texts(&with_axis, name("11"));
+        assert_eq!(on_curve.len(), "Bahnhofstrasse".chars().count(), "ein Zeichen je Primitiv");
+        assert_eq!(on_curve.iter().map(|(t, _)| t.as_str()).collect::<String>(), "Bahnhofstrasse");
+        assert!(on_curve.first().unwrap().1 - on_curve.last().unwrap().1 > 0.1, "Zeichen drehen mit der Achse");
+        // Gegenproben: keine Achse, andere Klasse, gerade Achse.
+        let none = project(layers.clone());
+        assert_eq!(texts(&none, name("11")), vec![("Bahnhofstrasse".to_string(), ang)]);
+        assert_eq!(texts(&with_axis, name("20")).len(), 1, "andere Klasse bleibt gerade");
+        let mut straight = project(layers);
+        straight.drawings2d.push(serde_json::from_value(axis("11", vec![serde_json::json!({"x": -100, "y": 0}), serde_json::json!({"x": 100, "y": 0})])).unwrap());
+        assert_eq!(texts(&straight, name("11")).len(), 1);
     }
 
     /// [199] Schnittmarke auf der Gesamtmass-Zahl (komplex UG/EG Ost: „B-B“ auf „19.24“): eine Zahl, die ins Segment
