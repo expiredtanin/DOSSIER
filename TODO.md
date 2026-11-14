@@ -223,9 +223,16 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   Einzelwort ab 5 Zeichen, allgemeine Wörter („Haus“, „Wohnen“ …) und blosse Zahlen zählen nicht. Dialog `ui/AnonymityDialog.tsx` listet Bereich,
   Fundstelle, Text, Begriff; „Trotzdem exportieren“ / „Abbrechen“ (Overlay, kein `window.confirm`). Kopfdaten waren schon leer (PDF-Info nur Kennwort,
   Producer/Datum neutralisiert — auch „Dossier“ bleibt weg, weil Programm + Version + Datum die Herkunft eingrenzen; IFC-Kopf/IfcOwnerHistory, DXF-Kopf, STEP):
-  keine Lücke gefunden. Tests: Rust `competition` (Treffer je Textort, Fehlalarme, Umlaute), vitest `competitionCheck`, e2e `competition`. Offen: Berichte-PDF
-  (Flächen, Raumbuch …) und Bild-/Rendering-Exporte laufen nicht durch das Tor; Prüfung läuft nur im Dialog-Weg (CLI/KI-Werkzeuge nicht); der
-  Dateiname der Ausgabe wird nur beim Direkt-Export geprüft; nicht in der Tauri-App/auf dem Mac geprüft.
+  keine Lücke gefunden. Tests: Rust `competition` (Treffer je Textort, Fehlalarme, Umlaute), vitest `competitionCheck`, e2e `competition`. **Nachtrag (14.11., spät)**: das Tor
+  hängt jetzt an allen Export-Einstiegen der Oberfläche: Berichte (Fläche, Raumbuch, Kosten, Öffnungen, Bauteile, Programm, Flächenbilanz) als CSV und PDF,
+  3D-Bild-PNG, Rendering (PNG, .blend, Blender-Paket), Kamerafahrt-Video, Layout-Ordner-PDF, KI-Werkzeug-Speichern; `runWithAnonymityGate` für
+  Knopf-Handler, Dateiname der Ausgabe wird mitgeprüft. Bild-/Video-/Rendering-Dateinamen nutzen jetzt den Kennwort-Namen (`exportProjectName`)
+  statt `project.name`. Vitest `state/anonymityGate.entries.test.ts` gleicht ab: jede Oberflächen-Datei mit Datei-Ausgabe ruft das Tor auf
+  (neue Einstiege fallen dort auf). CLI: bei anonymer Abgabe prüfen plan/section/elevation/dxf/dwg/ifc/obj/stl/glb/gltf/step/schedule/kennzahlen/
+  raumprogramm/render/blend/model3d den Freitext, Treffer auf stderr, Exit-Code 3, `--ignore-anonymity` übergeht (Test in `cli.test.ts`);
+  KI-/MCP-Werkzeug `export` ohne `save` liefert bei Treffern nichts aus (Argument `ignoreAnonymity`). Der Projekt-Dateiname ist auch nach
+  Autosave-Wiederherstellen und Browser-/Electron-Start-Öffnen Suchbegriff, beim „Neu“ wird er gelöscht. Offen: `dossier-cli convert` prüft nicht;
+  BCF-Export bewusst ohne Tor; nicht in der Tauri-App/auf dem Mac geprüft (Dialog-Weg nur per Code-Abgleich, kein e2e für die neuen Knöpfe).
 - [61] Raumprogramm gegen Modell und Flächennachweis SIA 416 als Tabelle/Layout-Element ([70]); Kennzahlen (GF, GV, HNF/GF, Fassadenanteil).
 - 3D-Bilder für die Abgabe: hochaufgelöster PNG-Export (Perspektive, Axonometrie, Schatten), Sonnenstand; [205] Pausfolie.
 - [199]/[204] Plan- und App-Review-Reste im Darstellungsbereich 1:500/1:200 schliessen.

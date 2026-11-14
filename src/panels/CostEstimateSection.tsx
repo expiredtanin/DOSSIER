@@ -13,6 +13,7 @@ import { exportProjectName, areaReportToCsv, buildAreaReportPdf, buildCostReport
 import type { CostBasis, CostEstimate, CostGroup, CostMethod, CostResult } from "../core";
 import type { Project } from "../model/types";
 import { downloadCsv } from "./downloadFile";
+import { runWithAnonymityGate } from "../state/anonymityGate";
 import { useStore } from "../state/appStore";
 
 const BASES: CostBasis[] = ["method", "gv", "gf", "hnf", "facade", "roof", "lump"];
@@ -73,13 +74,15 @@ export function CostEstimateSection() {
   const patchGroup = (i: number, g: Partial<CostGroup>, key: string) =>
     update((e) => ({ ...e, groups: e.groups.map((x, j) => (j === i ? { ...x, ...g } : x)) }), `${key}.${i}`);
 
-  const exportCsv = () => downloadCsv(`${stem}.csv`, areaReportToCsv(buildCostReport(project, res)));
+  const exportCsv = () => runWithAnonymityGate(project, [`${stem}.csv`], () => downloadCsv(`${stem}.csv`, areaReportToCsv(buildCostReport(project, res))));
   const exportPdf = () => {
-    try {
-      buildAreaReportPdf(buildCostReport(project, res)).save(`${stem}.pdf`);
-    } catch {
-      notify(t("costs.export.fail"));
-    }
+    runWithAnonymityGate(project, [`${stem}.pdf`], () => {
+      try {
+        buildAreaReportPdf(buildCostReport(project, res)).save(`${stem}.pdf`);
+      } catch {
+        notify(t("costs.export.fail"));
+      }
+    });
   };
   const pctLabel = (v: number) => `${Number.isInteger(v) ? v.toFixed(0) : v.toFixed(1)} %`;
   const sumRow = (label: string, n: number, testId: string, total = false, code = "") => (

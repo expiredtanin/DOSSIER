@@ -81,7 +81,7 @@ export const AI_TOOLS: AiToolDef[] = [
       "Exportiert Grundriss als SVG (format=svg) oder PDF (pdf, nur App) bzw. das Modell als IFC (ifc). Liefert den Inhalt " +
       "(PDF base64); mit save=true öffnet die App den Speichern-Dialog und die Nutzerin wählt den Ort.",
     inputSchema: obj(
-      { format: { type: "string", enum: ["svg", "pdf", "ifc"] }, level: { type: "string" }, scale: { type: "number" }, save: { type: "boolean" } },
+      { format: { type: "string", enum: ["svg", "pdf", "ifc"] }, level: { type: "string" }, scale: { type: "number" }, save: { type: "boolean" }, ignoreAnonymity: { type: "boolean" } },
       ["format"],
     ),
   },

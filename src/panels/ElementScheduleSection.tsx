@@ -6,6 +6,7 @@ import { useMemo } from "react";
 import { t } from "../i18n";
 import { exportProjectName, areaReportToCsv, buildAreaReportPdf, buildElementReport, elementSchedule } from "../core";
 import { downloadCsv } from "./downloadFile";
+import { runWithAnonymityGate } from "../state/anonymityGate";
 import { useStore } from "../state/appStore";
 
 export function ElementScheduleSection() {
@@ -14,11 +15,13 @@ export function ElementScheduleSection() {
   const rows = useMemo(() => elementSchedule(project), [project]);
   const stem = `${exportProjectName(project) || "projekt"}-bauteile`;
   const exportPdf = () => {
-    try {
-      buildAreaReportPdf(buildElementReport(project)).save(`${stem}.pdf`);
-    } catch {
-      notify(t("openings.exportPdf.fail"));
-    }
+    runWithAnonymityGate(project, [`${stem}.pdf`], () => {
+      try {
+        buildAreaReportPdf(buildElementReport(project)).save(`${stem}.pdf`);
+      } catch {
+        notify(t("openings.exportPdf.fail"));
+      }
+    });
   };
   return (
     <div className="area-section element-section" data-element-schedule>
@@ -26,7 +29,7 @@ export function ElementScheduleSection() {
         <span className="balance-section-label">{t("elemSchedule.title")}</span>
         {rows.length > 0 && (
           <span className="area-actions">
-            <button type="button" className="balance-export" onClick={() => downloadCsv(`${stem}.csv`, areaReportToCsv(buildElementReport(project)))}>
+            <button type="button" className="balance-export" onClick={() => runWithAnonymityGate(project, [`${stem}.csv`], () => downloadCsv(`${stem}.csv`, areaReportToCsv(buildElementReport(project))))}>
               {t("openings.exportCsv")}
             </button>
             <button type="button" className="balance-export" onClick={exportPdf}>

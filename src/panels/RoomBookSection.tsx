@@ -7,6 +7,7 @@ import { useMemo } from "react";
 import { t } from "../i18n";
 import { exportProjectName, areaReportToCsv, buildAreaReportPdf, buildRoomBookReport, hasSlope, roomBook, usageLabel } from "../core";
 import { downloadCsv } from "./downloadFile";
+import { runWithAnonymityGate } from "../state/anonymityGate";
 import { useStore } from "../state/appStore";
 
 const m2 = (v: number) => v.toFixed(2);
@@ -19,11 +20,13 @@ export function RoomBookSection() {
   const stem = `${exportProjectName(project) || "projekt"}-raumbuch`;
 
   const exportPdf = () => {
-    try {
-      buildAreaReportPdf(buildRoomBookReport(project)).save(`${stem}.pdf`);
-    } catch {
-      notify(t("roomBook.exportPdf.fail"));
-    }
+    runWithAnonymityGate(project, [`${stem}.pdf`], () => {
+      try {
+        buildAreaReportPdf(buildRoomBookReport(project)).save(`${stem}.pdf`);
+      } catch {
+        notify(t("roomBook.exportPdf.fail"));
+      }
+    });
   };
 
   return (
@@ -32,7 +35,7 @@ export function RoomBookSection() {
         <span className="balance-section-label">{t("roomBook.title")}</span>
         {book.rows.length > 0 && (
           <span className="area-actions">
-            <button type="button" className="balance-export" onClick={() => downloadCsv(`${stem}.csv`, areaReportToCsv(buildRoomBookReport(project)))}>
+            <button type="button" className="balance-export" onClick={() => runWithAnonymityGate(project, [`${stem}.csv`], () => downloadCsv(`${stem}.csv`, areaReportToCsv(buildRoomBookReport(project))))}>
               {t("roomBook.exportCsv")}
             </button>
             <button type="button" className="balance-export" onClick={exportPdf}>

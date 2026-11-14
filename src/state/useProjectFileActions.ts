@@ -202,7 +202,7 @@ export function useProjectFileActions(
   useEffect(() => offerRecovery(null), []);
   const onRecoverRestore = () => {
     if (!recovery) return;
-    openProjectOrReport(recovery.text, notify); // bleibt „ungespeichert" bis zum Speichern
+    if (openProjectOrReport(recovery.text, notify)) setAnonymityProjectFileName(recovery.path); // [208] bleibt „ungespeichert" bis zum Speichern
     setRecovery(null);
   };
   const onRecoverDiscard = () => {
@@ -504,6 +504,7 @@ export function useProjectFileActions(
     }
     openedProjectPathRef.current = null;
     savePathRef.current = null;
+    setAnonymityProjectFileName(null); // [208] der alte Dateiname ist kein Suchbegriff mehr
     projectLockOwnedRef.current = false;
   };
   // Übernimmt ein per Pfad geöffnetes Projekt (Tauri-Fluss): parst, prüft grob
@@ -655,6 +656,7 @@ export function useProjectFileActions(
         if (!loaded) return;
         releaseCurrentProjectLock();
         lastSavedProjectRef.current = loaded;
+        setAnonymityProjectFileName(file.name); // [208] Browser/Electron-Start: kein Pfad, aber der Dateiname
       });
     };
     r.readAsText(file);

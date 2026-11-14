@@ -11,6 +11,7 @@ import { connectAiBridge, type AiBridgeStatus } from "../net/aiBridge";
 import { buildPlanPdf } from "../export/exportPdf";
 import { saveBinaryFile, saveTextFile } from "../native/saveFile";
 import { getState, setState } from "./appStore";
+import { confirmAnonymousExport } from "./anonymityGate";
 import type { Selection, SelectionKind } from "./selection";
 
 export interface AiLogEntry {
@@ -197,7 +198,10 @@ export const appHost: AiHost = {
     const doc = await buildPlanPdf(plan, { scaleDenominator: scale, paper: "a3", orientation: "landscape", title });
     return new Uint8Array(doc.output("arraybuffer"));
   },
-  save: (data, name, mime) => (typeof data === "string" ? saveTextFile(data, name, mime) : saveBinaryFile(data, name, mime)),
+  // [208] Anonyme Abgabe: Freitext vorher prüfen (Dialog in der App), bei Abbruch wird nicht gespeichert.
+  save: async (data, name, mime) =>
+    (await confirmAnonymousExport(getState().project, [name])) &&
+    (typeof data === "string" ? saveTextFile(data, name, mime) : saveBinaryFile(data, name, mime)),
 };
 
 /** Ein Aufruf der Brücke: Pause prüfen, ausführen, protokollieren. */

@@ -19,6 +19,7 @@ import {
   type BlenderHost,
   type RenderCameraChoice,
   type RenderCameraSpec,
+  exportProjectName,
 } from "../core";
 import { getState } from "../state/appStore";
 import { setRenderDialogOpener } from "../state/renderDialogHook";
@@ -26,6 +27,7 @@ import { getBlenderPath, setBlenderPath } from "../state/blenderSettings";
 import { buildPackage, currentRenderCamera, openInBlender, packageAsZip, renderHost, renderWithBlender, saveBlendWithBlender } from "../state/renderAction";
 import { openExternalUrl } from "../native/blender";
 import { saveBinaryFile } from "../native/saveFile";
+import { runWithAnonymityGate } from "../state/anonymityGate";
 import { defaultTargetLayout, placeImageOnLayout } from "../state/layoutImageActions";
 
 type SizeId = "hd" | "uhd" | "a4" | "a3" | "a2" | "custom";
@@ -236,8 +238,10 @@ export const RenderDialogHost = memo(function RenderDialogHost() {
         st.notify(t("render.blend.opened"), "info");
       } else {
         const res = await saveBlendWithBlender(host, pkg, hooks);
-        const name = `${(st.project.name || "projekt").replace(/[^\w.-]+/g, "_")}.blend`;
-        if (await saveBinaryFile(res.blend, name, "application/octet-stream")) st.notify(t("render.blend.saved"), "info");
+        const name = `${(exportProjectName(st.project) || "projekt").replace(/[^\w.-]+/g, "_")}.blend`;
+        runWithAnonymityGate(st.project, [name], async () => {
+          if (await saveBinaryFile(res.blend, name, "application/octet-stream")) st.notify(t("render.blend.saved"), "info");
+        });
       }
       setPhase("setup");
     } catch (err) {
@@ -255,8 +259,10 @@ export const RenderDialogHost = memo(function RenderDialogHost() {
     try {
       const pkg = await buildPackage(st.project, request());
       const bytes = await packageAsZip(pkg);
-      const name = `${(st.project.name || "projekt").replace(/[^\w.-]+/g, "_")}-render.zip`;
-      if (await saveBinaryFile(bytes, name, "application/zip")) st.notify(t("render.zip.saved"), "info");
+      const name = `${(exportProjectName(st.project) || "projekt").replace(/[^\w.-]+/g, "_")}-render.zip`;
+      runWithAnonymityGate(st.project, [name], async () => {
+        if (await saveBinaryFile(bytes, name, "application/zip")) st.notify(t("render.zip.saved"), "info");
+      });
       setPhase("setup");
     } catch (err) {
       setPhase("error");
@@ -269,7 +275,7 @@ export const RenderDialogHost = memo(function RenderDialogHost() {
     if (!png) return;
     const st = getState();
     const layout = (st.project.layouts ?? []).find((l) => l.id === layoutTarget);
-    const name = `${(st.project.name || "projekt").replace(/[^\w.-]+/g, "_")}-rendering.png`;
+    const name = `${(exportProjectName(st.project) || "projekt").replace(/[^\w.-]+/g, "_")}-rendering.png`;
     if (layout && placeImageOnLayout(layout.id, name, png)) st.notify(t("render.toLayout.done", { name: layout.name }), "info");
     else st.notify(t("render.toLayout.none"), "warning");
   };
@@ -277,8 +283,10 @@ export const RenderDialogHost = memo(function RenderDialogHost() {
   const savePng = async () => {
     if (!png) return;
     const st = getState();
-    const name = `${(st.project.name || "projekt").replace(/[^\w.-]+/g, "_")}-rendering.png`;
-    if (await saveBinaryFile(png, name, "image/png")) st.notify(t("render.saved"), "info");
+    const name = `${(exportProjectName(st.project) || "projekt").replace(/[^\w.-]+/g, "_")}-rendering.png`;
+    runWithAnonymityGate(st.project, [name], async () => {
+      if (await saveBinaryFile(png, name, "image/png")) st.notify(t("render.saved"), "info");
+    });
   };
 
   const camLabel = cameraKey !== "live" ? t("render.camera.saved", { name: cameras.find((c) => c.id === cameraKey)?.name ?? "" }) : "preset" in camera ? t("render.camera.preset", { name: t(`view3d.${camera.preset === "right" ? "side" : camera.preset}` as never) }) : t("render.camera.view");

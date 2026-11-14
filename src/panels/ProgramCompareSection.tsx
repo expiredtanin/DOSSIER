@@ -15,6 +15,7 @@ import { exportProjectName, addProgramSheetOps, areaReportToCsv, buildAreaReport
 import type { CompareRow, CompareSum, Light } from "../core";
 import type { Project } from "../model/types";
 import { downloadCsv } from "./downloadFile";
+import { runWithAnonymityGate } from "../state/anonymityGate";
 
 const fmt = (n: number, d = 1) => n.toLocaleString("de-CH", { minimumFractionDigits: d, maximumFractionDigits: d });
 /** Mit Vorzeichen; was auf die angezeigte Stelle zu 0 rundet, bleibt ohne Vorzeichen. */
@@ -59,11 +60,13 @@ export function ProgramCompareSection({ statusLabel }: { statusLabel: (status: C
   };
 
   const exportPdf = () => {
-    try {
-      buildAreaReportPdf(buildProgramReport(project)).save(`${stem}.pdf`);
-    } catch {
-      notify(t("program.compare.exportPdf.fail"));
-    }
+    runWithAnonymityGate(project, [`${stem}.pdf`], () => {
+      try {
+        buildAreaReportPdf(buildProgramReport(project)).save(`${stem}.pdf`);
+      } catch {
+        notify(t("program.compare.exportPdf.fail"));
+      }
+    });
   };
 
   const generate = () => {
@@ -83,7 +86,7 @@ export function ProgramCompareSection({ statusLabel }: { statusLabel: (status: C
       <div className="balance-head">
         <span className="balance-section-label">{t("program.compare.title")}</span>
         <span className="area-actions">
-          <button type="button" className="balance-export" onClick={() => downloadCsv(`${stem}.csv`, areaReportToCsv(buildProgramReport(project)))}>
+          <button type="button" className="balance-export" onClick={() => runWithAnonymityGate(project, [`${stem}.csv`], () => downloadCsv(`${stem}.csv`, areaReportToCsv(buildProgramReport(project))))}>
             {t("program.compare.exportCsv")}
           </button>
           <button type="button" className="balance-export" onClick={exportPdf}>

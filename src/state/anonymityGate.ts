@@ -65,3 +65,10 @@ export async function confirmAnonymousExport(project: Project, outputFileNames: 
     emit();
   });
 }
+
+/** Führt `run` erst nach bestandener Prüfung aus (Knopf-Handler der Berichte, Bild-Exporte …); bei Abbruch passiert nichts. */
+export function runWithAnonymityGate(project: Project, outputFileNames: string[], run: () => void | Promise<void>): void {
+  void confirmAnonymousExport(project, outputFileNames).then((ok) => {
+    if (ok) return run();
+  });
+}

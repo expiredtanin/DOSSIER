@@ -52,6 +52,31 @@ describe("dossier-cli", () => {
     expect(await run([broken, "plan", "--out", join(dir, "haengend.svg")])).toBe(0);
   });
 
+  it("anonyme Abgabe: Export prüft den Freitext, Treffer brechen ab, --ignore-anonymity übergeht ([208])", async () => {
+    const anon = join(dir, "seeblick-meierhofer.obp");
+    const p = {
+      ...sampleProject,
+      name: "Seeblick Meierhofer",
+      competition: { anonymous: true, keyword: "FALKE 7", identifiers: "" },
+      rooms: [{ ...sampleProject.rooms![0], name: "Büro Seeblick Meierhofer" }, ...sampleProject.rooms!.slice(1)],
+    };
+    writeFileSync(anon, serializeProject(p as typeof sampleProject));
+    const err = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      const target = join(dir, "anon.svg");
+      expect(await run([anon, "plan", "--out", target])).toBe(3);
+      expect(existsSync(target)).toBe(false);
+      expect(err.mock.calls.map((c) => String(c[0])).join("")).toContain("Anonyme Abgabe");
+      expect(await run([anon, "info"])).toBe(0); // kein Export
+      expect(await run([anon, "plan", "--out", target, "--ignore-anonymity"])).toBe(0);
+      expect(existsSync(target)).toBe(true);
+    } finally {
+      err.mockRestore();
+    }
+    // Nicht anonym: keine Prüfung.
+    expect(await run([file, "plan", "--out", join(dir, "nicht-anon.svg")])).toBe(0);
+  });
+
   it("Plan als SVG", async () => {
     const out = join(dir, "eg.svg");
     expect(await call("plan", "--out", out)).toBe(0);

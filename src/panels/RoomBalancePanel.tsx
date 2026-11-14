@@ -19,6 +19,7 @@ import { OpeningScheduleSection } from "./OpeningScheduleSection";
 import { ElementScheduleSection } from "./ElementScheduleSection";
 import { RoomBookSection } from "./RoomBookSection";
 import { downloadCsv } from "./downloadFile";
+import { runWithAnonymityGate } from "../state/anonymityGate";
 
 /** Löst je Raum die anrechenbare (Netto-)Fläche + Kategorie auf. */
 function roomAreas(rooms: Room[]): { category: Room["siaCategory"]; area: number }[] {
@@ -66,7 +67,7 @@ export function RoomBalancePanel() {
         area: evaluateRoom(r.boundary, r.siaCategory, { bulge: r.boundaryBulge }).netArea,
       })),
     );
-    downloadCsv("flaechenbilanz.csv", csv);
+    runWithAnonymityGate(project, ["flaechenbilanz.csv"], () => downloadCsv("flaechenbilanz.csv", csv));
   };
 
   return (

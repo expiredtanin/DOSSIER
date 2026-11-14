@@ -8,6 +8,7 @@ import { folderPdfBytes } from "../../export/layoutPdf";
 import { addPublishSetOps, addWbwSetOps, deletePublishSetOps, patchPublishSetOps, publishSet, setCompetitionOps } from "../publishActions";
 import { openLayoutTab } from "../tabNavigation";
 import { saveBinaryFile } from "../../native/saveFile";
+import { runWithAnonymityGate } from "../anonymityGate";
 import { createPosterMaster, findPosterMaster, posterTemplate } from "../../model/posterTemplates";
 import type { FlatHostOpts, HostPart } from "./types";
 
@@ -155,9 +156,11 @@ export function buildLayoutsHost(c: FlatHostOpts) {
     onExportFolderPdf: (folderId) => {
       const folder = (project.layoutFolders ?? []).find((f) => f.id === folderId);
       const name = folder?.name?.trim() || "layouts";
-      void folderPdfBytes(project, folderId).then((bytes) => {
-        if (bytes) return saveBinaryFile(bytes, `${name}.pdf`, "application/pdf");
-      });
+      runWithAnonymityGate(project, [`${name}.pdf`], () =>
+        folderPdfBytes(project, folderId).then((bytes) => {
+          if (bytes) void saveBinaryFile(bytes, `${name}.pdf`, "application/pdf");
+        }),
+      );
     },
     onMoveLayoutToFolder: (layoutId, folderId) => {
       applyChange((p) => fieldOps(p, "layouts", moveLayoutToFolder(p.layouts ?? [], layoutId, folderId)));

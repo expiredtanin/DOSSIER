@@ -17,6 +17,8 @@ import { computeKennzahlen, checkRoomProgram } from "../analysis/kennzahlen";
 import { computeAreaTable, computeIvhb } from "../analysis/areaTable";
 import { checkSiteRules } from "../analysis/siteRules";
 import { loadFileio } from "../engine/fileioWasm";
+import { anonymityFindings } from "../export/competitionCheck";
+import { exportProjectName } from "../export/competitionIdentity";
 import { documentFor } from "./document";
 import { validateProject, projectWarnings, type CoreOp } from "./ops";
 import { aiText, aiToolDef, randomHex, type AiToolResult } from "./aiToolDefs";
@@ -174,7 +176,7 @@ const appOnly = (name: string) => err(`${name}: nur mit der laufenden App (dossi
 
 async function exportTool(host: AiHost, project: Project, args: Record<string, unknown>): Promise<AiToolResult> {
   const format = String(args.format);
-  const stem = project.name || "projekt";
+  const stem = exportProjectName(project) || "projekt";
   const scale = Number(args.scale ?? 100);
   if (args.save === true && !host.save) return err("save: Speichern nur in der App (Dialog, Ort wählt die Nutzerin)");
   let data: string | Uint8Array;
@@ -199,6 +201,15 @@ async function exportTool(host: AiHost, project: Project, args: Record<string, u
     }
     file = `${stem}-${lvl.name}.${format}`;
   } else return err(`export: unbekanntes Format ${format}`);
+  // [208] Anonyme Abgabe: Ohne `save` gibt das Werkzeug die Daten direkt an die KI zurück — Freitext vorher prüfen.
+  // (Mit `save` fragt die App selbst im Anonymitäts-Dialog nach.)
+  if (args.save !== true && args.ignoreAnonymity !== true) {
+    const found = anonymityFindings(project, { texts: [{ area: "export", place: "fileName", text: file }] });
+    if (found.length > 0) {
+      const lines = found.slice(0, 20).map((f) => `${f.area} / ${f.place}: „${f.text}" enthält „${f.term}"`);
+      return err(`Anonyme Abgabe: ${found.length} Treffer im Freitext, Export nicht ausgeliefert (mit ignoreAnonymity=true übergehen):\n${lines.join("\n")}`);
+    }
+  }
   if (args.save === true) {
     const ok = await host.save!(data, file, mime);
     return ok ? aiText(`gespeichert: ${file}`) : err("Speichern abgebrochen");

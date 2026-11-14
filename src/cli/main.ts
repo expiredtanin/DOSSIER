@@ -101,6 +101,8 @@ import {
   areaReportToSvg,
   buildAreaReportPdf,
   exportProjectName,
+  isAnonymous,
+  anonymityFindings,
   sunPosition,
   shadowPolygons,
   projectLatLon,
@@ -476,7 +478,8 @@ export async function run(argv: string[]): Promise<number> {
         "        dossier-cli pointcloud-info <datei> [--voxel 0.05] [--max 2000000]\n" +
         "        dossier-cli bcf-info <datei.bcfzip>\n" +
         "        dossier-cli pdf-info <datei.pdf> [--page 1]\n" +
-        "        dossier-cli mcp --app [--port 7979] [--token schlüssel]   (MCP-Brücke zur offenen App)\n",
+        "        dossier-cli mcp --app [--port 7979] [--token schlüssel]   (MCP-Brücke zur offenen App)\n" +
+        "        Anonyme Wettbewerbs-Abgabe: Exporte prüfen den Freitext (Exit 3 bei Treffern); --ignore-anonymity übergeht die Prüfung\n",
     );
     return 2;
   }
@@ -903,9 +906,36 @@ async function importSyntheticContext(base: Project, args: Args, rows: Array<[st
   return cur;
 }
 
+/** Befehle, die eine Ausgabe-Datei erzeugen (für die Anonymitäts-Prüfung einer Wettbewerbs-Abgabe, [208]). */
+const EXPORT_COMMANDS = new Set(["plan", "section", "elevation", "dxf", "dwg", "ifc", "obj", "stl", "glb", "gltf", "step", "stp", "schedule", "kennzahlen", "raumprogramm", "render", "blend", "model3d"]);
+
+/**
+ * [208] Anonyme Abgabe: vor einem Export den Freitext prüfen. Treffer stehen auf stderr; ohne `--ignore-anonymity`
+ * bricht der Befehl mit Exit-Code 3 ab. Gibt den Exit-Code zurück, `0` = weiter.
+ */
+function anonymityGate(project: Project, file: string, command: string, args: Args): number {
+  if (!EXPORT_COMMANDS.has(command) || !isAnonymous(project)) return 0;
+  const texts = [] as { area: string; place: string; text: string }[];
+  const target = args.flags.get("out");
+  if (target && target !== "-" && target !== "true") texts.push({ area: "export", place: "fileName", text: basename(target) });
+  const findings = anonymityFindings(project, { fileName: file.startsWith(":") ? "" : basename(file), texts });
+  if (findings.length === 0) return 0;
+  const lines = findings.map((f) => `  ${f.area} / ${f.place}: „${f.text}" enthält „${f.term}" (${f.kind})`);
+  const ignore = args.flags.has("ignore-anonymity") && args.flags.get("ignore-anonymity") !== "false";
+  process.stderr.write(`Anonyme Abgabe: ${findings.length} Treffer im Freitext:\n${lines.join("\n")}\n`);
+  if (ignore) {
+    process.stderr.write("Hinweis: --ignore-anonymity gesetzt, Export läuft trotzdem.\n");
+    return 0;
+  }
+  process.stderr.write("Export abgebrochen (zum Übergehen: --ignore-anonymity).\n");
+  return 3;
+}
+
 /** Führt EINEN Befehl gegen ein geladenes Projekt aus (Rückgabe = Exit-Code). */
 async function execute(project: Project, file: string, command: string, rest: string[], args: Args): Promise<number> {
   const scale = Number(args.flags.get("scale") ?? 100);
+  const blocked = anonymityGate(project, file, command, args);
+  if (blocked !== 0) return blocked;
   // [257] `bench --context`: vorher synthetische Kontext-Importe (Kataster, Höhenlinien, Gebäudenetze) ins Projekt laden.
   const contextRows: Array<[string, number]> = [];
   if (command === "bench" && args.flags.has("context")) {

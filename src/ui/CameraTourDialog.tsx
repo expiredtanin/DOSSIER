@@ -10,6 +10,8 @@ import { getState } from "../state/appStore";
 import { cancelCameraTour, currentTourKeys, getTourSettings, playCameraTour, recordCameraTour, setTourSettings } from "../state/cameraTourActions";
 import { setCameraTourDialogOpener } from "../state/cameraTourDialogHook";
 import { saveBinaryFile } from "../native/saveFile";
+import { runWithAnonymityGate } from "../state/anonymityGate";
+import { exportProjectName } from "../core";
 import { getViewportCanvas } from "../viewport/cameraBridge";
 import { availableVideoFormats, videoFileName } from "../viewport/videoRecorder";
 import type { TourMode } from "../viewport/cameraTour";
@@ -82,7 +84,10 @@ export const CameraTourDialogHost = memo(function CameraTourDialogHost() {
     if (!res) return;
     try {
       const bytes = new Uint8Array(await res.blob.arrayBuffer());
-      if (await saveBinaryFile(bytes, videoFileName(getState().project.name, res.ext), res.blob.type || "video/webm")) getState().notify(t("tour.saved"), "info");
+      const name = videoFileName(exportProjectName(getState().project) || "projekt", res.ext);
+      runWithAnonymityGate(getState().project, [name], async () => {
+        if (await saveBinaryFile(bytes, name, res.blob.type || "video/webm")) getState().notify(t("tour.saved"), "info");
+      });
     } catch (err) {
       getState().notify(t("tour.recordFailed", { reason: err instanceof Error ? err.message : String(err) }), "warning");
     }

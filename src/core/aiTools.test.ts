@@ -105,6 +105,16 @@ describe("KI-Werkzeuge (gemeinsame Liste)", () => {
     expect((await callAiTool(host, "export", { format: "svg", save: true })).isError).toBe(true); // Speichern nur mit Dialog
     expect((await callAiTool(host, "gibtsnicht", {})).isError).toBe(true);
   });
+  it("anonyme Abgabe: Export mit Freitext-Treffern wird nicht ausgeliefert, ignoreAnonymity übergeht ([208])", async () => {
+    const { host } = fakeHost(false);
+    const real = host.project();
+    const anon = { ...real, name: "Seeblick Meierhofer", competition: { anonymous: true, keyword: "FALKE 7", identifiers: "" }, rooms: [{ ...real.rooms![0], name: "Büro Seeblick Meierhofer" }, ...real.rooms!.slice(1)] } as Project;
+    const h: AiHost = { ...host, project: () => anon };
+    const blocked = await callAiTool(h, "export", { format: "svg" });
+    expect(blocked.isError).toBe(true);
+    expect(textOf(blocked)).toContain("Anonyme Abgabe");
+    expect(textOf(await callAiTool(h, "export", { format: "svg", ignoreAnonymity: true }))).toContain("<svg");
+  });
 });
 
 describe("Brücken-Anmeldung", () => {

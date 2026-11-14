@@ -11,6 +11,7 @@ import { exportProjectName, areaReportToCsv, buildAreaReportPdf, buildOpeningRep
 import type { OpeningScheduleRow } from "../core";
 import type { Opening, Project } from "../model/types";
 import { downloadCsv } from "./downloadFile";
+import { runWithAnonymityGate } from "../state/anonymityGate";
 import { useStore } from "../state/appStore";
 
 type TextField = "mark" | "fireRating" | "soundClass" | "burglaryClass" | "notes";
@@ -37,11 +38,13 @@ export function OpeningScheduleSection() {
   const setExternal = (id: string, value: string) => patch(id, { isExternal: value === "" ? undefined : value === "ext" }, "isExternal");
 
   const exportPdf = () => {
-    try {
-      buildAreaReportPdf(buildOpeningReport(project)).save(`${stem}.pdf`);
-    } catch {
-      notify(t("openings.exportPdf.fail"));
-    }
+    runWithAnonymityGate(project, [`${stem}.pdf`], () => {
+      try {
+        buildAreaReportPdf(buildOpeningReport(project)).save(`${stem}.pdf`);
+      } catch {
+        notify(t("openings.exportPdf.fail"));
+      }
+    });
   };
   const select = (r: OpeningScheduleRow) => host.onSelectScheduleRow(r.kind === "door" ? "Tür" : "Fenster", r.id, r.floorId);
 
@@ -55,7 +58,7 @@ export function OpeningScheduleSection() {
         <span className="balance-section-label">{t("openings.title")}</span>
         {rows.length > 0 && (
           <span className="area-actions">
-            <button type="button" className="balance-export" onClick={() => downloadCsv(`${stem}.csv`, areaReportToCsv(buildOpeningReport(project)))}>
+            <button type="button" className="balance-export" onClick={() => runWithAnonymityGate(project, [`${stem}.csv`], () => downloadCsv(`${stem}.csv`, areaReportToCsv(buildOpeningReport(project))))}>
               {t("openings.exportCsv")}
             </button>
             <button type="button" className="balance-export" onClick={exportPdf}>

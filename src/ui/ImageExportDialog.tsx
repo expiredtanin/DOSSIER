@@ -7,7 +7,8 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useModalFocus } from "./modalFocus";
 import { t } from "../i18n";
-import { paperPixels } from "../core";
+import { exportProjectName, paperPixels } from "../core";
+import { runWithAnonymityGate } from "../state/anonymityGate";
 import { getState } from "../state/appStore";
 import { setImageExportDialogOpener } from "../state/imageExportDialogHook";
 import { defaultTargetLayout, placeImageOnLayout } from "../state/layoutImageActions";
@@ -155,10 +156,13 @@ export const ImageExportDialogHost = memo(function ImageExportDialogHost() {
     if (transparent && !img.transparent) setMessage(t("image3d.noTransparency"));
   };
 
-  const fileName = () => imageFileName(getState().project.name, result?.width ?? 0, result?.height ?? 0);
+  const fileName = () => imageFileName(exportProjectName(getState().project) || "projekt", result?.width ?? 0, result?.height ?? 0);
   const save = async () => {
     if (!result) return;
-    if (await saveBinaryFile(result.png, fileName(), "image/png")) getState().notify(t("image3d.saved"), "info");
+    const name = fileName();
+    runWithAnonymityGate(getState().project, [name], async () => {
+      if (await saveBinaryFile(result.png, name, "image/png")) getState().notify(t("image3d.saved"), "info");
+    });
   };
   const placeInLayout = () => {
     if (!result) return;

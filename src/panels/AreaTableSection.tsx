@@ -12,6 +12,7 @@ import { exportProjectName, areaReportToCsv, buildAreaReport, buildAreaReportPdf
 import type { AgfBasis } from "../core";
 import { DEFAULT_AREA_INPUTS, ivhbOptionsOf, type AreaInputs } from "./areaInputs";
 import { downloadCsv } from "./downloadFile";
+import { runWithAnonymityGate } from "../state/anonymityGate";
 import { useStore } from "../state/appStore";
 
 const BASES: AgfBasis[] = ["ngf", "gf", "nf"];
@@ -29,11 +30,13 @@ export function AreaTableSection() {
   const stem = `${exportProjectName(project) || "projekt"}-flaechen`;
 
   const exportPdf = () => {
-    try {
-      buildAreaReportPdf(report).save(`${stem}.pdf`);
-    } catch {
-      notify(t("areas.exportPdf.fail"));
-    }
+    runWithAnonymityGate(project, [`${stem}.pdf`], () => {
+      try {
+        buildAreaReportPdf(report).save(`${stem}.pdf`);
+      } catch {
+        notify(t("areas.exportPdf.fail"));
+      }
+    });
   };
 
   return (
@@ -41,7 +44,7 @@ export function AreaTableSection() {
       <div className="balance-head">
         <span className="balance-section-label">{t("areas.title")}</span>
         <span className="area-actions">
-          <button type="button" className="balance-export" onClick={() => downloadCsv(`${stem}.csv`, areaReportToCsv(report))}>
+          <button type="button" className="balance-export" onClick={() => runWithAnonymityGate(project, [`${stem}.csv`], () => downloadCsv(`${stem}.csv`, areaReportToCsv(report)))}>
             {t("areas.exportCsv")}
           </button>
           <button type="button" className="balance-export" onClick={exportPdf}>
