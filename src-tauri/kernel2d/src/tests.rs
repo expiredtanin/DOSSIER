@@ -322,6 +322,18 @@ fn near(a: Vec2, x: f64, y: f64) -> bool {
     (a.x - x).abs() < 1e-9 && (a.y - y).abs() < 1e-9
 }
 
+/// [258] Lauflänge f64::MAX (Summe/Produkt laufen über, Stufenzahl sättigt zu i64::MAX): endlich viele Tritte.
+#[test]
+fn regression_stair_riesige_lauflaenge() {
+    for shape in ["L", "U", "straightLanding", "straight"] {
+        let mut p = stair(shape);
+        p.run_length = f64::MAX;
+        p.run2_length = Some(3.0);
+        let g = stair_geometry(&p, 1.0);
+        assert!(g.treads.len() <= 20, "{shape}: {} Tritte", g.treads.len());
+    }
+}
+
 #[test]
 fn stair_gerade_tritte_lauflinie_pfeil() {
     let g = stair_geometry(&stair("straight"), 2.8);

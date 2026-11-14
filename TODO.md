@@ -89,10 +89,20 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   `while sweep <= 0 { sweep += 2π }` bei Winkeln ±1e300 (`svg.rs`, `stamp_place`, `drawing_recognize`, `magic_wand`, `stair_symbol`) durch
   `rem_euclid` ersetzt; Obergrenzen für Massstabsbalken-Segmente, Strahlen der Böschungsschraffur, Höhenlinien-Beschriftung, Strichzerlegung
   (`dxf::dash_seg`), Blasen-Verschiebung, Wendeltreppen-Vorschau, Raster in `context_ground` (Koordinaten ~1e17). Je ein `regression_*`-Fall.
-  **Offen:** Seeds: 20 weitere (1001–1020) sauber, aber nur ein
-  Seed je Lauf (Suche mit anderen Seeds von Hand); Speicher-Abbruch (`handle_alloc_error`) lässt sich nicht per
-  `catch_unwind` fangen, der Test bricht dann den ganzen Lauf ab; WASM-Bindungen (`web/`) und TS-Seite nicht abgedeckt; Rust-Panic im WASM selbst
-  nicht gemessen ([118] bleibt Wiederanlauf). · M
+  **Bindungen 14.11.:** `src-tauri/core/tests/robustness_web.rs` (Feature `web`; `web` ist dafür `pub`+`doc(hidden)`, die wasm-bindgen-Funktionen laufen nativ
+  als gewöhnliche Rust-Funktionen) ruft ALLE 190 `#[wasm_bindgen]`-Einstiege in `src/web/*.rs` je Seed-Lauf N-mal mit kaputten Eingaben (leere/abgeschnittene/
+  verdorbene Flat-Puffer, Zähler -1/1e9/NaN/∞, Zufallsbits, ungültiges/abgeschnittenes/verdorbenes Projekt-JSON, falsche Handles/ids, Zufallsbytes) unter `catch_unwind`
+  samt 30-s-Wächter (Endlosschleife) auf; `jede_bindung_ist_abgedeckt` schlägt fehl, wenn eine neue Bindung nicht in `CALLS` steht (`ROBUST_WEB_N/SEED/ONLY/SKIP/TRACE/DUMP`,
+  Kopf der Datei; von Hand mit `ulimit -v 6000000`, dann wird ein Speicher-Abbruch zur Meldung statt Absturz des Rechners). Gefunden und behoben (je `regression_*`):
+  usize-Überlauf bei gesättigten Zählern (`grip_coincident`, `contour_marks`, `decode_step`, `smooth_grid`: 1e300 → `usize::MAX`, `1 + 2·n` lief über → Slice-Panic);
+  Schraffur (`hatchgen`): Schleifen mit `k += 1.0` bei Indizes ≥ 2^53 (Linienschar, Zufallslinien, Erde/Kies/Streuung, Band-/Punktmuster) → Zählschleife `fseq`/Grenzen,
+  Linienschar/Strichzerlegung/Zickzack/Motiv mit Obergrenzen, Streuraster bei langen dünnen Flächen (Milliarden Zellen in einer Zeile); Dach: Skelett-Wellenfront lief in einen
+  Rundungszyklus (Ecken-Obergrenze `32·n+256` → Degeneration/Rückfall); Treppe: `split_steps` sättigte bei Lauflänge `f64::MAX` zu `i64::MAX` Tritten (Speicher-Abbruch);
+  Delaunay: Koordinaten > 1e60 (Hülle inkonsistent, Endlosschleife). Dazu `render2d/tests/robustness.rs` (Szene lesen → `compile_scene`, Textzeilen, WOFF2, Zerlegung, Strichphase)
+  und `render3d/tests/robustness.rs` (verdorbenes Teile-Update → `Scene::apply`/`chunk_data`/`cut_section`): beide sauber (100000 bzw. 30000 Läufe je Seed), keine Befunde.
+  **Offen:** Speicher-Abbruch (`handle_alloc_error`) lässt sich nicht per `catch_unwind` fangen (der Test bricht dann den ganzen Lauf ab; im WASM ein Trap wie ein Panic);
+  `WebModelRenderer`/`WebRenderer` (GPU, Canvas: `set_model`, `set_scene_bin` …) nur über ihre GPU-freien Leser abgedeckt, nicht als Ganzes; die Ausgangsdaten der Bindungsläufe sind
+  flach/zufällig (Tiefenprüfung der Dokument-Ops mit gültigen Op-Strukturen fehlt); TS-Seite nicht abgedeckt; Rust-Panic im WASM selbst nicht gemessen ([118] bleibt Wiederanlauf). · M
 - Release-Notes-Entwurf `doc/RELEASE-NOTES-1.0.md` (14.11.), offene Fragen an den Maintainer dort markiert (`**[Frage M: …]**`); nach dem Mac-Durchlauf [206] Einschränkungen nachführen.
 - [30] Release-Workflow lauffähig: macOS universal signiert/notarisiert, Updater, Versionsnummer 1.0.0-beta; [57]/[120] CI auf GitHub grün.
 - „Mac-Gegenprobe“ (Sammelpunkt unten) für alles im Referenz-Ablauf abarbeiten (Maintainer), Befunde sofort beheben;

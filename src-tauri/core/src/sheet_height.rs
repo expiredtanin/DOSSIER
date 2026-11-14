@@ -281,7 +281,7 @@ pub fn contour_marks(flat: &[f64]) -> Vec<f64> {
     let mut i = 5;
     while i + 3 <= flat.len() {
         let (z, closed, n) = (flat[i], flat[i + 1] != 0.0, flat[i + 2]);
-        if !(n >= 0.0 && n.fract() == 0.0) || i + 3 + 2 * (n as usize) > flat.len() {
+        if !(n >= 0.0 && n.fract() == 0.0) || n > ((flat.len() - i - 3) / 2) as f64 {
             return vec![];
         }
         let pts = flat[i + 3..i + 3 + 2 * (n as usize)].chunks_exact(2).map(|c| [c[0], c[1]]).collect();
@@ -331,6 +331,14 @@ fn ridge_pitch(r: &Value, eave: f64, rise: f64) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// [258] Punktzahl 1e300 (saturiert zu usize::MAX, `2 * n` lief über → Slice-Panic): leer statt Panic.
+    #[test]
+    fn regression_contour_marks_riesige_punktzahl() {
+        for n in [1e300, 1e19, 4e18, 1e9, f64::INFINITY, f64::NAN, -1.0, 0.5] {
+            assert!(contour_marks(&[0.0, 0.0, 1.0, 0.0, f64::NAN, 10.0, 1.0, n, 0.0, 0.0]).is_empty());
+        }
+    }
 
     fn root() -> Map<String, Value> {
         json!({

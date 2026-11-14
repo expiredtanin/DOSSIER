@@ -300,15 +300,17 @@ pub fn hatch_line_family(poly: &[V2], angle_rad: f64, spacing_m: f64, offset_m: 
     let first = ((d_min - offset_m) / spacing_m).floor() - 1.0;
     let last = ((d_max - offset_m) / spacing_m).ceil() + 1.0;
     // Unendliche Ausdehnung (TS lief hier endlos): nichts zeichnen.
-    if !(last - first).is_finite() {
+    // Obergrenze ([258]): Milliarden Linien (riesiges Polygon, feiner Abstand) lähmen wie Endlosschleife.
+    if !((last - first) <= MAX_FAMILY_LINES) {
         return segs;
     }
-    let mut k = first;
-    while k <= last {
+    // Zählschleife statt `k += 1.0`: bei |k| ≥ 2^53 ändert `+ 1` den Wert nicht (Endlosschleife, [258]).
+    let count = (last - first) as u64;
+    for n in 0..=count {
+        let k = first + n as f64;
         let d = offset_m + k * spacing_m;
         let p0 = v2(center.x + nrm.x * d, center.y + nrm.y * d);
         segs.extend(clip_line_to_polygon(p0, dir, poly));
-        k += 1.0;
     }
     segs
 }
@@ -335,6 +337,23 @@ pub fn hatch_dash(h: &Hatch) -> Vec<f64> {
     h.dash.iter().map(|d| d * k).collect()
 }
 
+/// Ganzzahlige Laufindizes `first..=last` als f64. Zählt über einen ganzzahligen Zähler statt `k += 1.0`:
+/// ab |k| ≥ 2^53 ändert `+ 1.0` den Wert nicht mehr (Endlosschleife bei fernen Koordinaten, [258]); unterhalb
+/// ist das Ergebnis bitgleich zur fortlaufenden Addition.
+fn fseq(first: f64, last: f64) -> impl Iterator<Item = f64> {
+    let n = if last >= first { Some((last - first).min(1e15) as u64) } else { None };
+    n.into_iter().flat_map(move |n| (0..=n).map(move |m| first + m as f64))
+}
+
+/// Obergrenze der Linien einer Schraffur-Schar ([258]).
+const MAX_FAMILY_LINES: f64 = 2_000_000.0;
+
+/// Obergrenze der Punkte einer Zickzack-/Motivlinie ([258]).
+const MAX_LINE_POINTS: f64 = 4_000_000.0;
+
+/// Obergrenze der Strichstücke einer Zerlegung ([258]).
+const MAX_DASH_PIECES: f64 = 2_000_000.0;
+
 /// Zerlegt Läufe entlang eines Strichmusters (`dash` in mm-Papier, [an, aus, …]; ungerade
 /// Länge wird verdoppelt). Die Phase läuft über Stützpunkte hinweg durch.
 pub fn apply_dash_runs(runs: Vec<Run>, dash: &[f64]) -> Vec<Run> {
@@ -351,6 +370,20 @@ pub fn apply_dash_runs(runs: Vec<Run>, dash: &[f64]) -> Vec<Run> {
         total += d;
     }
     if total <= 1e-9 {
+        return runs;
+    }
+    // Obergrenze ([258]): Lauf von 1e300 m oder unendlicher Länge mit feinem Muster ergäbe Milliarden
+    // Striche (Speicher-Abbruch bzw. Endlosschleife) — dann durchgezogen lassen.
+    let mut path_len = 0.0;
+    for run in &runs {
+        for w in run.windows(2) {
+            let l = hypot2(w[1].x - w[0].x, w[1].y - w[0].y);
+            if !l.is_nan() {
+                path_len += l;
+            }
+        }
+    }
+    if !((path_len / total) * cycle.len() as f64 <= MAX_DASH_PIECES) {
         return runs;
     }
     let mut out: Vec<Run> = Vec::new();
@@ -492,13 +525,11 @@ fn wood_runs(poly: &[V2], angle_rad: f64, spacing_m: f64, anchor: V2, seed: f64)
         return Vec::new();
     }
     let mut runs = Vec::new();
-    let mut k = first;
-    while k <= last {
+    for k in fseq(first, last) {
         let jitter = Mulberry32 { a: hash_cell(k, 0.0, seed) }.next() - 0.5;
         let d = (k + 0.3 * jitter) * spacing_m;
         let p0 = v2(anchor.x + nrm.x * d, anchor.y + nrm.y * d);
         runs.extend(clip_line_to_polygon(p0, dir, poly).into_iter().map(|(a, b)| vec![a, b]));
-        k += 1.0;
     }
     runs
 }
@@ -513,13 +544,15 @@ fn barrier_runs(poly: &[V2], hatch: &Hatch, scale: f64) -> Vec<Run> {
     }
     let mut runs = Vec::new();
     for &(vc, _) in &b.rows {
-        let mut i = ((b.u0 - b.ua) / (2.0 * dash)).floor();
-        while b.ua + 2.0 * i * dash <= b.u1 {
+        let i0 = ((b.u0 - b.ua) / (2.0 * dash)).floor();
+        for i in fseq(i0, ((b.u1 - b.ua) / (2.0 * dash)).floor() + 1.0) {
+            if b.ua + 2.0 * i * dash > b.u1 {
+                break;
+            }
             let s = b.ua + 2.0 * i * dash;
             for (sa, sb) in clip_segment_to_polygon(b.at(s, vc), b.at(s + dash, vc), poly) {
                 runs.push(vec![sa, sb]);
             }
-            i += 1.0;
         }
     }
     runs
@@ -589,7 +622,7 @@ fn band_frame(poly: &[V2], hatch: &Hatch, scale: f64) -> Option<Band> {
 fn band_curve(poly: &[V2], b: &Band, vc: f64, margin: f64, dx: f64, f: impl Fn(f64) -> (f64, f64)) -> Vec<Run> {
     let x0 = ((b.u0 - b.ua - margin) / dx).floor() * dx;
     let x1 = b.u1 - b.ua + margin;
-    if !(dx > 1e-9) || (x1 - x0) / dx > BAND_MAX_POINTS {
+    if !(dx > 1e-9) || (x1 - x0) / dx > BAND_MAX_POINTS || !(x0.abs().max(x1.abs()) / dx < 1e15) {
         return Vec::new();
     }
     let mut pts = Vec::new();
@@ -673,6 +706,10 @@ fn insulation_snake(poly: &[V2], b: &Band, vc: f64, h: f64, p: f64) -> Vec<Run> 
     let n_bot = (bot_sweep / step).ceil().max(1.0) as usize;
     let k0 = ((b.u0 - b.ua) / p).floor() - 1.0;
     let mut k = ((b.u1 - b.ua) / p).ceil() + 1.0;
+    // Ferne Koordinaten: ab |k| ≥ 2^53 käme `k -= 1.0` nie voran ([258]).
+    if !(k.abs() < 1e15 && k0.abs() < 1e15) {
+        return Vec::new();
+    }
     let mut pts = Vec::new();
     while k >= k0 {
         let ct = b.ua + k * p;
@@ -758,10 +795,8 @@ fn earth_runs(poly: &[V2], hatch: &Hatch, scale: f64) -> Vec<Run> {
     let Some((i0, i1, j0, j1)) = cells_over(poly, u, v, cell) else { return Vec::new() };
     let at = |a: f64, b: f64| v2(u.x * a + v.x * b, u.y * a + v.y * b);
     let mut runs = Vec::new();
-    let mut j = j0;
-    while j <= j1 {
-        let mut i = i0;
-        while i <= i1 {
+    for j in fseq(j0, j1) {
+        for i in fseq(i0, i1) {
             let along_u = (i + j).rem_euclid(2.0) == 0.0;
             for k in [0.25, 0.5, 0.75] {
                 let (a, b) = if along_u {
@@ -773,9 +808,7 @@ fn earth_runs(poly: &[V2], hatch: &Hatch, scale: f64) -> Vec<Run> {
                     runs.push(vec![sa, sb]);
                 }
             }
-            i += 1.0;
         }
-        j += 1.0;
     }
     runs
 }
@@ -787,10 +820,8 @@ fn gravel_runs(poly: &[V2], hatch: &Hatch, scale: f64) -> Vec<Run> {
     let Some((i0, i1, j0, j1)) = cells_over(poly, v2(1.0, 0.0), v2(0.0, 1.0), cell) else { return Vec::new() };
     let seed = hatch.seed.unwrap_or(0.0);
     let mut runs = Vec::new();
-    let mut j = j0;
-    while j <= j1 {
-        let mut i = i0;
-        while i <= i1 {
+    for j in fseq(j0, j1) {
+        for i in fseq(i0, i1) {
             let mut rnd = Mulberry32 { a: hash_cell(i, j, seed) };
             let r = cell * (0.125 + 0.15 * rnd.next());
             let cx = (i + 0.5) * cell + (rnd.next() - 0.5) * (cell - 2.0 * r);
@@ -800,9 +831,7 @@ fn gravel_runs(poly: &[V2], hatch: &Hatch, scale: f64) -> Vec<Run> {
                 v2(cx + r * jsnum::cos(a), cy + r * jsnum::sin(a))
             }).collect();
             runs.extend(clip_polyline_to_polygon(&ring, poly));
-            i += 1.0;
         }
-        j += 1.0;
     }
     runs
 }
@@ -831,6 +860,9 @@ fn dots_runs(poly: &[V2], hatch: &Hatch, scale: f64) -> Vec<Run> {
             let v = vc - half + (r + 0.5) * step;
             let shift = if r.rem_euclid(2.0) == 0.0 { 0.0 } else { 0.5 };
             let mut i = ((b.u0 - b.ua) / pitch).floor() - 1.0;
+            if !(i.abs() < 1e15) {
+                return Vec::new(); // [258]: `i += 1.0` käme ab 2^53 nie voran
+            }
             while b.ua + (i + shift) * pitch <= b.u1 + pitch {
                 let cu = b.ua + (i + shift) * pitch;
                 let (a, e) = (b.at(cu - half_dot, v), b.at(cu + half_dot, v));
@@ -917,8 +949,19 @@ pub fn scatter_strokes(
         ix1 = (max_x / eff).floor();
         iy0 = (min_y / eff).floor();
         iy1 = (max_y / eff).floor();
+        // Lange, dünne Polygone: die eine Rasterzeile bleibt breit, die Näherung oben reicht nicht ([258]).
+        // Erst weit über dem Limit eingreifen, damit gewöhnliche Fälle bitgleich bleiben.
+        let mut rounds = 0;
+        while (ix1 - ix0 + 1.0) * (iy1 - iy0 + 1.0) > 2.0 * MAX_CELLS && rounds < 200 {
+            eff *= 2.0;
+            ix0 = (min_x / eff).floor();
+            ix1 = (max_x / eff).floor();
+            iy0 = (min_y / eff).floor();
+            iy1 = (max_y / eff).floor();
+            rounds += 1;
+        }
     }
-    if !(ix1 - ix0).is_finite() || !(iy1 - iy0).is_finite() {
+    if !(ix1 - ix0).is_finite() || !(iy1 - iy0).is_finite() || !((ix1 - ix0 + 1.0) * (iy1 - iy0 + 1.0) <= 2.0 * MAX_CELLS) {
         return Vec::new();
     }
     let range = match (len_min, len_max) {
@@ -926,10 +969,8 @@ pub fn scatter_strokes(
         _ => None,
     };
     let mut runs = Vec::new();
-    let mut iy = iy0;
-    while iy <= iy1 {
-        let mut ix = ix0;
-        while ix <= ix1 {
+    for iy in fseq(iy0, iy1) {
+        for ix in fseq(ix0, ix1) {
             let mut rnd = Mulberry32 { a: hash_cell(ix, iy, seed) };
             let cx = (ix + rnd.next()) * eff;
             let cy = (iy + rnd.next()) * eff;
@@ -946,9 +987,7 @@ pub fn scatter_strokes(
             for (sa, sb) in clip_segment_to_polygon(a, b, poly) {
                 runs.push(vec![sa, sb]);
             }
-            ix += 1.0;
         }
-        iy += 1.0;
     }
     runs
 }
@@ -1040,6 +1079,10 @@ pub fn zigzag_points(a: V2, b: V2, amplitude: f64, wavelength: f64) -> Option<Ve
     let ny = ux;
     let quarter = wavelength / 4.0;
     let steps = jsnum::max(1.0, jsnum::round(l / quarter));
+    // Obergrenze ([258]): sehr lange Strecke mit feiner Welle (oder Länge ∞) → Strecke gilt.
+    if !(steps <= MAX_LINE_POINTS) {
+        return None;
+    }
     const TRI: [f64; 4] = [0.0, 1.0, 0.0, -1.0];
     let mut pts = Vec::new();
     let mut i = 0.0f64;
@@ -1078,6 +1121,9 @@ pub fn motif_points_opt(a: V2, b: V2, motif: &Motif, scale: f64) -> Option<Vec<V
     let to_world = |ax: f64, off: f64| v2(a.x + ux * ax + nx * off, a.y + uy * ax + ny * off);
     let mut out = Vec::new();
     let reps = (l / cell).ceil() + 1.0;
+    if !(reps * motif.points.len() as f64 <= MAX_LINE_POINTS) {
+        return None; // [258]: Obergrenze wie bei der Zickzacklinie
+    }
     let mut last: Option<(f64, f64)> = None;
     let mut r = 0.0f64;
     while r < reps {
@@ -1114,6 +1160,48 @@ pub fn motif_points_opt(a: V2, b: V2, motif: &Motif, scale: f64) -> Option<Vec<V
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// [258] Riesige/unendliche Läufe mit feinem Strichmuster: durchgezogen zurück statt Speicher-Abbruch/Endlosschleife.
+    #[test]
+    fn regression_zickzack_motiv_riesige_strecke() {
+        for far in [1e300, f64::INFINITY] {
+            assert!(zigzag_points(v2(0.0, 0.0), v2(far, 0.0), 0.1, 0.1).is_none());
+            let m = Motif { points: vec![v2(0.0, 0.0), v2(0.5, 0.2), v2(1.0, 0.0)], length: 1.0 };
+            assert!(motif_points_opt(v2(0.0, 0.0), v2(far, 0.0), &m, 1e-3).is_none());
+        }
+        assert!(zigzag_points(v2(0.0, 0.0), v2(1.0, 0.0), 0.1, 0.1).is_some());
+    }
+
+    #[test]
+    fn regression_streuung_lange_duenne_flaeche() {
+        // 1e9 m lang, 1e-3 m hoch: ein Raster von Milliarden Zellen in einer Zeile.
+        let poly = vec![v2(0.0, 0.0), v2(1e9, 0.0), v2(1e9, 1e-3), v2(0.0, 1e-3)];
+        let _ = scatter_strokes(&poly, 0.05, 0.3, 1.0, 0.04, None, None);
+        let _ = scatter_strokes(&poly, 0.05, 0.3, 1.0, 0.04, Some(0.01), Some(0.02));
+    }
+
+    #[test]
+    fn regression_linienschar_riesiges_polygon() {
+        let poly = vec![v2(0.0, 0.0), v2(1e12, 0.0), v2(1e12, 1e12), v2(0.0, 1e12)];
+        assert!(hatch_line_family(&poly, 0.3, 0.01, 0.0, v2(0.0, 0.0)).is_empty());
+        let sq = vec![v2(0.0, 0.0), v2(1.0, 0.0), v2(1.0, 1.0), v2(0.0, 1.0)];
+        assert!(!hatch_line_family(&sq, 0.0, 0.1, 0.0, v2(0.0, 0.0)).is_empty());
+        // Ferne Koordinaten: k ≥ 2^53, `k += 1.0` käme nie voran.
+        let far = vec![v2(1e300, 1e300), v2(1e300 + 1e290, 1e300), v2(1e300, 1e300 + 1e290)];
+        let _ = hatch_line_family(&far, 0.3, 1.0, 0.0, v2(0.0, 0.0));
+    }
+
+    #[test]
+    fn regression_dash_runs_riesiger_lauf() {
+        for far in [1e300, f64::INFINITY] {
+            let runs = vec![vec![v2(0.0, 0.0), v2(far, 0.0)]];
+            let out = apply_dash_runs(runs.clone(), &[0.01, 0.01]);
+            assert_eq!(out.len(), 1);
+        }
+        // Normalfall unverändert: Zerlegung in mehrere Striche.
+        let out = apply_dash_runs(vec![vec![v2(0.0, 0.0), v2(1.0, 0.0)]], &[1.0, 1.0]);
+        assert!(out.len() > 1);
+    }
 
     fn square() -> Vec<V2> {
         vec![v2(0.0, 0.0), v2(1.0, 0.0), v2(1.0, 1.0), v2(0.0, 1.0)]

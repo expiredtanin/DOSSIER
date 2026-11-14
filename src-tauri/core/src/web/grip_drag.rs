@@ -198,10 +198,11 @@ pub fn grip_coincident(corners: &[f64], groups: &[f64]) -> Vec<f64> {
         if !(n >= 0.0 && n.fract() == 0.0) {
             return vec![];
         }
-        let end = i + 1 + 2 * n as usize;
-        if end > groups.len() {
+        // Als f64 prüfen: `n as usize` sättigt bei 1e300, `1 + 2 * n` liefe über ([258]).
+        if n > ((groups.len() - i - 1) / 2) as f64 {
             return vec![];
         }
+        let end = i + 1 + 2 * n as usize;
         gs.push(pts(&groups[i + 1..end]));
         i = end;
     }
@@ -211,6 +212,15 @@ pub fn grip_coincident(corners: &[f64], groups: &[f64]) -> Vec<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// [258] Gruppengrösse 1e300 / 1e19: leer statt Slice-Panic durch usize-Überlauf.
+    #[test]
+    fn regression_coincident_riesige_gruppe() {
+        for n in [1e300, 1e19, 9.3e18, 4e18, f64::INFINITY] {
+            assert!(grip_coincident(&[0.0, 0.0], &[n, 0.0, 0.0]).is_empty());
+            assert!(grip_coincident(&[0.0, 0.0], &[1.0, 0.0, 0.0, n, 0.0, 0.0]).is_empty());
+        }
+    }
 
     #[test]
     fn kaputte_puffer_leer() {
