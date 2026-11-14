@@ -31,6 +31,8 @@ test("native Fläche: Overlay-Ausschnitt folgt jedem Zoom-/Schwenk-Frame im selb
       return [x + ox, y + oy, w, h];
     };
     let cb = 1;
+    // `unlisten()` der Tauri-Ereignis-API ruft dies auf (im Dev-Modus durch React-StrictMode-Aufräumen sichtbar).
+    (window as unknown as { __TAURI_EVENT_PLUGIN_INTERNALS__: unknown }).__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };
     (window as unknown as { __TAURI_INTERNALS__: unknown }).__TAURI_INTERNALS__ = {
       transformCallback: () => cb++,
       unregisterCallback: () => {},
@@ -96,6 +98,7 @@ for (const accept of [true, false]) {
     await page.addInitScript((acceptTexts: boolean) => {
       window.__nativeSceneTexts = null;
       let cb = 1;
+      (window as unknown as { __TAURI_EVENT_PLUGIN_INTERNALS__: unknown }).__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };
       (window as unknown as { __TAURI_INTERNALS__: unknown }).__TAURI_INTERNALS__ = {
         transformCallback: () => cb++,
         unregisterCallback: () => {},
