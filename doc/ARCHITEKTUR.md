@@ -443,6 +443,26 @@ nach dem 3D-Cache: `layers` ist dort keine globale Änderung, Teil-Updates halte
 Offen: Bauzonen sind kein eigener Planinhalt (nur Baurecht-Einstellungen); „grau" im 3D als Geisterschicht (Klassen und Geschosse, `set_ghost_model`/`set_ghost_lines`, `src/viewport/ghostSync.ts`); Datei-Exporte
 (OBJ/glTF/IFC/STEP) bleiben vollständig.
 
+### 3.7 Objektbibliothek 2D ([253])
+
+Standard-Symbole (Sanitär, Küche im 55er-Raster, Tische mit Stühlen, Sofa, Betten, Schränke, Auto/Velo/Wendekreis) sind
+**keine `BlockDef`s**, sondern parametrische Instanzen. Der Grund: Masse, Stuhlzahl, Küchenmodule und der Detailgrad
+(grob/mittel/fein, derselbe Mechanismus wie bei Türen und Fenstern: `c.a.detail`, „mittel" ab 1:200 wie „grob") lassen
+sich mit starrer Geometrie nicht speichern. Aufbau in `src-tauri/core/src/furniture_lib.rs`:
+
+| Teil | Inhalt |
+|---|---|
+| **Definition** `ObjectDef` | Id (`lib:wc-wand`), Gruppe, Klasse (`Cat`: Möbel „22", Sanitär „23", Fahrzeuge & Freiflächen „24"), Einfügepunkt (`Wall` = Wandseite Mitte, `Center`), Parameterliste `ParamDef` (Schlüssel, Art `Length`/`Count`/`Flag`/`Fraction`/`Choice`, Vorgabe, Min, Max, Schritt). Nur Daten. |
+| **Erzeugung** `LibObject::geometry` | `(Params, Detail, seed) → Vec<Drawing2DGeom>`: nur allgemeine Primitive (Linie, Rechteck, Polylinie, Kreis, Bogen, Ellipse), nie objektspezifische Typen. Für eine spätere 3D-Erzeugung hat der Trait Platz für eine zweite Methode (`geometry3d`), heute nicht umgesetzt. |
+| **Register** `all()`, `find(id)` | die eingebauten Objekte (`Builtin`) sind die ersten Einträge; eine Benutzerdefinition oder ein Knoten-Graph [254] wäre ein weiterer `LibObject`-Implementierer, ohne Änderung an Modell, Plan oder Objekt-Info. |
+| **Instanz im Modell** | `Drawing2DGeom::Libobj { libId, at, rotation, params, seed }` — `params` ist eine offene Map (Name → Zahl/Bool/Text, `mirror` = Spiegeln), keine objektspezifischen Felder. Klasse, Auswahl, Griffe, Verschieben/Drehen/Spiegeln, Belag-Aussparen ([156]) laufen wie bei jeder 2D-Zeichnung. |
+| **Plan** | `plan/drawings.rs::emit_inner` (Fall `Libobj`): `furniture_lib::geometry_for(id, params, detail, seed)`, drehen/verschieben, dann wie ein Block rekursiv ausgeben (Klasse, Strichstärke, Overrides, DXF als lose Linien). Unbekannte Id ⇒ `placeholder` (Rahmen mit Diagonalen), nie ein Fehler. |
+| **Zufall** | Die Unordnung der Stühle (`mess`, 0–1) nutzt nur `seed` (ganzzahliges SplitMix, plattformgleich); der Seed wird beim Setzen aus der Element-Id gebildet, „Neu würfeln" setzt ihn neu. Nie Zufall zur Plan-Zeit ⇒ Goldens und Export stabil. Stühle werden immer so weit hinausgeschoben, dass sie den Tisch nicht schneiden. |
+| **Oberfläche** | Katalog als JSON (`furniture_lib_catalog_json`, Vorschau-Linien `furniture_lib_geometry_json`) → `src/model/furnitureLib.ts`; Dock-Panel „Objekte" (`panels/ObjectLibraryPanel.tsx`), Befehl `libobj` (`commands/cmds/libobj.ts`, R = drehen, M = spiegeln; Kern `cmd_draw.rs::libobj_ops` legt die Klasse im selben Undo-Schritt an, falls sie fehlt), Objekt-Info (`panels/objectInfo/LibObjectSection.tsx`) baut ihre Felder generisch aus der Parameterliste. Namen: i18n `lib.o.<id>`, `lib.g.<gruppe>`, `lib.p.<parameter>`. |
+
+Neues eingebautes Objekt: Eintrag in `furniture_lib.rs::build()` (Definition + Zeichenfunktion), Namen in `de.ts`/`en.ts`.
+Standards laden ergänzt die Klassen „Möbel", „Sanitär" und „Fahrzeuge & Freiflächen" (`standards.rs::merge_plan`).
+
 ---
 
 ## 4. Schnitt

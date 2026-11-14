@@ -1194,6 +1194,18 @@ export type Drawing2DGeom =
     scale?: number;
   }
   | {
+    shape: "libobj";
+    libId: string;
+    at: Vec2;
+    rotation: number;
+    /**
+     * Parameter (Name → Zahl/Bool/Text), z. B. `w`, `d`, `n`, `mirror`, `mess`; fehlend = Vorgabe des Objekts.
+     */
+    params?: Record<string, number | boolean | string>;
+    /** Seed für zufällige Anteile (Unordnung der Stühle): gleicher Seed = gleiche Geometrie. */
+    seed?: number;
+  }
+  | {
     shape: "image";
     /** Obere-linke Ecke der Bild-Box (Modell-Meter). */
     min: Vec2;

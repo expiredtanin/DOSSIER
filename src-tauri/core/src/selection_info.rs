@@ -1250,7 +1250,7 @@ pub fn geom_bbox(g: &Value) -> [f64; 4] {
                 pts.extend(chain.iter().map(|q| (q.0 + nx, q.1 + ny)));
             }
         }
-        Some("kote" | "text" | "block" | "detailref" | "pointmarker") => pts.push(p("at")),
+        Some("kote" | "text" | "block" | "libobj" | "detailref" | "pointmarker") => pts.push(p("at")),
         Some("grid") => {
             if let Some(spec) = serde_json::from_value::<crate::model::Drawing2DGeom>(g.clone()).ok().as_ref().and_then(crate::grid::Spec::of) {
                 for ax in spec.axes() {

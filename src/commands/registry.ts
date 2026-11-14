@@ -75,6 +75,7 @@ import { sectionLineCommand, viewLineCommand } from "./cmds/sectionline";
 import { georefCommand } from "./cmds/georef";
 import { blockCommand } from "./cmds/block";
 import { defblockCommand } from "./cmds/defblock";
+import { libobjCommand } from "./cmds/libobj";
 import { presentationCommand } from "./cmds/presentation";
 import { traceMoveCommand, traceRotateCommand } from "./cmds/tracemove";
 import { renderingCommand } from "./cmds/rendering";
@@ -164,6 +165,7 @@ export const COMMANDS: Record<string, Command> = {
   georef: georefCommand,
   block: blockCommand,
   defblock: defblockCommand,
+  libobj: libobjCommand,
   tracemove: traceMoveCommand,
   tracerotate: traceRotateCommand,
 };

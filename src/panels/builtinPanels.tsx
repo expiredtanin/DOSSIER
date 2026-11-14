@@ -24,6 +24,7 @@ import { SitePanel } from "./SitePanel";
 import { RoomBalancePanel } from "./RoomBalancePanel";
 import { ElementTreePanel, ElementsTabIcon } from "./ElementTreePanel";
 import { ViewSnapshotsPanel, ViewSnapshotsTabIcon } from "./ViewSnapshotsPanel";
+import { ObjectLibraryPanel, ObjectLibraryTabIcon } from "./ObjectLibraryPanel";
 import { LayoutsPanel, LayoutsTabIcon } from "./LayoutsPanel";
 import { BcfPanel } from "./BcfPanel";
 import { ClashPanel } from "./ClashPanel";
@@ -57,6 +58,7 @@ export const BUILTIN_PANEL_IDS = {
   clash: "clash",
   history: "history",
   objectSettings: "object-settings",
+  objectLibrary: "object-library",
 } as const;
 
 // Werkzeug-Palette (Symbol + Name je Werkzeug, ArchiCAD/Vectorworks-Stil).
@@ -66,6 +68,15 @@ registerPanel({
   icon: <ToolsTabIcon />,
   hasDisplayMode: false,
   render: () => <ToolsPanel />,
+});
+
+// Objekt-Bibliothek 2D ([253]): Palette der Standard-Symbole (Sanitär, Küche, Möbel …) zum Einsetzen.
+registerPanel({
+  id: BUILTIN_PANEL_IDS.objectLibrary,
+  title: "nav.objects",
+  icon: <ObjectLibraryTabIcon />,
+  hasDisplayMode: false,
+  render: () => <ObjectLibraryPanel />,
 });
 
 // Attribute-Palette (Stift/Füllung/Strichstärke der Auswahl, Vectorworks-Stil).

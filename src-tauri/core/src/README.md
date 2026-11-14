@@ -33,6 +33,7 @@ Neues Modul: `<modul>.rs` und `mod` in `lib.rs`, Bindungen in `web/<modul>.rs` u
 | `gpu_compile.rs` | GPU-Kompilierung von Plan-Puffern (nativer macOS-Weg) |
 | `style.rs` | Farben, Schraffur und Schnitt-Linienstil aus dem Modell |
 | `standards.rs` | Standard-Bibliothek: Baustoffe mit SIA-400-Schraffur und Kennwerten, Linientypen, Standard-Aufbauten |
+| `furniture_lib.rs` | Objektbibliothek 2D ([253]): Katalog der Standard-Symbole mit Parametern (Definition) und Zeichenfunktionen nach Detailgrad (Erzeugung), Register, Platzhalter für unbekannte Ids; s. `doc/ARCHITEKTUR.md` 3.7 |
 | `text_layout.rs`, `rich_text.rs` | Text-Layout (Zeilen, Umbruch) und Bearbeiten von Rich-Text |
 
 ## 3D

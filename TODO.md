@@ -55,7 +55,18 @@ Raumprogramm gegen Modell → Grundrisse/Schnitte/Ansichten 1:200 (Vorprojekt 1:
 Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
 
 #- ○ **[252]** Entscheide Maintainer 14.11.: (1) „Geschoss“ heisst im Englischen durchgehend **floor** (en.ts vereinheitlichen, „storey“ ersetzen; Fachbegriffe wie „storey height“ → „floor height“). (2) **Tab bleibt immer für die Befehlszeile** (kein Tab-Durchlauf durch Dock-Knöpfe); **Ctrl+Tab / Ctrl+Umschalt+Tab** springt durch die Reiter (Grundriss/3D/Schnitt …). · S
-- ○ **[253]** Standard-Objektbibliothek 2D (14.11., Wunsch Maintainer): Sanitär (WC, Lavabo, Dusche, Wanne, Urinal, WM/Tumbler), Küche (Schweizer Küchennorm 55er-Raster, T 60: Unterbau, Spüle, Kochfeld, GS, Kühlschrank, Hochschrank, Zeile/L/Insel), Tische, Stühle, Sofa, Betten 90–180×200, Schränke T 60/35, Auto+Parkfeld, Velo, Rollstuhl-Wendekreis Ø 150; als `BlockDef`s aus dem Kern erzeugt (abstrakter Strich, 1:100/1:200), Klassen „Möbel“/„Sanitär“, Palette zum Einsetzen. Vorgaben ohne Antwort des Maintainers: abstrakt, nur 55er-Raster, nur 2D (3D nach 1.0). · M
+- ◐ **[253]** Standard-Objektbibliothek 2D (14.11., Wunsch Maintainer). Stand 14.11.: parametrische Objekte statt starrer `BlockDef`s —
+  `Drawing2DGeom::Libobj { libId, at, rotation, params, seed }`; der Kern (`furniture_lib.rs`) erzeugt die Linien zur Plan-Zeit nach Detailgrad
+  (grob/mittel/fein wie bei Türen/Fenstern), Definition (Parameterliste, Einfügepunkt, Klasse) getrennt von der Erzeugung, Register für
+  spätere eigene Objekte [254] (`doc/ARCHITEKTUR.md` 3.7). 48 Objekte: Sanitär (WC wand/Kasten, Lavabo, Handwasch, Doppel, Dusche, Wanne,
+  Urinal, WM/Tumbler), Küche im 55er-Raster (Unterbau, Spüle, Kochfeld, GS, Kühlschrank, Hochschrank, Zeile mit n Modulen, Insel), Tische
+  (mit/ohne Stühle, Anzahl und „Unordnung“ per Seed, gleicher Seed = gleiche Stühle), Stuhl, Sofa, Sessel, Salontisch, Betten, Nachttisch, Schränke,
+  Garderobe, Regal, Auto+Parkfeld, Velo, Wendekreis Ø 150 (gestrichelt). Klassen Möbel „22“, Sanitär „23“, Fahrzeuge & Freiflächen „24“
+  (Standards laden ergänzt sie, Setzen legt sie im selben Undo-Schritt an); Möbel/Sanitär sparen den Belag aus ([156]). Palette: Dock-Panel
+  „Objekte“ (Tab neben den Werkzeugen), Befehl `libobj` (R drehen, M spiegeln, Vorschau am Cursor); Objekt-Info baut die Felder generisch aus
+  der Parameterliste („Neu würfeln“). Unbekannte Id = Platzhalter-Rahmen. Offen: auf dem Mac nicht geprüft; Ziehen aus der Palette (nur Klick);
+  3D nach 1.0 (Trait hat Platz für `geometry3d`); Symbole nur im CLI-SVG/Chromium angesehen, nicht in der Tauri-App; DXF gibt die erzeugten Linien lose aus
+  (kein BLOCK/INSERT). Vorgaben ohne Antwort des Maintainers: abstrakt, nur 55er-Raster, nur 2D. · M
 
 ## Phase 1 (13.–19.11.): Stabil und baubar
 - ◐ **[206]** Referenz-Ablauf als e2e-Spec (Browser) und als Checkliste für die Mac-Abnahme (`doc/RELEASE-1.0.md`): jeder Schritt

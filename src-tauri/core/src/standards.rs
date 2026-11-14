@@ -409,7 +409,7 @@ pub fn derived_visible(p: &crate::model::Project, code: &str, shown: impl Fn(&st
 }
 
 /// Gibt es im Kategorie-Baum schon den Code oder den Namen `name` (klein)?
-fn has_category(layers: &[Value], code: &str, name: &str) -> bool {
+pub(crate) fn has_category(layers: &[Value], code: &str, name: &str) -> bool {
     layers.iter().any(|l| l["code"].as_str() == Some(code) || name_key(l).as_deref() == Some(name) || l["children"].as_array().is_some_and(|c| has_category(c, code, name)))
 }
 
@@ -498,6 +498,12 @@ fn merge_plan(root: &Map<String, Value>) -> (Vec<Value>, HashMap<String, String>
     for (c, d) in DERIVED_CATEGORIES.iter().zip(derived_categories()) {
         if !has_category(&layers, c.0, &c.1.to_lowercase()) {
             all.push(d);
+        }
+    }
+    // [253] Klassen der Objektbibliothek: Möbel, Sanitär, Fahrzeuge & Freiflächen.
+    for (_, code, name, color, lw) in crate::furniture_lib::CATEGORIES {
+        if !has_category(&layers, code, &name.to_lowercase()) {
+            all.push(json!({"code": code, "name": name, "color": color, "lw": lw, "visible": true, "locked": false}));
         }
     }
     if all.len() != layers.len() {
@@ -867,7 +873,7 @@ mod tests {
         // Andere Kategorien bleiben, die neue kommt ans Ende.
         own.insert("layers".into(), json!([{"code": "20", "name": "Wände", "color": "#000", "lw": 0.35, "visible": true, "locked": false}]));
         let op = merge_ops(&own).into_iter().find(|o| o["key"] == "layers").unwrap();
-        assert_eq!(op["value"].as_array().unwrap().iter().map(|l| l["code"].as_str().unwrap()).collect::<Vec<_>>(), ["20", "65", "08", "81", "82", "91", "92", "83", "84"]);
+        assert_eq!(op["value"].as_array().unwrap().iter().map(|l| l["code"].as_str().unwrap()).collect::<Vec<_>>(), ["20", "65", "08", "81", "82", "91", "92", "83", "84", "22", "23", "24"]);
     }
 
     /// [180] Klassen der abgeleiteten Darstellung: „Standards laden" legt sie an, einmal; vorhandene (Code oder Name) bleiben.
@@ -883,7 +889,7 @@ mod tests {
         own.insert("layers".into(), json!([{"code": "77", "name": "schatten", "color": "#000", "lw": 0.13, "visible": true, "locked": false}]));
         let op = merge_ops(&own).into_iter().find(|o| o["key"] == "layers").unwrap();
         let codes: Vec<&str> = op["value"].as_array().unwrap().iter().map(|l| l["code"].as_str().unwrap()).collect();
-        assert_eq!(codes, ["77", "65", "81", "82", "91", "92", "83", "84"]);
+        assert_eq!(codes, ["77", "65", "81", "82", "91", "92", "83", "84", "22", "23", "24"]);
         // Sichtbar, solange die Klasse fehlt; sonst nach der Klassen-Sichtbarkeit.
         assert!(derived_visible(&p, SHADOW_CATEGORY, |c| c == SHADOW_CATEGORY));
         assert!(!derived_visible(&p, SHADOW_CATEGORY, |_| false));

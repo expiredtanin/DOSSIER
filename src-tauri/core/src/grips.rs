@@ -969,7 +969,7 @@ fn drawing_grip(d: &Value, index: f64, x: f64, y: f64, scale: f64, free: bool) -
             }
             set("at", p)
         }
-        "kote" | "detailref" | "scalebar" | "pointmarker" | "block" => set("at", p),
+        "kote" | "detailref" | "scalebar" | "pointmarker" | "block" | "libobj" => set("at", p),
         "grid" => {
             // Griff 0 = Ursprung, danach je Achse (a, dann b) das Achsende: zieht die Achse auf die neue Lage.
             if index == 0.0 {
@@ -1928,7 +1928,7 @@ pub fn drawing_vertices(g: &Value, scale: f64) -> Option<Vec<(f64, f64)>> {
             }
             out
         }
-        "kote" | "detailref" | "scalebar" | "pointmarker" | "block" => vec![p("at")],
+        "kote" | "detailref" | "scalebar" | "pointmarker" | "block" | "libobj" => vec![p("at")],
         "grid" => {
             let geom: crate::model::Drawing2DGeom = serde_json::from_value(g.clone()).ok()?;
             let spec = crate::grid::Spec::of(&geom)?;
