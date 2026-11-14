@@ -257,7 +257,7 @@ fn full_house_in(mut b: B, with_geo: bool) -> B {
     b.str("R1");
     b.str("101");
     b.str("Wohnen");
-    b.n(&[0.0, 2.5]);
+    b.n(&[0.0, 2.5, 0.0, 2.5]);
     b.pts(&SQUARE);
     b.n(&[1.9, 2.0]);
     b.str("HNF");
@@ -1354,4 +1354,30 @@ fn netz_wird_verschweisst() {
     assert_eq!(m.positions.len() / 3, 4, "{:?}", m.positions);
     assert_eq!(m.indices, vec![0, 1, 2, 1, 3, 2]);
     assert!(m.closed);
+}
+
+/// [259] Ebenen: Darstellungen eines Bauteils (hier Raum und Stütze) liegen auf genau einer IfcPresentationLayerAssignment.
+#[test]
+fn ebenen_als_presentation_layer() {
+    let mut b = full_house(true);
+    b.n(&[REC_LAYERS, 3.0]);
+    for (key, name) in [("space/R1", "60_Räume"), ("column/C1", "50_Stützen"), ("space/unbekannt", "99_x")] {
+        b.str(key);
+        b.str(name);
+    }
+    let ifc = build(&b).unwrap();
+    check_structure(&ifc);
+    assert_eq!(count(&ifc, "IFCPRESENTATIONLAYERASSIGNMENT"), 2, "unbekannte Schlüssel erzeugen keine Ebene");
+    let layer = ifc.lines().find(|l| l.contains("IFCPRESENTATIONLAYERASSIGNMENT(\x27") && l.contains("St\\X2\\00FC\\X0\\tzen")).expect("Stützen-Ebene");
+    assert!(layer.ends_with(",$);"), "{layer}");
+    let mut seen = std::collections::HashSet::new();
+    for l in ifc.lines().filter(|l| l.contains("IFCPRESENTATIONLAYERASSIGNMENT")) {
+        let items = &l[l.find(",$,(").unwrap() + 4..];
+        for id in items[..items.find(')').unwrap()].split(',') {
+            assert!(seen.insert(id.to_string()), "Darstellung {id} doppelt");
+            let target = ifc.lines().find(|x| x.starts_with(&format!("{id}="))).unwrap();
+            assert!(target.contains("IFCSHAPEREPRESENTATION"), "{target}");
+        }
+    }
+    assert_eq!(seen.len(), 2);
 }
