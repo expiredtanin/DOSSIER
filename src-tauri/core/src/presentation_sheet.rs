@@ -6,7 +6,7 @@
 //! senkrecht, soweit Platz ist. Das Schriftfeld des Masters (unten rechts, wie `TitleBlockSvg`) bleibt frei.
 //! Gewählt wird der grösste Massstab aus [`SCALES`], bei dem alles auf das Blatt passt.
 
-use crate::model::{DetailLevel, Project, ViewSnapshot};
+use crate::model::{DetailLevel, Project, ViewSnapshot, ViewTemplate};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -171,6 +171,9 @@ pub struct Request {
     /// [224] Eigener Rand/obere Kante (Plakat-Vorlage, unter der Kopfzeile).
     pub margin_mm: Option<f64>,
     pub top_mm: Option<f64>,
+    /// Ansichtsvorlage, mit der die Viewports verknüpft werden: die Ausmasse müssen mit ihr gerechnet werden (sie setzt z. B.
+    /// Schatten), sonst sitzt der Inhalt neben dem Rahmen und wird beschnitten. Fehlt sie im Projekt, wird sie eingesetzt.
+    pub template: Option<ViewTemplate>,
 }
 
 /// Abfrage `presentationSheet`: Massstab und Rahmen für die Ebenen; Ebenen ohne Inhalt stehen unter
@@ -185,7 +188,19 @@ pub fn query(p: &Project, text: &str) -> Result<Value, String> {
         layer_visibility: req.layer_visibility.clone(),
         detail: req.detail,
         scale_denominator: 100.0,
+        template_id: req.template.as_ref().map(|t| t.id.clone()),
+        template_linked: req.template.as_ref().map(|_| true),
         ..Default::default()
+    };
+    let with_tpl;
+    let p = match &req.template {
+        Some(t) if !p.view_templates.iter().flatten().any(|v| v.id == t.id) => {
+            let mut q = p.clone();
+            q.view_templates.get_or_insert_with(Vec::new).push(t.clone());
+            with_tpl = q;
+            &with_tpl
+        }
+        _ => p,
     };
     let bounds_at = |level: &str, s: f64| crate::sheet_viewports::snapshot_bounds(p, &snap(level), s, Some(req.shadows));
     // Ebenen ohne Inhalt fallen weg (geprüft beim mittleren Massstab).

@@ -25,7 +25,8 @@ import { documentFor } from "../core/document";
 import { addedItems, addItems, patchItem } from "../core/opsBuild";
 import { standardsMergeOps } from "../model/standards";
 import { createLayout, createMasterLayout, createSheetLevel, sheetMmToModel, sheetSizeMm } from "../model/layoutModel";
-import { createPosterMaster, findPosterMaster, posterMetrics, posterTemplate } from "../model/posterTemplates";
+import { SHADOW_CATEGORY } from "../model/derivedCategories";
+import { createPosterMaster, findPosterMaster, posterMetrics, posterTemplate, scaleLabelMetrics } from "../model/posterTemplates";
 
 /** Id der Standard-Ansichtsvorlage „Präsentation" (`standards.rs`). */
 export const PRESENTATION_TEMPLATE_ID = "std-vt-praesentation";
@@ -208,6 +209,7 @@ export function planPresentationSheet(project: Project, o: PresentationOptions):
     sheetH: size.h,
     titleBlock: !poster,
     shadows: template.shadows ?? false,
+    template,
     ...(o.scale ? { scale: o.scale } : {}),
     scales: o.scales ?? {},
     ...(poster ? { marginMm: poster.marginMm, topMm: poster.contentTopMm } : {}),
@@ -309,6 +311,7 @@ export function presentationSheetOps(
   const layout: Layout = { ...createLayout(layoutId, labels.sheetName, sheet.paper, sheet.orientation), masterId: master.id };
   const sheetLevel = createSheetLevel(`sheet-${layoutId}`, layout);
   const vis = presentationVisibility(project, template);
+  const labelM = scaleLabelMetrics(sheetSizeMm(sheet.paper, sheet.orientation));
   const cat = annotationCategory(project);
   const byId = new Map(project.drawingLevels.map((l) => [l.id, l]));
   const snaps: ViewSnapshot[] = [];
@@ -329,15 +332,21 @@ export function presentationSheetOps(
       scaleDenominator: it.scale,
       detail: template.detail ?? "mittel",
       activeLevelId: level.id,
-      layerVisibility: vis,
+      // Grundrisse ohne die Schattenstudie des Projekts (Klasse „Schatten"): ihr Wurf läge über den Rahmen hinaus und
+      // würde beschnitten; die Schatten der Ansichten (Vorlage) bleiben.
+      layerVisibility: it.group === 0 ? { ...vis, [SHADOW_CATEGORY]: false } : vis,
       drawingVisibility: {},
       ...(template.enabledOverrideRuleIds ? { enabledOverrideRuleIds: [...template.enabledOverrideRuleIds] } : {}),
       templateId: template.id,
       templateLinked: true,
     } as ViewSnapshot);
     vps.push({ id: `vp-pres-${stamp}-${i}`, snapshotId: snapId, xMm: it.xMm, yMm: it.yMm, widthMm: it.widthMm, heightMm: it.heightMm, scaleDenominator: it.scale });
+    // Plakat: die Massstabsangabe des Masters steht links unter dem Viewport (Grundlinie `scaleLabelMetrics`);
+    // der Titel folgt rechts daneben auf derselben Linie, sonst überdecken sich beide.
     drawings.push(
-      sheetText(`d-pres-${stamp}-t${i}`, sheetLevel.id, cat, it.xMm + FRAME_PAD_MM, it.yMm + it.heightMm + 6, tpl ? level.name : `${level.name}   1:${it.scale}`, 4, true),
+      tpl
+        ? sheetText(`d-pres-${stamp}-t${i}`, sheetLevel.id, cat, it.xMm + labelM.sizeMm * 3.6, it.yMm + it.heightMm + labelM.dyMm, level.name, 4, true)
+        : sheetText(`d-pres-${stamp}-t${i}`, sheetLevel.id, cat, it.xMm + FRAME_PAD_MM, it.yMm + it.heightMm + 6, `${level.name}   1:${it.scale}`, 4, true),
     );
   });
   // Nordpfeil rechts neben dem Titel des ersten Grundrisses.

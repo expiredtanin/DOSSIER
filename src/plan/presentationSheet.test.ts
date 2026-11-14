@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { buildComplexSampleProject } from "../model/sampleProjectComplex";
+import { buildWettbewerbSampleProject } from "../model/sampleProjectWettbewerb";
+import { generatePlan } from "./generatePlan";
 import { getState } from "../state/appStore";
 import { sheetSizeMm } from "../model/layoutModel";
 import { posterMetrics } from "../model/posterTemplates";
@@ -129,5 +131,24 @@ describe("[66] Präsentationsplan", () => {
     expect([master.template, lay.paper, lay.orientation]).toEqual(["poster-a1-landscape", "a1", "landscape"]);
     const top = posterMetrics(841, 594).contentTopMm;
     for (const v of lay.viewports) expect(v.yMm).toBeGreaterThanOrEqual(top - 1e-6);
+  }, 60_000);
+
+  // Abgabe-Review [208]: Der Rahmen eines Grundrisses muss den ganzen Inhalt umfassen, auch die Schattenstudie des Projekts
+  // (Wettbewerb-Beispiel: Studie eingeschaltet) — sonst wird der Grundriss im Viewport links/oben beschnitten.
+  it("[208] Rahmen der Grundrisse umfasst Inhalt samt Schattenstudie", () => {
+    st().loadProject(buildWettbewerbSampleProject());
+    const p = st().project;
+    expect(p.sunStudy?.show).toBe(true);
+    const o = { ...presentationDefaults(p), scale: 200, poster: "poster-a1-landscape" };
+    const res = presentationSheetOps(p, o, LABELS, "t6")!;
+    st().applyChange(res.ops);
+    const q = st().project;
+    const tpl = q.viewTemplates!.find((t) => t.id === PRESENTATION_TEMPLATE_ID)!;
+    const show = new Set(Object.entries(q.viewSnapshots!.find((v) => v.id === "vs-pres-t6-0")!.layerVisibility).filter(([, v]) => v).map(([k]) => k));
+    for (const it of res.plan.items.filter((i) => i.group === 0)) {
+      const b = generatePlan(q, it.levelId, show, undefined, tpl.detail, false, true, true, 200, false, false).bounds;
+      expect(it.widthMm).toBeGreaterThanOrEqual(((b.maxX - b.minX) * 1000) / 200 - 1e-6);
+      expect(it.heightMm).toBeGreaterThanOrEqual(((b.maxY - b.minY) * 1000) / 200 - 1e-6);
+    }
   }, 60_000);
 });

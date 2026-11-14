@@ -96,6 +96,12 @@ export function posterHeaderItems(project: Project, layout: Layout, master: Mast
   return out === "" ? [] : (JSON.parse(out) as HeaderItem[]);
 }
 
+/** Schrifthöhe und Abstand der Grundlinie unter dem Viewport-Rahmen (Papier-mm) der Massstabsangabe. */
+export function scaleLabelMetrics(sheet: { w: number; h: number }): { sizeMm: number; dyMm: number } {
+  const sizeMm = Math.max(3, Math.min(sheet.w, sheet.h) / 140);
+  return { sizeMm, dyMm: sizeMm * 1.3 };
+}
+
 /** Massstabsangabe unter einem Viewport: Text, Lage (Papier-mm, Grundlinie) und Schrifthöhe. */
 export function viewportScaleLabel(
   project: Project,
@@ -106,6 +112,6 @@ export function viewportScaleLabel(
   const snap = findSnapshot(project, vp.snapshotId);
   if (!snap) return null;
   const n = scaleOverride ?? resolveViewportScale(vp, snap);
-  const sizeMm = Math.max(3, Math.min(sheet.w, sheet.h) / 140);
-  return { text: `1:${n}`, x: vp.xMm, y: vp.yMm + vp.heightMm + sizeMm * 1.3, sizeMm };
+  const { sizeMm, dyMm } = scaleLabelMetrics(sheet);
+  return { text: `1:${n}`, x: vp.xMm, y: vp.yMm + vp.heightMm + dyMm, sizeMm };
 }
