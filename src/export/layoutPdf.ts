@@ -284,8 +284,8 @@ async function renderPage(
         doc.setLineWidth(0.35);
         doc.rect(5, 5, widthMm - 10, heightMm - 10);
       }
-      const tb = resolveTitleBlock(project, layout, master);
-      drawTitleBlock(doc, widthMm, heightMm, tb, layout.paper, layout.orientation, ctx.includeRevision);
+      // [208] Plakat-Vorlage: Kopfzeile statt Schriftfeld.
+      if (!master.posterHeader) drawTitleBlock(doc, widthMm, heightMm, resolveTitleBlock(project, layout, master), layout.paper, layout.orientation, ctx.includeRevision);
       if (master.posterHeader) drawPosterHeaderPdf(doc, project, layout, master, { w: widthMm, h: heightMm });
     });
   }

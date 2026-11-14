@@ -6,7 +6,7 @@
 import { memo, useCallback, useEffect, useState } from "react";
 import { t } from "../i18n";
 import { enterConfirmsDialog, useModalFocus } from "./modalFocus";
-import { PRESENTATION_SCALES, levelHasContent, presentationDefaults, type PresentationOptions } from "../core";
+import { POSTER_EXTRAS_DEFAULT, PRESENTATION_SCALES, levelHasContent, presentationDefaults, type PosterTableKind, type PresentationOptions } from "../core";
 import type { LayoutOrientation, LayoutPaperFormat } from "../model/types";
 import { PAPER_FORMAT_GROUPS } from "../model/layoutModel";
 import { POSTER_TEMPLATES, posterTemplateLabel } from "../model/posterTemplates";
@@ -60,6 +60,8 @@ export const PresentationDialogHost = memo(function PresentationDialogHost({
     set({ floors: floors.map((f) => f.id).filter((f) => (f === id ? on : opts.floors.includes(f))) });
   const toggleElevation = (id: string, on: boolean) =>
     set({ elevationIds: elevations.map((e) => e.id).filter((e) => (e === id ? on : opts.elevationIds.includes(e))) });
+  const toggleTable = (kind: PosterTableKind, on: boolean): PosterTableKind[] =>
+    (["areas", "siteProof"] as const).filter((k) => (k === kind ? on : (opts.extras?.tables ?? []).includes(k)));
   const empty = opts.floors.length === 0 && opts.elevationIds.length === 0 && !opts.sectionId;
   // [224] Massstab je Viewport: "" = gemeinsamer Massstab.
   const scaleOf = (id: string) => String(opts.scales?.[id] ?? "");
@@ -154,7 +156,7 @@ export const PresentationDialogHost = memo(function PresentationDialogHost({
                 data-testid="presentation-target"
                 aria-label={t("presentation.sheet")}
                 value={opts.poster ?? ""}
-                onChange={(e) => set({ poster: e.target.value || undefined })}
+                onChange={(e) => set({ poster: e.target.value || undefined, extras: e.target.value ? (opts.extras ?? POSTER_EXTRAS_DEFAULT) : undefined })}
               >
                 <option value="">{t("presentation.target.sheet")}</option>
                 {POSTER_TEMPLATES.map((tpl) => (
@@ -206,6 +208,29 @@ export const PresentationDialogHost = memo(function PresentationDialogHost({
               </div>
             </div>
           </section>
+          {poster && opts.extras && (
+            <section className="imp-section" data-testid="presentation-extras">
+              <div className="imp-section-title">{t("presentation.extras")}</div>
+              {(
+                [
+                  ["situation", t("presentation.extras.situation"), opts.extras.situation, (on: boolean) => ({ situation: on })],
+                  ["areas", t("presentation.extras.areas"), opts.extras.tables.includes("areas"), (on: boolean) => ({ tables: toggleTable("areas", on) })],
+                  ["siteProof", t("presentation.extras.siteProof"), opts.extras.tables.includes("siteProof"), (on: boolean) => ({ tables: toggleTable("siteProof", on) })],
+                  ["image", t("presentation.extras.image"), opts.extras.image, (on: boolean) => ({ image: on })],
+                ] as const
+              ).map(([key, label, on, patch]) => (
+                <label key={key} className="imp-check" style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                  <input
+                    type="checkbox"
+                    data-testid={`presentation-extra-${key}`}
+                    checked={on}
+                    onChange={(e) => set({ extras: { ...opts.extras!, ...patch(e.target.checked) } })}
+                  />
+                  {label}
+                </label>
+              ))}
+            </section>
+          )}
           <section className="imp-section">
             <label className="imp-check" style={{ display: "flex", gap: 6, alignItems: "center" }}>
               <input

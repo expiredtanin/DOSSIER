@@ -94,8 +94,8 @@ export { AI_TOOLS, AI_BRIDGE_DEFAULT_PORT, aiText, aiToolDef, hmacHex, randomHex
 export type { AiToolDef, AiToolResult, AiBridgeMsg } from "./aiToolDefs";
 export { callAiTool } from "./aiTools";
 export type { AiHost } from "./aiTools";
-export { PRESENTATION_SCALES, PRESENTATION_DEFAULT_SCALE, levelHasContent, PRESENTATION_TEMPLATE_ID, presentationDefaults, presentationSheetOps, planPresentationSheet } from "../plan/presentationSheet";
-export type { PresentationOptions, PresentationPlan, PresentationLabels } from "../plan/presentationSheet";
+export { PRESENTATION_SCALES, POSTER_EXTRAS_DEFAULT, POSTER_SITUATION_SCALE, PRESENTATION_DEFAULT_SCALE, levelHasContent, PRESENTATION_TEMPLATE_ID, presentationDefaults, presentationSheetOps, planPresentationSheet } from "../plan/presentationSheet";
+export type { PresentationOptions, PosterExtras, PosterTableKind, PresentationPlan, PresentationLabels } from "../plan/presentationSheet";
 export { lineEndsOf, lineEndsCode, lineEndsFromCode, lineEndsSvgAttrs, planLineEndsProps, MITER_LIMIT as LINE_MITER_LIMIT } from "../model/lineEnds";
 export type { LineEnds } from "../model/lineEnds";
 export type { LineCap, LineJoin } from "../model/types";

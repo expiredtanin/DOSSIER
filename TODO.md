@@ -308,6 +308,15 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   e) Anonymitäts-Dialog zu Recht bei „Hofwiesenstrasse“ in der Kontext-Zeichnung des Beispiels (Adresse) — Beispiel enthält die Adresse im Klartext.
   f) Schwarzplan/Nachbarn grau nicht beurteilbar (Situation nicht auf dem Plakat). Dateigrösse 98 KB (ohne Bild), Rand/Satzspiegel (Raster 6 Spalten) in Ordnung,
   Kennwort-Feld und „Plan 1/1“ lesbar, kein Projektname/Büro im PDF (Gegenprobe e2e `[208]`).
+  **Plakat als Grundgerüst (14.11., zu a/b/f)**: Präsentationsplan mit Plakat-Vorlage setzt jetzt auf dem Spaltenraster (Kern `presentation_poster.rs`, Skyline-Packung,
+  Rahmen = ganze Spalten): Situation 1:500 (Vorlage „Situation WBW“, Erdgeschoss-Ebene, Nordpfeil/Massstabsbalken aus der Modelldarstellung) zuerst oben links, Grundrisse/
+  Ansichten/Schnitt im festen Massstab (Vorgabe 1:200), Blatt-Tabellen Kennzahlen SIA 416 (HNF/NNF/NF/VF/FF/GF/GV) und Baurecht-Nachweis ([255]) mit Titel, dazu ein Rahmen fürs
+  3D-Bild (letztes Layout-Bild des Projekts, sonst beschrifteter Platzhalter „3D-Bild hier einsetzen“, nichts erfunden); Dialog-Abschnitt „Plakat-Inhalt“ (je abwählbar).
+  Zu viel Inhalt ⇒ zweites Plakat („Plan 2/2“), nie kleinerer Massstab. Wettbewerb-Beispiel A1 quer: ein Blatt, > 70 % der Satzspiegelfläche belegt (Test). Schriftfeld des Masters
+  entfällt bei Plakat-Vorlagen (Kopfzeile mit Kennwort + „Plan x/n“ genügt; Bildschirm und PDF). Tests: Rust `presentation_poster`, vitest `presentationSheet.test.ts`.
+  Offen: Rahmen sind so breit wie der Inhalt samt Masskette/Kontext (Musterhaus komplex: 2 Spalten je Grundriss, viel Weissraum im Rahmen, 2 Blätter); Anordnung mischt
+  Gruppen (Pläne neben Situation, Ansichten darunter) statt strenger Zeilen; Tabellen-Spaltenköpfe „Reserve/Erfüllt“ eng; Baurecht-Zeilen mit „—“ bei fehlenden Vorgaben;
+  Lage der Tabellen/des Bildes nicht von Hand fixiert (Neuberechnung nur durch Neuerstellen); nicht in der Tauri-App geprüft.
 - [61] Raumprogramm gegen Modell und Flächennachweis SIA 416 als Tabelle/Layout-Element ([70]); Kennzahlen (GF, GV, HNF/GF, Fassadenanteil).
 - 3D-Bilder für die Abgabe: hochaufgelöster PNG-Export (Perspektive, Axonometrie, Schatten), Sonnenstand; [205] Pausfolie.
 - [199]/[204] Plan- und App-Review-Reste im Darstellungsbereich 1:500/1:200 schliessen.

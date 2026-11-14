@@ -6,6 +6,8 @@
 
 import type {
   DetailLevel,
+  LayoutImage,
+  LayoutTable,
   Drawing2D,
   Drawing2DGeom,
   DrawingLevel,
@@ -23,7 +25,8 @@ import type {
 import type { CoreOp } from "../core/ops";
 import { documentFor } from "../core/document";
 import { addedItems, addItems, patchItem } from "../core/opsBuild";
-import { standardsMergeOps } from "../model/standards";
+import { standardModelViews, standardsMergeOps } from "../model/standards";
+import { imageAspect } from "../model/layoutImages";
 import { createLayout, createMasterLayout, createSheetLevel, sheetMmToModel, sheetSizeMm } from "../model/layoutModel";
 import { SHADOW_CATEGORY } from "../model/derivedCategories";
 import { createPosterMaster, findPosterMaster, posterMetrics, posterTemplate, scaleLabelMetrics } from "../model/posterTemplates";
@@ -50,7 +53,30 @@ export interface PresentationOptions {
   scales?: Record<string, number>;
   /** [224] Plakat-Vorlage ([208], Schlüssel in `POSTER_TEMPLATES`) als Ziel; fehlt sie, gilt `paper`/`orientation`. */
   poster?: string;
+  /** [208] Zusätzliche Plakat-Inhalte (nur mit `poster`): Situation 1:500, Tabellen, 3D-Bild-Platzhalter. */
+  extras?: PosterExtras;
 }
+
+/** Kennzahlen (SIA 416) und Baurecht-Nachweis als Blatt-Tabellen. */
+export type PosterTableKind = "areas" | "siteProof";
+
+export interface PosterExtras {
+  /** Situationsplan 1:500 (Vorlage „Situation WBW“, Nordpfeil und Massstabsbalken aus der Modelldarstellung). */
+  situation: boolean;
+  tables: PosterTableKind[];
+  /** Rahmen fürs 3D-/Axonometrie-Bild: das zuletzt eingesetzte Bild des Projekts, sonst ein beschrifteter Platzhalter. */
+  image: boolean;
+}
+
+/** Vorgabe beim Wählen einer Plakat-Vorlage: alles, was zu einer Wettbewerbs-Abgabe gehört. */
+export const POSTER_EXTRAS_DEFAULT: PosterExtras = { situation: true, tables: ["areas", "siteProof"], image: true };
+/** Massstab der Situation auf dem Plakat. */
+export const POSTER_SITUATION_SCALE = 500;
+/** Id der Standard-Ansichtsvorlage „Situation WBW 1:500“ und ihrer Modelldarstellung (`standards.rs`). */
+export const SITUATION_TEMPLATE_ID = "std-vt-situation-wbw";
+const SITUATION_MODEL_VIEW_ID = "std-mv-situation-wbw";
+/** Spalten der Kennzahlen-Tabelle: Fläche je Geschoss mit HNF/NNF/NF/VF/FF, GF und GV. */
+const AREAS_COLUMNS = ["name", "hnf", "nnf", "nf", "vf", "ff", "gf", "gv"];
 
 /** Massstäbe zur Wahl im Dialog (wie `SCALES` im Kern). */
 export const PRESENTATION_SCALES = [50, 100, 200, 500, 1000] as const;
@@ -59,6 +85,10 @@ export const PRESENTATION_DEFAULT_SCALE = 200;
 
 export interface PresentationItem {
   levelId: string;
+  /** [208] "situation": Situationsplan der Ebene (Vorlage „Situation WBW“); sonst der Ausschnitt der Ebene. */
+  kind?: "situation" | "view";
+  /** [208] Blatt (0-basiert) bei mehreren Plakaten. */
+  page?: number;
   /** Massstab dieses Viewports (gemeinsam oder je Ebene gewählt). */
   scale: number;
   group: number;
@@ -68,11 +98,32 @@ export interface PresentationItem {
   heightMm: number;
 }
 
+/** [208] Tabelle oder Bild-Rahmen auf dem Plakat (Papier-mm, `heightMm` mit Titelband oben bei Tabellen). */
+export interface PosterBox {
+  page: number;
+  xMm: number;
+  yMm: number;
+  widthMm: number;
+  heightMm: number;
+}
+
+export interface PosterTableBox extends PosterBox {
+  id: PosterTableKind;
+  tableHeightMm: number;
+  bandMm: number;
+}
+
 export interface PresentationPlan {
   scale: number;
   fits: boolean;
   items: PresentationItem[];
   skipped: string[];
+  /** [208] Anzahl Plakate (Blätter); fehlt = 1. */
+  pages?: number;
+  tables?: PosterTableBox[];
+  image?: PosterBox | null;
+  /** [208] Titelband unter jedem Rahmen (mm). */
+  bandMm?: number;
 }
 
 /** Beschriftungen (vom Aufrufer über `t()`). */
@@ -84,6 +135,12 @@ export interface PresentationLabels {
   /** [137] Gruppen-Namen von Nordpfeil und Massstabsbalken (Objekt-Info). */
   northGroup?: string;
   scaleBarGroup?: string;
+  /** [208] Titel des Situationsplans, der Tabellen und Platzhalter des 3D-Bilds auf dem Plakat. */
+  situation?: string;
+  tableAreas?: string;
+  tableSiteProof?: string;
+  imagePlaceholder?: string;
+  imageHint?: string;
 }
 
 const isFloor = (l: DrawingLevel) => l.kind === "floor" && !l.layoutId;
@@ -191,6 +248,34 @@ function masterFor(project: Project, o: PresentationOptions): MasterLayout | und
   );
 }
 
+/** Erdgeschoss-Ebene für die Situation: das Geschoss mit Inhalt, dessen Oberkante der Höhe ±0.00 am nächsten liegt. */
+function groundFloorId(project: Project, o: PresentationOptions): string | undefined {
+  const floors = project.drawingLevels.filter((l) => isFloor(l) && (o.floors.includes(l.id) || levelHasContent(project, l.id)));
+  const pool = floors.length > 0 ? floors : project.drawingLevels.filter(isFloor);
+  return (pool.find((l) => l.zeroLevel) ?? [...pool].sort((a, b) => Math.abs(a.baseElevation ?? 0) - Math.abs(b.baseElevation ?? 0))[0])?.id;
+}
+
+/** Sichtbarkeit des Situationsplans: alle Klassen ausser denen, die die Vorlage „Situation WBW“ ausblendet (Umgebung bleibt), ohne Schattenstudie. */
+function situationVisibility(project: Project, t: ViewTemplate): Record<string, boolean> {
+  const vis: Record<string, boolean> = {};
+  for (const c of categoryCodes(project.layers)) vis[c] = true;
+  return { ...vis, ...(t.layerVisibility ?? {}), [SHADOW_CATEGORY]: false };
+}
+
+/** Die Vorlage „Situation WBW“ des Projekts bzw. aus den Standards (dann fehlt sie im Projekt und muss mit angelegt werden). */
+function situationTemplate(project: Project): { template: ViewTemplate; isNew: boolean } | null {
+  const own = (project.viewTemplates ?? []).find((t) => t.id === SITUATION_TEMPLATE_ID);
+  if (own) return { template: own, isNew: false };
+  const std = (addedItems(standardsMergeOps(project), "viewTemplates") as ViewTemplate[]).find((t) => t.id === SITUATION_TEMPLATE_ID);
+  return std ? { template: std, isNew: true } : null;
+}
+
+/** Schrift und Titelband der Plakat-Blatt-Elemente (Papier-mm), nach Blattgrösse. */
+function posterTextMetrics(size: { w: number; h: number }): { sizeMm: number; dyMm: number; bandMm: number; tablePt: number } {
+  const m = scaleLabelMetrics(size);
+  return { sizeMm: m.sizeMm, dyMm: m.dyMm, bandMm: m.dyMm + m.sizeMm * 0.8, tablePt: Math.round((Math.min(size.w, size.h) / 594) * 13) };
+}
+
 /** Massstab und Rahmen aus dem Kern (ohne das Projekt zu ändern). */
 export function planPresentationSheet(project: Project, o: PresentationOptions): PresentationPlan {
   const { template } = presentationTemplate(project);
@@ -200,6 +285,24 @@ export function planPresentationSheet(project: Project, o: PresentationOptions):
   const poster = o.poster && posterTemplate(o.poster) ? posterMetrics(size.w, size.h) : null;
   const levels = chosenLevels(project, o);
   const vis = presentationVisibility(project, template);
+  let posterReq: Record<string, unknown> | undefined;
+  if (poster) {
+    const ex = o.extras;
+    const sit = ex?.situation ? situationTemplate(project) : null;
+    const sitLevel = sit && groundFloorId(project, o);
+    const m = posterTextMetrics(size);
+    const sitTpl = sit?.template ?? (project.viewTemplates ?? []).find((t) => t.id === SITUATION_TEMPLATE_ID);
+    posterReq = {
+      columns: poster.columns,
+      gutterMm: poster.gutterMm,
+      bandMm: m.bandMm,
+      ...(sit && sitLevel && sitTpl
+        ? { situation: { levelId: sitLevel, scale: POSTER_SITUATION_SCALE, layerVisibility: situationVisibility(project, sitTpl), detail: sitTpl.detail ?? "grob", template: sitTpl } }
+        : {}),
+      tables: (ex?.tables ?? []).map((id) => ({ id, source: id, fontPt: m.tablePt, ...(id === "areas" ? { columns: AREAS_COLUMNS } : {}) })),
+      image: !!ex?.image,
+    };
+  }
   const text = JSON.stringify({
     levels: levels.map((l) => l.id),
     groups: levels.map((l) => l.group),
@@ -213,6 +316,7 @@ export function planPresentationSheet(project: Project, o: PresentationOptions):
     ...(o.scale ? { scale: o.scale } : {}),
     scales: o.scales ?? {},
     ...(poster ? { marginMm: poster.marginMm, topMm: poster.contentTopMm } : {}),
+    ...(posterReq ? { poster: posterReq } : {}),
   });
   return documentFor(project).query<PresentationPlan>("presentationSheet", [], text);
 }
@@ -279,10 +383,24 @@ function annotationCategory(project: Project): string {
   return (all.find((c) => /beschrift|text|annot/i.test(c.name)) ?? all.find((c) => c.code === "80") ?? all[0])?.code ?? "0";
 }
 
+/** Rechteck-Umriss (Papier-mm) als geschlossene Polylinie auf der Blatt-Ebene. */
+function sheetRect(id: string, levelId: string, cat: string, x: number, y: number, w: number, h: number, extra: Partial<Drawing2D> = {}): Drawing2D {
+  const P = (px: number, py: number) => sheetMmToModel(px, py);
+  return sheetShape(id, levelId, cat, { shape: "polyline", closed: true, pts: [P(x, y), P(x + w, y), P(x + w, y + h), P(x, y + h)] }, extra);
+}
+
+/** Letztes Bild eines Layouts im Projekt (z. B. aus „Ins Layout einsetzen“ im Rendering-Dialog). */
+function lastLayoutImage(project: Project): LayoutImage | undefined {
+  const all = (project.layouts ?? []).flatMap((l) => l.images ?? []);
+  return all[all.length - 1];
+}
+
 /**
  * Ops für das Präsentationsblatt (ein Undo-Schritt, wenn sie zusammen angewendet werden): Layout mit
  * Blatt-Ebene und Master (neu, falls keiner zum Format passt), je Ebene ein an „Präsentation" gebundener
  * Ausschnitt und ein Viewport, Titel und Nordpfeil auf der Blatt-Ebene, Schatten/Skizze an den Ebenen.
+ * Plakat ([208]): zusätzlich Situation 1:500, Blatt-Tabellen (Kennzahlen, Baurecht) und ein Rahmen fürs 3D-Bild;
+ * passt der Inhalt nicht auf ein Blatt, entstehen weitere Plakate (`layoutIds`), die Massstäbe bleiben fest.
  * `stamp` macht die Ids eindeutig. Keine Ebene mit Inhalt ⇒ `null`.
  */
 export function presentationSheetOps(
@@ -290,7 +408,7 @@ export function presentationSheetOps(
   o: PresentationOptions,
   labels: PresentationLabels,
   stamp: string,
-): { ops: CoreOp[]; layoutId: string; plan: PresentationPlan } | null {
+): { ops: CoreOp[]; layoutId: string; layoutIds: string[]; plan: PresentationPlan } | null {
   const plan = planPresentationSheet(project, o);
   if (plan.items.length === 0) return null;
   const { template, isNew } = presentationTemplate(project);
@@ -307,58 +425,78 @@ export function presentationSheetOps(
     master = { ...createMasterLayout(`mas-pres-${stamp}`, labels.masterName, sheet.paper, sheet.orientation), titleBlock: { ...(first?.titleBlock ?? {}) } };
     ops.push(...addItems("masterLayouts", [master]));
   }
-  const layoutId = `lay-pres-${stamp}`;
-  const layout: Layout = { ...createLayout(layoutId, labels.sheetName, sheet.paper, sheet.orientation), masterId: master.id };
-  const sheetLevel = createSheetLevel(`sheet-${layoutId}`, layout);
+  // Situation: Vorlage und Modelldarstellung „Situation WBW“ aus den Standards, falls das Projekt sie nicht hat.
+  const hasSituation = plan.items.some((it) => it.kind === "situation");
+  const sitTpl = hasSituation ? situationTemplate(project) : null;
+  if (sitTpl?.isNew) {
+    ops.push(...addItems("viewTemplates", [sitTpl.template]));
+    const mv = standardModelViews(project).find((m) => m.id === SITUATION_MODEL_VIEW_ID);
+    if (mv) ops.push(...addItems("modelViewOptions", [mv]));
+  }
+  const pages = Math.max(1, plan.pages ?? 1);
+  const layoutIds = Array.from({ length: pages }, (_, k) => (k === 0 ? `lay-pres-${stamp}` : `lay-pres-${stamp}-${k + 1}`));
+  const size = sheetSizeMm(sheet.paper, sheet.orientation);
+  const labelM = scaleLabelMetrics(size);
+  const layouts: Layout[] = layoutIds.map((id, k) => ({
+    ...createLayout(id, pages > 1 ? `${labels.sheetName} ${k + 1}` : labels.sheetName, sheet.paper, sheet.orientation),
+    masterId: master.id,
+  }));
+  const sheetLevels = layouts.map((l) => createSheetLevel(`sheet-${l.id}`, l));
   const vis = presentationVisibility(project, template);
-  const labelM = scaleLabelMetrics(sheetSizeMm(sheet.paper, sheet.orientation));
   const cat = annotationCategory(project);
   const byId = new Map(project.drawingLevels.map((l) => [l.id, l]));
   const snaps: ViewSnapshot[] = [];
-  const vps: LayoutViewport[] = [];
+  const vps: LayoutViewport[][] = layouts.map(() => []);
   const drawings: Drawing2D[] = [];
+  const tables: LayoutTable[][] = layouts.map(() => []);
+  const images: LayoutImage[][] = layouts.map(() => []);
   // [137] Nordpfeil und Massstabsbalken als je eine Gruppe: ein Klick wählt, verschiebt und löscht sie als Ganzes.
   const groups: Group[] = [];
   const group = (id: string, name: string | undefined, members: Drawing2D[]) =>
     groups.push({ id, name, wallIds: [], drawingIds: members.map((d) => d.id), ceilingIds: [], roomIds: [], stairIds: [], columnIds: [], roofIds: [], openingIds: [], groupIds: [] });
   plan.items.forEach((it, i) => {
+    const page = it.page ?? 0;
     const level = byId.get(it.levelId)!;
     const snapId = `vs-pres-${stamp}-${i}`;
+    const isSit = it.kind === "situation";
+    const t = isSit && sitTpl ? sitTpl.template : template;
     snaps.push({
       id: snapId,
-      name: `${level.name} · ${template.name}`,
+      name: isSit ? `${labels.situation ?? level.name} · ${t.name}` : `${level.name} · ${t.name}`,
       viewType: "grundriss",
       view3d: "top",
       scaleDenominator: it.scale,
-      detail: template.detail ?? "mittel",
+      detail: t.detail ?? "mittel",
       activeLevelId: level.id,
       // Grundrisse ohne die Schattenstudie des Projekts (Klasse „Schatten"): ihr Wurf läge über den Rahmen hinaus und
       // würde beschnitten; die Schatten der Ansichten (Vorlage) bleiben.
-      layerVisibility: it.group === 0 ? { ...vis, [SHADOW_CATEGORY]: false } : vis,
+      layerVisibility: isSit ? situationVisibility(project, t) : it.group === 0 ? { ...vis, [SHADOW_CATEGORY]: false } : vis,
       drawingVisibility: {},
-      ...(template.enabledOverrideRuleIds ? { enabledOverrideRuleIds: [...template.enabledOverrideRuleIds] } : {}),
-      templateId: template.id,
+      ...(!isSit && template.enabledOverrideRuleIds ? { enabledOverrideRuleIds: [...template.enabledOverrideRuleIds] } : {}),
+      templateId: t.id,
       templateLinked: true,
     } as ViewSnapshot);
-    vps.push({ id: `vp-pres-${stamp}-${i}`, snapshotId: snapId, xMm: it.xMm, yMm: it.yMm, widthMm: it.widthMm, heightMm: it.heightMm, scaleDenominator: it.scale });
+    vps[page].push({ id: `vp-pres-${stamp}-${i}`, snapshotId: snapId, xMm: it.xMm, yMm: it.yMm, widthMm: it.widthMm, heightMm: it.heightMm, scaleDenominator: it.scale });
+    const title = isSit ? (labels.situation ?? level.name) : level.name;
     // Plakat: die Massstabsangabe des Masters steht links unter dem Viewport (Grundlinie `scaleLabelMetrics`);
     // der Titel folgt rechts daneben auf derselben Linie, sonst überdecken sich beide.
     drawings.push(
       tpl
-        ? sheetText(`d-pres-${stamp}-t${i}`, sheetLevel.id, cat, it.xMm + labelM.sizeMm * 3.6, it.yMm + it.heightMm + labelM.dyMm, level.name, 4, true)
-        : sheetText(`d-pres-${stamp}-t${i}`, sheetLevel.id, cat, it.xMm + FRAME_PAD_MM, it.yMm + it.heightMm + 6, `${level.name}   1:${it.scale}`, 4, true),
+        ? sheetText(`d-pres-${stamp}-t${i}`, sheetLevels[page].id, cat, it.xMm + labelM.sizeMm * 3.6, it.yMm + it.heightMm + labelM.dyMm, title, labelM.sizeMm, true)
+        : sheetText(`d-pres-${stamp}-t${i}`, sheetLevels[page].id, cat, it.xMm + FRAME_PAD_MM, it.yMm + it.heightMm + 6, `${title}   1:${it.scale}`, 4, true),
     );
   });
   // Nordpfeil rechts neben dem Titel des ersten Grundrisses.
-  const firstFloor = plan.items.find((it) => it.group === 0);
+  const firstFloor = plan.items.find((it) => it.group === 0 && it.kind !== "situation");
   if (firstFloor) {
+    const lvl = sheetLevels[firstFloor.page ?? 0].id;
     const cx = firstFloor.xMm + firstFloor.widthMm - 8;
     const cy = firstFloor.yMm + firstFloor.heightMm + 4.8;
-    const north = northArrow(stamp, sheetLevel.id, cat, cx, cy, 3.6, labels.north);
+    const north = northArrow(stamp, lvl, cat, cx, cy, 3.6, labels.north);
     drawings.push(...north);
     group(`grp-pres-${stamp}-n`, labels.northGroup, north);
     // Massstabsbalken links vom Nordpfeil, sofern er den Titel nicht berührt (Breite grob 0.65 × Schrifthöhe je Zeichen).
-    const bar = scaleBar(stamp, sheetLevel.id, cat, cx - 3.6 - 10, cy - 1, firstFloor.scale);
+    const bar = scaleBar(stamp, lvl, cat, cx - 3.6 - 10, cy - 1, firstFloor.scale);
     const title = byId.get(firstFloor.levelId)!.name;
     const titleEnd = firstFloor.xMm + FRAME_PAD_MM + (title.length + 8) * 4 * 0.65;
     const barLeft = Math.min(...bar.flatMap((d) => (d.geom.shape === "polyline" ? d.geom.pts.map((p) => p.x * 1000) : [])));
@@ -367,16 +505,57 @@ export function presentationSheetOps(
       group(`grp-pres-${stamp}-s`, labels.scaleBarGroup, bar);
     }
   }
-  ops.push(...addItems("layouts", [{ ...layout, viewports: vps }]), ...addItems("drawingLevels", [sheetLevel]));
+  // [208] Blatt-Tabellen mit Titel im Band darüber.
+  const fontPt = posterTextMetrics(size).tablePt;
+  for (const tb of plan.tables ?? []) {
+    const lvl = sheetLevels[tb.page].id;
+    const title = tb.id === "areas" ? labels.tableAreas : labels.tableSiteProof;
+    if (title) drawings.push(sheetText(`d-pres-${stamp}-tt-${tb.id}`, lvl, cat, tb.xMm, tb.yMm + labelM.sizeMm * 1.1, title, labelM.sizeMm, true));
+    tables[tb.page].push({
+      id: `tbl-pres-${stamp}-${tb.id}`,
+      source: tb.id,
+      xMm: tb.xMm,
+      yMm: tb.yMm + tb.bandMm,
+      widthMm: tb.widthMm,
+      fontSizePt: fontPt,
+      borders: "rows",
+      ...(tb.id === "areas" ? { columns: AREAS_COLUMNS } : {}),
+    } as LayoutTable);
+  }
+  // [208] 3D-/Axonometrie-Bild: das letzte Layout-Bild des Projekts im Rahmen, sonst ein beschrifteter Platzhalter (nichts erfunden).
+  const box = plan.image;
+  if (box) {
+    const lvl = sheetLevels[box.page].id;
+    const existing = lastLayoutImage(project);
+    if (existing) {
+      const ar = imageAspect(existing);
+      const w = Math.min(box.widthMm, box.heightMm * ar);
+      const h = w / ar;
+      images[box.page].push({ ...existing, id: `img-pres-${stamp}`, xMm: box.xMm, yMm: box.yMm, widthMm: w, heightMm: h });
+    } else {
+      const ph = labels.imagePlaceholder ?? "";
+      const size1 = labelM.sizeMm * 1.6;
+      drawings.push(
+        sheetRect(`d-pres-${stamp}-ph0`, lvl, cat, box.xMm, box.yMm, box.widthMm, box.heightMm, { weightMm: 0.35, color: "#8a8a8a" }),
+        sheetText(`d-pres-${stamp}-ph1`, lvl, cat, box.xMm + box.widthMm / 2 - ph.length * size1 * 0.27, box.yMm + box.heightMm / 2, ph, size1, true),
+      );
+      if (labels.imageHint) drawings.push(sheetText(`d-pres-${stamp}-ph2`, lvl, cat, box.xMm + box.widthMm / 2 - labels.imageHint.length * labelM.sizeMm * 0.25, box.yMm + box.heightMm / 2 + size1 * 1.5, labels.imageHint, labelM.sizeMm));
+    }
+  }
+  layouts.forEach((l, k) => {
+    ops.push(...addItems("layouts", [{ ...l, viewports: vps[k], ...(tables[k].length ? { tables: tables[k] } : {}), ...(images[k].length ? { images: images[k] } : {}) }]));
+  });
+  ops.push(...addItems("drawingLevels", sheetLevels));
   ops.push(...addItems("viewSnapshots", snaps), ...addItems("drawings2d", drawings));
   if (groups.length > 0) ops.push(...addItems("groups", groups));
   // Schatten (Vorlage) für Ansichten/Schnitt, Skizze nach Wahl für alle gezeigten Ebenen.
   for (const it of plan.items) {
+    if (it.kind === "situation") continue;
     const level = byId.get(it.levelId)!;
     const patch: Partial<DrawingLevel> = {};
     if (it.group > 0 && template.shadows !== undefined && level.shadows !== template.shadows) patch.shadows = template.shadows;
     if (o.sketch && !level.sketch) patch.sketch = true;
     if (Object.keys(patch).length > 0) ops.push(...patchItem(project, "drawingLevels", level.id, patch));
   }
-  return { ops, layoutId, plan };
+  return { ops, layoutId: layoutIds[0], layoutIds, plan };
 }

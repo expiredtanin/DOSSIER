@@ -174,6 +174,43 @@ pub struct Request {
     /// Ansichtsvorlage, mit der die Viewports verknüpft werden: die Ausmasse müssen mit ihr gerechnet werden (sie setzt z. B.
     /// Schatten), sonst sitzt der Inhalt neben dem Rahmen und wird beschnitten. Fehlt sie im Projekt, wird sie eingesetzt.
     pub template: Option<ViewTemplate>,
+    /// [208] Plakat-Anordnung auf dem Spaltenraster (Situation, Tabellen, 3D-Bild-Platzhalter, mehrere Blätter).
+    pub poster: Option<PosterReq>,
+}
+
+/// [208] Plakat-Raster und zusätzliche Inhalte.
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PosterReq {
+    pub columns: usize,
+    pub gutter_mm: f64,
+    /// Platz unter jedem Rahmen für Titel und Massstab (mm).
+    pub band_mm: f64,
+    pub situation: Option<SituationReq>,
+    pub tables: Vec<TableReq>,
+    /// Platzhalter (oder vorhandenes Bild) fürs 3D-Bild: nimmt das grösste freie Rechteck.
+    pub image: bool,
+}
+
+/// Situationsplan: Grundriss der Ebene mit der Vorlage „Situation WBW“, eigener Massstab (1:500).
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct SituationReq {
+    pub level_id: String,
+    pub scale: f64,
+    pub layer_visibility: BTreeMap<String, bool>,
+    pub detail: DetailLevel,
+    pub template: Option<ViewTemplate>,
+}
+
+/// Blatt-Tabelle auf dem Plakat (Kennzahlen, Baurecht-Nachweis).
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct TableReq {
+    pub id: String,
+    pub source: crate::model::LayoutTableSource,
+    pub columns: Option<Vec<String>>,
+    pub font_pt: f64,
 }
 
 /// Abfrage `presentationSheet`: Massstab und Rahmen für die Ebenen; Ebenen ohne Inhalt stehen unter
@@ -216,6 +253,9 @@ pub fn query(p: &Project, text: &str) -> Result<Value, String> {
     }
     kept.sort_by_key(|k| k.1);
     let sheet = Sheet::new(req.sheet_w, req.sheet_h, req.title_block).with_area(req.margin_mm, req.top_mm);
+    if let Some(po) = &req.poster {
+        return Ok(poster_plan(p, &req, po, &sheet, &kept, &skipped, &bounds_at));
+    }
     let valid = |v: f64| v.is_finite() && v > 0.0;
     let own = |id: &str| req.scales.get(id).copied().filter(|v| valid(*v));
     let sizes_at = |s: f64| -> Vec<(u32, f64, f64)> {
@@ -239,6 +279,130 @@ pub fn query(p: &Project, text: &str) -> Result<Value, String> {
         .map(|((id, g), r)| json!({"levelId": id, "group": g, "scale": own(id).unwrap_or(choice.scale), "xMm": r.x_mm, "yMm": r.y_mm, "widthMm": r.width_mm, "heightMm": r.height_mm}))
         .collect();
     Ok(json!({"scale": choice.scale, "fits": choice.fits, "items": items, "skipped": skipped}))
+}
+
+/// Gruppe der Situation (nach den Schnitten).
+const SITUATION_GROUP: u32 = 3;
+/// Mindesthöhe des 3D-Bild-Platzhalters relativ zur Satzspiegelhöhe.
+const MIN_IMAGE_SHARE: f64 = 0.14;
+
+/// Höhe (mm, ohne Titelband) jeder Tabelle: eine Probe-Ebene mit den Tabellen im Projekt, gerechnet vom Tabellenkern.
+fn table_heights(p: &Project, tables: &[TableReq]) -> Vec<f64> {
+    use crate::model::{Layout, LayoutTable};
+    let lts: Vec<LayoutTable> = tables
+        .iter()
+        .enumerate()
+        .map(|(i, t)| LayoutTable {
+            id: format!("probe{i}"),
+            source: t.source,
+            width_mm: 100.0,
+            columns: t.columns.clone(),
+            font_size_pt: (t.font_pt.is_finite() && t.font_pt > 0.0).then_some(t.font_pt),
+            ..Default::default()
+        })
+        .collect();
+    let mut q = p.clone();
+    q.layouts = Some(vec![Layout { id: "probe".into(), tables: Some(lts), ..Default::default() }]);
+    let lay = &q.layouts.as_ref().map(|l| l[0].clone()).unwrap_or_default();
+    let out = crate::sheet_table::render(&q, lay, &crate::sheet_table::Labels::default());
+    tables.iter().enumerate().map(|(i, _)| out.iter().find(|o| o.id == format!("probe{i}")).map_or(0.0, |o| o.height_mm)).collect()
+}
+
+/// [208] Plakat: Inhalte auf dem Spaltenraster, Massstäbe fest; mehr Inhalt als ein Blatt ⇒ weitere Blätter.
+fn poster_plan(p: &Project, req: &Request, po: &PosterReq, sheet: &Sheet, kept: &[(String, u32)], skipped: &[String], bounds_at: &dyn Fn(&str, f64) -> Option<[f64; 4]>) -> Value {
+    use crate::presentation_poster::{layout, Cell, Grid};
+    let valid = |v: f64| v.is_finite() && v > 0.0;
+    let gutter = if po.gutter_mm.is_finite() && po.gutter_mm >= 0.0 && po.gutter_mm < sheet.w / 4.0 { po.gutter_mm } else { GAP_MM };
+    let band = if valid(po.band_mm) { po.band_mm } else { TITLE_MM };
+    let g = Grid::new(sheet.w, sheet.h, sheet.margin, sheet.top, po.columns.max(1), gutter, band);
+    let own = |id: &str| req.scales.get(id).copied().filter(|v| valid(*v));
+
+    // Situation: eigener Ausschnitt (Vorlage „Situation WBW“, Umgebung sichtbar), eigener Massstab.
+    let situation = po.situation.as_ref().filter(|s| valid(s.scale) && p.drawing_levels.iter().any(|l| l.id == s.level_id)).and_then(|s| {
+        let with_tpl;
+        let q = match &s.template {
+            Some(t) if !p.view_templates.iter().flatten().any(|v| v.id == t.id) => {
+                let mut c = p.clone();
+                c.view_templates.get_or_insert_with(Vec::new).push(t.clone());
+                with_tpl = c;
+                &with_tpl
+            }
+            _ => p,
+        };
+        let snap = ViewSnapshot {
+            active_level_id: s.level_id.clone(),
+            layer_visibility: s.layer_visibility.clone(),
+            detail: s.detail,
+            scale_denominator: s.scale,
+            template_id: s.template.as_ref().map(|t| t.id.clone()),
+            template_linked: s.template.as_ref().map(|_| true),
+            ..Default::default()
+        };
+        let b = crate::sheet_viewports::snapshot_bounds(q, &snap, s.scale, Some(false))?;
+        b.iter().all(|v| v.is_finite()).then_some((s, b))
+    });
+
+    let heights = table_heights(p, &po.tables);
+    let pref = g.cols.div_ceil(2).max(2);
+    let tables: Vec<(usize, f64)> = heights.iter().map(|h| (pref, *h)).collect();
+    let min_image = ((g.bottom - g.top) * MIN_IMAGE_SHARE).max(60.0);
+
+    // Rahmengrössen je Gruppe: grösster Inhalt der Gruppe plus Rand, auf ganze Spalten gerundet.
+    let cells_at = |s: f64| -> Vec<Cell> {
+        let mut dims: BTreeMap<u32, (f64, f64)> = BTreeMap::new();
+        for (id, grp) in kept {
+            let sc = own(id).unwrap_or(s);
+            let b = bounds_at(id, sc).unwrap_or([0.0, 0.0, 1.0, 1.0]);
+            let e = dims.entry(*grp).or_insert((0.0, 0.0));
+            e.0 = e.0.max((b[2] - b[0]) * 1000.0 / sc);
+            e.1 = e.1.max((b[3] - b[1]) * 1000.0 / sc);
+        }
+        let mut cells = Vec::new();
+        if let Some((sit, b)) = &situation {
+            let w = (b[2] - b[0]) * 1000.0 / sit.scale + 2.0 * FRAME_PAD_MM;
+            let h = (b[3] - b[1]) * 1000.0 / sit.scale + 2.0 * FRAME_PAD_MM;
+            // Sehr grosse Umgebung: Ausschnitt begrenzen (Frame kleiner als der Inhalt, der Viewport zeigt die Mitte).
+            let span = g.span_for(w).min(g.cols.div_ceil(2));
+            cells.push(Cell { span, h: h.min((g.bottom - g.top - g.band) * 0.45) });
+        }
+        for (_, grp) in kept {
+            let (w, h) = dims[grp];
+            cells.push(Cell { span: g.span_for(w + 2.0 * FRAME_PAD_MM), h: h + 2.0 * FRAME_PAD_MM });
+        }
+        cells
+    };
+    let scale = match req.scale.filter(|v| valid(*v)) {
+        Some(s) => s,
+        None => SCALES
+            .iter()
+            .copied()
+            .find(|s| {
+                let r = layout(&g, &cells_at(*s), &tables, false, min_image);
+                r.pages == 1 && r.items.iter().all(|i| !i.forced)
+            })
+            .unwrap_or(SCALES[SCALES.len() - 1]),
+    };
+    let r = layout(&g, &cells_at(scale), &tables, po.image, min_image);
+    let mut items: Vec<Value> = Vec::new();
+    let mut placed = r.items.iter();
+    if let Some((sit, _)) = &situation {
+        if let Some(pl) = placed.next() {
+            items.push(json!({"levelId": sit.level_id, "kind": "situation", "group": SITUATION_GROUP, "scale": sit.scale, "page": pl.page, "xMm": pl.rect.x_mm, "yMm": pl.rect.y_mm, "widthMm": pl.rect.width_mm, "heightMm": pl.rect.height_mm}));
+        }
+    }
+    for ((id, grp), pl) in kept.iter().zip(placed) {
+        items.push(json!({"levelId": id, "kind": "view", "group": grp, "scale": own(id).unwrap_or(scale), "page": pl.page, "xMm": pl.rect.x_mm, "yMm": pl.rect.y_mm, "widthMm": pl.rect.width_mm, "heightMm": pl.rect.height_mm}));
+    }
+    let tables_out: Vec<Value> = po
+        .tables
+        .iter()
+        .zip(&r.tables)
+        .zip(&heights)
+        .map(|((t, pl), h)| json!({"id": t.id, "page": pl.page, "xMm": pl.rect.x_mm, "yMm": pl.rect.y_mm, "widthMm": pl.rect.width_mm, "heightMm": pl.rect.height_mm, "tableHeightMm": h, "bandMm": g.band}))
+        .collect();
+    let image = r.image.map(|pl| json!({"page": pl.page, "xMm": pl.rect.x_mm, "yMm": pl.rect.y_mm, "widthMm": pl.rect.width_mm, "heightMm": pl.rect.height_mm}));
+    let forced = r.items.iter().chain(&r.tables).any(|i| i.forced);
+    json!({"scale": scale, "fits": !forced, "pages": r.pages, "items": items, "skipped": skipped, "tables": tables_out, "image": image, "bandMm": g.band})
 }
 
 #[cfg(test)]

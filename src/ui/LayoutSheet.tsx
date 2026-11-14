@@ -715,7 +715,8 @@ export function LayoutSheetPane({
             )}
           </g>
         )}
-        {master && (
+        {/* [208] Plakat-Vorlage: die Kopfzeile trägt Kennwort und „Plan x/n“, ein zusätzliches Schriftfeld entfällt. */}
+        {master && !master.posterHeader && (
           <g pointerEvents="none">
             <TitleBlockSvg sheet={sheet} tb={titleBlock} paper={layout.paper} orientation={layout.orientation} />
             {titleBlockSelected && (
@@ -1028,7 +1029,7 @@ export function LayoutSheetPane({
       setSelectedLegendId(lg ? lg.id : null);
       // Schriftfeld (liegt über den Viewports, nur mit Master gezeichnet).
       const tbb = titleBlockBox(sheet);
-      const onTitle = !tableHit && !lg && !!master && !!handlers.onPatchTitleBlock &&
+      const onTitle = !tableHit && !lg && !!master && !master.posterHeader && !!handlers.onPatchTitleBlock &&
         mm.xMm >= tbb.xMm && mm.xMm <= tbb.xMm + tbb.widthMm && mm.yMm >= tbb.yMm && mm.yMm <= tbb.yMm + tbb.heightMm;
       setTitleBlockSelected(onTitle);
       const imgHit = tableHit || lg || onTitle
