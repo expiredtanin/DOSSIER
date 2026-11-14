@@ -316,7 +316,8 @@ fn slabs_of(s: &StairIn, idx: usize, for_section: bool, coarse: bool, out: &mut 
 
     if structure == BETON && s.flights() && for_section {
         // Ansicht (`coarse`): ein Block je Tritt bis zur Untersicht an seiner Vorderkante.
-        let n = if coarse { 1.0 } else { ((riser / SOFFIT_SLICE_STEP).ceil()).max(1.0) };
+        // [258] Höchstens 400 Scheiben je Tritt (Steigung 1e12 m ergäbe sonst Billionen Platten und einen Speicher-Abbruch).
+        let n = if coarse { 1.0 } else { ((riser / SOFFIT_SLICE_STEP).ceil()).max(1.0).min(400.0) };
         let n_int = n as usize;
         for r in run_ranges(&geo) {
             let Some((ax, len)) = run_axes(&geo, &r) else { continue };

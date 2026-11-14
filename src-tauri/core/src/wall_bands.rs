@@ -377,7 +377,8 @@ fn band_coverage(w: &WallIn, u: Vec2, n: Vec2, offset: f64, outline: &[Vec2], lo
     }
     let base = add(w.start, scale(n, offset));
     let inside = |t: f64| point_in_outline(add(base, scale(u, t)), outline);
-    let steps = 32f64.max(((hi - lo) / 0.05).ceil()) as usize;
+    // [258] Höchstens 20000 Schritte: eine Wand von 1e12 m Länge ergäbe sonst Billionen Prüfpunkte (Hänger).
+    let steps = 32f64.max(((hi - lo) / 0.05).ceil()).min(20_000.0) as usize;
     let dt = (hi - lo) / steps as f64;
     let mut out = Vec::new();
     let mut prev_inside = inside(lo);

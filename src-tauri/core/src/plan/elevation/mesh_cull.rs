@@ -167,7 +167,9 @@ pub(super) fn mesh_faces_needed(faces: &[Face]) -> Vec<bool> {
     for (k, &i) in idx.iter().enumerate() {
         order[i] = k as u32 + 1;
     }
-    let cell = ((x1 - x0) * (y1 - y0) / CULL_CELLS).sqrt().max(1e-3);
+    // [258] Höchstens 65536 Zellen je Richtung: ein extrem gestreckter Ausschnitt (1e12 m × 1 m) ergäbe sonst
+    // Milliarden Zellen in einer Reihe (Speicher/Laufzeit). Normale Seitenverhältnisse (< ~2000:1) bleiben unberührt.
+    let cell = ((x1 - x0) * (y1 - y0) / CULL_CELLS).sqrt().max(1e-3).max((x1 - x0) / 65536.0).max((y1 - y0) / 65536.0);
     let (w, h) = (((x1 - x0) / cell).ceil() as usize + 1, ((y1 - y0) / cell).ceil() as usize + 1);
     // Spätester Maler-Platz je Zelle (0 = leer).
     let mut top = vec![0u32; w * h];
