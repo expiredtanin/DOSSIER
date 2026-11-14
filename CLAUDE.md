@@ -81,7 +81,7 @@ Der ganze Kern wandert nach Rust (`src-tauri/core`, Crate `dossier-core`); die U
 ## Parallel arbeitende Agents
 
 In der Cloud höchstens **3 Agents gleichzeitig: 1 Opus + 2 Sonnet** (Vorgabe Maintainer, 12.11. abends; vorher 1 + 3); neue erst starten,
-wenn einer fertig ist. Speicher knapp (15 GB): Rust-Builds mit `CARGO_BUILD_JOBS=2 CARGO_PROFILE_RELEASE_LTO=off`. Modell je Aufgabe: Sonnet für mechanische, klar umrissene Portierungen; Opus für knifflige
+wenn einer fertig ist. Speicher knapp (15 GB): Rust-Builds mit `CARGO_BUILD_JOBS=2 CARGO_PROFILE_RELEASE_LTO=off`. WASM-Builds (`build:core`, wasm-pack render2d/render3d/fileio) je Crate in ein EIGENES `CARGO_TARGET_DIR` — teilen sich mehrere Crates eines, liegen danach mehrere `wasm_bindgen`-rlibs nebeneinander und der nächste Build scheitert mit `rust-lld: duplicate symbol` oder liefert einen leeren Stub (Grösse des `*_bg.wasm` prüfen). Modell je Aufgabe: Sonnet für mechanische, klar umrissene Portierungen; Opus für knifflige
 Geometrie mit vielen Sonderfällen oder Architektur-Entscheide. Jeder Agent in eigenem Git-Worktree und eigenem Branch, nur die Dateien seiner Aufgabe. In gemeinsamen
 Dateien (`lib.rs`, `web/mod.rs`, `Cargo.toml`, `src/core/index.ts`, `src/core/extra.ts`, `i18n/de.ts`,
 `i18n/en.ts`, `TODO.md`) nur Zeilen ergänzen, nichts umordnen oder umformatieren. Nicht pushen — der
