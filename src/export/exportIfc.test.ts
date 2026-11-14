@@ -307,10 +307,14 @@ describe("exportIfcSpf — IFC4-Export", () => {
     // Das Loch-Face-Set hat 48 CoordIndex-Tripel.
     const triCounts = faceSets.map((l) => (l.match(/\(\d+,\d+,\d+\)/g) ?? []).length);
     expect(triCounts).toContain(48);
-    // Zugehörige Punktliste hat 144 Punkte (3er-Koordinaten-Tupel).
-    const pointLists = lines.filter((l) => l.includes("=IFCCARTESIANPOINTLIST3D("));
-    const ptCounts = pointLists.map((l) => (l.match(/\([^()]*,[^()]*,[^()]*\)/g) ?? []).length);
-    expect(ptCounts).toContain(144);
+    // [259] Zugehörige Punktliste verschweisst: jede Ecke einmal (vorher 144 = 3 je Dreieck).
+    const hole = faceSets[triCounts.indexOf(48)];
+    const listId = /IFCTRIANGULATEDFACESET\(#(\d+)/.exec(hole)![1];
+    const list = lines.find((l) => l.startsWith(`#${listId}=`))!;
+    const pts = list.match(/\([^()]*,[^()]*,[^()]*\)/g) ?? [];
+    expect(new Set(pts).size).toBe(pts.length);
+    expect(pts.length).toBeLessThan(144);
+    expect(pts.length).toBeGreaterThanOrEqual(16); // Quader-Ecken + Loch-Ecken vorne/hinten
     // Keine dangling refs (der Kern-Invarianten-Check gilt auch mit Face-Sets).
     const { defined, referenced } = collectIds(spf);
     expect([...referenced].filter((id) => !defined.has(id))).toEqual([]);
@@ -433,28 +437,26 @@ describe("exportIfcSpf — IFC4-Export", () => {
     expect(b.filter((g) => a.has(g))).toEqual([]);
   });
 
-  it("georeferenziert: mit geoAnchor werden die ECHTEN LV95-Koordinaten geschrieben (lokal bearbeitet, weltweit lagerichtig)", () => {
-    // Modell lokal nahe (0,0), aber geoAnchor sagt: Modell (0,0) = LV95
-    // (2600000,1200000). Der Export muss die Profil-/Punkt-Koordinaten auf die
-    // echten Landeskoordinaten (Millionenbereich) verschoben schreiben.
+  it("[259] georeferenziert: Geometrie bleibt lokal, IfcMapConversion trägt den LV95-Versatz und die Höhe von ±0.00", () => {
+    // Modell lokal nahe (0,0), geoAnchor: Modell (2,1) = LV95 (2600002,1200001) ⇒ Ursprung = (2600000,1200000).
+    // Vorher lag die ganze Geometrie in LV95-Millionen (Revit/Archicad warnen, Genauigkeit leidet).
     const local = fixtureProject();
     const withoutAnchor = exportIfcSpf(local);
-    // Ohne Bezug: lokale Koordinaten, KEINE Millionenwerte im Text.
     expect(withoutAnchor).not.toMatch(/26000\d\d\./);
+    expect(withoutAnchor).not.toContain("IFCMAPCONVERSION");
 
     const geo: Project = {
       ...local,
-      geoAnchor: { lv95: { e: 2600000, n: 1200000 }, model: { x: 0, y: 0 } },
+      geoAnchor: { lv95: { e: 2600002, n: 1200001 }, model: { x: 2, y: 1 } },
+      referenceElevationMasl: 441.3,
     };
     const spf = exportIfcSpf(geo);
-    // W1.start (0,0) -> LV95 (2600000,1200000); W2.end (5,4) -> (2600005,1200004).
-    expect(spf).toContain("2600000.");
-    expect(spf).toContain("1200000.");
-    expect(spf).toContain("2600005.");
-    // Koordinatensystem deklariert (IFC4): EPSG:2056 + Identitäts-Abbildung.
+    // Nur der Versatz in Millionen, keine Koordinate.
+    expect(spf.match(/\b2600000\.0\b/g)).toHaveLength(1);
+    expect(spf).not.toMatch(/2600005\./);
     expect(spf).toContain("IFCPROJECTEDCRS('EPSG:2056'");
-    expect(spf).toContain("IFCMAPCONVERSION(");
-    expect(withoutAnchor).not.toContain("IFCMAPCONVERSION");
+    expect(spf).toMatch(/IFCMAPCONVERSION\(#\d+,#\d+,2600000\.0,1200000\.0,441\.3,1\.0,0\.0,1\.0\);/);
+    expect(spf).toMatch(/IFCSITE\(.*,441\.3,\$,\$\);/);
     // Struktur bleibt valide (keine dangling refs / Duplikate).
     const { defined, referenced, duplicates } = collectIds(spf);
     expect(duplicates).toEqual([]);
