@@ -94,7 +94,7 @@ Ziehen aus der Palette gibt es nicht. Ein gesetztes Objekt wählst du an und än
 **Unordnung**, wie schief die Stühle stehen, **Neu würfeln** zieht eine neue Anordnung (gleiche Zahl = gleiche Stühle). Die Zeichnung
 folgt dem Detailgrad der Ansicht (grob, mittel, fein). Möbel liegen auf der Klasse 22, Sanitär auf 23, Fahrzeuge und
 Freiflächen auf 24 und lassen sich dort ausschalten; Möbel und Sanitär sparen den Bodenbelag aus. Im DXF-Export wird jedes
-Objekt als Block mit Einfügung ausgegeben. Die Objekte sind nur 2D; im 3D erscheinen sie nicht.
+Objekt als Block mit Einfügung ausgegeben. Die Objekte sind nur 2D; im 3D und im IFC erscheinen sie nicht.
 
 ## 5. Räume und Raumprogramm
 
@@ -148,6 +148,13 @@ Süd“ aus dem leeren Projekt folgen dem Gebauten, bis du ihre Linien verschieb
 
 ![Ansicht Süd 1:200](kurzanleitung/ansicht.png)
 
+**Grundriss 1:100: Fenster über der Schnitthöhe.** Öffnungen, die ganz über oder unter der Schnitthöhe in einer Wand liegen
+(z. B. ein Rundfenster in 1.8 m), bleiben strichpunktiert; der Teil auf der schwarz gefüllten Wand wird hell gezeichnet
+(Bildschirm, SVG, PDF und DXF). Abschalten: *Fenster → Ressourcen*, Reiter „Modelldarstellung“, Option „Öffnungen über/unter
+Schnitt hell auf schwarzer Wand“. Treppen zeigen im Grundriss die Bruchlinie über die Laufbreite in Papiergrösse. Die Höhenkoten
+im Schnitt und in der Ansicht messen nur das eigene Gebäude, nicht höhere Nachbarn. Das Gesamtbild des 1:100-Plans ist noch nicht
+abgeschlossen (Plan-Review läuft).
+
 ## 9. Axonometrie und Schatten
 
 Kopfleiste **Axonometrie** öffnet einen Reiter „3D · Erdgeschoss“. Im Panel **Gelände** schaltest du **Schatten im
@@ -197,7 +204,12 @@ Massstab, mit Titeln, Nordpfeil, Massstabsbalken und Schriftfeld. Das Beispiel e
 - **PDF:** Panel **Mappe** → **Publikationssatz anlegen**, die Blätter anhaken, **Publizieren**. Es entsteht ein PDF
   (mit PDF-Ebenen je Kategorie, wenn eingeschaltet), Index im Titelblock und im Dateinamen.
 - **DXF:** Geschoss wählen, *Datei → Exportieren → DXF* (Browser: „Exportieren: DXF“). LV95, Layer je Kategorie.
-- **IFC:** *Datei → Exportieren → IFC* (IFC4 mit Wänden, Decken, Räumen).
+- **IFC:** *Datei → Exportieren → IFC* (IFC4 mit Wänden, Decken, Räumen). Für Fachplaner:innen liegt die Geometrie lokal
+  um den Projekt-Nullpunkt; die LV95-Lage steht als Georeferenz in der Datei (Versatz des Ursprungs, ±0.00 in m ü. M.).
+  Räume tragen Nummer, Name, Fläche und die SIA-416-Kategorie, das Geschoss die Flächen und Rauminhalte. Die Option
+  „Kontext mitgeben (Gelände, Nachbargebäude)“ im Export-Dialog (Vorgabe aus; Kommandozeile `--kontext`) legt das Gelände und
+  die Kontext-Netze am Grundstück mit ab. Die Objektbibliothek (Möbel, Sanitär) kommt nicht ins IFC. Nicht in Archicad
+  oder Revit geöffnet.
 
 **Plakat: Hilfslinien und Bild-Zuschnitt.** Im Panel **Mappe** ein Layout anlegen, im Dialog „Neues Layout“ die
 **Plakat-Vorlage (Wettbewerb)** wählen (A0/A1, hoch oder quer): Dossier legt ein Raster aus Hilfslinien, eine Kopfzeile mit
@@ -213,15 +225,35 @@ das Original wieder her. Unter 100 dpi warnt das Bild-HUD („niedrige Auflösun
 eintragen. Dann zeigen Plankopf und Dateinamen nur das Kennwort, und diese Ausgaben enthalten keinen Projekt-, Büro- oder
 Bearbeiternamen: PDF (Titel = Kennwort; Autor, Programm und Datum neutral), Berichte (Fläche, Raumbuch, Kosten, Öffnungen,
 Bauteile, Programm), IFC, DXF/DWG (Blattnamen „Blatt n“), STEP und das Rendering-Paket für Blender. „WBW-Abgabe anlegen“
-fasst alle Plakate in einen Publikationssatz. **Nicht geprüft** werden frei getippte Texte (Ebenen-, Raum-, Geschoss- und
-Blocknamen, Textobjekte, Blattnamen): vor der Abgabe von Hand durchsehen.
+fasst alle Plakate in einen Publikationssatz. Vor jedem Export einer anonymen Abgabe (PDF, SVG, DXF, IFC,
+CSV, Berichte, 3D-Bild, Rendering, Video, Publikationssatz) prüft Dossier auch den Freitext: Raum-, Geschoss-, Ebenen-,
+Block-, Layout- und Blattnamen, Textobjekte und Bild-Dateinamen. Gesucht werden Projektname und -nummer, Büro, Bearbeiter:in,
+Adresse, der Projekt-Dateiname, die Begriffe aus „Weitere Angaben, die nicht vorkommen dürfen“ (Panel **Mappe**, neben dem
+Kennwort) sowie E-Mail-Adressen und Telefonnummern. Bei Treffern öffnet sich der Dialog „Anonymität prüfen“: Er nennt je
+Fundstelle den Bereich, das Element mit Feld (z. B. Material Wärmedämmung · Name), den Text und den Begriff. „Abbrechen“
+exportiert nichts; erst umbenennen und neu exportieren, oder „Trotzdem exportieren“. Allgemeine Wörter wie Haus oder Wohnen
+und blosse Zahlen zählen nicht. Auf der Kommandozeile bricht ein Export bei Treffern mit Exit-Code 3 ab; `--ignore-anonymity`
+übergeht die Prüfung. Die Prüfung ersetzt die Durchsicht vor der Abgabe nicht, `dossier-cli convert` und der BCF-Export
+prüfen nicht.
 
 **Kataster-Schwarzplan.** Nach dem Kataster-Import (Schritt 2) stellst du die Ansicht auf die Ansichtsvorlage „Situation
 WBW 1:500“ oder „Schwarzplan 1:500“ (*Fenster → Ressourcen*, Ansichtsvorlagen). Das eigene Gebäude erscheint als gefüllter
 Umriss über alle Geschosse, die Kataster-Gebäude und Nachbarn als gefüllte Grundfläche (Situation: grau, Schwarzplan: alles
-schwarz), dazu Parzelle, Strassen, Höhenlinien, Nordpfeil und Massstabsbalken. Raster, Wände, Möbel, Text, Masse und
-Schnittmarken sind aus. Alle Teile liegen auf Klassen (83 Situation Gebäude, 84 Planzeichen) und lassen sich dort
+schwarz), dazu Parzelle, Strassen, Höhenlinien, Nordpfeil und Massstabsbalken. Die Füllung der Nachbargebäude kommt aus dem Stil
+ihrer Klasse: Im Ebenen-Editor (Ebene anklicken) stellst du die „Füllung“ der Klasse ein; Höhenlinien enden am gefüllten
+Nachbarn. Raster, Wände, Möbel, Text, Masse und
+Schnittmarken sind aus. Kamera-Sichtkegel (Klasse 92) und Sonnenschatten (08) sind in den Standard-Vorlagen Präsentation,
+Eingabe, Ausführung, Situation und Schwarzplan ausgeschaltet. Alle Teile liegen auf Klassen (83 Situation Gebäude, 84 Planzeichen) und lassen sich dort
 ausschalten.
+
+**Sichern und Wiederherstellen.** Schreibt Dossier eine Datei (Projekt oder Export, in der Tauri-App), geht das über eine
+Zwischendatei; bei einem Fehler bleibt die vorhandene Datei heil, und eine rote Meldung nennt den Grund. Beim Projekt bleibt
+die vorige Fassung als `.obp~` liegen. Hat ein Projekt ungespeicherte Änderungen, fragen Fenster schliessen, ⌘Q, Neu und
+Öffnen mit „Ungespeicherte Änderungen“ nach (Speichern · Nicht speichern · Abbrechen). Alle 30 Sekunden legt Dossier eine
+Kopie ab, zwei Stände; nach einem Absturz bietet der Start „Ungesicherte Arbeit gefunden“ die neueste lesbare an
+(Wiederherstellen · Verwerfen · Später). Lässt sich eine Datei nicht öffnen, bietet Dossier ihre vorige Fassung an; bei
+offener Datei holt *Datei → Vorige Fassung wiederherstellen …* sie ebenfalls. Sie ersetzt die Datei erst beim nächsten
+Speichern. Meldet Dossier, dass die automatische Sicherung nicht geschrieben werden konnte, das Projekt von Hand speichern.
 
 Zum Schluss ⌘S. Das Projekt (`.obp`) enthält Volumen, Räume, Baurecht, Raumprogramm, Blätter und Publikationssätze.
 
@@ -229,7 +261,7 @@ Zum Schluss ⌘S. Das Projekt (`.obp`) enthält Volumen, Räume, Baurecht, Raump
 
 ## Noch offen
 
-Das Wettbewerbsplakat ist erst teilweise fertig ([208] in `TODO.md`: Freitext wird bei der Anonymität nicht geprüft), das
-Rendering mit Blender (*Ansicht → Rendering mit Blender …*, [211]) und der Pathtracer ([212]) sind auf dem Mac noch nicht
+Das Wettbewerbsplakat ist erst teilweise fertig ([208] in `TODO.md`: die Freitext-Prüfung deckt nur die Namen ab, die Dossier
+kennt), das Rendering mit Blender (*Ansicht → Rendering mit Blender …*, [211]) und der Pathtracer ([212]) sind auf dem Mac noch nicht
 geprüft. Der Ablauf wurde im Browser-Build automatisch
 geprüft (`e2e/release10.spec.ts`); der Durchlauf auf dem Mac steht noch aus (`doc/RELEASE-1.0.md`).
