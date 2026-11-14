@@ -93,6 +93,8 @@ test("Schnitt A-A als Pausfolie hinter dem EG: sichtbar, nicht anwählbar, versc
   // Achsraster des Modells, das dort durchläuft).
   const selectedAt = async () => {
     await page.keyboard.press("Escape");
+    // Esc hebt die Auswahl verzögert auf ([204]); sonst trifft der Klick die noch gewählte Wand und schaltet weiter.
+    await expect.poll(async () => (await page.evaluate(() => window.__dossierTest!.selected())).all).not.toMatch(/"[a-z]+":\["/);
     await page.mouse.click(at.x, at.y);
     await page.waitForTimeout(300);
     return (await page.evaluate(() => window.__dossierTest!.selected())).all;
