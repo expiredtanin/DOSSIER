@@ -1434,7 +1434,7 @@ Punktwolken/BCF-Ausbau, Windows-Paket, [C5]/[C7]/[15] Kern-Umbauten — ausser s
   einen Adapter, AppImage enthält Desktop-Datei, MIME und Icon. Offen: Start des AppImage selbst (FUSE) und echte
   AMD-GPU/ANGLE-Vulkan, Öffnen einer gültigen `.obp` per Argument, Flatpak-Manifest (`packaging/linux/ch.dossier.cad.yml`)
   nie gebaut, deb/rpm, `--no-sandbox` im Desktop-Eintrag (AppImage-Vorgabe) ersetzen, Workflow nicht auf GitHub gelaufen. · M
-- ◐ **[57]** Tests bei jedem Push (`check.yml`). Nicht auf GitHub gelaufen. · S
+- ◐ **[57]** Tests bei jedem Push (`check.yml`). Nicht auf GitHub gelaufen. 14.11.: Umfang geprüft — `npm run check` fährt nun auch `cargo test --features web --test robustness_web` im Kern ([258]; mit `CARGO_PROFILE_DEV_OVERFLOW_CHECKS=false`, sonst melden Debug-Überlauf-Panics, die im Release/WASM wrappen: `roof.rs:664`, `web/geo_mesh.rs:65`); CI installiert zusätzlich numpy (IFC-Mengenprüfung, [259]). Render2d/render3d/kernel2d/hatchgen-Tests liefen schon, e2e läuft als eigener Job. Offen: `exportIfc.fachplaner.test.ts` (komplex/Erker) meldet lokal mit ifcopenshell 0.9 `NetVolume 7.5 ≠ Geometrie 30.4` an Wand #3971 — klären, bevor CI es sieht; Debug-Überlauf in `roof.rs`/`geo_mesh.rs` ggf. mit `wrapping_mul` entschärfen. · S
 - ○ **[C6]** `cargo xtask ci`: Formatierung, Clippy, Tests, Crate-Schichtung, Asset-Herkunft, WASM-Build in einem
   Befehl. · M
 - ◐ **[C9]** Ehrliche Paritäts-Doku `doc/DATEIFORMATE.md` (12.11.2026): je Format hin/zurück/verloren mit Belegen aus dem Code; Test
