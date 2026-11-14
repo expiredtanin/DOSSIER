@@ -89,18 +89,18 @@ function openDb(): Promise<IDBDatabase> {
 }
 
 /**
- * Speichert ein Projekt unter `name` (überschreibt einen vorhandenen
- * Datensatz gleichen Namens). Ohne IndexedDB: no-op (wirft nicht).
+ * Wie {@link saveProject}, meldet aber, ob wirklich geschrieben wurde (`false`: kein IndexedDB,
+ * Kontingent voll, Zugriff verweigert). `savedAt` überschreibt den Zeitstempel (Rotation der Autosave-Kopie).
  */
-export async function saveProject(name: string, project: StoredProject): Promise<void> {
-  if (!name) return;
+export async function saveProjectChecked(name: string, project: StoredProject, savedAt = Date.now()): Promise<boolean> {
+  if (!name) return false;
   if (!isAvailable()) {
     warnUnavailableOnce();
-    return;
+    return false;
   }
   try {
     const db = await openDb();
-    const record: ProjectRecord = { name, savedAt: Date.now(), project };
+    const record: ProjectRecord = { name, savedAt, project };
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, "readwrite");
       tx.objectStore(STORE_NAME).put(record);
@@ -108,10 +108,19 @@ export async function saveProject(name: string, project: StoredProject): Promise
       tx.onerror = () => reject(tx.error ?? new Error("Transaktion fehlgeschlagen"));
       tx.onabort = () => reject(tx.error ?? new Error("Transaktion abgebrochen"));
     });
+    return true;
   } catch {
-    // Kontingent überschritten, Zugriff verweigert o. Ä. — still ignorieren
-    // (analog writeJson in visibilitySets.ts).
+    // Kontingent überschritten, Zugriff verweigert o. Ä. (analog writeJson in visibilitySets.ts).
+    return false;
   }
+}
+
+/**
+ * Speichert ein Projekt unter `name` (überschreibt einen vorhandenen
+ * Datensatz gleichen Namens). Ohne IndexedDB: no-op (wirft nicht).
+ */
+export async function saveProject(name: string, project: StoredProject): Promise<void> {
+  await saveProjectChecked(name, project);
 }
 
 /**

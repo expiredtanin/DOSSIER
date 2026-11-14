@@ -25,6 +25,8 @@ import type { SelectionActionId } from "../state/selectionActions";
 /** Alle Aktionen, die die native Menüleiste auslösen kann. */
 export interface NativeAppMenuHandlers {
   onNewProject: () => void;
+  /** [116] Beenden (Cmd+Q) mit Rückfrage bei ungespeicherten Änderungen. */
+  onQuitApp?: () => void;
   onNewProjectFromSample: () => void;
   onNewProjectFromComplexSample: () => void;
   onNewProjectFromWettbewerbSample: () => void;
@@ -529,7 +531,16 @@ export function useNativeAppMenu(
             text: t("menu.native.about"),
           }),
           await PredefinedMenuItem.new({ item: "Separator" }),
-          await PredefinedMenuItem.new({ item: "Quit", text: t("menu.native.quit") }),
+          // [116] Eigener Eintrag statt „Quit": der vordefinierte beendet den Prozess ohne Fenster-Schliessen und
+          // damit ohne Rückfrage bei ungespeicherten Änderungen.
+          await MenuItem.new({
+            text: t("menu.native.quit"),
+            accelerator: "CmdOrCtrl+Q",
+            action: () => {
+              const h = handlersRef.current;
+              if (h.onQuitApp) h.onQuitApp();
+            },
+          }),
         ],
       });
 

@@ -905,6 +905,8 @@ export default function App() {
       <>
         {projectSync}
         <BootScreen phase={bootPhase} setPhase={setBootPhase} files={files} notify={notify} />
+        {/* [116] Meldungen schon am Startbildschirm (beschädigte Wiederherstellungskopie, fehlende zuletzt geöffnete Datei). */}
+        <Toast />
       </>
     );
   }

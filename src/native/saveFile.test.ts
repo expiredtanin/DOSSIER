@@ -79,4 +79,17 @@ describe("saveTextFile atomar ([116])", () => {
     ).rejects.toBeInstanceOf(m.SaveError);
     expect(saved).toEqual([]);
   });
+
+  it("Fehler im Speichern-Dialog selbst: SaveError statt stillem Download (Projekt gilt als ungespeichert)", async () => {
+    vi.resetModules();
+    vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
+    vi.doMock("@tauri-apps/plugin-dialog", () => ({
+      save: async () => {
+        throw new Error("Dialog nicht verfügbar");
+      },
+    }));
+    vi.doMock("@tauri-apps/api/core", () => ({ invoke: async () => {} }));
+    const m = await import("./saveFile");
+    await expect(m.saveTextFile("{}", "a.obp", "application/json", undefined, undefined, true)).rejects.toBeInstanceOf(m.SaveError);
+  });
 });

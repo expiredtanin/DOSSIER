@@ -16,6 +16,14 @@ contextBridge.exposeInMainWorld("dossierWindow", {
     ipcRenderer.on("window:maximized-changed", listener);
     return () => ipcRenderer.removeListener("window:maximized-changed", listener);
   },
+  // [116] Schliess-Wächter: bei ungespeicherten Änderungen fragt die Oberfläche (Overlay) nach, statt dass das Fenster zugeht.
+  setCloseGuard: (enabled) => ipcRenderer.send("window:set-close-guard", !!enabled),
+  onCloseRequested: (callback) => {
+    const listener = () => callback();
+    ipcRenderer.on("window:close-requested", listener);
+    return () => ipcRenderer.removeListener("window:close-requested", listener);
+  },
+  forceClose: () => ipcRenderer.send("window:force-close"),
 });
 
 // [211] Rendering mit Blender: Prozess im Hauptprozess (electron-blender.cjs), Renderer-Seite src/native/blender.ts.

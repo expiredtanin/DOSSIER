@@ -93,11 +93,28 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   Seed je Lauf (Suche mit anderen Seeds von Hand); Speicher-Abbruch (`handle_alloc_error`) lässt sich nicht per
   `catch_unwind` fangen, der Test bricht dann den ganzen Lauf ab; WASM-Bindungen (`web/`) und TS-Seite nicht abgedeckt; Rust-Panic im WASM selbst
   nicht gemessen ([118] bleibt Wiederanlauf). · M
+- ◐ **[116]** Datensicherheit, Audit (14.11.): Speichern/Autosave/Wiederherstellen/Schliessen. Test zuerst, Befunde behoben: (1) **Schliessen ohne Rückfrage:**
+  Fenster zu, Cmd+Q, Electron-Schliessen und Browser-Tab verwarfen ungespeicherte Änderungen (nur die 30-s-Kopie blieb). Jetzt `registerCloseGuard`
+  (`native/projectFile.ts`): Tauri `onCloseRequested` → Overlay „Ungespeicherte Änderungen" (wie Neu/Öffnen), danach `destroy`; Cmd+Q ist ein eigener
+  Menüeintrag (`onQuitApp`, `quitApp`), weil der vordefinierte „Quit" ohne Fenster-Schliessen beendet; Electron: Hauptprozess hält `close` an
+  (`window:close-requested`, `forceClose`); Browser `beforeunload`. Rechte `core:window:allow-destroy`, `process:allow-exit`. (2) **Autosave-Schlüssel nach
+  „Speichern unter":** Kopie lag unter dem alten Pfad (`openedProjectPathRef`), Wiederherstellen am neuen Pfad fand nichts, am alten bot es fremden Inhalt an
+  → Schlüssel = `savePathRef`; Speichern räumt alten, neuen und „unbenannt". (3) **Beschädigte Kopie:** wurde angeboten, Wiederherstellen scheiterte, die Kopie
+  blieb für immer → zwei Stände (`#prev`, im Speicher rotiert), Angebot nur der neuesten LESBAREN (Kern-Prüfung), beschädigte gelöscht, Hinweis (`recover.damaged*`).
+  (4) **Autosave-Fehler still:** Kontingent voll / kein IndexedDB schluckte alles, der Stand galt als gesichert → `writeAutosave` meldet, Stand wird erneut versucht,
+  einmalige Meldung `autosave.failed`. (5) **Speichern-Dialog-Fehler** fiel unter Tauri auf Browser-Download zurück und galt als gespeichert → `SaveError`.
+  (6) Öffnen: Lese-/Dialogfehler (nativ, Vorlage, FileReader) nur in der Konsole → `notify`. (7) Meldungen am Startbildschirm unsichtbar (`<Toast />` fehlte dort).
+  Geprüft ohne Befund: `save_atomic` (Temp + fsync + Umbenennen + `~`; 3 neue Rust-Tests), Fehler → `SaveError` → `notify`, Projekt bleibt ungespeichert;
+  Rundreise aller Beispiele und der Robustheits-Fixtures samt Libobj/`fill`/`identifiers`/Baurecht (`src/io/projectRoundtrip.test.ts`); Autosave `sampleProjectBig`
+  (1.7 MB) Serialisieren ≈ 35 ms, Prüfen ≈ 33 ms (headless gemessen). Tests: `autosave.test.ts`, `closeGuard.test.ts`, `saveFile.test.ts`, `e2e/datensicherheit116.spec.ts`
+  (Browser). **Offen:** nichts davon in der Tauri-App geprüft — `doc/RELEASE-1.0.md` Abschnitt 14 (Mac); Exporte (`saveBinaryFile`, PDF/DXF) schreiben weiter nicht atomar;
+  Electron schreibt Projektdateien als Download (kein atomares Überschreiben möglich), `.obp~` ohne Wiederherstellungs-UI; Autosave ist ein Fenster-Zustand der Webview
+  (Löschen der Webview-Daten löscht die Kopien); Autosave serialisiert im Hauptfaden (≈ 35 ms bei Grossgebäude, bei viel grösseren Projekten Worker erwägen). · S
 - Release-Notes-Entwurf `doc/RELEASE-NOTES-1.0.md` (14.11.), offene Fragen an den Maintainer dort markiert (`**[Frage M: …]**`); nach dem Mac-Durchlauf [206] Einschränkungen nachführen.
 - [30] Release-Workflow lauffähig: macOS universal signiert/notarisiert, Updater, Versionsnummer 1.0.0-beta; [57]/[120] CI auf GitHub grün.
 - „Mac-Gegenprobe“ (Sammelpunkt unten) für alles im Referenz-Ablauf abarbeiten (Maintainer), Befunde sofort beheben;
   [194] Texte synchron, [195b] Objektfenster, [190] Cmd+J auf dem Mac bestätigen.
-- Datensicherheit: Speichern/Autosave/Wiederherstellen auf dem Mac ([116]), Öffnen alter Beispielstände, kein Kern-Panic im Ablauf.
+- Datensicherheit: Speichern/Autosave/Wiederherstellen auf dem Mac ([116], Audit 14.11. s. o.; Mac-Prüfschritte `doc/RELEASE-1.0.md` Abschnitt 14), Öffnen alter Beispielstände (Rundreise-Test grün), kein Kern-Panic im Ablauf.
 
 ### Phase 2 (20.–26.11.): Wettbewerb lückenlos
 - ◐ **[226]** Schriftfamilien im GPU-Text (13.11., Nachfolger [218]/[194]): Der Glyphen-Pass (`render2d/src/glyph.rs`, WebGPU und Metal) kannte nur

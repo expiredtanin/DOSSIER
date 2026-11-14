@@ -206,25 +206,96 @@ function isLockInfo(v: unknown): v is LockInfo {
   );
 }
 
+/** Was beim Schliessen des Hauptfensters zu tun ist ([116]). */
+export interface CloseGuardOptions {
+  /** Pfad der offenen Projektdatei (Lock-Freigabe), sonst `null`. */
+  getPath: () => string | null;
+  /** Ungespeicherte Änderungen? */
+  isDirty: () => boolean;
+  /** Fragt den Nutzer (Overlay-Dialog Speichern / Nicht speichern / Abbrechen); `proceed` schliesst wirklich. */
+  requestClose: (proceed: () => void) => void;
+}
+
 /**
- * Best-effort Freigabe beim Schliessen des Fensters (sauberes Timing): der
- * OS-Lock fällt beim Prozessende/Absturz ohnehin automatisch weg (fs4-Handle
- * schliesst mit dem Prozess) — dieser Hook sorgt nur dafür, dass ein normales
- * Schliessen die Lock-Datei nicht unnötig bis zum nächsten GC/Poll blockiert.
- * No-op ohne Tauri.
+ * Schliessen angefordert: ohne ungespeicherte Änderungen Lock freigeben und durchlassen (`false`); sonst das
+ * Schliessen verhindern, den Dialog zeigen und erst nach Bestätigung (`proceed`) Lock freigeben und `close` rufen (`true`).
+ * Cmd+Q, die Titelleiste und der Schliessen-Knopf laufen alle hierüber.
  */
-export function registerLockAutoRelease(getPath: () => string | null): void {
+export function handleCloseRequested(event: { preventDefault: () => void }, o: CloseGuardOptions, close: () => void): boolean {
+  const release = () => {
+    const path = o.getPath();
+    if (path) void releaseProjectLock(path);
+  };
+  if (!o.isDirty()) {
+    release();
+    return false;
+  }
+  event.preventDefault();
+  o.requestClose(() => {
+    release();
+    close();
+  });
+  return true;
+}
+
+/** Beendet die App ohne weitere Rückfrage (Tauri; nach dem Bestätigen des Dialogs). */
+export async function quitApp(): Promise<void> {
   if (!isTauriRuntime()) return;
-  void (async () => {
-    try {
-      const { getCurrentWindow } = await import("@tauri-apps/api/window");
-      const win = getCurrentWindow();
-      await win.onCloseRequested(() => {
-        const path = getPath();
-        if (path) void releaseProjectLock(path);
-      });
-    } catch {
-      // Tauri-window-API nicht verfügbar -> ignorieren, OS-Lock greift ohnehin.
-    }
-  })();
+  try {
+    const { exit } = await import("@tauri-apps/plugin-process");
+    await exit(0);
+  } catch (e) {
+    console.error("App beenden fehlgeschlagen.", e);
+  }
+}
+
+/**
+ * Schliess-Wächter des Hauptfensters ([116]): ungespeicherte Änderungen fragen nach (Overlay, kein `window.confirm`),
+ * der Datei-Lock wird beim Schliessen frei. Tauri: `onCloseRequested` (zerstört das Fenster erst nach Bestätigung);
+ * Electron: Hauptprozess leitet das Schliessen an uns (`window:close-requested`); Browser: `beforeunload`
+ * (das System-Fenster des Browsers; ein eigener Dialog ist dort nicht möglich). Liefert die Abmeldung.
+ */
+export function registerCloseGuard(o: CloseGuardOptions): () => void {
+  if (typeof window === "undefined") return () => {};
+  if (isTauriRuntime()) {
+    let off: (() => void) | null = null;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const { getCurrentWindow } = await import("@tauri-apps/api/window");
+        const win = getCurrentWindow();
+        const un = await win.onCloseRequested((event) => {
+          handleCloseRequested(event, o, () => void win.destroy());
+        });
+        if (cancelled) un();
+        else off = un;
+      } catch {
+        // Tauri-window-API nicht verfügbar -> ignorieren, OS-Lock greift ohnehin.
+      }
+    })();
+    return () => {
+      cancelled = true;
+      off?.();
+    };
+  }
+  const ew = window.dossierWindow;
+  if (ew?.setCloseGuard && ew.onCloseRequested && ew.forceClose) {
+    const force = () => ew.forceClose!();
+    ew.setCloseGuard(true);
+    const un = ew.onCloseRequested(() => {
+      if (!handleCloseRequested({ preventDefault: () => {} }, o, force)) force();
+    });
+    return () => {
+      un();
+      ew.setCloseGuard!(false);
+    };
+  }
+  if (typeof window.addEventListener !== "function") return () => {};
+  const onBeforeUnload = (e: BeforeUnloadEvent) => {
+    if (!o.isDirty()) return;
+    e.preventDefault();
+    e.returnValue = "";
+  };
+  window.addEventListener("beforeunload", onBeforeUnload);
+  return () => window.removeEventListener("beforeunload", onBeforeUnload);
 }

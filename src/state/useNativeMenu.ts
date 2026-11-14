@@ -85,6 +85,7 @@ export function useNativeMenu(opts: {
   } = opts;
   const {
     onNewProject,
+    onQuitApp,
     onNewProjectFromSample,
     onNewProjectFromComplexSample,
     onNewProjectFromWettbewerbSample,
@@ -113,6 +114,7 @@ export function useNativeMenu(opts: {
   useNativeAppMenu(
     {
       onNewProject,
+      onQuitApp,
       onNewProjectFromSample,
       onNewProjectFromComplexSample,
       onNewProjectFromWettbewerbSample,

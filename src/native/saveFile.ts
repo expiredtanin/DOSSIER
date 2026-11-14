@@ -77,6 +77,8 @@ export async function saveTextFile(
       return true;
     } catch (err) {
       if (err instanceof SaveError) throw err;
+      // Projektdatei ([116]): ein stiller Download-Ersatz würde als „gespeichert" gelten, obwohl am Zielort nichts liegt.
+      if (atomic) throw new SaveError(err instanceof Error ? err.message : String(err));
       if (!warnedFallback) {
         warnedFallback = true;
         console.warn(
