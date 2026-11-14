@@ -186,6 +186,7 @@ export type QueryName =
   | "programCompare"
   | "programLayout"
   | "ivhb"
+  | "siteProof"
   | "siteCheck"
   | "excavationQuantities"
   | "dormerStatus"

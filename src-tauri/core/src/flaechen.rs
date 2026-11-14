@@ -572,7 +572,7 @@ pub fn ivhb(p: &Project, opt: &IvhbOptions) -> Ivhb {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     fn close(a: f64, b: f64) -> bool {
@@ -582,7 +582,7 @@ mod tests {
     /// Einfaches Haus: Achsen 10 × 8 m, Wände 0.3 m, Räume innen 9.7 × 7.7 m.
     /// EG (HNF 9.7×4 = 38.8, NNF 9.7×1.7 = 16.49, VF 9.7×2 = 19.4), OG (HNF 74.69),
     /// UG (FF 74.69) unter ±0.00. Geschosshöhe 2.6 m.
-    fn house() -> Project {
+    pub(crate) fn house() -> Project {
         let json = r#"{
           "drawingLevels":[
             {"id":"ug","name":"UG","kind":"floor","visible":true,"locked":false,"baseElevation":-2.6,"floorHeight":2.6},

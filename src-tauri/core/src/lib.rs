@@ -23,6 +23,7 @@ pub mod sun;
 pub mod tree;
 pub mod camera;
 pub mod site_rules;
+pub mod site_proof;
 pub mod auto_dimensions;
 pub mod kennzahlen;
 pub mod flaechen;

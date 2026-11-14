@@ -38,7 +38,7 @@ interface Catalog {
   valueKeys: string[];
 }
 
-export const TABLE_SOURCES: readonly LayoutTableSource[] = ["openings", "areas", "rooms", "elements", "earthworks", "roomBook", "costs"];
+export const TABLE_SOURCES: readonly LayoutTableSource[] = ["openings", "areas", "rooms", "elements", "earthworks", "roomBook", "costs", "siteProof"];
 
 export function tableSourceLabel(s: LayoutTableSource): string {
   return t(`sheetTable.source.${s}`);

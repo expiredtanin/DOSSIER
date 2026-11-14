@@ -17,6 +17,7 @@ import { t } from "../i18n/translate";
 import { core } from "../engine/coreWasm";
 import { computeAreaTable, computeIvhb } from "../analysis/areaTable";
 import type { AreaRow, IvhbOptions } from "../analysis/areaTable";
+import { computeSiteProof } from "../analysis/siteProof";
 
 /** Zelle: Text oder Zahl (`d` Nachkommastellen, `null` = nicht berechenbar). */
 export type Cell = string | { n: number | null; d: number; g?: boolean };
@@ -51,6 +52,8 @@ export interface AreaReportOptions {
   /** IVHB-Kennziffern aufnehmen (Default nein). */
   ivhb?: boolean;
   ivhbOptions?: IvhbOptions;
+  /** Baurecht-Nachweis ([255]): Vorgaben der Parzelle gegen Kennzahlen, mit Grundlagen (Default nein). */
+  siteProof?: boolean;
 }
 
 const num = (n: number | null | undefined, d: number): Cell => ({ n: n === undefined || n === null || !Number.isFinite(n) ? null : n, d });
@@ -114,6 +117,30 @@ export function buildAreaReport(project: Project, opts: AreaReportOptions = {}):
     });
     notes.push(t("areas.foot.ivhb"));
     addNotes(v.notes);
+  }
+  if (opts.siteProof) {
+    const pr = computeSiteProof(project, opts.ivhbOptions);
+    const dash = t("siteProof.none");
+    const val = (n: number | null, d: number): Cell => (n === null || !Number.isFinite(n) ? dash : { n, d });
+    sections.push({
+      heading: t("siteProof.table"),
+      columns: [t("siteProof.col.item"), t("siteProof.col.allowed"), t("siteProof.col.actual"), t("siteProof.col.reserve"), t("siteProof.col.ok")],
+      widths: [5, 1.6, 1.6, 2.2, 1.1],
+      rows: pr.rows.map((r) => ({
+        cells: [t(`siteProof.row.${r.key}`), val(r.allowed, r.decimals), val(r.actual, r.decimals), val(r.reserve, r.decimals), r.ok === null ? dash : t(r.ok ? "siteProof.ok.yes" : "siteProof.ok.no")],
+      })),
+    });
+    sections.push({
+      heading: t("siteProof.basis.title"),
+      columns: [t("siteProof.col.item"), t("siteProof.col.value"), t("siteProof.col.source")],
+      widths: [5, 1.8, 4.5],
+      rows: pr.basis.map((b) => ({ cells: [t(`siteProof.basis.${b.key}`), val(b.value, b.decimals), t(`siteProof.src.${b.source}`)] })),
+    });
+    notes.push(t("siteProof.foot"));
+    for (const k of pr.notes) {
+      const text = t(`siteProof.note.${k}`);
+      if (!notes.includes(text)) notes.push(text);
+    }
   }
   return { title: t("areas.title"), ...reportHead(project), sections, notes };
 }

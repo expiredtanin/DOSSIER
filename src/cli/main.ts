@@ -23,7 +23,7 @@
 //                                                  --snapshot <Name|id> übernimmt Geschoss, Massstab, Vorlage und Sichtbarkeit eines Ausschnitts [207]
 //   dossier-cli <projekt.obp> ifc [--ebkph] [--ebenen]   (IFC mit eBKP-H-Hauptgruppen bzw. Modell-Ebenen als Klassifikation)
 //                                                  --schema 4|2x3: IFC4 (Standard) oder IFC2x3 (Coordination View 2.0)
-//   dossier-cli <projekt.obp> dxf [--binary] [--scale 100] [--dim-unit cm] [--layout]|dwg|ifc|step|obj [--no-mtl]|stl|glb|gltf|schedule [--openings|--elements|--rooms] [--format json|csv|svg|pdf]|kennzahlen [--sia416] [--ivhb] [--format json|csv|svg|pdf] [--agsf m2] [--gruenflaeche m2] [--agf-basis gf|ngf|nf] [--untergeschosse]|raumprogramm [--import tabelle] [--sheet name|nr] [--mode replace|append] [--tolerance %] [--generate] [--format json|csv|svg|pdf] [--save projekt.obp]|sun [--level EG] [--out datei]
+//   dossier-cli <projekt.obp> dxf [--binary] [--scale 100] [--dim-unit cm] [--layout]|dwg|ifc|step|obj [--no-mtl]|stl|glb|gltf|schedule [--openings|--elements|--rooms] [--format json|csv|svg|pdf]|kennzahlen [--sia416] [--ivhb] [--nachweis] [--format json|csv|svg|pdf] [--agsf m2] [--gruenflaeche m2] [--agf-basis gf|ngf|nf] [--untergeschosse]|raumprogramm [--import tabelle] [--sheet name|nr] [--mode replace|append] [--tolerance %] [--generate] [--format json|csv|svg|pdf] [--save projekt.obp]|sun [--level EG] [--out datei]
 //                                                  glb/gltf = glTF 2.0 (Y-up, Meter, Geschoss als Eltern; --flat ohne Geschoss-Knoten)
 //   dossier-cli convert <eingabe> <ausgabe> [--cmd "befehl"]…   Format nach Endung: dxf/dwg/ifc/obp → obp-Import,
 //                                                  obp → dxf/dwg/ifc/obj/stl/glb/gltf/step; --cmd: weitere Befehle
@@ -85,6 +85,7 @@ import {
   computeKennzahlen,
   computeAreaTable,
   computeIvhb,
+  computeSiteProof,
   buildAreaReport,
   buildOpeningReport,
   openingSchedule,
@@ -1025,7 +1026,7 @@ async function execute(project: Project, file: string, command: string, rest: st
       return 0;
     case "kennzahlen": {
       // --sia416 / --ivhb: Flächentabelle bzw. IVHB-Kennziffern [70]; --format json|csv|svg|pdf (Default json).
-      if (args.flags.has("sia416") || args.flags.has("ivhb")) {
+      if (args.flags.has("sia416") || args.flags.has("ivhb") || args.flags.has("nachweis")) {
         const num = (k: string): number | undefined => {
           const v = args.flags.get(k);
           if (v === undefined) return undefined;
@@ -1038,14 +1039,15 @@ async function execute(project: Project, file: string, command: string, rest: st
         const ivhbOptions = { agsf: num("agsf"), greenArea: num("gruenflaeche"), agfBasis: basis, includeUnderground: args.flags.has("untergeschosse") } as const;
         const wantAreas = args.flags.has("sia416");
         const wantIvhb = args.flags.has("ivhb");
+        const wantProof = args.flags.has("nachweis");
         const format = args.flags.get("format") ?? "json";
         const stem = `${exportProjectName(project) || "projekt"}-flaechen`;
         if (format === "json") {
-          const json = { ...(wantAreas ? { flaechentabelle: computeAreaTable(project) } : {}), ...(wantIvhb ? { ivhb: computeIvhb(project, ivhbOptions) } : {}) };
+          const json = { ...(wantAreas ? { flaechentabelle: computeAreaTable(project) } : {}), ...(wantIvhb ? { ivhb: computeIvhb(project, ivhbOptions) } : {}), ...(wantProof ? { baurechtNachweis: computeSiteProof(project, ivhbOptions) } : {}) };
           out(args, JSON.stringify(json, null, 2), `${stem}.json`);
           return 0;
         }
-        const report = buildAreaReport(project, { areas: wantAreas, ivhb: wantIvhb, ivhbOptions });
+        const report = buildAreaReport(project, { areas: wantAreas, ivhb: wantIvhb, siteProof: wantProof, ivhbOptions });
         if (format === "csv") out(args, areaReportToCsv(report), `${stem}.csv`);
         else if (format === "svg") out(args, areaReportToSvg(report), `${stem}.svg`);
         else if (format === "pdf") out(args, new Uint8Array(buildAreaReportPdf(report).output("arraybuffer")), `${stem}.pdf`);

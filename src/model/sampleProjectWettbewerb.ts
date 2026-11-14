@@ -286,6 +286,8 @@ export function buildWettbewerbSampleProject(): Project {
       // Grenzabstände je Parzellenkante (Süd, Ost, Nord/Strasse, West).
       setbacks: [4, 4, 5, 4], defaultSetback: 4,
       maxHeight: 12, show: true, show3d: true,
+      // Beispielwerte (fiktive Zone) für den Baurecht-Nachweis [255].
+      maxAz: 0.8, maxUz: 0.35, maxFacadeHeight: 12,
     },
     referenceElevationMasl: 441.3,
     geoAnchor: { lv95: { e: 2697450, n: 1261800 }, height: 441.3, model: P(0, 0), label: "Hofwiesenstrasse, 8400 Winterthur (fiktiv)" },
