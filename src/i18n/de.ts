@@ -3820,6 +3820,7 @@ export const de = {
   "history.op.reorder": "{what} umordnen",
   "history.op.setField": "{what} ändern",
   "history.cmd.arc": "Bogen",
+  "history.cmd.contextToTerrain": "Aufs Gelände setzen",
   "history.cmd.autodim": "Automassketten",
   "history.cmd.bezier": "Bézierkurve",
   "history.cmd.block": "Block einfügen",

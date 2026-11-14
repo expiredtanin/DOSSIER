@@ -218,9 +218,12 @@ pub fn ops(root: &Map<String, Value>, p: &crate::model::Project, v: &Value) -> O
     // [227] Kontextgebäude aufs Gelände setzen: ein Befehl für mehrere Netze (`ids`).
     if cmd == "contextToTerrain" {
         let ids: Vec<&str> = v.get("ids").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).collect()).unwrap_or_default();
+        // [257] Gelände einmal, Elemente über eine Id-Tabelle (Hunderte Gebäude: sonst je Gebäude neu bzw. linear gesucht).
+        let ground = crate::context_ground::Grounder::new(p);
+        let by_id: std::collections::HashMap<&str, &Value> = arr(root.get("context")).iter().filter_map(|e| id_of(e).map(|i| (i, e))).collect();
         return Some(
             ids.into_iter()
-                .filter_map(|id| element(root, id).and_then(|e| crate::context_ground::ground_element(p, e)))
+                .filter_map(|id| by_id.get(id).and_then(|e| crate::context_ground::ground_element_with(&ground, e)))
                 .map(|entity| Op::Replace { collection: "context".into(), entity })
                 .collect(),
         );
