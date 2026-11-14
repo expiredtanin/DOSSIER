@@ -12,7 +12,7 @@
 // normalen Schliessen. Nur unter Tauri relevant: im reinen Browser gibt es
 // keinen echten Dateipfad (Blob-Download), daher entfällt der Lock dort.
 
-import { saveTextFile } from "./saveFile";
+import { saveTextFile, SaveError } from "./saveFile";
 
 /** Datei-Endung für Projektdateien (ohne Punkt). Einzige Änderungsstelle. */
 export const PROJECT_EXT = "obp";
@@ -37,6 +37,57 @@ export const PROJECT_TEMPLATE_DIALOG_FILTERS = [
 /** Erkennt Tauri wie an anderen Stellen (saveFile.ts, nativeSync.ts). */
 export function isTauriRuntime(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+}
+
+/** Brücke des Electron-Hauptprozesses für Projektdateien ([116], `scripts/electron-files.cjs`, `electron-preload.cjs`). */
+export interface DossierFiles {
+  saveAtomic: (path: string, text: string) => Promise<boolean>;
+  /** Speichern-Dialog + atomar schreiben; `null` = abgebrochen. */
+  saveAs: (defaultName: string, text: string, filters?: { name: string; extensions: string[] }[]) => Promise<string | null>;
+  backupExists: (path: string) => Promise<boolean>;
+  readBackup: (path: string) => Promise<string | null>;
+  /** Pfad einer vom Nutzer gewählten Datei (Electron), sonst `null`. */
+  pathForFile: (file: File) => string | null;
+}
+declare global {
+  interface Window {
+    dossierFiles?: DossierFiles;
+  }
+}
+
+/** Electron-Dateibrücke, falls vorhanden. */
+export function electronFiles(): DossierFiles | null {
+  return typeof window !== "undefined" && window.dossierFiles ? window.dossierFiles : null;
+}
+
+const errMsg = (err: unknown): string => (err instanceof Error ? err.message : String(err));
+
+/** Gibt es zur Projektdatei `path` eine Sicherung der Vorversion (`<path>~`)? Ohne Dateisystem (Browser) immer `false`. */
+export async function backupAvailable(path: string): Promise<boolean> {
+  try {
+    if (isTauriRuntime()) {
+      const { invoke } = await import("@tauri-apps/api/core");
+      return (await invoke("backup_exists", { path })) === true;
+    }
+    return (await electronFiles()?.backupExists(path)) === true;
+  } catch {
+    return false;
+  }
+}
+
+/** Inhalt der Sicherung `<path>~`; `null`, wenn es keine gibt (oder ohne Dateisystem). */
+export async function readBackupText(path: string): Promise<string | null> {
+  try {
+    if (isTauriRuntime()) {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const text = await invoke("read_backup", { path });
+      return typeof text === "string" ? text : null;
+    }
+    const text = await electronFiles()?.readBackup(path);
+    return typeof text === "string" ? text : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Ergebnis eines erfolgreichen nativen Öffnen-Vorgangs. */
@@ -134,6 +185,18 @@ export async function saveProjectFile(
     return true;
   }
   const filename = `${projectName || "projekt"}.${PROJECT_EXT}`;
+  // Electron ([116]): atomar über den Hauptprozess (Temp + Umbenennen, Vorversion als `~`); ohne bekannten Pfad Dialog dort.
+  const ef = electronFiles();
+  if (ef && !isTauriRuntime()) {
+    try {
+      const path = knownPath ? ((await ef.saveAtomic(knownPath, json)), knownPath) : await ef.saveAs(filename, json, PROJECT_DIALOG_FILTERS);
+      if (!path) return false; // Dialog abgebrochen
+      onSavedPath?.(path);
+      return true;
+    } catch (err) {
+      throw new SaveError(errMsg(err));
+    }
+  }
   return saveTextFile(json, filename, "application/json", PROJECT_DIALOG_FILTERS, onSavedPath, true);
 }
 
@@ -206,25 +269,96 @@ function isLockInfo(v: unknown): v is LockInfo {
   );
 }
 
+/** Was beim Schliessen des Hauptfensters zu tun ist ([116]). */
+export interface CloseGuardOptions {
+  /** Pfad der offenen Projektdatei (Lock-Freigabe), sonst `null`. */
+  getPath: () => string | null;
+  /** Ungespeicherte Änderungen? */
+  isDirty: () => boolean;
+  /** Fragt den Nutzer (Overlay-Dialog Speichern / Nicht speichern / Abbrechen); `proceed` schliesst wirklich. */
+  requestClose: (proceed: () => void) => void;
+}
+
 /**
- * Best-effort Freigabe beim Schliessen des Fensters (sauberes Timing): der
- * OS-Lock fällt beim Prozessende/Absturz ohnehin automatisch weg (fs4-Handle
- * schliesst mit dem Prozess) — dieser Hook sorgt nur dafür, dass ein normales
- * Schliessen die Lock-Datei nicht unnötig bis zum nächsten GC/Poll blockiert.
- * No-op ohne Tauri.
+ * Schliessen angefordert: ohne ungespeicherte Änderungen Lock freigeben und durchlassen (`false`); sonst das
+ * Schliessen verhindern, den Dialog zeigen und erst nach Bestätigung (`proceed`) Lock freigeben und `close` rufen (`true`).
+ * Cmd+Q, die Titelleiste und der Schliessen-Knopf laufen alle hierüber.
  */
-export function registerLockAutoRelease(getPath: () => string | null): void {
+export function handleCloseRequested(event: { preventDefault: () => void }, o: CloseGuardOptions, close: () => void): boolean {
+  const release = () => {
+    const path = o.getPath();
+    if (path) void releaseProjectLock(path);
+  };
+  if (!o.isDirty()) {
+    release();
+    return false;
+  }
+  event.preventDefault();
+  o.requestClose(() => {
+    release();
+    close();
+  });
+  return true;
+}
+
+/** Beendet die App ohne weitere Rückfrage (Tauri; nach dem Bestätigen des Dialogs). */
+export async function quitApp(): Promise<void> {
   if (!isTauriRuntime()) return;
-  void (async () => {
-    try {
-      const { getCurrentWindow } = await import("@tauri-apps/api/window");
-      const win = getCurrentWindow();
-      await win.onCloseRequested(() => {
-        const path = getPath();
-        if (path) void releaseProjectLock(path);
-      });
-    } catch {
-      // Tauri-window-API nicht verfügbar -> ignorieren, OS-Lock greift ohnehin.
-    }
-  })();
+  try {
+    const { exit } = await import("@tauri-apps/plugin-process");
+    await exit(0);
+  } catch (e) {
+    console.error("App beenden fehlgeschlagen.", e);
+  }
+}
+
+/**
+ * Schliess-Wächter des Hauptfensters ([116]): ungespeicherte Änderungen fragen nach (Overlay, kein `window.confirm`),
+ * der Datei-Lock wird beim Schliessen frei. Tauri: `onCloseRequested` (zerstört das Fenster erst nach Bestätigung);
+ * Electron: Hauptprozess leitet das Schliessen an uns (`window:close-requested`); Browser: `beforeunload`
+ * (das System-Fenster des Browsers; ein eigener Dialog ist dort nicht möglich). Liefert die Abmeldung.
+ */
+export function registerCloseGuard(o: CloseGuardOptions): () => void {
+  if (typeof window === "undefined") return () => {};
+  if (isTauriRuntime()) {
+    let off: (() => void) | null = null;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const { getCurrentWindow } = await import("@tauri-apps/api/window");
+        const win = getCurrentWindow();
+        const un = await win.onCloseRequested((event) => {
+          handleCloseRequested(event, o, () => void win.destroy());
+        });
+        if (cancelled) un();
+        else off = un;
+      } catch {
+        // Tauri-window-API nicht verfügbar -> ignorieren, OS-Lock greift ohnehin.
+      }
+    })();
+    return () => {
+      cancelled = true;
+      off?.();
+    };
+  }
+  const ew = window.dossierWindow;
+  if (ew?.setCloseGuard && ew.onCloseRequested && ew.forceClose) {
+    const force = () => ew.forceClose!();
+    ew.setCloseGuard(true);
+    const un = ew.onCloseRequested(() => {
+      if (!handleCloseRequested({ preventDefault: () => {} }, o, force)) force();
+    });
+    return () => {
+      un();
+      ew.setCloseGuard!(false);
+    };
+  }
+  if (typeof window.addEventListener !== "function") return () => {};
+  const onBeforeUnload = (e: BeforeUnloadEvent) => {
+    if (!o.isDirty()) return;
+    e.preventDefault();
+    e.returnValue = "";
+  };
+  window.addEventListener("beforeunload", onBeforeUnload);
+  return () => window.removeEventListener("beforeunload", onBeforeUnload);
 }

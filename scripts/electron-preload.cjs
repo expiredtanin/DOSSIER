@@ -4,7 +4,7 @@
 // electron-main.cjs) — sonst gaebe es keine Moeglichkeit, das Fenster ueberhaupt
 // zu steuern.
 
-const { contextBridge, ipcRenderer } = require("electron");
+const { contextBridge, ipcRenderer, webUtils } = require("electron");
 
 contextBridge.exposeInMainWorld("dossierWindow", {
   minimize: () => ipcRenderer.send("window:minimize"),
@@ -16,6 +16,14 @@ contextBridge.exposeInMainWorld("dossierWindow", {
     ipcRenderer.on("window:maximized-changed", listener);
     return () => ipcRenderer.removeListener("window:maximized-changed", listener);
   },
+  // [116] Schliess-Wächter: bei ungespeicherten Änderungen fragt die Oberfläche (Overlay) nach, statt dass das Fenster zugeht.
+  setCloseGuard: (enabled) => ipcRenderer.send("window:set-close-guard", !!enabled),
+  onCloseRequested: (callback) => {
+    const listener = () => callback();
+    ipcRenderer.on("window:close-requested", listener);
+    return () => ipcRenderer.removeListener("window:close-requested", listener);
+  },
+  forceClose: () => ipcRenderer.send("window:force-close"),
 });
 
 // [211] Rendering mit Blender: Prozess im Hauptprozess (electron-blender.cjs), Renderer-Seite src/native/blender.ts.
@@ -46,5 +54,21 @@ contextBridge.exposeInMainWorld("dossierLaunch", {
     const listener = (_event, file) => callback(file);
     ipcRenderer.on("launch:open-file", listener);
     return () => ipcRenderer.removeListener("launch:open-file", listener);
+  },
+});
+
+// [116] Projektdateien: atomar speichern (Temp + Umbenennen, Vorversion als `~`), „Speichern unter", Sicherung lesen.
+// Renderer-Seite: src/native/projectFile.ts. `pathForFile` liefert den Pfad einer im Dialog gewählten Datei.
+contextBridge.exposeInMainWorld("dossierFiles", {
+  saveAtomic: (path, text) => ipcRenderer.invoke("file:save-atomic", path, text),
+  saveAs: (defaultName, text, filters) => ipcRenderer.invoke("file:save-as", defaultName, text, filters),
+  backupExists: (path) => ipcRenderer.invoke("file:backup-exists", path),
+  readBackup: (path) => ipcRenderer.invoke("file:read-backup", path),
+  pathForFile: (file) => {
+    try {
+      return webUtils.getPathForFile(file) || null;
+    } catch {
+      return null;
+    }
   },
 });

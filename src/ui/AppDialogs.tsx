@@ -35,6 +35,7 @@ import { ImageExportDialogHost } from "./ImageExportDialog";
 import { ShortcutOverviewDialogHost } from "./ShortcutOverviewDialog";
 import { PromptDialog } from "./PromptDialog";
 import { RecoverAutosaveDialog } from "./RecoverAutosaveDialog";
+import { BackupOfferDialog } from "./BackupOfferDialog";
 import { ResourceManager, type ResourceManagerHandlers } from "./ResourceManager";
 import { SettingsDialog } from "./SettingsDialog";
 import { UnsavedChangesDialog } from "./UnsavedChangesDialog";
@@ -113,6 +114,9 @@ export function AppDialogs(props: {
     onRecoverLater,
     lockConflict,
     setLockConflict,
+    backupOffer,
+    onBackupOfferAccept,
+    onBackupOfferCancel,
     pendingDiscard,
     setPendingDiscard,
     loadImportLayout,
@@ -261,6 +265,14 @@ export function AppDialogs(props: {
         onRestore={onRecoverRestore}
         onDiscard={onRecoverDiscard}
         onLater={onRecoverLater}
+      />
+    )}
+    {backupOffer && (
+      <BackupOfferDialog
+        path={backupOffer.path}
+        error={backupOffer.error}
+        onAccept={onBackupOfferAccept}
+        onCancel={onBackupOfferCancel}
       />
     )}
     {lockConflict && (

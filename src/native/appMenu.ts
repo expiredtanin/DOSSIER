@@ -25,6 +25,8 @@ import type { SelectionActionId } from "../state/selectionActions";
 /** Alle Aktionen, die die native Menüleiste auslösen kann. */
 export interface NativeAppMenuHandlers {
   onNewProject: () => void;
+  /** [116] Beenden (Cmd+Q) mit Rückfrage bei ungespeicherten Änderungen. */
+  onQuitApp?: () => void;
   onNewProjectFromSample: () => void;
   onNewProjectFromComplexSample: () => void;
   onNewProjectFromWettbewerbSample: () => void;
@@ -32,6 +34,8 @@ export interface NativeAppMenuHandlers {
   onOpenProject: () => void;
   onSaveProject: () => void;
   onSaveProjectAs: () => void;
+  /** Datei: vorige Fassung (.obp~) der aktuellen Datei wiederherstellen ([116]). */
+  onRestoreBackup: () => void;
   onImport: () => void;
   onExportPdf: () => void;
   onExportDxf: () => void;
@@ -201,6 +205,10 @@ export function useNativeAppMenu(
             text: t("menu.native.saveAs"),
             accelerator: "CmdOrCtrl+Shift+S",
             action: () => handlersRef.current.onSaveProjectAs(),
+          }),
+          await MenuItem.new({
+            text: t("menu.native.restoreBackup"),
+            action: () => handlersRef.current.onRestoreBackup(),
           }),
           await MenuItem.new({
             text: t("menu.native.import"),
@@ -529,7 +537,16 @@ export function useNativeAppMenu(
             text: t("menu.native.about"),
           }),
           await PredefinedMenuItem.new({ item: "Separator" }),
-          await PredefinedMenuItem.new({ item: "Quit", text: t("menu.native.quit") }),
+          // [116] Eigener Eintrag statt „Quit": der vordefinierte beendet den Prozess ohne Fenster-Schliessen und
+          // damit ohne Rückfrage bei ungespeicherten Änderungen.
+          await MenuItem.new({
+            text: t("menu.native.quit"),
+            accelerator: "CmdOrCtrl+Q",
+            action: () => {
+              const h = handlersRef.current;
+              if (h.onQuitApp) h.onQuitApp();
+            },
+          }),
         ],
       });
 

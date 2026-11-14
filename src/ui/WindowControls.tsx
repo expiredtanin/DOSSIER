@@ -17,6 +17,11 @@ interface DossierWindowApi {
   close: () => void;
   isMaximized: () => Promise<boolean>;
   onMaximizedChange: (callback: (isMaximized: boolean) => void) => () => void;
+  /** [116] Schliess-Wächter: Hauptprozess hält das Schliessen an und fragt über `onCloseRequested` nach. */
+  setCloseGuard?: (enabled: boolean) => void;
+  onCloseRequested?: (callback: () => void) => () => void;
+  /** Schliesst ohne weitere Rückfrage. */
+  forceClose?: () => void;
 }
 
 declare global {

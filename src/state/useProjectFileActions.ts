@@ -10,9 +10,9 @@ import { getState, setState, useStore } from "./appStore";
 import { onCoreRestart } from "../engine/coreWasm";
 import { historyPatch, storeDocument } from "./historySlice";
 import type { NotifyKind } from "./notifySlice";
-import { serializeProject } from "../io/projectFormat";
+import { parseProjectFile, serializeProject } from "../io/projectFormat";
 import { uiStateForSave } from "./viewTabs";
-import { AUTOSAVE_INTERVAL_MS, clearAutosave, createAutosaveTracker, readAutosave, writeAutosave } from "./autosave";
+import { AUTOSAVE_INTERVAL_MS, clearAutosave, createAutosaveTracker, pickAutosave, writeAutosave } from "./autosave";
 import type { AutosaveRecovery } from "./autosave";
 import { useEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
@@ -30,7 +30,7 @@ import { loadFileio } from "../engine/fileioWasm";
 import { exportProjectStep } from "../export/exportStep";
 import { exportGlb, exportMtl, exportObj, exportStl } from "../export/exportMesh";
 import type { ExportSaveFormat } from "../ui/ExportSaveDialog";
-import { saveBinaryFile, saveTextFile, saveTextWithCompanion } from "../native/saveFile";
+import { saveBinaryFile, saveTextFile, saveTextWithCompanion, setExportErrorReporter } from "../native/saveFile";
 import {
   saveProjectFile,
   openProjectFileNative,
@@ -38,8 +38,11 @@ import {
   openProjectTemplateNative,
   acquireProjectLock,
   releaseProjectLock,
-  registerLockAutoRelease,
+  registerCloseGuard,
+  quitApp,
   isTauriRuntime,
+  electronFiles,
+  readBackupText,
 } from "../native/projectFile";
 import type { LockInfo } from "../native/projectFile";
 import { addRecentProject, removeRecentProject } from "./recentProjects";
@@ -69,6 +72,8 @@ export type ImportDialogState = {
 /** Von electron-preload.cjs injiziert (nur Electron/Linux, [170]): Projektdatei aus `dossier datei.obp`. */
 interface LaunchProject {
   name: string;
+  /** Voller Pfad der Datei ([116]): Speichern schreibt dann atomar dorthin. */
+  path?: string;
   text: string;
 }
 declare global {
@@ -96,6 +101,15 @@ function openProjectOrReport(content: string, notify: (msg: string, kind?: Notif
   }
   for (const w of r.warnings) console.info(`Projekt geladen mit Hinweis: ${w}`);
   return r.project;
+}
+
+/** Angebot „Vorige Fassung (.obp~) öffnen" ([116]): die Datei liess sich nicht laden, die Sicherung schon. */
+export interface BackupOffer {
+  path: string;
+  text: string;
+  /** Fehlermeldung beim Laden der eigentlichen Datei. */
+  error: string;
+  lockOwned: boolean;
 }
 
 export function useProjectFileActions(
@@ -142,6 +156,12 @@ export function useProjectFileActions(
   // Eine verworfene Aktion (Neu/Öffnen), die erst nach Bestätigung des
   // "Ungespeicherte Änderungen"-Dialogs ausgeführt wird — s. `guardDiscard`.
   const [pendingDiscard, setPendingDiscard] = useState<(() => void) | null>(null);
+  const [backupOffer, setBackupOffer] = useState<BackupOffer | null>(null);
+  // Gescheiterte Export-Schreibvorgänge ([116], native/saveFile.ts) als Meldung statt stiller Konsole.
+  useEffect(() => {
+    setExportErrorReporter((msg) => notify(`${t("export.save.failed")} ${msg}`, "error"));
+    return () => setExportErrorReporter(null);
+  }, []);
   /**
    * Führt `action` (Projekt ERSETZEN — Neu/Öffnen) nur direkt aus, wenn seit
    * dem letzten Speichern/Laden nichts geändert wurde; sonst wird sie als
@@ -152,7 +172,7 @@ export function useProjectFileActions(
   const guardDiscard = (action: () => void) => {
     if (getState().project !== lastSavedProjectRef.current) {
       // Bewusst verworfen (oder vorher gespeichert) → Wiederherstellungskopie ist hinfällig.
-      const path = openedProjectPathRef.current;
+      const path = savePathRef.current;
       setPendingDiscard(() => () => {
         void clearAutosave(path);
         autosaveTracker.cleared();
@@ -164,11 +184,33 @@ export function useProjectFileActions(
   // ── Autosave + Wiederherstellen (s. state/autosave.ts) ─────────────────────
   const autosaveTracker = useRef(createAutosaveTracker()).current;
   const [recovery, setRecovery] = useState<AutosaveRecovery | null>(null);
+  // Kopie unter dem Schlüssel der Zieldatei (`savePathRef`: nach „Speichern unter" der NEUE Pfad). Misslingt das
+  // Schreiben (Kontingent voll, kein IndexedDB), gilt der Stand wieder als ungesichert (nächster Versuch) und der
+  // Nutzer erfährt es einmal, damit er von Hand speichert.
+  const autosaveWarned = useRef(false);
+  const runAutosave = (p: Project) => {
+    let text: string;
+    try {
+      text = serializeProject(p, uiStateForSave());
+    } catch (e) {
+      autosaveTracker.cleared();
+      console.error("Autosave: Serialisieren fehlgeschlagen.", e);
+      return;
+    }
+    void writeAutosave(savePathRef.current, text).then((ok) => {
+      if (ok) return;
+      autosaveTracker.cleared();
+      if (!autosaveWarned.current) {
+        autosaveWarned.current = true;
+        notify(t("autosave.failed"), "warning");
+      }
+    });
+  };
   useEffect(() => {
     const id = window.setInterval(() => {
       const p = getState().project;
       if (!autosaveTracker.shouldWrite(p, lastSavedProjectRef.current)) return;
-      void writeAutosave(openedProjectPathRef.current, serializeProject(p, uiStateForSave()));
+      runAutosave(p);
     }, AUTOSAVE_INTERVAL_MS);
     return () => window.clearInterval(id);
   }, []);
@@ -183,7 +225,7 @@ export function useProjectFileActions(
         if (info.quiet) return;
         const p = getState().project;
         try {
-          if (autosaveTracker.shouldWrite(p, lastSavedProjectRef.current)) void writeAutosave(openedProjectPathRef.current, serializeProject(p, uiStateForSave()));
+          if (autosaveTracker.shouldWrite(p, lastSavedProjectRef.current)) runAutosave(p);
         } catch (e) {
           console.error("Autosave nach Kern-Neustart fehlgeschlagen.", e);
         }
@@ -194,8 +236,10 @@ export function useProjectFileActions(
     [],
   );
   const offerRecovery = (path: string | null) => {
-    void readAutosave(path).then((r) => {
-      if (r) setRecovery({ path, text: r.text, savedAt: r.savedAt });
+    // Nur lesbare Kopien anbieten (Kern-Prüfung); eine beschädigte wird gelöscht und gemeldet, die vorige springt ein.
+    void pickAutosave(path, (text) => parseProjectFile(text).ok).then((r) => {
+      if (r.damaged) notify(t(r.found ? "recover.damagedOlder" : "recover.damaged"), "warning");
+      if (r.found) setRecovery({ path, text: r.found.text, savedAt: r.found.savedAt });
     });
   };
   // Start: Kopie eines nie gespeicherten Projekts aus der letzten Sitzung?
@@ -212,11 +256,26 @@ export function useProjectFileActions(
   };
   const onRecoverLater = () => setRecovery(null);
 
-  // Best-effort Lock-Freigabe beim Fenster-Schliessen (sauberes Timing; der
-  // OS-Lock fällt bei Prozessende/Absturz ohnehin automatisch weg). No-op ohne Tauri.
-  useEffect(() => {
-    registerLockAutoRelease(() => openedProjectPathRef.current);
-  }, []);
+  // [116] Schliess-Wächter: Fenster schliessen mit ungespeicherten Änderungen fragt im Overlay nach (Speichern /
+  // Nicht speichern / Abbrechen, wie bei Neu/Öffnen); Lock-Freigabe beim Schliessen (der OS-Lock fällt bei
+  // Prozessende/Absturz ohnehin weg). Tauri: onCloseRequested, Electron: Hauptprozess-Brücke, Browser: beforeunload.
+  const guardRef = useRef(guardDiscard);
+  guardRef.current = guardDiscard;
+  useEffect(
+    () =>
+      registerCloseGuard({
+        getPath: () => openedProjectPathRef.current,
+        isDirty: () => getState().project !== lastSavedProjectRef.current,
+        requestClose: (proceed) => guardRef.current(proceed),
+      }),
+    [],
+  );
+  // Cmd+Q (Menü „Beenden"): beendet den Prozess ohne Fenster-Schliessen, läuft daher selbst über den Wächter.
+  const onQuitApp = () =>
+    guardDiscard(() => {
+      releaseCurrentProjectLock();
+      void quitApp();
+    });
 
   // Eine Datei (Button ODER Drop) öffnet den modalen Import-Dialog. DXF (ASCII/Binär)
   // und DWG werden als Bytes im Web-Worker über das Rust-Format-Modul gelesen (lazy,
@@ -397,6 +456,7 @@ export function useProjectFileActions(
   const saveProjectTo = (asNew: boolean): Promise<boolean> => {
     const project = getState().project;
     const json = serializeProject(project, uiStateForSave());
+    const pathBefore = savePathRef.current;
     return saveProjectFile(json, project.name, (path) => {
       savePathRef.current = path;
       setAnonymityProjectFileName(path);
@@ -406,8 +466,8 @@ export function useProjectFileActions(
         if (saved) {
           lastSavedProjectRef.current = project;
           // Erst nach erfolgreichem Umbenennen ([116]) — bei Fehler bleibt die Kopie.
-          void clearAutosave(openedProjectPathRef.current);
-          void clearAutosave(null);
+          // Kopien des alten und des neuen Pfads sowie des „unbenannten" Projekts.
+          for (const key of new Set([pathBefore, openedProjectPathRef.current, savePathRef.current, null])) void clearAutosave(key);
           autosaveTracker.cleared();
         }
         return saved;
@@ -482,6 +542,7 @@ export function useProjectFileActions(
           opened = await openProjectTemplateNative();
         } catch (err) {
           console.error("Vorlage konnte nicht geöffnet werden:", err);
+          notify(`${t("project.open.failed")} ${errorText(err)}`, "error");
           return;
         }
         if (opened) applyTemplateContent(opened.content);
@@ -493,7 +554,61 @@ export function useProjectFileActions(
   const onProjectTemplateFileChosen = (file: File) => {
     const r = new FileReader();
     r.onload = () => applyTemplateContent(String(r.result ?? ""));
+    r.onerror = () => notify(`${t("project.open.failed")} ${r.error?.message ?? ""}`, "error");
     r.readAsText(file);
+  };
+
+  // Öffnet `content`; lässt sich die Datei nicht laden, aber ihre Sicherung `<pfad>~` ([116]), bietet ein Overlay-Dialog die
+  // vorige Fassung an (der Lock bleibt bis zur Antwort), sonst wird der Fehler gemeldet. `null` = nicht geladen.
+  const openOrOfferBackup = (content: string, path: string | null, lockOwned: boolean): Project | null => {
+    const r = getState().openProjectFile(content);
+    if (r.ok) {
+      for (const w of r.warnings) console.info(`Projekt geladen mit Hinweis: ${w}`);
+      return r.project;
+    }
+    const fail = () => {
+      notify(`${t("project.open.failed")} ${r.error}`, "error");
+      if (path && lockOwned) void releaseProjectLock(path);
+    };
+    if (!path) fail();
+    else
+      void readBackupText(path).then((text) => {
+        if (text && parseProjectFile(text).ok) setBackupOffer({ path, text, error: r.error, lockOwned });
+        else fail();
+      });
+    return null;
+  };
+  const onBackupOfferAccept = () => {
+    if (!backupOffer) return;
+    const { path, text, lockOwned } = backupOffer;
+    setBackupOffer(null);
+    applyOpenedProjectFile(path, text, lockOwned, true);
+  };
+  const onBackupOfferCancel = () => {
+    if (backupOffer?.lockOwned) void releaseProjectLock(backupOffer.path);
+    setBackupOffer(null);
+  };
+  // Datei-Menü „Vorige Fassung wiederherstellen …": die Sicherung der aktuellen Datei (`<pfad>~`) wird zum offenen
+  // Projekt, die Datei selbst bleibt bis zum nächsten Speichern unverändert (dann wird die jetzige Fassung zur Sicherung).
+  const onRestoreBackup = () => {
+    const path = savePathRef.current;
+    if (!path) {
+      notify(t("backup.none"), "info");
+      return;
+    }
+    void readBackupText(path).then((text) => {
+      if (!text) {
+        notify(t("backup.none"), "info");
+        return;
+      }
+      if (!parseProjectFile(text).ok) {
+        notify(t("backup.damaged"), "error");
+        return;
+      }
+      guardDiscard(() => {
+        if (openProjectOrReport(text, notify)) notify(t("backup.restored"), "info");
+      });
+    });
   };
 
   // Gibt den Lock der zuletzt geöffneten Projektdatei frei (falls wir ihn
@@ -510,15 +625,13 @@ export function useProjectFileActions(
   // Übernimmt ein per Pfad geöffnetes Projekt (Tauri-Fluss): parst, prüft grob
   // die Form, gibt einen evtl. vorher gehaltenen Lock frei und merkt sich Pfad
   // + ob WIR den Schreib-Lock für die neue Datei halten.
-  const applyOpenedProjectFile = (path: string, content: string, lockOwned: boolean) => {
+  const applyOpenedProjectFile = (path: string, content: string, lockOwned: boolean, fromBackup = false) => {
     guardDiscard(() => {
-      const loaded = openProjectOrReport(content, notify);
-      if (!loaded) {
-        if (lockOwned) void releaseProjectLock(path);
-        return;
-      }
+      const loaded = openOrOfferBackup(content, path, lockOwned);
+      if (!loaded) return;
       releaseCurrentProjectLock();
-      lastSavedProjectRef.current = loaded;
+      // Aus der Sicherung: bleibt „ungespeichert", bis der Nutzer die Datei bewusst überschreibt.
+      if (!fromBackup) lastSavedProjectRef.current = loaded;
       openedProjectPathRef.current = path;
       savePathRef.current = path;
       setAnonymityProjectFileName(path);
@@ -539,6 +652,7 @@ export function useProjectFileActions(
       opened = await openProjectFileNative();
     } catch (err) {
       console.error(t("file.openFailed"), err);
+      notify(`${t("project.open.failed")} ${errorText(err)}`, "error");
       return;
     }
     if (!opened) return; // Nutzer hat den Öffnen-Dialog abgebrochen
@@ -645,20 +759,24 @@ export function useProjectFileActions(
     }
   };
 
-  const onProjectFileChosen = (file: File) => {
+  const onProjectFileChosen = (file: File, knownPath?: string | null) => {
     const r = new FileReader();
     r.onload = () => {
       const content = String(r.result ?? "");
+      // Electron ([116]): der Pfad der gewählten Datei erlaubt atomares Speichern und die Sicherung `.obp~`; im Browser gibt es keinen.
+      const path = knownPath ?? electronFiles()?.pathForFile(file) ?? null;
       // Browser-Pfad hat keinen echten Dateipfad → kein Lock für die neue
       // Datei, aber ein evtl. vorher (unter Tauri) gehaltener Lock wird frei.
       guardDiscard(() => {
-        const loaded = openProjectOrReport(content, notify);
+        const loaded = openOrOfferBackup(content, path, false);
         if (!loaded) return;
         releaseCurrentProjectLock();
         lastSavedProjectRef.current = loaded;
-        setAnonymityProjectFileName(file.name); // [208] Browser/Electron-Start: kein Pfad, aber der Dateiname
+        if (path) savePathRef.current = path;
+        setAnonymityProjectFileName(path ?? file.name); // [208] Browser/Electron-Start: kein Pfad, aber der Dateiname
       });
     };
+    r.onerror = () => notify(`${t("project.open.failed")} ${r.error?.message ?? ""}`, "error");
     r.readAsText(file);
   };
 
@@ -669,7 +787,7 @@ export function useProjectFileActions(
   useEffect(() => {
     const api = window.dossierLaunch;
     if (!api) return;
-    const open = (f: LaunchProject) => chosenRef.current(new File([f.text], f.name));
+    const open = (f: LaunchProject) => chosenRef.current(new File([f.text], f.name), f.path);
     void api.takeOpenFile().then((f) => f && open(f));
     return api.onOpenFile(open);
   }, []);
@@ -729,6 +847,10 @@ export function useProjectFileActions(
     projectLockOwnedRef,
     lockConflict,
     setLockConflict,
+    backupOffer,
+    onBackupOfferAccept,
+    onBackupOfferCancel,
+    onRestoreBackup,
     recovery,
     onRecoverRestore,
     onRecoverDiscard,
@@ -741,6 +863,7 @@ export function useProjectFileActions(
     onSaveProject,
     onSaveProjectAs,
     onNewProject,
+    onQuitApp,
     onNewProjectFromSample,
     onNewProjectFromComplexSample,
     onNewProjectFromWettbewerbSample,

@@ -85,6 +85,7 @@ export function useNativeMenu(opts: {
   } = opts;
   const {
     onNewProject,
+    onQuitApp,
     onNewProjectFromSample,
     onNewProjectFromComplexSample,
     onNewProjectFromWettbewerbSample,
@@ -92,6 +93,7 @@ export function useNativeMenu(opts: {
     onOpenProject,
     onSaveProject,
     onSaveProjectAs,
+    onRestoreBackup,
     onExportSchedule,
     onExportIfc,
     onExportObj,
@@ -113,6 +115,7 @@ export function useNativeMenu(opts: {
   useNativeAppMenu(
     {
       onNewProject,
+      onQuitApp,
       onNewProjectFromSample,
       onNewProjectFromComplexSample,
       onNewProjectFromWettbewerbSample,
@@ -120,6 +123,7 @@ export function useNativeMenu(opts: {
       onOpenProject,
       onSaveProject,
       onSaveProjectAs,
+      onRestoreBackup,
       onImport: () => dxfInputRef.current?.click(),
       onExportPdf: () => setExportOpen(true),
       onExportDxf: () => setExportDxfOpen(true),

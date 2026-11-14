@@ -33,6 +33,7 @@ export type TopBarEvents = Required<
     | "onOpenProject"
     | "onSaveProject"
     | "onSaveProjectAs"
+    | "onRestoreBackup"
     | "onImport"
     | "onImportPointCloud"
     | "onImportMesh"
@@ -134,6 +135,7 @@ export function useTopBarElements(opts: {
           onOpenProject={ev.onOpenProject}
           onSaveProject={ev.onSaveProject}
           onSaveProjectAs={ev.onSaveProjectAs}
+          onRestoreBackup={ev.onRestoreBackup}
           onImport={ev.onImport}
           onImportPointCloud={ev.onImportPointCloud}
           onImportMesh={ev.onImportMesh}

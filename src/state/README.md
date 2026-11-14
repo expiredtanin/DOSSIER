@@ -75,7 +75,7 @@ in `ProjectSync`.
 | `selectionActions.ts` | Ablage für Aktionen mit mehreren Eingängen ([190]): Duplizieren, Sperren, Verbinden, Ebenen aus-/einblenden, Einpassen — Tastenkürzel und natives Menü rufen dieselben Funktionen (`runSelectionAction`) |
 | `groupActions.ts` | Gruppen erzeugen, auflösen, betreten |
 | `exportScope.ts`, `objectLock.ts`, `selectAll.ts`, `contextHeight.ts` | Export „nur Auswahl"; Objekt-Sperre; Cmd+A-Auswahl (reine Funktion); Höhenversatz von Gelände-Elementen |
-| `autosave.ts`, `projectStore.ts`, `recentProjects.ts`, `startupGuard.ts` | Autosave und Wiederherstellen, IndexedDB, zuletzt geöffnet, Start-Protokoll |
+| `autosave.ts`, `projectStore.ts`, `recentProjects.ts`, `startupGuard.ts` | Autosave (zwei Stände, beschädigte Kopien verworfen) und Wiederherstellen, IndexedDB, zuletzt geöffnet, Start-Protokoll |
 | `aiAccess.ts` | KI-Zugriff auf das offene Projekt (`[9]`) |
 
 ## Regeln

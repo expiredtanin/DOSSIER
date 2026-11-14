@@ -25,6 +25,8 @@ export interface AppMenuBarProps {
   onOpenProject: () => void;
   onSaveProject: () => void;
   onSaveProjectAs: () => void;
+  /** Datei: vorige Fassung (.obp~) der aktuellen Datei wiederherstellen ([116]). */
+  onRestoreBackup: () => void;
   onImport: () => void;
   /** Datei: Punktwolke importieren ([27]). */
   onImportPointCloud?: () => void;
@@ -72,6 +74,7 @@ export const AppMenuBar = memo(function AppMenuBar({
   onOpenProject,
   onSaveProject,
   onSaveProjectAs,
+  onRestoreBackup,
   onImport,
   onImportPointCloud,
   onImportMesh,
@@ -107,6 +110,7 @@ export const AppMenuBar = memo(function AppMenuBar({
     { label: t("file.open"), onSelect: onOpenProject },
     { label: t("file.save"), onSelect: onSaveProject },
     { label: t("menu.native.saveAs"), onSelect: onSaveProjectAs },
+    { label: t("menu.native.restoreBackup"), onSelect: onRestoreBackup },
     { divider: true },
     { label: t("file.import"), onSelect: onImport },
     ...(onImportPointCloud ? [{ label: t("menu.native.importPointCloud"), onSelect: onImportPointCloud }] : []),

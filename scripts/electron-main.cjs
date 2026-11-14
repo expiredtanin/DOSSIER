@@ -4,11 +4,12 @@
 // (render2d-WASM-Engine, ?engine=wasm) zuverlässig läuft. Kein Rust-Backend
 // nötig: compute_joins hat einen TS-Fallback (src/compute/index.ts).
 
-const { app, BrowserWindow, Menu, ipcMain, protocol, session } = require("electron");
+const { app, BrowserWindow, Menu, ipcMain, protocol, session, dialog } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
 const { buildCsp } = require("./csp.cjs");
 require("./electron-blender.cjs").register(ipcMain); // [211] Blender als eigener Prozess
+require("./electron-files.cjs").register(ipcMain, dialog, () => mainWindow); // [116] Projekt atomar speichern, Sicherung lesen
 
 // Randloses App-Fenster wie chromium-shell.sh (--app=…): keine native
 // Menüleiste (File/Edit/View/Window), kein Fensterrahmen. Minimieren/
@@ -129,6 +130,9 @@ ipcMain.handle("launch:take-open-file", () => {
   return file ? readProject(file) : null;
 });
 
+const closeGuard = new Set(); // Fenster-IDs mit Schliess-Wächter ([116])
+const forceClose = new Set(); // Fenster-IDs, die jetzt ohne Rückfrage schliessen dürfen
+
 function createWindow() {
   const win = new BrowserWindow({
     title: "Dossier",
@@ -144,7 +148,18 @@ function createWindow() {
   });
 
   mainWindow = win;
+  // [116] Schliess-Wächter: ist er gesetzt (Renderer läuft), geht das Fenster erst nach „window:force-close" zu;
+  // der Renderer fragt bei ungespeicherten Änderungen im Overlay nach. Stürzt der Renderer ab, gilt der Wächter nicht mehr.
+  win.webContents.on("render-process-gone", () => closeGuard.delete(win.id));
+  win.on("close", (e) => {
+    if (closeGuard.has(win.id) && !forceClose.has(win.id)) {
+      e.preventDefault();
+      win.webContents.send("window:close-requested");
+    }
+  });
   win.on("closed", () => {
+    closeGuard.delete(win.id);
+    forceClose.delete(win.id);
     if (mainWindow === win) mainWindow = null;
   });
 
@@ -174,6 +189,18 @@ ipcMain.on("window:toggle-maximize", (event) => {
 });
 ipcMain.on("window:close", (event) => {
   BrowserWindow.fromWebContents(event.sender)?.close();
+});
+ipcMain.on("window:set-close-guard", (event, enabled) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win) return;
+  if (enabled) closeGuard.add(win.id);
+  else closeGuard.delete(win.id);
+});
+ipcMain.on("window:force-close", (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win) return;
+  forceClose.add(win.id);
+  win.close();
 });
 ipcMain.handle("window:is-maximized", (event) => {
   return BrowserWindow.fromWebContents(event.sender)?.isMaximized() ?? false;
