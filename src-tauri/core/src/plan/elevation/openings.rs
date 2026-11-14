@@ -195,7 +195,7 @@ pub(super) fn collect_openings(p: &Project, frame: &[f64; 9], win: &crate::plan:
                         }
                         None => {
                             let wc = if t.wing_count == 0.0 || t.wing_count.is_nan() { 1.0 } else { t.wing_count };
-                            let n = max(1.0, round(wc)) as usize;
+                            let n = max(1.0, round(wc).min(crate::opening_geom::MAX_WINGS)) as usize;
                             for i in 0..n {
                                 // [105] Pfostenbreite gesetzt: Pfosten zwischen den Flügeln.
                                 if i > 0 && mullion.is_finite() && mullion > 1e-4 {

@@ -98,7 +98,7 @@ pub(crate) fn sashes_of_window_type(wt: &WindowType) -> Vec<crate::opening_geom:
             .collect();
     }
     let wc = if wt.wing_count == 0.0 || wt.wing_count.is_nan() { 1.0 } else { wt.wing_count };
-    let n = max(1.0, round(wc)) as usize;
+    let n = max(1.0, round(wc).min(crate::opening_geom::MAX_WINGS)) as usize;
     let operable = wt.kind != OpeningKind::Fest;
     (0..n).map(|_| crate::opening_geom::Sash { post: false, auto_width: true, width: f64::NAN, post_width: f64::NAN, operable }).collect()
 }

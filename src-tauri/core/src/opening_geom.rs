@@ -272,6 +272,10 @@ fn sash_segments(sashes: &[Sash], total_width: f64) -> Vec<(usize, f64, f64)> {
     segs
 }
 
+/// [258] Obergrenze für Flügelzahlen aus dem Modell (`wingCount`): ein Wert wie 1e300 darf keine Schleife über
+/// Milliarden Flügel auslösen (Speicher-Abbruch im WASM).
+pub const MAX_WINGS: f64 = 64.0;
+
 /// Fenster-Symbol; `spec` nur mit auflösbarem Typ (sonst Alt-Pfad mit `wing_count`, NaN = 1).
 pub fn window_symbol(
     w: &WallRef,

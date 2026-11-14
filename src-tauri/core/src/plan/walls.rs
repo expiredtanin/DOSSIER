@@ -599,7 +599,7 @@ fn sashes(wt: &WindowType) -> Vec<SashDef> {
         return s.clone();
     }
     let wc = if wt.wing_count == 0.0 || wt.wing_count.is_nan() { 1.0 } else { wt.wing_count };
-    let n = crate::jsnum::max(1.0, round(wc)) as usize;
+    let n = crate::jsnum::max(1.0, round(wc).min(crate::opening_geom::MAX_WINGS)) as usize;
     let opening = if wt.kind == OpeningKind::Fest { OpeningKind::Fest } else { wt.kind };
     (0..n).map(|i| SashDef { kind: SashDefKind::Fluegel, auto_width: Some(true), opening: Some(opening), hinge_side: Some(if i % 2 == 0 { SashDefHingeSide::Left } else { SashDefHingeSide::Right }), ..Default::default() }).collect()
 }
