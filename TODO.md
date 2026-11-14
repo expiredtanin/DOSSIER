@@ -199,11 +199,21 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   am Masterlayout gespeichert, `MasterLayout.guides` — kein neues Modellfeld, gilt für alle Blätter des Masters, ohne Master nicht setzbar),
   **Bild-Zuschnitt durch Ziehen** (Knopf „Zuschneiden“ oder Doppelklick, Griffe am Ausschnitt, Original bleibt stehen, ein Undo-Schritt je Zug).
   Tests: vitest `sheetSnap`, `sheetGuides`, e2e `competition`. Offen: Fang für Texte (es gibt keine freien Text-Elemente auf dem Blatt) und
-  Legenden-Verschieben (Legende hat keinen Zug am Blatt); Hilfslinien je Blatt statt je Master; Bild in DXF/IFC-Exporten nicht; frei eingegebene Texte
-  (Layer-/Ebenen-, Raum-, Geschoss-, Blockbezeichnungen, Textobjekte, Blattnamen im PDF) prüft niemand — der Satz „Anonym“ gilt für
-  Projekt-Stammdaten, nicht für Freitext; Eigenschaftssatz-Namen `Dossier_Qto_…` im IFC (Programmkonvention) bleiben; Download-Namen im Browser ohne Tauri-Dialog; grosse Bilder: jede
+  Legenden-Verschieben (Legende hat keinen Zug am Blatt); Hilfslinien je Blatt statt je Master; Bild in DXF/IFC-Exporten nicht; Eigenschaftssatz-Namen `Dossier_Qto_…` im IFC (Programmkonvention) bleiben; Download-Namen im Browser ohne Tauri-Dialog; grosse Bilder: jede
   Blatt-Änderung (Viewport verschieben …) ersetzt das ganze Layout samt Data-URL im Op und im Verlauf (wie `ContextImage`) — bei vielen MB Bilder
   in eine eigene Sammlung auslagern; nicht in der Tauri-App/auf dem Mac geprüft. · M
+  **Anonymitäts-Prüfung des Freitexts (14.11.)**: vor PDF-/SVG-/DXF-Export, Direkt-Export (CSV/IFC/OBJ/STL/GLB) und Publikationssatz einer
+  anonymen Abgabe sucht der Kern (`competition.rs`, Bindung `anonymity_findings`, TS-Fassade `export/competitionCheck.ts`, Tor
+  `state/anonymityGate.ts`) in jeder Zeichenkette des Projekts (Raum-, Geschoss-, Ebenen-/Klassen-, Gruppen-, Block-, Layout-/Blattnamen, Textobjekte,
+  Bild-Dateinamen, Bauteil-/Schraffurnamen …; ausser Ids, Data-URLs und den Quellfeldern selbst) nach Projektname, -nummer, Titelblock-Büro/-Bearbeiter,
+  Adresse des Standort-Bezugs, Projekt-Dateiname und der neuen Liste `competition.identifiers` („Weitere Angaben“ in der Mappe: Büro, Namen, E-Mail,
+  Telefon), dazu E-Mail-Adressen und Telefonnummern an sich. Ganze Wörter, Gross-/Kleinschreibung, Umlaute (ä = ae = a) und Trenner egal; Phrase ab 3,
+  Einzelwort ab 5 Zeichen, allgemeine Wörter („Haus“, „Wohnen“ …) und blosse Zahlen zählen nicht. Dialog `ui/AnonymityDialog.tsx` listet Bereich,
+  Fundstelle, Text, Begriff; „Trotzdem exportieren“ / „Abbrechen“ (Overlay, kein `window.confirm`). Kopfdaten waren schon leer (PDF-Info nur Kennwort,
+  Producer/Datum neutralisiert — auch „Dossier“ bleibt weg, weil Programm + Version + Datum die Herkunft eingrenzen; IFC-Kopf/IfcOwnerHistory, DXF-Kopf, STEP):
+  keine Lücke gefunden. Tests: Rust `competition` (Treffer je Textort, Fehlalarme, Umlaute), vitest `competitionCheck`, e2e `competition`. Offen: Berichte-PDF
+  (Flächen, Raumbuch …) und Bild-/Rendering-Exporte laufen nicht durch das Tor; Prüfung läuft nur im Dialog-Weg (CLI/KI-Werkzeuge nicht); der
+  Dateiname der Ausgabe wird nur beim Direkt-Export geprüft; nicht in der Tauri-App/auf dem Mac geprüft.
 - [61] Raumprogramm gegen Modell und Flächennachweis SIA 416 als Tabelle/Layout-Element ([70]); Kennzahlen (GF, GV, HNF/GF, Fassadenanteil).
 - 3D-Bilder für die Abgabe: hochaufgelöster PNG-Export (Perspektive, Axonometrie, Schatten), Sonnenstand; [205] Pausfolie.
 - [199]/[204] Plan- und App-Review-Reste im Darstellungsbereich 1:500/1:200 schliessen.

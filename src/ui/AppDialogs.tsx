@@ -21,6 +21,7 @@ import type { useTopBarState } from "../state/useTopBarState";
 import { t } from "../i18n";
 import { AiActivityPanel } from "./AiActivityPanel";
 import { BusyOverlay } from "./BusyOverlay";
+import { AnonymityDialogHost } from "./AnonymityDialog";
 import { ExportDxfDialog } from "./ExportDxfDialog";
 import { ExportPdfDialog } from "./ExportPdfDialog";
 import { ExportSaveDialog } from "./ExportSaveDialog";
@@ -165,6 +166,8 @@ export function AppDialogs(props: {
     <RenderDialogHost />
     {/* [223] 3D-Bild exportieren (Befehl `bild3d`, Menü Ansicht) */}
     <ImageExportDialogHost />
+    {/* [208] Anonymitäts-Prüfung des Freitexts vor dem Export einer anonymen Abgabe */}
+    <AnonymityDialogHost />
     {/* [246] Kamerafahrt abspielen und als Video aufnehmen (Panel Ausschnitte, Gruppe Kameras) */}
     <CameraTourDialogHost />
     {/* [210] Kürzel-Übersicht (Menü Hilfe) */}

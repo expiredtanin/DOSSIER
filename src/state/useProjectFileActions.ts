@@ -23,6 +23,7 @@ import { beginBusy, endBusy } from "./busyStore";
 import type { ImportDecision, PdfImportOptions } from "../ui/ImportDialog";
 import { isPdfFile, pdfImport, readPdfVector, type PdfRead } from "../io/pdfVector";
 import { exportProjectName } from "../export/competitionIdentity";
+import { confirmAnonymousExport, setAnonymityProjectFileName } from "./anonymityGate";
 import { exportScheduleCsv } from "../export/exportSchedule";
 import { exportIfcSpf, type IfcExportOptions } from "../export/exportIfc";
 import { loadFileio } from "../engine/fileioWasm";
@@ -398,6 +399,7 @@ export function useProjectFileActions(
     const json = serializeProject(project, uiStateForSave());
     return saveProjectFile(json, project.name, (path) => {
       savePathRef.current = path;
+      setAnonymityProjectFileName(path);
       addRecentProject(path, project.name || "modell");
     }, asNew ? null : savePathRef.current).then(
       (saved) => {
@@ -518,6 +520,7 @@ export function useProjectFileActions(
       lastSavedProjectRef.current = loaded;
       openedProjectPathRef.current = path;
       savePathRef.current = path;
+      setAnonymityProjectFileName(path);
       projectLockOwnedRef.current = lockOwned;
       addRecentProject(path, loaded.name || "modell");
       offerRecovery(path);
@@ -578,6 +581,12 @@ export function useProjectFileActions(
   // gewählten Dateinamen aus. Erzeugung aus dem jeweiligen reinen Kern, Download
   // über den robusten Helfer.
   const runExport = (format: ExportSaveFormat, filename: string, ifcOptions?: IfcExportOptions) => {
+    // [208] Anonyme Abgabe: Freitext vorher prüfen (Dialog), erst dann schreiben.
+    void confirmAnonymousExport(getState().project, [filename]).then((ok) => {
+      if (ok) runExportChecked(format, filename, ifcOptions);
+    });
+  };
+  const runExportChecked = (format: ExportSaveFormat, filename: string, ifcOptions?: IfcExportOptions) => {
     const project = getState().project;
     switch (format) {
       case "csv":

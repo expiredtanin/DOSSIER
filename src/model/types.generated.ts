@@ -345,6 +345,11 @@ export type CompetitionSettings = {
   anonymous: boolean;
   /** Kennwort der Abgabe (steht in Plankopf und PDF-Titel). */
   keyword: string;
+  /**
+   * Weitere identifizierende Angaben (Büro, Personen, E-Mail, Telefon, Adresse), getrennt durch Komma, Semikolon
+   * oder Zeilenumbruch: die Anonymitäts-Prüfung sucht sie im Freitext des Projekts.
+   */
+  identifiers?: string;
 };
 
 /**

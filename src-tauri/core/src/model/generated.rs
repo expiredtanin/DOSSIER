@@ -5799,6 +5799,11 @@ pub struct CompetitionSettings {
     pub anonymous: bool,
     /// Kennwort der Abgabe (steht in Plankopf und PDF-Titel).
     pub keyword: String,
+    /// Weitere identifizierende Angaben (Büro, Personen, E-Mail, Telefon, Adresse), getrennt durch Komma, Semikolon
+    /// oder Zeilenumbruch: die Anonymitäts-Prüfung sucht sie im Freitext des Projekts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub identifiers: Option<String>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,

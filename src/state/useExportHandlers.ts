@@ -22,6 +22,7 @@ import type { Project } from "../model/types";
 import { filterProjectToSelection } from "./exportScope";
 import type { GroupMembership } from "./groupActions";
 import { getState, useStore } from "./appStore";
+import { confirmAnonymousExport } from "./anonymityGate";
 import { t } from "../i18n";
 
 export function useExportHandlers(opts: {
@@ -93,6 +94,7 @@ export function useExportHandlers(opts: {
   // Gefilterte/verschobene Kopie = eigenes, kurzlebiges Kern-Dokument ([122]); das ganze Projekt läuft
   // direkt über das Dokument des Stores.
   const onExportPdf = async (decision: ExportPdfDecision) => {
+    if (!(await confirmAnonymousExport(getState().project))) return; // [208] Anonymitäts-Prüfung
     const scoped = scopedProject(decision.selectionOnly);
     const plan = withDocument(scoped, () => generatePlan(
       scoped,
@@ -122,7 +124,8 @@ export function useExportHandlers(opts: {
   // SVG-Export: dieselbe Plan-Erzeugung + denselben Massstab/Papier/
   // Ausrichtung wie der PDF-Export (Nutzer-Wunsch „Kein SVG-Export"), nur
   // ohne den jsPDF/svg2pdf-Umweg — reiner Download des Druck-SVG.
-  const onExportSvg = (decision: ExportPdfDecision) => {
+  const onExportSvg = async (decision: ExportPdfDecision) => {
+    if (!(await confirmAnonymousExport(getState().project))) return; // [208]
     const scoped = scopedProject(decision.selectionOnly);
     const plan = withDocument(scoped, () => generatePlan(
       scoped,
@@ -150,6 +153,7 @@ export function useExportHandlers(opts: {
   // Kategorie-Ebenen; jede Entity auf ihrem Kategorie-Layer. Asynchron, weil das
   // Format-Modul (acadrust, pkgFileIo) erst beim ersten Export nachgeladen wird.
   const onExportDxf = async (decision: ExportDxfDecision) => {
+    if (!(await confirmAnonymousExport(getState().project))) return; // [208]
     // Georeferenziert exportieren: bei gesetztem Standort-Bezug (geoAnchor)
     // schreibt der Modell-DXF die ECHTEN LV95-Koordinaten (weit vom Nullpunkt),
     // damit die Datei in anderer CAD-Software lagerichtig ankommt — auch wenn

@@ -3,6 +3,7 @@
 
 import { fieldOps, type CoreOp } from "../core";
 import type { Project, PublishSet } from "../model/types";
+import { confirmAnonymousExport } from "./anonymityGate";
 import { planPublish, publishOps } from "../export/publishSet";
 import { bundlePublished, runPublish } from "../export/publishRun";
 import { saveBinaryFile } from "../native/saveFile";
@@ -33,9 +34,10 @@ export function addWbwSetOps(p: Project, id: string): CoreOp[] {
 }
 
 /** Wettbewerbs-Einstellung ([208]) ändern; ohne Kennwort und nicht anonym entfällt das Feld. */
-export function setCompetitionOps(p: Project, patch: { anonymous?: boolean; keyword?: string }): CoreOp[] {
+export function setCompetitionOps(p: Project, patch: { anonymous?: boolean; keyword?: string; identifiers?: string }): CoreOp[] {
   const next = { anonymous: false, keyword: "", ...p.competition, ...patch };
-  return fieldOps(p, "competition", next.anonymous || next.keyword.trim() ? next : undefined);
+  if (!next.identifiers?.trim()) delete next.identifiers;
+  return fieldOps(p, "competition", next.anonymous || next.keyword.trim() || next.identifiers ? next : undefined);
 }
 
 export function patchPublishSetOps(p: Project, id: string, patch: Partial<Omit<PublishSet, "id">>): CoreOp[] {
@@ -50,6 +52,7 @@ export function deletePublishSetOps(p: Project, id: string): CoreOp[] {
 export async function publishSet(project: Project, setId: string): Promise<CoreOp[] | null> {
   const set = (project.publishSets ?? []).find((s) => s.id === setId);
   if (!set) return null;
+  if (!(await confirmAnonymousExport(project))) return null; // [208] Anonymitäts-Prüfung
   const now = new Date();
   const plan = planPublish(project, set, now.toISOString().slice(0, 10));
   if (plan.files.length === 0) {

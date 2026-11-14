@@ -194,7 +194,18 @@ export function PublishSection() {
             onChange={(e) => host.onSetCompetition({ keyword: e.target.value })}
           />
         </label>
+        <label style={{ display: "grid", gap: 2 }}>
+          <span>{t("publish.competition.identifiers")}</span>
+          <textarea
+            className="res-input"
+            rows={2}
+            data-testid="competition-identifiers"
+            value={project.competition?.identifiers ?? ""}
+            onChange={(e) => host.onSetCompetition({ identifiers: e.target.value })}
+          />
+        </label>
         {project.competition?.anonymous === true && <div style={{ color: "var(--muted)" }}>{t("publish.competition.hint")}</div>}
+        <div style={{ color: "var(--muted)" }}>{t("publish.competition.identifiersHint")}</div>
         <button className="nav-add nav-add-text" style={{ justifySelf: "start" }} data-testid="publish-add-wbw" onClick={() => setOpen(host.onAddWbwSet())}>
           ＋ {t("publish.wbw.add")}
         </button>
