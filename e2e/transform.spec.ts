@@ -105,9 +105,13 @@ test("Bewegen, Drehen, Spiegeln über Knopf, getippten Befehl und Taste; Esc/Ent
   expect(await lines(page)).toHaveLength(2);
 
   // Enter = Punkt an der letzten Mausposition: Kopie (Taste I im Befehlsfeld) nach rechts.
-  // Neu wählen: je nach Timing beendet schon das erste Esc den Befehl, dann hebt das zweite die Auswahl auf.
+  // Neu wählen: je nach Timing beendet schon das erste Esc den Befehl, dann hebt das zweite die Auswahl auf — und
+  // zwar verzögert (setTimeout, [204]). Erst warten, bis das geschehen ist, sonst leert es die neue Auswahl wieder.
+  await page.waitForTimeout(50);
   await selectAll(page);
+  await expect.poll(async () => (await page.evaluate(() => window.__dossierTest!.selected().drawings)).length).toBe(2);
   await page.getByRole("button", { name: "Verschieben", exact: true }).click();
+  await expect(prompt(page)).toHaveText("Basispunkt klicken");
   await commandInput(page).press("i");
   await typeCommand(page, "0,0");
   const p = await screenOf(page, 4, 0);
@@ -115,7 +119,9 @@ test("Bewegen, Drehen, Spiegeln über Knopf, getippten Befehl und Taste; Esc/Ent
   await page.mouse.move(p.x, p.y);
   await blurFocus(page);
   // Mausposition muss beim Befehl angekommen sein (Zeigerereignis läuft über rAF), sonst nimmt Enter den alten Punkt.
-  await page.waitForTimeout(200);
+  // Unter Last reichen feste 200 ms nicht: zwei Animationsbilder abwarten, damit der rAF-Zeigerpfad gelaufen ist.
+  await page.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))));
+  await page.waitForTimeout(100);
   await page.keyboard.press("Enter");
   await expect(prompt(page)).toHaveText("Befehl:");
   expect(await lines(page)).toHaveLength(4);
