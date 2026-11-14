@@ -23,8 +23,17 @@ fn signed_area(r: &Ring) -> f64 {
     a / 2.0
 }
 
-/// Ring säubern: nur endliche Punkte, doppelten Schlusspunkt weg; `None` bei Entartung.
+/// [258] Grösste Koordinate (m, Betrag), die in die Booleans geht. i_overlay bricht bei ≥ 2^500 mit Panic ab
+/// (`Invalid adapter bounds`), und lange vorher rechnet das Ganzzahlraster (Ausdehnung/2³⁰) nur noch Unsinn;
+/// ein Projekt mit 1e300 m Wandlänge darf nicht den ganzen Kern lahmlegen. Weltweit liegt alles unter 1e8 m.
+pub const COORD_LIMIT: f64 = 1e9;
+
+/// Ring säubern: nur endliche Punkte, doppelten Schlusspunkt weg; `None` bei Entartung oder Punkten
+/// ausserhalb von [`COORD_LIMIT`].
 fn clean_ring(r: &Ring) -> Option<Ring> {
+    if r.iter().any(|p| p[0].abs() > COORD_LIMIT || p[1].abs() > COORD_LIMIT) {
+        return None;
+    }
     let mut out: Ring = r.iter().copied().filter(|p| p[0].is_finite() && p[1].is_finite()).collect();
     while out.len() > 1 && out.first() == out.last() {
         out.pop();
@@ -217,5 +226,18 @@ mod tests {
         assert_eq!(v.len(), 1);
         assert_eq!(v[0].len(), 1);
         assert!((area(&v) - 175.0).abs() < 1e-6);
+    }
+
+    /// [258] Koordinaten jenseits des Rechenbereichs (1e300 m) brachten i_overlay zum Panic
+    /// (`Invalid adapter bounds`) und damit das WASM-Modul zum Stillstand: der Ring entfällt.
+    #[test]
+    fn riesige_koordinaten_ohne_panic() {
+        let huge: Polygon = vec![vec![[0.0, 0.0], [1e300, 0.0], [1e300, 1e300]]];
+        let r = rect(0.0, 0.0, 2.0, 2.0);
+        assert!(union(&[huge.clone()]).is_empty());
+        assert!(intersection(&[r.clone()], &[huge.clone()]).is_empty());
+        assert!((area(&difference(&[r.clone()], &[huge])) - 4.0).abs() < 1e-6);
+        // Knapp innerhalb der Grenze rechnet weiter.
+        assert!(!union(&[vec![vec![[0.0, 0.0], [1e8, 0.0], [1e8, 1e8]]]]).is_empty());
     }
 }
