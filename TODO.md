@@ -345,7 +345,12 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   (`sunStudy.show`), unverändert; Wettbewerb-Schnitt ohne Gelände: Nachbar bleibt (hellgrau) weit neben dem Haus; `levelMarkers.ts`-Doppelspur
   (braucht eine Kern-Abfrage mit Plan-Puffer als Eingabe); Stempel „Schlafen" DG 80 %. **14.11. (spät):** Klassen-Füllung im Klassen-Dialog
   editierbar (Farbwähler + „keine", Inline-Editor und macOS-Ebenenfenster; Ziehen = ein Undo-Schritt; Test `categoryFill.test.ts`); nur vitest/tsc,
-  nicht in der Tauri-App angesehen. · M
+  nicht in der Tauri-App angesehen. **14.11. (Befund 6, Vorschlag umschaltbar, Entscheid Maintainer offen):** Öffnungen über/unter der
+  Schnitthöhe in geschlossener Wand (DG-Rundfenster 1.8 m, EG-Bad-Fenster, EG-Rundfenster) bleiben strichpunktiert, der Teil auf der
+  schwarzen 1:100-Sammelfläche wird weiss (SIA-Praxis), ausserhalb unverändert, Bemassung bleibt. Über die Plan-Primitive (`plan/contrast.rs`:
+  Linien/Bögen an dunklen Flächen zerlegt, helle Stücke über allen Füllungen) — Bildschirm, Plan-SVG, Druck-SVG/PDF, DXF (Echtfarbe weiss)
+  bekommen dieselben Stücke; 1:50 (helle Schichten) unverändert. Abschaltbar: Modelldarstellung `walls.contrastOnSolid` (Basis an).
+  Tests `contrast::tests`, `ueber_schnitt_hell_auf_schwarzer_wand`; Goldens nachgeführt. Geprüft nur Linux/CLI-SVG `--hatch` in Chromium. · M
   UI-Review 14.11.: Ebenen-Editor (Füllung): schwebender Editor wird nach dem Aufbau am Fensterrand geklemmt (lag vorher rechts/unten ausserhalb, Messung während der Einblend-Animation).
 - Fachplaner-Austausch: DXF/DWG je Geschoss/Schnitt/Ansicht ([200]), IFC mit Räumen/Psets ([201]); Rundreise in Archicad/Revit einmal
   real prüfen ([C9]).
@@ -363,9 +368,13 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   TERRAIN, Netze auf Umgebungsklassen → Proxy „Kontext", am IfcSite. Entscheid: 2D-Objektbibliothek ([253]) wird NICHT exportiert (kein
   falscher Körper, kein geometrieloses IfcFurniture). Grösse/Zeit (Linux, unter Last): komplex 1.6 MB / 2.5 s, Wettbewerb 0.9 MB / 0.5 s,
   Stress-Beispiel `sampleProjectBig` 19.8 MB / 5.8 s. **Offen:** nicht in Archicad/Revit/Solibri/BIMcollab geöffnet (Prüfzeile 13.14 in
-  `doc/RELEASE-1.0.md`); Anbauwand OG Ost (komplex, Netz unter dem Pultdach mit Fenster): ifcopenshell scheitert am Abzug der Öffnung
-  (30.4 statt 7.5 m³, als bekannt in der Prüfung); Raumhöhe = Geschosshöhe statt lichter Höhe; keine `IfcPresentationLayerAssignment`
-  (Ebenen nur als Klassifikation); IFC2x3 nur über die bestehenden Tests. · M
+  `doc/RELEASE-1.0.md`); Raumhöhe = Geschosshöhe statt lichter Höhe; keine `IfcPresentationLayerAssignment`
+  (Ebenen nur als Klassifikation); IFC2x3 nur über die bestehenden Tests. **14.11. (spät):** Anbauwand OG Ost (komplex, unter dem
+  Pultdach mit Fenster) behoben — ihre Stücke um das Fenster (je eigene Dach-Oberkante) lagen als verschweisste Schalen im Face-Set (Kanten
+  3–4-fach), ifcopenshell rechnete beim Abzug 30.4 statt 7.5 m³. Jetzt der vereinigte 3D-Körper je Band (`RWall::body`, `union_bodies`), Ecken auf das 1e-6-Ausgaberaster gelegt (sonst
+  blieb zwischen Nachbarbändern ein Spalt von 1e-15 m und zwei Schalen, Wettbewerb OG2 Ost), dicht nach dem Verschweissen geprüft, sonst Schalen wie bisher;
+  `--known` aus der Prüfung entfernt, komplex 0 Befunde; zwei weitere Dachwände und eine Wand mit Formöffnung genauer (Abweichung NetVolume ↔
+  Geometrie 0.9 % → 0). Test `wand_unter_dem_dach_mit_fenster_als_ein_koerper`. · M
 - ◐ **[255]** Baurecht-Nachweis: Ausnützung gegen Modell als Tabelle (14.11.). Kern `site_proof.rs` (Abfrage `siteProof`) stellt die Vorgaben
   der Parzelle den Kennzahlen gegenüber: GFZ, AZ, BMZ, ÜZ, GZ (min.), Gesamt-/Fassadenhöhe, Grundfläche ausserhalb Grenzabstand/Baulinie,
   Gebäudeprofil; je Zeile zulässig · Projekt · Reserve/Überschreitung · erfüllt, fehlende Vorgabe als „—“ (nichts erfunden), dazu Grundlagen

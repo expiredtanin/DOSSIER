@@ -11,7 +11,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import "../engine/fileioWasm.setup";
-import { exportIfcSpf, ifcGuid, type IfcExportOptions } from "./exportIfc";
+import { exportIfcSpf, type IfcExportOptions } from "./exportIfc";
 import { sampleProject } from "../model/sampleProject";
 import { buildComplexSampleProject } from "../model/sampleProjectComplex";
 import { buildWettbewerbSampleProject } from "../model/sampleProjectWettbewerb";
@@ -79,12 +79,11 @@ describe.skipIf(!hasIfcOpenShell)("[259] IFC für Fachplaner (ifcopenshell)", { 
 
   it("komplex: Bogenkanten (Erker) mit Fläche/Volumen = Mengen, Kontext (Gelände + Nachbar) mit Option", () => {
     const p = buildComplexSampleProject();
-    // Offen ([259]): Anbauwand OG Ost unter dem Pultdach (Netz mit Dach-Oberkante + Fenster) — ifcopenshell scheitert am
-    // Abzug der Öffnung (30.4 statt 7.5 m³); Netz und Mengen stimmen mit dem 3D überein.
-    const known = `--known=${ifcGuid(`${p.id}/wall/og-anbau-o`)}`;
-    const k = check("komplex", exportIfcSpf(p), ["--geo", known]);
-    expect(k.stats.known.length).toBeLessThanOrEqual(1);
-    const c = check("komplex-kontext", exportIfcSpf(p, { context: true }), ["--geo", "--context", known]);
+    // [259] Anbauwand OG Ost unter dem Pultdach (Stücke um das Fenster mit je eigener Dach-Oberkante): als 3D-Körper
+    // (vereinigt) statt verschweisster Schalen — ifcopenshell zieht die Öffnung richtig ab (vorher 30.4 statt 7.5 m³).
+    const k = check("komplex", exportIfcSpf(p), ["--geo"]);
+    expect(k.stats.known).toEqual([]);
+    const c = check("komplex-kontext", exportIfcSpf(p, { context: true }), ["--geo", "--context"]);
     expect(c.stats.counts.IfcGeographicElement).toBeGreaterThanOrEqual(1); // Gelände (TERRAIN)
     expect(c.stats.context).toBe(2); // Gelände + Nachbargebäude; Höhenlinien und Baugrube nicht
   });

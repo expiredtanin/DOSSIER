@@ -465,6 +465,54 @@ fn union_bands(bands: &[&RWall], base: f64, boxes: &[[f64; 24]]) -> Option<(Vec<
     (!m.indices.is_empty()).then_some((m.positions, m.indices))
 }
 
+/// [259] Wand mit Körper je Band aus dem 3D (`model3d::wall_body`: Formöffnungen, Öffnungen unter dem Dach, `RWall::body`):
+/// genau diese Körper, alle Bänder vereinigt (Manifold) — IFC-Koordinaten (x, y, z − `base`). Die Stücke solcher Wände
+/// (Pfeiler, Brüstung, Sturz mit je eigener Dach-Oberkante) berühren sich nur an Flächen; als Schalen-Netz verschweisst
+/// waren Kanten 3- bis 4-fach belegt, und ifcopenshell rechnete beim Abzug der Öffnung ein Vielfaches (Anbauwand OG Ost,
+/// komplex: 30.4 statt 7.5 m³). `None`, wenn kein Stück einen Körper trägt, ein sichtbares Stück ohne Körper bleibt
+/// (Band ohne Körper: Schalen wie bisher) oder Manifold ablehnt.
+fn union_bodies(pieces: &[&RWall], base: f64) -> Option<(Vec<f64>, Vec<u32>)> {
+    use crate::solid_bool::{Mesh, Solid};
+    if !pieces.iter().any(|b| b.body.is_some()) || pieces.iter().any(|b| b.body.is_none() && !b.no_mesh) {
+        return None;
+    }
+    // Auf das Ausgaberaster (6 Nachkommastellen wie die IFC-Datei): Nachbarbänder treffen sich sonst nur bis aufs
+    // Rundungsrauschen (19.995 aus 20.085 − 0.09 bzw. 19.9075 + 0.0875), Manifold liesse einen Spalt von 1e-15 m und
+    // zwei Schalen stehen, die das Verschweissen beim Schreiben zu einer Fläche mit vierfach belegten Kanten machte.
+    let snap = |v: f64| (v * 1e6).round() / 1e6;
+    let mut acc: Option<Solid> = None;
+    for body in pieces.iter().filter_map(|b| b.body.as_ref()) {
+        let positions: Vec<f64> = body.positions.chunks_exact(3).flat_map(|c| [snap(c[0]), snap(c[1]), snap(c[2] - base)]).collect();
+        let s = Solid::new(&Mesh { positions, indices: body.indices.clone() }).ok()?;
+        acc = Some(match acc.take() {
+            None => s,
+            Some(a) => a.union(&s).ok()?,
+        });
+    }
+    let m = acc?.to_mesh();
+    (!m.indices.is_empty() && welded_manifold(&m.positions, &m.indices)).then_some((m.positions, m.indices))
+}
+
+/// Nach dem Verschweissen auf 6 Nachkommastellen (wie `fileio` beim Schreiben) zweimannigfaltig: jede gerichtete Kante
+/// genau einmal und ihre Gegenkante vorhanden (Dreiecke ohne Fläche entfallen).
+fn welded_manifold(positions: &[f64], indices: &[u32]) -> bool {
+    let key = |i: u32| -> Option<[i64; 3]> {
+        let c = positions.get(i as usize * 3..i as usize * 3 + 3)?;
+        Some([(c[0] * 1e6).round() as i64, (c[1] * 1e6).round() as i64, (c[2] * 1e6).round() as i64])
+    };
+    let mut edges: HashMap<([i64; 3], [i64; 3]), u32> = HashMap::new();
+    for t in indices.chunks_exact(3) {
+        let (Some(a), Some(b), Some(c)) = (key(t[0]), key(t[1]), key(t[2])) else { return false };
+        if a == b || b == c || a == c {
+            continue;
+        }
+        for e in [(a, b), (b, c), (c, a)] {
+            *edges.entry(e).or_default() += 1;
+        }
+    }
+    !edges.is_empty() && edges.iter().all(|(&(a, b), &n)| n == 1 && edges.get(&(b, a)) == Some(&1))
+}
+
 /// Ausdehnung aller Bänder quer zur Wandachse (entlang der linken Normalen ab `wall.start`).
 fn cross_extent(wall: &Wall, bands: &[&RWall]) -> (f64, f64) {
     let n = left_normal(normalize(sub(wall.end, wall.start)));
@@ -1258,7 +1306,9 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
         }
         // [259] Mehrere Schalen (Bänder, Stücke, Füllkörper) zu einem Körper; lehnt Manifold ab, bleiben die Schalen.
         let shells = bands.len() + boxes.len();
-        match (arc.is_none() && shells > 1).then(|| union_bands(bands, base, &boxes)).flatten() {
+        // [259] Körper aus dem 3D (Formöffnung als Umriss, Stücke unter dem Dach vereinigt) gehen vor; die Füllkörper sind darin.
+        let bodies = arc.is_none().then(|| union_bodies(bands, base)).flatten();
+        match bodies.or_else(|| (arc.is_none() && shells > 1).then(|| union_bands(bands, base, &boxes)).flatten()) {
             Some((up, ui)) => (positions, indices) = (up, ui),
             None => {
                 for b in &boxes {
@@ -2347,5 +2397,41 @@ mod tests {
         let o = p.openings.as_ref().unwrap().iter().find(|o| o.host_wall_id == "W1" && o.kind == ElementKind::Window).unwrap();
         let (lo, hi) = reveal_frame_slice(&p, w1, o).expect("Stücke ⇒ Rahmenlage");
         assert!(hi > lo);
+    }
+
+    /// [259] Giebelwand unter dem Dach mit Fenster (wie die Anbauwand OG Ost im Beispiel komplex): die Stücke um das
+    /// Fenster tragen je eigene Dach-Oberkante; der IFC-Körper ist der vereinigte 3D-Körper aller Bänder — dicht, jede
+    /// Kante genau zweimal, Volumen = Summe der Band-Körper. Vorher lagen die Stücke als verschweisste Schalen im
+    /// Face-Set und ifcopenshell rechnete beim Abzug der Öffnung ein Vielfaches.
+    #[test]
+    fn wand_unter_dem_dach_mit_fenster_als_ein_koerper() {
+        let mut p = sample();
+        p.ceilings = Some(vec![]);
+        p.walls.retain(|w| w.id == "W6");
+        p.walls[0].height = 6.0;
+        p.walls[0].roof_attach = Some(true);
+        let o: Opening = serde_json::from_value(serde_json::json!({
+            "id": "F1", "type": "opening", "hostWallId": "W6", "categoryCode": "21", "kind": "window", "typeId": "",
+            "position": 1.0, "width": 1.0, "height": 1.2, "sillHeight": 0.9
+        }))
+        .unwrap();
+        p.openings = Some(vec![o]);
+        let all = model3d::emit_walls(&p, true).unwrap();
+        let pieces: Vec<&RWall> = all.iter().filter(|b| b.wall_id == "W6").collect();
+        assert!(pieces.iter().any(|b| b.top_plane.is_some()), "Oberkante unter dem Dach");
+        assert!(pieces.len() > pieces.iter().filter(|b| b.body.is_some()).count(), "Stücke um das Fenster");
+        let bodies: f64 = pieces.iter().filter_map(|b| b.body.as_ref()).map(|b| crate::export_flat::mesh_volume(&b.positions, &b.indices).abs()).sum();
+        let (pos, idx) = union_bodies(&pieces, 0.0).expect("ein Körper");
+        assert!(is_watertight(&pos, &idx, 1e-6) && welded_manifold(&pos, &idx));
+        let v = crate::export_flat::mesh_volume(&pos, &idx);
+        assert!(v > 0.1 && (v - bodies).abs() < 1e-6 * bodies.max(1.0), "{v} vs {bodies}");
+        // Mit z-Versatz (Geschoss-UK) bleibt der Körper gleich gross.
+        let (pos2, idx2) = union_bodies(&pieces, 2.5).unwrap();
+        assert!((crate::export_flat::mesh_volume(&pos2, &idx2) - v).abs() < 1e-6);
+        // Ohne Körper (gewöhnliche Wand): kein Ersatz, der bisherige Weg bleibt.
+        let q = sample();
+        let plain = model3d::emit_walls(&q, true).unwrap();
+        let w2: Vec<&RWall> = plain.iter().filter(|b| b.wall_id == "W2").collect();
+        assert!(w2.iter().all(|b| b.body.is_none()) && union_bodies(&w2, 0.0).is_none());
     }
 }

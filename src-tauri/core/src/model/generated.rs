@@ -2429,6 +2429,11 @@ pub struct ModelViewWalls {
     #[serde(rename = "cutHatch", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub cut_hatch: Option<bool>,
+    /// [256] Öffnungen über/unter der Schnittebene in geschlossener Wand: der Teil auf schwarzer Schnittfläche hell
+    /// (weiss) statt dunkel, damit das strichpunktierte Symbol lesbar bleibt (Basis: ja).
+    #[serde(rename = "contrastOnSolid", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub contrast_on_solid: Option<bool>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
