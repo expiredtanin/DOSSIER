@@ -71,8 +71,8 @@ export function ObjectLibraryPanel() {
                   <button
                     key={o.id}
                     type="button"
-                    title={name}
-                    aria-label={name}
+                    title={name.replace(/\u00AD/g, "")}
+                    aria-label={name.replace(/\u00AD/g, "")}
                     onClick={() => place(o)}
                     style={{
                       display: "flex",
@@ -89,7 +89,7 @@ export function ObjectLibraryPanel() {
                     }}
                   >
                     <Preview def={o} />
-                    <span style={{ fontSize: 10, lineHeight: 1.15, textAlign: "center", overflowWrap: "anywhere" }}>{name}</span>
+                    <span style={{ fontSize: 10, lineHeight: 1.15, textAlign: "center", overflowWrap: "break-word", hyphens: "manual" }}>{name}</span>
                   </button>
                 );
               })}

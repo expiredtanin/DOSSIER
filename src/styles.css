@@ -4678,6 +4678,8 @@ body {
   position: fixed;
   z-index: 301;
   min-width: 240px;
+  max-height: calc(100vh - 8px);
+  overflow-y: auto;
   max-width: 320px;
   background: var(--ctx-surface);
   border: 1px solid var(--ctx-border);
@@ -8875,7 +8877,7 @@ body {
 }
 .area-table th,
 .area-table td {
-  padding: 2px 5px;
+  padding: 2px 3px;
   white-space: nowrap;
   text-align: left;
   border-bottom: 1px solid var(--line);
@@ -8883,6 +8885,23 @@ body {
 .area-table th {
   color: var(--ink-2);
   font-weight: 600;
+  /* Köpfe und Textzellen dürfen umbrechen: die 340-px-Dock-Spalte zeigt so auch die Baurecht-Nachweis-Tabelle (5 Spalten) ganz. */
+  white-space: normal;
+  vertical-align: bottom;
+  line-height: 1.2;
+}
+.area-table td:not(.num) {
+  white-space: normal;
+  hyphens: auto;
+  overflow-wrap: anywhere; /* lange Wörter („Geschossflächenziffer“) brechen, statt die Tabelle über die Dock-Breite zu schieben */
+}
+.area-table td:first-child {
+  min-width: 5em;
+}
+.area-table.wide td:first-child {
+  min-width: 6.2em;
+  overflow-wrap: normal;
+  hyphens: manual;
 }
 .area-table .num {
   text-align: right;

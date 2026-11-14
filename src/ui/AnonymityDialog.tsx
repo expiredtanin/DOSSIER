@@ -3,7 +3,7 @@
 // `LockConflictDialog` (kein window.confirm: im Tauri-WKWebView stumm). Zustand und Prüfung: `state/anonymityGate.ts`.
 
 import { memo, useEffect, useSyncExternalStore } from "react";
-import { t } from "../i18n";
+import { getLanguage, t } from "../i18n";
 import { getAnonymityRequest, subscribeAnonymityRequest } from "../state/anonymityGate";
 import { useModalFocus } from "./modalFocus";
 
@@ -49,7 +49,7 @@ const DialogBody = memo(function DialogBody() {
                   <b>{areaLabel(f.area)}</b>
                   {f.place ? <span style={{ color: "var(--muted)" }}> · {f.place}</span> : null}
                   <div>
-                    „{f.text}" — {t(`anonymity.kind.${f.kind}`)}: <span className="mono">{f.term}</span>
+                    {getLanguage() === "en" ? `\u201C${f.text}\u201D` : `\u201E${f.text}\u201C`} — {t(`anonymity.kind.${f.kind}`)}: <span className="mono">{f.term}</span>
                   </div>
                 </li>
               ))}
