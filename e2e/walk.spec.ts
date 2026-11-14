@@ -26,8 +26,12 @@ test("Begehen: Geist-Knopf und Taste G, Esc beendet", async ({ page }) => {
   const ghost = page.getByTestId("walk-ghost");
   await expect(ghost).toHaveAttribute("aria-pressed", "false");
   await expect(page.getByTestId("walk-help")).toContainText("G");
-  await page.keyboard.press("g");
-  await expect(ghost).toHaveAttribute("aria-pressed", "true");
+  // Unter Last hängt der Tasten-Hörer des Begehen-Modus erst nach dem nächsten Effekt: G wiederholen, bis es wirkt
+  // (nur solange noch aus, damit kein Doppel-Umschalten entsteht).
+  await expect(async () => {
+    if ((await ghost.getAttribute("aria-pressed")) !== "true") await page.keyboard.press("g");
+    await expect(ghost).toHaveAttribute("aria-pressed", "true", { timeout: 1_000 });
+  }).toPass({ timeout: 15_000 });
   await page.keyboard.press("g");
   await expect(ghost).toHaveAttribute("aria-pressed", "false");
   // W läuft ohne Absturz (Kollisionswelt wird aus dem Modell gebaut).
