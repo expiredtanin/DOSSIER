@@ -108,6 +108,8 @@ test("Taste T: in Textfeldern wirkungslos, ohne Auswahl und Werkzeug nichts ([18
   await page.locator(".cmdline-input").fill("");
   await blurFocus(page);
   await page.keyboard.press("Escape");
+  // Esc hebt die Auswahl erst nach dem Ereignis auf (setTimeout, [204]): abwarten, sonst gilt T noch der Auswahl.
+  await expect(page.locator(".objinfo-panel").getByText("Kein Objekt gewählt")).toBeVisible();
   await page.keyboard.press("t");
   await expect(page.locator(".objset-panel")).toHaveCount(0);
 });
