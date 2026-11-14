@@ -438,6 +438,51 @@ pub(crate) mod tests {
         println!("  Antwort {} KiB", sent / 1024);
     }
 
+    /// [207] Strassenname (Einzeltext der Klasse „11“) folgt der Achse auch im Zeichnungs-Cache: Achse verschieben/
+    /// dazufügen/entfernen rechnet den Namen neu (Ergebnis = ohne Cache); eine Wand zu verschieben lässt alle Stücke stehen.
+    #[test]
+    fn strassenname_folgt_achse_im_cache() {
+        let mut r = Rng(5);
+        let mut doc = random_doc(&mut r, 300);
+        let arc = |r0: f64| -> Vec<Value> { (0..=12).map(|i| { let a = (20.0 + 5.0 * i as f64).to_radians(); json!({"x": r0 * a.cos(), "y": r0 * a.sin()}) }).collect() };
+        let axis = |id: &str, r0: f64| json!({"id": id, "type": "drawing2d", "levelId": "eg", "categoryCode": "11", "geom": {"shape": "polyline", "pts": arc(r0), "closed": false}});
+        let name = json!({"id": "name", "type": "drawing2d", "levelId": "eg", "categoryCode": "11",
+            "geom": {"shape": "text", "at": {"x": 24.0, "y": 29.0}, "text": "Bahnhofstrasse", "height": 1.0, "angle": 2.0}});
+        doc.commit(ops(json!([{"kind": "add", "collection": "drawings2d", "items": [axis("achse", 40.0), name], "at": 0}])), None, 1.0, false).unwrap();
+        let a = PlanArgs::parse(1.0, &json!({"floor": "eg", "show": ["11", "20", "21", "30", "60", "99"], "grey": [], "scale": 500.0, "global": true}).to_string()).unwrap();
+        let mut store: HashMap<u64, Vec<u8>> = HashMap::new();
+        let mut step = |doc: &mut Document, store: &mut HashMap<u64, Vec<u8>>| {
+            let fresh = plain(&plan_domains_buf(doc.project().unwrap(), &a).unwrap());
+            let have: HashSet<u64> = store.keys().copied().collect();
+            let (p, revs, cache) = doc.project_cached().unwrap();
+            let out = plan_domains_cached(p, revs, cache, &a, &have).unwrap();
+            let keys: Vec<u64> = out.chunks.iter().map(|c| c.0).collect();
+            let got = assembled(&out, store);
+            assert_eq!(got, fresh, "mit Cache anders als ohne");
+            (keys, got.0)
+        };
+        let (k0, p0) = step(&mut doc, &mut store);
+        assert!(p0.matches("\"drawingText\"").count() >= 14, "Zeichen einzeln auf der Achse");
+        // Wand verschieben: Stücke unverändert, nichts neu.
+        let mut w = doc.field("walls").unwrap()[0].clone();
+        w["end"]["x"] = json!(w["end"]["x"].as_f64().unwrap() + 0.3);
+        doc.commit(ops(json!([{"kind": "replace", "collection": "walls", "entity": w}])), None, 2.0, false).unwrap();
+        let (k1, _) = step(&mut doc, &mut store);
+        assert_eq!(k0, k1, "Wand verschieben lässt die Stücke stehen");
+        // Achse verschieben: genau der Name (und die Achse) werden neu gerechnet, der Name folgt.
+        doc.commit(ops(json!([{"kind": "replace", "collection": "drawings2d", "entity": axis("achse", 44.0)}])), None, 3.0, false).unwrap();
+        let (k2, p2) = step(&mut doc, &mut store);
+        assert_ne!(p0, p2, "Name folgt der verschobenen Achse");
+        assert!(k2.iter().zip(&k0).filter(|(a, b)| a != b).count() <= 3 && k2 != k0, "nur wenige Stücke neu");
+        // Zweite Achse dazu, dann wieder weg.
+        doc.commit(ops(json!([{"kind": "add", "collection": "drawings2d", "items": [axis("achse2", 41.0)], "at": 0}])), None, 4.0, false).unwrap();
+        let (_, p3) = step(&mut doc, &mut store);
+        assert_ne!(p2, p3, "neue, nähere Achse wirkt");
+        doc.commit(ops(json!([{"kind": "remove", "collection": "drawings2d", "ids": ["achse2", "achse"]}])), None, 5.0, false).unwrap();
+        let (_, p4) = step(&mut doc, &mut store);
+        assert!(p4.matches("\"drawingText\"").count() < p3.matches("\"drawingText\"").count(), "ohne Achse bleibt der Text gerade");
+    }
+
     /// Mit Cache = ohne Cache (Primitive, Inhalts-Hashes, Linienzüge, Ausmass) über zufällige
     /// Änderungen samt Undo und Laden, wechselnde Argumente (Geschoss, Sichtbarkeit, Dimmen, kompakt,
     /// Massstab, Detail) und einen Aufrufer, der Stücke behält, verliert oder nie hatte. Dazu: die

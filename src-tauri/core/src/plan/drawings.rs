@@ -342,7 +342,22 @@ pub(super) fn road_axes(c: &Ctx) -> Vec<(String, Vec<Vec2>)> {
     out
 }
 
-const ROAD_CLASS: &str = "11";
+pub(super) const ROAD_CLASS: &str = "11";
+
+/// [207] Stand der Strassenachsen je Ebene (Zeichnungs-Cache): Mischung der Element-Stände aller Achs-Kandidaten
+/// (Klasse „11“, Linie/Polylinie/Bogen) derselben Ebene, in Reihenfolge. Ebenen ohne Achse fehlen. Die Stände der Namen
+/// (Einzeltexte der Klasse) tragen ihn mit, so rechnet der Cache sie neu, wenn eine Achse sich ändert, dazukommt oder
+/// wegfällt — Wände, andere Klassen und Ebenen lassen sie unberührt.
+pub(super) fn road_axes_stamp(p: &crate::model::Project, stamps: &[u64]) -> HashMap<String, u64> {
+    let mut out: HashMap<String, u64> = HashMap::new();
+    for (d, &st) in p.drawings2d.iter().zip(stamps) {
+        if d.category_code == ROAD_CLASS && matches!(d.geom, Drawing2DGeom::Line { .. } | Drawing2DGeom::Polyline { .. } | Drawing2DGeom::Arc { .. }) {
+            let h = out.entry(d.level_id.clone()).or_insert(0x9E37_79B9_7F4A_7C15);
+            *h = mix(*h, st);
+        }
+    }
+    out
+}
 
 /// [207] Zeichen eines Strassennamens entlang der nächstgelegenen Achse derselben Ebene (`None`: kein einfacher Text auf der
 /// Strassen-Klasse oder keine passende Achse, dann bleibt der Text gerade).
