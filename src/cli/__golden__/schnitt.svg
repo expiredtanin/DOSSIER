@@ -49,6 +49,6 @@
 <line x1="6.4" y1="0.5" x2="0.6" y2="0.5" stroke="#2b3039" stroke-width="0.018"/>
 <polyline points="6.1725,2.05885 6.4,2.05885 6.4,1.88564 6.4,0.73094" fill="none" stroke="#2b3039" stroke-width="0.018"/>
 <polyline points="0.6,0.73094 0.6,1.88564 0.6,2.05885 0.8275,2.05885" fill="none" stroke="#2b3039" stroke-width="0.018"/>
-<line x1="0.6" y1="7.08564" x2="6.4" y2="7.08564" stroke="#1f242c" stroke-width="0.025"/>
+<line x1="-1.4" y1="7.08564" x2="8.4" y2="7.08564" stroke="#1f242c" stroke-width="0.05"/>
 </g>
 </svg>
