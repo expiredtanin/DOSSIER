@@ -21,6 +21,8 @@
 // Sync) bleibt in App.tsx — exaktes Muster wie `commandAliasOverrides.ts`.
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
+import { getLanguage } from "../i18n/translate";
+
 export type ShortcutId =
   | "undo"
   | "redo"
@@ -384,16 +386,20 @@ const KEY_DISPLAY_LABELS: Record<string, string> = {
   ArrowRight: "→",
 };
 
+/** Englische Tastennamen, wo sie vom Deutschen abweichen (Rest wie `KEY_DISPLAY_LABELS`). */
+const KEY_DISPLAY_LABELS_EN: Record<string, string> = { Delete: "Del", Backspace: "Backspace", " ": "Space" };
+
 /** Menschenlesbare Darstellung einer Kombination, plattformabhängig (⌘⇧Z auf macOS, Strg+Umschalt+Z sonst). */
 export function formatCombo(combo: string, mac: boolean = isMacPlatform()): string {
   const parts = combo.split("+");
   const key = parts[parts.length - 1];
   const mods = parts.slice(0, -1);
   const segs: string[] = [];
-  if (mods.includes("mod")) segs.push(mac ? "⌘" : "Strg");
-  if (mods.includes("shift")) segs.push(mac ? "⇧" : "Umschalt");
+  const en = getLanguage() === "en";
+  if (mods.includes("mod")) segs.push(mac ? "⌘" : en ? "Ctrl" : "Strg");
+  if (mods.includes("shift")) segs.push(mac ? "⇧" : en ? "Shift" : "Umschalt");
   if (mods.includes("alt")) segs.push(mac ? "⌥" : "Alt");
-  const keyLabel = KEY_DISPLAY_LABELS[key] ?? (key.length === 1 ? key.toUpperCase() : key);
+  const keyLabel = (en ? KEY_DISPLAY_LABELS_EN[key] : undefined) ?? KEY_DISPLAY_LABELS[key] ?? (key.length === 1 ? key.toUpperCase() : key);
   segs.push(keyLabel);
   return segs.join(mac ? "" : "+");
 }

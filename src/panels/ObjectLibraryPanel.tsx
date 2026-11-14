@@ -2,7 +2,7 @@
 // mit Vorschau-Symbol je Objekt. Klick wählt das Objekt und startet den Befehl `libobj` (Einfügepunkt klicken,
 // R = drehen, M = spiegeln). Der Katalog kommt aus dem Rust-Kern; die Vorschau zeichnet der Kern (grob).
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { t } from "../i18n";
 import type { TranslationKey } from "../i18n";
 import { usePanelHostAction } from "./host";
@@ -43,7 +43,31 @@ function Preview({ def }: { def: LibObjectDef }) {
   );
 }
 
+const OPEN_KEY = "cad.objlib.open";
+
+/** Gemerkter Zustand der Gruppen (offen/zu) je Gruppen-Schlüssel; leer, wenn nichts gespeichert ist. */
+function loadOpen(): Record<string, boolean> {
+  try {
+    const raw = localStorage.getItem(OPEN_KEY);
+    const v: unknown = raw ? JSON.parse(raw) : null;
+    return v && typeof v === "object" ? (v as Record<string, boolean>) : {};
+  } catch {
+    return {};
+  }
+}
+
 export function ObjectLibraryPanel() {
+  const [open, setOpen] = useState<Record<string, boolean>>(loadOpen);
+  const setGroupOpen = (g: string, v: boolean) =>
+    setOpen((o) => {
+      const next = { ...o, [g]: v };
+      try {
+        localStorage.setItem(OPEN_KEY, JSON.stringify(next));
+      } catch {
+        /* Speicher gesperrt: der Zustand gilt nur für diese Sitzung */
+      }
+      return next;
+    });
   const onRunCommand = usePanelHostAction("onRunCommand");
   const catalog = useMemo(() => libCatalog(), []);
   const groups = useMemo(() => libGroups(), []);
@@ -60,7 +84,7 @@ export function ObjectLibraryPanel() {
     <div className="objlib-panel" style={{ overflowY: "auto", padding: "6px 8px" }}>
       <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 6 }}>{t("lib.hint")}</div>
       {groups.map((g) => (
-        <details key={g} open={g === groups[0]} style={{ marginBottom: 4 }}>
+        <details key={g} open={open[g] ?? g === groups[0]} onToggle={(e) => { const v = e.currentTarget.open; if (v !== (open[g] ?? g === groups[0])) setGroupOpen(g, v); }} style={{ marginBottom: 4 }}>
           <summary style={{ cursor: "pointer", fontSize: 12, fontWeight: 600, padding: "3px 0" }}>{t(`lib.g.${g}` as TranslationKey)}</summary>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(72px, 1fr))", gap: 4, padding: "4px 0" }}>
             {catalog.objects
@@ -71,8 +95,8 @@ export function ObjectLibraryPanel() {
                   <button
                     key={o.id}
                     type="button"
-                    title={name}
-                    aria-label={name}
+                    title={name.replace(/\u00AD/g, "")}
+                    aria-label={name.replace(/\u00AD/g, "")}
                     onClick={() => place(o)}
                     style={{
                       display: "flex",
@@ -89,7 +113,7 @@ export function ObjectLibraryPanel() {
                     }}
                   >
                     <Preview def={o} />
-                    <span style={{ fontSize: 10, lineHeight: 1.15, textAlign: "center", overflowWrap: "anywhere" }}>{name}</span>
+                    <span style={{ fontSize: 10, lineHeight: 1.15, textAlign: "center", overflowWrap: "break-word", hyphens: "manual" }}>{name}</span>
                   </button>
                 );
               })}

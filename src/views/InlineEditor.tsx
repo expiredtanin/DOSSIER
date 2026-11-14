@@ -4,7 +4,7 @@
 //
 // Extrahiert aus App.tsx. Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { t } from "../i18n";
 
 export function InlineEditor({
@@ -23,16 +23,27 @@ export function InlineEditor({
   const ref = useRef<HTMLDivElement>(null);
   // An die Viewport-Ränder klemmen (wie das Kontextmenü).
   const [pos, setPos] = useState({ x, y });
-  useEffect(() => {
+  // Auch nach dem Aufbau neu klemmen: Felder (z. B. Füllung) wachsen den Editor erst nach der ersten Messung.
+  useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const r = el.getBoundingClientRect();
-    let nx = x;
-    let ny = y;
-    if (nx + r.width > window.innerWidth - 4) nx = window.innerWidth - r.width - 4;
-    if (ny + r.height > window.innerHeight - 4)
-      ny = window.innerHeight - r.height - 4;
-    setPos({ x: Math.max(4, nx), y: Math.max(4, ny) });
+    const clamp = () => {
+      // Layout-Mass (offsetWidth), nicht getBoundingClientRect: die Einblend-Animation skaliert und verfälscht die Messung.
+      const nx = Math.min(x, window.innerWidth - el.offsetWidth - 4);
+      const ny = Math.min(y, window.innerHeight - el.offsetHeight - 4);
+      setPos((p) => {
+        const q = { x: Math.max(4, nx), y: Math.max(4, ny) };
+        return p.x === q.x && p.y === q.y ? p : q;
+      });
+    };
+    clamp();
+    const ro = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(clamp);
+    ro?.observe(el);
+    window.addEventListener("resize", clamp);
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener("resize", clamp);
+    };
   }, [x, y]);
   // Schließen bei Außenklick / Esc.
   useEffect(() => {

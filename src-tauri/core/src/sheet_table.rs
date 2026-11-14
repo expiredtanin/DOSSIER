@@ -130,11 +130,13 @@ const COSTS: &[Col] = &[
 
 /// [255] Baurecht-Nachweis.
 const SITE_PROOF: &[Col] = &[
-    c("item", "siteProof.col.item", 4.6, false, true),
-    c("allowed", "siteProof.col.allowed", 1.4, true, true),
+    // Kurzer Kopf „Reserve“ (die lange Fassung „Reserve (+) / Überschr. (−)“ steht in der Panel-Tabelle): Köpfe und Zahlen passen
+    // schon bei 100 mm Breite ohne „…“ (Test `baurecht_nachweis_tabelle`).
+    c("item", "siteProof.col.item", 4.25, false, true),
+    c("allowed", "siteProof.col.allowed", 1.5, true, true),
     c("actual", "siteProof.col.actual", 1.4, true, true),
-    c("reserve", "siteProof.col.reserve", 1.8, true, true),
-    c("ok", "siteProof.col.ok", 1.0, false, true),
+    c("reserve", "siteProof.col.reserveShort", 1.5, true, true),
+    c("ok", "siteProof.col.ok", 1.35, false, true),
 ];
 
 /// [158] Raumbuch-Spalten, die nur erscheinen, wenn ein Raum eine Dachschräge hat.
@@ -895,5 +897,21 @@ mod tests {
         assert!(tx.contains(&"100.00".to_string()), "{tx:?}");
         assert_eq!(serde_json::to_value(LayoutTableSource::SiteProof).unwrap(), "siteProof");
         assert!(catalog_json()["sources"]["siteProof"].as_array().unwrap().len() == 5);
+    }
+
+    /// [255] Köpfe der Baurecht-Tabelle werden auch bei schmalem Rahmen (100 mm) nicht mit „…“ gekürzt (de und en, 8 pt fett).
+    #[test]
+    fn baurecht_tabelle_koepfe_passen() {
+        for heads in [["Prüfgrösse", "Zulässig", "Projekt", "Reserve", "Erfüllt"], ["Item", "Allowed", "Project", "Reserve", "Met"]] {
+            let mut t = table("n", None);
+            t.source = LayoutTableSource::SiteProof;
+            t.width_mm = 100.0;
+            let p = project(0, vec![t]);
+            let lb = Labels::parse(&json!({"siteProof.col.item": heads[0], "siteProof.col.allowed": heads[1], "siteProof.col.actual": heads[2], "siteProof.col.reserveShort": heads[3], "siteProof.col.ok": heads[4]}));
+            let tx = texts(&render(&p, &p.layouts.as_ref().unwrap()[0], &lb)[0]);
+            for h in heads {
+                assert!(tx.contains(&h.to_string()), "Kopf {h} gekürzt: {tx:?}");
+            }
+        }
     }
 }

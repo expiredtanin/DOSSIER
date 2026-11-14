@@ -38,6 +38,12 @@ declare global {
   }
 }
 window.__i18n = { getLanguage, setLanguage };
+// Nur mit `?dossierTest&lang=en`: Sprache VOR dem ersten Render setzen (UI-Review; gibt noch keinen Umschalter).
+{
+  const q = new URLSearchParams(window.location.search);
+  const l = q.get("lang");
+  if (q.has("dossierTest") && (l === "de" || l === "en")) setLanguage(l);
+}
 
 // ── Native-App-Verhalten (kein Browser-Standard) ─────────────────────────────
 // Die App soll sich wie ein natives Programm anfühlen. Diese globalen Hooks

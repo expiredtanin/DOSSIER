@@ -57,7 +57,7 @@ export function AreaTableSection() {
         <div key={si} className="area-block">
           <div className="area-heading">{s.heading}</div>
           <div className="area-scroll">
-            <table className="area-table">
+            <table className={s.columns.length > 6 ? "area-table wide" : "area-table"}>
               <thead>
                 <tr>
                   {s.columns.map((c, i) => (
@@ -72,9 +72,12 @@ export function AreaTableSection() {
                   <tr key={ri} className={r.total ? "total" : ""}>
                     {r.cells.map((c, ci) =>
                       typeof c === "string" ? (
-                        <td key={ci}>{c}</td>
+                        // Kurze Textzellen in Zahlenspalten (Strich, ja/nein) stehen wie die Zahlen rechts.
+                        <td key={ci} data-label={ci > 0 ? s.columns[ci] : undefined} className={ci > 0 && c.length <= 4 ? "num" : undefined}>
+                          {c}
+                        </td>
                       ) : (
-                        <td key={ci} className="num">
+                        <td key={ci} data-label={ci > 0 ? s.columns[ci] : undefined} className="num">
                           {c.n === null ? "–" : c.n.toFixed(c.d)}
                         </td>
                       ),

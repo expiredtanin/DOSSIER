@@ -90,7 +90,7 @@ Unterkante zwischen zwei Geschossen), lehnt der Befehl mit einer Meldung ab.
 Tische, Sitzen, Schlafen, Schränke, Aussenraum (Auto mit Parkfeld, Velo, Rollstuhl-Wendekreis). Objekt wählen, im Plan den
 Einfügepunkt klicken (Befehl `libobj`); vor dem Klick dreht R das Objekt, M spiegelt es. Die Vorschau hängt am Cursor.
 Ziehen aus der Palette gibt es nicht. Ein gesetztes Objekt wählst du an und änderst es im Panel **Objekt-Info** (Abschnitt
-„Objekt aus Bibliothek“): **Breite**, **Tiefe**, **Anzahl** und weitere Parameter; bei Esstischen mit Stühlen regelt
+„Objekt“): **Breite**, **Tiefe**, **Anzahl** und weitere Parameter; bei Esstischen mit Stühlen regelt
 **Unordnung**, wie schief die Stühle stehen, **Neu würfeln** zieht eine neue Anordnung (gleiche Zahl = gleiche Stühle). Die Zeichnung
 folgt dem Detailgrad der Ansicht (grob, mittel, fein). Möbel liegen auf der Klasse 22, Sanitär auf 23, Fahrzeuge und
 Freiflächen auf 24 und lassen sich dort ausschalten; Möbel und Sanitär sparen den Bodenbelag aus. Im DXF-Export wird jedes

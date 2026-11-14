@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { setLanguage } from "../i18n";
 import {
   comboFromEvent,
   comboMatches,
@@ -156,6 +157,17 @@ describe("formatCombo", () => {
 
   it("Nicht-macOS-Darstellung: Wörter mit +", () => {
     expect(formatCombo("mod+shift+z", false)).toBe("Strg+Umschalt+Z");
+  });
+
+  it("Englisch: Ctrl/Shift/Del statt Strg/Umschalt/Entf", () => {
+    setLanguage("en");
+    try {
+      expect(formatCombo("mod+shift+Tab", false)).toBe("Ctrl+Shift+Tab");
+      expect(formatCombo("Delete", false)).toBe("Del");
+      expect(formatCombo("mod+shift+z", true)).toBe("⌘⇧Z");
+    } finally {
+      setLanguage("de");
+    }
   });
 
   it("Sondertasten bekommen ein lesbares Label", () => {
