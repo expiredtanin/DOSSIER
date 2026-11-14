@@ -184,6 +184,18 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   (`openings.rs` `reveal_meshes`, glatt schattiert wie der Rahmenring); die Quader bleiben für Export/IFC (`with_fill`). Test
   `formoeffnung_leibungsstuecke_ein_koerper_je_kantenzug`; Golden `komplex-model3d` (−69 Netze). Offen: Bogenwände (Erker) behalten
   Quader-Leibungen; Mac-Gegenprobe.
+  Stand 14.11.: (a) Formöffnungen in Bogenwänden schneiden die echte Form (`wall_body.rs`): ohne Schichteinzug ein gebogenes Prisma
+  (abgewickelt gebaut, unterteilt, auf den Bogen gelegt; Leibungen radial), mit Schichteinzug [106] ein gerades Prisma auf der Sehne
+  über `reveal_zone` (die zweite Rechnung in `walls.rs` legt dafür die Sehne ohne Loch an, `zone_only`); die Öffnungsteile
+  (`openings.rs`) haben keine Füllkörper mehr, die Leibungsstücke laufen als ein Körper je Kantenzug wie bei geraden Wänden (damit
+  auch keine Quader-Leibungen im Erker). Test `formoeffnung_in_bogenwand_mit_echter_form` (Rund/Spitzbogen gebogen, Rundbogen/Rund
+  mit Einzug; Punkt-in-Körper an Öffnungsmitte und Rechteck-Ecken). (b) Dachmuster verschnittener Dächer (Kehle, Gauben) enden
+  an der Kehle: Musterlinien jeder Dachfläche auf die nach `roof_assembly` übrigen Flächen der Eindeckung beschnitten
+  (Verankerung unverändert); Zwischenspeicher-Schlüssel mit den Ständen der Nachbardächer. Test `dachmuster_endet_an_der_kehle`.
+  Goldens unverändert (Musterhaus komplex: Erker-Fenster sind Rechtecke, Muster nicht im `model3d`-Golden). Nur per Rust-Test und
+  Puffer-Auswertung geprüft, nicht angesehen (Linux ohne Metal). Offen: Mac-Gegenprobe; 3D-Live-Schnitt durch Formfenster zeigt
+  Rechteck-Loch (`render3d/section.rs` schneidet die Stücke, nicht den Körper); Rahmen/Glas gebogener Formöffnungen bleiben
+  Sehnen zwischen den Ecken (wie Rechteck-Einbauteile in Bogenwänden).
 - ◐ **[228]** In Blender öffnen / .blend speichern (12.11., Wunsch Maintainer; Stand 13.11.: umgesetzt und mit bpy 5.3 im Linux-Container geprüft, Mac-Gegenprobe offen). Skript `render_dossier.py` hat Modus `save` (`scene.json` `mode`, Argument `--mode`): Szene wie fürs Rendering bauen, Objekte in Collections nach Bauteil (Geschosse, Wände, Decken, Dächer, Fenster und Türen, Treppen, Stützen, Extrusionen, Bäume, Gelände, Kontext, Dossier) mit lesbaren Namen (`Wand eg-aw-s`; Zuordnung aus Knotenname/`extras` des GLB, keine Export-Änderung nötig, `doc/RENDER-SZENE.md`), Kamera `Dossier-Kamera`, Himmel `Dossier-Himmel`, `pack_all`, `save_as_mainfile`; 3D-Fenster der Datei in Material-Vorschau mit Blick durch die Kamera. Dialog: «Als .blend speichern …» (Blender im Hintergrund, dann nativer Speichern-Dialog) und «In Blender öffnen» (Datei im Arbeitsordner bauen, dann Blender MIT Oberfläche auf die Datei, ohne Warten); Browser: ZIP mit Anleitung für `--mode save`. Neuer Tauri-Befehl `blender_open`, Electron `blender:open`. CLI `dossier-cli … blend --out x.blend`. Abweichung: «Öffnen» startet Blender nicht mit dem Skript, sondern mit der fertigen .blend (zuverlässiger, selbe Datei wie «Speichern», Layout steckt in der Datei). Offen: Mac/Windows-Gegenprobe der Start-Befehle (`blender_open` nur im Linux-Container kompiliert/getestet), Blender-GUI nicht gesehen (Linux ohne Anzeige); Datei liegt nach «Öffnen» im Temp-Ordner (in Blender «Speichern unter»). · S
 - ◐ **[227]** Kontextgebäude auf dem Gelände, Baugrube im Rendering ausblenden (12.11., Befunde der Mac-Gegenprobe [211]). (1) Kern
   `context_ground.rs`: jedes zusammenhängende Gebäude eines Netzes (`importedMesh`, auch mehrere Häuser in einem Netz) wird senkrecht auf den

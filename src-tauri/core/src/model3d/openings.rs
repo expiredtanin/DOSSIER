@@ -182,12 +182,12 @@ pub fn emit_opening_meshes(p: &Project, detail: f64) -> Vec<RMesh> {
 pub fn emit_opening_meshes_with(p: &Project, detail: f64, keep: &dyn Fn(&Opening) -> bool) -> Vec<RMesh> {
     let arcs: Vec<usize> = p.walls.iter().enumerate().filter(|(_, w)| crate::wall_arc::WallArc::of_wall(w).is_some()).map(|(i, _)| i).collect();
     if arcs.is_empty() {
-        return emit_opening_meshes_plain(p, detail, keep, true);
+        return emit_opening_meshes_plain(p, detail, keep);
     }
     let mut q = p.clone();
     let arc_ids: std::collections::HashSet<&str> = arcs.iter().map(|&i| p.walls[i].id.as_str()).collect();
     q.openings = p.openings.as_ref().map(|v| v.iter().filter(|o| keep(o) && !arc_ids.contains(o.host_wall_id.as_str())).cloned().collect());
-    let mut out = emit_opening_meshes_plain(&q, detail, &|_| true, true);
+    let mut out = emit_opening_meshes_plain(&q, detail, &|_| true);
     for &i in &arcs {
         let Some((arc, v)) = crate::wall_arc::unrolled_wall(&p.walls[i]) else { continue };
         q.walls = vec![v];
@@ -201,7 +201,7 @@ pub fn emit_opening_meshes_with(p: &Project, detail: f64, keep: &dyn Fn(&Opening
         };
         let (zoned, bent): (Vec<Opening>, Vec<Opening>) = own.into_iter().partition(|o| zone(o).is_some());
         q.openings = Some(bent);
-        for mut m in emit_opening_meshes_plain(&q, detail, &|_| true, false) {
+        for mut m in emit_opening_meshes_plain(&q, detail, &|_| true) {
             for c in m.positions.chunks_exact_mut(3) {
                 let w = arc.point(c[0], c[1]);
                 c[0] = w.x;
@@ -213,7 +213,7 @@ pub fn emit_opening_meshes_with(p: &Project, detail: f64, keep: &dyn Fn(&Opening
             let Some((sa, sb)) = zone(&o) else { continue };
             let (pa, u, chord) = crate::wall_arc::chord_of(&arc, sa, sb);
             q.openings = Some(vec![o]);
-            for mut m in emit_opening_meshes_plain(&q, detail, &|_| true, false) {
+            for mut m in emit_opening_meshes_plain(&q, detail, &|_| true) {
                 for c in m.positions.chunks_exact_mut(3) {
                     let t = (c[0] - sa) / (sb - sa) * chord;
                     let (x, y) = (pa.x + u.x * t - u.y * c[1], pa.y + u.y * t + u.x * c[1]);
@@ -227,12 +227,12 @@ pub fn emit_opening_meshes_with(p: &Project, detail: f64, keep: &dyn Fn(&Opening
     out
 }
 
-fn emit_opening_meshes_plain(p: &Project, detail: f64, keep: &dyn Fn(&Opening) -> bool, bodies: bool) -> Vec<RMesh> {
+fn emit_opening_meshes_plain(p: &Project, detail: f64, keep: &dyn Fn(&Opening) -> bool) -> Vec<RMesh> {
     let mut by_wall = p.openings_by_wall();
     for v in by_wall.values_mut() {
         v.retain(|o| keep(o));
     }
-    let per: Vec<WallOpeningMeshes> = p.walls.iter().map(|wall| wall_opening_meshes_ex(p, wall, by_wall.get(wall.id.as_str()).map_or(&[][..], |v| v.as_slice()), detail, bodies)).collect();
+    let per: Vec<WallOpeningMeshes> = p.walls.iter().map(|wall| wall_opening_meshes(p, wall, by_wall.get(wall.id.as_str()).map_or(&[][..], |v| v.as_slice()), detail)).collect();
     let mut out = assemble_opening_meshes(per);
     out.extend(surface_window_meshes_with(p, keep));
     out
@@ -273,15 +273,10 @@ pub(crate) fn surface_window_meshes_with(p: &Project, keep: &dyn Fn(&Opening) ->
     out
 }
 
-/// Einbauteile der Öffnungen `openings` (in Projekt-Reihenfolge) der Wand `wall`.
+/// Einbauteile der Öffnungen `openings` (in Projekt-Reihenfolge) der Wand `wall`. Formöffnungen ohne Füllkörper: den
+/// Umriss schneidet der Wandkörper ([216], `wall_body`; auch bei Bogenwänden, hier auf der abgewickelten Ersatzwand).
 pub(crate) fn wall_opening_meshes(p: &Project, wall: &Wall, openings: &[&Opening], detail: f64) -> WallOpeningMeshes {
-    wall_opening_meshes_ex(p, wall, openings, detail, true)
-}
-
-/// Wie [`wall_opening_meshes`]; `bodies = false` für die abgewickelte Ersatzwand einer Bogenwand: dort gibt es
-/// keinen Wandkörper nach dem Umriss ([216]), die Formöffnungen behalten ihre Füllkörper.
-pub(crate) fn wall_opening_meshes_ex(p: &Project, wall: &Wall, openings: &[&Opening], detail: f64, bodies: bool) -> WallOpeningMeshes {
-    let body_ops = if bodies { super::wall_body::body_openings(wall, openings) } else { Vec::new() };
+    let body_ops = super::wall_body::body_openings(openings);
     let mut shaped: Vec<RMesh> = Vec::new();
     let mut w = FlatWriter::new();
     w.num(detail).num(1.0);
