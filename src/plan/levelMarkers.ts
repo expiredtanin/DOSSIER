@@ -11,6 +11,14 @@ import type { Primitive } from "./generatePlan";
 import { documentFor } from "../core/document";
 import { decodePlanBuf } from "./planBuf";
 import { derivedVisible, LEVEL_MARK_CATEGORY } from "../model/derivedCategories";
+import {
+  CONTEXT_PARENT_CATEGORY,
+  EXCAVATION_CATEGORY,
+  GENERIC_IMPORT_CATEGORY,
+  GEO_CATEGORY_DEFS,
+  IMAGE_CATEGORY,
+  TERRAIN_CATEGORY,
+} from "../model/contextCategories";
 
 /**
  * Ob eine Ebene automatische Koten trägt: Ebene > [173] Modelldarstellung der Ebene (`dimensions.levelMarks`,
@@ -53,10 +61,34 @@ function siteIds(project: Project): Set<string> {
   return new Set((project.context ?? []).filter((c) => c.type === "terrainMesh" || c.type === "excavation" || c.type === "contourSet").map((c) => c.id));
 }
 
+// [256] Umgebungsklassen (Kern `import_context::is_context_class`): Netze darauf sind Nachbarn/Kataster, nicht das eigene Gebäude.
+const CONTEXT_CLASSES = new Set([CONTEXT_PARENT_CATEGORY, TERRAIN_CATEGORY, IMAGE_CATEGORY, EXCAVATION_CATEGORY, GENERIC_IMPORT_CATEGORY, ...Object.values(GEO_CATEGORY_DEFS)].map((d) => d.code));
+
+/**
+ * [256] Nachbargebäude (wie Kern `drawings::level_marker_bounds`): Flächen der Kontext-Netze auf einer Umgebungsklasse und
+ * Linien ganz in ihrem Ausmass (Umriss, Schnittkante) zählen nicht zum Gebauten.
+ */
+function neighbourFilter(project: Project, primitives: readonly Primitive[]): (q: Primitive) => boolean {
+  const ids = new Set((project.context ?? []).filter((c) => c.type === "importedMesh" && CONTEXT_CLASSES.has(c.categoryCode)).map((c) => c.id));
+  if (ids.size === 0) return () => false;
+  const boxes: [number, number, number, number][] = [];
+  for (const q of primitives) {
+    if (q.kind === "polygon" && q.contextObjectId && ids.has(q.contextObjectId)) {
+      const b: [number, number, number, number] = [Infinity, Infinity, -Infinity, -Infinity];
+      for (const v of q.pts) [b[0], b[1], b[2], b[3]] = [Math.min(b[0], v.x), Math.min(b[1], v.y), Math.max(b[2], v.x), Math.max(b[3], v.y)];
+      boxes.push(b);
+    }
+  }
+  const inBox = (v: { x: number; y: number }) => boxes.some((b) => v.x >= b[0] - 1e-6 && v.x <= b[2] + 1e-6 && v.y >= b[1] - 1e-6 && v.y <= b[3] + 1e-6);
+  return (q) => (q.kind === "polygon" ? !!q.contextObjectId && ids.has(q.contextObjectId) : q.kind === "line" && inBox(q.a) && inBox(q.b));
+}
+
 function builtMinX(project: Project, primitives: readonly Primitive[]): number {
   const site = siteIds(project);
+  const neighbour = neighbourFilter(project, primitives);
   let minX = Infinity;
   for (const q of primitives) {
+    if (neighbour(q)) continue;
     if (q.kind === "line") {
       if (!TERRAIN_CLS.has(q.cls)) minX = Math.min(minX, q.a.x, q.b.x);
     } else if (q.kind === "polygon") {
@@ -72,8 +104,10 @@ const TREE_PICK_PREFIX = "@tree:"; // Kern `tree::TREE_PICK_PREFIX`
 
 function builtMaxY(project: Project, primitives: readonly Primitive[]): number {
   const site = siteIds(project);
+  const neighbour = neighbourFilter(project, primitives);
   let maxY = -Infinity;
   for (const q of primitives) {
+    if (neighbour(q)) continue;
     if (q.kind === "line") {
       if (!NOT_BUILT_TOP.has(q.cls)) maxY = Math.max(maxY, q.a.y, q.b.y);
     } else if (q.kind === "polygon") {

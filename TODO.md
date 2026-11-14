@@ -10,7 +10,7 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   stehen im Archiv („Bewusst nicht übernommen“).
 - **Grösse** (eine Person mit Agenten): S ≤ 1 Tag · M ≤ 1 Woche · L ≤ 1 Monat · XL > 1 Monat.
   Steht keine Grösse im Archiv, ist sie hier geschätzt.
-- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 254);
+- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 256);
   nie eine ID wiederverwenden oder umnummerieren. Präfix-IDs (`[K]`, `[G]`, `[T]`, `[B]`, `[C]`) bleiben.
 - **Pro Punkt:** was fehlt · wo im Code · Grösse. Höchstens ein bis drei Sätze je Punkt;
   Messwerte und Befunde gehören in den Commit.
@@ -265,6 +265,20 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   (Rund-/Spitzbogen, Höhe 1 m über der Wand). Goldens (Ansicht Süd, Schnitt A, 3D-Modell) nachgeführt. Offen: Öffnungen, die in eine Decke
   hineinragen (unter der Wandoberkante), werden nicht gekappt; Bild der Ansicht aus [216](3) nicht identisch nachgestellt. · S
 - 1:100-Pläne in Abgabequalität (Bemassung, Koten, Raumstempel, Öffnungen nach Detailgrad) — Plan-Review-Runde 4 nach [199].
+- ◐ **[256]** Plan-Review Runde 4 (1:100 Vorprojekt, 14.11., beide Musterhäuser + Wettbewerb, alle Grundrisse, Schnitt A-A, Ansicht Süd, 1:200
+  Gegenprobe; CLI-SVG `--hatch` in Chromium, nur Linux). Behoben: (1) Raumstempel im Ersatz (Grundschrift/umbrochen/Nummer/gekürzt) verloren
+  das Fett des Namens („Treppenhaus", „Eingang", „Wohnen/Essen/Küche" dünn neben fetten Nachbarn) — Marken je Zeile bleiben, nur die eigene
+  Grösse entfällt (`fit_room_stamp_with`, Test `raumstempel_ersatz_behaelt_fett`); (2) oberste Höhenkote sass auf dem höheren Nachbargebäude
+  („+12.00" statt „+9.50", Wettbewerb Schnitt/Ansicht) und der Kotenturm stand links vom Nachbarn statt am Haus (komplex Ansicht Süd) — Kontext-Netze
+  auf Umgebungsklassen zählen nicht zum Gebauten (`level_marker_bounds` + TS `levelMarkers.ts`, Tests `koten_ohne_nachbargebaeude`, vitest);
+  (3) „±0.00 = 441.30" lief in die Aussenwand — Kotenreihe rückt um die Textbreite (`level_markers`, Test `kotentext_endet_vor_dem_gebauten`);
+  (4) DG komplex ohne Aussenbemassung (Beispiel: `autodim` auch im DG); (5) Wettbewerb: Zimmer/Bad/Diele ohne Türen, Wohnungstür Ost schlug ins
+  Treppenhaus (Beispiel: Innentüren, Anschlag). Goldens (komplex EG/OG/DG) nachgeführt. Offen: Kamera-Sichtkegel „Südost" quer durch den EG-Grundriss
+  (Klasse 92 im Abgabeplan aus?); Nachbargebäude im Schnitt als schwarze Schnittfläche, schwebend über dem Geländeende, im Grundriss schwarz
+  (grau/Umriss?); Sonnenschatten im 1:100-Grundriss (Wettbewerb, komplex); DG-Fenster über der Schnitthöhe bemasst, aber nicht gezeigt (gestrichelt?);
+  Stempel „Schlafen" DG auf 80 %; Treppe im Grundriss ohne Schnitt-Bruchlinie über die Laufbreite; Höhenlinien-Koten/Revisionstext auf Masszahlen
+  (komplex EG Süd); Kotenwerte doppelt gerechnet in TS und Kern (`levelMarkers.ts` ↔ `level_marker_bounds`, Doppelspur seit [199]). Nicht in der
+  Tauri-App/auf dem Mac angesehen. · M
 - Fachplaner-Austausch: DXF/DWG je Geschoss/Schnitt/Ansicht ([200]), IFC mit Räumen/Psets ([201]); Rundreise in Archicad/Revit einmal
   real prüfen ([C9]).
 - Baurecht-Hülle/Ausnützung (AZ/ÜZ) gegen Modell als Nachweis-Tabelle.

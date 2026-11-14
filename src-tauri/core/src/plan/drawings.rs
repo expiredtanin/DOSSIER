@@ -2339,9 +2339,29 @@ pub fn level_marker_bounds(p: &Project, prims: &[Primitive], b: [f64; 4]) -> [f6
         .filter(|c| matches!(c, crate::model::ContextObject::TerrainMesh(_) | crate::model::ContextObject::Excavation(_) | crate::model::ContextObject::ContourSet(_)))
         .map(|c| c.id())
         .collect();
+    // [256] Nachbargebäude: Kontext-Netze auf einer Umgebungsklasse. Ihre Flächen zählen nicht, Linien ganz in ihrem
+    // Ausmass (Umriss, Schnittkante) auch nicht.
+    let neighbours: Vec<&str> = p
+        .context
+        .as_deref()
+        .unwrap_or(&[])
+        .iter()
+        .filter(|c| matches!(c, crate::model::ContextObject::ImportedMesh(m) if crate::import_context::is_context_class(&m.category_code)))
+        .map(|c| c.id())
+        .collect();
+    let boxes: Vec<[f64; 4]> = prims
+        .iter()
+        .filter_map(|q| match q {
+            Primitive::Polygon { pts, context_object_id: Some(id), .. } if neighbours.contains(&id.as_str()) => Some(pts.iter().fold([f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY], |b, v| [b[0].min(v.x), b[1].min(v.y), b[2].max(v.x), b[3].max(v.y)])),
+            _ => None,
+        })
+        .collect();
+    let in_box = |q: &Vec2| boxes.iter().any(|b| q.x >= b[0] - 1e-6 && q.x <= b[2] + 1e-6 && q.y >= b[1] - 1e-6 && q.y <= b[3] + 1e-6);
     let (mut min_x, mut max_y) = (f64::INFINITY, f64::NEG_INFINITY);
     for q in prims {
         match q {
+            Primitive::Line { a, b, .. } if in_box(a) && in_box(b) => {}
+            Primitive::Polygon { context_object_id: Some(id), .. } if neighbours.contains(&id.as_str()) => {}
             Primitive::Line { a, b, cls, .. } if !TERRAIN.contains(&cls.as_str()) => {
                 min_x = min_x.min(a.x).min(b.x);
                 if cls != "draw2d" && cls != "tree-crown" && cls != "tree-remove" {
@@ -2380,7 +2400,6 @@ pub fn level_markers(p: &Project, b: [f64; 4]) -> Vec<Primitive> {
     if !(max_x > min_x) || !(max_y > min_y) {
         return Vec::new();
     }
-    let x = min_x - MARK_OFFSET_M;
     let mut heights: Vec<f64> = Vec::new();
     let mut push_h = |z: f64| {
         if z < min_y - 1e-6 || z > max_y + 1e-6 {
@@ -2399,19 +2418,29 @@ pub fn level_markers(p: &Project, b: [f64; 4]) -> Vec<Primitive> {
         }
     }
     push_h(max_y);
+    let labels: Vec<(f64, String)> = heights
+        .into_iter()
+        .map(|z| {
+            let value = jsnum::round(z * 100.0) / 100.0;
+            let mut label = kote_label(value);
+            // ±0.00 = Bezugsgeschoss ([131]): mit bekannter Meereshöhe „±0.00 = 512.40" (m ü. M.).
+            if let Some(masl) = p.reference_elevation_masl.filter(|m| m.is_finite() && value.abs() < 1e-6) {
+                label = format!("{label} = {}", to_fixed(masl, 2));
+            }
+            (z, label)
+        })
+        .collect();
+    // [256] Die Zahl steht rechts vom Dreieck über der Bezugslinie: eine lange Kote („±0.00 = 441.30") ragte bei festem
+    // Abstand ins Gebaute. Die Reihe rückt so weit nach links, dass der längste Text vor der Bezugslinien-Lücke endet.
+    let text_w = labels.iter().map(|(_, l)| crate::text_layout::text_width_em(l, false) * KOTE_TEXT_HEIGHT_M).fold(0.0, f64::max);
+    let x = (min_x - MARK_OFFSET_M).min(min_x - LEADER_GAP_M - 0.1 - KOTE_TRI_HALF_W_M - KOTE_TEXT_GAP_M - text_w);
     let mut out = Out::default();
     let mut sink = Sink::new(Target::Vec(&mut out), Keep::All);
-    for z in heights {
+    for (z, label) in labels {
         sink.line(
             LineRef { a: v(x - 0.3, z), b: v(min_x - LEADER_GAP_M, z), cls: "section-level-leader", weight_mm: 0.13, dash: None, zigzag: None, motif: None, color: Some(INK), drawing_id: None, opening_id: None, stair_id: None, greyed: None, opacity: None },
             0,
         );
-        let value = jsnum::round(z * 100.0) / 100.0;
-        let mut label = kote_label(value);
-        // ±0.00 = Bezugsgeschoss ([131]): mit bekannter Meereshöhe „±0.00 = 512.40" (m ü. M.).
-        if let Some(masl) = p.reference_elevation_masl.filter(|m| m.is_finite() && value.abs() < 1e-6) {
-            label = format!("{label} = {}", to_fixed(masl, 2));
-        }
         push_kote_labeled(&mut sink, v(x, z), label, KoteKind::OkFertig, INK, 0.18, false, None, 1.0);
     }
     out.prims
@@ -2970,6 +2999,62 @@ mod tests {
         assert_eq!(level_marker_bounds(&p, &prims, [-12.0, -1.0, 8.0, 9.5]), [0.0, -1.0, 8.0, 6.2]);
         // Nichts Gebautes: die Grenzen bleiben.
         assert_eq!(level_marker_bounds(&p, &prims[2..3], [-12.0, -1.0, 8.0, 9.5]), [-12.0, -1.0, 8.0, 9.5]);
+    }
+
+    /// [256] Nachbargebäude (Kontext-Netz auf einer Umgebungsklasse, z. B. „12 Gebäude") zählen nicht zum Gebauten:
+    /// die oberste Kote sass sonst auf dem höheren Nachbarn („+12.00" 2.6 m über dem Flachdach, Wettbewerb Schnitt A-A),
+    /// die Koten standen links vom Nachbarn statt neben dem Haus (Musterhaus komplex, Ansicht Süd). Ein Netz auf einer
+    /// eigenen Klasse (z. B. das importierte Gebäude selbst) zählt weiter.
+    #[test]
+    fn koten_ohne_nachbargebaeude() {
+        let mesh = |id: &str, cat: &str| serde_json::json!({"type": "importedMesh", "id": id, "name": id, "categoryCode": cat, "positions": [], "indices": []});
+        let p = project(serde_json::json!({ "context": [mesh("nachbarn", "12"), mesh("ifc", "60")] }));
+        let poly = |pts: &[(f64, f64)], ctx: Option<&str>| {
+            let mut q = polygon(pts.iter().map(|q| v(q.0, q.1)).collect(), "#000", "#000", 0.5, no_hatch(), false, None);
+            if let Primitive::Polygon { context_object_id, .. } = &mut q {
+                *context_object_id = ctx.map(String::from);
+            }
+            q
+        };
+        let line = |a: (f64, f64), b: (f64, f64), cls: &str| -> Primitive {
+            serde_json::from_value(serde_json::json!({"kind": "line", "a": {"x": a.0, "y": a.1}, "b": {"x": b.0, "y": b.1}, "cls": cls, "weightMm": 0.25})).unwrap()
+        };
+        let house = poly(&[(0.0, 0.0), (10.0, 0.0), (10.0, 9.4), (0.0, 9.4)], None);
+        // Nachbar links (Fläche + Umrisslinien), höher als das Haus.
+        let mut prims = vec![
+            house.clone(),
+            poly(&[(-20.0, -0.5), (-8.0, -0.5), (-8.0, 12.0), (-20.0, 12.0)], Some("nachbarn")),
+            line((-20.0, 12.0), (-8.0, 12.0), "section-cut-outline"),
+            line((-20.0, -0.5), (-20.0, 12.0), "elevation-outline"),
+        ];
+        assert_eq!(level_marker_bounds(&p, &prims, [-20.0, -0.5, 10.0, 12.0]), [0.0, -0.5, 10.0, 9.4]);
+        // Nachbar hinter dem Haus (breiter und höher): Linien in seinem Ausmass zählen nicht, die Hausfläche schon.
+        prims.push(poly(&[(-2.0, 0.0), (14.0, 0.0), (14.0, 12.0), (-2.0, 12.0)], Some("nachbarn")));
+        prims.push(line((-2.0, 12.0), (14.0, 12.0), "elevation-outline"));
+        assert_eq!(level_marker_bounds(&p, &prims, [-20.0, -0.5, 14.0, 12.0]), [0.0, -0.5, 14.0, 9.4]);
+        // Netz auf eigener Klasse zählt.
+        let own = vec![house, poly(&[(-3.0, 0.0), (-1.0, 0.0), (-1.0, 11.0), (-3.0, 11.0)], Some("ifc"))];
+        assert_eq!(level_marker_bounds(&p, &own, [-3.0, 0.0, 10.0, 11.0]), [-3.0, 0.0, 10.0, 11.0]);
+    }
+
+    /// [256] Lange Kote („±0.00 = 441.30") ragt nicht ins Gebaute: die Kotenreihe rückt um die Textbreite nach links.
+    #[test]
+    fn kotentext_endet_vor_dem_gebauten() {
+        let p = project(serde_json::json!({ "referenceElevationMasl": 441.3, "drawingLevels": [
+            {"id": "eg", "name": "EG", "kind": "floor", "visible": true, "locked": false, "floorHeight": 3, "baseElevation": 0, "zeroLevel": true}] }));
+        let out = level_markers(&p, [0.0, -1.0, 10.0, 3.0]);
+        let mut right = f64::NEG_INFINITY;
+        for q in &out {
+            if let Primitive::DrawingText { at, text, height_m, .. } = q {
+                right = right.max(at.x + crate::text_layout::text_width_em(text, false) * height_m);
+            }
+        }
+        assert!(right.is_finite() && right < -0.1, "Text endet bei {right}");
+        // Kurze Koten bleiben am gewohnten Abstand (1.2 m).
+        let p2 = project(serde_json::json!({ "drawingLevels": [
+            {"id": "eg", "name": "EG", "kind": "floor", "visible": true, "locked": false, "floorHeight": 3, "baseElevation": 0}] }));
+        let tri = level_markers(&p2, [0.0, -1.0, 10.0, 3.0]).into_iter().find_map(|q| if let Primitive::Polygon { pts, .. } = q { Some(pts[0].x) } else { None });
+        assert_eq!(tri, Some(-1.2));
     }
 
     /// [131] Untergeschoss unter ±0.00: negative Kote; mit `referenceElevationMasl` trägt ±0.00 die Meereshöhe.

@@ -1107,12 +1107,21 @@ fn fit_room_stamp_with(doc: &RichTextDoc, number: Option<&str>, extra: Vec<Stamp
     // Name mit eigenen Schriftgrössen (Stempel: Name 12 pt fett) schrumpft nicht mit `pt`: dann ohne
     // Auszeichnungen in der Grundschrift (Ersatz `Some`).
     // [218] Familie und Farbe des Namens bleiben auch ohne die eigenen Grössen.
-    let look = doc.paragraphs.first().and_then(|q| q.runs.first()).map(|r| (r.marks.font.clone(), r.marks.color.clone()));
+    // [256] Auszeichnung je Zeile bleibt (Name fett, Zeile 2 kursiv, Nummer normal), nur die eigene Grösse entfällt:
+    // die Ersatzzeile übernimmt die Marken des Absatzes gleichen Texts, Teile eines umbrochenen oder gekürzten
+    // Namens die des Namens.
+    let line_marks: Vec<(String, Marks)> = doc
+        .paragraphs
+        .iter()
+        .filter_map(|q| q.runs.first().map(|r| (q.runs.iter().map(|r| r.text.as_str()).collect::<String>(), Marks { size_pt: None, ..r.marks.clone() })))
+        .collect();
     let restyle = |mut d: RichTextDoc| {
-        if let Some((font, color)) = &look {
-            for r in d.paragraphs.iter_mut().flat_map(|q| q.runs.iter_mut()) {
-                r.marks.font = font.clone();
-                r.marks.color = color.clone();
+        let Some(name_marks) = line_marks.first().map(|(_, m)| m) else { return d };
+        for q in d.paragraphs.iter_mut() {
+            let t: String = q.runs.iter().map(|r| r.text.as_str()).collect();
+            let m = line_marks.iter().find(|(s, _)| *s == t).or_else(|| line_marks.iter().find(|(s, _)| !t.trim().is_empty() && s.contains(t.trim()))).map_or(name_marks, |(_, m)| m);
+            for r in q.runs.iter_mut() {
+                r.marks = m.clone();
             }
         }
         d
@@ -1171,7 +1180,7 @@ fn fit_room_stamp_with(doc: &RichTextDoc, number: Option<&str>, extra: Vec<Stamp
     }
     let pt = pt.min(ROOM_STAMP_MIN_PT);
     if let Some(n) = number.map(str::trim).filter(|n| !n.is_empty()) {
-        let d = doc_from_text(n);
+        let d = restyle(doc_from_text(n));
         if let Some(q) = at(&d, &[], pt, false) {
             return (Vec::new(), pt, Some(d), Some(q));
         }
@@ -1180,7 +1189,7 @@ fn fit_room_stamp_with(doc: &RichTextDoc, number: Option<&str>, extra: Vec<Stamp
     let mut shortest = None;
     for n in (2..longest).rev() {
         let Some(t) = abbreviate(&text, n) else { continue };
-        let d = doc_from_text(&t);
+        let d = restyle(doc_from_text(&t));
         if let Some(q) = at(&d, &[], pt, false) {
             return (Vec::new(), pt, Some(d), Some(q));
         }
@@ -2352,6 +2361,39 @@ mod tests {
         assert!(d3.is_none(), "mit eigenen Grössen: Überdeckung statt Ersatz");
     }
 
+    /// [256] Die Ersatzvarianten (Name in Grundschrift, umbrochen, nur Nummer, gekürzt) behalten die Auszeichnung je Zeile:
+    /// Name fett, Zeile 2 kursiv, Nummer normal — vorher fiel der Name auf Normalschrift zurück (Plan-Review 1:100:
+    /// „Treppenhaus", „Eingang", „Wohnen/Essen/Küche" dünn neben fetten Nachbarstempeln).
+    #[test]
+    fn raumstempel_ersatz_behaelt_fett() {
+        let s = RoomStamp { name: "Wohnen/Essen/Küche".into(), name_line2: Some("offen".into()), number: Some("E.03".into()), ..Default::default() };
+        let doc = room_stamp_to_doc(&s);
+        let marks = |d: &RichTextDoc| d.paragraphs.iter().map(|q| q.runs.first().map(|r| (r.marks.bold, r.marks.italic, r.marks.size_pt))).collect::<Vec<_>>();
+        // Frei nur, wenn der Block schmaler als die volle Zeile ist: Ersatz in Grundschrift.
+        let full = stamp_size_m(&doc, &[], ROOM_STAMP_PT, 100.0).0;
+        let place = |w: f64, _: f64, free: bool| (!free || w < full * 0.99).then_some(Vec2 { x: 0.0, y: 0.0 });
+        let (_, _, d, _) = fit_room_stamp(&doc, Some("E.03"), vec![], ROOM_STAMP_PT, 100.0, &place);
+        let d = d.expect("Ersatzvariante");
+        let m = marks(&d);
+        assert_eq!(m.first().copied().flatten(), Some((Some(true), None, None)), "Name fett ohne eigene Grösse: {m:?}");
+        assert_eq!(m.last().copied().flatten(), Some((None, None, None)), "Nummer normal: {m:?}");
+        assert!(m.iter().flatten().any(|&(b, i, _)| i == Some(true) && b.is_none()), "Zeile 2 kursiv: {m:?}");
+        // Umbrochen: beide Teile des Namens fett.
+        let narrow = stamp_size_m(&doc_from_text("Wohnen/Essen/\nKüche\noffen\nE.03"), &[], ROOM_STAMP_PT, 100.0).0 * 1.1;
+        let place2 = |w: f64, _: f64, _: bool| (w < narrow).then_some(Vec2 { x: 0.0, y: 0.0 });
+        let (_, _, d2, _) = fit_room_stamp(&doc, Some("E.03"), vec![], ROOM_STAMP_PT, 100.0, &place2);
+        let d2 = d2.expect("umbrochen");
+        assert_eq!(d2.paragraphs.len(), 4, "{}", crate::text_layout::plain_text(&d2));
+        let m2 = marks(&d2);
+        assert!(m2[..2].iter().all(|q| q.is_some_and(|(b, _, _)| b == Some(true))), "{m2:?}");
+        // Nur die Nummer: normal.
+        let place3 = |w: f64, _: f64, _: bool| (w < 0.8).then_some(Vec2 { x: 0.0, y: 0.0 });
+        let (_, _, d3, _) = fit_room_stamp(&doc, Some("E.03"), vec![], ROOM_STAMP_PT, 100.0, &place3);
+        let d3 = d3.expect("Nummer");
+        assert_eq!(crate::text_layout::plain_text(&d3), "E.03");
+        assert_eq!(marks(&d3)[0].unwrap().0, None);
+    }
+
     /// [218] Im Plan trägt der Stempel die gewählte Schrift (Primitiv `text`): Familie im Namen, Zeilenmarken.
     #[test]
     fn raumstempel_schrift_im_plan() {
@@ -2502,6 +2544,17 @@ mod tests {
         let room = |w: f64, h: f64| move |sw: f64, sh: f64, _free: bool| (sw <= w && sh <= h).then_some(Vec2 { x: 0.0, y: 0.0 });
         let (_, _, d, _) = fit_room_stamp(&doc, Some("E.03"), vec![], ROOM_STAMP_PT, 100.0, &room(50.0, 50.0));
         assert!(d.is_none(), "genug Platz: unverändert");
+        // [256] Ersatz in Grundschrift, Name weiterhin fett (Namenszeilen = alle ausser der letzten).
+        let doc_from_text = |t: &str| {
+            let mut d = doc_from_text(t);
+            let n = d.paragraphs.len();
+            for q in d.paragraphs.iter_mut().take(n - 1) {
+                for r in q.runs.iter_mut() {
+                    r.marks.bold = Some(true);
+                }
+            }
+            d
+        };
         // (a) Zu schmal für eine Zeile, aber hoch genug für zwei: Umbruch an einem Trenner, volle Schrift, kein Kürzen.
         let (w1, _) = stamp_size_m(&doc_from_text("Wohnen/Essen/Küche\nE.03"), &[], ROOM_STAMP_PT, 100.0);
         let (w2, h2) = stamp_size_m(&doc_from_text("Wohnen/\nEssen/Küche\nE.03"), &[], ROOM_STAMP_PT, 100.0);
@@ -2522,7 +2575,9 @@ mod tests {
         assert_eq!(plain_of(d).as_deref(), Some("E.03"));
         // (d) Ohne Nummer: gekürzt an Wortenden, mindestens 3 Buchstaben + Punkt je Wort.
         let nm = room_stamp_to_doc(&RoomStamp { name: "Wohnen/Essen/Küche".into(), ..Default::default() });
-        let (w14, h14) = stamp_size_m(&doc_from_text("Woh./Ess./Küc."), &[], ROOM_STAMP_MIN_PT, 500.0);
+        let mut d14 = super::doc_from_text("Woh./Ess./Küc.");
+        d14.paragraphs[0].runs[0].marks.bold = Some(true);
+        let (w14, h14) = stamp_size_m(&d14, &[], ROOM_STAMP_MIN_PT, 500.0);
         let (_, _, d, at) = fit_room_stamp(&nm, None, vec![], ROOM_STAMP_PT, 500.0, &room(w14 + 1e-6, h14 + 1e-6));
         let t = plain_of(d).unwrap();
         assert!(at.is_some(), "{t}");

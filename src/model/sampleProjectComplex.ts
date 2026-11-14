@@ -930,8 +930,8 @@ export function buildComplexSampleProject(): Project {
   // Räume per Raumerkennung (Umriss = Innenkontur der Wände).
   p = addRooms(p);
 
-  // Aussenbemassung (Massketten je Fassade) in UG, EG, OG.
+  // Aussenbemassung (Massketten je Fassade) in allen Geschossen ([256]: auch DG — Vorprojekt 1:100 bemasst jedes Geschoss).
   // [180] Die Ketten landen auf der Klasse „81 Auto-Bemassung" (Befehl `autodim`), nicht auf der aktiven.
-  for (const f of ["ug", "eg", "og"]) p = runCmd(p, f, "autodim", {}, "80").project;
+  for (const f of ["ug", "eg", "og", "dg"]) p = runCmd(p, f, "autodim", {}, "80").project;
   return p;
 }
