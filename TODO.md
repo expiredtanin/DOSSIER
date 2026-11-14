@@ -508,6 +508,7 @@ Punktwolken/BCF-Ausbau, Windows-Paket, [C5]/[C7]/[15] Kern-Umbauten — ausser s
   Text auf Pfad, Editor, Griffe. Offen: auf dem Mac prüfen (Takt, Schärfe auf Retina, Bild gegen SVG); Griffe nativ;
   gemischte Schnitte innerhalb einer Zeile (Schnitt des ersten Laufs gilt). · M
 - ◐ **[190]** Verbinden wie Archicad + Kürzel (12.11., Wunsch Maintainer). Umgesetzt (12.11.): Cmd/Ctrl+J („join") schliesst bei
+  **Zwischenstand 14.11. (Bogenwände verbinden, unfertig, ungetestet):** `doc/wip/190-bogenwaende-wip.patch` (Sitzung endete, Agent mitten in den Tests). Anwenden mit `git apply`, dann Tests laufen lassen.
   gewählten Wänden auch Ecken: nicht parallele gerade Wände eines Geschosses, deren Enden bis 0.5 m (bzw. 2 × Wanddicke)
   vom Achsschnittpunkt liegen (Lücke oder Überstand), werden dort verlängert/gekürzt (L-Ecke, beide Enden); Ende nahe einer
   anderen Wand, deren Achse im Innern getroffen wird, ergibt einen T-Stoss (nur dieses Ende rückt). Mehr als zwei Wände: alle
