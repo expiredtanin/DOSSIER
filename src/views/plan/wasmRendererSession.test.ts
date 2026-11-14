@@ -104,7 +104,7 @@ const frame = (x: number): PlanFrame => ({
   height: 100,
 });
 
-function setup(opts: { maxRecoveries?: number; failCreate?: () => boolean; now?: () => number; loadFont?: (key: number) => Promise<Uint8Array | null> } = {}) {
+function setup(opts: { probationMs?: number; maxRecoveries?: number; failCreate?: () => boolean; now?: () => number; loadFont?: (key: number) => Promise<Uint8Array | null> } = {}) {
   const made: FakeRenderer[] = [];
   const ready: boolean[] = [];
   const warnings: string[] = [];
@@ -124,6 +124,7 @@ function setup(opts: { maxRecoveries?: number; failCreate?: () => boolean; now?:
     loadFont: opts.loadFont,
     warn: (m) => warnings.push(m),
     info: () => {},
+    probationMs: opts.probationMs ?? 0,
     recovery: new GpuRecovery({ maxLosses: opts.maxRecoveries ?? 3, windowMs: 1000, baseDelayMs: 0, now: opts.now ?? (() => 0) }),
   });
   /** Ausstehende `create`-Aufrufe erfüllen und die Mikrotasks abarbeiten. */
@@ -324,6 +325,30 @@ describe("WasmPlanRendererSession", () => {
     await settle();
     await settle();
     expect(made).toHaveLength(2);
+    expect(session.ready).toBe(true);
+  });
+
+  it("[118] Neuaufbau meldet ready erst nach der Bewährungszeit; erneuter Verlust darin schaltet nicht hin und her", async () => {
+    const { session, made, settle, ready } = setup({ probationMs: 30 });
+    session.start();
+    await settle();
+    session.setScene({ name: "A" });
+    session.draw(frame(1));
+    expect(ready).toEqual([true]);
+    made[0].lostCb?.();
+    await settle();
+    expect(made).toHaveLength(2);
+    // Neuer Renderer zeichnet schon (Szene + Ausschnitt), bleibt aber noch beim SVG.
+    expect(made[1].calls).toContain("scene:A");
+    expect(made[1].calls.at(-1)).toBe("render");
+    expect(ready).toEqual([true, false]);
+    // Verlust während der Bewährung: kein kurzes ready=true dazwischen.
+    made[1].lostCb?.();
+    await settle();
+    expect(made).toHaveLength(3);
+    expect(ready).toEqual([true, false]);
+    await new Promise((r) => setTimeout(r, 60));
+    expect(ready).toEqual([true, false, true]);
     expect(session.ready).toBe(true);
   });
 

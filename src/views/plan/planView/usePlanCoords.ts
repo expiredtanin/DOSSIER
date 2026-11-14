@@ -237,8 +237,10 @@ export function usePlanCoords(inp: UsePlanCoordsArgs) {
   const [selected, setSelected] = useState<number | null>(null);
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
+  // [121] Nur bei bestehender Wahl setzen: ein `setSelected(null)` bei schon leerer Wahl rendert die ganze
+  // Plan-Ansicht ein zweites Mal (im Effekt direkt nach dem Commit greift Reacts Sofort-Abbruch nicht).
   useEffect(() => {
-    setSelected(null);
+    if (selectedRef.current !== null) setSelected(null);
   }, [plan]);
 
   // Verhältnis viewBox-Einheiten ↔ Bildschirm-Pixel. preserveAspectRatio

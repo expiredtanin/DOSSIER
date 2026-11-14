@@ -194,6 +194,10 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   // [26] Kante unter dem Cursor (Kanten-Anfasser); gezeichnet wird sie nur für Flächen-Elemente
   // (Dach, Decke, Raum, Baugrube), deren Kanten-Indizes Griff-Indizes sind.
   const [hoverEdge, setHoverEdge] = useState<EdgeGrip | null>(null);
+  // [121] Aktuellen Wert spiegeln: bei jeder Zeigerbewegung nur setzen, wenn sich die Kante ändert (ein
+  // setState mit gleichem Wert kann je nach React-Interna die ganze Plan-Ansicht ein zweites Mal rendern).
+  const hoverEdgeRef = useRef(hoverEdge);
+  hoverEdgeRef.current = hoverEdge;
   // Ausschnitt NUR bei Plan-/Geschoss-Wechsel (resetKey) auf „eingepasst"
   // zurücksetzen — NICHT bei jeder Bounds-Änderung durch Editieren (sonst
   // „wandert" die Ansicht beim Verschieben/Löschen mit). `defaultView` ist beim
@@ -388,7 +392,12 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     grips,
     edgeGripsActive,
     edgeGripAt,
-    onHoverEdge: (e) => setHoverEdge((h) => (h?.aIndex === e?.aIndex && h?.bIndex === e?.bIndex && h?.owner === e?.owner ? h : e)),
+    onHoverEdge: (e) => {
+      const h = hoverEdgeRef.current;
+      if (h?.aIndex === e?.aIndex && h?.bIndex === e?.bIndex && h?.owner === e?.owner) return;
+      hoverEdgeRef.current = e;
+      setHoverEdge(e);
+    },
     grabbedBody,
     moveDrag,
     marquee,

@@ -167,8 +167,12 @@ export function usePlanPickCycle(inp: UsePlanPickCycleArgs) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selection]);
+  // [121] Nur bei offener Liste setzen: ein `setPickList(null)` bei schon leerer Liste rendert die ganze
+  // Plan-Ansicht ein zweites Mal (im Effekt direkt nach dem Commit greift Reacts Sofort-Abbruch nicht).
+  const pickListOpenRef = useRef(false);
+  pickListOpenRef.current = pickList !== null;
   useEffect(() => {
-    setPickList(null);
+    if (pickListOpenRef.current) setPickList(null);
     cycleRef.current = null;
   }, [view, planRaw]);
   // Der Klick-Zyklus überlebt neu erzeugte Pläne (Greifen des Gewählten baut den Plan neu auf): Kandidaten

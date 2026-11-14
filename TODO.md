@@ -1559,6 +1559,13 @@ Punktwolken/BCF-Ausbau, Windows-Paket, [C5]/[C7]/[15] Kern-Umbauten — ausser s
   Offen: Rest ist Chromiums eigene Verlust-Meldung (~3 je Seite) plus je eine Zeile von uns; der Pathtracer-Test ([212]) wird headless jetzt übersprungen
   (zählte vorher auf dem toten Gerät); Idee: Testnaht „offscreen statt Canvas“ für echte GPU-Läufe in e2e. Nicht in WKWebView/auf dem Mac geprüft
   (`doc/RELEASE-1.0.md`, „Nur auf dem Mac“); Wettlauf „Gerät tot, `device.lost` noch nicht gemeldet“ fängt nur `guardRenderer` (Panic-Zeile bleibt dann).
+  **Nachtrag 14.11. (e2e `renderCount` rot, 141 statt < 45 Renders je Wand-Änderung):** Mit dem Backoff liefen die Neuaufbauten headless über ~5 s statt in
+  wenigen ms; jeder schaltete `ready` kurz an und wieder aus, also die ganze Plan-Ansicht SVG → WebGPU → SVG — fiel das in das Messfenster, zählte der Test
+  die volle Plan-Ansicht. Behoben: `wasmRendererSession.ts` meldet einen NACH Verlust neu aufgebauten Renderer erst nach einer Bewährungszeit (`probationMs`,
+  1 s ohne erneuten Verlust) als `ready` (zeichnet aber schon) — headless bleibt der Plan durchgehend beim SVG (vitest dazu). Dabei gefunden ([121]): drei
+  `setState` mit unverändertem Wert (`setSelected(null)` je Plan, `setPickList(null)` je Ausschnitt, `setHoverEdge` je Zeigerschritt) renderten die Plan-Ansicht
+  je nach React-Interna ein zweites Mal; jetzt nur bei echter Änderung. Zahlen: Wand-Änderung 42, Zoom-Schritt 8 → 7, 5 Zeiger-Schritte 20. Offen: render3d
+  (`gpuRendererSlot.ts`) hat noch keine Bewährungszeit (Viewport braucht den Renderer zum Einspielen); nicht auf dem Mac geprüft.
 - ◐ **[3]** Darstellungswege reduzieren (vier 2D-Pfade: render2d, glPlan, SVG, native2d; zwei 3D-Pfade). · L
 - ◐ **[17]** Ergebnisse über die Ausgabe testen. Golden-Ausgaben für 3D fehlen. · M
 - ◐ **[19]** Beispielgebäude als Skript: `sampleProject.ts` + Kontrollmodell. · S

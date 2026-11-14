@@ -19,6 +19,10 @@
  *    gesperrtes nicht mehr angefasst), `ready` geht aus (SVG zeichnet den Plan) und ein neuer Renderer
  *    entsteht nach einer Wartezeit; danach werden letzte Szene und letzter Ausschnitt erneut angewandt.
  *  - [206]/[118] Der Verlust-Rückruf aus Rust wird erst im nächsten Takt verarbeitet (nie verschachtelt).
+ *  - [118] Ein NEU aufgebauter Renderer (nach Verlust) meldet `ready` erst nach einer Bewährungszeit
+ *    (`probationMs`) ohne erneuten Verlust: Geht das Gerät jedes Mal beim ersten Präsentieren verloren
+ *    (headless SwiftShader), bleibt der Plan durchgehend beim SVG, statt bei jedem Neuaufbau zwischen SVG und
+ *    WebGPU hin- und herzuschalten (jeder Wechsel rendert die ganze Plan-Ansicht neu).
  *    Wartezeit und Budget teilen sich alle Renderer der Seite (`engine/gpuRecovery.ts`: 0,5 s, 2 s, 8 s,
  *    dann bleibt WebGPU aus und der Plan beim SVG-Rückfall); ein gescheiterter Neuaufbau zählt als Verlust.
  *
@@ -77,6 +81,8 @@ export interface SessionOptions<S> {
   recovery?: GpuRecovery;
   /** Zeitgeber (Vorgabe `setTimeout`); liefert eine Abbruch-Funktion. */
   schedule?(fn: () => void, ms: number): () => void;
+  /** [118] Bewährungszeit eines nach Verlust neu aufgebauten Renderers bis `ready` in ms (Vorgabe 1000). */
+  probationMs?: number;
 }
 
 export class WasmPlanRendererSession<S> {
@@ -95,6 +101,8 @@ export class WasmPlanRendererSession<S> {
   /** Ein Neuaufbau läuft (ein Init-Fehler zählt dann als weiterer Verlust, nicht als „kein WebGPU“). */
   private recovering = false;
   private cancelTimer: (() => void) | null = null;
+  /** [118] Laufende Bewährungszeit eines neu aufgebauten Renderers (Abbruch-Funktion). */
+  private cancelProbation: (() => void) | null = null;
   /** [226] Schriftdateien, die gerade geladen werden. */
   private fontsLoading = new Set<number>();
   private _ready = false;
@@ -143,6 +151,8 @@ export class WasmPlanRendererSession<S> {
     this.disposed = true;
     this.cancelTimer?.();
     this.cancelTimer = null;
+    this.cancelProbation?.();
+    this.cancelProbation = null;
     this.setReady(false);
     this.release(this.renderer, true);
     this.renderer = null;
@@ -179,6 +189,7 @@ export class WasmPlanRendererSession<S> {
           return;
         }
         this.renderer = r;
+        const rebuilt = this.recovering;
         this.recovering = false;
         this.uploaded = undefined;
         this.fontsLoading.clear();
@@ -188,7 +199,16 @@ export class WasmPlanRendererSession<S> {
             if (this.renderer === r) this.fail(new Error(`WebGPU-Gerät verloren (${why ?? "?"})`), true);
           }, 0),
         );
-        this.setReady(true);
+        if (!rebuilt) {
+          this.setReady(true);
+        } else {
+          // [118] Erst nach der Bewährungszeit vom SVG zurückschalten (s. Kopf); gezeichnet wird schon jetzt.
+          this.cancelProbation?.();
+          this.cancelProbation = this.schedule(() => {
+            this.cancelProbation = null;
+            if (!this.disposed && this.renderer === r) this.setReady(true);
+          }, this.opts.probationMs ?? 1000);
+        }
         this.flush(this.frame !== null);
       },
       (e) => {
@@ -253,6 +273,8 @@ export class WasmPlanRendererSession<S> {
     const old = this.renderer;
     this.renderer = null;
     this.uploaded = undefined;
+    this.cancelProbation?.();
+    this.cancelProbation = null;
     this.release(old, healthy);
     this.setReady(false);
     if (this.disposed) return;
