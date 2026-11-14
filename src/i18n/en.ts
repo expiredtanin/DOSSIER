@@ -1168,6 +1168,8 @@ export const en: Record<TranslationKey, string> = {
   "editor.color": "Color",
   "editor.pen": "Pen",
   "editor.lineWeight": "Line weight",
+  "editor.fill": "Fill",
+  "editor.fillNone": "none",
   "editor.hatch": "Hatch",
   "editor.floorHeight": "Floor height",
   "editor.cutHeight": "Cut height",

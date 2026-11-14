@@ -11,6 +11,7 @@
 
 import { useEffect, useState } from "react";
 import { EditorField } from "../ui/EditorField";
+import { OptionalColorField } from "../ui/OptionalColorField";
 import type { LayerSettingsCommandHandlers, LayerSettingsSyncState } from "./layerSettingsWindow";
 import { t } from "../i18n";
 import { listenBridgeState } from "./windowBridge";
@@ -42,7 +43,7 @@ export function LayerSettingsWindowApp() {
     };
   }, []);
 
-  const patch = (p: Partial<{ name: string; color: string; lw: number; hatch: string | undefined }>) => {
+  const patch = (p: Partial<{ name: string; color: string; lw: number; fill: string | undefined; hatch: string | undefined }>) => {
     if (!state) return;
     void import("@tauri-apps/api/event").then(({ emitTo }) =>
       emitTo("main", "layer-settings-command", {
@@ -110,6 +111,9 @@ export function LayerSettingsWindowApp() {
               />
               <span className="editor-unit">{t("editor.unit.mm")}</span>
             </span>
+          </EditorField>
+          <EditorField label={t("editor.fill")}>
+            <OptionalColorField value={state.fill} onChange={(fill) => patch({ fill })} />
           </EditorField>
           <EditorField label={t("editor.hatch")}>
             <span className="editor-hatch">

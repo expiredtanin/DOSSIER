@@ -12,6 +12,7 @@ import type { DrawingLevel, LayerCategory } from "../model/types";
 import { getState, useStore } from "../state/appStore";
 import { EditorField } from "../ui/EditorField";
 import { HatchSwatch } from "../ui/hatchPreview";
+import { OptionalColorField } from "../ui/OptionalColorField";
 import { PenColorField } from "../ui/PenColorField";
 import { InlineEditor } from "../views/InlineEditor";
 
@@ -81,6 +82,9 @@ export function LayerInlineEditor({
           />
           <span className="editor-unit">{t("editor.unit.mm")}</span>
         </span>
+      </EditorField>
+      <EditorField label={t("editor.fill")}>
+        <OptionalColorField value={cat.fill} onChange={(fill) => patchCategory(cat.code, { fill })} />
       </EditorField>
       <EditorField label={t("editor.hatch")}>
         <span className="editor-hatch">

@@ -33,6 +33,7 @@ export interface LayerSettingsSyncState {
   name: string;
   color: string;
   lw: number;
+  fill: string | undefined;
   hatchId: string | undefined;
   hatches: { id: string; name: string }[];
 }
@@ -71,6 +72,7 @@ function stateFor(project: Pick<Project, "layers" | "hatches">, code: string): L
     name: cat.name,
     color: cat.color,
     lw: cat.lw,
+    fill: cat.fill,
     hatchId: cat.hatch,
     hatches: project.hatches.map((h: HatchStyle) => ({ id: h.id, name: h.name })),
   };
