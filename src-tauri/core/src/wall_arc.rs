@@ -220,11 +220,63 @@ pub struct Unroll {
     pub arc: WallArc,
     /// (abgewickelte Gerade, Weltgerade).
     pairs: Vec<(Line, Line)>,
+    /// [216] Gerade Sehnen `[sa, sb]` (Bogenlänge) über Öffnungen mit Schichteinzug ([106], [`reveal_zone`]): dort liegt die
+    /// Wand gerade auf der Sehne wie im 3D (`chord_walls`, Leibungen senkrecht zur Sehne), an den Enden radial gehrt.
+    zones: Vec<(f64, f64)>,
 }
 
 impl Unroll {
     pub fn new(arc: WallArc) -> Unroll {
-        Unroll { arc, pairs: Vec::new() }
+        Unroll { arc, pairs: Vec::new(), zones: Vec::new() }
+    }
+
+    /// [216] Sehnen-Zonen setzen (siehe Feld `zones`).
+    pub fn set_zones(&mut self, zones: Vec<(f64, f64)>) {
+        self.zones = zones.into_iter().filter(|(a, b)| b - a > 1e-6).collect();
+    }
+
+    fn zone_of(&self, s: f64) -> Option<(f64, f64)> {
+        self.zones.iter().copied().find(|(a, b)| s >= a - 1e-9 && s <= b + 1e-9)
+    }
+
+    /// Abgewickelter Punkt in einer Sehnen-Zone → Welt: Lage linear auf der Sehne, quer senkrecht dazu (wie die Einbauteile
+    /// im 3D, `model3d/openings.rs`); genau an den Zonenenden auf der radialen Gehrung.
+    fn zone_map(&self, p: Vec2) -> Option<Vec2> {
+        let (sa, sb) = self.zone_of(p.x)?;
+        let (pa, u, chord) = chord_of(&self.arc, sa, sb);
+        let nc = Vec2::new(-u.y, u.x);
+        for s in [sa, sb] {
+            if (p.x - s).abs() < 1e-9 {
+                let o = self.arc.point(s, 0.0);
+                let r = sub(self.arc.point(s, 1.0), o);
+                let c = r.x * nc.x + r.y * nc.y;
+                if c.abs() < 0.5 {
+                    return None;
+                }
+                return Some(Vec2::new(o.x + r.x * p.y / c, o.y + r.y * p.y / c));
+            }
+        }
+        let t = (p.x - sa) / (sb - sa) * chord;
+        Some(Vec2::new(pa.x + u.x * t + nc.x * p.y, pa.y + u.y * t + nc.y * p.y))
+    }
+
+    /// [216] Abschnitte der abgewickelten Kante a→b (konstantes n) an den Zonengrenzen: `(von, bis, gerade)`; `gerade` =
+    /// in einer Sehnen-Zone (Gerade statt Bogen).
+    pub fn runs(&self, a: Vec2, b: Vec2) -> Vec<(Vec2, Vec2, bool)> {
+        let (lo, hi) = (a.x.min(b.x), a.x.max(b.x));
+        let mut cuts: Vec<f64> = self.zones.iter().flat_map(|z| [z.0, z.1]).filter(|s| *s > lo + 1e-9 && *s < hi - 1e-9).collect();
+        cuts.sort_by(|x, y| x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal));
+        if b.x < a.x {
+            cuts.reverse();
+        }
+        let mut out = Vec::new();
+        let mut s0 = a.x;
+        for s1 in cuts.into_iter().chain([b.x]) {
+            let straight = self.zone_of(0.5 * (s0 + s1)).is_some_and(|(za, zb)| s0.min(s1) >= za - 1e-9 && s0.max(s1) <= zb + 1e-9);
+            out.push((Vec2::new(s0, a.y), Vec2::new(s1, a.y), straight));
+            s0 = s1;
+        }
+        out
     }
 
     /// Weltgerade → abgewickelte Gerade durch ihre Treffer mit den Flächen `n_lo`/`n_hi`
@@ -254,6 +306,9 @@ impl Unroll {
     /// Abgewickelter Punkt → Welt; Punkte auf einer registrierten Schnittlinie landen exakt auf
     /// deren Weltgerade (Schnitt mit dem Versatzkreis).
     pub fn map(&self, p: Vec2) -> Vec2 {
+        if let Some(q) = self.zone_map(p) {
+            return q;
+        }
         let base = self.arc.point(p.x, p.y);
         for (u, w) in &self.pairs {
             let dl = u.dir.x.hypot(u.dir.y);
@@ -283,8 +338,17 @@ impl Unroll {
         }
         let rm = self.arc.radius_at(a.y).abs();
         let total = self.arc.length().max(1e-12);
-        let k = ((self.arc.segments(rm) as f64 * (b.x - a.x).abs() / total).ceil() as usize).clamp(1, 512);
-        (1..=k).map(|i| if i == k { self.map(b) } else { self.arc.point(a.x + (b.x - a.x) * i as f64 / k as f64, a.y) }).collect()
+        let mut out = Vec::new();
+        // [216] In einer Sehnen-Zone gerade (nur der Endpunkt).
+        for (a, b, straight) in self.runs(a, b) {
+            if straight {
+                out.push(self.map(b));
+                continue;
+            }
+            let k = ((self.arc.segments(rm) as f64 * (b.x - a.x).abs() / total).ceil() as usize).clamp(1, 512);
+            out.extend((1..=k).map(|i| if i == k { self.map(b) } else { self.arc.point(a.x + (b.x - a.x) * i as f64 / k as f64, a.y) }));
+        }
+        out
     }
 
     /// Polygon biegen; `no_stroke` (Kantenindizes) wird auf die neuen Kanten umgerechnet.

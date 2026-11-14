@@ -109,7 +109,7 @@ pub struct WebModelRenderer {
     bounds: Option<([f32; 3], [f32; 3])>,
     /// Wand-/Decken-/Dach-Schicht-Eingabe des Modells fuer den Live-Schnitt (`cut_section`), aus den
     /// Teilen der Szene zusammengesetzt — erst bei aktivem Schnitt, verworfen bei jeder Modell-Aenderung.
-    section_inputs: Option<(Vec<WallInput>, Vec<SlabInput>, Vec<RoofLayerInput>)>,
+    section_inputs: Option<(Vec<WallInput>, Vec<SlabInput>, Vec<RoofLayerInput>, Vec<MeshInput>)>,
     /// Aktueller Live-Schnitt-Zustand: aktiv? + Ebene (point/normal). Gemerkt,
     /// damit ein `set_model` bei aktivem Schnitt die Caps automatisch neu baut.
     section: Option<([f32; 3], [f32; 3])>,
@@ -129,11 +129,12 @@ impl WebModelRenderer {
 
     fn refresh_section(&mut self, active: bool, point: [f32; 3], normal: [f32; 3]) {
         if active && self.section_inputs.is_none() {
-            self.section_inputs = Some(self.renderer.scene().collect_inputs());
+            let (w, s, r) = self.renderer.scene().collect_inputs();
+            self.section_inputs = Some((w, s, r, self.renderer.scene().collect_section_bodies()));
         }
-        let empty = (Vec::new(), Vec::new(), Vec::new());
-        let (w, s, r) = self.section_inputs.as_ref().unwrap_or(&empty);
-        self.renderer.update_section(&self.device, active, point, normal, w, s, r);
+        let empty = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        let (w, s, r, b) = self.section_inputs.as_ref().unwrap_or(&empty);
+        self.renderer.update_section(&self.device, active, point, normal, w, s, r, b);
     }
 }
 

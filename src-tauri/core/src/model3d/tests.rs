@@ -1057,6 +1057,51 @@ fn oeffnung_in_die_decke_endet_an_der_deckenunterkante() {
     }
 }
 
+/// [234] Eine Formöffnung, die in die Decke ragt, wird an der Deckenunterkante ABGESCHNITTEN, nicht gestaucht: der Umriss
+/// behält die Form der vollen Höhe, der obere Teil fällt weg (gerade Oberkante). Rundbogen 1 m breit, Brüstung 0,9, Höhe
+/// 1,6, Decke ab 2,43 m: voller Bogen ab 1,1 m über der Brüstung; gestaucht (auf 1,53 m) begänne er bei 1,03 m.
+#[test]
+fn formoeffnung_in_der_decke_wird_abgeschnitten_nicht_gestaucht() {
+    let mut p = sample();
+    p.walls.retain(|w| w.id == "W1");
+    p.walls[0].height = 2.8;
+    for f in p.drawing_levels.iter_mut().filter(|f| f.id == "eg") {
+        f.floor_height = Some(2.8);
+    }
+    let c = &mut p.ceilings.as_mut().unwrap()[0];
+    c.thickness = Some(0.37);
+    c.outline = vec![Vec2 { x: -1.0, y: -3.0 }, Vec2 { x: 6.0, y: -3.0 }, Vec2 { x: 6.0, y: 4.0 }, Vec2 { x: -1.0, y: 4.0 }];
+    p.openings.as_mut().unwrap().retain(|o| o.id == "O1");
+    let o = &mut p.openings.as_mut().unwrap()[0];
+    (o.sill_height, o.height, o.shape) = (0.9, 1.6, Some(OpeningShape::Rundbogen));
+    let o = p.openings.as_ref().unwrap()[0].clone();
+    let w = p.walls[0].clone();
+    let (zb, _) = p.wall_vertical_extent(&w);
+    let top = p.opening_top_under_ceilings(&w, &o, zb + 0.9, zb + 2.5);
+    assert!((top - 2.43).abs() < 1e-9, "{top}");
+    let h = top - (zb + 0.9);
+    // Umriss: oben gerade bis 1,53, an der Oberkante so breit wie der volle Bogen dort (Halbbreite √(0,25 − 0,43²) ≈ 0,255).
+    let poly = crate::opening_shape::opening_outline(&o, 1.0, h).unwrap();
+    let vmax = poly.iter().map(|q| q[1]).fold(f64::NEG_INFINITY, f64::max);
+    assert!((vmax - h).abs() < 1e-9, "Oberkante {vmax} statt {h}");
+    let (u0, u1) = crate::opening_shape::u_range(&poly, h - 1e-9).unwrap();
+    let half = (0.25f64 - (h - 1.1).powi(2)).sqrt();
+    assert!(((u1 - u0) / 2.0 - half).abs() < 0.01, "Breite oben {} statt {half}", u1 - u0);
+    // Kämpfer bei 1,1 (volle Form), nicht 1,03 (gestaucht): auf 1,08 noch volle Breite.
+    let (a, b) = crate::opening_shape::u_range(&poly, 1.08).unwrap();
+    assert!(b - a > 1.0 - 1e-6, "Kämpfer gestaucht: Breite {} auf 1,08", b - a);
+    // Wandkörper: auf 1,45 m über der Brüstung 0,31 m neben der Mitte offen (voller Bogen: Halbbreite 0,357; gestaucht 0,271).
+    let walls = emit_walls(&p, true).unwrap();
+    let bodies: Vec<&WallBody> = walls.iter().filter_map(|w| w.body.as_ref()).collect();
+    assert!(!bodies.is_empty());
+    let solid = |pt: [f64; 3]| bodies.iter().any(|b| inside_mesh(&b.positions, &b.indices, pt));
+    let (cx, y) = (o.position + 0.5, w.start.y);
+    for n in [-0.05, 0.0123, 0.05] {
+        assert!(!solid([cx + 0.31, y + n, zb + 0.9 + 1.45]), "Bogen gestaucht bei n {n}");
+        assert!(solid([cx + 0.45, y + n, zb + 0.9 + 1.45]), "Zwickel fehlt bei n {n}");
+    }
+}
+
 /// [216] Rahmen, Flügel, Glas und Fensterbank in der Bogenwand (Erker, r = 2,5 m, Fenster 1,2 m: Pfeilhöhe ≈ 7 cm) folgen
 /// dem Bogen: jeder Punkt eines Teils (Ecken, Dreiecks-Schwerpunkte, Kantenmitten) liegt quer zur Wand im Bereich seiner
 /// Ecken — kein Versatz der geraden Sehne zur Leibung in Brüstungsmitte. Rechteck und Formöffnung, Teile dicht.

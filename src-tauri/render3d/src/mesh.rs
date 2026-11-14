@@ -1718,6 +1718,7 @@ mod tests {
             material_index: None,
             vertex_colors: vec![],
             crease_angle: None,
+            section: None,
         };
         let mut mesh = Mesh::default();
         append_context_mesh(&mut mesh, &input);
@@ -1823,7 +1824,7 @@ mod tests {
         // Dreieck 1 in der Ebene z = 0, Dreieck 2 um die x-Achse (Kante y = 0) um 10° geknickt.
         let positions = vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, -1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, t.cos(), t.sin()];
         let mk = |crease: Option<f32>| {
-            let input = MeshInput { positions: positions.clone(), indices: vec![0, 1, 2, 3, 4, 5], kind: MeshKind::Imported, color: None, material_index: None, vertex_colors: vec![], crease_angle: crease };
+            let input = MeshInput { positions: positions.clone(), indices: vec![0, 1, 2, 3, 4, 5], kind: MeshKind::Imported, color: None, material_index: None, vertex_colors: vec![], crease_angle: crease, section: None };
             let mut mesh = Mesh::default();
             append_context_mesh(&mut mesh, &input);
             mesh

@@ -20,7 +20,7 @@ use crate::math::{view_projection, Mat4};
 use crate::scene::{ChunkData, PartEntry, PartInput, PartsUpdate, Scene, SceneChange};
 use crate::section::SectionPlane;
 use crate::section_fill::{
-    build_cut_cap_lines, build_cut_caps, CAP_FLOATS_PER_VERTEX, CUT_LINE_FLOATS_PER_VERTEX,
+    build_cut_cap_lines_with, build_cut_caps_with, CAP_FLOATS_PER_VERTEX, CUT_LINE_FLOATS_PER_VERTEX,
 };
 use crate::shaders::{CAP_WGSL, GHOST_WGSL, GRID_WGSL, MESH_AERIAL_WGSL, MESH_TEXTURED_WGSL, MESH_WGSL, SHADOW_WGSL};
 use crate::shadow::{caster_indices, cascades, far_map_size, texel_world_size, DEFAULT_SHADOW_MAP_SIZE};
@@ -2021,15 +2021,16 @@ impl Renderer {
         walls: &[WallInput],
         slabs: &[SlabInput],
         roofs: &[RoofLayerInput],
+        bodies: &[MeshInput],
     ) {
         self.set_section_plane(active, point, normal);
         if active {
             let plane = SectionPlane::new(point, normal);
-            let caps = build_cut_caps(&plane, walls, slabs, roofs);
+            let caps = build_cut_caps_with(&plane, walls, slabs, roofs, bodies);
             self.set_cut_caps(device, &caps);
             // P2: die Schnitt-Umrisslinien (Fugen-/Materiallinien) je ueberlebendem
             // Cut-Cap-Rechteck aus DERSELBEN, dominanz-verschnittenen Rechteck-Menge.
-            let lines = build_cut_cap_lines(&plane, walls, slabs, roofs);
+            let lines = build_cut_cap_lines_with(&plane, walls, slabs, roofs, bodies);
             self.set_cut_lines(device, &lines);
         } else {
             self.set_cut_caps(device, &[]);
@@ -3351,6 +3352,7 @@ mod shadow_gpu_tests {
             material_index,
             vertex_colors: Vec::new(),
             crease_angle: None,
+            section: None,
         };
         let cam = Camera { eye: [4.0, 20.0, 0.01], target: [4.0, 0.0, 0.0], up: [0.0, 0.0, -1.0], projection: crate::types::Projection::Orthographic, ortho_half_height: 3.0, ..Camera::default() };
         // Streifen-Karte: 0.5 m hell, 0.5 m dunkel längs u (= Welt-x).
@@ -3422,6 +3424,7 @@ mod shadow_gpu_tests {
             material_index: Some(1),
             vertex_colors: Vec::new(),
             crease_angle: None,
+            section: None,
         };
         let cam = Camera { eye: [4.0, 20.0, 0.01], target: [4.0, 0.0, 0.0], up: [0.0, 0.0, -1.0], projection: crate::types::Projection::Orthographic, ortho_half_height: 3.0, ..Camera::default() };
         let size = super::TEXTURE_SIZE as usize;

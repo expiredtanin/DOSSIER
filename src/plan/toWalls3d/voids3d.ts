@@ -35,8 +35,8 @@ const WALL_BODY_CREASE_DEG = 20;
 
 /**
  * [216] Wandstücke, deren Band einen fertigen Körper hat (Wand mit Formöffnungen, Kern `model3d/wall_body.rs`):
- * render3d bekommt statt der Stücke (`noMesh`) das Netz des Körpers als Mesh; Schnitt, Ansicht und Export
- * rechnen im Kern mit den Stücken. Rest und Netze getrennt.
+ * render3d bekommt statt der Stücke (`noMesh`) das Netz des Körpers als Mesh (mit Schnitt-Stil `section`: der
+ * 3D-Live-Schnitt schneidet das Netz); Schnitt, Ansicht und Export rechnen im Kern mit den Stücken. Rest und Netze getrennt.
  */
 export function splitWallBodies(walls: readonly RWall[]): { walls: RWall[]; meshes: RMesh[] } {
   const rest: RWall[] = [];
@@ -55,6 +55,8 @@ export function splitWallBodies(walls: readonly RWall[]): { walls: RWall[]; mesh
         color: w.color,
         ...(w.materialIndex !== undefined ? { materialIndex: w.materialIndex } : {}),
         creaseAngle: WALL_BODY_CREASE_DEG,
+        // Live-Schnitt: render3d schneidet den Körper selbst (echte Öffnungsform statt der Stücke).
+        section: { ...(w.hatch ? { hatch: w.hatch } : {}), ...(w.cut ? { cut: w.cut } : {}) },
       });
     }
   }

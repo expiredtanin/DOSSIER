@@ -216,6 +216,19 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   konstantem Querversatz als Bögen, `bend_prims`) und Schnitt ([157] tangential an der Schnittstelle) zeigten das Symbol schon im
   Bogen. Nur per Rust-Test geprüft (Linux, kein Metal, nicht angesehen). Offen: Mac-Gegenprobe; mit Schichteinzug zeigt der
   Grundriss das Symbol gebogen, 3D gerade auf der Sehne.
+  Stand 14.11. (spät): (a) 3D-Live-Schnitt durch Wandkörper: die Körper-Wände (Formöffnung, Bogenwand, Giebel [231]) erreichten
+  render3d nur als Netz — ihre Stücke fehlten im Schnitt ganz (keine Schnittfläche, Wand hohl). Jetzt trägt das Netz den
+  Schnitt-Stil der Schicht (`MeshInput.section` = Schraffur + `cut`, TS `splitWallBodies`), und render3d schneidet das Netz selbst
+  (`section_mesh.rs`: Dreieck × Ebene → Strecken, Fläche gerade-ungerade als waagrechte Trapeze, Umriss = die Strecken, ohne Fugen):
+  echte Öffnungsform (rund, Bogen, Spitzbogen, frei, gebogen in Bogenwänden) in jeder Schnittrichtung. Bänder STRIKT höherer
+  Priorität (Decke) schneiden Fläche und Umriss weg; der Körper schneidet umgekehrt keine Bänder (Rechteck-Dominanz). Tests
+  `laengsschnitt_zeigt_rundes_loch`, `querschnitt_neben_der_mitte_folgt_dem_kreis`, `live_schnitt_mit_koerper_netz_und_dominanz`
+  (Punkt-in-Fläche). (b) Grundriss mit Schichteinzug in Bogenwänden wie das 3D: `Unroll` kennt die Sehnen-Zonen (`reveal_zone`),
+  Wand und Symbol liegen dort gerade auf der Sehne (Lage linear, quer senkrecht zur Sehne; an den Zonenenden radial gehrt, ≈ 2 mm
+  Stufe zum Bogen), Linien an den Zonengrenzen geteilt (Bogen/Gerade). Test
+  `fenster_mit_schichteinzug_in_bogenwand_gerade_auf_der_sehne`. Nur Linux (Rust-Tests, WASM gebaut), Live-Schnitt nicht im
+  Browser/Metal angesehen. Offen: Mac-Gegenprobe; Schnitt/Ansicht (2D) zeigen Erker-Fenster mit Schichteinzug weiter gebogen
+  (tangential, [157]).
 - ◐ **[228]** In Blender öffnen / .blend speichern (12.11., Wunsch Maintainer; Stand 13.11.: umgesetzt und mit bpy 5.3 im Linux-Container geprüft, Mac-Gegenprobe offen). Skript `render_dossier.py` hat Modus `save` (`scene.json` `mode`, Argument `--mode`): Szene wie fürs Rendering bauen, Objekte in Collections nach Bauteil (Geschosse, Wände, Decken, Dächer, Fenster und Türen, Treppen, Stützen, Extrusionen, Bäume, Gelände, Kontext, Dossier) mit lesbaren Namen (`Wand eg-aw-s`; Zuordnung aus Knotenname/`extras` des GLB, keine Export-Änderung nötig, `doc/RENDER-SZENE.md`), Kamera `Dossier-Kamera`, Himmel `Dossier-Himmel`, `pack_all`, `save_as_mainfile`; 3D-Fenster der Datei in Material-Vorschau mit Blick durch die Kamera. Dialog: «Als .blend speichern …» (Blender im Hintergrund, dann nativer Speichern-Dialog) und «In Blender öffnen» (Datei im Arbeitsordner bauen, dann Blender MIT Oberfläche auf die Datei, ohne Warten); Browser: ZIP mit Anleitung für `--mode save`. Neuer Tauri-Befehl `blender_open`, Electron `blender:open`. CLI `dossier-cli … blend --out x.blend`. Abweichung: «Öffnen» startet Blender nicht mit dem Skript, sondern mit der fertigen .blend (zuverlässiger, selbe Datei wie «Speichern», Layout steckt in der Datei). Offen: Mac/Windows-Gegenprobe der Start-Befehle (`blender_open` nur im Linux-Container kompiliert/getestet), Blender-GUI nicht gesehen (Linux ohne Anzeige); Datei liegt nach «Öffnen» im Temp-Ordner (in Blender «Speichern unter»). · S
 - ◐ **[227]** Kontextgebäude auf dem Gelände, Baugrube im Rendering ausblenden (12.11., Befunde der Mac-Gegenprobe [211]). (1) Kern
   `context_ground.rs`: jedes zusammenhängende Gebäude eines Netzes (`importedMesh`, auch mehrere Häuser in einem Netz) wird senkrecht auf den
@@ -418,7 +431,12 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   Wandoberkante gekappt wurde: 3D-Wandloch, Wandkörper, Einbauteile, Pick, Taschen, Schichteinzug, Flächenmuster, Plan/Schnitt
   (`view_range`, `section/bands`), Ansicht, IFC, Sonne. Test `oeffnung_in_die_decke_endet_an_der_deckenunterkante` (Beispiel
   `og-f1`: Brüstung 0,9 + 1,6 bei Decke ab 2,43 m; Rechteck/Rundbogen, gerade/Bogenwand; ohne Decke volle Höhe). Formöffnungen werden
-  wie an der Wandoberkante gestaucht (Umriss über die gekappte Höhe), nicht abgeschnitten. · S
+  wie an der Wandoberkante gestaucht (Umriss über die gekappte Höhe), nicht abgeschnitten.
+  Stand 14.11. (spät): gekappte Formöffnungen (Wandoberkante wie Deckenunterkante) werden ABGESCHNITTEN: `opening_outline` baut die
+  Form über die volle Höhe der Öffnung und schneidet sie bei der gekappten Höhe gerade ab (konvex bleibt konvex) — eine Stelle für
+  3D-Wandkörper, Einbauteile, Grundriss-Sehne, Schnitt, Ansicht, Flächenmuster, IFC und Mengen. Test
+  `formoeffnung_in_der_decke_wird_abgeschnitten_nicht_gestaucht` (Rundbogen: Kämpfer bleibt auf 1,1 m, Breite an der Oberkante
+  wie der volle Bogen, Punkt-in-Körper). Die Breite wird nicht gekappt (Öffnung über das Wandende hinaus bleibt gestaucht). · S
 - 1:100-Pläne in Abgabequalität (Bemassung, Koten, Raumstempel, Öffnungen nach Detailgrad) — Plan-Review-Runde 4 nach [199].
 - ◐ **[256]** Plan-Review Runde 4 (1:100 Vorprojekt, 14.11., beide Musterhäuser + Wettbewerb, alle Grundrisse, Schnitt A-A, Ansicht Süd, 1:200
   Gegenprobe; CLI-SVG `--hatch` in Chromium, nur Linux). Behoben: (1) Raumstempel im Ersatz (Grundschrift/umbrochen/Nummer/gekürzt) verloren

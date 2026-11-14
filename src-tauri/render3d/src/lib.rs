@@ -34,6 +34,7 @@ pub mod scene;
 pub mod section;
 pub mod section_boolean;
 pub mod section_fill;
+pub mod section_mesh;
 pub mod shaders;
 pub mod shadow;
 pub mod types;
@@ -1024,6 +1025,7 @@ mod tests {
     fn flat_context_tri(z: f32, kind: MeshKind, color: Option<[f32; 3]>) -> MeshInput {
         MeshInput {
             crease_angle: None,
+            section: None,
             positions: vec![0.0, 0.0, z, 1.0, 0.0, z, 0.0, 1.0, z],
             indices: vec![0, 1, 2],
             kind,
@@ -1119,6 +1121,7 @@ mod tests {
             &mut mesh,
             &MeshInput {
             crease_angle: None,
+            section: None,
                 positions: vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0],
                 indices: vec![0, 1, 2],
                 kind: MeshKind::Terrain,
@@ -1141,6 +1144,7 @@ mod tests {
             &mut mesh2,
             &MeshInput {
             crease_angle: None,
+            section: None,
                 positions: vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0],
                 indices: vec![0, 1, 2],
                 kind: MeshKind::Terrain,
@@ -1163,6 +1167,7 @@ mod tests {
         // Stil „Textured" konnte also nie eine echte Dachziegel-Textur zeigen.
         let m = MeshInput {
             crease_angle: None,
+            section: None,
             positions: vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0],
             indices: vec![0, 1, 2],
             kind: MeshKind::Extrusion,
@@ -1198,6 +1203,7 @@ mod tests {
             &mut mesh,
             &MeshInput {
             crease_angle: None,
+            section: None,
                 positions: vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0],
                 indices: vec![0, 1, 9],
                 kind: MeshKind::Imported,
@@ -1212,6 +1218,7 @@ mod tests {
             &mut mesh,
             &MeshInput {
             crease_angle: None,
+            section: None,
                 positions: vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 2.0, 0.0, 0.0],
                 indices: vec![0, 1, 2],
                 kind: MeshKind::Imported,
