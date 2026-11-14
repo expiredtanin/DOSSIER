@@ -18,6 +18,11 @@ export function loadEngine3d(): Promise<any> {
     enginePromise = (async () => {
       const mod: any = await import("./pkg3d/render3d.js");
       await mod.default(await wasmInitArg("render3d")); // lädt render3d_bg.wasm
+      // Ein ohne Feature `web` gebautes Paket lädt fehlerfrei, exportiert aber nichts (480-Byte-Stub) — dann
+      // klar melden statt später „reading 'new' of undefined“ (3D, Begehen, Pathtracer tot).
+      if (typeof mod.WebModelRenderer !== "function") {
+        throw new Error("pkg3d ohne Feature „web“ gebaut: npm run build:engine3d");
+      }
       return mod;
     })();
   }
