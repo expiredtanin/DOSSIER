@@ -138,8 +138,9 @@ impl Obstacles {
             }
             Primitive::DrawingArc { center, r, a0, a1, .. } => {
                 let mut sweep = a1 - a0;
-                while sweep < 0.0 && sweep.is_finite() {
-                    sweep += 2.0 * std::f64::consts::PI;
+                // [258] `rem_euclid` statt Schleife (Winkel ±1e300 → Endlosschleife).
+                if sweep < 0.0 && sweep.is_finite() {
+                    sweep = sweep.rem_euclid(2.0 * std::f64::consts::PI);
                 }
                 if sweep.is_finite() && *r > 0.0 {
                     self.polyline(&arc_pts(*center, *r, *a0, sweep));

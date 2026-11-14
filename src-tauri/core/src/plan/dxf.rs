@@ -627,7 +627,8 @@ fn dash_seg(a: V2, b: V2, cycle: &[f64]) -> Vec<(V2, V2)> {
     let mut pos = 0.0;
     let mut idx = 0usize;
     let mut on = true;
-    while pos < len - 1e-9 {
+    // [258] Höchstens so viele Stücke: ein winziges Muster auf einer riesigen Linie ergäbe Milliarden.
+    while pos < len - 1e-9 && idx < 1_000_000 {
         let step = jsnum::min(cycle[idx % cycle.len()], len - pos);
         if on && step > 1e-9 {
             out.push((V2 { x: a.x + ux * pos, y: a.y + uy * pos }, V2 { x: a.x + ux * (pos + step), y: a.y + uy * (pos + step) }));

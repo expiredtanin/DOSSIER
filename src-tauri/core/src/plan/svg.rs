@@ -505,8 +505,9 @@ pub fn plan_svg(parts: &mut [Part], o: &SvgOptions) -> Option<String> {
                     let ex = cx + r * jsnum::cos(a1);
                     let ey = cy + r * jsnum::sin(a1);
                     let mut sweep = a1 - a0;
-                    while sweep < 0.0 && sweep.is_finite() {
-                        sweep += PI * 2.0;
+                    // [258] `rem_euclid` statt Schleife: bei Winkeln ±1e300 änderte `+= 2π` den Wert nie (Endlosschleife).
+                    if sweep < 0.0 && sweep.is_finite() {
+                        sweep = sweep.rem_euclid(PI * 2.0);
                     }
                     let stroke = esc(part.str(f[0]).unwrap_or(""));
                     let dash = dash_attr(part)? + &arc_dash_offset(part, &rec, r * sweep.abs(), mm_to_m);

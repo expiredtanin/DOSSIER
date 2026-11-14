@@ -12,6 +12,8 @@ use std::rc::Rc;
 
 /// Höchstens so viele Rasterschritte je Richtung unter dem Grundriss.
 const MAX_GRID: f64 = 40.0;
+/// [258] Obergrenze der Rasterpunkte je Achse (bei Schrittweite ≥ 1 und Ausdehnung/40 höchstens ~41).
+const MAX_GRID_POINTS: usize = 4096;
 /// Fusshöhe: Punkte höchstens so viel über dem tiefsten Punkt gehören zum Fuss.
 const FOOT_TOL: f64 = 0.05;
 /// Liegt der Grundriss ganz ausserhalb des Geländenetzes, gilt die Höhe des nächsten Randpunkts, aber nur bis zu
@@ -79,12 +81,13 @@ fn in_tri(p: P2, a: P2, b: P2, c: P2) -> bool {
 fn footprint_grid(lo: [f64; 2], hi: [f64; 2], step: f64, tris: &[[P2; 3]]) -> Vec<P2> {
     let (mut xs, mut ys) = (Vec::new(), Vec::new());
     let mut x = lo[0] + step / 2.0;
-    while x < hi[0] {
+    // [258] Zählgrenze: bei Koordinaten ~1e17 ändert `x += step` den Wert nicht mehr (Endlosschleife).
+    while x < hi[0] && xs.len() < MAX_GRID_POINTS {
         xs.push(x);
         x += step;
     }
     let mut y = lo[1] + step / 2.0;
-    while y < hi[1] {
+    while y < hi[1] && ys.len() < MAX_GRID_POINTS {
         ys.push(y);
         y += step;
     }

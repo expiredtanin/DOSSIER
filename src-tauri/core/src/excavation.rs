@@ -1077,7 +1077,13 @@ pub fn slope_hatch_of(st: &SiteTerrain, id: &str, spec: &ExSpec, spacing: f64) -
 /// Kanten schon gedeckt.
 const FAN_MIN_TURN: f64 = 5.0 * std::f64::consts::PI / 180.0;
 
+/// [258] Höchstzahl Strahlen je Lauf (Umriss 1e12 m lang, Abstand klein).
+const MAX_RAYS_PER_RUN: usize = 20_000;
+
 pub fn slope_hatch(t: &Tin, ex: &ExSpec, spacing: f64) -> Vec<(P2, P2)> {
+    if !(spacing.is_finite() && spacing > 0.0) {
+        return Vec::new();
+    }
     let idx = TinIndex::new(t);
     let r = ex.reach_in(t, &idx).max(spacing);
     let step = (spacing / 4.0).max(0.02);
@@ -1149,13 +1155,13 @@ pub fn slope_hatch(t: &Tin, ex: &ExSpec, spacing: f64) -> Vec<(P2, P2)> {
             (ex.ring[v0], normal(v0))
         };
         if cyclic {
-            let k = ((total / spacing).round() as usize).max(1);
+            let k = ((total / spacing).round() as usize).clamp(1, MAX_RAYS_PER_RUN);
             for s in 0..k {
                 rays.push(at(total * s as f64 / k as f64));
             }
             continue;
         }
-        let k = (total / spacing).floor() as usize;
+        let k = ((total / spacing).floor() as usize).min(MAX_RAYS_PER_RUN);
         let off = (total - k as f64 * spacing) / 2.0;
         for s in 0..=k {
             let pos = off + s as f64 * spacing;
@@ -1177,7 +1183,7 @@ pub fn slope_hatch(t: &Tin, ex: &ExSpec, spacing: f64) -> Vec<(P2, P2)> {
             }
             let mid = [((a0 + a1) / 2.0).cos(), ((a0 + a1) / 2.0).sin()];
             let lm = ray(b, mid).map_or(0.0, |r| r.0);
-            let m = ((a1 - a0) * lm / spacing).floor() as usize;
+            let m = (((a1 - a0) * lm / spacing).floor() as usize).min(MAX_RAYS_PER_RUN);
             for s in 0..=m {
                 let ang = a0 + (a1 - a0) * s as f64 / m.max(1) as f64;
                 rays.push((b, [ang.cos(), ang.sin()]));

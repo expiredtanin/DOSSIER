@@ -1470,7 +1470,7 @@ fn stair_preview(e: &Value, xf: &Xf, out: &mut Shapes) {
     let r_out = r_in + st.width;
     let sweep = st.sweep.unwrap_or(360.0);
     let a0 = jsnum::atan2(st.start.y - c.y, st.start.x - c.x);
-    let steps = jsnum::max(4.0, jsnum::round(sweep.abs() / 15.0));
+    let steps = jsnum::min(720.0, jsnum::max(4.0, jsnum::round(sweep.abs() / 15.0))); // [258] gedeckelt (sweep 1e300)
     let (mut outer, mut inner) = (Vec::new(), Vec::new());
     let mut i = 0.0;
     while i <= steps {

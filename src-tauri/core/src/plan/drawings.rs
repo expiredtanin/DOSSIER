@@ -856,6 +856,8 @@ fn emit_inner(c: &Ctx, d: &Drawing2D, attrs: Attrs, geom: &Drawing2DGeom, greyed
             let bar_h = mm_to_model(SCALEBAR_HEIGHT_MM, scale);
             let tick_len = mm_to_model(SCALEBAR_TICK_MM, scale);
             let text_h = mm_to_model(SCALEBAR_TEXT_MM, scale);
+            // [258] Obergrenze: `segments` 1e300 liesse die Schleifen Milliarden Polygone/Marken bauen.
+            let segments = &(if *segments > MAX_SCALEBAR_SEGMENTS { MAX_SCALEBAR_SEGMENTS } else { *segments });
             let mut i = 0.0;
             while i < *segments {
                 let x0 = at.x + i * segment_length;
@@ -1228,6 +1230,9 @@ fn scalebar_labels(labels: Vec<(f64, String)>, seg: f64, text_h: f64) -> Vec<(f6
     out
 }
 
+/// [258] Mehr Segmente eines Massstabsbalkens zeichnet der Plan nicht.
+const MAX_SCALEBAR_SEGMENTS: f64 = 1000.0;
+
 /// [157] Wie weit die Blasen (Radius `r`) an den Achsenden `ends` (je Ende, Richtung) einer Seite in Richtung ihrer
 /// Achse hinaus müssen, damit sie mit Luft (10 % des Radius) ausserhalb jedes Gebäuderings und frei von den
 /// Massketten `dims` liegen; 0, wenn sie schon frei sind (höchstens 60 m). Alle Blasen der Seite rücken gleich weit
@@ -1250,7 +1255,11 @@ fn bubble_shift(ends: &[(Vec2, Vec2)], r: f64, house: &[Vec<Vec2>], dims: &super
     let run = (2.0 * r / step).ceil() as usize;
     let free_at = |t: f64| ends.iter().all(|(end, dir)| (0..=run).all(|k| clear(v(end.x + dir.x * (t + r + k as f64 * step), end.y + dir.y * (t + r + k as f64 * step)))));
     let mut t = 0.0;
-    while t <= 60.0 {
+    // [258] Obergrenze der Schritte: ein winziger Radius (Massstab ~0) liesse 60 m in Pikometer-Schritten laufen.
+    for _ in 0..100_000 {
+        if t > 60.0 {
+            break;
+        }
         if free_at(t) {
             return t;
         }

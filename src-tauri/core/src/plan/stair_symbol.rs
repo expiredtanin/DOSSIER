@@ -481,11 +481,12 @@ pub fn plan_stair_run(params: &[f64], total_rise: f64, cut_rise: f64, lw_mm: f64
             let pieces = match t_break {
                 Some(tb) => {
                     let mut t = tb;
-                    while t < lo - 1e-12 {
-                        t += std::f64::consts::TAU;
-                    }
-                    while t > hi + 1e-12 {
-                        t -= std::f64::consts::TAU;
+                    // [258] Ohne Schleife über die Windungen (Winkel 1e300 kämen nie ans Ziel).
+                    if lo.is_finite() && hi.is_finite() && t.is_finite() {
+                        t = (lo - 1e-12) + (t - (lo - 1e-12)).rem_euclid(std::f64::consts::TAU);
+                        if t > hi + 1e-12 {
+                            t -= std::f64::consts::TAU;
+                        }
                     }
                     if t > lo && t < hi {
                         vec![(a0, t, false), (t, a1, true)]

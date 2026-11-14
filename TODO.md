@@ -85,8 +85,12 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   Typen, fehlende/leere/doppelte Felder, Verweise ins Leere, Zahlen 1e300). Jeder Aufruf unter `catch_unwind`, alle Panics gesammelt gemeldet
   (`ROBUST_STEPS/SEED/ONLY/TRACE/SLOW`, Kopf der Datei). Behoben (je mit Begründung im Commit): i_overlay-Panic bei Koordinaten ≥ 2^500
   (`polygon_bool::COORD_LIMIT`), Speicher-Abbruch bei `wingCount` 1e300 (Elevation/Schnitt/Plan), Gitter über riesige Räume (`room_area::label_point`,
-  `room_book::height_bands`), Ansichts-Zellraster (`mesh_cull`), `partial_cmp().unwrap()` auf NaN in render3d/hatchgen/Kern. **Offen:** nur ein
-  Seed je Lauf (Suche mit anderen Seeds von Hand: bisher je 4–6 Seeds sauber); Speicher-Abbruch (`handle_alloc_error`) lässt sich nicht per
+  `room_book::height_bands`), Ansichts-Zellraster (`mesh_cull`), `partial_cmp().unwrap()` auf NaN in render3d/hatchgen/Kern. **Nachsuche 14.11.:** Endlosschleifen
+  `while sweep <= 0 { sweep += 2π }` bei Winkeln ±1e300 (`svg.rs`, `stamp_place`, `drawing_recognize`, `magic_wand`, `stair_symbol`) durch
+  `rem_euclid` ersetzt; Obergrenzen für Massstabsbalken-Segmente, Strahlen der Böschungsschraffur, Höhenlinien-Beschriftung, Strichzerlegung
+  (`dxf::dash_seg`), Blasen-Verschiebung, Wendeltreppen-Vorschau, Raster in `context_ground` (Koordinaten ~1e17). Je ein `regression_*`-Fall.
+  **Offen:** Seeds: 20 weitere (1001–1020) sauber, aber nur ein
+  Seed je Lauf (Suche mit anderen Seeds von Hand); Speicher-Abbruch (`handle_alloc_error`) lässt sich nicht per
   `catch_unwind` fangen, der Test bricht dann den ganzen Lauf ab; WASM-Bindungen (`web/`) und TS-Seite nicht abgedeckt; Rust-Panic im WASM selbst
   nicht gemessen ([118] bleibt Wiederanlauf). · M
 - Release-Notes-Entwurf `doc/RELEASE-NOTES-1.0.md` (14.11.), offene Fragen an den Maintainer dort markiert (`**[Frage M: …]**`); nach dem Mac-Durchlauf [206] Einschränkungen nachführen.
