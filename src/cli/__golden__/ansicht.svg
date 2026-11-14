@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0.1 0 6.8 7.58564" width="68mm" height="75.85641mm">
-<rect x="0.1" y="0" width="6.8" height="7.58564" fill="#ffffff"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-1.9 0 10.8 7.58564" width="108mm" height="75.85641mm">
+<rect x="-1.9" y="0" width="10.8" height="7.58564" fill="#ffffff"/>
 <g stroke-linecap="butt" stroke-linejoin="miter" stroke-miterlimit="4">
 <polygon points="1.8,4.98564 1.8,7.08564 2.7,7.08564 2.7,4.98564" fill="#ffffff" stroke="none" stroke-width="0"/>
 <polygon points="4.2,4.98564 4.2,5.00564 5,5.00564 5,4.98564" fill="#9aa0a6" stroke="none" stroke-width="0"/>
@@ -42,6 +42,6 @@
 <line x1="0.6" y1="1.88564" x2="6.4" y2="1.88564" stroke="#2b3039" stroke-width="0.013"/>
 <line x1="6.4" y1="2.05885" x2="0.6" y2="2.05885" stroke="#2b3039" stroke-width="0.013"/>
 <polyline points="6.4,2.05885 6.4,1.88564 6.4,0.5 0.6,0.5 0.6,1.88564 0.6,2.05885" fill="none" stroke="#2b3039" stroke-width="0.018"/>
-<line x1="0.6" y1="7.08564" x2="6.4" y2="7.08564" stroke="#1f242c" stroke-width="0.025"/>
+<line x1="-1.4" y1="7.08564" x2="8.4" y2="7.08564" stroke="#1f242c" stroke-width="0.05"/>
 </g>
 </svg>

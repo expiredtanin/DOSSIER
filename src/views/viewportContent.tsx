@@ -1128,9 +1128,9 @@ function SectionPlanView({
   const marks = useMemo(
     () =>
       rawPlan && levelMarksEnabled(level, project, (c) => visibleCodes.has(c) && categoryDisplay(c).render)
-        ? levelMarkerPrimitives(project, rawPlan.bounds, rawPlan.primitives)
+        ? levelMarkerPrimitives(project, rawPlan.bounds, rawPlan.primitives, scaleDenominator)
         : [],
-    [rawPlan, level, project, visibleCodes, categoryDisplay],
+    [rawPlan, level, project, visibleCodes, categoryDisplay, scaleDenominator],
   );
   const withOverlay = useMemo(() => {
     if (!rawPlan) return rawPlan;

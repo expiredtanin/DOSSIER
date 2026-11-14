@@ -40,7 +40,7 @@ pub(crate) use cull::fascia_quads;
 const EDGE_INK: &str = "#2b3039";
 const EDGE_MM: f64 = 0.13;
 /// [140] Silhouette (Umriss aller Bauteile zusammen) mittelstark: hebt den Baukörper von Details (0.13) ab;
-/// Terrainlinie 0.25 (grösste Standard-Stärke bei 1:100).
+/// Terrainlinie kräftig ([`GROUND_MM`]).
 const SILHOUETTE_MM: f64 = 0.18;
 /// [140] Abstand (m), bis zu dem eine Kante als Teil der Silhouette gilt.
 const SILHOUETTE_TOL: f64 = 2e-3;
@@ -56,7 +56,11 @@ const SHADOW_FILL: &str = "#8f959e";
 const SHADOW_SMOOTH_MM: f64 = 0.2;
 const OPENING_SHADOW_FILL: &str = "#a7adb5";
 const GROUND_INK: &str = "#1f242c";
-const GROUND_MM: f64 = 0.25;
+/// [208] Terrain-/Bodenlinie kräftig (SIA-Praxis: stärkste Linie der Ansicht; 0.38 mm bei 1:200 mit Massstabs-Stärken).
+const GROUND_MM: f64 = 0.5;
+/// [208] Überstand der Bodenlinie ohne Geländenetz über die Gebäudebreite hinaus: 10 mm Papier, mindestens 2 m.
+const GROUND_OVERHANG_MM: f64 = 10.0;
+const GROUND_OVERHANG_MIN_M: f64 = 2.0;
 const FRAME_FILL_COLOR: &str = "#dcdcdc";
 const SILL_FILL_COLOR: &str = "#cccccb";
 const DOOR_LEAF_FILL_COLOR: &str = "#ececec";
@@ -297,7 +301,16 @@ pub fn elevation_primitives_with(p: &Project, level: &LevelSpec, shadows: bool, 
     // Ansichtsfarbe und -schraffur ([100]) der sichtbaren Bauteilseite.
     let (mut pattern_lines, mut pattern_styles) = surface_patterns(p, &mut faces, &frame, scale, mono);
     // [173] Öffnungslinien der Fenster nach der Modelldarstellung der Ebene (Element und Typ gehen vor).
-    let mvo = crate::plan::model_view::for_view_scaled(p, level.model_view.as_deref(), crate::plan::style::Detail::Mittel, scale);
+    // [208] Abgabe-Review „Fenster nur grau" (Wettbewerb 1:200): die automatische Vergröberung des Grundrisses (mittel ab
+    // 1:200 wie grob, [140]) gilt in der Ansicht erst für die Übersicht ab 1:500. Bei 1:200 zeigt die Ansicht Rahmen, Flügel
+    // und Glas wie „mittel" (Fassadenbild des Wettbewerbs), nur die gestrichelten Öffnungssymbole entfallen dort.
+    let overview = scale >= super::domains::OVERVIEW_FROM;
+    let mvo = if overview {
+        crate::plan::model_view::for_view_scaled(p, level.model_view.as_deref(), crate::plan::style::Detail::Mittel, scale)
+    } else {
+        crate::plan::model_view::for_view(p, level.model_view.as_deref(), crate::plan::style::Detail::Mittel, scale)
+    };
+    let thinned = !overview && super::domains::effective_detail(mvo.detail, scale).1;
     let win = &mvo.window;
     let mut openings = collect_openings(p, &frame, win);
     // [180] Öffnungen nach ihrer Klasse und der ihres Wirts (Wand, Dach): ausgeblendet ⇒ ohne Öffnung.
@@ -319,6 +332,9 @@ pub fn elevation_primitives_with(p: &Project, level: &LevelSpec, shadows: bool, 
         let Some(o) = p.openings.as_deref().unwrap_or(&[]).iter().find(|o| o.id == op.id) else { continue };
         let door = o.kind == ElementKind::Door;
         op.look = mvo.opening_detail(door, o.detail_level);
+        if thinned {
+            op.symbol.clear();
+        }
         if !door && !win.elevation_division.unwrap_or(op.look != crate::plan::style::Detail::Grob) {
             op.divisions.clear();
             op.sash_rects.clear();
@@ -804,9 +820,57 @@ pub fn elevation_primitives_with(p: &Project, level: &LevelSpec, shadows: bool, 
     }
     // Mit Gelände ersetzt die Silhouette die Grundlinie ([T6]).
     if acc.min_x.is_finite() && acc.min_y.is_finite() && !has_terrain {
-        prims.push(line(v2(acc.min_x, acc.min_y), v2(acc.max_x, acc.min_y), "elevation-ground", GROUND_MM, GROUND_INK));
+        if let Some(g) = ground_line(p, &acc, &prims, scale, &|c| vis.visible(c) && vis.render(c)) {
+            for q in &g {
+                if let Primitive::Line { a, b, .. } = q {
+                    acc.add(a.x, a.y);
+                    acc.add(b.x, b.y);
+                }
+            }
+            prims.extend(g);
+        }
     }
     Ok(Some((prims, acc.bounds())))
+}
+
+/// [208] Bodenlinie der Ansicht ohne Geländenetz (Abgabe-Review: „keine Terrainlinie", sie lag als dünne Linie genau auf
+/// der Unterkante des Baus): kräftig auf ±0.00 (Bezugsgeschoss `zeroLevel`, sonst 0; liegt das ausserhalb des Gezeichneten,
+/// an dessen Unterkante), beidseits über die Gebäudebreite hinaus ([`GROUND_OVERHANG_MM`]). Was darunter liegt (Fundament,
+/// Untergeschoss), deckt eine weisse Fläche wie beim Gelände ([T6]). Auf der Klasse „Gelände" (02): ausgeblendet ⇒ ohne.
+fn ground_line(p: &Project, acc: &Acc, prims: &[Primitive], scale: f64, shown: &dyn Fn(&str) -> bool) -> Option<Vec<Primitive>> {
+    if !crate::standards::derived_visible(p, crate::import_context::TERRAIN_CODE, shown) {
+        return None;
+    }
+    let zero = p.drawing_levels.iter().find(|l| l.kind == DrawingLevelKind::Floor && l.zero_level == Some(true)).and_then(|l| l.base_elevation).filter(|z| z.is_finite()).unwrap_or(0.0);
+    let (bottom, top) = (acc.min_y, acc.max_y);
+    let y = if zero >= bottom - 1e-9 && zero < top { zero } else { bottom };
+    let scale = if scale.is_finite() && scale > 0.0 { scale } else { super::drawings::DEFAULT_SCALE_DENOMINATOR };
+    let ext = (GROUND_OVERHANG_MM / 1000.0 * scale).max(GROUND_OVERHANG_MIN_M);
+    let (x0, x1) = (acc.min_x - ext, acc.max_x + ext);
+    let mut out = Vec::new();
+    // Nur über die Breite dessen, was unter den Boden reicht: so verschiebt die Fläche die Koten nicht (sie stehen neben
+    // dem Gebauten, `level_marker_bounds`, Nachbarn zählen dort nicht).
+    if y > bottom + 1e-6 {
+        let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+        let mut below = |q: &Vec2| {
+            lo = lo.min(q.x);
+            hi = hi.max(q.x);
+        };
+        for q in prims {
+            match q {
+                Primitive::Polygon { pts, .. } if pts.iter().any(|v| v.y < y - 1e-6) => pts.iter().for_each(&mut below),
+                Primitive::Line { a, b, .. } if a.y.min(b.y) < y - 1e-6 => [a, b].into_iter().for_each(&mut below),
+                _ => {}
+            }
+        }
+        if hi > lo {
+            // Rand: Umrisslinien am Rand liegen halb ausserhalb (Strichbreite).
+            let (lo, hi) = (lo - 0.05, hi + 0.05);
+            out.push(polygon(vec![v2(lo, y), v2(hi, y), v2(hi, bottom - 0.05), v2(lo, bottom - 0.05)], "#ffffff", "none", 0.0, no_hatch()));
+        }
+    }
+    out.push(line(v2(x0, y), v2(x1, y), "elevation-ground", GROUND_MM, GROUND_INK));
+    Some(out)
 }
 
 /// Bauteil der sichtbaren Wandseite: rechts der Achse (Anfang → Ende) liegt die äusserste Schicht

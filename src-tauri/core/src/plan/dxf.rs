@@ -1235,7 +1235,7 @@ impl Ctx<'_> {
         let mm = |v: f64| (v / 1000.0) * scale;
         let text_h = mm(th);
         // [172] Vorgabe-Lage wie im Plan: passt die Zahl nicht zwischen die Hilfslinien, steht sie ausserhalb.
-        let auto = super::drawings::dim_auto_offsets(pts, text_h);
+        let auto = super::drawings::dim_auto_offsets(pts, text_h, *offset);
         for i in 0..pts.len().saturating_sub(1) {
             let a = V2 { x: pts[i].x, y: pts[i].y };
             let q = V2 { x: pts[i + 1].x, y: pts[i + 1].y };
