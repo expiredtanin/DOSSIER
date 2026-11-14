@@ -688,7 +688,7 @@ fn contour_prims(c: &Ctx, st: &crate::excavation::SiteTerrain, iv: f64, every: i
         let hw = crate::text_layout::text_width_em(&text, false) * text_h / 2.0;
         let hv = 0.6 * text_h;
         let reserve = hw + 0.4 * text_h;
-        let n = ((len / spacing).floor() as usize).max(1);
+        let n = ((len / spacing).floor() as usize).clamp(1, 10_000); // [258] Obergrenze (Massstab ~0)
         let sec = len / n as f64;
         let mut mine: Vec<f64> = Vec::new();
         for i in 0..n {

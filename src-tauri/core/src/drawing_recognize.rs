@@ -467,8 +467,12 @@ pub fn collect(p: &Project, level: &str, ids: &[String]) -> Input {
             }
             Drawing2DGeom::Arc { center, r, a0, a1 } => {
                 let mut sweep = a1 - a0;
-                while sweep <= 0.0 && sweep.is_finite() {
-                    sweep += 2.0 * PI;
+                // [258] `rem_euclid` statt Schleife: bei ±1e300 änderte `sweep += 2π` den Wert nie.
+                if sweep <= 0.0 && sweep.is_finite() {
+                    sweep = sweep.rem_euclid(2.0 * PI);
+                    if sweep <= 0.0 {
+                        sweep = 2.0 * PI;
+                    }
                 }
                 if r.is_finite() && *r > 1e-6 && sweep.is_finite() && a0.is_finite() {
                     inp.arcs.push(ArcIn { c: (center.x, center.y), r: *r, a0: wrap2pi(*a0), sweep: sweep.min(2.0 * PI), layer });

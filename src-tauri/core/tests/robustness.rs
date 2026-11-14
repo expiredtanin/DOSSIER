@@ -979,3 +979,54 @@ fn regression_treppe_riesige_steigung() {
     // Ortbetontreppe mit Steigung 1e12 m: Untersicht-Scheiben je Tritt (Billionen Platten im Schnitt).
     regression("Treppe 1e12", |m| item(m, "stairs", 0)["totalRise"] = json!(1e12));
 }
+
+// ── [258] Nachsuche: ungedeckelte Schleifen über Modellzahlen ────────────────
+
+/// Zeichenelement (`drawings2d`) auf Geschoss `eg` ergänzen.
+fn add_drawing(m: &mut Map<String, Value>, id: &str, geom: Value) {
+    let list = m.entry("drawings2d").or_insert_with(|| json!([])).as_array_mut().unwrap();
+    list.push(json!({"id": id, "type": "drawing2d", "levelId": "eg", "categoryCode": "01", "geom": geom}));
+}
+
+#[test]
+fn regression_massstabsbalken_segmentzahl() {
+    // `segments` 1e300: Schleife über Milliarden Segmente (Speicher) im Plan.
+    for (n, len) in [(1e300, 1.0), (1e12, 1.0), (5.0, 1e-300)] {
+        regression(&format!("Massstabsbalken {n}/{len}"), |m| {
+            add_drawing(m, "sb", json!({"shape": "scalebar", "at": {"x": 0, "y": 0}, "segmentLength": len, "segments": n}));
+        });
+    }
+}
+
+#[test]
+fn regression_bogen_winkel_riesig() {
+    // Bogenwinkel ±1e300: `while sweep <= 0 { sweep += 2π }` ändert den Wert nicht mehr (Endlosschleife).
+    for (a0, a1) in [(1e300, -1e300), (0.0, -1e300), (-1e300, 1e300)] {
+        regression(&format!("Bogen {a0}/{a1}"), |m| {
+            add_drawing(m, "bg", json!({"shape": "arc", "center": {"x": 3, "y": 3}, "r": 2, "a0": a0, "a1": a1}));
+            add_drawing(m, "ln", json!({"shape": "line", "a": {"x": 0, "y": 3}, "b": {"x": 6, "y": 3}}));
+        });
+    }
+}
+
+#[test]
+fn regression_wendeltreppe_winkel_riesig() {
+    regression("Wendeltreppe sweep 1e300", |m| {
+        let s = item(m, "stairs", 0);
+        s["shape"] = json!("spiral");
+        s["center"] = json!({"x": 10, "y": 3});
+        s["radius"] = json!(0.3);
+        s["sweep"] = json!(1e300);
+    });
+}
+
+#[test]
+fn regression_strichmuster_winzig() {
+    // Strichlänge 1e-300 mm auf langer Schraffurlinie (DXF-Strichzerlegung).
+    regression("Strichmuster 1e-300", |m| {
+        for l in m.get_mut("lineStyles").and_then(Value::as_array_mut).unwrap() {
+            l["dash"] = json!([1e-300, 1e-300]);
+        }
+        item(m, "walls", 0)["start"]["x"] = json!(-1e9);
+    });
+}

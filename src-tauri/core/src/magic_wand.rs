@@ -23,10 +23,17 @@ const CIRCLE_STEPS: usize = 64;
 fn arc_segments(c: &Circle, out: &mut Vec<[f64; 4]>) {
     let (a0, a1) = c.arc.unwrap_or((0.0, std::f64::consts::TAU));
     let mut span = a1 - a0;
-    while span <= 0.0 {
-        span += std::f64::consts::TAU;
+    // [258] Nicht endliche oder riesige Winkel: `while span <= 0 { span += 2π }` käme nie ans Ziel.
+    if !span.is_finite() {
+        return;
     }
-    let n = ((span / std::f64::consts::TAU) * CIRCLE_STEPS as f64).ceil().max(2.0) as usize;
+    if span <= 0.0 {
+        span = span.rem_euclid(std::f64::consts::TAU);
+        if span <= 0.0 {
+            span = std::f64::consts::TAU;
+        }
+    }
+    let n = (((span / std::f64::consts::TAU) * CIRCLE_STEPS as f64).ceil().max(2.0) as usize).min(4 * CIRCLE_STEPS);
     let pt = |t: f64| (c.cx + c.r * crate::jsnum::cos(t), c.cy + c.r * crate::jsnum::sin(t));
     let mut prev = pt(a0);
     for i in 1..=n {
