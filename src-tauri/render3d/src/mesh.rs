@@ -397,7 +397,7 @@ fn solid_subrects(
     holes: &[(f32, f32, f32, f32)],
 ) -> Vec<(f32, f32, f32, f32)> {
     let sort_dedup = |mut v: Vec<f32>| -> Vec<f32> {
-        v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        v.sort_by(|a, b| a.total_cmp(b));
         v.dedup_by(|a, b| (*a - *b).abs() <= MIN_SPAN);
         v
     };
@@ -444,7 +444,7 @@ fn subtract_intervals(lo: f32, hi: f32, gaps: &[(f32, f32)]) -> Vec<(f32, f32)> 
         .map(|(a, b)| (a.max(lo), b.min(hi)))
         .filter(|(a, b)| b - a > MIN_SPAN)
         .collect();
-    gs.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+    gs.sort_by(|a, b| a.0.total_cmp(&b.0));
     let mut out = Vec::new();
     let mut cursor = lo;
     for (a, b) in gs {

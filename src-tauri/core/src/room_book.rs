@@ -180,11 +180,19 @@ pub fn height_bands(p: &Project, r: &Room, roofs: &RoofPlanes, net_area: f64) ->
     let (x0, y0, x1, y1) = ring.iter().fold((f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY), |b, v| (b.0.min(v.x), b.1.min(v.y), b.2.max(v.x), b.3.max(v.y)));
     let step = (((x1 - x0) * (y1 - y0)) / 40_000.0).sqrt().max(0.05);
     let (nx, ny) = ((((x1 - x0) / step).ceil() as usize).max(1), (((y1 - y0) / step).ceil() as usize).max(1));
+    // [258] Sehr lang gestreckter oder riesiger Raum (1e300 m): höchstens 1000 Zellen je Richtung, dann mit eigenem
+    // Abstand je Achse (sonst Milliarden Zellen). Im Normalfall bleibt `step` für beide Achsen.
+    let (sx, sy, nx, ny) = if nx > 1000 || ny > 1000 {
+        let (nx, ny) = (nx.min(1000), ny.min(1000));
+        ((x1 - x0) / nx as f64, (y1 - y0) / ny as f64, nx, ny)
+    } else {
+        (step, step, nx, ny)
+    };
     let (mut n, mut sum, mut min) = (0usize, 0.0, f64::INFINITY);
     let mut counts = [0usize; 3];
     for j in 0..ny {
         for i in 0..nx {
-            let (x, y) = (x0 + (i as f64 + 0.5) * step, y0 + (j as f64 + 0.5) * step);
+            let (x, y) = (x0 + (i as f64 + 0.5) * sx, y0 + (j as f64 + 0.5) * sy);
             if !in_ring(x, y, &ring) {
                 continue;
             }

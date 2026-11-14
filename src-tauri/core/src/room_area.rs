@@ -129,10 +129,15 @@ pub fn label_point(polygon: &[[f64; 2]]) -> [f64; 2] {
         y1 = y1.max(p[1]);
     }
     let (w, h) = (x1 - x0, y1 - y0);
-    let size = w.min(h);
-    if !(size > 0.0) {
+    // [258] Absurde Ausdehnung (Rechenbereich der Doubles: `x += size` käme nicht mehr voran) → Schwerpunkt.
+    if !(x0.abs() < 1e9 && y0.abs() < 1e9 && x1.abs() < 1e9 && y1.abs() < 1e9) {
         return c;
     }
+    // [258] Höchstens 256 Startzellen je Richtung: ein sehr langer, schmaler Raum (1e12 m × 1 mm) ergab sonst Milliarden.
+    if !(w.min(h) > 0.0) {
+        return c;
+    }
+    let size = w.min(h).max(w.max(h) / 256.0);
     let precision = (w.max(h) * 1e-3).max(1e-4);
     // Zelle: Mitte, halbe Kantenlänge, Abstand der Mitte, obere Schranke innerhalb der Zelle.
     #[derive(PartialEq)]
@@ -347,5 +352,19 @@ mod tests {
         // U mit Schlitz: alle Ecken innen, aber der Schlitz quert das Rechteck.
         let u = [[0.0, 0.0], [5.0, 0.0], [5.0, 4.0], [2.6, 4.0], [2.6, 1.0], [2.4, 1.0], [2.4, 4.0], [0.0, 4.0]];
         assert!(!rect_in_ring(&u, 2.5, 2.5, 2.0, 0.5));
+    }
+
+    /// [258] Sehr lang gestreckte oder riesige Räume: die Startzellen von `label_point` waren min(Breite, Höhe) breit
+    /// (1e12 m × 1 mm: Milliarden Zellen, Speicher-Abbruch) und ab 1e300 m kam `x += size` nicht mehr voran.
+    #[test]
+    fn label_punkt_extreme_raeume() {
+        let t0 = std::time::Instant::now();
+        let long = [[0.0, 0.0], [1e8, 0.0], [1e8, 1e-3], [0.0, 1e-3]];
+        let p = label_point(&long);
+        assert!(p[0].is_finite() && p[1].is_finite(), "{p:?}");
+        let huge = [[0.0, 0.0], [1e300, 0.0], [1e300, 1.0], [0.0, 1.0]];
+        let _ = label_point(&huge);
+        let _ = label_point(&[[1e300, 1e300], [1e300 + 1e290, 1e300], [1e300, 1e300 + 1e290]]);
+        assert!(t0.elapsed().as_secs_f64() < 5.0, "zu langsam: {:?}", t0.elapsed());
     }
 }

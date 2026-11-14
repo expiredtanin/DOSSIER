@@ -93,7 +93,9 @@ fn half_plane(a: [f64; 2], b: [f64; 2], inside: [f64; 2], size: f64) -> Option<P
 
 /// Streifen der Halbbreite `d` um die Strecke a–b mit runden Enden (Puffer der Kante).
 fn strip(a: [f64; 2], b: [f64; 2], d: f64) -> Vec<Polygon> {
-    if a == b {
+    // [258] Ausserhalb des Rechenbereichs von i_overlay (Panic) und für nicht endliche Werte: kein Streifen.
+    let lim = crate::polygon_bool::COORD_LIMIT;
+    if a == b || !(d.is_finite() && d.abs() <= lim) || [a, b].iter().any(|q| q[0].abs() > lim || q[1].abs() > lim || q[0].is_nan() || q[1].is_nan()) {
         return vec![];
     }
     let style = StrokeStyle::new(2.0 * d).start_cap(LineCap::Round(ARC_STEP)).end_cap(LineCap::Round(ARC_STEP));

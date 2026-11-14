@@ -1359,7 +1359,7 @@ mod tests {
                 ((a.y - y) * (b.y - y) <= 0.0 && (b.y - a.y).abs() > 1e-12).then(|| a.x + (y - a.y) / (b.y - a.y) * (b.x - a.x))
             })
             .collect();
-        xs.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        xs.sort_by(|a, b| a.total_cmp(b));
         xs
     }
 

@@ -10,7 +10,7 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   stehen im Archiv („Bewusst nicht übernommen“).
 - **Grösse** (eine Person mit Agenten): S ≤ 1 Tag · M ≤ 1 Woche · L ≤ 1 Monat · XL > 1 Monat.
   Steht keine Grösse im Archiv, ist sie hier geschätzt.
-- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 257);
+- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 258);
   nie eine ID wiederverwenden oder umnummerieren. Präfix-IDs (`[K]`, `[G]`, `[T]`, `[B]`, `[C]`) bleiben.
 - **Pro Punkt:** was fehlt · wo im Code · Grösse. Höchstens ein bis drei Sätze je Punkt;
   Messwerte und Befunde gehören in den Commit.
@@ -77,6 +77,18 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   Kennzahlenleiste war ohne freie Körper 0 m³, neue Decken bekamen den Aussenwand-Aufbau statt eines Deckentyps. Offen: Durchlauf
   der Checkliste auf dem Mac (Maintainer); 3D-Bild headless nicht prüfbar; Blender-Lauf von [211] nur auf dem Mac; Pathtracer unter SwiftShader (s. o.).
 
+- ◐ **[258]** Robustheit: kein Kern-Panic im Referenz-Ablauf (14.11.). `src-tauri/core/tests/robustness.rs`, deterministisch, Release < 1 min: (1) die vier
+  Beispielprojekte (`tests/fixtures/robust/*.json`, aus `dossier-cli :beispiel|:wettbewerb|:gross|:musterhaus-komplex migrate`; Komplex ohne `context`)
+  durch den Lader und alle Ableitungen (Grundrisse je Geschoss 1:20–1:500 samt SVG/Druck-SVG/DXF/Szene/Texte, Schnitt, Ansicht, 3D, ~50 Abfragen,
+  IFC-/Netz-Sammler, Kennzahlen, Baurecht, Objekt-Info, Griffe, Befehle), (2) Mutationsrunde mit festem Seed (Zahlen auf 0/1e-9/-1/1e300/null/Text,
+  NaN-Marken, verschieben, löschen, duplizieren, Undo/Redo), nach jedem Schritt neu rechnen, (3) kaputte Projektdateien (abgeschnitten, falsche
+  Typen, fehlende/leere/doppelte Felder, Verweise ins Leere, Zahlen 1e300). Jeder Aufruf unter `catch_unwind`, alle Panics gesammelt gemeldet
+  (`ROBUST_STEPS/SEED/ONLY/TRACE/SLOW`, Kopf der Datei). Behoben (je mit Begründung im Commit): i_overlay-Panic bei Koordinaten ≥ 2^500
+  (`polygon_bool::COORD_LIMIT`), Speicher-Abbruch bei `wingCount` 1e300 (Elevation/Schnitt/Plan), Gitter über riesige Räume (`room_area::label_point`,
+  `room_book::height_bands`), Ansichts-Zellraster (`mesh_cull`), `partial_cmp().unwrap()` auf NaN in render3d/hatchgen/Kern. **Offen:** nur ein
+  Seed je Lauf (Suche mit anderen Seeds von Hand: bisher je 4–6 Seeds sauber); Speicher-Abbruch (`handle_alloc_error`) lässt sich nicht per
+  `catch_unwind` fangen, der Test bricht dann den ganzen Lauf ab; WASM-Bindungen (`web/`) und TS-Seite nicht abgedeckt; Rust-Panic im WASM selbst
+  nicht gemessen ([118] bleibt Wiederanlauf). · M
 - Release-Notes-Entwurf `doc/RELEASE-NOTES-1.0.md` (14.11.), offene Fragen an den Maintainer dort markiert (`**[Frage M: …]**`); nach dem Mac-Durchlauf [206] Einschränkungen nachführen.
 - [30] Release-Workflow lauffähig: macOS universal signiert/notarisiert, Updater, Versionsnummer 1.0.0-beta; [57]/[120] CI auf GitHub grün.
 - „Mac-Gegenprobe“ (Sammelpunkt unten) für alles im Referenz-Ablauf abarbeiten (Maintainer), Befunde sofort beheben;

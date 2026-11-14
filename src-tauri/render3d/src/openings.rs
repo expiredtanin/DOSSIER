@@ -44,7 +44,7 @@ pub(crate) fn split_range_by_voids(
     if voids.is_empty() {
         return vec![(lo, hi, z0, z1)];
     }
-    voids.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+    voids.sort_by(|a, b| a.0.total_cmp(&b.0));
 
     let mut rects = Vec::new();
     let mut cursor = lo;
