@@ -241,6 +241,7 @@ export {
 export {
   type SectionOutput,
   computeSection,
+  prepareSection,
   generateSectionPlan,
   sameSectionInputs,
   sameSectionLine,
