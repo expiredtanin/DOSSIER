@@ -32,6 +32,10 @@ Wichtige Kürzel: `w` (`wand`) Wand · `d` (`decke`) Decke · `rf` (`dach`) Dach
 `schnittlinie` (`sectionline`) Schnitt · `ansichtslinie` (`viewline`) Ansicht ·
 `praesentation` Präsentationsplan · `bild3d` 3D-Bild. Eigene Kürzel: *Einstellungen → Tastenkürzel*.
 
+Die Tab-Taste springt immer in die Befehlszeile. Zwischen den Ansichts-Reitern (Grundriss, Schnitt, 3D …) wechselst du mit
+Ctrl+Tab (vorwärts) und Ctrl+Umschalt+Tab (rückwärts), auch auf dem Mac mit der Ctrl-Taste. In Dialogen bleibt Tab bei
+deren Feldern.
+
 ## 1. Leeres Projekt
 
 *Datei → Neu* (⌘N; im Browser „Neues Projekt“). Das neue Projekt hat Erdgeschoss, Obergeschoss, Schnitt A und Ansicht Süd. Gleich speichern:
@@ -69,6 +73,8 @@ Zuerst das Geschoss wählen (Panel **Zeichnungsebenen**, „Erdgeschoss“; ⌘5
   Befehlszeile wählen („Flachdach“ unter den Optionen). Nachträglich: Dach wählen, Panel **Objekt-Info** → Abschnitt „Dach“
   → **Dachform** „Flachdach“; dann erscheint **Attika Höhe (m)** (0 = keine Attika), wie im Beispiel. Die Dachform ist ein
   Auswahlfeld, kein Schalter.
+- **Wände verbinden:** Zwei oder mehr Wände wählen, Cmd+J (Windows/Linux: Ctrl+J). Dossier schliesst Ecken (L-Stoss) und
+  T-Stösse, auch bei Bogenwänden (Erker). Liegen die Enden zu weit auseinander, nennt ein Hinweis den Grund.
 - Obergeschosse: Wände wählen, ⌘C, mit ⌘6 („Geschoss höher“) das Geschoss wechseln, ⌘V: Die Kopie liegt auf dem aktiven
   Geschoss an denselben Koordinaten. (⌘D „Duplizieren“ legt dagegen eine Kopie mit Versatz von 0.5 m auf demselben
   Geschoss an, nicht auf einem anderen.)
@@ -79,6 +85,16 @@ oder Prisma), wandelt der Befehl `solidtoparts` („Körper in Bauteile umwandel
 Geschoss Aussenwände, Decken zwischen den Geschossen und ein Flachdach; fehlende Geschosse legt Dossier obenauf an, der
 Körper entfällt. Alles ist ein Undo-Schritt. Was nicht geht (verjüngte oder geneigte Körper, Kugel, Kegel, Verschneidungen,
 Unterkante zwischen zwei Geschossen), lehnt der Befehl mit einer Meldung ab.
+
+**Möbel und Sanitär: Objekte.** Das Panel **Objekte** (neben den Werkzeugen) enthält die 2D-Objektbibliothek: Sanitär, Küche,
+Tische, Sitzen, Schlafen, Schränke, Aussenraum (Auto mit Parkfeld, Velo, Rollstuhl-Wendekreis). Objekt wählen, im Plan den
+Einfügepunkt klicken (Befehl `libobj`); vor dem Klick dreht R das Objekt, M spiegelt es. Die Vorschau hängt am Cursor.
+Ziehen aus der Palette gibt es nicht. Ein gesetztes Objekt wählst du an und änderst es im Panel **Objekt-Info** (Abschnitt
+„Objekt aus Bibliothek“): **Breite**, **Tiefe**, **Anzahl** und weitere Parameter; bei Esstischen mit Stühlen regelt
+**Unordnung**, wie schief die Stühle stehen, **Neu würfeln** zieht eine neue Anordnung (gleiche Zahl = gleiche Stühle). Die Zeichnung
+folgt dem Detailgrad der Ansicht (grob, mittel, fein). Möbel liegen auf der Klasse 22, Sanitär auf 23, Fahrzeuge und
+Freiflächen auf 24 und lassen sich dort ausschalten; Möbel und Sanitär sparen den Bodenbelag aus. Im DXF-Export wird jedes
+Objekt als Block mit Einfügung ausgegeben. Die Objekte sind nur 2D; im 3D erscheinen sie nicht.
 
 ## 5. Räume und Raumprogramm
 
@@ -96,7 +112,15 @@ Im Beispiel sind alle 7 Programmzeilen erfüllt (Toleranz 10 %).
 Das Panel **Flächenbilanz** zeigt die Kennzahlenleiste: GF, aGF, GV, AZ, ÜZ. Darunter der „Flächen- und
 Kennzahlen-Nachweis“ (HNF, NNF, VF, FF, KF; IVHB-Ziffern) mit **CSV** und **PDF**. Das Menü
 *Bearbeiten → Kennzahlen und Raumprogramm …* gibt dasselbe als Meldung. Beispielwerte aus dem Projekt „Wettbewerb“:
-GF 745 m², GV 2’234 m³, AZ 0.75, ÜZ 0.28. Die **Kostenschätzung grob** (eBKP-H, CHF/m³ GV oder CHF/m² GF) steht im
+GF 745 m², GV 2’234 m³, AZ 0.75, ÜZ 0.28.
+
+**Baurecht-Nachweis.** Die zulässigen Ziffern trägst du im Panel **Gelände** unter „Baurecht der Parzelle“ ein: **GFZ max.**,
+**AZ max.**, **BMZ max.**, **ÜZ max.**, **GZ min.** und **Fassadenhöhe max.** (zusätzlich zu „Gesamthöhe max.“); leer heisst
+keine Vorgabe. Im Panel **Flächenbilanz** steht darunter die Tabelle „Nachweis gegen das Baurecht“: je Zeile zulässig, Projekt,
+Reserve oder Überschreitung und erfüllt; fehlt die Vorgabe, steht „—“. Darunter die „Grundlagen des Nachweises“. Die Tabelle
+geht mit **CSV** und **PDF** hinaus und lässt sich als Blatt-Tabelle („Baurecht-Nachweis (AZ, ÜZ, Höhen)“) auf ein Layout legen.
+Auf der Kommandozeile: `node dist-cli/dossier-cli.mjs :wettbewerb kennzahlen --nachweis`. Die Fassadenhöhe misst Dossier
+über ±0.00 (Näherung), die Grünfläche gilt nur, wenn du sie eingibst. Die **Kostenschätzung grob** (eBKP-H, CHF/m³ GV oder CHF/m² GF) steht im
 selben Panel und lässt sich als Tabelle auf ein Blatt legen.
 
 ## 7. Pläne 1:200

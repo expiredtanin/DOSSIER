@@ -38,9 +38,13 @@ in `doc/KURZANLEITUNG.md`):
    der Statusleiste. Standort-Import von swisstopo (Gebäude, Gelände, Luftbild) und OSM, Kontextgebäude werden aufs Gelände gesetzt.
    Gelände aus Höhenlinien.
 2. **Baurecht.** Parzelle aus der Auswahl, Grenzabstand je Kante, Baulinie, Profilwinkel, Gesamthöhe. Die Prüfung steht im Panel
-   (z. B. «Höhe 5.72 m ≤ 12.00 m»); die zulässige Hülle lässt sich im 3D zeigen.
-3. **Volumenstudie.** Wände, Decken und Dach zeichnen, oder ein Volumen als Körper anlegen und mit dem Befehl `koerperinbauteile`
+   (z. B. «Höhe 5.72 m ≤ 12.00 m»); die zulässige Hülle lässt sich im 3D zeigen. **Baurecht-Nachweis:** zulässige GFZ, AZ, BMZ, ÜZ, GZ und
+   Fassadenhöhe im Panel eintragen; die Flächenbilanz zeigt die Tabelle zulässig/Projekt/Reserve (CSV, PDF, Blatt-Tabelle, CLI `kennzahlen --nachweis`).
+3. **Volumenstudie.** Wände, Decken und Dach zeichnen; Wände mit Cmd/Ctrl+J verbinden (Ecken, T-Stösse, auch Bogenwände); oder ein Volumen als Körper anlegen und mit dem Befehl `koerperinbauteile`
    in Wände, Decken und Dach je Geschoss umwandeln (ein Undo-Schritt).
+   **Objektbibliothek 2D:** 48 parametrische Objekte (Sanitär, Küche, Tische, Sitzen, Schlafen, Schränke, Auto/Parkfeld, Velo,
+   Wendekreis) aus dem Panel «Objekte» oder per Befehl `libobj`; R dreht, M spiegelt; Parameter, «Unordnung» und «Neu würfeln»
+   in der Objekt-Info; Detailstufe grob/mittel/fein; eigene Klassen 22–24; im DXF als Block.
 4. **Raumprogramm.** CSV/Tabelle importieren, Räume zeichnen, Soll/Ist-Abgleich in der Flächenbilanz; «Räume generieren» aus dem Programm.
 5. **Pläne.** Grundriss je Geschoss, Schnitte und Ansichten aus Schnitt- und Ansichtslinien, SIA-400-Schraffuren und -Linientypen,
    Massstab und Detailgrad, Bemassung, Koten, Raumstempel mit wählbarer Schrift.
@@ -61,6 +65,8 @@ in `doc/KURZANLEITUNG.md`):
     Berichte, IFC, DXF/DWG, STEP, SVG, OBJ/STL/glTF und das Blender-Paket. **Frei getippte Texte prüft Dossier nicht** (siehe unten).
 12. **Austausch.** DXF/DWG (Geschoss, Schnitt, Ansicht; LV95), IFC4/IFC2x3 mit Wänden, Decken, Dächern, Räumen, Öffnungen, Treppen und
     Psets (inkl. `CH_Qto_SIA416`), STEP, OBJ/STL/glTF, SVG, PDF. Was in welche Richtung verloren geht, steht in `doc/DATEIFORMATE.md`.
+
+**Bedienung.** Tab öffnet immer die Befehlszeile; Ctrl+Tab und Ctrl+Umschalt+Tab wechseln die Ansichts-Reiter.
 
 **Datensicherheit.** Speichern schreibt atomar (unter Tauri). Solange es ungespeicherte Änderungen gibt, legt Dossier alle 30 Sekunden
 eine Kopie ab und bietet sie nach einem Absturz beim nächsten Start an (Wiederherstellen · Verwerfen · Später). Eine Sperrdatei
@@ -119,7 +125,13 @@ Ehrlich vorweg: **Der Durchlauf des ganzen Referenz-Ablaufs auf dem Mac ist noch
 - Kostenschätzung: Kennwerte sind Beispielwerte; keine Varianten nebeneinander, keine Kennwerte aus Büro- oder CRB-Quelle ([209]).
 - Volumen → Bauteile: nur gerade Prismen und Quader/Zylinder; verjüngte Körper, Kugel/Kegel/Torus u. a. werden mit Meldung abgelehnt; keine
   Bodenplatte, keine Innenwände ([222]).
-- Baurecht-Nachweis (AZ/ÜZ gegen Modell als Tabelle) ist für Phase 3 geplant, nicht fertig.
+- **Baurecht-Nachweis** ([255]): Fassadenhöhe nur über ±0.00 (Näherung); Grünfläche und aGSF nur per Eingabe; die Blatt-Tabelle übernimmt nur
+  Parzellenfläche und -grenze, nicht aGSF/Grünfläche aus den Panel-Eingaben; Grenzabstand als Verstossfläche, nicht als kleinster Abstand;
+  auf dem Mac nicht geprüft.
+- **Objektbibliothek** ([253]): nur 2D, nur abstrakte Symbole im 55er-Raster; kein Ziehen aus der Palette (nur Klick); im DXF ohne Attribute
+  (Id und Parameter stehen nur im Blocknamen); Symbole nur im Chromium/CLI-SVG angesehen, nicht in der Tauri-App. Eigene Objekte [254] gibt es erst nach 1.0.
+- **Tastatur** ([252], [190]): Ctrl+Tab/Ctrl+Umschalt+Tab auf dem Mac nicht geprüft (das System oder die Webview könnte die Tasten abfangen);
+  Cmd+J bei Bogenwänden: die Schraffurflächen von Bogen und gerader Wand bleiben getrennt.
 
 **Austausch**
 - Alle Rundreisen (DXF, IFC) wurden nur mit Tests geprüft, **nicht mit AutoCAD, Archicad, Revit oder Acrobat** ([C9], [200], [201]). Dächer
