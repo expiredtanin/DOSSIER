@@ -256,7 +256,7 @@ fn ansicht_schatten_schraffur_fensterteilung() {
 fn nur_kern_mit_echter_kerndicke() {
     let p = sample();
     let wall_area = |p: &Project| -> f64 {
-        plan(p, "eg", 2.0, 50.0).walls.iter().map(|q| match q { Primitive::Polygon { wall_id: Some(_), fill, opening_id: None, pts, .. } if fill != "none" => area(pts), _ => 0.0 }).sum()
+        plan(p, "eg", 2.0, 50.0).walls.iter().map(|q| match q { Primitive::Polygon { wall_id: Some(_), fill, stroke, opening_id: None, pts, .. } if fill != "none" || stroke == "none" => area(pts), _ => 0.0 }).sum()
     };
     let a0 = wall_area(&p);
     let mut k = with_mv(p.clone(), serde_json::json!({"walls": {"layers": "core"}}));

@@ -63,11 +63,22 @@ pub(crate) fn prims(p: &Project) -> Vec<Primitive> {
     d.walls.into_iter().chain(d.columns).collect()
 }
 
-/// Gefüllte Flächen (Schichtbänder, Stützen).
+/// [198] Vereinigte Schichtfläche gleichen Stoffs mehrerer Wände (ohne Besitzer-Id); die Bänder der Wände
+/// stehen als unsichtbare Pick-Flächen (Wand-Id, Füllung „none", ohne Strich) daneben.
+pub(crate) fn is_union(q: &Primitive) -> bool {
+    matches!(q, Primitive::Polygon { fill, stroke, wall_id: None, column_id: None, opening_id: None, .. } if fill != "none" && stroke == "none")
+}
+
+/// Unsichtbare Pick-Fläche eines vereinigten Wandbandes.
+pub(crate) fn is_pick_band(q: &Primitive) -> bool {
+    matches!(q, Primitive::Polygon { fill, stroke, wall_id: Some(_), opening_id: None, .. } if fill == "none" && stroke == "none")
+}
+
+/// Gefüllte Flächen (Schichtbänder je Wand, auch die in einer [198]-Vereinigung aufgegangenen; Stützen).
 pub(crate) fn filled(ps: &[Primitive]) -> Vec<Vec<Vec2>> {
     ps.iter()
         .filter_map(|q| match q {
-            Primitive::Polygon { pts, fill, opening_id: None, .. } if fill != "none" => Some(pts.clone()),
+            Primitive::Polygon { pts, fill, opening_id: None, .. } if (fill != "none" && !is_union(q)) || is_pick_band(q) => Some(pts.clone()),
             _ => None,
         })
         .collect()

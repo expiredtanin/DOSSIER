@@ -83,10 +83,11 @@ describe("generatePlan — Wandecken-Gehrung", () => {
 
   it("legt die Umriss-Cut-Ecken exakt auf die Fläche×Fläche-Apexe (sauberer Miter, kein Overshoot)", () => {
     const plan = generatePlan(cornerProject(), "eg", visible, undefined, "mittel");
-    // Der Wand-Umriss ist das letzte Wandpolygon je Wand (fill:"none").
+    // Der Wand-Umriss ist das letzte Wandpolygon je Wand (fill:"none", gestrichen) — ohne die unsichtbaren
+    // Pick-Flächen der in einer [198]-Vereinigung aufgegangenen Bänder (fill und stroke "none").
     const outlineW1 = plan.primitives.filter(
       (p): p is Extract<typeof p, { kind: "polygon" }> =>
-        p.kind === "polygon" && p.wallId === "W1" && p.fill === "none",
+        p.kind === "polygon" && p.wallId === "W1" && p.fill === "none" && p.stroke !== "none",
     );
     expect(outlineW1.length).toBe(1);
     const o = outlineW1[0];
