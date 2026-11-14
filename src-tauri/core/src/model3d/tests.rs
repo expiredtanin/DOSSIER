@@ -928,3 +928,93 @@ fn bogenwand_ein_koerper_ohne_sehnen_fugen() {
         }
     }
 }
+
+/// Liegt `pt` im geschlossenen Netz? Strahl senkrecht nach oben, Treffer zählen (ungerade = innen).
+fn inside_mesh(positions: &[f64], indices: &[u32], pt: [f64; 3]) -> bool {
+    let v = |i: u32| [positions[i as usize * 3], positions[i as usize * 3 + 1], positions[i as usize * 3 + 2]];
+    let mut hits = 0;
+    for t in indices.chunks_exact(3) {
+        let (a, b, c) = (v(t[0]), v(t[1]), v(t[2]));
+        // Dreieck in der Grundrissprojektion, Punkt darin (baryzentrisch), Treffer oberhalb von pt.
+        let d = (b[1] - c[1]) * (a[0] - c[0]) + (c[0] - b[0]) * (a[1] - c[1]);
+        if d.abs() < 1e-15 {
+            continue;
+        }
+        let l1 = ((b[1] - c[1]) * (pt[0] - c[0]) + (c[0] - b[0]) * (pt[1] - c[1])) / d;
+        let l2 = ((c[1] - a[1]) * (pt[0] - c[0]) + (a[0] - c[0]) * (pt[1] - c[1])) / d;
+        let l3 = 1.0 - l1 - l2;
+        if l1 < 0.0 || l2 < 0.0 || l3 < 0.0 {
+            continue;
+        }
+        if l1 * a[2] + l2 * b[2] + l3 * c[2] > pt[2] {
+            hits += 1;
+        }
+    }
+    hits % 2 == 1
+}
+
+/// [216] Bogenwand W1 (Halbkreis) mit einer Formöffnung `shape` (u 2 … 3.2 m Bogenlänge, Brüstung 0.9, 1.2 × 1.2 m);
+/// `reveal` = mit Schichteinzug [106] (Öffnung gerade auf der Sehne über `reveal_zone`).
+fn arc_wall_with_shape(shape: &str, reveal: bool) -> Project {
+    let mut p = sample();
+    p.walls.retain(|w| w.id == "W1");
+    p.walls[0].bulge = Some(-1.0);
+    let mut o = serde_json::json!({
+        "id": "R1", "type": "opening", "hostWallId": "W1", "categoryCode": "21", "kind": "window", "typeId": "",
+        "position": 2.0, "width": 1.2, "height": 1.2, "sillHeight": 0.9, "shape": shape
+    });
+    if reveal {
+        o["layerReveals"] = serde_json::json!([{ "layer": -1, "mode": "zurueck", "amount": 0.05 }, { "layer": 0, "mode": "leibung" }]);
+    }
+    p.openings = Some(vec![serde_json::from_value(o).unwrap()]);
+    p
+}
+
+/// [216] Formöffnung in der Bogenwand (Erker): der Wandkörper schneidet die echte Form (Rund-/Spitzbogen) statt eines
+/// Rechteck-Lochs mit Füllkörpern — ohne Schichteinzug gebogen (Leibungen radial), mit Schichteinzug gerade auf der Sehne;
+/// die Öffnungsteile haben keine Füllkörper und keine Quader-Leibungen mehr.
+#[test]
+fn formoeffnung_in_bogenwand_mit_echter_form() {
+    for (shape, reveal) in [("rund", false), ("spitzbogen", false), ("rundbogen", true), ("rund", true)] {
+        let p = arc_wall_with_shape(shape, reveal);
+        let a = crate::wall_arc::WallArc::of_wall(&p.walls[0]).unwrap();
+        let o = &p.openings.as_ref().unwrap()[0];
+        assert!(!reveal || crate::opening_detail::opening_reveal(&p, &p.walls[0], o).is_some(), "{shape}: Schichteinzug");
+        let walls = emit_walls(&p, true).unwrap();
+        assert!(walls.iter().all(|w| w.no_mesh), "{shape}/{reveal}: alle Stücke ohne eigene Extrusion");
+        let n_bands = walls.iter().map(|w| w.band).max().unwrap() + 1;
+        let bodies: Vec<&WallBody> = walls.iter().filter_map(|w| w.body.as_ref()).collect();
+        assert_eq!(bodies.len(), n_bands, "{shape}/{reveal}: ein Körper je Band");
+        for b in &bodies {
+            assert!(crate::solid_bool::Mesh { positions: b.positions.clone(), indices: b.indices.clone() }.is_closed(), "{shape}/{reveal}: geschlossen");
+        }
+        // Lage (Bogenlänge s, quer n, Höhe z) → Welt: gebogen bzw. auf der Sehne über die Einzug-Zone.
+        let zb = p.wall_vertical_extent(&p.walls[0]).0 + 0.9;
+        let world = |s: f64, n: f64, z: f64| -> [f64; 3] {
+            if reveal {
+                let r = crate::opening_detail::opening_reveal(&p, &p.walls[0], o).unwrap();
+                let ms = r.sides[..2].iter().flatten().map(|x| x.shift).fold(0.0f64, f64::max);
+                let (sa, sb) = crate::wall_arc::reveal_zone(r.from, r.to, ms, a.length());
+                let (pa, u, chord) = crate::wall_arc::chord_of(&a, sa, sb);
+                let t = (s - sa) / (sb - sa) * chord;
+                [pa.x + u.x * t - u.y * n, pa.y + u.y * t + u.x * n, z]
+            } else {
+                let w = a.point(s, n);
+                [w.x, w.y, z]
+            }
+        };
+        let solid = |pt: [f64; 3]| bodies.iter().any(|b| inside_mesh(&b.positions, &b.indices, pt));
+        // Mitte der Öffnung offen, Ecken des umschreibenden Rechtecks oben (ausserhalb der Form) Wand — quer an mehreren
+        // Stellen in der Wand (nicht im Rücksprung des Innenputzes).
+        for n in [-0.09, 0.0123, 0.11] {
+            assert!(!solid(world(2.6, n, zb + 0.6)), "{shape}/{reveal}: Öffnung zu bei n {n}");
+            assert!(!solid(world(2.6, n, zb + 1.1)), "{shape}/{reveal}: Scheitel zu bei n {n}");
+            assert!(solid(world(2.03, n, zb + 1.17)), "{shape}/{reveal}: Rechteck-Ecke oben links offen bei n {n}");
+            assert!(solid(world(3.17, n, zb + 1.17)), "{shape}/{reveal}: Rechteck-Ecke oben rechts offen bei n {n}");
+            assert!(solid(world(1.7, n, zb + 0.6)), "{shape}/{reveal}: Wand neben der Öffnung fehlt bei n {n}");
+        }
+        // Öffnungsteile: Rahmen/Glas (und je Seite ein Leibungskörper), keine Füllkörper-Quader.
+        let meshes = emit_opening_meshes(&p, 1.0);
+        assert!(!meshes.is_empty() && meshes.len() <= 10, "{shape}/{reveal}: {} Öffnungsteile (Quader?)", meshes.len());
+    }
+}

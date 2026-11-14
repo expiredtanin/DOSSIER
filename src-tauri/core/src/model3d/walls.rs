@@ -702,21 +702,23 @@ pub fn emit_walls_with(p: &Project, layered: bool, pockets: bool) -> Result<Vec<
 /// behält das Ergebnis je Wand.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn wall_pieces(p: &Project, maps: &[String], wall: &Wall, ctx: &FloorContext, openings: &[&Opening], cuts: WallCuts, layered: bool, pockets: bool, out: &mut Vec<RWall>) {
-    wall_pieces_with(p, maps, wall, ctx, openings, cuts, layered, pockets, false, out);
+    wall_pieces_with(p, maps, wall, ctx, openings, cuts, layered, pockets, false, &[], out);
 }
 
 /// Wie [`wall_pieces`]; `plain` = zweite Rechnung für den Wandkörper ([`super::wall_body`]): unter Dachflächen
-/// behalten die Stücke ihre Löcher (`WallIn::keep_holes`), und es entsteht kein weiterer Körper.
+/// behalten die Stücke ihre Löcher (`WallIn::keep_holes`), und es entsteht kein weiterer Körper. `zone_only` (nur Bogenwand,
+/// zweite Rechnung): Formöffnungen, deren Schichteinzug [106] eine gerade Sehne über `wall_arc::reveal_zone` verlangt — die
+/// Sehne entsteht wie bei der Anzeige, aber ohne Loch (der Körper schneidet den Umriss selbst, [`super::wall_body`]).
 #[allow(clippy::too_many_arguments)]
-fn wall_pieces_with(p: &Project, maps: &[String], wall: &Wall, ctx: &FloorContext, openings: &[&Opening], cuts: WallCuts, layered: bool, pockets: bool, plain: bool, out: &mut Vec<RWall>) {
+fn wall_pieces_with(p: &Project, maps: &[String], wall: &Wall, ctx: &FloorContext, openings: &[&Opening], cuts: WallCuts, layered: bool, pockets: bool, plain: bool, zone_only: &[&Opening], out: &mut Vec<RWall>) {
     // [141] Ganz in einer kollinearen Wand gleichen Typs: deren Körper zeigt sie mit (nicht doppelt).
     if cuts.covered {
         return;
     }
     let carves = cuts.column_carves.clone();
     let carve_from = out.len();
-    // [216] Formöffnungen der geraden Wand: Körper je Band ([`super::wall_body`]); die Schnitte für die zweite Rechnung.
-    let shaped: Vec<&Opening> = if layered && !plain { super::wall_body::body_openings(wall, openings) } else { Vec::new() };
+    // [216] Formöffnungen (gerade und Bogenwand): Körper je Band ([`super::wall_body`]); die Schnitte für die zweite Rechnung.
+    let shaped: Vec<&Opening> = if layered && !plain { super::wall_body::body_openings(openings) } else { Vec::new() };
     // [231] Auch Rechteck-Öffnungen unter einer Dachfläche (Giebel): die Stücke würden dort in Pfeiler/Brüstung/Sturz
     // mit je eigener Oberkante zerfallen (Fugen von der Öffnung bis zum Dach) — Körper je Band wie bei Formöffnungen.
     // [216] Bogenwand: immer ein Körper je Band (die Sehnen-Stücke stossen sonst an radialen Stirnflächen zusammen, im 3D
@@ -754,8 +756,31 @@ fn wall_pieces_with(p: &Project, maps: &[String], wall: &Wall, ctx: &FloorContex
             Some(a) => [0.0, a.length()].into_iter().chain(win.openings.iter().flat_map(|o| [o.from, o.to])).collect(),
             None => Vec::new(),
         };
+        // [216] Formöffnungen mit Schichteinzug in der Bogenwand (zweite Rechnung): nur ihre Sehne, ohne Loch.
+        let mut win = win;
+        let mut zones: Vec<(f64, f64)> = Vec::new();
+        if let (Some(a), true) = (arc, layered && stacked && !zone_only.is_empty()) {
+            let reveals = wall_reveals(p, wall, zone_only, bands.len());
+            for oi in wall_openings(p, wall, zone_only, true) {
+                let Some(r) = reveals.iter().find(|r| r.from == oi.from && r.to == oi.to && r.z_bottom == oi.z_bottom && r.z_top == oi.z_top) else { continue };
+                let ms = r.shifts.iter().flat_map(|s| [s[0], s[1]]).fold(0.0f64, f64::max);
+                zones.push(crate::wall_arc::reveal_zone(oi.from, oi.to, ms, a.length()));
+                win.openings.push(oi);
+                win.reveals.push(r.clone());
+            }
+        }
         let wins = match arc {
-            Some(a) => crate::wall_arc::chord_walls(&win, &a),
+            Some(a) => {
+                let mut v = crate::wall_arc::chord_walls(&win, &a);
+                for w in v.iter_mut() {
+                    let (sa, sb) = (a.local(w.start).0, a.local(w.end).0);
+                    if zones.iter().any(|(za, zb)| (za - sa).abs() < 1e-6 && (zb - sb).abs() < 1e-6) {
+                        w.openings.clear();
+                        w.reveals.clear();
+                    }
+                }
+                v
+            }
             None => vec![win],
         };
         let first_piece = out.len();
@@ -820,7 +845,8 @@ fn wall_pieces_with(p: &Project, maps: &[String], wall: &Wall, ctx: &FloorContex
     if let Some(body_cuts) = body_cuts.filter(|_| is_arc || !shaped.is_empty() || sloped()) {
         let plain_ops: Vec<&Opening> = openings.iter().copied().filter(|o| !shaped.iter().any(|s| std::ptr::eq(*s, *o))).collect();
         let mut pieces = Vec::new();
-        wall_pieces_with(p, maps, wall, ctx, &plain_ops, body_cuts, true, pockets, true, &mut pieces);
+        let zone_only: &[&Opening] = if is_arc { &shaped } else { &[] };
+        wall_pieces_with(p, maps, wall, ctx, &plain_ops, body_cuts, true, pockets, true, zone_only, &mut pieces);
         let (bands, stacked) = resolve_wall_bands(p, maps, wall, true);
         super::wall_body::attach_bodies(p, wall, &shaped, &pieces, bands.len(), stacked, &mut out[carve_from..]);
     }

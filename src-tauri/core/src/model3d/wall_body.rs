@@ -18,9 +18,11 @@
 //! unter dem Dach behalten ihre Rechteck-Löcher), [`band_solid`] schneidet die Löcher aus und vereinigt.
 //!
 //! [216] Bogenwände ([T2]) bekommen ebenso einen Körper je Band: ihre Sehnen-Stücke stossen an radialen Gehrungen
-//! zusammen, deren Stirnflächen im 3D als senkrechte Linien je Sehne sichtbar waren. Formöffnungen in Bogenwänden behalten
-//! Rechteck-Loch und Füllkörper (kein Umriss-Prisma entlang des Bogens). Schlägt ein Boolean fehl, bleibt die Wand wie
-//! vorher (Stücke, Rechteck-Loch) — nie Panik.
+//! zusammen, deren Stirnflächen im 3D als senkrechte Linien je Sehne sichtbar waren. Formöffnungen in Bogenwänden schneiden
+//! wie in geraden Wänden ihren Umriss: ohne Schichteinzug ein gebogenes Prisma (Umriss in Bogenlänge × Höhe, quer radial,
+//! fein unterteilt und auf den Bogen gelegt — Leibungen radial wie bei Rechteck-Öffnungen), mit Schichteinzug [106] ein
+//! gerades Prisma auf der Sehne über `wall_arc::reveal_zone` (dort liegen auch Rahmen, Glas und Leibungsstücke,
+//! `openings.rs`). Schlägt ein Boolean fehl, bleibt die Wand wie vorher (Stücke, Rechteck-Loch) — nie Panik.
 
 use super::*;
 use crate::opening_shape as os;
@@ -29,11 +31,8 @@ use crate::solid_bool::{Mesh, Solid};
 /// Überstand der Schneidkörper über die Wand hinaus (m), damit keine Flächen zusammenfallen.
 const OVER: f64 = 0.05;
 
-/// Formöffnungen der Wand, die einen Körper bekommen (gerade Wand, gültiger Umriss).
-pub(crate) fn body_openings<'a>(wall: &Wall, openings: &[&'a Opening]) -> Vec<&'a Opening> {
-    if crate::wall_arc::WallArc::of_wall(wall).is_some() {
-        return Vec::new();
-    }
+/// Formöffnungen der Wand, die einen Körper bekommen (gültiger Umriss; gerade Wand oder Bogenwand).
+pub(crate) fn body_openings<'a>(openings: &[&'a Opening]) -> Vec<&'a Opening> {
     openings.iter().copied().filter(|o| os::is_shaped(o) && os::opening_outline(o, o.width, o.height).is_some()).collect()
 }
 
@@ -56,6 +55,40 @@ fn outline_prism(f: &Frame, ring: &[[f64; 2]], s0: f64, z0: f64, n0: f64, n1: f6
     // Prisma-Koordinaten: (x, y) = (u, v), z = Querlage.
     let positions = m.positions.chunks_exact(3).flat_map(|c| f.at(s0 + c[0], c[2], z0 + c[1])).collect();
     Mesh { positions, indices: m.indices }
+}
+
+/// Bogenwand mit Schichteinzug [106]: Prisma über dem Umriss gerade auf der Sehne `zone` (wie `openings.rs` die Teile
+/// dorthin legt: Bogenlänge linear auf die Sehne), quer `±lat` zur Sehne.
+fn chord_prism(a: &crate::wall_arc::WallArc, (sa, sb): (f64, f64), ring: &[[f64; 2]], s0: f64, z0: f64, lat: f64) -> Mesh {
+    let (pa, u, chord) = crate::wall_arc::chord_of(a, sa, sb);
+    if !((sb - sa).abs() > 1e-9) {
+        return Mesh::default();
+    }
+    let k = chord / (sb - sa);
+    let f = Frame { origin: [pa.x, pa.y], u: [u.x, u.y], n: [-u.y, u.x] };
+    let ring: Vec<[f64; 2]> = ring.iter().map(|q| [(s0 + q[0] - sa) * k, q[1]]).collect();
+    outline_prism(&f, &ring, 0.0, z0, -lat, lat)
+}
+
+/// Bogenwand ohne Schichteinzug: Prisma über dem Umriss (`u` = Bogenlänge ab `s0`, `v` ab `z0`) quer `±lat` radial,
+/// abgewickelt gebaut, gleichmässig unterteilt (Kanten höchstens ein Winkelschritt des Bogens) und Ecke für Ecke auf den
+/// Bogen gelegt: Leibungen radial, Brüstung/Sturz/Bogen folgen der Wand.
+fn bent_prism(a: &crate::wall_arc::WallArc, ring: &[[f64; 2]], s0: f64, z0: f64, lat: f64) -> Result<Solid, String> {
+    let flat = Frame { origin: [0.0, 0.0], u: [1.0, 0.0], n: [0.0, 1.0] };
+    let m = outline_prism(&flat, ring, s0, z0, -lat, lat);
+    let Some((lo, hi)) = m.bounds() else { return Err("leerer Umriss".into()) };
+    let step = (a.r * crate::wall_arc::MAX_STEP / 2.0).clamp(0.05, 0.25);
+    let n = (((hi[0] - lo[0]) / step).ceil() as i32).clamp(1, 24);
+    let fine = Solid::new(&m)?.refined(n).to_mesh_raw();
+    let positions = fine
+        .positions
+        .chunks_exact(3)
+        .flat_map(|c| {
+            let w = a.point(c[0], c[1]);
+            [w.x, w.y, c[2]]
+        })
+        .collect();
+    Solid::new(&Mesh { positions, indices: fine.indices })
 }
 
 /// Quader entlang der Achse von `s0` bis `s1`, Höhe `z0`…`z1`, quer `n0`…`n1`.
@@ -220,14 +253,21 @@ pub(crate) fn attach_bodies(p: &Project, wall: &Wall, shaped: &[&Opening], plain
         return;
     }
     let f = Frame { origin: [wall.start.x, wall.start.y], u: [dx / len, dy / len], n: [-dy / len, dx / len] };
-    let arc = crate::wall_arc::WallArc::of_wall(wall).is_some();
-    let lat = wr.total + 0.4;
+    let arc_geom = crate::wall_arc::WallArc::of_wall(wall);
+    let arc = arc_geom.is_some();
+    // Bogenwand: quer nicht über den Mittelpunkt hinaus (Innenradius des Schneidkörpers ≥ halber Innenradius der Wand).
+    let lat = match arc_geom {
+        Some(a) => (wr.total + 0.4).min(0.5 * (a.r + wr.total)),
+        None => wr.total + 0.4,
+    };
     // Je Band: Umrisse der Formöffnungen mit Schichteinzug.
     struct Cut {
         from: f64,
         bottom: f64,
         poly: Vec<[f64; 2]>,
         shift: Vec<[f64; 4]>,
+        /// Bogenwand mit Schichteinzug: Sehne `[sa, sb]` (Bogenlänge), auf der die Öffnung gerade liegt.
+        zone: Option<(f64, f64)>,
     }
     let mut cuts: Vec<Cut> = Vec::new();
     for o in shaped {
@@ -237,6 +277,7 @@ pub(crate) fn attach_bodies(p: &Project, wall: &Wall, shaped: &[&Opening], plain
         let (w, h) = (to - from, top - bottom);
         let Some(poly) = os::opening_outline(o, w, h) else { continue };
         let mut shift = vec![[0.0; 4]; bands];
+        let mut zone = None;
         if stacked {
             if let Some(r) = crate::opening_detail::opening_reveal(p, wall, o).filter(|r| r.thick.len() == bands) {
                 for (k, side) in r.sides.iter().enumerate() {
@@ -246,9 +287,14 @@ pub(crate) fn attach_bodies(p: &Project, wall: &Wall, shaped: &[&Opening], plain
                         }
                     }
                 }
+                // Wie `walls.rs`/`wall_arc::chord_walls`: grösster seitlicher Rücksprung.
+                if let Some(a) = arc_geom {
+                    let ms = shift.iter().flat_map(|s| [s[0], s[1]]).fold(0.0f64, f64::max);
+                    zone = Some(crate::wall_arc::reveal_zone(from, to, ms, a.length()));
+                }
             }
         }
-        cuts.push(Cut { from, bottom, poly, shift });
+        cuts.push(Cut { from, bottom, poly, shift, zone });
     }
     if cuts.len() < shaped.len() {
         return;
@@ -265,7 +311,12 @@ pub(crate) fn attach_bodies(p: &Project, wall: &Wall, shaped: &[&Opening], plain
         for c in &cuts {
             let s = c.shift[band];
             let ring = if s.iter().any(|v| *v > 1e-9) { os::outset_sides(&c.poly, s) } else { c.poly.clone() };
-            match Solid::new(&outline_prism(&f, &ring, c.from, c.bottom, -lat, lat)).and_then(|cut| solid.difference(&cut)) {
+            let cutter = match (arc_geom, c.zone) {
+                (None, _) => Solid::new(&outline_prism(&f, &ring, c.from, c.bottom, -lat, lat)),
+                (Some(a), Some(z)) => Solid::new(&chord_prism(&a, z, &ring, c.from, c.bottom, lat)),
+                (Some(a), None) => bent_prism(&a, &ring, c.from, c.bottom, lat),
+            };
+            match cutter.and_then(|cut| solid.difference(&cut)) {
                 Ok(r) => solid = r,
                 Err(_) => {
                     ok = false;

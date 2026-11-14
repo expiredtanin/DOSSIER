@@ -268,12 +268,25 @@ impl PatternCache {
             fresh_walls.insert(stamp, e);
         }
         self.walls = fresh_walls;
+        // [216] Das Muster eines verschnittenen Dachs hängt auch von den Nachbardächern ab (Kehlen): Schlüssel mit deren
+        // Ständen.
+        let roof_nb = (!roofs.is_empty()).then(|| crate::roof_assembly::neighbors_rc(p));
+        let roof_key = |i: usize, stamp: u64| -> u64 {
+            let Some(nb) = roof_nb.as_ref().and_then(|v| v.get(i)).filter(|v| !v.is_empty()) else { return stamp };
+            let mut h = crate::solid_bool::ContentHash::default();
+            h.u64(stamp);
+            for &j in nb {
+                h.u64(j as u64).u64(roof_stamps.get(j).copied().unwrap_or(0));
+            }
+            h.finish()
+        };
         // Decken, dann Dächer (Reihenfolge wie im ungepufferten Pfad).
         for kind in 0..2 {
             let (stamps, old_map) = if kind == 0 { (ceiling_stamps, &mut self.ceilings) } else { (roof_stamps, &mut self.roofs) };
             let mut old = std::mem::take(old_map);
             let mut fresh: HashMap<u64, FacePat> = HashMap::with_capacity(stamps.len());
             for (i, &stamp) in stamps.iter().enumerate() {
+                let stamp = if kind == 0 { stamp } else { roof_key(i, stamp) };
                 let id = if kind == 0 { ceilings[i].id.as_str() } else { roofs[i].id.as_str() };
                 let hidden = filter.hides(id);
                 let dz = dz_of(id);
@@ -316,15 +329,22 @@ fn roof_lines(p: &Project, roof: &crate::model::Roof, s: &mut Sink) {
     let rgb = ink_rgb(pat, comp);
     let off = roof.surface_pattern_offset.as_ref().map_or([0.0, 0.0], |o| [o.x, o.y]);
     let g = crate::roof::roof_geometry(&roof.params(), p.roof_base_elevation(roof));
+    let faces = assembled_top_faces(p, roof);
     for plane in &g.planes {
         let n = newell(plane);
         let n = if n[2] < 0.0 { [-n[0], -n[1], -n[2]] } else { n };
         let lift = |q: [f64; 3]| [q[0] + n[0] * LIFT, q[1] + n[1] * LIFT, q[2] + n[2] * LIFT];
+        let clip = faces.as_ref().map(|f| FaceClip::new(plane, n, f));
         let mut idx: HashMap<[i64; 6], usize> = HashMap::new();
         let mut segs: Vec<([f64; 3], [f64; 3], u8)> = Vec::new();
         let q = |v: f64| (v * 1e5).round() as i64;
         for (i, &sc) in LOD_SCALES.iter().enumerate() {
-            for (a, b) in sp::segments_3d(plane, &spec, off, sc) {
+            let raw = sp::segments_3d(plane, &spec, off, sc);
+            let clipped = match &clip {
+                Some(c) => raw.into_iter().flat_map(|(a, b)| c.clip(a, b)).collect(),
+                None => raw,
+            };
+            for (a, b) in clipped {
                 let key = [q(a[0]), q(a[1]), q(a[2]), q(b[0]), q(b[1]), q(b[2])];
                 match idx.get(&key) {
                     Some(&k) => segs[k].2 |= 1 << i,
@@ -338,6 +358,76 @@ fn roof_lines(p: &Project, roof: &crate::model::Roof, s: &mut Sink) {
         for (a, b, m) in segs {
             s.push(lift(a), lift(b), rgb, m);
         }
+    }
+}
+
+/// [216] Verschnittenes Dach (Kehle zu einem anderen Dach, Gauben; `roof_assembly`): die nach oben zeigenden ebenen
+/// Flächen der äussersten Dachschicht, wie sie nach der Verschneidung übrig sind. `None` = unverschnitten (die Dachflächen
+/// aus `roof_geometry` gelten ganz).
+fn assembled_top_faces(p: &Project, roof: &crate::model::Roof) -> Option<Vec<Vec<[f64; 3]>>> {
+    let ri = p.roofs.as_deref()?.iter().position(|r| std::ptr::eq(r, roof) || r.id == roof.id)?;
+    let solids = crate::roof_assembly::roof_solids(p, ri)?;
+    let mut faces = Vec::new();
+    for part in solids.parts.iter().filter(|pt| pt.role == crate::roof_assembly::Role::RoofLayer && pt.layer == 0) {
+        let m = &part.mesh;
+        let up: Vec<usize> = (0..m.indices.len() / 3)
+            .filter(|&t| {
+                let v = |k: usize| {
+                    let j = m.indices[t * 3 + k] as usize * 3;
+                    [m.positions[j], m.positions[j + 1], m.positions[j + 2]]
+                };
+                newell(&[v(0), v(1), v(2)])[2] > 0.05
+            })
+            .collect();
+        faces.extend(crate::roof_assembly::planar_faces(m, &up));
+    }
+    Some(faces)
+}
+
+/// Musterlinien einer Dachfläche (Ebene aus `roof_geometry`, Verankerung des Musters unverändert) auf die nach der
+/// Verschneidung übrigen Flächen in derselben Ebene beschneiden: Linien enden an Kehlen und Gaubenlöchern statt im
+/// anderen Dach.
+struct FaceClip {
+    o: [f64; 3],
+    u: [f64; 3],
+    v: [f64; 3],
+    polys: Vec<Vec<P>>,
+}
+
+impl FaceClip {
+    fn new(plane: &[[f64; 3]], n: [f64; 3], faces: &[Vec<[f64; 3]>]) -> FaceClip {
+        let o = plane[0];
+        let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+        let sub = |a: [f64; 3], b: [f64; 3]| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+        // Achsen in der Ebene: waagrecht und Falllinie.
+        let h = [-n[1], n[0], 0.0];
+        let hl = dot(h, h).sqrt();
+        let u = if hl > 1e-9 { [h[0] / hl, h[1] / hl, 0.0] } else { [1.0, 0.0, 0.0] };
+        let v = [n[1] * u[2] - n[2] * u[1], n[2] * u[0] - n[0] * u[2], n[0] * u[1] - n[1] * u[0]];
+        let polys = faces
+            .iter()
+            .filter(|f| {
+                let fnrm = newell(f);
+                dot(fnrm, n) > 0.999 && f.iter().all(|q| dot(sub(*q, o), n).abs() < 1e-3)
+            })
+            .map(|f| f.iter().map(|q| [dot(sub(*q, o), u), dot(sub(*q, o), v)]).collect())
+            .collect();
+        FaceClip { o, u, v, polys }
+    }
+
+    fn clip(&self, a: [f64; 3], b: [f64; 3]) -> Vec<([f64; 3], [f64; 3])> {
+        let dot = |x: [f64; 3], y: [f64; 3]| x[0] * y[0] + x[1] * y[1] + x[2] * y[2];
+        let loc = |q: [f64; 3]| {
+            let d = [q[0] - self.o[0], q[1] - self.o[1], q[2] - self.o[2]];
+            [dot(d, self.u), dot(d, self.v)]
+        };
+        let back = |q: P| [self.o[0] + self.u[0] * q[0] + self.v[0] * q[1], self.o[1] + self.u[1] * q[0] + self.v[1] * q[1], self.o[2] + self.u[2] * q[0] + self.v[2] * q[1]];
+        let (la, lb) = (loc(a), loc(b));
+        let mut out = Vec::new();
+        for poly in &self.polys {
+            sp::clip_to_poly(la, lb, poly, &mut out);
+        }
+        out.into_iter().map(|(x, y)| (back(x), back(y))).collect()
     }
 }
 
@@ -858,5 +948,61 @@ mod tests {
             check(&mut d, &format!("Schritt {step} (Art {kind})"));
         }
         assert!([0, 1, 4, 5, 6, 7, 8, 10].iter().all(|&k| kinds[k] > 0), "{kinds:?}");
+    }
+
+    /// [216] Zwei verschnittene Satteldächer (L, Kehle): die Dachmuster enden an der Kehle — keine Linie liegt unter der
+    /// Dachfläche des anderen Dachs (vorher liefen die Linien jeder Dachfläche durch das andere Dach hindurch).
+    #[test]
+    fn dachmuster_endet_an_der_kehle() {
+        let mut p = sample();
+        let sattel = |id: &str, b: [f64; 2], axis: &str| -> crate::model::Roof {
+            serde_json::from_value(serde_json::json!({
+                "id": id, "type": "roof", "floorId": "og", "categoryCode": "31", "roofTypeId": "roof-warm",
+                "outline": [{"x": 0.0, "y": 0.0}, {"x": b[0], "y": 0.0}, {"x": b[0], "y": b[1]}, {"x": 0.0, "y": b[1]}],
+                "shape": "sattel", "pitchDeg": 40, "overhang": 0.3, "ridgeAxis": axis, "thickness": 0.27
+            }))
+            .unwrap()
+        };
+        p.roofs = Some(vec![sattel("A", [12.0, 8.0], "x"), sattel("B", [8.0, 14.0], "y")]);
+        p.walls.clear();
+        p.ceilings = Some(vec![]);
+        p.openings = Some(vec![]);
+        with_pattern(&mut p, "roof-tiles", 0.25);
+        assert!(crate::roof_assembly::is_assembled(&p, 0), "verschnitten");
+        // Dachflächen (analytisch, unverschnitten) beider Dächer: Höhe der Oberfläche über (x, y), höchste.
+        let planes: Vec<Vec<[f64; 3]>> = p.roofs.as_ref().unwrap().iter().flat_map(|r| crate::roof::roof_geometry(&r.params(), p.roof_base_elevation(r)).planes).collect();
+        let top_at = |x: f64, y: f64| -> f64 {
+            let mut best = f64::NEG_INFINITY;
+            for pl in &planes {
+                let poly: Vec<[f64; 2]> = pl.iter().map(|q| [q[0], q[1]]).collect();
+                if !crate::surface_pattern::point_in([x, y], &poly) {
+                    continue;
+                }
+                let n = newell(pl);
+                if n[2].abs() < 1e-9 {
+                    continue;
+                }
+                let z = pl[0][2] - (n[0] * (x - pl[0][0]) + n[1] * (y - pl[0][1])) / n[2];
+                best = best.max(z);
+            }
+            best
+        };
+        let v = pattern_lines_3d(&p);
+        let n = v.len() / PATTERN_STRIDE;
+        assert!(n > 40, "{n} Linien");
+        // Welt (x, z, y): Punkte auf der Strecke prüfen.
+        let mut hidden = 0;
+        for c in v.chunks_exact(PATTERN_STRIDE) {
+            for t in [0.1, 0.5, 0.9] {
+                let (x, z, y) = (c[0] as f64 + (c[3] - c[0]) as f64 * t, c[1] as f64 + (c[4] - c[1]) as f64 * t, c[2] as f64 + (c[5] - c[2]) as f64 * t);
+                // Bis zur Dicke der Eindeckung (4 cm, lotrecht ~5 cm) darf eine Linie unter dem anderen Dach liegen: dort
+                // endet das frühere Dach erst an der Unterkante der Eindeckung des späteren (`roof_assembly`, Regel Dach ↔
+                // Dach) — verdeckt, nicht sichtbar.
+                if top_at(x, y) > z + 0.06 {
+                    hidden += 1;
+                }
+            }
+        }
+        assert_eq!(hidden, 0, "Musterlinien unter dem anderen Dach");
     }
 }
