@@ -281,6 +281,7 @@ const CALLS: &[Call] = &[
     ("document::doc_last_extra", |r: &mut Rng| { let a0 = r.id(); let _ = web::document::doc_last_extra(a0); }),
     ("document::doc_last_hits", |r: &mut Rng| { let a0 = r.id(); let _ = web::document::doc_last_hits(a0); }),
     ("document::__debug_panic", |r: &mut Rng| { let a0 = r.id(); let _ = web::document::__debug_panic(a0); }),
+    ("fonts::woff2_to_sfnt", |r: &mut Rng| { let a0 = r.bytes(); let _ = web::fonts::woff2_to_sfnt(&a0); }),
     ("competition::anonymity_findings", |r: &mut Rng| { let a0 = r.text(); let a1 = r.text(); let _ = web::competition::anonymity_findings(&a0, &a1); }),
     ("furniture_lib::furniture_lib_catalog_json", |_r: &mut Rng| { let _ = web::furniture_lib::furniture_lib_catalog_json(); }),
     ("furniture_lib::furniture_lib_geometry_json", |r: &mut Rng| { let a0 = r.text(); let a1 = r.text(); let a2 = r.text(); let a3 = r.id(); let _ = web::furniture_lib::furniture_lib_geometry_json(&a0, &a1, &a2, a3); }),
