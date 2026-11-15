@@ -62,7 +62,8 @@ in `doc/KURZANLEITUNG.md`):
     mit Raster-Hilfslinien (nur am Bildschirm), Kennwort-Feld und Bild-Element mit Zuschnitt; der Präsentationsplan füllt ein Plakat auf dem Spaltenraster
     (Situation 1:500, Pläne, Ansichten, Schnitt, Tabellen Kennzahlen und Baurecht-Nachweis, Rahmen fürs 3D-Bild; «Plakat-Inhalt» im Dialog, bei Platzmangel
     ein zweites Plakat statt kleinerem Massstab, ohne Schriftfeld); alle PDF-Schriften sind eingebettet; Publikationssätze als ein PDF
-    (mit PDF-Ebenen), «WBW-Abgabe» für alle Plakate.
+    (mit PDF-Ebenen), «WBW-Abgabe» für alle Plakate. **Freie Texte auf dem Blatt** (15.11., [208]): Knopf «Text» in der Blatt-Leiste, Schriftgrösse nach
+    Blattformat, Blocksatz, Fang an Papierrand, Hilfslinien und Rahmen; im DXF als MTEXT ([200]).
 11. **Anonyme Abgabe.** Mit «Wettbewerb (anonym)» und Kennwort zeigen Plankopf und Dateinamen nur das Kennwort. Geprüft für PDF,
     Berichte, IFC, DXF/DWG, STEP, SVG, OBJ/STL/glTF und das Blender-Paket. **Freitext-Prüfung:** Vor jedem Export (Oberfläche und Kommandozeile) sucht
     Dossier in allen Namen und Texten des Projekts nach Projektname, -nummer, Büro, Bearbeiter:in, Adresse, Dateiname, eigenen Begriffen
@@ -73,6 +74,11 @@ in `doc/KURZANLEITUNG.md`):
     LV95-Lage als Georeferenz (Versatz und ±0.00 m ü. M.), Räume mit Nummer, Name, Fläche und SIA-416-Kategorie, Geschossflächen und
     Gebäudesummen; Mengen stimmen mit der Geometrie überein (mit ifcopenshell gegengeprüft, alle drei Beispielprojekte ohne Befund). Option
     «Kontext mitgeben (Gelände, Nachbargebäude)» im Export-Dialog bzw. `--kontext` (Vorgabe aus). Die Objektbibliothek (Möbel, Sanitär) wird nicht ins IFC geschrieben. Was in welche Richtung verloren geht, steht in `doc/DATEIFORMATE.md`.
+
+**Erker und Wiederanlauf (15.11.).** Fenster in Bogenwänden (Erker) sitzen in Schnitt und Ansicht wie im 3D und im Grundriss auf der Sehne; die Sehnen-Zonen
+gelten über alle Geschosse, der Deckenrand folgt der Sehne ([216]). Raumstempel rücken in Lücken zwischen den Linien, bevor sie schrumpfen; die Baulinie setzt vor
+Masszahlen aus ([256]). Fällt die Grafikkarte aus, baut Dossier die Anzeige mit Pausen neu auf: der Plan bleibt beim SVG, das 3D zeigt nach mehreren
+Fehlschlägen einen Hinweis, die Kamera bleibt erhalten, das Begehen läuft auch ohne GPU ([118], [206]).
 
 **Darstellung im Plan (Stand 14.11.).** Nachbargebäude erscheinen über den Stil ihrer Klasse (Füllung einstellbar im Ebenen-Editor, in den
 Standard-Situationsplänen grau); Treppen haben im Grundriss eine Bruchlinie in Papiergrösse; die Standard-Vorlagen Präsentation, Eingabe,
@@ -152,6 +158,16 @@ Ehrlich vorweg: **Der Durchlauf des ganzen Referenz-Ablaufs auf dem Mac ist noch
   Bezug dazu, Wörter unter 5 Zeichen (Einzelwort), allgemeine Wörter und blosse Zahlen nicht. Vor der Abgabe trotzdem von Hand durchsehen.
   `dossier-cli convert` und BCF-Export prüfen nicht. Programmkonventionelle Namen wie `Dossier_Qto_…` im IFC bleiben. Der Dialog-Weg ist nur
   per Code-Abgleich geprüft, nicht in der Tauri-App.
+- **Freie Texte auf dem Blatt und MTEXT** ([208], [200]): Blocksatz am Bildschirm im Editor per CSS, in Szene/PDF per Metrik ohne Kerning (±1 mm zum Editor
+  möglich); Objektfang an Tabellen nur mit fester Höhe, Legenden fehlen; Breite-Ziehen an den Griffen der Textspalte nicht geprüft; Vorgabe-Klasse ist die aktive
+  Klasse. **Das DXF mit MTEXT wurde in AutoCAD/BricsCAD nicht geöffnet** (nur mit ezdxf geprüft; CAD bricht nach eigenen Metriken um), Texte ohne Transparenz.
+  Nur Linux/Chromium, nicht in der Tauri-App.
+- **Grafikkarten-Verlust** ([118], [206]): Neuaufbau mit Pausen, Plan bleibt beim SVG, 3D-Hinweis, Kamera bleibt erhalten — **nur headless (SwiftShader) mit erzwungenem
+  `GPUDevice.destroy()` geprüft, auf dem Mac (WKWebView/Metal) mit echtem Verlust nicht**; ein unverändertes Preset wird nach dem Neuaufbau neu eingepasst.
+- **Erker im Musterhaus komplex** ([216]): Die Vereinigung der Sehnen-Zonen ergibt dort eine 2-m-Facette (Pfeilhöhe ca. 25 cm) über UG, EG und OG, weil die
+  Fenster überlappen; wer runder will, legt sie übereinander. **Entscheid des Maintainers offen** (Facette so lassen oder Zonen je Geschoss). Nur im Container
+  (CLI-SVG in Chromium, Rust-Tests) angesehen; Mac-Gegenprobe, Metal-3D und Live-Schnitt offen; an der Geschossgrenze bleibt eine Kante, wenn UG und EG
+  verschiedene Wanddicken haben; der Dachrand `dach-erker` folgt weiter dem Bogen.
 - Plakat: Hilfslinien gehören zum Masterlayout, nicht zum Blatt; kein Fang für Legenden; Bilder werden als Data-URL im Projekt gespeichert
   (Dateigrösse und Verlauf wachsen bei grossen Bildern); Bild erscheint nicht in DXF/IFC ([208]).
 - Plakat aus dem Präsentationsplan ([208]): Die Rahmen sind so breit wie der Inhalt samt Masskette und Kontext (bei grossen Häusern viel Weissraum, zwei Blätter);
@@ -174,7 +190,8 @@ Ehrlich vorweg: **Der Durchlauf des ganzen Referenz-Ablaufs auf dem Mac ist noch
   des Stress-Beispiels gross (19.8 MB, ca. 6 s).
 - **Plandarstellung 1:100** ([256]): Fenster über der Schnitthöhe — erledigt durch [260] (symbolisch/geschnitten wählbar, Vorgabe symbolisch;
   ~~Frage M: Darstellung Fenster über Schnitt~~); auf dem Mac nicht geprüft. Offen: Sonnenschatten
-  im 1:100-Grundriss, Stempel «Schlafen» im DG auf 80 %, Höhenlinien-Koten auf Masszahlen; nur im Container (CLI-SVG in Chromium) angesehen, nicht auf dem Mac.
+  im 1:100-Grundriss, Höhenlinien-Koten auf Masszahlen, Koten «±0.00»/«+5.70» auf Achslinien; Stempel «Schlafen» im DG steht jetzt in 90 % (statt 80 %), die
+  Baulinie setzt vor Masszahlen aus (15.11.); Raumstempel bleiben unter 90 %, wenn Linien den Raum zerschneiden (Entscheid Maintainer offen); nur im Container (CLI-SVG in Chromium) angesehen, nicht auf dem Mac.
 - **Datensicherheit** ([116]): Schliessen-Rückfrage, Cmd+Q-Menüeintrag, Autosave mit zwei Ständen, atomare Exporte und «Vorige Fassung wiederherstellen …»
   sind **nicht in der Tauri-App und nicht in Electron geprüft** (nur Tests und Browser, `doc/RELEASE-1.0.md` Abschnitt 14); der Menüeintrag ist nicht
   ausgegraut (ohne Sicherung nur ein Hinweis); bei sehr grossen Projekten serialisiert die Kopie im Hauptfaden.

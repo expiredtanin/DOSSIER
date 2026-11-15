@@ -136,6 +136,10 @@ für das Vorprojekt. Der Detailgrad („grob“, „mittel“, „fein“) passt
 
 ![1. Obergeschoss 1:200](kurzanleitung/og1.png)
 
+Raumstempel suchen sich bei engen Räumen zuerst eine Lücke zwischen den Linien der Zeichnung (Gauben-Umriss, Achsen, Koten)
+und schrumpfen erst dann (90 %, dann 80 %). Die gestrichelte Baulinie und die Parzellengrenze setzen vor Masszahlen aus,
+statt durch sie zu laufen.
+
 Die Situation 1:500 mit Schwarzplan kommt aus der Standard-Ansichtsvorlage „Situation WBW“ (Gebäude schwarz,
 Nachbarn grau, Parzelle, Nordpfeil, Massstabsbalken):
 
@@ -153,6 +157,12 @@ und gehört zur Klasse 02 Gelände (ausgeschaltet entfällt sie). Die automatisc
 (2 mm Schrift), auch im Blatt. Fenster zeigen in der Ansicht 1:200 Rahmen, Flügel und Glas, auch mit der Vorlage „Wettbewerb 1:200“;
 nur im Grundriss und im Schnitt sind sie dort bewusst vereinfacht (Linien). Passt eine Masszahl nicht ins Segment, rückt sie zur
 Seite oder nach aussen aus, statt in der Wand zu stehen. Senkrechte Masszahlen lesen immer von unten nach oben.
+
+**Erker und Bogenwände in Schnitt und Ansicht.** Fenster in Bogenwänden sitzen im Schnitt und in der Ansicht wie im 3D und im
+Grundriss im Wandloch (vorher schräg daneben). Die Wand liegt dort auf Sehnen: Fenster, die sich über die Geschosse
+überlappen, teilen sich eine gemeinsame, gerade Facette. Im Musterhaus komplex gibt das im Erker eine breite Facette über
+drei Geschosse; wer ihn runder will, legt die Fenster übereinander. Der Deckenrand folgt dort der Sehne statt des Bogens.
+Das Ergebnis ist nur im Linux-Container angesehen; ob die breite Facette so bleibt, ist offen.
 
 ![Schnitt A-A 1:200](kurzanleitung/schnitt.png)
 
@@ -180,6 +190,13 @@ oder Pfeile gehen, Q/E runter und hoch, Umschalt schneller, Alt langsamer, mit g
 aktuelle Ansicht legst du als Kamera ab („Kamera aus aktueller Ansicht anlegen“, Gruppe **Kameras** im Panel
 **Ausschnitte**) und öffnest sie später wieder. Ein 3D-Bild in Abgabeauflösung (z. B. A3 bei 300 dpi) erzeugt *Ansicht → 3D-Bild exportieren …* (Befehl
 `bild3d`); es lässt sich speichern oder ins Layout einsetzen.
+
+**Wenn die Grafikkarte ausfällt.** Verliert die Grafikkarte das Gerät (z. B. nach dem Ruhezustand oder beim Wechsel der
+Grafik), baut Dossier die Anzeige nach kurzen Pausen neu auf. Der Plan bleibt dabei bei der einfachen SVG-Darstellung und
+flackert nicht; die 3D-Ansicht zeigt „3D-Engine nicht verfügbar“ mit einem Hinweis, wenn der Neuaufbau mehrmals scheitert
+(dann Projekt speichern und die App neu starten). Nach einem gelungenen Neuaufbau bleiben Kamera, Standpunkt und Ziel erhalten, auch
+im Begehen; nur ein unverändertes Preset wird neu eingepasst. Die Tasten des Begehens (G, W/A/S/D, Umschalt+F) wirken auch ohne
+Grafikkarte. Auf dem Mac ist das nicht geprüft.
 
 **Begehen mit Kollision.** Beim Begehen hält dich das Modell auf: Wände und Fensterglas sperren, du gleitest an ihnen
 entlang. Türöffnungen sind frei. Treppen, Stufen und Kanten steigst du mit (bis 25 cm ohne Hindernis), der Boden folgt
@@ -247,6 +264,14 @@ Mitten ein (8 Pixel; **Alt** hält den Fang aus). Ein **Bild** (PNG/JPEG) setzt 
 3D-Bild-Dialog „Ins Layout einsetzen“. Verschieben, an der Ecke skalieren (Seitenverhältnis bleibt); **Zuschneiden**
 (Knopf) zeigt Griffe am Ausschnitt, die Felder Links/Rechts/Oben/Unten geben den Zuschnitt, „Zuschnitt aufheben“ stellt
 das Original wieder her. Unter 100 dpi warnt das Bild-HUD („niedrige Auflösung“).
+
+**Freie Texte auf dem Blatt.** Im Layout setzt der Knopf „Text“ in der Blatt-Leiste eine „Textspalte“: Rahmen aufziehen, dann tippen.
+Der Rahmen rastet am Papierrand, an den Hilfslinien des Masters und an den Kanten von Ansichten, Bildern und Tabellen ein.
+Die Schrift richtet sich nach dem Blattformat (A2 5 mm, A1 7 mm, A0 10 mm statt 3.5 mm). Schrift, Grösse und Ausrichtung
+(links, zentriert, rechts, „Blocksatz“) stellst du in der Leiste des Editors ein. Der Umbruch rechnet mit den echten
+Schriftbreiten, PDF und Bildschirm stimmen auf etwa 1 mm überein. Der Text liegt auf einer Klasse und lässt sich dort ausschalten.
+Im DXF steht er als MTEXT (Breite, Schrift, fett, kursiv, Ausrichtung), eine einzelne zentrierte oder rechte Zeile als TEXT.
+Geöffnet in AutoCAD oder BricsCAD wurde das noch nicht; die CAD-Programme brechen nach eigenen Schriftmassen um.
 
 **Anonyme Abgabe.** Im Panel **Mappe**, Abschnitt Publikation, „Wettbewerb (anonym)“ einschalten und das **Kennwort**
 eintragen. Dann zeigen Plankopf und Dateinamen nur das Kennwort, und diese Ausgaben enthalten keinen Projekt-, Büro- oder
