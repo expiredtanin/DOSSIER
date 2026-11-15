@@ -59,7 +59,7 @@ export function TypeLibraryTab<T extends { id: string; name: string }>({
               className={`res-md-row${selected?.id === item.id ? " active" : ""}`}
               onClick={() => setSelectedId(item.id)}
             >
-              <span className="res-md-row-name">{item.name}</span>
+              <span className="res-md-row-name" title={item.name}>{item.name}</span>
             </button>
           ))}
           {types.length === 0 && (

@@ -38,7 +38,9 @@ test("Startzoom: neues Projekt, Muster und komplexes Muster passen sich ein", as
   await page.waitForTimeout(1200);
   const m1 = await view(page);
   sane(m1.n, "Musterhaus");
-  expect(shows(m1.vb, 1, 1, 8, 6), "Musterhaus sichtbar").toBe(true);
+  expect(shows(m1.vb, 0, 0, 5, 4), "Musterhaus (5 × 4 m) sichtbar").toBe(true);
+  // [263] Ein Haus von 5 × 4 m füllt das Fenster (vorher 1:179, ≈ 110 px breit), nicht ein Sechstel davon.
+  expect(m1.n, "Musterhaus: eingepasst, nicht auf 30 m Mindestausschnitt").toBeLessThan(90);
 
   await fileMenu(page, /Musterhaus \(komplex\)/);
   await discardIfAsked(page);
@@ -48,5 +50,7 @@ test("Startzoom: neues Projekt, Muster und komplexes Muster passen sich ein", as
   sane(m2.n, "Musterhaus komplex");
   expect(shows(m2.vb, 0, 0, 15, 10), "Musterhaus komplex sichtbar").toBe(true);
   // [204] Auf das Gebäude eingepasst, nicht auf das ganze Kataster (vorher 1:375, das Haus winzig).
+  // [263] Auch Bemassungsketten und Schnittmarken ausserhalb der Wände bleiben im Bild (vorher rechts angeschnitten).
+  expect(shows(m2.vb, -6.7, -3, 17.2, 16.3), "Musterhaus komplex: Gebäude samt Rand sichtbar").toBe(true);
   expect(m2.n, "Musterhaus komplex: aufs Gebäude, nicht aufs Kataster eingepasst").toBeLessThan(200);
 });

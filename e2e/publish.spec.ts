@@ -84,6 +84,7 @@ test("Satz publizieren: PDF mit Ebenen, Index erhöht, Protokoll", async ({ page
   await mkdir("test-results", { recursive: true });
   await writeFile("test-results/publish-set.pdf", bytes);
   // Index A → B und Protokoll.
+  await expect(page.getByText("Publiziert: «Baueingabe.pdf»")).toBeVisible(); // [263] Meldung nennt die Datei
   await expect(page.locator("[data-publish-log]")).toContainText("Baueingabe");
   await expect(page.locator("[data-publish-log]")).toContainText("Index B");
   await page.screenshot({ path: "test-results/publish-panel.png" });

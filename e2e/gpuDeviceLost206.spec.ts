@@ -77,7 +77,7 @@ test("WebGPU-Geräteverlust: kein Panic, Plan und 3D bleiben bedienbar, kein Neu
 
   // 3D: Gerät zerstören, während das Modell steht; dann drehen und zurück zum Plan.
   await page.getByRole("button", { name: "Ansicht", exact: true }).click();
-  await page.getByRole("option", { name: "Perspektive" }).first().click();
+  await page.getByRole("option", { name: "3D-Ansicht", exact: true }).click();
   const canvas3d = page.locator("canvas[data-engine=render3d]");
   await expect(canvas3d).toBeVisible({ timeout: 30_000 });
   await page.waitForTimeout(800);

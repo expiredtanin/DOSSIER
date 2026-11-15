@@ -271,7 +271,7 @@ export function ViewTemplatesTab({ project, handlers }: { project: Project; hand
                 if (e.key === "Enter" || e.key === " ") setSelectedId(x.id);
               }}
             >
-              <span className="res-md-row-name" style={{ flex: 1 }}>
+              <span className="res-md-row-name" title={x.name} style={{ flex: 1 }}>
                 {x.name}
                 {usedBy(x.id) > 0 && <span style={{ display: "block", fontSize: "0.85em", opacity: 0.65 }}>{t("resources.viewTemplates.linkedCount", { n: usedBy(x.id) })}</span>}
               </span>

@@ -287,7 +287,7 @@ export function LinesTab({
               }`}
               onClick={() => setSelectedId(l.id)}
             >
-              <span className="res-md-row-name">{l.name}</span>
+              <span className="res-md-row-name" title={l.name}>{l.name}</span>
               <LineSwatch style={l} width={150} height={14} />
             </button>
           ))}

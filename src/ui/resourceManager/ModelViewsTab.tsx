@@ -146,7 +146,7 @@ export function ModelViewsTab({ project, handlers }: { project: Project; handler
         if (e.key === "Enter" || e.key === " ") setSelectedId(id);
       }}
     >
-      <span className="res-md-row-name" style={{ flex: 1, opacity: own ? 1 : 0.75 }}>
+      <span className="res-md-row-name" title={name} style={{ flex: 1, opacity: own ? 1 : 0.75 }}>
         {name}
       </span>
       <button

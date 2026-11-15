@@ -34,9 +34,9 @@ test("Dach: Eckgriff im Grundriss ziehen, Rückgängig ([26])", async ({ page })
   await expect(page.locator(".plan-edge-grip")).toHaveCount(4);
   const before = await gripCentres(page);
 
-  // Linkeste/oberste Ecke nach rechts-unten ziehen: Umriss wird schief, die übrigen Ecken bleiben.
+  // Linkeste/oberste Ecke nach links-oben ziehen: Umriss wird schief, die übrigen Ecken bleiben.
   const corner = before[0];
-  const target = { x: corner.x + 60, y: corner.y + 30 };
+  const target = { x: corner.x - 40, y: corner.y - 30 }; // nach aussen, weg von Wandecken-Fangpunkten (Musterhaus ist seit [263] eingepasst, 1 m ≈ 80 px)
   await dragGrip(page, corner, target);
   await expect
     .poll(async () => (await gripCentres(page)).some((g) => Math.abs(g.x - target.x) < 3 && Math.abs(g.y - target.y) < 3))

@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { defaultViewFor, MIN_FIT_EXTENT_M, PAD, PX_PER_M, type ModelRect } from "./geometry";
+import { defaultViewFor, HOUSE_FIT_EXTENT_M, MIN_FIT_EXTENT_M, PAD, PX_PER_M, type ModelRect } from "./geometry";
 import type { Primitive } from "../generatePlan";
 import { PlanPickIndex } from "./planPick";
 
@@ -119,6 +119,11 @@ describe("defaultViewFor [147]", () => {
     expect(v.h).toBeCloseTo(MIN_FIT_EXTENT_M * PX_PER_M + 2 * PAD);
     expect(v.x + v.w / 2).toBeCloseTo(0.5 * PX_PER_M);
     expect(v.y + v.h / 2).toBeCloseTo(-0.5 * PX_PER_M);
+  });
+  it("[263] kleines Haus (5 × 4 m): Mindestausschnitt 8 m statt 30 m, das Haus füllt über die Hälfte", () => {
+    const v = defaultViewFor({ minX: 0, minY: 0, maxX: 5, maxY: 4 }, PAD, HOUSE_FIT_EXTENT_M);
+    expect(v.w).toBeCloseTo(HOUSE_FIT_EXTENT_M * PX_PER_M + 2 * PAD);
+    expect(5 * PX_PER_M / v.w).toBeGreaterThan(0.5);
   });
   it("ungültige Grenzen (NaN/Infinity) → endlicher Standardausschnitt", () => {
     const v = defaultViewFor({ minX: NaN, minY: 0, maxX: Infinity, maxY: 1 });

@@ -382,7 +382,7 @@ export function HatchesTab({
               <span className="res-md-row-thumb">
                 <HatchSwatch hatch={h} size={30} />
               </span>
-              <span className="res-md-row-name">{h.name}</span>
+              <span className="res-md-row-name" title={h.name}>{h.name}</span>
             </button>
           ))}
           {hatches.length === 0 && (
