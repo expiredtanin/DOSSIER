@@ -85,7 +85,7 @@ fn domain_profile(p: &Project, a: &PlanArgs, n: usize) -> Vec<(&'static str, f64
         floor_finishes(&c, &d.rooms, &mut finish);
         add("Bodenbelag", ms(t));
         let t = Instant::now();
-        let _ = extras_of(p, a);
+        let _ = extras_of(&c);
         add("Schatten/Baurecht", ms(t));
         if std::env::var("BENCH_VOIDS").is_ok() {
             let z = super::super::extras::cut_z(p, &a.floor);
