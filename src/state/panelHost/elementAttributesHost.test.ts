@@ -197,3 +197,28 @@ describe("Mehrfachauswahl setzt alle gewählten Elemente in einem Schritt [195b]
     expect(JSON.stringify(getState().project.roofs!.find((r) => r.id === b.id))).toBe(before);
   });
 });
+
+describe("Darstellung im Grundriss [260]", () => {
+  it("symbolisch/geschnitten gilt für alle gewählten Fenster UND Türen in einem Undo-Schritt", () => {
+    getState().loadProject(buildComplexSampleProject());
+    const os = getState().project.openings!;
+    const win = os.find((o) => o.kind === "window" && !o.hostRoofId && !o.hostCeilingId)!;
+    const door = os.find((o) => o.kind === "door")!;
+    setState({ selection: { ...EMPTY_SELECTION, openings: [win.id, door.id] } });
+    const host = hostFor("opening", win.id);
+    const setMode = host.onSetOpeningPlanMode as (m: string | undefined) => void;
+    const depth = getState().undoDepth;
+    setMode("geschnitten");
+    const after = getState().project.openings!;
+    expect(after.find((o) => o.id === win.id)!.planMode).toBe("geschnitten");
+    expect(after.find((o) => o.id === door.id)!.planMode).toBe("geschnitten");
+    expect(getState().undoDepth).toBe(depth + 1);
+    getState().undo();
+    expect(getState().project.openings!.find((o) => o.id === door.id)!.planMode).toBeUndefined();
+    expect(getState().undoDepth).toBe(depth);
+    // „Wie Typ“ entfernt die Übersteuerung wieder.
+    getState().redo();
+    setMode(undefined);
+    expect(getState().project.openings!.find((o) => o.id === win.id)!.planMode).toBeUndefined();
+  });
+});

@@ -311,6 +311,26 @@ export function OpeningSection({
         />
       </div>
 
+      {/* [260] Darstellung im Grundriss: symbolisch (Symbol unabhängig von der Schnitthöhe) oder geschnitten
+          (nach der Schnitthöhe, darüber/darunter Wand geschlossen + Linie über/unter Schnitt); "" = wie Typ. */}
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.opening.planMode")}</span>
+        <Dropdown
+          value={opening.planMode ?? ""}
+          onChange={(v) =>
+            host.onSetOpeningPlanMode(v === "" ? undefined : (v as "symbolisch" | "geschnitten"))
+          }
+          options={[
+            { value: "", label: t("objinfo.opening.fromType") },
+            { value: "symbolisch", label: t("objinfo.opening.planMode.symbolisch") },
+            { value: "geschnitten", label: t("objinfo.opening.planMode.geschnitten") },
+          ]}
+          title={t("objinfo.opening.planMode.tip")}
+          width={130}
+        />
+        <MixedMark on={multi?.planMode.mixed} what="planMode" />
+      </div>
+
       <div className="objinfo-sep" />
 
       {/* UK/OK (read-only, aus der Wand-UK + Brüstung/Höhe abgeleitet). */}

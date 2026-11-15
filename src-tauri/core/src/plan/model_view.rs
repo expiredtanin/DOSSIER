@@ -251,6 +251,16 @@ pub struct WallOpts {
     pub cut_hatch_mv: Option<bool>,
     /// [256] Öffnungs-Symbole über/unter Schnitt auf schwarzer Wand hell (Basis: ja).
     pub contrast_on_solid: bool,
+    /// [260] Fenster/Türen im Grundriss: Vorgabe der Modelldarstellung (fehlt ⇒ symbolisch).
+    pub opening_plan_mode_mv: Option<OpeningPlanMode>,
+}
+
+impl WallOpts {
+    /// [260] Darstellungsart einer Öffnung im Grundriss: Element > Typ > Modelldarstellung > symbolisch.
+    pub fn opening_plan_mode(&self, element: Option<OpeningPlanMode>, ty: Option<OpeningPlanMode>) -> OpeningPlanMode {
+        let known = |m: Option<OpeningPlanMode>| m.filter(|m| *m != OpeningPlanMode::Unknown);
+        known(element).or(known(ty)).or(known(self.opening_plan_mode_mv)).unwrap_or(OpeningPlanMode::Symbolisch)
+    }
 }
 
 /// Decken und Böden.
@@ -528,6 +538,7 @@ pub fn resolve(mv: Option<&ModelViewOption>, detail: Detail, scale: f64) -> Opti
             reveals: wl.and_then(|w| w.reveals).unwrap_or(true),
             cut_hatch_mv: wl.and_then(|w| w.cut_hatch),
             contrast_on_solid: wl.and_then(|w| w.contrast_on_solid).unwrap_or(true),
+            opening_plan_mode_mv: wl.and_then(|w| w.opening_plan_mode),
         },
         slab: SlabOpts {
             layers: layer_mode(sl.and_then(|s| s.layers)),
@@ -593,3 +604,6 @@ mod tests2;
 #[cfg(test)]
 #[path = "model_view_tests3.rs"]
 mod tests3;
+#[cfg(test)]
+#[path = "opening_plan_mode_tests.rs"]
+mod opening_plan_mode_tests;

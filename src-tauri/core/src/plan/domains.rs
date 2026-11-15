@@ -3205,6 +3205,15 @@ mod tests {
         let o1 = p.openings.as_mut().unwrap().iter_mut().find(|o| o.id == "O1").unwrap();
         (o1.sill_height, o1.height) = (1.5, 0.6);
         let codes = ["20", "21", "30", "60"];
+        // [260] Vorgabe symbolisch: auch mit Oberkante Lücke in der Wand, Symbol ausgezogen.
+        let symbolic = {
+            let mut q = p.clone();
+            set_range(&mut q, "eg", Some(2.5), None, None);
+            serde_json::to_value(&plan_domains(&q, &args("eg", 1.0, &codes)).unwrap().walls).unwrap()
+        };
+        assert!(!symbolic.to_string().contains("view-range"));
+        // Darstellung nach der Schnitthöhe.
+        p.openings.as_mut().unwrap().iter_mut().find(|o| o.id == "O1").unwrap().plan_mode = Some(OpeningPlanMode::Geschnitten);
         let run = |p: &Project| {
             let r = plan_domains(p, &args("eg", 1.0, &codes)).unwrap();
             (serde_json::to_value(&r.walls).unwrap(), serde_json::to_string(&r.rooms).unwrap())
@@ -3212,16 +3221,17 @@ mod tests {
         let of = |v: &serde_json::Value, id: &str| -> Vec<serde_json::Value> { v.as_array().unwrap().iter().filter(|x| x["openingId"] == id).cloned().collect() };
         let w1_polys = |v: &serde_json::Value| v.as_array().unwrap().iter().filter(|x| x["kind"] == "polygon" && x["wallId"] == "W1").count();
         let dashed = |xs: &[serde_json::Value]| xs.iter().filter(|x| x["kind"] == "line").all(|x| x["dash"] == serde_json::json!([6.0, 1.5, 0.0, 1.5]));
-        // Ohne Grenzen: wie bisher (Lücke in der Wand, Symbol ausgezogen).
+        assert!(w1_polys(&symbolic) > 0);
+        // [260] Geschnitten auch ohne Grenzen: Oberlicht „über Schnitt“, Wand ohne Lücke.
         let (w0, r0) = run(&p);
-        assert!(!of(&w0, "O1").is_empty() && !dashed(&of(&w0, "O1")));
-        assert!(!w0.to_string().contains("view-range"));
+        let s0 = of(&w0, "O1");
+        assert!(s0.iter().any(|x| x["kind"] == "line") && dashed(&s0), "{s0:?}");
         // Oberkante 2.5 m: Oberlicht „über Schnitt“ strichpunktiert, Wand im Schnitt ohne Lücke.
         set_range(&mut p, "eg", Some(2.5), None, None);
         let (w1, r1) = run(&p);
         let s1 = of(&w1, "O1");
         assert!(s1.iter().any(|x| x["kind"] == "line") && dashed(&s1), "{s1:?}");
-        assert!(w1_polys(&w1) < w1_polys(&w0), "{} {}", w1_polys(&w1), w1_polys(&w0));
+        assert!(w1_polys(&w1) < w1_polys(&symbolic), "{} {}", w1_polys(&w1), w1_polys(&symbolic));
         // Tür und Fenster im Schnitt bleiben ausgezogen.
         assert!(!dashed(&of(&w1, "D1")) && !dashed(&of(&w1, "O2")));
         // Oberkante 1.2 m: Oberlicht entfällt, Wand bleibt geschlossen.
@@ -3241,6 +3251,8 @@ mod tests {
         let mut p = sample();
         let o1 = p.openings.as_mut().unwrap().iter_mut().find(|o| o.id == "O1").unwrap();
         (o1.sill_height, o1.height) = (0.1, 0.3);
+        // [260] Nur „geschnitten“ richtet sich nach der Schnitthöhe (Vorgabe symbolisch: Symbol in der Lücke).
+        o1.plan_mode = Some(OpeningPlanMode::Geschnitten);
         let codes = ["20", "21", "30", "60"];
         let run = |p: &Project| serde_json::to_value(&plan_domains(p, &args("eg", 1.0, &codes)).unwrap().walls).unwrap();
         let of = |v: &serde_json::Value, id: &str| -> Vec<serde_json::Value> { v.as_array().unwrap().iter().filter(|x| x["openingId"] == id).cloned().collect() };

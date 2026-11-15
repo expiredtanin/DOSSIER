@@ -986,6 +986,10 @@ pub struct DoorType {
     #[serde(rename = "lintelLineStyle", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub lintel_line_style: Option<LintelLineStyle>,
+    /// [260] Darstellung im Grundriss: symbolisch (Symbol unabhängig von der Schnitthöhe) oder geschnitten; fehlt ⇒ Modelldarstellung.
+    #[serde(rename = "planMode", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub plan_mode: Option<OpeningPlanMode>,
     /// Rahmen-Detail ([105]): Blendrahmen je Seite, Flügelrahmen, Pfosten/Kämpfer, Zusatzprofile,
     /// Anschlag je Seite. Fehlt ⇒ wie bisher (`frameWidth`, `rebateDepth`).
     #[serde(rename = "frameDetail", default, skip_serializing_if = "Option::is_none")]
@@ -1336,6 +1340,10 @@ pub struct WindowType {
     #[serde(rename = "planSwingArcs", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub plan_swing_arcs: Option<bool>,
+    /// [260] Darstellung im Grundriss: symbolisch (Symbol unabhängig von der Schnitthöhe) oder geschnitten; fehlt ⇒ Modelldarstellung.
+    #[serde(rename = "planMode", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub plan_mode: Option<OpeningPlanMode>,
     /// Auf-/Untersicht-Andeutung im Grundriss (mittel/fein): eine Referenzlinie an
     /// der gewählten Fläche(n) — sinnvoll, wenn die Öffnung die Schnittebene NICHT
     /// regulär durchschneidet (z. B. bodentiefes Fenster oder hoch sitzendes
@@ -2434,6 +2442,10 @@ pub struct ModelViewWalls {
     #[serde(rename = "contrastOnSolid", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub contrast_on_solid: Option<bool>,
+    /// [260] Fenster/Türen im Grundriss: symbolisch oder geschnitten, solange Element und Typ nichts sagen (Basis: symbolisch).
+    #[serde(rename = "openingPlanMode", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub opening_plan_mode: Option<OpeningPlanMode>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -3535,6 +3547,21 @@ pub enum OpeningHinge {
     Unknown,
 }
 
+/// [260] Darstellungsart von Fenstern und Türen im Grundriss.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+pub enum OpeningPlanMode {
+    /// Öffnungssymbol nach Norm (Rahmen, Glas/Flügel, Aufschlag, Brüstung) unabhängig von der Schnitthöhe.
+    #[default]
+    #[serde(rename = "symbolisch")]
+    Symbolisch,
+    /// Nach der tatsächlichen Schnitthöhe: über/unter dem Schnitt bleibt die Wand geschlossen, die Öffnung als Linie über/unter Schnitt.
+    #[serde(rename = "geschnitten")]
+    Geschnitten,
+    #[serde(other)]
+    #[ts(skip)]
+    Unknown,
+}
+
 /// Linientyp der Sturzlinien einer Tür im Grundriss ([105]; Strichmuster in Papier-mm wie [153]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
 pub enum LintelLineStyle {
@@ -3798,6 +3825,10 @@ pub struct Opening {
     #[serde(rename = "planSwingArcs", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub plan_swing_arcs: Option<bool>,
+    /// [260] Darstellung im Grundriss (übersteuert Tür-/Fenstertyp und Modelldarstellung); fehlt ⇒ wie Typ.
+    #[serde(rename = "planMode", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub plan_mode: Option<OpeningPlanMode>,
     /// Referenz auf einen Bauteil-Typ (Bibliothek): {@link DoorType} bei
     /// `kind: "door"`, {@link WindowType} bei `kind: "window"`. Fehlt sie, gilt
     /// das heutige Inline-Verhalten (rückwärtskompatibel). Typ-Defaults liefern

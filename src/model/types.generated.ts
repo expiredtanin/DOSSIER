@@ -797,6 +797,10 @@ export type DoorType = {
   /** Linientyp der Sturzlinien im Grundriss ([105]); fehlt ⇒ gestrichelt. */
   lintelLineStyle?: LintelLineStyle;
   /**
+   * [260] Darstellung im Grundriss: symbolisch (Symbol unabhängig von der Schnitthöhe) oder geschnitten; fehlt ⇒ Modelldarstellung.
+   */
+  planMode?: OpeningPlanMode;
+  /**
    * Rahmen-Detail ([105]): Blendrahmen je Seite, Flügelrahmen, Pfosten/Kämpfer, Zusatzprofile,
    * Anschlag je Seite. Fehlt ⇒ wie bisher (`frameWidth`, `rebateDepth`).
    */
@@ -2473,6 +2477,10 @@ export type ModelViewWalls = {
    * (weiss) statt dunkel, damit das strichpunktierte Symbol lesbar bleibt (Basis: ja).
    */
   contrastOnSolid?: boolean;
+  /**
+   * [260] Fenster/Türen im Grundriss: symbolisch oder geschnitten, solange Element und Typ nichts sagen (Basis: symbolisch).
+   */
+  openingPlanMode?: OpeningPlanMode;
 };
 
 /** [173] Fenster in der Modelldarstellung (fehlt ⇒ wie Basis). */
@@ -2638,6 +2646,10 @@ export type Opening = {
    */
   planSwingArcs?: boolean;
   /**
+   * [260] Darstellung im Grundriss (übersteuert Tür-/Fenstertyp und Modelldarstellung); fehlt ⇒ wie Typ.
+   */
+  planMode?: OpeningPlanMode;
+  /**
    * Referenz auf einen Bauteil-Typ (Bibliothek): {@link DoorType} bei
    * `kind: "door"`, {@link WindowType} bei `kind: "window"`. Fehlt sie, gilt
    * das heutige Inline-Verhalten (rückwärtskompatibel). Typ-Defaults liefern
@@ -2741,6 +2753,9 @@ export type Opening = {
  * Öffnungsart eines einzelnen Flügels (bzw. des ganzen Fensters, alt).
  */
 export type OpeningKind = "dreh" | "kipp" | "drehkipp" | "fest" | "schiebe";
+
+/** [260] Darstellungsart von Fenstern und Türen im Grundriss. */
+export type OpeningPlanMode = "symbolisch" | "geschnitten";
 
 /**
  * Werte je Seite einer Öffnung (Meter). `left` = Leibung beim Wandanfang (kleineres Achsmass),
@@ -4591,6 +4606,10 @@ export type WindowType = {
   sashSymbols?: boolean;
   /** Aufschlagbogen der Drehflügel im Grundriss (zur Innenseite, [95]). Fehlt ⇒ aus. */
   planSwingArcs?: boolean;
+  /**
+   * [260] Darstellung im Grundriss: symbolisch (Symbol unabhängig von der Schnitthöhe) oder geschnitten; fehlt ⇒ Modelldarstellung.
+   */
+  planMode?: OpeningPlanMode;
   /**
    * Auf-/Untersicht-Andeutung im Grundriss (mittel/fein): eine Referenzlinie an
    * der gewählten Fläche(n) — sinnvoll, wenn die Öffnung die Schnittebene NICHT

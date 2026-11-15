@@ -27,6 +27,7 @@ import type {
 import { useStore } from "../../state/appStore";
 import type { usePanelHost } from "../host";
 import { getDoorType, getWindowType, sashesOfWindowType, glazingPanesOf } from "../../model/types";
+import { planModeFromValue, planModeOptions } from "../../ui/planModeOptions";
 import { CorePreview, DoorFramePanel, FrameDetailPanel, RebatePanel, RevealPanel, ScopeSwitch } from "../../ui/OpeningDetailPanels";
 
 /** P0-Kategorien der Sidebar, je nach Öffnungsart. */
@@ -304,17 +305,20 @@ function SelField<V extends string>({
   value,
   options,
   onChange,
+  testId,
 }: {
   label: string;
   value: V;
   options: { value: V; label: string }[];
   onChange: (v: V) => void;
+  testId?: string;
 }) {
   return (
     <label className="oed-field">
       <span className="oed-flabel">{label}</span>
       <select
         className="oed-select"
+        data-testid={testId}
         value={value}
         onChange={(e) => onChange(e.target.value as V)}
       >
@@ -361,12 +365,22 @@ function BasisPanel({
 }) {
   if (isDoor && dt) {
     return (
-      <SelField
-        label={t("oed.f.kind")}
-        value={dt.kind}
-        options={DOOR_KIND_OPTS()}
-        onChange={(v) => patchDt({ kind: v })}
-      />
+      <>
+        <SelField
+          label={t("oed.f.kind")}
+          value={dt.kind}
+          options={DOOR_KIND_OPTS()}
+          onChange={(v) => patchDt({ kind: v })}
+        />
+        {/* [260] Darstellung im Grundriss (Typ; leer = Modelldarstellung), wie in den Ressourcen. */}
+        <SelField
+          label={t("objinfo.opening.planMode")}
+          value={dt.planMode ?? ""}
+          options={planModeOptions()}
+          onChange={(v) => patchDt({ planMode: planModeFromValue(v) })}
+          testId="oed-planMode"
+        />
+      </>
     );
   }
   if (wt) {
@@ -377,6 +391,14 @@ function BasisPanel({
           value={wt.kind}
           options={OPENING_KIND_OPTS()}
           onChange={(v) => patchWt({ kind: v })}
+        />
+        {/* [260] Darstellung im Grundriss (Typ; leer = Modelldarstellung), wie in den Ressourcen. */}
+        <SelField
+          label={t("objinfo.opening.planMode")}
+          value={wt.planMode ?? ""}
+          options={planModeOptions()}
+          onChange={(v) => patchWt({ planMode: planModeFromValue(v) })}
+          testId="oed-planMode"
         />
         <SelField
           label={t("oed.f.glazing")}

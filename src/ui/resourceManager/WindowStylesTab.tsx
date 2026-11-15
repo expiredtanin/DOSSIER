@@ -3,6 +3,7 @@
 
 import type { Opening, Project, WindowType } from "../../model/types";
 import { t } from "../../i18n";
+import { planModeFromValue, planModeOptions } from "../planModeOptions";
 import { FieldRow, NumberField, SelectField } from "./fields";
 import { INSET_FACE_OPTIONS, TypeLibraryTab } from "./TypeLibraryTab";
 import { ElevationPreview } from "../ElevationPreview";
@@ -201,6 +202,14 @@ export function WindowStylesTab({
                 { value: "an", label: t("objinfo.opening.on") },
                 { value: "aus", label: t("objinfo.opening.off") },
               ]}
+            />
+          </FieldRow>
+          {/* [260] Darstellung im Grundriss (leer = Modelldarstellung). */}
+          <FieldRow label={t("objinfo.opening.planMode")}>
+            <SelectField
+              value={win.planMode ?? ""}
+              onChange={(v) => patch({ planMode: planModeFromValue(v) })}
+              options={planModeOptions()}
             />
           </FieldRow>
           <FieldRow label={t("objinfo.opening.planSwingArcs")}>

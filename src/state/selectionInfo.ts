@@ -239,6 +239,8 @@ export interface OpeningInfo {
   /** Nur Fenster: Öffnungslinien in der Ansicht / Aufschlagbogen im Grundriss ([95]); fehlt → wie Typ. */
   sashSymbols?: boolean;
   planSwingArcs?: boolean;
+  /** [260] Darstellung im Grundriss (symbolisch/geschnitten); fehlt → wie Typ bzw. Modelldarstellung. */
+  planMode?: "symbolisch" | "geschnitten";
   /** Zugewiesener Tür-/Fenstertyp (Bibliothek, `Opening.typeId`) oder undefined. */
   typeId?: string;
   /** Per-Element-Übersteuerung der Detailstufe; fehlt → Ansichts-Detailstufe gilt. */

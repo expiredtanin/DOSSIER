@@ -197,6 +197,7 @@ export const MODEL_VIEW_FIELDS: readonly ModelViewField[] = [
   { section: "walls", key: "reveals", values: "bool" },
   { section: "walls", key: "cutHatch", values: "bool" },
   { section: "walls", key: "contrastOnSolid", values: "bool" },
+  { section: "walls", key: "openingPlanMode", values: ["symbolisch", "geschnitten"] },
   { section: "slabs", key: "floorFinish", values: ["off", "wet", "all"] },
   { section: "slabs", key: "layers", values: ["all", "simplified", "core"] },
   { section: "slabs", key: "buildUp", values: ["show", "merged"] },

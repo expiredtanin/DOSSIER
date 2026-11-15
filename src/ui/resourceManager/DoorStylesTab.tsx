@@ -3,6 +3,7 @@
 
 import type { DoorType, Opening, Project } from "../../model/types";
 import { t } from "../../i18n";
+import { planModeFromValue, planModeOptions } from "../planModeOptions";
 import { FieldRow, NumberField, Segmented, SelectField } from "./fields";
 import { INSET_FACE_OPTIONS, TypeLibraryTab } from "./TypeLibraryTab";
 import { ElevationPreview } from "../ElevationPreview";
@@ -181,6 +182,14 @@ export function DoorStylesTab({
                 value: v,
                 label: t(`objinfo.opening.lintelLineStyle.${v}`),
               }))}
+            />
+          </FieldRow>
+          {/* [260] Darstellung im Grundriss (leer = Modelldarstellung). */}
+          <FieldRow label={t("objinfo.opening.planMode")}>
+            <SelectField
+              value={door.planMode ?? ""}
+              onChange={(v) => patch({ planMode: planModeFromValue(v) })}
+              options={planModeOptions()}
             />
           </FieldRow>
           <FieldRow label={t("resources.field.transomHeight")}>
