@@ -72,12 +72,9 @@ import { sun3dFor, sun3dKey } from "./sun3d";
 import { useStore } from "../state/appStore";
 import { projectGeoOrigin } from "../core";
 import {
-  camera3dFromViewCamera,
   FOV_Y,
   PITCH_LIMIT,
-  lerpOrbit,
   orbitCamera,
-  orbitFromCamera3d,
   registerViewportCamera,
   type OrbitState,
   type V3 as CamV3,
@@ -87,6 +84,7 @@ import { WalkWorld, walkInputFrom } from "./walkCollision";
 import { loadShortcutOverrides, matchesShortcut } from "../state/keyboardShortcuts";
 import { createCameraFromView } from "../state/cameraActions";
 import { ViewportToolbar3d } from "./ViewportToolbar3d";
+import { createViewportCameraApi } from "./viewportCameraApi";
 
 /** Ein per 3D-Klick getroffenes Bauteil, oder null (Leerraum). */
 export type Pick3dHit =
@@ -766,77 +764,45 @@ export function Wasm3DViewport({
     if (!ready) return;
     applyPreset();
   }, [ready, applyPreset]);
+  // [118] Ohne Renderer (verloren/aufgegeben) trotzdem einen Orbit anlegen, damit die Kamera-Brücke lesen und setzen kann.
+  useEffect(() => {
+    if (!ready && !orbitRef.current) applyPreset();
+  }, [ready, applyPreset]);
 
   // Kamera-Brücke ([BCF]): Lesen/Setzen der Orbit-Kamera, Schnappschuss und Schnitt von aussen
   // (`cameraBridge.ts`). Der Orbit-Zustand ist die Wahrheit; nach einem Preset ist er aus der
   // Rust-Preset-Kamera geseedet (s. `applyPreset`).
-  const animRef = useRef(0);
+  // [118] Die Anmeldung hängt NICHT an `ready`: der Orbit gehört dem Viewport, nicht dem GPU-Renderer. Bei Verlust,
+  // Neuaufbau oder aufgegebenem WebGPU bleiben Kamera lesen/setzen möglich (render/snapshot sind dann No-ops bzw. null).
+  const sectionSetterRef = useRef(setExtSection);
+  sectionSetterRef.current = setExtSection;
   useEffect(() => {
-    if (!ready) return;
     const canvas = canvasRef.current;
-    // Das Bild so zeichnen, wie es gerade angezeigt wird (Preset-Kamera oder Orbit).
-    const draw = () => redrawRef.current();
-    const off = registerViewportCamera({
-      read: () => {
-        const o = orbitRef.current;
-        const rect = canvas?.getBoundingClientRect();
-        if (!o || !rect || rect.width < 1 || rect.height < 1) return null;
-        return { camera: orbitCamera(o), aspect: rect.width / rect.height };
+    const { api, dispose } = createViewportCameraApi({
+      getOrbit: () => orbitRef.current,
+      setOrbit: (o) => {
+        orbitRef.current = o;
       },
-      write: (cam, animate) => {
-        const to = orbitFromCamera3d(cam);
-        if (!to) return false;
-        cancelAnimationFrame(animRef.current);
-        const from = orbitRef.current;
-        // Ab jetzt zeichnet der Orbit (nicht mehr die Rust-Preset-Kamera).
+      getRect: () => canvas?.getBoundingClientRect() ?? null,
+      useOrbitRedraw: () => {
         redrawRef.current = () => {
           if (orbitRef.current) render(orbitCamera(orbitRef.current));
         };
-        if (!animate || !from) {
-          orbitRef.current = to;
-          redrawRef.current();
-          return true;
-        }
-        const t0 = performance.now();
-        const DURATION = 350;
-        const step = (now: number) => {
-          const k = Math.min(1, (now - t0) / DURATION);
-          const e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2; // ease in-out
-          orbitRef.current = k >= 1 ? to : lerpOrbit(from, to, e);
-          redrawRef.current();
-          if (k < 1) animRef.current = requestAnimationFrame(step);
-        };
-        animRef.current = requestAnimationFrame(step);
-        return true;
       },
-      snapshot: (maxEdge) => snapshotPng(draw, maxEdge),
-      image: (o) => {
-        const cur = orbitRef.current;
-        const rect = canvas?.getBoundingClientRect();
-        if (!cur || !rect) return Promise.resolve(null);
-        // Gespeicherte Kamera ([213]) oder die Live-Kamera; das Blickziel liegt im Abstand der Live-Kamera.
-        const cam = o.camera ? camera3dFromViewCamera(o.camera, cur.dist) : orbitCamera(cur);
-        if (!cam) return Promise.resolve(null);
-        return exportImage({
-          camera: cam,
-          width: o.width,
-          height: o.height,
-          transparent: o.transparent,
-          ...(o.samples !== undefined ? { samples: o.samples } : {}),
-          ...(o.onProgress ? { onProgress: o.onProgress } : {}),
-          ...(o.signal ? { signal: o.signal } : {}),
-          restore: draw,
-        });
-      },
-      section: (plane) => setExtSection(plane),
+      redraw: () => redrawRef.current(),
+      // Das Bild so zeichnen, wie es gerade angezeigt wird (Preset-Kamera oder Orbit).
+      snapshot: (maxEdge) => snapshotPng(() => redrawRef.current(), maxEdge),
+      exportImage: (o) => exportImage({ ...o, restore: () => redrawRef.current() }),
+      setSection: (plane) => sectionSetterRef.current(plane),
       fit: () => fitCameraRef.current(),
       canvas: () => canvas ?? null,
     });
+    const off = registerViewportCamera(api);
     return () => {
-      cancelAnimationFrame(animRef.current);
+      dispose();
       off();
     };
-  }, [ready, render, snapshotPng, exportImage, canvasRef]);
+  }, [render, snapshotPng, exportImage, canvasRef]);
 
   // Darstellungsart (volle RenderMode-Union) an den Renderer weiterreichen,
   // sobald sie wechselt oder der Renderer bereit wird — dann mit der aktuell

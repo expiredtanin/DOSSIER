@@ -1567,6 +1567,13 @@ Punktwolken/BCF-Ausbau, Windows-Paket, [C5]/[C7]/[15] Kern-Umbauten — ausser s
   `setState` mit unverändertem Wert (`setSelected(null)` je Plan, `setPickList(null)` je Ausschnitt, `setHoverEdge` je Zeigerschritt) renderten die Plan-Ansicht
   je nach React-Interna ein zweites Mal; jetzt nur bei echter Änderung. Zahlen: Wand-Änderung 42, Zoom-Schritt 8 → 7, 5 Zeiger-Schritte 20. Offen: render3d
   (`gpuRendererSlot.ts`) hat noch keine Bewährungszeit (Viewport braucht den Renderer zum Einspielen); nicht auf dem Mac geprüft.
+  **Nachtrag 15.11. (e2e `camera.spec.ts:21`/`:67` rot, `window.__dossierCamera` fehlte):** Der 3D-Viewport meldete seine Kamera erst bei `ready` an (Effekt
+  `if (!ready) return`) und der Orbit-Zustand wurde nur mit lebendem Renderer angelegt; headless (Gerät verloren, WebGPU aufgegeben) gab es deshalb keine Kamera-Brücke,
+  „Kamera aus der 3D-Ansicht anlegen“/„Kamera öffnen“ gingen nicht. Behoben: Anmeldung vom Renderer entkoppelt — `viewport/viewportCameraApi.ts` (read/write auf dem
+  Orbit, zeichnet nur wenn ein Renderer lebt; `snapshot`/`image` ohne Renderer null), `Wasm3DViewport` meldet an, solange er gemountet ist (kein `ready` in den
+  Abhängigkeiten, also keine Abmelde-Lücke beim Neuaufbau), und legt den Orbit auch ohne Renderer an (Fit-Rückfall in TS). Tests: vitest `viewportCameraApi.test.ts`;
+  e2e `camera` 3x, `gpuDeviceLost206`, `walk`, `renderCount`, `a11yNewDialogs` grün. Offen: Kamera bleibt nach einem Neuaufbau nicht erhalten (Preset wird neu
+  angewandt); nicht auf dem Mac geprüft.
 - ◐ **[3]** Darstellungswege reduzieren (vier 2D-Pfade: render2d, glPlan, SVG, native2d; zwei 3D-Pfade). · L
 - ◐ **[17]** Ergebnisse über die Ausgabe testen. Golden-Ausgaben für 3D fehlen. · M
 - ◐ **[19]** Beispielgebäude als Skript: `sampleProject.ts` + Kontrollmodell. · S
