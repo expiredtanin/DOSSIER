@@ -282,6 +282,32 @@ impl Walk<'_> {
         }
     }
 
+    /// Rich-Text ([208] Textspalten auf Blättern): ein Name oder eine Adresse kann über Run-Grenzen laufen
+    /// („Atelier “ + fett „Brunner AG“) — der Absatz wird zusätzlich als Ganzes geprüft. Treffer, die schon ein
+    /// einzelner Run liefert, kommen nicht doppelt.
+    fn check_rich(&mut self, area: &str, path: &str, paragraphs: &[Value]) {
+        for (i, p) in paragraphs.iter().enumerate() {
+            let Some(runs) = p.get("runs").and_then(Value::as_array) else { continue };
+            let texts: Vec<&str> = runs.iter().filter_map(|r| r.get("text").and_then(Value::as_str)).collect();
+            if texts.len() < 2 {
+                continue;
+            }
+            let before = self.out.len();
+            self.check(area, &format!("{path}.paragraphs.{i}"), &texts.concat());
+            let new: Vec<Finding> = self.out.drain(before..).collect();
+            for f in new {
+                let in_run = texts.iter().any(|t| match f.kind.as_str() {
+                    "email" => find_email(t).is_some(),
+                    "phone" => find_phone(t).is_some(),
+                    _ => contains_words(&norm(t), &norm(&f.term)),
+                });
+                if !in_run {
+                    self.out.push(f);
+                }
+            }
+        }
+    }
+
     fn walk(&mut self, area: &str, path: &str, v: &Value) {
         match v {
             Value::String(s) => self.check(area, path, s),
@@ -293,6 +319,9 @@ impl Walk<'_> {
                 }
             }
             Value::Object(m) => {
+                if let Some(Value::Array(ps)) = m.get("paragraphs") {
+                    self.check_rich(area, path, ps);
+                }
                 for (k, e) in m {
                     if skip_key(k) {
                         continue;
@@ -379,6 +408,28 @@ mod tests {
         assert!(has(&f, "layouts", "titleBlock", "logo-brunner.png"), "{f:?}");
         // Telefon im Raum
         assert!(f.iter().any(|x| x.kind == "phone" && x.area == "rooms"), "{f:?}");
+    }
+
+    /// [208] Textspalte auf dem Blatt (Rich-Text auf der Blatt-Ebene): Treffer im Run, über Run-Grenzen, nur einmal.
+    #[test]
+    fn textspalte_auf_dem_blatt_auch_ueber_run_grenzen() {
+        let mut r = root();
+        let run = |t: &str, bold: bool| serde_json::json!({ "text": t, "marks": { "bold": bold } });
+        r["drawings2d"] = serde_json::json!([
+            { "id": "t1", "kind": "text", "text": "", "layerId": "x", "doc": { "version": 1, "paragraphs": [
+                { "runs": [run("Projektbeschrieb. ", false), run("Atelier Brunner AG", true)] },
+                { "runs": [run("Kontakt Atelier ", false), run("Brunner", true), run(" AG", false)] },
+                { "runs": [run("info@brunner", false), run("-arch.ch", true)] },
+                { "runs": [run("Der Hof öffnet sich nach Süden.", false)] } ] } }
+        ]);
+        let f = find(&r, &CheckInput::default());
+        let in_doc: Vec<&Finding> = f.iter().filter(|x| x.area == "drawings2d").collect();
+        // Absatz 0: ganzer Name in einem Run → genau ein Treffer; Absatz 1 und 2: nur als Ganzes erkennbar.
+        assert_eq!(in_doc.iter().filter(|x| x.place.contains("paragraphs.0.runs.1")).count(), 1, "{in_doc:?}");
+        assert!(in_doc.iter().any(|x| x.place.ends_with("paragraphs.1") && x.kind == "identifier"), "{in_doc:?}");
+        assert!(in_doc.iter().any(|x| x.place.ends_with("paragraphs.2") && x.kind == "email"), "{in_doc:?}");
+        assert!(!in_doc.iter().any(|x| x.place.ends_with("paragraphs.0")), "kein Doppeltreffer: {in_doc:?}");
+        assert!(!in_doc.iter().any(|x| x.text.contains("Hof öffnet")), "{in_doc:?}");
     }
 
     #[test]

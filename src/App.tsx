@@ -461,6 +461,7 @@ export default function App() {
     activeLevelId,
     setActiveLevelId,
     applyChange,
+    runCommand: onRunCommand,
   });
 
   // ── Effektive Darstellung für die Hauptansicht → state/useDisplayResolvers.ts ──

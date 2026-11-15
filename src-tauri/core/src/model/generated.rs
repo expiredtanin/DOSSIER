@@ -4222,6 +4222,9 @@ pub enum Align {
     Center,
     #[serde(rename = "right")]
     Right,
+    /// Blocksatz ([208]): umbrochene Zeilen füllen die Spaltenbreite, die letzte Zeile des Absatzes bleibt links.
+    #[serde(rename = "justify")]
+    Justify,
     #[serde(other)]
     #[ts(skip)]
     Unknown,

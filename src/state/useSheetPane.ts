@@ -32,8 +32,10 @@ export function useSheetPane(opts: {
   activeLevelId: string;
   setActiveLevelId: (id: string) => void;
   applyChange: ProjectSlice["applyChange"];
+  /** Befehl starten (Werkzeugleiste des Blatts: Textspalte). */
+  runCommand?: (name: string) => void;
 }) {
-  const { activeLayoutId, setActiveLayoutId, activeLevelId, setActiveLevelId, applyChange } = opts;
+  const { activeLayoutId, setActiveLayoutId, activeLevelId, setActiveLevelId, applyChange, runCommand } = opts;
   // Nur Layouts und Zeichnungsebenen abonnieren ([121]): eine Op an Bauteilen rendert den Aufrufer nicht.
   const layouts = useStore((s) => s.project.layouts);
   const drawingLevels = useStore((s) => s.project.drawingLevels);
@@ -89,6 +91,8 @@ export function useSheetPane(opts: {
   const openId = () => activeLayout?.id ?? "";
   const handlers = useEventBundle({
     onBack: () => setActiveLayoutId(null),
+    // [208] Freier Text: Textspalte-Befehl auf der Blatt-Ebene (Rahmen aufziehen, dann tippen).
+    onAddText: () => runCommand?.("textbox"),
     onPatchViewport: (viewportId: string, patch: Partial<Omit<LayoutViewport, "id" | "snapshotId">>) =>
       patchOpenLayout(openId(), (l) => patchViewportInLayout(l, viewportId, patch)),
     onRemoveViewport: (viewportId: string) =>

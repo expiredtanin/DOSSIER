@@ -26,6 +26,12 @@ pub const TEXT_LINE_HEIGHT_MULT: f64 = 1.25;
 /// 1 pt in Papier-mm.
 pub const PT_TO_MM: f64 = 25.4 / 72.0;
 
+/// Blocksatz ([208]): Absatz mit `Align::Justify`? (Die Zeile selbst ist dann [`LineAlign::Left`]; nur umbrochene
+/// Zeilen ausser der letzten des Absatzes tragen `justify`.)
+pub fn is_justify(a: Option<Align>) -> bool {
+    a == Some(Align::Justify)
+}
+
 /// Ausrichtung einer Zeile. Unbekannte Werte (`Align::Unknown`) gelten wie fehlende als links —
 /// alle Verbraucher behandelten sie schon in TS wie links.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -41,7 +47,7 @@ impl LineAlign {
         match a {
             Some(Align::Center) => LineAlign::Center,
             Some(Align::Right) => LineAlign::Right,
-            _ => LineAlign::Left,
+            _ => LineAlign::Left, // links, Blocksatz (setzt [`LineRef::justify`]) und Unbekanntes
         }
     }
     /// SVG-`text-anchor` der Zeile.
@@ -105,6 +111,9 @@ impl Tspan {
 pub struct Line {
     pub tspans: Vec<Tspan>,
     pub align: LineAlign,
+    /// Blocksatz ([208]): Wörter auf die Spaltenbreite verteilen ([`justify_fragments`]); sonst linksbündig.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub justify: bool,
     /// Vorschub zu dieser Zeile (Benutzereinheiten).
     pub line_height: f64,
 }
@@ -212,6 +221,8 @@ pub struct Tok {
 pub struct LineRef {
     pub toks: Vec<Tok>,
     pub align: LineAlign,
+    /// Blocksatz ([208]): umbrochene Zeile eines `Align::Justify`-Absatzes, nicht die letzte.
+    pub justify: bool,
     pub line_height: f64,
 }
 
@@ -223,8 +234,9 @@ fn run_font_size(m: &Marks, base_pt: f64, unit_per_pt: f64) -> f64 {
 }
 
 /// Zeilen als Verweise (`docToLines`/`wrapDocToLines`): ohne Spalte (`wrap` ≤ 0/NaN/`None`) eine
-/// Zeile je Absatz (leere Runs entfallen), sonst wortweise umbrochen — Wortbreite = UTF-16-Länge ×
-/// Schriftgrösse × 0.55, Leerraum am Zeilenrand fällt weg, Run-Grenzen bleiben.
+/// Zeile je Absatz (leere Runs entfallen), sonst wortweise umbrochen — Wortbreite aus den Schriftmetriken der
+/// gebündelten Familien ([`text_width_em_in`], seit [208] statt der Schätzung 0.55 × Zeichenzahl: Textrahmen auf
+/// dem Plakat füllen die Spalte wie im Editor), Leerraum am Zeilenrand fällt weg, Run-Grenzen bleiben.
 pub fn layout_refs(doc: &RichTextDoc, o: &LayoutOpts, wrap: Option<f64>) -> Vec<LineRef> {
     let max_width = wrap.filter(|w| *w > 0.0);
     struct Token {
@@ -238,7 +250,7 @@ pub fn layout_refs(doc: &RichTextDoc, o: &LayoutOpts, wrap: Option<f64>) -> Vec<
         let align = LineAlign::of(p.align);
         let Some(max_width) = max_width else {
             let toks = p.runs.iter().enumerate().filter(|(_, r)| !r.text.is_empty()).map(|(ri, r)| Tok { para: pi, run: ri, b0: 0, b1: r.text.len(), u0: 0, u1: utf16_len(&r.text) }).collect();
-            lines.push(LineRef { toks, align, line_height });
+            lines.push(LineRef { toks, align, justify: false, line_height });
             continue;
         };
         let mut tokens: Vec<Token> = Vec::new();
@@ -251,22 +263,23 @@ pub fn layout_refs(doc: &RichTextDoc, o: &LayoutOpts, wrap: Option<f64>) -> Vec<
             for part in split_keep_ws(&run.text) {
                 let ul = utf16_len(part);
                 let is_space = part.chars().next().is_some_and(js_space);
-                tokens.push(Token { tok: Tok { para: pi, run: ri, b0: b, b1: b + part.len(), u0: u, u1: u + ul }, width: ul as f64 * fs * CHAR_WIDTH_FACTOR, is_space });
+                tokens.push(Token { tok: Tok { para: pi, run: ri, b0: b, b1: b + part.len(), u0: u, u1: u + ul }, width: text_width_em_in(part, run.marks.bold == Some(true), run.marks.italic == Some(true), run.marks.font.as_deref()) * fs, is_space });
                 b += part.len();
                 u += ul;
             }
         }
         if tokens.is_empty() {
-            lines.push(LineRef { toks: Vec::new(), align, line_height });
+            lines.push(LineRef { toks: Vec::new(), align, justify: false, line_height });
             continue;
         }
+        let first_line = lines.len();
         let mut current: Vec<Token> = Vec::new();
         let mut current_width = 0.0;
         let flush = |current: &mut Vec<Token>, lines: &mut Vec<LineRef>| {
             while current.last().is_some_and(|t| t.is_space) {
                 current.pop();
             }
-            lines.push(LineRef { toks: current.drain(..).map(|t| t.tok).collect(), align, line_height });
+            lines.push(LineRef { toks: current.drain(..).map(|t| t.tok).collect(), align, justify: false, line_height });
         };
         for tok in tokens {
             if current.is_empty() && tok.is_space {
@@ -283,6 +296,12 @@ pub fn layout_refs(doc: &RichTextDoc, o: &LayoutOpts, wrap: Option<f64>) -> Vec<
             current.push(tok);
         }
         flush(&mut current, &mut lines);
+        if is_justify(p.align) {
+            let last = lines.len() - 1;
+            for l in &mut lines[first_line..last] {
+                l.justify = true;
+            }
+        }
     }
     lines
 }
@@ -300,6 +319,7 @@ pub fn lines_of(doc: &RichTextDoc, refs: Vec<LineRef>, o: &LayoutOpts) -> Vec<Li
                 })
                 .collect(),
             align: l.align,
+            justify: l.justify,
             line_height: l.line_height,
         })
         .collect()
@@ -395,7 +415,7 @@ pub fn stamp_block_refs(doc: &RichTextDoc, extra: &[ExtraRow], base_pt: f64, uni
     let mut lines = layout_refs(doc, &LayoutOpts { line_height: line_gap, unit_per_pt, base_pt, color }, None);
     let n = doc.paragraphs.len();
     for (i, (text, align, _)) in extra.iter().enumerate() {
-        lines.push(LineRef { toks: vec![Tok { para: n + i, run: 0, b0: 0, b1: text.len(), u0: 0, u1: utf16_len(text) }], align: *align, line_height: line_gap });
+        lines.push(LineRef { toks: vec![Tok { para: n + i, run: 0, b0: 0, b1: text.len(), u0: 0, u1: utf16_len(text) }], align: *align, justify: false, line_height: line_gap });
     }
     if lines.is_empty() {
         return Vec::new();
@@ -480,7 +500,7 @@ pub fn stamp_block(doc: &RichTextDoc, extra: &[ExtraRow], base_pt: f64, unit_per
                     }
                 })
                 .collect();
-            Placed { line: Line { tspans, align: l.align, line_height: l.line_height }, y }
+            Placed { line: Line { tspans, align: l.align, justify: false, line_height: l.line_height }, y }
         })
         .collect()
 }
@@ -689,6 +709,45 @@ fn tspan_width_em(t: &Tspan) -> f64 {
     text_width_em_in(&t.text, t.bold, t.italic, t.font_family.as_deref())
 }
 
+/// Blocksatz ([208]): eine umbrochene Zeile (`justify`) in Wort-Stücke zerlegen, deren Zwischenräume die Spaltenbreite
+/// `col` (gleiche Einheiten wie die Schriftgrösse) ausfüllen. Ergebnis: je Wort-Stück (x-Versatz vom linken
+/// Spaltenrand, linksbündige Zeile mit einem Tspan). Die Breiten kommen aus den Schriftmetriken der gebündelten
+/// Schriften ([`text_width_em_in`]), nicht aus der Umbruch-Schätzung. Leer = nicht ausrichtbar (kein Zwischenraum,
+/// keine Spalte oder die Zeile ist schon breiter als die Spalte); der Aufrufer setzt sie dann linksbündig.
+pub fn justify_fragments(line: &Line, col: f64) -> Vec<(f64, Line)> {
+    if !line.justify || col.is_nan() || col <= 0.0 {
+        return Vec::new();
+    }
+    // Teile (Tspan-Nummer, Text, Breite, Leerraum?) in Lesereihenfolge.
+    let mut parts: Vec<(usize, &str, f64, bool)> = Vec::new();
+    for (ti, ts) in line.tspans.iter().enumerate() {
+        for part in split_keep_ws(&ts.text) {
+            let is_space = part.chars().next().is_some_and(js_space);
+            let w = text_width_em_in(part, ts.bold, ts.italic, ts.font_family.as_deref()) * ts.font_size;
+            parts.push((ti, part, w, is_space));
+        }
+    }
+    let gaps = parts.iter().filter(|p| p.3).count();
+    let natural: f64 = parts.iter().map(|p| p.2).sum();
+    if gaps == 0 || natural.is_nan() || natural >= col {
+        return Vec::new();
+    }
+    let extra = (col - natural) / gaps as f64;
+    let mut x = 0.0;
+    let mut out = Vec::new();
+    for (ti, text, w, is_space) in parts {
+        if is_space {
+            x += w + extra;
+            continue;
+        }
+        let mut ts = line.tspans[ti].clone();
+        ts.text = text.to_string();
+        out.push((x, Line { tspans: vec![ts], align: LineAlign::Left, justify: false, line_height: line.line_height }));
+        x += w;
+    }
+    out
+}
+
 /// [140] Waagrechte Lage jeder Zeile eines Raumstempels relativ zum Anker (gleiche Einheiten wie die Zeilen):
 /// der Block ist so breit wie seine breiteste Zeile ([`stamp_block_size`]) und um den Anker zentriert; eine
 /// linksbündige Zeile beginnt am linken Blockrand (−Breite/2), eine rechtsbündige endet am rechten (+Breite/2),
@@ -797,8 +856,11 @@ mod tests {
     fn bricht_wortweise_um_und_verliert_nichts() {
         let d = doc_from_text("eins zwei drei vier fünf", &Marks::default());
         let l = wrap_doc_to_lines(&d, &O, Some(30.0));
-        // 5.5 Einheiten je Zeichen: "eins" (22) + " " (5.5) passt, "zwei" (22) nicht mehr.
+        // Inter 10 pt: "eins" ≈ 22 Einheiten + Leerzeichen 2.8 passt, "zwei" (≈ 25) nicht mehr in 30.
         assert_eq!(texts(&l), ["eins", "zwei", "drei", "vier", "fünf"]);
+        // Breite wie im Editor: in 60 Einheiten passen zwei kurze Wörter nebeneinander.
+        let l = wrap_doc_to_lines(&d, &O, Some(60.0));
+        assert_eq!(texts(&l), ["eins zwei", "drei vier", "fünf"]);
         let l = wrap_doc_to_lines(&doc_from_text("aa bb cc", &Marks::default()), &O, Some(1.0));
         assert_eq!(texts(&l), ["aa", "bb", "cc"]);
     }
@@ -823,13 +885,14 @@ mod tests {
 
     #[test]
     fn breite_in_utf16_einheiten_und_js_leerraum() {
-        // 🏠 zählt 2 Einheiten (11 bei Grösse 10), NBSP trennt Wörter, U+0085 nicht (kein JS-\s).
+        // NBSP trennt Wörter, U+0085 nicht (kein JS-\s); 🏠 ist nicht in der Schrift: Ersatzbreite 0.55 em je Zeichen.
         assert_eq!(split_keep_ws("a\u{a0}b\u{85}c  d"), ["a", "\u{a0}", "b\u{85}c", "  ", "d"]);
         assert_eq!(split_ws(" a  b "), ["", "a", "b", ""]);
         assert_eq!(split_ws(""), [""]);
         let d = doc_from_text("🏠 🏠", &Marks::default());
-        assert_eq!(texts(&wrap_doc_to_lines(&d, &O, Some(27.5))), ["🏠 🏠"]);
-        assert_eq!(texts(&wrap_doc_to_lines(&d, &O, Some(27.4))), ["🏠", "🏠"]);
+        // 0.55 + Leerzeichen (0.281) + 0.55 em = 13.81 bei Grösse 10.
+        assert_eq!(texts(&wrap_doc_to_lines(&d, &O, Some(14.0))), ["🏠 🏠"]);
+        assert_eq!(texts(&wrap_doc_to_lines(&d, &O, Some(13.7))), ["🏠", "🏠"]);
     }
 
     #[test]
@@ -917,5 +980,61 @@ mod tests {
         // Zweite Zeile 8 pt: 4.60 m² ≈ 3.6 em · 8; Höhe 10 + 13.
         assert!((h - 23.0).abs() < 1e-9, "{h}");
         assert!((w - text_width_em("4.60 m²", false) * 8.0).abs() < 1e-9, "{w}");
+    }
+
+    fn justified_doc() -> RichTextDoc {
+        let mut d = doc(vec![vec![("Der Hof öffnet sich nach Süden und verbindet die beiden Häuser mit dem Dorfplatz.", Marks::default())], vec![("Kurz", Marks::default())]]);
+        d.paragraphs[0].align = Some(Align::Justify);
+        d.paragraphs[1].align = Some(Align::Justify);
+        d
+    }
+
+    #[test]
+    fn blocksatz_markiert_alle_zeilen_ausser_der_letzten_des_absatzes() {
+        let lines = wrap_doc_to_lines(&justified_doc(), &O, Some(120.0));
+        assert!(lines.len() >= 3, "{:?}", texts(&lines));
+        let n = lines.len();
+        // Letzte Zeile des ersten Absatzes und einzeiliger zweiter Absatz: nicht ausgerichtet.
+        assert!(lines[..n - 2].iter().all(|l| l.justify), "{:?}", lines.iter().map(|l| l.justify).collect::<Vec<_>>());
+        assert!(!lines[n - 2].justify && !lines[n - 1].justify);
+        assert!(lines.iter().all(|l| l.align == LineAlign::Left));
+        // Ohne Spalte (kein Umbruch) bleibt jede Zeile links.
+        assert!(wrap_doc_to_lines(&justified_doc(), &O, None).iter().all(|l| !l.justify));
+    }
+
+    #[test]
+    fn blocksatz_fuellt_die_spaltenbreite() {
+        let lines = wrap_doc_to_lines(&justified_doc(), &O, Some(120.0));
+        let line = &lines[0];
+        let frags = justify_fragments(line, 120.0);
+        assert!(frags.len() >= 2);
+        assert_eq!(frags[0].0, 0.0);
+        let (x, last) = frags.last().unwrap();
+        let w = text_width_em_in(&last.tspans[0].text, false, false, None) * last.tspans[0].font_size;
+        assert!((x + w - 120.0).abs() < 1e-9, "rechter Rand {}", x + w);
+        // Kein Wort geht verloren, Reihenfolge bleibt.
+        let joined: String = frags.iter().map(|f| f.1.content()).collect::<Vec<_>>().join(" ");
+        assert_eq!(joined, line.content());
+        assert!(frags.windows(2).all(|p| p[1].0 > p[0].0));
+        // Nicht ausrichtbar: zu schmale Spalte, einzelnes Wort, nicht markierte Zeile.
+        assert!(justify_fragments(line, 5.0).is_empty());
+        assert!(justify_fragments(&lines[lines.len() - 1], 120.0).is_empty());
+        let mut single = line.clone();
+        single.tspans.truncate(1);
+        single.tspans[0].text = "Wort".into();
+        assert!(justify_fragments(&single, 120.0).is_empty());
+    }
+
+    #[test]
+    fn blocksatz_ueber_laufgrenzen() {
+        let bold = Marks { bold: Some(true), ..Default::default() };
+        let mut d = doc(vec![vec![("Ein ", Marks::default()), ("fetter", bold), (" Satz mit Text", Marks::default())]]);
+        d.paragraphs[0].align = Some(Align::Justify);
+        let mut line = wrap_doc_to_lines(&d, &O, Some(500.0)).remove(0);
+        line.justify = true; // einzeilig: von Hand wie eine umbrochene Zeile behandeln
+        let frags = justify_fragments(&line, 200.0);
+        let words: Vec<String> = frags.iter().map(|f| f.1.content()).collect();
+        assert_eq!(words, ["Ein", "fetter", "Satz", "mit", "Text"]);
+        assert!(frags[1].1.tspans[0].bold && !frags[0].1.tspans[0].bold);
     }
 }

@@ -21,13 +21,16 @@ import type { DropdownItem, DropdownOption } from "./Dropdown";
 import { PromptDialog } from "./PromptDialog";
 import { WindowControls } from "./WindowControls";
 import {
+  applyAlign,
   applyMark,
   applyPreset,
+  commonAlign,
   commonMarkValue,
   DEFAULT_LINE_HEIGHT,
   docLength,
   isMarkActive,
   toggleMark,
+  touchedParagraphs,
 } from "../text/richText";
 import type { DetailLevel, RenderMode, View3d, ViewType } from "../model/viewTypes";
 import type { ModelViewChoice } from "../state/modelViews";
@@ -765,7 +768,7 @@ export function TextGroup({
         <Segment
           ariaLabel={t("text.group")}
           accent={active}
-          style={{ width: 130 }}
+          style={{ width: 172 }}
           cells={[
             {
               key: "left",
@@ -787,6 +790,13 @@ export function TextGroup({
               title: t("text.align.right"),
               active: curAlign === "right",
               onClick: () => setAlignValue("right"),
+            },
+            {
+              key: "justify",
+              icon: "format_align_justify",
+              title: t("text.align.justify"),
+              active: curAlign === "justify",
+              onClick: () => setAlignValue("justify"),
             },
           ]}
         />
@@ -836,43 +846,6 @@ export function TextGroup({
 }
 
 /**
- * Gemeinsame Absatz-Ausrichtung der vom Bereich berührten Absätze; `undefined`
- * bei uneinheitlicher/leerer Auswahl. Ohne Bereich → Ausrichtung des ersten
- * Absatzes (das ganze Doc als Ziel).
- */
-function commonAlign(doc: RichTextDoc, range: TextRange | null): Align | undefined {
-  const paras = touchedParagraphs(doc, range);
-  if (paras.length === 0) return doc.paragraphs[0]?.align ?? "left";
-  let value: Align | undefined;
-  let first = true;
-  for (const idx of paras) {
-    const a = doc.paragraphs[idx]?.align ?? "left";
-    if (first) {
-      value = a;
-      first = false;
-    } else if (a !== value) {
-      return undefined;
-    }
-  }
-  return value;
-}
-
-/**
- * Setzt die Absatz-Ausrichtung auf alle vom Bereich berührten Absätze. Ohne
- * Bereich (null) auf ALLE Absätze des Dokuments.
- */
-function applyAlign(doc: RichTextDoc, range: TextRange | null, align: Align): RichTextDoc {
-  const touched = new Set(touchedParagraphs(doc, range));
-  const all = range == null;
-  return {
-    version: 1,
-    paragraphs: doc.paragraphs.map((p, i) =>
-      all || touched.has(i) ? { ...p, align } : p,
-    ),
-  };
-}
-
-/**
  * Gemeinsame Zeilenhöhe der vom Bereich berührten Absätze (Vielfaches der
  * Basisgrösse); `undefined` bei uneinheitlicher Auswahl.
  */
@@ -906,25 +879,6 @@ function applyLineHeight(doc: RichTextDoc, range: TextRange | null, lineHeight: 
       all || touched.has(i) ? { ...p, lineHeight } : p,
     ),
   };
-}
-
-/** Indizes der Absätze, die der Bereich [start,end) berührt. */
-function touchedParagraphs(doc: RichTextDoc, range: TextRange | null): number[] {
-  if (range == null || range.start === range.end) {
-    return doc.paragraphs.map((_, i) => i);
-  }
-  const start = Math.min(range.start, range.end);
-  const end = Math.max(range.start, range.end);
-  const out: number[] = [];
-  let cursor = 0;
-  doc.paragraphs.forEach((p, i) => {
-    const len = p.runs.reduce((n, r) => n + r.text.length, 0);
-    const pStart = cursor;
-    const pEnd = cursor + len;
-    if (!(pEnd < start || pStart > end)) out.push(i);
-    cursor += len + 1;
-  });
-  return out;
 }
 
 /** App-Version (spiegelt src-tauri/tauri.conf.json). Exportiert für appMenu.ts

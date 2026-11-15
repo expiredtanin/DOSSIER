@@ -3431,6 +3431,7 @@ export const en: Record<TranslationKey, string> = {
   "text.align.left": "Align left",
   "text.align.center": "Center",
   "text.align.right": "Align right",
+  "text.align.justify": "Justify",
   "text.lineHeight": "Line height",
   "text.lineHeight.hint": "Line height (multiple of font size)",
   "text.lineHeight.increase": "Increase line height",
@@ -4133,6 +4134,8 @@ export const en: Record<TranslationKey, string> = {
   "settings.blenderPath.hint": "Empty: Blender is searched in PATH and the usual places (macOS: /Applications/Blender.app).",
   // [208] Competition submission: images on sheets, poster templates, anonymity
   "sheetImage.title": "Image",
+  "sheetText.add": "Text",
+  "sheetText.add.hint": "Text column on the sheet: drag a frame, then type (font, size, alignment in the top bar)",
   "sheetImage.add": "Image",
   "sheetImage.width": "Width mm",
   "sheetImage.dpi": "{dpi} dpi on the sheet",

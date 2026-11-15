@@ -4,7 +4,7 @@
 /* eslint-disable */
 
 /** Absatz-Ausrichtung. */
-export type Align = "left" | "center" | "right";
+export type Align = "left" | "center" | "right" | "justify";
 
 /**
  * Quelle eines vererbbaren Attributs (Vordergrund/Hintergrund/Strichstärke/

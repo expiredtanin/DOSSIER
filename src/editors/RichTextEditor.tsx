@@ -11,8 +11,10 @@ import { t } from "../i18n";
 import { docToHtml } from "../text/renderHtml";
 import { Dropdown } from "../ui/Dropdown";
 import {
+  applyAlign,
   applyMark,
   applyPreset,
+  commonAlign,
   commonMarkValue,
   DEFAULT_PRESETS,
   docLength,
@@ -23,6 +25,7 @@ import {
   toggleMark,
 } from "../text/richText";
 import type {
+  Align,
   BoolMark,
   Marks,
   RichTextDoc,
@@ -534,6 +537,16 @@ export function RichTextEditor({
     [effectiveRange, selRange, setEditorHtml],
   );
 
+  // Absatz-Ausrichtung ([208]: links/zentriert/rechts/Blocksatz) für die berührten Absätze (ohne Auswahl: alle).
+  const handleAlign = useCallback(
+    (align: Align) => {
+      const newDoc = applyAlign(valueRef.current, selRange && selRange.start !== selRange.end ? selRange : null, align);
+      onChangeRef.current(newDoc);
+      setEditorHtml(newDoc, selRange, true);
+    },
+    [selRange, setEditorHtml],
+  );
+
   const handlePreset = useCallback(
     (id: string) => {
       const preset = effectivePresets.find((p) => p.id === id);
@@ -661,6 +674,7 @@ export function RichTextEditor({
   const isSuper = isMarkActive(value, queryRange, "super");
   const isSub = isMarkActive(value, queryRange, "sub");
 
+  const currentAlign = commonAlign(value, selRange && selRange.start !== selRange.end ? selRange : null);
   const currentSize = commonMarkValue(value, queryRange, "sizePt") ?? 12;
   const rawColor = commonMarkValue(value, queryRange, "color") ?? "#ededed";
   const currentColor = rawColor.startsWith("#") ? rawColor : "#ededed";
@@ -775,6 +789,36 @@ export function RichTextEditor({
           onChange={handleColorChange}
           title={t("rt.color")}
         />
+
+        <div className="rt-toolbar-sep" />
+
+        {/* Ausrichtung */}
+        {(
+          [
+            ["left", "format_align_left", "text.align.left"],
+            ["center", "format_align_center", "text.align.center"],
+            ["right", "format_align_right", "text.align.right"],
+            ["justify", "format_align_justify", "text.align.justify"],
+          ] as const
+        ).map(([a, icon, key]) => (
+          <button
+            key={a}
+            type="button"
+            className={`rt-btn${currentAlign === a ? " rt-btn--active" : ""}`}
+            title={t(key)}
+            aria-label={t(key)}
+            aria-pressed={currentAlign === a}
+            data-rt-align={a}
+            onMouseDown={(e) => {
+              e.preventDefault();
+              handleAlign(a);
+            }}
+          >
+            <span className="material-symbols-outlined" aria-hidden="true" style={{ fontSize: 16 }}>
+              {icon}
+            </span>
+          </button>
+        ))}
 
         {/* Presets */}
         {effectivePresets.length > 0 && (

@@ -56,6 +56,7 @@ import {
   resolveViewportScale,
   sheetMmToModel,
   sheetModelToMm,
+  sheetLevelOf,
   viewportCenterBounds,
   visibleCodesFromSnapshot,
 } from "../model/layoutModel";
@@ -73,6 +74,8 @@ import {
 import type { PlanSelection, PlanViewHandle } from "../views/plan/PlanView";
 import { t } from "../i18n";
 import { getState } from "../state/appStore";
+import { sheetFangSegments } from "../model/sheetFang";
+import { setSheetSnapSegments } from "../tools/sheetSnapGeometry";
 
 // ── Geteilter Render-Kern ─────────────────────────────────────────────────────
 
@@ -235,6 +238,8 @@ function clip(s: string, max: number): string {
 export interface LayoutSheetHandlers {
   /** Zurück zur Modell-Ansicht (Grundriss/3D). */
   onBack: () => void;
+  /** Freier Text ([208]): startet die Textspalte (Rahmen aufziehen, Text tippen) auf der Blatt-Ebene. */
+  onAddText?: () => void;
   /** Ändert Position/Grösse/Massstab eines Viewports (mm). */
   onPatchViewport: (viewportId: string, patch: Partial<Omit<LayoutViewport, "id" | "snapshotId">>) => void;
   /** Entfernt einen Viewport per Id. */
@@ -382,6 +387,14 @@ export function LayoutSheetPane({
   const cropping = !!selectedImage && cropId === selectedImage.id;
   const guides = master?.guides;
   const canGuides = !!master && !!handlers.onSetGuides;
+
+  // [208] Objektfang der Blatt-Ebene: Papierrand, Hilfslinien und Rahmen der Blatt-Elemente (Textspalte, Linien …).
+  const sheetLevelId = sheetLevelOf(project, layout.id)?.id;
+  useEffect(() => {
+    if (!sheetLevelId) return;
+    setSheetSnapSegments(sheetLevelId, sheetFangSegments(layout, sheet, guides ?? []));
+    return () => setSheetSnapSegments(sheetLevelId, null);
+  }, [sheetLevelId, layout, sheet.w, sheet.h, guides]);
 
   // Gelöschter Viewport / anderes Blatt → Auswahl und laufendes Platzieren verwerfen.
   useEffect(() => {
@@ -1112,6 +1125,9 @@ export function LayoutSheetPane({
         </select>
         <button className="nav-add" data-add-image disabled={toolInputActive} title={t("sheetImage.add")} onClick={() => fileRef.current?.click()}>
           ＋ {t("sheetImage.add")}
+        </button>
+        <button className="nav-add" data-add-text disabled={toolInputActive || !handlers.onAddText} title={t("sheetText.add.hint")} onClick={() => handlers.onAddText?.()}>
+          ＋ {t("sheetText.add")}
         </button>
         <input
           ref={fileRef}

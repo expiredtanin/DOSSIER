@@ -328,10 +328,22 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   **frei setzbar** (aus dem Lineal ziehen, Zug ausserhalb des Blatts oder Doppelklick löscht, Panel „Hilfslinien“ mit Zahlenfeldern;
   am Masterlayout gespeichert, `MasterLayout.guides` — kein neues Modellfeld, gilt für alle Blätter des Masters, ohne Master nicht setzbar),
   **Bild-Zuschnitt durch Ziehen** (Knopf „Zuschneiden“ oder Doppelklick, Griffe am Ausschnitt, Original bleibt stehen, ein Undo-Schritt je Zug).
-  Tests: vitest `sheetSnap`, `sheetGuides`, e2e `competition`. Offen: Fang für Texte (es gibt keine freien Text-Elemente auf dem Blatt) und
-  Legenden-Verschieben (Legende hat keinen Zug am Blatt); Hilfslinien je Blatt statt je Master; Bild in DXF/IFC-Exporten nicht; Eigenschaftssatz-Namen `Dossier_Qto_…` im IFC (Programmkonvention) bleiben; Download-Namen im Browser ohne Tauri-Dialog; grosse Bilder: jede
+  Tests: vitest `sheetSnap`, `sheetGuides`, e2e `competition`. Offen: Legenden-Verschieben (Legende hat keinen Zug am Blatt); Hilfslinien je Blatt statt je Master; Bild in DXF/IFC-Exporten nicht; Eigenschaftssatz-Namen `Dossier_Qto_…` im IFC (Programmkonvention) bleiben; Download-Namen im Browser ohne Tauri-Dialog; grosse Bilder: jede
   Blatt-Änderung (Viewport verschieben …) ersetzt das ganze Layout samt Data-URL im Op und im Verlauf (wie `ContextImage`) — bei vielen MB Bilder
   in eine eigene Sammlung auslagern; nicht in der Tauri-App/auf dem Mac geprüft. · M
+  **Freie Texte auf dem Blatt (15.11.)**: nichts Neues gebaut — die Textspalte (`textbox`, Rich-Text auf der Blatt-Ebene, Papier 1:1) war schon da und
+  lag auf Ebene + Klasse; ergänzt: Knopf „Text“ in der Blatt-Leiste (startet die Textspalte), Vorgabe-Schrift wächst mit dem Blatt (A2 5 mm, A1 7 mm, A0 10 mm statt
+  immer 3.5 mm; `sheetTextHeightM`), **Blocksatz** (`Align::Justify`; Kern `text_layout::justify_fragments`: umbrochene Zeilen ausser der letzten des
+  Absatzes, Wörter an festen Lagen nach den Metriken der gebündelten Schriften; Bildschirm-Szene und Druck-SVG/PDF), Ausrichtung auch in der Werkzeugleiste des
+  Inline-Editors (die Kopfleiste ist beim Tippen vom Hintergrund verdeckt; links/zentriert/rechts/Blocksatz), **Umbruch nach echten Schriftbreiten** statt 0.55 × Zeichen
+  (Spalte füllt sich wie im Editor), zentriert/rechtsbündig in der Spalte auch am Bildschirm (stand vorher am Anker), **Fang**: Papierrand, Hilfslinien des Masters und
+  Rahmen von Viewports/Bildern/Tabellen als Objektfang der Blatt-Ebene (`model/sheetFang.ts` → `setSheetSnapSegments`; gilt für Textspalte und alle Zeichenwerkzeuge,
+  Endpunkt/Mitte/Kante/Schnitt, nicht nur 8-px-Einrasten), **Anonymitäts-Prüfung** erkennt Namen/E-Mail, die über Run-Grenzen laufen („Atelier“ + fett „Brunner AG“).
+  Tests: Rust `text_layout` (Blocksatz), `plan::text` (Spalte, Blocksatz in der Szene), `competition` (Rich-Text über Runs); vitest `sheetFang`, `state/sheetText`
+  (Textspalte → Ops → Undo/Redo, Klasse, Vorgabegrösse), `planToPrintSvg.sheetText`; e2e `sheetText` (Knopf, Rahmen, tippen, Blocksatz, Undo, PDF `pdftotext`, Schrift
+  eingebettet, Umbruch). Offen: DXF exportiert Einzeltext linksbündig mit Spaltenbreite (Ausrichtung/Blocksatz gehen im DXF nicht mit, auch vorher nicht);
+  Blocksatz am Bildschirm im Editor per CSS, in Szene/PDF per Metrik ohne Kerning (±1 mm Abweichung zum Editor möglich); Objektfang an Tabellen nur mit fester Höhe,
+  Legenden fehlen; die vier Griffe an der gewählten Textspalte (Plan-Ansicht) sind sichtbar, das Breite-Ziehen damit ist nicht geprüft (Objekt-Info zeigt für Text Breite/Höhe 0); Vorgabe-Klasse ist die aktive Klasse (nicht eigene „Beschriftung“); nicht in der Tauri-App/auf dem Mac geprüft.
   **Anonymitäts-Prüfung des Freitexts (14.11.)**: vor PDF-/SVG-/DXF-Export, Direkt-Export (CSV/IFC/OBJ/STL/GLB) und Publikationssatz einer
   anonymen Abgabe sucht der Kern (`competition.rs`, Bindung `anonymity_findings`, TS-Fassade `export/competitionCheck.ts`, Tor
   `state/anonymityGate.ts`) in jeder Zeichenkette des Projekts (Raum-, Geschoss-, Ebenen-/Klassen-, Gruppen-, Block-, Layout-/Blattnamen, Textobjekte,

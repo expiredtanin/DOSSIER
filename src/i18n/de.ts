@@ -3443,6 +3443,7 @@ export const de = {
   "text.align.left": "Linksbündig",
   "text.align.center": "Zentriert",
   "text.align.right": "Rechtsbündig",
+  "text.align.justify": "Blocksatz",
   "text.lineHeight": "Zeilenhöhe",
   "text.lineHeight.hint": "Zeilenhöhe (Vielfaches der Schriftgrösse)",
   "text.lineHeight.increase": "Zeilenhöhe erhöhen",
@@ -4147,6 +4148,8 @@ export const de = {
   "settings.blenderPath.hint": "Leer: Blender wird im PATH und an den üblichen Orten gesucht (macOS: /Applications/Blender.app).",
   // [208] Wettbewerbs-Abgabe: Bilder auf Blättern, Plakat-Vorlagen, Anonymität
   "sheetImage.title": "Bild",
+  "sheetText.add": "Text",
+  "sheetText.add.hint": "Textspalte auf dem Blatt: Rahmen aufziehen, dann tippen (Schrift, Grösse, Ausrichtung in der Kopfleiste)",
   "sheetImage.add": "Bild",
   "sheetImage.width": "Breite mm",
   "sheetImage.dpi": "{dpi} dpi auf dem Blatt",

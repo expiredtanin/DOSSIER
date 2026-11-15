@@ -28,7 +28,7 @@ use crate::plan::buf::{whole, Rec, View, F_COLOR, F_DASH_NULL, F_OPACITY, T_ARC,
 use crate::plan::parts::{greyed_of, Part};
 use crate::plan::arc_fit;
 use crate::plan::text::{SingleText, StampText};
-use crate::text_layout::{place_lines, stamp_block, stamp_line_offsets, wrap_doc_to_lines, Line, LayoutOpts, PT_TO_MM, TEXT_LINE_HEIGHT_MULT};
+use crate::text_layout::{justify_fragments, place_lines, stamp_block, stamp_line_offsets, wrap_doc_to_lines, Line, LayoutOpts, PT_TO_MM, TEXT_LINE_HEIGHT_MULT};
 use std::f64::consts::PI;
 
 /// Optionen: Massstab-Nenner, Blatt (mm) und Ausmass des Plans (`Plan.bounds`).
@@ -657,6 +657,16 @@ fn text_node(out: &mut Out, t: &SingleText, m: Map, opacity: String) {
     out.tagged(&["X"], &attrs);
     let at = place_lines(lines.iter().map(|l| (l.align, l.line_height)), c.x, c.y, wrap);
     for (line, (x, y)) in lines.iter().zip(at) {
+        // Blocksatz ([208]): jedes Wort als eigene linksbündige Zeile an seinem Platz, Zwischenräume füllen die Spalte.
+        if let Some(col) = wrap.filter(|_| line.justify) {
+            let frags = justify_fragments(line, col);
+            if !frags.is_empty() {
+                for (dx, frag) in &frags {
+                    line_node(out, frag, "", x + dx, y);
+                }
+                continue;
+            }
+        }
         let content = if line.tspans.is_empty() { "\u{200b}" } else { "" };
         line_node(out, line, content, x, y);
     }

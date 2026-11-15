@@ -13,7 +13,7 @@ use crate::plan::buf::{whole, T_DRAWING_TEXT, T_TEXT};
 use crate::plan::dxf::{StampLine as DxfLine, TextIn, TextStyleIn};
 use crate::plan::parts::{in_ranges, Part};
 use crate::plan::scene::{to_rgba, Rgba, SText, STYLE_BOLD, STYLE_ITALIC};
-use crate::text_layout::{doc_from_text, font_family_id, font_name_of, is_blank, plain_text, split_ws, stamp_block, stamp_line_offsets, wrap_doc_to_lines, LayoutOpts, LineAlign, Placed, PT_TO_MM, TEXT_LINE_HEIGHT_MULT};
+use crate::text_layout::{doc_from_text, font_family_id, font_name_of, is_blank, justify_fragments, plain_text, split_ws, stamp_block, stamp_line_offsets, wrap_doc_to_lines, LayoutOpts, LineAlign, Placed, PT_TO_MM, TEXT_LINE_HEIGHT_MULT};
 use serde::{Deserialize, Deserializer};
 
 fn num<'de, D: Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
@@ -221,8 +221,26 @@ fn single_scene(t: &SingleText, forced: bool, mm_to_m: f64, out: &mut Vec<SText>
         let size_m = line.max_size().unwrap_or(t.height_m);
         let fill = line.tspans.first().map(|s| s.fill.as_str()).or(color);
         let c = greyed_color(to_rgba(fill).unwrap_or(def), greyed);
+        let size_mm = if unit_per_pt > 0.0 { size_m / mm_to_m } else { size_m };
+        // Blocksatz ([208]): jedes Wort für sich, die Zwischenräume füllen die Spalte.
+        if let Some(col) = t.wrap().filter(|_| line.justify) {
+            let frags = justify_fragments(&line, col);
+            if !frags.is_empty() {
+                for (dx, frag) in frags {
+                    let fc = greyed_color(to_rgba(frag.tspans.first().map(|s| s.fill.as_str()).or(color)).unwrap_or(def), greyed);
+                    push(out, t.at.x + dx, t.at.y - dy, frag.content(), frag.max_size().map_or(size_mm, |m| if unit_per_pt > 0.0 { m / mm_to_m } else { m }), fc, LineAlign::Left, line_style(&frag), line_family(&frag));
+                }
+                continue;
+            }
+        }
         let style = line_style(&line);
-        push(out, t.at.x, t.at.y - dy, content, if unit_per_pt > 0.0 { size_m / mm_to_m } else { size_m }, c, line.align, style, line_family(&line));
+        // Zentriert/rechts in der Spalte (wie `place_lines` im Druck-SVG): Anker der Zeile = Mitte/rechter Rand der Spalte.
+        let x = match (line.align, t.wrap()) {
+            (LineAlign::Center, Some(w)) => t.at.x + w / 2.0,
+            (LineAlign::Right, Some(w)) => t.at.x + w,
+            _ => t.at.x,
+        };
+        push(out, x, t.at.y - dy, content, size_mm, c, line.align, style, line_family(&line));
     }
 }
 
@@ -400,5 +418,47 @@ mod tests {
         assert_eq!(xs(&run(Some(ScreenTexts { skip: Some(2) }))), vec![(0.0, STYLE_BOLD)]);
         assert!(!is_rotated(0.0) && !is_rotated(f64::NAN) && is_rotated(-0.1));
         assert!(!is_rotated(std::f64::consts::TAU) && !is_rotated(-2e-11) && is_rotated(std::f64::consts::PI));
+    }
+
+    /// [208] Textrahmen: zentrierte/rechte Zeilen stehen in der Spalte, Blocksatz zerlegt in Wörter bis zum rechten Rand.
+    #[test]
+    fn spalte_zentriert_rechts_und_blocksatz() {
+        use crate::model::{Align, Paragraph, TextRun, Vec2};
+        use crate::plan::buf::{View, Writer};
+        use crate::plan::prim::Primitive;
+        let para = |text: &str, align: Align| Paragraph { runs: vec![TextRun { text: text.into(), ..Default::default() }], align: Some(align), ..Default::default() };
+        let long = "Der Hof öffnet sich nach Süden und verbindet die beiden Häuser mit dem Dorfplatz";
+        let doc = RichTextDoc { version: 1.0, paragraphs: vec![para("Mitte", Align::Center), para("Rechts", Align::Right), para(long, Align::Justify)], ..Default::default() };
+        let wrap = 3.0; // m
+        let prims = vec![Primitive::DrawingText {
+            at: Vec2 { x: 10.0, y: 0.0 },
+            text: String::new(),
+            height_m: 0.1,
+            angle: 0.0,
+            color: "#000".into(),
+            marks: None,
+            wrap_width: Some(wrap),
+            doc: Some(doc),
+            drawing_id: Some("t".into()),
+            greyed: None,
+            opacity: None,
+        }];
+        let mut w = Writer::new(false);
+        w.group(&prims);
+        let bytes = w.finish();
+        let view = View::parse(&bytes).unwrap();
+        let n = view.len();
+        let mut parts = vec![Part::new(view, 0, n).unwrap()];
+        let out = scene_texts(&mut parts, &[], 100.0, None).unwrap();
+        assert_eq!((out[0].align, out[0].pos.x), (1, 10.0 + wrap / 2.0));
+        assert_eq!((out[1].align, out[1].pos.x), (2, 10.0 + wrap));
+        // Blocksatz: Wörter linksbündig, erste Zeile beginnt am Spaltenrand, jedes Wort rechts der Spalte endet nicht darüber hinaus.
+        let words: Vec<&SText> = out[2..].iter().filter(|t| t.align == 0).collect();
+        assert!(words.len() > 6, "{}", words.len());
+        assert!((words[0].pos.x - 10.0).abs() < 1e-9);
+        assert!(words.iter().all(|t| t.pos.x >= 10.0 - 1e-9 && t.pos.x <= 10.0 + wrap));
+        // Wörter derselben Zeile haben dieselbe Grundlinie; spätere Zeilen liegen tiefer.
+        let ys: std::collections::BTreeSet<i64> = words.iter().map(|t| (t.pos.y * 1e6) as i64).collect();
+        assert!(ys.len() >= 2);
     }
 }

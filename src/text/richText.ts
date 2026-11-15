@@ -154,3 +154,59 @@ export function applyPreset(
 ): RichTextDoc {
   return parseDoc(core().rich_apply_preset(JSON.stringify(doc), range.start, range.end, JSON.stringify(preset)), doc);
 }
+
+/**
+ * Gemeinsame Absatz-Ausrichtung der vom Bereich berührten Absätze; `undefined`
+ * bei uneinheitlicher/leerer Auswahl. Ohne Bereich → Ausrichtung des ersten
+ * Absatzes (das ganze Doc als Ziel).
+ */
+export function commonAlign(doc: RichTextDoc, range: TextRange | null): Align | undefined {
+  const paras = touchedParagraphs(doc, range);
+  if (paras.length === 0) return doc.paragraphs[0]?.align ?? "left";
+  let value: Align | undefined;
+  let first = true;
+  for (const idx of paras) {
+    const a = doc.paragraphs[idx]?.align ?? "left";
+    if (first) {
+      value = a;
+      first = false;
+    } else if (a !== value) {
+      return undefined;
+    }
+  }
+  return value;
+}
+
+/**
+ * Setzt die Absatz-Ausrichtung auf alle vom Bereich berührten Absätze. Ohne
+ * Bereich (null) auf ALLE Absätze des Dokuments.
+ */
+export function applyAlign(doc: RichTextDoc, range: TextRange | null, align: Align): RichTextDoc {
+  const touched = new Set(touchedParagraphs(doc, range));
+  const all = range == null;
+  return {
+    version: 1,
+    paragraphs: doc.paragraphs.map((p, i) =>
+      all || touched.has(i) ? { ...p, align } : p,
+    ),
+  };
+}
+
+/** Indizes der Absätze, die der Bereich [start,end) berührt. */
+export function touchedParagraphs(doc: RichTextDoc, range: TextRange | null): number[] {
+  if (range == null || range.start === range.end) {
+    return doc.paragraphs.map((_, i) => i);
+  }
+  const start = Math.min(range.start, range.end);
+  const end = Math.max(range.start, range.end);
+  const out: number[] = [];
+  let cursor = 0;
+  doc.paragraphs.forEach((p, i) => {
+    const len = p.runs.reduce((n, r) => n + r.text.length, 0);
+    const pStart = cursor;
+    const pEnd = cursor + len;
+    if (!(pEnd < start || pStart > end)) out.push(i);
+    cursor += len + 1;
+  });
+  return out;
+}

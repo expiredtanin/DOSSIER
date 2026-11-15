@@ -4,6 +4,7 @@
 // Treffer zwischen den Schritten rechnet der Kern.
 
 import type { Project, Vec2 } from "../model/types";
+import { effectiveSheetSizeMm, findMaster } from "../model/layoutModel";
 import type { CommandContext, DraftShape } from "./types";
 import type { ProjectMutation } from "../core";
 import { cmdMutation, documentFor } from "../core/document";
@@ -22,6 +23,19 @@ export interface CreatePreview {
 /** Schrifthöhe neuer Texte auf einem Layout-Blatt (Papier 1:1): 3.5 mm. */
 export const SHEET_TEXT_HEIGHT_M = 0.0035;
 
+/**
+ * Schrifthöhe neuer Texte auf dem Blatt des Layouts `layoutId` ([208]): 10 pt auf A4/A3 sind auf einem Plakat nicht
+ * lesbar — ab A2 wächst die Vorgabe mit der kurzen Blattseite (A2 5 mm, A1 7 mm, A0 10 mm). Ändern geht jederzeit
+ * in der Kopfleiste (pt).
+ */
+export function sheetTextHeightM(project: Pick<Project, "layouts" | "masterLayouts">, layoutId: string): number {
+  const layout = (project.layouts ?? []).find((l) => l.id === layoutId);
+  if (!layout) return SHEET_TEXT_HEIGHT_M;
+  const size = effectiveSheetSizeMm(findMaster(project, layout) ?? layout);
+  const short = Math.min(size.w, size.h);
+  return (short >= 800 ? 10 : short >= 550 ? 7 : short >= 400 ? 5 : 3.5) / 1000;
+}
+
 /** Kontext der Anfrage: aktive Ebene/Geschoss, Kategorie, Wandtyp (auf einem Blatt: Papier-Schrifthöhe). */
 function ctxReq(ctx: CommandContext): object {
   return {
@@ -29,7 +43,7 @@ function ctxReq(ctx: CommandContext): object {
     floorHeight: ctx.level.floorHeight ?? null,
     cat: ctx.defaultCategoryCode,
     wallType: ctx.activeWallTypeId,
-    ...(ctx.level.layoutId ? { textHeight: SHEET_TEXT_HEIGHT_M, sheet: true } : {}),
+    ...(ctx.level.layoutId ? { textHeight: sheetTextHeightM(ctx.project, ctx.level.layoutId), sheet: true } : {}),
   };
 }
 
