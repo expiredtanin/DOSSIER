@@ -73,12 +73,128 @@ fn sash_kind(k: OpeningKind) -> f64 {
     }
 }
 
+/// Öffnungen, die mit EINER Ansicht (`frame`) projiziert werden; `map` legt sie danach auf die 3D-Lage ([216]).
+struct Group<'a> {
+    frame: [f64; 9],
+    map: Option<ArcMap>,
+    b: Vec<f64>,
+    ids: Vec<&'a str>,
+    shapes: Vec<Option<ShapeNorm>>,
+    bands: Vec<Option<DoorBand>>,
+    /// Laufnummer je Öffnung (Reihenfolge der Ausgabe wie ohne Gruppen).
+    seq: Vec<usize>,
+}
+
+impl Group<'_> {
+    fn new(frame: [f64; 9], map: Option<ArcMap>) -> Self {
+        Group { frame, map, b: vec![0.0], ids: Vec::new(), shapes: Vec::new(), bands: Vec::new(), seq: Vec::new() }
+    }
+}
+
+/// [216] Öffnung in einer Bogenwand: in der Hilfsansicht abgewickelt gerechnet (x = Bogenlänge, y = Höhe, frontal auf die
+/// sichtbare Seite) und Punkt für Punkt dorthin gelegt, wo das 3D die Teile hat (`model3d::arc_placement`, gleiche
+/// Abbildung wie `emit_opening_meshes_with`): auf die Sehne der Einzug-Zone (gerade, schräg gesehen gleichmässig verkürzt),
+/// auf den Bogen (Teilung nach der Lage auf dem Bogen verkürzt) oder auf die Sehne zwischen den Laibungen; danach in die
+/// echte Ansicht projiziert. Waagrechte bleiben waagrecht, Senkrechte senkrecht.
+struct ArcMap {
+    arc: crate::wall_arc::WallArc,
+    place: crate::model3d::ArcPlacement,
+    from: f64,
+    to: f64,
+    /// Querlage der sichtbaren Wandfläche (links der Laufrichtung positiv), wie bei geraden Wänden ± Dicke/2 um die Achse.
+    n: f64,
+    /// +1 = rechte Seite (Aussenseite, `layers[0]`) sichtbar, −1 = linke.
+    side: f64,
+    view: [f64; 9],
+}
+
+impl ArcMap {
+    #[allow(clippy::too_many_arguments)]
+    fn new(p: &Project, wall: &Wall, arc: &crate::wall_arc::WallArc, op: &Opening, from: f64, to: f64, thickness: f64, frame: &[f64; 9]) -> Option<Self> {
+        // Sichtbare Seite nach der Tangente in Öffnungsmitte (rechte Normale (t.y, −t.x); Ansichtswelt (x, Höhe, y)).
+        let t = arc.tangent((from + to) / 2.0);
+        let facing = frame[3] * t.y - frame[5] * t.x;
+        let side = if facing < -1e-4 {
+            1.0
+        } else if facing > 1e-4 {
+            -1.0
+        } else {
+            return None;
+        };
+        Some(ArcMap { arc: *arc, place: crate::model3d::arc_placement(p, wall, arc, op), from, to, n: -side * thickness / 2.0, side, view: *frame })
+    }
+
+    /// Hilfsansicht: frontal auf die Ersatzwand (0,0)–(Länge,0), Seite `side` sichtbar, u = Bogenlänge.
+    fn frame(&self) -> [f64; 9] {
+        [0.0, 0.0, -100.0 * self.side, 0.0, 0.0, self.side, 1.0, 0.0, 0.0]
+    }
+
+    /// Bogenlänge `s` auf der sichtbaren Fläche → Grundriss-Punkt (wie das 3D).
+    fn world(&self, s: f64) -> kernel2d::Vec2 {
+        use crate::model3d::ArcPlacement;
+        let n = self.n;
+        match self.place {
+            ArcPlacement::Follow => self.arc.point(s, n),
+            ArcPlacement::Chord => {
+                let (a, b) = (self.arc.point(self.from, n), self.arc.point(self.to, n));
+                let k = (s - self.from) / (self.to - self.from);
+                kernel2d::Vec2::new(a.x + (b.x - a.x) * k, a.y + (b.y - a.y) * k)
+            }
+            ArcPlacement::Zone(sa, sb) => {
+                let (pa, u, chord) = crate::wall_arc::chord_of(&self.arc, sa, sb);
+                let t = (s - sa) / (sb - sa) * chord;
+                kernel2d::Vec2::new(pa.x + u.x * t - u.y * n, pa.y + u.y * t + u.x * n)
+            }
+        }
+    }
+
+    /// Punkt der Hilfsansicht → (Punkt der Ansicht, Tiefe).
+    fn proj(&self, q: Pt) -> (Pt, f64) {
+        let w = self.world(q[0]);
+        let f = &self.view;
+        let r = [w.x - f[0], q[1] - f[1], w.y - f[2]];
+        ([r[0] * f[6] + r[1] * f[7] + r[2] * f[8], q[1]], r[0] * f[3] + r[1] * f[4] + r[2] * f[5])
+    }
+
+    /// Alle Punkte der Öffnung umlegen, Tiefe = Mittel der Ecken; `false` hinter der Ansichtslinie.
+    fn apply(&self, op: &mut ProjOpening) -> bool {
+        let m = |q: &mut Pt| *q = self.proj(*q).0;
+        let depth = op.pts.iter().map(|q| self.proj(*q).1).sum::<f64>() / 4.0;
+        if !(depth > 1e-9) {
+            return false;
+        }
+        op.depth = depth;
+        let quads = |v: &mut Vec<[Pt; 4]>| v.iter_mut().flatten().for_each(m);
+        op.pts.iter_mut().for_each(m);
+        quads(&mut op.glass);
+        quads(&mut op.door_leaf);
+        quads(&mut op.sash_rects);
+        quads(&mut op.sill);
+        op.divisions.iter_mut().chain(op.symbol.iter_mut()).for_each(|(a, b)| {
+            m(a);
+            m(b);
+        });
+        if let Some(f) = op.frame.as_mut() {
+            f.iter_mut().for_each(m);
+        }
+        if let Some(s) = op.shading.as_mut() {
+            s.iter_mut().for_each(m);
+        }
+        if let Some((outline, glass, fills, _)) = op.shape.as_mut() {
+            outline.iter_mut().chain(glass.iter_mut()).for_each(m);
+            fills.iter_mut().flatten().for_each(m);
+        }
+        true
+    }
+}
+
 /// `collectOpenings`.
 pub(super) fn collect_openings(p: &Project, frame: &[f64; 9], win: &crate::plan::model_view::WindowOpts) -> Vec<ProjOpening> {
-    let mut b = vec![0.0];
-    let mut ids: Vec<&str> = Vec::new();
-    let mut shapes: Vec<Option<ShapeNorm>> = Vec::new();
-    let mut bands: Vec<Option<DoorBand>> = Vec::new();
+    // Gruppe 0: alle Öffnungen in geraden Wänden, projiziert mit `frame`. Je Öffnung in einer Bogenwand eine eigene
+    // Gruppe ([216]): abgewickelt gerechnet (Hilfsansicht frontal auf die sichtbare Seite, x = Bogenlänge) und Punkt
+    // für Punkt auf die 3D-Lage gelegt (`ArcMap`).
+    let mut groups: Vec<Group> = vec![Group::new(*frame, None)];
+    let mut seq = 0usize;
     let by_wall = p.openings_by_wall();
     for wall in &p.walls {
         let thickness = p.wall_type(wall).map_or(0.2, |t| t.layers.iter().fold(0.0, |s, l| s + l.thickness));
@@ -90,14 +206,23 @@ pub(super) fn collect_openings(p: &Project, frame: &[f64; 9], win: &crate::plan:
             if to - from < 1e-4 {
                 continue;
             }
-            // [T2] Bogenwand: Öffnung als Sehne zwischen den Laibungen (Ersatzwand je Öffnung).
-            let (ws, we, from, to) = match arc {
+            // [216] Bogenwand: abgewickelt auf einer Ersatzwand (x = Bogenlänge), Lage der Teile wie im 3D
+            // (`model3d::arc_placement`: Sehne der Einzug-Zone, Bogen oder Sehne zwischen den Laibungen).
+            let mut arc_side = None;
+            let (ws, we) = match arc {
                 Some(a) => {
-                    let (ps, pe) = (a.point(from, 0.0), a.point(to, 0.0));
-                    (Vec2 { x: ps.x, y: ps.y }, Vec2 { x: pe.x, y: pe.y }, 0.0, hypot2(pe.x - ps.x, pe.y - ps.y))
+                    let Some(m) = ArcMap::new(p, wall, &a, op, from, to, thickness, frame) else { continue };
+                    arc_side = Some(m.side);
+                    groups.push(Group::new(m.frame(), Some(m)));
+                    (Vec2 { x: 0.0, y: 0.0 }, Vec2 { x: axis, y: 0.0 })
                 }
-                None => (wall.start, wall.end, from, to),
+                None => (wall.start, wall.end),
             };
+            let gi = if arc.is_some() { groups.len() - 1 } else { 0 };
+            let g = &mut groups[gi];
+            g.seq.push(seq);
+            seq += 1;
+            let b = &mut g.b;
             let (zb, zt) = p.wall_vertical_extent(wall);
             let ob = zb + max(0.0, op.sill_height);
             let ot = p.opening_top_under_ceilings(wall, op, ob, min(zt, ob + op.height));
@@ -147,7 +272,7 @@ pub(super) fn collect_openings(p: &Project, frame: &[f64; 9], win: &crate::plan:
             // [105] Rahmen-Detail je Seite, Anschlag je Seite, Profile, Türblatt-Einzug der Zarge.
             let det = crate::opening_detail::frame_of(p, op).filter(|f| f.detailed);
             let dframe = crate::opening_detail::door_frame_of(p, op);
-            let side = view_side(frame, wall);
+            let side = arc_side.unwrap_or_else(|| view_side(frame, wall));
             let band = dframe.as_ref().map(|df| door_band(df, thickness, op, side));
             let nan = f64::NAN;
             match det.as_ref() {
@@ -237,9 +362,9 @@ pub(super) fn collect_openings(p: &Project, frame: &[f64; 9], win: &crate::plan:
                     if s.hinge_side.unwrap_or(SashDefHingeSide::Left) == SashDefHingeSide::Left { 1.0 } else { 0.0 },
                 ]);
             }
-            ids.push(&op.id);
-            bands.push(band);
-            shapes.push(crate::opening_shape::opening_outline(op, to - from, ot - ob).map(|poly| {
+            g.ids.push(&op.id);
+            g.bands.push(band);
+            g.shapes.push(crate::opening_shape::opening_outline(op, to - from, ot - ob).map(|poly| {
                 let (w, h) = (to - from, ot - ob);
                 let fw = if door { dt.and_then(|t| t.frame_width) } else { wt.and_then(|t| t.frame_width) }.unwrap_or(0.06).min(w.min(h) / 3.0);
                 let norm = |q: &[f64; 2]| [q[0] / w, q[1] / h];
@@ -249,7 +374,26 @@ pub(super) fn collect_openings(p: &Project, frame: &[f64; 9], win: &crate::plan:
             b[0] += 1.0;
         }
     }
-    let f = crate::plan::elevation_geom::openings(frame, &b);
+    let mut all: Vec<(usize, ProjOpening)> = Vec::new();
+    for g in &groups {
+        let f = crate::plan::elevation_geom::openings(&g.frame, &g.b);
+        for (k, mut op) in parse_openings(p, &f, &g.ids, &g.shapes, &g.bands) {
+            if let Some(m) = &g.map {
+                if !m.apply(&mut op) {
+                    continue;
+                }
+            }
+            all.push((g.seq[k], op));
+        }
+    }
+    all.sort_by_key(|(k, _)| *k);
+    let mut out: Vec<ProjOpening> = all.into_iter().map(|(_, op)| op).collect();
+    surface_openings(p, frame, &mut out);
+    out
+}
+
+/// Ausgabe von `elevation_geom::openings` lesen: (Index der Öffnung im Puffer, projizierte Öffnung).
+fn parse_openings(p: &Project, f: &[f64], ids: &[&str], shapes: &[Option<ShapeNorm>], bands: &[Option<DoorBand>]) -> Vec<(usize, ProjOpening)> {
     let mut out = Vec::new();
     if f.is_empty() {
         return out;
@@ -295,7 +439,7 @@ pub(super) fn collect_openings(p: &Project, frame: &[f64; 9], win: &crate::plan:
         if shape.is_some() {
             // Formöffnung ([G3]): ohne Flügel-/Sprossenteilung, Türblatt und Symbole (Rechteck-Raster).
             let round = p.openings.as_deref().unwrap_or(&[]).iter().any(|o| o.id == ids[k] && !crate::opening_shape::has_flat_bottom(o));
-            out.push(ProjOpening { pts, depth, glass: Vec::new(), door_leaf: Vec::new(), divisions: Vec::new(), sash_rects: Vec::new(), sill: if round { Vec::new() } else { sill }, symbol: Vec::new(), id: ids[k].to_string(), shape, frame: None, look: crate::plan::style::Detail::Fein, shading: None, glass_only: false });
+            out.push((k, ProjOpening { pts, depth, glass: Vec::new(), door_leaf: Vec::new(), divisions: Vec::new(), sash_rects: Vec::new(), sill: if round { Vec::new() } else { sill }, symbol: Vec::new(), id: ids[k].to_string(), shape, frame: None, look: crate::plan::style::Detail::Fein, shading: None, glass_only: false }));
             continue;
         }
         let mut sash_rects = sash_rects;
@@ -313,9 +457,8 @@ pub(super) fn collect_openings(p: &Project, frame: &[f64; 9], win: &crate::plan:
                 sash_rects.push(r(bd.clear / w, 1.0 - bd.clear / w, 1.0 - bd.clear / h));
             }
         }
-        out.push(ProjOpening { pts, depth, glass, door_leaf, divisions, sash_rects, sill, symbol, id: ids[k].to_string(), shape, frame: pts_frame, look: crate::plan::style::Detail::Fein, shading: None, glass_only: false });
+        out.push((k, ProjOpening { pts, depth, glass, door_leaf, divisions, sash_rects, sill, symbol, id: ids[k].to_string(), shape, frame: pts_frame, look: crate::plan::style::Detail::Fein, shading: None, glass_only: false }));
     }
-    surface_openings(p, frame, &mut out);
     out
 }
 

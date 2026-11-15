@@ -442,8 +442,9 @@ pub fn section_opening_primitives_mv(p: &Project, level: &LevelSpec, vis: &Visib
         if !vis.visible(&wall.category_code) {
             continue;
         }
-        // Bogenwand ([T2]): Öffnung auf der Sehne zwischen den Laibungen (gerades Einbauteil).
-        let chord = arc_cut_opening(wall, o, p0, u).or_else(|| arc_chord_opening(wall, o));
+        // Bogenwand ([T2], [216]): gerades Einbauteil dort, wo das 3D es hat (Sehne der Einzug-Zone, tangential am Bogen
+        // an der Schnittstelle oder Sehne zwischen den Laibungen).
+        let chord = arc_section_opening(p, wall, o, Some((p0, u)));
         let (wall, o) = match &chord {
             Some((vw, vo)) => (vw, vo),
             None => (wall, o),

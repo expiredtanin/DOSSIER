@@ -1375,3 +1375,72 @@ fn bodenlinie_auf_null_mit_ueberstand() {
     assert!(ground(&p, &hidden, 100.0).1.is_none());
     assert!(ground(&p, &Visibility::default(), 100.0).1.is_some());
 }
+
+/// [216] Fenster mit Schichteinzug [106] in der Bogenwand: im 3D liegen Wandloch und Fenster gerade auf der Sehne der
+/// Einzug-Zone (`model3d::arc_placement`). Der Schnitt (radial nahe der Laibung, wo Sehne und Bogen ≈ 2,5 cm auseinander
+/// liegen) zeigt Wand und Rahmen dort: Wandschnitt = Band der Sehne (± Dicke/2), Rahmen darin an derselben Stelle wie
+/// bei der geraden Wand (bündig aussen) — nicht tangential am Bogen.
+#[test]
+fn fenster_mit_schichteinzug_in_bogenwand_auf_der_sehne() {
+    use crate::model3d::{arc_placement, ArcPlacement};
+    let measure = |bulge: Option<f64>| -> (f64, f64, f64, f64) {
+        let mut p = sample_flush();
+        let w1 = p.walls.iter_mut().find(|w| w.id == "W1").unwrap();
+        w1.bulge = bulge;
+        let w1 = w1.clone();
+        for o in p.openings.iter_mut().flatten().filter(|o| o.id == "O1") {
+            o.layer_reveals = Some(vec![crate::model::LayerReveal { layer: -1.0, mode: crate::model::RevealMode::Zurueck, amount: Some(0.05), ..Default::default() }]);
+        }
+        let o1 = p.openings.as_deref().unwrap().iter().find(|o| o.id == "O1").unwrap().clone();
+        let m = o1.position + o1.width * 0.15;
+        let ht = p.wall_thickness(&w1, 0.2) / 2.0;
+        // Schnittlinie senkrecht zur Wand (radial) bei Bogenlänge m; erwartetes Wandband [c0, c1] in Schnitt-u.
+        let (c, n, band): (kernel2d::Vec2, kernel2d::Vec2, Option<(kernel2d::Vec2, kernel2d::Vec2)>) = match crate::wall_arc::WallArc::of_wall(&w1) {
+            Some(a) => {
+                let ArcPlacement::Zone(sa, sb) = arc_placement(&p, &w1, &a, &o1) else { panic!("Schichteinzug ⇒ Sehne") };
+                let (pa, u, _) = crate::wall_arc::chord_of(&a, sa, sb);
+                (a.point(m, 0.0), a.normal(m), Some((pa, u)))
+            }
+            None => (kernel2d::Vec2::new(w1.start.x + m, w1.start.y), kernel2d::Vec2::new(0.0, 1.0), None),
+        };
+        let l = LevelSpec { kind: "section".into(), line: Some([Vec2 { x: c.x - n.x * 3.0, y: c.y - n.y * 3.0 }, Vec2 { x: c.x + n.x * 3.0, y: c.y + n.y * 3.0 }]), ..Default::default() };
+        let out = compute_section(&p, &l, &[]).unwrap().unwrap();
+        let wall: Vec<f64> = out.cuts.iter().filter(|c| c.kind == Kind::Wall && c.source_id.as_deref() == Some("W1")).flat_map(|c| c.pts.iter().map(|q| q[0])).collect();
+        let (u0, u1) = (wall.iter().copied().fold(f64::INFINITY, f64::min), wall.iter().copied().fold(f64::NEG_INFINITY, f64::max));
+        assert!(u1 > u0, "{bulge:?}: Wandschnitt fehlt");
+        if let Some((pa, u)) = band {
+            // Schnitt-u der Sehnen-Flächen (Sehne ± ht entlang ihrer Normalen) auf der Schnittlinie.
+            let plane = l.plane().unwrap();
+            let (b, (ux, uy)) = (plane.base(), plane.u_model());
+            let ul = ux.hypot(uy);
+            let (ux, uy) = (ux / ul, uy / ul);
+            let hit = |off: f64| -> f64 {
+                let q = (pa.x - u.y * off, pa.y + u.x * off);
+                // Schnittlinie b + λ·û gegen Sehnen-Flächen-Linie q + μ·u.
+                let den = ux * u.y - uy * u.x;
+                ((q.0 - b.0) * u.y - (q.1 - b.1) * u.x) / den
+            };
+            let (c0, c1) = (hit(-ht).min(hit(ht)), hit(-ht).max(hit(ht)));
+            assert!((u0 - c0).abs() < 3e-3 && (u1 - c1).abs() < 3e-3, "Wandschnitt {u0}..{u1} nicht auf der Sehne {c0}..{c1}");
+        }
+        let prims = section_opening_primitives(&p, &l, &Visibility::default()).unwrap();
+        let frame: Vec<f64> = prims
+            .iter()
+            .filter_map(|pr| match pr {
+                Primitive::Polygon { pts, opening_id: Some(id), fill, .. } if id == "O1" && fill == "#ffffff" => Some(pts.iter().map(|q| q.x).collect::<Vec<_>>()),
+                _ => None,
+            })
+            .flatten()
+            .collect();
+        assert!(!frame.is_empty(), "{bulge:?}: Rahmen im Schnitt fehlt");
+        (u0, u1, frame.iter().copied().fold(f64::INFINITY, f64::min), frame.iter().copied().fold(f64::NEG_INFINITY, f64::max))
+    };
+    let (su0, su1, sf0, sf1) = measure(None);
+    let (au0, au1, af0, af1) = measure(Some(-0.3));
+    // Rahmen relativ zum Wandschnitt wie bei der geraden Wand (gleiche Seite, gleiche Lage in der Dicke).
+    let (s_in, s_out) = (sf0 - su0, su1 - sf1);
+    let (a_in, a_out) = (af0 - au0, au1 - af1);
+    let flip = (s_in - a_out).abs() + (s_out - a_in).abs() < (s_in - a_in).abs() + (s_out - a_out).abs();
+    let (a_in, a_out) = if flip { (a_out, a_in) } else { (a_in, a_out) };
+    assert!((a_in - s_in).abs() < 3e-3 && (a_out - s_out).abs() < 3e-3, "Rahmen in der Wand: Bogen {a_in}/{a_out}, gerade {s_in}/{s_out}");
+}

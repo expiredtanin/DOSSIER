@@ -193,20 +193,19 @@ pub fn emit_opening_meshes_with(p: &Project, detail: f64, keep: &dyn Fn(&Opening
         let Some((arc, v)) = crate::wall_arc::unrolled_wall(&p.walls[i]) else { continue };
         q.walls = vec![v];
         let own: Vec<Opening> = p.openings.as_deref().unwrap_or(&[]).iter().filter(|o| o.host_wall_id == p.walls[i].id && keep(o)).cloned().collect();
-        // [106] Öffnungen mit Schichteinzug liegen gerade auf der Sehne über `reveal_zone` (wie die
-        // Teilwand mit dem Loch, `wall_arc::chord_walls`); die übrigen werden gebogen.
-        let zone = |o: &Opening| -> Option<(f64, f64)> {
-            let r = crate::opening_detail::opening_reveal(p, &p.walls[i], o)?;
-            let ms = r.sides[..2].iter().flatten().map(|a| a.shift).fold(0.0f64, f64::max);
-            Some(crate::wall_arc::reveal_zone(r.from, r.to, ms, arc.length()))
-        };
-        let (zoned, bent): (Vec<Opening>, Vec<Opening>) = own.into_iter().partition(|o| zone(o).is_some());
-        // [216] Breite Öffnungen folgen dem Bogen (Rahmen, Flügel, Glas, Fensterbank in der Wandflucht), schmale bleiben
-        // gerade zwischen den Leibungen (Pfeilhöhe ≤ `BEND_SAGITTA`).
+        // [106]/[216] Lage nach [`arc_placement`]: mit Schichteinzug gerade auf der Sehne über `reveal_zone` (wie die
+        // Teilwand mit dem Loch, `wall_arc::chord_walls`), breite folgen dem Bogen, schmale bleiben gerade.
+        let (mut zoned, mut follow, mut straight) = (Vec::new(), Vec::new(), Vec::new());
+        for o in own {
+            match arc_placement(p, &p.walls[i], &arc, &o) {
+                ArcPlacement::Zone(sa, sb) => zoned.push((o, sa, sb)),
+                ArcPlacement::Follow => follow.push(o),
+                ArcPlacement::Chord => straight.push(o),
+            }
+        }
         let total = p.wall_thickness(&p.walls[i], 0.2);
         let off = crate::joins::reference_offset(super::wall_reference(&p.walls[i]), total);
         let r_out = arc.r_max(off - total / 2.0, off + total / 2.0);
-        let (follow, straight): (Vec<Opening>, Vec<Opening>) = bent.into_iter().partition(|o| follows_arc(r_out, o.width));
         q.openings = Some(straight);
         for mut m in emit_opening_meshes_plain(&q, detail, &|_| true) {
             for c in m.positions.chunks_exact_mut(3) {
@@ -223,8 +222,7 @@ pub fn emit_opening_meshes_with(p: &Project, detail: f64, keep: &dyn Fn(&Opening
                 out.extend(bend_on_arc(m, &arc, &stations));
             }
         }
-        for o in zoned {
-            let Some((sa, sb)) = zone(&o) else { continue };
+        for (o, sa, sb) in zoned {
             let (pa, u, chord) = crate::wall_arc::chord_of(&arc, sa, sb);
             q.openings = Some(vec![o]);
             for mut m in emit_opening_meshes_plain(&q, detail, &|_| true) {
@@ -239,6 +237,32 @@ pub fn emit_opening_meshes_with(p: &Project, detail: f64, keep: &dyn Fn(&Opening
         }
     }
     out
+}
+
+/// [216] Lage der Einbauteile einer Öffnung in einer Bogenwand — EINE Entscheidung für 3D, Ansicht und Schnitt.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum ArcPlacement {
+    /// Mit Schichteinzug [106]: Wandloch und Teile gerade auf der Sehne der Achse über `[sa, sb]` (Bogenlänge,
+    /// `wall_arc::reveal_zone`); Bogenlänge `s` liegt auf der Sehne linear bei `(s − sa)·Länge/(sb − sa)`.
+    Zone(f64, f64),
+    /// Ohne Schichteinzug und Pfeilhöhe > [`BEND_SAGITTA`]: Teile folgen dem Bogen (Punkt `s`, Querlage `n` auf
+    /// `arc.point(s, n)`).
+    Follow,
+    /// Schmal: gerade zwischen den Laibungen (Sehne von `from` nach `to`).
+    Chord,
+}
+
+/// [216] Wie liegen die Einbauteile von `o` in der Bogenwand `wall` (Bogen `arc`)? Siehe [`ArcPlacement`].
+pub(crate) fn arc_placement(p: &Project, wall: &Wall, arc: &crate::wall_arc::WallArc, o: &Opening) -> ArcPlacement {
+    if let Some(r) = crate::opening_detail::opening_reveal(p, wall, o) {
+        let ms = r.sides[..2].iter().flatten().map(|a| a.shift).fold(0.0f64, f64::max);
+        let (sa, sb) = crate::wall_arc::reveal_zone(r.from, r.to, ms, arc.length());
+        return ArcPlacement::Zone(sa, sb);
+    }
+    let total = p.wall_thickness(wall, 0.2);
+    let off = crate::joins::reference_offset(super::wall_reference(wall), total);
+    let r_out = arc.r_max(off - total / 2.0, off + total / 2.0);
+    if follows_arc(r_out, o.width) { ArcPlacement::Follow } else { ArcPlacement::Chord }
 }
 
 /// [216] Pfeilhöhe (m), ab der die Einbauteile einer Öffnung in der Bogenwand dem Bogen folgen; darunter bleiben sie

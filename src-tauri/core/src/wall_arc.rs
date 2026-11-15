@@ -517,13 +517,16 @@ pub fn chord_walls(w: &crate::wall_bands::WallIn, arc: &WallArc) -> Vec<crate::w
     let z1 = reach(ends, true) - 1e-3;
     st.retain(|&s| s <= 0.0 || s >= len || (s > z0 && s < z1));
     // [106] Sehnen über Öffnungen mit Schichteinzug: (Bereich, Öffnung, Einzug).
-    let zones: Vec<((f64, f64), &crate::wall_bands::OpeningIn, &crate::wall_bands::RevealIn)> = w
+    // [216] Ohne Schichtbänder (Schnitt/Ansicht) kommen die Bereiche aus `chord_zones` (gleiche Lage, ohne Einzug).
+    let zones: Vec<((f64, f64), &crate::wall_bands::OpeningIn, Option<&crate::wall_bands::RevealIn>)> = w
         .openings
         .iter()
-        .filter_map(|o| {
-            let r = w.reveals.iter().find(|r| r.from == o.from && r.to == o.to && r.z_bottom == o.z_bottom && r.z_top == o.z_top)?;
-            let ms = r.shifts.iter().flat_map(|s| [s[0], s[1]]).fold(0.0f64, f64::max);
-            Some((reveal_zone(o.from, o.to, ms, len), o, r))
+        .filter_map(|o| match w.reveals.iter().find(|r| r.from == o.from && r.to == o.to && r.z_bottom == o.z_bottom && r.z_top == o.z_top) {
+            Some(r) => {
+                let ms = r.shifts.iter().flat_map(|s| [s[0], s[1]]).fold(0.0f64, f64::max);
+                Some((reveal_zone(o.from, o.to, ms, len), o, Some(r)))
+            }
+            None => w.chord_zones.iter().find(|(a, b)| *a <= o.from + 1e-9 && *b >= o.to - 1e-9).map(|z| (*z, o, None)),
         })
         .collect();
     st.retain(|&s| !zones.iter().any(|((a, b), _, _)| s > *a + 1e-6 && s < *b - 1e-6));
@@ -585,8 +588,8 @@ pub fn chord_walls(w: &crate::wall_bands::WallIn, arc: &WallArc) -> Vec<crate::w
         if let Some((_, o, r)) = zones.iter().find(|((a, b), _, _)| (a - sa).abs() < 1e-6 && (b - sb).abs() < 1e-6) {
             let m = |s: f64| (s - sa) / (sb - sa) * chord;
             let oi = crate::wall_bands::OpeningIn { from: m(o.from), to: m(o.to), ..**o };
-            let ri = crate::wall_bands::RevealIn { from: oi.from, to: oi.to, ..(*r).clone() };
-            out.push(crate::wall_bands::WallIn { start: pa, end: pb, openings: vec![oi], cuts, reveals: vec![ri], ..w.clone() });
+            let reveals = r.map(|r| crate::wall_bands::RevealIn { from: oi.from, to: oi.to, ..r.clone() }).into_iter().collect();
+            out.push(crate::wall_bands::WallIn { start: pa, end: pb, openings: vec![oi], cuts, reveals, chord_zones: vec![], ..w.clone() });
             continue;
         }
         // z-Bereiche ohne die Öffnungen, die diese Teilwand ganz überdecken.

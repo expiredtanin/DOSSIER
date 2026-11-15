@@ -12,6 +12,30 @@ pub(super) fn opening_extent(p: &Project, w: &Wall, o: &Opening) -> (f64, f64) {
     (ob, p.opening_top_under_ceilings(w, o, ob, min(zt, ob + o.height)))
 }
 
+/// [216] Öffnung in der Bogenwand als gerade Ersatzwand dort, wo das 3D ihre Teile hat (`model3d::arc_placement`, EINE
+/// Entscheidung für 3D, Grundriss, Ansicht und Schnitt): mit Schichteinzug [106] auf der Sehne der Einzug-Zone (Lage
+/// linear, wie Wandloch und Teilwand in `wall_arc::chord_walls`); dem Bogen folgend tangential an der Schnittstelle
+/// ([157], [`arc_cut_opening`], nur mit `cut` = Schnittebene (Punkt, Richtung)); sonst (schmal, oder Ebene trifft die
+/// Achse in der Öffnung nicht) auf der Sehne zwischen den Laibungen ([`arc_chord_opening`]). `None` bei gerader Wand.
+pub(super) fn arc_section_opening(p: &Project, wall: &Wall, o: &Opening, cut: Option<((f64, f64), (f64, f64))>) -> Option<(Wall, Opening)> {
+    use crate::model3d::ArcPlacement;
+    let a = crate::wall_arc::WallArc::of_wall(wall)?;
+    match crate::model3d::arc_placement(p, wall, &a, o) {
+        ArcPlacement::Zone(sa, sb) if sb - sa > 1e-9 => {
+            let axis = a.length();
+            let from = max(0.0, min(o.position, axis));
+            let to = max(from, min(o.position + o.width, axis));
+            let (pa, u, chord) = crate::wall_arc::chord_of(&a, sa, sb);
+            let k = chord / (sb - sa);
+            let vw = Wall { start: Vec2 { x: pa.x, y: pa.y }, end: Vec2 { x: pa.x + u.x * chord, y: pa.y + u.y * chord }, bulge: None, ..wall.clone() };
+            let vo = Opening { position: (from - sa) * k, width: (to - from) * k, ..o.clone() };
+            Some((vw, vo))
+        }
+        ArcPlacement::Follow => cut.and_then(|(p0, u)| arc_cut_opening(wall, o, p0, u)).or_else(|| arc_chord_opening(wall, o)),
+        _ => arc_chord_opening(wall, o),
+    }
+}
+
 /// [T2] Öffnung in der Bogenwand als gerade Ersatzwand: Sehne der Achse zwischen den Laibungen,
 /// Öffnung ab 0 über die Sehnenlänge. `None` bei gerader Wand.
 pub(super) fn arc_chord_opening(wall: &Wall, o: &Opening) -> Option<(Wall, Opening)> {
@@ -551,8 +575,8 @@ fn section_reveal(p: &Project, wall: &Wall, plane: &Plane, v_min: f64, v_max: f6
         if flat.contains(&o.id) {
             continue;
         }
-        // Bogenwand ([T2]): Einzug auf der Sehne zwischen den Laibungen.
-        let chord = arc_chord_opening(host, o);
+        // Bogenwand ([T2], [216]): Einzug dort, wo das 3D die Öffnung hat (Sehne der Einzug-Zone).
+        let chord = arc_section_opening(p, host, o, None);
         let (wall, o) = match &chord {
             Some((vw, vo)) => (vw, vo),
             None => (wall, o),
