@@ -10,7 +10,7 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   stehen im Archiv („Bewusst nicht übernommen“).
 - **Grösse** (eine Person mit Agenten): S ≤ 1 Tag · M ≤ 1 Woche · L ≤ 1 Monat · XL > 1 Monat.
   Steht keine Grösse im Archiv, ist sie hier geschätzt.
-- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 260);
+- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 261);
   nie eine ID wiederverwenden oder umnummerieren. Präfix-IDs (`[K]`, `[G]`, `[T]`, `[B]`, `[C]`) bleiben.
 - **Pro Punkt:** was fehlt · wo im Code · Grösse. Höchstens ein bis drei Sätze je Punkt;
   Messwerte und Befunde gehören in den Commit.
@@ -54,6 +54,7 @@ Raumprogramm gegen Modell → Grundrisse/Schnitte/Ansichten 1:200 (Vorprojekt 1:
 3D-Bilder/Axonometrie/Schatten → Flächen/Volumen SIA 416 und Kennzahlen → Kostenschätzung grob → Abgabe-Layouts (Plakate A0/A1,
 Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
 
+- ◐ **[261]** Version und Buildnummer (15.11., Entscheid Maintainer): Anwender-Version semver **1.0.0-beta.1** (`package.json`, `tauri.conf.json`, App-`Cargo.toml`, `website/hugo.toml`; Kern-Crates bleiben 0.1.0, nichts Sichtbares). Interne Buildnummer **`JJMMTT.N`** aus `scripts/build-number.cjs`: Env `DOSSIER_BUILD` gewinnt, sonst Datum + Anzahl Commits des Tages (`git log --since=midnight`), ohne Git `JJMMTT.0`. Eingebacken über Vite-`define` (`__DOSSIER_BUILD__`, `src/update/buildInfo.ts`; Browser/Electron/Tauri) und `scripts/build-cli.mjs` (`dossier-cli --version`); Anzeige „1.0.0-beta.1 (Build 261115.1)“ in Über-Dialog, Einstellungen, Startbildschirm, macOS-Info-Fenster (shortVersion) und dezent in der Statusleiste; `tauri:build` setzt `bundle.macOS.bundleVersion` (CFBundleVersion). Tests: `src/update/buildNumber.test.ts`. **Offen:** nicht in der Tauri-App/auf dem Mac geprüft (Prüfschritt 13.35); Electron-`buildVersion` nicht gesetzt (nur Vite-Anzeige); Projektdatei trägt (noch) kein Feld für die schreibende App-Version/Build (bräuchte Modellfeld in Rust + `KNOWN_KEYS` + Fassade, S); Zähler zählt Commits, nicht Builds (zwei Builds ohne Commit dazwischen = gleiche Nummer; Abhilfe `DOSSIER_BUILD=261115.3`). Grösse S.
 - ◐ **[260]** Fenster/Türen im Grundriss: Darstellungsart **symbolisch** oder **geschnitten** wählbar (15.11., Entscheid Maintainer). Symbolisch = Öffnungssymbol nach Norm unabhängig von der Schnitthöhe (heutiges Verhalten für Öffnungen im Schnitt, Brüstungen/Stürze über/unter Schnitt als Symbol); geschnitten = Darstellung nach der tatsächlichen Schnitthöhe (Öffnung über dem Schnitt: Wand geschlossen, Öffnung als Linie über Schnitt). Einstellbar im Objekteinstellungsfenster (Taste T) je Fenster/Tür bzw. Typ, Vorgabe aus Modelldarstellung.
   **Umgesetzt 15.11.:** Modell `OpeningPlanMode` (`symbolisch` | `geschnitten`) als `Opening.planMode`, `WindowType.planMode`, `DoorType.planMode` und
   Modelldarstellung `walls.openingPlanMode` (Kern `generated.rs`, `npm run gen:types`); Rangfolge Element > Typ > Modelldarstellung > symbolisch

@@ -391,7 +391,7 @@ dependencies = [
 
 [[package]]
 name = "cad-tauri"
-version = "0.1.0"
+version = "1.0.0-beta.1"
 dependencies = [
  "fs4",
  "objc2 0.6.4",

@@ -209,8 +209,7 @@ Ehrlich vorweg: **Der Durchlauf des ganzen Referenz-Ablaufs auf dem Mac ist noch
 
 ## Offene Fragen an den Maintainer
 
-1. **[Frage M: Versionsnummer]** Der Stand im Repo ist `0.1.0` (`package.json`, `tauri.conf.json`); [30] nennt als Ziel «1.0.0-beta», der Release-Abschnitt «1.0.0».
-   Was steht auf dem Paket? Datum: Ziel 12.12.2026?
+1. ~~Versionsnummer~~ — erledigt durch [261] (15.11.): 1.0.0-beta.N, Build JJMMTT.N (Über Dossier und Statusleiste zeigen beides).
 2. **[Frage M: Signierung/Notarisierung/Updater]** Wird die Mac-App signiert und notarisiert, und läuft der Updater (Endpunkt zeigt auf `git.openbureau.ch`)? Sonst gehört ein
    Hinweis zu Gatekeeper in die Notes.
 3. **[Frage M: Download-Ort]** Wo liegen die Pakete (Download-Seite, git.openbureau.ch, GitHub)? Die README sagt «Fertige Installer gibt es noch nicht».

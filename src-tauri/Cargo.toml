@@ -11,7 +11,7 @@ exclude = ["render2d", "render3d", "kernel2d", "dwgimport", "trucksolid", "hatch
 
 [package]
 name = "cad-tauri"
-version = "0.1.0"
+version = "1.0.0-beta.1"
 license = "AGPL-3.0-or-later"
 edition = "2021"
 

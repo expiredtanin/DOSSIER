@@ -4,6 +4,7 @@
 // unverändert mit WebGL. Opt-out: DOSSIER_NO_NATIVE2D=1.
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
 
 // Veraltete WASM-Pakete zuerst neu bauen (sonst passen Oberfläche und Kern nach einem Pull nicht zusammen).
 if (!process.env.DOSSIER_NO_WASM_CHECK) {
@@ -14,6 +15,12 @@ if (!process.env.DOSSIER_NO_WASM_CHECK) {
 const args = process.argv.slice(2);
 const native = process.platform === "darwin" && !process.env.DOSSIER_NO_NATIVE2D;
 if (native && !args.includes("--features")) args.push("--features", "native2d");
+// [261] Buildnummer JJMMTT.N: Vite bäckt sie über `define` ein (Env DOSSIER_BUILD), macOS bekommt sie als CFBundleVersion
+// (`bundle.macOS.bundleVersion`; „Version“ im Finder bleibt die semver aus tauri.conf.json).
+const build = createRequire(import.meta.url)("./build-number.cjs").computeBuildNumber();
+process.env.DOSSIER_BUILD = build;
+if (args[0] === "build" && !args.includes("--config")) args.push("--config", JSON.stringify({ bundle: { macOS: { bundleVersion: build } } }));
+console.log(`[tauri-native] Build ${build}`);
 console.log(`[tauri-native] tauri ${args.join(" ")}`);
 const child = spawn("npx", ["tauri", ...args], { stdio: "inherit" });
 child.on("exit", (code, signal) => process.exit(code ?? (signal ? 1 : 0)));

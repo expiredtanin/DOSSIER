@@ -15,6 +15,7 @@ import { useEffect, useRef, useState, memo } from "react";
 import type { SnapSettings } from "../tools/types";
 import { t } from "../i18n";
 import { TraceControl } from "./TraceControl";
+import { BUILD_INFO, formatBuildShort } from "../update/buildInfo";
 
 export interface StatusBarProps {
   /** [205] Pausfolie schaltbar (2D-Ansicht: Grundriss, Schnitt, Ansicht, Zeichnung). */
@@ -459,6 +460,8 @@ export const StatusBar = memo(function StatusBar({
         <Field label={t("status.floor")} value={activeFloor} />
         <Sep />
         <Field label={t("status.layer")} value={activeLayer} />
+        <Sep />
+        <span className="sb-field" title={t("status.build.title")}><span className="sb-val" style={{ opacity: 0.55 }}>{formatBuildShort(BUILD_INFO, t("about.build"))}</span></span>
       </div>
     </footer>
   );

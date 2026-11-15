@@ -22,6 +22,7 @@ import type { LineCap, LineEnds, LineJoin } from "../core";
 import type { ThemeMode } from "../theme/themeMode";
 import { checkForUpdate, getUpdateSnoozeUntil, setUpdateSnooze } from "../update/checkForUpdate";
 import { getRunningVersion } from "../update/version";
+import { BUILD_INFO, formatBuildInfo } from "../update/buildInfo";
 import { getBlenderPath, setBlenderPath } from "../state/blenderSettings";
 import {
   fetchVersionHistory,
@@ -330,7 +331,7 @@ export function SettingsDialog({
           <section className="imp-section">
             <div className="imp-section-title">{t("settings.section.update")}</div>
             <div className="imp-note">
-              {t("about.version")} {runningVersion ?? APP_VERSION}
+              {t("about.version")} {formatBuildInfo({ ...BUILD_INFO, version: runningVersion ?? APP_VERSION }, t("about.build"))}
             </div>
             <button
               type="button"

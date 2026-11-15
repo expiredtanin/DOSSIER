@@ -186,6 +186,10 @@ function ifcSchemaFlag(args: Args): "IFC4" | "IFC2X3" {
   return fail(`--schema: "${v}" unbekannt (4 oder 2x3)`);
 }
 
+// [261] Version + Buildnummer: von scripts/build-cli.mjs eingebacken (esbuild define).
+declare const __DOSSIER_VERSION__: string;
+declare const __DOSSIER_BUILD__: string;
+
 function parseArgs(argv: string[]): Args {
   const positional: string[] = [];
   const flags = new Map<string, string>();
@@ -472,6 +476,10 @@ export async function run(argv: string[]): Promise<number> {
   const convertMode = args.positional[0] === "convert";
   // `dossier-cli bench --big [--floors 8 --apartments 15]` = `dossier-cli :gross bench` ([20]).
   if (args.positional[0] === "bench" && args.flags.has("big")) args.positional.unshift(":gross");
+  if (args.flags.has("version") || args.positional[0] === "--version") {
+    process.stdout.write(`dossier-cli ${`${typeof __DOSSIER_VERSION__ !== "undefined" ? __DOSSIER_VERSION__ : "0.0.0-dev"} (Build ${typeof __DOSSIER_BUILD__ !== "undefined" ? __DOSSIER_BUILD__ : "dev"})`}\n`);
+    return 0;
+  }
   const [file, command, ...rest] = args.positional;
   if (file === "bcf-info") return runBcfInfo(command);
   if (file === "pointcloud-info") return pointCloudInfo(args, command);

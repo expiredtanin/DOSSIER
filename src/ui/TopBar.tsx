@@ -13,6 +13,7 @@ import { t } from "../i18n";
 import { useModalFocus } from "./modalFocus";
 import { checkForUpdate } from "../update/checkForUpdate";
 import { getRunningVersion } from "../update/version";
+import { BUILD_INFO, formatBuildInfo } from "../update/buildInfo";
 import { memo, useEffect, useRef, useState } from "react";
 import { useLiveScale, zoomPercentOf } from "../state/liveScaleStore";
 import { createPortal } from "react-dom";
@@ -884,7 +885,7 @@ function applyLineHeight(doc: RichTextDoc, range: TextRange | null, lineHeight: 
 /** App-Version (spiegelt src-tauri/tauri.conf.json). Exportiert für appMenu.ts
  * (native macOS-Menüleiste, „Über Dossier"), damit die Versionsnummer nur an
  * dieser einen Stelle gepflegt wird. */
-export const APP_VERSION = "0.1.0";
+export const APP_VERSION = BUILD_INFO.version;
 
 /**
  * „Über"-Dialog (In-App, dunkel) — App-Marke, Version, Kurzbeschreibung und die
@@ -926,7 +927,7 @@ function AboutDialog({ onClose }: { onClose: () => void }) {
           dossier<span className="brand-dot">.</span>
         </div>
         <div className="about-version">
-          {t("about.version")} {runningVersion ?? APP_VERSION}
+          {t("about.version")} {formatBuildInfo({ ...BUILD_INFO, version: runningVersion ?? APP_VERSION }, t("about.build"))}
         </div>
         <p className="about-desc">{t("about.desc")}</p>
         <div className="about-meta">

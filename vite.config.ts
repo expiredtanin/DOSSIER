@@ -1,8 +1,12 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { createRequire } from "node:module";
+import { readFileSync } from "node:fs";
 
 const { buildCsp } = createRequire(import.meta.url)("./scripts/csp.cjs") as { buildCsp: () => string };
+// [261] Version (package.json) und Buildnummer JJMMTT.N (scripts/build-number.cjs) in die Oberfläche einbacken.
+const { computeBuildNumber } = createRequire(import.meta.url)("./scripts/build-number.cjs") as { computeBuildNumber: () => string };
+const pkg = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")) as { version: string };
 
 // [117] CSP nur im Build (Meta-Tag): der Dev-Server braucht Inline-Skripte für HMR/React-Refresh.
 const cspPlugin = {
@@ -16,6 +20,7 @@ const cspPlugin = {
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react(), cspPlugin],
+  define: { __DOSSIER_VERSION__: JSON.stringify(pkg.version), __DOSSIER_BUILD__: JSON.stringify(computeBuildNumber()) },
   // Tauri lädt die App über den Vite-Dev-Server; dessen Logs (cargo/tauri)
   // sollen nicht vom Bildschirm gewischt werden, und Tauri-eigene Env-Vars
   // müssen im Client sichtbar sein.

@@ -3208,6 +3208,8 @@ export const en: Record<TranslationKey, string> = {
   "mesh.export.failed": "Mesh export failed",
   "about.title": "About dossier",
   "about.version": "Version",
+  "about.build": "Build",
+  "status.build.title": "Internal build number (YYMMDD.N) — include it with every bug report",
   "about.desc": "Open Source Computer Aided Architecture Design — 2D vector design plus standards-compliant drawings from a semantic building model.",
   "about.copyright": "© 2026 Karim Gabriele Varano",
   "about.license": "License: AGPL-3.0-or-later",

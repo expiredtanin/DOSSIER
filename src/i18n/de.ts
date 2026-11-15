@@ -3221,6 +3221,8 @@ export const de = {
   "clash.failed": "Kollisionsprüfung fehlgeschlagen",
   "about.title": "Über dossier",
   "about.version": "Version",
+  "about.build": "Build",
+  "status.build.title": "Interne Buildnummer (JJMMTT.N) — bei jeder Fehlermeldung angeben",
   "about.desc": "Open Source Computer Aided Architecture Design — 2D-Vektordesign sowie normgerechte Pläne aus einem semantischen Gebäudemodell.",
   "about.copyright": "© 2026 Karim Gabriele Varano",
   "about.license": "Lizenz: AGPL-3.0-or-later",

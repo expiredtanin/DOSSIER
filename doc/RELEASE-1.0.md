@@ -29,6 +29,7 @@ E 2'600'048 / N 1'200'046 und E 2'600'060 / N 1'200'056. Raumprogramm als CSV (`
 | # | Schritt in Dossier | Erwartet | Status |
 |---|---|---|---|
 | 0.1 | App starten, Startbildschirm „Neues Projekt“ (oder Datei → Neu, ⌘N) | leeres Projekt mit Erdgeschoss, Obergeschoss, Schnitt A, Ansicht Süd | ✅ |
+| 0.0 | „Über dossier“ öffnen (Klick auf die Wortmarke) | zeigt Version und Build, z. B. „1.0.0-beta.1 (Build 261115.1)“; **Build bei jedem Befund angeben** (steht auch dezent in der Statusleiste) | |
 | 0.2 | Datei → Speichern unter … (⇧⌘S) als `wbw-test.obp` | Datei liegt am gewählten Ort, Titel zeigt den Namen | ✅ (Browser: Download) |
 
 ## 1. Grundstück und Kontext laden
@@ -175,6 +176,7 @@ und Befunde in `TODO.md` eintragen.
 | 13.32 | **Erker in Schnitt und Ansicht ([216]):** Musterhaus komplex, Ansicht Süd/Ost und Schnitt B-B 1:100 am Bildschirm (Metal), dazu das 3D des Erkers | Fenster sitzen im Wandloch der Erkerwand, Facetten laufen senkrecht durch die Geschosse, Deckenrand folgt der Sehne ohne Kappe; die breite Facette über UG–OG ist nach Geschmack zu beurteilen (Entscheid Maintainer offen); Plan, Schnitt, Ansicht und 3D stimmen überein |
 | 13.33 | **Raumstempel und Baulinie ([256]):** Musterhaus komplex DG 1:100 und Wettbewerb EG 1:200 am Bildschirm (Metal) und als PDF | Stempel «Schlafen» steht in 90 % in der Lücke zwischen Gauben-Umriss und Achse; die gestrichelte Baulinie/Parzellengrenze läuft nicht durch Masszahlen (2.69, 1.20, 20.39) |
 | 13.34 | **Grafikkarte weg, Plan und 3D ([118], [206]):** Plan und 3D offen, im Begehen (Umschalt+F) die Kamera verstellen, dann Mac in den Ruhezustand/Grafik wechseln; mehrmals wiederholen | Plan bleibt dabei beim SVG und flackert nicht; 3D baut nach Pausen neu auf, Kamera, Standpunkt und Begehen bleiben erhalten, G/WASD wirken weiter; bei dauerndem Ausfall Hinweis «3D-Engine nicht verfügbar», Speichern geht |
+| 13.35 | **Version und Build ([261]):** `npm run tauri:build`, App im Finder wählen → Informationen; Dossier → Über dossier; Statusleiste rechts unten | Finder: Version 1.0.0-beta.1 (Build 261115.N in der Bundle-Version); Über-Dialog „1.0.0-beta.1 (Build …)“ gleiche Nummer; Statusleiste „Build …“ |
 
 ## 14. Datensicherheit auf dem Mac ([116], Audit 14.11.)
 

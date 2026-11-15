@@ -8,6 +8,7 @@ import { getLanguage, t } from "../i18n";
 import { isTauriRuntime } from "../native/projectFile";
 import { APP_VERSION } from "./TopBar";
 import { getRunningVersion } from "../update/version";
+import { BUILD_INFO, formatBuildInfo } from "../update/buildInfo";
 import {
   getRecentProjects,
   removeRecentProject,
@@ -94,7 +95,7 @@ export function StartScreen({
         )}
       </div>
       <div className="start-footer">
-        {t("about.version")} {version ?? APP_VERSION}
+        {t("about.version")} {formatBuildInfo({ ...BUILD_INFO, version: version ?? APP_VERSION }, t("about.build"))}
       </div>
     </div>
   );

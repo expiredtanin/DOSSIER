@@ -13,7 +13,7 @@ disableKinds = ["taxonomy", "term", "rss"]
 
 [params]
   description = "Dossier ist ein freies CAD für Architektur. Du baust ein Gebäude aus Bauteilen, Grundriss, Schnitt und Ansicht werden daraus berechnet. Open-Source-CAAD unter AGPL-3.0."
-  version = "0.1.0"
+  version = "1.0.0-beta.1"
 
   repo     = "https://github.com/expiredtanin/DOSSIER"
   releases = "https://github.com/expiredtanin/DOSSIER/releases"

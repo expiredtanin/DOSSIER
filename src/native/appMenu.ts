@@ -19,6 +19,7 @@ import { openRenderDialog } from "../state/renderDialogHook";
 import { openShortcutOverview } from "../state/shortcutOverviewHook";
 import { openImageExportDialog } from "../state/imageExportDialogHook";
 import { APP_VERSION } from "../ui/TopBar";
+import { BUILD_INFO } from "../update/buildInfo";
 import type { View3d, ViewType } from "../model/viewTypes";
 import type { SelectionActionId } from "../state/selectionActions";
 
@@ -529,7 +530,7 @@ export function useNativeAppMenu(
               About: {
                 name: "dossier",
                 version: APP_VERSION,
-                shortVersion: APP_VERSION,
+                shortVersion: `${APP_VERSION} (${BUILD_INFO.build})`,
                 copyright: t("about.copyright"),
                 credits: `${t("about.desc")}\n\n${t("about.license")} · ${t("about.suite")}`,
               },
