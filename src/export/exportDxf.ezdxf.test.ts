@@ -25,6 +25,13 @@ interface EzEntity {
   pts?: number[][];
   closed?: boolean;
   text?: string;
+  plain?: string;
+  at?: number[];
+  width?: number;
+  attachment?: number;
+  halign?: number;
+  align_point?: number[];
+  spacing?: number;
   solid?: boolean;
   paths?: number;
   pattern_lines?: number;
@@ -104,6 +111,43 @@ describe.skipIf(!hasEzdxf)("DXF-Export gegen ezdxf", { timeout: 60_000 }, () => 
     expect(r.result!.entities).toEqual([
       expect.objectContaining({ type: "TEXT", layer: `${cat0.code}_Gelände_Süd`, text: "Grünfläche ≥ 30 %" }),
     ]);
+  });
+
+  it("Textspalte als MTEXT mit Breite, Absatz-Ausrichtung und fett in Teilen; zentrierte Zeile als TEXT 72/11", () => {
+    const cat0 = sampleProject.layers[0];
+    const project: Project = {
+      ...sampleProject,
+      drawings2d: [{ ...(sampleProject.drawings2d[0] ?? {}), id: "d1", categoryCode: cat0.code } as Project["drawings2d"][number]],
+    };
+    const doc = {
+      version: 1,
+      paragraphs: [
+        { align: "justify", runs: [{ text: "Erster Satz mit ", marks: {} }, { text: "fettem", marks: { bold: true, font: "Georgia" } }, { text: " Teil.", marks: {} }] },
+        { align: "right", runs: [{ text: "Zweiter Absatz", marks: {} }] },
+      ],
+    };
+    const mid = { version: 1, paragraphs: [{ align: "center", runs: [{ text: "Mitte", marks: {} }] }] };
+    const t = (at: { x: number; y: number }, d: object) => ({ kind: "drawingText", at, text: "", heightM: 0.2, angle: 0, color: "#000", drawingId: "d1", wrapWidth: 5, doc: d });
+    const plan = {
+      primitives: [t({ x: 1, y: 10 }, doc), t({ x: 1, y: 20 }, mid)],
+      bounds: { minX: 0, minY: 0, maxX: 1, maxY: 1 },
+    } as unknown as Plan;
+    const r = ezdxfRead("mtext", buildPlanDxf(plan, project));
+    expect(r.result, r.err).not.toBeNull();
+    expect(r.result!.errors).toEqual([]);
+    expect(r.status).toBe(0);
+    const [m, tx] = r.result!.entities;
+    expect(m.type).toBe("MTEXT");
+    expect(m.width).toBe(5);
+    expect(m.attachment).toBe(1);
+    expect(m.at![0]).toBe(1);
+    expect(m.plain).toBe("Erster Satz mit fettem Teil.\nZweiter Absatz");
+    expect(m.text).toContain("\\pxqj;");
+    expect(m.text).toContain("\\fGeorgia|b1|i0;");
+    expect(m.text).toContain("\\pxqr;Zweiter Absatz");
+    expect(tx.type).toBe("TEXT");
+    expect(tx.halign).toBe(1);
+    expect(tx.align_point).toEqual([3.5, 20]);
   });
 
   it("HATCH: Vollfüllung, Kreuzschraffur und gestrichelt — ezdxf liest Rand, Farbe, Musterzeilen ohne Auditor-Fehler", () => {
