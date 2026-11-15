@@ -1584,6 +1584,7 @@ Punktwolken/BCF-Ausbau, Windows-Paket, [C5]/[C7]/[15] Kern-Umbauten — ausser s
   (headless wird der Renderer nie bekannt, die Prüfung deckt dort nur die Brücke ab; der Neuaufbau-Pfad ist durch vitest abgedeckt), `camera`, `walk`,
   `renderCount`, `a11yNewDialogs` grün. Nicht in der Tauri-App/auf dem Mac mit echtem Geräteverlust geprüft. Noch offen: ein Preset, das der Nutzer nicht
   verändert hat, wird nach dem Neuaufbau neu eingepasst (gewollt).
+  **Nachtrag 15.11. (e2e `walk:17`/`a11yNewDialogs:263` flackerten, Taste G wirkungslos):** Ursache: der Tasten-Hörer des Begehens (G, WASD, Umschalt+F) hing an `walkInput = ready || failed`; in der Probezeit nach Geräteverlust ist beides falsch, der Hörer war abgemeldet. Behoben: Effekt nur noch von `render` abhängig (kein Renderer-Zustand; `render` tut ohne Renderer nichts). Test: vitest `walkKeysLifecycle.test.ts` (Quell-Wächter, kein DOM-Test möglich); e2e `walk`+`a11yNewDialogs:263` 5x mit `--workers=2`, `gpuDeviceLost206`, `camera`, `renderCount` grün. Nicht auf dem Mac geprüft.
 - ◐ **[3]** Darstellungswege reduzieren (vier 2D-Pfade: render2d, glPlan, SVG, native2d; zwei 3D-Pfade). · L
 - ◐ **[17]** Ergebnisse über die Ausgabe testen. Golden-Ausgaben für 3D fehlen. · M
 - ◐ **[19]** Beispielgebäude als Skript: `sampleProject.ts` + Kontrollmodell. · S
