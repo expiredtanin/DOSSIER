@@ -165,7 +165,7 @@ Ehrlich vorweg: **Der Durchlauf des ganzen Referenz-Ablaufs auf dem Mac ist noch
 - **Grafikkarten-Verlust** ([118], [206]): Neuaufbau mit Pausen, Plan bleibt beim SVG, 3D-Hinweis, Kamera bleibt erhalten — **nur headless (SwiftShader) mit erzwungenem
   `GPUDevice.destroy()` geprüft, auf dem Mac (WKWebView/Metal) mit echtem Verlust nicht**; ein unverändertes Preset wird nach dem Neuaufbau neu eingepasst.
 - **Erker im Musterhaus komplex** ([216]): Die Vereinigung der Sehnen-Zonen ergibt dort eine 2-m-Facette (Pfeilhöhe ca. 25 cm) über UG, EG und OG, weil die
-  Fenster überlappen; wer runder will, legt sie übereinander. **Entscheid des Maintainers offen** (Facette so lassen oder Zonen je Geschoss). Nur im Container
+  Fenster überlappen. **Entscheid Maintainer 15.11.:** das UG-Fenster wird über die EG/OG-Fenster gelegt, damit der Erker rund bleibt (Umsetzung läuft). Nur im Container
   (CLI-SVG in Chromium, Rust-Tests) angesehen; Mac-Gegenprobe, Metal-3D und Live-Schnitt offen; an der Geschossgrenze bleibt eine Kante, wenn UG und EG
   verschiedene Wanddicken haben; der Dachrand `dach-erker` folgt weiter dem Bogen.
 - Plakat: Hilfslinien gehören zum Masterlayout, nicht zum Blatt; kein Fang für Legenden; Bilder werden als Data-URL im Projekt gespeichert
@@ -191,7 +191,7 @@ Ehrlich vorweg: **Der Durchlauf des ganzen Referenz-Ablaufs auf dem Mac ist noch
 - **Plandarstellung 1:100** ([256]): Fenster über der Schnitthöhe — erledigt durch [260] (symbolisch/geschnitten wählbar, Vorgabe symbolisch;
   ~~Frage M: Darstellung Fenster über Schnitt~~); auf dem Mac nicht geprüft. Offen: Sonnenschatten
   im 1:100-Grundriss, Höhenlinien-Koten auf Masszahlen, Koten «±0.00»/«+5.70» auf Achslinien; Stempel «Schlafen» im DG steht jetzt in 90 % (statt 80 %), die
-  Baulinie setzt vor Masszahlen aus (15.11.); Raumstempel bleiben unter 90 %, wenn Linien den Raum zerschneiden (Entscheid Maintainer offen); nur im Container (CLI-SVG in Chromium) angesehen, nicht auf dem Mac.
+  Baulinie setzt vor Masszahlen aus (15.11.); Raumstempel schrumpfen bei Platzmangel auf 90 %, statt eine Achse zu überdecken (Entscheid Maintainer 15.11.); nur im Container (CLI-SVG in Chromium) angesehen, nicht auf dem Mac.
 - **Datensicherheit** ([116]): Schliessen-Rückfrage, Cmd+Q-Menüeintrag, Autosave mit zwei Ständen, atomare Exporte und «Vorige Fassung wiederherstellen …»
   sind **nicht in der Tauri-App und nicht in Electron geprüft** (nur Tests und Browser, `doc/RELEASE-1.0.md` Abschnitt 14); der Menüeintrag ist nicht
   ausgegraut (ohne Sicherung nur ein Hinweis); bei sehr grossen Projekten serialisiert die Kopie im Hauptfaden.

@@ -58,7 +58,7 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   **Umgesetzt 15.11.:** Modell `OpeningPlanMode` (`symbolisch` | `geschnitten`) als `Opening.planMode`, `WindowType.planMode`, `DoorType.planMode` und
   Modelldarstellung `walls.openingPlanMode` (Kern `generated.rs`, `npm run gen:types`); Rangfolge Element > Typ > Modelldarstellung > symbolisch
   (`WallOpts::opening_plan_mode`). Kern `plan/walls.rs`: symbolisch ⇒ Öffnung immer als geschnitten (Wandlücke + Symbol), Formöffnungen mit
-  voller Breite statt der Sehne auf Schnitthöhe ([G3] gilt nur noch für „geschnitten“); geschnitten ⇒ wie bisher nach Ansichtsbereich, neu auch
+  voller Breite statt der Sehne auf Schnitthöhe ([G3] gilt nur noch für „geschnitten“; Entscheid Maintainer 15.11. bestätigt); geschnitten ⇒ wie bisher nach Ansichtsbereich, neu auch
   ohne eigenen Bereich: ganz über dem Schnitt Wand geschlossen + strichpunktiert, darunter gepunktet, auf schwarzer Wand hell ([256]
   `contrastOnSolid`). Eine Stelle für Bildschirm, Plan-SVG, Druck-SVG/PDF und DXF (alle aus den Plan-Primitiven); Bemassung unverändert.
   UI: Objekteinstellungen (T) Feld „Im Grundriss“ (Wie Typ/symbolisch/geschnitten, „gemischt“-Marke) über den neuen Host-Handler
@@ -608,7 +608,7 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   `raumstempel_rueckt_in_luecke_statt_zu_schrumpfen`, `baulinie_setzt_vor_masszahlen_aus`; Golden komplex EG/OG/DG. Geprüft nur Linux/CLI-SVG
   in Chromium. **Offen:** Kote „±0.00" (komplex EG Zimmer) und „+5.70" (DG) stehen auf/neben Achslinien; Handmass „5.73" quert den Zimmer-Stempel
   nicht, aber die Wohnen/Essen/Küche-Beschriftung steht unter Revisionswolke und Sichtkegel (ohne Abgabe-Vorlage); Raumstempel nicht >90 %, wenn
-  Linien die Räume zerschneiden — Alternative wäre Freistellung in voller Schrift (Entscheid Maintainer).
+  Linien die Räume zerschneiden — **Entscheid Maintainer 15.11.: so lassen** (90 % statt Achse überdecken, keine Freistellung).
 - Fachplaner-Austausch: DXF/DWG je Geschoss/Schnitt/Ansicht ([200]), IFC mit Räumen/Psets ([201]); Rundreise in Archicad/Revit einmal
   real prüfen ([C9]).
 - ◐ **[259]** IFC-Export für Fachplaner (Vorprojekt, 14.11.). Alle drei Beispielprojekte mit ifcopenshell 0.9 geprüft: `validate-ifc.py`
