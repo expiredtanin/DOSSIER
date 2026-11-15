@@ -250,7 +250,23 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   Stufe zum Bogen), Linien an den Zonengrenzen geteilt (Bogen/Gerade). Test
   `fenster_mit_schichteinzug_in_bogenwand_gerade_auf_der_sehne`. Nur Linux (Rust-Tests, WASM gebaut), Live-Schnitt nicht im
   Browser/Metal angesehen. Offen: Mac-Gegenprobe; Schnitt/Ansicht (2D) zeigen Erker-Fenster mit Schichteinzug weiter gebogen
-  (tangential, [157]).
+  (tangential, [157]) — erledigt 15.11., s. unten.
+  Stand 15.11.: Schnitt und Ansicht (2D) legen Fenster in Bogenwänden wie 3D und Grundriss. EINE Entscheidung
+  `model3d::arc_placement` (`ArcPlacement::Zone/Follow/Chord`, nutzt `reveal_zone` und `follows_arc`/`BEND_SAGITTA`; das 3D
+  `emit_opening_meshes_with` ruft sie jetzt auch). Ansicht (`plan/elevation/openings.rs`): je Bogen-Öffnung eine Gruppe, in
+  einer Hilfsansicht abgewickelt gerechnet (x = Bogenlänge) und Punkt für Punkt auf die 3D-Lage gelegt (`ArcMap`: Sehne der
+  Einzug-Zone, Bogen oder Sehne der Laibungen), dann orthogonal projiziert — Flügelteilung schräg gesehen nach der Lage auf dem
+  Bogen verkürzt; sichtbare Seite nach der Tangente in Öffnungsmitte. Schnitt (`section/bands.rs` `arc_section_opening`, auch
+  für Leibungs-Einzug und Formöffnungs-Umriss): mit Einzug auf der Zonen-Sehne, gebogen tangential an der Schnittstelle, schmal
+  auf der Laibungs-Sehne. Die Wand selbst liegt in Schnitt/Ansicht (Eingabe ohne Schichtbänder) jetzt ebenfalls auf der
+  Zonen-Sehne (`WallIn::chord_zones` → `chord_walls`); Pfeiler/Brüstung/Sturz der Zonen-Teilwand bekommen die radiale Gehrung
+  nur am Ende vor/hinter dem Loch. Tests `fenster_in_bogenwand_wie_im_3d` (Glas-Ausdehnung = 3D-Glas auf der Aussenfläche
+  projiziert, Flügelteilung auf Bogen/Sehne; gerade, gebogen, mit Einzug) und `fenster_mit_schichteinzug_in_bogenwand_auf_der_sehne`
+  (Wandschnitt = Sehnen-Band, Rahmen darin wie bei gerader Wand). Golden `komplex-ansicht-ansicht-sued` (Erker-Fenster und
+  -Wand auf der Sehne), `komplex-model3d` unverändert. Musterhaus komplex Ansicht Ost/Süd und Schnitt B-B per CLI-SVG `--hatch`
+  in Chromium verglichen (Linux): Fenster sitzen im Wandloch (vorher schräg gesehen ≈ 1–2 cm daneben). Offen: Mac-Gegenprobe;
+  Deckenstirn im Erker folgt weiter dem Bogen und ragt im Schnitt an der Zonen-Sehne ≈ 2,5 cm in die Dämmung (wie im 3D);
+  an den Zonenenden zeigt die Ansicht senkrechte Kanten (Stufe Sehne/Bogen ≈ 2 mm, wie im 3D).
 - ◐ **[228]** In Blender öffnen / .blend speichern (12.11., Wunsch Maintainer; Stand 13.11.: umgesetzt und mit bpy 5.3 im Linux-Container geprüft, Mac-Gegenprobe offen). Skript `render_dossier.py` hat Modus `save` (`scene.json` `mode`, Argument `--mode`): Szene wie fürs Rendering bauen, Objekte in Collections nach Bauteil (Geschosse, Wände, Decken, Dächer, Fenster und Türen, Treppen, Stützen, Extrusionen, Bäume, Gelände, Kontext, Dossier) mit lesbaren Namen (`Wand eg-aw-s`; Zuordnung aus Knotenname/`extras` des GLB, keine Export-Änderung nötig, `doc/RENDER-SZENE.md`), Kamera `Dossier-Kamera`, Himmel `Dossier-Himmel`, `pack_all`, `save_as_mainfile`; 3D-Fenster der Datei in Material-Vorschau mit Blick durch die Kamera. Dialog: «Als .blend speichern …» (Blender im Hintergrund, dann nativer Speichern-Dialog) und «In Blender öffnen» (Datei im Arbeitsordner bauen, dann Blender MIT Oberfläche auf die Datei, ohne Warten); Browser: ZIP mit Anleitung für `--mode save`. Neuer Tauri-Befehl `blender_open`, Electron `blender:open`. CLI `dossier-cli … blend --out x.blend`. Abweichung: «Öffnen» startet Blender nicht mit dem Skript, sondern mit der fertigen .blend (zuverlässiger, selbe Datei wie «Speichern», Layout steckt in der Datei). Offen: Mac/Windows-Gegenprobe der Start-Befehle (`blender_open` nur im Linux-Container kompiliert/getestet), Blender-GUI nicht gesehen (Linux ohne Anzeige); Datei liegt nach «Öffnen» im Temp-Ordner (in Blender «Speichern unter»). · S
 - ◐ **[227]** Kontextgebäude auf dem Gelände, Baugrube im Rendering ausblenden (12.11., Befunde der Mac-Gegenprobe [211]). (1) Kern
   `context_ground.rs`: jedes zusammenhängende Gebäude eines Netzes (`importedMesh`, auch mehrere Häuser in einem Netz) wird senkrecht auf den

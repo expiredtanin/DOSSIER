@@ -1150,3 +1150,91 @@ fn ansicht_wettbewerb_vorlage_zeigt_rahmen() {
     assert_eq!(polys(&mv, 200.0), polys(&plain, 200.0));
     assert!(polys(&mv, 500.0) <= windows.len(), "1:500 grob");
 }
+
+/// [216] Fenster in der Bogenwand (Halbkreis r = 2,5 m, 2-flügelig 2 m breit, Mitte 45° schräg zur Ansicht Süd): die
+/// Ansicht zeigt Rahmen und Glas als Projektion der 3D-Lage — ohne Schichteinzug dem Bogen folgend (Flügelteilung nach
+/// der Lage auf dem Bogen verkürzt), mit Schichteinzug [106] gerade auf der Sehne der Einzug-Zone. Vergleich: die
+/// Glas-Netze des 3D (`emit_opening_meshes`), je Punkt auf die sichtbare Wandfläche gelegt (gleiche Bogenlänge bzw.
+/// Sehnen-Lage, Querlage der Aussenfläche) und projiziert, gegen die Glas-Felder der Ansicht.
+#[test]
+fn fenster_in_bogenwand_wie_im_3d() {
+    use crate::model3d::{arc_placement, ArcPlacement};
+    for (bulge, reveal) in [(None, false), (Some(-1.0), false), (Some(-1.0), true)] {
+        let mut p = sample();
+        p.walls.retain(|w| w.id == "W1");
+        p.roofs = Some(vec![]);
+        p.ceilings = Some(vec![]);
+        p.stairs = Some(vec![]);
+        p.walls[0].bulge = bulge;
+        let mut o = serde_json::json!({
+            "id": "O1", "type": "opening", "hostWallId": "W1", "categoryCode": "21", "kind": "window", "typeId": "window-double",
+            "position": if bulge.is_some() { 0.96 } else { 1.5 }, "width": 2.0, "height": 1.2, "sillHeight": 0.9, "layerReveals": []
+        });
+        if reveal {
+            o["layerReveals"] = serde_json::json!([{ "layer": -1, "mode": "zurueck", "amount": 0.05 }, { "layer": 0, "mode": "leibung" }]);
+        }
+        p.openings = Some(vec![serde_json::from_value(o).unwrap()]);
+        let o = p.openings.as_ref().unwrap()[0].clone();
+        let l = p.drawing_levels.iter().find(|l| l.id == "ansicht-sued").unwrap();
+        let level = LevelSpec::from_json(&serde_json::to_value(l).unwrap());
+        let frame = frame_of(&level.plane().unwrap());
+        let win = crate::plan::model_view::resolve(None, crate::plan::style::Detail::Fein, 50.0).window;
+        let ops = collect_openings(&p, &frame, &win);
+        let op = ops.iter().find(|q| q.id == "O1").expect("Fenster sichtbar");
+        let ht = p.wall_thickness(&p.walls[0], 0.2) / 2.0;
+        let u_of = move |x: f64, y: f64| (x - frame[0]) * frame[6] + (y - frame[2]) * frame[8];
+        // Punkt des 3D-Netzes → Lage auf der Aussenfläche (rechts der Achse, n = −ht) → Ansichts-x.
+        let face_u: Box<dyn Fn([f64; 3]) -> f64> = match crate::wall_arc::WallArc::of_wall(&p.walls[0]) {
+            None => Box::new(move |q: [f64; 3]| u_of(q[0], q[1])),
+            Some(a) => match arc_placement(&p, &p.walls[0], &a, &o) {
+                ArcPlacement::Follow => {
+                    assert!(!reveal);
+                    Box::new(move |q: [f64; 3]| {
+                        let s = a.local(kernel2d::Vec2::new(q[0], q[1])).0;
+                        let w = a.point(s, -ht);
+                        u_of(w.x, w.y)
+                    })
+                }
+                ArcPlacement::Zone(sa, sb) => {
+                    assert!(reveal);
+                    let (pa, u, _) = crate::wall_arc::chord_of(&a, sa, sb);
+                    Box::new(move |q: [f64; 3]| {
+                        let t = (q[0] - pa.x) * u.x + (q[1] - pa.y) * u.y;
+                        u_of(pa.x + u.x * t + u.y * ht, pa.y + u.y * t - u.x * ht)
+                    })
+                }
+                ArcPlacement::Chord => panic!("2 m breit folgt dem Bogen"),
+            },
+        };
+        // Ganzes Glasfeld: Ausdehnung der 3D-Glas-Netze auf der Aussenfläche.
+        let want = crate::model3d::emit_opening_meshes(&p, 2.0)
+            .iter()
+            .filter(|m| m.color == crate::model3d::PART_RGB[0])
+            .flat_map(|m| m.positions.chunks_exact(3).map(|c| face_u([c[0], c[1], c[2]])).collect::<Vec<_>>())
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), x| (lo.min(x), hi.max(x)));
+        let got = op.glass.iter().flatten().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), c| (lo.min(c[0]), hi.max(c[0])));
+        assert!(want.1 - want.0 > 0.5, "{bulge:?}/{reveal}: 3D-Glas {want:?}");
+        assert!((got.0 - want.0).abs() < 0.015 && (got.1 - want.1).abs() < 0.015, "{bulge:?}/{reveal}: Glas {got:?} vs 3D {want:?}");
+        // Flügelteilung in der Öffnungsmitte (Bogenlänge): Ansichts-x nach der Lage auf dem Bogen bzw. der Sehne.
+        let s_mid = o.position + o.width / 2.0;
+        let mid = match crate::wall_arc::WallArc::of_wall(&p.walls[0]) {
+            None => u_of(s_mid, 0.0),
+            Some(a) => match arc_placement(&p, &p.walls[0], &a, &o) {
+                ArcPlacement::Zone(sa, sb) => {
+                    let (pa, u, chord) = crate::wall_arc::chord_of(&a, sa, sb);
+                    let t = (s_mid - sa) / (sb - sa) * chord;
+                    u_of(pa.x + u.x * t + u.y * ht, pa.y + u.y * t - u.x * ht)
+                }
+                _ => {
+                    let w = a.point(s_mid, -ht);
+                    u_of(w.x, w.y)
+                }
+            },
+        };
+        let mut sash: Vec<(f64, f64)> = op.glass.iter().map(|q| q.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), c| (lo.min(c[0]), hi.max(c[0])))).filter(|r| r.1 - r.0 < (got.1 - got.0) * 0.7).collect();
+        sash.sort_by(|a, b| a.0.total_cmp(&b.0));
+        assert_eq!(sash.len(), 2, "{bulge:?}/{reveal}: zwei Flügel-Gläser {sash:?}");
+        let gap = (sash[0].1 + sash[1].0) / 2.0;
+        assert!((gap - mid).abs() < 0.01, "{bulge:?}/{reveal}: Flügelteilung bei {gap}, auf dem Bogen/der Sehne {mid}");
+    }
+}

@@ -748,6 +748,17 @@ fn wall_pieces_with(p: &Project, maps: &[String], wall: &Wall, ctx: &FloorContex
             roof_attach: wall.roof_attach,
             reveals: if layered && stacked { wall_reveals(p, wall, openings, bands.len()) } else { Vec::new() },
             keep_holes: plain,
+            // [216] Ohne Schichtbänder (Schnitt/Ansicht): Sehnen über Öffnungen mit Schichteinzug wie im 3D.
+            chord_zones: match crate::wall_arc::WallArc::of_wall(wall) {
+                Some(a) if !(layered && stacked) => openings
+                    .iter()
+                    .filter_map(|o| match super::arc_placement(p, wall, &a, o) {
+                        super::ArcPlacement::Zone(sa, sb) => Some((sa, sb)),
+                        _ => None,
+                    })
+                    .collect(),
+                _ => Vec::new(),
+            },
         };
         // Bogenwand ([T2]): Sehnen-Teilwände mit radialen Gehrungen.
         let arc = crate::wall_arc::WallArc::of_wall(wall);
@@ -792,9 +803,19 @@ fn wall_pieces_with(p: &Project, maps: &[String], wall: &Wall, ctx: &FloorContex
         for mut piece in wall_bands::wall_bands(win, ctx) {
             let Some(b) = bands.get(piece.band) else { continue };
             // Schnitt-Eingabe der Bogen-Teilwände: radiale Gehrungen auch ohne Schichtband-Pfad.
+            // [216] Teilwand mit Loch (Sehnen-Zone): nur die Stücke vor bzw. hinter dem Loch tragen die Gehrung am Ende;
+            // Pfeiler, Brüstung und Sturz enden an der Laibung gerade (sonst reichten sie bis zur Gehrung durchs Loch).
             if arc.is_some() && !layered {
-                piece.start_cut = piece.start_cut.or(win.cuts.start_cut);
-                piece.end_cut = piece.end_cut.or(win.cuts.end_cut);
+                let l = dx.hypot(dy).max(1e-12);
+                let along = |q: kernel2d::Vec2| ((q.x - win.start.x) * dx + (q.y - win.start.y) * dy) / l;
+                let lo = win.openings.iter().map(|o| o.from).fold(f64::INFINITY, f64::min);
+                let hi = win.openings.iter().map(|o| o.to).fold(f64::NEG_INFINITY, f64::max);
+                if along(piece.start) < lo - 1e-6 {
+                    piece.start_cut = piece.start_cut.or(win.cuts.start_cut);
+                }
+                if along(piece.end) > hi + 1e-6 {
+                    piece.end_cut = piece.end_cut.or(win.cuts.end_cut);
+                }
             }
             out.push(RWall {
                 start: [piece.start.x, piece.start.y],

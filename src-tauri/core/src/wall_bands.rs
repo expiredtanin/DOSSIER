@@ -194,6 +194,10 @@ pub struct WallIn {
     /// eigener Oberkante zu teilen — für den Wandkörper per Boolean (`model3d/wall_body.rs`), der die Löcher
     /// selbst ausschneidet. Sonst `false`.
     pub keep_holes: bool,
+    /// [216] Bogenwand: Sehnen-Bereiche `[sa, sb]` (Bogenlänge) über Öffnungen mit Schichteinzug ([106], `wall_arc::reveal_zone`),
+    /// auch wo `reveals` leer ist (Schnitt/Ansicht rechnen ohne Schichtbänder) — Wand und Loch liegen dort gerade auf der
+    /// Sehne wie im 3D (`wall_arc::chord_walls`). Sonst leer.
+    pub chord_zones: Vec<(f64, f64)>,
 }
 
 /// Decken und Dächer eines Geschosses — einmal je Geschoss gelesen, für alle seine Wände; die
@@ -1245,6 +1249,7 @@ mod tests {
             reveals: vec![],
             roof_attach: None,
             keep_holes: false,
+            chord_zones: vec![],
         }
     }
     fn band(t: f64, p: f64) -> BandIn {

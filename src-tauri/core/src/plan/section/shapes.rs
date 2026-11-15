@@ -17,8 +17,8 @@ pub(super) fn shaped_wall_cuts(cuts: &mut [Cut], p: &Project, walls_r: &[RWall],
     let u = (u.0 / ul, u.1 / ul);
     for o in p.openings.as_deref().unwrap_or(&[]).iter().filter(|o| crate::opening_shape::is_shaped(o)) {
         let Some(host) = p.walls.iter().find(|w| w.id == o.host_wall_id) else { continue };
-        // Bogenwand ([T2]): Umriss auf der Sehne zwischen den Laibungen.
-        let chord = arc_chord_opening(host, o);
+        // Bogenwand ([T2], [216]): Umriss dort, wo das 3D die Öffnung hat (Sehne der Einzug-Zone oder der Laibungen).
+        let chord = arc_section_opening(p, host, o, None);
         let (wall, o) = match &chord {
             Some((vw, vo)) => (vw, vo),
             None => (host, o),
@@ -85,8 +85,8 @@ pub(super) fn shaped_projection(visible: &mut Vec<Edge>, p: &Project, walls_r: &
     let nrm = (plane.normal[0], plane.normal[2]);
     for o in p.openings.as_deref().unwrap_or(&[]).iter().filter(|o| crate::opening_shape::is_shaped(o)) {
         let Some(host) = p.walls.iter().find(|w| w.id == o.host_wall_id) else { continue };
-        // Bogenwand ([T2]): Umriss auf der Sehne zwischen den Laibungen.
-        let chord = arc_chord_opening(host, o);
+        // Bogenwand ([T2], [216]): Umriss dort, wo das 3D die Öffnung hat (Sehne der Einzug-Zone oder der Laibungen).
+        let chord = arc_section_opening(p, host, o, None);
         let (wall, o) = match &chord {
             Some((vw, vo)) => (vw, vo),
             None => (host, o),
