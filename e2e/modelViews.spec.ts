@@ -28,7 +28,7 @@ test("Modelldarstellung: eigene Stufe mit Sturzlinie „keine“ ändert den Gru
   await detail.getByRole("textbox", { name: "Name" }).fill("Werkplan ohne Sturz");
   await page.getByTestId("model-view-opt-doors-lintelLineStyle").selectOption("keine");
   await expect(page.getByTestId("model-view-opt-doors-lintelLineStyle")).toHaveValue("keine");
-  await page.locator(".res-window").getByRole("button", { name: "Schließen" }).first().click();
+  await page.locator(".res-window").getByRole("button", { name: "Schliessen" }).first().click();
 
   // Werkzeugleiste: Detailgrad-Wahl listet die eigene Stufe.
   const dd = page.getByRole("button", { name: "Detailgrad der Plandarstellung (Symbole, Schraffuren, Linien)" });
@@ -60,7 +60,7 @@ test("Modelldarstellung im Schnitt: „nur Kern“ zeigt die Wände in Kerndicke
   await expect(page.getByTestId("model-view-section-elevation")).toBeVisible();
   await page.getByTestId("model-view-opt-walls-layers").selectOption("core");
   await page.getByTestId("model-view-opt-windows-sectionDetail").selectOption("false");
-  await page.locator(".res-window").getByRole("button", { name: "Schließen" }).first().click();
+  await page.locator(".res-window").getByRole("button", { name: "Schliessen" }).first().click();
 
   // In den Schnitt wechseln und die Stufe für ihn wählen.
   await openTab(page, "Zeichnungsebenen");

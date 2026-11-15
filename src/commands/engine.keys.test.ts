@@ -39,6 +39,29 @@ const P = [
   { x: 1, y: 6 },
 ];
 
+describe("[263] Unbekannter Befehl im Ruhezustand", () => {
+  it("meldet „cmd.unknown“ statt still nichts zu tun; bekannte Befehle melden nichts", () => {
+    const notes: { key: string; params?: Record<string, string | number> }[] = [];
+    const host: EngineHost = {
+      context: (lastPoint) => ({ ...ctx, lastPoint }),
+      snap: () => null,
+      pxPerMeter: () => 50,
+      setDraft: () => {},
+      commit: () => {},
+      isFloor: () => true,
+      notify: (key, params) => void notes.push({ key, params }),
+    };
+    const engine = new CommandEngine(host);
+    engine.submitText("xyzabc");
+    expect(notes).toEqual([{ key: "cmd.unknown", params: { name: "xyzabc" } }]);
+    expect(engine.isActive()).toBe(false);
+    notes.length = 0;
+    engine.submitText("polyline");
+    expect(notes).toEqual([]);
+    expect(engine.isActive()).toBe(true);
+  });
+});
+
 describe("Esc/Enter der Befehls-Engine", () => {
   it("Wand: Esc nimmt den letzten Punkt zurück, Enter übernimmt den Rest", () => {
     const { engine, log } = setup();

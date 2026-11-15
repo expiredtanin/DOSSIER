@@ -1117,8 +1117,26 @@ export const ViewRibbonTab = memo(function ViewRibbonTab({
     { value: "__custom__", label: t("topbar.scale.custom") },
   ];
 
+  // [263] Die Ansichts-Leiste scrollt ohne sichtbare Leiste: bei schmalem Fenster (1280 px) liegen Massstab,
+  // Zoom und Schrift rechts ausserhalb. Ein Ausblenden am rechten Rand (Klasse `has-more`) zeigt, dass es weitergeht.
+  const ribbonRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = ribbonRef.current;
+    if (!el) return;
+    const update = () => el.classList.toggle("has-more", el.scrollWidth - el.clientWidth - el.scrollLeft > 2);
+    update();
+    el.addEventListener("scroll", update, { passive: true });
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(update) : null;
+    ro?.observe(el);
+    for (const c of Array.from(el.children)) ro?.observe(c);
+    return () => {
+      el.removeEventListener("scroll", update);
+      ro?.disconnect();
+    };
+  });
+
   return (
-    <div className="ribbon-views">
+    <div className="ribbon-views" ref={ribbonRef}>
       {/* Reihenfolge: Grundriss · Ansichten · Iso · Axo — ohne Trennstriche
           (eine zusammenhängende Symbol-Zeile, Nutzer-Wunsch). */}
       <span className="tb-viewtoggle" role="group" aria-label={t("topbar.viewGroup")}>

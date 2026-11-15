@@ -63,7 +63,7 @@ test("KI-Zugriff: MCP-Client zeichnet über die Brücke eine Wand in der offenen
     expect(tools).toEqual(expect.arrayContaining(["run_command", "select", "zoom_to", "export"]));
 
     await expect(page.getByTestId("ai-status")).toHaveText("Verbunden", { timeout: 15_000 });
-    await page.getByRole("button", { name: "Schließen" }).first().click();
+    await page.getByRole("button", { name: "Schliessen" }).first().click();
 
     const before = JSON.parse((await mcp.call("project_info")).content![0].text).counts.walls ?? 0;
     const r = await mcp.call("run_command", { cmd: "wall", params: { pts: [[0, 0], [5, 0]] } });

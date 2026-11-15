@@ -34,7 +34,7 @@ test("Overrides-Tab: Regel Darstellung = Ansicht mit Ausblenden ändert die Ansi
   await pick("Wert", "Ansicht");
   await detail.getByRole("checkbox", { name: "Ausblenden" }).first().check();
   await expect(detail.getByRole("checkbox", { name: "Ausblenden" })).toHaveCount(2);
-  await page.locator(".res-window").getByRole("button", { name: "Schließen" }).first().click();
+  await page.locator(".res-window").getByRole("button", { name: "Schliessen" }).first().click();
 
   // Wände, Decken, Dach und Öffnungen sind weg (Gelände und Schatten bleiben: nur mit Bauteilart).
   await expect.poll(count, { timeout: 30_000 }).toBeLessThan(before / 2);

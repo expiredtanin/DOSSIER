@@ -13,7 +13,7 @@ test("Ansichtsvorlage: Kategorie ausblenden, anwenden, Vorlage ändern, Ansicht 
     await page.getByRole("option", { name: /Ressourcen/ }).click();
     await page.getByRole("tab", { name: "Ansichtsvorlagen" }).click();
   };
-  const closeResources = () => page.locator(".res-window").getByRole("button", { name: "Schließen" }).first().click();
+  const closeResources = () => page.locator(".res-window").getByRole("button", { name: "Schliessen" }).first().click();
   await openResources();
   // Neue Projekte bringen Standard-Vorlagen mit ([66]); gezählt wird relativ dazu.
   const rows = page.getByTestId("view-template-row");
