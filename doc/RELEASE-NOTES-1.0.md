@@ -189,8 +189,10 @@ Ehrlich vorweg: **Der Durchlauf des ganzen Referenz-Ablaufs auf dem Mac ist noch
   Dachraum-Körper füllt die Schräge nicht aus (Höhe = lichte Höhe); Dächer als Netz; IFC2x3 nur über die bestehenden Tests; Datei
   des Stress-Beispiels gross (19.8 MB, ca. 6 s).
 - **Plandarstellung 1:100** ([256]): Fenster über der Schnitthöhe — erledigt durch [260] (symbolisch/geschnitten wählbar, Vorgabe symbolisch;
-  ~~Frage M: Darstellung Fenster über Schnitt~~); auf dem Mac nicht geprüft. Offen: Sonnenschatten
-  im 1:100-Grundriss, Höhenlinien-Koten auf Masszahlen, Koten «±0.00»/«+5.70» auf Achslinien; Stempel «Schlafen» im DG steht jetzt in 90 % (statt 80 %), die
+  ~~Frage M: Darstellung Fenster über Schnitt~~); auf dem Mac nicht geprüft. Hilfslinien (Achsen, Schnittlinie, Baulinie/Parzelle,
+  Höhenlinien) setzen vor Masszahlen, Texten und Höhenkoten aus — Schrift hat Vorrang (SIA 400); Koten «±0.00»/«+5.70» stehen nicht mehr auf
+  der Schnittlinie A-A, Höhenlinien laufen nicht mehr durch Masszahlen (15.11.). Sonnenschatten (Klasse 08) ist in den Abgabe-Vorlagen
+  (Eingabe, Ausführung, «Grundriss 1:100») aus und nur in der Präsentation an. Stempel «Schlafen» im DG steht jetzt in 90 % (statt 80 %), die
   Baulinie setzt vor Masszahlen aus (15.11.); Raumstempel schrumpfen bei Platzmangel auf 90 %, statt eine Achse zu überdecken (Entscheid Maintainer 15.11.); nur im Container (CLI-SVG in Chromium) angesehen, nicht auf dem Mac.
 - **Datensicherheit** ([116]): Schliessen-Rückfrage, Cmd+Q-Menüeintrag, Autosave mit zwei Ständen, atomare Exporte und «Vorige Fassung wiederherstellen …»
   sind **nicht in der Tauri-App und nicht in Electron geprüft** (nur Tests und Browser, `doc/RELEASE-1.0.md` Abschnitt 14); der Menüeintrag ist nicht
