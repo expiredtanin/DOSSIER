@@ -165,7 +165,7 @@ Ehrlich vorweg: **Der Durchlauf des ganzen Referenz-Ablaufs auf dem Mac ist noch
 - **Grafikkarten-Verlust** ([118], [206]): Neuaufbau mit Pausen, Plan bleibt beim SVG, 3D-Hinweis, Kamera bleibt erhalten — **nur headless (SwiftShader) mit erzwungenem
   `GPUDevice.destroy()` geprüft, auf dem Mac (WKWebView/Metal) mit echtem Verlust nicht**; ein unverändertes Preset wird nach dem Neuaufbau neu eingepasst.
 - **Erker im Musterhaus komplex** ([216]): Die Vereinigung der Sehnen-Zonen ergibt dort eine 2-m-Facette (Pfeilhöhe ca. 25 cm) über UG, EG und OG, weil die
-  Fenster überlappen. **Entscheid Maintainer 15.11.:** das UG-Fenster wird über die EG/OG-Fenster gelegt, damit der Erker rund bleibt (Umsetzung läuft). Nur im Container
+  Fenster überlappen. **Entscheid Maintainer 15.11.:** das UG-Fenster wird über die EG/OG-Fenster gelegt, damit der Erker rund bleibt (umgesetzt: getrennte 1-m-Sehnen statt der Facette). Nur im Container
   (CLI-SVG in Chromium, Rust-Tests) angesehen; Mac-Gegenprobe, Metal-3D und Live-Schnitt offen; an der Geschossgrenze bleibt eine Kante, wenn UG und EG
   verschiedene Wanddicken haben; der Dachrand `dach-erker` folgt weiter dem Bogen.
 - Plakat: Hilfslinien gehören zum Masterlayout, nicht zum Blatt; kein Fang für Legenden; Bilder werden als Data-URL im Projekt gespeichert

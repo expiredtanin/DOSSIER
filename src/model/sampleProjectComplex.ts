@@ -337,7 +337,8 @@ win("ug-f1", "ug-aw-s", "mk-fe-dk2", 1.6, 1.8, 1.4, 0.8);
 door("ug-t-garten", "ug-aw-s", "mk-tu-hebeschiebe", 7.2, 3.0, 2.2, { isExternal: true, uValue: 1.0, notes: "Gartenzugang" });
 win("ug-f2", "ug-aw-s", "mk-fe-dk", 11.6, 1.4, 1.4, 0.8);
 win("ug-f3", "ug-aw-n", "mk-fe-dk", 11.0, 1.0, 0.5, 1.8, { notes: "Kellerfenster über Terrain" });
-win("ug-f4", "ug-aw-erker", "mk-fe-dk", 2.2, 0.9, 1.2, 0.9);
+// [216] Über eg-f5/og-f6 (gleiche Lage und Breite): gleiche Sehnen-Zone in allen Geschossen, der Erker bleibt rund (Entscheid 15.11.).
+win("ug-f4", "ug-aw-erker", "mk-fe-dk", 1.2, 1.0, 1.2, 0.9);
 door("ug-t1", "ug-iw-x6", "mk-tu-ug", 3.4, 0.9, 2.0, { fireRating: "EI30", hinge: "end" });
 door("ug-t2", "ug-iw-kern-s", "mk-tu-ug", 1.0, 0.9, 2.0, { fireRating: "EI30" });
 door("ug-t3", "ug-iw-x6", "mk-tu-ug", 8.2, 0.9, 2.0, { fireRating: "EI30" });

@@ -267,6 +267,7 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   in Chromium verglichen (Linux): Fenster sitzen im Wandloch (vorher schräg gesehen ≈ 1–2 cm daneben). Offen: Mac-Gegenprobe;
   Deckenstirn im Erker folgt weiter dem Bogen und ragt im Schnitt an der Zonen-Sehne ≈ 2,5 cm in die Dämmung (wie im 3D);
   an den Zonenenden zeigt die Ansicht senkrechte Kanten (Stufe Sehne/Bogen ≈ 2 mm, wie im 3D) — erledigt 15.11. (später), s. unten.
+  **15.11. (Entscheid Maintainer):** UG-Erkerfenster `ug-f4` über `eg-f5`/`og-f6` gelegt (Lage 1.2, Breite 1.0): getrennte 1-m-Sehnen statt der 2-m-Facette, der Erker bleibt rund. Goldens komplex (Grundriss UG/EG/OG, Ansicht Süd, 3D) nachgeführt; CLI-SVG UG/EG 1:100 in Chromium angesehen (Linux), Mac offen.
   Stand 15.11. (später): Erker-Geometrie stimmig. (1) EINE Quelle der Sehnen-Zonen `model3d::arc_zones`: je Öffnung mit
   Schichteinzug ihre `reveal_zone`, vereinigt über alle deckungsgleichen Bogenwände (gleicher Mittelpunkt, Bänder radial
   überlappend — die Erkerwände aller Geschosse); Öffnungen ohne Einzug, die eine Zone anschneiden, erweitern sie und liegen
