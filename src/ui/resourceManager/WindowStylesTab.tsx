@@ -3,6 +3,7 @@
 
 import type { Opening, Project, WindowType } from "../../model/types";
 import { t } from "../../i18n";
+import { planModeFromValue, planModeOptions } from "../planModeOptions";
 import { FieldRow, NumberField, SelectField } from "./fields";
 import { INSET_FACE_OPTIONS, TypeLibraryTab } from "./TypeLibraryTab";
 import { ElevationPreview } from "../ElevationPreview";
@@ -207,12 +208,8 @@ export function WindowStylesTab({
           <FieldRow label={t("objinfo.opening.planMode")}>
             <SelectField
               value={win.planMode ?? ""}
-              onChange={(v) => patch({ planMode: v === "" ? undefined : (v as "symbolisch" | "geschnitten") })}
-              options={[
-                { value: "", label: t("objinfo.opening.planMode.fromModelView") },
-                { value: "symbolisch", label: t("objinfo.opening.planMode.symbolisch") },
-                { value: "geschnitten", label: t("objinfo.opening.planMode.geschnitten") },
-              ]}
+              onChange={(v) => patch({ planMode: planModeFromValue(v) })}
+              options={planModeOptions()}
             />
           </FieldRow>
           <FieldRow label={t("objinfo.opening.planSwingArcs")}>

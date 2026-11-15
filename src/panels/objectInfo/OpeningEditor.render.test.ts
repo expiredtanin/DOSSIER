@@ -24,6 +24,20 @@ describe("Objekteinstellungen: Öffnung [195b]", () => {
     expect(html).not.toContain("imp-overlay");
   });
 
+  it("[260] Typ-Feld „Im Grundriss“ im Editor: Fenster und Tür, Wert aus dem Typ", () => {
+    const p = buildComplexSampleProject();
+    for (const kind of ["window", "door"] as const) {
+      const o = p.openings!.find((x) => x.kind === kind && x.typeId && !x.hostRoofId && !x.hostCeilingId)!;
+      const key = kind === "window" ? "windowTypes" : "doorTypes";
+      getState().loadProject({ ...p, [key]: p[key]!.map((ty) => (ty.id === o.typeId ? { ...ty, planMode: "geschnitten" } : ty)) });
+      setState({ selection: { ...EMPTY_SELECTION, openings: [o.id] } });
+      const html = render();
+      const m = /<select[^>]*data-testid="oed-planMode"[^>]*>.*?<\/select>/s.exec(html);
+      expect(m, kind).not.toBeNull();
+      expect(m![0]).toMatch(/<option value="geschnitten" selected/);
+    }
+  });
+
   it("zwei Öffnungen mit abweichender Breite: „gemischt“ am Breitenfeld", () => {
     const p = buildComplexSampleProject();
     const [a, b] = p.openings!.filter((x) => !x.hostRoofId && !x.hostCeilingId);

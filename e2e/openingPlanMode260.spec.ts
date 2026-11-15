@@ -38,7 +38,7 @@ test("Fenster über der Schnitthöhe: symbolisch (Vorgabe) ↔ geschnitten über
   await mode.scrollIntoViewIfNeeded();
   await page.waitForTimeout(300);
   await mode.click();
-  await page.getByRole("option", { name: "geschnitten", exact: true }).click();
+  await page.locator(".tb-dd-item", { hasText: /^geschnitten$/ }).click();
   await expect(mode).toContainText("geschnitten");
   await expect.poll(() => aboveCut(page)).toBeGreaterThan(0);
 
@@ -48,4 +48,37 @@ test("Fenster über der Schnitthöhe: symbolisch (Vorgabe) ↔ geschnitten über
   await expect.poll(() => aboveCut(page)).toBe(0);
   await expect(mode).toContainText("Wie Typ");
   expect((await page.evaluate(() => window.__dossierTest!.heights().openings.find((o) => o.id === "O1")))?.sillHeight).toBe(1.1);
+});
+
+test("Typ im Fenstereditor (Objekt) auf „geschnitten“: Fenster ohne eigene Einstellung folgen, ein Undo-Schritt", async ({ page }) => {
+  await page.goto("/?dossierTest");
+  await page.getByRole("button", { name: /Neues Projekt/ }).first().click();
+  await expect(page.getByRole("group", { name: "Befehlszeile" })).toBeVisible();
+  await openSample(page);
+  await blurFocus(page);
+  await page.evaluate(() => window.__dossierTest!.select({ openings: ["O1"] }));
+  await blurFocus(page);
+  await page.keyboard.press("t");
+  const panel = page.locator(".objset-panel");
+  await expect(panel).toBeVisible();
+  const group = panel.locator('[data-group="opening"]');
+  const sill = group.locator("label.objinfo-field", { hasText: "Brüstung" }).first().locator("input");
+  await sill.fill("1.1");
+  await sill.press("Enter");
+  const height = group.locator("label.objinfo-field", { has: page.locator(".objinfo-flabel", { hasText: /^Höhe$/ }) }).first().locator("input");
+  await height.fill("0.6");
+  await height.press("Enter");
+  await expect.poll(async () => (await page.evaluate(() => window.__dossierTest!.heights().openings.find((o) => o.id === "O1")))?.sillHeight).toBe(1.1);
+  expect(await aboveCut(page)).toBe(0);
+
+  // Typ-Feld im Editor (Basis): geschnitten → das Fenster (ohne eigene Einstellung) folgt dem Typ.
+  const typeMode = panel.getByTestId("oed-planMode");
+  await typeMode.scrollIntoViewIfNeeded();
+  await typeMode.selectOption("geschnitten");
+  await expect.poll(() => aboveCut(page)).toBeGreaterThan(0);
+
+  await blurFocus(page);
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect.poll(() => aboveCut(page)).toBe(0);
+  await expect(typeMode).toHaveValue("");
 });

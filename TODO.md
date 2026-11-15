@@ -71,7 +71,9 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   eigenen Ansichtsbereich haben und Bad-/Réduit-/Rund-/Lichtschachtfenster über der Schnitthöhe bisher die Wand schlossen — jetzt Symbol in der
   Lücke (je Plan 1 Polygon/Polylinie mehr, Hash neu); Musterhaus einfach und CLI-Goldens unverändert. Vorher/Nachher CLI-SVG `--hatch` 1:100 EG/DG
   in Chromium angesehen (Linux). Offen: auf dem Mac nicht geprüft (Metal-Fläche, natives Objekteinstellungsfenster, PDF/DXF; `doc/RELEASE-1.0.md` 13.29);
-  der Fenster-/Türeditor im Bereich „Objekt“ zeigt das Typ-Feld nicht (nur Ressourcen). · M
+  **15.11. (später):** Typ-Feld „Im Grundriss“ jetzt auch im Fenster-/Türeditor (Bereich „Objekt“, Kategorie Basis; Wert und Texte aus `src/ui/planModeOptions.ts`,
+  gemeinsam mit den Ressourcen-Tabs), Änderung über `onPatchWindowType`/`onPatchDoorType` (eine Op, ein Undo-Schritt, im macOS-Nebenfenster über die
+  bestehende Handler-Weiterleitung). Tests: vitest `OpeningEditor.render.test.ts`, e2e zweiter Fall in `openingPlanMode260.spec.ts`. Offen: Mac-Prüfung (s. o.). · M
 - ◐ **[253]** Standard-Objektbibliothek 2D (14.11., Wunsch Maintainer). Stand 14.11.: parametrische Objekte statt starrer `BlockDef`s —
   `Drawing2DGeom::Libobj { libId, at, rotation, params, seed }`; der Kern (`furniture_lib.rs`) erzeugt die Linien zur Plan-Zeit nach Detailgrad
   (grob/mittel/fein wie bei Türen/Fenstern), Definition (Parameterliste, Einfügepunkt, Klasse) getrennt von der Erzeugung, Register für

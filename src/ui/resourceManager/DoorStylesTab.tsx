@@ -3,6 +3,7 @@
 
 import type { DoorType, Opening, Project } from "../../model/types";
 import { t } from "../../i18n";
+import { planModeFromValue, planModeOptions } from "../planModeOptions";
 import { FieldRow, NumberField, Segmented, SelectField } from "./fields";
 import { INSET_FACE_OPTIONS, TypeLibraryTab } from "./TypeLibraryTab";
 import { ElevationPreview } from "../ElevationPreview";
@@ -187,12 +188,8 @@ export function DoorStylesTab({
           <FieldRow label={t("objinfo.opening.planMode")}>
             <SelectField
               value={door.planMode ?? ""}
-              onChange={(v) => patch({ planMode: v === "" ? undefined : (v as "symbolisch" | "geschnitten") })}
-              options={[
-                { value: "", label: t("objinfo.opening.planMode.fromModelView") },
-                { value: "symbolisch", label: t("objinfo.opening.planMode.symbolisch") },
-                { value: "geschnitten", label: t("objinfo.opening.planMode.geschnitten") },
-              ]}
+              onChange={(v) => patch({ planMode: planModeFromValue(v) })}
+              options={planModeOptions()}
             />
           </FieldRow>
           <FieldRow label={t("resources.field.transomHeight")}>
