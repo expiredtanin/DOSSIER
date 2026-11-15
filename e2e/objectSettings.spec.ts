@@ -27,7 +27,7 @@ test("Wand gewählt: Attribute ohne Aufbau/Typ-Felder, Objekt-Info mit Wand-Absc
   await expect(attr.locator(".objinfo-wall-anchor")).toHaveCount(0);
   await expect(attr.getByText("Volumen")).toHaveCount(0);
   await expect(attr.getByText("Aufbau", { exact: false })).toHaveCount(0);
-  await expect(attr.getByText("Maße", { exact: true })).toHaveCount(0);
+  await expect(attr.getByText("Masse", { exact: true })).toHaveCount(0);
   // … und in der Objekt-Info als einklappbarer Abschnitt.
   const group = info.locator('[data-group="wall"]');
   await expect(group.locator(".objinfo-wall-anchor").first()).toBeVisible();

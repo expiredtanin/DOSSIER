@@ -454,6 +454,11 @@ export class CommandEngine {
         this.repeatLast();
         return;
       }
+      // [263] Nicht still scheitern: unbekannter Name → Meldung (Start-Fehler melden sich selbst).
+      if (!(resolveCommand(text, this.aliasOverrides) ?? getCommand(text))) {
+        this.host.notify?.("cmd.unknown", { name: text }, "warning");
+        return;
+      }
       this.start(text);
       return;
     }

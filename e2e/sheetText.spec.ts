@@ -74,7 +74,7 @@ test("Plakat: Textspalte aufziehen, tippen, Blocksatz, Undo, Text im PDF", async
   await page.keyboard.press("ControlOrMeta+Shift+z");
   await expect(history).toHaveCount(steps);
 
-  await page.locator("section[aria-label=Verlauf]").getByRole("button", { name: "Schließen" }).click();
+  await page.locator("section[aria-label=Verlauf]").getByRole("button", { name: "Schliessen" }).click();
   // Anonym + WBW-Satz: ein PDF, der Text steht darin (zeilenweise umbrochen, nicht in einer Zeile).
   await page.locator("[data-testid=competition-anonymous]").check();
   await page.locator("[data-testid=competition-keyword]").fill("FALKE 7");

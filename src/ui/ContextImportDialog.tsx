@@ -484,7 +484,7 @@ export function ContextImportDialog({
               <div className="imp-section-title">{t("ctxImport.refPoint")}</div>
               <div className="cim-radius-row">
                 <input
-                  className="cim-input cim-input-num"
+                  className="cim-input cim-input-num cim-input-coord"
                   type="number"
                   step={0.01}
                   value={refPoint.e}
@@ -493,7 +493,7 @@ export function ContextImportDialog({
                   aria-label={t("ctxImport.refPoint.e")}
                 />
                 <input
-                  className="cim-input cim-input-num"
+                  className="cim-input cim-input-num cim-input-coord"
                   type="number"
                   step={0.01}
                   value={refPoint.n}
@@ -502,7 +502,7 @@ export function ContextImportDialog({
                   aria-label={t("ctxImport.refPoint.n")}
                 />
                 <input
-                  className="cim-input cim-input-num"
+                  className="cim-input cim-input-num cim-input-coord"
                   type="number"
                   step={0.01}
                   value={refPoint.h}

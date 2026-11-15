@@ -568,7 +568,7 @@ async function applyViewTemplate(page: Page, name: RegExp): Promise<void> {
   await page.getByRole("tab", { name: "Ansichtsvorlagen" }).click();
   await page.getByTestId("view-template-row").filter({ hasText: name }).first().click();
   await page.getByTestId("view-template-apply-once").click();
-  await page.locator(".res-window").getByRole("button", { name: "Schließen" }).first().click();
+  await page.locator(".res-window").getByRole("button", { name: "Schliessen" }).first().click();
 }
 
 const templateFills = (page: Page, id: string) => page.evaluate((i) => window.__dossierTest!.templateFills(i), id);

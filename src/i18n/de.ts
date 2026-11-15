@@ -293,11 +293,11 @@ export const de = {
   "tool.wall.firstPoint": "Wand: ersten Achspunkt setzen",
   "tool.wall.nextPoint": "Wand: nächsten Punkt — Doppelklick/Rechtsklick beendet",
   "tool.ceiling.firstPoint": "Decke: ersten Umrisspunkt setzen",
-  "tool.ceiling.nextPoint": "Decke: nächster Punkt — Klick auf Start schließt, Enter beendet",
+  "tool.ceiling.nextPoint": "Decke: nächster Punkt — Klick auf Start schliesst, Enter beendet",
   "tool.line.firstPoint": "Linie: Startpunkt setzen",
   "tool.line.secondPoint": "Linie: Endpunkt setzen",
   "tool.polyline.firstPoint": "Polylinie: ersten Punkt setzen",
-  "tool.polyline.nextPoint": "Polylinie: nächster Punkt — Klick auf Start schließt, Doppelklick beendet",
+  "tool.polyline.nextPoint": "Polylinie: nächster Punkt — Klick auf Start schliesst, Doppelklick beendet",
   "tool.rect.firstCorner": "Rechteck: erste Ecke setzen",
   "tool.rect.secondCorner": "Rechteck: gegenüberliegende Ecke setzen",
   "tool.wallType": "Wandtyp",
@@ -502,7 +502,7 @@ export const de = {
   "objinfo.y": "Y",
   "objinfo.z": "Z",
   "objinfo.zHint": "2D-Ebene – keine Höhe am Element",
-  "objinfo.dimensions": "Maße",
+  "objinfo.dimensions": "Masse",
   "objinfo.width": "Breite",
   "objinfo.height": "Höhe",
   "objinfo.type": "Typ",
@@ -617,7 +617,7 @@ export const de = {
   // ── Wand-Attribute (Object-Info-Panel) ──────────────────────────────────
   "objinfo.wall.section": "Wand",
   "objinfo.wall.refLine": "Referenzlinie",
-  "objinfo.wall.refLine.left": "Außen (links)",
+  "objinfo.wall.refLine.left": "Aussen (links)",
   "objinfo.wall.refLine.center": "Mitte",
   "objinfo.wall.refLine.right": "Innen (rechts)",
   "objinfo.wall.refLine.joint": "Fuge",
@@ -884,7 +884,7 @@ export const de = {
   "objinfo.opening.swing.right": "Rechts",
   "objinfo.opening.dir": "Richtung",
   "objinfo.opening.dir.in": "Innen",
-  "objinfo.opening.dir.out": "Außen",
+  "objinfo.opening.dir.out": "Aussen",
   "objinfo.opening.bottom": "Unterkante (UK)",
   "objinfo.opening.top": "Oberkante (OK)",
   // Neue Öffnungs-Felder
@@ -895,7 +895,7 @@ export const de = {
   "objinfo.opening.lintelLines": "Sturzlinien",
   "objinfo.opening.lintelLines.keine": "Keine",
   "objinfo.opening.lintelLines.innen": "Innen",
-  "objinfo.opening.lintelLines.aussen": "Außen",
+  "objinfo.opening.lintelLines.aussen": "Aussen",
   "objinfo.opening.lintelLines.beide": "Beide",
   "objinfo.opening.lintelLineStyle": "Sturzlinie",
   "objinfo.opening.lintelLineStyle.gestrichelt": "Gestrichelt",
@@ -1099,10 +1099,10 @@ export const de = {
   // ── Dock ─────────────────────────────────────────────────────────────────
   "dock.resize": "Breite anpassen",
   "dock.dock": "Andocken",
-  "dock.close": "Schließen",
+  "dock.close": "Schliessen",
   "dock.float": "Lösen",
   "dock.redock": "Andocken",
-  "dock.resizePanel": "Größe ändern",
+  "dock.resizePanel": "Grösse ändern",
   "dock.dropLeft": "Links andocken",
   "dock.dropRight": "Rechts andocken",
 
@@ -1173,7 +1173,7 @@ export const de = {
   "ctx.title.view": "Ansicht",
 
   // ── Inline-Editor (Ebene / Geschoss) ─────────────────────────────────────
-  "editor.close": "Schließen",
+  "editor.close": "Schliessen",
   "editor.layerTitle": "Ebene {code}",
   "editor.name": "Name",
   "editor.color": "Farbe",
@@ -1269,7 +1269,7 @@ export const de = {
   // ── Ressourcen-Manager ───────────────────────────────────────────────────
   "resources.title": "Ressourcen",
   "resources.label": "Ressourcen-Manager",
-  "resources.close": "Schließen",
+  "resources.close": "Schliessen",
   "resources.loading": "Verbinde mit dem Hauptfenster …",
   "resources.tab.components": "Bauteile",
   "resources.tab.hatches": "Schraffuren",
@@ -1587,11 +1587,11 @@ export const de = {
 
   // Bauteil-Typen (Tür/Fenster/Treppe) — Formular-Bibliotheken.
   "resources.doorTypes.hint":
-    "Wiederverwendbare Türtypen mit Bauart, Blattausführung und Standardmaßen für neu platzierte Türen.",
+    "Wiederverwendbare Türtypen mit Bauart, Blattausführung und Standardmassen für neu platzierte Türen.",
   "resources.doorTypes.empty": "Noch keine Türtypen.",
   "resources.doorTypes.placeholder": "Türtyp",
   "resources.windowTypes.hint":
-    "Wiederverwendbare Fenstertypen mit Öffnungsart, Verglasung und Standardmaßen für neu platzierte Fenster.",
+    "Wiederverwendbare Fenstertypen mit Öffnungsart, Verglasung und Standardmassen für neu platzierte Fenster.",
   "resources.windowTypes.empty": "Noch keine Fenstertypen.",
   "resources.windowTypes.placeholder": "Fenstertyp",
   "resources.addPreset": "Aus Bibliothek…",
@@ -1675,7 +1675,7 @@ export const de = {
   "resources.glazing.dreifach": "Dreifach",
   "resources.sillBoard.keine": "Keine",
   "resources.sillBoard.innen": "Innen",
-  "resources.sillBoard.aussen": "Außen",
+  "resources.sillBoard.aussen": "Aussen",
   "resources.sillBoard.beide": "Beide",
   "resources.structure.massiv": "Massiv",
   "resources.structure.beton": "Betontreppe (Laufplatte)",
@@ -1716,7 +1716,7 @@ export const de = {
   "resources.import.pat": "⤓ .pat importieren",
 
   // Bauteile.
-  "resources.components.hint": "Höhere Priorität läuft am Stoß durch (verschneidet zuerst); niedrigere stößt seitlich an.",
+  "resources.components.hint": "Höhere Priorität läuft am Stoss durch (verschneidet zuerst); niedrigere stösst seitlich an.",
   "resources.components.empty": "Noch keine Bauteile.",
   "resources.components.placeholder": "Bauteil",
   "resources.col.name": "Name",
@@ -1728,7 +1728,7 @@ export const de = {
   "resources.col.viewHatch": "Ansichtsschraffur",
   "resources.viewHatch.none": "(keine)",
   "resources.col.prio": "Prio",
-  "resources.col.prio.hint": "Höhere Priorität läuft am Stoß durch",
+  "resources.col.prio.hint": "Höhere Priorität läuft am Stoss durch",
   "resources.col.texture": "Textur",
   "resources.col.material": "Material",
   "material.fetchAmbient": "Textur laden",
@@ -1737,7 +1737,7 @@ export const de = {
   "resources.updateStandards": "Standards aktualisieren",
   "resources.updateStandards.hint": "Bringt Standard-Einträge (Schraffuren, Baustoffe, Linientypen, Aufbauten mit Standard-id) auf die heutige Definition. Du siehst vorher, was sich ändert, und wählst aus; ein Undo-Schritt.",
   "resources.updateStandards.intro": "Diese Standard-Einträge weichen von der heutigen Bibliothek ab. Ob du einen Eintrag selbst angepasst hast, kann Dossier nicht erkennen: umbenannte Einträge sind abgewählt, alle anderen vorgewählt. Name und eigene Zusatzfelder bleiben unverändert.",
-  "resources.updateStandards.added": "Außerdem werden {n} fehlende Standard-Einträge hinzugefügt.",
+  "resources.updateStandards.added": "Ausserdem werden {n} fehlende Standard-Einträge hinzugefügt.",
   "resources.updateStandards.none": "Alle Standard-Einträge sind auf dem heutigen Stand.",
   "resources.updateStandards.renamed": "umbenannt",
   "resources.updateStandards.all": "Alle überschreiben",
@@ -1849,7 +1849,7 @@ export const de = {
   "material.dialog.hint": "Wähle ein eingebautes Material oder lade eigene Texturen hoch. Wirkt im 3D-Modus „Texturiert\".",
   "material.library": "Bibliothek (ambientCG, CC0)",
   "material.upload": "Eigene Texturen",
-  "material.upload.hint": "Lade Bilder als Karten hoch (mindestens Farbe). Größe = physische Kachelgröße in Metern.",
+  "material.upload.hint": "Lade Bilder als Karten hoch (mindestens Farbe). Grösse = physische Kachelgrösse in Metern.",
   "material.upload.color": "Farbe (Albedo)",
   "material.upload.normal": "Normal",
   "material.upload.roughness": "Rauheit",
@@ -1857,10 +1857,10 @@ export const de = {
   "material.upload.ao": "AO",
   "material.upload.choose": "Bild …",
   "material.upload.apply": "Zuweisen",
-  "material.size": "Kachelgröße (m)",
+  "material.size": "Kachelgrösse (m)",
   "material.current": "Aktuell",
   "material.clear": "Material entfernen",
-  "material.close": "Schließen",
+  "material.close": "Schliessen",
   "material.uploaded": "Hochgeladen",
   // ── ambientCG-Bibliothek durchsuchen (Live) ──────────────────────────────
   "material.browse": "Bibliothek durchsuchen",
@@ -1881,11 +1881,11 @@ export const de = {
   "material.browse.downloadError": "Download fehlgeschlagen (CORS/Proxy prüfen).",
 
   // Schraffuren.
-  "resources.hatches.hint": "Muster, Maßstab und Winkel steuern die Schnitt-Schraffur; der Linienstil bestimmt die Stärke der Musterlinien.",
+  "resources.hatches.hint": "Muster, Massstab und Winkel steuern die Schnitt-Schraffur; der Linienstil bestimmt die Stärke der Musterlinien.",
   "resources.hatches.empty": "Noch keine Schraffuren.",
   "resources.hatches.placeholder": "Schraffur",
   "resources.col.pattern": "Muster",
-  "resources.col.scale": "Maßstab",
+  "resources.col.scale": "Massstab",
   "resources.col.angle": "Winkel °",
   "resources.col.relativeToWall": "Wandbezug",
   "resources.col.relativeToWall.hint": "Winkel relativ zur Wandachse — das Muster dreht mit der Wand mit",
@@ -2054,6 +2054,7 @@ export const de = {
   "cmd.ceilingOpening.corner": "Gegenecke:",
   "cmd.roofHole.label": "Dachhof",
   "cmd.needsFloor": "Dieser Befehl zeichnet im Grundriss: zuerst ein Geschoss wählen",
+  "cmd.unknown": "Unbekannter Befehl „{name}“ — Tab zeigt passende Befehle",
   "cmd.excavation.noTerrain": "Baugrube braucht ein Gelände: zuerst Höhenlinien importieren und „Gelände erzeugen“ (Panel Gelände) oder den Standort importieren",
   "cmd.excavation.outside": "Keine Baugrube: der Umriss liegt ausserhalb des Geländes",
   "cmd.excavation.degenerate": "Keine Baugrube: der Umriss hat keine Fläche",
@@ -2680,7 +2681,7 @@ export const de = {
   // ── Import-Dialog (ImportDialog) ─────────────────────────────────────────
   "import.title": "DXF importieren",
   "import.failed": "Import fehlgeschlagen",
-  "import.close": "Schließen",
+  "import.close": "Schliessen",
   "import.file": "Datei",
   "import.summary.heading": "Inhalt",
   "import.summary.contours": "{n} Konturen",
@@ -2789,7 +2790,7 @@ export const de = {
   "export.title": "PDF/SVG exportieren",
   "export.confirmSvg": "Als SVG",
   "export.confirmPdf": "Als PDF",
-  "export.close": "Schließen",
+  "export.close": "Schliessen",
   "export.plan": "Plan",
   "export.scale": "Massstab",
   "export.paper": "Papierformat",
@@ -2799,7 +2800,7 @@ export const de = {
   "export.scale.customPlaceholder": "Freitext (z. B. 1:75 oder 75)",
   "export.selectionOnly": "Nur Auswahl exportieren ({count} Element(e))",
   "export.warnFit":
-    "Der Plan passt im gewählten Massstab nicht ganz auf das Blatt — größeres Format oder kleineren Massstab wählen.",
+    "Der Plan passt im gewählten Massstab nicht ganz auf das Blatt — grösseres Format oder kleineren Massstab wählen.",
   "export.confirm": "Exportieren",
   "export.cancel": "Abbrechen",
 
@@ -3228,7 +3229,7 @@ export const de = {
   "about.license": "Lizenz: AGPL-3.0-or-later",
   "about.suite": "Teil von openbureau",
   "about.licenses": "Open-Source-Lizenzen (Drittkomponenten)",
-  "about.close": "Schließen",
+  "about.close": "Schliessen",
   "about.checkUpdate": "Nach Updates suchen",
   "about.checkingUpdate": "Suche nach Updates …",
 
@@ -3256,9 +3257,9 @@ export const de = {
   "settings.marqueeColor": "Auswahlrahmen-Farbe",
   "settings.marqueeColor.hint":
     "Farbe des Auswahlrahmens beim Aufziehen einer Auswahl (Marquee) im Grundriss.",
-  "settings.snapColor": "Snap-/Endpunkt-Farbe",
+  "settings.snapColor": "Fang-/Endpunkt-Farbe",
   "settings.snapColor.hint":
-    "Farbe der Snap-/Endpunkt-Hervorhebung beim Zeichnen/Editieren im Grundriss.",
+    "Farbe der Fang-/Endpunkt-Hervorhebung beim Zeichnen und Bearbeiten im Grundriss.",
   "settings.section.project": "Projekt",
   "settings.referenceElevation": "Höhe ±0.00 (m ü. M.)",
   "settings.referenceElevation.hint":
@@ -3373,7 +3374,7 @@ export const de = {
   "site.setGeoref": "Neuer Bezugspunkt",
   "site.setGeoref.hint": "Klick im Grundriss verschiebt das ganze Projekt — der geklickte Punkt wird zum neuen Ursprung (0,0). Der reale Standort-Bezug bleibt erhalten.",
   "ctxImport.title": "Standort importieren",
-  "ctxImport.close": "Schließen",
+  "ctxImport.close": "Schliessen",
   "ctxImport.geoAnchor": "Georeferenziert ab: {label}",
   "ctxImport.geoAnchor.coords": "E {e} / N {n} / H {h}",
   "ctxImport.geoAnchor.reset": "Zurücksetzen",
@@ -3430,7 +3431,7 @@ export const de = {
   "cmd.room.mode": "Modus",
   "cmd.room.inside": "Klick in Raum setzen:",
   "cmd.room.first": "Ersten Raumpunkt setzen:",
-  "cmd.room.next": "Nächsten Punkt setzen ( Enter/Start schließt ):",
+  "cmd.room.next": "Nächsten Punkt setzen ( Enter/Start schliesst ):",
 
   // ── Text-Gruppe (Oberleiste) ─────────────────────────────────────────────
   "text.group": "Text",
