@@ -7,10 +7,10 @@
 //!
 //! Zahlen im JSON, die TS als `null` geschrieben hat (NaN), werden NaN.
 
-use crate::model::{Marks, RichTextDoc};
+use crate::model::{Align, Marks, RichTextDoc};
 use crate::plan::prim::StampLine;
 use crate::plan::buf::{whole, T_DRAWING_TEXT, T_TEXT};
-use crate::plan::dxf::{StampLine as DxfLine, TextIn, TextStyleIn};
+use crate::plan::dxf::{MTextIn, StampLine as DxfLine, TextIn, TextStyleIn};
 use crate::plan::parts::{in_ranges, Part};
 use crate::plan::scene::{to_rgba, Rgba, SText, STYLE_BOLD, STYLE_ITALIC};
 use crate::text_layout::{doc_from_text, font_family_id, font_name_of, is_blank, justify_fragments, plain_text, split_ws, stamp_block, stamp_line_offsets, wrap_doc_to_lines, LayoutOpts, LineAlign, Placed, PT_TO_MM, TEXT_LINE_HEIGHT_MULT};
@@ -267,17 +267,112 @@ pub fn dxf_text(t: &TextPrim, scale: f64, default_font: &str) -> TextIn {
                 bold: marks.is_some_and(|m| m.bold == Some(true)),
                 italic: marks.is_some_and(|m| m.italic == Some(true)),
             };
+            let color = marks.and_then(|m| m.color.clone()).or_else(|| p.color.clone()).unwrap_or_else(|| "#000000".to_string());
+            let mtext = mtext_in(p, scale, &style, &color, &family);
             TextIn::Single {
                 at: crate::hatch::V2 { x: p.at.x, y: p.at.y },
                 angle: p.angle,
                 height: p.height_m,
                 wrap: p.wrap_width.unwrap_or(f64::NAN),
                 style,
-                color: marks.and_then(|m| m.color.clone()).or_else(|| p.color.clone()).unwrap_or_else(|| "#000000".to_string()),
+                color,
+                mtext,
                 paras: paras.into_iter().map(|q| { let w = split_ws(&q).into_iter().map(str::to_string).collect(); (q, w) }).collect(),
             }
         }
     }
+}
+
+/// [200] `MTEXT`-Inhalt eines Einzeltexts (`None`: nichts, was ein einzelnes `TEXT` nicht auch könnte: eine Zeile ohne
+/// Spalte, linksbündig, eine Schrift). Absatz-Ausrichtung `\pxql;`/`\pxqc;`/`\pxqr;`/`\pxqj;`, Schrift `\fName|b1|i1;`,
+/// Höhe `\H<Faktor>x;`, Farbe `\c<BGR>;`, Unterstreichen `\L…\l`, Durchstreichen `\K…\k`; Absätze durch `\P`.
+fn mtext_in(p: &SingleText, scale: f64, base: &TextStyleIn, base_color: &str, family: &dyn Fn(Option<&str>) -> String) -> Option<MTextIn> {
+    let doc = p.doc();
+    let paras: Vec<&crate::model::Paragraph> = doc.paragraphs.iter().collect();
+    if paras.is_empty() {
+        return None;
+    }
+    let code = |a: Option<Align>| match a {
+        Some(Align::Center) => 1.0,
+        Some(Align::Right) => 2.0,
+        Some(Align::Justify) => 3.0,
+        _ => 0.0,
+    };
+    let aligns: Vec<f64> = paras.iter().map(|q| code(q.align)).collect();
+    let first_marks = paras.iter().flat_map(|q| q.runs.iter()).map(|r| &r.marks).next();
+    let uniform = paras.iter().flat_map(|q| q.runs.iter()).all(|r| Some(&r.marks) == first_marks);
+    let simple = paras.len() == 1 && uniform;
+    let width = p.wrap().unwrap_or(0.0);
+    if simple && width == 0.0 && aligns[0] == 0.0 {
+        return None;
+    }
+    let unit_per_pt = PT_TO_MM * (scale / 1000.0);
+    let hex = |c: &str| to_rgba(Some(c)).map(|[r, g, b, _]| ((b * 255.0).round() as u32) << 16 | ((g * 255.0).round() as u32) << 8 | (r * 255.0).round() as u32);
+    let base_rgb = hex(base_color);
+    let mut out = String::new();
+    for (k, q) in paras.iter().enumerate() {
+        if k > 0 {
+            out.push_str("\\P");
+        }
+        out.push_str(match aligns[k] as i32 {
+            1 => "\\pxqc;",
+            2 => "\\pxqr;",
+            3 => "\\pxqj;",
+            _ => "\\pxql;",
+        });
+        for r in &q.runs {
+            if r.text.is_empty() {
+                continue;
+            }
+            let m = &r.marks;
+            let fam = family(m.font.as_deref());
+            let (bold, italic) = (m.bold == Some(true), m.italic == Some(true));
+            let font = fam != base.family || bold != base.bold || italic != base.italic;
+            let ratio = match m.size_pt {
+                Some(pt) if pt > 0.0 && p.height_m > 0.0 && unit_per_pt > 0.0 => pt * unit_per_pt / p.height_m,
+                _ => 1.0,
+            };
+            let color = m.color.as_deref().and_then(hex).filter(|c| Some(*c) != base_rgb);
+            let mut pre = String::new();
+            let mut post = String::new();
+            if font {
+                let name: String = fam.chars().filter(|c| !matches!(c, ';' | '|' | '\\' | '{' | '}')).collect();
+                pre.push_str(&format!("\\f{name}|b{}|i{};", bold as u8, italic as u8));
+            }
+            if (ratio - 1.0).abs() > 1e-6 {
+                pre.push_str(&format!("\\H{}x;", (ratio * 1e4).round() / 1e4));
+            }
+            if let Some(c) = color {
+                pre.push_str(&format!("\\c{c};"));
+            }
+            if m.underline == Some(true) {
+                pre.push_str("\\L");
+                post.insert_str(0, "\\l");
+            }
+            if m.strike == Some(true) {
+                pre.push_str("\\K");
+                post.insert_str(0, "\\k");
+            }
+            let text: String = r.text.chars().filter(|c| *c != '\r').flat_map(|c| match c {
+                '\\' => vec!['\\', '\\'],
+                '{' => vec!['\\', '{'],
+                '}' => vec!['\\', '}'],
+                '\n' => vec![' '],
+                c => vec![c],
+            }).collect();
+            if pre.is_empty() {
+                out.push_str(&text);
+            } else {
+                // Auszeichnung in Klammern, damit sie am Lauf endet (Gruppenzustand).
+                out.push('{');
+                out.push_str(&pre);
+                out.push_str(&text);
+                out.push_str(&post);
+                out.push('}');
+            }
+        }
+    }
+    Some(MTextIn { content: out, width, align: aligns[0], simple })
 }
 
 /// `text.split(/\r?\n/)`.

@@ -34,6 +34,7 @@ const REC_LTYPE: f64 = 9.0;
 const REC_PEN: f64 = 11.0;
 const REC_STYLE: f64 = 12.0;
 const REC_TEXT2: f64 = 13.0;
+const REC_MTEXT: f64 = 28.0;
 const REC_DIMSTYLE: f64 = 14.0;
 const REC_DIM: f64 = 15.0;
 const REC_BLOCK: f64 = 16.0;
@@ -82,6 +83,8 @@ const DIM_GAP: f64 = 1.0;
 const DIM_OVERSHOOT: f64 = 1.0;
 const DIM_TICK: f64 = 2.0;
 const DIM_TEXT: f64 = 2.5;
+/// Zeilenabstand 1.0 einer MTEXT-Entität in Texthöhen (AutoCAD: 5/3).
+const MTEXT_LINE_UNIT: f64 = 5.0 / 3.0;
 
 /// Optionen des Exports.
 pub struct DxfOptions {
@@ -127,6 +130,18 @@ pub struct StampLine {
     pub dx: f64,
 }
 
+/// [200] Mehrzeiliger Text als `MTEXT`: Inhalt samt Formatcodes (Absatz-Ausrichtung `\pxq…;`, Schrift `\f…;`, Höhe
+/// `\H…x;`, Farbe `\c…;`, Unterstreichen/Durchstreichen), Rahmenbreite (Meter, 0 = keine) und Ausrichtung des ersten
+/// Absatzes (0 links, 1 Mitte, 2 rechts, 3 Blocksatz). `simple`: ein Absatz, eine Schrift — dann genügt bei einer Zeile
+/// ein `TEXT` mit Ausrichtung.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MTextIn {
+    pub content: String,
+    pub width: f64,
+    pub align: f64,
+    pub simple: bool,
+}
+
 /// Text-Eingabe je Text-Eintrag (aus dem Text-JSON gesetzt, s. [`crate::plan::text::dxf_text`]).
 #[derive(Clone, Debug, PartialEq)]
 pub enum TextIn {
@@ -135,7 +150,7 @@ pub enum TextIn {
     /// `drawingText`: Anker, Winkel, Höhe, Spaltenbreite (NaN = keine), Schrift und Absätze
     /// (Text des Absatzes, Wörter nach `split(/\s+/)`).
     /// `color` [200]: Textfarbe (Hex).
-    Single { at: V2, angle: f64, height: f64, wrap: f64, style: TextStyleIn, color: String, paras: Vec<(String, Vec<String>)> },
+    Single { at: V2, angle: f64, height: f64, wrap: f64, style: TextStyleIn, color: String, paras: Vec<(String, Vec<String>)>, mtext: Option<MTextIn> },
 }
 
 /// Ergebnis: Zahlen und Zeichenketten der flachen Zeichnung, Entitäten je Art (Modell, Blöcke).
@@ -386,6 +401,18 @@ impl Flat {
         let l = self.layer(layer);
         let s = self.str(value);
         self.push(b, &[REC_TEXT2, l, s, at.x, at.y, height, rot, halign, style]);
+    }
+
+    /// [200] `MTEXT`: `[Ebene, Text, x, y, Höhe, Drehung (rad), Breite, Anhängepunkt 1–3, Zeilenabstand, Stil]`.
+    #[allow(clippy::too_many_arguments)]
+    fn add_mtext(&mut self, b: &mut Buf, layer: &str, at: V2, height: f64, rot: f64, m: &MTextIn, style: f64) {
+        b.counts[K_TEXT] += 1;
+        let l = self.layer(layer);
+        let s = self.str(&m.content);
+        // Anhängepunkt oben links/Mitte/rechts nach der Ausrichtung des ersten Absatzes.
+        let attach = match m.align as i32 { 1 => 2.0, 2 => 3.0, _ => 1.0 };
+        let spacing = crate::text_layout::TEXT_LINE_HEIGHT_MULT / MTEXT_LINE_UNIT;
+        self.push(b, &[REC_MTEXT, l, s, at.x, at.y, height, rot, m.width.max(0.0), attach, spacing, style]);
     }
 
     fn add_hatch(&mut self, b: &mut Buf, layer: &str, pts: &[V2], solid: bool, rgb: Option<f64>, families: &[(f64, f64)], dashes: &[f64]) {
@@ -743,7 +770,7 @@ enum Prim {
     Polygon { pts: Vec<V2>, fill: String, stroke: String, hatch: Option<HatchIn> },
     Circle { center: V2, r: f64, dash: Vec<f64> },
     DrawingArc { center: V2, r: f64, a0: f64, a1: f64, dash: Vec<f64> },
-    Single { at: V2, angle: f64, height: f64, wrap: f64, style: TextStyleIn, color: String, paras: Vec<(String, Vec<String>)> },
+    Single { at: V2, angle: f64, height: f64, wrap: f64, style: TextStyleIn, color: String, paras: Vec<(String, Vec<String>)>, mtext: Option<MTextIn> },
     Stamp { at: V2, lines: Vec<StampLine> },
     /// Textpfad, Bild, Platzhalter: nichts zu schreiben.
     Other,
@@ -855,8 +882,8 @@ fn read_entry(part: &mut Part, i: usize, hatches: &[(i32, Hatch, i32)], text: Op
             _ => Prim::Other,
         },
         T_DRAWING_TEXT => match text {
-            Some(TextIn::Single { at, angle, height, wrap, style, color, paras }) => {
-                Prim::Single { at: *at, angle: *angle, height: *height, wrap: *wrap, style: style.clone(), color: color.clone(), paras: paras.clone() }
+            Some(TextIn::Single { at, angle, height, wrap, style, color, paras, mtext }) => {
+                Prim::Single { at: *at, angle: *angle, height: *height, wrap: *wrap, style: style.clone(), color: color.clone(), paras: paras.clone(), mtext: mtext.clone() }
             }
             _ => Prim::Other,
         },
@@ -937,7 +964,7 @@ fn to_local(p: &Prim, f: Frame) -> Option<Prim> {
         },
         Prim::Circle { center, r, dash } => Prim::Circle { center: f.local(*center), r: r / f.scale, dash: dash.clone() },
         Prim::DrawingArc { center, r, a0, a1, dash } => Prim::DrawingArc { center: f.local(*center), r: r / f.scale, a0: a0 - f.rot, a1: a1 - f.rot, dash: dash.clone() },
-        Prim::Single { at, angle, height, wrap, style, color, paras } => Prim::Single {
+        Prim::Single { at, angle, height, wrap, style, color, paras, mtext } => Prim::Single {
             at: f.local(*at),
             angle: angle - f.rot,
             height: height / f.scale,
@@ -946,6 +973,7 @@ fn to_local(p: &Prim, f: Frame) -> Option<Prim> {
             style: style.clone(),
             color: color.clone(),
             paras: paras.clone(),
+            mtext: mtext.as_ref().map(|m| MTextIn { width: if m.width > 0.0 { m.width / f.scale } else { m.width }, ..m.clone() }),
         },
         _ => return None,
     })
@@ -1126,16 +1154,40 @@ impl Ctx<'_> {
                 self.flat.apply_pen(b, layer);
                 self.flat.add_arc(b, layer, *center, *r, *a0, *a1);
             }
-            Prim::Single { at, angle, height, wrap, style, color, paras } => {
+            Prim::Single { at, angle, height, wrap, style, color, paras, mtext } => {
+                if !(*height > 0.0) {
+                    return;
+                }
                 let dir = V2 { x: jsnum::sin(*angle), y: -jsnum::cos(*angle) };
-                for (text, down) in single_lines(*height, *wrap, paras) {
-                    if js_trim(&text).is_empty() || !(*height > 0.0) {
-                        continue;
-                    }
-                    let p = V2 { x: at.x + dir.x * down, y: at.y + dir.y * down };
+                let lines = single_lines(*height, *wrap, paras);
+                let non_blank = lines.iter().filter(|l| !js_trim(&l.0).is_empty()).count();
+                // [200] Textspalte/Absätze/Auszeichnung: `MTEXT` mit Rahmenbreite; eine einzelne Zeile in einer Schrift bleibt `TEXT`.
+                let as_mtext = mtext.as_ref().filter(|m| !(m.simple && lines.len() == 1) && non_blank > 0);
+                if let Some(m) = as_mtext {
+                    // Oberkante der ersten Zeile = Grundlinie des TEXT + Texthöhe (nach oben, gedreht).
+                    let p = V2 { x: at.x - dir.x * *height, y: at.y - dir.y * *height };
                     let st = self.style_of(Some(style));
                     self.text_pen(b, color, layer);
-                    self.flat.add_text2(b, layer, p, *height, *angle, &text, 0.0, st);
+                    self.flat.add_mtext(b, layer, p, *height, *angle, m, st);
+                    return;
+                }
+                // Ausgerichtet in der Spalte: Ankerpunkt = Mitte bzw. rechter Rand der Spalte.
+                let col = if *wrap > 0.0 { *wrap } else { 0.0 };
+                let align = mtext.as_ref().map_or(0.0, |m| m.align);
+                let (halign, shift) = match (col > 0.0, align as i32) {
+                    (true, 1) => (1.0, col / 2.0),
+                    (true, 2) => (2.0, col),
+                    _ => (0.0, 0.0),
+                };
+                let (cs, sn) = (jsnum::cos(*angle), jsnum::sin(*angle));
+                for (text, down) in lines {
+                    if js_trim(&text).is_empty() {
+                        continue;
+                    }
+                    let p = V2 { x: at.x + dir.x * down + cs * shift, y: at.y + dir.y * down + sn * shift };
+                    let st = self.style_of(Some(style));
+                    self.text_pen(b, color, layer);
+                    self.flat.add_text2(b, layer, p, *height, *angle, &text, halign, st);
                 }
             }
             Prim::Stamp { at, lines } => {
@@ -2020,6 +2072,59 @@ mod tests {
         assert!(seq.iter().filter(|s| s.0 == REC_TEXT2).all(|s| s.2 == -1.0));
     }
 
+    /// [200] Textspalte als MTEXT: Breite, Anhängepunkt, Absatz-Ausrichtung, Blocksatz, fett in Teilen; einzeilig
+    /// zentriert in einer Spalte bleibt `TEXT` (72 = 1) am Spaltenmittelpunkt; ohne Spalte linksbündig wie bisher.
+    #[test]
+    fn textspalte_als_mtext_und_ausgerichteter_text() {
+        use crate::model::{RichTextDoc, Vec2};
+        use crate::plan::buf::Writer;
+        use crate::plan::prim::Primitive;
+        let doc = |align: &str, extra: &str| -> RichTextDoc {
+            serde_json::from_str(&format!(
+                r#"{{"version":1,"paragraphs":[{{"align":"{align}","runs":[{{"text":"Erster Satz mit ","marks":{{}}}},{{"text":"fettem","marks":{{"bold":true,"font":"Georgia"}}}},{{"text":" Teil.","marks":{{}}}}]}}{extra}]}}"#
+            ))
+            .unwrap()
+        };
+        let prim = |d: Option<RichTextDoc>, text: &str, wrap: Option<f64>, y: f64| Primitive::DrawingText {
+            at: Vec2 { x: 1.0, y }, text: text.into(), height_m: 0.2, angle: 0.0, color: "#000000".into(), marks: None, wrap_width: wrap, doc: d,
+            drawing_id: None, greyed: None, opacity: None,
+        };
+        let mut w = Writer::new(false);
+        w.push(&prim(Some(doc("justify", r#",{"align":"right","runs":[{"text":"Zweiter Absatz","marks":{}}]}"#)), "", Some(5.0), 10.0));
+        w.push(&prim(None, "Kurz", Some(4.0), 20.0)); // links, eine Zeile: TEXT wie bisher
+        let centered: RichTextDoc = serde_json::from_str(r#"{"version":1,"paragraphs":[{"align":"center","runs":[{"text":"Mitte","marks":{}}]}]}"#).unwrap();
+        w.push(&prim(Some(centered.clone()), "", Some(4.0), 30.0)); // zentriert, eine Zeile: TEXT 72 = 1
+        w.push(&prim(Some(centered), "", None, 40.0)); // ohne Spalte: linksbündig am Anker
+        let bytes = w.finish();
+        let p: Project = serde_json::from_value(crate::sheet_viewports::tests::json()).unwrap();
+        let view = View::parse(&bytes).unwrap();
+        let n = view.len();
+        let mut parts = [Part::new(view, 0, n).unwrap()];
+        let o = DxfOptions { scale: 100.0, include_hatches: true, dim_cm: false, paper_layout: false, bounds: [0.0, 0.0, 10.0, 6.0], default_font: "Arial".into(), floor: "eg".into(), table_labels: String::new() };
+        let f = collect(&mut parts, &p, &o).unwrap();
+        let mut i = f.nums.iter().position(|x| *x == REC_ENTITY_PEN).unwrap();
+        let (mut mt, mut tx): (Vec<Vec<f64>>, Vec<Vec<f64>>) = (vec![], vec![]);
+        while i < f.nums.len() {
+            match f.nums[i] {
+                x if x == REC_ENTITY_PEN => i += 4,
+                x if x == REC_MTEXT => { mt.push(f.nums[i..i + 11].to_vec()); i += 11 }
+                x if x == REC_TEXT2 => { tx.push(f.nums[i..i + 9].to_vec()); i += 9 }
+                _ => i += 1,
+            }
+        }
+        assert_eq!(mt.len(), 1, "nur die Spalte mit Absätzen: {mt:?}");
+        let m = &mt[0];
+        assert_eq!((m[3], m[4], m[5], m[6], m[7], m[8]), (1.0, 10.2, 0.2, 0.0, 5.0, 1.0), "Anker oben links, Höhe, Breite: {m:?}");
+        assert!((m[9] - 0.75).abs() < 1e-12);
+        let content = f.strings[m[2] as usize].as_str();
+        assert!(content.starts_with("\\pxqj;Erster Satz mit {\\fGeorgia|b1|i0;fettem} Teil."), "{content}");
+        assert!(content.ends_with("\\P\\pxqr;Zweiter Absatz"), "{content}");
+        assert_eq!(tx.len(), 3);
+        assert_eq!((tx[0][3], tx[0][7]), (1.0, 0.0), "linksbündig am Anker");
+        assert_eq!((tx[1][3], tx[1][4], tx[1][7]), (3.0, 30.0, 1.0), "zentriert: Spaltenmitte, 72 = 1");
+        assert_eq!((tx[2][3], tx[2][7]), (1.0, 0.0), "ohne Spalte: Anker");
+    }
+
     /// [200] Gedimmte Elemente (0,3) und Objekt-Deckkraft landen als Deckkraft 0–255 im ENTPEN-Satz (Gruppe 440);
     /// ein normales Element bleibt ohne (−1).
     #[test]
@@ -2139,7 +2244,7 @@ mod tests {
         // 4 m in Richtung +y = lokale +x, durch Skalierung 2.
         assert!((b.x - 2.0).abs() < 1e-12 && b.y.abs() < 1e-12);
         let style = TextStyleIn { family: "Arial".into(), bold: false, italic: false };
-        let Some(Prim::Single { height, angle, wrap, .. }) = to_local(&Prim::Single { at: V2 { x: 10.0, y: 5.0 }, angle: PI / 2.0, height: 0.4, wrap: 0.0, style, color: "#000".into(), paras: vec![] }, f) else { panic!() };
+        let Some(Prim::Single { height, angle, wrap, .. }) = to_local(&Prim::Single { at: V2 { x: 10.0, y: 5.0 }, angle: PI / 2.0, height: 0.4, wrap: 0.0, style, color: "#000".into(), paras: vec![], mtext: None }, f) else { panic!() };
         assert!((height - 0.2).abs() < 1e-12 && angle.abs() < 1e-12 && wrap == 0.0);
         let Some(Prim::Circle { center, r, .. }) = to_local(&Prim::Circle { center: V2 { x: 10.0, y: 7.0 }, r: 1.0, dash: vec![] }, f) else { panic!() };
         assert!((r - 0.5).abs() < 1e-12 && (center.x - 1.0).abs() < 1e-12);

@@ -70,6 +70,16 @@ def main(path: str) -> int:
             item["rotation"] = e.dxf.rotation
             if e.dxf.hasattr("align_point"):
                 item["align_point"] = [e.dxf.align_point.x, e.dxf.align_point.y]
+        elif t == "MTEXT":
+            item["text"] = e.text
+            item["plain"] = e.plain_text()
+            item["at"] = [e.dxf.insert.x, e.dxf.insert.y]
+            item["height"] = e.dxf.char_height
+            item["width"] = e.dxf.get("width", 0)
+            item["attachment"] = e.dxf.attachment_point
+            item["style"] = e.dxf.style
+            item["rotation"] = e.dxf.get("rotation", 0)
+            item["spacing"] = e.dxf.get("line_spacing_factor", 1)
         elif t == "INSERT":
             item["name"] = e.dxf.name
             item["at"] = [e.dxf.insert.x, e.dxf.insert.y]

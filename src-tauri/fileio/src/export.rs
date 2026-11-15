@@ -40,6 +40,7 @@
 //   PEN      = 11, ltype (−1 = nach Ebene)     gilt für alle folgenden Entitäten bis zum nächsten PEN
 //   STYLE    = 12, name_idx, font_idx, bold, italic, width_factor   Textstil (TrueType-Schriftname); Index = Reihenfolge
 //   TEXT2    = 13, layer, text_idx, x, y, height, rotation, halign (0 links, 1 Mitte, 2 rechts), style (−1 = Standard)
+//   MTEXT    = 28, layer, text_idx, x, y, height, rotation (rad), width (0 = keine), attach (1 links, 2 Mitte, 3 rechts, oben), line_spacing, style (−1 = Standard)
 //   DIMSTYLE = 14, name_idx, textstyle (−1), scale, txt, tick, exo, exe, gap, dec, lfac, post_idx (−1)   (Papier-Meter, s. export_dim.rs)
 //   DIM      = 15, layer, dimstyle, x1, y1, x2, y2, dx, dy (Punkt auf der Masslinie), has_text, tx, ty
 //   BLOCK    = 16, name_idx, desc_idx (−1), n_att, (tag_idx, prompt_idx, default_idx, x, y, height) × n_att
@@ -67,7 +68,7 @@ use acadrust::entities::{
     HatchPatternType, PolylineEdge,
 };
 use acadrust::entities::{
-    AttributeDefinition, AttributeEntity, Insert, TextHorizontalAlignment, Viewport,
+    AttachmentPoint, AttributeDefinition, AttributeEntity, Insert, MText, TextHorizontalAlignment, Viewport,
 };
 use acadrust::tables::{BlockRecord, LineType, LineTypeElement, TextStyle};
 use acadrust::types::Handle;
@@ -124,6 +125,8 @@ pub const REC_ELLIPSE: f64 = 26.0;
 /// Transparenz (440, `0x02000000 | Deckkraft`; gedimmte Elemente und Objekt-Deckkraft).
 /// Schraffuren mit eigener Farbe behalten sie.
 pub const REC_ENTITY_PEN: f64 = 27.0;
+/// [200] Mehrzeiliger Text: `[Ebene, Text (mit MTEXT-Formatcodes), x, y, Höhe, Drehung (rad), Breite (0 = keine), Anhängepunkt 1–3 (oben links/Mitte/rechts), Zeilenabstandsfaktor, Textstil (−1 = Standard)]`.
+pub const REC_MTEXT: f64 = 28.0;
 
 /// DXF-Ausgabeversion (s. Kopf).
 pub const DXF_VERSION: DxfVersion = DxfVersion::AC1032;
@@ -714,6 +717,32 @@ pub fn build_document(flat: &[f64], strings: &str) -> Result<CadDocument, String
                     t.alignment_point = Some(at);
                 }
                 EntityType::Text(t)
+            })
+        } else if tag == REC_MTEXT {
+            let value = str_at(r.idx()?)?.replace(['\r', '\n'], " ");
+            let v = r.take(4)?;
+            let width = r.f()?;
+            let attach = r.f()?;
+            let spacing = r.f()?;
+            let style = opt_idx(r.f()?, "Textstil")?;
+            let style_name = match style {
+                Some(i) => styles.get(i).ok_or_else(|| format!("Textstil {i} nicht definiert"))?.clone(),
+                None => "Standard".to_string(),
+            };
+            (all_finite(v) && v[2] > 0.0 && width.is_finite() && !value.trim().is_empty()).then(|| {
+                let mut t = MText::with_value(value, Vector3::new(v[0], v[1], 0.0)).with_height(v[2]);
+                t.rotation = v[3];
+                t.rectangle_width = width.max(0.0);
+                t.style = style_name;
+                t.attachment_point = match attach as i32 {
+                    2 => AttachmentPoint::TopCenter,
+                    3 => AttachmentPoint::TopRight,
+                    _ => AttachmentPoint::TopLeft,
+                };
+                if spacing.is_finite() && (0.25..=4.0).contains(&spacing) {
+                    t.line_spacing_factor = spacing;
+                }
+                EntityType::MText(Box::new(t))
             })
         } else if tag == REC_ELLIPSE {
             let v = r.take(7)?;
@@ -1564,6 +1593,39 @@ mod tests {
         check_cad(&read_dxf(export_dxf(&flat, &strings).unwrap()));
         check_cad(&read_dxf(export_dxf_binary(&flat, &strings).unwrap()));
         check_cad(&read_dwg(export_dwg(&flat, &strings).unwrap()));
+    }
+
+    #[test]
+    fn dxf_mtext_mit_breite_anhaengepunkt_und_formatcodes() {
+        let content = "\\pxqj;Blocksatz {\\fArial|b1|i0;fett} und mehr\\P\\pxqc;Mitte";
+        let strings = ["0", content].join("\0");
+        let flat = vec![
+            FLAT_VERSION,
+            REC_LAYER, 0.0, 0x11_11_11 as f64, 18.0,
+            REC_MTEXT, 0.0, 1.0, 10.0, 20.0, 0.25, 0.5, 6.0, 2.0, 0.75, -1.0,
+            // ohne Höhe/Breite unsinnig: verworfen
+            REC_MTEXT, 0.0, 1.0, 10.0, 20.0, 0.0, 0.0, 6.0, 1.0, 0.75, -1.0,
+        ];
+        let dxf = export_dxf(&flat, &strings).unwrap();
+        let text = String::from_utf8(dxf.clone()).unwrap();
+        let lines: Vec<&str> = text.lines().map(str::trim).collect();
+        let at = lines.iter().position(|l| *l == "MTEXT").expect("MTEXT");
+        let group = |code: &str| lines[at + 1..].chunks(2).take_while(|w| w[0] != "ENDSEC" && w[0] != "0").find(|w| w[0] == code).map(|w| w[1].to_string());
+        assert_eq!(group("41").as_deref().map(|v| v.parse::<f64>().unwrap()), Some(6.0));
+        assert_eq!(group("71").as_deref(), Some("2"));
+        assert!(group("1").unwrap().contains("\\pxqj;"));
+        assert_eq!(lines.iter().filter(|l| **l == "MTEXT").count(), 1);
+        for doc in [read_dxf(dxf), read_dwg(export_dwg(&flat, &strings).unwrap())] {
+            let m = doc
+                .model_space_entities()
+                .find_map(|e| if let EntityType::MText(m) = e { Some(m) } else { None })
+                .expect("MTEXT zurückgelesen");
+            assert_eq!(m.value, content);
+            assert_eq!((m.insertion_point.x, m.insertion_point.y), (10.0, 20.0));
+            assert_eq!((m.height, m.rectangle_width, m.rotation), (0.25, 6.0, 0.5));
+            assert_eq!(m.attachment_point, AttachmentPoint::TopCenter);
+            assert!((m.line_spacing_factor - 0.75).abs() < 1e-12);
+        }
     }
 
     #[test]
