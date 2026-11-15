@@ -6,6 +6,7 @@
 // Eintrag nur den DMG-Download im System-Browser an — Installation bleibt
 // der gewohnte manuelle Schritt (DMG oeffnen, App in Applications ersetzen).
 import { isTauriRuntime } from "../native/projectFile";
+import { isOffline } from "../net/net";
 
 export interface VersionEntry {
   version: string;
@@ -24,7 +25,7 @@ const VERSIONS_URL =
 /** Leeres Array ausserhalb von Tauri oder bei Netzwerk-/Parsefehlern (keine
  * Wurf-Semantik hier — der Aufrufer zeigt einfach eine leere Liste). */
 export async function fetchVersionHistory(): Promise<VersionEntry[]> {
-  if (!isTauriRuntime()) return [];
+  if (!isTauriRuntime() || isOffline()) return []; // Offline-Modus: kein Abruf ([262])
   try {
     const { fetch: tauriFetch } = await import("@tauri-apps/plugin-http");
     const res = await tauriFetch(VERSIONS_URL);

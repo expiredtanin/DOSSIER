@@ -6,6 +6,7 @@
 import { ask, message } from "@tauri-apps/plugin-dialog";
 import { t } from "../i18n";
 import { isTauriRuntime } from "../native/projectFile";
+import { isOffline } from "../net/net";
 
 /** localStorage-Key fuer die Update-Pause (s. `getUpdateSnoozeUntil`). */
 const SNOOZE_KEY = "dossier.updateSnoozeUntil";
@@ -37,6 +38,11 @@ export function setUpdateSnooze(untilMs: number | null): void {
  */
 export async function checkForUpdate(silent: boolean): Promise<void> {
   if (!isTauriRuntime()) return;
+  // Offline-Modus ([262]): der Update-Check geht am Tauri-Plugin vorbei an `netFetch`, prüft den Schalter also selbst.
+  if (isOffline()) {
+    if (!silent) await message(t("update.offline"), { title: t("update.title"), kind: "info" });
+    return;
+  }
   if (silent && getUpdateSnoozeUntil() != null) return;
   const { check } = await import("@tauri-apps/plugin-updater");
   let update: Awaited<ReturnType<typeof check>>;

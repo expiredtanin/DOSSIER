@@ -18,7 +18,7 @@
  * (`set_material_detail_textures`; fehlende bleiben schwarz = keine Karte).
  */
 
-import { netFetch } from "../net/net";
+import { HostNotAllowedError, OfflineError, netFetch } from "../net/net";
 import type { Project } from "../model/types";
 import { pathtraceMaterials, type PtMaterialEntry } from "../core";
 
@@ -103,7 +103,9 @@ async function loadImage(url: string): Promise<CanvasImageSource> {
       const res = await netFetch(url);
       const blob = await res.blob();
       return await createImageBitmap(blob);
-    } catch {
+    } catch (err) {
+      // Offline-Modus und Host-Liste gelten auch für den Bild-Fallback unten ([262]).
+      if (err instanceof OfflineError || err instanceof HostNotAllowedError) throw err;
       // Fallback unten (z. B. wenn fetch die URL nicht mag).
     }
   }

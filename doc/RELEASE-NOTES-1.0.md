@@ -207,6 +207,26 @@ Ehrlich vorweg: **Der Durchlauf des ganzen Referenz-Ablaufs auf dem Mac ist noch
   gehen im IFC als Netz, nicht als parametrisches Dach. 2D-Zeichnungen, Texte, Bemassungen, Schraffuren, Layouts, Gelände, Möbel und
   Blöcke gehen nicht ins IFC. Punktwolken und BCF-Themen sind nicht im Projekt gespeichert.
 
+## Netzzugriffe und Datenschutz
+
+Dossier arbeitet lokal: Projekte, Pläne und Modelle bleiben auf deinem Rechner und werden nicht hochgeladen. Es gibt **keine Telemetrie, keine
+Nutzungsstatistik und keinen Absturzbericht** (im Code nicht vorhanden; geprüft 15.11. durch Suche in Quelltext, Rust-Crates, `package.json`,
+Electron-Hauptprozess und `index.html`). Schriften und Icons werden mitgeliefert, es lädt nichts von einem CDN.
+
+| Dienst | Wofür | Wann | Abschaltbar |
+|---|---|---|---|
+| swisstopo / geo.admin.ch | Adresssuche, Gebäude und Luftbild für den Kontext-Import, 3D-Gebäude und Gelände (STAC) | nur nach Klick im Dialog «Kontext importieren» (Suche, Import) | Offline-Modus |
+| OpenStreetMap (Overpass) | Gebäude, Strassen, Wasser, Grün im Kontext-Import | nur nach Klick im Dialog «Kontext importieren» | Offline-Modus |
+| ambientCG | Materialtexturen (CC0) | Die Materialbibliothek (Ressourcen → Komponenten) fragt beim Öffnen die Trefferliste ab, Texturen erst nach Klick auf «Textur laden» | Offline-Modus |
+| Update-Server (`git.openbureau.ch`) | Suche nach neuer Version; Versionsverlauf in den Einstellungen | Tauri/macOS: **automatisch einmal beim Start** und beim Öffnen der Einstellungen; Knopf «Nach Updates suchen». Electron/Linux: keine Update-Prüfung | Offline-Modus (ab [262]); Start-Prüfung zusätzlich pausierbar (Einstellungen → Update) |
+| KI-Zugriff (MCP-Brücke) | KI-Werkzeuge steuern Dossier | nur mit «KI-Zugriff erlauben»; lokal auf `127.0.0.1`, mit Schlüssel, nicht aus dem Netz erreichbar | Schalter «KI-Zugriff erlauben» |
+| Blender | Rendern | startet das lokal installierte Blender; kein Netz. «Blender laden» öffnet nur die Webseite im Browser | – |
+
+Der **Offline-Modus** (Einstellungen → Allgemein) sperrt alle Abrufe der Tabelle. Bereits geladene Daten bleiben nutzbar. Mit Ausnahme des Update-Servers
+laufen alle Abrufe über eine Host-Liste: andere Adressen lehnt Dossier ab, die Sicherheitsrichtlinie der App (CSP) erlaubt genau diese Hosts. Beim Abruf
+erfährt der jeweilige Dienst deine IP-Adresse und die abgefragte Gegend bzw. Suche (Koordinaten, Adresstext); Dossier sendet keine Projektdateien. Ist ein
+Geo-Proxy konfiguriert (`VITE_GEO_PROXY`, Büro-Server), laufen swisstopo/OSM-Abrufe stattdessen über diesen.
+
 ## Offene Fragen an den Maintainer
 
 1. ~~Versionsnummer~~ — erledigt durch [261] (15.11.): 1.0.0-beta.N, Build JJMMTT.N (Über Dossier und Statusleiste zeigen beides).
@@ -222,8 +242,9 @@ Ehrlich vorweg: **Der Durchlauf des ganzen Referenz-Ablaufs auf dem Mac ist noch
 9. **[Frage M: Dateiformat]** Verspricht 1.0 das Öffnen von `.obp` aus 1.x? CLAUDE.md sagt, es gebe keine produktiven Projekte und keine Migrationspflicht;
    Anwender:innen müssten das in den Notes lesen.
 10. **[Frage M: Beispielprojekt]** Das Beispielprojekt «Wettbewerb» ist fiktiv (Winterthur): als Beispiel ausliefern und so nennen?
-11. **[Frage M: Netzzugriffe und Datenschutz]** Welche Netzzugriffe nennen die Notes (swisstopo/geo.admin, OSM; Offline-Modus in `src/net`)? Gibt es Telemetrie
-    (aus dem Repo nicht ersichtlich)?
+11. **[Frage M: Netzzugriffe und Datenschutz]** Befund steht im Abschnitt «Netzzugriffe und Datenschutz» ([262], nur aus dem Code): keine Telemetrie gefunden,
+    Netzzugriffe nur über die Host-Liste, einziger Start-Zugriff ist die Update-Prüfung (Tauri), jetzt mit Offline-Modus. Bitte bestätigen, dass die Notes
+    das so nennen sollen, und ob die Start-Prüfung in 1.0 standardmässig an bleibt.
 12. ~~Fenster über Schnitt~~ — erledigt durch [260] (15.11.): Fenster/Türen im Grundriss symbolisch (Vorgabe) oder geschnitten, je Element, Typ oder
     Modelldarstellung; „geschnitten“ zeichnet Öffnungen über/unter Schnitt hell auf schwarzer Wand ([256]).
 13. ~~Klassen der Objektbibliothek~~ — erledigt: 22/23/24 bestätigt (15.11.).
