@@ -16,6 +16,8 @@ export const PX_PER_M = 90; // viewBox-Einheiten je Meter (Modell → SVG-Benutz
 export const PAD = 60; // Rand in viewBox-Einheiten
 /** Kleinste Kantenlänge (m) des Einpass-Bereichs: leeres/winziges Modell öffnet bei ca. 1:100 statt extrem nah ([147]). */
 export const MIN_FIT_EXTENT_M = 30;
+/** [263] Kleinster Einpass-Bereich (m), sobald Bauteile da sind: ein Haus von 5 m soll den Bildschirm füllen, nicht 1/6 davon. */
+export const HOUSE_FIT_EXTENT_M = 8;
 
 /**
  * Modell-Meter → SVG-Benutzerraum (viewBox-Einheiten) mit FIXEM Welt-Ursprung

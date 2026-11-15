@@ -422,7 +422,7 @@ export const StatusBar = memo(function StatusBar({
   return (
     <footer className="statusbar">
       {/* Links: Werkzeug-Hinweis. */}
-      <span className="sb-hint" data-testid="status-hint">{pickHint ?? hint}</span>
+      <span className="sb-hint" data-testid="status-hint" title={pickHint ?? hint}>{pickHint ?? hint}</span>
 
       {/* Rechts: abgeleiteter Wert-Cluster. Interaktive Kontrollen (Linien-
           Darstellung, Fang) zuerst, danach die reinen Anzeigewerte. */}
@@ -460,8 +460,10 @@ export const StatusBar = memo(function StatusBar({
         <Field label={t("status.floor")} value={activeFloor} />
         <Sep />
         <Field label={t("status.layer")} value={activeLayer} />
-        <Sep />
-        <span className="sb-field" title={t("status.build.title")}><span className="sb-val" style={{ opacity: 0.55 }}>{formatBuildShort(BUILD_INFO, t("about.build"))}</span></span>
+        <span className="sb-build">
+          <Sep />
+          <span className="sb-field" title={t("status.build.title")}><span className="sb-val" style={{ opacity: 0.55 }}>{formatBuildShort(BUILD_INFO, t("about.build"))}</span></span>
+        </span>
       </div>
     </footer>
   );

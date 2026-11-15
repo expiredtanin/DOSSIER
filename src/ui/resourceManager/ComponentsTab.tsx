@@ -806,7 +806,7 @@ export function ComponentsTab({
                     <ColorSwatch color={c.foreground ?? c.color} />
                   )}
                 </span>
-                <span className="res-md-row-name">{c.name}</span>
+                <span className="res-md-row-name" title={c.name}>{c.name}</span>
               </button>
             );
           })}

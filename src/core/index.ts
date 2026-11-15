@@ -203,6 +203,7 @@ export {
   toScreen,
   viewForCamera,
   defaultViewFor,
+  HOUSE_FIT_EXTENT_M,
   viewForScale,
   visibleEdgeRuns,
 } from "../plan/planView/geometry";

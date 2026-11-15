@@ -128,6 +128,7 @@ export function KennzahlenSection() {
                   type="text"
                   className="kz-input"
                   value={row.name}
+                  title={row.name || undefined}
                   placeholder={t("program.namePlaceholder")}
                   onChange={(e) => patchRow(i, { name: e.target.value }, "name")}
                 />
@@ -157,6 +158,7 @@ export function KennzahlenSection() {
                   type="text"
                   className="kz-input"
                   value={row.group ?? ""}
+                  title={row.group || undefined}
                   onChange={(e) => patchRow(i, { group: e.target.value === "" ? undefined : e.target.value }, "group")}
                 />
                 <span

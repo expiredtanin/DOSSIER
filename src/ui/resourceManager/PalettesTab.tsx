@@ -102,7 +102,7 @@ export function PalettesTab({
               className={`res-md-row${selected?.id === p.id ? " active" : ""}`}
               onClick={() => setSelectedId(p.id)}
             >
-              <span className="res-md-row-name">{p.name}</span>
+              <span className="res-md-row-name" title={p.name}>{p.name}</span>
               <span className="res-md-row-meta">{p.colors.length}</span>
             </button>
           ))}

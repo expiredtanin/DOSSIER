@@ -275,7 +275,7 @@ function LayeredStylesTab({
                   orientation={orientation}
                 />
               </span>
-              <span className="res-md-row-name">{s.name}</span>
+              <span className="res-md-row-name" title={s.name}>{s.name}</span>
             </button>
           ))}
           {types.length === 0 && (

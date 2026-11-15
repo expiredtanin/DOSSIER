@@ -174,6 +174,7 @@ registerPanel({
   title: "nav.bcf",
   icon: <BcfTabIcon />,
   hasDisplayMode: false,
+  closeOnEscape: true,
   render: () => <BcfPanel />,
 });
 
@@ -184,6 +185,7 @@ registerPanel({
   title: "nav.clash",
   icon: <BcfTabIcon />,
   hasDisplayMode: false,
+  closeOnEscape: true,
   render: () => <ClashPanel />,
 });
 
@@ -194,6 +196,7 @@ registerPanel({
   title: "nav.history",
   icon: <HistoryTabIcon />,
   hasDisplayMode: false,
+  closeOnEscape: true,
   render: () => <HistoryPanel />,
 });
 

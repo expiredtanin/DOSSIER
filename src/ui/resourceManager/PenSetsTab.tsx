@@ -156,7 +156,7 @@ export function PenSetsTab({
               className={`res-md-row${selected?.id === s.id ? " active" : ""}`}
               onClick={() => setSelectedId(s.id)}
             >
-              <span className="res-md-row-name">{s.name}</span>
+              <span className="res-md-row-name" title={s.name}>{s.name}</span>
               {project.activePenSetId === s.id && (
                 <span className="res-pen-active-badge">{t("resources.pens.activeBadge")}</span>
               )}

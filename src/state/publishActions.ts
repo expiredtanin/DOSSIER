@@ -65,7 +65,7 @@ export async function publishSet(project: Project, setId: string): Promise<CoreO
     if (!bundle) return null;
     const saved = await saveBinaryFile(bundle.bytes, bundle.fileName, bundle.mime);
     if (!saved) return null;
-    getState().notify(`${t("publish.done")}: ${files.length}`, "info");
+    getState().notify(files.length === 1 ? t("publish.doneOne", { file: bundle.fileName }) : t("publish.done", { file: bundle.fileName, n: files.length }), "info");
     return publishOps(project, set, plan, now.toISOString(), `pub-${now.getTime()}`);
   } catch (err) {
     getState().notify(`${t("publish.failed")}: ${err instanceof Error ? err.message : String(err)}`, "error");

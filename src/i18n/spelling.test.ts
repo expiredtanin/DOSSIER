@@ -29,3 +29,17 @@ describe("en.ts: einheitliche Schreibweise", () => {
     expect(hits).toEqual([]);
   });
 });
+
+// [263] Auslassungspunkte: Befehle, die einen Dialog öffnen, enden auf „ …“ (Leerzeichen davor) — in Menüs, Dateimenü,
+// Kontextmenüs und Befehlsnamen, de und en gleich. Fortschrittstexte („Suche…“) und Platzhalter sind ausgenommen.
+describe("Auslassungspunkte in Menü- und Befehlstexten", () => {
+  const isCommandKey = (k: string) => /^(menu|file|ctx)\./.test(k) || /^cmd\..*\.label$/.test(k) || k === "bcf.open" || k === "bcf.save";
+  for (const [name, dict] of [["de", de], ["en", en]] as const) {
+    it(`${name}: „ …“ mit Leerzeichen, nie „x…“ oder „...“`, () => {
+      const hits = Object.entries(dict)
+        .filter(([k, v]) => typeof v === "string" && isCommandKey(k) && (/\S…$/.test(v) || /\.\.\.$/.test(v)))
+        .map(([k, v]) => `${k}: ${v}`);
+      expect(hits).toEqual([]);
+    });
+  }
+});

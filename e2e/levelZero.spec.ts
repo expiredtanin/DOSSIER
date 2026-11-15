@@ -12,7 +12,7 @@ test("Geschoss als ±0.00 wählen: Erdgeschoss liegt danach negativ", async ({ p
   await expect(ogElev).toHaveText("+2.60");
 
   await page.locator(".nav-row", { hasText: "Obergeschoss" }).first().click({ button: "right" });
-  await page.getByText("Einstellungen…", { exact: true }).click();
+  await page.getByText("Einstellungen …", { exact: true }).click();
   const zero = page.getByTestId("level-zero");
   await expect(zero).not.toBeChecked();
   await zero.check();
@@ -24,7 +24,7 @@ test("Geschoss als ±0.00 wählen: Erdgeschoss liegt danach negativ", async ({ p
   // Geschosshöhe des EG ändert sich → ±0.00 bleibt beim OG, das EG wandert nach unten.
   await page.keyboard.press("Escape");
   await page.locator(".nav-row", { hasText: "Erdgeschoss" }).first().click({ button: "right" });
-  await page.getByText("Einstellungen…", { exact: true }).click();
+  await page.getByText("Einstellungen …", { exact: true }).click();
   const h = page.locator(".editor-num input[type=number]:not([data-testid])").first();
   await h.fill("2.8");
   await expect(egElev).toHaveText("−2.80");

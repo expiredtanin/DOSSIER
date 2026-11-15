@@ -18,7 +18,7 @@ import { RichTextEditor } from "../../editors/RichTextEditor";
 import { LiveMeet, LiveValue } from "./planView/liveMeet";
 import { publishPlanViewport, viewBoxToMeshRect } from "../../state/planViewport";
 import { DEFAULT_MARQUEE_COLOR, DEFAULT_SNAP_COLOR } from "../../theme/accents";
-import { type ViewBox__plan_planView_geometry as ViewBox, PX_PER_M, PAD, toScreen, meetScale, defaultViewFor } from "../../core";
+import { type ViewBox__plan_planView_geometry as ViewBox, PX_PER_M, PAD, toScreen, meetScale, defaultViewFor, HOUSE_FIT_EXTENT_M } from "../../core";
 import {
   polyUsesPattern,
   HatchPattern,
@@ -172,7 +172,8 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     const b = fitBounds ?? planRaw.bounds;
     // Fester Einpass-Bereich (Blatt): Rand relativ zu seiner Grösse statt der festen Modell-Marge.
     const pad = fitBounds ? Math.max(b.maxX - b.minX, b.maxY - b.minY) * PX_PER_M * 0.04 : PAD;
-    return defaultViewFor(b, pad, fitBounds ? 0 : undefined);
+    // [263] Mit Bauteilen kleinerer Mindestausschnitt (kleines Haus füllt das Fenster); leeres Projekt: 30 m.
+    return defaultViewFor(b, pad, fitBounds ? 0 : planRaw.houseBounds ? HOUSE_FIT_EXTENT_M : undefined);
   }, [planRaw, fitBounds]);
 
   // [204] Startansicht (Öffnen, Geschoss-/Plan-Wechsel ohne gemerkten Zoom): auf das GEBÄUDE eingepasst (Wände, Decken,
@@ -182,7 +183,8 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   // sich auf das ganze Ausmass (sonst liesse sich nicht bis zum Kataster herauszoomen).
   const startView = useMemo<ViewBox>(() => {
     const h = fitBounds ? undefined : planRaw.houseBounds;
-    return h ? defaultViewFor(h, PAD) : defaultView;
+    // [263] Rand 6 % der Kantenlänge (Bemassungsketten, Schnittmarken ausserhalb der Wände bleiben im Bild).
+    return h ? defaultViewFor(h, Math.max(PAD, 0.06 * PX_PER_M * Math.max(h.maxX - h.minX, h.maxY - h.minY)), HOUSE_FIT_EXTENT_M) : defaultView;
   }, [planRaw, fitBounds, defaultView]);
   const startViewRef = useRef(startView);
   startViewRef.current = startView;

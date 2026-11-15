@@ -15,7 +15,7 @@
 //
 // Bezeichner englisch, UI-Text/Kommentare deutsch (CONVENTIONS.md).
 
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import { PanelFrame } from "./PanelFrame";
 import { getPanel } from "./registry";
@@ -158,9 +158,28 @@ export function FloatingPanel({
 
   const title = def ? t(def.title) : panel.panelId;
 
+  // [263] Verlauf/BCF/Kollisionen: Fokus ins Fenster beim Öffnen, damit Esc es schliesst.
+  const rootRef = useRef<HTMLElement | null>(null);
+  const closeOnEscape = !!def?.closeOnEscape;
+  useEffect(() => {
+    if (closeOnEscape) rootRef.current?.focus({ preventScroll: true });
+  }, [closeOnEscape]);
+
   return (
     <section
       className="floating-panel"
+      ref={rootRef}
+      tabIndex={closeOnEscape ? -1 : undefined}
+      onKeyDown={
+        closeOnEscape
+          ? (e) => {
+              if (e.key === "Escape" && !e.defaultPrevented) {
+                e.stopPropagation();
+                onClose(panel.panelId);
+              }
+            }
+          : undefined
+      }
       style={style}
       onPointerDownCapture={() => onFocus(panel.panelId)}
       role="dialog"

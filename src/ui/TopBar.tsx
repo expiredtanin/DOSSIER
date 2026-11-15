@@ -8,6 +8,7 @@
 // aus App, Aktionen melden sich über Callbacks zurück. Bezeichner englisch,
 // UI-Text/Kommentare deutsch (CONVENTIONS.md).
 
+import { setAboutDialogOpener } from "../state/aboutDialogHook";
 import { TEXT_FONTS } from "../text/fontList";
 import { t } from "../i18n";
 import { useModalFocus } from "./modalFocus";
@@ -1393,6 +1394,11 @@ export const TopBar = memo(function TopBar({
   // Unter Tauri (native macOS-Ampeln oben links via titleBarStyle "Overlay")
   // braucht die Zeile links Platz, damit `dossier.` nicht darunter liegt.
   const [aboutOpen, setAboutOpen] = useState(false);
+  // [263] Hilfe → „Über dossier …“ öffnet denselben Dialog wie die Wortmarke.
+  useEffect(() => {
+    setAboutDialogOpener(() => setAboutOpen(true));
+    return () => setAboutDialogOpener(null);
+  }, []);
 
   const tauriNativeTitlebar =
     typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;

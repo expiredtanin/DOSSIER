@@ -154,6 +154,11 @@ export interface PanelDef {
    */
   hasDisplayMode?: boolean;
   /**
+   * [263] Schwebend schliesst Esc das Fenster (Fokus im Fenster; es nimmt ihn beim Öffnen), wie bei den modalen Dialogen.
+   * Nur für Panels, die man kurz aufruft und wieder wegschickt (Verlauf, BCF, Kollisionen); Werkzeug-Panels bleiben.
+   */
+  closeOnEscape?: boolean;
+  /**
    * Optionale Aktions-Elemente rechts in der EINEN Kopfzeile des PanelFrame
    * (z. B. „+ Kategorie", Fenster-Ausklinken). So bündeln Panels ihre Aktionen
    * in der gemeinsamen Frame-Kopfzeile statt einer zweiten eigenen Titelzeile

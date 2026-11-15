@@ -31,10 +31,10 @@ test("Schnitt und Ansicht: Wechsel ins 3D (eigener Reiter, Schnitt bleibt offen)
   await drawingTab(page, "Schnitt A-A").click();
   await expect(page.locator("svg.plan-svg").first()).toBeVisible({ timeout: 30_000 });
 
-  // Ansicht: über das Menü Ansicht → Perspektive.
+  // Ansicht: über das Menü Ansicht → 3D-Ansicht.
   await openViewTab(page, "Ansicht Süd");
   await page.getByRole("button", { name: "Ansicht", exact: true }).click();
-  await page.getByRole("option", { name: "Perspektive" }).first().click();
+  await page.getByRole("option", { name: "3D-Ansicht", exact: true }).click();
   await expect(drawingTabs(page).getByRole("tab", { name: /^3D/ })).toHaveAttribute("aria-selected", "true", { timeout: 30_000 });
 });
 

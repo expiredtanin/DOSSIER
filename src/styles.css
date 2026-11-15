@@ -1031,6 +1031,9 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  /* [263] Der Hinweis (z. B. „1/4 Treffer — erneut klicken …“) schrumpfte bei 1280 px mit Koordinaten auf „1…“. */
+  flex: 1 1 auto;
+  min-width: 170px;
 }
 
 /* Rechter Wert-Cluster. */
@@ -1038,8 +1041,24 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
   white-space: nowrap;
+}
+.sb-build {
+  display: inline-flex;
+  align-items: center;
+  gap: inherit;
+}
+/* [263] Schmale Fenster: Build-Nummer weg (steht im Über-Dialog), Abstände enger — dem Hinweis bleibt Platz. */
+@media (max-width: 1500px) {
+  .sb-cluster {
+    gap: 5px;
+  }
+  .sb-build {
+    display: none;
+  }
 }
 
 /* Ein Wert-Feld: kleine Beschriftung + Wert. */
@@ -3055,8 +3074,10 @@ body {
    kein Rahmen/Verschmelzen mit dem Rand. */
 .res-tabs {
   display: flex;
+  /* [263] Umbrechen statt abschneiden: bei 1280 px verschwanden „Dachtypen“ … rechts ohne Hinweis. */
+  flex-wrap: wrap;
   gap: 2px;
-  padding: 10px 16px 0;
+  padding: 10px 16px 6px;
   flex: 0 0 auto;
   border-bottom: 1px solid var(--line);
 }
@@ -9115,7 +9136,19 @@ body {
 
 /* Raumprogramm: Gruppenspalte, Aktionen, Soll/Ist-Vergleich, Import-Dialog ([61]). */
 .kz-program-row {
-  grid-template-columns: minmax(0, 1fr) 52px 36px 64px 56px 18px;
+  /* [263] Zwei Zeilen je Raum: Name über die ganze Breite, darunter Fläche, Anzahl, Gruppe (flexibel), Status, Entfernen —
+     im 320-px-Panel blieben dem Namen sonst ≈ 40 px. */
+  grid-template-columns: 52px 36px minmax(0, 1fr) 56px 18px;
+}
+.kz-program-row > :first-child {
+  grid-column: 1 / -1;
+}
+.kz-program-head > :first-child {
+  display: none;
+}
+.kz-program-row:not(.kz-program-head) {
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--line, rgba(128, 128, 128, 0.2));
 }
 .kz-program-actions {
   display: flex;
@@ -9421,4 +9454,9 @@ body {
   max-height: calc(100% - 24px);
   overflow-y: auto;
   box-sizing: border-box;
+}
+
+/* [263] Schwebendes Panel nimmt den Fokus (Esc schliesst Verlauf/BCF/Kollisionen), ohne Fokusring ums ganze Fenster. */
+.floating-panel:focus {
+  outline: none;
 }

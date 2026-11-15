@@ -28,7 +28,7 @@ test("Baum setzen, Höhe ändern, Undo", async ({ page }) => {
   await typeCommand(page, "baum");
   await expect(page.locator(".cmdline-prompt")).toHaveText("Baum setzen (Zahl = Kronendurchmesser):");
   await typeCommand(page, "6");
-  await typeCommand(page, "4,-6");
+  await typeCommand(page, "3,5");
   await finishCommand(page);
   await blurFocus(page);
 
@@ -38,8 +38,8 @@ test("Baum setzen, Höhe ändern, Undo", async ({ page }) => {
   const height = field("Höhe");
   await expect(async () => {
     await page.keyboard.press("Escape");
-    // Neben der Stammmitte in die Krone klicken (Kronenradius 3 m).
-    await clickModel(page, 5, -6);
+    // Neben der Stammmitte in die Krone klicken (Kronenradius 3 m); Baum im Bild des eingepassten Musterhauses (8 m Ausschnitt, [263]).
+    await clickModel(page, 4, 5);
     await expect(height).toBeVisible({ timeout: 1000 });
   }).toPass({ timeout: 30_000 });
   await expect(objInfo).toContainText("Baum");
