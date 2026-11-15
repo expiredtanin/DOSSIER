@@ -54,7 +54,24 @@ Raumprogramm gegen Modell → Grundrisse/Schnitte/Ansichten 1:200 (Vorprojekt 1:
 3D-Bilder/Axonometrie/Schatten → Flächen/Volumen SIA 416 und Kennzahlen → Kostenschätzung grob → Abgabe-Layouts (Plakate A0/A1,
 Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
 
-- ○ **[260]** Fenster/Türen im Grundriss: Darstellungsart **symbolisch** oder **geschnitten** wählbar (15.11., Entscheid Maintainer). Symbolisch = Öffnungssymbol nach Norm unabhängig von der Schnitthöhe (heutiges Verhalten für Öffnungen im Schnitt, Brüstungen/Stürze über/unter Schnitt als Symbol); geschnitten = Darstellung nach der tatsächlichen Schnitthöhe (Öffnung über dem Schnitt: Wand geschlossen, Öffnung als Linie über Schnitt). Einstellbar im Objekteinstellungsfenster (Taste T) je Fenster/Tür bzw. Typ, Vorgabe aus Modelldarstellung. · M
+- ◐ **[260]** Fenster/Türen im Grundriss: Darstellungsart **symbolisch** oder **geschnitten** wählbar (15.11., Entscheid Maintainer). Symbolisch = Öffnungssymbol nach Norm unabhängig von der Schnitthöhe (heutiges Verhalten für Öffnungen im Schnitt, Brüstungen/Stürze über/unter Schnitt als Symbol); geschnitten = Darstellung nach der tatsächlichen Schnitthöhe (Öffnung über dem Schnitt: Wand geschlossen, Öffnung als Linie über Schnitt). Einstellbar im Objekteinstellungsfenster (Taste T) je Fenster/Tür bzw. Typ, Vorgabe aus Modelldarstellung.
+  **Umgesetzt 15.11.:** Modell `OpeningPlanMode` (`symbolisch` | `geschnitten`) als `Opening.planMode`, `WindowType.planMode`, `DoorType.planMode` und
+  Modelldarstellung `walls.openingPlanMode` (Kern `generated.rs`, `npm run gen:types`); Rangfolge Element > Typ > Modelldarstellung > symbolisch
+  (`WallOpts::opening_plan_mode`). Kern `plan/walls.rs`: symbolisch ⇒ Öffnung immer als geschnitten (Wandlücke + Symbol), Formöffnungen mit
+  voller Breite statt der Sehne auf Schnitthöhe ([G3] gilt nur noch für „geschnitten“); geschnitten ⇒ wie bisher nach Ansichtsbereich, neu auch
+  ohne eigenen Bereich: ganz über dem Schnitt Wand geschlossen + strichpunktiert, darunter gepunktet, auf schwarzer Wand hell ([256]
+  `contrastOnSolid`). Eine Stelle für Bildschirm, Plan-SVG, Druck-SVG/PDF und DXF (alle aus den Plan-Primitiven); Bemassung unverändert.
+  UI: Objekteinstellungen (T) Feld „Im Grundriss“ (Wie Typ/symbolisch/geschnitten, „gemischt“-Marke) über den neuen Host-Handler
+  `onSetOpeningPlanMode` — anders als die Art-eigenen Felder für ALLE gewählten Öffnungen, Fenster und Türen, ein Undo-Schritt; das macOS-Nebenfenster
+  bekommt ihn über die bestehende Handler-Weiterleitung (`remoteHost`). Fenster-/Türtypen (Ressourcen) Feld „Im Grundriss“, Modelldarstellung
+  Option „Fenster/Türen im Grundriss“. Tests: Rust `plan/opening_plan_mode_tests.rs` (Badfenster ab 1.10 m als Symbol, Kellerfenster; geschnitten:
+  Wand geschlossen + Linie über/unter Schnitt hell; Rangfolge; Türtyp), bestehende Tests [36]/[G3]/[256] auf „geschnitten“ gestellt plus
+  Gegenprobe symbolisch; vitest `elementAttributesHost.test.ts` (Fenster + Tür, ein Undo-Schritt); e2e `e2e/openingPlanMode260.spec.ts` (O1 wählen, T,
+  Brüstung 1.10, „geschnitten“ ⇒ Linie über Schnitt, ⌘Z). Goldens: nur Musterhaus komplex (UG/EG/OG/DG 1:100/1:50), weil dessen Geschosse einen
+  eigenen Ansichtsbereich haben und Bad-/Réduit-/Rund-/Lichtschachtfenster über der Schnitthöhe bisher die Wand schlossen — jetzt Symbol in der
+  Lücke (je Plan 1 Polygon/Polylinie mehr, Hash neu); Musterhaus einfach und CLI-Goldens unverändert. Vorher/Nachher CLI-SVG `--hatch` 1:100 EG/DG
+  in Chromium angesehen (Linux). Offen: auf dem Mac nicht geprüft (Metal-Fläche, natives Objekteinstellungsfenster, PDF/DXF; `doc/RELEASE-1.0.md` 13.29);
+  der Fenster-/Türeditor im Bereich „Objekt“ zeigt das Typ-Feld nicht (nur Ressourcen). · M
 - ◐ **[253]** Standard-Objektbibliothek 2D (14.11., Wunsch Maintainer). Stand 14.11.: parametrische Objekte statt starrer `BlockDef`s —
   `Drawing2DGeom::Libobj { libId, at, rotation, params, seed }`; der Kern (`furniture_lib.rs`) erzeugt die Linien zur Plan-Zeit nach Detailgrad
   (grob/mittel/fein wie bei Türen/Fenstern), Definition (Parameterliste, Einfügepunkt, Klasse) getrennt von der Erzeugung, Register für

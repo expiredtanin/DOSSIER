@@ -614,6 +614,15 @@ fn window_type<'a>(p: &'a Project, o: &Opening) -> Option<&'a WindowType> {
     p.window_types.as_deref()?.iter().find(|t| t.id == id)
 }
 
+/// [260] Darstellungsart des Tür-/Fenstertyps im Grundriss (fehlt ⇒ Modelldarstellung).
+fn opening_type_plan_mode(p: &Project, o: &Opening) -> Option<OpeningPlanMode> {
+    if o.kind == ElementKind::Door {
+        door_type(p, o).and_then(|t| t.plan_mode)
+    } else {
+        window_type(p, o).and_then(|t| t.plan_mode)
+    }
+}
+
 /// Öffnungs-Symbol (`addOpeningSymbol`).
 #[allow(clippy::too_many_arguments)]
 fn opening_symbol(c: &Ctx, out: &mut Vec<Primitive>, w: &Wall, o: &Opening, color: Option<&str>, greyed: bool, detail: Detail, lw: f64, wall_line: (&str, f64)) -> Result<(), String> {
@@ -1112,10 +1121,23 @@ pub fn plan_walls(c: &Ctx, reference_lines: bool, out: &mut Vec<Primitive>, boun
             ref_off: joins::reference_offset(crate::model3d::wall_reference(w), wr_total),
         };
         let all_openings: Vec<(std::borrow::Cow<Opening>, Zone)> = p.openings_of_wall(&w.id).map(|o| {
+            // [260] Symbolisch (Vorgabe): das Öffnungssymbol nach Norm unabhängig von der Schnitthöhe — auch das
+            // Badfenster ab 1.10 m, das Oberlicht oder das Kellerfenster; Formöffnungen mit voller Breite statt der Sehne.
+            if c.mv().wall.opening_plan_mode(o.plan_mode, opening_type_plan_mode(p, o)) != OpeningPlanMode::Geschnitten {
+                return (std::borrow::Cow::Borrowed(o), Zone::Cut);
+            }
             let (ob, ot) = super::view_range::opening_vertical_extent(p, w, o);
-            // [36] Auch ohne eigenen Bereich: eine Öffnung ganz unter der Schnittebene (Brüstungs-/Kellerfenster) schneidet
-            // keine Lücke in die Wand; ganz darüber (Oberlicht) bleibt es ohne Bereich wie bisher.
-            let oz = if range.custom { range.classify(ob, ot) } else if ot < cut_z { Zone::Below } else { Zone::Cut };
+            // [36]/[260] Geschnitten: nach der Schnitthöhe. Auch ohne eigenen Bereich schneidet eine Öffnung ganz unter
+            // (Brüstungs-/Kellerfenster) oder ganz über der Schnittebene (Oberlicht) keine Lücke in die Wand.
+            let oz = if range.custom {
+                range.classify(ob, ot)
+            } else if ot < cut_z {
+                Zone::Below
+            } else if ob > cut_z {
+                Zone::Above
+            } else {
+                Zone::Cut
+            };
             match shaped_plan_cut(&wr, o, ob, ot, cut_z).filter(|_| oz == Zone::Cut && zone == Zone::Cut) {
                 Some(Ok(chord)) => (std::borrow::Cow::Owned(chord), oz),
                 Some(Err(miss)) => (std::borrow::Cow::Borrowed(o), miss),
@@ -1975,7 +1997,13 @@ pub(crate) mod tests {
     /// [G3] Projekt wie [`pocket_project`], statt der Tür ein Fenster 1.0..2.2 (Breite 1.2) mit Form.
     fn shaped_window(shape: OpeningShape, sill: f64, height: f64) -> Project {
         let mut p = pocket_project(DoorTypeKind::Dreh, None, 1.0);
-        p.openings = Some(vec![Opening { id: "o".into(), host_wall_id: "w".into(), kind: ElementKind::Window, category_code: "20".into(), position: 1.0, width: 1.2, height, sill_height: sill, shape: Some(shape), ..Default::default() }]);
+        p.openings = Some(vec![Opening { id: "o".into(), host_wall_id: "w".into(), kind: ElementKind::Window, category_code: "20".into(), position: 1.0, width: 1.2, height, sill_height: sill, shape: Some(shape), plan_mode: Some(OpeningPlanMode::Geschnitten), ..Default::default() }]);
+        p
+    }
+
+    /// [260] Dieselbe Formöffnung symbolisch (Vorgabe): volle Breite, unabhängig von der Schnitthöhe.
+    fn symbolic(mut p: Project) -> Project {
+        p.openings.as_mut().unwrap()[0].plan_mode = None;
         p
     }
 
@@ -2010,6 +2038,9 @@ pub(crate) mod tests {
         assert!((g - (u1 - u0) * 0.16).abs() < 1e-6, "{g} {}", (u1 - u0) * 0.16);
         let (x0, x1) = symbol_x(&wall_prims(&p));
         assert!(x0 >= 1.0 + u0 - 1e-6 && x1 <= 1.0 + u1 + 1e-6, "{x0} {x1}");
+        // [260] Symbolisch: Lücke des umschreibenden Rechtecks.
+        let g = gap(&symbolic(p.clone()));
+        assert!((g - rect).abs() < 1e-9, "{g}");
         // Rundbogen mit Kämpfer über der Schnitthöhe: wie Rechteck (gleiche Lücke).
         let g = gap(&shaped_window(OpeningShape::Rundbogen, 0.2, 1.8));
         assert!((g - rect).abs() < 1e-9, "{g}");
@@ -2122,5 +2153,9 @@ pub(crate) mod tests {
         let prims = wall_prims(&p);
         assert!((hatched(&prims).0 - full).abs() < 1e-9, "Wand geschlossen");
         assert!(prims.iter().any(|q| matches!(q, Primitive::Line { cls, .. } if cls == "view-range")), "Symbol gepunktet");
+        // [260] Symbolisch: Lücke und Symbol wie ein geschnittenes Fenster.
+        let prims = wall_prims(&symbolic(p));
+        assert!(hatched(&prims).0 < full - 0.1, "Wandlücke");
+        assert!(!prims.iter().any(|q| matches!(q, Primitive::Line { cls, .. } if cls == "view-range")));
     }
 }

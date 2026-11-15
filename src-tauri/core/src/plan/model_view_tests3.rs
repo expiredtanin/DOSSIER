@@ -291,6 +291,8 @@ fn ueber_schnitt_hell_auf_schwarzer_wand() {
     let mut p = sample();
     let o1 = p.openings.as_mut().unwrap().iter_mut().find(|o| o.id == "O1").unwrap();
     (o1.sill_height, o1.height) = (1.5, 0.6);
+    // [260] Nur „geschnitten“ schliesst die Wand (Vorgabe symbolisch zeigt das Symbol in der Lücke).
+    o1.plan_mode = Some(OpeningPlanMode::Geschnitten);
     p.drawing_levels.iter_mut().find(|l| l.id == "eg").unwrap().view_top = Some(2.5);
     let codes: Vec<String> = p.walls.iter().map(|w| w.category_code.clone()).chain(p.openings.iter().flatten().map(|o| o.category_code.clone())).collect();
     let run = |p: &Project, scale: f64| -> DomainPrims {

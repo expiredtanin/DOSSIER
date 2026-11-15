@@ -480,6 +480,9 @@ export interface PanelHostValue {
     sashSymbols?: boolean;
     planSwingArcs?: boolean;
   }) => void;
+  /** [260] Fenster/Tür im Grundriss symbolisch oder geschnitten; `undefined` = wie Typ/Modelldarstellung. Gilt für alle
+   *  gewählten Öffnungen (Fenster und Türen) in einem Undo-Schritt. */
+  onSetOpeningPlanMode: (planMode: "symbolisch" | "geschnitten" | undefined) => void;
   /** Übersteuert die Detailstufe dieser Öffnung; `undefined` = Ansichts-Detailstufe gilt. */
   onSetOpeningDetailLevel: (detailLevel: DetailLevel | undefined) => void;
   /** Dach-/Deckenfenster ([103]): Lage in der Wirtsfläche (Mittelpunkt im Grundriss, Drehung). */

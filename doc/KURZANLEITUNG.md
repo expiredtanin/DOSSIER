@@ -158,9 +158,15 @@ Seite oder nach aussen aus, statt in der Wand zu stehen. Senkrechte Masszahlen l
 
 ![Ansicht Süd 1:200](kurzanleitung/ansicht.png)
 
-**Grundriss 1:100: Fenster über der Schnitthöhe.** Öffnungen, die ganz über oder unter der Schnitthöhe in einer Wand liegen
-(z. B. ein Rundfenster in 1.8 m), bleiben strichpunktiert; der Teil auf der schwarz gefüllten Wand wird hell gezeichnet
-(Bildschirm, SVG, PDF und DXF). Abschalten: *Fenster → Ressourcen*, Reiter „Modelldarstellung“, Option „Öffnungen über/unter
+**Fenster und Türen im Grundriss: symbolisch oder geschnitten.** Vorgabe ist „symbolisch“: jedes Fenster und jede Tür
+erscheint mit dem üblichen Öffnungssymbol (Rahmen, Glas, Flügel, Aufschlag), auch wenn die Schnitthöhe es nicht trifft — das
+Badfenster ab 1.10 m, das Oberlicht oder das Rundfenster in 1.8 m. Mit „geschnitten“ richtet sich der Grundriss nach der
+Schnitthöhe: liegt die Öffnung darüber oder darunter, bleibt die Wand geschlossen und die Öffnung erscheint als Linie über
+(strichpunktiert) bzw. unter Schnitt (gepunktet), auf der schwarzen 1:100-Wand hell. Einstellen: Fenster oder Tür wählen, T,
+Feld „Im Grundriss“ (gilt für alle gewählten Öffnungen, ein Rückgängig-Schritt); für alle Öffnungen eines Typs unter
+*Fenster → Ressourcen*, Reiter „Fenstertypen“ bzw. „Türtypen“; als Vorgabe im Reiter „Modelldarstellung“, Option
+„Fenster/Türen im Grundriss“. Das Element geht vor dem Typ, der Typ vor der Modelldarstellung. Gilt gleich für Bildschirm,
+SVG, PDF und DXF; die Bemassung bleibt gleich. Die helle Linie auf schwarzer Wand lässt sich abschalten: Option „Öffnungen über/unter
 Schnitt hell auf schwarzer Wand“. Treppen zeigen im Grundriss die Bruchlinie über die Laufbreite in Papiergrösse. Die Höhenkoten
 im Schnitt und in der Ansicht messen nur das eigene Gebäude, nicht höhere Nachbarn. Das Gesamtbild des 1:100-Plans ist noch nicht
 abgeschlossen (Plan-Review läuft).

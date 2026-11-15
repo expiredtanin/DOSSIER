@@ -184,6 +184,8 @@ export interface SelectionOpeningValues {
   swing: Common<string>;
   openingDir: Common<string>;
   wingCount: Common<number>;
+  /** [260] Darstellung im Grundriss ("" = wie Typ). */
+  planMode: Common<string>;
 }
 
 export function selectionOpeningValues(project: Project, sel: Selection): SelectionOpeningValues {
@@ -195,6 +197,7 @@ export function selectionOpeningValues(project: Project, sel: Selection): Select
   const swing: string[] = [];
   const dir: string[] = [];
   const wings: number[] = [];
+  const mode: string[] = [];
   for (const id of sel.openings.slice(0, MAX_COMPARED)) {
     const o = deriveSelection(project, { openings: [id] })?.opening;
     if (!o) continue;
@@ -206,6 +209,7 @@ export function selectionOpeningValues(project: Project, sel: Selection): Select
     swing.push(o.swing ?? "");
     dir.push(o.openingDir ?? "");
     wings.push(o.wingCount ?? 1);
+    mode.push(o.planMode ?? "");
   }
   return {
     width: commonValue(w),
@@ -216,6 +220,7 @@ export function selectionOpeningValues(project: Project, sel: Selection): Select
     swing: commonValue(swing),
     openingDir: commonValue(dir),
     wingCount: commonValue(wings),
+    planMode: commonValue(mode),
   };
 }
 

@@ -871,6 +871,7 @@ fn opening_selection(lk: &Lookup, o: &Value) -> Result<J, String> {
         .raw("lintelLineStyle", o, "lintelLineStyle")
         .raw("sashSymbols", o, "sashSymbols")
         .raw("planSwingArcs", o, "planSwingArcs")
+        .raw("planMode", o, "planMode")
         .raw("typeId", o, "typeId")
         .raw("detailLevel", o, "detailLevel")
         .v("zBottom", zb)

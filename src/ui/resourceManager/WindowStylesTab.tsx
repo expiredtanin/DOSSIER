@@ -203,6 +203,18 @@ export function WindowStylesTab({
               ]}
             />
           </FieldRow>
+          {/* [260] Darstellung im Grundriss (leer = Modelldarstellung). */}
+          <FieldRow label={t("objinfo.opening.planMode")}>
+            <SelectField
+              value={win.planMode ?? ""}
+              onChange={(v) => patch({ planMode: v === "" ? undefined : (v as "symbolisch" | "geschnitten") })}
+              options={[
+                { value: "", label: t("objinfo.opening.planMode.fromModelView") },
+                { value: "symbolisch", label: t("objinfo.opening.planMode.symbolisch") },
+                { value: "geschnitten", label: t("objinfo.opening.planMode.geschnitten") },
+              ]}
+            />
+          </FieldRow>
           <FieldRow label={t("objinfo.opening.planSwingArcs")}>
             <SelectField
               value={win.planSwingArcs ? "an" : "aus"}

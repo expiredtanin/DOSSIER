@@ -77,8 +77,9 @@ in `doc/KURZANLEITUNG.md`):
 **Darstellung im Plan (Stand 14.11.).** Nachbargebäude erscheinen über den Stil ihrer Klasse (Füllung einstellbar im Ebenen-Editor, in den
 Standard-Situationsplänen grau); Treppen haben im Grundriss eine Bruchlinie in Papiergrösse; die Standard-Vorlagen Präsentation, Eingabe,
 Ausführung, Situation und Schwarzplan blenden Kamera-Sichtkegel (Klasse 92) und Sonnenschatten (08) aus; im 1:100-Grundriss werden Fenster
-über der Schnitthöhe auf der schwarzen Wand hell gezeichnet (**[Frage M: Fenster über Schnitt hell auf schwarzer Wand — als Vorgabe belassen oder
-anders lösen (Schnitthöhe/Bemassung)?]**, abschaltbar: Ressourcen → Modelldarstellung). Höhenkoten messen nur das eigene Gebäude. In der schmalen
+und Türen nach Wahl symbolisch (Vorgabe: Öffnungssymbol unabhängig von der Schnitthöhe, auch Badfenster ab 1.10 m und Oberlichter) oder
+geschnitten (nach der Schnitthöhe: Wand geschlossen, Öffnung als Linie über/unter Schnitt, auf schwarzer Wand hell) gezeichnet — je Element
+(Taste T), je Fenster-/Türtyp oder als Vorgabe der Modelldarstellung (~~Frage M: Fenster über Schnitt~~ — erledigt durch [260], Entscheid 15.11.). Höhenkoten messen nur das eigene Gebäude. In der schmalen
 Seitenleiste werden die breiten Tabellen (Flächenbilanz, Fenster-/Türliste, Raumbuch) zu Karten statt seitlich zu scrollen.
 
 **Leistung.** Mit grossen Kontext-Importen (300 Gebäude, 100 000 Dreiecke) wurden Ansicht, «Aufs Gelände setzen» und der DXF-Export deutlich
@@ -171,8 +172,8 @@ Ehrlich vorweg: **Der Durchlauf des ganzen Referenz-Ablaufs auf dem Mac ist noch
 - **IFC für Fachplaner** ([259]): **nicht in Archicad, Revit, Solibri oder BIMcollab geöffnet**, nur mit ifcopenshell (0 Befunde). **IFC-Ebenen** (eine je Klasse, ohne Sichtbarkeit) **sind in Archicad/Revit nicht geöffnet**; der
   Dachraum-Körper füllt die Schräge nicht aus (Höhe = lichte Höhe); Dächer als Netz; IFC2x3 nur über die bestehenden Tests; Datei
   des Stress-Beispiels gross (19.8 MB, ca. 6 s).
-- **Plandarstellung 1:100** ([256]): Fenster über der Schnitthöhe hell auf schwarzer Wand wartet auf den Entscheid des Maintainers
-  (**[Frage M: Darstellung Fenster über Schnitt — hell auf schwarz (jetzt Vorgabe, abschaltbar) oder Schnitthöhe/Bemassung ändern?]**). Offen: Sonnenschatten
+- **Plandarstellung 1:100** ([256]): Fenster über der Schnitthöhe — erledigt durch [260] (symbolisch/geschnitten wählbar, Vorgabe symbolisch;
+  ~~Frage M: Darstellung Fenster über Schnitt~~); auf dem Mac nicht geprüft. Offen: Sonnenschatten
   im 1:100-Grundriss, Stempel «Schlafen» im DG auf 80 %, Höhenlinien-Koten auf Masszahlen; nur im Container (CLI-SVG in Chromium) angesehen, nicht auf dem Mac.
 - **Datensicherheit** ([116]): Schliessen-Rückfrage, Cmd+Q-Menüeintrag, Autosave mit zwei Ständen, atomare Exporte und «Vorige Fassung wiederherstellen …»
   sind **nicht in der Tauri-App und nicht in Electron geprüft** (nur Tests und Browser, `doc/RELEASE-1.0.md` Abschnitt 14); der Menüeintrag ist nicht
@@ -207,7 +208,7 @@ Ehrlich vorweg: **Der Durchlauf des ganzen Referenz-Ablaufs auf dem Mac ist noch
 10. **[Frage M: Beispielprojekt]** Das Beispielprojekt «Wettbewerb» ist fiktiv (Winterthur): als Beispiel ausliefern und so nennen?
 11. **[Frage M: Netzzugriffe und Datenschutz]** Welche Netzzugriffe nennen die Notes (swisstopo/geo.admin, OSM; Offline-Modus in `src/net`)? Gibt es Telemetrie
     (aus dem Repo nicht ersichtlich)?
-12. **[Frage M: Fenster über Schnitt]** ([256]) Fenster über der Schnitthöhe im 1:100-Grundriss hell auf der schwarzen Wand zeigen (Vorgabe jetzt, abschaltbar in der
-    Modelldarstellung) oder Schnitthöhe/Bemassung anpassen?
+12. ~~Fenster über Schnitt~~ — erledigt durch [260] (15.11.): Fenster/Türen im Grundriss symbolisch (Vorgabe) oder geschnitten, je Element, Typ oder
+    Modelldarstellung; „geschnitten“ zeichnet Öffnungen über/unter Schnitt hell auf schwarzer Wand ([256]).
 13. ~~Klassen der Objektbibliothek~~ — erledigt: 22/23/24 bestätigt (15.11.).
 14. **[Frage M: Gegenprobe vor Release]** Bis wann ist der Mac-Durchlauf ([206], `doc/RELEASE-1.0.md`) fertig? Ergebnisse ändern die Liste der Einschränkungen oben.

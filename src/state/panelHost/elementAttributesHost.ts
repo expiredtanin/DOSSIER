@@ -189,6 +189,14 @@ export function buildElementAttributesHost(c: FlatHostOpts) {
     onSetOpeningDisplay: (patch) => {
       if (selection?.kind === "opening") patchAll("openings", selection.id, patch);
     },
+    // [260] Darstellung im Grundriss: anders als die Art-eigenen Felder für ALLE gewählten Öffnungen (Fenster und
+    // Türen), ein Undo-Schritt.
+    onSetOpeningPlanMode: (planMode) => {
+      if (selection?.kind !== "opening") return;
+      const sel = getState().selection.openings;
+      const ids = sel.length > 1 && sel.includes(selection.id) ? [...sel] : [selection.id];
+      applyChange((p) => patchItems(p, PROJECT_LIST.openings, ids, (o) => ({ ...o, planMode })));
+    },
     // Lage eines Dach-/Deckenfensters ist elementspezifisch (Punkt/Winkel in der Wirtsfläche) ⇒ bewusst nur das erste Element.
     onSetOpeningHost: (patch) => {
       if (selection?.kind === "opening") updateOpening(selection.id, patch);

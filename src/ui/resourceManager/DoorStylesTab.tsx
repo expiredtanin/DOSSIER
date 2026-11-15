@@ -183,6 +183,18 @@ export function DoorStylesTab({
               }))}
             />
           </FieldRow>
+          {/* [260] Darstellung im Grundriss (leer = Modelldarstellung). */}
+          <FieldRow label={t("objinfo.opening.planMode")}>
+            <SelectField
+              value={door.planMode ?? ""}
+              onChange={(v) => patch({ planMode: v === "" ? undefined : (v as "symbolisch" | "geschnitten") })}
+              options={[
+                { value: "", label: t("objinfo.opening.planMode.fromModelView") },
+                { value: "symbolisch", label: t("objinfo.opening.planMode.symbolisch") },
+                { value: "geschnitten", label: t("objinfo.opening.planMode.geschnitten") },
+              ]}
+            />
+          </FieldRow>
           <FieldRow label={t("resources.field.transomHeight")}>
             <NumberField
               value={door.transomHeight ?? 0}
