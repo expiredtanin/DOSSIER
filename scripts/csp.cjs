@@ -11,7 +11,6 @@ const NET_HOSTS = [
   "wms.geo.admin.ch",
   "data.geo.admin.ch",
   "overpass-api.de",
-  "nominatim.openstreetmap.org",
 ];
 
 const https = NET_HOSTS.map((h) => `https://${h}`);

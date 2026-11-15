@@ -3234,6 +3234,7 @@ export const de = {
 
   "update.title": "Update",
   "update.upToDate": "Du hast bereits die aktuellste Version.",
+  "update.offline": "Offline-Modus ist an: Dossier fragt nicht nach Updates. Schalte ihn in den Einstellungen unter Allgemein aus, um zu prüfen.",
   "update.availableBody": "Version {version} ist verfügbar. Jetzt herunterladen und installieren? Die App startet danach neu.",
   "update.installNow": "Installieren",
   "update.installLater": "Später",

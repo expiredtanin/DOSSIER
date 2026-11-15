@@ -10,7 +10,7 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   stehen im Archiv („Bewusst nicht übernommen“).
 - **Grösse** (eine Person mit Agenten): S ≤ 1 Tag · M ≤ 1 Woche · L ≤ 1 Monat · XL > 1 Monat.
   Steht keine Grösse im Archiv, ist sie hier geschätzt.
-- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 261);
+- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 262);
   nie eine ID wiederverwenden oder umnummerieren. Präfix-IDs (`[K]`, `[G]`, `[T]`, `[B]`, `[C]`) bleiben.
 - **Pro Punkt:** was fehlt · wo im Code · Grösse. Höchstens ein bis drei Sätze je Punkt;
   Messwerte und Befunde gehören in den Commit.
@@ -648,6 +648,7 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
 - Nur noch Fehler aus dem Referenz-Ablauf; Leistung mit grossen Kontext-Importen; keine neuen Funktionen.
 - Release 1.0.0: Tag, signierte Pakete, Release-Notes (ehrlich: was nicht geht), Download-Seite.
 
+- ◐ **[262]** Netzzugriffe und Datenschutz (15.11., Phase 4): Inventar aus dem Code steht in `doc/RELEASE-NOTES-1.0.md` («Netzzugriffe und Datenschutz»); keine Telemetrie/Analytics/Crash-Reporting gefunden. Behoben: (a) Update-Check beim Start und Versionsverlauf (Tauri-Plugins, an `netFetch` vorbei) ignorierten den Offline-Modus, jetzt geprüft (`update/checkForUpdate.ts`, `versionHistory.ts`); (b) Overpass-URL zeigte auf `maps.mail.ru`, das weder in `ALLOWED_HOSTS` noch in der CSP stand, der OSM-Import scheitert ohne Proxy also stets, jetzt `overpass-api.de`; (c) unbenutzter Host `nominatim.openstreetmap.org` aus Host-Liste/CSP/`tauri.conf.json` entfernt; (d) Bild-Fallback in `viewport/materialTextures.ts` umging bei abgelehnter URL `netFetch`. Test: `src/update/offline.test.ts`. **Offen:** Update-Prüfung beim Start ist standardmässig an (Entscheid Maintainer, Frage 11); `spherePreview.ts` lädt `new Image().src` ohne `netFetch` (heute nur blob-/Asset-URLs, S); Update-Plugin und Tauri-HTTP-Plugin (`git.openbureau.ch`) laufen ausserhalb der CSP/Host-Liste, nur mit Offline-Schalter gesperrt; nicht in der Tauri-App und nicht gegen die echten Dienste geprüft. Grösse S.
 - ◐ **[257]** Leistung mit grossen Kontext-Importen (14.11., Phase 4). Messung: `dossier-cli :beispiel bench --context [--footprints N --buildings N --triangles N --extent m] [--save-obp datei]`
   importiert synthetischen Wettbewerbs-Kontext (`model/sampleContext.ts`, deterministisch, keine echten Daten: Kataster-DXF mit Parzellen/Umrissen/Strassen,
   Höhenlinien-DXF → Gelände, Gebäudenetze als OBJ, Standard 300 Gebäude/100k Dreiecke/900 Umrisse) wie die App (Parser, Kern-Import, „Gelände erzeugen“, „Aufs

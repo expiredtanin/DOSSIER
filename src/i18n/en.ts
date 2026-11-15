@@ -3221,6 +3221,7 @@ export const en: Record<TranslationKey, string> = {
 
   "update.title": "Update",
   "update.upToDate": "You already have the latest version.",
+  "update.offline": "Offline mode is on: Dossier does not look for updates. Turn it off in Settings under General to check.",
   "update.availableBody": "Version {version} is available. Download and install now? The app will restart afterwards.",
   "update.installNow": "Install",
   "update.installLater": "Later",

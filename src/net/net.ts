@@ -17,7 +17,6 @@ export const ALLOWED_HOSTS: readonly string[] = [
   "wms.geo.admin.ch",
   "data.geo.admin.ch",
   "overpass-api.de",
-  "nominatim.openstreetmap.org",
   "localhost",
   "127.0.0.1",
 ];

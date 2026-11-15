@@ -17,8 +17,8 @@ import { bboxAround } from "./lv95";
 import type { GeoCategory, GeoFeature } from "./geoContext";
 import { viaProxy } from "./geoContext";
 
-// Direkter Mirror mit CORS `*` (Fallback, falls kein Proxy konfiguriert ist).
-const OVERPASS = "https://maps.mail.ru/osm/tools/overpass/api/interpreter";
+// Direktabruf (Fallback, falls kein Proxy konfiguriert ist). Der Host muss in `ALLOWED_HOSTS` (net/net.ts) stehen, [262].
+export const OVERPASS = "https://overpass-api.de/api/interpreter";
 
 /** Welche OSM-Kategorien der Aufrufer möchte. */
 export interface OsmSelection {
