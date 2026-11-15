@@ -44,7 +44,7 @@ in `doc/KURZANLEITUNG.md`):
    in Wände, Decken und Dach je Geschoss umwandeln (ein Undo-Schritt).
    **Objektbibliothek 2D:** 48 parametrische Objekte (Sanitär, Küche, Tische, Sitzen, Schlafen, Schränke, Auto/Parkfeld, Velo,
    Wendekreis) aus dem Panel «Objekte» oder per Befehl `libobj`; R dreht, M spiegelt; Parameter, «Unordnung» und «Neu würfeln»
-   in der Objekt-Info; Detailstufe grob/mittel/fein; eigene Klassen 22–24 (**[Frage M: Klassennummern 23 (Sanitär) und 24 (Fahrzeuge/Freiflächen) der Objektbibliothek beibehalten oder in das Klassenschema des Büros einordnen?]**); im DXF als Block, nicht im IFC.
+   in der Objekt-Info; Detailstufe grob/mittel/fein; eigene Klassen 22–24; im DXF als Block, nicht im IFC.
 4. **Raumprogramm.** CSV/Tabelle importieren, Räume zeichnen, Soll/Ist-Abgleich in der Flächenbilanz; «Räume generieren» aus dem Programm.
 5. **Pläne.** Grundriss je Geschoss, Schnitte und Ansichten aus Schnitt- und Ansichtslinien, SIA-400-Schraffuren und -Linientypen,
    Massstab und Detailgrad, Bemassung, Koten, Raumstempel mit wählbarer Schrift.
@@ -209,5 +209,5 @@ Ehrlich vorweg: **Der Durchlauf des ganzen Referenz-Ablaufs auf dem Mac ist noch
     (aus dem Repo nicht ersichtlich)?
 12. **[Frage M: Fenster über Schnitt]** ([256]) Fenster über der Schnitthöhe im 1:100-Grundriss hell auf der schwarzen Wand zeigen (Vorgabe jetzt, abschaltbar in der
     Modelldarstellung) oder Schnitthöhe/Bemassung anpassen?
-13. **[Frage M: Klassen der Objektbibliothek]** ([253]) Klassennummern 23 (Sanitär) und 24 (Fahrzeuge und Freiflächen) beibehalten?
+13. ~~Klassen der Objektbibliothek~~ — erledigt: 22/23/24 bestätigt (15.11.).
 14. **[Frage M: Gegenprobe vor Release]** Bis wann ist der Mac-Durchlauf ([206], `doc/RELEASE-1.0.md`) fertig? Ergebnisse ändern die Liste der Einschränkungen oben.
