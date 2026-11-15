@@ -132,6 +132,9 @@ impl PlanArgs {
     }
 }
 
+/// [256] Rand (Papier-mm) um Masszahlen, Texte und Höhenkoten, vor dem die Hilfslinien aussetzen ([`Ctx::cut_at_gaps`]).
+pub const LINE_GAP_MM: f64 = 0.5;
+
 /// Gemeinsamer Zustand einer Plan-Erzeugung.
 pub struct Ctx<'a> {
     pub p: &'a Project,
@@ -147,7 +150,7 @@ pub struct Ctx<'a> {
     /// [179] Je Plan-Erzeugung einmal gerechnet (mehrere Domänen und alle Raster brauchen sie): Gebäuderinge,
     /// Hindernisse der Masse/Koten, der übrigen Hindernis-Zeichnungen und der Achsblasen.
     house: std::cell::OnceCell<Vec<Vec<Vec2>>>,
-    drawn_obst: std::cell::OnceCell<(super::stamp_place::Obstacles, super::stamp_place::Obstacles)>,
+    drawn_obst: std::cell::OnceCell<super::drawings::DrawnObstacles>,
     bubble_obst: std::cell::OnceCell<super::stamp_place::Obstacles>,
     /// [207] Linienzüge der Strassen-Klasse („11“) je Geschoss für Strassennamen entlang der Achse (`plan/text_curve.rs`).
     road_axes: std::cell::OnceCell<Vec<(String, Vec<crate::model::Vec2>)>>,
@@ -172,12 +175,27 @@ impl<'a> Ctx<'a> {
 
     /// [179] Masse und Höhenkoten des Geschosses als Hindernisse (Achsblasen weichen ihnen aus).
     pub(super) fn dims_obstacles(&self) -> &super::stamp_place::Obstacles {
-        &self.drawn_obst.get_or_init(|| super::drawings::drawn_and_dimension_obstacles(self)).1
+        &self.drawn_obst.get_or_init(|| super::drawings::drawn_and_dimension_obstacles(self)).dims
     }
 
     /// [179] Hindernisse der Zeichnungen des Geschosses (Bemassung, Koten, Texte, Symbole).
     pub(super) fn drawn_obstacles(&self) -> &super::stamp_place::Obstacles {
-        &self.drawn_obst.get_or_init(|| super::drawings::drawn_and_dimension_obstacles(self)).0
+        &self.drawn_obst.get_or_init(|| super::drawings::drawn_and_dimension_obstacles(self)).drawn
+    }
+
+    /// [256] Aussparungen der Hilfslinien vor Masszahlen, Texten und Höhenkoten (`drawings::DrawnObstacles::gaps`).
+    pub(super) fn line_gaps(&self) -> &super::stamp_place::Obstacles {
+        &self.drawn_obst.get_or_init(|| super::drawings::drawn_and_dimension_obstacles(self)).gaps
+    }
+
+    /// [256] Hilfslinie a–b ohne die Stücke vor Masszahlen, Texten und Höhenkoten ([`Self::line_gaps`], 0.5 mm Papier Rand).
+    pub(super) fn cut_at_gaps(&self, a: Vec2, b: Vec2) -> Vec<(Vec2, Vec2)> {
+        let g = self.line_gaps();
+        if g.is_empty() {
+            return vec![(a, b)];
+        }
+        let pad = LINE_GAP_MM * self.a.scale.max(1.0) / 1000.0;
+        g.cut_out([a.x, a.y], [b.x, b.y], pad).into_iter().map(|[p, q]| (Vec2 { x: p[0], y: p[1] }, Vec2 { x: q[0], y: q[1] })).collect()
     }
 
     /// [207] Strassenachsen und -ränder (Linie, Polylinie, Bogen auf der Klasse „11“) als Linienzüge mit ihrer Ebene.
@@ -2107,27 +2125,25 @@ fn extras_of(c: &Ctx) -> (Vec<(Primitive, u32)>, Vec<Primitive>) {
     }
 }
 
-/// [256] Parzellengrenze und Baubereich setzen vor Masszahlen und Texten der Zeichnungen aus (die gestrichelte Baulinie lief
-/// im Wettbewerb durch „2.69“, „1.20“, „20.39“): ihre Linien werden um deren Rechtecke (0.5 mm Papier Rand) gekürzt, das
-/// Strichmuster einer Grenze bleibt dasselbe (gleiche Kennung).
+/// [256] Parzellengrenze und Baubereich setzen vor Masszahlen, Texten und Höhenkoten der Zeichnungen aus (die gestrichelte
+/// Baulinie lief im Wettbewerb durch „2.69“, „1.20“, „20.39“): ihre Linien werden um deren Rechtecke gekürzt
+/// ([`Ctx::cut_at_gaps`]), das Strichmuster einer Grenze bleibt dasselbe (gleiche Kennung).
 fn cut_site_lines(c: &Ctx, under: Vec<(Primitive, u32)>) -> Vec<(Primitive, u32)> {
     if !under.iter().any(|(q, _)| matches!(q, Primitive::Line { cls, .. } if cls == super::extras::SITE_PARCEL_CLS || cls == super::extras::SITE_ALLOWED_CLS)) {
         return under;
     }
-    let o = c.drawn_obstacles();
-    if o.is_empty() {
+    if c.line_gaps().is_empty() {
         return under;
     }
-    let pad = 0.5 * c.a.scale / 1000.0;
     let mut out = Vec::with_capacity(under.len());
     for (q, r) in under {
         match &q {
             Primitive::Line { a, b, cls, .. } if cls == super::extras::SITE_PARCEL_CLS || cls == super::extras::SITE_ALLOWED_CLS => {
-                for [p0, p1] in o.cut_out([a.x, a.y], [b.x, b.y], pad) {
+                for (p0, p1) in c.cut_at_gaps(*a, *b) {
                     let mut piece = q.clone();
                     if let Primitive::Line { a, b, .. } = &mut piece {
-                        *a = Vec2 { x: p0[0], y: p0[1] };
-                        *b = Vec2 { x: p1[0], y: p1[1] };
+                        *a = p0;
+                        *b = p1;
                     }
                     out.push((piece, r));
                 }
@@ -2301,6 +2317,9 @@ fn assemble_cached(c: &Ctx, revs: &crate::document::Revs, cc: &mut super::cache:
     // [140] Achsraster enden an der Gebäudegrundfläche: ihr Stand folgt auch Wänden, Körpern und Dächern.
     let stamps = revs.item_stamps("drawings2d").unwrap_or(&[]);
     let house_rev = ["walls", "extrudedSolids", "roofs"].iter().fold(0u64, |h, k| (h ^ revs.field(k)).wrapping_mul(0x0000_0100_0000_01b3));
+    // [157]/[256] Blasen weichen den Massen aus, die Achsen setzen vor Masszahlen, Texten und Koten aus: deren Stände auch.
+    let gaps_rev = c.p.drawings2d.iter().zip(stamps).filter(|(d, _)| super::drawings::is_stamp_obstacle(&d.geom)).fold(0u64, |h, (_, &st)| (h ^ st).wrapping_mul(0x9E37_79B9_7F4A_7C15).rotate_left(17));
+    let house_rev = house_rev ^ gaps_rev.rotate_left(29);
     let has_grid = house_rev != 0 && c.p.drawings2d.iter().any(|d| matches!(d.geom, crate::model::Drawing2DGeom::Grid { .. }));
     // [207] Strassennamen (Einzeltext der Strassen-Klasse) folgen den Achsen ihrer Ebene: deren Stände gehören zum Stand des Textes.
     let road = super::drawings::road_axes_stamp(c.p, stamps);
@@ -2893,6 +2912,64 @@ mod tests {
         }
         // Die Kennung des Strichmusters bleibt (eine Grenze, ein Muster).
         assert!(after.iter().all(|(_, _, r)| *r >= 2), "Kennung");
+    }
+
+    /// [256] Höhenkote auf der Schnittlinie und auf einer Achse (Musterhaus komplex: „±0.00“ im EG-Zimmer und „+5.70“ im DG
+    /// auf A-A): Text und Symbol haben Vorrang (SIA 400), die strichpunktierten Hilfslinien setzen über Dreieck und Wert aus.
+    #[test]
+    fn schnittlinie_und_achse_setzen_vor_kote_aus() {
+        let mut p = sample();
+        p.drawing_levels.retain(|l| !matches!(l.kind, DrawingLevelKind::Section | DrawingLevelKind::Elevation));
+        let level: DrawingLevel = serde_json::from_value(serde_json::json!({ "id": "sx", "name": "Schnitt A-A", "kind": "section", "visible": true, "locked": false,
+            "linePoints": [{ "x": 20.0, "y": -5.0 }, { "x": 20.0, "y": 15.0 }] })).unwrap();
+        p.drawing_levels.push(level);
+        let grid: Drawing2D = serde_json::from_value(serde_json::json!({ "id": "g", "type": "drawing2d", "levelId": "eg", "categoryCode": "00",
+            "geom": { "shape": "grid", "origin": { "x": 25.0, "y": -5.0 }, "angle": 0.0, "a": [{ "label": "1", "pos": 0.0 }], "b": [{ "label": "A", "pos": 0.0 }, { "label": "B", "pos": 20.0 }] } })).unwrap();
+        p.drawings2d.push(grid);
+        let t = serde_json::json!({ "floor": "eg", "show": ["00", "20", "80", "91"], "grey": [], "scale": 100, "global": true }).to_string();
+        let a = PlanArgs::parse(1.0, &t).unwrap();
+        // Strichpunktierte Linien entlang x = 20 (Schnitt) bzw. x = 25 (Achse 1).
+        let lines = |p: &Project| {
+            let out = plan_domains(p, &a).unwrap();
+            let sec: Vec<(Vec2, Vec2)> = out.sections.iter().filter_map(|q| match q { Primitive::Line { a, b, cls, dash: Some(Some(_)), .. } if cls == "section-line" && (a.x - 20.0).abs() < 1e-9 && (b.x - 20.0).abs() < 1e-9 => Some((*a, *b)), _ => None }).collect();
+            let axis: Vec<(Vec2, Vec2)> = out.drawings.prims.iter().filter_map(|q| match q { Primitive::Line { a, b, drawing_id: Some(i), .. } if i == "g" && (a.x - 25.0).abs() < 1e-9 && (b.x - 25.0).abs() < 1e-9 => Some((*a, *b)), _ => None }).collect();
+            (sec, axis, out.drawings.prims)
+        };
+        let (sec0, axis0, _) = lines(&p);
+        assert_eq!((sec0.len(), axis0.len()), (1, 1), "ohne Kote je eine durchgehende Linie");
+        for (id, x) in [("k1", 20.0), ("k2", 25.0)] {
+            let k: Drawing2D = serde_json::from_value(serde_json::json!({ "id": id, "type": "drawing2d", "levelId": "eg", "categoryCode": "80",
+                "geom": { "shape": "kote", "at": { "x": x, "y": 5.0 }, "value": 0.0, "kind": "okFertig", "rotation": 0.0 } })).unwrap();
+            p.drawings2d.push(k);
+        }
+        let (sec, axis, prims) = lines(&p);
+        assert!(sec.len() >= 2 && axis.len() >= 2, "Linien unterbrochen: {sec:?} {axis:?}");
+        // Rahmen je Kote aus Dreieck und Text.
+        for (id, pieces) in [("k1", &sec), ("k2", &axis)] {
+            let mut b = [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY];
+            let mut acc = |x: f64, y: f64| {
+                b = [b[0].min(x), b[1].min(y), b[2].max(x), b[3].max(y)];
+            };
+            for q in &prims {
+                match q {
+                    Primitive::Polygon { pts, drawing_id: Some(i), .. } if i == id => pts.iter().for_each(|v| acc(v.x, v.y)),
+                    Primitive::DrawingText { at, text, height_m, drawing_id: Some(i), .. } if i == id => {
+                        let w = crate::text_layout::text_width_em(text, false) * height_m;
+                        acc(at.x, at.y - 0.25 * height_m);
+                        acc(at.x + w, at.y + 0.95 * height_m);
+                    }
+                    _ => {}
+                }
+            }
+            assert!(b[0] < b[2], "Kote {id} gezeichnet");
+            for (a, c) in pieces.iter() {
+                for s in 0..=200 {
+                    let f = s as f64 / 200.0;
+                    let m = Vec2 { x: a.x + (c.x - a.x) * f, y: a.y + (c.y - a.y) * f };
+                    assert!(!(m.x >= b[0] && m.x <= b[2] && m.y >= b[1] && m.y <= b[3]), "Linie durch Kote {id}: {m:?} in {b:?}");
+                }
+            }
+        }
     }
 
     /// [157] Schnittführung quer durch den Raum: der Stempel steht neben der strichpunktierten Linie, nicht

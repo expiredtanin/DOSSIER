@@ -624,6 +624,16 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   in Chromium. **Offen:** Kote „±0.00" (komplex EG Zimmer) und „+5.70" (DG) stehen auf/neben Achslinien; Handmass „5.73" quert den Zimmer-Stempel
   nicht, aber die Wohnen/Essen/Küche-Beschriftung steht unter Revisionswolke und Sichtkegel (ohne Abgabe-Vorlage); Raumstempel nicht >90 %, wenn
   Linien die Räume zerschneiden — **Entscheid Maintainer 15.11.: so lassen** (90 % statt Achse überdecken, keine Freistellung).
+  **15.11. (Hilfslinien vor Text):** Die Kote „±0.00“/„+5.70“ (komplex, alle Geschosse bei x = 3) stand nicht auf einer Achse, sondern auf der
+  Schnittlinie A-A; Koten sind von Hand gesetzt (der Kern verschiebt sie bewusst nicht). Entscheid nach SIA 400 (Schrift hat Vorrang, Linien
+  setzen aus): Achsen, Schnittlinie (strichpunktierter Teil), Baulinie/Parzelle und Höhenlinien setzen vor Masszahlen, Texten, Detailverweis-Blasen
+  und je Höhenkote vor dem Rechteck über Dreieck und Wert aus (0.5 mm Papier Rand; `DrawnObstacles::gaps`, `Ctx::cut_at_gaps`; Symbole/Blöcke nicht).
+  Damit laufen auch die Höhenlinien nicht mehr durch „1.79“, „3.60“, „17.39“, „Hebeschiebetür …“ (komplex EG Süd). Stand der Achsraster-Stücke folgt
+  den Ständen der Masse/Texte/Koten (vorher nicht: Blasen-Versatz konnte veralten). Tests `schnittlinie_und_achse_setzen_vor_kote_aus`,
+  `hoehenlinien_setzen_vor_masszahlen_aus`; Goldens komplex Grundrisse (A-A in 3 Stücke: Masszahl „5.73“ und Kote). Sonnenschatten (08) geprüft:
+  in `vt-gr100`, Eingabe, Ausführung aus, in der Präsentation an (Wettbewerb, komplex) — kein Fehler, unverändert. Geprüft nur Linux/CLI-SVG in
+  Chromium. **Offen:** Hinweis-Führungslinie und Kamera-Kegel (92, nur ohne Vorlage) queren „17.39“ (von Hand gesetzt bzw. Arbeitsplan);
+  Höhenlinien-Beschriftung „-2.7“ an der Terrassenkante (komplex EG Südost).
 - Fachplaner-Austausch: DXF/DWG je Geschoss/Schnitt/Ansicht ([200]), IFC mit Räumen/Psets ([201]); Rundreise in Archicad/Revit einmal
   real prüfen ([C9]).
 - ◐ **[259]** IFC-Export für Fachplaner (Vorprojekt, 14.11.). Alle drei Beispielprojekte mit ifcopenshell 0.9 geprüft: `validate-ifc.py`

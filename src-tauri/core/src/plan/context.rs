@@ -626,7 +626,8 @@ fn terrain_contours(c: &Ctx, t: &TerrainMesh, out: &mut Vec<Primitive>, house: &
             (q.x.to_bits(), q.y.to_bits()).hash(&mut h);
         }
     }
-    let key: LinesKey = (st.key, iv.to_bits(), every, c.a.scale.max(1.0).to_bits(), h.finish(), obst.sig());
+    // [256] Die Linien setzen vor Masszahlen, Texten und Koten aus: deren Aussparungen gehören zum Schlüssel.
+    let key: LinesKey = (st.key, iv.to_bits(), every, c.a.scale.max(1.0).to_bits(), h.finish(), obst.sig() ^ c.line_gaps().sig().rotate_left(31));
     if let Some(v) = CONTOUR_LINES.with(|m| m.borrow().iter().find(|(k, _)| *k == key).map(|(_, v)| v.clone())) {
         // [179] Mit Luft: sonst verdoppelt das spätere Anhängen (Pick-Flächen) den ganzen Puffer (~20 MB kopieren).
         out.reserve(v.len() + 4096);
@@ -806,7 +807,8 @@ fn contour_prims(c: &Ctx, st: &crate::excavation::SiteTerrain, iv: f64, every: i
             let (a, b) = (seg[0], seg[1]);
             for (f0, f1) in spans {
                 let pt = |f: f64| v2(a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f);
-                for (p0, p1) in outside_bb(pt(f0), pt(f1), house, house_bb) {
+                // [256] … und vor Masszahlen, Texten und Höhenkoten der Zeichnungen (Höhenlinien durch „17.39“, komplex EG Süd).
+                for (p0, p1) in outside_bb(pt(f0), pt(f1), house, house_bb).into_iter().flat_map(|(p, q)| c.cut_at_gaps(p, q)) {
                     out.push(ink_line(p0, p1, w, TERRAIN_INK, None));
                 }
             }
@@ -1041,23 +1043,29 @@ pub fn plan_section_lines(c: &Ctx, out: &mut Vec<Primitive>) {
         for _ in 0..n {
             if f[i] == 2.0 {
                 let main = f[i + 1] == 0.0;
-                let line = Primitive::Line {
-                    a: v2(f[i + 2], f[i + 3]),
-                    b: v2(f[i + 4], f[i + 5]),
-                    cls: "section-line".into(),
-                    weight_mm: if main { SECTION_LINE_MM } else { SECTION_LINE_MARK_MM },
-                    dash: main.then(|| Some(SECTION_LINE_DASH.to_vec())),
-                    zigzag: None,
-                    motif: None,
-                    color: Some(SECTION_LINE_INK.into()),
-                    drawing_id: None,
-                    opening_id: None,
-                    stair_id: None,
-                    greyed,
-                    opacity: None,
-                };
-                obst.add_prim(&line);
-                out.push(line);
+                let (a, b) = (v2(f[i + 2], f[i + 3]), v2(f[i + 4], f[i + 5]));
+                // [256] Die strichpunktierte Linie setzt vor Masszahlen, Texten und Höhenkoten aus (Kote „±0.00“ auf A-A,
+                // Musterhaus komplex EG/DG); die kräftigen Endstücke bleiben ganz.
+                let pieces = if main { c.cut_at_gaps(a, b) } else { vec![(a, b)] };
+                for (a, b) in pieces {
+                    let line = Primitive::Line {
+                        a,
+                        b,
+                        cls: "section-line".into(),
+                        weight_mm: if main { SECTION_LINE_MM } else { SECTION_LINE_MARK_MM },
+                        dash: main.then(|| Some(SECTION_LINE_DASH.to_vec())),
+                        zigzag: None,
+                        motif: None,
+                        color: Some(SECTION_LINE_INK.into()),
+                        drawing_id: None,
+                        opening_id: None,
+                        stair_id: None,
+                        greyed,
+                        opacity: None,
+                    };
+                    obst.add_prim(&line);
+                    out.push(line);
+                }
                 i += 6;
             } else if f[i] == 3.0 {
                 let pts = (0..3).map(|j| v2(f[i + 1 + 2 * j], f[i + 2 + 2 * j])).collect();
@@ -1479,6 +1487,40 @@ mod tests {
         assert!(!inside(&p), "Höhenlinie im gefüllten Nachbarn");
         p.layers[0].fill = None;
         assert!(inside(&p), "ohne Füllung läuft sie durch");
+    }
+
+    /// [256] Höhenlinien setzen vor Masszahlen und Texten aus (Musterhaus komplex EG Süd: Höhenlinien durch „1.79“,
+    /// „3.60“, „17.39“ und „Hebeschiebetür …“) — gleiche Regel wie die Baulinie (`cut_site_lines`).
+    #[test]
+    fn hoehenlinien_setzen_vor_masszahlen_aus() {
+        // z = x/10 über x 0..30: senkrechte Höhenlinien je 0.5 m, eine bei x = 15.
+        let t = TerrainMesh { id: "t".into(), category_code: "02".into(), positions: vec![0.0, 0.0, 0.0, 30.0, 0.0, 3.0, 30.0, 10.0, 3.0, 0.0, 10.0, 0.0], indices: vec![0.0, 1.0, 2.0, 0.0, 2.0, 3.0], contour_interval: Some(0.5), ..Default::default() };
+        let mut p = Project { context: Some(vec![ContextObject::TerrainMesh(t)]), ..Default::default() };
+        let a = super::super::domains::PlanArgs::parse(1.0, r#"{"floor": "eg", "show": ["02", "80"], "scale": 100}"#).unwrap();
+        let at15 = |p: &Project| {
+            let mut out = Vec::new();
+            plan_context(&Ctx::new(p, &a), &mut out);
+            out.iter().filter_map(|q| match q { Primitive::Line { a, b, color: Some(c), .. } if c == TERRAIN_INK && (a.x - 15.0).abs() < 1e-6 && (b.x - 15.0).abs() < 1e-6 => Some((*a, *b)), _ => None }).collect::<Vec<_>>()
+        };
+        let span = |l: &[(Vec2, Vec2)]| l.iter().map(|(a, b)| (b.y - a.y).abs()).sum::<f64>();
+        let before = at15(&p);
+        assert!(span(&before) > 9.9, "{before:?}");
+        // Masskette 10..20 bei y = 5: Masszahl „10.00“ mittig über x = 15.
+        let dim: Drawing2D = serde_json::from_value(serde_json::json!({ "id": "m", "type": "drawing2d", "levelId": "eg", "categoryCode": "80",
+            "geom": { "shape": "dimension", "pts": [{ "x": 10.0, "y": 5.0 }, { "x": 20.0, "y": 5.0 }], "offset": 0.0 } })).unwrap();
+        p.drawings2d.push(dim);
+        let txt = super::super::drawings::stamp_obstacle_prims(&Ctx::new(&p, &a)).into_iter().find_map(|q| match q { Primitive::DrawingText { at, text, height_m, .. } => Some((at, text, height_m)), _ => None }).expect("Masszahl");
+        let w = crate::text_layout::text_width_em(&txt.1, false) * txt.2;
+        let (x0, x1, y0, y1) = (txt.0.x, txt.0.x + w, txt.0.y - 0.25 * txt.2, txt.0.y + 0.95 * txt.2);
+        assert!(x0 < 15.0 && x1 > 15.0, "Masszahl über x = 15: {txt:?}");
+        let after = at15(&p);
+        assert!(after.len() > before.len(), "Höhenlinie geteilt: {after:?}");
+        for (a, b) in &after {
+            let (lo, hi) = (a.y.min(b.y), a.y.max(b.y));
+            assert!(hi <= y0 + 1e-9 || lo >= y1 - 1e-9, "Höhenlinie durch die Masszahl: {lo}..{hi} gegen {y0}..{y1}");
+        }
+        // Nur um die Masszahl (mit Rand), nicht mehr.
+        assert!(span(&after) > span(&before) - (y1 - y0) - 0.2, "{after:?}");
     }
 
     /// [140] Steile Stellen (Stützmauer, Böschung): Höhenlinien enger als 0.6 mm auf dem Papier werden

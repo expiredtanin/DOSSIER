@@ -946,7 +946,8 @@ fn emit_inner(c: &Ctx, d: &Drawing2D, attrs: Attrs, geom: &Drawing2DGeom, greyed
             if let Some(spec) = crate::grid::Spec::of(geom) {
                 // [140] Achsen enden an der Gebäudegrundfläche (alle Geschosse vereinigt).
                 // [157] Blasen nicht auf den Massketten und Höhenkoten des Geschosses ([179] je Plan einmal gerechnet).
-                emit_grid(&mut em, &spec, crate::grid::bubble_diameter(*bubble_mm, scale), c.house_rings(), c.dims_obstacles());
+                // [256] Die Achsen setzen vor Masszahlen, Texten und Höhenkoten aus.
+                emit_grid(&mut em, &spec, crate::grid::bubble_diameter(*bubble_mm, scale), c.house_rings(), c.dims_obstacles(), &|a, b| c.cut_at_gaps(a, b));
             }
         }
         Drawing2DGeom::Text { at, text: s, height, angle, width, marks, doc, leader_target, leader_bend_points, path_pts, paper_height } => {
@@ -1396,7 +1397,9 @@ fn bubble_shift(ends: &[(Vec2, Vec2)], r: f64, house: &[Vec<Vec2>], dims: &super
     0.0
 }
 
-fn emit_grid(em: &mut Em, spec: &crate::grid::Spec, diameter: f64, house: &[Vec<Vec2>], dims: &super::stamp_place::Obstacles) {
+type CutFn<'f> = &'f dyn Fn(Vec2, Vec2) -> Vec<(Vec2, Vec2)>;
+
+fn emit_grid(em: &mut Em, spec: &crate::grid::Spec, diameter: f64, house: &[Vec<Vec2>], dims: &super::stamp_place::Obstacles, gaps: CutFn) {
     use crate::grid::Shape;
     // [153] Achsen strichpunktiert in Papier-mm (vorher mit dem Massstab in Modell-Meter vorskaliert).
     let dash = super::line_pattern::AXIS;
@@ -1420,14 +1423,14 @@ fn emit_grid(em: &mut Em, spec: &crate::grid::Spec, diameter: f64, house: &[Vec<
         let shift_of = |dir: (f64, f64)| if line { shift.get(&side(dir)).copied().unwrap_or(0.0) } else { 0.0 };
         match ax.shape {
             Shape::Line { a, b } => {
-                for (p0, p1) in super::context::outside(v(a.0, a.1), v(b.0, b.1), house) {
+                for (p0, p1) in super::context::outside(v(a.0, a.1), v(b.0, b.1), house).into_iter().flat_map(|(p, q)| gaps(p, q)) {
                     em.line(p0, p1, w, Some(&dash), dash_ref);
                 }
                 // Verlängerung bis zur hinausgerückten Blase (nur ausserhalb des Gebäudes).
                 for (end, dir) in ax.bubbles.iter().flatten() {
                     let t = shift_of(*dir);
                     if t > 0.0 {
-                        for (p0, p1) in super::context::outside(v(end.0, end.1), v(end.0 + dir.0 * t, end.1 + dir.1 * t), house) {
+                        for (p0, p1) in super::context::outside(v(end.0, end.1), v(end.0 + dir.0 * t, end.1 + dir.1 * t), house).into_iter().flat_map(|(p, q)| gaps(p, q)) {
                             em.line(p0, p1, w, Some(&dash), dash_ref);
                         }
                     }
@@ -2150,10 +2153,11 @@ pub fn stamp_obstacle_prims(c: &Ctx) -> Vec<Primitive> {
 }
 
 /// [179] Hindernisse der Zeichnungen des Geschosses ([`is_stamp_obstacle`]) und, daraus in einem Durchgang,
-/// die der Masse und Höhenkoten allein (Achsblasen weichen ihnen aus, [157]).
-pub(super) fn drawn_and_dimension_obstacles(c: &Ctx) -> (super::stamp_place::Obstacles, super::stamp_place::Obstacles) {
+/// die der Masse und Höhenkoten allein (Achsblasen weichen ihnen aus, [157]) sowie [256] die Aussparungen der
+/// Hilfslinien ([`DrawnObstacles::gaps`]).
+pub(super) fn drawn_and_dimension_obstacles(c: &Ctx) -> DrawnObstacles {
     let mut memo = Memo::default();
-    let (mut drawn, mut dims) = (super::stamp_place::Obstacles::default(), super::stamp_place::Obstacles::default());
+    let (mut drawn, mut dims, mut gaps) = (super::stamp_place::Obstacles::default(), super::stamp_place::Obstacles::default(), super::stamp_place::Obstacles::default());
     for d in c.p.drawings2d.iter().filter(|d| is_stamp_obstacle(&d.geom) && on_floor(c, d)) {
         let m = memo.get(c, d);
         if !m.shown {
@@ -2170,8 +2174,46 @@ pub(super) fn drawn_and_dimension_obstacles(c: &Ctx) -> (super::stamp_place::Obs
                 dims.add_prim(q);
             }
         }
+        line_gaps_of(&d.geom, &out.prims, &mut gaps);
     }
-    (drawn, dims)
+    DrawnObstacles { drawn, dims, gaps }
+}
+
+/// Hindernisse der Zeichnungen eines Geschosses ([`drawn_and_dimension_obstacles`]).
+#[derive(Default, Debug, Clone)]
+pub struct DrawnObstacles {
+    /// Alles, dem Raumstempel und Höhenlinien-Beschriftungen ausweichen ([`is_stamp_obstacle`]).
+    pub drawn: super::stamp_place::Obstacles,
+    /// Nur Masse und Höhenkoten (Achsblasen, Ansichtsmarker weichen ihnen aus).
+    pub dims: super::stamp_place::Obstacles,
+    /// [256] Nur Flächen: Masszahlen, Texte, Detailverweis-Blasen und je Höhenkote das Rechteck um Dreieck und Wert.
+    /// Davor setzen die Hilfslinien aus (Achsen, Schnittlinie, Baulinie/Parzelle, Höhenlinien): Schrift und Kote
+    /// haben Vorrang, die Linie wird unterbrochen (SIA 400). Ohne Symbole (Blöcke, Bibliotheks-Objekte).
+    pub gaps: super::stamp_place::Obstacles,
+}
+
+/// [256] Aussparungen einer Zeichnung ([`DrawnObstacles::gaps`]): Texte als Rechteck, Detailverweis-Blase als Kreis,
+/// eine Höhenkote als ein Rechteck über Dreieck und Wert (eine Linie durch die Spitze liefe sonst durchs Dreieck).
+fn line_gaps_of(g: &Drawing2DGeom, prims: &[Primitive], gaps: &mut super::stamp_place::Obstacles) {
+    match g {
+        Drawing2DGeom::Kote { .. } => {
+            let mut one = super::stamp_place::Obstacles::default();
+            for q in prims {
+                one.add_prim(q);
+            }
+            let pts = one.points();
+            if !pts.is_empty() {
+                let b = super::stamp_place::ring_bbox(&pts);
+                gaps.area(vec![[b[0], b[1]], [b[2], b[1]], [b[2], b[3]], [b[0], b[3]]]);
+            }
+        }
+        Drawing2DGeom::Dimension { .. } | Drawing2DGeom::Text { .. } | Drawing2DGeom::Detailref { .. } | Drawing2DGeom::Pointmarker { .. } => {
+            for q in prims.iter().filter(|q| matches!(q, Primitive::DrawingText { .. } | Primitive::DrawingCircle { .. })) {
+                gaps.add_prim(q);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// [150] Blasen und Beschriftungen der Achsraster des Geschosses (ohne die Achsen): Höhenlinien-Beschriftungen
