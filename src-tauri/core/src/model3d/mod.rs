@@ -34,6 +34,8 @@ mod drawings;
 mod pick;
 mod classes;
 mod solids;
+#[cfg(test)]
+mod arc_zone_tests;
 
 pub use ceilings::*;
 pub use columns::*;

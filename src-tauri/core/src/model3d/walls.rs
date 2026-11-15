@@ -748,17 +748,9 @@ fn wall_pieces_with(p: &Project, maps: &[String], wall: &Wall, ctx: &FloorContex
             roof_attach: wall.roof_attach,
             reveals: if layered && stacked { wall_reveals(p, wall, openings, bands.len()) } else { Vec::new() },
             keep_holes: plain,
-            // [216] Ohne Schichtbänder (Schnitt/Ansicht): Sehnen über Öffnungen mit Schichteinzug wie im 3D.
-            chord_zones: match crate::wall_arc::WallArc::of_wall(wall) {
-                Some(a) if !(layered && stacked) => openings
-                    .iter()
-                    .filter_map(|o| match super::arc_placement(p, wall, &a, o) {
-                        super::ArcPlacement::Zone(sa, sb) => Some((sa, sb)),
-                        _ => None,
-                    })
-                    .collect(),
-                _ => Vec::new(),
-            },
+            // [216] Sehnen-Zonen (über deckungsgleiche Bogenwände der Geschosse vereinigt, `arc_zones`): Wand und Loch liegen
+            // dort gerade auf der Sehne — in 3D, Schnitt und Ansicht gleich.
+            chord_zones: super::arc_zones(p, wall),
         };
         // Bogenwand ([T2]): Sehnen-Teilwände mit radialen Gehrungen.
         let arc = crate::wall_arc::WallArc::of_wall(wall);
@@ -769,13 +761,13 @@ fn wall_pieces_with(p: &Project, maps: &[String], wall: &Wall, ctx: &FloorContex
         };
         // [216] Formöffnungen mit Schichteinzug in der Bogenwand (zweite Rechnung): nur ihre Sehne, ohne Loch.
         let mut win = win;
-        let mut zones: Vec<(f64, f64)> = Vec::new();
-        if let (Some(a), true) = (arc, layered && stacked && !zone_only.is_empty()) {
+        // Bogenlänge-Bereiche (von, bis, z unten) der Formöffnungen, deren Loch die zweite Rechnung weglässt.
+        let mut drop_holes: Vec<(f64, f64, f64)> = Vec::new();
+        if let (Some(_), true) = (arc, layered && stacked && !zone_only.is_empty()) {
             let reveals = wall_reveals(p, wall, zone_only, bands.len());
             for oi in wall_openings(p, wall, zone_only, true) {
                 let Some(r) = reveals.iter().find(|r| r.from == oi.from && r.to == oi.to && r.z_bottom == oi.z_bottom && r.z_top == oi.z_top) else { continue };
-                let ms = r.shifts.iter().flat_map(|s| [s[0], s[1]]).fold(0.0f64, f64::max);
-                zones.push(crate::wall_arc::reveal_zone(oi.from, oi.to, ms, a.length()));
+                drop_holes.push((oi.from, oi.to, oi.z_bottom));
                 win.openings.push(oi);
                 win.reveals.push(r.clone());
             }
@@ -783,11 +775,17 @@ fn wall_pieces_with(p: &Project, maps: &[String], wall: &Wall, ctx: &FloorContex
         let wins = match arc {
             Some(a) => {
                 let mut v = crate::wall_arc::chord_walls(&win, &a);
-                for w in v.iter_mut() {
-                    let (sa, sb) = (a.local(w.start).0, a.local(w.end).0);
-                    if zones.iter().any(|(za, zb)| (za - sa).abs() < 1e-6 && (zb - sb).abs() < 1e-6) {
-                        w.openings.clear();
-                        w.reveals.clear();
+                if !drop_holes.is_empty() {
+                    for w in v.iter_mut().filter(|w| !w.openings.is_empty()) {
+                        let (sa, sb) = (a.local(w.start).0, a.local(w.end).0);
+                        let chord = (w.end.x - w.start.x).hypot(w.end.y - w.start.y);
+                        if !((sb - sa).abs() > 1e-9) {
+                            continue;
+                        }
+                        let m = |s: f64| (s - sa) / (sb - sa) * chord;
+                        let gone = |from: f64, to: f64, zb: f64| drop_holes.iter().any(|&(f, t, z)| (m(f) - from).abs() < 1e-6 && (m(t) - to).abs() < 1e-6 && (z - zb).abs() < 1e-9);
+                        w.reveals.retain(|r| !gone(r.from, r.to, r.z_bottom));
+                        w.openings.retain(|o| !gone(o.from, o.to, o.z_bottom));
                     }
                 }
                 v

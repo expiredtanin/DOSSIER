@@ -11,8 +11,8 @@
 //!   (`start` = (0,0), `end` = (L,0)), die Ausgabe wird mit [`WallArc::point`] gebogen; Kanten mit
 //!   konstantem `n` werden Bögen, Punkte auf Schnittlinien rastet [`Unroll::map`] exakt ein.
 //! - **Sehnen-Zerlegung** (3D, Schnitt, Ansicht, Exporte): [`WallArc::stations`] liefert Teilstellen,
-//!   zwischen denen gerade Teilwände mit radialen Gehrungs-Schnitten liegen; die Versätze eines
-//!   Sehnenpolygons sind wieder Sehnenpolygone, die Teilkörper schliessen also lückenlos.
+//!   zwischen denen gerade Teilwände liegen, gehrt auf der Winkelhalbierenden zweier Sehnen (an Laibungen radial); die
+//!   Versätze eines Sehnenpolygons sind wieder Sehnenpolygone, die Teilkörper schliessen also lückenlos und ohne Stufe.
 
 use crate::jsnum::ClampSafe;
 use crate::joins::Line;
@@ -240,24 +240,16 @@ impl Unroll {
     }
 
     /// Abgewickelter Punkt in einer Sehnen-Zone → Welt: Lage linear auf der Sehne, quer senkrecht dazu (wie die Einbauteile
-    /// im 3D, `model3d/openings.rs`); genau an den Zonenenden auf der radialen Gehrung.
+    /// im 3D, `model3d/openings.rs`); genau an den Zonenenden dort, wo die Sehnen-Parallele den Versatzkreis trifft
+    /// ([`zone_face_end`]) — Bogen und Gerade schliessen ohne Stufe an.
     fn zone_map(&self, p: Vec2) -> Option<Vec2> {
-        let (sa, sb) = self.zone_of(p.x)?;
-        let (pa, u, chord) = chord_of(&self.arc, sa, sb);
-        let nc = Vec2::new(-u.y, u.x);
-        for s in [sa, sb] {
+        let z = self.zone_of(p.x)?;
+        for (s, at_end) in [(z.0, false), (z.1, true)] {
             if (p.x - s).abs() < 1e-9 {
-                let o = self.arc.point(s, 0.0);
-                let r = sub(self.arc.point(s, 1.0), o);
-                let c = r.x * nc.x + r.y * nc.y;
-                if c.abs() < 0.5 {
-                    return None;
-                }
-                return Some(Vec2::new(o.x + r.x * p.y / c, o.y + r.y * p.y / c));
+                return Some(zone_face_end(&self.arc, z, p.y, at_end));
             }
         }
-        let t = (p.x - sa) / (sb - sa) * chord;
-        Some(Vec2::new(pa.x + u.x * t + nc.x * p.y, pa.y + u.y * t + nc.y * p.y))
+        Some(zone_point(&self.arc, z, p.x, p.y))
     }
 
     /// [216] Abschnitte der abgewickelten Kante a→b (konstantes n) an den Zonengrenzen: `(von, bis, gerade)`; `gerade` =
@@ -479,9 +471,86 @@ pub fn chord_of(arc: &WallArc, sa: f64, sb: f64) -> (Vec2, Vec2, f64) {
     (pa, u, l)
 }
 
+/// [216] Punkt der Sehnen-Zone `[sa, sb]` bei Bogenlänge `s` mit Querversatz `n`: Lage linear auf der Sehne der Achse, quer
+/// senkrecht dazu (so liegen Wand, Loch und Einbauteile dort im 3D).
+pub fn zone_point(arc: &WallArc, (sa, sb): (f64, f64), s: f64, n: f64) -> Vec2 {
+    let (pa, u, chord) = chord_of(arc, sa, sb);
+    let t = if (sb - sa).abs() > 1e-12 { (s - sa) / (sb - sa) * chord } else { 0.0 };
+    Vec2::new(pa.x + u.x * t - u.y * n, pa.y + u.y * t + u.x * n)
+}
+
+/// [216] Ende der geraden Fläche `n` einer Sehnen-Zone `[sa, sb]` (`at_end` = bei `sb`): Schnittpunkt der Sehnen-Parallelen
+/// mit dem Versatzkreis `n` — dort schliesst die gerade Fläche ohne Stufe an den Bogen an. Aussen liegt er etwas innerhalb,
+/// innen etwas ausserhalb der Zone; auf der Achse genau bei `sa`/`sb`. Rückfall (kein Treffer): auf der radialen Linie.
+pub fn zone_face_end(arc: &WallArc, z: (f64, f64), n: f64, at_end: bool) -> Vec2 {
+    let (sa, sb) = z;
+    let s = if at_end { sb } else { sa };
+    let (_, u, chord) = chord_of(arc, sa, sb);
+    let q = zone_point(arc, z, s, n);
+    let near = arc.point(s, n);
+    let l = Line { point: q, dir: u };
+    if let Some(h) = nearest(circle_line(arc.center, arc.radius_at(n), &l), near) {
+        let d = sub(h, near);
+        if d.x.hypot(d.y) < 0.25 * chord.max(1e-6) {
+            return h;
+        }
+    }
+    q
+}
+
+/// [216] Wirksame Fläche `n` einer Bogenwand mit Sehnen-Zonen `zones` über `[a, b]` (Bogenlänge) als Punktzug: Bogen, in den
+/// Zonen die Sehnen-Parallele, Übergang im Schnittpunkt ([`zone_face_end`]). EINE Quelle für Decken-/Dachanschlüsse
+/// (Deckenauflager [178], Deckenrand im Grundriss), damit sie der Wandflucht folgen.
+pub fn face_polyline(arc: &WallArc, zones: &[(f64, f64)], n: f64, a: f64, b: f64) -> Vec<Vec2> {
+    let rm = arc.radius_at(n).abs().max(arc.r);
+    let zj: Vec<((f64, f64), (f64, Vec2), (f64, Vec2))> = zones
+        .iter()
+        .filter(|z| z.1 - z.0 > 1e-9 && z.1 > a && z.0 < b)
+        .map(|&z| {
+            let (p0, p1) = (zone_face_end(arc, z, n, false), zone_face_end(arc, z, n, true));
+            (z, (arc.local(p0).0, p0), (arc.local(p1).0, p1))
+        })
+        .collect();
+    let zone_at = |s: f64| zj.iter().find(|(_, j0, j1)| s > j0.0 + 1e-9 && s < j1.0 - 1e-9).map(|t| t.0);
+    let mut pts: Vec<(f64, Vec2)> = Vec::new();
+    let st = arc.stations(a, b, rm);
+    let k = st.len();
+    for (i, &s) in st.iter().enumerate() {
+        match zone_at(s) {
+            None => pts.push((s, arc.point(s, n))),
+            Some(z) if i == 0 || i + 1 == k => pts.push((s, zone_point(arc, z, s, n))),
+            _ => {}
+        }
+    }
+    for (_, j0, j1) in &zj {
+        for j in [j0, j1] {
+            if j.0 > a + 1e-9 && j.0 < b - 1e-9 {
+                pts.push(*j);
+            }
+        }
+    }
+    pts.sort_by(|x, y| x.0.total_cmp(&y.0));
+    pts.dedup_by(|x, y| (x.0 - y.0).abs() < 1e-9);
+    pts.into_iter().map(|q| q.1).collect()
+}
+
+/// [216] Bereiche `[a, b]` sortiert, überlappende (oder berührende) vereinigt.
+pub fn merge_zones(mut z: Vec<(f64, f64)>) -> Vec<(f64, f64)> {
+    z.retain(|(a, b)| a.is_finite() && b.is_finite() && b > a);
+    z.sort_by(|x, y| x.0.total_cmp(&y.0));
+    let mut out: Vec<(f64, f64)> = Vec::new();
+    for (a, b) in z {
+        match out.last_mut() {
+            Some(l) if a <= l.1 + 1e-9 => l.1 = l.1.max(b),
+            _ => out.push((a, b)),
+        }
+    }
+    out
+}
+
 /// Sehnen-Zerlegung einer Bogenwand für die Schichtbänder: `w` trägt Öffnungen und Aussparungen in
 /// Bogenlänge, Schnitte in Weltkoordinaten (Start/Ende/Achse werden ignoriert). Ergebnis: gerade
-/// Teilwände (Sehnen der Achse) mit radialen Gehrungen dazwischen; Teilstellen auch an den
+/// Teilwände (Sehnen der Achse) mit Gehrungen dazwischen (Winkelhalbierende, an Laibungen radial); Teilstellen auch an den
 /// Öffnungskanten (Laibungen radial), keine Teilstelle im Bereich der Anschluss-Schnitte. Teilwände
 /// innerhalb einer Öffnung werden zu Brüstung und Sturz (z-Bereich ohne Loch). Öffnungen mit
 /// Schichteinzug ([106]) bekommen EINE gerade Teilwand über [`reveal_zone`], die Loch und Einzug trägt.
@@ -516,27 +585,40 @@ pub fn chord_walls(w: &crate::wall_bands::WallIn, arc: &WallArc) -> Vec<crate::w
     let z0 = reach(starts, false) + 1e-3;
     let z1 = reach(ends, true) - 1e-3;
     st.retain(|&s| s <= 0.0 || s >= len || (s > z0 && s < z1));
-    // [106] Sehnen über Öffnungen mit Schichteinzug: (Bereich, Öffnung, Einzug).
-    // [216] Ohne Schichtbänder (Schnitt/Ansicht) kommen die Bereiche aus `chord_zones` (gleiche Lage, ohne Einzug).
-    let zones: Vec<((f64, f64), &crate::wall_bands::OpeningIn, Option<&crate::wall_bands::RevealIn>)> = w
-        .openings
-        .iter()
-        .filter_map(|o| match w.reveals.iter().find(|r| r.from == o.from && r.to == o.to && r.z_bottom == o.z_bottom && r.z_top == o.z_top) {
-            Some(r) => {
-                let ms = r.shifts.iter().flat_map(|s| [s[0], s[1]]).fold(0.0f64, f64::max);
-                Some((reveal_zone(o.from, o.to, ms, len), o, Some(r)))
+    // [106]/[216] Sehnen-Zonen: die vorgegebenen (`chord_zones`, über Geschosse vereinigt, `model3d::arc_zones`), dazu je
+    // Öffnung mit Schichteinzug ihre eigene, falls keine Zone sie enthält; überlappende vereinigt. Je Zone die Öffnungen darin
+    // (mit Einzug, falls vorhanden) — eine Zone kann auch keine Öffnung tragen (Zone aus einem anderen Geschoss).
+    let reveal_of = |o: &crate::wall_bands::OpeningIn| w.reveals.iter().find(|r| r.from == o.from && r.to == o.to && r.z_bottom == o.z_bottom && r.z_top == o.z_top);
+    let mut zl: Vec<(f64, f64)> = w.chord_zones.iter().copied().filter(|z| z.1 - z.0 > 1e-9).collect();
+    for o in &w.openings {
+        if let Some(r) = reveal_of(o) {
+            let ms = r.shifts.iter().flat_map(|s| [s[0], s[1]]).fold(0.0f64, f64::max);
+            let z = reveal_zone(o.from, o.to, ms, len);
+            if !zl.iter().any(|(a, b)| *a <= z.0 + 1e-9 && *b >= z.1 - 1e-9) {
+                zl.push(z);
             }
-            None => w.chord_zones.iter().find(|(a, b)| *a <= o.from + 1e-9 && *b >= o.to - 1e-9).map(|z| (*z, o, None)),
-        })
+        }
+    }
+    let zl = merge_zones(zl);
+    type ZoneOps<'a> = Vec<(&'a crate::wall_bands::OpeningIn, Option<&'a crate::wall_bands::RevealIn>)>;
+    let zones: Vec<((f64, f64), ZoneOps)> = zl
+        .iter()
+        .map(|&(a, b)| (( a, b), w.openings.iter().filter(|o| o.from >= a - 1e-9 && o.to <= b + 1e-9).map(|o| (o, reveal_of(o))).collect()))
         .collect();
-    st.retain(|&s| !zones.iter().any(|((a, b), _, _)| s > *a + 1e-6 && s < *b - 1e-6));
-    for ((a, b), _, _) in &zones {
+    // Teilstellen in den Zonen weg, ebenso solche knapp neben einem Zonenende (sonst entstünde ein sehr kurzes Stück, dessen
+    // zwei Gehrungen sich in der Wanddicke kreuzen könnten).
+    let gap = 0.5 * len / arc.segments(r_max) as f64;
+    st.retain(|&s| s <= 0.0 || s >= len || !zones.iter().any(|((a, b), _)| s > *a - gap && s < *b + gap));
+    for ((a, b), _) in &zones {
         st.extend([*a, *b].into_iter().filter(|s| *s > 1e-6 && *s < len - 1e-6));
     }
-    for o in w.openings.iter().filter(|o| !zones.iter().any(|z| std::ptr::eq(z.1, *o))) {
+    // Laibungen der Öffnungen ausserhalb der Zonen: radiale Gehrung (Leibungen radial); sonst Winkelhalbierende.
+    let mut radial_at: Vec<f64> = Vec::new();
+    for o in w.openings.iter().filter(|o| !zones.iter().any(|(_, ops)| ops.iter().any(|(q, _)| std::ptr::eq(*q, *o)))) {
         for s in [o.from, o.to] {
             if s > 1e-6 && s < len - 1e-6 {
                 st.push(s);
+                radial_at.push(s);
             }
         }
     }
@@ -552,7 +634,28 @@ pub fn chord_walls(w: &crate::wall_bands::WallIn, arc: &WallArc) -> Vec<crate::w
             continue;
         }
         let map = |s: f64| ((s - sa) / (sb - sa) * chord).clamp_safe(0.0, chord);
-        let radial = |s: f64| Line { point: arc.point(s, 0.0), dir: arc.normal(s) };
+        // [216] Gehrung zwischen zwei Sehnen: Winkelhalbierende (alle Versatzlinien beider Sehnen treffen sich auf ihr, auch
+        // bei ungleich langen Sehnen wie am Rand einer Zone — keine Stufe); an Laibungen radial.
+        let radial = |j: usize| {
+            let s = st[j];
+            let q = arc.point(s, 0.0);
+            if j == 0 || j + 1 >= st.len() || radial_at.iter().any(|r| (r - s).abs() < 1e-6) {
+                return Line { point: q, dir: arc.normal(s) };
+            }
+            let unit = |a: Vec2, b: Vec2| {
+                let d = sub(b, a);
+                let l = d.x.hypot(d.y);
+                (l > 1e-12).then(|| Vec2::new(d.x / l, d.y / l))
+            };
+            match (unit(arc.point(st[j - 1], 0.0), q), unit(q, arc.point(st[j + 1], 0.0))) {
+                (Some(d1), Some(d2)) => {
+                    let m = Vec2::new(-(d1.y + d2.y), d1.x + d2.x);
+                    let l = m.x.hypot(m.y);
+                    if l > 1e-9 { Line { point: q, dir: Vec2::new(m.x / l, m.y / l) } } else { Line { point: q, dir: arc.normal(s) } }
+                }
+                _ => Line { point: q, dir: arc.normal(s) },
+            }
+        };
         let first = i == 0;
         let last = i + 1 == k;
         let layer_cuts = lc.map(|l| {
@@ -573,8 +676,8 @@ pub fn chord_walls(w: &crate::wall_bands::WallIn, arc: &WallArc) -> Vec<crate::w
             .filter(|c| c.to > c.from + 1e-9 || c.to_b > c.from_b + 1e-9)
             .collect();
         let cuts = WallCuts {
-            start_cut: if first { w.cuts.start_cut } else { Some(radial(sa)) },
-            end_cut: if last { w.cuts.end_cut } else { Some(radial(sb)) },
+            start_cut: if first { w.cuts.start_cut } else { Some(radial(i)) },
+            end_cut: if last { w.cuts.end_cut } else { Some(radial(i + 1)) },
             layer_cuts,
             span_cutouts,
             // [141] Y-Knick, Stossfuge gleichen Kreises, Stützenkontur: nur an den echten Enden.
@@ -584,12 +687,12 @@ pub fn chord_walls(w: &crate::wall_bands::WallIn, arc: &WallArc) -> Vec<crate::w
             at_column: [w.cuts.at_column[0] && first, w.cuts.at_column[1] && last],
             ..Default::default()
         };
-        // [106] Teilwand über einer Öffnung mit Schichteinzug: Loch und Einzug auf der Sehne.
-        if let Some((_, o, r)) = zones.iter().find(|((a, b), _, _)| (a - sa).abs() < 1e-6 && (b - sb).abs() < 1e-6) {
+        // [106] Teilwand über einer Sehnen-Zone mit Öffnungen: Loch (und Einzug) auf der Sehne.
+        if let Some((_, ops)) = zones.iter().find(|((a, b), ops)| !ops.is_empty() && (a - sa).abs() < 1e-6 && (b - sb).abs() < 1e-6) {
             let m = |s: f64| (s - sa) / (sb - sa) * chord;
-            let oi = crate::wall_bands::OpeningIn { from: m(o.from), to: m(o.to), ..**o };
-            let reveals = r.map(|r| crate::wall_bands::RevealIn { from: oi.from, to: oi.to, ..r.clone() }).into_iter().collect();
-            out.push(crate::wall_bands::WallIn { start: pa, end: pb, openings: vec![oi], cuts, reveals, chord_zones: vec![], ..w.clone() });
+            let openings: Vec<crate::wall_bands::OpeningIn> = ops.iter().map(|(o, _)| crate::wall_bands::OpeningIn { from: m(o.from), to: m(o.to), ..**o }).collect();
+            let reveals = ops.iter().filter_map(|(o, r)| r.map(|r| crate::wall_bands::RevealIn { from: m(o.from), to: m(o.to), ..r.clone() })).collect();
+            out.push(crate::wall_bands::WallIn { start: pa, end: pb, openings, cuts, reveals, chord_zones: vec![], ..w.clone() });
             continue;
         }
         // z-Bereiche ohne die Öffnungen, die diese Teilwand ganz überdecken.

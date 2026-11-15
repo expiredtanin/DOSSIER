@@ -300,9 +300,17 @@ impl Model3dCache {
         let mut old = std::mem::take(&mut self.walls[layered as usize]);
         let mut fresh: HashMap<u64, WallEntry> = HashMap::with_capacity(p.walls.len());
         let mut rebuilt = (0, 0);
+        // [216] Sehnen-Zonen einer Bogenwand hängen an den Öffnungen aller deckungsgleichen Bogenwände (`arc_zones`): deren
+        // Stände (grob: alle Bogenwände) gehören zum Schlüssel jeder Bogenwand.
+        let is_arc: Vec<bool> = p.walls.iter().map(|w| crate::wall_arc::WallArc::of_wall(w).is_some()).collect();
+        let arc_extra: Vec<u64> = p.walls.iter().enumerate().filter(|(i, _)| is_arc[*i]).flat_map(|(i, w)| std::iter::once(wall_stamps[i]).chain(hosted(&w.id).iter().map(|&k| opening_stamps[k]))).collect();
         for (wi, wall) in p.walls.iter().enumerate() {
             let stamp = wall_stamps[wi];
-            let os: Vec<u64> = hosted(&wall.id).iter().map(|&i| opening_stamps[i]).collect();
+            let mut os: Vec<u64> = hosted(&wall.id).iter().map(|&i| opening_stamps[i]).collect();
+            if is_arc[wi] {
+                os.push(u64::MAX);
+                os.extend_from_slice(&arc_extra);
+            }
             let cuts = joins.get(&wall.id).map_or_else(WallCuts::default, |c| if layered { c.clone() } else { model3d::section_cuts(c) });
             let e = match old.remove(&stamp) {
                 Some(e) if e.openings == os && e.cuts == cuts && !ctx_changed.contains(wall.floor_id.as_str()) => e,

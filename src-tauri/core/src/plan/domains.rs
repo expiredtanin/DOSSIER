@@ -590,7 +590,8 @@ fn ceilings(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) -> Result<()
     let fps = wall_footprints(c);
     for (ce, zone) in list {
         let out_start = out.len();
-        let pts: Vec<[f64; 2]> = ce.ring_xy();
+        // [216] Deckenrand folgt der Wandflucht (Sehnen-Zonen der Bogenwände).
+        let pts: Vec<[f64; 2]> = crate::model3d::bearing::plan_ceiling_ring(p, ce);
         for q in &pts {
             bounds.acc(q[0], q[1]);
         }

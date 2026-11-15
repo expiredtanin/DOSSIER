@@ -1171,11 +1171,7 @@ pub fn plan_walls(c: &Ctx, reference_lines: bool, out: &mut Vec<Primitive>, boun
                 let mut u = Unroll::new(*arc);
                 // [216] Öffnungen mit Schichteinzug liegen im 3D gerade auf einer Sehne (`reveal_zone`): Wand und Symbol
                 // dort ebenso gerade.
-                u.set_zones(p.openings_of_wall(&w.id).filter_map(|o| {
-                    let r = crate::opening_detail::opening_reveal(p, w, o)?;
-                    let ms = r.sides[..2].iter().flatten().map(|a| a.shift).fold(0.0f64, f64::max);
-                    Some(crate::wall_arc::reveal_zone(r.from, r.to, ms, arc.length()))
-                }).collect());
+                u.set_zones(crate::model3d::arc_zones(p, w));
                 let cu = unroll_cuts(&mut u, cut, ro - total / 2.0, ro + total / 2.0);
                 (Some(u), cu)
             }

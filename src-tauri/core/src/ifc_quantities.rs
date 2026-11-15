@@ -158,22 +158,42 @@ pub fn wall_quantities(start: Vec2, end: Vec2, bands: &[&RWall], cutouts: &[Cuto
 /// Bogenwand-Basismengen ([T2]) exakt aus der Kreisgeometrie: Length = Bogenlänge der Achse, Width =
 /// Dicke, GrossSideArea = Länge × Höhe, GrossVolume = Kreisringsektor (Fläche ½·θ·(R_a² − R_i²) mit den
 /// Flächenradien) × Höhe; Öffnungen als Ringsektoren über ihre Bogenlänge auf der Achse. `n_lo`/`n_hi`:
-/// Querbereich der Schichten zur Achse; `net_volume` wie bei [`wall_quantities`].
-pub fn arc_wall_quantities(arc: &crate::wall_arc::WallArc, n_lo: f64, n_hi: f64, z_bottom: f64, z_top: f64, cutouts: &[Cutout], net_volume: Option<f64>) -> Vec<Qty> {
+/// Querbereich der Schichten zur Achse; `net_volume` wie bei [`wall_quantities`]. [216] `zones`: Sehnen-Zonen
+/// (`model3d::arc_zones`) — dort ist die Wand gerade (`wall_arc::face_polyline`): die gewölbte Fläche verliert das
+/// Kreissegment zwischen ihren Zonen-Enden, die hohle gewinnt es; Öffnungen darin schneiden das gerade Band.
+pub fn arc_wall_quantities(arc: &crate::wall_arc::WallArc, n_lo: f64, n_hi: f64, z_bottom: f64, z_top: f64, cutouts: &[Cutout], net_volume: Option<f64>, zones: &[(f64, f64)]) -> Vec<Qty> {
     let length = arc.length();
     let h = z_top - z_bottom;
     let theta = arc.sweep.abs();
     let (r1, r2) = (arc.radius_at(n_lo), arc.radius_at(n_hi));
     // Ringfläche je Bogenlänge auf der Achse: ½·(R_a² − R_i²)/R.
     let ring_per_s = (r1 * r1 - r2 * r2).abs() / 2.0 / arc.r;
-    let mut gross = theta * (r1 * r1 - r2 * r2).abs() / 2.0 * h;
+    let mut plan_area = theta * (r1 * r1 - r2 * r2).abs() / 2.0;
+    // Kreissegment der Fläche `n` zwischen den Zonen-Enden (Sehne der Fläche auf ihrem Kreis).
+    let segment = |z: (f64, f64), n: f64| {
+        let (p, q) = (crate::wall_arc::zone_face_end(arc, z, n, false), crate::wall_arc::zone_face_end(arc, z, n, true));
+        let rr = arc.radius_at(n).abs();
+        let c = (q.x - p.x).hypot(q.y - p.y);
+        let phi = 2.0 * (c / (2.0 * rr)).clamp(-1.0, 1.0).asin();
+        rr * rr * (phi - phi.sin()) / 2.0
+    };
+    let (n_big, n_small) = if r1 >= r2 { (n_lo, n_hi) } else { (n_hi, n_lo) };
+    for &z in zones {
+        plan_area += segment(z, n_small) - segment(z, n_big);
+    }
+    let mut gross = plan_area * h;
     let gross_side = length * h;
     let mut cut_side = 0.0;
     let mut cut_volume = 0.0;
     for c in cutouts {
         let z = overlap(c.z_bottom, c.z_top, z_bottom, z_top);
         cut_side += (c.to - c.from) * z;
-        cut_volume += (c.to - c.from) * ring_per_s * z;
+        // In einer Sehnen-Zone: gerades Band (Breite linear auf die Sehne, Dicke n_hi − n_lo).
+        let per_s = match zones.iter().find(|(a, b)| *a <= c.from + 1e-6 && *b >= c.to - 1e-6) {
+            Some(&(a, b)) => crate::wall_arc::chord_of(arc, a, b).2 / (b - a) * (n_hi - n_lo).abs(),
+            None => ring_per_s,
+        };
+        cut_volume += (c.to - c.from) * per_s * z;
     }
     let net = net_volume.unwrap_or_else(|| max(0.0, gross - cut_volume));
     gross = max(gross, net);
@@ -451,7 +471,7 @@ mod tests {
     #[test]
     fn bogenwand_mengen_exakt() {
         let a = crate::wall_arc::WallArc::of(kernel2d::Vec2::new(0.0, 0.0), kernel2d::Vec2::new(10.0, 0.0), Some(1.0)).unwrap();
-        let q = arc_wall_quantities(&a, -0.15, 0.15, 0.0, 2.5, &[Cutout { from: 2.0, to: 3.2, z_bottom: 1.0, z_top: 2.0 }], None);
+        let q = arc_wall_quantities(&a, -0.15, 0.15, 0.0, 2.5, &[Cutout { from: 2.0, to: 3.2, z_bottom: 1.0, z_top: 2.0 }], None, &[]);
         let pi = std::f64::consts::PI;
         assert!(close(get(&q, "Length"), 5.0 * pi));
         assert!(close(get(&q, "Width"), 0.3));
@@ -460,6 +480,24 @@ mod tests {
         // ½·π·(5.15² − 4.85²)·2.5 = π·5·0.3·2.5
         assert!(close(get(&q, "GrossVolume"), pi * 5.0 * 0.3 * 2.5));
         assert!(close(get(&q, "NetVolume"), pi * 5.0 * 0.3 * 2.5 - 1.2 * 0.3 * 1.0));
+    }
+
+    /// [216] Bogenwand mit Sehnen-Zone: Volumen = Fläche des Grundrisses aus den wirksamen Flächen (`face_polyline`) × Höhe;
+    /// eine Öffnung in der Zone schneidet das gerade Band.
+    #[test]
+    fn bogenwand_mengen_mit_sehnen_zone() {
+        let a = crate::wall_arc::WallArc::of(kernel2d::Vec2::new(0.0, 0.0), kernel2d::Vec2::new(4.0, 0.0), Some(-1.0)).unwrap();
+        let z = (2.0, 4.0);
+        let (lo, hi) = (-0.2, 0.15);
+        let q = arc_wall_quantities(&a, lo, hi, 0.0, 2.5, &[Cutout { from: 2.5, to: 3.5, z_bottom: 1.0, z_top: 2.0 }], None, &[z]);
+        let mut ring = crate::wall_arc::face_polyline(&a, &[z], hi, 0.0, a.length());
+        ring.extend(crate::wall_arc::face_polyline(&a, &[z], lo, 0.0, a.length()).into_iter().rev());
+        let area = (0..ring.len()).map(|i| { let (p, r) = (ring[i], ring[(i + 1) % ring.len()]); p.x * r.y - r.x * p.y }).sum::<f64>().abs() / 2.0;
+        let gross = get(&q, "GrossVolume").unwrap();
+        assert!((gross - area * 2.5).abs() < 2e-3 * gross, "{gross} ≠ {}", area * 2.5);
+        let chord = crate::wall_arc::chord_of(&a, z.0, z.1).2;
+        let cut = gross - get(&q, "NetVolume").unwrap();
+        assert!((cut - 1.0 * chord / 2.0 * 0.35 * 1.0).abs() < 1e-9, "{cut}");
     }
 
     #[test]
