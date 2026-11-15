@@ -81,3 +81,14 @@ export function createViewportCameraApi(host: ViewportCameraHost): { api: Viewpo
   };
   return { api, dispose: () => cancelAnimationFrame(anim) };
 }
+
+/**
+ * [118] Was der Viewport tut, wenn ein Renderer bereit wird (erster Aufbau oder Neuaufbau nach Geräteverlust):
+ * `preset` = Preset anwenden und den Orbit daraus neu setzen (erster Aufbau, Preset gewechselt, oder noch keine
+ * Nutzerkamera: die Preset-Kamera lebt nur im Renderer); `redraw` = der Orbit (Standpunkt, Ziel, Projektion,
+ * Begehen) bleibt, der neue Renderer zeichnet ihn nur.
+ */
+export function cameraAfterReady(s: { hasOrbit: boolean; appliedPreset: string | null; view3d: string; orbitMode: boolean }): "preset" | "redraw" {
+  if (!s.hasOrbit || s.appliedPreset !== s.view3d) return "preset";
+  return s.orbitMode ? "redraw" : "preset";
+}

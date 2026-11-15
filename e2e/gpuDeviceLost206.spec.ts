@@ -81,12 +81,24 @@ test("WebGPU-Geräteverlust: kein Panic, Plan und 3D bleiben bedienbar, kein Neu
   const canvas3d = page.locator("canvas[data-engine=render3d]");
   await expect(canvas3d).toBeVisible({ timeout: 30_000 });
   await page.waitForTimeout(800);
+  // [118] Eine gesetzte Kamera muss den Geräteverlust samt Neuaufbau überleben (früher: Preset neu angewandt).
+  type CamApi = { getCamera: () => { position: number[]; direction: number[] } | null; setCamera: (c: unknown, animate?: boolean) => boolean };
+  await page.waitForFunction(() => (window as unknown as { __dossierCamera?: unknown }).__dossierCamera !== undefined, undefined, { timeout: 8_000 });
+  const camBefore = await page.evaluate(() => {
+    const api = (window as unknown as { __dossierCamera: CamApi }).__dossierCamera;
+    const c = api.getCamera()!;
+    api.setCamera({ ...c, position: [c.position[0] + 7, c.position[1] + 3, c.position[2] + 5] }, false);
+    return api.getCamera()!.position;
+  });
   await killAll();
   // Modelländerung im selben Takt wie der Verlust: Teile-Update lädt neue Puffer hoch.
   await blurFocus(page);
   await page.keyboard.press("ControlOrMeta+z");
   await page.waitForTimeout(300);
   await page.keyboard.press("ControlOrMeta+Shift+z");
+  await page.waitForTimeout(1500);
+  const camAfter = await page.evaluate(() => (window as unknown as { __dossierCamera: CamApi }).__dossierCamera.getCamera()!.position);
+  for (let k = 0; k < 3; k++) expect(camAfter[k], "Kamera nach Geräteverlust erhalten").toBeCloseTo(camBefore[k], 4);
   const b3 = (await canvas3d.boundingBox())!;
   await page.mouse.move(b3.x + b3.width / 2, b3.y + b3.height / 2);
   await page.mouse.down();

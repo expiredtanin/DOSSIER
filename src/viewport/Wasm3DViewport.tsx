@@ -84,7 +84,7 @@ import { WalkWorld, walkInputFrom } from "./walkCollision";
 import { loadShortcutOverrides, matchesShortcut } from "../state/keyboardShortcuts";
 import { createCameraFromView } from "../state/cameraActions";
 import { ViewportToolbar3d } from "./ViewportToolbar3d";
-import { createViewportCameraApi } from "./viewportCameraApi";
+import { cameraAfterReady, createViewportCameraApi } from "./viewportCameraApi";
 
 /** Ein per 3D-Klick getroffenes Bauteil, oder null (Leerraum). */
 export type Pick3dHit =
@@ -693,6 +693,9 @@ export function Wasm3DViewport({
   // Redraw-Strategie des zuletzt aktiven Kamera-Modus (Praeset ODER freier
   // Orbit) — Resize/Modell-Update ruft diese auf, ohne den Modus zu kennen.
   const redrawRef = useRef<() => void>(() => {});
+  // [118] Zeichnet der Orbit (true) oder noch die Rust-Preset-Kamera? Und welches Preset gilt gerade? (Kamera über Neuaufbau, s. `cameraAfterReady`)
+  const orbitModeRef = useRef(false);
+  const appliedPresetRef = useRef<string | null>(null);
   // Waren schon sichtbare Punktwolken eingepasst? (erste Wolke → Kamera einpassen)
   const hadCloudsRef = useRef(false);
   // Aktuelles Preset neu anwenden und den Orbit darauf einpassen (s. `applyPreset`).
@@ -755,15 +758,21 @@ export function Wasm3DViewport({
       ortho,
       orthoHalfHeight: rust && !rust.perspective ? rust.orthoHalfHeight : dist * Math.tan(FOV_Y / 2),
     };
+    orbitModeRef.current = false;
+    appliedPresetRef.current = view3d;
     redrawRef.current = () => render(null);
     redrawRef.current();
   }, [view3d, applyViewPreset, viewFit, readRustCamera, render]);
   fitCameraRef.current = applyPreset;
 
+  // [118] Nach einem Neuaufbau des Renderers bleibt die vom Nutzer gesetzte Kamera (Orbit, Begehen, Brücke) erhalten;
+  // das Preset gilt nur beim ersten Aufbau oder wenn es gewechselt wurde.
   useEffect(() => {
     if (!ready) return;
-    applyPreset();
-  }, [ready, applyPreset]);
+    const act = cameraAfterReady({ hasOrbit: orbitRef.current !== null, appliedPreset: appliedPresetRef.current, view3d, orbitMode: orbitModeRef.current });
+    if (act === "redraw") redrawRef.current();
+    else applyPreset();
+  }, [ready, applyPreset, view3d]);
   // [118] Ohne Renderer (verloren/aufgegeben) trotzdem einen Orbit anlegen, damit die Kamera-Brücke lesen und setzen kann.
   useEffect(() => {
     if (!ready && !orbitRef.current) applyPreset();
@@ -785,6 +794,7 @@ export function Wasm3DViewport({
       },
       getRect: () => canvas?.getBoundingClientRect() ?? null,
       useOrbitRedraw: () => {
+        orbitModeRef.current = true;
         redrawRef.current = () => {
           if (orbitRef.current) render(orbitCamera(orbitRef.current));
         };
@@ -1446,6 +1456,7 @@ export function Wasm3DViewport({
     let raf = 0;
     let last = 0;
     const redrawOrbit = () => {
+      orbitModeRef.current = true;
       redrawRef.current = () => {
         if (orbitRef.current) render(orbitCamera(orbitRef.current));
       };
@@ -1579,6 +1590,7 @@ export function Wasm3DViewport({
     if (!ready || !canvas) return;
 
     const useOrbitRedraw = () => {
+      orbitModeRef.current = true;
       redrawRef.current = () => {
         if (orbitRef.current) render(orbitCamera(orbitRef.current));
       };

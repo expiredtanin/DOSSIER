@@ -6,6 +6,9 @@
  *  - `renderer` ist eine {@link guardRenderer}-Hülle: ein Abbruch (Panic, WebGPU-Ausnahme) macht weitere Aufrufe
  *    zu No-ops und löst den Neuaufbau aus, ohne das gesperrte Objekt je wieder anzufassen.
  *  - Der Verlust-Rückruf aus Rust wird erst im nächsten Takt verarbeitet (nie verschachtelt).
+ *  - [118] Ein nach Verlust neu aufgebauter Renderer wird erst nach der Bewährungszeit (`probationMs`) ohne erneuten
+ *    Verlust bekannt gemacht (`renderer`/`ready`): Verliert das Gerät jedes Mal beim ersten Präsentieren (headless),
+ *    flackert die 3D-Ansicht nicht zwischen Hinweis und Bild. Der erste Aufbau ist davon unberührt.
  *  - Während des Neuaufbaus ist `renderer` null und `ready` false; danach ein NEUES Objekt: Abonnenten
  *    spielen Modell, Kamera usw. erneut ein.
  *
@@ -25,6 +28,8 @@ export interface GpuRendererSlotOptions<R> {
   /** Kurzname für Meldungen („render3d“). */
   label: string;
   recovery?: GpuRecovery;
+  /** Bewährungszeit nach einem Neuaufbau in ms (Vorgabe 1000, 0 = sofort): erst danach ohne erneuten Verlust `ready`. */
+  probationMs?: number;
   /** Zeitgeber (Vorgabe `setTimeout`); liefert eine Abbruch-Funktion. */
   schedule?(fn: () => void, ms: number): () => void;
   warn?(msg: string, e?: unknown): void;
@@ -45,6 +50,9 @@ export class GpuRendererSlot<R extends LosableRenderer> {
   private recovering = false;
   private _failed = false;
   private disposed = false;
+  /** Neuer Renderer ist noch in der Bewährungszeit (nach aussen nicht sichtbar). */
+  private probation = false;
+  private cancelProbation: (() => void) | null = null;
   private cancelTimer: (() => void) | null = null;
   private listeners = new Set<() => void>();
   private readonly recovery: GpuRecovery;
@@ -58,7 +66,7 @@ export class GpuRendererSlot<R extends LosableRenderer> {
   /** Der aktuelle (geschützte) Renderer oder null (noch nicht da, Neuaufbau, aufgegeben). */
   get renderer(): R | null {
     const g = this.guarded;
-    if (!g || g.dead()) return null;
+    if (!g || g.dead() || this.probation) return null;
     return g.renderer;
   }
 
@@ -93,6 +101,8 @@ export class GpuRendererSlot<R extends LosableRenderer> {
     this.disposed = true;
     this.cancelTimer?.();
     this.cancelTimer = null;
+    this.cancelProbation?.();
+    this.cancelProbation = null;
     this.drop(true);
     this.listeners.clear();
   }
@@ -109,6 +119,9 @@ export class GpuRendererSlot<R extends LosableRenderer> {
   private drop(healthy: boolean): void {
     const raw = this.raw;
     const g = this.guarded;
+    this.cancelProbation?.();
+    this.cancelProbation = null;
+    this.probation = false;
     this.raw = null;
     this.guarded = null;
     if (!raw || !g) return;
@@ -136,6 +149,7 @@ export class GpuRendererSlot<R extends LosableRenderer> {
           }
           return;
         }
+        const rebuilt = this.recovering;
         this.recovering = false;
         this.raw = raw;
         this.guarded = guardRenderer(raw, (e) => this.later(() => this.lost(raw, e, false)));
@@ -144,6 +158,17 @@ export class GpuRendererSlot<R extends LosableRenderer> {
           if (raw.is_lost?.()) this.later(() => this.lost(raw, "Gerät verloren", true));
         } catch (e) {
           this.later(() => this.lost(raw, e, false));
+        }
+        const wait = this.opts.probationMs ?? 1000;
+        if (rebuilt && wait > 0) {
+          this.probation = true;
+          this.cancelProbation = this.schedule(() => {
+            this.cancelProbation = null;
+            if (this.disposed || this.raw !== raw) return;
+            this.probation = false;
+            this.emit();
+          }, wait);
+          return;
         }
         this.emit();
       },

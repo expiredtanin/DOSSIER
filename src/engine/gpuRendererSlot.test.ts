@@ -40,7 +40,7 @@ class Fake implements LosableRenderer {
   }
 }
 
-function setup(opts: { maxLosses?: number; failCreate?: (k: number) => boolean } = {}) {
+function setup(opts: { probationMs?: number; maxLosses?: number; failCreate?: (k: number) => boolean } = {}) {
   const made: Fake[] = [];
   const warnings: string[] = [];
   /** Zeitgeber von Hand: [ms, fn]. */
@@ -50,6 +50,7 @@ function setup(opts: { maxLosses?: number; failCreate?: (k: number) => boolean }
   const slot = new GpuRendererSlot<Fake>({
     label: "render3d",
     recovery,
+    probationMs: opts.probationMs ?? 0,
     create: async () => {
       const k = creates++;
       if (opts.failCreate?.(k)) throw new Error("kein Adapter");
@@ -188,5 +189,40 @@ describe("GpuRendererSlot", () => {
     await settle();
     expect(made).toHaveLength(0);
     expect(slot.failed).toBe(true);
+  });
+
+  it("[118] Bewährungszeit: neu aufgebauter Renderer erst nach Ablauf bekannt, erster Aufbau sofort", async () => {
+    const { slot, made, settle, delays } = setup({ probationMs: 777 });
+    let emits = 0;
+    slot.subscribe(() => emits++);
+    slot.start();
+    await settle(2);
+    expect(slot.ready).toBe(true); // erster Aufbau unverändert
+    made[0].lost = true;
+    made[0].lostCb?.("weg");
+    // Verlust verarbeiten, Wartezeit abwarten, Neuaufbau: Probezeit-Zeitgeber steht noch aus
+    for (let k = 0; k < 8 && made.length < 2; k++) await settle(1);
+    expect(made).toHaveLength(2);
+    expect(slot.ready).toBe(false);
+    expect(slot.renderer).toBeNull();
+    await settle(1); // Probezeit läuft ab
+    expect(delays).toContain(777);
+    expect(slot.ready).toBe(true);
+    expect(slot.renderer).not.toBeNull();
+    expect(emits).toBeGreaterThan(0);
+  });
+
+  it("[118] Verlust in der Bewährungszeit: gesperrt, freigegeben, nächster Neuaufbau", async () => {
+    const { slot, made, settle } = setup({ probationMs: 777 });
+    slot.start();
+    await settle(2);
+    made[0].lost = true;
+    made[0].lostCb?.("weg");
+    for (let k = 0; k < 8 && made.length < 2; k++) await settle(1);
+    expect(made).toHaveLength(2);
+    made[1].lostCb?.("weg"); // sofort wieder weg, noch vor Ablauf
+    expect(slot.ready).toBe(false);
+    await settle(1);
+    expect(made[1].freed).toBe(true);
   });
 });

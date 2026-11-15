@@ -1,7 +1,7 @@
 // [118] Kamera-Brücke ohne lebenden Renderer: Lesen/Setzen geht, Bilder liefern null.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { captureImage, captureSnapshot, getCamera, registerViewportCamera, setCamera, viewportAvailable, type OrbitState, type ViewCamera } from "./cameraBridge";
-import { createViewportCameraApi, type ViewportCameraHost } from "./viewportCameraApi";
+import { cameraAfterReady, createViewportCameraApi, type ViewportCameraHost } from "./viewportCameraApi";
 
 beforeEach(() => {
   vi.stubGlobal("cancelAnimationFrame", () => {});
@@ -64,5 +64,14 @@ describe("Kamera-Brücke ohne GPU-Renderer", () => {
     offA();
     expect(viewportAvailable()).toBe(true);
     expect(getCamera()).not.toBeNull();
+  });
+});
+
+describe("Kamera nach Neuaufbau des Renderers ([118])", () => {
+  it("Preset nur beim ersten Aufbau oder bei Wechsel, sonst bleibt der Orbit", () => {
+    expect(cameraAfterReady({ hasOrbit: false, appliedPreset: null, view3d: "iso", orbitMode: false })).toBe("preset");
+    expect(cameraAfterReady({ hasOrbit: true, appliedPreset: "iso", view3d: "iso", orbitMode: true })).toBe("redraw");
+    expect(cameraAfterReady({ hasOrbit: true, appliedPreset: "iso", view3d: "front", orbitMode: true })).toBe("preset");
+    expect(cameraAfterReady({ hasOrbit: true, appliedPreset: "iso", view3d: "iso", orbitMode: false })).toBe("preset");
   });
 });

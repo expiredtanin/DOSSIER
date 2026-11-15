@@ -1574,6 +1574,15 @@ Punktwolken/BCF-Ausbau, Windows-Paket, [C5]/[C7]/[15] Kern-Umbauten — ausser s
   Abhängigkeiten, also keine Abmelde-Lücke beim Neuaufbau), und legt den Orbit auch ohne Renderer an (Fit-Rückfall in TS). Tests: vitest `viewportCameraApi.test.ts`;
   e2e `camera` 3x, `gpuDeviceLost206`, `walk`, `renderCount`, `a11yNewDialogs` grün. Offen: Kamera bleibt nach einem Neuaufbau nicht erhalten (Preset wird neu
   angewandt); nicht auf dem Mac geprüft.
+  **Nachtrag 15.11. (3D: Bewährungszeit und Kamera über den Neuaufbau):** `GpuRendererSlot` (`probationMs`, Vorgabe 1 s) macht einen NACH Verlust neu aufgebauten
+  render3d erst nach 1 s ohne erneuten Verlust als `renderer`/`ready` bekannt (erster Aufbau unverändert; Verlust in der Probezeit gibt das Objekt frei und baut
+  weiter mit Backoff neu) — die 3D-Ansicht flackert headless nicht mehr zwischen Hinweis und Bild. Kamera: `Wasm3DViewport` wendet das Preset nur beim ersten
+  Aufbau oder bei Preset-Wechsel an; ist der Orbit aktiv (Ziehen, Brücke, Begehen), zeichnet der neue Renderer ihn nur noch (`cameraAfterReady` in
+  `viewportCameraApi.ts`: Standpunkt, Ziel, Projektion und Begehen-Zustand bleiben, da sie im Orbit-Ref des Viewports liegen). Tests: vitest `gpuRendererSlot`
+  (Probezeit, Verlust in der Probezeit), `viewportCameraApi` (`cameraAfterReady`); e2e `gpuDeviceLost206` prüft „Kamera bleibt nach Geräteverlust erhalten“
+  (headless wird der Renderer nie bekannt, die Prüfung deckt dort nur die Brücke ab; der Neuaufbau-Pfad ist durch vitest abgedeckt), `camera`, `walk`,
+  `renderCount`, `a11yNewDialogs` grün. Nicht in der Tauri-App/auf dem Mac mit echtem Geräteverlust geprüft. Noch offen: ein Preset, das der Nutzer nicht
+  verändert hat, wird nach dem Neuaufbau neu eingepasst (gewollt).
 - ◐ **[3]** Darstellungswege reduzieren (vier 2D-Pfade: render2d, glPlan, SVG, native2d; zwei 3D-Pfade). · L
 - ◐ **[17]** Ergebnisse über die Ausgabe testen. Golden-Ausgaben für 3D fehlen. · M
 - ◐ **[19]** Beispielgebäude als Skript: `sampleProject.ts` + Kontrollmodell. · S
