@@ -195,8 +195,9 @@ pub struct WallIn {
     /// selbst ausschneidet. Sonst `false`.
     pub keep_holes: bool,
     /// [216] Bogenwand: Sehnen-Bereiche `[sa, sb]` (Bogenlänge) über Öffnungen mit Schichteinzug ([106], `wall_arc::reveal_zone`),
-    /// auch wo `reveals` leer ist (Schnitt/Ansicht rechnen ohne Schichtbänder) — Wand und Loch liegen dort gerade auf der
-    /// Sehne wie im 3D (`wall_arc::chord_walls`). Sonst leer.
+    /// über deckungsgleiche Bogenwände der Geschosse vereinigt (`model3d::arc_zones`), auch wo `reveals` leer ist
+    /// (Schnitt/Ansicht rechnen ohne Schichtbänder) — Wand und Loch liegen dort gerade auf der Sehne (`wall_arc::chord_walls`).
+    /// Sonst leer.
     pub chord_zones: Vec<(f64, f64)>,
 }
 

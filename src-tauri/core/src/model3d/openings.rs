@@ -254,15 +254,91 @@ pub(crate) enum ArcPlacement {
 
 /// [216] Wie liegen die Einbauteile von `o` in der Bogenwand `wall` (Bogen `arc`)? Siehe [`ArcPlacement`].
 pub(crate) fn arc_placement(p: &Project, wall: &Wall, arc: &crate::wall_arc::WallArc, o: &Opening) -> ArcPlacement {
-    if let Some(r) = crate::opening_detail::opening_reveal(p, wall, o) {
-        let ms = r.sides[..2].iter().flatten().map(|a| a.shift).fold(0.0f64, f64::max);
-        let (sa, sb) = crate::wall_arc::reveal_zone(r.from, r.to, ms, arc.length());
+    let zones = arc_zones(p, wall);
+    let own = match crate::opening_detail::opening_reveal(p, wall, o) {
+        Some(r) => {
+            let ms = r.sides[..2].iter().flatten().map(|a| a.shift).fold(0.0f64, f64::max);
+            Some(crate::wall_arc::reveal_zone(r.from, r.to, ms, arc.length()))
+        }
+        None => None,
+    };
+    // Die (über die Geschosse vereinigte) Zone, die die Öffnung enthält — auch ohne eigenen Einzug.
+    let (from, to) = own.unwrap_or((o.position, o.position + o.width));
+    if let Some(&(sa, sb)) = zones.iter().find(|(a, b)| *a <= from + 1e-6 && *b >= to - 1e-6) {
+        return ArcPlacement::Zone(sa, sb);
+    }
+    if let Some((sa, sb)) = own {
         return ArcPlacement::Zone(sa, sb);
     }
     let total = p.wall_thickness(wall, 0.2);
     let off = crate::joins::reference_offset(super::wall_reference(wall), total);
     let r_out = arc.r_max(off - total / 2.0, off + total / 2.0);
     if follows_arc(r_out, o.width) { ArcPlacement::Follow } else { ArcPlacement::Chord }
+}
+
+/// [216] Wirksame Sehnen-Zonen einer Bogenwand (Bogenlänge, sortiert, disjunkt): je Öffnung mit Schichteinzug [106] ihre
+/// Zone (`wall_arc::reveal_zone`), vereinigt über alle deckungsgleichen Bogenwände (gleicher Mittelpunkt, Bänder überlappen
+/// radial — die Erkerwände der Geschosse übereinander). So fluchten die Sehnen übereinanderliegender Geschosse (keine
+/// waagrechte Kante an der Geschossgrenze, Decke dazwischen auf derselben Flucht). Öffnungen ohne Einzug, die eine Zone
+/// teilweise überdecken, erweitern sie (sie liegen dann ganz auf der Sehne). EINE Quelle für Wand (3D, Schnitt, Ansicht,
+/// Grundriss), Einbauteile und Deckenanschluss.
+pub(crate) fn arc_zones(p: &Project, wall: &Wall) -> Vec<(f64, f64)> {
+    use crate::wall_arc::{merge_zones, reveal_zone, WallArc, REVEAL_MARGIN};
+    let Some(a) = WallArc::of_wall(wall) else { return Vec::new() };
+    let len = a.length();
+    let t0 = p.wall_thickness(wall, 0.2);
+    // Bereich [sa, sb] einer anderen Bogenwand `b` in Bogenlänge der eigenen Achse (`None`: liegt nicht auf ihr).
+    let map = |b: &WallArc, sa: f64, sb: f64| -> Option<(f64, f64)> {
+        let (x, y) = (a.local(b.point(sa, 0.0)).0, a.local(b.point(sb, 0.0)).0);
+        let (x, y) = (x.min(y), x.max(y));
+        let want = (sb - sa).abs() * a.r / b.r;
+        ((y - x - want).abs() < 1e-6 && y > 1e-9 && x < len - 1e-9).then_some((x, y))
+    };
+    let mut zones: Vec<(f64, f64)> = Vec::new();
+    let mut plain: Vec<(f64, f64)> = Vec::new();
+    for w in &p.walls {
+        let Some(b) = WallArc::of_wall(w) else { continue };
+        let d = (b.center.x - a.center.x).hypot(b.center.y - a.center.y);
+        if d > 1e-3 || (b.r - a.r).abs() > (t0 + p.wall_thickness(w, 0.2)) / 2.0 {
+            continue;
+        }
+        let bl = b.length();
+        for o in p.openings_of_wall(&w.id) {
+            match crate::opening_detail::opening_reveal(p, w, o) {
+                Some(r) => {
+                    let ms = r.sides[..2].iter().flatten().map(|a| a.shift).fold(0.0f64, f64::max);
+                    let (sa, sb) = reveal_zone(r.from, r.to, ms, bl);
+                    zones.extend(map(&b, sa, sb));
+                }
+                None => {
+                    let (from, to) = (o.position.clamp(0.0, bl), (o.position + o.width).clamp(0.0, bl));
+                    if to > from + 1e-9 {
+                        plain.extend(map(&b, (from - REVEAL_MARGIN).max(0.0), (to + REVEAL_MARGIN).min(bl)));
+                    }
+                }
+            }
+        }
+    }
+    if zones.is_empty() {
+        return zones;
+    }
+    let mut zones = merge_zones(zones);
+    for _ in 0..16 {
+        let mut grown = false;
+        for &(x, y) in &plain {
+            for z in zones.iter_mut() {
+                if x < z.1 - 1e-9 && y > z.0 + 1e-9 && (x < z.0 - 1e-9 || y > z.1 + 1e-9) {
+                    *z = (z.0.min(x), z.1.max(y));
+                    grown = true;
+                }
+            }
+        }
+        if !grown {
+            break;
+        }
+        zones = merge_zones(zones);
+    }
+    zones.into_iter().map(|(x, y)| (x.max(0.0), y.min(len))).filter(|(x, y)| y - x > 1e-6).collect()
 }
 
 /// [216] Pfeilhöhe (m), ab der die Einbauteile einer Öffnung in der Bogenwand dem Bogen folgen; darunter bleiben sie

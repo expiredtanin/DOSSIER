@@ -258,7 +258,18 @@ fn axis_rect(wall: &Wall, from: f64, to: f64, n_lo: f64, n_hi: f64) -> Vec<Vec2>
 /// [T2] Öffnung in der Bogenwand als gerade Ersatzwand (Sehne der Achse zwischen den Laibungen):
 /// (Ersatzwand, Intervall 0…Sehne, Querbereich zur Sehne, Einzug je Ende damit der Öffnungskörper
 /// auch an den Flächen innerhalb des radialen Lochs bleibt).
-fn arc_opening_chord(wall: &Wall, a: &crate::wall_arc::WallArc, c: &Cutout, host: (f64, f64)) -> (Wall, Cutout, (f64, f64), f64, f64) {
+fn arc_opening_chord(wall: &Wall, a: &crate::wall_arc::WallArc, c: &Cutout, host: (f64, f64), zone: Option<(f64, f64)>) -> (Wall, Cutout, (f64, f64), f64, f64) {
+    // [216] In einer Sehnen-Zone (Netz-Weg) liegt das Loch gerade auf der Sehne der Zone, Laibungen senkrecht dazu.
+    if let Some(z) = zone {
+        let (ps, pe) = (crate::wall_arc::zone_point(a, z, c.from, 0.0), crate::wall_arc::zone_point(a, z, c.to, 0.0));
+        let mut vw = wall.clone();
+        vw.start = Vec2 { x: ps.x, y: ps.y };
+        vw.end = Vec2 { x: pe.x, y: pe.y };
+        vw.bulge = None;
+        let chord = (pe.x - ps.x).hypot(pe.y - ps.y);
+        // Öffnungskörper 2 mm innerhalb der Laibungen (keine deckungsgleichen Flächen mit dem Wandnetz).
+        return (vw, Cutout { from: 0.0, to: chord, z_bottom: c.z_bottom, z_top: c.z_top }, host, 0.002f64.min(chord / 4.0), 0.0);
+    }
     let (ps, pe) = (a.point(c.from, 0.0), a.point(c.to, 0.0));
     let mid = a.point((c.from + c.to) / 2.0, 0.0);
     let chord = (pe.x - ps.x).hypot(pe.y - ps.y);
@@ -1216,8 +1227,8 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
                         crate::ring_arc::signed_area(&pts, Some(&bulge)).abs() * depth
                     })
                     .sum();
-                let mut quantities = qty::arc_wall_quantities(&a, ro - total / 2.0, ro + total / 2.0, zb, zt, &plain, None);
-                let exact = qty::arc_wall_quantities(&a, ro - total / 2.0, ro + total / 2.0, zb, zt, &[], None);
+                let mut quantities = qty::arc_wall_quantities(&a, ro - total / 2.0, ro + total / 2.0, zb, zt, &plain, None, &[]);
+                let exact = qty::arc_wall_quantities(&a, ro - total / 2.0, ro + total / 2.0, zb, zt, &[], None, &[]);
                 let full = exact.iter().find(|q| q.name == "GrossVolume").map_or(0.0, |q| q.value);
                 let cut = full - quantities.iter().find(|q| q.name == "NetVolume").map_or(full, |q| q.value);
                 for q in quantities.iter_mut() {
@@ -1331,9 +1342,11 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
                 let (zb, zt) = p.wall_vertical_extent(wall);
                 // Längen/Flächen exakt aus dem Kreis. [259] Volumen: dichtes Netz = geschriebener Körper (Schichten enden
                 // an der Decke; vorher volle Höhe über alle Schichten, Erker OG 23 % zu viel), Brutto = netto + Öffnungen.
-                let mut q = qty::arc_wall_quantities(a, ro - total / 2.0, ro + total / 2.0, zb, zt, &plain, None);
+                // [216] Sehnen-Zonen (Erker-Fenster mit Schichteinzug): das Netz ist dort gerade.
+                let zones = model3d::arc_zones(&p, wall);
+                let mut q = qty::arc_wall_quantities(a, ro - total / 2.0, ro + total / 2.0, zb, zt, &plain, None, &zones);
                 if let Some(nv) = net {
-                    let full = qty::arc_wall_quantities(a, ro - total / 2.0, ro + total / 2.0, zb, zt, &[], None);
+                    let full = qty::arc_wall_quantities(a, ro - total / 2.0, ro + total / 2.0, zb, zt, &[], None, &zones);
                     let gross = full.iter().find(|x| x.name == "GrossVolume").map_or(0.0, |x| x.value);
                     let cut = gross - q.iter().find(|x| x.name == "NetVolume").map_or(gross, |x| x.value);
                     for x in q.iter_mut() {
@@ -1436,7 +1449,16 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
             // (radialen) Lochs, Füllung um den Achsversatz der Sehne verschoben.
             let solid_arc = arc_solid.contains(&wall.id);
             let radial = arc.filter(|_| solid_arc).map(|a| arc_opening_quad(&a, c.from, c.to, host));
-            let chord = arc.map(|a| arc_opening_chord(wall, &a, &c, host));
+            let zone = match (&arc, solid_arc) {
+                (Some(a), false) => match model3d::arc_placement(&p, wall, a, o) {
+                    model3d::ArcPlacement::Zone(sa, sb) => Some((sa, sb)),
+                    _ => None,
+                },
+                _ => None,
+            };
+            let chord = arc.map(|a| arc_opening_chord(wall, &a, &c, host, zone));
+            // Rahmenlage aus der echten Wand (Bogenwand: abgewickelt), vor dem Wechsel auf die Ersatzwand.
+            let frame_slice = reveal_frame_slice(&p, wall, o);
             let (wall, c, host, shrink, sag) = match &chord {
                 Some((vw, vc, vh, e, d)) => (vw, *vc, *vh, *e, *d),
                 None => (wall, c, host, 0.0, 0.0),
@@ -1475,7 +1497,7 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
             // [168] Schichteinzug mit Stücken in der Öffnung (Überdämmung, Leibungsputz): das Wandnetz trägt
             // die Löcher schon; der Öffnungskörper bleibt in der Rahmenlage (frei von Stücken), sonst schnitte
             // er die Stücke wieder aus der Wand.
-            let (vlo, vhi) = match reveal_frame_slice(&p, wall, o).filter(|_| chord.is_none()) {
+            let (vlo, vhi) = match frame_slice.filter(|_| chord.is_none() || zone.is_some()) {
                 Some(s) => s,
                 None => (host.0 - sag - OPENING_OVERSHOOT, host.1 + sag + OPENING_OVERSHOOT),
             };

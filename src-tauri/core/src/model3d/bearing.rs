@@ -11,7 +11,9 @@
 //! Decken mit `edgeAtOutline` (Verhalten „wie Deckenumriss") bleiben unverändert. Bogenwände ([191]): der Streifen
 //! ist ein Kreisringsektor (Aussenfläche bis Aussenkante Kern, fein geteilt wie `ring_arc`), an den Wandenden an
 //! den Stosslinien; er reicht 2 cm über die Aussenfläche hinaus, damit die Sehnen des Deckenumrisses keinen Rest
-//! stehen lassen.
+//! stehen lassen. [216] In den Sehnen-Zonen einer Bogenwand (`arc_zones`, Fenster mit Schichteinzug im Erker) folgt die
+//! Kern-Aussenkante der geraden Wand (`wall_arc::face_polyline`); Decken bis zum Umriss und der Deckenrand im Grundriss
+//! verlieren dort die Kappe zwischen Sehne und Bogen ([`zone_caps`]).
 
 use super::*;
 use kernel2d::point_in_outline;
@@ -157,7 +159,7 @@ const ARC_MARGIN: f64 = 0.02;
 
 /// [191] Abzugs-Streifen einer Bogenwand: Kreisringsektoren von knapp vor der Aussenfläche bis zur Aussenkante
 /// des Kerns über die Bogenlänge, wo die Decke vor der Wand endet; an den Wandenden an den Stosslinien.
-fn arc_cutters(arc: &crate::wall_arc::WallArc, f: &OuterFaces, cuts: &WallCuts, outline: &[KVec]) -> Vec<Vec<[f64; 2]>> {
+fn arc_cutters(arc: &crate::wall_arc::WallArc, f: &OuterFaces, cuts: &WallCuts, outline: &[KVec], zones: &[(f64, f64)]) -> Vec<Vec<[f64; 2]>> {
     let len = arc.length();
     if !(len > 1e-9) {
         return Vec::new();
@@ -199,7 +201,21 @@ fn arc_cutters(arc: &crate::wall_arc::WallArc, f: &OuterFaces, cuts: &WallCuts, 
             };
             let ss: Vec<f64> = (0..=k).map(|i| a + (b - a) * i as f64 / k as f64).collect();
             let mut ring: Vec<[f64; 2]> = ss.iter().map(|&s| at(s, n_out)).collect();
-            ring.extend(ss.iter().rev().map(|&s| at(s, f.o_core)));
+            if zones.is_empty() {
+                ring.extend(ss.iter().rev().map(|&s| at(s, f.o_core)));
+            } else {
+                // [216] Kern-Aussenkante wie die Wand: in den Sehnen-Zonen gerade (`wall_arc::face_polyline`), damit die Platte
+                // dort nicht in die Dämmung ragt. Enden an den Stosslinien wie oben (ausserhalb der Zonen).
+                let mut inner: Vec<[f64; 2]> = crate::wall_arc::face_polyline(arc, zones, f.o_core, a, b).into_iter().map(|q| [q.x, q.y]).collect();
+                let in_zone = |s: f64| zones.iter().any(|z| s > z.0 - 1e-9 && s < z.1 + 1e-9);
+                if let (Some(q), false) = (inner.first_mut(), in_zone(a)) {
+                    *q = at(a, f.o_core);
+                }
+                if let (Some(q), false) = (inner.last_mut(), in_zone(b)) {
+                    *q = at(b, f.o_core);
+                }
+                ring.extend(inner.into_iter().rev());
+            }
             (ring_area(&ring) > 1e-9).then_some(ring)
         })
         .collect()
@@ -219,10 +235,77 @@ fn wall_cutters_with(p: &Project, w: &Wall, f: OuterFaces, cuts: &WallCuts, c: &
     }
     let k: Vec<KVec> = c.ring().iter().map(|v| KVec::new(v.x, v.y)).collect();
     if let Some(arc) = crate::wall_arc::WallArc::of_wall(w) {
-        return arc_cutters(&arc, &f, cuts, &k);
+        return arc_cutters(&arc, &f, cuts, &k, &super::arc_zones(p, w));
     }
     let Some(range) = body_range(w, &f, cuts) else { return Vec::new() };
     exterior_spans(w, &f, &k, range).into_iter().filter_map(|s| outer_strip(w, &f, cuts, s, range)).collect()
+}
+
+/// [216] Kappen der Sehnen-Zonen an einer Decke: wo eine Bogenwand mit Sehnen-Zonen (`arc_zones`) die Decke in der Höhe
+/// überlappt und die Decke an ihrer gewölbten (äusseren) Fläche endet, liegt die Wandflucht in der Zone auf der Sehne — die
+/// Fläche zwischen Sehnen-Parallele und Bogen (+ 2 cm) gehört nicht mehr zur Decke. Für den Deckenrand im Grundriss und
+/// Decken „wie Deckenumriss“ (`edgeAtOutline`); Decken bis zum Kern schneidet [`arc_cutters`] selbst.
+pub(crate) fn zone_caps(p: &Project, c: &Ceiling) -> Vec<Vec<[f64; 2]>> {
+    if c.outline.len() < 3 {
+        return Vec::new();
+    }
+    let mut ring: Option<Vec<KVec>> = None;
+    let mut out = Vec::new();
+    for w in &p.walls {
+        let Some(arc) = crate::wall_arc::WallArc::of_wall(w) else { continue };
+        if !overlaps_z(p, w, c) {
+            continue;
+        }
+        let zones = super::arc_zones(p, w);
+        if zones.is_empty() {
+            continue;
+        }
+        let k = ring.get_or_insert_with(|| c.ring().iter().map(|v| KVec::new(v.x, v.y)).collect());
+        let total = p.wall_thickness(w, 0.2);
+        let off = joins::reference_offset(wall_reference(w), total);
+        // Gewölbte Seite: die Fläche mit dem grösseren Radius; „nach aussen“ = Radius wächst.
+        let (lo, hi) = (off - total / 2.0, off + total / 2.0);
+        let n_face = if arc.radius_at(lo) >= arc.radius_at(hi) { lo } else { hi };
+        let out_dir = -arc.sigma();
+        for &z in &zones {
+            let mid = 0.5 * (z.0 + z.1);
+            let probe = arc.point(mid, n_face + out_dir * PROBE);
+            let facet = crate::wall_arc::zone_point(&arc, z, mid, n_face - out_dir * 1e-3);
+            if point_in_outline(probe, k) || !point_in_outline(facet, k) {
+                continue;
+            }
+            let (j0, j1) = (crate::wall_arc::zone_face_end(&arc, z, n_face, false), crate::wall_arc::zone_face_end(&arc, z, n_face, true));
+            let (s0, s1) = (arc.local(j0).0, arc.local(j1).0);
+            let n_m = n_face + out_dir * ARC_MARGIN;
+            let steps = crate::ring_arc::segments(arc.radius_at(n_m).abs(), (s1 - s0) / arc.r).max(2);
+            let mut cap = vec![[j0.x, j0.y], [j1.x, j1.y]];
+            cap.extend((0..=steps).map(|i| {
+                let q = arc.point(s1 + (s0 - s1) * i as f64 / steps as f64, n_m);
+                [q.x, q.y]
+            }));
+            if ring_area(&cap) > 1e-9 {
+                out.push(cap);
+            }
+        }
+    }
+    out
+}
+
+/// [216] Deckenumriss für den Grundriss: ohne die Kappen der Sehnen-Zonen ([`zone_caps`]) — der Deckenrand folgt der
+/// Wandflucht (Sehne in der Zone, Bogen ausserhalb). Ohne Zonen der Umriss selbst.
+pub fn plan_ceiling_ring(p: &Project, c: &Ceiling) -> Vec<[f64; 2]> {
+    let ring = c.ring_xy();
+    let caps = zone_caps(p, c);
+    if caps.is_empty() {
+        return ring;
+    }
+    let caps: Vec<crate::flat::Polygon> = caps.into_iter().map(|q| vec![q]).collect();
+    crate::polygon_bool::difference(&[vec![ring.clone()]], &caps)
+        .into_iter()
+        .filter_map(|poly| poly.into_iter().next())
+        .filter(|r| r.len() >= 3)
+        .max_by(|a, b| ring_area(a).total_cmp(&ring_area(b)))
+        .unwrap_or(ring)
 }
 
 fn ring_area(r: &[[f64; 2]]) -> f64 {
@@ -245,7 +328,7 @@ pub(crate) fn ceiling_bearing_outlines(p: &Project) -> Vec<Option<Vec<crate::fla
 pub(crate) fn bearing_outlines(p: &Project, only: impl Fn(&Ceiling) -> bool, known: Option<&HashMap<String, WallCuts>>) -> Vec<Option<Vec<crate::flat::Polygon>>> {
     let ceilings = p.ceilings.as_deref().unwrap_or(&[]);
     let mut out = vec![None; ceilings.len()];
-    let todo: Vec<usize> = (0..ceilings.len()).filter(|&i| only(&ceilings[i]) && ceilings[i].edge_at_outline != Some(true) && ceilings[i].outline.len() >= 3).collect();
+    let todo: Vec<usize> = (0..ceilings.len()).filter(|&i| only(&ceilings[i]) && ceilings[i].outline.len() >= 3).collect();
     if todo.is_empty() {
         return out;
     }
@@ -255,7 +338,12 @@ pub(crate) fn bearing_outlines(p: &Project, only: impl Fn(&Ceiling) -> bool, kno
         .filter(|w| todo.iter().any(|&i| overlaps_z(p, w, &ceilings[i])))
         .filter_map(|w| Some((w, outer_faces(p, w)?)))
         .collect();
+    let none = WallCuts::default();
     if walls.is_empty() {
+        // [216] Nur die Kappen der Sehnen-Zonen (falls welche).
+        for ci in todo {
+            out[ci] = ceiling_bearing(p, &ceilings[ci], &[], &|_| &none);
+        }
         return out;
     }
     // Verschneidung nur der Geschosse mit solchen Wänden (wie `compute_joins_by_floor`).
@@ -272,7 +360,6 @@ pub(crate) fn bearing_outlines(p: &Project, only: impl Fn(&Ceiling) -> bool, kno
             joins.insert(p.walls[i].id.as_str(), c);
         }
     }
-    let none = WallCuts::default();
     let cuts_of = |w: &Wall| known.and_then(|k| k.get(&w.id)).or_else(|| joins.get(w.id.as_str())).unwrap_or(&none);
     for ci in todo {
         out[ci] = ceiling_bearing(p, &ceilings[ci], &walls, &cuts_of);
@@ -291,6 +378,7 @@ fn ceiling_bearing<'c>(p: &Project, c: &Ceiling, walls: &[(&Wall, OuterFaces)], 
             let b = bbox_of(s.iter().copied());
             b[0] < cb[2] && b[2] > cb[0] && b[1] < cb[3] && b[3] > cb[1]
         })
+        .chain(zone_caps(p, c))
         .map(|s| vec![s])
         .collect();
     if cutters.is_empty() {
@@ -321,17 +409,23 @@ pub(crate) fn bearing_outlines_memo(p: &Project, known: &HashMap<String, WallCut
     let none = WallCuts::default();
     let cuts_of = |w: &Wall| known.get(&w.id).unwrap_or(&none);
     for (ci, c) in ceilings.iter().enumerate() {
-        if c.edge_at_outline == Some(true) || c.outline.len() < 3 {
+        if c.outline.len() < 3 {
             continue;
         }
         let (cb, ct) = p.ceiling_vertical_extent(c);
         let near: Vec<usize> = (0..p.walls.len()).filter(|&i| ext[i].1.min(ct) - ext[i].0.max(cb) > Z_EPS).collect();
-        let key: Vec<(u64, WallCuts)> = near.iter().map(|&i| (stamps.get(i).copied().unwrap_or(0), cuts_of(&p.walls[i]).clone())).collect();
+        let mut key: Vec<(u64, WallCuts)> = near.iter().map(|&i| (stamps.get(i).copied().unwrap_or(0), cuts_of(&p.walls[i]).clone())).collect();
+        // [216] Die Sehnen-Zonen der Bogenwände hängen auch an Öffnungen (anderer Geschosse): mit in den Schlüssel.
+        for &i in &near {
+            for z in super::arc_zones(p, &p.walls[i]) {
+                key.push((z.0.to_bits() ^ z.1.to_bits().rotate_left(17) ^ (i as u64).rotate_left(41), WallCuts::default()));
+            }
+        }
         let v = match memo.remove(&ci) {
             Some((k, v)) if k == key => v,
             _ => {
                 let walls: Vec<(&Wall, OuterFaces)> = near.iter().filter_map(|&i| Some((&p.walls[i], outer_faces(p, &p.walls[i])?))).collect();
-                if walls.is_empty() { None } else { ceiling_bearing(p, c, &walls, &cuts_of) }
+                ceiling_bearing(p, c, &walls, &cuts_of)
             }
         };
         out[ci] = v.clone();

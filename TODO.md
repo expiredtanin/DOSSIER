@@ -266,7 +266,33 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   -Wand auf der Sehne), `komplex-model3d` unverändert. Musterhaus komplex Ansicht Ost/Süd und Schnitt B-B per CLI-SVG `--hatch`
   in Chromium verglichen (Linux): Fenster sitzen im Wandloch (vorher schräg gesehen ≈ 1–2 cm daneben). Offen: Mac-Gegenprobe;
   Deckenstirn im Erker folgt weiter dem Bogen und ragt im Schnitt an der Zonen-Sehne ≈ 2,5 cm in die Dämmung (wie im 3D);
-  an den Zonenenden zeigt die Ansicht senkrechte Kanten (Stufe Sehne/Bogen ≈ 2 mm, wie im 3D).
+  an den Zonenenden zeigt die Ansicht senkrechte Kanten (Stufe Sehne/Bogen ≈ 2 mm, wie im 3D) — erledigt 15.11. (später), s. unten.
+  Stand 15.11. (später): Erker-Geometrie stimmig. (1) EINE Quelle der Sehnen-Zonen `model3d::arc_zones`: je Öffnung mit
+  Schichteinzug ihre `reveal_zone`, vereinigt über alle deckungsgleichen Bogenwände (gleicher Mittelpunkt, Bänder radial
+  überlappend — die Erkerwände aller Geschosse); Öffnungen ohne Einzug, die eine Zone anschneiden, erweitern sie und liegen
+  dann ganz auf der Sehne. Entscheid Vereinigung statt Raster: ein Raster lässt verschieden breite oder versetzte Fenster
+  weiter auf verschiedenen Sehnen (waagrechte Kante bleibt), die Vereinigung gibt durchgehende senkrechte Facetten über alle
+  Geschosse, auch die Decke dazwischen liegt auf der Flucht. Folge im Musterhaus komplex: UG-Fenster (2.2–3.1) und EG/OG-Fenster
+  (1.2–2.2) überlappen mit Zuschlag → eine 2-m-Facette (Pfeilhöhe ≈ 25 cm) über alle drei Geschosse, die zweite Facette
+  (3.6–4.6) läuft auch durchs UG. Wer runder will, legt die Fenster übereinander. `arc_placement`, `chord_walls`
+  (`WallIn::chord_zones` jetzt auch mit Schichtbändern, mehrere Öffnungen je Zone, Zone ohne Öffnung = gerade volle Wand),
+  `wall_body`, Grundriss (`Unroll`) und Einbauteile lesen sie. (2) Deckenrand/Auflager [178]: Kern-Aussenkante in der Zone
+  gerade (`wall_arc::face_polyline`, Abzugs-Streifen `bearing::arc_cutters`), Decken „wie Deckenumriss“ und der Deckenrand im
+  Grundriss verlieren die Kappe zwischen Sehne und Bogen (`bearing::zone_caps`, `plan_ceiling_ring`) — 3D, Schnitt, Ansicht,
+  Grundriss. (3) Stufe an den Zonenenden: Gehrung zwischen zwei Sehnen jetzt auf der Winkelhalbierenden (alle Versätze
+  treffen sich dort; an Laibungen weiter radial), Teilstellen knapp neben einem Zonenende entfallen (kurze Stücke mit gekreuzten
+  Gehrungen: ifcopenshell verlor sonst einen Körper); im Grundriss enden Sehne und Bogen im Schnittpunkt der
+  Sehnen-Parallelen mit dem Versatzkreis (`wall_arc::zone_face_end`). (4) IFC: Mengen der Bogenwand mit Zonen (Kreissegmente,
+  `ifc_quantities::arc_wall_quantities`), Öffnungskörper in der Zone auf der Zonen-Sehne in der Rahmenlage. 3D-Cache:
+  Schlüssel einer Bogenwand mit den Ständen aller Bogenwände und ihrer Öffnungen, Auflager-Memo mit den Zonen. Tests
+  `model3d/arc_zone_tests.rs` (Zonen fluchten, Decke nicht vor der Kern-Aussenkante in 3D/Schnitt/Grundriss ± 0,1 mm, keine
+  Stufe > 0,1 mm zwischen Nachbarstücken, kein Stück mit gekreuzten Gehrungen, Zonenende auf Bogen und Sehne),
+  `bogenwand_mengen_mit_sehnen_zone`. Goldens `komplex-grundriss-*` (Erker: Facetten, Deckenrand), `komplex-ansicht-ansicht-sued`,
+  `komplex-model3d` nachgeführt. Musterhaus komplex Grundriss EG/UG, Ansicht Ost, Schnitt B-B per CLI-SVG `--hatch` in
+  Chromium angesehen (Linux). Offen: Mac-Gegenprobe (3D/Metal nicht angesehen); UG und EG haben verschiedene Wandtypen
+  (Dicke), darum bleibt an der Geschossgrenze eine Kante der Aussenfläche und die Facetten-Knicke liegen wenige cm versetzt;
+  Dachrand `dach-erker` folgt weiter dem Bogen (Rand im Modell gezeichnet, nicht an die Wand gekoppelt); IFC-Profil-Weg
+  (Bogenwand ohne Dachanschluss) schreibt den Körper weiter als reinen Bogen (Facetten nur im Netz-Weg).
 - ◐ **[228]** In Blender öffnen / .blend speichern (12.11., Wunsch Maintainer; Stand 13.11.: umgesetzt und mit bpy 5.3 im Linux-Container geprüft, Mac-Gegenprobe offen). Skript `render_dossier.py` hat Modus `save` (`scene.json` `mode`, Argument `--mode`): Szene wie fürs Rendering bauen, Objekte in Collections nach Bauteil (Geschosse, Wände, Decken, Dächer, Fenster und Türen, Treppen, Stützen, Extrusionen, Bäume, Gelände, Kontext, Dossier) mit lesbaren Namen (`Wand eg-aw-s`; Zuordnung aus Knotenname/`extras` des GLB, keine Export-Änderung nötig, `doc/RENDER-SZENE.md`), Kamera `Dossier-Kamera`, Himmel `Dossier-Himmel`, `pack_all`, `save_as_mainfile`; 3D-Fenster der Datei in Material-Vorschau mit Blick durch die Kamera. Dialog: «Als .blend speichern …» (Blender im Hintergrund, dann nativer Speichern-Dialog) und «In Blender öffnen» (Datei im Arbeitsordner bauen, dann Blender MIT Oberfläche auf die Datei, ohne Warten); Browser: ZIP mit Anleitung für `--mode save`. Neuer Tauri-Befehl `blender_open`, Electron `blender:open`. CLI `dossier-cli … blend --out x.blend`. Abweichung: «Öffnen» startet Blender nicht mit dem Skript, sondern mit der fertigen .blend (zuverlässiger, selbe Datei wie «Speichern», Layout steckt in der Datei). Offen: Mac/Windows-Gegenprobe der Start-Befehle (`blender_open` nur im Linux-Container kompiliert/getestet), Blender-GUI nicht gesehen (Linux ohne Anzeige); Datei liegt nach «Öffnen» im Temp-Ordner (in Blender «Speichern unter»). · S
 - ◐ **[227]** Kontextgebäude auf dem Gelände, Baugrube im Rendering ausblenden (12.11., Befunde der Mac-Gegenprobe [211]). (1) Kern
   `context_ground.rs`: jedes zusammenhängende Gebäude eines Netzes (`importedMesh`, auch mehrere Häuser in einem Netz) wird senkrecht auf den

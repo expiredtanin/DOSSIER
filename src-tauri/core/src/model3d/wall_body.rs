@@ -291,7 +291,9 @@ pub(crate) fn attach_bodies(p: &Project, wall: &Wall, shaped: &[&Opening], plain
                 // Wie `walls.rs`/`wall_arc::chord_walls`: grösster seitlicher Rücksprung.
                 if let Some(a) = arc_geom {
                     let ms = shift.iter().flat_map(|s| [s[0], s[1]]).fold(0.0f64, f64::max);
-                    zone = Some(crate::wall_arc::reveal_zone(from, to, ms, a.length()));
+                    let own = crate::wall_arc::reveal_zone(from, to, ms, a.length());
+                    // [216] Die über die Geschosse vereinigte Zone (`arc_zones`), wie die Teilwand in `chord_walls`.
+                    zone = Some(super::arc_zones(p, wall).into_iter().find(|(za, zb)| *za <= own.0 + 1e-9 && *zb >= own.1 - 1e-9).unwrap_or(own));
                 }
             }
         }
