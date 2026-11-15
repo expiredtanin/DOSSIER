@@ -150,6 +150,20 @@ test("Referenz-Ablauf WBW/Vorprojekt: leeres Projekt bis Abgabe", async ({ page 
     // Soll/Ist: der gezeichnete „Raum 1“ ist noch keiner Programmzeile zugeordnet — „Atelier“ fehlt.
     await expect(page.locator(".pc-table").getByRole("row", { name: /Atelier/ })).toContainText("0/1");
     await shot(page, "04-raumprogramm");
+    // 4.3 Raum in „Atelier“ umbenennen (Objekt-Info): die Programmzeile ist danach belegt (1/1) statt „fehlt“ (0/1).
+    const room = (await page.evaluate(() => window.__dossierTest!.roomCenters()))[0];
+    await page.evaluate((id) => window.__dossierTest!.select({ rooms: [id] }), room.id);
+    await openTab(page, "Objekt-Info");
+    await page.locator("#objinfo-group-room").getByRole("textbox", { name: "Name", exact: true }).fill("Atelier");
+    await expect.poll(async () => (await page.evaluate(() => window.__dossierTest!.roomCenters()))[0].name).toBe("Atelier");
+    await blurFocus(page);
+    await page.keyboard.press("Escape");
+    await expect.poll(() => page.evaluate(() => Object.values(JSON.parse(window.__dossierTest!.selected().all) as Record<string, unknown>).flat().length)).toBe(0);
+    await openTab(page, "Flächenbilanz");
+    const atelierRow = page.locator(".pc-table").getByRole("row", { name: /Atelier/ });
+    await expect(atelierRow).toContainText("1/1");
+    await expect(atelierRow).not.toContainText("fehlt");
+    await shot(page, "04b-atelier");
   });
 
   await test.step("4b Objekte ([253]): WC und Esstisch mit Stühlen aus dem Panel „Objekte“ setzen", async () => {
@@ -365,6 +379,13 @@ test("Referenz-Ablauf WBW/Vorprojekt: leeres Projekt bis Abgabe", async ({ page 
     expect(pdfPages(pdf.bytes)).toBeGreaterThanOrEqual(1);
     if (process.env.DOSSIER_SHOTS) await writeFile(`${process.env.DOSSIER_SHOTS}/11-abgabe.pdf`, pdf.bytes);
     await shot(page, "11-publikation");
+    // 11.3 Ausgabe „DXF mit Layouts“: dieselbe Mappe liefert statt des PDF eine DXF-Datei je Blatt.
+    await editor.getByLabel("Ausgabe").selectOption("dxf");
+    const dxfSheets = await download(page, () => page.locator("[data-publish-run]").first().click());
+    // Eine DXF-Datei (Binär-DXF, Papierbereich mit den Blättern), kein PDF.
+    expect(dxfSheets.name).toMatch(/\.dxf$/);
+    expect(dxfSheets.bytes.subarray(0, 18).toString("latin1")).toBe("AutoCAD Binary DXF");
+    await editor.getByLabel("Ausgabe").selectOption("pdf-multi"); // zurück: 12b erwartet PDF
   });
 
   await test.step("12 Fachplaner-Austausch: DXF (Grundriss EG) und IFC", async () => {
@@ -458,6 +479,51 @@ test("Referenz-Ablauf WBW/Vorprojekt: leeres Projekt bis Abgabe", async ({ page 
     expect(j.costEstimate.method).toBe("gf");
     expect(j.costEstimate.groups).toHaveLength(9);
     if (process.env.DOSSIER_SHOTS) await writeFile(`${process.env.DOSSIER_SHOTS}/release10.obp`, saved.bytes);
+  });
+
+  await test.step("14 [206] 3.6 Obergeschoss: Wände kopieren, mit ⌘6/⌘5 Geschoss wechseln, GF steigt", async () => {
+    await openTab(page, "Flächenbilanz");
+    const gf = async () => Number((await page.locator(".kz-tile").filter({ has: page.locator(".kz-tile-label", { hasText: /^GF$/ }) }).locator(".kz-tile-value").textContent())!.replace(/[^\d.]/g, ""));
+    const gfEg = await gf();
+    const walls = (await page.evaluate(() => window.__dossierTest!.walls())).map((w) => w.id);
+    expect(walls).toHaveLength(4);
+    await page.evaluate((ids) => window.__dossierTest!.select({ walls: ids }), walls);
+    await blurFocus(page);
+    await page.keyboard.press("ControlOrMeta+c");
+    // ⌘6 = Geschoss aufwärts (Statusleiste zeigt das neue Geschoss).
+    await page.keyboard.press("ControlOrMeta+6");
+    await expect(page.locator("footer.statusbar")).toContainText("Obergeschoss");
+    await page.keyboard.press("ControlOrMeta+v");
+    await expect.poll(async () => (await page.evaluate(() => window.__dossierTest!.walls())).length).toBe(8);
+    await openTab(page, "Flächenbilanz");
+    await expect.poll(gf).toBeGreaterThan(gfEg + 5); // nur Wände im OG: Konstruktionsfläche (KF) kommt dazu, die Raumfläche noch nicht
+    // ⌘5 zurück ins Erdgeschoss.
+    await blurFocus(page);
+    await page.keyboard.press("ControlOrMeta+5");
+    await expect(page.locator("footer.statusbar")).toContainText("Erdgeschoss");
+    await shot(page, "14-og");
+  });
+
+  await test.step("15 [206] 1.3 Gelände aus Höhenlinien (DXF, Layer „Hoehenlinien“) erzeugen", async () => {
+    const ring = (r: number, z: number) => [
+      "0", "LWPOLYLINE", "8", "Hoehenlinien", "90", "4", "70", "1", "38", String(z),
+      ...[[-r, -r], [r, -r], [r, r], [-r, r]].flatMap(([x, y]) => ["10", String(E0 + 54 + x), "20", String(N0 + 51 + y)]),
+    ];
+    const dxf = ["0", "SECTION", "2", "ENTITIES", ...ring(15, 430), ...ring(25, 431), ...ring(35, 432), "0", "ENDSEC", "0", "EOF"].join("\n");
+    const chooser = page.waitForEvent("filechooser");
+    await fileMenu(page, /DXF\/DWG importieren/);
+    await (await chooser).setFiles({ name: "hoehenlinien.dxf", mimeType: "application/dxf", buffer: Buffer.from(dxf, "utf8") });
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText("Höhenlinien als Gelände übernehmen (3 erkannt)");
+    await dialog.locator(".imp-btn.primary").click();
+    await expect(dialog).toBeHidden({ timeout: 20_000 });
+    await expect.poll(async () => (await page.evaluate(() => window.__dossierTest!.context())).filter((o) => o.type === "contourSet").length).toBe(1);
+    await openTab(page, "Gelände");
+    await page.getByRole("button", { name: "Gelände erzeugen" }).click();
+    await expect.poll(async () => (await page.evaluate(() => window.__dossierTest!.context())).filter((o) => o.type === "terrainMesh").length).toBe(1);
+    expect(await page.evaluate(() => window.__dossierTest!.terrainZ())).toBeGreaterThan(429);
+    await shot(page, "15-gelaende");
   });
 });
 

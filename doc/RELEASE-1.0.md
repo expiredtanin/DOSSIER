@@ -38,7 +38,7 @@ E 2'600'048 / N 1'200'046 und E 2'600'060 / N 1'200'056. Raumprogramm als CSV (`
 |---|---|---|---|
 | 1.1 | Panel **Gelände** → „⤓ DXF importieren“ (oder Datei → Importieren …) → `kataster.dxf`, Vorgaben lassen (neue Zeichnung, Landeskoordinaten) → Importieren | neue Zeichnungsebene „kataster“, Parzellen mit Nummern 1000–1003, Gebäude grau, Parzellen anklickbar mit Griffen; Projekt-Nullpunkt = Kilometerpunkt E 2'600'000 / N 1'200'000 (Standort-Bezug), Statusleiste zeigt X/Y lokal und LV95 | ✅ (Spec Schritt 1, [221]) |
 | 1.2 | Gelände → „Standort importieren“ → Adresse/Koordinate, swisstopo-Gebäude, Gelände, Luftbild | Nachbarbauten als Netzkörper, Gelände, Luftbild lagerichtig zum Kataster | ◐ nur online; im Container nicht prüfbar (kein Netz) |
-| 1.3 | Gelände → „Gelände erzeugen“ aus Höhenlinien (falls importiert) | Geländemodell, im Schnitt sichtbar | ◐ nicht im Ablauf der Spec |
+| 1.3 | Gelände → „Gelände erzeugen“ aus Höhenlinien (falls importiert) | Geländemodell, im Schnitt sichtbar | ✅ (Spec 15: Höhenlinien-DXF importieren, „Gelände erzeugen“ → Geländenetz; Schnittansicht nicht geprüft) |
 
 ## 2. Baurecht und Hülle
 
@@ -58,7 +58,7 @@ E 2'600'048 / N 1'200'046 und E 2'600'060 / N 1'200'056. Raumprogramm als CSV (`
 | 3.3 | Befehl `decke` (`d`), 4 Ecken, Enter | eine Decke mit Deckentyp „Geschossdecke mehrschichtig“ | ✅ (Spec 3; vorher Aussenwand-Aufbau, in [206] behoben) |
 | 3.4 | Befehl `dach` (`rf`), zwei Ecken | Satteldach 30°, Vorsprung 0.4 m | ✅ (Spec 3) |
 | 3.5 | Volumen als Körper (`koerper`, Form Quader), dann `koerperinbauteile` und in den Körper klicken (oder Körper wählen, dann Befehl) | Aussenwände je Geschoss (aussen bündig mit dem Körper), Decken, Flachdach auf Körper-OK, fehlende Geschosse obenauf; Meldung mit Anzahl; ⌘Z nimmt alles zurück | ✅ (Spec [222]; geneigte/Kugel-/Kegelkörper werden mit Meldung abgelehnt) |
-| 3.6 | Obergeschoss: Wände kopieren (⌘5/⌘6 Geschoss wechseln) | OG mit Wänden, GF steigt | ◐ nicht in der Spec |
+| 3.6 | Obergeschoss: Wände kopieren (⌘5/⌘6 Geschoss wechseln) | OG mit Wänden, GF steigt | ✅ (Spec 14: Wände kopieren, ⌘6/⌘5, GF steigt um die Konstruktionsfläche) |
 
 ## 4. Raumprogramm gegen Modell
 
@@ -66,7 +66,7 @@ E 2'600'048 / N 1'200'046 und E 2'600'060 / N 1'200'056. Raumprogramm als CSV (`
 |---|---|---|---|
 | 4.1 | Befehl `raum` (`rm`), Klick ins Gebäude | „Raum 1“, 112.53 m² | ✅ (Spec 4) |
 | 4.2 | Flächenbilanz → „Raumprogramm importieren …“ → CSV, Spalten zuordnen → Importieren | 2 Programmzeilen, Soll/Ist-Tabelle | ✅ (Spec 4) |
-| 4.3 | Raum in „Atelier“ umbenennen (Objekt-Info) | Zeile „Atelier“ grün/gelb statt „fehlt“ | ◐ in der Spec nur „fehlt“ geprüft (Raum headless nicht angeklickt) |
+| 4.3 | Raum in „Atelier“ umbenennen (Objekt-Info) | Zeile „Atelier“ grün/gelb statt „fehlt“ | ✅ (Spec 4: „0/1“ vor, „1/1“ nach dem Umbenennen) |
 | 4.4 | „Räume generieren“ | neues Blatt mit Raumrechtecken nach Programm | ✅ (`e2e/roomprogram.spec.ts`) |
 | 4.5 | Mac: Menü „Kennzahlen und Raumprogramm …“ | Meldung mit Kennzahlen und Programmstand | ◐ nur auf dem Mac |
 
@@ -126,7 +126,7 @@ E 2'600'048 / N 1'200'046 und E 2'600'060 / N 1'200'056. Raumprogramm als CSV (`
 |---|---|---|---|
 | 11.1 | Erdgeschoss aktiv → Datei → Exportieren → DXF | DXF in LV95, Layer je Kategorie; in AutoCAD/Archicad lagerichtig | ✅ Datei (Spec 12); Rundreise in Fremdsoftware offen ([C9]) |
 | 11.2 | Datei → Exportieren → IFC | IFC4 mit IfcWall, IfcSlab, IfcSpace | ✅ (Spec 12) |
-| 11.3 | Publikationssatz mit Ausgabe „DXF mit Layouts“ | DXF je Blatt | ◐ nicht in der Spec |
+| 11.3 | Publikationssatz mit Ausgabe „DXF mit Layouts“ | DXF je Blatt | ✅ (Spec 11: eine Binär-DXF-Datei mit den Blättern) |
 
 ## 12. Sichern und Wiederöffnen
 
