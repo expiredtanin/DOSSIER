@@ -158,6 +158,79 @@ impl Obstacles {
         }
     }
 
+    /// [256] Die Strecke a–b ohne die Teile in den (konvexen) Flächen, je um `pad` aufgeweitet — Linien setzen vor
+    /// Masszahlen und Texten aus (Baulinie durch „2.69“). Liegt nichts darin: die Strecke selbst. Stücke kürzer als 1e-9 entfallen.
+    pub fn cut_out(&self, a: P, b: P, pad: f64) -> Vec<[P; 2]> {
+        let d = [b[0] - a[0], b[1] - a[1]];
+        let mut cuts: Vec<(f64, f64)> = Vec::new();
+        let (sx0, sx1, sy0, sy1) = (a[0].min(b[0]) - pad, a[0].max(b[0]) + pad, a[1].min(b[1]) - pad, a[1].max(b[1]) + pad);
+        for ring in &self.areas {
+            let n = ring.len();
+            let bb = ring_bbox(ring);
+            if n < 3 || bb[2] < sx0 || bb[0] > sx1 || bb[3] < sy0 || bb[1] > sy1 {
+                continue;
+            }
+            let area2: f64 = (0..n).map(|i| ring[i][0] * ring[(i + 1) % n][1] - ring[(i + 1) % n][0] * ring[i][1]).sum();
+            if !(area2.abs() > 1e-12) {
+                continue;
+            }
+            let sign = area2.signum();
+            // Nur konvexe Flächen (Text, Blase): alle Ecken drehen gleich.
+            let convex = (0..n).all(|i| {
+                let (p, q, r) = (ring[i], ring[(i + 1) % n], ring[(i + 2) % n]);
+                ((q[0] - p[0]) * (r[1] - q[1]) - (q[1] - p[1]) * (r[0] - q[0])) * sign >= -1e-12
+            });
+            if !convex {
+                continue;
+            }
+            // Cyrus–Beck: Parameter t in [0, 1], an dem die Strecke im aufgeweiteten Polygon liegt.
+            let (mut t0, mut t1) = (0.0f64, 1.0f64);
+            let mut inside = true;
+            for i in 0..n {
+                let (p, q) = (ring[i], ring[(i + 1) % n]);
+                let l = hypot2(q[0] - p[0], q[1] - p[1]);
+                if !(l > 1e-12) {
+                    continue;
+                }
+                // Äussere Normale (Ring CCW: rechts der Kante).
+                let nn = [(q[1] - p[1]) / l * sign, -(q[0] - p[0]) / l * sign];
+                let num = pad - (nn[0] * (a[0] - p[0]) + nn[1] * (a[1] - p[1]));
+                let den = nn[0] * d[0] + nn[1] * d[1];
+                if den.abs() < 1e-12 {
+                    if num < 0.0 {
+                        inside = false;
+                        break;
+                    }
+                } else if den > 0.0 {
+                    t1 = t1.min(num / den);
+                } else {
+                    t0 = t0.max(num / den);
+                }
+            }
+            if inside && t0 < t1 {
+                cuts.push((t0, t1));
+            }
+        }
+        if cuts.is_empty() {
+            return vec![[a, b]];
+        }
+        cuts.sort_by(|x, y| x.0.total_cmp(&y.0));
+        let len = hypot2(d[0], d[1]);
+        let at = |t: f64| [a[0] + d[0] * t, a[1] + d[1] * t];
+        let mut out = Vec::new();
+        let mut from = 0.0;
+        for (c0, c1) in cuts {
+            if c0 > from && (c0 - from) * len > 1e-9 {
+                out.push([at(from), at(c0)]);
+            }
+            from = from.max(c1);
+        }
+        if from < 1.0 && (1.0 - from) * len > 1e-9 {
+            out.push([at(from), at(1.0)]);
+        }
+        out
+    }
+
     /// Nur die Hindernisse, die das Rechteck `[x0, y0, x1, y1]` berühren (je Raum vorab gefiltert).
     pub fn within(&self, b: [f64; 4]) -> Obstacles {
         let hit = |pts: &[P]| {

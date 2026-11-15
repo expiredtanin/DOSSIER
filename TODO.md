@@ -573,6 +573,16 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   bekommen dieselben Stücke; 1:50 (helle Schichten) unverändert. Abschaltbar: Modelldarstellung `walls.contrastOnSolid` (Basis an).
   Tests `contrast::tests`, `ueber_schnitt_hell_auf_schwarzer_wand`; Goldens nachgeführt. Geprüft nur Linux/CLI-SVG `--hatch` in Chromium. · M
   UI-Review 14.11.: Ebenen-Editor (Füllung): schwebender Editor wird nach dem Aufbau am Fensterrand geklemmt (lag vorher rechts/unten ausserhalb, Messung während der Einblend-Animation).
+  **15.11. (Stempel, Baulinie):** Stempel „Schlafen" DG komplex: Ursache war kein Möbel, sondern Querlinien (Gauben-Umriss, Achsen, Kote): zwischen
+  Gaubenkante und Achse bleiben 1.6 m, der volle Stempel braucht 1.66 m; das 24er-Kandidatenraster (0.25 m) traf die Lücke nie. Jetzt (a) Lagen aus den
+  Hindernis-Koordinaten (`gap_candidates`: anstossend oder mittig in der Lücke) vor jedem Verkleinern/Überdecken, (b) Zwischenstufe 90 % vor 80 %
+  (`ROOM_STAMP_MID`): „Schlafen" steht jetzt in 90 % statt 80 % (volle Schrift passt dort nicht, 6 cm zu eng; Überdecken der Achse bleibt
+  die schlechtere Wahl, [199]). (b) Die gestrichelte Baulinie/Parzellengrenze lief im Wettbewerb-EG durch die Masszahlen („2.69", „1.20", „20.39"):
+  ihre Linien setzen jetzt vor Texten/Masszahlen der Zeichnungen aus (`cut_site_lines`, `Obstacles::cut_out`, 0.5 mm Rand). Tests
+  `raumstempel_rueckt_in_luecke_statt_zu_schrumpfen`, `baulinie_setzt_vor_masszahlen_aus`; Golden komplex EG/OG/DG. Geprüft nur Linux/CLI-SVG
+  in Chromium. **Offen:** Kote „±0.00" (komplex EG Zimmer) und „+5.70" (DG) stehen auf/neben Achslinien; Handmass „5.73" quert den Zimmer-Stempel
+  nicht, aber die Wohnen/Essen/Küche-Beschriftung steht unter Revisionswolke und Sichtkegel (ohne Abgabe-Vorlage); Raumstempel nicht >90 %, wenn
+  Linien die Räume zerschneiden — Alternative wäre Freistellung in voller Schrift (Entscheid Maintainer).
 - Fachplaner-Austausch: DXF/DWG je Geschoss/Schnitt/Ansicht ([200]), IFC mit Räumen/Psets ([201]); Rundreise in Archicad/Revit einmal
   real prüfen ([C9]).
 - ◐ **[259]** IFC-Export für Fachplaner (Vorprojekt, 14.11.). Alle drei Beispielprojekte mit ifcopenshell 0.9 geprüft: `validate-ifc.py`

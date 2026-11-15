@@ -1062,6 +1062,8 @@ fn scale_doc_pt(mut doc: RichTextDoc, k: f64) -> RichTextDoc {
 
 /// [199] Bis zu diesem Anteil der Grundschrift darf ein Stempel wegen anderen Planinhalts schrumpfen.
 const ROOM_STAMP_KEEP: f64 = 0.8;
+/// [256] Zwischenstufe vor `ROOM_STAMP_KEEP`.
+const ROOM_STAMP_MID: f64 = 0.9;
 /// [140] Kleinste Stempelschrift (2 mm Papier) für enge Räume.
 const ROOM_STAMP_MIN_PT: f64 = 2.0 / PT_MM;
 const PT_MM: f64 = crate::text_layout::PT_TO_MM;
@@ -1139,8 +1141,13 @@ fn fit_room_stamp_with(doc: &RichTextDoc, number: Option<&str>, extra: Vec<Stamp
     let width = |d: &RichTextDoc| stamp_size_m(d, &[], ROOM_STAMP_MIN_PT, scale).0;
     wraps.sort_by(|a, b| width(a).total_cmp(&width(b)));
     let wrapped: Vec<Option<&RichTextDoc>> = wraps.iter().map(Some).collect();
-    let steps_to = |floor: f64| {
+    let steps_to = |floor: f64, mid: bool| {
         let mut steps: Vec<(Vec<Option<&RichTextDoc>>, f64)> = vec![(vec![None], pt), (vec![Some(&plain)], pt), (wrapped.clone(), pt)];
+        // [256] Zwischenstufe 90 %: lieber knapp verkleinert als gleich auf 80 %.
+        let m = pt * ROOM_STAMP_MID;
+        if mid && m > floor + 1e-9 {
+            steps.extend([(vec![None], m), (vec![Some(&plain)], m), (wrapped.clone(), m)]);
+        }
         if pt > floor {
             steps.extend([(vec![None], floor), (vec![Some(&plain)], floor), (wrapped.clone(), floor)]);
         }
@@ -1170,19 +1177,19 @@ fn fit_room_stamp_with(doc: &RichTextDoc, number: Option<&str>, extra: Vec<Stamp
     // in Schriftgrösse über Linien (mit Freistellung, `stamp_knockout`) liest sich besser als einer in 2 mm. Erst
     // wenn der Raum auch das nicht fasst, geht es wie bisher bis auf 2 mm hinunter.
     if styled {
-        let own: Vec<(Vec<Option<&RichTextDoc>>, f64)> = steps_to(ROOM_STAMP_MIN_PT).into_iter().map(|(v, p)| (v.into_iter().filter(Option::is_none).collect(), p)).collect();
+        let own: Vec<(Vec<Option<&RichTextDoc>>, f64)> = steps_to(ROOM_STAMP_MIN_PT, false).into_iter().map(|(v, p)| (v.into_iter().filter(Option::is_none).collect(), p)).collect();
         if let Some((e, pt, v, q)) = search(&own, &[(true, false), (false, false)]) {
             return (e, pt, v, Some(q));
         }
     }
     let keep = (pt * ROOM_STAMP_KEEP).max(ROOM_STAMP_MIN_PT);
     if keep > ROOM_STAMP_MIN_PT {
-        if let Some((e, pt, v, q)) = search(&steps_to(keep), &[(true, false), (false, false)]) {
+        if let Some((e, pt, v, q)) = search(&steps_to(keep, true), &[(true, false), (false, false)]) {
             return (e, pt, v, Some(q));
         }
     }
     let all = [(true, false), (false, false), (true, true), (false, true)];
-    if let Some((e, pt, v, q)) = search(&steps_to(ROOM_STAMP_MIN_PT), &all) {
+    if let Some((e, pt, v, q)) = search(&steps_to(ROOM_STAMP_MIN_PT, false), &all) {
         return (e, pt, v, Some(q));
     }
     let pt = pt.min(ROOM_STAMP_MIN_PT);
@@ -1369,6 +1376,44 @@ fn obstacles_with(d: &DomainPrims, drawn: super::stamp_place::Obstacles, with_tr
 /// Lagen gewinnen nichts mehr (der Stempel bleibt am Pol, wenn er dort so viel Luft hat).
 const STAMP_CLEAR_MM: f64 = 2.0;
 
+/// [256] Lagen für einen Stempel `w` × `h` aus den Koordinaten der Hindernisse und des Raums: je Achse rechts/links
+/// anstossend (Abstand `eps`) und mittig zwischen einem Anschlag links und dem nächsten rechts. Höchstens 40 je Achse
+/// (die dem Pol `pole` nächsten), nach Abstand zum Pol geordnet. Leer, wenn der Stempel grösser als der Raum ist.
+fn gap_candidates(ring: &[[f64; 2]], obst: &super::stamp_place::Obstacles, pole: Option<Vec2>, w: f64, h: f64, eps: f64) -> Vec<Vec2> {
+    let b = ring_bounds(ring);
+    if !(w.is_finite() && h.is_finite() && eps.is_finite()) || b.iter().any(|v| !v.is_finite()) || w > b[2] - b[0] || h > b[3] - b[1] {
+        return Vec::new();
+    }
+    let pts = obst.points();
+    let axis = |coord: &dyn Fn(&[f64; 2]) -> f64, lo: f64, hi: f64, half: f64, mid: f64| -> Vec<f64> {
+        let mut raw: Vec<f64> = pts.iter().map(coord).chain(ring.iter().map(coord)).filter(|v| v.is_finite() && *v > lo - 2.0 * half && *v < hi + 2.0 * half).collect();
+        raw.sort_by(f64::total_cmp);
+        raw.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
+        let (lo_c, hi_c) = (lo + half, hi - half);
+        let lefts: Vec<f64> = raw.iter().map(|v| v + half + eps).collect();
+        let rights: Vec<f64> = raw.iter().map(|v| v - half - eps).collect();
+        let mut out: Vec<f64> = lefts.iter().chain(&rights).copied().collect();
+        for l in &lefts {
+            if let Some(r) = rights.iter().find(|r| **r >= *l) {
+                out.push((l + r) / 2.0);
+            }
+        }
+        out.retain(|v| *v >= lo_c && *v <= hi_c);
+        out.sort_by(f64::total_cmp);
+        out.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
+        out.sort_by(|a, b| (a - mid).abs().total_cmp(&(b - mid).abs()));
+        out.truncate(40);
+        out
+    };
+    let c = pole.unwrap_or(Vec2 { x: (b[0] + b[2]) / 2.0, y: (b[1] + b[3]) / 2.0 });
+    let xs = axis(&|p| p[0], b[0], b[2], w / 2.0, c.x);
+    let ys = axis(&|p| p[1], b[1], b[3], h / 2.0, c.y);
+    let mut out: Vec<Vec2> = xs.iter().flat_map(|&x| ys.iter().map(move |&y| Vec2 { x, y })).collect();
+    let d = |q: &Vec2| (q.x - c.x) * (q.x - c.x) + (q.y - c.y) * (q.y - c.y);
+    out.sort_by(|a, b| d(a).total_cmp(&d(b)));
+    out
+}
+
 /// [140] Lage eines Stempels (`w` × `h`) unter `candidates` (Pol zuerst, dann nach Abstand zum Pol): erst mit
 /// Luft (1.3 × Breite/Höhe), dann knapp im Raum; unter diesen die freieste Lage (Abstand zu `obst` bis
 /// `clear`, Gleichstand → näher am Pol). Liegt jede Lage auf einem Hindernis, die mit der geringsten
@@ -1377,22 +1422,36 @@ const STAMP_CLEAR_MM: f64 = 2.0;
 fn place_stamp(ring: &[[f64; 2]], candidates: &[Vec2], obst: &super::stamp_place::Obstacles, clear: f64, w: f64, h: f64, free: bool) -> Option<Vec2> {
     let inside = |q: &Vec2, k: f64| crate::room_area::rect_in_ring(ring, q.x, q.y, k * w / 2.0, k * h / 2.0);
     if !obst.is_empty() {
-        for k in [1.3, 1.0] {
-            let mut best: Option<(f64, Vec2)> = None;
-            for q in candidates.iter().filter(|q| inside(q, k)) {
-                // [179] Wie `obst.clearance(..).min(clear)`, aber ohne ferne Hindernisse und ohne Lagen, die `best` nicht schlagen.
-                let d = obst.clearance_capped(*q, w / 2.0, h / 2.0, clear, best.map_or(0.0, |(b, _)| b));
-                if d > 0.0 && best.is_none_or(|(b, _)| d > b) {
-                    best = Some((d, *q));
-                    // Mehr als `clear` zählt nicht: keine spätere Lage schlägt das (strikt grösser).
-                    if d >= clear {
-                        break;
+        // Beste freie Lage unter `cands` (grösster Abstand, Gleichstand → die frühere).
+        let free_pass = |cands: &[Vec2]| -> Option<Vec2> {
+            for k in [1.3, 1.0] {
+                let mut best: Option<(f64, Vec2)> = None;
+                for q in cands.iter().filter(|q| inside(q, k)) {
+                    // [179] Wie `obst.clearance(..).min(clear)`, aber ohne ferne Hindernisse und ohne Lagen, die `best` nicht schlagen.
+                    let d = obst.clearance_capped(*q, w / 2.0, h / 2.0, clear, best.map_or(0.0, |(b, _)| b));
+                    if d > 0.0 && best.is_none_or(|(b, _)| d > b) {
+                        best = Some((d, *q));
+                        // Mehr als `clear` zählt nicht: keine spätere Lage schlägt das (strikt grösser).
+                        if d >= clear {
+                            break;
+                        }
                     }
                 }
+                if let Some((_, q)) = best {
+                    return Some(q);
+                }
             }
-            if let Some((_, q)) = best {
-                return Some(q);
-            }
+            None
+        };
+        if let Some(q) = free_pass(candidates) {
+            return Some(q);
+        }
+        // [256] Das 24er-Raster trifft schmale Lücken zwischen Linien nicht (Musterhaus komplex DG „Schlafen“: 1.6 m zwischen
+        // Gaubenkante und Achse, Raster 0.25 m): Lagen aus den Hindernis-Koordinaten (Stempel stösst an, oder mittig in der
+        // Lücke) vor jedem Verkleinern oder Überdecken.
+        let refined = gap_candidates(ring, obst, candidates.first().copied(), w, h, clear * 0.05);
+        if let Some(q) = free_pass(&refined) {
+            return Some(q);
         }
         if free {
             return None;
@@ -2008,7 +2067,7 @@ pub fn plan_domains_buf(p: &Project, a: &PlanArgs) -> Result<Vec<u8>, String> {
     merge_marks(&mut bounds, &marks);
     let mut w = crate::plan::buf::Writer::new(true);
     w.post = super::extras::post_for(p, a);
-    let (under, violations) = extras_of(p, a);
+    let (under, violations) = extras_of(&c);
     group_refs(&mut w, &under);
     apply_voids(p, a, &mut d);
     merge_wall_bands(&mut d);
@@ -2029,7 +2088,8 @@ pub fn plan_domains_buf(p: &Project, a: &PlanArgs) -> Result<Vec<u8>, String> {
 
 /// Schatten/Baurecht (unterste Gruppe, mit Strichmuster-Kennungen) und Verstösse (oberste); nur
 /// beim projektglobalen Aufruf (`global`).
-fn extras_of(p: &Project, a: &PlanArgs) -> (Vec<(Primitive, u32)>, Vec<Primitive>) {
+fn extras_of(c: &Ctx) -> (Vec<(Primitive, u32)>, Vec<Primitive>) {
+    let (p, a) = (c.p, c.a);
     if a.global {
         // [66] Baurecht (Parzelle, Baubereich, Verstösse) gehört zur Vermessung: ausgeblendete Kategorie „01" ⇒ ohne.
         let site = crate::standards::derived_visible(p, super::extras::SITE_CATEGORY, |k| a.show.contains(k));
@@ -2039,10 +2099,42 @@ fn extras_of(p: &Project, a: &PlanArgs) -> (Vec<(Primitive, u32)>, Vec<Primitive
         }
         // [180] Sonnenschatten auf der Klasse „Schatten".
         let sun_when = a.sun_when.filter(|_| crate::standards::derived_visible(p, crate::standards::SHADOW_CATEGORY, |k| a.show.contains(k)));
-        super::extras::site_and_shadow(p, &a.floor, sun_when, a.scale, site)
+        let (under, violations) = super::extras::site_and_shadow(p, &a.floor, sun_when, a.scale, site);
+        (cut_site_lines(c, under), violations)
     } else {
         (Vec::new(), Vec::new())
     }
+}
+
+/// [256] Parzellengrenze und Baubereich setzen vor Masszahlen und Texten der Zeichnungen aus (die gestrichelte Baulinie lief
+/// im Wettbewerb durch „2.69“, „1.20“, „20.39“): ihre Linien werden um deren Rechtecke (0.5 mm Papier Rand) gekürzt, das
+/// Strichmuster einer Grenze bleibt dasselbe (gleiche Kennung).
+fn cut_site_lines(c: &Ctx, under: Vec<(Primitive, u32)>) -> Vec<(Primitive, u32)> {
+    if !under.iter().any(|(q, _)| matches!(q, Primitive::Line { cls, .. } if cls == super::extras::SITE_PARCEL_CLS || cls == super::extras::SITE_ALLOWED_CLS)) {
+        return under;
+    }
+    let o = c.drawn_obstacles();
+    if o.is_empty() {
+        return under;
+    }
+    let pad = 0.5 * c.a.scale / 1000.0;
+    let mut out = Vec::with_capacity(under.len());
+    for (q, r) in under {
+        match &q {
+            Primitive::Line { a, b, cls, .. } if cls == super::extras::SITE_PARCEL_CLS || cls == super::extras::SITE_ALLOWED_CLS => {
+                for [p0, p1] in o.cut_out([a.x, a.y], [b.x, b.y], pad) {
+                    let mut piece = q.clone();
+                    if let Primitive::Line { a, b, .. } = &mut piece {
+                        *a = Vec2 { x: p0[0], y: p0[1] };
+                        *b = Vec2 { x: p1[0], y: p1[1] };
+                    }
+                    out.push((piece, r));
+                }
+            }
+            _ => out.push((q, r)),
+        }
+    }
+    out
 }
 
 /// Eine Gruppe aus Primitiven mit Strichmuster-Kennung.
@@ -2162,7 +2254,7 @@ fn assemble_cached(c: &Ctx, revs: &crate::document::Revs, cc: &mut super::cache:
         // [204] Ausmass der Bauteile (ohne Schnittmarken, Zeichnungen, Kontext) fürs Einpassen beim Öffnen.
         let house = b.get();
         merge_marks(&mut b, &marks);
-        let (under, violations) = extras_of(c.p, c.a);
+        let (under, violations) = extras_of(c);
         let extra = super::extras::extra_bounds(c.p, &under, |k| c.shown(k));
         apply_voids(c.p, c.a, &mut d);
         merge_wall_bands(&mut d);
@@ -2720,6 +2812,86 @@ mod tests {
         p.rooms.as_mut().unwrap().iter_mut().find(|r| r.id == id).unwrap().stamp_anchor = Some(Vec2 { x: 53.5, y: 52.5 });
         let (_, top, mask) = find(&p);
         assert!(!top && !mask);
+    }
+
+    /// [256] Lücke zwischen zwei Linien, die das 24er-Raster verfehlt (komplex DG „Schlafen“: 1.6 m zwischen Gaubenkante und
+    /// Achse): der Stempel rückt in die Lücke, statt auf 80 % zu schrumpfen oder Linien zu überdecken. Passt er in voller Schrift
+    /// nicht ganz hinein, verkleinert er nur auf 90 % (Zwischenstufe), nicht gleich auf 80 %.
+    #[test]
+    fn raumstempel_rueckt_in_luecke_statt_zu_schrumpfen() {
+        let ring = [[0.0, 0.0], [6.0, 0.0], [6.0, 4.0], [0.0, 4.0]];
+        let pole = Vec2 { x: 3.0, y: 2.0 };
+        let cands = stamp_candidates(&ring, pole);
+        let clear = 0.2;
+        let (w, h) = (1.6, 1.0);
+        let wall = |x: f64, o: &mut super::super::stamp_place::Obstacles| o.seg([x, -1.0], [x, 5.0]);
+        // Lücke 1.65 m: Stempel 1.6 m; die Rasterlage (Mitte 1.875) lässt die Linie bei 2.65 schneiden.
+        let mut o = super::super::stamp_place::Obstacles::default();
+        wall(1.0, &mut o);
+        wall(2.65, &mut o);
+        wall(4.0, &mut o);
+        wall(5.5, &mut o);
+        let q = place_stamp(&ring, &cands, &o, clear, w, h, true).expect("Lücke gefunden");
+        assert!(o.clearance(q, w / 2.0, h / 2.0) > 0.0, "frei: {q:?}");
+        // Ganzer Stempel in Schrift: Lücke 1.65 m, Stempel in voller Schrift 1.7 m breit, in 90 % passt er.
+        let name = doc_from_text("Schlafen");
+        let extra = || vec![StampLine::plain("35.2 m²".into(), Align::Left)];
+        let (w100, _) = stamp_size_m(&name, &extra(), ROOM_STAMP_PT, 100.0);
+        let (w90, _) = stamp_size_m(&name, &extra(), ROOM_STAMP_PT * ROOM_STAMP_MID, 100.0);
+        let gap = (w100 + w90) / 2.0;
+        let mut o = super::super::stamp_place::Obstacles::default();
+        // Linien im Abstand `gap` über den ganzen Raum: nirgends passt die volle Schrift, überall 90 %.
+        let mut x = 0.4;
+        while x < 6.0 {
+            wall(x, &mut o);
+            x += gap;
+        }
+        let place = |w: f64, h: f64, free: bool| place_stamp(&ring, &cands, &o, clear, w, h, free);
+        let (e, pt, _, at) = fit_room_stamp(&name, None, extra(), ROOM_STAMP_PT, 100.0, &place);
+        let q = at.expect("Lage");
+        let (w, h) = stamp_size_m(&name, &e, pt, 100.0);
+        assert!(o.clearance(q, w / 2.0, h / 2.0) > 0.0, "frei, ohne Überdeckung: {q:?}");
+        assert!((pt / ROOM_STAMP_PT - ROOM_STAMP_MID).abs() < 1e-9 && e.len() == 1, "90 %: {pt} pt, {} Zeilen", e.len());
+        // Reicht die Lücke für volle Schrift (mit Spiel), bleibt es bei 100 %.
+        let mut o = super::super::stamp_place::Obstacles::default();
+        wall(1.0, &mut o);
+        wall(1.0 + w100 + 0.05, &mut o);
+        let place = |w: f64, h: f64, free: bool| place_stamp(&ring, &cands, &o, clear, w, h, free);
+        let (_, pt, _, at) = fit_room_stamp(&name, None, extra(), ROOM_STAMP_PT, 100.0, &place);
+        assert!(at.is_some() && pt == ROOM_STAMP_PT, "volle Schrift: {pt}");
+    }
+
+    /// [256] Die Baulinie (Parzelle, zulässige Fläche) setzt vor Texten und Masszahlen der Zeichnungen aus: vorher lief sie
+    /// durch die Zahlen der Aussenbemassung (Wettbewerb EG 1:100, „2.69“ / „20.39“).
+    #[test]
+    fn baulinie_setzt_vor_masszahlen_aus() {
+        let mut p = sample();
+        p.site_rules = Some(serde_json::from_value(serde_json::json!({"parcel": [{"x": -30, "y": -30}, {"x": 40, "y": -30}, {"x": 40, "y": 40}, {"x": -30, "y": 40}], "defaultSetback": 3.0})).unwrap());
+        let t = serde_json::json!({ "floor": "eg", "show": ["20", "60", "80", "01"], "grey": [], "scale": 100, "global": true }).to_string();
+        let a = PlanArgs::parse(1.0, &t).unwrap();
+        let lines = |p: &Project| {
+            let c = Ctx::new(p, &a);
+            extras_of(&c).0.into_iter().filter_map(|(q, r)| match q { Primitive::Line { a, b, cls, .. } if cls == super::super::extras::SITE_ALLOWED_CLS => Some((a, b, r)), _ => None }).collect::<Vec<_>>()
+        };
+        let before = lines(&p);
+        assert!(!before.is_empty());
+        // Text auf der linken zulässigen Kante (x = -27): die Kante ist unterbrochen, nichts liegt im Textrechteck.
+        let text: Drawing2D = serde_json::from_value(serde_json::json!({ "id": "kt", "type": "drawing2d", "levelId": "eg", "categoryCode": "80",
+            "geom": { "shape": "text", "at": { "x": -27.1, "y": 5.0 }, "text": "2.69", "height": 0.25, "angle": 0.0 } })).unwrap();
+        p.drawings2d.push(text);
+        let after = lines(&p);
+        assert!(after.len() > before.len(), "Linie geteilt: {} → {}", before.len(), after.len());
+        let w = crate::text_layout::text_width_em("2.69", false) * 0.25;
+        let inside = |v: Vec2| v.x > -27.1 && v.x < -27.1 + w && v.y > 5.0 - 0.06 && v.y < 5.0 + 0.23;
+        for (a, b, _) in &after {
+            for k in 0..=20 {
+                let f = k as f64 / 20.0;
+                let m = Vec2 { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f };
+                assert!(!inside(m), "Linie im Text: {m:?}");
+            }
+        }
+        // Die Kennung des Strichmusters bleibt (eine Grenze, ein Muster).
+        assert!(after.iter().all(|(_, _, r)| *r >= 2), "Kennung");
     }
 
     /// [157] Schnittführung quer durch den Raum: der Stempel steht neben der strichpunktierten Linie, nicht
