@@ -48,6 +48,8 @@ describe("Georeferenzierter Export: alle Entitäten im LV95-Rahmen", () => {
         for (const [cx, cy] of [[10, 20], [11, 21], [13, 23], [14, 24]]) {
           // ELLIPSE 11/21: Hauptachse als Vektor zur Mitte ([169]), kein Lagepunkt.
           if (e.type === "ELLIPSE" && cx === 11) continue;
+          // MTEXT 11/21: Richtungsvektor der X-Achse des Texts (AutoCAD-Referenz), kein Lagepunkt ([200] MTEXT).
+          if (e.type === "MTEXT" && cx === 11) continue;
           const xs = nums(e, cx);
           const ys = nums(e, cy);
           for (let i = 0; i < Math.min(xs.length, ys.length); i++) {
