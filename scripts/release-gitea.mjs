@@ -89,11 +89,10 @@ async function main() {
   // Prüfsummen mit denen, die schon am Release hängen (andere Plattform), zusammenführen.
   const prevSums = (rel.assets ?? []).find((x) => x.name === "SHA256SUMS.txt");
   if (prevSums && !dryRun) {
-    const txt = await (await fetch(prevSums.browser_download_url, { headers })).text();
-    for (const line of txt.split("\n")) {
-      const m = /^([0-9a-f]{64})\s+(.+)$/.exec(line.trim());
-      if (m && !(m[2] in sums)) sums[m[2]] = m[1];
-    }
+    // [268] Nicht lesbar: abbrechen statt die Prüfsummen der anderen Plattform stillschweigend zu verlieren.
+    const txt = await lib.fetchExisting(fetch, prevSums.browser_download_url, headers);
+    if (txt === null) throw new Error(`SHA256SUMS.txt hängt am Release, liess sich aber nicht laden (${prevSums.browser_download_url})`);
+    for (const [name, hex] of Object.entries(lib.parseSums(txt))) if (!(name in sums)) sums[name] = hex;
   }
   await uploadAsset(rel, "SHA256SUMS.txt", Buffer.from(lib.sha256sums(sums)));
 
@@ -112,7 +111,9 @@ async function main() {
     return;
   }
   const fixed = await ensureRelease("latest", { draft: false, prerelease: false, body: "Updater-Manifest (latest.json, versions.json).", target: "master" });
-  const oldVersions = await fetch(lib.assetUrl("latest", "versions.json")).then((r) => (r.ok ? r.json() : []), () => []);
+  // [268] Nur „gibt es noch nicht“ (404) zählt als leerer Verlauf; Netz-/Serverfehler brechen ab, statt ihn zu überschreiben.
+  const versionsTxt = await lib.fetchExisting(fetch, lib.assetUrl("latest", "versions.json"));
+  const oldVersions = versionsTxt === null ? [] : JSON.parse(versionsTxt);
   const versions = lib.mergeVersions(oldVersions, { version, tag, pub_date: pubDate, notes, dmg: a.dmg });
   await uploadAsset(fixed, "latest.json", Buffer.from(JSON.stringify(latest, null, 2) + "\n"));
   await uploadAsset(fixed, "versions.json", Buffer.from(JSON.stringify(versions, null, 2) + "\n"));

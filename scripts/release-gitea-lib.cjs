@@ -69,4 +69,26 @@ function mergeVersions(existing, entry, max = 30) {
   return [entry, ...rest].slice(0, max);
 }
 
-module.exports = { REPO, HOST, tagFor, isPrerelease, assetUrl, classifyAssets, sha256sums, latestManifest, mergeVersions };
+/**
+ * [268] Vorhandenen Release-Anhang lesen: Text, `null` nur wenn es ihn nicht gibt (404). Jeder andere Fehler (Netz, 5xx,
+ * Proxy) wirft — sonst überschriebe `--publish` versions.json mit nur der neuen Version bzw. fielen die Prüfsummen der
+ * anderen Plattform aus SHA256SUMS.txt.
+ */
+async function fetchExisting(fetchFn, url, headers) {
+  const res = await fetchFn(url, headers ? { headers } : undefined);
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`GET ${url}: ${res.status} ${await res.text().catch(() => "")}`.trim());
+  return res.text();
+}
+
+/** SHA256SUMS.txt lesen: {name: hex}; Zeilen in anderem Format werden übergangen. */
+function parseSums(txt) {
+  const out = {};
+  for (const line of String(txt).split("\n")) {
+    const m = /^([0-9a-f]{64})\s+(.+)$/.exec(line.trim());
+    if (m) out[m[2]] = m[1];
+  }
+  return out;
+}
+
+module.exports = { REPO, HOST, tagFor, isPrerelease, assetUrl, classifyAssets, sha256sums, latestManifest, mergeVersions, fetchExisting, parseSums };
