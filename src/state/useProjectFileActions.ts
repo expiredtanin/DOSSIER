@@ -519,7 +519,7 @@ export function useProjectFileActions(
   // Startzustand, s. state/projectSlice.ts).
   const onNewProjectFromSample = () => guardDiscard(() => {
     releaseCurrentProjectLock();
-    const next = withStandards(structuredClone(sampleProject));
+    const next = withStandards(structuredClone(sampleProject), "de");
     getState().loadProject(next);
     lastSavedProjectRef.current = next;
   });

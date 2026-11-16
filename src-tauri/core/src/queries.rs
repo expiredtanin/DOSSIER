@@ -219,12 +219,14 @@ pub fn run_root(lk: &crate::document::Lookup, name: &str, text: &str) -> Result<
         "penRebakeOps" => json(&crate::pens::rebake_ops(root)),
         "penDeleteOps" => json(&crate::pens::delete_pen_ops(root, text)),
         // Standard-Bibliothek ([100]–[102], `standards.rs`): fehlende Standard-Ressourcen als Ops.
-        "standardsMergeOps" => json(&crate::standards::merge_ops(root)),
+        "standardsMergeOps" => json(&crate::standards::merge_ops_in(root, crate::standards::Lang::parse(text))),
         // „Standards aktualisieren" ([109]): Abweichungen vom heutigen Standard / Ops für die gewählten (`text` = JSON-Liste `"<Liste>:<id>"`).
-        "standardsUpdatePlan" => json(&crate::standards::update_plan(root)),
+        "standardsUpdatePlan" => json(&crate::standards::update_plan(root, crate::standards::Lang::parse(text))),
         "standardsUpdateOps" => {
-            let sel: Vec<String> = serde_json::from_str(text).map_err(|e| format!("standardsUpdateOps: {e}"))?;
-            json(&crate::standards::update_ops(root, &sel))
+            // [264] `text` = `{"selected": [...], "lang": "de"|"en"}` (Sprache der anzuhängenden Standards).
+            let a: serde_json::Value = serde_json::from_str(text).map_err(|e| format!("standardsUpdateOps: {e}"))?;
+            let sel: Vec<String> = serde_json::from_value(a["selected"].clone()).map_err(|e| format!("standardsUpdateOps: {e}"))?;
+            json(&crate::standards::update_ops(root, &sel, crate::standards::Lang::parse(a["lang"].as_str().unwrap_or(""))))
         }
         "penSeedOps" => {
             let a: serde_json::Value = serde_json::from_str(text).map_err(|e| format!("penSeedOps: {e}"))?;

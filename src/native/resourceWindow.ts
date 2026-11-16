@@ -27,6 +27,7 @@ import type { Project } from "../model/types";
 import { projectDelta } from "./projectDelta";
 import type { ResourceManagerHandlers, TabId } from "../ui/ResourceManager";
 import { BORDERLESS_WINDOW_CHROME } from "./windowChrome";
+import { t } from "../i18n";
 
 /** Fenster-Label des Ressourcen-Fensters (für emitTo/getByLabel). */
 const RESOURCE_WINDOW_LABEL = "resources";
@@ -51,7 +52,7 @@ export async function openResourceWindowNative(initialTab?: TabId): Promise<void
     "index.html?window=resources" + (initialTab ? `&tab=${encodeURIComponent(initialTab)}` : "");
   new WebviewWindow(RESOURCE_WINDOW_LABEL, {
     url,
-    title: "Ressourcen — dossier",
+    title: `${t("resources.title")} — dossier`,
     width: 780,
     height: 660,
     minWidth: 480,

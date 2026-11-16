@@ -19,6 +19,7 @@ import type { LayoutState } from "../panels/types";
 import type { ThemeMode } from "../theme/themeMode";
 import { BORDERLESS_WINDOW_CHROME } from "./windowChrome";
 import { useWindowBridgeHost, type WindowHandlers } from "./windowBridge";
+import { t } from "../i18n";
 
 const SETTINGS_WINDOW_LABEL = "settings";
 
@@ -63,7 +64,7 @@ export async function openSettingsWindowNative(): Promise<void> {
   }
   new WebviewWindow(SETTINGS_WINDOW_LABEL, {
     url: "index.html?window=settings",
-    title: "Einstellungen — dossier",
+    title: `${t("settings.title")} — dossier`,
     width: 520,
     height: 640,
     minWidth: 420,

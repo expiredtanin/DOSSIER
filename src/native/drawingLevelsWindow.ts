@@ -21,6 +21,7 @@ import type { DrawingLevel } from "../model/types";
 import type { DisplayMode } from "../panels/types";
 import { BORDERLESS_WINDOW_CHROME } from "./windowChrome";
 import { useWindowBridgeHost, type WindowHandlers } from "./windowBridge";
+import { t } from "../i18n";
 
 const DRAWING_LEVELS_WINDOW_LABEL = "drawing-levels";
 
@@ -51,7 +52,7 @@ export async function openDrawingLevelsWindowNative(): Promise<void> {
   }
   new WebviewWindow(DRAWING_LEVELS_WINDOW_LABEL, {
     url: "index.html?window=drawing-levels",
-    title: "Zeichnungsebenen — dossier",
+    title: `${t("nav.drawingLevels")} — dossier`,
     width: 340,
     height: 560,
     minWidth: 260,
