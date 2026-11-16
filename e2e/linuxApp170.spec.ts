@@ -250,3 +250,55 @@ test("Autosave: nach kill -9 bietet der nächste Start die ungesicherte Arbeit a
   await expect(elementRows(again.page)).toHaveCount(3);
   await close(again);
 });
+
+// [268] Externe Adressen: `window.open` und Navigation erzeugen KEIN neues Fenster, https geht an `shell.openExternal`
+// (hier im Hauptprozess abgefangen, sonst startete der Test einen Browser), fremde Navigation bleibt aus.
+test("Externe Links: kein Kindfenster, shell.openExternal für https, Navigation bleibt in der App", async () => {
+  const r = await launch();
+  const { page, app } = r;
+  await expect(page.getByRole("button", { name: /Neues Projekt/ }).first()).toBeVisible({ timeout: 60_000 });
+  await app.evaluate(({ shell }) => {
+    const g = globalThis as unknown as { __opened: string[] };
+    g.__opened = [];
+    shell.openExternal = (async (url: string) => {
+      g.__opened.push(url);
+    }) as typeof shell.openExternal;
+  });
+  const windows = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length);
+  const opened = () => app.evaluate(() => (globalThis as unknown as { __opened: string[] }).__opened);
+  expect(await windows()).toBe(1);
+  const appUrl = page.url();
+
+  // Wie `openExternalUrl` (src/native/blender.ts) ausserhalb von Tauri.
+  await page.evaluate(() => void window.open("https://example.org/a", "_blank", "noopener,noreferrer"));
+  await expect.poll(opened).toEqual(["https://example.org/a"]);
+  await page.evaluate(() => void window.open("file:///etc/passwd"));
+  await page.evaluate(() => void window.open("http://example.org/unsicher"));
+  await page.evaluate(() => void window.open("https://example.org/b")); // ohne noopener
+  await expect.poll(opened).toEqual(["https://example.org/a", "https://example.org/b"]);
+  expect(await windows()).toBe(1);
+
+  // Navigation des App-Fensters auf fremde Adressen: gesperrt (https → System-Browser), Seite bleibt.
+  await page.evaluate(() => {
+    location.href = "https://example.org/nav";
+  });
+  await expect.poll(opened).toContain("https://example.org/nav");
+  await page.evaluate(() => {
+    location.href = "file:///etc/passwd";
+  });
+  await page.waitForTimeout(500);
+  expect(page.url()).toBe(appUrl);
+  expect(await windows()).toBe(1);
+  expect((await opened()).filter((u) => u.startsWith("file:") || u.startsWith("http:"))).toEqual([]);
+  // Die App ist unverändert da (über den Hauptprozess geprüft: Playwright wartet nach einer abgebrochenen Navigation
+  // auf deren Ende und würde den Locator-Aufruf hängen lassen).
+  const state = await app.evaluate(async ({ BrowserWindow }) => {
+    const wc = BrowserWindow.getAllWindows()[0].webContents;
+    return { url: wc.getURL(), text: (await wc.executeJavaScript("document.body.innerText")) as string };
+  });
+  expect(state.url).toBe(appUrl);
+  // Chromium meldet den Versuch auf file:// selbst als Konsolenfehler — erwartet, hier entfernen, den Rest prüft close().
+  r.errors = r.errors.filter((e) => !/Not allowed to load local resource: file:\/\/\/etc\/passwd/.test(e));
+  expect(state.text).toMatch(/Neues Projekt|New project/);
+  await close(r);
+});
