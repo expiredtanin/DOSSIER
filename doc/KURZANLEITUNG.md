@@ -116,7 +116,8 @@ Im Beispiel sind alle 7 Programmzeilen erfüllt (Toleranz 10 %).
 Das Panel **Flächenbilanz** zeigt die Kennzahlenleiste: GF, aGF, GV, AZ, ÜZ. Darunter der „Flächen- und
 Kennzahlen-Nachweis“ (HNF, NNF, VF, FF, KF; IVHB-Ziffern) mit **CSV** und **PDF**. Das Menü
 *Bearbeiten → Kennzahlen und Raumprogramm …* gibt dasselbe als Meldung. Beispielwerte aus dem Projekt „Wettbewerb“:
-GF 745 m², GV 2’234 m³, AZ 0.75, ÜZ 0.28.
+GF 745 m², GV 2’234 m³, AZ 0.75, ÜZ 0.28. Das GV (SIA 416) ist je Geschoss GF × Geschosshöhe plus der Dachraum unter
+Steildach und Gauben bis Oberkante Dach; Dachvorsprünge zählen nicht (das Wettbewerbsprojekt hat ein Flachdach, also keinen Dachraum).
 
 **Baurecht-Nachweis.** Die zulässigen Ziffern trägst du im Panel **Gelände** unter „Baurecht der Parzelle“ ein: **GFZ max.**,
 **AZ max.**, **BMZ max.**, **ÜZ max.**, **GZ min.** und **Fassadenhöhe max.** (zusätzlich zu „Gesamthöhe max.“); leer heisst

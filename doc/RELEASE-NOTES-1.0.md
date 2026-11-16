@@ -57,7 +57,10 @@ in `doc/KURZANLEITUNG.md`):
    Kamerafahrt, Begehen mit Kollision, 3D-Bild als PNG in Abgabeauflösung (`bild3d`). Rendering mit Blender/Cycles als Brücke;
    eingebauter Pathtracer als Vorschau.
 8. **Flächen und Kennzahlen.** Flächen nach SIA 416 / IVHB (HNF … GF, GFZ, AZ, BMZ, ÜZ), Raumbuch, Flächen- und Kennzahlen-Nachweis
-   als CSV und PDF; Kennzahlenleiste und Tabelle rechnen aus derselben Quelle.
+   als CSV und PDF; Kennzahlenleiste und Tabelle rechnen aus derselben Quelle. **GV nach SIA 416 inklusive Dachraum:** je Geschoss
+   GF × Geschosshöhe, dazu der Raum unter Steildach und Gauben bis Oberkante Dach (ohne Dachvorsprünge, Kniestock-Geschosse nur bis
+   zur Dachfläche); BMZ, Kosten je m³ GV, Baurecht-Nachweis, IFC-Mengen und Blatt-Tabellen zeigen denselben Wert. Freie Körper zählen
+   nur im reinen Massenmodell (ohne Geschossflächen).
 9. **Kostenschätzung grob.** Kennwert-Methode je eBKP-H-Hauptgruppe B–J (CHF/m³ GV oder CHF/m² GF), Honorare, Reserve, MwSt,
    Bandbreite; CSV/PDF und als lebendige Tabelle auf dem Blatt. **Die Kennwerte sind Beispielwerte (rund 800 CHF/m³ GV bzw.
    2'600 CHF/m² GF), keine offizielle Quelle; sie sind in der Tabelle als solche markiert.**

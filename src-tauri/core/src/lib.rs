@@ -27,6 +27,7 @@ pub mod site_proof;
 pub mod auto_dimensions;
 pub mod kennzahlen;
 pub mod flaechen;
+pub mod building_volume;
 pub mod room_program;
 pub mod area_report;
 pub mod rich_text;

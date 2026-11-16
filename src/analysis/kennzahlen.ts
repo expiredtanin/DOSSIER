@@ -2,8 +2,8 @@
 //
 //  • Flächen je Geschoss nach SIA 416 (GF = NGF + KF, NGF, HNF), Summe über das Gebäude — dieselben Zahlen
 //    wie die Flächentabelle ([225]: eine Quelle, `flaechen.rs`).
-//  • Gebäudevolumen (GV) aus den freien Körpern (Massenmodell); Abzugskörper zählen nicht mit,
-//    ihr Volumen wird abgezogen. Ohne freie Körper GF × Geschosshöhe wie die Flächentabelle ([206]).
+//  • Gebäudevolumen (GV) wie die Flächentabelle: Geschosse (GF × Geschosshöhe) plus Dachraum ([266]); nur im
+//    reinen Massenmodell (keine Geschossflächen) die freien Körper, Abzugskörper abgezogen ([206]).
 //  • AZ/ÜZ wie die IVHB-Ziffern der Tabelle mit ihren Vorgaben (aGF = NGF oberirdisch, aGbF), nur mit
 //    `project.parcelArea` oder der Parzellengrenze (`siteRules`).
 //  • Raumprogramm (`project.roomProgram`, Soll) gegen die gezeichneten Räume.
@@ -42,7 +42,7 @@ export interface Kennzahlen {
   hnf: number;
   /** Konstruktionsfläche (Σ). */
   kf: number;
-  /** Gebäudevolumen aus den freien Körpern (m³), Abzugskörper abgezogen; ohne Körper GF × Geschosshöhe. */
+  /** Gebäudevolumen (m³) wie die Flächentabelle: Geschosse + Dachraum, reines Massenmodell: freie Körper. */
   gv: number;
   /** Anrechenbare Gebäudefläche (IVHB aGbF, m²) = Zähler der ÜZ. */
   footprint: number;
