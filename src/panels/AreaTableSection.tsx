@@ -8,7 +8,7 @@
 
 import { useMemo, useState } from "react";
 import { t } from "../i18n";
-import { exportProjectName, areaReportToCsv, buildAreaReport, buildAreaReportPdf } from "../core";
+import { exportProjectName, areaReportToCsv, buildAreaReport, buildAreaReportPdf, isAreaReportEmpty } from "../core";
 import type { AgfBasis } from "../core";
 import { DEFAULT_AREA_INPUTS, ivhbOptionsOf, type AreaInputs } from "./areaInputs";
 import { downloadCsv } from "./downloadFile";
@@ -29,7 +29,18 @@ export function AreaTableSection() {
   const set = (patch: Partial<AreaInputs>) => setInputs((i) => ({ ...i, ...patch }));
   const stem = `${exportProjectName(project) || "projekt"}-flaechen`;
 
+  // [263] Leeres Projekt: kein Export von Nullen, sondern ein Hinweis (sonst sähe die Datei wie ein Ergebnis aus).
+  const emptyHint = () => {
+    if (!isAreaReportEmpty(project)) return false;
+    notify(t("areas.export.empty"));
+    return true;
+  };
+  const exportCsv = () => {
+    if (emptyHint()) return;
+    runWithAnonymityGate(project, [`${stem}.csv`], () => downloadCsv(`${stem}.csv`, areaReportToCsv(report)));
+  };
   const exportPdf = () => {
+    if (emptyHint()) return;
     runWithAnonymityGate(project, [`${stem}.pdf`], async () => {
       try {
         (await buildAreaReportPdf(report)).save(`${stem}.pdf`);
@@ -44,7 +55,7 @@ export function AreaTableSection() {
       <div className="balance-head">
         <span className="balance-section-label">{t("areas.title")}</span>
         <span className="area-actions">
-          <button type="button" className="balance-export" onClick={() => runWithAnonymityGate(project, [`${stem}.csv`], () => downloadCsv(`${stem}.csv`, areaReportToCsv(report)))}>
+          <button type="button" className="balance-export" onClick={exportCsv}>
             {t("areas.exportCsv")}
           </button>
           <button type="button" className="balance-export" onClick={exportPdf}>

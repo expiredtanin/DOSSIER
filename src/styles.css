@@ -5767,7 +5767,7 @@ body {
   display: grid;
   /* [263] Label-Spalte höchstens 42 %: ein langes Label („Strichmuster-Massstab“) presste sonst die
      Wert-Spalte auf 120 px, und die Quellen-Auswahl neben dem Zahlenfeld schrumpfte auf „e ▾“. */
-  grid-template-columns: minmax(80px, 42%) 1fr;
+  grid-template-columns: minmax(80px, 36%) 1fr;
   align-items: stretch;
   gap: 0;
   padding: 0;
@@ -5797,10 +5797,20 @@ body {
   min-width: 0;
   justify-content: space-between;
 }
-/* [263] Quellen-Auswahl neben einem Zahlenfeld: nie unter die Breite von „eigener Wert“ schrumpfen. */
+/* [263] Quellen-Auswahl neben einem Zahlenfeld: nie unter die Breite von „eigener Wert“ schrumpfen; dafür gibt das
+   Zahlenfeld nach (im 270-px-Panel ragte die Auswahl sonst rechts aus dem Panel: „eigener Wer“). */
+.attr-val > .attr-num {
+  flex: 0 1 auto;
+  min-width: 58px;
+}
+/* Das Drehfeld (Pfeile) frisst in dem schmalen Feld die Ziffern („0.3“); Eingabe per Tastatur/Mausrad bleibt. */
+.attr-val > input.attr-num[type="number"]::-webkit-inner-spin-button {
+  display: none;
+}
 .attr-val > .attr-num ~ .tb-dd-trigger {
   flex: 1 0 auto;
   min-width: 84px;
+  white-space: nowrap;
 }
 .attr-readonly {
   color: var(--label);
@@ -9551,3 +9561,41 @@ body {
 .floating-panel:focus {
   outline: none;
 }
+
+/* [263] Kurzanleitung (Hilfe-Menü): breiter Dialog, lesbarer Fliesstext, Bilder auf Dialogbreite. */
+.imp-dialog.quick-guide {
+  width: min(760px, 94vw);
+  max-height: 90vh;
+}
+.quick-guide-body {
+  display: block;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--label);
+  outline: none;
+}
+.quick-guide-body h2 { font-size: 18px; margin: 0 0 8px; }
+.quick-guide-body h3 { font-size: 15px; margin: 22px 0 6px; }
+.quick-guide-body h4 { font-size: 13px; margin: 14px 0 4px; }
+.quick-guide-body p,
+.quick-guide-body ul,
+.quick-guide-body ol,
+.quick-guide-body blockquote { margin: 0 0 10px; }
+.quick-guide-body ul,
+.quick-guide-body ol { padding-left: 22px; }
+.quick-guide-body li { margin-bottom: 3px; }
+.quick-guide-body blockquote {
+  padding: 6px 10px;
+  border-left: 3px solid var(--line);
+  background: var(--panel-2);
+  border-radius: 3px;
+}
+.quick-guide-body code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  background: var(--panel-2);
+  padding: 0 3px;
+  border-radius: 3px;
+}
+.quick-guide-body hr { border: none; border-top: 1px solid var(--line); margin: 16px 0; }
+.quick-guide-body img { display: block; max-width: 100%; height: auto; margin: 6px 0 12px; background: #fff; border: 1px solid var(--line); }

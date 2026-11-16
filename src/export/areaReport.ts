@@ -65,6 +65,12 @@ function areaCells(r: AreaRow): Cell[] {
   return [r.hnf, r.nnf, r.nf, r.vf, r.ff, r.ngf, r.kf, r.gf, r.agf].map((v) => num(v, 2)).concat(num(r.gv, 1));
 }
 
+/** [263] Ohne Bauteile (kein Raum, keine Fläche, kein Volumen) wäre der Nachweis nur Nullen: dann kein Export, sondern ein Hinweis. */
+export function isAreaReportEmpty(project: Project): boolean {
+  const { total, gv } = computeAreaTable(project);
+  return [total.hnf, total.nnf, total.vf, total.ff, total.kf, total.gf, total.agf, total.rooms, gv].every((v) => !(Math.abs(v) > 0));
+}
+
 /** Baut den Bericht aus dem Projekt. */
 export function buildAreaReport(project: Project, opts: AreaReportOptions = {}): AreaReport {
   const sections: ReportSection[] = [];

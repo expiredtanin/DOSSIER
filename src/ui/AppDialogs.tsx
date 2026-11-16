@@ -33,6 +33,7 @@ import { RenderDialogHost } from "./RenderDialog";
 import { CameraTourDialogHost } from "./CameraTourDialog";
 import { ImageExportDialogHost } from "./ImageExportDialog";
 import { ShortcutOverviewDialogHost } from "./ShortcutOverviewDialog";
+import { QuickGuideDialogHost } from "./QuickGuideDialog";
 import { PromptDialog } from "./PromptDialog";
 import { RecoverAutosaveDialog } from "./RecoverAutosaveDialog";
 import { BackupOfferDialog } from "./BackupOfferDialog";
@@ -176,6 +177,8 @@ export function AppDialogs(props: {
     <CameraTourDialogHost />
     {/* [210] Kürzel-Übersicht (Menü Hilfe) */}
     <ShortcutOverviewDialogHost />
+    {/* [263] Kurzanleitung (Menü Hilfe) */}
+    <QuickGuideDialogHost />
     {importState && (
       <ImportDialog
         fileName={importState.fileName}
