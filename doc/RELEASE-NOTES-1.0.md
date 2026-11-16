@@ -238,7 +238,7 @@ Geo-Proxy konfiguriert (`VITE_GEO_PROXY`, Büro-Server), laufen swisstopo/OSM-Ab
 4. **Lizenz — entschieden (16.11.):** AGPL-3.0-oder-später unverändert, Hinweis bleibt in den Notes.
 5. **macOS-Version/Hardware:** wird aus dem Mac-Durchlauf abgeleitet (WebGPU in der Webview bestimmt die kleinste Version); bis dahin «Apple Silicon, aktuelles macOS».
 6. **Linux — entschieden (16.11., Maintainer: «Linux-Prüfungen reichen»):** offiziell unterstützt (AppImage x86_64); Browser-Build nur zum Ausprobieren.
-7. **Halbfertiges — entschieden (16.11.):** bleibt sichtbar, aber als «Vorschau» gekennzeichnet (Pathtracing, Rendering mit Blender, Kamerafahrt/Video, Geist-Modus).
+7. **Halbfertiges — entschieden (16.11.):** bleibt sichtbar, aber als «Vorschau» gekennzeichnet (Pathtracing, Rendering mit Blender, Kamerafahrt/Video, Geist-Modus); umgesetzt mit [265] (Marke «Vorschau», Tooltip «Noch nicht fertig — Ergebnisse können abweichen»).
 8. **Kostenkennwerte — entschieden (16.11.):** Beispielwerte bleiben als Vorgabe, deutlich als «Beispielwerte, keine Richtwerte» markiert (wie heute).
 9. **Dateiformat — entschieden (16.11.):** Betas ohne Zusage; ab 1.0.0 öffnet jede 1.x-Version alle `.obp` aus 1.x (Migration beim Öffnen).
 10. **Beispielprojekt — entschieden (16.11.):** wird als fiktives Beispiel ausgeliefert und so benannt.

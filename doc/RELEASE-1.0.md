@@ -142,7 +142,7 @@ und Befunde in `TODO.md` eintragen.
 
 | # | Schritt auf dem Mac | Erwartet |
 |---|---|---|
-| 13.1 | **Pathtracer:** 3D-Reiter (Axonometrie), Darstellung „Pathtracing (Vorschau)“, Kamera drehen, Sonne ändern | Bild wird nach jeder Änderung neu und körnig, dann glatter; unten links „Pathtracing: N Samples · x/s“ zählt hoch, am Ende „(fertig)“; Fenster bleibt bedienbar; andere Darstellung zurück: normales Bild |
+| 13.1 | **Pathtracer:** 3D-Reiter (Axonometrie), Darstellung „Pathtracing“ (Marke „Vorschau“), Kamera drehen, Sonne ändern | Bild wird nach jeder Änderung neu und körnig, dann glatter; unten links „Pathtracing: N Samples · x/s“ zählt hoch, am Ende „(fertig)“; Fenster bleibt bedienbar; andere Darstellung zurück: normales Bild |
 | 13.2 | **Rendering mit Blender (Cycles):** Befehl `rendering`, Blender-Pfad, Kamera „Südost“, Start; danach „Als .blend speichern“ | Fortschritt „Sample x von y“, Abbrechen geht, Bild erscheint und lässt sich speichern bzw. ins Layout einsetzen; Berechtigungen (Temp-Ordner), Metal-GPU |
 | 13.3 | **Volumen → Bauteile:** Körper `koerper` → Quader, `koerperinbauteile`, ⌘Z | Wände/Decken/Dach je Geschoss, eine Meldung, ⌘Z nimmt alles in einem Schritt zurück |
 | 13.4 | **Hilfslinien/Zuschnitt (Plakat):** Mappe → Layout erstellen → Plakat A1 quer; Bild einsetzen, Zuschnitt in den Prozentfeldern, Bild verschieben | Raster-Hilfslinien nur am Bildschirm (nicht im PDF), Kopfzeile mit Kennwort-Feld, Bild-Zuschnitt und dpi-Anzeige stimmen, Rahmen bleibt im Blatt |

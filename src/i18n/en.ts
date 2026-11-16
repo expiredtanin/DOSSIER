@@ -98,7 +98,7 @@ export const en: Record<TranslationKey, string> = {
   "display.style.textured": "Textured",
   "display.style.wireframe": "Wireframe",
   "display.style.hidden": "Hidden line",
-  "display.style.pathtrace": "Path tracing (preview)",
+  "display.style.pathtrace": "Path tracing",
   "display.group.lines": "Lines",
   "display.group.faces": "Surfaces",
   "display.group.render": "Rendering",
@@ -4573,6 +4573,9 @@ export const en: Record<TranslationKey, string> = {
   "settings.language.auto": "Automatic (system)",
   "settings.language.de": "Deutsch",
   "settings.language.en": "English",
+  // [265] Preview marking of unfinished features
+  "preview.badge": "Preview",
+  "preview.tip": "Not finished yet — results may differ",
   "settings.update.onStart": "Check for updates on startup",
   "settings.update.onStart.hint": "Off: Dossier does not contact the update server on its own (privacy). “Check for updates” and the version history (loaded when you open this tab) only ask when you click or open the tab.",
 };

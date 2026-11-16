@@ -9,6 +9,7 @@ import { playCameraTour } from "../state/cameraTourActions";
 import { openCameraTourDialog } from "../state/cameraTourDialogHook";
 import { getState, useStore } from "../state/appStore";
 import { fromIds } from "../state/selection";
+import { PreviewBadge, previewTitle } from "../ui/PreviewBadge";
 
 export function CamerasGroup() {
   const cameras = useStore((s) => s.project.cameras);
@@ -17,15 +18,17 @@ export function CamerasGroup() {
   const list = cameras ?? [];
   return (
     <section className="nav-group" data-testid="cameras-group">
-      <header className="nav-group-head">
+      <header className="nav-group-head" style={{ flexWrap: "wrap" }}>
         <span className="nav-group-title">{t("camera.title")}</span>
-        <span className="nav-group-actions">
+        <span className="nav-group-actions" style={{ flexWrap: "wrap", justifyContent: "flex-end" }}>
           {/* [246] Kamerafahrt: Abspielen mit den zuletzt gewählten Einstellungen; „Video …" öffnet den Dialog */}
-          <button className="nav-add" style={{ display: "inline-flex", padding: "1px 5px" }} title={t("tour.buttonHint")} data-testid="camera-tour" disabled={list.length === 0} onClick={() => void playCameraTour()}>
+          <button className="nav-add nav-add-text" style={{ display: "inline-flex", padding: "1px 5px" }} title={previewTitle(t("tour.buttonHint"))} data-testid="camera-tour" disabled={list.length === 0} onClick={() => void playCameraTour()}>
             ▶ {t("tour.button")}
+            <PreviewBadge />
           </button>
-          <button className="nav-add" style={{ display: "inline-flex", padding: "1px 5px" }} title={t("tour.videoButtonHint")} data-testid="camera-tour-video" disabled={list.length === 0} onClick={() => openCameraTourDialog()}>
+          <button className="nav-add nav-add-text" style={{ display: "inline-flex", padding: "1px 5px" }} title={previewTitle(t("tour.videoButtonHint"))} data-testid="camera-tour-video" disabled={list.length === 0} onClick={() => openCameraTourDialog()}>
             {t("tour.videoButton")}
+            <PreviewBadge />
           </button>
           <button className="nav-add" style={{ display: "inline-flex", padding: "1px 5px" }} title={t("camera.createFromView")} data-testid="camera-create" onClick={() => createCameraFromView()}>
             +

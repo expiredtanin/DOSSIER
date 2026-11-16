@@ -22,6 +22,7 @@ import { APP_VERSION } from "../ui/TopBar";
 import { BUILD_INFO } from "../update/buildInfo";
 import type { View3d, ViewType } from "../model/viewTypes";
 import type { SelectionActionId } from "../state/selectionActions";
+import { withPreview } from "../ui/PreviewBadge";
 
 /** Alle Aktionen, die die native Menüleiste auslösen kann. */
 export interface NativeAppMenuHandlers {
@@ -446,7 +447,7 @@ export function useNativeAppMenu(
             action: () => openImageExportDialog(),
           }),
           await MenuItem.new({
-            text: t("menu.view.rendering"),
+            text: withPreview(t("menu.view.rendering")), // [265] natives Menü: nur Text, daher als Suffix
             action: () => openRenderDialog(),
           }),
         ],

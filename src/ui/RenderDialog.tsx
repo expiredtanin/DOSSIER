@@ -29,6 +29,7 @@ import { openExternalUrl } from "../native/blender";
 import { saveBinaryFile } from "../native/saveFile";
 import { runWithAnonymityGate } from "../state/anonymityGate";
 import { defaultTargetLayout, placeImageOnLayout } from "../state/layoutImageActions";
+import { PreviewBadge } from "./PreviewBadge";
 
 type SizeId = "hd" | "uhd" | "a4" | "a3" | "a2" | "custom";
 const SIZES: Record<Exclude<SizeId, "custom">, () => { width: number; height: number }> = {
@@ -301,7 +302,10 @@ export const RenderDialogHost = memo(function RenderDialogHost() {
     <div className="imp-overlay" onClick={() => !busy && close()}>
       <div ref={dialogRef} className="imp-dialog render-dialog" role="dialog" aria-modal="true" aria-label={t("render.title")} onClick={(e) => e.stopPropagation()}>
         <header className="imp-head">
-          <span className="imp-head-title">{t("render.title")}</span>
+          <span className="imp-head-title">
+            {t("render.title")}
+            <PreviewBadge />
+          </span>
           <button className="imp-close" onClick={close} aria-label={t("export.close")} disabled={busy}>
             ×
           </button>

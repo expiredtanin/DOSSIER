@@ -99,7 +99,7 @@ export const de = {
   "display.style.textured": "Texturiert",
   "display.style.wireframe": "Drahtgitter",
   "display.style.hidden": "Kanten",
-  "display.style.pathtrace": "Pathtracing (Vorschau)",
+  "display.style.pathtrace": "Pathtracing",
   "display.group.lines": "Linien",
   "display.group.faces": "Flächen",
   "display.group.render": "Rendern",
@@ -4587,6 +4587,9 @@ export const de = {
   "settings.language.auto": "Automatisch (System)",
   "settings.language.de": "Deutsch",
   "settings.language.en": "English",
+  // [265] Vorschau-Kennzeichnung unfertiger Funktionen
+  "preview.badge": "Vorschau",
+  "preview.tip": "Noch nicht fertig — Ergebnisse können abweichen",
   "settings.update.onStart": "Beim Start nach Updates suchen",
   "settings.update.onStart.hint": "Aus: Dossier nimmt von sich aus keinen Kontakt zum Update-Server auf (Datenschutz). «Nach Updates suchen» und der Versionsverlauf (beim Öffnen dieses Reiters) fragen nur auf deinen Klick bzw. Reiterwechsel.",
 } as const;
