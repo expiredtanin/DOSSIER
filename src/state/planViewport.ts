@@ -3,6 +3,16 @@
 // rechnet) an `useGripEditing`. Kein Zustand im Store: reiner Anzeige-Ausschnitt, ändert das Projekt nie.
 
 import type { MeshRect } from "../core";
+import type { DrawingLevelKind, ViewType } from "../model/types";
+
+/**
+ * [266] Ist eine Plan-Ansicht montiert (Grundriss, Schnitt, Ansicht, Zeichnung, Deckenspiegel, Blatt)? Dann gelten Einpassen,
+ * Zoom und Massstab der Oberleiste. Nur die 3D-Ansicht hat keine; Zeichnung und Deckenspiegel sind immer Plan.
+ * (Vorher nur im Geschoss-Grundriss: nach dem Kataster-Import oder im Schnitt war „Auf Plan einpassen“ gesperrt.)
+ */
+export function planViewMounted(kind: DrawingLevelKind, viewType: ViewType): boolean {
+  return viewType !== "perspektive" || kind === "drawing" || kind === "ceiling";
+}
 
 let current: MeshRect | null = null;
 const listeners = new Set<() => void>();

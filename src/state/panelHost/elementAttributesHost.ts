@@ -311,7 +311,15 @@ export function buildElementAttributesHost(c: FlatHostOpts) {
     // ── Raum-Attribute (nur bei selektiertem Raum) ─────────────────────────
     onSetRoomName: (name) => {
       // Raumnamen sind je Raum verschieden ⇒ bewusst nur das erste Element (das Feld ist bei Mehrfachauswahl gesperrt).
-      if (selection?.kind === "room") updateRoom(selection.id, { name });
+      if (selection?.kind !== "room") return;
+      // [266] Trägt der Stempel nur den alten Namen (so legt ihn der Befehl `raum` an), folgt er dem neuen Namen —
+      // sonst stünde im Plan weiter „Raum 1“. Ein eigener Stempel-Text bleibt.
+      const room = getState().project.rooms?.find((r) => r.id === selection.id);
+      const doc = room?.stampDoc;
+      const run = doc?.paragraphs.length === 1 && doc.paragraphs[0].runs.length === 1 ? doc.paragraphs[0].runs[0] : undefined;
+      if (room && doc && run && run.text === room.name) {
+        updateRoom(selection.id, { name, stampDoc: { ...doc, paragraphs: [{ ...doc.paragraphs[0], runs: [{ ...run, text: name }] }] } });
+      } else updateRoom(selection.id, { name });
     },
     onSetRoomSia: (category) => {
       if (selection?.kind === "room") patchAll("rooms", selection.id, { siaCategory: category });

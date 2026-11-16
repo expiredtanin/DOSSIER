@@ -4,6 +4,7 @@
 // zuvor ([121]), damit ein App-Render sie nicht neu zeichnet. Aufgerufen von `App.tsx` für die `TopBar`.
 
 import { isPlanKindActive } from "../state/viewTabs";
+import { planViewMounted } from "../state/planViewport";
 import { useMemo } from "react";
 import type { DrawingLevel, ModelViewOption, ViewType } from "../model/types";
 import { currentModelViewId, modelViewChoices } from "../state/modelViews";
@@ -204,7 +205,7 @@ export function useTopBarElements(opts: {
         detailEnabled={planActive || viewType === "perspektive" || (viewType === "grundriss" && (activeLevel.kind === "section" || activeLevel.kind === "elevation"))}
         scaleDenominator={scaleDenominator}
         onApplyScale={ev.applyScale}
-        zoomEnabled={planActive}
+        zoomEnabled={planViewMounted(activeLevel.kind, viewType)}
         onFit={ev.fitPlan}
         onFitSelection={ev.fitSelection}
         onZoom100={ev.zoomToApplied}

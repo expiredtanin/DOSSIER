@@ -635,3 +635,47 @@ fn default_step_count_regeln() {
     assert_eq!(default_step_count(0.1, 0.0), 2);
     assert_eq!(default_step_count(f64::NAN, 3.0), 2);
 }
+
+// [266] Lichter Raum aus Wandachsen: jede Kante um die halbe Dicke IHRER Wand nach innen, nicht um die mittlere
+// Dicke aller Wände (Aussenwand 34.5 cm + Innenwand 15 cm gab überall 13 cm: Räume ragten in die Aussenwand und
+// liessen Spalten an der Innenwand, GF = NGF + KF kam 2 % zu klein heraus).
+fn wseg(a: (f64, f64), b: (f64, f64), t: f64) -> WallSegment {
+    WallSegment { a: Vec2::new(a.0, a.1), b: Vec2::new(b.0, b.1), thickness: t }
+}
+
+#[test]
+fn room_offset_uses_thickness_of_own_wall() {
+    let walls = vec![
+        wseg((0.0, 0.0), (12.0, 0.0), 0.345),
+        wseg((12.0, 0.0), (12.0, 10.0), 0.345),
+        wseg((12.0, 10.0), (0.0, 10.0), 0.345),
+        wseg((0.0, 10.0), (0.0, 0.0), 0.345),
+        wseg((4.0, 0.0), (4.0, 10.0), 0.15),
+    ];
+    let h = 10.0 - 0.345;
+    let left = room_from_point_inside(Vec2::new(2.0, 5.0), &walls, 0.05, true).unwrap();
+    assert!((polygon_area(&left) - (4.0 - 0.1725 - 0.075) * h).abs() < 1e-9, "links {}", polygon_area(&left));
+    let right = room_from_point_inside(Vec2::new(8.0, 5.0), &walls, 0.05, true).unwrap();
+    assert!((polygon_area(&right) - (8.0 - 0.1725 - 0.075) * h).abs() < 1e-9, "rechts {}", polygon_area(&right));
+    // Alle Räume: Summe = Aussenmass − Wandflächen (12.345 × 10.345 − Aussenwände − Trennwand).
+    let rooms = detect_rooms(&walls, 0.05, 0.5, true);
+    assert_eq!(rooms.len(), 2);
+    let sum: f64 = rooms.iter().map(|r| polygon_area(r)).sum();
+    assert!((sum - (12.0 - 0.345 - 0.15) * h).abs() < 1e-9, "Summe {sum}");
+}
+
+#[test]
+fn room_offset_steps_where_collinear_walls_differ_in_thickness() {
+    // Unterkante aus zwei Wänden in einer Flucht: links 40 cm, rechts 20 cm; sonst 20 cm.
+    let walls = vec![
+        wseg((0.0, 0.0), (5.0, 0.0), 0.4),
+        wseg((5.0, 0.0), (10.0, 0.0), 0.2),
+        wseg((10.0, 0.0), (10.0, 4.0), 0.2),
+        wseg((10.0, 4.0), (0.0, 4.0), 0.2),
+        wseg((0.0, 4.0), (0.0, 0.0), 0.2),
+    ];
+    let r = room_from_point_inside(Vec2::new(5.0, 2.0), &walls, 0.05, true).unwrap();
+    let want = 4.9 * (3.9 - 0.2) + 4.9 * (3.9 - 0.1);
+    assert!((polygon_area(&r) - want).abs() < 1e-9, "Fläche {}", polygon_area(&r));
+    assert_eq!(r.len(), 6, "Absatz an der Stossstelle: {r:?}");
+}
