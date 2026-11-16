@@ -28,6 +28,7 @@
     "electron": "scripts/electron-shell.sh",
     "electron:pack": "node scripts/electron-pack.cjs",
     "test:linux-app": "node scripts/test-linux-app.mjs",
+    "release:gitea": "node scripts/release-gitea.mjs",
     "build:engine": "wasm-pack build src-tauri/render2d --release --target web --out-dir ../../src/engine/pkg --out-name render2d --no-default-features --features web",
     "build:engine3d": "wasm-pack build src-tauri/render3d --release --target web --out-dir ../../src/engine/pkg3d --out-name render3d --no-default-features --features web",
     "build:fileio": "wasm-pack build src-tauri/fileio --release --target web --out-dir ../../src/engine/pkgFileIo --out-name fileio --no-default-features --features web",

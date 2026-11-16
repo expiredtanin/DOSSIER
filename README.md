@@ -148,6 +148,12 @@ entstehen unsignierte Artefakte. Optionale Repository-Secrets:
 - Updater-Signatur: `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
   (passend zum `pubkey` in `tauri.conf.json`; ohne Schlüssel entfallen die Updater-Artefakte)
 
+**Release auf Gitea** ([30], ohne CI): Linux `npm run build && npm run electron:pack`, Mac `npm run tauri:build`, dann je
+`GITEA_TOKEN=… npm run release:gitea -- --dir <Ordner mit den Paketen>` (Linux: `release`, Mac: `src-tauri/target/release/bundle/dmg` und
+`…/bundle/macos`). Das legt einen **Entwurf** `v<version>` an bzw. ergänzt ihn (Anhänge gleichen Namens werden ersetzt, `SHA256SUMS.txt`
+über beide Plattformen); `--publish` veröffentlicht ihn und führt mit Mac-Updater-Paket samt `.sig` das Release `latest`
+(`latest.json`, `versions.json`) nach. `--dry-run` zeigt nur, was geschähe.
+
 Der Updater-Endpunkt in `tauri.conf.json` und der Versionsverlauf (`src/update/versionHistory.ts`) zeigen auf die Releases von
 `git.openbureau.ch/karim/dossier` (Release `latest` mit `latest.json`/`versions.json`; Entscheid Maintainer 16.11.: nur noch Gitea, kein GitHub, kein eigenes Standalone-Repo). Für Linux baut der Job `linux` ein AppImage
 (Electron, electron-builder, kein Secret nötig) und hängt es samt `SHA256SUMS-linux.txt` an dasselbe Release.
