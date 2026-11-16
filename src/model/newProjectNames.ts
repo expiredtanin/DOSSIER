@@ -18,6 +18,24 @@ function localizeLayers(layers: LayerCategory[]): LayerCategory[] {
   });
 }
 
+/** [264] Ressourcen der Vorlage (Linienstile, Schraffuren, Bauteile, Aufbauten, Typen), die der Kern nicht liefert. */
+const RESOURCE_LISTS = ["lineStyles", "hatches", "components", "wallTypes", "ceilingTypes", "roofTypes", "doorTypes", "windowTypes", "stairTypes"] as const;
+
+function localizeResources(project: Project): Partial<Project> {
+  const out: Record<string, unknown> = {};
+  const src = project as unknown as Record<string, { id: string; name: string }[] | undefined>;
+  for (const list of RESOURCE_LISTS) {
+    const items = src[list];
+    if (!items) continue;
+    out[list] = items.map((it) => {
+      const key = `newProject.res.${list}.${it.id}`;
+      const name = t(key);
+      return name === key ? it : { ...it, name };
+    });
+  }
+  return out as Partial<Project>;
+}
+
 /** Das Projekt mit Namen von Projekt, Geschossen/Schnitt/Ansicht und Ebenen in der aktuellen UI-Sprache. */
 export function withNewProjectNames(project: Project): Project {
   return {
@@ -29,5 +47,6 @@ export function withNewProjectNames(project: Project): Project {
       return name === key ? l : { ...l, name };
     }),
     layers: localizeLayers(project.layers),
+    ...localizeResources(project),
   };
 }

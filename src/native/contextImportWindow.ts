@@ -18,6 +18,7 @@
 import type { GeoAnchor } from "../ui/ContextImportDialog";
 import { BORDERLESS_WINDOW_CHROME } from "./windowChrome";
 import { useWindowBridgeHost, type WindowHandlers } from "./windowBridge";
+import { t } from "../i18n";
 
 const CONTEXT_IMPORT_WINDOW_LABEL = "context-import";
 
@@ -40,7 +41,7 @@ export async function openContextImportWindowNative(): Promise<void> {
   }
   new WebviewWindow(CONTEXT_IMPORT_WINDOW_LABEL, {
     url: "index.html?window=context-import",
-    title: "Standort importieren — dossier",
+    title: `${t("ctxImport.title")} — dossier`,
     width: 480,
     height: 680,
     minWidth: 400,

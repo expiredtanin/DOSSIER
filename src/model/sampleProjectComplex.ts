@@ -916,7 +916,7 @@ export function buildComplexSampleProject(): Project {
   };
 
   // Standard-Bibliothek SIA 400 (Baustoffe, Schraffuren, Linientypen, Aufbauten).
-  let p = withStandards(base);
+  let p = withStandards(base, "de"); // [264] Beispielprojekte bleiben deutsch
 
   // Gelände aus den Höhenlinien (Kern: geglättetes TIN mit Bruchkanten).
   p = runCmd(p, "ug", "terrain", {}).project;

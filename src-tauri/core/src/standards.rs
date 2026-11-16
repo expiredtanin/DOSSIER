@@ -11,6 +11,9 @@
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
 
+pub use crate::standards_names::Lang;
+use crate::standards_names::{en_layer_name, en_name, layer_name_in, name_in};
+
 /// Gebündelte Material-Bibliothek (`public/assets/materials/manifest.json`, wie `src/materials/library.ts`).
 const MANIFEST: &str = include_str!("../../../public/assets/materials/manifest.json");
 
@@ -415,7 +418,7 @@ pub(crate) fn has_category(layers: &[Value], code: &str, name: &str) -> bool {
 
 /// Gibt es im Kategorie-Baum schon den Code oder den Namen der Leuchten-Kategorie?
 fn has_light_category(layers: &[Value]) -> bool {
-    has_category(layers, LIGHT_CATEGORY_CODE, "leuchten")
+    has_category(layers, LIGHT_CATEGORY_CODE, "leuchten") || has_category(layers, LIGHT_CATEGORY_CODE, "lighting")
 }
 
 pub fn library() -> Vec<(&'static str, Vec<Value>)> {
@@ -447,11 +450,17 @@ fn remap(v: &mut Value, key: &str, ids: &HashMap<String, String>) {
 /// gleichem Namen (Gross-/Kleinschreibung egal); Verweise neuer Einträge (Schraffur → Linienstil, Bauteil →
 /// Schraffur, Aufbau → Bauteil/Fugen-Linienstil) zeigen dann auf den vorhandenen Eintrag.
 pub fn merge_ops(root: &Map<String, Value>) -> Vec<Value> {
-    merge_plan(root).0
+    merge_ops_in(root, Lang::De)
+}
+
+/// [264] Wie [`merge_ops`], die neuen Einträge und Klassen mit Namen in `lang` (Kennungen und Werte gleich;
+/// ein vorhandener Eintrag gilt bei deutschem wie englischem Namen als vorhanden).
+pub fn merge_ops_in(root: &Map<String, Value>, lang: Lang) -> Vec<Value> {
+    merge_plan(root, lang).0
 }
 
 /// Wie [`merge_ops`], dazu die Umleitung Standard-id → vorhandene id (gleichnamige Einträge).
-fn merge_plan(root: &Map<String, Value>) -> (Vec<Value>, HashMap<String, String>) {
+fn merge_plan(root: &Map<String, Value>, lang: Lang) -> (Vec<Value>, HashMap<String, String>) {
     let mut ids: HashMap<String, String> = HashMap::new();
     let mut ops = Vec::new();
     for (key, items) in library() {
@@ -464,9 +473,13 @@ fn merge_plan(root: &Map<String, Value>) -> (Vec<Value>, HashMap<String, String>
             if by_id.contains_key(id.as_str()) {
                 continue;
             }
-            if let Some(other) = name_key(&item).and_then(|n| by_name.get(&n).copied()) {
+            let en_key = en_name(&id).map(|n| n.trim().to_lowercase());
+            if let Some(other) = name_key(&item).into_iter().chain(en_key).find_map(|n| by_name.get(&n).copied()) {
                 ids.insert(id, other.to_string());
                 continue;
+            }
+            if lang == Lang::En {
+                item["name"] = json!(name_in(lang, &id, item["name"].as_str().unwrap_or_default()));
             }
             remap(&mut item, "lineStyleId", &ids);
             remap(&mut item, "hatchId", &ids);
@@ -492,18 +505,25 @@ fn merge_plan(root: &Map<String, Value>) -> (Vec<Value>, HashMap<String, String>
     // [180] Dazu die Klassen der abgeleiteten Darstellung.
     let layers = root.get("layers").and_then(Value::as_array).cloned().unwrap_or_default();
     let mut all = layers.clone();
+    let localized = |mut v: Value| {
+        let code = v["code"].as_str().unwrap_or_default().to_string();
+        v["name"] = json!(layer_name_in(lang, &code, v["name"].as_str().unwrap_or_default()));
+        v
+    };
     if !has_light_category(&layers) {
-        all.push(light_category());
+        all.push(localized(light_category()));
     }
     for (c, d) in DERIVED_CATEGORIES.iter().zip(derived_categories()) {
-        if !has_category(&layers, c.0, &c.1.to_lowercase()) {
-            all.push(d);
+        let en = en_layer_name(c.0).unwrap_or(c.1).to_lowercase();
+        if !has_category(&layers, c.0, &c.1.to_lowercase()) && !has_category(&layers, c.0, &en) {
+            all.push(localized(d));
         }
     }
     // [253] Klassen der Objektbibliothek: Möbel, Sanitär, Fahrzeuge & Freiflächen.
     for (_, code, name, color, lw) in crate::furniture_lib::CATEGORIES {
-        if !has_category(&layers, code, &name.to_lowercase()) {
-            all.push(json!({"code": code, "name": name, "color": color, "lw": lw, "visible": true, "locked": false}));
+        let en = en_layer_name(code).unwrap_or(name).to_lowercase();
+        if !has_category(&layers, code, &name.to_lowercase()) && !has_category(&layers, code, &en) {
+            all.push(json!({"code": code, "name": layer_name_in(lang, code, name), "color": color, "lw": lw, "visible": true, "locked": false}));
         }
     }
     if all.len() != layers.len() {
@@ -624,8 +644,8 @@ fn updated(key: &str, old: &Value, std: &Value, valid: &Valid, ids: &HashMap<Str
 /// Eine Abweichung: (Liste, id, Name, geänderte Felder, umbenannt, neue Fassung).
 type Change = (String, String, String, Vec<String>, bool, Value);
 
-fn update_changes(root: &Map<String, Value>) -> (Vec<Change>, usize) {
-    let (merge, ids) = merge_plan(root);
+fn update_changes(root: &Map<String, Value>, lang: Lang) -> (Vec<Change>, usize) {
+    let (merge, ids) = merge_plan(root, lang);
     let mut valid: Valid = HashMap::new();
     let mut added = 0;
     for (key, _) in library() {
@@ -664,7 +684,8 @@ fn update_changes(root: &Map<String, Value>) -> (Vec<Change>, usize) {
                 continue;
             }
             let name = old["name"].as_str().unwrap_or(id).to_string();
-            let renamed = !former && name_key(old) != name_key(std);
+            let en_key = en_name(id).map(|n| n.trim().to_lowercase());
+            let renamed = !former && name_key(old) != name_key(std) && name_key(old) != en_key;
             out.push((key.to_string(), id.to_string(), name, fields, renamed, new));
         }
     }
@@ -673,8 +694,8 @@ fn update_changes(root: &Map<String, Value>) -> (Vec<Change>, usize) {
 
 /// Abweichungen der Standard-Einträge im Projekt von der heutigen Bibliothek: je Eintrag
 /// `{collection, id, name, fields, renamed}`; dazu `added` = Anzahl fehlender Standard-Einträge.
-pub fn update_plan(root: &Map<String, Value>) -> Value {
-    let (changes, added) = update_changes(root);
+pub fn update_plan(root: &Map<String, Value>, lang: Lang) -> Value {
+    let (changes, added) = update_changes(root, lang);
     json!({
         "added": added,
         "changes": changes.iter().map(|c| json!({"collection": c.0, "id": c.1, "name": c.2, "fields": c.3, "renamed": c.4})).collect::<Vec<_>>(),
@@ -683,9 +704,9 @@ pub fn update_plan(root: &Map<String, Value>) -> Value {
 
 /// Ops für „Standards aktualisieren": fehlende Standards anhängen und die gewählten Einträge (`selected` =
 /// `"<Liste>:<id>"`) ersetzen — ein Undo-Schritt. Unbekannte Auswahl wird ignoriert.
-pub fn update_ops(root: &Map<String, Value>, selected: &[String]) -> Vec<Value> {
-    let mut ops = merge_ops(root);
-    for (key, id, _, _, _, new) in update_changes(root).0 {
+pub fn update_ops(root: &Map<String, Value>, selected: &[String], lang: Lang) -> Vec<Value> {
+    let mut ops = merge_ops_in(root, lang);
+    for (key, id, _, _, _, new) in update_changes(root, lang).0 {
         if selected.contains(&format!("{key}:{id}")) {
             ops.push(json!({"kind": "replace", "collection": key, "entity": new}));
         }
@@ -1019,14 +1040,14 @@ mod tests {
                 c["hatchId"] = json!("std-h-holz");
             }
         }
-        let plan = update_plan(&root);
+        let plan = update_plan(&root, Lang::De);
         let ch = plan["changes"].as_array().unwrap();
         let find = |id: &str| ch.iter().find(|c| c["id"] == id).unwrap_or_else(|| panic!("{id}"));
         assert_eq!(find("std-h-daemmung-weich")["renamed"], false, "früherer Standard-Name");
         assert!(find("std-h-daemmung-weich")["fields"].as_array().unwrap().iter().any(|f| f == "name"));
         assert!(ch.iter().all(|c| c["renamed"] == false));
         let all: Vec<String> = ch.iter().map(|c| format!("{}:{}", c["collection"].as_str().unwrap(), c["id"].as_str().unwrap())).collect();
-        let after = apply_all(&root, &update_ops(&root, &all));
+        let after = apply_all(&root, &update_ops(&root, &all, Lang::De));
         let get = |k: &str, id: &str| after[k].as_array().unwrap().iter().find(|e| e["id"] == id).unwrap().clone();
         assert_eq!(get("hatches", "std-h-daemmung-weich")["name"], "SIA Dämmung weich");
         assert_eq!(get("hatches", "std-h-daemmung-weich")["pattern"], "insulation");
@@ -1038,8 +1059,8 @@ mod tests {
         assert_eq!(get("components", "std-c-holz")["hatchId"], "std-h-holz-massiv");
         assert_eq!(get("components", "std-c-glas")["hatchId"], "std-h-glas");
         assert_eq!(get("components", "std-c-glas")["color"], "#ffffff");
-        assert!(update_plan(&after)["changes"].as_array().unwrap().is_empty());
-        assert_eq!(update_plan(&after)["added"], 0);
+        assert!(update_plan(&after, Lang::De)["changes"].as_array().unwrap().is_empty());
+        assert_eq!(update_plan(&after, Lang::De)["added"], 0);
         let p: Project = serde_json::from_value(Value::Object(after)).unwrap();
         assert!(crate::project_refs::dangling_refs(&p).is_empty());
     }
@@ -1090,7 +1111,7 @@ mod tests {
     #[test]
     fn aktualisieren_listet_abweichungen_und_ersetzt_gewaehlte() {
         let root = alt_projekt();
-        let plan = update_plan(&root);
+        let plan = update_plan(&root, Lang::De);
         assert_eq!(plan["added"], 1, "Putz-Schraffur fehlt");
         let ch = plan["changes"].as_array().unwrap();
         let find = |id: &str| ch.iter().find(|c| c["id"] == id);
@@ -1100,19 +1121,19 @@ mod tests {
         assert!(find("std-h-kalksandstein").unwrap()["fields"].as_array().unwrap().iter().any(|f| f == "pattern"));
         assert_eq!(find("std-c-innenputz").unwrap()["fields"], json!(["hatchId"]), "Verweis zeigt künftig auf die ergänzte Putz-Schraffur");
         assert!(find("mine").is_none() && find("std-h-backstein").is_none(), "Eigenes und Unverändertes nicht");
-        let ops = update_ops(&root, &["hatches:std-h-daemmung-weich".to_string(), "components:std-c-innenputz".to_string()]);
+        let ops = update_ops(&root, &["hatches:std-h-daemmung-weich".to_string(), "components:std-c-innenputz".to_string()], Lang::De);
         let after = apply_all(&root, &ops);
         let get = |k: &str, id: &str| after[k].as_array().unwrap().iter().find(|e| e["id"] == id).unwrap().clone();
         assert_eq!(get("hatches", "std-h-daemmung-weich")["pattern"], "insulation");
         assert_eq!(get("hatches", "std-h-kalksandstein")["pattern"], "crosshatch", "nicht gewählt: bleibt");
         assert_eq!(get("components", "std-c-innenputz")["hatchId"], "std-h-putz");
         assert!(after["hatches"].as_array().unwrap().iter().any(|h| h["id"] == "std-h-putz"));
-        let left = update_plan(&after);
+        let left = update_plan(&after, Lang::De);
         assert_eq!(left["added"], 0);
         assert!(left["changes"].as_array().unwrap().iter().all(|c| c["id"] == "std-h-kalksandstein"));
         let all: Vec<String> = left["changes"].as_array().unwrap().iter().map(|c| format!("{}:{}", c["collection"].as_str().unwrap(), c["id"].as_str().unwrap())).collect();
-        let done = apply_all(&after, &update_ops(&after, &all));
-        assert!(update_plan(&done)["changes"].as_array().unwrap().is_empty());
+        let done = apply_all(&after, &update_ops(&after, &all, Lang::De));
+        assert!(update_plan(&done, Lang::De)["changes"].as_array().unwrap().is_empty());
         let p: Project = serde_json::from_value(Value::Object(done)).unwrap();
         assert!(crate::project_refs::dangling_refs(&p).is_empty());
     }
@@ -1126,7 +1147,7 @@ mod tests {
                 h["myNote"] = json!("bleibt");
             }
         }
-        let after = apply_all(&root, &update_ops(&root, &["hatches:std-h-daemmung-weich".to_string()]));
+        let after = apply_all(&root, &update_ops(&root, &["hatches:std-h-daemmung-weich".to_string()], Lang::De));
         let eps = after["hatches"].as_array().unwrap().iter().find(|h| h["id"] == "std-h-daemmung-weich").unwrap();
         assert!(eps.get("lineStyleId").is_none());
         assert_eq!(eps["myNote"], "bleibt");
@@ -1151,5 +1172,43 @@ mod tests {
         assert_eq!(iw["layers"][1]["componentId"], "brick");
         let pb = r["hatches"].as_array().unwrap().iter().find(|h| h["id"] == "std-h-porenbeton").unwrap();
         assert_eq!(pb["lineStyleId"], "thin");
+    }
+
+    /// [264] Neues Projekt in englischer Oberfläche: gleiche Kennungen und Werte, englische Namen; deutsch bleibt unverändert.
+    #[test]
+    fn englische_standards_nur_namen() {
+        let de = merge_ops(&empty_root());
+        let en = merge_ops_in(&empty_root(), Lang::En);
+        assert_eq!(de.len(), en.len());
+        let strip = |ops: &[Value]| {
+            let mut v = serde_json::to_value(ops).unwrap();
+            fn walk(v: &mut Value) {
+                match v {
+                    Value::Object(m) => {
+                        m.remove("name");
+                        m.values_mut().for_each(walk);
+                    }
+                    Value::Array(a) => a.iter_mut().for_each(walk),
+                    _ => {}
+                }
+            }
+            walk(&mut v);
+            v
+        };
+        assert_eq!(strip(&de), strip(&en), "ausser Namen identisch");
+        let r = apply(&empty_root(), &en);
+        let name = |key: &str, id: &str| r[key].as_array().unwrap().iter().find(|e| e["id"] == id).unwrap()["name"].as_str().unwrap().to_string();
+        assert_eq!(name("components", "std-c-stahlbeton"), "Reinforced concrete");
+        assert_eq!(name("wallTypes", "std-wt-aw-kompakt"), "Exterior wall, rendered, 18 cm external insulation");
+        assert_eq!(name("viewTemplates", "std-vt-eingabe-100"), "Permit drawing 1:100");
+        let cats: Vec<&str> = r["layers"].as_array().unwrap().iter().filter_map(|l| l["name"].as_str()).collect();
+        assert!(cats.contains(&"Sanitary") && cats.contains(&"Furniture") && cats.contains(&"Shadows"), "{cats:?}");
+        // Zweites Laden (egal in welcher Sprache) ergänzt nichts: weder Duplikate noch zweite Klassen.
+        assert!(merge_ops_in(&r, Lang::En).is_empty());
+        assert!(merge_ops(&r).is_empty());
+        let de_r = apply(&empty_root(), &de);
+        assert!(merge_ops_in(&de_r, Lang::En).is_empty());
+        // Der Abgleich „Standards aktualisieren" hält englische Namen für unverändert (nicht umbenannt).
+        assert!(update_plan(&r, Lang::En)["changes"].as_array().unwrap().iter().all(|c| c["renamed"] == false));
     }
 }

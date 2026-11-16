@@ -25,6 +25,7 @@ import { findCategory } from "../model/layers";
 import type { HatchStyle, LayerCategory, Project } from "../model/types";
 import { BORDERLESS_WINDOW_CHROME } from "./windowChrome";
 import { useWindowBridgeHost } from "./windowBridge";
+import { t } from "../i18n";
 
 const LAYER_SETTINGS_WINDOW_LABEL = "layer-settings";
 
@@ -54,7 +55,7 @@ export async function openLayerSettingsWindowNative(code: string): Promise<void>
   }
   new WebviewWindow(LAYER_SETTINGS_WINDOW_LABEL, {
     url: `index.html?window=layer-settings&code=${encodeURIComponent(code)}`,
-    title: "Ebeneneinstellungen — dossier",
+    title: `${t("menu.window.layerSettingsTitle")} — dossier`,
     width: 360,
     height: 420,
     minWidth: 300,

@@ -3,20 +3,25 @@
 // Linientypen nach SIA 400 / ISO 128 und Standard-Aufbauten. Hier nur dünne Fassaden: der Kern liefert die
 // Ops, die fehlende Einträge anhängen (gleiche id oder gleicher Name gilt als vorhanden).
 
+import { getLanguage, type Language } from "../i18n/translate";
 import type { LayerFunction, ModelViewOption, OverrideRule, Project } from "./types";
 import type { CoreOp } from "../core/ops";
 import { applyOps } from "../core/ops";
 import { addedItems } from "../core/opsBuild";
 import { documentFor, withDocument } from "../core/document";
 
-/** Ops, die die fehlenden Standard-Ressourcen anhängen („Standards laden"); leer, wenn alles da ist. */
-export function standardsMergeOps(project: Project): CoreOp[] {
-  return documentFor(project).queryRoot<CoreOp[]>("standardsMergeOps");
+/**
+ * Ops, die die fehlenden Standard-Ressourcen anhängen („Standards laden"); leer, wenn alles da ist.
+ * [264] Neue Einträge und Klassen tragen ihre Namen in `lang` (Vorgabe: Oberflächensprache; der Kern hält die
+ * englischen Namen in `standards_names.rs`); bestehende Einträge bleiben unberührt.
+ */
+export function standardsMergeOps(project: Project, lang: Language = getLanguage()): CoreOp[] {
+  return documentFor(project).queryRoot<CoreOp[]>("standardsMergeOps", lang);
 }
 
 /** Projekt mit allen Standard-Ressourcen (für neue Projekte; eigenes, kurzlebiges Dokument, [122]). */
-export function withStandards(project: Project): Project {
-  return applyOps(project, withDocument(project, () => standardsMergeOps(project)));
+export function withStandards(project: Project, lang: Language = getLanguage()): Project {
+  return applyOps(project, withDocument(project, () => standardsMergeOps(project, lang)));
 }
 
 /** Was „Standards laden" anhängt: Anzahl neuer Einträge je Projekt-Liste (für die Rückmeldung). */
@@ -87,12 +92,12 @@ export const standardsChangeKey = (c: Pick<StandardsChange, "collection" | "id">
 
 /** Abweichungen der Standard-Einträge vom heutigen Standard (Regel s. `standards.rs`, „Standards aktualisieren"). */
 export function standardsUpdatePlan(project: Project): StandardsUpdatePlan {
-  return documentFor(project).queryRoot<StandardsUpdatePlan>("standardsUpdatePlan");
+  return documentFor(project).queryRoot<StandardsUpdatePlan>("standardsUpdatePlan", getLanguage());
 }
 
 /** Ops: fehlende Standards anhängen und die gewählten Einträge (`standardsChangeKey`) auf den heutigen Stand bringen. */
 export function standardsUpdateOps(project: Project, selected: readonly string[]): CoreOp[] {
-  return documentFor(project).queryRoot<CoreOp[]>("standardsUpdateOps", JSON.stringify(selected));
+  return documentFor(project).queryRoot<CoreOp[]>("standardsUpdateOps", JSON.stringify({ selected, lang: getLanguage() }));
 }
 
 /** [33] Schichtfunktionen (Werte wie im Rust-Modell, `LayerFunction`), Reihenfolge der Auswahl im Aufbau-Editor. */

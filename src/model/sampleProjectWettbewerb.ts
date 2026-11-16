@@ -302,7 +302,7 @@ export function buildWettbewerbSampleProject(): Project {
   };
 
   // Standard-Bibliothek SIA 400 (Baustoffe, Schraffuren, Linientypen, Aufbauten, Ansichtsvorlagen).
-  let p = withStandards(base);
+  let p = withStandards(base, "de"); // [264] Beispielprojekte bleiben deutsch
   p = addRooms(p);
   // Aussenbemassung (Massketten je Fassade), Klasse „81 Auto-Bemassung" (Befehl `autodim`).
   for (const f of FLOORS) p = runCmd(p, f.id, "autodim", {}, "80");

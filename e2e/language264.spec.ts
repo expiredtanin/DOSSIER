@@ -63,3 +63,52 @@ test("Sprache umschalten: sofort Englisch, bleibt nach Neuladen, neues Projekt m
   await page.keyboard.press("Escape");
   await expect(page.getByRole("button", { name: "Datei", exact: true })).toBeVisible();
 });
+
+test("Neues Projekt auf Englisch: Standards (Baustoffe, Aufbauten, Vorlagen, Klassen) englisch, Deutsch unverändert", async ({ page }) => {
+  test.setTimeout(120_000);
+  const shots = process.env.E2E_SHOTS;
+  const shot = async (name: string) => {
+    if (shots) await page.screenshot({ path: `${shots}/${name}.png`, type: "png" });
+  };
+  await page.addInitScript(() => {
+    if (!localStorage.getItem("dossier.language")) localStorage.setItem("dossier.language", "en");
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: "New project" }).first().click();
+  await expect(page.locator(".project-name")).toHaveText("Empty project");
+
+  await page.getByRole("menubar").getByRole("button", { name: "Window", exact: true }).click();
+  await page.getByRole("option", { name: /Resources/ }).click();
+  const res = page.locator(".res-window");
+  await expect(res).toBeVisible();
+  for (const [tab, name] of [
+    ["Components", "Reinforced concrete"],
+    ["Hatches", "SIA Reinforced concrete"],
+    ["Wall styles", "Exterior wall, rendered, 18 cm external insulation"],
+    ["View templates", "Permit drawing 1:100"],
+    ["Model view", "Competition 1:200"],
+  ] as const) {
+    await page.getByRole("tab", { name: tab, exact: true }).click();
+    await expect(res.getByText(name, { exact: true }).first(), `${tab}: ${name}`).toBeVisible();
+    await shot(`lang-en-res-${tab.replace(/ /g, "-").toLowerCase()}`);
+  }
+  // Keine deutschen Standardnamen in den Listen.
+  await expect(res.getByText("Eingabeplan 1:100")).toHaveCount(0);
+  await page.keyboard.press("Escape");
+
+  // Klassen der Objektbibliothek englisch.
+  await page.getByRole("tab", { name: "Layers", exact: true }).click();
+  await expect(page.getByText("Sanitary", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("Sanitär", { exact: true })).toHaveCount(0);
+  await shot("lang-en-layers");
+
+  // Deutsch: unverändert.
+  await page.evaluate(() => localStorage.setItem("dossier.language", "de"));
+  await page.reload();
+  await page.getByRole("button", { name: /Neues Projekt/ }).first().click();
+  await expect(page.locator(".project-name")).toHaveText("Leeres Projekt");
+  await page.getByRole("button", { name: "Fenster", exact: true }).first().click();
+  await page.getByRole("option", { name: /Ressourcen/ }).click();
+  await page.getByRole("tab", { name: "Ansichtsvorlagen", exact: true }).click();
+  await expect(page.locator(".res-window").getByText("Eingabeplan 1:100", { exact: true }).first()).toBeVisible();
+});
