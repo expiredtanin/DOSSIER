@@ -148,7 +148,7 @@ entstehen unsignierte Artefakte. Optionale Repository-Secrets:
 - Updater-Signatur: `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
   (passend zum `pubkey` in `tauri.conf.json`; ohne Schlüssel entfallen die Updater-Artefakte)
 
-**Release auf Gitea** ([30], ohne CI): Linux `npm run build && npm run electron:pack`, Mac `npm run tauri:build`, dann je
+**Release auf Gitea** ([30]): Mit Tag `v<version>` (nach Gitea UND GitHub gepusht) baut GitHub (`release.yml`) Mac und Linux und legt die Pakete als Entwurf auf Gitea ab, wenn das GitHub-Secret `GITEA_TOKEN` (Gitea-Token mit Schreibrecht auf karim/dossier) gesetzt ist. Von Hand, ohne CI: Linux `npm run build && npm run electron:pack`, Mac `npm run tauri:build`, dann je
 `GITEA_TOKEN=… npm run release:gitea -- --dir <Ordner mit den Paketen>` (Linux: `release`, Mac: `src-tauri/target/release/bundle/dmg` und
 `…/bundle/macos`). Das legt einen **Entwurf** `v<version>` an bzw. ergänzt ihn (Anhänge gleichen Namens werden ersetzt, `SHA256SUMS.txt`
 über beide Plattformen); `--publish` veröffentlicht ihn und führt mit Mac-Updater-Paket samt `.sig` das Release `latest`

@@ -1,5 +1,7 @@
 # Release ([30]): bei Tag `v*` baut die macOS-App (Tauri, universal = arm64 + x64) und legt einen
-# Release-Entwurf mit den Artefakten an. Ohne Secrets entstehen unsignierte Artefakte; mit Secrets
+# Release-Entwurf mit den Artefakten an. GitHub dient nur als Bau-Rechner (Entscheid Maintainer 16.11.): die Pakete
+# landen zusätzlich als ENTWURF im Release `v<version>` auf git.openbureau.ch/karim/dossier (Skript
+# scripts/release-gitea.mjs), wenn das Repository-Secret GITEA_TOKEN gesetzt ist; veröffentlicht wird dort von Hand. Ohne Secrets entstehen unsignierte Artefakte; mit Secrets
 # werden sie signiert/notarisiert und die Updater-Signaturen (latest.json) erzeugt.
 # Secrets: siehe README, Abschnitt „Releases". Linux ([170]): Job `linux` baut das AppImage (Electron, electron-builder,
 # kein Secret nötig) und hängt es mit SHA256SUMS an dasselbe Release; er läuft nach `macos`, damit nicht beide
@@ -24,6 +26,7 @@ jobs:
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
@@ -91,12 +94,21 @@ jobs:
           printf '\n\n' >> body.txt
           cat CHANGELOG-release.md >> body.txt
           gh release edit "$GITHUB_REF_NAME" --notes-file body.txt
+      - name: Mac-Pakete als Entwurf auf Gitea ablegen
+        if: startsWith(github.ref, 'refs/tags/') && env.GITEA_TOKEN != ''
+        run: |
+          mkdir -p gitea-release
+          find src-tauri/target -path '*/release/bundle/*' \( -name '*.dmg' -o -name '*.app.tar.gz' -o -name '*.app.tar.gz.sig' \) -exec cp {} gitea-release/ \;
+          ls -la gitea-release
+          npm run release:gitea -- --dir gitea-release --version "${GITHUB_REF_NAME#v}" --notes "$(cat CHANGELOG-release.md)"
 
   linux:
     needs: macos
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    env:
+      GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
@@ -135,7 +147,7 @@ jobs:
       - name: AppImage prüfen (Start, Speichern, Öffnen, Export, Wiederherstellen; [170])
         run: |
           sudo apt-get update && sudo apt-get install -y xvfb libfuse2t64
-          npm run test:linux-app
+          LANG=de_DE.UTF-8 LC_ALL=de_DE.UTF-8 npm run test:linux-app
       - uses: actions/upload-artifact@v4
         with:
           name: dossier-linux-appimage
@@ -151,3 +163,6 @@ jobs:
           gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 \
             || gh release create "$GITHUB_REF_NAME" --draft --title "Dossier $GITHUB_REF_NAME" --notes "Dossier $GITHUB_REF_NAME"
           gh release upload "$GITHUB_REF_NAME" release/Dossier-*.AppImage release/SHA256SUMS-linux.txt --clobber
+      - name: AppImage als Entwurf auf Gitea ablegen
+        if: startsWith(github.ref, 'refs/tags/') && env.GITEA_TOKEN != ''
+        run: npm run release:gitea -- --dir release --version "${GITHUB_REF_NAME#v}"
