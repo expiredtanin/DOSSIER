@@ -15,7 +15,7 @@ import { useModalFocus } from "./modalFocus";
 import { checkForUpdate } from "../update/checkForUpdate";
 import { getRunningVersion } from "../update/version";
 import { BUILD_INFO, formatBuildInfo } from "../update/buildInfo";
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useLiveScale, zoomPercentOf } from "../state/liveScaleStore";
 import { createPortal } from "react-dom";
 import { Dropdown } from "./Dropdown";
@@ -110,6 +110,26 @@ export interface ComboMenuHandlers {
   saveDrawingCombo: (name: string) => void;
   loadDrawingCombo: (name: string) => void;
   deleteDrawingCombo: (name: string) => void;
+}
+
+/** [263] Ansichtsleiste: Reihenfolge, in der Gruppen ins „⋯“-Menü wandern (zuerst Schrift, zuletzt Massstab/Zoom). */
+const OVERFLOW_ORDER = ["text", "sketch", "shadows", "combos", "detail", "views", "zoom"];
+const RIBBON_GAP = 8;
+const MORE_BTN_WIDTH = 30;
+
+/** Welche Gruppen passen nicht in `avail` px? Rechnet aus den gemerkten Breiten, unwichtigste zuerst. */
+export function overflowHidden(ids: string[], widths: Map<string, number>, avail: number): string[] {
+  const hide: string[] = [];
+  const total = () => {
+    const vis = ids.filter((i) => !hide.includes(i));
+    const sum = vis.reduce((a, i) => a + (widths.get(i) ?? 0), 0) + RIBBON_GAP * Math.max(0, vis.length - 1);
+    return sum + (hide.length > 0 ? MORE_BTN_WIDTH + RIBBON_GAP : 0);
+  };
+  for (const id of OVERFLOW_ORDER) {
+    if (total() <= avail) break;
+    if (ids.includes(id)) hide.push(id);
+  }
+  return ids.filter((i) => hide.includes(i));
 }
 
 /** Kleiner vertikaler Trenner zwischen Gruppen. */
@@ -1118,26 +1138,89 @@ export const ViewRibbonTab = memo(function ViewRibbonTab({
     { value: "__custom__", label: t("topbar.scale.custom") },
   ];
 
-  // [263] Die Ansichts-Leiste scrollt ohne sichtbare Leiste: bei schmalem Fenster (1280 px) liegen Massstab,
-  // Zoom und Schrift rechts ausserhalb. Ein Ausblenden am rechten Rand (Klasse `has-more`) zeigt, dass es weitergeht.
+  // [263] Überlauf-Menü „⋯“: Passt die Leiste nicht, wandern Gruppen (nach Priorität, unwichtigste zuerst) in ein
+  // Ausklappmenü am rechten Ende; Massstab/Zoom bleiben am längsten sichtbar. Die Breiten werden gemerkt, solange eine
+  // Gruppe in der Leiste steht; die Auswahl rechnet daraus bei jeder Grössenänderung neu (ResizeObserver).
   const ribbonRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
+  const widthsRef = useRef(new Map<string, number>());
+  const [hidden, setHidden] = useState<string[]>([]);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const moreBtnRef = useRef<HTMLButtonElement | null>(null);
+  const morePanelRef = useRef<HTMLDivElement | null>(null);
+  const [morePos, setMorePos] = useState({ top: 0, right: 0 });
+  const slotIds = ["views", "combos", "detail", "zoom"];
+  if (shadowsAvailable) slotIds.push("shadows");
+  if (sketchAvailable && onSketch) slotIds.push("sketch");
+  slotIds.push("text");
+  const slotKey = slotIds.join(",");
+  useLayoutEffect(() => {
     const el = ribbonRef.current;
     if (!el) return;
-    const update = () => el.classList.toggle("has-more", el.scrollWidth - el.clientWidth - el.scrollLeft > 2);
+    const update = () => {
+      for (const c of Array.from(el.querySelectorAll<HTMLElement>(":scope > [data-slot]"))) {
+        const w = c.getBoundingClientRect().width;
+        if (w > 0) widthsRef.current.set(c.dataset.slot!, w);
+      }
+      const next = overflowHidden(slotKey.split(","), widthsRef.current, el.clientWidth);
+      setHidden((h) => (h.length === next.length && h.every((x, i) => x === next[i]) ? h : next));
+    };
     update();
-    el.addEventListener("scroll", update, { passive: true });
     const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(update) : null;
     ro?.observe(el);
     for (const c of Array.from(el.children)) ro?.observe(c);
-    return () => {
-      el.removeEventListener("scroll", update);
-      ro?.disconnect();
-    };
+    return () => ro?.disconnect();
   });
+  useEffect(() => {
+    if (hidden.length === 0) setMoreOpen(false);
+  }, [hidden.length]);
+  useEffect(() => {
+    if (!moreOpen) return;
+    const r = moreBtnRef.current?.getBoundingClientRect();
+    if (r) setMorePos({ top: r.bottom + 6, right: Math.max(8, window.innerWidth - r.right) });
+    morePanelRef.current?.querySelector<HTMLElement>("button:not(:disabled), select, input:not(:disabled)")?.focus({ preventScroll: true });
+    const onDown = (e: PointerEvent) => {
+      const tgt = e.target as Element | null;
+      // Untermenüs (Dropdown) und Dialoge liegen im Body: nicht als Aussenklick werten.
+      if (!tgt || morePanelRef.current?.contains(tgt) || moreBtnRef.current?.contains(tgt) || tgt.closest(".tb-dd-menu, .ctx-menu, [role=dialog]")) return;
+      setMoreOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      if (document.querySelector(".tb-dd-menu, [role=dialog]")) return; // zuerst das Untermenü bzw. der Dialog
+      e.preventDefault();
+      setMoreOpen(false);
+      moreBtnRef.current?.focus({ preventScroll: true });
+    };
+    const onResize = () => setMoreOpen(false);
+    window.addEventListener("pointerdown", onDown, true);
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("resize", onResize);
+    return () => {
+      window.removeEventListener("pointerdown", onDown, true);
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("resize", onResize);
+    };
+  }, [moreOpen]);
+  const onMoreKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    const tgt = e.target as HTMLElement;
+    if (tgt.tagName === "INPUT" || tgt.tagName === "SELECT" || tgt.tagName === "TEXTAREA") return;
+    const items = Array.from(morePanelRef.current?.querySelectorAll<HTMLElement>("button:not(:disabled), select, input:not(:disabled)") ?? []);
+    if (items.length === 0) return;
+    e.preventDefault();
+    const i = items.indexOf(document.activeElement as HTMLElement);
+    const to = e.key === "ArrowDown" ? (i + 1) % items.length : (i - 1 + items.length) % items.length;
+    items[to]?.focus({ preventScroll: true });
+  };
+  // Gruppe in der Leiste oder (wenn verdrängt) im Menü.
+  const bar: Record<string, React.ReactNode> = {};
+  const menu: Record<string, React.ReactNode> = {};
+  const put = (id: string, node: React.ReactNode) => {
+    (hidden.includes(id) ? menu : bar)[id] = node;
+  };
 
-  return (
-    <div className="ribbon-views" ref={ribbonRef}>
+  put("views", (
+    <>
       {/* Reihenfolge: Grundriss · Ansichten · Iso · Axo — ohne Trennstriche
           (eine zusammenhängende Symbol-Zeile, Nutzer-Wunsch). */}
       <span className="tb-viewtoggle" role="group" aria-label={t("topbar.viewGroup")}>
@@ -1194,7 +1277,10 @@ export const ViewRibbonTab = memo(function ViewRibbonTab({
         </button>
       </span>
       <Sep />
-
+    </>
+  ));
+  put("combos", (
+    <>
       {/* Sichtbarkeits-Kombinationen (Ebenen-/Zeichnungskombinationen). */}
       <div className="tb-group tb-stack" role="group" aria-label={t("combo.layers.title")}>
         <label className="tb-field tb-field-row">
@@ -1221,7 +1307,10 @@ export const ViewRibbonTab = memo(function ViewRibbonTab({
         </label>
       </div>
       <Sep />
-
+    </>
+  ));
+  put("detail", (
+    <>
       {/* Detailgrad (grob/mittel/fein) + Darstellungsart übereinander gestapelt
           (Nutzer-Wunsch) — gleiches Stapel-Muster wie die Kombinationen. */}
       <div className="tb-group tb-stack" role="group" aria-label={t("topbar.detailGroup")}>
@@ -1268,7 +1357,10 @@ export const ViewRibbonTab = memo(function ViewRibbonTab({
           )}
         </label>
       </div>
-
+    </>
+  ));
+  put("zoom", (
+    <>
       {/* Massstab/Zoom + Text-Formatierung OHNE Trennstriche, gleich gross wie
           die Dropdowns (Mockup). */}
       <div className="tb-group tb-zoomcluster" role="group" aria-label={t("topbar.scaleGroup")}>
@@ -1312,7 +1404,11 @@ export const ViewRibbonTab = memo(function ViewRibbonTab({
           />
         </div>
       </div>
-
+    </>
+  ));
+  if (shadowsAvailable)
+    put("shadows", (
+    <>
       {/* Schatten ein/aus — NUR für eine aktive Ansicht (kind "elevation").
           Schreibt DrawingLevel.shadows; der Ansichts-Generator (toElevation)
           zeichnet dann den 45°-Schlagschatten auskragender Bauteile. */}
@@ -1331,7 +1427,11 @@ export const ViewRibbonTab = memo(function ViewRibbonTab({
           <Sep />
         </>
       )}
-
+    </>
+  ));
+  if (sketchAvailable && onSketch)
+    put("sketch", (
+    <>
       {sketchAvailable && onSketch && (
         <>
           <div className="tb-group" role="group" aria-label={t("view.sketch")}>
@@ -1348,11 +1448,64 @@ export const ViewRibbonTab = memo(function ViewRibbonTab({
           <Sep />
         </>
       )}
-
+    </>
+  ));
+  put("text", (
+    <>
       {/* Text-/Font-Formatierung auf DERSELBEN Leiste (Nutzer-Wunsch: Text und
           Ansichten zusammen) — Stil/Schrift/Grösse + B/I/U · L/C/R + Zeilenhöhe,
           formatiert das aktuelle Text-Ziel (Raumstempel) live. */}
       <TextGroup textTarget={textTarget} textStyles={textStyles} />
+    </>
+  ));
+  const order = slotIds;
+
+  return (
+    <div className="ribbon-views" ref={ribbonRef}>
+      {order.map((id) =>
+        bar[id] ? (
+          <div key={id} className="rv-slot" data-slot={id}>
+            {bar[id]}
+          </div>
+        ) : null,
+      )}
+      {hidden.length > 0 && (
+        <div className="rv-more">
+          <button
+            ref={moreBtnRef}
+            type="button"
+            className={`tb-vt-btn rv-more-btn${moreOpen ? " active" : ""}`}
+            title={t("topbar.more")}
+            aria-label={t("topbar.more")}
+            aria-haspopup="true"
+            aria-expanded={moreOpen}
+            data-testid="ribbon-more"
+            onClick={() => setMoreOpen((o) => !o)}
+          >
+            <span aria-hidden="true">⋯</span>
+          </button>
+          {moreOpen && createPortal(
+            <div
+              ref={morePanelRef}
+              className="rv-more-panel"
+              style={{ top: morePos.top, right: morePos.right }}
+              role="group"
+              aria-label={t("topbar.more")}
+              data-testid="ribbon-more-panel"
+              onKeyDown={onMoreKeyDown}
+            >
+              {order.map((id) =>
+                menu[id] ? (
+                  <div key={id} className="rv-more-row" data-slot={id}>
+                    {menu[id]}
+                  </div>
+                ) : null,
+              )}
+            </div>,
+            document.body,
+          )}
+        </div>
+      )}
       {scalePromptOpen && (
         <PromptDialog
           title={t("topbar.scale.custom")}

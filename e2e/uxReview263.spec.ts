@@ -15,17 +15,89 @@ test("unbekannter Befehl meldet sich statt still zu verpuffen", async ({ page })
   await expect(page.locator(".cmdline-prompt")).toHaveText("Startpunkt der Wand:");
 });
 
-test("Ansichtsleiste zeigt bei 1280 px, dass rechts noch Bedienelemente liegen", async ({ page }) => {
+// Ansichtsleiste: Überlauf-Menü „⋯“ statt verstecktem Scrollen. Jede Gruppe steht in der Leiste ODER im Menü.
+const RIBBON_GROUPS = ["Ansicht", "Ebenenkombinationen", "Detailgrad", "Massstab und Zoom"];
+async function openMoreIfAny(page: import("@playwright/test").Page) {
+  const more = page.getByTestId("ribbon-more");
+  if (await more.count()) {
+    await more.click();
+    await expect(page.getByTestId("ribbon-more-panel")).toBeVisible();
+    return true;
+  }
+  return false;
+}
+
+for (const [w, h] of [
+  [1280, 800],
+  [1440, 900],
+] as const) {
+  test(`Ansichtsleiste bei ${w} px: alles erreichbar, kein horizontaler Überlauf`, async ({ page }) => {
+    await page.setViewportSize({ width: w, height: h });
+    await startNewProject(page);
+    const ribbon = page.locator(".ribbon-views");
+    const sizes = await ribbon.evaluate((el) => ({ sw: el.scrollWidth, cw: el.clientWidth }));
+    expect(sizes.sw, "kein verstecktes Scrollen").toBeLessThanOrEqual(sizes.cw);
+    // Massstab und Zoom bleiben in der Leiste.
+    await expect(ribbon.locator(".tb-zoomcluster")).toBeVisible();
+    const hasMore = await openMoreIfAny(page);
+    for (const name of RIBBON_GROUPS) {
+      const g = page.locator(`.ribbon-views [aria-label="${name}"], .rv-more-panel [aria-label="${name}"]`).first();
+      await expect(g, `Gruppe „${name}“ erreichbar`).toBeVisible();
+    }
+    // Die Leiste zeigt „⋯“ mit Tooltip.
+    if (hasMore) await expect(page.getByTestId("ribbon-more")).toHaveAttribute("title", "Weitere Einstellungen");
+    // Nichts ragt rechts aus dem Fenster.
+    const right = await ribbon.evaluate((el) => Math.max(...Array.from(el.children).map((c) => c.getBoundingClientRect().right)));
+    expect(right).toBeLessThanOrEqual(w);
+  });
+}
+
+test("Ansichtsleiste: bei 1920 px nur die Schrift im „⋯“, ab 2560 px keins", async ({ page }) => {
+  await page.setViewportSize({ width: 1920, height: 1080 });
   await startNewProject(page);
   const ribbon = page.locator(".ribbon-views");
-  const overflows = await ribbon.evaluate((el) => el.scrollWidth > el.clientWidth + 2);
-  expect(overflows, "bei 1280 px passt die Leiste nicht ganz hinein").toBe(true);
-  await expect(ribbon).toHaveClass(/has-more/);
-  // Ganz nach rechts gescrollt: kein Hinweis mehr.
-  await ribbon.evaluate((el) => {
-    el.scrollLeft = el.scrollWidth;
-  });
-  await expect(ribbon).not.toHaveClass(/has-more/);
+  expect(await ribbon.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+  await page.getByTestId("ribbon-more").click();
+  // Die Schriftgruppe (ca. 710 px) ist die unwichtigste; alles andere passt noch in die Leiste.
+  expect(await page.locator(".rv-more-panel [data-slot]").evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset.slot))).toEqual(["text"]);
+  await page.keyboard.press("Escape");
+  await page.setViewportSize({ width: 2560, height: 1080 });
+  await expect(page.getByTestId("ribbon-more")).toHaveCount(0);
+});
+
+test("Ansichtsleiste: Überlauf-Menü per Tastatur, Massstab-Wechsel über das Menü", async ({ page }) => {
+  await page.setViewportSize({ width: 1000, height: 800 });
+  await startNewProject(page);
+  const more = page.getByTestId("ribbon-more");
+  await expect(more).toBeVisible();
+  await more.focus();
+  await page.keyboard.press("Enter");
+  const panel = page.getByTestId("ribbon-more-panel");
+  await expect(panel).toBeVisible();
+  // Esc schliesst und gibt den Fokus zurück.
+  await page.keyboard.press("Escape");
+  await expect(panel).toHaveCount(0);
+  await expect(more).toBeFocused();
+  await page.keyboard.press(" ");
+  await expect(panel).toBeVisible();
+  // Pfeil nach unten wandert durch die Bedienelemente des Menüs.
+  const first = await page.evaluate(() => document.activeElement?.outerHTML.slice(0, 80));
+  await page.keyboard.press("ArrowDown");
+  expect(await page.evaluate(() => document.activeElement?.outerHTML.slice(0, 80))).not.toBe(first);
+  await page.keyboard.press("Escape");
+  // Fenster breiter: Gruppen kehren in die Leiste zurück (ResizeObserver).
+  await page.setViewportSize({ width: 2560, height: 800 });
+  await expect(more).toHaveCount(0);
+  // Sehr schmal: Massstab-Wechsel funktioniert, auch wenn der Massstab im Menü steht.
+  await page.setViewportSize({ width: 520, height: 800 });
+  await expect(more).toBeVisible();
+  await more.click();
+  const scaleDd = page.getByTitle("Papier-Massstab 1:N anwenden");
+  const inMenu = await panel.getByTitle("Papier-Massstab 1:N anwenden").count();
+  if (!inMenu) await page.keyboard.press("Escape"); // Massstab noch in der Leiste
+  await scaleDd.click();
+  await page.getByRole("option", { name: "1:200", exact: true }).click();
+  await expect(scaleDd).toContainText("1:200");
 });
 
 test("Layout-Werkzeugleiste: Tabellen-Auswahl lesbar, „Einpassen“ im Fenster", async ({ page }) => {

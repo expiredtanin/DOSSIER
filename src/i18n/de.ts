@@ -32,6 +32,7 @@ export const de = {
   "view3d.left.abbr": "L",
   "view3d.perspective": "Perspektive",
   "view3d.perspective.hint": "Freie Perspektive (3/4-Blick)",
+  "topbar.more": "Weitere Einstellungen",
   "topbar.views": "Ansichten",
   "topbar.views.menu": "Ansicht wählen (Vorne/Hinten/Links/Rechts/Oben)",
   "topbar.axo": "Axonometrie",

@@ -182,7 +182,7 @@ body {
   position: relative;
   z-index: 2;
   /* Die Leiste selbst scrollt NICHT — nur der mittlere View-Controls-Block
-     (.ribbon-views) scrollt bei schmalen Fenstern. So bleiben Marke, Menü und
+     (.ribbon-views) lagert bei schmalen Fenstern Gruppen ins „⋯“-Menü aus. So bleiben Marke, Menü und
      die rechte Gruppe (Datei-Aktionen + Projekt) IMMER sichtbar. */
   overflow: visible;
   white-space: nowrap;
@@ -7730,17 +7730,53 @@ body {
   gap: 8px;
   flex: 1 1 auto;
   min-width: 0;
-  overflow-x: auto;
-  overflow-y: hidden;
-  scrollbar-width: none;
+  position: relative;
 }
-.ribbon-views::-webkit-scrollbar {
+/* [263] Gruppen in der Leiste; was nicht passt, steht im „⋯“-Menü (TopBar.tsx, `overflowHidden`) — kein verstecktes Scrollen. */
+.rv-slot {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+.rv-more {
+  position: relative;
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+.rv-more-btn {
+  width: 30px;
+  font-size: 16px;
+  line-height: 1;
+}
+.rv-more-panel {
+  position: fixed;
+  z-index: 1090;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  width: max-content;
+  max-width: calc(100vw - 16px);
+  background: var(--panel-2);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow-2, 0 8px 24px rgba(0, 0, 0, 0.25));
+  white-space: nowrap;
+}
+.rv-more-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.rv-more-row .rv-slot,
+.rv-more-row > * {
+  gap: 8px;
+}
+.rv-more-panel .tb-sep {
   display: none;
-}
-/* [263] Es gibt rechts noch Bedienelemente ausserhalb des Fensters: Rand ausblenden. */
-.ribbon-views.has-more {
-  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
-  mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
 }
 
 /* ── Layout-Blatt im Haupt-Viewport (DOSSIER A3, Phase 2b) ─────────────────────

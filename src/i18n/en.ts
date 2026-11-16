@@ -31,6 +31,7 @@ export const en: Record<TranslationKey, string> = {
   "view3d.left.abbr": "L",
   "view3d.perspective": "Perspective",
   "view3d.perspective.hint": "Free perspective (3/4 view)",
+  "topbar.more": "More settings",
   "topbar.views": "Views",
   "topbar.views.menu": "Pick a view (Front/Back/Left/Right/Top)",
   "topbar.axo": "Axonometric",
