@@ -203,3 +203,86 @@ test("Verlauf und BCF (schwebende Fenster) schliessen mit Esc", async ({ page })
   await page.keyboard.press("Escape");
   await expect(bcf).toBeHidden();
 });
+
+// [263] Rest: Quellen-Auswahl voll lesbar, Hilfe → Kurzanleitung / Fehler melden, CSV-Nachweis im leeren Projekt.
+// Screenshots nur auf Wunsch: E2E_SHOTS=/pfad.
+const shot = async (page: import("@playwright/test").Page, name: string) => {
+  if (process.env.E2E_SHOTS) await page.screenshot({ path: `${process.env.E2E_SHOTS}/${name}.png` });
+};
+
+test("Attribute-Panel: „eigener Wert“ steht ungekürzt und innerhalb des Panels", async ({ page }) => {
+  await startNewProject(page);
+  await fileMenu(page, /^Neu aus Vorlage: Wettbewerb$/);
+  await discardIfAsked(page);
+  await page.mouse.click(400, 430);
+  const trigger = page.locator(".attr-val > .attr-num ~ .tb-dd-trigger").first();
+  await expect(trigger).toBeVisible();
+  const box = (await trigger.boundingBox())!;
+  const panel = (await page.locator(".attr-grid").first().boundingBox())!;
+  expect(box.x + box.width).toBeLessThanOrEqual(panel.x + panel.width + 1);
+  await expect(trigger).toContainText("eigener Wert");
+  await shot(page, "attr-after");
+});
+
+test("Hilfe: Kurzanleitung öffnet im Dialog, Esc schliesst", async ({ page }) => {
+  await startNewProject(page);
+  await page.getByRole("button", { name: "Hilfe", exact: true }).click();
+  await page.getByRole("option", { name: "Kurzanleitung …", exact: true }).click();
+  const dlg = page.getByRole("dialog", { name: "Kurzanleitung" });
+  await expect(dlg).toBeVisible();
+  await expect(dlg.getByRole("heading", { name: "Erster Wettbewerb mit Dossier" })).toBeVisible();
+  await expect(dlg.getByRole("heading", { name: /^1\. Leeres Projekt/ })).toHaveCount(1);
+  expect(await dlg.textContent()).not.toContain("**");
+  await shot(page, "guide-de");
+  await dlg.locator("img").first().scrollIntoViewIfNeeded();
+  await expect.poll(() => dlg.locator("img").first().evaluate((i: HTMLImageElement) => i.complete && i.naturalWidth > 0)).toBe(true);
+  await shot(page, "guide-de-img");
+  await page.keyboard.press("Escape");
+  await expect(dlg).toBeHidden();
+});
+
+test("Hilfe: Fehler melden öffnet die Issue-Seite mit Version und Build, ohne Projektdaten", async ({ page }) => {
+  await page.addInitScript(() => {
+    const w = window as unknown as { __opened: string[] };
+    w.__opened = [];
+    window.open = ((url?: string | URL) => {
+      w.__opened.push(String(url));
+      return null;
+    }) as typeof window.open;
+  });
+  await startNewProject(page);
+  await page.getByRole("button", { name: "Hilfe", exact: true }).click();
+  await page.getByRole("option", { name: "Fehler melden …", exact: true }).click();
+  const opened = await page.evaluate(() => (window as unknown as { __opened: string[] }).__opened);
+  expect(opened).toHaveLength(1);
+  const u = new URL(opened[0]!);
+  expect(u.origin + u.pathname).toBe("https://git.openbureau.ch/karim/dossier/issues/new");
+  expect(u.searchParams.get("body")!).toMatch(/^Version: \S+ \(Build \S+\)/);
+});
+
+test("Fehler melden und Kurzanleitung auf Englisch", async ({ page }) => {
+  await page.goto("/?dossierTest&lang=en");
+  await page.getByRole("button", { name: "New project" }).first().click();
+  await page.getByRole("menubar").getByRole("button", { name: "Help", exact: true }).click();
+  await shot(page, "help-en");
+  await expect(page.getByRole("option", { name: "Report a Bug …", exact: true })).toBeVisible();
+  await page.getByRole("option", { name: "Quick Guide …", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "Quick Guide (German)" })).toBeVisible();
+});
+
+test("Flächen-Nachweis im leeren Projekt: Hinweis statt Nullen, mit Bauteilen exportiert", async ({ page }) => {
+  await startNewProject(page);
+  await openTab(page, "Flächenbilanz");
+  const downloads: string[] = [];
+  page.on("download", (d) => downloads.push(d.suggestedFilename()));
+  await page.getByRole("button", { name: "CSV", exact: true }).first().click();
+  await expect(page.getByText("Noch keine Bauteile — der Nachweis wäre leer.")).toBeVisible();
+  await shot(page, "csv-empty");
+  expect(downloads).toEqual([]);
+  await fileMenu(page, /^Neu aus Vorlage: Wettbewerb$/);
+  await discardIfAsked(page);
+  await openTab(page, "Flächenbilanz");
+  const dl = page.waitForEvent("download");
+  await page.getByRole("button", { name: "CSV", exact: true }).first().click();
+  expect((await dl).suggestedFilename()).toMatch(/\.csv$/);
+});

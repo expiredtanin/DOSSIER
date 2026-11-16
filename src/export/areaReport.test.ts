@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { sampleProject } from "../model/sampleProject";
+import { emptyProject, sampleProject } from "../model/sampleProject";
 import type { Project, Room, Wall } from "../model/types";
 import { computeAreaTable, computeIvhb } from "../analysis/areaTable";
-import { areaReportToCsv, areaReportToSvg, buildAreaReport, buildAreaReportPdf, layoutAreaReport, parseAreaReportCsv } from "./areaReport";
+import { isAreaReportEmpty, areaReportToCsv, areaReportToSvg, buildAreaReport, buildAreaReportPdf, layoutAreaReport, parseAreaReportCsv } from "./areaReport";
 
 // Einfaches Haus: Achsen 10 × 8 m, Wände 0.3 m, EG-Räume innen 9.7 × 7.7 m (Handrechnung siehe flaechen.rs).
 function house(): Project {
@@ -111,5 +111,12 @@ describe("Bericht", () => {
     const rows = Array.from({ length: 60 }, (_, i) => ({ cells: [`G${i}`, ...sec.rows[0]!.cells.slice(1)] }));
     const lay = layoutAreaReport({ ...report, sections: [{ ...sec, rows }] });
     expect(lay.pages.length).toBeGreaterThan(1);
+  });
+});
+
+describe("isAreaReportEmpty [263]", () => {
+  it("leeres Projekt: leer; Musterhaus: nicht leer", () => {
+    expect(isAreaReportEmpty(emptyProject)).toBe(true);
+    expect(isAreaReportEmpty(sampleProject)).toBe(false);
   });
 });

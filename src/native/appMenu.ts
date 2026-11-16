@@ -17,6 +17,7 @@ import { isTauriRuntime } from "./projectFile";
 import { t } from "../i18n";
 import { openRenderDialog } from "../state/renderDialogHook";
 import { openShortcutOverview } from "../state/shortcutOverviewHook";
+import { openBugReport, openQuickGuide } from "../state/helpMenuHook";
 import { openImageExportDialog } from "../state/imageExportDialogHook";
 import { APP_VERSION } from "../ui/TopBar";
 import { BUILD_INFO } from "../update/buildInfo";
@@ -502,13 +503,21 @@ export function useNativeAppMenu(
         ],
       });
 
-      // [210] Hilfe → Tastaturkürzel (Overlay-Dialog in der App).
+      // [210] Hilfe → Tastaturkürzel (Overlay-Dialog in der App); [263] Kurzanleitung (Dialog), Fehler melden (System-Browser).
       const helpMenu = await Submenu.new({
         text: t("menu.help"),
         items: [
           await MenuItem.new({
+            text: t("menu.help.guide"),
+            action: () => openQuickGuide(),
+          }),
+          await MenuItem.new({
             text: t("menu.help.shortcuts"),
             action: () => openShortcutOverview(),
+          }),
+          await MenuItem.new({
+            text: t("menu.help.bugReport"),
+            action: () => openBugReport(),
           }),
         ],
       });

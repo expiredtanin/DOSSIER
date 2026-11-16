@@ -13,6 +13,7 @@ import { t } from "../i18n";
 import type { View3d, ViewType } from "../model/viewTypes";
 import { openRenderDialog } from "../state/renderDialogHook";
 import { openAboutDialog } from "../state/aboutDialogHook";
+import { openBugReport, openQuickGuide } from "../state/helpMenuHook";
 import { openShortcutOverview } from "../state/shortcutOverviewHook";
 import { openImageExportDialog } from "../state/imageExportDialogHook";
 
@@ -190,7 +191,9 @@ export const AppMenuBar = memo(function AppMenuBar({
   ];
 
   const helpItems: DropdownItem[] = [
+    { label: t("menu.help.guide"), onSelect: openQuickGuide },
     { label: t("menu.help.shortcuts"), onSelect: openShortcutOverview },
+    { label: t("menu.help.bugReport"), onSelect: openBugReport },
     { divider: true },
     // [263] Auf macOS (natives Menü) steht „Über dossier“ im App-Menü; dieses Menü gibt es nur im Browser/Electron.
     { label: t("menu.help.about"), onSelect: openAboutDialog },
