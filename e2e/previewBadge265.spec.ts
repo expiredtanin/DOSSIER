@@ -4,7 +4,8 @@
 import type { Page } from "@playwright/test";
 import { expect, fileMenu, openTab, showSnapshot, test } from "./app";
 
-test.use({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1 });
+// 1920 breit: bei 1280 liegt die Darstellungsart seit dem Überlauf-Menü [263] im „⋯“.
+test.use({ viewport: { width: 1920, height: 1080 }, deviceScaleFactor: 1 });
 
 const shot = async (page: Page, name: string) => {
   if (process.env.E2E_SHOTS) await page.screenshot({ path: `${process.env.E2E_SHOTS}/${name}.png`, type: "png" });
