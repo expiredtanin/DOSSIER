@@ -3347,7 +3347,7 @@ export const de = {
   "shortcut.toggleTrace": "Pausfolie ein/aus",
 
   "settings.section.update": "Update",
-  "settings.update.autoCheck": "Automatisch nach Updates suchen",
+  "settings.update.autoCheck": "Prüfung beim Start",
   "settings.update.snooze.active": "Aktiv",
   "settings.update.snooze.1day": "1 Tag pausieren",
   "settings.update.snooze.1week": "1 Woche pausieren",
@@ -4587,6 +4587,8 @@ export const de = {
   "settings.language.auto": "Automatisch (System)",
   "settings.language.de": "Deutsch",
   "settings.language.en": "English",
+  "settings.update.onStart": "Beim Start nach Updates suchen",
+  "settings.update.onStart.hint": "Aus: Dossier nimmt von sich aus keinen Kontakt zum Update-Server auf (Datenschutz). «Nach Updates suchen» und der Versionsverlauf (beim Öffnen dieses Reiters) fragen nur auf deinen Klick bzw. Reiterwechsel.",
 } as const;
 
 export type TranslationKey = keyof typeof de;

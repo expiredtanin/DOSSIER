@@ -20,7 +20,7 @@ import { APP_VERSION } from "./TopBar";
 import type { LayoutState } from "../panels/types";
 import type { LineCap, LineEnds, LineJoin } from "../core";
 import type { ThemeMode } from "../theme/themeMode";
-import { checkForUpdate, getUpdateSnoozeUntil, setUpdateSnooze } from "../update/checkForUpdate";
+import { checkForUpdate, getUpdateCheckOnStart, getUpdateSnoozeUntil, setUpdateCheckOnStart, setUpdateSnooze } from "../update/checkForUpdate";
 import { getRunningVersion } from "../update/version";
 import { BUILD_INFO, formatBuildInfo } from "../update/buildInfo";
 import { getBlenderPath, setBlenderPath } from "../state/blenderSettings";
@@ -154,6 +154,7 @@ export function SettingsDialog({
   const [tab, setTab] = useState<SettingsTabId>("general");
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [runningVersion, setRunningVersion] = useState<string | null>(null);
+  const [checkOnStart, setCheckOnStart] = useState<boolean>(() => getUpdateCheckOnStart());
   const [snoozeUntil, setSnoozeUntilState] = useState<number | null>(() => getUpdateSnoozeUntil());
   const [versionHistory, setVersionHistory] = useState<VersionEntry[] | null>(null);
   const [selectedTag, setSelectedTag] = useState<string>("");
@@ -161,12 +162,14 @@ export function SettingsDialog({
   useEffect(() => {
     void getRunningVersion().then(setRunningVersion);
   }, []);
+  // Versionsverlauf erst abrufen, wenn der Reiter „Update“ geöffnet wird ([262]: kein Netz ohne Zutun).
   useEffect(() => {
+    if (tab !== "update" || versionHistory != null) return;
     void fetchVersionHistory().then((entries) => {
       setVersionHistory(entries);
       if (entries.length > 0) setSelectedTag(entries[0].tag);
     });
-  }, []);
+  }, [tab, versionHistory]);
 
   const dialogRef = useModalFocus({});
   useEffect(() => {
@@ -370,6 +373,20 @@ export function SettingsDialog({
               {checkingUpdate ? t("about.checkingUpdate") : t("about.checkUpdate")}
             </button>
 
+            <label className="settings-check">
+              <input
+                type="checkbox"
+                checked={checkOnStart}
+                onChange={(e) => {
+                  setUpdateCheckOnStart(e.target.checked);
+                  setCheckOnStart(e.target.checked);
+                }}
+              />
+              {t("settings.update.onStart")}
+            </label>
+            <div className="imp-note">{t("settings.update.onStart.hint")}</div>
+
+            {checkOnStart && (
             <div className="settings-subsection">
               <label className="settings-field-label" htmlFor="settings-update-snooze">
                 {t("settings.update.autoCheck")}
@@ -399,6 +416,7 @@ export function SettingsDialog({
                 </div>
               )}
             </div>
+            )}
 
             <div className="settings-subsection">
               <label className="settings-field-label" htmlFor="settings-update-history">

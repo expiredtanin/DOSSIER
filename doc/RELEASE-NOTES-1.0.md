@@ -220,7 +220,7 @@ Electron-Hauptprozess und `index.html`). Schriften und Icons werden mitgeliefert
 | swisstopo / geo.admin.ch | Adresssuche, Gebäude und Luftbild für den Kontext-Import, 3D-Gebäude und Gelände (STAC) | nur nach Klick im Dialog «Kontext importieren» (Suche, Import) | Offline-Modus |
 | OpenStreetMap (Overpass) | Gebäude, Strassen, Wasser, Grün im Kontext-Import | nur nach Klick im Dialog «Kontext importieren» | Offline-Modus |
 | ambientCG | Materialtexturen (CC0) | Die Materialbibliothek (Ressourcen → Komponenten) fragt beim Öffnen die Trefferliste ab, Texturen erst nach Klick auf «Textur laden» | Offline-Modus |
-| Update-Server (`git.openbureau.ch`) | Suche nach neuer Version; Versionsverlauf in den Einstellungen | Tauri/macOS: **automatisch einmal beim Start** und beim Öffnen der Einstellungen; Knopf «Nach Updates suchen». Electron/Linux: keine Update-Prüfung | Offline-Modus (ab [262]); Start-Prüfung zusätzlich pausierbar (Einstellungen → Update) |
+| Update-Server (`git.openbureau.ch`) | Suche nach neuer Version; Versionsverlauf in den Einstellungen | Tauri/macOS: **beim Start nur, wenn du es einschaltest** (Einstellungen → Update → «Beim Start nach Updates suchen», Vorgabe aus); sonst nur auf Klick («Nach Updates suchen») und beim Öffnen des Reiters «Update» (Versionsverlauf). Electron/Linux: keine Update-Prüfung | Offline-Modus (ab [262]); Start-Prüfung zusätzlich pausierbar (Einstellungen → Update) |
 | KI-Zugriff (MCP-Brücke) | KI-Werkzeuge steuern Dossier | nur mit «KI-Zugriff erlauben»; lokal auf `127.0.0.1`, mit Schlüssel, nicht aus dem Netz erreichbar | Schalter «KI-Zugriff erlauben» |
 | Blender | Rendern | startet das lokal installierte Blender; kein Netz. «Blender laden» öffnet nur die Webseite im Browser | – |
 
@@ -243,7 +243,7 @@ Geo-Proxy konfiguriert (`VITE_GEO_PROXY`, Büro-Server), laufen swisstopo/OSM-Ab
 9. **Dateiformat — entschieden (16.11.):** Betas ohne Zusage; ab 1.0.0 öffnet jede 1.x-Version alle `.obp` aus 1.x (Migration beim Öffnen).
 10. **Beispielprojekt — entschieden (16.11.):** wird als fiktives Beispiel ausgeliefert und so benannt.
 11. **Netzzugriffe — entschieden (16.11.):** Notes wie im Abschnitt oben; die Update-Prüfung beim Start ist **standardmässig aus** (Datenschutz zuerst, kein
-    Netz ohne Zutun), einschaltbar in den Einstellungen; «Nach Updates suchen» bleibt als Knopf.
+    Netz ohne Zutun), einschaltbar in den Einstellungen; «Nach Updates suchen» bleibt als Knopf. Umgesetzt mit [262] (16.11.).
 12. ~~Fenster über Schnitt~~ — erledigt durch [260] (15.11.): Fenster/Türen im Grundriss symbolisch (Vorgabe) oder geschnitten, je Element, Typ oder
     Modelldarstellung; „geschnitten“ zeichnet Öffnungen über/unter Schnitt hell auf schwarzer Wand ([256]).
 13. ~~Klassen der Objektbibliothek~~ — erledigt: 22/23/24 bestätigt (15.11.).

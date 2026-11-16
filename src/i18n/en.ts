@@ -3334,7 +3334,7 @@ export const en: Record<TranslationKey, string> = {
   "shortcut.toggleTrace": "Trace on/off",
 
   "settings.section.update": "Update",
-  "settings.update.autoCheck": "Check for updates automatically",
+  "settings.update.autoCheck": "Startup check",
   "settings.update.snooze.active": "Active",
   "settings.update.snooze.1day": "Pause for 1 day",
   "settings.update.snooze.1week": "Pause for 1 week",
@@ -4573,4 +4573,6 @@ export const en: Record<TranslationKey, string> = {
   "settings.language.auto": "Automatic (system)",
   "settings.language.de": "Deutsch",
   "settings.language.en": "English",
+  "settings.update.onStart": "Check for updates on startup",
+  "settings.update.onStart.hint": "Off: Dossier does not contact the update server on its own (privacy). “Check for updates” and the version history (loaded when you open this tab) only ask when you click or open the tab.",
 };
