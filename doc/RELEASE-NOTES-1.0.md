@@ -21,7 +21,7 @@ Mengen und Exporte werden daraus berechnet und stimmen nach jeder Änderung wied
 
 **Plattformen**
 - **macOS** (Tauri, Metal): Hauptplattform.
-- **Linux** (Electron, AppImage x86_64): vorhanden, im Container geprüft, nicht auf echter Hardware. **[Frage M: offiziell unterstützt?]**
+- **Linux** (Electron, AppImage x86_64): offiziell unterstützt (Entscheid 16.11.); im Container geprüft.
 - **Browser-Build:** vorhanden (kürzere Menüleiste, Dateien laden/speichern als Download, kein natives Fenster, keine Metal-Anzeige).
 - **Windows:** kein Paket in 1.0.
 
@@ -107,7 +107,7 @@ angeboten. Die Kopien liegen im Speicher der Webview: Löschen der Webview-Daten
 gespeichert. Für Abstürze im Rechenkern gibt es einen Wiederanlauf (nicht überall geprüft, s. [118]).
 
 **Dateiformat.** Projekte sind `.obp` (Vorlagen `.obpt`). Eine Datei aus einer neueren Dossier-Version lehnt eine ältere ab;
-ältere Dateien werden beim Öffnen migriert. **[Frage M: Dateiformat-Zusage für 1.x? Beispielstände vor 1.0 sind nicht garantiert öffenbar.]**
+ältere Dateien werden beim Öffnen migriert. Ab 1.0.0 öffnet jede 1.x-Version alle Dateien aus 1.x; Stände aus den Betas sind nicht garantiert öffenbar.
 
 **Lizenz.** GNU Affero General Public License v3.0 oder später (`LICENSE`), © 2026 Karim Gabriele Varano. Fremdkomponenten behalten ihre Lizenzen
 (`NOTICE`: u. a. acadrust MPL-2.0, Manifold Apache-2.0, i_overlay MIT/Apache-2.0); mitgelieferte ambientCG-Materialien sind CC0.
@@ -232,22 +232,19 @@ Geo-Proxy konfiguriert (`VITE_GEO_PROXY`, Büro-Server), laufen swisstopo/OSM-Ab
 ## Offene Fragen an den Maintainer
 
 1. ~~Versionsnummer~~ — erledigt durch [261] (15.11.): 1.0.0-beta.N, Build JJMMTT.N (Über Dossier und Statusleiste zeigen beides).
-2. **[Frage M: Signierung/Notarisierung/Updater]** Wird die Mac-App signiert und notarisiert, und läuft der Updater (Endpunkt zeigt auf `git.openbureau.ch`)? Sonst gehört ein
-   Hinweis zu Gatekeeper in die Notes.
-3. **[Frage M: Download-Ort]** Wo liegen die Pakete (Download-Seite, git.openbureau.ch, GitHub)? Die README sagt «Fertige Installer gibt es noch nicht».
-4. **[Frage M: Lizenz]** Gilt AGPL-3.0-oder-später für die ausgelieferte App unverändert? Soll der Lizenzhinweis in den Notes bleiben?
-5. **[Frage M: Unterstützte macOS-Version und Hardware]** Kleinste macOS-Version, Apple Silicon und/oder Intel (Ziel [30] «universal»), Mindest-RAM?
-6. **[Frage M: Linux]** Ist Linux (Electron, AppImage) offiziell unterstützt oder «auf eigene Gefahr»? Browser-Build: nur zum Ausprobieren?
-7. **[Frage M: Halbfertiges sichtbar lassen?]** Bleiben in 1.0 sichtbar: Pathtracing-Vorschau ([212]), Rendering mit Blender ([211]), Kamerafahrt/Video ([246]), Begehen
-   mit Geist-Modus ([245])? Als «Vorschau/Beta» kennzeichnen oder ausblenden?
-8. **[Frage M: Kostenkennwerte]** Bleiben die Beispielwerte als Vorgabe, oder sollen sie leer starten, damit niemand sie als Richtwert missversteht?
-9. **[Frage M: Dateiformat]** Verspricht 1.0 das Öffnen von `.obp` aus 1.x? CLAUDE.md sagt, es gebe keine produktiven Projekte und keine Migrationspflicht;
-   Anwender:innen müssten das in den Notes lesen.
-10. **[Frage M: Beispielprojekt]** Das Beispielprojekt «Wettbewerb» ist fiktiv (Winterthur): als Beispiel ausliefern und so nennen?
-11. **[Frage M: Netzzugriffe und Datenschutz]** Befund steht im Abschnitt «Netzzugriffe und Datenschutz» ([262], nur aus dem Code): keine Telemetrie gefunden,
-    Netzzugriffe nur über die Host-Liste, einziger Start-Zugriff ist die Update-Prüfung (Tauri), jetzt mit Offline-Modus. Bitte bestätigen, dass die Notes
-    das so nennen sollen, und ob die Start-Prüfung in 1.0 standardmässig an bleibt.
+2. **Signierung/Updater — vorläufig entschieden (16.11., Koordinator nach Haltung Maintainer):** Die Betas sind nicht signiert/notarisiert; die Notes erklären
+   den Gatekeeper-Weg (Rechtsklick → Öffnen). Notarisierung erst, wenn ein Apple-Entwicklerkonto da ist. **[Frage M: Apple-Entwicklerkonto vorhanden?]**
+3. **Download-Ort — entschieden (16.11.):** Releases auf `git.openbureau.ch` (eigener, freier Server statt GitHub); README und Website verweisen dorthin.
+4. **Lizenz — entschieden (16.11.):** AGPL-3.0-oder-später unverändert, Hinweis bleibt in den Notes.
+5. **macOS-Version/Hardware:** wird aus dem Mac-Durchlauf abgeleitet (WebGPU in der Webview bestimmt die kleinste Version); bis dahin «Apple Silicon, aktuelles macOS».
+6. **Linux — entschieden (16.11., Maintainer: «Linux-Prüfungen reichen»):** offiziell unterstützt (AppImage x86_64); Browser-Build nur zum Ausprobieren.
+7. **Halbfertiges — entschieden (16.11.):** bleibt sichtbar, aber als «Vorschau» gekennzeichnet (Pathtracing, Rendering mit Blender, Kamerafahrt/Video, Geist-Modus).
+8. **Kostenkennwerte — entschieden (16.11.):** Beispielwerte bleiben als Vorgabe, deutlich als «Beispielwerte, keine Richtwerte» markiert (wie heute).
+9. **Dateiformat — entschieden (16.11.):** Betas ohne Zusage; ab 1.0.0 öffnet jede 1.x-Version alle `.obp` aus 1.x (Migration beim Öffnen).
+10. **Beispielprojekt — entschieden (16.11.):** wird als fiktives Beispiel ausgeliefert und so benannt.
+11. **Netzzugriffe — entschieden (16.11.):** Notes wie im Abschnitt oben; die Update-Prüfung beim Start ist **standardmässig aus** (Datenschutz zuerst, kein
+    Netz ohne Zutun), einschaltbar in den Einstellungen; «Nach Updates suchen» bleibt als Knopf.
 12. ~~Fenster über Schnitt~~ — erledigt durch [260] (15.11.): Fenster/Türen im Grundriss symbolisch (Vorgabe) oder geschnitten, je Element, Typ oder
     Modelldarstellung; „geschnitten“ zeichnet Öffnungen über/unter Schnitt hell auf schwarzer Wand ([256]).
 13. ~~Klassen der Objektbibliothek~~ — erledigt: 22/23/24 bestätigt (15.11.).
-14. **[Frage M: Gegenprobe vor Release]** Bis wann ist der Mac-Durchlauf ([206], `doc/RELEASE-1.0.md`) fertig? Ergebnisse ändern die Liste der Einschränkungen oben.
+14. **Gegenprobe — entschieden (16.11., Maintainer):** Linux-Prüfungen reichen für die Freigabe; der Mac-Durchlauf (`doc/RELEASE-1.0.md`) läuft nebenher, Befunde fliessen als Fehlerbehebungen ein.
