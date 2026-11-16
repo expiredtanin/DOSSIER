@@ -333,7 +333,8 @@ test("Referenz-Ablauf WBW/Vorprojekt: leeres Projekt bis Abgabe", async ({ page 
     await page.locator("[data-testid=presentation-open]").click();
     const dialog = page.getByRole("dialog", { name: "Präsentationsplan" });
     await expect(dialog).toBeVisible();
-    await dialog.locator("[data-testid=presentation-section]").selectOption({ label: "Schnitt B" });
+    // [266] Mehrfachauswahl: nur Schnitt B (Schnitt A abwählen).
+    await dialog.locator("label", { hasText: "Schnitt A" }).locator("input[type=checkbox]").uncheck();
     await dialog.locator("[data-testid=presentation-paper]").selectOption("a1");
     await dialog.locator("[data-testid=presentation-create]").click();
     await expect(dialog).toBeHidden();

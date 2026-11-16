@@ -60,8 +60,12 @@ function lineDraft(ctx: CommandContext, pts: Vec2[], cursor: Vec2 | null): ToolD
  * Vorlage, Buchstaben A, B, … nach Anzahl der Ebenen dieser Art); zu kurze Linien (< 0.1 m) → nichts.
  */
 function lineMutation(ctx: CommandContext, a: Vec2, b: Vec2, kind: LineKind, bends: Vec2[] = []) {
-  const key = kind === "section" ? "cmd.sectionline.newSection" : "cmd.sectionline.newElevation";
-  return createMutation(ctx, { cmd: "sectionline", a, b, kind, name: t(key, { letter: "\u0001" }), ...(bends.length ? { bends } : {}) });
+  // [266] Ansichten heissen nach der Himmelsrichtung (Plan oben = Norden; \u0002 ersetzt der Kern), Schnitte nach Buchstaben.
+  if (kind === "elevation") {
+    const dirs = (["north", "east", "south", "west"] as const).map((d) => t(`cmd.sectionline.dir.${d}`));
+    return createMutation(ctx, { cmd: "sectionline", a, b, kind, name: t("cmd.sectionline.newElevation", { dir: "\u0002" }), dirs });
+  }
+  return createMutation(ctx, { cmd: "sectionline", a, b, kind, name: t("cmd.sectionline.newSection", { letter: "\u0001" }), ...(bends.length ? { bends } : {}) });
 }
 
 interface LineIdle extends CommandState {

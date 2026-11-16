@@ -28,7 +28,7 @@ import { addedItems, addItems, patchItem } from "../core/opsBuild";
 import { standardModelViews, standardsMergeOps } from "../model/standards";
 import { imageAspect } from "../model/layoutImages";
 import { createLayout, createMasterLayout, createSheetLevel, sheetMmToModel, sheetSizeMm } from "../model/layoutModel";
-import { SHADOW_CATEGORY } from "../model/derivedCategories";
+import { SECTION_MARK_CATEGORY, SHADOW_CATEGORY, SYMBOL_CATEGORY } from "../model/derivedCategories";
 import { createPosterMaster, findPosterMaster, posterMetrics, posterTemplate, scaleLabelMetrics } from "../model/posterTemplates";
 
 /** Id der Standard-Ansichtsvorlage „Präsentation" (`standards.rs`). */
@@ -41,8 +41,8 @@ export interface PresentationOptions {
   floors: string[];
   /** Gewählte Ansichten (Ebenen der Art `elevation`) in Blattreihenfolge. */
   elevationIds: string[];
-  /** Ein Schnitt (Ebene der Art `section`) oder keiner. */
-  sectionId: string | null;
+  /** [266] Gewählte Schnitte (Ebenen der Art `section`) in Blattreihenfolge. */
+  sectionIds: string[];
   paper: LayoutPaperFormat;
   orientation: LayoutOrientation;
   /** Skizzenstil ([67]) für die gezeigten Ebenen. */
@@ -51,6 +51,8 @@ export interface PresentationOptions {
   scale: number | null;
   /** [224] Massstab je Ebene (übersteuert `scale`). */
   scales?: Record<string, number>;
+  /** [266] Aussenbemassung (Befehl `autodim`, Gesamtmass je Seite) für die Grundrisse ergänzen, wo sie fehlt. Fehlt die Angabe: nein. */
+  autoDim?: boolean;
   /** [224] Plakat-Vorlage ([208], Schlüssel in `POSTER_TEMPLATES`) als Ziel; fehlt sie, gilt `paper`/`orientation`. */
   poster?: string;
   /** [208] Zusätzliche Plakat-Inhalte (nur mit `poster`): Situation 1:500, Tabellen, 3D-Bild-Platzhalter. */
@@ -160,7 +162,7 @@ export function levelHasContent(project: Project, levelId: string): boolean {
   return false;
 }
 
-/** Vorschlag für den Dialog: Geschosse mit Inhalt, alle Ansichten, erster Schnitt, 1:200; Blatt des meistgenutzten Masters, sonst A1 quer. */
+/** Vorschlag für den Dialog: Geschosse mit Inhalt, alle Ansichten und Schnitte, Aussenbemassung, 1:200; Blatt des meistgenutzten Masters, sonst A1 quer. */
 export function presentationDefaults(project: Project): PresentationOptions {
   const levels = project.drawingLevels;
   const masters = project.masterLayouts ?? [];
@@ -171,11 +173,12 @@ export function presentationDefaults(project: Project): PresentationOptions {
   return {
     floors: levels.filter((l) => isFloor(l) && levelHasContent(project, l.id)).map((l) => l.id),
     elevationIds: levels.filter((l) => l.kind === "elevation").map((l) => l.id),
-    sectionId: levels.find((l) => l.kind === "section")?.id ?? null,
+    sectionIds: levels.filter((l) => l.kind === "section").map((l) => l.id),
     paper: usable ? master.paper : "a1",
     orientation: usable ? master.orientation : "landscape",
     sketch: false,
     scale: PRESENTATION_DEFAULT_SCALE,
+    autoDim: true,
   };
 }
 
@@ -209,10 +212,12 @@ function categoryCodes(cats: readonly LayerCategory[], out: string[] = []): stri
  * Umgebung (Kataster, Strassen, Baurecht, Gelände, Höhenlinien — dafür gibt es den Situationsplan): sonst
  * bestimmen Parzelle und Geländemodell Grösse und Massstab jeder Zeichnung.
  */
-function presentationVisibility(project: Project, t: ViewTemplate): Record<string, boolean> {
+function presentationVisibility(project: Project, t: ViewTemplate, marks = false): Record<string, boolean> {
   const vis: Record<string, boolean> = {};
   for (const c of categoryCodes(project.layers)) vis[c] = true;
   const out: Record<string, boolean> = { ...vis, ...(t.layerVisibility ?? {}) };
+  // [266] Schnitt- und Ansichtsmarken im Grundriss, wenn das Blatt Schnitte/Ansichten zeigt (die Vorlage blendet sie sonst aus).
+  if (marks) out[SECTION_MARK_CATEGORY] = true;
   for (const c of siteCodes(project)) out[c] = false;
   return out;
 }
@@ -241,7 +246,7 @@ function chosenLevels(project: Project, o: PresentationOptions): { id: string; g
   const out: { id: string; group: number }[] = [];
   for (const id of o.floors) if (byId.get(id) && isFloor(byId.get(id)!)) out.push({ id, group: 0 });
   for (const id of o.elevationIds) if (byId.get(id)?.kind === "elevation") out.push({ id, group: 1 });
-  if (o.sectionId && byId.get(o.sectionId)?.kind === "section") out.push({ id: o.sectionId, group: 2 });
+  for (const id of o.sectionIds ?? []) if (byId.get(id)?.kind === "section") out.push({ id, group: 2 });
   return out;
 }
 
@@ -301,7 +306,8 @@ function situationLevelId(project: Project, o: PresentationOptions): string | un
 function situationVisibility(project: Project, t: ViewTemplate): Record<string, boolean> {
   const vis: Record<string, boolean> = {};
   for (const c of categoryCodes(project.layers)) vis[c] = true;
-  return { ...vis, ...(t.layerVisibility ?? {}), [SHADOW_CATEGORY]: false };
+  // Nordpfeil und Massstabsbalken setzt das Blatt an den Rahmenrand ([266]): in der Zeichnung lägen sie auf Parzelle oder Strasse.
+  return { ...vis, ...(t.layerVisibility ?? {}), [SHADOW_CATEGORY]: false, [SYMBOL_CATEGORY]: false };
 }
 
 /** Die Vorlage „Situation WBW“ des Projekts bzw. aus den Standards (dann fehlt sie im Projekt und muss mit angelegt werden). */
@@ -318,6 +324,13 @@ function posterTextMetrics(size: { w: number; h: number }): { sizeMm: number; dy
   return { sizeMm: m.sizeMm, dyMm: m.dyMm, bandMm: m.dyMm + m.sizeMm * 0.8, tablePt: Math.round((Math.min(size.w, size.h) / 594) * 13) };
 }
 
+/**
+ * [266] Zeigt das Plakat Schnitte oder Ansichten (dann stehen deren Marken in den Grundrissen)? Nur beim Plakat: dort gibt der
+ * Kern jedem Grundriss einen Ausschnitt um das Haus (mit Platz für die Marken); ein gewöhnliches Blatt zeigt das ganze Ausmass,
+ * und Marken weit vom Haus würden die Pläne vergrössern. Die Marken folgen den Linien des Projekts (auch ungewählter Schnitte).
+ */
+const showsMarks = (o: PresentationOptions) => !!o.poster && (o.elevationIds.length > 0 || (o.sectionIds ?? []).length > 0);
+
 /** Massstab und Rahmen aus dem Kern (ohne das Projekt zu ändern). */
 export function planPresentationSheet(project: Project, o: PresentationOptions): PresentationPlan {
   const { template } = presentationTemplate(project);
@@ -326,7 +339,7 @@ export function planPresentationSheet(project: Project, o: PresentationOptions):
   // Plakat: Kopfzeile und Ränder der Vorlage, kein Schriftfeld des Masters.
   const poster = o.poster && posterTemplate(o.poster) ? posterMetrics(size.w, size.h) : null;
   const levels = chosenLevels(project, o);
-  const vis = presentationVisibility(project, template);
+  const vis = presentationVisibility(project, template, showsMarks(o));
   let posterReq: Record<string, unknown> | undefined;
   if (poster) {
     const ex = o.extras;
@@ -357,6 +370,7 @@ export function planPresentationSheet(project: Project, o: PresentationOptions):
     template,
     ...(o.scale ? { scale: o.scale } : {}),
     scales: o.scales ?? {},
+    ...(showsMarks(o) ? { marks: true } : {}),
     ...(poster ? { marginMm: poster.marginMm, topMm: poster.contentTopMm } : {}),
     ...(posterReq ? { poster: posterReq } : {}),
   });
@@ -438,6 +452,22 @@ function lastLayoutImage(project: Project): LayoutImage | undefined {
 }
 
 /**
+ * [266] Aussenbemassung (Gesamtmasse je Gebäudeseite, Befehl `autodim`) für die gezeigten Grundrisse, wo sie noch fehlt: ohne
+ * Bemassung gibt ein Wettbewerbsplan 1:200 keine Hausgrösse an. Vorhandene Ketten bleiben (auch von Hand verschobene).
+ */
+function autoDimOps(project: Project, plan: PresentationPlan, cat: string, stamp: string): CoreOp[] {
+  const out: CoreOp[] = [];
+  const done = new Set<string>();
+  for (const it of plan.items) {
+    if (it.group !== 0 || it.kind === "situation" || done.has(it.levelId)) continue;
+    done.add(it.levelId);
+    if (project.drawings2d.some((d) => d.levelId === it.levelId && d.id.startsWith(`autodim-${it.levelId}-`))) continue;
+    out.push(...documentFor(project).cmdOps({ cmd: "autodim", ctx: { level: it.levelId, cat }, scale: it.scale, stamp }));
+  }
+  return out;
+}
+
+/**
  * Ops für das Präsentationsblatt (ein Undo-Schritt, wenn sie zusammen angewendet werden): Layout mit
  * Blatt-Ebene und Master (neu, falls keiner zum Format passt), je Ebene ein an „Präsentation" gebundener
  * Ausschnitt und ein Viewport, Titel und Nordpfeil auf der Blatt-Ebene, Schatten/Skizze an den Ebenen.
@@ -456,6 +486,7 @@ export function presentationSheetOps(
   const { template, isNew } = presentationTemplate(project);
   const ops: CoreOp[] = [];
   if (isNew) ops.push(...addItems("viewTemplates", [template]));
+  if (o.autoDim) ops.push(...autoDimOps(project, plan, annotationCategory(project), stamp));
   const sheet = targetSheet(o);
   const tpl = o.poster ? posterTemplate(o.poster) : undefined;
   let master = masterFor(project, o);
@@ -484,7 +515,7 @@ export function presentationSheetOps(
     masterId: master.id,
   }));
   const sheetLevels = layouts.map((l) => createSheetLevel(`sheet-${l.id}`, l));
-  const vis = presentationVisibility(project, template);
+  const vis = presentationVisibility(project, template, showsMarks(o));
   const cat = annotationCategory(project);
   const byId = new Map(project.drawingLevels.map((l) => [l.id, l]));
   const snaps: ViewSnapshot[] = [];
@@ -537,25 +568,33 @@ export function presentationSheetOps(
         : sheetText(`d-pres-${stamp}-t${i}`, sheetLevels[page].id, cat, it.xMm + FRAME_PAD_MM, it.yMm + it.heightMm + 6, `${title}   1:${it.scale}`, 4, true),
     );
   });
-  // Nordpfeil rechts neben dem Titel des ersten Grundrisses.
-  const firstFloor = plan.items.find((it) => it.group === 0 && it.kind !== "situation");
-  if (firstFloor) {
-    const lvl = sheetLevels[firstFloor.page ?? 0].id;
-    const cx = firstFloor.xMm + firstFloor.widthMm - 8;
-    const cy = firstFloor.yMm + firstFloor.heightMm + 4.8;
-    const north = northArrow(stamp, lvl, cat, cx, cy, 3.6, labels.north);
+  // Nordpfeil rechts neben dem Titel des ersten Grundrisses, Massstabsbalken links davon, sofern er den Titel nicht berührt
+  // (Breite grob 0.65 × Schrifthöhe je Zeichen). [266] Dasselbe für die Situation am Rahmenrand unter dem Plan: in der Zeichnung
+  // lägen die Planzeichen auf Parzelle oder Strasse. Ist der Rahmen so schmal, dass schon der Pfeil den Titel berührt (kleines
+  // Haus), steht der Pfeil in der oberen rechten Ecke des Rahmens und der Balken entfällt.
+  const symbols = (it: PresentationItem, key: string, title: string, ids: { n: string; s: string }) => {
+    const lvl = sheetLevels[it.page ?? 0].id;
+    const titleEnd = tpl
+      ? it.xMm + labelM.sizeMm * 3.6 + title.length * labelM.sizeMm * 0.65
+      : it.xMm + FRAME_PAD_MM + (title.length + 8) * 4 * 0.65;
+    const cx = it.xMm + it.widthMm - 8;
+    const beside = cx - 8 > titleEnd;
+    const cy = beside ? it.yMm + it.heightMm + 4.8 : it.yMm + 8;
+    const north = northArrow(key, lvl, cat, cx, cy, 3.6, labels.north);
     drawings.push(...north);
-    group(`grp-pres-${stamp}-n`, labels.northGroup, north);
-    // Massstabsbalken links vom Nordpfeil, sofern er den Titel nicht berührt (Breite grob 0.65 × Schrifthöhe je Zeichen).
-    const bar = scaleBar(stamp, lvl, cat, cx - 3.6 - 10, cy - 1, firstFloor.scale);
-    const title = byId.get(firstFloor.levelId)!.name;
-    const titleEnd = firstFloor.xMm + FRAME_PAD_MM + (title.length + 8) * 4 * 0.65;
+    group(ids.n, labels.northGroup, north);
+    if (!beside) return;
+    const bar = scaleBar(key, lvl, cat, cx - 3.6 - 10, cy - 1, it.scale);
     const barLeft = Math.min(...bar.flatMap((d) => (d.geom.shape === "polyline" ? d.geom.pts.map((p) => p.x * 1000) : [])));
     if (barLeft - 6 > titleEnd) {
       drawings.push(...bar);
-      group(`grp-pres-${stamp}-s`, labels.scaleBarGroup, bar);
+      group(ids.s, labels.scaleBarGroup, bar);
     }
-  }
+  };
+  const firstFloor = plan.items.find((it) => it.group === 0 && it.kind !== "situation");
+  if (firstFloor) symbols(firstFloor, stamp, byId.get(firstFloor.levelId)!.name, { n: `grp-pres-${stamp}-n`, s: `grp-pres-${stamp}-s` });
+  const sit = plan.items.find((it) => it.kind === "situation");
+  if (sit) symbols(sit, `${stamp}-sit`, labels.situation ?? byId.get(sit.levelId)!.name, { n: `grp-pres-${stamp}-sit-n`, s: `grp-pres-${stamp}-sit-s` });
   // [208] Blatt-Tabellen mit Titel im Band darüber.
   const fontPt = posterTextMetrics(size).tablePt;
   for (const tb of plan.tables ?? []) {
@@ -585,12 +624,14 @@ export function presentationSheetOps(
       images[box.page].push({ ...existing, id: `img-pres-${stamp}`, xMm: box.xMm, yMm: box.yMm, widthMm: w, heightMm: h });
     } else {
       const ph = labels.imagePlaceholder ?? "";
-      const size1 = labelM.sizeMm * 1.6;
+      // Schrift passt sich dem Rahmen an (ein kleines Haus gibt ein kleines Bild-Rahmen).
+      const size1 = Math.min(labelM.sizeMm * 1.6, (box.widthMm * 0.9) / (Math.max(ph.length, 1) * 0.55));
+      const sizeHint = Math.min(labelM.sizeMm, (box.widthMm * 0.92) / (Math.max((labels.imageHint ?? "").length, 1) * 0.5));
       drawings.push(
         sheetRect(`d-pres-${stamp}-ph0`, lvl, cat, box.xMm, box.yMm, box.widthMm, box.heightMm, { weightMm: 0.35, color: "#8a8a8a" }),
         sheetText(`d-pres-${stamp}-ph1`, lvl, cat, box.xMm + box.widthMm / 2 - ph.length * size1 * 0.27, box.yMm + box.heightMm / 2, ph, size1, true),
       );
-      if (labels.imageHint) drawings.push(sheetText(`d-pres-${stamp}-ph2`, lvl, cat, box.xMm + box.widthMm / 2 - labels.imageHint.length * labelM.sizeMm * 0.25, box.yMm + box.heightMm / 2 + size1 * 1.5, labels.imageHint, labelM.sizeMm));
+      if (labels.imageHint) drawings.push(sheetText(`d-pres-${stamp}-ph2`, lvl, cat, box.xMm + box.widthMm / 2 - labels.imageHint.length * sizeHint * 0.25, box.yMm + box.heightMm / 2 + size1 * 1.5, labels.imageHint, sizeHint));
     }
   }
   layouts.forEach((l, k) => {

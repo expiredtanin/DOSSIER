@@ -229,17 +229,24 @@ längere Rechenzeit. Es bleibt eine Vorschau; Endbilder gehen über das Renderin
 
 ## 10. Präsentationsplan
 
-Panel **Mappe** → **Präsentationsplan erstellen** (oder Befehl `praesentation`). Im Dialog Geschosse, Ansichten und den
-Schnitt wählen, Papier **A1**, Massstab 1:200 (Vorgabe) und **Erstellen**. Dossier ordnet alles im gemeinsamen
+Panel **Mappe** → **Präsentationsplan erstellen** (oder Befehl `praesentation`). Im Dialog Geschosse, Ansichten und
+Schnitte (beliebig viele) wählen, Papier **A1**, Massstab 1:200 (Vorgabe) und **Erstellen**. Dossier ordnet alles im gemeinsamen
 Massstab, mit Titeln, Nordpfeil, Massstabsbalken und Schriftfeld. Das Beispiel enthält so ein Blatt (3 Grundrisse,
-4 Ansichten, Schnitt A-A). Die Ausschnitte folgen der Vorlage „Präsentation“.
+4 Ansichten, die Schnitte A-A und B-B). Die Ausschnitte folgen der Vorlage „Präsentation“.
 
 **Plakat aus einem Schritt.** Ist als Papier eine Plakat-Vorlage gewählt, ordnet Dossier den Inhalt auf dem Spaltenraster an:
 die Situation 1:500 zuerst oben links, dann Grundrisse, Ansichten und Schnitt im festen Massstab, dazu die Tabellen
 „Kennzahlen (SIA 416)“ und „Baurecht-Nachweis“ und ein Rahmen „3D-Bild hier einsetzen“. Den Rahmen füllst du später im
 Rendering-Dialog mit „Ins Layout einsetzen“ oder mit dem Knopf „Bild“ im Blatt; nichts wird erfunden. Was aufs Plakat soll,
 wählst du im Dialog im Abschnitt „Plakat-Inhalt“ (Situation 1:500, Kennzahlen, Baurecht-Nachweis, Rahmen fürs 3D-Bild; je abwählbar).
-Reicht der Platz nicht, entsteht ein zweites Plakat (Plan 2/2); der Massstab wird nie verkleinert. Das Schriftfeld des
+Reicht der Platz nicht, entsteht ein zweites Plakat (Plan 2/2); der Massstab wird nie verkleinert. Bleibt Platz übrig,
+verteilt Dossier ihn gleichmässig als Weissraum zwischen den Zeilen; das 3D-Bild wird höchstens so gross wie der grösste Grundriss.
+
+**Bemassung und Marken im Plakat.** Der Haken „Aussenbemassung der Grundrisse ergänzen (wo sie fehlt)“ (Vorgabe an) legt für jedes gezeigte
+Geschoss ohne Masse die automatische Aussenbemassung an (derselbe Weg wie der Befehl `autodim`, Klasse 81, Auto-Bemassung);
+schon vorhandene Ketten bleiben. Zeigt das Plakat Schnitte oder Ansichten, stehen deren Marken (Klasse 91, Schnittmarken) in den Grundrissen,
+damit die Jury den Schnitt findet. Nordpfeil und Massstabsbalken der Situation stehen am Rahmenrand unter dem Plan, nicht
+auf Parzelle oder Strasse. Neue Ansichtslinien (Befehl `viewline`) heissen nach der Himmelsrichtung („Ansicht Süd“; Plan oben = Norden). Das Schriftfeld des
 Masters entfällt bei Plakat-Vorlagen, die Kopfzeile mit Kennwort und „Plan x/n“ genügt. Alle Schriften werden ins PDF
 eingebettet, damit die Druckerei sie nicht ersetzen muss.
 
