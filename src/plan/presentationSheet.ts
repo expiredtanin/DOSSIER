@@ -153,7 +153,9 @@ const isFloor = (l: DrawingLevel) => l.kind === "floor" && !l.layoutId;
 export function levelHasContent(project: Project, levelId: string): boolean {
   for (const [key, v] of Object.entries(project as unknown as Record<string, unknown>)) {
     if (key === "drawingLevels" || !Array.isArray(v)) continue;
-    if (v.some((it) => typeof it === "object" && it !== null && (it as { levelId?: string }).levelId === levelId)) return true;
+    // Bauteile (Wände, Decken, Dächer, Treppen, Räume, Stützen …) tragen `floorId`, 2D-Elemente und Körper `levelId` ([266]).
+    const on = (it: unknown) => typeof it === "object" && it !== null && ((it as { levelId?: string }).levelId === levelId || (it as { floorId?: string }).floorId === levelId);
+    if (v.some(on)) return true;
   }
   return false;
 }
@@ -259,6 +261,42 @@ function groundFloorId(project: Project, o: PresentationOptions): string | undef
   return (pool.find((l) => l.zeroLevel) ?? [...pool].sort((a, b) => Math.abs(a.baseElevation ?? 0) - Math.abs(b.baseElevation ?? 0))[0])?.id;
 }
 
+/** Alle Koordinatenpaare `{x, y}` einer Geometrie (Linie, Polylinie, Kreis, Text …), rekursiv. */
+function geomPoints(g: unknown, out: { x: number; y: number }[] = []): { x: number; y: number }[] {
+  if (Array.isArray(g)) for (const v of g) geomPoints(v, out);
+  else if (g && typeof g === "object") {
+    const o = g as Record<string, unknown>;
+    if (typeof o.x === "number" && typeof o.y === "number" && Number.isFinite(o.x) && Number.isFinite(o.y)) out.push({ x: o.x, y: o.y });
+    else for (const v of Object.values(o)) geomPoints(v, out);
+  }
+  return out;
+}
+
+/**
+ * [266] Ebene der Plakat-Situation: eine freie Zeichnungsebene (z. B. der Kataster-Import mit den Vorgaben), deren Zeichnung die
+ * Mitte des Gebäudes umgibt — dort zeichnet die Vorlage „Situation WBW“ Nachbarn, Strassen und Parzellen und das eigene Gebäude
+ * gefüllt. Bei mehreren die mit den meisten Elementen; ohne solche Ebene das Erdgeschoss.
+ */
+function situationLevelId(project: Project, o: PresentationOptions): string | undefined {
+  const ground = groundFloorId(project, o);
+  const parts = project.walls.filter((w) => w.floorId === ground).flatMap((w) => [w.start, w.end]);
+  if (parts.length === 0) return ground;
+  const cx = (Math.min(...parts.map((p) => p.x)) + Math.max(...parts.map((p) => p.x))) / 2;
+  const cy = (Math.min(...parts.map((p) => p.y)) + Math.max(...parts.map((p) => p.y))) / 2;
+  let best: { id: string; n: number } | null = null;
+  for (const l of project.drawingLevels) {
+    if (l.kind !== "drawing" || l.layoutId) continue;
+    const items = project.drawings2d.filter((d) => d.levelId === l.id);
+    const pts = items.flatMap((d) => geomPoints(d.geom));
+    if (pts.length < 2) continue;
+    const xs = pts.map((p) => p.x);
+    const ys = pts.map((p) => p.y);
+    const around = Math.min(...xs) < cx && cx < Math.max(...xs) && Math.min(...ys) < cy && cy < Math.max(...ys);
+    if (around && (!best || items.length > best.n)) best = { id: l.id, n: items.length };
+  }
+  return best?.id ?? ground;
+}
+
 /** Sichtbarkeit des Situationsplans: alle Klassen ausser denen, die die Vorlage „Situation WBW“ ausblendet (Umgebung bleibt), ohne Schattenstudie. */
 function situationVisibility(project: Project, t: ViewTemplate): Record<string, boolean> {
   const vis: Record<string, boolean> = {};
@@ -293,7 +331,7 @@ export function planPresentationSheet(project: Project, o: PresentationOptions):
   if (poster) {
     const ex = o.extras;
     const sit = ex?.situation ? situationTemplate(project) : null;
-    const sitLevel = sit && groundFloorId(project, o);
+    const sitLevel = sit && situationLevelId(project, o);
     const m = posterTextMetrics(size);
     const sitTpl = sit?.template ?? (project.viewTemplates ?? []).find((t) => t.id === SITUATION_TEMPLATE_ID);
     posterReq = {

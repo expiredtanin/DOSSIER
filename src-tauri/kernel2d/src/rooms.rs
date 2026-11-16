@@ -206,35 +206,51 @@ fn extract_all_faces(nodes: &[RbNode], edges: &[RbUEdge]) -> Vec<Vec<usize>> {
 
 // ── Innen-Offset ──────────────────────────────────────────────────────────────
 
-/// Versetzt ein CCW-Polygon um `d` nach innen (Port von `offsetInward`).
-fn offset_inward(poly: &[Vec2], d: f64) -> Vec<Vec2> {
+/// [266] Versetzt jede Kante des Rings um die halbe Dicke der Wand, auf deren Achse sie liegt, nach innen (statt
+/// der mittleren Dicke aller Wände): lichter Umriss an den echten Wandflächen. Kanten ohne passende Wand nehmen
+/// `fallback`. Liegen zwei Kanten in einer Flucht mit verschiedener Dicke, entsteht ein Absatz (zwei Punkte).
+fn offset_inward_by_walls(poly: &[Vec2], walls: &[WallSegment], tol: f64, fallback: f64) -> Vec<Vec2> {
     let n = poly.len();
-    if n < 3 || d <= 0.0 {
+    if n < 3 {
         return poly.to_vec();
     }
-    // CCW sicherstellen.
-    let pts_owned: Vec<Vec2>;
-    let pts: &[Vec2] = if signed_area(poly) > 0.0 {
-        poly
-    } else {
-        pts_owned = { let mut v = poly.to_vec(); v.reverse(); v };
-        &pts_owned
-    };
-    // Verschobene Kanten: linke Normale zeigt ins Innere bei CCW.
-    let shifted: Vec<(Vec2, Vec2)> = (0..n).map(|i| {
-        let a = pts[i];
-        let b = pts[(i + 1) % n];
-        let dir = rb_normalize(sub(b, a));
-        let nrm = left_normal(dir);
-        (add(a, scale(nrm, d)), dir)
-    }).collect();
-
+    let pts: Vec<Vec2> = if signed_area(poly) > 0.0 { poly.to_vec() } else { poly.iter().rev().copied().collect() };
+    let tol = tol.max(1e-6);
+    // Halbe Dicke je Kante: grösste Dicke der Wände, deren Achse die Kante trägt (parallel, Mitte auf der Achse).
+    let half: Vec<f64> = (0..n)
+        .map(|i| {
+            let (a, b) = (pts[i], pts[(i + 1) % n]);
+            let dir = rb_normalize(sub(b, a));
+            let m = scale(add(a, b), 0.5);
+            let t = walls
+                .iter()
+                .filter(|w| w.thickness.is_finite() && w.thickness > 0.0)
+                .filter(|w| {
+                    let wd = rb_normalize(sub(w.b, w.a));
+                    rb_cross(dir, wd).abs() <= 1e-3 && dist_point_segment(m, w.a, w.b) <= tol
+                })
+                .map(|w| w.thickness)
+                .fold(f64::NAN, f64::max);
+            if t.is_finite() { t / 2.0 } else { fallback }
+        })
+        .collect();
+    let shifted: Vec<(Vec2, Vec2)> = (0..n)
+        .map(|i| {
+            let a = pts[i];
+            let dir = rb_normalize(sub(pts[(i + 1) % n], a));
+            (add(a, scale(left_normal(dir), half[i])), dir)
+        })
+        .collect();
     let mut out: Vec<Vec2> = Vec::new();
     for i in 0..n {
-        let prev = &shifted[(i + n - 1) % n];
-        let curr = &shifted[i];
+        let p = (i + n - 1) % n;
+        let (prev, curr) = (&shifted[p], &shifted[i]);
         let denom = rb_cross(prev.1, curr.1);
         if denom.abs() < 1e-9 {
+            // Flucht: bei gleicher Dicke ein Punkt, sonst Absatz vom Ende der vorigen zur Anfang der nächsten Kante.
+            if (half[p] - half[i]).abs() > 1e-12 {
+                out.push(add(pts[i], scale(left_normal(prev.1), half[p])));
+            }
             out.push(curr.0);
             continue;
         }
@@ -242,6 +258,17 @@ fn offset_inward(poly: &[Vec2], d: f64) -> Vec<Vec2> {
         out.push(add(prev.0, scale(prev.1, t)));
     }
     out
+}
+
+/// Abstand Punkt–Strecke.
+fn dist_point_segment(p: Vec2, a: Vec2, b: Vec2) -> f64 {
+    let d = sub(b, a);
+    let l2 = d.x * d.x + d.y * d.y;
+    if !(l2 > 0.0) {
+        return dist(p, a);
+    }
+    let u = (((p.x - a.x) * d.x + (p.y - a.y) * d.y) / l2).clamp(0.0, 1.0);
+    dist(p, add(a, scale(d, u)))
 }
 
 /// Dedupliziert aufeinanderfolgende nahezu gleiche Punkte im Ring (Port von
@@ -342,7 +369,7 @@ pub fn detect_rooms(
             continue;
         }
         if offset_to_inner && half > 0.0 {
-            poly = dedupe_ring_rb(&offset_inward(&poly, half));
+            poly = dedupe_ring_rb(&offset_inward_by_walls(&poly, walls, gap_tol, half));
             if poly.len() < 3 {
                 continue;
             }
@@ -395,7 +422,7 @@ pub fn room_from_point_inside(
         }
         let mut inner = raw.clone();
         if offset_to_inner && half > 0.0 {
-            let off = dedupe_ring_rb(&offset_inward(&raw, half));
+            let off = dedupe_ring_rb(&offset_inward_by_walls(&raw, walls, gap_tol, half));
             if off.len() >= 3 {
                 inner = off;
             }

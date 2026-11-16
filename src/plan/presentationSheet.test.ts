@@ -121,6 +121,53 @@ describe("[66] Präsentationsplan", () => {
     expect(levelHasContent(withEmpty, floor.id)).toBe(true);
   });
 
+  // [266] Kataster-DXF mit den Vorgaben (neue Zeichnungsebene) importiert: die Situation des Plakats zeigte nur das Geschoss
+  // (Gebäude und Parzelle), ohne Nachbarn, Strassen und Parzellennummern. Jetzt nimmt sie die Zeichnungsebene, deren
+  // Zeichnung das Gebäude umgibt (dort zeichnet die Vorlage „Situation WBW“ das eigene Gebäude gefüllt dazu).
+  it("[266] Plakat-Situation auf der Kataster-Zeichnungsebene, die das Gebäude umgibt", () => {
+    const p0 = st().project;
+    const floor = p0.drawingLevels.find((l) => l.kind === "floor" && !l.layoutId)!;
+    const xs = p0.walls.filter((w) => w.floorId === floor.id).flatMap((w) => [w.start.x, w.end.x]);
+    const ys = p0.walls.filter((w) => w.floorId === floor.id).flatMap((w) => [w.start.y, w.end.y]);
+    const [x0, x1, y0, y1] = [Math.min(...xs) - 30, Math.max(...xs) + 30, Math.min(...ys) - 30, Math.max(...ys) + 30];
+    const ring = [{ x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 }];
+    const kat = { id: "lv-kataster", name: "kataster", kind: "drawing" as const, visible: true, locked: false };
+    const d = (id: string, geom: unknown) => ({ id, type: "drawing2d", levelId: kat.id, categoryCode: "20", geom }) as unknown as Project["drawings2d"][number];
+    const withKat: Project = {
+      ...p0,
+      drawingLevels: [...p0.drawingLevels, kat, { id: "lv-skizze", name: "Skizze", kind: "drawing", visible: true, locked: false }],
+      drawings2d: [
+        ...p0.drawings2d,
+        d("k1", { shape: "polyline", pts: ring, closed: true }),
+        d("k2", { shape: "text", at: { x: x0 + 1, y: y0 + 1 }, text: "1003", height: 2, rotation: 0 }),
+        // Skizze weit weg: nicht die Situation.
+        { ...d("s1", { shape: "line", a: { x: x1 + 500, y: y1 + 500 }, b: { x: x1 + 510, y: y1 + 500 } }), levelId: "lv-skizze" },
+      ],
+    };
+    const sit0 = planPresentationSheet(p0, { ...presentationDefaults(p0), scale: 200, poster: "poster-a1-landscape", extras: POSTER_EXTRAS_DEFAULT }).items.find((i) => i.kind === "situation")!;
+    // Ohne Kataster-Ebene bleibt es das Erdgeschoss.
+    expect(p0.drawingLevels.find((l) => l.id === sit0.levelId)!.kind).toBe("floor");
+    st().loadProject(withKat);
+    const p1 = st().project;
+    const o = { ...presentationDefaults(p1), scale: 200, poster: "poster-a1-landscape", extras: POSTER_EXTRAS_DEFAULT };
+    const sit = planPresentationSheet(p1, o).items.find((i) => i.kind === "situation")!;
+    expect(sit.levelId).toBe("lv-kataster");
+  }, 60_000);
+
+  it("[266] Geschoss nur mit Bauteilen (Wände/Räume tragen `floorId`, nicht `levelId`) gilt nicht als leer", () => {
+    const floor = project.drawingLevels.find((l) => l.kind === "floor" && !l.layoutId)!;
+    const wall = project.walls[0];
+    const room = project.rooms![0];
+    const onlyParts = {
+      ...project,
+      drawingLevels: [...project.drawingLevels, { ...floor, id: "lv-bau", name: "OG Bauteile", baseElevation: 99 }],
+      walls: [...project.walls, { ...wall, id: "w-bau", floorId: "lv-bau" }],
+      rooms: [...project.rooms!, { ...room, id: "r-bau", floorId: "lv-bau" }],
+    };
+    expect(levelHasContent(onlyParts, "lv-bau")).toBe(true);
+    expect(presentationDefaults(onlyParts).floors).toContain("lv-bau");
+  });
+
   it("[224] fester Massstab und Massstab je Viewport landen in Ausschnitt und Viewport", () => {
     const floors = project.drawingLevels.filter((l) => l.kind === "floor" && !l.layoutId).slice(0, 2).map((l) => l.id);
     const res = presentationSheetOps(project, { floors, elevationIds: [], scale: 200, scales: { [floors[1]]: 100 }, sectionId: null, paper: "a1", orientation: "landscape", sketch: false }, LABELS, "t4")!;

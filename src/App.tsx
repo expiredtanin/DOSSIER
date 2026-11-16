@@ -42,6 +42,7 @@ import { useT } from "./i18n";
 import { useStore } from "./state/appStore";
 import { setCursor } from "./state/cursorStore";
 import { setLiveScale } from "./state/liveScaleStore";
+import { planViewMounted } from "./state/planViewport";
 import { openMeshFileDialog, requestMeshImport, splitMeshFiles } from "./state/meshImportStore";
 import { openPointCloudFileDialog } from "./state/pointCloudStore";
 import { clearKinds, toIdLists } from "./state/selection";
@@ -573,9 +574,10 @@ export default function App() {
 
   // Solange keine Plan-Ansicht montiert ist, gibt es keinen Live-Massstab.
   // (PlanView meldet beim Montieren/Zoomen sofort wieder einen Wert.)
+  const planMounted = planViewMounted(activeLevel.kind, viewType);
   useEffect(() => {
-    if (!planActive) setLiveScale(null);
-  }, [planActive]);
+    if (!planMounted) setLiveScale(null);
+  }, [planMounted]);
 
   // Zoom-Buttons der Oberleiste an die montierte Plan-Ansicht weiterreichen.
   const fitPlan = () => planViewRef.current?.fit();

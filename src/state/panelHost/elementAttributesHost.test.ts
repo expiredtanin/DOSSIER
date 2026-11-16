@@ -222,3 +222,33 @@ describe("Darstellung im Grundriss [260]", () => {
     expect(getState().project.openings!.find((o) => o.id === win.id)!.planMode).toBeUndefined();
   });
 });
+
+// [266] Der Befehl `raum` legt den Stempel-Text als Kopie des Namens an („Raum 1“). Umbenennen in der Objekt-Info
+// änderte nur den Namen: im Plan stand weiter „Raum 1“. Jetzt folgt der Stempel, solange er nur den alten Namen trägt.
+describe("Raumname und Stempel [266]", () => {
+  it("Stempel mit dem alten Namen folgt dem neuen Namen (Ausrichtung bleibt), ein Undo-Schritt", () => {
+    getState().loadProject(buildComplexSampleProject());
+    const r = getState().project.rooms![0];
+    const doc = { version: 1 as const, paragraphs: [{ runs: [{ text: r.name, marks: { bold: true } }], align: "center" as const }] };
+    getState().setRoomStampDoc(r.id, doc);
+    setState({ selection: { ...EMPTY_SELECTION, rooms: [r.id] } });
+    const depth = getState().undoDepth;
+    (hostFor("room", r.id).onSetRoomName as (x: string) => void)("Wohnen/Essen");
+    const after = getState().project.rooms!.find((x) => x.id === r.id)!;
+    expect(after.name).toBe("Wohnen/Essen");
+    expect(after.stampDoc).toEqual({ version: 1, paragraphs: [{ runs: [{ text: "Wohnen/Essen", marks: { bold: true } }], align: "center" }] });
+    expect(getState().undoDepth).toBe(depth + 1);
+  });
+
+  it("eigener Stempel-Text (anders als der Name) bleibt", () => {
+    getState().loadProject(buildComplexSampleProject());
+    const r = getState().project.rooms![0];
+    const doc = { version: 1 as const, paragraphs: [{ runs: [{ text: "Atelier", marks: {} }] }, { runs: [{ text: "mit Galerie", marks: {} }] }] };
+    getState().setRoomStampDoc(r.id, doc);
+    setState({ selection: { ...EMPTY_SELECTION, rooms: [r.id] } });
+    (hostFor("room", r.id).onSetRoomName as (x: string) => void)("Werkstatt");
+    const after = getState().project.rooms!.find((x) => x.id === r.id)!;
+    expect(after.name).toBe("Werkstatt");
+    expect(after.stampDoc).toEqual(doc);
+  });
+});
