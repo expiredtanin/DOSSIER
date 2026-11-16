@@ -46,6 +46,26 @@ contextBridge.exposeInMainWorld("dossierBlender", {
   },
 });
 
+// [215] Mitgeliefertes Cycles (Endbilder): Prozess im Hauptprozess (electron-cycles.cjs), Renderer-Seite src/native/cyclesRuntime.ts.
+// Nur lesend „wo liegt es“ und „starten mit geprüften Argumenten“; der Hauptprozess startet ausschliesslich das Programm im Paketordner.
+contextBridge.exposeInMainWorld("dossierCycles", {
+  where: () => ipcRenderer.invoke("cycles:where"),
+  prepare: (files) => ipcRenderer.invoke("cycles:prepare", files),
+  start: (jobId, sceneDir, args) => ipcRenderer.invoke("cycles:start", jobId, sceneDir, args),
+  cancel: (jobId) => ipcRenderer.send("cycles:cancel", jobId),
+  readFile: (path) => ipcRenderer.invoke("cycles:read", path),
+  onLine: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on("cycles:line", listener);
+    return () => ipcRenderer.removeListener("cycles:line", listener);
+  },
+  onExit: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on("cycles:exit", listener);
+    return () => ipcRenderer.removeListener("cycles:exit", listener);
+  },
+});
+
 // [170] Projektdatei, mit der die App gestartet wurde (`dossier datei.obp`), und spätere Aufrufe
 // einer zweiten Instanz. Inhalt wird im Hauptprozess gelesen: {name, path, text} oder null.
 contextBridge.exposeInMainWorld("dossierLaunch", {

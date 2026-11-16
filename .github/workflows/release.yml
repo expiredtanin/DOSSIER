@@ -6,6 +6,9 @@
 # Secrets: siehe README, Abschnitt „Releases". Linux ([170]): Job `linux` baut das AppImage (Electron, electron-builder,
 # kein Secret nötig) und hängt es mit SHA256SUMS an dasselbe Release; er läuft nach `macos`, damit nicht beide
 # gleichzeitig den Release-Entwurf anlegen.
+# Cycles ([215], Endbild-Renderer): beide Jobs laden vor dem App-Bau das fertige Paket (scripts/cycles/get.sh: Gitea-Release `cycles-<version>`,
+# sonst Artefakt von cycles.yml) und liefern es mit (Tauri: externalBin + resources, Electron: extraResources). Fehlt es, bricht der
+# Linux-Job ab (DOSSIER_REQUIRE_CYCLES) — erst cycles.yml laufen lassen.
 name: release
 on:
   push:
@@ -46,6 +49,13 @@ jobs:
       - uses: taiki-e/install-action@v2
         with: { tool: wasm-pack }
       - run: npm ci || (sleep 30 && npm ci) || (sleep 90 && npm ci)  # Netz-Aussetzer (z. B. 504 beim wasm-pack-Download)
+      - name: Cycles laden (Endbild-Renderer, [215]; macOS arm64) und als Tauri-Sidecar bereitstellen
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Paket vom Gitea-Release `cycles-<version>`, sonst Artefakt des letzten erfolgreichen cycles.yml-Laufs.
+          scripts/cycles/get.sh macos arm64
+          node scripts/cycles/tauri-prepare.mjs build/cycles   # scripts/tauri-native.mjs hängt src-tauri/tauri.cycles.conf.json an
       - name: Secrets prüfen
         run: |
           # Ohne Updater-Schlüssel keine Updater-Artefakte (sonst bricht tauri build wegen createUpdaterArtifacts ab).
@@ -133,7 +143,13 @@ jobs:
             npm run "build:$s" || npm run "build:$s" -- --no-opt
           done
       - run: npm run build
+      - name: Cycles laden (Endbild-Renderer, [215]; Linux x86_64)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/cycles/get.sh linux x86_64   # electron-pack.cjs nimmt build/cycles als extraResources
       - name: AppImage bauen
+        env:
+          DOSSIER_REQUIRE_CYCLES: "1"
         run: |
           # Version aus dem Tag (v0.2.0 -> 0.2.0); ohne Tag (workflow_dispatch) die aus package.json.
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then

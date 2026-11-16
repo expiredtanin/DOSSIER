@@ -1,0 +1,32 @@
+Dossier — mitgeliefertes Cycles-Paket: Bestandteile und Lizenzen ([215], [51])
+=================================================================================
+
+Dieses Paket (Ordner `cycles/`) liegt der App bei und wird als eigenes Programm gestartet (`cycles --background …`). Es
+enthält nur Software unter permissiven Lizenzen — kein GPL, kein LGPL. Die Lizenztexte stehen in diesem Ordner
+(`Apache-2.0.txt`, `*-license.txt`, `Cycles-LICENSE.txt`, `debian/<paket>.copyright`, `OpenImageIO-*`, `libtiff-*`).
+
+Programm
+  Cycles (Blender Foundation u. a.), Standalone-Fassung, Version siehe Datei VERSION     Apache-2.0
+    Quelle: https://projects.blender.org/blender/cycles  (Tag v<VERSION>); Änderung: scripts/cycles/patches/no-ocio.patch
+    (OpenColorIO optional, bei uns aus). In der Quelle enthalten: Nishita-Himmel, Hosek-Wilkie-Himmel, mikktspace (Zlib),
+    atomic_ops (BSD-3-Clause), Teile unter MIT — Texte: Apache2-license.txt, BSD-3-Clause-license.txt, MIT-license.txt, Zlib-license.txt
+
+Bibliotheken (lib/)
+  Embree 4 (Intel)                          libembree4            Apache-2.0
+  Open Image Denoise 2.5 (Intel; enthält     libOpenImageDenoise*  Apache-2.0
+    oneDNN, Apache-2.0, und trainierte Netze)
+  OpenImageIO 2.4 (eigener schlanker Bau)    libOpenImageIO*       BSD-3-Clause
+  OpenEXR / Imath / Iex / IlmThread 3.1      libOpenEXR*, libI*    BSD-3-Clause
+  oneTBB                                     libtbb                Apache-2.0
+  libtiff 4.5 (eigener Bau, ohne jbig)       libtiff               libtiff-Lizenz (BSD-artig)
+  libpng                                     libpng16              libpng-Lizenz
+  libjpeg-turbo                              libjpeg               IJG / BSD-3-Clause / Zlib
+  zlib                                       libz                  Zlib
+  libdeflate                                 libdeflate            MIT
+  Zstandard                                  libzstd               BSD-3-Clause
+  pugixml                                    libpugixml            MIT
+  Boost (filesystem, thread)                 libboost_*            BSL-1.0
+macOS (arm64) zusätzlich: die Blender-Vorbau-Bibliotheken (lib-macos_arm64) in derselben Auswahl; die Metal-Kernel-Quellen
+(`source/`, Apache-2.0, Teil von Cycles).
+
+Das System liefert libc, libstdc++, libm (nicht Teil des Pakets).

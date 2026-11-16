@@ -2,7 +2,8 @@
 
 Stand 16.11.2026 (Spike). Entscheid Maintainer 16.11.: Cycles kommt VOR 1.0 in die App, damit man Blender nicht braucht.
 Dieses Dokument hält fest, was im Linux-Container gebaut und gemessen wurde und wie der Einbau aussieht.
-**Noch kein App-Umbau.** Bauskripte: `scripts/cycles/` (`build-linux.sh` geprüft, `build-macos.sh` Entwurf, ungeprüft),
+**Stand 16.11. (Teil 2):** Bau in CI (`cycles.yml`), Mitliefern (Tauri, Electron) und die Laufzeit-Fassade stehen — s. Abschnitt 10.
+Noch offen: XML-Schreiber im Kern, Dialog, Tonwert (s. 6. und 8.). Bauskripte: `scripts/cycles/` (`build-linux.sh` geprüft, `build-macos.sh` für CI geschrieben, ungeprüft),
 Testszene: `scripts/cycles/spike-scene.py`. Das Austauschformat der Blender-Brücke ([211]) steht in `doc/RENDER-SZENE.md`.
 
 ## 1. Ergebnis in Kürze
@@ -186,3 +187,58 @@ Summe **12–16 Tage**, davon **≈ 5 Tage Mac-abhängig**. Verkleinern der Ausl
 - Tonwert-Look gegen den Blender-Leser (AgX) und Sonnen-Drehsinn gegen `render_dossier.py`.
 - Hosts im Cloud-Container: gesperrt war `github.com` (alle Pfade, auch `codeload`, `api.github.com`, Release-Downloads; `raw.githubusercontent.com` und `pypi.org` gingen); gebraucht wurden nur
   `projects.blender.org` (Quellen, OIDN-LFS) und `archive.ubuntu.com` (OIIO-/libtiff-Quellen, apt).
+
+## 10. Bau, CI und Auslieferung (Teil 2, 16.11.)
+
+**Ablauf.** `.github/workflows/cycles.yml` (manuell und bei Änderung von `scripts/cycles/**`) baut Cycles je Plattform und legt
+`cycles-<os>-<arch>-<version>.tar.xz` (+ `.sha256`) ab: als Artefakt des Laufs und als Asset am Gitea-Release `cycles-<version>` auf
+`git.openbureau.ch/karim/dossier` (Vorabversion, aber veröffentlicht, damit ohne Token ladbar; Secret `GITEA_TOKEN`, sonst nur Artefakt).
+GitHub ist nur Bau-Rechner. Die Version steht an einer Stelle: `scripts/cycles/VERSION` (Tag `v<version>` der Cycles-Quellen, Paketname,
+Gitea-Release). `release.yml` ruft vor dem App-Bau `scripts/cycles/get.sh <os> <arch>` auf: zuerst der Gitea-Anhang (`fetch.mjs`, mit
+Prüfsumme), bei 404 das Artefakt des letzten erfolgreichen `cycles.yml`-Laufs (`gh run download`); Ergebnis `build/cycles/` (gitignoriert).
+Neue Cycles-Version = `VERSION` ändern, `cycles.yml` laufen lassen, dann Release.
+
+| Datei | Zweck |
+|---|---|
+| `scripts/cycles/build-linux.sh` | Linux x86_64 CPU (geprüft), seit Teil 2 mit Lizenztexten (`licenses/`) und `VERSION` im Paket |
+| `scripts/cycles/build-macos.sh` | macOS arm64 (Metal + CPU), Blender-Vorbau (`make update`, git-lfs): sammelt Nicht-System-Dylibs über `otool -L` ein, setzt `@rpath`/RPATH, Ad-hoc-Signatur, `source/` (Metal-Kernel), Lizenzen. **Nicht ausgeführt** |
+| `scripts/cycles/smoke.sh` | Rauchtest nach dem Bau: 4 Samples Testszene (CPU) → PNG + `Sample 4/4` (auf Linux gelaufen: 1 s) |
+| `scripts/cycles/pack.sh` | `tar.xz` + `.sha256`, Wurzel im Archiv `cycles/` |
+| `scripts/cycles/upload-gitea.mjs`, `fetch.mjs`, `get.sh`, `cycles-lib.cjs` | Ablage am Gitea-Release, Laden/Entpacken, Rückfall auf das Artefakt, Namensschema (Test `src/native/cyclesPackage.test.ts`) |
+| `scripts/cycles/THIRD-PARTY.txt` | Bestandteile und Lizenzen, kommt als `licenses/README.txt` ins Paket; `NOTICE` führt dieselbe Liste |
+
+**Paketaufbau** (`cycles/`): `cycles` (Programm), `lib/` (Bibliotheken, RPATH `$ORIGIN/lib` bzw. `@executable_path/lib`), `licenses/`
+(Cycles-LICENSE, Apache-2.0, `*-license.txt` der Cycles-Teile, `debian/<paket>.copyright`, OpenImageIO, libtiff), `VERSION`; macOS zusätzlich `source/`
+(Metal-Kernel-Quellen). Cycles liest `source/` über die Umgebungsvariable **`CYCLES_KERNEL_PATH`** (`src/util/path.cpp`); die App setzt sie beim Start
+auf den mitgelieferten Ordner, `source/` muss also nicht neben dem Programm liegen.
+
+**Linux/Electron.** `electron-builder.yml` führt `scripts/electron-cycles.cjs` in `files`; `scripts/electron-pack.cjs` trägt den Paketordner als
+`extraResources` (`from` → `cycles/`) ein: `--cycles=ORDNER`, sonst Umgebungsvariable `DOSSIER_CYCLES_DIR` (lokaler Ordner statt CI-Download, z. B. `dist/` von
+`build-linux.sh`), sonst `build/cycles`; ohne alles entsteht ein Paket ohne Cycles (Warnung), mit `DOSSIER_REQUIRE_CYCLES=1` (Release-CI) ein Fehler.
+Im AppImage liegt es unter `resources/cycles/` (aussen vor dem asar, ausführbar). Der Hauptprozess (`electron-cycles.cjs`) startet nur
+`<resources>/cycles/cycles` — ohne Shell, `cwd` = Arbeitsordner, Argumente geprüft (feste Schalterliste `--background --quiet --samples --width --height --tile-size
+--threads --device --log-level --output`, Wertebereiche, genau eine `*.xml`, Dateien nur unter `$TMP/dossier-render/…`). Preload: `window.dossierCycles`
+(`where`, `prepare`, `start`, `cancel`, `readFile`, `onLine`, `onExit`). Im ungepackten Lauf: `DOSSIER_CYCLES_DIR` oder `build/cycles`; im gepackten gibt es keine Umlenkung.
+
+**macOS/Tauri.** `src-tauri/tauri.cycles.conf.json` (Überlagerung, damit `cargo`/`tauri dev` ohne Cycles bauen): `bundle.externalBin: ["binaries/cycles"]` und
+`bundle.resources` für `lib/`, `source/`, `licenses/` → `Contents/Resources/cycles/…`. `scripts/cycles/tauri-prepare.mjs` legt das arm64-Programm als
+`src-tauri/binaries/cycles-{aarch64,x86_64,universal}-apple-darwin` ab (die Release-App ist universal; x86_64/universal sind nur Kopien, damit der Bau durchläuft);
+`scripts/tauri-native.mjs` hängt die Überlagerung an `tauri build`, sobald die Sidecars da sind. Das Programm hat zwei RPATHs: `@executable_path/lib` (Paket) und
+`@executable_path/../Resources/cycles/lib` (App). Laufzeit: Rust-Befehle `cycles_where` (Sidecar neben dem App-Programm; auf Intel-Macs `None`), `cycles_job_dir`,
+`cycles_start`, `cycles_cancel` in `src-tauri/src/lib.rs`, Logik und Argumentprüfung in `src-tauri/src/cycles.rs` (std-only, `rustc --test`), Start über
+`blender::start_program` (gemeinsame Job-Verwaltung mit der Blender-Brücke), Ereignisse `cycles://line` / `cycles://exit`.
+
+**Fassade** `src/native/cyclesRuntime.ts` (gleiche Signaturen für beide): `cyclesAvailable()`, `prepareCyclesScene(files)` → Arbeitsordner, `runCycles(sceneDir, args, onProgress, signal)`
+→ `{code, cancelled, lines}` (Fortschritt `Progress … Sample n/N`, `\r`-getrennt; `signal` beendet den Prozess), `readCyclesFile(path)`, `parseCyclesProgress(line)`. Browser: `false`.
+Der Aufrufer (Dialog „Rendering“, später) schreibt `szene.xml` + Texturen, ruft z. B. `["--background","--samples","64","--output","bild.png","szene.xml"]` und liest `bild.png`.
+
+**Grösse** (Linux, gemessen 16.11.): AppImage ohne Cycles 193 944 150 Byte (185 MiB), mit dem Spike-Paket (111 MB entpackt) 264 189 246 Byte (252 MiB): **+ 70,2 MB** (SquashFS-Kompression im Image; das Paket liegt
+entpackt in `resources/cycles/`, nichts wird beim Start entpackt). macOS-Zahlen: offen.
+
+**Geprüft (16.11., Linux-Container):** vitest (`src/native/cyclesRuntime|electronCycles|cyclesPackage.test.ts`: Fortschritt, Abbruch, Argumentprüfung, Ordnerwahl, Prozessstart mit Ersatzprogramm,
+Workflow-Aufbau), `rustc --test` für `cycles.rs` und `blender.rs`, `smoke.sh` gegen das Spike-Paket, **echtes AppImage** (mit dem Spike-Paket gebaut): `npm run test:linux-app` — `cyclesAvailable()` true,
+`runCycles` rendert `e2e/fixtures/cycles-haus.xml` (320 × 180, 8 Samples, OIDN) zu einem PNG mit Fortschritt `Sample 8/8`, Abbruch beendet den Prozess (kein Rest), fremde Argumente werden abgewiesen.
+Workflows nur mit `yaml.safe_load` auf Syntax geprüft.
+**Nicht geprüft:** beide GitHub-Workflows (laufen im Container nicht, `github.com` gesperrt), `build-macos.sh` und alles auf dem Mac (Bau, `make update`, Dylib-Einsammeln, RPATHs, Metal-Kernel,
+`cycles_*`-Befehle: die Tauri-App ist im Container nicht übersetzbar, es fehlt webkit2gtk — nur die std-Teile liefen als Test), Tauri-Resources-Syntax (Verzeichnis → Verzeichnis), Signieren/Notarisieren der Mach-O-Dateien
+unter `Resources/cycles/lib` und des Sidecars, universale App mit arm64-Sidecar, `build-linux.sh` Schritt (7) (Lizenzen) nur in Teilen (dpkg-Zuordnung geprüft, kein ganzer Bau), Portabilität auf ältere glibc.

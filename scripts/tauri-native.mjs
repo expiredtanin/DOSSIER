@@ -3,6 +3,7 @@
 // src-tauri/src/native_embed.rs). Auf anderen Plattformen läuft der Standard-Build
 // unverändert mit WebGL. Opt-out: DOSSIER_NO_NATIVE2D=1.
 import { spawn, spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 
@@ -19,7 +20,11 @@ if (native && !args.includes("--features")) args.push("--features", "native2d");
 // (`bundle.macOS.bundleVersion`; „Version“ im Finder bleibt die semver aus tauri.conf.json).
 const build = createRequire(import.meta.url)("./build-number.cjs").computeBuildNumber();
 process.env.DOSSIER_BUILD = build;
-if (args[0] === "build" && !args.includes("--config")) args.push("--config", JSON.stringify({ bundle: { macOS: { bundleVersion: build } } }));
+if (args[0] === "build" && !args.some((a) => a.includes("bundleVersion"))) args.push("--config", JSON.stringify({ bundle: { macOS: { bundleVersion: build } } }));
+// [215] Cycles mitliefern, sobald die Sidecars bereitstehen (scripts/cycles/tauri-prepare.mjs): Konfiguration als weitere `--config`
+// (Tauri führt mehrere zusammen). Ohne Cycles bleibt der Bau wie bisher (tauri-build verlangt sonst die Sidecar-Dateien).
+if (args[0] === "build" && existsSync(new URL("../src-tauri/binaries/cycles-aarch64-apple-darwin", import.meta.url)) && !args.some((a) => a.includes("tauri.cycles.conf.json")))
+  args.push("--config", fileURLToPath(new URL("../src-tauri/tauri.cycles.conf.json", import.meta.url)));
 console.log(`[tauri-native] Build ${build}`);
 console.log(`[tauri-native] tauri ${args.join(" ")}`);
 const child = spawn("npx", ["tauri", ...args], { stdio: "inherit" });

@@ -1,0 +1,76 @@
+name: cycles
+# [215] Cycles (Endbild-Renderer, Apache-2.0) bauen und als Paket ablegen, damit die App-Builds (release.yml) es nicht jedes
+# Mal neu bauen. Ergebnis je Plattform: `cycles-<os>-<arch>-<version>.tar.xz` (+ .sha256) als Artefakt dieses Laufs UND als Asset am
+# Gitea-Release `cycles-<version>` auf git.openbureau.ch/karim/dossier (Secret GITEA_TOKEN; ohne Secret nur das Artefakt).
+# Version: scripts/cycles/VERSION. Bauskripte und Hintergrund: doc/CYCLES.md. Dieser Workflow wurde im Cloud-Container NICHT
+# ausgeführt (kein GitHub-Zugang dort); der erste Lauf zeigt, was an den Bauskripten noch anzupassen ist (v. a. macOS).
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "scripts/cycles/**"
+      - ".github/workflows/cycles.yml"
+permissions:
+  contents: read
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Version
+        id: v
+        run: echo "version=$(tr -d ' \n' < scripts/cycles/VERSION)" >> "$GITHUB_OUTPUT"
+      - name: Cycles bauen (CPU, Embree, OIDN)
+        run: JOBS=$(nproc) scripts/cycles/build-linux.sh "$RUNNER_TEMP/cycles-build"
+      - name: Rauchtest
+        run: scripts/cycles/smoke.sh "$RUNNER_TEMP/cycles-build/dist"
+      - name: Packen
+        run: scripts/cycles/pack.sh "$RUNNER_TEMP/cycles-build/dist" linux x86_64 out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cycles-linux-x86_64-${{ steps.v.outputs.version }}
+          path: |
+            out/cycles-linux-x86_64-*.tar.xz
+            out/cycles-linux-x86_64-*.tar.xz.sha256
+          compression-level: 0
+          if-no-files-found: error
+      - name: Auf Gitea ablegen (Release cycles-<version>)
+        if: env.GITEA_TOKEN != ''
+        run: node scripts/cycles/upload-gitea.mjs --file out/cycles-linux-x86_64-${{ steps.v.outputs.version }}.tar.xz
+
+  macos:
+    runs-on: macos-14 # Apple Silicon (arm64)
+    timeout-minutes: 120
+    env:
+      GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Version
+        id: v
+        run: echo "version=$(tr -d ' \n' < scripts/cycles/VERSION)" >> "$GITHUB_OUTPUT"
+      - name: Werkzeuge
+        run: brew install cmake ninja git-lfs
+      - name: Cycles bauen (Metal + CPU, Embree, OIDN; Vorbau-Bibliotheken per git-lfs)
+        run: scripts/cycles/build-macos.sh "$RUNNER_TEMP/cycles-build"
+      - name: Rauchtest (CPU; gehostete Runner haben keine nutzbare GPU)
+        run: scripts/cycles/smoke.sh "$RUNNER_TEMP/cycles-build/dist"
+      - name: Packen
+        run: scripts/cycles/pack.sh "$RUNNER_TEMP/cycles-build/dist" macos arm64 out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cycles-macos-arm64-${{ steps.v.outputs.version }}
+          path: |
+            out/cycles-macos-arm64-*.tar.xz
+            out/cycles-macos-arm64-*.tar.xz.sha256
+          compression-level: 0
+          if-no-files-found: error
+      - name: Auf Gitea ablegen (Release cycles-<version>)
+        if: env.GITEA_TOKEN != ''
+        run: node scripts/cycles/upload-gitea.mjs --file out/cycles-macos-arm64-${{ steps.v.outputs.version }}.tar.xz

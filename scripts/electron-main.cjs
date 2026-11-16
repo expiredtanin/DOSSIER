@@ -10,6 +10,7 @@ const fs = require("node:fs");
 const { buildCsp } = require("./csp.cjs");
 const links = require("./electron-links.cjs"); // [268] externe Links, fremde Navigation
 require("./electron-blender.cjs").register(ipcMain); // [211] Blender als eigener Prozess
+require("./electron-cycles.cjs").register(ipcMain, app); // [215] mitgeliefertes Cycles als eigener Prozess
 require("./electron-files.cjs").register(ipcMain, dialog, () => mainWindow); // [116] Projekt atomar speichern, Sicherung lesen
 
 // Randloses App-Fenster wie chromium-shell.sh (--app=…): keine native

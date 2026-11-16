@@ -14,10 +14,10 @@
 # Cloud-Container gesperrt und wird NICHT gebraucht.
 set -euo pipefail
 
-CYCLES_TAG="${CYCLES_TAG:-v5.3.0}"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CYCLES_TAG="${CYCLES_TAG:-v$(tr -d ' \n' < "$HERE/VERSION")}"
 OIIO_VERSION="${OIIO_VERSION:-2.4.17.0+dfsg}"
 JOBS="${JOBS:-3}"
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORK="$(mkdir -p "${1:-$HOME/cycles-build}" && cd "${1:-$HOME/cycles-build}" && pwd)"
 OUT="$WORK/dist"
 echo "== Arbeitsordner: $WORK"
@@ -104,6 +104,7 @@ ninja -C "$WORK/build-cycles" -j"$JOBS"
 rm -rf "$OUT"; mkdir -p "$OUT/lib"
 cp "$WORK/build-cycles/bin/cycles" "$OUT/cycles"
 export LD_LIBRARY_PATH="$OIDN/lib:$OIIO/lib:$TIFF/lib"
+LIBS_SRC="$WORK/libs.txt"
 ldd "$OUT/cycles" | awk '/=>/ {print $3}' | grep -Ev '/(libc|libm|libdl|libpthread|librt|libstdc\+\+|libgcc_s|libresolv|ld-linux[^/]*)\.so' | sort -u > "$WORK/libs.txt"
 while read -r l; do cp -L "$l" "$OUT/lib/$(basename "$l")"; done < "$WORK/libs.txt"
 # OIDN lädt die Geräte-Bibliothek zur Laufzeit neben sich
@@ -111,5 +112,22 @@ cp -L "$OIDN/lib/libOpenImageDenoise_device_cpu.so.2.5.0" "$OUT/lib/"
 strip --strip-unneeded "$OUT/cycles" "$OUT/lib/"*.so* 2>/dev/null || true
 patchelf --set-rpath '$ORIGIN/lib' "$OUT/cycles"
 for f in "$OUT"/lib/*.so*; do patchelf --set-rpath '$ORIGIN' "$f" 2>/dev/null || true; done
-cp "$WORK/src/cycles/LICENSE" "$OUT/LICENSE-cycles.txt"
+
+# (7) Lizenztexte. Debian-Pakete: /usr/share/doc/<paket>/copyright (über dpkg -S vom Bibliothekspfad); eigene Builds und
+# der OIDN-Vorbau: aus den Quellordnern. Fehlt ein Text, bricht der Bau ab (sonst lieferten wir Bibliotheken ohne Lizenz aus).
+LIC="$OUT/licenses"; mkdir -p "$LIC/debian"
+cp "$WORK/src/cycles/LICENSE" "$LIC/Cycles-LICENSE.txt"
+cp "$WORK/src/cycles/src/doc/license/"*-license.txt "$LIC/"            # Apache-2.0, BSD-3-Clause, MIT, Zlib (Teile von Cycles, SPDX-Kopfzeilen)
+cp /usr/share/common-licenses/Apache-2.0 "$LIC/Apache-2.0.txt"
+cp "$HERE/THIRD-PARTY.txt" "$LIC/README.txt"
+for cand in LICENSE.md LICENSE; do [ -f "$WORK/src/oiio/$cand" ] && cp "$WORK/src/oiio/$cand" "$LIC/OpenImageIO-$cand.txt" && break; done
+for cand in LICENSE.md COPYRIGHT; do [ -f "$WORK/src/tiff/$cand" ] && cp "$WORK/src/tiff/$cand" "$LIC/libtiff-$cand.txt" && break; done
+# OIDN (Apache-2.0): Vorbau liefert keinen eigenen Text; Apache-2.0.txt oben gilt (Quelle: github.com/RenderKit/oidn, Copyright Intel).
+while read -r l; do
+  pkg="$(dpkg -S "$(readlink -f "$l")" 2>/dev/null | head -1 | cut -d: -f1 || true)"
+  [ -n "$pkg" ] && [ -f "/usr/share/doc/$pkg/copyright" ] && cp "/usr/share/doc/$pkg/copyright" "$LIC/debian/$pkg.copyright"
+done < "$LIBS_SRC"
+ls "$LIC" "$LIC/debian"
+for need in Cycles-LICENSE.txt Apache-2.0.txt; do [ -s "$LIC/$need" ] || { echo "FEHLT: licenses/$need"; exit 1; }; done
+printf '%s\n' "${CYCLES_TAG#v}" > "$OUT/VERSION"
 echo "== fertig: $OUT"; du -sh "$OUT" "$OUT/lib"; ls -la "$OUT/cycles"; "$OUT/cycles" --version

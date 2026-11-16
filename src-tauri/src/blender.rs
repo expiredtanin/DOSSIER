@@ -116,13 +116,33 @@ pub fn start(
     if !looks_like_blender(exe) {
         return Err(format!("keine Blender-Programmdatei: {}", exe.display()));
     }
-    let mut child = Command::new(exe)
-        .args(args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+    start_program(jobs, id, exe, args, None, &[], on_line, on_exit)
+}
+
+/// Wie {@link start}, aber ohne Namensprüfung (die Aufrufer prüfen selbst, welches Programm sie starten: Blender oder das
+/// mitgelieferte Cycles, `cycles.rs`), mit Arbeitsordner und zusätzlichen Umgebungsvariablen. Keine Shell.
+#[allow(clippy::too_many_arguments)]
+pub fn start_program(
+    jobs: &Jobs,
+    id: &str,
+    exe: &Path,
+    args: &[String],
+    cwd: Option<&Path>,
+    envs: &[(&str, &Path)],
+    on_line: impl Fn(String) + Send + Sync + 'static,
+    on_exit: impl FnOnce(i32) + Send + 'static,
+) -> Result<(), String> {
+    let mut cmd = Command::new(exe);
+    cmd.args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    if let Some(d) = cwd {
+        cmd.current_dir(d);
+    }
+    for (k, v) in envs {
+        cmd.env(k, v);
+    }
+    let mut child = cmd
         .spawn()
-        .map_err(|e| format!("Blender lässt sich nicht starten: {e}"))?;
+        .map_err(|e| format!("{} lässt sich nicht starten: {e}", exe.file_name().and_then(OsStr::to_str).unwrap_or("Programm")))?;
     let out = child.stdout.take();
     let err = child.stderr.take();
     let child = Arc::new(Mutex::new(child));

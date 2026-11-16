@@ -18,6 +18,7 @@ files:
   - scripts/electron-preload.cjs
   - scripts/csp.cjs
   - scripts/electron-blender.cjs
+  - scripts/electron-cycles.cjs
   - scripts/electron-files.cjs
   - scripts/electron-links.cjs
   - dist/**
@@ -25,6 +26,8 @@ files:
   - "!**/node_modules/**"
 extraMetadata:
   main: scripts/electron-main.cjs
+# [215] Cycles (build/cycles, scripts/cycles/get.sh) kommt als `extraResources` dazu — scripts/electron-pack.cjs trägt es ein, wenn der Ordner da ist
+# (oder per `--cycles=ORDNER` / DOSSIER_CYCLES_DIR). Im AppImage: `resources/cycles/` neben app.asar.
 linux:
   target:
     - target: AppImage
