@@ -841,6 +841,35 @@ fn level_letters(count: usize) -> String {
     letters
 }
 
+/// [266] Himmelsrichtung (0 Nord, 1 Ost, 2 Süd, 3 West; Plan oben = Norden) der Gebäudeseite, die eine Ansichtslinie `a → b`
+/// zeigt: wie bei „Ansicht Süd“ steht man südlich des Hauses und blickt nach Norden, die Seite liegt also gegen die Blickrichtung
+/// (bei `sign` = 1 blickt man links von `a → b`). Schräge Linien: die nächstliegende Richtung.
+pub(crate) fn elevation_side(a: V, b: V, sign: f64) -> usize {
+    let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+    let (sx, sy) = (dy * sign, -dx * sign);
+    if sy.abs() >= sx.abs() {
+        if sy > 0.0 { 0 } else { 2 }
+    } else if sx > 0.0 {
+        1
+    } else {
+        3
+    }
+}
+
+/// [266] Name einer neuen Ansicht: `\u{2}` in der Vorlage wird die Himmelsrichtung aus `dirs` (Nord, Ost, Süd, West); ist der Name
+/// schon vergeben, folgt „ 2“, „ 3“ …
+fn elevation_name(template: &str, dirs: &[String], a: V, b: V, taken: &[&str]) -> String {
+    let Some(dir) = dirs.get(elevation_side(a, b, 1.0)) else { return template.replace('\u{2}', "") };
+    let base = template.replace('\u{2}', dir);
+    let mut name = base.clone();
+    let mut n = 2;
+    while taken.contains(&name.as_str()) {
+        name = format!("{base} {n}");
+        n += 1;
+    }
+    name
+}
+
 /// Schnitt-/Ansichtslinie: eine verwaiste Ebene dieser Art bekommt die Linie, sonst eine neue Ebene
 /// (`name` = Vorlage der Hülle mit `\u{1}` für die Buchstaben).
 fn sectionline_ops(root: &Map<String, Value>, v: &Value, ids: &mut IdGen) -> Vec<Op> {
@@ -872,7 +901,14 @@ fn sectionline_ops(root: &Map<String, Value>, v: &Value, ids: &mut IdGen) -> Vec
         };
         return vec![Op::Replace { collection: "drawingLevels".into(), entity }];
     }
-    let name = s_of(v, "name").replace('\u{1}', &level_letters(of_kind.len()));
+    let tpl = s_of(v, "name");
+    let name = if kind == "elevation" && tpl.contains('\u{2}') {
+        let dirs: Vec<String> = v.get("dirs").and_then(Value::as_array).into_iter().flatten().filter_map(|d| d.as_str().map(String::from)).collect();
+        let taken: Vec<&str> = levels.iter().filter_map(|z| field(z, "name").and_then(Value::as_str)).collect();
+        elevation_name(tpl, &dirs, a, b, &taken)
+    } else {
+        tpl.replace('\u{1}', &level_letters(of_kind.len()))
+    };
     let mut fields = vec![
         ("id", s(&ids.next(kind))),
         ("name", s(&name)),
@@ -994,6 +1030,30 @@ mod tests {
         assert_eq!(l["linePoints"], json!([{"x": 0, "y": 0}, {"x": 6, "y": 10}]));
         assert!(run("section", json!([])).get("bendPoints").is_none());
         assert!(run("elevation", json!([{"x": 6, "y": 0}])).get("bendPoints").is_none());
+    }
+
+    /// [266] Neue Ansichten heissen nach der Himmelsrichtung (wie die Beispiele: Linie südlich des Hauses, Blick nach Norden =
+    /// „Süd“), bei gleicher Richtung folgt eine Nummer.
+    #[test]
+    fn ansicht_heisst_nach_himmelsrichtung() {
+        let root = json!({"drawingLevels": [{"id": "a1", "name": "Ansicht Süd", "kind": "elevation", "linePoints": [{"x": 0, "y": 0}, {"x": 1, "y": 0}]}]});
+        let root = root.as_object().unwrap();
+        let dirs = json!(["Nord", "Ost", "Süd", "West"]);
+        let run = |a: (f64, f64), b: (f64, f64)| {
+            let mut ids = IdGen::new("s");
+            let v = json!({"cmd": "sectionline", "a": {"x": a.0, "y": a.1}, "b": {"x": b.0, "y": b.1}, "kind": "elevation", "name": "Ansicht \u{2}", "dirs": dirs});
+            let Op::Add { items, .. } = &sectionline_ops(root, &v, &mut ids)[0] else { panic!() };
+            items[0]["name"].as_str().unwrap().to_string()
+        };
+        assert_eq!(run((-10.0, -12.0), (30.0, -12.0)), "Ansicht Süd 2");
+        assert_eq!(run((30.0, 24.0), (-10.0, 24.0)), "Ansicht Nord");
+        assert_eq!(run((24.0, -6.0), (24.0, 20.0)), "Ansicht Ost");
+        assert_eq!(run((-4.0, 20.0), (-4.0, -6.0)), "Ansicht West");
+        // Ohne Namen der Richtungen bleibt der Name ohne Platzhalter.
+        let mut ids = IdGen::new("s");
+        let v = json!({"cmd": "sectionline", "a": {"x": 0, "y": 0}, "b": {"x": 5, "y": 0}, "kind": "elevation", "name": "Ansicht \u{2}"});
+        let Op::Add { items, .. } = &sectionline_ops(root, &v, &mut ids)[0] else { panic!() };
+        assert_eq!(items[0]["name"], "Ansicht ");
     }
 
     #[test]

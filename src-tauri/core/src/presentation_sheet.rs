@@ -174,6 +174,8 @@ pub struct Request {
     /// Ansichtsvorlage, mit der die Viewports verknüpft werden: die Ausmasse müssen mit ihr gerechnet werden (sie setzt z. B.
     /// Schatten), sonst sitzt der Inhalt neben dem Rahmen und wird beschnitten. Fehlt sie im Projekt, wird sie eingesetzt.
     pub template: Option<ViewTemplate>,
+    /// [266] Die Grundrisse zeigen Schnitt- und Ansichtsmarken: der Plakat-Ausschnitt um das Haus wird um ihren Abstand grösser.
+    pub marks: bool,
     /// [208] Plakat-Anordnung auf dem Spaltenraster (Situation, Tabellen, 3D-Bild-Platzhalter, mehrere Blätter).
     pub poster: Option<PosterReq>,
 }
@@ -312,6 +314,10 @@ fn table_heights(p: &Project, tables: &[TableReq]) -> Vec<f64> {
 /// [208] Rand um die Bauteile eines Grundrisses (Papier-mm), in dem Bemassung und Beschriftung liegen; was weiter aussen
 /// liegt (Umgebung, Gelände, Wege), beschneidet der Rahmen.
 pub const PLAN_MARGIN_MM: f64 = 20.0;
+/// [266] Rand um die Linien der Schnitte/Ansichten für ihre Marken (Papier-mm): Schenkel, Pfeil und Name.
+pub const MARKS_MARGIN_MM: f64 = 12.0;
+/// [266] So weit (Papier-mm) darf der Ausschnitt eines Grundrisses wegen der Marken höchstens über die Bauteile hinauswachsen.
+pub const MARKS_REACH_MM: f64 = 40.0;
 /// [208] Rand um das Haus im Situationsplan (Papier-mm; 1:500 ⇒ 40 m Umgebung).
 pub const SITUATION_MARGIN_MM: f64 = 80.0;
 
@@ -351,13 +357,23 @@ impl Frame {
 
 /// [208] Rahmen je Ebene: Grundrisse (Gruppe 0) alle gleich gross mit gemeinsamer Bildmitte (deckungsgleich), Schnitte und
 /// Ansichten (Gruppen 1, 2) gleich hoch mit gemeinsamer Höhenmitte (±0.00 auf einer Linie), je eigene Breite.
-fn view_frames(kept: &[(String, u32)], scale_of: &dyn Fn(&str) -> f64, extents_at: &dyn Fn(&str, f64) -> Option<([f64; 4], Option<[f64; 4]>)>) -> Vec<Frame> {
+fn view_frames(kept: &[(String, u32)], scale_of: &dyn Fn(&str) -> f64, extents_at: &dyn Fn(&str, f64) -> Option<([f64; 4], Option<[f64; 4]>)>, marks: Option<[f64; 4]>) -> Vec<Frame> {
     let crops: Vec<[f64; 4]> = kept
         .iter()
-        .map(|(id, _)| {
+        .map(|(id, grp)| {
             let sc = scale_of(id);
             let (b, house) = extents_at(id, sc).unwrap_or(([0.0, 0.0, 1.0, 1.0], None));
-            crop(b, house, PLAN_MARGIN_MM * sc / 1000.0)
+            let c = crop(b, house, PLAN_MARGIN_MM * sc / 1000.0);
+            // [266] Grundrisse mit Marken: der Ausschnitt reicht bis zu den Linien der Schnitte/Ansichten samt Marke (begrenzt).
+            match (*grp, marks) {
+                (0, Some(m)) => {
+                    let k = sc / 1000.0;
+                    let reach = crop(b, house, MARKS_REACH_MM * k);
+                    let w = [(m[0] - MARKS_MARGIN_MM * k).max(reach[0]), (m[1] - MARKS_MARGIN_MM * k).max(reach[1]), (m[2] + MARKS_MARGIN_MM * k).min(reach[2]), (m[3] + MARKS_MARGIN_MM * k).min(reach[3])];
+                    if w[2] > w[0] && w[3] > w[1] { union(Some(c), w) } else { c }
+                }
+                _ => c,
+            }
         })
         .collect();
     let mut plans: Option<[f64; 4]> = None;
@@ -380,6 +396,20 @@ fn view_frames(kept: &[(String, u32)], scale_of: &dyn Fn(&str) -> f64, extents_a
             }
         })
         .collect()
+}
+
+/// [266] Ausmass der Linien (samt Knickpunkten) der gewählten Schnitte und Ansichten im Modell (Meter): dort stehen ihre Marken.
+fn marks_box(p: &Project, kept: &[(String, u32)]) -> Option<[f64; 4]> {
+    let mut b: Option<[f64; 4]> = None;
+    for l in p.drawing_levels.iter().filter(|l| kept.iter().any(|(id, g)| *g > 0 && *id == l.id)) {
+        let Some([a, c]) = l.line_points else { continue };
+        for q in [a, c].into_iter().chain(l.bend_points.iter().flatten().copied()) {
+            if q.x.is_finite() && q.y.is_finite() {
+                b = Some(union(b, [q.x, q.y, q.x, q.y]));
+            }
+        }
+    }
+    b
 }
 
 /// [208] Plakat: Inhalte in strengen Zeilen auf dem Spaltenraster, Massstäbe fest; mehr Inhalt als ein Blatt ⇒ weitere Blätter.
@@ -437,7 +467,8 @@ fn poster_plan(p: &Project, req: &Request, po: &PosterReq, sheet: &Sheet, kept: 
     let min_image = ((g.bottom - g.top) * MIN_IMAGE_SHARE).max(60.0);
 
     // Gruppen: Situation | Grundrisse | Schnitte + Ansichten.
-    let frames_at = |s: f64| view_frames(kept, &|id: &str| own(id).unwrap_or(s), extents_at);
+    let marks = req.marks.then(|| marks_box(p, kept)).flatten();
+    let frames_at = |s: f64| view_frames(kept, &|id: &str| own(id).unwrap_or(s), extents_at, marks);
     let groups_at = |frames: &[Frame]| -> Vec<Group> {
         let cell = |f: &Frame| Cell::sized(&g, f.w + 2.0 * FRAME_PAD_MM, f.h + 2.0 * FRAME_PAD_MM);
         let mut out = Vec::new();
@@ -460,6 +491,13 @@ fn poster_plan(p: &Project, req: &Request, po: &PosterReq, sheet: &Sheet, kept: 
             .unwrap_or(SCALES[SCALES.len() - 1]),
     };
     let frames = frames_at(scale);
+    // [266] Das 3D-Bild ist höchstens so gross wie der grösste Grundriss (ohne Grundrisse: wie der grösste Schnitt/die grösste Ansicht).
+    let grp0 = kept.iter().zip(&frames).filter(|((_, grp), _)| *grp == 0).map(|(_, f)| f).collect::<Vec<_>>();
+    let basis: Vec<&Frame> = if grp0.is_empty() { frames.iter().collect() } else { grp0 };
+    let g = match basis.iter().fold(None, |m: Option<(f64, f64)>, f| Some((m.map_or(f.w, |m| m.0.max(f.w)), m.map_or(f.h, |m| m.1.max(f.h))))) {
+        Some((w, h)) => g.with_image_max(w + 2.0 * FRAME_PAD_MM, h + 2.0 * FRAME_PAD_MM),
+        None => g,
+    };
     let r = layout(&g, &groups_at(&frames), &tables, po.image, min_image);
     let mut items: Vec<Value> = Vec::new();
     let mut placed = r.items.iter();
@@ -611,7 +649,7 @@ mod tests {
                 _ => ([1.0, -4.0, 13.0, 10.0], None),
             })
         };
-        let f = view_frames(&kept, &|_| 200.0, &ext);
+        let f = view_frames(&kept, &|_| 200.0, &ext, None);
         let m = PLAN_MARGIN_MM * 200.0 / 1000.0;
         // Grundrisse: Vereinigung der Ausschnitte (EG beschnitten auf ± 4 m), beide gleich.
         assert_eq!((f[0].w, f[0].h, f[0].cx, f[0].cy), (f[1].w, f[1].h, f[1].cx, f[1].cy));
