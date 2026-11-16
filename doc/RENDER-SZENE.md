@@ -2,7 +2,7 @@
 
 Renderer-neutrales Austauschformat für fotorealistische Bilder. Erzeugt von `src/export/blenderRender.ts`
 (`buildRenderPackage`), gelesen heute vom Blender-Skript `scripts/blender/render_dossier.py` (Cycles in Blender),
-später vom mitgelieferten Cycles-Standalone ([215]). Ein Leser setzt nur um, was hier steht; Dossier-Interna
+später vom mitgelieferten Cycles-Standalone ([215], Plan in `doc/CYCLES.md`: der bekommt Cycles-XML direkt aus dem Kern, diese Beschreibung bleibt die inhaltliche Vorlage). Ein Leser setzt nur um, was hier steht; Dossier-Interna
 (Ebenen, Plan) kommen darin nicht vor.
 
 ## Ordner

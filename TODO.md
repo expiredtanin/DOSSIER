@@ -835,10 +835,16 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   Samples körnig; indirektes Licht der Sonnenflecken (NEE auf beleuchtete Flächen, Cache) fehlt; Refit greift selten (Wände ändern
   beim Verschieben meist die Gehrungen der Nachbarn = andere Topologie); Leuchten im Modell (Bibliothek) gibt es nur über den
   Baustoffnamen; AO-/Höhenkarten (`*_AmbientOcclusion`, `*_Displacement`) nicht angefangen; Mond, OIDN.
-- ○ **[215]** Cycles eingebaut für Endbilder (nach 1.0): Cycles-Standalone (Apache-2.0, aus dem Blender-Projekt) als mitgeliefertes
-  Hilfsprogramm (Sidecar) der Desktop-App, Metal auf Apple Silicon, OIDN-Entrauscher; liest dasselbe renderer-neutrale Szenenformat
-  (GLB + Szenen-JSON) wie die Blender-Brücke [211], die als Option bleibt. Build-Kette macOS (C++, Abhängigkeiten) in CI, Herkunft in
-  `NOTICE` ([51]); App wird ca. 100–200 MB grösser. · L
+- ◐ **[215]** Cycles eingebaut für Endbilder (Entscheid Maintainer 16.11.: **vor 1.0**, damit man Blender nicht braucht): Cycles-Standalone (Apache-2.0, aus dem Blender-Projekt) als mitgeliefertes
+  Hilfsprogramm (Sidecar) der Desktop-App, Metal auf Apple Silicon, OIDN-Entrauscher; Szene direkt als Cycles-XML aus dem Kern (statt glb + Python wie die Blender-Brücke [211], die als Option bleibt).
+  Build-Kette macOS (C++, Abhängigkeiten) in CI, Herkunft in `NOTICE` ([51], erst beim echten Einbau). · L
+  **Stand 16.11. (Spike, Plan in `doc/CYCLES.md`, noch kein App-Umbau):** Linux-CPU-Build gelingt, ohne Blender-Vorbau (12–25 GB): Cycles 5.3.0 + Embree + OIDN 2.5.0, `cycles` 7,3 MB, mit 21 Bibliotheken
+  **111 MB entpackt / 58 MB `tar.xz`**, nur permissive Lizenzen; Bau 8 min bei 4 vCPU (`scripts/cycles/build-linux.sh`, ganz durchgelaufen; Patch `scripts/cycles/patches/no-ocio.patch`: OCIO optional;
+  eigenes schlankes OpenImageIO und libtiff, weil Ubuntus 430 MB/GPL-jbig mitbringt). Testhaus (`scripts/cycles/spike-scene.py`: Quader, Satteldach, Nishita-Himmel mit Sonne, Principled BSDF, Box-Textur) gerendert und angesehen:
+  Start 0,7 s, 1280×720 mit 64 Samples + OIDN **29 s** (ruhig, 4 vCPU; unter Last 51 s), 256 Samples 86 s. Gelernt: Kamera blickt +Z, Matrix spaltenweise; Himmel braucht Hintergrundlicht (`use_mis`); kein Tonwert im
+  Standalone (EXR → Belichtung/Tonwert/sRGB macht Dossier); ohne OCIO nur „auto“/Non-Color als Farbraum. **Empfehlung:** Cycles einbauen, Pathtracer [212] bleibt Vorschau; Aufwand **12–16 Tage**
+  (Bauskripte/CI 2, Mac/Metal/Signieren 3 (Mac), XML-Schreiber im Kern 4–5, Job/Dialog/CLI 1–2, Tonwert/PNG 1–2, Feinschliff 1–2). Mac-Skript `scripts/cycles/build-macos.sh` nur Entwurf (nichts ausgeführt).
+  **Offen:** gesamter Mac-Weg (Metal, Kernel-Übersetzung beim ersten Start, Zeiten), älterer Linux-Unterbau für AppImage, kleinerer Embree/OIDN, grosse Modelle, Tonwert-Look gegen den Blender-Leser (AgX), Sonnen-Drehsinn prüfen.
 
 ### Nicht in 1.0 (bewusst später)
 Ausführungsplanung 1:50/1:20-Details, [42] Varianten, [11] Bibliothek per GUID, [88] Web-Link, [G7] Booleans-Ausbau,

@@ -1,0 +1,59 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 7c0d9fd..97c1ee9 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -118,6 +118,8 @@ set_property(DIRECTORY APPEND PROPERTY COMPILE_DEFINITIONS
+ # Options.
+ 
+ # Use precompiled library dependencies
++# Dossier: OpenColorIO optional (Standard AUS; Dossier braucht nur sRGB/linear)
++option(WITH_OCIO "Build with OpenColorIO" OFF)
+ option(WITH_LIBS_PRECOMPILED        "Use precompiled library dependencies" ON)
+ 
+ # Library dependencies
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+index 422aed7..03085d3 100644
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -335,7 +335,9 @@ if(WITH_OPENSUBDIV)
+   add_definitions(-DWITH_OPENSUBDIV)
+ endif()
+ 
+-add_definitions(-DWITH_OCIO)
++if(WITH_OCIO)
++  add_definitions(-DWITH_OCIO)
++endif()
+ 
+ if(WITH_CYCLES_PATH_GUIDING)
+   add_definitions(-DWITH_PATH_GUIDING)
+diff --git a/src/cmake/dependency_targets.cmake b/src/cmake/dependency_targets.cmake
+index c9275ec..bc641e2 100644
+--- a/src/cmake/dependency_targets.cmake
++++ b/src/cmake/dependency_targets.cmake
+@@ -90,7 +90,12 @@ endif()
+ # -----------------------------------------------------------------------------
+ # Configure OpenColorIO
+ 
+-add_library(bf::dependencies::opencolorio ALIAS OpenColorIO::OpenColorIO)
++if(WITH_OCIO)
++  add_library(bf::dependencies::opencolorio ALIAS OpenColorIO::OpenColorIO)
++else()
++  add_library(bf_deps_opencolorio_none INTERFACE)
++  add_library(bf::dependencies::opencolorio ALIAS bf_deps_opencolorio_none)
++endif()
+ 
+ # -----------------------------------------------------------------------------
+ # Configure Zlib
+diff --git a/src/cmake/external_libs.cmake b/src/cmake/external_libs.cmake
+index 5b5ae35..3aeda2f 100644
+--- a/src/cmake/external_libs.cmake
++++ b/src/cmake/external_libs.cmake
+@@ -356,7 +356,7 @@ endif()
+ # OpenColorIO
+ ###########################################################################
+ 
+-if(NOT USD_OVERRIDE_OPENCOLORIO)
++if(WITH_OCIO AND NOT USD_OVERRIDE_OPENCOLORIO)
+   if(MSVC AND EXISTS ${_cycles_lib_dir})
+     set(OpenColorIO_ROOT ${OPENCOLORIO_ROOT_DIR})
+     find_package(OpenColorIO REQUIRED CONFIG)
