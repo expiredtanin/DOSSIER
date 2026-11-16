@@ -69,6 +69,7 @@ import {
   useObjectSettingsShortcut,
   useCloseObjectSettingsOnEscape,
   useFitShortcuts,
+  useFileShortcuts,
   useUndoRedoShortcut,
 } from "./state/useKeyboardShortcuts";
 import { registerSelectionActions } from "./state/selectionActions";
@@ -386,12 +387,21 @@ export default function App() {
   // Projektdatei-I/O (Speichern/Öffnen/Lock), Schnellexport (CSV/IFC/OBJ/STL)
   // und die Ausführung eines bestätigten DXF/DWG-Imports — gebündelt in
   // useProjectFileActions(), siehe dort.
+  // [170] Electron: `dossier datei.obp` / Doppelklick — direkt in den Editor, auch wenn noch Splash/Startbildschirm stehen.
+  const bootPhaseRef = useRef(bootPhase);
+  bootPhaseRef.current = bootPhase;
+  const launchFileOpened = () => {
+    const wasBooting = bootPhaseRef.current !== "editor";
+    if (wasBooting) setBootPhase("editor");
+    return { wasBooting };
+  };
   const files = useProjectFileActions(
     setImportState,
     setExportSaveFormat,
     activeCategoryCode,
     setActiveLevelId,
     planViewRef,
+    launchFileOpened,
   );
   const {
     projectFileInputRef, projectTemplateFileInputRef, openImportForFile, onSaveProject, onSaveProjectAs, onRestoreBackup,
@@ -575,6 +585,7 @@ export default function App() {
   const fitSelectionKey = () => (planViewRef.current ? planViewRef.current.fitSelection() : fitView3d());
   registerSelectionActions({ fitAll: fitAllKey, fitSelection: fitSelectionKey });
   useFitShortcuts(fitAllKey, fitSelectionKey, shortcutOverrides);
+  useFileShortcuts({ save: onSaveProject, saveAs: onSaveProjectAs, open: onOpenProject }); // [170] ohne natives Menü
   // Papier-Massstab anwenden: gewählten Nenner merken UND den Plan-Zoom exakt
   // auf 1:N setzen (PlanView rechnet die viewBox aus N + Canvas + dpi).
   const applyScale = (n: number) => {
@@ -710,6 +721,7 @@ export default function App() {
     onImport: () => dxfInputRef.current?.click(),
     onImportPointCloud: () => openPointCloudFileDialog(),
     onImportMesh: () => openMeshFileDialog(),
+    onOpenExportPdf: () => setExportOpen(true), // [170] Browser/Electron: Plan als PDF/SVG (sonst nur im nativen Menü)
     onOpenExportDxf: () => setExportDxfOpen(true),
     onExportIfc,
     onExportObj,

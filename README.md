@@ -110,19 +110,30 @@ Prüfen: `npm run check` (TypeScript, Vitest und die Rust-Tests aller Crates),
 
 ## Linux installieren
 
-Linux (x86_64) läuft in Electron (Chromium mit WebGPU über ANGLE-Vulkan; Mesa-Vulkan-Treiber nötig). Das
-AppImage stammt aus den Releases auf GitHub:
+Linux (x86_64) ist ab 1.0 offiziell unterstützt und läuft in Electron (Chromium mit WebGPU über ANGLE-Vulkan;
+Mesa-Vulkan-Treiber nötig). Das AppImage liegt bei den Releases auf
+[git.openbureau.ch](https://git.openbureau.ch/karim/dossier) (mit `SHA256SUMS-linux.txt`):
 
 ```bash
+sha256sum -c SHA256SUMS-linux.txt      # optional: Prüfsumme
 chmod +x Dossier-*-x86_64.AppImage     # ausführbar machen
 ./Dossier-*-x86_64.AppImage datei.obp  # starten, Projekt optional als Argument
 ```
 
-Das AppImage braucht FUSE 2 (`libfuse2`); sonst `--appimage-extract-and-run` anhängen. Für Menüeintrag und
-Doppelklick auf `.obp` ein Werkzeug wie AppImageLauncher nutzen oder den Desktop-Eintrag selbst anlegen.
-Selbst bauen: `npm run build && npm run electron:pack` (erzeugt `release/Dossier-<Version>-x86_64.AppImage`).
-Ein Flatpak-Manifest liegt unter `packaging/linux/ch.dossier.cad.yml` (nicht veröffentlicht, ungetestet; Aufruf im
-Dateikopf).
+Das AppImage braucht FUSE 2 (`sudo apt install libfuse2`, ab Ubuntu 24.04 `libfuse2t64`); ohne FUSE
+`./Dossier-*-x86_64.AppImage --appimage-extract-and-run` verwenden. Unter Wayland startet Dossier nativ
+(`DOSSIER_OZONE=x11` erzwingt XWayland). Strg+S speichert, Strg+Umschalt+S speichert unter, Strg+O öffnet.
+
+Menüeintrag und Doppelklick auf `.obp`: das AppImage enthält Desktop-Eintrag, Icon und MIME-Typ
+(`application/x-dossier-project`); eingetragen werden sie mit einem Werkzeug wie AppImageLauncher (Gear Lever unter
+GNOME) oder von Hand (`--appimage-extract`, dann `squashfs-root/dossier.desktop` mit angepasstem `Exec=` nach
+`~/.local/share/applications/` und `squashfs-root/usr/share/mime/packages/dossier.xml` nach
+`~/.local/share/mime/packages/`, danach `update-mime-database ~/.local/share/mime`).
+
+Selbst bauen und prüfen: `npm run build && npm run electron:pack` (erzeugt `release/Dossier-<Version>-x86_64.AppImage`,
+Buildnummer aus `dist/build-info.json`), dann `npm run test:linux-app` (startet das Paket mit Playwright, ohne Bildschirm
+unter `xvfb-run`: Start, Wand, Speichern/Öffnen, PDF/DXF, Wiederherstellen nach Absturz). Ein Flatpak-Manifest liegt unter
+`packaging/linux/ch.dossier.cad.yml` (nicht veröffentlicht, ungetestet; Aufruf im Dateikopf).
 
 ## Releases
 

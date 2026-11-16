@@ -32,7 +32,8 @@ import {
 } from "../editors/elementClipboard";
 import type { ElementClipboard, ElementSelectionIds, PastedIds } from "../editors/elementClipboard";
 import { parseClipboardText, serializeClipboardText } from "../editors/elementClipboardSerialize";
-import { matchesShortcut, tabKeyAction, type ShortcutId, type ShortcutOverrides } from "./keyboardShortcuts";
+import { fileShortcutFor, matchesShortcut, tabKeyAction, type FileShortcut, type ShortcutId, type ShortcutOverrides } from "./keyboardShortcuts";
+import { isTauriRuntime } from "../native/projectFile";
 import { isolateSelectionLayerCodes, showAllLayerCodes } from "./layerIsolate";
 import { isInModalDialog } from "./modalScope";
 import { toggleTraceAction } from "./traceActions";
@@ -750,4 +751,24 @@ export function useFitShortcuts(fitAll: () => void, fitSelection: () => void, ov
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [overrides]);
+}
+
+/**
+ * [170] Strg/Cmd+S (Speichern), +Umschalt (Speichern unter), Strg/Cmd+O (Öffnen) im Browser und in der Linux-App (Electron hat
+ * keine native Menüleiste). Unter Tauri übernimmt das native Menü (Accelerator) — dort nichts tun. Nicht in modalen Dialogen.
+ */
+export function useFileShortcuts(handlers: Record<FileShortcut, () => void>): void {
+  const ref = useRef(handlers);
+  ref.current = handlers;
+  useEffect(() => {
+    if (isTauriRuntime()) return;
+    const onKey = (e: KeyboardEvent) => {
+      const action = fileShortcutFor(e);
+      if (!action || isInModalDialog(e.target)) return;
+      e.preventDefault();
+      ref.current[action]();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 }

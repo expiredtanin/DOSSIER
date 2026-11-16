@@ -47,6 +47,7 @@ export type TopBarEvents = Required<
     | "onOpenHistory"
   >
 > & {
+  onOpenExportPdf: () => void;
   onOpenExportDxf: () => void;
   applyScale: ViewRibbonTabProps["onApplyScale"];
   fitPlan: ViewRibbonTabProps["onFit"];
@@ -139,6 +140,7 @@ export function useTopBarElements(opts: {
           onImport={ev.onImport}
           onImportPointCloud={ev.onImportPointCloud}
           onImportMesh={ev.onImportMesh}
+          onExportPdf={ev.onOpenExportPdf}
           onExportDxf={ev.onOpenExportDxf}
           onExportIfc={ev.onExportIfc}
           onExportObj={ev.onExportObj}

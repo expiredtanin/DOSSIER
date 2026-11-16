@@ -33,6 +33,7 @@ export interface AppMenuBarProps {
   onImportPointCloud?: () => void;
   onImportMesh?: () => void;
   /** Datei: Export-Dialoge (im Browser/Electron die einzige Quelle — das native Menü gibt es nur unter Tauri). */
+  onExportPdf?: () => void;
   onExportDxf?: () => void;
   onExportIfc?: () => void;
   onExportObj?: () => void;
@@ -79,6 +80,7 @@ export const AppMenuBar = memo(function AppMenuBar({
   onImport,
   onImportPointCloud,
   onImportMesh,
+  onExportPdf,
   onExportDxf,
   onExportIfc,
   onExportObj,
@@ -116,7 +118,8 @@ export const AppMenuBar = memo(function AppMenuBar({
     { label: t("file.import"), onSelect: onImport },
     ...(onImportPointCloud ? [{ label: t("menu.native.importPointCloud"), onSelect: onImportPointCloud }] : []),
     ...(onImportMesh ? [{ label: t("menu.native.importMesh"), onSelect: onImportMesh }] : []),
-    ...(onExportDxf || onExportIfc || onExportObj || onExportStl ? [{ divider: true }] : []),
+    ...(onExportPdf || onExportDxf || onExportIfc || onExportObj || onExportStl ? [{ divider: true }] : []),
+    ...(onExportPdf ? [{ label: `${t("menu.native.export")}: PDF`, onSelect: onExportPdf }] : []),
     ...(onExportDxf ? [{ label: `${t("menu.native.export")}: DXF`, onSelect: onExportDxf }] : []),
     ...(onExportIfc ? [{ label: `${t("menu.native.export")}: IFC`, onSelect: onExportIfc }] : []),
     ...(onExportObj ? [{ label: `${t("menu.native.export")}: OBJ`, onSelect: onExportObj }] : []),

@@ -125,13 +125,17 @@ jobs:
         run: |
           # Version aus dem Tag (v0.2.0 -> 0.2.0); ohne Tag (workflow_dispatch) die aus package.json.
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            npm run electron:pack -- -c.extraMetadata.version="${GITHUB_REF_NAME#v}"
+            npm run electron:pack -- --version="${GITHUB_REF_NAME#v}"
           else
             npm run electron:pack
           fi
           cd release
           sha256sum Dossier-*.AppImage > SHA256SUMS-linux.txt
           cat SHA256SUMS-linux.txt
+      - name: AppImage prüfen (Start, Speichern, Öffnen, Export, Wiederherstellen; [170])
+        run: |
+          sudo apt-get update && sudo apt-get install -y xvfb libfuse2t64
+          npm run test:linux-app
       - uses: actions/upload-artifact@v4
         with:
           name: dossier-linux-appimage

@@ -21,7 +21,10 @@ Mengen und Exporte werden daraus berechnet und stimmen nach jeder Änderung wied
 
 **Plattformen**
 - **macOS** (Tauri, Metal): Hauptplattform.
-- **Linux** (Electron, AppImage x86_64): offiziell unterstützt (Entscheid 16.11.); im Container geprüft.
+- **Linux** (Electron, AppImage x86_64): offiziell unterstützt (Entscheid 16.11.). Geprüft im Linux-Container (Xvfb, ohne echte GPU):
+  Start, Neues Projekt, Wände per Befehlszeile, Speichern (atomar, Vorversion `.obp~`), Öffnen per Dialog und per Argument
+  (`dossier datei.obp`), PDF-/DXF-Export, Wiederherstellen nach Absturz (`doc/RELEASE-1.0.md`, Abschnitt 15). Braucht FUSE 2
+  (`libfuse2`, Ubuntu 24.04: `libfuse2t64`), sonst `--appimage-extract-and-run`.
 - **Browser-Build:** vorhanden (kürzere Menüleiste, Dateien laden/speichern als Download, kein natives Fenster, keine Metal-Anzeige).
 - **Windows:** kein Paket in 1.0.
 
@@ -124,8 +127,10 @@ Ehrlich vorweg: **Der Durchlauf des ganzen Referenz-Ablaufs auf dem Mac ist noch
   ([194], [145]), Objekteinstellungen als eigenes Fenster ([195b]), Linienenden ([146]), Cmd+J Verbinden ([190]).
 - 3D-Bilder konnten headless nicht verglichen werden: Es gibt dort kein echtes WebGPU. Aussehen von 3D, Schatten und Hülle ist auf dem Mac zu prüfen ([206]).
 - Leistung mit grossen Kontext-Importen ist nur im Container gemessen, nicht auf echter GPU ([214]).
-- Linux: AppImage startet im Container; Start des Pakets selbst (FUSE) und echte Grafikkarte sind ungeprüft, Flatpak ist nicht fertig ([170]).
-  Windows gibt es nicht.
+- Linux: das AppImage ist nur im Container geprüft (Xvfb, SwiftShader, als root mit `--no-sandbox`). Ungeprüft: echte Grafikkarte
+  (Mesa-Vulkan), Wayland nativ, die GTK-Dialoge für Speichern/Export von Hand, Start mit Chromium-Sandbox als normaler Benutzer, Menüeintrag
+  und Doppelklick auf `.obp` nach der Desktop-Integration (AppImageLauncher o. ä.), Rendering mit Blender. Keine Update-Prüfung unter Linux;
+  Flatpak, deb und rpm gibt es nicht ([170]). Windows gibt es nicht.
 - Update- und Signier-Weg (macOS signiert/notarisiert, Updater, CI) sind noch nicht lauffähig nachgewiesen ([30]).
 
 **Grundstück, Situation**

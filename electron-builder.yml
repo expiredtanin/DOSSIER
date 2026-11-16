@@ -1,5 +1,7 @@
 # electron-builder ([170]): Linux-Pakete der Electron-Hülle (scripts/electron-main.cjs).
 # Bauen: `npm run build` (dist) und `npm run electron:pack` -> release/Dossier-<Version>-x86_64.AppImage
+# (`scripts/electron-pack.cjs` reicht die Buildnummer aus dist/build-info.json weiter, [261]).
+# Jedes Skript, das electron-main.cjs/electron-preload.cjs per require lädt, gehört in `files` (Test src/native/electronPackage.test.ts).
 # Die WebGPU-Flags (ANGLE-Vulkan) setzt electron-main.cjs selbst; die Oberfläche kommt aus dist/.
 appId: ch.dossier.cad
 productName: Dossier
@@ -16,6 +18,7 @@ files:
   - scripts/electron-preload.cjs
   - scripts/csp.cjs
   - scripts/electron-blender.cjs
+  - scripts/electron-files.cjs
   - dist/**
   - package.json
   - "!**/node_modules/**"

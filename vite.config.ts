@@ -17,10 +17,21 @@ const cspPlugin = {
   ],
 };
 
+// [261][170] Buildnummer einmal berechnen: eingebacken in die Oberfläche und als `dist/build-info.json` für das
+// Linux-Paket (`scripts/electron-pack.cjs`), damit beide dieselbe Nummer tragen.
+const BUILD = computeBuildNumber();
+const buildInfoPlugin = {
+  name: "dossier-build-info",
+  apply: "build" as const,
+  generateBundle(this: { emitFile: (f: { type: "asset"; fileName: string; source: string }) => void }) {
+    this.emitFile({ type: "asset", fileName: "build-info.json", source: JSON.stringify({ version: pkg.version, build: BUILD }) + "\n" });
+  },
+};
+
 // https://vitejs.dev/config/
 export default defineConfig({
-  plugins: [react(), cspPlugin],
-  define: { __DOSSIER_VERSION__: JSON.stringify(pkg.version), __DOSSIER_BUILD__: JSON.stringify(computeBuildNumber()) },
+  plugins: [react(), cspPlugin, buildInfoPlugin],
+  define: { __DOSSIER_VERSION__: JSON.stringify(pkg.version), __DOSSIER_BUILD__: JSON.stringify(BUILD) },
   // Tauri lädt die App über den Vite-Dev-Server; dessen Logs (cargo/tauri)
   // sollen nicht vom Bildschirm gewischt werden, und Tauri-eigene Env-Vars
   // müssen im Client sichtbar sein.
