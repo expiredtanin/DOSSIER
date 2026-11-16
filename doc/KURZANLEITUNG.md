@@ -29,7 +29,7 @@ Befehlszeile.
 Dossier hat unten eine **Befehlszeile**. Befehlsnamen oder Kürzel tippen, Enter. Danach fragt die Zeile nach Punkten:
 Klick in den Plan oder Koordinaten tippen (`x,y`; relativ mit `r5,3`), Enter beendet den Befehl, Esc bricht ab.
 Wichtige Kürzel: `w` (`wand`) Wand · `d` (`decke`) Decke · `rf` (`dach`) Dach · `rm` (`raum`) Raum ·
-`schnittlinie` (`sectionline`) Schnitt · `ansichtslinie` (`viewline`) Ansicht ·
+`schnittlinie` (`sectionline`) Schnitt · `ansichtslinie` (`viewline`) Ansicht · `ansichten` alle vier Seiten ·
 `praesentation` Präsentationsplan · `bild3d` 3D-Bild. Eigene Kürzel: *Einstellungen → Tastenkürzel*.
 
 Die Tab-Taste springt immer in die Befehlszeile. Zwischen den Ansichts-Reitern (Grundriss, Schnitt, 3D …) wechselst du mit
@@ -149,8 +149,11 @@ Nachbarn grau, Parzelle, Nordpfeil, Massstabsbalken):
 
 `schnittlinie`, Start- und Endpunkt quer durchs Gebäude, Enter: Es entsteht eine neue Ebene „Schnitt B“ in der
 Liste der Zeichnungsebenen; anklicken zeigt den Schnitt mit Wänden, Decken, Dach und Koten. „Schnitt A“ und „Ansicht
-Süd“ aus dem leeren Projekt folgen dem Gebauten, bis du ihre Linien verschiebst. Weitere Ansichten mit
-`ansichtslinie` (Nord, Ost, West).
+Süd“ aus dem leeren Projekt folgen dem Gebauten, bis du ihre Linien verschiebst. Die übrigen Ansichten entstehen in
+einem Schritt mit *Ansicht → Ansichten aller Seiten erzeugen* (Befehl `ansichten`): Dossier legt um das Gebäude je eine
+Linie für Nord, Ost, Süd und West an, parallel zu den Fassaden (auch bei einem gedrehten Haus; der Plan gilt oben als
+Norden) und mit etwas Abstand. Eine Seite, für die es schon eine Ansicht gibt, bleibt unverändert; ein Undo nimmt alle neuen
+Ansichten zurück. Einzelne Ansichten zeichnest du weiterhin mit `ansichtslinie`.
 
 In Ansicht und Schnitt zieht Dossier eine kräftige Bodenlinie auf ±0.00; sie ragt beidseits etwas über das Gezeichnete hinaus
 und gehört zur Klasse 02 Gelände (ausgeschaltet entfällt sie). Die automatischen Höhenkoten sind in Papiergrösse gesetzt

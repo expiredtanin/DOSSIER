@@ -925,6 +925,8 @@ pub fn ops(root: &Map<String, Value>, p: &Project, v: &Value, ctx: &Ctx, ids: &m
         "roofWindow" => roof_window_ops(root, p, v, ctx, ids),
         "dormer" => dormer_ops(root, p, v, ctx, ids),
         "sectionline" => sectionline_ops(root, v, ids),
+        // [267] Ansichten aller Seiten
+        "elevations" => crate::elevation_set::ops(p, root, v, ids),
         _ => return None,
     })
 }
@@ -965,6 +967,8 @@ pub fn query(root: &Map<String, Value>, p: &Project, v: &Value) -> Option<Value>
             let c = excavation_check(p, &pts, s_of(v, "level"));
             json!({ "valid": !pts.is_empty(), "bottom": js_num(c.bottom), "terrain": c.terrain, "over": c.over, "cut": c.cut, "datum": c.datum.map(js_num) })
         }
+        // [267] Welche Seiten entstehen, welche gibt es schon.
+        "elevationsPlan" => crate::elevation_set::query(p, root),
         _ => return None,
     })
 }

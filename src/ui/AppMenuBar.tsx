@@ -16,6 +16,7 @@ import { openAboutDialog } from "../state/aboutDialogHook";
 import { openBugReport, openQuickGuide } from "../state/helpMenuHook";
 import { openShortcutOverview } from "../state/shortcutOverviewHook";
 import { openImageExportDialog } from "../state/imageExportDialogHook";
+import { createElevationSet } from "../state/elevationSet";
 
 export interface AppMenuBarProps {
   /** Datei: Neu/Neu aus Vorlage/Öffnen/Speichern/Importieren. */
@@ -173,6 +174,9 @@ export const AppMenuBar = memo(function AppMenuBar({
       onSelect: () => onReferenceLines(!referenceLines),
       active: referenceLines,
     },
+    { divider: true },
+    // [267] Ansichten Nord/Ost/Süd/West um das Gebäude anlegen (ein Undo-Schritt, Meldung statt Dialog).
+    { label: t("menu.view.elevations"), onSelect: createElevationSet },
     { divider: true },
     // [211] Rendering mit Blender/Cycles (Dialog in App montiert, Öffner über den Modul-Hook).
     { label: t("menu.view.image3d"), onSelect: openImageExportDialog },

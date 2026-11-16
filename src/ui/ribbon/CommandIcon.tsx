@@ -333,6 +333,17 @@ export const CommandIcon = memo(function CommandIcon({ name }: { name: string })
           <polyline points="11.5,11.5 11.5,8 8,8" />
         </svg>
       );
+    case "ansichten":
+      // Ansichten aller Seiten: Gebäude (Rechteck) mit vier Blickpfeilen von aussen.
+      return (
+        <svg {...common}>
+          <rect x="5.5" y="5.5" width="5" height="5" />
+          <polyline points="6.5,1.5 8,3 9.5,1.5" />
+          <polyline points="6.5,14.5 8,13 9.5,14.5" />
+          <polyline points="1.5,6.5 3,8 1.5,9.5" />
+          <polyline points="14.5,6.5 13,8 14.5,9.5" />
+        </svg>
+      );
     case "viewline":
       // Ansichtslinie: Standpunkt (Kreis) mit Blickkegel.
       return (

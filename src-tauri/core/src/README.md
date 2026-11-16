@@ -90,6 +90,7 @@ Neues Modul: `<modul>.rs` und `mod` in `lib.rs`, Bindungen in `web/<modul>.rs` u
 | `competition.rs` | Anonyme Abgabe ([208]): `anonymous_keyword`, neutraler Zeitstempel für IFC-Sammler und DXF-Blattnamen (TS-Gegenstück `export/competitionIdentity.ts`) |
 | `parametric_walls.rs`, `geo_translate.rs`, `geo_rebase.rs` | parametrische Wände; Projekt verschieben; Ursprung für Exporte |
 | `auto_lines.rs` | [221] Standard-Schnitt/-Ansicht folgen dem Gebauten (im `commit` nachgeführt, wie `dim_assoc`) |
+| `elevation_set.rs` | [267] Befehl `elevations`: Ansichten Nord/Ost/Süd/West um das Gebaute (Hauptrichtung = minimales Rechteck der Hülle), ohne vorhandene Seiten; Abfrage `elevationsPlan` |
 
 ## Analyse
 

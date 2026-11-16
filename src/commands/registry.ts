@@ -72,6 +72,7 @@ import { excavationCommand } from "./cmds/excavation";
 import { meshCropCommand } from "./cmds/meshcrop";
 import { measureCommand } from "./cmds/measure";
 import { sectionLineCommand, viewLineCommand } from "./cmds/sectionline";
+import { elevationsCommand } from "./cmds/elevations";
 import { georefCommand } from "./cmds/georef";
 import { blockCommand } from "./cmds/block";
 import { defblockCommand } from "./cmds/defblock";
@@ -162,6 +163,7 @@ export const COMMANDS: Record<string, Command> = {
   measure: measureCommand,
   sectionline: sectionLineCommand,
   viewline: viewLineCommand,
+  ansichten: elevationsCommand,
   georef: georefCommand,
   block: blockCommand,
   defblock: defblockCommand,
@@ -326,6 +328,8 @@ export const ALIASES: Record<string, string> = {
   netzzuschnitt: "meshcrop",
   schnittlinie: "sectionline",
   ansichtslinie: "viewline",
+  elevations: "ansichten",
+  fassaden: "ansichten",
   bezugspunkt: "georef",
   nullpunkt: "georef",
 };
