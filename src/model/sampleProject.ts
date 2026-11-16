@@ -595,6 +595,9 @@ export const sampleProject: Project = {
  * Leeres Projekt (nur Bibliotheken, keine Geometrie) — für manuelle Tests, die
  * ohne das Demo-Haus starten wollen (z. B. Standort-Import auf leerer Fläche).
  */
+/** [266] Geschosshöhe neuer Projekte (m), auch für „Geschoss hinzufügen“. */
+export const EMPTY_FLOOR_HEIGHT = 2.9;
+
 export const emptyProject: Project = {
   ...sampleProject,
   id: "empty",
@@ -611,5 +614,11 @@ export const emptyProject: Project = {
   context: [],
   // [221] Schnitt A und Ansicht Süd folgen dem ersten Gebauten (bzw. der Parzelle), bis man sie bearbeitet
   // (Kern `auto_lines.rs`) — sonst lägen sie bei einem Projekt in Landeskoordinaten oder abseits des Nullpunkts daneben.
-  drawingLevels: sampleProject.drawingLevels.map((l) => (l.kind === "section" || l.kind === "elevation" ? { ...l, autoLine: true } : l)),
+  // [266] Geschosshöhe 2.90 m (CH-Wohnbau 2.80–3.00 m): bei 30 cm Decke bleiben 2.60 m lichte Höhe (≥ 2.40 m für Wohnräume);
+  // die 2.60 m des Beispielprojekts ergaben nur 2.30 m. Die Beispielprojekte bleiben unverändert.
+  drawingLevels: sampleProject.drawingLevels.map((l) => {
+    if (l.kind === "section" || l.kind === "elevation") return { ...l, autoLine: true };
+    if (l.kind !== "floor") return l;
+    return { ...l, floorHeight: EMPTY_FLOOR_HEIGHT, baseElevation: l.id === "og" ? EMPTY_FLOOR_HEIGHT : l.baseElevation };
+  }),
 };

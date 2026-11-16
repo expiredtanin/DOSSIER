@@ -6,6 +6,12 @@ describe("[221] getippte Landeskoordinaten", () => {
   it("absolute LV95-Eingabe wird bei Standort-Bezug auf den Projekt-Nullpunkt gerechnet", () => {
     expect(fromWorldInput(parseInput("2600048,1200046"), origin)).toEqual({ kind: "absolute", point: { x: 48, y: 46 } });
   });
+  it("[266] Ergebnis auf mm gerundet, keine Gleitkomma-Reste", () => {
+    const o = { e: 2_600_000.1, n: 1_200_000.3 };
+    const r = fromWorldInput(parseInput("2600053.3,1200010.7"), o);
+    expect(r).toEqual({ kind: "absolute", point: { x: 53.2, y: 10.4 } });
+    expect(fromWorldInput(parseInput("2600053.2,1200000.1"), origin)).toEqual({ kind: "absolute", point: { x: 53.2, y: 0.1 } });
+  });
   it("lokale, relative Eingaben und Projekte ohne Bezug bleiben", () => {
     expect(fromWorldInput(parseInput("48,46"), origin)).toEqual({ kind: "absolute", point: { x: 48, y: 46 } });
     expect(fromWorldInput(parseInput("r2600048,1200046"), origin).kind).toBe("relative");

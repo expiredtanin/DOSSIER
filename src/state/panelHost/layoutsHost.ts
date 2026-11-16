@@ -182,6 +182,8 @@ export function buildLayoutsHost(c: FlatHostOpts) {
       applyChange((p) => addWbwSetOps(p, id));
       return id;
     },
+    // [266] Projektname (Dateinamen der Exporte, Kopfzeilen); leer lässt den bisherigen Namen stehen.
+    onSetProjectName: (value) => applyChange((p) => (value.trim() ? fieldOps(p, "name", value) : []), "projectName"),
     onSetProjectNumber: (value) => applyChange((p) => fieldOps(p, "projectNumber", value.trim() ? value : undefined), "projectNumber"),
     onDeletePublishSet: (id) => applyChange((p) => deletePublishSetOps(p, id)),
     onPublishSet: (id) => {

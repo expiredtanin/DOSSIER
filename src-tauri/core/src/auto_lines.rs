@@ -106,12 +106,22 @@ pub fn extent(p: &Project) -> Option<[f64; 4]> {
     bbox(&pts).filter(areal).or_else(|| bbox(p.site_rules.iter().flat_map(|r| &r.parcel)).filter(areal))
 }
 
+/// [266] Mindestabstand (m) des automatischen Schnitts von einer parallelen Wandachse, Suchschritt (m) und
+/// grösster Sinus des Winkels, bis zu dem eine Wand als parallel gilt (≈ 6°).
+const AXIS_CLEARANCE: f64 = 0.5;
+const AXIS_STEP: f64 = 0.25;
+const PARALLEL_SIN: f64 = 0.1;
+
 /// Kleinste Ausdehnung (m) des Ausmasses in beiden Richtungen, ab der die Linien nachgeführt werden.
 const MIN_SIZE: f64 = 1.0;
 
 /// Linie einer automatischen Ebene für das Ausmass `b`: Richtung und Blickrichtung wie `line`, Schnitt durch die
 /// Mitte, Ansicht vor dem Ausmass (gegen die Blickrichtung), beide mit Rand über das Ausmass hinaus.
-pub fn place(kind: DrawingLevelKind, line: [Vec2; 2], sign: f64, b: [f64; 4]) -> Option<[Vec2; 2]> {
+///
+/// [266] `axes`: Wandachsen des Projekts. Der Schnitt weicht von der Mitte soweit aus, bis er keiner zu ihm
+/// (fast) parallelen Wandachse näher als [`AXIS_CLEARANCE`] liegt: sonst schneidet er die Wand der Länge nach (schwarze
+/// Fläche im Schnitt). Gibt es keinen freien Platz, bleibt er in der Mitte.
+pub fn place(kind: DrawingLevelKind, line: [Vec2; 2], sign: f64, b: [f64; 4], axes: &[[Vec2; 2]]) -> Option<[Vec2; 2]> {
     let (dx, dy) = (line[1].x - line[0].x, line[1].y - line[0].y);
     let len = dx.hypot(dy);
     if !(len > 1e-9) || !b.iter().all(|v| v.is_finite()) {
@@ -126,8 +136,26 @@ pub fn place(kind: DrawingLevelKind, line: [Vec2; 2], sign: f64, b: [f64; 4]) ->
     let (s0, s1) = corners.iter().map(along).fold((f64::INFINITY, f64::NEG_INFINITY), |(a, z), v| (a.min(v), z.max(v)));
     let (t0, t1) = corners.iter().map(across).fold((f64::INFINITY, f64::NEG_INFINITY), |(a, z), v| (a.min(v), z.max(v)));
     let margin = 2.0f64.max(0.1 * (s1 - s0).max(t1 - t0));
+    // Quer-Koordinaten (Richtung `n`) der zur Linie parallelen Wandachsen.
+    let parallel: Vec<f64> = axes
+        .iter()
+        .filter_map(|a| {
+            let (wx, wy) = (a[1].x - a[0].x, a[1].y - a[0].y);
+            let wl = wx.hypot(wy);
+            if !(wl > 1e-6) || (wx * d.1 - wy * d.0).abs() / wl > PARALLEL_SIN {
+                return None;
+            }
+            Some(a[0].x * n.0 + a[0].y * n.1)
+        })
+        .collect();
+    let clear = |t: f64| parallel.iter().all(|c| (c - t).abs() >= AXIS_CLEARANCE);
+    let mid = (t0 + t1) / 2.0;
+    let section_t = || {
+        let steps = ((t1 - t0) * 0.45 / AXIS_STEP).floor() as i32;
+        (0..=steps).flat_map(|k| [mid + k as f64 * AXIS_STEP, mid - k as f64 * AXIS_STEP]).find(|t| clear(*t)).unwrap_or(mid)
+    };
     let t = match kind {
-        DrawingLevelKind::Section => (t0 + t1) / 2.0,
+        DrawingLevelKind::Section => section_t(),
         DrawingLevelKind::Elevation => t0 - margin,
         _ => return None,
     };
@@ -142,6 +170,7 @@ pub fn place(kind: DrawingLevelKind, line: [Vec2; 2], sign: f64, b: [f64; 4]) ->
 pub fn sync_ops(p: &Project, root: &Map<String, Value>, t: &Touch) -> Vec<Op> {
     let levels = root.get("drawingLevels").and_then(Value::as_array).map(Vec::as_slice).unwrap_or(&[]);
     let ext = if t.extent { extent(p) } else { None };
+    let axes: Vec<[Vec2; 2]> = p.walls.iter().map(|w| [w.start, w.end]).collect();
     let mut out = Vec::new();
     for l in &p.drawing_levels {
         if l.auto_line != Some(true) || !matches!(l.kind, DrawingLevelKind::Section | DrawingLevelKind::Elevation) {
@@ -153,7 +182,7 @@ pub fn sync_ops(p: &Project, root: &Map<String, Value>, t: &Touch) -> Vec<Op> {
             e.remove("autoLine");
         } else {
             let (Some(b), Some(line)) = (ext, l.line_points) else { continue };
-            let Some(next) = place(l.kind, line, l.direction_sign.unwrap_or(1.0), b) else { continue };
+            let Some(next) = place(l.kind, line, l.direction_sign.unwrap_or(1.0), b, &axes) else { continue };
             let same = line.iter().zip(&next).all(|(a, c)| (a.x - c.x).abs() < 1e-6 && (a.y - c.y).abs() < 1e-6);
             if same && l.bend_points.as_ref().is_none_or(Vec::is_empty) {
                 continue;
@@ -194,17 +223,34 @@ mod tests {
     fn schnitt_durch_die_mitte_ansicht_davor() {
         let b = [48.0, 46.0, 60.0, 56.0];
         let line = [Vec2 { x: -1.0, y: 2.0 }, Vec2 { x: 6.0, y: 2.0 }];
-        let s = place(DrawingLevelKind::Section, line, 1.0, b).unwrap();
+        let s = place(DrawingLevelKind::Section, line, 1.0, b, &[]).unwrap();
         assert_eq!(s, [Vec2 { x: 46.0, y: 51.0 }, Vec2 { x: 62.0, y: 51.0 }]);
-        let e = place(DrawingLevelKind::Elevation, line, 1.0, b).unwrap();
+        let e = place(DrawingLevelKind::Elevation, line, 1.0, b, &[]).unwrap();
         // Blick nach +y (Norden): Linie südlich des Gebäudes.
         assert_eq!(e, [Vec2 { x: 46.0, y: 44.0 }, Vec2 { x: 62.0, y: 44.0 }]);
         // Umgekehrte Blickrichtung: Linie auf der anderen Seite.
-        let n = place(DrawingLevelKind::Elevation, line, -1.0, b).unwrap();
+        let n = place(DrawingLevelKind::Elevation, line, -1.0, b, &[]).unwrap();
         assert_eq!(n[0].y, 58.0);
-        assert!(place(DrawingLevelKind::Floor, line, 1.0, b).is_none());
-        assert!(place(DrawingLevelKind::Section, [line[0], line[0]], 1.0, b).is_none());
-        assert!(place(DrawingLevelKind::Section, line, 1.0, [f64::NAN, 0.0, 1.0, 1.0]).is_none());
+        assert!(place(DrawingLevelKind::Floor, line, 1.0, b, &[]).is_none());
+        assert!(place(DrawingLevelKind::Section, [line[0], line[0]], 1.0, b, &[]).is_none());
+        assert!(place(DrawingLevelKind::Section, line, 1.0, [f64::NAN, 0.0, 1.0, 1.0], &[]).is_none());
+    }
+
+    /// [266] Liegt die Mitte auf der Achse einer parallelen Innenwand, rückt der Schnitt zur Seite (nicht auf die Achse).
+    #[test]
+    fn schnitt_meidet_wandachsen() {
+        let b = [48.0, 46.0, 60.0, 56.0];
+        let line = [Vec2 { x: -1.0, y: 2.0 }, Vec2 { x: 6.0, y: 2.0 }];
+        let ax = |y: f64| [Vec2 { x: 48.0, y }, Vec2 { x: 60.0, y }];
+        let y_of = |axes: &[[Vec2; 2]]| place(DrawingLevelKind::Section, line, 1.0, b, axes).unwrap()[0].y;
+        assert_eq!(y_of(&[]), 51.0);
+        let y = y_of(&[ax(51.0)]);
+        assert!((y - 51.0).abs() >= 0.5 && (y - 51.0).abs() <= 1.0, "{y}");
+        // Senkrechte Wände zählen nicht; zwei Achsen beidseits: weiter ausweichen.
+        assert_eq!(y_of(&[[Vec2 { x: 51.0, y: 46.0 }, Vec2 { x: 51.0, y: 56.0 }]]), 51.0);
+        let y = y_of(&[ax(51.0), ax(51.25), ax(50.75)]);
+        assert!(![51.0, 51.25, 50.75].iter().any(|c| (c - y).abs() < 0.5), "{y}");
+        assert!(place(DrawingLevelKind::Elevation, line, 1.0, b, &[ax(44.0)]).unwrap()[0].y == 44.0);
     }
 
     #[test]

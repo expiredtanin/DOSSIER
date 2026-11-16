@@ -60,9 +60,11 @@ export const PresentationDialogHost = memo(function PresentationDialogHost({
     set({ floors: floors.map((f) => f.id).filter((f) => (f === id ? on : opts.floors.includes(f))) });
   const toggleElevation = (id: string, on: boolean) =>
     set({ elevationIds: elevations.map((e) => e.id).filter((e) => (e === id ? on : opts.elevationIds.includes(e))) });
+  const toggleSection = (id: string, on: boolean) =>
+    set({ sectionIds: sections.map((x) => x.id).filter((x) => (x === id ? on : opts.sectionIds.includes(x))) });
   const toggleTable = (kind: PosterTableKind, on: boolean): PosterTableKind[] =>
     (["areas", "siteProof"] as const).filter((k) => (k === kind ? on : (opts.extras?.tables ?? []).includes(k)));
-  const empty = opts.floors.length === 0 && opts.elevationIds.length === 0 && !opts.sectionId;
+  const empty = opts.floors.length === 0 && opts.elevationIds.length === 0 && opts.sectionIds.length === 0;
   // [224] Massstab je Viewport: "" = gemeinsamer Massstab.
   const scaleOf = (id: string) => String(opts.scales?.[id] ?? "");
   const setScaleOf = (id: string, v: string) => {
@@ -132,21 +134,19 @@ export const PresentationDialogHost = memo(function PresentationDialogHost({
           </section>
           <section className="imp-section">
             <div className="imp-section-title">{t("presentation.section")}</div>
-            <select
-              className="imp-select"
-              data-testid="presentation-section"
-              aria-label={t("presentation.section")}
-              value={opts.sectionId ?? ""}
-              onChange={(e) => set({ sectionId: e.target.value || null })}
-            >
-              <option value="">{t("presentation.noSection")}</option>
-              {sections.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
-            {opts.sectionId && <div style={{ display: "flex", marginTop: 4 }}>{scaleSelect(opts.sectionId)}</div>}
+            {sections.length === 0 && <div style={{ color: "var(--muted)" }}>{t("presentation.noSection")}</div>}
+            {sections.map((sec) => (
+              <label key={sec.id} className="imp-check" style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <input
+                  type="checkbox"
+                  data-testid={`presentation-section-${sec.id}`}
+                  checked={opts.sectionIds.includes(sec.id)}
+                  onChange={(ev) => toggleSection(sec.id, ev.target.checked)}
+                />
+                {sec.name}
+                {scaleSelect(sec.id)}
+              </label>
+            ))}
           </section>
           <section className="imp-section">
             <div className="imp-section-title">{t("presentation.sheet")}</div>
@@ -240,6 +240,15 @@ export const PresentationDialogHost = memo(function PresentationDialogHost({
                 onChange={(e) => set({ sketch: e.target.checked })}
               />
               {t("presentation.sketch")}
+            </label>
+            <label className="imp-check" style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <input
+                type="checkbox"
+                data-testid="presentation-autodim"
+                checked={!!opts.autoDim}
+                onChange={(e) => set({ autoDim: e.target.checked })}
+              />
+              {t("presentation.autoDim")}
             </label>
           </section>
           <p style={{ fontSize: 11, color: "var(--muted)", margin: "4px 0 0" }}>{t("presentation.hint")}</p>

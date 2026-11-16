@@ -38,7 +38,7 @@ describe("[66] Präsentationsplan", () => {
     const d = presentationDefaults(project);
     expect(d.floors.length).toBeGreaterThanOrEqual(4);
     expect(d.elevationIds.length).toBeGreaterThan(0);
-    expect(d.sectionId).not.toBeNull();
+    expect(d.sectionIds.length).toBeGreaterThan(0);
     expect([d.paper, d.orientation]).toEqual(["a1", "landscape"]);
     expect(d.sketch).toBe(false);
   });
@@ -56,7 +56,7 @@ describe("[66] Präsentationsplan", () => {
     expect(st().undoDepth).toBe(1);
     const p = st().project;
     const lay = p.layouts!.find((l) => l.id === layoutId)!;
-    expect(lay.viewports.length).toBe(o.floors.length + elevations + 1);
+    expect(lay.viewports.length).toBe(o.floors.length + elevations + o.sectionIds.length);
     expect(lay.masterId).toBeTruthy();
     const size = sheetSizeMm(lay.paper, lay.orientation);
     for (const [i, v] of lay.viewports.entries()) {
@@ -97,7 +97,7 @@ describe("[66] Präsentationsplan", () => {
 
   it("gewählte Geschosse, ohne Ansichten/Schnitt, Skizze an, A3: kleinerer Massstab", () => {
     const floors = project.drawingLevels.filter((l) => l.kind === "floor" && !l.layoutId).slice(0, 2).map((l) => l.id);
-    const res = presentationSheetOps(project, { floors, elevationIds: [], scale: null, sectionId: null, paper: "a3", orientation: "landscape", sketch: true }, LABELS, "t2")!;
+    const res = presentationSheetOps(project, { floors, elevationIds: [], scale: null, sectionIds: [], paper: "a3", orientation: "landscape", sketch: true }, LABELS, "t2")!;
     expect(res.plan.items.map((i) => i.levelId)).toEqual(floors);
     expect(res.plan.scale).toBeGreaterThanOrEqual(100);
     st().applyChange(res.ops);
@@ -107,7 +107,7 @@ describe("[66] Präsentationsplan", () => {
   });
 
   it("nichts gewählt ⇒ null, Projekt unverändert", () => {
-    expect(presentationSheetOps(project, { floors: [], elevationIds: [], scale: null, sectionId: null, paper: "a1", orientation: "landscape", sketch: false }, LABELS, "t3")).toBeNull();
+    expect(presentationSheetOps(project, { floors: [], elevationIds: [], scale: null, sectionIds: [], paper: "a1", orientation: "landscape", sketch: false }, LABELS, "t3")).toBeNull();
   });
 
   it("[224] Vorschlag: leere Geschosse nicht vorgewählt, Vorgabe 1:200", () => {
@@ -170,7 +170,7 @@ describe("[66] Präsentationsplan", () => {
 
   it("[224] fester Massstab und Massstab je Viewport landen in Ausschnitt und Viewport", () => {
     const floors = project.drawingLevels.filter((l) => l.kind === "floor" && !l.layoutId).slice(0, 2).map((l) => l.id);
-    const res = presentationSheetOps(project, { floors, elevationIds: [], scale: 200, scales: { [floors[1]]: 100 }, sectionId: null, paper: "a1", orientation: "landscape", sketch: false }, LABELS, "t4")!;
+    const res = presentationSheetOps(project, { floors, elevationIds: [], scale: 200, scales: { [floors[1]]: 100 }, sectionIds: [], paper: "a1", orientation: "landscape", sketch: false }, LABELS, "t4")!;
     expect(res.plan.scale).toBe(200);
     expect(res.plan.items.map((i) => i.scale)).toEqual([200, 100]);
     st().applyChange(res.ops);
@@ -181,7 +181,7 @@ describe("[66] Präsentationsplan", () => {
 
   it("[224] Plakat-Vorlage als Ziel: Master der Vorlage, Viewports unter der Kopfzeile", () => {
     const floors = project.drawingLevels.filter((l) => l.kind === "floor" && !l.layoutId).slice(0, 2).map((l) => l.id);
-    const res = presentationSheetOps(project, { floors, elevationIds: [], scale: 200, sectionId: null, paper: "a4", orientation: "portrait", sketch: false, poster: "poster-a1-landscape" }, LABELS, "t5")!;
+    const res = presentationSheetOps(project, { floors, elevationIds: [], scale: 200, sectionIds: [], paper: "a4", orientation: "portrait", sketch: false, poster: "poster-a1-landscape" }, LABELS, "t5")!;
     st().applyChange(res.ops);
     const p = st().project;
     const lay = p.layouts!.find((l) => l.id === res.layoutId)!;
@@ -202,7 +202,8 @@ describe("[66] Präsentationsplan", () => {
     st().applyChange(res.ops);
     const q = st().project;
     const tpl = q.viewTemplates!.find((t) => t.id === PRESENTATION_TEMPLATE_ID)!;
-    const show = new Set(Object.entries(q.viewSnapshots!.find((v) => v.id === "vs-pres-t6-0")!.layerVisibility).filter(([, v]) => v).map(([k]) => k));
+    // Marken ([266]) liegen weit ums Haus und werden vom Ausschnitt bewusst beschnitten: ohne sie vergleichen.
+    const show = new Set(Object.entries(q.viewSnapshots!.find((v) => v.id === "vs-pres-t6-0")!.layerVisibility).filter(([k, v]) => v && k !== "91").map(([k]) => k));
     for (const it of res.plan.items.filter((i) => i.group === 0)) {
       const b = generatePlan(q, it.levelId, show, undefined, tpl.detail, false, true, true, 200, false, false).bounds;
       // Rahmen um die eigene Bildmitte (deckungsgleiche Grundrisse) umfasst das ganze Ausmass (hier ohne fernen Kontext).
@@ -295,7 +296,9 @@ describe("[66] Präsentationsplan", () => {
   it("[208] Plakat mit Situation, Tabellen und Bild-Rahmen: alles im Satzspiegel, ohne Überlappung, feste Massstäbe, Blatt bis unten gefüllt", () => {
     st().loadProject(buildWettbewerbSampleProject());
     const p = st().project;
-    const o = { ...presentationDefaults(p), scale: 200, poster: "poster-a1-landscape", extras: POSTER_EXTRAS_DEFAULT };
+    // [266] Mit Schnitt-/Ansichtsmarken brauchen die Grundrisse mehr Rand: Auswahl so, dass alles auf ein Blatt passt.
+    const d = presentationDefaults(p);
+    const o = { ...d, elevationIds: d.elevationIds.slice(0, 1), sectionIds: [], scale: 200, poster: "poster-a1-landscape", extras: POSTER_EXTRAS_DEFAULT };
     const plan = planPresentationSheet(p, o);
     expect(plan.pages ?? 1).toBe(1);
     expect(plan.fits).toBe(true);
@@ -313,7 +316,10 @@ describe("[66] Präsentationsplan", () => {
     for (const i of plan.items) expect(i.scale).toBe(i.kind === "situation" ? 500 : 200);
     // Situation steht am Anfang (oben links).
     const sit = plan.items.find((i) => i.kind === "situation")!;
-    expect([sit.xMm, sit.yMm]).toEqual([m.marginMm, m.contentTopMm]);
+    // [266] Freier Platz wird als Weissraum verteilt: die Situation steht an der ersten Zeile, nicht zwingend direkt unter der Kopfzeile.
+    expect(sit.xMm).toBe(m.marginMm);
+    expect(sit.yMm).toBeGreaterThanOrEqual(m.contentTopMm);
+    expect(Math.min(...plan.items.map((i) => i.yMm))).toBe(sit.yMm);
     const left = m.marginMm;
     const right = 841 - m.marginMm;
     const bottom = 594 - m.marginMm;
@@ -360,4 +366,66 @@ describe("[66] Präsentationsplan", () => {
     expect(plan.tables).toEqual([]);
     expect(plan.image ?? null).toBeNull();
   }, 60_000);
+
+  // [266] Befunde aus dem Wettbewerbs-Durchlauf: Marken, mehrere Schnitte, Aussenbemassung, Planzeichen der Situation, Bildgrösse.
+  it("[266] Schnitt-/Ansichtsmarken sind in den Plakat-Grundrissen sichtbar, mehrere Schnitte wählbar", () => {
+    const sections = project.drawingLevels.filter((l) => l.kind === "section").map((l) => l.id);
+    expect(sections.length).toBeGreaterThanOrEqual(2);
+    const floors = project.drawingLevels.filter((l) => l.kind === "floor" && !l.layoutId && levelHasContent(project, l.id)).slice(0, 2).map((l) => l.id);
+    const res = presentationSheetOps(project, { floors, elevationIds: [], scale: 200, sectionIds: sections, paper: "a1", orientation: "landscape", sketch: false, poster: "poster-a1-landscape" }, LABELS, "m1")!;
+    st().applyChange(res.ops);
+    const q = st().project;
+    const lay = q.layouts!.find((l) => l.id === res.layoutId)!;
+    expect(lay.viewports).toHaveLength(floors.length + sections.length);
+    const snap = (i: number) => q.viewSnapshots!.find((v) => v.id === lay.viewports[i].snapshotId)!;
+    expect(snap(0).layerVisibility["91"]).toBe(true);
+    // Ohne Schnitte und Ansichten bleibt die Vorlage (Marken aus).
+    const none = presentationSheetOps(st().project, { floors, elevationIds: [], scale: 200, sectionIds: [], paper: "a1", orientation: "landscape", sketch: false, poster: "poster-a1-landscape" }, LABELS, "m2")!;
+    st().applyChange(none.ops);
+    expect(st().project.viewSnapshots!.find((v) => v.id === "vs-pres-m2-0")!.layerVisibility["91"]).toBe(false);
+  }, 60_000);
+
+  it("[266] Aussenbemassung wird für Grundrisse ohne Ketten ergänzt, vorhandene bleiben", () => {
+    const strip = { ...project, drawings2d: project.drawings2d.filter((d) => !d.id.startsWith("autodim-")) };
+    st().loadProject(strip);
+    const p = st().project;
+    const floors = p.drawingLevels.filter((l) => l.kind === "floor" && !l.layoutId && levelHasContent(p, l.id)).slice(0, 2).map((l) => l.id);
+    const base = { floors, elevationIds: [], scale: 200, sectionIds: [], paper: "a1" as const, orientation: "landscape" as const, sketch: false };
+    const off = presentationSheetOps(p, base, LABELS, "d0")!;
+    st().applyChange(off.ops);
+    expect(st().project.drawings2d.some((d) => d.id.startsWith("autodim-"))).toBe(false);
+    st().loadProject(strip);
+    const on = presentationSheetOps(st().project, { ...base, autoDim: true }, LABELS, "d1")!;
+    st().applyChange(on.ops);
+    for (const f of floors) expect(st().project.drawings2d.some((d) => d.id.startsWith(`autodim-${f}-`) && d.categoryCode === "81")).toBe(true);
+    // Zweiter Lauf: nichts doppelt (die Ketten tragen feste Ids).
+    const n = st().project.drawings2d.filter((d) => d.id.startsWith("autodim-")).length;
+    const again = presentationSheetOps(st().project, { ...base, autoDim: true }, LABELS, "d2")!;
+    st().applyChange(again.ops);
+    expect(st().project.drawings2d.filter((d) => d.id.startsWith("autodim-")).length).toBe(n);
+  }, 90_000);
+
+  it("[266] Situation: Planzeichen am Rahmenrand statt in der Zeichnung, Bild nicht grösser als der grösste Plan", () => {
+    st().loadProject(buildWettbewerbSampleProject());
+    const p = st().project;
+    const o = { ...presentationDefaults(p), scale: 200, poster: "poster-a1-portrait", extras: POSTER_EXTRAS_DEFAULT };
+    const res = presentationSheetOps(p, o, LABELS, "s1")!;
+    st().applyChange(res.ops);
+    const q = st().project;
+    const sit = res.plan.items.find((i) => i.kind === "situation")!;
+    const lay = q.layouts!.find((l) => l.id === res.layoutId)!;
+    const sitSnap = q.viewSnapshots!.find((v) => v.id === lay.viewports[0].snapshotId)!;
+    expect(sitSnap.layerVisibility["84"]).toBe(false);
+    const grp = q.groups!.find((g) => g.id === "grp-pres-s1-sit-n")!;
+    const arrow = q.drawings2d.filter((d) => grp.drawingIds.includes(d.id) && d.geom.shape === "circle");
+    expect(arrow).toHaveLength(1);
+    // Mitte des Nordpfeils: unter dem Rahmen der Situation (Papier-mm = Modell-m × 1000).
+    const c = (arrow[0].geom as { center: { x: number; y: number } }).center;
+    expect(-c.y * 1000).toBeGreaterThan(sit.yMm + sit.heightMm);
+    const plans = res.plan.items.filter((i) => i.group === 0);
+    expect(res.plan.image!.heightMm).toBeLessThanOrEqual(Math.max(...plans.map((i) => i.heightMm), 0.14 * 700) + 1e-6);
+    // Weissraum: der Inhalt reicht auf Blatt 1 nicht nur ins obere Drittel.
+    const bottoms = [...res.plan.items, ...(res.plan.tables ?? []), ...(res.plan.image ? [res.plan.image] : [])].filter((i) => (i.page ?? 0) === 0).map((i) => i.yMm + i.heightMm);
+    expect(Math.max(...bottoms)).toBeGreaterThan(841 * 0.6);
+  }, 90_000);
 });

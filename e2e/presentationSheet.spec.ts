@@ -28,7 +28,12 @@ test("Präsentationsplan: Dialog erstellt Blatt mit N Viewports, Undo entfernt e
   for (let i = 0; i < (await elevs.count()); i++) await elevs.nth(i).check();
   // Erstes Geschoss abwählen (falls vorgewählt), Rest bleibt.
   await floors.first().uncheck();
-  expect(await dialog.locator("[data-testid=presentation-section]").inputValue()).not.toBe("");
+  // [266] Schnitte einzeln wählbar (Haken), vorgewählt sind alle.
+  const secs = dialog.locator("input[data-testid^=presentation-section-]");
+  expect(await secs.count()).toBeGreaterThanOrEqual(1);
+  let nSec = 0;
+  for (let i = 0; i < (await secs.count()); i++) if (await secs.nth(i).isChecked()) nSec++;
+  expect(nSec).toBeGreaterThanOrEqual(1);
   let nFloors = 0;
   for (let i = 0; i < (await floors.count()); i++) if (await floors.nth(i).isChecked()) nFloors++;
   const nElev = await elevs.count();
@@ -37,7 +42,7 @@ test("Präsentationsplan: Dialog erstellt Blatt mit N Viewports, Undo entfernt e
 
   // Blatt ist offen: gewählte Grundrisse + Ansichten + 1 Schnitt.
   const vps = page.locator("[data-viewport-id]");
-  await expect(vps).toHaveCount(nFloors + nElev + 1, { timeout: 20_000 });
+  await expect(vps).toHaveCount(nFloors + nElev + nSec, { timeout: 20_000 });
   await page.waitForTimeout(1500);
   const shots = process.env.DOSSIER_SHOTS;
   if (shots) await page.screenshot({ path: `${shots}/presentation-sheet.png` });

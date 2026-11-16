@@ -147,7 +147,9 @@ export function isLv95(e: number, n: number): boolean {
  */
 export function fromWorldInput(p: ParsedInput, origin: { e: number; n: number } | null): ParsedInput {
   if (!origin || p.kind !== "absolute" || !isLv95(p.point.x, p.point.y)) return p;
-  return { kind: "absolute", point: { x: p.point.x - origin.e, y: p.point.y - origin.n } };
+  // [266] Auf mm runden: 2600053.2 − 2600000 ergäbe sonst 53.200000000186 im Modell.
+  const mm = (v: number) => Math.round(v * 1000) / 1000;
+  return { kind: "absolute", point: { x: mm(p.point.x - origin.e), y: mm(p.point.y - origin.n) } };
 }
 
 /** Punkt aus polarer Form (Distanz/Winkel) relativ zu einem Basispunkt. */
