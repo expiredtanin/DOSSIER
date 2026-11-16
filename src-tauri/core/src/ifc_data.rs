@@ -1571,7 +1571,8 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
             common.push(ident("Reference", n));
         }
         common.push(Prop::Bool("IsExternal", external));
-        let (id, name, long) = (f.str(&room.id), f.str(number.unwrap_or(&room.id)), f.str(&room.name));
+        // [266] IFC-Konvention: Name = Raumnummer, LongName = Raumname; ohne Nummer steht der Raumname im Namen (nicht die interne Id).
+        let (id, name, long) = (f.str(&room.id), f.str(number.unwrap_or(if room.name.is_empty() { &room.id } else { &room.name })), f.str(&room.name));
         let bands = crate::room_book::height_bands(&p, room, roofs, area.net);
         let arcs = crate::ring_arc::has_arcs(room.boundary_bulge.as_deref(), room.boundary.len());
         f.nums(&[if arcs { REC_SPACE_ARC } else { REC_SPACE }, structure, id, name, long, if external { 1.0 } else { 0.0 }, height, z_rel, bands.mean]);

@@ -543,6 +543,14 @@ describe("Räume als IfcSpace", () => {
     const contained = spf.split("\n").filter((l) => /=IFCRELCONTAINEDINSPATIALSTRUCTURE\(/.test(l) && spaceIds.some((id) => new RegExp(`${id}[,)]`).test(l)));
     expect(contained).toEqual([]);
   });
+  it("[266] Name = Raumnummer, LongName = Raumname; ohne Nummer der Raumname statt der internen Id", () => {
+    const p = withRooms();
+    p.rooms![0] = { ...p.rooms![0], stamp: { number: "1.01" } } as NonNullable<Project["rooms"]>[number];
+    const spaces = exportIfcSpf(p).split("\n").filter((l) => /=IFCSPACE\(/.test(l));
+    expect(spaces[0]).toMatch(/,'1\.01',\$,\$,#\d+,#\d+,'K\\X2\\00FC\\X0\\che',/);
+    expect(spaces[1]).toMatch(/,'Gang',\$,\$,#\d+,#\d+,'Gang',/);
+    expect(spaces.some((l) => l.includes("'R1'") || l.includes("'R2'"))).toBe(false);
+  });
   it("Netto-Geschossfläche und SIA-416-Kategorie", () => {
     const spf = exportIfcSpf(withRooms());
     expect(spf).toMatch(/IFCQUANTITYAREA\('NetFloorArea',\$,\$,12\.0,\$\)/);

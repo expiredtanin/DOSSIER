@@ -4004,6 +4004,7 @@ export const en: Record<TranslationKey, string> = {
   "publish.none": "No publication set. Use ＋ to bundle sheets into a set.",
   "publish.defaultName": "New set",
   "publish.projectNumber": "Project number",
+  "publish.projectName": "Project name",
   "publish.name": "Name",
   "publish.format": "Output",
   "publish.format.pdf-multi": "PDF, one document",

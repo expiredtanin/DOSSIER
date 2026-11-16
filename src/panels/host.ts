@@ -802,6 +802,8 @@ export interface PanelHostValue {
   onDeletePublishSet: (id: string) => void;
   /** Erzeugt und speichert alle Dateien des Satzes; zählt Indizes hoch und protokolliert. */
   onPublishSet: (id: string) => void;
+  /** [266] Setzt den Projektnamen (leer → unverändert). */
+  onSetProjectName: (value: string) => void;
   /** Setzt die Projektnummer (Dateinamen-Muster `{Projektnummer}`). */
   onSetProjectNumber: (value: string) => void;
   /** Wettbewerb ([208]): anonyme Abgabe und Kennwort setzen (Teil-Patch). */

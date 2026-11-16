@@ -148,6 +148,29 @@ function SetEditor({ set }: { set: PublishSet }) {
   );
 }
 
+/** [266] Projektname: Entwurf lokal, übernommen bei Enter/Verlassen (leer → alter Name bleibt). */
+function ProjectNameInput({ name, onCommit }: { name: string; onCommit: (v: string) => void }) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const commit = () => {
+    if (draft !== null && draft.trim() && draft !== name) onCommit(draft);
+    setDraft(null);
+  };
+  return (
+    <input
+      className="res-input"
+      style={{ flex: 1 }}
+      data-testid="project-name"
+      value={draft ?? name}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+        if (e.key === "Escape") setDraft(null);
+      }}
+    />
+  );
+}
+
 export function PublishSection() {
   const host = usePanelHost();
   const project = useStore((s) => s.project);
@@ -165,7 +188,11 @@ export function PublishSection() {
         </span>
       </header>
       <label style={{ display: "flex", gap: 6, alignItems: "center", padding: "2px 10px", fontSize: 12 }}>
-        <span>{t("publish.projectNumber")}</span>
+        <span style={{ minWidth: 82 }}>{t("publish.projectName")}</span>
+        <ProjectNameInput name={project.name} onCommit={host.onSetProjectName} />
+      </label>
+      <label style={{ display: "flex", gap: 6, alignItems: "center", padding: "2px 10px", fontSize: 12 }}>
+        <span style={{ minWidth: 82 }}>{t("publish.projectNumber")}</span>
         <input
           className="res-input mono"
           style={{ flex: 1 }}

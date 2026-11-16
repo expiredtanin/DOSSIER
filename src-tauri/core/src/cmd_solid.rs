@@ -684,6 +684,45 @@ fn ceiling_opening_ops(root: &Map<String, Value>, v: &Value, ctx: &Ctx) -> Vec<O
     vec![Op::Replace { collection: "ceilings".into(), entity: with(host, "openings", Value::Array(openings)) }]
 }
 
+/// [266] Deckenloch einer neuen Treppe: steigt sie über die ganze Geschosshöhe nach oben, wird in die Decke des
+/// Geschosses (die den ganzen Treppengrundriss enthält) eine Aussparung in der Form des Treppenumrisses gelegt.
+/// Keine solche Decke, Treppe nach unten oder nicht über die volle Höhe, oder schon ein Loch darüber → keine Op.
+/// Die Ops laufen mit der Treppe im selben Commit (ein Undo-Schritt).
+pub(crate) fn stair_hole_ops(root: &Map<String, Value>, params: &[f64], rise: f64, up: bool, ctx: &Ctx) -> Vec<Op> {
+    let floor_h = ctx.floor_height.unwrap_or(f64::NAN);
+    if !up || !(floor_h.is_finite() && rise >= floor_h - 0.05) {
+        return Vec::new();
+    }
+    let o = crate::stair::outline(params);
+    let ring: Vec<V> = match o.first() {
+        Some(&k) if k == 0.0 && o.len() >= 2 => {
+            let n = o[1] as usize;
+            (0..n).filter_map(|i| Some((*o.get(2 + 2 * i)?, *o.get(3 + 2 * i)?))).collect()
+        }
+        // Wendeltreppen (Linien + Bögen statt Polygon): Loch weiter von Hand (`deckenloch`).
+        _ => return Vec::new(),
+    };
+    if ring.len() < 3 || ring.iter().any(|q| !(q.0.is_finite() && q.1.is_finite())) {
+        return Vec::new();
+    }
+    let host = arr(root.get("ceilings")).iter().find(|c| {
+        let outline = ring_of(c);
+        crate::cmd_create::floor_of(c) == Some(ctx.level) && outline.len() >= 3 && ring.iter().all(|q| point_in_polygon(*q, &outline))
+    });
+    let Some(host) = host else { return Vec::new() };
+    let mut openings = arr(field(host, "openings")).to_vec();
+    // Ein bestehendes Loch, das den Umriss schon enthält, genügt.
+    let covered = openings.iter().any(|h| {
+        let hr: Vec<V> = arr(Some(h)).iter().map(xy).collect();
+        hr.len() >= 3 && ring.iter().all(|q| point_in_polygon(*q, &hr))
+    });
+    if covered {
+        return Vec::new();
+    }
+    openings.push(pvs(&ring));
+    vec![Op::Replace { collection: "ceilings".into(), entity: with(host, "openings", Value::Array(openings)) }]
+}
+
 /// Dachfenster / Deckenöffnung mit Oberlicht ([103]): ein Klick setzt die Öffnung (Mitte im Grundriss) in das
 /// Dach, dessen Umriss den Punkt enthält (Dächer des aktiven Geschosses zuerst), sonst in die Decke des
 /// Geschosses. Masse in der Dachebene (Standard 78 × 118 cm), Fenstertyp wie beim Fenster-Befehl.
