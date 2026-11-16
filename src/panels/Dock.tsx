@@ -55,6 +55,8 @@ export interface DockProps {
   onResize: (size: number) => void;
   /** Gruppen-Höhen geändert — liefert die neue Gewichts-Liste (so lang wie groups). */
   onResizeGroups: (weights: number[]) => void;
+  /** [263] Gruppe `index` ein-/ausklappen. */
+  onToggleCollapsed: (index: number) => void;
   /**
    * Baut den Host-Context-Wert für eine Gruppe (passend zu ihrem aktiven Tab).
    * App reicht hier `hostWithMode(...)` herein; das Dock wickelt jede Gruppe in
@@ -89,6 +91,7 @@ export const Dock = memo(function Dock({
   onStartTabDrag,
   onResize,
   onResizeGroups,
+  onToggleCollapsed,
   buildHost,
   ctx,
   displayModeFor,
@@ -100,6 +103,7 @@ export const Dock = memo(function Dock({
   const rootRef = useRef<HTMLDivElement | null>(null);
   // Stabile Identität für den memoisierten TabStrip ([121]).
   const startTabDrag = useEvent(onStartTabDrag);
+  const toggleCollapsed = useEvent(onToggleCollapsed);
   // Container der Gruppen (für die Gesamthöhe beim Gruppen-Splitter).
   const stackRef = useRef<HTMLDivElement | null>(null);
   // Breite während des aktiven Ziehens; null = nicht im Ziehen (dock.size gilt).
@@ -207,11 +211,13 @@ export const Dock = memo(function Dock({
       <div className="dock-stack" ref={stackRef}>
         {dock.groups.map((group, gi) => {
           const def = group.activeTab ? getPanel(group.activeTab) : undefined;
-          const groupStyle = { flexGrow: group.weight } as CSSProperties;
+          const collapsed = group.collapsed === true;
+          // Eingeklappt: nur die Tab-Leiste, kein Anteil an der Höhe.
+          const groupStyle = (collapsed ? { flex: "0 0 auto" } : { flexGrow: group.weight }) as CSSProperties;
           return [
             <section
               key={`g${gi}`}
-              className="dock-group"
+              className={`dock-group${collapsed ? " collapsed" : ""}`}
               style={groupStyle}
               // Datenattribute für die Drag-Auflösung: über dem Körper einer
               // Gruppe entsteht beim Ablegen eine NEUE Gruppe darüber/darunter.
@@ -224,8 +230,9 @@ export const Dock = memo(function Dock({
                 groupIndex={gi}
                 group={group}
                 onStartDrag={startTabDrag}
+                onToggleCollapsed={toggleCollapsed}
               />
-              {def ? (
+              {collapsed ? null : def ? (
                 <PanelHostProvider value={buildHost(group.activeTab)}>
                   <PanelFrame
                     def={def}
@@ -241,7 +248,8 @@ export const Dock = memo(function Dock({
               )}
             </section>,
             // Splitter zwischen dieser und der nächsten Gruppe.
-            gi < dock.groups.length - 1 ? (
+            // Kein Splitter zwischen Gruppen, wenn eine der beiden eingeklappt ist (nichts zu verteilen).
+            gi < dock.groups.length - 1 && !collapsed && !dock.groups[gi + 1].collapsed ? (
               <div
                 key={`s${gi}`}
                 className="dock-group-resize"

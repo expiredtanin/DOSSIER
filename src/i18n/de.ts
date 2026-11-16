@@ -1099,6 +1099,8 @@ export const de = {
 
   // ── Dock ─────────────────────────────────────────────────────────────────
   "dock.resize": "Breite anpassen",
+  "dock.collapseGroup": "Panel einklappen",
+  "dock.expandGroup": "Panel ausklappen",
   "dock.dock": "Andocken",
   "dock.close": "Schliessen",
   "dock.float": "Lösen",

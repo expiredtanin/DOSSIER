@@ -1094,6 +1094,8 @@ export const en: Record<TranslationKey, string> = {
 
   // Dock.
   "dock.resize": "Adjust width",
+  "dock.collapseGroup": "Collapse panel",
+  "dock.expandGroup": "Expand panel",
   "dock.dock": "Dock",
   "dock.close": "Close",
   "dock.float": "Float",

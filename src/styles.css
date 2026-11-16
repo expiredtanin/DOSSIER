@@ -4291,6 +4291,34 @@ body {
 .tab:hover {
   color: var(--ink);
 }
+/* [263] Ein-/Ausklappen der Gruppe: am rechten Ende der Tab-Leiste. */
+.tab-collapse {
+  flex: 0 0 auto;
+  margin-left: auto;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--ink-2);
+  padding: 0;
+  border-radius: 7px;
+  cursor: pointer;
+}
+.tab-collapse:hover {
+  color: var(--ink);
+  background: var(--accent-dim);
+}
+.tab-collapse:focus-visible {
+  outline: 2px solid var(--accent-border);
+  outline-offset: -2px;
+}
+/* Eingeklappte Gruppe: nur die Leiste, ohne untere Trennlinie. */
+.dock-group.collapsed .tabstrip {
+  border-bottom: none;
+}
 .tab.active {
   background: var(--accent-dim);
   color: var(--ink);

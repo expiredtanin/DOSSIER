@@ -18,6 +18,7 @@ import {
   reorderInGroup,
   setActiveTab,
   setGroupWeights,
+  toggleGroupCollapsed,
   updateFloat,
 } from "../panels/layout";
 import { DEFAULT_FLOAT_W, DEFAULT_FLOAT_H } from "../panels/panelDrag";
@@ -39,6 +40,8 @@ export interface LayoutSlice {
   // ── Dock-Größen / Gruppen ────────────────────────────────────────────────
   resizeDock: (side: "left" | "right", size: number) => void;
   resizeGroups: (side: "left" | "right", weights: number[]) => void;
+  /** [263] Gruppe im Dock ein-/ausklappen (nur Tab-Leiste bleibt). */
+  toggleGroupCollapsed: (side: "left" | "right", groupIndex: number) => void;
 
   // ── Tab-Drag-Auflösung (Reorder / Einreihen / Stapeln / Lösen) ────────────
   activateTab: (panelId: string) => void;
@@ -101,6 +104,8 @@ export function createLayoutSlice(api: StoreApi<LayoutSlice>): LayoutSlice {
       setLayout((l) => ({ ...l, [side]: { ...l[side], size } })),
     resizeGroups: (side, weights) =>
       setLayout((l) => setGroupWeights(l, side, weights)),
+    toggleGroupCollapsed: (side, groupIndex) =>
+      setLayout((l) => toggleGroupCollapsed(l, side, groupIndex)),
 
     // Unter der Schwelle losgelassen → Klick: Tab in seiner Gruppe aktivieren.
     activateTab: (panelId) => {
@@ -187,7 +192,7 @@ export function reconcileLayout(layout: LayoutState): LayoutState {
         const tabs = g.tabs.filter((id) => hasPanel(id));
         const activeTab =
           g.activeTab && tabs.includes(g.activeTab) ? g.activeTab : (tabs[0] ?? null);
-        return { tabs, activeTab, weight: g.weight };
+        return { tabs, activeTab, weight: g.weight, ...(g.collapsed ? { collapsed: true } : {}) };
       })
       .filter((g) => g.tabs.length > 0);
     return { groups, size: dock.size };

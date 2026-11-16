@@ -34,6 +34,11 @@ export interface DockGroup {
    * Verhältnisse zählen; ein Splitter-Zug verteilt Gewicht zwischen Nachbarn.
    */
   weight: number;
+  /**
+   * [263] Eingeklappt: nur die Tab-Leiste bleibt sichtbar, die übrigen Gruppen des
+   * Docks bekommen die Höhe. Fehlt = ausgeklappt.
+   */
+  collapsed?: boolean;
 }
 
 /**

@@ -99,7 +99,12 @@ function newGroupWeight(groups: DockGroup[]): number {
 
 /** Tiefe (frische Objekte) Kopie einer Gruppenliste. */
 function cloneGroups(groups: DockGroup[]): DockGroup[] {
-  return groups.map((g) => ({ tabs: [...g.tabs], activeTab: g.activeTab, weight: g.weight }));
+  return groups.map((g) => ({
+    tabs: [...g.tabs],
+    activeTab: g.activeTab,
+    weight: g.weight,
+    ...(g.collapsed ? { collapsed: true } : {}),
+  }));
 }
 
 // ── Standard ────────────────────────────────────────────────────────────────
@@ -364,8 +369,26 @@ export function setActiveTab(
 ): LayoutState {
   const d = layout[dock];
   const gi = d.groups.findIndex((g) => g.tabs.includes(panelId));
-  if (gi < 0 || d.groups[gi].activeTab === panelId) return layout;
-  const groups = d.groups.map((g, i) => (i === gi ? { ...g, activeTab: panelId } : g));
+  if (gi < 0) return layout;
+  if (d.groups[gi].activeTab === panelId && !d.groups[gi].collapsed) return layout;
+  // [263] Ein Klick auf einen Reiter will das Panel sehen: eingeklappte Gruppe klappt auf.
+  const groups = d.groups.map((g, i) => {
+    if (i !== gi) return g;
+    const { collapsed: _c, ...rest } = g;
+    return { ...rest, activeTab: panelId };
+  });
+  return { ...layout, [dock]: { ...d, groups } };
+}
+
+/** [263] Klappt eine Gruppe des Docks ein bzw. aus (immutabel); ungültiger Index → unverändert. */
+export function toggleGroupCollapsed(layout: LayoutState, dock: DockId, groupIndex: number): LayoutState {
+  const d = layout[dock];
+  if (groupIndex < 0 || groupIndex >= d.groups.length) return layout;
+  const groups = d.groups.map((g, i) => {
+    if (i !== groupIndex) return g;
+    const { collapsed, ...rest } = g;
+    return collapsed ? rest : { ...rest, collapsed: true };
+  });
   return { ...layout, [dock]: { ...d, groups } };
 }
 
@@ -446,7 +469,8 @@ function isDockGroup(v: unknown): v is DockGroup {
     Array.isArray(g.tabs) &&
     g.tabs.every((t) => typeof t === "string") &&
     (g.activeTab === null || typeof g.activeTab === "string") &&
-    typeof g.weight === "number"
+    typeof g.weight === "number" &&
+    (g.collapsed === undefined || typeof g.collapsed === "boolean")
   );
 }
 

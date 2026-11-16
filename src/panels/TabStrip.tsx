@@ -42,6 +42,8 @@ export interface TabStripProps {
    * entscheidet über die Bewegung, ob Klick oder Ziehen.
    */
   onStartDrag: (panelId: string, e: React.PointerEvent) => void;
+  /** [263] Gruppe ein-/ausklappen (Knopf am Ende der Leiste); Parameter = Gruppen-Index. */
+  onToggleCollapsed: (groupIndex: number) => void;
 }
 
 /**
@@ -50,7 +52,9 @@ export interface TabStripProps {
  * Controller).
  */
 // memo ([121]): rendert nur bei geänderter Gruppe; `onStartDrag` muss stabil sein (Dock: `useEvent`).
-export const TabStrip = memo(function TabStrip({ side, groupIndex, group, onStartDrag }: TabStripProps) {
+export const TabStrip = memo(function TabStrip({ side, groupIndex, group, onStartDrag, onToggleCollapsed }: TabStripProps) {
+  const collapsed = group.collapsed === true;
+  const toggleLabel = t(collapsed ? "dock.expandGroup" : "dock.collapseGroup");
   return (
     <div
       className="tabstrip"
@@ -80,6 +84,20 @@ export const TabStrip = memo(function TabStrip({ side, groupIndex, group, onStar
           </button>
         );
       })}
+      {/* [263] Ein-/Ausklappen: ein Button, daher Enter/Leertaste von selbst. */}
+      <button
+        type="button"
+        className="tab-collapse"
+        data-testid="group-toggle"
+        aria-expanded={!collapsed}
+        aria-label={toggleLabel}
+        title={toggleLabel}
+        onClick={() => onToggleCollapsed(groupIndex)}
+      >
+        <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+          <path d={collapsed ? "M3 4.5 6 7.5 9 4.5" : "M3 7.5 6 4.5 9 7.5"} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
     </div>
   );
 });

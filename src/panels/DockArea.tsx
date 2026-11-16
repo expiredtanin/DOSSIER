@@ -34,6 +34,7 @@ export function DockArea(props: {
   // Layout-Mutationen aus dem Layout-Slice (referenzstabile Store-Actions).
   const resizeDock = useStore((s) => s.resizeDock);
   const resizeGroups = useStore((s) => s.resizeGroups);
+  const toggleCollapsed = useStore((s) => s.toggleGroupCollapsed);
   const focusFloat = useStore((s) => s.focusFloat);
   const moveFloat = useStore((s) => s.moveFloat);
   const resizeFloat = useStore((s) => s.resizeFloat);
@@ -47,6 +48,8 @@ export function DockArea(props: {
   const resizeRight = useCallback((size: number) => resizeDock("right", size), [resizeDock]);
   const resizeGroupsLeft = useCallback((w: number[]) => resizeGroups("left", w), [resizeGroups]);
   const resizeGroupsRight = useCallback((w: number[]) => resizeGroups("right", w), [resizeGroups]);
+  const toggleCollapsedLeft = useCallback((gi: number) => toggleCollapsed("left", gi), [toggleCollapsed]);
+  const toggleCollapsedRight = useCallback((gi: number) => toggleCollapsed("right", gi), [toggleCollapsed]);
   const buildHost = useCallback(
     (activeTab: string | null) => hostWithMode(baseHost, activeTab, modeFor, setModeFor, measure),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -75,6 +78,7 @@ export function DockArea(props: {
             onStartTabDrag={onStartTabDrag}
             onResize={resizeLeft}
             onResizeGroups={resizeGroupsLeft}
+            onToggleCollapsed={toggleCollapsedLeft}
             buildHost={buildHost}
             displayModeFor={displayModeFor}
             onDisplayModeChange={onDisplayModeChange}
@@ -92,6 +96,7 @@ export function DockArea(props: {
             onStartTabDrag={onStartTabDrag}
             onResize={resizeRight}
             onResizeGroups={resizeGroupsRight}
+            onToggleCollapsed={toggleCollapsedRight}
             buildHost={buildHost}
             displayModeFor={displayModeFor}
             onDisplayModeChange={onDisplayModeChange}
