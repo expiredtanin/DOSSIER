@@ -24,6 +24,7 @@ import {
   totalSeconds,
   tourDialogReducer,
 } from "./cameraTourDialogState";
+import { PreviewBadge } from "./PreviewBadge";
 
 export const CameraTourDialogHost = memo(function CameraTourDialogHost() {
   const [s, dispatch] = useReducer(tourDialogReducer, initialTourDialogState);
@@ -125,7 +126,10 @@ export const CameraTourDialogHost = memo(function CameraTourDialogHost() {
     <div className="imp-overlay" data-tour-ui onClick={close}>
       <div ref={dialogRef} className="imp-dialog render-dialog" role="dialog" aria-modal="true" aria-label={t("tour.title")} data-testid="tour-dialog" onClick={(e) => e.stopPropagation()}>
         <header className="imp-head">
-          <span className="imp-head-title">{t("tour.title")}</span>
+          <span className="imp-head-title">
+            {t("tour.title")}
+            <PreviewBadge />
+          </span>
           <button className="imp-close" onClick={close} aria-label={t("export.close")}>
             ×
           </button>

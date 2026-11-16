@@ -4,6 +4,7 @@ import { useSyncExternalStore } from "react";
 import { getLanguage, subscribeLanguage, t } from "./translate";
 
 export * from "./translate";
+export * from "./languagePref";
 
 /**
  * Hook-Variante: liefert dieselbe `t`-Funktion, abonniert aber den

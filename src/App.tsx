@@ -35,7 +35,7 @@ import { setDxfImportTrigger } from "./io/dxfImportHook";
 import { DEFAULT_PRESETS } from "./text/richText";
 import { unitsForLevel } from "./tools/displayUnits";
 import type { ToolHandlers } from "./tools/types";
-import { checkForUpdate } from "./update/checkForUpdate";
+import { checkForUpdateOnStart } from "./update/checkForUpdate";
 import { useT } from "./i18n";
 
 // Globaler Store (Slices: project/selection/view/layout) und lokaler UI-Zustand.
@@ -231,11 +231,11 @@ export default function App() {
     return () => setDxfImportTrigger(null);
   }, []);
 
-  // Selbst-Update: einmalig beim Start prüfen (still — meldet sich nur bei
-  // einem gefundenen Update oder einem echten Fehler, s. checkForUpdate.ts).
-  // No-op ausserhalb von Tauri (Vite-Dev-Server im Browser).
+  // Selbst-Update: beim Start nur prüfen, wenn in den Einstellungen eingeschaltet ([262]: Vorgabe aus, kein
+  // Netz ohne Zutun); still — meldet sich nur bei einem gefundenen Update oder einem echten Fehler, s.
+  // checkForUpdate.ts. No-op ausserhalb von Tauri (Vite-Dev-Server im Browser) und offline.
   useEffect(() => {
-    checkForUpdate(true);
+    void checkForUpdateOnStart();
   }, []);
 
   // Panel-Layout (Docks/Tabs/Größen) — aus dem Store-Slice (Init lädt aus

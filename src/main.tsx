@@ -10,8 +10,9 @@ import { LayerSettingsWindowApp } from "./native/LayerSettingsWindowApp";
 import { ContextImportWindowApp } from "./native/ContextImportWindowApp";
 import { ObjectSettingsWindowApp } from "./native/ObjectSettingsWindowApp";
 import { ErrorBoundary } from "./ui/ErrorBoundary";
+import { LanguageRoot } from "./i18n/LanguageRoot";
 import { initCore } from "./core";
-import { getLanguage, setLanguage } from "./i18n";
+import { applyLanguagePref, getLanguage, getStoredLanguagePref, setLanguage } from "./i18n";
 import type { Language } from "./i18n";
 import { applyThemeMode, getStoredThemeMode } from "./theme/themeMode";
 import "material-symbols/outlined.css";
@@ -38,6 +39,8 @@ declare global {
   }
 }
 window.__i18n = { getLanguage, setLanguage };
+// [264] Gespeicherte Sprachwahl (Einstellungen → Allgemein) VOR dem ersten Render anwenden.
+applyLanguagePref(getStoredLanguagePref());
 // Nur mit `?dossierTest&lang=en`: Sprache VOR dem ersten Render setzen (UI-Review; gibt noch keinen Umschalter).
 {
   const q = new URLSearchParams(window.location.search);
@@ -105,7 +108,9 @@ initCore()
     root.render(
       <StrictMode>
         <ErrorBoundary>
-          <RootByWindowKind />
+          <LanguageRoot>
+            <RootByWindowKind />
+          </LanguageRoot>
         </ErrorBoundary>
       </StrictMode>,
     ),

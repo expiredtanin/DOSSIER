@@ -9,7 +9,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { SettingsDialog } from "../ui/SettingsDialog";
 import type { SettingsCommandHandlers, SettingsSyncState } from "./settingsWindow";
-import { t } from "../i18n";
+import { applyLanguagePref, t } from "../i18n";
 import { listenBridgeState } from "./windowBridge";
 import { applyThemeMode } from "../theme/themeMode";
 
@@ -17,6 +17,10 @@ type HandlerName = keyof SettingsCommandHandlers;
 
 export function SettingsWindowApp() {
   const [state, setState] = useState<SettingsSyncState | null>(null);
+  // [264] Eigenes Dokument, eigener i18n-Zustand: die Sprachwahl kommt mit dem Sync-Zustand vom Hauptfenster (LanguageRoot baut dann neu auf).
+  useEffect(() => {
+    if (state) applyLanguagePref(state.languagePref);
+  }, [state?.languagePref]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Dieses Fenster ist ein eigenes Dokument — Hell/Dunkel muss hier separat
   // angewendet werden, sobald der synchronisierte Zustand eintrifft.
@@ -99,6 +103,8 @@ export function SettingsWindowApp() {
       onLineEndsChange={handlers.onLineEndsChange}
       offline={state.offline}
       onOfflineChange={handlers.onOfflineChange}
+      languagePref={state.languagePref}
+      onLanguagePrefChange={handlers.onLanguagePrefChange}
       aiAccess={state.aiAccess}
       onAiAccessChange={handlers.onAiAccessChange}
       layout={state.layout}

@@ -172,7 +172,7 @@ export const AppMenuBar = memo(function AppMenuBar({
     { divider: true },
     // [211] Rendering mit Blender/Cycles (Dialog in App montiert, Öffner über den Modul-Hook).
     { label: t("menu.view.image3d"), onSelect: openImageExportDialog },
-    { label: t("menu.view.rendering"), onSelect: openRenderDialog },
+    { label: t("menu.view.rendering"), onSelect: openRenderDialog, preview: true },
   ];
 
   const windowItems: DropdownItem[] = [

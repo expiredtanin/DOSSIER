@@ -232,6 +232,8 @@ export function renderModeOptions(): DropdownOption[] {
   const render = t("display.group.render");
   const o = (value: RenderMode, key: string, icon: string, group: string): DropdownOption => ({
     value, label: t(`display.style.${key}`), hint: t(`display.style.${key}.tip`), icon, group,
+    // [265] Pathtracing ist eine Vorschau (Endbilder über Rendering mit Blender).
+    ...(value === "pathtrace" ? { preview: true } : {}),
   });
   return [
     o("wireframe", "wireframe", "deployed_code", lines),

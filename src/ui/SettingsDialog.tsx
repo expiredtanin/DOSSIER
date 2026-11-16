@@ -10,7 +10,7 @@
 // Bezeichner englisch, UI-Text/Kommentare deutsch (CONVENTIONS.md).
 
 import { useEffect, useState } from "react";
-import { t, type TranslationKey } from "../i18n";
+import { LANGUAGE_PREFS, t, type LanguagePref, type TranslationKey } from "../i18n";
 import { useModalFocus } from "./modalFocus";
 import { ACCENT_SWATCHES } from "../theme/accents";
 import { ColorHexField } from "./ColorHexField";
@@ -20,7 +20,7 @@ import { APP_VERSION } from "./TopBar";
 import type { LayoutState } from "../panels/types";
 import type { LineCap, LineEnds, LineJoin } from "../core";
 import type { ThemeMode } from "../theme/themeMode";
-import { checkForUpdate, getUpdateSnoozeUntil, setUpdateSnooze } from "../update/checkForUpdate";
+import { checkForUpdate, getUpdateCheckOnStart, getUpdateSnoozeUntil, setUpdateCheckOnStart, setUpdateSnooze } from "../update/checkForUpdate";
 import { getRunningVersion } from "../update/version";
 import { BUILD_INFO, formatBuildInfo } from "../update/buildInfo";
 import { getBlenderPath, setBlenderPath } from "../state/blenderSettings";
@@ -87,6 +87,9 @@ export interface SettingsDialogProps {
   /** Offline-Modus: sperrt alle entfernten Abrufe (Materialbibliothek, swisstopo, OSM). */
   offline: boolean;
   onOfflineChange: (offline: boolean) => void;
+  /** [264] Sprache der Oberfläche (sofort wirksam). */
+  languagePref: LanguagePref;
+  onLanguagePrefChange: (pref: LanguagePref) => void;
   /** [9] KI-Zugriff (MCP-Brücke): Stand und Schalter; ohne Angabe keine Sektion. */
   aiAccess?: AiAccessView;
   onAiAccessChange?: (on: boolean) => void;
@@ -137,6 +140,8 @@ export function SettingsDialog({
   onLineEndsChange,
   offline,
   onOfflineChange,
+  languagePref,
+  onLanguagePrefChange,
   aiAccess,
   onAiAccessChange,
   layout,
@@ -149,6 +154,7 @@ export function SettingsDialog({
   const [tab, setTab] = useState<SettingsTabId>("general");
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [runningVersion, setRunningVersion] = useState<string | null>(null);
+  const [checkOnStart, setCheckOnStart] = useState<boolean>(() => getUpdateCheckOnStart());
   const [snoozeUntil, setSnoozeUntilState] = useState<number | null>(() => getUpdateSnoozeUntil());
   const [versionHistory, setVersionHistory] = useState<VersionEntry[] | null>(null);
   const [selectedTag, setSelectedTag] = useState<string>("");
@@ -156,12 +162,14 @@ export function SettingsDialog({
   useEffect(() => {
     void getRunningVersion().then(setRunningVersion);
   }, []);
+  // Versionsverlauf erst abrufen, wenn der Reiter „Update“ geöffnet wird ([262]: kein Netz ohne Zutun).
   useEffect(() => {
+    if (tab !== "update" || versionHistory != null) return;
     void fetchVersionHistory().then((entries) => {
       setVersionHistory(entries);
       if (entries.length > 0) setSelectedTag(entries[0].tag);
     });
-  }, []);
+  }, [tab, versionHistory]);
 
   const dialogRef = useModalFocus({});
   useEffect(() => {
@@ -252,6 +260,22 @@ export function SettingsDialog({
 
           <section className="imp-section">
             <div className="imp-section-title">{t("settings.section.display")}</div>
+            <label className="settings-field-label" htmlFor="settings-language">
+              {t("settings.language")}
+            </label>
+            <select
+              id="settings-language"
+              className="settings-select"
+              value={languagePref}
+              onChange={(e) => onLanguagePrefChange(e.target.value as LanguagePref)}
+            >
+              {LANGUAGE_PREFS.map((l) => (
+                <option key={l} value={l}>
+                  {t(`settings.language.${l}` as const)}
+                </option>
+              ))}
+            </select>
+            <div className="imp-note">{t("settings.language.hint")}</div>
             <span className="settings-field-label">{t("settings.theme")}</span>
             <span className="sb-renderer-toggle" role="group" aria-label={t("settings.theme")}>
               <button
@@ -349,6 +373,20 @@ export function SettingsDialog({
               {checkingUpdate ? t("about.checkingUpdate") : t("about.checkUpdate")}
             </button>
 
+            <label className="settings-check">
+              <input
+                type="checkbox"
+                checked={checkOnStart}
+                onChange={(e) => {
+                  setUpdateCheckOnStart(e.target.checked);
+                  setCheckOnStart(e.target.checked);
+                }}
+              />
+              {t("settings.update.onStart")}
+            </label>
+            <div className="imp-note">{t("settings.update.onStart.hint")}</div>
+
+            {checkOnStart && (
             <div className="settings-subsection">
               <label className="settings-field-label" htmlFor="settings-update-snooze">
                 {t("settings.update.autoCheck")}
@@ -378,6 +416,7 @@ export function SettingsDialog({
                 </div>
               )}
             </div>
+            )}
 
             <div className="settings-subsection">
               <label className="settings-field-label" htmlFor="settings-update-history">

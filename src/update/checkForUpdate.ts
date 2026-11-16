@@ -28,6 +28,44 @@ export function setUpdateSnooze(untilMs: number | null): void {
   else localStorage.setItem(SNOOZE_KEY, String(untilMs));
 }
 
+/** localStorage-Key: Update-Pruefung beim Start ([262], Datenschutz zuerst: Vorgabe AUS). */
+const ON_START_KEY = "dossier.updateCheckOnStart";
+
+/** Soll die App beim Start von sich aus beim Update-Server nachfragen? Vorgabe: nein. */
+export function getUpdateCheckOnStart(): boolean {
+  try {
+    return localStorage.getItem(ON_START_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function setUpdateCheckOnStart(on: boolean): void {
+  try {
+    if (on) localStorage.setItem(ON_START_KEY, "1");
+    else localStorage.removeItem(ON_START_KEY);
+  } catch {
+    /* Speicher gesperrt: Vorgabe (aus) gilt */
+  }
+}
+
+let startupCheckRan = false;
+
+/**
+ * Stiller Start-Check (Aufruf in `App.tsx`): nur wenn in den Einstellungen eingeschaltet, hoechstens einmal je
+ * Seitenladen (ein Neuaufbau der App beim Sprachwechsel fragt nicht erneut), nie offline (`checkForUpdate`).
+ */
+export async function checkForUpdateOnStart(): Promise<void> {
+  if (startupCheckRan || !getUpdateCheckOnStart()) return;
+  startupCheckRan = true;
+  await checkForUpdate(true);
+}
+
+/** Nur fuer Tests: der Start-Check darf wieder laufen. */
+export function resetStartupCheckForTests(): void {
+  startupCheckRan = false;
+}
+
 /**
  * Prueft auf eine neue Version. `silent=true` (Start-Check) meldet sich nur
  * bei einem GEFUNDENEN Update oder einem echten Fehler — nicht bei „aktuell",

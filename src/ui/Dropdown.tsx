@@ -19,6 +19,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { ReactNode } from "react";
+import { PreviewBadge, previewTitle } from "./PreviewBadge";
 
 /** Eine wählbare Option (Wert-Auswahl-Modus, analog <option>). */
 export interface DropdownOption {
@@ -34,6 +35,8 @@ export interface DropdownOption {
   shortcut?: string;
   /** [244] Gruppentitel: aufeinanderfolgende Optionen mit gleicher Gruppe stehen unter einer Überschrift mit Trennlinie. */
   group?: string;
+  /** [265] Noch nicht fertig: dezente Marke „Vorschau“ samt Tooltip. */
+  preview?: boolean;
 }
 
 /**
@@ -62,6 +65,8 @@ export interface DropdownItem {
   hint?: string;
   /** [244] Kürzel rechts. */
   shortcut?: string;
+  /** [265] Noch nicht fertig: dezente Marke „Vorschau“ samt Tooltip. */
+  preview?: boolean;
 }
 
 /** Nicht wählbare Zeile (Trenner, Überschrift). */
@@ -84,6 +89,7 @@ export function optionRows(options: DropdownOption[], value?: string, onChange?:
       icon: o.icon,
       hint: o.hint,
       shortcut: o.shortcut,
+      preview: o.preview,
       onSelect: () => onChange?.(o.value),
     });
   }
@@ -113,7 +119,7 @@ export function DropdownRows({
       role="option"
       tabIndex={-1}
       aria-selected={!!row.active}
-      title={row.hint}
+      title={row.preview ? previewTitle(row.hint) : row.hint}
       className={`ctx-item tb-dd-item${row.danger ? " danger" : ""}${row.hint ? " has-hint" : ""}${i === activeIdx ? " is-active" : ""}`}
       disabled={row.disabled}
       onMouseEnter={() => !row.disabled && onHover(i)}
@@ -126,7 +132,10 @@ export function DropdownRows({
         </span>
       )}
       <span className="tb-dd-text">
-        <span className="ctx-item-label">{row.label}</span>
+        <span className="ctx-item-label">
+          {row.label}
+          {row.preview && <PreviewBadge />}
+        </span>
         {row.hint && <span className="tb-dd-hint">{row.hint}</span>}
       </span>
       {row.shortcut && <kbd className="tb-dd-kbd">{row.shortcut}</kbd>}
@@ -441,7 +450,10 @@ export function Dropdown({
         onClick={() => (open ? close() : openMenu())}
         onKeyDown={onTriggerKeyDown}
       >
-        <span className="tb-dd-trigger-label">{triggerLabel}</span>
+        <span className="tb-dd-trigger-label">
+          {triggerLabel}
+          {current?.preview && <PreviewBadge />}
+        </span>
         {triggerSuffix ?? CHEVRON}
       </button>
       {menu && createPortal(menu, document.body)}

@@ -198,6 +198,8 @@ flackert nicht; die 3D-Ansicht zeigt „3D-Engine nicht verfügbar“ mit einem 
 im Begehen; nur ein unverändertes Preset wird neu eingepasst. Die Tasten des Begehens (G, W/A/S/D, Umschalt+F) wirken auch ohne
 Grafikkarte. Auf dem Mac ist das nicht geprüft.
 
+**Vorschau-Marke.** Noch nicht fertige Funktionen tragen die Marke „Vorschau“ (Tooltip: „Noch nicht fertig — Ergebnisse können abweichen“): Pathtracing, Rendering mit Blender, Kamerafahrt mit Video und der Geist-Modus beim Begehen.
+
 **Begehen mit Kollision.** Beim Begehen hält dich das Modell auf: Wände und Fensterglas sperren, du gleitest an ihnen
 entlang. Türöffnungen sind frei. Treppen, Stufen und Kanten steigst du mit (bis 25 cm ohne Hindernis), der Boden folgt
 Decken, Gelände und Dächern. Die Taste G oder der Knopf „Geist (Wände durchlaufen)“ schaltet die Kollision aus und
@@ -215,7 +217,7 @@ Aufnahme, „Abbrechen“ stoppt. Im Stil Pathtracing zeigt die Fahrt nur Vorsch
 
 **Pathtracing-Vorschau:** In der Oberleiste öffnet **Darstellung** das Menü der Darstellungsarten, gegliedert in
 „Linien“ (Drahtgitter, Kanten, Nur Konturen), „Flächen“ (Schattiert, Schattiert mit Kanten, Texturiert, Weiss) und
-„Rendern“. Dort, als einziger Eintrag der Gruppe „Rendern“, steht „Pathtracing (Vorschau)“. Der
+„Rendern“. Dort, als einziger Eintrag der Gruppe „Rendern“, steht „Pathtracing“ mit der Marke „Vorschau“. Der
 Viewport rechnet dann Bild für Bild weiter und wird sauberer; ein Zähler „Pathtracing: n Samples · x/s“ läuft, bis
 „(fertig)“ dasteht. Die Sonne der Sonnenstudie liefert Licht und Himmel; steht sie unter dem Horizont, wird es Nacht, und
 in den Räumen brennt ein Raumlicht (unten links abschaltbar). Die Belichtung stellt Dossier selbst ein („Auto“); unten links

@@ -6,6 +6,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { t } from "../i18n";
+import { PreviewBadge, withPreview } from "../ui/PreviewBadge";
 
 export interface PathtraceStatus3d {
   samples: number;
@@ -70,15 +71,17 @@ function ToolButton(props: {
   testId: string;
   on?: boolean;
   pressed?: boolean;
+  /** [265] Noch nicht fertig: Marke am Knopf und Hinweis im Tooltip. */
+  preview?: boolean;
   onClick: () => void;
 }) {
   return (
     <button
       type="button"
-      className={`vp3t-btn${props.on ? " is-on" : ""}`}
+      className={`vp3t-btn${props.on ? " is-on" : ""}${props.preview ? " is-preview" : ""}`}
       aria-label={props.name ?? props.label}
       aria-pressed={props.pressed}
-      data-tip={props.label}
+      data-tip={props.preview ? withPreview(props.label) : props.label}
       data-testid={props.testId}
       // Der Viewport startet Kamerageste auf pointerdown — Knöpfe sollen sie nicht auslösen.
       onPointerDown={(e) => e.stopPropagation()}
@@ -117,10 +120,10 @@ function PathtraceLine({ status }: { status: PathtraceStatus3d }) {
 }
 
 function WalkHelp({ visible }: { visible: boolean }) {
-  const rows: Array<[string, string]> = [
+  const rows: Array<[string, string, boolean?]> = [
     ["W A S D", t("walk.help.move")],
     ["Q / E", t("walk.help.updown")],
-    ["G", t("walk.help.ghost")],
+    ["G", t("walk.help.ghost"), true],
     ["⇧ / Alt", t("walk.help.speed")],
     [t("walk.help.mouseKey"), t("walk.help.look")],
     ["Esc", t("walk.help.exit")],
@@ -128,10 +131,13 @@ function WalkHelp({ visible }: { visible: boolean }) {
   return (
     <div className={`vp3t-help${visible ? " is-visible" : ""}`} data-testid="walk-help" aria-hidden={!visible}>
       <div className="vp3t-help-title">{t("walk.toggle")}</div>
-      {rows.map(([keys, what]) => (
+      {rows.map(([keys, what, preview]) => (
         <div className="vp3t-help-row" key={what}>
           <kbd>{keys}</kbd>
-          <span>{what}</span>
+          <span>
+            {what}
+            {preview && <PreviewBadge />}
+          </span>
         </div>
       ))}
     </div>
@@ -170,6 +176,7 @@ export function ViewportToolbar3d({ walkMode, onToggleWalk, ghost = false, onTog
               label={ghost ? t("walk.tip.ghostOff") : t("walk.tip.ghostOn")}
               name={t("walk.help.ghost")}
               testId="walk-ghost"
+              preview
               on={ghost}
               pressed={ghost}
               onClick={onToggleGhost}

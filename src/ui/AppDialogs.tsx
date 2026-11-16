@@ -128,7 +128,7 @@ export function AppDialogs(props: {
     runImport,
   } = props.files;
   const { pendingIfc, setPendingIfc, ifcReport, setIfcReport, runIfcImport } = props.modelImport;
-  const { themeMode, setThemeMode, offline, onOfflineChange, aiAccess, setScaleLineWeights, setLineEnds } = props.settings;
+  const { themeMode, setThemeMode, offline, onOfflineChange, languagePref, onLanguagePrefChange, aiAccess, setScaleLineWeights, setLineEnds } = props.settings;
   const { exportContentMeters, onExportPdf, onExportSvg, onExportDxf } = props.planExport;
   // Das Projekt nur abonnieren, solange ein Dialog offen ist, der es zeigt ([121]): sonst rendert eine Op
   // am Modell hier nichts. `App` reicht es nicht mehr durch.
@@ -236,6 +236,8 @@ export function AppDialogs(props: {
         onLineEndsChange={setLineEnds}
         offline={offline}
         onOfflineChange={onOfflineChange}
+        languagePref={languagePref}
+        onLanguagePrefChange={onLanguagePrefChange}
         aiAccess={aiAccess}
         onAiAccessChange={setAiAccessEnabled}
         layout={layout}
