@@ -51,4 +51,47 @@ describe("release-gitea-lib", () => {
     expect(lib.mergeVersions([e, ...old], { ...e, notes: "neu" })[0].notes).toBe("neu");
     expect(lib.mergeVersions(old, { ...e, dmg: null })).toEqual(old);
   });
+
+  // [268] Vorhandene Anhänge lesen: nur „gibt es nicht“ (404) gilt als leer. Bisher ergab jeder Fehler (Netz, 5xx, Proxy)
+  // eine leere Liste — `--publish` überschrieb dann versions.json mit nur der neuen Version (Verlauf weg), und ein
+  // nicht lesbares SHA256SUMS.txt der anderen Plattform fiel stillschweigend aus den Prüfsummen.
+  it("fetchExisting: Text, null bei 404, sonst Fehler", async () => {
+    const res = (status: number, body = "") => async () => new Response(body, { status });
+    expect(await lib.fetchExisting(res(200, "[1]"), "u")).toBe("[1]");
+    expect(await lib.fetchExisting(res(404), "u")).toBeNull();
+    await expect(lib.fetchExisting(res(502, "bad gateway"), "u")).rejects.toThrow(/502/);
+    await expect(lib.fetchExisting(async () => { throw new TypeError("fetch failed"); }, "u")).rejects.toThrow(/fetch failed/);
+  });
+
+  it("parseSums liest sha256sum-Zeilen, ignoriert Fremdes", () => {
+    const h = "a".repeat(64);
+    expect(lib.parseSums(`${h}  x.AppImage\n\nkaputt\n${"b".repeat(64)}  y.dmg\n`)).toEqual({ "x.AppImage": h, "y.dmg": "b".repeat(64) });
+  });
+
+  // [268] Ersetzen eines Anhangs: erst hochladen (temporärer Name), dann löschen und umbenennen — nie ohne `latest.json`.
+  it("tempAssetName: anderer Name als das Original, Stempel enthalten", () => {
+    expect(lib.tempAssetName("latest.json", 7)).toBe("latest.json.upload-7");
+  });
+
+  it("preflight: ohne --publish nicht auf ein veröffentlichtes Release", () => {
+    const base = { localFiles: ["a.AppImage"], publish: false, replacePublished: false, linuxOnly: false };
+    expect(lib.preflight({ ...base, release: { tag_name: "v1", draft: false, assets: [] } })).toMatch(/--replace-published/);
+    expect(lib.preflight({ ...base, release: { tag_name: "v1", draft: false, assets: [] }, replacePublished: true })).toBeNull();
+    expect(lib.preflight({ ...base, release: { tag_name: "v1", draft: true, assets: [] } })).toBeNull();
+    expect(lib.preflight({ ...base, release: null })).toBeNull();
+  });
+
+  it("preflight: --publish nur mit Mac-Paketen (lokal oder am Release), sonst --linux-only", () => {
+    const base = { publish: true, replacePublished: false, linuxOnly: false };
+    const draft = (names: string[]) => ({ draft: true, assets: names.map((name) => ({ name })) });
+    expect(lib.preflight({ ...base, localFiles: ["a.AppImage"], release: draft([]) })).toMatch(/--linux-only/);
+    expect(lib.preflight({ ...base, localFiles: ["a.AppImage"], release: null })).toMatch(/--linux-only/);
+    expect(lib.preflight({ ...base, localFiles: ["a.AppImage"], release: draft([]), linuxOnly: true })).toBeNull();
+    expect(lib.preflight({ ...base, localFiles: ["a.AppImage", "b.dmg"], release: draft([]) })).toBeNull();
+    expect(lib.preflight({ ...base, localFiles: ["a.AppImage"], release: draft(["b.dmg"]) })).toBeNull();
+    // --publish auf ein veröffentlichtes Release bleibt erlaubt (Nachführen), wenn Mac-Pakete da sind
+    expect(lib.preflight({ ...base, localFiles: ["b.dmg"], release: { draft: false, assets: [] } })).toBeNull();
+    expect(lib.hasMacPackages(["x.AppImage", "SHA256SUMS.txt"])).toBe(false);
+    expect(lib.hasMacPackages(["x.app.tar.gz"])).toBe(true);
+  });
 });

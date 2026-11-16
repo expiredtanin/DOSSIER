@@ -152,7 +152,11 @@ entstehen unsignierte Artefakte. Optionale Repository-Secrets:
 `GITEA_TOKEN=… npm run release:gitea -- --dir <Ordner mit den Paketen>` (Linux: `release`, Mac: `src-tauri/target/release/bundle/dmg` und
 `…/bundle/macos`). Das legt einen **Entwurf** `v<version>` an bzw. ergänzt ihn (Anhänge gleichen Namens werden ersetzt, `SHA256SUMS.txt`
 über beide Plattformen); `--publish` veröffentlicht ihn und führt mit Mac-Updater-Paket samt `.sig` das Release `latest`
-(`latest.json`, `versions.json`) nach. `--dry-run` zeigt nur, was geschähe.
+(`latest.json`, `versions.json`) nach. `--dry-run` zeigt nur, was geschähe. Sicherungen ([268]): ein vorhandener Anhang wird erst unter
+temporärem Namen (`<name>.upload-<ms>`) hochgeladen, dann der alte gelöscht und der neue umbenannt (`latest.json` fehlt nie; bei
+Abbruch kann ein `.upload-…`-Rest am Release hängen, in Gitea löschen). Ohne `--publish` auf ein schon veröffentlichtes Release
+bricht das Skript ab (bewusst ersetzen: `--replace-published`); `--publish` ohne Mac-Pakete (weder im Ordner noch am Release) bricht
+ab (nur Linux veröffentlichen: `--linux-only`). Reihenfolge also: Mac-Pakete hochladen, Linux-Pakete hochladen, dann `--publish`.
 
 Der Updater-Endpunkt in `tauri.conf.json` und der Versionsverlauf (`src/update/versionHistory.ts`) zeigen auf die Releases von
 `git.openbureau.ch/karim/dossier` (Release `latest` mit `latest.json`/`versions.json`; Entscheid Maintainer 16.11.: nur noch Gitea, kein GitHub, kein eigenes Standalone-Repo). Für Linux baut der Job `linux` ein AppImage
