@@ -148,8 +148,8 @@ entstehen unsignierte Artefakte. Optionale Repository-Secrets:
 - Updater-Signatur: `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
   (passend zum `pubkey` in `tauri.conf.json`; ohne Schlüssel entfallen die Updater-Artefakte)
 
-Der Updater-Endpunkt in `tauri.conf.json` zeigt noch auf `git.openbureau.ch`; soll er GitHub nutzen,
-dort `…/releases/latest/download/latest.json` eintragen. Für Linux baut der Job `linux` ein AppImage
+Der Updater-Endpunkt in `tauri.conf.json` und der Versionsverlauf (`src/update/versionHistory.ts`) zeigen auf die Releases von
+`git.openbureau.ch/karim/dossier` (Release `latest` mit `latest.json`/`versions.json`; Entscheid Maintainer 16.11.: nur noch Gitea, kein GitHub, kein eigenes Standalone-Repo). Für Linux baut der Job `linux` ein AppImage
 (Electron, electron-builder, kein Secret nötig) und hängt es samt `SHA256SUMS-linux.txt` an dasselbe Release.
 
 ## Kommandozeile

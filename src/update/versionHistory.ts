@@ -20,7 +20,7 @@ export interface VersionEntry {
 }
 
 const VERSIONS_URL =
-  "https://git.openbureau.ch/karim/DOSSIER-STANDALONE/releases/download/latest/versions.json";
+  "https://git.openbureau.ch/karim/dossier/releases/download/latest/versions.json";
 
 /** Leeres Array ausserhalb von Tauri oder bei Netzwerk-/Parsefehlern (keine
  * Wurf-Semantik hier — der Aufrufer zeigt einfach eine leere Liste). */
@@ -38,7 +38,7 @@ export async function fetchVersionHistory(): Promise<VersionEntry[]> {
 }
 
 export function downloadUrlFor(entry: VersionEntry): string {
-  return `https://git.openbureau.ch/karim/DOSSIER-STANDALONE/releases/download/${entry.tag}/${entry.dmg}`;
+  return `https://git.openbureau.ch/karim/dossier/releases/download/${entry.tag}/${entry.dmg}`;
 }
 
 /** Oeffnet den DMG-Download im System-Standardbrowser (kein In-App-Download —
