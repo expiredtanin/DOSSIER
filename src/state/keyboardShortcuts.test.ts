@@ -3,6 +3,7 @@ import { setLanguage } from "../i18n";
 import {
   comboFromEvent,
   comboMatches,
+  fileShortcutFor,
   findConflict,
   formatCombo,
   isReservedCombo,
@@ -199,5 +200,23 @@ describe("[252] tabKeyAction", () => {
     expect(tabKeyAction(ev({ metaKey: true }))).toBeNull();
     expect(tabKeyAction(ev({ altKey: true }))).toBeNull();
     expect(tabKeyAction(ev({ key: "a", ctrlKey: true }))).toBeNull();
+  });
+});
+
+describe("[170] Datei-Kürzel ausserhalb von Tauri (Browser/Electron-Linux)", () => {
+  it("Strg/Cmd+S speichert, +Umschalt speichert unter, Strg/Cmd+O öffnet", () => {
+    expect(fileShortcutFor(key("s", { ctrlKey: true }))).toBe("save");
+    expect(fileShortcutFor(key("s", { metaKey: true }))).toBe("save");
+    expect(fileShortcutFor(key("S", { ctrlKey: true, shiftKey: true }))).toBe("saveAs");
+    expect(fileShortcutFor(key("o", { ctrlKey: true }))).toBe("open");
+  });
+  it("ohne Strg/Cmd oder mit Alt: nichts (s = Spiegeln bleibt frei)", () => {
+    expect(fileShortcutFor(key("s"))).toBeNull();
+    expect(fileShortcutFor(key("s", { ctrlKey: true, altKey: true }))).toBeNull();
+    expect(fileShortcutFor(key("o", { ctrlKey: true, shiftKey: true }))).toBeNull();
+  });
+  it("kollidiert mit keinem belegbaren Kürzel", () => {
+    const combos = SHORTCUT_DEFS.map((d) => d.defaultCombo);
+    for (const c of ["mod+s", "mod+shift+s", "mod+o"]) expect(combos).not.toContain(c);
   });
 });

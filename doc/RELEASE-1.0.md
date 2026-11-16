@@ -203,7 +203,42 @@ Speichern, Autosave und Schliessen sind im Browser und in Unit-Tests geprüft (`
 | 14.16 | Pfad mit Umlauten/Leerzeichen/`%` (`~/Pläne 100%/a b.pdf`) als Exportziel | Datei liegt genau dort (der Pfad wird prozent-kodiert an den Rust-Befehl `save_export` gereicht) |
 | 14.17 | Beschädigte Datei mit Sicherung: `t.obp` zweimal speichern (damit `t.obp~` existiert), dann `t.obp` abschneiden (`head -c 5000 t.obp > x && mv x t.obp`), über „Öffnen“ wählen | Overlay „Vorige Fassung öffnen?" mit Fehlertext; „Vorige Fassung (.obp~) öffnen“ lädt den Stand (Titel ungespeichert), erster ⌘S überschreibt `t.obp`, `t.obp~` ist dann die beschädigte Fassung; „Abbrechen“: bisheriges Projekt bleibt, Sperre frei. Ohne `t.obp~`: nur die rote Meldung wie 14.7 |
 | 14.18 | Datei → „Vorige Fassung wiederherstellen …“ bei offener Datei mit `~` / ohne `~` / ohne Dateipfad (neues Projekt) | mit `~`: Stand der Sicherung ist offen, Hinweis „Vorige Fassung geöffnet …", Datei bleibt bis ⌘S unverändert (bei ungespeicherten Änderungen vorher die Rückfrage); sonst Hinweis „Es gibt keine vorige Fassung …". Hinweis: der Menüeintrag ist immer aktiv (kein Ausgrauen) |
-| 14.19 | Linux/Electron (`scripts/electron-shell.sh`): `dossier t.obp` (Pfad per Argument) → ändern → ⌘/Strg+S; danach „Speichern unter“ im Hauptprozess-Dialog; `t.obp~` und `t.obp.tmp` ansehen | kein Download mehr: die Datei wird am Pfad überschrieben, `t.obp~` = Vorversion, keine `.tmp`; ohne Pfad (leeres Projekt) erscheint der Speichern-Dialog; nur im Linux-Container nicht geprüft (nur die Dateiebene `scripts/electron-files.cjs` per Test) |
+| 14.19 | Linux/Electron (`scripts/electron-shell.sh`): `dossier t.obp` (Pfad per Argument) → ändern → ⌘/Strg+S; danach „Speichern unter“ im Hauptprozess-Dialog; `t.obp~` und `t.obp.tmp` ansehen | kein Download mehr: die Datei wird am Pfad überschrieben, `t.obp~` = Vorversion, keine `.tmp`; ohne Pfad (leeres Projekt) erscheint der Speichern-Dialog. **16.11.:** im gepackten AppImage im Container geprüft (Abschnitt 15, `e2e/linuxApp170.spec.ts`) |
+
+---
+
+## 15. Linux-App (AppImage x86_64, [170], geprüft 16.11.)
+
+Linux ist ab 1.0 offiziell unterstützt (Entscheid 16.11.: „Linux-Prüfungen reichen“). Das Paket wird wie im Release gebaut und
+mit Playwright als Electron-App bedient (`e2e/linuxApp170.spec.ts`, im normalen e2e-Lauf übersprungen):
+
+```
+npm run build                 # dist + dist/build-info.json (Version, Buildnummer)
+npm run electron:pack         # release/Dossier-<Version>-x86_64.AppImage (scripts/electron-pack.cjs, Buildnummer aus dist)
+npm run test:linux-app        # neuestes AppImage, ohne Bildschirm unter xvfb-run; DOSSIER_ELECTRON_BIN=… für ein anderes Paket
+```
+
+Geprüft im Linux-Container (Ubuntu 24.04, Xvfb, SwiftShader statt GPU, als root), Electron 43.0.0, je einmal über FUSE
+(`libfuse2t64` nachinstalliert), mit `APPIMAGE_EXTRACT_AND_RUN=1` (ohne FUSE) und mit dem entpackten `release/linux-unpacked/dossier`:
+
+| # | Schritt | Status |
+|---|---|---|
+| 15.1 | AppImage bauen (`electron:pack`); Downloads von electron-builder (Electron-Zip, appimage-Werkzeuge, 7zip) kommen von `github.com` | ✅ (≈ 190 MB, 30 s). **Befund:** `scripts/electron-files.cjs` fehlte in `files` von `electron-builder.yml` — das Paket startete gar nicht („Cannot find module“); behoben, Test `src/native/electronPackage.test.ts` |
+| 15.2 | Start (`./Dossier-…AppImage`, als root mit `--no-sandbox`), Fenster, Startbildschirm, Version mit Buildnummer, Ursprung `dossier://app`, `navigator.gpu` liefert Adapter | ✅ Konsole des Fensters ohne Fehler (ausser den bekannten SwiftShader-Meldungen); der Hauptprozess meldet headless Vulkan-/ANGLE-Fehler (keine GPU) und fällt zurück |
+| 15.3 | Neues Projekt, Wände über die Befehlszeile (`wall`, `0,0`, `6,0`, `6,4`) | ✅ Elemente im Baum (Kern-WASM läuft); Zeichenfläche nicht pixelgenau geprüft (SwiftShader) |
+| 15.4 | Projekt speichern (erstes Mal Speichern-Dialog) → ändern → speichern | ✅ Datei am Pfad, `.obp~` = Vorversion, keine `.tmp`; der GTK-Dialog selbst ist im Test ersetzt (`dialog.showSaveDialog`) |
+| 15.5 | Strg+S auf bekannten Pfad | ✅ **Befund:** Strg+S/Strg+Umschalt+S/Strg+O gab es nur im nativen Tauri-Menü; jetzt auch im Browser/Electron (`useFileShortcuts`, Test `keyboardShortcuts.test.ts`) |
+| 15.6 | Öffnen per Argument (`dossier projekt.obp`, Doppelklick über den Desktop-Eintrag `%U`) | ✅ **Befund:** die Datei wurde hinter dem Startbildschirm geladen bzw. wartete auf eine Rückfrage, die dort nicht erscheint; jetzt geht die App direkt in den Editor |
+| 15.7 | Öffnen über Datei → „Projekt öffnen …“ (Dateiauswahl), danach Speichern auf denselben Pfad | ✅ |
+| 15.8 | PDF-Export des Plans auf die Platte | ✅ **Befund:** Datei → „Exportieren: PDF“ fehlte im Browser/Electron (nur im nativen Menü); ergänzt (`AppMenuBar`, e2e `io.spec.ts`). Der Download-Dialog (GTK) ist im Test ersetzt (`will-download`) |
+| 15.9 | DXF-Export auf die Platte | ✅ ASCII-DXF mit `ENTITIES`/`EOF` |
+| 15.10 | Autosave: ungespeichert ändern, 30-s-Takt abwarten, Hauptprozess `kill -9`, neu starten | ✅ „Ungesicherte Arbeit gefunden“ → Wiederherstellen bringt die Wände zurück |
+| 15.11 | Desktop-Integration im AppImage: `dossier.desktop` (`Exec=AppRun --no-sandbox %U`, `MimeType=application/x-dossier-project`, Kategorien), Icon 512 px, `usr/share/mime/packages/dossier.xml` (`*.obp`) | ✅ vorhanden; ins System eingetragen werden sie erst mit AppImageLauncher o. ä. (README) — nicht geprüft |
+| 15.12 | Buildnummer im Paket ([261]) | ✅ `package.json` im Paket trägt `dossierBuild` (gleich wie die Oberfläche, aus `dist/build-info.json`); `buildVersion` gesetzt |
+
+**Nicht geprüft (Container):** echte GPU (Mesa-Vulkan, AMD/Intel/NVIDIA), Wayland nativ (`--ozone-platform=wayland`), GNOME/KDE-Dateidialoge
+und Download-Dialog von Hand, Start als normaler Benutzer mit Chromium-Sandbox (User-Namespaces), Menüeintrag/Doppelklick nach
+Desktop-Integration, Blender-Rendering, Flatpak (`packaging/linux/ch.dossier.cad.yml`), deb/rpm, der Workflow-Job `linux` auf GitHub.
 
 ---
 

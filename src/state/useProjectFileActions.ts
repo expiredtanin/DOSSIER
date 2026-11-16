@@ -118,6 +118,12 @@ export function useProjectFileActions(
   activeCategoryCode: string,
   setActiveLevelId: (id: string) => void,
   planViewRef: RefObject<PlanViewHandle | null>,
+  /**
+   * [170] Electron: eine per Argument/Doppelklick übergebene Datei ist angekommen. Der Aufrufer wechselt in den Editor
+   * (sonst bliebe der Startbildschirm davor) und meldet, ob die App noch im Startablauf war — dann gibt es nichts zu
+   * verwerfen und die Rückfrage „Ungespeicherte Änderungen" entfällt.
+   */
+  onLaunchFile?: () => { wasBooting: boolean },
 ) {
   // Verstecktes Datei-Input zum Laden eines Projekts (Datei-Burger „Öffnen").
   // Wird NUR im Browser-Pfad benutzt (ohne Tauri) — unter Tauri geht „Öffnen"
@@ -759,7 +765,7 @@ export function useProjectFileActions(
     }
   };
 
-  const onProjectFileChosen = (file: File, knownPath?: string | null) => {
+  const onProjectFileChosen = (file: File, knownPath?: string | null, askDiscard = true) => {
     const r = new FileReader();
     r.onload = () => {
       const content = String(r.result ?? "");
@@ -767,14 +773,16 @@ export function useProjectFileActions(
       const path = knownPath ?? electronFiles()?.pathForFile(file) ?? null;
       // Browser-Pfad hat keinen echten Dateipfad → kein Lock für die neue
       // Datei, aber ein evtl. vorher (unter Tauri) gehaltener Lock wird frei.
-      guardDiscard(() => {
+      const apply = () => {
         const loaded = openOrOfferBackup(content, path, false);
         if (!loaded) return;
         releaseCurrentProjectLock();
         lastSavedProjectRef.current = loaded;
         if (path) savePathRef.current = path;
         setAnonymityProjectFileName(path ?? file.name); // [208] Browser/Electron-Start: kein Pfad, aber der Dateiname
-      });
+      };
+      if (askDiscard) guardDiscard(apply);
+      else apply();
     };
     r.onerror = () => notify(`${t("project.open.failed")} ${r.error?.message ?? ""}`, "error");
     r.readAsText(file);
@@ -782,12 +790,19 @@ export function useProjectFileActions(
 
   // [170] Electron: per Kommandozeile/Doppelklick übergebene .obp (beim Start und von einer zweiten
   // Instanz) wie eine im Browser gewählte Datei öffnen. Der Ref hält die jeweils aktuelle Fassung.
+  // Kommt die Datei noch im Startablauf (Splash/Startbildschirm), wechselt `onLaunchFile` in den Editor ([170], Befund 16.11.:
+  // vorher wurde die Datei hinter dem Startbildschirm geladen bzw. wartete auf eine Rückfrage, die dort nicht angezeigt wird).
   const chosenRef = useRef(onProjectFileChosen);
   chosenRef.current = onProjectFileChosen;
+  const launchRef = useRef(onLaunchFile);
+  launchRef.current = onLaunchFile;
   useEffect(() => {
     const api = window.dossierLaunch;
     if (!api) return;
-    const open = (f: LaunchProject) => chosenRef.current(new File([f.text], f.name), f.path);
+    const open = (f: LaunchProject) => {
+      const wasBooting = launchRef.current?.().wasBooting ?? false;
+      chosenRef.current(new File([f.text], f.name), f.path, !wasBooting);
+    };
     void api.takeOpenFile().then((f) => f && open(f));
     return api.onOpenFile(open);
   }, []);

@@ -323,6 +323,21 @@ export function comboMatches(e: KeyboardEvent, combo: string): boolean {
   return k === key;
 }
 
+/** [170] Datei-Kürzel ausserhalb von Tauri. */
+export type FileShortcut = "save" | "saveAs" | "open";
+
+/**
+ * [170] Strg/Cmd+S, Strg/Cmd+Umschalt+S, Strg/Cmd+O im Browser und in der Linux-App (Electron, ohne native Menüleiste).
+ * Unter Tauri liefert das native Menü dieselben Kürzel (`native/appMenu.ts`, Accelerator) — dort nicht verwenden.
+ * Fest wie die Menü-Accelerators, nicht umbelegbar (nicht in {@link SHORTCUT_DEFS}).
+ */
+export function fileShortcutFor(e: KeyboardEvent): FileShortcut | null {
+  if (comboMatches(e, "mod+shift+s")) return "saveAs";
+  if (comboMatches(e, "mod+s")) return "save";
+  if (comboMatches(e, "mod+o")) return "open";
+  return null;
+}
+
 /** Kurzform: matcht `e` gegen die (übersteuerte oder Default-)Kombination von `id`. */
 export function matchesShortcut(
   e: KeyboardEvent,

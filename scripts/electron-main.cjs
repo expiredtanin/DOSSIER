@@ -32,6 +32,13 @@ const gpu = process.env.DOSSIER_GPU || (ozone === "wayland" ? "minimal" : "vulka
 if (gpu === "vulkan") app.commandLine.appendSwitch("enable-features", "Vulkan,VulkanFromANGLE,DefaultANGLEVulkan");
 else if (gpu === "angle") app.commandLine.appendSwitch("enable-features", "VulkanFromANGLE,DefaultANGLEVulkan");
 console.log(`[dossier] GPU-Modus: ${gpu}${ozone ? `, Plattform: ${ozone}` : ""}`);
+// [261] Version und Buildnummer ins Log (Fehlerberichte); `dossierBuild` setzt scripts/electron-pack.cjs ins gepackte package.json.
+try {
+  const build = require("../package.json").dossierBuild;
+  console.log(`[dossier] Version ${app.getVersion()}${build ? ` (Build ${build})` : ""}`);
+} catch {
+  /* ohne package.json: kein Log */
+}
 if (ozone) app.commandLine.appendSwitch("ozone-platform", ozone);
 
 const DEV_URL = "http://localhost:5187";

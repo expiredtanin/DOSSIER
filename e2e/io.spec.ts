@@ -107,6 +107,19 @@ test("Export DXF: Dialog, Datei nicht leer, Kopf stimmt", async ({ page }) => {
   expect(text.trimEnd().endsWith("EOF")).toBe(true);
 });
 
+// [170] Im Browser/Electron (Linux) war der Plan-PDF-Export nur über das native Tauri-Menü erreichbar.
+test("Export PDF (Plan): Menü im Browser/Electron, Datei beginnt mit %PDF", async ({ page }) => {
+  await startNewProject(page);
+  await openSample(page);
+  await fileMenu(page, "Exportieren: PDF");
+  const dialog = page.getByRole("dialog", { name: "PDF/SVG exportieren" });
+  await expect(dialog).toBeVisible();
+  const pdf = await download(page, () => dialog.getByRole("button", { name: "Als PDF", exact: true }).click());
+  expect(pdf.name).toMatch(/\.pdf$/);
+  expect(pdf.bytes.subarray(0, 5).toString("latin1")).toBe("%PDF-");
+  expect(pdf.bytes.length).toBeGreaterThan(2000);
+});
+
 test("Import einer kleinen DXF legt eine Zeichnung an", async ({ page }) => {
   await startNewProject(page);
   await chooseFile(page, /DXF\/DWG importieren/, KLEIN_DXF);
