@@ -4013,6 +4013,7 @@ export const de = {
   "publish.none": "Kein Publikationssatz. Mit ＋ Blätter zu einem Satz bündeln.",
   "publish.defaultName": "Neuer Satz",
   "publish.projectNumber": "Projektnummer",
+  "publish.projectName": "Projektname",
   "publish.name": "Name",
   "publish.format": "Ausgabe",
   "publish.format.pdf-multi": "PDF, ein Dokument",

@@ -686,9 +686,13 @@ fn build_stair(p: &Project, v: &Value, ctx: &Ctx, id: Value) -> StairBuilt {
     StairBuilt { fields: f, params, rise, steps }
 }
 
-fn stair_ops(p: &Project, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
+fn stair_ops(root: &Map<String, Value>, p: &Project, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
     let b = build_stair(p, v, ctx, s(&ids.next("ST")));
-    add_op("stairs", vec![obj(b.fields)])
+    // [266] Deckenloch im selben Commit (ein Undo-Schritt), wenn die Treppe die Decke des Geschosses durchstösst.
+    let hole = crate::cmd_solid::stair_hole_ops(root, &b.params, b.rise, b_of(v, "up"), ctx);
+    let mut ops = add_op("stairs", vec![obj(b.fields)]);
+    ops.extend(hole);
+    ops
 }
 
 /// Treppen-Vorschau: Tritte, Podest, Lauflinie; `info = [Stufenzahl]`.
@@ -1147,7 +1151,7 @@ pub fn ops(root: &Map<String, Value>, p: &Project, v: &Value) -> Option<Vec<Op>>
         "wand" => wand_ops(p, v, &ctx, ids),
         // [154] Bauteile aus Zeichnung erkennen.
         "recognize" => crate::drawing_recognize::ops(p, v, &ctx, ids),
-        "stair" => stair_ops(p, v, &ctx, ids),
+        "stair" => stair_ops(root, p, v, &ctx, ids),
         "opening" => opening_ops(root, p, v, &ctx, ids),
         "roof" => roof_ops(p, v, &ctx, ids),
         "column" => column_ops(v, &ctx, ids),
@@ -1537,6 +1541,35 @@ mod tests {
         // Cursor am Wandende: die Lücke behält ihre Breite und rückt in die Wand.
         let (p, from, set) = pos_of(1.2, 5.9, Value::Null);
         assert_eq!((p, from, set), (4.8, 4.8, 4.8));
+    }
+
+    /// [266] Treppe durch die Decke des Geschosses: Aussparung im selben Commit (Treppenumriss), nur wenn die
+    /// Treppe aufwärts über die volle Geschosshöhe läuft und der Umriss ganz in der Decke liegt.
+    #[test]
+    fn treppe_legt_deckenloch_an() {
+        let ceil = json!({"id": "C1", "type": "ceiling", "floorId": "F1", "outline": [{"x": 0, "y": 0}, {"x": 8, "y": 0}, {"x": 8, "y": 6}, {"x": 0, "y": 6}]});
+        let r = root(json!({"ceilings": [ceil]}));
+        let t = crate::model::lenient::typed_for_test(&r);
+        let stair = |start: [f64; 2], cursor: [f64; 2], up: bool, rise: Value| {
+            let mut v = json!({"cmd": "stair", "shape": "straight", "up": up, "width": 1.0, "referenz": "mitte", "treadMode": "without",
+                "auftritt": 0.28, "steps": null, "start": {"x": start[0], "y": start[1]}, "cursor": {"x": cursor[0], "y": cursor[1]}});
+            v["rise"] = rise;
+            ops(&r, &t, &req(v)).unwrap()
+        };
+        let o = stair([1.0, 2.0], [5.0, 2.0], true, Value::Null);
+        assert_eq!(o.len(), 2, "Treppe + Aussparung");
+        let j = o[1].to_json();
+        assert_eq!(j["entity"]["id"], "C1");
+        let ring = j["entity"]["openings"][0].as_array().unwrap();
+        assert!(ring.len() >= 4);
+        for q in ring {
+            let (x, y) = (q["x"].as_f64().unwrap(), q["y"].as_f64().unwrap());
+            assert!((0.9..=5.1).contains(&x) && (1.4..=2.6).contains(&y), "{x},{y}");
+        }
+        // abwärts, Teilhöhe, ausserhalb der Decke → nur die Treppe
+        assert_eq!(stair([1.0, 2.0], [5.0, 2.0], false, Value::Null).len(), 1);
+        assert_eq!(stair([1.0, 2.0], [5.0, 2.0], true, json!(1.5)).len(), 1);
+        assert_eq!(stair([7.0, 2.0], [11.0, 2.0], true, Value::Null).len(), 1);
     }
 
     fn pos_or(p: &Preview) -> f64 {

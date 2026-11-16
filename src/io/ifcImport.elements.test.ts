@@ -23,6 +23,9 @@ const symmetric = (p: Project, wallTypeId: string) => {
   return l.every((x, i) => x.componentId === l[l.length - 1 - i].componentId && Math.abs(x.thickness - l[l.length - 1 - i].thickness) < 1e-9);
 };
 
+/** Leeres Projekt mit den Geschossen des Demo-Hauses (2.60 m): der Import ordnet Geschosse über die Höhe zu; die Vorgabe neuer Projekte (2.90 m, [266]) passt nicht dazu. */
+const blankProject: Project = { ...emptyProject, drawingLevels: sampleProject.drawingLevels };
+
 async function importInto(base: Project, src: Project) {
   const r = await importIfcInto(base, bytesOf(exportIfcSpf(src)), { elements: true });
   return { ...r, summary: r.summary as IfcElementsSummary };
@@ -30,7 +33,7 @@ async function importInto(base: Project, src: Project) {
 
 describe("IFC-Import als Bauteile: Rundreise Demo-Haus", () => {
   it("gleiche Wände (Achse, Typ, Höhe, Geschoss), Öffnungen, Decke, Raum; Rest als Mesh", async () => {
-    const { project: p, summary, report } = await importInto(emptyProject, sampleProject);
+    const { project: p, summary, report } = await importInto(blankProject, sampleProject);
     expect(report.parseErrors).toBe(0);
     expect(summary).toMatchObject({ walls: 9, openings: 3, ceilings: 1, columns: 0, rooms: 1, floors: 0, wallTypes: 0, ceilingTypes: 0, components: 0, kept: 0 });
     // (6.11.) Dach und Treppe kommen als Bauteile zurück, kein Kontext-Mesh mehr.
@@ -110,7 +113,7 @@ describe("IFC-Import als Bauteile: Rundreise Demo-Haus", () => {
             : o,
       ),
     };
-    const { project: p } = await importInto(emptyProject, src);
+    const { project: p } = await importInto(blankProject, src);
     const d = (p.openings ?? []).find((o) => o.kind === "door")!;
     expect(d).toMatchObject({ fireRating: "EI30", soundClass: "Rw 32 dB", burglaryClass: "RC2", uValue: 1.3, isExternal: false });
     const w = (p.openings ?? []).find((o) => o.kind === "window" && Math.abs(o.width - win.width) < 1e-6)!;
@@ -129,9 +132,9 @@ describe("IFC-Import als Bauteile: Rundreise Demo-Haus", () => {
     expect(spf).toContain("Pset_SpaceCoveringRequirements");
     expect(spf).toContain("Dossier_RoomBook");
     // In ein Projekt mit demselben Material: Verweis über den Namen; sonst Freitext.
-    const { project: p } = await importInto({ ...emptyProject, components: [comp] }, src);
+    const { project: p } = await importInto({ ...blankProject, components: [comp] }, src);
     expect(p.rooms![0]).toMatchObject({ usage: "bath", floorFinish: comp.id, wallFinish: "Abrieb 1 mm", ceilingFinish: "Weissputz", floorBuildUp: "UB 80, TSD 20" });
-    const { project: q } = await importInto({ ...emptyProject, components: [] }, src);
+    const { project: q } = await importInto({ ...blankProject, components: [] }, src);
     expect(q.rooms![0]!.floorFinish).toBe(comp.name);
     // Ohne Angaben: keine Raumbuch-Psets.
     expect(exportIfcSpf(sampleProject)).not.toContain("Dossier_RoomBook");
@@ -155,7 +158,7 @@ describe("IFC-Import als Bauteile: Rundreise Demo-Haus", () => {
               o.id === "D1" ? { ...o, hinge, swing, openingDir } : o.id === "O2" ? { ...o, wingCount: 2 } : o,
             ),
           };
-          const { project: p } = await importInto(emptyProject, src);
+          const { project: p } = await importInto(blankProject, src);
           const d1 = src.openings!.find((o) => o.id === "D1")!;
           const w1 = src.walls.find((w) => w.id === d1.hostWallId)!;
           const got = (p.openings ?? []).find((o) => o.kind === "door")!;
@@ -175,8 +178,8 @@ describe("IFC-Import als Bauteile: Rundreise Demo-Haus", () => {
 
   it("in ein Projekt ohne Geschosse/Typen: legt Geschosse, Wand-/Deckentypen und Materialien an", async () => {
     const bare: Project = {
-      ...emptyProject,
-      drawingLevels: emptyProject.drawingLevels.filter((l) => l.kind !== "floor"),
+      ...blankProject,
+      drawingLevels: blankProject.drawingLevels.filter((l) => l.kind !== "floor"),
       wallTypes: [],
       ceilingTypes: [],
       components: [],
@@ -200,8 +203,8 @@ describe("IFC-Import als Bauteile: Rundreise Demo-Haus", () => {
   });
 
   it("über Ops angewandt und gespeichert/geladen bleibt alles gleich", async () => {
-    const { project: next } = await importInto(emptyProject, sampleProject);
-    const applied = applyOps(emptyProject, projectDiffOps(emptyProject, next));
+    const { project: next } = await importInto(blankProject, sampleProject);
+    const applied = applyOps(blankProject, projectDiffOps(blankProject, next));
     expect(applied.walls).toEqual(next.walls);
     expect(applied.openings).toEqual(next.openings);
     const back = parseProjectFile(serializeProject(applied));
@@ -219,7 +222,7 @@ describe("IFC-Import als Bauteile: Rundreise Demo-Haus", () => {
       { id: "S2", type: "column", floorId: "og", categoryCode: "50", position: { x: 3, y: 2 }, profile: { kind: "round", radius: 0.15 }, rotation: 0, height: 2.5 },
     ];
     const src: Project = { ...sampleProject, columns: cols };
-    const { project: p, summary } = await importInto(emptyProject, src);
+    const { project: p, summary } = await importInto(blankProject, src);
     expect(summary.columns).toBe(2);
     const s1 = p.columns!.find((c) => c.profile.kind === "rect")!;
     expect(s1.floorId).toBe("eg");
@@ -246,7 +249,7 @@ describe("IFC-Import als Bauteile: Rundreise Demo-Haus", () => {
   for (const [name, typeId, patch] of cases) {
     it(`[151] Treppe ${name}: Rundreise`, async () => {
       const st0: Stair = { ...base, ...patch, typeId };
-      const { project: p, summary } = await importInto(emptyProject, { ...sampleProject, stairs: [st0] });
+      const { project: p, summary } = await importInto(blankProject, { ...sampleProject, stairs: [st0] });
       expect(summary.stairs).toBe(1);
       const st = p.stairs![0];
       expect([st.shape, st.stepCount, st.turn ?? null, st.midSteps ?? null], JSON.stringify(st)).toEqual([st0.shape, st0.stepCount, st0.turn ?? null, st0.midSteps ?? null]);
@@ -268,11 +271,11 @@ describe("Kontext-Mesh: Farbe und GlobalId", () => {
   // Benennung, Farbe (#rrggbb, gemeinsame Farbe beim Zusammenlegen) und GlobalId prüft der Kern-Test
   // `import_drawing_tests.rs::ifc_meshes_farbe_und_globalid`; hier die Rundreise aus einer Datei.
   it("Farbe aus der Datei (IfcStyledItem) kommt am Mesh an und übersteht Speichern/Laden", async () => {
-    const { meshes } = await importIfcInto(emptyProject, new Uint8Array(readFileSync(new URL("./testdata/ifc-geometry-cases.ifc", import.meta.url))), { fileName: "cases.ifc" });
+    const { meshes } = await importIfcInto(blankProject, new Uint8Array(readFileSync(new URL("./testdata/ifc-geometry-cases.ifc", import.meta.url))), { fileName: "cases.ifc" });
     expect(meshes.length).toBeGreaterThan(0);
     expect(meshes.every((m) => m.ifcGlobalId && !m.name.includes("["))).toBe(true);
     const withColor = { ...meshes[0], color: "#336699" };
-    const proj: Project = { ...emptyProject, context: [withColor] };
+    const proj: Project = { ...blankProject, context: [withColor] };
     const back = parseProjectFile(serializeProject(proj));
     expect(back.ok && back.project.context?.[0]).toEqual(withColor);
   });
@@ -294,7 +297,7 @@ describe.skipIf(!samples || !existsSync(samples))("IFC-Import als Bauteile: Beis
     walk(samples!);
     const rows: string[] = [];
     for (const f of files) {
-      const { project, summary } = await importIfcInto(emptyProject, new Uint8Array(readFileSync(f)), { fileName: f, elements: true });
+      const { project, summary } = await importIfcInto(blankProject, new Uint8Array(readFileSync(f)), { fileName: f, elements: true });
       expect(validateProject(project), f).toEqual([]);
       rows.push(`${f.slice(samples!.length + 1)}: ${JSON.stringify(summary)}`);
     }
