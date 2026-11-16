@@ -99,7 +99,7 @@ E 2'600'048 / N 1'200'046 und E 2'600'060 / N 1'200'056. Raumprogramm als CSV (`
 
 | # | Schritt in Dossier | Erwartet | Status |
 |---|---|---|---|
-| 8.1 | Flächenbilanz → Kennzahlenleiste | GF, aGF, GV, AZ, ÜZ mit Werten; GV ≈ GF × Geschosshöhe | ✅ (Spec 5; GV war 0 m³ ohne Körper, in [206] behoben) |
+| 8.1 | Flächenbilanz → Kennzahlenleiste | GF, aGF, GV, AZ, ÜZ mit Werten; GV = GF × Geschosshöhe + Dachraum (SIA 416, [266]) | ✅ (Spec 5; GV war 0 m³ ohne Körper, in [206] behoben) |
 | 8.2 | „Flächen- und Kennzahlen-Nachweis“ → CSV / PDF | Tabelle HNF…GF, IVHB-Ziffern (GFZ, AZ, BMZ, ÜZ), Gesamthöhe | ✅ (Spec 5) |
 | 8.3 | Leiste und Tabelle vergleichen | gleiche GF/ÜZ (GF = NGF + KF = 127.7 m²) | ✅ (Spec 5, [225]) |
 

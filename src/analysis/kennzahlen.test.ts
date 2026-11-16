@@ -34,16 +34,18 @@ describe("computeKennzahlen", () => {
     const k = computeKennzahlen({ ...sampleProject, parcelArea: 1000 });
     expect(k.az).toBeCloseTo(k.agf / 1000, 9);
   });
-  it("Gebäudevolumen aus freien Körpern, Abzugskörper zählen negativ nicht mit", () => {
-    const p: Project = {
-      ...sampleProject,
-      extrudedSolids: [
-        { id: "a", type: "extrudedSolid", categoryCode: "20", levelId: sampleProject.drawingLevels[0].id, points: sq(0, 0, 10), height: 3 } as never,
-        { id: "b", type: "extrudedSolid", categoryCode: "20", levelId: sampleProject.drawingLevels[0].id, points: sq(0, 0, 1), height: 3, operation: "subtract" } as never,
-      ],
-    };
-    const k = computeKennzahlen(p);
+  const solids = (levelId: string): Project["extrudedSolids"] => [
+    { id: "a", type: "extrudedSolid", categoryCode: "20", levelId, points: sq(0, 0, 10), height: 3 } as never,
+    { id: "b", type: "extrudedSolid", categoryCode: "20", levelId, points: sq(0, 0, 1), height: 3, operation: "subtract" } as never,
+  ];
+  it("Massenmodell (ohne Geschossflächen): Gebäudevolumen aus freien Körpern, Abzugskörper zählen negativ", () => {
+    const lv = emptyProject.drawingLevels.find((l) => l.kind === "floor")!.id;
+    const k = computeKennzahlen({ ...emptyProject, extrudedSolids: solids(lv) });
     expect(k.gv).toBeCloseTo(300 - 3, 6);
+  });
+  it("[266] mit Geschossflächen zählen freie Körper nicht zum GV", () => {
+    const k = computeKennzahlen({ ...sampleProject, extrudedSolids: solids(sampleProject.drawingLevels[0].id) });
+    expect(k.gv).toBeCloseTo(computeAreaTable(sampleProject).gv, 6);
   });
   it("[206] ohne freie Körper: GV wie die Flächentabelle (GF × Geschosshöhe), nicht 0", () => {
     const k = computeKennzahlen(sampleProject);

@@ -26,8 +26,10 @@ export interface AreaRow {
   /** Aussengeschossfläche — nicht Teil der GF. */
   agf: number;
   height: number;
-  /** GF × Geschosshöhe. */
+  /** GF × Geschosshöhe + Dachraum (`roofGv`); in der Summenzeile das GV der Tabelle. */
   gv: number;
+  /** [266] Dachraum-Korrektur des Geschosses (m³, in `gv` enthalten; Kern `building_volume.rs`). */
+  roofGv: number;
   rooms: number;
 }
 
@@ -39,6 +41,8 @@ export interface AreaTable {
   /** Gebäudevolumen (m³) gemäss `gvSource`. */
   gv: number;
   gvSource: GvSource;
+  /** [266] Anteil des Dachraums über ±0.00 (m³, Baumasse). */
+  roofGvAboveGround: number;
   /** Hinweis-Schlüssel (Annahmen der Rechnung). */
   notes: string[];
 }

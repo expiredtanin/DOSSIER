@@ -30,9 +30,12 @@
 //!    der Wanddicke; Wandenden, die auf einer anderen Wand enden, werden um deren halbe Dicke
 //!    verlängert (Eckschluss). Stützen und Schächte fehlen — als KGF-Raum zeichnen.
 //!  • GF = NGF + KF (Summe der Teile, nicht aus einem Umriss gemessen).
-//!  • GV je Geschoss ≈ GF × `floorHeight` (Rohbau-Geschosshöhe OK–OK, ohne Dachaufbauten). Gibt es
-//!    freie Körper (Massenmodell), so ist deren Volumen (Abzugskörper abgezogen) das GV
-//!    ([`GvSource::Solids`]). Beides ist eine Näherung der Hüllenvolumenrechnung der Norm.
+//!  • GV je Geschoss = GF × `floorHeight` (Geschosshöhe OK–OK) plus Dachraum ([266]): Raum unter der
+//!    Dach-Oberkante über dem Geschoss, auf dem das Dach steht (Steildach, Gauben), abzüglich der Teile
+//!    eines Kniestock-Geschosses über der Dachfläche; Dachvorsprünge zählen nicht. Abgrenzung nach SIA 416
+//!    und Rechnung: [`crate::building_volume`]. Ohne Geschossflächen (reines Massenmodell) ist das Volumen
+//!    der freien Körper (Abzugskörper abgezogen) das GV ([`GvSource::Solids`]); hat das Modell GF, zählen
+//!    freie Körper nicht (Brunnen, Möbel, Studienkörper im Garten sind kein Gebäudevolumen).
 //!
 //! # IVHB (Interkantonale Vereinbarung über die Harmonisierung der Baubegriffe, 22.9.2005)
 //!
@@ -87,9 +90,9 @@ use crate::jsnum::or_zero as finite;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum GvSource {
-    /// Summe der freien Körper (Massenmodell).
+    /// Summe der freien Körper (Massenmodell, nur ohne Geschossflächen).
     Solids,
-    /// Σ GF × Geschosshöhe.
+    /// Σ GF × Geschosshöhe + Dachraum ([`crate::building_volume`]).
     Levels,
 }
 
@@ -112,8 +115,11 @@ pub struct AreaRow {
     pub agf: f64,
     /// Geschosshöhe (m), in der Summenzeile 0.
     pub height: f64,
-    /// GF × Geschosshöhe; in der Summenzeile die Summe.
+    /// GF × Geschosshöhe + Dachraum (`roof_gv`); in der Summenzeile das GV der Tabelle.
     pub gv: f64,
+    /// [266] Dachraum-Korrektur dieses Geschosses (m³, in `gv` enthalten): Raum unter dem Dach über dem
+    /// Geschoss-Quader, abzüglich Teilen über der Dachfläche; in der Summenzeile die Summe.
+    pub roof_gv: f64,
     pub rooms: usize,
 }
 
@@ -129,6 +135,7 @@ impl AreaRow {
         self.gf += o.gf;
         self.agf += o.agf;
         self.gv += o.gv;
+        self.roof_gv += o.roof_gv;
         self.rooms += o.rooms;
     }
 }
@@ -140,15 +147,17 @@ pub struct AreaTable {
     /// Geschosse von unten nach oben.
     pub levels: Vec<AreaRow>,
     pub total: AreaRow,
-    /// Gebäudevolumen (m³) gemäss `gv_source`.
+    /// Gebäudevolumen (m³) gemäss `gv_source` — einzige Quelle für Kennzahlen, BMZ, Kosten, IFC, Blatt.
     pub gv: f64,
     pub gv_source: GvSource,
+    /// [266] Anteil des Dachraums über ±0.00 (m³, für die Baumasse).
+    pub roof_gv_above_ground: f64,
     /// Hinweise (Schlüssel, die die UI übersetzt): Annahmen, die in die Zahlen eingehen.
     pub notes: Vec<String>,
 }
 
 /// Geschosse (Art `floor`) von unten nach oben.
-fn floors_sorted(p: &Project) -> Vec<&DrawingLevel> {
+pub(crate) fn floors_sorted(p: &Project) -> Vec<&DrawingLevel> {
     let mut f: Vec<&DrawingLevel> = p.drawing_levels.iter().filter(|l| l.kind == DrawingLevelKind::Floor).collect();
     f.sort_by(|a, b| a.base_elevation.unwrap_or(0.0).partial_cmp(&b.base_elevation.unwrap_or(0.0)).unwrap_or(std::cmp::Ordering::Equal));
     f
@@ -202,6 +211,18 @@ fn wall_polygons(p: &Project, level_id: &str) -> Vec<Polygon> {
             vec![wall_corners(s, e, w.t)]
         })
         .collect()
+}
+
+/// [266] Grundriss eines Geschosses für das GV: Vereinigung der Wand- und Raumgrundrisse (ohne AGF), Löcher
+/// gefüllt (Wandring ohne Räume = ganzes Geschoss); leer ohne Wände/Räume.
+fn footprint(p: &Project, level_id: &str) -> Vec<Polygon> {
+    let mut parts = wall_polygons(p, level_id);
+    parts.extend(room_polygons(p, level_id, |c| c < CATEGORIES && c != AGF));
+    if parts.is_empty() {
+        return Vec::new();
+    }
+    let outers: Vec<Polygon> = polygon_bool::union(&parts).into_iter().filter_map(|poly| poly.into_iter().next()).map(|r| vec![r]).collect();
+    polygon_bool::union(&outers)
 }
 
 /// Räume eines Geschosses als Polygone, gefiltert nach Flächenart.
@@ -284,21 +305,40 @@ pub fn area_table(p: &Project) -> AreaTable {
             agf: c[AGF],
             height,
             gv: gf * height,
+            roof_gv: 0.0,
             rooms: rooms.iter().filter(|r| r.level == i).count(),
         });
+    }
+    let gf_sum: f64 = levels.iter().map(|l| l.gf).sum();
+    // Freie Körper sind das GV nur im reinen Massenmodell (keine Geschossflächen).
+    let gv_source = if gf_sum <= 1e-9 && solids.iter().any(|s| !s.subtract) { GvSource::Solids } else { GvSource::Levels };
+    let mut roof_failed = false;
+    let mut roof_gv_above_ground = 0.0;
+    if gv_source == GvSource::Levels {
+        let fps: Vec<Vec<Polygon>> = floors.iter().map(|l| footprint(p, &l.id)).collect();
+        let rs = crate::building_volume::roof_space(p, &floors, &fps);
+        roof_failed = rs.failed > 0;
+        for (row, d) in levels.iter_mut().zip(&rs.per_level) {
+            row.roof_gv = *d;
+            row.gv += *d;
+        }
+        roof_gv_above_ground = rs.above_ground;
     }
     let mut total = AreaRow::default();
     for l in &levels {
         total.add(l);
     }
-    let has_solids = solids.iter().any(|s| !s.subtract);
-    let (gv, gv_source) = if has_solids { (sums.gv, GvSource::Solids) } else { (total.gv, GvSource::Levels) };
+    let gv = if gv_source == GvSource::Solids { sums.gv } else { total.gv.max(0.0) };
+    total.gv = gv;
     let mut notes = vec!["agfSeparate".to_string()];
     if any_walls {
         notes.push("kfFromWalls".to_string());
     }
     notes.push(if gv_source == GvSource::Solids { "gvSolids" } else { "gvLevels" }.to_string());
-    AreaTable { levels, total, gv, gv_source, notes }
+    if roof_failed {
+        notes.push("gvRoofFailed".to_string());
+    }
+    AreaTable { levels, total, gv, gv_source, roof_gv_above_ground, notes }
 }
 
 // ── IVHB ────────────────────────────────────────────────────────────────────
@@ -511,9 +551,10 @@ pub fn ivhb(p: &Project, opt: &IvhbOptions) -> Ivhb {
             .map(|(l, r)| {
                 let (base, h) = (l.base_elevation.unwrap_or(0.0), r.height);
                 let frac = if h <= 0.0 || base >= 0.0 { 1.0 } else { ((base + h) / h).clamp(0.0, 1.0) };
-                r.gv * frac
+                (r.gv - r.roof_gv) * frac
             })
-            .sum()
+            .sum::<f64>()
+            + t.roof_gv_above_ground
     };
 
     let agbf = above_ground_footprint(p);
@@ -675,13 +716,30 @@ pub(crate) mod tests {
 
     #[test]
     fn volumen_aus_koerpern() {
+        // Reines Massenmodell (Geschosse ohne Wände/Räume): GV = Körpervolumen.
         let mut p = house();
+        p.walls.clear();
+        p.rooms = None;
         p.extruded_solids = Some(
             serde_json::from_value(serde_json::json!([{"id":"s","type":"extrudedSolid","levelId":"eg","points":[{"x":0,"y":0},{"x":10,"y":0},{"x":10,"y":8},{"x":0,"y":8}],"height":8.0}])).unwrap(),
         );
         let t = area_table(&p);
         assert_eq!(t.gv_source, GvSource::Solids);
         assert!(close(t.gv, 640.0));
+        assert!(close(t.total.gv, 640.0));
+    }
+
+    /// [266] Mit Geschossflächen zählen freie Körper (Brunnen, Studienkörper) nicht: im Musterhaus komplex
+    /// machten drei kleine Gartenkörper das GV zu 4 m³ statt ≈ 2'000 m³.
+    #[test]
+    fn kleine_koerper_ersetzen_das_gebaeude_nicht() {
+        let mut p = house();
+        p.extruded_solids = Some(
+            serde_json::from_value(serde_json::json!([{"id":"b","type":"extrudedSolid","levelId":"eg","points":[{"x":20,"y":0},{"x":21,"y":0},{"x":21,"y":1},{"x":20,"y":1}],"height":0.6}])).unwrap(),
+        );
+        let t = area_table(&p);
+        assert_eq!(t.gv_source, GvSource::Levels);
+        assert!(close(t.gv, 3.0 * 85.49 * 2.6));
     }
 
     #[test]
