@@ -49,7 +49,7 @@ function expectRoomHeightsAndLayers(p: Project, c: Check) {
   const rows = roomBook(p).rows;
   expect(rows.length).toBeGreaterThan(0);
   for (const row of rows) {
-    const h = c.stats.spaceHeights![row.number || row.id];
+    const h = c.stats.spaceHeights![row.number || row.name || row.id];
     expect(h, row.number).toBeDefined();
     expect(Math.abs(h.Height - row.clearHeight)).toBeLessThan(0.01);
     expect(Math.abs(h.FinishCeilingHeight - row.heightMean)).toBeLessThan(0.01);

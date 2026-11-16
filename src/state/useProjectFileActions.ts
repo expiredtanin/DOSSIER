@@ -113,6 +113,23 @@ export interface BackupOffer {
   lockOwned: boolean;
 }
 
+/**
+ * [268] Datei-Zustand der Sitzung AUSSERHALB von React: Ein Sprachwechsel baut die App neu auf (`LanguageRoot`, [264]).
+ * Mit `useRef` gingen dabei der zuletzt gespeicherte Stand (Rückfrage „Ungespeicherte Änderungen“ bei Neu/Öffnen/
+ * Schliessen entfiel, Änderungen gingen ohne Rückfrage verloren), Pfad (Cmd+S fragte neu), Lock und Autosave-Stand
+ * verloren, und die Autosave-Kopie der laufenden Sitzung erschien als „Ungesicherte Arbeit gefunden“.
+ */
+interface FileSession {
+  openedProjectPathRef: { current: string | null };
+  savePathRef: { current: string | null };
+  projectLockOwnedRef: { current: boolean };
+  lastSavedProjectRef: { current: Project };
+  autosaveTracker: ReturnType<typeof createAutosaveTracker>;
+  /** Kopie eines nie gespeicherten Projekts schon gesucht (einmal je Seitenladen). */
+  recoveryOffered: boolean;
+}
+let fileSession: FileSession | null = null;
+
 export function useProjectFileActions(
   setImportState: (next: ImportDialogState) => void,
   setExportSaveFormat: (format: ExportSaveFormat | null) => void,
@@ -141,10 +158,19 @@ export function useProjectFileActions(
   const projectTemplateFileInputRef = useRef<HTMLInputElement>(null);
   // Pfad + Lock-Status der aktuell offenen .obp/.json-Datei (nur Tauri; sonst
   // bleibt beides null/false — Browser-Blob-Pfad hat keinen echten Pfad).
-  const openedProjectPathRef = useRef<string | null>(null);
+  // [268] Zustand der Sitzung, übersteht den Neuaufbau beim Sprachwechsel (s. `FileSession`).
+  const session = (fileSession ??= {
+    openedProjectPathRef: { current: null },
+    savePathRef: { current: null },
+    projectLockOwnedRef: { current: false },
+    lastSavedProjectRef: { current: getState().project },
+    autosaveTracker: createAutosaveTracker(),
+    recoveryOffered: false,
+  });
+  const openedProjectPathRef = session.openedProjectPathRef;
   // Zielpfad für „Speichern" (Cmd/Ctrl+S): gesetzt beim Öffnen und nach „Speichern unter".
-  const savePathRef = useRef<string | null>(null);
-  const projectLockOwnedRef = useRef(false);
+  const savePathRef = session.savePathRef;
+  const projectLockOwnedRef = session.projectLockOwnedRef;
   // Konflikt-Zustand: Datei ist in einer anderen Instanz gesperrt → Dialog mit
   // „Schreibgeschützt öffnen"/„Trotzdem erzwingen"/„Abbrechen" (kein window.confirm!).
   const [lockConflict, setLockConflict] = useState<{
@@ -159,7 +185,7 @@ export function useProjectFileActions(
   // JSON-Diff. Start = das beim allerersten Render aktive Projekt (Startzustand
   // gilt als "gespeichert", noch nichts zu verlieren).
   // [121] Das Projekt kommt beim Aufruf aus dem Store (`getState()`); App abonniert es nicht mehr.
-  const lastSavedProjectRef = useRef(getState().project);
+  const lastSavedProjectRef = session.lastSavedProjectRef;
   // Eine verworfene Aktion (Neu/Öffnen), die erst nach Bestätigung des
   // "Ungespeicherte Änderungen"-Dialogs ausgeführt wird — s. `guardDiscard`.
   const [pendingDiscard, setPendingDiscard] = useState<(() => void) | null>(null);
@@ -189,7 +215,7 @@ export function useProjectFileActions(
   };
 
   // ── Autosave + Wiederherstellen (s. state/autosave.ts) ─────────────────────
-  const autosaveTracker = useRef(createAutosaveTracker()).current;
+  const autosaveTracker = session.autosaveTracker;
   const [recovery, setRecovery] = useState<AutosaveRecovery | null>(null);
   // Kopie unter dem Schlüssel der Zieldatei (`savePathRef`: nach „Speichern unter" der NEUE Pfad). Misslingt das
   // Schreiben (Kontingent voll, kein IndexedDB), gilt der Stand wieder als ungesichert (nächster Versuch) und der
@@ -250,7 +276,12 @@ export function useProjectFileActions(
     });
   };
   // Start: Kopie eines nie gespeicherten Projekts aus der letzten Sitzung?
-  useEffect(() => offerRecovery(null), []);
+  // [268] Nur beim ersten Aufbau je Seitenladen: nach einem Sprachwechsel wäre die Kopie die der laufenden Sitzung.
+  useEffect(() => {
+    if (session.recoveryOffered) return;
+    session.recoveryOffered = true;
+    offerRecovery(null);
+  }, []);
   const onRecoverRestore = () => {
     if (!recovery) return;
     if (openProjectOrReport(recovery.text, notify)) setAnonymityProjectFileName(recovery.path); // [208] bleibt „ungespeichert" bis zum Speichern

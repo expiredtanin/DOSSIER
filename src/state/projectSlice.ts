@@ -25,7 +25,7 @@ import {
   setFieldIfChanged,
 } from "../core";
 import type { PolylineVertexType } from "../core";
-import { sampleProject } from "../model/sampleProject";
+import { EMPTY_FLOOR_HEIGHT, sampleProject } from "../model/sampleProject";
 import {
   addChildByCode,
   applyVisibilityByCode,
@@ -729,7 +729,7 @@ export function createProjectSlice(
           kind: "floor",
           visible: true,
           locked: false,
-          floorHeight: 2.6,
+          floorHeight: EMPTY_FLOOR_HEIGHT,
           cutHeight: 1.0,
         };
         return fieldOps(p, "drawingLevels", recomputeFloorElevations([...p.drawingLevels, floor]));

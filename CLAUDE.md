@@ -85,7 +85,7 @@ wenn einer fertig ist. Speicher knapp (15 GB): Rust-Builds mit `CARGO_BUILD_JOBS
 Geometrie mit vielen Sonderfällen oder Architektur-Entscheide. Jeder Agent in eigenem Git-Worktree und eigenem Branch, nur die Dateien seiner Aufgabe. In gemeinsamen
 Dateien (`lib.rs`, `web/mod.rs`, `Cargo.toml`, `src/core/index.ts`, `src/core/extra.ts`, `i18n/de.ts`,
 `i18n/en.ts`, `TODO.md`) nur Zeilen ergänzen, nichts umordnen oder umformatieren. Nicht pushen — der
-Koordinator führt zusammen, prüft und pusht — nur nach `git.openbureau.ch/karim/dossier` (Gitea, Remote `openbureau`, Branch `master`; Vorgabe Maintainer 16.11., kein GitHub mehr). Im Worktree: `node_modules` verlinken und die WASM-Pakete
+Koordinator führt zusammen, prüft und pusht — nach `git.openbureau.ch/karim/dossier` (Gitea, Remote `openbureau`, Branch `master` — das Haupt-Repo) und denselben Stand nach GitHub (`origin`, Branch `master` und Tags) nur als Bau-Rechner für `release.yml` (Mac-Paket braucht einen macOS-Rechner; Vorgabe Maintainer 16.11.). Releases liegen auf Gitea. Im Worktree: `node_modules` verlinken und die WASM-Pakete
 aus dem Hauptcheckout kopieren (beide gitignored).
 
 ## Umgebung

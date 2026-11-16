@@ -117,6 +117,19 @@ describe("sectionline — Name der neuen Ebene", () => {
   });
 });
 
+describe("sectionline — Ansichten nach Himmelsrichtung [266]", () => {
+  it("benennt neue Ansichten nach der gezeigten Seite, nicht nach Buchstaben", () => {
+    const p = projectWith([]);
+    // a→b nach Osten, Blick nach Norden: Linie südlich des Hauses = „Ansicht Süd“ (wie die Beispielprojekte).
+    expect(nextLevelName(p, "elevation")).toBe("Ansicht Süd");
+    const north = commitLine(p, { x: 5, y: 8 }, { x: 0, y: 8 }, "elevation").drawingLevels.at(-1)!;
+    expect(north.name).toBe("Ansicht Nord");
+    // Gleiche Richtung zweimal: Nummer statt Namensgleichheit.
+    const again = commitLine(commitLine(p, a, b, "elevation"), a, b, "elevation").drawingLevels.at(-1)!;
+    expect(again.name).toBe("Ansicht Süd 2");
+  });
+});
+
 describe("sectionline — geknickter Schnitt [176]", () => {
   it("weitere Klicks werden Knickpunkte, Enter beendet; Doppelklick-Punkt zählt nicht doppelt", () => {
     const p = projectWith([{ id: "eg", name: "EG", kind: "floor", visible: true, locked: false }]);

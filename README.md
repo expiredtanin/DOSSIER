@@ -148,11 +148,15 @@ entstehen unsignierte Artefakte. Optionale Repository-Secrets:
 - Updater-Signatur: `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
   (passend zum `pubkey` in `tauri.conf.json`; ohne Schlüssel entfallen die Updater-Artefakte)
 
-**Release auf Gitea** ([30], ohne CI): Linux `npm run build && npm run electron:pack`, Mac `npm run tauri:build`, dann je
+**Release auf Gitea** ([30]): Mit Tag `v<version>` (nach Gitea UND GitHub gepusht) baut GitHub (`release.yml`) Mac und Linux und legt die Pakete als Entwurf auf Gitea ab, wenn das GitHub-Secret `GITEA_TOKEN` (Gitea-Token mit Schreibrecht auf karim/dossier) gesetzt ist. Von Hand, ohne CI: Linux `npm run build && npm run electron:pack`, Mac `npm run tauri:build`, dann je
 `GITEA_TOKEN=… npm run release:gitea -- --dir <Ordner mit den Paketen>` (Linux: `release`, Mac: `src-tauri/target/release/bundle/dmg` und
 `…/bundle/macos`). Das legt einen **Entwurf** `v<version>` an bzw. ergänzt ihn (Anhänge gleichen Namens werden ersetzt, `SHA256SUMS.txt`
 über beide Plattformen); `--publish` veröffentlicht ihn und führt mit Mac-Updater-Paket samt `.sig` das Release `latest`
-(`latest.json`, `versions.json`) nach. `--dry-run` zeigt nur, was geschähe.
+(`latest.json`, `versions.json`) nach. `--dry-run` zeigt nur, was geschähe. Sicherungen ([268]): ein vorhandener Anhang wird erst unter
+temporärem Namen (`<name>.upload-<ms>`) hochgeladen, dann der alte gelöscht und der neue umbenannt (`latest.json` fehlt nie; bei
+Abbruch kann ein `.upload-…`-Rest am Release hängen, in Gitea löschen). Ohne `--publish` auf ein schon veröffentlichtes Release
+bricht das Skript ab (bewusst ersetzen: `--replace-published`); `--publish` ohne Mac-Pakete (weder im Ordner noch am Release) bricht
+ab (nur Linux veröffentlichen: `--linux-only`). Reihenfolge also: Mac-Pakete hochladen, Linux-Pakete hochladen, dann `--publish`.
 
 Der Updater-Endpunkt in `tauri.conf.json` und der Versionsverlauf (`src/update/versionHistory.ts`) zeigen auf die Releases von
 `git.openbureau.ch/karim/dossier` (Release `latest` mit `latest.json`/`versions.json`; Entscheid Maintainer 16.11.: nur noch Gitea, kein GitHub, kein eigenes Standalone-Repo). Für Linux baut der Job `linux` ein AppImage

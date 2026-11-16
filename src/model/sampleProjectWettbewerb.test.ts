@@ -75,10 +75,10 @@ describe("Beispielprojekt Wettbewerb", () => {
     expect(p.rooms!.filter((r) => r.name === "Wohnen/Essen").length).toBe(6);
   });
 
-  it("Präsentationsplan A1 mit Grundrissen, Ansichten und Schnitt; Situation", () => {
+  it("Präsentationsplan A1 mit Grundrissen, Ansichten und beiden Schnitten; Situation", () => {
     const sheet = p.layouts!.find((l) => l.name.includes("Präsentation"));
     expect(sheet?.paper).toBe("a1");
-    expect(sheet!.viewports.length).toBe(3 + 4 + 1);
+    expect(sheet!.viewports.length).toBe(3 + 4 + 2);
     expect(sheet!.viewports.every((v) => v.scaleDenominator === 200)).toBe(true);
     const sit = p.layouts!.find((l) => l.id === "lay-situation");
     expect(sit?.viewports[0].scaleDenominator).toBe(500);

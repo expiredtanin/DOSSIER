@@ -19,6 +19,7 @@ files:
   - scripts/csp.cjs
   - scripts/electron-blender.cjs
   - scripts/electron-files.cjs
+  - scripts/electron-links.cjs
   - dist/**
   - package.json
   - "!**/node_modules/**"

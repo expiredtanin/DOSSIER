@@ -22,13 +22,22 @@ pub struct Grid {
     pub cols: usize,
     /// Platz unter einem Rahmen für Titel und Massstab.
     pub band: f64,
+    /// [266] Höchstgrösse des 3D-Bild-Rahmens (Breite, Höhe in mm), z. B. der grösste Grundriss: das Bild soll die Pläne nicht erdrücken.
+    pub image_max: Option<(f64, f64)>,
 }
 
 impl Grid {
     pub fn new(w: f64, h: f64, margin: f64, top: f64, cols: usize, gutter: f64, band: f64) -> Grid {
         let cols = cols.clamp(1, 12);
         let col_w = ((w - 2.0 * margin - (cols as f64 - 1.0) * gutter) / cols as f64).max(1.0);
-        Grid { left: margin, top, bottom: h - margin, col_w, gutter, cols, band }
+        Grid { left: margin, top, bottom: h - margin, col_w, gutter, cols, band, image_max: None }
+    }
+    /// [266] Höchstgrösse des Bild-Rahmens setzen (unsinnige Werte bleiben unbeachtet).
+    pub fn with_image_max(mut self, w: f64, h: f64) -> Grid {
+        if w.is_finite() && h.is_finite() && w > 0.0 && h > 0.0 {
+            self.image_max = Some((w, h));
+        }
+        self
     }
     pub fn span_w(&self, k: usize) -> f64 {
         k as f64 * self.col_w + (k as f64 - 1.0) * self.gutter
@@ -180,8 +189,8 @@ pub fn layout(g: &Grid, groups: &[Group], tables: &[(usize, f64)], image: bool, 
                 col += span;
             }
             if grp.image_beside && k == 0 && image && out.image.is_none() && g.cols >= col + 2 {
-                let rect = Rect { x_mm: g.col_x(col), y_mm: st.y, width_mm: g.span_w(g.cols - col), height_mm: lh - g.band };
-                out.image = Some(Placed { page: st.page, rect, forced: false, line: st.line });
+                let free = Rect { x_mm: g.col_x(col), y_mm: st.y, width_mm: g.span_w(g.cols - col), height_mm: lh - g.band };
+                out.image = Some(Placed { page: st.page, rect: cap_image(g, free, min_image_h, true), forced: false, line: st.line });
                 col = g.cols;
             }
             st.side = Some(Side { line: st.line, col, y: st.y });
@@ -238,15 +247,51 @@ pub fn layout(g: &Grid, groups: &[Group], tables: &[(usize, f64)], image: bool, 
         }
         let rect = Rect { x_mm: g.left, y_mm: st.y, width_mm: g.span_w(g.cols), height_mm: g.bottom - st.y };
         cands.push(Placed { page: st.page, rect, forced: false, line: st.line });
+        // Zuerst nach der freien Fläche wählen, dann auf die Höchstgrösse kürzen: seitlich rechtsbündig, darunter zentriert.
         let area = |p: &Placed| p.rect.width_mm * p.rect.height_mm;
-        let best = cands.into_iter().filter(|p| p.rect.height_mm + 1e-9 >= min_image_h).max_by(|a, b| area(a).total_cmp(&area(b)));
+        let below = cands.len() - 1;
+        let best = cands.iter().enumerate().filter(|(_, p)| p.rect.height_mm + 1e-9 >= min_image_h).max_by(|a, b| area(a.1).total_cmp(&area(b.1))).map(|(i, p)| Placed { rect: cap_image(g, p.rect, min_image_h, i != below), ..*p });
         out.image = Some(best.unwrap_or_else(|| {
             st.new_page();
             Placed { page: st.page, rect: Rect { x_mm: g.left, y_mm: g.top, width_mm: g.span_w(g.cols), height_mm: g.height() }, forced: false, line: st.line }
         }));
     }
     out.pages = out.items.iter().chain(&out.tables).chain(&out.image).map(|p| p.page + 1).max().unwrap_or(1);
+    spread(g, &mut out);
     out
+}
+
+/// [266] Bild-Rahmen auf die Höchstgrösse des Rasters kürzen (Höhe nie unter `min_h`, Breite mindestens 4:3 zur Höhe, nie über
+/// die freie Fläche); `right`: rechtsbündig an der freien Fläche, sonst waagrecht zentriert.
+fn cap_image(g: &Grid, free: Rect, min_h: f64, right: bool) -> Rect {
+    let Some((mw, mh)) = g.image_max else { return free };
+    let h = mh.max(min_h).min(free.height_mm);
+    let w = mw.max(h * 4.0 / 3.0).min(free.width_mm);
+    let x = if right { free.x_mm + free.width_mm - w } else { free.x_mm + (free.width_mm - w) / 2.0 };
+    Rect { x_mm: x, y_mm: free.y_mm, width_mm: w, height_mm: h }
+}
+
+/// [266] Freien Platz am Fuss jedes Blatts gleichmässig verteilen: vor der ersten, zwischen allen Zeilen und nach der letzten
+/// entsteht gleich viel Weissraum (je Lücke höchstens 12 % der Satzspiegelhöhe; der Rest bleibt unten). Elemente derselben Zeile
+/// (Tabellen und Bild neben einem Rahmen) rücken gemeinsam.
+fn spread(g: &Grid, out: &mut Result) {
+    for page in 0..out.pages {
+        let on = |p: &&mut Placed| p.page == page && !p.forced;
+        let mut lines: Vec<usize> = out.items.iter().chain(&out.tables).chain(out.image.iter()).filter(|p| p.page == page).map(|p| p.line).collect();
+        lines.sort_unstable();
+        lines.dedup();
+        let bottom = out.items.iter().filter(|p| p.page == page).map(|p| p.rect.y_mm + p.rect.height_mm + g.band).chain(out.tables.iter().chain(out.image.iter()).filter(|p| p.page == page).map(|p| p.rect.y_mm + p.rect.height_mm)).fold(g.top, f64::max);
+        let left = g.bottom - bottom;
+        let pf = out.items.iter().chain(&out.tables).chain(out.image.iter()).any(|p| p.page == page && p.forced);
+        if lines.is_empty() || left <= 1e-6 || pf {
+            continue;
+        }
+        let gap = (left / (lines.len() as f64 + 1.0)).min(0.12 * g.height());
+        let shift = |line: usize| gap * (lines.iter().position(|l| *l == line).unwrap_or(0) as f64 + 1.0);
+        for p in out.items.iter_mut().chain(out.tables.iter_mut()).chain(out.image.iter_mut()).filter(|p| on(p)) {
+            p.rect.y_mm += shift(p.line);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -385,5 +430,48 @@ mod tests {
         check(&g, &r);
         let r = layout(&g, &[], &[], false, 70.0);
         assert_eq!((r.pages, r.items.len(), r.image.is_none()), (1, 0, true));
+    }
+
+    /// [266] Das Bild ist nicht grösser als der grösste Plan (Höhe und, bei gleichem Seitenverhältnis, Breite) und steht rechtsbündig
+    /// neben der Situation.
+    #[test]
+    fn bild_hoechstens_so_gross_wie_der_plan() {
+        let g = a1().with_image_max(110.0, 100.0);
+        let groups = vec![
+            Group { cells: vec![Cell { span: 2, w: 200.0, h: 300.0 }], image_beside: true },
+            Group { cells: cells(2, 1, 110.0, 100.0), image_beside: false },
+        ];
+        let r = layout(&g, &groups, &[], true, 70.0);
+        let img = r.image.expect("Bild");
+        assert!(img.rect.height_mm <= 100.0 + 1e-9 && img.rect.width_mm <= 100.0 * 4.0 / 3.0 + 1e-9, "{:?}", img.rect);
+        assert!((img.rect.x_mm + img.rect.width_mm - (g.left + g.span_w(g.cols))).abs() < 1e-9, "rechtsbündig");
+        // Ohne Höchstgrösse füllt es den Rest der Zeile.
+        let r0 = layout(&a1(), &groups, &[], true, 70.0);
+        assert!(r0.image.unwrap().rect.height_mm > 250.0);
+        check(&g, &r);
+    }
+
+    /// [266] Freier Platz am Fuss wird gleichmässig auf die Zeilen verteilt (oben, zwischen, unten gleiche Lücke); Elemente
+    /// derselben Zeile rücken gemeinsam, nichts verlässt den Satzspiegel, volle Blätter bleiben unverändert.
+    #[test]
+    fn leerer_fuss_wird_gleichmaessig_verteilt() {
+        let g = a1();
+        let groups = vec![Group { cells: cells(2, 2, 160.0, 100.0), image_beside: true }, Group { cells: cells(2, 2, 160.0, 80.0), image_beside: false }];
+        let r = layout(&g, &groups, &[(2, 40.0)], true, 70.0);
+        check(&g, &r);
+        let lines: Vec<(f64, f64)> = [0usize, 1].iter().map(|l| {
+            let top = r.items.iter().filter(|p| p.line == *l).map(|p| p.rect.y_mm).fold(f64::MAX, f64::min);
+            let bot = r.items.iter().filter(|p| p.line == *l).map(|p| p.rect.y_mm + p.rect.height_mm + g.band).fold(0.0, f64::max);
+            (top, bot)
+        }).collect();
+        let (gap_top, gap_mid) = (lines[0].0 - g.top, lines[1].0 - lines[0].1);
+        assert!(gap_top > g.gutter && gap_mid >= gap_top - 1e-9, "oben {gap_top}, Mitte {gap_mid}");
+        // Der Inhalt liegt weiter unten als ohne Verteilung (vorher Oberkante der zweiten Zeile bei 58 + 108 + 10) und im Satzspiegel.
+        assert!(lines[1].0 > g.top + 108.0 + g.gutter + 1.0 && lines[1].1 <= g.bottom + 1e-9, "{lines:?}");
+        // Tabelle neben der letzten Zeile rückt mit ihr.
+        assert!((r.tables[0].rect.y_mm - lines[1].0).abs() < 1e-9);
+        // Ein volles Blatt ändert sich nicht.
+        let full = layout(&g, &[Group { cells: vec![Cell { span: 6, w: 801.0, h: g.height() - g.band }], image_beside: false }], &[], false, 70.0);
+        assert_eq!(full.items[0].rect.y_mm, g.top);
     }
 }

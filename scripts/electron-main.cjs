@@ -4,10 +4,11 @@
 // (render2d-WASM-Engine, ?engine=wasm) zuverlässig läuft. Kein Rust-Backend
 // nötig: compute_joins hat einen TS-Fallback (src/compute/index.ts).
 
-const { app, BrowserWindow, Menu, ipcMain, protocol, session, dialog } = require("electron");
+const { app, BrowserWindow, Menu, ipcMain, protocol, session, dialog, shell } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
 const { buildCsp } = require("./csp.cjs");
+const links = require("./electron-links.cjs"); // [268] externe Links, fremde Navigation
 require("./electron-blender.cjs").register(ipcMain); // [211] Blender als eigener Prozess
 require("./electron-files.cjs").register(ipcMain, dialog, () => mainWindow); // [116] Projekt atomar speichern, Sicherung lesen
 
@@ -49,6 +50,7 @@ const isDev = !app.isPackaged && !process.env.DOSSIER_USE_DIST; // DOSSIER_USE_D
 // localStorage brauchen einen richtigen Ursprung. Muss vor `ready` registriert werden.
 const APP_SCHEME = "dossier";
 const APP_ORIGIN = `${APP_SCHEME}://app`;
+const APP_ORIGINS = [APP_ORIGIN, new URL(DEV_URL).origin]; // [268] erlaubte Ursprünge für Navigation/CSP
 const DIST_DIR = path.join(__dirname, "..", "dist");
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -155,6 +157,21 @@ function createWindow() {
   });
 
   mainWindow = win;
+  // [268] Nie ein Kindfenster (es erbte Preload/CSP): https/mailto im System-Browser, alles andere verwerfen.
+  // Navigation und Weiterleitung des App-Fensters bleiben im App-Ursprung (gepackt `dossier://app`, Dev der Vite-Server).
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    const d = links.windowOpenDecision(url);
+    if (d.external) void shell.openExternal(d.external);
+    return { action: "deny" };
+  });
+  const guardNav = (event, url) => {
+    const d = links.navigationDecision(url, APP_ORIGINS);
+    if (d.allow) return;
+    event.preventDefault();
+    if (d.external) void shell.openExternal(d.external);
+  };
+  win.webContents.on("will-navigate", guardNav);
+  win.webContents.on("will-redirect", guardNav);
   // [116] Schliess-Wächter: ist er gesetzt (Renderer läuft), geht das Fenster erst nach „window:force-close" zu;
   // der Renderer fragt bei ungespeicherten Änderungen im Overlay nach. Stürzt der Renderer ab, gilt der Wächter nicht mehr.
   win.webContents.on("render-process-gone", () => closeGuard.delete(win.id));
@@ -219,6 +236,8 @@ app.whenReady().then(() => {
   if (!isDev) {
     protocol.handle(APP_SCHEME, serveDist);
     session.defaultSession.webRequest.onHeadersReceived((details, cb) => {
+      // [268] Nur Antworten des App-Ursprungs bekommen die CSP.
+      if (!links.shouldSetCsp(details.url, APP_ORIGINS)) return cb({});
       cb({ responseHeaders: { ...details.responseHeaders, "Content-Security-Policy": [buildCsp()] } });
     });
   }
