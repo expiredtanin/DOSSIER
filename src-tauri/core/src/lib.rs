@@ -84,6 +84,7 @@ pub mod snap;
 pub mod export_flat;
 pub mod geo_rebase;
 pub mod auto_lines;
+pub mod elevation_set;
 pub mod ifc_quantities;
 pub mod ifc_stairs;
 pub mod ifc_data;

@@ -77,7 +77,7 @@ E 2'600'048 / N 1'200'046 und E 2'600'060 / N 1'200'056. Raumprogramm als CSV (`
 | 5.1 | Kopfleiste Massstab → 1:200, Detailgrad „grob“/„mittel“ | Strichstärken und Schraffuren für 1:200 | ✅ (Spec 7) |
 | 5.2 | Befehl `sectionline`, Start/Ende quer durchs Gebäude, Enter | neue Ebene „Schnitt B“, Schnitt zeigt Wände, Decke, Dach, Koten | ✅ (Spec 8) |
 | 5.3 | „Schnitt A“ / „Ansicht Süd“ aus dem leeren Projekt | zeigen das Gebäude: die Linien folgen dem Gebauten (Schnitt durch die Mitte, Ansicht davor), bis man sie verschiebt | ✅ (Spec 13 prüft die Linien, CLI-Schnitt zeigt Wände/Decke/Dach; [221]) |
-| 5.4 | Befehl `viewline` für Ansichten Nord/Ost/West | je eine Ansichtsebene | ◐ geht von Hand, kein automatischer Satz → **[224]** |
+| 5.4 | Befehl `ansichten` (Menü Ansicht → „Ansichten aller Seiten erzeugen“) legt Nord/Ost/Süd/West um das Gebäude an; einzelne Ansichten weiter mit `viewline` | vier Ansichtsebenen, je eine Linie vor der Fassade | ✅ **[267]** Hülle des Gebauten (Wände, Decken, Dächer, Stützen, Treppen, Räume, Körper; nicht Kontext/Gelände); Hauptrichtung = minimal umschliessendes Rechteck der konvexen Hülle (bis 0.5° Abweichung achsparallel), Linie 2 m bzw. 10 % der Ausdehnung vor der Fassade und über deren Enden hinaus; Name nach der nächsten Himmelsrichtung der Fassade (Plan oben = Norden, es gibt noch keinen Nordwinkel; nie „Nordost“); vorhandene Ansicht gleicher Blickrichtung (< 45°) wird nicht doppelt angelegt (Meldung nennt sie); ein Undo-Schritt; der Präsentationsplan ([224]) nimmt die Ansichten mit. Nicht auf dem Mac geprüft |
 | 5.5 | 1:100 mit Bemassung, Koten, Raumstempeln, Öffnungen (Vorprojekt) | abgabefähiger 1:100-Plan | ◐ Plan-Review-Runde 4 (TODO Phase 3) |
 
 ## 6. Situation 1:500 mit Schwarzplan

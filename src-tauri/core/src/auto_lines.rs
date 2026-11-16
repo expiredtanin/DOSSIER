@@ -78,8 +78,8 @@ fn bbox<'a>(pts: impl IntoIterator<Item = &'a Vec2>) -> Option<[f64; 4]> {
     b[0].is_finite().then_some(b)
 }
 
-/// Ausmass [x0, y0, x1, y1] des Gebauten, ohne Gebautes der Parzelle; `None` ohne beides.
-pub fn extent(p: &Project) -> Option<[f64; 4]> {
+/// Alle Stützpunkte des Gebauten (Wände, Decken, Dächer, Stützen, Treppen, Räume, Körper; ohne Kontext und Gelände).
+pub fn built_points(p: &Project) -> Vec<Vec2> {
     let mut pts: Vec<Vec2> = Vec::new();
     for w in &p.walls {
         pts.extend([w.start, w.end]);
@@ -95,6 +95,12 @@ pub fn extent(p: &Project) -> Option<[f64; 4]> {
             None => pts.extend(s.points.iter().copied()),
         }
     }
+    pts
+}
+
+/// Ausmass [x0, y0, x1, y1] des Gebauten, ohne Gebautes der Parzelle; `None` ohne beides.
+pub fn extent(p: &Project) -> Option<[f64; 4]> {
+    let pts = built_points(p);
     // Erst eine Fläche zählt (≥ 1 m in beiden Richtungen): eine einzelne Wand ergäbe einen Schnitt genau auf ihrer Achse.
     let areal = |b: &[f64; 4]| b[2] - b[0] >= MIN_SIZE && b[3] - b[1] >= MIN_SIZE;
     bbox(&pts).filter(areal).or_else(|| bbox(p.site_rules.iter().flat_map(|r| &r.parcel)).filter(areal))

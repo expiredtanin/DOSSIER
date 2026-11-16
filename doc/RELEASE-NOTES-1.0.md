@@ -158,7 +158,9 @@ Ehrlich vorweg: **Der Durchlauf des ganzen Referenz-Ablaufs auf dem Mac ist noch
 **Pläne und Abgabe**
 - **1:100-Pläne in Abgabequalität** (Bemassung, Koten, Raumstempel, Öffnungen nach Detailgrad) sind noch nicht abgeschlossen (Phase 3, Plan-Review
   nach [199]).
-- Ansichten Nord/Ost/West entstehen von Hand mit `viewline`; der Präsentationsplan nimmt nur vorhandene Ansichten ([224]).
+- Ansichten Nord/Ost/Süd/West entstehen in einem Schritt (*Ansicht → Ansichten aller Seiten erzeugen*, Befehl `ansichten`, [267]),
+  ausgerichtet an der Hauptrichtung des Gebäudes. Es gibt noch keinen Nordwinkel: der Plan gilt oben als Norden, die Namen
+  folgen der nächsten Himmelsrichtung. Der Präsentationsplan nimmt nur vorhandene Ansichten ([224]).
 - **Anonymität** ([208]): Die Freitext-Prüfung findet nur Begriffe, die Dossier kennt (Projektangaben und die Liste «Weitere Angaben»); Wörter ohne
   Bezug dazu, Wörter unter 5 Zeichen (Einzelwort), allgemeine Wörter und blosse Zahlen nicht. Vor der Abgabe trotzdem von Hand durchsehen.
   `dossier-cli convert` und BCF-Export prüfen nicht. Programmkonventionelle Namen wie `Dossier_Qto_…` im IFC bleiben. Der Dialog-Weg ist nur

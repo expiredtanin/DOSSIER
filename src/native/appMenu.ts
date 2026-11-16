@@ -19,6 +19,7 @@ import { openRenderDialog } from "../state/renderDialogHook";
 import { openShortcutOverview } from "../state/shortcutOverviewHook";
 import { openBugReport, openQuickGuide } from "../state/helpMenuHook";
 import { openImageExportDialog } from "../state/imageExportDialogHook";
+import { createElevationSet } from "../state/elevationSet";
 import { APP_VERSION } from "../ui/TopBar";
 import { BUILD_INFO } from "../update/buildInfo";
 import type { View3d, ViewType } from "../model/viewTypes";
@@ -440,6 +441,12 @@ export function useNativeAppMenu(
             text: t("menu.view.toggleTrace"),
             accelerator: "CmdOrCtrl+Shift+T",
             action: () => handlersRef.current.onSelectionAction?.("toggleTrace"),
+          }),
+          // [267] Ansichten Nord/Ost/Süd/West um das Gebäude anlegen.
+          await PredefinedMenuItem.new({ item: "Separator" }),
+          await MenuItem.new({
+            text: t("menu.view.elevations"),
+            action: () => createElevationSet(),
           }),
           // [211] Rendering mit Blender/Cycles (Dialog in App montiert, Öffner über den Modul-Hook).
           await PredefinedMenuItem.new({ item: "Separator" }),
