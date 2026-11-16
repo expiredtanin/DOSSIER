@@ -10,7 +10,7 @@
 // Bezeichner englisch, UI-Text/Kommentare deutsch (CONVENTIONS.md).
 
 import { useEffect, useState } from "react";
-import { t, type TranslationKey } from "../i18n";
+import { LANGUAGE_PREFS, t, type LanguagePref, type TranslationKey } from "../i18n";
 import { useModalFocus } from "./modalFocus";
 import { ACCENT_SWATCHES } from "../theme/accents";
 import { ColorHexField } from "./ColorHexField";
@@ -87,6 +87,9 @@ export interface SettingsDialogProps {
   /** Offline-Modus: sperrt alle entfernten Abrufe (Materialbibliothek, swisstopo, OSM). */
   offline: boolean;
   onOfflineChange: (offline: boolean) => void;
+  /** [264] Sprache der Oberfläche (sofort wirksam). */
+  languagePref: LanguagePref;
+  onLanguagePrefChange: (pref: LanguagePref) => void;
   /** [9] KI-Zugriff (MCP-Brücke): Stand und Schalter; ohne Angabe keine Sektion. */
   aiAccess?: AiAccessView;
   onAiAccessChange?: (on: boolean) => void;
@@ -137,6 +140,8 @@ export function SettingsDialog({
   onLineEndsChange,
   offline,
   onOfflineChange,
+  languagePref,
+  onLanguagePrefChange,
   aiAccess,
   onAiAccessChange,
   layout,
@@ -252,6 +257,22 @@ export function SettingsDialog({
 
           <section className="imp-section">
             <div className="imp-section-title">{t("settings.section.display")}</div>
+            <label className="settings-field-label" htmlFor="settings-language">
+              {t("settings.language")}
+            </label>
+            <select
+              id="settings-language"
+              className="settings-select"
+              value={languagePref}
+              onChange={(e) => onLanguagePrefChange(e.target.value as LanguagePref)}
+            >
+              {LANGUAGE_PREFS.map((l) => (
+                <option key={l} value={l}>
+                  {t(`settings.language.${l}` as const)}
+                </option>
+              ))}
+            </select>
+            <div className="imp-note">{t("settings.language.hint")}</div>
             <span className="settings-field-label">{t("settings.theme")}</span>
             <span className="sb-renderer-toggle" role="group" aria-label={t("settings.theme")}>
               <button

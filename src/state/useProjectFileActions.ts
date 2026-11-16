@@ -47,6 +47,7 @@ import {
 import type { LockInfo } from "../native/projectFile";
 import { addRecentProject, removeRecentProject } from "./recentProjects";
 import { emptyProject, sampleProject } from "../model/sampleProject";
+import { withNewProjectNames } from "../model/newProjectNames";
 import { buildComplexSampleProject } from "../model/sampleProjectComplex";
 import { buildWettbewerbSampleProject } from "../model/sampleProjectWettbewerb";
 import { withStandards } from "../model/standards";
@@ -487,7 +488,7 @@ export function useProjectFileActions(
   const onNewProject = () => guardDiscard(() => {
     releaseCurrentProjectLock();
     // Neue Projekte bringen die SIA-400-Standards mit ([100]–[102]).
-    const next = withStandards(emptyProject);
+    const next = withStandards(withNewProjectNames(emptyProject));
     getState().loadProject(next);
     lastSavedProjectRef.current = next;
   });

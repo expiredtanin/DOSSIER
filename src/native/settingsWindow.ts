@@ -5,7 +5,7 @@
 // Sync-/Command-Paar statt eines generischen Proxys über 27 Handler.
 //
 // Hauptfenster → Einstellungs-Fenster: „settings-sync-state" mit
-//   { marqueeColor, snapColor, referenceElevationMasl, scaleLineWeights, offline, layout } bei jeder Änderung
+//   { marqueeColor, snapColor, referenceElevationMasl, scaleLineWeights, offline, languagePref, layout } bei jeder Änderung
 //   + auf „settings-window-ready".
 // Einstellungs-Fenster → Hauptfenster: „settings-command" mit
 //   { name, args } — dieselbe {name,args}-RPC-Form wie resource-command.
@@ -14,6 +14,7 @@
 
 import type { LineEnds } from "../core";
 import type { AiAccessView } from "../ui/AiAccessSection";
+import type { LanguagePref } from "../i18n";
 import type { LayoutState } from "../panels/types";
 import type { ThemeMode } from "../theme/themeMode";
 import { BORDERLESS_WINDOW_CHROME } from "./windowChrome";
@@ -31,6 +32,8 @@ export interface SettingsSyncState {
   /** Projekt-Option: Linienenden und -ecken ([146]). */
   lineEnds: LineEnds;
   offline: boolean;
+  /** [264] Sprachwahl der Oberfläche. */
+  languagePref: LanguagePref;
   /** [9] KI-Zugriff (Schalter, Sitzungsschlüssel, Stand). */
   aiAccess: AiAccessView;
   layout: LayoutState;
@@ -45,6 +48,7 @@ export interface SettingsCommandHandlers {
   onScaleLineWeightsChange: (on: boolean) => void;
   onLineEndsChange: (ends: LineEnds) => void;
   onOfflineChange: (offline: boolean) => void;
+  onLanguagePrefChange: (pref: LanguagePref) => void;
   onAiAccessChange: (on: boolean) => void;
   onApplyLayout: (layout: LayoutState) => void;
 }

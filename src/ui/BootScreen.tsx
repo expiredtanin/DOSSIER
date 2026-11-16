@@ -14,12 +14,17 @@ import { StartScreen } from "./StartScreen";
 
 export type BootPhase = "splash" | "start" | "editor";
 
+/** [264] Ein Sprachwechsel baut die App neu auf (`LanguageRoot`): Phase und angewandte Fenstergrösse bleiben erhalten. */
+let rememberedPhase: BootPhase = "splash";
+let appliedWindowPhase: BootPhase | null = null;
+
 export function useBootPhase() {
   // Wie bei den meisten CAD-Programmen (s. ui/SplashScreen.tsx/StartScreen.tsx).
   // Läuft NUR einmal pro Fensterstart; sobald "editor" erreicht ist, bleibt der
   // volle Editor bestehen (auch bei späteren File>Neu/Öffnen-Aktionen, die
   // weiterhin über das normale Menü laufen).
-  const [bootPhase, setBootPhase] = useState<BootPhase>("splash");
+  const [bootPhase, setBootPhase] = useState<BootPhase>(rememberedPhase);
+  rememberedPhase = bootPhase;
 
   // Fenstergrösse an die Boot-Phase anpassen: Splash/Startbildschirm sind ein
   // kleines, kompaktes Fenster (wie das Start-Fenster gängiger CAD-Programme),
@@ -29,7 +34,8 @@ export function useBootPhase() {
   // Tauri relevant (Browser-Fenster lässt sich per Web-API nicht sinnvoll
   // resizen).
   useEffect(() => {
-    if (!isTauriRuntime()) return;
+    if (!isTauriRuntime() || appliedWindowPhase === bootPhase) return;
+    appliedWindowPhase = bootPhase;
     void (async () => {
       const [{ getCurrentWindow }, { LogicalSize }] = await Promise.all([
         import("@tauri-apps/api/window"),

@@ -10,7 +10,7 @@ import { isTauriRuntime } from "../native/projectFile";
 import { openSettingsWindowNative, useSettingsWindowHost } from "../native/settingsWindow";
 import { useThemeModeState } from "../theme/useThemeMode";
 import type { PlanViewHandle } from "../views/plan/PlanView";
-import { t } from "../i18n";
+import { applyLanguagePref, getStoredLanguagePref, setStoredLanguagePref, t, type LanguagePref } from "../i18n";
 import { useStore, type RootState } from "./appStore";
 import { setAiAccessEnabled, setAiView, useAiAccess } from "./aiAccess";
 import { reconcileLayout } from "./layoutSlice";
@@ -19,6 +19,11 @@ import type { useDialogState } from "./useDialogState";
 import type { useTopBarState } from "./useTopBarState";
 
 type TopBar = ReturnType<typeof useTopBarState>;
+
+/** [264] Der Sprachwechsel baut die App neu auf (`LanguageRoot`); der Einstellungsdialog soll danach wieder offen sein. */
+let reopenSettingsAfterLanguageChange = false;
+/** Das Start-Protokoll läuft einmal je Seitenladen, nicht bei jedem Neuaufbau der App ([264]). */
+let sessionMarked = false;
 
 export function useSettingsHost(opts: {
   applyChange: RootState["applyChange"];
@@ -47,10 +52,18 @@ export function useSettingsHost(opts: {
     setSettingsOpen,
   } = opts;
 
+  useEffect(() => {
+    if (!reopenSettingsAfterLanguageChange) return;
+    reopenSettingsAfterLanguageChange = false;
+    if (!isTauriRuntime()) setSettingsOpen(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Start-Protokoll: war der letzte Lauf unsauber beendet, kurz darauf hinweisen (Autosave sichert
   // die Daten); beim Schliessen die Sitzung als sauber markieren.
   useEffect(() => {
-    const r = markSessionStart();
+    const r = sessionMarked ? { previousCrashed: false } : markSessionStart();
+    sessionMarked = true;
     if (r.previousCrashed) notify(t("startup.previousCrashed"), "warning");
     const clean = () => markSessionClean();
     window.addEventListener("pagehide", clean);
@@ -63,6 +76,15 @@ export function useSettingsHost(opts: {
   const onOfflineChange = (v: boolean) => {
     setOffline(v);
     setOfflineState(v);
+  };
+
+  // [264] Sprache der Oberfläche (Einstellungen → Allgemein): sofort wirksam, gespeichert in localStorage.
+  const [languagePref, setLanguagePrefState] = useState<LanguagePref>(() => getStoredLanguagePref());
+  const onLanguagePrefChange = (pref: LanguagePref) => {
+    setStoredLanguagePref(pref);
+    reopenSettingsAfterLanguageChange = true;
+    applyLanguagePref(pref);
+    setLanguagePrefState(pref);
   };
 
   // [9] KI-Zugriff (MCP-Brücke, Einstellungen → Allgemein): Stand für die Einstellungen; die
@@ -104,6 +126,7 @@ export function useSettingsHost(opts: {
       scaleLineWeights,
       lineEnds: lineEndsOf({ lineCap, lineJoin }),
       offline,
+      languagePref,
       aiAccess,
       layout,
     },
@@ -115,6 +138,7 @@ export function useSettingsHost(opts: {
       onScaleLineWeightsChange: setScaleLineWeights,
       onLineEndsChange: setLineEnds,
       onOfflineChange,
+      onLanguagePrefChange,
       onAiAccessChange: setAiAccessEnabled,
       onApplyLayout: (l) => setLayout(reconcileLayout(l)),
     },
@@ -127,5 +151,5 @@ export function useSettingsHost(opts: {
     }
   };
 
-  return { themeMode, setThemeMode, offline, onOfflineChange, aiAccess, setScaleLineWeights, setLineEnds, openSettings };
+  return { themeMode, setThemeMode, offline, onOfflineChange, languagePref, onLanguagePrefChange, aiAccess, setScaleLineWeights, setLineEnds, openSettings };
 }
