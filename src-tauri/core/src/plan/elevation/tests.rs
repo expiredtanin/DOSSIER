@@ -343,6 +343,34 @@ fn ansichtsschraffur_und_ansichtsfarbe_der_aussenschicht() {
     assert_eq!(render(&p, 2000.0).matches("elevation-surface-pattern").count(), 0, "grob: weggelassen");
 }
 
+/// [269] Ansichtsschraffur in Papiergrösse: ein Ziegelraster (Lagen 0.34 m, Stösse 0.21 m) ist bei 1:100 ausgedünnt
+/// (Linien nicht enger als 2.5 mm Papier) und bei 1:200 noch dünner; die Striche bleiben feiner als die
+/// Fensterkonturen.
+#[test]
+fn ansichtsschraffur_massstabsgerecht_und_fein() {
+    let mut p = sample();
+    let outer = p.wall_types.iter().find(|t| t.id == "aw").unwrap().layers[0].component_id.clone();
+    let c = p.components.iter_mut().find(|c| c.id == outer).unwrap();
+    c.surface_pattern = Some(SurfacePattern { kind: SurfacePatternKind::Grid, spacing: 0.21, height: Some(0.34), weight_mm: Some(0.35), ..Default::default() });
+    let lines = |scale: f64| -> Vec<(usize, f64)> {
+        let l = p.drawing_levels.iter().find(|l| l.id == "ansicht-sued").unwrap();
+        let level = LevelSpec::from_json(&serde_json::to_value(l).unwrap());
+        let (prims, _) = elevation_primitives(&p, &level, false, false, &Visibility::default(), scale).unwrap().unwrap();
+        prims
+            .iter()
+            .filter_map(|q| match q {
+                Primitive::Line { cls, weight_mm, .. } if cls == "elevation-surface-pattern" => Some((1, *weight_mm)),
+                _ => None,
+            })
+            .collect()
+    };
+    let (fine, mid) = (lines(100.0), lines(200.0));
+    assert!(!fine.is_empty() && mid.len() < fine.len(), "1:200 dünner: {} gegen {}", mid.len(), fine.len());
+    for (_, w) in fine.iter().chain(mid.iter()) {
+        assert!(*w <= super::patterns::PATTERN_WEIGHT_MAX_MM + 1e-9, "Muster feiner als die Konturen: {w}");
+    }
+}
+
 /// [140] Tusche-Ansicht (Schwarz-Weiss, Standard): keine Materialfarben, Flächen weiss, Glas hellgrau,
 /// Schatten und Ansichtsschraffur in neutralem Grau (Schatten bleiben).
 #[test]
