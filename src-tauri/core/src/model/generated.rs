@@ -1878,11 +1878,38 @@ pub struct DrawingLevel {
     #[serde(rename = "autoLine", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub auto_line: Option<bool>,
-    /// [176] Schnittmarke im Grundriss: "arrow" (Pfeil mit Dreieck, Basis) oder "lAngle" (nur ein L je Ende). Fehlt ⇒ die
-    /// Vorgabe der Modelldarstellung (`sectionMarks.style`), sonst Pfeil. Nur Schnitt.
-    #[serde(rename = "markerStyle", default, skip_serializing_if = "Option::is_none")]
+    /// [276] Darstellung der Linie im Grundriss: "full" (Basis: Schnitt = dünne Strichpunktlinie mit kräftigen Endstücken),
+    /// "ends" (nur die Endstücke) oder "none" (keine Linie). Fehlt ⇒ Vorgabe der Modelldarstellung (`sectionMarks` bzw.
+    /// `elevationMarks`), sonst Schnitt "full", Ansicht "none". Nur Schnitt/Ansicht.
+    #[serde(rename = "lineMode", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
-    pub marker_style: Option<SectionMarkerStyle>,
+    pub line_mode: Option<SectionLineMode>,
+    /// [276] Länge der Endstücke in Papier-mm (Basis 12; an Knicken die Hälfte).
+    #[serde(rename = "endLengthMm", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub end_length_mm: Option<f64>,
+    /// [276] Linientyp (`LineStyle.id`) der Linie; fehlt ⇒ Basis (Strichpunkt, bei "ends" durchgezogen).
+    #[serde(rename = "lineStyleId", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub line_style_id: Option<String>,
+    /// [276] Stift (`ColorPen.id`) der Linie (Farbe und Strichstärke des aktiven Stiftsatzes); fehlt ⇒ Basis.
+    #[serde(rename = "linePenId", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub line_pen_id: Option<String>,
+    /// [276] Marke an den Enden bzw. (Ansicht) in der Mitte: "arrow" (Schenkel mit Dreieck), "lAngle" (nur Schenkel, ein L
+    /// mit dem Endstück), "triangle" (nur gefülltes Dreieck) oder "none". Fehlt ⇒ Vorgabe der Modelldarstellung, sonst
+    /// Schnitt "arrow", Ansicht "triangle". Ansichten kennen "arrow", "triangle", "none".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub marker: Option<SectionMarker>,
+    /// [276] Wo die Marke steht (nur Schnitt): beide Enden (Basis), nur am Anfang oder nur am Ende.
+    #[serde(rename = "markerAt", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub marker_at: Option<SectionMarkerAt>,
+    /// [276] Beschriftung der Marke (Basis: ja).
+    #[serde(rename = "markerLabel", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub marker_label: Option<bool>,
     /// Blickrichtung relativ zur Schnittlinie (nur Schnitt/Ansicht).
     #[serde(rename = "directionSign", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional, type = "1 | -1")]
@@ -2147,6 +2174,10 @@ pub struct ModelViewOption {
     #[serde(rename = "sectionMarks", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub section_marks: Option<ModelViewSectionMarks>,
+    /// [276] Ansichtslinien und -marken im Grundriss.
+    #[serde(rename = "elevationMarks", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub elevation_marks: Option<ModelViewSectionMarks>,
     /// [173] Raumstempel: welche Zeilen (die Einstellung am Stempel geht vor).
     #[serde(rename = "roomStamps", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -2271,28 +2302,82 @@ pub enum ModelViewDimChains {
     Unknown,
 }
 
-/// [176] Schnittmarken in der Modelldarstellung (fehlt ⇒ Pfeil).
+/// [176]/[276] Schnitt- bzw. Ansichtsmarken in der Modelldarstellung (fehlt ⇒ Basis; die Ebene geht vor). Dieselben
+/// Felder wie an der Ebene (`DrawingLevel.lineMode` …) ohne Linientyp und Stift.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
 #[serde(default)]
 pub struct ModelViewSectionMarks {
-    /// Markentyp der Schnitte (die Ebene geht vor; Basis: Pfeil).
+    /// Linie: durchgehend, nur Endstücke, keine.
+    #[serde(rename = "lineMode", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub line_mode: Option<SectionLineMode>,
+    /// Länge der Endstücke in Papier-mm.
+    #[serde(rename = "endLengthMm", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub end_length_mm: Option<f64>,
+    /// Marke (Pfeil, L, Dreieck, keine).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
-    pub style: Option<SectionMarkerStyle>,
+    pub marker: Option<SectionMarker>,
+    /// Wo die Marke steht (nur Schnitt).
+    #[serde(rename = "markerAt", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub marker_at: Option<SectionMarkerAt>,
+    /// Beschriftung der Marke.
+    #[serde(rename = "markerLabel", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub marker_label: Option<bool>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
 }
 
-/// [176] Markentyp einer Schnittlinie im Grundriss: Pfeil (kräftige Endstücke, dünne Linie, Schenkel mit Dreieck)
-/// oder nur ein L an jedem Ende (langer Schenkel längs der Linie, kurzer in Blickrichtung, keine Linie dazwischen).
+/// [276] Linie einer Schnitt-/Ansichtslinie im Grundriss.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
-pub enum SectionMarkerStyle {
+pub enum SectionLineMode {
+    /// Ganze Linie (dünn, Strichpunkt) mit kräftigen Endstücken.
+    #[default]
+    #[serde(rename = "full")]
+    Full,
+    /// Nur die Endstücke (und Knickstücke).
+    #[serde(rename = "ends")]
+    Ends,
+    /// Keine Linie.
+    #[serde(rename = "none")]
+    None,
+    #[serde(other)]
+    #[ts(skip)]
+    Unknown,
+}
+
+/// [276] Marke einer Schnitt-/Ansichtslinie: Pfeil (Schenkel in Blickrichtung mit Dreieck), L (nur Schenkel), gefülltes
+/// Dreieck, keine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+pub enum SectionMarker {
     #[default]
     #[serde(rename = "arrow")]
     Arrow,
     #[serde(rename = "lAngle")]
     LAngle,
+    #[serde(rename = "triangle")]
+    Triangle,
+    #[serde(rename = "none")]
+    None,
+    #[serde(other)]
+    #[ts(skip)]
+    Unknown,
+}
+
+/// [276] An welchem Ende einer Schnittlinie die Marke steht.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+pub enum SectionMarkerAt {
+    #[default]
+    #[serde(rename = "both")]
+    Both,
+    #[serde(rename = "start")]
+    Start,
+    #[serde(rename = "end")]
+    End,
     #[serde(other)]
     #[ts(skip)]
     Unknown,

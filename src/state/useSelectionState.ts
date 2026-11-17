@@ -45,7 +45,8 @@ export function useSelectionState() {
     selectedWallId: selection.walls[0] ?? null,
     selectedDrawingId: single(selection, "drawings"),
     selectedCeilingId: single(selection, "ceilings"),
-    selectedSectionLineId: single(selection, "sectionLines"),
+    // Bei Mehrfachauswahl zeigt die Objekt-Info die erste Linie; Änderungen treffen alle ([276]).
+    selectedSectionLineId: selection.sectionLines[0] ?? null,
     selectedRoomId: single(selection, "rooms"),
     elementClipboard,
     setElementClipboard,

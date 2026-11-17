@@ -33,6 +33,7 @@ export type ModelViewSection =
   | "elevation"
   | "site"
   | "sectionMarks"
+  | "elevationMarks"
   | "roomStamps"
   | "dimensions"
   | "situation";
@@ -210,7 +211,15 @@ export const MODEL_VIEW_FIELDS: readonly ModelViewField[] = [
   { section: "elevation", key: "shadows", values: "bool" },
   { section: "elevation", key: "materialHatch", values: "bool" },
   { section: "site", key: "terrain", values: "bool" },
-  { section: "sectionMarks", key: "style", values: ["arrow", "lAngle"] },
+  { section: "sectionMarks", key: "lineMode", values: ["full", "ends", "none"] },
+  { section: "sectionMarks", key: "endLengthMm", values: [6, 9, 12, 15, 20] },
+  { section: "sectionMarks", key: "marker", values: ["arrow", "lAngle", "triangle", "none"] },
+  { section: "sectionMarks", key: "markerAt", values: ["both", "start", "end"] },
+  { section: "sectionMarks", key: "markerLabel", values: "bool" },
+  { section: "elevationMarks", key: "lineMode", values: ["full", "ends", "none"] },
+  { section: "elevationMarks", key: "endLengthMm", values: [6, 9, 12, 15, 20] },
+  { section: "elevationMarks", key: "marker", values: ["triangle", "arrow", "none"] },
+  { section: "elevationMarks", key: "markerLabel", values: "bool" },
   { section: "roomStamps", key: "number", values: "bool" },
   { section: "roomStamps", key: "area", values: "bool" },
   { section: "roomStamps", key: "usage", values: "bool" },

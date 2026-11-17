@@ -563,7 +563,7 @@ fn managed(key: &str) -> &'static [&'static str] {
         "overrideRules" => &["condition", "conditions", "actions"],
         // [173] Stufen der Modelldarstellung: Basis und alle Abschnitte.
         "modelViewOptions" => &[
-            "baseDetail", "doors", "windows", "stairs", "walls", "slabs", "roofs", "columns", "elevation", "site", "sectionMarks", "roomStamps", "dimensions",
+            "baseDetail", "doors", "windows", "stairs", "walls", "slabs", "roofs", "columns", "elevation", "site", "sectionMarks", "elevationMarks", "roomStamps", "dimensions",
         ],
         _ => &["layers"],
     }

@@ -1358,10 +1358,31 @@ export type DrawingLevel = {
    */
   autoLine?: boolean;
   /**
-   * [176] Schnittmarke im Grundriss: "arrow" (Pfeil mit Dreieck, Basis) oder "lAngle" (nur ein L je Ende). Fehlt ⇒ die
-   * Vorgabe der Modelldarstellung (`sectionMarks.style`), sonst Pfeil. Nur Schnitt.
+   * [276] Darstellung der Linie im Grundriss: "full" (Basis: Schnitt = dünne Strichpunktlinie mit kräftigen Endstücken),
+   * "ends" (nur die Endstücke) oder "none" (keine Linie). Fehlt ⇒ Vorgabe der Modelldarstellung (`sectionMarks` bzw.
+   * `elevationMarks`), sonst Schnitt "full", Ansicht "none". Nur Schnitt/Ansicht.
    */
-  markerStyle?: SectionMarkerStyle;
+  lineMode?: SectionLineMode;
+  /** [276] Länge der Endstücke in Papier-mm (Basis 12; an Knicken die Hälfte). */
+  endLengthMm?: number;
+  /**
+   * [276] Linientyp (`LineStyle.id`) der Linie; fehlt ⇒ Basis (Strichpunkt, bei "ends" durchgezogen).
+   */
+  lineStyleId?: string;
+  /**
+   * [276] Stift (`ColorPen.id`) der Linie (Farbe und Strichstärke des aktiven Stiftsatzes); fehlt ⇒ Basis.
+   */
+  linePenId?: string;
+  /**
+   * [276] Marke an den Enden bzw. (Ansicht) in der Mitte: "arrow" (Schenkel mit Dreieck), "lAngle" (nur Schenkel, ein L
+   * mit dem Endstück), "triangle" (nur gefülltes Dreieck) oder "none". Fehlt ⇒ Vorgabe der Modelldarstellung, sonst
+   * Schnitt "arrow", Ansicht "triangle". Ansichten kennen "arrow", "triangle", "none".
+   */
+  marker?: SectionMarker;
+  /** [276] Wo die Marke steht (nur Schnitt): beide Enden (Basis), nur am Anfang oder nur am Ende. */
+  markerAt?: SectionMarkerAt;
+  /** [276] Beschriftung der Marke (Basis: ja). */
+  markerLabel?: boolean;
   /** Blickrichtung relativ zur Schnittlinie (nur Schnitt/Ansicht). */
   directionSign?: 1 | -1;
   /**
@@ -2468,6 +2489,8 @@ export type ModelViewOption = {
   elevation?: ModelViewElevation;
   /** [176] Schnittmarken im Grundriss. */
   sectionMarks?: ModelViewSectionMarks;
+  /** [276] Ansichtslinien und -marken im Grundriss. */
+  elevationMarks?: ModelViewSectionMarks;
   /** [173] Raumstempel: welche Zeilen (die Einstellung am Stempel geht vor). */
   roomStamps?: ModelViewRoomStamps;
   /** [173] Bemassung: Massketten der automatischen Aussenbemassung, Höhenkoten. */
@@ -2509,10 +2532,21 @@ export type ModelViewRoomStamps = {
   divider?: boolean;
 };
 
-/** [176] Schnittmarken in der Modelldarstellung (fehlt ⇒ Pfeil). */
+/**
+ * [176]/[276] Schnitt- bzw. Ansichtsmarken in der Modelldarstellung (fehlt ⇒ Basis; die Ebene geht vor). Dieselben
+ * Felder wie an der Ebene (`DrawingLevel.lineMode` …) ohne Linientyp und Stift.
+ */
 export type ModelViewSectionMarks = {
-  /** Markentyp der Schnitte (die Ebene geht vor; Basis: Pfeil). */
-  style?: SectionMarkerStyle;
+  /** Linie: durchgehend, nur Endstücke, keine. */
+  lineMode?: SectionLineMode;
+  /** Länge der Endstücke in Papier-mm. */
+  endLengthMm?: number;
+  /** Marke (Pfeil, L, Dreieck, keine). */
+  marker?: SectionMarker;
+  /** Wo die Marke steht (nur Schnitt). */
+  markerAt?: SectionMarkerAt;
+  /** Beschriftung der Marke. */
+  markerLabel?: boolean;
 };
 
 /** [173] Gelände in der Modelldarstellung. */
@@ -3858,11 +3892,17 @@ export type SashDef = {
   hingeSide?: "left" | "right";
 };
 
+/** [276] Linie einer Schnitt-/Ansichtslinie im Grundriss. */
+export type SectionLineMode = "full" | "ends" | "none";
+
 /**
- * [176] Markentyp einer Schnittlinie im Grundriss: Pfeil (kräftige Endstücke, dünne Linie, Schenkel mit Dreieck)
- * oder nur ein L an jedem Ende (langer Schenkel längs der Linie, kurzer in Blickrichtung, keine Linie dazwischen).
+ * [276] Marke einer Schnitt-/Ansichtslinie: Pfeil (Schenkel in Blickrichtung mit Dreieck), L (nur Schenkel), gefülltes
+ * Dreieck, keine.
  */
-export type SectionMarkerStyle = "arrow" | "lAngle";
+export type SectionMarker = "arrow" | "lAngle" | "triangle" | "none";
+
+/** [276] An welchem Ende einer Schnittlinie die Marke steht. */
+export type SectionMarkerAt = "both" | "start" | "end";
 
 /**
  * Sequenz-Regel: fasst mehrere Unterregeln zusammen und wendet sie geordnet an.
