@@ -14,7 +14,7 @@ Grundrisse, Schnitte, Ansichten 1:200 (Vorprojekt 1:100) → Situation 1:500 mit
 Schatten → Flächen und Volumen nach SIA 416, Kennzahlen → Kostenschätzung grob → Abgabe-Layouts (Plakate A0/A1, Kennwort,
 anonym) als PDF → Austausch mit Fachplaner:innen über DXF und IFC.
 
-Nicht Ziel von 1.0: Ausführungsplanung 1:50/1:20 mit Details, Varianten nebeneinander, Bibliothek per GUID, Windows-Paket.
+Nicht Ziel von 1.0: Ausführungsplanung 1:50/1:20 mit Details, Bibliothek per GUID, Windows-Paket.
 
 Dossier arbeitet mit **einem** Modell: Wände, Decken, Dächer, Treppen, Fenster, Türen, Räume. Grundriss, Schnitt, Ansicht, 3D,
 Mengen und Exporte werden daraus berechnet und stimmen nach jeder Änderung wieder überein.
