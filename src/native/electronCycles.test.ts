@@ -3,7 +3,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRequire } from "node:module";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it } from "vitest";
 
 type Job = { jobId: string; line?: string; code?: number };
 const cy = createRequire(import.meta.url)("../../scripts/electron-cycles.cjs") as {
@@ -21,6 +21,7 @@ const scene = () => {
   dirs.push(d);
   return d;
 };
+afterAll(() => rmSync(root, { recursive: true, force: true }));
 afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });

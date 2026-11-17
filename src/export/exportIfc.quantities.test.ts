@@ -4,13 +4,13 @@
 
 import { describe, expect, it } from "vitest";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import "../engine/fileioWasm.setup";
 import { exportIfcSpf } from "./exportIfc";
 import { sampleProject } from "../model/sampleProject";
 import type { Column, Project, Stair } from "../model/types";
+import { makeTmpDir } from "../test/tmpDir";
 
 const hasIfcOpenShell = spawnSync("python3", ["-c", "import ifcopenshell, ifcopenshell.validate, numpy"]).status === 0;
 
@@ -31,7 +31,7 @@ function project(): Project {
 }
 
 function writeIfc(name: string, ifc: string): string {
-  const dir = mkdtempSync(join(tmpdir(), "dossier-qto-"));
+  const dir = makeTmpDir("dossier-qto-");
   const file = join(dir, `${name}.ifc`);
   writeFileSync(file, ifc);
   return file;

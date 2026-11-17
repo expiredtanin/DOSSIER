@@ -233,6 +233,13 @@ ipcMain.handle("window:is-maximized", (event) => {
 
 app.whenReady().then(() => {
   if (!gotLock) return;
+  // [273] Liegengebliebene Arbeitsordner von Rendering/Cycles (älter als 24 h) aufräumen.
+  try {
+    const bl = require("./electron-blender.cjs");
+    bl.sweepOldJobDirs(bl.renderRoot(), 24 * 3600 * 1000);
+  } catch {
+    // Aufräumen ist nie wichtiger als der Start
+  }
   // [117] CSP als Antwort-Header — nur gepackt: der Dev-Server (Vite HMR) braucht Inline-Skripte.
   if (!isDev) {
     protocol.handle(APP_SCHEME, serveDist);

@@ -1,12 +1,12 @@
 // dossier-cli convert ([C4]): Format nach Endung, Rundreisen über echte Dateien, --cmd mit {last}.
 import { describe, expect, it, beforeAll } from "vitest";
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { run } from "./main";
 import { parseProjectFile, serializeProject, sampleProject } from "../core";
+import { makeTmpDir } from "../test/tmpDir";
 
-const dir = mkdtempSync(join(tmpdir(), "dossier-convert-"));
+const dir = makeTmpDir("dossier-convert-");
 const p = (name: string) => join(dir, name);
 const obp = p("demo.obp");
 

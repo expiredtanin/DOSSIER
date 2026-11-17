@@ -45,13 +45,13 @@ let jobDirs = 0;
 
 /** Nur Pfade im eigenen Arbeitsordner lesen. */
 function insideRenderDir(p) {
-  const root = path.resolve(os.tmpdir(), "dossier-render") + path.sep;
+  const root = renderRoot() + path.sep;
   return path.resolve(p).startsWith(root);
 }
 
 /** Legt einen Arbeitsordner an und schreibt die Dateien hinein (Pfade relativ, nicht aus dem Ordner heraus); gibt den Ordner zurück. [215] auch für Cycles. */
 function prepareJobDir(files) {
-  const dir = path.join(os.tmpdir(), "dossier-render", `${Date.now()}-${process.pid}-${jobDirs++}`);
+  const dir = path.join(renderRoot(), `${Date.now()}-${process.pid}-${jobDirs++}`);
   fs.mkdirSync(dir, { recursive: true });
   for (const f of files) {
     const target = path.resolve(dir, f.path);
@@ -60,6 +60,43 @@ function prepareJobDir(files) {
     fs.writeFileSync(target, Buffer.from(f.bytes));
   }
   return dir;
+}
+
+/** [273] Wurzel aller Arbeitsordner (Blender und Cycles). */
+function renderRoot() {
+  return path.resolve(os.tmpdir(), "dossier-render");
+}
+
+/** [273] Arbeitsordner samt Inhalt löschen: nur direkt unter `$TMP/dossier-render/`, nie die Wurzel selbst; fehlender Ordner ist kein Fehler. */
+function removeJobDir(p) {
+  const root = renderRoot();
+  const abs = typeof p === "string" && p ? path.resolve(p) : "";
+  if (!abs.startsWith(root + path.sep) || path.dirname(abs) !== root) throw new Error("Pfad ist kein Arbeitsordner");
+  fs.rmSync(abs, { recursive: true, force: true });
+}
+
+/** [273] Alte Arbeitsordner (Änderungszeit älter als `maxAgeMs`) direkt unter `root` löschen, z. B. nach Absturz übrig geblieben. Gibt die Zahl gelöschter Ordner zurück. */
+function sweepOldJobDirs(root, maxAgeMs, now = Date.now()) {
+  let removed = 0;
+  let names = [];
+  try {
+    names = fs.readdirSync(root);
+  } catch {
+    return 0;
+  }
+  for (const name of names) {
+    const p = path.join(root, name);
+    try {
+      const st = fs.statSync(p);
+      if (st.isDirectory() && now - st.mtimeMs > maxAgeMs) {
+        fs.rmSync(p, { recursive: true, force: true });
+        removed++;
+      }
+    } catch {
+      // gerade verschwunden oder gesperrt: beim nächsten Start wieder
+    }
+  }
+  return removed;
 }
 
 /** Meldet Ausgabe in Zeilen (Ende bei \n oder \r, Blender überschreibt Fortschrittszeilen). */
@@ -83,6 +120,9 @@ function register(ipcMain) {
   ipcMain.handle("blender:find", (_e, custom) => findBlender(custom));
 
   ipcMain.handle("blender:prepare", (_e, files) => prepareJobDir(files));
+
+  // [273] Arbeitsordner nach dem Lauf löschen (Erfolg und Fehler).
+  ipcMain.handle("blender:cleanup", (_e, p) => removeJobDir(p));
 
   ipcMain.handle("blender:read", (_e, p) => {
     if (!insideRenderDir(p)) throw new Error("Pfad ausserhalb des Arbeitsordners");
@@ -129,4 +169,4 @@ function register(ipcMain) {
   });
 }
 
-module.exports = { register, findBlender, lineSplitter, prepareJobDir, insideRenderDir };
+module.exports = { register, findBlender, lineSplitter, prepareJobDir, insideRenderDir, renderRoot, removeJobDir, sweepOldJobDirs };

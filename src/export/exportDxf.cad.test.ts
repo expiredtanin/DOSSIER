@@ -6,8 +6,7 @@
 import "../engine/fileioWasm.setup";
 import { describe, expect, it } from "vitest";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { buildPlanDwg, buildPlanDxf, buildPlanDxfBinary, collectPlanDrawing } from "./exportDxf";
 import { countByType, libreDwgReader, readDxf } from "./cadReadBack.testutil";
@@ -16,6 +15,7 @@ import { sampleProject } from "../model/sampleProject";
 import { generatePlan } from "../plan/generatePlan";
 import { flattenCategories } from "../model/types";
 import type { Drawing2D, Project } from "../model/types";
+import { makeTmpDir } from "../test/tmpDir";
 
 const hasEzdxf = spawnSync("python3", ["-c", "import ezdxf"]).status === 0;
 const allCodes = (p: Project) => new Set(flattenCategories(p.layers).map((l) => l.code));
@@ -62,7 +62,7 @@ interface Ez {
 }
 
 function ezdxf(name: string, data: string | Uint8Array): { status: number | null; r: Ez; err: string } {
-  const dir = mkdtempSync(join(tmpdir(), "dossier-cad-"));
+  const dir = makeTmpDir("dossier-cad-");
   const file = join(dir, `${name}.dxf`);
   writeFileSync(file, data);
   const p = spawnSync("python3", ["scripts/validate-dxf.py", file], { encoding: "utf8", timeout: 60_000 });

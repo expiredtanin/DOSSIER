@@ -6,8 +6,7 @@
 import "../engine/fileioWasm.setup";
 import { describe, expect, it } from "vitest";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { buildPlanDxf, buildPlanDxfBinary } from "./exportDxf";
 import { sampleProject } from "../model/sampleProject";
@@ -16,6 +15,7 @@ import type { Plan } from "../plan/generatePlan";
 import { flattenCategories } from "../model/types";
 import type { Project } from "../model/types";
 import { projectToWorldCoords } from "../model/geoRebase";
+import { makeTmpDir } from "../test/tmpDir";
 
 const hasEzdxf = spawnSync("python3", ["-c", "import ezdxf"]).status === 0;
 
@@ -51,7 +51,7 @@ interface EzResult {
 }
 
 function ezdxfRead(name: string, dxf: string | Uint8Array): { status: number | null; result: EzResult | null; err: string } {
-  const dir = mkdtempSync(join(tmpdir(), "dossier-dxf-"));
+  const dir = makeTmpDir("dossier-dxf-");
   const file = join(dir, `${name}.dxf`);
   writeFileSync(file, dxf);
   const r = spawnSync("python3", ["scripts/validate-dxf.py", file], { encoding: "utf8", timeout: 60_000 });

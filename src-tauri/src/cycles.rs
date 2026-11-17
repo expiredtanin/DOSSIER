@@ -183,6 +183,7 @@ mod tests {
         std::fs::create_dir_all(base.join("res/cycles/source")).unwrap();
         assert_eq!(kernel_source_dir(&base.join("res")), Some(base.join("res/cycles/source")));
         assert_eq!(kernel_source_dir(&base), None);
+        std::fs::remove_dir_all(&base).ok(); // [273]
     }
 
     #[test]
