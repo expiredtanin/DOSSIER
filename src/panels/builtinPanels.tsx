@@ -206,7 +206,8 @@ registerPanel({
 });
 
 // [272] Varianten (Archicad „Design Options“): Sätze/Varianten, Kombination der Ansicht, Zeichen-Variante, Zuweisen,
-// Übernehmen, Vergleich. Nicht im Standard-Layout; über „Fenster > Panels“ bzw. den Chip „Variante: …“ der Statusleiste.
+// Übernehmen, Vergleich. Im Standard-Layout rechts oben neben Umbau; der Chip „Variante: …“ der Statusleiste und
+// „Fenster > Panels“ zeigen den Tab (schwebend nur, wenn man es so ablegt).
 registerPanel({
   id: BUILTIN_PANEL_IDS.designOptions,
   title: "designOption.title",

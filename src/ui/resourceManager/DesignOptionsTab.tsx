@@ -6,6 +6,8 @@ import { useState } from "react";
 import { t } from "../../i18n";
 import type { Project } from "../../model/types";
 import { designOptionSets, primaryOption } from "../../core";
+import { ConfirmDialog } from "../ConfirmDialog";
+import { InlineName } from "../InlineName";
 
 export interface DesignOptionHandlers {
   onAddDesignOptionSet?: (name: string) => void;
@@ -33,50 +35,66 @@ function counts(project: Project): Map<string, number> {
   return out;
 }
 
-export function DesignOptionsTab({ project, handlers }: { project: Project; handlers: DesignOptionHandlers }) {
+export function DesignOptionsTab({ project, handlers, embedded }: { project: Project; handlers: DesignOptionHandlers; /** Im Dock-Panel: ohne eigene Überschrift. */ embedded?: boolean }) {
   const sets = designOptionSets(project);
   const [newName, setNewName] = useState("");
+  const [deleting, setDeleting] = useState<{ setId: string; optionId?: string } | null>(null);
   const n = counts(project);
   const add = () => {
     if (!handlers.onAddDesignOptionSet) return;
     handlers.onAddDesignOptionSet(newName.trim() || t("designOption.set.defaultName", { n: sets.length + 1 }));
     setNewName("");
   };
+  const delSet = deleting ? sets.find((s) => s.id === deleting.setId) : undefined;
+  const delOption = delSet && deleting?.optionId ? delSet.options.find((o) => o.id === deleting.optionId) : undefined;
+  // Zahl der Elemente, die mit dem Satz bzw. der Variante verschwinden.
+  const delCount = !delSet ? 0 : delOption ? (n.get(`${delSet.id}/${delOption.id}`) ?? 0) : delSet.options.reduce((a, o) => a + (n.get(`${delSet.id}/${o.id}`) ?? 0), 0);
   return (
     <div className="rm-design-options" data-testid="rm-design-options">
-      <h4 className="rm-subhead">{t("designOption.sets.title")}</h4>
+      {!embedded && <h4 className="rm-subhead">{t("designOption.sets.title")}</h4>}
       <p className="rm-hint">{t("designOption.sets.hint")}</p>
       {sets.length === 0 && <div className="rm-empty">{t("designOption.sets.empty")}</div>}
       {sets.map((s) => {
         const prim = primaryOption(s);
         return (
           <div key={s.id} className="rm-design-option-set" data-testid="rm-design-option-set">
-            <div className="rm-row">
-              <input
-                type="text"
+            <div className="rm-row rm-set-head">
+              <InlineName
+                className="rm-set-name"
                 value={s.name}
-                aria-label={t("designOption.set")}
+                label={t("designOption.set")}
+                editLabel={t("designOption.rename")}
                 disabled={!handlers.onRenameDesignOptionSet}
-                onChange={(e) => handlers.onRenameDesignOptionSet?.(s.id, e.target.value)}
+                testId="rm-design-option-set-title"
+                onCommit={(name) => handlers.onRenameDesignOptionSet?.(s.id, name)}
               />
               <button type="button" className="rm-icon-btn" title={t("designOption.option.add")} aria-label={t("designOption.option.add")} disabled={!handlers.onAddDesignOption} onClick={() => handlers.onAddDesignOption?.(s.id)} data-testid="rm-design-option-add">
                 <span className="material-symbols-outlined" aria-hidden="true">add</span>
               </button>
-              <button type="button" className="rm-icon-btn" title={t("designOption.set.delete")} aria-label={t("designOption.set.delete")} disabled={!handlers.onDeleteDesignOption} onClick={() => handlers.onDeleteDesignOption?.(s.id)}>
+              <button type="button" className="rm-icon-btn" title={t("designOption.set.delete")} aria-label={t("designOption.set.delete")} disabled={!handlers.onDeleteDesignOption} onClick={() => setDeleting({ setId: s.id })} data-testid="rm-design-option-set-delete">
                 <span className="material-symbols-outlined" aria-hidden="true">delete</span>
               </button>
             </div>
             {s.options.map((o) => (
               <div className="rm-row rm-design-option" key={o.id} data-testid="rm-design-option">
-                <label className="rm-design-option-primary" title={t("designOption.primary")}>
-                  <input type="radio" name={`primary-${s.id}`} checked={prim === o.id} disabled={!handlers.onSetPrimaryDesignOption} onChange={() => handlers.onSetPrimaryDesignOption?.(s.id, o.id)} aria-label={t("designOption.primary")} />
-                </label>
                 <input
-                  type="text"
+                  type="radio"
+                  className="rm-design-option-primary"
+                  name={`primary-${s.id}`}
+                  checked={prim === o.id}
+                  disabled={!handlers.onSetPrimaryDesignOption}
+                  title={t("designOption.primary")}
+                  aria-label={`${t("designOption.primary")}: ${o.name}`}
+                  onChange={() => handlers.onSetPrimaryDesignOption?.(s.id, o.id)}
+                />
+                <InlineName
+                  className="rm-option-name"
                   value={o.name}
-                  aria-label={t("designOption.option")}
+                  label={t("designOption.option")}
+                  editLabel={t("designOption.rename")}
                   disabled={!handlers.onRenameDesignOption}
-                  onChange={(e) => handlers.onRenameDesignOption?.(s.id, o.id, e.target.value)}
+                  testId="rm-design-option-title"
+                  onCommit={(name) => handlers.onRenameDesignOption?.(s.id, o.id, name)}
                 />
                 <span className="rm-design-option-count" title={t("designOption.count")}>
                   {n.get(`${s.id}/${o.id}`) ?? 0}
@@ -84,7 +102,7 @@ export function DesignOptionsTab({ project, handlers }: { project: Project; hand
                 <button type="button" className="rm-add-btn" disabled={!handlers.onAcceptDesignOption} onClick={() => handlers.onAcceptDesignOption?.(s.id, o.id)} title={t("designOption.accept.hint")} data-testid="rm-design-option-accept">
                   {t("designOption.accept")}
                 </button>
-                <button type="button" className="rm-icon-btn" title={t("designOption.option.delete")} aria-label={t("designOption.option.delete")} disabled={!handlers.onDeleteDesignOption} onClick={() => handlers.onDeleteDesignOption?.(s.id, o.id)}>
+                <button type="button" className="rm-icon-btn" title={t("designOption.option.delete")} aria-label={t("designOption.option.delete")} disabled={!handlers.onDeleteDesignOption} onClick={() => setDeleting({ setId: s.id, optionId: o.id })} data-testid="rm-design-option-delete">
                   <span className="material-symbols-outlined" aria-hidden="true">delete</span>
                 </button>
               </div>
@@ -92,12 +110,26 @@ export function DesignOptionsTab({ project, handlers }: { project: Project; hand
           </div>
         );
       })}
-      <div className="rm-row">
-        <input type="text" value={newName} placeholder={t("designOption.set.placeholder")} aria-label={t("designOption.set.new")} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && add()} data-testid="rm-design-option-set-name" />
+      <div className="rm-row rm-add-row">
+        <input type="text" className="rm-input" value={newName} placeholder={t("designOption.set.placeholder")} aria-label={t("designOption.set.new")} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && add()} data-testid="rm-design-option-set-name" />
         <button type="button" className="rm-add-btn" disabled={!handlers.onAddDesignOptionSet} onClick={add} data-testid="rm-design-option-set-add">
           {t("designOption.set.add")}
         </button>
       </div>
+      {delSet && (
+        <ConfirmDialog
+          title={delOption ? t("designOption.option.delete") : t("designOption.set.delete")}
+          message={delOption ? t("designOption.option.deleteMessage", { name: delOption.name, n: delCount }) : t("designOption.set.deleteMessage", { name: delSet.name, n: delCount })}
+          confirmLabel={t("designOption.delete.confirm")}
+          danger
+          onClose={() => setDeleting(null)}
+          onConfirm={() => {
+            const d = deleting;
+            setDeleting(null);
+            if (d) handlers.onDeleteDesignOption?.(d.setId, d.optionId);
+          }}
+        />
+      )}
     </div>
   );
 }

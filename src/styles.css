@@ -9929,71 +9929,280 @@ body {
 .kz-variants-primary td {
   font-weight: 600;
 }
-.rm-design-option-set {
-  margin-bottom: 8px;
+/* [272] Ressourcen-Tabs „Umbau“ und „Varianten“ (rm-*) im Stil der übrigen Ressourcen-Tabs; Panel „Varianten“ im Dock
+   (Gestaltung wie .reno-*). */
+.rm-renovation,
+.rm-design-options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--ink);
 }
-.rm-design-option {
-  padding-left: 16px;
+.rm-subhead {
+  margin: 10px 0 0;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
 }
-.rm-design-option-count {
-  min-width: 2em;
-  text-align: right;
-  opacity: 0.7;
-  font-variant-numeric: tabular-nums;
+.rm-subhead:first-child {
+  margin-top: 0;
 }
-.rm-design-options .rm-row {
+.rm-hint {
+  margin: 0;
+  font-size: 11px;
+  font-style: italic;
+  line-height: 1.4;
+  color: var(--muted);
+}
+.rm-empty {
+  padding: 10px 12px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--muted);
+  background: var(--panel-2);
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+}
+.rm-row {
   display: flex;
   align-items: center;
-  gap: 4px;
-  margin: 2px 0;
+  gap: 6px;
+  min-width: 0;
 }
-.rm-design-options .rm-row input[type="text"] {
+.rm-label {
+  flex: 0 0 92px;
+  font-weight: 600;
+}
+.rm-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--ink-2);
+}
+.rm-inline input[type="color"] {
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--input);
+  cursor: pointer;
+}
+.rm-row input[type="text"],
+.rm-input {
   flex: 1 1 auto;
   min-width: 0;
+  font: inherit;
+  color: var(--ink);
+  background: var(--input);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px 10px;
+  outline: none;
+  transition: border-color 0.14s, box-shadow 0.14s;
 }
-.rm-design-options .rm-icon-btn {
-  padding: 0 2px;
+.rm-row input[type="text"]:hover,
+.rm-input:hover {
+  border-color: var(--accent);
+}
+.rm-row input[type="text"]:focus,
+.rm-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-dim);
+}
+.rm-icon-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  font-size: 10px;
   line-height: 1;
+  color: var(--ink-2);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
 }
-.rm-design-options .rm-icon-btn .material-symbols-outlined {
+.rm-icon-btn:hover:not(:disabled) {
+  color: var(--ink);
+  border-color: var(--accent-border);
+}
+.rm-icon-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.rm-icon-btn .material-symbols-outlined {
   font-size: 16px;
 }
-.rm-design-options .rm-add-btn {
+.rm-add-btn {
+  flex: 0 0 auto;
+  align-self: flex-start;
+  padding: 3px 10px;
+  font: inherit;
+  font-size: 11px;
   white-space: nowrap;
-  font-size: 11px;
+  color: var(--ink-2);
+  background: var(--input);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
 }
-.rm-design-options .rm-hint {
-  font-size: 11px;
-  opacity: 0.75;
+.rm-add-btn:hover:not(:disabled) {
+  color: var(--accent);
+  background: var(--accent-dim);
+  border-color: var(--accent-border);
 }
-.design-options-panel {
-  padding: 4px 8px 8px;
+.rm-add-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
-.design-options-panel .kz-parcel select {
-  max-width: 170px;
+.rm-design-option-set {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
 }
-/* [272] Benannte Variantenkombinationen im Panel „Varianten“ */
-.design-option-combination {
-  border-top: 1px solid var(--border, rgba(128, 128, 128, 0.25));
-  padding: 4px 0;
+.rm-design-option {
+  padding-left: 4px;
 }
-.design-option-combination .kz-input[type="text"] {
-  flex: 1;
+.rm-set-head {
+  gap: 2px;
+}
+.rm-set-name {
+  flex: 1 1 auto;
+  font-weight: 600;
+}
+.rm-option-name {
+  flex: 1 1 auto;
+}
+.rm-design-option-primary {
+  flex: 0 0 auto;
+  margin: 0 2px 0 0;
+  accent-color: var(--accent);
+}
+.rm-design-option-count {
+  flex: 0 0 auto;
+  min-width: 1.6em;
+  text-align: right;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.rm-add-row {
+  padding-top: 4px;
+}
+/* Name mit Stift-Knopf, Doppelklick bearbeitet (src/ui/InlineName.tsx). */
+.inline-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
   min-width: 0;
-  max-width: none;
 }
-.design-option-combination-set {
-  padding-left: 8px;
-  font-size: 11px;
+.inline-name-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: text;
+}
+.inline-name-edit {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  cursor: pointer;
+  opacity: 0;
+}
+.inline-name:hover .inline-name-edit,
+.inline-name-edit:focus-visible {
+  opacity: 1;
+}
+.inline-name-edit:hover {
+  color: var(--ink);
+}
+.inline-name-edit .material-symbols-outlined {
+  font-size: 14px;
+}
+.inline-name-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  font: inherit;
+  color: var(--ink);
+  background: var(--input);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  padding: 2px 6px;
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-dim);
+}
+/* Dock-Panel „Varianten“ */
+.design-options-panel .reno-field select {
+  max-width: 170px;
 }
 .design-options-panel .rm-hint {
   font-size: 11px;
-  opacity: 0.75;
 }
 .design-option-current-name {
+  min-width: 0;
   font-size: 12px;
   font-weight: 600;
   text-align: right;
-  min-width: 0;
   overflow-wrap: anywhere;
+}
+.design-option-combination {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 5px 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.design-option-combination.is-assigned {
+  border-color: var(--active);
+  background: var(--active-dim);
+}
+.dop-combo-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 600;
+}
+.dop-combo-head .inline-name {
+  flex: 1 1 auto;
+}
+.dop-assign.is-on,
+.dop-assign.is-on:disabled {
+  opacity: 1;
+  color: var(--accent);
+}
+.dop-combo-set {
+  font-size: 11px;
+  color: var(--ink-2);
+}
+.dop-combo-set select {
+  max-width: 150px;
+}
+.dop-actions {
+  display: flex;
+  gap: 6px;
+}
+.dop-check {
+  justify-content: flex-start;
+}
+.reno-icon-btn .material-symbols-outlined {
+  font-size: 16px;
 }

@@ -12,6 +12,7 @@ import {
   designOptionSets, designOptionTargets, levelCombination, parseTarget, renameDesignOptionOps, renameDesignOptionSetOps, setLevelCombinationOps, setPrimaryOptionOps,
 } from "../core";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
+import { InlineName } from "../ui/InlineName";
 import { PromptDialog } from "../ui/PromptDialog";
 import { DesignOptionsTab, type DesignOptionHandlers } from "../ui/resourceManager/DesignOptionsTab";
 import { DesignOptionCompareSection } from "./DesignOptionCompareSection";
@@ -47,115 +48,131 @@ export function DesignOptionsPanel() {
     onDeleteDesignOption: (setId, optionId) => applyChange((p) => deleteDesignOptionOps(p, setId, optionId)),
   };
   const drawKey = draw ? `${draw.set}/${draw.option}` : "";
+  const setOptions = (s: (typeof sets)[number]) =>
+    s.options.map((o) => (
+      <option key={o.id} value={o.id}>
+        {o.name}
+      </option>
+    ));
+  const targetOptions = (
+    <>
+      <option value="">{t("designOption.main")}</option>
+      {targets.map((x) => (
+        <option key={x.key} value={x.key}>
+          {x.label}
+        </option>
+      ))}
+    </>
+  );
   return (
-    <div className="design-options-panel" data-testid="design-options-panel">
+    <section className="reno-panel design-options-panel" data-testid="design-options-panel">
       {sets.length > 0 && (
         <>
-          <div className="balance-section-label">{t("designOption.viewCombination")}</div>
-          {sets.map((s) => (
-            <label key={s.id} className="kz-parcel">
-              <span>{s.name}</span>
-              <select
-                className="kz-input"
-                value={combo[s.id] ?? ""}
-                disabled={!levelEditable}
-                aria-label={s.name}
-                data-testid={`design-option-combo-${s.id}`}
-                onChange={(e) => level && applyChange((p) => setLevelCombinationOps(p, level.id, s.id, e.target.value))}
-              >
-                {s.options.map((o) => (
-                  <option key={o.id} value={o.id}>
-                    {o.name}
-                  </option>
-                ))}
+          <div className="reno-block">
+            <div className="reno-head">{t("designOption.viewCombination")}</div>
+            {sets.map((s) => (
+              <label key={s.id} className="reno-field">
+                <span>{s.name}</span>
+                <select
+                  value={combo[s.id] ?? ""}
+                  disabled={!levelEditable}
+                  aria-label={s.name}
+                  data-testid={`design-option-combo-${s.id}`}
+                  onChange={(e) => level && applyChange((p) => setLevelCombinationOps(p, level.id, s.id, e.target.value))}
+                >
+                  {setOptions(s)}
+                </select>
+              </label>
+            ))}
+            <label className="reno-field">
+              <span>{t("designOption.drawIn")}</span>
+              <select value={drawKey} aria-label={t("designOption.drawIn")} data-testid="design-option-draw" onChange={(e) => setDraw(parseTarget(e.target.value))}>
+                {targetOptions}
               </select>
             </label>
-          ))}
-          <label className="kz-parcel">
-            <span>{t("designOption.drawIn")}</span>
-            <select className="kz-input" value={drawKey} aria-label={t("designOption.drawIn")} data-testid="design-option-draw" onChange={(e) => setDraw(parseTarget(e.target.value))}>
-              <option value="">{t("designOption.main")}</option>
-              {targets.map((x) => (
-                <option key={x.key} value={x.key}>
-                  {x.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <div className="balance-section-label">{t("designOption.combinations.title")}</div>
-          <div className="kz-parcel" data-testid="design-option-current">
-            <span>{t("designOption.current")}</span>
-            <strong className="design-option-current-name" data-testid="design-option-current-name">
-              {state.kind === "named" ? state.name : t("designOption.customName")}
-            </strong>
           </div>
-          <button type="button" className="balance-export" data-testid="design-option-combo-save" onClick={() => setSaving(true)}>
-            {t("designOption.combination.save")}
-          </button>
-          {combos.length === 0 && <div className="rm-hint">{t("designOption.combinations.empty")}</div>}
-          {combos.map((c) => {
-            const full = combinationChoice(project, c);
-            const assigned = state.kind === "named" && state.id === c.id;
-            return (
-              <div key={c.id} className="design-option-combination" data-testid="design-option-combination">
-                <div className="kz-parcel">
-                  <input
-                    className="kz-input"
-                    type="text"
-                    value={c.name}
-                    aria-label={t("designOption.combination.name")}
-                    data-testid="design-option-combination-name"
-                    onChange={(e) => applyChange((p) => renameCombinationOps(p, c.id, e.target.value), `dopt-comb-${c.id}`)}
-                  />
-                  <button type="button" className="kz-add" disabled={!levelEditable || (assigned && state.kind === "named" && state.assigned)} data-testid="design-option-combination-assign" onClick={() => level && applyChange((p) => assignCombinationOps(p, level.id, c.id))}>
-                    {assigned && state.kind === "named" && state.assigned ? t("designOption.combination.assigned") : t("designOption.combination.assign")}
-                  </button>
-                  <button type="button" className="kz-add" aria-label={t("designOption.combination.delete")} title={t("designOption.combination.delete")} data-testid="design-option-combination-delete" onClick={() => setDeleting(c.id)}>
-                    ×
-                  </button>
+          <div className="reno-block">
+            <div className="reno-head">{t("designOption.combinations.title")}</div>
+            <div className="reno-field" data-testid="design-option-current">
+              <span>{t("designOption.current")}</span>
+              <strong className="design-option-current-name" data-testid="design-option-current-name">
+                {state.kind === "named" ? state.name : t("designOption.customName")}
+              </strong>
+            </div>
+            {combos.length === 0 && <div className="reno-hint">{t("designOption.combinations.empty")}</div>}
+            {combos.map((c) => {
+              const full = combinationChoice(project, c);
+              const assigned = state.kind === "named" && state.id === c.id && state.assigned;
+              return (
+                <div key={c.id} className={`design-option-combination${assigned ? " is-assigned" : ""}`} data-testid="design-option-combination">
+                  <div className="dop-combo-head">
+                    <InlineName
+                      value={c.name}
+                      label={t("designOption.combination.name")}
+                      editLabel={t("designOption.rename")}
+                      testId="design-option-combination-name"
+                      onCommit={(name) => applyChange((p) => renameCombinationOps(p, c.id, name), `dopt-comb-${c.id}`)}
+                    />
+                    <button
+                      type="button"
+                      className={`reno-icon-btn dop-assign${assigned ? " is-on" : ""}`}
+                      disabled={!levelEditable || assigned}
+                      title={assigned ? t("designOption.combination.assigned") : t("designOption.combination.assign")}
+                      aria-label={assigned ? t("designOption.combination.assigned") : t("designOption.combination.assign")}
+                      data-testid="design-option-combination-assign"
+                      onClick={() => level && applyChange((p) => assignCombinationOps(p, level.id, c.id))}
+                    >
+                      <span className="material-symbols-outlined" aria-hidden="true">{assigned ? "check_circle" : "visibility"}</span>
+                    </button>
+                    <button type="button" className="reno-icon-btn" aria-label={t("designOption.combination.delete")} title={t("designOption.combination.delete")} data-testid="design-option-combination-delete" onClick={() => setDeleting(c.id)}>
+                      <span className="material-symbols-outlined" aria-hidden="true">delete</span>
+                    </button>
+                  </div>
+                  {sets.map((s) => (
+                    <label key={s.id} className="reno-field dop-combo-set">
+                      <span>{s.name}</span>
+                      <select value={full[s.id] ?? ""} aria-label={`${c.name}: ${s.name}`} data-testid={`design-option-combination-${c.id}-${s.id}`} onChange={(e) => applyChange((p) => setCombinationChoiceOps(p, c.id, s.id, e.target.value))}>
+                        {setOptions(s)}
+                      </select>
+                    </label>
+                  ))}
                 </div>
-                {sets.map((s) => (
-                  <label key={s.id} className="kz-parcel design-option-combination-set">
-                    <span>{s.name}</span>
-                    <select className="kz-input" value={full[s.id] ?? ""} aria-label={`${c.name}: ${s.name}`} data-testid={`design-option-combination-${c.id}-${s.id}`} onChange={(e) => applyChange((p) => setCombinationChoiceOps(p, c.id, s.id, e.target.value))}>
-                      {s.options.map((o) => (
-                        <option key={o.id} value={o.id}>
-                          {o.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                ))}
-              </div>
-            );
-          })}
-          <div className="balance-section-label">{t("designOption.selection", { n: selIds.length })}</div>
-          <div className="kz-parcel">
-            <select className="kz-input" value={target} aria-label={t("designOption.label")} data-testid="design-option-target" onChange={(e) => setTarget(e.target.value)}>
-              <option value="">{t("designOption.main")}</option>
-              {targets.map((x) => (
-                <option key={x.key} value={x.key}>
-                  {x.label}
-                </option>
-              ))}
-            </select>
-            <button type="button" className="kz-add" disabled={!selIds.length} data-testid="design-option-assign" onClick={() => applyChange((p) => assignDesignOptionOps(p, selIds, parseTarget(target)))}>
-              {t("designOption.assign")}
+              );
+            })}
+            <button type="button" className="reno-add-btn" data-testid="design-option-combo-save" onClick={() => setSaving(true)}>
+              {t("designOption.combination.save")}
             </button>
-            <button type="button" className="kz-add" disabled={!selIds.length} data-testid="design-option-copy" onClick={() => applyChange((p) => copyToDesignOptionOps(p, selIds, parseTarget(target)))}>
-              {t("designOption.copy")}
-            </button>
+          </div>
+          <div className="reno-block">
+            <div className="reno-head">{t("designOption.selection", { n: selIds.length })}</div>
+            <label className="reno-field">
+              <span>{t("designOption.label")}</span>
+              <select value={target} aria-label={t("designOption.label")} data-testid="design-option-target" onChange={(e) => setTarget(e.target.value)}>
+                {targetOptions}
+              </select>
+            </label>
+            <div className="dop-actions">
+              <button type="button" className="reno-add-btn" disabled={!selIds.length} data-testid="design-option-assign" onClick={() => applyChange((p) => assignDesignOptionOps(p, selIds, parseTarget(target)))}>
+                {t("designOption.assign")}
+              </button>
+              <button type="button" className="reno-add-btn" disabled={!selIds.length} data-testid="design-option-copy" onClick={() => applyChange((p) => copyToDesignOptionOps(p, selIds, parseTarget(target)))}>
+                {t("designOption.copy")}
+              </button>
+            </div>
           </div>
         </>
       )}
-      <DesignOptionsTab project={project} handlers={handlers} />
+      <div className="reno-block">
+        <div className="reno-head">{t("designOption.sets.title")}</div>
+        <DesignOptionsTab project={project} handlers={handlers} embedded />
+      </div>
       {sets.length > 0 && (
-        <>
-          <button type="button" className="balance-export" data-testid="design-option-compare-open" onClick={() => setShowCompare((v) => !v)}>
+        <div className="reno-block">
+          <button type="button" className="reno-add-btn" data-testid="design-option-compare-open" onClick={() => setShowCompare((v) => !v)}>
             {showCompare ? t("designOption.compare.hide") : t("designOption.compare.show")}
           </button>
           {showCompare && <DesignOptionCompareSection project={project} />}
-        </>
+        </div>
       )}
       {saving && (
         <PromptDialog
@@ -182,6 +199,6 @@ export function DesignOptionsPanel() {
           }}
         />
       )}
-    </div>
+    </section>
   );
 }

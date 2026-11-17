@@ -169,3 +169,40 @@ async function openNewLayoutInFolder(page: Page) {
   await page.locator(".nav-row", { hasText: "Layout" }).first().dblclick();
   await expect(page.locator(".layout-sheet-pane")).toBeVisible();
 }
+
+test("Panel Varianten im Dock: Reiter, Namen inline umbenennen, Löschen mit Rückfrage ([272])", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/?dossierTest");
+  await page.getByRole("button", { name: /Neues Projekt/ }).first().click();
+  await fileMenu(page, /^Neu aus Vorlage: Beispiel Varianten$/);
+  await discardIfAsked(page);
+  const dopt = () => page.evaluate(() => window.__dossierTest!.designOptions());
+  // Standardmässig ein Reiter der rechten oberen Dock-Gruppe (neben Umbau), nicht schwebend.
+  const tab = page.getByRole("tab", { name: "Varianten", exact: true });
+  await expect(tab).toBeVisible();
+  await tab.click();
+  const panel = page.getByTestId("design-options-panel");
+  await expect(panel).toBeVisible();
+  const dock = page.getByRole("complementary").filter({ has: page.getByRole("tab", { name: "Umbau", exact: true }) });
+  await expect(dock.getByTestId("design-options-panel")).toBeVisible();
+
+  // Kombination per Doppelklick umbenennen: Esc verwirft, Enter übernimmt.
+  const name = panel.getByTestId("design-option-combination-name").first();
+  await name.dblclick();
+  const field = panel.getByTestId("design-option-combination-name-input");
+  await field.fill("Verworfen");
+  await field.press("Escape");
+  expect((await dopt()).combinations[0]).toBe("Studie 1 Flachdach/Lochfenster");
+  await panel.getByTestId("design-option-combination-name-edit").first().click();
+  await panel.getByTestId("design-option-combination-name-input").fill("Studie A");
+  await panel.getByTestId("design-option-combination-name-input").press("Enter");
+  await expect.poll(async () => (await dopt()).combinations[0]).toBe("Studie A");
+
+  // Satz löschen: erst Rückfrage, Abbrechen ändert nichts, Bestätigen löscht.
+  await panel.getByTestId("rm-design-option-set-delete").first().click();
+  await page.getByRole("button", { name: "Abbrechen", exact: true }).click();
+  expect((await dopt()).sets).toEqual(["dachform", "fassade"]);
+  await panel.getByTestId("rm-design-option-set-delete").first().click();
+  await page.getByTestId("confirm-dialog-ok").click();
+  await expect.poll(async () => (await dopt()).sets).toEqual(["fassade"]);
+});

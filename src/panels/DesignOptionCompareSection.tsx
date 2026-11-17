@@ -29,9 +29,9 @@ export function DesignOptionCompareSection({ project, renovation = "" }: { proje
   const delta = (v: number, b: number, d: number) => (v === b ? "" : ` (${v > b ? "+" : "−"}${fmt(Math.abs(v - b), d)})`);
   return (
     <div className="kz-variants" data-testid="design-option-compare">
-      <div className="balance-section-label">{t("designOption.compare.title")}</div>
+      <div className="reno-head">{t("designOption.compare.title")}</div>
       {saved && (
-        <label className="kz-parcel">
+        <label className="reno-field dop-check">
           <input type="checkbox" checked={all} data-testid="design-option-compare-all" onChange={(e) => setAll(e.target.checked)} />
           <span>{t("designOption.compare.all")}</span>
         </label>
@@ -61,7 +61,7 @@ export function DesignOptionCompareSection({ project, renovation = "" }: { proje
           </tbody>
         </table>
       </div>
-      <button type="button" className="balance-export" data-testid="design-option-compare-csv" onClick={exportCsv}>
+      <button type="button" className="reno-add-btn" data-testid="design-option-compare-csv" onClick={exportCsv}>
         {t("designOption.compare.csv")}
       </button>
     </div>
