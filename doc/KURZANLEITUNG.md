@@ -382,9 +382,18 @@ Design Options in Archicad). Ein Variantensatz (z. B. Dachform) hat Varianten (A
 Flachdach/Satteldach und Fassade: Lochfenster/Bandfenster).
 
 - **Panel:** ein Klick auf den Knopf Variante rechts in der Statusleiste (nur mit Variantensätzen; bei wenig Platz unter ⋯)
-  öffnet das Panel „Varianten“. Dort: „Kombination dieser Ansicht“ (je Satz eine Variante, Vorgabe die „Hauptvariante“), „Neue
-  Elemente zeichnen in“ (neue Bauteile und 2D-Elemente gehören dieser Variante), die Auswahl einer Variante „Zuweisen“ oder
-  „Kopieren in“ eine Variante, die Sätze verwalten („Satz hinzufügen“, umbenennen, löschen) und „Übernehmen“.
+  öffnet das Panel „Varianten“. Dort: unter „Variantensätze“ je Variante ein Auge und ein Stift (s. unten), die Auswahl einer
+  Variante „Zuweisen“ oder „Kopieren in“ eine Variante, die Sätze verwalten („Satz hinzufügen“, umbenennen, löschen) und
+  „Übernehmen“.
+- **Auge und Stift (wie Archicads Design-Options-Manager):** Das Auge schaltet, welche Variante die aktive Ansicht zeigt (je Satz
+  genau eine, Vorgabe die „Hauptvariante“). Der Stift macht eine Variante zur Bearbeitungsvariante: neue Bauteile und
+  2D-Elemente landen in ihr, die Ansicht zeigt sie (Stift heisst immer auch Auge), und die Statusleiste meldet deutlich
+  Bearbeite: Dachform B. Der Stift beim „Hauptmodell“ (Abschnitt „Bearbeiten“) oder ein zweiter Klick auf den Stift der
+  Variante beendet die Bearbeitung. Zwei Häkchen wirken beim Bearbeiten: „Elemente ausserhalb der Variante grau einfärben“
+  (Hauptmodell und andere Varianten hellgrau in Grundriss, Schnitt, Ansicht, Axonometrie und 3D — nur auf dem Bildschirm, Druck,
+  PDF und Exporte bleiben unverändert) und „Elemente ausserhalb der Variante sperren“ (sie lassen sich nicht wählen, also auch
+  nicht verschieben, löschen oder in der Objekt-Info ändern). Stift und Häkchen gehören zur Sitzung, nicht zum Projekt, und sind
+  kein Undo-Schritt; das Auge ändert die Ebene und lässt sich rückgängig machen.
 - **Kombination:** gehört zur Ebene wie der Umbaufilter, also je Reiter (Geschoss, Schnitt, Ansicht) eigen und mit Undo; der
   Grundriss, der Schnitt, die Ansicht, die Axonometrie und das 3D zeigen nur die gewählten Varianten. Ausschnitte merken die
   Kombination; ein Viewport auf dem Blatt kann dieselbe Ansicht in einer anderen Kombination zeigen (je Satz eine Wahl im

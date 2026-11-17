@@ -43,6 +43,7 @@ import { useClashSession } from "../panels/clashSession";
 import { greyedFloorIds, hiddenFloorIds } from "../panels/displayMode";
 import { applyGroupDimmingToPlan } from "../state/groupActions";
 import { useStore } from "../state/appStore";
+import { useDesignOptionEdit } from "../state/designOptionEdit";
 import { planFitKey } from "../state/viewTabs";
 import { classDisplay3d } from "../state/view3dFilter";
 import { PlanView } from "./plan/PlanView";
@@ -766,6 +767,7 @@ function LevelPlanView({
   gripHandlers: GripHandlers;
 }) {
   const projectEpoch = useStore((s) => s.projectEpoch);
+  const designOptionEdit = useDesignOptionEdit(project);
   // Fremd-Art-Referenz-Unterlage (Nutzer-Wunsch: "will mal etwas vom Schnitt
   // abzeichnen" — UND umgekehrt "in der Ansicht auch mal einen Grundriss
   // zeigen"): jede andere sichtbare Zeichnungsebene ANDERER Art (Auge an,
@@ -804,6 +806,8 @@ function LevelPlanView({
       // Kompakte Linien-Unterlage (s. Plan.underlay): hält Kataster-Importe
       // handhabbar; PlanView materialisiert sie, wo echte Primitive nötig sind.
       true,
+      // [272] Bearbeitungsvariante (Stift): sichtbar, ausserhalb grau — nur hier, nie im Druck.
+      designOptionEdit,
     );
     // Überlagerung anhängen, ohne die Primitive des Plans zu lesen (lazy, [K3d]).
     const withOverlay = overlayPrimitives.length === 0 ? p : planWithExtra(p, [], overlayPrimitives);
@@ -822,6 +826,7 @@ function LevelPlanView({
     floorDisplay,
     overlayPrimitives,
     groupPath,
+    designOptionEdit,
   ]);
   // [205] Pausfolie des Reiters unter (bzw. über) dem Grundriss — nicht anwählbar (ohne Ids), nicht gedimmt.
   const trace = useTracePlan(project, level, basePlan.bounds, visibleCodes, categoryDisplay, detail, referenceLines, mono, scaleDenominator);
@@ -1011,6 +1016,7 @@ function SectionPlanView({
   gripHandlers: GripHandlers;
 }) {
   const projectEpoch = useStore((s) => s.projectEpoch);
+  const designOptionEdit = useDesignOptionEdit(project);
   // Kontext-Objekte hebt der Schnitt (wie bisher) nicht hervor.
   const sectionSelection = useMemo(
     () => (selection.contextObjects.length ? { ...selection, contextObjects: [] } : selection),
@@ -1077,9 +1083,9 @@ function SectionPlanView({
   const elevationPlan = useMemo(
     () =>
       isElevation
-        ? generateElevationPlan(inputs.project, inputs.level, { mono, visibleCodes, categoryDisplay, scaleDenominator })
+        ? generateElevationPlan(inputs.project, inputs.level, { mono, visibleCodes, categoryDisplay, scaleDenominator, designOptionEdit })
         : null,
-    [isElevation, inputs, mono, visibleCodes, categoryDisplay, scaleDenominator],
+    [isElevation, inputs, mono, visibleCodes, categoryDisplay, scaleDenominator, designOptionEdit],
   );
 
   const sectionPlan = useMemo(
@@ -1092,9 +1098,10 @@ function SectionPlanView({
             openings: true,
             scaleDenominator,
             detail,
+            designOptionEdit,
           })
         : null,
-    [isElevation, output, mono, level.hiddenLines, visibleCodes, categoryDisplay, inputs, scaleDenominator, detail],
+    [isElevation, output, mono, level.hiddenLines, visibleCodes, categoryDisplay, inputs, scaleDenominator, detail, designOptionEdit],
   );
   const rawPlan = isElevation ? elevationPlan : sectionPlan;
   // [205] Pausfolie des Reiters (früher nur die Grundriss-Unterlage `planUnderlayId`): jede andere Ebene, ein

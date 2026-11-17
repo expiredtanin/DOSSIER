@@ -712,7 +712,9 @@ pub fn axo_plan_buf(p: &Project, args: &[f64], text: &str) -> Result<Vec<u8>, St
     // [271] Umbaufilter (`renovation`, `renovationPhase`): Ausgeblendetes fehlt, Flächen in der Umbau-Farbe.
     // [272] Variantenkombination (`designOptions`, sonst die Hauptvarianten): andere Varianten fehlen.
     let opts = crate::design_options::parse_request(v.get("designOptions"));
-    let ren = crate::renovation::View::with(p, v.get("renovation").and_then(|x| x.as_str()), v.get("renovationPhase").and_then(|x| x.as_str()), &[], &opts).map(|r| r.resolve(p));
+    let ren = crate::renovation::View::with(p, v.get("renovation").and_then(|x| x.as_str()), v.get("renovationPhase").and_then(|x| x.as_str()), &[], &opts);
+    // [272] Bearbeitungsvariante der Bildschirm-Ansicht (`designOptionEdit`).
+    let ren = crate::renovation::View::editing(ren, p, crate::design_options::parse_edit(p, v.get("designOptionEdit"))).map(|r| r.resolve(p));
     let filtered = ren.as_ref().filter(|r| !r.hidden.is_empty()).map(|r| crate::renovation::without_hidden(p, &r.hidden));
     let p = filtered.as_ref().unwrap_or(p);
     let Some(a) = AxoArgs::parse(p, &v) else { return Ok(w.finish()) };

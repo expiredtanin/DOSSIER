@@ -200,7 +200,8 @@ pub fn run(p: &Project, name: &str, args: &[f64], text: &str) -> Result<String, 
                 return Ok(v.to_string());
             }
             // [271] Umbaufilter (`text` = `{"renovation": …, "renovationPhase": …}`): Ausgeblendetes fehlt, Farben je Status.
-            let ren = crate::renovation::view_from_text(p, text).map(|v| v.resolve(p));
+            // [272] Dazu die Bearbeitungsvariante des 3D-Fensters (`designOptionEdit`, grau ausserhalb).
+            let ren = crate::renovation::screen_view_from_text(p, text).map(|v| v.resolve(p));
             let filtered = ren.as_ref().filter(|r| !r.hidden.is_empty()).map(|r| crate::renovation::without_hidden(p, &r.hidden));
             let p = filtered.as_ref().unwrap_or(p);
             let (detail, rails) = model3d_mv(p, text, args[1]);

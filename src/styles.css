@@ -10206,3 +10206,63 @@ body {
 .reno-icon-btn .material-symbols-outlined {
   font-size: 16px;
 }
+/* [272] Auge und Stift je Variante (wie Archicads Design-Options-Manager), Bearbeitungsmodus. */
+.rm-design-option .dop-eye {
+  width: 20px;
+  height: 20px;
+}
+.rm-design-option .dop-eye:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.dop-pen {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.dop-pen .material-symbols-outlined {
+  font-size: 15px;
+}
+.dop-pen.is-on {
+  color: var(--accent);
+  border-color: var(--accent-border);
+  background: var(--accent-dim);
+}
+.rm-design-option.is-editing,
+.dop-main-row.is-editing {
+  background: var(--active-dim);
+  border-radius: 6px;
+}
+.rm-design-option.is-editing .rm-option-name,
+.dop-main-row.is-editing .dop-main-name {
+  font-weight: 600;
+}
+.dop-main-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-left: 22px;
+}
+.dop-check input {
+  margin: 0 4px 0 0;
+  accent-color: var(--accent);
+}
+.dop-check span {
+  font-size: 12px;
+}
+.sb-toggle.sb-design-editing {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--accent);
+  border: 1px solid var(--accent-border);
+  background: var(--accent-dim);
+  border-radius: 6px;
+  padding: 0 6px;
+}
+.sb-toggle.sb-design-editing .material-symbols-outlined {
+  font-size: 14px;
+}

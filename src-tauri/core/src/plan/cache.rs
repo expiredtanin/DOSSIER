@@ -150,6 +150,7 @@ pub fn ctx_key(a: &PlanArgs) -> String {
         + &a.trace_of.as_deref().map_or(String::new(), |t| format!("\u{1}trace:{t}"))
         + &a.renovation.as_deref().map_or(String::new(), |t| format!("\u{1}ren:{t}:{}", a.renovation_phase.as_deref().unwrap_or("")))
         + &a.design_options.iter().map(|(k, v)| format!("\u{1}opt:{k}={v}")).collect::<String>()
+        + &a.design_option_edit.as_ref().map_or(String::new(), |e| format!("\u{1}edit:{e}"))
 }
 
 /// Sichtbarkeit und Dimmen als vergleichbarer Text (Mengen sortiert).

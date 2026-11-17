@@ -216,6 +216,68 @@ impl Combination {
     }
 }
 
+// ── Bearbeiten wie im Archicad-Manager ([272] Nachtrag 17.11.: Stift und „grau einfärben“) ───────────────────────
+
+/// Bearbeitungsvariante einer **Bildschirm**-Darstellung (Stift im Panel „Varianten“, Zustand der Sitzung): die Variante
+/// ist sichtbar (Stift impliziert Auge, geht der Kombination der Ebene vor), mit `grey` zeichnet die Darstellung alles
+/// ausserhalb von ihr (Hauptmodell und andere sichtbare Varianten) grau ([`crate::renovation::ghost_style`]). Kommt nur über
+/// das Anfrage-Feld `designOptionEdit` der Bildschirm-Ansichten (Grundriss, Schnitt, Ansicht, Axo, 3D) — Druck, PDF,
+/// Exporte, Kennzahlen und Goldens fragen nie damit. Die Sperre („Elemente ausserhalb sperren“) ist reine Auswahl-Logik
+/// der Oberfläche (`model/designOptions.ts::designOptionLocked`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Edit {
+    pub set: String,
+    pub option: String,
+    pub grey: bool,
+}
+
+/// Liest `{"set", "option", "grey"}` (Ids oder Namen); unbekannter Satz/Variante oder Unsinn ⇒ `None`.
+pub fn parse_edit(p: &Project, v: Option<&Value>) -> Option<Edit> {
+    let v = v?.as_object()?;
+    let s = find_set(p, v.get("set")?.as_str()?)?;
+    let o = find_option(s, v.get("option")?.as_str()?)?;
+    Some(Edit { set: s.id.clone(), option: o.id.clone(), grey: v.get("grey").and_then(Value::as_bool).unwrap_or(false) })
+}
+
+impl Edit {
+    /// Gehört ein Element mit dieser Zugehörigkeit zur Bearbeitungsvariante?
+    pub fn holds(&self, r: Option<&DesignOptionRef>) -> bool {
+        r.is_some_and(|r| r.set == self.set && r.option == self.option)
+    }
+
+    /// Ids aller Elemente ausserhalb der Bearbeitungsvariante (Öffnung ohne eigene Variante folgt ihrer Wand).
+    pub fn outside(&self, p: &Project) -> HashSet<String> {
+        let mut out = HashSet::new();
+        for w in &p.walls {
+            if !self.holds(w.design_option.as_ref()) {
+                out.insert(w.id.clone());
+            }
+        }
+        for o in p.openings.iter().flatten() {
+            let r = o.design_option.as_ref().or_else(|| p.walls.iter().find(|w| w.id == o.host_wall_id).and_then(|w| w.design_option.as_ref()));
+            if !self.holds(r) {
+                out.insert(o.id.clone());
+            }
+        }
+        macro_rules! each {
+            ($($f:ident),*) => {$(
+                for x in p.$f.iter().flatten() {
+                    if !self.holds(x.design_option.as_ref()) {
+                        out.insert(x.id.clone());
+                    }
+                }
+            )*};
+        }
+        each!(ceilings, roofs, stairs, columns, extruded_solids, rooms);
+        out
+    }
+
+    /// Schlüssel für Caches.
+    pub fn key(&self) -> String {
+        format!("{}={}{}", self.set, self.option, if self.grey { ":grey" } else { "" })
+    }
+}
+
 /// Gespeicherte Wahl einer Ebene ([`stored_choice`]; über die verknüpfte Vorlage hat sie schon `level_with_template`).
 pub fn level_choice(p: &Project, level_id: &str) -> Option<BTreeMap<String, String>> {
     p.floor(level_id).and_then(|l| stored_choice(p, l.design_option_combination.as_deref(), l.design_options.as_ref()))

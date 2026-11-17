@@ -13,6 +13,7 @@ import type { TraceReference, RenovationStatus } from "../model/types";
 import type { DisplayMode } from "../panels/types";
 import { DEFAULT_MARQUEE_COLOR, DEFAULT_SNAP_COLOR } from "../theme/accents";
 import type { StoreApi } from "./store";
+import { pruneLockedSelection } from "./selectionSlice";
 
 /** Standard-Darstellungsmodus je Panel (wie bisher: alles sichtbar normal). */
 const DEFAULT_DISPLAY_MODE: DisplayMode = "all";
@@ -33,6 +34,16 @@ export interface ViewSlice {
    */
   drawDesignOption: { set: string; option: string } | null;
   setDrawDesignOption: (target: { set: string; option: string } | null) => void;
+  /**
+   * [272] Häkchen des Panels „Varianten“ im Bearbeitungsmodus (Stift auf einer Variante), wie in Archicads Manager:
+   * „Elemente ausserhalb der Variante grau einfärben“ (nur Bildschirm: Grundriss, Schnitt, Ansicht, 3D) und „… sperren“
+   * (nicht wählbar). Zustand der Sitzung wie Stift und Kombination des Managers in Archicad — kein Projektfeld, kein
+   * Undo-Schritt, nie im Druck; Vorgabe: grau an, sperren aus.
+   */
+  designOptionGrey: boolean;
+  designOptionLock: boolean;
+  setDesignOptionGrey: (on: boolean) => void;
+  setDesignOptionLock: (on: boolean) => void;
   // Ansichtstyp (Grundriss / Perspektive).
   viewType: ViewType;
   // Zuletzt gewählter Ansichtstyp je Zeichnungsebene — jeder Tab merkt sich
@@ -107,7 +118,18 @@ export function createViewSlice(api: StoreApi<ViewSlice>): ViewSlice {
     drawRenovation: { status: "existing" },
     setDrawRenovation: (status, phase) => set({ drawRenovation: phase ? { status, phase } : { status } }),
     drawDesignOption: null,
-    setDrawDesignOption: (target) => set({ drawDesignOption: target }),
+    // Mit „sperren“ fallen gewählte Elemente ausserhalb der neuen Bearbeitungsvariante aus der Auswahl (`selectionSlice`).
+    setDrawDesignOption: (target) => {
+      set({ drawDesignOption: target });
+      pruneLockedSelection(api as never);
+    },
+    designOptionGrey: true,
+    designOptionLock: false,
+    setDesignOptionGrey: (on) => set({ designOptionGrey: on }),
+    setDesignOptionLock: (on) => {
+      set({ designOptionLock: on });
+      pruneLockedSelection(api as never);
+    },
     viewType: "grundriss",
     viewTypeByLevel: {},
     detail: "mittel",

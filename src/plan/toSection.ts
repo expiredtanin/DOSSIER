@@ -11,6 +11,7 @@ import { withDocument } from "../core/document";
 import { decodePlanBuf } from "./planBuf";
 import { lazyPlan } from "./planLazy";
 import { lineEndsCode } from "../model/lineEnds";
+import type { DesignOptionEditArg } from "../model/designOptions";
 import type { CategoryDisplayResolver, Plan } from "./generatePlan";
 
 /** Vorbereitete Eingabe eines Schnitts: Projekt, Ebene und der Schlüssel für den Schnitt-Cache des Kerns. */
@@ -110,6 +111,8 @@ export function generateSectionPlan(
     detail?: DetailLevel;
     /** [33] Eingeschaltete Override-Regeln eines Blatt-Viewports (fehlt = Schalter im Projekt). */
     overrideRuleIds?: readonly string[] | null;
+    /** [272] Bearbeitungsvariante der Bildschirm-Ansicht (`model/designOptions.ts`), nie im Druck. */
+    designOptionEdit?: DesignOptionEditArg | null;
   } = {},
 ): Plan {
   const { project } = output;
@@ -138,6 +141,7 @@ export function sectionPlanQuery(output: SectionOutput, mono: boolean, opts: Sec
     scale: opts.scaleDenominator ?? 100,
     detail: opts.detail,
     ...(opts.overrideRuleIds ? { rules: [...opts.overrideRuleIds] } : {}),
+    ...(opts.designOptionEdit ? { designOptionEdit: opts.designOptionEdit } : {}),
     ...visibilityArgs(project, opts.visibleCodes, opts.categoryDisplay),
   });
   const args = output.args.slice();

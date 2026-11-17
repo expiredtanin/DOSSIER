@@ -70,7 +70,8 @@ import { pointCloudSyncItems } from "./pointCloudSync";
 import { usePointClouds } from "../state/pointCloudStore";
 import { sun3dFor, sun3dKey } from "./sun3d";
 import { useStore } from "../state/appStore";
-import { projectGeoOrigin, storedChoice } from "../core";
+import { designOptionEditArg, projectGeoOrigin, storedChoice } from "../core";
+import type { DesignOptionEditArg } from "../core";
 import {
   FOV_Y,
   PITCH_LIMIT,
@@ -632,6 +633,11 @@ export function Wasm3DViewport({
     const c = l ? storedChoice(s.project, l) : undefined;
     return c ? JSON.stringify(c) : "";
   });
+  // [272] Bearbeitungsvariante (Stift) samt Häkchen „grau“: sichtbar, ausserhalb grau (nur Bildschirm).
+  const editKey = useStore((s) => {
+    const e = designOptionEditArg(s.project, s.drawDesignOption, s.designOptionGrey);
+    return e ? JSON.stringify(e) : "";
+  });
   const hide = useMemo<Hide3d>(() => {
     const split = (k: string) => (k ? k.split("\u0001") : []);
     const codes = split(hiddenKey);
@@ -640,10 +646,11 @@ export function Wasm3DViewport({
     const [renovation, renovationPhase] = split(renKey);
     const ren = renovation ? { renovation, ...(renovationPhase ? { renovationPhase } : {}) } : {};
     const opts = optKey ? { designOptions: JSON.parse(optKey) as Record<string, string> } : {};
-    return onlyIds || hiddenIds.length || floors.length || dim.grey.length || dim.lock.length || dim.greyFloors.length || renovation || optKey
-      ? { ...toFilter3d({ only: onlyIds, hidden: hiddenIds }, codes, floors, dim), ...ren, ...opts }
+    const edit = editKey ? { designOptionEdit: JSON.parse(editKey) as DesignOptionEditArg } : {};
+    return onlyIds || hiddenIds.length || floors.length || dim.grey.length || dim.lock.length || dim.greyFloors.length || renovation || optKey || editKey
+      ? { ...toFilter3d({ only: onlyIds, hidden: hiddenIds }, codes, floors, dim), ...ren, ...opts, ...edit }
       : codes;
-  }, [hiddenKey, floorsKey, greyKey, greyFloorsKey, lockKey, onlyIds, hiddenIds, renKey, optKey]);
+  }, [hiddenKey, floorsKey, greyKey, greyFloorsKey, lockKey, onlyIds, hiddenIds, renKey, optKey, editKey]);
   const hideRef = useRef(hide);
   hideRef.current = hide;
   // Versatz je Geschoss ([65]) für Griffe und gezogene Höhen (Modell bleibt unversetzt).

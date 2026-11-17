@@ -50,7 +50,9 @@ pub fn renovation_view(p: &Project, v: &serde_json::Value, level: &LevelSpec) ->
         None => (level.renovation.as_deref(), level.renovation_phase.as_deref()),
     };
     let own = crate::design_options::stored_choice(p, level.design_option_combination.as_deref(), level.design_options.as_ref());
-    crate::renovation::View::with(p, f, ph, &own.iter().collect::<Vec<_>>(), &crate::design_options::parse_request(v.get("designOptions")))
+    let view = crate::renovation::View::with(p, f, ph, &own.iter().collect::<Vec<_>>(), &crate::design_options::parse_request(v.get("designOptions")));
+    // [272] Bearbeitungsvariante der Bildschirm-Ansicht (`designOptionEdit`, nie im Druck).
+    crate::renovation::View::editing(view, p, crate::design_options::parse_edit(p, v.get("designOptionEdit")))
 }
 
 /// Abfrage `sectionPlan`: `args` = `[mono, openings, key]` (`key` > 0

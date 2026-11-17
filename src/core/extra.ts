@@ -141,4 +141,7 @@ export {
   renameCombinationOps, setCombinationChoiceOps, deleteCombinationOps,
 } from "../model/designOptions";
 export type { Combination, CombinationState, DesignOptionCompareRow, DesignOptionCollection } from "../model/designOptions";
+// [272] Nachtrag: Auge/Stift, grau einfärben und sperren wie im Archicad-Manager
+export { DESIGN_OPTION_GHOST_FILL, designOptionEditArg, visibleOption, eyeClick, penClick, designOptionLocked, unlockedSelection } from "../model/designOptions";
+export type { DesignOptionEditArg, DesignOptionTarget } from "../model/designOptions";
 export { buildVariantenSampleProject } from "../model/sampleProjectVarianten";

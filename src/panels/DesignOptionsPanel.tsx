@@ -1,7 +1,9 @@
-// [272] Dock-Panel „Varianten“ (wie Archicads Design-Options-Verwaltung): Kombination der aktiven Ansicht (je Satz eine
-// Variante; ein Feld der Ebene wie der Umbaufilter, darum je Reiter eigen und mit Undo), „neue Elemente zeichnen in …“
-// (Zustand der Sitzung), Auswahl einer Variante zuweisen oder in eine Variante kopieren (ein Undo-Schritt), Sätze und
-// Varianten verwalten samt „Übernehmen“ (Ressourcen-Tab, dieselben Bausteine) und der Vergleich der Kennzahlen/Kosten.
+// [272] Dock-Panel „Varianten“ (wie Archicads Design-Options-Manager): je Variante Auge und Stift — Auge = in der
+// Kombination der aktiven Ansicht sichtbar (je Satz eine; ein Feld der Ebene wie der Umbaufilter, darum je Reiter eigen
+// und mit Undo), Stift = Bearbeitungsvariante (neue Elemente landen in ihr; Zustand der Sitzung, kein Undo-Schritt;
+// Stift impliziert Auge). Im Bearbeitungsmodus zwei Häkchen wie in Archicad: ausserhalb grau einfärben (nur Bildschirm)
+// und sperren (nicht wählbar). Dazu benannte Kombinationen, Auswahl einer Variante zuweisen oder in eine Variante kopieren
+// (ein Undo-Schritt), Sätze und Varianten verwalten samt „Übernehmen“ und der Vergleich der Kennzahlen/Kosten.
 
 import { useMemo, useState } from "react";
 import { t } from "../i18n";
@@ -9,12 +11,13 @@ import { useStore } from "../state/appStore";
 import {
   addCombinationOps, assignCombinationOps, combinationChoice, deleteCombinationOps, designOptionCombinations, levelCombinationState, nextCombinationName, renameCombinationOps, setCombinationChoiceOps,
   acceptDesignOptionOps, addDesignOptionOps, addDesignOptionSetOps, assignDesignOptionOps, copyToDesignOptionOps, deleteDesignOptionOps, designOptionIds,
-  designOptionSets, designOptionTargets, levelCombination, parseTarget, renameDesignOptionOps, renameDesignOptionSetOps, setLevelCombinationOps, setPrimaryOptionOps,
+  designOptionSets, designOptionTargets, levelCombination, parseTarget, renameDesignOptionOps, renameDesignOptionSetOps, setPrimaryOptionOps,
+  eyeClick, penClick, visibleOption,
 } from "../core";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { InlineName } from "../ui/InlineName";
 import { PromptDialog } from "../ui/PromptDialog";
-import { DesignOptionsTab, type DesignOptionHandlers } from "../ui/resourceManager/DesignOptionsTab";
+import { DesignOptionsTab, type DesignOptionHandlers, type DesignOptionViewControls } from "../ui/resourceManager/DesignOptionsTab";
 import { DesignOptionCompareSection } from "./DesignOptionCompareSection";
 import { selectionDesignOptionIds } from "./objectInfo/DesignOptionField";
 
@@ -24,6 +27,10 @@ export function DesignOptionsPanel() {
   const selection = useStore((s) => s.selection);
   const draw = useStore((s) => s.drawDesignOption);
   const setDraw = useStore((s) => s.setDrawDesignOption);
+  const grey = useStore((s) => s.designOptionGrey);
+  const setGrey = useStore((s) => s.setDesignOptionGrey);
+  const lock = useStore((s) => s.designOptionLock);
+  const setLock = useStore((s) => s.setDesignOptionLock);
   const applyChange = useStore((s) => s.applyChange);
   const [target, setTarget] = useState("");
   const [showCompare, setShowCompare] = useState(false);
@@ -47,7 +54,19 @@ export function DesignOptionsPanel() {
     onAcceptDesignOption: (setId, optionId) => applyChange((p) => acceptDesignOptionOps(p, setId, optionId)),
     onDeleteDesignOption: (setId, optionId) => applyChange((p) => deleteDesignOptionOps(p, setId, optionId)),
   };
-  const drawKey = draw ? `${draw.set}/${draw.option}` : "";
+  // Auge und Stift je Variante (Zeilen der Variantensätze).
+  const view: DesignOptionViewControls = {
+    visible: (setId) => visibleOption(project, level, draw, setId),
+    edit: draw,
+    eyeEnabled: levelEditable,
+    onEye: (setId, optionId) => {
+      if (!level) return;
+      const r = eyeClick(project, level.id, draw, setId, optionId);
+      if (r.ops.length) applyChange((p) => eyeClick(p, level.id, draw, setId, optionId).ops);
+      if (r.draw !== draw) setDraw(r.draw);
+    },
+    onPen: (setId, optionId) => setDraw(penClick(project, draw, setId, optionId)),
+  };
   const setOptions = (s: (typeof sets)[number]) =>
     s.options.map((o) => (
       <option key={o.id} value={o.id}>
@@ -68,28 +87,35 @@ export function DesignOptionsPanel() {
     <section className="reno-panel design-options-panel" data-testid="design-options-panel">
       {sets.length > 0 && (
         <>
-          <div className="reno-block">
-            <div className="reno-head">{t("designOption.viewCombination")}</div>
-            {sets.map((s) => (
-              <label key={s.id} className="reno-field">
-                <span>{s.name}</span>
-                <select
-                  value={combo[s.id] ?? ""}
-                  disabled={!levelEditable}
-                  aria-label={s.name}
-                  data-testid={`design-option-combo-${s.id}`}
-                  onChange={(e) => level && applyChange((p) => setLevelCombinationOps(p, level.id, s.id, e.target.value))}
-                >
-                  {setOptions(s)}
-                </select>
-              </label>
-            ))}
-            <label className="reno-field">
-              <span>{t("designOption.drawIn")}</span>
-              <select value={drawKey} aria-label={t("designOption.drawIn")} data-testid="design-option-draw" onChange={(e) => setDraw(parseTarget(e.target.value))}>
-                {targetOptions}
-              </select>
+          <div className="reno-block" data-testid="design-option-edit">
+            <div className="reno-head">{t("designOption.edit.title")}</div>
+            <div className={`rm-row dop-main-row${draw ? "" : " is-editing"}`}>
+              <button
+                type="button"
+                className={`reno-icon-btn dop-pen${draw ? "" : " is-on"}`}
+                aria-pressed={!draw}
+                aria-label={t("designOption.pen.main")}
+                title={t("designOption.pen.main")}
+                data-testid="design-option-pen-main"
+                onClick={() => setDraw(null)}
+              >
+                <span className="material-symbols-outlined" aria-hidden="true">{draw ? "edit" : "edit_square"}</span>
+              </button>
+              <span className="dop-main-name">{t("designOption.main")}</span>
+            </div>
+            <label className="reno-field dop-check">
+              <input type="checkbox" checked={grey} data-testid="design-option-grey" onChange={(e) => setGrey(e.target.checked)} />
+              <span>{t("designOption.edit.grey")}</span>
             </label>
+            <label className="reno-field dop-check">
+              <input type="checkbox" checked={lock} data-testid="design-option-lock" onChange={(e) => setLock(e.target.checked)} />
+              <span>{t("designOption.edit.lock")}</span>
+            </label>
+            <div className="reno-hint">{t("designOption.edit.hint")}</div>
+          </div>
+          <div className="reno-block">
+            <div className="reno-head">{t("designOption.sets.title")}</div>
+            <DesignOptionsTab project={project} handlers={handlers} embedded view={view} />
           </div>
           <div className="reno-block">
             <div className="reno-head">{t("designOption.combinations.title")}</div>
@@ -162,10 +188,12 @@ export function DesignOptionsPanel() {
           </div>
         </>
       )}
-      <div className="reno-block">
-        <div className="reno-head">{t("designOption.sets.title")}</div>
-        <DesignOptionsTab project={project} handlers={handlers} embedded />
-      </div>
+      {sets.length === 0 && (
+        <div className="reno-block">
+          <div className="reno-head">{t("designOption.sets.title")}</div>
+          <DesignOptionsTab project={project} handlers={handlers} embedded />
+        </div>
+      )}
       {sets.length > 0 && (
         <div className="reno-block">
           <button type="button" className="reno-add-btn" data-testid="design-option-compare-open" onClick={() => setShowCompare((v) => !v)}>

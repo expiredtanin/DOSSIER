@@ -58,6 +58,7 @@ fn floor_args(a: &PlanArgs, floor: &str) -> PlanArgs {
         renovation: a.renovation.clone(),
         renovation_phase: a.renovation_phase.clone(),
         design_options: a.design_options.clone(),
+        design_option_edit: a.design_option_edit.clone(),
     }
 }
 

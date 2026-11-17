@@ -10,6 +10,7 @@ import { decodePlanBuf } from "./planBuf";
 import { lazyPlan } from "./planLazy";
 import { hasLine, levelArg, visibilityArgs } from "./toSection";
 import type { CategoryDisplayResolver, Plan } from "./generatePlan";
+import type { DesignOptionEditArg } from "../model/designOptions";
 
 /** Optionen des Ansichts-Generators. */
 export interface ElevationOptions {
@@ -27,6 +28,8 @@ export interface ElevationOptions {
   scaleDenominator?: number;
   /** [33] Eingeschaltete Override-Regeln eines Blatt-Viewports (fehlt = Schalter im Projekt). */
   overrideRuleIds?: readonly string[] | null;
+  /** [272] Bearbeitungsvariante der Bildschirm-Ansicht (`model/designOptions.ts`), nie im Druck. */
+  designOptionEdit?: DesignOptionEditArg | null;
 }
 
 /**
@@ -52,6 +55,7 @@ export function elevationPlanQuery(project: Project, level: DrawingLevel, opts: 
   const text = JSON.stringify({
     level: levelArg(level),
     ...(opts.overrideRuleIds ? { rules: [...opts.overrideRuleIds] } : {}),
+    ...(opts.designOptionEdit ? { designOptionEdit: opts.designOptionEdit } : {}),
     ...visibilityArgs(project, opts.visibleCodes, opts.categoryDisplay),
   });
   return { name: "elevationPlan" as const, args: [opts.mono ? 1 : 0, shadows === undefined || shadows === null ? 2 : shadows ? 1 : 0, opts.scaleDenominator ?? 100], text };

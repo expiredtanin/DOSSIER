@@ -661,3 +661,102 @@ fn set_field_kennt_alle_wurzelfelder() {
     d.undo().unwrap();
     assert_eq!(d.project().unwrap().design_option_combinations.as_ref().unwrap()[0].id, "k1");
 }
+
+// ── Bearbeiten wie im Archicad-Manager: Stift, grau einfärben ([272] Nachtrag 17.11.) ───────────────────────────────
+
+/// Bearbeitungsvariante der Bildschirm-Anfrage (`designOptionEdit`).
+fn edit(option: &str, grey: bool) -> Value {
+    json!({"designOptionEdit": {"set": "dach", "option": option, "grey": grey}})
+}
+
+/// Füllungen der Wand-Polygone von `id`.
+fn wall_fills(prims: &[Primitive], id: &str) -> Vec<String> {
+    prims
+        .iter()
+        .filter_map(|q| match q {
+            Primitive::Polygon { wall_id: Some(w), opening_id: None, fill, .. } if w == id && fill != "none" => Some(fill.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn bearbeiten_zeigt_die_variante_und_graut_den_rest_nur_auf_anfrage() {
+    let p = project(&fixture());
+    let ghost = crate::renovation::ghost_style();
+    // Ohne Bearbeitung: nichts grau (Druck, PDF, Exporte, Goldens fragen nie mit `designOptionEdit`).
+    let plain = plan_with(&p, json!({}));
+    assert!(wall_fills(&plain, "W1").iter().all(|f| *f != ghost.fill));
+    // Stift auf B: B ist sichtbar (Stift impliziert Auge), obwohl die Ebene A zeigt; A ist weg.
+    let b = plan_with(&p, edit("b", true));
+    assert!(has_wall(&b, "W9") && !has_wall(&b, "W2") && has_opening(&b, "O2"));
+    // Hauptmodell grau (Füllung), die bearbeitete Variante nicht.
+    assert!(!wall_fills(&b, "W1").is_empty() && wall_fills(&b, "W1").iter().all(|f| *f == ghost.fill), "{:?}", wall_fills(&b, "W1"));
+    assert!(wall_fills(&b, "W9").iter().all(|f| *f != ghost.fill));
+    // Häkchen „grau“ aus: sichtbar wie oben, aber keine graue Fläche.
+    let nb = plan_with(&p, edit("b", false));
+    assert!(has_wall(&nb, "W9") && !has_wall(&nb, "W2"));
+    assert!(wall_fills(&nb, "W1").iter().all(|f| *f != ghost.fill));
+    // Stift auf A (= Hauptvariante): B bleibt aus, Hauptmodell grau, W2 (in A) nicht.
+    let a = plan_with(&p, edit("a", true));
+    assert!(has_wall(&a, "W2") && !has_wall(&a, "W9"));
+    assert!(wall_fills(&a, "W1").iter().all(|f| *f == ghost.fill) && wall_fills(&a, "W2").iter().all(|f| *f != ghost.fill));
+    // Unbekannte Variante oder Unsinn: wie ohne Bearbeitung.
+    for bad in [json!({"set": "dach", "option": "zz", "grey": true}), json!({"set": 1}), json!("dach"), json!(null), json!({"option": "b"})] {
+        let q = plan_with(&p, json!({"designOptionEdit": bad}));
+        assert_eq!(format!("{q:?}"), format!("{plain:?}"), "{bad}");
+    }
+    // Cache-Schlüssel unterscheidet die Bearbeitung.
+    let k = |e: Option<Edit>| crate::renovation::View::editing(crate::renovation::View::new(&p, None, None), &p, e).map(|v| v.key());
+    let e = |grey| Some(Edit { set: "dach".into(), option: "b".into(), grey });
+    assert_ne!(k(None), k(e(true)));
+    assert_ne!(k(e(false)), k(e(true)));
+}
+
+#[test]
+fn bearbeiten_grau_in_schnitt_ansicht_axo_und_3d() {
+    let p = project(&fixture());
+    let ghost = crate::renovation::ghost_style();
+    let grey_fill = |prims: &[Primitive]| prims.iter().any(|q| matches!(q, Primitive::Polygon { fill, .. } if *fill == ghost.fill));
+    // Schnitt: das Dach RF1 (B) erscheint, Hauptmodell grau; ohne Anfrage nichts grau.
+    let s = section_prims(&p, edit("b", true));
+    assert!(ids_in(&s).contains("RF1") && grey_fill(&s));
+    assert!(!grey_fill(&section_prims(&p, json!({}))));
+    assert!(!grey_fill(&section_prims(&p, edit("b", false))));
+    // Ansicht.
+    assert!(grey_fill(&elevation_prims(&p, edit("b", true))), "Ansicht ohne Grau");
+    assert!(!grey_fill(&elevation_prims(&p, json!({}))));
+    assert_eq!(format!("{:?}", elevation_prims(&p, edit("b", false))), format!("{:?}", elevation_prims(&p, json!({"designOptions": "Dachform=B"}))));
+    // Axo.
+    let axo = |t: Value| crate::queries::run_bin(&p, "axoPlan", &[0.0, 100.0], &t.to_string()).unwrap();
+    assert_ne!(axo(edit("b", true)), axo(edit("b", false)));
+    assert_eq!(axo(edit("b", false)), axo(json!({"designOptions": "Dachform=B"})));
+    // 3D: Hauptmodell-Wand W1 in der Graufarbe, W9 (B) nicht, W2 (A) fehlt.
+    let parts = |t: Value| -> Value { serde_json::from_str(&crate::queries::run(&p, "model3dParts", &[1.0, 1.0, 0.0], &t.to_string()).unwrap()).unwrap() };
+    let rgb = crate::style::hex_to_rgb(&ghost.fill, [0.0; 3]).to_vec();
+    let wall = |v: &Value, id: &str| v["walls"].as_array().unwrap().iter().find(|w| w["wallId"] == id).cloned();
+    let col = |w: Value| w["color"].as_array().unwrap().iter().map(|x| x.as_f64().unwrap()).collect::<Vec<_>>();
+    let g = parts(edit("b", true));
+    assert_eq!(col(wall(&g, "W1").unwrap()), rgb);
+    assert_ne!(col(wall(&g, "W9").unwrap()), rgb);
+    assert!(wall(&g, "W2").is_none());
+    assert_ne!(col(wall(&parts(json!({})), "W1").unwrap()), rgb);
+    // Kennzahlen kennen keine Bearbeitung (gleich wie die Hauptkombination).
+    assert_eq!(crate::queries::run(&p, "kennzahlen", &[], &edit("b", true).to_string()).unwrap(), crate::queries::run(&p, "kennzahlen", &[], "").unwrap());
+}
+
+#[test]
+fn bearbeiten_auch_ohne_elemente_in_varianten() {
+    // Sätze ohne Elemente (gerade angelegt): Stift auf B graut alles, was es gibt.
+    let mut v = crate::renovation::tests::umbau_fixture();
+    v["designOptionSets"] = json!([{"id": "dach", "name": "Dachform", "options": [{"id": "a", "name": "A"}, {"id": "b", "name": "B"}], "primary": "a"}]);
+    let p = project(&v);
+    assert!(!active(&p));
+    let ghost = crate::renovation::ghost_style();
+    let b = plan_with(&p, edit("b", true));
+    assert!(!wall_fills(&b, "W1").is_empty() && wall_fills(&b, "W1").iter().all(|f| *f == ghost.fill));
+    // Mit Umbaufilter: Grau geht der Umbau-Farbe vor (ausserhalb der Variante), Ausgeblendetes bleibt weg.
+    let r = plan_with(&p, json!({"renovation": "neubau", "designOptionEdit": {"set": "dach", "option": "b", "grey": true}}));
+    assert!(!has_wall(&r, "W2"));
+    assert!(wall_fills(&r, "W9").iter().all(|f| *f == ghost.fill));
+}
