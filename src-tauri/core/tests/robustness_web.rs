@@ -244,6 +244,7 @@ const CALLS: &[Call] = &[
     ("commands::doc_cmd_commit", |r: &mut Rng| { let a0 = r.id(); let a1 = r.text(); let a2 = r.text(); let a3 = r.f64(); let _ = web::commands::doc_cmd_commit(a0, &a1, &a2, a3); }),
     ("commands::doc_cmd_preview", |r: &mut Rng| { let a0 = r.id(); let a1 = r.text(); let _ = web::commands::doc_cmd_preview(a0, &a1); }),
     ("commands::doc_cmd_query", |r: &mut Rng| { let a0 = r.id(); let a1 = r.text(); let _ = web::commands::doc_cmd_query(a0, &a1); }),
+    ("cycles::cycles_tonemap", |r: &mut Rng| { let a0: Vec<f32> = r.buf().iter().map(|v| *v as f32).collect(); let a1 = r.below(6) as u32; let a2 = r.f64(); let a3 = r.text(); let _ = web::cycles::cycles_tonemap(&a0, a1, a2, &a3); }),
     ("curves::curves_bezier_chain_flat", |r: &mut Rng| { let a0 = r.buf(); let a1 = r.f64(); let _ = web::curves::curves_bezier_chain_flat(&a0, a1); }),
     ("curves::curves_catmull_rom_flat", |r: &mut Rng| { let a0 = r.buf(); let a1 = r.below(2) == 1; let a2 = r.f64(); let _ = web::curves::curves_catmull_rom_flat(&a0, a1, a2); }),
     ("curves::curves_uniform_bspline_flat", |r: &mut Rng| { let a0 = r.buf(); let a1 = r.below(2) == 1; let a2 = r.f64(); let _ = web::curves::curves_uniform_bspline_flat(&a0, a1, a2); }),
