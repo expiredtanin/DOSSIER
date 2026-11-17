@@ -138,8 +138,10 @@ export type { RenovationStyleView, RenovationStyleSet, ResolvedRenovationStyles 
 export {
   wallBuildUp, buildUpKey, parseBuildUpKey, setBuildUpOps, commonBuildUp, renovateAllOfTypeOps, createRenovationTypeOps, setTypePairOps,
   renovationPair, renovationPairs,
+  renovationTypes, hostTypeId, RENOVATION_HOSTS,
 } from "../model/renovation";
 export type { RenovationBuildUp, RenovationPair, RenovationPairLayer, RenovationStripPiece, RenovationPairsInfo } from "../model/renovation";
+export type { RenovationHost, LayeredType } from "../model/renovation";
 export { buildUmbauSampleProject } from "../model/sampleProjectUmbau";
 // [272] Varianten: Sätze, Kombinationen, Zuweisen/Kopieren/Übernehmen (Regeln im Kern `design_options.rs`, Sichtbarkeit `renovation.rs`)
 export {

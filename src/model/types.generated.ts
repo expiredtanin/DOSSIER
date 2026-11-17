@@ -237,7 +237,23 @@ export type Ceiling = {
  * damit Fuge/Schraffur-Auflösung identisch zur Wand bleiben. Eine „einschichtige"
  * Decke (SOLID) ist einfach ein Deckentyp mit genau einer Schicht.
  */
-export type CeilingType = { id: string; name: string; layers: Array<Layer> };
+export type CeilingType = {
+  id: string;
+  name: string;
+  layers: Array<Layer>;
+  /**
+   * [274] Sanierungstyp (Deckentyp-Id): neuer Aufbau aller als „saniert“ markierten Decken dieses (Bestands-)Typs.
+   */
+  renovationTarget?: string;
+  /**
+   * [274] Bezugsseite der Sanierung (fehlt ⇒ innen); bei Decken: innen = unten (Rohdecke bleibt, die Oberkante verschiebt sich), aussen = oben (Oberkante bleibt).
+   */
+  renovationSide?: RenovationSide;
+  /** [274] Manuelle Zuordnung je Schicht dieses Bestandstyps (wie `WallType.renovationOld`). */
+  renovationOld?: Array<LayerRenovation>;
+  /** [274] Manuelle Zuordnung je Schicht des Sanierungstyps (wie `WallType.renovationNew`). */
+  renovationNew?: Array<LayerRenovation>;
+};
 
 /**
  * Ein Stift (ArchiCAD-Stiftsatz-Muster): ein reiner NAME/PLATZHALTER, der
@@ -3693,6 +3709,18 @@ export type RoofType = {
   name: string;
   /** Aussen (Eindeckung) → innen (Verkleidung), analog `WallType.layers`. */
   layers: Array<Layer>;
+  /**
+   * [274] Sanierungstyp (Dachtyp-Id): neuer Aufbau aller als „saniert“ markierten Dächer dieses (Bestands-)Typs.
+   */
+  renovationTarget?: string;
+  /**
+   * [274] Bezugsseite der Sanierung (fehlt ⇒ innen); innen = Tragwerk/Verkleidung bleibt, die Dachhaut verschiebt sich.
+   */
+  renovationSide?: RenovationSide;
+  /** [274] Manuelle Zuordnung je Schicht dieses Bestandstyps (wie `WallType.renovationOld`). */
+  renovationOld?: Array<LayerRenovation>;
+  /** [274] Manuelle Zuordnung je Schicht des Sanierungstyps (wie `WallType.renovationNew`). */
+  renovationNew?: Array<LayerRenovation>;
 };
 
 /**

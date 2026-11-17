@@ -509,6 +509,14 @@ Farben je Schicht im Grundriss über die Schicht-Aktionen (`WallLook::layer_acti
 (Typ-Paare, Editor, „Alle Wände vom Typ sanieren“); Kern-Abfragen `renovationPair`, `renovationPairs`. Mit den Ersatzstücken
 ([271]): `orig` in Schnitt und Ansicht ist das Projekt mit allem, aber mit den gezeigten Aufbauten (`apply` ohne Ausgeblendetes);
 Projektionslinien sanierter Wände in der Farbe der äussersten Schicht (`CutRules::edge` über `Resolved::faces`).
+**Decken und Dächer** (gleicher Code, Trait `build_up::Layered` für Wand-, Decken- und Dachtyp; `type_pair_in`, `look_core`):
+`CeilingType`/`RoofType` tragen dieselben Felder, `ceiling_look`/`roof_look` liefern denselben `WallLook` (in `Resolved::slabs`);
+Bezugsseite bei Decken innen = unten (Rohdecke bleibt, die Oberkante verschiebt sich: `WallLook::level` = neue OK), aussen = oben;
+bei Dächern innen = Tragwerk bleibt, die Dachhaut hebt sich (neue Traufhöhe, Dickendifferenz / cos Hauptneigung). `swap_build_ups`
+stellt Decke/Dach auf einen Ersatz-Decken- bzw. -Dachtyp um (Marke `~renovationOrigin` mit Typ, Dicke, OK/UK bzw. Traufhöhe).
+Farben: Schnitt je Schicht (`CutRules::with_renovation`, Kind Slab/Roof), 3D je geschichteter Platte (`color_parts` über
+`SlabSource::Ceiling.layer`; Dächer: oberste Schicht), Grundriss-Linien, Ansicht und Axo in der Farbe der obersten Schicht
+(`Resolved::element_style`/`faces`).
 
 
 ### 3.9 Varianten ([272])

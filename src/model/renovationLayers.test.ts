@@ -78,7 +78,7 @@ describe("[274] Sanierung je Schicht", () => {
     // Alles „automatisch“: Feld weg.
     const u = applyOps(s, setTypePairOps(s, "aw", { old: ["auto", "auto"] }));
     expect(u.wallTypes.find((t) => t.id === "aw")).not.toHaveProperty("renovationOld");
-    expect(renovationPairs(u).pairs.map((x) => x.type).sort()).toEqual(["aw", "aw-bestand"]);
+    expect(renovationPairs(u).pairs.filter((x) => x.kind === "wall").map((x) => x.type).sort()).toEqual(["aw", "aw-bestand"]);
   });
 
   it("Beispiel Umbau: Typ-Paar der Südwand, Zähler, Grundriss und GF je Filter", () => {
@@ -87,7 +87,8 @@ describe("[274] Sanierung je Schicht", () => {
     expect(pr?.old.map((l) => l.fate)).toEqual(["demolish", "demolish", "kept"]);
     expect(pr?.new.map((l) => l.fate)).toEqual(["new", "new", "kept"]);
     expect(pr?.result.map((q) => q.kind)).toEqual(["new", "new", "newOverDemolish", "newOverDemolish", "kept"]);
-    expect(renovationPairs(p).renovated).toBe(1);
+    // Südwand W1, Decke C1, Dach RF1.
+    expect(renovationPairs(p).renovated).toBe(3);
     // Grundriss: Abbruch gelb, Umbauplan mit gelber gestrichelter Kontur über Rot.
     const dashedYellow = (prims: ReturnType<typeof plan>) => prims.some((x) => x.kind === "line" && !!x.dash && x.color === "#e8c35a");
     expect(dashedYellow(plan(p, "umbauplan"))).toBe(true);
@@ -98,5 +99,38 @@ describe("[274] Sanierung je Schicht", () => {
     expect(gf(p) - gf(unsaniert)).toBeGreaterThan(0.25);
     const gfB = (q: Project) => computeAreaTable(q, "bestand").total.gf;
     expect(gfB(p)).toBeCloseTo(gfB(unsaniert), 9);
+  });
+
+  it("Decken und Dächer: Typ-Paare, Ops je Bauteilart, Bezugsseite unten", () => {
+    const p = buildUmbauSampleProject();
+    const kinds = renovationPairs(p).pairs.map((x) => `${x.kind}:${x.type}:${x.renovated}/${x.elements}`).sort();
+    expect(kinds).toEqual(["ceiling:decke-bestand:1/1", "roof:dach-bestand:1/1", "wall:aw-bestand:1/1"]);
+    // Decke: Rohdecke bleibt (Bezugsseite unten = „inside“), darüber alles neu.
+    const pc = renovationPair(p, "decke-bestand", undefined, "ceiling");
+    expect(pc?.kind).toBe("ceiling");
+    expect(pc?.side).toBe("inside");
+    expect(pc?.old.map((l) => l.fate)).toEqual(["demolish", "demolish", "demolish", "kept"]);
+    expect(pc?.new.map((l) => l.fate)).toEqual(["new", "new", "new", "kept"]);
+    // Dach: Sparren und Verkleidung bleiben, Ziegel ab, Dämmung und Ziegel neu.
+    const pr = renovationPair(p, "dach-bestand", undefined, "roof");
+    expect(pr?.old.map((l) => l.fate)).toEqual(["demolish", "kept", "kept"]);
+    expect(pr?.new.map((l) => l.fate)).toEqual(["new", "new", "kept", "kept"]);
+    // Bezugsseite oben (gleiche Gesamtdicke: die Rohdecke liegt auch von oben her gleich und bleibt).
+    const q = applyOps(p, setTypePairOps(p, "decke-bestand", { side: "outside" }, "ceiling"));
+    expect(q.ceilingTypes?.find((t) => t.id === "decke-bestand")?.renovationSide).toBe("outside");
+    expect(renovationPair(q, "decke-bestand", undefined, "ceiling")?.side).toBe("outside");
+    expect(renovationPair(q, "decke-bestand", undefined, "ceiling")?.old.map((l) => l.fate)).toEqual(["demolish", "demolish", "demolish", "kept"]);
+    // Ops je Art: keiner / wie Typ, gemeinsamer Wert, Sanierungstyp anlegen, alle sanieren.
+    const none = applyOps(p, setBuildUpOps(p, ["C1"], { kind: "none" }, "ceiling"));
+    expect(none.ceilings?.find((c) => c.id === "C1")?.renovation).toEqual({ status: "existing", phase: "etappe-1" });
+    expect(commonBuildUp(p, ["C1"], "ceiling")).toBe("type");
+    expect(commonBuildUp(p, ["RF1"], "roof")).toBe("type");
+    expect(commonBuildUp(p, ["W1"], "ceiling")).toBeNull();
+    const { ops, id } = createRenovationTypeOps(p, "dg-massiv", "Decke saniert", "ceiling");
+    const r = applyOps(p, ops);
+    expect(r.ceilingTypes?.find((t) => t.id === "dg-massiv")?.renovationTarget).toBe(id);
+    const s = applyOps(r, renovateAllOfTypeOps(r, "dg-massiv", "ceiling"));
+    // C2 (Anbau) ist neu: nicht saniert; sonst trägt keine Decke „dg-massiv“.
+    expect((s.ceilings ?? []).filter((c) => c.renovation?.renovated).map((c) => c.id)).toEqual(["C1"]);
   });
 });
