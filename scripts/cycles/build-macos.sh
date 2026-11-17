@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # [215] Cycles-Standalone für macOS arm64 (Apple Silicon, Metal-GPU + CPU) bauen — Ergebnis in $WORK/dist, danach
-# scripts/cycles/pack.sh <dist> macos arm64. STAND: für den CI-Lauf (macos-14, .github/workflows/cycles.yml) geschrieben,
+# scripts/cycles/pack.sh <dist> macos arm64. STAND: für den CI-Lauf (macos-latest, .github/workflows/cycles.yml) geschrieben,
 # im Linux-Container NICHT ausgeführt (kein Xcode/Metal). Der erste echte Lauf zeigt die Abweichungen; in doc/CYCLES.md nachtragen.
 #
 #   scripts/cycles/build-macos.sh [Arbeitsordner]      (Standard: $HOME/cycles-build)

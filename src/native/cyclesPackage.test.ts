@@ -75,10 +75,10 @@ describe("AppImage: Cycles als extraResources", () => {
 });
 
 describe("Workflows", () => {
-  it("cycles.yml: Jobs linux (ubuntu-24.04) und macos (macos-14), Artefakte, Gitea-Ablage", () => {
+  it("cycles.yml: Jobs linux (ubuntu-24.04) und macos (macos-latest, arm64), Artefakte, Gitea-Ablage", () => {
     const y = read(".github/workflows/cycles.yml");
     expect(y).toMatch(/^\s+linux:\n\s+runs-on: ubuntu-24\.04/m);
-    expect(y).toMatch(/^\s+macos:\n\s+runs-on: macos-14/m);
+    expect(y).toMatch(/^\s+macos:\n\s+runs-on: macos-latest/m);
     expect(y).toContain("scripts/cycles/build-linux.sh");
     expect(y).toContain("scripts/cycles/build-macos.sh");
     expect(y).toContain("cycles-linux-x86_64-${{ steps.v.outputs.version }}");
