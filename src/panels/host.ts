@@ -45,6 +45,7 @@ import type { TerrainOptions } from "../model/terrain";
 import type { TextStylePreset } from "../text/richText";
 import type { ScheduleKind } from "../export/exportSchedule";
 import type { DetailLevel } from "../model/viewTypes";
+import type { TabId as ResourceTabId } from "../ui/ResourceManager";
 
 // ── Darstellungsmodus-Steuerung je Dock-Inhalt ────────────────────────────
 
@@ -140,6 +141,8 @@ export interface PanelHostValue {
    * unter Tauri als natives Fenster, sonst als In-App-Dialog (App.openSettings).
    * Erreichbar über „Fenster"-Menü (AppMenuBar/native Menüleiste). */
   onOpenSettings: () => void;
+  /** Öffnet die Ressourcen (unter Tauri das Nebenfenster), optional auf einem Tab, z. B. `"renovation"` ([271]). */
+  onOpenResources: (tab?: ResourceTabId) => void;
 
   // Ressourcen-Handler (Bauteile / Schraffuren / Linienstile). Spiegelt
   // ResourceManagerHandlers, hier flach getippt, damit dieses Modul nicht von

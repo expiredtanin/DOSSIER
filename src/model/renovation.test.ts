@@ -4,7 +4,10 @@
 import { describe, expect, it } from "vitest";
 import { applyOps } from "../core/ops";
 import { documentFor } from "../core/document";
-import { commonRenovation, renovationFilterList, renovationForNew, setPhasesOps, setRenovationOps } from "./renovation";
+import {
+  commonRenovation, idsByRenovationStatus, phaseUsage, renovationCounts, renovationFilterList, renovationFilterShows, renovationForNew, renovationStyleOf, RENOVATION_STATUSES,
+  setPhasesOps, setRenovationOps,
+} from "./renovation";
 import { buildUmbauSampleProject } from "./sampleProjectUmbau";
 import { sampleProject } from "./sampleProject";
 import { generatePlan } from "../plan/generatePlan";
@@ -73,5 +76,48 @@ describe("[271] Umbau", () => {
     expect(added({ ...req, renovation: { status: "new", phase: "e2" } })[0].renovation).toEqual({ status: "new", phase: "e2" });
     // Vorgabe Bestand: ohne Feld.
     expect(added(req)[0]).not.toHaveProperty("renovation");
+  });
+
+  // ── Panel „Umbau“ ──
+  it("Panel: Vorschau je Filter stimmt mit dem Grundriss des Kerns überein (Override = Farbe da, Hide/Show = keine)", () => {
+    const p = buildUmbauSampleProject();
+    const colour = { existing: "#a6a6a6", demolish: "#ffd800", new: "#e3001b" } as const;
+    for (const f of renovationFilterList(p)) {
+      const shows = renovationFilterShows(p, f.id)!;
+      const got = fills(p, f.id);
+      for (const st of RENOVATION_STATUSES) {
+        expect(renovationStyleOf(p, st).fill).toBe(colour[st]);
+        expect(got.includes(colour[st]), `${f.id}/${st}`).toBe(shows[st] === "override");
+      }
+    }
+    expect(renovationFilterShows(p, "gibtsnicht")).toBeNull();
+    const own = { ...p, renovation: { ...p.renovation, filters: [{ id: "x", name: "X", existing: "hide" as const, demolish: "show" as const, new: "override" as const }], styles: { new: { fill: "#00ff00" } } } };
+    expect(renovationFilterShows(own, "x")).toEqual({ existing: "hide", demolish: "show", new: "override" });
+    expect(renovationStyleOf(own, "new").fill).toBe("#00ff00");
+    expect(renovationStyleOf(own, "new").dashed).toBe(false);
+  });
+
+  it("Panel: Auswahl nach Status (Öffnung folgt der Wand), Geschoss- und Etappenfilter, Zählung", () => {
+    const p = buildUmbauSampleProject();
+    const dem = idsByRenovationStatus(p, "demolish");
+    expect(dem.walls).toContain("W9");
+    expect(dem.openings).toContain("O2");
+    // Öffnung ohne eigenen Status: der Status ihrer Wand.
+    const o = p.openings!.find((x) => !x.renovation)!;
+    const host = p.walls.find((w) => w.id === o.hostWallId)!;
+    expect(idsByRenovationStatus(p, host.renovation?.status ?? "existing").openings).toContain(o.id);
+    expect(idsByRenovationStatus(p, "demolish", { floorId: "og-gibts-nicht" })).toEqual({});
+    expect(idsByRenovationStatus(p, "demolish", { phase: "etappe-1" }).walls).toContain("W9");
+    expect(idsByRenovationStatus(p, "demolish", { phase: "etappe-2" }).walls ?? []).not.toContain("W9");
+    const n = renovationCounts(p);
+    expect(n.demolish).toBeGreaterThan(0);
+    expect(n.new).toBeGreaterThan(0);
+    expect(n.existing + n.demolish + n.new).toBe(Object.values(idsByRenovationStatus(p, "existing")).flat().length + n.demolish + n.new);
+  });
+
+  it("Panel: Etappen-Nutzung für die Rückfrage beim Löschen", () => {
+    const p = buildUmbauSampleProject();
+    expect(phaseUsage(p, "etappe-1")).toBeGreaterThan(0);
+    expect(phaseUsage(p, "nix")).toBe(0);
   });
 });

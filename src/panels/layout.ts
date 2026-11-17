@@ -47,7 +47,8 @@ import type {
 // Flächenbilanz mit Raumprogramm war nur ~300 px hoch). Die Höhe merkt sich der Gruppen-Splitter (`resizeGroups`).
 // v14 ([253]): Objekt-Bibliothek ("object-library") als Tab neben den Werkzeugen links oben.
 // v15 ([253]): links oben (Werkzeuge/Objekte) bekommt mehr Höhe: Gewichte 1,6 : 1 (die Objekt-Palette war im 900-px-Fenster nur ~270 px hoch).
-export const LAYOUT_VERSION = 15;
+// v16 ([271]): Umbau-Panel ("renovation") als Tab rechts oben neben Objekt-Info und Flächenbilanz.
+export const LAYOUT_VERSION = 16;
 
 /** localStorage-Schlüssel des zuletzt benutzten Layouts. */
 const CURRENT_KEY = "cad.layout";
@@ -79,7 +80,7 @@ const DEFAULT_LEFT_GROUPS: DockGroup[] = [
   { tabs: ["attributes"], activeTab: "attributes", weight: 1 },
 ];
 const DEFAULT_RIGHT_GROUPS: DockGroup[] = [
-  { tabs: ["object-info", "room-balance"], activeTab: "object-info", weight: 1.6 },
+  { tabs: ["object-info", "room-balance", "renovation"], activeTab: "object-info", weight: 1.6 },
   {
     tabs: ["drawing-levels", "layers", "site", "elements", "view-snapshots", "layouts"],
     activeTab: "drawing-levels",

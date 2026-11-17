@@ -350,6 +350,13 @@ Für Umbauten trägt jedes Bauteil (Wand, Öffnung, Decke, Dach, Treppe, Stütze
 „Bestand“, „Abbruch“ oder „Neu“. Zum Ausprobieren: *Datei → Neu aus Vorlage: Beispiel Umbau* (Zwischenwand abgebrochen,
 Fenster zugemauert, neues Fenster in der Westwand, Anbau in der zweiten Etappe).
 
+- **Panel Umbau:** Der Reiter **Umbau** (rechts oben neben Objekt-Info und Flächenbilanz, einklappbar wie die anderen Panels)
+  bündelt alles an einem Ort: oben „Neue Bauteile zeichnen als“ (Bestand, Abbruch, Neu mit Farbmuster, dazu die Etappe), darunter
+  „Umbaufilter dieser Ansicht“ als Liste mit Vorschau der drei Status (wie gezeichnet, ausgeblendet oder in Umbau-Farbe), dann
+  „Auswahl“: zeigt den Status der gewählten Bauteile („gemischt“, wenn sie verschieden sind), setzt sie auf Bestand, Abbruch
+  oder Neu und weist die Etappe zu (je Aktion ein Undo-Schritt). „Nach Status wählen“ wählt alle Bauteile des Geschosses mit
+  einem Status, z. B. alles, was abgebrochen wird. Unten stehen die Etappen (anlegen, umbenennen, Reihenfolge, löschen mit
+  Rückfrage). Die Statusleiste bleibt als Kurzzugriff auf dieselben Einstellungen.
 - **Status setzen:** Bauteile wählen, in der **Objekt-Info** (auch Objekteinstellungen, Taste T) das Feld „Umbau“ und die
   „Etappe“ wählen; bei Mehrfachauswahl ändern sich alle in einem Schritt. Oder den Befehl `umbau` tippen und B, A oder N.
 - **Neue Bauteile:** Vorgabe ist „Bestand“. Rechts in der Statusleiste zeigt der Knopf Umbau den Zeichen-Status; ein Klick
@@ -360,7 +367,7 @@ Fenster zugemauert, neues Fenster in der Westwand, Anbau in der zweiten Etappe).
   Stand einer Etappe. Der Filter gehört zur Ebene wie die Modelldarstellung; Ausschnitte und Ansichtsvorlagen merken ihn.
 - **Öffnungen in Bestandswänden:** eine neue Öffnung bricht Mauerwerk ab (im Umbauplan ein gelbes Stück, im Bestand ist die
   Wand zu), eine Öffnung „Abbruch“ wird zugemauert (rote Ausfachung, im Neubau und Endzustand ist die Wand zu).
-- **Etappen und Farben:** *Fenster → Ressourcen*, Reiter „Umbau“: „Etappe hinzufügen“, umbenennen, Reihenfolge; die
+- **Etappen und Farben:** die Etappen im Panel Umbau (oder *Fenster → Ressourcen*, Reiter „Umbau“); dort auch die
   „Umbau-Farben“ je Status (Füllung, Linie, gestrichelt).
 - **Flächen:** Panel Flächenbilanz, „Zustand“ Bestand oder Endzustand.
 - **Exporte:** DXF legt Abbruch und Neu auf eigene Layer (z. B. 20_Wände_Abbruch), IFC schreibt den Status als `Status` im

@@ -4,7 +4,7 @@
 import type { CoreOp } from "../core/ops";
 import { documentFor } from "../core/document";
 import { patchItems, setField } from "../core/opsBuild";
-import type { Project, Renovation, RenovationPhase, RenovationStatus } from "./types";
+import type { Project, Renovation, RenovationPhase, RenovationShow, RenovationStatus } from "./types";
 
 /** Eingebaute Umbaufilter (Ids; Namen über `t("renovation.filter.<id>")`). */
 export const BUILTIN_RENOVATION_FILTERS = ["bestand", "abbruch", "neubau", "umbauplan", "endzustand"] as const;
@@ -144,4 +144,84 @@ export function newPhaseId(project: Project): string {
   let i = used.size + 1;
   while (used.has(`etappe-${i}`)) i++;
   return `etappe-${i}`;
+}
+
+// ── Panel „Umbau“ (Dock): Filter-Vorschau, Auswahl nach Status ─────────────────────────────────────────────
+
+/** Eingebaute Filter: Darstellung je Status (Spiegel von `renovation::builtin` im Kern; `renovation.test.ts` prüft ihn gegen den Plan). */
+const BUILTIN_FILTER_SHOWS: Record<string, Record<RenovationStatus, RenovationShow>> = {
+  bestand: { existing: "show", demolish: "show", new: "hide" },
+  abbruch: { existing: "show", demolish: "override", new: "hide" },
+  neubau: { existing: "show", demolish: "hide", new: "override" },
+  umbauplan: { existing: "override", demolish: "override", new: "override" },
+  endzustand: { existing: "show", demolish: "hide", new: "show" },
+};
+
+/** Darstellung je Status im Filter `id` (eingebaut oder eigen); `null` bei unbekanntem Filter. */
+export function renovationFilterShows(project: Project, id: string): Record<RenovationStatus, RenovationShow> | null {
+  const own = project.renovation?.filters?.find((f) => f.id === id);
+  if (own) return { existing: own.existing, demolish: own.demolish, new: own.new };
+  return BUILTIN_FILTER_SHOWS[id] ?? null;
+}
+
+/** Umbau-Farbe eines Status (Projekt-Vorgabe über SIA-400-Vorgabe). */
+export function renovationStyleOf(project: Project, status: RenovationStatus): { fill: string; line?: string; dashed: boolean } {
+  const d = DEFAULT_RENOVATION_STYLES[status];
+  const o = project.renovation?.styles?.[status];
+  return { fill: o?.fill ?? d.fill, line: o?.line ?? d.line, dashed: o?.dashed ?? d.dashed };
+}
+
+/** Auswahl-Art je Liste (`extrudedSolids` heissen in der Auswahl `solids`). */
+const SELECTION_KEY: Record<RenovationCollection, string> = {
+  walls: "walls",
+  openings: "openings",
+  ceilings: "ceilings",
+  roofs: "roofs",
+  stairs: "stairs",
+  columns: "columns",
+  extrudedSolids: "solids",
+  rooms: "rooms",
+};
+
+/**
+ * Ids aller Elemente mit Status `status` (Öffnung ohne eigenen Status: der der Wand), je Auswahl-Art.
+ * `floorId`: nur dieses Geschoss (Öffnungen über ihre Wand); `phase`: nur diese Etappe (`""` = ohne Etappe).
+ */
+export function idsByRenovationStatus(
+  project: Project,
+  status: RenovationStatus,
+  opts: { floorId?: string | null; phase?: string } = {},
+): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  const wallOf = new Map(project.walls.map((w) => [w.id, w]));
+  for (const c of RENOVATION_COLLECTIONS) {
+    const ids: string[] = [];
+    for (const e of (project[c] ?? []) as { id: string; floorId?: string; hostWallId?: string; renovation?: Renovation }[]) {
+      const wall = c === "openings" && e.hostWallId ? wallOf.get(e.hostWallId) : undefined;
+      const floor = e.floorId ?? wall?.floorId;
+      if (opts.floorId && floor && floor !== opts.floorId) continue;
+      const r = e.renovation ?? wall?.renovation;
+      if (renovationStatus(r) !== status) continue;
+      if (opts.phase !== undefined && (r?.phase ?? "") !== opts.phase) continue;
+      ids.push(e.id);
+    }
+    if (ids.length) out[SELECTION_KEY[c]] = ids;
+  }
+  return out;
+}
+
+/** Zahl der Elemente je Status (Öffnungen ohne eigenen Status zählen mit dem der Wand). */
+export function renovationCounts(project: Project, floorId?: string | null): Record<RenovationStatus, number> {
+  const n: Record<RenovationStatus, number> = { existing: 0, demolish: 0, new: 0 };
+  for (const s of RENOVATION_STATUSES) n[s] = Object.values(idsByRenovationStatus(project, s, { floorId })).reduce((a, v) => a + v.length, 0);
+  return n;
+}
+
+/** Zahl der Elemente, die Etappe `phaseId` tragen (für die Rückfrage beim Löschen). */
+export function phaseUsage(project: Project, phaseId: string): number {
+  let n = 0;
+  for (const c of RENOVATION_COLLECTIONS) {
+    for (const e of (project[c] ?? []) as { renovation?: Renovation }[]) if (e.renovation?.phase === phaseId) n++;
+  }
+  return n;
 }

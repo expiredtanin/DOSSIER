@@ -29,6 +29,7 @@ import { LayoutsPanel, LayoutsTabIcon } from "./LayoutsPanel";
 import { BcfPanel } from "./BcfPanel";
 import { ClashPanel } from "./ClashPanel";
 import { HistoryPanel } from "./HistoryPanel";
+import { RenovationPanel, RenovationTabIcon } from "./RenovationPanel";
 import { ObjectSettingsPanel } from "./objectSettings/ObjectSettingsPanel";
 import {
   ToolsTabIcon,
@@ -59,6 +60,7 @@ export const BUILTIN_PANEL_IDS = {
   history: "history",
   objectSettings: "object-settings",
   objectLibrary: "object-library",
+  renovation: "renovation",
 } as const;
 
 // Werkzeug-Palette (Symbol + Name je Werkzeug, ArchiCAD/Vectorworks-Stil).
@@ -208,4 +210,14 @@ registerPanel({
   icon: <ObjectInfoTabIcon />,
   hasDisplayMode: false,
   render: () => <ObjectSettingsPanel />,
+});
+
+// Umbau ([271], Wunsch Maintainer 17.11.): Zeichen-Status, Umbaufilter der Ansicht, Status der Auswahl, Etappen.
+// Im Standard-Layout rechts oben neben Objekt-Info und Flächenbilanz.
+registerPanel({
+  id: BUILTIN_PANEL_IDS.renovation,
+  title: "renovation.panel.tab",
+  icon: <RenovationTabIcon />,
+  hasDisplayMode: false,
+  render: () => <RenovationPanel />,
 });

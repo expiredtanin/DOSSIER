@@ -9,7 +9,7 @@ import { openLevel } from "../tabNavigation";
 import type { FlatHostOpts, HostPart } from "./types";
 
 export function buildToolsHost(c: FlatHostOpts) {
-  const { activeCategoryCode, activeLevel, activeLevelId, activeTool, activeWallTypeId, addCategory, addCeiling, addCeilingType, addComponent, addDrawing, addElevation, addFloor, addHatch, addLineStyle, addRoofType, addSection, addTextStyle, addWallType, deleteCeilingType, deleteComponent, deleteHatch, deleteLineStyle, deleteRoofType, deleteTextStyle, deleteWallType, engineView, importHatches, importLineStyles, onRunCommand, onSelectTool, openLayerSettings, openSettings, patchCeilingType, patchComponent, patchHatch, patchLineStyle, patchRoofType, patchTextStyle, patchWallType, setActiveCategoryCode, setActiveWallTypeId, setMenu, setSnap, snap, toggleCategoryVisible, toggleLevelVisible } = c;
+  const { activeCategoryCode, activeLevel, activeLevelId, activeTool, activeWallTypeId, addCategory, addCeiling, addCeilingType, addComponent, addDrawing, addElevation, addFloor, addHatch, addLineStyle, addRoofType, addSection, addTextStyle, addWallType, deleteCeilingType, deleteComponent, deleteHatch, deleteLineStyle, deleteRoofType, deleteTextStyle, deleteWallType, engineView, importHatches, importLineStyles, onRunCommand, onSelectTool, openLayerSettings, openResources, openSettings, patchCeilingType, patchComponent, patchHatch, patchLineStyle, patchRoofType, patchTextStyle, patchWallType, setActiveCategoryCode, setActiveWallTypeId, setMenu, setSnap, snap, toggleCategoryVisible, toggleLevelVisible } = c;
   return {
     activeLevelId,
     activeTool,
@@ -44,6 +44,7 @@ export function buildToolsHost(c: FlatHostOpts) {
       if (isTauriRuntime()) void openDrawingLevelsWindowNative();
     },
     onOpenSettings: () => openSettings(),
+    onOpenResources: (tab) => openResources(tab),
     onPatchComponent: patchComponent,
     onAddComponent: addComponent,
     onDeleteComponent: deleteComponent,

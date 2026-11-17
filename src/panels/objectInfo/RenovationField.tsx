@@ -1,30 +1,23 @@
 // [271] Objekt-Info und Objekteinstellungen: „Umbau“ — Status (Bestand, Abbruch, Neu) und Etappe der Auswahl.
 // Mehrfachauswahl: alle gewählten Bauteile in einem Undo-Schritt; verschiedene Werte zeigen „gemischt“.
 
-import { useMemo } from "react";
+import { memo } from "react";
 import { t } from "../../i18n";
 import type { RenovationStatus } from "../../model/types";
-import { commonRenovation, renovatableIds, renovationPhases, RENOVATION_STATUSES, setRenovationOps } from "../../core";
+import { RENOVATION_STATUSES } from "../../core";
 import { useStore } from "../../state/appStore";
-import type { Selection } from "../../state/selection";
+import { useRenovationSelection } from "../../state/renovationHook";
 import { Dropdown } from "../../ui/Dropdown";
 
+const NO_PHASES: readonly { id: string; name: string }[] = [];
 const MIXED = "__mixed";
 const NO_PHASE = "";
 
-/** Ids der Auswahl, die einen Umbau-Status tragen (Wände, Öffnungen, Decken, Dächer, Treppen, Stützen, Körper, Räume). */
-export function selectionRenovationIds(sel: Selection): string[] {
-  return [...sel.walls, ...sel.openings, ...sel.ceilings, ...sel.roofs, ...sel.stairs, ...sel.columns, ...sel.solids, ...sel.rooms];
-}
-
-export function RenovationField() {
-  const project = useStore((s) => s.project);
-  const selection = useStore((s) => s.selection);
-  const applyChange = useStore((s) => s.applyChange);
-  const ids = useMemo(() => renovatableIds(project, selectionRenovationIds(selection)), [project, selection]);
-  const common = useMemo(() => commonRenovation(project, ids), [project, ids]);
+/** `memo`: ohne Props rendert das Feld nur bei geänderter Auswahl/Status neu, nicht bei jeder Op des Eltern-Panels ([121]). */
+export const RenovationField = memo(function RenovationField() {
+  const phases = useStore((s) => s.project.renovation?.phases) ?? NO_PHASES;
+  const { ids, common, setStatus, setPhase } = useRenovationSelection();
   if (ids.length === 0) return null;
-  const phases = renovationPhases(project);
   const statusValue = common.status === "mixed" || common.status === null ? MIXED : common.status;
   const phaseValue = common.phase === "mixed" ? MIXED : (common.phase ?? NO_PHASE);
   const statusOptions = [
@@ -44,7 +37,7 @@ export function RenovationField() {
           value={statusValue}
           onChange={(v) => {
             if (v === MIXED) return;
-            applyChange((p) => setRenovationOps(p, ids, v as RenovationStatus));
+            setStatus(v as RenovationStatus);
           }}
           options={statusOptions}
           title={t("renovation.label")}
@@ -58,7 +51,7 @@ export function RenovationField() {
             value={phaseValue}
             onChange={(v) => {
               if (v === MIXED) return;
-              applyChange((p) => setRenovationOps(p, ids, undefined, v === NO_PHASE ? null : v));
+              setPhase(v === NO_PHASE ? null : v);
             }}
             options={phaseOptions}
             title={t("renovation.phase")}
@@ -68,4 +61,4 @@ export function RenovationField() {
       )}
     </>
   );
-}
+});

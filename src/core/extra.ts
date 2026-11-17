@@ -124,6 +124,7 @@ export { buildCostReport, costGroupLabel, costUnitLabel } from "../export/costRe
 export {
   BUILTIN_RENOVATION_FILTERS, RENOVATION_STATUSES, RENOVATION_COLLECTIONS, DEFAULT_RENOVATION_STYLES, renovationFilterList, renovationStatus, renovationPhases,
   renovationForNew, setRenovationOps, renovatableIds, commonRenovation, setPhasesOps, newPhaseId,
+  renovationFilterShows, renovationStyleOf, idsByRenovationStatus, renovationCounts, phaseUsage,
 } from "../model/renovation";
 export type { RenovationFilterEntry, RenovationCollection } from "../model/renovation";
 export { buildUmbauSampleProject } from "../model/sampleProjectUmbau";
