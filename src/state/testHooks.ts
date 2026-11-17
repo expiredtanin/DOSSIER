@@ -60,6 +60,10 @@ declare global {
       sectionWalls: () => Promise<{ n: number; area: number }>;
       /** [193] Gelände-/Umgebungs-Elemente (Art, Id, bei der Baugrube die erste Umrissecke, bei Höhenlinien der erste Punkt). */
       context: () => { id: string; type: string; first?: { x: number; y: number } }[];
+      /** [271] Füllfarben der Element-Flächen im Grundriss der aktiven Ebene (Farbe → Anzahl, alle Klassen, 1:100). */
+      planFillColors: () => Record<string, number>;
+      /** [271] Umbau: Filter und Etappe der aktiven Ebene, Zeichen-Status, Status je Wand. */
+      renovation: () => { filter: string | null; phase: string | null; draw: string; walls: Record<string, string> };
       /** [193] Gefüllte Flächen (Füllfarbe gesetzt) im Grundriss der aktiven Ebene (alle Kategorien, 1:100); bei 0 ist nichts Gefülltes mehr zu sehen. */
       planFills: () => number;
       /** [193] Höhe (z) des ersten Gelände-Netz-Punkts. */
@@ -152,6 +156,33 @@ export function installTestHooks(): void {
       };
       walk(s.project.layers);
       return generatePlan(s.project, s.activeLevelId, codes, undefined, s.detail, false, false, true, 50).primitives.filter((q) => q.kind === "line" && q.cls === cls).length;
+    },
+    planFillColors: () => {
+      const s = getState();
+      const codes = new Set<string>();
+      const walk = (cs: { code: string; children?: unknown[] }[]): void => {
+        for (const c of cs) {
+          codes.add(c.code);
+          walk((c.children ?? []) as { code: string; children?: unknown[] }[]);
+        }
+      };
+      walk(s.project.layers);
+      const out: Record<string, number> = {};
+      for (const q of generatePlan(s.project, s.activeLevelId, codes, undefined, s.detail, false, false, true, 100).primitives) {
+        if (q.kind !== "polygon" || !q.fill || !Object.entries(q).some(([k, v]) => k.endsWith("Id") && !!v)) continue;
+        out[q.fill] = (out[q.fill] ?? 0) + 1;
+      }
+      return out;
+    },
+    renovation: () => {
+      const s = getState();
+      const l = s.project.drawingLevels.find((x) => x.id === s.activeLevelId);
+      return {
+        filter: l?.renovationFilter ?? null,
+        phase: l?.renovationPhase ?? null,
+        draw: s.drawRenovation.status,
+        walls: Object.fromEntries(s.project.walls.map((w) => [w.id, w.renovation?.status ?? "existing"])),
+      };
     },
     context: () =>
       (getState().project.context ?? []).map((c) => ({ id: c.id, type: c.type, first: c.type === "excavation" ? c.outline[0] : c.type === "contourSet" ? c.contours[0]?.pts[0] : undefined })),

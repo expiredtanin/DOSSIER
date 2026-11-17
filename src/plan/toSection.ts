@@ -84,6 +84,9 @@ export function levelArg(level: DrawingLevel) {
     // [173] Modelldarstellung der Ebene (Schnitt: Schichten, Öffnungsdetail, Treppen; Ansicht: Schatten,
     // Materialschraffur, Fenster).
     modelViewOptionId: level.modelViewOptionId,
+    // [271] Umbaufilter und Etappe der Ebene (Kern `renovation.rs`).
+    renovationFilter: level.renovationFilter,
+    renovationPhase: level.renovationPhase,
   };
 }
 

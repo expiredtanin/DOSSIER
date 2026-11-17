@@ -120,3 +120,10 @@ export type { CyclesHost, CyclesPackage, CyclesSceneInfo, CyclesSceneOptions, Cy
 export { computeCostEstimate, defaultCostEstimate, formatChf } from "../analysis/costEstimate";
 export type { CostResult, CostRow, CostQuantities, CostEstimate, CostGroup, CostMethod, CostBasis } from "../analysis/costEstimate";
 export { buildCostReport, costGroupLabel, costUnitLabel } from "../export/costReport";
+// [271] Umbau: Status je Bauteil, Etappen, Umbaufilter (Regeln im Kern `renovation.rs`)
+export {
+  BUILTIN_RENOVATION_FILTERS, RENOVATION_STATUSES, RENOVATION_COLLECTIONS, DEFAULT_RENOVATION_STYLES, renovationFilterList, renovationStatus, renovationPhases,
+  renovationForNew, setRenovationOps, renovatableIds, commonRenovation, setPhasesOps, newPhaseId,
+} from "../model/renovation";
+export type { RenovationFilterEntry, RenovationCollection } from "../model/renovation";
+export { buildUmbauSampleProject } from "../model/sampleProjectUmbau";

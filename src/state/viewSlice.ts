@@ -9,7 +9,7 @@
 
 import { sampleProject } from "../model/sampleProject";
 import type { DetailLevel, RenderMode, View3d, ViewType } from "../model/viewTypes";
-import type { TraceReference } from "../model/types";
+import type { TraceReference, RenovationStatus } from "../model/types";
 import type { DisplayMode } from "../panels/types";
 import { DEFAULT_MARQUEE_COLOR, DEFAULT_SNAP_COLOR } from "../theme/accents";
 import type { StoreApi } from "./store";
@@ -21,6 +21,12 @@ const DEFAULT_DISPLAY_MODE: DisplayMode = "all";
 export interface ViewSlice {
   // Aktive Zeichnungsebene (Geschoss/Schnitt/Zeichnung).
   activeLevelId: string;
+  /**
+   * [271] Aktueller Zeichen-Status (Umbau): neue Bauteile der Zeichenbefehle tragen ihn (Vorgabe Bestand, Wunsch
+   * Maintainer); mit Etappe. Zustand der Sitzung, kein Undo-Schritt.
+   */
+  drawRenovation: { status: RenovationStatus; phase?: string };
+  setDrawRenovation: (status: RenovationStatus, phase?: string) => void;
   // Ansichtstyp (Grundriss / Perspektive).
   viewType: ViewType;
   // Zuletzt gewählter Ansichtstyp je Zeichnungsebene — jeder Tab merkt sich
@@ -92,6 +98,8 @@ export function createViewSlice(api: StoreApi<ViewSlice>): ViewSlice {
   const { set, get } = api;
   return {
     activeLevelId: sampleProject.drawingLevels[0].id,
+    drawRenovation: { status: "existing" },
+    setDrawRenovation: (status, phase) => set({ drawRenovation: phase ? { status, phase } : { status } }),
     viewType: "grundriss",
     viewTypeByLevel: {},
     detail: "mittel",

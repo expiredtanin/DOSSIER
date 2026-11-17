@@ -1247,6 +1247,27 @@ pub fn plan_walls(c: &Ctx, reference_lines: bool, out: &mut Vec<Primitive>, boun
         if let Some(d) = range.restyle_dash(zone) {
             super::view_range::restyle(out, out_start, d);
         }
+        // [271] Umbaufilter: Wand und Öffnungen in ihrer Umbau-Farbe; Ersatzstücke neuer (Abbruch-Stück) bzw.
+        // zugemauerter Öffnungen (Ausfachung) — über der geschlossenen Wand, sonst unter dem Öffnungssymbol.
+        if let Some(r) = c.renovation() {
+            crate::renovation::restyle_range(r, out, out_start, Some(&w.id));
+            if zone == Zone::Cut && !cut.covered {
+                for pa in r.patches.iter().filter(|pa| pa.wall_id == w.id) {
+                    let Some(o) = p.openings_of_wall(&w.id).find(|o| o.id == pa.opening_id) else { continue };
+                    let Some(ring) = crate::renovation::patch_ring(p, w, o) else { continue };
+                    let q = crate::renovation::patch_prims(ring, &pa.style, lw * c.a.detail.outline_factor(), &o.id);
+                    if pa.closed {
+                        out.extend(q);
+                    } else {
+                        let n = q.len();
+                        out.splice(out_start..out_start, q);
+                        for s in closed_syms.iter_mut().filter(|s| s.0 >= out_start) {
+                            *s = (s.0 + n, s.1 + n);
+                        }
+                    }
+                }
+            }
+        }
     }
     // [256] Auf schwarzer Sammelfläche (ab 1:100) verschwände das Symbol: der Teil in der Fläche wird hell
     // (Modelldarstellung `walls.contrastOnSolid`, Basis an). Hinten anfangen, die Bereiche verschieben sich.

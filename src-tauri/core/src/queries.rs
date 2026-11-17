@@ -16,7 +16,7 @@ pub fn run_doc(d: &mut crate::document::Document, name: &str, args: &[f64], text
     // des Aufrufers (0 = alles), Antwort als Änderung (`model3d_cache::write_delta`).
     let delta = (name == "model3dPartsDelta").then(|| args.get(5).copied().filter(|m| m.is_finite() && *m >= 0.0).unwrap_or(0.0) as u64);
     // [173] Mit Modelldarstellung (`text`) ohne den Cache (eigene Teile, s. `model3d_mv`).
-    if (name == "model3dParts" || delta.is_some()) && args.len() >= 3 && !explode && model3d_mv_id(text).is_none() {
+    if (name == "model3dParts" || delta.is_some()) && args.len() >= 3 && !explode && model3d_mv_id(text).is_none() && !text.contains("\"renovation\"") {
         let voids = args.get(3).is_some_and(|v| *v != 0.0);
         // [214] Ohne Abzugskörper braucht es die Wände/Decken nicht als Werte (spart das Kopieren): leere `voidMeshes`.
         if voids && crate::plan::extras::void_prisms(d.project()?).is_empty() {
@@ -68,11 +68,29 @@ fn model3d_mv(p: &Project, text: &str, detail: f64) -> (f64, bool) {
     (base, o.stair.handrail.is_some())
 }
 
+/// [271] Projekt im Umbau-Zustand des Texts (`renovation::view_from_text`), sonst unverändert.
+fn renovation_state<'a>(p: &'a Project, text: &str) -> std::borrow::Cow<'a, Project> {
+    match crate::renovation::view_from_text(p, text) {
+        Some(v) => {
+            let r = v.resolve(p);
+            if r.hidden.is_empty() {
+                std::borrow::Cow::Borrowed(p)
+            } else {
+                std::borrow::Cow::Owned(crate::renovation::without_hidden(p, &r.hidden))
+            }
+        }
+        None => std::borrow::Cow::Borrowed(p),
+    }
+}
+
 /// Führt die Abfrage `name` aus. `args`: Zahlen, `text`: ein Text (z. B. eine id).
 pub fn run(p: &Project, name: &str, args: &[f64], text: &str) -> Result<String, String> {
     match (name, args.len()) {
-        ("kennzahlen", _) => json(&kennzahlen::compute(p)),
-        ("areaTable", _) => json(&flaechen::area_table(p)),
+        // [271] Mit Umbau-Zustand (`text` = Filter-Id, z. B. „bestand“ oder „endzustand“; leer = alles).
+        ("kennzahlen", _) => json(&kennzahlen::compute(&renovation_state(p, text))),
+        ("areaTable", _) => json(&flaechen::area_table(&renovation_state(p, text))),
+        // [271] Umbaufilter (eingebaute und eigene) für die Oberfläche.
+        ("renovationFilters", _) => json(&crate::renovation::filter_list(p)),
         // [209] Kostenschätzung grob; `costDefaults` mit Text „gf“/„gv“ = Beispielwerte der Methode.
         ("costEstimate", _) => json(&crate::kosten::estimate(p)),
         ("costDefaults", _) => json(&crate::kosten::default_estimate(if text.trim() == "gf" { crate::model::CostMethod::Gf } else { crate::model::CostMethod::Gv })),
@@ -153,8 +171,15 @@ pub fn run(p: &Project, name: &str, args: &[f64], text: &str) -> Result<String, 
                 }
                 return Ok(v.to_string());
             }
+            // [271] Umbaufilter (`text` = `{"renovation": …, "renovationPhase": …}`): Ausgeblendetes fehlt, Farben je Status.
+            let ren = crate::renovation::view_from_text(p, text).map(|v| v.resolve(p));
+            let filtered = ren.as_ref().filter(|r| !r.hidden.is_empty()).map(|r| crate::renovation::without_hidden(p, &r.hidden));
+            let p = filtered.as_ref().unwrap_or(p);
             let (detail, rails) = model3d_mv(p, text, args[1]);
             let mut parts = model3d::parts_filtered(p, args[0] != 0.0, detail, args[2] != 0.0, &filter)?;
+            if let Some(r) = &ren {
+                crate::renovation::color_parts(p, &mut parts, r);
+            }
             if !rails {
                 parts.stair_railings.clear();
             }
@@ -329,7 +354,7 @@ pub fn run_bin(p: &Project, name: &str, args: &[f64], text: &str) -> Result<Vec<
             let c = domains::Ctx::new(p, &a);
             let flags = if args[1].is_finite() && args[1] >= 0.0 { args[1] as u32 } else { 0 };
             // Strichstärken nach Massstab wie im übrigen Plan.
-            let post = Some(crate::plan::extras::Post { mono: flags & 2 != 0, lw: crate::plan::extras::line_weight_factor(p, args[0]), sketch: 0.0 }).filter(crate::plan::extras::Post::active);
+            let post = Some(crate::plan::extras::Post { mono: flags & 2 != 0, lw: crate::plan::extras::line_weight_factor(p, args[0]), sketch: 0.0, keep: Default::default() }).filter(crate::plan::extras::Post::active);
             buf_with(post, |sink| drawings::underlay_lines(&c, &args[2..], flags & 1 != 0, sink))
         }
         // Primitive einer Zeichnung (JSON in `text`, ohne Override-Regeln) beim Massstab `args[0]`.

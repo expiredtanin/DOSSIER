@@ -15,6 +15,7 @@ import { useEffect, useLayoutEffect, useRef, useState, memo } from "react";
 import type { SnapSettings } from "../tools/types";
 import { t } from "../i18n";
 import { TraceControl } from "./TraceControl";
+import { RenovationControl } from "./RenovationControl";
 import { BUILD_INFO, formatBuildShort } from "../update/buildInfo";
 
 export interface StatusBarProps {
@@ -424,7 +425,7 @@ export const StatusBar = memo(function StatusBar({
   const pickHint = usePickHint();
   // [263] Schriftbreite ist nicht planbar (Ersatzschriften je System): passt der Cluster nicht, wird er nach Priorität
   // gekürzt — nie abgeschnitten. Stufe 1: Beschriftungen weg (nur Werte, Tooltip bleibt) · 2: Einheit und Build weg ·
-  // 3: Linien-Darstellung nach „⋯“ · 4: Pausfolie nach „⋯“ · 5: Fang und Referenzlinien nach „⋯“.
+  // 3: Linien-Darstellung nach „⋯“ · 4: Pausfolie und Umbau ([271]) nach „⋯“ · 5: Fang und Referenzlinien nach „⋯“.
   const footerRef = useRef<HTMLElement | null>(null);
   const clusterRef = useRef<HTMLDivElement | null>(null);
   const innerRef = useRef<HTMLSpanElement | null>(null);
@@ -486,6 +487,7 @@ export const StatusBar = memo(function StatusBar({
     <LineModeToggle lineMode={lineMode} onLineModeChange={onLineModeChange} lineModeEnabled={lineModeEnabled} />
   );
   const traceEl = <TraceControl enabled={!!traceEnabled} onRunCommand={onRunCommand} />;
+  const renovationEl = <RenovationControl />;
   const snapEl = <SnapControl snap={snap} onSnapChange={onSnapChange} />;
   const refEl = (
     <button
@@ -502,7 +504,7 @@ export const StatusBar = memo(function StatusBar({
   // Was in „⋯“ wandert (Reihenfolge = Wegfall-Priorität von oben nach unten).
   const inMore: React.ReactNode[] = [];
   if (level >= 3) inMore.push(<span key="lm">{lineModeEl}</span>);
-  if (level >= 4) inMore.push(<span key="tr">{traceEl}</span>);
+  if (level >= 4) inMore.push(<span key="tr">{traceEl}</span>, <span key="ren">{renovationEl}</span>);
   if (level >= 5) {
     inMore.push(<span key="sn">{snapEl}</span>, <span key="rf">{refEl}</span>);
   }
@@ -530,6 +532,8 @@ export const StatusBar = memo(function StatusBar({
           {level < 4 && (
             <>
               {traceEl}
+              <Sep />
+              {renovationEl}
               <Sep />
             </>
           )}

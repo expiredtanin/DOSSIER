@@ -40,6 +40,17 @@ fn cache_put(key: (f64, u64), o: std::rc::Rc<Output>) {
     });
 }
 
+/// [271] Umbaufilter eines Schnitts/einer Ansicht: `renovation`/`renovationPhase` im Aufruf (CLI, Blatt-Ausschnitt), sonst
+/// die Felder der Ebene (`renovationFilter`, `renovationPhase`).
+pub fn renovation_view(p: &Project, v: &serde_json::Value, level: &LevelSpec) -> Option<crate::renovation::View> {
+    let req = v.get("renovation").and_then(|m| m.as_str()).filter(|m| !m.is_empty());
+    let (f, ph) = match req {
+        Some(f) => (Some(f), v.get("renovationPhase").and_then(|m| m.as_str())),
+        None => (level.renovation.as_deref(), level.renovation_phase.as_deref()),
+    };
+    crate::renovation::View::new(p, f, ph)
+}
+
 /// Abfrage `sectionPlan`: `args` = `[mono, openings, key]` (`key` > 0
 /// = Schlüssel des vorbereiteten Schnitts, s. Cache unten, 0 = immer rechnen),
 /// `text` = `{"level": {...}, "hiddenLines", "hasVis", "invisible", "hasDisplay", "norender", "grey"}`.
@@ -57,7 +68,12 @@ pub fn section_plan_buf(p: &Project, args: &[f64], text: &str) -> Result<Vec<u8>
     let on: Option<HashSet<String>> = v.get("rules").and_then(|a| a.as_array()).map(|a| a.iter().filter_map(|s| s.as_str().map(String::from)).collect());
     let rv = RuleView::at(scale, on.as_ref()).view("section");
     // [33] Regel „Ausblenden“: Schnitt ohne diese Elemente (sie verdecken nichts, Wände samt Öffnungen).
-    let hidden_ids = crate::plan::overrides::hidden_elements(p, rv);
+    let mut hidden_ids = crate::plan::overrides::hidden_elements(p, rv);
+    // [271] Umbaufilter (angefragt, sonst der der Ebene): Ausgeblendetes wie „Ausblenden“, Farben auf die Schnittflächen.
+    let ren = renovation_view(p, &v, &level).map(|r| r.resolve(p));
+    if let Some(r) = &ren {
+        hidden_ids.extend(r.hidden.iter().cloned());
+    }
     let filtered = (!hidden_ids.is_empty()).then(|| without_elements(p, &hidden_ids));
     let p = filtered.as_ref().unwrap_or(p);
     // [184] Öffnungen mit Detailgrad grob (Strich im Schnitt): Wandschnitt an Sturz/Brüstung flach. Das ändert die
@@ -118,7 +134,7 @@ pub fn section_plan_buf(p: &Project, args: &[f64], text: &str) -> Result<Vec<u8>
     let mvo = mv_id.map(|id| crate::plan::model_view::for_view(p, Some(id), detail, scale));
     let smv = mvo.as_ref().map(|o| SectionMv::of(p, &out, o));
     let detail = mvo.as_ref().map_or(detail, |o| o.detail);
-    let (mut prims, bounds) = section_primitives_mv(&out, mono, hidden, &vis, scale, detail, level.cut_hatch, &CutRules::of(p, &out, rv), smv.as_ref());
+    let (mut prims, bounds) = section_primitives_mv(&out, mono, hidden, &vis, scale, detail, level.cut_hatch, &CutRules::of(p, &out, rv).with_renovation(&out, ren.as_ref()), smv.as_ref());
     w.post = crate::plan::extras::sketch_post(Some(level.sketch), scale);
     // Strichstärken nach Massstab ([32]) wie im Grundriss.
     crate::plan::extras::scale_line_weights(p, scale, &mut prims);

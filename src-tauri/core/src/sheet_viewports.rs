@@ -102,7 +102,7 @@ pub fn level_with_template(l: &DrawingLevel, t: &ViewTemplate) -> DrawingLevel {
     macro_rules! take {
         ($($f:ident),*) => { $(if t.$f.is_some() { l.$f = t.$f.clone(); })* };
     }
-    take!(cut_height, view_top, view_bottom, view_depth, shadows, hidden_lines, sketch, cut_hatch, floor_finish, show_terrain, model_view_option_id);
+    take!(cut_height, view_top, view_bottom, view_depth, shadows, hidden_lines, sketch, cut_hatch, floor_finish, show_terrain, model_view_option_id, renovation_filter, renovation_phase);
     l
 }
 
@@ -140,6 +140,9 @@ pub fn viewport_args(p: &Project, snap: &ViewSnapshot, scale: f64, mono: bool) -
         // [173] Modelldarstellung des Ausschnitts (sonst die der Ebene, auch über die verknüpfte Vorlage).
         model_view: snap.model_view_option_id.clone().filter(|s| !s.is_empty()),
         trace_of: None,
+        // [271] Umbaufilter des Ausschnitts (sonst der der Ebene).
+        renovation: snap.renovation_filter.clone().filter(|s| !s.is_empty()),
+        renovation_phase: snap.renovation_phase.clone().filter(|s| !s.is_empty()),
     };
     a.apply_model_view(p);
     a

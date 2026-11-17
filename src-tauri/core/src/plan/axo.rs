@@ -705,8 +705,21 @@ pub fn axo_plan_buf(p: &Project, args: &[f64], text: &str) -> Result<Vec<u8>, St
     let mono = args.first().is_some_and(|&x| x != 0.0);
     let scale = args.get(1).copied().filter(|s| s.is_finite() && *s > 0.0).unwrap_or(100.0);
     let mut w = crate::plan::buf::Writer::new(true);
+    // [271] Umbaufilter (`renovation`, `renovationPhase`): Ausgeblendetes fehlt, Flächen in der Umbau-Farbe.
+    let ren = crate::renovation::View::new(p, v.get("renovation").and_then(|x| x.as_str()), v.get("renovationPhase").and_then(|x| x.as_str())).map(|r| r.resolve(p));
+    let filtered = ren.as_ref().filter(|r| !r.hidden.is_empty()).map(|r| crate::renovation::without_hidden(p, &r.hidden));
+    let p = filtered.as_ref().unwrap_or(p);
     let Some(a) = AxoArgs::parse(p, &v) else { return Ok(w.finish()) };
     if let Some((mut prims, bounds)) = axo_primitives(p, &a, mono)? {
+        if let Some(r) = ren.as_ref().filter(|r| !r.styled.is_empty()) {
+            for q in prims.iter_mut() {
+                let Some(st) = crate::renovation::prim_element(q).and_then(|id| r.styled.get(id)) else { continue };
+                if let Primitive::Polygon { fill, stroke, .. } = q {
+                    *fill = st.fill.clone();
+                    *stroke = st.fill.clone();
+                }
+            }
+        }
         super::extras::scale_line_weights(p, scale, &mut prims);
         w.group(&prims);
         w.bounds = Some(bounds);

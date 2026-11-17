@@ -239,6 +239,11 @@ fn derive_all(d: &mut Document, tag: &str, depth: Depth, fails: &mut Fails) {
                 }
             }
         }
+        // [271] Umbaufilter (eingebaut, mit Etappe, Unsinn).
+        for ren in [json!({"renovation": "umbauplan"}), json!({"renovation": "neubau", "renovationPhase": "x"}), json!({"renovation": "?"})] {
+            let t = plan_text(&p, fl, 100.0, ren.clone());
+            fails.run(|| format!("{tag} Grundriss {fl} Umbau {ren}"), || dossier_core::queries::run_bin_doc(d, "planDomains", &[1.0], &t));
+        }
         if full {
             let t = plan_text(&p, fl, 100.0, json!({"mono": true, "forPrint": true, "compact": true}));
             fails.run(|| format!("{tag} Grundriss {fl} mono/Druck"), || dossier_core::queries::run_bin_doc(d, "planDomains", &[1.0], &t));
@@ -273,6 +278,10 @@ fn derive_all(d: &mut Document, tag: &str, depth: Depth, fails: &mut Fails) {
                         }
                     }
                 }
+                // [271] Umbaufilter im Schnitt/in der Ansicht.
+                let t = if section { json!({"level": level, "scale": 100.0, "detail": "mittel", "renovation": "umbauplan"}) } else { json!({"level": level, "renovation": "abbruch"}) }.to_string();
+                let args = if section { vec![0.0, 1.0, 0.0] } else { vec![0.0, 0.0, 100.0] };
+                fails.run(|| format!("{tag} {kind} {} Umbau", lv.id), || dossier_core::queries::run_bin_doc(d, if section { "sectionPlan" } else { "elevationPlan" }, &args, &t));
             }
             dossier_core::model::DrawingLevelKind::Ceiling | dossier_core::model::DrawingLevelKind::Drawing if full => {
                 let t = plan_text(&p, &lv.id, 100.0, json!({}));
@@ -319,6 +328,11 @@ fn derive_all(d: &mut Document, tag: &str, depth: Depth, fails: &mut Fails) {
         ("openingSchedule", vec![], ""),
         ("elementSchedule", vec![], ""),
         ("shadows", vec![180.0, 45.0, 2.5], ""),
+        // [271] Umbaufilter: Kennzahlen/Flächen im Zustand, Filterliste, 3D mit Filter.
+        ("kennzahlen", vec![], "endzustand"),
+        ("areaTable", vec![], "{\"renovation\": \"bestand\", \"renovationPhase\": 7}"),
+        ("renovationFilters", vec![], ""),
+        ("model3dParts", vec![0.0, 1.0, 0.0, 1.0], "{\"renovation\": \"umbauplan\"}"),
     ];
     if heavy {
         q.push(("pickGeometry", vec![0.0], ""));

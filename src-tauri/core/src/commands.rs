@@ -33,7 +33,8 @@ pub fn ops(root: &Map<String, Value>, p: &Project, text: &str) -> Result<Vec<Op>
         return Ok(ops);
     }
     if let Some(ops) = crate::cmd_create::ops(root, p, &v) {
-        return Ok(ops);
+        // [271] Aktueller Zeichen-Status (`renovation` der Anfrage): neue Bauteile tragen ihn (Bestand = ohne Feld).
+        return Ok(stamp_renovation(ops, v.get("renovation")));
     }
     if let Some(ops) = crate::cmd_context::ops(root, p, &v) {
         return Ok(ops);
@@ -48,6 +49,34 @@ pub fn ops(root: &Map<String, Value>, p: &Project, text: &str) -> Result<Vec<Op>
         "cutSegment" => crate::cmd_split::cut_segment_ops(root, &s("id"), crate::cmd_split::point_arg(&v, "at")),
         other => return Err(format!("Unbekannter Befehl: {other}")),
     })
+}
+
+/// Listen, deren neue Elemente den Zeichen-Status bekommen ([271]).
+const RENOVATION_COLLECTIONS: [&str; 8] = ["walls", "openings", "ceilings", "roofs", "stairs", "columns", "extrudedSolids", "rooms"];
+
+/// [271] Neue Bauteile der Ops (`add` in [`RENOVATION_COLLECTIONS`]) erhalten `renovation` (ein Objekt mit gültigem
+/// `status`), sofern sie keines tragen; sonst unverändert.
+pub fn stamp_renovation(mut ops: Vec<Op>, ren: Option<&Value>) -> Vec<Op> {
+    let Some(r) = ren.filter(|r| matches!(r.get("status").and_then(Value::as_str), Some("new" | "demolish" | "existing"))) else { return ops };
+    let r = match (r.get("status").and_then(Value::as_str), r.get("phase").and_then(Value::as_str).filter(|x| !x.is_empty())) {
+        (Some("existing"), None) => return ops,
+        (Some(st), Some(ph)) => serde_json::json!({"status": st, "phase": ph}),
+        (Some(st), None) => serde_json::json!({"status": st}),
+        _ => return ops,
+    };
+    for op in ops.iter_mut() {
+        if let Op::Add { collection, items, .. } = op {
+            if !RENOVATION_COLLECTIONS.contains(&collection.as_str()) {
+                continue;
+            }
+            for it in items.iter_mut() {
+                if let Some(o) = it.as_object_mut() {
+                    o.entry("renovation").or_insert_with(|| r.clone());
+                }
+            }
+        }
+    }
+    ops
 }
 
 /// Wie [`ops`], mit Hinweis-Schlüssel (i18n) für die Hülle; bisher nur Verschieben ([144]: Öffnung an

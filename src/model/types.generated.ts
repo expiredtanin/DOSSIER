@@ -222,6 +222,8 @@ export type Ceiling = {
    * Z-Wert; „floor" bindet die UK an ein Geschoss.
    */
   bottom?: VerticalAnchor;
+  /** [271] Umbau: Status (Bestand, Abbruch, Neu) und Etappe. Fehlt ⇒ Bestand. */
+  renovation?: Renovation;
 };
 
 /**
@@ -327,6 +329,8 @@ export type Column = {
   strokeWeightSource?: AttributeSource;
   /** Quelle der Schraffur, analog {@link Column.foregroundSource}. */
   hatchSource?: AttributeSource;
+  /** [271] Umbau: Status (Bestand, Abbruch, Neu) und Etappe. Fehlt ⇒ Bestand. */
+  renovation?: Renovation;
 };
 
 /**
@@ -1393,6 +1397,16 @@ export type DrawingLevel = {
    * Fehlt ⇒ der Detailgrad allein bestimmt die Darstellung (heutiges Verhalten).
    */
   modelViewOptionId?: string;
+  /**
+   * [271] Umbaufilter (eingebaut „bestand“, „abbruch“, „neubau“, „umbauplan“, „endzustand“ oder Id aus
+   * `Project.renovation.filters`). Fehlt ⇒ kein Filter: alle Bauteile wie ohne Umbau-Angaben.
+   */
+  renovationFilter?: string;
+  /**
+   * [271] Etappe, bis zu der der Umbaufilter gilt (Id aus `Project.renovation.phases`): Neues späterer Etappen fehlt
+   * noch, Abbruch späterer Etappen steht noch als Bestand. Fehlt ⇒ alle Etappen.
+   */
+  renovationPhase?: string;
 };
 
 /**
@@ -1541,6 +1555,8 @@ export type ExtrudedSolid = {
    * Grundriss und im Schnitt. Fehlt = neutrale Körper-Füllung mit Rückfall-Schraffur.
    */
   componentId?: string;
+  /** [271] Umbau: Status (Bestand, Abbruch, Neu) und Etappe. Fehlt ⇒ Bestand. */
+  renovation?: Renovation;
 };
 
 /**
@@ -2779,6 +2795,10 @@ export type Opening = {
   doorFrameKind?: "zarge" | "blockrahmen" | "blendrahmen" | "umfassungszarge" | "eckzarge" | "blockzarge" | "futter";
   /** Übersteuert die Zargen-/Rahmenmasse des Türtyps feldweise ([105]). */
   doorFrame?: DoorFrameDetail;
+  /**
+   * [271] Umbau: Status (Bestand, Abbruch, Neu) und Etappe. Fehlt ⇒ Bestand wie die Wand (eine neue Öffnung in einer Bestandswand bricht die Wand dort ab, eine Öffnung „Abbruch“ wird zugemauert).
+   */
+  renovation?: Renovation;
 };
 
 /**
@@ -3233,6 +3253,8 @@ export type Project = {
     /** Anzeige-Adresse/Bezeichnung des Bezugspunkts. */
     label?: string;
   };
+  /** [271] Umbau: Etappen, Farben je Status (SIA 400) und eigene Umbaufilter. */
+  renovation?: RenovationSettings;
 };
 
 /** Protokolleintrag einer Publikation ([79]): Datum, Blätter mit Revision, erzeugte Dateien. */
@@ -3300,6 +3322,54 @@ export type ReferenceLineRule = {
    */
   target: "all" | "exterior" | string;
 };
+
+/** [271] Umbau-Angaben eines Elements. */
+export type Renovation = {
+  status: RenovationStatus;
+  /**
+   * Etappe (`Project.renovation.phases`, Id): beim Status „neu“ die Bau-, bei „abbruch“ die Abbruch-Etappe.
+   * Fehlt ⇒ erste Etappe.
+   */
+  phase?: string;
+};
+
+/** [271] Ein Umbaufilter (wie Archicads „Renovation Filter“): Darstellung je Status. */
+export type RenovationFilter = {
+  id: string;
+  name: string;
+  existing: RenovationShow;
+  demolish: RenovationShow;
+  new: RenovationShow;
+};
+
+/** [271] Eine Bau-Etappe (Reihenfolge = Reihenfolge der Liste). */
+export type RenovationPhase = { id: string; name: string };
+
+/** [271] Umbau-Einstellungen des Projekts. */
+export type RenovationSettings = {
+  /** Etappen in ihrer Reihenfolge (Neubau/Abbruch Etappe 1, 2 …). */
+  phases?: Array<RenovationPhase>;
+  styles?: RenovationStyles;
+  /** Eigene Umbaufilter (zusätzlich zu den eingebauten). */
+  filters?: Array<RenovationFilter>;
+};
+
+/** [271] Darstellung eines Status im Umbaufilter. */
+export type RenovationShow = "show" | "hide" | "override";
+
+/**
+ * [271] Umbau-Status eines Bauteils (Archicad „Renovation Status“; SIA 400: Bestand schwarz/grau, Abbruch gelb,
+ * Neu rot).
+ */
+export type RenovationStatus = "existing" | "demolish" | "new";
+
+/**
+ * [271] Umbau-Farbe eines Status: Füllung der Schnittflächen, Linienfarbe, gestrichelt. Fehlende Felder ⇒ SIA-Vorgabe.
+ */
+export type RenovationStyle = { fill?: string; line?: string; dashed?: boolean };
+
+/** [271] Umbau-Farben je Status (fehlt ⇒ SIA-400-Vorgabe, `renovation::default_style`). */
+export type RenovationStyles = { existing?: RenovationStyle; demolish?: RenovationStyle; new?: RenovationStyle };
 
 /** Wie eine Wandschicht an der Öffnung anschliesst ([106]). */
 export type RevealMode = "buendig" | "zurueck" | "leibung" | "ueberdaemmt";
@@ -3433,6 +3503,8 @@ export type Roof = {
   parapetWidth?: number;
   /** Attika: Bauteil/Material (Farbe, Schnittschraffur); fehlt ⇒ Wandfarbe ohne Schraffur. */
   parapetComponentId?: string;
+  /** [271] Umbau: Status (Bestand, Abbruch, Neu) und Etappe. Fehlt ⇒ Bestand. */
+  renovation?: Renovation;
 };
 
 /**
@@ -3533,6 +3605,10 @@ export type Room = {
   ceilingFinish?: string;
   /** [158] Bodenaufbau als Freitext (z. B. „Parkett 15, UB 80, TSD 20"). */
   floorBuildUp?: string;
+  /**
+   * [271] Umbau: Status (Bestand, Abbruch, Neu) und Etappe. Fehlt ⇒ Bestand (nur Sichtbarkeit und Flächen je Zustand, keine Umbau-Farbe: ein Raum ist kein Bauteil).
+   */
+  renovation?: Renovation;
 };
 
 /**
@@ -3941,6 +4017,8 @@ export type Stair = {
    * [T3] Pfosten-Tiefe in Metern, quer zum Handlauf (rechteckig: fehlt = 0.03; Flachstahl: Dicke, fehlt = 0.01; rund: ohne Wirkung).
    */
   postDepth?: number;
+  /** [271] Umbau: Status (Bestand, Abbruch, Neu) und Etappe. Fehlt ⇒ Bestand. */
+  renovation?: Renovation;
 };
 
 /**
@@ -4307,6 +4385,16 @@ export type ViewSnapshot = {
    * Blickwinkel `view3d`. Fehlt ⇒ Blickwinkel `view3d`, Isometrie, getönte Flächen.
    */
   doc3d?: Doc3d;
+  /**
+   * [271] Umbaufilter (eingebaut „bestand“, „abbruch“, „neubau“, „umbauplan“, „endzustand“ oder Id aus
+   * `Project.renovation.filters`). Fehlt ⇒ kein Filter: alle Bauteile wie ohne Umbau-Angaben.
+   */
+  renovationFilter?: string;
+  /**
+   * [271] Etappe, bis zu der der Umbaufilter gilt (Id aus `Project.renovation.phases`): Neues späterer Etappen fehlt
+   * noch, Abbruch späterer Etappen steht noch als Bestand. Fehlt ⇒ alle Etappen.
+   */
+  renovationPhase?: string;
 };
 
 /**
@@ -4368,6 +4456,16 @@ export type ViewTemplate = {
    * Fehlt ⇒ der Detailgrad allein bestimmt die Darstellung (heutiges Verhalten).
    */
   modelViewOptionId?: string;
+  /**
+   * [271] Umbaufilter (eingebaut „bestand“, „abbruch“, „neubau“, „umbauplan“, „endzustand“ oder Id aus
+   * `Project.renovation.filters`). Fehlt ⇒ kein Filter: alle Bauteile wie ohne Umbau-Angaben.
+   */
+  renovationFilter?: string;
+  /**
+   * [271] Etappe, bis zu der der Umbaufilter gilt (Id aus `Project.renovation.phases`): Neues späterer Etappen fehlt
+   * noch, Abbruch späterer Etappen steht noch als Bestand. Fehlt ⇒ alle Etappen.
+   */
+  renovationPhase?: string;
 };
 
 /** Ansichtstyp eines Geschosses (wie in App). */
@@ -4524,6 +4622,8 @@ export type Wall = {
    * der Elementkante.
    */
   surfacePatternOffset?: Vec2;
+  /** [271] Umbau: Status (Bestand, Abbruch, Neu) und Etappe. Fehlt ⇒ Bestand. */
+  renovation?: Renovation;
 };
 
 /**

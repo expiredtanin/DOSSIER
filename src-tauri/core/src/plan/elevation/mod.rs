@@ -205,6 +205,12 @@ pub fn elevation_primitives(p: &Project, level: &LevelSpec, shadows: bool, mono:
 /// `None` = Schalter im Projekt). [33] Regeln wirken auf Flächen (Füllung, Schraffur, ausblenden), Kanten
 /// (Farbe, Stärke, Umriss aus) und Öffnungen (Linien, Glasfüllung).
 pub fn elevation_primitives_with(p: &Project, level: &LevelSpec, shadows: bool, mono: bool, vis: &Visibility, scale: f64, rules: Option<&HashSet<String>>) -> Result<Option<(Vec<Primitive>, [f64; 4])>, String> {
+    elevation_primitives_ren(p, level, shadows, mono, vis, scale, rules, None)
+}
+
+/// [271] Wie [`elevation_primitives_with`] mit den Umbau-Farben `ren` (das Ausgeblendete fehlt schon in `p`).
+#[allow(clippy::too_many_arguments)]
+pub fn elevation_primitives_ren(p: &Project, level: &LevelSpec, shadows: bool, mono: bool, vis: &Visibility, scale: f64, rules: Option<&HashSet<String>>, ren: Option<&crate::renovation::Resolved>) -> Result<Option<(Vec<Primitive>, [f64; 4])>, String> {
     let Some(plane) = level.plane() else { return Ok(None) };
     let frame = frame_of(&plane);
     let mut walls = model3d::emit_walls_with(p, false, false)?;
@@ -295,6 +301,9 @@ pub fn elevation_primitives_with(p: &Project, level: &LevelSpec, shadows: bool, 
     // Wände samt ihren Öffnungen.
     let rv = RuleView::at(scale, rules).view("elevation");
     face_overrides(p, &mut faces, rv);
+    if let Some(r) = ren {
+        face::renovation_faces(&mut faces, r);
+    }
     let hidden_walls: HashSet<String> = faces.iter().filter(|f| f.role == Role::Wall && f.ov.as_ref().is_some_and(|o| o.hide)).map(|f| f.id.clone()).collect();
     faces.retain(|f| !f.ov.as_ref().is_some_and(|o| o.hide));
 
@@ -958,7 +967,11 @@ pub fn elevation_plan_buf(p: &Project, args: &[f64], text: &str) -> Result<Vec<u
     w.post = super::extras::sketch_post(Some(level.sketch), scale);
     // [33] Eingeschaltete Override-Regeln eines Blatt-Viewports (`rules`: ids; fehlt = Schalter im Projekt).
     let on: Option<HashSet<String>> = v.get("rules").and_then(|a| a.as_array()).map(|a| a.iter().filter_map(|s| s.as_str().map(String::from)).collect());
-    if let Some((mut prims, bounds)) = elevation_primitives_with(p, &level, shadows, mono, &vis, scale, on.as_ref())? {
+    // [271] Umbaufilter (angefragt, sonst der der Ebene): Ausgeblendetes fehlt (verdeckt nichts), Farben auf die Flächen.
+    let ren = super::section::query::renovation_view(p, &v, &level).map(|r| r.resolve(p)).filter(|r| !r.is_empty());
+    let filtered = ren.as_ref().filter(|r| !r.hidden.is_empty()).map(|r| crate::renovation::without_hidden(p, &r.hidden));
+    let p = filtered.as_ref().unwrap_or(p);
+    if let Some((mut prims, bounds)) = elevation_primitives_ren(p, &level, shadows, mono, &vis, scale, on.as_ref(), ren.as_ref())? {
         super::extras::scale_line_weights(p, scale, &mut prims);
         w.group(&prims);
         // Achsraster ([112]): Achsen quer zur Blickebene.

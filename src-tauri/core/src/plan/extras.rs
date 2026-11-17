@@ -636,6 +636,40 @@ pub struct Post {
     pub lw: f64,
     /// Skizzenstil ([67], `plan/sketch.rs`): Meter Modell je Papier-mm; 0 = aus.
     pub sketch: f64,
+    /// [271] Farben, die Schwarz-Weiss nicht ändert (Umbau-Farben: im Umbauplan sind sie die Aussage).
+    pub keep: KeepColors,
+}
+
+/// [271] Bis zu sechs Farben (RGB), die [`Post`] in Schwarz-Weiss stehen lässt.
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
+pub struct KeepColors {
+    rgb: [u32; 6],
+    n: u8,
+}
+
+impl KeepColors {
+    /// Aus Hex-Farben (`#rrggbb`); ungültige und überzählige fallen weg.
+    pub fn of<'a>(colors: impl IntoIterator<Item = &'a str>) -> KeepColors {
+        let mut k = KeepColors::default();
+        for c in colors {
+            if let Some(v) = hex_rgb(c) {
+                if (k.n as usize) < k.rgb.len() && !k.rgb[..k.n as usize].contains(&v) {
+                    k.rgb[k.n as usize] = v;
+                    k.n += 1;
+                }
+            }
+        }
+        k
+    }
+
+    pub fn has(&self, c: &str) -> bool {
+        self.n > 0 && hex_rgb(c).is_some_and(|v| self.rgb[..self.n as usize].contains(&v))
+    }
+}
+
+fn hex_rgb(c: &str) -> Option<u32> {
+    let h = c.trim().strip_prefix('#')?;
+    (h.len() == 6).then(|| u32::from_str_radix(h, 16).ok()).flatten()
 }
 
 impl Post {
@@ -666,12 +700,12 @@ impl Post {
                     if *fill != "none" {
                         if solid {
                             *fill = HATCH_INK.into();
-                        } else if !is_neutral(fill) {
+                        } else if !is_neutral(fill) && !self.keep.has(fill) {
                             *fill = "#ffffff".into();
                         }
                     }
                     // [140] „none" bleibt (Wandschichten ohne Umriss: sonst Kontur statt Schraffur).
-                    if *stroke != "none" && !is_neutral(stroke) {
+                    if *stroke != "none" && !is_neutral(stroke) && !self.keep.has(stroke) {
                         *stroke = MONO_INK.into();
                     }
                 }
@@ -692,7 +726,7 @@ impl Post {
                 }
             }
             Primitive::Line { weight_mm, color, .. } => {
-                if self.mono && !color.as_deref().is_some_and(is_neutral) {
+                if self.mono && !color.as_deref().is_some_and(|c| is_neutral(c) || self.keep.has(c)) {
                     *color = Some(MONO_INK.into());
                 }
                 if self.lw != 1.0 {
@@ -710,7 +744,7 @@ impl Post {
 
     /// Farbe und Stärke einer Linie.
     pub fn line<'a>(&self, color: Option<&'a str>, w: f64) -> (Option<&'a str>, f64) {
-        (if self.mono && !color.is_some_and(is_neutral) { Some(MONO_INK) } else { color }, scale_weight(w, self.lw))
+        (if self.mono && !color.is_some_and(|c| is_neutral(c) || self.keep.has(c)) { Some(MONO_INK) } else { color }, scale_weight(w, self.lw))
     }
 }
 
@@ -735,7 +769,7 @@ pub fn scale_line_weights(p: &Project, scale: f64, prims: &mut [Primitive]) {
     if lw == 1.0 {
         return;
     }
-    let post = Post { mono: false, lw, sketch: 0.0 };
+    let post = Post { mono: false, lw, sketch: 0.0, keep: KeepColors::default() };
     for q in prims.iter_mut() {
         match q {
             Primitive::Line { weight_mm, .. } => *weight_mm = scale_weight(*weight_mm, lw),
@@ -750,7 +784,13 @@ pub fn post_for(p: &Project, a: &super::domains::PlanArgs) -> Option<Post> {
     let level = p.floor(&a.floor);
     let sheet = level.is_some_and(|l| l.layout_id.is_some());
     let sketch = if sheet { 0.0 } else { sketch_k(level.and_then(|l| l.sketch), a.scale) };
-    Some(Post { mono: a.mono, lw: if sheet { 1.0 } else { line_weight_factor(p, a.scale) }, sketch }).filter(Post::active)
+    // [271] Umbau-Farben bleiben auch in Schwarz-Weiss (Tusche): ohne sie sagt ein Umbauplan nichts.
+    let keep = if a.mono {
+        crate::renovation::View::for_level(p, &a.floor, a.renovation.as_deref(), a.renovation_phase.as_deref()).map_or_else(KeepColors::default, |v| KeepColors::of(v.colors().iter().map(String::as_str)))
+    } else {
+        KeepColors::default()
+    };
+    Some(Post { mono: a.mono, lw: if sheet { 1.0 } else { line_weight_factor(p, a.scale) }, sketch, keep }).filter(Post::active)
 }
 
 /// [67] Skizzenstil einer Ebene beim Massstab 1:`scale`: Meter je Papier-mm, 0 = aus.
@@ -764,7 +804,7 @@ pub fn sketch_k(on: Option<bool>, scale: f64) -> f64 {
 
 /// [67] Nachbearbeitung nur mit Skizzenstil (Schnitt/Ansicht; `None` = aus).
 pub fn sketch_post(on: Option<bool>, scale: f64) -> Option<Post> {
-    Some(Post { mono: false, lw: 1.0, sketch: sketch_k(on, scale) }).filter(Post::active)
+    Some(Post { mono: false, lw: 1.0, sketch: sketch_k(on, scale), keep: KeepColors::default() }).filter(Post::active)
 }
 
 // ── Ausmass ─────────────────────────────────────────────────────────────────────────────────────
@@ -1124,7 +1164,7 @@ mod tests {
 
     #[test]
     fn mono_poche_bleibt_schwarz() {
-        let post = Post { mono: true, lw: 1.0, sketch: 0.0 };
+        let post = Post { mono: true, lw: 1.0, sketch: 0.0, keep: KeepColors::default() };
         let mut solid = HatchRender { pattern: HatchPattern::Solid, ..no_hatch() };
         solid.color = "#123456".into();
         let mut p = flat_polygon(vec![], "#abcdef", 1.0);
@@ -1156,10 +1196,10 @@ mod tests {
             _ => unreachable!(),
         };
         let mut p = stamp();
-        Post { mono: true, lw: 1.0, sketch: 0.0 }.apply(&mut p);
+        Post { mono: true, lw: 1.0, sketch: 0.0, keep: KeepColors::default() }.apply(&mut p);
         assert_eq!(colors(&p), (MONO_INK.to_string(), vec![Some("#808080".into()), Some(MONO_INK.into())]));
         let mut p = stamp();
-        Post { mono: false, lw: 0.8, sketch: 0.0 }.apply(&mut p);
+        Post { mono: false, lw: 0.8, sketch: 0.0, keep: KeepColors::default() }.apply(&mut p);
         assert_eq!(colors(&p), ("#2255cc".to_string(), vec![Some("#808080".into()), Some("#d0342c".into())]));
     }
 
@@ -1167,7 +1207,7 @@ mod tests {
     /// die Kontur die Schraffur), Grautöne (Schatten, Gelände, Treppe) bleiben, bunte Farben werden Tinte/Papier.
     #[test]
     fn mono_behaelt_grau_und_ohne_umriss() {
-        let post = Post { mono: true, lw: 1.0, sketch: 0.0 };
+        let post = Post { mono: true, lw: 1.0, sketch: 0.0, keep: KeepColors::default() };
         let mut p = flat_polygon(vec![], "#3c3c3c", 0.0);
         if let Primitive::Polygon { stroke, hatch, .. } = &mut p {
             *stroke = "none".into();

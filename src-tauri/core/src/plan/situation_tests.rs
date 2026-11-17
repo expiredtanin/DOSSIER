@@ -220,7 +220,7 @@ fn kataster_gewaesser_mit_schraffur_auch_in_tusche() {
     // Abstand 1.2 mm auf dem Papier bei 1:500: 8 · scale / 90 m = 0.6 m.
     assert!((8.0 * hatch.scale / 90.0 - 0.6).abs() < 1e-9, "Abstand {}", 8.0 * hatch.scale / 90.0);
     let mut q = water[0].clone();
-    Post { mono: true, lw: 1.0, sketch: 0.0 }.apply(&mut q);
+    Post { mono: true, lw: 1.0, sketch: 0.0, keep: Default::default() }.apply(&mut q);
     let Primitive::Polygon { fill, hatch, .. } = &q else { unreachable!() };
     assert_eq!(fill, "#ffffff");
     assert_eq!(hatch.pattern, HatchPattern::Diagonal);

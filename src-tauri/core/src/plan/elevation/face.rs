@@ -102,6 +102,22 @@ fn surf_ov(p: &Project, v: RuleView, kind: &str, code: &str, name: Option<&str>,
     (o.fill.is_some() || o.no_pattern || o.outline.is_some() || o.color.is_some() || o.lineweight.is_some() || o.dash.is_some() || o.hide).then(|| Rc::new(o))
 }
 
+/// [271] Umbau-Farben je Ansichtsfläche (Füllung ohne Muster, Kanten in der Linienfarbe, gestrichelt bei Abbruch); gehen
+/// den Regeln vor.
+pub(super) fn renovation_faces(faces: &mut [Face], r: &crate::renovation::Resolved) {
+    if r.styled.is_empty() {
+        return;
+    }
+    let mut memo: HashMap<String, Rc<SurfOv>> = HashMap::new();
+    for f in faces.iter_mut().filter(|f| !f.id.is_empty()) {
+        let Some(st) = r.styled.get(&f.id) else { continue };
+        let o = memo.entry(f.id.clone()).or_insert_with(|| {
+            Rc::new(SurfOv { fill: Some(st.fill.clone()), no_pattern: true, hatch: None, outline: None, color: st.line.clone(), lineweight: None, dash: st.dashed.then(|| Some(crate::renovation::DEMOLISH_DASH.to_vec())), hide: false })
+        });
+        f.ov = Some(o.clone());
+    }
+}
+
 /// [33] Override-Regeln je Ansichtsfläche: Wand (Wandtyp, sichtbare Seite = äusserste bzw. innerste
 /// Schicht), Decke/Bodenplatte, Treppe, Dach (Eindeckung = erste Schicht), Stütze. Ohne aktive Regel nichts.
 pub(super) fn face_overrides(p: &Project, faces: &mut [Face], v: RuleView) {

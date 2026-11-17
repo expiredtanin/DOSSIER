@@ -80,7 +80,17 @@ export async function viewportLevelPlan(
  */
 export async function viewportSnapshotPlan(project: Project, snap: ViewSnapshot, visibleCodes: Set<string>, scaleDenominator: number, forPrint = false): Promise<Plan> {
   if (isDoc3dSnapshot(snap)) return snapshotAxoPlan(project, snap, visibleCodes, scaleDenominator, snapshotMono(project, snap)) ?? EMPTY;
+  // [271] Umbaufilter des Ausschnitts: geht dem der Ebene vor (wie im Kern `sheet_viewports::viewport_args`).
+  if (snap.renovationFilter) {
+    const rp = projectWithRenovation(project, snap.activeLevelId, snap.renovationFilter, snap.renovationPhase);
+    return withDocument(rp, () => viewportLevelPlan(rp, snap.activeLevelId, visibleCodes, snap.detail, scaleDenominator, forPrint, snapshotMono(rp, snap), snapshotOverrideRuleIds(rp, snap), snapshotTemplate(rp, snap), snap.modelViewOptionId));
+  }
   return viewportLevelPlan(project, snap.activeLevelId, visibleCodes, snap.detail, scaleDenominator, forPrint, snapshotMono(project, snap), snapshotOverrideRuleIds(project, snap), snapshotTemplate(project, snap), snap.modelViewOptionId);
+}
+
+/** [271] Das Projekt mit Umbaufilter `filter` (und Etappe) an der Ebene `levelId`. */
+export function projectWithRenovation(project: Project, levelId: string, filter: string, phase?: string): Project {
+  return { ...project, drawingLevels: project.drawingLevels.map((l) => (l.id === levelId ? { ...l, renovationFilter: filter, ...(phase ? { renovationPhase: phase } : {}) } : l)) };
 }
 
 /** [173] Das Projekt mit der Modelldarstellung `id` an der Ebene `levelId` (wie die Vorlage ein Ebenen-Feld). */

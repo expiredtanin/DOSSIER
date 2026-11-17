@@ -47,6 +47,7 @@ import { textboxCommand } from "./cmds/textbox";
 import { mirrorCommand, moveCommand, rotateCommand } from "./cmds/transform";
 import { scaleCommand } from "./cmds/scale";
 import { explodeCommand } from "./cmds/explode";
+import { renovationCommand } from "./cmds/renovation";
 import { dimdetachCommand } from "./cmds/dimdetach";
 import { autodimCommand } from "./cmds/autodim";
 import { gridCommand } from "./cmds/grid";
@@ -132,6 +133,7 @@ export const COMMANDS: Record<string, Command> = {
   rotate: rotateCommand,
   scale: scaleCommand,
   explode: explodeCommand,
+  renovation: renovationCommand,
   dimdetach: dimdetachCommand,
   autodim: autodimCommand,
   grid: gridCommand,
@@ -283,6 +285,7 @@ export const ALIASES: Record<string, string> = {
   skalieren: "scale",
   x: "explode",
   aufloesen: "explode",
+  umbau: "renovation",
   bml: "dimdetach",
   bemassungloesen: "dimdetach",
   ab: "autodim",

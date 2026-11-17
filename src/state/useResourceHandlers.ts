@@ -18,6 +18,7 @@ import type { useProjectActions } from "./useProjectActions";
 import type { useTopBarState } from "./useTopBarState";
 import { useViewTemplateHandlers } from "./useViewTemplateHandlers";
 import { modelViewHandlers } from "./useModelViewHandlers";
+import { setField, setPhasesOps } from "../core";
 
 type TopBar = ReturnType<typeof useTopBarState>;
 type Dialogs = ReturnType<typeof useDialogState>;
@@ -135,6 +136,15 @@ export function useResourceHandlers(opts: {
     ...viewTemplateHandlers,
     // [173] Modelldarstellung (neue Stufe über dem Detailgrad der Anzeige).
     ...modelViewHandlers(applyChange, () => detail),
+    // [271] Umbau: Etappen und Farben (Ressourcen-Tab „Umbau“).
+    onSetRenovationPhases: (phases) => applyChange((p) => setPhasesOps(p, phases)),
+    onSetRenovationStyles: (styles) =>
+      applyChange((p) => {
+        const next = { ...(p.renovation ?? {}) };
+        if (styles) next.styles = styles;
+        else delete next.styles;
+        return [setField("renovation", Object.keys(next).length ? next : undefined)];
+      }),
     onPatchComponent: patchComponent,
     onPatchWallType: patchWallType,
     onAddWallType: addWallType,
