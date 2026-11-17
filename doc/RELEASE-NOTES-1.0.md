@@ -30,7 +30,7 @@ Mengen und Exporte werden daraus berechnet und stimmen nach jeder Änderung wied
 
 **Systemvoraussetzungen:** Aus dem Repo nicht ersichtlich (kleinste macOS-Version, Prozessor, Arbeitsspeicher, Grafik).
 Die 3D-Anzeige braucht WebGPU bzw. Metal. **[Frage M: Systemvoraussetzungen und kleinste macOS-Version?]**
-Für das Rendering mit Blender/Cycles muss Blender selbst installiert sein (eigener Prozess, nicht mitgeliefert).
+Das Rendering braucht kein Blender mehr: Cycles (Apache-2.0) ist als eigenes Hilfsprogramm in der Desktop-App enthalten (Linux-AppImage ≈ +70 MB). Wer lieber Blender nutzt, wählt im Dialog „Renderer“ → „Blender“ (dann muss es installiert sein).
 
 ## Was geht
 
@@ -54,7 +54,7 @@ in `doc/KURZANLEITUNG.md`):
 6. **Situation und Schwarzplan 1:500.** Ansichtsvorlagen «Situation WBW 1:500» und «Schwarzplan 1:500»: eigenes Gebäude und
    Kataster-Gebäude gefüllt, Parzelle, Nordpfeil, Massstabsbalken; alles auf Klassen, einzeln ausschaltbar.
 7. **3D und Schatten.** 3D-Viewport mit Live-Schnitt, Axonometrie, Sonnenstand und Schatten (Datum/Uhrzeit), Kameras und
-   Kamerafahrt, Begehen mit Kollision, 3D-Bild als PNG in Abgabeauflösung (`bild3d`). Rendering mit Blender/Cycles als Brücke;
+   Kamerafahrt, Begehen mit Kollision, 3D-Bild als PNG in Abgabeauflösung (`bild3d`). Rendering mit dem eingebauten Cycles (ohne Blender) oder über ein installiertes Blender;
    eingebauter Pathtracer als Vorschau. **3D-Dokument** (16.11., [266]): *Ansicht → 3D-Dokument erstellen* zeichnet die aktuelle
    3D-Kamera (Parallel oder Perspektive) als Vektorzeichnung mit verdeckten Kanten aus dem Kern (Umriss kräftig, Flächen nach Lage
    hellgrau), als Ausschnitt mit Blatt A3; sie rechnet bei Modelländerungen neu und geht ins PDF/SVG/DXF, ohne Grafikkarte. Jeder
@@ -162,7 +162,9 @@ Ehrlich vorweg: **Der Durchlauf des ganzen Referenz-Ablaufs auf dem Mac ist noch
   Tauri/WKWebView nicht geprüft, Bildinhalt nicht gesehen ([246]).
 - **Pathtracing ist eine Vorschau** (progressiv, höchstens 1024 Samples, vereinfachte Materialien) und auf dem Mac nicht geprüft ([212]).
   Unter der Software-GPU (SwiftShader) des Test-Containers brach der erste Pathtrace-Lauf mit einem Fehler ab; auf echter GPU nicht geprüft.
-- **Rendering mit Blender/Cycles**: Lauf mit installiertem Blender nur im Container (bpy 5.3, CPU) geprüft; Mac, Metal-GPU und
+- **Rendering mit dem eingebauten Cycles ([215])**: im Linux-AppImage mit CPU geprüft (Dialog, Fortschritt, Bild, Ins Layout einsetzen);
+  **auf dem Mac (Metal-GPU, Tauri, erstes Übersetzen der Rechenkerne, Signieren des Hilfsprogramms) nicht geprüft**. Im Browser nicht verfügbar.
+- **Rendering mit Blender** (Option im selben Dialog): Lauf mit installiertem Blender nur im Container (bpy 5.3, CPU) geprüft; Mac, Metal-GPU und
   Blender 3.6/4.x offen ([211], [229], [228]). Ohne Blender gibt es nur einen Hinweis.
 
 **Pläne und Abgabe**

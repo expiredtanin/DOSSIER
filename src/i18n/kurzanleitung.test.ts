@@ -24,7 +24,7 @@ const VALUES = new Set(Object.values(de as Record<string, string>).map(strip));
 /** Texte, die keine UI-Texte sind, sondern Beispieldaten, Dateiformate oder Zahlen aus dem Beispielprojekt. */
 const DATA = new Set([
   "A1", "Wettbewerb & Vorprojekt", "Parzelle 880 m² · zulässig", "Höhe 9.50 m ≤ 12.00 m",
-  "Erdgeschoss", "Schnitt A", "Schnitt B", "3D · Erdgeschoss", "Pathtracing: n Samples · x/s", "Blatt n",
+  "Erdgeschoss", "Schnitt A", "Schnitt B", "3D · Erdgeschoss", "Pathtracing: n Samples · x/s", "Rendern: Sample n von N", "Blatt n",
   "Plan x/n", "(fertig)", "Alt", "Nicht geprüft", "PDF", "DXF", "IFC", "Wettbewerb",
 ]);
 

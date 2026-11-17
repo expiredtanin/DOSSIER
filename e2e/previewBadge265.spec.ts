@@ -30,15 +30,15 @@ test("Vorschau-Marke in Menü, Darstellungsart, Kamerafahrt und Geist (de)", asy
   test.setTimeout(150_000);
   await openKomplex(page, "de");
 
-  // Ansichtsmenü: „Rendering mit Blender …“ mit Marke, „3D-Bild …“ ohne.
+  // Ansichtsmenü: „Rendering …“ mit Marke, „3D-Bild …“ ohne.
   await page.getByRole("button", { name: "Ansicht", exact: true }).click();
-  const render = page.getByRole("option", { name: /Rendering mit Blender/ });
+  const render = page.getByRole("option", { name: /^Rendering/ });
   await expect(render.getByTestId("preview-badge")).toHaveText("Vorschau");
   await expect(render).toHaveAttribute("title", "Noch nicht fertig — Ergebnisse können abweichen");
   await expect(page.getByRole("option", { name: /^3D-Bild/ }).getByTestId("preview-badge")).toHaveCount(0);
   await shot(page, "preview-de-menu");
   await render.click();
-  const dlg = page.getByRole("dialog", { name: "Rendering mit Blender" });
+  const dlg = page.getByRole("dialog", { name: "Rendering", exact: true });
   await expect(dlg.getByTestId("preview-badge")).toHaveText("Vorschau");
   await shot(page, "preview-de-render-dialog");
   await page.keyboard.press("Escape");
@@ -79,7 +79,7 @@ test("Vorschau-Marke auf Englisch: Preview", async ({ page }) => {
   test.setTimeout(150_000);
   await openKomplex(page, "en");
   await page.getByRole("button", { name: "View", exact: true }).click();
-  const render = page.getByRole("option", { name: /Render with Blender/ });
+  const render = page.getByRole("option", { name: /^Render …/ });
   await expect(render.getByTestId("preview-badge")).toHaveText("Preview");
   await expect(render).toHaveAttribute("title", "Not finished yet — results may differ");
   await shot(page, "preview-en-menu");

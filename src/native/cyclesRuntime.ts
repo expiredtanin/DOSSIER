@@ -18,6 +18,8 @@ export interface DossierCyclesApi {
   start: (jobId: string, sceneDir: string, args: string[]) => Promise<void>;
   cancel: (jobId: string) => void;
   readFile: (path: string) => Promise<Uint8Array>;
+  /** Arbeitsordner samt Inhalt löschen (nur unter dossier-render). */
+  cleanup: (dir: string) => Promise<void>;
   onLine: (cb: (e: { jobId: string; line: string }) => void) => () => void;
   onExit: (cb: (e: { jobId: string; code: number }) => void) => () => void;
 }
@@ -53,6 +55,7 @@ interface CyclesHost {
   where(): Promise<string | null>;
   prepare(files: { path: string; bytes: Uint8Array }[]): Promise<string>;
   readFile(path: string): Promise<Uint8Array>;
+  cleanup(dir: string): Promise<void>;
   spawn(sceneDir: string, args: string[], onLine: (line: string) => void): { done: Promise<number>; cancel(): void };
 }
 
@@ -83,6 +86,7 @@ async function tauriHost(): Promise<CyclesHost> {
       return dir;
     },
     readFile: (path) => fs.readFile(path),
+    cleanup: (dir) => fs.remove(dir, { recursive: true }),
     spawn(sceneDir, args, onLine) {
       const jobId = newJobId();
       const done = (async () => {
@@ -112,6 +116,7 @@ function electronHost(api: DossierCyclesApi): CyclesHost {
     where: () => api.where(),
     prepare: (files) => api.prepare(files),
     readFile: (path) => api.readFile(path),
+    cleanup: (dir) => api.cleanup(dir),
     spawn(sceneDir, args, onLine) {
       const jobId = newJobId();
       let resolveExit!: (code: number) => void;
@@ -165,6 +170,15 @@ export async function prepareCyclesScene(files: { path: string; bytes: Uint8Arra
 /** Liest eine Datei aus dem Arbeitsordner (z. B. das gerenderte Bild). */
 export async function readCyclesFile(path: string): Promise<Uint8Array> {
   return (await requireHost()).readFile(path);
+}
+
+/** Löscht den Arbeitsordner von {@link prepareCyclesScene} samt Inhalt (Szene, Bild). Fehler schlucken: Aufräumen darf nichts verderben. */
+export async function cleanupCyclesScene(dir: string): Promise<void> {
+  try {
+    await (await requireHost()).cleanup(dir);
+  } catch {
+    /* Temp-Ordner bleibt liegen; das Betriebssystem räumt ihn später auf */
+  }
 }
 
 export interface CyclesResult {

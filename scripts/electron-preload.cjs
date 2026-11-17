@@ -54,6 +54,7 @@ contextBridge.exposeInMainWorld("dossierCycles", {
   start: (jobId, sceneDir, args) => ipcRenderer.invoke("cycles:start", jobId, sceneDir, args),
   cancel: (jobId) => ipcRenderer.send("cycles:cancel", jobId),
   readFile: (path) => ipcRenderer.invoke("cycles:read", path),
+  cleanup: (dir) => ipcRenderer.invoke("cycles:cleanup", dir),
   onLine: (callback) => {
     const listener = (_event, payload) => callback(payload);
     ipcRenderer.on("cycles:line", listener);

@@ -1,8 +1,10 @@
-// [211] Dialog „Rendering mit Blender": Bildgrösse, Qualität, Sonne (Datum/Uhrzeit, vorbelegt aus der
-// Sonnenstudie), Blender-Pfad → startet Blender als eigenen Prozess (Tauri/Electron), zeigt den Fortschritt
-// („Sample x von y"), bietet Abbrechen und nach dem Lauf das Bild (Vorschau, Speichern). Im Browser gibt es
-// stattdessen das Paket als ZIP. Registriert sich selbst als Öffner (`state/renderDialogHook`); Befehl
-// `rendering`, Menüpunkt Ansicht → „Rendering mit Blender …". Overlay wie `PresentationDialog` (kein window.prompt).
+// [211] Dialog „Rendering …": Renderer (eingebautes Cycles [215] oder installiertes Blender), Bildgrösse, Qualität, Sonne
+// (Datum/Uhrzeit, vorbelegt aus der Sonnenstudie), Kamera → startet den Renderer als eigenen Prozess (Tauri/Electron), zeigt den
+// Fortschritt („Sample x von y“, verstrichene Zeit, Restzeit), bietet Abbrechen und nach dem Lauf das Bild (Vorschau, Speichern,
+// Ins Layout einsetzen). Cycles ist die Vorgabe, wenn es mitgeliefert ist (`cyclesAvailable`); im Browser ist die Option
+// ausgegraut und es gibt stattdessen das Blender-Paket als ZIP. Cycles-Ablauf ohne Oberfläche: `state/cyclesAction.ts`.
+// Registriert sich selbst als Öffner (`state/renderDialogHook`); Befehl `rendering`, Menüpunkt Ansicht → „Rendering …“.
+// Overlay wie `PresentationDialog` (kein window.prompt).
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { t } from "../i18n";
@@ -10,6 +12,8 @@ import { useModalFocus } from "./modalFocus";
 import {
   BLENDER_DOWNLOAD_URL,
   BlenderMissingError,
+  CyclesCancelled,
+  CyclesMissingError,
   RENDER_QUALITY_PRESETS,
   RenderCancelled,
   defaultRenderTime,
@@ -26,13 +30,27 @@ import { setRenderDialogOpener } from "../state/renderDialogHook";
 import { getBlenderPath, setBlenderPath } from "../state/blenderSettings";
 import { buildPackage, currentRenderCamera, openInBlender, packageAsZip, renderHost, renderWithBlender, saveBlendWithBlender } from "../state/renderAction";
 import { openExternalUrl } from "../native/blender";
+import { cyclesAvailable } from "../native/cyclesRuntime";
+import {
+  CYCLES_MAX_EDGE,
+  CYCLES_MAX_SAMPLES,
+  CYCLES_QUALITIES,
+  CyclesRenderError,
+  cyclesSamples,
+  defaultEngine,
+  formatDuration,
+  renderWithCycles,
+  type CyclesStatus,
+  type RenderEngine,
+} from "../state/cyclesAction";
 import { saveBinaryFile } from "../native/saveFile";
 import { runWithAnonymityGate } from "../state/anonymityGate";
 import { defaultTargetLayout, placeImageOnLayout } from "../state/layoutImageActions";
 import { PreviewBadge } from "./PreviewBadge";
 
-type SizeId = "hd" | "uhd" | "a4" | "a3" | "a2" | "custom";
+type SizeId = "sd" | "hd" | "uhd" | "a4" | "a3" | "a2" | "custom";
 const SIZES: Record<Exclude<SizeId, "custom">, () => { width: number; height: number }> = {
+  sd: () => ({ width: 960, height: 540 }),
   hd: () => ({ width: 1920, height: 1080 }),
   uhd: () => ({ width: 3840, height: 2160 }),
   a4: () => paperPixels("a4", "landscape", 300),
@@ -65,6 +83,19 @@ export const RenderDialogHost = memo(function RenderDialogHost() {
   const [cameras, setCameras] = useState<RenderCameraChoice[]>([]);
   // [227] Baugrube im Bild ausblenden (Gelände hinterfüllt); das 3D im Modell bleibt wie es ist.
   const [backfilled, setBackfilled] = useState(true);
+  // [215] Renderer: eingebautes Cycles oder Blender; `cyclesOk` undefined, bis die Suche nach dem mitgelieferten Programm fertig ist.
+  const [engine, setEngine] = useState<RenderEngine>("blender");
+  const [cyclesOk, setCyclesOk] = useState<boolean | undefined>(undefined);
+  const [denoise, setDenoise] = useState(true);
+  const [context, setContext] = useState(true);
+  // Belichtungskorrektur in EV auf die automatische Belichtung (0 = automatisch).
+  const [exposureEv, setExposureEv] = useState(0);
+  // Eigene Samples (nur Cycles); null = die der Qualitätsstufe.
+  const [samplesCustom, setSamplesCustom] = useState<number | null>(null);
+  const [cyclesStatus, setCyclesStatus] = useState<CyclesStatus | null>(null);
+  const startedAt = useRef(0);
+  const [tick, setTick] = useState(0);
+  const [elapsedMs, setElapsedMs] = useState(0);
   const [blenderPath, setPath] = useState("");
   // Letzte Ausgabezeile von Blender (zeigt z. B. das erstmalige Übersetzen der Metal-Kernel, das Minuten dauern kann).
   const [lastLine, setLastLine] = useState("");
@@ -92,9 +123,16 @@ export const RenderDialogHost = memo(function RenderDialogHost() {
       setMessage("");
       setPng(null);
       setHost(undefined);
+      setCyclesOk(undefined);
+      setCyclesStatus(null);
+      setSamplesCustom(null);
       setLayoutTarget(defaultTargetLayout(st.project, st.activeLevelId)?.id ?? "");
       setOpen(true);
       void renderHost().then(setHost, () => setHost(null));
+      void cyclesAvailable().then((ok) => {
+        setCyclesOk(ok);
+        setEngine(defaultEngine(ok));
+      });
     });
     return () => setRenderDialogOpener(null);
   }, []);
@@ -111,6 +149,12 @@ export const RenderDialogHost = memo(function RenderDialogHost() {
   }, [png]);
 
   const busy = phase === "preparing" || phase === "running";
+  // [215] Sekundentakt für die verstrichene Zeit, solange gerechnet wird.
+  useEffect(() => {
+    if (!busy) return;
+    const id = setInterval(() => setTick((n) => n + 1), 1000);
+    return () => clearInterval(id);
+  }, [busy]);
   const close = useCallback(() => {
     abort.current?.abort();
     setOpen(false);
@@ -137,9 +181,14 @@ export const RenderDialogHost = memo(function RenderDialogHost() {
     setSize(id);
     if (id !== "custom") setDims(SIZES[id]());
   };
-  const validDims = dims.width >= 16 && dims.height >= 16 && dims.width <= MAX_EDGE && dims.height <= MAX_EDGE;
-  const canStart = validDims && date !== null && !busy;
-  const samples = RENDER_QUALITY_PRESETS.find((q) => q.id === quality)?.samples ?? 128;
+  const useCycles = engine === "cycles";
+  const maxEdge = useCycles ? CYCLES_MAX_EDGE : MAX_EDGE;
+  const validDims = dims.width >= 16 && dims.height >= 16 && dims.width <= maxEdge && dims.height <= maxEdge;
+  // „Final“ gibt es nur für Blender; mit Cycles gilt dann „Hoch“.
+  const qualityId = useCycles && quality === "final" ? "high" : quality;
+  const samples = useCycles ? (samplesCustom ?? cyclesSamples(qualityId)) : (RENDER_QUALITY_PRESETS.find((q) => q.id === quality)?.samples ?? 128);
+  const canStart = validDims && date !== null && !busy && (!useCycles || (cyclesOk === true && samples >= 1 && samples <= CYCLES_MAX_SAMPLES));
+  const qualities = useCycles ? CYCLES_QUALITIES : RENDER_QUALITY_PRESETS;
   const pickCamera = (key: string) => {
     setCameraKey(key);
     const choice = cameras.find((c) => c.id === key);
@@ -160,12 +209,23 @@ export const RenderDialogHost = memo(function RenderDialogHost() {
         : e.stage === "import" || e.stage === "materials" || e.stage === "camera" || e.stage === "sky" || e.stage === "organize" || e.stage === "save"
           ? t(`render.stage.${e.stage}`)
           : e.stage;
+  const cyclesStageText = (s: CyclesStatus): string =>
+    s.stage === "scene" ? t("render.working") : s.stage === "start" ? t("render.cycles.starting") : s.stage === "render" ? t("render.stage.render", { done: s.sample, total: s.samples }) : s.stage === "tonemap" ? t("render.cycles.tonemap") : t("render.stage.done");
   const failWith = (err: unknown) => {
-    if (err instanceof RenderCancelled) {
+    if (err instanceof RenderCancelled || err instanceof CyclesCancelled) {
       setPhase("setup");
       setMessage(t("render.cancelled"));
     } else if (err instanceof BlenderMissingError) {
       setPhase("missing");
+    } else if (err instanceof CyclesMissingError || err instanceof CyclesRenderError) {
+      // Programm fehlt, Start gescheitert, Absturz, kein Bild: klare Meldung im Dialog und als Hinweis.
+      const text =
+        err instanceof CyclesRenderError
+          ? t(`render.cycles.error.${err.kind}`, { code: err.code, detail: err.detail })
+          : t("render.cycles.error.missing");
+      setPhase("error");
+      setMessage(text);
+      getState().notify(text, "error");
     } else {
       setPhase("error");
       setMessage(t("render.error", { message: err instanceof Error ? err.message : String(err) }));
@@ -200,6 +260,46 @@ export const RenderDialogHost = memo(function RenderDialogHost() {
           setStatus(stageText(e));
         },
       });
+      setPng(res.png);
+      setPhase("done");
+    } catch (err) {
+      failWith(err);
+    } finally {
+      abort.current = null;
+    }
+  };
+
+  // [215] Bild mit dem eingebauten Cycles: Szene aus dem Kern, Programm mit Fortschritt/Abbruch, EXR → Tonwert → PNG.
+  const startCycles = async () => {
+    if (!canStart) return;
+    const st = getState();
+    setJob("render");
+    setPhase("preparing");
+    setStatus(t("render.working"));
+    setFraction(0);
+    setMessage("");
+    setPng(null);
+    setCyclesStatus(null);
+    setElapsedMs(0);
+    startedAt.current = Date.now();
+    const ac = new AbortController();
+    abort.current = ac;
+    try {
+      const res = await renderWithCycles(
+        st.project,
+        { width: dims.width, height: dims.height, samples, denoise, when: date!, camera, backfilled, context, extraEv: exposureEv },
+        {
+          signal: ac.signal,
+          onMissingTextures: (n) => st.notify(t("render.missingTextures", { n }), "warning"),
+          onStatus: (s) => {
+            setCyclesStatus(s);
+            setFraction(s.fraction);
+            setStatus(cyclesStageText(s));
+            if (s.stage !== "scene") setPhase("running");
+          },
+        },
+      );
+      setElapsedMs(res.millis);
       setPng(res.png);
       setPhase("done");
     } catch (err) {
@@ -291,10 +391,17 @@ export const RenderDialogHost = memo(function RenderDialogHost() {
   };
 
   const camLabel = cameraKey !== "live" ? t("render.camera.saved", { name: cameras.find((c) => c.id === cameraKey)?.name ?? "" }) : "preset" in camera ? t("render.camera.preset", { name: t(`view3d.${camera.preset === "right" ? "side" : camera.preset}` as never) }) : t("render.camera.view");
-  const browserOnly = host === null;
+  const browserOnly = host === null && cyclesOk === false;
+  // Warum das eingebaute Cycles nicht wählbar ist: Browser-Build oder Paket ohne Cycles.
+  const engineHint = browserOnly ? t("render.engine.cycles.browser") : t("render.engine.cycles.missing");
+  const etaMs = useCycles && cyclesStatus?.stage === "render" ? cyclesStatus.etaMs : null;
+  // Verstrichene Zeit läuft im Sekundentakt (tick), auch zwischen zwei Samples.
+  void tick;
+  const shownElapsed = busy ? Date.now() - startedAt.current : elapsedMs;
   startRef.current = () => {
     if (phase === "done" || phase === "missing" || host === undefined) return;
-    if (browserOnly) void saveZip();
+    if (useCycles) void startCycles();
+    else if (browserOnly) void saveZip();
     else void start();
   };
 
@@ -312,9 +419,55 @@ export const RenderDialogHost = memo(function RenderDialogHost() {
         </header>
         <div className="imp-body">
           <p className="imp-note">{t("render.intro")}</p>
+          {/* Fortschritt oben, damit er sichtbar bleibt, auch wenn die Einstellungen darunter den Dialog füllen. */}
+          {busy && (
+            <section className="imp-section" data-testid="render-progress">
+              <progress max={1} value={phase === "running" && job === "render" ? fraction : undefined} style={{ width: "100%" }} />
+              <div className="imp-note" data-testid="render-status">
+                {status}
+              </div>
+              {useCycles && (
+                <div className="imp-note" data-testid="render-eta">
+                  {etaMs !== null ? t("render.cycles.timeEta", { elapsed: formatDuration(shownElapsed), eta: formatDuration(etaMs) }) : t("render.cycles.time", { elapsed: formatDuration(shownElapsed) })}
+                </div>
+              )}
+              {lastLine && !useCycles && (
+                <div className="imp-note" data-testid="render-last-line" style={{ fontFamily: "ui-monospace, monospace", fontSize: 11, opacity: 0.7, overflowWrap: "anywhere" }}>
+                  {lastLine}
+                </div>
+              )}
+            </section>
+          )}
+          {message && (
+            <p className="imp-note" role="status" data-testid="render-message">
+              {message}
+            </p>
+          )}
           <p className="imp-note" data-testid="render-camera">
             {camLabel}
           </p>
+          {phase !== "done" && (
+            <section className="imp-section">
+              <div className="imp-section-title">{t("render.engine")}</div>
+              <select
+                className="imp-select"
+                aria-label={t("render.engine")}
+                data-testid="render-engine"
+                value={engine}
+                disabled={busy || cyclesOk === undefined}
+                title={cyclesOk === false ? engineHint : undefined}
+                onChange={(e) => setEngine(e.target.value as RenderEngine)}
+              >
+                <option value="cycles" disabled={cyclesOk !== true} title={cyclesOk === false ? engineHint : undefined}>
+                  {t("render.engine.cycles")}
+                </option>
+                <option value="blender">{t("render.engine.blender")}</option>
+              </select>
+              <div className="imp-note" data-testid="render-engine-hint">
+                {cyclesOk === false ? engineHint : useCycles ? t("render.engine.cycles.hint") : t("render.engine.blender.hint")}
+              </div>
+            </section>
+          )}
           {phase !== "done" && cameras.length > 0 && (
             <section className="imp-section">
               <div className="imp-section-title">{t("render.camera.title")}</div>
@@ -334,7 +487,7 @@ export const RenderDialogHost = memo(function RenderDialogHost() {
               <section className="imp-section">
                 <div className="imp-section-title">{t("render.size")}</div>
                 <select className="imp-select" aria-label={t("render.size")} data-testid="render-size" value={size} disabled={busy} onChange={(e) => pickSize(e.target.value as SizeId)}>
-                  {(["hd", "uhd", "a4", "a3", "a2", "custom"] as SizeId[]).map((id) => (
+                  {(["sd", "hd", "uhd", "a4", "a3", "a2", "custom"] as SizeId[]).map((id) => (
                     <option key={id} value={id}>
                       {t(`render.size.${id}`)}
                     </option>
@@ -343,23 +496,52 @@ export const RenderDialogHost = memo(function RenderDialogHost() {
                 <div style={{ display: "flex", gap: 8, marginTop: 6, alignItems: "center" }}>
                   <label className="imp-field-label">
                     {t("render.width")}{" "}
-                    <input className="imp-input imp-input-flush" type="number" min={16} max={MAX_EDGE} style={{ width: 90 }} value={dims.width} disabled={busy} onChange={(e) => { setSize("custom"); setDims({ ...dims, width: Number(e.target.value) }); }} />
+                    <input className="imp-input imp-input-flush" type="number" min={16} max={maxEdge} style={{ width: 90 }} value={dims.width} disabled={busy} onChange={(e) => { setSize("custom"); setDims({ ...dims, width: Number(e.target.value) }); }} />
                   </label>
                   <label className="imp-field-label">
                     {t("render.height")}{" "}
-                    <input className="imp-input imp-input-flush" type="number" min={16} max={MAX_EDGE} style={{ width: 90 }} value={dims.height} disabled={busy} onChange={(e) => { setSize("custom"); setDims({ ...dims, height: Number(e.target.value) }); }} />
+                    <input className="imp-input imp-input-flush" type="number" min={16} max={maxEdge} style={{ width: 90 }} value={dims.height} disabled={busy} onChange={(e) => { setSize("custom"); setDims({ ...dims, height: Number(e.target.value) }); }} />
                   </label>
                 </div>
+                {!validDims && (
+                  <div className="imp-note" data-testid="render-size-hint">
+                    {t("render.size.range", { max: maxEdge })}
+                  </div>
+                )}
               </section>
               <section className="imp-section">
                 <div className="imp-section-title">{t("render.quality")}</div>
-                <select className="imp-select" aria-label={t("render.quality")} data-testid="render-quality" value={quality} disabled={busy} onChange={(e) => setQuality(e.target.value as typeof quality)}>
-                  {RENDER_QUALITY_PRESETS.map((q) => (
+                <select className="imp-select" aria-label={t("render.quality")} data-testid="render-quality" value={useCycles && samplesCustom !== null ? "custom" : qualityId}
+                  disabled={busy}
+                  onChange={(e) => {
+                    if (e.target.value === "custom") return;
+                    setSamplesCustom(null);
+                    setQuality(e.target.value as typeof quality);
+                  }}
+                >
+                  {qualities.map((q) => (
                     <option key={q.id} value={q.id}>
                       {t(`render.quality.${q.id}`)}
                     </option>
                   ))}
+                  {useCycles && <option value="custom">{t("render.quality.custom")}</option>}
                 </select>
+                {useCycles && (
+                  <label className="imp-field-label" style={{ display: "block", marginTop: 6 }}>
+                    {t("render.samples")}{" "}
+                    <input
+                      className="imp-input imp-input-flush"
+                      type="number"
+                      min={1}
+                      max={CYCLES_MAX_SAMPLES}
+                      style={{ width: 80 }}
+                      data-testid="render-samples"
+                      value={samples}
+                      disabled={busy}
+                      onChange={(e) => setSamplesCustom(Number.isFinite(e.target.valueAsNumber) ? Math.round(e.target.valueAsNumber) : 1)}
+                    />
+                  </label>
+                )}
               </section>
               <section className="imp-section">
                 <div className="imp-section-title">{t("render.time")}</div>
@@ -377,7 +559,32 @@ export const RenderDialogHost = memo(function RenderDialogHost() {
                 </label>
                 <div className="imp-note">{t("render.backfilled.hint")}</div>
               </section>
-              {!browserOnly && (
+              {useCycles && (
+                <section className="imp-section" data-testid="render-cycles-options">
+                  <label className="imp-field-label">
+                    <input type="checkbox" data-testid="render-context" checked={context} disabled={busy} onChange={(e) => setContext(e.target.checked)} /> {t("render.cycles.context")}
+                  </label>
+                  <label className="imp-field-label" style={{ display: "block", marginTop: 4 }}>
+                    <input type="checkbox" data-testid="render-denoise" checked={denoise} disabled={busy} onChange={(e) => setDenoise(e.target.checked)} /> {t("render.cycles.denoise")}
+                  </label>
+                  <label className="imp-field-label" style={{ display: "block", marginTop: 4 }}>
+                    {t("render.cycles.exposure")}{" "}
+                    <input
+                      className="imp-input imp-input-flush"
+                      type="number"
+                      min={-5}
+                      max={5}
+                      step={0.5}
+                      style={{ width: 70 }}
+                      data-testid="render-exposure"
+                      value={exposureEv}
+                      disabled={busy}
+                      onChange={(e) => setExposureEv(Number.isFinite(e.target.valueAsNumber) ? Math.max(-5, Math.min(5, e.target.valueAsNumber)) : 0)}
+                    />
+                  </label>
+                </section>
+              )}
+              {!browserOnly && !useCycles && (
                 <section className="imp-section">
                   <div className="imp-section-title">{t("render.blenderPath")}</div>
                   <input
@@ -400,19 +607,7 @@ export const RenderDialogHost = memo(function RenderDialogHost() {
           )}
 
           {browserOnly && phase !== "done" && <p className="imp-note">{t("render.browser.text")}</p>}
-          {!browserOnly && phase !== "done" && !busy && <p className="imp-note" data-testid="render-blend-hint">{t("render.blend.hint")}</p>}
-
-          {busy && (
-            <section className="imp-section" data-testid="render-progress">
-              <progress max={1} value={phase === "running" && job === "render" ? fraction : undefined} style={{ width: "100%" }} />
-              <div className="imp-note">{status}</div>
-              {lastLine && (
-                <div className="imp-note" data-testid="render-last-line" style={{ fontFamily: "ui-monospace, monospace", fontSize: 11, opacity: 0.7, overflowWrap: "anywhere" }}>
-                  {lastLine}
-                </div>
-              )}
-            </section>
-          )}
+          {!browserOnly && !useCycles && phase !== "done" && !busy && <p className="imp-note" data-testid="render-blend-hint">{t("render.blend.hint")}</p>}
 
           {phase === "missing" && (
             <section className="imp-section" data-testid="render-missing">
@@ -426,7 +621,7 @@ export const RenderDialogHost = memo(function RenderDialogHost() {
 
           {phase === "done" && imageUrl && (
             <section className="imp-section" data-testid="render-result">
-              <div className="imp-note">{t("render.done", { width: dims.width, height: dims.height })}</div>
+              <div className="imp-note">{useCycles ? t("render.cycles.done", { width: dims.width, height: dims.height, time: formatDuration(elapsedMs) }) : t("render.done", { width: dims.width, height: dims.height })}</div>
               <img src={imageUrl} alt={t("render.title")} style={{ maxWidth: "100%", maxHeight: 360, display: "block", marginTop: 6 }} />
               {(getState().project.layouts ?? []).length > 0 && (
                 <label className="imp-field-label" style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 8 }}>
@@ -443,11 +638,6 @@ export const RenderDialogHost = memo(function RenderDialogHost() {
             </section>
           )}
 
-          {message && (
-            <p className="imp-note" role="status" data-testid="render-message">
-              {message}
-            </p>
-          )}
         </div>
         <footer className="imp-foot">
           {busy && phase === "running" ? (
@@ -480,6 +670,10 @@ export const RenderDialogHost = memo(function RenderDialogHost() {
           ) : browserOnly ? (
             <button className="imp-btn primary" data-testid="render-zip" disabled={!canStart} onClick={() => void saveZip()}>
               {t("render.zip.save")}
+            </button>
+          ) : useCycles ? (
+            <button className="imp-btn primary" data-testid="render-start" disabled={!canStart} onClick={() => void startCycles()}>
+              {t("render.start")}
             </button>
           ) : (
             <>

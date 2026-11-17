@@ -649,10 +649,19 @@ test("[211] Rendering-Dialog im Browser erzeugt das Export-Paket (model.glb + sc
   await discardIfAsked(page);
   await expect(page.locator(".project-name")).toHaveText("Musterhaus komplex", { timeout: 30_000 });
   await typeCommand(page, "rendering");
-  const dialog = page.getByRole("dialog", { name: "Rendering mit Blender" });
+  const dialog = page.getByRole("dialog", { name: "Rendering", exact: true });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByTestId("render-camera")).toBeVisible();
   await expect(dialog.getByTestId("render-sun")).toBeVisible();
+  // [215] Browser: das eingebaute Cycles ist ausgegraut («Nur in der Desktop-App»), Vorgabe Blender (Paket), keine Cycles-Optionen.
+  const engine = dialog.getByTestId("render-engine");
+  await expect(engine).toHaveValue("blender");
+  const cyclesOption = engine.locator("option[value=cycles]");
+  await expect(cyclesOption).toBeDisabled();
+  await expect(cyclesOption).toHaveAttribute("title", "Nur in der Desktop-App");
+  await expect(engine).toHaveAttribute("title", "Nur in der Desktop-App");
+  await expect(dialog.getByTestId("render-engine-hint")).toHaveText("Nur in der Desktop-App");
+  await expect(dialog.getByTestId("render-cycles-options")).toHaveCount(0);
   // Ohne Blender: kein Start-Knopf, nur das Paket.
   await expect(dialog.getByTestId("render-start")).toHaveCount(0);
   const zip = await download(page, () => dialog.getByTestId("render-zip").click());

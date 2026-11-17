@@ -93,7 +93,7 @@ E 2'600'048 / N 1'200'046 und E 2'600'060 / N 1'200'056. Raumprogramm als CSV (`
 | 7.1 | Kopfleiste „Axonometrie“ | eigener Reiter „3D · Erdgeschoss“ | ✅ (Spec 9; Bild nur auf dem Mac prüfbar) |
 | 7.2 | Gelände → „Schatten im 3D zeigen“, Datum 21.03./21.06./21.12., Uhrzeit | Schatten im 3D und (Haken) im Grundriss | ◐ Schalter geprüft, Bild nur auf dem Mac |
 | 7.3 | 3D-Bild als PNG in Abgabeauflösung | PNG-Datei, z. B. 6000 px breit | ✓ **[223]** Befehl `bild3d` (Mac: Metal-Gegenprobe offen) |
-| 7.4 | „Rendering …“ (Blender/Cycles) | PNG zurück, ins Layout einsetzbar | ◐ **[211]** Browser: Dialog erzeugt das Paket `model.glb` + `scene.json` (Spec); Lauf mit Blender nur auf dem Mac (s. 13) |
+| 7.4 | „Rendering …“ (Renderer „Eingebaut (Cycles)“, ohne Blender) | PNG zurück, ins Layout einsetzbar | ◐ **[215]** Linux-AppImage: Dialog rendert 320 × 180 mit 8 Samples, Fortschritt, Bild, ins Layout (`e2e/linuxApp170.spec.ts`); Browser: Option ausgegraut, Blender-Paket (`release10.spec.ts`); Mac/Metal nur auf dem Mac (s. 13.2) |
 
 ## 8. Flächen und Volumen SIA 416, Kennzahlen
 
@@ -143,7 +143,7 @@ und Befunde in `TODO.md` eintragen.
 | # | Schritt auf dem Mac | Erwartet |
 |---|---|---|
 | 13.1 | **Pathtracer:** 3D-Reiter (Axonometrie), Darstellung „Pathtracing“ (Marke „Vorschau“), Kamera drehen, Sonne ändern | Bild wird nach jeder Änderung neu und körnig, dann glatter; unten links „Pathtracing: N Samples · x/s“ zählt hoch, am Ende „(fertig)“; Fenster bleibt bedienbar; andere Darstellung zurück: normales Bild |
-| 13.2 | **Rendering mit Blender (Cycles):** Befehl `rendering`, Blender-Pfad, Kamera „Südost“, Start; danach „Als .blend speichern“ | Fortschritt „Sample x von y“, Abbrechen geht, Bild erscheint und lässt sich speichern bzw. ins Layout einsetzen; Berechtigungen (Temp-Ordner), Metal-GPU |
+| 13.2 | **Rendering ohne Blender ([215]):** Befehl `rendering`, Renderer „Eingebaut (Cycles)“ (Vorgabe), Kamera „Südost“, Qualität „Vorschau“, Start (beim ersten Mal übersetzt Cycles die Metal-Kerne: Minuten); Abbrechen und neu starten; danach „Ins Layout einsetzen“. Dann derselbe Ablauf mit Renderer „Blender“ (Pfad, „Als .blend speichern“) | Fortschritt „Sample x von y“ mit verstrichener Zeit und Restzeit, Abbrechen beendet den Prozess (Aktivitätsanzeige: kein `cycles` übrig), Bild erscheint und lässt sich speichern bzw. ins Layout einsetzen; Metal-GPU wird benutzt (Last in der Aktivitätsanzeige), Temp-Ordner `dossier-render` danach leer, Sidecar startet trotz Signatur/Notarisierung, Berechtigungen (`fs:allow-remove`), Absturz-Meldung z. B. durch Umbenennen des Sidecars |
 | 13.3 | **Volumen → Bauteile:** Körper `koerper` → Quader, `koerperinbauteile`, ⌘Z | Wände/Decken/Dach je Geschoss, eine Meldung, ⌘Z nimmt alles in einem Schritt zurück |
 | 13.4 | **Hilfslinien/Zuschnitt (Plakat):** Mappe → Layout erstellen → Plakat A1 quer; Bild einsetzen, Zuschnitt in den Prozentfeldern, Bild verschieben | Raster-Hilfslinien nur am Bildschirm (nicht im PDF), Kopfzeile mit Kennwort-Feld, Bild-Zuschnitt und dpi-Anzeige stimmen, Rahmen bleibt im Blatt |
 | 13.5 | **Kataster-Schwarzplan:** Kataster-DXF importieren, Ansicht auf „Situation WBW 1:500“ (Ressourcen → Ansichtsvorlagen → anwenden), danach „Schwarzplan 1:500“ | Eigenes Gebäude schwarz, Kataster-Gebäude und Nachbarn gefüllt (Situation grau, Schwarzplan alles schwarz), Parzelle, Nordpfeil, Massstabsbalken; Klassen 12/83/84 lassen sich ausschalten; Metal-Bild gleich wie der SVG-Export |

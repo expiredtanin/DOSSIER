@@ -1,6 +1,6 @@
 // [215] Cycles-Fassade (src/native/cyclesRuntime.ts) mit einer Brücke als Ersatz für den Hauptprozess; Browser: nicht verfügbar.
 import { afterEach, describe, expect, it } from "vitest";
-import { cyclesAvailable, parseCyclesProgress, prepareCyclesScene, runCycles, type DossierCyclesApi } from "./cyclesRuntime";
+import { cleanupCyclesScene, cyclesAvailable, parseCyclesProgress, prepareCyclesScene, runCycles, type DossierCyclesApi } from "./cyclesRuntime";
 
 type G = { window?: { dossierCycles?: DossierCyclesApi } };
 const g = globalThis as unknown as G;
@@ -9,14 +9,17 @@ afterEach(() => {
 });
 
 /** Ersatz-Brücke: `start` meldet die Zeilen und das Ende nach `exitAfterMs`, `cancel` beendet sofort mit -1. */
-function fakeApi(opts: { exe?: string | null; lines?: string[]; code?: number; hang?: boolean } = {}): DossierCyclesApi & { started: unknown[][]; cancelled: string[] } {
+function fakeApi(opts: { exe?: string | null; lines?: string[]; code?: number; hang?: boolean } = {}): DossierCyclesApi & { started: unknown[][]; cancelled: string[]; cleaned: string[] } {
   const lineCbs = new Set<(e: { jobId: string; line: string }) => void>();
   const exitCbs = new Set<(e: { jobId: string; code: number }) => void>();
   const started: unknown[][] = [];
   const cancelled: string[] = [];
+  const cleaned: string[] = [];
   return {
     started,
     cancelled,
+    cleaned,
+    cleanup: async (dir) => void cleaned.push(dir),
     where: async () => (opts.exe === undefined ? "/res/cycles/cycles" : opts.exe),
     prepare: async () => "/tmp/dossier-render/1",
     readFile: async () => new Uint8Array([1, 2, 3]),
@@ -90,5 +93,21 @@ describe("cyclesAvailable / runCycles", () => {
     ac.abort();
     expect(await runCycles("/tmp/dossier-render/1", ["szene.xml"], () => {}, ac.signal)).toMatchObject({ cancelled: true });
     expect(api.started).toEqual([]);
+  });
+});
+
+describe("cleanupCyclesScene", () => {
+  it("löscht den Arbeitsordner über die Brücke; Fehler werden geschluckt", async () => {
+    const api = fakeApi();
+    g.window = { dossierCycles: api };
+    await cleanupCyclesScene("/tmp/dossier-render/1");
+    expect(api.cleaned).toEqual(["/tmp/dossier-render/1"]);
+    api.cleanup = async () => {
+      throw new Error("weg");
+    };
+    await expect(cleanupCyclesScene("/tmp/dossier-render/2")).resolves.toBeUndefined();
+    // Browser: nichts zu tun, kein Fehler
+    delete g.window;
+    await expect(cleanupCyclesScene("/x")).resolves.toBeUndefined();
   });
 });

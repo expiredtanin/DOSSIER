@@ -7,6 +7,7 @@
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
+const os = require("node:os");
 const { lineSplitter, prepareJobDir, insideRenderDir } = require("./electron-blender.cjs");
 
 const isFile = (p) => {
@@ -116,6 +117,14 @@ function register(ipcMain, app) {
   ipcMain.handle("cycles:read", (_e, p) => {
     if (!insideRenderDir(p)) throw new Error("Pfad ausserhalb des Arbeitsordners");
     return new Uint8Array(fs.readFileSync(p));
+  });
+
+  // Arbeitsordner samt Inhalt löschen (nur direkt unter `$TMP/dossier-render/`, nie die Wurzel selbst).
+  ipcMain.handle("cycles:cleanup", (_e, p) => {
+    const root = path.resolve(os.tmpdir(), "dossier-render");
+    const abs = typeof p === "string" ? path.resolve(p) : "";
+    if (!abs.startsWith(root + path.sep) || path.dirname(abs) !== root) throw new Error("Pfad ist kein Arbeitsordner");
+    fs.rmSync(abs, { recursive: true, force: true });
   });
 
   // Läuft, bis Cycles endet; Zeilen und Ende gehen als Ereignisse an das Fenster, das den Auftrag stellte.

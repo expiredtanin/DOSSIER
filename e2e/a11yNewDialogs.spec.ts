@@ -167,7 +167,7 @@ test("Rendering-Dialog: Fokus, Tab-Falle, beschriftete Felder, Esc, Fokus zurüc
   await openKomplex(page);
   await selectAllWalls(page);
   await typeCommand(page, "rendering");
-  const dlg = page.getByRole("dialog", { name: "Rendering mit Blender" });
+  const dlg = page.getByRole("dialog", { name: "Rendering", exact: true });
   await expect(dlg).toBeVisible();
   await expect(dlg).toHaveAttribute("aria-modal", "true");
   await expect(dlg.getByTestId("render-size")).toHaveAccessibleName("Bildgrösse");

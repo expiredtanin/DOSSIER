@@ -35,6 +35,10 @@
       "identifier": "fs:allow-mkdir",
       "allow": [{ "path": "$TEMP/dossier-render/**" }]
     },
+    {
+      "identifier": "fs:allow-remove",
+      "allow": [{ "path": "$TEMP/dossier-render/**" }]
+    },
     "updater:default",
     "process:allow-restart",
     "process:allow-exit",

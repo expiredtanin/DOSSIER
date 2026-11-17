@@ -210,7 +210,7 @@ flackert nicht; die 3D-Ansicht zeigt „3D-Engine nicht verfügbar“ mit einem 
 im Begehen; nur ein unverändertes Preset wird neu eingepasst. Die Tasten des Begehens (G, W/A/S/D, Umschalt+F) wirken auch ohne
 Grafikkarte. Auf dem Mac ist das nicht geprüft.
 
-**Vorschau-Marke.** Noch nicht fertige Funktionen tragen die Marke „Vorschau“ (Tooltip: „Noch nicht fertig — Ergebnisse können abweichen“): Pathtracing, Rendering mit Blender, Kamerafahrt mit Video und der Geist-Modus beim Begehen.
+**Vorschau-Marke.** Noch nicht fertige Funktionen tragen die Marke „Vorschau“ (Tooltip: „Noch nicht fertig — Ergebnisse können abweichen“): Pathtracing, Rendering, Kamerafahrt mit Video und der Geist-Modus beim Begehen.
 
 **Begehen mit Kollision.** Beim Begehen hält dich das Modell auf: Wände und Fensterglas sperren, du gleitest an ihnen
 entlang. Türöffnungen sind frei. Treppen, Stufen und Kanten steigst du mit (bis 25 cm ohne Hindernis), der Boden folgt
@@ -237,7 +237,20 @@ im 3D gibt es dazu einen Regler von −3 bis +3 Blenden. Steht die Kamera im Rau
 die Fenster. Materialien und Bildkarten
 folgen den Baustoffen der Bauteile. Für die Abgabe: *Ansicht → 3D-Bild exportieren …* mit **Samples je Pixel
 (Pathtracing)**; das Bild rechnet mit Fortschrittsanzeige und lässt sich abbrechen. Mehr Samples = weniger Rauschen, dafür
-längere Rechenzeit. Es bleibt eine Vorschau; Endbilder gehen über das Rendering mit Blender.
+längere Rechenzeit. Es bleibt eine Vorschau; Endbilder gehen über das Rendering.
+
+**Rendering ohne Blender.** *Ansicht → Rendering …* (Befehl `rendering`, Marke „Vorschau“) rechnet ein fotorealistisches Bild der aktiven
+3D-Ansicht mit dem in Dossier eingebauten Cycles, ohne dass Blender installiert sein muss. Unter „Renderer“ steht „Eingebaut (Cycles)“
+als Vorgabe, wenn die App es mitbringt; sonst bleibt „Blender“ (installiertes Blender ab 3.6). Im Browser ist die Wahl ausgegraut
+(„Nur in der Desktop-App“). Gewählt werden „Kamera“ („Aktuelle 3D-Ansicht“ oder eine gespeicherte Kamera, die ihre Sonnenzeit mitbringt),
+„Bildgrösse“ (von „Vorschau, 960 × 540“ bis A2 bei 300 dpi), „Qualität“ („Vorschau (32 Samples)“, „Normal (128 Samples)“,
+„Hoch (512 Samples)“), „Datum und Uhrzeit der Sonne“ sowie „Gelände und Umgebung (Kontext) zeigen“, „Entrauschen (OIDN)“ und die
+„Belichtung (EV, 0 = automatisch)“. **Rendern** startet; der Balken zeigt „Rendern: Sample n von N“, die verstrichene Zeit und eine
+Schätzung der Restzeit, **Rendering abbrechen** beendet den Lauf. Beim allerersten Start übersetzt Cycles auf dem Mac seine Rechenkerne
+für die Grafikkarte, das kann einige Minuten dauern. Danach erscheint das Bild: „Bild speichern …“ als PNG oder „Ins Layout einsetzen“ auf
+das gewählte Blatt (so kommt es auch ins Plakat). Scheitert der Lauf, steht der Grund im Dialog und als Meldung; die Arbeitsdateien im
+Temp-Ordner räumt Dossier jedes Mal auf. Kommandozeile: `dossier-cli projekt.obp render --engine cycles --out bild.png`. Auf dem Mac (Metal)
+ist das nicht geprüft.
 
 ## 10. Präsentationsplan
 
@@ -336,6 +349,6 @@ Zum Schluss ⌘S. Das Projekt (`.obp`) enthält Volumen, Räume, Baurecht, Raump
 ## Noch offen
 
 Das Wettbewerbsplakat ist erst teilweise fertig ([208] in `TODO.md`: die Freitext-Prüfung deckt nur die Namen ab, die Dossier
-kennt), das Rendering mit Blender (*Ansicht → Rendering mit Blender …*, [211]) und der Pathtracer ([212]) sind auf dem Mac noch nicht
+kennt), das Rendering (*Ansicht → Rendering …*, eingebautes Cycles [215] oder Blender [211]) und der Pathtracer ([212]) sind auf dem Mac noch nicht
 geprüft. Der Ablauf wurde im Browser-Build automatisch
 geprüft (`e2e/release10.spec.ts`); der Durchlauf auf dem Mac steht noch aus (`doc/RELEASE-1.0.md`).

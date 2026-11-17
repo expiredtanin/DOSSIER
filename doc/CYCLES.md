@@ -274,3 +274,18 @@ Workflows nur mit `yaml.safe_load` auf Syntax geprüft.
 **Nicht geprüft:** beide GitHub-Workflows (laufen im Container nicht, `github.com` gesperrt), `build-macos.sh` und alles auf dem Mac (Bau, `make update`, Dylib-Einsammeln, RPATHs, Metal-Kernel,
 `cycles_*`-Befehle: die Tauri-App ist im Container nicht übersetzbar, es fehlt webkit2gtk — nur die std-Teile liefen als Test), Tauri-Resources-Syntax (Verzeichnis → Verzeichnis), Signieren/Notarisieren der Mach-O-Dateien
 unter `Resources/cycles/lib` und des Sidecars, universale App mit arm64-Sidecar, `build-linux.sh` Schritt (7) (Lizenzen) nur in Teilen (dpkg-Zuordnung geprüft, kein ganzer Bau), Portabilität auf ältere glibc.
+
+## 12. Umsetzung Teil 3: Dialog „Rendering …“ (17.11.)
+
+**Wo:** `src/ui/RenderDialog.tsx` (Oberfläche, Blender-Weg [211] unverändert daneben), `src/state/cyclesAction.ts` (Ablauf ohne Oberfläche, Abhängigkeiten über `CyclesDeps` austauschbar, Test `cyclesAction.test.ts`),
+`src/export/zlibCodec.ts` (Zlib für EXR/PNG im Webview: `pako`), `src/native/cyclesRuntime.ts` (`cleanupCyclesScene`; Electron-IPC `cycles:cleanup` in `scripts/electron-cycles.cjs`, Tauri `fs.remove` mit `fs:allow-remove` für `$TEMP/dossier-render/**`).
+
+**Ablauf:** `renderWithCycles` → `cyclesScene` (Kern, Bildkarten über `loadTextureBytes`) → `prepareCyclesScene` (`scene.xml`, `textures/…`) → `runCycles(dir, ["--background","--samples","N","--width","W","--height","H","--output","render.exr","scene.xml"])`
+→ `render.exr` lesen → `readExr` → Kern-Tonwert (Look `filmic`, Belichtungskorrektur EV) → PNG → Arbeitsordner löschen (`finally`, auch nach Abbruch/Fehler). Fortschritt aus `parseCyclesProgress`; die Restzeit ist (Zeit seit dem ersten gemeldeten Sample) / (seither fertige Samples) × (fehlende Samples) und fehlt bis zum zweiten gemeldeten Sample
+(das erste enthält auf dem Mac das Übersetzen der Metal-Kerne).
+Fehlerarten (`CyclesRenderError.kind`): `start` (Hauptprozess lehnt die Argumente ab / Prozess startet nicht), `crashed` (Code ≠ 0, mit den letzten `ERROR`-Zeilen), `nofile` (kein `render.exr`), `empty` (Modell ohne 3D-Netze); dazu `CyclesMissingError` und `CyclesCancelled`.
+
+**Vorgaben:** Renderer eingebaut, wenn `cyclesAvailable()`, sonst Blender; Qualität 32 / 128 / 512 Samples (oder eigene Zahl ≤ 4096; „Final“ gibt es nur für Blender), längste Kante ≤ 8192 px, Entrauschen an, Kontext an, Belichtung 0 EV (= automatisch nach Sonnenhöhe).
+
+**Geprüft (Linux, 17.11.):** `e2e/linuxApp170.spec.ts` im echten AppImage mit dem Spike-Paket: 320 × 180 mit 8 Samples (≈ 4 s mit Szenenaufbau), Fortschritt, Bild, ins Layout, Temp-Ordner leer; Abbruch bei 960 × 540 / 512 Samples (Prozess weg, Ordner gelöscht), danach neuer Lauf.
+Browser: Option ausgegraut (`e2e/release10.spec.ts`). **Nicht geprüft:** Mac (Tauri-Befehle, `fs.remove`-Berechtigung, Metal, Signatur des Sidecars).

@@ -856,6 +856,16 @@ Kennwort, anonym) als PDF; Austausch mit Fachplanern über DXF/IFC.
   `test:linux-app` rendert das Testhaus (8 Samples, PNG, Fortschritt, Abbruch); AppImage 185 → 252 MiB (+ 70 MB). **Nicht geprüft:** beide Workflows (nie gelaufen, kein GitHub im Container), gesamter Mac-Weg (Bau, Tauri-Befehle — Tauri-Crate
   im Container nicht übersetzbar —, Resources-Syntax, Signieren/Notarisieren der Mach-O-Dateien, universale App mit arm64-Sidecar), Linux-Lizenzschritt nur in Teilen. **Offen (Rest von [215]):** XML-Schreiber im Kern, Dialog „Rendering“ mit Cycles, Tonwert/PNG, CLI `cycles`.
 
+  **Stand 17.11. (Teil 3: Dialog „Rendering …“ mit Cycles):** `ui/RenderDialog.tsx` bietet „Renderer: Eingebaut (Cycles) / Blender“ (Vorgabe eingebaut, wenn `cyclesAvailable()`, sonst Blender; Browser: Option ausgegraut mit
+  „Nur in der Desktop-App“, Paket-ZIP wie bisher). Cycles-Einstellungen: Grösse (neu „Vorschau 960 × 540“ plus Full HD/4K/A4–A2 bei 300 dpi, Kante ≤ 8192), Qualität Vorschau 32 / Normal 128 / Hoch 512 oder eigene Samples, Entrauschen, Belichtungskorrektur (EV, 0 = automatisch),
+  Kamera (aktuelle 3D-Ansicht oder gespeicherte [213], mit Sonnenzeit), Datum/Uhrzeit, Kontext an/aus, Baugrube ausblenden. Ablauf `state/cyclesAction.ts` (`renderWithCycles`, Abhängigkeiten austauschbar): Szene über den Kern → `prepareCyclesScene` → `runCycles` →
+  EXR → Tonwert → PNG (Zlib im Webview: `pako`, neu als direkte Abhängigkeit); Fortschritt „Sample n von N“, verstrichene Zeit und Restzeit-Schätzung (aus dem Takt seit dem ersten Sample), Abbrechen-Knopf, Vorschau, „Bild speichern …“, „Ins Layout einsetzen“ (wie [211]/[223]);
+  Fehler (Programm fehlt, Start abgelehnt, Absturz mit Code, kein Bild, leeres Modell) als Meldung im Dialog und `notify()`; Arbeitsordner wird in jedem Fall gelöscht (neu `cleanupCyclesScene`, Electron-IPC `cycles:cleanup` nur direkt unter `dossier-render`, Tauri `fs:allow-remove`).
+  Dialogtitel/Menü jetzt „Rendering …“. **Geprüft:** vitest (`cyclesAction.test.ts`: Vorgaben, Restzeit, Fortschritts-Parser, Abbruch, alle Fehlerpfade, Aufräumen; `cyclesRuntime`/`electronCycles`: Cleanup), Browser-e2e (`release10.spec.ts`: Option ausgegraut mit Hinweis),
+  **echtes AppImage mit Cycles** (`e2e/linuxApp170.spec.ts`, Musterhaus komplex: 320 × 180 mit 8 Samples → Fortschritt gesehen, Bild 320 × 180, ins Layout eingesetzt, Temp-Ordner leer; Abbrechen bei 960 × 540 / 512 Samples beendet den Prozess, danach neuer Lauf), Bilder `doc/review-215/dialog-*.png`.
+  **Offen:** Mac/Tauri/Metal nicht geprüft (Tauri-Weg `fs.remove`, Berechtigungen, Kernel-Übersetzung beim ersten Start: Hinweistext im Dialog steht, Dauer unbekannt); Tonwert-Look (Filmic) nicht wählbar im Dialog; Belichtungskorrektur wirkt erst beim Rendern (kein Nachbelichten des fertigen Bildes);
+  EXR/Tonwert laufen synchron im Webview (A2 bei 300 dpi blockiert die Oberfläche kurz); CLI-Standard bleibt Blender (Umstellung nach Auslieferung des Pakets auf dem Mac).
+
 ### Nicht in 1.0 (bewusst später)
 Ausführungsplanung 1:50/1:20-Details, [42] Varianten, [11] Bibliothek per GUID, [88] Web-Link, [G7] Booleans-Ausbau,
 Punktwolken/BCF-Ausbau, Windows-Paket, [C5]/[C7]/[15] Kern-Umbauten — ausser sie blockieren den Referenz-Ablauf.

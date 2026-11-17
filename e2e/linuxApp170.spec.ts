@@ -10,6 +10,7 @@
 import { _electron, type ElectronApplication, type Page } from "playwright";
 import { test, expect } from "@playwright/test";
 import { buildSync } from "esbuild";
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -369,5 +370,145 @@ test("Cycles: mitgeliefert, cyclesAvailable, runCycles rendert haus (8 Samples) 
   expect(rejected.every((m) => m !== "gestartet")).toBe(true);
   // Das gerenderte Bild stimmt grob (kein leeres Schwarz): Dateigrösse des 320×180-PNG nach Entrauschen > 2 kB (oben).
   r.errors = r.errors.filter((e) => !/Error invoking remote method 'cycles:start'/.test(e));
+  await close(r);
+});
+
+// [215] Teil 3: Cycles im Dialog „Rendering …“ der echten Linux-App. Musterhaus komplex öffnen, Dialog (Renderer „Eingebaut (Cycles)“ ist die
+// Vorgabe), 320 × 180 mit 8 Samples rendern, Fortschritt „Sample n von 8“ wird angezeigt (ein Beobachter hält jeden Text fest, das Rendern
+// ist schneller als ein Abfragetakt), Bild erscheint, „Ins Layout einsetzen“, Arbeitsordner aufgeräumt. Zweiter Test: Abbrechen mitten im
+// Lauf. Läuft nur, wenn das Paket mit Cycles gebaut wurde. Mit `DOSSIER_SHOT_DIR=<ordner>` legt der Test Bilder des Dialogs ab.
+const SHOT_DIR = process.env.DOSSIER_SHOT_DIR ?? "";
+async function dialogShot(page: Page, name: string): Promise<void> {
+  if (SHOT_DIR) {
+    mkdirSync(SHOT_DIR, { recursive: true });
+    await page.screenshot({ path: join(SHOT_DIR, `${name}.png`) });
+  }
+}
+const renderDirs = (): string[] => {
+  const d = join(tmpdir(), "dossier-render");
+  return existsSync(d) ? readdirSync(d) : [];
+};
+
+/** App starten, Musterhaus komplex laden, Fenster auf 1280 × 800, Rendering-Dialog öffnen. */
+async function openRenderingDialog(r: Running, resources: string) {
+  const { page, app } = r;
+  await expect(page.getByRole("button", { name: /Neues Projekt/ }).first()).toBeVisible({ timeout: 60_000 });
+  test.skip(!existsSync(join(resources, "cycles", "cycles")), "Paket ohne Cycles gebaut");
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(1280, 800));
+  // Die Autosave-Sicherung des kill-9-Tests liegt im gemeinsamen Profil: verwerfen.
+  const recover = page.getByRole("dialog", { name: "Ungesicherte Arbeit gefunden" });
+  if (await recover.isVisible({ timeout: 3000 }).catch(() => false)) await recover.getByRole("button", { name: "Verwerfen" }).click();
+  await page.getByRole("button", { name: /Neues Projekt/ }).first().click();
+  await expect(page.getByRole("group", { name: "Befehlszeile" })).toBeVisible();
+  await fileMenu(page, /Musterhaus \(komplex\)/);
+  const discard = page.getByRole("button", { name: "Nicht speichern" });
+  if (await discard.isVisible({ timeout: 1500 }).catch(() => false)) await discard.click();
+  await expect(page.locator(".project-name")).toHaveText(/Musterhaus komplex/, { timeout: 30_000 });
+  const input = page.locator(".cmdline-input");
+  await input.fill("rendering");
+  await input.press("Enter");
+  const dialog = page.getByRole("dialog", { name: "Rendering", exact: true });
+  await expect(dialog).toBeVisible();
+  // Vorgabe: eingebautes Cycles (Suche nach dem Programm läuft asynchron).
+  await expect(dialog.getByTestId("render-engine")).toHaveValue("cycles");
+  await expect(dialog.getByTestId("render-start")).toBeEnabled();
+  return dialog;
+}
+
+/** Hält jeden Text von Status und Zeitzeile des Fortschritts fest (`window.__seen`). */
+async function recordProgress(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const seen: string[] = [];
+    (window as unknown as { __seen: string[] }).__seen = seen;
+    const last: Record<string, string> = {};
+    const read = () => {
+      for (const id of ["render-status", "render-eta"]) {
+        const text = document.querySelector(`[data-testid=${id}]`)?.textContent ?? "";
+        if (text && last[id] !== text) {
+          last[id] = text;
+          seen.push(`${id}: ${text}`);
+        }
+      }
+    };
+    new MutationObserver(read).observe(document.body, { subtree: true, childList: true, characterData: true });
+  });
+}
+const seenTexts = (page: Page) => page.evaluate(() => (window as unknown as { __seen: string[] }).__seen);
+
+test("Cycles im Rendering-Dialog: 320 × 180 mit 8 Samples, Fortschritt, Bild, ins Layout, Arbeitsordner aufgeräumt", async () => {
+  test.setTimeout(300_000);
+  const r = await launch();
+  const { page, app } = r;
+  const res = await app.evaluate(() => ({ resources: process.resourcesPath }));
+  const dialog = await openRenderingDialog(r, res.resources);
+  await expect(dialog.getByTestId("render-engine-hint")).toContainText("kein Blender nötig");
+  // Cycles-Optionen sichtbar, Blender-Pfad nicht.
+  await expect(dialog.getByTestId("render-cycles-options")).toBeVisible();
+  await expect(dialog.getByTestId("render-blender-path")).toHaveCount(0);
+  await expect(dialog.getByTestId("render-blend-save")).toHaveCount(0);
+  await dialogShot(page, "dialog-vorher");
+
+  await dialog.getByLabel("Breite (Pixel)").fill("320");
+  await dialog.getByLabel("Höhe (Pixel)").fill("180");
+  await dialog.getByTestId("render-samples").fill("8");
+  await expect(dialog.getByTestId("render-quality")).toHaveValue("custom");
+  const before = renderDirs();
+  await recordProgress(page);
+  await dialog.getByTestId("render-start").click();
+  await expect(dialog.getByTestId("render-result")).toBeVisible({ timeout: 240_000 });
+  const seen = await seenTexts(page);
+  expect(
+    seen.some((s) => /Sample \d+ von 8/.test(s)),
+    `Fortschritt gesehen: ${seen.join(" | ")}`,
+  ).toBe(true);
+  expect(seen.some((s) => /render-eta: Verstrichen \d+:\d\d/.test(s))).toBe(true);
+  const size = await dialog.locator('[data-testid="render-result"] img').evaluate(async (img: HTMLImageElement) => {
+    await img.decode();
+    return [img.naturalWidth, img.naturalHeight];
+  });
+  expect(size).toEqual([320, 180]);
+  await expect(dialog.getByTestId("render-result")).toContainText("320 × 180");
+  await dialogShot(page, "dialog-nachher");
+
+  // Ins Layout einsetzen (Blatt aus dem Musterhaus), die Meldung kommt als Hinweis.
+  await expect(dialog.getByTestId("render-to-layout")).toBeEnabled();
+  await dialog.getByTestId("render-to-layout").click();
+  await expect(page.getByText(/Rendering ins Blatt .* eingesetzt/).first()).toBeVisible();
+  // Arbeitsordner dieses Laufs ist weg (die Fassadenprobe des Tests davor lässt ihren Ordner liegen, daher Differenz).
+  expect(renderDirs().filter((d) => !before.includes(d))).toEqual([]);
+  await close(r);
+});
+
+test("Cycles im Rendering-Dialog: Abbrechen mitten im Lauf beendet den Prozess und räumt auf, danach geht ein neuer Lauf", async () => {
+  test.setTimeout(300_000);
+  const r = await launch();
+  const { page, app } = r;
+  const res = await app.evaluate(() => ({ resources: process.resourcesPath }));
+  const dialog = await openRenderingDialog(r, res.resources);
+  const before = renderDirs();
+  await dialog.getByTestId("render-size").selectOption("sd");
+  await dialog.getByTestId("render-quality").selectOption("high");
+  await expect(dialog.getByTestId("render-samples")).toHaveValue("512");
+  await recordProgress(page);
+  await dialog.getByTestId("render-start").click();
+  const abort = dialog.getByTestId("render-abort");
+  await expect(abort).toBeVisible({ timeout: 120_000 });
+  await expect(dialog.getByTestId("render-status")).toContainText(/Sample ([3-9]|\d\d+) von 512/, { timeout: 180_000 });
+  await expect(dialog.getByTestId("render-eta")).toContainText(/noch etwa \d+:\d\d/, { timeout: 60_000 });
+  await dialogShot(page, "dialog-waehrend");
+  await abort.click();
+  await expect(dialog.getByTestId("render-message")).toHaveText("Rendering abgebrochen", { timeout: 30_000 });
+  await expect(dialog.getByTestId("render-start")).toBeEnabled();
+  await expect.poll(() => renderDirs().filter((d) => !before.includes(d))).toEqual([]);
+  // Der Prozess ist weg.
+  await expect.poll(() => spawnSync("pgrep", ["-f", "cycles/cycles --background"]).status, { timeout: 15_000 }).not.toBe(0);
+
+  // Neuer Lauf nach dem Abbruch: Vorschau-Qualität.
+  await dialog.getByTestId("render-quality").selectOption("draft");
+  await expect(dialog.getByTestId("render-samples")).toHaveValue("32");
+  await dialog.getByTestId("render-start").click();
+  await expect(dialog.getByTestId("render-result")).toBeVisible({ timeout: 240_000 });
+  await expect(dialog.getByTestId("render-save")).toBeVisible();
+  expect(renderDirs().filter((d) => !before.includes(d))).toEqual([]);
   await close(r);
 });

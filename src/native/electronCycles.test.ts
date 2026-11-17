@@ -1,5 +1,5 @@
 // [215] Cycles im Electron-Hauptprozess (scripts/electron-cycles.cjs): Argumentprüfung, Pfadwahl, Prozessstart mit Ersatzprogramm.
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRequire } from "node:module";
@@ -115,5 +115,21 @@ describe("Prozessstart (Ersatzprogramm)", () => {
     // fremde Argumente: kein Prozess
     expect(() => handlers.get("cycles:start")!(ev, "j3", work, ["--help", "haus.xml"])).toThrow(/nicht erlaubt/);
     delete process.env.DOSSIER_CYCLES_DIR;
+  });
+});
+
+describe("cycles:cleanup", () => {
+  it("löscht einen Arbeitsordner samt Inhalt, nie die Wurzel, Unterordner oder fremde Pfade", async () => {
+    const handlers = new Map<string, (...a: unknown[]) => unknown>();
+    cy.register({ handle: (c: string, f: (...a: unknown[]) => unknown) => handlers.set(c, f), on: () => undefined }, { isPackaged: false });
+    const d = scene();
+    mkdirSync(join(d, "textures"));
+    writeFileSync(join(d, "textures", "a.png"), "x");
+    writeFileSync(join(d, "scene.xml"), "<cycles/>");
+    await handlers.get("cycles:cleanup")!({}, d);
+    expect(existsSync(d)).toBe(false);
+    const other = scene();
+    for (const bad of [root, join(other, "textures"), tmpdir(), "/etc", "", 7, join(root, "..")]) expect(() => handlers.get("cycles:cleanup")!({}, bad)).toThrow();
+    expect(existsSync(other)).toBe(true);
   });
 });
