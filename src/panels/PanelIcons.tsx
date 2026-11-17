@@ -98,6 +98,19 @@ export function RoomBalanceTabIcon() {
   );
 }
 
+/** [272] Varianten — Verzweigung in zwei Äste (A/B). */
+export function DesignOptionsTabIcon() {
+  return (
+    <svg {...common}>
+      <path d="M8 14V8" />
+      <path d="M8 8L3.5 3.5" />
+      <path d="M8 8l4.5-4.5" />
+      <circle cx="3.5" cy="3" r="1.2" />
+      <circle cx="12.5" cy="3" r="1.2" />
+    </svg>
+  );
+}
+
 /** Verlauf — Uhr mit Rückwärtspfeil. */
 export function HistoryTabIcon() {
   return (

@@ -48,6 +48,7 @@ import { mirrorCommand, moveCommand, rotateCommand } from "./cmds/transform";
 import { scaleCommand } from "./cmds/scale";
 import { explodeCommand } from "./cmds/explode";
 import { renovationCommand } from "./cmds/renovation";
+import { designOptionCommand, designOptionCopyCommand } from "./cmds/designOption";
 import { dimdetachCommand } from "./cmds/dimdetach";
 import { autodimCommand } from "./cmds/autodim";
 import { gridCommand } from "./cmds/grid";
@@ -134,6 +135,8 @@ export const COMMANDS: Record<string, Command> = {
   scale: scaleCommand,
   explode: explodeCommand,
   renovation: renovationCommand,
+  designOption: designOptionCommand,
+  designOptionCopy: designOptionCopyCommand,
   dimdetach: dimdetachCommand,
   autodim: autodimCommand,
   grid: gridCommand,
@@ -286,6 +289,8 @@ export const ALIASES: Record<string, string> = {
   x: "explode",
   aufloesen: "explode",
   umbau: "renovation",
+  variante: "designOption",
+  variantekopieren: "designOptionCopy",
   bml: "dimdetach",
   bemassungloesen: "dimdetach",
   ab: "autodim",

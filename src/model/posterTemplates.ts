@@ -9,6 +9,7 @@ import type { Layout, LayoutOrientation, LayoutPaperFormat, MasterLayout, Projec
 import { core } from "../engine/coreWasm";
 import { t } from "../i18n/translate";
 import { findSnapshot, resolveTitleBlock, resolveViewportScale, sheetSizeMm } from "./layoutModel";
+import { combinationSuffix } from "./designOptions";
 
 export interface PosterTemplate {
   /** Schlüssel in `MasterLayout.template`. */
@@ -113,5 +114,22 @@ export function viewportScaleLabel(
   if (!snap) return null;
   const n = scaleOverride ?? resolveViewportScale(vp, snap);
   const { sizeMm, dyMm } = scaleLabelMetrics(sheet);
-  return { text: `1:${n}`, x: vp.xMm, y: vp.yMm + vp.heightMm + dyMm, sizeMm };
+  // [272] Titelzusatz: Varianten, die von der Hauptkombination abweichen (Ausschnitt bzw. Viewport).
+  const suffix = viewportVariantSuffix(project, vp);
+  return { text: suffix ? `1:${n} · ${suffix}` : `1:${n}`, x: vp.xMm, y: vp.yMm + vp.heightMm + dyMm, sizeMm };
+}
+
+/** [272] Varianten eines Viewports, die von der Hauptkombination abweichen („Dachform B Satteldach“); leer sonst. */
+export function viewportVariantSuffix(project: Project, vp: Layout["viewports"][number]): string {
+  if (!project.designOptionSets?.length) return "";
+  const snap = findSnapshot(project, vp.snapshotId);
+  return combinationSuffix(project, { ...(snap?.designOptions ?? {}), ...(vp.designOptions ?? {}) });
+}
+
+/** [272] Titelzusatz unter einem Viewport ohne Massstabsangaben des Masters: nur die Varianten; `null` ohne Abweichung. */
+export function viewportVariantLabel(project: Project, vp: Layout["viewports"][number], sheet: { w: number; h: number }): { text: string; x: number; y: number; sizeMm: number } | null {
+  const suffix = viewportVariantSuffix(project, vp);
+  if (!suffix) return null;
+  const { sizeMm, dyMm } = scaleLabelMetrics(sheet);
+  return { text: suffix, x: vp.xMm, y: vp.yMm + vp.heightMm + dyMm, sizeMm };
 }

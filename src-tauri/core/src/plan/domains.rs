@@ -68,6 +68,9 @@ pub struct PlanArgs {
     /// `None` = der der Ebene (`DrawingLevel.renovationFilter`), sonst kein Filter (`renovation.rs`).
     pub renovation: Option<String>,
     pub renovation_phase: Option<String>,
+    /// [272] Ausdrücklich angefragte Variantenkombination (Blatt-Viewport, CLI `--options`), über der der Ebene
+    /// (`DrawingLevel.designOptions`) und den Hauptvarianten (`design_options.rs`).
+    pub design_options: crate::design_options::Request,
 }
 
 /// [140] Ab diesem Massstab (1:N) zeichnet der Detailgrad „mittel" wie „grob".
@@ -116,6 +119,7 @@ impl PlanArgs {
             trace_of: v.get("traceOf").and_then(|m| m.as_str()).filter(|m| !m.is_empty()).map(String::from),
             renovation: v.get("renovation").and_then(|m| m.as_str()).filter(|m| !m.is_empty()).map(String::from),
             renovation_phase: v.get("renovationPhase").and_then(|m| m.as_str()).filter(|m| !m.is_empty()).map(String::from),
+            design_options: crate::design_options::parse_request(v.get("designOptions")),
         })
     }
 
@@ -174,7 +178,7 @@ impl<'a> Ctx<'a> {
         }
         let mut hidden = overrides::hidden_elements(p, overrides::RuleView::at(a.scale, a.rules.as_ref()).view("plan"));
         // [271] Umbaufilter: ausgeblendete Bauteile wie bei der Regel „Ausblenden“ (eine Öffnung schliesst ihre Wand).
-        let ren = crate::renovation::View::for_level(p, &a.floor, a.renovation.as_deref(), a.renovation_phase.as_deref()).map(|v| v.resolve(p)).filter(|r| !r.is_empty());
+        let ren = crate::renovation::View::for_level(p, &a.floor, a.renovation.as_deref(), a.renovation_phase.as_deref(), &a.design_options).map(|v| v.resolve(p)).filter(|r| !r.is_empty());
         if let Some(r) = &ren {
             hidden.extend(r.hidden.iter().cloned());
         }
@@ -1668,7 +1672,7 @@ pub fn room_stamp_spots(p: &Project, floor: &str, show: &HashSet<String>, scale:
         return out;
     }
     let (detail, auto_coarse) = effective_detail(Detail::Mittel, scale);
-    let a = PlanArgs { floor: floor.to_string(), detail, show: show.clone(), grey: HashSet::new(), reference_lines: false, global: true, scale, for_print: false, compact: false, mono: false, sun_when: None, auto_coarse, rules: None, model_view: None, trace_of: None, renovation: None, renovation_phase: None };
+    let a = PlanArgs { floor: floor.to_string(), detail, show: show.clone(), grey: HashSet::new(), reference_lines: false, global: true, scale, for_print: false, compact: false, mono: false, sun_when: None, auto_coarse, rules: None, model_view: None, trace_of: None, renovation: None, renovation_phase: None, design_options: Vec::new() };
     let Ok(d) = plan_domains(p, &a) else { return out };
     for q in d.rooms.iter().chain(&d.sections) {
         if let Primitive::Text { at, room_id: Some(id), .. } = q {

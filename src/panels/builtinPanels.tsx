@@ -30,6 +30,7 @@ import { BcfPanel } from "./BcfPanel";
 import { ClashPanel } from "./ClashPanel";
 import { HistoryPanel } from "./HistoryPanel";
 import { RenovationPanel, RenovationTabIcon } from "./RenovationPanel";
+import { DesignOptionsPanel } from "./DesignOptionsPanel";
 import { ObjectSettingsPanel } from "./objectSettings/ObjectSettingsPanel";
 import {
   ToolsTabIcon,
@@ -41,6 +42,7 @@ import {
   RoomBalanceTabIcon,
   BcfTabIcon,
   HistoryTabIcon,
+  DesignOptionsTabIcon,
 } from "./PanelIcons";
 
 /** IDs der eingebauten Dock-Panels (auch für defaultLayout/Filter nutzbar). */
@@ -58,6 +60,7 @@ export const BUILTIN_PANEL_IDS = {
   bcf: "bcf",
   clash: "clash",
   history: "history",
+  designOptions: "design-options",
   objectSettings: "object-settings",
   objectLibrary: "object-library",
   renovation: "renovation",
@@ -200,6 +203,16 @@ registerPanel({
   hasDisplayMode: false,
   closeOnEscape: true,
   render: () => <HistoryPanel />,
+});
+
+// [272] Varianten (Archicad „Design Options“): Sätze/Varianten, Kombination der Ansicht, Zeichen-Variante, Zuweisen,
+// Übernehmen, Vergleich. Nicht im Standard-Layout; über „Fenster > Panels“ bzw. den Chip „Variante: …“ der Statusleiste.
+registerPanel({
+  id: BUILTIN_PANEL_IDS.designOptions,
+  title: "designOption.title",
+  icon: <DesignOptionsTabIcon />,
+  hasDisplayMode: false,
+  render: () => <DesignOptionsPanel />,
 });
 
 // Objekteinstellungen ([195]) — Taste T: schwebendes Fenster, folgt der Auswahl; Bereiche „Objekt" (Objekt-Info)

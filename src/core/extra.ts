@@ -128,3 +128,12 @@ export {
 } from "../model/renovation";
 export type { RenovationFilterEntry, RenovationCollection } from "../model/renovation";
 export { buildUmbauSampleProject } from "../model/sampleProjectUmbau";
+// [272] Varianten: Sätze, Kombinationen, Zuweisen/Kopieren/Übernehmen (Regeln im Kern `design_options.rs`, Sichtbarkeit `renovation.rs`)
+export {
+  DESIGN_OPTION_COLLECTIONS, designOptionSets, primaryOption, resolveCombination, levelCombination, combinationLabel, combinationSuffix, combinationSpec,
+  parseCombination, showsInCombination, designOptionLabel, designOptionSelection, designOptionIds, commonDesignOption, parseTarget, designOptionTargets,
+  assignDesignOptionOps, copyToDesignOptionOps, acceptDesignOptionOps, deleteDesignOptionOps, nextOptionName, addDesignOptionSetOps, addDesignOptionOps,
+  renameDesignOptionSetOps, renameDesignOptionOps, setPrimaryOptionOps, setLevelCombinationOps, compareDesignOptions, compareDesignOptionsCsv, projectWithCombination,
+} from "../model/designOptions";
+export type { Combination, DesignOptionCompareRow, DesignOptionCollection } from "../model/designOptions";
+export { buildVariantenSampleProject } from "../model/sampleProjectVarianten";

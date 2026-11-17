@@ -636,6 +636,10 @@ pub fn snapshot_text(snap: &ViewSnapshot, invisible: &[String]) -> String {
         }
         o.insert("hasVis".into(), serde_json::Value::Bool(true));
         o.insert("invisible".into(), serde_json::to_value(invisible).unwrap_or_default());
+        // [272] Variantenkombination des Ausschnitts.
+        if let Some(m) = snap.design_options.as_ref().filter(|m| !m.is_empty()) {
+            o.insert("designOptions".into(), serde_json::to_value(m).unwrap_or_default());
+        }
     }
     v.to_string()
 }
@@ -706,7 +710,9 @@ pub fn axo_plan_buf(p: &Project, args: &[f64], text: &str) -> Result<Vec<u8>, St
     let scale = args.get(1).copied().filter(|s| s.is_finite() && *s > 0.0).unwrap_or(100.0);
     let mut w = crate::plan::buf::Writer::new(true);
     // [271] Umbaufilter (`renovation`, `renovationPhase`): Ausgeblendetes fehlt, Flächen in der Umbau-Farbe.
-    let ren = crate::renovation::View::new(p, v.get("renovation").and_then(|x| x.as_str()), v.get("renovationPhase").and_then(|x| x.as_str())).map(|r| r.resolve(p));
+    // [272] Variantenkombination (`designOptions`, sonst die Hauptvarianten): andere Varianten fehlen.
+    let opts = crate::design_options::parse_request(v.get("designOptions"));
+    let ren = crate::renovation::View::with(p, v.get("renovation").and_then(|x| x.as_str()), v.get("renovationPhase").and_then(|x| x.as_str()), &[], &opts).map(|r| r.resolve(p));
     let filtered = ren.as_ref().filter(|r| !r.hidden.is_empty()).map(|r| crate::renovation::without_hidden(p, &r.hidden));
     let p = filtered.as_ref().unwrap_or(p);
     let Some(a) = AxoArgs::parse(p, &v) else { return Ok(w.finish()) };

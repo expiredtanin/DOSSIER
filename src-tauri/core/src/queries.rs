@@ -16,7 +16,10 @@ pub fn run_doc(d: &mut crate::document::Document, name: &str, args: &[f64], text
     // des Aufrufers (0 = alles), Antwort als Änderung (`model3d_cache::write_delta`).
     let delta = (name == "model3dPartsDelta").then(|| args.get(5).copied().filter(|m| m.is_finite() && *m >= 0.0).unwrap_or(0.0) as u64);
     // [173] Mit Modelldarstellung (`text`) ohne den Cache (eigene Teile, s. `model3d_mv`).
-    if (name == "model3dParts" || delta.is_some()) && args.len() >= 3 && !explode && model3d_mv_id(text).is_none() && !text.contains("\"renovation\"") {
+    // [272] Mit Varianten ohne den Cache (die Teile hängen an der Kombination).
+    // Die Änderungs-Abfrage bleibt beim Cache (die Hülle fragt bei Varianten `model3dParts`, `toWalls3d.ts`).
+    let options = name == "model3dParts" && d.project().is_ok_and(crate::design_options::active);
+    if (name == "model3dParts" || delta.is_some()) && args.len() >= 3 && !explode && model3d_mv_id(text).is_none() && !text.contains("\"renovation\"") && !options {
         let voids = args.get(3).is_some_and(|v| *v != 0.0);
         // [214] Ohne Abzugskörper braucht es die Wände/Decken nicht als Werte (spart das Kopieren): leere `voidMeshes`.
         if voids && crate::plan::extras::void_prisms(d.project()?).is_empty() {
@@ -68,19 +71,16 @@ fn model3d_mv(p: &Project, text: &str, detail: f64) -> (f64, bool) {
     (base, o.stair.handrail.is_some())
 }
 
-/// [271] Projekt im Umbau-Zustand des Texts (`renovation::view_from_text`), sonst unverändert.
+/// [271] Projekt im Umbau-Zustand des Texts (`renovation::view_from_text`), [272] in der Variantenkombination des
+/// Texts (`designOptions`, sonst die Hauptvarianten), sonst unverändert.
 fn renovation_state<'a>(p: &'a Project, text: &str) -> std::borrow::Cow<'a, Project> {
-    match crate::renovation::view_from_text(p, text) {
-        Some(v) => {
-            let r = v.resolve(p);
-            if r.hidden.is_empty() {
-                std::borrow::Cow::Borrowed(p)
-            } else {
-                std::borrow::Cow::Owned(crate::renovation::without_hidden(p, &r.hidden))
-            }
-        }
-        None => std::borrow::Cow::Borrowed(p),
-    }
+    crate::renovation::project_for_text(p, text)
+}
+
+/// [272] Projekt in der Kombination eines JSON-Texts (`designOptions`, Umbaufilter), sonst in den Hauptvarianten;
+/// für Abfragen, deren Text keine Darstellung ist (dann zählt nur ein JSON-Objekt).
+fn options_state<'a>(p: &'a Project, text: &str) -> std::borrow::Cow<'a, Project> {
+    crate::renovation::project_for_text(p, if text.trim_start().starts_with('{') { text } else { "" })
 }
 
 /// Führt die Abfrage `name` aus. `args`: Zahlen, `text`: ein Text (z. B. eine id).
@@ -92,34 +92,46 @@ pub fn run(p: &Project, name: &str, args: &[f64], text: &str) -> Result<String, 
         // [271] Umbaufilter (eingebaute und eigene) für die Oberfläche.
         ("renovationFilters", _) => json(&crate::renovation::filter_list(p)),
         // [209] Kostenschätzung grob; `costDefaults` mit Text „gf“/„gv“ = Beispielwerte der Methode.
-        ("costEstimate", _) => json(&crate::kosten::estimate(p)),
+        ("costEstimate", _) => json(&crate::kosten::estimate(&renovation_state(p, text))),
+        // [272] Varianten: Sätze mit Varianten und Zahl der Elemente; Vergleich der Kennzahlen/Kosten je Kombination
+        // (`text` = `{"renovation", "renovationPhase"}` oder leer); CSV mit Spaltenköpfen (`text` = `{"head": [...]}`).
+        ("designOptionInfo", _) => Ok(crate::design_options::info(p).to_string()),
+        ("designOptionCompare", _) => {
+            let v: serde_json::Value = serde_json::from_str(text).unwrap_or_default();
+            let s = |k: &str| v.get(k).and_then(|x| x.as_str()).filter(|x| !x.is_empty());
+            let rows = crate::design_options::compare(p, s("renovation"), s("renovationPhase"));
+            match v.get("head").and_then(|h| h.as_array()) {
+                Some(h) => json(&crate::design_options::compare_csv(&rows, &h.iter().filter_map(|x| x.as_str().map(String::from)).collect::<Vec<_>>())),
+                None => json(&rows),
+            }
+        }
         ("costDefaults", _) => json(&crate::kosten::default_estimate(if text.trim() == "gf" { crate::model::CostMethod::Gf } else { crate::model::CostMethod::Gv })),
         ("ivhb", _) => {
             let opt: flaechen::IvhbOptions = if text.trim().is_empty() { Default::default() } else { serde_json::from_str(text).map_err(|e| format!("ivhb: {e}"))? };
-            json(&flaechen::ivhb(p, &opt))
+            json(&flaechen::ivhb(&options_state(p, text), &opt))
         }
         // [255] Baurecht-Nachweis (Vorgaben der Parzelle gegen Kennzahlen); Text = `IvhbOptions` als JSON.
         ("siteProof", _) => {
             let opt: flaechen::IvhbOptions = if text.trim().is_empty() { Default::default() } else { serde_json::from_str(text).map_err(|e| format!("siteProof: {e}"))? };
-            json(&crate::site_proof::site_proof(p, &opt))
+            json(&crate::site_proof::site_proof(&options_state(p, text), &opt))
         }
-        ("programCompare", _) => json(&room_program::compare(p)),
+        ("programCompare", _) => json(&room_program::compare(&options_state(p, text))),
         ("programLayout", _) => {
             let opt: room_program::LayoutOptions = if text.trim().is_empty() { Default::default() } else { serde_json::from_str(text).map_err(|e| format!("programLayout: {e}"))? };
             json(&room_program::layout(p, &opt))
         }
-        ("siteCheck", _) => json(&site_rules::check_project(p)),
+        ("siteCheck", _) => json(&site_rules::check_project(&options_state(p, text))),
         // [215] Cycles-Szene (XML + Bilddateien) aus dem Projekt; Text = `CyclesOptions` als JSON (camelCase).
         ("cyclesScene", _) => {
             let o: crate::cycles_scene::CyclesOptions = if text.trim().is_empty() { Default::default() } else { serde_json::from_str(text).map_err(|e| format!("cyclesScene: {e}"))? };
-            json(&crate::cycles_scene::cycles_scene(p, &o)?)
+            json(&crate::cycles_scene::cycles_scene(&options_state(p, text), &o)?)
         }
         ("dormerStatus", _) => json(&crate::dormer::status(p)),
         ("excavationQuantities", _) => json(&crate::excavation::quantities(p)),
-        ("buildingFootprint", _) => json(&site_rules::building_footprint(p)),
-        ("modelTop", _) => json(&site_rules::model_top(p)),
+        ("buildingFootprint", _) => json(&site_rules::building_footprint(&options_state(p, text))),
+        ("modelTop", _) => json(&site_rules::model_top(&options_state(p, text))),
         // [142] Drittes Argument: Schnitthöhe des Grundrisses (Decken/Dächer darunter fangen den Schatten).
-        ("shadows", 2 | 3) => json(&site_rules::area_out(&sun::shadow_polygons_project(p, sun::SunPosition { azimuth: args[0], elevation: args[1] }, args.get(2).copied().filter(|c| c.is_finite())))),
+        ("shadows", 2 | 3) => json(&site_rules::area_out(&sun::shadow_polygons_project(&options_state(p, text), sun::SunPosition { azimuth: args[0], elevation: args[1] }, args.get(2).copied().filter(|c| c.is_finite())))),
         ("materialMaps", _) => json(&model3d::wall_material_color_maps(p)),
         ("slabs", _) => json(&model3d::emit_slabs(p)),
         ("columnMeshes", _) => json(&model3d::emit_columns(p)),
@@ -130,10 +142,10 @@ pub fn run(p: &Project, name: &str, args: &[f64], text: &str) -> Result<String, 
         ("stairRailings", _) => json(&model3d::emit_stair_railings(p)),
         ("roofMeshes", _) => json(&model3d::emit_roofs(p, if text.is_empty() { None } else { Some(text) })?),
         ("roofCutLayers", _) => json(&model3d::emit_roof_cut_layers(p)?),
-        ("scheduleRows", _) => json(&export_schedule::schedule_rows(p)),
-        ("openingSchedule", _) => json(&crate::opening_schedule::opening_schedule(p)),
-        ("elementSchedule", _) => json(&crate::u_value::element_schedule(p)),
-        ("roomBook", _) => json(&crate::room_book::room_book(p)),
+        ("scheduleRows", _) => json(&export_schedule::schedule_rows(&options_state(p, text))),
+        ("openingSchedule", _) => json(&crate::opening_schedule::opening_schedule(&options_state(p, text))),
+        ("elementSchedule", _) => json(&crate::u_value::element_schedule(&options_state(p, text))),
+        ("roomBook", _) => json(&crate::room_book::room_book(&options_state(p, text))),
         ("sheetTables", _) => Ok(crate::sheet_table::query(p, text).to_string()),
         ("sheetTableCatalog", _) => Ok(crate::sheet_table::catalog_json().to_string()),
         ("presentationSheet", _) => Ok(crate::presentation_sheet::query(p, text)?.to_string()),
@@ -148,6 +160,9 @@ pub fn run(p: &Project, name: &str, args: &[f64], text: &str) -> Result<String, 
         ("explodeOffsets", _) => json(&crate::explode3d::floor_offsets(p, args.first().copied().unwrap_or(0.0))),
         // [180] Ohne die Elemente ausgeblendeter Klassen (`text` = `{"hide": [codes]}`, s. `model3d::ClassFilter`).
         ("pickGeometry", _) => {
+            // [272] Elemente anderer Varianten nicht picken.
+            let q = options_state(p, text);
+            let p = q.as_ref();
             let mut g = crate::explode3d::pick_geometry(p, args.first().copied().unwrap_or(0.0))?;
             model3d::ClassFilter::from_text(p, text).retain_pick(&mut g);
             json(&g)
@@ -160,9 +175,12 @@ pub fn run(p: &Project, name: &str, args: &[f64], text: &str) -> Result<String, 
         // `args[4]`: Explosionsabstand ([65], `explode3d.rs`; Körper und Abzugskörper wandern mit dem Geschoss).
         // [180] Ohne die Teile ausgeblendeter Klassen (`text` = `{"hide": [codes], "modelView": …}`).
         ("model3dParts", n) if n >= 3 => {
+            // [272] Explosion in der Kombination des Texts (sonst Hauptvarianten); ohne Explosion unten mit Umbaufilter.
+            let opt_p = options_state(p, text);
             let explode = args.get(4).copied().filter(|g| g.is_finite() && *g > 0.0);
             let filter = model3d::ClassFilter::from_text(p, text);
             if let Some(gap) = explode {
+                let p = opt_p.as_ref();
                 let parts = crate::explode3d::parts_filtered(p, args[0] != 0.0, args[1], args[2] != 0.0, gap, &filter)?;
                 let mut v = serde_json::to_value(&parts).map_err(|e| e.to_string())?;
                 if args.get(3).is_some_and(|v| *v != 0.0) {
@@ -190,7 +208,7 @@ pub fn run(p: &Project, name: &str, args: &[f64], text: &str) -> Result<String, 
             json(&parts)
         }
         // STEP-Export: alle Bauteile als truck-Spezifikationen (`solid_specs::project_solid_specs`).
-        ("projectSolidSpecs", _) => json(&crate::solid_specs::project_solid_specs(p)?),
+        ("projectSolidSpecs", _) => json(&crate::solid_specs::project_solid_specs(&options_state(p, text))?),
         // [33] Von einer Regel „Ausblenden“ ausgeblendete Elemente (ids, sortiert): `args[0]` = Massstab 1:N
         // (fehlt/NaN = ohne Massstab-Kriterium), `text` = Darstellung ("plan", "section", "elevation").
         ("hiddenElements", _) => {
@@ -247,6 +265,21 @@ pub fn run_root(lk: &crate::document::Lookup, name: &str, text: &str) -> Result<
     match name {
         // Stiftsätze ([K4] S3, `pens.rs`): Ops statt Projekt-Kopien.
         "penRebakeOps" => json(&crate::pens::rebake_ops(root)),
+        // [272] Varianten (`design_options.rs`): `text` = JSON `{set, option?, sel?, stamp?}`; Antwort Ops (ein Undo-Schritt).
+        "designOptionAcceptOps" | "designOptionDeleteOps" | "designOptionAssignOps" | "designOptionCopyOps" => {
+            let a: serde_json::Value = serde_json::from_str(text).map_err(|e| format!("{name}: {e}"))?;
+            let s = |k: &str| a.get(k).and_then(|x| x.as_str()).unwrap_or("").to_string();
+            let (set, option) = (s("set"), s("option"));
+            let target = (!set.is_empty() && !option.is_empty()).then_some((set.as_str(), option.as_str()));
+            let sel: crate::design_options::Selection = a.get("sel").and_then(|x| serde_json::from_value(x.clone()).ok()).unwrap_or_default();
+            json(&match name {
+                "designOptionAcceptOps" => crate::design_options::accept_ops(root, &set, &option),
+                "designOptionDeleteOps" if option.is_empty() => crate::design_options::delete_set_ops(root, &set),
+                "designOptionDeleteOps" => crate::design_options::delete_option_ops(root, &set, &option),
+                "designOptionAssignOps" => crate::design_options::assign_ops(root, &sel, target),
+                _ => crate::design_options::copy_ops(root, &sel, target, &s("stamp")),
+            })
+        }
         "penDeleteOps" => json(&crate::pens::delete_pen_ops(root, text)),
         // Standard-Bibliothek ([100]–[102], `standards.rs`): fehlende Standard-Ressourcen als Ops.
         "standardsMergeOps" => json(&crate::standards::merge_ops_in(root, crate::standards::Lang::parse(text))),
@@ -333,13 +366,17 @@ pub fn run_bin(p: &Project, name: &str, args: &[f64], text: &str) -> Result<Vec<
         // Export-Sammler ([K4], [B5], [C11]): flacher Puffer für `fileio` (Byte-Hülle `export_flat.rs`).
         ("ifcExportData", 4 | 5) => {
             // 5. Argument [259]: Kontext (Gelände, Nachbarn) mitgeben.
-            let opt = crate::ifc_data::IfcOptions { now: args[0], ifc2x3: args[1] != 0.0, ebkph: args[2] != 0.0, layer_codes: args[3] != 0.0, context: args.get(4).is_some_and(|v| *v != 0.0), iso: text.to_string() };
-            crate::ifc_data::ifc_export_data(p, &opt).map(|f| f.to_bytes())
+            // [272] `text` = Zeitstempel (ISO) oder `{"iso", "designOptions", "renovation"}`: Kombination der Ansicht.
+            let json_text = text.trim_start().starts_with('{');
+            let iso = if json_text { serde_json::from_str::<serde_json::Value>(text).ok().and_then(|v| v.get("iso").and_then(|x| x.as_str()).map(String::from)).unwrap_or_default() } else { text.to_string() };
+            let q = options_state(p, text);
+            let opt = crate::ifc_data::IfcOptions { now: args[0], ifc2x3: args[1] != 0.0, ebkph: args[2] != 0.0, layer_codes: args[3] != 0.0, context: args.get(4).is_some_and(|v| *v != 0.0), iso };
+            crate::ifc_data::ifc_export_data(&q, &opt).map(|f| f.to_bytes())
         }
         ("meshExportData", 3 | 4) => {
             // 4. Argument [227]: Baugruben weglassen (hinterfüllt).
             let opt = crate::mesh_data::MeshOptions { opening_parts: args[0] != 0.0, context: args[1] != 0.0, by_level: args[2] != 0.0, backfilled: args.get(3).is_some_and(|v| *v != 0.0) };
-            crate::mesh_data::mesh_export_data(p, &opt).map(|f| f.to_bytes())
+            crate::mesh_data::mesh_export_data(&options_state(p, text), &opt).map(|f| f.to_bytes())
         }
         // Gruppen der kompakten Linien-Unterlage (gleiche Argumente wie `planDomains`), als f64.
         ("drawingUnderlay", 1) => {

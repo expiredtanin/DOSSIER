@@ -101,6 +101,8 @@ export function classFilterText(hide?: Hide3d, extra?: Record<string, unknown>):
     h.renovation = f.renovation;
     if (f.renovationPhase) h.renovationPhase = f.renovationPhase;
   }
+  // [272] Variantenkombination der Ansicht (fehlt = Hauptvarianten; Kern `renovation.rs`).
+  if (f.designOptions && Object.keys(f.designOptions).length) h.designOptions = f.designOptions;
   return Object.keys(h).length || extra ? JSON.stringify({ ...extra, ...h }) : "";
 }
 
@@ -125,6 +127,8 @@ export interface Filter3d {
   /** [271] Umbaufilter der Ansicht (Id) und Etappe: Ausgeblendetes fehlt, Bauteile in der Umbau-Farbe (ohne Teil-Cache). */
   renovation?: string;
   renovationPhase?: string;
+  /** [272] Variantenkombination der Ansicht (Satz-Id → Varianten-Id); fehlt = Hauptvarianten. */
+  designOptions?: Record<string, string>;
 }
 
 /**
@@ -335,7 +339,8 @@ export function projectToModel3d(project: Project, opts: Model3dOptions = {}): R
     if (opts.renovationPhase) extra.renovationPhase = opts.renovationPhase;
   }
   const text = classFilterText(opts.hide, Object.keys(extra).length ? extra : undefined);
-  const parts = opts.modelView || opts.renovation || filter3d(opts.hide).renovation || explode > 0 ? doc.query<Model3dParts>("model3dParts", args, text) : doc.model3dParts<Model3dParts>(args, text);
+  // [272] Mit Variantensätzen ohne Änderungs-Antworten (die Teile hängen an der Kombination).
+  const parts = opts.modelView || opts.renovation || filter3d(opts.hide).renovation || project.designOptionSets?.length || explode > 0 ? doc.query<Model3dParts>("model3dParts", args, text) : doc.model3dParts<Model3dParts>(args, text);
   // [115] Freie Körper als Kern-Netze (`model3d/solids.rs`) zwischen Kontext-Meshes und Stützen.
   const meshes: RMesh[] = [...parts.contextMeshes];
   for (const m of parts.solidMeshes) meshes.push(m);
@@ -389,7 +394,8 @@ export function projectToModel3dParts(project: Project, opts: Model3dOptions = {
   const layered = opts.layeredWalls ?? true;
   const detail = opts.detail ?? "fein";
   // [271] Mit Umbaufilter ohne Teil-Cache: das ganze Modell (`projectToModel3d`).
-  if (explodeGap(opts.explode) > 0 || opts.renovation || filter3d(opts.hide).renovation) return null;
+  // [272] Mit Variantensätzen ebenso (die Teile hängen an der Kombination; der Kern rechnet dann ohne Cache).
+  if (explodeGap(opts.explode) > 0 || opts.renovation || filter3d(opts.hide).renovation || project.designOptionSets?.length) return null;
   const voids = !!opts.voids;
   const args = [layered ? 1 : 0, DETAIL_CODE[detail] ?? 3, opts.forSection ? 1 : 0, voids ? 1 : 0, 0];
   const { parts, keyed } = documentFor(project).model3dPartsKeyed<Model3dParts>(args, classFilterText(opts.hide));

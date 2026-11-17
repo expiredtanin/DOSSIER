@@ -18,7 +18,7 @@ import type { useProjectActions } from "./useProjectActions";
 import type { useTopBarState } from "./useTopBarState";
 import { useViewTemplateHandlers } from "./useViewTemplateHandlers";
 import { modelViewHandlers } from "./useModelViewHandlers";
-import { setField, setPhasesOps } from "../core";
+import { setField, setPhasesOps, addDesignOptionSetOps, renameDesignOptionSetOps, addDesignOptionOps, renameDesignOptionOps, setPrimaryOptionOps, acceptDesignOptionOps, deleteDesignOptionOps } from "../core";
 
 type TopBar = ReturnType<typeof useTopBarState>;
 type Dialogs = ReturnType<typeof useDialogState>;
@@ -145,6 +145,14 @@ export function useResourceHandlers(opts: {
         else delete next.styles;
         return [setField("renovation", Object.keys(next).length ? next : undefined)];
       }),
+    // [272] Varianten (Ressourcen-Tab „Varianten“): Sätze/Varianten, Hauptvariante, Übernehmen, Löschen (je ein Undo-Schritt).
+    onAddDesignOptionSet: (name) => applyChange((p) => addDesignOptionSetOps(p, name).ops),
+    onRenameDesignOptionSet: (setId, name) => applyChange((p) => renameDesignOptionSetOps(p, setId, name), `dopt-set-${setId}`),
+    onAddDesignOption: (setId) => applyChange((p) => addDesignOptionOps(p, setId)),
+    onRenameDesignOption: (setId, optionId, name) => applyChange((p) => renameDesignOptionOps(p, setId, optionId, name), `dopt-${setId}-${optionId}`),
+    onSetPrimaryDesignOption: (setId, optionId) => applyChange((p) => setPrimaryOptionOps(p, setId, optionId)),
+    onAcceptDesignOption: (setId, optionId) => applyChange((p) => acceptDesignOptionOps(p, setId, optionId)),
+    onDeleteDesignOption: (setId, optionId) => applyChange((p) => deleteDesignOptionOps(p, setId, optionId)),
     onPatchComponent: patchComponent,
     onPatchWallType: patchWallType,
     onAddWallType: addWallType,

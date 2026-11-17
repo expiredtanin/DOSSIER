@@ -51,6 +51,7 @@ import { withNewProjectNames } from "../model/newProjectNames";
 import { buildComplexSampleProject } from "../model/sampleProjectComplex";
 import { buildWettbewerbSampleProject } from "../model/sampleProjectWettbewerb";
 import { buildUmbauSampleProject } from "../model/sampleProjectUmbau";
+import { buildVariantenSampleProject } from "../model/sampleProjectVarianten";
 import { withStandards } from "../model/standards";
 import type { Project } from "../model/types";
 import type { PlanViewHandle } from "../views/plan/PlanView";
@@ -578,6 +579,13 @@ export function useProjectFileActions(
     getState().loadProject(next);
     lastSavedProjectRef.current = next;
   });
+  // [272] „Neu aus Vorlage: Beispiel Varianten" — Demo-Haus mit den Sätzen Dachform (Flach-/Satteldach) und Fassade.
+  const onNewProjectFromVariantenSample = () => guardDiscard(() => {
+    releaseCurrentProjectLock();
+    const next = buildVariantenSampleProject();
+    getState().loadProject(next);
+    lastSavedProjectRef.current = next;
+  });
   // „Neu aus Vorlage: Datei wählen…" — native `.obpt`-Dialog unter Tauri, sonst
   // das versteckte `<input type=file>` (projectTemplateFileInputRef).
   const onNewProjectFromTemplate = () => {
@@ -923,6 +931,7 @@ export function useProjectFileActions(
     onNewProjectFromComplexSample,
     onNewProjectFromWettbewerbSample,
     onNewProjectFromUmbauSample,
+    onNewProjectFromVariantenSample,
     onNewProjectFromTemplate,
     onProjectTemplateFileChosen,
     releaseCurrentProjectLock,

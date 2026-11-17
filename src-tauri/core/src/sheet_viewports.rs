@@ -102,22 +102,49 @@ pub fn level_with_template(l: &DrawingLevel, t: &ViewTemplate) -> DrawingLevel {
     macro_rules! take {
         ($($f:ident),*) => { $(if t.$f.is_some() { l.$f = t.$f.clone(); })* };
     }
-    take!(cut_height, view_top, view_bottom, view_depth, shadows, hidden_lines, sketch, cut_hatch, floor_finish, show_terrain, model_view_option_id, renovation_filter, renovation_phase);
+    take!(cut_height, view_top, view_bottom, view_depth, shadows, hidden_lines, sketch, cut_hatch, floor_finish, show_terrain, model_view_option_id, renovation_filter, renovation_phase, design_options);
     l
 }
 
 /// [34] Das Projekt, wie es die verknüpfte Vorlage des Ausschnitts für dessen Ebene sieht: Ebenen-Felder
 /// der Vorlage und ihre Strichstärken-Skalierung. Ohne verknüpfte Vorlage unverändert (geliehen).
 pub fn snapshot_project<'a>(p: &'a Project, snap: &ViewSnapshot) -> Cow<'a, Project> {
-    let Some(t) = snapshot_template(p, snap) else { return Cow::Borrowed(p) };
+    let t = snapshot_template(p, snap);
+    // [272] Variantenkombination des Ausschnitts (über der der Ebene und der Vorlage).
+    let opts = snap.design_options.as_ref().filter(|m| !m.is_empty());
+    if t.is_none() && opts.is_none() {
+        return Cow::Borrowed(p);
+    }
     let mut q = p.clone();
     for l in q.drawing_levels.iter_mut().filter(|l| l.id == snap.active_level_id) {
-        *l = level_with_template(l, t);
+        if let Some(t) = t {
+            *l = level_with_template(l, t);
+        }
+        if let Some(o) = opts {
+            let mut m = l.design_options.clone().unwrap_or_default();
+            m.extend(o.iter().map(|(k, v)| (k.clone(), v.clone())));
+            l.design_options = Some(m);
+        }
     }
-    if t.scale_line_weights.is_some() {
+    if let Some(t) = t.filter(|t| t.scale_line_weights.is_some()) {
         q.scale_line_weights = t.scale_line_weights;
     }
     Cow::Owned(q)
+}
+
+/// [272] Der Ausschnitt eines Viewports mit dessen eigener Variantenkombination (über der des Ausschnitts); ohne
+/// eigene Wahl unverändert.
+pub fn viewport_snapshot<'a>(snap: &'a ViewSnapshot, vp: &LayoutViewport) -> Cow<'a, ViewSnapshot> {
+    match vp.design_options.as_ref().filter(|m| !m.is_empty()) {
+        Some(o) => {
+            let mut s = snap.clone();
+            let mut m = s.design_options.clone().unwrap_or_default();
+            m.extend(o.iter().map(|(k, v)| (k.clone(), v.clone())));
+            s.design_options = Some(m);
+            Cow::Owned(s)
+        }
+        None => Cow::Borrowed(snap),
+    }
 }
 
 /// Plan-Argumente eines Viewports (wie `ViewportPlanSvg`: projektglobal, nicht für den Druck).
@@ -143,6 +170,8 @@ pub fn viewport_args(p: &Project, snap: &ViewSnapshot, scale: f64, mono: bool) -
         // [271] Umbaufilter des Ausschnitts (sonst der der Ebene).
         renovation: snap.renovation_filter.clone().filter(|s| !s.is_empty()),
         renovation_phase: snap.renovation_phase.clone().filter(|s| !s.is_empty()),
+        // [272] Variantenkombination des Ausschnitts (über der der Ebene).
+        design_options: snap.design_options.iter().flatten().map(|(k, v)| (k.clone(), v.clone())).collect(),
     };
     a.apply_model_view(p);
     a
@@ -164,6 +193,8 @@ pub fn viewport_maps(p: &Project, layout: &Layout) -> Vec<VpMap> {
     let mut out = Vec::new();
     for vp in &layout.viewports {
         let Some(snap) = snaps.iter().find(|s| s.id == vp.snapshot_id) else { continue };
+        let snap = viewport_snapshot(snap, vp);
+        let snap = snap.as_ref();
         if !(vp.width_mm > 0.0 && vp.height_mm > 0.0 && vp.x_mm.is_finite() && vp.y_mm.is_finite()) {
             continue;
         }

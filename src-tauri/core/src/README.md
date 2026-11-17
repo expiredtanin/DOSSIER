@@ -33,6 +33,7 @@ Neues Modul: `<modul>.rs` und `mod` in `lib.rs`, Bindungen in `web/<modul>.rs` u
 | `gpu_compile.rs` | GPU-Kompilierung von Plan-Puffern (nativer macOS-Weg) |
 | `style.rs` | Farben, Schraffur und Schnitt-Linienstil aus dem Modell |
 | `renovation.rs` | [271] Umbau: Status je Bauteil, Etappen, Umbaufilter (`View`, `Resolved`), SIA-Farben; ein Ort für „sichtbar/wie gezeichnet im Filter“ (s. `doc/ARCHITEKTUR.md` 3.8) |
+| `design_options.rs` | [272] Varianten: Kombination (je Satz eine Variante), Anfragen „Satz=Variante“, Ops (Übernehmen, Löschen, Zuweisen, Kopieren, Zeichen-Variante), Vergleich der Kennzahlen/Kosten; die Sichtbarkeit selbst entscheidet `renovation.rs` (`doc/ARCHITEKTUR.md` 3.9) |
 | `standards.rs` | Standard-Bibliothek: Baustoffe mit SIA-400-Schraffur und Kennwerten, Linientypen, Standard-Aufbauten |
 | `standards_names.rs` | [264] Englische Namen der Standards nach Kennung (`Lang`, `name_in`); neue Projekte in englischer UI bekommen sie über `standardsMergeOps(lang)` |
 | `furniture_lib.rs` | Objektbibliothek 2D ([253]): Katalog der Standard-Symbole mit Parametern (Definition) und Zeichenfunktionen nach Detailgrad (Erzeugung), Register, Platzhalter für unbekannte Ids; s. `doc/ARCHITEKTUR.md` 3.7 |

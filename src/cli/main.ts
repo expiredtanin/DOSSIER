@@ -21,6 +21,9 @@
 //                                                  --model-view <Name> wählt eine Modelldarstellung (eigene Stufe oder grob/mittel/fein) [173]
 //                                                  --renovation <Filter> Umbaufilter (bestand, abbruch, neubau, umbauplan, endzustand oder eigener)
 //                                                  mit --phase <Etappe> (Name oder id); auch für axo, model3d und kennzahlen [271]
+//                                                  --options "Dachform=B,Fassade=A" Variantenkombination (Satz=Variante, Namen oder ids;
+//                                                  fehlende Sätze: Hauptvariante); für alle Ausgaben (plan, section, elevation, axo,
+//                                                  model3d, kennzahlen, dxf, ifc, obj …); `designoptions` vergleicht alle Kombinationen [272]
 //                                                  --hide <Code|Name,…> blendet Klassen aus (z. B. --hide "Schatten,Auto-Bemassung") [180]
 //                                                  --snapshot <Name|id> übernimmt Geschoss, Massstab, Vorlage und Sichtbarkeit eines Ausschnitts [207]
 //   dossier-cli <projekt.obp> axo [--view southeast|southwest|northeast|northwest|iso|…] [--projection iso|military|military30]
@@ -145,6 +148,12 @@ import {
   viewportLevelPlan,
   generateAxoPlan,
   renovationFilterList,
+  parseCombination,
+  designOptionSets,
+  projectWithCombination,
+  compareDesignOptions,
+  compareDesignOptionsCsv,
+  buildVariantenSampleProject,
   buildUmbauSampleProject,
   type AxoOptions,
   planToRenderScene,
@@ -258,6 +267,7 @@ function loadProject(path: string, args: Args): Project {
   if (path === ":musterhaus-komplex") return buildComplexSampleProject();
   if (path === ":wettbewerb") return buildWettbewerbSampleProject();
   if (path === ":umbau") return buildUmbauSampleProject();
+  if (path === ":varianten") return buildVariantenSampleProject();
   if (path === ":gross") return buildBigSampleProject({ floors: Number(args.flags.get("floors") ?? 8), apartments: Number(args.flags.get("apartments") ?? 15) });
   let text: string;
   try {
@@ -631,7 +641,7 @@ function importParsedDrawing(base: Project, parsed: ReturnType<typeof parseDxf>,
 /** Liest Eingabe nach Endung in ein Projekt: obp direkt, dxf/dwg als 2D-Zeichnung + Meshes, ifc als Kontext-Meshes (`--elements`: Bauteile). */
 async function importAny(path: string, args: Args): Promise<Project> {
   const ext = extOf(path);
-  if (ext === "obp" || ext === "json" || path === ":beispiel" || path === ":musterhaus-komplex" || path === ":wettbewerb" || path === ":umbau") return loadProject(path, args);
+  if (ext === "obp" || ext === "json" || path === ":beispiel" || path === ":musterhaus-komplex" || path === ":wettbewerb" || path === ":umbau" || path === ":varianten") return loadProject(path, args);
   let bytes: Uint8Array;
   try {
     bytes = new Uint8Array(readFileSync(path));
@@ -1049,7 +1059,7 @@ async function importSyntheticContext(base: Project, args: Args, rows: Array<[st
 }
 
 /** Befehle, die eine Ausgabe-Datei erzeugen (für die Anonymitäts-Prüfung einer Wettbewerbs-Abgabe, [208]). */
-const EXPORT_COMMANDS = new Set(["plan", "section", "elevation", "axo", "dxf", "dwg", "ifc", "obj", "stl", "glb", "gltf", "step", "stp", "schedule", "kennzahlen", "raumprogramm", "render", "blend", "model3d"]);
+const EXPORT_COMMANDS = new Set(["plan", "section", "elevation", "axo", "dxf", "dwg", "ifc", "obj", "stl", "glb", "gltf", "step", "stp", "schedule", "kennzahlen", "designoptions", "raumprogramm", "render", "blend", "model3d"]);
 
 /**
  * [208] Anonyme Abgabe: vor einem Export den Freitext prüfen. Treffer stehen auf stderr; ohne `--ignore-anonymity`
@@ -1078,6 +1088,17 @@ async function execute(project: Project, file: string, command: string, rest: st
   const scale = Number(args.flags.get("scale") ?? 100);
   const blocked = anonymityGate(project, file, command, args);
   if (blocked !== 0) return blocked;
+  // [272] `--options "Dachform=B,Fassade=A"`: diese Variantenkombination gilt für alle Ausgaben (wird zur Hauptkombination).
+  const optSpec = args.flags.get("options");
+  if (optSpec && optSpec !== "true") {
+    const combo = parseCombination(project, optSpec);
+    const asked = optSpec.split(/[,;]/).filter((s) => s.trim()).length;
+    if (Object.keys(combo).length !== asked) {
+      const known = designOptionSets(project).map((s) => `${s.name}=${s.options.map((o) => o.name).join("|")}`).join(", ");
+      fail(`Variante nicht gefunden: ${optSpec} (vorhanden: ${known || "keine Variantensätze"})`);
+    }
+    project = projectWithCombination(project, combo);
+  }
   // [257] `bench --context`: vorher synthetische Kontext-Importe (Kataster, Höhenlinien, Gebäudenetze) ins Projekt laden.
   const contextRows: Array<[string, number]> = [];
   if (command === "bench" && args.flags.has("context")) {
@@ -1339,6 +1360,15 @@ async function execute(project: Project, file: string, command: string, rest: st
       // [68] Erdarbeiten je Baugrube (Abtrag/Auftrag/Hinterfüllung, m³).
       const erdarbeiten = excavationQuantities(project);
       out(args, JSON.stringify({ kennzahlen: k, raumprogramm: prog, baurecht, erdarbeiten }, null, 2), `${exportProjectName(project) || "projekt"}-kennzahlen.json`);
+      return 0;
+    }
+    case "designoptions": {
+      // [272] Varianten-Vergleich: Kennzahlen und Kosten je Kombination; --format json|csv, --renovation wie kennzahlen.
+      const ren = renovationFlags(project, args)?.renovation ?? "";
+      const stem = `${exportProjectName(project) || "projekt"}-varianten`;
+      if ((args.flags.get("format") ?? "json") === "csv") {
+        out(args, compareDesignOptionsCsv(project, ["Kombination", "GF m2", "HNF m2", "GV m3", "Fussabdruck m2", "AZ", "UEZ", "Kosten CHF"], ren), `${stem}.csv`);
+      } else out(args, JSON.stringify(compareDesignOptions(project, ren), null, 2), `${stem}.json`);
       return 0;
     }
     case "raumprogramm": {

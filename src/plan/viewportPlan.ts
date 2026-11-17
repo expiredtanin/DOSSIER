@@ -67,10 +67,14 @@ export async function viewportLevelPlan(
   /** [173] Modelldarstellung des Ausschnitts (`ViewSnapshot.modelViewOptionId`): geht der Ebene und der
    * Vorlage vor (Kern: `sheet_viewports::viewport_args`, Schnitt/Ansicht über `modelView`). */
   modelViewOptionId?: string | null,
+  /** [272] Variantenkombination des Ausschnitts/Viewports (über der der Ebene; Kern: `sheet_viewports::snapshot_project`). */
+  designOptions?: Record<string, string> | null,
 ): Promise<Plan> {
-  if (!template && !modelViewOptionId) return levelPlan(project, levelId, visibleCodes, detail, scaleDenominator, forPrint, mono, overrideRuleIds);
+  const opts = designOptions && Object.keys(designOptions).length ? designOptions : null;
+  if (!template && !modelViewOptionId && !opts) return levelPlan(project, levelId, visibleCodes, detail, scaleDenominator, forPrint, mono, overrideRuleIds);
   let tp = template ? projectWithTemplate(project, levelId, template) : project;
   if (modelViewOptionId) tp = projectWithModelView(tp, levelId, modelViewOptionId);
+  if (opts) tp = projectWithDesignOptions(tp, levelId, opts);
   return withDocument(tp, () => levelPlan(tp, levelId, visibleCodes, template?.detail ?? detail, scaleDenominator, forPrint, mono, overrideRuleIds));
 }
 
@@ -78,14 +82,32 @@ export async function viewportLevelPlan(
  * Inhalt eines Ausschnitts auf dem Blatt bzw. im PDF: [266] 3D-Ausschnitte (Ansichtstyp „perspektive“) als 3D-Dokument aus dem
  * Kern (Vektor-Axonometrie/-Perspektive mit verdeckten Kanten, Kern: `sheet_viewports::doc3d_buf`), sonst {@link viewportLevelPlan}.
  */
-export async function viewportSnapshotPlan(project: Project, snap: ViewSnapshot, visibleCodes: Set<string>, scaleDenominator: number, forPrint = false): Promise<Plan> {
-  if (isDoc3dSnapshot(snap)) return snapshotAxoPlan(project, snap, visibleCodes, scaleDenominator, snapshotMono(project, snap)) ?? EMPTY;
+export async function viewportSnapshotPlan(project: Project, snap: ViewSnapshot, visibleCodes: Set<string>, scaleDenominator: number, forPrint = false, viewport?: { designOptions?: Record<string, string> | null } | null): Promise<Plan> {
+  // [272] Variantenkombination: Ausschnitt, darüber die des Viewports (dieselbe Ansicht in anderer Kombination).
+  const opts = viewportDesignOptions(snap, viewport);
+  if (isDoc3dSnapshot(snap)) return snapshotAxoPlan(project, snap, visibleCodes, scaleDenominator, snapshotMono(project, snap), opts) ?? EMPTY;
+  if (opts) {
+    const dp = projectWithDesignOptions(project, snap.activeLevelId, opts);
+    const fp = snap.renovationFilter ? projectWithRenovation(dp, snap.activeLevelId, snap.renovationFilter, snap.renovationPhase) : dp;
+    return withDocument(fp, () => viewportLevelPlan(fp, snap.activeLevelId, visibleCodes, snap.detail, scaleDenominator, forPrint, snapshotMono(fp, snap), snapshotOverrideRuleIds(fp, snap), snapshotTemplate(fp, snap), snap.modelViewOptionId));
+  }
   // [271] Umbaufilter des Ausschnitts: geht dem der Ebene vor (wie im Kern `sheet_viewports::viewport_args`).
   if (snap.renovationFilter) {
     const rp = projectWithRenovation(project, snap.activeLevelId, snap.renovationFilter, snap.renovationPhase);
     return withDocument(rp, () => viewportLevelPlan(rp, snap.activeLevelId, visibleCodes, snap.detail, scaleDenominator, forPrint, snapshotMono(rp, snap), snapshotOverrideRuleIds(rp, snap), snapshotTemplate(rp, snap), snap.modelViewOptionId));
   }
   return viewportLevelPlan(project, snap.activeLevelId, visibleCodes, snap.detail, scaleDenominator, forPrint, snapshotMono(project, snap), snapshotOverrideRuleIds(project, snap), snapshotTemplate(project, snap), snap.modelViewOptionId);
+}
+
+/** [272] Kombination eines Ausschnitts samt Viewport (Viewport geht vor); `null` ohne eigene Wahl. */
+export function viewportDesignOptions(snap: { designOptions?: Record<string, string> | null }, viewport?: { designOptions?: Record<string, string> | null } | null): Record<string, string> | null {
+  const m = { ...(snap.designOptions ?? {}), ...(viewport?.designOptions ?? {}) };
+  return Object.keys(m).length ? m : null;
+}
+
+/** [272] Das Projekt mit der Variantenkombination `opts` an der Ebene `levelId` (über deren eigener Wahl). */
+export function projectWithDesignOptions(project: Project, levelId: string, opts: Record<string, string>): Project {
+  return { ...project, drawingLevels: project.drawingLevels.map((l) => (l.id === levelId ? { ...l, designOptions: { ...(l.designOptions ?? {}), ...opts } } : l)) };
 }
 
 /** [271] Das Projekt mit Umbaufilter `filter` (und Etappe) an der Ebene `levelId`. */

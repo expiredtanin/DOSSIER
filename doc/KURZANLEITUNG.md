@@ -374,6 +374,30 @@ Fenster zugemauert, neues Fenster in der Westwand, Anbau in der zweiten Etappe).
   `Pset_WallCommon` (NEW, EXISTING, DEMOLISH) und die Etappe in `Dossier_Umbau`. Kommandozeile: `--renovation umbauplan`
   (und `--phase`) bei plan, section, elevation, axo, model3d und kennzahlen.
 
+## 13. Varianten
+
+Für Wettbewerb und Vorprojekt lassen sich Teile des Entwurfs in Varianten zeichnen und nebeneinander vergleichen (wie die
+Design Options in Archicad). Ein Variantensatz (z. B. Dachform) hat Varianten (A, B, …); jedes Element gehört zum
+„Hauptmodell“ oder zu genau einer Variante. Zum Ausprobieren: *Datei → Neu aus Vorlage: Beispiel Varianten* (Sätze Dachform:
+Flachdach/Satteldach und Fassade: Lochfenster/Bandfenster).
+
+- **Panel:** ein Klick auf den Knopf Variante rechts in der Statusleiste (nur mit Variantensätzen; bei wenig Platz unter ⋯)
+  öffnet das Panel „Varianten“. Dort: „Kombination dieser Ansicht“ (je Satz eine Variante, Vorgabe die „Hauptvariante“), „Neue
+  Elemente zeichnen in“ (neue Bauteile und 2D-Elemente gehören dieser Variante), die Auswahl einer Variante „Zuweisen“ oder
+  „Kopieren in“ eine Variante, die Sätze verwalten („Satz hinzufügen“, umbenennen, löschen) und „Übernehmen“.
+- **Kombination:** gehört zur Ebene wie der Umbaufilter, also je Reiter (Geschoss, Schnitt, Ansicht) eigen und mit Undo; der
+  Grundriss, der Schnitt, die Ansicht, die Axonometrie und das 3D zeigen nur die gewählten Varianten. Ausschnitte merken die
+  Kombination; ein Viewport auf dem Blatt kann dieselbe Ansicht in einer anderen Kombination zeigen (je Satz eine Wahl im
+  Viewport, Vorgabe „wie Ausschnitt“) und trägt dann den Variantennamen unter dem Plan.
+- **Zuweisen:** Elemente wählen, in der **Objekt-Info** (auch Taste T) das Feld „Variante“; bei Mehrfachauswahl in einem Schritt.
+  Oder die Befehle `variante` und `variantekopieren` (Ziel z. B. Dachform=B, Variantenname oder Nummer; H = Hauptmodell).
+- **Übernehmen:** „Übernehmen“ bei einer Variante legt ihre Elemente ins Hauptmodell und löscht die übrigen Varianten des Satzes
+  samt Elementen (ein Undo-Schritt). Der Papierkorb löscht eine Variante bzw. einen Satz samt Elementen.
+- **Vergleich:** Panel Flächenbilanz (oder „Vergleich öffnen“ im Panel „Varianten“): der „Varianten-Vergleich“ zeigt GF, HNF,
+  GV, Fussabdruck, AZ, ÜZ und Kosten je Kombination nebeneinander, mit „Vergleich als CSV“.
+- **Exporte:** DXF, IFC, PDF und Kennzahlen nehmen die Kombination der Ansicht bzw. die Hauptvarianten. Kommandozeile:
+  --options "Dachform=B,Fassade=A" bei allen Ausgaben, dossier-cli … designoptions für den Vergleich (--format csv).
+
 ---
 
 ## Noch offen

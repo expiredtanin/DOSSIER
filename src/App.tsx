@@ -244,6 +244,15 @@ export default function App() {
   // localStorage + reconcile). Bei jeder Änderung zurückspeichern.
   const layout = useStore((s) => s.layout);
   const setLayout = useStore((s) => s.setLayout);
+  // [272] Panel öffnen auf Wunsch eines Bausteins ohne Zugriff aufs Layout (Chip „Variante: …“ der Statusleiste).
+  useEffect(() => {
+    const on = (e: Event) => {
+      const id = (e as CustomEvent<string>).detail;
+      if (typeof id === "string" && id) setLayout((l) => revealPanel(l, id, { x: 96, y: 96, w: 520, h: 680 }));
+    };
+    window.addEventListener("dossier:reveal-panel", on);
+    return () => window.removeEventListener("dossier:reveal-panel", on);
+  }, [setLayout]);
   const modeFor = useStore((s) => s.modeFor);
   const setModeFor = useStore((s) => s.setModeFor);
   useEffect(() => {
@@ -406,7 +415,7 @@ export default function App() {
   );
   const {
     projectFileInputRef, projectTemplateFileInputRef, openImportForFile, onSaveProject, onSaveProjectAs, onRestoreBackup,
-    onNewProject, onNewProjectFromSample, onNewProjectFromComplexSample, onNewProjectFromWettbewerbSample, onNewProjectFromUmbauSample, onNewProjectFromTemplate,
+    onNewProject, onNewProjectFromSample, onNewProjectFromComplexSample, onNewProjectFromWettbewerbSample, onNewProjectFromUmbauSample, onNewProjectFromVariantenSample, onNewProjectFromTemplate,
     onProjectTemplateFileChosen, onExportIfc, onExportObj, onExportStl, onOpenProject, onProjectFileChosen,
   } = files;
 
@@ -716,6 +725,7 @@ export default function App() {
     onNewProjectFromComplexSample,
     onNewProjectFromWettbewerbSample,
     onNewProjectFromUmbauSample,
+    onNewProjectFromVariantenSample,
     onNewProjectFromTemplate,
     onOpenProject,
     onSaveProject,
@@ -734,6 +744,8 @@ export default function App() {
     onOpenSettings: () => openSettings(),
     onOpenBcf: () => setLayout((l) => revealPanel(l, "bcf")),
     onOpenHistory: () => setLayout((l) => revealPanel(l, "history")),
+    // [272] Panel „Varianten“ (auch vom Chip der Statusleiste über `dossier:reveal-panel`).
+    onOpenDesignOptions: () => setLayout((l) => revealPanel(l, "design-options", { x: 96, y: 96, w: 520, h: 680 })),
     applyScale,
     fitPlan,
     fitSelection,

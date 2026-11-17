@@ -60,6 +60,7 @@ pub use dossier_hatch::hatch;
 pub mod hatch_flat;
 pub mod plan;
 pub mod renovation;
+pub mod design_options;
 pub mod project_format;
 pub mod queries;
 pub mod gpu_compile;

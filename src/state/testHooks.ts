@@ -62,8 +62,12 @@ declare global {
       context: () => { id: string; type: string; first?: { x: number; y: number } }[];
       /** [271] Füllfarben der Element-Flächen im Grundriss der aktiven Ebene (Farbe → Anzahl, alle Klassen, 1:100). */
       planFillColors: () => Record<string, number>;
+      /** [272] Öffnungs-Ids im Grundriss der aktiven Ebene (alle Klassen, 1:100). */
+      planOpeningIds: () => string[];
       /** [271] Umbau: Filter und Etappe der aktiven Ebene, Zeichen-Status, Status je Wand. */
       renovation: () => { filter: string | null; phase: string | null; draw: string; walls: Record<string, string> };
+      /** [272] Varianten: Kombination der aktiven Ebene, Zeichen-Variante, Variante je Element (`set/option`, leer = Hauptmodell), Sätze. */
+      designOptions: () => { level: Record<string, string>; draw: string | null; elements: Record<string, string>; sets: string[] };
       /** [193] Gefüllte Flächen (Füllfarbe gesetzt) im Grundriss der aktiven Ebene (alle Kategorien, 1:100); bei 0 ist nichts Gefülltes mehr zu sehen. */
       planFills: () => number;
       /** [193] Höhe (z) des ersten Gelände-Netz-Punkts. */
@@ -157,6 +161,23 @@ export function installTestHooks(): void {
       walk(s.project.layers);
       return generatePlan(s.project, s.activeLevelId, codes, undefined, s.detail, false, false, true, 50).primitives.filter((q) => q.kind === "line" && q.cls === cls).length;
     },
+    planOpeningIds: () => {
+      const s = getState();
+      const codes = new Set<string>();
+      const walk = (cs: { code: string; children?: unknown[] }[]): void => {
+        for (const c of cs) {
+          codes.add(c.code);
+          walk((c.children ?? []) as { code: string; children?: unknown[] }[]);
+        }
+      };
+      walk(s.project.layers);
+      const ids = new Set<string>();
+      for (const q of generatePlan(s.project, s.activeLevelId, codes, undefined, s.detail, false, false, true, 100).primitives) {
+        const o = (q as { openingId?: string }).openingId;
+        if (o) ids.add(o);
+      }
+      return [...ids].sort();
+    },
     planFillColors: () => {
       const s = getState();
       const codes = new Set<string>();
@@ -173,6 +194,15 @@ export function installTestHooks(): void {
         out[q.fill] = (out[q.fill] ?? 0) + 1;
       }
       return out;
+    },
+    designOptions: () => {
+      const s = getState();
+      const l = s.project.drawingLevels.find((x) => x.id === s.activeLevelId);
+      const elements: Record<string, string> = {};
+      for (const list of [s.project.walls, s.project.openings, s.project.roofs, s.project.ceilings, s.project.rooms]) {
+        for (const e of (list ?? []) as { id: string; designOption?: { set: string; option: string } }[]) elements[e.id] = e.designOption ? `${e.designOption.set}/${e.designOption.option}` : "";
+      }
+      return { level: l?.designOptions ?? {}, draw: s.drawDesignOption ? `${s.drawDesignOption.set}/${s.drawDesignOption.option}` : null, elements, sets: (s.project.designOptionSets ?? []).map((x) => x.id) };
     },
     renovation: () => {
       const s = getState();

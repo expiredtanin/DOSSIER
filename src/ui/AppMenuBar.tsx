@@ -26,6 +26,7 @@ export interface AppMenuBarProps {
   onNewProjectFromComplexSample: () => void;
   onNewProjectFromWettbewerbSample: () => void;
   onNewProjectFromUmbauSample?: () => void;
+  onNewProjectFromVariantenSample?: () => void;
   onNewProjectFromTemplate: () => void;
   onOpenProject: () => void;
   onSaveProject: () => void;
@@ -68,6 +69,8 @@ export interface AppMenuBarProps {
   onOpenBcf?: () => void;
   /** Verlauf-Panel öffnen ([84]). */
   onOpenHistory?: () => void;
+  /** [272] Panel „Varianten“ öffnen. */
+  onOpenDesignOptions?: () => void;
 }
 
 /** Menüleiste (Bearbeiten/Ansicht/Fenster) — sitzt in der TopBar neben der Wortmarke. */
@@ -77,6 +80,7 @@ export const AppMenuBar = memo(function AppMenuBar({
   onNewProjectFromComplexSample,
   onNewProjectFromWettbewerbSample,
   onNewProjectFromUmbauSample,
+  onNewProjectFromVariantenSample,
   onNewProjectFromTemplate,
   onOpenProject,
   onSaveProject,
@@ -107,6 +111,7 @@ export const AppMenuBar = memo(function AppMenuBar({
   onOpenSettings,
   onOpenBcf,
   onOpenHistory,
+  onOpenDesignOptions,
 }: AppMenuBarProps) {
   const fileItems: DropdownItem[] = [
     { label: t("file.new"), onSelect: onNewProject },
@@ -114,6 +119,7 @@ export const AppMenuBar = memo(function AppMenuBar({
     { label: t("file.newFromComplexSample"), onSelect: onNewProjectFromComplexSample },
     { label: t("file.newFromWettbewerbSample"), onSelect: onNewProjectFromWettbewerbSample },
     ...(onNewProjectFromUmbauSample ? [{ label: t("file.newFromUmbauSample"), onSelect: onNewProjectFromUmbauSample }] : []),
+    ...(onNewProjectFromVariantenSample ? [{ label: t("file.newFromVariantenSample"), onSelect: onNewProjectFromVariantenSample }] : []),
     { label: t("file.newFromTemplateFile"), onSelect: onNewProjectFromTemplate },
     { divider: true },
     { label: t("file.open"), onSelect: onOpenProject },
@@ -136,6 +142,7 @@ export const AppMenuBar = memo(function AppMenuBar({
     { label: t("menu.edit.undo"), onSelect: onUndo, disabled: !canUndo },
     { label: t("menu.edit.redo"), onSelect: onRedo, disabled: !canRedo },
     ...(onOpenHistory ? [{ label: t("nav.history"), onSelect: onOpenHistory }] : []),
+    ...(onOpenDesignOptions ? [{ label: t("designOption.title"), onSelect: onOpenDesignOptions }] : []),
     { divider: true },
     {
       label: t("menu.edit.delete"),

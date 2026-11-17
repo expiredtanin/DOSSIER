@@ -224,6 +224,10 @@ export type Ceiling = {
   bottom?: VerticalAnchor;
   /** [271] Umbau: Status (Bestand, Abbruch, Neu) und Etappe. Fehlt ⇒ Bestand. */
   renovation?: Renovation;
+  /**
+   * [272] Variante, zu der das Element gehört (`Project.designOptionSets`). Fehlt ⇒ Hauptmodell (immer sichtbar).
+   */
+  designOption?: DesignOptionRef;
 };
 
 /**
@@ -331,6 +335,10 @@ export type Column = {
   hatchSource?: AttributeSource;
   /** [271] Umbau: Status (Bestand, Abbruch, Neu) und Etappe. Fehlt ⇒ Bestand. */
   renovation?: Renovation;
+  /**
+   * [272] Variante, zu der das Element gehört (`Project.designOptionSets`). Fehlt ⇒ Hauptmodell (immer sichtbar).
+   */
+  designOption?: DesignOptionRef;
 };
 
 /**
@@ -665,6 +673,29 @@ export type CustomPalette = {
    * Manager (Tab „Paletten"), damit die Bank-Leiste im Popover kurz bleibt.
    */
   visible?: boolean;
+};
+
+/** [272] Eine Variante eines Satzes (z. B. „A Flachdach“). */
+export type DesignOption = { id: string; name: string };
+
+/** [272] Zugehörigkeit eines Elements zu einer Variante (Archicad „Design Options“). */
+export type DesignOptionRef = {
+  /** Id des Variantensatzes (`DesignOptionSet.id`). */
+  set: string;
+  /** Id der Variante im Satz (`DesignOption.id`). */
+  option: string;
+};
+
+/**
+ * [272] Ein Variantensatz (z. B. „Dachform“) mit seinen Varianten; je Darstellung ist genau eine Variante des
+ * Satzes sichtbar (Vorgabe: die Hauptvariante).
+ */
+export type DesignOptionSet = {
+  id: string;
+  name: string;
+  options: Array<DesignOption>;
+  /** Id der Hauptvariante. Fehlt/unbekannt ⇒ die erste Variante. */
+  primary?: string;
 };
 
 /**
@@ -1010,6 +1041,10 @@ export type Drawing2D = {
    * Verhalten (ohne `hatchId` keine Schraffur).
    */
   hatchSource?: AttributeSource;
+  /**
+   * [272] Variante, zu der das Element gehört (`Project.designOptionSets`). Fehlt ⇒ Hauptmodell (immer sichtbar).
+   */
+  designOption?: DesignOptionRef;
 };
 
 /** Geometrie eines 2D-Zeichenelements (Tag `shape`). */
@@ -1407,6 +1442,8 @@ export type DrawingLevel = {
    * noch, Abbruch späterer Etappen steht noch als Bestand. Fehlt ⇒ alle Etappen.
    */
   renovationPhase?: string;
+  /** [272] Variantenkombination: Satz-Id → Varianten-Id (fehlende Sätze ⇒ Hauptvariante). */
+  designOptions?: { [key in string]: string };
 };
 
 /**
@@ -1557,6 +1594,10 @@ export type ExtrudedSolid = {
   componentId?: string;
   /** [271] Umbau: Status (Bestand, Abbruch, Neu) und Etappe. Fehlt ⇒ Bestand. */
   renovation?: Renovation;
+  /**
+   * [272] Variante, zu der das Element gehört (`Project.designOptionSets`). Fehlt ⇒ Hauptmodell (immer sichtbar).
+   */
+  designOption?: DesignOptionRef;
 };
 
 /**
@@ -2161,6 +2202,10 @@ export type LayoutViewport = {
    * gleicher ±0.00 stehen und Kontext ausserhalb des Rahmens beschnitten wird.
    */
   center?: Vec2;
+  /**
+   * [272] Variantenkombination des Viewports (über der des Ausschnitts): Satz-Id → Varianten-Id (fehlende Sätze ⇒ Hauptvariante).
+   */
+  designOptions?: { [key in string]: string };
 };
 
 /** Linienenden aller Striche im Plan/Schnitt/Ansicht und in den Exporten ([146]); fehlt = flach. */
@@ -2799,6 +2844,10 @@ export type Opening = {
    * [271] Umbau: Status (Bestand, Abbruch, Neu) und Etappe. Fehlt ⇒ Bestand wie die Wand (eine neue Öffnung in einer Bestandswand bricht die Wand dort ab, eine Öffnung „Abbruch“ wird zugemauert).
    */
   renovation?: Renovation;
+  /**
+   * [272] Variante, zu der das Element gehört (`Project.designOptionSets`). Fehlt ⇒ Hauptmodell (immer sichtbar).
+   */
+  designOption?: DesignOptionRef;
 };
 
 /**
@@ -3255,6 +3304,11 @@ export type Project = {
   };
   /** [271] Umbau: Etappen, Farben je Status (SIA 400) und eigene Umbaufilter. */
   renovation?: RenovationSettings;
+  /**
+   * [272] Variantensätze (Archicad „Design Options“): Elemente mit `designOption` erscheinen nur in der
+   * Kombination ihrer Variante.
+   */
+  designOptionSets?: Array<DesignOptionSet>;
 };
 
 /** Protokolleintrag einer Publikation ([79]): Datum, Blätter mit Revision, erzeugte Dateien. */
@@ -3505,6 +3559,10 @@ export type Roof = {
   parapetComponentId?: string;
   /** [271] Umbau: Status (Bestand, Abbruch, Neu) und Etappe. Fehlt ⇒ Bestand. */
   renovation?: Renovation;
+  /**
+   * [272] Variante, zu der das Element gehört (`Project.designOptionSets`). Fehlt ⇒ Hauptmodell (immer sichtbar).
+   */
+  designOption?: DesignOptionRef;
 };
 
 /**
@@ -3609,6 +3667,10 @@ export type Room = {
    * [271] Umbau: Status (Bestand, Abbruch, Neu) und Etappe. Fehlt ⇒ Bestand (nur Sichtbarkeit und Flächen je Zustand, keine Umbau-Farbe: ein Raum ist kein Bauteil).
    */
   renovation?: Renovation;
+  /**
+   * [272] Variante, zu der das Element gehört (`Project.designOptionSets`). Fehlt ⇒ Hauptmodell (immer sichtbar).
+   */
+  designOption?: DesignOptionRef;
 };
 
 /**
@@ -4019,6 +4081,10 @@ export type Stair = {
   postDepth?: number;
   /** [271] Umbau: Status (Bestand, Abbruch, Neu) und Etappe. Fehlt ⇒ Bestand. */
   renovation?: Renovation;
+  /**
+   * [272] Variante, zu der das Element gehört (`Project.designOptionSets`). Fehlt ⇒ Hauptmodell (immer sichtbar).
+   */
+  designOption?: DesignOptionRef;
 };
 
 /**
@@ -4395,6 +4461,8 @@ export type ViewSnapshot = {
    * noch, Abbruch späterer Etappen steht noch als Bestand. Fehlt ⇒ alle Etappen.
    */
   renovationPhase?: string;
+  /** [272] Variantenkombination: Satz-Id → Varianten-Id (fehlende Sätze ⇒ Hauptvariante). */
+  designOptions?: { [key in string]: string };
 };
 
 /**
@@ -4466,6 +4534,8 @@ export type ViewTemplate = {
    * noch, Abbruch späterer Etappen steht noch als Bestand. Fehlt ⇒ alle Etappen.
    */
   renovationPhase?: string;
+  /** [272] Variantenkombination: Satz-Id → Varianten-Id (fehlende Sätze ⇒ Hauptvariante). */
+  designOptions?: { [key in string]: string };
 };
 
 /** Ansichtstyp eines Geschosses (wie in App). */
@@ -4624,6 +4694,10 @@ export type Wall = {
   surfacePatternOffset?: Vec2;
   /** [271] Umbau: Status (Bestand, Abbruch, Neu) und Etappe. Fehlt ⇒ Bestand. */
   renovation?: Renovation;
+  /**
+   * [272] Variante, zu der das Element gehört (`Project.designOptionSets`). Fehlt ⇒ Hauptmodell (immer sichtbar).
+   */
+  designOption?: DesignOptionRef;
 };
 
 /**

@@ -67,7 +67,7 @@ fn kein_filter_ohne_gueltige_id() {
     assert!(View::new(&p, Some(""), None).is_none());
     assert!(View::new(&p, Some("gibts-nicht"), None).is_none());
     // Name ohne Gross-/Kleinschreibung (CLI).
-    assert_eq!(View::new(&p, Some("Umbauplan"), None).unwrap().filter.id, "umbauplan");
+    assert_eq!(View::new(&p, Some("Umbauplan"), None).unwrap().filter.unwrap().id, "umbauplan");
 }
 
 #[test]

@@ -2077,6 +2077,8 @@ fn on_floor(c: &Ctx, d: &Drawing2D) -> bool {
         && !(matches!(d.geom, Drawing2DGeom::Grid { .. }) && c.a.trace_of.as_deref().is_some_and(|t| crate::grid::visible_on(d, t)))
         && !(c.a.for_print && d.no_print == Some(true))
         && c.mv().dims.shows(d)
+        // [272] Zeichnungen anderer Varianten (und künftig von Regeln ausgeblendete) fehlen.
+        && !c.rule_hidden(&d.id)
 }
 
 /// Domäne „2D-Zeichnungen" von `planDomains`: alle gezeichneten Zeichnungen des Geschosses in
