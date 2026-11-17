@@ -7,9 +7,9 @@
 // x = Ost, y = Nord, z = Höhe). Die Summe wird hier in f64 gebildet und erst danach auf f32
 // gerundet: LV95-Koordinaten (2,6 Mio. m) kippen so nie in f32 (dort nur ~0,25 m Auflösung).
 //
-// Achsen: wie die übrigen ECHTEN Geo-Rohdaten (Gelände/Import, `mesh::append_context_mesh`,
-// `MeshKind::Terrain`): Modell (x, y, z) → world (x, z, −y). So liegt eine Punktwolke deckungsgleich
-// auf einem swissALTI3D-Gelände desselben Standort-Bezugs.
+// Achsen: wie Bauteile und Gelände (`mesh::append_context_mesh`): Modell (x, y, z) → world (x, z, y).
+// So liegt eine Punktwolke deckungsgleich auf einem swissALTI3D-Gelände desselben Standort-Bezugs und unter
+// den Bauteilen; die Spiegelung des Achsentauschs gleicht die Kamera aus ([270], `view_dir`).
 //
 // Darstellung: ein Instanz-Quad je Punkt (6 Vertices aus `vertex_index`, keine Geometrie je Punkt
 // im Puffer), feste Grösse in Bildschirm-Pixeln, tiefengetestet gegen das Modell. Farben werden auf
@@ -63,7 +63,7 @@ pub fn clamp_point_size(px: f32) -> f32 {
 /// Attribute, gefiltert auf gültige Punkte (NaN/∞ fliegen raus, Attribute bleiben ausgerichtet).
 #[derive(Clone, Debug, Default)]
 pub struct PointCloudCpu {
-    /// world x, y (= Höhe), z (= −Nord) je Punkt.
+    /// world x, y (= Höhe), z (= Nord) je Punkt.
     pub positions: Vec<f32>,
     pub rgb: Option<Vec<u8>>,
     pub intensity: Option<Vec<u16>>,
@@ -108,7 +108,7 @@ impl PointCloudCpu {
             // In f64 addieren, erst dann runden (LV95-fest).
             let wx = (offset[0] + x as f64) as f32;
             let wy = (offset[2] + z as f64) as f32;
-            let wz = -((offset[1] + y as f64) as f32);
+            let wz = (offset[1] + y as f64) as f32;
             if !(wx.is_finite() && wy.is_finite() && wz.is_finite()) {
                 continue;
             }
@@ -393,9 +393,9 @@ mod tests {
 
     #[test]
     fn positions_map_model_to_world_like_terrain() {
-        // Modell (x, y, z) → world (x, z, −y), Versatz addiert.
+        // Modell (x, y, z) → world (x, z, y), Versatz addiert.
         let c = PointCloudCpu::from_raw(&[1.0, 2.0, 3.0], &[], &[], &[], [10.0, 20.0, 30.0]).unwrap();
-        assert_eq!(c.positions, vec![11.0, 33.0, -22.0]);
+        assert_eq!(c.positions, vec![11.0, 33.0, 22.0]);
         assert_eq!(c.height_range, [33.0, 33.0]);
     }
 
@@ -407,7 +407,7 @@ mod tests {
         let off = [2_600_123.0_f64 - 2_600_123.5, 1_200_000.0 - 1_200_000.25, 0.0];
         let c = PointCloudCpu::from_raw(&[0.123, 0.001, 0.0], &[], &[], &[], off).unwrap();
         assert!((c.positions[0] - (-0.377)).abs() < 1e-6);
-        assert!((c.positions[2] - 0.249).abs() < 1e-6);
+        assert!((c.positions[2] - (-0.249)).abs() < 1e-6);
     }
 
     #[test]

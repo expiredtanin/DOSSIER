@@ -217,14 +217,15 @@ fn norm(v: [f32; 3]) -> Option<[f32; 3]> {
     (l.is_finite() && l > 1e-12).then(|| [v[0] / l, v[1] / l, v[2] / l])
 }
 
-/// Kamera-Teil der Parameter wie `math::look_at` (rechts = Blick × oben). None bei unbrauchbarer Kamera.
+/// Kamera-Teil der Parameter wie `math::view_matrix` ([270] rechts = oben × Blick, `view_dir::world_right`, gleicht
+/// die Welt-Spiegelung aus). None bei unbrauchbarer Kamera.
 pub fn camera_basis(cam: &Camera, aspect: f32) -> Option<([f32; 4], [f32; 4], [f32; 4], [f32; 4])> {
     if !(aspect.is_finite() && aspect > 0.0) {
         return None;
     }
     let f = norm(sub(cam.target, cam.eye))?;
-    let r = norm(cross(f, cam.up))?;
-    let u = cross(r, f);
+    let r = crate::view_dir::world_right(f, cam.up)?;
+    let u = cross(f, r);
     let (ortho, w) = match cam.projection {
         Projection::Perspective => (0.0, (cam.fov_y * 0.5).tan()),
         Projection::Orthographic => (1.0, cam.ortho_half_height),

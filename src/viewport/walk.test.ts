@@ -66,12 +66,12 @@ describe("[213] Begehen: Bewegung", () => {
   });
 
   it("seitwärts steht senkrecht auf der Blickrichtung; rechts ist rechts", () => {
-    // Blick nach −x (yaw 0), Weltoben +y: rechts ist −z.
-    near(walkVelocity({ ...NO_KEYS, right: true }, 0, 2), [0, 0, -2]);
-    near(walkVelocity({ ...NO_KEYS, left: true }, 0, 2), [0, 0, 2]);
-    // Gedreht um 90°: Blick nach −z, rechts ist +x.
+    // [270] Blick nach −x (yaw 0, Westen), world z = Norden: rechts ist Norden (+z).
+    near(walkVelocity({ ...NO_KEYS, right: true }, 0, 2), [0, 0, 2]);
+    near(walkVelocity({ ...NO_KEYS, left: true }, 0, 2), [0, 0, -2]);
+    // Gedreht um 90°: Blick nach −z (Süden), rechts ist Westen (−x).
     near(walkVelocity({ ...NO_KEYS, forward: true }, Math.PI / 2, 2), [0, 0, -2]);
-    near(walkVelocity({ ...NO_KEYS, right: true }, Math.PI / 2, 2), [2, 0, 0]);
+    near(walkVelocity({ ...NO_KEYS, right: true }, Math.PI / 2, 2), [-2, 0, 0]);
   });
 
   it("diagonal ist nicht schneller; Gegentasten heben sich auf; Q/E senkrecht", () => {
@@ -113,7 +113,7 @@ describe("[213] Begehen: Umschauen", () => {
     const eye = orbitEye(o);
     const n = lookAround(o, 120, -40);
     near(orbitEye(n), eye, 1e-9);
-    expect(n.yaw).toBeGreaterThan(o.yaw); // Maus nach rechts → Blick nach rechts
+    expect(n.yaw).toBeLessThan(o.yaw); // Maus nach rechts → Blick nach rechts ([270]: yaw nimmt ab)
     expect(n.pitch).toBeLessThan(o.pitch); // Maus nach oben → Blick hebt sich
     expect(n.dist).toBe(o.dist);
   });

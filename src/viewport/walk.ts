@@ -5,7 +5,7 @@
 // seitwärts laufen in der Horizontalen (Augenhöhe bleibt, auch bei geneigtem Blick); Q/E bewegen senkrecht.
 // Umschauen dreht die Blickrichtung um den Augpunkt (nicht um das Ziel wie der Orbit).
 
-import { PITCH_LIMIT } from "./cameraBridge";
+import { PITCH_LIMIT, orbitRight } from "./cameraBridge";
 import type { OrbitState, V3 } from "./cameraBridge";
 import { STEP_UP, type WalkWorld } from "./walkCollision";
 
@@ -71,9 +71,10 @@ export function walkVelocity(keys: WalkKeys, yaw: number, speed: number): V3 {
   const fwd = (keys.forward ? 1 : 0) - (keys.back ? 1 : 0);
   const side = (keys.right ? 1 : 0) - (keys.left ? 1 : 0);
   const vert = (keys.up ? 1 : 0) - (keys.down ? 1 : 0);
-  // Horizontale Blickrichtung f = (−cos yaw, 0, −sin yaw), rechts s = (sin yaw, 0, −cos yaw) (wie im Pan des Viewports).
-  const hx = -Math.cos(yaw) * fwd + Math.sin(yaw) * side;
-  const hz = -Math.sin(yaw) * fwd - Math.cos(yaw) * side;
+  // Horizontale Blickrichtung f = (−cos yaw, 0, −sin yaw), rechts = `orbitRight` (−sin yaw, 0, cos yaw), [270] seitenrichtig.
+  const r = orbitRight(yaw);
+  const hx = -Math.cos(yaw) * fwd + r[0] * side;
+  const hz = -Math.sin(yaw) * fwd + r[2] * side;
   const hl = Math.hypot(hx, hz);
   const k = hl > 1e-12 ? speed / hl : 0;
   return [hx * k, vert * speed, hz * k];
@@ -102,7 +103,8 @@ export function orbitEye(o: OrbitState): V3 {
 export function lookAround(o: OrbitState, dx: number, dy: number, radPerPx: number = LOOK_RAD_PER_PX): OrbitState {
   if (!Number.isFinite(dx) || !Number.isFinite(dy) || (dx === 0 && dy === 0)) return o;
   const eye = orbitEye(o);
-  const yaw = o.yaw + dx * radPerPx;
+  // [270] Rechts im Bild ist `orbitRight`: der Blick dreht nach rechts, wenn yaw abnimmt.
+  const yaw = o.yaw - dx * radPerPx;
   const pitch = Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, o.pitch + dy * radPerPx));
   const r = o.dist * Math.cos(pitch);
   return { ...o, yaw, pitch, target: [eye[0] - r * Math.cos(yaw), eye[1] - o.dist * Math.sin(pitch), eye[2] - r * Math.sin(yaw)] };

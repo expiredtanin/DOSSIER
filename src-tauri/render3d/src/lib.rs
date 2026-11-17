@@ -39,6 +39,7 @@ pub mod section_mesh;
 pub mod shaders;
 pub mod shadow;
 pub mod types;
+pub mod view_dir;
 
 #[cfg(feature = "render")]
 pub mod gpu;
@@ -1062,42 +1063,16 @@ mod tests {
     }
 
     #[test]
-    fn context_mesh_negiert_nord_achse_nur_fuer_terrain_und_imported_nicht_fuer_extrusion() {
-        // Nutzer-Report 2026-09-27 "gewisse Dinge sind noch gespiegelt im 3D":
-        // der 2026-09-24-Fix negierte die Nord-Achse PAUSCHAL fuer jeden
-        // `append_context_mesh`-Aufruf und brach dabei unbemerkt Dach/Treppe/
-        // Stuetze/truck-Extrusion/2D-Zeichnungs-Bodenspuren (alle `kind:
-        // Extrusion`, orientierungserhaltend wie eine Wand) — nur echte Import-
-        // Rohdaten (Terrain/Imported) duerfen negiert werden.
-        let mut terrain = Mesh::default();
-        append_context_mesh(&mut terrain, &flat_context_tri(2.0, MeshKind::Terrain, None));
-        let (tmin, tmax) = terrain.bounds();
-        assert!(
-            tmin[2] < -0.99 && tmax[2].abs() < 1e-5,
-            "Terrain: Modell-y in [0,1] wird negiert -> world.z in [-1,0], war {:?}..{:?}",
-            tmin,
-            tmax
-        );
-
-        let mut imported = Mesh::default();
-        append_context_mesh(&mut imported, &flat_context_tri(2.0, MeshKind::Imported, None));
-        let (imin, imax) = imported.bounds();
-        assert!(
-            imin[2] < -0.99 && imax[2].abs() < 1e-5,
-            "Imported: Modell-y in [0,1] wird negiert -> world.z in [-1,0], war {:?}..{:?}",
-            imin,
-            imax
-        );
-
-        let mut extrusion = Mesh::default();
-        append_context_mesh(&mut extrusion, &flat_context_tri(2.0, MeshKind::Extrusion, None));
-        let (emin, emax) = extrusion.bounds();
-        assert!(
-            emin[2].abs() < 1e-5 && emax[2] > 0.99,
-            "Extrusion: Modell-y in [0,1] bleibt UNVERAENDERT -> world.z in [0,1], war {:?}..{:?}",
-            emin,
-            emax
-        );
+    fn context_mesh_liegt_fuer_alle_arten_bei_x_hoehe_y() {
+        // [270] Gelände, Import und Extrusion liegen wie die Wände bei world (x, Höhe, y): deckungsgleich mit den
+        // Bauteilen. Vorher wurde für Gelände/Import die Nord-Achse negiert (Fund 2026-09-24 „swisstopo im 3D
+        // gespiegelt“): im gespiegelten Bild sah das Gelände richtig aus, lag aber an y = 0 gespiegelt unter dem Haus.
+        for kind in [MeshKind::Terrain, MeshKind::Imported, MeshKind::Extrusion] {
+            let mut m = Mesh::default();
+            append_context_mesh(&mut m, &flat_context_tri(2.0, kind, None));
+            let (lo, hi) = m.bounds();
+            assert!(lo[2].abs() < 1e-5 && hi[2] > 0.99, "{kind:?}: Modell-y in [0,1] -> world.z in [0,1], war {lo:?}..{hi:?}");
+        }
     }
 
     #[test]
@@ -1355,11 +1330,56 @@ mod tests {
             // Alle vier blicken von OBEN (Y > 0) — untere Oktanten bleiben ungenutzt.
             assert!(cam.eye[1] > t[1], "Iso-Oktant ueber dem Ziel");
         }
-        // Vier unterschiedliche horizontale Vorzeichen-Kombinationen (X,Z).
-        assert!(iso.eye[0] > t[0] && iso.eye[2] > t[2]); // vorne-rechts
-        assert!(fl.eye[0] < t[0] && fl.eye[2] > t[2]); // vorne-links
-        assert!(br.eye[0] > t[0] && br.eye[2] < t[2]); // hinten-rechts
-        assert!(bl.eye[0] < t[0] && bl.eye[2] < t[2]); // hinten-links
+        // [270] Vier Himmelsrichtungen (world z = Modell-y = Nord): vorne = Süden, rechts = Osten.
+        assert!(iso.eye[0] > t[0] && iso.eye[2] < t[2]); // vorne-rechts = Südost
+        assert!(fl.eye[0] < t[0] && fl.eye[2] < t[2]); // vorne-links = Südwest
+        assert!(br.eye[0] > t[0] && br.eye[2] > t[2]); // hinten-rechts = Nordost
+        assert!(bl.eye[0] < t[0] && bl.eye[2] > t[2]); // hinten-links = Nordwest
+    }
+
+    /// [270] Seitenrichtig: ein Testhaus mit Erker im Osten (Modell x = +6) und Garage im Westen (x = −6), Nordflügel
+    /// (y = +6). Welt = (x, Höhe, y). Bild-x/-y nach der vollen View-Projektion (NDC, x rechts, y oben).
+    #[test]
+    fn kamera_zeigt_modell_seitenrichtig() {
+        use super::math::{preset_camera, transform_point, view_projection};
+        use super::types::CameraPreset;
+        let w = |x: f32, y: f32, z: f32| [x, z, y];
+        let (erker, garage, nord, sued) = (w(6.0, 0.0, 1.0), w(-6.0, 0.0, 1.0), w(0.0, 6.0, 1.0), w(0.0, -6.0, 1.0));
+        let ndc = |p: CameraPreset, q: [f32; 3]| {
+            let cam = preset_camera(p, [0.0, 1.0, 0.0], 30.0);
+            let c = transform_point(&view_projection(&cam, 1.0), q);
+            [c[0] / c[3], c[1] / c[3]]
+        };
+        // Von Süden (vorne): Osten rechts.
+        assert!(ndc(CameraPreset::Front, erker)[0] > 0.1 && ndc(CameraPreset::Front, garage)[0] < -0.1);
+        // Von Norden: Osten links.
+        assert!(ndc(CameraPreset::Back, erker)[0] < -0.1 && ndc(CameraPreset::Back, garage)[0] > 0.1);
+        // Von Osten (rechts): Norden rechts; von Westen: Süden rechts.
+        assert!(ndc(CameraPreset::Side, nord)[0] > 0.1 && ndc(CameraPreset::Left, sued)[0] > 0.1);
+        // Draufsicht wie der Grundriss: Norden oben, Osten rechts.
+        assert!(ndc(CameraPreset::Top, nord)[1] > 0.1 && ndc(CameraPreset::Top, sued)[1] < -0.1);
+        assert!(ndc(CameraPreset::Top, erker)[0] > 0.1 && ndc(CameraPreset::Top, garage)[0] < -0.1);
+        // Südost (iso): Blick nach Nordwesten, rechts = Nordosten → Erker rechts, Garage links, Süden vorne unten.
+        assert!(ndc(CameraPreset::Iso, erker)[0] > 0.1 && ndc(CameraPreset::Iso, garage)[0] < -0.1);
+        assert!(ndc(CameraPreset::Iso, sued)[1] < ndc(CameraPreset::Iso, nord)[1]);
+        assert!(ndc(CameraPreset::Persp, erker)[0] > 0.1 && ndc(CameraPreset::Persp, garage)[0] < -0.1);
+        // Nordwest: rechts = Südwesten → Garage rechts.
+        assert!(ndc(CameraPreset::IsoBackLeft, garage)[0] > 0.1 && ndc(CameraPreset::IsoBackLeft, erker)[0] < -0.1);
+    }
+
+    /// [270] Die Welt-Spiegelung kehrt die Wicklung im Bild um: ein aussen zeigendes (in der Welt CCW gewickeltes)
+    /// Dreieck erscheint im Uhrzeigersinn, daher `FrontFace::Cw` in den Pipelines mit Rückseiten-Culling.
+    #[test]
+    fn aussenflaechen_erscheinen_im_uhrzeigersinn() {
+        use super::math::{preset_camera, transform_point, view_projection};
+        use super::types::CameraPreset;
+        // Dreieck in der Ebene world z = 1 (Nordseite), Normale +z (nach Norden, zum Betrachter im Norden), CCW um +z.
+        let tri = [[0.0f32, 0.0, 1.0], [1.0, 0.0, 1.0], [0.0, 1.0, 1.0]];
+        let cam = preset_camera(CameraPreset::Back, [0.0, 0.0, 0.0], 10.0);
+        let m = view_projection(&cam, 1.0);
+        let p: Vec<[f32; 2]> = tri.iter().map(|q| { let c = transform_point(&m, *q); [c[0] / c[3], c[1] / c[3]] }).collect();
+        let area = (p[1][0] - p[0][0]) * (p[2][1] - p[0][1]) - (p[2][0] - p[0][0]) * (p[1][1] - p[0][1]);
+        assert!(super::view_dir::FRONT_FACE_CW && area < 0.0, "Fläche im Bild {area}");
     }
 
     /// Validiert die WGSL-Quelle headless ueber naga (Parser + Validator) — faengt

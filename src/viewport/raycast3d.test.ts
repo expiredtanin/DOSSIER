@@ -35,9 +35,10 @@ describe("cameraRay", () => {
     expect(ray.dir[2]).toBeCloseTo(-1, 6);
   });
 
-  it("positives ndcX weicht nach rechts (+X), ndcY nach oben (+Y) aus", () => {
+  it("positives ndcX weicht nach Bild-rechts aus, ndcY nach oben (+Y)", () => {
+    // [270] Blick von world +z (Modell-Norden) nach Süden: Bild-rechts ist Westen (−X), seitenrichtig.
     const ray = cameraRay(CAM, 0.5, 0.5, 1);
-    expect(ray.dir[0]).toBeGreaterThan(0);
+    expect(ray.dir[0]).toBeLessThan(0);
     expect(ray.dir[1]).toBeGreaterThan(0);
     expect(ray.dir[2]).toBeLessThan(0);
     // normalisiert
@@ -52,7 +53,7 @@ describe("cameraRay", () => {
     expect(offset.dir).toEqual(center.dir);
     expect(center.dir[2]).toBeCloseTo(-1, 6);
     // Der Ursprung wandert stattdessen lateral mit dem Pixel (Kehrwert von worldToScreen).
-    expect(offset.origin[0]).toBeCloseTo(2.5, 6); // ndcX·aspect·hh = 0.5·1·5
+    expect(offset.origin[0]).toBeCloseTo(-2.5, 6); // −ndcX·aspect·hh (Bild-rechts = −X, [270])
     expect(offset.origin[1]).toBeCloseTo(3.5, 6); // eye.y(1) + ndcY·hh = 1 + 0.5·5
     expect(offset.origin[2]).toBeCloseTo(10, 6); // unveraendert (Achse senkrecht zur Blickrichtung)
   });

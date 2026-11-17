@@ -387,7 +387,7 @@ mod gpu_tests {
     }
 
     fn camera() -> Camera {
-        // Blick von world +z (Modell-Süd, Nord-Achse negiert) auf den Nullpunkt, 1 m hoch.
+        // Blick von world +z (Modell-Nord) auf den Nullpunkt, 1 m hoch.
         Camera { eye: [0.0, 1.0, 10.0], target: [0.0, 1.0, 0.0], ..Camera::default() }
     }
 
@@ -405,21 +405,21 @@ mod gpu_tests {
         r.upload_model(&device, &[wall], &[], &[]);
         let cam = camera();
 
-        // Wolke VOR der Wand (Modell-y = −3 → world z = +3): rot in der Bildmitte.
-        r.set_point_cloud(&device, 1, Some(red_sheet(-3.0)), STYLE);
+        // Wolke VOR der Wand (Modell-y = +3 → world z = +3): rot in der Bildmitte.
+        r.set_point_cloud(&device, 1, Some(red_sheet(3.0)), STYLE);
         assert_eq!(r.point_cloud_len(1), 41 * 41);
         let img = render(&device, &queue, &mut r, &cam);
         let c = pixel(&img, W / 2, H / 2);
         assert!(is_red(c), "Mitte sollte rot sein: {c:?}");
 
-        // Wolke HINTER der Wand (Modell-y = +5 → world z = −5): Wand verdeckt sie.
-        r.set_point_cloud(&device, 1, Some(red_sheet(5.0)), STYLE);
+        // Wolke HINTER der Wand (Modell-y = −5 → world z = −5): Wand verdeckt sie.
+        r.set_point_cloud(&device, 1, Some(red_sheet(-5.0)), STYLE);
         let img = render(&device, &queue, &mut r, &cam);
         let c = pixel(&img, W / 2, H / 2);
         assert!(!is_red(c), "Wand muss Punkte verdecken: {c:?}");
 
         // Unsichtbar geschaltet: auch vor der Wand nichts Rotes.
-        r.set_point_cloud(&device, 1, Some(red_sheet(-3.0)), STYLE);
+        r.set_point_cloud(&device, 1, Some(red_sheet(3.0)), STYLE);
         assert!(r.set_point_cloud_style(&queue, 1, PointStyle { visible: false, ..STYLE }));
         let img = render(&device, &queue, &mut r, &cam);
         assert!(!is_red(pixel(&img, W / 2, H / 2)), "unsichtbare Wolke gezeichnet");

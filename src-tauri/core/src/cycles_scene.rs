@@ -52,7 +52,8 @@ pub struct SunIn {
     pub elevation: f64,
 }
 
-/// Kamera: Voreinstellung (`iso`, `perspective`, `front`, `back`, `left`, `right`, `side`, `top`; rahmt das Gebäude ein)
+/// Kamera: Voreinstellung (`iso`, `perspective`, `front`, `back`, `left`, `right`, `side`, `top` oder eine Himmelsrichtung
+/// `south` … `northwest`, Tabelle `render3d::view_dir`; rahmt das Gebäude ein)
 /// oder explizit in Modell-Koordinaten (Form wie `RenderCamera` in `doc/RENDER-SZENE.md`).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
@@ -479,24 +480,23 @@ struct Cam {
     ortho_height: f64,
 }
 
-/// Blickrichtungen der Voreinstellungen (vom Auge zum Modell, x Ost, y Nord, z oben) und ob orthogonal.
-fn preset(name: &str) -> ([f64; 3], bool) {
-    match name {
-        "perspective" => ([1.0, 1.0, -0.55], false),
-        "front" => ([0.0, 1.0, 0.0], true),
-        "back" => ([0.0, -1.0, 0.0], true),
-        "side" | "right" => ([-1.0, 0.0, 0.0], true),
-        "left" => ([1.0, 0.0, 0.0], true),
-        "top" => ([0.0, 0.0, -1.0], true),
-        _ => ([1.0, 1.0, -0.8], true),
+/// Blickrichtung (vom Auge zum Modell, x Ost, y Nord, z oben), ob orthogonal und Hoch-Vektor einer Voreinstellung —
+/// [270] aus der gemeinsamen Tabelle `render3d::view_dir` (wie 3D-Fenster, Axonometrie, Blender): `iso` = Südost,
+/// `front` = von Süden, `southwest` … ; Unbekanntes wie `iso`.
+fn preset(name: &str) -> ([f64; 3], bool, [f64; 3]) {
+    match render3d::view_dir::view_dir(name).or_else(|| render3d::view_dir::view_dir("iso")) {
+        Some(d) => {
+            let t = d.to_viewer;
+            ([-t[0], -t[1], -t[2]], d.ortho, render3d::view_dir::up_of(&d))
+        }
+        None => ([0.0, 1.0, 0.0], true, [0.0, 0.0, 1.0]),
     }
 }
 
 /// Kamera rahmt das Gebäude ein (Mitte der Hülle, Radius = halbe Diagonale, mind. 1 m); wie `make_camera` im Blender-Leser.
 fn framed_camera(name: &str, lo: [f64; 3], hi: [f64; 3], aspect: f64) -> Cam {
-    let (d, ortho) = preset(name);
+    let (d, ortho, up) = preset(name);
     let dir = norm3(d).unwrap_or([0.0, 1.0, 0.0]);
-    let up = if name == "top" { [0.0, 1.0, 0.0] } else { [0.0, 0.0, 1.0] };
     let center = [(lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0, (lo[2] + hi[2]) / 2.0];
     let radius = ((hi[0] - lo[0]).hypot(hi[1] - lo[1]).hypot(hi[2] - lo[2]) / 2.0).max(1.0);
     let fov = 50.0_f64;
@@ -955,6 +955,29 @@ mod tests {
         // Blick nach Norden: Ort südlich des Hauses (y < 0), Blickrichtung +Y.
         assert!(v[13] < -5.0, "y = {}", v[13]);
         assert_eq!((v[8], v[9], v[10]), (0.0, 1.0, 0.0));
+    }
+
+    /// [270] Gleiche Namen wie 3D-Fenster und Axonometrie (`render3d::view_dir`): `iso` = `southeast` = Betrachter im
+    /// Südosten, Bild-rechts nach Nordosten (Osten rechts von Westen); `front` = von Süden mit Osten rechts.
+    #[test]
+    fn voreinstellungen_heissen_wie_im_3d() {
+        let mat = |preset: &str| -> Vec<f64> {
+            let s = cycles_scene(&sample(), &opts(&format!("{{\"camera\":{{\"preset\":\"{preset}\"}}}}"))).unwrap();
+            s.xml.split("<transform matrix=\"").nth(1).unwrap().split('"').next().unwrap().split_whitespace().map(|x| x.parse().unwrap()).collect()
+        };
+        let (iso, se) = (mat("iso"), mat("southeast"));
+        assert_eq!(iso, se);
+        let c = |v: &[f64], i: usize| v[i];
+        // Ort: Osten und Süden der Hausmitte; Blick nach Nordwesten; rechts = Nordost.
+        assert!(c(&se, 8) < 0.0 && c(&se, 9) > 0.0 && c(&se, 10) < 0.0, "Blick {:?}", &se[8..11]);
+        assert!(c(&se, 0) > 0.0 && c(&se, 1) > 0.0 && c(&se, 2).abs() < 1e-9, "rechts {:?}", &se[0..3]);
+        let sw = mat("southwest");
+        assert!(c(&sw, 8) > 0.0 && c(&sw, 9) > 0.0 && c(&sw, 0) > 0.0 && c(&sw, 1) < 0.0, "Südwest {sw:?}");
+        let f = mat("front");
+        assert!(c(&f, 0) > 0.99 && c(&f, 9) > 0.99, "von Süden: rechts = Osten {f:?}");
+        assert_eq!(mat("south"), f);
+        let top = mat("top");
+        assert!(c(&top, 0) > 0.0 && c(&top, 5) > 0.0, "Draufsicht: Osten rechts, Norden oben {top:?}");
     }
 
     /// Sonne: fester Azimut/Höhe → Nishita-Rotation = Kompass, Höhe im Bogenmass; Datum/Ort: Mittsommer Zürich.

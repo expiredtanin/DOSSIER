@@ -17,7 +17,7 @@
 #     "version": 1, "model": "model.glb", "output": "render.png",
 #     "resolution": {"width": 1920, "height": 1080}, "samples": 128, "denoise": true, "device": "auto",
 #     "camera": {"kind": "perspective", "position": [x,y,z], "direction": [..], "up": [..], "fovDeg": 50, "orthoHeight": 10}
-#              oder {"preset": "iso" | "perspective" | "front" | "back" | "left" | "right" | "side" | "top"},
+#              oder {"preset": "iso" | "perspective" | "front" | "back" | "left" | "right" | "side" | "top" | "southeast" …},
 #     "sun": {"azimuth": 135, "elevation": 40},          # Grad, Azimut von Norden im Uhrzeigersinn
 #     "materials": [{"name": "Beton", "glass": false, "textures": {"color": "textures/0_color.jpg", ...}, "sizeM": 1.0}]
 #   }
@@ -359,16 +359,26 @@ def apply_materials(specs, base_dir):
 
 PRESET_DIRECTIONS = {
     # Blickrichtung (vom Auge zum Modell) in Modell-Koordinaten: x Ost, y Nord, z oben.
-    "iso": (1.0, 1.0, -0.8),            # von Suedwesten oben
-    "perspective": (1.0, 1.0, -0.55),
+    # [270] Kopie der gemeinsamen Tabelle `render3d::view_dir` (3D-Fenster, Axonometrie, Cycles); geprueft von
+    # `src/viewport/viewDirections.test.ts`. "Suedost" = Betrachter im Suedosten; vorne = Sueden, rechts = Osten.
+    "iso": (-1.0, 1.0, -1.0),           # von Suedosten oben (Isometrie, 35.26 Grad)
+    "southeast": (-1.0, 1.0, -1.0),
+    "southwest": (1.0, 1.0, -1.0),
+    "northeast": (-1.0, -1.0, -1.0),
+    "northwest": (1.0, -1.0, -1.0),
+    "perspective": (-1.0, 1.0, -0.772588),  # von Suedosten, 0.5 rad erhoeht (sqrt2 * tan 0.5)
     "front": (0.0, 1.0, 0.0),           # Blick nach Norden (Suedansicht)
+    "south": (0.0, 1.0, 0.0),
     "back": (0.0, -1.0, 0.0),
+    "north": (0.0, -1.0, 0.0),
     "side": (-1.0, 0.0, 0.0),           # Blick nach Westen (Ostansicht)
     "right": (-1.0, 0.0, 0.0),
+    "east": (-1.0, 0.0, 0.0),
     "left": (1.0, 0.0, 0.0),
+    "west": (1.0, 0.0, 0.0),
     "top": (0.0, 0.0, -1.0),
 }
-PRESET_ORTHO = {"iso", "front", "back", "side", "right", "left", "top"}
+PRESET_ORTHO = set(PRESET_DIRECTIONS) - {"perspective"}
 
 
 def camera_basis(direction, up):

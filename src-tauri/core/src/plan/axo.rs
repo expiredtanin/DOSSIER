@@ -15,9 +15,9 @@
 //!   `(x·z₀/z, y·z₀/z, z₀ − z₀²/z)` — eine projektive Abbildung erhält Ebenen, also bleibt die Sichtbarkeit exakt;
 //!   `z₀` = Abstand zur Modellmitte, dort ist die Zeichnung massstäblich.
 //!
-//! Vorgaben (Blick von …): `southeast`, `southwest`, `northeast`, `northwest` (Norden = +y), dazu die
-//! Blickwinkel der 3D-Ansicht (`iso` = von vorne-oben-rechts, `isoFrontLeft`, `isoBackRight`, `isoBackLeft`, `front`,
-//! `back`, `side`, `left`, `top`; „vorne“ = +y wie `render3d::preset_camera` mit Welt-z = Modell-y).
+//! Vorgaben (Blick von …): `southeast`, `southwest`, `northeast`, `northwest`, `south` … (Norden = +y), dazu die
+//! Blickwinkel der 3D-Ansicht (`iso` = Südost, `isoFrontLeft` = Südwest, `isoBackRight` = Nordost, `isoBackLeft` =
+//! Nordwest, `front` = Süd, `back`, `side` = Ost, `left`, `top`); eine Tabelle für alle Wege: `render3d::view_dir` ([270]).
 //!
 //! Klassen ([180]): jede Linie und Fläche gehört zu einem Bauteil und verschwindet mit dessen Klasse (Bauteile
 //! ausgeblendeter Klassen nehmen an der Verdeckung nicht teil).
@@ -82,27 +82,16 @@ fn camera_basis(dir: V3, up: V3) -> Option<(V3, V3, V3)> {
 }
 
 /// Vorgabe nach Name (`view`) und Projektionsart (`kind`: `iso`, `military` = 45°/45°, `military30` = 30°/60°).
+/// [270] Richtungen aus der gemeinsamen Tabelle `render3d::view_dir` (wie 3D-Fenster, Cycles, Blender): „Südost“ =
+/// Betrachter im Südosten; `iso` = Südost, `front` = von Süden; leerer Name = Südost.
 pub fn preset(view: &str, kind: &str) -> Option<Projection> {
-    let s = std::f64::consts::FRAC_1_SQRT_2;
-    // Horizontale Richtung zum Betrachter.
-    let corner = match view {
-        "southeast" | "isoBackRight" => Some([s, -s]),
-        "southwest" | "isoBackLeft" => Some([-s, -s]),
-        "northeast" | "iso" | "perspective" | "" => Some([s, s]),
-        "northwest" | "isoFrontLeft" => Some([-s, s]),
-        _ => None,
-    };
+    let d = render3d::view_dir::view_dir(if view.is_empty() { "southeast" } else { view })?;
+    let t = d.to_viewer;
+    let hl = t[0].hypot(t[1]);
+    // Diagonale Blicke (Ecke) als Iso/Militär; senkrechte Ansichten und Draufsicht als Parallelprojektion.
+    let corner = (hl > 1e-9 && t[0].abs() > 1e-9 && t[1].abs() > 1e-9).then(|| [t[0] / hl, t[1] / hl]);
     let Some(h) = corner else {
-        // Senkrechte Ansichten und Draufsicht (Parallel, ohne Militär).
-        let (dir, up): (V3, V3) = match view {
-            "front" => ([0.0, -1.0, 0.0], [0.0, 0.0, 1.0]),
-            "back" => ([0.0, 1.0, 0.0], [0.0, 0.0, 1.0]),
-            "side" => ([-1.0, 0.0, 0.0], [0.0, 0.0, 1.0]),
-            "left" => ([1.0, 0.0, 0.0], [0.0, 0.0, 1.0]),
-            "top" => ([0.0, 0.0, -1.0], [0.0, 1.0, 0.0]),
-            _ => return None,
-        };
-        let (r, u, f) = camera_basis(dir, up)?;
+        let (r, u, f) = camera_basis([-t[0], -t[1], -t[2]], render3d::view_dir::up_of(&d))?;
         return Some(Projection::Parallel { m: [r, u, f], o: [0.0; 3] });
     };
     // Rechts (vom Betrachter aus) und vorwärts in der Ebene.
@@ -127,7 +116,8 @@ pub fn preset(view: &str, kind: &str) -> Option<Projection> {
             Some(Projection::Parallel { m: [row_u, row_v, d], o: [0.0; 3] })
         }
         _ => {
-            // Isometrie: Höhenwinkel asin(1/√3) ≈ 35.26°.
+            // Isometrie: Höhenwinkel asin(1/√3) ≈ 35.26° (wie `view_dir`).
+            let s = std::f64::consts::FRAC_1_SQRT_2;
             let e = [h[0], h[1], s];
             let (r, u, f) = camera_basis([-e[0], -e[1], -e[2]], [0.0, 0.0, 1.0])?;
             Some(Projection::Parallel { m: [r, u, f], o: [0.0; 3] })
