@@ -488,6 +488,22 @@ Farbe im Strichwerk über `drawings::emit` (Linienfarbe, sonst Füllfarbe; Abbru
 [149]: bestehend/neu/zu fällen) IST der Umbau-Status (`tree_renovation`: bestehend = Bestand, zu fällen = Abbruch, neu = Neu) — ein Feld, keine
 zweite Wahrheit; der Baum trägt kein eigenes `renovation` und keine Etappe.
 
+**Sanierung je Schicht ([274], `renovation::build_up`):** typbasiert. Der Bestands-Wandtyp trägt seinen Sanierungstyp
+(`WallType.renovationTarget`), die Bezugsseite (`renovationSide`, Vorgabe innen) und die manuelle Zuordnung je Schicht
+(`renovationOld`/`renovationNew`, „auto“ = automatisch); eine Bestandswand mit `renovation.renovated` nutzt ihn (Ausnahme je Wand:
+`renovation.newTypeId`). `match_layers` ordnet von der Bezugsseite her zu (gleicher Baustoff, Dicke, Lage = Bestand), `pieces` liefert den
+gezeigten Aufbau (alt, neu oder überlagert in Teilschichten), `look` je Wand und Filter einen `WallLook` (Farbe je Schicht, Ersatztyp,
+Achsversatz: die Bezugsseite bleibt stehen). **Ein Weg in die Ableitungen:** `Resolved::project`/`swap_build_ups` (Kennzahlen, 3D,
+Ansicht, Axo, Exporte über `filtered`/`project_for_text`) bzw. `renovation::with_build_ups` (Grundriss: `domains::plan_project`; Schnitt:
+`section/query.rs`) stellen die Wand auf einen Ersatztyp um (Marke `~renovationOrigin`, damit ein zweites Auflösen dasselbe ergibt);
+Farben je Schicht im Grundriss über die Schicht-Aktionen (`WallLook::layer_actions`, wie Override-Regeln [33]) und `dash_edges`
+(Kanten der Abbruch-Schichten gestrichelt, Kontur abgebrochener Schichten unter Neu), im Schnitt über `CutRules::with_renovation`
+(`layer_style`), in Ansicht/Axo/3D die Farbe der äussersten Schicht (`Resolved::faces`). Oberfläche: Objekt-Info
+`RenovationField` („Neuer Aufbau (Sanierung)“, Streifen `ui/RenovationStrip.tsx`), Umbau-Panel `panels/RenovationSanierung.tsx`
+(Typ-Paare, Editor, „Alle Wände vom Typ sanieren“); Kern-Abfragen `renovationPair`, `renovationPairs`. Mit den Ersatzstücken
+([271]): `orig` in Schnitt und Ansicht ist das Projekt mit allem, aber mit den gezeigten Aufbauten (`apply` ohne Ausgeblendetes);
+Projektionslinien sanierter Wände in der Farbe der äussersten Schicht (`CutRules::edge` über `Resolved::faces`).
+
 
 ### 3.9 Varianten ([272])
 

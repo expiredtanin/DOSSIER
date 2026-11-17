@@ -78,9 +78,15 @@ pub fn section_plan_buf(p: &Project, args: &[f64], text: &str) -> Result<Vec<u8>
     if let Some(r) = &ren {
         hidden_ids.extend(r.hidden.iter().cloned());
     }
-    let filtered = (!hidden_ids.is_empty()).then(|| crate::renovation::without_hidden(p, &hidden_ids));
-    // [271] Das Projekt mit allem (die zugemauerte Öffnung fehlt in `p` unten): Quelle der Ersatzstücke der Öffnungen.
-    let orig = p;
+    let mut filtered = (!hidden_ids.is_empty()).then(|| crate::renovation::without_hidden(p, &hidden_ids));
+    // [274] Sanierte Wände mit dem Aufbau, den der Filter zeigt.
+    if let Some(r) = ren.as_ref().filter(|r| r.swaps()) {
+        r.swap_build_ups(filtered.get_or_insert_with(|| p.clone()));
+    }
+    // [271] Das Projekt mit allem (die zugemauerte Öffnung fehlt in `p` unten): Quelle der Ersatzstücke der Öffnungen;
+    // [274] sanierte Wände auch hier mit dem gezeigten Aufbau.
+    let swapped = ren.as_ref().filter(|r| r.swaps()).and_then(|r| crate::renovation::apply(p, Some(r), &HashSet::new()));
+    let orig = swapped.as_ref().unwrap_or(p);
     let p = filtered.as_ref().unwrap_or(p);
     // [184] Öffnungen mit Detailgrad grob (Strich im Schnitt): Wandschnitt an Sturz/Brüstung flach. Das ändert die
     // Schnittflächen, gehört also in den Schlüssel (unten) und in die Sichtbarkeit.

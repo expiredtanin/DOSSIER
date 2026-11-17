@@ -23,6 +23,7 @@ import {
 import type { Project, RenovationShow, RenovationStatus } from "../model/types";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { usePanelHostAction } from "./host";
+import { RenovationSanierung } from "./RenovationSanierung";
 
 const MIXED = "__mixed";
 
@@ -237,6 +238,9 @@ export function RenovationPanel() {
           ))}
         </div>
       </div>
+
+      {/* [274] Sanierung je Schicht: Typ-Paare Bestand → Sanierungstyp */}
+      <RenovationSanierung project={project} />
 
       {/* Etappen */}
       <div className="reno-block">
