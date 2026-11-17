@@ -13,6 +13,8 @@
 
 import type { Project } from "../model/types";
 import { fileio } from "../engine/fileioWasm";
+import type { ExportView } from "./exportView";
+import { exportViewText } from "./exportView";
 import { documentFor } from "../core/document";
 
 /** IFC-Schema der Ausgabe: IFC4 (Standard) oder IFC2x3 (Coordination View 2.0, TC1). */
@@ -34,6 +36,8 @@ export interface IfcExportOptions {
    * (IfcBuildingElementProxy „Kontext"), am IfcSite. Ohne Angabe nicht: Fachplaner wollen meist nur das Gebäude.
    */
   context?: boolean;
+  /** [271][272] Ansicht der Ausgabe: Umbaufilter und Variantenkombination (ohne Angabe kein Filter, Hauptvarianten). */
+  view?: ExportView;
 }
 
 /** Deterministische 22-stellige IFC-GUID aus einem Namen (Rust, `ifc_export::ifc_guid`). */
@@ -79,7 +83,7 @@ export function exportIfcSpf(project: Project, options: IfcExportOptions = {}): 
   const now = Date.now();
   const iso = new Date(now).toISOString().replace(/\.\d+Z$/, "");
   const args = [Math.floor(now / 1000), options.schema === "IFC2X3" ? 1 : 0, options.ebkph ? 1 : 0, options.layerCodes ? 1 : 0, options.context ? 1 : 0];
-  const [buf, strings] = decodeExportFlat(documentFor(project).queryBin("ifcExportData", args, iso));
+  const [buf, strings] = decodeExportFlat(documentFor(project).queryBin("ifcExportData", args, exportViewText(options.view, { iso })));
   const m = fileio();
   const text = m.export_ifc_flat(buf, strings);
   if (text.length === 0) {

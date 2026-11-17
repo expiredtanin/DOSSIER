@@ -24,6 +24,7 @@ import type { Camera, ComponentMaterial, LayoutOrientation, LayoutPaperFormat, P
 import { projectLatLon, sunPosition } from "../analysis/sun";
 import { sheetSizeMm } from "../model/layoutModel";
 import { exportGlb } from "./exportMesh";
+import type { ExportView } from "./exportView";
 import { TERRAIN_GRASS_MATERIAL, terrainComponentMaterial, terrainMeshes } from "../materials/terrainMaterial";
 
 /** Kamera in Modell-Koordinaten (gleiche Form wie `ViewCamera` der 3D-Ansicht, `viewport/cameraBridge.ts`). */
@@ -100,6 +101,8 @@ export interface RenderOptions {
    * die 3D-Ansicht im Modell bleibt unberührt (Klasse „07 Baugrube").
    */
   backfilled?: boolean;
+  /** [271][272] Ansicht der Szene: Umbaufilter und Variantenkombination (Ausgeblendetes fehlt; ohne Angabe Hauptvarianten). */
+  view?: ExportView;
 }
 
 /** Eintrag der Materialtabelle in `scene.json`. */
@@ -361,7 +364,7 @@ function componentMaterials(project: Project): Map<string, ComponentMaterial> {
  * Kamera, Sonne. Verlangt das geladene Format-Modul (`await loadFileio()`) und den Kern.
  */
 export async function buildRenderPackage(project: Project, opts: RenderOptions, loadTexture?: TextureLoader): Promise<RenderPackage> {
-  const glb = splitRoofMaterials(exportGlb(project, { backfilled: opts.backfilled ?? true }), project);
+  const glb = splitRoofMaterials(exportGlb(project, { backfilled: opts.backfilled ?? true, view: opts.view }), project);
   const files: RenderPackage["files"] = [{ path: "model.glb", bytes: glb }];
   const materials = glbMaterials(glb);
   const comp = componentMaterials(project);

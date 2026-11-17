@@ -12,6 +12,7 @@ import { t } from "../i18n";
 import { useModalFocus } from "./modalFocus";
 import { Dropdown } from "./Dropdown";
 import type { IfcExportOptions, IfcSchema } from "../export/exportIfc";
+import { hasExportView, type ExportView } from "../export/exportView";
 
 /** Direkt-herunterladbare Exportformate (mit Datei-Endung). */
 export type ExportSaveFormat = "csv" | "ifc" | "obj" | "stl" | "glb" | "step";
@@ -31,8 +32,15 @@ export interface ExportSaveDialogProps {
   initialFormat: ExportSaveFormat;
   /** Basis-Dateiname OHNE Endung (i. d. R. Projektname). */
   baseName: string;
-  /** `ifc`: Klassifikations-Optionen (nur bei Format IFC gesetzt). */
-  onSave: (format: ExportSaveFormat, filename: string, ifc?: IfcExportOptions) => void;
+  /** [271][272] Ansicht der aktiven Ebene (Umbaufilter, Etappe, Variantenkombination); fehlt oder leer = Hauptvarianten, alles. */
+  view?: ExportView;
+  /** Lesbare Fassung von `view` (Filtername mit Etappe, Kombination) für die Anzeige. */
+  viewLabels?: { renovation: string | null; combination: string | null };
+  /**
+   * `ifc`: Klassifikations-Optionen (nur bei Format IFC gesetzt). `view`: die Ansicht, die der Export übernimmt
+   * (nur bei den 3D-Formaten und wenn gewählt; sonst nicht gesetzt = Hauptvarianten, kein Filter).
+   */
+  onSave: (format: ExportSaveFormat, filename: string, ifc?: IfcExportOptions, view?: ExportView) => void;
   onClose: () => void;
 }
 
@@ -46,6 +54,8 @@ function withExt(base: string, ext: string): string {
 export function ExportSaveDialog({
   initialFormat,
   baseName,
+  view,
+  viewLabels,
   onSave,
   onClose,
 }: ExportSaveDialogProps) {
@@ -69,7 +79,11 @@ export function ExportSaveDialog({
   const [context, setContext] = useState(false);
   // IFC-Schema: IFC4 (Standard) oder IFC2x3 für ältere Fachplaner-Programme.
   const [schema, setSchema] = useState<IfcSchema>("IFC4");
-  const onConfirm = () => onSave(format, filename, format === "ifc" ? { schema, ebkph, layerCodes, context } : undefined);
+  // [271][272] Die Ansicht der aktiven Ebene gilt für alle 3D-Formate (IFC, OBJ, STL, glTF, STEP); die Bauteilliste (CSV) nicht.
+  const viewApplies = format !== "csv";
+  const viewActive = hasExportView(view);
+  const [useView, setUseView] = useState(true);
+  const onConfirm = () => onSave(format, filename, format === "ifc" ? { schema, ebkph, layerCodes, context } : undefined, viewApplies && viewActive && useView ? view : undefined);
 
   return (
     <div className="imp-overlay" onClick={onClose}>
@@ -134,6 +148,29 @@ export function ExportSaveDialog({
               </label>
               <div className="imp-note">{t("exportSave.ifc.contextHint")}</div>
               <div className="imp-note">{t("exportSave.ifc.zonesNote")}</div>
+            </section>
+          )}
+
+          {viewApplies && (
+            <section className="imp-section" data-testid="export-view">
+              <div className="imp-section-title">{t("exportSave.view")}</div>
+              {viewActive ? (
+                <>
+                  <label className="imp-check">
+                    <input type="checkbox" data-testid="export-view-use" checked={useView} onChange={(e) => setUseView(e.target.checked)} />
+                    <span>{t("exportSave.view.use")}</span>
+                  </label>
+                  <div className="imp-note" data-testid="export-view-summary">
+                    {useView
+                      ? [viewLabels?.renovation ? t("exportSave.view.renovation", { name: viewLabels.renovation }) : "", viewLabels?.combination ? t("exportSave.view.combination", { name: viewLabels.combination }) : ""].filter(Boolean).join(" · ")
+                      : t("exportSave.view.off")}
+                  </div>
+                </>
+              ) : (
+                <div className="imp-note" data-testid="export-view-summary">
+                  {t("exportSave.view.none")}
+                </div>
+              )}
             </section>
           )}
 

@@ -37,6 +37,12 @@ export interface CyclesSceneOptions {
   ground?: boolean;
   /** Bild-URLs, die geladen werden können (`undefined` = alle). */
   textures?: string[];
+  /** [271][272] Umbaufilter und Variantenkombination der Ansicht (Ausgeblendetes fehlt; ohne Angabe Hauptvarianten). */
+  renovation?: string;
+  renovationPhase?: string;
+  designOptions?: Record<string, string>;
+  /** [271] Umbau-Farben im Bild (nur mit Filter, der Farben vorsieht; Standard: Materialfarben). */
+  renovationColors?: boolean;
 }
 
 /** Antwort des Kerns. */

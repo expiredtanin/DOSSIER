@@ -240,6 +240,30 @@ echo "Finished Rendering."
     expect(xml).toContain("textures/");
   }, 120_000);
 
+  // [271][272] Die Szene folgt `--renovation`/`--phase`/`--options`/`--combination`; Umbau-Farben nur mit `--renovation-colors`.
+  it("Szene ohne Ausgeblendetes, Kombination und Umbau-Farben auf Wunsch", async () => {
+    const sceneXml = () => readFileSync(join(dir, "fake-cycles-scene.xml"), "utf8");
+    const meshes = (xml: string) => (xml.match(/<mesh /g) ?? []).length;
+    const base = (extra: string[]) => run([":umbau", "render", "--engine", "cycles", "--cycles", fakeCycles, "--out", join(dir, "ren.png"), "--samples", "8", "--size", "8x4", "--no-context", ...extra]);
+    expect((await quiet(() => base([]))).result).toBe(0);
+    const ganz = sceneXml();
+    expect((await quiet(() => base(["--renovation", "bestand"]))).result).toBe(0);
+    const bestand = sceneXml();
+    expect(meshes(bestand)).toBeLessThan(meshes(ganz));
+    expect(bestand).not.toContain("Umbau-");
+    expect((await quiet(() => base(["--renovation", "umbauplan"]))).result).toBe(0);
+    expect(sceneXml()).not.toContain("Umbau-");
+    expect((await quiet(() => base(["--renovation", "umbauplan", "--renovation-colors"]))).result).toBe(0);
+    expect(sceneXml()).toContain("Umbau-ffd800");
+    const vb = (extra: string[]) => run([":varianten", "render", "--engine", "cycles", "--cycles", fakeCycles, "--out", join(dir, "var.png"), "--samples", "8", "--size", "8x4", "--no-context", ...extra]);
+    expect((await quiet(() => vb([]))).result).toBe(0);
+    const studie1 = sceneXml();
+    expect((await quiet(() => vb(["--combination", "Studie 2 Satteldach/Bandfenster"]))).result).toBe(0);
+    expect(sceneXml()).not.toBe(studie1);
+    expect((await quiet(() => vb(["--options", "Dachform=B"]))).result).toBe(0);
+    expect(sceneXml()).not.toBe(studie1);
+  }, 240_000);
+
   it("Programm aus DOSSIER_CYCLES; fehlt es: Hinweis und Exit-Code 3", async () => {
     const png = join(dir, "cy2.png");
     const old = process.env.DOSSIER_CYCLES;
@@ -303,4 +327,21 @@ describe.skipIf(!realCycles || !existsSync(realCycles))("dossier-cli render --en
     expect(sum / (raw.length - 180)).toBeGreaterThan(40);
     expect(max - min).toBeGreaterThan(80);
   }, 240_000);
+
+  // [271][272] Ansicht: Umbau „Endzustand“ und Variantenkombination „Studie 2“ rendern (klein, 4 Samples).
+  it(":umbau im Endzustand und :varianten Studie 2 geben ein PNG", async () => {
+    const err = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      for (const [name, extra] of [
+        [":umbau", ["--renovation", "endzustand"]],
+        [":varianten", ["--combination", "Studie 2 Satteldach/Bandfenster"]],
+      ] as const) {
+        const png = join(dir, `echt-${name.slice(1)}.png`);
+        expect(await run([name, "render", "--engine", "cycles", "--out", png, "--samples", "4", "--size", "160x90", "--cpu", ...extra])).toBe(0);
+        expect(Array.from(readFileSync(png).subarray(1, 4))).toEqual([80, 78, 71]);
+      }
+    } finally {
+      err.mockRestore();
+    }
+  }, 360_000);
 });

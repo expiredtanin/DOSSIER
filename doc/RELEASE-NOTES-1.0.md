@@ -89,7 +89,7 @@ in `doc/KURZANLEITUNG.md`):
     je Ansicht: Bestand, Abbruch, Neubau, Umbauplan (SIA 400: Bestand grau, Abbruch gelb gestrichelt, Neu rot) und Endzustand, bis zu einer
     Etappe; neue Öffnungen in Bestandswänden zeigen das abgebrochene Mauerwerk, zugemauerte Öffnungen die Ausfachung. Gilt in Grundriss,
     Schnitt, Ansicht, Vektor-Axonometrie, Kennzahlen (Bestand/Endzustand) und Exporten (DXF-Layer je Status, IFC `Status` im
-    `Pset_*Common`). Beispiel: *Datei → Neu aus Vorlage: Beispiel Umbau*. Das 3D-Fenster folgt dem Filter der aktiven Ebene (noch ohne Bildprüfung); Cycles/Blender noch ohne Filter.
+    `Pset_*Common`). Beispiel: *Datei → Neu aus Vorlage: Beispiel Umbau*. Das 3D-Fenster folgt dem Filter der aktiven Ebene (noch ohne Bildprüfung). Exporte (IFC, OBJ, STL, glTF, STEP) und das Rendering (Cycles, Blender-Paket) übernehmen Umbaufilter und Variantenkombination der aktiven Ansicht — die Dialoge zeigen sie und lassen „Hauptvarianten/kein Filter“ wählen; im Rendering mit Cycles färbt „Umbau-Farben im Bild“ (Vorgabe aus) Bestand grau, Abbruch gelb, Neu rot. CLI: `--renovation/--phase` auch für diese Ausgaben.
 14. **Varianten (17.11., [272]).** Wie Archicads „Design Options“: Variantensätze (z. B. Dachform, Fassade) mit Varianten A, B, …; jedes
     Element (Bauteile, Öffnungen, Räume, Körper, 2D-Elemente samt Bibliotheksobjekten) gehört zum Hauptmodell oder zu genau einer Variante.
     Je Ansicht, Ausschnitt, Vorlage und Blatt-Viewport eine Kombination (Vorgabe die Hauptvarianten); Grundriss, Schnitt, Ansicht,

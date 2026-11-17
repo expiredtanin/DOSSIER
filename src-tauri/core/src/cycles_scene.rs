@@ -100,6 +100,9 @@ pub struct CyclesOptions {
     pub context: bool,
     /// Bodenplatte unter dem Modell (der Himmel unter dem Horizont ist dunkel).
     pub ground: bool,
+    /// [271] Umbau-Farben im Bild (Abbruch gelb, Neu rot …; nur mit Umbaufilter, der Farben vorsieht, z. B. „Umbauplan“);
+    /// Vorgabe aus = Materialfarben. Ausgeblendetes fehlt in jedem Fall.
+    pub renovation_colors: bool,
     /// Bild-URLs, die der Gastgeber laden kann; `None` = alle. Fehlende Karten fallen auf den Ersatzlook zurück.
     pub textures: Option<Vec<String>>,
 }
@@ -119,6 +122,7 @@ impl Default for CyclesOptions {
             backfilled: true,
             context: true,
             ground: true,
+            renovation_colors: false,
             textures: None,
         }
     }
@@ -569,6 +573,12 @@ fn auto_exposure(elevation: f64, strength: f64) -> f64 {
 /// Schreibt die Cycles-Szene. Fehler nur bei unbrauchbaren Optionen (Bildgrösse, Kamera); ein leeres Projekt ergibt eine
 /// gültige Szene ohne Netze (`meshes == 0`).
 pub fn cycles_scene(p: &Project, o: &CyclesOptions) -> Result<CyclesScene, String> {
+    cycles_scene_styled(p, o, &HashMap::new())
+}
+
+/// Wie [`cycles_scene`], mit Umbau-Farben (Element-id → Füllfarbe des Status, `renovation::Resolved::styled`): solche Elemente
+/// bekommen eine einfarbige Fläche statt ihres Materials (Glas bleibt Glas). Leere Tabelle = Materialfarben.
+pub fn cycles_scene_styled(p: &Project, o: &CyclesOptions, styled: &HashMap<String, String>) -> Result<CyclesScene, String> {
     let dim = |v: f64, what: &str| -> Result<u32, String> {
         if v.is_finite() && (1.0..=32768.0).contains(&v) {
             Ok(v.round() as u32)
@@ -644,8 +654,14 @@ pub fn cycles_scene(p: &Project, o: &CyclesOptions) -> Result<CyclesScene, Strin
                         None => {}
                     }
                 }
-                let (color, rough, metal) = flat_look(role, &comp_name.to_lowercase(), srgb, m.roughness, m.metallic);
-                Look { label, color, rough, metal, glass: false, tex: t }
+                match styled.get(&g.id) {
+                    // [271] Umbau-Farbe: einfarbig, ohne Bildkarte (Schnittflächen und Körper wie im 3D-Fenster).
+                    Some(fill) => Look { label: format!("Umbau-{}", fill.trim_start_matches('#')), color: clamp_albedo(lin(hex_to_rgb(fill, [0.8, 0.8, 0.8]))), rough: 0.8, metal: 0.0, glass: false, tex: None },
+                    None => {
+                        let (color, rough, metal) = flat_look(role, &comp_name.to_lowercase(), srgb, m.roughness, m.metallic);
+                        Look { label, color, rough, metal, glass: false, tex: t }
+                    }
+                }
             };
             let key = format!("{look:?}");
             let sid = match shader_ids.get(&key) {

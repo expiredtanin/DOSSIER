@@ -4,10 +4,12 @@
 // Raumstempel-Editor und der Drop-Rahmen — in derselben Reihenfolge wie zuvor. Gerendert von
 // `App.tsx` nach der Status-Leiste; Zustand und Handler kommen aus den Hooks der App.
 
+import { useMemo } from "react";
 import type { DrawingLevel } from "../model/types";
 import { lineEndsOf, setFieldIfChanged } from "../core";
 import { getState, useStore, type RootState } from "../state/appStore";
 import { setAiAccessEnabled } from "../state/aiAccess";
+import { activeExportView } from "../state/exportViewState";
 import { reconcileLayout } from "../state/layoutSlice";
 import type { useCommandEngineHost } from "../state/useCommandEngineHost";
 import type { useDialogState } from "../state/useDialogState";
@@ -136,6 +138,8 @@ export function AppDialogs(props: {
   const needsProject = resourcesOpen || !!importState || settingsOpen;
   const subscribed = useStore((s) => (needsProject ? s.project : null));
   const project = subscribed ?? getState().project;
+  // [271][272] Ansicht der aktiven Ebene für den Export-Dialog (beim Öffnen gelesen, der Dialog ist modal).
+  const exportView = useMemo(() => (exportSaveFormat ? activeExportView() : null), [exportSaveFormat]);
   // [193] Höhe eines Netzpunkts (Rechtsklick auf den Griff): Overlay-Eingabe statt window.prompt.
   const meshHeightPrompt = useStore((s) => s.meshHeightPrompt);
   const meshPromptZ = useStore((s) => {
@@ -255,8 +259,10 @@ export function AppDialogs(props: {
       <ExportSaveDialog
         initialFormat={exportSaveFormat}
         baseName={projectFileName()}
-        onSave={(fmt, filename, ifcOptions) => {
-          runExport(fmt, filename, ifcOptions);
+        view={exportView?.view}
+        viewLabels={exportView?.labels}
+        onSave={(fmt, filename, ifcOptions, view) => {
+          runExport(fmt, filename, ifcOptions, view);
           setExportSaveFormat(null);
         }}
         onClose={() => setExportSaveFormat(null)}

@@ -26,6 +26,7 @@ import { exportProjectName } from "../export/competitionIdentity";
 import { confirmAnonymousExport, setAnonymityProjectFileName } from "./anonymityGate";
 import { exportScheduleCsv } from "../export/exportSchedule";
 import { exportIfcSpf, type IfcExportOptions } from "../export/exportIfc";
+import type { ExportView } from "../export/exportView";
 import { loadFileio } from "../engine/fileioWasm";
 import { exportProjectStep } from "../export/exportStep";
 import { exportGlb, exportMtl, exportObj, exportStl } from "../export/exportMesh";
@@ -749,13 +750,14 @@ export function useProjectFileActions(
   // Führt den gewählten Direkt-Export (CSV/IFC/OBJ/STL) mit dem im Dialog
   // gewählten Dateinamen aus. Erzeugung aus dem jeweiligen reinen Kern, Download
   // über den robusten Helfer.
-  const runExport = (format: ExportSaveFormat, filename: string, ifcOptions?: IfcExportOptions) => {
+  const runExport = (format: ExportSaveFormat, filename: string, ifcOptions?: IfcExportOptions, view?: ExportView) => {
     // [208] Anonyme Abgabe: Freitext vorher prüfen (Dialog), erst dann schreiben.
     void confirmAnonymousExport(getState().project, [filename]).then((ok) => {
-      if (ok) runExportChecked(format, filename, ifcOptions);
+      if (ok) runExportChecked(format, filename, ifcOptions, view);
     });
   };
-  const runExportChecked = (format: ExportSaveFormat, filename: string, ifcOptions?: IfcExportOptions) => {
+  // [271][272] `view`: Umbaufilter und Variantenkombination der aktiven Ansicht (3D-Formate); fehlt sie, gelten Hauptvarianten und alles.
+  const runExportChecked = (format: ExportSaveFormat, filename: string, ifcOptions?: IfcExportOptions, view?: ExportView) => {
     const project = getState().project;
     switch (format) {
       case "csv":
@@ -764,7 +766,7 @@ export function useProjectFileActions(
       case "ifc":
         // IFC schreibt Rust (Format-Modul pkgFileIo, wird beim ersten Export nachgeladen).
         void loadFileio()
-          .then(() => downloadTextFile(exportIfcSpf(project, ifcOptions), filename))
+          .then(() => downloadTextFile(exportIfcSpf(project, { ...ifcOptions, view }), filename))
           .catch((e) => notify(`${t("ifc.export.failed")}: ${e instanceof Error ? e.message : String(e)}`, "error"));
         break;
       case "obj":
@@ -773,17 +775,17 @@ export function useProjectFileActions(
         // OBJ/STL/glTF schreibt Rust (Format-Modul pkgFileIo, wird beim ersten Export nachgeladen).
         void loadFileio()
           .then(() => {
-            if (format === "glb") void saveBinaryFile(exportGlb(project), filename, "model/gltf-binary");
+            if (format === "glb") void saveBinaryFile(exportGlb(project, { view }), filename, "model/gltf-binary");
             // [201] OBJ mit MTL (Farben) als zweite Datei gleichen Namens; STL kennt keine Farben.
-            else if (format === "obj") void saveTextWithCompanion((mtlName) => ({ main: exportObj(project, {}, mtlName), companion: exportMtl(project) }), filename, "mtl");
-            else downloadTextFile(exportStl(project), filename);
+            else if (format === "obj") void saveTextWithCompanion((mtlName) => ({ main: exportObj(project, { view }, mtlName), companion: exportMtl(project, { view }) }), filename, "mtl");
+            else downloadTextFile(exportStl(project, { view }), filename);
           })
           .catch((e) => notify(`${t("mesh.export.failed")}: ${e instanceof Error ? e.message : String(e)}`, "error"));
         break;
       case "step":
         // B-Rep via truck-WASM (asynchron): Körper, die truck nicht bauen kann, werden
         // übersprungen — der Export bleibt trotzdem erhalten, Hinweis per Meldung.
-        void exportProjectStep(project, filename.replace(/\.[^.]+$/, ""))
+        void exportProjectStep(project, filename.replace(/\.[^.]+$/, ""), view)
           .then((r) => {
             downloadTextFile(r.text, filename);
             if (r.skipped.length > 0) {

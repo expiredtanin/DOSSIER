@@ -12,6 +12,8 @@ import type { Project } from "../model/types";
 import { fileio } from "../engine/fileioWasm";
 import { documentFor } from "../core/document";
 import { decodeExportFlat } from "./exportIfc";
+import type { ExportView } from "./exportView";
+import { exportViewText } from "./exportView";
 
 /** Was in die Szene kommt. Alles standardmässig an (vollständiges 3D-Modell). */
 export interface MeshOptions {
@@ -21,12 +23,14 @@ export interface MeshOptions {
   context?: boolean;
   /** [227] Baugruben weglassen: Gelände ohne Aushub (hinterfüllt, bis an die Fassade geschlossen). Standard: nein. */
   backfilled?: boolean;
+  /** [271][272] Ansicht der Ausgabe: Umbaufilter und Variantenkombination (ohne Angabe kein Filter, Hauptvarianten). */
+  view?: ExportView;
 }
 
 /** Ruft eine Rust-Bindung; leeres Ergebnis (kaputter Puffer) wird zum Fehler mit dem Grund. */
 function write<T extends string | Uint8Array>(project: Project, opts: MeshOptions, byLevel: boolean, run: (m: ReturnType<typeof fileio>, buf: Float64Array, strings: string) => T): T {
   const args = [(opts.openingParts ?? true) ? 1 : 0, (opts.context ?? true) ? 1 : 0, byLevel ? 1 : 0, opts.backfilled ? 1 : 0];
-  const [buf, strings] = decodeExportFlat(documentFor(project).queryBin("meshExportData", args));
+  const [buf, strings] = decodeExportFlat(documentFor(project).queryBin("meshExportData", args, exportViewText(opts.view)));
   const m = fileio();
   const out = run(m, buf, strings);
   if (out.length === 0) {

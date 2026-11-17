@@ -15,6 +15,8 @@
 
 import { exportProjectName, isAnonymous, neutralizeStepText } from "./competitionIdentity";
 import type { Project } from "../model/types";
+import type { ExportView } from "./exportView";
+import { exportViewText } from "./exportView";
 import { documentFor } from "../core/document";
 import { exportStepSolids } from "../engine/truckSolid";
 import type { SolidSpec } from "../engine/truckSolid";
@@ -28,8 +30,8 @@ export { wallProfile, wallSpec } from "../plan/wallSpec";
 const VOID_FALLBACK = new WeakMap<SolidSpec, SolidSpec>();
 
 /** Alle Bauteile des Projekts als B-Rep-Spezifikationen (Rust-Kern, `solid_specs.rs::project_solid_specs`; kein truck-WASM). */
-export function projectSolidSpecs(project: Project): SolidSpec[] {
-  const r = documentFor(project).query<{ specs: SolidSpec[]; fallbacks: [number, SolidSpec][] }>("projectSolidSpecs", []);
+export function projectSolidSpecs(project: Project, view?: ExportView): SolidSpec[] {
+  const r = documentFor(project).query<{ specs: SolidSpec[]; fallbacks: [number, SolidSpec][] }>("projectSolidSpecs", [], exportViewText(view));
   for (const [i, base] of r.fallbacks) VOID_FALLBACK.set(r.specs[i], base);
   return r.specs;
 }
@@ -47,8 +49,9 @@ export interface StepExportResult {
  * Exportiert das Projekt als STEP-Text. Körper, die truck nicht bauen kann (entartete
  * Profile …), werden einzeln übersprungen statt den ganzen Export zu verwerfen.
  */
-export async function exportProjectStep(project: Project, fileName = ""): Promise<StepExportResult> {
-  const specs = projectSolidSpecs(project);
+/** [271][272] `view`: Umbaufilter und Variantenkombination der Ansicht (ohne Angabe kein Filter, Hauptvarianten). */
+export async function exportProjectStep(project: Project, fileName = "", view?: ExportView): Promise<StepExportResult> {
+  const specs = projectSolidSpecs(project, view);
   const good: SolidSpec[] = [];
   const skipped: StepExportResult["skipped"] = [];
   // Erst alle zusammen versuchen (Normalfall); nur bei Fehler einzeln prüfen.
