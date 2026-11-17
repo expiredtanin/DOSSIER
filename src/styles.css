@@ -10468,3 +10468,29 @@ body {
 .reno-phase-styles .reno-link-btn {
   align-self: flex-start;
 }
+
+/* [276] Darstellung der Schnitt-/Ansichtslinie: Symbol-Knöpfe mit Vorschau (Objekt-Info). */
+.look-choice {
+  display: inline-flex;
+  gap: 2px;
+  flex-wrap: wrap;
+}
+.look-choice-btn {
+  padding: 2px 3px;
+  border: 1px solid var(--border, #3a3f47);
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  line-height: 0;
+}
+.look-choice-btn:hover {
+  background: var(--hover, rgba(127, 127, 127, 0.15));
+}
+.look-choice-btn.active {
+  border-color: var(--accent, #4c8dff);
+  background: var(--accent-soft, rgba(76, 141, 255, 0.18));
+}
+.look-icon {
+  display: block;
+}

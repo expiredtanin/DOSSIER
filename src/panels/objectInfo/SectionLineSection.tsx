@@ -1,11 +1,12 @@
 // Abschnitt „Schnitt-/Ansichtslinie" der Attribute ([165] aus `ObjectInfoPanel.tsx`): Name, Art, Tiefe,
-// Umkehren, Höhenmarken, Plan-Unterlage. Gerufen von `AttributesPanel`.
+// Umkehren, Höhenmarken, Plan-Unterlage, Darstellung im Plan ([276]). Gerufen von `AttributesPanel`.
 
 import type { DrawingLevel, Vec2 } from "../../model/types";
 import { usePanelHost } from "../host";
 import { t } from "../../i18n";
 import type { TranslationKey } from "../../i18n";
-import { Dropdown } from "../../ui/Dropdown";
+import { useStore } from "../../state/appStore";
+import { SectionLookFields } from "./SectionLookFields";
 
 // ── Schnitt-/Ansichtslinien-Abschnitt (Object-Info; nur die gewählte Linie) ──
 // Name (editierbar), Blickrichtung umkehren (directionSign-Flip), Endpunkt-
@@ -19,6 +20,8 @@ export function SectionLineSection({
   level: DrawingLevel;
   host: ReturnType<typeof usePanelHost>;
 }) {
+  const project = useStore((s) => s.project);
+  const activeLevelId = useStore((s) => s.activeLevelId);
   const line = level.linePoints;
   const isElev = level.kind === "elevation";
   const kindLabel =
@@ -126,24 +129,6 @@ export function SectionLineSection({
         />
       </div>
 
-      {/* [176] Schnittmarke im Grundriss: leer = Vorgabe der Modelldarstellung (sonst Pfeil). */}
-      {level.kind === "section" && (
-        <div className="objinfo-field">
-          <span className="objinfo-flabel">{t("objinfo.sectionLine.marker")}</span>
-          <Dropdown
-            value={level.markerStyle ?? ""}
-            onChange={(v) => host.onSetSectionLinePatch({ markerStyle: v === "arrow" || v === "lAngle" ? v : undefined })}
-            options={[
-              { value: "", label: t("objinfo.sectionLine.marker.model") },
-              { value: "arrow", label: t("resources.modelViews.val.arrow") },
-              { value: "lAngle", label: t("resources.modelViews.val.lAngle") },
-            ]}
-            title={t("objinfo.sectionLine.marker")}
-            width={150}
-          />
-        </div>
-      )}
-
       {/* Verdeckte Kanten (gestrichelt) — Default aus (blasses Liniengewirr). */}
       <div className="objinfo-field">
         <span className="objinfo-flabel">{t("objinfo.sectionLine.hiddenLines")}</span>
@@ -165,6 +150,9 @@ export function SectionLineSection({
           title={t("objinfo.sectionLine.levelMarks")}
         />
       </div>
+
+      {/* [276] Darstellung im Plan: Linie, Linientyp, Stift, Marke, Beschriftung. */}
+      <SectionLookFields level={level} project={project} planLevelId={activeLevelId} onPatch={host.onSetSectionLinePatch} />
 
       {/* Löschen: linePoints zurücksetzen (die Ebene bleibt bestehen). */}
       <button type="button" className="objinfo-btn" onClick={() => host.onDeleteSectionLine()}>

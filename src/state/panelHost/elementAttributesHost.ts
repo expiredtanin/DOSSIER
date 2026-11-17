@@ -258,8 +258,13 @@ export function buildElementAttributesHost(c: FlatHostOpts) {
     },
     // ── Schnitt-/Ansichtslinie (nur bei selektierter Linie) ────────────────
     sectionLine,
+    // Mehrfachauswahl ([276]): die Änderung trifft alle gewählten Schnitt-/Ansichtslinien, ein Undo-Schritt.
     onSetSectionLinePatch: (patch) => {
-      if (sectionLine) patchLevel(sectionLine.id, patch);
+      if (!sectionLine) return;
+      const ids = getState().selection.sectionLines;
+      if (ids.length > 1 && ids.includes(sectionLine.id)) {
+        applyChange((p) => patchItems(p, "drawingLevels", ids, (l) => ({ ...l, ...patch })));
+      } else patchLevel(sectionLine.id, patch);
     },
     onDeleteSectionLine: () => {
       if (sectionLine) patchLevel(sectionLine.id, { linePoints: undefined });

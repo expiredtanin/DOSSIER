@@ -330,8 +330,9 @@ pub struct Options {
     pub elevation: ElevOpts,
     pub floor_finish_mv: Option<FloorFinishDisplay>,
     pub terrain_mv: Option<bool>,
-    /// [176] Markentyp der Schnitte laut Modelldarstellung (die Ebene geht vor, s. [`Options::section_marker`]).
-    pub section_marker_mv: Option<SectionMarkerStyle>,
+    /// [176]/[276] Schnitt- bzw. Ansichtsmarken laut Modelldarstellung (die Ebene geht vor, s. [`Options::mark_look`]).
+    pub section_marks_mv: Option<ModelViewSectionMarks>,
+    pub elevation_marks_mv: Option<ModelViewSectionMarks>,
     /// Raumstempel.
     pub stamp: StampOpts,
     /// Bemassung.
@@ -395,9 +396,19 @@ impl Options {
     pub fn terrain(&self, level: Option<bool>) -> Option<bool> {
         level.or(self.terrain_mv)
     }
-    /// [176] Schnittmarke: Ebene > Modelldarstellung > Pfeil.
-    pub fn section_marker(&self, level: Option<SectionMarkerStyle>) -> SectionMarkerStyle {
-        level.filter(|s| *s != SectionMarkerStyle::Unknown).or(self.section_marker_mv).unwrap_or(SectionMarkerStyle::Arrow)
+    /// [276] Darstellung der Schnitt-/Ansichtslinie: Ebene > Modelldarstellung > Basis (Schnitt: Linie mit Endstücken, Pfeile
+    /// an beiden Enden; Ansicht: keine Linie, Dreieck in der Mitte; beide mit Beschriftung).
+    pub fn mark_look(&self, level: &DrawingLevel) -> crate::plan::misc::SectionLook {
+        use crate::plan::misc::SectionLook;
+        let elev = matches!(level.kind, DrawingLevelKind::Elevation);
+        let mv = if elev { self.elevation_marks_mv.as_ref() } else { self.section_marks_mv.as_ref() };
+        let base = SectionLook::default();
+        let line = level.line_mode.or(mv.and_then(|m| m.line_mode)).filter(|x| *x != SectionLineMode::Unknown).unwrap_or(if elev { SectionLineMode::None } else { base.line });
+        let marker = level.marker.or(mv.and_then(|m| m.marker)).filter(|x| *x != SectionMarker::Unknown).unwrap_or(if elev { SectionMarker::Triangle } else { base.marker });
+        let at = level.marker_at.or(mv.and_then(|m| m.marker_at)).filter(|x| *x != SectionMarkerAt::Unknown).unwrap_or(base.at);
+        let end_mm = level.end_length_mm.or(mv.and_then(|m| m.end_length_mm)).filter(|v| v.is_finite() && *v > 0.0).unwrap_or(base.end_mm);
+        let label = level.marker_label.or(mv.and_then(|m| m.marker_label)).unwrap_or(true);
+        SectionLook { line, end_mm, marker, at, label }
     }
     /// Automatische Höhenkoten in Schnitt/Ansicht: Ebene > Modelldarstellung > an.
     pub fn level_marks(&self, level: Option<bool>) -> bool {
@@ -560,7 +571,8 @@ pub fn resolve(mv: Option<&ModelViewOption>, detail: Detail, scale: f64) -> Opti
         elevation: ElevOpts { shadows_mv: el.and_then(|e| e.shadows), material_hatch: el.and_then(|e| e.material_hatch).unwrap_or(true) },
         floor_finish_mv: mv.and_then(|m| m.slabs.as_ref()).and_then(|s| s.floor_finish).filter(|f| *f != FloorFinishDisplay::Unknown),
         terrain_mv: mv.and_then(|m| m.site.as_ref()).and_then(|s| s.terrain),
-        section_marker_mv: mv.and_then(|m| m.section_marks.as_ref()).and_then(|s| s.style).filter(|s| *s != SectionMarkerStyle::Unknown),
+        section_marks_mv: mv.and_then(|m| m.section_marks.clone()),
+        elevation_marks_mv: mv.and_then(|m| m.elevation_marks.clone()),
         stamp: mv.and_then(|m| m.room_stamps.as_ref()).map_or_else(StampOpts::default, |r| StampOpts { number: r.number, area: r.area, usage: r.usage, height: r.height, finish: r.finish, divider: r.divider }),
         dims: {
             let d = mv.and_then(|m| m.dimensions.as_ref());

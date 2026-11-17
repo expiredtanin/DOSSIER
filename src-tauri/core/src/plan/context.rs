@@ -23,6 +23,65 @@ const SECTION_LINE_DASH: [f64; 4] = super::line_pattern::SECTION_LINE;
 /// [176] Beschriftungshöhe in Papier-mm (Modell-Meter = mm · Massstab/1000).
 const SECTION_LABEL_MM: f64 = 3.5;
 
+/// [276] Farbe, Strichstärken und Linientyp einer Schnitt-/Ansichtslinie: Stift (aktiver Stiftsatz) > Linientyp > Basis.
+struct LineInk {
+    color: String,
+    main_w: f64,
+    mark_w: f64,
+    main_dash: Option<Vec<f64>>,
+    piece_dash: Option<Vec<f64>>,
+    zigzag: Option<LineStyleZigzag>,
+    motif: Option<LineStyleMotif>,
+    /// Zickzack/Motiv gelten für die Hauptlinie (`full`) bzw. die Endstücke (`ends`).
+    styled_ends: bool,
+}
+
+fn line_ink(p: &Project, level: &DrawingLevel, look: &crate::plan::misc::SectionLook) -> LineInk {
+    let ls = level.line_style_id.as_deref().filter(|s| !s.is_empty()).and_then(|id| p.line_style(id));
+    let pen = level.line_pen_id.as_deref().filter(|s| !s.is_empty()).and_then(|id| {
+        let set = p.pen_sets.as_deref()?.iter().find(|s| Some(&s.id) == p.active_pen_set_id.as_ref())?;
+        Some(set.pens.get(id).map_or((crate::pens::PEN_FALLBACK_COLOR.to_string(), crate::pens::PEN_FALLBACK_WEIGHT), |st| (st.color.clone(), st.weight)))
+    });
+    let ends = look.line == SectionLineMode::Ends;
+    let pen_w = pen.as_ref().map(|x| x.1).filter(|w| w.is_finite() && *w > 0.0);
+    let color = pen.as_ref().map(|x| x.0.clone()).or_else(|| ls.map(|l| l.color.clone()).filter(|c| !c.is_empty())).unwrap_or_else(|| SECTION_LINE_INK.to_string());
+    LineInk {
+        color,
+        main_w: pen_w.unwrap_or(SECTION_LINE_MM),
+        mark_w: if ends || look.line == SectionLineMode::None { pen_w.unwrap_or(SECTION_LINE_MARK_MM) } else { pen_w.map_or(SECTION_LINE_MARK_MM, |w| w.max(SECTION_LINE_MARK_MM)) },
+        main_dash: match ls {
+            Some(l) => l.dash.clone().filter(|d| !d.is_empty()),
+            None => Some(SECTION_LINE_DASH.to_vec()),
+        },
+        piece_dash: if ends { ls.and_then(|l| l.dash.clone()).filter(|d| !d.is_empty()) } else { None },
+        zigzag: ls.filter(|l| l.kind == Some(LineStyleKind::Zigzag)).and_then(|l| l.zigzag.clone()),
+        motif: ls.filter(|l| l.kind == Some(LineStyleKind::Custom)).and_then(|l| l.motif.clone()),
+        styled_ends: ends,
+    }
+}
+
+impl LineInk {
+    /// Linie `a`–`b`: `main` = dünne Hauptlinie, sonst kräftiges Stück bzw. Schenkel.
+    fn line(&self, a: Vec2, b: Vec2, main: bool, greyed: Option<bool>) -> Primitive {
+        let styled = main != self.styled_ends;
+        Primitive::Line {
+            a,
+            b,
+            cls: "section-line".into(),
+            weight_mm: if main { self.main_w } else { self.mark_w },
+            dash: if main { Some(self.main_dash.clone()) } else { self.piece_dash.clone().map(Some) },
+            zigzag: if styled { self.zigzag.clone() } else { None },
+            motif: if styled { self.motif.clone() } else { None },
+            color: Some(self.color.clone().into()),
+            drawing_id: None,
+            opening_id: None,
+            stair_id: None,
+            greyed,
+            opacity: None,
+        }
+    }
+}
+
 fn v2(x: f64, y: f64) -> Vec2 {
     Vec2 { x, y }
 }
@@ -926,6 +985,24 @@ pub fn section_label_tag(name: &str) -> String {
 /// die Bezeichnung waagrecht dahinter (auf der dem Blick abgewandten Seite); Pick-Band über Dreieck und Text.
 #[allow(clippy::too_many_arguments)]
 fn view_marker(c: &Ctx, level: &DrawingLevel, p0: Vec2, p1: Vec2, sign: f64, k: f64, tag: &str, greyed: Option<bool>, obst: &mut super::stamp_place::Obstacles, out: &mut Vec<Primitive>) {
+    let look = c.mv().mark_look(level);
+    let ink = line_ink(c.p, level, &look);
+    // [276] Die Linie selbst (Basis: keine) liegt exakt auf der Ansichtslinie.
+    {
+        let f = crate::plan::misc::view_line_parts((p0.x, p0.y), (p1.x, p1.y), k, &look);
+        let mut i = 1;
+        for _ in 0..f.first().copied().unwrap_or(0.0) as usize {
+            let (a, b) = (v2(f[i + 2], f[i + 3]), v2(f[i + 4], f[i + 5]));
+            let main = f[i + 1] == 0.0;
+            let pieces = if main { c.cut_at_gaps(a, b) } else { vec![(a, b)] };
+            for (a, b) in pieces {
+                let line = ink.line(a, b, main, greyed);
+                obst.add_prim(&line);
+                out.push(line);
+            }
+            i += 6;
+        }
+    }
     let h = SECTION_LABEL_MM * k;
     let w = crate::text_layout::text_width_em(tag, false) * h;
     // [199] Steht der Marker auf der Bemassung (Massketten rücken bei 1:200 auf 7 mm Abstand hinaus), rückt er
@@ -937,7 +1014,7 @@ fn view_marker(c: &Ctx, level: &DrawingLevel, p0: Vec2, p1: Vec2, sign: f64, k: 
     let ul = if len > 1e-9 { v2((p1.x - p0.x) / len, (p1.y - p0.y) / len) } else { v2(0.0, 0.0) };
     let at = |(s, t): (f64, f64)| {
         let (dx, dy) = (-bn.x * s + ul.x * t, -bn.y * s + ul.y * t);
-        crate::plan::misc::view_marker_sized(p0.x + dx, p0.y + dy, p1.x + dx, p1.y + dy, sign, k, w)
+        crate::plan::misc::view_symbol(p0.x + dx, p0.y + dy, p1.x + dx, p1.y + dy, sign, k, w, look.marker, look.label)
     };
     let band = |f: &[f64]| -> Option<Vec<[f64; 2]>> {
         let mut i = 1;
@@ -945,6 +1022,7 @@ fn view_marker(c: &Ctx, level: &DrawingLevel, p0: Vec2, p1: Vec2, sign: f64, k: 
             match f.get(i).copied()? {
                 3.0 => i += 7,
                 5.0 => i += 3,
+                2.0 => i += 6,
                 _ => return Some((0..4).map(|j| [f[i + 1 + 2 * j], f[i + 2 + 2 * j]]).collect()),
             }
         }
@@ -965,6 +1043,7 @@ fn view_marker(c: &Ctx, level: &DrawingLevel, p0: Vec2, p1: Vec2, sign: f64, k: 
                     out.push(vec![[x - pad, y - pad], [x + w + pad, y - pad], [x + w + pad, y + 0.75 * h + pad], [x - pad, y + 0.75 * h + pad]]);
                     i += 3;
                 }
+                Some(2.0) => i += 6,
                 Some(_) => i += 9,
                 None => break,
             }
@@ -986,13 +1065,18 @@ fn view_marker(c: &Ctx, level: &DrawingLevel, p0: Vec2, p1: Vec2, sign: f64, k: 
     }
     let mut i = 1;
     for _ in 0..f[0] as usize {
-        if f[i] == 3.0 {
+        if f[i] == 2.0 {
+            let line = ink.line(v2(f[i + 2], f[i + 3]), v2(f[i + 4], f[i + 5]), false, greyed);
+            obst.add_prim(&line);
+            out.push(line);
+            i += 6;
+        } else if f[i] == 3.0 {
             let pts: Vec<Vec2> = (0..3).map(|j| v2(f[i + 1 + 2 * j], f[i + 2 + 2 * j])).collect();
             let ring: Vec<[f64; 2]> = pts.iter().map(|q| [q.x, q.y]).collect();
             obst.area(ring);
             let mut tri = pick_band(pts, None, None);
             if let Primitive::Polygon { fill, .. } = &mut tri {
-                *fill = SECTION_LINE_INK.into();
+                *fill = ink.color.clone().into();
             }
             out.push(tri);
             i += 7;
@@ -1009,7 +1093,7 @@ fn view_marker(c: &Ctx, level: &DrawingLevel, p0: Vec2, p1: Vec2, sign: f64, k: 
                 text: tag.to_string(),
                 height_m: h,
                 angle: 0.0,
-                color: SECTION_LINE_INK.into(),
+                color: ink.color.clone().into(),
                 marks: None,
                 wrap_width: None,
                 doc: None,
@@ -1041,7 +1125,7 @@ pub fn plan_section_lines(c: &Ctx, out: &mut Vec<Primitive>) {
     let k = n / 1000.0;
     // [157] Beschriftungen zuletzt: sie weichen Masszahlen, Texten, Achsblasen, allen Linien und Marken der
     // Schnittführungen und den schon gesetzten Beschriftungen aus.
-    let mut labels: Vec<(Vec2, String, Vec2, Vec2)> = Vec::new();
+    let mut labels: Vec<(Vec2, String, Vec2, Vec2, String)> = Vec::new();
     let mut obst = super::stamp_place::Obstacles::default();
     // [270] Erst die Schnitte, dann die Ansichtsmarken: diese weichen den Schnittmarken aus (`view_marker`).
     let sections = c.p.drawing_levels.iter().filter(|l| matches!(l.kind, DrawingLevelKind::Section));
@@ -1059,7 +1143,10 @@ pub fn plan_section_lines(c: &Ctx, out: &mut Vec<Primitive>) {
         let mut path: Vec<(f64, f64)> = vec![(p0.x, p0.y)];
         path.extend(level.bend_points.iter().flatten().map(|q| (q.x, q.y)));
         path.push((p1.x, p1.y));
-        let f = crate::plan::misc::section_polyline_styled(&path, sign, k, label_w, c.mv().section_marker(level.marker_style));
+        let look = c.mv().mark_look(level);
+        let ink = line_ink(c.p, level, &look);
+        let marked = look.marked_ends();
+        let f = crate::plan::misc::section_polyline_look(&path, sign, k, label_w, &look);
         if f.is_empty() {
             continue;
         }
@@ -1083,21 +1170,7 @@ pub fn plan_section_lines(c: &Ctx, out: &mut Vec<Primitive>) {
                 // Musterhaus komplex EG/DG); die kräftigen Endstücke bleiben ganz.
                 let pieces = if main { c.cut_at_gaps(a, b) } else { vec![(a, b)] };
                 for (a, b) in pieces {
-                    let line = Primitive::Line {
-                        a,
-                        b,
-                        cls: "section-line".into(),
-                        weight_mm: if main { SECTION_LINE_MM } else { SECTION_LINE_MARK_MM },
-                        dash: main.then(|| Some(SECTION_LINE_DASH.to_vec())),
-                        zigzag: None,
-                        motif: None,
-                        color: Some(SECTION_LINE_INK.into()),
-                        drawing_id: None,
-                        opening_id: None,
-                        stair_id: None,
-                        greyed,
-                        opacity: None,
-                    };
+                    let line = ink.line(a, b, main, greyed);
                     obst.add_prim(&line);
                     out.push(line);
                 }
@@ -1108,14 +1181,14 @@ pub fn plan_section_lines(c: &Ctx, out: &mut Vec<Primitive>) {
                 obst.area(pts.iter().map(|q| [q.x, q.y]).collect());
                 let mut tri = pick_band(pts, None, None);
                 if let Primitive::Polygon { fill, .. } = &mut tri {
-                    *fill = SECTION_LINE_INK.into();
+                    *fill = ink.color.clone().into();
                 }
                 out.push(tri);
                 i += 7;
             } else if f[i] == 5.0 {
-                let (outward, bn) = ends[end_no.min(1)];
+                let (outward, bn) = ends[marked.get(end_no).copied().unwrap_or(1).min(1)];
                 end_no += 1;
-                labels.push((v2(f[i + 1], f[i + 2]), tag.clone(), bn, outward));
+                labels.push((v2(f[i + 1], f[i + 2]), tag.clone(), bn, outward, ink.color.clone()));
                 i += 3;
             } else {
                 let pts = (0..4).map(|j| v2(f[i + 1 + 2 * j], f[i + 2 + 2 * j])).collect();
@@ -1158,7 +1231,7 @@ pub fn plan_section_lines(c: &Ctx, out: &mut Vec<Primitive>) {
     let cost = |&(so, sb): &(f64, f64)| so.hypot(sb) + if sb < 0.0 || so < 0.0 { 0.5 } else { 0.0 };
     steps.sort_by(|a, b| cost(a).total_cmp(&cost(b)).then(a.0.total_cmp(&b.0).reverse()).then(a.1.total_cmp(&b.1).reverse()));
     let steps = &steps;
-    for (at, tag, bn, outward) in labels {
+    for (at, tag, bn, outward, ink_color) in labels {
         let w = crate::text_layout::text_width_em(&tag, false) * h;
         let rect = |a: Vec2| -> Vec<[f64; 2]> {
             let pad = 0.1 * h;
@@ -1179,7 +1252,7 @@ pub fn plan_section_lines(c: &Ctx, out: &mut Vec<Primitive>) {
             text: tag,
             height_m: h,
             angle: 0.0,
-            color: SECTION_LINE_INK.into(),
+            color: ink_color.into(),
             marks: None,
             wrap_width: None,
             doc: None,
@@ -1401,36 +1474,108 @@ mod tests {
         assert!((ost[1][0] - 15.0).abs() < 1e-9 && ((ost[1][1] + ost[2][1]) / 2.0 - 5.0).abs() < 1e-9, "Ost bleibt in der Mitte: {ost:?}");
     }
 
-    /// [176] Schnittmarke als L: Ebenenfeld `markerStyle` bzw. Vorgabe der Modelldarstellung (`sectionMarks.style`);
-    /// Ebene > Modelldarstellung > Pfeil. L: keine dünne Linie, kein Dreieck.
+    /// Projekt mit einem Schnitt (`kind` "section") oder einer Ansicht; `lv` ergänzt Felder der Ebene, `mv` die Modelldarstellung "m".
+    fn look_project(kind: &str, lv: serde_json::Value, mv: Option<serde_json::Value>) -> Project {
+        let mut lvl = serde_json::json!({ "id": "s", "name": "Schnitt A-A", "kind": kind, "visible": true, "locked": false,
+            "linePoints": [{ "x": 0.0, "y": 0.0 }, { "x": 10.0, "y": 0.0 }] });
+        for (k, v) in lv.as_object().unwrap() {
+            lvl[k] = v.clone();
+        }
+        let mut p = Project { drawing_levels: vec![serde_json::from_value(lvl).unwrap()], ..Default::default() };
+        if let Some(m) = mv {
+            let mut o = serde_json::json!({ "id": "m", "name": "M" });
+            for (k, v) in m.as_object().unwrap() {
+                o[k] = v.clone();
+            }
+            p.model_view_options = Some(vec![serde_json::from_value(o).unwrap()]);
+        }
+        p
+    }
+
+    fn run_lines(p: &Project, mv: bool) -> Vec<Primitive> {
+        let a = super::super::domains::PlanArgs::parse(1.0, &format!(r#"{{"show": ["02", "90"], "scale": 100, "global": true{}}}"#, if mv { r#", "modelView": "m""# } else { "" })).unwrap();
+        let mut out = Vec::new();
+        plan_section_lines(&Ctx::new(p, &a), &mut out);
+        out
+    }
+
+    /// (dünne Linien, kräftige Linien, Dreiecke, Texte)
+    fn count_parts(out: &[Primitive]) -> (usize, usize, usize, usize) {
+        let thin = out.iter().filter(|q| matches!(q, Primitive::Line { dash: Some(_), .. })).count();
+        let heavy = out.iter().filter(|q| matches!(q, Primitive::Line { dash: None, weight_mm, .. } if *weight_mm > 0.4)).count();
+        let tri = out.iter().filter(|q| matches!(q, Primitive::Polygon { fill, .. } if fill != "none")).count();
+        let txt = out.iter().filter(|q| matches!(q, Primitive::DrawingText { .. })).count();
+        (thin, heavy, tri, txt)
+    }
+
+    /// [176] Schnittmarke als L: Ebenenfeld `marker`/`lineMode` bzw. Vorgabe der Modelldarstellung (`sectionMarks`); die
+    /// Ebene geht vor. L mit "ends": keine dünne Linie, kein Dreieck.
     #[test]
     fn schnittmarke_als_l_nach_ebene_und_modelldarstellung() {
-        let mk = |style: Option<&str>| -> Project {
-            let mut lv = serde_json::json!({ "id": "s", "name": "Schnitt A-A", "kind": "section", "visible": true, "locked": false,
-                "linePoints": [{ "x": 0.0, "y": 0.0 }, { "x": 10.0, "y": 0.0 }] });
-            if let Some(st) = style {
-                lv["markerStyle"] = st.into();
-            }
-            let mut p = Project { drawing_levels: vec![serde_json::from_value(lv).unwrap()], ..Default::default() };
-            p.model_view_options = Some(vec![serde_json::from_value(serde_json::json!({ "id": "m", "name": "M", "sectionMarks": { "style": "lAngle" } })).unwrap()]);
-            p
-        };
-        let run = |p: &Project, mv: bool| {
-            let a = super::super::domains::PlanArgs::parse(1.0, &format!(r#"{{"show": ["02", "90"], "scale": 100, "global": true{}}}"#, if mv { r#", "modelView": "m""# } else { "" })).unwrap();
-            let mut out = Vec::new();
-            plan_section_lines(&Ctx::new(p, &a), &mut out);
-            out
-        };
-        let is_l = |out: &[Primitive]| !out.iter().any(|q| matches!(q, Primitive::Line { dash: Some(_), .. })) && !out.iter().any(|q| matches!(q, Primitive::Polygon { fill, .. } if fill != "none"));
-        let heavy = |out: &[Primitive]| out.iter().filter(|q| matches!(q, Primitive::Line { weight_mm, .. } if *weight_mm > 0.4)).count();
-        assert!(!is_l(&run(&mk(None), false)), "Basis = Pfeil");
-        assert!(!is_l(&run(&mk(None), false)));
-        let l = run(&mk(Some("lAngle")), false);
-        assert!(is_l(&l));
-        assert_eq!(heavy(&l), 4, "je Ende zwei Schenkel");
-        assert_eq!(l.iter().filter(|q| matches!(q, Primitive::DrawingText { .. })).count(), 2);
-        assert!(is_l(&run(&mk(None), true)), "Vorgabe der Modelldarstellung");
-        assert!(!is_l(&run(&mk(Some("arrow")), true)), "Ebene geht vor");
+        let mvl = serde_json::json!({ "sectionMarks": { "lineMode": "ends", "marker": "lAngle" } });
+        let base = run_lines(&look_project("section", serde_json::json!({}), Some(mvl.clone())), false);
+        let (thin, heavy, tri, txt) = count_parts(&base);
+        assert!(thin == 1 && tri == 2 && heavy == 4 && txt == 2, "Basis = Pfeil: {:?}", count_parts(&base));
+        let l = run_lines(&look_project("section", serde_json::json!({ "lineMode": "ends", "marker": "lAngle" }), None), false);
+        assert_eq!(count_parts(&l), (0, 4, 0, 2), "je Ende zwei Schenkel");
+        let via_mv = run_lines(&look_project("section", serde_json::json!({}), Some(mvl.clone())), true);
+        assert_eq!(count_parts(&via_mv), (0, 4, 0, 2), "Vorgabe der Modelldarstellung");
+        let ebene = run_lines(&look_project("section", serde_json::json!({ "marker": "arrow", "lineMode": "full" }), Some(mvl)), true);
+        assert_eq!(count_parts(&ebene), (1, 4, 2, 2), "Ebene geht vor");
+    }
+
+    /// [276] Varianten im Grundriss: Linie keine/Enden, Dreieck, nur Anfang, ohne Beschriftung; Pick-Band bleibt immer.
+    #[test]
+    fn schnittlinie_varianten_im_grundriss() {
+        let run = |lv: serde_json::Value| run_lines(&look_project("section", lv, None), false);
+        assert_eq!(count_parts(&run(serde_json::json!({ "lineMode": "none", "marker": "triangle" }))), (0, 0, 2, 2));
+        assert_eq!(count_parts(&run(serde_json::json!({ "lineMode": "none", "marker": "none", "markerLabel": false }))), (0, 0, 0, 0));
+        assert_eq!(count_parts(&run(serde_json::json!({ "markerAt": "start" }))), (1, 3, 1, 1));
+        assert_eq!(count_parts(&run(serde_json::json!({ "markerLabel": false }))), (1, 4, 2, 0));
+        let leer = run(serde_json::json!({ "lineMode": "none", "marker": "none", "markerLabel": false }));
+        assert!(leer.iter().any(|q| matches!(q, Primitive::Polygon { section_line_id: Some(_), .. })), "Pick-Band bleibt");
+        // Nur Anfang: die Beschriftung steht am Anfang (links, x < 0), nicht am Ende.
+        let start = run(serde_json::json!({ "markerAt": "start" }));
+        let x = start.iter().find_map(|q| if let Primitive::DrawingText { at, .. } = q { Some(at.x) } else { None }).unwrap();
+        assert!(x < 3.0, "Anfang: {x}");
+        let end = run(serde_json::json!({ "markerAt": "end" }));
+        let x = end.iter().find_map(|q| if let Primitive::DrawingText { at, .. } = q { Some(at.x) } else { None }).unwrap();
+        assert!(x > 7.0, "Ende: {x}");
+    }
+
+    /// [276] Linientyp und Stift der Linie: Stift (Farbe, Stärke) und Linientyp (Muster) wirken auf die Hauptlinie.
+    #[test]
+    fn schnittlinie_linientyp_und_stift() {
+        let mut p = look_project("section", serde_json::json!({ "lineStyleId": "ls", "linePenId": "pen" }), None);
+        p.line_styles.push(serde_json::from_value(serde_json::json!({ "id": "ls", "name": "Punkt", "color": "#00ff00", "dash": [0.0, 1.0] })).unwrap());
+        p.active_pen_set_id = Some("set".into());
+        p.pen_sets = Some(vec![serde_json::from_value(serde_json::json!({ "id": "set", "name": "S", "pens": { "pen": { "color": "#ff0000", "weight": 0.35 } } })).unwrap()]);
+        let out = run_lines(&p, false);
+        let main = out.iter().find_map(|q| match q {
+            Primitive::Line { dash: Some(d), weight_mm, color, .. } => Some((d.clone(), *weight_mm, color.clone())),
+            _ => None,
+        });
+        let (d, w, col) = main.expect("Hauptlinie");
+        assert_eq!(d, Some(vec![0.0, 1.0]));
+        assert!((w - 0.35).abs() < 1e-12);
+        assert_eq!(col.as_deref(), Some("#ff0000"));
+        // Ohne Stift: Farbe des Linientyps.
+        p.drawing_levels[0].line_pen_id = None;
+        let out = run_lines(&p, false);
+        assert!(out.iter().any(|q| matches!(q, Primitive::Line { color: Some(c), dash: Some(_), .. } if &**c == "#00ff00")));
+    }
+
+    /// [276] Ansicht: Basis wie bisher (nur Dreieck + Bezeichnung, keine Linie); mit Linie, Pfeil oder ohne Zeichen.
+    #[test]
+    fn ansichtslinie_varianten() {
+        let run = |lv: serde_json::Value| run_lines(&look_project("elevation", lv, None), false);
+        assert_eq!(count_parts(&run(serde_json::json!({}))), (0, 0, 1, 1));
+        assert_eq!(count_parts(&run(serde_json::json!({ "lineMode": "full" }))), (1, 2, 1, 1));
+        assert_eq!(count_parts(&run(serde_json::json!({ "lineMode": "ends", "marker": "none" }))), (0, 2, 0, 1));
+        assert_eq!(count_parts(&run(serde_json::json!({ "marker": "arrow" }))), (0, 1, 1, 1));
+        assert_eq!(count_parts(&run(serde_json::json!({ "marker": "none", "markerLabel": false }))), (0, 0, 0, 0));
+        let mv = serde_json::json!({ "elevationMarks": { "lineMode": "full" } });
+        assert_eq!(count_parts(&run_lines(&look_project("elevation", serde_json::json!({}), Some(mv)), true)), (1, 2, 1, 1), "Vorgabe Ansichten");
     }
 
     /// [176] Geknickter Schnitt: Knickpunkte aus `bendPoints` erscheinen als kräftige Stücke im Grundriss; ohne
