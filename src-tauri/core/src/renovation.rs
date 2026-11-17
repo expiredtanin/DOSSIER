@@ -362,10 +362,10 @@ impl View {
         }
         // [271] 2D-Zeichnungen (Möbel, Symbole und Elemente mit ausdrücklichem Status) und Bäume ([149]: Status = Umbau-Status).
         for x in p.drawings2d.iter().filter(|d| drawing_takes_part(d)) {
-            put(&x.id, self.treat(x.renovation.as_ref()), &mut out);
+            put(&x.id, self.treat(x.renovation.as_ref()), out);
         }
         for t in p.trees.iter().flatten() {
-            put(&t.id, self.treat(Some(&tree_renovation(t))), &mut out);
+            put(&t.id, self.treat(Some(&tree_renovation(t))), out);
         }
         // Räume: nur sichtbar oder nicht (ein Raum ist kein Bauteil, er bekommt keine Umbau-Farbe).
         for x in p.rooms.iter().flatten() {
@@ -577,7 +577,7 @@ pub fn restyle_linework(prims: &mut Vec<Primitive>, from: usize, st: &Style, fil
     if from >= prims.len() {
         return;
     }
-    let st = Style { fill: st.fill.clone(), line: Some(st.line.clone().unwrap_or_else(|| st.fill.clone())), dashed: st.dashed };
+    let st = Style { fill: st.fill.clone(), line: Some(st.line.clone().unwrap_or_else(|| st.fill.clone())), dashed: st.dashed, ghost: st.ghost };
     let mut extra = Vec::new();
     for q in prims[from..].iter_mut() {
         restyle_with(q, &st, &mut extra, fill);
