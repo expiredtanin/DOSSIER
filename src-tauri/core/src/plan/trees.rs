@@ -130,7 +130,12 @@ pub(super) fn plan_trees(c: &Ctx, out: &mut Vec<Primitive>) {
             continue;
         }
         let greyed = Some(c.greyed(&t.category_code));
+        let from = out.len();
         out.extend(tree_symbol(t, &g, c.cat(&t.category_code), greyed));
+        // [271] Umbaufilter: der Baum in der Farbe seines Status (Bestand grau, Fällen gelb gestrichelt, Neu rot).
+        if let Some(st) = c.renovation().and_then(|r| r.styled.get(&t.id)) {
+            crate::renovation::restyle_linework(out, from, st, true);
+        }
     }
 }
 
@@ -274,7 +279,7 @@ pub fn tree_symbol(t: &Tree, g: &TreeGeom, cat: Option<&LayerCategory>, greyed: 
 /// Ebene trifft, erscheinen geschnitten: Kronen- und Stammquerschnitt mit Schnittstärke, davor liegende Teile
 /// entfallen (Mitte vor der Ebene: nur der Querschnitt als Umriss des Teils dahinter), Teile dahinter bleiben als
 /// Silhouette.
-pub fn view_trees(p: &Project, level: &LevelSpec, vis: &Visibility, fill: Option<&str>, cut: Option<bool>) -> Vec<(f64, Vec<Primitive>)> {
+pub fn view_trees(p: &Project, level: &LevelSpec, vis: &Visibility, fill: Option<&str>, cut: Option<bool>, ren: Option<&crate::renovation::Resolved>) -> Vec<(f64, Vec<Primitive>)> {
     let Some(trees) = p.trees.as_deref().filter(|t| !t.is_empty()) else { return vec![] };
     let Some(plane) = level.plane() else { return vec![] };
     let [nx, _, nz] = plane.normal;
@@ -321,6 +326,10 @@ pub fn view_trees(p: &Project, level: &LevelSpec, vis: &Visibility, fill: Option
             if let Some(c) = cc {
                 prims.push(poly(to(&c), if mono { "none" } else { VIEW_CROWN_CUT_FILL }, stroke, VIEW_CUT_MM, pick, greyed));
             }
+        }
+        // [271] Umbaufilter: Silhouette in der Linienfarbe des Status (Bestand grau, Fällen gelb gestrichelt, Neu rot).
+        if let Some(st) = ren.and_then(|r| r.styled.get(&t.id)) {
+            crate::renovation::restyle_linework(&mut prims, 0, st, false);
         }
         out.push((depth, prims));
     }
@@ -471,7 +480,7 @@ mod tests {
     fn section_polys(p: &Project, id: &str) -> Vec<(f64, Vec<Vec2>)> {
         let l = p.drawing_levels.iter().find(|l| l.id == "sc").unwrap();
         let level = LevelSpec::from_json(&serde_json::to_value(l).unwrap());
-        view_trees(p, &level, &Visibility::default(), None, Some(false))
+        view_trees(p, &level, &Visibility::default(), None, Some(false), None)
             .into_iter()
             .flat_map(|(_, ps)| ps)
             .filter_map(|q| match q {
@@ -509,7 +518,7 @@ mod tests {
         // Ansicht unverändert: ganze Silhouette, keine Schnittstärke.
         let l = p.drawing_levels.iter().find(|l| l.id == "an").unwrap();
         let level = LevelSpec::from_json(&serde_json::to_value(l).unwrap());
-        let ps = view_trees(&p, &level, &Visibility::default(), None, None);
+        let ps = view_trees(&p, &level, &Visibility::default(), None, None, None);
         assert!(ps.iter().flat_map(|(_, ps)| ps).all(|q| !matches!(q, Primitive::Polygon { stroke_width_mm, .. } if *stroke_width_mm == VIEW_CUT_MM)));
     }
 

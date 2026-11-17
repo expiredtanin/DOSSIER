@@ -476,6 +476,18 @@ Vektor-Axo (`axo_plan_buf`), 3D (`model3dParts` mit `text.renovation`, ohne Teil
 (`text` = Filter-Id), DXF (`dxf.rs::renovation_layers`) und IFC (`ifc_data.rs::renovation_props`). Neue Bauteile der Zeichenbefehle
 bekommen den Zeichen-Status über `commands::stamp_renovation` (Anfrage-Feld `renovation`, gesetzt in `projectSlice.applyCmd`).
 
+**Ersatzstücke und Zeichnungen (Nachtrag 17.11.):** Die Ersatzstücke der Öffnungen (`Resolved::patches`: Abbruch-Stück gelb gestrichelt, Ausfachung
+rot) gelten in allen drei Zeichnungen, jedes aus der Quelle, die dort die Öffnung kennt: Grundriss `walls.rs` (Wandband, `patch_ring`), Schnitt
+`section/openings.rs::section_patch_primitives` (Rechteck der geschnittenen Öffnung über `cross_section`, Bogenwände über die Sehne), Ansicht
+`elevation/mod.rs` (Viereck der Öffnung aus `collect_openings` des UNGEFILTERTEN Projekts, verdeckungsgeprüft; `elevation_primitives_ren` bekommt
+`orig`). Die zugemauerte Öffnung fehlt im gefilterten Projekt, darum rechnen Schnitt und Ansicht die Stücke aus dem Projekt mit allem. Projektionslinien
+des Schnitts: `Output::edge_ids` (Besitzer-Id je Kante) → `CutRules::edge` (Linienfarbe, Strichmuster). Öffnungen der Ansicht: `restyle_with` auf ihre
+Linien (Flächen behalten die Füllung). **2D-Elemente** (`Drawing2D.renovation`) nehmen teil, wenn sie ein Möbel/Symbol (`libobj`, `block`; ohne Angabe
+Bestand) sind oder ausdrücklich einen Status tragen (`drawing_takes_part`; Masse, Texte, Raster ohne Angabe nie — sonst wären sie im Umbauplan grau);
+Farbe im Strichwerk über `drawings::emit` (Linienfarbe, sonst Füllfarbe; Abbruch gestrichelt). **Bäume:** der Bestand des Baums (`Tree.status`,
+[149]: bestehend/neu/zu fällen) IST der Umbau-Status (`tree_renovation`: bestehend = Bestand, zu fällen = Abbruch, neu = Neu) — ein Feld, keine
+zweite Wahrheit; der Baum trägt kein eigenes `renovation` und keine Etappe.
+
 
 ### 3.9 Varianten ([272])
 

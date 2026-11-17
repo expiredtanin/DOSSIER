@@ -306,6 +306,8 @@ pub struct CutRules {
     /// [256] Vorgabe-Stil der Klasse je importiertem Netz (`Output::meshes`-Index): Füllung, Umrissfarbe, -stärke
     /// (`style::class_cut_style`, z. B. Nachbargebäude hellgrau statt schwarz).
     pub class: HashMap<usize, (String, String, f64)>,
+    /// [271] Umbau-Farbe der Projektionslinien je Besitzer (`Output::edge_ids`): Linienfarbe bzw. Strichmuster des Status.
+    pub edge: HashMap<(Kind, usize), crate::renovation::Style>,
 }
 
 impl CutRules {
@@ -313,6 +315,14 @@ impl CutRules {
     /// Abbruch. Geht den Regeln vor (der Umbaufilter ist die Aussage des Plans).
     pub fn with_renovation(mut self, out: &Output, r: Option<&crate::renovation::Resolved>) -> CutRules {
         let Some(r) = r.filter(|r| !r.styled.is_empty()) else { return self };
+        // Projektionslinien: Besitzer mit Umbau-Farbe (nur Linienfarbe und Strichmuster, die Fläche gibt es nicht).
+        for (k, id) in &out.edge_ids {
+            if let Some(st) = r.styled.get(id) {
+                if st.line.is_some() || st.dashed {
+                    self.edge.insert(*k, st.clone());
+                }
+            }
+        }
         if out.cuts.iter().all(|c| c.source_id.as_ref().is_none_or(|s| !r.styled.contains_key(s))) {
             return self;
         }
@@ -351,7 +361,7 @@ impl CutRules {
             mesh = rules.into_iter().enumerate().filter_map(|(i, r)| r.filter(|r| r.0.any()).map(|r| (i, MeshLineStyle { color: r.0.color.clone(), weight: r.0.lineweight.filter(|w| w.is_finite() && *w >= 0.0), dash: super::overrides::linetype_dash(p, r.0.linetype_id.as_deref()) }))).collect();
         }
         let class = out.meshes.iter().enumerate().filter_map(|(i, m)| m.category.as_deref().and_then(|k| super::style::class_cut_style(p, k)).map(|s| (i, s))).collect();
-        CutRules { loose: loose_fill_components(p), ov, terrain, terrain_dash, terrain_hatch, mesh, class }
+        CutRules { loose: loose_fill_components(p), ov, terrain, terrain_dash, terrain_hatch, mesh, class, edge: HashMap::new() }
     }
 }
 
@@ -551,6 +561,8 @@ pub struct Output {
     pub mesh_lines: Vec<(usize, Vec<[f64; 2]>)>,
     /// [180] Klasse der Bauteile hinter den Projektionskanten (`Edge::kind`, `Edge::index`; Netze über `meshes`).
     pub edge_cats: HashMap<(Kind, usize), String>,
+    /// [271] Element-Id der Bauteile hinter den Projektionskanten (wie `edge_cats`): Umbau-Farbe der Projektionslinien.
+    pub edge_ids: HashMap<(Kind, usize), String>,
     /// [208] ±0.00 und „Gelände"-Klasse ausgeblendet? (Bodenlinie ohne Geländenetz, `elevation::ground_ref`); Standard: 0 / nein.
     pub ground: (f64, bool),
 }
@@ -578,6 +590,32 @@ pub(crate) fn edge_categories(p: &Project, walls: &[Option<&Wall>], slabs: &[ban
     }
     for (i, b) in p.extruded_solids.as_deref().unwrap_or(&[]).iter().enumerate() {
         m.insert((Kind::Body, i), b.category_code.clone());
+    }
+    m
+}
+
+/// [271] Element-Ids der Projektions-Besitzer (Schlüssel wie [`edge_categories`]): Wände, Decken, Treppen, Stützen, Dächer, Körper.
+pub(crate) fn edge_ids(p: &Project, walls: &[Option<&Wall>], slabs: &[bands::SlabOwner]) -> HashMap<(Kind, usize), String> {
+    let mut m = HashMap::new();
+    for (i, w) in walls.iter().enumerate() {
+        if let Some(w) = w {
+            m.insert((Kind::Wall, i), w.id.clone());
+        }
+    }
+    for (i, s) in slabs.iter().enumerate() {
+        let id = match s {
+            bands::SlabOwner::Ceiling(c, _) => &c.id,
+            bands::SlabOwner::Stair(st) => &st.id,
+            bands::SlabOwner::Column(c) => &c.id,
+            bands::SlabOwner::None => continue,
+        };
+        m.insert((Kind::Slab, i), id.clone());
+    }
+    for (i, r) in p.roofs.as_deref().unwrap_or(&[]).iter().enumerate() {
+        m.insert((Kind::Roof, i), r.id.clone());
+    }
+    for (i, b) in p.extruded_solids.as_deref().unwrap_or(&[]).iter().enumerate() {
+        m.insert((Kind::Body, i), b.id.clone());
     }
     m
 }
@@ -654,6 +692,7 @@ pub(super) fn compute_plane(p: &Project, level: &LevelSpec, bodies: &[BodyMesh],
     let walls: Vec<Option<&Wall>> = owners.iter().zip(&virt).map(|(o, v)| v.as_ref().or(*o)).collect();
     let slabs = slab_owners(p, &slabs_r);
     let edge_cats = edge_categories(p, &walls, &slabs);
+    let edge_ids = edge_ids(p, &walls, &slabs);
     // [180] Ausgeblendete Klassen vor der Dominanz und der Verdeckung entfernen (nicht erst beim Zeichnen).
     let shown = |c: &str| vis.visible(c) && vis.render(c);
     let skip = |k: Kind, i: usize| edge_cats.get(&(k, i)).is_some_and(|c| !shown(c));
@@ -687,7 +726,7 @@ pub(super) fn compute_plane(p: &Project, level: &LevelSpec, bodies: &[BodyMesh],
     let (mut visible, hidden) = projection_edges(p, &plane, &walls_r, &wi, &slabs_r, &bodies, &meshes, &cuts, level.hidden_lines, level.depth, strip.map_or(&[][..], |s| &s.half[..]), &skip);
     shaped_projection(&mut visible, p, &walls_r, &plane);
     let meshes = meshes.iter().map(|m| MeshMeta { id: m.mesh.id.clone(), name: m.mesh.name.clone(), category: Some(m.mesh.category_code.clone()) }).collect();
-    let mut out = Output { cuts, visible, hidden, profiles: Vec::new(), earth: Vec::new(), shoring: Vec::new(), terrain_id: None, meshes, mesh_lines, edge_cats, ground: super::elevation::ground_ref(p, &|c| vis.visible(c) && vis.render(c)) };
+    let mut out = Output { cuts, visible, hidden, profiles: Vec::new(), earth: Vec::new(), shoring: Vec::new(), terrain_id: None, meshes, mesh_lines, edge_cats, edge_ids, ground: super::elevation::ground_ref(p, &|c| vis.visible(c) && vis.render(c)) };
     append_terrain_profiles(&mut out, p, base, u);
     clip_context_meshes_to_terrain(&mut out);
     if let Some(s) = strip {

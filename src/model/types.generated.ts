@@ -1053,6 +1053,10 @@ export type Drawing2D = {
    */
   hatchSource?: AttributeSource;
   /**
+   * [271] Umbau: Status (Bestand, Abbruch, Neu) und Etappe — auch für Objekte der Bibliothek (Möbel). Fehlt ⇒ Bestand.
+   */
+  renovation?: Renovation;
+  /**
    * [272] Variante, zu der das Element gehört (`Project.designOptionSets`). Fehlt ⇒ Hauptmodell (immer sichtbar).
    */
   designOption?: DesignOptionRef;

@@ -67,11 +67,26 @@ pub fn stamp_renovation(mut ops: Vec<Op>, ren: Option<&Value>) -> Vec<Op> {
     };
     for op in ops.iter_mut() {
         if let Op::Add { collection, items, .. } = op {
-            if !RENOVATION_COLLECTIONS.contains(&collection.as_str()) {
+            let coll = collection.as_str();
+            // [271] Bäume: ihr Bestand ([149], `status`) ist der Umbau-Status (Neu = neu, Abbruch = zu fällen).
+            if coll == "trees" {
+                let tree_status = if r.get("status").and_then(Value::as_str) == Some("demolish") { "remove" } else { "new" };
+                for it in items.iter_mut().filter_map(Value::as_object_mut) {
+                    if it.get("status").and_then(Value::as_str).is_none_or(|s| s == "existing") {
+                        it.insert("status".into(), Value::String(tree_status.into()));
+                    }
+                }
+                continue;
+            }
+            if !RENOVATION_COLLECTIONS.contains(&coll) && coll != "drawings2d" {
                 continue;
             }
             for it in items.iter_mut() {
                 if let Some(o) = it.as_object_mut() {
+                    // [271] 2D-Elemente: Möbel/Symbole und Linienwerk; Masse, Texte, Koten, Raster u. ä. sind keine Bauteile.
+                    if coll == "drawings2d" && !o.get("geom").and_then(|g| g.get("shape")).and_then(Value::as_str).is_some_and(|s| STAMPED_SHAPES.contains(&s)) {
+                        continue;
+                    }
                     o.entry("renovation").or_insert_with(|| r.clone());
                 }
             }
@@ -79,6 +94,9 @@ pub fn stamp_renovation(mut ops: Vec<Op>, ren: Option<&Value>) -> Vec<Op> {
     }
     ops
 }
+
+/// [271] 2D-Formen, die den Zeichen-Status tragen (Linienwerk, Möbel und Symbole).
+const STAMPED_SHAPES: [&str; 9] = ["line", "polyline", "rect", "circle", "arc", "ellipse", "libobj", "block", "bezier"];
 
 /// Wie [`ops`], mit Hinweis-Schlüssel (i18n) für die Hülle; bisher nur Verschieben ([144]: Öffnung an
 /// der Nachbaröffnung angehalten).

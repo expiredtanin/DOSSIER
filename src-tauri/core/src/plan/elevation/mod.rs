@@ -71,6 +71,8 @@ const IMPORTED_RGB: [f64; 3] = [159.0 / 255.0, 166.0 / 255.0, 174.0 / 255.0];
 /// [115] Freie Körper: Farbe wie im 3D (`EXTRUSION_RGB` in `toWalls3d/extrusions.ts`).
 const BODY_RGB: [f64; 3] = [0.85, 0.55, 0.25];
 const EPS: f64 = 1e-6;
+/// [271] Tiefe (m) vor der Öffnungsmitte, in der ein Ersatzstück auf Verdeckung geprüft wird (die Fassade davor zählt nicht).
+const PATCH_DEPTH_SLACK: f64 = 0.5;
 const HIDDEN_INK: &str = "#8a929c";
 const HIDDEN_MM: f64 = 0.13;
 const HIDDEN_DASH: [f64; 2] = super::line_pattern::HIDDEN;
@@ -205,12 +207,13 @@ pub fn elevation_primitives(p: &Project, level: &LevelSpec, shadows: bool, mono:
 /// `None` = Schalter im Projekt). [33] Regeln wirken auf Flächen (Füllung, Schraffur, ausblenden), Kanten
 /// (Farbe, Stärke, Umriss aus) und Öffnungen (Linien, Glasfüllung).
 pub fn elevation_primitives_with(p: &Project, level: &LevelSpec, shadows: bool, mono: bool, vis: &Visibility, scale: f64, rules: Option<&HashSet<String>>) -> Result<Option<(Vec<Primitive>, [f64; 4])>, String> {
-    elevation_primitives_ren(p, level, shadows, mono, vis, scale, rules, None)
+    elevation_primitives_ren(p, level, shadows, mono, vis, scale, rules, None, p)
 }
 
-/// [271] Wie [`elevation_primitives_with`] mit den Umbau-Farben `ren` (das Ausgeblendete fehlt schon in `p`).
+/// [271] Wie [`elevation_primitives_with`] mit den Umbau-Farben `ren` (das Ausgeblendete fehlt schon in `p`; `orig` ist das
+/// Projekt mit allem, Quelle der Ersatzstücke zugemauerter Öffnungen).
 #[allow(clippy::too_many_arguments)]
-pub fn elevation_primitives_ren(p: &Project, level: &LevelSpec, shadows: bool, mono: bool, vis: &Visibility, scale: f64, rules: Option<&HashSet<String>>, ren: Option<&crate::renovation::Resolved>) -> Result<Option<(Vec<Primitive>, [f64; 4])>, String> {
+pub fn elevation_primitives_ren(p: &Project, level: &LevelSpec, shadows: bool, mono: bool, vis: &Visibility, scale: f64, rules: Option<&HashSet<String>>, ren: Option<&crate::renovation::Resolved>, orig: &Project) -> Result<Option<(Vec<Primitive>, [f64; 4])>, String> {
     let Some(plane) = level.plane() else { return Ok(None) };
     let frame = frame_of(&plane);
     let mut walls = model3d::emit_walls_with(p, false, false)?;
@@ -416,6 +419,22 @@ pub fn elevation_primitives_ren(p: &Project, level: &LevelSpec, shadows: bool, m
             _ => op.depth <= d + 1e-6,
         });
     }
+    // [271] Umbau: Ersatzstücke der Öffnungen in Bestandswänden (Abbruch-Stück bzw. Ausfachung) auf der Fassade. Sie stehen im
+    // Projekt MIT den Öffnungen (`orig`: die zugemauerte fehlt in `p`), gelten für sichtbare Klassen und Wände.
+    let patch_ops: Vec<(ProjOpening, &crate::renovation::Patch)> = match ren.filter(|r| !r.patches.is_empty()) {
+        Some(r) => {
+            let shown = |c: &str| vis.visible(c) && vis.render(c);
+            collect_openings(orig, &frame, win)
+                .into_iter()
+                .filter_map(|op| r.patches.iter().find(|pa| pa.opening_id == op.id).map(|pa| (op, pa)))
+                .filter(|(op, pa)| {
+                    let cat_ok = orig.openings.iter().flatten().find(|o| o.id == op.id).is_none_or(|o| shown(&o.category_code)) && wall_cat.get(pa.wall_id.as_str()).is_none_or(|c| shown(c));
+                    cat_ok && !hidden_walls.contains(&pa.wall_id) && !far.as_ref().is_some_and(|(_, dropped)| dropped.contains(&(Role::Wall, pa.wall_id.clone())))
+                })
+                .collect()
+        }
+        None => Vec::new(),
+    };
     let mut occ = vec![(faces.len() + openings.len()) as f64];
     for f in &faces {
         occ.extend([f.depth_max, f.pts.len() as f64]);
@@ -495,7 +514,7 @@ pub fn elevation_primitives_ren(p: &Project, level: &LevelSpec, shadows: bool, m
         }
     }
     // [149] Bäume: Silhouette (Krone gefüllt, Stamm) in der Maler-Reihenfolge; Bauteile davor verdecken sie.
-    for (depth, tree) in super::trees::view_trees(p, level, vis, Some(super::trees::view_crown_fill(mono)), None) {
+    for (depth, tree) in super::trees::view_trees(p, level, vis, Some(super::trees::view_crown_fill(mono)), None, ren) {
         for prim in tree {
             if let Primitive::Polygon { pts, .. } = &prim {
                 for q in pts {
@@ -690,9 +709,18 @@ pub fn elevation_primitives_ren(p: &Project, level: &LevelSpec, shadows: bool, m
                 seq += 1;
             }
         }
-        let mut push = |prim: Primitive| {
-            items.push(Item { depth: d, seq, rank: None, prim });
-            seq += 1;
+        // [271] Umbaufilter: Linien der Öffnung in der Linienfarbe des Status (neu rot), bei Abbruch gestrichelt; Flächen
+        // (Rahmen, Glas, Blatt) behalten ihre Füllung.
+        let ostyle = ren.and_then(|r| r.styled.get(&op.id));
+        let mut push = |mut prim: Primitive| {
+            let mut extra = Vec::new();
+            if let Some(st) = ostyle {
+                crate::renovation::restyle_with(&mut prim, st, &mut extra, false);
+            }
+            for q in std::iter::once(prim).chain(extra) {
+                items.push(Item { depth: d, seq, rank: None, prim: q });
+                seq += 1;
+            }
         };
         // [33] Regeln der Öffnung: Linienfarbe/-stärke, Füllung für Glas und Türblatt.
         let ov = if op_rules { opening_override(p, rv, &op.id) } else { None };
@@ -751,6 +779,35 @@ pub fn elevation_primitives_ren(p: &Project, level: &LevelSpec, shadows: bool, m
                 *dash = Some(Some(vec![2.2, 1.8]));
             }
             push(l);
+        }
+    }
+
+    // [271] Ersatzstücke: nicht verdeckte (Mitte sichtbar), auf der Wand — mit offener Öffnung unter deren Rahmen, bei
+    // geschlossener Wand (Öffnung im Filter ausgeblendet) knapp vor der Fassade.
+    if !patch_ops.is_empty() {
+        let mut b = vec![patch_ops.len() as f64];
+        for (op, _) in &patch_ops {
+            let q = &op.pts;
+            b.extend([(q[0][0] + q[1][0] + q[2][0] + q[3][0]) / 4.0, (q[0][1] + q[1][1] + q[2][1] + q[3][1]) / 4.0, op.depth - PATCH_DEPTH_SLACK]);
+        }
+        let hidden_pt = crate::plan::elevation_geom::occluded_points(&occ, &b);
+        for (k, (op, pa)) in patch_ops.iter().enumerate() {
+            if hidden_pt.get(1 + k) == Some(&1.0) || op.pts.iter().any(|q| !q[0].is_finite() || !q[1].is_finite()) {
+                continue;
+            }
+            let ring: Vec<Vec2> = op.pts.iter().map(|q| v2(q[0], q[1])).collect();
+            for q in &ring {
+                acc.add(q.x, q.y);
+            }
+            // Fläche unter dem Fenster (offene Öffnung) bzw. vor der Fassade (geschlossene Wand); der gestrichelte Umriss
+            // des Abbruch-Stücks liegt über dem Fenster, sonst verdeckte dessen Rahmen die Aussage.
+            let depth = if pa.closed { op.depth - PATCH_DEPTH_SLACK * 0.6 } else { op.depth - EPS * 50.0 };
+            let outline_depth = if pa.closed { depth } else { op.depth - EPS * 200.0 };
+            for prim in crate::renovation::patch_prims(ring, &pa.style, EDGE_MM, &op.id) {
+                let depth = if matches!(prim, Primitive::Polygon { .. }) { depth } else { outline_depth };
+                items.push(Item { depth, seq, rank: None, prim });
+                seq += 1;
+            }
         }
     }
 
@@ -970,8 +1027,9 @@ pub fn elevation_plan_buf(p: &Project, args: &[f64], text: &str) -> Result<Vec<u
     // [271] Umbaufilter (angefragt, sonst der der Ebene): Ausgeblendetes fehlt (verdeckt nichts), Farben auf die Flächen.
     let ren = super::section::query::renovation_view(p, &v, &level).map(|r| r.resolve(p)).filter(|r| !r.is_empty());
     let filtered = ren.as_ref().filter(|r| !r.hidden.is_empty()).map(|r| crate::renovation::without_hidden(p, &r.hidden));
+    let orig = p;
     let p = filtered.as_ref().unwrap_or(p);
-    if let Some((mut prims, bounds)) = elevation_primitives_ren(p, &level, shadows, mono, &vis, scale, on.as_ref(), ren.as_ref())? {
+    if let Some((mut prims, bounds)) = elevation_primitives_ren(p, &level, shadows, mono, &vis, scale, on.as_ref(), ren.as_ref(), orig)? {
         super::extras::scale_line_weights(p, scale, &mut prims);
         w.group(&prims);
         // Achsraster ([112]): Achsen quer zur Blickebene.

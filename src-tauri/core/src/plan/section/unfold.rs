@@ -235,6 +235,7 @@ pub(super) fn merge_output(acc: &mut Option<Output>, o: Output) {
     a.shoring.extend(o.shoring);
     a.mesh_lines.extend(o.mesh_lines);
     a.edge_cats.extend(o.edge_cats);
+    a.edge_ids.extend(o.edge_ids);
     if a.terrain_id.is_none() {
         a.terrain_id = o.terrain_id;
     }
