@@ -715,13 +715,13 @@ pub fn axo_plan_buf(p: &Project, args: &[f64], text: &str) -> Result<Vec<u8>, St
     let ren = crate::renovation::View::with(p, v.get("renovation").and_then(|x| x.as_str()), v.get("renovationPhase").and_then(|x| x.as_str()), &[], &opts);
     // [272] Bearbeitungsvariante der Bildschirm-Ansicht (`designOptionEdit`).
     let ren = crate::renovation::View::editing(ren, p, crate::design_options::parse_edit(p, v.get("designOptionEdit"))).map(|r| r.resolve(p));
-    let filtered = ren.as_ref().filter(|r| !r.hidden.is_empty()).map(|r| crate::renovation::without_hidden(p, &r.hidden));
+    let filtered = ren.as_ref().and_then(|r| r.project(p));
     let p = filtered.as_ref().unwrap_or(p);
     let Some(a) = AxoArgs::parse(p, &v) else { return Ok(w.finish()) };
     if let Some((mut prims, bounds)) = axo_primitives(p, &a, mono)? {
-        if let Some(r) = ren.as_ref().filter(|r| !r.styled.is_empty()) {
+        if let Some(r) = ren.as_ref().filter(|r| !r.styled.is_empty() || !r.faces.is_empty()) {
             for q in prims.iter_mut() {
-                let Some(st) = crate::renovation::prim_element(q).and_then(|id| r.styled.get(id)) else { continue };
+                let Some(st) = crate::renovation::prim_element(q).and_then(|id| r.surface(id)) else { continue };
                 if let Primitive::Polygon { fill, stroke, .. } = q {
                     *fill = st.fill.clone();
                     *stroke = st.fill.clone();

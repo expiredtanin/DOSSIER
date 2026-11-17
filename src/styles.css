@@ -10266,3 +10266,117 @@ body {
 .sb-toggle.sb-design-editing .material-symbols-outlined {
   font-size: 14px;
 }
+
+/* [274] Sanierung je Schicht: Streifen Alt/Neu/Ergebnis, Typ-Paare und Typ-Paar-Editor im Umbau-Panel. */
+.reno-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 10px;
+  color: var(--ink-2);
+}
+.reno-strip-row {
+  display: grid;
+  grid-template-columns: 48px auto 1fr;
+  align-items: center;
+  gap: 6px;
+}
+.reno-strip-label {
+  font-size: 10px;
+}
+.reno-strip-bar {
+  display: inline-flex;
+  height: 10px;
+}
+.reno-strip-piece {
+  display: inline-block;
+  height: 10px;
+  box-sizing: border-box;
+  border: 1px solid rgba(0, 0, 0, 0.5);
+  border-right-width: 0;
+}
+.reno-strip-piece:last-child {
+  border-right-width: 1px;
+}
+.reno-strip-cm {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+.reno-strip-field {
+  display: block;
+}
+.reno-pair {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 4px 0;
+  border-top: 1px solid var(--line, rgba(0, 0, 0, 0.08));
+}
+.reno-pair-title {
+  display: flex;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.reno-pair-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px;
+  border-radius: 4px;
+  background: var(--panel-2, rgba(0, 0, 0, 0.03));
+}
+.reno-pair-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+.reno-pair-col {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.reno-pair-layer {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 4px;
+  font-size: 11px;
+}
+.reno-pair-layer .reno-swatch {
+  width: 10px;
+  height: 10px;
+}
+.reno-pair-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.reno-pair-cm {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.reno-pair-layer select {
+  grid-column: 2 / 4;
+  font-size: 11px;
+  min-width: 0;
+}
+.reno-fate.is-demolish {
+  box-shadow: inset 3px 0 0 #ffd800;
+}
+.reno-fate.is-new {
+  box-shadow: inset 3px 0 0 #e3001b;
+}
+.reno-fate.is-kept {
+  box-shadow: inset 3px 0 0 #a6a6a6;
+}
+.reno-create {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+.reno-create select {
+  min-width: 0;
+  flex: 1 1 auto;
+}

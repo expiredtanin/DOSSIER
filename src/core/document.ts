@@ -184,6 +184,8 @@ export type QueryName =
   | "kennzahlen"
   | "areaTable"
   | "renovationFilters"
+  | "renovationPair"
+  | "renovationPairs"
   | "designOptionInfo"
   | "designOptionCompare"
   | "costEstimate"

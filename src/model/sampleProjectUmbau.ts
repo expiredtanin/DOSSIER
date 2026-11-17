@@ -8,9 +8,12 @@
 // Möbel (Objekte der Bibliothek) und Bäume tragen den Umbau-Status ebenfalls: ein Sofa bleibt (Bestand), ein Tisch wird
 // entfernt (Abbruch, Etappe 1), ein neues Sofa kommt in den Anbau (Etappe 2); ein Baum wird gefällt (Bäume: `status` = Umbau-Status),
 // ein neuer wird gepflanzt.
+// [274] Sanierung je Schicht: die Südwand W1 ist eine Aussenwand „Beton 20 + Dämmung 10 + Aussenputz“ (Bestandstyp
+// „aw-bestand“) mit dem Sanierungstyp „aw-saniert“ (Beton bleibt, Dämmung und Putz werden abgebrochen, neue Dämmung 20 +
+// neuer Putz), saniert in Etappe 1: Kern bleibt an seiner Stelle, die Fassade rückt 10 cm nach aussen.
 // Nur Modellfelder, keine Kern-Befehle: das Modul ist ohne geladenen Kern auswertbar.
 
-import type { Ceiling, Drawing2D, DrawingLevel, Opening, Project, Renovation, Room, Tree, Wall } from "./types";
+import type { Ceiling, Drawing2D, DrawingLevel, Opening, Project, Renovation, Room, Tree, Wall, WallType } from "./types";
 import { sampleProject } from "./sampleProject";
 
 const E1: Renovation = { status: "new", phase: "etappe-1" };
@@ -46,8 +49,35 @@ export function buildUmbauSampleProject(): Project {
     { id: "schnitt-b", name: "Schnitt B", kind: "section", visible: true, locked: false, linePoints: [{ x: 1.4, y: -1 }, { x: 1.4, y: 8 }], directionSign: -1 },
     // Ansicht West (Blick nach Osten): das neue Fenster O3 in der Bestandswand W4 mit seinem Abbruch-Stück, der Anbau dahinter.
     { id: "ansicht-west", name: "Ansicht West", kind: "elevation", visible: true, locked: false, linePoints: [{ x: -2, y: 8 }, { x: -2, y: -1 }], directionSign: 1 },
+    // [274] Schnitt durch die sanierte Südwand W1 (zwischen Tür und Fenster) und den Anbau.
+    { id: "schnitt-c", name: "Schnitt C", kind: "section", visible: true, locked: false, linePoints: [{ x: 2, y: -1 }, { x: 2, y: 8 }], directionSign: -1 },
   ];
-  const walls: Wall[] = base.walls.map((w) => (w.id === "W9" ? { ...w, renovation: D1 } : w));
+  const walls: Wall[] = base.walls.map((w) =>
+    w.id === "W9" ? { ...w, renovation: D1 } : w.id === "W1" ? { ...w, wallTypeId: "aw-bestand", renovation: { status: "existing", phase: "etappe-1", renovated: true } } : w,
+  );
+  // [274] Typ-Paar Bestand → Sanierung (aussen → innen).
+  const wallTypes: WallType[] = [
+    ...base.wallTypes,
+    {
+      id: "aw-bestand",
+      name: "Aussenwand Beton 20 + Dämmung 10 (Bestand)",
+      layers: [
+        { componentId: "render-ext", thickness: 0.02 },
+        { componentId: "insulation", thickness: 0.1 },
+        { componentId: "concrete", thickness: 0.2 },
+      ],
+      renovationTarget: "aw-saniert",
+    },
+    {
+      id: "aw-saniert",
+      name: "Aussenwand Beton 20 + Dämmung 20 (saniert)",
+      layers: [
+        { componentId: "render-ext", thickness: 0.02 },
+        { componentId: "insulation", thickness: 0.2 },
+        { componentId: "concrete", thickness: 0.2 },
+      ],
+    },
+  ];
   walls.push(wall("W10", 0, 4, 0, 7), wall("W11", 0, 7, 3, 7), wall("W12", 3, 7, 3, 4));
   const openings: Opening[] = (base.openings ?? []).map((o) => (o.id === "O2" ? { ...o, renovation: D1 } : o));
   openings.push(
@@ -86,6 +116,7 @@ export function buildUmbauSampleProject(): Project {
     id: "beispiel-umbau",
     name: "Beispiel Umbau",
     drawingLevels: levels,
+    wallTypes,
     walls,
     openings,
     ceilings,

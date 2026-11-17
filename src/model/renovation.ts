@@ -3,8 +3,8 @@
 
 import type { CoreOp } from "../core/ops";
 import { documentFor } from "../core/document";
-import { patchItems, setField } from "../core/opsBuild";
-import type { Project, Renovation, RenovationPhase, RenovationShow, RenovationStatus, Tree, TreeStatus } from "./types";
+import { addItems, patchItem, patchItems, setField } from "../core/opsBuild";
+import type { LayerRenovation, Project, Renovation, RenovationPhase, RenovationShow, RenovationSide, RenovationStatus, Tree, TreeStatus, WallType } from "./types";
 
 /** Eingebaute Umbaufilter (Ids; Namen über `t("renovation.filter.<id>")`). */
 export const BUILTIN_RENOVATION_FILTERS = ["bestand", "abbruch", "neubau", "umbauplan", "endzustand"] as const;
@@ -76,7 +76,7 @@ export function setRenovationOps(project: Project, ids: Iterable<string>, status
         const old = (e as { renovation?: Renovation }).renovation;
         const st = status ?? renovationStatus(old);
         const ph = phase === undefined ? old?.phase : phase ?? undefined;
-        const next = renovationForNew(st, ph);
+        const next = keepRenovated(renovationForNew(st, ph), old);
         const { renovation: _drop, ...rest } = e as { renovation?: Renovation } & Record<string, unknown>;
         void _drop;
         return (next ? { ...rest, renovation: next } : rest) as unknown as typeof e;
@@ -86,6 +86,15 @@ export function setRenovationOps(project: Project, ids: Iterable<string>, status
   // Bäume: der Status ist ihr Bestand (Etappen kennen sie nicht).
   if (status) ops.push(...patchItems(project, "trees", set, (t) => ({ ...t, status: TREE_STATUS_OF[status] })));
   return ops;
+}
+
+/** [274] Sanierung (`renovated`, `newTypeId`) beim Setzen von Status/Etappe behalten. */
+function keepRenovated(next: Renovation | undefined, old: Renovation | undefined): Renovation | undefined {
+  if (!old?.renovated && !old?.newTypeId) return next;
+  const r: Renovation = { ...(next ?? { status: "existing" }) };
+  if (old.renovated) r.renovated = true;
+  if (old.newTypeId) r.newTypeId = old.newTypeId;
+  return r;
 }
 
 /** Element-Ids der Auswahl, die einen Umbau-Status tragen können. */
@@ -141,7 +150,7 @@ export function setPhasesOps(project: Project, phases: readonly RenovationPhase[
         },
         (e) => {
           const r = (e as { renovation?: Renovation }).renovation!;
-          const next = renovationForNew(renovationStatus(r), null);
+          const next = keepRenovated(renovationForNew(renovationStatus(r), null), r);
           const { renovation: _drop, ...rest } = e as { renovation?: Renovation } & Record<string, unknown>;
           void _drop;
           return (next ? { ...rest, renovation: next } : rest) as unknown as typeof e;
@@ -249,4 +258,153 @@ export function phaseUsage(project: Project, phaseId: string): number {
     for (const e of (project[c] ?? []) as { renovation?: Renovation }[]) if (e.renovation?.phase === phaseId) n++;
   }
   return n;
+}
+
+// ── [274] Sanierung je Schicht: Typ-Paar Bestand → Sanierungstyp (Regeln im Kern `renovation::build_up`) ────────────
+
+/** Neuer Aufbau einer Wand: keiner, der Sanierungstyp ihres Wandtyps oder ein anderer Wandtyp (Ausnahme). */
+export type RenovationBuildUp = { kind: "none" } | { kind: "type" } | { kind: "other"; typeId: string };
+
+/** Neuer Aufbau einer Wand aus ihren Umbau-Angaben. */
+export function wallBuildUp(r: Renovation | undefined | null): RenovationBuildUp {
+  if (r?.newTypeId) return { kind: "other", typeId: r.newTypeId };
+  return r?.renovated ? { kind: "type" } : { kind: "none" };
+}
+
+/** Schlüssel eines Aufbaus für Auswahllisten (`""` keiner, `"type"` wie Typ, sonst die Typ-Id mit Präfix). */
+export function buildUpKey(b: RenovationBuildUp): string {
+  return b.kind === "none" ? "" : b.kind === "type" ? "type" : `t:${b.typeId}`;
+}
+
+/** Gegenstück zu {@link buildUpKey}. */
+export function parseBuildUpKey(k: string): RenovationBuildUp {
+  if (k === "type") return { kind: "type" };
+  if (k.startsWith("t:") && k.length > 2) return { kind: "other", typeId: k.slice(2) };
+  return { kind: "none" };
+}
+
+function withBuildUp(r: Renovation | undefined, b: RenovationBuildUp): Renovation | undefined {
+  const base: Renovation = { ...(r ?? { status: "existing" }) };
+  delete base.renovated;
+  delete base.newTypeId;
+  if (b.kind === "type") base.renovated = true;
+  if (b.kind === "other") {
+    base.renovated = true;
+    base.newTypeId = b.typeId;
+  }
+  const plain = base.status === "existing" && !base.phase && !base.renovated;
+  return plain ? undefined : base;
+}
+
+/** Ops: neuer Aufbau für die Wände `ids` (ein Undo-Schritt); Status/Etappe bleiben. */
+export function setBuildUpOps(project: Project, ids: Iterable<string>, b: RenovationBuildUp): CoreOp[] {
+  const set = new Set(ids);
+  return patchItems(project, "walls", set, (w) => {
+    const next = withBuildUp(w.renovation, b);
+    const { renovation: _drop, ...rest } = w;
+    void _drop;
+    return next ? { ...rest, renovation: next } : rest;
+  });
+}
+
+/** Gemeinsamer Aufbau-Schlüssel ({@link buildUpKey}) der Wände `ids`: `"mixed"` bei verschiedenen, `null` ohne Wände. */
+export function commonBuildUp(project: Project, ids: Iterable<string>): string | null {
+  const set = new Set(ids);
+  let out: string | null = null;
+  for (const w of project.walls) {
+    if (!set.has(w.id)) continue;
+    const k = buildUpKey(wallBuildUp(w.renovation));
+    if (out === null) out = k;
+    else if (out !== k) return "mixed";
+  }
+  return out;
+}
+
+/** Ops: alle Wände des Bestandstyps `typeId` sanieren (Sanierungstyp des Typs; ein Undo-Schritt). */
+export function renovateAllOfTypeOps(project: Project, typeId: string): CoreOp[] {
+  const ids = project.walls.filter((w) => w.wallTypeId === typeId && renovationStatus(w.renovation) === "existing").map((w) => w.id);
+  return setBuildUpOps(project, ids, { kind: "type" });
+}
+
+/** Nächste freie Wandtyp-Id mit Präfix. */
+function freeTypeId(project: Project, base: string): string {
+  const used = new Set(project.wallTypes.map((t) => t.id));
+  let i = 1;
+  while (used.has(`${base}-${i}`)) i++;
+  return `${base}-${i}`;
+}
+
+/**
+ * Ops: „Sanierungstyp anlegen …“ — Kopie des Bestandstyps `typeId` als neuer Wandtyp `name` (zum Anpassen der Schichten)
+ * und als Sanierungstyp des Bestandstyps eingetragen. Liefert die Ops und die neue Id.
+ */
+export function createRenovationTypeOps(project: Project, typeId: string, name: string): { ops: CoreOp[]; id: string } {
+  const src = project.wallTypes.find((t) => t.id === typeId);
+  if (!src) return { ops: [], id: "" };
+  const id = freeTypeId(project, `${typeId}-saniert`);
+  const copy: WallType = { id, name, layers: src.layers.map((l) => ({ ...l })) };
+  return { ops: [...addItems("wallTypes", [copy]), ...setTypePairOps(project, typeId, { target: id, old: null, new: null })], id };
+}
+
+/** Ops: Typ-Paar am Bestandstyp ändern (Sanierungstyp, Bezugsseite, manuelle Zuordnung; `null` entfernt). */
+export function setTypePairOps(
+  project: Project,
+  typeId: string,
+  patch: { target?: string | null; side?: RenovationSide | null; old?: LayerRenovation[] | null; new?: LayerRenovation[] | null },
+): CoreOp[] {
+  return patchItem(project, "wallTypes", typeId, (t) => {
+    const next: WallType = { ...t };
+    const put = <K extends keyof WallType>(k: K, v: WallType[K] | null | undefined) => {
+      if (v === undefined) return;
+      if (v === null || (Array.isArray(v) && v.every((x) => x === "auto"))) delete next[k];
+      else next[k] = v;
+    };
+    put("renovationTarget", patch.target);
+    put("renovationSide", patch.side === "inside" ? null : patch.side);
+    put("renovationOld", patch.old);
+    put("renovationNew", patch.new);
+    return next;
+  });
+}
+
+/** Schicht eines Typ-Paars (Kern-Abfrage `renovationPair`). */
+export interface RenovationPairLayer {
+  componentId: string;
+  name: string;
+  color: string;
+  thickness: number;
+  fate: "kept" | "demolish" | "new";
+}
+/** Teilstück eines Ergebnis-Streifens. */
+export interface RenovationStripPiece {
+  thickness: number;
+  kind: "kept" | "demolish" | "new" | "newOverDemolish";
+  fill: string;
+}
+export interface RenovationPair {
+  type: string;
+  target: string;
+  side: RenovationSide;
+  old: RenovationPairLayer[];
+  new: RenovationPairLayer[];
+  oldStrip: RenovationStripPiece[];
+  newStrip: RenovationStripPiece[];
+  result: RenovationStripPiece[];
+  walls: number;
+  renovated: number;
+}
+
+/** Typ-Paar Bestandstyp → Sanierungstyp (`target` fehlt = eingetragener); `null` ohne gültiges Paar. */
+export function renovationPair(project: Project, typeId: string, target?: string): RenovationPair | null {
+  return documentFor(project).query<RenovationPair | null>("renovationPair", [], JSON.stringify({ type: typeId, target: target ?? "" }));
+}
+
+export interface RenovationPairsInfo {
+  pairs: { type: string; name: string; target: string; targetName: string | null; walls: number; renovated: number }[];
+  renovated: number;
+}
+
+/** Alle Typ-Paare mit Zählern (Umbau-Panel „Sanierung“). */
+export function renovationPairs(project: Project): RenovationPairsInfo {
+  return documentFor(project).query<RenovationPairsInfo>("renovationPairs");
 }

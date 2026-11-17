@@ -93,6 +93,11 @@ in `doc/KURZANLEITUNG.md`):
     (grau, gelb gestrichelt, rot bzw. ausgeblendet); Masse und Texte nur mit ausdrücklichem Status. Gilt in Grundriss,
     Schnitt, Ansicht, Vektor-Axonometrie, Kennzahlen (Bestand/Endzustand) und Exporten (DXF-Layer je Status, IFC `Status` im
     `Pset_*Common`). Beispiel: *Datei → Neu aus Vorlage: Beispiel Umbau*. Das 3D-Fenster folgt dem Filter der aktiven Ebene (noch ohne Bildprüfung). Exporte (IFC, OBJ, STL, glTF, STEP) und das Rendering (Cycles, Blender-Paket) übernehmen Umbaufilter und Variantenkombination der aktiven Ansicht — die Dialoge zeigen sie und lassen „Hauptvarianten/kein Filter“ wählen; im Rendering mit Cycles färbt „Umbau-Farben im Bild“ (Vorgabe aus) Bestand grau, Abbruch gelb, Neu rot. CLI: `--renovation/--phase` auch für diese Ausgaben. Einschränkungen: das Ersatzstück zeigt sich im Schnitt nur dort, wo die Schnittebene die Öffnung trifft (nicht in der Projektion dahinter); DXF-Layer je Status nur für Wände, Stützen und Öffnungen (nicht für Möbel und Bäume).
+    **Sanierung je Schicht (17.11., [274]):** ein Bestands-Wandtyp bekommt einen Sanierungstyp (Panel Umbau → „Sanierung“: anlegen als
+    Kopie, Zuordnung je Schicht automatisch nach Baustoff, Dicke und Lage von der Bezugsseite oder von Hand, Streifen Alt/Neu/Ergebnis,
+    „Alle Wände vom Typ sanieren“; je Wand „Neuer Aufbau (Sanierung)“ in der Objekt-Info). Die Filter zeigen je Schicht: Abbruch gelb,
+    Neu rot, im Umbauplan die abgebrochenen Schichten als gelbe gestrichelte Kontur über der neuen Füllung; Grundriss, Schnitt, Ansicht,
+    3D, Leibungen und GF folgen dem alten bzw. neuen Aufbau. Beispiel Umbau: Südwand Beton 20 + Dämmung 10 → Dämmung 20.
 14. **Varianten (17.11., [272]).** Wie Archicads „Design Options“: Variantensätze (z. B. Dachform, Fassade) mit Varianten A, B, …; jedes
     Element (Bauteile, Öffnungen, Räume, Körper, 2D-Elemente samt Bibliotheksobjekten) gehört zum Hauptmodell oder zu genau einer Variante.
     Je Ansicht, Ausschnitt, Vorlage und Blatt-Viewport eine Kombination (Vorgabe die Hauptvarianten); Grundriss, Schnitt, Ansicht,
