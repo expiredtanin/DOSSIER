@@ -2,7 +2,7 @@
 // Variante zuweisen (Undo), Kombination der Ansicht umschalten (Grundriss zeigt das Bandfenster statt des Lochfensters),
 // Vergleichstabelle, Variante übernehmen und Undo. Geprüft über die UI und den Plan (Test-Nähte), nicht über Pixel.
 import type { Page } from "@playwright/test";
-import { blurFocus, discardIfAsked, expect, fileMenu, openTab, test } from "./app";
+import { blurFocus, commandInput, discardIfAsked, expect, fileMenu, finishCommand, openTab, test, typeCommand } from "./app";
 
 test("Varianten: Satz, Zuweisen, Kombination, Vergleich, Übernehmen, Undo ([272])", async ({ page }) => {
   await page.goto("/?dossierTest");
@@ -39,8 +39,10 @@ test("Varianten: Satz, Zuweisen, Kombination, Vergleich, Übernehmen, Undo ([272
   await page.keyboard.press("ControlOrMeta+z");
   await expect.poll(async () => (await dopt()).elements.W1).toBe("");
 
-  // Kombination der Ansicht: Fassade B → Bandfenster statt Lochfenster; der Chip nennt die Abweichung.
-  await panel.getByTestId("design-option-combo-fassade").selectOption("b");
+  // Kombination der Ansicht über das Auge: Fassade B → Bandfenster statt Lochfenster; der Chip nennt die Abweichung.
+  await panel.getByTestId("design-option-eye-fassade-b").click();
+  await expect(panel.getByTestId("design-option-eye-fassade-b")).toHaveAttribute("aria-pressed", "true");
+  await expect(panel.getByTestId("design-option-eye-fassade-a")).toHaveAttribute("aria-pressed", "false");
   await expect.poll(async () => (await dopt()).level).toEqual({ fassade: "b" });
   await expect.poll(openings).toContain("O-band");
   expect(await openings()).not.toContain("O2");
@@ -86,7 +88,7 @@ test("Variantenkombinationen: speichern, zuweisen, umschalten, Vergleich, Lösch
   await expect(panel.getByTestId("design-option-current-name")).toHaveText("Studie 1 Flachdach/Lochfenster");
 
   // Eine Wahl, die zu keiner Kombination passt, heisst „Eigene“ und wird unter neuem Namen gespeichert.
-  await panel.getByTestId("design-option-combo-dachform").selectOption("b");
+  await panel.getByTestId("design-option-eye-dachform-b").click();
   await expect(panel.getByTestId("design-option-current-name")).toHaveText("Eigene");
   await expect(chip).toContainText("Eigene");
   await panel.getByTestId("design-option-combo-save").click();
@@ -205,4 +207,82 @@ test("Panel Varianten im Dock: Reiter, Namen inline umbenennen, Löschen mit Rü
   await panel.getByTestId("rm-design-option-set-delete").first().click();
   await page.getByTestId("confirm-dialog-ok").click();
   await expect.poll(async () => (await dopt()).sets).toEqual(["fassade"]);
+});
+
+test("Varianten bearbeiten wie Archicad: Stift, Zeichnen in die Variante, grau, sperren, zurück, Undo ([272])", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/?dossierTest");
+  await page.getByRole("button", { name: /Neues Projekt/ }).first().click();
+  await expect(page.getByRole("group", { name: "Befehlszeile" })).toBeVisible();
+  await fileMenu(page, /^Neu aus Vorlage: Beispiel Varianten$/);
+  await discardIfAsked(page);
+  const dopt = () => page.evaluate(() => window.__dossierTest!.designOptions());
+  const plan = () => page.evaluate(() => window.__dossierTest!.designOptionPlan());
+  const chip = page.getByTestId("design-option-toggle");
+  await chip.click();
+  const panel = page.getByTestId("design-options-panel");
+  await expect(panel).toBeVisible();
+  // Ohne Stift: Hauptmodell wird bearbeitet, nichts grau.
+  await expect(panel.getByTestId("design-option-pen-main")).toHaveAttribute("aria-pressed", "true");
+  expect((await plan()).grey).toEqual([]);
+
+  // Stift auf „Dachform B“: Bearbeitungsmodus, Chip deutlich, Auge folgt (Stift impliziert Auge), Ebene unverändert.
+  await panel.getByTestId("design-option-pen-dachform-b").click();
+  await expect.poll(async () => (await dopt()).draw).toBe("dachform/b");
+  await expect(chip).toContainText("Bearbeite: Dachform B");
+  await expect(panel.getByTestId("design-option-eye-dachform-b")).toHaveAttribute("aria-pressed", "true");
+  await expect(panel.getByTestId("design-option-pen-dachform-b")).toHaveAttribute("aria-pressed", "true");
+  expect((await dopt()).level).toEqual({});
+
+  // Wand zeichnen: sie landet in Variante B.
+  const before = (await dopt()).elements;
+  await page.getByRole("button", { name: "Wand", exact: true }).click();
+  await expect(page.locator(".cmdline-prompt")).toHaveText("Startpunkt der Wand:");
+  await commandInput(page).focus();
+  await typeCommand(page, "0,5");
+  await typeCommand(page, "4.5,5");
+  await finishCommand(page);
+  let added = "";
+  await expect
+    .poll(async () => {
+      const el = (await dopt()).elements;
+      added = Object.keys(el).find((id) => !(id in before)) ?? "";
+      return added ? el[added] : "";
+    })
+    .toBe("dachform/b");
+
+  // Häkchen „grau“ (Vorgabe an): Hauptmodell grau, die neue Wand nicht — nur Bildschirm, nie im Druck.
+  await expect(panel.getByTestId("design-option-grey")).toBeChecked();
+  await expect.poll(async () => (await plan()).grey.length).toBeGreaterThan(0);
+  expect((await plan()).grey).not.toContain(added);
+  expect((await plan()).grey).toContain("W1");
+  expect((await plan()).printGrey).toBe(0);
+  const shots = process.env.DOSSIER_SHOTS;
+  await page.screenshot({ path: shots ? `${shots}/06-auge-stift-grau.png` : "test-results/designOptions272-auge-stift-grau.png" });
+  // Häkchen aus: nichts grau.
+  await panel.getByTestId("design-option-grey").uncheck();
+  await expect.poll(async () => (await plan()).grey).toEqual([]);
+  await panel.getByTestId("design-option-grey").check();
+
+  // Häkchen „sperren“: Hauptmodell-Wand nicht wählbar, die eigene schon.
+  await panel.getByTestId("design-option-lock").check();
+  await page.evaluate(() => window.__dossierTest!.select({ walls: ["W1"] }));
+  expect(JSON.parse((await page.evaluate(() => window.__dossierTest!.selected())).all).walls).toEqual([]);
+  await page.evaluate((id) => window.__dossierTest!.select({ walls: [id] }), added);
+  expect(JSON.parse((await page.evaluate(() => window.__dossierTest!.selected())).all).walls).toEqual([added]);
+  // Ohne Sperre wieder wählbar.
+  await panel.getByTestId("design-option-lock").uncheck();
+  await page.evaluate(() => window.__dossierTest!.select({ walls: ["W1"] }));
+  expect(JSON.parse((await page.evaluate(() => window.__dossierTest!.selected())).all).walls).toEqual(["W1"]);
+
+  // Stift zurück aufs Hauptmodell: kein Grau, Chip wieder „Variante: …“, die B-Wand ist in der Ansicht (A) weg.
+  await panel.getByTestId("design-option-pen-main").click();
+  await expect.poll(async () => (await dopt()).draw).toBe(null);
+  await expect(chip).not.toContainText("Bearbeite");
+  await expect.poll(async () => (await plan()).walls).not.toContain(added);
+  expect((await plan()).grey).toEqual([]);
+  // Undo nimmt die Wand zurück (der Stift war kein Undo-Schritt).
+  await blurFocus(page);
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect.poll(async () => added in (await dopt()).elements).toBe(false);
 });

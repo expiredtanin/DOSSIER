@@ -9,6 +9,7 @@ import {
   resolveCombination, setLevelCombinationOps, setPrimaryOptionOps, showsInCombination,
   addCombinationOps, assignCombinationOps, combinationChoice, deleteCombinationOps, designOptionCombinations, levelCombinationState, renameCombinationOps, setCombinationChoiceOps,
   storedChoice,
+  DESIGN_OPTION_GHOST_FILL, designOptionEditArg, designOptionLocked, eyeClick, penClick, unlockedSelection, visibleOption,
 } from "./designOptions";
 import { viewportDesignOptions } from "../plan/viewportPlan";
 import { viewportVariantSuffix } from "./posterTemplates";
@@ -231,5 +232,76 @@ describe("[272] Benannte Variantenkombinationen", () => {
     expect(q.drawingLevels.find((l) => l.id === "eg")).not.toHaveProperty("designOptions");
     const q2 = projectWithCombination(p, { dachform: "a" });
     expect(q2.drawingLevels.find((l) => l.id === "eg")?.designOptions).toEqual({ fassade: "b" });
+  });
+});
+
+describe("[272] Varianten bearbeiten wie Archicad (Auge, Stift, grau, sperren)", () => {
+  const dach = (option: string) => ({ set: "dachform", option });
+
+  it("Bearbeitungsvariante der Bildschirm-Anfrage: nur mit Stift und bekannter Variante", () => {
+    const p = buildVariantenSampleProject();
+    expect(designOptionEditArg(p, null, true)).toBeNull();
+    expect(designOptionEditArg(p, { set: "dachform", option: "zz" }, true)).toBeNull();
+    expect(designOptionEditArg(p, dach("b"), true)).toEqual({ set: "dachform", option: "b", grey: true });
+    expect(designOptionEditArg(p, dach("b"), false)).toEqual({ set: "dachform", option: "b", grey: false });
+  });
+
+  it("Auge: sichtbare Variante je Satz (Stift geht vor); Klick schaltet die Ebene um, im Stift-Satz endet die Bearbeitung", () => {
+    const p = buildVariantenSampleProject();
+    const eg = p.drawingLevels.find((l) => l.id === "eg");
+    expect(visibleOption(p, eg, null, "dachform")).toBe("a");
+    expect(visibleOption(p, eg, dach("b"), "dachform")).toBe("b");
+    expect(visibleOption(p, eg, dach("b"), "fassade")).toBe(levelCombination(p, eg).fassade);
+    // Auge in einem anderen Satz: Ebene wechselt, Stift bleibt.
+    const other = eyeClick(p, "eg", dach("b"), "fassade", "b");
+    expect(other.draw).toEqual(dach("b"));
+    const q = applyOps(p, other.ops);
+    expect(levelCombination(q, q.drawingLevels.find((l) => l.id === "eg")).fassade).toBe("b");
+    // Auge im Satz des Stifts auf eine andere Variante: Bearbeitung endet (Stift impliziert Auge).
+    const same = eyeClick(p, "eg", dach("b"), "dachform", "a");
+    expect(same.draw).toBeNull();
+    // Auge auf die bearbeitete Variante: nichts zu tun.
+    expect(eyeClick(p, "eg", dach("b"), "dachform", "b")).toEqual({ draw: dach("b"), ops: [] });
+  });
+
+  it("Stift: setzt die Bearbeitungsvariante, zweiter Klick zurück aufs Hauptmodell (kein Undo-Schritt)", () => {
+    const p = buildVariantenSampleProject();
+    expect(penClick(p, null, "dachform", "b")).toEqual(dach("b"));
+    expect(penClick(p, dach("b"), "dachform", "b")).toBeNull();
+    expect(penClick(p, dach("b"), "fassade", "a")).toEqual({ set: "fassade", option: "a" });
+    expect(penClick(p, null, "dachform", "zz")).toBeNull();
+  });
+
+  it("Sperren: ausserhalb der Bearbeitungsvariante nicht wählbar (Öffnung folgt ihrer Wand), ohne Stift nichts gesperrt", () => {
+    const p = buildVariantenSampleProject();
+    const main = p.walls.find((w) => !w.designOption)!;
+    const roofB = (p.roofs ?? []).find((r) => r.designOption?.option === "b" && r.designOption.set === "dachform")!;
+    const roofA = (p.roofs ?? []).find((r) => r.designOption?.option === "a" && r.designOption.set === "dachform")!;
+    expect(designOptionLocked(p, dach("b"), "walls", main.id)).toBe(true);
+    expect(designOptionLocked(p, dach("b"), "roofs", roofB.id)).toBe(false);
+    expect(designOptionLocked(p, dach("b"), "roofs", roofA.id)).toBe(true);
+    expect(designOptionLocked(p, null, "walls", main.id)).toBe(false);
+    // Öffnung ohne eigene Variante in einer Wand der Variante: frei.
+    const q: Project = { ...p, walls: p.walls.map((w) => (w.id === main.id ? { ...w, designOption: dach("b") } : w)) };
+    const o = (q.openings ?? []).find((x) => x.hostWallId === main.id && !x.designOption);
+    expect(o).toBeDefined();
+    expect(designOptionLocked(q, dach("b"), "openings", o!.id)).toBe(false);
+    expect(designOptionLocked(p, dach("b"), "openings", o!.id)).toBe(true);
+    // Schnittlinien und Gruppen bleiben wählbar; Auswahl gefiltert.
+    expect(designOptionLocked(p, dach("b"), "sectionLines", "schnitt-a")).toBe(false);
+    expect(unlockedSelection(p, dach("b"), { walls: [main.id], roofs: [roofB.id, roofA.id] })).toEqual({ walls: [], roofs: [roofB.id] });
+    expect(unlockedSelection(p, null, { walls: [main.id] })).toEqual({ walls: [main.id] });
+  });
+
+  it("Grau nur in der Bildschirm-Anfrage: Hauptmodell grau, bearbeitete Variante nicht, Druck unverändert", () => {
+    const p = buildVariantenSampleProject();
+    const fills = (edit: ReturnType<typeof designOptionEditArg>) =>
+      withDocument(p, () => {
+        const plan = generatePlan(p, "eg", ALL, undefined, "mittel", false, false, true, 100, false, false, null, null, edit);
+        return plan.primitives.filter((x) => x.kind === "polygon" && (x as { wallId?: string }).wallId).map((x) => (x as { fill: string }).fill);
+      });
+    expect(fills(null)).not.toContain(DESIGN_OPTION_GHOST_FILL);
+    expect(fills(designOptionEditArg(p, dach("b"), true))).toContain(DESIGN_OPTION_GHOST_FILL);
+    expect(fills(designOptionEditArg(p, dach("b"), false))).not.toContain(DESIGN_OPTION_GHOST_FILL);
   });
 });

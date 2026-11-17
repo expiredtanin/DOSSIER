@@ -106,14 +106,24 @@ pub struct Style {
     pub line: Option<String>,
     /// Linien gestrichelt ([`DEMOLISH_DASH`]).
     pub dashed: bool,
+    /// [272] Grau ausserhalb der Bearbeitungsvariante ([`ghost_style`]): alle gefüllten Flächen des Elements (nicht nur
+    /// die Schnittfläche) in der Füllfarbe, ohne Muster.
+    pub ghost: bool,
+}
+
+/// [272] Grau für Elemente ausserhalb der Bearbeitungsvariante (Häkchen „Elemente ausserhalb der Variante grau
+/// einfärben“, nur Bildschirm): helles Grau, mit dem Papier gemischt wie die Pausfolie (`plan/trace.rs::Tone`), damit es
+/// halbtransparent wirkt und in Ansicht und 3D (nur `#rrggbb`) gleich aussieht.
+pub fn ghost_style() -> Style {
+    Style { fill: "#e3e3e3".into(), line: Some("#a8a8a8".into()), dashed: false, ghost: true }
 }
 
 /// SIA-400-Vorgabe: Bestand grau, Abbruch gelb und gestrichelt, Neu rot.
 pub fn default_style(s: RenovationStatus) -> Style {
     match s {
-        RenovationStatus::Demolish => Style { fill: "#ffd800".into(), line: None, dashed: true },
-        RenovationStatus::New => Style { fill: "#e3001b".into(), line: Some("#c00016".into()), dashed: false },
-        _ => Style { fill: "#a6a6a6".into(), line: None, dashed: false },
+        RenovationStatus::Demolish => Style { fill: "#ffd800".into(), line: None, dashed: true, ghost: false },
+        RenovationStatus::New => Style { fill: "#e3001b".into(), line: Some("#c00016".into()), dashed: false, ghost: false },
+        _ => Style { fill: "#a6a6a6".into(), line: None, dashed: false, ghost: false },
     }
 }
 
@@ -156,6 +166,8 @@ pub struct View {
     pub options: Option<crate::design_options::Combination>,
     /// Etappe, bis zu der der Filter gilt (Index), `None` = alle.
     pub upto: Option<usize>,
+    /// [272] Bearbeitungsvariante der Bildschirm-Darstellung (Stift; [`View::editing`]), `None` = keine.
+    pub edit: Option<crate::design_options::Edit>,
     phases: HashMap<String, usize>,
     styles: [Style; 3],
 }
@@ -185,7 +197,22 @@ impl View {
         let upto = if filter.is_some() { phase.filter(|s| !s.trim().is_empty()).and_then(|s| phase_index(p, s)) } else { None };
         let phases = phases(p).iter().enumerate().map(|(i, x)| (x.id.clone(), i)).collect();
         let styles = [style(p, RenovationStatus::Existing), style(p, RenovationStatus::Demolish), style(p, RenovationStatus::New)];
-        Some(View { filter, options, upto, phases, styles })
+        Some(View { filter, options, upto, phases, styles, edit: None })
+    }
+
+    /// [272] Mit Bearbeitungsvariante (Stift, nur Bildschirm-Anfragen `designOptionEdit`): die Variante ist sichtbar (geht
+    /// der Kombination vor — Stift impliziert Auge), mit `grey` bekommt alles ausserhalb [`ghost_style`]. Gibt es
+    /// sonst keine `View` (kein Filter, keine Elemente in Varianten), entsteht eine. `edit = None` ⇒ `v` unverändert.
+    pub fn editing(v: Option<View>, p: &Project, edit: Option<crate::design_options::Edit>) -> Option<View> {
+        let Some(e) = edit else { return v };
+        let mut v = v.unwrap_or_else(|| {
+            let styles = [style(p, RenovationStatus::Existing), style(p, RenovationStatus::Demolish), style(p, RenovationStatus::New)];
+            View { filter: None, options: None, upto: None, phases: HashMap::new(), styles, edit: None }
+        });
+        let c = v.options.get_or_insert_with(|| crate::design_options::Combination::primary(p));
+        c.choice.insert(e.set.clone(), e.option.clone());
+        v.edit = Some(e);
+        Some(v)
     }
 
     /// Filter einer Darstellung: ausdrücklich angefragt (CLI, Blatt-Ausschnitt), sonst der der Ebene `level_id`
@@ -245,10 +272,25 @@ impl View {
         if let Some(c) = &self.options {
             out.hidden = c.hidden(p);
         }
-        if self.filter.is_none() {
-            return out;
+        if self.filter.is_some() {
+            self.resolve_filter(p, &mut out);
         }
-        let mut put = |id: &str, t: Treat, out: &mut Resolved| match t {
+        // [272] Grau ausserhalb der Bearbeitungsvariante: geht der Umbau-Farbe vor; Ausgeblendetes bleibt weg.
+        if let Some(e) = self.edit.as_ref().filter(|e| e.grey) {
+            let g = ghost_style();
+            for id in e.outside(p) {
+                if !out.hidden.contains(&id) {
+                    out.styled.insert(id, g.clone());
+                }
+            }
+            out.patches.retain(|pa| !out.styled.get(&pa.opening_id).is_some_and(|s| s.ghost));
+        }
+        out
+    }
+
+    /// Ausgeblendetes, Farben und Ersatzstücke des Umbaufilters (mit Filter).
+    fn resolve_filter(&self, p: &Project, out: &mut Resolved) {
+        let put = |id: &str, t: Treat, out: &mut Resolved| match t {
             Treat::Hide => {
                 out.hidden.insert(id.to_string());
             }
@@ -261,7 +303,7 @@ impl View {
         for w in &p.walls {
             let s = self.state(w.renovation.as_ref());
             wall_state.insert(w.id.as_str(), s);
-            put(&w.id, self.treat_state(s), &mut out);
+            put(&w.id, self.treat_state(s), out);
         }
         for o in p.openings.iter().flatten() {
             let host = wall_state.get(o.host_wall_id.as_str()).copied().flatten();
@@ -270,7 +312,7 @@ impl View {
                 continue;
             }
             let s = self.state(opening_renovation(p, o));
-            put(&o.id, self.treat_state(s), &mut out);
+            put(&o.id, self.treat_state(s), out);
             // Ersatzstück nur, wenn die Öffnung einen anderen Zustand hat als ihre (Bestands-)Wand.
             if o.renovation.is_none() || host != Some(RenovationStatus::Existing) {
                 continue;
@@ -285,19 +327,19 @@ impl View {
             }
         }
         for x in p.ceilings.iter().flatten() {
-            put(&x.id, self.treat(x.renovation.as_ref()), &mut out);
+            put(&x.id, self.treat(x.renovation.as_ref()), out);
         }
         for x in p.roofs.iter().flatten() {
-            put(&x.id, self.treat(x.renovation.as_ref()), &mut out);
+            put(&x.id, self.treat(x.renovation.as_ref()), out);
         }
         for x in p.stairs.iter().flatten() {
-            put(&x.id, self.treat(x.renovation.as_ref()), &mut out);
+            put(&x.id, self.treat(x.renovation.as_ref()), out);
         }
         for x in p.columns.iter().flatten() {
-            put(&x.id, self.treat(x.renovation.as_ref()), &mut out);
+            put(&x.id, self.treat(x.renovation.as_ref()), out);
         }
         for x in p.extruded_solids.iter().flatten() {
-            put(&x.id, self.treat(x.renovation.as_ref()), &mut out);
+            put(&x.id, self.treat(x.renovation.as_ref()), out);
         }
         // Räume: nur sichtbar oder nicht (ein Raum ist kein Bauteil, er bekommt keine Umbau-Farbe).
         for x in p.rooms.iter().flatten() {
@@ -305,7 +347,6 @@ impl View {
                 out.hidden.insert(x.id.clone());
             }
         }
-        out
     }
 
     /// Füll- und Linienfarben der Status, die der Filter farbig zeigt (bleiben in Schwarz-Weiss erhalten).
@@ -324,9 +365,10 @@ impl View {
     /// Schlüssel für Caches (Filter samt Darstellungen, Etappe, Farben).
     pub fn key(&self) -> String {
         let opts = self.options.as_ref().map_or(String::new(), |c| c.key());
+        let edit = self.edit.as_ref().map_or(String::new(), |e| format!("|edit:{}", e.key()));
         match &self.filter {
-            Some(f) => format!("{}:{:?}{:?}{:?}:{:?}:{:?}|{opts}", f.id, f.existing, f.demolish, f.new, self.upto, self.styles),
-            None => format!("-|{opts}"),
+            Some(f) => format!("{}:{:?}{:?}{:?}:{:?}:{:?}|{opts}{edit}", f.id, f.existing, f.demolish, f.new, self.upto, self.styles),
+            None => format!("-|{opts}{edit}"),
         }
     }
 }
@@ -452,17 +494,24 @@ pub fn restyle_with(q: &mut Primitive, st: &Style, extra: &mut Vec<Primitive>, w
                 *stroke = "none".into();
             }
         }
-        Primitive::Line { color, dash: d, .. } => {
+        Primitive::Line { color, dash: d, greyed, .. } => {
             if let Some(l) = &st.line {
                 *color = Some(l.clone().into());
+            }
+            // [272] Grau ausserhalb der Bearbeitungsvariante: auch Linien mit Klassenfarbe (Türbogen, Fensterrahmen).
+            if st.ghost {
+                *greyed = Some(true);
             }
             if st.dashed {
                 *d = dash();
             }
         }
-        Primitive::Arc { color, dash: d, .. } => {
+        Primitive::Arc { color, dash: d, greyed, .. } => {
             if let Some(l) = &st.line {
                 *color = Some(l.clone().into());
+            }
+            if st.ghost {
+                *greyed = Some(true);
             }
             if st.dashed {
                 *d = dash();
@@ -502,7 +551,8 @@ pub fn restyle_range(r: &Resolved, prims: &mut Vec<Primitive>, from: usize, owne
         let id = prim_element(q).or(owner);
         if let Some(st) = id.and_then(|id| r.styled.get(id)) {
             // Symbole und Ansichten (Fenster, Türflügel, Treppenstufen, Decken- und Dachkanten): nur Linien.
-            let f = cut_fill(q);
+            // [272] Grau ausserhalb der Bearbeitungsvariante: alle Flächen.
+            let f = st.ghost || cut_fill(q);
             restyle_with(q, st, &mut extra, f);
         }
     }
@@ -558,7 +608,7 @@ pub fn patch_prims(ring: Vec<Vec2>, st: &Style, weight_mm: f64, opening_id: &str
     };
     let mut extra = Vec::new();
     if st.dashed {
-        restyle(&mut q, &Style { fill: st.fill.clone(), line: None, dashed: true }, &mut extra);
+        restyle(&mut q, &Style { fill: st.fill.clone(), line: None, dashed: true, ghost: false }, &mut extra);
     }
     // Linien des Stücks tragen die Öffnung (Picken, Kontrast).
     for l in extra.iter_mut() {
@@ -583,6 +633,18 @@ pub fn view_from_text(p: &Project, text: &str) -> Option<View> {
     let f = v.get("renovation").and_then(|x| x.as_str()).filter(|x| !x.is_empty());
     let req = crate::design_options::parse_request(v.get("designOptions"));
     View::with(p, f, v.get("renovationPhase").and_then(|x| x.as_str()), &[], &req)
+}
+
+/// [272] Wie [`view_from_text`] für Bildschirm-Anfragen (3D-Fenster): dazu die Bearbeitungsvariante `designOptionEdit`
+/// ([`View::editing`]). Kennzahlen und Exporte nehmen [`view_from_text`] und kennen sie nicht.
+pub fn screen_view_from_text(p: &Project, text: &str) -> Option<View> {
+    let v = view_from_text(p, text);
+    let t = text.trim();
+    if !t.starts_with('{') {
+        return v;
+    }
+    let Ok(j) = serde_json::from_str::<serde_json::Value>(t) else { return v };
+    View::editing(v, p, crate::design_options::parse_edit(p, j.get("designOptionEdit")))
 }
 
 /// 3D: Teile in der Umbau-Farbe (Füllfarbe des Status) — Wände, Decken, Dächer, Stützen, Treppen, Körper.
@@ -615,6 +677,14 @@ pub fn color_parts(p: &Project, parts: &mut crate::model3d::Parts, r: &Resolved)
     for l in &mut parts.roof_layers {
         if let Some(c) = l.owner.id(p).and_then(rgb) {
             l.color = c;
+        }
+    }
+    // [272] Grau ausserhalb der Bearbeitungsvariante: auch Fenster und Türen (Umbau-Farben lassen sie, wie sie sind).
+    for m in parts.opening_meshes.iter_mut() {
+        if let Some(st) = m.owner.id(p).and_then(|id| r.styled.get(id)).filter(|s| s.ghost) {
+            m.color = crate::style::hex_to_rgb(&st.fill, crate::style::WALL_RGB);
+            m.vertex_colors = None;
+            m.material_index = None;
         }
     }
 }

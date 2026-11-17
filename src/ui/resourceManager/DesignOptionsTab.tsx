@@ -7,7 +7,23 @@ import { t } from "../../i18n";
 import type { Project } from "../../model/types";
 import { designOptionSets, primaryOption } from "../../core";
 import { ConfirmDialog } from "../ConfirmDialog";
+import { EyeIcon } from "../EyeIcon";
 import { InlineName } from "../InlineName";
+
+/**
+ * [272] Auge und Stift je Variante (nur im Dock-Panel „Varianten“, wie Archicads Design-Options-Manager): Auge = in der
+ * Kombination der aktiven Ansicht sichtbar (je Satz genau eine), Stift = Bearbeitungsvariante (neue Elemente landen in ihr).
+ */
+export interface DesignOptionViewControls {
+  /** Sichtbare Variante des Satzes (Stift geht vor). */
+  visible: (setId: string) => string | undefined;
+  /** Bearbeitungsvariante (`null` = Hauptmodell). */
+  edit: { set: string; option: string } | null;
+  /** Die aktive Ansicht kann eine Kombination tragen (sonst Augen gesperrt). */
+  eyeEnabled: boolean;
+  onEye: (setId: string, optionId: string) => void;
+  onPen: (setId: string, optionId: string) => void;
+}
 
 export interface DesignOptionHandlers {
   onAddDesignOptionSet?: (name: string) => void;
@@ -35,7 +51,7 @@ function counts(project: Project): Map<string, number> {
   return out;
 }
 
-export function DesignOptionsTab({ project, handlers, embedded }: { project: Project; handlers: DesignOptionHandlers; /** Im Dock-Panel: ohne eigene Überschrift. */ embedded?: boolean }) {
+export function DesignOptionsTab({ project, handlers, embedded, view }: { project: Project; handlers: DesignOptionHandlers; /** Im Dock-Panel: ohne eigene Überschrift. */ embedded?: boolean; /** [272] Auge und Stift je Variante (nur im Dock-Panel). */ view?: DesignOptionViewControls }) {
   const sets = designOptionSets(project);
   const [newName, setNewName] = useState("");
   const [deleting, setDeleting] = useState<{ setId: string; optionId?: string } | null>(null);
@@ -75,8 +91,38 @@ export function DesignOptionsTab({ project, handlers, embedded }: { project: Pro
                 <span className="material-symbols-outlined" aria-hidden="true">delete</span>
               </button>
             </div>
-            {s.options.map((o) => (
-              <div className="rm-row rm-design-option" key={o.id} data-testid="rm-design-option">
+            {s.options.map((o) => {
+              const shown = view?.visible(s.id) === o.id;
+              const editing = view?.edit?.set === s.id && view.edit.option === o.id;
+              return (
+              <div className={`rm-row rm-design-option${editing ? " is-editing" : ""}`} key={o.id} data-testid="rm-design-option">
+                {view && (
+                  <>
+                    <button
+                      type="button"
+                      className={`eye dop-eye${shown ? " is-on" : ""}`}
+                      disabled={!view.eyeEnabled && !shown}
+                      aria-pressed={shown}
+                      aria-label={`${t("designOption.eye")}: ${o.name}`}
+                      title={shown ? t("designOption.eye.on") : t("designOption.eye.off")}
+                      data-testid={`design-option-eye-${s.id}-${o.id}`}
+                      onClick={() => view.onEye(s.id, o.id)}
+                    >
+                      <EyeIcon open={shown} />
+                    </button>
+                    <button
+                      type="button"
+                      className={`reno-icon-btn dop-pen${editing ? " is-on" : ""}`}
+                      aria-pressed={editing}
+                      aria-label={`${t("designOption.pen")}: ${o.name}`}
+                      title={editing ? t("designOption.pen.on") : t("designOption.pen.off")}
+                      data-testid={`design-option-pen-${s.id}-${o.id}`}
+                      onClick={() => view.onPen(s.id, o.id)}
+                    >
+                      <span className="material-symbols-outlined" aria-hidden="true">{editing ? "edit_square" : "edit"}</span>
+                    </button>
+                  </>
+                )}
                 <input
                   type="radio"
                   className="rm-design-option-primary"
@@ -106,7 +152,8 @@ export function DesignOptionsTab({ project, handlers, embedded }: { project: Pro
                   <span className="material-symbols-outlined" aria-hidden="true">delete</span>
                 </button>
               </div>
-            ))}
+              );
+            })}
           </div>
         );
       })}

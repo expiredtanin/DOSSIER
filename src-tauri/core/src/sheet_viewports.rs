@@ -184,6 +184,7 @@ pub fn viewport_args(p: &Project, snap: &ViewSnapshot, scale: f64, mono: bool) -
         renovation_phase: snap.renovation_phase.clone().filter(|s| !s.is_empty()),
         // [272] Variantenkombination des Ausschnitts (über der der Ebene).
         design_options: crate::design_options::stored_choice(p, snap.design_option_combination.as_deref(), snap.design_options.as_ref()).into_iter().flatten().collect(),
+        design_option_edit: None,
     };
     a.apply_model_view(p);
     a

@@ -504,6 +504,16 @@ löscht eine Kombination samt Verweisen — je ein Undo-Schritt. Vergleich `desi
 Kreuzprodukt; `compare_scope(.., all)`), Blatt-Tabelle `sheet_table.rs` Quelle `designOptionCompare`; TS: `model/designOptions.ts`
 (`storedChoice`, `assignCombinationOps` …), Panel `DesignOptionsPanel.tsx`; CLI `--combination`.
 
+**Bearbeiten wie im Archicad-Manager** (Nachtrag): Auge und Stift je Variante im Panel. Auge = Wahl der Ebene (Op, Undo). Stift =
+`drawDesignOption` (Sitzung, kein Undo-Schritt; neue Elemente über `stamp_ops`). Die Bildschirm-Ansichten (Grundriss
+`generateVisibleLevelsPlan`, Schnitt/Ansicht `opts.designOptionEdit`, 3D `Filter3d.designOptionEdit`; Hook `state/designOptionEdit.ts`)
+schicken `designOptionEdit: {set, option, grey}` mit — Druck, PDF, Exporte, Kennzahlen und Goldens nie. Im Kern liest
+`design_options::parse_edit` es, `renovation::View::editing` erzwingt die Variante in der Kombination (Stift impliziert Auge) und legt mit
+`grey` alles ausserhalb (`Edit::outside`, Öffnung folgt ihrer Wand) als `ghost_style()` in `Resolved.styled` — also derselbe Weg wie die
+Umbau-Farben (Plan `restyle_range`, Schnitt `CutRules::with_renovation`, Ansicht `renovation_faces`, Axo, 3D `color_parts` über
+`screen_view_from_text`). „Sperren“ ist Auswahl-Logik der Oberfläche: `selectionSlice.setSelection` filtert über
+`model/designOptions.ts::unlockedSelection` (ein Ort für Klick, Rechteck, 3D-Pick, Alles wählen; Griffe/Objekt-Info/Befehle sehen nur die Auswahl).
+
 ---
 
 ## 4. Schnitt

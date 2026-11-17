@@ -11,6 +11,7 @@ import { computeSection, generatePlan, generateVisibleLevelsPlan, materializeGre
 import { withDocument } from "../core/document";
 import { collectVisibleCodes } from "../model/layers";
 import { tracePlan } from "../core";
+import { DESIGN_OPTION_GHOST_FILL, designOptionEditArg } from "../core";
 import { getViewStateBridge } from "./viewTabs";
 import { getView3dFilter, toFilter3d } from "./view3dFilter";
 import { BUILTIN_PANEL_IDS } from "../panels/builtinPanels";
@@ -68,6 +69,8 @@ declare global {
       renovation: () => { filter: string | null; phase: string | null; draw: string; walls: Record<string, string> };
       /** [272] Varianten: Kombination der aktiven Ebene, Zeichen-Variante, Variante je Element (`set/option`, leer = Hauptmodell), Sätze. */
       designOptions: () => { level: Record<string, string>; combination: string | null; combinations: string[]; draw: string | null; elements: Record<string, string>; sets: string[] };
+      /** [272] Grundriss der aktiven Ebene wie auf dem Bildschirm (mit Bearbeitungsvariante): Wände und grau gezeichnete Wände (ids); dazu derselbe Grundriss für den Druck. */
+      designOptionPlan: () => { walls: string[]; grey: string[]; printGrey: number };
       /** [193] Gefüllte Flächen (Füllfarbe gesetzt) im Grundriss der aktiven Ebene (alle Kategorien, 1:100); bei 0 ist nichts Gefülltes mehr zu sehen. */
       planFills: () => number;
       /** [193] Höhe (z) des ersten Gelände-Netz-Punkts. */
@@ -203,6 +206,21 @@ export function installTestHooks(): void {
         for (const e of (list ?? []) as { id: string; designOption?: { set: string; option: string } }[]) elements[e.id] = e.designOption ? `${e.designOption.set}/${e.designOption.option}` : "";
       }
       return { level: l?.designOptions ?? {}, combination: l?.designOptionCombination ?? null, combinations: (s.project.designOptionCombinations ?? []).map((x) => x.name), draw: s.drawDesignOption ? `${s.drawDesignOption.set}/${s.drawDesignOption.option}` : null, elements, sets: (s.project.designOptionSets ?? []).map((x) => x.id) };
+    },
+    designOptionPlan: () => {
+      const s = getState();
+      const codes = collectVisibleCodes(s.project.layers);
+      const edit = designOptionEditArg(s.project, s.drawDesignOption, s.designOptionGrey);
+      const walls = new Set<string>();
+      const grey = new Set<string>();
+      for (const q of generateVisibleLevelsPlan(s.project, s.activeLevelId, codes, undefined, s.detail, false, false, undefined, 100, false, edit).primitives) {
+        const w = (q as { wallId?: string; openingId?: string }).wallId;
+        if (q.kind !== "polygon" || !w || (q as { openingId?: string }).openingId) continue;
+        walls.add(w);
+        if (q.fill === DESIGN_OPTION_GHOST_FILL) grey.add(w);
+      }
+      const printGrey = generatePlan(s.project, s.activeLevelId, codes, undefined, s.detail, false, false, true, 100, true, false, null, null, edit).primitives.filter((q) => q.kind === "polygon" && q.fill === DESIGN_OPTION_GHOST_FILL).length;
+      return { walls: [...walls].sort(), grey: [...grey].sort(), printGrey };
     },
     renovation: () => {
       const s = getState();

@@ -25,6 +25,7 @@ import type {
 } from "../model/types";
 import { documentFor } from "../core/document";
 import { lineEndsCode } from "../model/lineEnds";
+import type { DesignOptionEditArg } from "../model/designOptions";
 import { registerCoreRestore } from "../engine/coreWasm";
 import { decodePlanBuf, type DecodedPlanBuf } from "./planBuf";
 import {
@@ -260,6 +261,11 @@ export function generatePlan(
    * {@link generateVisibleLevelsPlan}); Achsraster, die dort auch stehen, fehlen hier (nur einmal im Bild).
    */
   traceOf?: string | null,
+  /**
+   * [272] Bearbeitungsvariante der Bildschirm-Ansicht (Stift im Panel „Varianten“, `model/designOptions.ts`): sichtbar, mit
+   * `grey` alles ausserhalb grau (Kern `renovation::View::editing`). Nie im Druck/Export (dort fehlt sie).
+   */
+  designOptionEdit?: DesignOptionEditArg | null,
 ): Plan {
   const compact = compactUnderlay && !forPrint;
   // Blatt-Ebene eines Layouts (Papier 1:1): ohne projektglobale Zutaten (Kontext, Luftbilder,
@@ -275,7 +281,7 @@ export function generatePlan(
   // Zeitpunkt der Schattenstudie: `Date` nimmt das Datum, wie es in der Datei steht (Ortszeit ohne Zone).
   const study = project.sunStudy;
   const sunWhen = includeGlobal && study?.show ? new Date(study.when).getTime() : NaN;
-  const dom = planDomains(project, floorId, visibleCodes, categoryDisplay, detail, showReferenceLines, includeGlobal, scaleDenominator, forPrint, compact, mono, sunWhen, overrideRuleIds, traceOf);
+  const dom = planDomains(project, floorId, visibleCodes, categoryDisplay, detail, showReferenceLines, includeGlobal, scaleDenominator, forPrint, compact, mono, sunWhen, overrideRuleIds, traceOf, forPrint ? null : designOptionEdit);
   const pieces: PlanPiece[] = [];
   const pushGroups = (first: number, last: number): void => {
     const from = dom.buf.groups[first][0];
@@ -356,6 +362,8 @@ export function generateVisibleLevelsPlan(
   scaleDenominator: number = DEFAULT_SCALE_DENOMINATOR,
   /** Kompakte Linien-Unterlage (s. `UnderlayGroup`) — nur die interaktive GPU-Ansicht. */
   compactUnderlay = false,
+  /** [272] Bearbeitungsvariante der Bildschirm-Ansicht (s. {@link generatePlan}). */
+  designOptionEdit?: DesignOptionEditArg | null,
 ): Plan {
   const active = project.drawingLevels.find((l) => l.id === activeLevelId);
   const siblings =
@@ -408,6 +416,7 @@ export function generateVisibleLevelsPlan(
       compactUnderlay,
       null,
       activeLevelId, // [203] Achsraster des aktiven Geschosses nicht noch einmal
+      designOptionEdit,
     );
     for (const g of p.underlay ?? []) underlay.push({ ...g, tint: d.greyed, above: false });
     const from = count;
@@ -434,6 +443,9 @@ export function generateVisibleLevelsPlan(
     scaleDenominator,
     false,
     compactUnderlay,
+    null,
+    null,
+    designOptionEdit,
   );
   const activeCount = planCount(activePlan);
   for (const pc of piecesOf(activePlan)) pieces.push(pc);
@@ -504,6 +516,7 @@ function planDomainsArgs(
   sunWhen: number,
   rules?: readonly string[] | null,
   traceOf?: string | null,
+  designOptionEdit?: DesignOptionEditArg | null,
 ): Record<string, unknown> {
   // Sichtbar und gezeichnet bzw. gedimmt: über die sichtbaren Codes (wenige), nicht über alle
   // Elemente — der Kern zeichnet ein Element genau dann, wenn sein Code in `show` steht.
@@ -518,6 +531,7 @@ function planDomainsArgs(
   const out: Record<string, unknown> = { floor: floorId, show, grey, referenceLines, global, scale, forPrint, compact, mono, sunWhen: Number.isNaN(sunWhen) ? null : sunWhen };
   if (rules) out.rules = [...rules];
   if (traceOf) out.traceOf = traceOf;
+  if (designOptionEdit) out.designOptionEdit = designOptionEdit;
   return out;
 }
 
@@ -573,8 +587,9 @@ function planDomains(
   sunWhen: number,
   rules?: readonly string[] | null,
   traceOf?: string | null,
+  designOptionEdit?: DesignOptionEditArg | null,
 ): DomainPrims {
-  const args = JSON.stringify(planDomainsArgs(floorId, visibleCodes, categoryDisplay, referenceLines, global, scale, forPrint, compact, mono, sunWhen, rules, traceOf));
+  const args = JSON.stringify(planDomainsArgs(floorId, visibleCodes, categoryDisplay, referenceLines, global, scale, forPrint, compact, mono, sunWhen, rules, traceOf, designOptionEdit));
   const held = chunkStores.get(args);
   const query = held && held.size ? `${args.slice(0, -1)},"have":[${[...held.keys()].join(",")}]}` : args;
   const res = readPlanMulti(documentFor(project).queryBin("planDomains", [DETAIL_CODE[detail] ?? 1], query), held);

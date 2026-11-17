@@ -103,6 +103,8 @@ export function classFilterText(hide?: Hide3d, extra?: Record<string, unknown>):
   }
   // [272] Variantenkombination der Ansicht (fehlt = Hauptvarianten; Kern `renovation.rs`).
   if (f.designOptions && Object.keys(f.designOptions).length) h.designOptions = f.designOptions;
+  // [272] Bearbeitungsvariante des 3D-Fensters (Stift; grau ausserhalb, Kern `renovation::screen_view_from_text`).
+  if (f.designOptionEdit) h.designOptionEdit = f.designOptionEdit;
   return Object.keys(h).length || extra ? JSON.stringify({ ...extra, ...h }) : "";
 }
 
@@ -129,6 +131,8 @@ export interface Filter3d {
   renovationPhase?: string;
   /** [272] Variantenkombination der Ansicht (Satz-Id → Varianten-Id); fehlt = Hauptvarianten. */
   designOptions?: Record<string, string>;
+  /** [272] Bearbeitungsvariante (Stift) des 3D-Fensters: sichtbar, mit `grey` alles ausserhalb grau. Nur Bildschirm. */
+  designOptionEdit?: { set: string; option: string; grey: boolean } | null;
 }
 
 /**

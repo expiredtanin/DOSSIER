@@ -424,3 +424,101 @@ export function projectWithCombination(project: Project, c: Combination): Projec
     ...(project.layouts ? { layouts: project.layouts.map((l) => ({ ...l, viewports: l.viewports.map(strip) })) } : {}),
   };
 }
+
+// ── Bearbeiten wie im Archicad-Manager (Nachtrag 17.11.): Auge, Stift, grau einfärben, sperren ─────────────────────
+//
+// Stift = Bearbeitungsvariante (`drawDesignOption` im Store, Zustand der Sitzung wie in Archicad die Einstellungen des
+// Managers, kein Undo-Schritt): neue Elemente der Zeichenbefehle gehören ihr (Kern `design_options::stamp_ops`), die
+// Bildschirm-Ansichten zeigen sie (Stift impliziert Auge) und färben mit „grau“ alles ausserhalb grau (Kern
+// `design_options::Edit`, `renovation::View::editing` — der eine Sichtbarkeits-Ort; Druck/PDF/Exporte fragen nie damit).
+
+/** Variante als Ziel (Satz-Id, Varianten-Id). */
+export type DesignOptionTarget = { set: string; option: string };
+
+/** Anfrage-Feld `designOptionEdit` der Bildschirm-Ansichten (Grundriss, Schnitt, Ansicht, Axo, 3D). */
+export interface DesignOptionEditArg {
+  set: string;
+  option: string;
+  /** Häkchen „Elemente ausserhalb der Variante grau einfärben“. */
+  grey: boolean;
+}
+
+/** Füllfarbe des Graus ausserhalb der Bearbeitungsvariante (gleich wie `renovation::ghost_style` im Kern). */
+export const DESIGN_OPTION_GHOST_FILL = "#e3e3e3";
+
+function knownTarget(project: Project, t: DesignOptionTarget | null | undefined): t is DesignOptionTarget {
+  return !!t && designOptionSets(project).some((s) => s.id === t.set && s.options.some((o) => o.id === t.option));
+}
+
+/** Bearbeitungsvariante für Bildschirm-Anfragen; `null` ohne Stift oder bei unbekannter Variante. */
+export function designOptionEditArg(project: Project, draw: DesignOptionTarget | null | undefined, grey: boolean): DesignOptionEditArg | null {
+  return knownTarget(project, draw) ? { set: draw.set, option: draw.option, grey } : null;
+}
+
+/** Auge: die in der aktiven Ansicht sichtbare Variante des Satzes (der Stift geht vor, sonst die Kombination der Ebene). */
+export function visibleOption(project: Project, level: DrawingLevel | undefined, draw: DesignOptionTarget | null | undefined, setId: string): string | undefined {
+  if (knownTarget(project, draw) && draw.set === setId) return draw.option;
+  return levelCombination(project, level)[setId];
+}
+
+/**
+ * Klick aufs Auge einer Variante: die Ebene zeigt sie (Ops, ein Undo-Schritt). Im Satz des Stifts endet damit die Bearbeitung
+ * (Stift impliziert Auge, eine andere Variante dieses Satzes sichtbar zu machen heisst, den Stift abzugeben).
+ */
+export function eyeClick(project: Project, levelId: string, draw: DesignOptionTarget | null, setId: string, optionId: string): { draw: DesignOptionTarget | null; ops: CoreOp[] } {
+  if (draw && draw.set === setId && draw.option === optionId) return { draw, ops: [] };
+  const level = project.drawingLevels.find((l) => l.id === levelId);
+  const ops = levelCombination(project, level)[setId] === optionId ? [] : setLevelCombinationOps(project, levelId, setId, optionId);
+  return { draw: draw && draw.set === setId ? null : draw, ops };
+}
+
+/** Klick auf den Stift einer Variante: sie wird Bearbeitungsvariante; der Stift der bearbeiteten Variante gibt zurück ans Hauptmodell. */
+export function penClick(project: Project, draw: DesignOptionTarget | null, setId: string, optionId: string): DesignOptionTarget | null {
+  if (draw && draw.set === setId && draw.option === optionId) return null;
+  const t = { set: setId, option: optionId };
+  return knownTarget(project, t) ? t : null;
+}
+
+/** Auswahl-Art → Liste im Projekt (nur Arten, deren Elemente einer Variante angehören können). */
+const KIND_COLLECTION: Record<string, DesignOptionCollection> = {
+  walls: "walls",
+  openings: "openings",
+  ceilings: "ceilings",
+  roofs: "roofs",
+  stairs: "stairs",
+  columns: "columns",
+  solids: "extrudedSolids",
+  rooms: "rooms",
+  drawings: "drawings2d",
+};
+
+/** Modell-Arten ohne Variante (immer ausserhalb einer Bearbeitungsvariante). */
+const OUTSIDE_KINDS = new Set(["trees", "cameras", "contextObjects"]);
+
+/**
+ * Häkchen „Elemente ausserhalb der Variante sperren“: ist das Element (Auswahl-Art, Id) bei Bearbeitungsvariante `edit` gesperrt?
+ * Gesperrt ist alles ausserhalb der Variante (Hauptmodell, andere Varianten, Bäume, Kameras, Kontext); eine Öffnung ohne eigene
+ * Variante folgt ihrer Wand. Schnittlinien, Lage-Darstellung und Gruppen bleiben wählbar. Ohne `edit` nichts gesperrt.
+ */
+export function designOptionLocked(project: Project, edit: DesignOptionTarget | null | undefined, kind: string, id: string): boolean {
+  if (!edit) return false;
+  if (OUTSIDE_KINDS.has(kind)) return true;
+  const coll = KIND_COLLECTION[kind];
+  if (!coll) return false;
+  const e = ((project[coll] ?? []) as { id: string; designOption?: DesignOptionRef; hostWallId?: string }[]).find((x) => x.id === id);
+  if (!e) return false;
+  const r = e.designOption ?? (coll === "openings" ? project.walls.find((w) => w.id === e.hostWallId)?.designOption : undefined);
+  return !(r && r.set === edit.set && r.option === edit.option);
+}
+
+/** Auswahl ohne gesperrte Elemente ({@link designOptionLocked}); unveränderte Listen behalten ihre Referenz. */
+export function unlockedSelection<T extends Record<string, string[] | undefined>>(project: Project, edit: DesignOptionTarget | null | undefined, sel: T): T {
+  if (!edit) return sel;
+  const out = { ...sel } as Record<string, string[] | undefined>;
+  for (const [k, ids] of Object.entries(sel)) {
+    if (!ids?.length) continue;
+    const keep = ids.filter((id) => !designOptionLocked(project, edit, k, id));
+    if (keep.length !== ids.length) out[k] = keep;
+  }
+  return out as T;
+}
