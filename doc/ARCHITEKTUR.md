@@ -978,6 +978,7 @@ Reihenfolge aufrufen, Gerüst rendern. Herausgelöst, ohne Verhaltensänderung (
 | `src/state/useModelImport.ts` | IFC-, STEP- und Mesh-Import, Datei-Verteiler für Dialog und Drag & Drop |
 | `src/state/useTextTarget.ts`, `useSectionLineState.ts`, `useStatusBarInfo.ts` | Text-Ziel der Formatierleiste; Objekt-Info, Schnittlinie, 3D-Live-Schnitt; Status-Leiste |
 | `src/state/useResourceHandlers.ts`, `useSettingsHost.ts`, `useNativeWindowHosts.ts`, `useNativeMenu.ts` | Ressourcen-Fenster, Einstellungen, native Nebenfenster, native Menüleiste |
+| `src/state/renderJob.ts`, `src/native/renderWindow.ts`, `RenderWindowApp.tsx`, `src/ui/RenderDialog.tsx` | Rendering ([277]): Auftrag (Szene aus dem Kern, Cycles/Blender, Abbruch, Bild) im Hauptfenster; Tauri: eigenes Fenster `?window=render` über die Sync-Brücke (Zustand `{info, job, image}`, Befehle `RenderCommands`); Browser/Electron: Overlay mit derselben Ansicht `RenderDialogView` |
 | `src/menus/AppContextMenu.tsx` | Kontextmenü-Verdrahtung |
 | `src/panels/DockArea.tsx` | Docks links/rechts, Andockzonen, schwebende Panels um die Mitte |
 | `src/ui/AppDialogs.tsx`, `HiddenFileInputs.tsx`, `BootScreen.tsx`, `useTopBarElements.tsx` | Dialoge und Overlays; versteckte Datei-Felder; Splash/Start; Menüleiste und Ansichts-Ribbon |

@@ -51,7 +51,7 @@ describe("Anonymitäts-Tor", () => {
       "state/panelHost/layoutsHost.ts", // Layout-Ordner als PDF
       "state/aiAccess.ts", // KI-Werkzeuge (Speichern)
       "ui/ImageExportDialog.tsx", // 3D-Bild PNG
-      "ui/RenderDialog.tsx", // Rendering PNG, .blend, Blender-Paket
+      "state/renderJob.ts", // Rendering PNG, .blend, Blender-Paket
       "ui/CameraTourDialog.tsx", // Kamerafahrt (Video)
       "panels/AreaTableSection.tsx",
       "panels/RoomBookSection.tsx",
