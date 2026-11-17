@@ -1043,13 +1043,37 @@ body {
   gap: 8px;
   flex: 0 1 auto;
   min-width: 0;
-  overflow: hidden;
+  /* sichtbar, damit die Popover nach oben nicht beschnitten werden; Überlauf verhindert die Kürzung in StatusBar.tsx */
+  overflow: visible;
   white-space: nowrap;
+}
+.sb-inner {
+  display: inline-flex;
+  align-items: center;
+  gap: inherit;
+  flex: none;
 }
 .sb-build {
   display: inline-flex;
   align-items: center;
   gap: inherit;
+}
+/* [263] Stufe 1 der Kürzung: nur Werte (Koordinaten behalten ihre Beschriftung), Beschriftung steht im Tooltip. */
+.sb-compact .sb-field:not(.sb-keep-key) > .sb-key {
+  display: none;
+}
+.sb-more-popover .sb-snap-popover {
+  position: static;
+  margin: 4px 0 0;
+  box-shadow: none;
+}
+.sb-more-popover {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  right: 0;
+  left: auto;
 }
 /* [263] Schmale Fenster: Build-Nummer weg (steht im Über-Dialog), Abstände enger — dem Hinweis bleibt Platz. */
 @media (max-width: 1500px) {

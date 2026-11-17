@@ -11,7 +11,7 @@
 import { usePickHint } from "../state/pickHintStore";
 import { MODEL_UNITS, fmtDisplay, xToDisplay, yToDisplay, type DisplayUnits } from "../tools/displayUnits";
 import { useCursor } from "../state/cursorStore";
-import { useEffect, useRef, useState, memo } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, memo } from "react";
 import type { SnapSettings } from "../tools/types";
 import { t } from "../i18n";
 import { TraceControl } from "./TraceControl";
@@ -70,7 +70,7 @@ function LineModeToggle({
   lineModeEnabled: boolean;
 }) {
   return (
-    <span className="sb-field">
+    <span className="sb-field" title={t("topbar.lineModeGroup")}>
       <span className="sb-key">{t("topbar.lineModeGroup")}</span>
       <span
         className={`sb-seg${lineModeEnabled ? "" : " disabled"}`}
@@ -348,10 +348,13 @@ function SnapControl({
   );
 }
 
+/** Höchste Kürzungsstufe der Statusleiste (s. `StatusBar`). */
+const MAX_LEVEL = 5;
+
 /** Ein Wert-Feld im rechten Cluster: kleine Beschriftung + Wert. */
-function Field({ label, value }: { label: string; value: string }) {
+function Field({ label, value, keepKey }: { label: string; value: string; keepKey?: boolean }) {
   return (
-    <span className="sb-field">
+    <span className={`sb-field${keepKey ? " sb-keep-key" : ""}`} title={label}>
       <span className="sb-key">{label}</span>
       <span className="sb-val">{value}</span>
     </span>
@@ -386,13 +389,13 @@ const CursorField = memo(function CursorField({
       ? `${fmt(cursor.x)}, ${fmt(cursor.y)}`
       : `${fmtDisplay(units, xToDisplay(units, cursor.x))}, ${fmtDisplay(units, yToDisplay(units, cursor.y))}`
     : "—";
-  if (!geoOrigin) return <Field label={t("status.xy")} value={coords} />;
+  if (!geoOrigin) return <Field label={t("status.xy")} value={coords} keepKey />;
   const lv95 = cursor ? `${(cursor.x + geoOrigin.e).toFixed(2)}, ${(cursor.y + geoOrigin.n).toFixed(2)}` : "—";
   return (
     <>
-      <Field label={t("status.xy")} value={coords} />
+      <Field label={t("status.xy")} value={coords} keepKey />
       <span title={t("status.lv95.hint")}>
-        <Field label={t("status.lv95")} value={lv95} />
+        <Field label={t("status.lv95")} value={lv95} keepKey />
       </span>
     </>
   );
@@ -419,50 +422,165 @@ export const StatusBar = memo(function StatusBar({
 }: StatusBarProps) {
   // [137] Klick-Zyklus im Plan („2/3 Treffer — erneut klicken zum Wechseln") hat Vorrang vor dem Werkzeug-Hinweis.
   const pickHint = usePickHint();
+  // [263] Schriftbreite ist nicht planbar (Ersatzschriften je System): passt der Cluster nicht, wird er nach Priorität
+  // gekürzt — nie abgeschnitten. Stufe 1: Beschriftungen weg (nur Werte, Tooltip bleibt) · 2: Einheit und Build weg ·
+  // 3: Linien-Darstellung nach „⋯“ · 4: Pausfolie nach „⋯“ · 5: Fang und Referenzlinien nach „⋯“.
+  const footerRef = useRef<HTMLElement | null>(null);
+  const clusterRef = useRef<HTMLDivElement | null>(null);
+  const innerRef = useRef<HTMLSpanElement | null>(null);
+  const [level, setLevel] = useState(0);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const moreRef = useRef<HTMLSpanElement | null>(null);
+  const overflows = () => {
+    const c = clusterRef.current;
+    return !!c && c.scrollWidth > c.clientWidth + 0.5;
+  };
+  // Neue Ausgangslage (anderer Inhalt) → wieder bei Stufe 0 messen.
+  useLayoutEffect(() => {
+    setLevel(0);
+  }, [showCursor, units, geoOrigin, activeFloor, activeLayer, unit, lineModeEnabled, referenceLinesEnabled, traceEnabled, hint, pickHint]);
+  // Nach jedem Render: reicht der Platz nicht, eine Stufe weiter (vor dem Zeichnen, mehrfach möglich).
+  useLayoutEffect(() => {
+    if (level < MAX_LEVEL && overflows()) setLevel(level + 1);
+  });
+  // Fensterbreite ändert sich → neu von Stufe 0; Inhalt wächst (Koordinaten) → nur weiter kürzen.
+  useEffect(() => {
+    const f = footerRef.current;
+    const i = innerRef.current;
+    if (!f || typeof ResizeObserver === "undefined") return;
+    let w = f.clientWidth;
+    const ro1 = new ResizeObserver(() => {
+      if (f.clientWidth !== w) {
+        w = f.clientWidth;
+        setLevel(0);
+      }
+    });
+    ro1.observe(f);
+    const ro2 = new ResizeObserver(() => {
+      if (overflows()) setLevel((l) => Math.min(MAX_LEVEL, l + 1));
+    });
+    if (i) ro2.observe(i);
+    return () => {
+      ro1.disconnect();
+      ro2.disconnect();
+    };
+  }, []);
+  useEffect(() => {
+    if (!moreOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (moreRef.current && !moreRef.current.contains(e.target as Node)) setMoreOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setMoreOpen(false);
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [moreOpen]);
+  useEffect(() => {
+    if (level < 3) setMoreOpen(false);
+  }, [level]);
+
+  const lineModeEl = (
+    <LineModeToggle lineMode={lineMode} onLineModeChange={onLineModeChange} lineModeEnabled={lineModeEnabled} />
+  );
+  const traceEl = <TraceControl enabled={!!traceEnabled} onRunCommand={onRunCommand} />;
+  const snapEl = <SnapControl snap={snap} onSnapChange={onSnapChange} />;
+  const refEl = (
+    <button
+      type="button"
+      className={`sb-toggle${referenceLines ? " active" : ""}`}
+      aria-pressed={referenceLines}
+      disabled={!referenceLinesEnabled}
+      onClick={() => onReferenceLines(!referenceLines)}
+      title={referenceLinesEnabled ? t("status.referenceLines.hint") : t("status.referenceLines.hintDisabled")}
+    >
+      {t("status.referenceLines")}
+    </button>
+  );
+  // Was in „⋯“ wandert (Reihenfolge = Wegfall-Priorität von oben nach unten).
+  const inMore: React.ReactNode[] = [];
+  if (level >= 3) inMore.push(<span key="lm">{lineModeEl}</span>);
+  if (level >= 4) inMore.push(<span key="tr">{traceEl}</span>);
+  if (level >= 5) {
+    inMore.push(<span key="sn">{snapEl}</span>, <span key="rf">{refEl}</span>);
+  }
   return (
-    <footer className="statusbar">
+    <footer className="statusbar" ref={footerRef}>
       {/* Links: Werkzeug-Hinweis. */}
       <span className="sb-hint" data-testid="status-hint" title={pickHint ?? hint}>{pickHint ?? hint}</span>
 
       {/* Rechts: abgeleiteter Wert-Cluster. Interaktive Kontrollen (Linien-
           Darstellung, Fang) zuerst, danach die reinen Anzeigewerte. */}
-      <div className="sb-cluster">
-        <LineModeToggle
-          lineMode={lineMode}
-          onLineModeChange={onLineModeChange}
-          lineModeEnabled={lineModeEnabled}
-        />
-        <Sep />
-        <SnapControl snap={snap} onSnapChange={onSnapChange} />
-        <Sep />
-        <TraceControl enabled={!!traceEnabled} onRunCommand={onRunCommand} />
-        <Sep />
-        {/* Referenzlinien-Schalter (aus der TopBar hierher gewandert). */}
-        <button
-          type="button"
-          className={`sb-toggle${referenceLines ? " active" : ""}`}
-          aria-pressed={referenceLines}
-          disabled={!referenceLinesEnabled}
-          onClick={() => onReferenceLines(!referenceLines)}
-          title={
-            referenceLinesEnabled
-              ? t("status.referenceLines.hint")
-              : t("status.referenceLines.hintDisabled")
-          }
-        >
-          {t("status.referenceLines")}
-        </button>
-        <Sep />
-        <CursorField showCursor={showCursor} units={units} geoOrigin={geoOrigin} />
-        <Sep />
-        <Field label={t("status.unit")} value={units === MODEL_UNITS ? unit : units.suffix} />
-        <Sep />
-        <Field label={t("status.floor")} value={activeFloor} />
-        <Sep />
-        <Field label={t("status.layer")} value={activeLayer} />
-        <span className="sb-build">
+      <div className={`sb-cluster${level >= 1 ? " sb-compact" : ""}`} ref={clusterRef}>
+        <span className="sb-inner" ref={innerRef}>
+          {level < 3 && (
+            <>
+              {lineModeEl}
+              <Sep />
+            </>
+          )}
+          {level < 5 && (
+            <>
+              {snapEl}
+              <Sep />
+            </>
+          )}
+          {level < 4 && (
+            <>
+              {traceEl}
+              <Sep />
+            </>
+          )}
+          {level < 5 && (
+            <>
+              {/* Referenzlinien-Schalter (aus der TopBar hierher gewandert). */}
+              {refEl}
+              <Sep />
+            </>
+          )}
+          {level >= 3 && (
+            <>
+              <span className="sb-snap-wrap" ref={moreRef}>
+                <button
+                  type="button"
+                  className={`sb-toggle${moreOpen ? " active" : ""}`}
+                  data-testid="status-more"
+                  aria-haspopup="true"
+                  aria-expanded={moreOpen}
+                  aria-label={t("status.more")}
+                  title={t("status.more")}
+                  onClick={() => setMoreOpen((v) => !v)}
+                >
+                  ⋯
+                </button>
+                {moreOpen && (
+                  <div className="sb-snap-popover sb-more-popover" role="dialog" aria-label={t("status.more")} data-testid="status-more-panel">
+                    {inMore}
+                  </div>
+                )}
+              </span>
+              <Sep />
+            </>
+          )}
+          <CursorField showCursor={showCursor} units={units} geoOrigin={geoOrigin} />
+          {level < 2 && (
+            <>
+              <Sep />
+              <Field label={t("status.unit")} value={units === MODEL_UNITS ? unit : units.suffix} />
+            </>
+          )}
           <Sep />
-          <span className="sb-field" title={t("status.build.title")}><span className="sb-val" style={{ opacity: 0.55 }}>{formatBuildShort(BUILD_INFO, t("about.build"))}</span></span>
+          <Field label={t("status.floor")} value={activeFloor} />
+          <Sep />
+          <Field label={t("status.layer")} value={activeLayer} />
+          {level < 2 && (
+            <span className="sb-build">
+              <Sep />
+              <span className="sb-field" title={t("status.build.title")}><span className="sb-val" style={{ opacity: 0.55 }}>{formatBuildShort(BUILD_INFO, t("about.build"))}</span></span>
+            </span>
+          )}
         </span>
       </div>
     </footer>

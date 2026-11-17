@@ -157,6 +157,50 @@ test("Statusleiste bei 1280 px: Hinweistext behält Platz neben den Koordinaten"
   await expect(hint).toHaveAttribute("title", /\S/);
 });
 
+// CI (ubuntu-latest) hat breitere Ersatzschriften als der Container: die Leiste muss sich nach Priorität kürzen,
+// nie abschneiden. Simulation: breite Schrift + Zeichenabstand über die ganze Leiste.
+for (const [w, h, spacing] of [
+  [1280, 800, "0.1em"],
+  [1440, 900, "0.2em"], // breiteres Fenster, dafür noch breitere Schrift
+  [1024, 768, "0.15em"], // erzwingt den Überlauf „⋯“
+] as const) {
+  test(`Statusleiste bei ${w} px mit breiter Schrift: nichts abgeschnitten, Geschoss und Ebene bleiben`, async ({ page }) => {
+    await page.setViewportSize({ width: w, height: h });
+    await startNewProject(page);
+    await fileMenu(page, /^Neu aus Vorlage: Wettbewerb$/);
+    await discardIfAsked(page);
+    await page.addStyleTag({
+      content: `.statusbar, .statusbar * { font-family: "DejaVu Sans", Verdana, sans-serif !important; letter-spacing: ${spacing} !important; }`,
+    });
+    await page.mouse.move(600, 400);
+    await page.mouse.move(610, 410);
+    await expect(page.locator(".sb-field", { hasText: "LV95" })).toBeVisible();
+    const bar = (await page.locator(".statusbar").boundingBox())!;
+    await expect
+      .poll(() => page.locator(".sb-cluster").evaluate((el) => el.scrollWidth <= el.clientWidth + 1), { message: "nichts im Cluster abgeschnitten" })
+      .toBe(true);
+    const cluster = (await page.locator(".sb-cluster").boundingBox())!;
+    expect(cluster.x + cluster.width).toBeLessThanOrEqual(bar.x + bar.width);
+    // Jedes sichtbare Feld liegt ganz im Cluster.
+    const outside = await page.locator(".sb-cluster").evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      return [...el.querySelectorAll(".sb-field, .sb-toggle, .sb-seg")]
+        .filter((e) => (e as HTMLElement).offsetParent !== null)
+        .filter((e) => e.getBoundingClientRect().right > r.right + 1).length;
+    });
+    expect(outside).toBe(0);
+    expect((await page.getByTestId("status-hint").boundingBox())!.width).toBeGreaterThanOrEqual(150);
+    await expect(page.locator(".statusbar")).toContainText("Erdgeschoss");
+    // Was weggekürzt wurde, bleibt über „⋯“ erreichbar.
+    const more = page.getByTestId("status-more");
+    if (await more.count()) {
+      await more.click();
+      await expect(page.getByTestId("status-more-panel")).toBeVisible();
+      await expect(page.getByTestId("status-more-panel").getByRole("group", { name: "Linien-Darstellung" })).toBeVisible();
+    }
+  });
+}
+
 test("Ressourcen-Fenster: Reiter umbrechen statt abzuschneiden, Zeilennamen mit Tooltip", async ({ page }) => {
   await startNewProject(page);
   await page.getByRole("button", { name: "Fenster", exact: true }).first().click();

@@ -362,6 +362,7 @@ export const en: Record<TranslationKey, string> = {
   "status.xy": "X/Y",
   "status.lv95": "LV95",
   "status.lv95.hint": "Swiss national coordinates of the pointer (project origin + X/Y). Typed LV95 coordinates are converted relative to the project origin.",
+  "status.more": "More controls",
   "status.unit": "Unit",
   "status.scale": "Scale",
   "status.zoom": "Zoom",

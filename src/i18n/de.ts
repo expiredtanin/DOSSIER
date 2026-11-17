@@ -364,6 +364,7 @@ export const de = {
   "status.xy": "X/Y",
   "status.lv95": "LV95",
   "status.lv95.hint": "Landeskoordinaten des Zeigers (Projekt-Nullpunkt + X/Y). Getippte LV95-Koordinaten werden auf den Projekt-Nullpunkt gerechnet.",
+  "status.more": "Weitere Anzeigen",
   "status.unit": "Einheit",
   "status.scale": "Massstab",
   "status.zoom": "Zoom",
