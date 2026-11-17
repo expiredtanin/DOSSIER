@@ -46,7 +46,7 @@ test("IFC-Export übernimmt Kombination und Umbaufilter der Ansicht ([271][272])
   await page.getByTestId("design-option-toggle").click();
   const panel = page.getByTestId("design-options-panel");
   await expect(panel).toBeVisible();
-  await panel.getByTestId("design-option-combo-fassade").selectOption("b");
+  await panel.getByTestId("design-option-eye-fassade-b").click();
   await expect.poll(async () => (await page.evaluate(() => window.__dossierTest!.designOptions())).level).toEqual({ fassade: "b" });
   await blurFocus(page);
 
