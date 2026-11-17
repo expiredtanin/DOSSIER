@@ -12,6 +12,7 @@ import { exportProjectName, areaReportToCsv, buildAreaReport, buildAreaReportPdf
 import type { AgfBasis } from "../core";
 import { DEFAULT_AREA_INPUTS, ivhbOptionsOf, type AreaInputs } from "./areaInputs";
 import { downloadCsv } from "./downloadFile";
+import { ReportTable } from "./ReportTable";
 import { runWithAnonymityGate } from "../state/anonymityGate";
 import { useStore } from "../state/appStore";
 
@@ -26,6 +27,8 @@ export function AreaTableSection() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [project, inputs],
   );
+  // [278] CSV/PDF enthalten zusätzlich den Wohnungsspiegel (die Anzeige hat ihn im Abschnitt „Nutzungseinheiten“).
+  const buildExport = () => buildAreaReport(project, { areas: true, ivhb: true, siteProof: true, units: true, ivhbOptions: ivhbOptionsOf(inputs) });
   const set = (patch: Partial<AreaInputs>) => setInputs((i) => ({ ...i, ...patch }));
   const stem = `${exportProjectName(project) || "projekt"}-flaechen`;
 
@@ -37,13 +40,13 @@ export function AreaTableSection() {
   };
   const exportCsv = () => {
     if (emptyHint()) return;
-    runWithAnonymityGate(project, [`${stem}.csv`], () => downloadCsv(`${stem}.csv`, areaReportToCsv(report)));
+    runWithAnonymityGate(project, [`${stem}.csv`], () => downloadCsv(`${stem}.csv`, areaReportToCsv(buildExport())));
   };
   const exportPdf = () => {
     if (emptyHint()) return;
     runWithAnonymityGate(project, [`${stem}.pdf`], async () => {
       try {
-        (await buildAreaReportPdf(report)).save(`${stem}.pdf`);
+        (await buildAreaReportPdf(buildExport())).save(`${stem}.pdf`);
       } catch {
         notify(t("areas.exportPdf.fail"));
       }
@@ -65,40 +68,7 @@ export function AreaTableSection() {
       </div>
 
       {report.sections.map((s, si) => (
-        <div key={si} className="area-block">
-          <div className="area-heading">{s.heading}</div>
-          <div className="area-scroll">
-            <table className={s.columns.length > 6 ? "area-table wide" : "area-table"}>
-              <thead>
-                <tr>
-                  {s.columns.map((c, i) => (
-                    <th key={i} className={i === 0 ? "" : "num"}>
-                      {c}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {s.rows.map((r, ri) => (
-                  <tr key={ri} className={r.total ? "total" : ""}>
-                    {r.cells.map((c, ci) =>
-                      typeof c === "string" ? (
-                        // Kurze Textzellen in Zahlenspalten (Strich, ja/nein) stehen wie die Zahlen rechts.
-                        <td key={ci} data-label={ci > 0 ? s.columns[ci] : undefined} className={ci > 0 && c.length <= 4 ? "num" : undefined}>
-                          {c}
-                        </td>
-                      ) : (
-                        <td key={ci} data-label={ci > 0 ? s.columns[ci] : undefined} className="num">
-                          {c.n === null ? "–" : c.n.toFixed(c.d)}
-                        </td>
-                      ),
-                    )}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        <ReportTable key={si} section={s} />
       ))}
 
       <div className="area-inputs">

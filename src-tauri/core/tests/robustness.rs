@@ -334,6 +334,9 @@ fn derive_all(d: &mut Document, tag: &str, depth: Depth, fails: &mut Fails) {
         ("renovationFilters", vec![], ""),
         // [272] Varianten: Info, Vergleich (mit Unsinn), Kombination in Kennzahlen/3D/IFC.
         ("designOptionInfo", vec![], ""),
+        // [278] Wohnungsspiegel (auch mit Unsinn im Text).
+        ("unitSchedule", vec![], ""),
+        ("unitSchedule", vec![], "{\"head\": [1, null], \"renovation\": 3}"),
         ("designOptionCompare", vec![], "{\"renovation\": 3, \"head\": [1]}"),
         ("kennzahlen", vec![], "{\"designOptions\": \"a=b\"}"),
         ("model3dParts", vec![0.0, f64::NAN, 0.0, 1.0], "{\"designOptions\": {\"s\": null}}"),

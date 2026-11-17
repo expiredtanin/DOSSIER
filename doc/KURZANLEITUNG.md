@@ -128,6 +128,16 @@ Auf der Kommandozeile: `node dist-cli/dossier-cli.mjs :wettbewerb kennzahlen --n
 über ±0.00 (Näherung), die Grünfläche gilt nur, wenn du sie eingibst. Die **Kostenschätzung grob** (eBKP-H, CHF/m³ GV oder CHF/m² GF) steht im
 selben Panel und lässt sich als Tabelle auf ein Blatt legen.
 
+**Nutzungseinheiten und Wohnungsspiegel.** Im Panel **Flächenbilanz** steht unter dem Nachweis der Abschnitt „Nutzungseinheiten und
+Wohnungsspiegel“. Räume wählen und **Neue Einheit aus Auswahl** legt eine Wohnung an (oder in der Objekt-Info des Raums das Feld
+**Einheit**, bei Mehrfachauswahl für alle gewählten Räume in einem Undo-Schritt). Nummer (z. B. 2.1), Typ und Nutzung (Wohnen, Gewerbe, Büro)
+trägst du in der Liste ein; die Zimmerzahl rechnet Dossier nach Schweizer Zählweise: Wohnen, Schlafen, Essen und Büro zählen 1, Küche,
+Bad, Diele, Abstellraum 0, je Raum einstellbar (**Zimmer-Zählung** in der Objekt-Info, z. B. 0.5 für eine Wohnküche); ohne eigenen Typ
+heisst die Wohnung z. B. 3.5-Zi-Whg. Der Spiegel zeigt je Einheit Geschoss, Typ, Zimmer, HNF, NNF, NF und Aussenraum (Räume der Flächenart AGF,
+Balkon/Loggia), dazu die Summe je Typ und je Geschoss; „Spiegel CSV“ und „Spiegel PDF“ und die Blatt-Tabelle „Wohnungsspiegel“ geben dasselbe aus,
+der Nachweis-Export enthält ihn ebenfalls. Auf der Kommandozeile: `dossier-cli :wettbewerb kennzahlen --wohnungsspiegel` (auch mit
+`--format csv|pdf|svg`; die Kennzahlen ohne Option nennen ihn, sobald das Projekt Einheiten hat).
+
 ## 7. Pläne 1:200
 
 In der Kopfleiste den **Massstab** wählen (Papier-Massstab 1:N anwenden), z. B. 1:200 für den Wettbewerb und 1:100

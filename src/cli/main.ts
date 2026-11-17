@@ -37,7 +37,7 @@
 //                                                  (Linienzeichnung, Silhouette kräftig, Flächen nach Lage grau; ohne GPU)
 //   dossier-cli <projekt.obp> ifc [--ebkph] [--ebenen] [--kontext]   (IFC mit eBKP-H-Hauptgruppen bzw. Modell-Ebenen als Klassifikation; --kontext: Gelände/Nachbarn mitgeben)
 //                                                  --schema 4|2x3: IFC4 (Standard) oder IFC2x3 (Coordination View 2.0)
-//   dossier-cli <projekt.obp> dxf [--binary] [--scale 100] [--dim-unit cm] [--layout]|dwg|ifc|step|obj [--no-mtl]|stl|glb|gltf|schedule [--openings|--elements|--rooms] [--format json|csv|svg|pdf]|kennzahlen [--sia416] [--ivhb] [--nachweis] [--format json|csv|svg|pdf] [--agsf m2] [--gruenflaeche m2] [--agf-basis gf|ngf|nf] [--untergeschosse]|raumprogramm [--import tabelle] [--sheet name|nr] [--mode replace|append] [--tolerance %] [--generate] [--format json|csv|svg|pdf] [--save projekt.obp]|sun [--level EG] [--out datei]
+//   dossier-cli <projekt.obp> dxf [--binary] [--scale 100] [--dim-unit cm] [--layout]|dwg|ifc|step|obj [--no-mtl]|stl|glb|gltf|schedule [--openings|--elements|--rooms] [--format json|csv|svg|pdf]|kennzahlen [--sia416] [--ivhb] [--nachweis] [--wohnungsspiegel] [--format json|csv|svg|pdf] [--agsf m2] [--gruenflaeche m2] [--agf-basis gf|ngf|nf] [--untergeschosse]|raumprogramm [--import tabelle] [--sheet name|nr] [--mode replace|append] [--tolerance %] [--generate] [--format json|csv|svg|pdf] [--save projekt.obp]|sun [--level EG] [--out datei]
 //                                                  glb/gltf = glTF 2.0 (Y-up, Meter, Geschoss als Eltern; --flat ohne Geschoss-Knoten)
 //   dossier-cli convert <eingabe> <ausgabe> [--cmd "befehl"]…   Format nach Endung: dxf/dwg/ifc/obp → obp-Import,
 //                                                  obp → dxf/dwg/ifc/obj/stl/glb/gltf/step; --cmd: weitere Befehle
@@ -107,6 +107,7 @@ import {
   exportScheduleCsv,
   computeKennzahlen,
   computeAreaTable,
+  computeUnitSchedule,
   computeIvhb,
   computeSiteProof,
   buildAreaReport,
@@ -1365,7 +1366,7 @@ async function execute(project: Project, file: string, command: string, rest: st
       return 0;
     case "kennzahlen": {
       // --sia416 / --ivhb: Flächentabelle bzw. IVHB-Kennziffern [70]; --format json|csv|svg|pdf (Default json).
-      if (args.flags.has("sia416") || args.flags.has("ivhb") || args.flags.has("nachweis")) {
+      if (args.flags.has("sia416") || args.flags.has("ivhb") || args.flags.has("nachweis") || args.flags.has("wohnungsspiegel")) {
         const num = (k: string): number | undefined => {
           const v = args.flags.get(k);
           if (v === undefined) return undefined;
@@ -1379,14 +1380,15 @@ async function execute(project: Project, file: string, command: string, rest: st
         const wantAreas = args.flags.has("sia416");
         const wantIvhb = args.flags.has("ivhb");
         const wantProof = args.flags.has("nachweis");
+        const wantUnits = args.flags.has("wohnungsspiegel");
         const format = args.flags.get("format") ?? "json";
         const stem = `${exportProjectName(project) || "projekt"}-flaechen`;
         if (format === "json") {
-          const json = { ...(wantAreas ? { flaechentabelle: computeAreaTable(project) } : {}), ...(wantIvhb ? { ivhb: computeIvhb(project, ivhbOptions) } : {}), ...(wantProof ? { baurechtNachweis: computeSiteProof(project, ivhbOptions) } : {}) };
+          const json = { ...(wantAreas ? { flaechentabelle: computeAreaTable(project) } : {}), ...(wantIvhb ? { ivhb: computeIvhb(project, ivhbOptions) } : {}), ...(wantProof ? { baurechtNachweis: computeSiteProof(project, ivhbOptions) } : {}), ...(wantUnits ? { wohnungsspiegel: computeUnitSchedule(project) } : {}) };
           out(args, JSON.stringify(json, null, 2), `${stem}.json`);
           return 0;
         }
-        const report = buildAreaReport(project, { areas: wantAreas, ivhb: wantIvhb, siteProof: wantProof, ivhbOptions });
+        const report = buildAreaReport(project, { areas: wantAreas, ivhb: wantIvhb, siteProof: wantProof, units: wantUnits, ivhbOptions });
         if (format === "csv") out(args, areaReportToCsv(report), `${stem}.csv`);
         else if (format === "svg") out(args, areaReportToSvg(report), `${stem}.svg`);
         else if (format === "pdf") out(args, new Uint8Array((await buildAreaReportPdf(report)).output("arraybuffer")), `${stem}.pdf`);
@@ -1399,7 +1401,9 @@ async function execute(project: Project, file: string, command: string, rest: st
       const baurecht = checkSiteRules(project);
       // [68] Erdarbeiten je Baugrube (Abtrag/Auftrag/Hinterfüllung, m³).
       const erdarbeiten = excavationQuantities(project);
-      out(args, JSON.stringify({ kennzahlen: k, raumprogramm: prog, baurecht, erdarbeiten }, null, 2), `${exportProjectName(project) || "projekt"}-kennzahlen.json`);
+      // [278] Wohnungsspiegel, sobald das Projekt Nutzungseinheiten hat.
+      const wohnungsspiegel = (project.units ?? []).length > 0 ? computeUnitSchedule(project) : undefined;
+      out(args, JSON.stringify({ kennzahlen: k, raumprogramm: prog, baurecht, erdarbeiten, ...(wohnungsspiegel ? { wohnungsspiegel } : {}) }, null, 2), `${exportProjectName(project) || "projekt"}-kennzahlen.json`);
       return 0;
     }
     case "designoptions": {

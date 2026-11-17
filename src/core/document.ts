@@ -183,6 +183,7 @@ export type QueryName =
   | "presentationSheet"
   | "kennzahlen"
   | "areaTable"
+  | "unitSchedule"
   | "renovationFilters"
   | "renovationStyles"
   | "renovationPair"

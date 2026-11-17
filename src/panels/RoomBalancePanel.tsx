@@ -14,6 +14,7 @@ import type { Room } from "../model/types";
 import { roomDisplayName } from "../model/roomStamp";
 import { KennzahlenSection } from "./KennzahlenSection";
 import { AreaTableSection } from "./AreaTableSection";
+import { UnitsSection } from "./UnitsSection";
 import { CostEstimateSection } from "./CostEstimateSection";
 import { OpeningScheduleSection } from "./OpeningScheduleSection";
 import { ElementScheduleSection } from "./ElementScheduleSection";
@@ -84,6 +85,9 @@ export function RoomBalancePanel() {
 
       {/* Flächentabelle und IVHB-Kennziffern. */}
       <AreaTableSection />
+
+      {/* Nutzungseinheiten und Wohnungsspiegel ([278]). */}
+      <UnitsSection />
 
       {/* Kostenschätzung grob ([209]). */}
       <CostEstimateSection />

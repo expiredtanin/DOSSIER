@@ -2213,7 +2213,8 @@ export type LayoutTableSource =
   | "roomBook"
   | "costs"
   | "siteProof"
-  | "designOptionCompare";
+  | "designOptionCompare"
+  | "unitSchedule";
 
 /**
  * Einfache Textfelder des Titelblocks (Master). Alle optional — leere Felder
@@ -3376,6 +3377,10 @@ export type Project = {
    * [272] Benannte Variantenkombinationen (Archicad „Design Option Combinations“): je Satz genau eine Variante.
    */
   designOptionCombinations?: Array<DesignOptionCombination>;
+  /**
+   * [278] Nutzungseinheiten (Wohnungen, Gewerbe) für den Wohnungsspiegel; Räume verweisen mit `unitId` darauf.
+   */
+  units?: Array<Unit>;
 };
 
 /** Protokolleintrag einer Publikation ([79]): Datum, Blätter mit Revision, erzeugte Dateien. */
@@ -3770,6 +3775,16 @@ export type Room = {
    * [272] Variante, zu der das Element gehört (`Project.designOptionSets`). Fehlt ⇒ Hauptmodell (immer sichtbar).
    */
   designOption?: DesignOptionRef;
+  /**
+   * [278] Nutzungseinheit (`Project.units`, Id), zu der der Raum gehört (Wohnung, Gewerbeeinheit). Fehlt oder
+   * unbekannt ⇒ keiner Einheit zugeordnet (Gemeinschaftsfläche).
+   */
+  unitId?: string;
+  /**
+   * [278] Zimmerzahl-Beitrag dieses Raums für den Wohnungsspiegel (CH-Konvention: Zimmer 1, Wohnküche/halbes Zimmer 0.5,
+   * Nebenraum 0). Fehlt ⇒ Vorgabe aus der Nutzung (`unit_schedule::default_room_count`).
+   */
+  roomCount?: number;
 };
 
 /**
@@ -4444,6 +4459,29 @@ export type UiViewTabs = {
   /** Id des aktiven Reiters. */
   activeId: string;
 };
+
+/**
+ * [278] Nutzungseinheit (Wohnung, Gewerbe-, Büroeinheit): fasst Räume für den Wohnungsspiegel zusammen. Die Räume
+ * verweisen mit `Room.unitId` auf sie; Fläche, Geschoss und Zimmerzahl rechnet der Kern aus den Räumen.
+ */
+export type Unit = {
+  id: string;
+  /** Nummer/Bezeichnung, z. B. „2.1“. */
+  name: string;
+  /**
+   * Typ, z. B. „3.5-Zi-Whg“. Fehlt er, leitet der Spiegel bei Wohnungen „n-Zi-Whg“ aus der Zimmerzahl ab.
+   */
+  unitType?: string;
+  /** Nutzung (Fehlt ⇒ Wohnen). */
+  usage?: UnitUsage;
+  /** Farbe der Einheit (hex) für Darstellungen. */
+  color?: string;
+  /** Bemerkung (reiner Text). */
+  note?: string;
+};
+
+/** [278] Nutzung einer Nutzungseinheit. */
+export type UnitUsage = "living" | "commercial" | "office" | "other";
 
 export type Vec2 = { x: number; y: number };
 

@@ -7,6 +7,7 @@ import { t } from "../../i18n";
 import { Dropdown } from "../../ui/Dropdown";
 import type { SiaCategory, Project, Room } from "../../model/types";
 import { SIA_CATEGORIES, siaLabelFull, patchItems, roomBook, ROOM_USAGES, usageLabel } from "../../core";
+import { addUnitOps, assignRoomsOps, draftUnit } from "../unitOps";
 import { formatM } from "../../model/types";
 import { useStore } from "../../state/appStore";
 import type { TranslationKey } from "../../i18n";
@@ -82,6 +83,78 @@ export function RoomSection({
 
       {/* [158] Raumbuch: Nutzung und Oberflächen. */}
       <RoomFinishFields roomId={roomId} />
+
+      {/* [278] Nutzungseinheit und Zimmer-Zählung (Wohnungsspiegel). */}
+      <RoomUnitFields roomId={roomId} />
+    </>
+  );
+}
+
+const UNIT_NONE = "";
+const UNIT_NEW = "__new";
+const UNIT_MIXED = "__mixed";
+/** Zimmer-Zählung: automatisch (aus der Nutzung) oder fest 0 / 0.5 / 1 / 1.5 / 2. */
+const ROOM_COUNTS = [0, 0.5, 1, 1.5, 2] as const;
+const COUNT_KEY = { 0: "units.roomCount.0", 0.5: "units.roomCount.05", 1: "units.roomCount.1", 1.5: "units.roomCount.15", 2: "units.roomCount.2" } as const satisfies Record<(typeof ROOM_COUNTS)[number], TranslationKey>;
+
+/** [278] Einheit des Raums (Auswahl, „Neue Einheit …“) und Beitrag zur Zimmerzahl. Bei Mehrfachauswahl gilt die Wahl für alle
+ *  gewählten Räume in einem Undo-Schritt; unterschiedliche Werte zeigt die Auswahl als „gemischt“. */
+function RoomUnitFields({ roomId }: { roomId: string }) {
+  const project = useStore((st) => st.project);
+  const applyChange = useStore((s) => s.applyChange);
+  const selectedRooms = useStore((s) => s.selection.rooms);
+  const room = (project.rooms ?? []).find((r) => r.id === roomId);
+  if (!room) return null;
+  const ids = selectedRooms.length > 1 && selectedRooms.includes(roomId) ? [...selectedRooms] : [roomId];
+  const group = ids.map((id) => (project.rooms ?? []).find((r) => r.id === id)).filter((r): r is Room => !!r);
+  const unitIds = new Set(group.map((r) => r.unitId ?? UNIT_NONE));
+  const counts = new Set(group.map((r) => (r.roomCount === undefined ? "auto" : String(r.roomCount))));
+  const units = project.units ?? [];
+  const known = new Set(units.map((u) => u.id));
+  const unitValue = unitIds.size > 1 ? UNIT_MIXED : known.has(room.unitId ?? "") ? (room.unitId as string) : UNIT_NONE;
+  const countValue = counts.size > 1 ? UNIT_MIXED : room.roomCount === undefined ? "auto" : String(room.roomCount);
+  const onUnit = (v: string) => {
+    if (v === UNIT_MIXED) return;
+    if (v === UNIT_NEW) applyChange((p: Project) => addUnitOps(p, draftUnit(p, t("units.nameDefault")), ids), "unit:new");
+    else applyChange((p: Project) => assignRoomsOps(p, ids, v === UNIT_NONE ? undefined : v), `room:${roomId}:unit`);
+  };
+  const onCount = (v: string) => {
+    if (v === UNIT_MIXED) return;
+    applyChange((p: Project) => patchItems(p, "rooms", ids, (r) => ({ ...r, roomCount: v === "auto" ? undefined : Number(v) }) as Room), `room:${roomId}:roomCount`);
+  };
+  const mixed = { value: UNIT_MIXED, label: t("objsettings.mixed"), disabled: true };
+  return (
+    <>
+      <div className="objinfo-section-label">{t("units.title")}</div>
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("units.field")}</span>
+        <Dropdown
+          value={unitValue}
+          onChange={onUnit}
+          options={[
+            ...(unitValue === UNIT_MIXED ? [mixed] : []),
+            { value: UNIT_NONE, label: t("units.field.none") },
+            ...units.map((u) => ({ value: u.id, label: u.unitType ? `${u.name} · ${u.unitType}` : u.name })),
+            { value: UNIT_NEW, label: t("units.field.new") },
+          ]}
+          title={t("units.field")}
+          width={170}
+        />
+      </div>
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("units.roomCount")}</span>
+        <Dropdown
+          value={countValue}
+          onChange={onCount}
+          options={[
+            ...(countValue === UNIT_MIXED ? [mixed] : []),
+            { value: "auto", label: t("units.roomCount.auto") },
+            ...ROOM_COUNTS.map((c) => ({ value: String(c), label: t(COUNT_KEY[c]) })),
+          ]}
+          title={t("units.roomCount.hint")}
+          width={170}
+        />
+      </div>
     </>
   );
 }

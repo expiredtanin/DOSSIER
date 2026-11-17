@@ -4904,6 +4904,62 @@ pub struct Room {
     #[serde(rename = "designOption", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub design_option: Option<DesignOptionRef>,
+    /// [278] Nutzungseinheit (`Project.units`, Id), zu der der Raum gehört (Wohnung, Gewerbeeinheit). Fehlt oder
+    /// unbekannt ⇒ keiner Einheit zugeordnet (Gemeinschaftsfläche).
+    #[serde(rename = "unitId", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub unit_id: Option<String>,
+    /// [278] Zimmerzahl-Beitrag dieses Raums für den Wohnungsspiegel (CH-Konvention: Zimmer 1, Wohnküche/halbes Zimmer 0.5,
+    /// Nebenraum 0). Fehlt ⇒ Vorgabe aus der Nutzung (`unit_schedule::default_room_count`).
+    #[serde(rename = "roomCount", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub room_count: Option<f64>,
+    #[serde(flatten)]
+    #[ts(skip)]
+    pub extra: Extra,
+}
+
+/// [278] Nutzung einer Nutzungseinheit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+pub enum UnitUsage {
+    #[default]
+    #[serde(rename = "living")]
+    Living,
+    #[serde(rename = "commercial")]
+    Commercial,
+    #[serde(rename = "office")]
+    Office,
+    #[serde(rename = "other")]
+    Other,
+    #[serde(other)]
+    #[ts(skip)]
+    Unknown,
+}
+
+/// [278] Nutzungseinheit (Wohnung, Gewerbe-, Büroeinheit): fasst Räume für den Wohnungsspiegel zusammen. Die Räume
+/// verweisen mit `Room.unitId` auf sie; Fläche, Geschoss und Zimmerzahl rechnet der Kern aus den Räumen.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct Unit {
+    pub id: String,
+    /// Nummer/Bezeichnung, z. B. „2.1“.
+    pub name: String,
+    /// Typ, z. B. „3.5-Zi-Whg“. Fehlt er, leitet der Spiegel bei Wohnungen „n-Zi-Whg“ aus der Zimmerzahl ab.
+    #[serde(rename = "unitType", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub unit_type: Option<String>,
+    /// Nutzung (Fehlt ⇒ Wohnen).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub usage: Option<UnitUsage>,
+    /// Farbe der Einheit (hex) für Darstellungen.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub color: Option<String>,
+    /// Bemerkung (reiner Text).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub note: Option<String>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -6197,6 +6253,9 @@ pub enum LayoutTableSource {
     /// [272] Variantenvergleich: Kennzahlen und Kosten je gespeicherte Variantenkombination.
     #[serde(rename = "designOptionCompare")]
     DesignOptionCompare,
+    /// [278] Wohnungsspiegel (Nutzungseinheiten mit Geschoss, Typ, Zimmer, Flächen).
+    #[serde(rename = "unitSchedule")]
+    UnitSchedule,
     #[serde(other)]
     #[ts(skip)]
     Unknown,
@@ -7068,6 +7127,10 @@ pub struct Project {
     #[serde(rename = "designOptionCombinations", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub design_option_combinations: Option<Vec<DesignOptionCombination>>,
+    /// [278] Nutzungseinheiten (Wohnungen, Gewerbe) für den Wohnungsspiegel; Räume verweisen mit `unitId` darauf.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub units: Option<Vec<Unit>>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -7962,6 +8025,12 @@ impl Project {
             "designOptionCombinations" => {
                 self.design_option_combinations = match v {
                     Some(v) => <Option<Vec<DesignOptionCombination>>>::deserialize(v).map_err(|e| e.to_string())?,
+                    None => Default::default(),
+                };
+            }
+            "units" => {
+                self.units = match v {
+                    Some(v) => <Option<Vec<Unit>>>::deserialize(v).map_err(|e| e.to_string())?,
                     None => Default::default(),
                 };
             }

@@ -444,7 +444,7 @@ pub struct RoomBook {
 }
 
 /// Raumnummern natürlich vergleichen („1.2" vor „1.10").
-fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+pub(crate) fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
     let split = |s: &str| -> Vec<(bool, String)> {
         let mut out: Vec<(bool, String)> = Vec::new();
         for ch in s.chars() {

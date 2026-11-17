@@ -20,6 +20,8 @@ import type {
   Project,
   Room,
   RoomStamp,
+  RoomUsage,
+  Unit,
   RoofType,
   SiaCategory,
   Vec2,
@@ -223,6 +225,21 @@ const ROOMS_PER_FLOOR: RoomDef[] = [
   [P(10, 9.5), "10", "Abstellraum", "NNF"],
 ];
 
+/** Nutzung je Raumname (Raumbuch, Zimmerzahl im Wohnungsspiegel [278]). */
+const USAGE: Record<string, RoomUsage> = { "Wohnen/Essen": "living", Zimmer: "sleeping", Diele: "circulation", Bad: "bath", Treppenhaus: "circulation", Eingang: "circulation", Abstellraum: "storage" };
+/** [278] Nutzungseinheiten: je Geschoss eine West- (Räume 01–04) und eine Ost-Wohnung (05–08); Nummer „Geschoss.Seite“ (EG = 0). */
+const UNIT_NR = { eg: "0", og1: "1", og2: "2" } as const;
+const unitOf = (floor: keyof typeof UNIT_NR, key: string): string | undefined => {
+  const n = Number(key);
+  return n >= 1 && n <= 4 ? `whg-${floor}-w` : n >= 5 && n <= 8 ? `whg-${floor}-o` : undefined;
+};
+function units(): Unit[] {
+  return FLOORS.flatMap((f) => [
+    { id: `whg-${f.id}-w`, name: `${UNIT_NR[f.id]}.1`, usage: "living" as const, color: "#4f8fc0" },
+    { id: `whg-${f.id}-o`, name: `${UNIT_NR[f.id]}.2`, usage: "living" as const, color: "#c0874f" },
+  ]);
+}
+
 function addRooms(p: Project): Project {
   const prefix = { eg: "E", og1: "1", og2: "2" } as const;
   for (const f of FLOORS) {
@@ -235,7 +252,10 @@ function addRooms(p: Project): Project {
       const made = ops.find((o) => o.kind === "add" && o.collection === "rooms");
       if (!made || made.kind !== "add") throw new Error(`Wettbewerb: Raum ${nr} nicht erkannt`);
       const stamp: RoomStamp = { number: nr, name, showFloorArea: true, showUsage: false, roundingStep: 0.1 };
-      const room = { ...(made.items[0] as unknown as Room), id: `raum-${nr}`, name, siaCategory: cat, stamp };
+      const unitId = unitOf(f.id, key);
+      // Ost-Wohnungen: Wohnen/Essen mit offener Küche zählt 1.5 Zimmer (2.5-Zi-Whg), West: 2-Zi-Whg nach der Vorgabe aus der Nutzung.
+      const roomCount = unitId?.endsWith("-o") && baseName === "Wohnen/Essen" ? 1.5 : undefined;
+      const room = { ...(made.items[0] as unknown as Room), id: `raum-${nr}`, name, siaCategory: cat, stamp, usage: USAGE[name], ...(unitId ? { unitId } : {}), ...(roomCount !== undefined ? { roomCount } : {}) };
       p = applyOps(p, [{ kind: "add", collection: "rooms", items: [room as unknown as { id: string }] } as CoreOp]);
     }
   }
@@ -274,6 +294,7 @@ export function buildWettbewerbSampleProject(): Project {
     roofs,
     stairs,
     rooms: [],
+    units: units(),
     drawings2d: cadastre(),
     context: [neighbours()],
     // Raumprogramm des Wettbewerbs (Soll); die Räume im Modell liefern das Ist.
@@ -322,6 +343,8 @@ export function buildWettbewerbSampleProject(): Project {
     ],
     layouts: [
       { id: "lay-situation", name: "Situation 1:500", paper: "a3", orientation: "landscape", planNumber: "001", viewports: [{ id: "vp-situation", snapshotId: "vs-situation", xMm: 20, yMm: 20, widthMm: 380, heightMm: 260, scaleDenominator: 500 }] },
+      // [278] Wohnungsspiegel als lebendige Tabelle (folgt dem Modell).
+      { id: "lay-wohnungsspiegel", name: "Wohnungsspiegel", paper: "a4", orientation: "landscape", planNumber: "002", viewports: [], tables: [{ id: "tab-wohnungsspiegel", source: "unitSchedule", xMm: 20, yMm: 20, widthMm: 257 }] },
     ],
   };
 

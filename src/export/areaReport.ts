@@ -19,6 +19,7 @@ import { ensurePdfFonts, hasPdfFont, PDF_DEFAULT_FONT, setPdfFont } from "./pdfF
 import { computeAreaTable, computeIvhb } from "../analysis/areaTable";
 import type { AreaRow, IvhbOptions } from "../analysis/areaTable";
 import { computeSiteProof } from "../analysis/siteProof";
+import { computeUnitSchedule } from "../analysis/unitSchedule";
 
 /** Zelle: Text oder Zahl (`d` Nachkommastellen, `null` = nicht berechenbar). */
 export type Cell = string | { n: number | null; d: number; g?: boolean };
@@ -55,6 +56,8 @@ export interface AreaReportOptions {
   ivhbOptions?: IvhbOptions;
   /** Baurecht-Nachweis ([255]): Vorgaben der Parzelle gegen Kennzahlen, mit Grundlagen (Default nein). */
   siteProof?: boolean;
+  /** Wohnungsspiegel ([278]): Nutzungseinheiten, Summe je Typ und je Geschoss (Default nein; ohne Einheiten kein Abschnitt). */
+  units?: boolean;
 }
 
 const num = (n: number | null | undefined, d: number): Cell => ({ n: n === undefined || n === null || !Number.isFinite(n) ? null : n, d });
@@ -69,6 +72,44 @@ function areaCells(r: AreaRow): Cell[] {
 export function isAreaReportEmpty(project: Project): boolean {
   const { total, gv } = computeAreaTable(project);
   return [total.hnf, total.nnf, total.vf, total.ff, total.kf, total.gf, total.agf, total.rooms, gv].every((v) => !(Math.abs(v) > 0));
+}
+
+/** [278] Hat das Projekt Nutzungseinheiten (sonst wäre der Wohnungsspiegel leer)? */
+export function hasUnits(project: Project): boolean {
+  return (project.units ?? []).length > 0;
+}
+
+/** [278] Wohnungsspiegel als Abschnitte: Einheiten mit Summe, je Typ, je Geschoss (samt Räumen ohne Einheit). */
+function addUnitSections(project: Project, sections: ReportSection[], notes: string[]): void {
+  if (!hasUnits(project)) return;
+  const u = computeUnitSchedule(project);
+  const dash = "–";
+  sections.push({
+    heading: t("units.table"),
+    columns: [t("units.col.name"), t("units.col.floor"), t("units.col.type"), t("units.col.rooms"), "HNF", "NNF", "NF", t("units.col.outdoor")],
+    widths: [1.4, 3, 2.6, 1.4, 1.6, 1.6, 1.6, 2],
+    rows: [
+      ...u.units.map((r): ReportRow => ({ cells: [r.name, r.floors.join(", "), r.typeLabel, r.usage === "living" ? num(r.roomCount, 1) : dash, num(r.hnf, 2), num(r.nnf, 2), num(r.nf, 2), num(r.agf, 2)] })),
+      { total: true, cells: [t("areas.total"), "", String(u.total.count), num(u.total.roomCount, 1), num(u.total.hnf, 2), num(u.total.nnf, 2), num(u.total.nf, 2), num(u.total.agf, 2)] },
+    ],
+  });
+  sections.push({
+    heading: t("units.byType"),
+    columns: [t("units.col.type"), t("units.col.count"), t("units.col.rooms"), t("units.col.avgHnf"), "HNF", "NF", t("units.col.outdoor")],
+    widths: [3, 1.4, 1.6, 1.8, 1.8, 1.8, 2],
+    rows: u.byType.map((r): ReportRow => ({ cells: [r.typeLabel || t("units.noType"), String(r.count), num(r.roomCount, 1), num(r.avgHnf, 2), num(r.hnf, 2), num(r.nf, 2), num(r.agf, 2)] })),
+  });
+  sections.push({
+    heading: t("units.byLevel"),
+    columns: [t("units.col.floor"), t("units.col.count"), "HNF", "NNF", "NF", t("units.col.outdoor")],
+    widths: [3, 1.4, 1.8, 1.8, 1.8, 2],
+    rows: [
+      ...u.byLevel.map((r): ReportRow => ({ cells: [r.name, String(r.count), num(r.hnf, 2), num(r.nnf, 2), num(r.nf, 2), num(r.agf, 2)] })),
+      ...(u.unassigned.rooms > 0 ? [{ cells: [t("units.unassigned"), "", num(u.unassigned.hnf, 2), num(u.unassigned.nnf, 2), num(u.unassigned.nf, 2), num(u.unassigned.agf, 2)] } as ReportRow] : []),
+    ],
+  });
+  const foot = t("units.foot");
+  if (!notes.includes(foot)) notes.push(foot);
 }
 
 /** Baut den Bericht aus dem Projekt. */
@@ -149,6 +190,7 @@ export function buildAreaReport(project: Project, opts: AreaReportOptions = {}):
       if (!notes.includes(text)) notes.push(text);
     }
   }
+  if (opts.units) addUnitSections(project, sections, notes);
   return { title: t("areas.title"), ...reportHead(project), sections, notes };
 }
 

@@ -28,6 +28,7 @@ pub const NOT_FOR_DRAWINGS: &[&str] = &[
     "roofs",
     "stairs",
     "rooms",
+    "units",
     "columns",
     "trees",
     "cameras",

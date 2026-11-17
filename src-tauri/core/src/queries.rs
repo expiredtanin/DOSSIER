@@ -89,6 +89,15 @@ pub fn run(p: &Project, name: &str, args: &[f64], text: &str) -> Result<String, 
         // [271] Mit Umbau-Zustand (`text` = Filter-Id, z. B. „bestand“ oder „endzustand“; leer = alles).
         ("kennzahlen", _) => json(&kennzahlen::compute(&renovation_state(p, text))),
         ("areaTable", _) => json(&flaechen::area_table(&renovation_state(p, text))),
+        // [278] Wohnungsspiegel (Nutzungseinheiten); mit `text` = `{"head": [...]}` als CSV.
+        ("unitSchedule", _) => {
+            let v: serde_json::Value = serde_json::from_str(text).unwrap_or_default();
+            let sched = crate::unit_schedule::unit_schedule(&options_state(p, text));
+            match v.get("head").and_then(|h| h.as_array()) {
+                Some(h) => json(&crate::unit_schedule::schedule_csv(&sched, &h.iter().filter_map(|x| x.as_str().map(String::from)).collect::<Vec<_>>())),
+                None => json(&sched),
+            }
+        }
         // [271] Umbaufilter (eingebaute und eigene) für die Oberfläche.
         ("renovationFilters", _) => json(&crate::renovation::filter_list(p)),
         // [275] Aufgelöste Umbau-Farben (Vorgabe, Projekt, Etappen) für Muster in der Oberfläche.

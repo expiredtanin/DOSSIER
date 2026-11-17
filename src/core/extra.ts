@@ -45,6 +45,8 @@ export type { RoomBook, RoomBookRow, FinishQty, WallSide } from "../export/roomB
 export { sheetTables, createTable, drawTablesPdf, tableCatalog, tableLabels, tableSourceLabel, TABLE_SOURCES } from "../export/sheetTable";
 export type { TableOut, TablePrim, TableColumn } from "../export/sheetTable";
 export { computeAreaTable, computeIvhb } from "../analysis/areaTable";
+export { computeUnitSchedule, unitScheduleCsv, nextUnitName, newUnitId, UNIT_USAGES } from "../analysis/unitSchedule";
+export type { UnitSchedule, UnitRow, UnitTypeSum, UnitLevelSum, UnitAreas } from "../analysis/unitSchedule";
 export type { AreaTable, AreaRow, Ivhb, IvhbOptions, AgfBasis } from "../analysis/areaTable";
 export { computeSiteProof } from "../analysis/siteProof";
 export type { SiteProof, ProofRow, ProofBasis } from "../analysis/siteProof";
@@ -52,7 +54,7 @@ export { exportProjectName, competitionIdentity, isAnonymous, competitionKeyword
 export type { CompetitionIdentity } from "../export/competitionIdentity";
 export { anonymityFindings } from "../export/competitionCheck";
 export type { AnonymityFinding, AnonymityKind } from "../export/competitionCheck";
-export { isAreaReportEmpty, buildAreaReport, areaReportToCsv, parseAreaReportCsv, areaReportToSvg, buildAreaReportPdf } from "../export/areaReport";
+export { isAreaReportEmpty, hasUnits, buildAreaReport, areaReportToCsv, parseAreaReportCsv, areaReportToSvg, buildAreaReportPdf } from "../export/areaReport";
 export { setPdfFontLoader } from "../export/pdfFonts";
 export type { AreaReport, AreaReportOptions } from "../export/areaReport";
 export { sunPosition, shadowPolygons, shadowOfPrism, projectLatLon } from "../analysis/sun";

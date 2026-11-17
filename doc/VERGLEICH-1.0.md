@@ -58,7 +58,7 @@ Grösse: S ≤ 1 Tag · M ≤ 1 Woche · L ≤ 1 Monat. IDs aus `TODO.md`; **neu
 
 | # | Lücke | Wo / ID | Grösse |
 |---|---|---|---|
-| 6 | **Wohnungsspiegel / Nutzungseinheiten**: Räume lassen sich keiner Wohnung zuordnen; kein Spiegel (Zimmerzahl, NWF je Wohnung) — im Mehrfamilienhaus-WBW üblich. **neu** | `Room` (nur `usage`, `siaCategory`), `flaechen.rs`, `RoomBookSection` | M |
+| 6 | **Wohnungsspiegel / Nutzungseinheiten**: Räume lassen sich keiner Wohnung zuordnen; kein Spiegel (Zimmerzahl, NWF je Wohnung) — im Mehrfamilienhaus-WBW üblich. **erledigt 17.11. ([278], Rest: Grundriss-Darstellung der Einheiten)** | `unit_schedule.rs`, `UnitsSection` | M |
 | 7 | **Geländer als eigenes Bauteil** (Balkon/Loggia/Absturzsicherung in Plan, Schnitt, Ansicht, 3D); heute nur Wand-/2D-Behelf. **neu** | Modell `Stair.railProfile`/`stairs3d::RailSpec` als Ausgangspunkt, `cmds/` | M |
 | 8 | **Geneigte Decke / Rampe** (Tiefgarage, Terrassen mit Gefälle): `Ceiling` hat nur Ober-/Unterkante, keine Neigung; Behelf Pultdach/Körper. **neu** | `Ceiling`, `ceiling_item` (`cmd_create.rs`), `plan/section` | M |
 | 9 | **Träger/Unterzug/Fassadenträger**: kein Element (Behelf Körper/Wand), Deckenspiegel mit Unterzügen fehlt. **neu**, [100] nennt die Lücke | `columns` als Muster | M |

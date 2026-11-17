@@ -158,6 +158,21 @@ const DESIGN_OPTION_COMPARE: &[Col] = &[
     c("cost", "designOption.compare.cost", 1.9, true, true),
 ];
 
+/// [278] Wohnungsspiegel: eine Zeile je Nutzungseinheit, Summenzeile am Ende.
+const UNITS: &[Col] = &[
+    c("name", "units.col.name", 1.1, false, true),
+    c("floor", "openings.col.floor", 1.8, false, true),
+    c("type", "units.col.type", 2.0, false, true),
+    c("usage", "units.col.usage", 1.6, false, false),
+    c("rooms", "units.col.rooms", 1.1, true, true),
+    c("hnf", "sheetTable.col.hnf", 1.2, true, true),
+    c("nnf", "sheetTable.col.nnf", 1.2, true, false),
+    c("nf", "sheetTable.col.nf", 1.2, true, true),
+    c("outdoor", "units.col.outdoor", 1.4, true, true),
+    c("roomCount", "sheetTable.col.roomCount", 1.1, true, false),
+    c("note", "units.col.note", 2.4, false, false),
+];
+
 /// [158] Raumbuch-Spalten, die nur erscheinen, wenn ein Raum eine Dachschräge hat.
 const SLOPE_COLS: &[&str] = &["heightMin", "heightMean", "areaUnder1", "area1To15"];
 
@@ -192,6 +207,10 @@ pub const VALUE_KEYS: &[&str] = &[
     "roomBook.usage.office",
     "roomBook.usage.other",
     "roomBook.wet",
+    "units.usage.living",
+    "units.usage.commercial",
+    "units.usage.office",
+    "units.usage.other",
     "costs.group.B",
     "costs.group.C",
     "costs.group.D",
@@ -233,6 +252,7 @@ pub fn catalog(source: LayoutTableSource) -> &'static [Col] {
         LayoutTableSource::Costs => COSTS,
         LayoutTableSource::SiteProof => SITE_PROOF,
         LayoutTableSource::DesignOptionCompare => DESIGN_OPTION_COMPARE,
+        LayoutTableSource::UnitSchedule => UNITS,
     }
 }
 
@@ -240,7 +260,7 @@ pub fn catalog(source: LayoutTableSource) -> &'static [Col] {
 pub fn catalog_json() -> Value {
     let one = |s: &[Col]| s.iter().map(|k| json!({"id": k.id, "key": k.key, "numeric": k.numeric, "default": k.default})).collect::<Vec<_>>();
     json!({
-        "sources": {"openings": one(OPENINGS), "areas": one(AREAS), "rooms": one(ROOMS), "elements": one(ELEMENTS), "earthworks": one(EARTHWORKS), "roomBook": one(ROOM_BOOK), "costs": one(COSTS), "siteProof": one(SITE_PROOF), "designOptionCompare": one(DESIGN_OPTION_COMPARE)},
+        "sources": {"openings": one(OPENINGS), "areas": one(AREAS), "rooms": one(ROOMS), "elements": one(ELEMENTS), "earthworks": one(EARTHWORKS), "roomBook": one(ROOM_BOOK), "costs": one(COSTS), "siteProof": one(SITE_PROOF), "designOptionCompare": one(DESIGN_OPTION_COMPARE), "unitSchedule": one(UNITS)},
         "valueKeys": VALUE_KEYS,
     })
 }
@@ -379,6 +399,7 @@ fn data_of(p: &Project, t: &LayoutTable, lb: &Labels) -> Data {
         LayoutTableSource::Costs => costs_data(p, lb),
         LayoutTableSource::SiteProof => site_proof_data(p, lb),
         LayoutTableSource::DesignOptionCompare => design_option_compare_data(p),
+        LayoutTableSource::UnitSchedule => unit_schedule_data(p, lb),
     }
 }
 
@@ -438,6 +459,38 @@ fn costs_data(p: &Project, lb: &Labels) -> Data {
     rows.push(vec![empty(), txt(lb.get("costs.row.net")), empty(), empty(), empty(), chf(r.net)]);
     rows.push(vec![txt("Z"), txt(pct("costs.row.vat", r.vat_pct)), empty(), empty(), empty(), chf(r.vat)]);
     rows.push(vec![empty(), txt(format!("{} (±{} %)", lb.get("costs.row.gross"), to_fixed(r.accuracy_pct, 0))), empty(), empty(), empty(), chf(r.gross)]);
+    Data { rows, sloped: false, total_last: true }
+}
+
+/// [278] Wohnungsspiegel: eine Zeile je Nutzungseinheit (Nummer, Geschoss, Typ, Nutzung, Zimmer, HNF, NNF, NF, Aussenraum,
+/// Zimmerzahl-Spalte „roomCount“ = Zahl der Räume), Summenzeile mit Zahl der Einheiten im Typ-Feld. Ohne Einheiten leer.
+fn unit_schedule_data(p: &Project, lb: &Labels) -> Data {
+    let s = crate::unit_schedule::unit_schedule(p);
+    if s.units.is_empty() {
+        return Data { rows: vec![], sloped: false, total_last: false };
+    }
+    let dash = || txt("–");
+    let mut rows: Vec<Vec<Cell>> = s
+        .units
+        .iter()
+        .map(|u| {
+            vec![
+                txt(u.name.clone()),
+                txt(u.floors.join(", ")),
+                txt(u.type_label.clone()),
+                txt(lb.get(&format!("units.usage.{}", u.usage))),
+                if u.usage == "living" { num(u.room_count, 1) } else { dash() },
+                num(u.areas.hnf, 2),
+                num(u.areas.nnf, 2),
+                num(u.areas.nf, 2),
+                num(u.areas.agf, 2),
+                num(u.rooms as f64, 0),
+                txt(u.note.clone()),
+            ]
+        })
+        .collect();
+    let t = &s.total;
+    rows.push(vec![txt(lb.get("sheetTable.v.total")), txt(""), txt(format!("{}", t.count)), txt(""), num(t.room_count, 1), num(t.areas.hnf, 2), num(t.areas.nnf, 2), num(t.areas.nf, 2), num(t.areas.agf, 2), num(s.units.iter().map(|u| u.rooms as f64).sum(), 0), txt("")]);
     Data { rows, sloped: false, total_last: true }
 }
 
@@ -892,6 +945,25 @@ mod tests {
         assert!(render(&p, &p.layouts.as_ref().unwrap()[0], &lb()).is_empty());
         assert_eq!(query(&p, r#"{"layoutId":"nix"}"#), json!([]));
         assert!(catalog_json()["sources"]["elements"].as_array().unwrap().len() >= 6);
+    }
+
+    /// [278] Wohnungsspiegel als Blatt-Tabelle: eine Zeile je Einheit plus Summe; ohne Einheiten leer.
+    #[test]
+    fn wohnungsspiegel_tabelle() {
+        let mut t = table("u", None);
+        t.source = LayoutTableSource::UnitSchedule;
+        let mut p = project(0, vec![t]);
+        assert_eq!(serde_json::to_value(LayoutTableSource::UnitSchedule).unwrap(), "unitSchedule");
+        assert_eq!(catalog_json()["sources"]["unitSchedule"].as_array().unwrap().len(), 11);
+        assert_eq!(render(&p, &p.layouts.as_ref().unwrap()[0], &lb())[0].total, 0);
+        let lvl = p.drawing_levels[0].id.clone();
+        let sq = |s: f64| vec![Vec2 { x: 0.0, y: 0.0 }, Vec2 { x: s, y: 0.0 }, Vec2 { x: s, y: s }, Vec2 { x: 0.0, y: s }];
+        p.units = Some(vec![Unit { id: "a".into(), name: "1.1".into(), ..Default::default() }]);
+        p.rooms = Some(vec![Room { id: "r".into(), floor_id: lvl, usage: Some(RoomUsage::Living), unit_id: Some("a".into()), boundary: sq(4.0), ..Default::default() }]);
+        let r = render(&p, &p.layouts.as_ref().unwrap()[0], &lb());
+        assert_eq!(r[0].total, 2, "Einheit + Summe");
+        let tx = texts(&r[0]);
+        assert!(tx.contains(&"1-Zi-Whg".to_string()) && tx.contains(&"16.00".to_string()), "{tx:?}");
     }
 
     /// [209] Kostenschätzung als Blatt-Tabelle: Gruppen beschriftet, Franken mit Apostroph, Total als Summenzeile.
