@@ -785,6 +785,8 @@ struct Ids {
     solid: Option<String>,
     room: Option<String>,
     opening: Option<String>,
+    /// [271] Baum (Kronenumriss, Stamm): Id aus der Pick-Fläche `@tree:<id>`, den übrigen Teilen nachgetragen.
+    tree: Option<String>,
 }
 
 struct Entry {
@@ -818,6 +820,7 @@ fn read_entry(part: &mut Part, i: usize, hatches: &[(i32, Hatch, i32)], text: Op
             6 => ids.room = Some(s),
             7 => ids.solid = Some(s),
             9 => ids.column = Some(s),
+            8 => ids.tree = s.strip_prefix(crate::tree::TREE_PICK_PREFIX).map(str::to_string),
             _ => {}
         }
     }
@@ -1492,6 +1495,13 @@ fn renovation_layers(cx: &mut Ctx, cats: &[&LayerCategory]) -> HashMap<String, S
     use crate::model::RenovationStatus as S;
     let p = cx.project;
     let mut items: Vec<(&str, &str, S)> = Vec::new();
+    // Möbel/Symbole und 2D-Elemente mit ausdrücklichem Status; Bäume: ihr `status` ist der Umbau-Status ([149]).
+    for d in &p.drawings2d {
+        items.push((&d.id, &d.category_code, crate::renovation::status_of(d.renovation.as_ref())));
+    }
+    for t in p.trees.iter().flatten() {
+        items.push((&t.id, &t.category_code, crate::renovation::tree_renovation(t).status));
+    }
     for w in &p.walls {
         items.push((&w.id, &w.category_code, crate::renovation::status_of(w.renovation.as_ref())));
     }
@@ -1526,11 +1536,16 @@ fn emit_entries(cx: &mut Ctx, main: &mut Buf, entries: &[Entry], layer_by_code: 
     let layer_of_code = |m: &HashMap<&str, &str>, id: &str| -> Option<String> { layer_by_code.get(m.get(id).copied().unwrap_or("")).cloned() };
     let drawing_layer = |id: Option<&String>, fallback: &str| -> String {
         match id {
+            Some(id) if ren_layer.contains_key(id) => ren_layer[id].clone(),
             Some(id) => layer_of_code(&code_by_drawing, id).unwrap_or_else(|| LAYER_DEFAULT.to_string()),
             None => fallback.to_string(),
         }
     };
     let layer_for = |e: &Entry| -> String {
+        // [271] Teile eines Baums mit Status Abbruch/Neu: Status-Ebene (Bestand bleibt auf der bisherigen Ebene).
+        if let Some(l) = e.ids.tree.as_ref().and_then(|id| ren_layer.get(id)) {
+            return l.clone();
+        }
         match e.tag {
             T_POLYGON => {
                 if let Some(l) = e.ids.wall.as_ref().or(e.ids.column.as_ref()).and_then(|id| ren_layer.get(id)) {
@@ -1719,6 +1734,27 @@ fn emit_entries(cx: &mut Ctx, main: &mut Buf, entries: &[Entry], layer_by_code: 
     }
 }
 
+/// [271] Baum-Symbol (`plan/trees.rs::tree_symbol`): Pick-Fläche `@tree:<id>`, dann Kronenlinien (`tree-crown`,
+/// `tree-remove`), zuletzt der Stamm (Fläche ohne Ids). Linien und Stamm tragen keine Id — sie bekommen die des Baums.
+fn tag_tree_parts(entries: &mut [Entry]) {
+    let mut cur: Option<String> = None;
+    for e in entries.iter_mut() {
+        if e.ids.tree.is_some() {
+            cur = e.ids.tree.clone();
+            continue;
+        }
+        let crown = matches!(&e.prim, Prim::Line { cls, .. } if cls == "tree-crown" || cls == "tree-remove");
+        let bare = e.ids.wall.is_none() && e.ids.drawing.is_none() && e.ids.column.is_none() && e.ids.solid.is_none() && e.ids.room.is_none() && e.ids.opening.is_none();
+        if cur.is_some() && crown {
+            e.ids.tree = cur.clone();
+        } else if cur.is_some() && bare && e.tag == T_POLYGON {
+            e.ids.tree = cur.take();
+        } else {
+            cur = None;
+        }
+    }
+}
+
 /// Primitive der Abschnitte in Plan-Reihenfolge lesen (Texte gesetzt beim Massstab `scale`).
 fn read_entries(parts: &mut [Part], scale: f64, font: &str) -> Option<Vec<Entry>> {
     let mut entries: Vec<Entry> = Vec::new();
@@ -1729,6 +1765,7 @@ fn read_entries(parts: &mut [Part], scale: f64, font: &str) -> Option<Vec<Entry>
             entries.push(read_entry(part, i, &hatches, text.as_ref())?);
         }
     }
+    tag_tree_parts(&mut entries);
     Some(entries)
 }
 
