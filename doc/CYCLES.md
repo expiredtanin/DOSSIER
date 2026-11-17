@@ -220,6 +220,8 @@ Farbton erhalten, Lichter entsättigt, sRGB-Übertragung; `standard` = nur begre
 Iso 96 s · `:wettbewerb` Iso 48 s, Perspektive 44 s. Bilder: `doc/review-215/`. Angesehen: Normalen stimmen, Fenster spiegeln/durchsichtig, Schatten zur erwarteten Seite.
 **Nicht geprüft:** Mac/Metal, Tauri/Electron-Einbindung, Texturen im echten Lauf nur über `:musterhaus-komplex` (Wiese), Normalenkarten (unbenutzt).
 
+**Ansicht (17.11., [271]/[272]):** die Optionen der Abfrage `cyclesScene` kennen `renovation`, `renovationPhase` und `designOptions` (derselbe Text wie bei IFC/Netz-Exporten, `renovation::view_from_text`): Elemente, die der Umbaufilter oder die Variantenkombination ausblendet, fehlen in der Szene. `renovationColors: true` malt Elemente mit Umbau-Status in der Füllfarbe des Status (Bestand grau, Abbruch gelb, Neu rot; einfarbig, Rauheit 0.8, ohne Bildkarte; Glas bleibt Glas), sonst Materialfarben (`cycles_scene_styled`). Dialog „Rendering …“ und CLI (`--renovation`, `--phase`, `--options`, `--combination`, `--renovation-colors`) setzen sie.
+
 ## 10. Bau, CI und Auslieferung (Teil 2, 16.11.)
 
 **Ablauf.** `.github/workflows/cycles.yml` (manuell und bei Änderung von `scripts/cycles/**`) baut Cycles je Plattform und legt

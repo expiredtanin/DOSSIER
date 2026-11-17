@@ -24,6 +24,7 @@ import {
   type RenderCameraChoice,
   type RenderCameraSpec,
   exportProjectName,
+  hasExportView,
 } from "../core";
 import { getState } from "../state/appStore";
 import { setRenderDialogOpener } from "../state/renderDialogHook";
@@ -46,6 +47,7 @@ import {
 import { saveBinaryFile } from "../native/saveFile";
 import { runWithAnonymityGate } from "../state/anonymityGate";
 import { defaultTargetLayout, placeImageOnLayout } from "../state/layoutImageActions";
+import { activeExportView, type ActiveExportView } from "../state/exportViewState";
 import { PreviewBadge } from "./PreviewBadge";
 
 type SizeId = "sd" | "hd" | "uhd" | "a4" | "a3" | "a2" | "custom";
@@ -83,6 +85,10 @@ export const RenderDialogHost = memo(function RenderDialogHost() {
   const [cameras, setCameras] = useState<RenderCameraChoice[]>([]);
   // [227] Baugrube im Bild ausblenden (Gelände hinterfüllt); das 3D im Modell bleibt wie es ist.
   const [backfilled, setBackfilled] = useState(true);
+  // [271][272] Ansicht der aktiven 3D-Ansicht (Umbaufilter, Variantenkombination); übernehmen oder Hauptvarianten/alles.
+  const [view, setView] = useState<ActiveExportView>({ view: {}, labels: { renovation: null, combination: null } });
+  const [useView, setUseView] = useState(true);
+  const [renoColors, setRenoColors] = useState(false);
   // [215] Renderer: eingebautes Cycles oder Blender; `cyclesOk` undefined, bis die Suche nach dem mitgelieferten Programm fertig ist.
   const [engine, setEngine] = useState<RenderEngine>("blender");
   const [cyclesOk, setCyclesOk] = useState<boolean | undefined>(undefined);
@@ -116,6 +122,9 @@ export const RenderDialogHost = memo(function RenderDialogHost() {
       const st = getState();
       setWhen(toInputValue(defaultRenderTime(st.project)));
       setCamera(currentRenderCamera());
+      setView(activeExportView());
+      setUseView(true);
+      setRenoColors(false);
       setCameraKey("live");
       setCameras(projectRenderCameras(st.project));
       setPath(getBlenderPath());
@@ -200,7 +209,9 @@ export const RenderDialogHost = memo(function RenderDialogHost() {
     // Sonnenzeit der Kamera übernehmen (änderbar).
     if (choice.sunWhen) setWhen(toInputValue(choice.sunWhen));
   };
-  const request = () => ({ width: dims.width, height: dims.height, samples, when: date!, camera, backfilled });
+  const viewActive = hasExportView(view.view);
+  const appliedView = viewActive && useView ? view.view : undefined;
+  const request = () => ({ width: dims.width, height: dims.height, samples, when: date!, camera, backfilled, view: appliedView });
   const stageText = (e: { stage: string; done: number; total: number }) =>
     e.stage === "render"
       ? t("render.stage.render", { done: e.done, total: e.total })
@@ -287,7 +298,7 @@ export const RenderDialogHost = memo(function RenderDialogHost() {
     try {
       const res = await renderWithCycles(
         st.project,
-        { width: dims.width, height: dims.height, samples, denoise, when: date!, camera, backfilled, context, extraEv: exposureEv },
+        { width: dims.width, height: dims.height, samples, denoise, when: date!, camera, backfilled, context, extraEv: exposureEv, view: appliedView, renovationColors: renoColors && !!appliedView?.renovation },
         {
           signal: ac.signal,
           onMissingTextures: (n) => st.notify(t("render.missingTextures", { n }), "warning"),
@@ -558,6 +569,33 @@ export const RenderDialogHost = memo(function RenderDialogHost() {
                   <input type="checkbox" data-testid="render-backfilled" checked={backfilled} disabled={busy} onChange={(e) => setBackfilled(e.target.checked)} /> {t("render.backfilled")}
                 </label>
                 <div className="imp-note">{t("render.backfilled.hint")}</div>
+              </section>
+              <section className="imp-section" data-testid="render-view">
+                <div className="imp-section-title">{t("render.view")}</div>
+                {viewActive ? (
+                  <>
+                    <label className="imp-field-label">
+                      <input type="checkbox" data-testid="render-view-use" checked={useView} disabled={busy} onChange={(e) => setUseView(e.target.checked)} /> {t("render.view.use")}
+                    </label>
+                    <div className="imp-note" data-testid="render-view-summary">
+                      {useView
+                        ? [view.labels.renovation ? t("render.view.renovation", { name: view.labels.renovation }) : "", view.labels.combination ? t("render.view.combination", { name: view.labels.combination }) : ""].filter(Boolean).join(" · ")
+                        : t("render.view.off")}
+                    </div>
+                  </>
+                ) : (
+                  <div className="imp-note" data-testid="render-view-summary">
+                    {t("render.view.none")}
+                  </div>
+                )}
+                {useCycles && viewActive && useView && !!view.view.renovation && (
+                  <>
+                    <label className="imp-field-label" style={{ display: "block", marginTop: 4 }}>
+                      <input type="checkbox" data-testid="render-reno-colors" checked={renoColors} disabled={busy} onChange={(e) => setRenoColors(e.target.checked)} /> {t("render.view.colors")}
+                    </label>
+                    <div className="imp-note">{t("render.view.colorsHint")}</div>
+                  </>
+                )}
               </section>
               {useCycles && (
                 <section className="imp-section" data-testid="render-cycles-options">

@@ -15,6 +15,9 @@ export { projectToWorldCoords } from "../model/geoRebase";
 export { exportScheduleCsv } from "../export/exportSchedule";
 export { exportObj, exportMtl, exportStl, exportGlb, exportGltf } from "../export/exportMesh";
 export { exportProjectStep } from "../export/exportStep";
+// [271][272] Ansicht eines Exports/Renderings (Umbaufilter, Etappe, Variantenkombination der aktiven Ebene).
+export { levelExportView, hasExportView, exportViewText, exportViewFields, exportViewLabels } from "../export/exportView";
+export type { ExportView } from "../export/exportView";
 export { planToSvgString } from "../export/planToSvgString";
 export { setWasmBytesProvider } from "../engine/wasmSource";
 export { initCore } from "../engine/coreWasm";

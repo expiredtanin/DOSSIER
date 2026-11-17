@@ -12,7 +12,9 @@ import {
   type Codec,
   type CyclesPackage,
   type CyclesSceneOptions,
+  type ExportView,
   type RenderCameraSpec,
+  exportViewFields,
 } from "../core";
 import type { Project } from "../model/types";
 import { pakoCodec } from "../export/zlibCodec";
@@ -108,6 +110,10 @@ export interface CyclesRequest {
   exposureEv?: number;
   /** Belichtungskorrektur in EV beim Tonwert, auf die automatische Belichtung (0 = keine). */
   extraEv?: number;
+  /** [271][272] Ansicht der Szene (Umbaufilter, Etappe, Variantenkombination); fehlt sie, gilt kein Filter und die Hauptvarianten. */
+  view?: ExportView;
+  /** [271] Umbau-Farben im Bild (Vorgabe aus: Materialfarben). */
+  renovationColors?: boolean;
 }
 
 export interface CyclesHooks {
@@ -181,6 +187,8 @@ export async function renderWithCycles(project: Project, req: CyclesRequest, hoo
     backfilled: req.backfilled,
     context: req.context,
     exposureEv: req.exposureEv,
+    ...exportViewFields(req.view),
+    ...(req.renovationColors ? { renovationColors: true } : {}),
   });
   if (pkg.info.meshes === 0) throw new CyclesRenderError("empty", 0, "");
   if (pkg.missingTextures.length > 0) hooks.onMissingTextures?.(pkg.missingTextures.length);

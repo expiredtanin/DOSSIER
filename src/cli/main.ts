@@ -26,6 +26,8 @@
 //                                                  model3d, kennzahlen, dxf, ifc, obj …); `designoptions` vergleicht die gespeicherten Kombinationen
 //                                                  (--all: alle Kombinationen der Sätze) [272]
 //                                                  --combination "Studie 1" gespeicherte benannte Kombination (Name oder id), für alle Ausgaben [272]
+//                                                  Exporte und Rendering (ifc, obj, stl, glb, gltf, step, render, blend) folgen --renovation/--phase ebenso: Ausgeblendetes fehlt;
+//                                                  render --engine cycles: --renovation-colors malt die Umbau-Farben ins Bild (Vorgabe: Materialfarben) [271]
 //                                                  --hide <Code|Name,…> blendet Klassen aus (z. B. --hide "Schatten,Auto-Bemassung") [180]
 //                                                  --snapshot <Name|id> übernimmt Geschoss, Massstab, Vorlage und Sichtbarkeit eines Ausschnitts [207]
 //   dossier-cli <projekt.obp> axo [--view southeast|southwest|northeast|northwest|iso|…] [--projection iso|military|military30]
@@ -150,6 +152,7 @@ import {
   viewportLevelPlan,
   generateAxoPlan,
   renovationFilterList,
+  exportViewFields,
   parseCombination,
   designOptionSets,
   designOptionCombinations,
@@ -202,7 +205,7 @@ import {
   runCyclesRender,
   CyclesMissingError,
 } from "../core";
-import type { BlenderHost, CyclesHost, Filter3d, Project, RenderMode, RenderPackage, RenderViewPreset, TextureLoader, ViewTemplate } from "../core";
+import type { BlenderHost, CyclesHost, ExportView, Filter3d, Project, RenderMode, RenderPackage, RenderViewPreset, TextureLoader, ViewTemplate } from "../core";
 import { serveStdio } from "./mcp";
 import { startBridge } from "./mcpBridge";
 
@@ -404,6 +407,11 @@ function renovationFlags(project: Project, args: Args): { renovation: string; re
   const p = phases.find((x) => x.id === ph || x.name.toLowerCase() === ph.toLowerCase());
   if (!p) fail(`Etappe nicht gefunden: ${ph} (vorhanden: ${phases.map((x) => x.name).join(", ") || "keine"})`);
   return { renovation: hit.id, renovationPhase: p.id };
+}
+
+/** [271][272] Ansicht für Exporte und Rendering aus `--renovation`/`--phase` (die Kombination gilt schon über `--options`/`--combination`); ohne Flag `undefined`. */
+function exportViewFlags(project: Project, args: Args): ExportView | undefined {
+  return renovationFlags(project, args) ?? undefined;
 }
 
 /** `--sketch` ([67]): die Ebene im Skizzenstil (wie `DrawingLevel.sketch`); sonst das Projekt unverändert. */
@@ -881,7 +889,7 @@ async function buildCliPackage(project: Project, args: Args, mode: RenderMode): 
   await loadFileio();
   const pkg = await buildRenderPackage(
     project,
-    { mode, width, height, samples, when, camera: choice ? choice.camera : { preset: view }, device: args.flags.has("cpu") ? "cpu" : "auto", backfilled: !args.flags.has("excavation") },
+    { mode, width, height, samples, when, camera: choice ? choice.camera : { preset: view }, device: args.flags.has("cpu") ? "cpu" : "auto", backfilled: !args.flags.has("excavation"), view: exportViewFlags(project, args) },
     localTextureLoader(),
   );
   if (pkg.missingTextures.length > 0) process.stderr.write(`Hinweis: ${pkg.missingTextures.length} Bildkarten nicht lesbar (Material erscheint einfarbig)\n`);
@@ -962,7 +970,7 @@ async function runCyclesRenderCli(project: Project, args: Args): Promise<number>
   if (look !== "filmic" && look !== "standard") return fail("--look: filmic|standard");
   const pkg = await buildCyclesPackage(
     project,
-    { width, height, samples, denoise: !args.flags.has("no-denoise"), whenMs: when.getTime(), camera: choice ? choice.camera : { preset: view }, backfilled: !args.flags.has("excavation"), context: !args.flags.has("no-context"), exposureEv },
+    { width, height, samples, denoise: !args.flags.has("no-denoise"), whenMs: when.getTime(), camera: choice ? choice.camera : { preset: view }, backfilled: !args.flags.has("excavation"), context: !args.flags.has("no-context"), exposureEv, ...exportViewFields(exportViewFlags(project, args)), ...(args.flags.has("renovation-colors") ? { renovationColors: true } : {}) },
     localTextureLoader(),
   );
   if (pkg.info.meshes === 0) return fail("render: Das Modell enthält keine 3D-Geometrie");
@@ -1305,7 +1313,7 @@ async function execute(project: Project, file: string, command: string, rest: st
     case "ifc":
       await loadFileio();
       // --ebkph: eBKP-H-Hauptgruppen je Bauteilart; --ebenen: Ebene (categoryCode) des Modells als Klassifikation.
-      out(args, exportIfcSpf(project, { ebkph: args.flags.has("ebkph"), layerCodes: args.flags.has("ebenen"), context: args.flags.has("kontext"), schema: ifcSchemaFlag(args) }), `${exportProjectName(project) || "projekt"}.ifc`);
+      out(args, exportIfcSpf(project, { ebkph: args.flags.has("ebkph"), layerCodes: args.flags.has("ebenen"), context: args.flags.has("kontext"), schema: ifcSchemaFlag(args), view: exportViewFlags(project, args) }), `${exportProjectName(project) || "projekt"}.ifc`);
       return 0;
     case "obj":
       await loadFileio();
@@ -1314,26 +1322,26 @@ async function execute(project: Project, file: string, command: string, rest: st
       {
         const target = args.flags.get("out") ?? `${exportProjectName(project) || "projekt"}.obj`;
         if (target === "-" || args.flags.has("no-mtl")) {
-          out(args, exportObj(project), `${exportProjectName(project) || "projekt"}.obj`);
+          out(args, exportObj(project, { view: exportViewFlags(project, args) }), `${exportProjectName(project) || "projekt"}.obj`);
         } else {
           const mtlPath = target.replace(/\.obj$/i, "") + ".mtl";
-          out(args, exportObj(project, {}, basename(mtlPath)), target);
-          writeFileSync(mtlPath, exportMtl(project));
+          out(args, exportObj(project, { view: exportViewFlags(project, args) }, basename(mtlPath)), target);
+          writeFileSync(mtlPath, exportMtl(project, { view: exportViewFlags(project, args) }));
           process.stderr.write(`geschrieben: ${mtlPath}\n`);
         }
       }
       return 0;
     case "stl":
       await loadFileio();
-      out(args, exportStl(project), `${exportProjectName(project) || "projekt"}.stl`);
+      out(args, exportStl(project, { view: exportViewFlags(project, args) }), `${exportProjectName(project) || "projekt"}.stl`);
       return 0;
     case "glb":
       await loadFileio();
-      out(args, exportGlb(project, { byLevel: !args.flags.has("flat") }), `${exportProjectName(project) || "projekt"}.glb`);
+      out(args, exportGlb(project, { byLevel: !args.flags.has("flat"), view: exportViewFlags(project, args) }), `${exportProjectName(project) || "projekt"}.glb`);
       return 0;
     case "gltf":
       await loadFileio();
-      out(args, exportGltf(project, { byLevel: !args.flags.has("flat") }), `${exportProjectName(project) || "projekt"}.gltf`);
+      out(args, exportGltf(project, { byLevel: !args.flags.has("flat"), view: exportViewFlags(project, args) }), `${exportProjectName(project) || "projekt"}.gltf`);
       return 0;
     case "kennzahlen": {
       // --sia416 / --ivhb: Flächentabelle bzw. IVHB-Kennziffern [70]; --format json|csv|svg|pdf (Default json).
@@ -1488,7 +1496,7 @@ async function execute(project: Project, file: string, command: string, rest: st
       return 0;
     }
     case "step": {
-      const r = await exportProjectStep(project, project.name || "projekt");
+      const r = await exportProjectStep(project, project.name || "projekt", exportViewFlags(project, args));
       if (r.skipped.length) process.stderr.write(`${r.skipped.length} Körper übersprungen/ungeschnitten.\n`);
       out(args, r.text, `${exportProjectName(project) || "projekt"}.stp`);
       return 0;

@@ -124,7 +124,13 @@ pub fn run(p: &Project, name: &str, args: &[f64], text: &str) -> Result<String, 
         // [215] Cycles-Szene (XML + Bilddateien) aus dem Projekt; Text = `CyclesOptions` als JSON (camelCase).
         ("cyclesScene", _) => {
             let o: crate::cycles_scene::CyclesOptions = if text.trim().is_empty() { Default::default() } else { serde_json::from_str(text).map_err(|e| format!("cyclesScene: {e}"))? };
-            json(&crate::cycles_scene::cycles_scene(&options_state(p, text), &o)?)
+            // [271] Umbau-Farben nur auf Wunsch (`renovationColors`); Ausgeblendetes (Umbaufilter, Variante) fehlt immer.
+            let styled: std::collections::HashMap<String, String> = if o.renovation_colors {
+                crate::renovation::view_from_text(p, text).map(|v| v.resolve(p).styled.into_iter().map(|(k, s)| (k, s.fill)).collect()).unwrap_or_default()
+            } else {
+                Default::default()
+            };
+            json(&crate::cycles_scene::cycles_scene_styled(&options_state(p, text), &o, &styled)?)
         }
         ("dormerStatus", _) => json(&crate::dormer::status(p)),
         ("excavationQuantities", _) => json(&crate::excavation::quantities(p)),
@@ -181,7 +187,11 @@ pub fn run(p: &Project, name: &str, args: &[f64], text: &str) -> Result<String, 
             let filter = model3d::ClassFilter::from_text(p, text);
             if let Some(gap) = explode {
                 let p = opt_p.as_ref();
-                let parts = crate::explode3d::parts_filtered(p, args[0] != 0.0, args[1], args[2] != 0.0, gap, &filter)?;
+                let mut parts = crate::explode3d::parts_filtered(p, args[0] != 0.0, args[1], args[2] != 0.0, gap, &filter)?;
+                // [271] Umbau-Farben wie im 3D-Fenster ohne Explosion (Ausgeblendetes fehlt schon über `opt_p`).
+                if let Some(r) = crate::renovation::view_from_text(p, text).map(|v| v.resolve(p)) {
+                    crate::renovation::color_parts(p, &mut parts, &r);
+                }
                 let mut v = serde_json::to_value(&parts).map_err(|e| e.to_string())?;
                 if args.get(3).is_some_and(|v| *v != 0.0) {
                     let cuts = crate::explode3d::void_cuts(p, &parts, gap);
@@ -493,3 +503,7 @@ fn buf_with(post: Option<crate::plan::extras::Post>, f: impl FnOnce(&mut crate::
     w.end_group(start);
     Ok(w.finish())
 }
+
+#[cfg(test)]
+#[path = "export_view_tests.rs"]
+mod export_view_tests;

@@ -490,7 +490,7 @@ wo der Umbaufilter wirkt: Grundriss (`Ctx.hidden`, 2D-Elemente über `drawings::
 Axo, 3D (`model3dParts` mit Text; das 3D-Fenster nimmt die Kombination der aktiven Ebene, ohne Teil-Cache), Kennzahlen/Kosten/Baurecht/
 Raumbuch/IFC/Netz-Exporte (`queries.rs::options_state`: Kombination des JSON-Texts, sonst Hauptvarianten). Blatt-Viewports:
 `sheet_viewports::viewport_snapshot`/`snapshot_project` (Rust) bzw. `viewportPlan.ts::viewportDesignOptions` (TS), Titelzusatz
-`posterTemplates.ts::viewportVariantSuffix`. Bearbeiten: `design_options.rs` (Wurzel-Abfragen `designOptionAcceptOps`, `…DeleteOps`,
+`posterTemplates.ts::viewportVariantSuffix`. Exporte und Rendering ([271]/[272] Nachtrag): `src/export/exportView.ts` (`levelExportView`: Umbaufilter, Etappe, Kombination der aktiven Ebene → `exportViewText`) ist der eine Weg in die Kern-Abfragen von IFC (`ifcExportData`), OBJ/STL/glTF (`meshExportData`), STEP (`projectSolidSpecs`), Blender-Paket und Cycles-Szene (`cyclesScene`, dazu `renovationColors`); Dialoge: `ExportSaveDialog`, `RenderDialog` (Zustand `state/exportViewState.ts`), CLI `--renovation/--phase` (`exportViewFlags`). Bearbeiten: `design_options.rs` (Wurzel-Abfragen `designOptionAcceptOps`, `…DeleteOps`,
 `…AssignOps`, `…CopyOps`; neue Elemente der Zeichenbefehle über `stamp_ops`, Anfrage-Feld `designOption` aus `projectSlice.applyCmd`),
 Vergleich `designOptionCompare` (Kreuzprodukt, höchstens 24 Kombinationen). Oberfläche: Panel „Varianten“ (`panels/DesignOptionsPanel.tsx`),
 Chip in der Statusleiste, Objekt-Info `DesignOptionField`, Ressourcen-Tab, Befehle `variante`/`variantekopieren`; CLI `--options`.
