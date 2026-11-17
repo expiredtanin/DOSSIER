@@ -930,9 +930,15 @@ fn view_marker(c: &Ctx, level: &DrawingLevel, p0: Vec2, p1: Vec2, sign: f64, k: 
     let w = crate::text_layout::text_width_em(tag, false) * h;
     // [199] Steht der Marker auf der Bemassung (Massketten rücken bei 1:200 auf 7 mm Abstand hinaus), rückt er
     // gegen die Blickrichtung weg vom Gebäude, in 1-mm-Schritten bis 40 mm Papier, bis er frei ist.
+    // [270] Ebenso weicht er den Schnittmarken und schon gesetzten Ansichtsmarken (`obst`) aus, dort auch seitlich entlang
+    // seiner Linie (bis 15 mm, seitlich 1.5-fach gewichtet): Ansichtsmarke „Süd“ nicht mehr auf dem Ende von Schnitt B.
     let len = (p1.x - p0.x).hypot(p1.y - p0.y);
     let bn = if len > 1e-9 { v2(-(p1.y - p0.y) / len * sign, (p1.x - p0.x) / len * sign) } else { v2(0.0, 0.0) };
-    let at = |s: f64| crate::plan::misc::view_marker_sized(p0.x - bn.x * s, p0.y - bn.y * s, p1.x - bn.x * s, p1.y - bn.y * s, sign, k, w);
+    let ul = if len > 1e-9 { v2((p1.x - p0.x) / len, (p1.y - p0.y) / len) } else { v2(0.0, 0.0) };
+    let at = |(s, t): (f64, f64)| {
+        let (dx, dy) = (-bn.x * s + ul.x * t, -bn.y * s + ul.y * t);
+        crate::plan::misc::view_marker_sized(p0.x + dx, p0.y + dy, p1.x + dx, p1.y + dy, sign, k, w)
+    };
     let band = |f: &[f64]| -> Option<Vec<[f64; 2]>> {
         let mut i = 1;
         for _ in 0..f.first().copied().unwrap_or(0.0) as usize {
@@ -944,8 +950,37 @@ fn view_marker(c: &Ctx, level: &DrawingLevel, p0: Vec2, p1: Vec2, sign: f64, k: 
         }
         None
     };
+    // Dreieck und Bezeichnung (ohne das Pick-Band dazwischen) gegen die Marken.
+    let parts = |f: &[f64]| -> Vec<Vec<[f64; 2]>> {
+        let mut out = Vec::new();
+        let mut i = 1;
+        for _ in 0..f.first().copied().unwrap_or(0.0) as usize {
+            match f.get(i).copied() {
+                Some(3.0) if f.len() >= i + 7 => {
+                    out.push((0..3).map(|j| [f[i + 1 + 2 * j], f[i + 2 + 2 * j]]).collect());
+                    i += 7;
+                }
+                Some(5.0) if f.len() >= i + 3 => {
+                    let (x, y, pad) = (f[i + 1], f[i + 2], 0.1 * h);
+                    out.push(vec![[x - pad, y - pad], [x + w + pad, y - pad], [x + w + pad, y + 0.75 * h + pad], [x - pad, y + 0.75 * h + pad]]);
+                    i += 3;
+                }
+                Some(_) => i += 9,
+                None => break,
+            }
+        }
+        out
+    };
     let dims = c.dims_obstacles();
-    let f = (0..=40).map(|s| at(s as f64 * k)).find(|f| band(f).is_none_or(|r| !dims.hits_convex(&r))).unwrap_or_else(|| at(0.0));
+    let mut cands: Vec<(f64, f64)> = Vec::new();
+    for s in 0..=40 {
+        for t in -15..=15 {
+            cands.push((s as f64, t as f64));
+        }
+    }
+    cands.sort_by(|a, b| (a.0 + 1.5 * a.1.abs()).total_cmp(&(b.0 + 1.5 * b.1.abs())).then(a.1.abs().total_cmp(&b.1.abs())).then(b.1.total_cmp(&a.1)));
+    let free = |f: &Vec<f64>| band(f).is_none_or(|r| !dims.hits_convex(&r)) && parts(f).iter().all(|r| !obst.hits_convex(r));
+    let f = cands.iter().map(|&(s, t)| at((s * k, t * k))).find(free).unwrap_or_else(|| at((0.0, 0.0)));
     if f.is_empty() {
         return;
     }
@@ -1008,10 +1043,10 @@ pub fn plan_section_lines(c: &Ctx, out: &mut Vec<Primitive>) {
     // Schnittführungen und den schon gesetzten Beschriftungen aus.
     let mut labels: Vec<(Vec2, String, Vec2, Vec2)> = Vec::new();
     let mut obst = super::stamp_place::Obstacles::default();
-    for level in &c.p.drawing_levels {
-        if !matches!(level.kind, DrawingLevelKind::Section | DrawingLevelKind::Elevation) {
-            continue;
-        }
+    // [270] Erst die Schnitte, dann die Ansichtsmarken: diese weichen den Schnittmarken aus (`view_marker`).
+    let sections = c.p.drawing_levels.iter().filter(|l| matches!(l.kind, DrawingLevelKind::Section));
+    let elevations = c.p.drawing_levels.iter().filter(|l| matches!(l.kind, DrawingLevelKind::Elevation));
+    for level in sections.chain(elevations) {
         let Some([p0, p1]) = level.line_points else { continue };
         let tag = section_label_tag(&level.name);
         let label_w = crate::text_layout::text_width_em(&tag, false) * SECTION_LABEL_MM * k;
@@ -1068,7 +1103,9 @@ pub fn plan_section_lines(c: &Ctx, out: &mut Vec<Primitive>) {
                 }
                 i += 6;
             } else if f[i] == 3.0 {
-                let pts = (0..3).map(|j| v2(f[i + 1 + 2 * j], f[i + 2 + 2 * j])).collect();
+                let pts: Vec<Vec2> = (0..3).map(|j| v2(f[i + 1 + 2 * j], f[i + 2 + 2 * j])).collect();
+                // [270] Pfeile sind Hindernis für Ansichtsmarken und Beschriftungen.
+                obst.area(pts.iter().map(|q| [q.x, q.y]).collect());
                 let mut tri = pick_band(pts, None, None);
                 if let Primitive::Polygon { fill, .. } = &mut tri {
                     *fill = SECTION_LINE_INK.into();
@@ -1303,6 +1340,65 @@ mod tests {
         let c = Ctx::new(&p, &a);
         let ring: Vec<[f64; 2]> = t.iter().map(|q| [q.x, q.y]).collect();
         assert!(!c.dims_obstacles().hits_convex(&ring), "{t:?}");
+    }
+
+    /// [270] ([266] Befund 8) Ansichtsmarken weichen den Schnittmarken aus: die Ansichtslinien Süd/Nord haben ihre Mitte genau
+    /// auf den Enden von Schnitt B (wie im Wettbewerbs-Durchlauf: „Süd“ auf der Marke B). Dreieck und Bezeichnung der
+    /// Ansichtsmarke berühren weder Linie, Endstrich noch Pfeil des Schnitts, liegen nahe an ihrer Linie (≤ 15 mm Papier) und
+    /// zeigen weiter in Blickrichtung; frei stehende Marken bleiben in der Mitte.
+    #[test]
+    fn ansichtsmarken_weichen_schnittmarken_aus() {
+        let lv = |v: serde_json::Value| -> DrawingLevel { serde_json::from_value(v).unwrap() };
+        let sec = || lv(serde_json::json!({ "id": "b", "name": "Schnitt B-B", "kind": "section", "visible": true, "locked": false,
+            "linePoints": [{ "x": 6.0, "y": -3.0 }, { "x": 6.0, "y": 13.0 }], "directionSign": 1 }));
+        let elev = |id: &str, name: &str, a: (f64, f64), b: (f64, f64)| lv(serde_json::json!({ "id": id, "name": name, "kind": "elevation", "visible": true,
+            "locked": false, "linePoints": [{ "x": a.0, "y": a.1 }, { "x": b.0, "y": b.1 }], "directionSign": 1 }));
+        let both = Project { drawing_levels: vec![elev("s", "Ansicht Süd", (0.0, -3.0), (12.0, -3.0)), sec(), elev("n", "Ansicht Nord", (12.0, 13.0), (0.0, 13.0)), elev("o", "Ansicht Ost", (15.0, -1.0), (15.0, 11.0))], ..Default::default() };
+        let only_sec = Project { drawing_levels: vec![sec()], ..Default::default() };
+        let a = super::super::domains::PlanArgs::parse(1.0, r#"{"show": ["02", "90"], "scale": 100, "global": true}"#).unwrap();
+        let run = |p: &Project| {
+            let mut out = Vec::new();
+            plan_section_lines(&Ctx::new(p, &a), &mut out);
+            out
+        };
+        let tris = |out: &[Primitive]| -> Vec<Vec<[f64; 2]>> {
+            out.iter().filter_map(|q| match q { Primitive::Polygon { pts, fill, .. } if fill != "none" => Some(pts.iter().map(|v| [v.x, v.y]).collect()), _ => None }).collect()
+        };
+        // Sichtbare Schnittmarke B: Linien und Pfeile.
+        let s = run(&only_sec);
+        let segs: Vec<[[f64; 2]; 2]> = s.iter().filter_map(|q| match q { Primitive::Line { a, b, .. } => Some([[a.x, a.y], [b.x, b.y]]), _ => None }).collect();
+        let arrows = tris(&s);
+        let out = run(&both);
+        let same = |t: &Vec<[f64; 2]>| arrows.iter().any(|r| r.iter().zip(t).all(|(p, q)| (p[0] - q[0]).abs() + (p[1] - q[1]).abs() < 1e-9));
+        let marks: Vec<Vec<[f64; 2]>> = tris(&out).into_iter().filter(|t| !same(t)).collect();
+        assert_eq!(marks.len(), 3, "drei Ansichtsmarken: {marks:?}");
+        let h = SECTION_LABEL_MM * 0.1;
+        let labels: Vec<(String, Vec<[f64; 2]>)> = out
+            .iter()
+            .filter_map(|q| match q {
+                Primitive::DrawingText { at, text, height_m, .. } if text != "B-B" => {
+                    let w = crate::text_layout::text_width_em(text, false) * height_m;
+                    Some((text.clone(), vec![[at.x, at.y], [at.x + w, at.y], [at.x + w, at.y + 0.75 * h], [at.x, at.y + 0.75 * h]]))
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(labels.len(), 3, "{labels:?}");
+        let hit = |ring: &[[f64; 2]]| segs.iter().any(|g| super::super::stamp_place::seg_hits_ring(g[0], g[1], ring)) || arrows.iter().any(|r| super::super::stamp_place::convex_overlap(r, ring));
+        for t in &marks {
+            assert!(!hit(t), "Ansichtsmarke auf der Schnittmarke: {t:?}");
+        }
+        for (name, r) in &labels {
+            assert!(!hit(r), "Bezeichnung {name} auf der Schnittmarke: {r:?}");
+        }
+        // Nahe an der eigenen Linie, Spitze weiter in Blickrichtung; Ost (frei) unverschoben in der Mitte.
+        let tip_of = |t: &Vec<[f64; 2]>| t[0];
+        let sued = marks.iter().find(|t| (t[1][1] - t[2][1]).abs() < 1e-9 && t[0][1] > t[1][1]).expect("Süd zeigt nach Norden");
+        assert!((tip_of(sued)[0] - 6.0).abs() <= 1.5 && (sued[1][1] - (-3.0)).abs() <= 1.5, "Süd nahe der Linie: {sued:?}");
+        let nord = marks.iter().find(|t| (t[1][1] - t[2][1]).abs() < 1e-9 && t[0][1] < t[1][1]).expect("Nord zeigt nach Süden");
+        assert!((tip_of(nord)[0] - 6.0).abs() <= 1.5 && (nord[1][1] - 13.0).abs() <= 1.5, "Nord nahe der Linie: {nord:?}");
+        let ost = marks.iter().find(|t| (t[1][0] - t[2][0]).abs() < 1e-9).expect("Ost");
+        assert!((ost[1][0] - 15.0).abs() < 1e-9 && ((ost[1][1] + ost[2][1]) / 2.0 - 5.0).abs() < 1e-9, "Ost bleibt in der Mitte: {ost:?}");
     }
 
     /// [176] Schnittmarke als L: Ebenenfeld `markerStyle` bzw. Vorgabe der Modelldarstellung (`sectionMarks.style`);

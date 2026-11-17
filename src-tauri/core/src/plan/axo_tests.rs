@@ -94,15 +94,15 @@ fn wuerfel_flaechen_getoent_nach_lage() {
 
 #[test]
 fn verdeckter_wuerfel_entfaellt() {
-    // Von Norden (vorne) gesehen: der kleinere Würfel liegt ganz hinter dem grossen.
+    // Von Norden (hinten, [270]) gesehen: der kleinere Würfel liegt ganz hinter dem grossen.
     let mut p = cubes(&[(0.0, 0.0, 0.0), (0.0, -5.0, 0.0)]);
     p.walls[1].start.x = 0.25;
     p.walls[1].end.x = 0.75;
     p.walls[1].height = 0.5;
-    let l = lines(&prims_of(&p, serde_json::json!({"view": "front"})));
+    let l = lines(&prims_of(&p, serde_json::json!({"view": "back"})));
     assert_eq!(l.len(), 4, "nur das Quadrat vorne: {l:?}");
     // Mit verdeckten Kanten: die Kanten des hinteren Würfels gestrichelt.
-    let prims = prims_of(&p, serde_json::json!({"view": "front", "hidden": true}));
+    let prims = prims_of(&p, serde_json::json!({"view": "back", "hidden": true}));
     let hidden = prims.iter().filter(|q| matches!(q, Primitive::Line { cls, dash: Some(Some(_)), .. } if cls == "axo-hidden")).count();
     assert!(hidden >= 3, "verdeckte Kanten: {hidden}");
     // In der Isometrie zwei Würfel hintereinander: der hintere wird teilweise verdeckt, keine Linie quert den vorderen.
@@ -238,7 +238,7 @@ fn kamera_element_des_projekts() {
 #[test]
 fn ausschnitt_3d_auf_dem_blatt() {
     let mut p = cubes(&[(0.0, 0.0, 0.0)]);
-    let snap: ViewSnapshot = serde_json::from_value(serde_json::json!({"id": "s3", "name": "3D", "viewType": "perspektive", "view3d": "isoBackRight", "scaleDenominator": 50, "detail": "mittel", "activeLevelId": "l0", "layerVisibility": {"20": true}, "drawingVisibility": {}})).unwrap();
+    let snap: ViewSnapshot = serde_json::from_value(serde_json::json!({"id": "s3", "name": "3D", "viewType": "perspektive", "view3d": "iso", "scaleDenominator": 50, "detail": "mittel", "activeLevelId": "l0", "layerVisibility": {"20": true}, "drawingVisibility": {}})).unwrap();
     p.view_snapshots = Some(vec![snap.clone()]);
     let buf = crate::sheet_viewports::snapshot_buf(&p, &snap, 50.0, None).expect("3D-Dokument");
     let prims = crate::plan::buf::View::parse(&buf).unwrap().prims().unwrap();
@@ -299,4 +299,36 @@ fn ringe_vereinfachen_ohne_flaechenverlust() {
     assert!((area(&s) - 2.0).abs() < 1e-12);
     let tri = vec![[0.0, 0.0], [2.0, 0.0], [1.0, 2.0], [0.0, 0.0], [0.0, 0.0]];
     assert!((area(&simplify(&tri)) - 2.0).abs() < 1e-12);
+}
+
+/// [270] Seitenrichtig: Erker im Osten (Würfel bei x = +5), Garage im Westen (x = −6), Nordflügel (y = +5). In der
+/// Zeichnung (x rechts, y oben wie der Plan) liegt der Erker von Süden/Südost aus rechts, von Norden/Nordwest aus links;
+/// die Kamera der 3D-Ansicht (Modell-Koordinaten, `camera`) und die Vorgaben `iso`/`southeast` stimmen überein.
+#[test]
+fn testhaus_seitenrichtig_in_allen_vorgaben() {
+    let mid = |p: &Project, v: serde_json::Value, k: usize| -> f64 {
+        let l = lines(&prims_of(p, v));
+        assert!(!l.is_empty());
+        l.iter().map(|e| e.0[k] + e.1[k]).sum::<f64>() / (2 * l.len()) as f64
+    };
+    let (erker, garage) = (cubes(&[(5.0, 0.0, 0.0)]), cubes(&[(-6.0, 0.0, 0.0)]));
+    let views = [("southeast", true), ("iso", true), ("south", true), ("front", true), ("southwest", true), ("isoFrontLeft", true), ("perspective", true), ("northwest", false), ("north", false), ("back", false), ("northeast", false), ("isoBackRight", false), ("isoBackLeft", false)];
+    for (view, east_right) in views {
+        for kind in ["iso", "military", "military30"] {
+            let v = serde_json::json!({"view": view, "projection": kind});
+            let (e, g) = (mid(&erker, v.clone(), 0), mid(&garage, v, 0));
+            assert_eq!(e > g, east_right, "{view}/{kind}: Erker {e:.2}, Garage {g:.2}");
+        }
+    }
+    // Draufsicht wie der Grundriss: Norden oben, Osten rechts; von Osten (`side`): Norden rechts.
+    let (nord, sued) = (cubes(&[(0.0, 5.0, 0.0)]), cubes(&[(0.0, -6.0, 0.0)]));
+    let top = serde_json::json!({"view": "top"});
+    assert!(mid(&nord, top.clone(), 1) > mid(&sued, top.clone(), 1));
+    assert!(mid(&erker, top.clone(), 0) > mid(&garage, top, 0));
+    let side = serde_json::json!({"view": "side"});
+    assert!(mid(&nord, side.clone(), 0) > mid(&sued, side, 0));
+    // Kamera der 3D-Ansicht aus Südosten (Modell-Koordinaten): dieselbe Seite wie die Vorgabe.
+    let cam = serde_json::json!({"camera": {"kind": "orthogonal", "position": [30.0, -30.0, 25.0], "direction": [-1.0, 1.0, -0.8], "up": [0.0, 0.0, 1.0], "orthoHeight": 30.0}});
+    let (e, g) = (mid(&erker, cam.clone(), 0), mid(&garage, cam, 0));
+    assert!(e > g, "Kamera Südost: Erker {e:.2}, Garage {g:.2}");
 }

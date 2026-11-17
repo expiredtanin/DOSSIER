@@ -732,6 +732,7 @@ schreibt `src-tauri/src/atomic_save.rs` die Datei absturzsicher.
 | **Kompakte Linien-Unterlage** | Linien einfacher 2D-Zeichnungen (z. B. Kataster) entstehen erst bei Bedarf, gruppiert je Kategorie. | `underlay_groups()` in `plan/drawings.rs` |
 | **Chunk** | Stück eines Plans, das die GPU getrennt kompiliert und nur bei Änderung neu baut. | `src/plan/glPlan/glPlanChunks.ts`, `render2d/src/chunks.rs` |
 | **Fassade** | TS-Funktion mit unveränderter Signatur, die nur den Kern aufruft (Muster `src/geometry/polygonBool.ts`). | `src/geometry`, `src/plan` |
+| **Achsen, Blickrichtung** | Modell: x = Ost, y = Nord (Plan oben), z = Höhe, rechtshändig. render3d-Welt = (x, Höhe, y) für alles (Bauteile, Gelände, Punktwolken); die Spiegelung des Tauschs gleicht die Kamera aus (Bild-rechts = oben × Blick). Eine Tabelle der Blickrichtungen für 3D, Axonometrie, Cycles, Blender: „Südost“ = Betrachter im Südosten, `front` = von Süden, `iso` = Südost [270]. | `render3d/src/view_dir.rs`, `math::view_matrix`, `src/viewport/cameraBridge.ts` (`screenRight`) |
 
 ---
 

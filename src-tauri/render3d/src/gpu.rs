@@ -17,6 +17,10 @@ use crate::grid::{build_ground_grid, GRID_FLOATS_PER_VERTEX};
 use crate::gpu_points::{PointRenderer, PointStyle};
 use crate::points::PointCloudCpu;
 use crate::math::{view_projection, Mat4};
+
+/// [270] Vorderseite im Bild: die View-Matrix gleicht die Welt-Spiegelung aus (`view_dir`), aussen zeigende Dreiecke
+/// erscheinen deshalb im Uhrzeigersinn.
+const MODEL_FRONT_FACE: wgpu::FrontFace = if crate::view_dir::FRONT_FACE_CW { wgpu::FrontFace::Cw } else { wgpu::FrontFace::Ccw };
 use crate::scene::{ChunkData, PartEntry, PartInput, PartsUpdate, Scene, SceneChange};
 use crate::section::SectionPlane;
 use crate::section_fill::{
@@ -818,8 +822,8 @@ impl Renderer {
                 }),
                 primitive: wgpu::PrimitiveState {
                     topology: wgpu::PrimitiveTopology::TriangleList,
-                    // Aussen zeigende Flaechen sind CCW (mesh.rs) -> Rueckseiten cullen.
-                    front_face: wgpu::FrontFace::Ccw,
+                    // Aussen zeigende Flaechen sind in der Welt CCW (mesh.rs), im Bild CW ([270] `view_dir`) -> Rueckseiten cullen.
+                    front_face: MODEL_FRONT_FACE,
                     cull_mode: Some(wgpu::Face::Back),
                     ..Default::default()
                 },
@@ -1175,7 +1179,7 @@ impl Renderer {
             }),
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleList,
-                front_face: wgpu::FrontFace::Ccw,
+                front_face: MODEL_FRONT_FACE,
                 cull_mode: Some(wgpu::Face::Back),
                 ..Default::default()
             },
@@ -1267,7 +1271,7 @@ impl Renderer {
             }),
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleList,
-                front_face: wgpu::FrontFace::Ccw,
+                front_face: MODEL_FRONT_FACE,
                 cull_mode: Some(wgpu::Face::Back),
                 ..Default::default()
             },

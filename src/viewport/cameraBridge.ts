@@ -8,16 +8,18 @@
 // ACHSABBILDUNG: Wände, Decken, Dächer, Zeichnungs-Spuren, Treppen und Stützen liegen im Viewport
 // als world = (x, Höhe, y) (`fitTargetDist` in `Wasm3DViewport`, `emitDrawingLineVerts`,
 // render3d `mesh.rs`: `start[1]` wird zu world-z). Die Abbildung ist ein Tausch von y und z und
-// damit ihre eigene Umkehrung. Geo-Rohdaten (Gelände, Punktwolken) negieren dagegen y
-// (world = (x, z, −y), `append_context_mesh`) — für die Kamera zählt die Abbildung der
-// Bauteile, weil nur diese im IFC-Export stehen. `cameraBridge.test.ts` belegt die Abbildung
-// gegen `projectToModel3d`.
+// damit ihre eigene Umkehrung. [270] Gelände, Importe und Punktwolken liegen genauso (vorher mit
+// negiertem y, also an y = 0 gespiegelt unter dem Haus). Der Tausch ist eine Spiegelung; die Kamera
+// gleicht sie aus (render3d `math::view_matrix`, hier `screenRight`): Bild-rechts = oben × Blick, so
+// erscheint das Modell seitenrichtig. Blickrichtungen und Namen: render3d `view_dir.rs`.
+// `cameraBridge.test.ts` belegt die Abbildung gegen `projectToModel3d`, `view270.test.ts` die Seiten.
 //
 // Der Viewport (`Wasm3DViewport`) meldet sich beim Einhängen an (`registerViewportCamera`) und
 // ab, wenn er verschwindet. Ohne Viewport (kein 3D geöffnet, nativer macOS-Pfad) liefern
 // `getCamera`/`captureSnapshot` null und `setCamera` false — kein Fehler.
 
 import type { Camera3d } from "./useWasm3dRenderer";
+import type { View3d } from "../model/viewTypes";
 import type { ExportProgress } from "./imageExport";
 
 export type V3 = [number, number, number];
@@ -76,6 +78,41 @@ export interface ViewSection {
 export const modelToWorld = (p: readonly number[]): V3 => [p[0], p[2], p[1]];
 /** render3d-world → Modell; derselbe Tausch, also die eigene Umkehrung. */
 export const worldToModel = (p: readonly number[]): V3 => [p[0], p[2], p[1]];
+
+/**
+ * [270] Bild-Rechts einer Kamera in render3d-world: oben × Blick, normiert. Der Achsentausch Modell → world ist eine
+ * Spiegelung; render3d gleicht sie in der Kamera aus (`math::view_matrix`, `view_dir::world_right`), damit das Modell
+ * seitenrichtig erscheint (Blick nach Norden: Osten rechts). Jede Umrechnung Bild ↔ world (Pick-Strahl, Griffe, Pan,
+ * Zoom zum Cursor, Begehen) nimmt „rechts“ von hier.
+ */
+export function screenRight(f: readonly number[], up: readonly number[]): V3 {
+  const r: V3 = [up[1] * f[2] - up[2] * f[1], up[2] * f[0] - up[0] * f[2], up[0] * f[1] - up[1] * f[0]];
+  const l = Math.hypot(r[0], r[1], r[2]);
+  return l > 1e-12 ? [r[0] / l, r[1] / l, r[2] / l] : [0, 0, 0];
+}
+
+/** [270] Bild-Rechts der Orbit-Kamera (Blick f = −(cos yaw, ·, sin yaw), oben = world Y): (−sin yaw, 0, cos yaw). */
+export const orbitRight = (yaw: number): V3 => [-Math.sin(yaw), 0, Math.cos(yaw)];
+
+const ISO_PITCH = Math.asin(1 / Math.sqrt(3));
+/**
+ * Orbit-Blickwinkel (yaw/pitch), die DIESELBE Blickrichtung wie das jeweilige `view3d`-Praeset ergeben (hergeleitet
+ * aus `preset_camera` in render3d/src/math.rs). Startpunkt des freien Orbits nach einem Praeset-Sprung.
+ * [270] Richtungen wie `render3d::view_dir` (Augpunkt world = Ziel + (cos yaw, ·, sin yaw), world z = Norden):
+ * vorne = Süden (yaw −π/2), rechts = Osten (yaw 0); iso = Südost. Test: `cameraBridge.test.ts`.
+ */
+export const VIEW3D_ORBIT: Record<View3d, { yaw: number; pitch: number }> = {
+  front: { yaw: -Math.PI / 2, pitch: 0 },
+  back: { yaw: Math.PI / 2, pitch: 0 },
+  side: { yaw: 0, pitch: 0 },
+  left: { yaw: Math.PI, pitch: 0 },
+  top: { yaw: -Math.PI / 2, pitch: PITCH_LIMIT },
+  iso: { yaw: -Math.PI / 4, pitch: ISO_PITCH },
+  isoFrontLeft: { yaw: (-3 * Math.PI) / 4, pitch: ISO_PITCH },
+  isoBackRight: { yaw: Math.PI / 4, pitch: ISO_PITCH },
+  isoBackLeft: { yaw: (3 * Math.PI) / 4, pitch: ISO_PITCH },
+  perspective: { yaw: -Math.PI / 4, pitch: 0.5 },
+};
 
 const sub = (a: V3, b: V3): V3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 const dot = (a: V3, b: V3): number => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];

@@ -75,6 +75,8 @@ import {
   FOV_Y,
   PITCH_LIMIT,
   orbitCamera,
+  orbitRight,
+  VIEW3D_ORBIT,
   registerViewportCamera,
   type OrbitState,
   type V3 as CamV3,
@@ -371,28 +373,6 @@ function fitTargetDist(project: Project, hide?: Hide3d): {
   return { target, dist };
 }
 
-/**
- * Orbit-Blickwinkel (yaw/pitch), die DIESELBE Blickrichtung wie das jeweilige
- * `view3d`-Praeset ergeben (hergeleitet aus `preset_camera` in
- * render3d/src/math.rs — front/side/top/iso/perspective). Dient NICHT dem
- * Zeichnen der Presets selbst (das macht `set_view_preset` in Rust, inkl.
- * echter Orthografie für front/top/side) — nur als Startpunkt für den freien
- * Orbit-Zustand, damit ein Drag direkt nach einem Praeset-Sprung nicht aus
- * einem unpassenden Blickwinkel losspringt.
- */
-const ISO_PITCH = Math.asin(1 / Math.sqrt(3));
-const VIEW3D_ORBIT: Record<View3d, { yaw: number; pitch: number }> = {
-  front: { yaw: Math.PI / 2, pitch: 0 },
-  back: { yaw: -Math.PI / 2, pitch: 0 },
-  side: { yaw: 0, pitch: 0 },
-  left: { yaw: Math.PI, pitch: 0 },
-  top: { yaw: Math.PI / 2, pitch: PITCH_LIMIT },
-  iso: { yaw: Math.PI / 4, pitch: ISO_PITCH },
-  isoFrontLeft: { yaw: (3 * Math.PI) / 4, pitch: ISO_PITCH },
-  isoBackRight: { yaw: -Math.PI / 4, pitch: ISO_PITCH },
-  isoBackLeft: { yaw: (-3 * Math.PI) / 4, pitch: ISO_PITCH },
-  perspective: { yaw: Math.PI / 4, pitch: 0.5 },
-};
 
 export function Wasm3DViewport({
   project,
@@ -1727,8 +1707,9 @@ export function Wasm3DViewport({
         // [213] Umschauen um den Augpunkt (Orbit-Zustand bleibt die Wahrheit, das Ziel wandert mit).
         orbitRef.current = lookAround(o, dx, dy);
       } else if (drag.mode === "orbit") {
-        // Winkel je Pixel wie OrbitControls: voller Umlauf über die Viewport-Höhe.
-        o.yaw += (2 * Math.PI * dx) / h;
+        // Winkel je Pixel wie OrbitControls: voller Umlauf über die Viewport-Höhe. [270] Bild-rechts ist
+        // `orbitRight` (seitenrichtig): Maus nach rechts dreht das Modell mit der Maus (yaw nimmt ab).
+        o.yaw -= (2 * Math.PI * dx) / h;
         o.pitch = Math.max(
           -PITCH_LIMIT,
           Math.min(PITCH_LIMIT, o.pitch + (2 * Math.PI * dy) / h),
@@ -1748,7 +1729,7 @@ export function Wasm3DViewport({
           -Math.sin(pitch),
           -Math.cos(pitch) * Math.sin(o.yaw),
         ];
-        const s = [Math.sin(o.yaw), 0, -Math.cos(o.yaw)];
+        const s = orbitRight(o.yaw); // [270] Bild-rechts, seitenrichtig
         const u = [
           s[1] * f[2] - s[2] * f[1],
           s[2] * f[0] - s[0] * f[2],
@@ -1840,7 +1821,7 @@ export function Wasm3DViewport({
           -Math.sin(pitch),
           -Math.cos(pitch) * Math.sin(o.yaw),
         ];
-        const s = [Math.sin(o.yaw), 0, -Math.cos(o.yaw)];
+        const s = orbitRight(o.yaw); // [270] Bild-rechts, seitenrichtig
         const u = [
           s[1] * f[2] - s[2] * f[1],
           s[2] * f[0] - s[0] * f[2],

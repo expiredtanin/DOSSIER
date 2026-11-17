@@ -1429,12 +1429,12 @@ pub fn build_terrain_mesh(meshes: &[MeshInput]) -> Mesh {
 /// Quell-Mesh.
 ///
 /// Koordinaten: model `(x, y, z)` -> world `(x, z, y)` (Hoehe entlang +Y), exakt
-/// wie `extrude_layer_segment`/`extrude_slab` und `Viewport3D.tsx` — GILT NUR
-/// fuer `MeshKind::Extrusion` (plan-abgeleitete, orientierungserhaltende
-/// Geometrie: Dach/Treppe/Stuetze/truck-Extrusion/2D-Zeichnungs-Bodenspuren,
-/// s. u.). `MeshKind::Terrain`/`MeshKind::Imported` (echte, UNABHAENGIGE xyz-
-/// Rohdaten aus einem Import) negieren zusaetzlich die Nord-Achse (Modell-y),
-/// s. Kommentar an `negate_north` unten.
+/// wie `extrude_layer_segment`/`extrude_slab` — fuer ALLE Arten (Extrusion, Gelaende,
+/// Import). [270] Der Tausch ist eine Spiegelung; die gleicht die Kamera aus
+/// (`math::view_matrix`, `view_dir`), nicht das Netz. Frueher (2026-09-24) wurde
+/// fuer Gelaende/Import zusaetzlich die Nord-Achse negiert: das Gelaende sah im
+/// gespiegelten Bild richtig aus, lag aber an der an y = 0 gespiegelten Stelle
+/// unter den Bauteilen.
 ///
 /// DOPPELSEITIG: jedes Dreieck wird ZWEIMAL emittiert (Vorderseite `a,b,c` mit
 /// Normale `+n`, Rueckseite `a,c,b` mit `-n`), weil das Quell-Winding von
@@ -1461,29 +1461,10 @@ pub fn append_context_mesh(mesh: &mut Mesh, input: &MeshInput) {
             color
         }
     };
-    // world-Position aus Modell (x, y, z=Hoehe): (x, hoehe, ±y). Die Nord-Achse
-    // (Modell-y) wird NUR fuer `Terrain`/`Imported` NEGIERT — ein reiner
-    // Komponenten-Tausch ohne Vorzeichenwechsel ist fuer einen allgemeinen
-    // (unabhaengigen) xyz-Punktsatz eine Spiegelung (Determinante -1), das
-    // betrifft NUR echte Import-Rohdaten (swisstopo/OSM: Terrain, Gebaeude).
-    // `Extrusion` entsteht dagegen IMMER ueber eine orientierungserhaltende
-    // Extrusions-/Rotationskonstruktion (Dach/Treppe/Stuetze/truck-Extrusion/
-    // 2D-Zeichnungs-Bodenspuren) — dort MUSS die Konvention unveraendert
-    // bleiben, exakt wie bei Wand/Slab. Fund 2026-09-24: "swisstopo-Import im
-    // 3D komplett gespiegelt" (betraf Kontext-Meshes) — der damalige Fix
-    // negierte pauschal ALLE `append_context_mesh`-Aufrufer und brach dabei
-    // unbemerkt Dach/Treppe/Stuetze/truck-Extrusion/2D-Zeichnungs-Bodenspuren
-    // (Nutzer-Report 2026-09-27: "gewisse Dinge sind noch gespiegelt im 3D",
-    // beim Durchgehen ALLER `append_context_mesh`-Aufrufer gefunden — s.
-    // PENDENZEN.md fuer die volle Herleitung).
-    let negate_north = matches!(input.kind, MeshKind::Terrain | MeshKind::Imported);
+    // world-Position aus Modell (x, y, z=Hoehe): (x, hoehe, y) fuer alle Arten ([270], s. Doku oben).
     let vworld = |i: usize| -> [f32; 3] {
         let b = i * 3;
-        if negate_north {
-            [pos[b], pos[b + 2], -pos[b + 1]]
-        } else {
-            [pos[b], pos[b + 2], pos[b + 1]]
-        }
+        [pos[b], pos[b + 2], pos[b + 1]]
     };
     // [T4] Glatt: Ecken-Normalen je Dreieck (sonst kantig mit der Flaechennormale).
     let smooth = input.crease_angle.filter(|a| a.is_finite() && *a > 0.0).map(|a| dossier_hatch::mesh_normals::smooth_corner_normals(&input.indices, vcount, &vworld, a));
@@ -1699,18 +1680,13 @@ mod tests {
     use super::*;
     use crate::types::MeshKind;
 
-    /// Regression: Nutzer-Report "swisstopo-Import im 3D komplett gespiegelt"
-    /// (2026-09-24). `append_context_mesh` bildete Modell (x,y,z) OHNE
-    /// Vorzeichenwechsel auf world (x, z, y) ab — ein reines Achsen-Vertauschen
-    /// ohne Negierung ist fuer einen allgemeinen (unabhaengigen) xyz-Punktsatz
-    /// immer eine Spiegelung (Determinante -1), anders als bei Wand/Slab, die
-    /// ueber eine orientierungserhaltende Extrusion entstehen. Fix: die
-    /// Nord-Achse (Modell-y) wird jetzt negiert -> world (x, z, -y).
+    /// [270] Import-Netze liegen wie die Bauteile bei world (x, Hoehe, y) — deckungsgleich mit Waenden; die
+    /// Spiegelung des Achsentauschs gleicht die Kamera aus (`math::view_matrix`).
     #[test]
-    fn append_context_mesh_negiert_die_nord_achse() {
+    fn append_context_mesh_liegt_wie_die_bauteile() {
         let input = MeshInput {
             // Ein Dreieck; der dritte Punkt (2,3,4) ist der interessante Fall
-            // (x=2, y=3=Nord, z=4=Hoehe) -> erwartet world (2, 4, -3).
+            // (x=2, y=3=Nord, z=4=Hoehe) -> erwartet world (2, 4, 3).
             positions: vec![0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 2.0, 3.0, 4.0],
             indices: vec![0, 1, 2],
             kind: MeshKind::Imported,
@@ -1724,7 +1700,7 @@ mod tests {
         append_context_mesh(&mut mesh, &input);
         // Erstes emittiertes Dreieck (Vorderseite a,b,c) — dritter Vertex (c).
         let base = 2 * FLOATS_PER_VERTEX;
-        assert_eq!(&mesh.verts[base..base + 3], &[2.0, 4.0, -3.0]);
+        assert_eq!(&mesh.verts[base..base + 3], &[2.0, 4.0, 3.0]);
     }
 
     /// [169] Bogenwand aus zwei Sehnen-Teilwänden (r = 4 um den Ursprung, je 7.5°): mit `arcCenter` tragen die

@@ -18,6 +18,7 @@
 
 
 import { DRAWING_PICK_TOLERANCE } from "../core";
+import { screenRight } from "./cameraBridge";
 import type { Vec3, PickWall, PickOpening, PickDrawingSeg, PickSlab, PickStair, PickRoof, PickContextMesh, PickColumnMesh, PickSolidMesh, PickOpeningMesh, PickStairMesh, PickDrawingMesh, PickTreeMesh } from "../core";
 
 /** Kamera-Parameter für den Pick-Strahl (Teilmenge von Camera3d). */
@@ -95,8 +96,8 @@ export function cameraRay(
 ): Ray {
   const eye = cam.eye as Vec3;
   const f = norm(sub(cam.target as Vec3, eye)); // Blickrichtung
-  const s = norm(cross(f, cam.up as Vec3)); // rechts
-  const u = cross(s, f); // echtes Kamera-oben
+  const s = screenRight(f, cam.up) as Vec3; // Bild-rechts ([270], seitenrichtig)
+  const u = cross(f, s); // echtes Kamera-oben
 
   if (cam.perspective === false) {
     const hh = cam.orthoHalfHeight || 1;
@@ -523,8 +524,8 @@ export function worldToScreen(
 ): { x: number; y: number } | null {
   const eye = cam.eye as Vec3;
   const f = norm(sub(cam.target as Vec3, eye));
-  const s = norm(cross(f, cam.up as Vec3));
-  const u = cross(s, f);
+  const s = screenRight(f, cam.up) as Vec3; // [270] wie render3d `view_matrix`
+  const u = cross(f, s);
   const v = sub(point, eye);
   const aspect = width / height;
   let ndcX: number;

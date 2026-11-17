@@ -5350,13 +5350,13 @@ pub enum ViewType {
     Unknown,
 }
 
-/// Kanonischer Blickwinkel der 3D-Ansicht (Vectorworks/DOSSIER-Stil). „front"/
-/// „back"/„side"/„left" springen auf die vier Kardinalrichtungen (Vorne/Hinten/
-/// Rechts/Links — KEINE Himmelsrichtungs-Labels, da es noch keinen Nordwinkel
-/// gibt); „top" auf die Draufsicht. „iso"/„isoFrontLeft"/„isoBackRight"/
-/// „isoBackLeft" sind die vier oberen Iso-Oktanten (untere vier bleiben im
-/// Hochbau ungenutzt) — „iso" (vorne-oben-rechts) ist der bestehende Default.
-/// „perspective" ist der freie 3/4-Blick. Wirkt nur in der Perspektive.
+/// Kanonischer Blickwinkel der 3D-Ansicht (Vectorworks/DOSSIER-Stil). [270] Vorne = Süden
+/// (Plan unten), rechts = Osten (Plan rechts), Plan oben = Norden; eine Tabelle für 3D,
+/// Axonometrie, Cycles und Blender (`render3d::view_dir`): „front" = von Süden, „back" = Norden,
+/// „side" = Osten, „left" = Westen, „top" = Draufsicht (Norden oben); „iso" = Südost,
+/// „isoFrontLeft" = Südwest, „isoBackRight" = Nordost, „isoBackLeft" = Nordwest (die vier oberen
+/// Iso-Oktanten, „iso" ist der Default); „perspective" = freier Blick aus Südosten.
+/// Wirkt nur in der Perspektive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
 pub enum View3d {
     #[default]

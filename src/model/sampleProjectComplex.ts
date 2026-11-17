@@ -779,7 +779,7 @@ function views(): Pick<Project, "viewTemplates" | "viewSnapshots" | "viewSnapsho
       snap("vs-ansicht-n", "Ansicht Nord", "ansicht-nord", 100, P(6, 3.3), { folderId: "vf-sa", layerVisibility: NO_NEIGHBOURS }),
       snap("vs-ansicht-w", "Ansicht West", "ansicht-west", 100, P(6, 3.3), { folderId: "vf-sa", layerVisibility: NO_NEIGHBOURS }),
       snap("vs-detail", "Detail Deckenauflager 1:10", "detail-traufe", 10, P(DETAIL_X + 0.4, 1.0), { folderId: "vf-sa", detail: "fein", layerVisibility: HIDE_SITE }),
-      snap("vs-3d", "Axonometrie Südost", "eg", 100, P(7.5, 5), { folderId: "vf-3d", viewType: "perspektive", view3d: "isoFrontLeft", fov: 45 }),
+      snap("vs-3d", "Axonometrie Südost", "eg", 100, P(7.5, 5), { folderId: "vf-3d", viewType: "perspektive", view3d: "iso", fov: 45 }),
     ],
     layoutFolders: [{ id: "lf-plaene", name: "Baueingabe", kind: "layout" }, { id: "lf-master", name: "Vorlagen", kind: "master" }],
     masterLayouts: [

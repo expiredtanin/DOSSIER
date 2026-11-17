@@ -156,9 +156,18 @@ pub fn projection_matrix(cam: &Camera, aspect: f32) -> Mat4 {
     }
 }
 
-/// View-Matrix aus einer `Camera`.
+/// View-Matrix aus einer `Camera` — [270] mit dem Ausgleich der Welt-Spiegelung (`view_dir`-Modulkopf): die Welt
+/// `(x, Höhe, y)` ist gegenüber dem Modell gespiegelt, deshalb ist „rechts im Bild“ oben × Blick
+/// (`view_dir::world_right`), also die erste Zeile von `look_at` negiert. So erscheint das Modell seitenrichtig
+/// (Blick nach Norden: Osten rechts). Aussen zeigende Dreiecke erscheinen dadurch im Uhrzeigersinn
+/// (`view_dir::FRONT_FACE_CW`). Schatten (`shadow.rs`) nutzen `look_at` direkt (ohne Culling, nur Tiefe).
 pub fn view_matrix(cam: &Camera) -> Mat4 {
-    look_at(cam.eye, cam.target, cam.up)
+    let mut m = look_at(cam.eye, cam.target, cam.up);
+    m[0] = -m[0];
+    m[4] = -m[4];
+    m[8] = -m[8];
+    m[12] = -m[12];
+    m
 }
 
 /// Kombinierte View-Projektions-Matrix (`proj * view`), fertig fuer das Uniform.
@@ -185,104 +194,45 @@ pub fn orbit_eye(target: [f32; 3], yaw: f32, pitch: f32, dist: f32) -> [f32; 3] 
     ]
 }
 
+/// Name eines Presets in der gemeinsamen Richtungstabelle (`view_dir`).
+pub fn preset_name(preset: CameraPreset) -> &'static str {
+    match preset {
+        CameraPreset::Front => "front",
+        CameraPreset::Back => "back",
+        CameraPreset::Top => "top",
+        CameraPreset::Side => "side",
+        CameraPreset::Left => "left",
+        CameraPreset::Iso => "iso",
+        CameraPreset::IsoFrontLeft => "isoFrontLeft",
+        CameraPreset::IsoBackRight => "isoBackRight",
+        CameraPreset::IsoBackLeft => "isoBackLeft",
+        CameraPreset::Persp => "perspective",
+    }
+}
+
 /// Baut eine `Camera` fuer eines der Kardinal-/Iso-Presets (ROADMAP §11).
 /// `target` ist das Blickziel (Modell-Mitte), `dist` der Abstand. Alle Presets
 /// ausser `Persp` sind orthografisch (Front/Back/Top/Side/Left achsparallel,
 /// die Iso-Varianten diagonal); nur Persp ist perspektivisch.
 ///
-/// Achs-Konvention (wie die three.js-Sicht, s. `applyView3d` in Viewport3D.tsx):
-/// +Z = vorne (Front blickt von +Z entlang -Z), +X = rechts (Side blickt von
-/// +X entlang -X). Back/Left sind exakt die Gegenrichtungen (-Z/-X); es gibt
-/// noch KEINEN Nordwinkel — die Kardinalrichtungen sind rein modellrelativ
-/// (Vorne/Rechts/Hinten/Links im UI, keine Himmelsrichtungen).
+/// [270] Richtungen aus der gemeinsamen Tabelle `view_dir` (wie Axonometrie, Cycles, Blender): „vorne“ = Süden
+/// (Plan unten), „rechts“ = Osten; `Iso` = Südost, `IsoFrontLeft` = Südwest, `IsoBackRight` = Nordost,
+/// `IsoBackLeft` = Nordwest; `Top` mit Norden oben. Welt = (x, Höhe, y), also Süden = world −Z.
 pub fn preset_camera(preset: CameraPreset, target: [f32; 3], dist: f32) -> Camera {
     let mut cam = Camera {
         target,
         ..Camera::default()
     };
-    // Iso-Distanz-Helfer: Augenabstand-Komponente je Achse, sodass der
-    // tatsaechliche eye-target-Abstand exakt `dist` bleibt (d*sqrt(3) == dist,
-    // wie bei den bisherigen Front/Top/Side-Presets), damit alle Iso-Varianten
-    // das Modell gleich gross zeigen.
-    let iso_d = dist / 3.0_f32.sqrt();
-    match preset {
-        // Blick entlang -Z (von vorne), orthografisch.
-        CameraPreset::Front => {
-            cam.projection = Projection::Orthographic;
-            cam.eye = [target[0], target[1], target[2] + dist];
-            cam.up = [0.0, 1.0, 0.0];
-            cam.ortho_half_height = dist * 0.5;
-        }
-        // Blick entlang +Z (von hinten) — Gegenrichtung von Front.
-        CameraPreset::Back => {
-            cam.projection = Projection::Orthographic;
-            cam.eye = [target[0], target[1], target[2] - dist];
-            cam.up = [0.0, 1.0, 0.0];
-            cam.ortho_half_height = dist * 0.5;
-        }
-        // Blick von oben entlang -Y (Grundriss), orthografisch. Up = -Z, damit
-        // Modell-Y (world +Z) im Bild nach unten zeigt (wie die 2D-Plan-Sicht).
-        CameraPreset::Top => {
-            cam.projection = Projection::Orthographic;
-            cam.eye = [target[0], target[1] + dist, target[2]];
-            cam.up = [0.0, 0.0, -1.0];
-            cam.ortho_half_height = dist * 0.5;
-        }
-        // Blick entlang -X (von der rechten Seite), orthografisch.
-        CameraPreset::Side => {
-            cam.projection = Projection::Orthographic;
-            cam.eye = [target[0] + dist, target[1], target[2]];
-            cam.up = [0.0, 1.0, 0.0];
-            cam.ortho_half_height = dist * 0.5;
-        }
-        // Blick entlang +X (von der linken Seite) — Gegenrichtung von Side.
-        CameraPreset::Left => {
-            cam.projection = Projection::Orthographic;
-            cam.eye = [target[0] - dist, target[1], target[2]];
-            cam.up = [0.0, 1.0, 0.0];
-            cam.ortho_half_height = dist * 0.5;
-        }
-        // Isometrischer Ueberblick von vorne-oben-rechts (Default-Iso).
-        // Echte Isometrie ist per Definition parallelprojiziert (keine
-        // perspektivische Verzerrung, Kantenlaengen bleiben massstabsgetreu).
-        CameraPreset::Iso => {
-            cam.projection = Projection::Orthographic;
-            cam.eye = [target[0] + iso_d, target[1] + iso_d, target[2] + iso_d];
-            cam.up = [0.0, 1.0, 0.0];
-            cam.ortho_half_height = dist * 0.5;
-        }
-        // Isometrischer Ueberblick von vorne-oben-links.
-        CameraPreset::IsoFrontLeft => {
-            cam.projection = Projection::Orthographic;
-            cam.eye = [target[0] - iso_d, target[1] + iso_d, target[2] + iso_d];
-            cam.up = [0.0, 1.0, 0.0];
-            cam.ortho_half_height = dist * 0.5;
-        }
-        // Isometrischer Ueberblick von hinten-oben-rechts.
-        CameraPreset::IsoBackRight => {
-            cam.projection = Projection::Orthographic;
-            cam.eye = [target[0] + iso_d, target[1] + iso_d, target[2] - iso_d];
-            cam.up = [0.0, 1.0, 0.0];
-            cam.ortho_half_height = dist * 0.5;
-        }
-        // Isometrischer Ueberblick von hinten-oben-links.
-        CameraPreset::IsoBackLeft => {
-            cam.projection = Projection::Orthographic;
-            cam.eye = [target[0] - iso_d, target[1] + iso_d, target[2] - iso_d];
-            cam.up = [0.0, 1.0, 0.0];
-            cam.ortho_half_height = dist * 0.5;
-        }
-        // Freie perspektivische Standard-Ansicht (leicht von vorn-oben-rechts).
-        CameraPreset::Persp => {
-            cam.projection = Projection::Perspective;
-            cam.eye = orbit_eye(
-                target,
-                std::f32::consts::FRAC_PI_4,
-                0.5,
-                dist,
-            );
-            cam.up = [0.0, 1.0, 0.0];
-        }
+    let Some(d) = crate::view_dir::view_dir(preset_name(preset)) else { return cam };
+    let w = crate::view_dir::model_to_world(d.to_viewer);
+    let u = crate::view_dir::model_to_world(crate::view_dir::up_of(&d));
+    cam.eye = [target[0] + w[0] as f32 * dist, target[1] + w[1] as f32 * dist, target[2] + w[2] as f32 * dist];
+    cam.up = [u[0] as f32, u[1] as f32, u[2] as f32];
+    if d.ortho {
+        cam.projection = Projection::Orthographic;
+        cam.ortho_half_height = dist * 0.5;
+    } else {
+        cam.projection = Projection::Perspective;
     }
     cam
 }
