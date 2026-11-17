@@ -388,7 +388,12 @@ fn baeume_in_schnitt_und_ansicht_folgen_dem_filter() {
             })
             .collect()
     };
-    assert!(!stroke_of("T3").is_empty() && stroke_of("T3").iter().all(|c| *c == default_style(RenovationStatus::New).line.unwrap()), "{:?}", stroke_of("T3"));
+    // Teilweise verdeckte Bäume ([149]) zeichnen ihre sichtbaren Teile als Linien (`tree-view`, ohne Pick-Id): dann zählen die
+    // Linienfarben aller Bäume mit.
+    let line_colors: Vec<String> = u.iter().filter_map(|q| match q { Primitive::Line { cls, color: Some(c), .. } if &**cls == "tree-view" => Some(c.to_string()), _ => None }).collect();
+    let new = default_style(RenovationStatus::New).line.unwrap();
+    assert!(stroke_of("T3").iter().chain(&line_colors).any(|c| *c == new), "T3 rot: {:?} {:?}", stroke_of("T3"), line_colors);
+    assert!(stroke_of("T3").iter().all(|c| *c == new), "{:?}", stroke_of("T3"));
     assert!(stroke_of("T1").iter().all(|c| *c == default_style(RenovationStatus::Existing).fill), "{:?}", stroke_of("T1"));
 }
 

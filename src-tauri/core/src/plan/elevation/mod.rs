@@ -514,7 +514,16 @@ pub fn elevation_primitives_ren(p: &Project, level: &LevelSpec, shadows: bool, m
         }
     }
     // [149] Bäume: Silhouette (Krone gefüllt, Stamm) in der Maler-Reihenfolge; Bauteile davor verdecken sie.
-    for (depth, tree) in super::trees::view_trees(p, level, vis, Some(super::trees::view_crown_fill(mono)), None, ren) {
+    // Vor Bauteilen, die sie überdecken, zeichnen Bäume nur als Umriss (Krone ohne Füllung); dahinter verdeckt das Haus.
+    let in_front = |depth: f64, bb: [f64; 4]| {
+        faces.iter().any(|f| {
+            f.depth_min > depth + 1e-3 && {
+                let (lo, hi) = f.pts.iter().fold(([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]), |(l, h), q| ([l[0].min(q[0]), l[1].min(q[1])], [h[0].max(q[0]), h[1].max(q[1])]));
+                lo[0] < bb[2] && hi[0] > bb[0] && lo[1] < bb[3] && hi[1] > bb[1]
+            }
+        })
+    };
+    for (depth, tree) in super::trees::view_trees_in_front(p, level, vis, Some(super::trees::view_crown_fill(mono)), None, ren, Some(&in_front)) {
         for prim in tree {
             if let Primitive::Polygon { pts, .. } = &prim {
                 for q in pts {

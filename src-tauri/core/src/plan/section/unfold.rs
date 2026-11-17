@@ -211,6 +211,7 @@ pub(super) fn shift_output(out: &mut Output, du: f64) {
     }
     let sh = |q: &mut [f64; 2]| q[0] += du;
     out.cuts.iter_mut().flat_map(|c| c.pts.iter_mut()).for_each(sh);
+    out.occluders.iter_mut().flat_map(|o| o.pts.iter_mut()).for_each(sh);
     for e in out.visible.iter_mut().chain(out.hidden.iter_mut()) {
         e.a[0] += du;
         e.b[0] += du;
@@ -228,6 +229,7 @@ pub(super) fn merge_output(acc: &mut Option<Output>, o: Output) {
         return;
     };
     a.cuts.extend(o.cuts);
+    a.occluders.extend(o.occluders);
     a.visible.extend(o.visible);
     a.hidden.extend(o.hidden);
     a.profiles.extend(o.profiles);

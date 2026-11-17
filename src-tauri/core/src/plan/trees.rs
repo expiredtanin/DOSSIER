@@ -280,6 +280,13 @@ pub fn tree_symbol(t: &Tree, g: &TreeGeom, cat: Option<&LayerCategory>, greyed: 
 /// entfallen (Mitte vor der Ebene: nur der Querschnitt als Umriss des Teils dahinter), Teile dahinter bleiben als
 /// Silhouette.
 pub fn view_trees(p: &Project, level: &LevelSpec, vis: &Visibility, fill: Option<&str>, cut: Option<bool>, ren: Option<&crate::renovation::Resolved>) -> Vec<(f64, Vec<Primitive>)> {
+    view_trees_in_front(p, level, vis, fill, cut, ren, None)
+}
+
+/// Wie [`view_trees`]; `in_front(Tiefe der Stammmitte, [u0, v0, u1, v1] der Krone)`: liegt der Baum vor Bauteilen, die
+/// er überdeckt (Ansicht), bleibt die Krone ohne Füllung — die Fassade dahinter bleibt sichtbar, der Baum zeichnet als
+/// Umriss darüber (Planpraxis); der Stamm behält seine Füllung.
+pub fn view_trees_in_front(p: &Project, level: &LevelSpec, vis: &Visibility, fill: Option<&str>, cut: Option<bool>, ren: Option<&crate::renovation::Resolved>, in_front: Option<&dyn Fn(f64, [f64; 4]) -> bool>) -> Vec<(f64, Vec<Primitive>)> {
     let Some(trees) = p.trees.as_deref().filter(|t| !t.is_empty()) else { return vec![] };
     let Some(plane) = level.plane() else { return vec![] };
     let [nx, _, nz] = plane.normal;
@@ -309,6 +316,8 @@ pub fn view_trees(p: &Project, level: &LevelSpec, vis: &Visibility, fill: Option
         let to = |r: &[[f64; 2]]| r.iter().map(|q| v(q[0], q[1])).collect::<Vec<Vec2>>();
         let stroke = t.color.as_deref().filter(|c| !c.is_empty()).unwrap_or(VIEW_INK);
         let trunk_fill = fill.map(|f| if f == "#ffffff" { f } else { VIEW_TRUNK_FILL });
+        let crown_bb = crown.iter().filter(|q| q[0].is_finite() && q[1].is_finite()).fold([f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY], |b, q| [b[0].min(q[0]), b[1].min(q[1]), b[2].max(q[0]), b[3].max(q[1])]);
+        let fill = if in_front.is_some_and(|f| f(depth, crown_bb)) { None } else { fill };
         let mut prims = Vec::new();
         // Stamm und Krone hinter der Ebene (Mitte hinter bzw. auf der Ebene) als ganze Silhouette; im Schnitt
         // entfällt, was vor der Ebene liegt.
@@ -332,6 +341,109 @@ pub fn view_trees(p: &Project, level: &LevelSpec, vis: &Visibility, fill: Option
             crate::renovation::restyle_linework(&mut prims, 0, st, false);
         }
         out.push((depth, prims));
+    }
+    out
+}
+
+/// [149] Bäume im Schnitt hinter der Ebene werden von allem verdeckt, was vor ihnen liegt: geschnittene Bauteile
+/// (Tiefe 0) und Projektionsflächen (Wände, Decken, Dach, Körper), die ganz vor der senkrechten Ebene durch die
+/// Stammmitte des Baums liegen — dieselben Verdecker wie die Projektionskanten (`hlr`, `Output::occluders`).
+/// Die Silhouette bleibt, wo nichts davor liegt (Gelände und Raum dahinter verdecken nicht, die Krone steht
+/// frei); der Schnitt des Baums selbst (Schnittstärke) liegt in der Ebene und wird nicht verdeckt. Umrisse, die
+/// teilweise verdeckt sind, werden zu Linien der sichtbaren Teile; die Pick-Fläche bleibt (`stroke: none`).
+/// Unsinn (nicht endliche Punkte) lässt die Gruppe unverändert. `groups`: (Tiefe der Stammmitte, Primitive).
+pub fn occlude_in_section(groups: Vec<(f64, Vec<Primitive>)>, occ: &[super::section::Occluder]) -> Vec<Primitive> {
+    if occ.is_empty() {
+        return groups.into_iter().flat_map(|(_, g)| g).collect();
+    }
+    let mut flat = vec![occ.len() as f64];
+    for o in occ {
+        flat.extend([o.depth, o.pts.len() as f64]);
+        for q in &o.pts {
+            flat.extend(q);
+        }
+    }
+    // Alle Strecken der Gruppen in einem Aufruf; `owner` = Index in `slots`.
+    let mut segs = vec![0.0];
+    let mut slots: Vec<(usize, usize)> = Vec::new(); // (Gruppe, Primitiv)
+    let mut ranges: Vec<std::ops::Range<usize>> = Vec::new(); // Strecken je Slot
+    let mut count = 0usize;
+    for (gi, (d, g)) in groups.iter().enumerate() {
+        for (pi, q) in g.iter().enumerate() {
+            let (pts, closed, w): (Vec<Vec2>, bool, f64) = match q {
+                Primitive::Polygon { pts, fill, stroke, stroke_width_mm, .. } if fill == "none" && stroke != "none" && pts.len() >= 3 => (pts.clone(), true, *stroke_width_mm),
+                Primitive::Line { a, b, weight_mm, .. } => (vec![*a, *b], false, *weight_mm),
+                _ => continue,
+            };
+            if !pts.iter().all(|q| q.x.is_finite() && q.y.is_finite()) || !d.is_finite() {
+                continue;
+            }
+            // Der Schnitt liegt in der Ebene (Tiefe 0), der Rest in der Tiefe der Stammmitte.
+            let depth = if (w - VIEW_CUT_MM).abs() < 1e-9 { 0.0 } else { *d };
+            let n = if closed { pts.len() } else { 1 };
+            let from = count;
+            for i in 0..n {
+                let (a, b) = (pts[i], pts[(i + 1) % pts.len()]);
+                segs.extend([a.x, a.y, b.x, b.y, depth]);
+                count += 1;
+            }
+            slots.push((gi, pi));
+            ranges.push(from..count);
+        }
+    }
+    segs[0] = count as f64;
+    let res = super::elevation_geom::clip_segments(&flat, &segs);
+    // Ergebnis je Strecke: [c, (ax, ay, bx, by) × c]; leer = Eingabe unbrauchbar, nichts verdecken.
+    let mut parts: Vec<Vec<(Vec2, Vec2)>> = Vec::new();
+    if res.len() > 1 && res[0] as usize == count {
+        let mut i = 1;
+        for _ in 0..count {
+            let c = res[i] as usize;
+            i += 1;
+            parts.push((0..c).map(|k| (v(res[i + 4 * k], res[i + 4 * k + 1]), v(res[i + 4 * k + 2], res[i + 4 * k + 3]))).collect());
+            i += 4 * c;
+        }
+    }
+    let mut out = Vec::new();
+    let mut slot = 0usize;
+    for (gi, (_, g)) in groups.into_iter().enumerate() {
+        for (pi, q) in g.into_iter().enumerate() {
+            if slots.get(slot) != Some(&(gi, pi)) || parts.is_empty() {
+                out.push(q);
+                continue;
+            }
+            let r = ranges[slot].clone();
+            slot += 1;
+            let whole = r.clone().all(|k| parts[k].len() == 1 && {
+                let (s, e) = (segs[1 + 5 * k..3 + 5 * k].to_vec(), segs[3 + 5 * k..5 + 5 * k].to_vec());
+                let (a, b) = parts[k][0];
+                (a.x - s[0]).abs() + (a.y - s[1]).abs() + (b.x - e[0]).abs() + (b.y - e[1]).abs() < 1e-9
+            });
+            if whole {
+                out.push(q);
+                continue;
+            }
+            match q {
+                Primitive::Polygon { pts, stroke, stroke_width_mm, greyed, context_object_id, .. } => {
+                    out.push(poly(pts, "none", "none", 0.0, context_object_id, greyed));
+                    for k in r {
+                        for (a, b) in &parts[k] {
+                            out.push(line(*a, *b, "tree-view", stroke_width_mm, &stroke, None, greyed));
+                        }
+                    }
+                }
+                Primitive::Line { cls, weight_mm, dash, color, greyed, .. } => {
+                    for (a, b) in &parts[r.start] {
+                        let mut l = line(*a, *b, &cls, weight_mm, color.as_deref().unwrap_or(VIEW_INK), None, greyed);
+                        if let Primitive::Line { dash: d, .. } = &mut l {
+                            d.clone_from(&dash);
+                        }
+                        out.push(l);
+                    }
+                }
+                other => out.push(other),
+            }
+        }
     }
     out
 }
@@ -556,3 +668,7 @@ mod tests {
         assert!(b[0].0.x + hw < 1.0 || b[0].0.x - hw > 1.4 || b[0].0.y.abs() > 0.5, "Label auf dem Nachbarstamm: {:?}", b[0].0);
     }
 }
+
+#[cfg(test)]
+#[path = "trees_tests.rs"]
+mod verdeckung_tests;

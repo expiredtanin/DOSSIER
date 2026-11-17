@@ -542,9 +542,20 @@ pub struct ShoringCut {
     pub excavation_id: String,
 }
 
+/// [149] Verdecker für Bäume hinter der Schnittebene: Fläche in Ansichtskoordinaten (u, Höhe) mit ihrer grössten
+/// Tiefe hinter der Ebene (Schnittflächen: 0). Ein Baum (senkrechte Ebene in der Tiefe seiner Stammmitte) liegt hinter
+/// allem, was vollständig davor liegt.
+#[derive(Clone, Debug)]
+pub struct Occluder {
+    pub depth: f64,
+    pub pts: Vec<[f64; 2]>,
+}
+
 /// Ergebnis eines Schnitts (`SectionOutput`).
 #[derive(Clone, Debug, Default)]
 pub struct Output {
+    /// [149] Verdecker für Bäume (Flächen der Projektion und Schnittflächen).
+    pub occluders: Vec<Occluder>,
     pub cuts: Vec<Cut>,
     pub visible: Vec<Edge>,
     pub hidden: Vec<Edge>,
@@ -723,10 +734,10 @@ pub(super) fn compute_plane(p: &Project, level: &LevelSpec, bodies: &[BodyMesh],
     }
     cuts.retain(|c| c.category.as_deref().is_none_or(shown));
     // Projektion hinter der Ebene exakt ([G4]); die Schnittflächen verdecken, was hinter ihnen liegt.
-    let (mut visible, hidden) = projection_edges(p, &plane, &walls_r, &wi, &slabs_r, &bodies, &meshes, &cuts, level.hidden_lines, level.depth, strip.map_or(&[][..], |s| &s.half[..]), &skip);
+    let (mut visible, hidden, occluders) = projection_edges(p, &plane, &walls_r, &wi, &slabs_r, &bodies, &meshes, &cuts, level.hidden_lines, level.depth, strip.map_or(&[][..], |s| &s.half[..]), &skip);
     shaped_projection(&mut visible, p, &walls_r, &plane);
     let meshes = meshes.iter().map(|m| MeshMeta { id: m.mesh.id.clone(), name: m.mesh.name.clone(), category: Some(m.mesh.category_code.clone()) }).collect();
-    let mut out = Output { cuts, visible, hidden, profiles: Vec::new(), earth: Vec::new(), shoring: Vec::new(), terrain_id: None, meshes, mesh_lines, edge_cats, edge_ids, ground: super::elevation::ground_ref(p, &|c| vis.visible(c) && vis.render(c)) };
+    let mut out = Output { occluders, cuts, visible, hidden, profiles: Vec::new(), earth: Vec::new(), shoring: Vec::new(), terrain_id: None, meshes, mesh_lines, edge_cats, edge_ids, ground: super::elevation::ground_ref(p, &|c| vis.visible(c) && vis.render(c)) };
     append_terrain_profiles(&mut out, p, base, u);
     clip_context_meshes_to_terrain(&mut out);
     if let Some(s) = strip {
