@@ -4,7 +4,7 @@
 import type { CoreOp } from "../core/ops";
 import { documentFor } from "../core/document";
 import { patchItems, setField } from "../core/opsBuild";
-import type { Project, Renovation, RenovationPhase, RenovationShow, RenovationStatus } from "./types";
+import type { Project, Renovation, RenovationPhase, RenovationShow, RenovationStatus, Tree, TreeStatus } from "./types";
 
 /** Eingebaute Umbaufilter (Ids; Namen über `t("renovation.filter.<id>")`). */
 export const BUILTIN_RENOVATION_FILTERS = ["bestand", "abbruch", "neubau", "umbauplan", "endzustand"] as const;
@@ -12,9 +12,19 @@ export const BUILTIN_RENOVATION_FILTERS = ["bestand", "abbruch", "neubau", "umba
 /** Status in der Reihenfolge der Oberfläche. */
 export const RENOVATION_STATUSES: readonly RenovationStatus[] = ["existing", "demolish", "new"];
 
-/** Listen mit Umbau-Status (Räume nur Sichtbarkeit/Flächen, keine Farbe). */
-export const RENOVATION_COLLECTIONS = ["walls", "openings", "ceilings", "roofs", "stairs", "columns", "extrudedSolids", "rooms"] as const;
+/**
+ * Listen mit Umbau-Status (Räume nur Sichtbarkeit/Flächen, keine Farbe). `drawings2d`: Möbel und Symbole der Bibliothek
+ * (ohne Angabe = Bestand) sowie 2D-Elemente mit ausdrücklichem Status (Linienwerk, Masse …; Kern `drawing_takes_part`).
+ */
+export const RENOVATION_COLLECTIONS = ["walls", "openings", "ceilings", "roofs", "stairs", "columns", "extrudedSolids", "rooms", "drawings2d"] as const;
 export type RenovationCollection = (typeof RENOVATION_COLLECTIONS)[number];
+
+/**
+ * Bäume tragen kein eigenes `renovation`: ihr Bestand (`Tree.status`, [149]) IST der Umbau-Status
+ * (bestehend = Bestand, zu fällen = Abbruch, neu = Neu; Kern `renovation::tree_renovation`).
+ */
+const TREE_STATUS_OF: Record<RenovationStatus, TreeStatus> = { existing: "existing", demolish: "remove", new: "new" };
+export const treeRenovationStatus = (t: Tree): RenovationStatus => (t.status === "remove" ? "demolish" : t.status === "new" ? "new" : "existing");
 
 /** SIA-400-Vorgabe der Umbau-Farben (gleich wie `renovation::default_style` im Kern). */
 export const DEFAULT_RENOVATION_STYLES: Record<RenovationStatus, { fill: string; line?: string; dashed: boolean }> = {
@@ -73,6 +83,8 @@ export function setRenovationOps(project: Project, ids: Iterable<string>, status
       }),
     );
   }
+  // Bäume: der Status ist ihr Bestand (Etappen kennen sie nicht).
+  if (status) ops.push(...patchItems(project, "trees", set, (t) => ({ ...t, status: TREE_STATUS_OF[status] })));
   return ops;
 }
 
@@ -83,6 +95,7 @@ export function renovatableIds(project: Project, ids: Iterable<string>): string[
   for (const c of RENOVATION_COLLECTIONS) {
     for (const e of (project[c] ?? []) as { id: string }[]) if (set.has(e.id)) out.push(e.id);
   }
+  for (const t of project.trees ?? []) if (set.has(t.id)) out.push(t.id);
   return out;
 }
 
@@ -92,21 +105,22 @@ export function commonRenovation(project: Project, ids: Iterable<string>): { sta
   let status: RenovationStatus | "mixed" | null = null;
   let phase: string | "mixed" | null = null;
   let first = true;
+  const add = (s: RenovationStatus, ph: string) => {
+    if (first) {
+      status = s;
+      phase = ph;
+      first = false;
+    } else {
+      if (status !== s) status = "mixed";
+      if (phase !== ph) phase = "mixed";
+    }
+  };
   for (const c of RENOVATION_COLLECTIONS) {
     for (const e of (project[c] ?? []) as { id: string; renovation?: Renovation }[]) {
-      if (!set.has(e.id)) continue;
-      const s = renovationStatus(e.renovation);
-      const ph = e.renovation?.phase ?? "";
-      if (first) {
-        status = s;
-        phase = ph;
-        first = false;
-      } else {
-        if (status !== s) status = "mixed";
-        if (phase !== ph) phase = "mixed";
-      }
+      if (set.has(e.id)) add(renovationStatus(e.renovation), e.renovation?.phase ?? "");
     }
   }
+  for (const t of project.trees ?? []) if (set.has(t.id)) add(treeRenovationStatus(t), "");
   return { status, phase };
 }
 
@@ -171,6 +185,12 @@ export function renovationStyleOf(project: Project, status: RenovationStatus): {
   return { fill: o?.fill ?? d.fill, line: o?.line ?? d.line, dashed: o?.dashed ?? d.dashed };
 }
 
+/** Möbel und Symbole (Objekte der Bibliothek, Blöcke): nehmen ohne Angabe als Bestand am Umbaufilter teil. */
+function isFurnitureShape(d: unknown): boolean {
+  const shape = (d as { geom?: { shape?: string } }).geom?.shape;
+  return shape === "libobj" || shape === "block";
+}
+
 /** Auswahl-Art je Liste (`extrudedSolids` heissen in der Auswahl `solids`). */
 const SELECTION_KEY: Record<RenovationCollection, string> = {
   walls: "walls",
@@ -181,6 +201,7 @@ const SELECTION_KEY: Record<RenovationCollection, string> = {
   columns: "columns",
   extrudedSolids: "solids",
   rooms: "rooms",
+  drawings2d: "drawings",
 };
 
 /**
@@ -197,8 +218,10 @@ export function idsByRenovationStatus(
   for (const c of RENOVATION_COLLECTIONS) {
     const ids: string[] = [];
     for (const e of (project[c] ?? []) as { id: string; floorId?: string; hostWallId?: string; renovation?: Renovation }[]) {
+      // Zeichnungen ohne ausdrücklichen Status (Linien, Masse …) nehmen nicht teil; Möbel und Symbole gelten als Bestand.
+      if (c === "drawings2d" && !e.renovation && !isFurnitureShape(e)) continue;
       const wall = c === "openings" && e.hostWallId ? wallOf.get(e.hostWallId) : undefined;
-      const floor = e.floorId ?? wall?.floorId;
+      const floor = e.floorId ?? (e as { levelId?: string }).levelId ?? wall?.floorId;
       if (opts.floorId && floor && floor !== opts.floorId) continue;
       const r = e.renovation ?? wall?.renovation;
       if (renovationStatus(r) !== status) continue;
@@ -207,6 +230,8 @@ export function idsByRenovationStatus(
     }
     if (ids.length) out[SELECTION_KEY[c]] = ids;
   }
+  const trees = (project.trees ?? []).filter((t) => treeRenovationStatus(t) === status && (!opts.floorId || t.floorId === opts.floorId) && (opts.phase === undefined || opts.phase === "")).map((t) => t.id);
+  if (trees.length) out.trees = trees;
   return out;
 }
 

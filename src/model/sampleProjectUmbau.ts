@@ -5,9 +5,12 @@
 // und Endzustand ist die Wand dort zu, mit roter Ausfachung im Umbauplan), in die Westwand W4 kommt ein neues Fenster O3
 // (Öffnung „Neu“ in Bestandswand: im Bestand ist die Wand dort zu, im Umbauplan gelbes Abbruch-Stück).
 // Etappe 2 (Anbau): ein eingeschossiger Anbau im Norden (Wände, Decke, Raum, Fenster) und eine neue Tür in W3.
+// Möbel (Objekte der Bibliothek) und Bäume tragen den Umbau-Status ebenfalls: ein Sofa bleibt (Bestand), ein Tisch wird
+// entfernt (Abbruch, Etappe 1), ein neues Sofa kommt in den Anbau (Etappe 2); ein Baum wird gefällt (Bäume: `status` = Umbau-Status),
+// ein neuer wird gepflanzt.
 // Nur Modellfelder, keine Kern-Befehle: das Modul ist ohne geladenen Kern auswertbar.
 
-import type { Ceiling, DrawingLevel, Opening, Project, Renovation, Room, Wall } from "./types";
+import type { Ceiling, Drawing2D, DrawingLevel, Opening, Project, Renovation, Room, Tree, Wall } from "./types";
 import { sampleProject } from "./sampleProject";
 
 const E1: Renovation = { status: "new", phase: "etappe-1" };
@@ -23,6 +26,17 @@ const win = (id: string, hostWallId: string, position: number, width: number, re
   ...(renovation ? { renovation } : {}),
 });
 
+/** Objekt der Bibliothek ([253]) auf der Möbel-Klasse; ohne `renovation` = Bestand. */
+const furniture = (id: string, libId: string, x: number, y: number, renovation?: Renovation, rotation = 0): Drawing2D => ({
+  id, type: "drawing2d", levelId: "eg", categoryCode: "22", geom: { shape: "libobj", libId, at: { x, y }, rotation },
+  ...(renovation ? { renovation } : {}),
+});
+
+const tree = (id: string, x: number, y: number, status: Tree["status"]): Tree => ({
+  id, type: "tree", floorId: "eg", categoryCode: "13", position: { x, y }, trunkDiameter: 0.3, crownDiameter: 3.2, crownBase: 1.8, height: 6.5,
+  shape: "round", status, foliage: "deciduous",
+});
+
 /** Das Umbau-Beispiel (frische Kopie bei jedem Aufruf). */
 export function buildUmbauSampleProject(): Project {
   const base = structuredClone(sampleProject);
@@ -30,6 +44,8 @@ export function buildUmbauSampleProject(): Project {
     ...base.drawingLevels,
     // Schnitt durch den Anbau (Nord–Süd, Blick nach Osten): zeigt Bestand, Abbruch W9 nicht, aber Anbau und neue Tür.
     { id: "schnitt-b", name: "Schnitt B", kind: "section", visible: true, locked: false, linePoints: [{ x: 1.4, y: -1 }, { x: 1.4, y: 8 }], directionSign: -1 },
+    // Ansicht West (Blick nach Osten): das neue Fenster O3 in der Bestandswand W4 mit seinem Abbruch-Stück, der Anbau dahinter.
+    { id: "ansicht-west", name: "Ansicht West", kind: "elevation", visible: true, locked: false, linePoints: [{ x: -2, y: 8 }, { x: -2, y: -1 }], directionSign: 1 },
   ];
   const walls: Wall[] = base.walls.map((w) => (w.id === "W9" ? { ...w, renovation: D1 } : w));
   walls.push(wall("W10", 0, 4, 0, 7), wall("W11", 0, 7, 3, 7), wall("W12", 3, 7, 3, 4));
@@ -57,6 +73,14 @@ export function buildUmbauSampleProject(): Project {
       renovation: E2,
     },
   ];
+  // Möbel im Westraum und im Anbau, Bäume östlich des Hauses.
+  const drawings2d: Drawing2D[] = [
+    ...base.drawings2d,
+    furniture("M1", "lib:sofa-2", 0.85, 2.0, undefined, Math.PI / 2),
+    furniture("M2", "lib:tisch-80x140", 1.65, 2.0, D1),
+    furniture("M3", "lib:sofa-2", 1.5, 5.6, E2),
+  ];
+  const trees: Tree[] = [...(base.trees ?? []), tree("B1", 7.4, 1.2, "remove"), tree("B2", 9.4, 4.6, "new")];
   return {
     ...base,
     id: "beispiel-umbau",
@@ -66,6 +90,8 @@ export function buildUmbauSampleProject(): Project {
     openings,
     ceilings,
     rooms,
+    drawings2d,
+    trees,
     renovation: {
       phases: [
         { id: "etappe-1", name: "Etappe 1" },

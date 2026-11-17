@@ -78,7 +78,9 @@ pub fn section_plan_buf(p: &Project, args: &[f64], text: &str) -> Result<Vec<u8>
     if let Some(r) = &ren {
         hidden_ids.extend(r.hidden.iter().cloned());
     }
-    let filtered = (!hidden_ids.is_empty()).then(|| without_elements(p, &hidden_ids));
+    let filtered = (!hidden_ids.is_empty()).then(|| crate::renovation::without_hidden(p, &hidden_ids));
+    // [271] Das Projekt mit allem (die zugemauerte Öffnung fehlt in `p` unten): Quelle der Ersatzstücke der Öffnungen.
+    let orig = p;
     let p = filtered.as_ref().unwrap_or(p);
     // [184] Öffnungen mit Detailgrad grob (Strich im Schnitt): Wandschnitt an Sturz/Brüstung flach. Das ändert die
     // Schnittflächen, gehört also in den Schlüssel (unten) und in die Sichtbarkeit.
@@ -140,12 +142,20 @@ pub fn section_plan_buf(p: &Project, args: &[f64], text: &str) -> Result<Vec<u8>
     let detail = mvo.as_ref().map_or(detail, |o| o.detail);
     let (mut prims, bounds) = section_primitives_mv(&out, mono, hidden, &vis, scale, detail, level.cut_hatch, &CutRules::of(p, &out, rv).with_renovation(&out, ren.as_ref()), smv.as_ref());
     w.post = crate::plan::extras::sketch_post(Some(level.sketch), scale);
+    // [271] Umbau: Abbruch-Stück (neue Öffnung in Bestandswand) und Ausfachung (zugemauerte Öffnung) in der Schnittfläche.
+    let parts = unfold::parts(&level);
+    if let Some(r) = ren.as_ref().filter(|r| !r.patches.is_empty()) {
+        for (l, s) in &parts {
+            prims.extend(unfold::clip_prims(section_patch_primitives(orig, l, &vis, &r.patches, &hidden_ids), s.as_ref()));
+        }
+    }
     // Strichstärken nach Massstab ([32]) wie im Grundriss.
     crate::plan::extras::scale_line_weights(p, scale, &mut prims);
     // [149] Bäume hinter der Schnittebene: transparente Silhouette unter dem Schnitt (Bauteile verdecken sie).
     // [176] Geknickter Schnitt: Bäume, Öffnungen und Achsen je Segment, auf den Streifen geschnitten und abgewickelt.
-    let parts = unfold::parts(&level);
-    let mut trees: Vec<Primitive> = parts.iter().flat_map(|(l, s)| crate::plan::trees::view_trees(p, l, &vis, None, Some(mono)).into_iter().flat_map(move |(_, t)| unfold::keep_group(t, s.as_ref()))).collect();
+    // Verdeckt von allem, was vor ihnen liegt (geschnittene Bauteile, Projektionsflächen).
+    let groups: Vec<(f64, Vec<Primitive>)> = parts.iter().flat_map(|(l, s)| crate::plan::trees::view_trees(p, l, &vis, None, Some(mono), ren.as_ref()).into_iter().map(move |(d, t)| (d, unfold::keep_group(t, s.as_ref())))).collect();
+    let mut trees = crate::plan::trees::occlude_in_section(groups, &out.occluders);
     let bounds = crate::plan::trees::union_bounds(bounds, &trees);
     crate::plan::extras::scale_line_weights(p, scale, &mut trees);
     trees.extend(prims);

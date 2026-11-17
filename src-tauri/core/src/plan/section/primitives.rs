@@ -656,6 +656,15 @@ pub fn section_primitives_mv(out: &Output, mono: bool, hidden_lines: bool, vis: 
         acc.add(e.b[0], e.b[1]);
         let mut l = line(v2(e.a[0], e.a[1]), v2(e.b[0], e.b[1]), "section-visible", SECTION_VISIBLE_MM, SECTION_VISIBLE_INK);
         mesh_style(e, &mut l);
+        // [271] Umbau: Projektionslinie in der Linienfarbe des Status, bei Abbruch gestrichelt.
+        if let (Some(st), Primitive::Line { color, dash, .. }) = (rules.edge.get(&(e.kind, e.index)), &mut l) {
+            if let Some(c) = &st.line {
+                *color = Some(c.clone().into());
+            }
+            if st.dashed {
+                *dash = Some(Some(crate::renovation::DEMOLISH_DASH.to_vec()));
+            }
+        }
         prims.push(l);
     }
     // [152] Offene Schnittlinien importierter Netze (Flächen ohne Dicke, nicht-mannigfaltige Netze): schwer

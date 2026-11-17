@@ -23,9 +23,9 @@ export function renovationFilterLabel(id: string, own: readonly { id: string; na
   return own.find((f) => f.id === id)?.name ?? id;
 }
 
-/** Ids der Auswahl, die einen Umbau-Status tragen (Wände, Öffnungen, Decken, Dächer, Treppen, Stützen, Körper, Räume). */
+/** Ids der Auswahl, die einen Umbau-Status tragen (Wände, Öffnungen, Decken, Dächer, Treppen, Stützen, Körper, Räume, 2D-Elemente, Bäume). */
 export function selectionRenovationIds(sel: Selection): string[] {
-  return [...sel.walls, ...sel.openings, ...sel.ceilings, ...sel.roofs, ...sel.stairs, ...sel.columns, ...sel.solids, ...sel.rooms];
+  return [...sel.walls, ...sel.openings, ...sel.ceilings, ...sel.roofs, ...sel.stairs, ...sel.columns, ...sel.solids, ...sel.rooms, ...sel.drawings, ...sel.trees];
 }
 
 const NO_PHASES: readonly { id: string; name: string }[] = [];

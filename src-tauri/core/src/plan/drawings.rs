@@ -236,6 +236,8 @@ pub fn shape_name(g: &Drawing2DGeom) -> &'static str {
 /// Element-Attribute nach den Override-Regeln (Farbe, Strichstärke, Linienstil) und die Ebene.
 #[derive(Clone, Copy, Default)]
 pub struct Attrs<'a> {
+    /// [271] Strichmuster „Abbruch“ ([`crate::renovation::DEMOLISH_DASH`]) statt des Linienstils.
+    pub demolish_dash: bool,
     pub color: Option<&'a str>,
     pub weight: Option<f64>,
     pub line_style_id: Option<&'a str>,
@@ -245,12 +247,13 @@ pub struct Attrs<'a> {
 impl<'a> Attrs<'a> {
     /// Ohne Overrides: die Felder des Elements.
     pub fn of(c: &Ctx<'a>, d: &'a Drawing2D) -> Self {
-        Attrs { color: d.color.as_deref(), weight: d.weight_mm, line_style_id: d.line_style_id.as_deref(), category: c.cat(&d.category_code) }
+        Attrs { demolish_dash: false, color: d.color.as_deref(), weight: d.weight_mm, line_style_id: d.line_style_id.as_deref(), category: c.cat(&d.category_code) }
     }
 
     /// Mit Override-Aktionen (`ov.x ?? d.x`).
     pub fn with(d: &'a Drawing2D, ov: &'a Actions, category: Option<&'a LayerCategory>) -> Self {
         Attrs {
+            demolish_dash: false,
             color: ov.color.as_deref().or(d.color.as_deref()),
             weight: ov.lineweight.or(d.weight_mm),
             line_style_id: ov.linetype_id.as_deref().or(d.line_style_id.as_deref()),
@@ -375,6 +378,13 @@ fn street_name_on_axis(c: &Ctx, d: &Drawing2D, text: &str, height: f64, at: Vec2
 /// trifft sie auch die rekursiv erzeugte Block-Geometrie (dort mehrfach, wie in TS).
 #[allow(clippy::too_many_arguments)]
 pub fn emit(c: &Ctx, d: &Drawing2D, attrs: Attrs, geom: &Drawing2DGeom, greyed: bool, scale: f64, sink: &mut Sink, depth: u32) -> Result<(), String> {
+    // [271] Umbaufilter: Möbel und Elemente mit Umbau-Status zeichnen in der Farbe ihres Status (Linienfarbe, sonst die
+    // Füllfarbe) und bei Abbruch gestrichelt; sie gehen den Regeln vor wie bei Wänden.
+    let mut attrs = attrs;
+    if let Some(st) = c.renovation().and_then(|r| r.styled.get(&d.id)) {
+        attrs.color = Some(st.line.as_deref().unwrap_or(&st.fill));
+        attrs.demolish_dash = st.dashed;
+    }
     let clamp = |v: Option<f64>| v.filter(|x| *x < 1.0).map(|x| jsnum::max(0.0, x));
     sink.frames.push((clamp(d.opacity), clamp(d.fill_opacity)));
     let r = emit_inner(c, d, attrs, geom, greyed, scale, sink, depth);
@@ -662,6 +672,7 @@ fn emit_inner(c: &Ctx, d: &Drawing2D, attrs: Attrs, geom: &Drawing2DGeom, greyed
     };
     let raw = ls.and_then(|l| l.dash.as_ref());
     let (dash, dash_ref) = match raw {
+        _ if attrs.demolish_dash => (Some(Cow::Borrowed(&crate::renovation::DEMOLISH_DASH[..])), sink.fresh_ref()),
         None => (None, 0),
         Some(r) if dash_scale != 1.0 => (Some(Cow::Owned(r.iter().map(|x| x * dash_scale).collect::<Vec<f64>>())), sink.fresh_ref()),
         Some(r) => (Some(Cow::Borrowed(r.as_slice())), DASH_REF_STYLE + ls_idx.unwrap_or(0) as u32),

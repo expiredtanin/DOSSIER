@@ -241,11 +241,11 @@ pub(crate) fn view_faces(p: &Project, view: &dyn Fn([f64; 3]) -> [f64; 3], view_
 /// auf die Seite hinter der Ebene zugeschnitten; die Schnittflächen verdecken in Tiefe 0. Bogenwände,
 /// verschnittene Dächer und Körper glätten ihre Facetten (keine Fugen, nur Knicke und Silhouetten).
 #[allow(clippy::too_many_arguments)]
-pub(super) fn projection_edges(p: &Project, plane: &Plane, walls_r: &[RWall], wi: &[render3d::WallInput], slabs_r: &[RSlab], bodies: &[&BodyMesh], meshes: &[crate::mesh_view::MeshRef], cuts: &[Cut], hidden: bool, max_depth: Option<f64>, strip: &[[f64; 3]], skip: &dyn Fn(Kind, usize) -> bool) -> (Vec<Edge>, Vec<Edge>) {
+pub(super) fn projection_edges(p: &Project, plane: &Plane, walls_r: &[RWall], wi: &[render3d::WallInput], slabs_r: &[RSlab], bodies: &[&BodyMesh], meshes: &[crate::mesh_view::MeshRef], cuts: &[Cut], hidden: bool, max_depth: Option<f64>, strip: &[[f64; 3]], skip: &dyn Fn(Kind, usize) -> bool) -> (Vec<Edge>, Vec<Edge>, Vec<Occluder>) {
     use crate::hlr;
     let nl = crate::jsmath::hypot(&plane.normal);
     if !(nl > 1e-12) {
-        return (Vec::new(), Vec::new());
+        return (Vec::new(), Vec::new(), Vec::new());
     }
     let n = [plane.normal[0] / nl, plane.normal[1] / nl, plane.normal[2] / nl];
     let ul = hypot2(n[2], n[0]);
@@ -279,6 +279,13 @@ pub(super) fn projection_edges(p: &Project, plane: &Plane, walls_r: &[RWall], wi
             faces.push(f);
         }
     }
+    // [149] Verdecker für Bäume: alle deckenden Flächen mit ihrer grössten Tiefe.
+    let occluders: Vec<Occluder> = faces
+        .iter()
+        .filter(|f| f.occludes && f.pts.len() >= 3)
+        .map(|f| Occluder { depth: f.pts.iter().fold(f64::NEG_INFINITY, |m, q| m.max(q[2])), pts: f.pts.iter().map(|q| [q[0], q[1]]).collect() })
+        .filter(|o| o.depth.is_finite() && o.pts.iter().all(|q| q[0].is_finite() && q[1].is_finite()))
+        .collect();
     let opts = hlr::Opts { tol: 1e-4, depth_eps: 1e-4, hidden, ..hlr::Opts::default() };
     let (mut visible, mut hidden) = (Vec::new(), Vec::new());
     for sg in hlr::hidden_lines(&faces, &opts) {
@@ -297,7 +304,7 @@ pub(super) fn projection_edges(p: &Project, plane: &Plane, walls_r: &[RWall], wi
             visible.push(e);
         }
     }
-    (visible, hidden)
+    (visible, hidden, occluders)
 }
 
 /// [266] Besitzer einer Fläche aus [`model_view_faces`]: Art und Element-Id (für die Auswahl im Plan).

@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { applyOps } from "../core/ops";
 import { documentFor } from "../core/document";
 import {
-  commonRenovation, idsByRenovationStatus, phaseUsage, renovationCounts, renovationFilterList, renovationFilterShows, renovationForNew, renovationStyleOf, RENOVATION_STATUSES,
+  commonRenovation, idsByRenovationStatus, phaseUsage, renovatableIds, renovationCounts, renovationFilterList, renovationFilterShows, renovationForNew, renovationStyleOf, RENOVATION_STATUSES,
   setPhasesOps, setRenovationOps,
 } from "./renovation";
 import { buildUmbauSampleProject } from "./sampleProjectUmbau";
@@ -119,5 +119,32 @@ describe("[271] Umbau", () => {
     const p = buildUmbauSampleProject();
     expect(phaseUsage(p, "etappe-1")).toBeGreaterThan(0);
     expect(phaseUsage(p, "nix")).toBe(0);
+  });
+
+  it("Möbel und Bäume tragen den Umbau-Status (Baum: sein Bestand ist der Status)", () => {
+    const p = buildUmbauSampleProject();
+    // Beispiel: Sofa Bestand, Tisch Abbruch, Sofa neu; Baum zu fällen = Abbruch, neuer Baum = Neu.
+    const dem = idsByRenovationStatus(p, "demolish");
+    expect(dem.drawings).toEqual(["M2"]);
+    expect(dem.trees).toEqual(["B1"]);
+    expect(idsByRenovationStatus(p, "new").drawings).toEqual(["M3"]);
+    expect(idsByRenovationStatus(p, "new").trees).toEqual(["B2"]);
+    expect(idsByRenovationStatus(p, "existing").drawings).toEqual(["M1"]);
+    // Linien und Masse ohne Angabe nehmen nicht teil (sonst wären sie im Umbauplan grau).
+    const withLine = { ...p, drawings2d: [...p.drawings2d, { id: "L0", type: "drawing2d" as const, levelId: "eg", categoryCode: "20", geom: { shape: "line" as const, a: { x: 0, y: 0 }, b: { x: 1, y: 0 } } }] };
+    expect(idsByRenovationStatus(withLine, "existing").drawings).toEqual(["M1"]);
+    // Setzen: Möbel bekommen `renovation`, Bäume ihren `status` (zu fällen = Abbruch).
+    const ops = setRenovationOps(p, ["M1", "B2"], "demolish");
+    expect(ops).toHaveLength(2);
+    const q = applyOps(p, ops);
+    expect(q.drawings2d.find((d) => d.id === "M1")?.renovation?.status).toBe("demolish");
+    expect(q.trees?.find((t) => t.id === "B2")?.status).toBe("remove");
+    expect(commonRenovation(q, ["M1", "B2"]).status).toBe("demolish");
+    expect(commonRenovation(p, ["M1", "B1"]).status).toBe("mixed");
+    // Zurück auf Bestand: das Möbel verliert das Feld, der Baum wird bestehend.
+    const back = applyOps(q, setRenovationOps(q, ["M1", "B2"], "existing"));
+    expect(back.drawings2d.find((d) => d.id === "M1")?.renovation).toBeUndefined();
+    expect(back.trees?.find((t) => t.id === "B2")?.status).toBe("existing");
+    expect(renovatableIds(p, ["M1", "B1", "gibts-nicht"]).sort()).toEqual(["B1", "M1"]);
   });
 });

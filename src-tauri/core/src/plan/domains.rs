@@ -2368,7 +2368,8 @@ fn assemble_cached(c: &Ctx, revs: &crate::document::Revs, cc: &mut super::cache:
             h = (h ^ b as u64).wrapping_mul(0x0000_0100_0000_01b3);
         }
         // [199] Die Zahlen der Aussenbemassung weichen Schnittmarken aus: der Stand der Schnitte gehört dazu.
-        (h ^ revs.field("drawingLevels").rotate_left(7)) ^ cc.drawings.sig.wrapping_mul(0xff51_afd7_ed55_8ccd)
+        // [271] Möbel und Zeichnungen folgen dem Umbaufilter (Ebene) und den Umbau-Farben/Etappen des Projekts.
+        (h ^ revs.field("drawingLevels").rotate_left(7) ^ revs.field("renovation").rotate_left(13)) ^ cc.drawings.sig.wrapping_mul(0xff51_afd7_ed55_8ccd)
     };
     // [140] Achsraster enden an der Gebäudegrundfläche: ihr Stand folgt auch Wänden, Körpern und Dächern.
     let stamps = revs.item_stamps("drawings2d").unwrap_or(&[]);

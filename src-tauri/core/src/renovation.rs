@@ -97,6 +97,25 @@ pub fn opening_renovation<'a>(p: &'a Project, o: &'a Opening) -> Option<&'a Reno
     o.renovation.as_ref().or_else(|| p.walls.iter().find(|w| w.id == o.host_wall_id).and_then(|w| w.renovation.as_ref()))
 }
 
+/// Umbau-Angaben eines Baums: sein Bestand ([149], `Tree.status`) IST der Umbau-Status — bestehend = Bestand, neu = Neu,
+/// zu fällen = Abbruch. Ein Feld, keine zweite Wahrheit (der Baum trägt kein eigenes `renovation`); Etappen kennt er nicht
+/// (gilt als Etappe 1).
+pub fn tree_renovation(t: &Tree) -> Renovation {
+    let status = match t.status {
+        TreeStatus::New => RenovationStatus::New,
+        TreeStatus::Remove => RenovationStatus::Demolish,
+        _ => RenovationStatus::Existing,
+    };
+    Renovation { status, ..Default::default() }
+}
+
+/// Nimmt eine 2D-Zeichnung am Umbaufilter teil? Möbel und Symbole (Objekte der Bibliothek, Blöcke) immer (ohne Angabe =
+/// Bestand); alle übrigen 2D-Elemente (Linien, Masse, Texte, Koten, Raster …) nur mit ausdrücklichem Umbau-Status — sonst
+/// blieben im Umbauplan alle Masse und Beschriftungen grau.
+pub fn drawing_takes_part(d: &Drawing2D) -> bool {
+    d.renovation.is_some() || matches!(d.geom, Drawing2DGeom::Libobj { .. } | Drawing2DGeom::Block { .. })
+}
+
 /// Umbau-Farbe eines Status, aufgelöst (Projekt-Vorgabe über der SIA-Vorgabe).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Style {
@@ -341,6 +360,13 @@ impl View {
         for x in p.extruded_solids.iter().flatten() {
             put(&x.id, self.treat(x.renovation.as_ref()), out);
         }
+        // [271] 2D-Zeichnungen (Möbel, Symbole und Elemente mit ausdrücklichem Status) und Bäume ([149]: Status = Umbau-Status).
+        for x in p.drawings2d.iter().filter(|d| drawing_takes_part(d)) {
+            put(&x.id, self.treat(x.renovation.as_ref()), &mut out);
+        }
+        for t in p.trees.iter().flatten() {
+            put(&t.id, self.treat(Some(&tree_renovation(t))), &mut out);
+        }
         // Räume: nur sichtbar oder nicht (ein Raum ist kein Bauteil, er bekommt keine Umbau-Farbe).
         for x in p.rooms.iter().flatten() {
             if !self.visible(x.renovation.as_ref()) {
@@ -408,8 +434,12 @@ pub fn without_hidden(p: &Project, hidden: &HashSet<String>) -> Project {
     if let Some(v) = &mut q.extruded_solids {
         v.retain(|x| !hidden.contains(&x.id));
     }
-    // [272] 2D-Zeichnungen anderer Varianten.
+    // [272] 2D-Zeichnungen anderer Varianten, [271] Möbel und Symbole im Umbaufilter.
     q.drawings2d.retain(|x| !hidden.contains(&x.id));
+    // [271] Bäume (Schnitt, Ansicht, 3D).
+    if let Some(v) = &mut q.trees {
+        v.retain(|x| !hidden.contains(&x.id));
+    }
     q
 }
 
@@ -540,6 +570,21 @@ pub fn prim_element(q: &Primitive) -> Option<&str> {
     }
 }
 
+/// Strichzeichnung eines Objekts ohne Schnittfläche (Baum, Möbel): `prims[from..]` in der Linienfarbe des Status (sonst
+/// seiner Füllfarbe: Bestand grau, Abbruch gelb gestrichelt, Neu rot); gefüllte Flächen (Stamm) in der Füllfarbe,
+/// ausser mit `fill = false` (Silhouetten in Schnitt und Ansicht).
+pub fn restyle_linework(prims: &mut Vec<Primitive>, from: usize, st: &Style, fill: bool) {
+    if from >= prims.len() {
+        return;
+    }
+    let st = Style { fill: st.fill.clone(), line: Some(st.line.clone().unwrap_or_else(|| st.fill.clone())), dashed: st.dashed };
+    let mut extra = Vec::new();
+    for q in prims[from..].iter_mut() {
+        restyle_with(q, &st, &mut extra, fill);
+    }
+    prims.extend(extra);
+}
+
 /// Umbau-Farben auf `prims[from..]`: jedes Primitiv nach seinem Element ([`prim_element`]), sonst nach `owner`
 /// (z. B. die Wand, deren Umrisslinien keine Id tragen). Umrisslinien gestrichelter Flächen kommen dahinter.
 pub fn restyle_range(r: &Resolved, prims: &mut Vec<Primitive>, from: usize, owner: Option<&str>) {
@@ -565,14 +610,28 @@ fn cut_fill(q: &Primitive) -> bool {
     matches!(q, Primitive::Polygon { opening_id: None, wall_id: Some(_), .. } | Primitive::Polygon { opening_id: None, column_id: Some(_), .. })
 }
 
-/// Grundriss: Fläche eines Ersatzstücks (Wandband zwischen den Leibungen der Öffnung), `None` bei Bogenwänden
-/// oder ohne gültige Lage.
+/// Grundriss: Fläche eines Ersatzstücks (Wandband zwischen den Leibungen der Öffnung; bei Bogenwänden das Ringstück
+/// zwischen den Versatzbögen), `None` ohne gültige Lage.
 pub fn patch_ring(p: &Project, w: &Wall, o: &Opening) -> Option<Vec<Vec2>> {
-    if crate::wall_arc::WallArc::of_wall(w).is_some() {
-        return None;
-    }
     let total = p.wall_thickness(w, 0.2);
     let ref_off = crate::joins::reference_offset(crate::model3d::wall_reference(w), total);
+    if let Some(arc) = crate::wall_arc::WallArc::of_wall(w) {
+        // Öffnungsmass in Bogenlänge der Achse (wie im Schnitt und in der Ansicht), Querversatz links der Laufrichtung.
+        let axis = arc.length();
+        let from = o.position.max(0.0).min(axis);
+        let to = (o.position + o.width).min(axis).max(from);
+        let (n0, n1) = (ref_off - total / 2.0, ref_off + total / 2.0);
+        if !(to - from >= 1e-4) || ![from, to, n0, n1].iter().all(|x| x.is_finite()) {
+            return None;
+        }
+        let st = arc.stations(from, to, arc.r_max(n0, n1));
+        let at = |s: f64, n: f64| {
+            let q = arc.point(s, n);
+            Vec2 { x: q.x, y: q.y }
+        };
+        let ring: Vec<Vec2> = st.iter().map(|&s| at(s, n0)).chain(st.iter().rev().map(|&s| at(s, n1))).collect();
+        return ring.iter().all(|v| v.x.is_finite() && v.y.is_finite()).then_some(ring);
+    }
     let wr = crate::opening_geom::WallRef { start: crate::opening_geom::v(w.start.x, w.start.y), end: crate::opening_geom::v(w.end.x, w.end.y), total, ref_off };
     let (from, to) = crate::opening_geom::opening_interval(&wr, o.position, o.width)?;
     let fp = crate::plan::wall_poche::wall_footprint([w.start.x, w.start.y], [w.end.x, w.end.y], total, ref_off);
@@ -723,9 +782,13 @@ pub fn renovation_of<'a>(p: &'a Project, id: &str) -> Option<&'a Renovation> {
         )*};
     }
     look!(ceilings, roofs, stairs, columns, extruded_solids, rooms);
-    None
+    p.drawings2d.iter().find(|d| d.id == id).and_then(|d| d.renovation.as_ref())
 }
 
 #[cfg(test)]
 #[path = "renovation_tests.rs"]
 pub(crate) mod tests;
+
+#[cfg(test)]
+#[path = "renovation_tests2.rs"]
+mod tests2;

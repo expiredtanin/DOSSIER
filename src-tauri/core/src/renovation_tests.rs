@@ -304,7 +304,7 @@ fn grundriss_filter_der_ebene_und_etappe() {
     assert!(has_wall(&q, "W9"));
 }
 
-fn section_prims(p: &Project, extra: Value) -> Vec<Primitive> {
+pub(crate) fn section_prims(p: &Project, extra: Value) -> Vec<Primitive> {
     let level = p.drawing_levels.iter().find(|l| l.id == "schnitt-a").unwrap();
     let mut v = json!({"level": level, "scale": 50, "detail": "mittel"});
     for (k, x) in extra.as_object().unwrap() {
@@ -454,7 +454,7 @@ fn neue_bauteile_tragen_den_zeichen_status() {
         }
         _ => panic!(),
     }
-    // 2D-Zeichnungen bekommen keinen Status.
+    // 2D-Zeichnungen ohne Form (kein Möbel, kein Linienwerk) bekommen keinen Status (Rest: `renovation_tests2.rs`).
     assert!(matches!(&out[1], Op::Add { items, .. } if items[0].get("renovation").is_none()));
     // Bestand ohne Etappe = ohne Feld; Unsinn wird ignoriert.
     for r in [json!({"status": "existing"}), json!({"status": "kaputt"}), json!(42), json!(null)] {

@@ -458,3 +458,43 @@ pub fn section_opening_primitives_mv(p: &Project, level: &LevelSpec, vis: &Visib
     }
     Ok(out)
 }
+
+/// [271] Umbau im Schnitt: Ersatzstücke von Öffnungen in Bestandswänden (`renovation::Patch`) als Fläche in der Öffnung
+/// (Abbruch-Stück gelb gestrichelt, Ausfachung rot), dort, wo die Schnittebene die Öffnung trifft — wie die geschnittene
+/// Öffnung selbst ([`cross_section`], Bogenwände über die Sehne). `p` ist das Projekt MIT den im Filter ausgeblendeten
+/// Elementen (die geschlossene Öffnung steht sonst nicht darin); Wände in `skip` (Regel „Ausblenden“) und ausgeblendete
+/// Klassen entfallen. Ohne gültige Lage nichts (NaN, fehlende Wand/Öffnung).
+pub fn section_patch_primitives(p: &Project, level: &LevelSpec, vis: &Visibility, patches: &[crate::renovation::Patch], skip: &HashSet<String>) -> Vec<Primitive> {
+    let Some(plane) = level.plane() else { return Vec::new() };
+    if level.kind != "section" || patches.is_empty() {
+        return Vec::new();
+    }
+    let u_raw = plane.u_model();
+    let l = hypot2(u_raw.0, u_raw.1);
+    let l = if l == 0.0 || l.is_nan() { 1.0 } else { l };
+    let u = (u_raw.0 / l, u_raw.1 / l);
+    let p0 = plane.base();
+    let mut out = Vec::new();
+    for pa in patches {
+        let (Some(o), Some(wall)) = (p.openings.iter().flatten().find(|o| o.id == pa.opening_id), p.walls.iter().find(|w| w.id == pa.wall_id)) else { continue };
+        if skip.contains(&wall.id) || !vis.visible(&wall.category_code) || !vis.render(&wall.category_code) || !vis.visible(&o.category_code) || !vis.render(&o.category_code) {
+            continue;
+        }
+        let chord = arc_section_opening(p, wall, o, Some((p0, u)));
+        let (wall, o) = match &chord {
+            Some((vw, vo)) => (vw, vo),
+            None => (wall, o),
+        };
+        let Ok(Some(c)) = cross_section(p, wall, o, p0, u) else { continue };
+        let ring = rect(c.u_at(c.face_min), c.u_at(c.face_max), c.z_bottom, c.z_top);
+        if ring.iter().any(|q| !q.x.is_finite() || !q.y.is_finite()) {
+            continue;
+        }
+        let mut q = crate::renovation::patch_prims(ring, &pa.style, SECTION_VISIBLE_MM, &pa.opening_id);
+        if vis.greyed(&wall.category_code) {
+            q = q.into_iter().map(|x| x.with_greyed(true)).collect();
+        }
+        out.extend(q);
+    }
+    out
+}

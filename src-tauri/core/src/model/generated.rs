@@ -4981,6 +4981,10 @@ pub struct Drawing2D {
     #[serde(rename = "hatchSource", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub hatch_source: Option<AttributeSource>,
+    /// [271] Umbau: Status (Bestand, Abbruch, Neu) und Etappe — auch für Objekte der Bibliothek (Möbel). Fehlt ⇒ Bestand.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub renovation: Option<Renovation>,
     /// [272] Variante, zu der das Element gehört (`Project.designOptionSets`). Fehlt ⇒ Hauptmodell (immer sichtbar).
     #[serde(rename = "designOption", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
