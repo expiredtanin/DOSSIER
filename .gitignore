@@ -61,3 +61,7 @@ src-tauri/assets/native3d_walls.json
 test-results/
 playwright-report/
 src-tauri/target-*/
+
+# Cycles ([215]): ausgepacktes Paket (scripts/cycles/get.sh) und Tauri-Sidecars (scripts/cycles/tauri-prepare.mjs)
+/build/cycles/
+/src-tauri/binaries/

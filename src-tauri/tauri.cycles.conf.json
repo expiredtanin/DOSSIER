@@ -1,0 +1,10 @@
+{
+  "bundle": {
+    "externalBin": ["binaries/cycles"],
+    "resources": {
+      "../build/cycles/lib/": "cycles/lib/",
+      "../build/cycles/source/": "cycles/source/",
+      "../build/cycles/licenses/": "cycles/licenses/"
+    }
+  }
+}

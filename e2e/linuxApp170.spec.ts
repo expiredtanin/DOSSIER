@@ -9,9 +9,10 @@
 // durch die App (IPC, atomares Schreiben, Export-Bytes) bleibt der echte.
 import { _electron, type ElectronApplication, type Page } from "playwright";
 import { test, expect } from "@playwright/test";
+import { buildSync } from "esbuild";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 const BIN = process.env.DOSSIER_ELECTRON_BIN ?? "";
 
@@ -300,5 +301,73 @@ test("Externe Links: kein Kindfenster, shell.openExternal für https, Navigation
   // Chromium meldet den Versuch auf file:// selbst als Konsolenfehler — erwartet, hier entfernen, den Rest prüft close().
   r.errors = r.errors.filter((e) => !/Not allowed to load local resource: file:\/\/\/etc\/passwd/.test(e));
   expect(state.text).toMatch(/Neues Projekt|New project/);
+  await close(r);
+});
+
+// [215] Mitgeliefertes Cycles: im AppImage liegt `resources/cycles/cycles`; die Fassade `src/native/cyclesRuntime.ts` (hier mit esbuild in die
+// Seite geladen, damit der echte Code über Preload → Hauptprozess → Prozessstart läuft) findet es, rendert die kleine Testszene mit 8 Samples
+// zu einem PNG und meldet Fortschritt; Abbruch beendet den Prozess. Läuft nur, wenn das Paket mit Cycles gebaut wurde
+// (`DOSSIER_CYCLES_DIR=<ordner> npm run electron:pack`, s. doc/CYCLES.md), sonst übersprungen.
+test("Cycles: mitgeliefert, cyclesAvailable, runCycles rendert haus (8 Samples) zu PNG mit Fortschritt, Abbruch", async () => {
+  const r = await launch();
+  const { page, app } = r;
+  await expect(page.getByRole("button", { name: /Neues Projekt/ }).first()).toBeVisible({ timeout: 60_000 });
+  const res = await app.evaluate(({ app }) => ({ packaged: app.isPackaged, resources: process.resourcesPath }));
+  test.skip(!existsSync(join(res.resources, "cycles", "cycles")), "Paket ohne Cycles gebaut");
+  expect(res.packaged).toBe(true);
+  const facade = buildSync({
+    entryPoints: [resolve(process.cwd(), "src/native/cyclesRuntime.ts")],
+    bundle: true,
+    format: "iife",
+    globalName: "__cyclesFacade",
+    footer: { js: "window.__cyclesFacade = __cyclesFacade;" },
+    platform: "browser",
+    write: false,
+  }).outputFiles[0].text;
+  await page.evaluate(facade); // Runtime.evaluate: von der Seiten-CSP (kein eval) nicht betroffen
+  const xml = readFileSync(resolve(process.cwd(), "e2e/fixtures/cycles-haus.xml"), "utf8");
+  type Facade = {
+    cyclesAvailable(): Promise<boolean>;
+    prepareCyclesScene(f: { path: string; bytes: Uint8Array }[]): Promise<string>;
+    runCycles(dir: string, args: string[], on: (p: { fraction: number; sample: number; samples: number }) => void, signal?: AbortSignal): Promise<{ code: number; cancelled: boolean; lines: string[] }>;
+    readCyclesFile(path: string): Promise<Uint8Array>;
+  };
+  const out = await page.evaluate(async (xml) => {
+    const c = (window as unknown as { __cyclesFacade: Facade }).__cyclesFacade;
+    const available = await c.cyclesAvailable();
+    const dir = await c.prepareCyclesScene([{ path: "haus.xml", bytes: new TextEncoder().encode(xml) }]);
+    const progress: { sample: number; samples: number }[] = [];
+    const t0 = Date.now();
+    const run = await c.runCycles(dir, ["--background", "--device", "CPU", "--samples", "8", "--width", "320", "--height", "180", "--output", "out.png", "haus.xml"], (p) => progress.push({ sample: p.sample, samples: p.samples }));
+    const ms = Date.now() - t0;
+    const png = await c.readCyclesFile(`${dir}/out.png`);
+    // Abbruch: grosse Zahl Samples, nach dem ersten Fortschritt abbrechen
+    const ac = new AbortController();
+    const t1 = Date.now();
+    const aborted = await c.runCycles(dir, ["--background", "--device", "CPU", "--samples", "5000", "--width", "640", "--height", "360", "--output", "x.png", "haus.xml"], () => ac.abort(), ac.signal);
+    return { available, dir, progress, run, ms, head: Array.from(png.subarray(0, 8)), pngBytes: png.length, aborted, abortMs: Date.now() - t1 };
+  }, xml);
+  expect(out.available).toBe(true);
+  expect(out.dir).toContain("dossier-render");
+  expect(out.run.code).toBe(0);
+  expect(out.run.cancelled).toBe(false);
+  expect(out.progress.length).toBeGreaterThan(0);
+  expect(out.progress.at(-1)).toEqual({ sample: 8, samples: 8 });
+  expect(out.head).toEqual([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  expect(out.pngBytes).toBeGreaterThan(2000);
+  expect(out.aborted.cancelled).toBe(true);
+  expect(out.aborted.code).not.toBe(0);
+  expect(out.abortMs).toBeLessThan(20_000);
+  // Argumente werden im Hauptprozess geprüft: fremde Schalter und Pfade ausserhalb des Arbeitsordners starten nichts.
+  const rejected = await page.evaluate(async (dir) => {
+    const c = (window as unknown as { __cyclesFacade: Facade }).__cyclesFacade;
+    const tries = [["--help", "haus.xml"], ["--output", "../../etc/x.png", "haus.xml"], ["/etc/hosts.xml"]];
+    const outcomes: string[] = [];
+    for (const a of tries) outcomes.push(await c.runCycles(dir, a, () => {}).then(() => "gestartet", (e: Error) => e.message));
+    return outcomes;
+  }, out.dir);
+  expect(rejected.every((m) => m !== "gestartet")).toBe(true);
+  // Das gerenderte Bild stimmt grob (kein leeres Schwarz): Dateigrösse des 320×180-PNG nach Entrauschen > 2 kB (oben).
+  r.errors = r.errors.filter((e) => !/Error invoking remote method 'cycles:start'/.test(e));
   await close(r);
 });

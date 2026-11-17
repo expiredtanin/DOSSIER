@@ -108,6 +108,13 @@ für schnellere nächste Builds, `--appimage` baut zusätzlich ein AppImage).
 Prüfen: `npm run check` (TypeScript, Vitest und die Rust-Tests aller Crates),
 `npm run e2e` für die Oberflächentests mit Playwright.
 
+**Cycles (Endbild-Renderer, [215])**: wird nicht im App-Bau übersetzt, sondern als fertiges Paket mitgeliefert. `.github/workflows/cycles.yml` baut es
+(Linux x86_64, macOS arm64; Skripte `scripts/cycles/`, Version in `scripts/cycles/VERSION`) und legt `cycles-<os>-<arch>-<version>.tar.xz` am Gitea-Release
+`cycles-<version>` ab; `release.yml` lädt es vor dem App-Bau (`scripts/cycles/get.sh linux x86_64` bzw. `macos arm64`, Ergebnis `build/cycles/`). Lokal (Linux):
+`scripts/cycles/build-linux.sh` baut nach `~/cycles-build/dist`, dann `DOSSIER_CYCLES_DIR=~/cycles-build/dist npm run electron:pack` (statt `get.sh`);
+macOS: `node scripts/cycles/tauri-prepare.mjs build/cycles && npm run tauri:build`. Ohne Cycles läuft die App weiter (Blender-Brücke [211]). Einzelheiten und
+Prüfstand: `doc/CYCLES.md`, Abschnitt 10.
+
 ## Linux installieren
 
 Linux (x86_64) ist ab 1.0 offiziell unterstützt und läuft in Electron (Chromium mit WebGPU über ANGLE-Vulkan;

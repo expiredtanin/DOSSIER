@@ -21,6 +21,8 @@ mod atomic_save;
 
 // Blender als eigener Prozess ([211], Rendering mit Blender/Cycles): suchen, starten, abbrechen.
 mod blender;
+// Mitgeliefertes Cycles als eigener Prozess ([215], Endbilder): Programm finden, Argumente prüfen (Start über blender::start_program).
+mod cycles;
 
 use std::path::PathBuf;
 use tauri::State;
@@ -121,6 +123,73 @@ fn blender_open(exe: String, args: Vec<String>) -> Result<(), String> {
 /// Bricht ein laufendes Rendering ab.
 #[tauri::command]
 fn blender_cancel(job_id: String, state: State<blender::Jobs>) {
+    blender::cancel(&state, &job_id);
+}
+
+/// Programmdatei des mitgelieferten Cycles ([215]): der Sidecar neben dem App-Programm (`bundle.externalBin`), in Debug-Builds
+/// auch `DOSSIER_CYCLES_DIR`. `None` = nicht enthalten (Bau ohne Cycles) oder nicht lauffähig (Intel-Mac: das Paket ist arm64).
+fn cycles_exe() -> Option<PathBuf> {
+    if cfg!(all(target_os = "macos", not(target_arch = "aarch64"))) {
+        return None;
+    }
+    let dev = if cfg!(debug_assertions) { std::env::var_os("DOSSIER_CYCLES_DIR").map(PathBuf::from) } else { None };
+    let exe_dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
+    cycles::find_exe(&exe_dir, dev.as_deref())
+}
+
+#[tauri::command]
+fn cycles_where() -> Option<String> {
+    cycles_exe().map(|p| p.to_string_lossy().into_owned())
+}
+
+/// Neuer Arbeitsordner für ein Cycles-Bild (`<temp>/dossier-render/…`); die Webview schreibt die Szene hinein.
+#[tauri::command]
+fn cycles_job_dir() -> Result<String, String> {
+    blender::job_dir().map(|p| p.to_string_lossy().into_owned())
+}
+
+/// Startet Cycles im Arbeitsordner. Ausgabezeilen (Fortschritt mit `\r`) als Ereignis `cycles://line` `{ jobId, line }`, Ende als
+/// `cycles://exit` `{ jobId, code }`. Nur das mitgelieferte Programm, nur geprüfte Argumente (cycles.rs).
+#[tauri::command]
+fn cycles_start(
+    app: tauri::AppHandle,
+    job_id: String,
+    scene_dir: String,
+    args: Vec<String>,
+    state: State<blender::Jobs>,
+) -> Result<(), String> {
+    use tauri::{Emitter, Manager};
+    if !cycles::job_id_ok(&job_id) {
+        return Err("ungültige Auftragskennung".into());
+    }
+    let exe = cycles_exe().ok_or("Cycles ist in dieser Installation nicht enthalten")?;
+    let render_root = std::env::temp_dir().join("dossier-render");
+    let scene_dir = PathBuf::from(scene_dir);
+    let argv = cycles::validate_args(&scene_dir, &render_root, &args)?;
+    // Metal-Kernel-Quellen aus den Ressourcen (Cycles liest sie über CYCLES_KERNEL_PATH).
+    let source = app.path().resource_dir().ok().and_then(|r| cycles::kernel_source_dir(&r));
+    let envs: Vec<(&str, &std::path::Path)> = source.iter().map(|p| ("CYCLES_KERNEL_PATH", p.as_path())).collect();
+    let (a1, a2) = (app.clone(), app);
+    let (i1, i2) = (job_id.clone(), job_id.clone());
+    blender::start_program(
+        &state,
+        &job_id,
+        &exe,
+        &argv,
+        Some(&scene_dir),
+        &envs,
+        move |line| {
+            let _ = a1.emit("cycles://line", serde_json::json!({ "jobId": i1, "line": line }));
+        },
+        move |code| {
+            let _ = a2.emit("cycles://exit", serde_json::json!({ "jobId": i2, "code": code }));
+        },
+    )
+}
+
+/// Bricht ein laufendes Cycles-Bild ab.
+#[tauri::command]
+fn cycles_cancel(job_id: String, state: State<blender::Jobs>) {
     blender::cancel(&state, &job_id);
 }
 
@@ -450,7 +519,11 @@ pub fn run() {
         blender_job_dir,
         blender_start,
         blender_cancel,
-        blender_open
+        blender_open,
+        cycles_where,
+        cycles_job_dir,
+        cycles_start,
+        cycles_cancel
     ]);
     #[cfg(not(any(feature = "native2d", feature = "native3d")))]
     let builder = builder.invoke_handler(tauri::generate_handler![
@@ -477,7 +550,11 @@ pub fn run() {
         blender_job_dir,
         blender_start,
         blender_cancel,
-        blender_open
+        blender_open,
+        cycles_where,
+        cycles_job_dir,
+        cycles_start,
+        cycles_cancel
     ]);
 
     builder

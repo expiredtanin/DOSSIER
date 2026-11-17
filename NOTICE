@@ -113,3 +113,20 @@ Rust (ausgeliefert):
     MIT und/oder Apache-2.0 (glyphon: MIT OR Apache-2.0 OR Zlib)
   truck-modeling, -meshalgo, -shapeops, -stepio (src-tauri/trucksolid), Apache-2.0
   serde, serde_json, ts-rs, fs4: MIT OR Apache-2.0
+
+Cycles (Endbild-Renderer, [215]; als eigenes Programm mitgeliefert, nicht eingebunden; Ordner `cycles/` in der App,
+  Lizenztexte im Paket unter `cycles/licenses/`; Bau: scripts/cycles/, Liste: scripts/cycles/THIRD-PARTY.txt):
+  Cycles (Blender Foundation u. a., https://projects.blender.org/blender/cycles, Tag laut scripts/cycles/VERSION), Apache-2.0;
+    Änderung: scripts/cycles/patches/no-ocio.patch (OpenColorIO optional). Enthält Teile unter BSD-3-Clause, MIT, Zlib (Nishita-/
+    Hosek-Wilkie-Himmel, mikktspace, atomic_ops; Kopfzeilen SPDX).
+  Embree 4 (Intel, https://github.com/RenderKit/embree), Apache-2.0
+  Open Image Denoise 2.5 (Intel, https://github.com/RenderKit/oidn), Apache-2.0 — enthält oneDNN (Apache-2.0) und trainierte Netze;
+    Binärdateien aus Blenders Vorbau (https://projects.blender.org/blender/lib-linux_x64, lib-macos_arm64)
+  OpenImageIO 2.4 (https://github.com/AcademySoftwareFoundation/OpenImageIO), BSD-3-Clause — eigener schlanker Bau aus dem Ubuntu-Quellpaket
+  OpenEXR, Imath (https://github.com/AcademySoftwareFoundation/openexr), BSD-3-Clause
+  oneTBB (https://github.com/oneapi-src/oneTBB), Apache-2.0
+  libtiff 4.5 (https://libtiff.gitlab.io/libtiff/, ohne jbig), libtiff-Lizenz (BSD-artig); libpng (libpng-Lizenz); libjpeg-turbo
+    (IJG, BSD-3-Clause, Zlib); zlib (Zlib); libdeflate (MIT); Zstandard (BSD-3-Clause); pugixml (MIT); Boost.Filesystem/-Thread (BSL-1.0)
+  macOS arm64: dieselben Bibliotheken aus Blenders Vorbau (lib-macos_arm64) in der Auswahl, die der Bau mitnimmt (Liste im Paket:
+    licenses/macos-libs.txt); Metal-Kernel-Quellen (`source/`) sind Teil von Cycles (Apache-2.0).
+  Kein GPL/LGPL im Paket (libtiff ohne jbigkit; OpenImageIO ohne ffmpeg/GDAL/OpenCV/OCIO).

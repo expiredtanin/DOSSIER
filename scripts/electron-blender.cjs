@@ -49,6 +49,19 @@ function insideRenderDir(p) {
   return path.resolve(p).startsWith(root);
 }
 
+/** Legt einen Arbeitsordner an und schreibt die Dateien hinein (Pfade relativ, nicht aus dem Ordner heraus); gibt den Ordner zurück. [215] auch für Cycles. */
+function prepareJobDir(files) {
+  const dir = path.join(os.tmpdir(), "dossier-render", `${Date.now()}-${process.pid}-${jobDirs++}`);
+  fs.mkdirSync(dir, { recursive: true });
+  for (const f of files) {
+    const target = path.resolve(dir, f.path);
+    if (!target.startsWith(dir + path.sep)) throw new Error(`Pfad ausserhalb des Arbeitsordners: ${f.path}`);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, Buffer.from(f.bytes));
+  }
+  return dir;
+}
+
 /** Meldet Ausgabe in Zeilen (Ende bei \n oder \r, Blender überschreibt Fortschrittszeilen). */
 function lineSplitter(onLine) {
   let rest = "";
@@ -69,17 +82,7 @@ function lineSplitter(onLine) {
 function register(ipcMain) {
   ipcMain.handle("blender:find", (_e, custom) => findBlender(custom));
 
-  ipcMain.handle("blender:prepare", (_e, files) => {
-    const dir = path.join(os.tmpdir(), "dossier-render", `${Date.now()}-${process.pid}-${jobDirs++}`);
-    fs.mkdirSync(dir, { recursive: true });
-    for (const f of files) {
-      const target = path.resolve(dir, f.path);
-      if (!target.startsWith(dir + path.sep)) throw new Error(`Pfad ausserhalb des Arbeitsordners: ${f.path}`);
-      fs.mkdirSync(path.dirname(target), { recursive: true });
-      fs.writeFileSync(target, Buffer.from(f.bytes));
-    }
-    return dir;
-  });
+  ipcMain.handle("blender:prepare", (_e, files) => prepareJobDir(files));
 
   ipcMain.handle("blender:read", (_e, p) => {
     if (!insideRenderDir(p)) throw new Error("Pfad ausserhalb des Arbeitsordners");
@@ -126,4 +129,4 @@ function register(ipcMain) {
   });
 }
 
-module.exports = { register, findBlender, lineSplitter };
+module.exports = { register, findBlender, lineSplitter, prepareJobDir, insideRenderDir };

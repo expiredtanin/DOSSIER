@@ -1,0 +1,19 @@
+<cycles>
+<film exposure="0.03" />
+<integrator max_bounce="6" max_diffuse_bounce="3" max_glossy_bounce="3" max_transmission_bounce="6" use_denoise="true" />
+<camera width="1280" height="720" />
+<transform matrix="0.771930 0.635707 -0.000000 0.000000 -0.094206 0.114393 0.988959 0.000000 -0.628688 0.763407 -0.148191 0.000000 14.000000 -17.000000 5.500000 1.000000"><camera type="perspective" fov="0.7853981633974483" nearclip="0.1" farclip="1000" /></transform>
+<background>
+  <sky_texture name="sky" sky_type="multiple_scattering" sun_disc="true" sun_size="0.009512" sun_intensity="1.0" sun_elevation="0.6632251157578453" sun_rotation="2.6179938779914944" air_density="1.0" aerosol_density="1.0" ozone_density="1.0" altitude="100" />
+  <background name="bg" strength="1.0" />
+  <connect from="sky color" to="bg color" />
+  <connect from="bg background" to="output surface" />
+</background>
+<shader name="putz"><principled_bsdf name="p" base_color="0.82 0.78 0.70" roughness="0.85" metallic="0" /><connect from="p bsdf" to="output surface" /></shader>
+<shader name="ziegel"><principled_bsdf name="p" base_color="0.45 0.12 0.07" roughness="0.7" metallic="0" /><connect from="p bsdf" to="output surface" /></shader>
+<shader name="gras"><principled_bsdf name="p" base_color="0.12 0.25 0.05" roughness="0.9" metallic="0" /><connect from="p bsdf" to="output surface" /></shader>
+<state shader="default_background"><light light_type="background" use_mis="true" map_resolution="1024" /></state>
+<state shader="putz" interpolation="flat"><mesh P="-5 -4 0 5 -4 0 5 4 0 -5 4 0 -5 -4 3 5 -4 3 5 4 3 -5 4 3" nverts="4 4 4 4 4 4" verts="0 3 2 1 4 5 6 7 0 1 5 4 1 2 6 5 2 3 7 6 3 0 4 7" /><mesh P="-5 -4 3 -5 4 3 -5 0 5.2 5 4 3 5 -4 3 5 0 5.2" nverts="3 3" verts="0 1 2 3 4 5" /></state>
+<state shader="ziegel" interpolation="flat"><mesh P="-5.5 -4.5 2.7 5.5 -4.5 2.7 5.5 0 5.2 -5.5 0 5.2 -5.5 4.5 2.7 5.5 4.5 2.7" nverts="4 4" verts="0 1 2 3 3 2 5 4" /></state>
+<state shader="gras" interpolation="flat"><mesh P="-60 -60 0 60 -60 0 60 60 0 -60 60 0" nverts="4" verts="0 1 2 3" /></state>
+</cycles>
