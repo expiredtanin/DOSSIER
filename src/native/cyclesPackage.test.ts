@@ -1,9 +1,9 @@
 // [215] Cycles-Paket: Namensschema (Bau, Gitea-Release, App-Bau), Einbindung ins AppImage (extraResources) und in die Workflows.
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createRequire } from "node:module";
 import { describe, expect, it } from "vitest";
+import { makeTmpDir } from "../test/tmpDir";
 
 const req = createRequire(import.meta.url);
 const root = join(__dirname, "..", "..");
@@ -53,7 +53,7 @@ describe("AppImage: Cycles als extraResources", () => {
     expect(pack.packConfig("1").extraResources).toBeUndefined();
   });
   it("Ordnerwahl: --cycles, Umgebung, build/cycles; fehlendes Programm / Pflicht", () => {
-    const d = mkdtempSync(join(tmpdir(), "dossier-cypack-"));
+    const d = makeTmpDir("dossier-cypack-");
     try {
       expect(pack.resolveCyclesDir(d, [], {})).toBeNull();
       expect(() => pack.resolveCyclesDir(d, [], { DOSSIER_REQUIRE_CYCLES: "1" })).toThrow(/Cycles fehlt/);

@@ -1,13 +1,13 @@
 // dossier-cli import-mesh und convert mit Mesh-Eingabe: Rundreise über echte Dateien (glb, gltf, obj+mtl, stl).
 import { beforeAll, describe, expect, it } from "vitest";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { run } from "./main";
 import { parseProjectFile, sampleProject, serializeProject } from "../core";
 import type { Project } from "../core";
+import { makeTmpDir } from "../test/tmpDir";
 
-const dir = mkdtempSync(join(tmpdir(), "dossier-import-mesh-"));
+const dir = makeTmpDir("dossier-import-mesh-");
 const p = (name: string) => join(dir, name);
 const obp = p("demo.obp");
 

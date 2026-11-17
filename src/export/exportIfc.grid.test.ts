@@ -2,13 +2,13 @@
 
 import { describe, expect, it } from "vitest";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import "../engine/fileioWasm.setup";
 import { exportIfcSpf } from "./exportIfc";
 import { sampleProject } from "../model/sampleProject";
 import type { Drawing2D, Project } from "../model/types";
+import { makeTmpDir } from "../test/tmpDir";
 
 const hasIfcOpenShell = spawnSync("python3", ["-c", "import ifcopenshell, ifcopenshell.validate, _pytest"]).status === 0;
 
@@ -51,7 +51,7 @@ describe("IfcGrid im Export [112]", () => {
 
   it.skipIf(!hasIfcOpenShell)("ifcopenshell: gültig, Achsen lesbar (rechtwinklig und radial)", () => {
     for (const [name, p] of [["ortho", gridProject()], ["radial", gridProject(true)]] as const) {
-      const dir = mkdtempSync(join(tmpdir(), "dossier-ifc-grid-"));
+      const dir = makeTmpDir("dossier-ifc-grid-");
       const file = join(dir, `${name}.ifc`);
       writeFileSync(file, exportIfcSpf(p));
       const r = spawnSync("python3", ["scripts/validate-ifc.py", file], { encoding: "utf8", timeout: 120_000 });

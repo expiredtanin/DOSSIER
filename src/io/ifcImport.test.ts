@@ -9,8 +9,7 @@
 import "../engine/fileioWasm.setup";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { exportIfcSpf, ifcGuid } from "../export/exportIfc";
 import { sampleProject } from "../model/sampleProject";
@@ -20,6 +19,7 @@ import { wallMeshVolumes } from "../export/meshScene.testutil";
 import { formatIfcReport, handleIfcWorkerRequest, type IfcWorkerRequest } from "./ifcImport";
 import { importIfcInto, inspectIfc, type IfcProductView as IfcProduct } from "./importView.testutil";
 import type { Project } from "../model/types";
+import { makeTmpDir } from "../test/tmpDir";
 
 function volume(pos: ArrayLike<number>, idx: ArrayLike<number>): number {
   let v = 0;
@@ -298,7 +298,7 @@ async function compare(file: string, rel: (p: IfcProduct) => number): Promise<st
 
 describe.skipIf(!hasIfcOpenShell)("IFC-Import gegen ifcopenshell", { timeout: 120_000 }, () => {
   it("Demo-Haus: gleiche Bauteile, gleiches Volumen je Bauteil", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "dossier-ifcimp-"));
+    const dir = makeTmpDir("dossier-ifcimp-");
     const file = join(dir, "demo-haus.ifc");
     writeFileSync(file, exportIfcSpf(sampleProject));
     const problems = await compare(file, () => 1e-6);
@@ -310,7 +310,7 @@ describe.skipIf(!hasIfcOpenShell)("IFC-Import gegen ifcopenshell", { timeout: 12
       id: "S2", type: "column" as const, floorId: "eg", categoryCode: "50", position: { x: 1, y: 1 },
       profile: { kind: "round" as const, radius: 0.15 }, rotation: 0, height: 2.5,
     };
-    const dir = mkdtempSync(join(tmpdir(), "dossier-ifcimp-"));
+    const dir = makeTmpDir("dossier-ifcimp-");
     const file = join(dir, "stuetze.ifc");
     writeFileSync(file, exportIfcSpf({ ...sampleProject, columns: [col] }));
     const problems = await compare(file, (p) => (p.ifcClass === "IfcColumn" ? 0.03 : 1e-6));

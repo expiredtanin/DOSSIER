@@ -31,6 +31,7 @@ Mengen und Exporte werden daraus berechnet und stimmen nach jeder Änderung wied
 **Systemvoraussetzungen:** Aus dem Repo nicht ersichtlich (kleinste macOS-Version, Prozessor, Arbeitsspeicher, Grafik).
 Die 3D-Anzeige braucht WebGPU bzw. Metal. **[Frage M: Systemvoraussetzungen und kleinste macOS-Version?]**
 Das Rendering braucht kein Blender mehr: Cycles (Apache-2.0) ist als eigenes Hilfsprogramm in der Desktop-App enthalten (Linux-AppImage ≈ +70 MB). Wer lieber Blender nutzt, wählt im Dialog „Renderer“ → „Blender“ (dann muss es installiert sein).
+Arbeitsordner für Rendering (Blender und Cycles) legt Dossier im Temp-Ordner an und löscht sie nach dem Lauf, auch bei Fehler oder Abbruch (Kommandozeile: `--keep` behält sie); liegengebliebene Ordner älter als 24 Stunden räumt die App beim Start auf.
 
 ## Was geht
 

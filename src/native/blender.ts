@@ -14,6 +14,8 @@ import type { BlenderHost } from "../core";
 export interface DossierBlenderApi {
   find: (custom?: string) => Promise<string | null>;
   prepare: (files: { path: string; bytes: Uint8Array }[]) => Promise<string>;
+  /** [273] Arbeitsordner löschen. */
+  cleanup: (dir: string) => Promise<void>;
   start: (jobId: string, exe: string, args: string[]) => Promise<void>;
   cancel: (jobId: string) => void;
   readFile: (path: string) => Promise<Uint8Array>;
@@ -86,6 +88,7 @@ async function tauriHost(): Promise<BlenderHost> {
       return { done, cancel: () => void invoke("blender_cancel", { jobId }).catch(() => undefined) };
     },
     readFile: (path) => fs.readFile(path),
+    cleanup: (dir) => fs.remove(dir, { recursive: true }),
     launch: (exe, args) => invoke<void>("blender_open", { exe, args }),
     join,
   };
@@ -96,6 +99,7 @@ function electronHost(api: DossierBlenderApi): BlenderHost {
   return {
     find: (custom) => api.find(custom?.trim() || undefined),
     prepare: (files) => api.prepare(files),
+    cleanup: (dir) => api.cleanup(dir),
     spawn(exe, args, onLine) {
       const jobId = newJobId();
       let resolveExit!: (code: number) => void;

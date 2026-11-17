@@ -74,7 +74,7 @@
 //
 // WASM-Pakete (src/engine/pkg*) werden aus DOSSIER_WASM_DIR bzw. `<repo>/src/engine` gelesen.
 
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { deflateSync, inflateSync } from "node:zlib";
 import { tmpdir } from "node:os";
@@ -807,10 +807,29 @@ function localTextureLoader(): TextureLoader {
   };
 }
 
+/** [273] Sicherheitsnetz: Arbeitsordner auch bei Ctrl-C/SIGTERM und `process.exit` löschen (Normalfall: `cleanup` des Ablaufs). */
+const exitDirs = new Set<string>();
+let exitHooked = false;
+function removeOnExit(dir: string): void {
+  if (!exitHooked) {
+    exitHooked = true;
+    process.on("exit", () => {
+      for (const d of exitDirs) rmSync(d, { recursive: true, force: true });
+    });
+    for (const sig of ["SIGINT", "SIGTERM"] as const) process.once(sig, () => process.exit(sig === "SIGINT" ? 130 : 143));
+  }
+  exitDirs.add(dir);
+}
+
 /** [211] Blender als Kindprozess (Node): Programmdatei suchen, Arbeitsordner im Temp-Ordner, Ausgabe zeilenweise. */
 function nodeBlenderHost(keep: boolean): BlenderHost {
   let dir = "";
   return {
+    // [273] Ordner nach dem Lauf löschen (auch bei Fehler, Ablauf in blenderRender.ts); `--keep` behält ihn.
+    async cleanup(d) {
+      if (!keep) rmSync(d, { recursive: true, force: true });
+      exitDirs.delete(d);
+    },
     async find(custom) {
       const c = custom?.trim();
       if (c) {
@@ -825,6 +844,7 @@ function nodeBlenderHost(keep: boolean): BlenderHost {
     },
     async prepare(files) {
       dir = mkdtempSync(join(tmpdir(), "dossier-render-"));
+      if (!keep) removeOnExit(dir);
       for (const f of files) {
         const target = join(dir, f.path);
         mkdirSync(dirname(target), { recursive: true });

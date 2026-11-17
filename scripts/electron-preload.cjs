@@ -30,6 +30,7 @@ contextBridge.exposeInMainWorld("dossierWindow", {
 contextBridge.exposeInMainWorld("dossierBlender", {
   find: (custom) => ipcRenderer.invoke("blender:find", custom),
   prepare: (files) => ipcRenderer.invoke("blender:prepare", files),
+  cleanup: (dir) => ipcRenderer.invoke("blender:cleanup", dir),
   start: (jobId, exe, args) => ipcRenderer.invoke("blender:start", jobId, exe, args),
   cancel: (jobId) => ipcRenderer.send("blender:cancel", jobId),
   readFile: (path) => ipcRenderer.invoke("blender:read", path),

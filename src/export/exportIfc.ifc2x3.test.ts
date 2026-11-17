@@ -8,14 +8,14 @@
 
 import { describe, expect, it } from "vitest";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import "../engine/fileioWasm.setup";
 import { exportIfcSpf } from "./exportIfc";
 import { importIfcInto, inspectIfc } from "../io/importView.testutil";
 import { emptyProject, sampleProject } from "../model/sampleProject";
 import type { Project } from "../model/types";
+import { makeTmpDir } from "../test/tmpDir";
 
 const hasIfcOpenShell = spawnSync("python3", ["-c", "import ifcopenshell, ifcopenshell.validate, _pytest"]).status === 0;
 const bytesOf = (s: string) => new TextEncoder().encode(s);
@@ -181,7 +181,7 @@ describe("IFC2x3-Export: eigener Import liest dasselbe wie bei IFC4", () => {
 // ── ifcopenshell ────────────────────────────────────────────────────────────
 
 function writeIfc(name: string, ifc: string): string {
-  const dir = mkdtempSync(join(tmpdir(), "dossier-ifc2x3-"));
+  const dir = makeTmpDir("dossier-ifc2x3-");
   const file = join(dir, `${name}.ifc`);
   writeFileSync(file, ifc);
   return file;

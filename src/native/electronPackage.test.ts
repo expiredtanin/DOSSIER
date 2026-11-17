@@ -3,9 +3,9 @@
 // („Cannot find module './electron-files.cjs'“). Dazu: Buildnummer ([261]) aus dem gebauten `dist` ins Paket.
 import { describe, expect, it } from "vitest";
 import { createRequire } from "node:module";
-import { readFileSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { readFileSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { makeTmpDir } from "../test/tmpDir";
 
 const root = join(__dirname, "..", "..");
 const read = (rel: string) => readFileSync(join(root, rel), "utf8");
@@ -64,7 +64,7 @@ describe("[170][261] Buildnummer im Linux-Paket", () => {
     expect(packConfig("261116.3", "1.0.0").extraMetadata).toEqual({ dossierBuild: "261116.3", version: "1.0.0" });
   });
   it("Buildnummer kommt aus dem gebauten dist (build-info.json), nicht neu berechnet", () => {
-    const dir = mkdtempSync(join(tmpdir(), "dossier-dist-"));
+    const dir = makeTmpDir("dossier-dist-");
     try {
       expect(readDistBuild(dir)).toBeNull();
       writeFileSync(join(dir, "build-info.json"), JSON.stringify({ version: "1.0.0-beta.1", build: "261116.2" }));

@@ -3,14 +3,14 @@
 
 import { describe, expect, it } from "vitest";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import "../engine/fileioWasm.setup";
 import { exportIfcSpf } from "./exportIfc";
 import { importIfcInto, inspectIfc } from "../io/importView.testutil";
 import { sampleProject } from "../model/sampleProject";
 import type { Project, Room } from "../model/types";
+import { makeTmpDir } from "../test/tmpDir";
 
 const hasIfcOpenShell = spawnSync("python3", ["-c", "import ifcopenshell, ifcopenshell.util.classification, ifcopenshell.validate, _pytest"]).status === 0;
 
@@ -151,7 +151,7 @@ for s in m.by_type("IfcBuildingStorey"):
 print(json.dumps(out))
 `;
   const run = (name: string, ifc: string) => {
-    const dir = mkdtempSync(join(tmpdir(), "dossier-ifc-cls-"));
+    const dir = makeTmpDir("dossier-ifc-cls-");
     const file = join(dir, `${name}.ifc`);
     writeFileSync(file, ifc);
     const r = spawnSync("python3", ["-c", PY, file], { encoding: "utf8", timeout: 120_000 });

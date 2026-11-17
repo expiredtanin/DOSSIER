@@ -134,6 +134,8 @@ export interface CyclesHost {
   spawn(exe: string, args: string[], onLine: (line: string) => void): { done: Promise<number>; cancel(): void };
   readFile(path: string): Promise<Uint8Array>;
   join(dir: string, rel: string): string;
+  /** [273] Arbeitsordner samt Inhalt löschen (nach Erfolg und Fehler; bei `--keep` nicht aufgerufen). */
+  cleanup?(dir: string): Promise<void>;
 }
 
 export class CyclesMissingError extends Error {
@@ -198,6 +200,15 @@ export async function runCyclesRender(host: CyclesHost, pkg: CyclesPackage, opts
   const exe = await host.find(opts.cyclesPath);
   if (!exe) throw new CyclesMissingError();
   const dir = await host.prepare(pkg.files);
+  try {
+    return await runCyclesIn(host, dir, exe, pkg, opts);
+  } finally {
+    // [273] Arbeitsordner immer löschen (Erfolg, Fehler, Abbruch).
+    await host.cleanup?.(dir).catch(() => undefined);
+  }
+}
+
+async function runCyclesIn(host: CyclesHost, dir: string, exe: string, pkg: CyclesPackage, opts: CyclesRunOptions): Promise<CyclesResult> {
   const out = host.join(dir, "render.exr");
   const total = pkg.info.samples;
   const messages: string[] = [];

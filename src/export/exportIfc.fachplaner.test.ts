@@ -7,8 +7,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import "../engine/fileioWasm.setup";
 import { exportIfcSpf, type IfcExportOptions } from "./exportIfc";
@@ -17,11 +16,12 @@ import { buildComplexSampleProject } from "../model/sampleProjectComplex";
 import { buildWettbewerbSampleProject } from "../model/sampleProjectWettbewerb";
 import type { Drawing2D, Project } from "../model/types";
 import { roomBook } from "./roomBook";
+import { makeTmpDir } from "../test/tmpDir";
 
 const hasIfcOpenShell = spawnSync("python3", ["-c", "import ifcopenshell, ifcopenshell.validate, ifcopenshell.util.shape, _pytest"]).status === 0;
 
 function writeIfc(name: string, ifc: string): string {
-  const file = join(mkdtempSync(join(tmpdir(), "dossier-ifc-fp-")), `${name}.ifc`);
+  const file = join(makeTmpDir("dossier-ifc-fp-"), `${name}.ifc`);
   writeFileSync(file, ifc);
   return file;
 }

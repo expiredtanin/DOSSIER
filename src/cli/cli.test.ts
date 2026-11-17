@@ -1,14 +1,13 @@
 // dossier-cli (Phase C): importiert nur src/core, und die Befehle laufen headless gegen das
 // Beispielprojekt (inkl. der echten WASM-Pakete aus src/engine/pkg*).
 import { describe, expect, it, beforeAll, vi } from "vitest";
-import { existsSync, mkdtempSync, readFileSync, writeFileSync, readdirSync, statSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readFileSync, writeFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { run } from "./main";
 import { projectToModel3d, serializeProject } from "../core";
 import { sampleProject } from "../model/sampleProject";
 
-const dir = mkdtempSync(join(tmpdir(), "dossier-cli-"));
+const dir = makeTmpDir("dossier-cli-");
 const file = join(dir, "demo.obp");
 
 beforeAll(() => {
@@ -250,6 +249,7 @@ describe("dossier-cli", () => {
 });
 
 import { handleMessage } from "./mcp";
+import { makeTmpDir } from "../test/tmpDir";
 
 describe("MCP-Server", () => {
   it("initialize, tools/list, project_info, apply_ops mit Validierung", async () => {

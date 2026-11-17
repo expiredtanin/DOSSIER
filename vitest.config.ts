@@ -8,6 +8,8 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["src/**/*.test.ts"],
+    // [273] eigener TMPDIR je Lauf; was Tests liegen lassen, wird nachgezählt und gemeldet.
+    globalSetup: ["src/test/tmpGuard.ts"],
     // Rust-Kern (pkgCore) vor jedem Testmodul synchron laden.
     setupFiles: ["src/engine/coreWasm.setup.ts", "src/export/pdfFonts.setup.ts"],
     // Grosszügig: andere Agents bauen/testen parallel, die Maschine ist oft überbucht. Die 5-s-Vorgabe

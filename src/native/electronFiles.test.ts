@@ -1,10 +1,10 @@
 // Atomares Schreiben im Electron-Hauptprozess ([116], scripts/electron-files.cjs) — gleiche Garantien wie atomic_save.rs.
 
-import { mkdtempSync, mkdirSync, readFileSync, existsSync, writeFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, readFileSync, existsSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { createRequire } from "node:module";
 import { afterEach, describe, expect, it } from "vitest";
+import { makeTmpDir } from "../test/tmpDir";
 
 const { writeAtomic, backupExists } = createRequire(import.meta.url)("../../scripts/electron-files.cjs") as {
   writeAtomic: (file: string, text: string, keepBackup: boolean) => void;
@@ -13,7 +13,7 @@ const { writeAtomic, backupExists } = createRequire(import.meta.url)("../../scri
 
 const dirs: string[] = [];
 const tmp = () => {
-  const d = mkdtempSync(join(tmpdir(), "dossier-efiles-"));
+  const d = makeTmpDir("dossier-efiles-");
   dirs.push(d);
   return d;
 };

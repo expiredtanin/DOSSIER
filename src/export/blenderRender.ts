@@ -529,6 +529,8 @@ export interface BlenderHost {
   launch(exe: string, args: string[]): Promise<void>;
   /** Pfad zu `dir/rel`. */
   join(dir: string, rel: string): string;
+  /** [273] Arbeitsordner samt Inhalt löschen (nach Erfolg und Fehler; bei `--keep` und für „In Blender öffnen" nicht aufgerufen). */
+  cleanup?(dir: string): Promise<void>;
 }
 
 export class BlenderMissingError extends Error {
@@ -564,10 +566,22 @@ export interface RenderResult {
 }
 
 /** Gemeinsamer Ablauf: Paket auspacken, Blender im Hintergrund laufen lassen, Fortschritt melden, Ergebnisdatei lesen. */
-async function runJob(host: BlenderHost, pkg: RenderPackage, opts: RenderRunOptions, outputRel: string, missingText: string): Promise<{ exe: string; bytes: Uint8Array; dir: string; path: string }> {
+async function runJob(host: BlenderHost, pkg: RenderPackage, opts: RenderRunOptions, outputRel: string, missingText: string, keepDir = false): Promise<{ exe: string; bytes: Uint8Array; dir: string; path: string }> {
   const exe = await host.find(opts.blenderPath);
   if (!exe) throw new BlenderMissingError();
   const dir = await host.prepare([...pkg.files, { path: "render_dossier.py", bytes: new TextEncoder().encode(opts.script) }]);
+  let ok = false;
+  try {
+    const r = await runIn(host, dir, exe, pkg, opts, outputRel, missingText);
+    ok = true;
+    return r;
+  } finally {
+    // [273] Arbeitsordner immer löschen (Erfolg, Fehler, Abbruch); nur „In Blender öffnen" braucht ihn danach noch.
+    if (!(ok && keepDir)) await host.cleanup?.(dir).catch(() => undefined);
+  }
+}
+
+async function runIn(host: BlenderHost, dir: string, exe: string, pkg: RenderPackage, opts: RenderRunOptions, outputRel: string, missingText: string): Promise<{ exe: string; bytes: Uint8Array; dir: string; path: string }> {
   const scenePath = host.join(dir, "scene.json");
   let stage = "import";
   let error = "";
@@ -648,7 +662,7 @@ export async function runBlenderSave(host: BlenderHost, pkg: RenderPackage, opts
  * speichert sie dort über „Speichern unter".
  */
 export async function runBlenderOpen(host: BlenderHost, pkg: RenderPackage, opts: RenderRunOptions): Promise<{ dir: string; path: string }> {
-  const r = await runJob(host, pkg, opts, requireSave(pkg), "Blender hat keine .blend-Datei geschrieben");
+  const r = await runJob(host, pkg, opts, requireSave(pkg), "Blender hat keine .blend-Datei geschrieben", true);
   await host.launch(r.exe, blendOpenArgs(r.path));
   return { dir: r.dir, path: r.path };
 }

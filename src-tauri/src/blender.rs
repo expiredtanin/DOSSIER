@@ -75,6 +75,26 @@ pub fn job_dir() -> Result<PathBuf, String> {
     Ok(dir)
 }
 
+/// [273] Löscht alte Arbeitsordner direkt unter `root` (Änderungszeit mehr als `max_age` her), z. B. nach einem Absturz übrig geblieben.
+/// Nur Ordner, nie Dateien oder die Wurzel; Fehler einzelner Ordner werden übergangen. Gibt die Zahl gelöschter Ordner zurück.
+pub fn sweep_old_jobs(root: &std::path::Path, max_age: std::time::Duration) -> usize {
+    let Ok(rd) = std::fs::read_dir(root) else { return 0 };
+    let now = std::time::SystemTime::now();
+    let mut n = 0;
+    for e in rd.flatten() {
+        let p = e.path();
+        let Ok(meta) = std::fs::symlink_metadata(&p) else { continue };
+        if !meta.is_dir() {
+            continue;
+        }
+        let old = meta.modified().ok().and_then(|m| now.duration_since(m).ok()).is_some_and(|age| age > max_age);
+        if old && std::fs::remove_dir_all(&p).is_ok() {
+            n += 1;
+        }
+    }
+    n
+}
+
 /// Laufende Aufträge (Kennung → Prozess), um sie abbrechen zu können.
 #[derive(Default)]
 pub struct Jobs(Arc<Mutex<HashMap<String, Arc<Mutex<Child>>>>>);
@@ -231,6 +251,26 @@ mod tests {
         let d = std::env::temp_dir().join(format!("dossier-blender-test-{}-{name}", std::process::id()));
         std::fs::create_dir_all(&d).unwrap();
         d
+    }
+
+    #[test]
+    fn sweep_loescht_nur_alte_ordner() {
+        let root = tmp("sweep");
+        let alt = root.join("alt");
+        let neu = root.join("neu");
+        std::fs::create_dir_all(alt.join("sub")).unwrap();
+        std::fs::create_dir_all(&neu).unwrap();
+        std::fs::write(alt.join("sub").join("scene.json"), "{}").unwrap();
+        std::fs::write(root.join("datei.txt"), "x").unwrap();
+        // Frist 0: alles Vorhandene gilt als alt, Dateien bleiben stehen.
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        assert_eq!(sweep_old_jobs(&root, std::time::Duration::from_millis(10)), 2);
+        assert!(!alt.exists() && !neu.exists() && root.join("datei.txt").exists());
+        // Grosse Frist: nichts zu tun; fehlende Wurzel: 0.
+        std::fs::create_dir_all(&neu).unwrap();
+        assert_eq!(sweep_old_jobs(&root, std::time::Duration::from_secs(86_400)), 0);
+        assert_eq!(sweep_old_jobs(&root.join("nix"), std::time::Duration::ZERO), 0);
+        std::fs::remove_dir_all(&root).ok();
     }
 
     #[test]

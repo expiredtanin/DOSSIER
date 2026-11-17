@@ -481,6 +481,8 @@ pub fn run() {
     let builder = builder.manage(native_embed::EmbedState::default());
 
     let builder = builder.setup(|_app| {
+        // [273] Liegengebliebene Arbeitsordner von Rendering/Cycles (älter als 24 h) aufräumen.
+        blender::sweep_old_jobs(&std::env::temp_dir().join("dossier-render"), std::time::Duration::from_secs(24 * 3600));
         // Native GPU-Fenster auf einem eigenen Thread hochfahren, damit der
         // Tauri-Hauptthread frei bleibt. NICHT auf macOS (winit verlangt dort
         // den Hauptthread) — dort s. `open_native2d_window`/`native_tauri_window`.

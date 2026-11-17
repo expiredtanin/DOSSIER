@@ -2,16 +2,16 @@
 // Kommandozeile prüft, Cycles-Zeilen ausgibt und ein PNG neben scene.json schreibt. Ein echter Blender-Lauf
 // steht nicht in der Testsuite (Beschreibung in TODO.md [211]).
 import { describe, expect, it, beforeAll, vi } from "vitest";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { run } from "./main";
 import { serializeProject } from "../core";
 import { sampleProject } from "../model/sampleProject";
 import { makeExr } from "../export/cyclesExr.testutil";
+import { makeTmpDir } from "../test/tmpDir";
 
-const dir = mkdtempSync(join(tmpdir(), "dossier-cli-render-"));
+const dir = makeTmpDir("dossier-cli-render-");
 const file = join(dir, "demo.obp");
 const fake = join(dir, "blender-fake");
 const fakeBlend = join(dir, "blender-fake-blend");

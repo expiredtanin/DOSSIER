@@ -5,8 +5,7 @@
 import "../engine/fileioWasm.setup";
 import { describe, expect, it } from "vitest";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { buildPlanDwg, buildPlanDxf } from "./exportDxf";
 import { countByType, readDxf } from "./cadReadBack.testutil";
@@ -14,6 +13,7 @@ import { parseDxf } from "../io/dxfParser";
 import { buildComplexSampleProject } from "../model/sampleProjectComplex";
 import { collectVisibleCodes } from "../model/types";
 import { viewportLevelPlan } from "../plan/viewportPlan";
+import { makeTmpDir } from "../test/tmpDir";
 
 const hasEzdxf = spawnSync("python3", ["-c", "import ezdxf"]).status === 0;
 const p = buildComplexSampleProject();
@@ -42,7 +42,7 @@ describe.each([
 
   it.skipIf(!hasEzdxf)(`${label}: ezdxf liest ohne Auditor-Fehler`, async () => {
     const plan = await viewportLevelPlan(p, levelId, codes, "mittel", 100, true, false);
-    const dir = mkdtempSync(join(tmpdir(), "dossier-dxf-"));
+    const dir = makeTmpDir("dossier-dxf-");
     const file = join(dir, `${levelId}.dxf`);
     writeFileSync(file, buildPlanDxf(plan, p, { scaleDenominator: 100, levelId }));
     const r = spawnSync("python3", ["scripts/validate-dxf.py", file], { encoding: "utf8", timeout: 60_000, maxBuffer: 256 * 1024 * 1024 });
