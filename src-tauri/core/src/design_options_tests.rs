@@ -708,7 +708,7 @@ fn bearbeiten_zeigt_die_variante_und_graut_den_rest_nur_auf_anfrage() {
     }
     // Cache-Schlüssel unterscheidet die Bearbeitung.
     let k = |e: Option<Edit>| crate::renovation::View::editing(crate::renovation::View::new(&p, None, None), &p, e).map(|v| v.key());
-    let e = |grey| Some(Edit { set: "dach".into(), option: "b".into(), grey });
+    let e = |grey| Some(Edit { set: "dach".into(), option: "b".into(), grey, lock: false, layer: false });
     assert_ne!(k(None), k(e(true)));
     assert_ne!(k(e(false)), k(e(true)));
 }
@@ -759,4 +759,81 @@ fn bearbeiten_auch_ohne_elemente_in_varianten() {
     let r = plan_with(&p, json!({"renovation": "neubau", "designOptionEdit": {"set": "dach", "option": "b", "grey": true}}));
     assert!(!has_wall(&r, "W2"));
     assert!(wall_fills(&r, "W9").iter().all(|f| *f == ghost.fill));
+}
+
+/// Fixture mit zweitem Satz „Fassade“ (X Haupt): Raum R2 ohne Variante (Hauptmodell), Linie L-g in Fassade X.
+fn fixture_two_sets() -> Value {
+    let mut v = fixture();
+    v["designOptionSets"].as_array_mut().unwrap().push(json!({"id": "fas", "name": "Fassade", "options": [{"id": "x", "name": "X"}, {"id": "y", "name": "Y"}], "primary": "x"}));
+    let mut r2 = v["rooms"][0].clone();
+    r2["id"] = json!("R2");
+    r2.as_object_mut().unwrap().remove("designOption");
+    v["rooms"].as_array_mut().unwrap().push(r2);
+    v["drawings2d"].as_array_mut().unwrap().push(json!({"id": "L-g", "type": "line", "levelId": "eg", "categoryCode": "00", "geom": {"shape": "line", "a": {"x": 0, "y": 0}, "b": {"x": 2, "y": 0}}, "designOption": {"set": "fas", "option": "x"}}));
+    v["drawings2d"].as_array_mut().unwrap().push(json!({"id": "L-0", "type": "line", "levelId": "eg", "categoryCode": "00", "geom": {"shape": "line", "a": {"x": 0, "y": 1}, "b": {"x": 2, "y": 1}}}));
+    v
+}
+
+#[test]
+fn bearbeiten_graut_raeume_und_2d_elemente_ausserhalb() {
+    let p = project(&fixture_two_sets());
+    let ghost = crate::renovation::ghost_style();
+    let line = ghost.line.clone().unwrap();
+    let room_fill = |prims: &[Primitive], id: &str| -> Vec<String> {
+        prims.iter().filter_map(|q| match q { Primitive::Polygon { room_id: Some(r), fill, stroke, .. } if r == id => Some(format!("{fill}|{stroke}")), _ => None }).collect()
+    };
+    let text_color = |prims: &[Primitive], id: &str| prims.iter().find_map(|q| match q { Primitive::Text { room_id: Some(r), color, .. } if r == id => Some(color.to_string()), _ => None });
+    let line_color = |prims: &[Primitive], id: &str| prims.iter().find_map(|q| match q { Primitive::Line { drawing_id: Some(d), color, .. } if d == id => Some(color.as_ref().map(|c| c.to_string())), _ => None });
+    // Stift auf B (Dachform): R2 (Hauptmodell) und L-g (Fassade X, anderer Satz) grau, L-b (in B) und L-0 (ohne Variante) nicht.
+    let g = plan_with(&p, edit("b", true));
+    assert!(!room_fill(&g, "R2").is_empty() && room_fill(&g, "R2").iter().all(|f| f.ends_with(&format!("|{line}"))), "{:?}", room_fill(&g, "R2"));
+    assert_eq!(text_color(&g, "R2"), Some(line.clone()));
+    assert!(g.iter().any(|q| matches!(q, Primitive::Text { room_id: Some(r), greyed: Some(true), .. } if r == "R2")), "Stempel nicht gedämpft");
+    assert!(!plan_with(&p, json!({})).iter().any(|q| matches!(q, Primitive::Text { room_id: Some(r), greyed: Some(true), .. } if r == "R2")));
+    assert_eq!(line_color(&g, "L-g"), Some(Some(line.clone())));
+    assert_ne!(line_color(&g, "L-b"), Some(Some(line.clone())));
+    assert_ne!(line_color(&g, "L-0"), Some(Some(line.clone())));
+    // Ohne Grau-Häkchen und ohne Stift: nichts grau.
+    for t in [edit("b", false), json!({})] {
+        let n = plan_with(&p, t);
+        assert!(room_fill(&n, "R2").iter().all(|f| !f.ends_with(&format!("|{line}"))));
+        assert_ne!(line_color(&n, "L-g"), Some(Some(line.clone())));
+    }
+}
+
+#[test]
+fn bearbeiten_3d_geisterschicht_und_sperre() {
+    let p = project(&fixture_two_sets());
+    let model = |t: Value| -> Value { serde_json::from_str(&crate::queries::run(&p, "model3dParts", &[1.0, 1.0, 0.0], &t.to_string()).unwrap()).unwrap() };
+    let walls = |v: &Value| -> Vec<String> { v["walls"].as_array().unwrap().iter().map(|w| w["wallId"].as_str().unwrap().to_string()).collect() };
+    let e = |layer: bool, lock: bool| json!({"designOptionEdit": {"set": "dach", "option": "b", "grey": true, "layer": layer, "lock": lock}});
+    // Ohne Schicht (Standardform): W1 im Hauptmodell, grau gefärbt (unverändert).
+    assert!(walls(&model(e(false, false))).contains(&"W1".to_string()));
+    // Mit Schicht: W1 (Hauptmodell, ausserhalb) fehlt im Hauptmodell, W9 (in B) bleibt.
+    let main = walls(&model(e(true, false)));
+    assert!(!main.contains(&"W1".to_string()) && main.contains(&"W9".to_string()), "{main:?}");
+    // Geisterschicht: nur das Graue, in seiner eigenen Farbe (nicht hellgrau eingefärbt).
+    let mut t = e(true, false);
+    t["ghost"] = json!(true);
+    let ghost = model(t);
+    let gw = walls(&ghost);
+    assert!(gw.contains(&"W1".to_string()) && !gw.contains(&"W9".to_string()), "{gw:?}");
+    let col = |w: &Value| w["color"].as_array().unwrap().iter().map(|x| x.as_f64().unwrap()).collect::<Vec<_>>();
+    let w1 = ghost["walls"].as_array().unwrap().iter().find(|w| w["wallId"] == "W1").unwrap();
+    assert_ne!(col(w1), crate::style::hex_to_rgb(&crate::renovation::ghost_style().fill, [0.0; 3]).to_vec());
+    // Ohne Grau-Häkchen keine Geisterschicht.
+    let mut off = e(true, false);
+    off["designOptionEdit"]["grey"] = json!(false);
+    off["ghost"] = json!(true);
+    assert!(walls(&model(off)).is_empty());
+    // Pick: ohne Sperre bleiben Elemente ausserhalb anwählbar (auch graue), mit Sperre nur die der Variante.
+    let pick = |t: Value| -> Value { serde_json::from_str(&crate::queries::run(&p, "pickGeometry", &[0.0], &t.to_string()).unwrap()).unwrap() };
+    let ids = |v: &Value| -> Vec<String> { v["walls"].as_array().unwrap().iter().map(|x| x["wallId"].as_str().unwrap().to_string()).collect() };
+    let free = ids(&pick(e(true, false)));
+    assert!(free.contains(&"W1".to_string()) && free.contains(&"W9".to_string()), "{free:?}");
+    let locked = ids(&pick(e(true, true)));
+    assert!(!locked.contains(&"W1".to_string()) && locked.contains(&"W9".to_string()), "{locked:?}");
+    // Variante per Stift sichtbar, auch wenn die Kombination die andere zeigt: W9 ist pickbar ohne `designOptions`.
+    assert!(ids(&pick(json!({"designOptionEdit": {"set": "dach", "option": "b", "grey": false}}))).contains(&"W9".to_string()));
+    assert!(!ids(&pick(json!({}))).contains(&"W9".to_string()));
 }

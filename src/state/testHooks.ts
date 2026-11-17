@@ -11,7 +11,7 @@ import { computeSection, generatePlan, generateVisibleLevelsPlan, materializeGre
 import { withDocument } from "../core/document";
 import { collectVisibleCodes } from "../model/layers";
 import { tracePlan } from "../core";
-import { DESIGN_OPTION_GHOST_FILL, designOptionEditArg } from "../core";
+import { DESIGN_OPTION_GHOST_FILL, DESIGN_OPTION_GHOST_LINE, designOptionEditArg } from "../core";
 import { getViewStateBridge } from "./viewTabs";
 import { getView3dFilter, toFilter3d } from "./view3dFilter";
 import { BUILTIN_PANEL_IDS } from "../panels/builtinPanels";
@@ -74,7 +74,7 @@ declare global {
       /** [272] Varianten: Kombination der aktiven Ebene, Zeichen-Variante, Variante je Element (`set/option`, leer = Hauptmodell), Sätze. */
       designOptions: () => { level: Record<string, string>; combination: string | null; combinations: string[]; draw: string | null; elements: Record<string, string>; sets: string[] };
       /** [272] Grundriss der aktiven Ebene wie auf dem Bildschirm (mit Bearbeitungsvariante): Wände und grau gezeichnete Wände (ids); dazu derselbe Grundriss für den Druck. */
-      designOptionPlan: () => { walls: string[]; grey: string[]; printGrey: number };
+      designOptionPlan: () => { walls: string[]; grey: string[]; greyRooms: string[]; greyDrawings: string[]; printGrey: number };
       /** [193] Gefüllte Flächen (Füllfarbe gesetzt) im Grundriss der aktiven Ebene (alle Kategorien, 1:100); bei 0 ist nichts Gefülltes mehr zu sehen. */
       planFills: () => number;
       /** [193] Höhe (z) des ersten Gelände-Netz-Punkts. */
@@ -218,14 +218,20 @@ export function installTestHooks(): void {
       const edit = designOptionEditArg(s.project, s.drawDesignOption, s.designOptionGrey);
       const walls = new Set<string>();
       const grey = new Set<string>();
+      const greyRooms = new Set<string>();
+      const greyDrawings = new Set<string>();
       for (const q of generateVisibleLevelsPlan(s.project, s.activeLevelId, codes, undefined, s.detail, false, false, undefined, 100, false, edit).primitives) {
+        // [272] Räume (Rand) und 2D-Elemente (Linien-/Strichfarbe) ausserhalb der Bearbeitungsvariante in der Grau-Linienfarbe.
+        const r = q as { roomId?: string; drawingId?: string; stroke?: string; color?: string };
+        if (r.roomId && q.kind === "polygon" && r.stroke === DESIGN_OPTION_GHOST_LINE) greyRooms.add(r.roomId);
+        if (r.drawingId && (r.color === DESIGN_OPTION_GHOST_LINE || r.stroke === DESIGN_OPTION_GHOST_LINE)) greyDrawings.add(r.drawingId);
         const w = (q as { wallId?: string; openingId?: string }).wallId;
         if (q.kind !== "polygon" || !w || (q as { openingId?: string }).openingId) continue;
         walls.add(w);
         if (q.fill === DESIGN_OPTION_GHOST_FILL) grey.add(w);
       }
       const printGrey = generatePlan(s.project, s.activeLevelId, codes, undefined, s.detail, false, false, true, 100, true, false, null, null, edit).primitives.filter((q) => q.kind === "polygon" && q.fill === DESIGN_OPTION_GHOST_FILL).length;
-      return { walls: [...walls].sort(), grey: [...grey].sort(), printGrey };
+      return { walls: [...walls].sort(), grey: [...grey].sort(), greyRooms: [...greyRooms].sort(), greyDrawings: [...greyDrawings].sort(), printGrey };
     },
     renovation: () => {
       const s = getState();

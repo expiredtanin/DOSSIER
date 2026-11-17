@@ -3,6 +3,7 @@
 //
 // Satz „Dachform": A Flachdach (Hauptvariante, neues Dach RF2), B Satteldach (das Dach RF1 des Demo-Hauses).
 // Satz „Fassade": A Lochfenster (Nordfenster O2 des Demo-Hauses, Hauptvariante), B Bandfenster (O-band, 3.6 m breit).
+// Dazu ein Sofa (2D-Möbel) in Fassade A: bei Bearbeitung einer Dachform-Variante steht es ausserhalb (grau).
 // Alles Übrige gehört zum Hauptmodell. Ein eigenes Beispiel, damit die bestehenden Goldens unverändert bleiben.
 
 import type { DesignOptionCombination, DesignOptionSet, Opening, Project, Roof } from "./types";
@@ -36,6 +37,10 @@ export function buildVariantenSampleProject(): Project {
     name: "Beispiel Varianten",
     roofs,
     openings,
+    drawings2d: [
+      ...(base.drawings2d ?? []),
+      { id: "M-sofa", type: "drawing2d", levelId: "eg", categoryCode: "22", geom: { shape: "libobj", libId: "lib:sofa-2", at: { x: 1.4, y: 1.0 }, rotation: 0 }, designOption: { set: "fassade", option: "a" } },
+    ],
     designOptionSets: structuredClone(VARIANTEN_SETS),
     designOptionCombinations: structuredClone(VARIANTEN_COMBINATIONS),
   };

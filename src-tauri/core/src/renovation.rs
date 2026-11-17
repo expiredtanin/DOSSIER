@@ -386,7 +386,8 @@ impl View {
             self.resolve_filter(p, &mut out);
         }
         // [272] Grau ausserhalb der Bearbeitungsvariante: geht der Umbau-Farbe vor; Ausgeblendetes bleibt weg.
-        if let Some(e) = self.edit.as_ref().filter(|e| e.grey) {
+        // Im 3D-Fenster (`layer`) zeigt die Geisterschicht das Grau, nicht die Teilefarbe.
+        if let Some(e) = self.edit.as_ref().filter(|e| e.grey && !e.layer) {
             let g = ghost_style();
             for id in e.outside(p) {
                 if !out.hidden.contains(&id) {

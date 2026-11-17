@@ -132,7 +132,7 @@ export interface Filter3d {
   /** [272] Variantenkombination der Ansicht (Satz-Id → Varianten-Id); fehlt = Hauptvarianten. */
   designOptions?: Record<string, string>;
   /** [272] Bearbeitungsvariante (Stift) des 3D-Fensters: sichtbar, mit `grey` alles ausserhalb grau. Nur Bildschirm. */
-  designOptionEdit?: { set: string; option: string; grey: boolean } | null;
+  designOptionEdit?: { set: string; option: string; grey: boolean; lock?: boolean; layer?: boolean } | null;
 }
 
 /**
@@ -141,7 +141,9 @@ export interface Filter3d {
  */
 export function ghostFilter3d(hide?: Hide3d): Filter3d | null {
   const f = filter3d(hide);
-  return f.grey?.length || f.greyFloors?.length ? { ...f, ghost: true } : null;
+  // [272] Auch die Elemente ausserhalb der Bearbeitungsvariante (Stift mit Häkchen „grau“) stehen in der Geisterschicht.
+  const editGrey = !!f.designOptionEdit?.grey && !!f.designOptionEdit.layer;
+  return f.grey?.length || f.greyFloors?.length || editGrey ? { ...f, ghost: true } : null;
 }
 
 /** Klassen-Codes (bisherige Form) oder der volle {@link Filter3d}. */

@@ -229,14 +229,20 @@ pub struct Edit {
     pub set: String,
     pub option: String,
     pub grey: bool,
+    /// [272] Häkchen „ausserhalb sperren“ (nur 3D-Pick, `lock`): Elemente ausserhalb sind im 3D nicht anwählbar.
+    pub lock: bool,
+    /// [272] 3D-Fenster: das Grau kommt als durchscheinende Geisterschicht (`model3d::ClassFilter`, render3d), nicht als
+    /// helle Teilefarbe ([`crate::renovation::View::resolve`] färbt dann nicht).
+    pub layer: bool,
 }
 
-/// Liest `{"set", "option", "grey"}` (Ids oder Namen); unbekannter Satz/Variante oder Unsinn ⇒ `None`.
+/// Liest `{"set", "option", "grey", "lock", "layer"}` (Ids oder Namen); unbekannter Satz/Variante oder Unsinn ⇒ `None`.
 pub fn parse_edit(p: &Project, v: Option<&Value>) -> Option<Edit> {
     let v = v?.as_object()?;
     let s = find_set(p, v.get("set")?.as_str()?)?;
     let o = find_option(s, v.get("option")?.as_str()?)?;
-    Some(Edit { set: s.id.clone(), option: o.id.clone(), grey: v.get("grey").and_then(Value::as_bool).unwrap_or(false) })
+    let flag = |k: &str| v.get(k).and_then(Value::as_bool).unwrap_or(false);
+    Some(Edit { set: s.id.clone(), option: o.id.clone(), grey: flag("grey"), lock: flag("lock"), layer: flag("layer") })
 }
 
 impl Edit {
@@ -269,12 +275,29 @@ impl Edit {
             )*};
         }
         each!(ceilings, roofs, stairs, columns, extruded_solids, rooms);
+        // 2D-Elemente (Möbel, Linien, Masse, Texte): nur die, die einer anderen Variante angehören — ohne Zugehörigkeit
+        // stehen sie im Hauptmodell, wo sie nicht grau werden (sonst wäre jede Beschriftung grau).
+        for d in &p.drawings2d {
+            if d.design_option.is_some() && !self.holds(d.design_option.as_ref()) {
+                out.insert(d.id.clone());
+            }
+        }
+        out
+    }
+
+    /// Ids der Elemente, die bei „ausserhalb sperren“ im 3D nicht anwählbar sind: alles ausserhalb ([`Self::outside`]),
+    /// alle 2D-Elemente ohne die Bearbeitungsvariante, Bäume und Kontext (wie `designOptionLocked` der Auswahl).
+    pub fn locked(&self, p: &Project) -> HashSet<String> {
+        let mut out = self.outside(p);
+        out.extend(p.drawings2d.iter().filter(|d| !self.holds(d.design_option.as_ref())).map(|d| d.id.clone()));
+        out.extend(p.trees.iter().flatten().map(|t| t.id.clone()));
+        out.extend(p.context.iter().flatten().map(|c| c.id().to_string()));
         out
     }
 
     /// Schlüssel für Caches.
     pub fn key(&self) -> String {
-        format!("{}={}{}", self.set, self.option, if self.grey { ":grey" } else { "" })
+        format!("{}={}{}{}", self.set, self.option, if self.grey { ":grey" } else { "" }, if self.layer { ":layer" } else { "" })
     }
 }
 

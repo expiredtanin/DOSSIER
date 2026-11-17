@@ -17,7 +17,7 @@ import { buildVariantenSampleProject } from "./sampleProjectVarianten";
 import { sampleProject } from "./sampleProject";
 import { generatePlan } from "../plan/generatePlan";
 import { computeKennzahlen } from "../analysis/kennzahlen";
-import { projectToModel3d, projectToModel3dParts } from "../plan/toWalls3d";
+import { classFilterText, ghostFilter3d, pickGeometry, projectToModel3d, projectToModel3dParts } from "../plan/toWalls3d";
 import { withDocument } from "../core/document";
 import type { Project } from "./types";
 
@@ -303,5 +303,33 @@ describe("[272] Varianten bearbeiten wie Archicad (Auge, Stift, grau, sperren)",
     expect(fills(null)).not.toContain(DESIGN_OPTION_GHOST_FILL);
     expect(fills(designOptionEditArg(p, dach("b"), true))).toContain(DESIGN_OPTION_GHOST_FILL);
     expect(fills(designOptionEditArg(p, dach("b"), false))).not.toContain(DESIGN_OPTION_GHOST_FILL);
+  });
+  it("3D: Edit-Argument mit Geisterschicht und Sperre; Geisterschicht nur bei Stift mit Grau", () => {
+    const p = buildVariantenSampleProject();
+    expect(designOptionEditArg(p, dach("b"), true, { lock: false })).toEqual({ set: "dachform", option: "b", grey: true, layer: true });
+    expect(designOptionEditArg(p, dach("b"), true, { lock: true })).toEqual({ set: "dachform", option: "b", grey: true, layer: true, lock: true });
+    const g = designOptionEditArg(p, dach("b"), true, { lock: false })!;
+    expect(ghostFilter3d({ designOptionEdit: g })?.ghost).toBe(true);
+    expect(ghostFilter3d({ designOptionEdit: { ...g, grey: false } })).toBeNull();
+    // Ohne `layer` (2D-Form) keine Schicht: das Grau bleibt Teilefarbe.
+    expect(ghostFilter3d({ designOptionEdit: designOptionEditArg(p, dach("b"), true)! })).toBeNull();
+    expect(JSON.parse(classFilterText({ designOptionEdit: g, ghost: true }))).toMatchObject({ ghost: true, designOptionEdit: { layer: true } });
+  });
+
+  it("3D: Geisterschicht trägt die Elemente ausserhalb, das Hauptmodell nur die der Variante; Pick folgt Stift und Sperre", () => {
+    const p = buildVariantenSampleProject();
+    const g = designOptionEditArg(p, dach("b"), true, { lock: false })!;
+    const wallIds = (h: Parameters<typeof projectToModel3d>[1]) => withDocument(p, () => projectToModel3d(p, h).walls.map((w) => w.wallId));
+    const main = wallIds({ hide: { designOptionEdit: g } });
+    const ghost = wallIds({ hide: { designOptionEdit: g, ghost: true } });
+    expect(ghost.length).toBeGreaterThan(0);
+    expect(main.filter((w) => ghost.includes(w))).toEqual([]);
+    // Pick: ohne Sperre bleiben graue Elemente anwählbar, mit Sperre nicht.
+    const pickWalls = (e: typeof g) => withDocument(p, () => pickGeometry(p, 0, { designOptionEdit: e }).walls.map((w) => w.wallId));
+    const free = pickWalls(g);
+    const locked = pickWalls({ ...g, lock: true });
+    expect(free.some((w) => ghost.includes(w))).toBe(true);
+    expect(locked.filter((w) => ghost.includes(w))).toEqual([]);
+    expect(locked.length).toBeLessThan(free.length);
   });
 });

@@ -256,12 +256,18 @@ test("Varianten bearbeiten wie Archicad: Stift, Zeichnen in die Variante, grau, 
   await expect.poll(async () => (await plan()).grey.length).toBeGreaterThan(0);
   expect((await plan()).grey).not.toContain(added);
   expect((await plan()).grey).toContain("W1");
+  // Räume (R1, Hauptmodell) und das Sofa (Fassade A, ausserhalb der Dachform-Variante) sind ebenfalls grau.
+  await expect.poll(async () => (await plan()).greyRooms).toContain("R1");
+  expect((await plan()).greyDrawings).toContain("M-sofa");
   expect((await plan()).printGrey).toBe(0);
   const shots = process.env.DOSSIER_SHOTS;
   await page.screenshot({ path: shots ? `${shots}/06-auge-stift-grau.png` : "test-results/designOptions272-auge-stift-grau.png" });
+  await page.screenshot({ path: shots ? `${shots}/09-grau-raeume-2d.png` : "test-results/designOptions272-grau-raeume-2d.png", clip: { x: 0, y: 0, width: 1280, height: 800 } });
   // Häkchen aus: nichts grau.
   await panel.getByTestId("design-option-grey").uncheck();
   await expect.poll(async () => (await plan()).grey).toEqual([]);
+  expect((await plan()).greyRooms).toEqual([]);
+  expect((await plan()).greyDrawings).toEqual([]);
   await panel.getByTestId("design-option-grey").check();
 
   // Häkchen „sperren“: Hauptmodell-Wand nicht wählbar, die eigene schon.
