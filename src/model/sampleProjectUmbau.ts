@@ -5,9 +5,12 @@
 // und Endzustand ist die Wand dort zu, mit roter Ausfachung im Umbauplan), in die Westwand W4 kommt ein neues Fenster O3
 // (Öffnung „Neu“ in Bestandswand: im Bestand ist die Wand dort zu, im Umbauplan gelbes Abbruch-Stück).
 // Etappe 2 (Anbau): ein eingeschossiger Anbau im Norden (Wände, Decke, Raum, Fenster) und eine neue Tür in W3.
+// [274] Sanierung je Schicht: die Südwand W1 ist eine Aussenwand „Beton 20 + Dämmung 10 + Aussenputz“ (Bestandstyp
+// „aw-bestand“) mit dem Sanierungstyp „aw-saniert“ (Beton bleibt, Dämmung und Putz werden abgebrochen, neue Dämmung 20 +
+// neuer Putz), saniert in Etappe 1: Kern bleibt an seiner Stelle, die Fassade rückt 10 cm nach aussen.
 // Nur Modellfelder, keine Kern-Befehle: das Modul ist ohne geladenen Kern auswertbar.
 
-import type { Ceiling, DrawingLevel, Opening, Project, Renovation, Room, Wall } from "./types";
+import type { Ceiling, DrawingLevel, Opening, Project, Renovation, Room, Wall, WallType } from "./types";
 import { sampleProject } from "./sampleProject";
 
 const E1: Renovation = { status: "new", phase: "etappe-1" };
@@ -30,8 +33,35 @@ export function buildUmbauSampleProject(): Project {
     ...base.drawingLevels,
     // Schnitt durch den Anbau (Nord–Süd, Blick nach Osten): zeigt Bestand, Abbruch W9 nicht, aber Anbau und neue Tür.
     { id: "schnitt-b", name: "Schnitt B", kind: "section", visible: true, locked: false, linePoints: [{ x: 1.4, y: -1 }, { x: 1.4, y: 8 }], directionSign: -1 },
+    // [274] Schnitt durch die sanierte Südwand W1 (zwischen Tür und Fenster) und den Anbau.
+    { id: "schnitt-c", name: "Schnitt C", kind: "section", visible: true, locked: false, linePoints: [{ x: 2, y: -1 }, { x: 2, y: 8 }], directionSign: -1 },
   ];
-  const walls: Wall[] = base.walls.map((w) => (w.id === "W9" ? { ...w, renovation: D1 } : w));
+  const walls: Wall[] = base.walls.map((w) =>
+    w.id === "W9" ? { ...w, renovation: D1 } : w.id === "W1" ? { ...w, wallTypeId: "aw-bestand", renovation: { status: "existing", phase: "etappe-1", renovated: true } } : w,
+  );
+  // [274] Typ-Paar Bestand → Sanierung (aussen → innen).
+  const wallTypes: WallType[] = [
+    ...base.wallTypes,
+    {
+      id: "aw-bestand",
+      name: "Aussenwand Beton 20 + Dämmung 10 (Bestand)",
+      layers: [
+        { componentId: "render-ext", thickness: 0.02 },
+        { componentId: "insulation", thickness: 0.1 },
+        { componentId: "concrete", thickness: 0.2 },
+      ],
+      renovationTarget: "aw-saniert",
+    },
+    {
+      id: "aw-saniert",
+      name: "Aussenwand Beton 20 + Dämmung 20 (saniert)",
+      layers: [
+        { componentId: "render-ext", thickness: 0.02 },
+        { componentId: "insulation", thickness: 0.2 },
+        { componentId: "concrete", thickness: 0.2 },
+      ],
+    },
+  ];
   walls.push(wall("W10", 0, 4, 0, 7), wall("W11", 0, 7, 3, 7), wall("W12", 3, 7, 3, 4));
   const openings: Opening[] = (base.openings ?? []).map((o) => (o.id === "O2" ? { ...o, renovation: D1 } : o));
   openings.push(
@@ -62,6 +92,7 @@ export function buildUmbauSampleProject(): Project {
     id: "beispiel-umbau",
     name: "Beispiel Umbau",
     drawingLevels: levels,
+    wallTypes,
     walls,
     openings,
     ceilings,

@@ -105,12 +105,12 @@ fn surf_ov(p: &Project, v: RuleView, kind: &str, code: &str, name: Option<&str>,
 /// [271] Umbau-Farben je Ansichtsfläche (Füllung ohne Muster, Kanten in der Linienfarbe, gestrichelt bei Abbruch); gehen
 /// den Regeln vor.
 pub(super) fn renovation_faces(faces: &mut [Face], r: &crate::renovation::Resolved) {
-    if r.styled.is_empty() {
+    if r.styled.is_empty() && r.faces.is_empty() {
         return;
     }
     let mut memo: HashMap<String, Rc<SurfOv>> = HashMap::new();
     for f in faces.iter_mut().filter(|f| !f.id.is_empty()) {
-        let Some(st) = r.styled.get(&f.id) else { continue };
+        let Some(st) = r.surface(&f.id) else { continue };
         let o = memo.entry(f.id.clone()).or_insert_with(|| {
             Rc::new(SurfOv { fill: Some(st.fill.clone()), no_pattern: true, hatch: None, outline: None, color: st.line.clone(), lineweight: None, dash: st.dashed.then(|| Some(crate::renovation::DEMOLISH_DASH.to_vec())), hide: false })
         });

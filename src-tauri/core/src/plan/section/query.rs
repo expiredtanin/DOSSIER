@@ -76,7 +76,11 @@ pub fn section_plan_buf(p: &Project, args: &[f64], text: &str) -> Result<Vec<u8>
     if let Some(r) = &ren {
         hidden_ids.extend(r.hidden.iter().cloned());
     }
-    let filtered = (!hidden_ids.is_empty()).then(|| without_elements(p, &hidden_ids));
+    let mut filtered = (!hidden_ids.is_empty()).then(|| without_elements(p, &hidden_ids));
+    // [274] Sanierte Wände mit dem Aufbau, den der Filter zeigt.
+    if let Some(r) = ren.as_ref().filter(|r| r.swaps()) {
+        r.swap_build_ups(filtered.get_or_insert_with(|| p.clone()));
+    }
     let p = filtered.as_ref().unwrap_or(p);
     // [184] Öffnungen mit Detailgrad grob (Strich im Schnitt): Wandschnitt an Sturz/Brüstung flach. Das ändert die
     // Schnittflächen, gehört also in den Schlüssel (unten) und in die Sichtbarkeit.

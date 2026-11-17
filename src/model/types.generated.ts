@@ -1977,6 +1977,9 @@ export type LayerFunction =
   | "cladding"
   | "air";
 
+/** [274] Zuordnung einer Schicht im Typ-Paar Bestand → Sanierung (manuell statt automatisch). */
+export type LayerRenovation = "auto" | "existing" | "demolish" | "new";
+
 /**
  * Schichteinzug einer Wandschicht an der Öffnung ([106]): Regel für alle Seiten, je Seite
  * übersteuerbar. `layer` zählt ab aussen (0 = äusserste Schicht); negativ ab innen (−1 = innerste),
@@ -3411,6 +3414,15 @@ export type Renovation = {
    * Fehlt ⇒ erste Etappe.
    */
   phase?: string;
+  /**
+   * [274] Saniert: die Wand bekommt den Sanierungstyp ihres Wandtyps (`WallType.renovationTarget`) als neuen
+   * Aufbau; der bisherige Aufbau ist der Bestand. Wirkt nur beim Status Bestand; Etappe der Sanierung = `phase`.
+   */
+  renovated?: boolean;
+  /**
+   * [274] Ausnahme: anderer neuer Aufbau als der Sanierungstyp des Wandtyps (Wandtyp-Id); setzt „saniert“ voraus.
+   */
+  newTypeId?: string;
 };
 
 /** [271] Ein Umbaufilter (wie Archicads „Renovation Filter“): Darstellung je Status. */
@@ -3436,6 +3448,11 @@ export type RenovationSettings = {
 
 /** [271] Darstellung eines Status im Umbaufilter. */
 export type RenovationShow = "show" | "hide" | "override";
+
+/**
+ * [274] Bezugsseite einer Sanierung (bleibt stehen, von ihr her werden die Schichten verglichen).
+ */
+export type RenovationSide = "inside" | "outside";
 
 /**
  * [271] Umbau-Status eines Bauteils (Archicad „Renovation Status“; SIA 400: Bestand schwarz/grau, Abbruch gelb,
@@ -4747,7 +4764,26 @@ export type Wall = {
 export type WallReferenceLine = "left" | "center" | "right";
 
 /** Ein Wandtyp = geordneter Schichtaufbau (außen → innen). */
-export type WallType = { id: string; name: string; layers: Array<Layer> };
+export type WallType = {
+  id: string;
+  name: string;
+  layers: Array<Layer>;
+  /**
+   * [274] Sanierungstyp (Wandtyp-Id): neuer Aufbau aller als „saniert“ markierten Wände dieses (Bestands-)Typs.
+   */
+  renovationTarget?: string;
+  /** [274] Bezugsseite der Sanierung (fehlt ⇒ innen). */
+  renovationSide?: RenovationSide;
+  /**
+   * [274] Manuelle Zuordnung je Schicht dieses Bestandstyps (Bestand/Abbruch, fehlt/„auto“ = automatisch); gilt
+   * für das Paar mit `renovationTarget`.
+   */
+  renovationOld?: Array<LayerRenovation>;
+  /**
+   * [274] Manuelle Zuordnung je Schicht des Sanierungstyps (Bestand/Neu, fehlt/„auto“ = automatisch).
+   */
+  renovationNew?: Array<LayerRenovation>;
+};
 
 /** Rollladen-/Sonnenschutzkasten über der Öffnung (P0-Minimalfassung). */
 export type WindowShading = {

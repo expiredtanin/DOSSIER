@@ -64,8 +64,8 @@ declare global {
       planFillColors: () => Record<string, number>;
       /** [272] Öffnungs-Ids im Grundriss der aktiven Ebene (alle Klassen, 1:100). */
       planOpeningIds: () => string[];
-      /** [271] Umbau: Filter und Etappe der aktiven Ebene, Zeichen-Status, Status je Wand. */
-      renovation: () => { filter: string | null; phase: string | null; draw: string; walls: Record<string, string> };
+      /** [271] Umbau: Filter und Etappe der aktiven Ebene, Zeichen-Status, Status je Wand; [274] neuer Aufbau je Wand („type“ = Sanierungstyp, sonst Typ-Id, leer = keiner). */
+      renovation: () => { filter: string | null; phase: string | null; draw: string; walls: Record<string, string>; buildUp: Record<string, string> };
       /** [272] Varianten: Kombination der aktiven Ebene, Zeichen-Variante, Variante je Element (`set/option`, leer = Hauptmodell), Sätze. */
       designOptions: () => { level: Record<string, string>; combination: string | null; combinations: string[]; draw: string | null; elements: Record<string, string>; sets: string[] };
       /** [193] Gefüllte Flächen (Füllfarbe gesetzt) im Grundriss der aktiven Ebene (alle Kategorien, 1:100); bei 0 ist nichts Gefülltes mehr zu sehen. */
@@ -212,6 +212,7 @@ export function installTestHooks(): void {
         phase: l?.renovationPhase ?? null,
         draw: s.drawRenovation.status,
         walls: Object.fromEntries(s.project.walls.map((w) => [w.id, w.renovation?.status ?? "existing"])),
+        buildUp: Object.fromEntries(s.project.walls.map((w) => [w.id, w.renovation?.newTypeId ?? (w.renovation?.renovated ? "type" : "")])),
       };
     },
     context: () =>

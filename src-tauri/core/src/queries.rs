@@ -91,6 +91,9 @@ pub fn run(p: &Project, name: &str, args: &[f64], text: &str) -> Result<String, 
         ("areaTable", _) => json(&flaechen::area_table(&renovation_state(p, text))),
         // [271] Umbaufilter (eingebaute und eigene) für die Oberfläche.
         ("renovationFilters", _) => json(&crate::renovation::filter_list(p)),
+        // [274] Typ-Paar Bestand → Sanierungstyp (Editor, Vorschau) bzw. alle Paare mit Zählern (Umbau-Panel).
+        ("renovationPair", _) => json(&crate::renovation::build_up::pair_json(p, text)),
+        ("renovationPairs", _) => json(&crate::renovation::build_up::pairs_json(p)),
         // [209] Kostenschätzung grob; `costDefaults` mit Text „gf“/„gv“ = Beispielwerte der Methode.
         ("costEstimate", _) => json(&crate::kosten::estimate(&renovation_state(p, text))),
         // [272] Varianten: Sätze mit Varianten und Zahl der Elemente; Vergleich der Kennzahlen/Kosten je Kombination
@@ -126,7 +129,10 @@ pub fn run(p: &Project, name: &str, args: &[f64], text: &str) -> Result<String, 
             let o: crate::cycles_scene::CyclesOptions = if text.trim().is_empty() { Default::default() } else { serde_json::from_str(text).map_err(|e| format!("cyclesScene: {e}"))? };
             // [271] Umbau-Farben nur auf Wunsch (`renovationColors`); Ausgeblendetes (Umbaufilter, Variante) fehlt immer.
             let styled: std::collections::HashMap<String, String> = if o.renovation_colors {
-                crate::renovation::view_from_text(p, text).map(|v| v.resolve(p).styled.into_iter().map(|(k, s)| (k, s.fill)).collect()).unwrap_or_default()
+                crate::renovation::view_from_text(p, text).map(|v| {
+                    let r = v.resolve(p);
+                    r.faces.into_iter().chain(r.styled).map(|(k, s)| (k, s.fill)).collect()
+                }).unwrap_or_default()
             } else {
                 Default::default()
             };
@@ -201,7 +207,7 @@ pub fn run(p: &Project, name: &str, args: &[f64], text: &str) -> Result<String, 
             }
             // [271] Umbaufilter (`text` = `{"renovation": …, "renovationPhase": …}`): Ausgeblendetes fehlt, Farben je Status.
             let ren = crate::renovation::view_from_text(p, text).map(|v| v.resolve(p));
-            let filtered = ren.as_ref().filter(|r| !r.hidden.is_empty()).map(|r| crate::renovation::without_hidden(p, &r.hidden));
+            let filtered = ren.as_ref().and_then(|r| r.project(p));
             let p = filtered.as_ref().unwrap_or(p);
             let (detail, rails) = model3d_mv(p, text, args[1]);
             let mut parts = model3d::parts_filtered(p, args[0] != 0.0, detail, args[2] != 0.0, &filter)?;

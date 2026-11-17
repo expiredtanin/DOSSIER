@@ -270,7 +270,12 @@ fn wall_poche(c: &Ctx, out: &mut Vec<Primitive>, e: &EffWall, gaps: &[(f64, f64)
     let layer_mm = LAYER_JOINT_MM * detail.layer_factor();
     let thick: Vec<f64> = wt.layers.iter().map(|l| l.thickness).collect();
     // [33] Overrides auf Schichten (Füllung, Schraffur, Umriss); ohne aktive Regel lauter leere Aktionen.
-    let lov = super::overrides::layer_actions(p, c.rule_view(), "wall", &w.category_code, Some(&wt.name), &wt.layers);
+    let mut lov = super::overrides::layer_actions(p, c.rule_view(), "wall", &w.category_code, Some(&wt.name), &wt.layers);
+    // [274] Sanierte Wand: Umbau-Farben je Schicht (Füllung ohne Muster), über den Regeln.
+    let renovated = c.renovation().and_then(|r| r.walls.get(&w.id)).filter(|l| l.type_id == w.wall_type_id && l.pieces.len() == wt.layers.len());
+    if let Some(look) = renovated {
+        look.layer_actions(&mut lov);
+    }
     let solid = c.solid_cut();
     // [140] Ab 1:100 (und „grob") schwarze Sammelfläche mit Umriss, ohne Schichten (`style::solid_cut`) —
     // [33] ausser eine Regel stylt eine Schicht: dann Schichten, die übrigen schwarz ohne Fugen dazwischen.
@@ -304,6 +309,10 @@ fn wall_poche(c: &Ctx, out: &mut Vec<Primitive>, e: &EffWall, gaps: &[(f64, f64)
     };
     // Fuge zwischen Schicht `a` und `b` weglassen: beide schwarz, gleicher Override ohne Muster, oder Umriss aus.
     let skip_joint = |a: usize, b: Option<usize>| {
+        // [274] Sanierte Wand: Schichtfugen bleiben (Grenzen zwischen Bestand, Abbruch und Neu, Kontur im Umbauplan).
+        if renovated.is_some() && b.is_some() && !(solid && !layered_solid) {
+            return false;
+        }
         let (oa, ob) = (ov_of(a), b.and_then(ov_of));
         let styled = |o: Option<&super::overrides::LayerActions>| o.is_some_and(|o| o.styles());
         (layered_solid && !styled(oa) && b.is_none_or(|_| !styled(ob)))
@@ -1250,6 +1259,10 @@ pub fn plan_walls(c: &Ctx, reference_lines: bool, out: &mut Vec<Primitive>, boun
         // [271] Umbaufilter: Wand und Öffnungen in ihrer Umbau-Farbe; Ersatzstücke neuer (Abbruch-Stück) bzw.
         // zugemauerter Öffnungen (Ausfachung) — über der geschlossenen Wand, sonst unter dem Öffnungssymbol.
         if let Some(r) = c.renovation() {
+            // [274] Sanierte Wand: Kanten der Abbruch-Schichten gestrichelt, Kontur abgebrochener Schichten im Umbauplan.
+            if let Some(look) = r.walls.get(&w.id).filter(|l| l.type_id == w.wall_type_id && arc_wall.is_none()) {
+                crate::renovation::build_up::dash_edges(look, out, out_start, &w.id, w.start, w.end, wr.ref_off);
+            }
             crate::renovation::restyle_range(r, out, out_start, Some(&w.id));
             if zone == Zone::Cut && !cut.covered {
                 for pa in r.patches.iter().filter(|pa| pa.wall_id == w.id) {

@@ -145,6 +145,14 @@ impl PlanArgs {
 /// [256] Rand (Papier-mm) um Masszahlen, Texte und Höhenkoten, vor dem die Hilfslinien aussetzen ([`Ctx::cut_at_gaps`]).
 pub const LINE_GAP_MM: f64 = 0.5;
 
+/// [274] Projekt einer Plan-Erzeugung: sanierte Wände mit dem Aufbau, den der Umbaufilter zeigt (sonst geliehen).
+pub fn plan_project<'p>(p: &'p Project, a: &PlanArgs) -> std::borrow::Cow<'p, Project> {
+    if !crate::renovation::build_up::any(p) {
+        return std::borrow::Cow::Borrowed(p);
+    }
+    crate::renovation::with_build_ups(p, crate::renovation::View::for_level(p, &a.floor, a.renovation.as_deref(), a.renovation_phase.as_deref(), &a.design_options))
+}
+
 /// Gemeinsamer Zustand einer Plan-Erzeugung.
 pub struct Ctx<'a> {
     pub p: &'a Project,
@@ -1925,6 +1933,8 @@ fn body_cut_ring(s: &ExtrudedSolid, zb: f64, cut: f64) -> Option<Vec<Vec2>> {
 
 /// Abfrage `planDomains`: Domänen als Listen (Tests); die 2D-Zeichnungen in `drawings`.
 pub fn plan_domains(p: &Project, a: &PlanArgs) -> Result<DomainPrims, String> {
+    let pv = plan_project(p, a);
+    let p = pv.as_ref();
     let c = Ctx::new(p, a);
     let mut out = DomainPrims::default();
     let mut bounds = Bounds::new();
@@ -2124,6 +2134,8 @@ pub const GROUPS: [&str; 12] = ["under", "ceilings", "roofs", "rooms", "walls", 
 /// Reihenfolge [`GROUPS`], Ausmass im Kopf, Inhalts-Hashes für den GPU-Chunk-Cache. Die
 /// 2D-Zeichnungen schreiben direkt in den Puffer (keine Primitiv-Liste dazwischen).
 pub fn plan_domains_buf(p: &Project, a: &PlanArgs) -> Result<Vec<u8>, String> {
+    let pv = plan_project(p, a);
+    let p = pv.as_ref();
     let c = Ctx::new(p, a);
     let mut d = DomainPrims::default();
     let mut bounds = Bounds::new();
@@ -2263,6 +2275,8 @@ impl PlanOut {
 pub fn plan_domains_cached(p: &Project, revs: &crate::document::Revs, cache: &mut super::cache::PlanCache, a: &PlanArgs, have: &HashSet<u64>) -> Result<PlanOut, String> {
     use super::cache::NOT_FOR_DRAWINGS;
     use crate::plan::buf::Writer;
+    let pv = plan_project(p, a);
+    let p = pv.as_ref();
     let c = Ctx::new(p, a);
     let cc = cache.context(a, revs.epoch());
     cc.trim();

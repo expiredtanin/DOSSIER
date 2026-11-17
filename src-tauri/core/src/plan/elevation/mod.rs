@@ -969,7 +969,7 @@ pub fn elevation_plan_buf(p: &Project, args: &[f64], text: &str) -> Result<Vec<u
     let on: Option<HashSet<String>> = v.get("rules").and_then(|a| a.as_array()).map(|a| a.iter().filter_map(|s| s.as_str().map(String::from)).collect());
     // [271] Umbaufilter (angefragt, sonst der der Ebene): Ausgeblendetes fehlt (verdeckt nichts), Farben auf die Flächen.
     let ren = super::section::query::renovation_view(p, &v, &level).map(|r| r.resolve(p)).filter(|r| !r.is_empty());
-    let filtered = ren.as_ref().filter(|r| !r.hidden.is_empty()).map(|r| crate::renovation::without_hidden(p, &r.hidden));
+    let filtered = ren.as_ref().and_then(|r| r.project(p));
     let p = filtered.as_ref().unwrap_or(p);
     if let Some((mut prims, bounds)) = elevation_primitives_ren(p, &level, shadows, mono, &vis, scale, on.as_ref(), ren.as_ref())? {
         super::extras::scale_line_weights(p, scale, &mut prims);

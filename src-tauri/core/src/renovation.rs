@@ -21,6 +21,16 @@
 //!   Vorgabe die Hauptvariante) gehört mit in die [`View`]: Elemente anderer Varianten sind ausgeblendet wie
 //!   Ausgeblendetes des Umbaufilters (auch 2D-Zeichnungen). Darum gibt es eine `View` auch ohne Umbaufilter, sobald
 //!   das Projekt Elemente in Varianten hat.
+//! - **Sanierung je Schicht** ([274], [`build_up`]): typbasiert. Ein Bestands-Wandtyp trägt seinen Sanierungstyp
+//!   (`WallType.renovationTarget`, dazu Bezugsseite `renovationSide` und die manuelle Zuordnung je Schicht
+//!   `renovationOld`/`renovationNew`); eine Bestandswand mit `renovation.renovated` bekommt ihn als neuen Aufbau
+//!   (Ausnahme je Wand: `renovation.newTypeId`). Zuordnung von der Bezugsseite her (Vorgabe innen: Kern bleibt, die
+//!   Aussenseite verschiebt sich; aussen = Innendämmung): gleicher Baustoff, gleiche Dicke und gleiche Lage ⇒ Bestand,
+//!   nur alt ⇒ Abbruch, nur neu ⇒ Neu; manuell je Schicht überschreibbar (z. B. ersetzter Baustoff gleicher Art).
+//!   Der Filter wählt den gezeigten Aufbau (Abbruch sichtbar, Neu nicht ⇒ alt; Neu sichtbar, Abbruch nicht ⇒ neu;
+//!   beide ⇒ überlagert in Teilschichten, Abbruch als gestrichelte Kontur über der Neu-Füllung). Die Wand-Achse
+//!   bleibt; die Ableitungen sehen eine Ersatzwand mit dem gezeigten Aufbau ([`Resolved::project`],
+//!   [`with_build_ups`]), die Farben gelten je Schicht ([`WallLook`]). Ohne Umbaufilter gilt der Bestandstyp.
 
 use crate::model::*;
 use crate::plan::prim::Primitive;
@@ -261,6 +271,27 @@ impl View {
         for w in &p.walls {
             let s = self.state(w.renovation.as_ref());
             wall_state.insert(w.id.as_str(), s);
+            // [274] Sanierte Bestandswand: Aufbau und Farben je Schicht statt einer Farbe für die ganze Wand.
+            if s == Some(RenovationStatus::Existing) {
+                if let Some(look) = build_up::look(self, p, w) {
+                    if let Some(Treat::Style(st)) = look.treat.first() {
+                        out.faces.insert(w.id.clone(), st.clone());
+                    }
+                    if look.pieces.is_empty() {
+                        out.hidden.insert(w.id.clone());
+                    }
+                    if look.new_type.is_none() && w.extra.0.contains_key(build_up::ORIGIN) {
+                        out.restore = true;
+                    }
+                    if let Some(t) = &look.new_type {
+                        if !out.wall_types.iter().any(|x| x.id == t.id) {
+                            out.wall_types.push(t.clone());
+                        }
+                    }
+                    out.walls.insert(w.id.clone(), look);
+                    continue;
+                }
+            }
             put(&w.id, self.treat_state(s), &mut out);
         }
         for o in p.openings.iter().flatten() {
@@ -352,11 +383,100 @@ pub struct Resolved {
     /// Elemente mit Umbau-Farbe (id → Farbe).
     pub styled: HashMap<String, Style>,
     pub patches: Vec<Patch>,
+    /// [274] Sanierte Wände (id → gezeigter Aufbau mit Farben je Schicht).
+    pub walls: HashMap<String, WallLook>,
+    /// [274] Wandtypen der gezeigten Aufbauten (neu bzw. überlagert), in [`Self::project`] ergänzt.
+    pub wall_types: Vec<WallType>,
+    /// [274] Ansichtsflächen sanierter Wände (Ansicht, Axo, 3D): Farbe der äussersten Schicht.
+    pub faces: HashMap<String, Style>,
+    /// [274] Eine schon umgestellte Ersatzwand muss auf den Bestand zurück ([`Self::swap_build_ups`]).
+    pub restore: bool,
 }
 
 impl Resolved {
     pub fn is_empty(&self) -> bool {
-        self.hidden.is_empty() && self.styled.is_empty() && self.patches.is_empty()
+        self.hidden.is_empty() && self.styled.is_empty() && self.patches.is_empty() && self.walls.is_empty()
+    }
+
+    /// Umbau-Farbe einer Ansichtsfläche (Element-Farbe, sonst die der äussersten Schicht einer sanierten Wand).
+    pub fn surface(&self, id: &str) -> Option<&Style> {
+        self.styled.get(id).or_else(|| self.faces.get(id))
+    }
+
+    /// Ersetzt der Filter Aufbauten (Wände mit anderem gezeigtem Aufbau)?
+    pub fn swaps(&self) -> bool {
+        self.restore || self.walls.values().any(|l| l.new_type.is_some())
+    }
+
+    /// Das Projekt dieser Darstellung: ohne Ausgeblendetes, sanierte Wände mit dem gezeigten Aufbau; `None` = unverändert.
+    pub fn project(&self, p: &Project) -> Option<Project> {
+        apply(p, Some(self), &self.hidden)
+    }
+
+    /// Sanierte Wände im Projekt `q` auf den gezeigten Aufbau umstellen (Achse bleibt, Bezugsseite bleibt stehen).
+    pub fn swap_build_ups(&self, q: &mut Project) {
+        if !self.swaps() {
+            return;
+        }
+        for w in q.walls.iter_mut() {
+            let Some(look) = self.walls.get(&w.id) else { continue };
+            if w.wall_type_id == look.type_id {
+                continue;
+            }
+            let Some(t) = &look.new_type else {
+                // Zeigt der Filter den Bestand, aber die Wand ist schon umgestellt: zurück auf den Ursprung.
+                let (ty, off, line) = build_up::origin(w);
+                (w.wall_type_id, w.reference_offset, w.reference_line) = (ty, off, line);
+                w.extra.0.remove(build_up::ORIGIN);
+                continue;
+            };
+            let (ty, off, line) = build_up::origin(w);
+            (w.wall_type_id, w.reference_offset, w.reference_line) = (ty, off, line);
+            // Ursprung merken: ein zweites Auflösen auf dem umgestellten Projekt ergibt dasselbe (`build_up::origin`).
+            let orig = serde_json::json!({"type": w.wall_type_id, "refOffset": w.reference_offset, "refLine": w.reference_line});
+            w.extra.0.insert(build_up::ORIGIN.to_string(), orig);
+            w.wall_type_id = t.id.clone();
+            w.reference_offset = Some(look.ref_offset);
+        }
+        for t in &self.wall_types {
+            if !q.wall_types.iter().any(|x| x.id == t.id) {
+                q.wall_types.push(t.clone());
+            }
+        }
+        for c in self.walls.values().flat_map(|l| l.components.iter()) {
+            if !q.components.iter().any(|x| x.id == c.id) {
+                q.components.push(c.clone());
+            }
+        }
+    }
+}
+
+/// [274] Projekt ohne `hidden` und mit den gezeigten Aufbauten von `r`; `None` = nichts zu ändern.
+pub fn apply(p: &Project, r: Option<&Resolved>, hidden: &HashSet<String>) -> Option<Project> {
+    let swaps = r.is_some_and(|r| r.swaps());
+    if hidden.is_empty() && !swaps {
+        return None;
+    }
+    let mut q = if hidden.is_empty() { p.clone() } else { without_hidden(p, hidden) };
+    if let Some(r) = r {
+        r.swap_build_ups(&mut q);
+    }
+    Some(q)
+}
+
+/// [274] Projekt einer Plan-Erzeugung mit den gezeigten Aufbauten (Ausgeblendetes bleibt, das blendet der Plan selbst
+/// aus); ohne sanierte Wände geliehen.
+pub fn with_build_ups<'a>(p: &'a Project, v: Option<View>) -> std::borrow::Cow<'a, Project> {
+    if !build_up::any(p) {
+        return std::borrow::Cow::Borrowed(p);
+    }
+    match v.map(|v| v.resolve(p)).filter(|r| r.swaps()) {
+        Some(r) => {
+            let mut q = p.clone();
+            r.swap_build_ups(&mut q);
+            std::borrow::Cow::Owned(q)
+        }
+        None => std::borrow::Cow::Borrowed(p),
     }
 }
 
@@ -385,14 +505,10 @@ pub fn project_for_text<'a>(p: &'a Project, text: &str) -> std::borrow::Cow<'a, 
 /// Das Projekt ohne das in `v` Ausgeblendete (ohne Wirkung geliehen).
 pub fn filtered(p: &Project, v: Option<View>) -> std::borrow::Cow<'_, Project> {
     match v {
-        Some(v) => {
-            let r = v.resolve(p);
-            if r.hidden.is_empty() {
-                std::borrow::Cow::Borrowed(p)
-            } else {
-                std::borrow::Cow::Owned(without_hidden(p, &r.hidden))
-            }
-        }
+        Some(v) => match v.resolve(p).project(p) {
+            Some(q) => std::borrow::Cow::Owned(q),
+            None => std::borrow::Cow::Borrowed(p),
+        },
         None => std::borrow::Cow::Borrowed(p),
     }
 }
@@ -400,14 +516,10 @@ pub fn filtered(p: &Project, v: Option<View>) -> std::borrow::Cow<'_, Project> {
 /// Das Projekt im Zustand eines Filters (`filter`: Id/Name, `phase`: Etappe); ohne gültigen Filter unverändert.
 pub fn project_in_state<'a>(p: &'a Project, filter: Option<&str>, phase: Option<&str>) -> std::borrow::Cow<'a, Project> {
     match View::new(p, filter, phase) {
-        Some(v) => {
-            let r = v.resolve(p);
-            if r.hidden.is_empty() {
-                std::borrow::Cow::Borrowed(p)
-            } else {
-                std::borrow::Cow::Owned(without_hidden(p, &r.hidden))
-            }
-        }
+        Some(v) => match v.resolve(p).project(p) {
+            Some(q) => std::borrow::Cow::Owned(q),
+            None => std::borrow::Cow::Borrowed(p),
+        },
         None => std::borrow::Cow::Borrowed(p),
     }
 }
@@ -587,10 +699,10 @@ pub fn view_from_text(p: &Project, text: &str) -> Option<View> {
 
 /// 3D: Teile in der Umbau-Farbe (Füllfarbe des Status) — Wände, Decken, Dächer, Stützen, Treppen, Körper.
 pub fn color_parts(p: &Project, parts: &mut crate::model3d::Parts, r: &Resolved) {
-    if r.styled.is_empty() {
+    if r.styled.is_empty() && r.faces.is_empty() {
         return;
     }
-    let rgb = |id: &str| r.styled.get(id).map(|s| crate::style::hex_to_rgb(&s.fill, crate::style::WALL_RGB));
+    let rgb = |id: &str| r.surface(id).map(|s| crate::style::hex_to_rgb(&s.fill, crate::style::WALL_RGB));
     for w in &mut parts.walls {
         if let Some(c) = rgb(&w.wall_id) {
             w.color = c;
@@ -656,6 +768,514 @@ pub fn renovation_of<'a>(p: &'a Project, id: &str) -> Option<&'a Renovation> {
     None
 }
 
+/// [274] Sanierung je Schicht: Typ-Paar Bestand → Sanierungstyp, Zuordnung der Schichten, gezeigter Aufbau je Filter.
+pub mod build_up {
+    use super::*;
+
+    /// Toleranz für gleiche Dicke/Lage (m).
+    pub const TOL: f64 = 0.0005;
+    /// Marke an einer umgestellten Ersatzwand: ursprünglicher Typ und Achslage ([`Resolved::swap_build_ups`]).
+    pub const ORIGIN: &str = "~renovationOrigin";
+
+    /// Schicksal einer Schicht im Typ-Paar.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+    #[serde(rename_all = "lowercase")]
+    pub enum Fate {
+        /// Bleibt (Bestand).
+        Kept,
+        /// Nur im Bestandstyp: wird abgebrochen.
+        Demolish,
+        /// Nur im Sanierungstyp: neu.
+        New,
+    }
+
+    /// Zuordnung je Schicht (Indizes in Typ-Reihenfolge aussen → innen).
+    #[derive(Clone, Debug, PartialEq, serde::Serialize)]
+    pub struct Matched {
+        pub old: Vec<Fate>,
+        pub new: Vec<Fate>,
+    }
+
+    fn thick(l: &Layer) -> f64 {
+        if l.thickness.is_finite() && l.thickness > 0.0 {
+            l.thickness
+        } else {
+            0.0
+        }
+    }
+
+    /// Gesamtdicke (unsinnige Dicken zählen 0).
+    pub fn total(layers: &[Layer]) -> f64 {
+        layers.iter().map(thick).sum()
+    }
+
+    /// Lage je Schicht: Abstand der bezugsseitigen und der abgewandten Kante von der Bezugsseite.
+    fn spans(layers: &[Layer], side: RenovationSide) -> Vec<(f64, f64)> {
+        let n = layers.len();
+        let mut out = vec![(0.0, 0.0); n];
+        let mut d = 0.0;
+        let order: Vec<usize> = if side == RenovationSide::Outside { (0..n).collect() } else { (0..n).rev().collect() };
+        for i in order {
+            out[i] = (d, d + thick(&layers[i]));
+            d += thick(&layers[i]);
+        }
+        out
+    }
+
+    /// Automatische Zuordnung: eine alte Schicht bleibt, wenn der neue Aufbau eine Schicht gleichen Baustoffs mit
+    /// gleicher Lage und Dicke (von der Bezugsseite her) hat; sonst Abbruch. Neue Schichten ohne Gegenstück sind neu.
+    /// Manuelle Zuordnung (`old_ov`/`new_ov`, je Schicht; „auto“ = automatisch) geht vor.
+    pub fn match_layers(old: &[Layer], new: &[Layer], side: RenovationSide, old_ov: &[LayerRenovation], new_ov: &[LayerRenovation]) -> Matched {
+        let (so, sn) = (spans(old, side), spans(new, side));
+        let mut nf = vec![Fate::New; new.len()];
+        let mut of = Vec::with_capacity(old.len());
+        let mut pair_of: Vec<Option<usize>> = Vec::with_capacity(old.len());
+        for (i, l) in old.iter().enumerate() {
+            let hit = (0..new.len()).find(|&j| nf[j] == Fate::New && new[j].component_id == l.component_id && (so[i].0 - sn[j].0).abs() < TOL && (so[i].1 - sn[j].1).abs() < TOL);
+            pair_of.push(hit);
+            of.push(match hit {
+                Some(j) => {
+                    nf[j] = Fate::Kept;
+                    Fate::Kept
+                }
+                None => Fate::Demolish,
+            });
+        }
+        for (i, f) in of.iter_mut().enumerate() {
+            match old_ov.get(i) {
+                Some(LayerRenovation::Existing) => *f = Fate::Kept,
+                Some(LayerRenovation::Demolish) => {
+                    // Das automatisch gepaarte Gegenstück ist dann neu (ausser es ist selbst manuell gesetzt).
+                    if let Some(j) = pair_of[i].filter(|&j| matches!(new_ov.get(j), None | Some(LayerRenovation::Auto))) {
+                        nf[j] = Fate::New;
+                    }
+                    *f = Fate::Demolish;
+                }
+                _ => {}
+            }
+        }
+        for (j, f) in nf.iter_mut().enumerate() {
+            match new_ov.get(j) {
+                Some(LayerRenovation::Existing) => *f = Fate::Kept,
+                Some(LayerRenovation::New) => {
+                    if let Some(i) = pair_of.iter().position(|x| *x == Some(j)).filter(|&i| matches!(old_ov.get(i), None | Some(LayerRenovation::Auto))) {
+                        of[i] = Fate::Demolish;
+                    }
+                    *f = Fate::New;
+                }
+                _ => {}
+            }
+        }
+        Matched { old: of, new: nf }
+    }
+
+    /// Art eines Teilstücks des gezeigten Aufbaus.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub enum Kind {
+        Kept,
+        Demolish,
+        New,
+        /// Neue Schicht, wo eine abgebrochene lag (Umbauplan: rot, Abbruch als gestrichelte Kontur darüber).
+        NewOverDemolish,
+    }
+
+    /// Eine Schicht des gezeigten Aufbaus mit Herkunft (Index im Bestands- bzw. Sanierungstyp).
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct Piece {
+        pub layer: Layer,
+        pub kind: Kind,
+        pub old: Option<usize>,
+        pub new: Option<usize>,
+    }
+
+    /// Welchen Aufbau eine Darstellung zeigt.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum Shown {
+        /// Bestand samt Abbruch (Bestands-, Abbruchplan).
+        Old,
+        /// Bestand und Neu (Neubauplan, Endzustand).
+        New,
+        /// Beide überlagert (Umbauplan).
+        Both,
+        /// Nur was bleibt (eigener Filter ohne Abbruch und ohne Neu).
+        Kept,
+    }
+
+    /// Schichten des gezeigten Aufbaus in Typ-Reihenfolge (aussen → innen).
+    pub fn pieces(old: &[Layer], new: &[Layer], m: &Matched, side: RenovationSide, shown: Shown) -> Vec<Piece> {
+        let of = |i: usize| m.old.get(i).copied().unwrap_or(Fate::Demolish);
+        let nf = |j: usize| m.new.get(j).copied().unwrap_or(Fate::New);
+        let kind = |f: Fate| match f {
+            Fate::Kept => Kind::Kept,
+            Fate::Demolish => Kind::Demolish,
+            Fate::New => Kind::New,
+        };
+        match shown {
+            Shown::Old => return old.iter().enumerate().map(|(i, l)| Piece { layer: l.clone(), kind: kind(of(i)), old: Some(i), new: None }).collect(),
+            Shown::Kept => return old.iter().enumerate().filter(|(i, _)| of(*i) == Fate::Kept).map(|(i, l)| Piece { layer: l.clone(), kind: Kind::Kept, old: Some(i), new: None }).collect(),
+            Shown::New => return new.iter().enumerate().map(|(j, l)| Piece { layer: l.clone(), kind: kind(nf(j)), old: None, new: Some(j) }).collect(),
+            Shown::Both => {}
+        }
+        // Überlagert: Teilstücke zwischen allen Schichtgrenzen beider Aufbauten, von der Bezugsseite her.
+        let (so, sn) = (spans(old, side), spans(new, side));
+        let mut cuts: Vec<f64> = so.iter().chain(sn.iter()).flat_map(|s| [s.0, s.1]).collect();
+        cuts.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        cuts.dedup_by(|a, b| (*a - *b).abs() < TOL);
+        let mut out: Vec<Piece> = Vec::new();
+        for w in cuts.windows(2) {
+            let (d0, d1) = (w[0], w[1]);
+            if d1 - d0 < TOL {
+                continue;
+            }
+            let mid = (d0 + d1) / 2.0;
+            let oi = (0..old.len()).find(|&i| so[i].0 < mid && mid < so[i].1);
+            let nj = (0..new.len()).find(|&j| sn[j].0 < mid && mid < sn[j].1);
+            let (layer, k) = match (oi, nj) {
+                (_, Some(j)) if nf(j) == Fate::Kept => (&new[j], Kind::Kept),
+                (Some(i), Some(j)) => (&new[j], if of(i) == Fate::Demolish { Kind::NewOverDemolish } else { Kind::New }),
+                (None, Some(j)) => (&new[j], Kind::New),
+                (Some(i), None) => (&old[i], kind(of(i))),
+                (None, None) => continue,
+            };
+            let mut layer = layer.clone();
+            layer.thickness = d1 - d0;
+            out.push(Piece { layer, kind: k, old: oi, new: nj });
+        }
+        if side != RenovationSide::Outside {
+            out.reverse();
+        }
+        out
+    }
+
+    /// Hat das Projekt sanierte Wände?
+    pub fn any(p: &Project) -> bool {
+        p.walls.iter().any(|w| w.renovation.as_ref().is_some_and(marked))
+    }
+
+    /// Ist die Wand als saniert markiert?
+    pub fn marked(r: &Renovation) -> bool {
+        r.renovated == Some(true) || r.new_type_id.as_deref().is_some_and(|s| !s.trim().is_empty())
+    }
+
+    /// Ursprünglicher Typ und Achslage (auch einer schon umgestellten Ersatzwand).
+    pub fn origin(w: &Wall) -> (String, Option<f64>, Option<WallReferenceLine>) {
+        if let Some(o) = w.extra.0.get(ORIGIN) {
+            let t = o.get("type").and_then(|x| x.as_str()).unwrap_or(&w.wall_type_id).to_string();
+            let off = o.get("refOffset").and_then(|x| x.as_f64());
+            let line = o.get("refLine").and_then(|x| serde_json::from_value(x.clone()).ok());
+            return (t, off, line);
+        }
+        (w.wall_type_id.clone(), w.reference_offset, w.reference_line)
+    }
+
+    /// Typ-Paar einer sanierten Wand: Bestandstyp, Sanierungstyp, Bezugsseite, Zuordnung. `None` = nicht saniert, Typ
+    /// fehlt, gleicher Typ oder ein Aufbau ohne Dicke.
+    pub fn pair<'a>(p: &'a Project, w: &Wall) -> Option<(&'a WallType, &'a WallType, RenovationSide, Matched)> {
+        let r = w.renovation.as_ref().filter(|r| marked(r))?;
+        let (old_id, _, _) = origin(w);
+        let old = p.wall_types.iter().find(|t| t.id == old_id)?;
+        let target = r.new_type_id.as_deref().map(str::trim).filter(|s| !s.is_empty()).or(old.renovation_target.as_deref())?;
+        type_pair(p, old, target)
+    }
+
+    /// Typ-Paar Bestandstyp `old` → `target` mit Zuordnung (die manuelle gilt nur für den eingetragenen Sanierungstyp).
+    pub fn type_pair<'a>(p: &'a Project, old: &'a WallType, target: &str) -> Option<(&'a WallType, &'a WallType, RenovationSide, Matched)> {
+        let new = p.wall_types.iter().find(|t| t.id == target)?;
+        if new.id == old.id || total(&old.layers) <= TOL || total(&new.layers) <= TOL {
+            return None;
+        }
+        let side = match old.renovation_side {
+            Some(RenovationSide::Outside) => RenovationSide::Outside,
+            _ => RenovationSide::Inside,
+        };
+        let own = old.renovation_target.as_deref() == Some(target);
+        let (oo, no) = if own { (old.renovation_old.clone().unwrap_or_default(), old.renovation_new.clone().unwrap_or_default()) } else { (Vec::new(), Vec::new()) };
+        let m = match_layers(&old.layers, &new.layers, side, &oo, &no);
+        Some((old, new, side, m))
+    }
+
+    /// Gezeigter Aufbau einer sanierten Wand im Filter.
+    #[derive(Clone, Debug)]
+    pub struct WallLook {
+        pub shown: Shown,
+        pub pieces: Vec<Piece>,
+        /// Darstellung je Schicht (gleich lang wie `pieces`).
+        pub treat: Vec<Treat>,
+        /// Wandtyp der Ersatzwand (`None` = der Bestandstyp bleibt).
+        pub new_type: Option<WallType>,
+        /// Typ, den die Wand in der Darstellung trägt.
+        pub type_id: String,
+        /// Achsversatz der Ersatzwand (`Wall.referenceOffset`): die Bezugsseite bleibt stehen.
+        pub ref_offset: f64,
+        /// Umbau-Farbe des Abbruchs, wenn der Filter ihn farbig zeigt (gestrichelte Kanten, Kontur im Umbauplan).
+        pub demolish: Option<Style>,
+        /// Hilfs-Bauteile der Schichten „Neu über Abbruch“ (Kopien des Baustoffs, in [`Resolved::project`] ergänzt).
+        pub components: Vec<Component>,
+    }
+
+    impl WallLook {
+        /// Schicht-Aktionen (Füllung ohne Muster) der farbigen Schichten über `lov` (Index = Schicht des Typs).
+        pub fn layer_actions(&self, lov: &mut Vec<crate::plan::overrides::LayerActions>) {
+            if lov.len() < self.pieces.len() {
+                lov.resize(self.pieces.len(), Default::default());
+            }
+            for (i, t) in self.treat.iter().enumerate() {
+                if let Treat::Style(st) = t {
+                    lov[i].fill_color = Some(st.fill.clone());
+                    lov[i].hatch = Some("none".into());
+                }
+            }
+        }
+
+        /// Darstellung der Schicht `li` des gezeigten Aufbaus (Schnitt).
+        pub fn layer_style(&self, li: usize) -> Option<Style> {
+            match self.treat.get(li)? {
+                Treat::Style(st) => {
+                    let mut st = st.clone();
+                    // Neu über Abbruch: die Kontur der abgebrochenen Schicht gestrichelt.
+                    if self.pieces[li].kind == Kind::NewOverDemolish && self.demolish.is_some() {
+                        st.dashed = true;
+                    }
+                    Some(st)
+                }
+                _ => None,
+            }
+        }
+    }
+
+    fn reference(off: Option<f64>, line: Option<WallReferenceLine>) -> crate::joins::Reference {
+        use crate::joins::Reference;
+        match (off, line) {
+            (Some(v), _) => Reference::Offset(v),
+            (None, Some(WallReferenceLine::Left)) => Reference::Left,
+            (None, Some(WallReferenceLine::Right)) => Reference::Right,
+            _ => Reference::Center,
+        }
+    }
+
+    /// Aufbau der Wand `w` im Filter `v` (`None` = nicht saniert).
+    pub fn look(v: &View, p: &Project, w: &Wall) -> Option<WallLook> {
+        let (old, new, side, m) = pair(p, w)?;
+        let phase = w.renovation.as_ref().and_then(|r| r.phase.clone());
+        let virt = |status| Renovation { status, phase: phase.clone(), ..Default::default() };
+        let td = v.treat_state(v.state(Some(&virt(RenovationStatus::Demolish))));
+        let tn = v.treat_state(v.state(Some(&virt(RenovationStatus::New))));
+        let tk = v.treat(w.renovation.as_ref());
+        let shown = match (td != Treat::Hide, tn != Treat::Hide) {
+            (true, false) => Shown::Old,
+            (false, true) => Shown::New,
+            (true, true) => Shown::Both,
+            (false, false) => Shown::Kept,
+        };
+        let mut pieces = pieces(&old.layers, &new.layers, &m, side, shown);
+        // Überlagert: neue Schichten über abgebrochenen bekommen ein eigenes (gleich aussehendes) Bauteil, damit
+        // Schnitt und 3D sie nicht mit der übrigen neuen Schicht gleichen Baustoffs zusammenfassen — sonst fehlte dort die
+        // Kontur der abgebrochenen Schicht.
+        let mut components: Vec<Component> = Vec::new();
+        for q in pieces.iter_mut().filter(|q| q.kind == Kind::NewOverDemolish) {
+            let id = format!("{}~abbruch{}", q.layer.component_id, q.old.unwrap_or(0));
+            if !components.iter().any(|c| c.id == id) {
+                components.push(Component { id: id.clone(), ..p.component_or_fallback(&q.layer.component_id).clone() });
+            }
+            q.layer.component_id = id;
+        }
+        let treat = pieces
+            .iter()
+            .map(|q| match q.kind {
+                Kind::Kept => tk.clone(),
+                Kind::Demolish => td.clone(),
+                Kind::New | Kind::NewOverDemolish => tn.clone(),
+            })
+            .collect();
+        let (_, off, line) = origin(w);
+        let t_old = total(&old.layers);
+        let t_eff: f64 = pieces.iter().map(|q| thick(&q.layer)).sum();
+        let r_old = crate::joins::reference_offset(reference(off, line), t_old);
+        let ref_offset = if side == RenovationSide::Outside { r_old - t_old / 2.0 + t_eff / 2.0 } else { r_old + t_old / 2.0 - t_eff / 2.0 };
+        let new_type = (shown != Shown::Old).then(|| {
+            let tag = match shown {
+                Shown::New => "neu",
+                Shown::Both => "umbau",
+                _ => "bleibt",
+            };
+            let name = if shown == Shown::New { new.name.clone() } else { format!("{} → {}", old.name, new.name) };
+            WallType { id: format!("{}~{}~{}", old.id, new.id, tag), name, layers: pieces.iter().map(|q| q.layer.clone()).collect(), ..Default::default() }
+        });
+        let type_id = new_type.as_ref().map_or_else(|| old.id.clone(), |t| t.id.clone());
+        let demolish = match td {
+            Treat::Style(s) => Some(s),
+            _ => None,
+        };
+        Some(WallLook { shown, pieces, treat, new_type, type_id, ref_offset: if ref_offset.is_finite() { ref_offset } else { 0.0 }, demolish, components })
+    }
+
+    /// Grundriss: Kanten der Wand (Umriss, Fugen, Stirnseiten) in `prims[from..]` je Schicht stricheln — Kanten einer
+    /// Abbruch-Schicht gestrichelt, im Umbauplan die Grenzen abgebrochener Schichten innerhalb einer neuen Schicht als
+    /// gestrichelte Kontur in der Abbruch-Farbe. Nur gerade Wände (Frame `start`→`end`, Achsversatz `ref_off`).
+    pub fn dash_edges(look: &WallLook, prims: &mut Vec<Primitive>, from: usize, wall_id: &str, start: Vec2, end: Vec2, ref_off: f64) {
+        let Some(dem) = &look.demolish else { return };
+        let (dx, dy) = (end.x - start.x, end.y - start.y);
+        let len = (dx * dx + dy * dy).sqrt();
+        if !(len > 1e-9) || from >= prims.len() {
+            return;
+        }
+        let m = (-dy / len, dx / len);
+        let n_of = |q: Vec2| (q.x - start.x) * m.0 + (q.y - start.y) * m.1;
+        let t: f64 = look.pieces.iter().map(|q| thick(&q.layer)).sum();
+        let mut bounds = vec![ref_off - t / 2.0];
+        for q in &look.pieces {
+            bounds.push(bounds[bounds.len() - 1] + thick(&q.layer));
+        }
+        let eps = 1e-6;
+        let piece_at = |n: f64| (0..look.pieces.len()).find(|&k| bounds[k] < n && n < bounds[k + 1]);
+        let dem_like = |k: Option<usize>| k.is_none_or(|k| look.pieces[k].kind == Kind::Demolish);
+        let contour = Style { fill: dem.fill.clone(), line: Some(dem.line.clone().unwrap_or_else(|| dem.fill.clone())), dashed: true };
+        // Stil eines Teilstücks (a, b) einer Kante; `None` = unverändert.
+        let style_of = |na: f64, nb: f64| -> Option<&Style> {
+            if (na - nb).abs() < eps {
+                return match bounds.iter().position(|b| (b - na).abs() < eps) {
+                    Some(bi) => {
+                        let below = bi.checked_sub(1);
+                        let above = (bi < look.pieces.len()).then_some(bi);
+                        if dem_like(below) && dem_like(above) && (below.is_some() || above.is_some()) {
+                            Some(dem)
+                        } else {
+                            match (below.map(|k| &look.pieces[k]), above.map(|k| &look.pieces[k])) {
+                                (Some(a), Some(b)) if a.new.is_some() && a.new == b.new && a.old != b.old && (a.kind == Kind::NewOverDemolish || b.kind == Kind::NewOverDemolish) => Some(&contour),
+                                _ => None,
+                            }
+                        }
+                    }
+                    None => piece_at(na).filter(|&k| look.pieces[k].kind == Kind::Demolish).map(|_| dem),
+                };
+            }
+            piece_at((na + nb) / 2.0).filter(|&k| look.pieces[k].kind == Kind::Demolish).map(|_| dem)
+        };
+        // Kante in Teilstücke an den Schichtgrenzen zerlegen.
+        let split = |a: Vec2, b: Vec2| -> Vec<(Vec2, Vec2, Option<Style>)> {
+            let (na, nb) = (n_of(a), n_of(b));
+            let mut ts: Vec<f64> = vec![0.0, 1.0];
+            if (na - nb).abs() > eps {
+                for &bn in &bounds {
+                    let s = (bn - na) / (nb - na);
+                    if s > 1e-9 && s < 1.0 - 1e-9 {
+                        ts.push(s);
+                    }
+                }
+            }
+            ts.sort_by(|x, y| x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal));
+            let at = |s: f64| Vec2 { x: a.x + (b.x - a.x) * s, y: a.y + (b.y - a.y) * s };
+            ts.windows(2).map(|w| (at(w[0]), at(w[1]), style_of(na + (nb - na) * w[0], na + (nb - na) * w[1]).cloned())).collect()
+        };
+        let dash = || Some(Some(DEMOLISH_DASH.to_vec()));
+        let mut extra = Vec::new();
+        for q in prims[from..].iter_mut() {
+            match q {
+                Primitive::Line { a, b, cls, opening_id: None, .. } if matches!(&**cls, "wall-outline" | "layer-joint" | "layer-joint-l") => {
+                    let parts = split(*a, *b);
+                    if parts.iter().all(|x| x.2.is_none()) {
+                        continue;
+                    }
+                    let template = q.clone();
+                    for (k, (pa, pb, st)) in parts.into_iter().enumerate() {
+                        let mut l = template.clone();
+                        if let Primitive::Line { a, b, dash: d, color, zigzag, motif, .. } = &mut l {
+                            *a = pa;
+                            *b = pb;
+                            if let Some(st) = st {
+                                *d = dash();
+                                *zigzag = None;
+                                *motif = None;
+                                if let Some(c) = &st.line {
+                                    *color = Some(c.clone().into());
+                                }
+                            }
+                        }
+                        // Das erste Stück ersetzt die Kante an ihrem Platz (Bereiche dahinter bleiben gültig).
+                        if k == 0 {
+                            *q = l;
+                        } else {
+                            extra.push(l);
+                        }
+                    }
+                }
+                Primitive::Polygon { pts, stroke, stroke_width_mm, wall_id: Some(wid), opening_id: None, no_stroke_edges, greyed, .. } if wid == wall_id && stroke.trim() != "none" && !stroke.is_empty() && *stroke_width_mm > 0.0 && pts.len() >= 2 => {
+                    let skip: HashSet<usize> = no_stroke_edges.iter().flatten().filter(|x| x.is_finite() && **x >= 0.0).map(|x| *x as usize).collect();
+                    let n = pts.len();
+                    let mut lines = Vec::new();
+                    let mut any = false;
+                    for i in (0..n).filter(|i| !skip.contains(i)) {
+                        for (pa, pb, st) in split(pts[i], pts[(i + 1) % n]) {
+                            any |= st.is_some();
+                            let color = st.as_ref().and_then(|s| s.line.clone()).unwrap_or_else(|| stroke.clone());
+                            lines.push(Primitive::Line { a: pa, b: pb, cls: "wall-outline".into(), weight_mm: *stroke_width_mm, dash: if st.is_some() { dash() } else { None }, zigzag: None, motif: None, color: Some(color.into()), drawing_id: None, opening_id: None, stair_id: None, greyed: *greyed, opacity: None });
+                        }
+                    }
+                    if any {
+                        *stroke = "none".into();
+                        extra.extend(lines);
+                    }
+                }
+                _ => {}
+            }
+        }
+        prims.extend(extra);
+    }
+
+    /// Abfrage `renovationPair` (Typ-Paar-Editor, Vorschau): Schichten alt/neu mit Zuordnung und Ergebnis-Streifen
+    /// (Umbauplan). `text` = `{"type": Bestandstyp-Id, "target": Sanierungstyp-Id (fehlt = eingetragener)}`; `null` ohne Paar.
+    pub fn pair_json(p: &Project, text: &str) -> serde_json::Value {
+        let v: serde_json::Value = serde_json::from_str(text).unwrap_or_default();
+        let Some(old) = v.get("type").and_then(|x| x.as_str()).and_then(|id| p.wall_types.iter().find(|t| t.id == id)) else { return serde_json::Value::Null };
+        let target = v.get("target").and_then(|x| x.as_str()).filter(|s| !s.is_empty()).or(old.renovation_target.as_deref());
+        let Some((old, new, side, m)) = target.and_then(|t| type_pair(p, old, t)) else { return serde_json::Value::Null };
+        let layer = |l: &Layer, f: Fate| {
+            let c = p.component_or_fallback(&l.component_id);
+            serde_json::json!({"componentId": l.component_id, "name": c.name, "color": c.color, "thickness": thick(l), "fate": f})
+        };
+        let fill = |k: Kind| match k {
+            Kind::Kept => style(p, RenovationStatus::Existing).fill,
+            Kind::Demolish => style(p, RenovationStatus::Demolish).fill,
+            _ => style(p, RenovationStatus::New).fill,
+        };
+        let strip = |shown: Shown| -> Vec<serde_json::Value> { pieces(&old.layers, &new.layers, &m, side, shown).iter().map(|q| serde_json::json!({"thickness": thick(&q.layer), "kind": q.kind, "fill": fill(q.kind)})).collect() };
+        let walls = p.walls.iter().filter(|w| origin(w).0 == old.id).count();
+        let renovated = p.walls.iter().filter(|w| origin(w).0 == old.id && pair(p, w).is_some_and(|x| x.1.id == new.id)).count();
+        serde_json::json!({
+            "type": old.id, "target": new.id, "side": if side == RenovationSide::Outside { "outside" } else { "inside" },
+            "old": old.layers.iter().zip(&m.old).map(|(l, f)| layer(l, *f)).collect::<Vec<_>>(),
+            "new": new.layers.iter().zip(&m.new).map(|(l, f)| layer(l, *f)).collect::<Vec<_>>(),
+            "oldStrip": strip(Shown::Old), "newStrip": strip(Shown::New), "result": strip(Shown::Both),
+            "walls": walls, "renovated": renovated,
+        })
+    }
+
+    /// Abfrage `renovationPairs` (Umbau-Panel): je Bestandstyp mit Sanierungstyp das Ziel und die Anzahl Wände bzw.
+    /// sanierter Wände; dazu die Zahl aller sanierten Wände.
+    pub fn pairs_json(p: &Project) -> serde_json::Value {
+        let pairs: Vec<serde_json::Value> = p
+            .wall_types
+            .iter()
+            .filter_map(|t| {
+                let target = t.renovation_target.as_deref().filter(|s| !s.is_empty())?;
+                let new = p.wall_types.iter().find(|x| x.id == target);
+                let walls = p.walls.iter().filter(|w| origin(w).0 == t.id).count();
+                let renovated = p.walls.iter().filter(|w| origin(w).0 == t.id && w.renovation.as_ref().is_some_and(marked)).count();
+                Some(serde_json::json!({"type": t.id, "name": t.name, "target": target, "targetName": new.map(|n| n.name.clone()), "walls": walls, "renovated": renovated}))
+            })
+            .collect();
+        let total = p.walls.iter().filter(|w| pair(p, w).is_some()).count();
+        serde_json::json!({"pairs": pairs, "renovated": total})
+    }
+}
+
+pub use build_up::WallLook;
+
 #[cfg(test)]
 #[path = "renovation_tests.rs"]
 pub(crate) mod tests;
+
+#[cfg(test)]
+#[path = "renovation_layers_tests.rs"]
+mod layers_tests;

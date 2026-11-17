@@ -312,13 +312,22 @@ impl CutRules {
     /// [271] Umbau-Farben als Override der Schnittflächen: Füllung der Farbe, ohne Muster, Umriss gestrichelt bei
     /// Abbruch. Geht den Regeln vor (der Umbaufilter ist die Aussage des Plans).
     pub fn with_renovation(mut self, out: &Output, r: Option<&crate::renovation::Resolved>) -> CutRules {
-        let Some(r) = r.filter(|r| !r.styled.is_empty()) else { return self };
-        if out.cuts.iter().all(|c| c.source_id.as_ref().is_none_or(|s| !r.styled.contains_key(s))) {
+        let Some(r) = r.filter(|r| !r.styled.is_empty() || !r.walls.is_empty()) else { return self };
+        // [274] Sanierte Wand: Farbe je Schicht (Schicht-Index im gezeigten Aufbau).
+        let style_of = |c: &Cut| -> Option<crate::renovation::Style> {
+            let s = c.source_id.as_ref()?;
+            if let Some(st) = r.styled.get(s) {
+                return Some(st.clone());
+            }
+            let look = r.walls.get(s).filter(|_| c.kind == Kind::Wall)?;
+            look.layer_style(c.layer_index.or_else(|| c.component_id.as_deref().and_then(|id| look.pieces.iter().position(|q| q.layer.component_id == id)))?)
+        };
+        if out.cuts.iter().all(|c| style_of(c).is_none()) {
             return self;
         }
         self.ov.resize(out.cuts.len(), None);
         for (i, c) in out.cuts.iter().enumerate() {
-            let Some(st) = c.source_id.as_ref().and_then(|s| r.styled.get(s)) else { continue };
+            let Some(st) = style_of(c) else { continue };
             let prev = self.ov[i].take();
             self.ov[i] = Some(CutOv {
                 fill: Some(st.fill.clone()),

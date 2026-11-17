@@ -130,6 +130,12 @@ export {
   renovationFilterShows, renovationStyleOf, idsByRenovationStatus, renovationCounts, phaseUsage,
 } from "../model/renovation";
 export type { RenovationFilterEntry, RenovationCollection } from "../model/renovation";
+// [274] Sanierung je Schicht: Typ-Paar Bestand → Sanierungstyp
+export {
+  wallBuildUp, buildUpKey, parseBuildUpKey, setBuildUpOps, commonBuildUp, renovateAllOfTypeOps, createRenovationTypeOps, setTypePairOps,
+  renovationPair, renovationPairs,
+} from "../model/renovation";
+export type { RenovationBuildUp, RenovationPair, RenovationPairLayer, RenovationStripPiece, RenovationPairsInfo } from "../model/renovation";
 export { buildUmbauSampleProject } from "../model/sampleProjectUmbau";
 // [272] Varianten: Sätze, Kombinationen, Zuweisen/Kopieren/Übernehmen (Regeln im Kern `design_options.rs`, Sichtbarkeit `renovation.rs`)
 export {
