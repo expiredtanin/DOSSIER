@@ -723,6 +723,23 @@ pub struct WallType {
     pub id: String,
     pub name: String,
     pub layers: Vec<Layer>,
+    /// [274] Sanierungstyp (Wandtyp-Id): neuer Aufbau aller als „saniert“ markierten Wände dieses (Bestands-)Typs.
+    #[serde(rename = "renovationTarget", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub renovation_target: Option<String>,
+    /// [274] Bezugsseite der Sanierung (fehlt ⇒ innen).
+    #[serde(rename = "renovationSide", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub renovation_side: Option<RenovationSide>,
+    /// [274] Manuelle Zuordnung je Schicht dieses Bestandstyps (Bestand/Abbruch, fehlt/„auto“ = automatisch); gilt
+    /// für das Paar mit `renovationTarget`.
+    #[serde(rename = "renovationOld", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub renovation_old: Option<Vec<LayerRenovation>>,
+    /// [274] Manuelle Zuordnung je Schicht des Sanierungstyps (Bestand/Neu, fehlt/„auto“ = automatisch).
+    #[serde(rename = "renovationNew", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub renovation_new: Option<Vec<LayerRenovation>>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -2977,9 +2994,53 @@ pub struct Renovation {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub phase: Option<String>,
+    /// [274] Saniert: die Wand bekommt den Sanierungstyp ihres Wandtyps (`WallType.renovationTarget`) als neuen
+    /// Aufbau; der bisherige Aufbau ist der Bestand. Wirkt nur beim Status Bestand; Etappe der Sanierung = `phase`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub renovated: Option<bool>,
+    /// [274] Ausnahme: anderer neuer Aufbau als der Sanierungstyp des Wandtyps (Wandtyp-Id); setzt „saniert“ voraus.
+    #[serde(rename = "newTypeId", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub new_type_id: Option<String>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
+}
+
+/// [274] Bezugsseite einer Sanierung (bleibt stehen, von ihr her werden die Schichten verglichen).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+pub enum RenovationSide {
+    /// Innen (Vorgabe, Aussendämmung): Kern an gleicher Stelle, die Aussenseite verschiebt sich.
+    #[default]
+    #[serde(rename = "inside")]
+    Inside,
+    /// Aussen (Innendämmung): die Fassade bleibt, die Innenseite verschiebt sich.
+    #[serde(rename = "outside")]
+    Outside,
+    #[serde(other)]
+    #[ts(skip)]
+    Unknown,
+}
+
+/// [274] Zuordnung einer Schicht im Typ-Paar Bestand → Sanierung (manuell statt automatisch).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+pub enum LayerRenovation {
+    /// Automatisch: gleicher Baustoff, gleiche Dicke und gleiche Lage von der Bezugsseite ⇒ Bestand.
+    #[default]
+    #[serde(rename = "auto")]
+    Auto,
+    #[serde(rename = "existing")]
+    Existing,
+    /// Nur im Bestandstyp: die Schicht wird abgebrochen.
+    #[serde(rename = "demolish")]
+    Demolish,
+    /// Nur im Sanierungstyp: die Schicht ist neu.
+    #[serde(rename = "new")]
+    New,
+    #[serde(other)]
+    #[ts(skip)]
+    Unknown,
 }
 
 /// [271] Eine Bau-Etappe (Reihenfolge = Reihenfolge der Liste).

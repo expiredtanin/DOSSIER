@@ -367,6 +367,21 @@ Fenster zugemauert, neues Fenster in der Westwand, Anbau in der zweiten Etappe).
   Stand einer Etappe. Der Filter gehört zur Ebene wie die Modelldarstellung; Ausschnitte und Ansichtsvorlagen merken ihn.
 - **Öffnungen in Bestandswänden:** eine neue Öffnung bricht Mauerwerk ab (im Umbauplan ein gelbes Stück, im Bestand ist die
   Wand zu), eine Öffnung „Abbruch“ wird zugemauert (rote Ausfachung, im Neubau und Endzustand ist die Wand zu).
+- **Sanierung je Schicht:** z. B. Aussenwand Beton 20 + Dämmung 10 + Putz → Beton bleibt, neue Dämmung 20 + neuer Putz. In drei
+  Schritten:
+  1. *Sanierungstyp anlegen:* im Panel Umbau, Abschnitt „Sanierung“, den Bestands-Wandtyp wählen und „Sanierungstyp anlegen …“
+     (eine Kopie des Typs). Die Schichten der Kopie in den Ressourcen (Reiter Wandstile) anpassen, etwa die Dämmung auf 20 cm.
+  2. *Zuordnung prüfen:* „Zuordnung bearbeiten“ zeigt Bestandstyp und Sanierungstyp nebeneinander mit dem Streifen Alt/Neu/Ergebnis
+     in den Umbau-Farben. Automatisch gilt: gleicher Baustoff, gleiche Dicke und gleiche Lage von der „Bezugsseite“ her (Vorgabe
+     innen: der Kern bleibt, die Fassade rückt nach aussen; aussen bei Innendämmung) ist Bestand, nur alt ist Abbruch, nur neu ist
+     Neu. Je Schicht lässt sich das von Hand ändern; die Zuordnung gilt für alle Wände dieses Typs.
+  3. *Anwenden:* „Alle Wände vom Typ sanieren“ (ein Undo-Schritt) oder Wände wählen und in der Objekt-Info das Feld
+     „Neuer Aufbau (Sanierung)“ auf den Sanierungstyp bzw. für eine Ausnahme auf einen anderen Wandtyp stellen.
+
+  Die Umbaufilter zeigen dann je Schicht: Bestand und Abbruch den alten Aufbau (Abbruch-Schichten gelb, gestrichelt umrandet),
+  Neubau und Endzustand den neuen (Neubau: neue Schichten rot), der Umbauplan beide — Beton grau, neue Schichten rot und die
+  abgebrochenen als gelbe gestrichelte Kontur darüber. Grundriss, Schnitt, Ansicht, 3D, Öffnungsleibungen und Flächen (GF an der
+  neuen Aussenkante) folgen dem gezeigten Aufbau; ohne Umbaufilter gilt der Bestand.
 - **Etappen und Farben:** die Etappen im Panel Umbau (oder *Fenster → Ressourcen*, Reiter „Umbau“); dort auch die
   „Umbau-Farben“ je Status (Füllung, Linie, gestrichelt).
 - **Flächen:** Panel Flächenbilanz, „Zustand“ Bestand oder Endzustand.

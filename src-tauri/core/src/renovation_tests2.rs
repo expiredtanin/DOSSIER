@@ -418,3 +418,38 @@ fn bogenwand_traegt_ersatzstueck_in_allen_drei_zeichnungen() {
     assert_eq!(patch_polys(&section_q(&p, json!({"renovation": "umbauplan"})), "O1", &yellow).len(), 1);
     assert_eq!(patch_polys(&elevation_of(&p, "ansicht-sued", json!({"renovation": "umbauplan"})), "O1", &yellow).len(), 1);
 }
+
+/// DXF-Ebenenliste (Strings des Exports) eines Projekts, Grundriss EG mit allen Ebenen.
+fn dxf_layer_names(p: &Project) -> Vec<String> {
+    let a = PlanArgs::parse(1.0, &plan_args(&json!({}))).unwrap();
+    let buf = crate::plan::domains::plan_domains_buf(p, &a).unwrap();
+    let view = crate::plan::buf::View::parse(&buf).unwrap();
+    let len = view.len();
+    let mut parts = [crate::plan::parts::Part::new(view, 0, len).unwrap()];
+    let o = crate::plan::dxf::DxfOptions { scale: 100.0, include_hatches: true, dim_cm: false, paper_layout: false, bounds: [0.0, 0.0, 20.0, 6.0], default_font: "Arial".into(), floor: "eg".into(), table_labels: String::new() };
+    crate::plan::dxf::collect(&mut parts, p, &o).unwrap().strings
+}
+
+#[test]
+fn dxf_ebenen_fuer_moebel_und_baeume() {
+    let mut v = fixture();
+    let s = dxf_layer_names(&project(&v));
+    // Möbel (M1 neu, M2 Abbruch) und Bäume (T2 zu fällen, T3 neu) auf Status-Ebenen ihrer Kategorie.
+    for n in ["22_Möbel_Abbruch", "22_Möbel_Neu", "13_Bäume_Abbruch", "13_Bäume_Neu"] {
+        assert!(s.iter().any(|x| x == n), "{n} fehlt: {:?}", s.iter().filter(|x| x.contains('_')).collect::<Vec<_>>());
+    }
+    // Bestand (M3, T1) bleibt auf der Kategorie-Ebene.
+    assert!(s.iter().any(|x| x == "22_Möbel") && s.iter().any(|x| x == "13_Bäume"));
+    // Ohne Umbau-Angaben keine Status-Ebenen für Möbel/Bäume.
+    for coll in ["drawings2d", "trees"] {
+        for d in v[coll].as_array_mut().unwrap() {
+            d.as_object_mut().unwrap().remove("renovation");
+            if coll == "trees" {
+                d["status"] = json!("existing");
+            }
+        }
+    }
+    let s = dxf_layer_names(&project(&v));
+    assert!(!s.iter().any(|x| x.starts_with("22_") && (x.ends_with("_Abbruch") || x.ends_with("_Neu"))));
+    assert!(!s.iter().any(|x| x.starts_with("13_") && (x.ends_with("_Abbruch") || x.ends_with("_Neu"))));
+}

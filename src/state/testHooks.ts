@@ -16,6 +16,8 @@ import { getViewStateBridge } from "./viewTabs";
 import { getView3dFilter, toFilter3d } from "./view3dFilter";
 import { BUILTIN_PANEL_IDS } from "../panels/builtinPanels";
 import { hiddenFloorIds, itemDisplay } from "../panels/displayMode";
+import { renderJob } from "./renderJob";
+import { CyclesCancelled } from "../core";
 
 declare global {
   interface Window {
@@ -53,6 +55,8 @@ declare global {
       dimPts: (id: string) => { x: number; y: number }[];
       /** [144] Texte der Hinweise (Benachrichtigungen). */
       notices: () => string[];
+      /** [277] Rendering mit Ersatz-Cycles (acht Samples à 250 ms, Farbverlauf als Bild): macht den Dialog im Browser durchspielbar. */
+      fakeRender: () => void;
       /** [173] Linien einer Klasse (z. B. "door-lintel") im Grundriss der aktiven Ebene (alle Kategorien, 1:50, Detailgrad der Anzeige). */
       planLines: (cls: string) => number;
       /** [173] Modelldarstellung der aktiven Ebene (Feld `modelViewOptionId`). */
@@ -65,8 +69,8 @@ declare global {
       planFillColors: () => Record<string, number>;
       /** [272] Öffnungs-Ids im Grundriss der aktiven Ebene (alle Klassen, 1:100). */
       planOpeningIds: () => string[];
-      /** [271] Umbau: Filter und Etappe der aktiven Ebene, Zeichen-Status, Status je Wand. */
-      renovation: () => { filter: string | null; phase: string | null; draw: string; walls: Record<string, string> };
+      /** [271] Umbau: Filter und Etappe der aktiven Ebene, Zeichen-Status, Status je Wand; [274] neuer Aufbau je Wand („type“ = Sanierungstyp, sonst Typ-Id, leer = keiner). */
+      renovation: () => { filter: string | null; phase: string | null; draw: string; walls: Record<string, string>; buildUp: Record<string, string> };
       /** [272] Varianten: Kombination der aktiven Ebene, Zeichen-Variante, Variante je Element (`set/option`, leer = Hauptmodell), Sätze. */
       designOptions: () => { level: Record<string, string>; combination: string | null; combinations: string[]; draw: string | null; elements: Record<string, string>; sets: string[] };
       /** [272] Grundriss der aktiven Ebene wie auf dem Bildschirm (mit Bearbeitungsvariante): Wände und grau gezeichnete Wände (ids); dazu derselbe Grundriss für den Druck. */
@@ -152,6 +156,7 @@ export function installTestHooks(): void {
       return g?.shape === "dimension" ? g.pts.map((p) => ({ x: p.x, y: p.y })) : [];
     },
     notices: () => getState().notifications.map((n) => n.message),
+    fakeRender: () => fakeRender(),
     planLines: (cls) => {
       const s = getState();
       const codes = new Set<string>();
@@ -230,6 +235,7 @@ export function installTestHooks(): void {
         phase: l?.renovationPhase ?? null,
         draw: s.drawRenovation.status,
         walls: Object.fromEntries(s.project.walls.map((w) => [w.id, w.renovation?.status ?? "existing"])),
+        buildUp: Object.fromEntries(s.project.walls.map((w) => [w.id, w.renovation?.newTypeId ?? (w.renovation?.renovated ? "type" : "")])),
       };
     },
     context: () =>
@@ -430,4 +436,38 @@ export function installTestHooks(): void {
       return { start: { ...st.start }, center: st.center ? { ...st.center } : null, hole0: hole ? { ...hole } : null, lines };
     },
   };
+}
+
+/** [277] Ersatz für das eingebaute Cycles: acht Samples, abbrechbar, am Ende ein kleines PNG (Farbverlauf). */
+function fakeRender(): void {
+  const gradientPng = async (w: number, h: number): Promise<Uint8Array> => {
+    const c = document.createElement("canvas");
+    c.width = w;
+    c.height = h;
+    const g = c.getContext("2d")!;
+    const grad = g.createLinearGradient(0, 0, w, h);
+    grad.addColorStop(0, "#cfe3f5");
+    grad.addColorStop(1, "#e8d9c4");
+    g.fillStyle = grad;
+    g.fillRect(0, 0, w, h);
+    const blob = await new Promise<Blob>((res) => c.toBlob((b) => res(b!), "image/png"));
+    return new Uint8Array(await blob.arrayBuffer());
+  };
+  renderJob.overrideDeps({
+    cyclesAvailable: async () => true,
+    renderWithCycles: async (_project, req, hooks = {}) => {
+      const t0 = Date.now();
+      const status = (stage: "scene" | "start" | "render" | "tonemap" | "done", sample: number) =>
+        hooks.onStatus?.({ stage, fraction: sample / req.samples, sample, samples: req.samples, elapsedMs: Date.now() - t0, etaMs: stage === "render" && sample > 1 ? (req.samples - sample) * 250 : null });
+      status("scene", 0);
+      await new Promise((r) => setTimeout(r, 200));
+      for (let s = 1; s <= req.samples; s++) {
+        if (hooks.signal?.aborted) throw new CyclesCancelled();
+        status("render", s);
+        await new Promise((r) => setTimeout(r, 250));
+      }
+      if (hooks.signal?.aborted) throw new CyclesCancelled();
+      return { png: await gradientPng(Math.min(req.width, 640), Math.min(req.height, 360)), width: req.width, height: req.height, millis: Date.now() - t0 };
+    },
+  });
 }
