@@ -5,6 +5,7 @@
 import type { Doc3d, Project, ViewSnapshot } from "../model/types";
 import { documentFor } from "../core/document";
 import { lineEndsCode } from "../model/lineEnds";
+import { storedChoice } from "../model/designOptions";
 import { decodePlanBuf } from "./planBuf";
 import { lazyPlan } from "./planLazy";
 import { visibilityArgs } from "./toSection";
@@ -55,6 +56,6 @@ export function isDoc3dSnapshot(snap: Pick<ViewSnapshot, "viewType">): boolean {
 /** 3D-Dokument eines Ausschnitts (Kern: `sheet_viewports::doc3d_buf`): `doc3d`, sonst sein Blickwinkel `view3d`. */
 export function snapshotAxoPlan(project: Project, snap: ViewSnapshot, visibleCodes: Set<string>, scaleDenominator: number, mono = true, designOptions?: Record<string, string> | null): Plan | null {
   // [272] Variantenkombination des Ausschnitts bzw. Viewports.
-  const opts = designOptions ?? snap.designOptions;
+  const opts = designOptions ?? storedChoice(project, snap);
   return generateAxoPlan(project, { view: snap.view3d, ...(snap.doc3d ?? {}), visibleCodes, scaleDenominator, mono, ...(opts && Object.keys(opts).length ? { designOptions: opts } : {}) });
 }

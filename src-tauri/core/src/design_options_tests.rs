@@ -392,13 +392,13 @@ fn blatt_viewport_mit_eigener_kombination() {
     let snap: ViewSnapshot = serde_json::from_value(json!({"id": "s", "name": "EG", "activeLevelId": "eg", "viewType": "grundriss", "scaleDenominator": 100, "detail": "mittel", "layerVisibility": {}, "drawingVisibility": {}})).unwrap_or_default();
     let mut vp = LayoutViewport::default();
     vp.design_options = Some([("dach".to_string(), "b".to_string())].into());
-    let s2 = crate::sheet_viewports::viewport_snapshot(&snap, &vp);
+    let s2 = crate::sheet_viewports::viewport_snapshot(&p, &snap, &vp);
     assert_eq!(s2.design_options.as_ref().unwrap()["dach"], "b");
     let q = crate::sheet_viewports::snapshot_project(&p, &s2);
     let l = q.drawing_levels.iter().find(|l| l.id == "eg").unwrap();
     assert_eq!(l.design_options.as_ref().unwrap()["dach"], "b");
     // Ohne eigene Wahl unverändert (geliehen).
-    assert!(matches!(crate::sheet_viewports::viewport_snapshot(&snap, &LayoutViewport::default()), std::borrow::Cow::Borrowed(_)));
+    assert!(matches!(crate::sheet_viewports::viewport_snapshot(&p, &snap, &LayoutViewport::default()), std::borrow::Cow::Borrowed(_)));
 }
 
 #[test]
@@ -435,4 +435,229 @@ fn robust_bei_unsinn() {
     many["walls"][0]["designOption"] = json!({"set": "s0", "option": "b"});
     let pm = project(&many);
     assert!(Combination::all(&pm).len() <= MAX_COMPARE);
+}
+
+// ── Benannte Kombinationen ([272] Nachtrag) ─────────────────────────────────────────────────────────
+
+/// Fixture mit zweitem Satz „Fassade“ (X = Haupt, Y: Wand W1) und zwei benannten Kombinationen:
+/// „Studie 1“ = Dachform A (Fassade fehlt ⇒ Hauptvariante X), „Studie 2“ = Dachform B + Fassade Y.
+fn fixture_k() -> Value {
+    let mut v = fixture();
+    v["designOptionSets"].as_array_mut().unwrap().push(json!({"id": "fas", "name": "Fassade", "options": [{"id": "x", "name": "X"}, {"id": "y", "name": "Y"}], "primary": "x"}));
+    v["walls"][0]["designOption"] = json!({"set": "fas", "option": "y"});
+    v["designOptionCombinations"] = json!([
+        {"id": "k1", "name": "Studie 1: Flachdach", "choices": {"dach": "a"}},
+        {"id": "k2", "name": "Studie 2: Satteldach + Y", "choices": {"dach": "b", "fas": "y"}},
+    ]);
+    v
+}
+
+fn level_with(v: &mut Value, id: &str, f: impl Fn(&mut Value)) {
+    for l in v["drawingLevels"].as_array_mut().unwrap() {
+        if l["id"] == id {
+            f(l);
+        }
+    }
+}
+
+#[test]
+fn kombination_rangfolge_und_fehlende_saetze() {
+    let p = project(&fixture_k());
+    let k1 = find_combination(&p, "k1").unwrap();
+    // Fehlender Satz „fas“ ⇒ Hauptvariante X.
+    assert_eq!(combination_choice(&p, k1).choice, BTreeMap::from([("dach".to_string(), "a".to_string()), ("fas".to_string(), "x".to_string())]));
+    assert_eq!(find_combination(&p, "studie 2: satteldach + y").unwrap().id, "k2", "auch nach Name");
+    // Unbekannte Variante in einer Kombination ⇒ Hauptvariante.
+    let mut v = fixture_k();
+    v["designOptionCombinations"][0]["choices"] = json!({"dach": "gibtsnicht"});
+    let q = project(&v);
+    assert_eq!(combination_choice(&q, find_combination(&q, "k1").unwrap()).choice["dach"], "a");
+    // Kombination gilt vollständig und geht der freien Wahl desselben Objekts vor; unbekannter Verweis ⇒ freie Wahl.
+    let free: BTreeMap<String, String> = [("dach".to_string(), "b".to_string())].into();
+    assert_eq!(stored_choice(&p, Some("k1"), Some(&free)).unwrap()["dach"], "a");
+    assert_eq!(stored_choice(&p, Some("weg"), Some(&free)).unwrap()["dach"], "b");
+    assert_eq!(stored_choice(&p, None, Some(&free)), Some(free.clone()));
+    assert_eq!(stored_choice(&p, None, None), None);
+    // Ebene: Kombination k2 ⇒ W9 (Dach B) sichtbar, W2 (A) weg, W1 (Fassade Y) sichtbar.
+    let mut v = fixture_k();
+    level_with(&mut v, "eg", |l| {
+        l["designOptionCombination"] = json!("k2");
+        l["designOptions"] = json!({"dach": "a"});
+    });
+    let q = project(&v);
+    let pr = plan_with(&q, json!({}));
+    assert!(has_wall(&pr, "W9") && !has_wall(&pr, "W2") && has_wall(&pr, "W1"), "Kombination vor freier Wahl");
+    // Die Anfrage geht der Kombination der Ebene vor.
+    let pr = plan_with(&q, json!({"designOptions": "Dachform=A"}));
+    assert!(has_wall(&pr, "W2") && !has_wall(&pr, "W9") && has_wall(&pr, "W1"));
+    // Kombination k1: Fassade fehlt ⇒ Hauptvariante X ⇒ W1 (Y) fehlt.
+    level_with(&mut v, "eg", |l| l["designOptionCombination"] = json!("k1"));
+    let pr = plan_with(&project(&v), json!({}));
+    assert!(has_wall(&pr, "W2") && !has_wall(&pr, "W1"));
+    // Gelöschte/unbekannte Kombination: freie Wahl der Ebene (A).
+    level_with(&mut v, "eg", |l| l["designOptionCombination"] = json!("weg"));
+    let pr = plan_with(&project(&v), json!({}));
+    assert!(has_wall(&pr, "W2") && !has_wall(&pr, "W9"));
+}
+
+#[test]
+fn kombination_in_vorlage_ausschnitt_und_viewport() {
+    let p = project(&fixture_k());
+    let snap: ViewSnapshot = serde_json::from_value(json!({"id": "s", "name": "EG", "activeLevelId": "eg", "viewType": "grundriss", "scaleDenominator": 100, "detail": "mittel", "layerVisibility": {}, "drawingVisibility": {}, "designOptionCombination": "k1", "designOptions": {"dach": "b"}})).unwrap_or_default();
+    // Ausschnitt: k1 vor freier Wahl; Viewport k2 darüber.
+    let mut vp = LayoutViewport::default();
+    vp.design_option_combination = Some("k2".into());
+    let s2 = crate::sheet_viewports::viewport_snapshot(&p, &snap, &vp);
+    assert_eq!(s2.design_options.as_ref().unwrap()["dach"], "b");
+    assert_eq!(s2.design_options.as_ref().unwrap()["fas"], "y");
+    assert!(s2.design_option_combination.is_none(), "aufgelöst, kein zweiter Verweis");
+    let q = crate::sheet_viewports::snapshot_project(&p, &s2);
+    assert_eq!(level_choice(&q, "eg").unwrap()["dach"], "b");
+    assert!(q.drawing_levels.iter().find(|l| l.id == "eg").unwrap().design_option_combination.is_none());
+    // Nur Ausschnitt: k1 (Fassade fehlt ⇒ Hauptvariante X), die freie Wahl des Ausschnitts wird übergangen.
+    let s3 = crate::sheet_viewports::viewport_snapshot(&p, &snap, &LayoutViewport::default());
+    let args = crate::sheet_viewports::viewport_args(&p, &s3, 100.0, false);
+    let c = Combination::resolve(&p, &[], &args.design_options);
+    assert_eq!((c.choice["dach"].as_str(), c.choice["fas"].as_str()), ("a", "x"));
+    // Vorlage mit Kombination ersetzt die freie Wahl der Ebene.
+    let mut v = fixture_k();
+    level_with(&mut v, "eg", |l| l["designOptions"] = json!({"dach": "b"}));
+    v["viewTemplates"] = json!([{"id": "vt", "name": "T", "designOptionCombination": "k1"}]);
+    let q = project(&v);
+    let t = &q.view_templates.as_ref().unwrap()[0];
+    let lv = crate::sheet_viewports::level_with_template(q.drawing_levels.iter().find(|l| l.id == "eg").unwrap(), t);
+    assert_eq!(stored_choice(&q, lv.design_option_combination.as_deref(), lv.design_options.as_ref()).unwrap()["dach"], "a");
+    // Vorlage ohne eigene Wahl: die der Ebene bleibt.
+    let t0: ViewTemplate = serde_json::from_value(json!({"id": "t0", "name": "T0"})).unwrap_or_default();
+    let lv = crate::sheet_viewports::level_with_template(q.drawing_levels.iter().find(|l| l.id == "eg").unwrap(), &t0);
+    assert_eq!(lv.design_options.as_ref().unwrap()["dach"], "b");
+}
+
+#[test]
+fn varianten_loeschen_bereinigt_kombinationen() {
+    // Variante B löschen: „Studie 2“ verliert die Wahl für „dach“ (⇒ Hauptvariante), „fas“ bleibt; ein Undo-Schritt.
+    let mut d = crate::document::Document::from_json(&fixture_k().to_string()).unwrap();
+    let before = d.to_json();
+    let ops = root_ops(&d, "designOptionDeleteOps", json!({"set": "dach", "option": "b"}));
+    apply(&mut d, &ops);
+    let p = project(&serde_json::from_str(&d.to_json()).unwrap());
+    let k2 = find_combination(&p, "k2").unwrap();
+    assert!(!k2.choices.contains_key("dach") && k2.choices["fas"] == "y", "{:?}", k2.choices);
+    assert_eq!(find_combination(&p, "k1").unwrap().choices["dach"], "a");
+    d.undo().unwrap();
+    assert_eq!(d.to_json(), before, "ein Undo-Schritt");
+    // Satz „fas“ löschen: beide Kombinationen ohne den Satz.
+    let ops = root_ops(&d, "designOptionDeleteOps", json!({"set": "fas"}));
+    apply(&mut d, &ops);
+    let p = project(&serde_json::from_str(&d.to_json()).unwrap());
+    assert!(combinations(&p).iter().all(|c| !c.choices.contains_key("fas")));
+    assert_eq!(combinations(&p).len(), 2, "Kombinationen bleiben");
+    d.undo().unwrap();
+    // Übernehmen von „dach“: Satz weg, Kombinationen ohne ihn.
+    let ops = root_ops(&d, "designOptionAcceptOps", json!({"set": "dach", "option": "a"}));
+    apply(&mut d, &ops);
+    assert!(combinations(&project(&serde_json::from_str(&d.to_json()).unwrap())).iter().all(|c| !c.choices.contains_key("dach")));
+    d.undo().unwrap();
+    assert_eq!(d.to_json(), before);
+}
+
+#[test]
+fn kombination_loeschen_raeumt_verweise_auf() {
+    let mut v = fixture_k();
+    level_with(&mut v, "eg", |l| {
+        l["designOptionCombination"] = json!("k2");
+        l["designOptions"] = json!({"dach": "a"});
+    });
+    v["viewSnapshots"] = json!([{"id": "s", "name": "EG", "activeLevelId": "eg", "viewType": "grundriss", "scaleDenominator": 100, "detail": "mittel", "layerVisibility": {}, "drawingVisibility": {}, "designOptionCombination": "k2"}]);
+    v["layouts"] = json!([{"id": "L", "name": "Blatt", "viewports": [{"id": "vp", "snapshotId": "s", "xMm": 0, "yMm": 0, "widthMm": 100, "heightMm": 100, "designOptionCombination": "k2"}, {"id": "vp2", "snapshotId": "s", "xMm": 0, "yMm": 0, "widthMm": 100, "heightMm": 100, "designOptionCombination": "k1"}]}]);
+    let mut d = crate::document::Document::from_json(&v.to_string()).unwrap();
+    let before = d.to_json();
+    let ops = root_ops(&d, "designOptionCombinationDeleteOps", json!({"id": "k2"}));
+    apply(&mut d, &ops);
+    let p = d.project().unwrap().clone();
+    assert!(find_combination(&p, "k2").is_none());
+    let l = p.drawing_levels.iter().find(|l| l.id == "eg").unwrap();
+    assert!(l.design_option_combination.is_none());
+    assert_eq!(l.design_options.as_ref().unwrap()["dach"], "a", "freie Wahl gilt wieder");
+    assert!(p.view_snapshots.as_ref().unwrap()[0].design_option_combination.is_none());
+    let vps = &p.layouts.as_ref().unwrap()[0].viewports;
+    assert!(vps[0].design_option_combination.is_none() && vps[1].design_option_combination.as_deref() == Some("k1"));
+    d.undo().unwrap();
+    assert_eq!(d.to_json(), before);
+    assert!(root_ops(&d, "designOptionCombinationDeleteOps", json!({"id": "nix"})).is_empty());
+}
+
+#[test]
+fn vergleich_je_gespeicherter_kombination() {
+    let p = project(&fixture_k());
+    let rows = compare(&p, None, None);
+    assert_eq!(rows.len(), 2, "gespeicherte Kombinationen, nicht das Kreuzprodukt (4)");
+    assert_eq!(rows[0].label, "Studie 1: Flachdach");
+    assert_eq!(rows[0].combination.as_deref(), Some("k1"));
+    assert_eq!(rows[0].detail, "Dachform A, Fassade X");
+    assert!(rows[0].primary && !rows[1].primary);
+    assert_eq!(rows[1].label, "Studie 2: Satteldach + Y");
+    assert_ne!(rows[0].hnf, rows[1].hnf, "R1 zählt nur in A");
+    // Alle Kombinationen: 4, Zeilentitel = Wahl als Text.
+    let all = compare_scope(&p, None, None, true);
+    assert_eq!(all.len(), 4);
+    assert!(all.iter().all(|r| r.combination.is_none()));
+    assert_eq!(all[0].label, "Dachform A, Fassade X");
+    // Abfrage und CSV: Name als Zeilentitel.
+    let q: Value = serde_json::from_str(&crate::queries::run(&p, "designOptionCompare", &[], "").unwrap()).unwrap();
+    assert_eq!(q.as_array().unwrap().len(), 2);
+    let q: Value = serde_json::from_str(&crate::queries::run(&p, "designOptionCompare", &[], r#"{"all": true}"#).unwrap()).unwrap();
+    assert_eq!(q.as_array().unwrap().len(), 4);
+    let csv: String = serde_json::from_str(&crate::queries::run(&p, "designOptionCompare", &[], r#"{"head": ["Kombination","GF","HNF","GV","Fussabdruck","AZ","ÜZ","Kosten"]}"#).unwrap()).unwrap();
+    assert!(csv.lines().nth(1).unwrap().starts_with("Studie 1: Flachdach;"), "{csv}");
+    assert_eq!(csv.lines().count(), 3);
+    // Ohne gespeicherte Kombinationen wie bisher.
+    assert_eq!(compare(&project(&fixture()), None, None).len(), 2);
+}
+
+#[test]
+fn kennzahlen_je_kombination_ueber_anfrage() {
+    // Kennzahlen mit der Wahl einer Kombination als Anfrage = Zeile des Vergleichs.
+    let p = project(&fixture_k());
+    let k2 = find_combination(&p, "k2").unwrap();
+    let spec = combination_choice(&p, k2).choice.iter().map(|(a, b)| format!("{a}={b}")).collect::<Vec<_>>().join(",");
+    let via_req = crate::queries::run(&p, "kennzahlen", &[], &json!({"designOptions": spec}).to_string()).unwrap();
+    let rows = compare(&p, None, None);
+    let k: Value = serde_json::from_str(&via_req).unwrap();
+    assert!((k["hnf"].as_f64().unwrap() - rows[1].hnf).abs() < 1e-9, "{} / {}", k["hnf"], rows[1].hnf);
+}
+
+#[test]
+fn robust_bei_kombinationen_unsinn() {
+    let mut v = fixture_k();
+    v["designOptionCombinations"] = json!([{}, {"id": "k1"}, {"id": "k1", "name": "doppelt", "choices": {"nix": "y", "dach": "gibtsnicht"}}, {"id": "k3"}]);
+    level_with(&mut v, "eg", |l| l["designOptionCombination"] = json!("k1"));
+    let p = project(&v);
+    let _ = plan_with(&p, json!({}));
+    let _ = compare(&p, None, None);
+    let _ = compare_scope(&p, None, None, true);
+    let d = crate::document::Document::from_json(&v.to_string()).unwrap();
+    for t in ["{}", r#"{"id": 5}"#, r#"{"id": "k1"}"#] {
+        let _ = crate::queries::run_root(&d.lookup(), "designOptionCombinationDeleteOps", t);
+    }
+    assert!(crate::queries::run_root(&d.lookup(), "designOptionCombinationDeleteOps", "kaputt").is_err());
+}
+
+/// Die typisierte Sicht des Dokuments folgt jeder Op auf ein Wurzelfeld: `Project::set_field` kennt alle Felder der Fixture
+/// (sonst landete z. B. `designOptionCombinations` nach einer Op in `extra` und die Ableitungen sähen die alte Fassung).
+#[test]
+fn set_field_kennt_alle_wurzelfelder() {
+    let v = fixture_k();
+    for (k, val) in v.as_object().unwrap() {
+        let mut q = Project::default();
+        q.set_field(k, Some(val)).unwrap();
+        assert!(!q.extra.0.contains_key(k), "set_field ohne Zweig für „{k}“");
+    }
+    // Op auf Kombinationen wirkt auf die typisierte Sicht (auch nach Undo).
+    let mut d = crate::document::Document::from_json(&v.to_string()).unwrap();
+    assert_eq!(d.project().unwrap().design_option_combinations.as_ref().unwrap().len(), 2);
+    apply(&mut d, &[json!({"kind": "setField", "key": "designOptionCombinations", "value": [{"id": "k9", "name": "Neu", "choices": {}}]})]);
+    assert_eq!(d.project().unwrap().design_option_combinations.as_ref().unwrap()[0].id, "k9");
+    d.undo().unwrap();
+    assert_eq!(d.project().unwrap().design_option_combinations.as_ref().unwrap()[0].id, "k1");
 }

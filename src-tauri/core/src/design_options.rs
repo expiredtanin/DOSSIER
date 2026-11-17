@@ -216,9 +216,41 @@ impl Combination {
     }
 }
 
-/// Gespeicherte Kombination einer Ebene (über die verknüpfte Vorlage hat sie schon `level_with_template`).
-pub fn level_choice<'a>(p: &'a Project, level_id: &str) -> Option<&'a BTreeMap<String, String>> {
-    p.floor(level_id).and_then(|l| l.design_options.as_ref())
+/// Gespeicherte Wahl einer Ebene ([`stored_choice`]; über die verknüpfte Vorlage hat sie schon `level_with_template`).
+pub fn level_choice(p: &Project, level_id: &str) -> Option<BTreeMap<String, String>> {
+    p.floor(level_id).and_then(|l| stored_choice(p, l.design_option_combination.as_deref(), l.design_options.as_ref()))
+}
+
+// ── Benannte Kombinationen ([272] Nachtrag, Archicad „Design Option Combinations“) ───────────────────────────────
+
+/// Benannte Variantenkombinationen des Projekts.
+pub fn combinations(p: &Project) -> &[DesignOptionCombination] {
+    p.design_option_combinations.as_deref().unwrap_or(&[])
+}
+
+/// Kombination nach Id, sonst nach Name (ohne Gross-/Kleinschreibung).
+pub fn find_combination<'a>(p: &'a Project, key: &str) -> Option<&'a DesignOptionCombination> {
+    let key = key.trim();
+    let low = key.to_lowercase();
+    combinations(p).iter().find(|c| c.id == key).or_else(|| combinations(p).iter().find(|c| c.name.trim().to_lowercase() == low))
+}
+
+/// Vollständige Wahl einer benannten Kombination: je Satz die gespeicherte Variante, sonst (fehlender Satz, gelöschte
+/// Variante) die Hauptvariante.
+pub fn combination_choice(p: &Project, c: &DesignOptionCombination) -> Combination {
+    Combination::resolve(p, &[&c.choices], &[])
+}
+
+/// **Rangfolge der gespeicherten Wahl eines Objekts** (Ebene, Vorlage, Ausschnitt, Viewport): Verweist es auf eine
+/// vorhandene benannte Kombination (`designOptionCombination`, Id), gilt diese vollständig — fehlende Sätze zeigen die
+/// Hauptvariante — und die freie Wahl `designOptions` desselben Objekts wird übergangen. Sonst (kein oder unbekannter
+/// Verweis) gilt die freie Wahl je Satz. Zwischen den Objekten bleibt es bei der bisherigen Reihenfolge (Hauptvarianten <
+/// Ebene < Vorlage < Ausschnitt < Viewport < Anfrage; spätere gehen vor). `None` = keine Wahl gespeichert.
+pub fn stored_choice(p: &Project, combination: Option<&str>, free: Option<&BTreeMap<String, String>>) -> Option<BTreeMap<String, String>> {
+    if let Some(c) = combination.filter(|s| !s.is_empty()).and_then(|id| combinations(p).iter().find(|c| c.id == id)) {
+        return Some(combination_choice(p, c).choice);
+    }
+    free.cloned()
 }
 
 /// Das Projekt in einer Kombination (Elemente anderer Varianten fehlen; ohne Wirkung geliehen).
@@ -239,7 +271,12 @@ pub fn project_in<'a>(p: &'a Project, c: &Combination) -> std::borrow::Cow<'a, P
 pub struct CompareRow {
     /// Satz-Id → Varianten-Id.
     pub choice: BTreeMap<String, String>,
+    /// Zeilentitel: Name der benannten Kombination, sonst die Wahl als Text („Dachform B“).
     pub label: String,
+    /// Id der benannten Kombination; fehlt bei Zeilen aus dem Kreuzprodukt.
+    pub combination: Option<String>,
+    /// Die Wahl je Satz als Text („Dachform B, Fassade A“).
+    pub detail: String,
     pub primary: bool,
     pub gf: f64,
     pub hnf: f64,
@@ -251,20 +288,45 @@ pub struct CompareRow {
     pub cost: f64,
 }
 
-/// [272] Kennzahlen und Kosten je Kombination (Hauptkombination zuerst); `filter`/`phase`: Umbau-Zustand.
+/// [272] Kennzahlen und Kosten je Kombination; `filter`/`phase`: Umbau-Zustand. Zeilen: die gespeicherten benannten
+/// Kombinationen (Name als Zeilentitel, Reihenfolge des Projekts); ohne gespeicherte Kombination alle Kombinationen
+/// der Sätze (Hauptkombination zuerst).
 pub fn compare(p: &Project, filter: Option<&str>, phase: Option<&str>) -> Vec<CompareRow> {
+    compare_scope(p, filter, phase, false)
+}
+
+/// Wie [`compare`]; `all` = immer alle Kombinationen der Sätze (Kreuzprodukt, höchstens [`MAX_COMPARE`]).
+pub fn compare_scope(p: &Project, filter: Option<&str>, phase: Option<&str>, all: bool) -> Vec<CompareRow> {
     if sets(p).is_empty() {
         return Vec::new();
     }
     let prim = Combination::primary(p);
-    Combination::all(p)
-        .into_iter()
-        .map(|c| {
+    let rows: Vec<(Option<&DesignOptionCombination>, Combination)> = if all || combinations(p).is_empty() {
+        Combination::all(p).into_iter().map(|c| (None, c)).collect()
+    } else {
+        combinations(p).iter().take(MAX_COMPARE).map(|c| (Some(c), combination_choice(p, c))).collect()
+    };
+    rows.into_iter()
+        .map(|(named, c)| {
             let q = crate::renovation::project_in_view(p, filter, phase, &c);
             let k = crate::kennzahlen::compute(&q);
             let cost = crate::kosten::estimate(&q);
             let num = |x: f64| if x.is_finite() { x } else { 0.0 };
-            CompareRow { label: c.label(p), primary: c == prim, gf: num(k.gf), hnf: num(k.hnf), gv: num(k.gv), footprint: num(k.footprint), az: k.az.filter(|x| x.is_finite()), uez: k.uez.filter(|x| x.is_finite()), cost: num(cost.gross), choice: c.choice }
+            let detail = c.label(p);
+            CompareRow {
+                label: named.map_or_else(|| detail.clone(), |n| n.name.clone()),
+                combination: named.map(|n| n.id.clone()),
+                detail,
+                primary: c == prim,
+                gf: num(k.gf),
+                hnf: num(k.hnf),
+                gv: num(k.gv),
+                footprint: num(k.footprint),
+                az: k.az.filter(|x| x.is_finite()),
+                uez: k.uez.filter(|x| x.is_finite()),
+                cost: num(cost.gross),
+                choice: c.choice,
+            }
         })
         .collect()
 }
@@ -324,25 +386,8 @@ fn set_list(root: &Map<String, Value>) -> Vec<Value> {
     arr(root, "designOptionSets").to_vec()
 }
 
-/// Gespeicherte Kombinationen (Ebenen, Vorlagen, Ausschnitte, Layout-Viewports) ohne den Satz `set` bzw. ohne die
-/// Variante `option` des Satzes (`None` = alle seine Varianten).
-fn clear_choices(root: &Map<String, Value>, set: &str, option: Option<&str>, ops: &mut Vec<Value>) {
-    let fix = |v: &Value| -> Option<Value> {
-        let m = v.get("designOptions")?.as_object()?;
-        let cur = m.get(set)?.as_str();
-        if option.is_some_and(|o| cur != Some(o)) {
-            return None;
-        }
-        let mut obj = v.as_object()?.clone();
-        let mut next = m.clone();
-        next.shift_remove(set);
-        if next.is_empty() {
-            obj.shift_remove("designOptions");
-        } else {
-            obj.insert("designOptions".into(), Value::Object(next));
-        }
-        Some(Value::Object(obj))
-    };
+/// Ops: `fix` auf Ebenen, Vorlagen, Ausschnitte und Layout-Viewports (Träger einer gespeicherten Wahl) anwenden.
+fn map_holders(root: &Map<String, Value>, fix: impl Fn(&Value) -> Option<Value>, ops: &mut Vec<Value>) {
     for key in ["drawingLevels", "viewTemplates", "viewSnapshots"] {
         for v in arr(root, key) {
             if let Some(n) = fix(v) {
@@ -360,6 +405,64 @@ fn clear_choices(root: &Map<String, Value>, set: &str, option: Option<&str>, ops
             ops.push(json!({"kind": "replace", "collection": "layouts", "entity": Value::Object(obj)}));
         }
     }
+}
+
+/// Gespeicherte Wahlen (Ebenen, Vorlagen, Ausschnitte, Layout-Viewports) und benannte Kombinationen ohne den Satz `set`
+/// bzw. ohne die Variante `option` des Satzes (`None` = alle seine Varianten). Eine benannte Kombination ohne den Satz
+/// zeigt dort die Hauptvariante.
+fn clear_choices(root: &Map<String, Value>, set: &str, option: Option<&str>, ops: &mut Vec<Value>) {
+    let without = |m: &Map<String, Value>| -> Option<Map<String, Value>> {
+        let cur = m.get(set)?.as_str();
+        if option.is_some_and(|o| cur != Some(o)) {
+            return None;
+        }
+        let mut next = m.clone();
+        next.shift_remove(set);
+        Some(next)
+    };
+    map_holders(
+        root,
+        |v| {
+            let next = without(v.get("designOptions")?.as_object()?)?;
+            let mut obj = v.as_object()?.clone();
+            if next.is_empty() {
+                obj.shift_remove("designOptions");
+            } else {
+                obj.insert("designOptions".into(), Value::Object(next));
+            }
+            Some(Value::Object(obj))
+        },
+        ops,
+    );
+    for c in arr(root, "designOptionCombinations") {
+        let Some(next) = c.get("choices").and_then(Value::as_object).and_then(&without) else { continue };
+        let mut obj = c.as_object().cloned().unwrap_or_default();
+        obj.insert("choices".into(), Value::Object(next));
+        ops.push(json!({"kind": "replace", "collection": "designOptionCombinations", "entity": Value::Object(obj)}));
+    }
+}
+
+/// [272] Benannte Kombination löschen: sie verschwindet, Verweise an Ebenen, Vorlagen, Ausschnitten und Viewports fallen weg
+/// (dort gilt wieder die freie Wahl bzw. die Hauptvarianten). Ein Undo-Schritt.
+pub fn delete_combination_ops(root: &Map<String, Value>, id: &str) -> Vec<Value> {
+    let mut ops = Vec::new();
+    if !arr(root, "designOptionCombinations").iter().any(|c| id_of(c) == Some(id)) {
+        return ops;
+    }
+    map_holders(
+        root,
+        |v| {
+            if v.get("designOptionCombination").and_then(Value::as_str) != Some(id) {
+                return None;
+            }
+            let mut obj = v.as_object()?.clone();
+            obj.shift_remove("designOptionCombination");
+            Some(Value::Object(obj))
+        },
+        &mut ops,
+    );
+    ops.push(json!({"kind": "remove", "collection": "designOptionCombinations", "ids": [id]}));
+    ops
 }
 
 /// Elemente des Satzes `set` je Liste: (Liste, Element) für jede Variante, die `keep(option)` nicht behält.

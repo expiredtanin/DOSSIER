@@ -67,7 +67,7 @@ declare global {
       /** [271] Umbau: Filter und Etappe der aktiven Ebene, Zeichen-Status, Status je Wand. */
       renovation: () => { filter: string | null; phase: string | null; draw: string; walls: Record<string, string> };
       /** [272] Varianten: Kombination der aktiven Ebene, Zeichen-Variante, Variante je Element (`set/option`, leer = Hauptmodell), Sätze. */
-      designOptions: () => { level: Record<string, string>; draw: string | null; elements: Record<string, string>; sets: string[] };
+      designOptions: () => { level: Record<string, string>; combination: string | null; combinations: string[]; draw: string | null; elements: Record<string, string>; sets: string[] };
       /** [193] Gefüllte Flächen (Füllfarbe gesetzt) im Grundriss der aktiven Ebene (alle Kategorien, 1:100); bei 0 ist nichts Gefülltes mehr zu sehen. */
       planFills: () => number;
       /** [193] Höhe (z) des ersten Gelände-Netz-Punkts. */
@@ -202,7 +202,7 @@ export function installTestHooks(): void {
       for (const list of [s.project.walls, s.project.openings, s.project.roofs, s.project.ceilings, s.project.rooms]) {
         for (const e of (list ?? []) as { id: string; designOption?: { set: string; option: string } }[]) elements[e.id] = e.designOption ? `${e.designOption.set}/${e.designOption.option}` : "";
       }
-      return { level: l?.designOptions ?? {}, draw: s.drawDesignOption ? `${s.drawDesignOption.set}/${s.drawDesignOption.option}` : null, elements, sets: (s.project.designOptionSets ?? []).map((x) => x.id) };
+      return { level: l?.designOptions ?? {}, combination: l?.designOptionCombination ?? null, combinations: (s.project.designOptionCombinations ?? []).map((x) => x.name), draw: s.drawDesignOption ? `${s.drawDesignOption.set}/${s.drawDesignOption.option}` : null, elements, sets: (s.project.designOptionSets ?? []).map((x) => x.id) };
     },
     renovation: () => {
       const s = getState();

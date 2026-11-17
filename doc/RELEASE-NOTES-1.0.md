@@ -97,7 +97,10 @@ in `doc/KURZANLEITUNG.md`):
     neue Elemente zeichnen in …, Zuweisen, Kopieren in …, Übernehmen), Objekt-Info „Variante“, Befehle `variante`/`variantekopieren`,
     Varianten-Vergleich (GF, HNF, GV, AZ, ÜZ, Kosten je Kombination, CSV) in der Flächenbilanz; ein Viewport kann dieselbe Ansicht in
     anderer Kombination zeigen (Titelzusatz mit Variantenname). CLI `--options "Dachform=B"`, Vergleich `designoptions`. Beispiel:
-    *Datei → Neu aus Vorlage: Beispiel Varianten*.
+    *Datei → Neu aus Vorlage: Beispiel Varianten*. **Benannte Kombinationen (wie Archicad „Design Option Combinations“):** Wahl je Satz
+    unter einem Namen speichern („Studie 1: Satteldach + Bandfenster“), einer Ansicht oder einem Viewport zuweisen (Zustand „Aktuell“ /
+    „Eigene“, Name im Chip der Statusleiste und als Titelzusatz im Blatt), Löschen bereinigt Verweise; Varianten-Vergleich je gespeicherter
+    Kombination (CSV, Blatt-Tabelle „Variantenvergleich“); CLI `--combination "Name"`.
 
 **Erker und Wiederanlauf (15.11.).** Fenster in Bogenwänden (Erker) sitzen in Schnitt und Ansicht wie im 3D und im Grundriss auf der Sehne; die Sehnen-Zonen
 gelten über alle Geschosse, der Deckenrand folgt der Sehne ([216]). Raumstempel rücken in Lücken zwischen den Linien, bevor sie schrumpfen; die Baulinie setzt vor

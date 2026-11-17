@@ -9,7 +9,7 @@ import type { Layout, LayoutOrientation, LayoutPaperFormat, MasterLayout, Projec
 import { core } from "../engine/coreWasm";
 import { t } from "../i18n/translate";
 import { findSnapshot, resolveTitleBlock, resolveViewportScale, sheetSizeMm } from "./layoutModel";
-import { combinationSuffix } from "./designOptions";
+import { combinationNameFor, combinationSuffix, designOptionCombinations, resolveCombination, storedChoice } from "./designOptions";
 
 export interface PosterTemplate {
   /** Schlüssel in `MasterLayout.template`. */
@@ -123,7 +123,14 @@ export function viewportScaleLabel(
 export function viewportVariantSuffix(project: Project, vp: Layout["viewports"][number]): string {
   if (!project.designOptionSets?.length) return "";
   const snap = findSnapshot(project, vp.snapshotId);
-  return combinationSuffix(project, { ...(snap?.designOptions ?? {}), ...(vp.designOptions ?? {}) });
+  // Verweist der Viewport (sonst der Ausschnitt) auf eine benannte Kombination, ist ihr Name der Titelzusatz (Hauptkombination: leer).
+  const ref = vp.designOptionCombination ?? (vp.designOptions && Object.keys(vp.designOptions).length ? undefined : snap?.designOptionCombination);
+  const named = ref ? designOptionCombinations(project).find((c) => c.id === ref) : undefined;
+  if (named) return named.name;
+  const m = { ...(snap ? storedChoice(project, snap) : {}), ...(storedChoice(project, vp) ?? {}) };
+  const sfx = combinationSuffix(project, m);
+  // Gleiche Wahl wie eine gespeicherte Kombination: deren Name statt der Aufzählung.
+  return sfx ? (combinationNameFor(project, resolveCombination(project, m)) ?? sfx) : "";
 }
 
 /** [272] Titelzusatz unter einem Viewport ohne Massstabsangaben des Masters: nur die Varianten; `null` ohne Abweichung. */

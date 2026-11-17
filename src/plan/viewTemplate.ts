@@ -13,6 +13,11 @@ export const TEMPLATE_LEVEL_KEYS = ["cutHeight", "viewTop", "viewBottom", "viewD
 export function templateLevelPatch(t: ViewTemplate): Partial<DrawingLevel> {
   const out: Record<string, unknown> = {};
   for (const k of TEMPLATE_LEVEL_KEYS) if (t[k] !== undefined) out[k] = t[k];
+  // [272] Variantenwahl der Vorlage (benannte Kombination oder freie Wahl) ersetzt die der Ebene als Ganzes (Kern `level_with_template`).
+  if (t.designOptions !== undefined || t.designOptionCombination !== undefined) {
+    out.designOptions = t.designOptions;
+    out.designOptionCombination = t.designOptionCombination;
+  }
   return out as Partial<DrawingLevel>;
 }
 

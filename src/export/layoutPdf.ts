@@ -234,7 +234,7 @@ async function renderPage(
       const template = snapshotTemplate(project, snap);
       // [266] 3D-Ausschnitt: 3D-Dokument aus dem Kern (`viewportSnapshotPlan`).
       // [272] Variantenkombination des Ausschnitts/Viewports.
-      const dopts = viewportDesignOptions(snap, vp);
+      const dopts = viewportDesignOptions(project, snap, vp);
       const planOf = (visible: Set<string>) => (isDoc3dSnapshot(snap) ? viewportSnapshotPlan(project, snap, visible, scaleN, true, vp) : viewportLevelPlan(project, snap.activeLevelId, visible, snap.detail, scaleN, true, snapshotMono(project, snap), ruleIds, template, snap.modelViewOptionId, dopts));
       // [208] Eigene Bildmitte (Plakat): Ausschnitt um die Mitte; was darüber hinausgeht, schneidet der Rahmen ab.
       const centered = viewportCenterBounds(vp, scaleN);

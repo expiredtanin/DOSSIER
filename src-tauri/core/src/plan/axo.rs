@@ -628,7 +628,7 @@ impl AxoArgs {
 
 /// [266] Abfrage-Text (`axoPlan`) eines 3D-Dokuments: Einstellungen des Ausschnitts (`doc3d`, sonst sein Blickwinkel
 /// `view3d`) und die Klassen, die er ausblendet (`invisible`, wie beim Schnitt-Viewport).
-pub fn snapshot_text(snap: &ViewSnapshot, invisible: &[String]) -> String {
+pub fn snapshot_text(p: &Project, snap: &ViewSnapshot, invisible: &[String]) -> String {
     let mut v = snap.doc3d.as_ref().and_then(|d| serde_json::to_value(d).ok()).unwrap_or_else(|| serde_json::json!({}));
     if let Some(o) = v.as_object_mut() {
         if !o.contains_key("view") {
@@ -637,8 +637,8 @@ pub fn snapshot_text(snap: &ViewSnapshot, invisible: &[String]) -> String {
         o.insert("hasVis".into(), serde_json::Value::Bool(true));
         o.insert("invisible".into(), serde_json::to_value(invisible).unwrap_or_default());
         // [272] Variantenkombination des Ausschnitts.
-        if let Some(m) = snap.design_options.as_ref().filter(|m| !m.is_empty()) {
-            o.insert("designOptions".into(), serde_json::to_value(m).unwrap_or_default());
+        if let Some(m) = crate::design_options::stored_choice(p, snap.design_option_combination.as_deref(), snap.design_options.as_ref()).filter(|m| !m.is_empty()) {
+            o.insert("designOptions".into(), serde_json::to_value(&m).unwrap_or_default());
         }
     }
     v.to_string()

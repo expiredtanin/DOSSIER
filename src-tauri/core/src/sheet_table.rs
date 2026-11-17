@@ -146,6 +146,18 @@ const SITE_PROOF: &[Col] = &[
     cc("ok", "siteProof.col.ok", 1.35, true),
 ];
 
+/// [272] Variantenvergleich (je gespeicherte Kombination, sonst je Kombination der Sätze).
+const DESIGN_OPTION_COMPARE: &[Col] = &[
+    c("combination", "designOption.compare.combination", 3.4, false, true),
+    c("gf", "designOption.compare.col.gf", 1.3, true, true),
+    c("hnf", "designOption.compare.col.hnf", 1.3, true, true),
+    c("gv", "designOption.compare.col.gv", 1.3, true, true),
+    c("footprint", "designOption.compare.footprint", 1.4, true, false),
+    c("az", "designOption.compare.col.az", 1.0, true, false),
+    c("uez", "designOption.compare.col.uez", 1.0, true, false),
+    c("cost", "designOption.compare.cost", 1.9, true, true),
+];
+
 /// [158] Raumbuch-Spalten, die nur erscheinen, wenn ein Raum eine Dachschräge hat.
 const SLOPE_COLS: &[&str] = &["heightMin", "heightMean", "areaUnder1", "area1To15"];
 
@@ -220,6 +232,7 @@ pub fn catalog(source: LayoutTableSource) -> &'static [Col] {
         LayoutTableSource::RoomBook => ROOM_BOOK,
         LayoutTableSource::Costs => COSTS,
         LayoutTableSource::SiteProof => SITE_PROOF,
+        LayoutTableSource::DesignOptionCompare => DESIGN_OPTION_COMPARE,
     }
 }
 
@@ -227,7 +240,7 @@ pub fn catalog(source: LayoutTableSource) -> &'static [Col] {
 pub fn catalog_json() -> Value {
     let one = |s: &[Col]| s.iter().map(|k| json!({"id": k.id, "key": k.key, "numeric": k.numeric, "default": k.default})).collect::<Vec<_>>();
     json!({
-        "sources": {"openings": one(OPENINGS), "areas": one(AREAS), "rooms": one(ROOMS), "elements": one(ELEMENTS), "earthworks": one(EARTHWORKS), "roomBook": one(ROOM_BOOK), "costs": one(COSTS), "siteProof": one(SITE_PROOF)},
+        "sources": {"openings": one(OPENINGS), "areas": one(AREAS), "rooms": one(ROOMS), "elements": one(ELEMENTS), "earthworks": one(EARTHWORKS), "roomBook": one(ROOM_BOOK), "costs": one(COSTS), "siteProof": one(SITE_PROOF), "designOptionCompare": one(DESIGN_OPTION_COMPARE)},
         "valueKeys": VALUE_KEYS,
     })
 }
@@ -365,6 +378,7 @@ fn data_of(p: &Project, t: &LayoutTable, lb: &Labels) -> Data {
         LayoutTableSource::RoomBook => room_book_data(p, lb),
         LayoutTableSource::Costs => costs_data(p, lb),
         LayoutTableSource::SiteProof => site_proof_data(p, lb),
+        LayoutTableSource::DesignOptionCompare => design_option_compare_data(p),
     }
 }
 
@@ -425,6 +439,19 @@ fn costs_data(p: &Project, lb: &Labels) -> Data {
     rows.push(vec![txt("Z"), txt(pct("costs.row.vat", r.vat_pct)), empty(), empty(), empty(), chf(r.vat)]);
     rows.push(vec![empty(), txt(format!("{} (±{} %)", lb.get("costs.row.gross"), to_fixed(r.accuracy_pct, 0))), empty(), empty(), empty(), chf(r.gross)]);
     Data { rows, sloped: false, total_last: true }
+}
+
+/// [272] Variantenvergleich: Kennzahlen und Kosten je gespeicherte Kombination (Name als Zeilentitel), ohne gespeicherte
+/// Kombination je Kombination der Sätze; ohne Variantensätze leer.
+fn design_option_compare_data(p: &Project) -> Data {
+    let rows = crate::design_options::compare(p, None, None)
+        .into_iter()
+        .map(|r| {
+            let opt = |x: Option<f64>| x.map_or_else(|| txt("–"), |x| num(x, 2));
+            vec![txt(r.label), num(r.gf, 1), num(r.hnf, 1), num(r.gv, 0), num(r.footprint, 1), opt(r.az), opt(r.uez), Cell::Num { n: Some(r.cost), d: 0, g: true }]
+        })
+        .collect();
+    Data { rows, sloped: false, total_last: false }
 }
 
 /// [255] Baurecht-Nachweis: eine Zeile je Prüfgrösse; fehlende Vorgabe/Projektwert als „—“. Ohne Angaben aus dem
@@ -887,6 +914,31 @@ mod tests {
         assert_eq!(crate::area_report::fmt_num(-999.0, 0, true), "-999");
         assert_eq!(crate::area_report::fmt_num(-1000.0, 0, true), "-1'000");
     }
+    /// [272] Variantenvergleich als Blatt-Tabelle: eine Zeile je gespeicherte Kombination (Name als Zeilentitel), sonst je Kombination der Sätze.
+    #[test]
+    fn variantenvergleich_tabelle() {
+        let mut t = table("v", None);
+        t.source = LayoutTableSource::DesignOptionCompare;
+        let mut p = project(0, vec![t]);
+        let opt = |id: &str, name: &str| DesignOption { id: id.into(), name: name.into(), ..Default::default() };
+        p.design_option_sets = Some(vec![DesignOptionSet { id: "dach".into(), name: "Dachform".into(), options: vec![opt("a", "A"), opt("b", "B")], primary: Some("a".into()), ..Default::default() }]);
+        p.walls[0].design_option = Some(DesignOptionRef { set: "dach".into(), option: "b".into(), ..Default::default() });
+        let lb = Labels::parse(&json!({"designOption.compare.combination": "Kombination"}));
+        let r = render(&p, &p.layouts.as_ref().unwrap()[0], &lb);
+        assert_eq!(r[0].total, 2, "ohne gespeicherte Kombinationen: alle (A, B)");
+        let tx = texts(&r[0]);
+        assert!(tx.contains(&"Kombination".to_string()) && tx.contains(&"Dachform A".to_string()) && tx.contains(&"Dachform B".to_string()), "{tx:?}");
+        p.design_option_combinations = Some(vec![DesignOptionCombination { id: "k".into(), name: "Studie 1".into(), choices: [("dach".to_string(), "b".to_string())].into(), ..Default::default() }]);
+        let r = render(&p, &p.layouts.as_ref().unwrap()[0], &lb);
+        assert_eq!(r[0].total, 1);
+        assert!(texts(&r[0]).contains(&"Studie 1".to_string()));
+        // Ohne Variantensätze: leere Tabelle, nie Panic.
+        p.design_option_sets = None;
+        assert_eq!(render(&p, &p.layouts.as_ref().unwrap()[0], &lb)[0].total, 0);
+        assert_eq!(serde_json::to_value(LayoutTableSource::DesignOptionCompare).unwrap(), "designOptionCompare");
+        assert_eq!(catalog_json()["sources"]["designOptionCompare"].as_array().unwrap().len(), 8);
+    }
+
     /// [255] Baurecht-Nachweis als Blatt-Tabelle: ohne Vorgaben überall „—“, mit Vorgabe zulässig/Projekt/Reserve/ja-nein.
     #[test]
     fn baurecht_nachweis_tabelle() {

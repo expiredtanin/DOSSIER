@@ -7,7 +7,11 @@ import {
   acceptDesignOptionOps, addDesignOptionOps, addDesignOptionSetOps, assignDesignOptionOps, combinationLabel, combinationSpec, combinationSuffix, commonDesignOption,
   compareDesignOptions, compareDesignOptionsCsv, copyToDesignOptionOps, deleteDesignOptionOps, levelCombination, nextOptionName, parseCombination, projectWithCombination,
   resolveCombination, setLevelCombinationOps, setPrimaryOptionOps, showsInCombination,
+  addCombinationOps, assignCombinationOps, combinationChoice, deleteCombinationOps, designOptionCombinations, levelCombinationState, renameCombinationOps, setCombinationChoiceOps,
+  storedChoice,
 } from "./designOptions";
+import { viewportDesignOptions } from "../plan/viewportPlan";
+import { viewportVariantSuffix } from "./posterTemplates";
 import { buildVariantenSampleProject } from "./sampleProjectVarianten";
 import { sampleProject } from "./sampleProject";
 import { generatePlan } from "../plan/generatePlan";
@@ -89,13 +93,13 @@ describe("[272] Varianten", () => {
 
   it("Vergleich: alle Kombinationen, Hauptkombination zuerst, CSV mit Kopf", () => {
     const p = buildVariantenSampleProject();
-    const rows = withDocument(p, () => compareDesignOptions(p));
+    const rows = withDocument(p, () => compareDesignOptions(p, "", true));
     expect(rows).toHaveLength(4);
     expect(rows[0].primary).toBe(true);
     expect(rows[0].label).toBe("Dachform A Flachdach, Fassade A Lochfenster");
     expect(new Set(rows.map((r) => r.gv)).size).toBeGreaterThan(1);
     expect(rows.every((r) => Number.isFinite(r.cost) && r.cost > 0)).toBe(true);
-    const csv = withDocument(p, () => compareDesignOptionsCsv(p, ["Kombination", "GF", "HNF", "GV", "Fussabdruck", "AZ", "ÜZ", "Kosten"]));
+    const csv = withDocument(p, () => compareDesignOptionsCsv(p, ["Kombination", "GF", "HNF", "GV", "Fussabdruck", "AZ", "ÜZ", "Kosten"], "", true));
     expect(csv.split("\n")[0]).toBe("Kombination;GF;HNF;GV;Fussabdruck;AZ;ÜZ;Kosten");
     expect(csv.trim().split("\n")).toHaveLength(5);
     expect(compareDesignOptions(sampleProject)).toEqual([]);
@@ -133,5 +137,99 @@ describe("[272] Varianten", () => {
     expect(q.designOptionSets?.find((s) => s.id === "dachform")?.primary).toBe("b");
     expect(q.drawingLevels.find((l) => l.id === "eg")?.designOptions).toEqual({ fassade: "b" });
     expect(projectWithCombination(p, {})).toBe(p);
+  });
+});
+
+describe("[272] Benannte Variantenkombinationen", () => {
+  it("Beispiel hat zwei Kombinationen; Vergleich je Kombination (Name als Zeilentitel), alle über `all`", () => {
+    const p = buildVariantenSampleProject();
+    expect(designOptionCombinations(p).map((c) => c.name)).toEqual(["Studie 1 Flachdach/Lochfenster", "Studie 2 Satteldach/Bandfenster"]);
+    const rows = withDocument(p, () => compareDesignOptions(p));
+    expect(rows.map((r) => r.label)).toEqual(["Studie 1 Flachdach/Lochfenster", "Studie 2 Satteldach/Bandfenster"]);
+    expect(rows[0].primary).toBe(true);
+    expect(rows[1].detail).toBe("Dachform B Satteldach, Fassade B Bandfenster");
+    expect(rows[0].gv).not.toBeCloseTo(rows[1].gv, 3);
+    const csv = withDocument(p, () => compareDesignOptionsCsv(p, ["Kombination", "GF", "HNF", "GV", "Fussabdruck", "AZ", "ÜZ", "Kosten"]));
+    expect(csv.split("\n")[1].startsWith("Studie 1 Flachdach/Lochfenster;")).toBe(true);
+    expect(withDocument(p, () => compareDesignOptions(p, "", true))).toHaveLength(4);
+  });
+
+  it("Speichern, umbenennen, Wahl ändern, löschen (ein Undo-Schritt im Kern); fehlende Sätze zeigen die Hauptvariante", () => {
+    const p0 = buildVariantenSampleProject();
+    const base = { ...p0, designOptionCombinations: undefined } as typeof p0;
+    delete (base as { designOptionCombinations?: unknown }).designOptionCombinations;
+    const { ops, id } = addCombinationOps(base, "Studie A", { dachform: "b" });
+    let p = applyOps(base, ops);
+    expect(p.designOptionCombinations?.[0]).toMatchObject({ id, name: "Studie A", choices: { dachform: "b", fassade: "a" } });
+    p = applyOps(p, renameCombinationOps(p, id, "Satteldach"));
+    p = applyOps(p, setCombinationChoiceOps(p, id, "fassade", "b"));
+    expect(combinationChoice(p, p.designOptionCombinations![0])).toEqual({ dachform: "b", fassade: "b" });
+    expect(setCombinationChoiceOps(p, id, "fassade", "zz")).toHaveLength(0);
+    // Eine Kombination mit fehlendem Satz zeigt dort die Hauptvariante.
+    const miss = { ...p, designOptionCombinations: [{ id: "m", name: "M", choices: { dachform: "b" } }] };
+    expect(combinationChoice(miss, miss.designOptionCombinations[0])).toEqual({ dachform: "b", fassade: "a" });
+    // Zuweisen an eine Ebene, danach Löschen räumt den Verweis auf.
+    p = applyOps(p, assignCombinationOps(p, "eg", id));
+    const eg = () => p.drawingLevels.find((l) => l.id === "eg")!;
+    expect(eg().designOptionCombination).toBe(id);
+    expect(levelCombinationState(p, eg())).toMatchObject({ kind: "named", name: "Satteldach", assigned: true });
+    p = withDocument(p, () => applyOps(p, deleteCombinationOps(p, id)));
+    expect(p.designOptionCombinations).toEqual([]);
+    expect(eg()).not.toHaveProperty("designOptionCombination");
+  });
+
+  it("Rangfolge: Kombination vor freier Wahl; „Eigene“ nach Änderung; gleiche Wahl erkennt den Namen", () => {
+    const p0 = buildVariantenSampleProject();
+    // Studie 2 zugewiesen ⇒ Dach B und Fassade B im Grundriss/Wahl.
+    let p = applyOps(p0, assignCombinationOps(p0, "eg", "studie-2"));
+    expect(storedChoice(p, p.drawingLevels.find((l) => l.id === "eg"))).toEqual({ dachform: "b", fassade: "b" });
+    expect(levelCombination(p, p.drawingLevels.find((l) => l.id === "eg"))).toEqual({ dachform: "b", fassade: "b" });
+    const ids = planIds(p, "eg");
+    expect(ids.has("O-band")).toBe(true);
+    expect(ids.has("O2")).toBe(false);
+    // Wahl der zugewiesenen Kombination ändern: der Grundriss folgt sofort (kein Cache-Rest).
+    const edited = applyOps(p, setCombinationChoiceOps(p, "studie-2", "fassade", "a"));
+    expect(planIds(edited, "eg").has("O2")).toBe(true);
+    expect(planIds(edited, "eg").has("O-band")).toBe(false);
+    // Eine Wahländerung löst den Verweis: „Eigene“ (Fassade A + Dach B passt zu keiner gespeicherten Kombination).
+    p = applyOps(p, setLevelCombinationOps(p, "eg", "fassade", "a"));
+    const l = p.drawingLevels.find((x) => x.id === "eg")!;
+    expect(l).not.toHaveProperty("designOptionCombination");
+    expect(l.designOptions).toEqual({ dachform: "b" });
+    expect(levelCombinationState(p, l).kind).toBe("custom");
+    // Zurück zur Wahl von Studie 2 ohne Verweis: gleicher Name (nicht zugewiesen).
+    p = applyOps(p, setLevelCombinationOps(p, "eg", "fassade", "b"));
+    expect(levelCombinationState(p, p.drawingLevels.find((x) => x.id === "eg")!)).toMatchObject({ kind: "named", name: "Studie 2 Satteldach/Bandfenster", assigned: false });
+    // Verweis lösen behält die Wahl als freie Wahl.
+    const q = applyOps(p0, [...assignCombinationOps(p0, "eg", "studie-2"), ...[]]);
+    const r = applyOps(q, assignCombinationOps(q, "eg", null));
+    expect(r.drawingLevels.find((x) => x.id === "eg")?.designOptions).toEqual({ dachform: "b", fassade: "b" });
+    // Unbekannte Kombination: keine Ops.
+    expect(assignCombinationOps(p0, "eg", "weg")).toHaveLength(0);
+  });
+
+  it("Viewport/Ausschnitt: Kombination, Titelzusatz = Kombinationsname", () => {
+    const p = buildVariantenSampleProject();
+    const snap = { id: "s", name: "EG", activeLevelId: "eg" } as never;
+    expect(viewportDesignOptions(p, snap, { designOptionCombination: "studie-2" })).toEqual({ dachform: "b", fassade: "b" });
+    // Viewport vor Ausschnitt; freie Wahl des Viewports wird bei Kombination übergangen.
+    expect(viewportDesignOptions(p, { designOptionCombination: "studie-1" }, { designOptions: { dachform: "b" }, designOptionCombination: "studie-1" })).toEqual({ dachform: "a", fassade: "a" });
+    const q = { ...p, viewSnapshots: [{ id: "s", name: "EG", activeLevelId: "eg", designOptionCombination: "studie-1" }] } as never as typeof p;
+    const vp = { id: "v", snapshotId: "s", designOptionCombination: "studie-2" } as never;
+    expect(viewportVariantSuffix(q, vp)).toBe("Studie 2 Satteldach/Bandfenster");
+    expect(viewportVariantSuffix(q, { id: "v2", snapshotId: "s" } as never)).toBe("Studie 1 Flachdach/Lochfenster");
+    expect(viewportVariantSuffix({ ...q, viewSnapshots: [{ id: "s", name: "EG", activeLevelId: "eg" }] } as never, { id: "v2", snapshotId: "s" } as never)).toBe("");
+    expect(viewportVariantSuffix(q, { id: "v3", snapshotId: "s", designOptions: { dachform: "b", fassade: "b" } } as never)).toBe("Studie 2 Satteldach/Bandfenster");
+  });
+
+  it("CLI-Kombination: benannte Kombination wird Hauptkombination, Verweise lösen sich auf", () => {
+    const p0 = buildVariantenSampleProject();
+    const p = applyOps(p0, assignCombinationOps(p0, "eg", "studie-2"));
+    const q = projectWithCombination(p, combinationChoice(p, p.designOptionCombinations![0]));
+    expect(q.designOptionSets?.map((s) => s.primary)).toEqual(["a", "a"]);
+    expect(q.drawingLevels.find((l) => l.id === "eg")).not.toHaveProperty("designOptionCombination");
+    expect(q.drawingLevels.find((l) => l.id === "eg")).not.toHaveProperty("designOptions");
+    const q2 = projectWithCombination(p, { dachform: "a" });
+    expect(q2.drawingLevels.find((l) => l.id === "eg")?.designOptions).toEqual({ fassade: "b" });
   });
 });

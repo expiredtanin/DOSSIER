@@ -1967,6 +1967,11 @@ pub struct DrawingLevel {
     #[serde(rename = "designOptions", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub design_options: Option<std::collections::BTreeMap<String, String>>,
+    /// [272] Benannte Variantenkombination (`Project.designOptionCombinations`, Id). Gesetzt und gültig ⇒ sie gilt vollständig
+    /// (fehlende Sätze ⇒ Hauptvariante) und die freie Wahl `designOptions` desselben Objekts wird übergangen; sonst die freie Wahl.
+    #[serde(rename = "designOptionCombination", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub design_option_combination: Option<String>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -2066,6 +2071,11 @@ pub struct ViewTemplate {
     #[serde(rename = "designOptions", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub design_options: Option<std::collections::BTreeMap<String, String>>,
+    /// [272] Benannte Variantenkombination (`Project.designOptionCombinations`, Id). Gesetzt und gültig ⇒ sie gilt vollständig
+    /// (fehlende Sätze ⇒ Hauptvariante) und die freie Wahl `designOptions` desselben Objekts wird übergangen; sonst die freie Wahl.
+    #[serde(rename = "designOptionCombination", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub design_option_combination: Option<String>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -3087,6 +3097,20 @@ pub struct DesignOptionSet {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub primary: Option<String>,
+    #[serde(flatten)]
+    #[ts(skip)]
+    pub extra: Extra,
+}
+
+/// [272] Eine benannte Variantenkombination (z. B. „Studie 1: Satteldach + Bandfenster“): je Satz die gewählte Variante.
+/// Sätze, die fehlen (oder deren Variante gelöscht wurde), zeigen ihre Hauptvariante.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct DesignOptionCombination {
+    pub id: String,
+    pub name: String,
+    /// Satz-Id → Varianten-Id.
+    pub choices: std::collections::BTreeMap<String, String>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -5759,6 +5783,11 @@ pub struct ViewSnapshot {
     #[serde(rename = "designOptions", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub design_options: Option<std::collections::BTreeMap<String, String>>,
+    /// [272] Benannte Variantenkombination (`Project.designOptionCombinations`, Id). Gesetzt und gültig ⇒ sie gilt vollständig
+    /// (fehlende Sätze ⇒ Hauptvariante) und die freie Wahl `designOptions` desselben Objekts wird übergangen; sonst die freie Wahl.
+    #[serde(rename = "designOptionCombination", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub design_option_combination: Option<String>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -5962,6 +5991,11 @@ pub struct LayoutViewport {
     #[serde(rename = "designOptions", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub design_options: Option<std::collections::BTreeMap<String, String>>,
+    /// [272] Benannte Variantenkombination (`Project.designOptionCombinations`, Id). Gesetzt und gültig ⇒ sie gilt vollständig
+    /// (fehlende Sätze ⇒ Hauptvariante) und die freie Wahl `designOptions` desselben Objekts wird übergangen; sonst die freie Wahl.
+    #[serde(rename = "designOptionCombination", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub design_option_combination: Option<String>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -5995,6 +6029,9 @@ pub enum LayoutTableSource {
     /// [255] Baurecht-Nachweis (AZ/ÜZ/Höhen: zulässig, Projekt, Reserve, erfüllt).
     #[serde(rename = "siteProof")]
     SiteProof,
+    /// [272] Variantenvergleich: Kennzahlen und Kosten je gespeicherte Variantenkombination.
+    #[serde(rename = "designOptionCompare")]
+    DesignOptionCompare,
     #[serde(other)]
     #[ts(skip)]
     Unknown,
@@ -6862,6 +6899,10 @@ pub struct Project {
     #[serde(rename = "designOptionSets", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub design_option_sets: Option<Vec<DesignOptionSet>>,
+    /// [272] Benannte Variantenkombinationen (Archicad „Design Option Combinations“): je Satz genau eine Variante.
+    #[serde(rename = "designOptionCombinations", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub design_option_combinations: Option<Vec<DesignOptionCombination>>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -7738,6 +7779,24 @@ impl Project {
             "geoAnchor" => {
                 self.geo_anchor = match v {
                     Some(v) => <Option<ProjectGeoAnchor>>::deserialize(v).map_err(|e| e.to_string())?,
+                    None => Default::default(),
+                };
+            }
+            "renovation" => {
+                self.renovation = match v {
+                    Some(v) => <Option<RenovationSettings>>::deserialize(v).map_err(|e| e.to_string())?,
+                    None => Default::default(),
+                };
+            }
+            "designOptionSets" => {
+                self.design_option_sets = match v {
+                    Some(v) => <Option<Vec<DesignOptionSet>>>::deserialize(v).map_err(|e| e.to_string())?,
+                    None => Default::default(),
+                };
+            }
+            "designOptionCombinations" => {
+                self.design_option_combinations = match v {
+                    Some(v) => <Option<Vec<DesignOptionCombination>>>::deserialize(v).map_err(|e| e.to_string())?,
                     None => Default::default(),
                 };
             }

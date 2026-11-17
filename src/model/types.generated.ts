@@ -678,6 +678,17 @@ export type CustomPalette = {
 /** [272] Eine Variante eines Satzes (z. B. „A Flachdach“). */
 export type DesignOption = { id: string; name: string };
 
+/**
+ * [272] Eine benannte Variantenkombination (z. B. „Studie 1: Satteldach + Bandfenster“): je Satz die gewählte Variante.
+ * Sätze, die fehlen (oder deren Variante gelöscht wurde), zeigen ihre Hauptvariante.
+ */
+export type DesignOptionCombination = {
+  id: string;
+  name: string;
+  /** Satz-Id → Varianten-Id. */
+  choices: { [key in string]: string };
+};
+
 /** [272] Zugehörigkeit eines Elements zu einer Variante (Archicad „Design Options“). */
 export type DesignOptionRef = {
   /** Id des Variantensatzes (`DesignOptionSet.id`). */
@@ -1444,6 +1455,11 @@ export type DrawingLevel = {
   renovationPhase?: string;
   /** [272] Variantenkombination: Satz-Id → Varianten-Id (fehlende Sätze ⇒ Hauptvariante). */
   designOptions?: { [key in string]: string };
+  /**
+   * [272] Benannte Variantenkombination (`Project.designOptionCombinations`, Id). Gesetzt und gültig ⇒ sie gilt vollständig
+   * (fehlende Sätze ⇒ Hauptvariante) und die freie Wahl `designOptions` desselben Objekts wird übergangen; sonst die freie Wahl.
+   */
+  designOptionCombination?: string;
 };
 
 /**
@@ -2168,7 +2184,8 @@ export type LayoutTableSource =
   | "earthworks"
   | "roomBook"
   | "costs"
-  | "siteProof";
+  | "siteProof"
+  | "designOptionCompare";
 
 /**
  * Einfache Textfelder des Titelblocks (Master). Alle optional — leere Felder
@@ -2206,6 +2223,11 @@ export type LayoutViewport = {
    * [272] Variantenkombination des Viewports (über der des Ausschnitts): Satz-Id → Varianten-Id (fehlende Sätze ⇒ Hauptvariante).
    */
   designOptions?: { [key in string]: string };
+  /**
+   * [272] Benannte Variantenkombination (`Project.designOptionCombinations`, Id). Gesetzt und gültig ⇒ sie gilt vollständig
+   * (fehlende Sätze ⇒ Hauptvariante) und die freie Wahl `designOptions` desselben Objekts wird übergangen; sonst die freie Wahl.
+   */
+  designOptionCombination?: string;
 };
 
 /** Linienenden aller Striche im Plan/Schnitt/Ansicht und in den Exporten ([146]); fehlt = flach. */
@@ -3309,6 +3331,10 @@ export type Project = {
    * Kombination ihrer Variante.
    */
   designOptionSets?: Array<DesignOptionSet>;
+  /**
+   * [272] Benannte Variantenkombinationen (Archicad „Design Option Combinations“): je Satz genau eine Variante.
+   */
+  designOptionCombinations?: Array<DesignOptionCombination>;
 };
 
 /** Protokolleintrag einer Publikation ([79]): Datum, Blätter mit Revision, erzeugte Dateien. */
@@ -4463,6 +4489,11 @@ export type ViewSnapshot = {
   renovationPhase?: string;
   /** [272] Variantenkombination: Satz-Id → Varianten-Id (fehlende Sätze ⇒ Hauptvariante). */
   designOptions?: { [key in string]: string };
+  /**
+   * [272] Benannte Variantenkombination (`Project.designOptionCombinations`, Id). Gesetzt und gültig ⇒ sie gilt vollständig
+   * (fehlende Sätze ⇒ Hauptvariante) und die freie Wahl `designOptions` desselben Objekts wird übergangen; sonst die freie Wahl.
+   */
+  designOptionCombination?: string;
 };
 
 /**
@@ -4536,6 +4567,11 @@ export type ViewTemplate = {
   renovationPhase?: string;
   /** [272] Variantenkombination: Satz-Id → Varianten-Id (fehlende Sätze ⇒ Hauptvariante). */
   designOptions?: { [key in string]: string };
+  /**
+   * [272] Benannte Variantenkombination (`Project.designOptionCombinations`, Id). Gesetzt und gültig ⇒ sie gilt vollständig
+   * (fehlende Sätze ⇒ Hauptvariante) und die freie Wahl `designOptions` desselben Objekts wird übergangen; sonst die freie Wahl.
+   */
+  designOptionCombination?: string;
 };
 
 /** Ansichtstyp eines Geschosses (wie in App). */

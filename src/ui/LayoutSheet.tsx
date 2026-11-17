@@ -27,7 +27,7 @@ import type {
   Project,
   Vec2,
 } from "../model/types";
-import { createTable, PX_PER_M, sheetTables, TABLE_SOURCES, tableSourceLabel, viewportSnapshotPlan } from "../core";
+import { createTable, PX_PER_M, sheetTables, storedChoice, TABLE_SOURCES, tableSourceLabel, viewportCombinationPatch, viewportSnapshotPlan } from "../core";
 import type { TableOut } from "../core";
 import { SheetTableHud } from "./SheetTableHud";
 import { isInModalDialog } from "../state/modalScope";
@@ -131,7 +131,7 @@ export function ViewportPlanSvg({
     return () => {
       disposed = true;
     };
-  }, [project, viewport.snapshotId, viewport.widthMm, viewport.heightMm, viewport.scaleDenominator, viewport.center?.x, viewport.center?.y, viewport.designOptions]);
+  }, [project, viewport.snapshotId, viewport.widthMm, viewport.heightMm, viewport.scaleDenominator, viewport.center?.x, viewport.center?.y, viewport.designOptions, viewport.designOptionCombination]);
   // Lage/Grösse über die Attribute des inneren SVG (folgt auch dem Ghost beim Ziehen).
   useEffect(() => {
     if (ref.current) placeInner(ref.current, rect);
@@ -1219,13 +1219,32 @@ export function LayoutSheetPane({
               </span>
             </label>
             {/* [272] Eigene Variantenkombination des Viewports: dieselbe Ansicht in anderer Kombination (Titelzusatz). */}
+            {(project.designOptionCombinations ?? []).length > 0 && (
+              <label className="layout-sheet-hud-row">
+                <span>{t("designOption.combination")}</span>
+                <select
+                  className="res-input"
+                  data-testid="vp-design-option-combination"
+                  value={selectedVp.designOptionCombination ?? ""}
+                  onChange={(e) => handlers.onPatchViewport(selectedVp.id, viewportCombinationPatch(e.target.value))}
+                >
+                  <option value="">{t("designOption.fromSnapshot")}</option>
+                  {(project.designOptionCombinations ?? []).map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             {(project.designOptionSets ?? []).map((s) => (
               <label key={s.id} className="layout-sheet-hud-row">
                 <span>{s.name}</span>
                 <select
                   className="res-input"
                   data-testid={`vp-design-option-${s.id}`}
-                  value={selectedVp.designOptions?.[s.id] ?? ""}
+                  value={(storedChoice(project, selectedVp) ?? {})[s.id] ?? ""}
+                  disabled={!!selectedVp.designOptionCombination}
                   onChange={(e) => {
                     const next = { ...(selectedVp.designOptions ?? {}) };
                     if (e.target.value) next[s.id] = e.target.value;

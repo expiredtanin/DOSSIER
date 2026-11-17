@@ -4,7 +4,7 @@
 
 import { t } from "../i18n";
 import { useStore } from "../state/appStore";
-import { combinationSuffix, designOptionTargets } from "../core";
+import { combinationSuffix, designOptionTargets, levelCombination, levelCombinationState } from "../core";
 
 export function DesignOptionControl() {
   const project = useStore((s) => s.project);
@@ -12,7 +12,10 @@ export function DesignOptionControl() {
   const draw = useStore((s) => s.drawDesignOption);
   if (!project.designOptionSets?.length) return null;
   const level = project.drawingLevels.find((l) => l.id === activeLevelId);
-  const suffix = combinationSuffix(project, level?.designOptions);
+  // Name der benannten Kombination (zugewiesen oder gleiche Wahl), sonst „Eigene: Abweichungen“ bzw. die Hauptvarianten.
+  const state = levelCombinationState(project, level);
+  const diff = combinationSuffix(project, levelCombination(project, level));
+  const suffix = state.kind === "named" ? state.name : diff ? t("designOption.custom", { combination: diff }) : "";
   const drawKey = draw ? `${draw.set}/${draw.option}` : "";
   const drawLabel = designOptionTargets(project).find((x) => x.key === drawKey)?.label ?? t("designOption.main");
   const shown = suffix || t("designOption.primaryCombination");

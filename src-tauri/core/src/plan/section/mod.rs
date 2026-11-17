@@ -136,6 +136,8 @@ pub struct LevelSpec {
     pub renovation_phase: Option<String>,
     /// [272] Variantenkombination der Ebene (`designOptions`: Satz-Id → Varianten-Id).
     pub design_options: Option<std::collections::BTreeMap<String, String>>,
+    /// [272] Benannte Kombination der Ebene (`designOptionCombination`, Id); sie geht `design_options` vor.
+    pub design_option_combination: Option<String>,
 }
 
 impl LevelSpec {
@@ -156,6 +158,7 @@ impl LevelSpec {
             model_view: v.get("modelViewOptionId").and_then(|m| m.as_str()).filter(|m| !m.is_empty()).map(String::from),
             renovation: v.get("renovationFilter").and_then(|m| m.as_str()).filter(|m| !m.is_empty()).map(String::from),
             renovation_phase: v.get("renovationPhase").and_then(|m| m.as_str()).filter(|m| !m.is_empty()).map(String::from),
+            design_option_combination: v.get("designOptionCombination").and_then(|m| m.as_str()).filter(|m| !m.is_empty()).map(String::from),
             design_options: v.get("designOptions").and_then(|m| m.as_object()).map(|m| m.iter().filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_string()))).collect()),
         }
     }

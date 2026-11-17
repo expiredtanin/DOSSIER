@@ -9972,3 +9972,28 @@ body {
 .design-options-panel .kz-parcel select {
   max-width: 170px;
 }
+/* [272] Benannte Variantenkombinationen im Panel „Varianten“ */
+.design-option-combination {
+  border-top: 1px solid var(--border, rgba(128, 128, 128, 0.25));
+  padding: 4px 0;
+}
+.design-option-combination .kz-input[type="text"] {
+  flex: 1;
+  min-width: 0;
+  max-width: none;
+}
+.design-option-combination-set {
+  padding-left: 8px;
+  font-size: 11px;
+}
+.design-options-panel .rm-hint {
+  font-size: 11px;
+  opacity: 0.75;
+}
+.design-option-current-name {
+  font-size: 12px;
+  font-weight: 600;
+  text-align: right;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}

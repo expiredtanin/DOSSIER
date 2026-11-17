@@ -99,7 +99,7 @@ pub fn run(p: &Project, name: &str, args: &[f64], text: &str) -> Result<String, 
         ("designOptionCompare", _) => {
             let v: serde_json::Value = serde_json::from_str(text).unwrap_or_default();
             let s = |k: &str| v.get(k).and_then(|x| x.as_str()).filter(|x| !x.is_empty());
-            let rows = crate::design_options::compare(p, s("renovation"), s("renovationPhase"));
+            let rows = crate::design_options::compare_scope(p, s("renovation"), s("renovationPhase"), v.get("all").and_then(|x| x.as_bool()).unwrap_or(false));
             match v.get("head").and_then(|h| h.as_array()) {
                 Some(h) => json(&crate::design_options::compare_csv(&rows, &h.iter().filter_map(|x| x.as_str().map(String::from)).collect::<Vec<_>>())),
                 None => json(&rows),
@@ -279,6 +279,11 @@ pub fn run_root(lk: &crate::document::Lookup, name: &str, text: &str) -> Result<
                 "designOptionAssignOps" => crate::design_options::assign_ops(root, &sel, target),
                 _ => crate::design_options::copy_ops(root, &sel, target, &s("stamp")),
             })
+        }
+        // [272] Benannte Kombination löschen (`text` = `{"id"}`): samt Verweisen an Ebenen, Vorlagen, Ausschnitten, Viewports.
+        "designOptionCombinationDeleteOps" => {
+            let a: serde_json::Value = serde_json::from_str(text).map_err(|e| format!("{name}: {e}"))?;
+            json(&crate::design_options::delete_combination_ops(root, a.get("id").and_then(|x| x.as_str()).unwrap_or("")))
         }
         "penDeleteOps" => json(&crate::pens::delete_pen_ops(root, text)),
         // Standard-Bibliothek ([100]–[102], `standards.rs`): fehlende Standard-Ressourcen als Ops.

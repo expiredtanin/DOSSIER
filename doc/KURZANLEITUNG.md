@@ -393,10 +393,20 @@ Flachdach/Satteldach und Fassade: Lochfenster/Bandfenster).
   Oder die Befehle `variante` und `variantekopieren` (Ziel z. B. Dachform=B, Variantenname oder Nummer; H = Hauptmodell).
 - **Übernehmen:** „Übernehmen“ bei einer Variante legt ihre Elemente ins Hauptmodell und löscht die übrigen Varianten des Satzes
   samt Elementen (ein Undo-Schritt). Der Papierkorb löscht eine Variante bzw. einen Satz samt Elementen.
+- **Kombinationen (wie in Archicad):** Eine Kombination hat einen Namen und speichert je Satz genau eine Variante (z. B.
+  Studie 2 Satteldach/Bandfenster). Im Panel „Varianten“ zeigt „Aktuell“ die Kombination der Ansicht; eine Wahl, die zu keiner
+  gespeicherten Kombination passt, heisst „Eigene“ und lässt sich mit „Als Kombination speichern …“ unter einem Namen sichern.
+  Je Kombination lässt sich die Wahl je Satz ändern, „Dieser Ansicht zuweisen“ setzt sie auf die aktive Ansicht, das Kreuz löscht sie
+  (nach Rückfrage; die Varianten bleiben). Ein Viewport auf dem Blatt wählt eine Kombination im Feld „Kombination“ und trägt
+  ihren Namen als Titelzusatz. Sätze, die eine Kombination nicht nennt, zeigen die Hauptvariante; wer eine Variante oder einen
+  Satz löscht, bereinigt die Kombinationen im selben Undo-Schritt. Der Chip in der Statusleiste nennt den Kombinationsnamen.
 - **Vergleich:** Panel Flächenbilanz (oder „Vergleich öffnen“ im Panel „Varianten“): der „Varianten-Vergleich“ zeigt GF, HNF,
-  GV, Fussabdruck, AZ, ÜZ und Kosten je Kombination nebeneinander, mit „Vergleich als CSV“.
+  GV, Fussabdruck, AZ, ÜZ und Kosten je gespeicherte Kombination nebeneinander (Name als Zeilentitel; „Alle Kombinationen der Sätze
+  zeigen“ rechnet das ganze Kreuzprodukt), mit „Vergleich als CSV“. Dieselbe Tabelle gibt es als Blatt-Tabelle „Variantenvergleich“
+  (Layout, Tabelle hinzufügen).
 - **Exporte:** DXF, IFC, PDF und Kennzahlen nehmen die Kombination der Ansicht bzw. die Hauptvarianten. Kommandozeile:
-  --options "Dachform=B,Fassade=A" bei allen Ausgaben, dossier-cli … designoptions für den Vergleich (--format csv).
+  --options "Dachform=B,Fassade=A" oder --combination "Studie 1 …" (gespeicherte Kombination) bei allen Ausgaben,
+  dossier-cli … designoptions für den Vergleich der gespeicherten Kombinationen (--format csv, --all für alle).
 
 ---
 

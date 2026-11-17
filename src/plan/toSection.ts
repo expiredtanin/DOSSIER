@@ -89,6 +89,7 @@ export function levelArg(level: DrawingLevel) {
     renovationPhase: level.renovationPhase,
     // [272] Variantenkombination der Ebene (Kern `design_options.rs`, Sichtbarkeit `renovation.rs`).
     designOptions: level.designOptions,
+    designOptionCombination: level.designOptionCombination,
   };
 }
 

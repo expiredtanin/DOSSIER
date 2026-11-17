@@ -5,12 +5,18 @@
 // Satz „Fassade": A Lochfenster (Nordfenster O2 des Demo-Hauses, Hauptvariante), B Bandfenster (O-band, 3.6 m breit).
 // Alles Übrige gehört zum Hauptmodell. Ein eigenes Beispiel, damit die bestehenden Goldens unverändert bleiben.
 
-import type { DesignOptionSet, Opening, Project, Roof } from "./types";
+import type { DesignOptionCombination, DesignOptionSet, Opening, Project, Roof } from "./types";
 import { sampleProject } from "./sampleProject";
 
 export const VARIANTEN_SETS: DesignOptionSet[] = [
   { id: "dachform", name: "Dachform", options: [{ id: "a", name: "A Flachdach" }, { id: "b", name: "B Satteldach" }], primary: "a" },
   { id: "fassade", name: "Fassade", options: [{ id: "a", name: "A Lochfenster" }, { id: "b", name: "B Bandfenster" }], primary: "a" },
+];
+
+/** Zwei benannte Kombinationen (wie Archicads „Design Option Combinations“): Studie 1 = Hauptvarianten, Studie 2 = B + B. */
+export const VARIANTEN_COMBINATIONS: DesignOptionCombination[] = [
+  { id: "studie-1", name: "Studie 1 Flachdach/Lochfenster", choices: { dachform: "a", fassade: "a" } },
+  { id: "studie-2", name: "Studie 2 Satteldach/Bandfenster", choices: { dachform: "b", fassade: "b" } },
 ];
 
 /** Das Varianten-Beispiel (frische Kopie bei jedem Aufruf). */
@@ -31,5 +37,6 @@ export function buildVariantenSampleProject(): Project {
     roofs,
     openings,
     designOptionSets: structuredClone(VARIANTEN_SETS),
+    designOptionCombinations: structuredClone(VARIANTEN_COMBINATIONS),
   };
 }

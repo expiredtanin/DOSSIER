@@ -495,6 +495,15 @@ Raumbuch/IFC/Netz-Exporte (`queries.rs::options_state`: Kombination des JSON-Tex
 Vergleich `designOptionCompare` (Kreuzprodukt, höchstens 24 Kombinationen). Oberfläche: Panel „Varianten“ (`panels/DesignOptionsPanel.tsx`),
 Chip in der Statusleiste, Objekt-Info `DesignOptionField`, Ressourcen-Tab, Befehle `variante`/`variantekopieren`; CLI `--options`.
 
+**Benannte Kombinationen** (Nachtrag): `Project.designOptionCombinations` (`{id, name, choices: Satz-Id → Varianten-Id}`); Ebene, Vorlage,
+Ausschnitt und Viewport tragen zusätzlich `designOptionCombination` (Id). Rangfolge in `design_options::stored_choice`: gültiger Verweis
+gilt vollständig (fehlende Sätze ⇒ Hauptvariante) und übergeht die freie Wahl `designOptions` desselben Objekts; sonst die freie Wahl.
+Zwischen den Objekten wie vorher (Hauptvarianten < Ebene < Vorlage < Ausschnitt < Viewport < Anfrage). Sichtbarkeit weiter nur in
+`renovation::View`. Löschen von Variante/Satz/„Übernehmen“ bereinigt Kombinationen (`clear_choices`), `designOptionCombinationDeleteOps`
+löscht eine Kombination samt Verweisen — je ein Undo-Schritt. Vergleich `design_options::compare` (je gespeicherte Kombination, sonst
+Kreuzprodukt; `compare_scope(.., all)`), Blatt-Tabelle `sheet_table.rs` Quelle `designOptionCompare`; TS: `model/designOptions.ts`
+(`storedChoice`, `assignCombinationOps` …), Panel `DesignOptionsPanel.tsx`; CLI `--combination`.
+
 ---
 
 ## 4. Schnitt

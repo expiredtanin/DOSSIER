@@ -5,7 +5,7 @@
 import type { CoreOp } from "../core/ops";
 import { documentFor } from "../core/document";
 import { patchItem, setField } from "../core/opsBuild";
-import type { DesignOption, DesignOptionRef, DesignOptionSet, DrawingLevel, Project } from "./types";
+import type { DesignOption, DesignOptionCombination, DesignOptionRef, DesignOptionSet, DrawingLevel, Project } from "./types";
 
 /** Listen, deren Elemente einer Variante angehören können (gleich wie `design_options::COLLECTIONS`). */
 export const DESIGN_OPTION_COLLECTIONS = ["walls", "openings", "ceilings", "roofs", "stairs", "columns", "extrudedSolids", "rooms", "drawings2d"] as const;
@@ -40,9 +40,43 @@ export function resolveCombination(project: Project, ...stored: (Combination | u
   return out;
 }
 
-/** Kombination einer Ebene (`DrawingLevel.designOptions` über den Hauptvarianten). */
+/** Benannte Kombinationen des Projekts ([272] Nachtrag, wie Archicads „Design Option Combinations“). */
+export function designOptionCombinations(project: Project): readonly DesignOptionCombination[] {
+  return project.designOptionCombinations ?? [];
+}
+
+/** Vollständige Wahl einer benannten Kombination: je Satz die gespeicherte Variante, sonst (fehlender Satz, gelöschte Variante) die Hauptvariante. */
+export function combinationChoice(project: Project, c: DesignOptionCombination): Combination {
+  return resolveCombination(project, c.choices);
+}
+
+/**
+ * Rangfolge der gespeicherten Wahl eines Objekts (Ebene, Vorlage, Ausschnitt, Viewport; Kern `design_options::stored_choice`):
+ * verweist es auf eine vorhandene benannte Kombination, gilt diese vollständig (fehlende Sätze ⇒ Hauptvariante) und die freie
+ * Wahl `designOptions` desselben Objekts wird übergangen; sonst (kein oder unbekannter Verweis) die freie Wahl; `undefined` ohne Wahl.
+ */
+export function storedChoice(project: Project, holder: { designOptionCombination?: string | null; designOptions?: Combination | null } | null | undefined): Combination | undefined {
+  const c = holder?.designOptionCombination ? designOptionCombinations(project).find((x) => x.id === holder.designOptionCombination) : undefined;
+  if (c) return combinationChoice(project, c);
+  return holder?.designOptions ?? undefined;
+}
+
+/** Kombination einer Ebene (`DrawingLevel`: benannte Kombination bzw. freie Wahl über den Hauptvarianten). */
 export function levelCombination(project: Project, level: DrawingLevel | undefined): Combination {
-  return resolveCombination(project, level?.designOptions);
+  return resolveCombination(project, storedChoice(project, level));
+}
+
+/** Zustand der Kombination einer Ansicht wie in Archicad: benannte Kombination (`named`; auch bei gleicher Wahl wie eine gespeicherte) oder „Eigene“. */
+export type CombinationState = { kind: "named"; id: string; name: string; assigned: boolean } | { kind: "custom" };
+
+export function levelCombinationState(project: Project, level: DrawingLevel | undefined): CombinationState {
+  const ref = level?.designOptionCombination ? designOptionCombinations(project).find((x) => x.id === level.designOptionCombination) : undefined;
+  if (ref) return { kind: "named", id: ref.id, name: ref.name, assigned: true };
+  const cur = levelCombination(project, level);
+  const same = (a: Combination, b: Combination) => Object.keys({ ...a, ...b }).every((k) => a[k] === b[k]);
+  const hit = designOptionCombinations(project).find((c) => same(combinationChoice(project, c), cur));
+  if (hit) return { kind: "named", id: hit.id, name: hit.name, assigned: false };
+  return { kind: "custom" };
 }
 
 /** Lesbarer Name „Dachform B, Fassade A“ (nur Sätze mit Varianten). */
@@ -53,6 +87,12 @@ export function combinationLabel(project: Project, c: Combination): string {
     if (o) parts.push(`${s.name} ${o.name}`.trim());
   }
   return parts.join(", ");
+}
+
+/** Name einer benannten Kombination mit genau dieser Wahl (erste in der Liste); sonst `undefined`. */
+export function combinationNameFor(project: Project, c: Combination): string | undefined {
+  const full = resolveCombination(project, c);
+  return designOptionCombinations(project).find((x) => Object.entries(combinationChoice(project, x)).every(([k, v]) => full[k] === v))?.name;
 }
 
 /** Kurzname nur der Varianten, die von der Hauptvariante abweichen (Titelzusatz im Blatt); leer = Hauptkombination. */
@@ -233,18 +273,90 @@ export function setPrimaryOptionOps(project: Project, setId: string, optionId: s
   return [setField("designOptionSets", sets.map((s) => (s.id === setId ? { ...s, primary: optionId } : s)))];
 }
 
-/** Ops: Kombination der Ebene setzen (eine Variante je Satz; die Hauptvariante wird nicht gespeichert). */
+/** Ops: Wahl der Ebene setzen (eine Variante je Satz; die Hauptvariante wird nicht gespeichert). Verweist die Ebene auf eine benannte
+ * Kombination, wird deren Wahl zur freien Wahl der Ebene (Verweis weg, Zustand „Eigene“) und dann der Satz geändert. */
 export function setLevelCombinationOps(project: Project, levelId: string, setId: string, optionId: string): CoreOp[] {
   const s = designOptionSets(project).find((x) => x.id === setId);
   if (!s || !s.options.some((o) => o.id === optionId)) return [];
   return patchItem(project, "drawingLevels", levelId, (l) => {
-    const m: Combination = { ...(l.designOptions ?? {}) };
+    const m: Combination = { ...freeOf(project, l) };
     if (primaryOption(s) === optionId) delete m[setId];
     else m[setId] = optionId;
-    const next = { ...l, designOptions: m };
-    if (!Object.keys(m).length) delete (next as { designOptions?: Combination }).designOptions;
+    return withFree(l, m);
+  });
+}
+
+/** Freie Wahl ohne Hauptvarianten, die die Ebene wirksam zeigt (benannte Kombination aufgelöst). */
+function freeOf(project: Project, l: DrawingLevel): Combination {
+  const eff = storedChoice(project, l) ?? {};
+  const prim = resolveCombination(project);
+  const out: Combination = {};
+  for (const [k, v] of Object.entries(eff)) if (prim[k] !== v) out[k] = v;
+  return out;
+}
+
+/** Die Ebene mit freier Wahl `m` und ohne Verweis auf eine benannte Kombination. */
+function withFree(l: DrawingLevel, m: Combination): DrawingLevel {
+  const next = { ...l } as DrawingLevel;
+  delete next.designOptionCombination;
+  if (Object.keys(m).length) next.designOptions = m;
+  else delete next.designOptions;
+  return next;
+}
+
+// ── Benannte Kombinationen ──────────────────────────────────────────────────
+
+/** Ops: Ebene `levelId` zeigt die benannte Kombination `combinationId` (`null` = Verweis lösen: die Wahl bleibt als freie Wahl, „Eigene“). */
+export function assignCombinationOps(project: Project, levelId: string, combinationId: string | null): CoreOp[] {
+  if (combinationId !== null && !designOptionCombinations(project).some((c) => c.id === combinationId)) return [];
+  return patchItem(project, "drawingLevels", levelId, (l) => {
+    if (combinationId === null) return withFree(l, freeOf(project, l));
+    const next = { ...l, designOptionCombination: combinationId } as DrawingLevel;
+    delete next.designOptions;
     return next;
   });
+}
+
+/** Ops: Layout-Viewport-Felder für die Wahl einer Kombination (`""` = wie Ausschnitt): Verweis setzen, freie Wahl des Viewports entfällt. */
+export function viewportCombinationPatch(combinationId: string): { designOptionCombination?: string; designOptions?: undefined } {
+  return combinationId ? { designOptionCombination: combinationId, designOptions: undefined } : { designOptionCombination: undefined };
+}
+
+/** Nächster freier Name „Kombination n“ nach Muster `base`. */
+export function nextCombinationName(project: Project, base: string): string {
+  const used = new Set(designOptionCombinations(project).map((c) => c.name.trim().toLowerCase()));
+  for (let n = designOptionCombinations(project).length + 1; ; n++) {
+    const name = `${base} ${n}`;
+    if (!used.has(name.toLowerCase())) return name;
+  }
+}
+
+/** Ops: neue benannte Kombination `name` mit der Wahl `choices` (ganz aufgelöst gespeichert, je Satz eine Variante). Gibt die neue Id zurück. */
+export function addCombinationOps(project: Project, name: string, choices: Combination): { ops: CoreOp[]; id: string } {
+  const list = designOptionCombinations(project);
+  const id = freeId(list.map((c) => c.id), "komb-");
+  const full = resolveCombination(project, choices);
+  return { ops: [setField("designOptionCombinations", [...list, { id, name: name.trim() || id, choices: full }])], id };
+}
+
+/** Ops: Kombination umbenennen. */
+export function renameCombinationOps(project: Project, id: string, name: string): CoreOp[] {
+  const list = designOptionCombinations(project);
+  if (!list.some((c) => c.id === id)) return [];
+  return [setField("designOptionCombinations", list.map((c) => (c.id === id ? { ...c, name } : c)))];
+}
+
+/** Ops: Wahl eines Satzes in einer benannten Kombination ändern. */
+export function setCombinationChoiceOps(project: Project, id: string, setId: string, optionId: string): CoreOp[] {
+  const list = designOptionCombinations(project);
+  const s = designOptionSets(project).find((x) => x.id === setId);
+  if (!list.some((c) => c.id === id) || !s || !s.options.some((o) => o.id === optionId)) return [];
+  return [setField("designOptionCombinations", list.map((c) => (c.id === id ? { ...c, choices: { ...c.choices, [setId]: optionId } } : c)))];
+}
+
+/** Ops: Kombination löschen samt Verweisen an Ebenen, Vorlagen, Ausschnitten und Viewports (Kern; ein Undo-Schritt). */
+export function deleteCombinationOps(project: Project, id: string): CoreOp[] {
+  return documentFor(project).queryRoot<CoreOp[]>("designOptionCombinationDeleteOps", JSON.stringify({ id }));
 }
 
 // ── Vergleich ───────────────────────────────────────────────────────────────
@@ -252,7 +364,12 @@ export function setLevelCombinationOps(project: Project, levelId: string, setId:
 /** Zeile der Vergleichstabelle (Kern `design_options::CompareRow`). */
 export interface DesignOptionCompareRow {
   choice: Combination;
+  /** Zeilentitel: Name der benannten Kombination, sonst die Wahl als Text. */
   label: string;
+  /** Id der benannten Kombination (fehlt in Zeilen aus dem Kreuzprodukt). */
+  combination?: string | null;
+  /** Wahl je Satz als Text („Dachform B, Fassade A“). */
+  detail: string;
   primary: boolean;
   gf: number;
   hnf: number;
@@ -263,16 +380,20 @@ export interface DesignOptionCompareRow {
   cost: number;
 }
 
-/** Kennzahlen und Kosten je Kombination (Hauptkombination zuerst); `renovation`: Umbau-Zustand (Filter-Id). */
-export function compareDesignOptions(project: Project, renovation = ""): DesignOptionCompareRow[] {
+/**
+ * Kennzahlen und Kosten je gespeicherte benannte Kombination (Name als Zeilentitel); ohne gespeicherte Kombination, oder mit
+ * `all`, je Kombination der Sätze (Hauptkombination zuerst). `renovation`: Umbau-Zustand (Filter-Id).
+ */
+export function compareDesignOptions(project: Project, renovation = "", all = false): DesignOptionCompareRow[] {
   if (!designOptionSets(project).length) return [];
-  return documentFor(project).query<DesignOptionCompareRow[]>("designOptionCompare", [], renovation ? JSON.stringify({ renovation }) : "");
+  const a = { ...(renovation ? { renovation } : {}), ...(all ? { all } : {}) };
+  return documentFor(project).query<DesignOptionCompareRow[]>("designOptionCompare", [], Object.keys(a).length ? JSON.stringify(a) : "");
 }
 
 /** Vergleich als CSV (Semikolon) mit den Spaltenköpfen `head` (übersetzt). */
-export function compareDesignOptionsCsv(project: Project, head: readonly string[], renovation = ""): string {
+export function compareDesignOptionsCsv(project: Project, head: readonly string[], renovation = "", all = false): string {
   if (!designOptionSets(project).length) return "";
-  return documentFor(project).query<string>("designOptionCompare", [], JSON.stringify(renovation ? { renovation, head } : { head }));
+  return documentFor(project).query<string>("designOptionCompare", [], JSON.stringify({ head, ...(renovation ? { renovation } : {}), ...(all ? { all } : {}) }));
 }
 
 /**
@@ -282,12 +403,16 @@ export function compareDesignOptionsCsv(project: Project, head: readonly string[
 export function projectWithCombination(project: Project, c: Combination): Project {
   const keys = Object.keys(c);
   if (!keys.length) return project;
-  const strip = <T extends { designOptions?: Combination | null }>(x: T): T => {
-    if (!x.designOptions || !keys.some((k) => k in x.designOptions!)) return x;
-    const m = { ...x.designOptions };
-    for (const k of keys) delete m[k];
-    const next = { ...x, designOptions: m };
-    if (!Object.keys(m).length) delete (next as { designOptions?: Combination | null }).designOptions;
+  // Benannte Kombinationen der Objekte werden zuerst zur freien Wahl aufgelöst, dann fallen die Sätze von `c` heraus.
+  const strip = <T extends { designOptions?: Combination | null; designOptionCombination?: string | null }>(x: T): T => {
+    if (!x.designOptions && !x.designOptionCombination) return x;
+    const eff = storedChoice(project, x) ?? {};
+    const m: Combination = {};
+    for (const [k, v] of Object.entries(eff)) if (!keys.includes(k)) m[k] = v;
+    const next = { ...x };
+    delete next.designOptionCombination;
+    if (Object.keys(m).length) next.designOptions = m;
+    else delete next.designOptions;
     return next;
   };
   return {

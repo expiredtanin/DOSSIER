@@ -195,8 +195,8 @@ impl View {
         let l = p.floor(level_id);
         let f = filter.filter(|s| !s.is_empty()).or_else(|| l.and_then(|l| l.renovation_filter.as_deref()));
         let ph = if filter.is_some_and(|s| !s.is_empty()) { phase } else { phase.or_else(|| l.and_then(|l| l.renovation_phase.as_deref())) };
-        let stored: Vec<&std::collections::BTreeMap<String, String>> = l.and_then(|l| l.design_options.as_ref()).into_iter().collect();
-        Self::with(p, f, ph, &stored, options)
+        let own = l.and_then(|l| crate::design_options::stored_choice(p, l.design_option_combination.as_deref(), l.design_options.as_ref()));
+        Self::with(p, f, ph, &own.iter().collect::<Vec<_>>(), options)
     }
 
     /// Zustand des Elements in der Etappe des Filters; `None` = es steht dort (noch/schon) nicht.

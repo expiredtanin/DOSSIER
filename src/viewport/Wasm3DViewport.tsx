@@ -70,7 +70,7 @@ import { pointCloudSyncItems } from "./pointCloudSync";
 import { usePointClouds } from "../state/pointCloudStore";
 import { sun3dFor, sun3dKey } from "./sun3d";
 import { useStore } from "../state/appStore";
-import { projectGeoOrigin } from "../core";
+import { projectGeoOrigin, storedChoice } from "../core";
 import {
   FOV_Y,
   PITCH_LIMIT,
@@ -629,7 +629,8 @@ export function Wasm3DViewport({
   // [272] Variantenkombination der aktiven Ebene (wie im Grundriss); ohne Wahl die Hauptvarianten (Kern).
   const optKey = useStore((s) => {
     const l = s.project.drawingLevels.find((x) => x.id === s.activeLevelId);
-    return l?.designOptions ? JSON.stringify(l.designOptions) : "";
+    const c = l ? storedChoice(s.project, l) : undefined;
+    return c ? JSON.stringify(c) : "";
   });
   const hide = useMemo<Hide3d>(() => {
     const split = (k: string) => (k ? k.split("\u0001") : []);

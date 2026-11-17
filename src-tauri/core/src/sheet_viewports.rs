@@ -102,7 +102,12 @@ pub fn level_with_template(l: &DrawingLevel, t: &ViewTemplate) -> DrawingLevel {
     macro_rules! take {
         ($($f:ident),*) => { $(if t.$f.is_some() { l.$f = t.$f.clone(); })* };
     }
-    take!(cut_height, view_top, view_bottom, view_depth, shadows, hidden_lines, sketch, cut_hatch, floor_finish, show_terrain, model_view_option_id, renovation_filter, renovation_phase, design_options);
+    take!(cut_height, view_top, view_bottom, view_depth, shadows, hidden_lines, sketch, cut_hatch, floor_finish, show_terrain, model_view_option_id, renovation_filter, renovation_phase);
+    // [272] Wahl der Vorlage (Kombination oder freie Wahl) ersetzt die der Ebene als Ganzes.
+    if t.design_options.is_some() || t.design_option_combination.is_some() {
+        l.design_options = t.design_options.clone();
+        l.design_option_combination = t.design_option_combination.clone();
+    }
     l
 }
 
@@ -110,20 +115,26 @@ pub fn level_with_template(l: &DrawingLevel, t: &ViewTemplate) -> DrawingLevel {
 /// der Vorlage und ihre Strichstärken-Skalierung. Ohne verknüpfte Vorlage unverändert (geliehen).
 pub fn snapshot_project<'a>(p: &'a Project, snap: &ViewSnapshot) -> Cow<'a, Project> {
     let t = snapshot_template(p, snap);
-    // [272] Variantenkombination des Ausschnitts (über der der Ebene und der Vorlage).
-    let opts = snap.design_options.as_ref().filter(|m| !m.is_empty());
+    // [272] Variantenkombination des Ausschnitts (über der der Ebene und der Vorlage; benannte Kombination vor freier Wahl).
+    let opts = crate::design_options::stored_choice(p, snap.design_option_combination.as_deref(), snap.design_options.as_ref()).filter(|m| !m.is_empty());
     if t.is_none() && opts.is_none() {
         return Cow::Borrowed(p);
     }
     let mut q = p.clone();
-    for l in q.drawing_levels.iter_mut().filter(|l| l.id == snap.active_level_id) {
-        if let Some(t) = t {
-            *l = level_with_template(l, t);
+    for i in 0..q.drawing_levels.len() {
+        if q.drawing_levels[i].id != snap.active_level_id {
+            continue;
         }
-        if let Some(o) = opts {
-            let mut m = l.design_options.clone().unwrap_or_default();
+        if let Some(t) = t {
+            q.drawing_levels[i] = level_with_template(&q.drawing_levels[i], t);
+        }
+        if let Some(o) = &opts {
+            let l = &q.drawing_levels[i];
+            let mut m = crate::design_options::stored_choice(&q, l.design_option_combination.as_deref(), l.design_options.as_ref()).unwrap_or_default();
             m.extend(o.iter().map(|(k, v)| (k.clone(), v.clone())));
+            let l = &mut q.drawing_levels[i];
             l.design_options = Some(m);
+            l.design_option_combination = None;
         }
     }
     if let Some(t) = t.filter(|t| t.scale_line_weights.is_some()) {
@@ -134,13 +145,14 @@ pub fn snapshot_project<'a>(p: &'a Project, snap: &ViewSnapshot) -> Cow<'a, Proj
 
 /// [272] Der Ausschnitt eines Viewports mit dessen eigener Variantenkombination (über der des Ausschnitts); ohne
 /// eigene Wahl unverändert.
-pub fn viewport_snapshot<'a>(snap: &'a ViewSnapshot, vp: &LayoutViewport) -> Cow<'a, ViewSnapshot> {
-    match vp.design_options.as_ref().filter(|m| !m.is_empty()) {
+pub fn viewport_snapshot<'a>(p: &Project, snap: &'a ViewSnapshot, vp: &LayoutViewport) -> Cow<'a, ViewSnapshot> {
+    match crate::design_options::stored_choice(p, vp.design_option_combination.as_deref(), vp.design_options.as_ref()).filter(|m| !m.is_empty()) {
         Some(o) => {
             let mut s = snap.clone();
-            let mut m = s.design_options.clone().unwrap_or_default();
-            m.extend(o.iter().map(|(k, v)| (k.clone(), v.clone())));
+            let mut m = crate::design_options::stored_choice(p, snap.design_option_combination.as_deref(), snap.design_options.as_ref()).unwrap_or_default();
+            m.extend(o);
             s.design_options = Some(m);
+            s.design_option_combination = None;
             Cow::Owned(s)
         }
         None => Cow::Borrowed(snap),
@@ -171,7 +183,7 @@ pub fn viewport_args(p: &Project, snap: &ViewSnapshot, scale: f64, mono: bool) -
         renovation: snap.renovation_filter.clone().filter(|s| !s.is_empty()),
         renovation_phase: snap.renovation_phase.clone().filter(|s| !s.is_empty()),
         // [272] Variantenkombination des Ausschnitts (über der der Ebene).
-        design_options: snap.design_options.iter().flatten().map(|(k, v)| (k.clone(), v.clone())).collect(),
+        design_options: crate::design_options::stored_choice(p, snap.design_option_combination.as_deref(), snap.design_options.as_ref()).into_iter().flatten().collect(),
     };
     a.apply_model_view(p);
     a
@@ -193,7 +205,7 @@ pub fn viewport_maps(p: &Project, layout: &Layout) -> Vec<VpMap> {
     let mut out = Vec::new();
     for vp in &layout.viewports {
         let Some(snap) = snaps.iter().find(|s| s.id == vp.snapshot_id) else { continue };
-        let snap = viewport_snapshot(snap, vp);
+        let snap = viewport_snapshot(p, snap, vp);
         let snap = snap.as_ref();
         if !(vp.width_mm > 0.0 && vp.height_mm > 0.0 && vp.x_mm.is_finite() && vp.y_mm.is_finite()) {
             continue;
@@ -256,7 +268,7 @@ pub fn snapshot_buf(p: &Project, snap: &ViewSnapshot, scale: f64, shadows: Optio
 pub fn doc3d_buf(p: &Project, snap: &ViewSnapshot, scale: f64) -> Option<Vec<u8>> {
     let show: HashSet<&String> = snap.layer_visibility.iter().filter(|(_, v)| **v).map(|(k, _)| k).collect();
     let invisible: Vec<String> = candidate_codes(p).into_iter().filter(|c| !show.contains(c)).collect();
-    let text = crate::plan::axo::snapshot_text(snap, &invisible);
+    let text = crate::plan::axo::snapshot_text(p, snap, &invisible);
     let buf = crate::plan::axo::axo_plan_buf(p, &[f64::from(u8::from(snapshot_mono(p, snap))), scale], &text).ok()?;
     let v = crate::plan::buf::View::parse(&buf)?;
     if v.prims()?.is_empty() {

@@ -7,6 +7,7 @@
 import type { DetailLevel } from "../model/viewTypes";
 import type { Project, ViewTemplate } from "../model/types";
 import { withDocument } from "../core/document";
+import { storedChoice } from "../model/designOptions";
 import { linkedViewTemplate, projectWithTemplate } from "./viewTemplate";
 import { generatePlan, type Plan, type Primitive } from "./generatePlan";
 import { computeSection, generateSectionPlan } from "./toSection";
@@ -82,9 +83,9 @@ export async function viewportLevelPlan(
  * Inhalt eines Ausschnitts auf dem Blatt bzw. im PDF: [266] 3D-Ausschnitte (Ansichtstyp „perspektive“) als 3D-Dokument aus dem
  * Kern (Vektor-Axonometrie/-Perspektive mit verdeckten Kanten, Kern: `sheet_viewports::doc3d_buf`), sonst {@link viewportLevelPlan}.
  */
-export async function viewportSnapshotPlan(project: Project, snap: ViewSnapshot, visibleCodes: Set<string>, scaleDenominator: number, forPrint = false, viewport?: { designOptions?: Record<string, string> | null } | null): Promise<Plan> {
+export async function viewportSnapshotPlan(project: Project, snap: ViewSnapshot, visibleCodes: Set<string>, scaleDenominator: number, forPrint = false, viewport?: { designOptions?: Record<string, string> | null; designOptionCombination?: string | null } | null): Promise<Plan> {
   // [272] Variantenkombination: Ausschnitt, darüber die des Viewports (dieselbe Ansicht in anderer Kombination).
-  const opts = viewportDesignOptions(snap, viewport);
+  const opts = viewportDesignOptions(project, snap, viewport);
   if (isDoc3dSnapshot(snap)) return snapshotAxoPlan(project, snap, visibleCodes, scaleDenominator, snapshotMono(project, snap), opts) ?? EMPTY;
   if (opts) {
     const dp = projectWithDesignOptions(project, snap.activeLevelId, opts);
@@ -99,15 +100,27 @@ export async function viewportSnapshotPlan(project: Project, snap: ViewSnapshot,
   return viewportLevelPlan(project, snap.activeLevelId, visibleCodes, snap.detail, scaleDenominator, forPrint, snapshotMono(project, snap), snapshotOverrideRuleIds(project, snap), snapshotTemplate(project, snap), snap.modelViewOptionId);
 }
 
-/** [272] Kombination eines Ausschnitts samt Viewport (Viewport geht vor); `null` ohne eigene Wahl. */
-export function viewportDesignOptions(snap: { designOptions?: Record<string, string> | null }, viewport?: { designOptions?: Record<string, string> | null } | null): Record<string, string> | null {
-  const m = { ...(snap.designOptions ?? {}), ...(viewport?.designOptions ?? {}) };
+/** [272] Wahl eines Ausschnitts samt Viewport (Viewport geht vor; benannte Kombination vor freier Wahl, Kern `design_options::stored_choice`); `null` ohne eigene Wahl. */
+export function viewportDesignOptions(
+  project: Project,
+  snap: { designOptions?: Record<string, string> | null; designOptionCombination?: string | null },
+  viewport?: { designOptions?: Record<string, string> | null; designOptionCombination?: string | null } | null,
+): Record<string, string> | null {
+  const m = { ...(storedChoice(project, snap) ?? {}), ...(storedChoice(project, viewport) ?? {}) };
   return Object.keys(m).length ? m : null;
 }
 
 /** [272] Das Projekt mit der Variantenkombination `opts` an der Ebene `levelId` (über deren eigener Wahl). */
 export function projectWithDesignOptions(project: Project, levelId: string, opts: Record<string, string>): Project {
-  return { ...project, drawingLevels: project.drawingLevels.map((l) => (l.id === levelId ? { ...l, designOptions: { ...(l.designOptions ?? {}), ...opts } } : l)) };
+  return {
+    ...project,
+    drawingLevels: project.drawingLevels.map((l) => {
+      if (l.id !== levelId) return l;
+      const next = { ...l, designOptions: { ...(storedChoice(project, l) ?? {}), ...opts } };
+      delete next.designOptionCombination;
+      return next;
+    }),
+  };
 }
 
 /** [271] Das Projekt mit Umbaufilter `filter` (und Etappe) an der Ebene `levelId`. */

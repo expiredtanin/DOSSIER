@@ -23,7 +23,9 @@
 //                                                  mit --phase <Etappe> (Name oder id); auch für axo, model3d und kennzahlen [271]
 //                                                  --options "Dachform=B,Fassade=A" Variantenkombination (Satz=Variante, Namen oder ids;
 //                                                  fehlende Sätze: Hauptvariante); für alle Ausgaben (plan, section, elevation, axo,
-//                                                  model3d, kennzahlen, dxf, ifc, obj …); `designoptions` vergleicht alle Kombinationen [272]
+//                                                  model3d, kennzahlen, dxf, ifc, obj …); `designoptions` vergleicht die gespeicherten Kombinationen
+//                                                  (--all: alle Kombinationen der Sätze) [272]
+//                                                  --combination "Studie 1" gespeicherte benannte Kombination (Name oder id), für alle Ausgaben [272]
 //                                                  --hide <Code|Name,…> blendet Klassen aus (z. B. --hide "Schatten,Auto-Bemassung") [180]
 //                                                  --snapshot <Name|id> übernimmt Geschoss, Massstab, Vorlage und Sichtbarkeit eines Ausschnitts [207]
 //   dossier-cli <projekt.obp> axo [--view southeast|southwest|northeast|northwest|iso|…] [--projection iso|military|military30]
@@ -150,6 +152,8 @@ import {
   renovationFilterList,
   parseCombination,
   designOptionSets,
+  designOptionCombinations,
+  combinationChoice,
   projectWithCombination,
   compareDesignOptions,
   compareDesignOptionsCsv,
@@ -1099,6 +1103,14 @@ async function execute(project: Project, file: string, command: string, rest: st
     }
     project = projectWithCombination(project, combo);
   }
+  // [272] `--combination "Studie 1"`: benannte Kombination (Name oder id) gilt für alle Ausgaben (`designoptions` listet sie nur).
+  const combSpec = args.flags.get("combination");
+  if (combSpec && combSpec !== "true" && command !== "designoptions") {
+    const key = combSpec.trim().toLowerCase();
+    const found = designOptionCombinations(project).find((c) => c.id.toLowerCase() === key) ?? designOptionCombinations(project).find((c) => c.name.trim().toLowerCase() === key);
+    if (!found) fail(`Kombination nicht gefunden: ${combSpec} (vorhanden: ${designOptionCombinations(project).map((c) => c.name).join(", ") || "keine"})`);
+    project = projectWithCombination(project, combinationChoice(project, found));
+  }
   // [257] `bench --context`: vorher synthetische Kontext-Importe (Kataster, Höhenlinien, Gebäudenetze) ins Projekt laden.
   const contextRows: Array<[string, number]> = [];
   if (command === "bench" && args.flags.has("context")) {
@@ -1367,8 +1379,8 @@ async function execute(project: Project, file: string, command: string, rest: st
       const ren = renovationFlags(project, args)?.renovation ?? "";
       const stem = `${exportProjectName(project) || "projekt"}-varianten`;
       if ((args.flags.get("format") ?? "json") === "csv") {
-        out(args, compareDesignOptionsCsv(project, ["Kombination", "GF m2", "HNF m2", "GV m3", "Fussabdruck m2", "AZ", "UEZ", "Kosten CHF"], ren), `${stem}.csv`);
-      } else out(args, JSON.stringify(compareDesignOptions(project, ren), null, 2), `${stem}.json`);
+        out(args, compareDesignOptionsCsv(project, ["Kombination", "GF m2", "HNF m2", "GV m3", "Fussabdruck m2", "AZ", "UEZ", "Kosten CHF"], ren, args.flags.has("all")), `${stem}.csv`);
+      } else out(args, JSON.stringify(compareDesignOptions(project, ren, args.flags.has("all")), null, 2), `${stem}.json`);
       return 0;
     }
     case "raumprogramm": {
