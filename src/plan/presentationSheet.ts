@@ -30,6 +30,7 @@ import { imageAspect } from "../model/layoutImages";
 import { createLayout, createMasterLayout, createSheetLevel, sheetMmToModel, sheetSizeMm } from "../model/layoutModel";
 import { SECTION_MARK_CATEGORY, SHADOW_CATEGORY, SYMBOL_CATEGORY } from "../model/derivedCategories";
 import { createPosterMaster, findPosterMaster, posterMetrics, posterTemplate, scaleLabelMetrics } from "../model/posterTemplates";
+import { generateAxoPlan } from "./toAxo";
 
 /** Id der Standard-Ansichtsvorlage „Präsentation" (`standards.rs`). */
 export const PRESENTATION_TEMPLATE_ID = "std-vt-praesentation";
@@ -147,6 +148,8 @@ export interface PresentationLabels {
   tableSiteProof?: string;
   imagePlaceholder?: string;
   imageHint?: string;
+  /** [266] Name des 3D-Dokuments (Axonometrie) im Bild-Rahmen. */
+  axo?: string;
 }
 
 const isFloor = (l: DrawingLevel) => l.kind === "floor" && !l.layoutId;
@@ -445,6 +448,47 @@ function sheetRect(id: string, levelId: string, cat: string, x: number, y: numbe
   return sheetShape(id, levelId, cat, { shape: "polyline", closed: true, pts: [P(x, y), P(x + w, y), P(x + w, y + h), P(x, y + h)] }, extra);
 }
 
+/** [266] Massstäbe, aus denen die Axonometrie im Bild-Rahmen den kleinsten passenden nimmt. */
+const AXO_SCALES = [50, 100, 150, 200, 250, 300, 400, 500, 750, 1000, 1500, 2000, 2500, 5000];
+
+/**
+ * [266] 3D-Dokument fürs Plakat, wenn kein gerendertes Bild da ist: Axonometrie Südost aus dem Kern (verdeckte Kanten, Flächen
+ * getönt) als Ausschnitt mit Viewport im Bild-Rahmen, im kleinsten Massstab, der passt. `null`, wenn sie nicht gelingt (dann
+ * bleibt der Platzhalter).
+ */
+export function posterAxo(
+  project: Project,
+  vis: Record<string, boolean>,
+  box: { xMm: number; yMm: number; widthMm: number; heightMm: number },
+  levelId: string,
+  stamp: string,
+  name: string,
+): { snap: ViewSnapshot; vp: LayoutViewport } | null {
+  const codes = new Set(Object.keys(vis).filter((k) => vis[k]));
+  const doc3d = { view: "southeast" };
+  const plan = generateAxoPlan(project, { ...doc3d, visibleCodes: codes });
+  if (!plan) return null;
+  const b = plan.bounds;
+  const need = Math.max(((b.maxX - b.minX) * 1000) / Math.max(box.widthMm - 2 * FRAME_PAD_MM, 1), ((b.maxY - b.minY) * 1000) / Math.max(box.heightMm - 2 * FRAME_PAD_MM, 1));
+  const scale = AXO_SCALES.find((s) => s >= need);
+  if (!scale || !Number.isFinite(need)) return null;
+  const snapId = `vs-pres-${stamp}-axo`;
+  const snap = {
+    id: snapId,
+    name,
+    viewType: "perspektive",
+    view3d: "isoBackRight",
+    scaleDenominator: scale,
+    detail: "mittel",
+    activeLevelId: levelId,
+    layerVisibility: { ...vis },
+    drawingVisibility: {},
+    doc3d,
+  } as ViewSnapshot;
+  const vp: LayoutViewport = { id: `vp-pres-${stamp}-axo`, snapshotId: snapId, xMm: box.xMm, yMm: box.yMm, widthMm: box.widthMm, heightMm: box.heightMm, scaleDenominator: scale, center: { x: (b.minX + b.maxX) / 2, y: (b.minY + b.maxY) / 2 } };
+  return { snap, vp };
+}
+
 /** Letztes Bild eines Layouts im Projekt (z. B. aus „Ins Layout einsetzen“ im Rendering-Dialog). */
 function lastLayoutImage(project: Project): LayoutImage | undefined {
   const all = (project.layouts ?? []).flatMap((l) => l.images ?? []);
@@ -612,8 +656,10 @@ export function presentationSheetOps(
       ...(tb.id === "areas" ? { columns: AREAS_COLUMNS } : {}),
     } as LayoutTable);
   }
-  // [208] 3D-/Axonometrie-Bild: das letzte Layout-Bild des Projekts im Rahmen, sonst ein beschrifteter Platzhalter (nichts erfunden).
+  // [208] 3D-/Axonometrie-Bild: das letzte Layout-Bild des Projekts im Rahmen, sonst [266] die Vektor-Axonometrie aus dem Kern, sonst
+  // ein beschrifteter Platzhalter (nichts erfunden).
   const box = plan.image;
+  let axo: ReturnType<typeof posterAxo> = null;
   if (box) {
     const lvl = sheetLevels[box.page].id;
     const existing = lastLayoutImage(project);
@@ -622,6 +668,12 @@ export function presentationSheetOps(
       const w = Math.min(box.widthMm, box.heightMm * ar);
       const h = w / ar;
       images[box.page].push({ ...existing, id: `img-pres-${stamp}`, xMm: box.xMm, yMm: box.yMm, widthMm: w, heightMm: h });
+    } else if ((axo = posterAxo(project, vis, box, plan.items[0].levelId, stamp, labels.axo ?? "Axonometrie"))) {
+      // [266] Ohne gerendertes Bild: das 3D-Dokument aus dem Kern (Platzhalter nur, wenn auch das nicht gelingt).
+      snaps.push(axo.snap);
+      vps[box.page].push(axo.vp);
+      // Titel wie bei den Plänen rechts neben der Massstabsangabe des Masters.
+      if (tpl) drawings.push(sheetText(`d-pres-${stamp}-tax`, lvl, cat, box.xMm + labelM.sizeMm * 3.6, box.yMm + box.heightMm + labelM.dyMm, axo.snap.name, labelM.sizeMm, true));
     } else {
       const ph = labels.imagePlaceholder ?? "";
       // Schrift passt sich dem Rahmen an (ein kleines Haus gibt ein kleines Bild-Rahmen).

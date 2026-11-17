@@ -233,6 +233,7 @@ export type QueryName =
   | "tracePlan"
   | "sectionPlan"
   | "elevationPlan"
+  | "axoPlan"
   | "selectionHighlight"
   | "modelJson";
 

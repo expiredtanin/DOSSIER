@@ -2121,6 +2121,10 @@ export const de = {
   "camera.empty": "Keine Kameras. Mit „+“ aus der aktuellen 3D-Ansicht anlegen.",
   "camera.createFromView": "Kamera aus aktueller Ansicht anlegen",
   "camera.created": "Kamera „{name}“ angelegt",
+  "doc3d.name": "3D-Dokument {n}",
+  "doc3d.created": "3D-Dokument „{name}“ angelegt: Ausschnitt und Blatt A3 (1:{scale})",
+  "doc3d.empty": "3D-Dokument: nichts Sichtbares in dieser Ansicht",
+  "menu.view.doc3d": "3D-Dokument erstellen",
   "camera.open": "Kamera öffnen",
   "camera.rowHint": "Klick wählt die Kamera, Doppelklick öffnet sie im 3D",
   "tour.button": "Kamerafahrt",
@@ -4064,6 +4068,7 @@ export const de = {
   "presentation.table.siteProof": "Baurecht-Nachweis",
   "presentation.image.placeholder": "3D-Bild hier einsetzen",
   "presentation.image.hint": "Rendering-Dialog: „Ins Layout einsetzen“, oder Knopf „Bild“ im Blatt",
+  "presentation.axo": "Axonometrie",
   "presentation.donePages": "Präsentationsplan 1:{scale} auf {pages} Plakaten erstellt",
   "presentation.failed": "Präsentationsplan konnte nicht erstellt werden",
   // [211] Rendering mit Blender/Cycles

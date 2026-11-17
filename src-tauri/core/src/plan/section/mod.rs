@@ -34,6 +34,7 @@ pub use bands::*;
 use shapes::*;
 use voids::*;
 pub(crate) use meshes::*;
+pub(crate) use projection::{model_view_faces, OwnerRef};
 use projection::*;
 pub use primitives::*;
 pub use openings::*;
@@ -524,7 +525,7 @@ pub struct Output {
 
 /// [180] Klassen der Projektions-Besitzer: Wände (Index in `walls_r`), Platten (Decken, Treppen, Stützen; Index in
 /// `slabs_r`), Dächer, Körper (Index in `extrudedSolids`).
-fn edge_categories(p: &Project, walls: &[Option<&Wall>], slabs: &[bands::SlabOwner]) -> HashMap<(Kind, usize), String> {
+pub(crate) fn edge_categories(p: &Project, walls: &[Option<&Wall>], slabs: &[bands::SlabOwner]) -> HashMap<(Kind, usize), String> {
     let mut m = HashMap::new();
     for (i, w) in walls.iter().enumerate() {
         if let Some(w) = w {

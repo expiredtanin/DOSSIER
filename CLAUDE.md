@@ -146,6 +146,8 @@ und Chromium-Screenshot (Playwright ist vorinstalliert). **Der CLI-SVG hat stand
 `--hatch` (`plan`/`section`/`elevation`; Option `hatch` von `planToSvgString`, Kern `plan/svg.rs`) breitet er die Schraffurlinien
 aus, an der Fläche beschnitten, mit demselben Generator wie der Druck-/PDF-Export der App (`sceneToPrintSvg`, Kern
 `plan/print_svg.rs`); `--format json` (render2d-Szene) enthält sie ebenfalls. Weitere CLI-Befehle: `kennzahlen`, `sun --when …`,
-`ifc`, `bench`. **3D headless (nur macOS):** `dossier-cli … model3d --out m.json`, dann
+`ifc`, `bench`, `axo` (3D-Dokument [266]: Vektor-Axonometrie/-Perspektive mit verdeckten Kanten aus dem Kern, ohne GPU, also auch im
+Linux-Container: `dossier-cli :wettbewerb axo --view southeast --scale 200 --out a.svg`, `--projection military|military30`, `--camera Name`,
+`--hidden`, `--format json|dxf`). **3D headless (nur macOS):** `dossier-cli … model3d --out m.json`, dann
 `src-tauri/target/release/render_png m.json out.png --view iso --style shaded-edges` (vorher
 `npm run build:render-png`). App im Browser: `vite build --outDir dist-test`, Vorschau auf Port 5188.

@@ -5,7 +5,7 @@
 // und den Diff der Dateien im Commit ansehen. Zahlen sind gerundet (Plan 1e-3 m, 3D 1e-4 m).
 import { describe, expect, it } from "vitest";
 import { createHash } from "node:crypto";
-import { computeSection, generateElevationPlan, generatePlan, generateSectionPlan, planToSvgString, projectToModel3d, projectWithTemplate } from "../core";
+import { computeSection, generateAxoPlan, generateElevationPlan, generatePlan, generateSectionPlan, planToSvgString, projectToModel3d, projectWithTemplate } from "../core";
 import { sampleProject } from "../model/sampleProject";
 import { buildComplexSampleProject } from "../model/sampleProjectComplex";
 import type { Project } from "../model/types";
@@ -104,6 +104,14 @@ for (const [name, make] of projects) {
       const plan = generateElevationPlan(p, el, { scaleDenominator: 100 });
       expect(plan).toBeTruthy();
       await expect(svgDigest(planToSvgString(plan!, { scaleDenominator: 100 }))).toMatchFileSnapshot(`__golden__/${name}-ansicht-${el.id}.txt`);
+    });
+
+    // [266] 3D-Dokument: Vektor-Axonometrie Südost (Isometrie) mit verdeckten Kanten und getönten Flächen, 1:200.
+    it("Axonometrie Südost", async () => {
+      if (name !== "muster") return;
+      const plan = generateAxoPlan(p, { view: "southeast", visibleCodes: codes, scaleDenominator: 200 });
+      expect(plan).toBeTruthy();
+      await expect(svgDigest(planToSvgString(plan!, { scaleDenominator: 200 }))).toMatchFileSnapshot(`__golden__/${name}-axo-southeast.txt`);
     });
 
     it("3D-Modell", async () => {

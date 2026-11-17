@@ -43,6 +43,7 @@ pub mod trees;
 pub mod cameras;
 pub mod mesh_plan;
 pub mod situation;
+pub mod axo;
 pub mod contrast;
 pub mod arc_fit;
 pub(crate) mod seams;

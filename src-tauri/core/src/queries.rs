@@ -355,6 +355,8 @@ pub fn run_bin(p: &Project, name: &str, args: &[f64], text: &str) -> Result<Vec<
         }
         ("sectionPlan", _) => crate::plan::section::section_plan_buf(p, args, text),
         ("elevationPlan", _) => crate::plan::elevation::elevation_plan_buf(p, args, text),
+        // [266] 3D-Dokument: Vektor-Axonometrie/-Perspektive mit verdeckten Kanten (`plan/axo.rs`).
+        ("axoPlan", _) => crate::plan::axo::axo_plan_buf(p, args, text),
         _ => Err(format!("Unbekannte Abfrage: {name}")),
     }
 }

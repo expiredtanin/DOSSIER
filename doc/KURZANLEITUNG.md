@@ -19,7 +19,7 @@ im Panel **Gelände**). Alle Tastenkürzel zeigt *Hilfe → Tastaturkürzel …*
 Befehlszeile.
 
 > **Stand der Bilder:** Sie stammen aus dem Linux-Container (CLI-Ausgabe, mit Schraffur, als SVG im Chromium
-> aufgenommen). 3D-Bilder fehlen, weil es dort kein WebGPU/Metal gibt. Die Mac-Ansicht (Metal) kann in Strichstärke
+> aufgenommen). Gerenderte 3D-Bilder fehlen, weil es dort kein WebGPU/Metal gibt; die Axonometrie als 3D-Dokument kommt ohne aus. Die Mac-Ansicht (Metal) kann in Strichstärke
 > und Schriftbild abweichen.
 
 ---
@@ -191,6 +191,14 @@ aktuelle Ansicht legst du als Kamera ab („Kamera aus aktueller Ansicht anlegen
 **Ausschnitte**) und öffnest sie später wieder. Ein 3D-Bild in Abgabeauflösung (z. B. A3 bei 300 dpi) erzeugt *Ansicht → 3D-Bild exportieren …* (Befehl
 `bild3d`); es lässt sich speichern oder ins Layout einsetzen.
 
+**3D-Dokument (Vektor-Axonometrie).** *Ansicht → 3D-Dokument erstellen* macht aus der aktuellen 3D-Kamera (Parallelprojektion oder
+Perspektive) eine Linienzeichnung mit verdeckten Kanten: sichtbare Kanten kräftig, Umriss stärker, Flächen nach ihrer Lage hellgrau.
+Dossier legt dafür einen Ausschnitt und ein Blatt A3 an; die Zeichnung rechnet der Kern bei jeder Anzeige neu (Modelländerungen wirken)
+und geht wie Schnitt und Ansicht ins PDF, SVG und DXF. Sie braucht keine Grafikkarte. Jeder Ausschnitt der 3D-Ansicht zeigt auf einem
+Blatt dasselbe 3D-Dokument. Auf der Kommandozeile: `dossier-cli :wettbewerb axo --view southeast --scale 200 --out axo.svg`
+(Blick von Südost, Südwest, Nordost, Nordwest: `--view southwest` usw.; `--projection military` für Militär 45°/45°,
+`--projection military30` für 30°/60°; `--camera Name` für eine Kamera des Projekts; `--hidden` zeigt verdeckte Kanten gestrichelt).
+
 **Wenn die Grafikkarte ausfällt.** Verliert die Grafikkarte das Gerät (z. B. nach dem Ruhezustand oder beim Wechsel der
 Grafik), baut Dossier die Anzeige nach kurzen Pausen neu auf. Der Plan bleibt dabei bei der einfachen SVG-Darstellung und
 flackert nicht; die 3D-Ansicht zeigt „3D-Engine nicht verfügbar“ mit einem Hinweis, wenn der Neuaufbau mehrmals scheitert
@@ -236,8 +244,9 @@ Massstab, mit Titeln, Nordpfeil, Massstabsbalken und Schriftfeld. Das Beispiel e
 
 **Plakat aus einem Schritt.** Ist als Papier eine Plakat-Vorlage gewählt, ordnet Dossier den Inhalt auf dem Spaltenraster an:
 die Situation 1:500 zuerst oben links, dann Grundrisse, Ansichten und Schnitt im festen Massstab, dazu die Tabellen
-„Kennzahlen (SIA 416)“ und „Baurecht-Nachweis“ und ein Rahmen „3D-Bild hier einsetzen“. Den Rahmen füllst du später im
-Rendering-Dialog mit „Ins Layout einsetzen“ oder mit dem Knopf „Bild“ im Blatt; nichts wird erfunden. Was aufs Plakat soll,
+„Kennzahlen (SIA 416)“ und „Baurecht-Nachweis“ und im Rahmen fürs 3D-Bild die Axonometrie Südost als 3D-Dokument (Vektorzeichnung
+aus dem Modell, Massstab passend zum Rahmen). Hat das Projekt schon ein Bild auf einem Blatt (Rendering-Dialog „Ins Layout einsetzen“
+oder Knopf „Bild“), steht dieses Bild im Rahmen; nur wenn beides fehlt, bleibt der Platzhalter „3D-Bild hier einsetzen“. Was aufs Plakat soll,
 wählst du im Dialog im Abschnitt „Plakat-Inhalt“ (Situation 1:500, Kennzahlen, Baurecht-Nachweis, Rahmen fürs 3D-Bild; je abwählbar).
 Reicht der Platz nicht, entsteht ein zweites Plakat (Plan 2/2); der Massstab wird nie verkleinert. Bleibt Platz übrig,
 verteilt Dossier ihn gleichmässig als Weissraum zwischen den Zeilen; das 3D-Bild wird höchstens so gross wie der grösste Grundriss.

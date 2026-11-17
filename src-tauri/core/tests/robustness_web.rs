@@ -278,6 +278,21 @@ const CALLS: &[Call] = &[
     ("document::doc_serialize", |r: &mut Rng| { let a0 = r.id(); let _ = web::document::doc_serialize(a0); }),
     ("document::doc_serialize_with_ui", |r: &mut Rng| { let a0 = r.id(); let a1 = r.text(); let _ = web::document::doc_serialize_with_ui(a0, &a1); }),
     ("document::doc_query_bin", |r: &mut Rng| { let a0 = r.id(); let a1 = r.text(); let a2 = r.buf(); let a3 = r.text(); let _ = web::document::doc_query_bin(a0, &a1, &a2, &a3); }),
+    // [266] 3D-Dokument: Kamera mit NaN/riesigen/entarteten Werten, Vorgaben, Unsinn — über das offene Beispielprojekt.
+    ("document::doc_query_bin axoPlan", |r: &mut Rng| {
+        let h = HANDLE.with(|c| c.get());
+        let n: Vec<String> = (0..11).map(|_| { let x = r.f64(); if x.is_finite() { format!("{x:e}") } else { "1e308".into() } }).collect();
+        let views = ["southeast", "southwest", "northeast", "northwest", "iso", "isoFrontLeft", "top", "front", "", "x"];
+        let kinds = ["perspective", "orthogonal", "", "x"];
+        let text = match r.below(4) {
+            0 => format!(r#"{{"camera":{{"kind":"{}","position":[{},{},{}],"direction":[{},{},{}],"up":[{},{},{}],"fovDeg":{},"aspect":{}}}}}"#, kinds[r.below(kinds.len())], n[0], n[1], n[2], n[3], n[4], n[5], n[6], n[7], n[8], n[9], n[10]),
+            1 => format!(r#"{{"view":"{}","projection":"{}","hidden":{},"fills":{},"context":true}}"#, views[r.below(views.len())], ["iso", "military", "military30", "x"][r.below(4)], r.below(2) == 0, r.below(2) == 0),
+            2 => format!(r#"{{"cameraId":"{}"}}"#, r.text()),
+            _ => r.text(),
+        };
+        let a = [r.f64(), r.f64()];
+        let _ = web::document::doc_query_bin(h, "axoPlan", &a, &text);
+    }),
     ("document::doc_last_extra", |r: &mut Rng| { let a0 = r.id(); let _ = web::document::doc_last_extra(a0); }),
     ("document::doc_last_hits", |r: &mut Rng| { let a0 = r.id(); let _ = web::document::doc_last_hits(a0); }),
     ("document::__debug_panic", |r: &mut Rng| { let a0 = r.id(); let _ = web::document::__debug_panic(a0); }),

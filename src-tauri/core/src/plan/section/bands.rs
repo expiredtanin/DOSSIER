@@ -111,7 +111,7 @@ pub(super) fn merge_arc_wall_cuts(cuts: Vec<Cut>, p: &Project, walls_r: &[RWall]
 }
 
 /// Je emittiertem Wand-Teilquader die Quellwand (über `RWall::wall_id`).
-pub(super) fn wall_owners<'a>(p: &'a Project, walls: &[RWall]) -> Vec<Option<&'a Wall>> {
+pub(crate) fn wall_owners<'a>(p: &'a Project, walls: &[RWall]) -> Vec<Option<&'a Wall>> {
     let mut by_id: HashMap<&str, &Wall> = HashMap::with_capacity(p.walls.len());
     for w in &p.walls {
         by_id.entry(w.id.as_str()).or_insert(w);

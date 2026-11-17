@@ -697,6 +697,42 @@ export type DimRef = {
   lost?: boolean;
 };
 
+/** [266] Einstellungen eines 3D-Dokuments (Vektor-Axonometrie/-Perspektive aus dem Kern). */
+export type Doc3d = {
+  /**
+   * Kamera in Modell-Koordinaten (wie `ViewCamera` der 3D-Ansicht); fehlt ⇒ Kamera-Element `cameraId`, sonst die Vorgabe `view`.
+   */
+  camera?: Doc3dCamera;
+  /** Kamera-Element des Projekts ([213], `Project.cameras`). */
+  cameraId?: string;
+  /**
+   * Vorgabe: "southeast" | "southwest" | "northeast" | "northwest" oder ein `View3d`-Blickwinkel; fehlt ⇒ `view3d` des Ausschnitts.
+   */
+  view?: string;
+  /** Projektion der Vorgabe: "iso" (Vorgabe) | "military" (45°/45°) | "military30" (30°/60°). */
+  projection?: string;
+  /** Verdeckte Kanten gestrichelt zeigen; fehlt ⇒ aus. */
+  hiddenLines?: boolean;
+  /** Flächen nach Lage hellgrau tönen; fehlt ⇒ an. */
+  fills?: boolean;
+  /** Importierte Kontext-Netze mitzeichnen; fehlt ⇒ aus. */
+  context?: boolean;
+};
+
+/** [266] Kamera eines 3D-Dokuments in Modell-Koordinaten (x, y, z = Höhe; Meter). */
+export type Doc3dCamera = {
+  /** "perspective" | "orthogonal". */
+  kind: string;
+  position:[number, number, number];
+  /** Blickrichtung (normiert). */
+  direction:[number, number, number];
+  up:[number, number, number];
+  /** Vertikaler Öffnungswinkel (Grad, Perspektive). */
+  fovDeg: number;
+  /** Seitenverhältnis des Bildrahmens (Breite/Höhe, Perspektive); fehlt ⇒ 1.5. */
+  aspect?: number;
+};
+
 /** Masse einer Türzarge/eines Türrahmens ([105]); Bedeutung je `frameKind`. Fehlt ⇒ Vorgabe. */
 export type DoorFrameDetail = {
   /** Falzbreite (parallel zur Wandfläche: Überdeckung Blatt/Rahmen), Vorgabe 0.015. */
@@ -4265,6 +4301,12 @@ export type ViewSnapshot = {
   modelViewOptionId?: string;
   /** [205] Pausfolie des Ausschnitts (nur Anzeige, nie im Druck). */
   trace?: TraceReference;
+  /**
+   * [266] 3D-Dokument: der Ausschnitt (Ansichtstyp „perspektive“) zeigt auf einem Layout-Blatt, im PDF und in der CLI die
+   * Vektorzeichnung mit verdeckten Kanten aus dem Kern (`plan/axo.rs`) — aus dieser Kamera, sonst aus dem
+   * Blickwinkel `view3d`. Fehlt ⇒ Blickwinkel `view3d`, Isometrie, getönte Flächen.
+   */
+  doc3d?: Doc3d;
 };
 
 /**

@@ -12,6 +12,8 @@ import { generatePlan, type Plan, type Primitive } from "./generatePlan";
 import { computeSection, generateSectionPlan } from "./toSection";
 import { generateElevationPlan } from "./toElevation";
 import { levelMarkerPrimitives, levelMarksEnabled } from "./levelMarkers";
+import { isDoc3dSnapshot, snapshotAxoPlan } from "./toAxo";
+import type { ViewSnapshot } from "../model/types";
 
 /**
  * [140] Tusche (Schwarz-Weiss) für einen Viewport: Standard wie in der App; Farbe nur, wenn die
@@ -70,6 +72,15 @@ export async function viewportLevelPlan(
   let tp = template ? projectWithTemplate(project, levelId, template) : project;
   if (modelViewOptionId) tp = projectWithModelView(tp, levelId, modelViewOptionId);
   return withDocument(tp, () => levelPlan(tp, levelId, visibleCodes, template?.detail ?? detail, scaleDenominator, forPrint, mono, overrideRuleIds));
+}
+
+/**
+ * Inhalt eines Ausschnitts auf dem Blatt bzw. im PDF: [266] 3D-Ausschnitte (Ansichtstyp „perspektive“) als 3D-Dokument aus dem
+ * Kern (Vektor-Axonometrie/-Perspektive mit verdeckten Kanten, Kern: `sheet_viewports::doc3d_buf`), sonst {@link viewportLevelPlan}.
+ */
+export async function viewportSnapshotPlan(project: Project, snap: ViewSnapshot, visibleCodes: Set<string>, scaleDenominator: number, forPrint = false): Promise<Plan> {
+  if (isDoc3dSnapshot(snap)) return snapshotAxoPlan(project, snap, visibleCodes, scaleDenominator, snapshotMono(project, snap)) ?? EMPTY;
+  return viewportLevelPlan(project, snap.activeLevelId, visibleCodes, snap.detail, scaleDenominator, forPrint, snapshotMono(project, snap), snapshotOverrideRuleIds(project, snap), snapshotTemplate(project, snap), snap.modelViewOptionId);
 }
 
 /** [173] Das Projekt mit der Modelldarstellung `id` an der Ebene `levelId` (wie die Vorlage ein Ebenen-Feld). */

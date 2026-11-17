@@ -17,7 +17,8 @@ import { t } from "../i18n/translate";
 import { legendPlan, legendPrintSvg } from "./legendSvg";
 import { categoryLayerGroups, enablePdfLayers, type PdfLayers } from "./pdfLayers";
 import { generatePlan, type Plan } from "../plan/generatePlan";
-import { snapshotMono, snapshotOverrideRuleIds, snapshotTemplate, viewportLevelPlan } from "../plan/viewportPlan";
+import { snapshotMono, snapshotOverrideRuleIds, snapshotTemplate, viewportLevelPlan, viewportSnapshotPlan } from "../plan/viewportPlan";
+import { isDoc3dSnapshot } from "../plan/toAxo";
 import { planToPrintSvg } from "./planToPrintSvg";
 import { drawTablesPdf, PDF_TABLE_FONT, sheetTables } from "./sheetTable";
 import { applyPdfInfo, finishPdfBytes } from "./pdfInfo";
@@ -230,7 +231,8 @@ async function renderPage(
       // [33] Override-Regeln des Ausschnitts bzw. seiner verknüpften Ansichtsvorlage (wie am Bildschirm).
       const ruleIds = snapshotOverrideRuleIds(project, snap);
       const template = snapshotTemplate(project, snap);
-      const planOf = (visible: Set<string>) => viewportLevelPlan(project, snap.activeLevelId, visible, snap.detail, scaleN, true, snapshotMono(project, snap), ruleIds, template, snap.modelViewOptionId);
+      // [266] 3D-Ausschnitt: 3D-Dokument aus dem Kern (`viewportSnapshotPlan`).
+      const planOf = (visible: Set<string>) => (isDoc3dSnapshot(snap) ? viewportSnapshotPlan(project, snap, visible, scaleN, true) : viewportLevelPlan(project, snap.activeLevelId, visible, snap.detail, scaleN, true, snapshotMono(project, snap), ruleIds, template, snap.modelViewOptionId));
       // [208] Eigene Bildmitte (Plakat): Ausschnitt um die Mitte; was darüber hinausgeht, schneidet der Rahmen ab.
       const centered = viewportCenterBounds(vp, scaleN);
       const draw = async (plan: Plan, transparent: boolean, bounds?: Plan["bounds"]) => {

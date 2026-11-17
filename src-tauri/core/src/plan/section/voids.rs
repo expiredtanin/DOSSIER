@@ -43,7 +43,7 @@ pub(super) fn subtract_voids_in_section(cuts: Vec<Cut>, p: &Project, base: (f64,
 }
 
 /// [G1] Ob ein Körper-Netz zu einem Abzugskörper gehört.
-pub(super) fn is_subtract_body(p: &Project, b: &BodyMesh) -> bool {
+pub(crate) fn is_subtract_body(p: &Project, b: &BodyMesh) -> bool {
     p.extruded_solids.as_deref().and_then(|s| s.get(b.index)).is_some_and(|s| s.operation.as_deref() == Some("subtract"))
 }
 

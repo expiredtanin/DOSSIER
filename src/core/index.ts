@@ -232,6 +232,7 @@ export {
   type ElevationOptions,
   generateElevationPlan,
 } from "../plan/toElevation";
+export { AXO_PROJECTIONS, AXO_VIEWS, axoPlanQuery, generateAxoPlan, isDoc3dSnapshot, snapshotAxoPlan, type AxoOptions } from "../plan/toAxo";
 
 export {
   planSceneBin,
@@ -249,7 +250,7 @@ export {
   sectionPlaneFromLevel,
   sectionUAxisModel,
 } from "../plan/toSection";
-export { viewportLevelPlan } from "../plan/viewportPlan";
+export { viewportLevelPlan, viewportSnapshotPlan } from "../plan/viewportPlan";
 export { snapshotMono } from "../plan/viewportPlan";
 export { snapshotOverrideRuleIds } from "../plan/viewportPlan";
 export { snapshotTemplate } from "../plan/viewportPlan";
