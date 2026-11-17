@@ -333,16 +333,22 @@ describe("[66] Präsentationsplan", () => {
     // Rahmen sind eng um den Inhalt (kein Flächenmass mehr); die Zeilen füllen den Satzspiegel bis unten.
     const lowest = Math.max(...boxes.map((b) => b.yMm + b.heightMm));
     expect((lowest - m.contentTopMm) / (bottom - m.contentTopMm)).toBeGreaterThanOrEqual(0.85);
-    // Ops: ein Blatt, Viewports, zwei Blatt-Tabellen, Platzhalter-Beschriftung, Master ohne eigenes Schriftfeld nötig (posterHeader).
+    // Ops: ein Blatt, Viewports, zwei Blatt-Tabellen, Axonometrie im Bild-Rahmen, Master ohne eigenes Schriftfeld nötig (posterHeader).
     const res = presentationSheetOps(p, o, LABELS, "p1")!;
     st().applyChange(res.ops);
     const q = st().project;
     const lay = q.layouts!.find((l) => l.id === res.layoutId)!;
-    expect(lay.viewports).toHaveLength(plan.items.length);
+    // [266] Ohne gerendertes Bild: die Vektor-Axonometrie aus dem Kern im Bild-Rahmen (ein 3D-Ausschnitt mehr), kein Platzhalter.
+    expect(lay.viewports).toHaveLength(plan.items.length + 1);
+    const axoVp = lay.viewports[lay.viewports.length - 1];
+    const axoSnap = q.viewSnapshots!.find((v) => v.id === axoVp.snapshotId)!;
+    expect(axoSnap.viewType).toBe("perspektive");
+    expect(axoSnap.doc3d?.view).toBe("southeast");
+    expect([axoVp.xMm, axoVp.yMm, axoVp.widthMm, axoVp.heightMm]).toEqual([plan.image!.xMm, plan.image!.yMm, plan.image!.widthMm, plan.image!.heightMm]);
     expect(lay.tables!.map((t) => t.source)).toEqual(["areas", "siteProof"]);
     const sheet = q.drawingLevels.find((l) => l.layoutId === lay.id)!;
     const texts = q.drawings2d.filter((d) => d.levelId === sheet.id && d.geom.shape === "text").map((d) => (d.geom as { text: string }).text);
-    expect(texts).toContain("3D-Bild hier einsetzen");
+    expect(texts).not.toContain("3D-Bild hier einsetzen");
     expect(texts).toContain("Situation");
     expect(q.masterLayouts!.find((x) => x.id === lay.masterId)!.posterHeader).toBe(true);
     expect(q.viewSnapshots!.find((v) => v.id === lay.viewports[0].snapshotId)!.templateId).toBe("std-vt-situation-wbw");

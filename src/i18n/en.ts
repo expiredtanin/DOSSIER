@@ -2124,6 +2124,10 @@ export const en: Record<TranslationKey, string> = {
   "camera.empty": "No cameras. Use “+” to create one from the current 3D view.",
   "camera.createFromView": "Create camera from current view",
   "camera.created": "Camera “{name}” created",
+  "doc3d.name": "3D document {n}",
+  "doc3d.created": "3D document “{name}” created: view and A3 sheet (1:{scale})",
+  "doc3d.empty": "3D document: nothing visible in this view",
+  "menu.view.doc3d": "Create 3D document",
   "camera.open": "Open camera",
   "camera.rowHint": "Click selects the camera, double-click opens it in 3D",
   "tour.button": "Camera tour",
@@ -4067,6 +4071,7 @@ export const en: Record<TranslationKey, string> = {
   "presentation.table.siteProof": "Zoning compliance",
   "presentation.image.placeholder": "Insert 3D image here",
   "presentation.image.hint": "Rendering dialog: \"Insert into layout\", or the \"Image\" button on the sheet",
+  "presentation.axo": "Axonometric",
   "presentation.donePages": "Presentation sheet 1:{scale} created on {pages} posters",
   "presentation.failed": "Could not create the presentation sheet",
   // [211] Rendering mit Blender/Cycles

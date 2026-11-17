@@ -21,6 +21,11 @@
 //                                                  --model-view <Name> wählt eine Modelldarstellung (eigene Stufe oder grob/mittel/fein) [173]
 //                                                  --hide <Code|Name,…> blendet Klassen aus (z. B. --hide "Schatten,Auto-Bemassung") [180]
 //                                                  --snapshot <Name|id> übernimmt Geschoss, Massstab, Vorlage und Sichtbarkeit eines Ausschnitts [207]
+//   dossier-cli <projekt.obp> axo [--view southeast|southwest|northeast|northwest|iso|…] [--projection iso|military|military30]
+//                                                  [--camera Name|id] [--snapshot Name|id] [--hidden] [--no-fills] [--context] [--hide …]
+//                                                  [--scale 200] [--hatch] [--color] [--format svg|json|dxf|dxfbin|dwg] [--out axo.svg]
+//                                                  [266] 3D-Dokument: Vektor-Axonometrie/-Perspektive mit verdeckten Kanten aus dem Kern
+//                                                  (Linienzeichnung, Silhouette kräftig, Flächen nach Lage grau; ohne GPU)
 //   dossier-cli <projekt.obp> ifc [--ebkph] [--ebenen] [--kontext]   (IFC mit eBKP-H-Hauptgruppen bzw. Modell-Ebenen als Klassifikation; --kontext: Gelände/Nachbarn mitgeben)
 //                                                  --schema 4|2x3: IFC4 (Standard) oder IFC2x3 (Coordination View 2.0)
 //   dossier-cli <projekt.obp> dxf [--binary] [--scale 100] [--dim-unit cm] [--layout]|dwg|ifc|step|obj [--no-mtl]|stl|glb|gltf|schedule [--openings|--elements|--rooms] [--format json|csv|svg|pdf]|kennzahlen [--sia416] [--ivhb] [--nachweis] [--format json|csv|svg|pdf] [--agsf m2] [--gruenflaeche m2] [--agf-basis gf|ngf|nf] [--untergeschosse]|raumprogramm [--import tabelle] [--sheet name|nr] [--mode replace|append] [--tolerance %] [--generate] [--format json|csv|svg|pdf] [--save projekt.obp]|sun [--level EG] [--out datei]
@@ -131,6 +136,8 @@ import {
   generatePlan,
   generateSectionPlan,
   viewportLevelPlan,
+  generateAxoPlan,
+  type AxoOptions,
   planToRenderScene,
   projectToModel3d,
   pathtraceMaterials,
@@ -922,7 +929,7 @@ async function importSyntheticContext(base: Project, args: Args, rows: Array<[st
 }
 
 /** Befehle, die eine Ausgabe-Datei erzeugen (für die Anonymitäts-Prüfung einer Wettbewerbs-Abgabe, [208]). */
-const EXPORT_COMMANDS = new Set(["plan", "section", "elevation", "dxf", "dwg", "ifc", "obj", "stl", "glb", "gltf", "step", "stp", "schedule", "kennzahlen", "raumprogramm", "render", "blend", "model3d"]);
+const EXPORT_COMMANDS = new Set(["plan", "section", "elevation", "axo", "dxf", "dwg", "ifc", "obj", "stl", "glb", "gltf", "step", "stp", "schedule", "kennzahlen", "raumprogramm", "render", "blend", "model3d"]);
 
 /**
  * [208] Anonyme Abgabe: vor einem Export den Freitext prüfen. Treffer stehen auf stderr; ohne `--ignore-anonymity`
@@ -1076,6 +1083,54 @@ async function execute(project: Project, file: string, command: string, rest: st
         return 0;
       }
       out(args, planToSvgString(plan, { scaleDenominator: tv.scale, hatch: args.flags.has("hatch") && args.flags.get("hatch") !== "false" }), `${lvl.name}.svg`);
+      return 0;
+    }
+    case "axo": {
+      // [266] 3D-Dokument aus dem Kern: Vorgabe (`--view`, `--projection`), Kamera-Element (`--camera`) oder Ausschnitt (`--snapshot`).
+      const f = args.flags;
+      const on = (k: string) => f.has(k) && f.get(k) !== "false";
+      const hidden = new Set(hideFlagCodes(project, args));
+      let codes = hidden.size ? new Set([...allCodes].filter((c) => !hidden.has(c))) : allCodes;
+      let axScale = f.has("scale") ? Number(f.get("scale")) : 200;
+      let opts: AxoOptions = { view: f.get("view") ?? "southeast", projection: f.get("projection") ?? "iso" };
+      const camName = f.get("camera");
+      if (camName) {
+        const n = camName.toLowerCase();
+        const cam = (project.cameras ?? []).find((c) => c.id.toLowerCase() === n || c.name.toLowerCase() === n);
+        if (!cam) fail(`Kamera nicht gefunden: ${camName}`);
+        opts = { cameraId: cam.id };
+      }
+      if (snapName) {
+        const n = snapName.toLowerCase();
+        const snap = (project.viewSnapshots ?? []).find((s) => s.id.toLowerCase() === n || s.name.toLowerCase() === n);
+        if (!snap) fail(`Ausschnitt nicht gefunden: ${snapName}`);
+        opts = { view: snap.view3d, ...(snap.doc3d ?? {}) };
+        if (!f.has("scale")) axScale = snap.scaleDenominator;
+        if (!f.has("hide")) codes = new Set([...allCodes].filter((c) => snap.layerVisibility[c] === true));
+      }
+      if (on("hidden")) opts.hiddenLines = true;
+      if (f.has("no-fills") || f.get("fills") === "false") opts.fills = false;
+      if (on("context")) opts.context = true;
+      const mono = f.has("color") ? inkArg(args) : true;
+      const t0 = Date.now();
+      const plan = generateAxoPlan(project, { ...opts, visibleCodes: codes, scaleDenominator: axScale, mono });
+      if (!plan) fail("kein 3D-Dokument (keine sichtbaren Bauteile oder unbrauchbare Kamera)");
+      if (f.has("time")) process.stderr.write(`axo: ${Date.now() - t0} ms, ${plan.primitives.length} Primitive\n`);
+      const name = `axo-${opts.view ?? opts.cameraId ?? "kamera"}`;
+      const fmt = f.get("format");
+      if (fmt === "json") {
+        out(args, JSON.stringify(planToRenderScene(plan, axScale)), `${name}.scene.json`);
+        return 0;
+      }
+      if (fmt === "dxf" || fmt === "dxfbin" || fmt === "dwg") {
+        await loadFileio();
+        const cad = { scaleDenominator: axScale, dimUnit: "m" as const, paperLayout: f.has("layout") };
+        if (fmt === "dxf") out(args, buildPlanDxf(plan, project, cad), `${name}.dxf`);
+        else if (fmt === "dxfbin") out(args, buildPlanDxfBinary(plan, project, cad), `${name}.dxf`);
+        else out(args, buildPlanDwg(plan, project, cad), `${name}.dwg`);
+        return 0;
+      }
+      out(args, planToSvgString(plan, { scaleDenominator: axScale, hatch: on("hatch") }), `${name}.svg`);
       return 0;
     }
     case "dxf":

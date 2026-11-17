@@ -44,37 +44,37 @@ fn quad_of(t: &[[f64; 3]; 3], n: [f64; 3], next: &[u32], vert: &dyn Fn(u32) -> (
     Some(q)
 }
 
-/// Ansichtskanten hinter der Schnittebene mit exakter Sichtbarkeit ([G4], `hlr.rs`; verdeckte nur mit
-/// `hidden`, wie `hiddenLines` der Ebene): die Körper als
-/// Dreiecke (Wände samt Gehrung und Löchern wie im 3D-Modell, Platten, Treppen, Dächer, Körper),
-/// auf die Seite hinter der Ebene zugeschnitten; die Schnittflächen verdecken in Tiefe 0. Bogenwände,
-/// verschnittene Dächer und Körper glätten ihre Facetten (keine Fugen, nur Knicke und Silhouetten).
+/// Flächen des Modells in Ansichtskoordinaten ([G4]), gemeinsam für den Schnitt (Projektion hinter der Ebene) und
+/// [266] die Vektor-Axonometrie (`plan/axo.rs`): Wände samt Gehrung und Löchern wie im 3D-Modell, Platten, Treppen
+/// (mit Wangen und Geländer), Dächer, freie Körper und importierte Netze (`mesh_keep`). `view`: Welt (x, Höhe, y) →
+/// Ansicht (u, v, Tiefe), affin; `view_normal`: Normale dazu (zugewandt bei Tiefe-Anteil < 0); `clip`: auf Tiefe ≥ 0
+/// zuschneiden (Schnitt). Bauteile ausgeblendeter Klassen (`skip`) entfallen.
+pub(crate) struct ViewFaces {
+    pub faces: Vec<crate::hlr::Face>,
+    /// Besitzer je `Face::owner`.
+    pub owners: Vec<(Kind, usize)>,
+    /// Besitzer, die Treppengeländer sind.
+    pub rail_owners: HashSet<u32>,
+}
+
 #[allow(clippy::too_many_arguments)]
-pub(super) fn projection_edges(p: &Project, plane: &Plane, walls_r: &[RWall], wi: &[render3d::WallInput], slabs_r: &[RSlab], bodies: &[&BodyMesh], meshes: &[crate::mesh_view::MeshRef], cuts: &[Cut], hidden: bool, max_depth: Option<f64>, strip: &[[f64; 3]], skip: &dyn Fn(Kind, usize) -> bool) -> (Vec<Edge>, Vec<Edge>) {
+pub(crate) fn view_faces(p: &Project, view: &dyn Fn([f64; 3]) -> [f64; 3], view_normal: &dyn Fn([f64; 3]) -> [f64; 3], clip: bool, walls_r: &[RWall], wi: &[render3d::WallInput], slabs_r: &[RSlab], bodies: &[&BodyMesh], meshes: &[crate::mesh_view::MeshRef], mesh_keep: &dyn Fn(&crate::mesh_view::MeshRef) -> bool, skip: &dyn Fn(Kind, usize) -> bool) -> ViewFaces {
     use crate::hlr;
-    let nl = crate::jsmath::hypot(&plane.normal);
-    if !(nl > 1e-12) {
-        return (Vec::new(), Vec::new());
-    }
-    let n = [plane.normal[0] / nl, plane.normal[1] / nl, plane.normal[2] / nl];
-    let ul = hypot2(n[2], n[0]);
-    let u = if ul > 1e-12 { [n[2] / ul, 0.0, -n[0] / ul] } else { [1.0, 0.0, 0.0] };
-    let o = plane.point;
-    let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-    let view = |w: [f64; 3]| {
-        let r = [w[0] - o[0], w[1] - o[1], w[2] - o[2]];
-        [dot(r, u), w[1], dot(r, n)]
-    };
     let mut faces: Vec<hlr::Face> = Vec::new();
     let mut owners: Vec<(Kind, usize)> = Vec::new();
     // Fläche (Welt, Y oben) hinter die Ebene zuschneiden und anhängen.
     let mut push = |faces: &mut Vec<hlr::Face>, world: &[[f64; 3]], normal: [f64; 3], owner: u32, smooth: u32, two_sided: bool| {
         let pts: Vec<[f64; 3]> = world.iter().map(|&w| view(w)).collect();
-        if pts.iter().all(|q| q[2] <= 0.0) {
-            return;
-        }
-        let Some((pts, no_edge)) = hlr::clip_front(&pts) else { return };
-        let mut f = hlr::Face::new(pts, [dot(normal, u), normal[1], dot(normal, n)], owner);
+        let (pts, no_edge) = if clip {
+            if pts.iter().all(|q| q[2] <= 0.0) {
+                return;
+            }
+            let Some(x) = hlr::clip_front(&pts) else { return };
+            x
+        } else {
+            (pts, Vec::new())
+        };
+        let mut f = hlr::Face::new(pts, view_normal(normal), owner);
         f.no_edge = no_edge;
         f.smooth = smooth;
         f.two_sided = two_sided;
@@ -221,19 +221,47 @@ pub(super) fn projection_edges(p: &Project, plane: &Plane, walls_r: &[RWall], wi
     }
     // [152] Importierte Netze hinter der Ebene (Hüllbox vorgefiltert): Facetten innerhalb des Knickwinkels
     // glätten (eine Gruppe je Netz), offene Netze beidseitig.
-    let (base, um) = (plane.base(), plane.u_model());
     for (k, m) in meshes.iter().enumerate() {
-        let (lo, hi) = mesh_depth_range(m, base, um);
-        if !(hi > 0.0) || max_depth.is_some_and(|d| d > 0.0 && lo > d + 1e-6) {
+        if !mesh_keep(m) {
             continue;
         }
         owners.push((Kind::Mesh, k));
         let owner = owners.len() as u32 - 1;
-        crate::mesh_view::hlr_faces(m, &|q| view([q[0], q[2], q[1]]), owner, group, true, &mut faces);
+        crate::mesh_view::hlr_faces(m, &|q| view([q[0], q[2], q[1]]), owner, group, clip, &mut faces);
         group += 1;
     }
     // [180] Bauteile ausgeblendeter Klassen: weder Kanten noch Verdecker.
     faces.retain(|f| owners.get(f.owner as usize).is_none_or(|&(k, i)| !skip(k, i)));
+    ViewFaces { faces, owners, rail_owners }
+}
+
+/// Ansichtskanten hinter der Schnittebene mit exakter Sichtbarkeit ([G4], `hlr.rs`; verdeckte nur mit
+/// `hidden`, wie `hiddenLines` der Ebene): die Körper als
+/// Dreiecke (Wände samt Gehrung und Löchern wie im 3D-Modell, Platten, Treppen, Dächer, Körper),
+/// auf die Seite hinter der Ebene zugeschnitten; die Schnittflächen verdecken in Tiefe 0. Bogenwände,
+/// verschnittene Dächer und Körper glätten ihre Facetten (keine Fugen, nur Knicke und Silhouetten).
+#[allow(clippy::too_many_arguments)]
+pub(super) fn projection_edges(p: &Project, plane: &Plane, walls_r: &[RWall], wi: &[render3d::WallInput], slabs_r: &[RSlab], bodies: &[&BodyMesh], meshes: &[crate::mesh_view::MeshRef], cuts: &[Cut], hidden: bool, max_depth: Option<f64>, strip: &[[f64; 3]], skip: &dyn Fn(Kind, usize) -> bool) -> (Vec<Edge>, Vec<Edge>) {
+    use crate::hlr;
+    let nl = crate::jsmath::hypot(&plane.normal);
+    if !(nl > 1e-12) {
+        return (Vec::new(), Vec::new());
+    }
+    let n = [plane.normal[0] / nl, plane.normal[1] / nl, plane.normal[2] / nl];
+    let ul = hypot2(n[2], n[0]);
+    let u = if ul > 1e-12 { [n[2] / ul, 0.0, -n[0] / ul] } else { [1.0, 0.0, 0.0] };
+    let o = plane.point;
+    let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    let view = |w: [f64; 3]| {
+        let r = [w[0] - o[0], w[1] - o[1], w[2] - o[2]];
+        [dot(r, u), w[1], dot(r, n)]
+    };
+    let mesh_keep = |m: &crate::mesh_view::MeshRef| {
+        let (lo, hi) = mesh_depth_range(m, plane.base(), plane.u_model());
+        hi > 0.0 && !max_depth.is_some_and(|d| d > 0.0 && lo > d + 1e-6)
+    };
+    let view_normal = |normal: [f64; 3]| [dot(normal, u), normal[1], dot(normal, n)];
+    let ViewFaces { mut faces, owners, rail_owners } = view_faces(p, &view, &view_normal, true, walls_r, wi, slabs_r, bodies, meshes, &mesh_keep, skip);
     // [176] Segment eines geknickten Schnitts: nur, was in seinem Streifen liegt (Winkelhalbierende).
     if !strip.is_empty() {
         faces = faces.into_iter().filter_map(|f| super::unfold::clip_face(f, strip)).collect();
@@ -270,4 +298,57 @@ pub(super) fn projection_edges(p: &Project, plane: &Plane, walls_r: &[RWall], wi
         }
     }
     (visible, hidden)
+}
+
+/// [266] Besitzer einer Fläche aus [`model_view_faces`]: Art und Element-Id (für die Auswahl im Plan).
+#[derive(Clone, Debug)]
+pub(crate) struct OwnerRef {
+    pub kind: Kind,
+    pub id: Option<String>,
+    /// Treppe (Stufen, Wangen, Geländer) bzw. Stütze statt Decke, wenn `kind` = `Slab`.
+    pub stair: bool,
+    pub column: bool,
+}
+
+/// [266] Alle Flächen des Modells für eine beliebige Ansicht (Vektor-Axonometrie, `plan/axo.rs`): dieselben Körper wie
+/// die Projektion des Schnitts ([`view_faces`]), ohne Zuschnitt; Bauteile ausgeblendeter Klassen entfallen ([180]),
+/// Abzugskörper ebenso (sie sind in den Wänden schon ausgespart). `meshes`: importierte Netze (Kontext) mitnehmen.
+pub(crate) fn model_view_faces(p: &Project, vis: &Visibility, view: &dyn Fn([f64; 3]) -> [f64; 3], view_normal: &dyn Fn([f64; 3]) -> [f64; 3], meshes: bool) -> Result<(ViewFaces, Vec<OwnerRef>), String> {
+    let walls_r = model3d::emit_walls_with(p, false, false)?;
+    let mut slabs_r = model3d::emit_slabs(p);
+    slabs_r.extend(model3d::emit_stairs(p, true));
+    slabs_r.extend(model3d::column_slabs(p));
+    let wi: Vec<render3d::WallInput> = walls_r.iter().map(wall_input).collect();
+    let walls = wall_owners(p, &walls_r);
+    let slabs = slab_owners(p, &slabs_r);
+    let cats = edge_categories(p, &walls, &slabs);
+    let shown = |c: &str| vis.visible(c) && vis.render(c);
+    let skip = |k: Kind, i: usize| cats.get(&(k, i)).is_some_and(|c| !shown(c));
+    let all = crate::solid_mesh::body_meshes(p);
+    let bodies: Vec<&BodyMesh> = all.iter().filter(|b| !is_subtract_body(p, b) && !skip(Kind::Body, b.index)).collect();
+    let mut mrefs = if meshes { crate::mesh_view::meshes(p) } else { Vec::new() };
+    mrefs.retain(|m| shown(&m.mesh.category_code));
+    let vf = view_faces(p, view, view_normal, false, &walls_r, &wi, &slabs_r, &bodies, &mrefs, &|_| true, &skip);
+    let roofs = p.roofs.as_deref().unwrap_or(&[]);
+    let solids = p.extruded_solids.as_deref().unwrap_or(&[]);
+    let refs = vf
+        .owners
+        .iter()
+        .map(|&(kind, i)| {
+            let (id, stair, column) = match kind {
+                Kind::Wall => (walls_r.get(i).map(|w| w.wall_id.clone()), false, false),
+                Kind::Slab => match slabs.get(i) {
+                    Some(SlabOwner::Ceiling(c, _)) => (Some(c.id.clone()), false, false),
+                    Some(SlabOwner::Stair(s)) => (Some(s.id.clone()), true, false),
+                    Some(SlabOwner::Column(c)) => (Some(c.id.clone()), false, true),
+                    _ => (None, false, false),
+                },
+                Kind::Roof => (roofs.get(i).map(|r| r.id.clone()), false, false),
+                Kind::Body => (solids.get(i).map(|s| s.id.clone()), false, false),
+                Kind::Mesh => (mrefs.get(i).map(|m| m.mesh.id.clone()), false, false),
+            };
+            OwnerRef { kind, id, stair, column }
+        })
+        .collect();
+    Ok((vf, refs))
 }

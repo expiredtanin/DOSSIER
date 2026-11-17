@@ -7,7 +7,7 @@
 //! auf das Rechteck geklippt. Die Blatt-Ebene rechnet in Papier-Metern (Ursprung oben links,
 //! Papier-y nach unten = −y, s. `sheetMmToModel`).
 
-use crate::model::{DetailLevel, DrawingLevel, DrawingLevelKind, Layout, LayoutViewport, Project, ViewSnapshot, ViewTemplate};
+use crate::model::{DetailLevel, DrawingLevel, DrawingLevelKind, Layout, LayoutViewport, Project, ViewSnapshot, ViewTemplate, ViewType};
 use crate::plan::domains::{plan_domains_buf, PlanArgs};
 use crate::plan::style::Detail;
 use std::borrow::Cow;
@@ -202,6 +202,10 @@ pub fn snapshot_extents(p: &Project, snap: &ViewSnapshot, scale: f64, shadows: O
 /// Plan-Puffer des Inhalts eines Ausschnitts beim Massstab 1:`scale` (Grundriss bzw. Schnitt/Ansicht wie
 /// im Viewport). `shadows` übersteuert den Schatten der Ansicht (Präsentationsplan [66]: Vorlage vor dem Anwenden).
 pub fn snapshot_buf(p: &Project, snap: &ViewSnapshot, scale: f64, shadows: Option<bool>) -> Option<Vec<u8>> {
+    // [266] 3D-Ausschnitt: Vektor-Axonometrie/-Perspektive mit verdeckten Kanten (3D-Dokument).
+    if snap.view_type == ViewType::Perspektive {
+        return doc3d_buf(p, snap, scale);
+    }
     let tp = snapshot_project(p, snap);
     let p = tp.as_ref();
     match p.drawing_levels.iter().find(|l| l.id == snap.active_level_id) {
@@ -211,6 +215,20 @@ pub fn snapshot_buf(p: &Project, snap: &ViewSnapshot, scale: f64, shadows: Optio
         },
         _ => plan_domains_buf(p, &viewport_args(p, snap, scale, snapshot_mono(p, snap))).ok(),
     }
+}
+
+/// [266] Inhalt eines 3D-Ausschnitts (Ansichtstyp „perspektive“) auf dem Blatt: das 3D-Dokument aus dem Kern
+/// (`plan/axo.rs`) mit den Klassen des Ausschnitts; ohne sichtbares Bauteil `None`.
+pub fn doc3d_buf(p: &Project, snap: &ViewSnapshot, scale: f64) -> Option<Vec<u8>> {
+    let show: HashSet<&String> = snap.layer_visibility.iter().filter(|(_, v)| **v).map(|(k, _)| k).collect();
+    let invisible: Vec<String> = candidate_codes(p).into_iter().filter(|c| !show.contains(c)).collect();
+    let text = crate::plan::axo::snapshot_text(snap, &invisible);
+    let buf = crate::plan::axo::axo_plan_buf(p, &[f64::from(u8::from(snapshot_mono(p, snap))), scale], &text).ok()?;
+    let v = crate::plan::buf::View::parse(&buf)?;
+    if v.prims()?.is_empty() {
+        return None;
+    }
+    Some(buf)
 }
 
 /// Ausmass (Modell-Meter `[minX, minY, maxX, maxY]`) des Ausschnitt-Inhalts — das Rechteck, dessen Mitte

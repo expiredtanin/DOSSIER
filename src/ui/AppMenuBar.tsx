@@ -12,6 +12,7 @@ import type { DropdownItem } from "./Dropdown";
 import { t } from "../i18n";
 import type { View3d, ViewType } from "../model/viewTypes";
 import { openRenderDialog } from "../state/renderDialogHook";
+import { create3dDocument } from "../state/doc3dAction";
 import { openAboutDialog } from "../state/aboutDialogHook";
 import { openBugReport, openQuickGuide } from "../state/helpMenuHook";
 import { openShortcutOverview } from "../state/shortcutOverviewHook";
@@ -180,6 +181,8 @@ export const AppMenuBar = memo(function AppMenuBar({
     { divider: true },
     // [211] Rendering mit Blender/Cycles (Dialog in App montiert, Öffner über den Modul-Hook).
     { label: t("menu.view.image3d"), onSelect: openImageExportDialog },
+    // [266] 3D-Dokument: die aktuelle 3D-Kamera als Vektorzeichnung (Ausschnitt + Blatt).
+    { label: t("menu.view.doc3d"), onSelect: () => void create3dDocument() },
     { label: t("menu.view.rendering"), onSelect: openRenderDialog, preview: true },
   ];
 

@@ -12,7 +12,7 @@ export function createPresentationSheet(o: PresentationOptions): string | null {
     const res = presentationSheetOps(
       st.project,
       o,
-      { sheetName: t("presentation.sheetName"), masterName: t("presentation.masterName", { format }), north: t("presentation.north"), northGroup: t("presentation.northGroup"), scaleBarGroup: t("presentation.scaleBarGroup"), situation: t("presentation.situation"), tableAreas: t("presentation.table.areas"), tableSiteProof: t("presentation.table.siteProof"), imagePlaceholder: t("presentation.image.placeholder"), imageHint: t("presentation.image.hint") },
+      { sheetName: t("presentation.sheetName"), masterName: t("presentation.masterName", { format }), north: t("presentation.north"), northGroup: t("presentation.northGroup"), scaleBarGroup: t("presentation.scaleBarGroup"), situation: t("presentation.situation"), tableAreas: t("presentation.table.areas"), tableSiteProof: t("presentation.table.siteProof"), imagePlaceholder: t("presentation.image.placeholder"), imageHint: t("presentation.image.hint"), axo: t("presentation.axo") },
       String(Date.now()),
     );
     if (!res) {

@@ -5472,9 +5472,71 @@ pub struct ViewSnapshot {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub trace: Option<TraceReference>,
+    /// [266] 3D-Dokument: der Ausschnitt (Ansichtstyp „perspektive“) zeigt auf einem Layout-Blatt, im PDF und in der CLI die
+    /// Vektorzeichnung mit verdeckten Kanten aus dem Kern (`plan/axo.rs`) — aus dieser Kamera, sonst aus dem
+    /// Blickwinkel `view3d`. Fehlt ⇒ Blickwinkel `view3d`, Isometrie, getönte Flächen.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub doc3d: Option<Doc3d>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
+}
+
+/// [266] Einstellungen eines 3D-Dokuments (Vektor-Axonometrie/-Perspektive aus dem Kern).
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct Doc3d {
+    /// Kamera in Modell-Koordinaten (wie `ViewCamera` der 3D-Ansicht); fehlt ⇒ Kamera-Element `cameraId`, sonst die Vorgabe `view`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub camera: Option<Doc3dCamera>,
+    /// Kamera-Element des Projekts ([213], `Project.cameras`).
+    #[serde(rename = "cameraId", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub camera_id: Option<String>,
+    /// Vorgabe: "southeast" | "southwest" | "northeast" | "northwest" oder ein `View3d`-Blickwinkel; fehlt ⇒ `view3d` des Ausschnitts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub view: Option<String>,
+    /// Projektion der Vorgabe: "iso" (Vorgabe) | "military" (45°/45°) | "military30" (30°/60°).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub projection: Option<String>,
+    /// Verdeckte Kanten gestrichelt zeigen; fehlt ⇒ aus.
+    #[serde(rename = "hiddenLines", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub hidden_lines: Option<bool>,
+    /// Flächen nach Lage hellgrau tönen; fehlt ⇒ an.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub fills: Option<bool>,
+    /// Importierte Kontext-Netze mitzeichnen; fehlt ⇒ aus.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub context: Option<bool>,
+    #[serde(flatten)]
+    #[ts(skip)]
+    pub extra: Extra,
+}
+
+/// [266] Kamera eines 3D-Dokuments in Modell-Koordinaten (x, y, z = Höhe; Meter).
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct Doc3dCamera {
+    /// "perspective" | "orthogonal".
+    pub kind: String,
+    pub position: [f64; 3],
+    /// Blickrichtung (normiert).
+    pub direction: [f64; 3],
+    pub up: [f64; 3],
+    /// Vertikaler Öffnungswinkel (Grad, Perspektive).
+    #[serde(rename = "fovDeg")]
+    pub fov_deg: f64,
+    /// Seitenverhältnis des Bildrahmens (Breite/Höhe, Perspektive); fehlt ⇒ 1.5.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub aspect: Option<f64>,
 }
 
 /// [205] Pausfolie (Archicad „Pausfolie & Referenz"): eine andere Ansicht gedämpft hinter (oder über) der

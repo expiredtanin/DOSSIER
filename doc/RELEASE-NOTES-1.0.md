@@ -55,7 +55,11 @@ in `doc/KURZANLEITUNG.md`):
    Kataster-Gebäude gefüllt, Parzelle, Nordpfeil, Massstabsbalken; alles auf Klassen, einzeln ausschaltbar.
 7. **3D und Schatten.** 3D-Viewport mit Live-Schnitt, Axonometrie, Sonnenstand und Schatten (Datum/Uhrzeit), Kameras und
    Kamerafahrt, Begehen mit Kollision, 3D-Bild als PNG in Abgabeauflösung (`bild3d`). Rendering mit Blender/Cycles als Brücke;
-   eingebauter Pathtracer als Vorschau.
+   eingebauter Pathtracer als Vorschau. **3D-Dokument** (16.11., [266]): *Ansicht → 3D-Dokument erstellen* zeichnet die aktuelle
+   3D-Kamera (Parallel oder Perspektive) als Vektorzeichnung mit verdeckten Kanten aus dem Kern (Umriss kräftig, Flächen nach Lage
+   hellgrau), als Ausschnitt mit Blatt A3; sie rechnet bei Modelländerungen neu und geht ins PDF/SVG/DXF, ohne Grafikkarte. Jeder
+   3D-Ausschnitt zeigt auf dem Blatt diese Zeichnung; Vorgaben Südost/Südwest/Nordost/Nordwest als Isometrie oder Militär 45°/45° bzw.
+   30°/60°; CLI `axo`. Der Präsentationsplan setzt die Axonometrie Südost in den Bild-Rahmen, wenn kein gerendertes Bild da ist.
 8. **Flächen und Kennzahlen.** Flächen nach SIA 416 / IVHB (HNF … GF, GFZ, AZ, BMZ, ÜZ), Raumbuch, Flächen- und Kennzahlen-Nachweis
    als CSV und PDF; Kennzahlenleiste und Tabelle rechnen aus derselben Quelle. **GV nach SIA 416 inklusive Dachraum:** je Geschoss
    GF × Geschosshöhe, dazu der Raum unter Steildach und Gauben bis Oberkante Dach (ohne Dachvorsprünge, Kniestock-Geschosse nur bis
@@ -129,6 +133,9 @@ Ehrlich vorweg: **Der Durchlauf des ganzen Referenz-Ablaufs auf dem Mac ist noch
   sind u. a. atomares Speichern ([116]), Sicherheitsrichtlinie der Webview ([117]), Wiederanlauf nach Kern-Panic ([118]), Texte beim Zoomen
   ([194], [145]), Objekteinstellungen als eigenes Fenster ([195b]), Linienenden ([146]), Cmd+J Verbinden ([190]).
 - 3D-Bilder konnten headless nicht verglichen werden: Es gibt dort kein echtes WebGPU. Aussehen von 3D, Schatten und Hülle ist auf dem Mac zu prüfen ([206]).
+- 3D-Dokument ([266]): verdeckte Kanten zeigt es nur, wo zugewandte Flächen verdeckt sind (keine Rückseiten); Fenster sind Öffnungen ohne Rahmen und
+  Glas; Flächen kleiner als etwa 1/1200 der Bildbreite bleiben ungetönt; Gelände und Kontext-Netze nur auf Wunsch (`--context`), Gelände-Element
+  gar nicht. Ob die Zeichnung zur Kamera im 3D-Fenster des Mac passt (Achsen, Spiegelung), ist nicht geprüft.
 - Leistung mit grossen Kontext-Importen ist nur im Container gemessen, nicht auf echter GPU ([214]).
 - Linux: das AppImage ist nur im Container geprüft (Xvfb, SwiftShader, als root mit `--no-sandbox`). Ungeprüft: echte Grafikkarte
   (Mesa-Vulkan), Wayland nativ, die GTK-Dialoge für Speichern/Export von Hand, Start mit Chromium-Sandbox als normaler Benutzer, Menüeintrag

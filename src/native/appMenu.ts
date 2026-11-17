@@ -16,6 +16,7 @@ import { useEffect, useRef } from "react";
 import { isTauriRuntime } from "./projectFile";
 import { t } from "../i18n";
 import { openRenderDialog } from "../state/renderDialogHook";
+import { create3dDocument } from "../state/doc3dAction";
 import { openShortcutOverview } from "../state/shortcutOverviewHook";
 import { openBugReport, openQuickGuide } from "../state/helpMenuHook";
 import { openImageExportDialog } from "../state/imageExportDialogHook";
@@ -457,6 +458,11 @@ export function useNativeAppMenu(
           await MenuItem.new({
             text: withPreview(t("menu.view.rendering")), // [265] natives Menü: nur Text, daher als Suffix
             action: () => openRenderDialog(),
+          }),
+          // [266] 3D-Dokument: die aktuelle 3D-Kamera als Vektorzeichnung (Ausschnitt + Blatt).
+          await MenuItem.new({
+            text: t("menu.view.doc3d"),
+            action: () => void create3dDocument(),
           }),
         ],
       });

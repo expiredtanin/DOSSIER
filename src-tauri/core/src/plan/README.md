@@ -67,6 +67,7 @@ Herkunft, kein Wegweiser.
 | `elevation/silhouette.rs` | Silhouette, Kanten mit exakter Verdeckung, Geländekante |
 | `elevation/patterns.rs` | Oberflächenmuster auf Ansichtsflächen |
 | `elevation/tests.rs` | Tests der Ansicht |
+| `axo.rs` | [266] 3D-Dokument: Vektor-Axonometrie/-Perspektive mit verdeckten Kanten (Flächen aus `section::model_view_faces`, `hlr.rs`, Tönung über `hlr_fill.rs`), Vorgaben, Kamera, Abfrage `axo_plan_buf()`; Tests `axo_tests.rs` |
 | `elevation_geom.rs` | Geometrie der Ansicht: Verdeckung, Schlagschatten, Eck-Verlängerung, Öffnungen |
 | `grid_view.rs` | Achsraster in Schnitt und Ansicht |
 | `underlay.rs` | Grundriss ausgerichtet unter Schnitt und Ansicht (Ausrichtung der Pausfolie „Grundriss hinter Schnitt“) |

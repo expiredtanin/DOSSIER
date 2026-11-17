@@ -93,7 +93,7 @@ fn f32s3(v: [f64; 3]) -> [f32; 3] {
     [json_f32(v[0]), json_f32(v[1]), json_f32(v[2])]
 }
 
-pub(super) fn wall_input(w: &RWall) -> render3d::WallInput {
+pub(crate) fn wall_input(w: &RWall) -> render3d::WallInput {
     render3d::WallInput {
         start: f32s2(w.start),
         end: f32s2(w.end),
