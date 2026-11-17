@@ -504,11 +504,15 @@ const columns: NonNullable<Project["columns"]> = [
   { id: "st-ug-1", type: "column", floorId: "ug", categoryCode: "25", position: P(10.0, 2.6), profile: { kind: "round", radius: 0.15 }, rotation: 0, height: H.ug, componentId: "std-c-stahlbeton" },
 ];
 
+/** [269] Klasse der Umgebungs-Körper (Brunnen, Pflanzgefäss, Sitzrolle): Objektbibliothek-Klasse „Fahrzeuge & Freiflächen". */
+const GARDEN_CLASS = "24";
+
 const extrudedSolids: NonNullable<Project["extrudedSolids"]> = [
   // Abzugskörper: Durchreiche Küche ↔ Atelier in der EG-Innenwand x = 6.
   { id: "void-durchreiche", type: "extrudedSolid", levelId: "eg", categoryCode: "20", points: rect(5.8, 6.6, 6.2, 7.8), height: 0.6, baseOffset: 1.0, operation: "subtract" },
-  // Freier Körper: runder Brunnentrog im Garten (Kreisprofil, Fase).
-  { id: "koerper-brunnen", type: "extrudedSolid", levelId: "ug", categoryCode: "20", points: [], circle: { center: P(4.5, -6.5), r: 0.7 }, height: 0.6, baseOffset: -0.1, chamfer: 0.03 },
+  // [269] Freier Körper: runder Brunnentrog im Garten (Kreisprofil, Fase) — Umgebung, also Klasse „24 Fahrzeuge &
+  // Freiflächen", nicht „20 Wände": nur so lässt er sich in Grundriss, Schnitt und Ansicht ausschalten.
+  { id: "koerper-brunnen", type: "extrudedSolid", levelId: "ug", categoryCode: GARDEN_CLASS, points: [], circle: { center: P(4.5, -6.5), r: 0.7 }, height: 0.6, baseOffset: -0.1, chamfer: 0.03 },
 ];
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -618,16 +622,19 @@ function annotations(): Drawing2D[] {
 
   // Text mit Formatierung, Hinweis mit Führungslinie, Detailverweis, Massstabsleiste, Revisionswolke.
   add("titel-eg", "eg", "50", {
-    shape: "text", at: P(-14, -16), text: "Erdgeschoss", height: 0.7, angle: 0, width: 16,
+    shape: "text", at: P(-14, -9.5), text: "Erdgeschoss", height: 0.7, angle: 0, width: 16,
     doc: textDoc([{ text: "Musterhaus komplex — Erdgeschoss", bold: true, sizePt: 14 }, { text: "Zweifamilienhaus am Südhang, Wohnung 1 (EG/UG) und Maisonette (OG/DG)", italic: true }]),
   });
+  // [269] Hinweis nah am Bauteil: einzeilig im Wohnraum über der Hebeschiebetür (Mitte x = 8.5), kurze
+  // Führungslinie zur Schwelle. Vorher stand er 4.5 m südlich unter den Massketten, die Führungslinie querte beide.
   add("hinweis-hst", "eg", "50", {
-    shape: "text", at: P(4, -4.5), text: "Hebeschiebetür, Schwelle rollstuhlgängig ≤ 25 mm", height: 0.25, angle: 0,
-    leaderTarget: P(8.5, -0.1), leaderBendPoints: [P(7.5, -2.8)],
+    shape: "text", at: P(7.3, 1.4), text: "Hebeschiebetür, Schwelle rollstuhlgängig ≤ 25 mm", height: 0.25, angle: 0,
+    leaderTarget: P(8.6, 0.05),
   }, { endMarks: { end: "arrow", sizeMm: 2 } });
   // [157] Detailverweis ausserhalb der Massketten (vorher „Detail und Situation“ auf Masskette/Höhenkote).
   add("detailref-1", "eg", "50", { shape: "detailref", at: P(-9, -2.6), label: "1", sheetLayoutId: "lay-501", sheetLabel: "501" });
-  add("massstab-eg", "eg", "50", { shape: "scalebar", at: P(-14, -19), segmentLength: 1, segments: 5 });
+  // [269] Titel und Massstabsbalken rücken näher ans Haus (vorher 16 bzw. 19 m darunter: ein halbes Blatt leer).
+  add("massstab-eg", "eg", "50", { shape: "scalebar", at: P(-14, -12), segmentLength: 1, segments: 5 });
   // Revisionswolke (Bögen nach aussen: negativer Bulge bei Gegenuhrzeigersinn).
   const cloud = [...arcPts(P(12.6, 0), 1.9, -Math.PI, Math.PI, 18).slice(0, 18)].map((q) => P(q.x, r3(q.y * 0.6)));
   add("revision-a", "eg", "90", { shape: "polyline", closed: true, pts: cloud, bulge: cloud.map(() => -0.45) }, { color: "#c0392b", weightMm: 0.35 });
@@ -930,8 +937,9 @@ export function buildComplexSampleProject(): Project {
     { id: "prof-rev", type: "drawing2d", levelId: "ug", categoryCode: "20", geom: { shape: "rect", min: P(0.5, -4.3), max: P(2.3, -4.05) } },
   ];
   p = { ...p, drawings2d: [...p.drawings2d, ...profiles] };
-  p = runCmd(p, "ug", "loft", { sources: ["prof-loft-1", "prof-loft-2"], height: 0.9 }).project;
-  p = runCmd(p, "ug", "revolve", { source: "prof-rev", a: [0.5, -4.6], b: [2.3, -4.6], angle: 360 }).project;
+  // [269] Beide auf der Umgebungsklasse (s. GARDEN_CLASS), damit der Eingabeplan sie ausblenden kann.
+  p = runCmd(p, "ug", "loft", { sources: ["prof-loft-1", "prof-loft-2"], height: 0.9 }, GARDEN_CLASS).project;
+  p = runCmd(p, "ug", "revolve", { source: "prof-rev", a: [0.5, -4.6], b: [2.3, -4.6], angle: 360 }, GARDEN_CLASS).project;
 
   // Räume per Raumerkennung (Umriss = Innenkontur der Wände).
   p = addRooms(p);

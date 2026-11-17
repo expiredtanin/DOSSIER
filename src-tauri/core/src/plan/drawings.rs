@@ -1006,7 +1006,13 @@ fn emit_inner(c: &Ctx, d: &Drawing2D, attrs: Attrs, geom: &Drawing2DGeom, greyed
                     let cut = em.end_mark(path[tip], dir, mark);
                     let tip_pulled = pull_back(path[tip], dir, cut);
                     for i in 0..tip {
-                        em.seg(path[i], if i == tip - 1 { tip_pulled } else { path[i + 1] });
+                        let (a0, b0) = (path[i], if i == tip - 1 { tip_pulled } else { path[i + 1] });
+                        // [269] Die Führungslinie setzt vor Masszahlen, Texten und Höhenkoten aus — auch vor dem
+                        // eigenen Text, sie beginnt also an dessen Rand statt im Wort. Das letzte Stück bleibt ganz,
+                        // damit der Pfeil am Bauteil ankommt.
+                        for (p0, p1) in c.cut_at_gaps(a0, b0) {
+                            em.seg(p0, p1);
+                        }
                     }
                 }
             }
@@ -2100,6 +2106,26 @@ pub fn plan_drawings(c: &Ctx, sink: &mut Sink, bounds: &mut Bounds) -> Result<()
     Ok(())
 }
 
+/// [269] Klassen, deren Zeichnungen weit über den Bauplatz hinausreichen dürfen (Kataster, Strassen, Höhenlinien,
+/// Gelände, Nachbargebäude): sie bestimmen den Ausschnitt nicht mit, sondern werden an ihm beschnitten.
+pub(super) fn is_far_class(code: &str) -> bool {
+    crate::import_context::is_context_class(code) || matches!(code, super::extras::SITE_CATEGORY | "13" | "14")
+}
+
+/// [269] Ausmass der Zeichnungen des Geschosses, die nicht auf einer weitreichenden Klasse liegen
+/// ([`is_far_class`]): Bemassung, Texte, Koten, Planzeichen. Sie bleiben im Ausschnitt, auch ausserhalb der Parzelle.
+pub(super) fn near_drawing_bounds(c: &Ctx) -> Bounds {
+    let mut memo = Memo::default();
+    let mut b = Bounds::new();
+    for d in &c.p.drawings2d {
+        if is_far_class(&d.category_code) || !on_floor(c, d) || !memo.get(c, d).shown {
+            continue;
+        }
+        acc_bounds(&d.geom, &mut b);
+    }
+    b
+}
+
 /// [207] Geschlossene Ringe der gezeichneten Zeichnungen des Geschosses (geschlossene Polylinie samt Inseln, Rechteck)
 /// auf Klassen, die `pred` (Klassen-Code) wählt und die der Plan zeigt; je Klasse in Projekt-Reihenfolge. Quelle der
 /// gefüllten Kataster-Gebäude und -Gewässer im Situationsplan (`situation.rs`).
@@ -2704,6 +2730,42 @@ mod tests {
 
     fn drawing(geom: serde_json::Value) -> serde_json::Value {
         serde_json::json!({ "id": "d1", "type": "drawing2d", "levelId": "eg", "categoryCode": "20", "geom": geom })
+    }
+
+    /// [269] Die Führungslinie eines Hinweistextes setzt vor Masszahlen und Texten aus (sie beginnt am Rand des
+    /// eigenen Textes und läuft nicht durch eine Masszahl).
+    #[test]
+    fn fuehrungslinie_setzt_vor_masszahlen_aus() {
+        let dim = serde_json::json!({
+            "id": "m1", "type": "drawing2d", "levelId": "eg", "categoryCode": "20",
+            "geom": { "shape": "dimension", "pts": [{ "x": 0.0, "y": 2.0 }, { "x": 8.0, "y": 2.0 }], "offset": 0.0 }
+        });
+        let hint = serde_json::json!({ "shape": "text", "at": { "x": 4.0, "y": 5.0 }, "text": "Hinweis", "height": 0.25, "angle": 0.0,
+            "leaderTarget": { "x": 4.0, "y": 0.0 } });
+        let len = |p: &Project| -> f64 {
+            render(p, drawing(hint.clone()), 100.0)
+                .iter()
+                .filter_map(|q| match q {
+                    Primitive::Line { a, b, .. } => Some(hypot2(b.x - a.x, b.y - a.y)),
+                    _ => None,
+                })
+                .sum()
+        };
+        let plain = project(serde_json::json!({ "drawings2d": [] }));
+        let with_dim = project(serde_json::json!({ "drawings2d": [dim] }));
+        let (l0, l1) = (len(&plain), len(&with_dim));
+        assert!(l0 > 4.0, "ohne Hindernis die ganze Linie: {l0}");
+        assert!(l1 < l0 - 0.2, "mit Masszahl kürzer: {l1} gegen {l0}");
+        // Der Pfeil sitzt weiterhin am Ziel.
+        let near_target = render(&with_dim, drawing(hint.clone()), 100.0).iter().any(|q| match q {
+            Primitive::Line { a, b, .. } => hypot2(a.x - 4.0, a.y) < 0.6 || hypot2(b.x - 4.0, b.y) < 0.6,
+            _ => false,
+        });
+        assert!(near_target, "Führungslinie endet am Bauteil");
+        // Der Hinweis selbst gehört zu den Zeichnungen: die Hindernisse (samt seinem Text) rechnen ohne Rekursion.
+        let both = project(serde_json::json!({ "drawings2d": [dim.clone(), drawing(hint.clone())] }));
+        let a = args(100.0);
+        assert!(!Ctx::new(&both, &a).line_gaps().is_empty());
     }
 
     /// [93] Auf der Blatt-Ebene (Papier 1:1) haben Kote, Detailverweis und Punktmarke dasselbe

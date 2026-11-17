@@ -151,6 +151,8 @@ pub struct Ctx<'a> {
     /// Hindernisse der Masse/Koten, der übrigen Hindernis-Zeichnungen und der Achsblasen.
     house: std::cell::OnceCell<Vec<Vec<Vec2>>>,
     drawn_obst: std::cell::OnceCell<super::drawings::DrawnObstacles>,
+    /// [269] Die Hindernisse werden gerade gerechnet: Führungslinien setzen dann nicht aus (sonst Rekursion).
+    obst_busy: std::cell::Cell<bool>,
     bubble_obst: std::cell::OnceCell<super::stamp_place::Obstacles>,
     /// [207] Linienzüge der Strassen-Klasse („11“) je Geschoss für Strassennamen entlang der Achse (`plan/text_curve.rs`).
     road_axes: std::cell::OnceCell<Vec<(String, Vec<crate::model::Vec2>)>>,
@@ -165,7 +167,7 @@ impl<'a> Ctx<'a> {
         let hidden = overrides::hidden_elements(p, overrides::RuleView::at(a.scale, a.rules.as_ref()).view("plan"));
         let mv_sel = super::model_view::selected_id(p, &a.floor, a.model_view.as_deref()).and_then(|id| super::model_view::find(p, id));
         let mv = super::model_view::resolve(mv_sel, a.detail, a.scale);
-        Ctx { p, a, cats, hidden, mv_sel, mv, house: Default::default(), drawn_obst: Default::default(), bubble_obst: Default::default(), road_axes: Default::default() }
+        Ctx { p, a, cats, hidden, mv_sel, mv, house: Default::default(), drawn_obst: Default::default(), obst_busy: Default::default(), bubble_obst: Default::default(), road_axes: Default::default() }
     }
 
     /// [179] Aussenringe der Gebäudegrundfläche (`context::building_rings`), einmal je Plan.
@@ -175,21 +177,33 @@ impl<'a> Ctx<'a> {
 
     /// [179] Masse und Höhenkoten des Geschosses als Hindernisse (Achsblasen weichen ihnen aus).
     pub(super) fn dims_obstacles(&self) -> &super::stamp_place::Obstacles {
-        &self.drawn_obst.get_or_init(|| super::drawings::drawn_and_dimension_obstacles(self)).dims
+        &self.obstacles().dims
     }
 
     /// [179] Hindernisse der Zeichnungen des Geschosses (Bemassung, Koten, Texte, Symbole).
     pub(super) fn drawn_obstacles(&self) -> &super::stamp_place::Obstacles {
-        &self.drawn_obst.get_or_init(|| super::drawings::drawn_and_dimension_obstacles(self)).drawn
+        &self.obstacles().drawn
+    }
+
+    fn obstacles(&self) -> &super::drawings::DrawnObstacles {
+        self.drawn_obst.get_or_init(|| {
+            self.obst_busy.set(true);
+            let o = super::drawings::drawn_and_dimension_obstacles(self);
+            self.obst_busy.set(false);
+            o
+        })
     }
 
     /// [256] Aussparungen der Hilfslinien vor Masszahlen, Texten und Höhenkoten (`drawings::DrawnObstacles::gaps`).
     pub(super) fn line_gaps(&self) -> &super::stamp_place::Obstacles {
-        &self.drawn_obst.get_or_init(|| super::drawings::drawn_and_dimension_obstacles(self)).gaps
+        &self.obstacles().gaps
     }
 
     /// [256] Hilfslinie a–b ohne die Stücke vor Masszahlen, Texten und Höhenkoten ([`Self::line_gaps`], 0.5 mm Papier Rand).
     pub(super) fn cut_at_gaps(&self, a: Vec2, b: Vec2) -> Vec<(Vec2, Vec2)> {
+        if self.obst_busy.get() {
+            return vec![(a, b)];
+        }
         let g = self.line_gaps();
         if g.is_empty() {
             return vec![(a, b)];
@@ -2100,7 +2114,7 @@ pub fn plan_domains_buf(p: &Project, a: &PlanArgs) -> Result<Vec<u8>, String> {
         w.group(g);
     }
     w.group(&violations);
-    w.bounds = Some(super::extras::plan_bounds(&bounds, &super::extras::extra_bounds(p, &under, |k| c.shown(k))));
+    w.bounds = Some(super::extras::site_clip(&c, super::extras::plan_bounds(&bounds, &super::extras::extra_bounds(p, &under, |k| c.shown(k))), house));
     w.house = house;
     Ok(w.finish())
 }
@@ -2354,7 +2368,7 @@ fn assemble_cached(c: &Ctx, revs: &crate::document::Revs, cc: &mut super::cache:
     };
     let mut e = Bounds::new();
     e.merge(extra);
-    w.bounds = Some(super::extras::plan_bounds(&bounds, &e));
+    w.bounds = Some(super::extras::site_clip(c, super::extras::plan_bounds(&bounds, &e), w.house));
     Ok(chunks)
 }
 
@@ -4053,6 +4067,44 @@ mod tests {
         let mut b = Bounds::new();
         merge_marks(&mut b, &[[2.6e6, 1.2e6, 2.6e6 + 10.0, 1.2e6]]);
         assert_eq!(b.get(), Some([2.6e6, 1.2e6, 2.6e6 + 10.0, 1.2e6]));
+    }
+
+    /// [269] Mit Parzelle endet das Ausmass bei Parzelle + 5 m (und dem Haus): lange Kataster- und Strassenlinien
+    /// blähen den Plan nicht auf. Situationsplan und Schattenstudie behalten ihr weites Ausmass.
+    #[test]
+    fn ausmass_endet_an_parzelle_plus_rand() {
+        let mut p = sample();
+        let codes: Vec<String> = p.flat_categories().iter().map(|c| c.code.clone()).collect();
+        let t = serde_json::json!({ "floor": "eg", "show": codes, "grey": [], "global": true, "scale": 200 }).to_string();
+        let a = PlanArgs::parse(1.0, &t).unwrap();
+        let line: Drawing2D = serde_json::from_value(serde_json::json!({
+            "id": "kat", "type": "drawing2d", "levelId": "eg", "categoryCode": "01", "geom": { "shape": "line", "a": { "x": -500.0, "y": -500.0 }, "b": { "x": 500.0, "y": 500.0 } }
+        })).unwrap();
+        p.drawings2d.push(line);
+        let bounds = |p: &Project, a: &PlanArgs| crate::plan::buf::decode(&plan_domains_buf(p, a).unwrap()).unwrap().2.unwrap();
+        let wide = bounds(&p, &a);
+        assert!(wide[0] <= -500.0 && wide[3] >= 500.0, "ohne Parzelle: die ganze Linie {wide:?}");
+        let h = plan_domains(&p, &a).unwrap().bounds.unwrap();
+        let pad = 3.0;
+        p.site_rules = Some(serde_json::from_value(serde_json::json!({
+            "parcel": [{"x": h[0] - pad, "y": h[1] - pad}, {"x": h[2] + pad, "y": h[1] - pad}, {"x": h[2] + pad, "y": h[3] + pad}, {"x": h[0] - pad, "y": h[3] + pad}], "defaultSetback": 0.0
+        })).unwrap());
+        let b = bounds(&p, &a);
+        let lim = pad + super::super::extras::SITE_MARGIN_M;
+        assert!(b[0] >= h[0] - lim - 1e-9 && b[1] >= h[1] - lim - 1e-9 && b[2] <= h[2] + lim + 1e-9 && b[3] <= h[3] + lim + 1e-9, "{b:?} gegen {h:?}");
+        assert!(b[0] <= h[0] && b[2] >= h[2], "Haus bleibt drin");
+        // Ein Titel weit unter der Parzelle gehört zum Plan (Klasse „50") und bleibt ganz im Ausschnitt.
+        let title: Drawing2D = serde_json::from_value(serde_json::json!({
+            "id": "titel", "type": "drawing2d", "levelId": "eg", "categoryCode": "50",
+            "geom": { "shape": "text", "at": { "x": 0.0, "y": -40.0 }, "text": "Erdgeschoss", "height": 0.7, "angle": 0.0 }
+        })).unwrap();
+        p.drawings2d.push(title);
+        assert!(bounds(&p, &a)[1] <= -40.0, "Titel bleibt");
+        // Schattenstudie: keine Beschneidung.
+        let t2 = serde_json::json!({ "floor": "eg", "show": p.flat_categories().iter().map(|c| c.code.clone()).collect::<Vec<_>>(), "grey": [], "global": true, "scale": 200, "sunWhen": 1.7e12 }).to_string();
+        let a2 = PlanArgs::parse(1.0, &t2).unwrap();
+        assert!(a2.sun_when.is_some());
+        assert!(bounds(&p, &a2)[2] >= 500.0);
     }
 
     #[test]

@@ -4,9 +4,24 @@
 
 use super::*;
 
+/// [269] Ansichtsschraffur in Papiergrösse: Musterlinien liegen nie enger als so viel Papier-mm (sonst dünnt
+/// `surface_pattern::thin_factor` aus oder lässt weg) — Ziegel- und Schalungsmuster bleiben bei 1:100 lesbar und
+/// verschwinden gegen 1:200 hin, statt die Fläche zu schwärzen.
+pub(super) const PATTERN_MIN_PAPER_MM: f64 = 2.5;
+/// [269] Strichstärke der Ansichtsschraffur (Papier-mm): fein wie die Bodenbeläge im Grundriss, und nie dominanter
+/// als die Fensterkonturen (0.18) — eine eigene Stärke im Muster gilt bis zu dieser Grenze.
+pub(super) const PATTERN_WEIGHT_MM: f64 = 0.05;
+pub(super) const PATTERN_WEIGHT_MAX_MM: f64 = 0.09;
+
+/// [269] Massstab für `surface_pattern::segments`, der dessen Ausdünnung auf [`PATTERN_MIN_PAPER_MM`] hebt.
+pub(super) fn pattern_scale(scale: f64) -> f64 {
+    let s = if scale.is_finite() && scale > 0.0 { scale } else { 100.0 };
+    s * PATTERN_MIN_PAPER_MM / crate::surface_pattern::MIN_PAPER_MM
+}
+
 /// Strichstärke und Farbe einer Ansichtsschraffur.
 fn pattern_style(sp: &SurfacePattern, comp: &Component) -> (f64, String) {
-    let w = sp.weight_mm.filter(|w| w.is_finite() && *w > 0.0).unwrap_or(0.1);
+    let w = sp.weight_mm.filter(|w| w.is_finite() && *w > 0.0).unwrap_or(PATTERN_WEIGHT_MM).min(PATTERN_WEIGHT_MAX_MM);
     let c = sp.color.clone().or_else(|| comp.foreground.clone()).filter(|c| !c.trim().is_empty()).unwrap_or_else(|| PATTERN_INK.into());
     (w, c)
 }
@@ -66,7 +81,7 @@ pub(super) fn surface_patterns(p: &Project, faces: &mut [Face], frame: &[f64; 9]
         let (u0, _, _) = proj([wall.start.x, 0.0, wall.start.y]);
         let local: Vec<sp::P> = f.pts.iter().map(|q| [(q[0] - u0) / k, q[1] - z0]).collect();
         let off = wall.surface_pattern_offset.as_ref().map_or([0.0, 0.0], |o| [o.x, o.y]);
-        let segs = sp::segments(&local, &spec, off, scale);
+        let segs = sp::segments(&local, &spec, off, pattern_scale(scale));
         if segs.is_empty() {
             continue;
         }
@@ -129,7 +144,7 @@ pub(super) fn surface_patterns(p: &Project, faces: &mut [Face], frame: &[f64; 9]
                 faces[ti].depth = face_depth;
             }
             let own: Option<Rc<[usize]>> = (!tris.is_empty()).then(|| Rc::from(tris));
-            for (a, b) in sp::segments_3d(plane, &spec, off, scale) {
+            for (a, b) in sp::segments_3d(plane, &spec, off, pattern_scale(scale)) {
                 let (ua, va, da) = proj([a[0], a[2], a[1]]);
                 let (ub, vb, db) = proj([b[0], b[2], b[1]]);
                 if da <= EPS || db <= EPS {

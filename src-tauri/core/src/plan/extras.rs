@@ -838,6 +838,42 @@ pub fn plan_bounds(domains: &Bounds, extra: &Bounds) -> [f64; 4] {
     b.get().unwrap_or([0.0, 0.0, 1.0, 1.0])
 }
 
+/// [269] Rand (m) um die Parzelle, bis zu dem der Plan reicht: was weiter draussen liegt (lange Kataster-, Strassen-
+/// und Höhenlinien), beschneidet der Ausschnitt, statt das Blatt aufzublähen.
+pub const SITE_MARGIN_M: f64 = 5.0;
+
+/// [269] Ausmass auf Parzelle + [`SITE_MARGIN_M`] (und das Haus samt Marken-Reichweite) beschnitten. Ohne Parzelle,
+/// im Situationsplan (weites Umfeld gewollt) und bei sichtbarem Schatten (reicht weit) unverändert.
+pub fn site_clip(c: &super::domains::Ctx, b: [f64; 4], house: Option<[f64; 4]>) -> [f64; 4] {
+    let (p, a) = (c.p, c.a);
+    let Some(rules) = p.site_rules.as_ref().filter(|r| r.parcel.len() >= 3 && r.parcel.iter().all(|q| q.x.is_finite() && q.y.is_finite())) else { return b };
+    // Schatten nur, wenn ihre Klasse gezeigt wird (sonst bestimmt die Studie das Ausmass nicht mit).
+    let shadow = a.sun_when.is_some() && crate::standards::derived_visible(p, crate::standards::SHADOW_CATEGORY, |k| a.show.contains(k));
+    if !a.global || shadow || super::situation::active(p, a) {
+        return b;
+    }
+    let mut w = Bounds::new();
+    for q in &rules.parcel {
+        w.acc(q.x, q.y);
+    }
+    let Some(mut w) = w.get().map(|w| [w[0] - SITE_MARGIN_M, w[1] - SITE_MARGIN_M, w[2] + SITE_MARGIN_M, w[3] + SITE_MARGIN_M]) else { return b };
+    if let Some(h) = house.filter(|h| h.iter().all(|v| v.is_finite())) {
+        // Schnittmarken, Bemassung und Beschriftung liegen um das Haus (Papier-mm → Meter).
+        let r = (2.0 * crate::presentation_sheet::MARKS_REACH_MM + crate::presentation_sheet::MARKS_MARGIN_MM) * a.scale.max(1.0) / 1000.0;
+        w = [w[0].min(h[0] - r), w[1].min(h[1] - r), w[2].max(h[2] + r), w[3].max(h[3] + r)];
+    }
+    // Zeichnungen ausserhalb der Parzelle, die zum Plan gehören (Titel, Massstabsbalken, Bemassung, Koten), bleiben ganz.
+    if let Some(n) = super::drawings::near_drawing_bounds(c).get() {
+        w = [w[0].min(n[0]), w[1].min(n[1]), w[2].max(n[2]), w[3].max(n[3])];
+    }
+    let n = [b[0].max(w[0]), b[1].max(w[1]), b[2].min(w[2]), b[3].min(w[3])];
+    if n[2] > n[0] && n[3] > n[1] {
+        n
+    } else {
+        b
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
