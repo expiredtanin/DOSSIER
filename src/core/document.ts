@@ -188,6 +188,7 @@ export type QueryName =
   | "ivhb"
   | "siteProof"
   | "siteCheck"
+  | "cyclesScene"
   | "excavationQuantities"
   | "dormerStatus"
   | "buildingFootprint"

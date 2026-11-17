@@ -48,19 +48,19 @@ impl Default for MeshOptions {
 }
 
 /// Teil-Netz mit EINEM Material, lokale Indizes.
-struct Prim {
-    material: f64,
-    positions: Vec<f64>,
-    indices: Vec<f64>,
+pub(crate) struct Prim {
+    pub(crate) material: f64,
+    pub(crate) positions: Vec<f64>,
+    pub(crate) indices: Vec<f64>,
 }
 
 /// Ein Bauteil-Vorkommen mit ≥ 1 Teil-Netz.
-struct Group {
-    name: String,
-    kind: &'static str,
-    id: String,
-    level: f64,
-    prims: Vec<Prim>,
+pub(crate) struct Group {
+    pub(crate) name: String,
+    pub(crate) kind: &'static str,
+    pub(crate) id: String,
+    pub(crate) level: f64,
+    pub(crate) prims: Vec<Prim>,
 }
 
 impl Group {
@@ -74,17 +74,17 @@ impl Group {
 }
 
 /// Material der Szene: Farbe sRGB 0..1, Alpha < 1 = transparent (Glas).
-struct Material {
-    name: String,
-    rgba: [f64; 4],
-    metallic: f64,
-    roughness: f64,
+pub(crate) struct Material {
+    pub(crate) name: String,
+    pub(crate) rgba: [f64; 4],
+    pub(crate) metallic: f64,
+    pub(crate) roughness: f64,
 }
 
 /// Materialtabelle: gleiche Farbe + Name = ein Material (Schlüssel wie in TS als Text).
 #[derive(Default)]
-struct Materials {
-    list: Vec<Material>,
+pub(crate) struct Materials {
+    pub(crate) list: Vec<Material>,
     by_key: HashMap<String, usize>,
 }
 
@@ -338,8 +338,47 @@ fn same_rgb(a: &Rgb, b: &Rgb) -> bool {
     a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-9)
 }
 
+/// Gesammelte Szene: Bauteil-Gruppen mit Teil-Netzen, Materialtabelle, Geschosse (gemeinsame Quelle von
+/// glTF/OBJ/STL und der Cycles-Szene [215], `cycles_scene.rs`).
+pub(crate) struct SceneData {
+    pub(crate) groups: Vec<Group>,
+    pub(crate) mats: Materials,
+    pub(crate) levels: Vec<(String, String)>,
+}
+
 /// Die Szene als flacher Puffer (s. Modulkopf).
 pub fn mesh_export_data(src: &Project, opt: &MeshOptions) -> Result<Flat, String> {
+    let SceneData { groups, mats, levels } = collect_scene(src, opt)?;
+    // Flacher Puffer (Gegenstück zu `mesh_export.rs`).
+    let mut f = Flat::new(FLAT_VERSION);
+    f.num(if opt.by_level { 1.0 } else { 0.0 });
+    f.num(mats.list.len() as f64);
+    for m in &mats.list {
+        let n = f.str(&m.name);
+        f.nums(&[n, m.rgba[0], m.rgba[1], m.rgba[2], m.rgba[3], m.metallic, m.roughness]);
+    }
+    f.num(levels.len() as f64);
+    for (id, name) in &levels {
+        let (a, b) = (f.str(id), f.str(name));
+        f.nums(&[a, b]);
+    }
+    let groups: Vec<&Group> = groups.iter().filter(|g| g.prims.iter().any(|p| !p.indices.is_empty())).collect();
+    f.num(groups.len() as f64);
+    for g in groups {
+        let (name, kind, id) = (f.str(&g.name), f.str(g.kind), f.str(&g.id));
+        f.nums(&[name, kind, id, g.level, g.prims.len() as f64]);
+        for pr in &g.prims {
+            f.nums(&[pr.material, (pr.positions.len() / 3) as f64]);
+            f.nums(&pr.positions);
+            f.num((pr.indices.len() / 3) as f64);
+            f.nums(&pr.indices);
+        }
+    }
+    Ok(f)
+}
+
+/// Sammelt die Szene aus dem Projekt (Dreiecke in Welt-Achsen (x, Höhe, y), nach aussen gewickelt).
+pub(crate) fn collect_scene(src: &Project, opt: &MeshOptions) -> Result<SceneData, String> {
     let mut p = src.clone();
     let mut groups: Vec<Group> = Vec::new();
     let mut mats = Materials::default();
@@ -533,32 +572,7 @@ pub fn mesh_export_data(src: &Project, opt: &MeshOptions) -> Result<Flat, String
         }
     }
 
-    // Flacher Puffer (Gegenstück zu `mesh_export.rs`).
-    let mut f = Flat::new(FLAT_VERSION);
-    f.num(if opt.by_level { 1.0 } else { 0.0 });
-    f.num(mats.list.len() as f64);
-    for m in &mats.list {
-        let n = f.str(&m.name);
-        f.nums(&[n, m.rgba[0], m.rgba[1], m.rgba[2], m.rgba[3], m.metallic, m.roughness]);
-    }
-    f.num(levels.len() as f64);
-    for (id, name) in &levels {
-        let (a, b) = (f.str(id), f.str(name));
-        f.nums(&[a, b]);
-    }
-    let groups: Vec<&Group> = groups.iter().filter(|g| g.prims.iter().any(|p| !p.indices.is_empty())).collect();
-    f.num(groups.len() as f64);
-    for g in groups {
-        let (name, kind, id) = (f.str(&g.name), f.str(g.kind), f.str(&g.id));
-        f.nums(&[name, kind, id, g.level, g.prims.len() as f64]);
-        for pr in &g.prims {
-            f.nums(&[pr.material, (pr.positions.len() / 3) as f64]);
-            f.nums(&pr.positions);
-            f.num((pr.indices.len() / 3) as f64);
-            f.nums(&pr.indices);
-        }
-    }
-    Ok(f)
+    Ok(SceneData { groups, mats, levels })
 }
 
 #[cfg(test)]

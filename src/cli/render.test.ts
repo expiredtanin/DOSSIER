@@ -9,6 +9,7 @@ import { spawnSync } from "node:child_process";
 import { run } from "./main";
 import { serializeProject } from "../core";
 import { sampleProject } from "../model/sampleProject";
+import { makeExr } from "../export/cyclesExr.testutil";
 
 const dir = mkdtempSync(join(tmpdir(), "dossier-cli-render-"));
 const file = join(dir, "demo.obp");
@@ -186,4 +187,120 @@ print("PROBE " + json.dumps({
     expect(info.shading).toEqual(["MATERIAL"]);
     expect(info.persp).toEqual(["CAMERA"]);
   }, 300_000);
+});
+
+// [215] `render --engine cycles`: Szene aus dem Kern, Ersatz-`cycles` (Shell-Skript) schreibt ein EXR; die CLI macht daraus das PNG.
+describe("dossier-cli render --engine cycles", () => {
+  const fakeCycles = join(dir, "cycles-fake");
+  const fakeExr = join(dir, "fake.exr");
+  beforeAll(() => {
+    writeFileSync(fakeExr, makeExr(8, 4, new Float32Array(8 * 4 * 3).fill(0.4), true));
+    writeFileSync(
+      fakeCycles,
+      `#!/bin/sh
+echo "args: $@" > "${dir}/fake-cycles-args.txt"
+out=""
+prev=""
+for a in "$@"; do
+  [ "$prev" = "--output" ] && out="$a"
+  prev="$a"
+  scene="$a"
+done
+cp "$scene" "${dir}/fake-cycles-scene.xml"
+printf 'Progress 50.00   Sample 4/8\\rProgress 100.00   Sample 8/8\\n'
+cp "${fakeExr}" "$out"
+echo "Finished Rendering."
+`,
+    );
+    chmodSync(fakeCycles, 0o755);
+  });
+  const quiet = async <T,>(f: () => Promise<T>): Promise<{ result: T; err: string }> => {
+    const err = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      const result = await f();
+      return { result, err: err.mock.calls.map((c) => String(c[0])).join("") };
+    } finally {
+      err.mockRestore();
+    }
+  };
+
+  it("schreibt Szene, startet cycles mit Grösse/Samples und macht ein PNG", async () => {
+    const png = join(dir, "cy.png");
+    const { result, err } = await quiet(() => run([":musterhaus-komplex", "render", "--engine", "cycles", "--cycles", fakeCycles, "--out", png, "--camera", "Südost", "--samples", "8", "--size", "8x4"]));
+    expect(result).toBe(0);
+    expect(Array.from(readFileSync(png).subarray(1, 4))).toEqual([80, 78, 71]);
+    expect(err).toContain("geschrieben:");
+    const args = readFileSync(join(dir, "fake-cycles-args.txt"), "utf8");
+    expect(args).toMatch(/--background --samples 8 --width 8 --height 4 --output .*render\.exr .*scene\.xml/);
+    const xml = readFileSync(join(dir, "fake-cycles-scene.xml"), "utf8");
+    expect(xml).toContain("<cycles>");
+    expect(xml).toContain("camera_type=\"perspective\"");
+    expect(xml).toMatch(/<mesh P=/);
+    // Bildkarten der Bibliothek (Gelände: Wiese) liegen neben der XML.
+    expect(xml).toContain("textures/");
+  }, 120_000);
+
+  it("Programm aus DOSSIER_CYCLES; fehlt es: Hinweis und Exit-Code 3", async () => {
+    const png = join(dir, "cy2.png");
+    const old = process.env.DOSSIER_CYCLES;
+    try {
+      process.env.DOSSIER_CYCLES = fakeCycles;
+      expect((await quiet(() => run([file, "render", "--engine", "cycles", "--out", png, "--samples", "8", "--size", "8x4"]))).result).toBe(0);
+      expect(existsSync(png)).toBe(true);
+      process.env.DOSSIER_CYCLES = join(dir, "gibt-es-nicht");
+      const r = await quiet(() => run([file, "render", "--engine", "cycles", "--out", join(dir, "cy3.png")]));
+      expect(r.result).toBe(3);
+      expect(r.err).toContain("Cycles nicht gefunden");
+    } finally {
+      if (old === undefined) delete process.env.DOSSIER_CYCLES;
+      else process.env.DOSSIER_CYCLES = old;
+    }
+  }, 120_000);
+
+  it("--engine blender bleibt der Standardweg; unbekannte Engine/Look beenden mit Fehler", async () => {
+    const exit = vi.spyOn(process, "exit").mockImplementation((() => {
+      throw new Error("exit");
+    }) as never);
+    try {
+      await quiet(async () => {
+        await expect(run([file, "render", "--engine", "unity", "--out", join(dir, "u.png")])).rejects.toThrow("exit");
+        await expect(run([file, "render", "--engine", "cycles", "--look", "grell", "--cycles", fakeCycles, "--out", join(dir, "u.png")])).rejects.toThrow("exit");
+      });
+    } finally {
+      exit.mockRestore();
+    }
+    expect((await quiet(() => run([file, "render", "--engine", "blender", "--out", join(dir, "b.png"), "--blender", fake, "--size", "320x180", "--samples", "8"]))).result).toBe(0);
+  }, 120_000);
+});
+
+// Echter Lauf mit dem gebauten Cycles (nur wenn `DOSSIER_CYCLES` auf das Programm zeigt): `:beispiel` klein mit 8 Samples.
+const realCycles = process.env.DOSSIER_CYCLES;
+describe.skipIf(!realCycles || !existsSync(realCycles))("dossier-cli render --engine cycles mit echtem Cycles", () => {
+  it(":beispiel 320x180, 8 Samples → PNG mit Himmel, Haus und Boden", async () => {
+    const png = join(dir, "echt.png");
+    const err = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      expect(await run([":beispiel", "render", "--engine", "cycles", "--out", png, "--samples", "8", "--size", "320x180", "--cpu"])).toBe(0);
+    } finally {
+      err.mockRestore();
+    }
+    const bytes = readFileSync(png);
+    expect(Array.from(bytes.subarray(1, 4))).toEqual([80, 78, 71]);
+    const dv = new DataView(bytes.buffer, bytes.byteOffset);
+    expect([dv.getUint32(16), dv.getUint32(20)]).toEqual([320, 180]);
+    const { inflateSync } = await import("node:zlib");
+    const raw = inflateSync(bytes.subarray(41, 41 + dv.getUint32(33)));
+    // Nicht einfarbig und nicht schwarz: Mittelwert hell genug, Streuung vorhanden.
+    let sum = 0;
+    let min = 255;
+    let max = 0;
+    for (let i = 0; i < raw.length; i++) {
+      if (i % (320 * 3 + 1) === 0) continue;
+      sum += raw[i];
+      min = Math.min(min, raw[i]);
+      max = Math.max(max, raw[i]);
+    }
+    expect(sum / (raw.length - 180)).toBeGreaterThan(40);
+    expect(max - min).toBeGreaterThan(80);
+  }, 240_000);
 });

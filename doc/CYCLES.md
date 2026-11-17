@@ -186,3 +186,35 @@ Summe **12–16 Tage**, davon **≈ 5 Tage Mac-abhängig**. Verkleinern der Ausl
 - Tonwert-Look gegen den Blender-Leser (AgX) und Sonnen-Drehsinn gegen `render_dossier.py`.
 - Hosts im Cloud-Container: gesperrt war `github.com` (alle Pfade, auch `codeload`, `api.github.com`, Release-Downloads; `raw.githubusercontent.com` und `pypi.org` gingen); gebraucht wurden nur
   `projects.blender.org` (Quellen, OIDN-LFS) und `archive.ubuntu.com` (OIIO-/libtiff-Quellen, apt).
+
+## 10. Umsetzung Teil 1: Szene aus dem Kern, CLI (17.11.)
+
+**Wo:** `src-tauri/core/src/cycles_scene.rs` (Szene), `cycles_post.rs` (Tonwert), Abfrage `cyclesScene` (`queries.rs`), Bindung `cycles_tonemap` (`web/cycles.rs`);
+TS: `src/export/cyclesRender.ts` (Optionen, Bildkarten laden, Prozess, EXR lesen, PNG schreiben), CLI `src/cli/main.ts`
+(`render --engine cycles`; `--engine blender` = Blender-Weg [211], bleibt Standard bis der Sidecar ausgeliefert wird).
+
+**Netze:** dieselbe Sammlung wie glTF/OBJ/STL und 3D-Anzeige (`mesh_data::collect_scene`: Wände mit Öffnungen, Decken, Dächer, Stützen, Treppen, Bäume, Fenster/Türen mit Glas, freie Körper,
+Gelände, Kontext); Baugrube ausgeblendet wie [227] (`--excavation` lässt sie). Welt (x, Höhe, y) → Modell (x Ost, y Nord, z oben), Wicklung vertauscht. Ecken nach Knickwinkel 30° geteilt,
+`interpolation="smooth"` (Cycles mittelt selbst, scharfe Kanten bleiben). Ein `<mesh>` je Teil-Netz, gleiche Shader in einem `<state>`. Kein `N`, keine UVs.
+
+**Materialien:** Principled BSDF, Farbe sRGB → linear, Albedo ≤ 0.8; Ersatzlooks ohne Bildkarte wie im Blender-Leser; Dachschichten je Baustoff. Glas: Transmission 1, IOR 1.5, für Schattenstrahlen
+durchsichtig (`light_path is_shadow_ray` → `mix_closure` mit `transparent_bsdf`). Bildkarten: `texture_coordinate object → mapping (1/sizeM) → image_texture projection="box"`, Farbkarte × 0.8 (`vector_math`),
+Rauheit/Metall `colorspace="Non-Color"`, Farbkarte Farbraum „auto“. Dateien `textures/<n>_<art>.<ext>` neben `scene.xml`; der Kern liefert `{path, url}`, der Gastgeber lädt die Bytes
+(nicht ladbare Karten → Ersatzlook, die XML nennt nie eine fehlende Datei).
+
+**Kamera (im Spike falsch beschrieben):** Typ heisst `camera_type="perspective|orthograph"` — ein `type="…"` wird STILL ignoriert (immer Perspektive); `<camera width height>` gilt nicht, die Grösse
+kommt per `--width/--height`. Matrix 16 Zahlen spaltenweise: rechts (= Blick × oben), oben, Blickrichtung, Ort. Orthogonal: Sichtebene ±1 hoch → halbe Sichthöhe als Skalierung der Spalten rechts/oben
+(Test: 10-m-Höhe stimmt). `fov` (Bogenmass) gilt für die kürzere Bildkante. Voreinstellungen rahmen das Gebäude ein (Mass wie `make_camera` im Blender-Leser).
+
+**Sonne:** `sun_rotation` = Kompass-Azimut (0 = Nord, 90° = Ost) — mit Schattenwurf geprüft (Sonne Ost → Schatten nach Westen); `sun_elevation` Bogenmass, unter dem Horizont 1°.
+Belichtung `<film exposure>` = 2^EV, automatisch nach Sonnenhöhe (Tabelle des Blender-Lesers), `--exposure EV` übersteuert. Hintergrundlicht `use_mis`, Bodenplatte, 8 Abpraller, OIDN.
+
+**Tonwert (`cycles_post.rs`):** EXR (Float, ZIP; `readExr` kennt keine/ZIPS/ZIP, Half/Float) → Kern `cycles_tonemap` → PNG. Look `filmic`: Helligkeit durch die ACES-Näherung (Narkowicz),
+Farbton erhalten, Lichter entsättigt, sRGB-Übertragung; `standard` = nur begrenzen + sRGB. Einfacher als AgX (AgX bleibt in sehr hellen Flächen farbiger).
+
+**CLI:** `render --engine cycles --out bild.png [--cycles pfad|$DOSSIER_CYCLES] [--samples 64] [--size 1280x720] [--view|--camera] [--when] [--exposure EV] [--look] [--no-denoise] [--cpu] [--exr roh.exr]
+[--no-context] [--excavation] [--verbose]`; Programm nicht gefunden = Exit 3.
+
+**Messwerte** (Linux-Container, 4 vCPU, durch andere Agenten ausgelastet, 1280×720, 64 Samples, OIDN, CPU; Wandzeit streut stark): `:beispiel` Iso 139 s · `:musterhaus-komplex` Südost-Perspektive 249 s,
+Iso 96 s · `:wettbewerb` Iso 48 s, Perspektive 44 s. Bilder: `doc/review-215/`. Angesehen: Normalen stimmen, Fenster spiegeln/durchsichtig, Schatten zur erwarteten Seite.
+**Nicht geprüft:** Mac/Metal, Tauri/Electron-Einbindung, Texturen im echten Lauf nur über `:musterhaus-komplex` (Wiese), Normalenkarten (unbenutzt).

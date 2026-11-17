@@ -52,6 +52,7 @@ pub mod furniture_lib;
 pub mod solid_bool;
 pub mod line_pattern;
 pub mod fonts;
+pub mod cycles;
 
 use wasm_bindgen::prelude::wasm_bindgen;
 

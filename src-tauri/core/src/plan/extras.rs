@@ -82,7 +82,7 @@ fn ring_pts(r: &[[f64; 2]]) -> Vec<Vec2> {
 }
 
 /// Breite/Länge des Projekts aus `geoAnchor` (LV95), sonst Zürich.
-fn project_lat_lon(p: &Project) -> (f64, f64) {
+pub(crate) fn project_lat_lon(p: &Project) -> (f64, f64) {
     match &p.geo_anchor {
         Some(a) => crate::geo_rebase::lv95_to_wgs84(a.lv95.e, a.lv95.n),
         None => (47.3769, 8.5417),
