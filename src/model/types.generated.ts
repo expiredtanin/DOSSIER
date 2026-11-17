@@ -3439,7 +3439,15 @@ export type RenovationFilter = {
 };
 
 /** [271] Eine Bau-Etappe (Reihenfolge = Reihenfolge der Liste). */
-export type RenovationPhase = { id: string; name: string };
+export type RenovationPhase = {
+  id: string;
+  name: string;
+  /**
+   * [275] Eigene Umbau-Farben der Etappe (Neu/Abbruch dieser Etappe, z. B. Neubau Etappe 2 blau); fehlende Felder
+   * ⇒ die Farben des Projekts (`RenovationSettings.styles`), dann die SIA-Vorgabe.
+   */
+  styles?: RenovationStyles;
+};
 
 /** [271] Umbau-Einstellungen des Projekts. */
 export type RenovationSettings = {
@@ -3466,8 +3474,18 @@ export type RenovationStatus = "existing" | "demolish" | "new";
 
 /**
  * [271] Umbau-Farbe eines Status: Füllung der Schnittflächen, Linienfarbe, gestrichelt. Fehlende Felder ⇒ SIA-Vorgabe.
+ * [275] Statt einer freien Farbe ein Stift (`ColorPen.id`): seine Farbe aus dem aktiven Stiftsatz geht der freien
+ * Farbe vor (ein S/W-Plot-Stiftsatz färbt so auch die Umbau-Farben um; Stift ohne Eintrag ⇒ freie Farbe/Vorgabe).
  */
-export type RenovationStyle = { fill?: string; line?: string; dashed?: boolean };
+export type RenovationStyle = {
+  fill?: string;
+  /** [275] Stift der Füllung. */
+  fillPen?: string;
+  line?: string;
+  /** [275] Stift der Linien. */
+  linePen?: string;
+  dashed?: boolean;
+};
 
 /** [271] Umbau-Farben je Status (fehlt ⇒ SIA-400-Vorgabe, `renovation::default_style`). */
 export type RenovationStyles = { existing?: RenovationStyle; demolish?: RenovationStyle; new?: RenovationStyle };

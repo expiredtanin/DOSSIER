@@ -4,8 +4,8 @@
 import { blurFocus, discardIfAsked, expect, fileMenu, openTab, test, typeCommand } from "./app";
 
 const GREY = "#a6a6a6";
-const YELLOW = "#ffd800";
-const RED = "#e3001b";
+const YELLOW = "#e8c35a";
+const RED = "#c8524a";
 
 test("Umbaufilter, Status setzen und Undo ([271])", async ({ page }) => {
   await page.goto("/?dossierTest");

@@ -91,6 +91,8 @@ pub fn run(p: &Project, name: &str, args: &[f64], text: &str) -> Result<String, 
         ("areaTable", _) => json(&flaechen::area_table(&renovation_state(p, text))),
         // [271] Umbaufilter (eingebaute und eigene) für die Oberfläche.
         ("renovationFilters", _) => json(&crate::renovation::filter_list(p)),
+        // [275] Aufgelöste Umbau-Farben (Vorgabe, Projekt, Etappen) für Muster in der Oberfläche.
+        ("renovationStyles", _) => Ok(crate::renovation::styles_json(p).to_string()),
         // [274] Typ-Paar Bestand → Sanierungstyp (Editor, Vorschau) bzw. alle Paare mit Zählern (Umbau-Panel).
         ("renovationPair", _) => json(&crate::renovation::build_up::pair_json(p, text)),
         ("renovationPairs", _) => json(&crate::renovation::build_up::pairs_json(p)),

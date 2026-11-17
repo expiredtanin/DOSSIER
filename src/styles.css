@@ -10,6 +10,11 @@
 :root {
   color-scheme: light;
 
+  /* [275] Vorgabe der Umbau-Farben (Kern `renovation::default_style`); Muster mit Projektfarben setzen sie inline. */
+  --reno-existing: #a6a6a6;
+  --reno-demolish: #e8c35a;
+  --reno-new: #c8524a;
+
   --bg: #e0dbd4;
   --panel: #e0dbd4;
   --panel-2: #d4cfc8;
@@ -1311,13 +1316,13 @@ body {
   vertical-align: baseline;
 }
 .sb-renovation-existing {
-  background: #a6a6a6;
+  background: var(--reno-existing);
 }
 .sb-renovation-demolish {
-  background: #ffd800;
+  background: var(--reno-demolish);
 }
 .sb-renovation-new {
-  background: #e3001b;
+  background: var(--reno-new);
 }
 .sb-toggle.sb-renovation-on {
   font-weight: 600;
@@ -9709,7 +9714,7 @@ body {
   opacity: 0.6;
 }
 .reno-swatch.is-mixed {
-  background: repeating-linear-gradient(45deg, #a6a6a6 0 3px, #ffd800 3px 6px, #e3001b 6px 9px);
+  background: repeating-linear-gradient(45deg, var(--reno-existing) 0 3px, var(--reno-demolish) 3px 6px, var(--reno-new) 6px 9px);
 }
 .reno-status-row {
   display: flex;
@@ -10363,13 +10368,13 @@ body {
   min-width: 0;
 }
 .reno-fate.is-demolish {
-  box-shadow: inset 3px 0 0 #ffd800;
+  box-shadow: inset 3px 0 0 var(--reno-demolish);
 }
 .reno-fate.is-new {
-  box-shadow: inset 3px 0 0 #e3001b;
+  box-shadow: inset 3px 0 0 var(--reno-new);
 }
 .reno-fate.is-kept {
-  box-shadow: inset 3px 0 0 #a6a6a6;
+  box-shadow: inset 3px 0 0 var(--reno-existing);
 }
 .reno-create {
   display: flex;
@@ -10379,4 +10384,87 @@ body {
 .reno-create select {
   min-width: 0;
   flex: 1 1 auto;
+}
+
+/* ── [275] Umbau-Farben bearbeiten (Panel „Umbau“ › Darstellung, Etappen; Ressourcen-Tab „Umbau“) ───────────────── */
+.reno-style-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.reno-style-row {
+  display: grid;
+  grid-template-columns: minmax(44px, 1fr) 44px 44px 84px 24px;
+  align-items: center;
+  gap: 6px;
+}
+.reno-style-label {
+  font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.reno-style-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.reno-style-head .reno-style-cap {
+  justify-self: start;
+}
+.reno-style-cap {
+  font-size: 10px;
+  color: var(--muted);
+}
+.reno-style-dashed {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.reno-style-actions {
+  display: flex;
+  justify-content: flex-start;
+}
+.reno-phase-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.reno-phase-sw {
+  flex: 0 0 auto;
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.reno-phase-sw .reno-swatch {
+  width: 10px;
+  height: 14px;
+}
+.reno-phase-sw.is-own {
+  border-color: var(--ink-2);
+}
+.reno-phase-sw.active,
+.reno-phase-sw:hover {
+  border-color: var(--active);
+}
+.reno-phase-styles {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 0 4px 22px;
+  padding: 6px 8px;
+  background: var(--input);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.reno-phase-styles .reno-link-btn {
+  align-self: flex-start;
 }

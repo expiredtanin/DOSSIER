@@ -54,13 +54,13 @@ describe("[271] Umbau", () => {
     const p = buildUmbauSampleProject();
     expect(renovationFilterList(p).map((f) => f.id)).toEqual(["bestand", "abbruch", "neubau", "umbauplan", "endzustand"]);
     // Ohne Filter keine Umbau-Farben; Umbauplan grau, gelb und rot.
-    expect(fills(p)).not.toContain("#e3001b");
+    expect(fills(p)).not.toContain("#c8524a");
     const u = fills(p, "umbauplan");
-    for (const c of ["#a6a6a6", "#ffd800", "#e3001b"]) expect(u).toContain(c);
+    for (const c of ["#a6a6a6", "#e8c35a", "#c8524a"]) expect(u).toContain(c);
     // Neubau: kein Gelb (Abbruch weg), Rot da.
     const n = fills(p, "neubau");
-    expect(n).not.toContain("#ffd800");
-    expect(n).toContain("#e3001b");
+    expect(n).not.toContain("#e8c35a");
+    expect(n).toContain("#c8524a");
     // Kennzahlen: der Anbau zählt nur im Endzustand.
     const b = computeKennzahlen(p, "bestand");
     const e = computeKennzahlen(p, "endzustand");
@@ -81,7 +81,7 @@ describe("[271] Umbau", () => {
   // ── Panel „Umbau“ ──
   it("Panel: Vorschau je Filter stimmt mit dem Grundriss des Kerns überein (Override = Farbe da, Hide/Show = keine)", () => {
     const p = buildUmbauSampleProject();
-    const colour = { existing: "#a6a6a6", demolish: "#ffd800", new: "#e3001b" } as const;
+    const colour = { existing: "#a6a6a6", demolish: "#e8c35a", new: "#c8524a" } as const;
     for (const f of renovationFilterList(p)) {
       const shows = renovationFilterShows(p, f.id)!;
       const got = fills(p, f.id);

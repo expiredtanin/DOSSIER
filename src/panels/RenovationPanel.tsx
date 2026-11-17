@@ -1,7 +1,8 @@
 // Dock-Panel „Umbau“ ([271], Wunsch Maintainer 17.11., wie Archicads Palette Umbau): Zeichen-Status neuer Bauteile,
 // Umbaufilter der aktiven Ansicht (mit Vorschau je Status), Status der Auswahl samt „nach Status wählen“ und die
 // Etappen. Zustand und Aktionen teilt es mit dem Popover der Statusleiste (`state/renovationHook.ts`); Änderungen
-// gehen als Ops über `applyChange` (ein Undo-Schritt je Aktion).
+// gehen als Ops über `applyChange` (ein Undo-Schritt je Aktion). [275] Abschnitt „Darstellung“: Umbau-Farben je Status
+// als Farbe oder Stift, „SIA-Vorgabe“; je Etappe eigene Farben (Muster in der Etappenliste).
 //
 // Bezeichner englisch, UI-Text/Kommentare deutsch (CONVENTIONS.md).
 
@@ -16,20 +17,23 @@ import {
   phaseUsage,
   renovationCounts,
   renovationFilterShows,
-  renovationStyleOf,
+  resolvedRenovationStyles,
   RENOVATION_STATUSES,
   setPhasesOps,
+  setPhaseStylesOps,
+  setRenovationStylesOps,
 } from "../core";
-import type { Project, RenovationShow, RenovationStatus } from "../model/types";
+import type { RenovationStyleView } from "../core";
+import type { RenovationPhase, RenovationShow, RenovationStatus } from "../model/types";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
+import { RenovationStyleEditor } from "../ui/RenovationStyleEditor";
 import { usePanelHostAction } from "./host";
 import { RenovationSanierung } from "./RenovationSanierung";
 
 const MIXED = "__mixed";
 
-/** Farbfeld eines Status (SIA-Farbmuster: Füllung, Linie, gestrichelt wie im Plan). */
-function Swatch({ project, status, show }: { project: Project; status: RenovationStatus; show?: RenovationShow }) {
-  const st = renovationStyleOf(project, status);
+/** Farbfeld eines Status (Umbau-Farbe: Füllung, Linie, gestrichelt wie im Plan). */
+function Swatch({ st, show }: { st: RenovationStyleView; show?: RenovationShow }) {
   const hidden = show === "hide";
   const plain = show === "show";
   return (
@@ -45,10 +49,10 @@ function Swatch({ project, status, show }: { project: Project; status: Renovatio
   );
 }
 
-function ShowChip({ project, status, show }: { project: Project; status: RenovationStatus; show: RenovationShow }) {
+function ShowChip({ st, status, show }: { st: RenovationStyleView; status: RenovationStatus; show: RenovationShow }) {
   return (
     <span className="reno-chip" data-testid={`reno-chip-${status}`} data-show={show}>
-      <Swatch project={project} status={status} show={show} />
+      <Swatch st={st} show={show} />
       <span className="reno-chip-text">
         <span className="reno-chip-status">{t(`renovation.status.${status}` as TranslationKey)}</span>
         <span className="reno-chip-show">{t(`renovation.show.${show}` as TranslationKey)}</span>
@@ -63,7 +67,12 @@ export function RenovationPanel() {
   const sel = useRenovationSelection();
   const applyChange = useStore((s) => s.applyChange);
   const openResources = usePanelHostAction("onOpenResources");
+  const saveColor = usePanelHostAction("onAddColorToCustomPalette");
   const [confirmId, setConfirmId] = useState<string | null>(null);
+  const [stylePhase, setStylePhase] = useState<string | null>(null);
+  const rs = resolvedRenovationStyles(project);
+  const sw = rs.project;
+  const ownStyles = project.renovation?.styles;
   const counts = renovationCounts(project, sel.floorId);
   const shows = filter ? renovationFilterShows(project, filter) : null;
   const filterIds = ["", ...BUILTIN_RENOVATION_FILTERS, ...own.map((f) => f.id)];
@@ -71,7 +80,7 @@ export function RenovationPanel() {
   const statusValue = sel.common.status === "mixed" || sel.common.status === null ? null : sel.common.status;
   const phaseValue = sel.common.phase === "mixed" ? MIXED : (sel.common.phase ?? "");
 
-  const setPhases = (next: { id: string; name: string }[], key?: string) => applyChange((p) => setPhasesOps(p, next), key);
+  const setPhases = (next: RenovationPhase[], key?: string) => applyChange((p) => setPhasesOps(p, next), key);
   const move = (i: number, d: number) => {
     const j = i + d;
     if (j < 0 || j >= phases.length) return;
@@ -98,7 +107,7 @@ export function RenovationPanel() {
               data-testid={`reno-draw-${s}`}
               onClick={() => setDraw(s, draw.phase)}
             >
-              <Swatch project={project} status={s} />
+              <Swatch st={sw[s]} />
               <span>{t(`renovation.status.${s}` as TranslationKey)}</span>
             </button>
           ))}
@@ -139,7 +148,7 @@ export function RenovationPanel() {
                 >
                   <span className="reno-filter-name">{id ? renovationFilterLabel(id, own) : t("renovation.filter.none")}</span>
                   <span className="reno-filter-sw">
-                    {fs && RENOVATION_STATUSES.map((s) => <Swatch key={s} project={project} status={s} show={fs[s]} />)}
+                    {fs && RENOVATION_STATUSES.map((s) => <Swatch key={s} st={sw[s]} show={fs[s]} />)}
                   </span>
                 </button>
               </li>
@@ -167,10 +176,36 @@ export function RenovationPanel() {
         {shows && (
           <div className="reno-preview" aria-label={t("renovation.panel.filter.preview")} data-testid="reno-preview">
             {RENOVATION_STATUSES.map((s) => (
-              <ShowChip key={s} project={project} status={s} show={shows[s]} />
+              <ShowChip key={s} st={sw[s]} status={s} show={shows[s]} />
             ))}
           </div>
         )}
+      </div>
+
+      {/* [275] Darstellung: Umbau-Farben je Status (Farbe oder Stift) */}
+      <div className="reno-block" data-testid="reno-styles">
+        <div className="reno-head">{t("renovation.panel.styles.title")}</div>
+        <RenovationStyleEditor
+          project={project}
+          styles={ownStyles}
+          shown={sw}
+          testId="reno-style"
+          onSaveColor={saveColor}
+          onChange={(next, s) => applyChange((p) => setRenovationStylesOps(p, next), `reno-style-${s}`)}
+        />
+        <div className="reno-style-actions">
+          <button
+            type="button"
+            className="reno-link-btn"
+            disabled={!ownStyles}
+            data-testid="reno-style-sia"
+            title={t("renovation.panel.styles.siaHint")}
+            onClick={() => applyChange((p) => setRenovationStylesOps(p, undefined))}
+          >
+            {t("renovation.panel.styles.sia")}
+          </button>
+        </div>
+        <div className="reno-hint">{t("renovation.panel.styles.hint")}</div>
       </div>
 
       {/* Auswahl */}
@@ -183,7 +218,7 @@ export function RenovationPanel() {
         ) : (
           <>
             <div className="reno-sel-state" data-testid="reno-sel-state" data-status={statusValue ?? "mixed"}>
-              {statusValue ? <Swatch project={project} status={statusValue} /> : <span className="reno-swatch is-mixed" aria-hidden="true" />}
+              {statusValue ? <Swatch st={sw[statusValue]} /> : <span className="reno-swatch is-mixed" aria-hidden="true" />}
               <span>{statusValue ? t(`renovation.status.${statusValue}` as TranslationKey) : t("renovation.mixed")}</span>
               <span className="reno-sel-count">{t("renovation.panel.selection.count", { n: String(sel.ids.length) })}</span>
             </div>
@@ -196,7 +231,7 @@ export function RenovationPanel() {
                   data-testid={`reno-set-${s}`}
                   onClick={() => sel.setStatus(s)}
                 >
-                  <Swatch project={project} status={s} />
+                  <Swatch st={sw[s]} />
                   <span>{t("renovation.panel.set", { status: t(`renovation.status.${s}` as TranslationKey) })}</span>
                 </button>
               ))}
@@ -232,7 +267,7 @@ export function RenovationPanel() {
               data-testid={`reno-select-${s}`}
               onClick={() => sel.selectByStatus(s)}
             >
-              <Swatch project={project} status={s} />
+              <Swatch st={sw[s]} />
               {t("renovation.panel.selectAll", { status: t(`renovation.status.${s}` as TranslationKey), n: String(counts[s]) })}
             </button>
           ))}
@@ -246,8 +281,25 @@ export function RenovationPanel() {
       <div className="reno-block">
         <div className="reno-head">{t("renovation.phases.title")}</div>
         {phases.length === 0 && <div className="reno-hint">{t("renovation.phases.empty")}</div>}
-        {phases.map((ph, i) => (
-          <div className="reno-phase-row" key={ph.id} data-testid="reno-phase-row">
+        {phases.map((ph, i) => {
+          const pst = rs.phases[ph.id] ?? sw;
+          const own = !!rs.phases[ph.id];
+          const open = stylePhase === ph.id;
+          return (
+          <div className="reno-phase-item" key={ph.id}>
+          <div className="reno-phase-row" data-testid="reno-phase-row">
+            <button
+              type="button"
+              className={`reno-phase-sw${own ? " is-own" : ""}${open ? " active" : ""}`}
+              aria-expanded={open}
+              title={t("renovation.panel.phases.styles")}
+              aria-label={t("renovation.panel.phases.styles")}
+              data-testid="reno-phase-style"
+              onClick={() => setStylePhase(open ? null : ph.id)}
+            >
+              <Swatch st={pst.demolish} />
+              <Swatch st={pst.new} />
+            </button>
             <input
               type="text"
               value={ph.name}
@@ -265,7 +317,26 @@ export function RenovationPanel() {
               ✕
             </button>
           </div>
-        ))}
+          {open && (
+            <div className="reno-phase-styles" data-testid="reno-phase-styles">
+              <div className="reno-hint">{t("renovation.panel.phases.stylesHint", { name: ph.name })}</div>
+              <RenovationStyleEditor
+                project={project}
+                styles={ph.styles}
+                shown={pst}
+                statuses={["demolish", "new"]}
+                testId="reno-phase-style"
+                onSaveColor={saveColor}
+                onChange={(next, s) => applyChange((p) => setPhaseStylesOps(p, ph.id, next), `reno-phase-style-${ph.id}-${s}`)}
+              />
+              <button type="button" className="reno-link-btn" disabled={!ph.styles} data-testid="reno-phase-style-reset" onClick={() => applyChange((p) => setPhaseStylesOps(p, ph.id, undefined))}>
+                {t("renovation.panel.phases.stylesReset")}
+              </button>
+            </div>
+          )}
+          </div>
+          );
+        })}
         <button
           type="button"
           className="reno-add-btn"

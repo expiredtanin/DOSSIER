@@ -184,6 +184,7 @@ export type QueryName =
   | "kennzahlen"
   | "areaTable"
   | "renovationFilters"
+  | "renovationStyles"
   | "renovationPair"
   | "renovationPairs"
   | "designOptionInfo"

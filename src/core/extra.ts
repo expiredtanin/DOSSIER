@@ -125,11 +125,13 @@ export type { CostResult, CostRow, CostQuantities, CostEstimate, CostGroup, Cost
 export { buildCostReport, costGroupLabel, costUnitLabel } from "../export/costReport";
 // [271] Umbau: Status je Bauteil, Etappen, Umbaufilter (Regeln im Kern `renovation.rs`)
 export {
-  BUILTIN_RENOVATION_FILTERS, RENOVATION_STATUSES, RENOVATION_COLLECTIONS, DEFAULT_RENOVATION_STYLES, renovationFilterList, renovationStatus, renovationPhases,
+  BUILTIN_RENOVATION_FILTERS, RENOVATION_STATUSES, RENOVATION_COLLECTIONS, renovationFilterList, renovationStatus, renovationPhases,
   renovationForNew, setRenovationOps, renovatableIds, commonRenovation, setPhasesOps, newPhaseId,
   renovationFilterShows, renovationStyleOf, idsByRenovationStatus, renovationCounts, phaseUsage,
+  resolvedRenovationStyles, patchRenovationStyles, setRenovationStylesOps, setPhaseStylesOps,
 } from "../model/renovation";
 export type { RenovationFilterEntry, RenovationCollection } from "../model/renovation";
+export type { RenovationStyleView, RenovationStyleSet, ResolvedRenovationStyles } from "../model/renovation";
 // [274] Sanierung je Schicht: Typ-Paar Bestand → Sanierungstyp
 export {
   wallBuildUp, buildUpKey, parseBuildUpKey, setBuildUpOps, commonBuildUp, renovateAllOfTypeOps, createRenovationTypeOps, setTypePairOps,

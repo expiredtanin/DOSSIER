@@ -4,8 +4,8 @@ import { blurFocus, commandInput, expect, finishCommand, openTab, test, typeComm
 
 test.use({ viewport: { width: 1280, height: 800 } });
 
-const RED = "#e3001b";
-const YELLOW = "#ffd800";
+const RED = "#c8524a";
+const YELLOW = "#e8c35a";
 
 test("Umbau-Panel: Zeichen-Status, Filter, Auswahl, Etappen ([271])", async ({ page }) => {
   await page.goto("/?dossierTest");

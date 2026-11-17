@@ -4,7 +4,7 @@
 import type { CoreOp } from "../core/ops";
 import { documentFor } from "../core/document";
 import { addItems, patchItem, patchItems, setField } from "../core/opsBuild";
-import type { LayerRenovation, Project, Renovation, RenovationPhase, RenovationShow, RenovationSide, RenovationStatus, Tree, TreeStatus, WallType } from "./types";
+import type { LayerRenovation, Project, Renovation, RenovationPhase, RenovationShow, RenovationSide, RenovationStatus, RenovationStyle, RenovationStyles, Tree, TreeStatus, WallType } from "./types";
 
 /** Eingebaute Umbaufilter (Ids; Namen über `t("renovation.filter.<id>")`). */
 export const BUILTIN_RENOVATION_FILTERS = ["bestand", "abbruch", "neubau", "umbauplan", "endzustand"] as const;
@@ -26,12 +26,75 @@ export type RenovationCollection = (typeof RENOVATION_COLLECTIONS)[number];
 const TREE_STATUS_OF: Record<RenovationStatus, TreeStatus> = { existing: "existing", demolish: "remove", new: "new" };
 export const treeRenovationStatus = (t: Tree): RenovationStatus => (t.status === "remove" ? "demolish" : t.status === "new" ? "new" : "existing");
 
-/** SIA-400-Vorgabe der Umbau-Farben (gleich wie `renovation::default_style` im Kern). */
-export const DEFAULT_RENOVATION_STYLES: Record<RenovationStatus, { fill: string; line?: string; dashed: boolean }> = {
-  existing: { fill: "#a6a6a6", dashed: false },
-  demolish: { fill: "#ffd800", dashed: true },
-  new: { fill: "#e3001b", line: "#c00016", dashed: false },
-};
+/** Aufgelöste Umbau-Farbe eines Status (Stift schon in Farbe übersetzt). */
+export interface RenovationStyleView {
+  fill: string;
+  line?: string;
+  dashed: boolean;
+}
+export type RenovationStyleSet = Record<RenovationStatus, RenovationStyleView>;
+/** [275] Umbau-Farben, wie der Kern sie auflöst: SIA-Vorgabe, Projekt, Etappen mit eigenen Farben (Id → je Status). */
+export interface ResolvedRenovationStyles {
+  defaults: RenovationStyleSet;
+  project: RenovationStyleSet;
+  phases: Record<string, RenovationStyleSet>;
+}
+
+type RawStyle = { fill: string; line: string | null; dashed: boolean };
+const cleanSet = (x: Record<RenovationStatus, RawStyle>): RenovationStyleSet =>
+  Object.fromEntries(RENOVATION_STATUSES.map((s) => [s, { fill: x[s].fill, ...(x[s].line ? { line: x[s].line } : {}), dashed: x[s].dashed }])) as RenovationStyleSet;
+
+/**
+ * [275] Umbau-Farben des Projekts (Kern-Abfrage `renovationStyles`, `renovation::style`/`phase_style`): eine Wahrheit
+ * für Plan und Muster der Oberfläche — Stifte (aktiver Stiftsatz) und Etappen-Farben sind schon aufgelöst.
+ */
+export function resolvedRenovationStyles(project: Project): ResolvedRenovationStyles {
+  const raw = documentFor(project).query<{ defaults: Record<RenovationStatus, RawStyle>; project: Record<RenovationStatus, RawStyle>; phases: Record<string, Record<RenovationStatus, RawStyle>> }>("renovationStyles");
+  return {
+    defaults: cleanSet(raw.defaults),
+    project: cleanSet(raw.project),
+    phases: Object.fromEntries(Object.entries(raw.phases ?? {}).map(([k, v]) => [k, cleanSet(v)])),
+  };
+}
+
+/**
+ * [275] Eine Umbau-Farbe ändern (`patch`; `null` = zurück auf die Vorgabe): fehlende Felder gelten als „wie Vorgabe“,
+ * Farbe und Stift schliessen sich aus (wer eine freie Farbe setzt, löst den Stift und umgekehrt). `undefined` = leer.
+ */
+export function patchRenovationStyles(styles: RenovationStyles | undefined, status: RenovationStatus, patch: Partial<RenovationStyle> | null): RenovationStyles | undefined {
+  const next: RenovationStyles = { ...(styles ?? {}) };
+  if (patch === null) delete next[status];
+  else {
+    const merged: RenovationStyle = { ...(next[status] ?? {}), ...patch };
+    if ("fill" in patch && patch.fill !== undefined) delete merged.fillPen;
+    if ("fillPen" in patch && patch.fillPen !== undefined) delete merged.fill;
+    if ("line" in patch && patch.line !== undefined) delete merged.linePen;
+    if ("linePen" in patch && patch.linePen !== undefined) delete merged.line;
+    for (const k of Object.keys(merged) as (keyof RenovationStyle)[]) if (merged[k] === undefined) delete merged[k];
+    if (Object.keys(merged).length) next[status] = merged;
+    else delete next[status];
+  }
+  return Object.keys(next).length ? next : undefined;
+}
+
+/** [275] Ops: Umbau-Farben des Projekts ersetzen (`undefined` = SIA-Vorgabe). */
+export function setRenovationStylesOps(project: Project, styles: RenovationStyles | undefined): CoreOp[] {
+  const next = { ...(project.renovation ?? {}) };
+  if (styles) next.styles = styles;
+  else delete next.styles;
+  return [setField("renovation", Object.keys(next).length ? next : undefined)];
+}
+
+/** [275] Ops: eigene Umbau-Farben einer Etappe ersetzen (`undefined` = Farben des Projekts). */
+export function setPhaseStylesOps(project: Project, phaseId: string, styles: RenovationStyles | undefined): CoreOp[] {
+  const phases = renovationPhases(project).map((ph) => {
+    if (ph.id !== phaseId) return ph;
+    const { styles: _drop, ...rest } = ph;
+    void _drop;
+    return styles ? { ...rest, styles } : rest;
+  });
+  return setPhasesOps(project, phases);
+}
 
 export interface RenovationFilterEntry {
   id: string;
@@ -187,11 +250,10 @@ export function renovationFilterShows(project: Project, id: string): Record<Reno
   return BUILTIN_FILTER_SHOWS[id] ?? null;
 }
 
-/** Umbau-Farbe eines Status (Projekt-Vorgabe über SIA-400-Vorgabe). */
-export function renovationStyleOf(project: Project, status: RenovationStatus): { fill: string; line?: string; dashed: boolean } {
-  const d = DEFAULT_RENOVATION_STYLES[status];
-  const o = project.renovation?.styles?.[status];
-  return { fill: o?.fill ?? d.fill, line: o?.line ?? d.line, dashed: o?.dashed ?? d.dashed };
+/** Umbau-Farbe eines Status (Etappe `phaseId` mit eigenen Farben, sonst Projekt, sonst SIA-Vorgabe; Kern löst auf). */
+export function renovationStyleOf(project: Project, status: RenovationStatus, phaseId?: string | null): RenovationStyleView {
+  const r = resolvedRenovationStyles(project);
+  return (phaseId ? r.phases[phaseId]?.[status] : undefined) ?? r.project[status];
 }
 
 /** Möbel und Symbole (Objekte der Bibliothek, Blöcke): nehmen ohne Angabe als Bestand am Umbaufilter teil. */

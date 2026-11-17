@@ -147,35 +147,103 @@ pub fn ghost_style() -> Style {
     Style { fill: "#e3e3e3".into(), line: Some("#a8a8a8".into()), dashed: false, ghost: true }
 }
 
-/// SIA-400-Vorgabe: Bestand grau, Abbruch gelb und gestrichelt, Neu rot.
+/// [275] Vorgabe Bestand: mittleres Grau (SIA 400).
+pub const EXISTING_FILL: &str = "#a6a6a6";
+/// [275] Vorgabe Abbruch: ruhiges Ocker-Gelb statt Signalgelb (#ffd800, Wunsch Maintainer 17.11.: „weniger leuchtend“) —
+/// auf weissem Papier noch klar gelb, neben dem Grau des Bestands unterscheidbar, im dunklen Thema nicht grell.
+pub const DEMOLISH_FILL: &str = "#e8c35a";
+/// [275] Vorgabe Neu: gedämpftes Ziegelrot statt Signalrot (#e3001b), Linie eine Stufe dunkler.
+pub const NEW_FILL: &str = "#c8524a";
+pub const NEW_LINE: &str = "#9e3a33";
+
+/// SIA-400-Vorgabe: Bestand grau, Abbruch gelb und gestrichelt, Neu rot ([275] gedämpfte Töne).
 pub fn default_style(s: RenovationStatus) -> Style {
     match s {
-        RenovationStatus::Demolish => Style { fill: "#ffd800".into(), line: None, dashed: true, ghost: false },
-        RenovationStatus::New => Style { fill: "#e3001b".into(), line: Some("#c00016".into()), dashed: false, ghost: false },
-        _ => Style { fill: "#a6a6a6".into(), line: None, dashed: false, ghost: false },
+        RenovationStatus::Demolish => Style { fill: DEMOLISH_FILL.into(), line: None, dashed: true, ghost: false },
+        RenovationStatus::New => Style { fill: NEW_FILL.into(), line: Some(NEW_LINE.into()), dashed: false, ghost: false },
+        _ => Style { fill: EXISTING_FILL.into(), line: None, dashed: false, ghost: false },
+    }
+}
+
+/// [275] Farbe eines Stifts (`ColorPen.id`) im aktiven Stiftsatz; `None` ohne aktiven Satz oder Eintrag (dann gilt die
+/// freie Farbe bzw. die Vorgabe — anders als bei Bauteilen kein Ersatz-Grau, damit ein Umbau-Plan nie grau wird).
+fn pen_color(p: &Project, pen: &str) -> Option<String> {
+    let pen = pen.trim();
+    if pen.is_empty() {
+        return None;
+    }
+    let active = p.active_pen_set_id.as_deref()?;
+    let set = p.pen_sets.as_deref()?.iter().find(|s| s.id == active)?;
+    let c = set.pens.get(pen)?.color.trim();
+    (!c.is_empty()).then(|| c.to_string())
+}
+
+fn pick(x: &RenovationStyles, s: RenovationStatus) -> Option<&RenovationStyle> {
+    match s {
+        RenovationStatus::Demolish => x.demolish.as_ref(),
+        RenovationStatus::New => x.new.as_ref(),
+        _ => x.existing.as_ref(),
+    }
+}
+
+/// Eigene Angaben `o` über `st` legen: Stift vor freier Farbe, fehlende Felder lassen `st` stehen.
+fn apply_own(p: &Project, st: &mut Style, o: &RenovationStyle) {
+    let free = |v: &Option<String>| v.as_deref().map(str::trim).filter(|f| !f.is_empty()).map(str::to_string);
+    if let Some(f) = o.fill_pen.as_deref().and_then(|x| pen_color(p, x)).or_else(|| free(&o.fill)) {
+        st.fill = f;
+    }
+    if let Some(l) = o.line_pen.as_deref().and_then(|x| pen_color(p, x)) {
+        st.line = Some(l);
+    } else if let Some(l) = o.line.as_deref().map(str::trim) {
+        st.line = (!l.is_empty()).then(|| l.to_string());
+    }
+    if let Some(d) = o.dashed {
+        st.dashed = d;
     }
 }
 
 /// Umbau-Farbe eines Status im Projekt.
 pub fn style(p: &Project, s: RenovationStatus) -> Style {
     let mut st = default_style(s);
-    let own = p.renovation.as_ref().and_then(|r| r.styles.as_ref()).and_then(|x| match s {
-        RenovationStatus::Demolish => x.demolish.as_ref(),
-        RenovationStatus::New => x.new.as_ref(),
-        _ => x.existing.as_ref(),
-    });
-    if let Some(o) = own {
-        if let Some(f) = o.fill.as_deref().map(str::trim).filter(|f| !f.is_empty()) {
-            st.fill = f.to_string();
-        }
-        if let Some(l) = o.line.as_deref().map(str::trim) {
-            st.line = (!l.is_empty()).then(|| l.to_string());
-        }
-        if let Some(d) = o.dashed {
-            st.dashed = d;
-        }
+    if let Some(o) = p.renovation.as_ref().and_then(|r| r.styles.as_ref()).and_then(|x| pick(x, s)) {
+        apply_own(p, &mut st, o);
     }
     st
+}
+
+/// [275] Umbau-Farbe eines Status für Elemente der Etappe `ph`: deren eigene Angaben über der Projektfarbe;
+/// `None`, wenn die Etappe für diesen Status nichts Eigenes hat.
+pub fn phase_style(p: &Project, s: RenovationStatus, ph: &RenovationPhase) -> Option<Style> {
+    let o = ph.styles.as_ref().and_then(|x| pick(x, s))?;
+    let mut st = style(p, s);
+    apply_own(p, &mut st, o);
+    Some(st)
+}
+
+const STATUSES: [RenovationStatus; 3] = [RenovationStatus::Existing, RenovationStatus::Demolish, RenovationStatus::New];
+
+/// [275] Eigene Farben je Etappe (Index der Etappe → je Status), nur Etappen mit eigenen Angaben.
+fn phase_styles(p: &Project) -> HashMap<usize, [Option<Style>; 3]> {
+    phases(p)
+        .iter()
+        .enumerate()
+        .filter(|(_, ph)| ph.styles.is_some())
+        .map(|(i, ph)| (i, STATUSES.map(|s| phase_style(p, s, ph))))
+        .filter(|(_, a)| a.iter().any(Option::is_some))
+        .collect()
+}
+
+/// [275] Aufgelöste Umbau-Farben für die Oberfläche (Abfrage `renovationStyles`): SIA-Vorgabe, Projekt und Etappen mit
+/// eigenen Angaben (Id → je Status), damit Muster im Panel/in der Legende genau die Farben des Plans zeigen.
+pub fn styles_json(p: &Project) -> serde_json::Value {
+    use serde_json::{json, Map, Value};
+    let one = |st: &Style| json!({"fill": st.fill, "line": st.line, "dashed": st.dashed});
+    let set = |f: &dyn Fn(RenovationStatus) -> Style| json!({"existing": one(&f(STATUSES[0])), "demolish": one(&f(STATUSES[1])), "new": one(&f(STATUSES[2]))});
+    let mut ph = Map::new();
+    for x in phases(p).iter().filter(|x| x.styles.is_some()) {
+        ph.insert(x.id.clone(), set(&|s| phase_style(p, s, x).unwrap_or_else(|| style(p, s))));
+    }
+    json!({"defaults": set(&default_style), "project": set(&|s| style(p, s)), "phases": Value::Object(ph)})
 }
 
 /// Wie ein Element im Filter erscheint.
@@ -199,6 +267,8 @@ pub struct View {
     pub edit: Option<crate::design_options::Edit>,
     phases: HashMap<String, usize>,
     styles: [Style; 3],
+    /// [275] Eigene Farben je Etappe (Index → je Status).
+    phase_styles: HashMap<usize, [Option<Style>; 3]>,
 }
 
 impl View {
@@ -226,7 +296,7 @@ impl View {
         let upto = if filter.is_some() { phase.filter(|s| !s.trim().is_empty()).and_then(|s| phase_index(p, s)) } else { None };
         let phases = phases(p).iter().enumerate().map(|(i, x)| (x.id.clone(), i)).collect();
         let styles = [style(p, RenovationStatus::Existing), style(p, RenovationStatus::Demolish), style(p, RenovationStatus::New)];
-        Some(View { filter, options, upto, phases, styles, edit: None })
+        Some(View { filter, options, upto, phases, styles, phase_styles: phase_styles(p), edit: None })
     }
 
     /// [272] Mit Bearbeitungsvariante (Stift, nur Bildschirm-Anfragen `designOptionEdit`): die Variante ist sichtbar (geht
@@ -236,7 +306,7 @@ impl View {
         let Some(e) = edit else { return v };
         let mut v = v.unwrap_or_else(|| {
             let styles = [style(p, RenovationStatus::Existing), style(p, RenovationStatus::Demolish), style(p, RenovationStatus::New)];
-            View { filter: None, options: None, upto: None, phases: HashMap::new(), styles, edit: None }
+            View { filter: None, options: None, upto: None, phases: HashMap::new(), styles, phase_styles: HashMap::new(), edit: None }
         });
         let c = v.options.get_or_insert_with(|| crate::design_options::Combination::primary(p));
         c.choice.insert(e.set.clone(), e.option.clone());
@@ -268,8 +338,13 @@ impl View {
         }
     }
 
-    /// Darstellung eines Zustands im Filter.
+    /// Darstellung eines Zustands im Filter (mit den Farben des Projekts).
     pub fn treat_state(&self, s: Option<RenovationStatus>) -> Treat {
+        self.treat_in(s, None)
+    }
+
+    /// Darstellung eines Zustands, mit den Farben der Etappe `phase` (Index), sofern sie eigene hat.
+    fn treat_in(&self, s: Option<RenovationStatus>, phase: Option<usize>) -> Treat {
         let Some(s) = s else { return Treat::Hide };
         let Some(filter) = &self.filter else { return Treat::Show };
         let (show, k) = match s {
@@ -279,14 +354,20 @@ impl View {
         };
         match show {
             RenovationShow::Hide => Treat::Hide,
-            RenovationShow::Override => Treat::Style(self.styles[k].clone()),
+            RenovationShow::Override => {
+                let own = phase.and_then(|i| self.phase_styles.get(&i)).and_then(|a| a[k].as_ref());
+                Treat::Style(own.unwrap_or(&self.styles[k]).clone())
+            }
             _ => Treat::Show,
         }
     }
 
-    /// Darstellung eines Elements mit diesen Umbau-Angaben.
+    /// Darstellung eines Elements mit diesen Umbau-Angaben. [275] Zeigt es noch seinen eigenen Status (nicht schon als
+    /// Bestand einer späteren Etappe), gelten die eigenen Farben seiner Etappe.
     pub fn treat(&self, r: Option<&Renovation>) -> Treat {
-        self.treat_state(self.state(r))
+        let s = self.state(r);
+        let own = if s == Some(status_of(r)) { r.and_then(|r| r.phase.as_deref()).and_then(|id| self.phases.get(id).copied()) } else { None };
+        self.treat_in(s, own)
     }
 
     /// Ist ein Element mit diesen Angaben im Filter sichtbar?
@@ -353,7 +434,7 @@ impl View {
                     continue;
                 }
             }
-            put(&w.id, self.treat_state(s), out);
+            put(&w.id, self.treat(w.renovation.as_ref()), out);
         }
         for o in p.openings.iter().flatten() {
             let host = wall_state.get(o.host_wall_id.as_str()).copied().flatten();
@@ -361,8 +442,9 @@ impl View {
                 out.hidden.insert(o.id.clone());
                 continue;
             }
-            let s = self.state(opening_renovation(p, o));
-            put(&o.id, self.treat_state(s), out);
+            let r = opening_renovation(p, o);
+            let s = self.state(r);
+            put(&o.id, self.treat(r), out);
             // Ersatzstück nur, wenn die Öffnung einen anderen Zustand hat als ihre (Bestands-)Wand.
             if o.renovation.is_none() || host != Some(RenovationStatus::Existing) {
                 continue;
@@ -372,7 +454,8 @@ impl View {
                 Some(RenovationStatus::Demolish) => RenovationStatus::New,
                 _ => continue,
             };
-            if let Treat::Style(st) = self.treat_state(Some(virt)) {
+            // [275] Das Stück gehört zur Etappe der Öffnung (deren eigene Farben).
+            if let Treat::Style(st) = self.treat(Some(&Renovation { status: virt, phase: r.and_then(|r| r.phase.clone()), ..Default::default() })) {
                 out.patches.push(Patch { opening_id: o.id.clone(), wall_id: o.host_wall_id.clone(), status: virt, style: st, closed: out.hidden.contains(&o.id) });
             }
         }
@@ -410,10 +493,13 @@ impl View {
     pub fn colors(&self) -> Vec<String> {
         let mut out = Vec::new();
         let Some(f) = &self.filter else { return out };
-        for (show, st) in [(f.existing, &self.styles[0]), (f.demolish, &self.styles[1]), (f.new, &self.styles[2])] {
+        for (k, show) in [f.existing, f.demolish, f.new].into_iter().enumerate() {
             if show == RenovationShow::Override {
-                out.push(st.fill.clone());
-                out.extend(st.line.clone());
+                // [275] Dazu die eigenen Farben der Etappen.
+                for st in std::iter::once(&self.styles[k]).chain(self.phase_styles.values().filter_map(|a| a[k].as_ref())) {
+                    out.push(st.fill.clone());
+                    out.extend(st.line.clone());
+                }
             }
         }
         out
@@ -424,7 +510,11 @@ impl View {
         let opts = self.options.as_ref().map_or(String::new(), |c| c.key());
         let edit = self.edit.as_ref().map_or(String::new(), |e| format!("|edit:{}", e.key()));
         match &self.filter {
-            Some(f) => format!("{}:{:?}{:?}{:?}:{:?}:{:?}|{opts}{edit}", f.id, f.existing, f.demolish, f.new, self.upto, self.styles),
+            Some(f) => {
+                let mut ph: Vec<_> = self.phase_styles.iter().collect();
+                ph.sort_by_key(|(i, _)| **i);
+                format!("{}:{:?}{:?}{:?}:{:?}:{:?}{ph:?}|{opts}{edit}", f.id, f.existing, f.demolish, f.new, self.upto, self.styles)
+            }
             None => format!("-|{opts}{edit}"),
         }
     }
@@ -1188,8 +1278,8 @@ pub mod build_up {
         let (old, new, side, m) = pair(p, w)?;
         let phase = w.renovation.as_ref().and_then(|r| r.phase.clone());
         let virt = |status| Renovation { status, phase: phase.clone(), ..Default::default() };
-        let td = v.treat_state(v.state(Some(&virt(RenovationStatus::Demolish))));
-        let tn = v.treat_state(v.state(Some(&virt(RenovationStatus::New))));
+        let td = v.treat(Some(&virt(RenovationStatus::Demolish)));
+        let tn = v.treat(Some(&virt(RenovationStatus::New)));
         let tk = v.treat(w.renovation.as_ref());
         let shown = match (td != Treat::Hide, tn != Treat::Hide) {
             (true, false) => Shown::Old,
@@ -1412,3 +1502,7 @@ mod tests2;
 #[cfg(test)]
 #[path = "renovation_layers_tests.rs"]
 mod layers_tests;
+
+#[cfg(test)]
+#[path = "renovation_style_tests.rs"]
+mod style_tests;

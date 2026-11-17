@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState } from "react";
 import { t } from "../i18n";
 import type { TranslationKey } from "../i18n";
-import { renovationFilterLabel, useRenovationControls } from "../state/renovationHook";
+import { renovationFilterLabel, useRenovationControls, useRenovationSwatches } from "../state/renovationHook";
 import { BUILTIN_RENOVATION_FILTERS, RENOVATION_STATUSES } from "../core";
 import type { RenovationStatus } from "../model/types";
 
@@ -14,6 +14,7 @@ export { renovationFilterLabel };
 
 export function RenovationControl() {
   const { draw, setDraw, phases, own, filter, filterPhase, levelEditable, setLevel } = useRenovationControls();
+  const sw = useRenovationSwatches();
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLSpanElement | null>(null);
   useEffect(() => {
@@ -42,7 +43,7 @@ export function RenovationControl() {
         title={t("renovation.status.hint", { status: statusLabel, filter: filterLabel })}
         onClick={() => setOpen((v) => !v)}
       >
-        <span className={`sb-renovation-dot sb-renovation-${draw.status}`} aria-hidden="true" />
+        <span className={`sb-renovation-dot sb-renovation-${draw.status}`} style={{ background: sw[draw.status].fill }} aria-hidden="true" />
         {t("renovation.short", { status: statusLabel })}
       </button>
       {open && (

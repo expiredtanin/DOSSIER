@@ -126,7 +126,9 @@ export function buildUmbauSampleProject(): Project {
     renovation: {
       phases: [
         { id: "etappe-1", name: "Etappe 1" },
-        { id: "etappe-2", name: "Etappe 2" },
+        // [275] Etappe 2 (Anbau) mit eigener Farbe: Neues gedämpft blau statt rot, damit die zwei Etappen im Umbauplan
+        // auseinanderzuhalten sind.
+        { id: "etappe-2", name: "Etappe 2", styles: { new: { fill: "#5b84b1", line: "#3e6390" } } },
       ],
     },
   };
