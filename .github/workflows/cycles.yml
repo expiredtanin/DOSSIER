@@ -44,7 +44,7 @@ jobs:
         run: node scripts/cycles/upload-gitea.mjs --file out/cycles-linux-x86_64-${{ steps.v.outputs.version }}.tar.xz
 
   macos:
-    runs-on: macos-14 # Apple Silicon (arm64)
+    runs-on: macos-latest # Apple Silicon (arm64); macos-14 wurde von GitHub sofort abgebrochen (17.11.)
     timeout-minutes: 120
     env:
       GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
