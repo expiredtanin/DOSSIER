@@ -11,9 +11,13 @@
 // [274] Sanierung je Schicht: die Südwand W1 ist eine Aussenwand „Beton 20 + Dämmung 10 + Aussenputz“ (Bestandstyp
 // „aw-bestand“) mit dem Sanierungstyp „aw-saniert“ (Beton bleibt, Dämmung und Putz werden abgebrochen, neue Dämmung 20 +
 // neuer Putz), saniert in Etappe 1: Kern bleibt an seiner Stelle, die Fassade rückt 10 cm nach aussen.
+// Ebenso je Schicht saniert (Etappe 1): die Geschossdecke C1 über dem EG (Rohdecke bleibt; Linoleum, Unterlagsboden und
+// Trittschall werden abgebrochen, neu Parkett + Unterlagsboden + dickerer Trittschall, gleiche Gesamtdicke) und das Dach
+// RF1 (Sparren und Verkleidung bleiben; Ziegel ab, neu 12 cm Aufsparrendämmung + Ziegel: die Dachhaut hebt sich). Schnitt C
+// (x = 2) schneidet Wand, Decke und Dach.
 // Nur Modellfelder, keine Kern-Befehle: das Modul ist ohne geladenen Kern auswertbar.
 
-import type { Ceiling, Drawing2D, DrawingLevel, Opening, Project, Renovation, Room, Tree, Wall, WallType } from "./types";
+import type { Ceiling, CeilingType, Component, Drawing2D, DrawingLevel, Opening, Project, Renovation, Roof, RoofType, Room, Tree, Wall, WallType } from "./types";
 import { sampleProject } from "./sampleProject";
 
 const E1: Renovation = { status: "new", phase: "etappe-1" };
@@ -87,10 +91,67 @@ export function buildUmbauSampleProject(): Project {
     // Fenster des Anbaus: ohne eigenen Status, folgt der neuen Wand.
     win("O5", "W11", 0.9, 1.2),
   );
-  const c1 = (base.ceilings ?? [])[0];
+  // [274] Decke und Dach je Schicht saniert (Typ-Paare oben → unten bzw. aussen → innen).
+  const components: Component[] = [
+    ...base.components,
+    { id: "linoleum", name: "Linoleum", color: "#9c8f6e", hatchId: "none", joinPriority: 5 },
+    { id: "parquet", name: "Parkett", color: "#c49a6c", hatchId: "none", joinPriority: 5 },
+    { id: "timber", name: "Sparren (Holz)", color: "#c8a26b", hatchId: "diagonal", joinPriority: 40 },
+  ];
+  const ceilingTypes: CeilingType[] = [
+    ...(base.ceilingTypes ?? []),
+    {
+      id: "decke-bestand",
+      name: "Geschossdecke Linoleum (Bestand)",
+      layers: [
+        { componentId: "linoleum", thickness: 0.005 },
+        { componentId: "screed", thickness: 0.055 },
+        { componentId: "insulation", thickness: 0.02 },
+        { componentId: "concrete", thickness: 0.2 },
+      ],
+      renovationTarget: "decke-saniert",
+    },
+    {
+      id: "decke-saniert",
+      name: "Geschossdecke Parkett (saniert)",
+      layers: [
+        { componentId: "parquet", thickness: 0.01 },
+        { componentId: "screed", thickness: 0.04 },
+        { componentId: "insulation", thickness: 0.03 },
+        { componentId: "concrete", thickness: 0.2 },
+      ],
+    },
+  ];
+  const roofTypes: RoofType[] = [
+    ...(base.roofTypes ?? []),
+    {
+      id: "dach-bestand",
+      name: "Steildach Sparren (Bestand)",
+      layers: [
+        { componentId: "roof-tiles", thickness: 0.04 },
+        { componentId: "timber", thickness: 0.16 },
+        { componentId: "render-int", thickness: 0.0125 },
+      ],
+      renovationTarget: "dach-saniert",
+    },
+    {
+      id: "dach-saniert",
+      name: "Steildach Aufsparrendämmung (saniert)",
+      layers: [
+        { componentId: "roof-tiles", thickness: 0.04 },
+        { componentId: "insulation", thickness: 0.12 },
+        { componentId: "timber", thickness: 0.16 },
+        { componentId: "render-int", thickness: 0.0125 },
+      ],
+    },
+  ];
+  const R1: Renovation = { status: "existing", phase: "etappe-1", renovated: true };
+  const roofs: Roof[] = (base.roofs ?? []).map((r) => (r.id === "RF1" ? { ...r, roofTypeId: "dach-bestand", renovation: R1 } : r));
+  const c1: Ceiling = { ...(base.ceilings ?? [])[0], ceilingTypeId: "decke-bestand", renovation: R1 };
   const ceilings: Ceiling[] = [
-    ...(base.ceilings ?? []),
-    { ...c1, id: "C2", outline: [{ x: 0, y: 4 }, { x: 3, y: 4 }, { x: 3, y: 7 }, { x: 0, y: 7 }], renovation: E2 },
+    c1,
+    ...(base.ceilings ?? []).slice(1),
+    { ...c1, ceilingTypeId: (base.ceilings ?? [])[0].ceilingTypeId, id: "C2", outline: [{ x: 0, y: 4 }, { x: 3, y: 4 }, { x: 3, y: 7 }, { x: 0, y: 7 }], renovation: E2 },
   ];
   const r1 = (base.rooms ?? [])[0];
   const h = 0.1725;
@@ -117,6 +178,10 @@ export function buildUmbauSampleProject(): Project {
     name: "Beispiel Umbau",
     drawingLevels: levels,
     wallTypes,
+    components,
+    ceilingTypes,
+    roofTypes,
+    roofs,
     walls,
     openings,
     ceilings,

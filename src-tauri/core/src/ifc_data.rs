@@ -140,6 +140,16 @@ fn renovation_props(p: &Project, psets: &mut Vec<Pset>, common: &'static str, r:
     }
 }
 
+/// [274] Status je Schicht eines sanierten Bauteils in `Dossier_Umbau` (s. `renovation::build_up::ifc_layer_status`).
+fn layer_renovation_props(p: &Project, psets: &mut Vec<Pset>, id: &str) {
+    let Some((old, new)) = crate::renovation::build_up::ifc_layer_status(p, id) else { return };
+    let props = [Prop::Label("SchichtenBestand", old), Prop::Label("SchichtenSanierung", new)];
+    match psets.iter_mut().find(|ps| ps.name == "Dossier_Umbau") {
+        Some(ps) => ps.props.extend(props),
+        None => psets.push(Pset { name: "Dossier_Umbau", props: props.into() }),
+    }
+}
+
 fn ident(name: &'static str, v: &str) -> Prop {
     Prop::Ident(name, v.to_string())
 }
@@ -1146,6 +1156,7 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
                 props.extend(crate::u_value::wall_u_value(p, wall).and_then(|u| u.u).map(|u| Prop::Thermal("ThermalTransmittance", u)));
                 let mut ps = vec![Pset { name: "Pset_WallCommon", props }];
                 renovation_props(p, &mut ps, "Pset_WallCommon", wall.renovation.as_ref());
+                layer_renovation_props(p, &mut ps, &wall.id);
                 ps.extend(q);
                 (wt.name.clone(), Some((wt.id.clone(), wt.name.clone(), layers)), ps)
             }
@@ -1425,6 +1436,7 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
             psets.push(Pset { name: "Pset_SlabCommon", props: slab_props });
         }
         renovation_props(&p, &mut psets, "Pset_SlabCommon", c.renovation.as_ref());
+        layer_renovation_props(&p, &mut psets, &c.id);
         // Aussparungen (wie im 3D) als innere Ringe des Profils; Netto zieht sie ab.
         let hole_rings = crate::opening_shape::ceiling_hole_rings(&p, c);
         let inner: Vec<&[Vec2]> = hole_rings.iter().filter(|r| r.len() >= 3).map(|r| r.as_slice()).collect();
@@ -1738,6 +1750,7 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
         props.extend(crate::u_value::roof_u_value(&p, roof).and_then(|u| u.u).map(|u| Prop::Thermal("ThermalTransmittance", u)));
         let mut psets = vec![Pset { name: "Pset_RoofCommon", props }];
         renovation_props(&p, &mut psets, "Pset_RoofCommon", roof.renovation.as_ref());
+        layer_renovation_props(&p, &mut psets, &roof.id);
         let (roof_q, dormer_q) = roof_base_quantities(&p, roof);
         psets.extend(qto("Qto_RoofBaseQuantities", roof_q));
         psets.extend(qto("Qto_DossierDormerQuantities", dormer_q));

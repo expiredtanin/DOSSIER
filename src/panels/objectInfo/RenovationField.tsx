@@ -4,7 +4,8 @@
 import { memo } from "react";
 import { t } from "../../i18n";
 import type { RenovationStatus } from "../../model/types";
-import { RENOVATION_STATUSES, commonBuildUp, parseBuildUpKey, renovationPair, setBuildUpOps } from "../../core";
+import { RENOVATION_STATUSES, commonBuildUp, hostTypeId, parseBuildUpKey, renovationPair, renovationTypes, setBuildUpOps } from "../../core";
+import type { RenovationHost } from "../../core";
 import { getState, useStore } from "../../state/appStore";
 import { RenovationStrip } from "../../ui/RenovationStrip";
 import { useRenovationSelection } from "../../state/renovationHook";
@@ -65,26 +66,33 @@ export const RenovationField = memo(function RenovationField() {
   );
 });
 
-const NO_TYPES: readonly { id: string; name: string; renovationTarget?: string }[] = [];
+const NO_IDS: readonly string[] = [];
+const SEL_KEY = { wall: "walls", ceiling: "ceilings", roof: "roofs" } as const;
 
 /**
- * [274] „Neuer Aufbau (Sanierung)“ der gewählten Wände: keiner, wie Typ (Sanierungstyp des Wandtyps) oder ein anderer
- * Wandtyp (Ausnahme). Mehrfachauswahl in einem Undo-Schritt; bei gemeinsamem Wandtyp der Streifen Alt/Neu/Ergebnis.
+ * [274] „Neuer Aufbau (Sanierung)“ der gewählten Wände, Decken oder Dächer (die erste Art der Auswahl): keiner, wie Typ
+ * (Sanierungstyp des Typs) oder ein anderer Typ derselben Art (Ausnahme). Mehrfachauswahl in einem Undo-Schritt; bei
+ * gemeinsamem Typ der Streifen Alt/Neu/Ergebnis.
  */
 const BuildUpField = memo(function BuildUpField() {
-  const types = useStore((s) => s.project.wallTypes) ?? NO_TYPES;
   const applyChange = useStore((s) => s.applyChange);
-  const wallIds = useStore((s) => s.selection.walls);
-  // Gemeinsamer Aufbau und gemeinsamer Wandtyp als Text: rendert nur bei echter Änderung neu.
+  const host = useStore((s): RenovationHost | null => (s.selection.walls.length ? "wall" : s.selection.ceilings.length ? "ceiling" : s.selection.roofs.length ? "roof" : null));
+  const ids = useStore((s) => (host ? s.selection[SEL_KEY[host]] : NO_IDS));
+  // Typen der Art (Id, Name, Sanierungstyp) als Text: rendert nur bei echter Änderung neu.
+  const typesKey = useStore((s) => (host ? JSON.stringify(renovationTypes(s.project, host).map((x) => [x.id, x.name, x.renovationTarget ?? ""])) : "[]"));
+  // Gemeinsamer Aufbau und gemeinsamer Typ als Text.
   const key = useStore((s) => {
-    const set = new Set(s.selection.walls);
-    const ts = new Set(s.project.walls.filter((w) => set.has(w.id)).map((w) => w.wallTypeId));
-    return JSON.stringify([commonBuildUp(s.project, s.selection.walls), ts.size === 1 ? [...ts][0] : null]);
+    if (!host) return JSON.stringify([null, null]);
+    const set = new Set(ids);
+    const items = ((s.project as unknown as Record<string, { id: string }[] | undefined>)[SEL_KEY[host]] ?? []).filter((x) => set.has(x.id));
+    const ts = new Set(items.map((x) => hostTypeId(x, host) ?? ""));
+    return JSON.stringify([commonBuildUp(s.project, ids, host), ts.size === 1 ? [...ts][0] || null : null]);
   });
   const [common, typeId] = JSON.parse(key) as [string | null, string | null];
-  if (common === null || wallIds.length === 0) return null;
+  if (!host || common === null || ids.length === 0) return null;
+  const types = (JSON.parse(typesKey) as [string, string, string][]).map(([id, name, target]) => ({ id, name, target }));
   const own = typeId ? types.find((x) => x.id === typeId) : undefined;
-  const ownTarget = own?.renovationTarget ? types.find((x) => x.id === own.renovationTarget) : undefined;
+  const ownTarget = own?.target ? types.find((x) => x.id === own.target) : undefined;
   const options = [
     ...(common === "mixed" ? [{ value: MIXED, label: t("renovation.mixed") }] : []),
     { value: "", label: t("renovation.buildUp.none") },
@@ -94,7 +102,7 @@ const BuildUpField = memo(function BuildUpField() {
   const value = common === "mixed" ? MIXED : common;
   const b = parseBuildUpKey(value === MIXED ? "" : value);
   const target = b.kind === "other" ? b.typeId : b.kind === "type" ? ownTarget?.id : undefined;
-  const pair = typeId && target ? renovationPair(getState().project, typeId, target) : null;
+  const pair = typeId && target ? renovationPair(getState().project, typeId, target, host) : null;
   return (
     <>
       <div className="objinfo-field" data-testid="objinfo-renovation-buildup">
@@ -105,7 +113,7 @@ const BuildUpField = memo(function BuildUpField() {
           value={value}
           onChange={(v) => {
             if (v === MIXED) return;
-            applyChange((p) => setBuildUpOps(p, wallIds, parseBuildUpKey(v)));
+            applyChange((p) => setBuildUpOps(p, ids, parseBuildUpKey(v), host));
           }}
           options={options}
           title={t("renovation.buildUp")}

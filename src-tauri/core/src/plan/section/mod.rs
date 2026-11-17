@@ -314,7 +314,7 @@ impl CutRules {
     /// [271] Umbau-Farben als Override der Schnittflächen: Füllung der Farbe, ohne Muster, Umriss gestrichelt bei
     /// Abbruch. Geht den Regeln vor (der Umbaufilter ist die Aussage des Plans).
     pub fn with_renovation(mut self, out: &Output, r: Option<&crate::renovation::Resolved>) -> CutRules {
-        let Some(r) = r.filter(|r| !r.styled.is_empty() || !r.walls.is_empty()) else { return self };
+        let Some(r) = r.filter(|r| !r.styled.is_empty() || !r.walls.is_empty() || !r.slabs.is_empty()) else { return self };
         // Projektionslinien: Besitzer mit Umbau-Farbe (nur Linienfarbe und Strichmuster, die Fläche gibt es nicht);
         // [274] sanierte Wände in der Farbe ihrer äussersten Schicht.
         for (k, id) in &out.edge_ids {
@@ -330,8 +330,18 @@ impl CutRules {
             if let Some(st) = r.styled.get(s) {
                 return Some(st.clone());
             }
-            let look = r.walls.get(s).filter(|_| c.kind == Kind::Wall)?;
-            look.layer_style(c.layer_index.or_else(|| c.component_id.as_deref().and_then(|id| look.pieces.iter().position(|q| q.layer.component_id == id)))?)
+            // [274] Sanierte Decke bzw. Dach ebenso je Schicht.
+            let look = match c.kind {
+                Kind::Wall => r.walls.get(s),
+                Kind::Slab | Kind::Roof => r.slabs.get(s),
+                _ => None,
+            }?;
+            let li = c.layer_index.or_else(|| if look.pieces.len() == 1 { Some(0) } else { c.component_id.as_deref().and_then(|id| look.pieces.iter().position(|q| q.layer.component_id == id)) });
+            match li {
+                Some(li) => look.layer_style(li),
+                // Ungeteilte Platte (z. B. zusammengefasster Aufbau): Farbe der obersten Schicht.
+                None => r.faces.get(s).cloned().filter(|_| c.kind != Kind::Wall),
+            }
         };
         if out.cuts.iter().all(|c| style_of(c).is_none()) {
             return self;

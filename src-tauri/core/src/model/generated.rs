@@ -756,6 +756,22 @@ pub struct CeilingType {
     pub id: String,
     pub name: String,
     pub layers: Vec<Layer>,
+    /// [274] Sanierungstyp (Deckentyp-Id): neuer Aufbau aller als „saniert“ markierten Decken dieses (Bestands-)Typs.
+    #[serde(rename = "renovationTarget", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub renovation_target: Option<String>,
+    /// [274] Bezugsseite der Sanierung (fehlt ⇒ innen); bei Decken: innen = unten (Rohdecke bleibt, die Oberkante verschiebt sich), aussen = oben (Oberkante bleibt).
+    #[serde(rename = "renovationSide", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub renovation_side: Option<RenovationSide>,
+    /// [274] Manuelle Zuordnung je Schicht dieses Bestandstyps (wie `WallType.renovationOld`).
+    #[serde(rename = "renovationOld", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub renovation_old: Option<Vec<LayerRenovation>>,
+    /// [274] Manuelle Zuordnung je Schicht des Sanierungstyps (wie `WallType.renovationNew`).
+    #[serde(rename = "renovationNew", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub renovation_new: Option<Vec<LayerRenovation>>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -774,6 +790,22 @@ pub struct RoofType {
     pub name: String,
     /// Aussen (Eindeckung) → innen (Verkleidung), analog `WallType.layers`.
     pub layers: Vec<Layer>,
+    /// [274] Sanierungstyp (Dachtyp-Id): neuer Aufbau aller als „saniert“ markierten Dächer dieses (Bestands-)Typs.
+    #[serde(rename = "renovationTarget", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub renovation_target: Option<String>,
+    /// [274] Bezugsseite der Sanierung (fehlt ⇒ innen); innen = Tragwerk/Verkleidung bleibt, die Dachhaut verschiebt sich.
+    #[serde(rename = "renovationSide", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub renovation_side: Option<RenovationSide>,
+    /// [274] Manuelle Zuordnung je Schicht dieses Bestandstyps (wie `WallType.renovationOld`).
+    #[serde(rename = "renovationOld", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub renovation_old: Option<Vec<LayerRenovation>>,
+    /// [274] Manuelle Zuordnung je Schicht des Sanierungstyps (wie `WallType.renovationNew`).
+    #[serde(rename = "renovationNew", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub renovation_new: Option<Vec<LayerRenovation>>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,

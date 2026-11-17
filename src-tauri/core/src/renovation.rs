@@ -31,6 +31,7 @@
 //!   beide ⇒ überlagert in Teilschichten, Abbruch als gestrichelte Kontur über der Neu-Füllung). Die Wand-Achse
 //!   bleibt; die Ableitungen sehen eine Ersatzwand mit dem gezeigten Aufbau ([`Resolved::project`],
 //!   [`with_build_ups`]), die Farben gelten je Schicht ([`WallLook`]). Ohne Umbaufilter gilt der Bestandstyp.
+//!   Decken und Dächer gleich (Decken-/Dachtyp, [`build_up::Layered`]); Bezugsseite der Decke innen = unten, aussen = oben.
 
 use crate::model::*;
 use crate::plan::prim::Primitive;
@@ -436,6 +437,35 @@ impl View {
             }
             put(&w.id, self.treat(w.renovation.as_ref()), out);
         }
+        // [274] Sanierte Bestandsdecken und -dächer: Aufbau und Farben je Schicht wie bei den Wänden.
+        let layered = |id: &str, look: Option<WallLook>, has_origin: bool, out: &mut Resolved| -> bool {
+            let Some(look) = look else { return false };
+            if let Some(Treat::Style(st)) = look.treat.first() {
+                out.faces.insert(id.to_string(), st.clone());
+            }
+            if look.pieces.is_empty() {
+                out.hidden.insert(id.to_string());
+            }
+            if look.new_type.is_none() && has_origin {
+                out.restore = true;
+            }
+            out.slabs.insert(id.to_string(), look);
+            true
+        };
+        for x in p.ceilings.iter().flatten() {
+            let s = self.state(x.renovation.as_ref());
+            if s == Some(RenovationStatus::Existing) && layered(&x.id, build_up::ceiling_look(self, p, x), x.extra.0.contains_key(build_up::ORIGIN), out) {
+                continue;
+            }
+            put(&x.id, self.treat(x.renovation.as_ref()), out);
+        }
+        for x in p.roofs.iter().flatten() {
+            let s = self.state(x.renovation.as_ref());
+            if s == Some(RenovationStatus::Existing) && layered(&x.id, build_up::roof_look(self, p, x), x.extra.0.contains_key(build_up::ORIGIN), out) {
+                continue;
+            }
+            put(&x.id, self.treat(x.renovation.as_ref()), out);
+        }
         for o in p.openings.iter().flatten() {
             let host = wall_state.get(o.host_wall_id.as_str()).copied().flatten();
             if out.hidden.contains(&o.host_wall_id) {
@@ -458,12 +488,6 @@ impl View {
             if let Treat::Style(st) = self.treat(Some(&Renovation { status: virt, phase: r.and_then(|r| r.phase.clone()), ..Default::default() })) {
                 out.patches.push(Patch { opening_id: o.id.clone(), wall_id: o.host_wall_id.clone(), status: virt, style: st, closed: out.hidden.contains(&o.id) });
             }
-        }
-        for x in p.ceilings.iter().flatten() {
-            put(&x.id, self.treat(x.renovation.as_ref()), out);
-        }
-        for x in p.roofs.iter().flatten() {
-            put(&x.id, self.treat(x.renovation.as_ref()), out);
         }
         for x in p.stairs.iter().flatten() {
             put(&x.id, self.treat(x.renovation.as_ref()), out);
@@ -545,15 +569,29 @@ pub struct Resolved {
     pub walls: HashMap<String, WallLook>,
     /// [274] Wandtypen der gezeigten Aufbauten (neu bzw. überlagert), in [`Self::project`] ergänzt.
     pub wall_types: Vec<WallType>,
-    /// [274] Ansichtsflächen sanierter Wände (Ansicht, Axo, 3D): Farbe der äussersten Schicht.
+    /// [274] Ansichtsflächen sanierter Wände, Decken und Dächer (Ansicht, Axo, 3D, Grundriss-Linien der Decken und
+    /// Dächer): Farbe der äussersten bzw. obersten Schicht.
     pub faces: HashMap<String, Style>,
+    /// [274] Sanierte Decken und Dächer (id → gezeigter Aufbau mit Farben je Schicht, Schichten oben/aussen → unten/innen).
+    pub slabs: HashMap<String, WallLook>,
     /// [274] Eine schon umgestellte Ersatzwand muss auf den Bestand zurück ([`Self::swap_build_ups`]).
     pub restore: bool,
 }
 
 impl Resolved {
     pub fn is_empty(&self) -> bool {
-        self.hidden.is_empty() && self.styled.is_empty() && self.patches.is_empty() && self.walls.is_empty()
+        self.hidden.is_empty() && self.styled.is_empty() && self.patches.is_empty() && self.walls.is_empty() && self.slabs.is_empty()
+    }
+
+    /// [274] Umbau-Farbe eines Elements für Linien und Flächen im Grundriss: eigene Farbe, sonst die oberste Schicht
+    /// einer sanierten Decke bzw. eines sanierten Dachs (Wände färben je Schicht selbst).
+    pub fn element_style(&self, id: &str) -> Option<&Style> {
+        self.styled.get(id).or_else(|| if self.slabs.contains_key(id) { self.faces.get(id) } else { None })
+    }
+
+    /// [274] Darstellung der Schicht `li` (Schicht des gezeigten Aufbaus) einer sanierten Decke oder eines Dachs.
+    pub fn slab_layer_style(&self, id: &str, li: usize) -> Option<Style> {
+        self.slabs.get(id)?.layer_style(li)
     }
 
     /// Umbau-Farbe einer Ansichtsfläche (Element-Farbe, sonst die der äussersten Schicht einer sanierten Wand).
@@ -563,7 +601,7 @@ impl Resolved {
 
     /// Ersetzt der Filter Aufbauten (Wände mit anderem gezeigtem Aufbau)?
     pub fn swaps(&self) -> bool {
-        self.restore || self.walls.values().any(|l| l.new_type.is_some())
+        self.restore || self.walls.values().chain(self.slabs.values()).any(|l| l.new_type.is_some())
     }
 
     /// Das Projekt dieser Darstellung: ohne Ausgeblendetes, sanierte Wände mit dem gezeigten Aufbau; `None` = unverändert.
@@ -601,7 +639,47 @@ impl Resolved {
                 q.wall_types.push(t.clone());
             }
         }
-        for c in self.walls.values().flat_map(|l| l.components.iter()) {
+        // [274] Decken: Ersatz-Deckentyp; die Bezugsseite bleibt stehen (unten: neue Oberkante, oben: Unterkante folgt).
+        for c in q.ceilings.iter_mut().flatten() {
+            let Some(look) = self.slabs.get(&c.id) else { continue };
+            if c.ceiling_type_id.as_deref() == Some(look.type_id.as_str()) && look.new_type.is_some() {
+                continue;
+            }
+            build_up::restore_ceiling(c);
+            let Some(t) = &look.new_type else { continue };
+            let orig = serde_json::json!({"type": c.ceiling_type_id, "thickness": c.thickness, "top": c.top, "bottom": c.bottom});
+            c.extra.0.insert(build_up::ORIGIN.to_string(), orig);
+            if let Some(z) = look.level {
+                c.top = Some(VerticalAnchor::Custom { z });
+            }
+            c.bottom = None;
+            c.thickness = None;
+            c.ceiling_type_id = Some(t.id.clone());
+            let types = q.ceiling_types.get_or_insert_with(Vec::new);
+            if !types.iter().any(|x| x.id == t.id) {
+                types.push(CeilingType { id: t.id.clone(), name: t.name.clone(), layers: t.layers.clone(), ..Default::default() });
+            }
+        }
+        // [274] Dächer: Ersatz-Dachtyp; Bezugsseite innen hebt die Dachhaut (Traufhöhe).
+        for r in q.roofs.iter_mut().flatten() {
+            let Some(look) = self.slabs.get(&r.id) else { continue };
+            if r.roof_type_id.as_deref() == Some(look.type_id.as_str()) && look.new_type.is_some() {
+                continue;
+            }
+            build_up::restore_roof(r);
+            let Some(t) = &look.new_type else { continue };
+            let orig = serde_json::json!({"type": r.roof_type_id, "base": r.base_elevation});
+            r.extra.0.insert(build_up::ORIGIN.to_string(), orig);
+            if let Some(z) = look.level {
+                r.base_elevation = Some(z);
+            }
+            r.roof_type_id = Some(t.id.clone());
+            let types = q.roof_types.get_or_insert_with(Vec::new);
+            if !types.iter().any(|x| x.id == t.id) {
+                types.push(RoofType { id: t.id.clone(), name: t.name.clone(), layers: t.layers.clone(), ..Default::default() });
+            }
+        }
+        for c in self.walls.values().chain(self.slabs.values()).flat_map(|l| l.components.iter()) {
             if !q.components.iter().any(|x| x.id == c.id) {
                 q.components.push(c.clone());
             }
@@ -790,13 +868,14 @@ pub fn restyle_linework(prims: &mut Vec<Primitive>, from: usize, st: &Style, fil
 /// Umbau-Farben auf `prims[from..]`: jedes Primitiv nach seinem Element ([`prim_element`]), sonst nach `owner`
 /// (z. B. die Wand, deren Umrisslinien keine Id tragen). Umrisslinien gestrichelter Flächen kommen dahinter.
 pub fn restyle_range(r: &Resolved, prims: &mut Vec<Primitive>, from: usize, owner: Option<&str>) {
-    if r.styled.is_empty() || from >= prims.len() {
+    if (r.styled.is_empty() && r.slabs.is_empty()) || from >= prims.len() {
         return;
     }
     let mut extra = Vec::new();
     for q in prims[from..].iter_mut() {
         let id = prim_element(q).or(owner);
-        if let Some(st) = id.and_then(|id| r.styled.get(id)) {
+        // [274] Sanierte Decke/Dach: Linien in der Farbe der obersten Schicht.
+        if let Some(st) = id.and_then(|id| r.element_style(id)) {
             // Symbole und Ansichten (Fenster, Türflügel, Treppenstufen, Decken- und Dachkanten): nur Linien.
             // [272] Grau ausserhalb der Bearbeitungsvariante: alle Flächen.
             let f = st.ghost || cut_fill(q);
@@ -925,6 +1004,15 @@ pub fn color_parts(p: &Project, parts: &mut crate::model3d::Parts, r: &Resolved)
             s.color = c;
         }
     }
+    // [274] Sanierte Decke: Farbe je Schicht (geschichtete Platten tragen ihre Schicht).
+    let ceilings = p.ceilings.as_deref().unwrap_or(&[]);
+    for s in &mut parts.slabs {
+        if let crate::model3d::SlabSource::Ceiling { index, layer: Some(li) } = s.source {
+            if let Some(st) = ceilings.get(index).and_then(|c| r.slab_layer_style(&c.id, li)) {
+                s.color = crate::style::hex_to_rgb(&st.fill, crate::style::WALL_RGB);
+            }
+        }
+    }
     let meshes = [&mut parts.column_meshes, &mut parts.stair_meshes, &mut parts.roof_meshes, &mut parts.solid_meshes, &mut parts.stair_railings];
     for list in meshes {
         for m in list.iter_mut() {
@@ -1013,6 +1101,57 @@ pub mod build_up {
     pub struct Matched {
         pub old: Vec<Fate>,
         pub new: Vec<Fate>,
+    }
+
+    /// Mehrschichtiger Typ mit Sanierungs-Angaben (Wand-, Decken-, Dachtyp): eine Zuordnungs-Logik für alle drei.
+    pub trait Layered {
+        fn type_id(&self) -> &str;
+        fn type_name(&self) -> &str;
+        fn type_layers(&self) -> &[Layer];
+        fn target(&self) -> Option<&str>;
+        fn side(&self) -> Option<RenovationSide>;
+        fn old_ov(&self) -> Option<&[LayerRenovation]>;
+        fn new_ov(&self) -> Option<&[LayerRenovation]>;
+    }
+
+    macro_rules! layered {
+        ($($t:ty),*) => {$(
+            impl Layered for $t {
+                fn type_id(&self) -> &str { &self.id }
+                fn type_name(&self) -> &str { &self.name }
+                fn type_layers(&self) -> &[Layer] { &self.layers }
+                fn target(&self) -> Option<&str> { self.renovation_target.as_deref() }
+                fn side(&self) -> Option<RenovationSide> { self.renovation_side }
+                fn old_ov(&self) -> Option<&[LayerRenovation]> { self.renovation_old.as_deref() }
+                fn new_ov(&self) -> Option<&[LayerRenovation]> { self.renovation_new.as_deref() }
+            }
+        )*};
+    }
+    layered!(WallType, CeilingType, RoofType);
+
+    /// Bauteilart einer Sanierung (Abfragen `renovationPair`/`renovationPairs`, Oberfläche).
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum Host {
+        Wall,
+        Ceiling,
+        Roof,
+    }
+
+    impl Host {
+        pub fn parse(s: &str) -> Host {
+            match s {
+                "ceiling" => Host::Ceiling,
+                "roof" => Host::Roof,
+                _ => Host::Wall,
+            }
+        }
+        pub fn key(self) -> &'static str {
+            match self {
+                Host::Wall => "wall",
+                Host::Ceiling => "ceiling",
+                Host::Roof => "roof",
+            }
+        }
     }
 
     fn thick(l: &Layer) -> f64 {
@@ -1167,9 +1306,10 @@ pub mod build_up {
         out
     }
 
-    /// Hat das Projekt sanierte Wände?
+    /// Hat das Projekt sanierte Wände, Decken oder Dächer?
     pub fn any(p: &Project) -> bool {
-        p.walls.iter().any(|w| w.renovation.as_ref().is_some_and(marked))
+        let m = |r: &Option<Renovation>| r.as_ref().is_some_and(marked);
+        p.walls.iter().any(|w| m(&w.renovation)) || p.ceilings.iter().flatten().any(|c| m(&c.renovation)) || p.roofs.iter().flatten().any(|r| m(&r.renovation))
     }
 
     /// Ist die Wand als saniert markiert?
@@ -1200,18 +1340,76 @@ pub mod build_up {
 
     /// Typ-Paar Bestandstyp `old` → `target` mit Zuordnung (die manuelle gilt nur für den eingetragenen Sanierungstyp).
     pub fn type_pair<'a>(p: &'a Project, old: &'a WallType, target: &str) -> Option<(&'a WallType, &'a WallType, RenovationSide, Matched)> {
-        let new = p.wall_types.iter().find(|t| t.id == target)?;
-        if new.id == old.id || total(&old.layers) <= TOL || total(&new.layers) <= TOL {
+        type_pair_in(&p.wall_types, old, target)
+    }
+
+    /// Typ-Paar unter den Typen `types` (Wand-, Decken- oder Dachtypen), wie [`type_pair`].
+    pub fn type_pair_in<'a, T: Layered>(types: &'a [T], old: &'a T, target: &str) -> Option<(&'a T, &'a T, RenovationSide, Matched)> {
+        let new = types.iter().find(|t| t.type_id() == target)?;
+        if new.type_id() == old.type_id() || total(old.type_layers()) <= TOL || total(new.type_layers()) <= TOL {
             return None;
         }
-        let side = match old.renovation_side {
+        let side = match old.side() {
             Some(RenovationSide::Outside) => RenovationSide::Outside,
             _ => RenovationSide::Inside,
         };
-        let own = old.renovation_target.as_deref() == Some(target);
-        let (oo, no) = if own { (old.renovation_old.clone().unwrap_or_default(), old.renovation_new.clone().unwrap_or_default()) } else { (Vec::new(), Vec::new()) };
-        let m = match_layers(&old.layers, &new.layers, side, &oo, &no);
+        let own = old.target() == Some(target);
+        let (oo, no) = if own { (old.old_ov().unwrap_or_default(), old.new_ov().unwrap_or_default()) } else { (&[][..], &[][..]) };
+        let m = match_layers(old.type_layers(), new.type_layers(), side, oo, no);
         Some((old, new, side, m))
+    }
+
+    /// Sanierungstyp eines Elements: Ausnahme `newTypeId`, sonst der eingetragene des Bestandstyps.
+    fn target_of<'a, T: Layered>(r: &'a Renovation, old: &'a T) -> Option<&'a str> {
+        r.new_type_id.as_deref().map(str::trim).filter(|s| !s.is_empty()).or(old.target())
+    }
+
+    /// Ursprünglicher Deckentyp, Dicke und Höhenbindungen (auch einer schon umgestellten Ersatzdecke).
+    pub fn ceiling_origin(c: &Ceiling) -> Ceiling {
+        let mut c = c.clone();
+        restore_ceiling(&mut c);
+        c
+    }
+
+    /// Ersatzdecke auf ihren Ursprung zurückstellen (Marke [`ORIGIN`]).
+    pub fn restore_ceiling(c: &mut Ceiling) {
+        let Some(o) = c.extra.0.remove(ORIGIN) else { return };
+        c.ceiling_type_id = o.get("type").and_then(|x| x.as_str()).map(String::from);
+        c.thickness = o.get("thickness").and_then(|x| x.as_f64());
+        c.top = o.get("top").and_then(|x| serde_json::from_value(x.clone()).ok());
+        c.bottom = o.get("bottom").and_then(|x| serde_json::from_value(x.clone()).ok());
+    }
+
+    /// Ersatzdach auf seinen Ursprung zurückstellen (Marke [`ORIGIN`]).
+    pub fn restore_roof(r: &mut Roof) {
+        let Some(o) = r.extra.0.remove(ORIGIN) else { return };
+        r.roof_type_id = o.get("type").and_then(|x| x.as_str()).map(String::from);
+        r.base_elevation = o.get("base").and_then(|x| x.as_f64());
+    }
+
+    /// Ursprünglicher Dachtyp und Traufhöhe (auch eines schon umgestellten Ersatzdachs).
+    pub fn roof_origin(r: &Roof) -> Roof {
+        let mut r = r.clone();
+        restore_roof(&mut r);
+        r
+    }
+
+    /// Typ-Paar einer sanierten Decke (nur mit Deckentyp, wie [`pair`]).
+    pub fn ceiling_pair<'a>(p: &'a Project, c: &Ceiling) -> Option<(&'a CeilingType, &'a CeilingType, RenovationSide, Matched)> {
+        let r = c.renovation.as_ref().filter(|r| marked(r))?;
+        let types = p.ceiling_types.as_deref()?;
+        let id = if c.extra.0.contains_key(ORIGIN) { ceiling_origin(c).ceiling_type_id? } else { c.ceiling_type_id.clone()? };
+        let old = types.iter().find(|t| t.id == id)?;
+        type_pair_in(types, old, target_of(r, old)?)
+    }
+
+    /// Typ-Paar eines sanierten Dachs (nur mit Dachtyp).
+    pub fn roof_pair<'a>(p: &'a Project, x: &Roof) -> Option<(&'a RoofType, &'a RoofType, RenovationSide, Matched)> {
+        let r = x.renovation.as_ref().filter(|r| marked(r))?;
+        let types = p.roof_types.as_deref()?;
+        let id = if x.extra.0.contains_key(ORIGIN) { roof_origin(x).roof_type_id? } else { x.roof_type_id.clone()? };
+        let old = types.iter().find(|t| t.id == id)?;
+        type_pair_in(types, old, target_of(r, old)?)
     }
 
     /// Gezeigter Aufbau einer sanierten Wand im Filter.
@@ -1221,12 +1419,16 @@ pub mod build_up {
         pub pieces: Vec<Piece>,
         /// Darstellung je Schicht (gleich lang wie `pieces`).
         pub treat: Vec<Treat>,
-        /// Wandtyp der Ersatzwand (`None` = der Bestandstyp bleibt).
+        /// Typ der Ersatzwand (`None` = der Bestandstyp bleibt); bei Decken und Dächern Träger von Id, Name und
+        /// Schichten des Ersatz-Decken- bzw. -Dachtyps.
         pub new_type: Option<WallType>,
         /// Typ, den die Wand in der Darstellung trägt.
         pub type_id: String,
         /// Achsversatz der Ersatzwand (`Wall.referenceOffset`): die Bezugsseite bleibt stehen.
         pub ref_offset: f64,
+        /// Decke: neue Oberkante (absolut), Dach: neue Traufhöhe; `None` = bleibt. Die Bezugsseite bleibt stehen, die
+        /// andere Seite verschiebt sich um die Dickendifferenz.
+        pub level: Option<f64>,
         /// Umbau-Farbe des Abbruchs, wenn der Filter ihn farbig zeigt (gestrichelte Kanten, Kontur im Umbauplan).
         pub demolish: Option<Style>,
         /// Hilfs-Bauteile der Schichten „Neu über Abbruch“ (Kopien des Baustoffs, in [`Resolved::project`] ergänzt).
@@ -1276,18 +1478,60 @@ pub mod build_up {
     /// Aufbau der Wand `w` im Filter `v` (`None` = nicht saniert).
     pub fn look(v: &View, p: &Project, w: &Wall) -> Option<WallLook> {
         let (old, new, side, m) = pair(p, w)?;
-        let phase = w.renovation.as_ref().and_then(|r| r.phase.clone());
+        let mut look = look_core(v, p, w.renovation.as_ref(), old, new, side, &m);
+        let (_, off, line) = origin(w);
+        let t_old = total(&old.layers);
+        let t_eff: f64 = look.pieces.iter().map(|q| thick(&q.layer)).sum();
+        let r_old = crate::joins::reference_offset(reference(off, line), t_old);
+        let ref_offset = if side == RenovationSide::Outside { r_old - t_old / 2.0 + t_eff / 2.0 } else { r_old + t_old / 2.0 - t_eff / 2.0 };
+        look.ref_offset = if ref_offset.is_finite() { ref_offset } else { 0.0 };
+        Some(look)
+    }
+
+    /// Aufbau der Decke `c` im Filter `v` (`None` = nicht saniert). Bezugsseite innen = unten (die Rohdecke bleibt, die
+    /// Oberkante verschiebt sich um die Dickendifferenz), aussen = oben (die Unterkante verschiebt sich).
+    pub fn ceiling_look(v: &View, p: &Project, c: &Ceiling) -> Option<WallLook> {
+        let (old, new, side, m) = ceiling_pair(p, c)?;
+        let mut look = look_core(v, p, c.renovation.as_ref(), old, new, side, &m);
+        if look.new_type.is_some() && side != RenovationSide::Outside {
+            let (uk, ok) = p.ceiling_vertical_extent(&ceiling_origin(c));
+            let t_eff: f64 = look.pieces.iter().map(|q| thick(&q.layer)).sum();
+            look.level = Some(uk + t_eff).filter(|z| z.is_finite() && (z - ok).abs() > TOL);
+        }
+        Some(look)
+    }
+
+    /// Aufbau des Dachs `x` im Filter `v` (`None` = nicht saniert). Bezugsseite innen (Vorgabe): Tragwerk und
+    /// Verkleidung bleiben, die Dachhaut hebt sich um die Dickendifferenz (senkrecht zur Fläche; lotrecht über die
+    /// Hauptneigung umgerechnet, an der Traufhöhe angesetzt); aussen: die Dachhaut bleibt, die Unterseite verschiebt sich.
+    pub fn roof_look(v: &View, p: &Project, x: &Roof) -> Option<WallLook> {
+        let (old, new, side, m) = roof_pair(p, x)?;
+        let mut look = look_core(v, p, x.renovation.as_ref(), old, new, side, &m);
+        if look.new_type.is_some() && side != RenovationSide::Outside {
+            let t_eff: f64 = look.pieces.iter().map(|q| thick(&q.layer)).sum();
+            let pitch = if x.pitch_deg.is_finite() { x.pitch_deg.clamp(0.0, 85.0) } else { 0.0 };
+            let cos = crate::jsnum::cos(pitch.to_radians());
+            let base = p.roof_base_elevation(&roof_origin(x));
+            let z = base + (t_eff - total(&old.layers)) / cos;
+            look.level = Some(z).filter(|z| z.is_finite() && (z - base).abs() > TOL);
+        }
+        Some(look)
+    }
+
+    /// Gezeigter Aufbau eines Typ-Paars im Filter (ohne Lage): Teilstücke, Darstellung je Schicht, Ersatztyp.
+    fn look_core<T: Layered>(v: &View, p: &Project, ren: Option<&Renovation>, old: &T, new: &T, side: RenovationSide, m: &Matched) -> WallLook {
+        let phase = ren.and_then(|r| r.phase.clone());
         let virt = |status| Renovation { status, phase: phase.clone(), ..Default::default() };
         let td = v.treat(Some(&virt(RenovationStatus::Demolish)));
         let tn = v.treat(Some(&virt(RenovationStatus::New)));
-        let tk = v.treat(w.renovation.as_ref());
+        let tk = v.treat(ren);
         let shown = match (td != Treat::Hide, tn != Treat::Hide) {
             (true, false) => Shown::Old,
             (false, true) => Shown::New,
             (true, true) => Shown::Both,
             (false, false) => Shown::Kept,
         };
-        let mut pieces = pieces(&old.layers, &new.layers, &m, side, shown);
+        let mut pieces = pieces(old.type_layers(), new.type_layers(), m, side, shown);
         // Überlagert: neue Schichten über abgebrochenen bekommen ein eigenes (gleich aussehendes) Bauteil, damit
         // Schnitt und 3D sie nicht mit der übrigen neuen Schicht gleichen Baustoffs zusammenfassen — sonst fehlte dort die
         // Kontur der abgebrochenen Schicht.
@@ -1307,26 +1551,21 @@ pub mod build_up {
                 Kind::New | Kind::NewOverDemolish => tn.clone(),
             })
             .collect();
-        let (_, off, line) = origin(w);
-        let t_old = total(&old.layers);
-        let t_eff: f64 = pieces.iter().map(|q| thick(&q.layer)).sum();
-        let r_old = crate::joins::reference_offset(reference(off, line), t_old);
-        let ref_offset = if side == RenovationSide::Outside { r_old - t_old / 2.0 + t_eff / 2.0 } else { r_old + t_old / 2.0 - t_eff / 2.0 };
         let new_type = (shown != Shown::Old).then(|| {
             let tag = match shown {
                 Shown::New => "neu",
                 Shown::Both => "umbau",
                 _ => "bleibt",
             };
-            let name = if shown == Shown::New { new.name.clone() } else { format!("{} → {}", old.name, new.name) };
-            WallType { id: format!("{}~{}~{}", old.id, new.id, tag), name, layers: pieces.iter().map(|q| q.layer.clone()).collect(), ..Default::default() }
+            let name = if shown == Shown::New { new.type_name().to_string() } else { format!("{} → {}", old.type_name(), new.type_name()) };
+            WallType { id: format!("{}~{}~{}", old.type_id(), new.type_id(), tag), name, layers: pieces.iter().map(|q| q.layer.clone()).collect(), ..Default::default() }
         });
-        let type_id = new_type.as_ref().map_or_else(|| old.id.clone(), |t| t.id.clone());
+        let type_id = new_type.as_ref().map_or_else(|| old.type_id().to_string(), |t| t.id.clone());
         let demolish = match td {
             Treat::Style(s) => Some(s),
             _ => None,
         };
-        Some(WallLook { shown, pieces, treat, new_type, type_id, ref_offset: if ref_offset.is_finite() { ref_offset } else { 0.0 }, demolish, components })
+        WallLook { shown, pieces, treat, new_type, type_id, ref_offset: 0.0, level: None, demolish, components }
     }
 
     /// Grundriss: Kanten der Wand (Umriss, Fugen, Stirnseiten) in `prims[from..]` je Schicht stricheln — Kanten einer
@@ -1442,13 +1681,61 @@ pub mod build_up {
         prims.extend(extra);
     }
 
+    /// [274] IFC: Status je Schicht eines sanierten Bauteils (Wand, Decke, Dach; `id`), unabhängig vom Umbaufilter —
+    /// Bestandstyp und Sanierungstyp je als Liste „Baustoff Dicke cm: EXISTING|DEMOLISH|NEW“ (Schichten aussen/oben →
+    /// innen/unten). IFC kennt den Status nur je Bauteil (`Pset_*Common.Status`, PEnum_ElementStatus) und keinen je
+    /// Materialschicht; die Liste steht darum in `Dossier_Umbau` (`SchichtenBestand`, `SchichtenSanierung`). `None` ohne Sanierung.
+    pub fn ifc_layer_status(p: &Project, id: &str) -> Option<(String, String)> {
+        fn text(p: &Project, layers: &[Layer], fates: &[Fate]) -> String {
+            let word = |f: Fate| match f {
+                Fate::Kept => "EXISTING",
+                Fate::Demolish => "DEMOLISH",
+                Fate::New => "NEW",
+            };
+            layers.iter().zip(fates).map(|(l, f)| format!("{} {:.1} cm: {}", p.component_or_fallback(&l.component_id).name, thick(l) * 100.0, word(*f))).collect::<Vec<_>>().join("; ")
+        }
+        fn of<T: Layered>(p: &Project, x: Option<(&T, &T, RenovationSide, Matched)>) -> Option<(String, String)> {
+            let (old, new, _, m) = x?;
+            Some((text(p, old.type_layers(), &m.old), text(p, new.type_layers(), &m.new)))
+        }
+        if let Some(w) = p.walls.iter().find(|w| w.id == id) {
+            return of(p, pair(p, w));
+        }
+        if let Some(c) = p.ceilings.iter().flatten().find(|c| c.id == id) {
+            return of(p, ceiling_pair(p, c));
+        }
+        let r = p.roofs.iter().flatten().find(|r| r.id == id)?;
+        of(p, roof_pair(p, r))
+    }
+
+    /// Bestandstyp, Markierung „saniert“ und gezeigter Sanierungstyp je Element einer Bauteilart (Zähler der Abfragen).
+    fn members(p: &Project, host: Host) -> Vec<(Option<String>, bool, Option<String>)> {
+        let m = |r: &Option<Renovation>| r.as_ref().is_some_and(marked);
+        match host {
+            Host::Wall => p.walls.iter().map(|w| (Some(origin(w).0), m(&w.renovation), pair(p, w).map(|x| x.1.id.clone()))).collect(),
+            Host::Ceiling => p.ceilings.iter().flatten().map(|c| (ceiling_origin(c).ceiling_type_id, m(&c.renovation), ceiling_pair(p, c).map(|x| x.1.id.clone()))).collect(),
+            Host::Roof => p.roofs.iter().flatten().map(|r| (roof_origin(r).roof_type_id, m(&r.renovation), roof_pair(p, r).map(|x| x.1.id.clone()))).collect(),
+        }
+    }
+
     /// Abfrage `renovationPair` (Typ-Paar-Editor, Vorschau): Schichten alt/neu mit Zuordnung und Ergebnis-Streifen
-    /// (Umbauplan). `text` = `{"type": Bestandstyp-Id, "target": Sanierungstyp-Id (fehlt = eingetragener)}`; `null` ohne Paar.
+    /// (Umbauplan). `text` = `{"type": Bestandstyp-Id, "target": Sanierungstyp-Id (fehlt = eingetragener), "kind": "wall" |
+    /// "ceiling" | "roof" (fehlt = Wand)}`; `null` ohne Paar. `elements`/`renovated`: Elemente des Bestandstyps bzw. mit
+    /// diesem Sanierungstyp saniert.
     pub fn pair_json(p: &Project, text: &str) -> serde_json::Value {
         let v: serde_json::Value = serde_json::from_str(text).unwrap_or_default();
-        let Some(old) = v.get("type").and_then(|x| x.as_str()).and_then(|id| p.wall_types.iter().find(|t| t.id == id)) else { return serde_json::Value::Null };
-        let target = v.get("target").and_then(|x| x.as_str()).filter(|s| !s.is_empty()).or(old.renovation_target.as_deref());
-        let Some((old, new, side, m)) = target.and_then(|t| type_pair(p, old, t)) else { return serde_json::Value::Null };
+        let host = Host::parse(v.get("kind").and_then(|x| x.as_str()).unwrap_or(""));
+        match host {
+            Host::Wall => pair_json_in(p, &p.wall_types, host, &v),
+            Host::Ceiling => pair_json_in(p, p.ceiling_types.as_deref().unwrap_or(&[]), host, &v),
+            Host::Roof => pair_json_in(p, p.roof_types.as_deref().unwrap_or(&[]), host, &v),
+        }
+    }
+
+    fn pair_json_in<T: Layered>(p: &Project, types: &[T], host: Host, v: &serde_json::Value) -> serde_json::Value {
+        let Some(old) = v.get("type").and_then(|x| x.as_str()).and_then(|id| types.iter().find(|t| t.type_id() == id)) else { return serde_json::Value::Null };
+        let target = v.get("target").and_then(|x| x.as_str()).filter(|s| !s.is_empty()).or(old.target());
+        let Some((old, new, side, m)) = target.and_then(|t| type_pair_in(types, old, t)) else { return serde_json::Value::Null };
         let layer = |l: &Layer, f: Fate| {
             let c = p.component_or_fallback(&l.component_id);
             serde_json::json!({"componentId": l.component_id, "name": c.name, "color": c.color, "thickness": thick(l), "fate": f})
@@ -1458,33 +1745,36 @@ pub mod build_up {
             Kind::Demolish => style(p, RenovationStatus::Demolish).fill,
             _ => style(p, RenovationStatus::New).fill,
         };
-        let strip = |shown: Shown| -> Vec<serde_json::Value> { pieces(&old.layers, &new.layers, &m, side, shown).iter().map(|q| serde_json::json!({"thickness": thick(&q.layer), "kind": q.kind, "fill": fill(q.kind)})).collect() };
-        let walls = p.walls.iter().filter(|w| origin(w).0 == old.id).count();
-        let renovated = p.walls.iter().filter(|w| origin(w).0 == old.id && pair(p, w).is_some_and(|x| x.1.id == new.id)).count();
+        let strip = |shown: Shown| -> Vec<serde_json::Value> { pieces(old.type_layers(), new.type_layers(), &m, side, shown).iter().map(|q| serde_json::json!({"thickness": thick(&q.layer), "kind": q.kind, "fill": fill(q.kind)})).collect() };
+        let list = members(p, host);
+        let of_type = |x: &(Option<String>, bool, Option<String>)| x.0.as_deref() == Some(old.type_id());
+        let elements = list.iter().filter(|x| of_type(x)).count();
+        let renovated = list.iter().filter(|x| of_type(x) && x.2.as_deref() == Some(new.type_id())).count();
         serde_json::json!({
-            "type": old.id, "target": new.id, "side": if side == RenovationSide::Outside { "outside" } else { "inside" },
-            "old": old.layers.iter().zip(&m.old).map(|(l, f)| layer(l, *f)).collect::<Vec<_>>(),
-            "new": new.layers.iter().zip(&m.new).map(|(l, f)| layer(l, *f)).collect::<Vec<_>>(),
+            "kind": host.key(), "type": old.type_id(), "target": new.type_id(), "side": if side == RenovationSide::Outside { "outside" } else { "inside" },
+            "old": old.type_layers().iter().zip(&m.old).map(|(l, f)| layer(l, *f)).collect::<Vec<_>>(),
+            "new": new.type_layers().iter().zip(&m.new).map(|(l, f)| layer(l, *f)).collect::<Vec<_>>(),
             "oldStrip": strip(Shown::Old), "newStrip": strip(Shown::New), "result": strip(Shown::Both),
-            "walls": walls, "renovated": renovated,
+            "elements": elements, "renovated": renovated,
         })
     }
 
-    /// Abfrage `renovationPairs` (Umbau-Panel): je Bestandstyp mit Sanierungstyp das Ziel und die Anzahl Wände bzw.
-    /// sanierter Wände; dazu die Zahl aller sanierten Wände.
+    /// Abfrage `renovationPairs` (Umbau-Panel): je Bestandstyp mit Sanierungstyp (Wände, Decken, Dächer) das Ziel und die
+    /// Anzahl Elemente bzw. sanierter Elemente; dazu die Zahl aller sanierten Bauteile.
     pub fn pairs_json(p: &Project) -> serde_json::Value {
-        let pairs: Vec<serde_json::Value> = p
-            .wall_types
-            .iter()
-            .filter_map(|t| {
-                let target = t.renovation_target.as_deref().filter(|s| !s.is_empty())?;
-                let new = p.wall_types.iter().find(|x| x.id == target);
-                let walls = p.walls.iter().filter(|w| origin(w).0 == t.id).count();
-                let renovated = p.walls.iter().filter(|w| origin(w).0 == t.id && w.renovation.as_ref().is_some_and(marked)).count();
-                Some(serde_json::json!({"type": t.id, "name": t.name, "target": target, "targetName": new.map(|n| n.name.clone()), "walls": walls, "renovated": renovated}))
-            })
-            .collect();
-        let total = p.walls.iter().filter(|w| pair(p, w).is_some()).count();
+        fn of<T: Layered>(p: &Project, types: &[T], host: Host, out: &mut Vec<serde_json::Value>) -> usize {
+            let list = members(p, host);
+            for t in types {
+                let Some(target) = t.target().filter(|s| !s.is_empty()) else { continue };
+                let new = types.iter().find(|x| x.type_id() == target);
+                let elements = list.iter().filter(|x| x.0.as_deref() == Some(t.type_id())).count();
+                let renovated = list.iter().filter(|x| x.0.as_deref() == Some(t.type_id()) && x.1).count();
+                out.push(serde_json::json!({"kind": host.key(), "type": t.type_id(), "name": t.type_name(), "target": target, "targetName": new.map(|n| n.type_name()), "elements": elements, "renovated": renovated}));
+            }
+            list.iter().filter(|x| x.2.is_some()).count()
+        }
+        let mut pairs = Vec::new();
+        let total = of(p, &p.wall_types, Host::Wall, &mut pairs) + of(p, p.ceiling_types.as_deref().unwrap_or(&[]), Host::Ceiling, &mut pairs) + of(p, p.roof_types.as_deref().unwrap_or(&[]), Host::Roof, &mut pairs);
         serde_json::json!({"pairs": pairs, "renovated": total})
     }
 }

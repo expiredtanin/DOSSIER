@@ -235,7 +235,10 @@ export function installTestHooks(): void {
         phase: l?.renovationPhase ?? null,
         draw: s.drawRenovation.status,
         walls: Object.fromEntries(s.project.walls.map((w) => [w.id, w.renovation?.status ?? "existing"])),
-        buildUp: Object.fromEntries(s.project.walls.map((w) => [w.id, w.renovation?.newTypeId ?? (w.renovation?.renovated ? "type" : "")])),
+        // [274] Wände, Decken und Dächer (Ids sind projektweit eindeutig).
+        buildUp: Object.fromEntries(
+          [...s.project.walls, ...(s.project.ceilings ?? []), ...(s.project.roofs ?? [])].map((w) => [w.id, w.renovation?.newTypeId ?? (w.renovation?.renovated ? "type" : "")]),
+        ),
       };
     },
     context: () =>
