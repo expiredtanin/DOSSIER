@@ -25,6 +25,7 @@ export interface AppMenuBarProps {
   onNewProjectFromSample: () => void;
   onNewProjectFromComplexSample: () => void;
   onNewProjectFromWettbewerbSample: () => void;
+  onNewProjectFromUmbauSample?: () => void;
   onNewProjectFromTemplate: () => void;
   onOpenProject: () => void;
   onSaveProject: () => void;
@@ -75,6 +76,7 @@ export const AppMenuBar = memo(function AppMenuBar({
   onNewProjectFromSample,
   onNewProjectFromComplexSample,
   onNewProjectFromWettbewerbSample,
+  onNewProjectFromUmbauSample,
   onNewProjectFromTemplate,
   onOpenProject,
   onSaveProject,
@@ -111,6 +113,7 @@ export const AppMenuBar = memo(function AppMenuBar({
     { label: t("file.newFromSample"), onSelect: onNewProjectFromSample },
     { label: t("file.newFromComplexSample"), onSelect: onNewProjectFromComplexSample },
     { label: t("file.newFromWettbewerbSample"), onSelect: onNewProjectFromWettbewerbSample },
+    ...(onNewProjectFromUmbauSample ? [{ label: t("file.newFromUmbauSample"), onSelect: onNewProjectFromUmbauSample }] : []),
     { label: t("file.newFromTemplateFile"), onSelect: onNewProjectFromTemplate },
     { divider: true },
     { label: t("file.open"), onSelect: onOpenProject },

@@ -84,6 +84,12 @@ in `doc/KURZANLEITUNG.md`):
     LV95-Lage als Georeferenz (Versatz und ±0.00 m ü. M.), Räume mit Nummer, Name, Fläche und SIA-416-Kategorie, Geschossflächen und
     Gebäudesummen; Mengen stimmen mit der Geometrie überein (mit ifcopenshell gegengeprüft, alle drei Beispielprojekte ohne Befund). Option
     «Kontext mitgeben (Gelände, Nachbargebäude)» im Export-Dialog bzw. `--kontext` (Vorgabe aus). Die Objektbibliothek (Möbel, Sanitär) wird nicht ins IFC geschrieben. Was in welche Richtung verloren geht, steht in `doc/DATEIFORMATE.md`.
+13. **Umbau (17.11., [271]).** Jedes Bauteil und jeder Raum trägt einen Umbau-Status Bestand, Abbruch oder Neu und optional eine Etappe
+    (Objekt-Info, Befehl `umbau`; neue Bauteile mit dem Zeichen-Status aus der Statusleiste, Vorgabe Bestand). Umbaufilter wie in Archicad
+    je Ansicht: Bestand, Abbruch, Neubau, Umbauplan (SIA 400: Bestand grau, Abbruch gelb gestrichelt, Neu rot) und Endzustand, bis zu einer
+    Etappe; neue Öffnungen in Bestandswänden zeigen das abgebrochene Mauerwerk, zugemauerte Öffnungen die Ausfachung. Gilt in Grundriss,
+    Schnitt, Ansicht, Vektor-Axonometrie, Kennzahlen (Bestand/Endzustand) und Exporten (DXF-Layer je Status, IFC `Status` im
+    `Pset_*Common`). Beispiel: *Datei → Neu aus Vorlage: Beispiel Umbau*. Das 3D-Fenster folgt dem Filter der aktiven Ebene (noch ohne Bildprüfung); Cycles/Blender noch ohne Filter.
 
 **Erker und Wiederanlauf (15.11.).** Fenster in Bogenwänden (Erker) sitzen in Schnitt und Ansicht wie im 3D und im Grundriss auf der Sehne; die Sehnen-Zonen
 gelten über alle Geschosse, der Deckenrand folgt der Sehne ([216]). Raumstempel rücken in Lücken zwischen den Linien, bevor sie schrumpfen; die Baulinie setzt vor

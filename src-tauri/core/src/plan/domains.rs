@@ -64,6 +64,10 @@ pub struct PlanArgs {
     /// [203] Pausfolie: dieser Plan liegt gedimmt unter dem Grundriss des Geschosses `trace_of` (Zeichnungsebenen-Modus
     /// „Andere grau"). Achsraster, die auch dort stehen, fehlen hier — sie stehen nur einmal im Bild. `None` = eigener Plan.
     pub trace_of: Option<String>,
+    /// [271] Ausdrücklich angefragter Umbaufilter (Id oder Name; CLI `--renovation`, Blatt-Ausschnitt) und Etappe;
+    /// `None` = der der Ebene (`DrawingLevel.renovationFilter`), sonst kein Filter (`renovation.rs`).
+    pub renovation: Option<String>,
+    pub renovation_phase: Option<String>,
 }
 
 /// [140] Ab diesem Massstab (1:N) zeichnet der Detailgrad „mittel" wie „grob".
@@ -110,6 +114,8 @@ impl PlanArgs {
             rules: v.get("rules").and_then(|a| a.as_array()).map(|a| a.iter().filter_map(|s| s.as_str().map(String::from)).collect()),
             model_view: v.get("modelView").and_then(|m| m.as_str()).filter(|m| !m.is_empty()).map(String::from),
             trace_of: v.get("traceOf").and_then(|m| m.as_str()).filter(|m| !m.is_empty()).map(String::from),
+            renovation: v.get("renovation").and_then(|m| m.as_str()).filter(|m| !m.is_empty()).map(String::from),
+            renovation_phase: v.get("renovationPhase").and_then(|m| m.as_str()).filter(|m| !m.is_empty()).map(String::from),
         })
     }
 
@@ -156,6 +162,8 @@ pub struct Ctx<'a> {
     bubble_obst: std::cell::OnceCell<super::stamp_place::Obstacles>,
     /// [207] Linienzüge der Strassen-Klasse („11“) je Geschoss für Strassennamen entlang der Achse (`plan/text_curve.rs`).
     road_axes: std::cell::OnceCell<Vec<(String, Vec<crate::model::Vec2>)>>,
+    /// [271] Umbaufilter dieser Plan-Erzeugung (ausgeblendete Elemente stehen zusätzlich in `hidden`).
+    ren: Option<crate::renovation::Resolved>,
 }
 
 impl<'a> Ctx<'a> {
@@ -164,10 +172,27 @@ impl<'a> Ctx<'a> {
         for c in p.flat_categories() {
             cats.insert(c.code.as_str(), c);
         }
-        let hidden = overrides::hidden_elements(p, overrides::RuleView::at(a.scale, a.rules.as_ref()).view("plan"));
+        let mut hidden = overrides::hidden_elements(p, overrides::RuleView::at(a.scale, a.rules.as_ref()).view("plan"));
+        // [271] Umbaufilter: ausgeblendete Bauteile wie bei der Regel „Ausblenden“ (eine Öffnung schliesst ihre Wand).
+        let ren = crate::renovation::View::for_level(p, &a.floor, a.renovation.as_deref(), a.renovation_phase.as_deref()).map(|v| v.resolve(p)).filter(|r| !r.is_empty());
+        if let Some(r) = &ren {
+            hidden.extend(r.hidden.iter().cloned());
+        }
         let mv_sel = super::model_view::selected_id(p, &a.floor, a.model_view.as_deref()).and_then(|id| super::model_view::find(p, id));
         let mv = super::model_view::resolve(mv_sel, a.detail, a.scale);
-        Ctx { p, a, cats, hidden, mv_sel, mv, house: Default::default(), drawn_obst: Default::default(), obst_busy: Default::default(), bubble_obst: Default::default(), road_axes: Default::default() }
+        Ctx { p, a, cats, hidden, mv_sel, mv, house: Default::default(), drawn_obst: Default::default(), obst_busy: Default::default(), bubble_obst: Default::default(), road_axes: Default::default(), ren }
+    }
+
+    /// [271] Umbaufilter (Farben, Ersatzstücke der Öffnungen); `None` ohne Filter.
+    pub fn renovation(&self) -> Option<&crate::renovation::Resolved> {
+        self.ren.as_ref()
+    }
+
+    /// [271] Umbau-Farben auf `out[from..]` (Primitive nach ihrem Element, sonst nach `owner`).
+    pub fn renovation_restyle(&self, out: &mut Vec<Primitive>, from: usize, owner: Option<&str>) {
+        if let Some(r) = &self.ren {
+            crate::renovation::restyle_range(r, out, from, owner);
+        }
     }
 
     /// [179] Aussenringe der Gebäudegrundfläche (`context::building_rings`), einmal je Plan.
@@ -1643,7 +1668,7 @@ pub fn room_stamp_spots(p: &Project, floor: &str, show: &HashSet<String>, scale:
         return out;
     }
     let (detail, auto_coarse) = effective_detail(Detail::Mittel, scale);
-    let a = PlanArgs { floor: floor.to_string(), detail, show: show.clone(), grey: HashSet::new(), reference_lines: false, global: true, scale, for_print: false, compact: false, mono: false, sun_when: None, auto_coarse, rules: None, model_view: None, trace_of: None };
+    let a = PlanArgs { floor: floor.to_string(), detail, show: show.clone(), grey: HashSet::new(), reference_lines: false, global: true, scale, for_print: false, compact: false, mono: false, sun_when: None, auto_coarse, rules: None, model_view: None, trace_of: None, renovation: None, renovation_phase: None };
     let Ok(d) = plan_domains(p, &a) else { return out };
     for q in d.rooms.iter().chain(&d.sections) {
         if let Primitive::Text { at, room_id: Some(id), .. } = q {
@@ -1967,6 +1992,12 @@ fn domains_before(c: &Ctx, out: &mut DomainPrims, bounds: &mut Bounds) -> Result
     // [149] Bäume (Planzeichen) mit den Stützen in einer Gruppe.
     super::trees::plan_trees(c, &mut out.columns);
     solids(c, &mut out.solids);
+    // [271] Umbaufilter: Decken, Dächer, Treppen, Stützen und Körper in ihrer Umbau-Farbe (Wände: `plan_walls`).
+    if c.renovation().is_some() {
+        for v in [&mut out.ceilings, &mut out.roofs, &mut out.stairs, &mut out.columns, &mut out.solids] {
+            c.renovation_restyle(v, 0, None);
+        }
+    }
     Ok(())
 }
 

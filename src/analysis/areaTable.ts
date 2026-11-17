@@ -84,8 +84,9 @@ export interface Ivhb {
 }
 
 /** SIA-416-Flächentabelle je Geschoss und total. */
-export function computeAreaTable(project: Project): AreaTable {
-  return documentFor(project).query<AreaTable>("areaTable");
+export function computeAreaTable(project: Project, renovation = ""): AreaTable {
+  // [271] `renovation`: Umbau-Zustand (Filter-Id); leer = alle Bauteile.
+  return documentFor(project).query<AreaTable>("areaTable", [], renovation);
 }
 
 /** IVHB-Kennziffern (GFZ, AZ, BMZ, ÜZ, GZ, Höhen). */

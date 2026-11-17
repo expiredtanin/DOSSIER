@@ -479,7 +479,8 @@ export class CommandEngine {
     if (accepts.includes("option")) {
       const opts = this.command.options(this.state);
       const q = text.toLowerCase();
-      const hit = opts.find((o) => o.id.toLowerCase().startsWith(q));
+      // [271] Sonst das Kürzel der Option (z. B. „A“ für Abbruch bei der Id `demolish`), getippt mit Enter.
+      const hit = opts.find((o) => o.id.toLowerCase().startsWith(q)) ?? opts.find((o) => o.key?.toLowerCase() === q);
       if (hit) {
         this.feed({ kind: "option", id: hit.id });
         return;

@@ -124,6 +124,22 @@ fn structure_props(external: Option<bool>, load_bearing: Option<bool>) -> Vec<Pr
     v
 }
 
+/// [271] Umbau-Status als `Status` im `Pset_<Bauteil>Common` (IFC4 `PEnum_ElementStatus`: NEW, EXISTING, DEMOLISH; das
+/// IFC-Mittel für Umbau, das Revit/Archicad beim Austausch lesen) und die Etappe als `Dossier_Umbau.Etappe` (IFC kennt
+/// Bauphasen nur über Vorgänge `IfcTask` — für Austausch und Filter genügt die Eigenschaft). Nur mit Angabe im Modell.
+fn renovation_props(p: &Project, psets: &mut Vec<Pset>, common: &'static str, r: Option<&Renovation>) {
+    let Some(r) = r else { return };
+    let status = Prop::Label("Status", crate::renovation::ifc_status(crate::renovation::status_of(Some(r))).to_string());
+    match psets.iter_mut().find(|ps| ps.name == common) {
+        Some(ps) => ps.props.push(status),
+        None => psets.insert(0, Pset { name: common, props: vec![status] }),
+    }
+    let phase = r.phase.as_deref().and_then(|id| crate::renovation::phases(p).iter().find(|x| x.id == id)).map(|x| x.name.trim()).filter(|n| !n.is_empty());
+    if let Some(n) = phase {
+        psets.push(Pset { name: "Dossier_Umbau", props: vec![Prop::Label("Etappe", n.to_string())] });
+    }
+}
+
 fn ident(name: &'static str, v: &str) -> Prop {
     Prop::Ident(name, v.to_string())
 }
@@ -757,6 +773,7 @@ fn fill_psets(p: &Project, o: &Opening, width: f64, height: f64) -> Vec<Pset> {
     props.extend(o.u_value.filter(|u| *u > 0.0).map(|u| Prop::Thermal("ThermalTransmittance", u)));
     props.extend(label("SecurityRating", &o.burglary_class));
     let mut psets = vec![Pset { name: pset_name, props }];
+    renovation_props(p, &mut psets, pset_name, crate::renovation::opening_renovation(p, o));
     psets.extend(qto(if is_door { "Qto_DoorBaseQuantities" } else { "Qto_WindowBaseQuantities" }, qty::opening_quantities(width, height)));
     psets
 }
@@ -1128,12 +1145,14 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
                 props.extend(structure_props(wall.is_external, wall.load_bearing));
                 props.extend(crate::u_value::wall_u_value(p, wall).and_then(|u| u.u).map(|u| Prop::Thermal("ThermalTransmittance", u)));
                 let mut ps = vec![Pset { name: "Pset_WallCommon", props }];
+                renovation_props(p, &mut ps, "Pset_WallCommon", wall.renovation.as_ref());
                 ps.extend(q);
                 (wt.name.clone(), Some((wt.id.clone(), wt.name.clone(), layers)), ps)
             }
             None => {
                 props.extend(structure_props(wall.is_external, wall.load_bearing));
                 let mut ps = if props.is_empty() { Vec::new() } else { vec![Pset { name: "Pset_WallCommon", props }] };
+                renovation_props(p, &mut ps, "Pset_WallCommon", wall.renovation.as_ref());
                 ps.extend(q);
                 (wall.id.clone(), None, ps)
             }
@@ -1405,6 +1424,7 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
         if !slab_props.is_empty() {
             psets.push(Pset { name: "Pset_SlabCommon", props: slab_props });
         }
+        renovation_props(&p, &mut psets, "Pset_SlabCommon", c.renovation.as_ref());
         // Aussparungen (wie im 3D) als innere Ringe des Profils; Netto zieht sie ab.
         let hole_rings = crate::opening_shape::ceiling_hole_rings(&p, c);
         let inner: Vec<&[Vec2]> = hole_rings.iter().filter(|r| r.len() >= 3).map(|r| r.as_slice()).collect();
@@ -1717,6 +1737,7 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
         props.push(Prop::Bool("IsExternal", true));
         props.extend(crate::u_value::roof_u_value(&p, roof).and_then(|u| u.u).map(|u| Prop::Thermal("ThermalTransmittance", u)));
         let mut psets = vec![Pset { name: "Pset_RoofCommon", props }];
+        renovation_props(&p, &mut psets, "Pset_RoofCommon", roof.renovation.as_ref());
         let (roof_q, dormer_q) = roof_base_quantities(&p, roof);
         psets.extend(qto("Qto_RoofBaseQuantities", roof_q));
         psets.extend(qto("Qto_DossierDormerQuantities", dormer_q));
@@ -1783,6 +1804,7 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
         classified.push((format!("column/{}", col.id), Kind::Column, col.category_code.clone()));
         let label = crate::plan::domains::column_label(col);
         let mut psets = vec![Pset { name: "Pset_ColumnCommon", props: vec![ident("Reference", &label)] }];
+        renovation_props(&p, &mut psets, "Pset_ColumnCommon", col.renovation.as_ref());
         let quantities = if let [(footprint, zb, zt)] = pieces.as_slice() {
             qty::column_quantities(footprint, zt - zb)
         } else {

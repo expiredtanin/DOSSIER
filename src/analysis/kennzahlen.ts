@@ -61,8 +61,9 @@ export function solidVolume(s: ExtrudedSolid): number {
  * Flächen je Geschoss (SIA 416), Gebäudevolumen, Ausnützungs- und Überbauungsziffer. Rechnet der
  * Kern auf dem Projekt-Dokument (`kennzahlen.rs`, [K4] S2).
  */
-export function computeKennzahlen(project: Project): Kennzahlen {
-  return documentFor(project).query<Kennzahlen>("kennzahlen");
+export function computeKennzahlen(project: Project, renovation = ""): Kennzahlen {
+  // [271] `renovation`: Umbau-Zustand (Filter-Id, z. B. „bestand“ oder „endzustand“); leer = alle Bauteile.
+  return documentFor(project).query<Kennzahlen>("kennzahlen", [], renovation);
 }
 
 export type { ProgramStatus } from "./roomProgram";

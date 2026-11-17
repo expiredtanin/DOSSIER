@@ -21,6 +21,9 @@ export interface AxoOptions extends Doc3d {
   mono?: boolean;
   /** Massstabsnenner (Strichstärken nach Massstab); Vorgabe 100. */
   scaleDenominator?: number;
+  /** [271] Umbaufilter (Id oder Name) und Etappe. */
+  renovation?: string;
+  renovationPhase?: string;
 }
 
 /** Kern-Abfrage `axoPlan`. */

@@ -621,15 +621,22 @@ export function Wasm3DViewport({
   const greyKey = (greyCodes ?? []).join("\u0001");
   const greyFloorsKey = (greyFloors ?? []).join("\u0001");
   const lockKey = (lockedCodes ?? []).join("\u0001");
+  // [271] Umbaufilter der aktiven Ebene (wie im Grundriss): Ausgeblendetes fehlt, Bauteile in der Umbau-Farbe.
+  const renKey = useStore((s) => {
+    const l = s.project.drawingLevels.find((x) => x.id === s.activeLevelId);
+    return l?.renovationFilter ? `${l.renovationFilter}\u0001${l.renovationPhase ?? ""}` : "";
+  });
   const hide = useMemo<Hide3d>(() => {
     const split = (k: string) => (k ? k.split("\u0001") : []);
     const codes = split(hiddenKey);
     const floors = split(floorsKey);
     const dim = { grey: split(greyKey), lock: split(lockKey), greyFloors: split(greyFloorsKey) };
-    return onlyIds || hiddenIds.length || floors.length || dim.grey.length || dim.lock.length || dim.greyFloors.length
-      ? toFilter3d({ only: onlyIds, hidden: hiddenIds }, codes, floors, dim)
+    const [renovation, renovationPhase] = split(renKey);
+    const ren = renovation ? { renovation, ...(renovationPhase ? { renovationPhase } : {}) } : {};
+    return onlyIds || hiddenIds.length || floors.length || dim.grey.length || dim.lock.length || dim.greyFloors.length || renovation
+      ? { ...toFilter3d({ only: onlyIds, hidden: hiddenIds }, codes, floors, dim), ...ren }
       : codes;
-  }, [hiddenKey, floorsKey, greyKey, greyFloorsKey, lockKey, onlyIds, hiddenIds]);
+  }, [hiddenKey, floorsKey, greyKey, greyFloorsKey, lockKey, onlyIds, hiddenIds, renKey]);
   const hideRef = useRef(hide);
   hideRef.current = hide;
   // Versatz je Geschoss ([65]) für Griffe und gezogene Höhen (Modell bleibt unversetzt).

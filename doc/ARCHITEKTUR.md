@@ -463,6 +463,19 @@ sich mit starrer Geometrie nicht speichern. Aufbau in `src-tauri/core/src/furnit
 Neues eingebautes Objekt: Eintrag in `furniture_lib.rs::build()` (Definition + Zeichenfunktion), Namen in `de.ts`/`en.ts`.
 Standards laden ergänzt die Klassen „Möbel", „Sanitär" und „Fahrzeuge & Freiflächen" (`standards.rs::merge_plan`).
 
+### 3.8 Umbaufilter ([271])
+
+Wie Archicads „Renovation": Bauteile und Räume tragen `renovation: { status: existing | demolish | new, phase? }` (fehlt =
+Bestand; Öffnung ohne eigenen Status folgt ihrer Wand), das Projekt `renovation` (Etappen, Farben, eigene Filter). **Ein Ort:**
+`src-tauri/core/src/renovation.rs` — `View` (Filter + Etappe, aufgelöst: angefragt über Argument `renovation`/`renovationPhase`,
+sonst `DrawingLevel.renovationFilter`, wie die Modelldarstellung) und `View::resolve` → `Resolved` (ausgeblendete Ids, Farbe je Id,
+Ersatzstücke der Öffnungen in Bestandswänden). Es fragen: Grundriss (`Ctx::new` legt Ausgeblendetes zu `hidden` — dieselbe Wirkung
+wie die Regel „Ausblenden“, eine Öffnung schliesst ihre Wand; Farben je Element-Bereich in `walls.rs::plan_walls` und
+`domains_before`), Schnitt (`without_elements` + `CutRules::with_renovation`), Ansicht (`elevation_plan_buf`, `face::renovation_faces`),
+Vektor-Axo (`axo_plan_buf`), 3D (`model3dParts` mit `text.renovation`, ohne Teil-Cache; `color_parts`), Kennzahlen/Flächen
+(`text` = Filter-Id), DXF (`dxf.rs::renovation_layers`) und IFC (`ifc_data.rs::renovation_props`). Neue Bauteile der Zeichenbefehle
+bekommen den Zeichen-Status über `commands::stamp_renovation` (Anfrage-Feld `renovation`, gesetzt in `projectSlice.applyCmd`).
+
 ---
 
 ## 4. Schnitt

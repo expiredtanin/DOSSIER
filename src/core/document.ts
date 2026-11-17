@@ -181,6 +181,7 @@ export type QueryName =
   | "presentationSheet"
   | "kennzahlen"
   | "areaTable"
+  | "renovationFilters"
   | "costEstimate"
   | "costDefaults"
   | "programCompare"

@@ -576,7 +576,10 @@ export function createProjectSlice(
 
   // Befehl ([K4] S3, `commands.rs`): der Kern rechnet ihn auf dem Dokument und wendet ihn im selben
   // Aufruf an (`cmdMutation`); Prüfung, Verlauf und Meldungen wie `commitOps`.
-  const applyCmd = (req: object, coalesceKey?: string) => {
+  const applyCmd = (req0: object, coalesceKey?: string) => {
+    // [271] Aktueller Zeichen-Status: der Kern gibt ihn neuen Bauteilen der Zeichenbefehle (`commands::stamp_renovation`).
+    const dr = (get() as unknown as { drawRenovation?: { status: string; phase?: string } }).drawRenovation;
+    const req = dr && (dr.status !== "existing" || dr.phase) ? { ...req0, renovation: dr } : req0;
     if (forwarded(() => storeDocument(get().project).cmdOps(req), coalesceKey)) return;
     let notice: string | undefined;
     set((s) => {

@@ -6,6 +6,7 @@
 //    kommt aus `checkRoomProgram`.
 // Änderungen laufen über `applyChange` (Ops) mit coalesceKey, damit Tippen einen Undo-Schritt ergibt.
 
+import { useState } from "react";
 import { t } from "../i18n";
 import type { TranslationKey } from "../i18n";
 import { useStore } from "../state/appStore";
@@ -37,13 +38,21 @@ function parseNum(text: string): number | null {
   return text.trim() !== "" && Number.isFinite(v) ? v : null;
 }
 
+/** [271] Trägt ein Bauteil oder Raum einen Umbau-Status (sonst bleibt die Wahl „Zustand“ verborgen)? */
+function hasRenovation(p: Project): boolean {
+  const lists = [p.walls, p.openings, p.ceilings, p.roofs, p.stairs, p.columns, p.extrudedSolids, p.rooms] as Array<readonly { renovation?: unknown }[] | undefined>;
+  return lists.some((l) => (l ?? []).some((e) => e.renovation !== undefined));
+}
+
 const fmt = (n: number, d = 1) => n.toLocaleString("de-CH", { minimumFractionDigits: d, maximumFractionDigits: d });
 
 export function KennzahlenSection() {
   const applyChange = useStore((s) => s.applyChange);
   const notify = useStore((s) => s.notify);
   const project = useStore((s) => s.project);
-  const k = computeKennzahlen(project);
+  // [271] Umbau: Kennzahlen im Zustand Bestand bzw. Endzustand (Kern `renovation.rs`); leer = alle Bauteile.
+  const [renState, setRenState] = useState("");
+  const k = computeKennzahlen(project, renState);
   const prog = checkRoomProgram(project);
   const rows = project.roomProgram ?? [];
 
@@ -73,6 +82,16 @@ export function KennzahlenSection() {
 
   return (
     <div className="kz-section">
+      {hasRenovation(project) && (
+        <label className="kz-parcel" data-testid="kz-renovation-state">
+          <span>{t("renovation.state")}</span>
+          <select className="kz-input" value={renState} onChange={(e) => setRenState(e.target.value)} aria-label={t("renovation.state")}>
+            <option value="">{t("renovation.state.all")}</option>
+            <option value="bestand">{t("renovation.filter.bestand")}</option>
+            <option value="endzustand">{t("renovation.filter.endzustand")}</option>
+          </select>
+        </label>
+      )}
       <div className="kz-bar">
         {tiles.map((tile) => (
           <div key={tile.label} className="kz-tile" title={t(tile.title)}>

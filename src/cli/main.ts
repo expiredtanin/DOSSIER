@@ -19,6 +19,8 @@
 //                                                  Override-Regel ein (auch Standard-Baustein, z. B. --rule "Deckenaufbau weiss") [33];
 //                                                  das Massstab-Kriterium einer Regel (ab/bis 1:n) gilt nach --scale;
 //                                                  --model-view <Name> wählt eine Modelldarstellung (eigene Stufe oder grob/mittel/fein) [173]
+//                                                  --renovation <Filter> Umbaufilter (bestand, abbruch, neubau, umbauplan, endzustand oder eigener)
+//                                                  mit --phase <Etappe> (Name oder id); auch für axo, model3d und kennzahlen [271]
 //                                                  --hide <Code|Name,…> blendet Klassen aus (z. B. --hide "Schatten,Auto-Bemassung") [180]
 //                                                  --snapshot <Name|id> übernimmt Geschoss, Massstab, Vorlage und Sichtbarkeit eines Ausschnitts [207]
 //   dossier-cli <projekt.obp> axo [--view southeast|southwest|northeast|northwest|iso|…] [--projection iso|military|military30]
@@ -60,7 +62,8 @@
 //
 // Statt einer Datei nimmt `:beispiel` das eingebaute Demo-Haus (sampleProject), `:musterhaus-komplex` das
 // grosse Beispiel (model/sampleProjectComplex.ts; als Datei: `dossier-cli :musterhaus-komplex migrate --out mk.obp`),
-// `:wettbewerb` das Wettbewerbs-Beispiel der Kurzanleitung (model/sampleProjectWettbewerb.ts, [210]).
+// `:wettbewerb` das Wettbewerbs-Beispiel der Kurzanleitung (model/sampleProjectWettbewerb.ts, [210]), `:umbau` das
+// Umbau-Beispiel (model/sampleProjectUmbau.ts, [271]).
 //
 // WASM-Pakete (src/engine/pkg*) werden aus DOSSIER_WASM_DIR bzw. `<repo>/src/engine` gelesen.
 
@@ -141,6 +144,8 @@ import {
   generateSectionPlan,
   viewportLevelPlan,
   generateAxoPlan,
+  renovationFilterList,
+  buildUmbauSampleProject,
   type AxoOptions,
   planToRenderScene,
   projectToModel3d,
@@ -252,6 +257,7 @@ function loadProject(path: string, args: Args): Project {
   if (path === ":beispiel") return sampleProject;
   if (path === ":musterhaus-komplex") return buildComplexSampleProject();
   if (path === ":wettbewerb") return buildWettbewerbSampleProject();
+  if (path === ":umbau") return buildUmbauSampleProject();
   if (path === ":gross") return buildBigSampleProject({ floors: Number(args.flags.get("floors") ?? 8), apartments: Number(args.flags.get("apartments") ?? 15) });
   let text: string;
   try {
@@ -364,7 +370,26 @@ function withTemplate(project: Project, levelId: string, tpl: ViewTemplate | und
     if (!mv) fail(`Modelldarstellung nicht gefunden: ${mName} (vorhanden: grob, mittel, fein${(p.modelViewOptions ?? []).map((m) => `, ${m.name}`).join("")})`);
     p = { ...p, drawingLevels: p.drawingLevels.map((l) => (l.id === levelId ? { ...l, modelViewOptionId: mv } : l)) };
   }
+  // [271] `--renovation <Filter>` (und `--phase <Etappe>`): Umbaufilter der Ebene; geht der Vorlage vor.
+  const ren = renovationFlags(p, args);
+  if (ren) p = { ...p, drawingLevels: p.drawingLevels.map((l) => (l.id === levelId ? { ...l, renovationFilter: ren.renovation, renovationPhase: ren.renovationPhase } : l)) };
   return p;
+}
+
+/** [271] `--renovation <Filter>` und `--phase <Etappe>` geprüft (Filter-Id oder Name; Etappe Name oder id); ohne Flag `null`. */
+function renovationFlags(project: Project, args: Args): { renovation: string; renovationPhase?: string } | null {
+  const name = args.flags.get("renovation");
+  if (!name || name === "true") return null;
+  const filters = renovationFilterList(project);
+  const n = name.toLowerCase();
+  const hit = filters.find((f) => f.id.toLowerCase() === n || f.name.toLowerCase() === n);
+  if (!hit) fail(`Umbaufilter nicht gefunden: ${name} (vorhanden: ${filters.map((f) => f.name).join(", ")})`);
+  const ph = args.flags.get("phase");
+  if (!ph || ph === "true") return { renovation: hit.id };
+  const phases = project.renovation?.phases ?? [];
+  const p = phases.find((x) => x.id === ph || x.name.toLowerCase() === ph.toLowerCase());
+  if (!p) fail(`Etappe nicht gefunden: ${ph} (vorhanden: ${phases.map((x) => x.name).join(", ") || "keine"})`);
+  return { renovation: hit.id, renovationPhase: p.id };
 }
 
 /** `--sketch` ([67]): die Ebene im Skizzenstil (wie `DrawingLevel.sketch`); sonst das Projekt unverändert. */
@@ -606,7 +631,7 @@ function importParsedDrawing(base: Project, parsed: ReturnType<typeof parseDxf>,
 /** Liest Eingabe nach Endung in ein Projekt: obp direkt, dxf/dwg als 2D-Zeichnung + Meshes, ifc als Kontext-Meshes (`--elements`: Bauteile). */
 async function importAny(path: string, args: Args): Promise<Project> {
   const ext = extOf(path);
-  if (ext === "obp" || ext === "json" || path === ":beispiel" || path === ":musterhaus-komplex" || path === ":wettbewerb") return loadProject(path, args);
+  if (ext === "obp" || ext === "json" || path === ":beispiel" || path === ":musterhaus-komplex" || path === ":wettbewerb" || path === ":umbau") return loadProject(path, args);
   let bytes: Uint8Array;
   try {
     bytes = new Uint8Array(readFileSync(path));
@@ -1208,7 +1233,7 @@ async function execute(project: Project, file: string, command: string, rest: st
       if (on("context")) opts.context = true;
       const mono = f.has("color") ? inkArg(args) : true;
       const t0 = Date.now();
-      const plan = generateAxoPlan(project, { ...opts, visibleCodes: codes, scaleDenominator: axScale, mono });
+      const plan = generateAxoPlan(project, { ...opts, ...(renovationFlags(project, args) ?? {}), visibleCodes: codes, scaleDenominator: axScale, mono });
       if (!plan) fail("kein 3D-Dokument (keine sichtbaren Bauteile oder unbrauchbare Kamera)");
       if (f.has("time")) process.stderr.write(`axo: ${Date.now() - t0} ms, ${plan.primitives.length} Primitive\n`);
       const name = `axo-${opts.view ?? opts.cameraId ?? "kamera"}`;
@@ -1307,7 +1332,8 @@ async function execute(project: Project, file: string, command: string, rest: st
         else throw new Error("--format: json, csv, svg oder pdf");
         return 0;
       }
-      const k = computeKennzahlen(project);
+      // [271] `--renovation bestand|endzustand`: Kennzahlen im Umbau-Zustand.
+      const k = computeKennzahlen(project, renovationFlags(project, args)?.renovation ?? "");
       const prog = checkRoomProgram(project);
       const baurecht = checkSiteRules(project);
       // [68] Erdarbeiten je Baugrube (Abtrag/Auftrag/Hinterfüllung, m³).
@@ -1492,7 +1518,7 @@ async function execute(project: Project, file: string, command: string, rest: st
       const filter: Filter3d = { hide: hideFlagCodes(project, args), grey: hideFlagCodes(project, args, "grey"), greyFloors: greyFloorIds(project, args) };
       const ghost = ghostFilter3d(filter);
       const model = {
-        ...projectToModel3d(project, { explode, hide: filter }),
+        ...projectToModel3d(project, { explode, hide: filter, ...(renovationFlags(project, args) ?? {}) }),
         // Flächenmuster ([100]) des Modells (render_png zeichnet sie in den Kanten-Stilen).
         patternLines: Array.from(emitSurfacePatternLines(project, explode, filter)),
         // [212] Materialtabelle des Pathtracers (render_png `--style pathtrace`).

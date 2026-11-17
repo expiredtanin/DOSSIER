@@ -1460,7 +1460,9 @@ pub fn collect(parts: &mut [Part], project: &Project, o: &DxfOptions) -> Option<
     cx.flat.add_layer(LAYER_EXTRUSION, Some(rgb_from_hex("#d98c40")), 13.0);
     cx.flat.add_layer(LAYER_ZERO, None, 25.0);
 
-    emit_entries(&mut cx, &mut main, &entries, &layer_by_code, true);
+    // [271] Umbau: Bauteile mit Status Abbruch/Neu auf eigene Ebenen „<Ebene>_Abbruch“ bzw. „<Ebene>_Neu“ (Bestand bleibt).
+    let ren_layer = renovation_layers(&mut cx, &cats);
+    emit_entries(&mut cx, &mut main, &entries, &layer_by_code, &ren_layer, true);
     cx.flat.set_pen(&mut main, -1.0);
     cx.flat.set_epen(&mut main, -1.0, -1.0, -1.0);
 
@@ -1484,7 +1486,37 @@ pub fn collect(parts: &mut [Part], project: &Project, o: &DxfOptions) -> Option<
 /// Bemassungen, Blockinstanzen und Öffnungen als CAD-Objekte, der Rest je Primitiv.
 /// `objects = false`: auch Bemassungen, Blockinstanzen und Öffnungen nur als ihre Primitive (Inhalt
 /// eines Blocks, der keine weiteren Blöcke definieren darf).
-fn emit_entries(cx: &mut Ctx, main: &mut Buf, entries: &[Entry], layer_by_code: &HashMap<&str, String>, objects: bool) {
+/// [271] Ebene je Bauteil mit Umbau-Status Abbruch/Neu (Wände, Stützen, Öffnungen samt Wand-Rückfall): Element-Id →
+/// Ebenen-Name, die Ebenen sind angelegt (Farbe und Strichstärke der Kategorie).
+fn renovation_layers(cx: &mut Ctx, cats: &[&LayerCategory]) -> HashMap<String, String> {
+    use crate::model::RenovationStatus as S;
+    let p = cx.project;
+    let mut items: Vec<(&str, &str, S)> = Vec::new();
+    for w in &p.walls {
+        items.push((&w.id, &w.category_code, crate::renovation::status_of(w.renovation.as_ref())));
+    }
+    for c in p.columns.iter().flatten() {
+        items.push((&c.id, &c.category_code, crate::renovation::status_of(c.renovation.as_ref())));
+    }
+    for o in p.openings.iter().flatten() {
+        items.push((&o.id, &o.category_code, crate::renovation::status_of(crate::renovation::opening_renovation(p, o))));
+    }
+    let mut out = HashMap::new();
+    for (id, code, st) in items {
+        let suffix = match st {
+            S::Demolish => "Abbruch",
+            S::New => "Neu",
+            _ => continue,
+        };
+        let Some(c) = cats.iter().find(|c| c.code == code) else { continue };
+        let name = format!("{}_{}_{}", c.code, c.name, suffix);
+        cx.flat.add_layer(&name, Some(rgb_from_hex(&c.color)), mm_to_lwe(c.lw));
+        out.insert(id.to_string(), name);
+    }
+    out
+}
+
+fn emit_entries(cx: &mut Ctx, main: &mut Buf, entries: &[Entry], layer_by_code: &HashMap<&str, String>, ren_layer: &HashMap<String, String>, objects: bool) {
     let project = cx.project;
     // 2) Rückverweise Primitiv → Kategorie.
     let code_by_wall: HashMap<&str, &str> = project.walls.iter().map(|w| (w.id.as_str(), w.category_code.as_str())).collect();
@@ -1501,6 +1533,9 @@ fn emit_entries(cx: &mut Ctx, main: &mut Buf, entries: &[Entry], layer_by_code: 
     let layer_for = |e: &Entry| -> String {
         match e.tag {
             T_POLYGON => {
+                if let Some(l) = e.ids.wall.as_ref().or(e.ids.column.as_ref()).and_then(|id| ren_layer.get(id)) {
+                    return l.clone();
+                }
                 if let Some(w) = &e.ids.wall {
                     return layer_of_code(&code_by_wall, w).unwrap_or_else(|| LAYER_DEFAULT.to_string());
                 }
@@ -1668,7 +1703,7 @@ fn emit_entries(cx: &mut Ctx, main: &mut Buf, entries: &[Entry], layer_by_code: 
                 }
                 _ => {
                     let op = opening_by_id[id];
-                    let layer = layer_by_code.get(op.category_code.as_str()).cloned().unwrap_or_else(|| LAYER_SYMBOLS.to_string());
+                    let layer = ren_layer.get(&op.id).or_else(|| layer_by_code.get(op.category_code.as_str())).cloned().unwrap_or_else(|| LAYER_SYMBOLS.to_string());
                     if !cx.opening(main, op, &members, &layer, &mut names) {
                         for m in &members {
                             let l = layer_for(m);
@@ -1746,6 +1781,8 @@ fn sheets(cx: &mut Ctx, main: &mut Buf, layer_by_code: &HashMap<&str, String>) {
                     rules: None,
                     model_view: None,
                     trace_of: None,
+                    renovation: None,
+                    renovation_phase: None,
                 };
                 if let Some(entries) = plan_domains_buf(p, &args).ok().and_then(|buf| {
                     let view = View::parse(&buf)?;
@@ -1756,7 +1793,7 @@ fn sheets(cx: &mut Ctx, main: &mut Buf, layer_by_code: &HashMap<&str, String>) {
                     let o1 = DxfOptions { scale: 1.0, include_hatches: cx.o.include_hatches, dim_cm: cx.o.dim_cm, paper_layout: false, bounds: [0.0; 4], default_font: cx.o.default_font.clone(), floor: String::new(), table_labels: String::new() };
                     let mut sub = Ctx { project: p, o: &o1, flat: std::mem::replace(&mut cx.flat, Flat::new()) };
                     let mut content = Buf::block();
-                    emit_entries(&mut sub, &mut content, &entries, layer_by_code, false);
+                    emit_entries(&mut sub, &mut content, &entries, layer_by_code, &HashMap::new(), false);
                     let bname = format!("SHEET_{}", n + 1);
                     sub.flat.define_block(main, &bname, &name, &[], content);
                     cx.flat = sub.flat;

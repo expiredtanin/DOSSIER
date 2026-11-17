@@ -26,7 +26,7 @@ mod meshes;
 mod projection;
 mod primitives;
 mod openings;
-mod query;
+pub(crate) mod query;
 pub mod unfold;
 
 use input::*;
@@ -131,6 +131,9 @@ pub struct LevelSpec {
     pub cut_hatch: bool,
     /// [173] Modelldarstellung der Ebene (`modelViewOptionId`; Ansicht: Öffnungslinien der Fenster).
     pub model_view: Option<String>,
+    /// [271] Umbaufilter und Etappe der Ebene (`renovationFilter`, `renovationPhase`).
+    pub renovation: Option<String>,
+    pub renovation_phase: Option<String>,
 }
 
 impl LevelSpec {
@@ -149,6 +152,8 @@ impl LevelSpec {
             sketch: v.get("sketch").and_then(|b| b.as_bool()).unwrap_or(false),
             cut_hatch: v.get("cutHatch").and_then(|b| b.as_bool()).unwrap_or(false),
             model_view: v.get("modelViewOptionId").and_then(|m| m.as_str()).filter(|m| !m.is_empty()).map(String::from),
+            renovation: v.get("renovationFilter").and_then(|m| m.as_str()).filter(|m| !m.is_empty()).map(String::from),
+            renovation_phase: v.get("renovationPhase").and_then(|m| m.as_str()).filter(|m| !m.is_empty()).map(String::from),
         }
     }
 
@@ -298,6 +303,27 @@ pub struct CutRules {
 }
 
 impl CutRules {
+    /// [271] Umbau-Farben als Override der Schnittflächen: Füllung der Farbe, ohne Muster, Umriss gestrichelt bei
+    /// Abbruch. Geht den Regeln vor (der Umbaufilter ist die Aussage des Plans).
+    pub fn with_renovation(mut self, out: &Output, r: Option<&crate::renovation::Resolved>) -> CutRules {
+        let Some(r) = r.filter(|r| !r.styled.is_empty()) else { return self };
+        if out.cuts.iter().all(|c| c.source_id.as_ref().is_none_or(|s| !r.styled.contains_key(s))) {
+            return self;
+        }
+        self.ov.resize(out.cuts.len(), None);
+        for (i, c) in out.cuts.iter().enumerate() {
+            let Some(st) = c.source_id.as_ref().and_then(|s| r.styled.get(s)) else { continue };
+            let prev = self.ov[i].take();
+            self.ov[i] = Some(CutOv {
+                fill: Some(st.fill.clone()),
+                hatch: HatchOv::None,
+                outline: prev.as_ref().and_then(|o| o.outline).or(Some(true)),
+                dash: if st.dashed { Some(Some(crate::renovation::DEMOLISH_DASH.to_vec())) } else { prev.and_then(|o| o.dash) },
+            });
+        }
+        self
+    }
+
     /// `v`: Massstab und eingeschaltete Regeln der Darstellung ([`super::overrides::RuleView`]).
     pub fn of(p: &Project, out: &Output, v: RuleView) -> CutRules {
         let ts = crate::excavation::terrains(p);

@@ -97,6 +97,10 @@ export function classFilterText(hide?: Hide3d, extra?: Record<string, unknown>):
   if (f.greyFloors?.length) h.greyFloors = f.greyFloors;
   if (f.lock?.length) h.lock = f.lock;
   if (f.ghost) h.ghost = true;
+  if (f.renovation) {
+    h.renovation = f.renovation;
+    if (f.renovationPhase) h.renovationPhase = f.renovationPhase;
+  }
   return Object.keys(h).length || extra ? JSON.stringify({ ...extra, ...h }) : "";
 }
 
@@ -118,6 +122,9 @@ export interface Filter3d {
   lock?: readonly string[];
   /** [180] Geisterschicht: nur die grauen Elemente. */
   ghost?: boolean;
+  /** [271] Umbaufilter der Ansicht (Id) und Etappe: Ausgeblendetes fehlt, Bauteile in der Umbau-Farbe (ohne Teil-Cache). */
+  renovation?: string;
+  renovationPhase?: string;
 }
 
 /**
@@ -296,6 +303,12 @@ export interface Model3dOptions {
    */
   modelView?: string;
   /**
+   * [271] Umbaufilter (Id oder Name, `renovation.rs`) und Etappe: Ausgeblendetes fehlt, Bauteile in der Umbau-Farbe.
+   * Rechnet ohne den inkrementellen Kern-Cache.
+   */
+  renovation?: string;
+  renovationPhase?: string;
+  /**
    * [180] Klassen, die zusätzlich zum Ebenen-Baum nicht gezeichnet werden (Darstellungsmodus des Ebenen-Panels).
    * Ausgeblendete Klassen fehlen im Modell, in der Pick-Geometrie und im Export der Ansicht (Kern filtert nach dem
    * Cache, Umschalten rechnet keine Wand neu). [185] Auch als {@link Filter3d} mit Element-Auswahl.
@@ -315,8 +328,14 @@ export function projectToModel3d(project: Project, opts: Model3dOptions = {}): R
   const args = [layered ? 1 : 0, DETAIL_CODE[detail] ?? 3, opts.forSection ? 1 : 0, voids ? 1 : 0, explode];
   // Ohne Explosion inkrementell ([58]): nur geänderte Wände reisen aus dem Kern und werden gelesen.
   const doc = documentFor(project);
-  const text = classFilterText(opts.hide, opts.modelView ? { modelView: opts.modelView } : undefined);
-  const parts = opts.modelView || explode > 0 ? doc.query<Model3dParts>("model3dParts", args, text) : doc.model3dParts<Model3dParts>(args, text);
+  const extra: Record<string, unknown> = {};
+  if (opts.modelView) extra.modelView = opts.modelView;
+  if (opts.renovation) {
+    extra.renovation = opts.renovation;
+    if (opts.renovationPhase) extra.renovationPhase = opts.renovationPhase;
+  }
+  const text = classFilterText(opts.hide, Object.keys(extra).length ? extra : undefined);
+  const parts = opts.modelView || opts.renovation || filter3d(opts.hide).renovation || explode > 0 ? doc.query<Model3dParts>("model3dParts", args, text) : doc.model3dParts<Model3dParts>(args, text);
   // [115] Freie Körper als Kern-Netze (`model3d/solids.rs`) zwischen Kontext-Meshes und Stützen.
   const meshes: RMesh[] = [...parts.contextMeshes];
   for (const m of parts.solidMeshes) meshes.push(m);
@@ -369,7 +388,8 @@ export interface Model3dPart {
 export function projectToModel3dParts(project: Project, opts: Model3dOptions = {}): Model3dPart[] | null {
   const layered = opts.layeredWalls ?? true;
   const detail = opts.detail ?? "fein";
-  if (explodeGap(opts.explode) > 0) return null;
+  // [271] Mit Umbaufilter ohne Teil-Cache: das ganze Modell (`projectToModel3d`).
+  if (explodeGap(opts.explode) > 0 || opts.renovation || filter3d(opts.hide).renovation) return null;
   const voids = !!opts.voids;
   const args = [layered ? 1 : 0, DETAIL_CODE[detail] ?? 3, opts.forSection ? 1 : 0, voids ? 1 : 0, 0];
   const { parts, keyed } = documentFor(project).model3dPartsKeyed<Model3dParts>(args, classFilterText(opts.hide));

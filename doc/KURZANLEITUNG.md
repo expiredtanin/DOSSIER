@@ -344,6 +344,29 @@ Speichern. Meldet Dossier, dass die automatische Sicherung nicht geschrieben wer
 
 Zum Schluss ⌘S. Das Projekt (`.obp`) enthält Volumen, Räume, Baurecht, Raumprogramm, Blätter und Publikationssätze.
 
+## 12. Umbau
+
+Für Umbauten trägt jedes Bauteil (Wand, Öffnung, Decke, Dach, Treppe, Stütze, Körper) und jeder Raum einen Umbau-Status:
+„Bestand“, „Abbruch“ oder „Neu“. Zum Ausprobieren: *Datei → Neu aus Vorlage: Beispiel Umbau* (Zwischenwand abgebrochen,
+Fenster zugemauert, neues Fenster in der Westwand, Anbau in der zweiten Etappe).
+
+- **Status setzen:** Bauteile wählen, in der **Objekt-Info** (auch Objekteinstellungen, Taste T) das Feld „Umbau“ und die
+  „Etappe“ wählen; bei Mehrfachauswahl ändern sich alle in einem Schritt. Oder den Befehl `umbau` tippen und B, A oder N.
+- **Neue Bauteile:** Vorgabe ist „Bestand“. Rechts in der Statusleiste zeigt der Knopf Umbau den Zeichen-Status; ein Klick
+  öffnet „Neue Bauteile zeichnen als“ (Status und Etappe). Bei wenig Platz liegt er unter ⋯.
+- **Umbaufilter:** im selben Popover der „Umbaufilter“ der aktiven Ansicht (Geschoss, Schnitt, Ansicht): „Bestand“ (alles,
+  was heute steht), „Abbruch“ (Abbruch gelb und gestrichelt), „Neubau“ (Neu rot, Abbruch weg), „Umbauplan“ (Bestand grau,
+  Abbruch gelb, Neu rot nach SIA 400) und „Endzustand“ (ohne Farben, Abbruch weg). Mit „Filter bis Etappe“ zeigt der Plan den
+  Stand einer Etappe. Der Filter gehört zur Ebene wie die Modelldarstellung; Ausschnitte und Ansichtsvorlagen merken ihn.
+- **Öffnungen in Bestandswänden:** eine neue Öffnung bricht Mauerwerk ab (im Umbauplan ein gelbes Stück, im Bestand ist die
+  Wand zu), eine Öffnung „Abbruch“ wird zugemauert (rote Ausfachung, im Neubau und Endzustand ist die Wand zu).
+- **Etappen und Farben:** *Fenster → Ressourcen*, Reiter „Umbau“: „Etappe hinzufügen“, umbenennen, Reihenfolge; die
+  „Umbau-Farben“ je Status (Füllung, Linie, gestrichelt).
+- **Flächen:** Panel Flächenbilanz, „Zustand“ Bestand oder Endzustand.
+- **Exporte:** DXF legt Abbruch und Neu auf eigene Layer (z. B. 20_Wände_Abbruch), IFC schreibt den Status als `Status` im
+  `Pset_WallCommon` (NEW, EXISTING, DEMOLISH) und die Etappe in `Dossier_Umbau`. Kommandozeile: `--renovation umbauplan`
+  (und `--phase`) bei plan, section, elevation, axo, model3d und kennzahlen.
+
 ---
 
 ## Noch offen

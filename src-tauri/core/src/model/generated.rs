@@ -1953,6 +1953,16 @@ pub struct DrawingLevel {
     #[serde(rename = "modelViewOptionId", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub model_view_option_id: Option<String>,
+    /// [271] Umbaufilter (eingebaut „bestand“, „abbruch“, „neubau“, „umbauplan“, „endzustand“ oder Id aus
+    /// `Project.renovation.filters`). Fehlt ⇒ kein Filter: alle Bauteile wie ohne Umbau-Angaben.
+    #[serde(rename = "renovationFilter", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub renovation_filter: Option<String>,
+    /// [271] Etappe, bis zu der der Umbaufilter gilt (Id aus `Project.renovation.phases`): Neues späterer Etappen fehlt
+    /// noch, Abbruch späterer Etappen steht noch als Bestand. Fehlt ⇒ alle Etappen.
+    #[serde(rename = "renovationPhase", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub renovation_phase: Option<String>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -2038,6 +2048,16 @@ pub struct ViewTemplate {
     #[serde(rename = "modelViewOptionId", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub model_view_option_id: Option<String>,
+    /// [271] Umbaufilter (eingebaut „bestand“, „abbruch“, „neubau“, „umbauplan“, „endzustand“ oder Id aus
+    /// `Project.renovation.filters`). Fehlt ⇒ kein Filter: alle Bauteile wie ohne Umbau-Angaben.
+    #[serde(rename = "renovationFilter", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub renovation_filter: Option<String>,
+    /// [271] Etappe, bis zu der der Umbaufilter gilt (Id aus `Project.renovation.phases`): Neues späterer Etappen fehlt
+    /// noch, Abbruch späterer Etappen steht noch als Bestand. Fehlt ⇒ alle Etappen.
+    #[serde(rename = "renovationPhase", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub renovation_phase: Option<String>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -2913,6 +2933,136 @@ pub enum SliceTermination {
     Unknown,
 }
 
+/// [271] Umbau-Status eines Bauteils (Archicad „Renovation Status“; SIA 400: Bestand schwarz/grau, Abbruch gelb,
+/// Neu rot).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+pub enum RenovationStatus {
+    #[default]
+    #[serde(rename = "existing")]
+    Existing,
+    #[serde(rename = "demolish")]
+    Demolish,
+    #[serde(rename = "new")]
+    New,
+    #[serde(other)]
+    #[ts(skip)]
+    Unknown,
+}
+
+/// [271] Umbau-Angaben eines Elements.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct Renovation {
+    pub status: RenovationStatus,
+    /// Etappe (`Project.renovation.phases`, Id): beim Status „neu“ die Bau-, bei „abbruch“ die Abbruch-Etappe.
+    /// Fehlt ⇒ erste Etappe.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub phase: Option<String>,
+    #[serde(flatten)]
+    #[ts(skip)]
+    pub extra: Extra,
+}
+
+/// [271] Eine Bau-Etappe (Reihenfolge = Reihenfolge der Liste).
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct RenovationPhase {
+    pub id: String,
+    pub name: String,
+    #[serde(flatten)]
+    #[ts(skip)]
+    pub extra: Extra,
+}
+
+/// [271] Darstellung eines Status im Umbaufilter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+pub enum RenovationShow {
+    /// Normal zeichnen (wie ohne Umbau-Angaben).
+    #[default]
+    #[serde(rename = "show")]
+    Show,
+    /// Ausblenden (wie nicht vorhanden: verdeckt nichts, eine Öffnung schliesst ihre Wand).
+    #[serde(rename = "hide")]
+    Hide,
+    /// Mit der Umbau-Farbe des Status (`RenovationStyle`).
+    #[serde(rename = "override")]
+    Override,
+    #[serde(other)]
+    #[ts(skip)]
+    Unknown,
+}
+
+/// [271] Umbau-Farbe eines Status: Füllung der Schnittflächen, Linienfarbe, gestrichelt. Fehlende Felder ⇒ SIA-Vorgabe.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct RenovationStyle {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub fill: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub line: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub dashed: Option<bool>,
+    #[serde(flatten)]
+    #[ts(skip)]
+    pub extra: Extra,
+}
+
+/// [271] Umbau-Farben je Status (fehlt ⇒ SIA-400-Vorgabe, `renovation::default_style`).
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct RenovationStyles {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub existing: Option<RenovationStyle>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub demolish: Option<RenovationStyle>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub new: Option<RenovationStyle>,
+    #[serde(flatten)]
+    #[ts(skip)]
+    pub extra: Extra,
+}
+
+/// [271] Ein Umbaufilter (wie Archicads „Renovation Filter“): Darstellung je Status.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct RenovationFilter {
+    pub id: String,
+    pub name: String,
+    pub existing: RenovationShow,
+    pub demolish: RenovationShow,
+    pub new: RenovationShow,
+    #[serde(flatten)]
+    #[ts(skip)]
+    pub extra: Extra,
+}
+
+/// [271] Umbau-Einstellungen des Projekts.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct RenovationSettings {
+    /// Etappen in ihrer Reihenfolge (Neubau/Abbruch Etappe 1, 2 …).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub phases: Option<Vec<RenovationPhase>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub styles: Option<RenovationStyles>,
+    /// Eigene Umbaufilter (zusätzlich zu den eingebauten).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub filters: Option<Vec<RenovationFilter>>,
+    #[serde(flatten)]
+    #[ts(skip)]
+    pub extra: Extra,
+}
+
 /// Eine Wand, definiert über ihre Achse (Centerline) und ihren Typ.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
 #[serde(default)]
@@ -3082,6 +3232,10 @@ pub struct Wall {
     #[serde(rename = "surfacePatternOffset", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub surface_pattern_offset: Option<Vec2>,
+    /// [271] Umbau: Status (Bestand, Abbruch, Neu) und Etappe. Fehlt ⇒ Bestand.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub renovation: Option<Renovation>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -3240,6 +3394,10 @@ pub struct Ceiling {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub bottom: Option<VerticalAnchor>,
+    /// [271] Umbau: Status (Bestand, Abbruch, Neu) und Etappe. Fehlt ⇒ Bestand.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub renovation: Option<Renovation>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -3443,6 +3601,10 @@ pub struct Roof {
     #[serde(rename = "parapetComponentId", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub parapet_component_id: Option<String>,
+    /// [271] Umbau: Status (Bestand, Abbruch, Neu) und Etappe. Fehlt ⇒ Bestand.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub renovation: Option<Renovation>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -3935,6 +4097,10 @@ pub struct Opening {
     #[serde(rename = "doorFrame", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub door_frame: Option<DoorFrameDetail>,
+    /// [271] Umbau: Status (Bestand, Abbruch, Neu) und Etappe. Fehlt ⇒ Bestand wie die Wand (eine neue Öffnung in einer Bestandswand bricht die Wand dort ab, eine Öffnung „Abbruch“ wird zugemauert).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub renovation: Option<Renovation>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -4196,6 +4362,10 @@ pub struct Stair {
     #[serde(rename = "postDepth", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub post_depth: Option<f64>,
+    /// [271] Umbau: Status (Bestand, Abbruch, Neu) und Etappe. Fehlt ⇒ Bestand.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub renovation: Option<Renovation>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -4472,6 +4642,10 @@ pub struct Room {
     #[serde(rename = "floorBuildUp", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub floor_build_up: Option<String>,
+    /// [271] Umbau: Status (Bestand, Abbruch, Neu) und Etappe. Fehlt ⇒ Bestand (nur Sichtbarkeit und Flächen je Zustand, keine Umbau-Farbe: ein Raum ist kein Bauteil).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub renovation: Option<Renovation>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -4820,6 +4994,10 @@ pub struct ExtrudedSolid {
     #[serde(rename = "componentId", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub component_id: Option<String>,
+    /// [271] Umbau: Status (Bestand, Abbruch, Neu) und Etappe. Fehlt ⇒ Bestand.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub renovation: Option<Renovation>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -4927,6 +5105,10 @@ pub struct Column {
     #[serde(rename = "hatchSource", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub hatch_source: Option<AttributeSource>,
+    /// [271] Umbau: Status (Bestand, Abbruch, Neu) und Etappe. Fehlt ⇒ Bestand.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub renovation: Option<Renovation>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -5478,6 +5660,16 @@ pub struct ViewSnapshot {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub doc3d: Option<Doc3d>,
+    /// [271] Umbaufilter (eingebaut „bestand“, „abbruch“, „neubau“, „umbauplan“, „endzustand“ oder Id aus
+    /// `Project.renovation.filters`). Fehlt ⇒ kein Filter: alle Bauteile wie ohne Umbau-Angaben.
+    #[serde(rename = "renovationFilter", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub renovation_filter: Option<String>,
+    /// [271] Etappe, bis zu der der Umbaufilter gilt (Id aus `Project.renovation.phases`): Neues späterer Etappen fehlt
+    /// noch, Abbruch späterer Etappen steht noch als Bestand. Fehlt ⇒ alle Etappen.
+    #[serde(rename = "renovationPhase", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub renovation_phase: Option<String>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -6568,6 +6760,10 @@ pub struct Project {
     #[serde(rename = "geoAnchor", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional, inline)]
     pub geo_anchor: Option<ProjectGeoAnchor>,
+    /// [271] Umbau: Etappen, Farben je Status (SIA 400) und eigene Umbaufilter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub renovation: Option<RenovationSettings>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
