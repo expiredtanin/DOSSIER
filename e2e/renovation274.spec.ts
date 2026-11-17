@@ -6,7 +6,7 @@ import { blurFocus, discardIfAsked, expect, fileMenu, openTab, test } from "./ap
 
 test.use({ viewport: { width: 1280, height: 800 } });
 
-const RED = "#e3001b";
+const RED = "#c8524a";
 
 test("Sanierung je Schicht: Feld, Typ-Paar, alle sanieren ([274])", async ({ page }) => {
   await page.goto("/?dossierTest");

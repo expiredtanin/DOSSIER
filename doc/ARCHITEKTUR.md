@@ -488,6 +488,12 @@ Farbe im Strichwerk über `drawings::emit` (Linienfarbe, sonst Füllfarbe; Abbru
 [149]: bestehend/neu/zu fällen) IST der Umbau-Status (`tree_renovation`: bestehend = Bestand, zu fällen = Abbruch, neu = Neu) — ein Feld, keine
 zweite Wahrheit; der Baum trägt kein eigenes `renovation` und keine Etappe.
 
+**Umbau-Farben ([275]):** `renovation::style` (Projekt über SIA-Vorgabe `default_style`, gedämpft: Abbruch `#e8c35a`, Neu `#c8524a`/`#9e3a33`)
+und `phase_style` (eigene `RenovationPhase.styles` über der Projektfarbe). Je Status Farbe ODER Stift (`fillPen`/`linePen` = `ColorPen.id`,
+gelesen im aktiven Stiftsatz, nicht eingebacken — ein S/W-Plot-Stiftsatz färbt so auch den Umbauplan um). `View::treat` nimmt die Farbe der Etappe
+des Elements, solange es seinen eigenen Status zeigt (im Stand einer späteren Etappe ist es Bestand in Projektfarbe); Ersatzstücke gehören zur
+Etappe ihrer Öffnung. Die Oberfläche liest die aufgelösten Farben über die Abfrage `renovationStyles` (keine zweite Rechnung in TS).
+
 **Sanierung je Schicht ([274], `renovation::build_up`):** typbasiert. Der Bestands-Wandtyp trägt seinen Sanierungstyp
 (`WallType.renovationTarget`), die Bezugsseite (`renovationSide`, Vorgabe innen) und die manuelle Zuordnung je Schicht
 (`renovationOld`/`renovationNew`, „auto“ = automatisch); eine Bestandswand mit `renovation.renovated` nutzt ihn (Ausnahme je Wand:

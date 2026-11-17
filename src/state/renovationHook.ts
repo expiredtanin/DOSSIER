@@ -14,8 +14,9 @@ import {
   idsByRenovationStatus,
   patchItem,
   setRenovationOps,
+  resolvedRenovationStyles,
 } from "../core";
-import type { RenovationStatus } from "../model/types";
+import type { RenovationPhase, RenovationStatus } from "../model/types";
 
 /** Anzeigename eines Filters (eingebaut übersetzt, eigene mit ihrem Namen). */
 export function renovationFilterLabel(id: string, own: readonly { id: string; name: string }[]): string {
@@ -28,7 +29,7 @@ export function selectionRenovationIds(sel: Selection): string[] {
   return [...sel.walls, ...sel.openings, ...sel.ceilings, ...sel.roofs, ...sel.stairs, ...sel.columns, ...sel.solids, ...sel.rooms, ...sel.drawings, ...sel.trees];
 }
 
-const NO_PHASES: readonly { id: string; name: string }[] = [];
+const NO_PHASES: readonly RenovationPhase[] = [];
 const NO_FILTERS: readonly { id: string; name: string }[] = [];
 
 /**
@@ -82,4 +83,16 @@ export function useRenovationSelection() {
     return Object.values(found).reduce((a, v) => a + v.length, 0);
   };
   return { ids, common, floorId, setStatus, setPhase, selectByStatus };
+}
+
+/**
+ * [275] Umbau-Farben des Projekts (aufgelöst im Kern, Stifte inklusive) für Muster ausserhalb des Panels (Statusleiste).
+ * Hört nur auf Umbau-Einstellungen und Stiftsätze, nicht auf jede Op.
+ */
+export function useRenovationSwatches() {
+  const reno = useStore((s) => s.project.renovation);
+  const penSets = useStore((s) => s.project.penSets);
+  const active = useStore((s) => s.project.activePenSetId);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  return useMemo(() => resolvedRenovationStyles(getState().project).project, [reno, penSets, active]);
 }

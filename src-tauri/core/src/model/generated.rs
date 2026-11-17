@@ -3049,6 +3049,11 @@ pub enum LayerRenovation {
 pub struct RenovationPhase {
     pub id: String,
     pub name: String,
+    /// [275] Eigene Umbau-Farben der Etappe (Neu/Abbruch dieser Etappe, z. B. Neubau Etappe 2 blau); fehlende Felder
+    /// ⇒ die Farben des Projekts (`RenovationSettings.styles`), dann die SIA-Vorgabe.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub styles: Option<RenovationStyles>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -3073,15 +3078,25 @@ pub enum RenovationShow {
 }
 
 /// [271] Umbau-Farbe eines Status: Füllung der Schnittflächen, Linienfarbe, gestrichelt. Fehlende Felder ⇒ SIA-Vorgabe.
+/// [275] Statt einer freien Farbe ein Stift (`ColorPen.id`): seine Farbe aus dem aktiven Stiftsatz geht der freien
+/// Farbe vor (ein S/W-Plot-Stiftsatz färbt so auch die Umbau-Farben um; Stift ohne Eintrag ⇒ freie Farbe/Vorgabe).
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
 #[serde(default)]
 pub struct RenovationStyle {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub fill: Option<String>,
+    /// [275] Stift der Füllung.
+    #[serde(rename = "fillPen", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub fill_pen: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub line: Option<String>,
+    /// [275] Stift der Linien.
+    #[serde(rename = "linePen", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub line_pen: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub dashed: Option<bool>,

@@ -91,7 +91,7 @@ describe("Exporte folgen der Ansicht", () => {
     const plan = { ...base, renovation: "umbauplan" };
     expect(cyclesSceneInfo(u, plan).xml).not.toContain("Umbau-");
     const farbig = cyclesSceneInfo(u, { ...plan, renovationColors: true });
-    expect(farbig.xml).toContain("Umbau-ffd800");
+    expect(farbig.xml).toContain("Umbau-e8c35a");
     expect(farbig.triangles).toBe(cyclesSceneInfo(u, plan).triangles);
 
     const v = buildVariantenSampleProject();

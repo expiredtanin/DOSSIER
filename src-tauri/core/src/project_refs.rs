@@ -137,6 +137,16 @@ pub fn dangling_refs(p: &Project) -> Vec<String> {
     for c in p.flat_categories() {
         check_pens(&mut out, &pens, "Kategorie", &c.code, [&c.color_pen_id, &none, &none]);
     }
+    // [275] Stifte der Umbau-Farben (Projekt und Etappen).
+    if let Some(r) = &p.renovation {
+        let phases = r.phases.as_deref().unwrap_or(&[]);
+        let sets = std::iter::once(("Projekt", p.id.as_str(), r.styles.as_ref())).chain(phases.iter().map(|x| ("Etappe", x.id.as_str(), x.styles.as_ref())));
+        for (what, owner, st) in sets {
+            for s in st.into_iter().flat_map(|s| [&s.existing, &s.demolish, &s.new]).flatten() {
+                check_pens(&mut out, &pens, what, owner, [&s.fill_pen, &s.line_pen, &none]);
+            }
+        }
+    }
     let pen_sets = ids(p.pen_sets.as_deref().unwrap_or(&[]), |s| s.id.as_str());
     miss(&mut out, "Projekt", &p.id, "Stiftsatz", p.active_pen_set_id.as_deref().unwrap_or(""), &pen_sets);
     for l in p.layouts.as_deref().unwrap_or(&[]) {

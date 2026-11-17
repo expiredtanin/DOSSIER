@@ -89,7 +89,7 @@ describe("[274] Sanierung je Schicht", () => {
     expect(pr?.result.map((q) => q.kind)).toEqual(["new", "new", "newOverDemolish", "newOverDemolish", "kept"]);
     expect(renovationPairs(p).renovated).toBe(1);
     // Grundriss: Abbruch gelb, Umbauplan mit gelber gestrichelter Kontur über Rot.
-    const dashedYellow = (prims: ReturnType<typeof plan>) => prims.some((x) => x.kind === "line" && !!x.dash && x.color === "#ffd800");
+    const dashedYellow = (prims: ReturnType<typeof plan>) => prims.some((x) => x.kind === "line" && !!x.dash && x.color === "#e8c35a");
     expect(dashedYellow(plan(p, "umbauplan"))).toBe(true);
     expect(dashedYellow(plan(p, "endzustand"))).toBe(false);
     // GF im Endzustand: die Südwand ist 10 cm dicker als ohne Sanierung (die Aussenkante rückt nach aussen).

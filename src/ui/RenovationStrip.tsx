@@ -33,7 +33,7 @@ export function RenovationStrip({ pair, width = 150 }: { pair: RenovationPair; w
   const sum = (v: RenovationStripPiece[]) => v.reduce((a, q) => a + q.thickness, 0);
   const max = Math.max(sum(pair.oldStrip), sum(pair.newStrip), sum(pair.result), 1e-6);
   const scale = width / max;
-  const demolishFill = pair.result.find((q) => q.kind === "demolish")?.fill ?? pair.oldStrip.find((q) => q.kind === "demolish")?.fill ?? "#ffd800";
+  const demolishFill = pair.result.find((q) => q.kind === "demolish")?.fill ?? pair.oldStrip.find((q) => q.kind === "demolish")?.fill ?? "var(--reno-demolish)";
   const row = (label: string, pieces: RenovationStripPiece[], id: string) => (
     <div className="reno-strip-row" data-testid={`reno-strip-${id}`}>
       <span className="reno-strip-label">{label}</span>

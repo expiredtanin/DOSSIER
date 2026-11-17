@@ -66,7 +66,7 @@ fn cycles_umbaufarben_nur_auf_wunsch() {
     mit_opts["renovationColors"] = json!(true);
     let mit = scene(&p, &mit_opts.to_string());
     let xml = mit["xml"].as_str().unwrap();
-    assert!(xml.contains("Umbau-ffd800"), "Abbruch gelb");
+    assert!(xml.contains(&format!("Umbau-{}", &crate::renovation::DEMOLISH_FILL[1..])), "Abbruch gelb");
     // Geometrie bleibt gleich.
     assert_eq!(ohne["triangles"], mit["triangles"]);
     // Ohne Filter keine Farben, auch mit dem Schalter.

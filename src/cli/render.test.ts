@@ -254,7 +254,7 @@ echo "Finished Rendering."
     expect((await quiet(() => base(["--renovation", "umbauplan"]))).result).toBe(0);
     expect(sceneXml()).not.toContain("Umbau-");
     expect((await quiet(() => base(["--renovation", "umbauplan", "--renovation-colors"]))).result).toBe(0);
-    expect(sceneXml()).toContain("Umbau-ffd800");
+    expect(sceneXml()).toContain("Umbau-e8c35a");
     const vb = (extra: string[]) => run([":varianten", "render", "--engine", "cycles", "--cycles", fakeCycles, "--out", join(dir, "var.png"), "--samples", "8", "--size", "8x4", "--no-context", ...extra]);
     expect((await quiet(() => vb([]))).result).toBe(0);
     const studie1 = sceneXml();

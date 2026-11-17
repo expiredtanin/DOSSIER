@@ -18,7 +18,7 @@ import type { useProjectActions } from "./useProjectActions";
 import type { useTopBarState } from "./useTopBarState";
 import { useViewTemplateHandlers } from "./useViewTemplateHandlers";
 import { modelViewHandlers } from "./useModelViewHandlers";
-import { setField, setPhasesOps, addDesignOptionSetOps, renameDesignOptionSetOps, addDesignOptionOps, renameDesignOptionOps, setPrimaryOptionOps, acceptDesignOptionOps, deleteDesignOptionOps } from "../core";
+import { setPhasesOps, setRenovationStylesOps, addDesignOptionSetOps, renameDesignOptionSetOps, addDesignOptionOps, renameDesignOptionOps, setPrimaryOptionOps, acceptDesignOptionOps, deleteDesignOptionOps } from "../core";
 
 type TopBar = ReturnType<typeof useTopBarState>;
 type Dialogs = ReturnType<typeof useDialogState>;
@@ -138,13 +138,7 @@ export function useResourceHandlers(opts: {
     ...modelViewHandlers(applyChange, () => detail),
     // [271] Umbau: Etappen und Farben (Ressourcen-Tab „Umbau“).
     onSetRenovationPhases: (phases) => applyChange((p) => setPhasesOps(p, phases)),
-    onSetRenovationStyles: (styles) =>
-      applyChange((p) => {
-        const next = { ...(p.renovation ?? {}) };
-        if (styles) next.styles = styles;
-        else delete next.styles;
-        return [setField("renovation", Object.keys(next).length ? next : undefined)];
-      }),
+    onSetRenovationStyles: (styles) => applyChange((p) => setRenovationStylesOps(p, styles)),
     // [272] Varianten (Ressourcen-Tab „Varianten“): Sätze/Varianten, Hauptvariante, Übernehmen, Löschen (je ein Undo-Schritt).
     onAddDesignOptionSet: (name) => applyChange((p) => addDesignOptionSetOps(p, name).ops),
     onRenameDesignOptionSet: (setId, name) => applyChange((p) => renameDesignOptionSetOps(p, setId, name), `dopt-set-${setId}`),

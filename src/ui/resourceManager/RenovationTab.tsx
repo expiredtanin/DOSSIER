@@ -1,11 +1,12 @@
 // [271] Ressourcen-Tab „Umbau“: Etappen (Name, Reihenfolge, hinzufügen/entfernen) und Umbau-Farben je Status
 // (Füllung, Linie, gestrichelt; Vorgabe SIA 400: Bestand grau, Abbruch gelb gestrichelt, Neu rot).
-// Reine Darstellung über Handler (wie die anderen Tabs, auch im macOS-Nebenfenster).
+// Reine Darstellung über Handler (wie die anderen Tabs, auch im macOS-Nebenfenster). [275] Farben als Farbe oder Stift
+// über den gemeinsamen Editor (`ui/RenovationStyleEditor.tsx`, wie im Umbau-Panel).
 
 import { t } from "../../i18n";
-import type { TranslationKey } from "../../i18n";
-import type { Project, RenovationPhase, RenovationStatus, RenovationStyle, RenovationStyles } from "../../model/types";
-import { DEFAULT_RENOVATION_STYLES, newPhaseId, RENOVATION_STATUSES, renovationPhases } from "../../core";
+import type { Project, RenovationPhase, RenovationStyles } from "../../model/types";
+import { newPhaseId, renovationPhases, resolvedRenovationStyles } from "../../core";
+import { RenovationStyleEditor } from "../RenovationStyleEditor";
 
 export interface RenovationHandlers {
   /** Etappen-Liste ersetzen (Elemente einer entfernten Etappe verlieren sie). */
@@ -16,7 +17,7 @@ export interface RenovationHandlers {
 
 export function RenovationTab({ project, handlers }: { project: Project; handlers: RenovationHandlers }) {
   const phases = renovationPhases(project);
-  const styles = project.renovation?.styles ?? {};
+  const styles = project.renovation?.styles;
   const setPhases = handlers.onSetRenovationPhases;
   const setStyles = handlers.onSetRenovationStyles;
   const move = (i: number, d: number) => {
@@ -25,13 +26,6 @@ export function RenovationTab({ project, handlers }: { project: Project; handler
     const next = [...phases];
     [next[i], next[j]] = [next[j], next[i]];
     setPhases(next);
-  };
-  const patchStyle = (s: RenovationStatus, patch: Partial<RenovationStyle> | null) => {
-    if (!setStyles) return;
-    const next: RenovationStyles = { ...styles };
-    if (patch === null) delete next[s];
-    else next[s] = { ...(styles[s] ?? {}), ...patch };
-    setStyles(Object.keys(next).length ? next : undefined);
   };
   return (
     <div className="rm-renovation" data-testid="rm-renovation">
@@ -70,30 +64,15 @@ export function RenovationTab({ project, handlers }: { project: Project; handler
 
       <h4 className="rm-subhead">{t("renovation.styles.title")}</h4>
       <p className="rm-hint">{t("renovation.styles.hint")}</p>
-      {RENOVATION_STATUSES.map((s) => {
-        const d = DEFAULT_RENOVATION_STYLES[s];
-        const own = styles[s] ?? {};
-        return (
-          <div className="rm-row" key={s} data-testid={`rm-renovation-style-${s}`}>
-            <span className="rm-label">{t(`renovation.status.${s}` as TranslationKey)}</span>
-            <label className="rm-inline">
-              {t("renovation.styles.fill")}
-              <input type="color" value={own.fill ?? d.fill} disabled={!setStyles} onChange={(e) => patchStyle(s, { fill: e.target.value })} />
-            </label>
-            <label className="rm-inline">
-              {t("renovation.styles.line")}
-              <input type="color" value={own.line ?? d.line ?? "#000000"} disabled={!setStyles} onChange={(e) => patchStyle(s, { line: e.target.value })} />
-            </label>
-            <label className="rm-inline">
-              <input type="checkbox" checked={own.dashed ?? d.dashed} disabled={!setStyles} onChange={(e) => patchStyle(s, { dashed: e.target.checked })} />
-              {t("renovation.styles.dashed")}
-            </label>
-            <button type="button" className="rm-icon-btn" disabled={!setStyles || !styles[s]} title={t("renovation.styles.reset")} aria-label={t("renovation.styles.reset")} onClick={() => patchStyle(s, null)}>
-              ↺
-            </button>
-          </div>
-        );
-      })}
+      <RenovationStyleEditor
+        project={project}
+        styles={styles}
+        shown={resolvedRenovationStyles(project).project}
+        testId="rm-renovation-style"
+        dashedFor={["existing", "demolish", "new"]}
+        disabled={!setStyles}
+        onChange={(next) => setStyles?.(next)}
+      />
     </div>
   );
 }

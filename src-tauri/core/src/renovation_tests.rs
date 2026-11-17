@@ -57,7 +57,7 @@ fn vorgaben_je_status() {
     assert_eq!(View::new(&p, Some("umbauplan"), None).unwrap().treat(None), ex(RenovationStatus::Existing));
     // SIA: Abbruch gelb gestrichelt, Neu rot.
     assert!(default_style(RenovationStatus::Demolish).dashed);
-    assert!(default_style(RenovationStatus::New).fill.starts_with("#e3"));
+    assert_eq!(default_style(RenovationStatus::New).fill, NEW_FILL);
 }
 
 #[test]
@@ -198,7 +198,7 @@ fn restyle_flaechen_und_linien() {
     assert_eq!(q.len(), 5);
     match &q[0] {
         Primitive::Polygon { fill, stroke, opening_id, .. } => {
-            assert_eq!(fill, "#ffd800");
+            assert_eq!(fill, DEMOLISH_FILL);
             assert_eq!(stroke, "none");
             assert_eq!(opening_id.as_deref(), Some("O1"));
         }
@@ -219,7 +219,7 @@ fn restyle_flaechen_und_linien() {
 
 use crate::plan::domains::{plan_domains, PlanArgs};
 
-fn plan_with(p: &Project, extra: Value) -> Vec<Primitive> {
+pub(crate) fn plan_with(p: &Project, extra: Value) -> Vec<Primitive> {
     let codes: Vec<String> = (0..100).map(|k| format!("{k:02}")).collect();
     let mut t = json!({"floor": "eg", "show": codes, "scale": 100});
     for (k, x) in extra.as_object().unwrap() {
@@ -240,7 +240,7 @@ fn has_opening(prims: &[Primitive], id: &str) -> bool {
     })
 }
 
-fn fills_of(prims: &[Primitive], id: &str) -> Vec<String> {
+pub(crate) fn fills_of(prims: &[Primitive], id: &str) -> Vec<String> {
     prims
         .iter()
         .filter_map(|q| match q {
