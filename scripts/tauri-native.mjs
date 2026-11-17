@@ -21,6 +21,19 @@ if (native && !args.includes("--features")) args.push("--features", "native2d");
 const build = createRequire(import.meta.url)("./build-number.cjs").computeBuildNumber();
 process.env.DOSSIER_BUILD = build;
 if (args[0] === "build" && !args.some((a) => a.includes("bundleVersion"))) args.push("--config", JSON.stringify({ bundle: { macOS: { bundleVersion: build } } }));
+// [215] Mac-Bau ohne Cycles-Sidecar: Paket zuerst holen (Gitea-Release, sonst cycles.yml-Artefakt über `gh`) und als Sidecar
+// bereitstellen. Scheitert das, bricht der Bau ab statt still ein Paket ohne Cycles zu bauen. Opt-out: DOSSIER_NO_CYCLES=1.
+const cyclesSidecar = new URL("../src-tauri/binaries/cycles-aarch64-apple-darwin", import.meta.url);
+if (args[0] === "build" && process.platform === "darwin" && !process.env.DOSSIER_NO_CYCLES && !existsSync(cyclesSidecar)) {
+  const root = fileURLToPath(new URL("..", import.meta.url));
+  console.log("[tauri-native] Cycles fehlt — hole das Paket (scripts/cycles/get.sh macos arm64)");
+  const get = spawnSync("bash", ["scripts/cycles/get.sh", "macos", "arm64"], { cwd: root, stdio: "inherit" });
+  const prep = get.status === 0 ? spawnSync(process.execPath, ["scripts/cycles/tauri-prepare.mjs", "build/cycles"], { cwd: root, stdio: "inherit" }) : get;
+  if (prep.status !== 0 || !existsSync(cyclesSidecar)) {
+    console.error("[tauri-native] Cycles konnte nicht geholt werden. Ohne Cycles bauen: DOSSIER_NO_CYCLES=1 npm run tauri:build");
+    process.exit(1);
+  }
+}
 // [215] Cycles mitliefern, sobald die Sidecars bereitstehen (scripts/cycles/tauri-prepare.mjs): Konfiguration als weitere `--config`
 // (Tauri führt mehrere zusammen). Ohne Cycles bleibt der Bau wie bisher (tauri-build verlangt sonst die Sidecar-Dateien).
 if (args[0] === "build" && existsSync(new URL("../src-tauri/binaries/cycles-aarch64-apple-darwin", import.meta.url)) && !args.some((a) => a.includes("tauri.cycles.conf.json")))
