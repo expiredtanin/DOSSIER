@@ -441,18 +441,36 @@ export interface DesignOptionEditArg {
   option: string;
   /** Häkchen „Elemente ausserhalb der Variante grau einfärben“. */
   grey: boolean;
+  /** 3D-Pick: „sperren“ — Elemente ausserhalb der Variante sind nicht anwählbar (Kern `design_options::Edit::locked`). */
+  lock?: boolean;
+  /** 3D-Fenster: das Grau kommt als durchscheinende Geisterschicht (render3d), nicht als helle Teilefarbe. */
+  layer?: boolean;
 }
 
 /** Füllfarbe des Graus ausserhalb der Bearbeitungsvariante (gleich wie `renovation::ghost_style` im Kern). */
 export const DESIGN_OPTION_GHOST_FILL = "#e3e3e3";
+/** Linien-/Randfarbe des Grau (Kern `renovation::ghost_style`): Räume, Möbel und andere 2D-Elemente ausserhalb. */
+export const DESIGN_OPTION_GHOST_LINE = "#a8a8a8";
 
 function knownTarget(project: Project, t: DesignOptionTarget | null | undefined): t is DesignOptionTarget {
   return !!t && designOptionSets(project).some((s) => s.id === t.set && s.options.some((o) => o.id === t.option));
 }
 
 /** Bearbeitungsvariante für Bildschirm-Anfragen; `null` ohne Stift oder bei unbekannter Variante. */
-export function designOptionEditArg(project: Project, draw: DesignOptionTarget | null | undefined, grey: boolean): DesignOptionEditArg | null {
-  return knownTarget(project, draw) ? { set: draw.set, option: draw.option, grey } : null;
+export function designOptionEditArg(
+  project: Project,
+  draw: DesignOptionTarget | null | undefined,
+  grey: boolean,
+  /** Nur das 3D-Fenster: Sperre im Pick (`lock`) und Geisterschicht statt Teilefarbe (`layer`). */
+  view3d?: { lock: boolean },
+): DesignOptionEditArg | null {
+  if (!knownTarget(project, draw)) return null;
+  const e: DesignOptionEditArg = { set: draw.set, option: draw.option, grey };
+  if (view3d) {
+    e.layer = true;
+    if (view3d.lock) e.lock = true;
+  }
+  return e;
 }
 
 /** Auge: die in der aktiven Ansicht sichtbare Variante des Satzes (der Stift geht vor, sonst die Kombination der Ebene). */

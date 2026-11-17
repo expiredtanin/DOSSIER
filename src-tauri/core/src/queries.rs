@@ -183,8 +183,9 @@ pub fn run(p: &Project, name: &str, args: &[f64], text: &str) -> Result<String, 
         ("explodeOffsets", _) => json(&crate::explode3d::floor_offsets(p, args.first().copied().unwrap_or(0.0))),
         // [180] Ohne die Elemente ausgeblendeter Klassen (`text` = `{"hide": [codes]}`, s. `model3d::ClassFilter`).
         ("pickGeometry", _) => {
-            // [272] Elemente anderer Varianten nicht picken.
-            let q = options_state(p, text);
+            // [272] Elemente anderer Varianten nicht picken; mit Stift gilt die Bearbeitungsvariante als sichtbar, bei
+            // „sperren“ sind die Elemente ausserhalb nicht anwählbar (`ClassFilter`, `designOptionEdit`).
+            let q = crate::renovation::filtered(p, crate::renovation::screen_view_from_text(p, if text.trim_start().starts_with('{') { text } else { "" }));
             let p = q.as_ref();
             let mut g = crate::explode3d::pick_geometry(p, args.first().copied().unwrap_or(0.0))?;
             model3d::ClassFilter::from_text(p, text).retain_pick(&mut g);

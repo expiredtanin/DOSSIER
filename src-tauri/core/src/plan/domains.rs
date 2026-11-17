@@ -1569,7 +1569,9 @@ fn rooms(c: &Ctx, out: &mut Vec<Primitive>, top: &mut Vec<Primitive>, bounds: &m
             bounds.acc(q.x, q.y);
         }
         let ov = c.overrides(Some("room"), &room.category_code, Some(&room.name));
-        let color = ov.color.as_deref().unwrap_or(&room.color);
+        // [272] Raum ausserhalb der Bearbeitungsvariante (Grau): Fläche, Rand und Stempel gedämpft.
+        let ghost = c.renovation().and_then(|r| r.styled.get(&room.id)).filter(|s| s.ghost);
+        let color = ghost.and_then(|g| g.line.as_deref()).or(ov.color.as_deref()).unwrap_or(&room.color);
         let greyed = Some(c.greyed(&room.category_code));
         if room.boundary.len() < 3 {
             continue;
@@ -1589,7 +1591,7 @@ fn rooms(c: &Ctx, out: &mut Vec<Primitive>, top: &mut Vec<Primitive>, bounds: &m
         let overview = c.a.auto_coarse && c.a.scale >= OVERVIEW_FROM;
         // [140] Raumstempel in Tinte (Druck ohne Schwarz-Weiss); Farbe nur aus einer Darstellungsregel
         // oder aus den Auszeichnungen des Stempel-Texts.
-        let text_color = ov.color.as_deref().unwrap_or(MONO_INK);
+        let text_color = ghost.and_then(|g| g.line.as_deref()).or(ov.color.as_deref()).unwrap_or(MONO_INK);
         // [173] Zeilen nach der Modelldarstellung: die Einstellung am Stempel geht vor (`StampOpts::line`); die
         // Raumnummer zeigt die Stufe (Basis ja), der Stempel liefert nur den Text.
         let st = &c.mv().stamp;
@@ -1670,7 +1672,9 @@ fn rooms(c: &Ctx, out: &mut Vec<Primitive>, top: &mut Vec<Primitive>, bounds: &m
                 }
             }
         }
-        out.push(Primitive::Text { at, doc, extra_lines, base_pt, color: text_color.into(), room_id: Some(room.id.clone()), greyed, opacity: None });
+        // [272] Grau: der Stempel-Text trägt seine Farbe im Text-Dokument, darum gedämpft über `greyed` (wie gedimmte Geschosse).
+        let text_greyed = if ghost.is_some() { Some(true) } else { greyed };
+        out.push(Primitive::Text { at, doc, extra_lines, base_pt, color: text_color.into(), room_id: Some(room.id.clone()), greyed: text_greyed, opacity: None });
     }
 }
 

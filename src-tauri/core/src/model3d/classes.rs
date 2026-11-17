@@ -70,6 +70,10 @@ pub struct ElementSelection {
     pub grey_floors: HashSet<String>,
     /// [180] Gesperrte Klassen des Darstellungsmodus: sichtbar (bzw. grau), aber nicht anwählbar.
     pub lock: HashSet<String>,
+    /// [272] Einzelne Elemente (Ids) im Modus „grau“: Elemente ausserhalb der Bearbeitungsvariante (Stift, `designOptionEdit`).
+    pub grey_ids: HashSet<String>,
+    /// [272] Einzelne gesperrte Elemente (Ids): ausserhalb der Bearbeitungsvariante bei „sperren“, im Pick nicht anwählbar.
+    pub lock_ids: HashSet<String>,
     /// [180] Geisterschicht: NUR die grauen (nicht ausgeblendeten) Elemente liefern.
     pub ghost: bool,
 }
@@ -77,7 +81,7 @@ pub struct ElementSelection {
 impl ElementSelection {
     /// Keine Einschränkung.
     pub fn is_empty(&self) -> bool {
-        self.only.is_none() && self.hide.is_empty() && self.hide_floors.is_empty() && self.grey.is_empty() && self.grey_floors.is_empty() && self.lock.is_empty() && !self.ghost
+        self.only.is_none() && self.hide.is_empty() && self.hide_floors.is_empty() && self.grey.is_empty() && self.grey_floors.is_empty() && self.lock.is_empty() && self.grey_ids.is_empty() && self.lock_ids.is_empty() && !self.ghost
     }
 }
 
@@ -132,10 +136,10 @@ impl ClassFilter {
         let mut add = |code: &str, id: &str, floor: &str| {
             if codes.contains(code) || sel.hide.contains(id) || sel.hide_floors.contains(floor) || only.as_ref().is_some_and(|o| !o.contains(id)) {
                 hidden.insert(id.to_owned());
-            } else if sel.grey.contains(code) || sel.grey_floors.contains(floor) {
+            } else if sel.grey.contains(code) || sel.grey_floors.contains(floor) || sel.grey_ids.contains(id) {
                 grey.insert(id.to_owned());
             }
-            if sel.lock.contains(code) {
+            if sel.lock.contains(code) || sel.lock_ids.contains(id) {
                 locked.insert(id.to_owned());
             }
         };
@@ -171,10 +175,10 @@ impl ClassFilter {
         for o in p.openings.as_deref().unwrap_or(&[]) {
             if codes.contains(&o.category_code) || sel.hide.contains(&o.id) || opening_hosts(o).any(|h| hidden.contains(h)) {
                 hidden.insert(o.id.clone());
-            } else if sel.grey.contains(&o.category_code) || opening_hosts(o).any(|h| grey.contains(h)) {
+            } else if sel.grey.contains(&o.category_code) || sel.grey_ids.contains(&o.id) || opening_hosts(o).any(|h| grey.contains(h)) {
                 grey.insert(o.id.clone());
             }
-            if sel.lock.contains(&o.category_code) {
+            if sel.lock.contains(&o.category_code) || sel.lock_ids.contains(&o.id) {
                 locked.insert(o.id.clone());
             }
         }
@@ -219,7 +223,19 @@ impl ClassFilter {
             grey_floors: list("greyFloors").unwrap_or_default().into_iter().collect(),
             lock: list("lock").unwrap_or_default().into_iter().collect(),
             ghost: v.as_ref().and_then(|v| v.get("ghost")).and_then(|b| b.as_bool()).unwrap_or(false),
+            ..Default::default()
         };
+        // [272] Bearbeitungsvariante (Stift): im 3D-Fenster (`layer`) steht, was ausserhalb liegt, in der Geisterschicht
+        // (halbtransparent); mit `lock` sind diese Elemente (dazu Bäume, Kontext) nicht anwählbar.
+        let mut sel = sel;
+        if let Some(e) = v.as_ref().and_then(|v| crate::design_options::parse_edit(p, v.get("designOptionEdit"))) {
+            if e.grey && e.layer {
+                sel.grey_ids = e.outside(p);
+            }
+            if e.lock {
+                sel.lock_ids = e.locked(p);
+            }
+        }
         ClassFilter::with_elements(p, &list("hide").unwrap_or_default(), &sel)
     }
 

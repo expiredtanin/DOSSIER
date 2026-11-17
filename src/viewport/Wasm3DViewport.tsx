@@ -635,7 +635,7 @@ export function Wasm3DViewport({
   });
   // [272] Bearbeitungsvariante (Stift) samt Häkchen „grau“: sichtbar, ausserhalb grau (nur Bildschirm).
   const editKey = useStore((s) => {
-    const e = designOptionEditArg(s.project, s.drawDesignOption, s.designOptionGrey);
+    const e = designOptionEditArg(s.project, s.drawDesignOption, s.designOptionGrey, { lock: s.designOptionLock });
     return e ? JSON.stringify(e) : "";
   });
   const hide = useMemo<Hide3d>(() => {
