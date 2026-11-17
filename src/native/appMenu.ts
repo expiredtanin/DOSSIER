@@ -36,6 +36,7 @@ export interface NativeAppMenuHandlers {
   onNewProjectFromComplexSample: () => void;
   onNewProjectFromWettbewerbSample: () => void;
   onNewProjectFromUmbauSample: () => void;
+  onNewProjectFromVariantenSample: () => void;
   onNewProjectFromTemplate: () => void;
   onOpenProject: () => void;
   onSaveProject: () => void;
@@ -193,6 +194,10 @@ export function useNativeAppMenu(
               await MenuItem.new({
                 text: t("menu.native.newFromUmbauSample"),
                 action: () => handlersRef.current.onNewProjectFromUmbauSample(),
+              }),
+              await MenuItem.new({
+                text: t("menu.native.newFromVariantenSample"),
+                action: () => handlersRef.current.onNewProjectFromVariantenSample(),
               }),
               await MenuItem.new({
                 text: t("menu.native.newFromTemplateFile"),

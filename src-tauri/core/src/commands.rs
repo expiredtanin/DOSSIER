@@ -34,7 +34,8 @@ pub fn ops(root: &Map<String, Value>, p: &Project, text: &str) -> Result<Vec<Op>
     }
     if let Some(ops) = crate::cmd_create::ops(root, p, &v) {
         // [271] Aktueller Zeichen-Status (`renovation` der Anfrage): neue Bauteile tragen ihn (Bestand = ohne Feld).
-        return Ok(stamp_renovation(ops, v.get("renovation")));
+        // [272] Aktuelle Zeichen-Variante (`designOption` der Anfrage): neue Elemente gehören ihr.
+        return Ok(crate::design_options::stamp_ops(stamp_renovation(ops, v.get("renovation")), v.get("designOption")));
     }
     if let Some(ops) = crate::cmd_context::ops(root, p, &v) {
         return Ok(ops);

@@ -786,7 +786,7 @@ pub fn post_for(p: &Project, a: &super::domains::PlanArgs) -> Option<Post> {
     let sketch = if sheet { 0.0 } else { sketch_k(level.and_then(|l| l.sketch), a.scale) };
     // [271] Umbau-Farben bleiben auch in Schwarz-Weiss (Tusche): ohne sie sagt ein Umbauplan nichts.
     let keep = if a.mono {
-        crate::renovation::View::for_level(p, &a.floor, a.renovation.as_deref(), a.renovation_phase.as_deref()).map_or_else(KeepColors::default, |v| KeepColors::of(v.colors().iter().map(String::as_str)))
+        crate::renovation::View::for_level(p, &a.floor, a.renovation.as_deref(), a.renovation_phase.as_deref(), &a.design_options).map_or_else(KeepColors::default, |v| KeepColors::of(v.colors().iter().map(String::as_str)))
     } else {
         KeepColors::default()
     };

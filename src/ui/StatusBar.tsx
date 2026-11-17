@@ -16,6 +16,8 @@ import type { SnapSettings } from "../tools/types";
 import { t } from "../i18n";
 import { TraceControl } from "./TraceControl";
 import { RenovationControl } from "./RenovationControl";
+import { DesignOptionControl } from "./DesignOptionControl";
+import { useStore } from "../state/appStore";
 import { BUILD_INFO, formatBuildShort } from "../update/buildInfo";
 
 export interface StatusBarProps {
@@ -488,6 +490,9 @@ export const StatusBar = memo(function StatusBar({
   );
   const traceEl = <TraceControl enabled={!!traceEnabled} onRunCommand={onRunCommand} />;
   const renovationEl = <RenovationControl />;
+  // [272] Varianten (nur mit Variantensätzen im Projekt; sonst leer).
+  const hasDesignOptions = useStore((s) => !!s.project.designOptionSets?.length);
+  const designOptionEl = <DesignOptionControl />;
   const snapEl = <SnapControl snap={snap} onSnapChange={onSnapChange} />;
   const refEl = (
     <button
@@ -504,7 +509,7 @@ export const StatusBar = memo(function StatusBar({
   // Was in „⋯“ wandert (Reihenfolge = Wegfall-Priorität von oben nach unten).
   const inMore: React.ReactNode[] = [];
   if (level >= 3) inMore.push(<span key="lm">{lineModeEl}</span>);
-  if (level >= 4) inMore.push(<span key="tr">{traceEl}</span>, <span key="ren">{renovationEl}</span>);
+  if (level >= 4) inMore.push(<span key="tr">{traceEl}</span>, <span key="ren">{renovationEl}</span>, <span key="dopt">{designOptionEl}</span>);
   if (level >= 5) {
     inMore.push(<span key="sn">{snapEl}</span>, <span key="rf">{refEl}</span>);
   }
@@ -535,6 +540,12 @@ export const StatusBar = memo(function StatusBar({
               <Sep />
               {renovationEl}
               <Sep />
+              {hasDesignOptions && (
+                <>
+                  {designOptionEl}
+                  <Sep />
+                </>
+              )}
             </>
           )}
           {level < 5 && (

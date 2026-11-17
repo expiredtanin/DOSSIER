@@ -17,14 +17,14 @@ import { t } from "../i18n/translate";
 import { legendPlan, legendPrintSvg } from "./legendSvg";
 import { categoryLayerGroups, enablePdfLayers, type PdfLayers } from "./pdfLayers";
 import { generatePlan, type Plan } from "../plan/generatePlan";
-import { snapshotMono, snapshotOverrideRuleIds, snapshotTemplate, viewportLevelPlan, viewportSnapshotPlan } from "../plan/viewportPlan";
+import { snapshotMono, snapshotOverrideRuleIds, snapshotTemplate, viewportDesignOptions, viewportLevelPlan, viewportSnapshotPlan } from "../plan/viewportPlan";
 import { isDoc3dSnapshot } from "../plan/toAxo";
 import { planToPrintSvg } from "./planToPrintSvg";
 import { drawTablesPdf, PDF_TABLE_FONT, sheetTables } from "./sheetTable";
 import { applyPdfInfo, finishPdfBytes } from "./pdfInfo";
 import { ensurePdfFonts, PDF_DEFAULT_FONT, prepareSvgFonts, setPdfFont } from "./pdfFonts";
 import { imageGeometry } from "../model/layoutImages";
-import { posterHeaderItems, viewportScaleLabel } from "../model/posterTemplates";
+import { posterHeaderItems, viewportScaleLabel, viewportVariantLabel } from "../model/posterTemplates";
 import { collectVisibleCodes } from "../model/types";
 import {
   effectiveSheetSizeMm,
@@ -181,11 +181,12 @@ function drawImagesPdf(doc: jsPDF, layout: Layout): void {
 }
 
 /** Massstabsangabe unter jedem Viewport ([208], Master `viewportScaleLabels`). */
-function drawScaleLabelsPdf(doc: jsPDF, project: Project, layout: Layout, sheet: { w: number; h: number }, scaleOverride?: number): void {
+function drawScaleLabelsPdf(doc: jsPDF, project: Project, layout: Layout, sheet: { w: number; h: number }, scaleOverride?: number, withScale = true): void {
   doc.setTextColor(17, 17, 17);
   setPdfFont(doc, PDF_DEFAULT_FONT);
   for (const vp of layout.viewports) {
-    const l = viewportScaleLabel(project, vp, sheet, scaleOverride);
+    // [272] Ohne Massstabsangaben nur der Titelzusatz der Varianten.
+    const l = withScale ? viewportScaleLabel(project, vp, sheet, scaleOverride) : viewportVariantLabel(project, vp, sheet);
     if (!l) continue;
     doc.setFontSize(l.sizeMm * MM_TO_PT);
     doc.text(l.text, l.x, l.y);
@@ -232,7 +233,9 @@ async function renderPage(
       const ruleIds = snapshotOverrideRuleIds(project, snap);
       const template = snapshotTemplate(project, snap);
       // [266] 3D-Ausschnitt: 3D-Dokument aus dem Kern (`viewportSnapshotPlan`).
-      const planOf = (visible: Set<string>) => (isDoc3dSnapshot(snap) ? viewportSnapshotPlan(project, snap, visible, scaleN, true) : viewportLevelPlan(project, snap.activeLevelId, visible, snap.detail, scaleN, true, snapshotMono(project, snap), ruleIds, template, snap.modelViewOptionId));
+      // [272] Variantenkombination des Ausschnitts/Viewports.
+      const dopts = viewportDesignOptions(snap, vp);
+      const planOf = (visible: Set<string>) => (isDoc3dSnapshot(snap) ? viewportSnapshotPlan(project, snap, visible, scaleN, true, vp) : viewportLevelPlan(project, snap.activeLevelId, visible, snap.detail, scaleN, true, snapshotMono(project, snap), ruleIds, template, snap.modelViewOptionId, dopts));
       // [208] Eigene Bildmitte (Plakat): Ausschnitt um die Mitte; was darüber hinausgeht, schneidet der Rahmen ab.
       const centered = viewportCenterBounds(vp, scaleN);
       const draw = async (plan: Plan, transparent: boolean, bounds?: Plan["bounds"]) => {
@@ -278,6 +281,8 @@ async function renderPage(
   // Massstab je Viewport ([208]).
   if (master?.viewportScaleLabels) {
     await inLayer(ctx, t("pdfLayers.frame"), () => drawScaleLabelsPdf(doc, project, layout, { w: widthMm, h: heightMm }, ctx.scaleOverride));
+  } else if (project.designOptionSets?.length) {
+    await inLayer(ctx, t("pdfLayers.frame"), () => drawScaleLabelsPdf(doc, project, layout, { w: widthMm, h: heightMm }, ctx.scaleOverride, false));
   }
 
   // Legenden ([82]): live aus den Viewports (oder Handauswahl), Muster vom Kern-Schraffurgenerator.

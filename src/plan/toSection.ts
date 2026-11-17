@@ -87,6 +87,8 @@ export function levelArg(level: DrawingLevel) {
     // [271] Umbaufilter und Etappe der Ebene (Kern `renovation.rs`).
     renovationFilter: level.renovationFilter,
     renovationPhase: level.renovationPhase,
+    // [272] Variantenkombination der Ebene (Kern `design_options.rs`, Sichtbarkeit `renovation.rs`).
+    designOptions: level.designOptions,
   };
 }
 

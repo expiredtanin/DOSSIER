@@ -17,6 +17,10 @@
 //!   bricht dort Mauerwerk ab — der Wandteil in der Öffnung ist ein Abbruch-Stück ([`Patch`], gelb). Eine Öffnung
 //!   „Abbruch“ wird zugemauert — die Ausfachung ist ein Neu-Stück (rot). Ist die Öffnung ausgeblendet (Bestand:
 //!   die neue Öffnung gibt es noch nicht; Neubau/Endzustand: die alte ist zu), ist die Wand dort geschlossen.
+//! - **Varianten** ([272], `design_options.rs`): Die Variantenkombination der Darstellung (je Satz eine Variante,
+//!   Vorgabe die Hauptvariante) gehört mit in die [`View`]: Elemente anderer Varianten sind ausgeblendet wie
+//!   Ausgeblendetes des Umbaufilters (auch 2D-Zeichnungen). Darum gibt es eine `View` auch ohne Umbaufilter, sobald
+//!   das Projekt Elemente in Varianten hat.
 
 use crate::model::*;
 use crate::plan::prim::Primitive;
@@ -146,7 +150,10 @@ pub enum Treat {
 /// Ein aufgelöster Umbaufilter einer Darstellung.
 #[derive(Clone, Debug)]
 pub struct View {
-    pub filter: RenovationFilter,
+    /// Umbaufilter; `None` = keiner (nur die Variantenkombination wirkt).
+    pub filter: Option<RenovationFilter>,
+    /// [272] Variantenkombination; `None` = das Projekt hat keine Elemente in Varianten.
+    pub options: Option<crate::design_options::Combination>,
     /// Etappe, bis zu der der Filter gilt (Index), `None` = alle.
     pub upto: Option<usize>,
     phases: HashMap<String, usize>,
@@ -155,21 +162,41 @@ pub struct View {
 
 impl View {
     /// Filter `filter` (Id oder Name) bis Etappe `phase` (Id oder Name); `None` ohne (gültigen) Filter.
+    /// [272] Mit der Hauptkombination der Varianten (sofern das Projekt Elemente in Varianten hat).
     pub fn new(p: &Project, filter: Option<&str>, phase: Option<&str>) -> Option<View> {
-        let filter = find_filter(p, filter?)?;
-        let upto = phase.filter(|s| !s.trim().is_empty()).and_then(|s| phase_index(p, s));
+        Self::with(p, filter, phase, &[], &[])
+    }
+
+    /// Filter und Etappe wie [`Self::new`], dazu die Variantenkombination aus gespeicherten Wahlen (`stored`:
+    /// Ebene, Vorlage, Ausschnitt, Viewport — spätere gehen vor) und der ausdrücklichen Anfrage (`request`, Ids
+    /// oder Namen; CLI `--options`). `None` ohne Filter und ohne Elemente in Varianten.
+    pub fn with(p: &Project, filter: Option<&str>, phase: Option<&str>, stored: &[&std::collections::BTreeMap<String, String>], request: &[(String, String)]) -> Option<View> {
+        let options = crate::design_options::active(p).then(|| crate::design_options::Combination::resolve(p, stored, request));
+        Self::with_combination(p, filter, phase, options)
+    }
+
+    /// Wie [`Self::with`] mit fertiger Kombination (`None` = ohne Varianten).
+    pub fn with_combination(p: &Project, filter: Option<&str>, phase: Option<&str>, options: Option<crate::design_options::Combination>) -> Option<View> {
+        let filter = filter.and_then(|f| find_filter(p, f));
+        let options = options.filter(|c| !c.choice.is_empty() && crate::design_options::active(p));
+        if filter.is_none() && options.is_none() {
+            return None;
+        }
+        let upto = if filter.is_some() { phase.filter(|s| !s.trim().is_empty()).and_then(|s| phase_index(p, s)) } else { None };
         let phases = phases(p).iter().enumerate().map(|(i, x)| (x.id.clone(), i)).collect();
         let styles = [style(p, RenovationStatus::Existing), style(p, RenovationStatus::Demolish), style(p, RenovationStatus::New)];
-        Some(View { filter, upto, phases, styles })
+        Some(View { filter, options, upto, phases, styles })
     }
 
     /// Filter einer Darstellung: ausdrücklich angefragt (CLI, Blatt-Ausschnitt), sonst der der Ebene `level_id`
-    /// (`DrawingLevel.renovationFilter`/`renovationPhase`, wie die Modelldarstellung [173]).
-    pub fn for_level(p: &Project, level_id: &str, filter: Option<&str>, phase: Option<&str>) -> Option<View> {
+    /// (`DrawingLevel.renovationFilter`/`renovationPhase`, wie die Modelldarstellung [173]). [272] Dazu die
+    /// Variantenkombination der Ebene (`designOptions`), darüber `options` (Anfrage).
+    pub fn for_level(p: &Project, level_id: &str, filter: Option<&str>, phase: Option<&str>, options: &[(String, String)]) -> Option<View> {
         let l = p.floor(level_id);
         let f = filter.filter(|s| !s.is_empty()).or_else(|| l.and_then(|l| l.renovation_filter.as_deref()));
         let ph = if filter.is_some_and(|s| !s.is_empty()) { phase } else { phase.or_else(|| l.and_then(|l| l.renovation_phase.as_deref())) };
-        Self::new(p, f, ph)
+        let stored: Vec<&std::collections::BTreeMap<String, String>> = l.and_then(|l| l.design_options.as_ref()).into_iter().collect();
+        Self::with(p, f, ph, &stored, options)
     }
 
     /// Zustand des Elements in der Etappe des Filters; `None` = es steht dort (noch/schon) nicht.
@@ -188,10 +215,11 @@ impl View {
     /// Darstellung eines Zustands im Filter.
     pub fn treat_state(&self, s: Option<RenovationStatus>) -> Treat {
         let Some(s) = s else { return Treat::Hide };
+        let Some(filter) = &self.filter else { return Treat::Show };
         let (show, k) = match s {
-            RenovationStatus::Demolish => (self.filter.demolish, 1),
-            RenovationStatus::New => (self.filter.new, 2),
-            _ => (self.filter.existing, 0),
+            RenovationStatus::Demolish => (filter.demolish, 1),
+            RenovationStatus::New => (filter.new, 2),
+            _ => (filter.existing, 0),
         };
         match show {
             RenovationShow::Hide => Treat::Hide,
@@ -213,6 +241,13 @@ impl View {
     /// Ausgeblendete Elemente, Umbau-Farben und Ersatzstücke der Öffnungen für das ganze Projekt.
     pub fn resolve(&self, p: &Project) -> Resolved {
         let mut out = Resolved::default();
+        // [272] Elemente anderer Varianten: ausgeblendet (Öffnungen ausgeblendeter Wände mit).
+        if let Some(c) = &self.options {
+            out.hidden = c.hidden(p);
+        }
+        if self.filter.is_none() {
+            return out;
+        }
         let mut put = |id: &str, t: Treat, out: &mut Resolved| match t {
             Treat::Hide => {
                 out.hidden.insert(id.to_string());
@@ -276,7 +311,8 @@ impl View {
     /// Füll- und Linienfarben der Status, die der Filter farbig zeigt (bleiben in Schwarz-Weiss erhalten).
     pub fn colors(&self) -> Vec<String> {
         let mut out = Vec::new();
-        for (show, st) in [(self.filter.existing, &self.styles[0]), (self.filter.demolish, &self.styles[1]), (self.filter.new, &self.styles[2])] {
+        let Some(f) = &self.filter else { return out };
+        for (show, st) in [(f.existing, &self.styles[0]), (f.demolish, &self.styles[1]), (f.new, &self.styles[2])] {
             if show == RenovationShow::Override {
                 out.push(st.fill.clone());
                 out.extend(st.line.clone());
@@ -287,7 +323,11 @@ impl View {
 
     /// Schlüssel für Caches (Filter samt Darstellungen, Etappe, Farben).
     pub fn key(&self) -> String {
-        format!("{}:{:?}{:?}{:?}:{:?}:{:?}", self.filter.id, self.filter.existing, self.filter.demolish, self.filter.new, self.upto, self.styles)
+        let opts = self.options.as_ref().map_or(String::new(), |c| c.key());
+        match &self.filter {
+            Some(f) => format!("{}:{:?}{:?}{:?}:{:?}:{:?}|{opts}", f.id, f.existing, f.demolish, f.new, self.upto, self.styles),
+            None => format!("-|{opts}"),
+        }
     }
 }
 
@@ -326,7 +366,35 @@ pub fn without_hidden(p: &Project, hidden: &HashSet<String>) -> Project {
     if let Some(v) = &mut q.extruded_solids {
         v.retain(|x| !hidden.contains(&x.id));
     }
+    // [272] 2D-Zeichnungen anderer Varianten.
+    q.drawings2d.retain(|x| !hidden.contains(&x.id));
     q
+}
+
+/// [272] Das Projekt in Umbau-Zustand und Variantenkombination `c` (Vergleichstabelle); ohne Wirkung geliehen.
+pub fn project_in_view<'a>(p: &'a Project, filter: Option<&str>, phase: Option<&str>, c: &crate::design_options::Combination) -> std::borrow::Cow<'a, Project> {
+    filtered(p, View::with_combination(p, filter, phase, Some(c.clone())))
+}
+
+/// [271]/[272] Projekt im Zustand eines Anfrage-Texts ([`view_from_text`]: Umbaufilter, Etappe, Variantenkombination;
+/// leer = Hauptkombination), sonst unverändert.
+pub fn project_for_text<'a>(p: &'a Project, text: &str) -> std::borrow::Cow<'a, Project> {
+    filtered(p, view_from_text(p, text))
+}
+
+/// Das Projekt ohne das in `v` Ausgeblendete (ohne Wirkung geliehen).
+pub fn filtered(p: &Project, v: Option<View>) -> std::borrow::Cow<'_, Project> {
+    match v {
+        Some(v) => {
+            let r = v.resolve(p);
+            if r.hidden.is_empty() {
+                std::borrow::Cow::Borrowed(p)
+            } else {
+                std::borrow::Cow::Owned(without_hidden(p, &r.hidden))
+            }
+        }
+        None => std::borrow::Cow::Borrowed(p),
+    }
 }
 
 /// Das Projekt im Zustand eines Filters (`filter`: Id/Name, `phase`: Etappe); ohne gültigen Filter unverändert.
@@ -504,18 +572,17 @@ pub fn patch_prims(ring: Vec<Vec2>, st: &Style, weight_mm: f64, opening_id: &str
 }
 
 /// Umbaufilter aus einem JSON-Text (`{"renovation": Id/Name, "renovationPhase": Etappe}`, 3D und Kennzahlen);
-/// ein Text ohne `{` ist selbst die Filter-Id. `None` ohne Filter.
+/// ein Text ohne `{` ist selbst die Filter-Id. [272] `designOptions`: Variantenkombination (Text „Satz=Variante,…“
+/// oder Objekt), ohne Angabe die Hauptkombination. `None` ohne Filter und ohne Elemente in Varianten.
 pub fn view_from_text(p: &Project, text: &str) -> Option<View> {
     let t = text.trim();
-    if t.is_empty() {
-        return None;
-    }
     if !t.starts_with('{') {
-        return View::new(p, Some(t), None);
+        return View::new(p, Some(t).filter(|t| !t.is_empty()), None);
     }
-    let v: serde_json::Value = serde_json::from_str(t).ok()?;
-    let f = v.get("renovation").and_then(|x| x.as_str())?;
-    View::new(p, Some(f), v.get("renovationPhase").and_then(|x| x.as_str()))
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(t) else { return View::new(p, None, None) };
+    let f = v.get("renovation").and_then(|x| x.as_str()).filter(|x| !x.is_empty());
+    let req = crate::design_options::parse_request(v.get("designOptions"));
+    View::with(p, f, v.get("renovationPhase").and_then(|x| x.as_str()), &[], &req)
 }
 
 /// 3D: Teile in der Umbau-Farbe (Füllfarbe des Status) — Wände, Decken, Dächer, Stützen, Treppen, Körper.
@@ -591,4 +658,4 @@ pub fn renovation_of<'a>(p: &'a Project, id: &str) -> Option<&'a Renovation> {
 
 #[cfg(test)]
 #[path = "renovation_tests.rs"]
-mod tests;
+pub(crate) mod tests;

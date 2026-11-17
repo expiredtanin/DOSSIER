@@ -44,7 +44,7 @@ import {
   type GuideHit,
 } from "./sheetSnap";
 import { createLayoutImage, imageAspect, imageGeometry } from "../model/layoutImages";
-import { posterHeaderItems, viewportScaleLabel } from "../model/posterTemplates";
+import { posterHeaderItems, viewportScaleLabel, viewportVariantLabel } from "../model/posterTemplates";
 import { planToPrintSvg } from "../export/planToPrintSvg";
 import { legendPlan, legendPrintSvg } from "../export/legendSvg";
 import { legendBox, legendEntries, legendKeysOfViewports, type LegendKind } from "../analysis/legend";
@@ -111,7 +111,8 @@ export function ViewportPlanSvg({
     // Massstab ZUERST: er geht in die Plan-Erzeugung ein (Bemassung in Papier-mm, s. model/dimension.ts).
     const scaleN = resolveViewportScale(viewport, snap);
     // Geschoss/Zeichnung wie bisher; Schnitt/Ansicht über die abgeleitete Projektion ([115], Schnitt asynchron).
-    void viewportSnapshotPlan(project, snap, codes, scaleN)
+    // [272] Eigene Variantenkombination des Viewports (dieselbe Ansicht in anderer Kombination).
+    void viewportSnapshotPlan(project, snap, codes, scaleN, false, viewport)
       .then((plan) => {
         if (disposed) return;
         const print = planToPrintSvg(plan, {
@@ -130,7 +131,7 @@ export function ViewportPlanSvg({
     return () => {
       disposed = true;
     };
-  }, [project, viewport.snapshotId, viewport.widthMm, viewport.heightMm, viewport.scaleDenominator, viewport.center?.x, viewport.center?.y]);
+  }, [project, viewport.snapshotId, viewport.widthMm, viewport.heightMm, viewport.scaleDenominator, viewport.center?.x, viewport.center?.y, viewport.designOptions]);
   // Lage/Grösse über die Attribute des inneren SVG (folgt auch dem Ghost beim Ziehen).
   useEffect(() => {
     if (ref.current) placeInner(ref.current, rect);
@@ -803,9 +804,9 @@ export function LayoutSheetPane({
           );
         })}
         {/* Massstab unter jedem Viewport (Master „Massstabsangaben"). */}
-        {master?.viewportScaleLabels &&
-          layout.viewports.map((vp) => {
-            const l = viewportScaleLabel(project, vp, sheet);
+        {layout.viewports.map((vp) => {
+            // [272] Ohne Massstabsangaben des Masters nur der Titelzusatz der Varianten (falls abweichend).
+            const l = master?.viewportScaleLabels ? viewportScaleLabel(project, vp, sheet) : viewportVariantLabel(project, vp, sheet);
             return l ? (
               <text key={`sl-${vp.id}`} x={l.x} y={l.y} fontSize={l.sizeMm} fontFamily="Helvetica, Arial, sans-serif" fill="#111111" pointerEvents="none" data-scale-label>
                 {l.text}
@@ -1217,6 +1218,30 @@ export function LayoutSheetPane({
                 />
               </span>
             </label>
+            {/* [272] Eigene Variantenkombination des Viewports: dieselbe Ansicht in anderer Kombination (Titelzusatz). */}
+            {(project.designOptionSets ?? []).map((s) => (
+              <label key={s.id} className="layout-sheet-hud-row">
+                <span>{s.name}</span>
+                <select
+                  className="res-input"
+                  data-testid={`vp-design-option-${s.id}`}
+                  value={selectedVp.designOptions?.[s.id] ?? ""}
+                  onChange={(e) => {
+                    const next = { ...(selectedVp.designOptions ?? {}) };
+                    if (e.target.value) next[s.id] = e.target.value;
+                    else delete next[s.id];
+                    handlers.onPatchViewport(selectedVp.id, { designOptions: Object.keys(next).length ? next : undefined });
+                  }}
+                >
+                  <option value="">{t("designOption.fromSnapshot")}</option>
+                  {s.options.map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {o.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ))}
             <div className="layout-sheet-hud-size">
               {Math.round(selectedVp.widthMm)} × {Math.round(selectedVp.heightMm)} mm
             </div>

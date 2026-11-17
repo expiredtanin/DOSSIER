@@ -579,7 +579,11 @@ export function createProjectSlice(
   const applyCmd = (req0: object, coalesceKey?: string) => {
     // [271] Aktueller Zeichen-Status: der Kern gibt ihn neuen Bauteilen der Zeichenbefehle (`commands::stamp_renovation`).
     const dr = (get() as unknown as { drawRenovation?: { status: string; phase?: string } }).drawRenovation;
-    const req = dr && (dr.status !== "existing" || dr.phase) ? { ...req0, renovation: dr } : req0;
+    const req1 = dr && (dr.status !== "existing" || dr.phase) ? { ...req0, renovation: dr } : req0;
+    // [272] Aktuelle Zeichen-Variante: neue Elemente der Zeichenbefehle gehören ihr (`design_options::stamp_ops`).
+    const dopt = (get() as unknown as { drawDesignOption?: { set: string; option: string } | null }).drawDesignOption;
+    const known = dopt && get().project.designOptionSets?.some((s) => s.id === dopt.set && s.options.some((o) => o.id === dopt.option));
+    const req = known ? { ...req1, designOption: dopt } : req1;
     if (forwarded(() => storeDocument(get().project).cmdOps(req), coalesceKey)) return;
     let notice: string | undefined;
     set((s) => {

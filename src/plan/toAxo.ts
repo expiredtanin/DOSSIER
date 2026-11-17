@@ -24,6 +24,8 @@ export interface AxoOptions extends Doc3d {
   /** [271] Umbaufilter (Id oder Name) und Etappe. */
   renovation?: string;
   renovationPhase?: string;
+  /** [272] Variantenkombination (Satz-Id → Varianten-Id); fehlt = Hauptvarianten. */
+  designOptions?: Record<string, string>;
 }
 
 /** Kern-Abfrage `axoPlan`. */
@@ -51,6 +53,8 @@ export function isDoc3dSnapshot(snap: Pick<ViewSnapshot, "viewType">): boolean {
 }
 
 /** 3D-Dokument eines Ausschnitts (Kern: `sheet_viewports::doc3d_buf`): `doc3d`, sonst sein Blickwinkel `view3d`. */
-export function snapshotAxoPlan(project: Project, snap: ViewSnapshot, visibleCodes: Set<string>, scaleDenominator: number, mono = true): Plan | null {
-  return generateAxoPlan(project, { view: snap.view3d, ...(snap.doc3d ?? {}), visibleCodes, scaleDenominator, mono });
+export function snapshotAxoPlan(project: Project, snap: ViewSnapshot, visibleCodes: Set<string>, scaleDenominator: number, mono = true, designOptions?: Record<string, string> | null): Plan | null {
+  // [272] Variantenkombination des Ausschnitts bzw. Viewports.
+  const opts = designOptions ?? snap.designOptions;
+  return generateAxoPlan(project, { view: snap.view3d, ...(snap.doc3d ?? {}), visibleCodes, scaleDenominator, mono, ...(opts && Object.keys(opts).length ? { designOptions: opts } : {}) });
 }

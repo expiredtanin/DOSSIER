@@ -31,6 +31,7 @@ export type TopBarEvents = Required<
     | "onNewProjectFromComplexSample"
     | "onNewProjectFromWettbewerbSample"
     | "onNewProjectFromUmbauSample"
+    | "onNewProjectFromVariantenSample"
     | "onNewProjectFromTemplate"
     | "onOpenProject"
     | "onSaveProject"
@@ -135,6 +136,7 @@ export function useTopBarElements(opts: {
           onNewProjectFromComplexSample={ev.onNewProjectFromComplexSample}
           onNewProjectFromWettbewerbSample={ev.onNewProjectFromWettbewerbSample}
           onNewProjectFromUmbauSample={ev.onNewProjectFromUmbauSample}
+          onNewProjectFromVariantenSample={ev.onNewProjectFromVariantenSample}
           onNewProjectFromTemplate={ev.onNewProjectFromTemplate}
           onOpenProject={ev.onOpenProject}
           onSaveProject={ev.onSaveProject}

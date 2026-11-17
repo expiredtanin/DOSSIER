@@ -48,6 +48,8 @@ import { ModelViewsTab } from "./resourceManager/ModelViewsTab";
 import type { ModelViewHandlers } from "./resourceManager/ModelViewsTab";
 import { RenovationTab } from "./resourceManager/RenovationTab";
 import type { RenovationHandlers } from "./resourceManager/RenovationTab";
+import { DesignOptionsTab } from "./resourceManager/DesignOptionsTab";
+import type { DesignOptionHandlers } from "./resourceManager/DesignOptionsTab";
 import { PenSetsTab } from "./resourceManager/PenSetsTab";
 import { PalettesTab } from "./resourceManager/PalettesTab";
 import { TextStylesTab } from "./resourceManager/TextStylesTab";
@@ -72,6 +74,7 @@ export type TabId =
   | "viewTemplates"
   | "modelViews"
   | "renovation"
+  | "designOptions"
   | "pens"
   | "palettes";
 
@@ -93,10 +96,11 @@ const TABS: { id: TabId; labelKey: string }[] = [
   { id: "viewTemplates", labelKey: "resources.tab.viewTemplates" },
   { id: "modelViews", labelKey: "resources.tab.modelViews" },
   { id: "renovation", labelKey: "resources.tab.renovation" },
+  { id: "designOptions", labelKey: "resources.tab.designOptions" },
 ];
 
 /** Bündel der immutablen Mutationen (von App über setProject bereitgestellt). */
-export interface ResourceManagerHandlers extends ViewTemplateHandlers, ModelViewHandlers, RenovationHandlers {
+export interface ResourceManagerHandlers extends ViewTemplateHandlers, ModelViewHandlers, RenovationHandlers, DesignOptionHandlers {
   onPatchComponent: (id: string, patch: Partial<Component>) => void;
   onAddComponent: () => void;
   onDeleteComponent: (id: string) => void;
@@ -496,6 +500,7 @@ export function ResourceManager({
           {tab === "viewTemplates" && <ViewTemplatesTab project={project} handlers={handlers} />}
           {tab === "modelViews" && <ModelViewsTab project={project} handlers={handlers} />}
           {tab === "renovation" && <RenovationTab project={project} handlers={handlers} />}
+          {tab === "designOptions" && <DesignOptionsTab project={project} handlers={handlers} />}
           {tab === "overrides" && (
             <OverridesTab
               project={project}

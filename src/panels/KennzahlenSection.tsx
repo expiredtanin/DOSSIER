@@ -15,6 +15,7 @@ import type { Project, RoomProgramRow } from "../model/types";
 import { setField, setFieldIfChanged } from "../core";
 import { RoomProgramImportButton } from "../ui/RoomProgramImportDialog";
 import { ProgramCompareSection } from "./ProgramCompareSection";
+import { DesignOptionCompareSection } from "./DesignOptionCompareSection";
 
 type ProgramStatus = ReturnType<typeof checkRoomProgram>["rows"][number]["status"];
 
@@ -100,6 +101,9 @@ export function KennzahlenSection() {
           </div>
         ))}
       </div>
+
+      {/* [272] Varianten: Kennzahlen und Kosten je Kombination nebeneinander (Leiste oben: Hauptvarianten). */}
+      <DesignOptionCompareSection project={project} renovation={renState} />
 
       <label className="kz-parcel">
         <span>{t("kennzahlen.parcelArea")}</span>

@@ -39,6 +39,7 @@ import { elementDimensions } from "./objectInfo/elementDims";
 import { InfoGroups, hasInfoGroups } from "./objectInfo/InfoGroups";
 import { infoGroupFrame, useInfoGroupState } from "./objectInfo/InfoGroup";
 import { RenovationField } from "./objectInfo/RenovationField";
+import { DesignOptionField } from "./objectInfo/DesignOptionField";
 
 // ── Bezugspunkt-Raster ───────────────────────────────────────────────────────
 // Neun Anker als 3×3-Raster. Zeile 0 = oben (fy=0), Spalte 0 = links (fx=0).
@@ -198,6 +199,8 @@ export function ObjectInfoPanel({ showPlacement = true }: { showPlacement?: bool
 
       {/* [271] Umbau: Status und Etappe der Auswahl (Mehrfachauswahl in einem Undo-Schritt). */}
       <RenovationField />
+      {/* [272] Variante der Auswahl (Hauptmodell oder Satz: Variante; ein Undo-Schritt). */}
+      <DesignOptionField />
 
       {showPlacement && (
         <>

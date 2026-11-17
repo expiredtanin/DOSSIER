@@ -149,6 +149,7 @@ pub fn ctx_key(a: &PlanArgs) -> String {
     format!("{}\u{1}{:?}\u{1}{}\u{1}{}\u{1}{}\u{1}{}\u{1}{}\u{1}{}\u{1}{}\u{1}{}", a.floor, a.detail, a.reference_lines, a.global, a.scale.to_bits(), a.for_print, a.compact, a.mono, a.auto_coarse, rules) + &a.model_view.as_deref().map_or(String::new(), |m| format!("\u{1}mv:{m}"))
         + &a.trace_of.as_deref().map_or(String::new(), |t| format!("\u{1}trace:{t}"))
         + &a.renovation.as_deref().map_or(String::new(), |t| format!("\u{1}ren:{t}:{}", a.renovation_phase.as_deref().unwrap_or("")))
+        + &a.design_options.iter().map(|(k, v)| format!("\u{1}opt:{k}={v}")).collect::<String>()
 }
 
 /// Sichtbarkeit und Dimmen als vergleichbarer Text (Mengen sortiert).

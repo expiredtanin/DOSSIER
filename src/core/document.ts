@@ -172,7 +172,9 @@ export type LoadFileResult =
   | { ok: false; error: string };
 
 /** Wurzel-Abfragen des Kerns (`queries.rs::run_root`). */
-export type RootQueryName = "penRebakeOps" | "penDeleteOps" | "penSeedOps" | "standardsMergeOps" | "standardsUpdatePlan" | "standardsUpdateOps" | "folderPdfPages" | "layoutTitleBlock" | "translatePatch" | "translateOps" | "selectionFilterPatch";
+export type RootQueryName = "penRebakeOps" | "penDeleteOps" | "penSeedOps" | "standardsMergeOps" | "standardsUpdatePlan" | "standardsUpdateOps" | "folderPdfPages" | "layoutTitleBlock" | "translatePatch" | "translateOps" | "selectionFilterPatch"
+  // [272] Varianten (`design_options.rs`)
+  | "designOptionAcceptOps" | "designOptionDeleteOps" | "designOptionAssignOps" | "designOptionCopyOps";
 
 /** Abfragen des Kerns (`queries.rs`). */
 export type QueryName =
@@ -182,6 +184,8 @@ export type QueryName =
   | "kennzahlen"
   | "areaTable"
   | "renovationFilters"
+  | "designOptionInfo"
+  | "designOptionCompare"
   | "costEstimate"
   | "costDefaults"
   | "programCompare"

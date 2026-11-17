@@ -41,14 +41,16 @@ fn cache_put(key: (f64, u64), o: std::rc::Rc<Output>) {
 }
 
 /// [271] Umbaufilter eines Schnitts/einer Ansicht: `renovation`/`renovationPhase` im Aufruf (CLI, Blatt-Ausschnitt), sonst
-/// die Felder der Ebene (`renovationFilter`, `renovationPhase`).
+/// die Felder der Ebene (`renovationFilter`, `renovationPhase`). [272] Dazu die Variantenkombination: die der Ebene
+/// (`designOptions`), darüber die angefragte (`designOptions` im Aufruf: Blatt-Viewport, CLI `--options`).
 pub fn renovation_view(p: &Project, v: &serde_json::Value, level: &LevelSpec) -> Option<crate::renovation::View> {
     let req = v.get("renovation").and_then(|m| m.as_str()).filter(|m| !m.is_empty());
     let (f, ph) = match req {
         Some(f) => (Some(f), v.get("renovationPhase").and_then(|m| m.as_str())),
         None => (level.renovation.as_deref(), level.renovation_phase.as_deref()),
     };
-    crate::renovation::View::new(p, f, ph)
+    let stored: Vec<&std::collections::BTreeMap<String, String>> = level.design_options.iter().collect();
+    crate::renovation::View::with(p, f, ph, &stored, &crate::design_options::parse_request(v.get("designOptions")))
 }
 
 /// Abfrage `sectionPlan`: `args` = `[mono, openings, key]` (`key` > 0

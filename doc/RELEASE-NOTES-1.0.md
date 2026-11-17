@@ -90,6 +90,14 @@ in `doc/KURZANLEITUNG.md`):
     Etappe; neue Öffnungen in Bestandswänden zeigen das abgebrochene Mauerwerk, zugemauerte Öffnungen die Ausfachung. Gilt in Grundriss,
     Schnitt, Ansicht, Vektor-Axonometrie, Kennzahlen (Bestand/Endzustand) und Exporten (DXF-Layer je Status, IFC `Status` im
     `Pset_*Common`). Beispiel: *Datei → Neu aus Vorlage: Beispiel Umbau*. Das 3D-Fenster folgt dem Filter der aktiven Ebene (noch ohne Bildprüfung); Cycles/Blender noch ohne Filter.
+14. **Varianten (17.11., [272]).** Wie Archicads „Design Options“: Variantensätze (z. B. Dachform, Fassade) mit Varianten A, B, …; jedes
+    Element (Bauteile, Öffnungen, Räume, Körper, 2D-Elemente samt Bibliotheksobjekten) gehört zum Hauptmodell oder zu genau einer Variante.
+    Je Ansicht, Ausschnitt, Vorlage und Blatt-Viewport eine Kombination (Vorgabe die Hauptvarianten); Grundriss, Schnitt, Ansicht,
+    Vektor-Axonometrie, 3D, Kennzahlen, Kosten, Baurecht, DXF, IFC und PDF folgen ihr. Panel „Varianten“ (Sätze verwalten, Kombination,
+    neue Elemente zeichnen in …, Zuweisen, Kopieren in …, Übernehmen), Objekt-Info „Variante“, Befehle `variante`/`variantekopieren`,
+    Varianten-Vergleich (GF, HNF, GV, AZ, ÜZ, Kosten je Kombination, CSV) in der Flächenbilanz; ein Viewport kann dieselbe Ansicht in
+    anderer Kombination zeigen (Titelzusatz mit Variantenname). CLI `--options "Dachform=B"`, Vergleich `designoptions`. Beispiel:
+    *Datei → Neu aus Vorlage: Beispiel Varianten*.
 
 **Erker und Wiederanlauf (15.11.).** Fenster in Bogenwänden (Erker) sitzen in Schnitt und Ansicht wie im 3D und im Grundriss auf der Sehne; die Sehnen-Zonen
 gelten über alle Geschosse, der Deckenrand folgt der Sehne ([216]). Raumstempel rücken in Lücken zwischen den Linien, bevor sie schrumpfen; die Baulinie setzt vor
@@ -204,7 +212,7 @@ Ehrlich vorweg: **Der Durchlauf des ganzen Referenz-Ablaufs auf dem Mac ist noch
   Fenster in der Ansicht mit Rahmen und Glas, ausweichende und rauschfest lesbare Masszahlen sind behoben. **Bewusst vereinfacht:** mit der Vorlage
   «Wettbewerb 1:200» zeigen Grundriss und Schnitt die Fenster als Linien (nur die Ansicht zeigt Rahmen/Glas). Nur im Linux-Container (CLI-SVG in Chromium,
   PDF mit Poppler `pdftotext`/`pdftoppm`) angesehen, nicht auf dem Mac.
-- Kostenschätzung: Kennwerte sind Beispielwerte; keine Varianten nebeneinander, keine Kennwerte aus Büro- oder CRB-Quelle ([209]).
+- Kostenschätzung: Kennwerte sind Beispielwerte; Varianten nebeneinander über den Varianten-Vergleich ([272]), keine Kennwerte aus Büro- oder CRB-Quelle ([209]).
 - Volumen → Bauteile: nur gerade Prismen und Quader/Zylinder; verjüngte Körper, Kugel/Kegel/Torus u. a. werden mit Meldung abgelehnt; keine
   Bodenplatte, keine Innenwände ([222]).
 - **Baurecht-Nachweis** ([255]): Fassadenhöhe nur über ±0.00 (Näherung); Grünfläche und aGSF nur per Eingabe; die Blatt-Tabelle übernimmt nur

@@ -240,7 +240,7 @@ fn derive_all(d: &mut Document, tag: &str, depth: Depth, fails: &mut Fails) {
             }
         }
         // [271] Umbaufilter (eingebaut, mit Etappe, Unsinn).
-        for ren in [json!({"renovation": "umbauplan"}), json!({"renovation": "neubau", "renovationPhase": "x"}), json!({"renovation": "?"})] {
+        for ren in [json!({"renovation": "umbauplan"}), json!({"renovation": "neubau", "renovationPhase": "x"}), json!({"renovation": "?"}), json!({"designOptions": "Dachform=B,?=?"}), json!({"designOptions": {"x": 5}}), json!({"designOptions": 42, "renovation": "bestand"})] {
             let t = plan_text(&p, fl, 100.0, ren.clone());
             fails.run(|| format!("{tag} Grundriss {fl} Umbau {ren}"), || dossier_core::queries::run_bin_doc(d, "planDomains", &[1.0], &t));
         }
@@ -279,7 +279,7 @@ fn derive_all(d: &mut Document, tag: &str, depth: Depth, fails: &mut Fails) {
                     }
                 }
                 // [271] Umbaufilter im Schnitt/in der Ansicht.
-                let t = if section { json!({"level": level, "scale": 100.0, "detail": "mittel", "renovation": "umbauplan"}) } else { json!({"level": level, "renovation": "abbruch"}) }.to_string();
+                let t = if section { json!({"level": level, "scale": 100.0, "detail": "mittel", "renovation": "umbauplan"}) } else { json!({"level": level, "renovation": "abbruch", "designOptions": "x=y"}) }.to_string();
                 let args = if section { vec![0.0, 1.0, 0.0] } else { vec![0.0, 0.0, 100.0] };
                 fails.run(|| format!("{tag} {kind} {} Umbau", lv.id), || dossier_core::queries::run_bin_doc(d, if section { "sectionPlan" } else { "elevationPlan" }, &args, &t));
             }
@@ -332,6 +332,12 @@ fn derive_all(d: &mut Document, tag: &str, depth: Depth, fails: &mut Fails) {
         ("kennzahlen", vec![], "endzustand"),
         ("areaTable", vec![], "{\"renovation\": \"bestand\", \"renovationPhase\": 7}"),
         ("renovationFilters", vec![], ""),
+        // [272] Varianten: Info, Vergleich (mit Unsinn), Kombination in Kennzahlen/3D/IFC.
+        ("designOptionInfo", vec![], ""),
+        ("designOptionCompare", vec![], "{\"renovation\": 3, \"head\": [1]}"),
+        ("kennzahlen", vec![], "{\"designOptions\": \"a=b\"}"),
+        ("model3dParts", vec![0.0, f64::NAN, 0.0, 1.0], "{\"designOptions\": {\"s\": null}}"),
+        ("costEstimate", vec![], "{\"designOptions\": []}"),
         ("model3dParts", vec![0.0, 1.0, 0.0, 1.0], "{\"renovation\": \"umbauplan\"}"),
     ];
     if heavy {

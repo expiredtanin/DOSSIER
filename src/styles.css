@@ -9404,7 +9404,7 @@ body {
 }
 .rpi-table th,
 .rpi-table td {
-  padding: 2px 6px;
+  padding: 2px 4px;
   border-bottom: 1px solid var(--border);
   text-align: left;
   white-space: nowrap;
@@ -9656,3 +9656,77 @@ body {
 }
 .quick-guide-body hr { border: none; border-top: 1px solid var(--line); margin: 16px 0; }
 .quick-guide-body img { display: block; max-width: 100%; height: auto; margin: 6px 0 12px; background: #fff; border: 1px solid var(--line); }
+
+/* [272] Varianten: Vergleichstabelle (Flächenbilanz) und Ressourcen-Tab. */
+.kz-variants-scroll {
+  overflow-x: auto;
+}
+.kz-variants-table {
+  border-collapse: collapse;
+  font-size: 11px;
+  width: 100%;
+}
+.kz-variants-table th,
+.kz-variants-table td {
+  padding: 2px 4px;
+  border-bottom: 1px solid rgba(127, 127, 127, 0.25);
+  text-align: left;
+  white-space: nowrap;
+}
+.kz-variants-table td:first-child {
+  white-space: normal;
+  min-width: 110px;
+}
+.kz-variants-table th {
+  white-space: normal;
+}
+.kz-variants-table td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.kz-variants-primary td {
+  font-weight: 600;
+}
+.rm-design-option-set {
+  margin-bottom: 8px;
+}
+.rm-design-option {
+  padding-left: 16px;
+}
+.rm-design-option-count {
+  min-width: 2em;
+  text-align: right;
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+}
+.rm-design-options .rm-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 2px 0;
+}
+.rm-design-options .rm-row input[type="text"] {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.rm-design-options .rm-icon-btn {
+  padding: 0 2px;
+  line-height: 1;
+}
+.rm-design-options .rm-icon-btn .material-symbols-outlined {
+  font-size: 16px;
+}
+.rm-design-options .rm-add-btn {
+  white-space: nowrap;
+  font-size: 11px;
+}
+.rm-design-options .rm-hint {
+  font-size: 11px;
+  opacity: 0.75;
+}
+.design-options-panel {
+  padding: 4px 8px 8px;
+}
+.design-options-panel .kz-parcel select {
+  max-width: 170px;
+}

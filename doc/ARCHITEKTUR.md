@@ -476,6 +476,25 @@ Vektor-Axo (`axo_plan_buf`), 3D (`model3dParts` mit `text.renovation`, ohne Teil
 (`text` = Filter-Id), DXF (`dxf.rs::renovation_layers`) und IFC (`ifc_data.rs::renovation_props`). Neue Bauteile der Zeichenbefehle
 bekommen den Zeichen-Status über `commands::stamp_renovation` (Anfrage-Feld `renovation`, gesetzt in `projectSlice.applyCmd`).
 
+
+### 3.9 Varianten ([272])
+
+Wie Archicads „Design Options“: `Project.designOptionSets` (Sätze mit Varianten, `primary` = Hauptvariante), an Wand, Öffnung, Decke,
+Dach, Treppe, Stütze, Körper, Raum und 2D-Element `designOption: {set, option}` (fehlt = Hauptmodell), Kombination `designOptions`
+(Satz-Id → Varianten-Id) an `DrawingLevel`, `ViewTemplate`, `ViewSnapshot` und `LayoutViewport`. **Keine zweite Sichtbarkeitslogik:**
+die Kombination ist Teil der `renovation::View` (3.8) — `View::with`/`for_level` lösen sie auf (Hauptvarianten, darüber die gespeicherte
+Wahl der Ebene/des Ausschnitts, darüber die Anfrage `designOptions` als Text „Dachform=B,…“ oder Objekt), `View::resolve` legt
+Elemente anderer Varianten (Öffnungen ausgeblendeter Wände mit) in `hidden`; eine `View` gibt es darum auch ohne Umbaufilter, sobald
+das Projekt Elemente in Varianten hat (`design_options::active`, sonst alles wie vorher). So wirkt sie ohne eigene Anbindung überall,
+wo der Umbaufilter wirkt: Grundriss (`Ctx.hidden`, 2D-Elemente über `drawings::on_floor`), Schnitt/Ansicht (`LevelSpec.design_options`),
+Axo, 3D (`model3dParts` mit Text; das 3D-Fenster nimmt die Kombination der aktiven Ebene, ohne Teil-Cache), Kennzahlen/Kosten/Baurecht/
+Raumbuch/IFC/Netz-Exporte (`queries.rs::options_state`: Kombination des JSON-Texts, sonst Hauptvarianten). Blatt-Viewports:
+`sheet_viewports::viewport_snapshot`/`snapshot_project` (Rust) bzw. `viewportPlan.ts::viewportDesignOptions` (TS), Titelzusatz
+`posterTemplates.ts::viewportVariantSuffix`. Bearbeiten: `design_options.rs` (Wurzel-Abfragen `designOptionAcceptOps`, `…DeleteOps`,
+`…AssignOps`, `…CopyOps`; neue Elemente der Zeichenbefehle über `stamp_ops`, Anfrage-Feld `designOption` aus `projectSlice.applyCmd`),
+Vergleich `designOptionCompare` (Kreuzprodukt, höchstens 24 Kombinationen). Oberfläche: Panel „Varianten“ (`panels/DesignOptionsPanel.tsx`),
+Chip in der Statusleiste, Objekt-Info `DesignOptionField`, Ressourcen-Tab, Befehle `variante`/`variantekopieren`; CLI `--options`.
+
 ---
 
 ## 4. Schnitt

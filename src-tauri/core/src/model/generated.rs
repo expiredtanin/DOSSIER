@@ -1963,6 +1963,10 @@ pub struct DrawingLevel {
     #[serde(rename = "renovationPhase", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub renovation_phase: Option<String>,
+    /// [272] Variantenkombination: Satz-Id → Varianten-Id (fehlende Sätze ⇒ Hauptvariante).
+    #[serde(rename = "designOptions", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub design_options: Option<std::collections::BTreeMap<String, String>>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -2058,6 +2062,10 @@ pub struct ViewTemplate {
     #[serde(rename = "renovationPhase", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub renovation_phase: Option<String>,
+    /// [272] Variantenkombination: Satz-Id → Varianten-Id (fehlende Sätze ⇒ Hauptvariante).
+    #[serde(rename = "designOptions", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub design_options: Option<std::collections::BTreeMap<String, String>>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -3043,6 +3051,47 @@ pub struct RenovationFilter {
     pub extra: Extra,
 }
 
+/// [272] Zugehörigkeit eines Elements zu einer Variante (Archicad „Design Options“).
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct DesignOptionRef {
+    /// Id des Variantensatzes (`DesignOptionSet.id`).
+    pub set: String,
+    /// Id der Variante im Satz (`DesignOption.id`).
+    pub option: String,
+    #[serde(flatten)]
+    #[ts(skip)]
+    pub extra: Extra,
+}
+
+/// [272] Eine Variante eines Satzes (z. B. „A Flachdach“).
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct DesignOption {
+    pub id: String,
+    pub name: String,
+    #[serde(flatten)]
+    #[ts(skip)]
+    pub extra: Extra,
+}
+
+/// [272] Ein Variantensatz (z. B. „Dachform“) mit seinen Varianten; je Darstellung ist genau eine Variante des
+/// Satzes sichtbar (Vorgabe: die Hauptvariante).
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct DesignOptionSet {
+    pub id: String,
+    pub name: String,
+    pub options: Vec<DesignOption>,
+    /// Id der Hauptvariante. Fehlt/unbekannt ⇒ die erste Variante.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub primary: Option<String>,
+    #[serde(flatten)]
+    #[ts(skip)]
+    pub extra: Extra,
+}
+
 /// [271] Umbau-Einstellungen des Projekts.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
 #[serde(default)]
@@ -3236,6 +3285,10 @@ pub struct Wall {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub renovation: Option<Renovation>,
+    /// [272] Variante, zu der das Element gehört (`Project.designOptionSets`). Fehlt ⇒ Hauptmodell (immer sichtbar).
+    #[serde(rename = "designOption", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub design_option: Option<DesignOptionRef>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -3398,6 +3451,10 @@ pub struct Ceiling {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub renovation: Option<Renovation>,
+    /// [272] Variante, zu der das Element gehört (`Project.designOptionSets`). Fehlt ⇒ Hauptmodell (immer sichtbar).
+    #[serde(rename = "designOption", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub design_option: Option<DesignOptionRef>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -3605,6 +3662,10 @@ pub struct Roof {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub renovation: Option<Renovation>,
+    /// [272] Variante, zu der das Element gehört (`Project.designOptionSets`). Fehlt ⇒ Hauptmodell (immer sichtbar).
+    #[serde(rename = "designOption", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub design_option: Option<DesignOptionRef>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -4101,6 +4162,10 @@ pub struct Opening {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub renovation: Option<Renovation>,
+    /// [272] Variante, zu der das Element gehört (`Project.designOptionSets`). Fehlt ⇒ Hauptmodell (immer sichtbar).
+    #[serde(rename = "designOption", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub design_option: Option<DesignOptionRef>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -4366,6 +4431,10 @@ pub struct Stair {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub renovation: Option<Renovation>,
+    /// [272] Variante, zu der das Element gehört (`Project.designOptionSets`). Fehlt ⇒ Hauptmodell (immer sichtbar).
+    #[serde(rename = "designOption", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub design_option: Option<DesignOptionRef>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -4646,6 +4715,10 @@ pub struct Room {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub renovation: Option<Renovation>,
+    /// [272] Variante, zu der das Element gehört (`Project.designOptionSets`). Fehlt ⇒ Hauptmodell (immer sichtbar).
+    #[serde(rename = "designOption", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub design_option: Option<DesignOptionRef>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -4884,6 +4957,10 @@ pub struct Drawing2D {
     #[serde(rename = "hatchSource", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub hatch_source: Option<AttributeSource>,
+    /// [272] Variante, zu der das Element gehört (`Project.designOptionSets`). Fehlt ⇒ Hauptmodell (immer sichtbar).
+    #[serde(rename = "designOption", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub design_option: Option<DesignOptionRef>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -4998,6 +5075,10 @@ pub struct ExtrudedSolid {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub renovation: Option<Renovation>,
+    /// [272] Variante, zu der das Element gehört (`Project.designOptionSets`). Fehlt ⇒ Hauptmodell (immer sichtbar).
+    #[serde(rename = "designOption", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub design_option: Option<DesignOptionRef>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -5109,6 +5190,10 @@ pub struct Column {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub renovation: Option<Renovation>,
+    /// [272] Variante, zu der das Element gehört (`Project.designOptionSets`). Fehlt ⇒ Hauptmodell (immer sichtbar).
+    #[serde(rename = "designOption", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub design_option: Option<DesignOptionRef>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -5670,6 +5755,10 @@ pub struct ViewSnapshot {
     #[serde(rename = "renovationPhase", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub renovation_phase: Option<String>,
+    /// [272] Variantenkombination: Satz-Id → Varianten-Id (fehlende Sätze ⇒ Hauptvariante).
+    #[serde(rename = "designOptions", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub design_options: Option<std::collections::BTreeMap<String, String>>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -5869,6 +5958,10 @@ pub struct LayoutViewport {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub center: Option<Vec2>,
+    /// [272] Variantenkombination des Viewports (über der des Ausschnitts): Satz-Id → Varianten-Id (fehlende Sätze ⇒ Hauptvariante).
+    #[serde(rename = "designOptions", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub design_options: Option<std::collections::BTreeMap<String, String>>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
@@ -6764,6 +6857,11 @@ pub struct Project {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub renovation: Option<RenovationSettings>,
+    /// [272] Variantensätze (Archicad „Design Options“): Elemente mit `designOption` erscheinen nur in der
+    /// Kombination ihrer Variante.
+    #[serde(rename = "designOptionSets", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub design_option_sets: Option<Vec<DesignOptionSet>>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,

@@ -27,6 +27,12 @@ export interface ViewSlice {
    */
   drawRenovation: { status: RenovationStatus; phase?: string };
   setDrawRenovation: (status: RenovationStatus, phase?: string) => void;
+  /**
+   * [272] Aktuelle Zeichen-Variante: neue Elemente der Zeichenbefehle gehören ihr (`null` = Hauptmodell). Zustand der
+   * Sitzung, kein Undo-Schritt.
+   */
+  drawDesignOption: { set: string; option: string } | null;
+  setDrawDesignOption: (target: { set: string; option: string } | null) => void;
   // Ansichtstyp (Grundriss / Perspektive).
   viewType: ViewType;
   // Zuletzt gewählter Ansichtstyp je Zeichnungsebene — jeder Tab merkt sich
@@ -100,6 +106,8 @@ export function createViewSlice(api: StoreApi<ViewSlice>): ViewSlice {
     activeLevelId: sampleProject.drawingLevels[0].id,
     drawRenovation: { status: "existing" },
     setDrawRenovation: (status, phase) => set({ drawRenovation: phase ? { status, phase } : { status } }),
+    drawDesignOption: null,
+    setDrawDesignOption: (target) => set({ drawDesignOption: target }),
     viewType: "grundriss",
     viewTypeByLevel: {},
     detail: "mittel",
