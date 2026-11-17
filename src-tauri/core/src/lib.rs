@@ -90,6 +90,8 @@ pub mod ifc_quantities;
 pub mod ifc_stairs;
 pub mod ifc_data;
 pub mod mesh_data;
+pub mod cycles_scene;
+pub mod cycles_post;
 pub mod solid_bool;
 pub mod solid_mesh;
 pub mod dormer;

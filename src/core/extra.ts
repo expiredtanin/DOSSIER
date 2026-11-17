@@ -113,6 +113,9 @@ export {
   BlenderMissingError, RenderCancelled, RENDER_SIZE_PRESETS, RENDER_QUALITY_PRESETS, RENDER_VIEW_PRESETS, BLENDER_CANDIDATES, BLENDER_DOWNLOAD_URL,
 } from "../export/blenderRender";
 export type { BlenderHost, RenderPackage, RenderOptions, RenderScene, RenderCamera, RenderCameraSpec, RenderViewPreset, RenderMaterial, RenderRole, RenderCameraChoice, TextureLoader, BlenderEvent, RenderResult, RenderRunOptions, RenderMode, BlendResult } from "../export/blenderRender";
+// [215] Rendering mit dem mitgelieferten Cycles: Szene aus dem Kern (cyclesScene), Prozess-Ablauf, EXR/PNG
+export { buildCyclesPackage, cyclesSceneInfo, runCyclesRender, parseCyclesLine, cyclesArgs, readExr, encodePng, exrToPng, CyclesMissingError, CyclesCancelled } from "../export/cyclesRender";
+export type { CyclesHost, CyclesPackage, CyclesSceneInfo, CyclesSceneOptions, CyclesRunOptions, CyclesResult, CyclesEvent, Codec, ExrImage } from "../export/cyclesRender";
 // [209] Kostenschätzung grob (Kern kosten.rs): Rechnung, Beispielwerte, Bericht (CSV/PDF wie der Flächen-Nachweis)
 export { computeCostEstimate, defaultCostEstimate, formatChf } from "../analysis/costEstimate";
 export type { CostResult, CostRow, CostQuantities, CostEstimate, CostGroup, CostMethod, CostBasis } from "../analysis/costEstimate";

@@ -91,6 +91,11 @@ pub fn run(p: &Project, name: &str, args: &[f64], text: &str) -> Result<String, 
             json(&room_program::layout(p, &opt))
         }
         ("siteCheck", _) => json(&site_rules::check_project(p)),
+        // [215] Cycles-Szene (XML + Bilddateien) aus dem Projekt; Text = `CyclesOptions` als JSON (camelCase).
+        ("cyclesScene", _) => {
+            let o: crate::cycles_scene::CyclesOptions = if text.trim().is_empty() { Default::default() } else { serde_json::from_str(text).map_err(|e| format!("cyclesScene: {e}"))? };
+            json(&crate::cycles_scene::cycles_scene(p, &o)?)
+        }
         ("dormerStatus", _) => json(&crate::dormer::status(p)),
         ("excavationQuantities", _) => json(&crate::excavation::quantities(p)),
         ("buildingFootprint", _) => json(&site_rules::building_footprint(p)),

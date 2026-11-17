@@ -643,7 +643,8 @@ Import-Liste und keine „Kontext-Schicht", die Sichtbarkeit oder Darstellung st
    (läuft nur, wenn ifcopenshell installiert ist).
 
 Andere Formate laufen nach demselben Muster: der Kern sammelt einen flachen Puffer (`mesh_data.rs` für
-OBJ/STL/glTF, `plan/dxf.rs` für DXF/DWG), `fileio` schreibt die Datei.
+OBJ/STL/glTF, `plan/dxf.rs` für DXF/DWG), `fileio` schreibt die Datei. Die Cycles-Szene für Endbilder ([215]) schreibt der Kern selbst
+(`cycles_scene.rs`, gleiche Dreiecke wie `mesh_data.rs`; Abfrage `cyclesScene`), Gastgeber/Prozess in `src/export/cyclesRender.ts`, Plan in `doc/CYCLES.md`.
 
 Was bei Speichern, Export und Import jedes Formats mitreist und was verloren geht (mit Belegen im Code): `doc/DATEIFORMATE.md` ([C9]).
 

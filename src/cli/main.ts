@@ -43,6 +43,9 @@
 //                                                  ins Geschoss); Bericht als JSON. Z. B. convert plan.dxf p.obp --cmd "erkennen --out e.obp"
 //   dossier-cli <projekt.obp> render --out bild.png [--view iso|perspective|front|back|left|right|top] [--when 2026-06-21T10:00Z]
 //                                                  [--camera Name|id] [--samples 128] [--size 1920x1080] [--cpu] [--excavation] [--blender pfad] [--keep]   [211] [227] (--excavation: Baugrube im Bild lassen) Rendering mit Blender/Cycles
+//   dossier-cli <projekt.obp> render --engine cycles [--cycles pfad|$DOSSIER_CYCLES] --out bild.png [--view …|--camera …] [--when …] [--samples 64] [--size 1280x720]
+//                                                  [--exposure EV] [--look filmic|standard] [--no-denoise] [--cpu|--device CPU] [--exr roh.exr] [--no-context] [--excavation] [--keep] [--verbose]
+//                                                  [215] Rendering mit dem mitgelieferten Cycles (Szene aus dem Kern, Tonwert in Dossier); `--engine blender` (Standard) = Blender-Weg [211]
 //   dossier-cli <projekt.obp> blend --out x.blend [--view …] [--camera …] [--when …] [--samples 128] [--size 1920x1080] [--cpu] [--excavation] [--blender pfad] [--keep]   [228] Szene als .blend (Collections nach Bauteil, Bilder eingepackt, Kamera «Dossier-Kamera»), ohne zu rendern
 //   dossier-cli <projekt.obp> model3d [--explode 3] [--hide …] [--grey …] [--out modell.json]   3D-Modell fürs Headless-Rendern (render_png)
 //   dossier-cli pointcloud-info <datei.las|laz|e57|ply|xyz|pts> [--voxel 0.05] [--max 2000000]
@@ -61,8 +64,9 @@
 //
 // WASM-Pakete (src/engine/pkg*) werden aus DOSSIER_WASM_DIR bzw. `<repo>/src/engine` gelesen.
 
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
+import { deflateSync, inflateSync } from "node:zlib";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -176,8 +180,11 @@ import {
   RENDER_VIEW_PRESETS,
   findRenderCamera,
   projectRenderCameras,
+  buildCyclesPackage,
+  runCyclesRender,
+  CyclesMissingError,
 } from "../core";
-import type { BlenderHost, Filter3d, Project, RenderMode, RenderPackage, RenderViewPreset, TextureLoader, ViewTemplate } from "../core";
+import type { BlenderHost, CyclesHost, Filter3d, Project, RenderMode, RenderPackage, RenderViewPreset, TextureLoader, ViewTemplate } from "../core";
 import { serveStdio } from "./mcp";
 import { startBridge } from "./mcpBridge";
 
@@ -810,8 +817,8 @@ function nodeBlenderHost(keep: boolean): BlenderHost {
   };
 }
 
-/** Optionen von `render` und `blend` ([211] [228]): Kamera, Zeit, Grösse, Samples → Paket (bei ungültigen Optionen beendet `fail()` den Prozess). */
-async function buildCliPackage(project: Project, args: Args, mode: RenderMode): Promise<RenderPackage> {
+/** Gemeinsame Optionen von `render` (Blender und Cycles) und `blend`: Kamera, Zeit, Grösse, Samples (bei ungültigen Optionen beendet `fail()` den Prozess). */
+function cliRenderParams(project: Project, args: Args, defaultSamples = 128, defaultSize = "1920x1080") {
   const view = (args.flags.get("view") ?? "iso") as RenderViewPreset;
   if (!(RENDER_VIEW_PRESETS as readonly string[]).includes(view)) return fail(`--view: ${RENDER_VIEW_PRESETS.join("|")}`);
   // [213] `--camera <Name|id>`: gespeicherte Kamera (Standpunkt, Ziel, Bildwinkel; Sonnenzeit der Kamera, falls `--when` fehlt).
@@ -821,15 +828,21 @@ async function buildCliPackage(project: Project, args: Args, mode: RenderMode): 
   const whenText = args.flags.get("when");
   const when = whenText ? new Date(whenText) : (choice?.sunWhen ?? defaultRenderTime(project));
   if (Number.isNaN(when.getTime())) return fail("--when: ungültiges Datum");
-  const samples = Number(args.flags.get("samples") ?? 128);
+  const samples = Number(args.flags.get("samples") ?? defaultSamples);
   if (!Number.isFinite(samples) || samples < 1) return fail("--samples: Zahl ≥ 1");
-  const sizeText = args.flags.get("size") ?? "1920x1080";
+  const sizeText = args.flags.get("size") ?? defaultSize;
   const m = /^(\d+)x(\d+)$/i.exec(sizeText);
   if (!m) return fail("--size: BreitexHöhe in Pixeln, z. B. 1920x1080");
+  return { view, choice, when, samples, width: Number(m[1]), height: Number(m[2]) };
+}
+
+/** Optionen von `render` und `blend` ([211] [228]): Kamera, Zeit, Grösse, Samples → Paket. */
+async function buildCliPackage(project: Project, args: Args, mode: RenderMode): Promise<RenderPackage> {
+  const { view, choice, when, samples, width, height } = cliRenderParams(project, args);
   await loadFileio();
   const pkg = await buildRenderPackage(
     project,
-    { mode, width: Number(m[1]), height: Number(m[2]), samples, when, camera: choice ? choice.camera : { preset: view }, device: args.flags.has("cpu") ? "cpu" : "auto", backfilled: !args.flags.has("excavation") },
+    { mode, width, height, samples, when, camera: choice ? choice.camera : { preset: view }, device: args.flags.has("cpu") ? "cpu" : "auto", backfilled: !args.flags.has("excavation") },
     localTextureLoader(),
   );
   if (pkg.missingTextures.length > 0) process.stderr.write(`Hinweis: ${pkg.missingTextures.length} Bildkarten nicht lesbar (Material erscheint einfarbig)\n`);
@@ -848,6 +861,9 @@ function blenderFailure(e: unknown): number {
 
 /** `dossier-cli … render`: Paket bauen, Blender starten, Bild nach `--out`. Rückgabe = Exit-Code. */
 async function runRender(project: Project, args: Args): Promise<number> {
+  const engine = args.flags.get("engine") ?? "blender";
+  if (engine === "cycles") return runCyclesRenderCli(project, args);
+  if (engine !== "blender") return fail("--engine: cycles|blender");
   const pkg = await buildCliPackage(project, args, "render");
   const target = args.flags.get("out") ?? `${exportProjectName(project) || "projekt"}.png`;
   try {
@@ -865,6 +881,85 @@ async function runRender(project: Project, args: Args): Promise<number> {
     return 0;
   } catch (e) {
     return blenderFailure(e);
+  }
+}
+
+/** [215] Zlib des Node-Gastgebers für EXR (ZIP) und PNG. */
+const nodeCodec = {
+  inflate: (d: Uint8Array): Uint8Array => new Uint8Array(inflateSync(d)),
+  deflate: (d: Uint8Array): Uint8Array => new Uint8Array(deflateSync(d, { level: 6 })),
+};
+
+/** [215] Cycles als Kindprozess (Node): Programm aus `--cycles`, `DOSSIER_CYCLES`, neben der CLI (`cycles`, `cycles/cycles`) oder im PATH. */
+function nodeCyclesHost(keep: boolean): CyclesHost {
+  const exeName = process.platform === "win32" ? "cycles.exe" : "cycles";
+  const isFile = (p: string) => existsSync(p) && statSync(p).isFile();
+  return {
+    ...nodeBlenderHost(keep),
+    async find(custom) {
+      const given = custom?.trim() || process.env.DOSSIER_CYCLES?.trim();
+      if (given) {
+        if (isFile(given)) return given;
+        const inner = join(given, exeName);
+        return isFile(inner) ? inner : null;
+      }
+      const here = dirname(fileURLToPath(import.meta.url));
+      for (const c of [join(here, exeName), join(here, "cycles", exeName), join(here, "..", "cycles", exeName)]) if (isFile(c)) return c;
+      for (const d of (process.env.PATH ?? "").split(process.platform === "win32" ? ";" : ":")) {
+        if (d && isFile(join(d, exeName))) return join(d, exeName);
+      }
+      return null;
+    },
+  };
+}
+
+/** `dossier-cli … render --engine cycles` [215]: Szene aus dem Kern, `cycles` starten, EXR → Tonwert → PNG. Rückgabe = Exit-Code (3 = Cycles fehlt). */
+async function runCyclesRenderCli(project: Project, args: Args): Promise<number> {
+  const { view, choice, when, samples, width, height } = cliRenderParams(project, args, 64, "1280x720");
+  const evText = args.flags.get("exposure");
+  const exposureEv = evText === undefined ? undefined : Number(evText);
+  if (exposureEv !== undefined && !Number.isFinite(exposureEv)) return fail("--exposure: Zahl (EV)");
+  const look = args.flags.get("look") ?? "filmic";
+  if (look !== "filmic" && look !== "standard") return fail("--look: filmic|standard");
+  const pkg = await buildCyclesPackage(
+    project,
+    { width, height, samples, denoise: !args.flags.has("no-denoise"), whenMs: when.getTime(), camera: choice ? choice.camera : { preset: view }, backfilled: !args.flags.has("excavation"), context: !args.flags.has("no-context"), exposureEv },
+    localTextureLoader(),
+  );
+  if (pkg.info.meshes === 0) return fail("render: Das Modell enthält keine 3D-Geometrie");
+  if (pkg.missingTextures.length > 0) process.stderr.write(`Hinweis: ${pkg.missingTextures.length} Bildkarten nicht lesbar (Material erscheint einfarbig)\n`);
+  const target = args.flags.get("out") ?? `${exportProjectName(project) || "projekt"}.png`;
+  process.stderr.write(`Szene: ${pkg.info.meshes} Netze, ${pkg.info.triangles} Dreiecke, Sonne ${pkg.info.sunAzimuth.toFixed(0)}° / ${pkg.info.sunElevation.toFixed(0)}° hoch, Belichtung ×${pkg.info.exposure.toPrecision(3)}\n`);
+  let lastShown = 0;
+  try {
+    const res = await runCyclesRender(nodeCyclesHost(args.flags.has("keep")), pkg, {
+      cyclesPath: args.flags.get("cycles"),
+      device: args.flags.has("cpu") ? "CPU" : args.flags.get("device"),
+      look,
+      codec: nodeCodec,
+      onLine: args.flags.has("verbose") ? (l) => process.stderr.write(`  ${l}\n`) : undefined,
+      onProgress: (e) => {
+        // Cycles meldet jeden Stand mehrfach; je Achtel und am Ende genau einmal anzeigen.
+        if (e.stage === "render" && e.done > lastShown && e.total > 0 && (e.done === e.total || e.done % Math.max(1, Math.floor(e.total / 8)) === 0)) {
+          lastShown = e.done;
+          process.stderr.write(`Sample ${e.done}/${e.total}\n`);
+        }
+      },
+    });
+    writeFileSync(target, res.png);
+    const exrTarget = args.flags.get("exr");
+    if (exrTarget) writeFileSync(exrTarget, res.exr);
+    lastOutput = target;
+    process.stderr.write(`geschrieben: ${target} (${res.png.length} Bytes, ${res.width}x${res.height}, ${samples} Samples, Cycles ${(res.millis / 1000).toFixed(1)} s)\n`);
+    for (const n of pkg.info.notes) process.stderr.write(`Hinweis: ${n}\n`);
+    return 0;
+  } catch (e) {
+    if (e instanceof CyclesMissingError) {
+      process.stderr.write("Cycles nicht gefunden: --cycles <pfad> angeben, DOSSIER_CYCLES setzen oder das Programm neben die CLI legen.\n");
+      return 3;
+    }
+    process.stderr.write(`dossier-cli: ${e instanceof Error ? e.message : String(e)}\n`);
+    return 1;
   }
 }
 
