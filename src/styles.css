@@ -9897,6 +9897,8 @@ body {
   border: 1px solid var(--border);
   border-radius: 999px;
   cursor: pointer;
+}
+
 /* [272] Varianten: Vergleichstabelle (Flächenbilanz) und Ressourcen-Tab. */
 .kz-variants-scroll {
   overflow-x: auto;
