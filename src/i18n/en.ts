@@ -2702,6 +2702,8 @@ export const en: Record<TranslationKey, string> = {
   "areas.note.gvSolids": "GV = volume of the free solids (massing model without floor areas).",
   "areas.note.gvLevels": "GV per SIA 416: GF × floor height per level plus the roof space up to the top of the roof (dormers included, eaves overhangs excluded); parts of a level above the roof surface deducted.",
   "areas.note.gvRoofFailed": "Roof space could not be computed (faulty roof geometry): GV without roof space.",
+  "areas.note.gvBaseSlab": "The base slab below the lowest level (a ceiling whose underside lies below the finished floor) counts towards GV, within the level footprint.",
+  "areas.note.gvStudySolids": "Free solids of at least 9 m² footprint and 2.4 m height count as study volumes towards GV where they stand outside the level footprints.",
   "areas.note.terrainZero": "Reference terrain = ±0.00 (no terrain model).",
   "areas.note.agsfMissing": "Without a creditable plot area no ratios can be computed.",
   "areas.note.greenInput": "The green area cannot be derived from the model and must be entered.",

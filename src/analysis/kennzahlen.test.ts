@@ -43,9 +43,15 @@ describe("computeKennzahlen", () => {
     const k = computeKennzahlen({ ...emptyProject, extrudedSolids: solids(lv) });
     expect(k.gv).toBeCloseTo(300 - 3, 6);
   });
-  it("[266] mit Geschossflächen zählen freie Körper nicht zum GV", () => {
-    const k = computeKennzahlen({ ...sampleProject, extrudedSolids: solids(sampleProject.drawingLevels[0].id) });
+  it("[266] mit Geschossflächen zählen kleine/niedrige freie Körper (Brunnen, Mauer) nicht zum GV", () => {
+    const lv = sampleProject.drawingLevels[0].id;
+    const k = computeKennzahlen({ ...sampleProject, extrudedSolids: [{ id: "a", type: "extrudedSolid", categoryCode: "20", levelId: lv, points: sq(200, 200, 10), height: 1.2 } as never] });
     expect(k.gv).toBeCloseTo(computeAreaTable(sampleProject).gv, 6);
+  });
+  it("[266] Studienkörper neben dem Haus (≥ 9 m², ≥ 2.4 m) zählt zum GV", () => {
+    const lv = sampleProject.drawingLevels[0].id;
+    const k = computeKennzahlen({ ...sampleProject, extrudedSolids: [{ id: "a", type: "extrudedSolid", categoryCode: "20", levelId: lv, points: sq(200, 200, 10), height: 3 } as never] });
+    expect(k.gv).toBeCloseTo(computeAreaTable(sampleProject).gv + 300, 6);
   });
   it("[206] ohne freie Körper: GV wie die Flächentabelle (GF × Geschosshöhe), nicht 0", () => {
     const k = computeKennzahlen(sampleProject);

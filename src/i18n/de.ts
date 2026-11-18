@@ -2714,6 +2714,8 @@ export const de = {
   "areas.note.gvSolids": "GV = Volumen der freien Körper (Massenmodell ohne Geschossflächen).",
   "areas.note.gvLevels": "GV nach SIA 416: GF × Geschosshöhe je Geschoss plus Dachraum bis Oberkante Dach (Gauben eingeschlossen, ohne Dachvorsprünge); Geschossteile über der Dachfläche abgezogen.",
   "areas.note.gvRoofFailed": "Dachraum nicht berechenbar (Dachgeometrie fehlerhaft): GV ohne Dachraum.",
+  "areas.note.gvBaseSlab": "Bodenplatte unter dem untersten Geschoss (Decke mit Unterkante unter dem Fertigboden) zählt zum GV, innerhalb des Geschossgrundrisses.",
+  "areas.note.gvStudySolids": "Freie Körper ab 9 m² Grundfläche und 2.4 m Höhe zählen als Studienkörper zum GV, soweit sie ausserhalb der Geschossgrundrisse stehen.",
   "areas.note.terrainZero": "Massgebendes Terrain = ±0.00 (kein Geländemodell).",
   "areas.note.agsfMissing": "Ohne anrechenbare Grundstücksfläche sind keine Ziffern berechenbar.",
   "areas.note.greenInput": "Die Grünfläche ist nicht aus dem Modell ableitbar und muss eingegeben werden.",

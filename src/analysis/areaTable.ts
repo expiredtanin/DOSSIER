@@ -30,6 +30,10 @@ export interface AreaRow {
   gv: number;
   /** [266] Dachraum-Korrektur des Geschosses (m³, in `gv` enthalten; Kern `building_volume.rs`). */
   roofGv: number;
+  /** [266] Bodenplatte unter dem untersten Geschoss (m³, in `gv` enthalten). */
+  baseGv: number;
+  /** [266] Studienkörper neben dem Wandbau (m³, in `gv` enthalten). */
+  solidGv: number;
   rooms: number;
 }
 
@@ -43,6 +47,8 @@ export interface AreaTable {
   gvSource: GvSource;
   /** [266] Anteil des Dachraums über ±0.00 (m³, Baumasse). */
   roofGvAboveGround: number;
+  /** [266] Anteil von Bodenplatte und Studienkörpern über ±0.00 (m³, Baumasse). */
+  extraGvAboveGround: number;
   /** Hinweis-Schlüssel (Annahmen der Rechnung). */
   notes: string[];
 }

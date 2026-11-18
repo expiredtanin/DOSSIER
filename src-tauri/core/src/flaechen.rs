@@ -35,7 +35,10 @@
 //!    eines Kniestock-Geschosses über der Dachfläche; Dachvorsprünge zählen nicht. Abgrenzung nach SIA 416
 //!    und Rechnung: [`crate::building_volume`]. Ohne Geschossflächen (reines Massenmodell) ist das Volumen
 //!    der freien Körper (Abzugskörper abgezogen) das GV ([`GvSource::Solids`]); hat das Modell GF, zählen
-//!    freie Körper nicht (Brunnen, Möbel, Studienkörper im Garten sind kein Gebäudevolumen).
+//!    nur gebäudeartige freie Körper (≥ 9 m² Grundfläche, ≥ 2.4 m hoch; Brunnen, Möbel, Mauern nicht) und nur der
+//!    Teil ausserhalb der Geschossgrundrisse (innerhalb wäre er doppelt gezählt). Bodenplatte: eine Decke unter
+//!    dem untersten Geschoss zählt von ihrer Unterkante bis zum Fertigboden (SIA 416: untere Begrenzung =
+//!    Unterseite der untersten Bodenkonstruktion); Fundamente, Kies und Magerbeton nicht.
 //!
 //! # IVHB (Interkantonale Vereinbarung über die Harmonisierung der Baubegriffe, 22.9.2005)
 //!
@@ -120,6 +123,12 @@ pub struct AreaRow {
     /// [266] Dachraum-Korrektur dieses Geschosses (m³, in `gv` enthalten): Raum unter dem Dach über dem
     /// Geschoss-Quader, abzüglich Teilen über der Dachfläche; in der Summenzeile die Summe.
     pub roof_gv: f64,
+    /// [266] Bodenplatte unter dem untersten Geschoss (m³, in `gv` enthalten): Raum zwischen Unterkante der
+    /// untersten Decke und Oberkante Fertigboden, innerhalb des Geschossgrundrisses; sonst 0.
+    pub base_gv: f64,
+    /// [266] Freie Gebäude-/Studienkörper neben dem Wandbau (m³, in `gv` enthalten), dem Geschoss des Körpers
+    /// zugeordnet; nur der Teil ausserhalb der Geschossgrundrisse.
+    pub solid_gv: f64,
     pub rooms: usize,
 }
 
@@ -136,6 +145,8 @@ impl AreaRow {
         self.agf += o.agf;
         self.gv += o.gv;
         self.roof_gv += o.roof_gv;
+        self.base_gv += o.base_gv;
+        self.solid_gv += o.solid_gv;
         self.rooms += o.rooms;
     }
 }
@@ -152,6 +163,8 @@ pub struct AreaTable {
     pub gv_source: GvSource,
     /// [266] Anteil des Dachraums über ±0.00 (m³, für die Baumasse).
     pub roof_gv_above_ground: f64,
+    /// [266] Anteil von Bodenplatte und Studienkörpern (`base_gv`, `solid_gv`) über ±0.00 (m³, für die Baumasse).
+    pub extra_gv_above_ground: f64,
     /// Hinweise (Schlüssel, die die UI übersetzt): Annahmen, die in die Zahlen eingehen.
     pub notes: Vec<String>,
 }
@@ -248,6 +261,76 @@ fn construction_area(p: &Project, level_id: &str) -> f64 {
     finite(multi_polygon_area(&polygon_bool::difference(&kf_parts, &rooms))).max(0.0)
 }
 
+/// [266] Bodenplatte unter dem untersten Geschoss: Ist unter dem untersten Geschoss mit Grundriss eine Decke
+/// modelliert (Oberkante höchstens auf dessen Fertigboden, Unterkante tiefer), zählt der Raum von ihrer
+/// Unterkante bis zur Fertigboden-Kote — innerhalb des Geschossgrundrisses — zum GV (SIA 416: untere
+/// Begrenzung = Unterseite der untersten Bodenkonstruktion). Mehrere Decken (Stufen): je Fläche die tiefste
+/// Unterkante. Fundamente, Magerbeton, Kies und Aussparungen der Decke zählen nicht. Ohne solche Decke 0.
+/// Liefert (Geschoss-Index, Volumen, Anteil über ±0.00).
+fn base_slab_volume(p: &Project, floors: &[&DrawingLevel], fps: &[Vec<Polygon>]) -> Option<(usize, f64, f64)> {
+    let i = fps.iter().position(|f| !f.is_empty())?;
+    let base = finite(floors[i].base_elevation.unwrap_or(0.0));
+    let mut slabs: Vec<(Vec<[f64; 2]>, f64)> = p
+        .ceilings
+        .as_deref()
+        .unwrap_or(&[])
+        .iter()
+        .filter_map(|c| {
+            let ring = c.ring_xy();
+            let (uk, ok) = p.ceiling_vertical_extent(c);
+            let valid = ring.len() >= 3 && ring.iter().all(|v| v[0].is_finite() && v[1].is_finite()) && uk.is_finite() && ok.is_finite();
+            (valid && ok <= base + 1e-6 && uk < base - 1e-6).then_some((ring, uk))
+        })
+        .collect();
+    slabs.sort_by(|a, b| a.1.total_cmp(&b.1));
+    let (mut covered, mut vol, mut above): (Vec<Polygon>, f64, f64) = (Vec::new(), 0.0, 0.0);
+    for (ring, uk) in slabs {
+        let mut part = polygon_bool::intersection(&[vec![ring]], &fps[i]);
+        if !covered.is_empty() {
+            part = polygon_bool::difference(&part, &covered);
+        }
+        let a = finite(multi_polygon_area(&part)).max(0.0);
+        vol += a * (base - uk);
+        above += a * (base - uk.max(0.0)).max(0.0);
+        covered.extend(part);
+    }
+    (vol > 0.0).then_some((i, finite(vol), finite(above)))
+}
+
+/// [266] Mindestgrösse eines freien Körpers, damit er als Gebäudekörper (Studienkörper) zum GV zählt:
+/// Grundfläche und Höhe (Annahme: kleinster Wohnraum, lichte Höhe) — Brunnen, Möbel, Mauern, Podeste nicht.
+const STUDY_SOLID_MIN_AREA: f64 = 9.0;
+const STUDY_SOLID_MIN_HEIGHT: f64 = 2.4;
+
+/// [266] Studienkörper neben einem aus Wänden gebauten Haus. Ein positiver freier Körper ab
+/// `STUDY_SOLID_MIN_*` zählt zum GV, aber nur der Teil seiner Grundfläche AUSSERHALB der Grundrisse der
+/// Geschosse (was darin liegt, ist schon über GF × Höhe erfasst — sonst doppelt); Verjüngung wird
+/// anteilig nach Grundfläche gerechnet. Liefert je Körper (Geschoss-Index, Volumen, Anteil über ±0.00).
+fn study_solid_volumes(p: &Project, idx: &std::collections::HashMap<&str, usize>, fps: &[Vec<Polygon>]) -> Vec<(usize, f64, f64)> {
+    let built: Vec<Polygon> = fps.iter().flatten().cloned().collect();
+    let built = if built.is_empty() { built } else { polygon_bool::union(&built) };
+    let mut out = Vec::new();
+    for (s, si) in p.extruded_solids.as_deref().unwrap_or(&[]).iter().zip(solids_in(p)) {
+        let ring: Vec<[f64; 2]> = s.points.iter().map(|v| [v.x, v.y]).collect();
+        if si.subtract || ring.len() < 3 || !ring.iter().all(|v| v[0].is_finite() && v[1].is_finite()) {
+            continue;
+        }
+        let area = signed_area(&ring).abs();
+        if !(area >= STUDY_SOLID_MIN_AREA && finite(s.height) >= STUDY_SOLID_MIN_HEIGHT) {
+            continue;
+        }
+        let poly: Vec<Polygon> = vec![vec![ring]];
+        let outside = if built.is_empty() { area } else { finite(multi_polygon_area(&polygon_bool::difference(&poly, &built))).max(0.0) };
+        let frac = (outside / area).clamp(0.0, 1.0);
+        let base = p.floor(&s.level_id).map_or(0.0, |f| f.base_elevation.unwrap_or(0.0)) + s.base_offset.unwrap_or(0.0);
+        let v = finite(kennzahlen::solid_volume(&si.points, si.circle_r, si.height, si.taper)) * frac;
+        if v > 0.0 {
+            out.push((idx.get(s.level_id.as_str()).copied().unwrap_or(0), v, solid_volume_above(&si, base) * frac));
+        }
+    }
+    out
+}
+
 fn solids_in(p: &Project) -> Vec<SolidIn> {
     p.extruded_solids
         .as_deref()
@@ -306,6 +389,8 @@ pub fn area_table(p: &Project) -> AreaTable {
             height,
             gv: gf * height,
             roof_gv: 0.0,
+            base_gv: 0.0,
+            solid_gv: 0.0,
             rooms: rooms.iter().filter(|r| r.level == i).count(),
         });
     }
@@ -314,8 +399,21 @@ pub fn area_table(p: &Project) -> AreaTable {
     let gv_source = if gf_sum <= 1e-9 && solids.iter().any(|s| !s.subtract) { GvSource::Solids } else { GvSource::Levels };
     let mut roof_failed = false;
     let mut roof_gv_above_ground = 0.0;
+    let mut extra_gv_above_ground = 0.0;
+    let mut study_solids = false;
     if gv_source == GvSource::Levels {
         let fps: Vec<Vec<Polygon>> = floors.iter().map(|l| footprint(p, &l.id)).collect();
+        if let Some((i, v, above)) = base_slab_volume(p, &floors, &fps) {
+            levels[i].base_gv = v;
+            levels[i].gv += v;
+            extra_gv_above_ground += above;
+        }
+        for (i, v, above) in study_solid_volumes(p, &idx, &fps) {
+            levels[i].solid_gv += v;
+            levels[i].gv += v;
+            extra_gv_above_ground += above;
+            study_solids = true;
+        }
         let rs = crate::building_volume::roof_space(p, &floors, &fps);
         roof_failed = rs.failed > 0;
         for (row, d) in levels.iter_mut().zip(&rs.per_level) {
@@ -338,7 +436,13 @@ pub fn area_table(p: &Project) -> AreaTable {
     if roof_failed {
         notes.push("gvRoofFailed".to_string());
     }
-    AreaTable { levels, total, gv, gv_source, roof_gv_above_ground, notes }
+    if levels.iter().any(|l| l.base_gv > 0.0) {
+        notes.push("gvBaseSlab".to_string());
+    }
+    if study_solids {
+        notes.push("gvStudySolids".to_string());
+    }
+    AreaTable { levels, total, gv, gv_source, roof_gv_above_ground, extra_gv_above_ground, notes }
 }
 
 // ── IVHB ────────────────────────────────────────────────────────────────────
@@ -551,10 +655,11 @@ pub fn ivhb(p: &Project, opt: &IvhbOptions) -> Ivhb {
             .map(|(l, r)| {
                 let (base, h) = (l.base_elevation.unwrap_or(0.0), r.height);
                 let frac = if h <= 0.0 || base >= 0.0 { 1.0 } else { ((base + h) / h).clamp(0.0, 1.0) };
-                (r.gv - r.roof_gv) * frac
+                (r.gv - r.roof_gv - r.base_gv - r.solid_gv) * frac
             })
             .sum::<f64>()
             + t.roof_gv_above_ground
+            + t.extra_gv_above_ground
     };
 
     let agbf = above_ground_footprint(p);
@@ -712,6 +817,85 @@ pub(crate) mod tests {
         rooms.push(schacht);
         p.rooms = Some(rooms);
         assert!(close(area_table(&p).levels[1].kf, 11.8));
+    }
+
+    fn solid(id: &str, x0: f64, x1: f64, h: f64) -> serde_json::Value {
+        serde_json::json!({"id":id,"type":"extrudedSolid","levelId":"eg","points":[{"x":x0,"y":0},{"x":x1,"y":0},{"x":x1,"y":8},{"x":x0,"y":8}],"height":h})
+    }
+
+    /// [266] Studienkörper neben dem Wandhaus (10 × 8 m, Höhe 7): zählt voll zum GV und zur Baumasse.
+    #[test]
+    fn studienkoerper_neben_dem_haus_zaehlt() {
+        let mut p = house();
+        p.extruded_solids = Some(serde_json::from_value(serde_json::json!([solid("s", 20.0, 30.0, 7.0)])).unwrap());
+        let t = area_table(&p);
+        assert_eq!(t.gv_source, GvSource::Levels);
+        assert!(close(t.gv, 3.0 * 85.49 * 2.6 + 560.0));
+        assert!(close(t.levels[1].solid_gv, 560.0));
+        assert!(close(t.total.solid_gv, 560.0));
+        assert!(t.notes.iter().any(|n| n == "gvStudySolids"));
+        let iv = ivhb(&p, &IvhbOptions::default());
+        let ohne = ivhb(&house(), &IvhbOptions::default());
+        assert!(close(iv.baumasse - ohne.baumasse, 560.0));
+    }
+
+    /// [266] Liegt der Körper im Haus, ist er über GF × Höhe schon erfasst (nicht doppelt); ragt er zur Hälfte
+    /// heraus, zählt nur die Hälfte (Grundriss des Hauses: Wände 10.3 × 8.3 m, x −0.15 … 10.15).
+    #[test]
+    fn studienkoerper_im_haus_zaehlt_nicht_doppelt() {
+        let mut p = house();
+        p.extruded_solids = Some(serde_json::from_value(serde_json::json!([solid("s", 1.0, 9.0, 7.0)])).unwrap());
+        assert!(close(area_table(&p).gv, 3.0 * 85.49 * 2.6));
+        p.extruded_solids = Some(serde_json::from_value(serde_json::json!([solid("s", 10.15, 20.15, 5.0)])).unwrap());
+        assert!(close(area_table(&p).gv, 3.0 * 85.49 * 2.6 + 400.0));
+        p.extruded_solids = Some(serde_json::from_value(serde_json::json!([solid("s", 5.15, 15.15, 5.0)])).unwrap());
+        let extra = area_table(&p).total.solid_gv;
+        assert!(extra > 190.0 && extra < 210.0, "{extra}");
+    }
+
+    /// [266] Kleine (Brunnen) und niedrige Körper (Mauer, Podest) sind kein Gebäudevolumen; Abzugskörper auch nicht.
+    #[test]
+    fn niedrige_und_abzugskoerper_zaehlen_nicht() {
+        let mut p = house();
+        let mut sub = solid("a", 20.0, 30.0, 7.0);
+        sub["operation"] = "subtract".into();
+        p.extruded_solids = Some(serde_json::from_value(serde_json::json!([solid("m", 20.0, 30.0, 1.2), sub])).unwrap());
+        assert!(close(area_table(&p).gv, 3.0 * 85.49 * 2.6));
+    }
+
+    /// [266] Bodenplatte unter dem UG (OKFF −2.6): 0.4 m dick, OK auf dem Boden, Umriss 10 × 8 → +32 m³, unter
+    /// ±0.00 (nicht in der Baumasse). Ohne Decke oder mit Decke auf dem Boden-OK (Zwischendecke) ändert sich nichts.
+    #[test]
+    fn bodenplatte_unter_dem_untersten_geschoss_zaehlt() {
+        let slab = |id: &str, floor: &str, top: serde_json::Value, t: f64| {
+            serde_json::json!({"id":id,"type":"ceiling","floorId":floor,"categoryCode":"30","wallTypeId":"wt","thickness":t,"top":top,
+              "outline":[{"x":-1.0,"y":-1.0},{"x":11.0,"y":-1.0},{"x":11.0,"y":9.0},{"x":-1.0,"y":9.0}]})
+        };
+        let mut p = house();
+        let ohne = area_table(&p);
+        p.ceilings = Some(serde_json::from_value(serde_json::json!([slab("bp", "ug", serde_json::json!({"mode":"floor","floorId":"ug"}), 0.4)])).unwrap());
+        let t = area_table(&p);
+        // Umriss grösser als das Haus: nur der Teil im Grundriss (Wände 10.3 × 8.3 = 85.49 m²) zählt.
+        assert!(close(t.levels[0].base_gv, 85.49 * 0.4), "{}", t.levels[0].base_gv);
+        assert!(close(t.gv - ohne.gv, 85.49 * 0.4));
+        assert!(t.notes.iter().any(|n| n == "gvBaseSlab"));
+        let (a, b) = (ivhb(&p, &IvhbOptions::default()), ivhb(&house(), &IvhbOptions::default()));
+        assert!(close(a.baumasse, b.baumasse));
+        // Zwischendecke über dem UG (OK = 0.00) liegt nicht unter dem untersten Geschoss.
+        p.ceilings = Some(serde_json::from_value(serde_json::json!([slab("d", "ug", serde_json::json!({"mode":"custom","z":0.0}), 0.25)])).unwrap());
+        assert!(close(area_table(&p).gv, ohne.gv));
+    }
+
+    /// [266] Zwei überlappende Decken zählen die Fläche einmal, mit der tiefsten Unterkante.
+    #[test]
+    fn ueberlappende_bodenplatten_zaehlen_einmal() {
+        let slab = |id: &str, t: f64| {
+            serde_json::json!({"id":id,"type":"ceiling","floorId":"ug","categoryCode":"30","wallTypeId":"wt","thickness":t,"top":{"mode":"floor","floorId":"ug"},
+              "outline":[{"x":0.0,"y":0.0},{"x":10.0,"y":0.0},{"x":10.0,"y":8.0},{"x":0.0,"y":8.0}]})
+        };
+        let mut p = house();
+        p.ceilings = Some(serde_json::from_value(serde_json::json!([slab("a", 0.3), slab("b", 0.5)])).unwrap());
+        assert!(close(area_table(&p).total.base_gv, 80.0 * 0.5));
     }
 
     #[test]

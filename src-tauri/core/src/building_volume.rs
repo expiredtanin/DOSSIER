@@ -32,7 +32,8 @@
 //!
 //! Die Dachfläche ist die Oberkante (`roof::roof_geometry`, Schichten liegen darunter): ein Flachdach auf
 //! der Oberkante des obersten Geschosses fügt nichts hinzu, die Geschosshöhe OK–OK enthält die Decke. Die
-//! Unterkante der Bodenplatte unter dem untersten Geschoss fehlt weiterhin (Geschosshöhen OK–OK).
+//! Bodenplatte unter dem untersten Geschoss und Studienkörper neben dem Haus kommen in `flaechen.rs` dazu
+//! (`base_slab_volume`, `study_solid_volumes`, [266]).
 //!
 //! Ergebnis je Inhalt gecacht (Schlüssel `gv-roof-space`); scheitert ein Boolean, ist die Korrektur 0 und
 //! `failed` > 0 (Hinweis in der Flächentabelle), nie Panik.
