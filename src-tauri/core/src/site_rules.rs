@@ -592,7 +592,12 @@ pub fn model_top(p: &Project) -> Option<f64> {
     }
     for r in p.roofs.as_deref().unwrap_or(&[]) {
         let eaves = p.roof_base_elevation(r);
-        top = top.max(eaves + crate::roof::roof_geometry(&r.params(), eaves).ridge_height);
+        let geo = crate::roof::roof_geometry(&r.params(), eaves);
+        top = top.max(eaves + geo.ridge_height);
+        // [285] Attika zählt zur Gesamthöhe (Oberkante Brüstung über der Dachhaut).
+        if let Some(pp) = crate::roof_parapet::parapet(r, &geo) {
+            top = top.max(pp.z1);
+        }
     }
     top.is_finite().then_some(top)
 }

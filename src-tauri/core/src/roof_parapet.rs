@@ -176,6 +176,14 @@ mod tests {
         }
     }
 
+    /// [285] Die Gesamthöhe (Baurecht, Kennzahlen) reicht bis Oberkante Attika, nicht nur bis zur Dachhaut.
+    #[test]
+    fn gesamthoehe_enthaelt_die_attika() {
+        let ohne = crate::site_rules::model_top(&project("")).unwrap();
+        let mit = crate::site_rules::model_top(&project(r#","parapetHeight":0.5,"parapetWidth":0.2"#)).unwrap();
+        assert!((mit - ohne - 0.5).abs() < 1e-9, "{ohne} {mit}");
+    }
+
     #[test]
     fn ohne_hoehe_keine_attika() {
         assert!(of(&project("")).is_none());
