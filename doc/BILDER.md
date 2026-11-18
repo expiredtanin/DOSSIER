@@ -12,6 +12,20 @@ Prüfbilder je Aufgabe, neueste zuerst. Entstanden im Linux-Container (CLI-SVG b
 - PDF: [wettbewerb-praesentationsplan-a2-1-200.pdf](review-pdf/wettbewerb-praesentationsplan-a2-1-200.pdf)
 
 
+## [285] Wettbewerb zweiter Durchlauf (Plakat, Wohnungsspiegel, Axo)
+
+**r1-plakat-a1-anonym.png**
+
+![r1-plakat-a1-anonym.png](review-285/r1-plakat-a1-anonym.png)
+
+**r2-wohnungsspiegel.png**
+
+![r2-wohnungsspiegel.png](review-285/r2-wohnungsspiegel.png)
+
+**r3-axo-entourage.png**
+
+![r3-axo-entourage.png](review-285/r3-axo-entourage.png)
+
 ## [253] 3D-Entourage (Personen, Velo, Auto, Bank)
 
 **entourage.png**
