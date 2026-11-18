@@ -251,10 +251,8 @@ describe("[66] Präsentationsplan", () => {
         expect(colEdges.some((x) => Math.abs(x - a.xMm) < 1e-6)).toBe(true);
         for (const b of plan.items) if (a.line === b.line) expect(b.yMm).toBeCloseTo(a.yMm, 6);
       }
-      // Bild neben der Situation, Tabellen nach den Ansichten.
-      expect(plan.image!.yMm).toBeCloseTo(sit[0].yMm, 6);
-      const lastViewTop = Math.max(...views.filter((v) => (v.page ?? 0) === Math.max(...views.map((w) => w.page ?? 0))).map((v) => v.yMm));
-      for (const t of plan.tables!) expect(t.page > (views[0].page ?? 0) || t.yMm >= lastViewTop - 1e-6).toBe(true);
+      // [285] Tabellen und Bild stehen dort, wo Platz ist (neben der Situation oder rechts neben den Zeilen), nie über den Rahmen.
+      for (const t of [...plan.tables!, plan.image!]) for (const a of plan.items) if ((a.page ?? 0) === t.page) expect(overlaps({ ...a, heightMm: a.heightMm + band }, t)).toBe(false);
       // Grundrisse deckungsgleich: gleiche Rahmengrösse und gleiche Bildmitte.
       for (const f of floors) {
         expect([f.widthMm, f.heightMm, f.center!.x, f.center!.y]).toEqual([floors[0].widthMm, floors[0].heightMm, floors[0].center!.x, floors[0].center!.y]);
@@ -314,7 +312,16 @@ describe("[66] Präsentationsplan", () => {
     expect(plan.items.filter((i) => i.kind === "situation")).toHaveLength(1);
     expect(plan.tables!.map((t) => t.id)).toEqual(["areas", "siteProof"]);
     expect(plan.image).toBeTruthy();
-    for (const i of plan.items) expect(i.scale).toBe(i.kind === "situation" ? 500 : 200);
+    // [285] Der gewählte Massstab ist die Obergrenze: so fein wie möglich (nicht unter 1:100), alles auf einem Blatt.
+    for (const i of plan.items) {
+      if (i.kind === "situation") {
+        expect(i.scale).toBe(500);
+      } else {
+        expect(i.scale).toBeGreaterThanOrEqual(100);
+        expect(i.scale).toBeLessThanOrEqual(200);
+      }
+    }
+    expect(new Set(plan.items.filter((i) => i.kind !== "situation").map((i) => i.scale)).size).toBe(1);
     // Situation steht am Anfang (oben links).
     const sit = plan.items.find((i) => i.kind === "situation")!;
     // [266] Freier Platz wird als Weissraum verteilt: die Situation steht an der ersten Zeile, nicht zwingend direkt unter der Kopfzeile.
@@ -353,6 +360,22 @@ describe("[66] Präsentationsplan", () => {
     expect(texts).toContain("Situation");
     expect(q.masterLayouts!.find((x) => x.id === lay.masterId)!.posterHeader).toBe(true);
     expect(q.viewSnapshots!.find((v) => v.id === lay.viewports[0].snapshotId)!.templateId).toBe("std-vt-situation-wbw");
+  }, 90_000);
+
+  // [285] Plakat gefüllt: Wettbewerb mit allen Ebenen auf einem Blatt, Satzspiegel zu mindestens 55 % belegt.
+  it("[285] Plakat des Wettbewerbs: ein Blatt, Satzspiegel zu über der Hälfte belegt, keine Überlappung", () => {
+    st().loadProject(buildWettbewerbSampleProject());
+    const p = st().project;
+    const o = { ...presentationDefaults(p), scale: 200, poster: "poster-a1-landscape", extras: posterExtrasDefault(p) };
+    const plan = planPresentationSheet(p, o);
+    expect(plan.pages ?? 1).toBe(1);
+    expect(plan.fits).toBe(true);
+    const m = posterMetrics(841, 594);
+    const band = plan.bandMm!;
+    const boxes = [...plan.items.map((i) => ({ ...i, heightMm: i.heightMm + band })), ...plan.tables!, plan.image!];
+    for (const [k, b] of boxes.entries()) for (const c of boxes.slice(k + 1)) expect(overlaps(b, c)).toBe(false);
+    const area = boxes.reduce((s, b) => s + b.widthMm * b.heightMm, 0);
+    expect(area / ((841 - 2 * m.marginMm) * (594 - m.marginMm - m.contentTopMm))).toBeGreaterThanOrEqual(0.55);
   }, 90_000);
 
   it("[208] zu viele Grundrisse für ein Blatt: zweites Plakat statt kleinerem Massstab", () => {

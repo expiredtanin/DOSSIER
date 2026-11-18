@@ -284,6 +284,9 @@ pub fn query(p: &Project, text: &str) -> Result<Value, String> {
     Ok(json!({"scale": choice.scale, "fits": choice.fits, "items": items, "skipped": skipped}))
 }
 
+/// [285] Feinster Massstab, den das Plakat selbst wählt (1:100), und die Stufen dazwischen (fein zuerst).
+const POSTER_FINEST: f64 = 100.0;
+const POSTER_FINE_SCALES: [f64; 6] = [100.0, 125.0, 150.0, 200.0, 250.0, 300.0];
 /// Gruppe der Situation (nach den Schnitten).
 const SITUATION_GROUP: u32 = 3;
 /// Mindesthöhe des 3D-Bild-Platzhalters relativ zur Satzspiegelhöhe.
@@ -495,25 +498,17 @@ fn poster_plan(p: &Project, req: &Request, po: &PosterReq, sheet: &Sheet, kept: 
         out.push(Group { cells: kept.iter().zip(frames).filter(|((_, grp), _)| *grp > 0).map(|(_, f)| cell(f)).collect(), image_beside: false });
         out
     };
+    // [285] Alles auf ein Blatt: der gewählte Massstab ist der gröbste erlaubte; so fein wie möglich (nicht unter 1:100), bei dem
+    // alles auf EIN Blatt passt, sonst bleibt es beim gewählten (dann weitere Blätter). Ohne Wahl: der grösste aus [`SCALES`].
+    let one_page = |s: f64| {
+        let r = layout(&g, &groups_at(&frames_at(s)), &tables, po.image, min_image);
+        r.pages == 1 && r.items.iter().chain(&r.tables).all(|i| !i.forced)
+    };
     let scale = match req.scale.filter(|v| valid(*v)) {
-        Some(s) => s,
-        None => SCALES
-            .iter()
-            .copied()
-            .find(|s| {
-                let r = layout(&g, &groups_at(&frames_at(*s)), &tables, false, min_image);
-                r.pages == 1 && r.items.iter().all(|i| !i.forced)
-            })
-            .unwrap_or(SCALES[SCALES.len() - 1]),
+        Some(chosen) => POSTER_FINE_SCALES.iter().copied().filter(|s| *s >= POSTER_FINEST && *s < chosen).find(|s| one_page(*s)).unwrap_or(chosen),
+        None => SCALES.iter().copied().find(|s| one_page(*s)).unwrap_or(SCALES[SCALES.len() - 1]),
     };
     let frames = frames_at(scale);
-    // [266] Das 3D-Bild ist höchstens so gross wie der grösste Grundriss (ohne Grundrisse: wie der grösste Schnitt/die grösste Ansicht).
-    let grp0 = kept.iter().zip(&frames).filter(|((_, grp), _)| *grp == 0).map(|(_, f)| f).collect::<Vec<_>>();
-    let basis: Vec<&Frame> = if grp0.is_empty() { frames.iter().collect() } else { grp0 };
-    let g = match basis.iter().fold(None, |m: Option<(f64, f64)>, f| Some((m.map_or(f.w, |m| m.0.max(f.w)), m.map_or(f.h, |m| m.1.max(f.h))))) {
-        Some((w, h)) => g.with_image_max(w + 2.0 * FRAME_PAD_MM, h + 2.0 * FRAME_PAD_MM),
-        None => g,
-    };
     let r = layout(&g, &groups_at(&frames), &tables, po.image, min_image);
     let mut items: Vec<Value> = Vec::new();
     let mut placed = r.items.iter();
@@ -690,6 +685,94 @@ mod tests {
         // Ansicht und Schnitt: Höhe −4 … 10 gemeinsam, Breite je eigen.
         assert_eq!((f[2].h, f[2].cy), (f[3].h, f[3].cy));
         assert!((f[2].h - 70.0).abs() < 1e-9 && (f[2].w - 120.0).abs() < 1e-9 && (f[3].w - 60.0).abs() < 1e-9);
+    }
+
+    /// [285] Belegungsgrad des Satzspiegels (Rahmen samt Titelband, Tabellen, Bild) auf Blatt 0 und Anzahl Blätter eines Plakats
+    /// A1 quer mit allen Ebenen eines Projekts, gewähltem Massstab 1:200, Situation, Tabellen und Bild.
+    fn poster_fill(json: &str, scale: f64, keep: [usize; 3]) -> (f64, usize, f64, Vec<Value>) {
+        let p: Project = serde_json::from_str(json).unwrap();
+        let ids = |k: &str| p.drawing_levels.iter().filter(|l| serde_json::to_value(l.kind).unwrap() == k).map(|l| l.id.clone()).collect::<Vec<_>>();
+        let (mut floors, mut elev, mut sect) = (ids("floor"), ids("elevation"), ids("section"));
+        floors.truncate(keep[0]);
+        elev.truncate(keep[1]);
+        sect.truncate(keep[2]);
+        let levels: Vec<String> = floors.iter().chain(&elev).chain(&sect).cloned().collect();
+        let groups: Vec<u32> = floors.iter().map(|_| 0).chain(elev.iter().map(|_| 1)).chain(sect.iter().map(|_| 2)).collect();
+        // Sichtbarkeit wie die Oberfläche (`presentationVisibility`, `situationVisibility`): alle Kategorien, nach Vorlage, die
+        // Umgebung (01, 05) aus, Marken an.
+        fn codes(v: &Value, in_site: bool, all: &mut Vec<(String, bool)>) {
+            for c in v.as_array().into_iter().flatten() {
+                let code = c["code"].as_str().unwrap_or("").to_string();
+                let site = in_site || code == "01" || code == "05";
+                all.push((code, site));
+                codes(&c["children"], site, all);
+            }
+        }
+        let mut all = Vec::new();
+        codes(&serde_json::to_value(&p.layers).unwrap(), false, &mut all);
+        let tpl = |id: &str| p.view_templates.iter().flatten().find(|t| t.id == id).cloned().unwrap();
+        let (pres, sit) = (tpl("std-vt-praesentation"), tpl("std-vt-situation-wbw"));
+        let base = |t: &ViewTemplate| -> serde_json::Map<String, Value> {
+            let mut m: serde_json::Map<String, Value> = all.iter().map(|(c, _)| (c.clone(), Value::Bool(true))).collect();
+            for (k, v) in t.layer_visibility.iter().flatten() {
+                m.insert(k.clone(), Value::Bool(*v));
+            }
+            m
+        };
+        let mut vis = base(&pres);
+        vis.insert("91".into(), Value::Bool(true));
+        for (c, site) in &all {
+            if *site {
+                vis.insert(c.clone(), Value::Bool(false));
+            }
+        }
+        let mut sit_vis = base(&sit);
+        sit_vis.insert("08".into(), Value::Bool(false));
+        sit_vis.insert("84".into(), Value::Bool(false));
+        let req = json!({
+            "layerVisibility": vis, "detail": "mittel", "template": pres, "shadows": pres.shadows,
+            "levels": levels, "groups": groups, "sheetW": 841.0, "sheetH": 594.0, "titleBlock": false, "scale": scale,
+            "marginMm": 20.0, "topMm": 58.0, "marks": true,
+            "poster": {"columns": 6, "gutterMm": 10.0, "bandMm": 8.0, "image": true,
+                "situation": {"levelId": floors[0], "scale": 500.0, "layerVisibility": sit_vis, "detail": sit.detail, "template": sit},
+                "tables": [{"id": "areas", "source": "areas", "fontPt": 7.0}, {"id": "siteProof", "source": "siteProof", "fontPt": 7.0}]}
+        });
+        let v = query(&p, &req.to_string()).unwrap();
+        let num = |x: &Value, k: &str| x[k].as_f64().unwrap();
+        let mut boxes: Vec<(u64, Rect)> = Vec::new();
+        let band = num(&v, "bandMm");
+        for it in v["items"].as_array().unwrap() {
+            boxes.push((it["page"].as_u64().unwrap(), Rect { x_mm: num(it, "xMm"), y_mm: num(it, "yMm"), width_mm: num(it, "widthMm"), height_mm: num(it, "heightMm") + band }));
+        }
+        for t in v["tables"].as_array().unwrap().iter().chain(std::iter::once(&v["image"])).filter(|t| !t.is_null()) {
+            boxes.push((t["page"].as_u64().unwrap(), Rect { x_mm: num(t, "xMm"), y_mm: num(t, "yMm"), width_mm: num(t, "widthMm"), height_mm: num(t, "heightMm") }));
+        }
+        let ov = |a: &Rect, b: &Rect| a.x_mm < b.x_mm + b.width_mm - 1e-6 && b.x_mm < a.x_mm + a.width_mm - 1e-6 && a.y_mm < b.y_mm + b.height_mm - 1e-6 && b.y_mm < a.y_mm + a.height_mm - 1e-6;
+        for (i, (pa, a)) in boxes.iter().enumerate() {
+            assert!(a.x_mm >= 20.0 - 1e-6 && a.x_mm + a.width_mm <= 821.0 + 1e-6 && a.y_mm >= 58.0 - 1e-6 && a.y_mm + a.height_mm <= 574.0 + 1e-6, "{a:?} ausserhalb des Satzspiegels");
+            for (pb, b) in &boxes[i + 1..] {
+                assert!(pa != pb || !ov(a, b), "Überlappung {a:?} / {b:?}");
+            }
+        }
+        let pages = boxes.iter().map(|b| b.0).collect::<std::collections::BTreeSet<_>>().len();
+        let area: f64 = boxes.iter().filter(|b| b.0 == 0).map(|b| b.1.width_mm * b.1.height_mm).sum();
+        (area / ((841.0 - 40.0) * (594.0 - 20.0 - 58.0)), pages, v["scale"].as_f64().unwrap(), v["items"].as_array().unwrap().clone())
+    }
+
+    /// [285] Plakat gefüllt: ein kleines Haus und der Wettbewerb liegen auf EINEM Blatt, der Satzspiegel ist zu mindestens 55 %
+    /// belegt; der Massstab wird nur feiner als gewählt (nicht unter 1:100), nie gröber.
+    #[test]
+    fn plakat_ist_gefuellt_auf_einem_blatt() {
+        let wb = include_str!("../tests/fixtures/robust/wettbewerb.json");
+        for (name, keep) in [("Wettbewerb", [9, 9, 9]), ("kleines Haus", [2, 1, 1])] {
+            let (fill, pages, scale, _) = poster_fill(wb, 200.0, keep);
+            if std::env::var("POSTER_DEBUG").is_ok() {
+                eprintln!("{name}: Belegung {fill:.2}, Blätter {pages}, Massstab {scale}");
+            }
+            assert_eq!(pages, 1, "{name}: Blätter");
+            assert!((100.0..=200.0).contains(&scale), "{name}: Massstab {scale}");
+            assert!(fill >= 0.55, "{name}: Belegung {fill:.2}");
+        }
     }
 
     #[test]

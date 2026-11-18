@@ -355,11 +355,12 @@ export function fittingPresentationScale(project: Project, o: PresentationOption
 
 /**
  * [208] Gegenstück zu {@link fittingPresentationScale}: Passt der Plan im gewählten Massstab und es passt auch ein
- * feinerer (nicht unter 1:100, auf einem Blatt wie bisher), bleibt das Blatt bei einem kleinen Haus leer. Gibt den
+ * feinerer (nicht unter 1:100, auf einem Blatt wie bisher), bleibt das Blatt bei einem kleinen Haus leer (nicht beim Plakat). Gibt den
  * feinsten solchen Massstab zurück, sonst `null`. Nur ein Vorschlag (Meldung), nichts wird geändert.
  */
 export function finerPresentationScale(project: Project, o: PresentationOptions): number | null {
-  if (!o.scale) return null;
+  // [285] Das Plakat wählt den feinsten Massstab (bis 1:100), bei dem alles auf ein Blatt passt, selbst: der gewählte ist die Obergrenze.
+  if (!o.scale || o.poster) return null;
   const now = planPresentationSheet(project, o);
   if (!now.fits) return null;
   for (const s of PRESENTATION_SCALES) {
