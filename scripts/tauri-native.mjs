@@ -36,7 +36,22 @@ if (args[0] === "build" && process.platform === "darwin" && !process.env.DOSSIER
 }
 // [215] Cycles mitliefern, sobald die Sidecars bereitstehen (scripts/cycles/tauri-prepare.mjs): Konfiguration als weitere `--config`
 // (Tauri führt mehrere zusammen). Ohne Cycles bleibt der Bau wie bisher (tauri-build verlangt sonst die Sidecar-Dateien).
-if (args[0] === "build" && existsSync(new URL("../src-tauri/binaries/cycles-aarch64-apple-darwin", import.meta.url)) && !args.some((a) => a.includes("tauri.cycles.conf.json")))
+// macOS-Bau ohne bereitliegendes Paket: erst holen (scripts/cycles/get.sh) und als Sidecar bereitstellen, damit kein Bau
+// still ohne Cycles entsteht; gelingt das nicht, laut warnen. Opt-out: DOSSIER_NO_CYCLES=1.
+const sidecar = new URL("../src-tauri/binaries/cycles-aarch64-apple-darwin", import.meta.url);
+if (args[0] === "build" && process.platform === "darwin" && !process.env.DOSSIER_NO_CYCLES && !existsSync(sidecar)) {
+  const script = (f) => fileURLToPath(new URL(`./cycles/${f}`, import.meta.url));
+  if (!existsSync(new URL("../build/cycles/cycles", import.meta.url))) {
+    console.log("[tauri-native] Cycles-Paket fehlt — hole es (scripts/cycles/get.sh macos arm64)");
+    spawnSync("bash", [script("get.sh"), "macos", "arm64"], { stdio: "inherit" });
+  }
+  if (existsSync(new URL("../build/cycles/cycles", import.meta.url))) spawnSync(process.execPath, [script("tauri-prepare.mjs")], { stdio: "inherit" });
+  if (!existsSync(sidecar)) {
+    console.warn("\n[tauri-native] ⚠ ACHTUNG: Dieses Paket wird OHNE eingebautes Cycles gebaut (kein Paket gefunden).");
+    console.warn("[tauri-native] ⚠ Zuerst `scripts/cycles/get.sh macos arm64` (braucht gh + Token oder ein Gitea-Release) und neu bauen.\n");
+  }
+}
+if (args[0] === "build" && existsSync(sidecar) && !args.some((a) => a.includes("tauri.cycles.conf.json")))
   args.push("--config", fileURLToPath(new URL("../src-tauri/tauri.cycles.conf.json", import.meta.url)));
 console.log(`[tauri-native] Build ${build}`);
 console.log(`[tauri-native] tauri ${args.join(" ")}`);
