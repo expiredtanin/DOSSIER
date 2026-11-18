@@ -356,3 +356,20 @@ fn entourage_in_schiefen_projektionen() {
         assert!(n1 > n0 + 10, "{kind}: {n0} -> {n1}");
     }
 }
+
+/// [285] Bäume (`Project.trees`) erscheinen im 3D-Dokument wie im 3D (Stamm + Krone); ihre Klasse schaltet sie ab, auch in
+/// den schiefen Projektionen.
+#[test]
+fn baeume_im_3d_dokument() {
+    let mut p = cubes(&[(0.0, 0.0, 0.0)]);
+    p.trees = Some(vec![serde_json::from_value(serde_json::json!({
+        "id": "T1", "type": "tree", "floorId": "l0", "categoryCode": "13", "position": {"x": 6.0, "y": -4.0},
+        "trunkDiameter": 0.4, "crownDiameter": 5.0, "crownBase": 2.0, "height": 8.0
+    }))
+    .unwrap()]);
+    for kind in ["iso", "military"] {
+        let n1 = lines(&prims_of(&p, serde_json::json!({"view": "southeast", "projection": kind}))).len();
+        let n0 = lines(&prims_of(&p, serde_json::json!({"view": "southeast", "projection": kind, "hasVis": true, "invisible": ["13"]}))).len();
+        assert!(n1 > n0 + 10, "{kind}: {n0} -> {n1}");
+    }
+}

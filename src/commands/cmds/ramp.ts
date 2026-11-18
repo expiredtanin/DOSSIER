@@ -44,9 +44,25 @@ function draft(s: RampState): ToolDraft {
 
 const idle = (): RampState => ({ phase: "start", points: [], cursor: null, lastPoint: null });
 
+/** Vorgabe-Geschosshöhe, wenn das Geschoss keine hat (wie der Kern, `cmd_create.rs`). */
+const DEF_FLOOR_HEIGHT = 2.6;
+
+/**
+ * [285] Hinweis nach dem Anlegen: steigt die Rampe über die Geschosshöhe bzw. fällt sie tiefer als eine Geschosshöhe unter den
+ * Boden, stimmt meist die Richtung nicht (Anfang = Geschossboden, positives Gefälle = steigt zum Ende).
+ */
+export function rampNotice(from: Vec2, to: Vec2, percent: number, floorHeight: number | undefined): CommandResult["notice"] {
+  const h = floorHeight && floorHeight > 0 ? floorHeight : DEF_FLOOR_HEIGHT;
+  const rise = (percent / 100) * dist(from, to);
+  if (rise > h + EPS) return { key: "cmd.ramp.tooHigh", params: { rise: rise.toFixed(2), height: h.toFixed(2) }, kind: "warning" };
+  if (rise < -h - EPS) return { key: "cmd.ramp.tooLow", params: { drop: (-rise).toFixed(2), height: h.toFixed(2) }, kind: "warning" };
+  return { key: "cmd.ramp.done", kind: "info" };
+}
+
 function commit(s: RampState, percent: number, ctx: CommandContext): [CommandState, CommandResult] {
   const req = { cmd: "ramp", pts: s.points.map(xy), from: xy(s.from!), to: xy(s.to!), percent };
-  return [idle(), { draft: null, done: true, commit: createMutation(ctx, req), notice: { key: "cmd.ramp.done", kind: "info" } }];
+  const notice = rampNotice(s.from!, s.to!, percent, ctx.level.floorHeight);
+  return [idle(), { draft: null, done: true, commit: createMutation(ctx, req), notice }];
 }
 
 const closeOutline = (s: RampState): [CommandState, CommandResult] => {

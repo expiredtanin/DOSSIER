@@ -3,7 +3,7 @@
  * Geschossboden; Enter beim Gefälle übernimmt 6 %.
  */
 import { describe, expect, it } from "vitest";
-import { rampCommand, RAMP_DEFAULT_PERCENT } from "./ramp";
+import { rampCommand, rampNotice, RAMP_DEFAULT_PERCENT } from "./ramp";
 import type { CommandContext, CommandState, Project, Vec2 } from "../types";
 
 function project(): Project {
@@ -78,5 +78,27 @@ describe("rampCommand", () => {
   it("Gefälle 0 legt nichts an", () => {
     const q = run([...outline, { x: 0, y: 1.5 }, { x: 5, y: 1.5 }], 0);
     expect(q.ceilings ?? []).toHaveLength(0);
+  });
+
+  it("[285] Hinweis, wenn die Rampe über die Geschosshöhe steigt oder tiefer als eine Geschosshöhe fällt", () => {
+    const a = { x: 0, y: 0 };
+    // 6 % auf 10 m = 0.6 m: in Ordnung.
+    expect(rampNotice(a, { x: 10, y: 0 }, 6, 2.6)?.key).toBe("cmd.ramp.done");
+    // 6 % auf 50 m = 3 m > 2.6 m: steigt über die Geschosshöhe.
+    const hi = rampNotice(a, { x: 50, y: 0 }, 6, 2.6);
+    expect(hi?.key).toBe("cmd.ramp.tooHigh");
+    expect(hi?.kind).toBe("warning");
+    // −6 % auf 50 m = −3 m: fällt unter den Boden.
+    expect(rampNotice(a, { x: 50, y: 0 }, -6, 2.6)?.key).toBe("cmd.ramp.tooLow");
+    // Ohne Geschosshöhe gilt die Vorgabe 2.6 m.
+    expect(rampNotice(a, { x: 50, y: 0 }, 6, undefined)?.key).toBe("cmd.ramp.tooHigh");
+  });
+  it("[285] Der Befehl meldet den Hinweis beim Commit", () => {
+    const p = project();
+    const ctx = ctxOf(p);
+    let state: CommandState = rampCommand.init();
+    for (const point of [...outline, { x: 0, y: 1.5 }, { x: 10, y: 1.5 }]) state = rampCommand.onInput(state, { kind: "point", point }, ctx)[0];
+    const [, res] = rampCommand.onInput(state, { kind: "number", value: 50 }, ctx);
+    expect(res.notice?.key).toBe("cmd.ramp.tooHigh");
   });
 });

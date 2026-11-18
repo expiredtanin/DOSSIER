@@ -331,10 +331,12 @@ pub fn placed(p: &Project) -> Vec<(usize, Vec<Mesh3>)> {
 
 /// Kopie des Projekts für Ansichten, die nur Netze aus `Project::context` kennen (3D-Dokument, `plan/axo.rs`): die Teilnetze der
 /// Entourage als `ImportedMesh` mit Klasse und Id der Zeichnung angehängt; `context = false` lässt die übrigen Netze des Kontexts
-/// weg (nur Entourage). `None`, wenn das Projekt keine Entourage hat.
+/// weg (nur Entourage). [285] Auch die Bäume (`Project.trees`, Stamm + Krone wie im 3D) kommen so hinein. `None`, wenn das
+/// Projekt weder Entourage noch Bäume hat.
 pub fn with_context_meshes(p: &Project, context: bool) -> Option<Project> {
     let placed = placed(p);
-    if placed.is_empty() {
+    let trees = crate::tree::geoms(p);
+    if placed.is_empty() && trees.is_empty() {
         return None;
     }
     let mut q = p.clone();
@@ -353,6 +355,22 @@ pub fn with_context_meshes(p: &Project, context: bool) -> Option<Project> {
                 color: Some(hex(m.color)),
                 positions: m.positions,
                 indices: m.indices.iter().map(|&k| k as f64).collect(),
+                ..Default::default()
+            }));
+        }
+    }
+    let list = p.trees.as_deref().unwrap_or(&[]);
+    for (i, g) in trees {
+        let t = &list[i];
+        let (trunk, crown) = crate::tree::colors(t);
+        for ((positions, indices), rgb) in [(g.trunk_mesh(8), trunk), (g.crown_mesh(8, 12), crown)] {
+            ctx.push(crate::model::ContextObject::ImportedMesh(crate::model::ImportedMesh {
+                id: t.id.clone(),
+                name: t.id.clone(),
+                category_code: t.category_code.clone(),
+                color: Some(hex(rgb)),
+                positions,
+                indices: indices.iter().map(|&k| k as f64).collect(),
                 ..Default::default()
             }));
         }
