@@ -22,7 +22,7 @@
 use crate::hatch::{self, v2, HatchKind, Motif, Pattern, V2, DASH_MM_TO_M};
 use crate::jsnum;
 use crate::plan::overrides::js_trim;
-use crate::plan::buf::{js_parse_hex, whole, Rec, F_COLOR, F_DASH_LIST, F_DASH_NULL, F_MOTIF, F_NSE, F_ZIGZAG};
+use crate::plan::buf::{js_parse_hex, whole, Rec, F_COLOR, F_DASH_LIST, F_DASH_NULL, F_MOTIF, F_NSE, F_OPACITY, F_ZIGZAG};
 use crate::plan::buf::{T_ARC, T_CIRCLE, T_DRAWING_ARC, T_DRAWING_TEXT, T_IMAGE, T_LINE, T_POLYGON, T_TEXT};
 use crate::plan::parts::{greyed_of, in_ranges, pick_id, Part};
 use std::collections::HashMap;
@@ -179,6 +179,16 @@ fn with_opacity(col: Rgba, cls: Option<&str>, greyed: bool) -> Rgba {
 fn with_fill_opacity(col: Rgba, greyed: bool) -> Rgba {
     if greyed {
         [1.0, 1.0, 1.0, col[3]]
+    } else {
+        col
+    }
+}
+
+/// [290] Deckkraft des Objekts (`opacity` der Fläche, z. B. Schatten 0.16) auf eine Farbe: wie `opacity` im Plan-/Druck-SVG.
+/// Vorher liess die Bildschirm-Szene sie weg — der Sonnenschatten (#3c3c3c) erschien unter render2d (WASM und Metal) deckend.
+fn with_obj_opacity(col: Rgba, o: f64) -> Rgba {
+    if o.is_finite() && (0.0..1.0).contains(&o) {
+        [col[0], col[1], col[2], col[3] * o]
     } else {
         col
     }
@@ -495,10 +505,11 @@ pub fn build_scene(parts: &mut [Part], greyed_ranges: &[(usize, usize)]) -> Opti
                     }
                     // [169] Ring mit Bögen fein (Fläche, Schraffur-Beschnitt, Umriss); Kantenläufe aus `pts`.
                     let fine = if pts.len() >= 4 { smooth(pts.clone(), true) } else { pts.clone() };
+                    let obj = if rec.flags & F_OPACITY != 0 { f[4] } else { 1.0 };
                     if let Some(fc) = color(part, f[0]) {
                         if pts.len() >= 3 {
                             let z = b.z();
-                            b.s.fills.push(SFill { pts: fine.clone(), color: with_fill_opacity(fc, greyed), z });
+                            b.s.fills.push(SFill { pts: fine.clone(), color: with_obj_opacity(with_fill_opacity(fc, greyed), obj), z });
                         }
                     }
                     if f[3] != -1.0 {
@@ -507,7 +518,7 @@ pub fn build_scene(parts: &mut [Part], greyed_ranges: &[(usize, usize)]) -> Opti
                         }
                         let (_, h, hc) = hatches.as_ref()?.get(whole(f[3])?)?.clone();
                         if h.kind != HatchKind::Image && h.kind != HatchKind::Gradient && h.pattern != Pattern::None && h.pattern != Pattern::Solid {
-                            let hatch_col = with_opacity(color(part, hc as f64).unwrap_or(INK), None, greyed);
+                            let hatch_col = with_obj_opacity(with_opacity(color(part, hc as f64).unwrap_or(INK), None, greyed), obj);
                             let hatch_mm = if h.line_weight > 0.0 { h.line_weight } else { 0.13 };
                             let runs = if pts.len() < 3 { Vec::new() } else { hatch::build_hatch_runs(&fine, &h) };
                             let runs = hatch::apply_dash_runs(runs, &hatch::hatch_dash(&h));
@@ -522,7 +533,7 @@ pub fn build_scene(parts: &mut [Part], greyed_ranges: &[(usize, usize)]) -> Opti
                     if let Some(raw) = color(part, f[1]) {
                         let w = f[2];
                         if w > 0.0 {
-                            let sc = with_opacity(raw, None, greyed);
+                            let sc = with_obj_opacity(with_opacity(raw, None, greyed), obj);
                             let nse = match (rec.flags & F_NSE != 0, rec.nse) {
                                 (true, Some((o, n))) => part.view.pool(o, n)?,
                                 _ => Vec::new(),
@@ -915,6 +926,30 @@ mod tests {
         l.lines.push(SLine { a: v2(2600000.123456, 1200000.654321), b: v2(0.0, 0.0), color: [0.0; 4], width_mm: 0.1, dash: SDash::Null, z: 0.0 });
         let b = encode_scene_bin(&l, &[]);
         assert_eq!(f64::from_le_bytes(b[48..56].try_into().unwrap()), 2600000.123456);
+    }
+
+    /// [290] Schatten genau mit der Soll-Deckkraft des Kerns (wie Druck-SVG), nicht deckend.
+    #[test]
+    fn flaechen_deckkraft_in_szene() {
+        use crate::plan::buf::Writer;
+        use crate::plan::extras::{flat_polygon, SUN_SHADOW_FILL, SUN_SHADOW_OPACITY};
+        use crate::model::Vec2;
+        use crate::plan::prim::Primitive;
+        let sq = vec![Vec2 { x: 0.0, y: 0.0 }, Vec2 { x: 2.0, y: 0.0 }, Vec2 { x: 2.0, y: 2.0 }, Vec2 { x: 0.0, y: 2.0 }];
+        let mut p = flat_polygon(sq, SUN_SHADOW_FILL, SUN_SHADOW_OPACITY);
+        let mut w = Writer::new(false);
+        w.push(&p);
+        if let Primitive::Polygon { opacity, .. } = &mut p {
+            *opacity = None;
+        }
+        w.push(&p);
+        let bytes = w.finish();
+        let view = crate::plan::buf::View::parse(&bytes).unwrap();
+        let len = view.len();
+        let sc = build_scene(&mut [Part::new(view, 0, len).unwrap()], &[]).unwrap();
+        assert_eq!(sc.fills.len(), 2);
+        assert!((sc.fills[0].color[3] - SUN_SHADOW_OPACITY).abs() < 1e-12, "{:?}", sc.fills[0].color);
+        assert_eq!(sc.fills[1].color[3], 1.0);
     }
 
     #[test]

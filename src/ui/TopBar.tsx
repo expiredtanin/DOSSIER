@@ -10,6 +10,7 @@
 
 import { platformName } from "../state/platform";
 import { setAboutDialogOpener } from "../state/aboutDialogHook";
+import { describeAdapter, gpuAdapterSummary } from "../engine/gpuAdapterInfo";
 import { TEXT_FONTS } from "../text/fontList";
 import { t } from "../i18n";
 import { useModalFocus } from "./modalFocus";
@@ -922,6 +923,11 @@ function AboutDialog({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     void getRunningVersion().then(setRunningVersion);
   }, []);
+  // [290] Tatsächlicher WebGPU-Adapter: zeigt, ob 3D auf der Grafikkarte oder in Software (CPU) läuft.
+  const [gpu, setGpu] = useState<string | null>(null);
+  useEffect(() => {
+    void gpuAdapterSummary().then((a) => setGpu(!a ? t("about.gpuNone") : `${describeAdapter(a) || "?"}${a.software ? ` — ${t("about.gpuSoftware")}` : ""}`));
+  }, []);
   const dialogRef = useModalFocus({});
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -953,6 +959,11 @@ function AboutDialog({ onClose }: { onClose: () => void }) {
         <div className="about-version">
           {t("about.version")} {formatBuildInfo({ ...BUILD_INFO, version: runningVersion ?? APP_VERSION }, t("about.build"))}
         </div>
+        {gpu && (
+          <div className="about-version" data-testid="about-gpu">
+            {t("about.gpu")} {gpu}
+          </div>
+        )}
         <p className="about-desc">{t("about.desc")}</p>
         <div className="about-meta">
           <div>{t("about.copyright")}</div>

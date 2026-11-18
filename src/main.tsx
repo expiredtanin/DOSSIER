@@ -14,6 +14,7 @@ import { RenderWindowApp } from "./native/RenderWindowApp";
 import { ErrorBoundary } from "./ui/ErrorBoundary";
 import { LanguageRoot } from "./i18n/LanguageRoot";
 import { initCore } from "./core";
+import { logGpuAdapter } from "./engine/gpuAdapterInfo";
 import { applyLanguagePref, getLanguage, getStoredLanguagePref, setLanguage } from "./i18n";
 import type { Language } from "./i18n";
 import { applyThemeMode, getStoredThemeMode } from "./theme/themeMode";
@@ -106,6 +107,7 @@ const root = createRoot(document.getElementById("root")!);
 const testHooks = new URLSearchParams(window.location.search).has("dossierTest")
   ? import("./state/testHooks").then((m) => m.installTestHooks())
   : Promise.resolve();
+if (!windowKind) logGpuAdapter(); // [290] tatsächlicher WebGPU-Adapter (Hardware oder Software/CPU) in die Konsole
 initCore()
   .then(() => testHooks)
   .then(() =>

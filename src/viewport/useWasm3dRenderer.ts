@@ -31,6 +31,7 @@ import { decodeImageToRgba } from "../io/swissImage";
 import { planPointCloudSync } from "./pointCloudSync";
 import { PT_EXPORT_MAX_PIXELS, clampImageSize, exportSamples, isBlankImage, matteFromBlackWhite, renderPathtraceChunks, type ExportProgress } from "./imageExport";
 import type { PointCloudSyncItem, UploadedPointCloud } from "./pointCloudSync";
+import { FrameScheduler, countFrame } from "./renderOnDemand";
 
 /** Fertige Kamera für einen Frame (world-Meter, Y-up — wie render3d::types::Camera). */
 export interface Camera3d {
@@ -707,6 +708,7 @@ export function useWasm3dRenderer(
       const canvas = canvasRef.current;
       if (!canvas || !rendererRef.current || canvas.width < 1 || canvas.height < 1) return null;
       draw();
+      schedulerRef.current?.flush(); // [290] angemeldeten Frame jetzt zeichnen, gleich danach wird ausgelesen
       const k = Math.min(1, Math.max(16, maxEdge) / Math.max(canvas.width, canvas.height));
       const w = Math.max(1, Math.round(canvas.width * k));
       const h = Math.max(1, Math.round(canvas.height * k));
@@ -829,22 +831,47 @@ export function useWasm3dRenderer(
    * ein `set_camera` hier würde das freie Orbit-Ergebnis darüberschreiben und
    * die orthografische Projektion der Presets zunichtemachen).
    */
+  // [290] Gezeichnet wird höchstens einmal je Bildschirm-Frame (s. `renderOnDemand.ts`); die Kamera geht sofort an
+  // Rust (Reihenfolge mit `applyViewPreset`/`render(null)` bleibt, `readRustCamera` sieht sie gleich).
+  const drawNow = useCallback(() => {
+    const r = rendererRef.current;
+    const canvas = canvasRef.current;
+    if (!r || !canvas || exportingRef.current) return;
+    const rect = canvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    const w = Math.max(1, Math.round(rect.width * dpr));
+    const h = Math.max(1, Math.round(rect.height * dpr));
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width = w;
+      canvas.height = h;
+    }
+    try {
+      r.resize(w, h);
+      r.render();
+      countFrame("3d");
+    } catch (e) {
+      console.warn("render3d render fehlgeschlagen:", e);
+    }
+  }, [canvasRef]);
+  const schedulerRef = useRef<FrameScheduler | null>(null);
+  if (!schedulerRef.current) schedulerRef.current = new FrameScheduler(() => drawNowRef.current());
+  const drawNowRef = useRef(drawNow);
+  drawNowRef.current = drawNow;
+  useEffect(() => () => schedulerRef.current?.cancel(), []);
+
+  /**
+   * Einen Frame anmelden (Canvas-Größe + DPR abgleichen beim Zeichnen). `cam` = null lässt
+   * die zuletzt in Rust gesetzte Kamera unverändert — Fall für `render(null)`
+   * direkt nach `applyViewPreset` (die Kamera kommt dann aus `preset_camera`,
+   * ein `set_camera` hier würde das freie Orbit-Ergebnis darüberschreiben und
+   * die orthografische Projektion der Presets zunichtemachen).
+   */
   const render = useCallback(
     (cam: Camera3d | null) => {
       const r = rendererRef.current;
-      const canvas = canvasRef.current;
-      if (!r || !canvas || exportingRef.current) return;
-      const rect = canvas.getBoundingClientRect();
-      const dpr = window.devicePixelRatio || 1;
-      const w = Math.max(1, Math.round(rect.width * dpr));
-      const h = Math.max(1, Math.round(rect.height * dpr));
-      if (canvas.width !== w || canvas.height !== h) {
-        canvas.width = w;
-        canvas.height = h;
-      }
-      try {
-        r.resize(w, h);
-        if (cam) {
+      if (!r || !canvasRef.current || exportingRef.current) return;
+      if (cam) {
+        try {
           r.set_camera(
             cam.eye[0],
             cam.eye[1],
@@ -859,11 +886,11 @@ export function useWasm3dRenderer(
             cam.fovY,
             cam.orthoHalfHeight,
           );
+        } catch (e) {
+          console.warn("render3d set_camera fehlgeschlagen:", e);
         }
-        r.render();
-      } catch (e) {
-        console.warn("render3d render fehlgeschlagen:", e);
       }
+      schedulerRef.current?.request();
     },
     [canvasRef],
   );
