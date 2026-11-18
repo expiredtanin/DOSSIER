@@ -619,6 +619,11 @@ fn stair_footprint(st: &Stair) -> Vec<Vec2> {
     vec![Vec2 { x: min_x, y: min_y }, Vec2 { x: max_x, y: min_y }, Vec2 { x: max_x, y: max_y }, Vec2 { x: min_x, y: max_y }]
 }
 
+/// Name einer Dachfläche (Teil eines IfcRoof): Typname oder „Dachfläche“.
+fn name_of_part(type_name: Option<&str>) -> &str {
+    type_name.filter(|n| !n.is_empty()).unwrap_or("Dachfläche")
+}
+
 fn roof_predefined(s: RoofShape) -> &'static str {
     match s {
         RoofShape::Flach => "FLAT_ROOF",
@@ -1789,25 +1794,9 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
         classified.push((format!("roof/{}", roof.id), Kind::Roof, roof.category_code.clone()));
         // Alle Dächer im Projekt lassen (Verschneidung [G5] braucht die Nachbarn), nur dieses ausgeben.
         p.roofs = roofs.clone();
-        let meshes = model3d::emit_roofs(&p, Some(&roof.id))?;
-        let (mut positions, mut indices) = (Vec::<f64>::new(), Vec::<u32>::new());
-        for m in &meshes {
-            let at = (positions.len() / 3) as u32;
-            for c in m.positions.chunks_exact(3) {
-                positions.extend_from_slice(&[c[0], c[1], c[2] - base]);
-            }
-            indices.extend(m.indices.iter().map(|i| at + i));
-        }
-        if indices.is_empty() {
+        let parts = model3d::emit_roof_parts(&p, &roof.id)?;
+        if parts.is_empty() {
             continue;
-        }
-        let mut closed = is_watertight(&positions, &indices, 1e-6);
-        if !closed {
-            let flipped: Vec<u32> = indices.chunks_exact(3).flat_map(|t| [t[0], t[2], t[1]]).collect();
-            if is_watertight(&positions, &flipped, 1e-6) {
-                indices = flipped;
-                closed = true;
-            }
         }
         let predefined = roof_predefined(roof.shape);
         let roof_type = roof.roof_type_id.as_deref().filter(|s| !s.is_empty()).and_then(|id| p.roof_types.as_deref().unwrap_or(&[]).iter().find(|t| t.id == id));
@@ -1817,7 +1806,8 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
             props.push(ident("Reference", &t.name));
         }
         props.push(Prop::Bool("IsExternal", true));
-        props.extend(crate::u_value::roof_u_value(&p, roof).and_then(|u| u.u).map(|u| Prop::Thermal("ThermalTransmittance", u)));
+        let u_value = crate::u_value::roof_u_value(&p, roof).and_then(|u| u.u);
+        props.extend(u_value.map(|u| Prop::Thermal("ThermalTransmittance", u)));
         let mut psets = vec![Pset { name: "Pset_RoofCommon", props }];
         renovation_props(&p, &mut psets, "Pset_RoofCommon", roof.renovation.as_ref());
         layer_renovation_props(&p, &mut psets, &roof.id);
@@ -1829,7 +1819,63 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
         f.nums(&[REC_ROOF, structure, id, name, pre]);
         w_type(&mut f, ty.as_ref().map(|t| type_ref(t, 2.0, predefined)).as_ref());
         w_psets(&mut f, &psets);
-        w_mesh(&mut f, &positions, &indices, closed);
+        // [B5] IfcRoof als Aggregat, je Dachfläche ein IfcSlab ROOF (Pset_SlabCommon, Qto_SlabBaseQuantities).
+        let ri = p.roofs.as_deref().unwrap_or(&[]).iter().position(|r| r.id == roof.id);
+        let thickness = ty.as_ref().map_or(0.0, |t| t.2.iter().map(|l| l.2.max(0.0)).sum::<f64>());
+        let planes = crate::roof::roof_geometry(&roof.params(), p.roof_base_elevation(roof)).planes;
+        f.num(parts.len() as f64);
+        for (k, part) in parts.iter().enumerate() {
+            let (mut positions, mut indices) = (Vec::<f64>::new(), part.indices.clone());
+            for c in part.positions.chunks_exact(3) {
+                positions.extend_from_slice(&[c[0], c[1], c[2] - base]);
+            }
+            let mut closed = is_watertight(&positions, &indices, 1e-6);
+            if !closed {
+                let flipped: Vec<u32> = indices.chunks_exact(3).flat_map(|t| [t[0], t[2], t[1]]).collect();
+                if is_watertight(&positions, &flipped, 1e-6) {
+                    indices = flipped;
+                    closed = true;
+                }
+            }
+            let plane = part.plane.filter(|&i| i < planes.len());
+            let mut slab_props: Vec<Prop> = Vec::new();
+            if let Some(t) = roof_type {
+                slab_props.push(ident("Reference", &t.name));
+            }
+            slab_props.push(Prop::Bool("IsExternal", true));
+            slab_props.extend(u_value.map(|u| Prop::Thermal("ThermalTransmittance", u)));
+            let mut slab_psets = vec![Pset { name: "Pset_SlabCommon", props: slab_props }];
+            renovation_props(&p, &mut slab_psets, "Pset_SlabCommon", roof.renovation.as_ref());
+            // Mengen: Fläche der Dachfläche (geneigt, Aussenseite) abzüglich Dachfenster, Volumen aus dem Körper.
+            let volume = signed_volume6(&positions, &indices).abs() / 6.0;
+            let mut slab_q = match plane {
+                Some(i) => {
+                    let gross = qty::roof_quantities(std::slice::from_ref(&planes[i])).into_iter().find(|q| q.name == "GrossArea").map_or(0.0, |q| q.value);
+                    let pts = &planes[i];
+                    let perimeter: f64 = (0..pts.len()).map(|j| { let (a, b) = (pts[j], pts[(j + 1) % pts.len()]); ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt() }).sum();
+                    let cut: f64 = ri.map_or(0.0, |ri| crate::opening_shape::roof_openings(&p, ri).iter().filter(|(_, fr)| fr.plane == Some(i)).map(|(o, _)| max(0.0, o.width) * max(0.0, o.height)).sum());
+                    vec![
+                        qty::Qty { name: "Width", kind: qty::QtyKind::Length, value: thickness },
+                        qty::Qty { name: "Perimeter", kind: qty::QtyKind::Length, value: perimeter },
+                        qty::Qty { name: "GrossArea", kind: qty::QtyKind::Area, value: gross },
+                        qty::Qty { name: "NetArea", kind: qty::QtyKind::Area, value: max(0.0, gross - cut) },
+                    ]
+                }
+                None => Vec::new(),
+            };
+            slab_q.push(qty::Qty { name: "GrossVolume", kind: qty::QtyKind::Volume, value: volume });
+            slab_q.push(qty::Qty { name: "NetVolume", kind: qty::QtyKind::Volume, value: volume });
+            slab_psets.extend(qto("Qto_SlabBaseQuantities", slab_q));
+            let part_name = match (plane, parts.len()) {
+                (Some(_), _) => format!("{} {}", name_of_part(roof_type.map(|t| t.name.as_str())), k + 1),
+                (None, 1) => name_of_part(roof_type.map(|t| t.name.as_str())).to_string(),
+                (None, _) => "Attika".to_string(),
+            };
+            let (pname, plane_n) = (f.str(&part_name), plane.map_or(-1.0, |i| i as f64));
+            f.nums(&[pname, plane_n]);
+            w_psets(&mut f, &slab_psets);
+            w_mesh(&mut f, &positions, &indices, closed);
+        }
     }
     p.roofs = roofs;
 
@@ -1838,7 +1884,8 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
         let Some(fr) = crate::opening_shape::host_frame(&p, o) else { continue };
         let (host_key, floor_id) = if fr.plane.is_some() || fr.dormer {
             let r = &p.roofs.as_deref().unwrap_or(&[])[fr.host];
-            (format!("roof/{}", r.id), r.floor_id.clone())
+            // [B5] Wirt = die Dachfläche (IfcSlab ROOF im IfcRoof-Aggregat), s. Datensatz ROOF.
+            (fr.plane.map_or_else(|| format!("roof/{}", r.id), |i| format!("roof/{}/p{i}", r.id)), r.floor_id.clone())
         } else {
             let c = &p.ceilings.as_deref().unwrap_or(&[])[fr.host];
             (format!("slab/{}", c.id), c.floor_id.clone())
@@ -2310,8 +2357,21 @@ mod tests {
         p.openings.as_mut().unwrap().push(Opening { id: "DF".into(), kind: ElementKind::Window, width: 0.78, height: 1.18, host_roof_id: Some("RF1".into()), host_point: Some(Vec2 { x: 2.5, y: 1.0 }), ..Default::default() });
         let f = ifc_export_data(&p, &IfcOptions::default()).unwrap();
         let s = strings(&f);
-        assert!(s.iter().any(|x| x == "wall/W1") && s.iter().any(|x| x == "roof/RF1"));
+        assert!(s.iter().any(|x| x == "wall/W1") && s.iter().any(|x| x.starts_with("roof/RF1")));
         assert_eq!(f.nums.iter().filter(|v| **v == REC_OPENING_SOLID).count() >= 2, true);
+    }
+
+    /// [B5] Dach als Aggregat: je Dachfläche ein Teil mit Pset_SlabCommon und Qto_SlabBaseQuantities; Dachfenster am Teil.
+    #[test]
+    fn dach_in_dachflaechen() {
+        let mut p = sample();
+        p.openings.as_mut().unwrap().push(Opening { id: "DF".into(), kind: ElementKind::Window, width: 0.78, height: 1.18, host_roof_id: Some("RF1".into()), host_point: Some(Vec2 { x: 2.5, y: 1.0 }), ..Default::default() });
+        let n_planes = crate::roof::roof_geometry(&p.roofs.as_ref().unwrap()[0].params(), p.roof_base_elevation(&p.roofs.as_ref().unwrap()[0])).planes.len();
+        let parts = model3d::emit_roof_parts(&p, "RF1").unwrap();
+        assert!(parts.len() >= 2 && parts.iter().filter(|x| x.plane.is_some()).count() <= n_planes, "{}", parts.len());
+        let s = strings(&ifc_export_data(&p, &IfcOptions::default()).unwrap());
+        assert_eq!(s.iter().filter(|x| *x == "Qto_SlabBaseQuantities").count() >= 2, true);
+        assert!(s.iter().any(|x| x == "Pset_SlabCommon") && s.iter().any(|x| x.starts_with("roof/RF1/p")));
     }
 
     /// [148] Flachdach auf L-Umriss: IFC-Mengen aus dem echten Umriss (60 m², nicht 66 m² Bounding-Box),

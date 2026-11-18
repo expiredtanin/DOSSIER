@@ -123,9 +123,10 @@ describe("Rundreise Export → Import", () => {
     const ifc = exportIfcSpf(sampleProject, { ebkph: true });
     const bytes = new TextEncoder().encode(ifc);
     const { products } = await inspectIfc(bytes);
-    expect(products.find((p) => p.ifcClass === "IfcRoof")?.classifications?.[0]).toMatchObject({ system: "eBKP-H", code: "F" });
+    // [B5] Das Dach ist ein IfcRoof-Aggregat ohne Körper: die Dachflächen (IfcSlab ROOF) erben die Klassifikation.
+    expect(products.find((p) => p.ifcClass === "IfcSlab" && p.classifications?.[0]?.code === "F")?.classifications?.[0]).toMatchObject({ system: "eBKP-H", code: "F" });
     const r = await importIfcInto(sampleProject, bytes, { group: "product" });
-    const roof = r.meshes.find((m) => m.source === "IFC IfcRoof")!;
+    const roof = r.meshes.find((m) => / \[eBKP-H F\]$/.test(m.name))!;
     expect(roof.name).toMatch(/ \[eBKP-H F\]$/);
     // Ohne Klassifikation kein Zusatz.
     expect(r.meshes.find((m) => m.source === "IFC IfcStairFlight")?.name).not.toMatch(/\[/);

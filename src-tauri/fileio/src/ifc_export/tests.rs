@@ -284,6 +284,11 @@ fn full_house_in(mut b: B, with_geo: bool) -> B {
     b.str("Beton");
     b.n(&[0.3]);
     b.ref_pset("Pset_RoofCommon", "Satteldach");
+    // [B5] Teile: eine Dachfläche (Index 0) mit Pset_SlabCommon.
+    b.n(&[1.0]);
+    b.str("Satteldach 1");
+    b.n(&[0.0]);
+    b.ref_pset("Pset_SlabCommon", "Satteldach");
     b.mesh_tetra();
     // Stütze mit Material.
     b.n(&[REC_COLUMN, 0.0]);
@@ -354,7 +359,7 @@ fn volles_haus_ist_wohlgeformt() {
     assert!(ifc.is_ascii(), "Datei muss reines ASCII sein");
     check_structure(&ifc);
     assert_eq!(count(&ifc, "IFCWALL"), 2);
-    assert_eq!(count(&ifc, "IFCSLAB"), 1);
+    assert_eq!(count(&ifc, "IFCSLAB"), 2); // Decke + Dachfläche des Dachs
     assert_eq!(count(&ifc, "IFCROOF"), 1);
     assert_eq!(count(&ifc, "IFCCOLUMN"), 1);
     assert_eq!(count(&ifc, "IFCSTAIR"), 1);
@@ -376,11 +381,17 @@ fn volles_haus_ist_wohlgeformt() {
     assert_eq!(count(&ifc, "IFCMATERIALLAYERSET"), 2); // Wandtyp + Dachtyp
     assert_eq!(count(&ifc, "IFCMATERIAL"), 2); // Beton (geteilt mit Dachtyp und Stütze) + Dämmung
     assert_eq!(count(&ifc, "IFCRELDEFINESBYTYPE"), 2);
-    assert_eq!(count(&ifc, "IFCPROPERTYSET"), 5); // Wall, Space, Roof, Column + CH_Raum (Tür ohne Pset)
+    assert_eq!(count(&ifc, "IFCPROPERTYSET"), 6); // Wall, Space, Roof, SlabCommon der Dachfläche, Column + CH_Raum (Tür ohne Pset)
     // Eingliederung: Geschoss (Wände, Decke, Treppe, Tür, Dach, Stütze) und Gebäude (Extrusion).
     assert_eq!(count(&ifc, "IFCRELCONTAINEDINSPATIALSTRUCTURE"), 2);
-    // Project→Site, Site→Building, Building→Storeys, Geschoss→Räume.
-    assert_eq!(count(&ifc, "IFCRELAGGREGATES"), 4);
+    // Project→Site, Site→Building, Building→Storeys, Geschoss→Räume, Dach→Dachfläche.
+    assert_eq!(count(&ifc, "IFCRELAGGREGATES"), 5);
+    // [B5] Dach als Aggregat: IfcRoof ohne Darstellung, darunter IfcSlab ROOF mit den Schichten des Dachtyps.
+    let roof = first_line(&ifc, "IFCROOF");
+    assert!(roof.ends_with(",$,$,.GABLE_ROOF.);"), "{roof}");
+    assert!(first_line(&ifc, "IFCRELAGGREGATES").len() > 0);
+    assert!(ifc.lines().any(|l| l.contains("=IFCSLAB(") && l.ends_with(".ROOF.);")), "IfcSlab ROOF");
+    assert!(ifc.lines().any(|l| l.contains("=IFCMATERIALLAYERSETUSAGE(") && l.ends_with(".AXIS3.,.NEGATIVE.,0.,$);")));
 }
 
 /// Zeile der ersten Entität eines Typs.
@@ -581,7 +592,7 @@ fn wand_mit_achse_und_layer_set_usage() {
     let ifc = build(&full_house(false)).unwrap();
     check_structure(&ifc);
     // Nur W1 hat Wandsystem: eine Usage, eine Axis-Darstellung, ein Axis-Kontext.
-    assert_eq!(count(&ifc, "IFCMATERIALLAYERSETUSAGE"), 1);
+    assert_eq!(count(&ifc, "IFCMATERIALLAYERSETUSAGE"), 2); // Wand W1 + Dachflächen
     assert_eq!(count(&ifc, "IFCGEOMETRICREPRESENTATIONSUBCONTEXT"), 1);
     let usage = first_line(&ifc, "IFCMATERIALLAYERSETUSAGE");
     assert!(usage.contains(".AXIS2.,.POSITIVE.,-0.2,$"), "{usage}");
@@ -954,8 +965,9 @@ fn ifc2x3_kopf_und_entitaeten() {
     // W1 hat Achse + Usage (StandardCase), W2 nicht (IfcWall).
     assert_eq!(count(&ifc, "IFCWALLSTANDARDCASE"), 1);
     assert_eq!(count(&ifc, "IFCWALL"), 1);
-    assert_eq!(count(&ifc, "IFCMATERIALLAYERSETUSAGE"), 1);
+    assert_eq!(count(&ifc, "IFCMATERIALLAYERSETUSAGE"), 2); // Wand + Dachflächen (IFC2x3: keine ReferenceExtent)
     assert!(first_line(&ifc, "IFCMATERIALLAYERSETUSAGE").ends_with(".AXIS2.,.POSITIVE.,-0.2);"));
+    assert!(ifc.lines().any(|l| l.contains("=IFCMATERIALLAYERSETUSAGE(") && l.ends_with(".AXIS3.,.NEGATIVE.,0.);")));
     // Wand ohne PredefinedType (8 Attribute), Stütze ebenso.
     assert!(first_line(&ifc, "IFCWALL").ends_with(",$);") && first_line(&ifc, "IFCWALL").matches(',').count() == 7, "{}", first_line(&ifc, "IFCWALL"));
     assert!(first_line(&ifc, "IFCCOLUMN").ends_with(",$);"), "{}", first_line(&ifc, "IFCCOLUMN"));
@@ -979,7 +991,7 @@ fn ifc2x3_kopf_und_entitaeten() {
     assert_eq!(count(&ifc, "IFCFACE"), 4);
     assert_eq!(count(&ifc, "IFCPOLYLOOP"), 4);
     assert!(ifc.contains("'Body','Brep'"));
-    assert_eq!(count(&ifc, "IFCRELASSOCIATESMATERIAL"), 4); // Wandtyp, Usage, Dachschichten, Stütze
+    assert_eq!(count(&ifc, "IFCRELASSOCIATESMATERIAL"), 5); // Wandtyp, Usage, Dachschichten (am Dach), Usage der Dachflächen, Stütze
     // Stile der Teilrollen über IfcPresentationStyleAssignment.
     assert_eq!(count(&ifc, "IFCPRESENTATIONSTYLEASSIGNMENT"), 3);
     // Mengen ohne Formula.
@@ -1037,6 +1049,10 @@ fn dachfenster_oeffnungskoerper() {
         b.str("GABLE_ROOF");
         b.no_type();
         b.no_psets();
+        b.n(&[1.0]);
+        b.str("Dachfläche 1");
+        b.n(&[0.0]);
+        b.no_psets();
         b.n(&[4.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 0.0]);
         b.n(&[2.0, 0.0, 1.0, 2.0, 0.0, 2.0, 3.0]);
         b.f.push(0.0);
@@ -1081,6 +1097,10 @@ fn ifc2x3_offenes_netz_ist_shell_based_surface_model() {
     b.str("FLAT_ROOF");
     b.no_type();
     b.no_psets();
+    b.n(&[1.0]);
+    b.str("Dachfläche 1");
+    b.n(&[0.0]);
+    b.no_psets();
     // Zwei Dreiecke (offen) plus ein entartetes (doppelte Ecke).
     b.n(&[4.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 0.0]);
     b.n(&[3.0, 0.0, 1.0, 2.0, 0.0, 2.0, 3.0, 0.0, 0.0, 1.0]);
@@ -1090,7 +1110,7 @@ fn ifc2x3_offenes_netz_ist_shell_based_surface_model() {
     assert_eq!(count(&ifc, "IFCSHELLBASEDSURFACEMODEL"), 1);
     assert_eq!(count(&ifc, "IFCOPENSHELL"), 1);
     assert_eq!(count(&ifc, "IFCFACE"), 2);
-    assert_eq!(count(&ifc, "IFCCARTESIANPOINT"), 6); // Ursprung, 4 Ecken (je einmal), Placement
+    assert_eq!(count(&ifc, "IFCCARTESIANPOINT"), 7); // Ursprung, 4 Ecken (je einmal), 2 Placements (Dach, Dachfläche)
     assert!(ifc.contains("'Body','SurfaceModel'"));
     assert_eq!(count(&ifc, "IFCFACETEDBREP"), 0);
 }

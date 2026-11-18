@@ -603,6 +603,61 @@ pub fn emit_roofs(p: &Project, only_roof: Option<&str>) -> Result<Vec<RMesh>, St
     Ok(out)
 }
 
+/// Ein Körper des IFC-Exports eines Dachs ([B5]): eine Dachfläche mit allen Schichten (Index in `roof_geometry().planes`)
+/// oder ein Sonderteil ohne Fläche (Attika; verschnittenes Dach mit Gauben/Nachbarn als Ganzes).
+pub struct RoofPart {
+    pub plane: Option<usize>,
+    pub positions: Vec<f64>,
+    pub indices: Vec<u32>,
+}
+
+/// Dach in Teilen für den IFC-Export: je Dachfläche ein Körper (alle Schichten, Dachfenster-Löcher wie im 3D), dazu die
+/// Attika. Verschnittene Dächer und Gauben ([G5]) liefern ihre Körper nicht je Fläche: ein Teil ohne Fläche.
+pub fn emit_roof_parts(p: &Project, roof_id: &str) -> Result<Vec<RoofPart>, String> {
+    let nb = crate::roof_assembly::neighbors_rc(p);
+    let Some((ri, roof)) = p.roofs.as_deref().unwrap_or(&[]).iter().enumerate().find(|(_, r)| r.id == roof_id) else { return Ok(Vec::new()) };
+    if crate::roof_assembly::roof_solids_with(p, ri, &nb).is_some() {
+        let (mut positions, mut indices) = (Vec::<f64>::new(), Vec::<u32>::new());
+        for m in emit_roofs(p, Some(roof_id))? {
+            let at = (positions.len() / 3) as u32;
+            positions.extend_from_slice(&m.positions);
+            indices.extend(m.indices.iter().map(|i| at + i));
+        }
+        return Ok(if indices.is_empty() { Vec::new() } else { vec![RoofPart { plane: None, positions, indices }] });
+    }
+    let g = crate::roof::roof_geometry(&roof.params(), p.roof_base_elevation(roof));
+    let mitre = Mitre::new(&g.planes);
+    let holes = roof_holes_by_plane(p, ri, &g.planes);
+    let layers: Vec<f64> = p.roof_layers(roof).iter().map(|l| l.thickness.max(0.0)).filter(|t| *t > EPS).collect();
+    let mut out = Vec::new();
+    for (i, plane) in g.planes.iter().enumerate() {
+        if plane.len() < 3 {
+            continue;
+        }
+        // Jede Fläche ein eigener, geschlossener Körper: auch entlang der Gratkanten Seitenflächen (Gehrungsebene).
+        let (mut positions, mut indices) = (Vec::new(), Vec::new());
+        let mut offset_above = 0.0;
+        for &t in &layers {
+            let top = mitre.at(i, offset_above);
+            let bottom = mitre.at(i, offset_above + t);
+            if holes[i].is_empty() {
+                push_roof_slab_between(&mut positions, &mut indices, &top, &bottom, &vec![false; top.len()]);
+            } else {
+                push_roof_slab_with_holes(&mut positions, &mut indices, &top, &bottom, &vec![false; top.len()], &holes[i], offset_above, offset_above + t);
+            }
+            offset_above += t;
+        }
+        if !indices.is_empty() {
+            out.push(RoofPart { plane: Some(i), positions, indices });
+        }
+    }
+    if let Some(pp) = crate::roof_parapet::parapet(roof, &g) {
+        let m = crate::roof_parapet::mesh(&pp);
+        out.push(RoofPart { plane: None, positions: m.positions, indices: m.indices });
+    }
+    Ok(out)
+}
+
 /// Dachschicht-Eingabe für den 3D-Live-Schnitt (`emitRoofCutLayers`).
 pub fn emit_roof_cut_layers(p: &Project) -> Result<Vec<RRoofLayer>, String> {
     let mut out = Vec::new();
