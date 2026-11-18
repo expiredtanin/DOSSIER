@@ -18,6 +18,10 @@ Prüfbilder je Aufgabe, neueste zuerst. Entstanden im Linux-Container (CLI-SVG b
 
 ![entourage.png](review-253/entourage.png)
 
+**schnitt-ansicht.png**
+
+![schnitt-ansicht.png](review-253/schnitt-ansicht.png)
+
 ## [283] UX-Prüfung der neuen Funktionen
 
 **nachtrag.png**
