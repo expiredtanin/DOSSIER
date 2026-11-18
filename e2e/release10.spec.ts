@@ -101,7 +101,8 @@ test("Referenz-Ablauf WBW/Vorprojekt: leeres Projekt bis Abgabe", async ({ page 
     await typeCommand(page, "wand");
     await expect(page.locator(".cmdline-prompt")).toHaveText("Startpunkt der Wand:");
     for (const [x, y] of [[B.x0, B.y0], [B.x1, B.y0], [B.x1, B.y1], [B.x0, B.y1], [B.x0, B.y0]]) await typeCommand(page, lv(x, y));
-    await finishCommand(page);
+    // [287] Der Startpunkt schliesst den Wandring und beendet den Befehl (kein Enter nötig; Enter würde ihn wiederholen).
+    await expect(page.locator(".cmdline-prompt")).toHaveText("Befehl:");
     await expect.poll(() => elementRows(page).count()).toBe(before + 4);
     await typeCommand(page, "decke");
     for (const [x, y] of [[B.x0, B.y0], [B.x1, B.y0], [B.x1, B.y1], [B.x0, B.y1]]) await typeCommand(page, lv(x, y));
