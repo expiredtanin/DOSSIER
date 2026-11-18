@@ -933,6 +933,16 @@ pub fn import_ops(root: &Map<String, Value>, d: &DrawingImport, dec: &Decision, 
                 o.insert("name".into(), n.into());
             }
         }
+        // [285] Landeskoordinaten = Kataster/Vermessung: die neuen Klassen zeigt der Arbeitsgrundriss als Unterlage
+        // (`LayerCategory.underlay`), damit Wände darüber lesbar bleiben; Druck/Export bleiben deckend.
+        let cadastral = dec.view_center.is_none() && bbox(d).is_some_and(|b| lv95_origin(root, [(b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0], &dec.geo_label).is_some());
+        if cadastral {
+            for ch in plan.children.iter_mut() {
+                if let Some(o) = ch.as_object_mut() {
+                    o.insert("underlay".into(), true.into());
+                }
+            }
+        }
         if !plan.children.is_empty() {
             let parent = json!({"code": plan.parent_code, "name": dec.parent_name, "color": "#707078", "lw": 0.18, "visible": true, "locked": false, "children": plan.children});
             ensure_layers_with_parent(&mut layers, Some(parent));

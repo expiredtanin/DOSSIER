@@ -420,12 +420,13 @@ pub fn run_bin(p: &Project, name: &str, args: &[f64], text: &str) -> Result<Vec<
             Ok(drawings::underlay_groups(&domains::Ctx::new(p, &a)).iter().flat_map(|v| v.to_le_bytes()).collect())
         }
         // Linien der Zeichnungen `[Massstab, Schalter, Index…]` (Index in `drawings2d`), mit Override-Regeln;
-        // Schalter: Bit 1 = gedimmt, Bit 2 = Schwarz-Weiss ([140]).
+        // Schalter: Bit 1 = gedimmt, Bit 2 = Schwarz-Weiss ([140]), Bit 3 = Klasse als Unterlage ([285]).
         ("drawingLines", n) if n >= 2 => {
             let mut a = domains::PlanArgs::parse(1.0, "{}")?;
             a.scale = args[0];
-            let c = domains::Ctx::new(p, &a);
             let flags = if args[1].is_finite() && args[1] >= 0.0 { args[1] as u32 } else { 0 };
+            a.context_underlay = flags & 4 != 0;
+            let c = domains::Ctx::new(p, &a);
             // Strichstärken nach Massstab wie im übrigen Plan.
             let post = Some(crate::plan::extras::Post { mono: flags & 2 != 0, lw: crate::plan::extras::line_weight_factor(p, args[0]), sketch: 0.0, keep: Default::default() }).filter(crate::plan::extras::Post::active);
             buf_with(post, |sink| drawings::underlay_lines(&c, &args[2..], flags & 1 != 0, sink))

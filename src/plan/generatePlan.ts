@@ -271,6 +271,11 @@ export function generatePlan(
    * `grey` alles ausserhalb grau (Kern `renovation::View::editing`). Nie im Druck/Export (dort fehlt sie).
    */
   designOptionEdit?: DesignOptionEditArg | null,
+  /**
+   * [285] Arbeitsgrundriss (Bildschirm): Klassen „als Unterlage" (`LayerCategory.underlay`, vorgegeben die Umgebungsklassen:
+   * Kataster, Strassen, Gelände …) halbtransparent, damit Wände darüber lesbar bleiben. Nie im Druck/Export (dort fehlt es).
+   */
+  contextUnderlay = false,
 ): Plan {
   const compact = compactUnderlay && !forPrint;
   // Blatt-Ebene eines Layouts (Papier 1:1): ohne projektglobale Zutaten (Kontext, Luftbilder,
@@ -286,7 +291,7 @@ export function generatePlan(
   // Zeitpunkt der Schattenstudie: `Date` nimmt das Datum, wie es in der Datei steht (Ortszeit ohne Zone).
   const study = project.sunStudy;
   const sunWhen = includeGlobal && study?.show ? new Date(study.when).getTime() : NaN;
-  const dom = planDomains(project, floorId, visibleCodes, categoryDisplay, detail, showReferenceLines, includeGlobal, scaleDenominator, forPrint, compact, mono, sunWhen, overrideRuleIds, traceOf, forPrint ? null : designOptionEdit);
+  const dom = planDomains(project, floorId, visibleCodes, categoryDisplay, detail, showReferenceLines, includeGlobal, scaleDenominator, forPrint, compact, mono, sunWhen, overrideRuleIds, traceOf, forPrint ? null : designOptionEdit, contextUnderlay && !forPrint);
   const pieces: PlanPiece[] = [];
   const pushGroups = (first: number, last: number): void => {
     const from = dom.buf.groups[first][0];
@@ -369,6 +374,8 @@ export function generateVisibleLevelsPlan(
   compactUnderlay = false,
   /** [272] Bearbeitungsvariante der Bildschirm-Ansicht (s. {@link generatePlan}). */
   designOptionEdit?: DesignOptionEditArg | null,
+  /** [285] Klassen „als Unterlage" halbtransparent (s. {@link generatePlan}) — nur die aktive Ebene. */
+  contextUnderlay = false,
 ): Plan {
   const active = project.drawingLevels.find((l) => l.id === activeLevelId);
   const siblings =
@@ -451,6 +458,7 @@ export function generateVisibleLevelsPlan(
     null,
     null,
     designOptionEdit,
+    contextUnderlay,
   );
   const activeCount = planCount(activePlan);
   for (const pc of piecesOf(activePlan)) pieces.push(pc);
@@ -522,6 +530,7 @@ function planDomainsArgs(
   rules?: readonly string[] | null,
   traceOf?: string | null,
   designOptionEdit?: DesignOptionEditArg | null,
+  contextUnderlay = false,
 ): Record<string, unknown> {
   // Sichtbar und gezeichnet bzw. gedimmt: über die sichtbaren Codes (wenige), nicht über alle
   // Elemente — der Kern zeichnet ein Element genau dann, wenn sein Code in `show` steht.
@@ -537,6 +546,7 @@ function planDomainsArgs(
   if (rules) out.rules = [...rules];
   if (traceOf) out.traceOf = traceOf;
   if (designOptionEdit) out.designOptionEdit = designOptionEdit;
+  if (contextUnderlay) out.contextUnderlay = true;
   return out;
 }
 
@@ -593,8 +603,9 @@ function planDomains(
   rules?: readonly string[] | null,
   traceOf?: string | null,
   designOptionEdit?: DesignOptionEditArg | null,
+  contextUnderlay = false,
 ): DomainPrims {
-  const args = JSON.stringify(planDomainsArgs(floorId, visibleCodes, categoryDisplay, referenceLines, global, scale, forPrint, compact, mono, sunWhen, rules, traceOf, designOptionEdit));
+  const args = JSON.stringify(planDomainsArgs(floorId, visibleCodes, categoryDisplay, referenceLines, global, scale, forPrint, compact, mono, sunWhen, rules, traceOf, designOptionEdit, contextUnderlay));
   const held = chunkStores.get(args);
   const query = held && held.size ? `${args.slice(0, -1)},"have":[${[...held.keys()].join(",")}]}` : args;
   const res = readPlanMulti(documentFor(project).queryBin("planDomains", [DETAIL_CODE[detail] ?? 1], query), held);
@@ -669,21 +680,22 @@ function underlayGroups(project: Project, dom: DomainPrims, scaleDenominator: nu
   const out: UnderlayGroup[] = [];
   let k = 1;
   for (let g = 0; g < f[0]; g++) {
-    const catGreyed = f[k] === 1;
+    const catGreyed = (f[k] & 1) === 1;
+    const asUnderlay = (f[k] & 2) === 2;
     const n = f[k + 1];
     const drawings: Drawing2D[] = new Array(n);
     for (let i = 0; i < n; i++) drawings[i] = all[f[k + 2 + i]];
     k += 2 + n;
     const buildBuf = (list: Drawing2D[]): DecodedPlanBuf => {
-      // Schalter: Bit 1 = gedimmt, Bit 2 = Schwarz-Weiss ([140]).
-      const args = [scaleDenominator, (catGreyed ? 1 : 0) + (mono ? 2 : 0)];
+      // Schalter: Bit 1 = gedimmt, Bit 2 = Schwarz-Weiss ([140]), Bit 3 = Klasse als Unterlage ([285]).
+      const args = [scaleDenominator, (catGreyed ? 1 : 0) + (mono ? 2 : 0) + (asUnderlay ? 4 : 0)];
       for (const d of list) {
         const i = indexOf(d);
         if (i !== undefined) args.push(i);
       }
       return decodePlanBuf(documentFor(project).queryBin("drawingLines", args));
     };
-    out.push({ drawings, catGreyed, tint: false, above: true, ctx, build: (list) => buildBuf(list).prims, buildBuf });
+    out.push({ drawings, catGreyed, tint: false, above: true, ctx: asUnderlay ? [...ctx, "underlay"] : ctx, build: (list) => buildBuf(list).prims, buildBuf });
   }
   return out;
 }

@@ -1861,6 +1861,7 @@ fn sheets(cx: &mut Ctx, main: &mut Buf, layer_by_code: &HashMap<&str, String>) {
                     renovation_phase: None,
                     design_options: Vec::new(),
                     design_option_edit: None,
+                    context_underlay: false,
                 };
                 if let Some(entries) = plan_domains_buf(p, &args).ok().and_then(|buf| {
                     let view = View::parse(&buf)?;

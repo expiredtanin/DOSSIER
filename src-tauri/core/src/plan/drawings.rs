@@ -386,10 +386,31 @@ pub fn emit(c: &Ctx, d: &Drawing2D, attrs: Attrs, geom: &Drawing2DGeom, greyed: 
         attrs.demolish_dash = st.dashed;
     }
     let clamp = |v: Option<f64>| v.filter(|x| *x < 1.0).map(|x| jsnum::max(0.0, x));
+    // [285] Kontext-Klassen (Kataster …) im Arbeitsgrundriss halbtransparent, damit Wände darüber lesbar bleiben.
+    let under = if depth == 0 { underlay_opacity(c, &d.category_code) } else { None };
+    if under.is_some() {
+        sink.frames.push((under, None));
+    }
     sink.frames.push((clamp(d.opacity), clamp(d.fill_opacity)));
     let r = emit_inner(c, d, attrs, geom, greyed, scale, sink, depth);
     sink.frames.pop();
+    if under.is_some() {
+        sink.frames.pop();
+    }
     r
+}
+
+/// [285] Deckkraft der Zeichnungen einer Klasse, die der Arbeitsgrundriss als Unterlage zeigt.
+pub const UNDERLAY_OPACITY: f64 = 0.35;
+
+/// [285] Zeigt der Plan die Klasse `code` als halbtransparente Unterlage? Nur im Arbeitsgrundriss (`contextUnderlay`,
+/// nie Druck/Export): nach `LayerCategory.underlay`, ohne Angabe die Umgebungsklassen (Kataster, Strassen, Gelände …).
+pub(super) fn underlay_class(c: &Ctx, code: &str) -> bool {
+    c.a.context_underlay && !c.a.for_print && c.cat(code).and_then(|k| k.underlay).unwrap_or_else(|| crate::import_context::is_context_class(code))
+}
+
+fn underlay_opacity(c: &Ctx, code: &str) -> Option<f64> {
+    underlay_class(c, code).then_some(UNDERLAY_OPACITY)
 }
 
 fn opacity_mut(p: &mut Primitive) -> Option<&mut Option<f64>> {
@@ -2428,7 +2449,7 @@ pub fn plan_drawings_chunked(c: &Ctx, stamps: &[u64], cache: &mut super::cache::
             continue;
         }
         let keep = if c.a.compact && compact_eligible(d) { Keep::NoLines } else { Keep::All };
-        seq.push((i, stamp, m.greyed as u8 | ((keep as u8) << 1)));
+        seq.push((i, stamp, m.greyed as u8 | ((keep as u8) << 1) | ((underlay_class(c, &d.category_code) as u8) << 4)));
     }
     let mut old = std::mem::take(&mut cache.chunks);
     let mut new: HashMap<u64, Chunk> = HashMap::new();
@@ -2560,10 +2581,10 @@ fn build_chunk<'a>(
 
 /// Gruppen der kompakten Unterlage: je (gedimmt, Ebene) in Reihenfolge des ersten Auftretens die
 /// Indizes (in `project.drawings2d`) der Zeichnungen, deren Linien bei Bedarf entstehen. Format:
-/// `[nGruppen, (gedimmt 0/1, n, Index…)…]`.
+/// `[nGruppen, (Schalter, n, Index…)…]`; Schalter: Bit 1 = gedimmt, Bit 2 = Klasse als Unterlage ([285]).
 pub fn underlay_groups(c: &Ctx) -> Vec<f64> {
     let mut keys: HashMap<(bool, &str), usize> = HashMap::new();
-    let mut groups: Vec<(bool, Vec<f64>)> = Vec::new();
+    let mut groups: Vec<(bool, &str, Vec<f64>)> = Vec::new();
     if c.a.compact {
         let mut memo = Memo::default();
         for (i, d) in c.p.drawings2d.iter().enumerate() {
@@ -2576,15 +2597,15 @@ pub fn underlay_groups(c: &Ctx) -> Vec<f64> {
             }
             let g = m.greyed;
             let k = *keys.entry((g, d.category_code.as_str())).or_insert_with(|| {
-                groups.push((g, Vec::new()));
+                groups.push((g, d.category_code.as_str(), Vec::new()));
                 groups.len() - 1
             });
-            groups[k].1.push(i as f64);
+            groups[k].2.push(i as f64);
         }
     }
     let mut out = vec![groups.len() as f64];
-    for (g, idx) in groups {
-        out.push(if g { 1.0 } else { 0.0 });
+    for (g, code, idx) in groups {
+        out.push(f64::from(g as u8 | ((underlay_class(c, code) as u8) << 1)));
         out.push(idx.len() as f64);
         out.extend(idx);
     }
@@ -3607,6 +3628,41 @@ mod tests {
         assert!(kernel2d::rb_point_in_polygon(kernel2d::Vec2::new(3.0, 3.0), &k));
         assert_eq!(out.len(), 1 + 4 + 4);
         assert!(!compact_eligible(&serde_json::from_value(d).unwrap()));
+    }
+
+    /// [285] Kontext-Klassen (Kataster …) zeigt nur der Arbeitsgrundriss halbtransparent; Druck/Export und andere
+    /// Klassen bleiben deckend, `LayerCategory.underlay` schaltet je Klasse um.
+    #[test]
+    fn kontext_klasse_als_unterlage() {
+        let line = serde_json::json!({ "shape": "line", "a": {"x": 0, "y": 0}, "b": {"x": 4, "y": 0} });
+        let mk = |code: &str| {
+            let mut d = drawing(line.clone());
+            d["categoryCode"] = serde_json::json!(code);
+            d
+        };
+        let p = project(serde_json::json!({"layers": [
+            {"code": "05", "name": "Kontext", "color": "#888888", "lw": 0.25, "visible": true, "locked": false},
+            {"code": "20", "name": "Zeichnung", "color": "#0a0a0a", "lw": 0.5, "visible": true, "locked": false},
+            {"code": "21", "name": "Eigene", "color": "#0a0a0a", "lw": 0.5, "visible": true, "locked": false, "underlay": true}
+        ]}));
+        let op = |code: &str, extra: &str| -> Option<f64> {
+            let t = format!(r#"{{"floor":"eg","show":["05","20","21"],"scale":100{extra}}}"#);
+            let a = PlanArgs::parse(1.0, &t).unwrap();
+            let c = Ctx::new(&p, &a);
+            let d: Drawing2D = serde_json::from_value(mk(code)).unwrap();
+            let mut out = Out::default();
+            emit(&c, &d, Attrs::of(&c, &d), &d.geom, false, 100.0, &mut Sink::new(Target::Vec(&mut out), Keep::All), 0).unwrap();
+            out.prims.iter().find_map(|q| match q {
+                Primitive::Line { opacity, .. } => Some(opacity.unwrap_or(1.0)),
+                _ => None,
+            })
+        };
+        let work = r#","contextUnderlay":true"#;
+        assert_eq!(op("05", work), Some(UNDERLAY_OPACITY));
+        assert_eq!(op("21", work), Some(UNDERLAY_OPACITY), "ausdrücklich als Unterlage");
+        assert_eq!(op("20", work), Some(1.0));
+        assert_eq!(op("05", ""), Some(1.0), "ohne Arbeitsgrundriss deckend");
+        assert_eq!(op("05", r#","contextUnderlay":true,"forPrint":true"#), Some(1.0), "Druck unverändert");
     }
 
     #[test]

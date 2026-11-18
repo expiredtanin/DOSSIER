@@ -7,7 +7,7 @@
 import type { ComponentProps } from "react";
 import { t } from "../i18n";
 import { activePenSet, resolvePenColor, resolvePenWeight } from "../model/penSets";
-import { findCategory, formatElevation } from "../model/layers";
+import { findCategory, formatElevation, isUnderlayCategory } from "../model/layers";
 import type { DrawingLevel, LayerCategory } from "../model/types";
 import { getState, useStore } from "../state/appStore";
 import { EditorField } from "../ui/EditorField";
@@ -85,6 +85,15 @@ export function LayerInlineEditor({
       </EditorField>
       <EditorField label={t("editor.fill")}>
         <OptionalColorField value={cat.fill} onChange={(fill) => patchCategory(cat.code, { fill })} />
+      </EditorField>
+      <EditorField label={t("editor.underlay")}>
+        <input
+          type="checkbox"
+          data-testid="layer-underlay"
+          title={t("editor.underlay.hint")}
+          checked={isUnderlayCategory(project.layers, cat.code)}
+          onChange={(e) => patchCategory(cat.code, { underlay: e.target.checked })}
+        />
       </EditorField>
       <EditorField label={t("editor.hatch")}>
         <span className="editor-hatch">
