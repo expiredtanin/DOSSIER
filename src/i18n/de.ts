@@ -2209,7 +2209,6 @@ export const de = {
   "cmd.opening.windowLabel": "Fenster",
   "cmd.opening.doorLabel": "Tür",
   "cmd.opening.wall": "Wand für die Öffnung wählen:",
-  "cmd.opening.pos": "Position entlang der Wand ( Abstand tippen ):",
   "cmd.opening.kind": "Art",
   "cmd.opening.hinge": "Anschlag",
   "cmd.opening.side": "Seite",

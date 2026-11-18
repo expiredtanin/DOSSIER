@@ -2,7 +2,7 @@
 // entsteht ein eigenständiges `Wall`). Schritte:
 //   1) „Startpunkt der Wand:" → Punkt
 //   2) „Nächster Punkt ( Zurück ):" → Punkt … (chainend: jede weitere Wand
-//      beginnt am letzten Endpunkt) bis Esc/Enter den Zug beendet.
+//      beginnt am letzten Endpunkt) bis Esc/Enter den Zug beendet (beide legen die Wände an, [287]).
 //
 // BOGEN-MODUS ([T2], Option „Bogen", wie bei der Polylinie): das nächste Segment wird eine Bogenwand
 // (`Wall.bulge`). Drei-Punkt (Default: Durchgangspunkt, dann Endpunkt) oder „Tangential" (schliesst
@@ -335,6 +335,14 @@ export const wallCommand: Command = {
     }
     return idle(s.thickOverride, s.single, modeOf(s));
   },
+  // [287] Esc beendet einen offenen Zug (≥ 2 Punkte) und BEHÄLT die gesetzten Wände — nur die Gummiband-Wand
+  // fällt weg (Vectorworks/Archicad; löst die Vorgabe [99] „Esc = ein Punkt zurück“ für die Wand ab). Das
+  // zweite Esc verlässt das Werkzeug. Wartet ein Drei-Punkt-Bogen auf seinen Endpunkt, nimmt Esc diesen zurück.
+  onEscape: (state, ctx0) => {
+    const s = state as WallCmdState;
+    if (s.phase !== "next" || s.points.length < 2 || s.pendingThrough) return null;
+    return wallCommand.onConfirm(s, ctx0);
+  },
   onCancel: (state): [CommandState, CommandResult] => {
     const s = state as WallCmdState;
     return idle(s.thickOverride, s.single, modeOf(s));
@@ -357,6 +365,11 @@ export const wallCommand: Command = {
     if ("thick" in locks && locks.thick >= MIN_THICKNESS) s.thickOverride = locks.thick;
     if (s.phase !== "next" || s.points.length === 0) return null;
     return wallNextFromFields(s.points[s.points.length - 1], locks, cursor);
+  },
+  // [287] Länge + Enter legt das Segment sofort in Mausrichtung an (Richtung klar = Cursor nicht auf dem letzten Punkt).
+  commitsOnLock: (state, fieldId, cursor) => {
+    const s = state as WallCmdState;
+    return fieldId === "length" && s.phase === "next" && !!cursor && segLen(s.points[s.points.length - 1], cursor) >= EPS;
   },
   fieldValues: (state, locks, cursor): Record<string, number> => {
     const s = state as WallCmdState;

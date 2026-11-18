@@ -43,7 +43,8 @@ export interface CommandLineProps {
   /** Geordnete Zahlenfelder des aktuellen Schritts (Tab-Feld-Zyklus). */
   fields: CommandLineField[];
   /** Enter mit dem aktuellen Eingabetext (Befehl/Koordinate/Zahl). */
-  onSubmit: (text: string) => void;
+  /** `viaTab`: Tab statt Enter — ein getippter Wert wird gelockt, der Schritt aber nicht abgeschlossen ([287]). */
+  onSubmit: (text: string, viaTab?: boolean) => void;
   /** Klick auf eine Inline-Option. */
   onOption: (id: string) => void;
   /** Tab im Feld-Modus: nächstes Feld aktivieren. */
@@ -113,8 +114,8 @@ export const CommandLine = memo(forwardRef<CommandLineHandle, CommandLineProps>(
     const suggestions = !active && text.trim() !== "" ? suggest(text).slice(0, 6) : [];
     const hasFields = fields.length > 0;
 
-    const submit = (value: string) => {
-      onSubmit(value);
+    const submit = (value: string, viaTab = false) => {
+      onSubmit(value, viaTab);
       setText("");
     };
 
@@ -161,7 +162,7 @@ export const CommandLine = memo(forwardRef<CommandLineHandle, CommandLineProps>(
           // Feld, wird sie zuerst ins aktive Feld gelockt (das rückt selbst vor),
           // sonst nur zum nächsten Feld weiterschalten.
           e.preventDefault();
-          if (text.trim() !== "") submit(text);
+          if (text.trim() !== "") submit(text, true);
           else onCycleField();
         } else if (suggestions.length > 0) {
           // Ruhezustand: Tab akzeptiert den ersten Autocomplete-Vorschlag.

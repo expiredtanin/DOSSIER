@@ -261,7 +261,12 @@ export function useCommandEngineHost(opts: {
   }, [commandActive]);
   // Live-Echo des Befehlszeilen-Texts fürs Cursor-HUD: der getippte Wert
   // erscheint sofort im aktiven Tab-Feld am Cursor (VW-Verhalten).
-  const [cmdTyped, setCmdTyped] = useState("");
+  const [cmdTyped, setCmdTypedRaw] = useState("");
+  // [287] Die Vorschau folgt dem getippten Wert sofort (nicht erst nach Tab/Enter).
+  const setCmdTyped = (v: string) => {
+    setCmdTypedRaw(v);
+    engine.previewTyped(v);
+  };
 
   return {
     engineRef,

@@ -4,7 +4,7 @@
 // Zeichenfläche und nach einem Klick in ein Panel (Reiter-Knopf fokussiert).
 import { readFileSync } from "node:fs";
 import type { Page } from "@playwright/test";
-import { blurFocus, commandInput, elementRows, expect, openTab, startNewProject, test, typeCommand } from "./app";
+import { blurFocus, commandInput, expect, openTab, startNewProject, test, typeCommand } from "./app";
 
 /** Befehlsnamen der Registratur (Schlüssel von `COMMANDS` in src/commands/registry.ts). */
 function registeredCommands(): string[] {
@@ -54,6 +54,7 @@ async function start(page: Page, name: string): Promise<boolean> {
 
 async function escEscEnter(page: Page, name: string, focus: Focus): Promise<string> {
   await toIdle(page);
+  if (name === "wall") return "eigener Test (Esc beendet den Zug, [287])";
   if (!(await start(page, name))) return "sofort";
   // Punkte setzen, je Schritt den Prompt merken (Index = Schritt-Tiefe).
   const prompts: string[] = [(await prompt(page).textContent())!];
@@ -120,9 +121,12 @@ for (let c = 0; c < NAMES.length; c += CHUNK) {
   });
 }
 
+// [287] löst [99] für die Wand ab: Esc beendet den offenen Zug und behält die Wände.
 for (const focus of FOCI) {
-  test(`Wandzug: Esc nimmt den letzten Punkt, Enter übernimmt (Fokus: ${focus})`, async ({ page }) => {
-    await startNewProject(page);
+  test(`Wandzug: Esc beendet und behält die Wände, Enter ebenso (Fokus: ${focus})`, async ({ page }) => {
+    await startNewProject(page, "?dossierTest");
+    const walls = () => page.evaluate(() => window.__dossierTest!.counts().walls);
+    const w0 = await walls();
     await openTab(page, "Elemente");
     await page.getByRole("button", { name: "Wand", exact: true }).click();
     await expect(prompt(page)).toHaveText("Startpunkt der Wand:");
@@ -132,20 +136,18 @@ for (const focus of FOCI) {
     await expect(page.locator(".cmdline")).toHaveAttribute("data-steps", "3");
     await setFocus(page, focus);
     await page.keyboard.press("Escape");
-    await expect(page.locator(".cmdline")).toHaveAttribute("data-steps", "2");
-    await expect(prompt(page)).toHaveText("Nächster Punkt:");
-    await setFocus(page, focus);
-    await page.keyboard.press("Enter");
+    // Die Wände sind angelegt; ob das Werkzeug danach noch für den nächsten Zug bereitsteht, hängt am Fokus.
+    await expect.poll(walls).toBe(w0 + 2);
+    // Enter beendet einen Zug ebenfalls und legt an.
+    await page.keyboard.press("Escape");
+    await blurFocus(page);
+    await page.keyboard.press("Escape");
     await expect(prompt(page)).toHaveText(IDLE);
-    await expect(elementRows(page)).toHaveCount(1);
-    // Esc-Esc schnell mitten im Zug: nichts dazu.
     await page.getByRole("button", { name: "Wand", exact: true }).click();
     await clickCanvas(page, 150, 350);
     await clickCanvas(page, 450, 350);
     await setFocus(page, focus);
-    await page.keyboard.press("Escape");
-    await page.keyboard.press("Escape");
-    await expect(prompt(page)).toHaveText(IDLE);
-    await expect(elementRows(page)).toHaveCount(1);
+    await page.keyboard.press("Enter");
+    await expect.poll(walls).toBe(w0 + 3);
   });
 }

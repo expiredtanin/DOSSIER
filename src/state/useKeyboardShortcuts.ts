@@ -32,7 +32,7 @@ import {
 } from "../editors/elementClipboard";
 import type { ElementClipboard, ElementSelectionIds, PastedIds } from "../editors/elementClipboard";
 import { parseClipboardText, serializeClipboardText } from "../editors/elementClipboardSerialize";
-import { fileShortcutFor, matchesShortcut, tabKeyAction, type FileShortcut, type ShortcutId, type ShortcutOverrides } from "./keyboardShortcuts";
+import { SHORTCUT_DEFS, fileShortcutFor, matchesShortcut, tabKeyAction, type FileShortcut, type ShortcutId, type ShortcutOverrides } from "./keyboardShortcuts";
 import { isTauriRuntime } from "../native/projectFile";
 import { isolateSelectionLayerCodes, showAllLayerCodes } from "./layerIsolate";
 import { isInModalDialog } from "./modalScope";
@@ -235,6 +235,39 @@ export function useToolNumberShortcuts(
 }
 
 /**
+ * [287] Tippen auf der Zeichenfläche: ein Buchstabe, den kein Kürzel braucht und der in kein Eingabefeld
+ * fällt, fokussiert die Befehlszeile und wird dort übernommen — „w“ + Enter startet die Wand (Archicad/
+ * AutoCAD-Gewohnheit). Kürzel haben Vorrang: greift eines (ein anderer Handler hat die Taste schon
+ * verbraucht oder sie steht in `SHORTCUT_DEFS`), geschieht hier nichts. Nur im Ruhezustand; läuft ein
+ * Befehl, gehören die Buchstaben seinen Optionskürzeln. Muss NACH den anderen Tastatur-Hooks registriert
+ * sein (s. `ViewportCenter`), damit `defaultPrevented` deren Entscheidung kennt.
+ */
+export function useTypeToCommandLine(
+  engineRef: RefObject<CommandEngine | null>,
+  commandLineRef: RefObject<CommandLineHandle | null>,
+  overrides: ShortcutOverrides,
+): void {
+  const overridesRef = useRef(overrides);
+  overridesRef.current = overrides;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
+      if (!/^\p{L}$/u.test(e.key)) return;
+      if (isEditableTarget(e) || isInModalDialog(e.target as HTMLElement | null)) return;
+      const el = e.target as HTMLElement | null;
+      // Fokussierte Schaltflächen/Menüs/Listen behalten ihre Typeahead-Tasten.
+      if (el?.closest?.('[role="toolbar"],[role="menu"],[role="listbox"],[role="tree"],[role="grid"],[role="tablist"]')) return;
+      if (!engineRef.current || engineRef.current.isActive()) return;
+      if (SHORTCUT_DEFS.some((d) => matchesShortcut(e, d.id, overridesRef.current))) return;
+      e.preventDefault();
+      commandLineRef.current?.beginTyping(e.key);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [engineRef, commandLineRef]);
+}
+
+/**
  * Tastatur für ein gewähltes, aber ruhendes Zeichenwerkzeug (sein Befehl ist nach dem Commit
  * beendet): Esc schaltet zurück auf Auswahl, Enter wird geschluckt. Läuft der Befehl, gehören
  * Esc/Enter der Engine (`commandKeys.ts`). In echten Eingaben inaktiv.
@@ -248,6 +281,9 @@ export function useActiveToolKeys(
     if (activeTool === "select") return;
     const onKey = (e: KeyboardEvent) => {
       if (isEditableTarget(e)) return;
+      // [287] Esc, das der Verteiler gerade für den Befehl verbraucht hat (z. B. Wandzug beenden), verlässt das
+      // Werkzeug nicht gleich mit — erst das nächste Esc.
+      if (e.defaultPrevented) return;
       if (engineRef.current?.isActive()) return;
       if (e.key === "Escape") {
         setActiveTool("select");

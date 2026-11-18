@@ -17,7 +17,7 @@ import { useGripInputs } from "../state/useGripInputs";
 import { useGripEditing } from "../state/useGripEditing";
 import { useGrip3dEditing } from "../state/useGrip3dEditing";
 import { useCommandLineBinding } from "../state/useCommandLineBinding";
-import { useToolNumberShortcuts } from "../state/useKeyboardShortcuts";
+import { useToolNumberShortcuts, useTypeToCommandLine } from "../state/useKeyboardShortcuts";
 import type { ShortcutOverrides } from "../state/keyboardShortcuts";
 import type { useCommandEngineHost } from "../state/useCommandEngineHost";
 import type { useProjectActions } from "../state/useProjectActions";
@@ -168,6 +168,8 @@ export function ViewportCenter(props: {
     gripDragInfoRef,
     edgeDragInfoRef,
   );
+  // [287] Buchstaben ohne Kürzel landen in der Befehlszeile (zuletzt registriert: Kürzel haben Vorrang).
+  useTypeToCommandLine(engineRef, commandLineRef, props.shortcutOverrides);
 
   // ── 3D-Editier-Griffe (direkt im Viewport3D) → state/useGrip3dEditing.ts ───
   const grip3d = useGrip3dEditing({

@@ -14,7 +14,7 @@ Einstieg `commands.rs`. Hier bleiben nur die Abläufe. Ein Beispiel von Klick bi
 | Datei | Inhalt |
 |---|---|
 | `types.ts` | Verträge: `Command`, `CommandState`, `CommandContext` (Projekt, Ebene, Auswahl), `CommandResult` (Vorschau, `commit`, `done`) |
-| `engine.ts` | `CommandEngine`: hält den aktiven Befehl, verteilt Eingaben (`pick()`, `move()`, `submitText()`), Fang über den Host, Esc/Enter, letzter Befehl |
+| `engine.ts` | `CommandEngine`: hält den aktiven Befehl, verteilt Eingaben (`pick()`, `move()`, `submitText()`), Fang über den Host, Esc/Enter (Esc = ein Schritt zurück, Esc-Esc Abbruch; Wand: `onEscape` beendet den Zug und behält die Wände, [287]), letzter Befehl |
 | `registry.ts` | `COMMANDS` (Name → Befehl), Kürzel, `resolveCommand()` (Name, Nutzer-Kürzel, eingebautes Kürzel, Präfix) |
 | `parseInput.ts` | Parser der Befehlszeile: absolute, relative und polare Koordinaten, Zahlen, Optionen |
 | `createCore.ts` | Brücke zum Kern: `createMutation()` (Commit als Kern-Anfrage), `createPreview()` (Vorschau je Mausschritt), `createQuery()` |

@@ -62,24 +62,65 @@ describe("[263] Unbekannter Befehl im Ruhezustand", () => {
   });
 });
 
+describe("[287] Wand: Länge tippen", () => {
+  it("Länge + Enter legt das Segment sofort in Mausrichtung an (Winkel klar), ohne zweites Enter", () => {
+    const { engine, log } = setup();
+    engine.start("wall");
+    engine.pick({ x: 0, y: 0 });
+    engine.move({ x: 0, y: 3 }); // Maus nach +y
+    engine.submitText("2");
+    expect(engine.stepDepth()).toBe(2);
+    engine.confirm(); // zweites Enter beendet den Zug
+    expect(log.commits).toBe(1);
+  });
+
+  it("Länge + Tab sperrt nur die Länge: Winkel kann zusätzlich getippt werden", () => {
+    const { engine } = setup();
+    engine.start("wall");
+    engine.pick({ x: 0, y: 0 });
+    engine.move({ x: 0, y: 3 });
+    engine.submitText("2", true);
+    expect(engine.stepDepth()).toBe(1); // noch kein zweiter Punkt
+    expect(engine.view().fields.find((f) => f.id === "angle")?.active).toBe(true);
+  });
+
+  it("Vorschau folgt dem getippten Winkel sofort", () => {
+    const { engine, log } = setup();
+    engine.start("wall");
+    engine.pick({ x: 0, y: 0 });
+    engine.move({ x: 3, y: 0 });
+    engine.submitText("2", true); // Länge gesperrt, Winkelfeld aktiv
+    engine.previewTyped("90");
+    const v = log.draft?.hud;
+    expect(v).toBeTruthy();
+    expect(log.draft!.preview.length).toBeGreaterThan(0);
+  });
+});
+
 describe("Esc/Enter der Befehls-Engine", () => {
-  it("Wand: Esc nimmt den letzten Punkt zurück, Enter übernimmt den Rest", () => {
+  // [287] löst die Vorgabe [99] für die Wand ab: Esc beendet den offenen Zug und BEHÄLT die Wände.
+  it("Wand: Esc beendet den offenen Zug und behält die gezeichneten Wände, zweites Esc ändert nichts mehr", () => {
     const { engine, log } = setup();
     engine.start("wall");
     for (const p of P.slice(0, 3)) engine.pick(p);
-    expect(engine.stepDepth()).toBe(3);
+    engine.move({ x: 2, y: 2 });
     engine.escape(1000);
-    expect(engine.isActive()).toBe(true);
-    expect(engine.stepDepth()).toBe(2);
-    expect(log.draft?.vertices.length).toBe(2);
-    // Pause > ESC_DOUBLE_MS: zweites Esc ist wieder EIN Schritt zurück, kein Abbruch.
-    engine.escape(1000 + ESC_DOUBLE_MS + 50);
-    expect(engine.isActive()).toBe(true);
-    expect(engine.stepDepth()).toBe(1);
-    engine.pick(P[3]);
-    engine.confirm();
     expect(engine.isActive()).toBe(false);
     expect(log.commits).toBe(1);
+    expect(log.draft).toBe(null);
+    engine.escape(1000 + ESC_DOUBLE_MS + 50);
+    expect(engine.isActive()).toBe(false);
+    expect(log.commits).toBe(1);
+  });
+
+  it("Wand: Esc mit nur dem Startpunkt nimmt ihn zurück, dann endet der Befehl ohne Wand", () => {
+    const { engine, log } = setup();
+    engine.start("wall");
+    engine.pick(P[0]);
+    engine.escape(1000);
+    engine.escape(1000 + ESC_DOUBLE_MS + 50);
+    expect(engine.isActive()).toBe(false);
+    expect(log.commits).toBe(0);
   });
 
   it("Esc ohne Schritt beendet den Befehl", () => {
@@ -116,7 +157,7 @@ describe("Esc/Enter der Befehls-Engine", () => {
   // (bzw. Ende ohne Schritt), Esc-Esc = aus, ohne dass Esc etwas committet.
   for (const name of Object.keys(COMMANDS)) {
     const cmd = COMMANDS[name];
-    if (cmd.autoRun) continue;
+    if (cmd.autoRun || name === "wall") continue; // Wand: eigene Tests oben ([287])
     it(`${name}: Esc einen Schritt zurück, Esc-Esc bricht ab`, () => {
       const { engine, log } = setup();
       if (!engine.start(name)) return;

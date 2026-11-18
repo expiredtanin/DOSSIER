@@ -283,20 +283,50 @@ export class CommandEngine {
     return !f || NON_LENGTH_FIELDS.has(f.id) ? "none" : f.id === "height" ? "dy" : "length";
   }
 
-  private lockActiveField(value: number): void {
+  private lockActiveField(value: number, viaTab = false): void {
     this.syncFields();
     const defs = this.currentFields();
     if (defs.length === 0) return;
     const field = defs[this.activeFieldIndex];
     this.locks = { ...this.locks, [field.id]: value };
     const allLocked = defs.every((f) => f.id in this.locks);
-    if (allLocked) {
+    // [287] Enter (nicht Tab) mit klarer Richtung: der Befehl schliesst den Schritt nach dem Hauptwert ab.
+    if (allLocked || (!viaTab && this.command?.commitsOnLock?.(this.state!, field.id, this.lastCursor))) {
       this.commitFields();
       return;
     }
     this.activeFieldIndex = (this.activeFieldIndex + 1) % defs.length;
     this.refreshFieldPreview();
     this.emit();
+  }
+
+  /**
+   * [287] Live-Vorschau des gerade getippten (noch nicht bestätigten) Werts im aktiven Feld: die Vorschau folgt
+   * sofort dem Text, ohne zu locken. Leerer/unlesbarer Text stellt die Vorschau der echten Locks wieder her.
+   */
+  previewTyped(text: string): void {
+    if (!this.command || !this.state || !this.command.pointFromFields || !this.hasFields() || !this.lastCursor) return;
+    this.syncFields();
+    const field = this.currentFields()[this.activeFieldIndex];
+    if (!field) return;
+    const parsed = fromWorldInput(
+      toModelInput(parseInput(text.trim()), this.host.inputUnits?.() ?? MODEL_UNITS, this.activeFieldUnit()),
+      this.host.inputGeoOrigin?.() ?? null,
+    );
+    if (text.trim() === "" || parsed.kind !== "distance") {
+      this.redraw();
+      return;
+    }
+    try {
+      // Auf einer Kopie des Zustands: die Vorschau darf weder Sticky-Werte noch den Befehlszustand verändern.
+      const scratch = { ...this.state };
+      const pt = this.command.pointFromFields(scratch, { ...this.locks, [field.id]: parsed.value }, this.lastCursor);
+      if (!pt) return;
+      const [, res] = this.command.onMove(scratch, pt, null, this.context());
+      if (res.draft) this.host.setDraft(res.draft);
+    } catch {
+      /* Vorschau ist nur Zugabe */
+    }
   }
 
   /** Committet den aus den Feld-Locks (+ Cursor) gebildeten Punkt als Schritt-Eingabe. */
@@ -392,6 +422,17 @@ export class CommandEngine {
    */
   escape(now: number = Date.now()): void {
     if (!this.command) return;
+    // [287] Befehle mit offenem Zug (Wand) beenden ihn bei Esc und behalten das Gezeichnete — es sei denn,
+    // ein getippter Feldwert wartet (den löst `back` zuerst).
+    if (this.command.onEscape && this.state && Object.keys(this.locks).length === 0) {
+      const r = this.command.onEscape(this.state, this.context());
+      if (r) {
+        this.lastEscAt = now;
+        this.state = r[0];
+        this.applyResult(r[1]);
+        return;
+      }
+    }
     const quick = now - this.lastEscAt <= ESC_DOUBLE_MS;
     this.lastEscAt = now;
     if (quick) this.cancel();
@@ -431,7 +472,7 @@ export class CommandEngine {
       return;
     }
     try {
-      const [st, res] = this.command.onMove(this.state, this.lastCursor, null, this.context());
+      const [st, res] = this.command.onMove(this.state, this.fieldResultPoint(this.lastCursor) ?? this.lastCursor, null, this.context());
       this.state = st;
       this.host.setDraft(res.draft ?? null);
     } catch {
@@ -446,7 +487,7 @@ export class CommandEngine {
    * leerer Zeile letzten wiederholen (§2.3). In einem Befehl: als Koordinate/
    * Zahl/Option in den aktuellen Schritt routen.
    */
-  submitText(raw: string): void {
+  submitText(raw: string, viaTab = false): void {
     const text = raw.trim();
     if (!this.command || !this.state) {
       // Ruhezustand: leere Zeile = letzten Befehl wiederholen.
@@ -467,11 +508,11 @@ export class CommandEngine {
       this.confirm();
       return;
     }
-    this.routeTypedInput(text);
+    this.routeTypedInput(text, viaTab);
   }
 
   /** Routet getippten Text in den aktuellen Schritt (Koordinate/Zahl/Option). */
-  private routeTypedInput(text: string): void {
+  private routeTypedInput(text: string, viaTab = false): void {
     if (!this.command || !this.state) return;
     const accepts = this.command.accepts(this.state);
 
@@ -510,7 +551,7 @@ export class CommandEngine {
     // distance/number durchzureichen) und rückt aufs nächste Feld vor. Absolute/
     // relative/polare Koordinaten umgehen die Felder (committen wie gewohnt).
     if (parsed.kind === "distance" && this.hasFields()) {
-      this.lockActiveField(parsed.value);
+      this.lockActiveField(parsed.value, viaTab);
       return;
     }
 
@@ -604,6 +645,7 @@ export class CommandEngine {
     // Bestätigen: mehrteilige Befehle (Wand/Polylinie) beenden ihren Zug über
     // onConfirm (sonst feuerte die Feld-Auflösung einen Cursor-Punkt und der Zug
     // liesse sich nie abschliessen).
+    this.syncFields(); // Locks des vorigen Schritts nicht mitnehmen ([287])
     if (Object.keys(this.locks).length > 0) {
       const fieldPt = this.fieldResultPoint(this.lastCursor);
       if (fieldPt) {

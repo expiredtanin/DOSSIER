@@ -242,6 +242,12 @@ export interface Command {
    * Den Schritt zurück bei einfachem Esc führt die Engine selbst (Schritt-Verlauf, [99]).
    */
   onCancel(state: CommandState): [CommandState, CommandResult];
+  /**
+   * [287] Esc (optional), bevor die Engine einen Schritt zurücknimmt: liefert ein Ergebnis, wenn Esc einen
+   * offenen Zug BEENDEN und das Gezeichnete BEHALTEN soll (Wandzug, wie Vectorworks/Archicad); null = die
+   * Engine verfährt wie gewohnt (Schritt zurück, dann Abbruch).
+   */
+  onEscape?(state: CommandState, ctx: CommandContext): [CommandState, CommandResult] | null;
 
   /**
    * Sofort-Befehl (optional): läuft direkt beim Start OHNE Punkt-Picken und liefert
@@ -273,6 +279,13 @@ export interface Command {
     locks: Record<string, number>,
     cursor: Vec2 | null,
   ): Vec2 | null;
+
+  /**
+   * [287] Schliesst ein mit Enter getippter Wert für dieses Feld den Schritt sofort ab (statt nur zu locken)?
+   * Wand: die Länge, sobald die Richtung durch Maus/Fang klar ist; der Winkel wird nur mit Tab zusätzlich
+   * getippt. Fehlt die Methode, gilt „alle Felder gelockt“.
+   */
+  commitsOnLock?(state: CommandState, fieldId: string, cursor: Vec2 | null): boolean;
 
   /**
    * LIVE-Zahlenwerte je Feld für die aktuelle Cursor-Position (Maus-Vorschau in

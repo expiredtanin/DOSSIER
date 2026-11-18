@@ -55,8 +55,8 @@ export const test = base.extend<{ errors: string[] }>({
 export { expect };
 
 /** App öffnen und am Startbildschirm „Neues Projekt" wählen. */
-export async function startNewProject(page: Page): Promise<void> {
-  await page.goto("/");
+export async function startNewProject(page: Page, query = ""): Promise<void> {
+  await page.goto("/" + query);
   await page.getByRole("button", { name: /Neues Projekt/ }).first().click();
   await expect(page.getByRole("group", { name: "Befehlszeile" })).toBeVisible();
 }

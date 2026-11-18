@@ -96,7 +96,7 @@ export function useCommandLineBinding(opts: {
     : engineView.fields;
   const cmdLineSteps = fieldController ? 0 : engineView.steps;
 
-  const onCmdSubmit = (text: string) => {
+  const onCmdSubmit = (text: string, viaTab = false) => {
     // Feld-Controller (Griff, Kante): getippte Länge in Anzeige-Einheiten
     // (Blatt: Papier-mm) → Meter; Winkel/Anzahl bleiben.
     const ctlFields = gripEdit
@@ -134,7 +134,7 @@ export function useCommandLineBinding(opts: {
       else setGrip3dEdit(null);
       return;
     }
-    engine.submitText(text);
+    engine.submitText(text, viaTab);
   };
   const onCmdCycleField = () =>
     gripEdit

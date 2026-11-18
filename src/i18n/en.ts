@@ -2198,7 +2198,6 @@ export const en: Record<TranslationKey, string> = {
   "cmd.opening.windowLabel": "Window",
   "cmd.opening.doorLabel": "Door",
   "cmd.opening.wall": "Pick a wall for the opening:",
-  "cmd.opening.pos": "Position along the wall ( type distance ):",
   "cmd.opening.kind": "Type",
   "cmd.opening.hinge": "Hinge",
   "cmd.opening.side": "Side",

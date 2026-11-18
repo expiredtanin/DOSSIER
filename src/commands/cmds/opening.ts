@@ -1,12 +1,11 @@
 // Opening — Öffnung (Fenster/Tür) als Engine-Befehl. Sie wird in eine BESTEHENDE
 // Wand gehostet. Ablauf:
-//   1) „Wand für die Öffnung wählen:" → Klick auf/nahe eine Wand (Host).
-//   2) „Position entlang der Wand:" → Klick auf der Wandachse ODER getippter
-//      Abstand vom Wand-Startpunkt (Zahl). Die Position wird auf die Achse
-//      projiziert; der HUD zeigt den Abstand vom Wandanfang.
-//   3) Commit: hängt eine `Opening` ans Projekt.
+//   „Wand für die Öffnung wählen:" → [287] EIN Klick auf/nahe eine Wand setzt die Öffnung an der
+//   Mausposition (Archicad/Vectorworks); die Wand ergibt sich aus dem Treffer. Beim Überfahren zeigt
+//   eine Vorschau Öffnung und Abstands-Masse. Ein vorher getippter Abstand (Zahl/Feld „Abstand“)
+//   gilt statt der Mausposition. Commit: hängt eine `Opening` ans Projekt.
 //
-// Tab-Felder im Positionsschritt: Breite / Höhe / Brüstung (sillHeight) /
+// Tab-Felder: Breite / Höhe / Brüstung (sillHeight) /
 // Schwenkwinkel (nur Tür). Optionen: Fenster⇄Tür-Umschalter, Anschlag
 // (Scharnier start/end), Aufschlagseite (links/rechts), Richtung (innen/außen).
 //
@@ -59,7 +58,7 @@ const HINGE: CmdOption = { id: "hinge", labelKey: "cmd.opening.hinge", value: "s
 const SIDE: CmdOption = { id: "side", labelKey: "cmd.opening.side", value: "left" };
 const DIR: CmdOption = { id: "dir", labelKey: "cmd.opening.dir", value: "in" };
 
-interface OpIdle extends CommandState {
+interface OpState extends CommandState {
   phase: "wall";
   kind: "window" | "door";
   hinge: "start" | "end";
@@ -69,30 +68,19 @@ interface OpIdle extends CommandState {
   height: number;
   sill: number;
   swingAngle: number;
+  /** [285] Getippter Abstand (Feld „Abstand“): hat Vorrang vor der Mausposition. */
+  posLock?: number;
 }
-interface OpPos extends CommandState {
-  phase: "pos";
+/** Treffer-Wand unter der Maus (Kern `pickWall`). */
+interface Host {
   wallId: string;
   start: Vec2;
   end: Vec2;
   /** Bogenwand ([T2]): Bulge der Host-Wand; die Position gilt dann als Bogenlänge. */
   bulge?: number;
-  cursor: Vec2 | null;
-  posAlong: number; // Abstand vom Wandanfang (Meter)
-  /** [285] Getippter Abstand (Feld „Abstand“): hat Vorrang vor Maus und Klick. */
-  posLock?: number;
-  kind: "window" | "door";
-  hinge: "start" | "end";
-  side: "left" | "right";
-  dir: "in" | "out";
-  width: number;
-  height: number;
-  sill: number;
-  swingAngle: number;
 }
-type OpState = OpIdle | OpPos;
 
-function initState(kind: "window" | "door" = "window"): OpIdle {
+function initState(kind: "window" | "door" = "window"): OpState {
   const def = kind === "door" ? DEF_DOOR : DEF_WINDOW;
   return {
     phase: "wall",
@@ -109,12 +97,12 @@ function initState(kind: "window" | "door" = "window"): OpIdle {
 }
 
 /** Anfrage an den Kern (`cmd_create.rs`); `pos` = null → Position aus dem Cursor projiziert. */
-const openingReq = (s: OpPos, pos: number | null) => ({
+const openingReq = (s: OpState, h: Host, pos: number | null) => ({
   cmd: "opening",
-  wall: s.wallId,
-  start: xy(s.start),
-  end: xy(s.end),
-  bulge: s.bulge ?? null,
+  wall: h.wallId,
+  start: xy(h.start),
+  end: xy(h.end),
+  bulge: h.bulge ?? null,
   kind: s.kind,
   hinge: s.hinge,
   side: s.side,
@@ -126,27 +114,32 @@ const openingReq = (s: OpPos, pos: number | null) => ({
   pos,
 });
 
+/** Wand unter dem Cursor als Host (oder null). */
+function hostAt(ctx: CommandContext, p: Vec2): Host | null {
+  const w = pickWall(ctx, p);
+  return w ? { wallId: w.id, start: w.start, end: w.end, bulge: w.bulge } : null;
+}
+
 /**
- * Vorschau (Kern): Lücken-Balken entlang der Wand + Symbol (Fenster = Mittellinie, Tür = Blatt in
- * Schwenkrichtung); `pos` = null projiziert `at` auf die Achse. Liefert dazu die Position.
+ * [287] Vorschau beim Überfahren einer Wand (Kern): Lücken-Balken + Symbol an der Mausposition (bzw. am
+ * getippten Abstand), dazu Abstands-Masse „Abstand vom Wandanfang · Öffnung B×H · Abstand zum Wandende“.
+ * Liefert dazu die Position entlang der Wand.
  */
-function posDraftAt(s: OpPos, ctx: CommandContext, pos: number | null, at: Vec2 | null): { draft: ToolDraft; pos: number } {
-  const pv = createPreview(ctx, openingReq(s, pos), at ? [at] : []);
+function previewAt(s: OpState, h: Host, ctx: CommandContext, at: Vec2): { draft: ToolDraft; pos: number } {
+  const pv = createPreview(ctx, openingReq(s, h, s.posLock ?? null), s.posLock !== undefined ? [] : [at]);
   const [p, from, ax, ay, bx, by, mx, my] = pv.info;
   const draft: ToolDraft = { preview: pv.shapes, vertices: [{ x: ax, y: ay }, { x: bx, y: by }] };
+  const straight = !h.bulge;
+  const len = Math.hypot(h.end.x - h.start.x, h.end.y - h.start.y);
+  const toEnd = straight ? ` · ${Math.max(0, len - from - s.width).toFixed(2)} m` : "";
   draft.hud = {
-    at: s.cursor ?? { x: mx, y: my },
+    at: s.posLock !== undefined ? { x: mx, y: my } : at,
     text: `${from.toFixed(2)} m · ${t(s.kind === "door" ? "cmd.opening.doorLabel" : "cmd.opening.windowLabel")} ${(
       s.width * 100
-    ).toFixed(0)}×${(s.height * 100).toFixed(0)}`,
+    ).toFixed(0)}×${(s.height * 100).toFixed(0)}${toEnd}`,
   };
   return { draft, pos: p };
 }
-
-const posDraft = (s: OpPos, ctx: CommandContext): ToolDraft => posDraftAt(s, ctx, s.posAlong, null).draft;
-
-/** Commit (Kern): Öffnung in die Host-Wand, Breite/Position auf die Wand geklemmt, Standard-Typ der Bibliothek. */
-const appendOpening = (s: OpPos, ctx: CommandContext) => createMutation(ctx, openingReq(s, s.posAlong));
 
 const idle = (from?: OpState): [CommandState, CommandResult] => [
   initState(from?.kind ?? "window"),
@@ -157,12 +150,8 @@ export const openingCommand: Command = {
   name: "opening",
   labelKey: "cmd.opening.label",
   floorOnly: true,
-  prompt: (s) =>
-    (s as OpState).phase === "pos" ? "cmd.opening.pos" : "cmd.opening.wall",
-  accepts: (s) =>
-    (s as OpState).phase === "pos"
-      ? ["point", "number", "option"]
-      : ["point", "option"],
+  prompt: () => "cmd.opening.wall",
+  accepts: () => ["point", "number", "option"],
   options: (s): CmdOption[] => {
     const st = s as OpState;
     // [287] Werte übersetzt (vorher „Art=window", „Seite=left").
@@ -177,7 +166,7 @@ export const openingCommand: Command = {
     }
     return [kind];
   },
-  init: (): OpIdle => initState("window"),
+  init: (): OpState => initState("window"),
 
   onInput: (state, input, ctx): [CommandState, CommandResult] => {
     const s = state as OpState;
@@ -198,85 +187,35 @@ export const openingCommand: Command = {
       } else if (input.id === "dir") {
         next.dir = s.dir === "in" ? "out" : "in";
       }
-      return [next, { draft: next.phase === "pos" ? posDraft(next as OpPos, ctx) : null }];
+      return [next, { draft: null }];
     }
+    if (input.kind !== "point") return [s, { draft: null }];
 
-    if (input.kind === "number") {
-      // Im Positionsschritt: getippte Zahl = Abstand vom Wandanfang (Meter).
-      if (s.phase === "pos") {
-        const ns: OpPos = { ...s, posAlong: input.value };
-        return [ns, { draft: posDraft(ns, ctx) }];
-      }
-      return [s, { draft: null }];
-    }
-
-    if (input.kind !== "point") {
-      return [s, { draft: s.phase === "pos" ? posDraft(s as OpPos, ctx) : null }];
-    }
-
-    const pt = input.point;
-    if (s.phase === "wall") {
-      const w = pickWall(ctx, pt);
-      if (!w) return [s, { draft: null }]; // kein Treffer: Schritt wiederholen
-      const ns: OpPos = {
-        phase: "pos",
-        lastPoint: pt,
-        wallId: w.id,
-        start: w.start,
-        end: w.end,
-        bulge: w.bulge,
-        cursor: pt,
-        posAlong: w.t,
-        kind: s.kind,
-        hinge: s.hinge,
-        side: s.side,
-        dir: s.dir,
-        width: s.width,
-        height: s.height,
-        sill: s.sill,
-        swingAngle: s.swingAngle,
-      };
-      return [ns, { draft: posDraft(ns, ctx) }];
-    }
-
-    // Positionsschritt: Klick projiziert auf die Achse (ein getippter Abstand gilt vor dem Klick) → committen.
-    const ns: OpPos = { ...s, posAlong: s.posLock ?? posDraftAt(s, ctx, null, pt).pos, cursor: pt };
-    return [
-      idle(s)[0],
-      { draft: null, done: true, commit: appendOpening(ns, ctx) },
-    ];
+    // [287] EIN Klick auf die Wand setzt die Öffnung an der Mausposition (ein getippter Abstand gilt vor dem Klick);
+    // die Wand ergibt sich aus dem Treffer. Kein Treffer: Schritt wiederholen.
+    const h = hostAt(ctx, input.point);
+    if (!h) return [s, { draft: null }];
+    const pos = s.posLock ?? previewAt(s, h, ctx, input.point).pos;
+    return [idle(s)[0], { draft: null, done: true, commit: createMutation(ctx, openingReq(s, h, pos)) }];
   },
 
   onMove: (state, point, _snap, ctx): [CommandState, CommandResult] => {
     const s = state as OpState;
-    if (s.phase !== "pos") return [s, { draft: null }];
-    const at = s.posLock !== undefined ? posDraftAt({ ...s, cursor: point }, ctx, s.posLock, null) : posDraftAt({ ...s, cursor: point }, ctx, null, point);
-    const ns: OpPos = { ...s, posAlong: at.pos, cursor: point };
-    return [ns, { draft: at.draft }];
+    const h = hostAt(ctx, point);
+    return [s, { draft: h ? previewAt(s, h, ctx, point).draft : null }];
   },
 
-  onConfirm: (state, ctx): [CommandState, CommandResult] => {
-    const s = state as OpState;
-    if (s.phase === "pos") {
-      const ns: OpPos = s.posLock !== undefined ? { ...s, posAlong: s.posLock } : s;
-      return [
-        idle(s)[0],
-        { draft: null, done: true, commit: appendOpening(ns, ctx) },
-      ];
-    }
-    return idle(s);
-  },
+  onConfirm: (state): [CommandState, CommandResult] => idle(state as OpState),
   onCancel: (state): [CommandState, CommandResult] => idle(state as OpState),
 
   fields: (state) => {
     const s = state as OpState;
-    if (s.phase !== "pos") return [];
     return s.kind === "door" ? [...BASE_FIELDS, SWING_FIELD] : BASE_FIELDS;
   },
   // Getippte Tab-Felder sticky in den State übernehmen; kein Koordinatenpunkt.
   pointFromFields: (state, locks) => {
     const s = state as OpState;
-    if (s.phase === "pos") s.posLock = "pos" in locks && Number.isFinite(locks.pos) ? locks.pos : undefined;
+    s.posLock = "pos" in locks && Number.isFinite(locks.pos) ? locks.pos : undefined;
     if ("width" in locks && locks.width > 0) s.width = locks.width;
     if ("height" in locks && locks.height > 0) s.height = locks.height;
     if ("sill" in locks && locks.sill >= 0) s.sill = locks.sill;
@@ -286,7 +225,7 @@ export const openingCommand: Command = {
   fieldValues: (state): Record<string, number> => {
     const s = state as OpState;
     const out: Record<string, number> = {
-      ...(s.phase === "pos" ? { pos: s.posLock ?? s.posAlong } : {}),
+      ...(s.posLock !== undefined ? { pos: s.posLock } : {}),
       width: s.width,
       height: s.height,
       sill: s.sill,
@@ -301,7 +240,7 @@ export const fensterCommand: Command = {
   ...openingCommand,
   name: "fenster",
   labelKey: "cmd.opening.windowLabel",
-  init: (): OpIdle => initState("window"),
+  init: (): OpState => initState("window"),
 };
 
 /** „Tür"-Variante: identischer Befehl, startet aber im Tür-Modus. */
@@ -309,5 +248,5 @@ export const tuerCommand: Command = {
   ...openingCommand,
   name: "tuer",
   labelKey: "cmd.opening.doorLabel",
-  init: (): OpIdle => initState("door"),
+  init: (): OpState => initState("door"),
 };
