@@ -1,7 +1,7 @@
 // [66] Präsentationsplan anlegen: Ops aus dem Kern-Fassadenteil (`plan/presentationSheet.ts`), angewendet
 // als EIN Undo-Schritt, Meldung über `notify`. Liefert die Id des neuen Blatts (zum Öffnen) oder `null`.
 
-import { presentationSheetOps, type PresentationOptions } from "../core";
+import { fittingPresentationScale, presentationSheetOps, type PresentationOptions } from "../core";
 import { t } from "../i18n";
 import { getState } from "./appStore";
 
@@ -19,11 +19,16 @@ export function createPresentationSheet(o: PresentationOptions): string | null {
       st.notify(t("presentation.empty"), "warning");
       return null;
     }
+    // [282] Passt nichts aufs Blatt: kein überlaufendes Blatt anlegen, sondern den grössten passenden Massstab vorschlagen.
+    if (!res.plan.fits) {
+      const fit = fittingPresentationScale(st.project, o);
+      st.notify(fit ? t("presentation.tooBigSuggest", { scale: res.plan.scale, fit }) : t("presentation.tooBig", { scale: res.plan.scale }), "warning");
+      return null;
+    }
     st.applyChange(res.ops);
     const pages = res.plan.pages ?? 1;
-    if (res.plan.fits && pages > 1) st.notify(t("presentation.donePages", { scale: res.plan.scale, pages }), "info");
-    else if (res.plan.fits) st.notify(t("presentation.done", { scale: res.plan.scale, n: res.plan.items.length }), "info");
-    else st.notify(t("presentation.tooBig", { scale: res.plan.scale }), "warning");
+    if (pages > 1) st.notify(t("presentation.donePages", { scale: res.plan.scale, pages }), "info");
+    else st.notify(t("presentation.done", { scale: res.plan.scale, n: res.plan.items.length }), "info");
     return res.layoutId;
   } catch (e) {
     st.notify(`${t("presentation.failed")}: ${e instanceof Error ? e.message : String(e)}`, "error");

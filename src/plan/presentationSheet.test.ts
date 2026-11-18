@@ -5,7 +5,7 @@ import { generatePlan } from "./generatePlan";
 import { getState } from "../state/appStore";
 import { sheetSizeMm } from "../model/layoutModel";
 import { posterMetrics } from "../model/posterTemplates";
-import { POSTER_EXTRAS_DEFAULT, PRESENTATION_TEMPLATE_ID, levelHasContent, planPresentationSheet, presentationDefaults, presentationSheetOps } from "./presentationSheet";
+import { fittingPresentationScale, POSTER_EXTRAS_DEFAULT, PRESENTATION_TEMPLATE_ID, levelHasContent, planPresentationSheet, presentationDefaults, presentationSheetOps } from "./presentationSheet";
 import type { Project } from "../model/types";
 
 const LABELS = {
@@ -434,4 +434,21 @@ describe("[66] Präsentationsplan", () => {
     const bottoms = [...res.plan.items, ...(res.plan.tables ?? []), ...(res.plan.image ? [res.plan.image] : [])].filter((i) => (i.page ?? 0) === 0).map((i) => i.yMm + i.heightMm);
     expect(Math.max(...bottoms)).toBeGreaterThan(841 * 0.6);
   }, 90_000);
+
+  // [282] Passt der Plan im gewählten Massstab nicht: kein überlaufendes Blatt, sondern der grösste passende Massstab als Vorschlag.
+  it("[282] Massstab-Vorschlag: 1:50 auf A4 passt nicht, vorgeschlagener Massstab passt", () => {
+    st().loadProject(buildWettbewerbSampleProject());
+    const p = st().project;
+    const o = { ...presentationDefaults(p), paper: "a4" as const, orientation: "portrait" as const, scale: 50 };
+    expect(planPresentationSheet(p, o).fits).toBe(false);
+    const s = fittingPresentationScale(p, o);
+    expect(s).not.toBeNull();
+    expect(s!).toBeGreaterThan(50);
+    expect(planPresentationSheet(p, { ...o, scale: s }).fits).toBe(true);
+    // Der Vorschlag ist der grösste: der nächstgrössere Massstab passt nicht.
+    const bigger = [50, 100, 200, 500, 1000].filter((x) => x > 50 && x < s!);
+    for (const b of bigger) expect(planPresentationSheet(p, { ...o, scale: b }).fits).toBe(false);
+    // Was schon passt, braucht keinen Vorschlag auf Kosten des Massstabs: A1 1:200.
+    expect(planPresentationSheet(p, { ...presentationDefaults(p), scale: 200 }).fits).toBe(true);
+  }, 60_000);
 });

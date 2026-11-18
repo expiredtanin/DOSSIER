@@ -15,7 +15,7 @@ import "svg2pdf.js";
 import type { Layout, LayoutPaperFormat, MasterLayout, Project } from "../model/types";
 import { t } from "../i18n/translate";
 import { legendPlan, legendPrintSvg } from "./legendSvg";
-import { categoryLayerGroups, enablePdfLayers, type PdfLayers } from "./pdfLayers";
+import { categoryLayerGroups, enablePdfLayers, layerRunsInPlanOrder, type PdfLayers } from "./pdfLayers";
 import { generatePlan, type Plan } from "../plan/generatePlan";
 import { snapshotMono, snapshotOverrideRuleIds, snapshotTemplate, viewportDesignOptions, viewportLevelPlan, viewportSnapshotPlan } from "../plan/viewportPlan";
 import { isDoc3dSnapshot } from "../plan/toAxo";
@@ -260,10 +260,13 @@ async function renderPage(
         // Alle Ebenen mit den Grenzen des GANZEN Plans, sonst läge jede anders zentriert.
         doc.setFillColor(255, 255, 255);
         doc.rect(vp.xMm, vp.yMm, vp.widthMm, vp.heightMm, "F");
-        for (const g of categoryLayerGroups(project.layers, codes, t("pdfLayers.other"))) {
-          const plan = await planOf(g.codes);
-          if (plan.primitives.length === 0) continue; // leere Ebenen nicht anlegen
-          await ctx.layers.run(g.name, () => draw(plan, true, full.bounds));
+        // [282] Stapelung des ganzen Plans erhalten: Läufe in Plan-Reihenfolge statt Ebene für Ebene nach
+        // Kategorie-Baum (sonst deckt die Decken-Füllung die Wände zu).
+        const groups: { name: string; plan: Plan }[] = [];
+        for (const g of categoryLayerGroups(project.layers, codes, t("pdfLayers.other"))) groups.push({ name: g.name, plan: await planOf(g.codes) });
+        for (const run of layerRunsInPlanOrder(full, groups)) {
+          if (run.primitives.length === 0) continue;
+          await ctx.layers.run(run.name, () => draw({ ...full, primitives: run.primitives }, true, full.bounds));
         }
       }
     } catch {
