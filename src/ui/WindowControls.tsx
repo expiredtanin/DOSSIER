@@ -49,25 +49,9 @@ export function WindowControls() {
 
   if (!api) return null;
 
-  // Reihenfolge (macOS-Titelleiste links): Schliessen · Minimieren · Maximieren.
+  // [289] Electron läuft auf Linux/Windows: Fensterknöpfe rechts, Reihenfolge Minimieren · Maximieren · Schliessen.
   return (
     <div className="win-controls" role="group" aria-label={t("window.controls")}>
-      <button
-        type="button"
-        className="win-btn win-btn-close"
-        onClick={() => api.close()}
-        title={t("window.close")}
-        aria-label={t("window.close")}
-      >
-        <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
-          <path
-            d="M1 1 L9 9 M9 1 L1 9"
-            stroke="currentColor"
-            strokeWidth="1.2"
-            strokeLinecap="round"
-          />
-        </svg>
-      </button>
       <button
         type="button"
         className="win-btn"
@@ -108,6 +92,22 @@ export function WindowControls() {
             />
           </svg>
         )}
+      </button>
+      <button
+        type="button"
+        className="win-btn win-btn-close"
+        onClick={() => api.close()}
+        title={t("window.close")}
+        aria-label={t("window.close")}
+      >
+        <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+          <path
+            d="M1 1 L9 9 M9 1 L1 9"
+            stroke="currentColor"
+            strokeWidth="1.2"
+            strokeLinecap="round"
+          />
+        </svg>
       </button>
     </div>
   );

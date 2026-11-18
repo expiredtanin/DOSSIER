@@ -149,6 +149,7 @@ export {
   NativeTextSync,
   isGpuText,
   isSceneText,
+  svgDrawsTextOverGpu,
 } from "../plan/nativeText";
 
 export {

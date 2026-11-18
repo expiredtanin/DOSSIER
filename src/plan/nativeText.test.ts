@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Primitive } from './generatePlan';
-import { NativeTextSync, cssColorToRgba, isGpuText, isRotated, isSceneText } from './nativeText';
+import { NativeTextSync, cssColorToRgba, isGpuText, isRotated, isSceneText, svgDrawsTextOverGpu } from './nativeText';
 
 const txt = (id: string, over: Record<string, unknown> = {}) =>
   ({ kind: 'drawingText', drawingId: id, at: { x: 1, y: 2 }, text: 'A', heightM: 2, angle: 0.5, color: '#ff0000', ...over }) as unknown as Primitive;
@@ -60,5 +60,26 @@ describe('NativeTextSync.delta', () => {
     s.delta([txt('a'), txt('b')]);
     const d = s.delta([txt('a'), txt('b')], 'b');
     expect(d.remove).toHaveLength(1);
+  });
+});
+
+describe('svgDrawsTextOverGpu [289]: jeder Text genau einmal', () => {
+  const stamp = { kind: 'text', at: { x: 0, y: 0 } } as unknown as Primitive;
+  const flat = txt('f', { angle: 0 });
+  const rotated = txt('r', { angle: 0.5 });
+  const line = { kind: 'line' } as unknown as Primitive;
+
+  it('WASM (Browser, Linux/Electron): die Szene zeichnet Stempel und waagrechte Texte, das SVG nur gedrehte', () => {
+    const e = { wasm: true, native: false };
+    expect(svgDrawsTextOverGpu(stamp, e)).toBe(false);
+    expect(svgDrawsTextOverGpu(flat, e)).toBe(false); // vorher true: gedoppelte Schrift
+    expect(svgDrawsTextOverGpu(rotated, e)).toBe(true);
+    expect(svgDrawsTextOverGpu(line, e)).toBe(false);
+  });
+  it('native Fläche: Glyphen-Pass und Vektor-Glyphen, sonst SVG', () => {
+    expect(svgDrawsTextOverGpu(flat, { wasm: false, native: true, sceneTexts: true, gpuTexts: true })).toBe(false);
+    expect(svgDrawsTextOverGpu(rotated, { wasm: false, native: true, sceneTexts: true, gpuTexts: true })).toBe(false);
+    expect(svgDrawsTextOverGpu(rotated, { wasm: false, native: true, sceneTexts: true, gpuTexts: false })).toBe(true);
+    expect(svgDrawsTextOverGpu(flat, { wasm: false, native: true, sceneTexts: false })).toBe(true);
   });
 });

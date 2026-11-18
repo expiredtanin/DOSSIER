@@ -4,7 +4,7 @@
 // `PlanView`; die Reihenfolge der Hooks und Effekte ist wie vor der Aufteilung.
 
 import { useRef, useEffect, useMemo, useState, useLayoutEffect } from "react";
-import { PlanPickIndex, planTextEntries, materializeGreyed, materializeUnderlay, roomStampAt, buildDrawingIndex, isGpuText, isSceneText, meetScale, PLAN_DASH_VAR, toScreen, scaleFromView, PX_PER_M } from "../../../core";
+import { PlanPickIndex, planTextEntries, materializeGreyed, materializeUnderlay, roomStampAt, buildDrawingIndex, svgDrawsTextOverGpu, meetScale, PLAN_DASH_VAR, toScreen, scaleFromView, PX_PER_M } from "../../../core";
 import { useNativeAvailable, useNativePlanRenderer } from "../useNativePlanRenderer";
 import { useWasmPlanRenderer } from "../useWasmPlanRenderer";
 import type { UnderlayGroup, DrawingIndex, Primitive, ViewBox__plan_planView_geometry as ViewBox } from "../../../core";
@@ -194,17 +194,10 @@ export function usePlanEngine(inp: UsePlanEngineArgs) {
   const svgCandidates = useMemo(() => {
     const out: Array<{ p: Primitive; i: number }> = [];
     const items: ReadonlyArray<{ p: Primitive; i: number }> = useGpuRenderer ? planTextEntries(plan) : plan.primitives.map((p, i) => ({ p, i }));
+    const engine = { wasm: wantWasm, native: wantNative, sceneTexts: nativeHook.sceneTexts, gpuTexts: nativeHook.gpuTexts };
     for (const { p, i } of items) {
-      const drawnElsewhere = useGpuRenderer
-        ? wantWasm
-          ? p.kind !== "drawingText"
-          : p.kind !== "text" && p.kind !== "drawingText"
-        : p.kind === "line" && !!p.drawingId;
-      // Texte zeichnet die native Fläche selbst, im selben Frame wie die Linien ([194]): Raumstempel und
-      // waagrechte Textfelder über den Glyphen-Pass, gedrehte Einzeiler als Vektor-Glyphen.
-      if (useGpuRenderer && wantNative && nativeHook.sceneTexts && isSceneText(p)) continue;
-      if (useGpuRenderer && wantNative && nativeHook.gpuTexts && isGpuText(p)) continue;
-      if (!drawnElsewhere) out.push({ p, i });
+      // Mit GPU zeichnet das SVG nur Texte, und nur die, die die Szene auslässt ([289]: jeder Text genau einmal).
+      if (useGpuRenderer ? svgDrawsTextOverGpu(p, engine) : !(p.kind === "line" && !!p.drawingId)) out.push({ p, i });
     }
     return out;
   }, [plan, useGpuRenderer, wantWasm, wantNative, nativeHook.gpuTexts, nativeHook.sceneTexts]);

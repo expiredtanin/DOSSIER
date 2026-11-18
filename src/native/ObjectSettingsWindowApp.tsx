@@ -6,6 +6,7 @@
 // seine Projekt-Änderungen gehen als Ops ans Hauptfenster (`changeSink.ts`), Host-Handler ebenso. Cmd+Z/
 // Cmd+Shift+Z wirken auf den Verlauf des Hauptfensters; Esc schliesst das Fenster.
 
+import { isPrimaryMod } from "../state/platform";
 import { useEffect, useMemo, useState } from "react";
 import { t } from "../i18n";
 import { PanelHostProvider } from "../panels/host";
@@ -75,7 +76,7 @@ export function ObjectSettingsWindowApp() {
 
     const onKey = (e: KeyboardEvent) => {
       if (isTextEntry(document.activeElement)) return;
-      const mod = e.metaKey || e.ctrlKey;
+      const mod = isPrimaryMod(e);
       if (mod && (e.key === "z" || e.key === "Z")) {
         e.preventDefault();
         send(e.shiftKey ? "redo" : "undo");

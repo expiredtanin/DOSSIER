@@ -418,7 +418,7 @@ export default function App() {
   );
   const {
     projectFileInputRef, projectTemplateFileInputRef, openImportForFile, onSaveProject, onSaveProjectAs, onRestoreBackup,
-    onNewProject, onNewProjectFromSample, onNewProjectFromComplexSample, onNewProjectFromWettbewerbSample, onNewProjectFromUmbauSample, onNewProjectFromVariantenSample, onNewProjectFromTemplate,
+    onNewProject, onQuitApp, onNewProjectFromSample, onNewProjectFromComplexSample, onNewProjectFromWettbewerbSample, onNewProjectFromUmbauSample, onNewProjectFromVariantenSample, onNewProjectFromTemplate,
     onProjectTemplateFileChosen, onExportIfc, onExportObj, onExportStl, onOpenProject, onProjectFileChosen,
   } = files;
 
@@ -607,7 +607,21 @@ export default function App() {
   const fitSelectionKey = () => (planViewRef.current ? planViewRef.current.fitSelection() : fitView3d());
   registerSelectionActions({ fitAll: fitAllKey, fitSelection: fitSelectionKey });
   useFitShortcuts(fitAllKey, fitSelectionKey, shortcutOverrides);
-  useFileShortcuts({ save: onSaveProject, saveAs: onSaveProjectAs, open: onOpenProject }); // [170] ohne natives Menü
+  // [170] ohne natives Menü; [289] auch Neu/Drucken/Beenden/Zoom (wie CmdOrCtrl im Mac-Menü)
+  const zoomKey = (f: number) => {
+    const v = planViewRef.current;
+    if (v) v.setCamera(v.viewCenterModel(), v.pxPerMeter() * f);
+  };
+  useFileShortcuts({
+    save: onSaveProject,
+    saveAs: onSaveProjectAs,
+    open: onOpenProject,
+    new: onNewProject,
+    print: () => setExportOpen(true),
+    quit: onQuitApp,
+    zoomIn: () => zoomKey(1.25),
+    zoomOut: () => zoomKey(0.8),
+  });
   // Papier-Massstab anwenden: gewählten Nenner merken UND den Plan-Zoom exakt
   // auf 1:N setzen (PlanView rechnet die viewBox aus N + Canvas + dpi).
   const applyScale = (n: number) => {

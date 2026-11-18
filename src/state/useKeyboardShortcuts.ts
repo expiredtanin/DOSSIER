@@ -33,6 +33,7 @@ import {
 import type { ElementClipboard, ElementSelectionIds, PastedIds } from "../editors/elementClipboard";
 import { parseClipboardText, serializeClipboardText } from "../editors/elementClipboardSerialize";
 import { SHORTCUT_DEFS, fileShortcutFor, matchesShortcut, tabKeyAction, type FileShortcut, type ShortcutId, type ShortcutOverrides } from "./keyboardShortcuts";
+import { isPrimaryMod } from "./platform";
 import { isTauriRuntime } from "../native/projectFile";
 import { isolateSelectionLayerCodes, showAllLayerCodes } from "./layerIsolate";
 import { isInModalDialog } from "./modalScope";
@@ -70,7 +71,7 @@ export function useUndoRedoShortcut(
         undo();
         return;
       }
-      const mod = e.ctrlKey || e.metaKey;
+      const mod = isPrimaryMod(e);
       if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "y") {
         e.preventDefault();
         redo();

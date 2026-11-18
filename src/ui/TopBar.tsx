@@ -8,6 +8,7 @@
 // aus App, Aktionen melden sich über Callbacks zurück. Bezeichner englisch,
 // UI-Text/Kommentare deutsch (CONVENTIONS.md).
 
+import { platformName } from "../state/platform";
 import { setAboutDialogOpener } from "../state/aboutDialogHook";
 import { TEXT_FONTS } from "../text/fontList";
 import { t } from "../i18n";
@@ -1555,8 +1556,9 @@ export const TopBar = memo(function TopBar({
     return () => setAboutDialogOpener(null);
   }, []);
 
+  // [289] Nur der macOS-Overlay-Titel lässt Platz für die Ampeln; Tauri unter Linux/Windows hat sie nicht.
   const tauriNativeTitlebar =
-    typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+    typeof window !== "undefined" && "__TAURI_INTERNALS__" in window && platformName() === "mac";
 
   return (
     // `data-tauri-drag-region`: die Titelleiste ist selbst der Fenster-Ziehbereich

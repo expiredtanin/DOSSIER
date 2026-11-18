@@ -16,6 +16,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 const BIN = process.env.DOSSIER_ELECTRON_BIN ?? "";
+const SHOT_DIR = process.env.DOSSIER_SHOT_DIR ?? "";
 
 test.skip(!BIN || !existsSync(BIN), "kein Electron-Paket (DOSSIER_ELECTRON_BIN), s. npm run test:linux-app");
 test.describe.configure({ mode: "serial" });
@@ -377,7 +378,6 @@ test("Cycles: mitgeliefert, cyclesAvailable, runCycles rendert haus (8 Samples) 
 // Vorgabe), 320 × 180 mit 8 Samples rendern, Fortschritt „Sample n von 8“ wird angezeigt (ein Beobachter hält jeden Text fest, das Rendern
 // ist schneller als ein Abfragetakt), Bild erscheint, „Ins Layout einsetzen“, Arbeitsordner aufgeräumt. Zweiter Test: Abbrechen mitten im
 // Lauf. Läuft nur, wenn das Paket mit Cycles gebaut wurde. Mit `DOSSIER_SHOT_DIR=<ordner>` legt der Test Bilder des Dialogs ab.
-const SHOT_DIR = process.env.DOSSIER_SHOT_DIR ?? "";
 async function dialogShot(page: Page, name: string): Promise<void> {
   if (SHOT_DIR) {
     mkdirSync(SHOT_DIR, { recursive: true });
@@ -510,5 +510,50 @@ test("Cycles im Rendering-Dialog: Abbrechen mitten im Lauf beendet den Prozess u
   await expect(dialog.getByTestId("render-result")).toBeVisible({ timeout: 240_000 });
   await expect(dialog.getByTestId("render-save")).toBeVisible();
   expect(renderDirs().filter((d) => !before.includes(d))).toEqual([]);
+  await close(r);
+});
+
+// [289] Tastenkürzel mit Strg in der echten Linux-App (kein natives Menü): Undo/Redo, Speichern, Neu, Drucken. Die Super-Taste
+// (Meta) löst unter Linux nichts aus. Mit `DOSSIER_SHOT_DIR=<ordner>` legt der Test ein Bild der Oberfläche als `linux.png` ab.
+test("Strg-Kürzel: Undo/Redo, Speichern, Neu, PDF-Dialog; Meta tut nichts; Titelleiste ohne Mac-Einrückung", async () => {
+  const r = await launch();
+  const { page } = r;
+  await page.getByRole("button", { name: /Neues Projekt/ }).first().click();
+  await expect(page.getByRole("group", { name: "Befehlszeile" })).toBeVisible({ timeout: 60_000 });
+  await page.getByRole("tab", { name: "Elemente", exact: true }).click();
+  await drawWalls(page, ["0,0", "6,0"]);
+  await expect(elementRows(page)).toHaveCount(1);
+  await drawWalls(page, ["6,0", "6,4"]);
+  await expect(elementRows(page)).toHaveCount(2);
+  if (SHOT_DIR) {
+    mkdirSync(SHOT_DIR, { recursive: true });
+    await page.screenshot({ path: join(SHOT_DIR, "linux.png") });
+  }
+  const blur = () => page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await blur();
+  await page.keyboard.press("Meta+z"); // Super: nichts
+  await expect(elementRows(page)).toHaveCount(2);
+  await page.keyboard.press("Control+z");
+  await expect(elementRows(page)).toHaveCount(1);
+  await page.keyboard.press("Control+Shift+z");
+  await expect(elementRows(page)).toHaveCount(2);
+  await page.keyboard.press("Control+z");
+  await expect(elementRows(page)).toHaveCount(1);
+  await page.keyboard.press("Control+y");
+  await expect(elementRows(page)).toHaveCount(2);
+  // Titelleiste: keine Mac-Einrückung für Ampeln, Plattform am Wurzelelement.
+  expect(await page.evaluate(() => document.documentElement.dataset.platform)).toBe("linux");
+  expect(await page.evaluate(() => getComputedStyle(document.querySelector("header.topbar")!).paddingLeft)).not.toBe("88px");
+  await page.keyboard.press("Control+s");
+  await expect.poll(() => existsSync(obp) && wallsIn(obp)).toBe(2);
+  await page.keyboard.press("Control+p");
+  await expect(page.getByRole("dialog", { name: "PDF/SVG exportieren" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog", { name: "PDF/SVG exportieren" })).toBeHidden();
+  await blur();
+  await page.keyboard.press("Control+n");
+  const discard = page.getByRole("button", { name: "Nicht speichern" });
+  if (await discard.isVisible({ timeout: 1500 }).catch(() => false)) await discard.click();
+  await expect(elementRows(page)).toHaveCount(0);
   await close(r);
 });

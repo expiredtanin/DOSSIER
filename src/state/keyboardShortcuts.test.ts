@@ -1,4 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { beforeAll, afterAll, describe, expect, it, vi } from "vitest";
+// [289] Die Tests gehen von Strg als Primär-Modifikator aus (Linux), egal auf welchem Rechner sie laufen.
+beforeAll(() => vi.stubGlobal("navigator", { platform: "Linux x86_64", userAgent: "" }));
+afterAll(() => vi.unstubAllGlobals());
 import { setLanguage } from "../i18n";
 import {
   comboFromEvent,
@@ -64,16 +67,16 @@ describe("[190] Archicad-Kürzel", () => {
     expect(new Set(all).size).toBe(all.length);
     // Cmd+D (Duplizieren) und d (Drehen) sind verschiedene Kombinationen.
     expect(matchesShortcut(key("d"), "duplicate", {})).toBe(false);
-    expect(matchesShortcut(key("d", { metaKey: true }), "duplicate", {})).toBe(true);
-    expect(matchesShortcut(key("d", { metaKey: true }), "transformRotate", {})).toBe(false);
+    expect(matchesShortcut(key("d", { ctrlKey: true }), "duplicate", {})).toBe(true);
+    expect(matchesShortcut(key("d", { ctrlKey: true }), "transformRotate", {})).toBe(false);
   });
 });
 
 describe("comboMatches", () => {
   it("erkennt Ctrl/Cmd+Z (mod+z)", () => {
     expect(comboMatches(key("z", { ctrlKey: true }), "mod+z")).toBe(true);
-    expect(comboMatches(key("z", { metaKey: true }), "mod+z")).toBe(true);
-    expect(comboMatches(key("Z", { metaKey: true }), "mod+z")).toBe(true); // Grossbuchstabe (Caps/Shift-Ambiguität) egal
+    expect(comboMatches(key("z", { ctrlKey: true }), "mod+z")).toBe(true);
+    expect(comboMatches(key("Z", { ctrlKey: true }), "mod+z")).toBe(true); // Grossbuchstabe (Caps/Shift-Ambiguität) egal
   });
 
   it("verlangt exakte Modifikator-Übereinstimmung (kein zusätzliches Shift)", () => {
@@ -100,7 +103,7 @@ describe("comboFromEvent", () => {
   });
 
   it("baut die Kombination in fester Reihenfolge mod+shift+alt+key", () => {
-    expect(comboFromEvent(key("g", { metaKey: true, shiftKey: true }))).toBe("mod+shift+g");
+    expect(comboFromEvent(key("g", { ctrlKey: true, shiftKey: true }))).toBe("mod+shift+g");
     expect(comboFromEvent(key("G", { ctrlKey: true }))).toBe("mod+g");
     expect(comboFromEvent(key("q"))).toBe("q");
   });
@@ -206,7 +209,7 @@ describe("[252] tabKeyAction", () => {
 describe("[170] Datei-Kürzel ausserhalb von Tauri (Browser/Electron-Linux)", () => {
   it("Strg/Cmd+S speichert, +Umschalt speichert unter, Strg/Cmd+O öffnet", () => {
     expect(fileShortcutFor(key("s", { ctrlKey: true }))).toBe("save");
-    expect(fileShortcutFor(key("s", { metaKey: true }))).toBe("save");
+    expect(fileShortcutFor(key("s", { metaKey: true }))).toBeNull(); // [289] Super/Meta ist unter Linux kein Primär-Modifikator
     expect(fileShortcutFor(key("S", { ctrlKey: true, shiftKey: true }))).toBe("saveAs");
     expect(fileShortcutFor(key("o", { ctrlKey: true }))).toBe("open");
   });

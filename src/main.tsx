@@ -1,5 +1,6 @@
 // Einstieg der Oberfläche (Vite, `index.html`): setzt Hell/Dunkel, unterdrückt Browser-Gesten, lädt den
 // Rust-Kern (`initCore`) und mountet dann die App oder, je nach `?window=…`, ein macOS-Nebenfenster.
+import { isPrimaryMod, platformName } from "./state/platform";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
@@ -24,6 +25,7 @@ import "./text/fonts.css";
 // eigenes Dokument und mountet über dieselbe main.tsx) — verhindert einen
 // Hell/Dunkel-Flackerer beim Laden.
 applyThemeMode(getStoredThemeMode());
+document.documentElement.dataset.platform = platformName(); // [289] CSS-Haken je Plattform (Scrollbalken, Schrift)
 
 /** Eigenes natives Nebenfenster statt der Haupt-App? Steuert per URL-Query,
  * welcher Root gemountet wird (siehe native/resourceWindow.ts bzw.
@@ -74,7 +76,7 @@ document.addEventListener("contextmenu", (e) => e.preventDefault());
 // 2) Ctrl/Cmd+A („Alles markieren") außerhalb echter Eingaben unterbinden.
 //    In Eingaben bleibt es das normale Markieren des Feldinhalts.
 document.addEventListener("keydown", (e) => {
-  if ((e.ctrlKey || e.metaKey) && (e.key === "a" || e.key === "A")) {
+  if (isPrimaryMod(e) && (e.key === "a" || e.key === "A")) {
     if (!isTextEntry(document.activeElement)) e.preventDefault();
   }
 });

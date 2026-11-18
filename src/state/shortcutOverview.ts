@@ -3,6 +3,7 @@
 // Registry (`ALIASES` + Nutzer-Kürzel). Nichts wird von Hand gepflegt; neue Kürzel erscheinen von selbst.
 // Reine Funktion (kein React), Anzeige in `ui/ShortcutOverviewDialog.tsx`.
 
+import { isMacPlatform } from "./platform";
 import { ALIASES, COMMANDS } from "../commands/registry";
 import {
   SHORTCUT_DEFS,
@@ -51,7 +52,7 @@ export function buildShortcutOverview(
   aliasOverrides: Record<string, string> = {},
   mac?: boolean,
 ): ShortcutOverview {
-  const isMac = mac ?? (typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent || ""));
+  const isMac = mac ?? isMacPlatform();
   const combos: ComboGroup[] = CATEGORY_ORDER.map((category) => ({
     category,
     rows: [

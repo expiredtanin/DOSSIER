@@ -6,6 +6,8 @@
 // zwischen Block-Elementen (div/p) zählt je eine Absatzgrenze als +1. So entsteht
 // ein linearer Zeichen-Offset, der mit TextRange kompatibel ist.
 
+import { formatCombo } from "../state/keyboardShortcuts";
+import { isPrimaryMod } from "../state/platform";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { t } from "../i18n";
 import { docToHtml } from "../text/renderHtml";
@@ -568,7 +570,7 @@ export function RichTextEditor({
 
       // Standard-WYSIWYG-Kürzel (Cmd auf macOS, Ctrl sonst) — bisher fehlten
       // sie komplett, nur die Toolbar-Buttons konnten Marks umschalten.
-      const mod = e.metaKey || e.ctrlKey;
+      const mod = isPrimaryMod(e);
       if (mod && !e.altKey) {
         const k = e.key.toLowerCase();
         if (k === "b" || k === "i" || k === "u") {
@@ -688,7 +690,7 @@ export function RichTextEditor({
         <button
           type="button"
           className={`rt-btn${isBold ? " rt-btn--active" : ""}`}
-          title={`${t("rt.bold")} (Cmd/Ctrl+B)`}
+          title={`${t("rt.bold")} (${formatCombo("mod+b")})`}
           onMouseDown={(e) => {
             e.preventDefault();
             handleToggleMark("bold");
@@ -701,7 +703,7 @@ export function RichTextEditor({
         <button
           type="button"
           className={`rt-btn${isItalic ? " rt-btn--active" : ""}`}
-          title={`${t("rt.italic")} (Cmd/Ctrl+I)`}
+          title={`${t("rt.italic")} (${formatCombo("mod+i")})`}
           onMouseDown={(e) => {
             e.preventDefault();
             handleToggleMark("italic");
@@ -714,7 +716,7 @@ export function RichTextEditor({
         <button
           type="button"
           className={`rt-btn${isUnderline ? " rt-btn--active" : ""}`}
-          title={`${t("rt.underline")} (Cmd/Ctrl+U)`}
+          title={`${t("rt.underline")} (${formatCombo("mod+u")})`}
           onMouseDown={(e) => {
             e.preventDefault();
             handleToggleMark("underline");

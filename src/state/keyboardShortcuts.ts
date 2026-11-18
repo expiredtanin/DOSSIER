@@ -22,6 +22,7 @@
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
 import { getLanguage } from "../i18n/translate";
+import { isMacPlatform, isPrimaryMod } from "./platform";
 
 export type ShortcutId =
   | "undo"
@@ -300,7 +301,7 @@ const MODIFIER_KEYS = new Set(["Control", "Meta", "Shift", "Alt"]);
 export function comboFromEvent(e: KeyboardEvent): string | null {
   if (MODIFIER_KEYS.has(e.key)) return null;
   const parts: string[] = [];
-  if (e.ctrlKey || e.metaKey) parts.push("mod");
+  if (isPrimaryMod(e)) parts.push("mod");
   if (e.shiftKey) parts.push("shift");
   if (e.altKey) parts.push("alt");
   const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
@@ -316,7 +317,7 @@ export function comboMatches(e: KeyboardEvent, combo: string): boolean {
   const wantMod = mods.includes("mod");
   const wantShift = mods.includes("shift");
   const wantAlt = mods.includes("alt");
-  if ((e.ctrlKey || e.metaKey) !== wantMod) return false;
+  if (isPrimaryMod(e) !== wantMod) return false;
   if (e.shiftKey !== wantShift) return false;
   if (e.altKey !== wantAlt) return false;
   const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
@@ -324,10 +325,10 @@ export function comboMatches(e: KeyboardEvent, combo: string): boolean {
 }
 
 /** [170] Datei-Kürzel ausserhalb von Tauri. */
-export type FileShortcut = "save" | "saveAs" | "open";
+export type FileShortcut = "save" | "saveAs" | "open" | "new" | "print" | "quit" | "zoomIn" | "zoomOut";
 
 /**
- * [170] Strg/Cmd+S, Strg/Cmd+Umschalt+S, Strg/Cmd+O im Browser und in der Linux-App (Electron, ohne native Menüleiste).
+ * [170] Strg/Cmd+S, Strg/Cmd+Umschalt+S, Strg/Cmd+O ([289]: auch N, P, Q, Zoom +/-) im Browser und in der Linux-App (Electron, ohne native Menüleiste).
  * Unter Tauri liefert das native Menü dieselben Kürzel (`native/appMenu.ts`, Accelerator) — dort nicht verwenden.
  * Fest wie die Menü-Accelerators, nicht umbelegbar (nicht in {@link SHORTCUT_DEFS}).
  */
@@ -335,6 +336,13 @@ export function fileShortcutFor(e: KeyboardEvent): FileShortcut | null {
   if (comboMatches(e, "mod+shift+s")) return "saveAs";
   if (comboMatches(e, "mod+s")) return "save";
   if (comboMatches(e, "mod+o")) return "open";
+  // [289] Dieselben Kürzel wie im nativen Mac-Menü (CmdOrCtrl+N/Q) plus Drucken und Zoom, die es dort nicht gibt.
+  if (comboMatches(e, "mod+n")) return "new";
+  if (comboMatches(e, "mod+p")) return "print";
+  if (comboMatches(e, "mod+q")) return "quit";
+  // Zoom: „+" liegt auf deutscher Tastatur auf „+", auf US-Tastatur auf „=" (Shift) — beide gelten; NumPad-„+/-" ebenso.
+  if (isPrimaryMod(e) && !e.altKey && (e.key === "+" || e.key === "=")) return "zoomIn";
+  if (isPrimaryMod(e) && !e.altKey && (e.key === "-" || e.key === "_")) return "zoomOut";
   return null;
 }
 
@@ -383,10 +391,6 @@ export function tabKeyAction(e: Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey
   return "commandLine";
 }
 
-function isMacPlatform(): boolean {
-  if (typeof navigator === "undefined") return false;
-  return /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent || "");
-}
 
 const KEY_DISPLAY_LABELS: Record<string, string> = {
   Delete: "Entf",

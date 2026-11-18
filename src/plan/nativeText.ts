@@ -135,3 +135,20 @@ export class NativeTextSync {
     return { upsert, remove };
   }
 }
+
+/**
+ * [289] Zeichnet das SVG-Overlay diesen Text-Eintrag, obwohl die GPU-Fläche den Plan zeichnet? Jeder Text genau EINMAL:
+ * `text`/`drawingText` setzt der Kern in die Szene ({@link isSceneText}; render2d/WASM und native Fläche zeichnen sie),
+ * das SVG behält nur, was die Szene auslässt (gedrehte Einzeltexte, bei der nativen Fläche ohne `isGpuText`).
+ * Vorher zeichnete das SVG unter WASM (Browser, Linux/Electron) alle `drawingText` ZUSÄTZLICH zur Szene: gedoppelte Schrift.
+ */
+export function svgDrawsTextOverGpu(
+  p: Primitive,
+  engine: { wasm: boolean; native: boolean; sceneTexts?: boolean; gpuTexts?: boolean },
+): boolean {
+  if (p.kind !== 'text' && p.kind !== 'drawingText') return false;
+  if (engine.wasm) return !isSceneText(p);
+  if (engine.native && engine.sceneTexts && isSceneText(p)) return false;
+  if (engine.native && engine.gpuTexts && isGpuText(p)) return false;
+  return true;
+}

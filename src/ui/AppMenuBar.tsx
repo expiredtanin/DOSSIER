@@ -7,6 +7,7 @@ import { memo } from "react";
 //
 // Bezeichner englisch, UI-Text über i18n (CONVENTIONS.md).
 
+import { formatCombo, loadShortcutOverrides, resolveCombo } from "../state/keyboardShortcuts";
 import { Dropdown } from "./Dropdown";
 import type { DropdownItem } from "./Dropdown";
 import { t } from "../i18n";
@@ -113,8 +114,9 @@ export const AppMenuBar = memo(function AppMenuBar({
   onOpenHistory,
   onOpenDesignOptions,
 }: AppMenuBarProps) {
+  const ov = loadShortcutOverrides();
   const fileItems: DropdownItem[] = [
-    { label: t("file.new"), onSelect: onNewProject },
+    { label: t("file.new"), onSelect: onNewProject, shortcut: formatCombo("mod+n") },
     { label: t("file.newFromSample"), onSelect: onNewProjectFromSample },
     { label: t("file.newFromComplexSample"), onSelect: onNewProjectFromComplexSample },
     { label: t("file.newFromWettbewerbSample"), onSelect: onNewProjectFromWettbewerbSample },
@@ -122,16 +124,16 @@ export const AppMenuBar = memo(function AppMenuBar({
     ...(onNewProjectFromVariantenSample ? [{ label: t("file.newFromVariantenSample"), onSelect: onNewProjectFromVariantenSample }] : []),
     { label: t("file.newFromTemplateFile"), onSelect: onNewProjectFromTemplate },
     { divider: true },
-    { label: t("file.open"), onSelect: onOpenProject },
-    { label: t("file.save"), onSelect: onSaveProject },
-    { label: t("menu.native.saveAs"), onSelect: onSaveProjectAs },
+    { label: t("file.open"), onSelect: onOpenProject, shortcut: formatCombo("mod+o") },
+    { label: t("file.save"), onSelect: onSaveProject, shortcut: formatCombo("mod+s") },
+    { label: t("menu.native.saveAs"), onSelect: onSaveProjectAs, shortcut: formatCombo("mod+shift+s") },
     { label: t("menu.native.restoreBackup"), onSelect: onRestoreBackup },
     { divider: true },
     { label: t("file.import"), onSelect: onImport },
     ...(onImportPointCloud ? [{ label: t("menu.native.importPointCloud"), onSelect: onImportPointCloud }] : []),
     ...(onImportMesh ? [{ label: t("menu.native.importMesh"), onSelect: onImportMesh }] : []),
     ...(onExportPdf || onExportDxf || onExportIfc || onExportObj || onExportStl ? [{ divider: true }] : []),
-    ...(onExportPdf ? [{ label: `${t("menu.native.export")}: PDF`, onSelect: onExportPdf }] : []),
+    ...(onExportPdf ? [{ label: `${t("menu.native.export")}: PDF`, onSelect: onExportPdf, shortcut: formatCombo("mod+p") }] : []),
     ...(onExportDxf ? [{ label: `${t("menu.native.export")}: DXF`, onSelect: onExportDxf }] : []),
     ...(onExportIfc ? [{ label: `${t("menu.native.export")}: IFC`, onSelect: onExportIfc }] : []),
     ...(onExportObj ? [{ label: `${t("menu.native.export")}: OBJ`, onSelect: onExportObj }] : []),
@@ -139,8 +141,8 @@ export const AppMenuBar = memo(function AppMenuBar({
   ];
 
   const editItems: DropdownItem[] = [
-    { label: t("menu.edit.undo"), onSelect: onUndo, disabled: !canUndo },
-    { label: t("menu.edit.redo"), onSelect: onRedo, disabled: !canRedo },
+    { label: t("menu.edit.undo"), onSelect: onUndo, disabled: !canUndo, shortcut: formatCombo(resolveCombo("undo", ov)) },
+    { label: t("menu.edit.redo"), onSelect: onRedo, disabled: !canRedo, shortcut: formatCombo(resolveCombo("redo", ov)) },
     ...(onOpenHistory ? [{ label: t("nav.history"), onSelect: onOpenHistory }] : []),
     ...(onOpenDesignOptions ? [{ label: t("designOption.title"), onSelect: onOpenDesignOptions }] : []),
     { divider: true },
