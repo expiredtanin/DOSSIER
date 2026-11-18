@@ -160,7 +160,7 @@ fn component_occluders(c: &Ctx, range: &ViewRange, out: &mut Vec<crate::hlr::Fac
         }
     }
     for ce in p.ceilings.as_deref().unwrap_or(&[]).iter().filter(|x| c.vis(&x.category_code, &x.id)) {
-        let (zb, zt) = p.ceiling_vertical_extent(ce);
+        let (zb, zt) = p.ceiling_vertical_span(ce);
         let zone = range.classify(zb, zt);
         if ce.floor_id != c.a.floor && !range.admits_other_floor(zone) {
             continue;

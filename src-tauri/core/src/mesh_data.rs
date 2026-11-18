@@ -245,6 +245,12 @@ fn signed_area_xy(pts: &[Vec2]) -> f64 {
 /// Extrudiertes Umriss-Prisma (Decke, Treppen-Tritt, Extrusion): Kappen + Mantel, aussen gewunden;
 /// `taper` (0..1) verjüngt den oberen Ring linear zum Schwerpunkt.
 fn push_prism(g: &mut Prim, outline: &[Vec2], z_bottom: f64, z_top: f64, taper: f64) {
+    push_prism_sloped(g, outline, z_bottom, z_top, taper, None);
+}
+
+/// Wie [`push_prism`]; [281] `slope` (Neigungsebene `[ox, oy, gx, gy]`) versetzt jede Höhe (geneigte Decke).
+fn push_prism_sloped(g: &mut Prim, outline: &[Vec2], z_bottom: f64, z_top: f64, taper: f64, slope: Option<&[f64; 4]>) {
+    let dz = |x: f64, y: f64| slope.map_or(0.0, |s| crate::model::helpers::slope_dz(s, x, y));
     if outline.len() < 3 || z_top - z_bottom <= 1e-9 {
         return;
     }
@@ -260,10 +266,11 @@ fn push_prism(g: &mut Prim, outline: &[Vec2], z_bottom: f64, z_top: f64, taper: 
     let t = min(1.0, max(0.0, taper));
     let base = (g.positions.len() / 3) as f64;
     for p in &ccw {
-        g.positions.extend_from_slice(&[p.x, z_bottom, p.y]);
+        g.positions.extend_from_slice(&[p.x, z_bottom + dz(p.x, p.y), p.y]);
     }
     for p in &ccw {
-        g.positions.extend_from_slice(&[cx + (p.x - cx) * (1.0 - t), z_top, cy + (p.y - cy) * (1.0 - t)]);
+        let (x, y) = (cx + (p.x - cx) * (1.0 - t), cy + (p.y - cy) * (1.0 - t));
+        g.positions.extend_from_slice(&[x, z_top + dz(x, y), y]);
     }
     let nf = n as f64;
     let cap = crate::gpu_compile::triangulate(&ccw.iter().map(|p| crate::hatch::v2(p.x, p.y)).collect::<Vec<_>>());
@@ -436,7 +443,7 @@ pub(crate) fn collect_scene(src: &Project, opt: &MeshOptions) -> Result<SceneDat
         let mut g = Group::new(format!("Decke_{}", sanitize_name(&s.ceiling_id)), "slab", &s.ceiling_id, level_of(ceiling_floor.get(s.ceiling_id.as_str()).copied()));
         let outline: Vec<Vec2> = s.outline.iter().map(|q| Vec2 { x: q[0], y: q[1] }).collect();
         let mat = mats.solid(&component_name(&p, s.cut.as_ref().and_then(|c| c.component_id.as_deref()), "Decke"), s.color);
-        push_prism(g.prim(mat), &outline, s.z_bottom, s.z_top, 0.0);
+        push_prism_sloped(g.prim(mat), &outline, s.z_bottom, s.z_top, 0.0, s.slope.as_ref());
         groups.push(g);
     }
 

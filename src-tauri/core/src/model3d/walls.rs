@@ -624,7 +624,8 @@ pub(crate) fn floor_context_with(p: &Project, floor_id: &str, with_ceilings: boo
 /// Wie [`floor_context_with`] mit schon gerechneten Platten-Umrissen je Decke (`bearing`, Index wie
 /// `Project::ceilings`, s. `bearing::bearing_outlines_memo`; [214] 3D-Cache).
 pub(crate) fn floor_context_from(p: &Project, floor_id: &str, with_ceilings: bool, bearing: &[Option<Vec<crate::flat::Polygon>>]) -> FloorContext {
-    let only = |c: &Ceiling| with_ceilings && c.floor_id == floor_id && c.outline.len() >= 3;
+    // [281] Geneigte Decken schneiden die Wandschichten (noch) nicht ein: die Schnitt-Bänder sind waagrecht.
+    let only = |c: &Ceiling| with_ceilings && c.floor_id == floor_id && c.outline.len() >= 3 && c.slope_plane().is_none();
     let ceilings: Vec<CeilingIn> = p
         .ceilings
         .as_deref()

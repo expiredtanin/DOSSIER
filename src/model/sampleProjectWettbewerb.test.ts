@@ -36,8 +36,10 @@ describe("Beispielprojekt Wettbewerb", () => {
       expect(p.rooms!.filter((r) => r.floorId === f).length).toBe(10);
     }
     // [279] zwei Balkonplatten mit Geländer (Stäbe 1. OG, Glas 2. OG)
-    expect(p.ceilings!.length).toBe(5);
+    expect(p.ceilings!.length).toBe(6);
     expect(p.railings!.map((r) => r.kind)).toEqual(["bars", "glass"]);
+    // [281] Eingangsrampe (6 %) an der Ostfassade.
+    expect(p.ceilings!.find((c) => c.id === "c-rampe")?.slope?.ramp).toBe(true);
     expect(p.roofs![0].shape).toBe("flach");
     expect(p.stairs!.length).toBe(2);
     expect(p.rooms!.length).toBe(30);

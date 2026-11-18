@@ -201,6 +201,8 @@ export interface RSlab {
    * render3d `SlabInput::monolith`.
    */
   monolith?: string;
+  /** [281] Geneigte Decke/Rampe: Neigungsebene `[ox, oy, gx, gy]` (render3d `SlabInput::slope`). */
+  slope?: [number, number, number, number];
 }
 
 /** Art eines rohen Kontext-Meshes (bestimmt in render3d die Default-Einfärbung). */

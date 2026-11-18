@@ -179,6 +179,8 @@ pub const REC_RAILING: f64 = 26.0;
 pub const REC_COLUMN_PIECES: f64 = 20.0;
 pub const REC_CEILING_ARC: f64 = 21.0;
 pub const REC_SPACE_ARC: f64 = 22.0;
+/// [281] Geneigte Decke als Netz (Flag Rampe ⇒ `IfcRamp` + `IfcRampFlight`).
+pub const REC_CEILING_MESH: f64 = 27.0;
 
 mod format;
 mod reader;
@@ -201,6 +203,7 @@ fn rec_name(code: f64) -> &'static str {
         c if c == REC_WALL_ARC_SOLID => "WALL_ARC_SOLID",
         c if c == REC_CEILING => "CEILING",
         c if c == REC_CEILING_ARC => "CEILING_ARC",
+        c if c == REC_CEILING_MESH => "CEILING_MESH",
         c if c == REC_SPACE_ARC => "SPACE_ARC",
         c if c == REC_OPENING => "OPENING",
         c if c == REC_OPENING_SOLID => "OPENING_SOLID",
@@ -702,6 +705,43 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
                     w.emit_box_product_voids(&plain, &plain_inner, z_rel, depth, w.placement_of(structure))
                 };
                 w.finish_typed("IFCSLAB", format!("slab/{id}"), &name, &ty, &psets, structure, placement, shape, Some(enum_("FLOOR")), true);
+            }
+            c if c == REC_CEILING_MESH => {
+                let structure = r.structure(n_storeys)?;
+                let id = r.string()?;
+                let name = r.string()?;
+                let ty = r.type_ref()?;
+                let psets = r.psets()?;
+                let ramp = r.flag()?;
+                let mesh = r.mesh()?;
+                let key = format!("slab/{id}");
+                if !ramp {
+                    let (placement, shape) = w.emit_triangulated_product(&mesh, w.placement_of(structure));
+                    w.finish_typed("IFCSLAB", key, &name, &ty, &psets, structure, placement, shape, Some(enum_("FLOOR")), true);
+                } else {
+                    // Rampe ohne eigene Darstellung; der Lauf (Körper, Typ, Eigenschaften) hängt per IfcRelAggregates daran
+                    // (wie Treppe/Treppenlauf). IFC2x3: `ShapeType` statt `PredefinedType`, Lauf ohne Typ-Enum.
+                    let parent = w.placement_of(structure);
+                    let ramp_placement = w.emit_placement(0.0, parent);
+                    let g = w.gid(&key);
+                    let ramp_entity = w.add(
+                        "IFCRAMP",
+                        format!("{g},#{},{},$,$,#{ramp_placement},$,$,{}", w.owner_history, ifc_string(&name), enum_("STRAIGHT_RUN_RAMP")),
+                    );
+                    let (placement, shape) = w.emit_triangulated_product(&mesh, ramp_placement);
+                    let fkey = format!("{key}/flight");
+                    let guid = w.gid(&fkey);
+                    let flight = w.emit_building_element("IFCRAMPFLIGHT", guid, &name, placement, shape, Some(enum_("STRAIGHT")));
+                    for p in &psets {
+                        w.add_pset(p, flight, &fkey);
+                    }
+                    // Der Deckentyp (IfcSlabType) passt nicht zum Rampenlauf: ohne Typ, Schichten nur im Modell.
+                    let _ = ty;
+                    let g = w.gid(&format!("aggregates/{key}"));
+                    w.add("IFCRELAGGREGATES", format!("{g},#{},$,$,#{ramp_entity},{}", w.owner_history, refs(&[flight])));
+                    w.add_to_containment(structure, ramp_entity);
+                    w.elements.insert(key, ramp_entity);
+                }
             }
             c if c == REC_OPENING => {
                 let wall_id = r.string()?;

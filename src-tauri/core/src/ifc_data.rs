@@ -59,6 +59,8 @@ const REC_GUIDS: f64 = 23.0;
 const REC_CONTEXT: f64 = 24.0;
 const REC_LAYERS: f64 = 25.0;
 const REC_RAILING: f64 = 26.0;
+/// [281] Geneigte Decke als Netz; Rampe ⇒ `IfcRamp` mit `IfcRampFlight`.
+const REC_CEILING_MESH: f64 = 27.0;
 
 /// Toleranz des Kerns (`wall_bands.rs::EPS`) für „Öffnung trifft Band".
 const BAND_EPS: f64 = 1e-4;
@@ -876,6 +878,39 @@ fn add_back(quantities: &mut [Qty], (area, volume): (f64, f64)) {
     }
 }
 
+/// [281] Netz einer geneigten Platte (Modell x, y, z; nach aussen gewickelt): Umriss mit Aussparungen (über Brücken
+/// eingefügt), Unterseite bei `z0`, Dicke `depth` lotrecht, jede Höhe um den Versatz der Neigungsebene `g`.
+pub(crate) fn sloped_slab_mesh(outline: &[[f64; 2]], holes: &[Vec<[f64; 2]>], z0: f64, depth: f64, g: &[f64; 4]) -> (Vec<f64>, Vec<u32>) {
+    let merged = crate::polygon_holes::merge_holes(outline, holes, 1e-4);
+    let mut ring = merged.ring;
+    if ring.len() < 3 || !(depth > 0.0) {
+        return (Vec::new(), Vec::new());
+    }
+    let area: f64 = (0..ring.len()).map(|i| { let (a, b) = (ring[i], ring[(i + 1) % ring.len()]); a[0] * b[1] - b[0] * a[1] }).sum();
+    if area < 0.0 {
+        ring.reverse();
+    }
+    let n = ring.len() as u32;
+    let mut positions = Vec::with_capacity(ring.len() * 6);
+    for z in [z0, z0 + depth] {
+        for q in &ring {
+            positions.extend_from_slice(&[q[0], q[1], z + crate::model::helpers::slope_dz(g, q[0], q[1])]);
+        }
+    }
+    let tris = dossier_hatch::ear_clip::triangulate(&ring);
+    let mut indices = Vec::with_capacity(tris.len() * 2 + ring.len() * 6);
+    for t in tris.chunks_exact(3) {
+        // Unterseite nach unten (umgekehrt), Oberseite nach oben (CCW).
+        indices.extend_from_slice(&[t[0], t[2], t[1]]);
+        indices.extend_from_slice(&[n + t[0], n + t[1], n + t[2]]);
+    }
+    for i in 0..n {
+        let j = (i + 1) % n;
+        indices.extend_from_slice(&[i, j, n + j, i, n + j, n + i]);
+    }
+    (positions, indices)
+}
+
 fn push_box(positions: &mut Vec<f64>, indices: &mut Vec<u32>, b: &[f64; 24], base: f64) {
     let at = (positions.len() / 3) as u32;
     for c in b.chunks_exact(3) {
@@ -1446,6 +1481,36 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
         // [191] Bögen im Umriss: Mengen auf dem fein geteilten Ring, Profil mit echten Bögen (s. unten).
         let outline = c.ring();
         psets.extend(qto("Qto_SlabBaseQuantities", qty::slab_quantities(&outline, &inner, z_top - z_bottom)));
+        // [281] Geneigte Decke/Rampe: Körper als Netz (Ober- und Unterseite in der Neigungsebene, Ränder lotrecht).
+        if let Some(g) = c.slope_plane() {
+            let ring: Vec<[f64; 2]> = outline.iter().map(|v| [v.x, v.y]).collect();
+            let holes: Vec<Vec<[f64; 2]>> = inner.iter().map(|r| r.iter().map(|v| [v.x, v.y]).collect()).collect();
+            let (positions, indices) = sloped_slab_mesh(&ring, &holes, z_bottom - base_of(structure), z_top - z_bottom, &g);
+            if indices.is_empty() {
+                continue;
+            }
+            let closed = is_watertight(&positions, &indices, 1e-6);
+            // Rampe: Eigenschaften und Mengen am Rampenlauf (IFC4 `Pset_RampFlightCommon`, `Qto_RampFlightBaseQuantities`
+            // ohne Breite/Umfang der Platte; Flächen = Grundrissprojektion, Volumen exakt, da die Dicke lotrecht ist).
+            if c.is_ramp() {
+                for ps in psets.iter_mut() {
+                    match ps.name {
+                        "Pset_SlabCommon" => ps.name = "Pset_RampFlightCommon",
+                        "Qto_SlabBaseQuantities" => {
+                            ps.name = "Qto_RampFlightBaseQuantities";
+                            ps.props.retain(|p| !matches!(p, Prop::Qty("Width" | "Perimeter", _, _)));
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            w_head(&mut f, REC_CEILING_MESH, structure, &c.id, &name);
+            w_type(&mut f, ty.as_ref().map(|t| type_ref(t, 1.0, "FLOOR")).as_ref());
+            w_psets(&mut f, &psets);
+            f.num(if c.is_ramp() { 1.0 } else { 0.0 });
+            w_mesh(&mut f, &positions, &indices, closed);
+            continue;
+        }
         // Mit Bögen: Profil als IfcCompositeCurve (CEILING_ARC); die gehosteten Fensteröffnungen sind gerade.
         let arcs = c.has_arcs();
         w_head(&mut f, if arcs { REC_CEILING_ARC } else { REC_CEILING }, structure, &c.id, &name);

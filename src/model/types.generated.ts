@@ -222,12 +222,34 @@ export type Ceiling = {
    * Z-Wert; „floor" bindet die UK an ein Geschoss.
    */
   bottom?: VerticalAnchor;
+  /** [281] Neigung (geneigte Decke, Rampe, Gefälle). Fehlt ⇒ waagrecht. */
+  slope?: CeilingSlope;
   /** [271] Umbau: Status (Bestand, Abbruch, Neu) und Etappe. Fehlt ⇒ Bestand. */
   renovation?: Renovation;
   /**
    * [272] Variante, zu der das Element gehört (`Project.designOptionSets`). Fehlt ⇒ Hauptmodell (immer sichtbar).
    */
   designOption?: DesignOptionRef;
+};
+
+/**
+ * [281] Neigung einer Decke oder Rampe: Ober- und Unterkante (alle Schichten) folgen einer Ebene, die
+ * längs der Gefällelinie `from` → `to` gleichmässig steigt oder fällt. Am Bezugspunkt `from` liegt die Decke
+ * auf ihrer eingestellten Höhe (`top`/`bottom`); bei `to` um `rise` höher (negativ = tiefer). Quer zur
+ * Gefällelinie bleibt die Höhe gleich. Die Dicke bleibt lotrecht gemessen (Schichten verschoben, nicht gedreht).
+ * Gefälle in % = `rise` / |`to` − `from`| · 100.
+ */
+export type CeilingSlope = {
+  /** Bezugspunkt im Grundriss (Meter): dort gilt die eingestellte Höhe der Decke. */
+  from: Vec2;
+  /** Zweiter Punkt der Gefällelinie (Meter); die Richtung `from` → `to` ist die Fallinie. */
+  to: Vec2;
+  /** Höhenunterschied der Decke von `from` nach `to` (Meter; positiv = steigt zu `to`). */
+  rise: number;
+  /**
+   * Als Rampe darstellen: Grundriss mit Lauflinie und Pfeil (aufwärts), IFC als `IfcRamp`/`IfcRampFlight`.
+   */
+  ramp?: boolean;
 };
 
 /**

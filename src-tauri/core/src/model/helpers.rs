@@ -195,23 +195,37 @@ impl Project {
         let ring = |r: &[Vec2]| -> Vec<kernel2d::Vec2> { r.iter().map(|q| kernel2d::Vec2::new(q.x, q.y)).collect() };
         let mut cap = top;
         for c in ceilings {
-            let (cb, ct) = self.ceiling_vertical_extent(c);
-            if !(cb > bottom + 1e-6 && cb < cap - 1e-6 && ct > cb) || c.outline.len() < 3 {
+            let (cb0, ct) = self.ceiling_vertical_extent(c);
+            if !(ct > cb0) || c.outline.len() < 3 {
                 continue;
             }
             let outline = ring(&c.outline);
             let holes: Vec<Vec<kernel2d::Vec2>> = c.openings.iter().flatten().map(|h| ring(h)).collect();
-            let under = probes.iter().any(|&q| kernel2d::point_in_outline(q, &outline) && !holes.iter().any(|h| h.len() >= 3 && kernel2d::point_in_outline(q, h)));
-            if under {
+            // [281] Geneigte Decke: tiefste Unterkante über den Proben unter der Decke.
+            let cb = probes
+                .iter()
+                .filter(|&&q| kernel2d::point_in_outline(q, &outline) && !holes.iter().any(|h| h.len() >= 3 && kernel2d::point_in_outline(q, h)))
+                .map(|q| cb0 + c.slope_dz(q.x, q.y))
+                .fold(f64::NAN, f64::min);
+            if cb > bottom + 1e-6 && cb < cap - 1e-6 {
                 cap = cb;
             }
         }
         cap
     }
 
+    /// (UK, OK) einer Decke am Bezugspunkt; [281] eine geneigte Decke liegt anderswo um [`Ceiling::slope_dz`]
+    /// höher oder tiefer (Spanne über den Umriss: [`Self::ceiling_vertical_span`]).
     pub fn ceiling_vertical_extent(&self, c: &Ceiling) -> (f64, f64) {
         let floor_top = self.floor(&c.floor_id).map_or(0.0, |f| f.base_elevation.unwrap_or(0.0) + f.floor_height.unwrap_or(0.0));
         heights::ceiling(floor_top, self.resolve_anchor(c.bottom.as_ref()), self.resolve_anchor(c.top.as_ref()), || self.ceiling_thickness(c))
+    }
+
+    /// [281] (tiefste UK, höchste OK) einer Decke über ihren ganzen Umriss (waagrecht = [`Self::ceiling_vertical_extent`]).
+    pub fn ceiling_vertical_span(&self, c: &Ceiling) -> (f64, f64) {
+        let (zb, zt) = self.ceiling_vertical_extent(c);
+        let (lo, hi) = c.slope_range();
+        (zb + lo, zt + hi)
     }
 
     pub fn stair_vertical_extent(&self, s: &Stair) -> (f64, f64) {
@@ -364,4 +378,45 @@ pub mod heights {
             assert_eq!(floor_anchor(2.8, 0.1), 2.8 + 0.1);
         }
     }
+}
+
+impl Ceiling {
+    /// [281] Neigungsebene `[ox, oy, gx, gy]`: Höhenversatz `dz = gx·(x − ox) + gy·(y − oy)` gegenüber der
+    /// eingestellten Höhe. `None` ohne Neigung, mit entarteter Gefällelinie (< 1 mm) oder Unsinn (NaN).
+    pub fn slope_plane(&self) -> Option<[f64; 4]> {
+        let s = self.slope.as_ref()?;
+        let (dx, dy) = (s.to.x - s.from.x, s.to.y - s.from.y);
+        let l2 = dx * dx + dy * dy;
+        if !(l2 > 1e-6) || !s.rise.is_finite() || s.rise == 0.0 || !s.from.x.is_finite() || !s.from.y.is_finite() || !l2.is_finite() {
+            return None;
+        }
+        Some([s.from.x, s.from.y, s.rise * dx / l2, s.rise * dy / l2])
+    }
+
+    /// [281] Höhenversatz der geneigten Decke am Grundrisspunkt (x, y); waagrecht 0.
+    pub fn slope_dz(&self, x: f64, y: f64) -> f64 {
+        self.slope_plane().map_or(0.0, |g| slope_dz(&g, x, y))
+    }
+
+    /// [281] Als Rampe dargestellt (Grundriss-Lauflinie, IFC `IfcRamp`)?
+    pub fn is_ramp(&self) -> bool {
+        self.slope_plane().is_some() && self.slope.as_ref().and_then(|s| s.ramp).unwrap_or(false)
+    }
+
+    /// [281] (kleinster, grösster) Höhenversatz über die Umrisspunkte; waagrecht (0, 0).
+    pub fn slope_range(&self) -> (f64, f64) {
+        let Some(g) = self.slope_plane() else { return (0.0, 0.0) };
+        let ring = self.ring();
+        let mut r = (f64::INFINITY, f64::NEG_INFINITY);
+        for q in ring.iter() {
+            let d = slope_dz(&g, q.x, q.y);
+            r = (r.0.min(d), r.1.max(d));
+        }
+        if r.0 > r.1 { (0.0, 0.0) } else { r }
+    }
+}
+
+/// [281] Höhenversatz einer Neigungsebene `[ox, oy, gx, gy]` am Punkt (x, y).
+pub fn slope_dz(g: &[f64; 4], x: f64, y: f64) -> f64 {
+    g[2] * (x - g[0]) + g[3] * (y - g[1])
 }

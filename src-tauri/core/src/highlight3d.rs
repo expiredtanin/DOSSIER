@@ -152,12 +152,18 @@ impl Out {
 
     /// Prisma über dem Grundriss `outline` von `z_bottom` bis `z_top`.
     fn prism_edges(&mut self, outline: &[[f64; 2]], z_bottom: f64, z_top: f64) {
+        self.prism_edges_sloped(outline, z_bottom, z_top, None);
+    }
+
+    /// Wie [`Self::prism_edges`]; [281] geneigte Platte: jede Höhe um den Versatz der Neigungsebene verschoben.
+    fn prism_edges_sloped(&mut self, outline: &[[f64; 2]], z_bottom: f64, z_top: f64, slope: Option<&[f64; 4]>) {
         let n = outline.len();
         if n < 3 || z_top - z_bottom <= EPS {
             return;
         }
-        let bottom = |i: usize| [outline[i][0], z_bottom, outline[i][1]];
-        let top = |i: usize| [outline[i][0], z_top, outline[i][1]];
+        let d = |i: usize| slope.map_or(0.0, |g| crate::model::helpers::slope_dz(g, outline[i][0], outline[i][1]));
+        let bottom = |i: usize| [outline[i][0], z_bottom + d(i), outline[i][1]];
+        let top = |i: usize| [outline[i][0], z_top + d(i), outline[i][1]];
         let mut j = n - 1;
         for i in 0..n {
             self.edge(bottom(j), bottom(i));
@@ -220,7 +226,7 @@ pub fn selection_highlight_lines(p: &Project, a: &Args) -> Result<Vec<f32>, Stri
         for s in emit_slabs(p) {
             if ceilings.contains(s.ceiling_id.as_str()) {
                 let n = out.v.len();
-                out.prism_edges(&s.outline, s.z_bottom, s.z_top);
+                out.prism_edges_sloped(&s.outline, s.z_bottom, s.z_top, s.slope.as_ref());
                 lift(&mut out, n, &s.ceiling_id);
             }
         }

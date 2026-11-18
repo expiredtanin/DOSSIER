@@ -137,6 +137,33 @@ export function buildElementAttributesHost(c: FlatHostOpts) {
     onSetCeilingBottom: (anchor) => {
       if (selection?.kind === "ceiling") patchAll("ceilings", selection.id, { bottom: anchor ?? undefined });
     },
+    onSetCeilingSlope: (slope) => {
+      if (selection?.kind !== "ceiling") return;
+      if (slope === null) return patchAll("ceilings", selection.id, { slope: undefined });
+      if (!("enable" in slope)) return patchAll("ceilings", selection.id, { slope }, "ceiling-slope");
+      // [281] Einschalten: je Decke eine Vorgabe aus ihrer Hüllbox (längere Seite = Gefällelinie, aufwärts).
+      const ramp = slope.enable === "ramp";
+      const ids = targetIds("ceilings", selection.id);
+      getState().groupChanges(() => {
+        for (const id of ids) {
+          const c = (getState().project.ceilings ?? []).find((x) => x.id === id);
+          if (!c || c.outline.length < 3) continue;
+          if (c.slope) {
+            updateCeiling(id, { slope: { ...c.slope, ramp: ramp || undefined } });
+            continue;
+          }
+          const xs = c.outline.map((q) => q.x);
+          const ys = c.outline.map((q) => q.y);
+          const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+          const alongX = x1 - x0 >= y1 - y0;
+          const from = alongX ? { x: x0, y: (y0 + y1) / 2 } : { x: (x0 + x1) / 2, y: y0 };
+          const to = alongX ? { x: x1, y: (y0 + y1) / 2 } : { x: (x0 + x1) / 2, y: y1 };
+          const len = Math.hypot(to.x - from.x, to.y - from.y);
+          if (!(len > 0.01)) continue;
+          updateCeiling(id, { slope: { from, to, rise: (ramp ? 0.06 : 0.02) * len, ramp: ramp || undefined } });
+        }
+      });
+    },
     // ── Öffnungs-Attribute (nur bei selektierter Öffnung) ──────────────────
     onSetOpeningKind: (kind) => {
       if (selection?.kind === "opening")

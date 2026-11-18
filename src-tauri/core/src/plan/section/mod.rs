@@ -30,6 +30,8 @@ pub(crate) mod query;
 pub mod unfold;
 
 use input::*;
+#[cfg(test)]
+pub(crate) use input::slab_input_pub;
 pub use bands::*;
 use shapes::*;
 use voids::*;

@@ -22,7 +22,7 @@
 //! `faces_full(frame, walls, slabs, roofs)`; `frame = [Px,Py,Pz, Nx,Ny,Nz, Ux,Uy,Uz]` (Welt, Y oben).
 //! ```text
 //! walls  [n, (sx, sz, ex, ez, dicke, hoehe, basis) × n]
-//! slabs  [n, (zUnten, zOben, k, x, z …) × n]
+//! slabs  [n, (zUnten, zOben, k, x, z …) × n]   [281] geneigt: k negativ (−Ecken), dann ox, oy, gx, gy vor den Ecken
 //! roofs  [n, (nFl, nGiebel, (k, x, y, z …) × nFl, (k, x, y, z …) × nGiebel) × n]   Modell [x, y, Höhe]
 //! → Flächen (Rolle 0 Wand|1 Decke|2 Dach, Quelle, Tiefe Mittel/Min/Max, Normale, (u, v) und Tiefe je Ecke)
 //! ```
@@ -670,7 +670,7 @@ fn wall_faces(f: &Frame, w: &[f64], src: usize, out: &mut Vec<Projected>) {
     }
 }
 
-fn slab_faces(f: &Frame, z_bottom: f64, z_top: f64, outline: &[P], src: usize, out: &mut Vec<Projected>) {
+fn slab_faces(f: &Frame, z_bottom: f64, z_top: f64, outline: &[P], slope: Option<&[f64; 4]>, src: usize, out: &mut Vec<Projected>) {
     let n = outline.len();
     if n < 3 || z_top - z_bottom <= EPS {
         return;
@@ -682,16 +682,19 @@ fn slab_faces(f: &Frame, z_bottom: f64, z_top: f64, outline: &[P], src: usize, o
     }
     cx /= n as f64;
     cz /= n as f64;
-    let bottom: Vec<V3> = outline.iter().map(|p| [p.0, z_bottom, p.1]).collect();
-    let top: Vec<V3> = outline.iter().map(|p| [p.0, z_top, p.1]).collect();
+    // [281] Geneigte Platte: Höhen um den Versatz der Neigungsebene verschoben, Mantel bleibt lotrecht.
+    let d = |p: &P| slope.map_or(0.0, |g| crate::model::helpers::slope_dz(g, p.0, p.1));
+    let up = slope.map_or([0.0, 1.0, 0.0], |g| normalize3([-g[2], 1.0, -g[3]]));
+    let bottom: Vec<V3> = outline.iter().map(|p| [p.0, z_bottom + d(p), p.1]).collect();
+    let top: Vec<V3> = outline.iter().map(|p| [p.0, z_top + d(p), p.1]).collect();
     let mut push = |poly: &[V3], normal: V3| {
         if let Some(p) = project_face(f, poly, normal, 1, src) {
             out.push(p);
         }
     };
-    push(&top, [0.0, 1.0, 0.0]);
+    push(&top, up);
     let rev: Vec<V3> = bottom.iter().rev().copied().collect();
-    push(&rev, [0.0, -1.0, 0.0]);
+    push(&rev, neg(up));
     for i in 0..n {
         let j = (i + 1) % n;
         let ex = outline[j].0 - outline[i].0;
@@ -818,13 +821,17 @@ pub(crate) fn faces_full(frame: &[f64], walls: &[f64], slabs: &[f64], roofs: &[f
     let mut i = 1;
     for k in 0..ns {
         let Some(&kk) = slabs.get(i + 2) else { return None };
-        if kk < 0.0 || kk.fract() != 0.0 || i + 3 + 2 * kk as usize > slabs.len() {
+        // [281] Negative Eckenzahl: geneigte Platte, vier Werte der Neigungsebene folgen.
+        let (kk, slope) = if kk < 0.0 { (-kk, Some(slabs.get(i + 3..i + 7)?)) } else { (kk, None) };
+        let head = 3 + if slope.is_some() { 4 } else { 0 };
+        if kk.fract() != 0.0 || i + head + 2 * kk as usize > slabs.len() {
             return None;
         }
         let kk = kk as usize;
-        let outline: Vec<P> = (0..kk).map(|j| (slabs[i + 3 + 2 * j], slabs[i + 4 + 2 * j])).collect();
-        slab_faces(&fr, slabs[i], slabs[i + 1], &outline, k, &mut out);
-        i += 3 + 2 * kk;
+        let outline: Vec<P> = (0..kk).map(|j| (slabs[i + head + 2 * j], slabs[i + head + 1 + 2 * j])).collect();
+        let g = slope.map(|g| [g[0], g[1], g[2], g[3]]);
+        slab_faces(&fr, slabs[i], slabs[i + 1], &outline, g.as_ref(), k, &mut out);
+        i += head + 2 * kk;
     }
     if i != slabs.len() {
         return None;

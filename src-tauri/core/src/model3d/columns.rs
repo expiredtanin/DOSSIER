@@ -133,7 +133,7 @@ pub fn column_slabs(p: &Project) -> Vec<RSlab> {
         for (foot, z_bottom, z_top) in column_pieces(p, c) {
             let outline: Vec<RVec2> = foot.iter().map(|q| [q.x, q.y]).collect();
             if z_top - z_bottom > 1e-6 && outline.iter().flatten().all(|v| v.is_finite()) {
-                out.push(RSlab { outline, z_bottom, z_top, color, ceiling_id: c.id.clone(), hatch: None, cut: None, monolith: None, source: SlabSource::Column { index } });
+                out.push(RSlab { outline, z_bottom, z_top, color, ceiling_id: c.id.clone(), hatch: None, cut: None, monolith: None, slope: None, source: SlabSource::Column { index } });
             }
         }
     }

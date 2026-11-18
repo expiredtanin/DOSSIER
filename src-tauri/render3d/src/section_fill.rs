@@ -575,6 +575,7 @@ mod tests {
         // z in [2.0, 2.4]; Prio 100 (Beton laeuft durch, schneidet die Wand).
         let slab = SlabInput {
             monolith: None,
+            slope: None,
             outline: vec![[-1.0, -1.0], [4.0, -1.0], [4.0, 1.0], [-1.0, 1.0]],
             z_bottom: 2.0,
             z_top: 2.4,
@@ -653,6 +654,7 @@ mod tests {
         // Wand in u ab (Umriss ueber y in [-1,1]).
         let screed = SlabInput {
             monolith: None,
+            slope: None,
             outline: vec![[-1.0, -1.0], [4.0, -1.0], [4.0, 1.0], [-1.0, 1.0]],
             z_bottom: 1.0,
             z_top: 1.06,
@@ -668,6 +670,7 @@ mod tests {
         // Daemmung-Slab (Prio 20, Muster 4), z in [0.96,1.0], gleiche u-Deckung.
         let insulation = SlabInput {
             monolith: None,
+            slope: None,
             outline: vec![[-1.0, -1.0], [4.0, -1.0], [4.0, 1.0], [-1.0, 1.0]],
             z_bottom: 0.96,
             z_top: 1.0,

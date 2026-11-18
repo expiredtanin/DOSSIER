@@ -451,6 +451,23 @@ fn ceiling_ops(p: &Project, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
     add_op("ceilings", vec![ceiling_item(p, ctx.level, &outline, ctx, ids)])
 }
 
+/// [281] Rampe: Decke aus dem Umriss mit Neigung längs `from` → `to`; `percent` = Gefälle in % (positiv = steigt zum
+/// Endpunkt). Die Oberkante liegt am Anfang auf der Geschosshöhe (Boden des aktiven Geschosses), nicht an der
+/// Geschossoberkante wie eine Geschossdecke. Entartet (Umriss, Gefällelinie < 1 cm, Gefälle 0/NaN) → nichts.
+fn ramp_ops(p: &Project, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
+    let Some(outline) = normalize_outline(&pts_of(v, "pts")) else { return Vec::new() };
+    let (from, to) = (p_of(v, "from"), p_of(v, "to"));
+    let len = (to.0 - from.0).hypot(to.1 - from.1);
+    let pct = opt_n(v, "percent").unwrap_or(f64::NAN);
+    if abs_area(&outline) < 1e-4 || !(len > 0.01) || !pct.is_finite() || pct == 0.0 || pct.abs() > 100.0 {
+        return Vec::new();
+    }
+    let mut item = ceiling_item(p, ctx.level, &outline, ctx, ids);
+    item["top"] = json!({"mode": "floor", "floorId": ctx.level, "offset": 0});
+    item["slope"] = json!({"from": pv(from), "to": pv(to), "rise": js_num(pct / 100.0 * len), "ramp": true});
+    add_op("ceilings", vec![item])
+}
+
 /// Neue Decke auf Geschoss `floor` mit dem Umriss `outline` (Aufbau wie beim Zeichnen; auch [222]).
 pub(crate) fn ceiling_item(p: &Project, floor: &str, outline: &[V], ctx: &Ctx, ids: &mut IdGen) -> Value {
     let mut fields = vec![
@@ -1189,6 +1206,7 @@ pub fn ops(root: &Map<String, Value>, p: &Project, v: &Value) -> Option<Vec<Op>>
     Some(match s_of(v, "cmd") {
         "wall" => wall_ops(root, p, v, &ctx, ids),
         "ceiling" => ceiling_ops(p, v, &ctx, ids),
+        "ramp" => ramp_ops(p, v, &ctx, ids),
         "room" => room_ops(p, v, &ctx, ids),
         "wand" => wand_ops(p, v, &ctx, ids),
         // [154] Bauteile aus Zeichnung erkennen.
@@ -1442,6 +1460,29 @@ mod tests {
         let r = root(json!({"wallTypes": wt}));
         let o = ops(&r, &crate::model::lenient::typed_for_test(&r), &req(pts)).unwrap();
         assert!(items(&o, 0)[0].get("ceilingTypeId").is_none());
+    }
+
+    /// [281] Rampe: Decke mit Neigung (Gefälle in % längs Anfang → Ende), OK am Anfang auf dem Geschossboden;
+    /// Unsinn (Gefälle 0, Linie zu kurz) legt nichts an.
+    #[test]
+    fn rampe_mit_gefaelle() {
+        let ct = json!([{"id": "CT1", "name": "Stahlbetondecke", "layers": [{"componentId": "c", "thickness": 0.25}]}]);
+        let r = root(json!({"wallTypes": [{"id": "WT1", "name": "W", "layers": [{"componentId": "c", "thickness": 0.3}]}], "ceilingTypes": ct}));
+        let base = json!({"cmd": "ramp", "pts": [[0, 0], [10, 0], [10, 3], [0, 3]], "from": [0, 1.5], "to": [10, 1.5], "percent": -15});
+        let o = ops(&r, &crate::model::lenient::typed_for_test(&r), &req(base.clone())).unwrap();
+        let c = &items(&o, 0)[0];
+        assert_eq!(c["slope"]["ramp"], true);
+        assert!((c["slope"]["rise"].as_f64().unwrap() + 1.5).abs() < 1e-9, "{c}");
+        assert_eq!(c["top"], json!({"mode": "floor", "floorId": "F1", "offset": 0}));
+        assert_eq!(c["ceilingTypeId"], "CT1");
+        for bad in [json!(0), json!(null), json!(150)] {
+            let mut v = base.clone();
+            v["percent"] = bad;
+            assert!(ops(&r, &crate::model::lenient::typed_for_test(&r), &req(v)).unwrap().is_empty());
+        }
+        let mut v = base;
+        v["to"] = json!([0, 1.505]);
+        assert!(ops(&r, &crate::model::lenient::typed_for_test(&r), &req(v)).unwrap().is_empty());
     }
 
     #[test]

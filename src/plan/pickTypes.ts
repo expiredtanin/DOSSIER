@@ -58,6 +58,8 @@ export interface PickSlab {
   zBottom: number;
   zTop: number;
   ceilingId: string;
+  /** [281] Geneigte Decke: Neigungsebene `[ox, oy, gx, gy]`, Höhe + gx·(x−ox) + gy·(y−oy). */
+  slope?: readonly [number, number, number, number];
 }
 
 /**

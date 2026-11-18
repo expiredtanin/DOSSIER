@@ -296,12 +296,17 @@ pub fn void_cuts_lifted(p: &Project, walls: &[RWall], slabs: &[RSlab], wall_dz: 
             continue;
         }
         let dz = slab_dz(i);
-        let hits = hitting(&voids, &bbox(s.outline.iter().map(|q| (q[0], q[1]))), s.z_bottom - dz, s.z_top - dz);
+        // [281] Geneigte Platte: Höhenspanne über den Umriss, Körper mit Neigungsebene.
+        let (lo, hi) = s.outline.iter().fold((0.0f64, 0.0f64), |(a, b), q| (a.min(s.dz(q[0], q[1])), b.max(s.dz(q[0], q[1]))));
+        let hits = hitting(&voids, &bbox(s.outline.iter().map(|q| (q[0], q[1]))), s.z_bottom + lo - dz, s.z_top + hi - dz);
         if hits.is_empty() {
             continue;
         }
         let pts: Vec<f64> = s.outline.iter().flat_map(|q| [q[0], q[1]]).collect();
-        let base = json!({"kind": "extrude", "points": pts, "height": s.z_top - s.z_bottom, "z0": s.z_bottom});
+        let mut base = json!({"kind": "extrude", "points": pts, "height": s.z_top - s.z_bottom, "z0": s.z_bottom});
+        if let Some(g) = s.slope {
+            base["slope"] = json!(g);
+        }
         out.slabs.push((i, subtract(base, &hits, dz)));
     }
     out

@@ -95,7 +95,12 @@ pub fn clear_range(p: &Project, r: &Room) -> (f64, f64) {
         return (base, base + fh);
     }
     let [x, y] = crate::room_area::label_point(&ring);
-    let over: Vec<(f64, f64)> = p.ceilings.as_deref().unwrap_or(&[]).iter().filter(|ce| in_ceiling(ce, x, y)).map(|ce| p.ceiling_vertical_extent(ce)).filter(|(a, b)| a.is_finite() && b.is_finite()).collect();
+    let over: Vec<(f64, f64)> = p.ceilings.as_deref().unwrap_or(&[]).iter().filter(|ce| in_ceiling(ce, x, y)).map(|ce| {
+        // [281] Geneigte Decke: Höhe am Beschriftungspunkt des Raums.
+        let (b, t) = p.ceiling_vertical_extent(ce);
+        let d = ce.slope_dz(x, y);
+        (b + d, t + d)
+    }).filter(|(a, b)| a.is_finite() && b.is_finite()).collect();
     let floor_z = over.iter().map(|e| e.1).filter(|t| *t >= base - 0.3 && *t <= base + 0.5).fold(f64::NAN, f64::max);
     let floor_z = if floor_z.is_finite() { floor_z } else { base };
     let ceil_z = over.iter().map(|e| e.0).filter(|b| *b > floor_z + 1.0).fold(f64::NAN, f64::min);

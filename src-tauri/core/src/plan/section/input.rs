@@ -125,6 +125,12 @@ fn f32s4(v: [f64; 4]) -> [f32; 4] {
     [json_f32(v[0]), json_f32(v[1]), json_f32(v[2]), json_f32(v[3])]
 }
 
+/// [281] Für Tests ausserhalb des Schnitts (geneigte Platte im 3D-Netz).
+#[cfg(test)]
+pub(crate) fn slab_input_pub(s: &RSlab) -> render3d::SlabInput {
+    slab_input(s)
+}
+
 pub(super) fn slab_input(s: &RSlab) -> render3d::SlabInput {
     render3d::SlabInput {
         outline: s.outline.iter().map(|q| f32s2(*q)).collect(),
@@ -134,5 +140,6 @@ pub(super) fn slab_input(s: &RSlab) -> render3d::SlabInput {
         hatch: None,
         cut: None,
         monolith: s.monolith.clone(),
+        slope: s.slope.map(|g| [json_f32(g[0]), json_f32(g[1]), json_f32(g[2]), json_f32(g[3])]),
     }
 }

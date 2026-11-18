@@ -3511,6 +3511,29 @@ pub struct Wall {
     pub extra: Extra,
 }
 
+/// [281] Neigung einer Decke oder Rampe: Ober- und Unterkante (alle Schichten) folgen einer Ebene, die
+/// längs der Gefällelinie `from` → `to` gleichmässig steigt oder fällt. Am Bezugspunkt `from` liegt die Decke
+/// auf ihrer eingestellten Höhe (`top`/`bottom`); bei `to` um `rise` höher (negativ = tiefer). Quer zur
+/// Gefällelinie bleibt die Höhe gleich. Die Dicke bleibt lotrecht gemessen (Schichten verschoben, nicht gedreht).
+/// Gefälle in % = `rise` / |`to` − `from`| · 100.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct CeilingSlope {
+    /// Bezugspunkt im Grundriss (Meter): dort gilt die eingestellte Höhe der Decke.
+    pub from: Vec2,
+    /// Zweiter Punkt der Gefällelinie (Meter); die Richtung `from` → `to` ist die Fallinie.
+    pub to: Vec2,
+    /// Höhenunterschied der Decke von `from` nach `to` (Meter; positiv = steigt zu `to`).
+    pub rise: f64,
+    /// Als Rampe darstellen: Grundriss mit Lauflinie und Pfeil (aufwärts), IFC als `IfcRamp`/`IfcRampFlight`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub ramp: Option<bool>,
+    #[serde(flatten)]
+    #[ts(skip)]
+    pub extra: Extra,
+}
+
 /// Eine Decke (Slab) — ein geschossgebundenes, mehrschichtiges Flächenbauteil,
 /// definiert über einen GESCHLOSSENEN Umriss (Polygon) im Grundriss und eine
 /// Dicke. Analog zur Wand trägt sie ihren Schichtaufbau über einen `wallTypeId`
@@ -3664,6 +3687,10 @@ pub struct Ceiling {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub bottom: Option<VerticalAnchor>,
+    /// [281] Neigung (geneigte Decke, Rampe, Gefälle). Fehlt ⇒ waagrecht.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub slope: Option<CeilingSlope>,
     /// [271] Umbau: Status (Bestand, Abbruch, Neu) und Etappe. Fehlt ⇒ Bestand.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]

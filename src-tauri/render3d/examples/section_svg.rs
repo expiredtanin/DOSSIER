@@ -85,6 +85,7 @@ fn l_wall_scene() -> (Vec<WallInput>, Vec<SlabInput>) {
     ];
     let slabs = vec![SlabInput {
         monolith: None,
+        slope: None,
         outline: vec![[-0.5, -0.5], [3.5, -0.5], [3.5, 3.5], [-0.5, 3.5]],
         z_bottom: -0.2,
         z_top: 0.0,

@@ -301,6 +301,21 @@ pub struct SlabInput {
     /// verschwinden, sichtbar bleibt der Umriss (Sägezahn). `None` = Einzelteil.
     #[serde(default)]
     pub monolith: Option<String>,
+    /// [281] Geneigte Decke/Rampe: Neigungsebene `[ox, oy, gx, gy]` (Modell-Meter) — jede Höhe der Platte liegt
+    /// am Grundrisspunkt (x, y) um `gx·(x−ox) + gy·(y−oy)` höher (Ober- und Unterkante parallel verschoben,
+    /// Mantel bleibt lotrecht). `None` = waagrecht.
+    #[serde(default)]
+    pub slope: Option<[f32; 4]>,
+}
+
+impl SlabInput {
+    /// [281] Höhenversatz der Neigungsebene am Grundrisspunkt (waagrecht 0).
+    pub fn dz(&self, p: Point2) -> f32 {
+        match self.slope {
+            Some(s) => s[2] * (p[0] - s[0]) + s[3] * (p[1] - s[1]),
+            None => 0.0,
+        }
+    }
 }
 
 /// EINE Dachflächen-Schicht für den 3D-Live-Schnitt (`crate::roof_cut`).

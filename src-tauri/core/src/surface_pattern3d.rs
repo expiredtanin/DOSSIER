@@ -642,7 +642,8 @@ fn ceiling_lines(p: &Project, ce: &Ceiling, s: &mut Sink) {
         let Some((pat, comp, spec)) = spec_for(layer.and_then(|l| p.component(&l.component_id)), 0.0) else { continue };
         let rgb = ink_rgb(pat, comp);
         for (a, b, m) in lod_segments(|sc| sp::segments(&ring, &spec, outer[0], sc)) {
-            s.push([a[0], a[1], z], [b[0], b[1], z], rgb, m);
+            // [281] Geneigte Decke: Linien liegen auf der geneigten Fläche (Versatz je Endpunkt, linear dazwischen).
+            s.push([a[0], a[1], z + ce.slope_dz(a[0], a[1])], [b[0], b[1], z + ce.slope_dz(b[0], b[1])], rgb, m);
         }
     }
 }
