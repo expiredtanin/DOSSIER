@@ -316,6 +316,28 @@ pub fn run(lk: &Lookup, req: &Request) -> Result<GripResult, String> {
             })
             .into()
         }
+        // [281] Gefällelinie einer geneigten Decke: Griff 0 = Bezugspunkt `slope.from`, 1 = `slope.to`. Das Gefälle in %
+        // (rise / Länge) bleibt, der Höhenunterschied passt sich der neuen Länge an (wie die Objekt-Info).
+        "ceilingSlopeGrip" => {
+            let (index, (x, y)) = (r.n("index"), r.p("pt"));
+            patch("ceilings", r.s("id"), &|e| {
+                if truthy(field(e, "locked")) || !(index == 0.0 || index == 1.0) {
+                    return None;
+                }
+                let sl = field(e, "slope")?;
+                let (a, b) = (xy(field(sl, "from")?), xy(field(sl, "to")?));
+                let rise = num_of(field(sl, "rise"));
+                let len = hypot2(b.0 - a.0, b.1 - a.1);
+                let (na, nb) = if index == 0.0 { ((x, y), b) } else { (a, (x, y)) };
+                let nlen = hypot2(nb.0 - na.0, nb.1 - na.1);
+                if !(len > 1e-9 && nlen > 1e-9 && nlen.is_finite()) {
+                    return None;
+                }
+                let nsl = with_all(sl, vec![("from", pt(na.0, na.1)), ("to", pt(nb.0, nb.1)), ("rise", js_num(rise / len * nlen))]);
+                Some(with(e, "slope", nsl))
+            })
+            .into()
+        }
         "ceilingGrip" | "roomGrip" => {
             let (coll, field) = if op == "ceilingGrip" { ("ceilings", "outline") } else { ("rooms", "boundary") };
             let (index, (x, y)) = (r.n("index"), r.p("pt"));
@@ -2068,6 +2090,25 @@ mod tests {
         assert!(ent(json!({"op": "beamGrip", "id": "x", "index": 0, "pt": [3, 1]})).ops.is_empty());
         let locked = root(json!({"beams": [{"id": "b", "locked": true, "start": {"x": 0, "y": 0}, "end": {"x": 4, "y": 0}}]}));
         assert!(run(&Lookup::plain(&locked), &rq(json!({"op": "beamGrip", "id": "b", "index": 0, "pt": [1, 1]}))).unwrap().ops.is_empty());
+    }
+
+    /// [281] Gefällelinie: Griff 0/1 verschiebt from/to, das Gefälle in % bleibt (rise skaliert mit der Länge).
+    #[test]
+    fn decke_gefaelle_griffe() {
+        let r = root(json!({"ceilings": [{"id": "c", "slope": {"from": {"x": 0, "y": 0}, "to": {"x": 5, "y": 0}, "rise": -0.3, "ramp": true}}, {"id": "f"}]}));
+        let ent = |req: Value| run(&Lookup::plain(&r), &rq(req)).unwrap();
+        let g = |e: &Value, k: &str| (e["slope"][k]["x"].as_f64().unwrap(), e["slope"][k]["y"].as_f64().unwrap());
+        let e = ent(json!({"op": "ceilingSlopeGrip", "id": "c", "index": 1, "pt": [10, 0]}));
+        let c = entity(&e);
+        assert_eq!((g(c, "from"), g(c, "to")), ((0.0, 0.0), (10.0, 0.0)));
+        assert!((c["slope"]["rise"].as_f64().unwrap() + 0.6).abs() < 1e-12 && c["slope"]["ramp"] == true);
+        let e = ent(json!({"op": "ceilingSlopeGrip", "id": "c", "index": 0, "pt": [1, 0]}));
+        let c = entity(&e);
+        assert_eq!(g(c, "from"), (1.0, 0.0));
+        assert!((c["slope"]["rise"].as_f64().unwrap() + 0.24).abs() < 1e-12);
+        assert!(ent(json!({"op": "ceilingSlopeGrip", "id": "c", "index": 2, "pt": [1, 0]})).ops.is_empty());
+        assert!(ent(json!({"op": "ceilingSlopeGrip", "id": "c", "index": 1, "pt": [0, 0]})).ops.is_empty());
+        assert!(ent(json!({"op": "ceilingSlopeGrip", "id": "f", "index": 0, "pt": [1, 0]})).ops.is_empty());
     }
 
     #[test]

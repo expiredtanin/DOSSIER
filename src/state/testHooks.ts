@@ -61,6 +61,8 @@ declare global {
       planLines: (cls: string) => number;
       /** [281] Neigung je Decke (`id` → {rise, ramp}; waagrecht fehlt). */
       ceilingSlopes: () => Record<string, { rise: number; ramp: boolean }>;
+      /** [281] Gefällelinie einer Decke (from/to in Metern; fehlt bei waagrechter Decke). */
+      ceilingSlopeLine: (id: string) => { from: { x: number; y: number }; to: { x: number; y: number } } | undefined;
       /** [173] Modelldarstellung der aktiven Ebene (Feld `modelViewOptionId`). */
       modelView: () => string | undefined;
       /** [173] Schnitt der aktiven Ebene (1:50, Detailgrad der Anzeige): Zahl der Wand-Schnittflächen und ihre Fläche (m²). */
@@ -161,6 +163,10 @@ export function installTestHooks(): void {
     fakeRender: () => fakeRender(),
     ceilingSlopes: () =>
       Object.fromEntries((getState().project.ceilings ?? []).flatMap((c) => (c.slope ? [[c.id, { rise: c.slope.rise, ramp: !!c.slope.ramp }]] : []))),
+    ceilingSlopeLine: (id) => {
+      const s = (getState().project.ceilings ?? []).find((c) => c.id === id)?.slope;
+      return s ? { from: { x: s.from.x, y: s.from.y }, to: { x: s.to.x, y: s.to.y } } : undefined;
+    },
     planLines: (cls) => {
       const s = getState();
       const codes = new Set<string>();

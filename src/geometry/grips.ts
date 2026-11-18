@@ -49,6 +49,7 @@ export type GripRequest =
   // [213] Kamera: 0 = Standpunkt, 1 = Ziel, 2 = Bildwinkel bzw. Sichtbreite (Kern `camera::grip_edit`); `cameraBy` verschiebt Standpunkt und Ziel.
   | { op: "cameraGrip"; id: string; index: number; pt: P }
   | { op: "beamGrip"; id: string; index: number; pt: P }
+  | { op: "ceilingSlopeGrip"; id: string; index: number; pt: P }
   | { op: "cameraBy"; id: string; delta: P }
   | { op: "sectionBendDelete"; id: string; index: number }
   | { op: "sectionLineTidy"; id: string; tol?: number }

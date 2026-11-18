@@ -386,6 +386,8 @@ export interface ProjectSlice {
   // ── Decken-Editieren ──────────────────────────────────────────────────────
   /** Verschiebt EINEN Umriss-Vertex (per Index) einer Decke. */
   moveCeilingGrip: (ceilingId: string, index: number, pt: Vec2) => void;
+  /** [281] Gefällelinie einer geneigten Decke: 0 = Bezugspunkt, 1 = Endpunkt; Gefälle in % bleibt. */
+  moveCeilingSlopeGrip: (ceilingId: string, index: number, pt: Vec2) => void;
   /** [68] Baugrube: Umriss-Ecke ziehen (Index = Ecke; Index = Eckenzahl: Sohlenhöhe). */
   moveExcavationGrip: (id: string, index: number, pt: Vec2) => void;
   /** [176] Griff einer Schnittlinie: 0 = Anfang, dann die Knickpunkte, zuletzt das Ende. */
@@ -1315,6 +1317,9 @@ export function createProjectSlice(
     // Mutation bei jedem Maus-Move-Schritt eines Drags.)
     moveCeilingGrip: (ceilingId, index, pt) =>
       applyGrip({ op: "ceilingGrip", id: ceilingId, index, pt: gripPt(pt) }, `moveCeilingGrip:${ceilingId}:${index}`),
+
+    moveCeilingSlopeGrip: (ceilingId, index, pt) =>
+      applyGrip({ op: "ceilingSlopeGrip", id: ceilingId, index, pt: gripPt(pt) }, `moveCeilingSlopeGrip:${ceilingId}:${index}`),
 
     moveExcavationGrip: (id, index, pt) => applyGrip({ op: "excavationGrip", id, index, pt: gripPt(pt) }, `moveExcavationGrip:${id}:${index}`),
     moveSectionLineGrip: (id, index, pt, coalesceKey) =>
