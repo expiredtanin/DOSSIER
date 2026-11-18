@@ -45,5 +45,5 @@ export function ReportTable({ section: s }: { section: ReportSection }) {
 /** Kartenansicht im schmalen Dock: lange Texte und lange Spaltenköpfe („Aussenraum m²“) belegen zwei bzw. drei Rasterspalten, damit nichts mitten im Wort bricht. */
 function cardSpan(text: string, head: string | undefined): string | undefined {
   if (text.length > 22) return "3";
-  return text.length > 9 || (head?.length ?? 0) > 9 ? "2" : undefined;
+  return text.length > 7 || (head?.length ?? 0) > 9 ? "2" : undefined;
 }

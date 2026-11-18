@@ -145,12 +145,14 @@ export function DesignOptionsTab({ project, handlers, embedded, view }: { projec
                 <span className="rm-design-option-count" title={t("designOption.count")}>
                   {n.get(`${s.id}/${o.id}`) ?? 0}
                 </span>
-                <button type="button" className="rm-add-btn" disabled={!handlers.onAcceptDesignOption} onClick={() => handlers.onAcceptDesignOption?.(s.id, o.id)} title={t("designOption.accept.hint")} data-testid="rm-design-option-accept">
-                  {t("designOption.accept")}
-                </button>
-                <button type="button" className="rm-icon-btn" title={t("designOption.option.delete")} aria-label={t("designOption.option.delete")} disabled={!handlers.onDeleteDesignOption} onClick={() => setDeleting({ setId: s.id, optionId: o.id })} data-testid="rm-design-option-delete">
-                  <span className="material-symbols-outlined" aria-hidden="true">delete</span>
-                </button>
+                <span className="rm-option-actions">
+                  <button type="button" className="rm-add-btn" disabled={!handlers.onAcceptDesignOption} onClick={() => handlers.onAcceptDesignOption?.(s.id, o.id)} title={t("designOption.accept.hint")} data-testid="rm-design-option-accept">
+                    {t("designOption.accept")}
+                  </button>
+                  <button type="button" className="rm-icon-btn" title={t("designOption.option.delete")} aria-label={t("designOption.option.delete")} disabled={!handlers.onDeleteDesignOption} onClick={() => setDeleting({ setId: s.id, optionId: o.id })} data-testid="rm-design-option-delete">
+                    <span className="material-symbols-outlined" aria-hidden="true">delete</span>
+                  </button>
+                </span>
               </div>
               );
             })}

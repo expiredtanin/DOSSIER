@@ -10156,6 +10156,12 @@ body {
   white-space: normal;
   overflow-wrap: anywhere;
 }
+.rm-option-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+}
 .rm-design-option-primary {
   flex: 0 0 auto;
   margin: 0 2px 0 0;

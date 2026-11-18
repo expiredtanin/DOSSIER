@@ -1012,7 +1012,7 @@ fn column_ops(v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
     )
 }
 
-/// [280] Träger: Achse `pts[0]` → `pts[1]` auf dem aktiven Geschoss, Klasse „25“ (Stützen) bzw. „50“, Querschnitt `width` × `height`
+/// [280] Träger: Achse `pts[0]` → `pts[1]` auf dem aktiven Geschoss, Klasse „35“ (Träger), sonst „25“ (Stützen) bzw. „50“, Querschnitt `width` × `height`
 /// (Vorgabe 25 × 40 cm), Profilname nur als Text, Oberkante bündig an der Deckenunterkante (`topOffset` 0).
 fn beam_ops(p: &Project, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
     let pts = pts_of(v, "pts");
@@ -1025,8 +1025,8 @@ fn beam_ops(p: &Project, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
         ("id", s(&ids.next("beam"))),
         ("type", s("beam")),
         ("floorId", s(ctx.level)),
-        // Klasse „25“ (Stützen), sonst „50“ (Tragwerk), sonst die aktive (wie beim Erkennen von Stützen).
-        ("categoryCode", if has_category(p, "25") { s("25") } else { category_or(p, "50", ctx) }),
+        // Klasse „35“ (Träger), sonst „25“ (Stützen), sonst „50“ (Tragwerk), sonst die aktive (wie beim Erkennen von Stützen).
+        ("categoryCode", if has_category(p, "35") { s("35") } else if has_category(p, "25") { s("25") } else { category_or(p, "50", ctx) }),
         ("start", pv(a)),
         ("end", pv(b)),
         ("width", js_num(num("width", 0.25))),

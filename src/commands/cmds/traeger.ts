@@ -2,7 +2,7 @@
 //   1) „Anfang des Trägers:" → Punkt
 //   2) „Ende des Trägers:"   → Punkt → commit (ein Träger, Befehl endet)
 //
-// Der Träger sitzt auf dem aktiven Geschoss, Klasse „25“ (Stützen), sonst „50“ (Tragwerk), die Oberkante bündig an der Deckenunterkante
+// Der Träger sitzt auf dem aktiven Geschoss, Klasse „35“ (Träger), sonst „25“ (Stützen), sonst „50“ (Tragwerk), die Oberkante bündig an der Deckenunterkante
 // (Unterzug); der Kern (`cmd_create.rs`, Befehl `beam`) legt ihn an. Optionen (IMMER sichtbar): Profil = Vorgabe aus
 // einer kurzen Liste (Rechteck-Unterzug 25/40 … oder Stahlprofil als Text mit Aussenmassen). Eine getippte Zahl setzt
 // die Querschnittshöhe (Meter) PERSISTENT über Aufrufe, die Breite bleibt die des Profils.
