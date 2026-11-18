@@ -59,9 +59,10 @@ export const INFO_GROUP_TITLE: Record<InfoGroupId, TranslationKey> = {
 
 /**
  * [239] Standardmässig zugeklappt: nur Auskunft ohne Eingabe (Herkunft, LV95-Mittelpunkt) — selten gebraucht,
- * bei Geländen aber lang. Alles, was man bedient oder ständig prüft, bleibt offen. Der Kopf bleibt sichtbar.
+ * bei Geländen aber lang. [283] Ebenso „Bezugspunkt" (Würfel + X/Y/Z/Drehen, ~140 px): Der Platz fehlte bei 1280 × 800
+ * für Raum-/Einheiten-/Darstellungs-Abschnitte darunter. Alles andere bleibt offen. Der Kopf bleibt sichtbar.
  */
-export const INFO_GROUP_DEFAULT_COLLAPSED: ReadonlySet<InfoGroupId> = new Set<InfoGroupId>(["georef"]);
+export const INFO_GROUP_DEFAULT_COLLAPSED: ReadonlySet<InfoGroupId> = new Set<InfoGroupId>(["georef", "refpoint"]);
 
 export interface InfoGroupContext {
   sel: SelectionInfo | null;

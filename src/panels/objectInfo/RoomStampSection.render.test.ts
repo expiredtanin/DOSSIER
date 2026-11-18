@@ -13,6 +13,7 @@ import { PanelHostProvider } from "../host";
 import type { PanelHost } from "../types";
 import { ObjectInfoPanel } from "../ObjectInfoPanel";
 import { ObjectSettingsPanel } from "../objectSettings/ObjectSettingsPanel";
+import { resetInfoGroupsForTest, toggleInfoGroup } from "./infoGroupState";
 
 const host = { activeTool: "select", sectionLine: null, displayMode: { mode: "all", setMode: () => {} } } as unknown as PanelHost;
 const wrap = (el: ReturnType<typeof createElement>) => renderToString(createElement(PanelHostProvider, { value: host }, el));
@@ -40,6 +41,8 @@ describe("Raumstempel in den Objekteinstellungen [218]", () => {
   it("Bezugspunkt und Masse nur im Objekt-Info-Panel, nicht im Fenster (Raum und Wand)", () => {
     const p = buildComplexSampleProject();
     getState().loadProject(p);
+    resetInfoGroupsForTest();
+    toggleInfoGroup("refpoint"); // [283] Bezugspunkt ist standardmässig zugeklappt
     for (const sel of [{ rooms: [p.rooms![0].id] }, { walls: [p.walls[0].id] }]) {
       setState({ selection: { ...EMPTY_SELECTION, ...sel } });
       const panel = panelHtml();

@@ -49,7 +49,8 @@ import type {
 // v15 ([253]): links oben (Werkzeuge/Objekte) bekommt mehr Höhe: Gewichte 1,6 : 1 (die Objekt-Palette war im 900-px-Fenster nur ~270 px hoch).
 // v16 ([271]): Umbau-Panel ("renovation") als Tab rechts oben neben Objekt-Info und Flächenbilanz.
 // v17 ([272]): Varianten-Panel ("design-options") als Tab rechts oben neben Umbau (vorher nur schwebend auf Wunsch).
-export const LAYOUT_VERSION = 17;
+// v18 ([283]): rechts oben bekommt noch mehr Höhe: Gewichte 2 : 1 (Objekt-Info bei 1280 × 800: 453 → ~490 px, Bezugspunkt zugeklappt statt Scrollen).
+export const LAYOUT_VERSION = 18;
 
 /** localStorage-Schlüssel des zuletzt benutzten Layouts. */
 const CURRENT_KEY = "cad.layout";
@@ -81,7 +82,7 @@ const DEFAULT_LEFT_GROUPS: DockGroup[] = [
   { tabs: ["attributes"], activeTab: "attributes", weight: 1 },
 ];
 const DEFAULT_RIGHT_GROUPS: DockGroup[] = [
-  { tabs: ["object-info", "room-balance", "renovation", "design-options"], activeTab: "object-info", weight: 1.6 },
+  { tabs: ["object-info", "room-balance", "renovation", "design-options"], activeTab: "object-info", weight: 2 },
   {
     tabs: ["drawing-levels", "layers", "site", "elements", "view-snapshots", "layouts"],
     activeTab: "drawing-levels",

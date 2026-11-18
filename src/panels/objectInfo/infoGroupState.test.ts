@@ -26,10 +26,11 @@ beforeEach(() => {
 const open = (id: InfoGroupId) => isInfoGroupOpen(getInfoGroupState(), id);
 
 describe("Abschnitte einklappen [239]", () => {
-  it("Standard: alles offen ausser der Auskunfts-Gruppe Georeferenzierung", () => {
-    expect([...INFO_GROUP_DEFAULT_COLLAPSED]).toEqual(["georef"]);
+  it("Standard: alles offen ausser Georeferenzierung (Auskunft) und Bezugspunkt ([283])", () => {
+    expect([...INFO_GROUP_DEFAULT_COLLAPSED]).toEqual(["georef", "refpoint"]);
     expect(open("wall")).toBe(true);
-    expect(open("refpoint")).toBe(true);
+    expect(open("refpoint")).toBe(false);
+    expect(open("dimensions")).toBe(true);
     expect(open("georef")).toBe(false);
   });
 
@@ -72,9 +73,9 @@ describe("Abschnitte einklappen [239]", () => {
     const html = () => renderToString(createElement(PanelHostProvider, { value: host }, createElement(ObjectInfoPanel)));
     expect(html()).toContain('data-group="refpoint"');
     expect(html()).toContain('data-group="dimensions"');
-    expect(html()).toContain("objinfo-cube");
+    expect(html()).not.toContain("objinfo-cube"); // [283] standardmässig zugeklappt, Kopf bleibt
     toggleInfoGroup("refpoint");
     expect(html()).toContain('data-group="refpoint"');
-    expect(html()).not.toContain("objinfo-cube");
+    expect(html()).toContain("objinfo-cube");
   });
 });
