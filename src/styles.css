@@ -5643,12 +5643,14 @@ body {
 .attr-panel .objinfo-flabel,
 .objinfo-group-body .objinfo-flabel,
 .objinfo-camera .objinfo-flabel,
+.objinfo-railing .objinfo-flabel,
 .objinfo-tree .objinfo-flabel {
   flex: 0 0 104px;
   width: 104px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  /* Lange Beschriftungen („Verdeckte Kanten“, „Schnitt-Tiefe (m)“) brechen um statt mit „…“ abzuschneiden ([283]). */
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.25;
   padding-right: 8px;
   color: var(--label);
 }
@@ -5656,6 +5658,7 @@ body {
 .attr-panel .objinfo-fval,
 .objinfo-group-body .objinfo-fval,
 .objinfo-camera .objinfo-fval,
+.objinfo-railing .objinfo-fval,
 .objinfo-tree .objinfo-fval {
   flex: 1 1 auto;
   text-align: left;
@@ -7535,8 +7538,10 @@ body {
 }
 .balance-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
+  gap: 4px 8px;
   margin-bottom: 8px;
 }
 .balance-title {
@@ -7549,6 +7554,7 @@ body {
   border-radius: 4px;
   padding: 4px 10px;
   font-size: 12px;
+  white-space: nowrap;
   cursor: pointer;
 }
 .balance-export:hover {

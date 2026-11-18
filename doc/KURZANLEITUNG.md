@@ -372,11 +372,11 @@ Fenster zugemauert, neues Fenster in der Westwand, Anbau in der zweiten Etappe).
 - **Neue Bauteile:** Vorgabe ist „Bestand“. Rechts in der Statusleiste zeigt der Knopf Umbau den Zeichen-Status; ein Klick
   öffnet „Neue Bauteile zeichnen als“ (Status und Etappe). Bei wenig Platz liegt er unter ⋯.
 - **Umbaufilter:** im selben Popover der „Umbaufilter“ der aktiven Ansicht (Geschoss, Schnitt, Ansicht): „Bestand“ (alles,
-  was heute steht), „Abbruch“ (Abbruch gelb und gestrichelt), „Neubau“ (Neu rot, Abbruch weg), „Umbauplan“ (Bestand grau,
+  was heute steht), „Abbruch“ (Abbruch gelb und gestrichelt), „Neu“ (Neu rot, Abbruch weg), „Umbauplan“ (Bestand grau,
   Abbruch gelb, Neu rot nach SIA 400) und „Endzustand“ (ohne Farben, Abbruch weg). Mit „Filter bis Etappe“ zeigt der Plan den
   Stand einer Etappe. Der Filter gehört zur Ebene wie die Modelldarstellung; Ausschnitte und Ansichtsvorlagen merken ihn.
 - **Öffnungen in Bestandswänden:** eine neue Öffnung bricht Mauerwerk ab (im Umbauplan ein gelbes Stück, im Bestand ist die
-  Wand zu), eine Öffnung „Abbruch“ wird zugemauert (rote Ausfachung, im Neubau und Endzustand ist die Wand zu).
+  Wand zu), eine Öffnung „Abbruch“ wird zugemauert (rote Ausfachung, in „Neu“ und „Endzustand“ ist die Wand zu).
 - **Sanierung je Schicht:** z. B. Aussenwand Beton 20 + Dämmung 10 + Putz → Beton bleibt, neue Dämmung 20 + neuer Putz. In drei
   Schritten:
   1. *Sanierungstyp anlegen:* im Panel Umbau, Abschnitt „Sanierung“, den Bestands-Wandtyp wählen und „Sanierungstyp anlegen …“
@@ -389,7 +389,7 @@ Fenster zugemauert, neues Fenster in der Westwand, Anbau in der zweiten Etappe).
      „Neuer Aufbau (Sanierung)“ auf den Sanierungstyp bzw. für eine Ausnahme auf einen anderen Wandtyp stellen.
 
   Die Umbaufilter zeigen dann je Schicht: Bestand und Abbruch den alten Aufbau (Abbruch-Schichten gelb, gestrichelt umrandet),
-  Neubau und Endzustand den neuen (Neubau: neue Schichten rot), der Umbauplan beide — Beton grau, neue Schichten rot und die
+  „Neu“ und „Endzustand“ den neuen (Neu: neue Schichten rot), der Umbauplan beide — Beton grau, neue Schichten rot und die
   abgebrochenen als gelbe gestrichelte Kontur darüber. Grundriss, Schnitt, Ansicht, 3D, Öffnungsleibungen und Flächen (GF an der
   neuen Aussenkante) folgen dem gezeigten Aufbau; ohne Umbaufilter gilt der Bestand.
 - **Etappen und Farben:** die Etappen im Panel Umbau (oder *Fenster → Ressourcen*, Reiter „Umbau“); dort auch die
