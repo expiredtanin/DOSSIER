@@ -809,6 +809,8 @@ function LevelPlanView({
       true,
       // [272] Bearbeitungsvariante (Stift): sichtbar, ausserhalb grau — nur hier, nie im Druck.
       designOptionEdit,
+      // [285] Kataster/Kontext halbtransparent als Unterlage (nur Bildschirm, nie Druck).
+      true,
     );
     // Überlagerung anhängen, ohne die Primitive des Plans zu lesen (lazy, [K3d]).
     const withOverlay = overlayPrimitives.length === 0 ? p : planWithExtra(p, [], overlayPrimitives);

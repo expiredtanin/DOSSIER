@@ -47,6 +47,17 @@ export function findCategory(cats: LayerCategory[], code: string): LayerCategory
  * keine Ebene verweist (verwaister `categoryCode`). Nicht-werfend, damit die Attribut-Resolve-Kette
  * (`plan/generatePlan.ts`) robust auf einen fehlenden Ebenen-Wert zurückfallen kann.
  */
+/**
+ * [285] Zeigt der Arbeitsgrundriss die Klasse als halbtransparente Unterlage? `LayerCategory.underlay`, ohne Angabe
+ * die Umgebungsklassen („05 Kontext" und Kinder: Kataster, Strassen, Gelände …) wie im Kern (`plan/drawings.rs`).
+ */
+export function isUnderlayCategory(cats: LayerCategory[], code: string): boolean {
+  const own = findCategory(cats, code)?.underlay;
+  if (own !== undefined) return own;
+  const ctx = findCategory(cats, "05");
+  return !!ctx && (code === "05" || flattenCategories(ctx.children ?? []).some((c) => c.code === code));
+}
+
 export const getLayerCategory = (project: Project, code: string): LayerCategory | undefined => findCategory(project.layers, code);
 
 /** Menge aller Codes sichtbarer Kategorien (Baum berücksichtigt). */

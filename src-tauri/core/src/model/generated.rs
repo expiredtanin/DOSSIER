@@ -3012,6 +3012,11 @@ pub struct LayerCategory {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub fill: Option<String>,
+    /// [285] Im Arbeitsgrundriss (Bildschirm, nie Druck/Export) halbtransparent als Unterlage zeigen, damit Wände darüber
+    /// lesbar bleiben. Fehlt: an für Umgebungsklassen („05 Kontext" und Kinder: Kataster, Strassen, Gelände …), sonst aus.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub underlay: Option<bool>,
     /// Unterkategorien (Baum).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]

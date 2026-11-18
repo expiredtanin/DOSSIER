@@ -2106,6 +2106,11 @@ export type LayerCategory = {
    * Fehlt sie, gilt die Körper-Konvention (ab 1:100 schwarz). Situation/Schwarzplan färben selbst ([207]).
    */
   fill?: string;
+  /**
+   * [285] Im Arbeitsgrundriss (Bildschirm, nie Druck/Export) halbtransparent als Unterlage zeigen, damit Wände darüber
+   * lesbar bleiben. Fehlt: an für Umgebungsklassen („05 Kontext" und Kinder: Kataster, Strassen, Gelände …), sonst aus.
+   */
+  underlay?: boolean;
   /** Unterkategorien (Baum). */
   children?: Array<LayerCategory>;
 };

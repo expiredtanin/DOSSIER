@@ -21,7 +21,7 @@
 //
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
-import { findCategory } from "../model/layers";
+import { findCategory, isUnderlayCategory } from "../model/layers";
 import type { HatchStyle, LayerCategory, Project } from "../model/types";
 import { BORDERLESS_WINDOW_CHROME } from "./windowChrome";
 import { useWindowBridgeHost } from "./windowBridge";
@@ -35,6 +35,8 @@ export interface LayerSettingsSyncState {
   color: string;
   lw: number;
   fill: string | undefined;
+  /** [285] Als Unterlage (wirksam, mit Vorgabe der Umgebungsklassen). */
+  underlay: boolean;
   hatchId: string | undefined;
   hatches: { id: string; name: string }[];
 }
@@ -74,6 +76,7 @@ function stateFor(project: Pick<Project, "layers" | "hatches">, code: string): L
     color: cat.color,
     lw: cat.lw,
     fill: cat.fill,
+    underlay: isUnderlayCategory(project.layers, cat.code),
     hatchId: cat.hatch,
     hatches: project.hatches.map((h: HatchStyle) => ({ id: h.id, name: h.name })),
   };

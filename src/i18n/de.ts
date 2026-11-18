@@ -1208,6 +1208,8 @@ export const de = {
   "editor.fill": "Füllung",
   "editor.fillNone": "keine",
   "editor.hatch": "Schraffur",
+  "editor.underlay": "Als Unterlage",
+  "editor.underlay.hint": "Im Arbeitsgrundriss halbtransparent zeigen, damit Wände darüber lesbar bleiben (Druck und Export unverändert)",
   "editor.floorHeight": "Geschosshöhe",
   "editor.cutHeight": "Schnitthöhe",
   "editor.levelElevation": "OK fertig Boden",

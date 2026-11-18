@@ -1202,6 +1202,8 @@ export const en: Record<TranslationKey, string> = {
   "editor.fill": "Fill",
   "editor.fillNone": "none",
   "editor.hatch": "Hatch",
+  "editor.underlay": "As underlay",
+  "editor.underlay.hint": "Show semi-transparent in the working plan so walls on top stay readable (print and export unchanged)",
   "editor.floorHeight": "Floor height",
   "editor.cutHeight": "Cut height",
   "editor.levelElevation": "Finished floor level",

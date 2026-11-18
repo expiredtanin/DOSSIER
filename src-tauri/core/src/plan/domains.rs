@@ -74,6 +74,8 @@ pub struct PlanArgs {
     /// [272] Bearbeitungsvariante der Bildschirm-Ansicht (`designOptionEdit`: `{set, option, grey}`, nur Bildschirm;
     /// aufgelöst in [`Ctx::new`] über `design_options::parse_edit`).
     pub design_option_edit: Option<serde_json::Value>,
+    /// [285] Arbeitsgrundriss (Bildschirm): Klassen „als Unterlage" (Kataster, Kontext) halbtransparent (`drawings::underlay_class`).
+    pub context_underlay: bool,
 }
 
 /// [140] Ab diesem Massstab (1:N) zeichnet der Detailgrad „mittel" wie „grob".
@@ -124,6 +126,7 @@ impl PlanArgs {
             renovation_phase: v.get("renovationPhase").and_then(|m| m.as_str()).filter(|m| !m.is_empty()).map(String::from),
             design_options: crate::design_options::parse_request(v.get("designOptions")),
             design_option_edit: v.get("designOptionEdit").filter(|e| e.is_object()).cloned(),
+            context_underlay: v.get("contextUnderlay").and_then(|b| b.as_bool()).unwrap_or(false),
         })
     }
 
@@ -1784,7 +1787,7 @@ pub fn room_stamp_spots(p: &Project, floor: &str, show: &HashSet<String>, scale:
         return out;
     }
     let (detail, auto_coarse) = effective_detail(Detail::Mittel, scale);
-    let a = PlanArgs { floor: floor.to_string(), detail, show: show.clone(), grey: HashSet::new(), reference_lines: false, global: true, scale, for_print: false, compact: false, mono: false, sun_when: None, auto_coarse, rules: None, model_view: None, trace_of: None, renovation: None, renovation_phase: None, design_options: Vec::new(), design_option_edit: None };
+    let a = PlanArgs { floor: floor.to_string(), detail, show: show.clone(), grey: HashSet::new(), reference_lines: false, global: true, scale, for_print: false, compact: false, mono: false, sun_when: None, auto_coarse, rules: None, model_view: None, trace_of: None, renovation: None, renovation_phase: None, design_options: Vec::new(), design_option_edit: None, context_underlay: false };
     let Ok(d) = plan_domains(p, &a) else { return out };
     for q in d.rooms.iter().chain(&d.sections) {
         if let Primitive::Text { at, room_id: Some(id), .. } = q {

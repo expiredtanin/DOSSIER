@@ -43,7 +43,7 @@ export function LayerSettingsWindowApp() {
     };
   }, []);
 
-  const patch = (p: Partial<{ name: string; color: string; lw: number; fill: string | undefined; hatch: string | undefined }>) => {
+  const patch = (p: Partial<{ name: string; color: string; lw: number; fill: string | undefined; hatch: string | undefined; underlay: boolean }>) => {
     if (!state) return;
     void import("@tauri-apps/api/event").then(({ emitTo }) =>
       emitTo("main", "layer-settings-command", {
@@ -114,6 +114,9 @@ export function LayerSettingsWindowApp() {
           </EditorField>
           <EditorField label={t("editor.fill")}>
             <OptionalColorField value={state.fill} onChange={(fill) => patch({ fill })} />
+          </EditorField>
+          <EditorField label={t("editor.underlay")}>
+            <input type="checkbox" title={t("editor.underlay.hint")} checked={state.underlay} onChange={(e) => patch({ underlay: e.target.checked })} />
           </EditorField>
           <EditorField label={t("editor.hatch")}>
             <span className="editor-hatch">
