@@ -9682,6 +9682,8 @@ body {
 
 /* ── [271] Dock-Panel „Umbau“ ─────────────────────────────────────────────────────────────────────── */
 .reno-panel {
+  /* Vorschau-Chips über dem Editor wachsen beim ersten Bearbeiten: kein Scroll-Anker-Sprung, der den offenen Farb-Popover schliesst ([283]). */
+  overflow-anchor: none;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -10419,9 +10421,9 @@ body {
 }
 .reno-style-row {
   display: grid;
-  grid-template-columns: minmax(44px, 1fr) 44px 44px 84px 24px;
+  grid-template-columns: minmax(62px, 1fr) 40px 40px 80px 22px;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
 }
 .reno-style-label {
   font-weight: 600;
