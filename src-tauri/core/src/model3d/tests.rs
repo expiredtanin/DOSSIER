@@ -1163,3 +1163,27 @@ fn slice_x_quader_bleibt_geschlossen() {
     assert!(m.positions.chunks_exact(3).all(|c| [0.0, 0.25, 0.6, 1.0].iter().any(|x| (c[0] - x).abs() < 1e-12)));
     assert!(m.positions.chunks_exact(3).any(|c| c[0] == 0.25) && m.positions.chunks_exact(3).any(|c| c[0] == 0.6));
 }
+
+/// [253] Entourage im 3D: Bibliotheksobjekte mit Netz kommen als Meshes bei den Stützen, Herkunft = Zeichnung; die Klasse
+/// der Zeichnung und das Ausblenden der Id wirken wie bei jedem Element; Objekte ohne Netz (WC) liefern nichts.
+#[test]
+fn entourage_im_3d_klasse_und_filter() {
+    let mut p = sample();
+    let lv = p.drawing_levels[0].id.clone();
+    let n0 = parts(&p, true, 1.0, false).unwrap().column_meshes.len();
+    let d = |v: serde_json::Value| -> Drawing2D { serde_json::from_value(v).unwrap() };
+    p.drawings2d.push(d(serde_json::json!({"id": "pers1", "type": "drawing2d", "levelId": lv, "categoryCode": "24", "geom": {"shape": "libobj", "libId": "lib:person-stehend", "at": {"x": 4.0, "y": -3.0}, "rotation": 0.5}})));
+    p.drawings2d.push(d(serde_json::json!({"id": "wc1", "type": "drawing2d", "levelId": lv, "categoryCode": "23", "geom": {"shape": "libobj", "libId": "lib:wc-wand", "at": {"x": 1.0, "y": 1.0}, "rotation": 0.0}})));
+    let m = parts(&p, true, 1.0, false).unwrap().column_meshes;
+    assert_eq!(m.len(), n0 + 6, "Person = Rumpf, Kopf, 2 Beine, 2 Arme; WC nur 2D");
+    let idx = p.drawings2d.iter().position(|x| x.id == "pers1").unwrap();
+    assert!(m[n0..].iter().all(|x| x.owner == Owner::Drawing(idx) && x.owner.id(&p) == Some("pers1")));
+    let zmax = m[n0..].iter().flat_map(|x| x.positions.chunks_exact(3).map(|q| q[2])).fold(f64::NEG_INFINITY, f64::max);
+    let base = p.floor(&lv).map_or(0.0, |f| f.base_elevation.unwrap_or(0.0));
+    assert!((zmax - (base + 1.75)).abs() < 1e-9, "{zmax}");
+    // Klasse „24" aus: weg; Id ausgeblendet: weg.
+    let f = ClassFilter::new(&p, &["24".to_string()]);
+    assert_eq!(parts_filtered(&p, true, 1.0, false, &f).unwrap().column_meshes.len(), n0);
+    let f = ClassFilter::from_text(&p, r#"{"hideIds": ["pers1"]}"#);
+    assert_eq!(parts_filtered(&p, true, 1.0, false, &f).unwrap().column_meshes.len(), n0);
+}

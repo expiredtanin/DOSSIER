@@ -300,8 +300,14 @@ fn prepare(p: &Project, proj: &Projection, vis: &Visibility, context: bool) -> R
                 let q = model_of(n);
                 [dot(cof[0], q), dot(cof[1], q), dot(cof[2], q)]
             };
-            let (mut vf, refs) = super::section::model_view_faces(p, vis, &view, &view_n, context && ortho)?;
-            if vf.faces.len() > FACE_BUDGET && context {
+            // [253] Entourage (Person, Auto …) als Netze im Kontext der Kopie; nur längentreu (nicht in schiefen Projektionen).
+            let ent = if ortho { crate::furniture_3d::with_context_meshes(p, context) } else { None };
+            let (pp, meshes) = match &ent {
+                Some(q) => (q, true),
+                None => (p, context && ortho),
+            };
+            let (mut vf, refs) = super::section::model_view_faces(pp, vis, &view, &view_n, meshes)?;
+            if vf.faces.len() > FACE_BUDGET && (context || ent.is_some()) {
                 (vf, _) = super::section::model_view_faces(p, vis, &view, &view_n, false)?;
             }
             // Modell-Normale = Mᵀ · Normale (die Normale ging über M⁻ᵀ).
@@ -317,8 +323,13 @@ fn prepare(p: &Project, proj: &Projection, vis: &Visibility, context: bool) -> R
                 let q = model_of(n);
                 [dot(r, q), dot(u, q), dot(f, q)]
             };
-            let (mut vf, refs) = super::section::model_view_faces(p, vis, &view, &view_n, context)?;
-            if vf.faces.len() > FACE_BUDGET && context {
+            let ent = crate::furniture_3d::with_context_meshes(p, context);
+            let (pp, meshes) = match &ent {
+                Some(q) => (q, true),
+                None => (p, context),
+            };
+            let (mut vf, refs) = super::section::model_view_faces(pp, vis, &view, &view_n, meshes)?;
+            if vf.faces.len() > FACE_BUDGET && (context || ent.is_some()) {
                 (vf, _) = super::section::model_view_faces(p, vis, &view, &view_n, false)?;
             }
             let model_n: Vec<V3> = vf.faces.iter().map(|q| unit([0, 1, 2].map(|k| r[k] * q.normal[0] + u[k] * q.normal[1] + f[k] * q.normal[2])).unwrap_or([0.0, 0.0, 1.0])).collect();

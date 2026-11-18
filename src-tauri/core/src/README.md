@@ -36,6 +36,7 @@ Neues Modul: `<modul>.rs` und `mod` in `lib.rs`, Bindungen in `web/<modul>.rs` u
 | `design_options.rs` | [272] Varianten: Kombination (je Satz eine Variante), Anfragen „Satz=Variante“, Ops (Übernehmen, Löschen, Zuweisen, Kopieren, Zeichen-Variante), Vergleich der Kennzahlen/Kosten; die Sichtbarkeit selbst entscheidet `renovation.rs` (`doc/ARCHITEKTUR.md` 3.9) |
 | `standards.rs` | Standard-Bibliothek: Baustoffe mit SIA-400-Schraffur und Kennwerten, Linientypen, Standard-Aufbauten |
 | `standards_names.rs` | [264] Englische Namen der Standards nach Kennung (`Lang`, `name_in`); neue Projekte in englischer UI bekommen sie über `standardsMergeOps(lang)` |
+| `furniture_3d.rs` | Entourage 3D ([253]): Low-Poly-Netze (Person, Auto, Velo, Bank, Stuhl, Tische) der Bibliotheksobjekte, Platzierung auf Gelände/Geschoss, Schattenwolken; Netze kommen über `model3d::emit_entourage` in 3D, `mesh_data` (Cycles) und `plan/axo.rs` |
 | `furniture_lib.rs` | Objektbibliothek 2D ([253]): Katalog der Standard-Symbole mit Parametern (Definition) und Zeichenfunktionen nach Detailgrad (Erzeugung), Register, Platzhalter für unbekannte Ids; s. `doc/ARCHITEKTUR.md` 3.7 |
 | `text_layout.rs`, `rich_text.rs` | Text-Layout (Zeilen, Umbruch) und Bearbeiten von Rich-Text |
 | `woff2.rs` | WOFF2 → TTF/SFNT (nur untransformierte Pakete), `woff2_to_sfnt` für die PDF-Schriften ([208], `src/export/pdfFonts.ts`); render2d bindet dieselbe Datei per `#[path]` ein (Glyphen-Pass [226]) |

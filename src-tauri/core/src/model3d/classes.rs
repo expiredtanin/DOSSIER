@@ -40,6 +40,8 @@ pub enum Owner {
     Context(usize),
     /// [115] Index in `Project::extruded_solids`.
     Solid(usize),
+    /// [253] Index in `Project::drawings2d` (Entourage: Bibliotheksobjekt mit 3D-Netz).
+    Drawing(usize),
 }
 
 impl Owner {
@@ -58,6 +60,7 @@ impl Owner {
             Owner::Stair(i) => at(&p.stairs, i).map(|e| e.id.as_str()),
             Owner::Context(i) => at(&p.context, i).map(|e| e.id()),
             Owner::Solid(i) => at(&p.extruded_solids, i).map(|e| e.id.as_str()),
+            Owner::Drawing(i) => p.drawings2d.get(i).map(|d| d.id.as_str()),
         }
     }
 }
@@ -352,6 +355,7 @@ pub fn parts_filtered(p: &Project, layered: bool, detail: f64, for_section: bool
         column_meshes: {
             let mut m = emit_columns(p);
             m.extend(emit_trees(p));
+            m.extend(emit_entourage(p));
             m.extend(emit_railings(p));
             m
         },

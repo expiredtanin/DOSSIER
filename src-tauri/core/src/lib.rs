@@ -153,6 +153,7 @@ pub mod surface_pattern;
 pub mod surface_pattern3d;
 pub mod standards;
 pub mod standards_names;
+pub mod furniture_3d;
 pub mod furniture_lib;
 pub mod dim_assoc;
 pub mod opening_slide;

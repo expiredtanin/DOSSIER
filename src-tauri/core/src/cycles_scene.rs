@@ -865,6 +865,18 @@ mod tests {
         xml.matches(&format!("<{tag} ")).count() + xml.matches(&format!("<{tag}>")).count()
     }
 
+    /// [253] Entourage (Person, Auto …) kommt als eigene Netze in die Szene.
+    #[test]
+    fn entourage_ist_in_der_szene() {
+        let base = cycles_scene(&sample(), &opts("{}")).unwrap();
+        let mut p = sample();
+        let lv = p.drawing_levels[0].id.clone();
+        p.drawings2d.push(serde_json::from_value(serde_json::json!({"id": "pers1", "type": "drawing2d", "levelId": lv, "categoryCode": "24", "geom": {"shape": "libobj", "libId": "lib:person-stehend", "at": {"x": 4.0, "y": -3.0}, "rotation": 0.5}})).unwrap());
+        let s = cycles_scene(&p, &opts("{}")).unwrap();
+        assert!(s.meshes > base.meshes && s.triangles > base.triangles + 100, "{} -> {} Dreiecke", base.triangles, s.triangles);
+        well_formed(&s.xml);
+    }
+
     /// Das Beispielprojekt ergibt eine wohlgeformte XML-Szene: Zähler und Verschachtelung stimmen, alle Indizes zeigen auf Ecken.
     #[test]
     fn beispiel_ist_wohlgeformt() {

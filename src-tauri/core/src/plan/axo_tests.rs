@@ -332,3 +332,14 @@ fn testhaus_seitenrichtig_in_allen_vorgaben() {
     let (e, g) = (mid(&erker, cam.clone(), 0), mid(&garage, cam, 0));
     assert!(e > g, "Kamera Südost: Erker {e:.2}, Garage {g:.2}");
 }
+
+/// [253] Entourage (Auto) erscheint im 3D-Dokument; seine Klasse schaltet es ab.
+#[test]
+fn entourage_im_3d_dokument() {
+    let mut p = cubes(&[(0.0, 0.0, 0.0)]);
+    let n0 = lines(&prims_of(&p, serde_json::json!({"view": "southeast"}))).len();
+    p.drawings2d.push(serde_json::from_value(serde_json::json!({"id": "pers1", "type": "drawing2d", "levelId": "l0", "categoryCode": "24", "geom": {"shape": "libobj", "libId": "lib:auto", "at": {"x": 4.0, "y": -3.0}, "rotation": 0.5}})).unwrap());
+    let n1 = lines(&prims_of(&p, serde_json::json!({"view": "southeast"}))).len();
+    assert!(n1 > n0 + 10, "{n0} -> {n1}");
+    assert_eq!(lines(&prims_of(&p, serde_json::json!({"view": "southeast", "hasVis": true, "invisible": ["24"]}))).len(), n0, "Klasse aus");
+}
