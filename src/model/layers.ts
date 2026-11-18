@@ -110,6 +110,7 @@ export interface SelectionMembers {
   columnIds?: readonly string[];
   roofIds?: readonly string[];
   openingIds?: readonly string[];
+  railingIds?: readonly string[];
 }
 
 /** Kategorie-Codes aller gewählten Objekte (eindeutig, in Fundreihenfolge). */

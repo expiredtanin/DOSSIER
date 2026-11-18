@@ -360,6 +360,8 @@ pub struct SelectionMembers {
     pub column_ids: Vec<String>,
     pub roof_ids: Vec<String>,
     pub opening_ids: Vec<String>,
+    /// [284] Geländer.
+    pub railing_ids: Vec<String>,
 }
 
 /// Kategorie-Codes aller gewählten Objekte (eindeutig, in Fundreihenfolge; leere Codes zählen nicht).
@@ -386,6 +388,7 @@ pub fn selection_category_codes(p: &Project, sel: &SelectionMembers) -> Vec<Stri
     scan(&sel.column_ids, &mut p.beams.iter().flatten().map(|o| (o.id.as_str(), o.category_code.as_str())));
     scan(&sel.roof_ids, &mut p.roofs.iter().flatten().map(|o| (o.id.as_str(), o.category_code.as_str())));
     scan(&sel.opening_ids, &mut p.openings.iter().flatten().map(|o| (o.id.as_str(), o.category_code.as_str())));
+    scan(&sel.railing_ids, &mut p.railings.iter().flatten().map(|o| (o.id.as_str(), o.category_code.as_str())));
     out
 }
 
@@ -412,6 +415,15 @@ mod tests {
     }
     fn codes_of(t: &[Value]) -> Vec<String> {
         flatten(t).iter().map(|c| code_of(c).unwrap().to_string()).collect()
+    }
+
+    /// [284] „Klasse der Auswahl“ kennt Geländer.
+    #[test]
+    fn auswahl_klasse_gelaender() {
+        let mut p: Project = serde_json::from_str(include_str!("../tests/fixtures/sample_project.json")).unwrap();
+        p.railings = Some(vec![serde_json::from_value(json!({"id": "g1", "type": "railing", "floorId": "eg", "categoryCode": "41", "points": [{"x": 0, "y": 0}, {"x": 4, "y": 0}], "height": 1.0, "kind": "bars"})).unwrap()]);
+        let sel = SelectionMembers { railing_ids: vec!["g1".into()], ..Default::default() };
+        assert_eq!(selection_category_codes(&p, &sel), vec!["41".to_string()]);
     }
 
     #[test]

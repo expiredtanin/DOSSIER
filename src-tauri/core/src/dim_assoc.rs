@@ -245,7 +245,7 @@ fn drawing_shape(d: &Value) -> Option<Shape> {
 }
 
 /// Listen, in denen Ecke/Kante/Mitte ihr Element suchen (in dieser Reihenfolge).
-const SHAPE_LISTS: [&str; 6] = ["columns", "ceilings", "roofs", "rooms", "drawings2d", "stairs"];
+const SHAPE_LISTS: [&str; 7] = ["columns", "ceilings", "roofs", "rooms", "drawings2d", "stairs", "railings"];
 
 /// Treppe: Umriss (gerade/L: Aussenlinie; Wendel: die vier Ecken der Schliesslinien), Podest als
 /// weiterer Umriss, Mittelpunkt nur bei der Wendel.
@@ -275,6 +275,8 @@ fn shape_of(coll: &str, e: &Value) -> Option<Shape> {
         "rooms" => Some(Shape::new(pts_list(e.get("boundary")), true, None)),
         "drawings2d" => drawing_shape(e),
         "stairs" => stair_shape(e),
+        // [284] Geländer: Achse als offener bzw. geschlossener Zug.
+        "railings" => Some(Shape::new(pts_list(e.get("points")), e.get("closed").and_then(Value::as_bool).unwrap_or(false), None)),
         _ => None,
     }
 }
@@ -675,7 +677,7 @@ fn with(v: &Value, key: &str, x: Value) -> Value {
 }
 
 /// Felder, deren Änderung Bezüge verschieben kann.
-pub const SOURCE_FIELDS: [&str; 8] = ["walls", "wallTypes", "openings", "columns", "ceilings", "roofs", "rooms", "drawings2d"];
+pub const SOURCE_FIELDS: [&str; 9] = ["walls", "wallTypes", "openings", "columns", "ceilings", "roofs", "rooms", "drawings2d", "railings"];
 
 /// Nachführ-Ops: je Bemassung mit Bezügen, deren aufgelöste Lage oder Gültigkeit sich geändert hat,
 /// ein `replace` mit neuen `pts`/`refs`.
@@ -788,6 +790,7 @@ mod tests {
             "openings": [{"id": "O", "hostWallId": "A", "position": 2, "width": 1.5}],
             "columns": [{"id": "S", "floorId": "eg", "position": {"x": 5, "y": 3}, "profile": {"kind": "rect", "width": 0.4, "depth": 0.2}, "rotation": 0}],
             "ceilings": [{"id": "C", "floorId": "eg", "outline": [{"x": 0, "y": 0}, {"x": 4, "y": 0}, {"x": 4, "y": 4}]}],
+            "railings": [{"id": "G", "floorId": "eg", "points": [{"x": 40, "y": 0}, {"x": 44, "y": 0}, {"x": 44, "y": 3}]}],
             "drawings2d": [
                 {"id": "L", "levelId": "eg", "geom": {"shape": "line", "a": {"x": 20, "y": 0}, "b": {"x": 24, "y": 0}}},
                 {"id": "K", "levelId": "eg", "geom": {"shape": "circle", "center": {"x": 30, "y": 0}, "r": 1}}
@@ -822,6 +825,9 @@ mod tests {
             ((24.0, 0.0), DimFeature::Vertex),
             ((22.0, 0.0), DimFeature::Edge),
             ((30.0, 0.0), DimFeature::Center),
+            // [284] Geländer: Eckpunkt und Kante der Achse.
+            ((44.0, 0.0), DimFeature::Vertex),
+            ((42.0, 0.0), DimFeature::Edge),
         ];
         for (s, f) in cases {
             let rf = at(&r, s);

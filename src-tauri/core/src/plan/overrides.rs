@@ -355,6 +355,12 @@ pub fn hidden_elements(p: &Project, v: RuleView) -> HashSet<String> {
             out.insert(b.id.clone());
         }
     }
+    // [284] Geländer.
+    for g in p.railings.iter().flatten() {
+        if test("railing", &g.category_code, Some(&crate::railing::label(g))) {
+            out.insert(g.id.clone());
+        }
+    }
     for r in p.rooms.iter().flatten() {
         if test("room", &r.category_code, Some(&r.name)) {
             out.insert(r.id.clone());
@@ -719,6 +725,19 @@ mod tests {
         r.condition = cond(MaterialCategory, Equals, "insulation");
         p.override_rules = Some(vec![r]);
         assert!(hidden_elements(&p, RuleView::default().view("plan")).is_empty());
+    }
+
+    /// [284] „Ausblenden“ erfasst auch Geländer (Bauteilart „railing“).
+    #[test]
+    fn ausgeblendete_gelaender() {
+        let mut p = sample();
+        p.railings = Some(vec![serde_json::from_value(serde_json::json!({"id": "g1", "type": "railing", "floorId": "eg", "categoryCode": "41", "points": [{"x": 0, "y": 0}, {"x": 4, "y": 0}], "height": 1.0, "kind": "bars"})).unwrap()]);
+        let mut r = rule(true, cond(ElementKind, Equals, "railing"), None, None, None);
+        r.actions.hide = Some(true);
+        p.override_rules = Some(vec![r]);
+        let h = hidden_elements(&p, RuleView::default().view("plan"));
+        assert!(h.contains("g1"));
+        assert!(p.walls.iter().all(|w| !h.contains(&w.id)));
     }
 
     /// [33] Schatten und Gelände folgen nur Regeln, die die Bauteilart ausdrücklich nennen; Linienstil und

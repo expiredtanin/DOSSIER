@@ -854,6 +854,11 @@ export function createProjectSlice(
           ...removeItems(p, "columns", (c) => c.floorId === id),
           ...removeItems(p, "beams", (b) => b.floorId === id),
           ...removeItems(p, "railings", (r) => r.floorId === id),
+          // [284] 2D-Elemente, Körper, Bäume und Kameras des Geschosses.
+          ...removeItems(p, "drawings2d", (d) => d.levelId === id),
+          ...removeItems(p, "extrudedSolids", (s) => s.levelId === id),
+          ...removeItems(p, "trees", (t) => t.floorId === id),
+          ...removeItems(p, "cameras", (c) => c.floorId === id),
           ...removeItems(p, "openings", (o) => removedWallIds.has(o.hostWallId) || (!!o.hostCeilingId && removedCeilingIds.has(o.hostCeilingId)) || (!!o.hostRoofId && removedRoofIds.has(o.hostRoofId))),
         ];
       });
