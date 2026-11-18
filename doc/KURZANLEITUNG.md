@@ -70,8 +70,13 @@ Zuerst das Geschoss wählen (Panel **Zeichnungsebenen**, „Erdgeschoss“; ⌘5
 
 - **Wände:** `w`, Ecken klicken oder als LV95 tippen, mit dem Startpunkt schliessen, Enter. In Bogenwänden folgen Fenster und Türen
   dem Bogen (ausser bei Schichteinzug), Rundbogen- und andere Formöffnungen schneiden ihre echte Form, auch im 3D-Live-Schnitt.
-  Eine Öffnung, die in eine Decke ragt, endet an der Deckenunterkante.
-- **Decke:** `d`, die vier Ecken, Enter. Die Decke bekommt den Deckentyp des Projekts.
+  Eine Öffnung, die in eine Decke ragt, endet an der Deckenunterkante. Die Optionen des Befehls stehen in der Befehlszeile: Taste W
+  schaltet den Wandtyp reihum durch die Typen des Projekts (Innenwände gleich im richtigen Aufbau zeichnen), Taste A das Aussenbauteil
+  (nach Typ, ja, nein). Vorgabe nach dem Typnamen: ein Typ mit Aussenwand im Namen gilt als aussen, mit Innenwand als innen; nur dann schreibt
+  der IFC-Export `IsExternal` und rechnet der U-Wert. (Taste T öffnet dagegen die Objekteinstellungen.)
+- **Decke:** `d`, die vier Ecken, Enter. Die Decke bekommt den Deckentyp des Projekts. Taste L wählt die **Lage**: oben am Geschoss
+  (Geschossdecke, Vorgabe), unter dem Geschoss (Bodenplatte unter dem Erdgeschoss) oder frei mit getippter Oberkante in m über
+  dem Geschossboden (z. B. Balkonplatte). Das spart die Umstellung von Oberkante und Unterkante in der Objekt-Info.
 - **Dach:** `rf`, zwei Ecken; vorgegeben ist ein Satteldach. Die Dachform lässt sich schon in der
   Befehlszeile wählen („Flachdach“ unter den Optionen). Nachträglich: Dach wählen, Panel **Objekt-Info** → Abschnitt „Dach“
   → **Dachform** „Flachdach“; dann erscheint **Attika Höhe (m)** (0 = keine Attika), wie im Beispiel. Die Dachform ist ein
@@ -89,6 +94,25 @@ Geschoss Aussenwände, Decken zwischen den Geschossen und ein Flachdach; fehlend
 Körper entfällt. Alles ist ein Undo-Schritt. Was nicht geht (verjüngte oder geneigte Körper, Kugel, Kegel, Verschneidungen,
 Unterkante zwischen zwei Geschossen), lehnt der Befehl mit einer Meldung ab.
 
+**Geländer, Träger, Rampe.** Drei Bauteile für den Wettbewerb, je mit eigenem Befehl; sie erscheinen in Grundriss, Schnitt, Ansicht,
+3D, im 3D-Dokument, im DXF (eigene Ebene) und im IFC und folgen Umbaufilter und Varianten.
+
+- **Geländer:** Befehl `gelaender`. Punkte der Achse klicken (Balkon, Galerie, Treppenauge), Enter beendet, Schliessen oder ein Klick auf den
+  Startpunkt schliesst ringsum. Eine getippte Zahl setzt die Höhe (Vorgabe 1.00 m nach SIA 358). Die Art wählst du als Option:
+  Stäbe, Glas, Brüstung (massiv) oder Lochblech. Fusshöhe über dem Geschoss, Handlauf, Stababstand und Dicke danach in der
+  **Objekt-Info** im Abschnitt Geländer. Glas erscheint in Ansicht und 3D-Dokument durchscheinend, im Schnitt unverändert. Der Objektfang
+  greift an der Achse. Nicht möglich: Lochblech zeichnet kein Lochmuster, ein fremdes Geländer aus einer IFC-Datei bleibt Mesh.
+- **Träger und Unterzug:** Befehl `traeger`. Anfang und Ende klicken; der Träger sitzt bündig an der Deckenunterkante des aktiven Geschosses.
+  Als Option wählst du das Profil (Rechteck-Unterzüge wie 25/40 oder Stahlprofile als Text mit Aussenmassen, z. B. HEB 200); eine
+  getippte Zahl setzt die Querschnittshöhe. Im Grundriss steht er gestrichelt mit Achse, weil er über der Schnittebene liegt. Nicht
+  möglich: nur rechteckiger Querschnitt und waagrechte Lage (Stahlprofile sind Text, kein Katalog), keine Anschlussdetails, kein Deckenspiegel.
+- **Rampe und geneigte Decke:** Befehl `rampe`. Umriss klicken (Schliessen oder Enter), dann Anfang und Ende der Gefällelinie und das Gefälle
+  in Prozent (Enter = 6 %, rollstuhlgerecht nach SIA 500; negativ = abwärts). Es entsteht eine Decke mit Neigung, ein Gefällepfeil
+  zeigt die Richtung. Eine normale Decke bekommt in der **Objekt-Info** das Feld Gefälle und wird so zum Pultdach oder Podest. Steigt die
+  Rampe über Geschosshöhe, warnt Dossier (Richtung vertauscht?). Schnitt, Ansicht, 3D und IFC (IfcRamp) folgen der Neigung. Nicht
+  möglich: Wände schneiden sich nicht an der geneigten Decke ein (ihre Oberkante bleibt waagrecht), der STEP-Export schreibt die Platte
+  waagrecht, die Sonne wirft einen Hüllschatten, der Griff für die Gefällelinie fehlt.
+
 **Möbel und Sanitär: Objekte.** Das Panel **Objekte** (neben den Werkzeugen) enthält die 2D-Objektbibliothek: Sanitär, Küche,
 Tische, Sitzen, Schlafen, Schränke, Aussenraum (Auto mit Parkfeld, Velo, Rollstuhl-Wendekreis). Objekt wählen, im Plan den
 Einfügepunkt klicken (Befehl `libobj`); vor dem Klick dreht R das Objekt, M spiegelt es. Die Vorschau hängt am Cursor.
@@ -98,7 +122,11 @@ wie im Befehl, Loslassen setzt es; Loslassen über dem Panel oder Esc bricht ab.
 **Unordnung**, wie schief die Stühle stehen, **Neu würfeln** zieht eine neue Anordnung (gleiche Zahl = gleiche Stühle). Die Zeichnung
 folgt dem Detailgrad der Ansicht (grob, mittel, fein). Möbel liegen auf der Klasse 22, Sanitär auf 23, Fahrzeuge und
 Freiflächen auf 24 und lassen sich dort ausschalten; Möbel und Sanitär sparen den Bodenbelag aus. Im DXF-Export wird jedes
-Objekt als Block mit Einfügung ausgegeben. Die Objekte sind nur 2D; im 3D und im IFC erscheinen sie nicht.
+Objekt als Block mit Einfügung ausgegeben. Im IFC erscheinen die Objekte nicht.
+**Entourage im 3D.** Person (stehend, gehend), Velo, Auto, Sitzbank, Stuhl und Tische mit Stühlen erscheinen auch im 3D, im 3D-Dokument,
+im Schatten und im Rendering als einfache Körper (Parameter H = Höhe), ebenso im Schnitt und in der Ansicht (dort als Hülle: in der
+Ansicht gefüllt, im Schnitt als Umriss, von Bauteilen verdeckt; ein Objekt vor der Schnittebene entfällt). Ein Klick im 3D wählt die
+Zeichnung. Nicht möglich: die Körper sind grob (Hüllen statt genauer Silhouette), weitere Möbel gibt es nicht als 3D, ins IFC gehen sie nicht.
 
 ## 5. Räume und Raumprogramm
 
@@ -118,6 +146,10 @@ Kennzahlen-Nachweis“ (HNF, NNF, VF, FF, KF; IVHB-Ziffern) mit **CSV** und **PD
 *Bearbeiten → Kennzahlen und Raumprogramm …* gibt dasselbe als Meldung. Beispielwerte aus dem Projekt „Wettbewerb“:
 GF 745 m², GV 2’234 m³, AZ 0.75, ÜZ 0.28. Das GV (SIA 416) ist je Geschoss GF × Geschosshöhe plus der Dachraum unter
 Steildach und Gauben bis Oberkante Dach; Dachvorsprünge zählen nicht (das Wettbewerbsprojekt hat ein Flachdach, also keinen Dachraum).
+Unten zählt die Bodenplatte mit: eine Decke unter dem untersten Geschoss reicht von ihrer Unterkante bis zum Fertigboden (Fundamente,
+Kies und Magerbeton nicht). Freie Körper neben dem Haus (Studienkörper, mindestens 9 m² Grundfläche und 2.4 m hoch) zählen, aber nur
+ausserhalb der Geschossgrundrisse; Aufstockungen modellierst du als Geschoss, nicht als Körper. Die Schwellen 9 m² und 2.4 m sind Annahmen,
+die Auslegung von Fundamenten ist noch nicht gegen die Norm geprüft; Innenhöfe ohne Dach füllt Dossier im Dachraum fälschlich mit.
 
 **Baurecht-Nachweis.** Die zulässigen Ziffern trägst du im Panel **Gelände** unter „Baurecht der Parzelle“ ein: **GFZ max.**,
 **AZ max.**, **BMZ max.**, **ÜZ max.**, **GZ min.** und **Fassadenhöhe max.** (zusätzlich zu „Gesamthöhe max.“); leer heisst
@@ -165,6 +197,13 @@ einem Schritt mit *Ansicht → Ansichten aller Seiten erzeugen* (Befehl `ansicht
 Linie für Nord, Ost, Süd und West an, parallel zu den Fassaden (auch bei einem gedrehten Haus; der Plan gilt oben als
 Norden) und mit etwas Abstand. Eine Seite, für die es schon eine Ansicht gibt, bleibt unverändert; ein Undo nimmt alle neuen
 Ansichten zurück. Einzelne Ansichten zeichnest du weiterhin mit `ansichtslinie`.
+
+**Schnitt- und Ansichtslinie im Plan einstellen.** Wie sie im Grundriss aussehen, legst du je Linie fest: Schnittlinie wählen, in der
+**Objekt-Info** den Abschnitt „Darstellung im Plan“. Dort stehen Linie (durchgehend, nur Enden oder keine), Linientyp, Stift, Länge der Endstücke,
+Marke (Pfeil, L, Dreieck oder keine), Marke an Anfang, Ende oder beiden und die Beschriftung. Für alle Linien zugleich gilt die Vorgabe in
+*Fenster → Ressourcen*, Reiter „Modelldarstellung“, Gruppe Schnittmarken bzw. Ansichtsmarken. Nicht möglich: die Marke Kreis mit Pfeil für
+Ansichten, und der Versatz der Marke lässt sich nicht von der Linie lösen. Im Schnitt und in der Ansicht selbst lässt Dossier Nachbar-Kontext
+weg, der mehr als 150 mm Papier (bei 1:100 also 15 m) seitlich neben dem Haus liegt; so wird der Schnitt nicht über die halbe Stadt breit.
 
 In Ansicht und Schnitt zieht Dossier eine kräftige Bodenlinie auf ±0.00; sie ragt beidseits etwas über das Gezeichnete hinaus
 und gehört zur Klasse 02 Gelände (ausgeschaltet entfällt sie). Die automatischen Höhenkoten sind in Papiergrösse gesetzt
@@ -259,7 +298,10 @@ als Vorgabe, wenn die App es mitbringt; sonst bleibt „Blender“ (installierte
 Schätzung der Restzeit, **Rendering abbrechen** beendet den Lauf. Beim allerersten Start übersetzt Cycles auf dem Mac seine Rechenkerne
 für die Grafikkarte, das kann einige Minuten dauern. Danach erscheint das Bild: „Bild speichern …“ als PNG oder „Ins Layout einsetzen“ auf
 das gewählte Blatt (so kommt es auch ins Plakat). Scheitert der Lauf, steht der Grund im Dialog und als Meldung; die Arbeitsdateien im
-Temp-Ordner räumt Dossier jedes Mal auf. Kommandozeile: `dossier-cli projekt.obp render --engine cycles --out bild.png`. Auf dem Mac (Metal)
+Temp-Ordner räumt Dossier jedes Mal auf. Der Dialog öffnet als eigenes Fenster (Mac), das Hauptfenster bleibt bedienbar:
+du kannst weiterzeichnen, während es rechnet; das Fenster merkt sich seine Lage. Schliessen vor dem Ende fragt nach und bricht
+dann den Lauf ab. Der Browser-Build zeigt den Dialog weiter als Fenster im Hauptfenster. Das Bild folgt der Umbau- und Varianten-Ansicht
+der aktiven Ebene. Kommandozeile: `dossier-cli projekt.obp render --engine cycles --out bild.png`. Auf dem Mac (Metal)
 ist das nicht geprüft.
 
 ## 10. Präsentationsplan
@@ -275,8 +317,12 @@ die Situation 1:500 zuerst oben links, dann Grundrisse, Ansichten und Schnitt im
 aus dem Modell, Massstab passend zum Rahmen). Hat das Projekt schon ein Bild auf einem Blatt (Rendering-Dialog „Ins Layout einsetzen“
 oder Knopf „Bild“), steht dieses Bild im Rahmen; nur wenn beides fehlt, bleibt der Platzhalter „3D-Bild hier einsetzen“. Was aufs Plakat soll,
 wählst du im Dialog im Abschnitt „Plakat-Inhalt“ (Situation 1:500, Kennzahlen, Baurecht-Nachweis, Rahmen fürs 3D-Bild; je abwählbar).
-Reicht der Platz nicht, entsteht ein zweites Plakat (Plan 2/2); der Massstab wird nie verkleinert. Bleibt Platz übrig,
-verteilt Dossier ihn gleichmässig als Weissraum zwischen den Zeilen; das 3D-Bild wird höchstens so gross wie der grösste Grundriss.
+Das Plakat füllt ein Blatt: Dossier wählt den feinsten Massstab (nicht unter 1:100, nie gröber als gewählt), bei dem alles auf das Blatt
+passt; ein kleines Haus erscheint also in 1:100 statt winzig in 1:200. Beim Papier einer normalen Vorlage bietet der Dialog den feineren
+Massstab als Knopf an. Tabellen und das 3D-Bild stehen in der freien Fläche neben und unter den Plänen. Reicht der Platz auch im
+gewählten Massstab nicht, entsteht ein zweites Plakat (Plan 2/2); der Massstab wird nie gröber. Bei Projekten mit Nutzungseinheiten kommt
+der Wohnungsspiegel als dritte Tabelle dazu. Die Situation zeigt die eigene Parzelle mit 10 m Umgebung (ohne Parzelle das Haus mit 30 m),
+nicht mehr das ganze Kataster.
 
 **Bemassung und Marken im Plakat.** Der Haken „Aussenbemassung der Grundrisse ergänzen (wo sie fehlt)“ (Vorgabe an) legt für jedes gezeigte
 Geschoss ohne Masse die automatische Aussenbemassung an (derselbe Weg wie der Befehl `autodim`, Klasse 81, Auto-Bemassung);
@@ -289,7 +335,10 @@ eingebettet, damit die Druckerei sie nicht ersetzen muss.
 ## 11. Abgabe: PDF, DXF, IFC
 
 - **PDF:** Panel **Mappe** → **Publikationssatz anlegen**, die Blätter anhaken, **Publizieren**. Es entsteht ein PDF
-  (mit PDF-Ebenen je Kategorie, wenn eingeschaltet), Index im Titelblock und im Dateinamen.
+  (mit PDF-Ebenen je Kategorie, wenn eingeschaltet), Index im Titelblock und im Dateinamen. Im Acrobat-Ebenenfenster stehen die
+  Klassen des Plans (Wände, Decken, Möbel, Masse, Texte …) in der Stapelfolge des Plans, dazu Rahmen und Titelblock, Legende, Tabellen
+  und Bilder; Füllungen verdecken also keine Wände. Nicht geprüft: Acrobat selbst (nur die 17 Ebenen des Beispiels im Dateiaufbau), PDF/X und Plotter-Ebenen. Ein Präsentationsplan, der nicht aufs
+  Blatt passt, wird nicht angelegt; stattdessen nennt die Meldung den grössten passenden Massstab.
 - **DXF:** Geschoss wählen, *Datei → Exportieren → DXF* (Browser: „Exportieren: DXF“). LV95, Layer je Kategorie.
 - **IFC:** *Datei → Exportieren → IFC* (IFC4 mit Wänden, Decken, Räumen). Für Fachplaner:innen liegt die Geometrie lokal
   um den Projekt-Nullpunkt; die LV95-Lage steht als Georeferenz in der Datei (Versatz des Ursprungs, ±0.00 in m ü. M.).
@@ -298,7 +347,12 @@ eingebettet, damit die Druckerei sie nicht ersetzen muss.
   liegt auf einer IFC-Ebene mit dem Namen seiner Klasse wie im DXF (z. B. 20_Wände). Die Option
   „Kontext mitgeben (Gelände, Nachbargebäude)“ im Export-Dialog (Vorgabe aus; Kommandozeile `--kontext`) legt das Gelände und
   die Kontext-Netze am Grundstück mit ab. Die Objektbibliothek (Möbel, Sanitär) kommt nicht ins IFC. Nicht in Archicad
-  oder Revit geöffnet (auch die Ebenen nicht).
+  oder Revit geöffnet (auch die Ebenen nicht). **Dach, Träger, Geländer, Rampe:** Ein Dach geht als IfcRoof mit einer Dachfläche je
+  Platte (Schichten des Dachtyps, Menge, Dachfenster-Öffnung; IFC4 und IFC2x3), Träger als IfcBeam, Geländer als IfcRailing, die Rampe als
+  IfcRamp. Beim **Import** der eigenen Datei erkennt Dossier diese Bauteile wieder (Rundreise: Dächer samt Höfen, Gauben und Attika,
+  rechteckige Träger, Geländer, Rampen als geneigte Decke); fremde Dächer passt es weiter an ein Dach an, fremde Geländer, Treppen mit
+  mehr als zwei Podesten, Träger mit I- oder U-Profil und Dachfenster bleiben Mesh. Nicht möglich: eine Dachfläche als parametrisches
+  Profil (sie bleibt ein Netz); die Rundreise ist nur mit ifcopenshell geprüft.
 
 **Plakat: Hilfslinien und Bild-Zuschnitt.** Im Panel **Mappe** ein Layout anlegen, im Dialog „Neues Layout“ die
 **Plakat-Vorlage (Wettbewerb)** wählen (A0/A1, hoch oder quer): Dossier legt ein Raster aus Hilfslinien, eine Kopfzeile mit
@@ -377,7 +431,7 @@ Fenster zugemauert, neues Fenster in der Westwand, Anbau in der zweiten Etappe).
   Stand einer Etappe. Der Filter gehört zur Ebene wie die Modelldarstellung; Ausschnitte und Ansichtsvorlagen merken ihn.
 - **Öffnungen in Bestandswänden:** eine neue Öffnung bricht Mauerwerk ab (im Umbauplan ein gelbes Stück, im Bestand ist die
   Wand zu), eine Öffnung „Abbruch“ wird zugemauert (rote Ausfachung, in „Neu“ und „Endzustand“ ist die Wand zu).
-- **Sanierung je Schicht:** z. B. Aussenwand Beton 20 + Dämmung 10 + Putz → Beton bleibt, neue Dämmung 20 + neuer Putz. In drei
+- **Sanierung je Schicht:** (Wände, Decken und Dächer) z. B. Aussenwand Beton 20 + Dämmung 10 + Putz → Beton bleibt, neue Dämmung 20 + neuer Putz. In drei
   Schritten:
   1. *Sanierungstyp anlegen:* im Panel Umbau, Abschnitt „Sanierung“, den Bestands-Wandtyp wählen und „Sanierungstyp anlegen …“
      (eine Kopie des Typs). Die Schichten der Kopie in den Ressourcen (Reiter Wandstile) anpassen, etwa die Dämmung auf 20 cm.
@@ -390,10 +444,19 @@ Fenster zugemauert, neues Fenster in der Westwand, Anbau in der zweiten Etappe).
 
   Die Umbaufilter zeigen dann je Schicht: Bestand und Abbruch den alten Aufbau (Abbruch-Schichten gelb, gestrichelt umrandet),
   „Neu“ und „Endzustand“ den neuen (Neu: neue Schichten rot), der Umbauplan beide — Beton grau, neue Schichten rot und die
-  abgebrochenen als gelbe gestrichelte Kontur darüber. Grundriss, Schnitt, Ansicht, 3D, Öffnungsleibungen und Flächen (GF an der
+  abgebrochenen als gelbe gestrichelte Kontur darüber. Der IFC-Export schreibt den Status je Schicht
+  (`Dossier_Umbau`). Nicht möglich: Bogenwände zeigen keine gestrichelten Abbruch-Kanten; im Schnitt ist die Abbruch-Kontur schwarz statt gelb;
+  in Ansicht und 3D zählt nur die Farbe der äussersten Schicht (beim Dach die Eindeckung); der DXF-Export kennt keine Ebene je Schicht. Grundriss, Schnitt, Ansicht, 3D, Öffnungsleibungen und Flächen (GF an der
   neuen Aussenkante) folgen dem gezeigten Aufbau; ohne Umbaufilter gilt der Bestand.
 - **Etappen und Farben:** die Etappen im Panel Umbau (oder *Fenster → Ressourcen*, Reiter „Umbau“); dort auch die
-  „Umbau-Farben“ je Status (Füllung, Linie, gestrichelt).
+  „Umbau-Farben“ je Status. Füllung und Linie sind je eine Farbe oder ein Stift: ein Stift nimmt die Farbe aus dem aktiven Stiftsatz,
+  etwa für einen Plot in Schwarzweiss. Die Vorgabe ist gedämpft nach SIA 400 (Bestand grau, Abbruch gelb gestrichelt, Neu rot), der Knopf
+  „SIA-Vorgabe“ stellt sie wieder her. Jede Etappe kann für Abbruch und Neu eigene Farben bekommen („Eigene Farben der Etappe“), leer gilt
+  die Farbe des Projekts. Nicht möglich: Der Stift wirkt nur als Farbe, nicht als Strichstärke; die Etappen-Farben gibt es in der Oberfläche nur
+  für Neu und Abbruch; dünnes Strichwerk im Abbruch (Möbel, ein zu fällender Baum) bleibt auf Papier blass.
+- **Wo der Umbau wirkt:** Grundriss, Schnitt, Ansicht, Axonometrie und 3D, auch für Möbel, Bäume und 2D-Linien mit Status. Abbruch-Stücke
+  und Ausfachungen erscheinen im Schnitt und in der Ansicht, auch bei Bogenwänden; Möbel und Bäume liegen im DXF auf eigenen Ebenen je
+  Status (z. B. Möbel_Abbruch, Möbel_Neu). Das 3D-Fenster folgt dem Filter der aktiven Ebene.
 - **Flächen:** Panel Flächenbilanz, „Zustand“ Bestand oder Endzustand.
 - **Exporte:** DXF legt Abbruch und Neu auf eigene Layer (z. B. 20_Wände_Abbruch), IFC schreibt den Status als `Status` im
   `Pset_WallCommon` (NEW, EXISTING, DEMOLISH) und die Etappe in `Dossier_Umbau`. Kommandozeile: `--renovation umbauplan`
@@ -418,7 +481,9 @@ Flachdach/Satteldach und Fassade: Lochfenster/Bandfenster).
   (Hauptmodell und andere Varianten hellgrau in Grundriss, Schnitt, Ansicht, Axonometrie und 3D — nur auf dem Bildschirm, Druck,
   PDF und Exporte bleiben unverändert) und „Elemente ausserhalb der Variante sperren“ (sie lassen sich nicht wählen, also auch
   nicht verschieben, löschen oder in der Objekt-Info ändern). Stift und Häkchen gehören zur Sitzung, nicht zum Projekt, und sind
-  kein Undo-Schritt; das Auge ändert die Ebene und lässt sich rückgängig machen.
+  kein Undo-Schritt; das Auge ändert die Ebene und lässt sich rückgängig machen. Grau wirkt auch auf Räume und 2D-Elemente; im 3D
+  erscheint das Übrige als durchscheinende Geisterschicht. Die Sperre gilt für die Auswahl: eine schon gewählte fremde Auswahl lässt
+  sich noch fangen oder an Griffen ziehen. Das native 3D-Fenster auf dem Mac gibt die Bearbeitungsvariante nicht weiter.
 - **Kombination:** gehört zur Ebene wie der Umbaufilter, also je Reiter (Geschoss, Schnitt, Ansicht) eigen und mit Undo; der
   Grundriss, der Schnitt, die Ansicht, die Axonometrie und das 3D zeigen nur die gewählten Varianten. Ausschnitte merken die
   Kombination; ein Viewport auf dem Blatt kann dieselbe Ansicht in einer anderen Kombination zeigen (je Satz eine Wahl im
@@ -447,6 +512,9 @@ Flachdach/Satteldach und Fassade: Lochfenster/Bandfenster).
 ## Noch offen
 
 Das Wettbewerbsplakat ist erst teilweise fertig ([208] in `TODO.md`: die Freitext-Prüfung deckt nur die Namen ab, die Dossier
-kennt), das Rendering (*Ansicht → Rendering …*, eingebautes Cycles [215] oder Blender [211]) und der Pathtracer ([212]) sind auf dem Mac noch nicht
-geprüft. Der Ablauf wurde im Browser-Build automatisch
+kennt), das Rendering (*Ansicht → Rendering …*, eingebautes Cycles [215] oder Blender [211]) mit dem eigenen Fenster [277] und der Pathtracer ([212]) sind auf dem Mac noch nicht
+geprüft. Ebenso nur im Linux-Container oder Browser angesehen, nicht in der Mac-App: Geländer, Träger, Rampe, Entourage im 3D, Umbau
+je Schicht und Umbau-Farben, Varianten (Grau, Geisterschicht), Wohnungsspiegel, die Schnitt- und Ansichtslinien, das Plakat auf einem Blatt und die
+PDF-Ebenen. Der Referenz-Ablauf wurde zweimal im Browser durchgespielt (16. und 18.11.); Umbau, Varianten und das Rendering-Fenster
+waren beim zweiten Mal nicht dabei. Der Ablauf ist im Browser-Build automatisch
 geprüft (`e2e/release10.spec.ts`); der Durchlauf auf dem Mac steht noch aus (`doc/RELEASE-1.0.md`).

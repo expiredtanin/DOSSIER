@@ -1,6 +1,6 @@
 # Dossier 1.0 «Wettbewerb & Vorprojekt» — Release-Notes (Entwurf)
 
-Entwurf vom 14.11.2026 (nachgeführt am Abend) für Anwender:innen (Architekt:innen). Stellen mit **[Frage M: …]** muss der Maintainer entscheiden
+Entwurf vom 14.11.2026 (nachgeführt am 18.11.2026 für die Beta) für Anwender:innen (Architekt:innen). Stellen mit **[Frage M: …]** muss der Maintainer entscheiden
 oder bestätigen; sie sind unten unter «Offene Fragen an den Maintainer» gesammelt. Grundlage sind `TODO.md`,
 `doc/RELEASE-1.0.md` (Abnahme-Checkliste) und `doc/KURZANLEITUNG.md`. Der Durchlauf auf dem Mac steht noch aus: alles,
 was hier als «geht» steht, ist bisher im Linux-Container und im Browser-Build geprüft (CLI-Ausgabe, Chromium, Tests),
@@ -84,7 +84,7 @@ in `doc/KURZANLEITUNG.md`):
     Psets (inkl. `CH_Qto_SIA416`; Bauteile auf IFC-Ebenen je Klasse, Raumhöhe = lichte Höhe), STEP, OBJ/STL/glTF, SVG, PDF. **IFC für Fachplaner:innen:** Geometrie lokal um den Projekt-Nullpunkt,
     LV95-Lage als Georeferenz (Versatz und ±0.00 m ü. M.), Räume mit Nummer, Name, Fläche und SIA-416-Kategorie, Geschossflächen und
     Gebäudesummen; Mengen stimmen mit der Geometrie überein (mit ifcopenshell gegengeprüft, alle drei Beispielprojekte ohne Befund). Option
-    «Kontext mitgeben (Gelände, Nachbargebäude)» im Export-Dialog bzw. `--kontext` (Vorgabe aus). Die Objektbibliothek (Möbel, Sanitär) wird nicht ins IFC geschrieben. Was in welche Richtung verloren geht, steht in `doc/DATEIFORMATE.md`.
+    «Kontext mitgeben (Gelände, Nachbargebäude)» im Export-Dialog bzw. `--kontext` (Vorgabe aus). Die Objektbibliothek (Möbel, Sanitär, Entourage) wird nicht ins IFC geschrieben. Was in welche Richtung verloren geht, steht in `doc/DATEIFORMATE.md`.
 13. **Umbau (17.11., [271]).** Jedes Bauteil und jeder Raum trägt einen Umbau-Status Bestand, Abbruch oder Neu und optional eine Etappe
     (Objekt-Info, Befehl `umbau`; neue Bauteile mit dem Zeichen-Status aus der Statusleiste, Vorgabe Bestand). Umbaufilter wie in Archicad
     je Ansicht: Bestand, Abbruch, Neubau, Umbauplan (SIA 400: Bestand grau, Abbruch gelb gestrichelt, Neu rot) und Endzustand, bis zu einer
@@ -148,6 +148,46 @@ gespeichert. Für Abstürze im Rechenkern gibt es einen Wiederanlauf (nicht übe
 (`NOTICE`: u. a. acadrust MPL-2.0, Manifold Apache-2.0, i_overlay MIT/Apache-2.0); mitgelieferte ambientCG-Materialien sind CC0.
 Wer Dossier verändert und als Netzwerkdienst anbietet, muss den Quellcode offenlegen.
 
+## Neu in der Beta (16.–18.11.2026)
+
+Alles hier ist im Linux-Container und im Browser geprüft (Tests, CLI-Ausgabe, Chromium), **nicht in der Mac-App**. Bedienung im Einzelnen:
+`doc/KURZANLEITUNG.md`.
+
+- **Umbau weiter ausgebaut ([271], [274], [275]).** Umbaufilter und Etappen gelten jetzt auch in Schnitt, Ansicht und 2D-Linienwerk
+  (Abbruch-Stücke und Ausfachungen auch bei Bogenwänden), für Möbel und Bäume; Bäume sind im Schnitt von Bauteilen verdeckt, in der
+  Ansicht vor der Fassade nur als Umriss. **Sanierung je Schicht** gilt jetzt auch für Decken und Dächer (Typ-Paar Bestand → Sanierungstyp,
+  Status je Schicht im IFC). **Umbau-Farben** als Farbe oder Stift (der Stift folgt dem aktiven Stiftsatz, z. B. Plot S/W), gedämpfte
+  Vorgabe nach SIA 400, eigene Farben je Etappe; DXF-Ebenen für Möbel und Bäume je Status. Der Umbau-Etappen-Editor hat ein Farb-Popover,
+  das offen bleibt.
+- **Varianten ([272]).** Auge und Stift wie Archicads Design Options, Kombinationen, Grau für Räume und 2D-Elemente (nur am Bildschirm),
+  im 3D als durchscheinende Geisterschicht; der 3D-Pick folgt Stift und Sperre. Träger gehören dazu (Fehler vor der Beta behoben, [284]).
+- **Schnitt- und Ansichtslinien einstellbar ([276]).** Linie durchgehend, nur Enden oder keine; Linientyp, Stift, Marke (Pfeil, L,
+  Dreieck), an Anfang, Ende oder beiden, Beschriftung; Vorgabe in der Modelldarstellung. Nachbar-Kontext weit neben dem Haus (mehr als
+  150 mm Papier) entfällt in Schnitt und Ansicht ([256]: 1:100-Schnitt des Beispiels 44.8 m statt 17.0 m breit).
+- **Rendering als eigenes Fenster ([277]).** Der Dialog läuft in einem Nebenfenster, das Hauptfenster bleibt frei; Schliessen mit Rückfrage,
+  Lage wird gemerkt. Im Browser bleibt der Dialog im Hauptfenster.
+- **Nutzungseinheiten und Wohnungsspiegel ([278]).** Räume zu Wohnungen zusammenfassen, Zimmerzahl nach Schweizer Zählweise, Spiegel mit
+  SIA-416-Flächen (CSV, PDF, Blatt-Tabelle, Kommandozeile `--wohnungsspiegel`); auf dem Plakat als dritte Tabelle.
+- **Geländer, Träger, Rampe ([279], [280], [281]).** Befehle `gelaender` (Stäbe, Glas, Brüstung, Lochblech; Glas durchscheinend),
+  `traeger` (Unterzug, Stahlprofil als Text) und `rampe` (Decke mit Gefälle, Gefällepfeil); Grundriss, Schnitt, Ansicht, 3D, 3D-Dokument,
+  DXF, IFC (IfcRailing, IfcBeam, IfcRamp), Umbau und Varianten. Bedienung nach dem Review: Rampe warnt bei falscher Richtung,
+  Geschoss löschen nimmt Dächer, Stützen, Träger, Geländer, 2D-Elemente, Körper, Bäume und Kameras mit ([284]).
+- **3D-Entourage ([253]).** Person, Velo, Auto, Sitzbank, Stuhl, Tische mit Stühlen als einfache Körper im 3D, 3D-Dokument, Schatten und
+  Rendering; in Schnitt und Ansicht als Hülle; im 3D wählbar. Auch schiefe Projektionen (Militär 45°/45° und 30°/60°) im 3D-Dokument.
+- **Plakat auf einem Blatt ([285]).** Der Präsentationsplan wählt den feinsten Massstab (nicht unter 1:100), bei dem alles auf ein Blatt
+  passt; Tabellen und Bild füllen die freie Fläche; die Situation zeigt die eigene Parzelle. Passt er nicht aufs Blatt, nennt die Meldung
+  den grössten passenden Massstab.
+- **PDF-Ebenen ([282]).** Die Stapelung des Plans bleibt erhalten (Decken-Füllungen deckten Wände zu); je Kategorie eine Ebene, im
+  Beispiel 17.
+- **GV nach SIA 416 mit Bodenplatte ([266]).** Die Decke unter dem untersten Geschoss zählt von ihrer Unterkante bis zum Fertigboden;
+  Studienkörper neben dem Haus zählen ausserhalb der Geschossgrundrisse. Die Gesamthöhe für Baurecht und Kennzahlen zählt die Attika.
+- **IFC ([B4], [B5]).** Export des Dachs als IfcRoof mit einer Dachfläche je Platte (Schichten, Menge, Dachfenster-Öffnung; IFC4 und
+  IFC2x3). Import erkennt eigene Dächer, Träger, Geländer und Rampen wieder (Rundreise Musterhaus komplex 4 von 4 Dächern, Wettbewerb 1 von 1).
+- **Befehlsoptionen ([285]).** `decke`: Taste L für die Lage (oben, Bodenplatte unter dem Geschoss, frei mit getippter Oberkante);
+  `wand`: Taste W für den Wandtyp, Taste A für das Aussenbauteil (ohne Angabe nach dem Typnamen; IFC `IsExternal`). Die Standard-Baustoffe
+  tragen eine Wärmeleitfähigkeit, der U-Wert des Standardaufbaus ist damit vollständig. Die Baurecht-Meldung «innerhalb der zulässigen Fläche»
+  erscheint erst mit einem Gebäude. Ein getippter Abstand beim Fenster setzt den Abstand, nicht die Breite.
+
 ## Bekannte Einschränkungen
 
 Ehrlich vorweg: **Der Durchlauf des ganzen Referenz-Ablaufs auf dem Mac ist noch nicht gemacht** ([206], «Mac-Gegenprobe» in
@@ -167,6 +207,32 @@ Ehrlich vorweg: **Der Durchlauf des ganzen Referenz-Ablaufs auf dem Mac ist noch
   und Doppelklick auf `.obp` nach der Desktop-Integration (AppImageLauncher o. ä.), Rendering mit Blender. Keine Update-Prüfung unter Linux;
   Flatpak, deb und rpm gibt es nicht ([170]). Windows gibt es nicht.
 - Update- und Signier-Weg (macOS signiert/notarisiert, Updater, CI) sind noch nicht lauffähig nachgewiesen ([30]).
+- **Alles unter «Neu in der Beta» ist nicht auf dem Mac geprüft** ([271]–[285], [B4], [B5], [253], [256], [266]): weder Metal noch das native 3D-Fenster
+  (Umbau-Filter, Varianten-Geisterschicht und Entourage sind dort nie als Bild angesehen; das natives 3D-Fenster reicht die
+  Bearbeitungsvariante nicht durch), noch das Rendering-Fenster ([277]: Öffnen, Fortschritt, Schliessen mit Rückfrage), noch der Druck des A1-Plakats.
+  Der Referenz-Ablauf wurde zweimal im Browser durchgespielt (16. und 18.11.); beim zweiten Mal ohne Umbau, Varianten und Rendering.
+- **Umbau und Varianten** ([271], [272], [274], [275]): Bogenwände ohne gestrichelte Abbruch-Kanten; im Schnitt ist die Abbruch-Kontur schwarz statt
+  gelb; 3D und Ansicht zeigen je Schicht nur die Farbe der äussersten (Dach: Eindeckung); der DXF-Export kennt keine Ebene je Schicht; das
+  Blender-Paket hat keine Umbau-Farben; der Stift wirkt nur als Farbe; die Wahl eines Variantensatzes in Ansichtsvorlagen und Ausschnitten gibt es
+  nur im Modell; die Blatt-Tabelle «Variantenvergleich» zeigt immer die gespeicherten Kombinationen, nicht den Umbau-Zustand der Ansicht;
+  die Variantensperre wirkt auf die Auswahl, nicht auf Fang und Griffe einer schon gewählten Fremd-Auswahl.
+- **Geländer, Träger, Rampe** ([279]–[281]): Lochblech ohne Lochmuster; Träger nur rechteckig und waagrecht, Profile nur als Text (kein Katalog),
+  keine Anschlussdetails, kein Deckenspiegel; Wände werden von geneigten Decken nicht eingeschnitten und der STEP-Export schreibt die Rampenplatte
+  waagrecht; die Sonne wirft von der geneigten Decke einen Hüllschatten; Griff für die Gefällelinie fehlt; Loggia-Brüstungen an Wänden bleiben Wand;
+  Geländer, Träger und Rampe mit Profilen/Stufen aus fremden IFC-Dateien bleiben Mesh.
+- **Nutzungseinheiten** ([278]): keine farbige Fläche der Einheit im Grundriss, keine Mindestflächen für Zimmer und NWF nach kantonaler
+  Definition, Einheiten nicht in IFC und DXF; der Spiegel erscheint im schmalen Seitenfenster als Karten; eine leere Einheit nach dem Verschieben
+  oder Löschen bleibt stehen.
+- **Entourage** ([253]): grobe Körper statt genauer Silhouetten (Schnitt und Ansicht zeichnen ihre Hüllen), im 3D-Dokument mit Parallelprojektion
+  ohne die Kontext-Netze; nicht im IFC; weitere Möbel gibt es nur in 2D.
+- **GV** ([266]): Die Schwellen für Studienkörper (9 m², 2.4 m) sind Annahmen; wie die Norm Fundamente und Sauberkeitsschicht
+  behandelt, ist nicht gegengelesen; Innenhöfe ohne Dach werden im Dachraum fälschlich gefüllt.
+- **Plakat** ([285]): Marken ungewählter Schnitte erscheinen mit und lange Linien werden bei 40 mm Papier beschnitten; die Grundrisse zeigen alle
+  Bemassungsketten, nicht nur das Gesamtmass; das 3D-Bild des Plakats ist die Axonometrie, kein Rendering, solange keines eingesetzt ist; das
+  Prüfbild zur Anordnung ist eine Skizze, kein gerenderter Plan.
+- **Räume und Bedienung** ([285]): Der Befehl `raum` legt je Aufruf einen Raum an, Name, Nutzung und Kategorie je Raum einzeln (zehn Räume sind etwa 40
+  Eingaben); die Statusleiste nennt die Klasse «Ebene» und die Zeichnungsebene «Geschoss» (Bezeichnungen noch uneinheitlich); die Zeichnungsebene «kataster» liegt im
+  Grundriss über den neuen Wänden, bis man sie ausblendet; der Projektname bleibt «Leeres Projekt», bis er im Panel Mappe gesetzt wird.
 
 **Grundstück, Situation**
 - Echte Kataster-DXF verschiedener Kantone sind nicht geprüft; Layer-Zuordnung (Gebäude, Strassen, Gewässer) folgt gängigen Namen, rein
@@ -230,7 +296,7 @@ Ehrlich vorweg: **Der Durchlauf des ganzen Referenz-Ablaufs auf dem Mac ist noch
   Parzellenfläche und -grenze, nicht aGSF/Grünfläche aus den Panel-Eingaben; Grenzabstand als Verstossfläche, nicht als kleinster Abstand;
   auf dem Mac nicht geprüft.
 - **IFC für Fachplaner** ([259]): **nicht in Archicad, Revit, Solibri oder BIMcollab geöffnet**, nur mit ifcopenshell (0 Befunde). **IFC-Ebenen** (eine je Klasse, ohne Sichtbarkeit) **sind in Archicad/Revit nicht geöffnet**; der
-  Dachraum-Körper füllt die Schräge nicht aus (Höhe = lichte Höhe); Dächer als Netz; IFC2x3 nur über die bestehenden Tests; Datei
+  Dachraum-Körper füllt die Schräge nicht aus (Höhe = lichte Höhe); Dachflächen als Netz (Export als IfcRoof mit IfcSlab, kein Profil-Sweep); IFC2x3 nur über die bestehenden Tests; Datei
   des Stress-Beispiels gross (19.8 MB, ca. 6 s).
 - **Plandarstellung 1:100** ([256]): Fenster über der Schnitthöhe — erledigt durch [260] (symbolisch/geschnitten wählbar, Vorgabe symbolisch;
   ~~Frage M: Darstellung Fenster über Schnitt~~); auf dem Mac nicht geprüft. Hilfslinien (Achsen, Schnittlinie, Baulinie/Parzelle,
@@ -243,14 +309,14 @@ Ehrlich vorweg: **Der Durchlauf des ganzen Referenz-Ablaufs auf dem Mac ist noch
   ausgegraut (ohne Sicherung nur ein Hinweis); bei sehr grossen Projekten serialisiert die Kopie im Hauptfaden.
 - **Seitenleiste** ([255], [253]): Karten-Tabellen in der schmalen Seitenleiste nur in Chromium (de/en, 303–340 px) angesehen, nicht in der Tauri-App; Namen der
   Objekt-Klassen bleiben auch im englischen UI deutsch.
-- **Objektbibliothek** ([253]): nur 2D, nur abstrakte Symbole im 55er-Raster; Ziehen aus der Palette geht über Zeigerereignisse (nur im Chromium geprüft, nicht mit nativem Metal); im DXF ohne Attribute
+- **Objektbibliothek** ([253]): 3D nur für Person, Velo, Auto, Sitzbank, Stuhl und Tische mit Stühlen, alles andere nur 2D; nur abstrakte Symbole im 55er-Raster; Ziehen aus der Palette geht über Zeigerereignisse (nur im Chromium geprüft, nicht mit nativem Metal); im DXF ohne Attribute
   (Id und Parameter stehen nur im Blocknamen); Symbole nur im Chromium/CLI-SVG angesehen, nicht in der Tauri-App. Eigene Objekte [254] gibt es erst nach 1.0.
 - **Tastatur** ([252], [190]): Ctrl+Tab/Ctrl+Umschalt+Tab auf dem Mac nicht geprüft (das System oder die Webview könnte die Tasten abfangen);
   Cmd+J bei Bogenwänden: die Schraffurflächen von Bogen und gerader Wand bleiben getrennt.
 
 **Austausch**
-- Alle Rundreisen (DXF, IFC) wurden nur mit Tests geprüft, **nicht mit AutoCAD, Archicad, Revit oder Acrobat** ([C9], [200], [201]). Dächer
-  gehen im IFC als Netz, nicht als parametrisches Dach. 2D-Zeichnungen, Texte, Bemassungen, Schraffuren, Layouts, Gelände, Möbel und
+- Alle Rundreisen (DXF, IFC) wurden nur mit Tests geprüft, **nicht mit AutoCAD, Archicad, Revit oder Acrobat** ([C9], [200], [201]). Dachflächen
+  gehen im IFC als Netz (unter einem IfcRoof), nicht als parametrisches Dach; die Rundreise der eigenen Dächer, Träger, Geländer und Rampen ist nur mit Tests geprüft. 2D-Zeichnungen, Texte, Bemassungen, Schraffuren, Layouts, Gelände, Möbel und
   Blöcke gehen nicht ins IFC. Punktwolken und BCF-Themen sind nicht im Projekt gespeichert.
 
 ## Netzzugriffe und Datenschutz
