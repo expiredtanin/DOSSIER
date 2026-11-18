@@ -13,8 +13,8 @@ import type { Plan } from "../../core";
 import { materializeUnderlay } from "../../core";
 import type { Project } from "../../model/types";
 import { planSceneBin } from "../../core";
-import { ghostFilter3d, projectToModel3d } from "../../core";
-import type { Hide3d } from "../../core";
+import { designOptionEditArg, ghostFilter3d, projectToModel3d, storedChoice } from "../../core";
+import type { DesignOptionTarget, Filter3d, Hide3d } from "../../core";
 
 type Model3d = ReturnType<typeof projectToModel3d>;
 
@@ -102,6 +102,28 @@ export function pushNativeWalls(
     if (!(await isNativeEnabled())) return;
     void invokeNative("push_native_walls", { walls: nativeModel3d(project, explode, hide) });
   }, DEBOUNCE_MS);
+}
+
+/**
+ * [271]/[272] Anfrage-Felder der Ansicht fürs 3D-Fenster: Umbaufilter und Variantenkombination der aktiven Ebene sowie
+ * Bearbeitungsvariante (Stift, Grau, Sperre, Geisterschicht) — dieselben Felder wie `Wasm3DViewport` (`hide`), damit das
+ * native Metal-Fenster Grau, Geisterschicht und Sperre ebenso zeigt.
+ */
+export function nativeViewQuery(
+  project: Project,
+  activeLevelId: string,
+  draw: DesignOptionTarget | null | undefined,
+  grey: boolean,
+  lock: boolean,
+): Pick<Filter3d, "renovation" | "renovationPhase" | "designOptions" | "designOptionEdit"> {
+  const level = project.drawingLevels.find((x) => x.id === activeLevelId);
+  const choice = level ? storedChoice(project, level) : undefined;
+  const edit = designOptionEditArg(project, draw, grey, { lock });
+  return {
+    ...(level?.renovationFilter ? { renovation: level.renovationFilter, ...(level.renovationPhase ? { renovationPhase: level.renovationPhase } : {}) } : {}),
+    ...(choice ? { designOptions: choice } : {}),
+    ...(edit ? { designOptionEdit: edit } : {}),
+  };
 }
 
 /** [180] Modell fürs native 3D-Fenster: ohne die grauen Klassen, die stehen gedämpft in `ghost` (render3d `ghost.rs`). */

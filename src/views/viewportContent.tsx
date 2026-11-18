@@ -36,7 +36,7 @@ import { crossKindOverlayAllowed, tracePlan, withTrace } from "../core";
 import { levelMarkerPrimitives, levelMarksEnabled } from "../core";
 import { unitsForLevel } from "../tools/displayUnits";
 import { setSheetOwnerOutlines, setSheetSnapSegments, snapSegmentsFromPrimitives } from "../tools/sheetSnapGeometry";
-import { pushNativeScene, pushNativeWalls } from "./plan/nativeSync";
+import { nativeViewQuery, pushNativeScene, pushNativeWalls } from "./plan/nativeSync";
 import { explodeFloorOffsets, selectionHighlightLines } from "../core";
 import { clashHighlightLines } from "../analysis/clash";
 import { useClashSession } from "../panels/clashSession";
@@ -852,10 +852,21 @@ function LevelPlanView({
   // Explosionsaxonometrie ([65]) auch im nativen 3D-Fenster.
   const explode = useStore((s) => (s.explode3d ? s.explode3dGap : 0));
   // [180] Mit dem Darstellungsmodus der Klassen wie im WASM-Viewport (aus, grau = Geisterschicht).
+  // [271]/[272] Dazu Umbaufilter, Variantenkombination und Bearbeitungsvariante (Grau, Geisterschicht, Sperre) wie im WASM-Viewport.
+  const activeLevelId = useStore((s) => s.activeLevelId);
+  const drawDesignOption = useStore((s) => s.drawDesignOption);
+  const designOptionGrey = useStore((s) => s.designOptionGrey);
+  const designOptionLock = useStore((s) => s.designOptionLock);
   const nativeHide = useMemo(() => {
     const d = classDisplay3d(flattenCategories(project.layers ?? []).map((c) => c.code), categoryDisplay);
-    return { hide: d.hide, grey: d.grey, hideFloors: hiddenFloorIds(project.drawingLevels, floorDisplay), greyFloors: greyedFloorIds(project.drawingLevels, floorDisplay) };
-  }, [project.layers, project.drawingLevels, categoryDisplay, floorDisplay]);
+    return {
+      hide: d.hide,
+      grey: d.grey,
+      hideFloors: hiddenFloorIds(project.drawingLevels, floorDisplay),
+      greyFloors: greyedFloorIds(project.drawingLevels, floorDisplay),
+      ...nativeViewQuery(project, activeLevelId, drawDesignOption, designOptionGrey, designOptionLock),
+    };
+  }, [project, categoryDisplay, floorDisplay, activeLevelId, drawDesignOption, designOptionGrey, designOptionLock]);
   useEffect(() => {
     pushNativeWalls(project, explode, nativeHide);
   }, [project, explode, nativeHide]);
