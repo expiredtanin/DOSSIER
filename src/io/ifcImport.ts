@@ -123,8 +123,10 @@ export interface IfcElementsSummary {
   /** Dächer (Flach/Pult/Sattel/Walm, auch mit Neigung je Kante) und Treppen (gerade, L, Wendel) ([B4]). */
   roofs: number;
   stairs: number;
-  /** Träger (IfcBeam) als Extrusionskörper ([B4]). */
+  /** Träger (IfcBeam): rechteckige als Träger, sonst Extrusionskörper ([B4]). */
   beams?: number;
+  /** Geländer des eigenen Exports (Achse im Pset `Dossier_Railing`) ([B4]). */
+  railings?: number;
   /** Neu angelegte Geschosse. */
   floors: number;
   wallTypes: number;

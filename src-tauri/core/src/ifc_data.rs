@@ -154,6 +154,11 @@ fn layer_renovation_props(p: &Project, psets: &mut Vec<Pset>, id: &str) {
     }
 }
 
+/// Koordinate auf 1e-6 m für Textwerte (Achse eines Geländers).
+fn fmt_coord(v: f64) -> String {
+    format!("{v:.6}")
+}
+
 fn ident(name: &'static str, v: &str) -> Prop {
     Prop::Ident(name, v.to_string())
 }
@@ -2065,7 +2070,18 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
         let label = crate::railing::label(r);
         let mut psets = vec![Pset { name: "Pset_RailingCommon", props: vec![ident("Reference", &label)] }];
         renovation_props(&p, &mut psets, "Pset_RailingCommon", r.renovation.as_ref());
-        psets.push(Pset { name: "Dossier_Railing", props: vec![ident("Kind", kind), ident("Handrail", if s.handrail { "yes" } else { "no" })] });
+        // [B4] Achse (Meter, Modellkoordinaten), Höhe und Schluss: damit liest der Import das Geländer als Bauteil zurück.
+        let axis_text = r.points.iter().map(|q| format!("{},{}", fmt_coord(q.x), fmt_coord(q.y))).collect::<Vec<_>>().join(";");
+        psets.push(Pset {
+            name: "Dossier_Railing",
+            props: vec![
+                ident("Kind", kind),
+                ident("Handrail", if s.handrail { "yes" } else { "no" }),
+                ident("Axis", &axis_text),
+                ident("Closed", if r.closed.unwrap_or(false) { "yes" } else { "no" }),
+                ident("Height", &fmt_coord(s.height)),
+            ],
+        });
         let len = crate::railing::length(&ax);
         let q = vec![
             Qty { name: "Length", kind: QtyKind::Length, value: len },

@@ -27,6 +27,7 @@ const ROOF_CATEGORY: &str = "35";
 const STAIR_CATEGORY: &str = "40";
 /// [180] Träger (Extrusionskörper) wie „35 Träger" der Musterprojekte.
 const BEAM_CATEGORY: &str = "35";
+const RAILING_CATEGORY: &str = "55";
 const ROOM_COLOR: &str = "#6b7280";
 const SIA: [&str; 6] = ["HNF", "NNF", "VF", "FF", "KGF", "AGF"];
 const LEVEL_TOL: f64 = 0.005;
@@ -101,6 +102,18 @@ struct SlabData {
     holes: Vec<Vec<[f64; 2]>>,
     z0: f64,
     z1: f64,
+    /// [B4] Geneigte Decke/Rampe: (Bezugspunkt, zweiter Punkt, Höhenunterschied, Rampe).
+    slope: Option<([f64; 2], [f64; 2], f64, bool)>,
+}
+
+struct RailingData {
+    info: Info,
+    points: Vec<[f64; 2]>,
+    closed: bool,
+    height: f64,
+    z0: f64,
+    kind: String,
+    handrail: Option<bool>,
 }
 
 struct ColumnData {
@@ -187,6 +200,7 @@ struct Elements {
     roofs: Vec<RoofData>,
     stairs: Vec<StairData>,
     beams: Vec<BeamData>,
+    railings: Vec<RailingData>,
     kept: Map<String, Value>,
     /// Je Klasse die Gründe, weshalb Kandidaten Mesh blieben (`{"IfcWall": {"slopedTop": 3}}`).
     kept_reasons: Map<String, Value>,
@@ -306,7 +320,15 @@ fn decode_elements(meta: &Value, data: &[f64]) -> Elements {
             "slab" => {
                 if let Some(r) = v.get(2).and_then(|&c| rings(v, 3, c)) {
                     if let Some((outline, holes)) = r.split_first() {
-                        out.slabs.push(SlabData { info, z0: v[0], z1: v[1], outline: outline.clone(), holes: holes.to_vec() });
+                        let slope = e.get("slope").and_then(|k| {
+                            let p2 = |key: &str| {
+                                let a = k.get(key)?.as_array()?;
+                                Some([a.first()?.as_f64()?, a.get(1)?.as_f64()?])
+                            };
+                            let rise = k.get("rise")?.as_f64()?;
+                            (rise.is_finite() && rise != 0.0).then_some((p2("from")?, p2("to")?, rise, k.get("ramp").and_then(Value::as_bool).unwrap_or(false)))
+                        });
+                        out.slabs.push(SlabData { info, z0: v[0], z1: v[1], outline: outline.clone(), holes: holes.to_vec(), slope });
                     }
                 }
             }
@@ -373,6 +395,21 @@ fn decode_elements(meta: &Value, data: &[f64]) -> Elements {
                     out.beams.push(BeamData { info, outline: r.remove(0), z0: v[0], z1: v[1] });
                 }
             }
+            "railing" => {
+                let n = v.get(2).copied().unwrap_or(-1.0);
+                if n >= 2.0 && n.fract() == 0.0 && v.len() == 3 + 2 * n as usize && v[1] > 0.0 {
+                    let kind = s_of(e.get("railingKind")).unwrap_or_else(|| "bars".into());
+                    out.railings.push(RailingData {
+                        info,
+                        points: v[3..].chunks_exact(2).map(|c| [c[0], c[1]]).collect(),
+                        closed: e.get("closed").and_then(Value::as_bool).unwrap_or(false),
+                        height: v[1],
+                        z0: v[0],
+                        kind,
+                        handrail: e.get("handrail").and_then(Value::as_bool),
+                    });
+                }
+            }
             "space" => {
                 if let Some(mut r) = rings(v, 2, 1.0) {
                     out.spaces.push(SpaceData {
@@ -426,6 +463,43 @@ fn id_of(v: &Value) -> &str {
 }
 
 /// [201] GlobalId der Quelle ans neue Element (`ifcGlobalId`).
+/// Rechteckiger Träger-Grundriss → (Anfang, Ende, Breite): Achse längs der langen Seite durch die Mitte der kurzen.
+/// `None` bei Nicht-Rechtecken (Körper).
+fn beam_axis(ring: &[[f64; 2]]) -> Option<([f64; 2], [f64; 2], f64)> {
+    let ring: Vec<[f64; 2]> = if ring.len() == 5 && ring[0] == ring[4] { ring[..4].to_vec() } else { ring.to_vec() };
+    if ring.len() != 4 {
+        return None;
+    }
+    let e: Vec<[f64; 2]> = (0..4).map(|i| [ring[(i + 1) % 4][0] - ring[i][0], ring[(i + 1) % 4][1] - ring[i][1]]).collect();
+    let l: Vec<f64> = e.iter().map(|d| d[0].hypot(d[1])).collect();
+    if l.iter().any(|x| !(*x > 1e-3)) {
+        return None;
+    }
+    let rect = (0..4).all(|i| (e[i][0] * e[(i + 1) % 4][0] + e[i][1] * e[(i + 1) % 4][1]).abs() <= 1e-6 * l[i] * l[(i + 1) % 4]) && (l[0] - l[2]).abs() <= 1e-6 && (l[1] - l[3]).abs() <= 1e-6;
+    if !rect {
+        return None;
+    }
+    let mid = |a: [f64; 2], b: [f64; 2]| [(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0];
+    // Lange Seite = Achsrichtung (bei Quadrat die erste Kante).
+    let i = if l[1] > l[0] + 1e-9 { 1 } else { 0 };
+    let (a0, a1) = (ring[i], ring[(i + 1) % 4]);
+    let (b0, b1) = (ring[(i + 3) % 4], ring[(i + 2) % 4]);
+    Some((mid(a0, b0), mid(a1, b1), l[(i + 1) % 4]))
+}
+
+/// Punkt im Polygon (gerade/ungerade Regel).
+fn point_in_ring(p: [f64; 2], ring: &[[f64; 2]]) -> bool {
+    let mut inside = false;
+    let n = ring.len();
+    for i in 0..n {
+        let (a, b) = (ring[i], ring[(i + 1) % n]);
+        if (a[1] > p[1]) != (b[1] > p[1]) && p[0] < (b[0] - a[0]) * (p[1] - a[1]) / (b[1] - a[1]) + a[0] {
+            inside = !inside;
+        }
+    }
+    inside
+}
+
 fn set_gid(v: &mut Value, info: &Info) {
     if let Some(g) = &info.global_id {
         v["ifcGlobalId"] = g.clone().into();
@@ -591,7 +665,7 @@ fn list_of(root: &Map<String, Value>, key: &str) -> Vec<(Value, bool)> {
 fn elements_ops(root: &Map<String, Value>, meta: &Value, products: &[IfcProduct], el: &Elements, opts: &IfcOptions, now: f64) -> (Vec<Op>, Value, usize) {
     let kept: f64 = el.kept.values().map(|v| v.as_f64().unwrap_or(f64::NAN)).sum();
     let mut summary = Map::new();
-    for k in ["walls", "openings", "ceilings", "columns", "rooms", "roofs", "stairs", "beams", "floors", "wallTypes", "ceilingTypes", "roofTypes", "doorTypes", "windowTypes", "components", "meshes", "classified"] {
+    for k in ["walls", "openings", "ceilings", "columns", "rooms", "roofs", "stairs", "beams", "railings", "floors", "wallTypes", "ceilingTypes", "roofTypes", "doorTypes", "windowTypes", "components", "meshes", "classified"] {
         summary.insert(k.into(), 0.into());
     }
     summary.insert("kept".into(), js_num(kept));
@@ -622,6 +696,9 @@ fn elements_ops(root: &Map<String, Value>, meta: &Value, products: &[IfcProduct]
     }
     for b in &el.beams {
         b.outline.iter().for_each(|p| extra.extend(p));
+    }
+    for r in &el.railings {
+        r.points.iter().for_each(|p| extra.extend(p));
     }
     let [dx, dy] = map_shift(meta, root).unwrap_or_else(|| geo_shift(products, project_geo_origin(root), &extra));
     let mv = |p: [f64; 2]| pt([round(p[0] + dx, 1e-9), round(p[1] + dy, 1e-9)]);
@@ -836,8 +913,23 @@ fn elements_ops(root: &Map<String, Value>, meta: &Value, products: &[IfcProduct]
         if (s.z1 - floor_top).abs() > LEVEL_TOL {
             v.insert("top".into(), json!({"mode": "floor", "floorId": fid, "offset": js_num(anchor_offset(s.z1, base))}));
         }
+        if let Some((from, to, rise, ramp)) = s.slope {
+            let mut k = json!({"from": mv(from), "to": mv(to), "rise": js_num(round(rise, 1e-6))});
+            if ramp {
+                k["ramp"] = true.into();
+            }
+            v.insert("slope".into(), k);
+        }
         ceilings.push(Value::Object(v));
     }
+    // Decken (Mitte, tiefste Unterkante, Loch) für die Träger: Bezug der Trägeroberkante ([280]).
+    let ceiling_under: Vec<(String, Vec<[f64; 2]>, Vec<Vec<[f64; 2]>>, f64)> = el
+        .slabs
+        .iter()
+        .zip(ceilings.iter())
+        .filter(|(sl, _)| sl.slope.is_none())
+        .map(|(sl, c)| (c["floorId"].as_str().unwrap_or("").to_string(), sl.outline.clone(), sl.holes.clone(), sl.z0))
+        .collect();
     let mut columns: Vec<Value> = Vec::new();
     for c in &el.columns {
         let (fid, base, _) = floor_of(&mut ctx, c.info.storey, c.z0);
@@ -982,10 +1074,33 @@ fn elements_ops(root: &Map<String, Value>, meta: &Value, products: &[IfcProduct]
         set_gid(&mut v, &s.info);
         stairs.push(v);
     }
-    // Träger als Extrusionskörper (Grundriss + Höhe über der Geschoss-UK).
+    // Träger ([280]): rechteckiger Grundriss → Dossier-Träger (Achse, Breite, Höhe, Oberkante über `topOffset`); sonst
+    // Extrusionskörper (Grundriss + Höhe über der Geschoss-UK).
     let mut solids: Vec<Value> = Vec::new();
+    let mut beams: Vec<Value> = Vec::new();
     for b in &el.beams {
-        let (fid, base, _) = floor_of(&mut ctx, b.info.storey, b.z0);
+        let (fid, base, fh) = floor_of(&mut ctx, b.info.storey, b.z0);
+        if let Some((start, end, width)) = beam_axis(&b.outline) {
+            // Bezug wie `Project::beam_vertical_extent`: tiefste Deckenunterkante über der Achsmitte, sonst Geschoss-OK.
+            let mid = [(start[0] + end[0]) / 2.0, (start[1] + end[1]) / 2.0];
+            let floor_top = base + fh;
+            let reference = ceiling_under
+                .iter()
+                .filter(|(f, outline, holes, _)| *f == fid && point_in_ring(mid, outline) && !holes.iter().any(|h| point_in_ring(mid, h)))
+                .map(|c| c.3)
+                .fold(floor_top, f64::min);
+            let mut v = json!({
+                "id": ctx.new_id("beam"), "type": "beam", "floorId": fid, "categoryCode": BEAM_CATEGORY,
+                "start": mv(start), "end": mv(end), "width": js_num(round(width, 1e-6)), "height": js_num(round(b.z1 - b.z0, 1e-6)),
+            });
+            let off = b.z1 - reference;
+            if off.abs() > 1e-6 {
+                v["topOffset"] = js_num(round(off, 1e-6));
+            }
+            set_gid(&mut v, &b.info);
+            beams.push(v);
+            continue;
+        }
         let mut v = json!({
             "id": ctx.new_id("solid"), "type": "extrudedSolid", "levelId": fid, "categoryCode": BEAM_CATEGORY,
             "points": b.outline.iter().map(|&p| mv(p)).collect::<Vec<_>>(), "height": js_num(round(b.z1 - b.z0, 1e-6)),
@@ -996,6 +1111,27 @@ fn elements_ops(root: &Map<String, Value>, meta: &Value, products: &[IfcProduct]
         }
         set_gid(&mut v, &b.info);
         solids.push(v);
+    }
+    // Geländer ([B4]): Achse und Art aus dem eigenen Export, Fuss relativ zur Geschoss-UK.
+    let mut railings: Vec<Value> = Vec::new();
+    for r in &el.railings {
+        let (fid, base, _) = floor_of(&mut ctx, r.info.storey, r.z0);
+        let mut v = json!({
+            "id": ctx.new_id("railing"), "type": "railing", "floorId": fid, "categoryCode": RAILING_CATEGORY,
+            "points": r.points.iter().map(|&p| mv(p)).collect::<Vec<_>>(), "height": js_num(round(r.height, 1e-6)), "kind": r.kind,
+        });
+        if r.closed {
+            v["closed"] = true.into();
+        }
+        let off = anchor_offset(r.z0, base);
+        if off.abs() > 1e-6 {
+            v["baseOffset"] = js_num(round(off, 1e-6));
+        }
+        if let Some(h) = r.handrail {
+            v["handrail"] = h.into();
+        }
+        set_gid(&mut v, &r.info);
+        railings.push(v);
     }
 
     // ── Übrige Bauteile als Kontext-Mesh ──
@@ -1009,7 +1145,7 @@ fn elements_ops(root: &Map<String, Value>, meta: &Value, products: &[IfcProduct]
         + el.roofs.iter().filter(|r| r.info.classified).count()
         + el.stairs.iter().filter(|s| s.info.classified).count()
         + products.iter().filter(|p| !p.classifications.is_empty()).count();
-    for (k, n) in [("walls", walls.len()), ("openings", openings.len()), ("ceilings", ceilings.len()), ("columns", columns.len()), ("rooms", rooms.len()), ("roofs", roofs.len()), ("stairs", stairs.len()), ("beams", solids.len()), ("meshes", n_meshes), ("classified", classified)] {
+    for (k, n) in [("walls", walls.len()), ("openings", openings.len()), ("ceilings", ceilings.len()), ("columns", columns.len()), ("rooms", rooms.len()), ("roofs", roofs.len()), ("stairs", stairs.len()), ("beams", solids.len() + beams.len()), ("railings", railings.len()), ("meshes", n_meshes), ("classified", classified)] {
         ctx.summary.insert(k.into(), n.into());
     }
 
@@ -1028,12 +1164,12 @@ fn elements_ops(root: &Map<String, Value>, meta: &Value, products: &[IfcProduct]
     if !walls.is_empty() {
         ops.push(Op::Add { collection: "walls".into(), items: walls, at: None });
     }
-    for (key, items) in [("openings", openings), ("ceilings", ceilings), ("columns", columns), ("rooms", rooms), ("roofs", roofs), ("stairs", stairs), ("extrudedSolids", solids)] {
+    for (key, items) in [("openings", openings), ("ceilings", ceilings), ("columns", columns), ("rooms", rooms), ("roofs", roofs), ("stairs", stairs), ("beams", beams), ("railings", railings), ("extrudedSolids", solids)] {
         if root.get(key).is_some_and(|v| crate::json_util::truthy(Some(v))) {
             if !items.is_empty() {
                 ops.push(Op::Add { collection: key.into(), items, at: None });
             }
-        } else if !(key == "extrudedSolids" && items.is_empty()) {
+        } else if !(matches!(key, "extrudedSolids" | "beams" | "railings") && items.is_empty()) {
             ops.push(Op::SetField { key: key.into(), value: Some(Value::Array(items)), at: None });
         }
     }
@@ -1107,6 +1243,15 @@ fn rotate_elements(el: &mut Elements, cs: [f64; 2]) {
     }
     for b in &mut el.beams {
         ring(&mut b.outline);
+    }
+    for r in &mut el.railings {
+        r.points.iter_mut().for_each(rot);
+    }
+    for sl in &mut el.slabs {
+        if let Some((a, b, _, _)) = &mut sl.slope {
+            rot(a);
+            rot(b);
+        }
     }
 }
 
@@ -1383,11 +1528,15 @@ mod tests {
         assert!((u["midOffset"].as_f64().unwrap() - 0.09).abs() < 1e-9, "{u}");
         let typed: crate::model::Stair = serde_json::from_value(u.clone()).unwrap();
         assert_eq!(typed.shape, crate::model::StairShape::U);
-        let solids = added(&r.ops, "extrudedSolids");
-        assert_eq!(solids.len(), 1);
-        assert_eq!(solids[0]["type"].as_str(), Some("extrudedSolid"));
-        assert!((solids[0]["height"].as_f64().unwrap() - 0.4).abs() < 1e-9 && (solids[0]["baseOffset"].as_f64().unwrap() - 2.6).abs() < 1e-9);
-        assert!(at(&solids[0]["points"][2], 104.0, 50.2));
+        // [B4] Rechteckiger Träger → Dossier-Träger: Achse durch die Mitte der kurzen Seiten, Oberkante über `topOffset`.
+        assert!(added(&r.ops, "extrudedSolids").is_empty());
+        let beams = added(&r.ops, "beams");
+        assert_eq!(beams.len(), 1);
+        let bm = beams[0];
+        assert_eq!(bm["type"].as_str(), Some("beam"));
+        assert!((bm["height"].as_f64().unwrap() - 0.4).abs() < 1e-9 && (bm["width"].as_f64().unwrap() - 0.2).abs() < 1e-9, "{bm}");
+        let (s0, e0) = (&bm["start"], &bm["end"]);
+        assert!(at(s0, 100.0, 50.1) && at(e0, 104.0, 50.1) || at(e0, 100.0, 50.1) && at(s0, 104.0, 50.1), "{bm}");
         assert_eq!(r.summary.unwrap()["beams"].as_f64(), Some(1.0));
 
         // Lokal x zeigt nach Norden (90°): alles um 90° gedreht, dann verschoben.
@@ -1401,7 +1550,8 @@ mod tests {
         let stairs = added(&r.ops, "stairs");
         assert!(at(&stairs[0]["start"], 98.0, 51.0) && at(&stairs[0]["dir"], 0.0, 1.0), "{}", stairs[0]);
         assert!(at(&stairs[1]["center"], 97.0, 52.0) && at(&stairs[1]["start"], 97.0, 52.8), "{}", stairs[1]);
-        assert!(at(&added(&r.ops, "extrudedSolids")[0]["points"][2], 99.8, 54.0));
+        let bm = added(&r.ops, "beams")[0];
+        assert!(at(&bm["start"], 99.9, 50.0) && at(&bm["end"], 99.9, 54.0) || at(&bm["end"], 99.9, 50.0) && at(&bm["start"], 99.9, 54.0), "{bm}");
         // Ohne Projekt-Bezug bleibt die Datei lokal und ungedreht.
         let mut bare = root();
         bare.remove("geoAnchor");

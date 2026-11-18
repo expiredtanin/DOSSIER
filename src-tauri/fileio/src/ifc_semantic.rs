@@ -97,7 +97,7 @@ pub struct Info {
 
 /// Eigenschaften der gemeinsamen Psets, die ins Modell übernommen werden; [158] dazu die Raum-Oberflächen
 /// (`Pset_SpaceCoveringRequirements`, IFC2x3 `Pset_SpaceCommon`) und Nutzung/Bodenaufbau (`Dossier_RoomBook`).
-const COMMON_PROPS: [&str; 12] = [
+const COMMON_PROPS: [&str; 17] = [
     "IsExternal",
     "LoadBearing",
     "FireRating",
@@ -110,11 +110,17 @@ const COMMON_PROPS: [&str; 12] = [
     "CeilingCovering",
     "Usage",
     "FloorBuildUp",
+    // `Dossier_Railing` ([B4]): Achse als Text, Art, Handlauf, Höhe.
+    "Axis",
+    "Closed",
+    "Kind",
+    "Handrail",
+    "Height",
 ];
 
 /// Psets, deren Eigenschaften aus [`COMMON_PROPS`] gelesen werden: `Pset_*Common` und die Raumbuch-Psets.
 fn reads_common(name: &str) -> bool {
-    (name.starts_with("Pset_") && name.ends_with("Common")) || name == "Pset_SpaceCoveringRequirements" || name == "Dossier_RoomBook"
+    (name.starts_with("Pset_") && name.ends_with("Common")) || name == "Pset_SpaceCoveringRequirements" || name == "Dossier_RoomBook" || name == "Dossier_Railing"
 }
 
 #[derive(Clone, Debug, Default)]
@@ -170,8 +176,35 @@ pub struct Slab {
     pub info: Info,
     pub outline: Vec<V2>,
     pub holes: Vec<Vec<V2>>,
+    /// Waagrechte Platte: UK/OK; geneigt (`slope`): UK/OK am Bezugspunkt `slope.from`.
     pub z0: f64,
     pub z1: f64,
+    /// [B4] Geneigte Platte (Rampe): Gefällelinie und Höhenunterschied, sonst `None`.
+    pub slope: Option<SlabSlope>,
+}
+
+/// Gefällelinie einer geneigten Platte (Dossier `CeilingSlope`).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct SlabSlope {
+    pub from: V2,
+    pub to: V2,
+    pub rise: f64,
+    /// Aus `IfcRamp`/`IfcRampFlight` ⇒ als Rampe darstellen.
+    pub ramp: bool,
+}
+
+/// [B4] Geländer (Dossier `Railing`) aus dem eigenen Export (Pset `Dossier_Railing` mit Achse), wenn der Körper dazu passt.
+#[derive(Clone, Debug, Default)]
+pub struct Railing {
+    pub info: Info,
+    pub points: Vec<V2>,
+    pub closed: bool,
+    pub height: f64,
+    /// Fusshöhe (absolut, Unterkante des Körpers).
+    pub z0: f64,
+    /// `bars`, `glass`, `solid`, `perforated`.
+    pub kind: String,
+    pub handrail: Option<bool>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -282,6 +315,8 @@ pub struct Semantic {
     pub stairs: Vec<Stair>,
     /// Träger als senkrechte Prismen (Dossier-Extrusionskörper).
     pub beams: Vec<Beam>,
+    /// Geländer mit Dossier-Achse (eigener Export).
+    pub railings: Vec<Railing>,
     /// Kandidaten (Wand, Decke, Stütze, Raum, Dach, Treppe), die nicht sicher abbildbar waren, je Klasse.
     pub kept: BTreeMap<String, usize>,
     /// Dieselben je Klasse und Grund (Kennwort, s. [`Reason`]).
@@ -319,6 +354,8 @@ const R_PROFILE: &str = "profile";
 const R_HOLES: &str = "holes";
 /// Teil eines anderen Bauteils (Vorhangfassade, Baugruppe …).
 const R_PART: &str = "part";
+/// Rampe, die keine ebene schräge Platte ist.
+const R_RAMP_FORM: &str = "rampForm";
 
 // ---------------------------------------------------------------------------
 // 2D-Hilfen
@@ -623,6 +660,88 @@ fn prism(s: &Shape) -> Option<(Vec<V2>, Vec<Vec<V2>>)> {
     // Flächen der Schleifen müssen die Oberseite ergeben.
     let sum = area2(&outer) - holes.iter().map(|h| area2(h)).sum::<f64>();
     ((sum - a).abs() <= 0.01 * a).then_some((outer, holes))
+}
+
+/// [B4] Ebene, geneigte Platte (Rampe): Oberseite und Unterseite auf parallelen Ebenen `z = gx·x + gy·y + c`
+/// (Unterseite um `t` tiefer, lotrecht gemessen), alle übrigen Flächen senkrecht, Volumen = Fläche × t.
+/// Liefert Umriss, Löcher, Gefälle `[gx, gy]`, `c` der Oberseite und `t`; `None` sonst (nichts raten).
+fn sloped_plate(m: &Mesh) -> Option<(Vec<V2>, Vec<Vec<V2>>, V2, f64, f64)> {
+    if m.indices.len() < 12 || m.positions.len() < 12 || m.positions.iter().any(|v| !v.is_finite()) {
+        return None;
+    }
+    let p = |i: u32| -> Option<[f64; 3]> {
+        let k = i as usize * 3;
+        m.positions.get(k..k + 3).map(|s| [s[0], s[1], s[2]])
+    };
+    let mut top: Vec<[[f64; 3]; 3]> = Vec::new();
+    let mut bottom: Vec<[[f64; 3]; 3]> = Vec::new();
+    for t in m.indices.chunks_exact(3) {
+        let (a, b, c) = (p(t[0])?, p(t[1])?, p(t[2])?);
+        let (u, v) = ([b[0] - a[0], b[1] - a[1], b[2] - a[2]], [c[0] - a[0], c[1] - a[1], c[2] - a[2]]);
+        let n = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+        let l = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
+        if l < 1e-12 {
+            continue;
+        }
+        let nz = n[2] / l;
+        if nz > 0.05 {
+            top.push([a, b, c]);
+        } else if nz < -0.05 {
+            bottom.push([a, b, c]);
+        } else if nz.abs() > 1e-3 {
+            return None;
+        }
+    }
+    if top.is_empty() || bottom.is_empty() {
+        return None;
+    }
+    // Ebene der Oberseite aus dem ersten Dreieck.
+    let plane = |t: &[[f64; 3]; 3]| -> Option<(f64, f64, f64)> {
+        let (a, b, c) = (t[0], t[1], t[2]);
+        let n = [(b[1] - a[1]) * (c[2] - a[2]) - (b[2] - a[2]) * (c[1] - a[1]), (b[2] - a[2]) * (c[0] - a[0]) - (b[0] - a[0]) * (c[2] - a[2]), (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])];
+        (n[2].abs() > 1e-12).then(|| {
+            let (gx, gy) = (-n[0] / n[2], -n[1] / n[2]);
+            (gx, gy, a[2] - gx * a[0] - gy * a[1])
+        })
+    };
+    let (gx, gy, c_top) = plane(&top[0])?;
+    let g = gx.hypot(gy);
+    if !(0.002..=0.6).contains(&g) {
+        return None;
+    }
+    let c_bot = {
+        let a = bottom[0][0];
+        a[2] - gx * a[0] - gy * a[1]
+    };
+    let fits = |tris: &[[[f64; 3]; 3]], c: f64| tris.iter().flatten().all(|q| (q[2] - (gx * q[0] + gy * q[1] + c)).abs() <= 1e-3);
+    if !fits(&top, c_top) || !fits(&bottom, c_bot) {
+        return None;
+    }
+    let t = c_top - c_bot;
+    if !(0.01..=3.0).contains(&t) {
+        return None;
+    }
+    let xy_area = |tris: &[[[f64; 3]; 3]]| -> f64 { tris.iter().map(|q| ((q[1][0] - q[0][0]) * (q[2][1] - q[0][1]) - (q[1][1] - q[0][1]) * (q[2][0] - q[0][0])).abs() / 2.0).sum() };
+    let a = xy_area(&top);
+    if !(a > 1e-4 && (xy_area(&bottom) - a).abs() <= 0.01 * a && (signed_volume(&m.positions, &m.indices) - a * t).abs() <= 0.01 * a * t) {
+        return None;
+    }
+    let tris: Vec<[V2; 3]> = top.iter().map(|q| [[q[0][0], q[0][1]], [q[1][0], q[1][1]], [q[2][0], q[2][1]]]).collect();
+    let mut outer: Option<Vec<V2>> = None;
+    let mut holes = Vec::new();
+    for l in boundary_loops(&tris) {
+        if area2(&l) > 0.0 {
+            if outer.is_some() {
+                return None;
+            }
+            outer = Some(l);
+        } else {
+            holes.push(l.iter().rev().copied().collect::<Vec<V2>>());
+        }
+    }
+    let outer = outer?;
+    let sum = area2(&outer) - holes.iter().map(|h| area2(h)).sum::<f64>();
+    ((sum - a).abs() <= 0.01 * a).then_some((outer, holes, [gx, gy], c_top, t))
 }
 
 /// Ausdehnung eines Körpers im Rahmen (Ursprung `o`, Richtung `d`, Normale `left(d)`):
@@ -1123,7 +1242,7 @@ impl Ctx<'_, '_> {
             }
             holes.push(ring);
         }
-        Ok(Slab { info: self.info(id, color), outline, holes, z0: s.z0, z1: s.z1 })
+        Ok(Slab { info: self.info(id, color), outline, holes, z0: s.z0, z1: s.z1, slope: None })
     }
 
     fn column(&mut self, id: u64) -> Result<Column, &'static str> {
@@ -1575,6 +1694,95 @@ fn stairs(cx: &mut Ctx, out: &mut Semantic, ids: &[u64], children: &HashMap<u64,
     }
 }
 
+/// [B4] Rampen: `IfcRamp` (mit genau einem Lauf als Körper) bzw. frei stehender `IfcRampFlight` oder `IfcRamp` mit eigenem
+/// Körper → geneigte Decke (`slope.ramp`), wenn der Körper eine ebene schräge Platte ist; sonst bleibt alles Mesh.
+fn ramps(cx: &mut Ctx, out: &mut Semantic, ids: &[u64], children: &HashMap<u64, Vec<u64>>) {
+    let f = cx.r.f;
+    let rels = cx.rels;
+    for &id in ids {
+        let Some(e) = f.get(id) else { continue };
+        if !matches!(e.ty.as_str(), "IFCRAMP" | "IFCRAMPFLIGHT") || rels.parent.get(&id).is_some_and(|p| !is_spatial(f, *p)) {
+            continue;
+        }
+        let mut parts = vec![id];
+        parts.extend(children.get(&id).map(Vec::as_slice).unwrap_or(&[]).iter().copied().filter(|c| f.get(*c).is_some_and(|e| e.ty == "IFCRAMPFLIGHT")));
+        let mut b = bodies(cx, &parts);
+        if b.is_empty() {
+            continue;
+        }
+        let class = class_name(&e.ty);
+        // Mehrere Läufe/Körper: nicht sicher als eine Platte lesbar.
+        if b.len() != 1 {
+            out.keep(&class, R_RAMP_FORM);
+            continue;
+        }
+        let (body_id, mesh, color) = b.remove(0);
+        let Some((outline, holes, [gx, gy], c_top, t)) = sloped_plate(&mesh) else {
+            out.keep(&class, R_RAMP_FORM);
+            continue;
+        };
+        // Gefällelinie durch den Schwerpunkt des Umrisses, von der tiefsten bis zur höchsten Stelle.
+        let g = gx.hypot(gy);
+        let d = [gx / g, gy / g];
+        let n = outline.len() as f64;
+        let c = outline.iter().fold([0.0, 0.0], |a, p| [a[0] + p[0] / n, a[1] + p[1] / n]);
+        let proj = |p: V2| p[0] * d[0] + p[1] * d[1];
+        let (lo, hi) = outline.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |a, p| (a.0.min(proj(*p)), a.1.max(proj(*p))));
+        let (from, to) = ([c[0] + d[0] * (lo - proj(c)), c[1] + d[1] * (lo - proj(c))], [c[0] + d[0] * (hi - proj(c)), c[1] + d[1] * (hi - proj(c))]);
+        let z1 = gx * from[0] + gy * from[1] + c_top;
+        let mut info = cx.info(id, color);
+        if info.common.is_empty() && body_id != id {
+            info.common = cx.info(body_id, None).common;
+        }
+        out.converted.insert(id);
+        out.converted.insert(body_id);
+        out.slabs.push(Slab { info, outline, holes, z0: z1 - t, z1, slope: Some(SlabSlope { from, to, rise: g * (hi - lo), ramp: true }) });
+    }
+}
+
+/// [B4] Geländer des eigenen Exports: `Dossier_Railing` trägt die Achse (`Axis` = "x,y;x,y;…", `Closed`), Art, Handlauf und Höhe.
+/// Übernommen wird nur, wenn der Körper dazu passt (Hüllbox enthält die Achse, Höhe = Körperhöhe); sonst bleibt es Mesh.
+/// Fremde Geländer (ohne diese Eigenschaften) bleiben Mesh: aus einem Netz lässt sich keine Achse sicher lesen.
+fn railings(cx: &mut Ctx, out: &mut Semantic, ids: &[u64]) {
+    let f = cx.r.f;
+    for &id in ids {
+        let Some(e) = f.get(id) else { continue };
+        if e.ty != "IFCRAILING" || cx.rels.parent.get(&id).is_some_and(|p| !is_spatial(f, *p)) {
+            continue;
+        }
+        let Some(common) = cx.common.get(&id).filter(|c| c.contains_key("Axis")) else { continue };
+        let axis: Option<Vec<V2>> = common["Axis"]
+            .split(';')
+            .map(|p| {
+                let (x, y) = p.split_once(',')?;
+                let q = [x.trim().parse::<f64>().ok()?, y.trim().parse::<f64>().ok()?];
+                (q[0].is_finite() && q[1].is_finite()).then_some(q)
+            })
+            .collect();
+        let height = common.get("Height").and_then(|h| h.parse::<f64>().ok()).filter(|h| h.is_finite() && *h > 0.0);
+        let (closed, kind, handrail) = (common.get("Closed").is_some_and(|c| c == "yes"), common.get("Kind").cloned().unwrap_or_default(), common.get("Handrail").map(|h| h == "yes"));
+        let (Some(points), Some(height)) = (axis.filter(|a| a.len() >= 2), height) else { continue };
+        if !["bars", "glass", "solid", "perforated"].contains(&kind.as_str()) {
+            continue;
+        }
+        let Some((mesh, color)) = cx.body(id) else { continue };
+        let (mut lo, mut hi) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
+        for c in mesh.positions.chunks_exact(3) {
+            for k in 0..3 {
+                lo[k] = lo[k].min(c[k]);
+                hi[k] = hi[k].max(c[k]);
+            }
+        }
+        // Achsenpunkte liegen in der Hüllbox (Rand: halbe Füllungsdicke, Pfosten), Höhe stimmt auf 1 cm.
+        let tol = 0.3;
+        if !(lo.iter().chain(hi.iter()).all(|v| v.is_finite()) && ((hi[2] - lo[2]) - height).abs() <= 0.01 && points.iter().all(|p| p[0] >= lo[0] - tol && p[0] <= hi[0] + tol && p[1] >= lo[1] - tol && p[1] <= hi[1] + tol)) {
+            continue;
+        }
+        out.converted.insert(id);
+        out.railings.push(Railing { info: cx.info(id, color), points, closed, height, z0: lo[2], kind, handrail });
+    }
+}
+
 /// Erkennt alle sicher abbildbaren Bauteile.
 pub(crate) fn analyze(r: &mut Reader, rels: &Rels, ids: &[u64]) -> Semantic {
     let f = r.f;
@@ -1673,6 +1881,8 @@ pub(crate) fn analyze(r: &mut Reader, rels: &Rels, ids: &[u64]) -> Semantic {
     // Dächer zuerst: schräge Wandkronen darunter werden zum Dachanschluss.
     let roof_fail = roofs(&mut cx, &mut out, ids, &children);
     stairs(&mut cx, &mut out, ids, &children);
+    ramps(&mut cx, &mut out, ids, &children);
+    railings(&mut cx, &mut out, ids);
 
     let spatial = |id: u64| f.get(id).is_some_and(|e| matches!(e.ty.as_str(), "IFCBUILDINGSTOREY" | "IFCBUILDING" | "IFCSITE" | "IFCSPACE"));
     let mut walls = Vec::new();
@@ -1941,7 +2151,11 @@ pub(crate) fn encode(s: &Semantic) -> (serde_json::Value, Vec<f64>) {
         for h in &sl.holes {
             ring(h, &mut nums);
         }
-        push("slab", &sl.info, json!({}), nums, &mut data);
+        let extra = match &sl.slope {
+            Some(k) => json!({ "slope": { "from": k.from, "to": k.to, "rise": k.rise, "ramp": k.ramp } }),
+            None => json!({}),
+        };
+        push("slab", &sl.info, extra, nums, &mut data);
     }
     for c in &s.columns {
         let (kind, a, b) = match c.profile {
@@ -1964,6 +2178,12 @@ pub(crate) fn encode(s: &Semantic) -> (serde_json::Value, Vec<f64>) {
         let mut nums = vec![b.z0, b.z1];
         ring(&b.outline, &mut nums);
         push("beam", &b.info, json!({}), nums, &mut data);
+    }
+    for r in &s.railings {
+        let pts: Vec<f64> = r.points.iter().flatten().copied().collect();
+        let mut nums = vec![r.z0, r.height, r.points.len() as f64];
+        nums.extend(pts);
+        push("railing", &r.info, json!({ "railingKind": r.kind, "closed": r.closed, "handrail": r.handrail }), nums, &mut data);
     }
     for st in &s.stairs {
         let nums = vec![
@@ -2619,6 +2839,28 @@ ENDSEC;\nEND-ISO-10303-21;\n"
         let (_, sm) = sem(&file(METRE, &brep_product(200, "IFCBEAM", &faces, "$")));
         assert!(sm.beams.is_empty());
         assert_eq!(sm.kept.get("IfcBeam"), Some(&1), "{:?}", sm.kept_reasons);
+    }
+
+    #[test]
+    fn ramp_flight_becomes_sloped_slab_and_other_forms_stay_mesh() {
+        // Rampe 10 × 4, steigt in +y mit 10 % von z = 0.5, 0.2 dick (lotrecht) ⇒ UK bei y = 0: 0.3.
+        let plate = roof_plate(0.0, 10.0, 0.0, 4.0, 0.5, 0.1, 0.2 / (1.0 + 0.01f64).sqrt());
+        let flight = brep_product(100, "IFCRAMPFLIGHT", &plate, ".STRAIGHT.");
+        let (r, sm) = sem(&file(METRE, &flight));
+        assert_eq!(sm.slabs.len(), 1, "{:?}", sm.kept_reasons);
+        assert!(r.products.is_empty(), "als Bauteil erkannt, nicht als Mesh");
+        let sl = &sm.slabs[0];
+        let k = sl.slope.expect("Gefälle");
+        assert!(k.ramp);
+        assert!(close(k.rise.abs(), 0.4) && close(k.from[0], 5.0) && close2(k.to, [5.0, 4.0]) && close(sl.z1 - sl.z0, 0.2), "{sl:?}");
+        assert!(close(sl.z1, 0.5) && sl.outline.len() == 4);
+        // Zwei Läufe: nicht sicher eine Platte ⇒ Mesh.
+        let a = brep_product(200, "IFCRAMPFLIGHT", &plate, ".STRAIGHT.");
+        let b = brep_product(300, "IFCRAMPFLIGHT", &roof_plate(0.0, 10.0, 6.0, 10.0, 0.5, 0.1, 0.2), ".STRAIGHT.");
+        let ramp = "#900=IFCRAMP('rp',$,'R',$,$,#22,$,$,.STRAIGHT_RUN_RAMP.);#901=IFCRELAGGREGATES('ra',$,$,$,#900,(#200,#300));#902=IFCRELCONTAINEDINSPATIALSTRUCTURE('rr',$,$,$,(#900),#23);";
+        let (_, sm) = sem(&file(METRE, &format!("{a}{b}{ramp}")));
+        assert!(sm.slabs.is_empty());
+        assert_eq!(sm.kept.get("IfcRamp"), Some(&1), "{:?}", sm.kept_reasons);
     }
 
     #[test]
