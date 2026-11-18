@@ -178,6 +178,22 @@ struct RestKey {
     for_section: bool,
     walls: Vec<u64>,
     openings: Vec<u64>,
+    /// [253] Stand der Bibliotheksobjekte mit 3D-Netz (`drawings2d` ist sonst kein globales Feld).
+    entourage: u64,
+}
+
+/// [253] Inhalts-Stand der Bibliotheksobjekte (Id, Geschoss, Geometrie): ändert sich nur, wenn eines davon sich ändert.
+fn entourage_stamp(p: &Project) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    for d in &p.drawings2d {
+        if matches!(d.geom, crate::model::Drawing2DGeom::Libobj { .. }) {
+            d.id.hash(&mut h);
+            d.level_id.hash(&mut h);
+            serde_json::to_string(&d.geom).unwrap_or_default().hash(&mut h);
+        }
+    }
+    h.finish()
 }
 
 /// Ergebnis: die Teile (Wände/Öffnungen nur mit `structs`) und das JSON wie `serde_json::to_string(&parts)`.
@@ -208,7 +224,7 @@ impl Model3dCache {
         let maps = model3d::wall_material_color_maps(p);
         if self.sig != Some(sig) || self.maps != maps {
             // [214] Übrige Gruppen behalten (zum Vergleich), aber nicht als Treffer: `RestKey` ohne Stände.
-            let rest = std::mem::take(&mut self.rest).map(|r| r.map(|(k, r)| (RestKey { for_section: k.for_section, walls: Vec::new(), openings: vec![u64::MAX] }, r)));
+            let rest = std::mem::take(&mut self.rest).map(|r| r.map(|(k, r)| (RestKey { for_section: k.for_section, walls: Vec::new(), openings: vec![u64::MAX], entourage: 0 }, r)));
             let groups = std::mem::take(&mut self.groups);
             let tails = std::mem::take(&mut self.tails);
             *self = Model3dCache {
@@ -404,7 +420,7 @@ impl Model3dCache {
 
         // [214] Übrige Gruppen: aus `rest`, solange Stände und Variante gleich sind (sonst neu, mit den schon
         // bekannten Schnittlinien fürs Deckenauflager).
-        let key = RestKey { for_section, walls: wall_stamps.to_vec(), openings: opening_stamps.to_vec() };
+        let key = RestKey { for_section, walls: wall_stamps.to_vec(), openings: opening_stamps.to_vec(), entourage: entourage_stamp(p) };
         let var = for_section as usize;
         self.last_rest_hit = matches!(&self.rest[var], Some((k, _)) if *k == key);
         self.last_groups_changed = 0;
@@ -417,7 +433,7 @@ impl Model3dCache {
                 slabs,
                 context_meshes: model3d::emit_context_meshes(p),
                 solid_meshes: model3d::emit_solids(p),
-                column_meshes: { let mut m = model3d::emit_columns(p); m.extend(model3d::emit_trees(p)); m.extend(model3d::emit_railings(p)); m },
+                column_meshes: { let mut m = model3d::emit_columns(p); m.extend(model3d::emit_trees(p)); m.extend(model3d::emit_entourage(p)); m.extend(model3d::emit_railings(p)); m },
                 opening_meshes: Vec::new(),
                 stair_meshes: model3d::emit_stair_meshes(p),
                 stair_railings: model3d::emit_stair_railings(p),
@@ -1050,6 +1066,34 @@ mod tests {
         d.commit(vec![Op::Replace { collection: "walls".into(), entity: w }], None, 0.0, false).unwrap();
         q(&mut d, "", true);
         assert!(!d.model3d_rest_hit(), "Wand geändert");
+    }
+
+    /// [253] Bibliotheksobjekte (`drawings2d`) sind sonst kein globales Feld: ein neues Objekt mit 3D-Netz muss die
+    /// übrigen Gruppen trotzdem neu rechnen, ein Objekt ohne Netz nicht.
+    #[test]
+    fn entourage_im_cache() {
+        let mut d = sample();
+        let q = |d: &mut Document| d.model3d_parts_with(true, 2.0, false, false, None, "").unwrap().json;
+        let a = q(&mut d);
+        let lv = list(&d, "drawingLevels")[0]["id"].clone();
+        let add = |d: &mut Document, lib: &str| {
+            let it = json!({"id": "x1", "type": "drawing2d", "levelId": lv, "categoryCode": "24", "geom": {"shape": "libobj", "libId": lib, "at": {"x": 1.0, "y": -2.0}, "rotation": 0.0}});
+            d.commit(vec![Op::Add { collection: "drawings2d".into(), items: vec![it], at: None }], None, 0.0, false).unwrap();
+        };
+        add(&mut d, "lib:wc-wand");
+        assert_eq!(q(&mut d), a, "WC hat kein Netz");
+        d.commit(vec![Op::Remove { collection: "drawings2d".into(), ids: vec!["x1".into()] }], None, 0.0, false).unwrap();
+        add(&mut d, "lib:auto");
+        let b = q(&mut d);
+        assert_ne!(a, b);
+        assert!(!d.model3d_rest_hit(), "neu gerechnet");
+        // Verschieben: neu; unverändert: Treffer.
+        let mut it = list(&d, "drawings2d").into_iter().find(|x| x["id"] == "x1").unwrap();
+        it["geom"]["at"]["x"] = json!(5.0);
+        d.commit(vec![Op::Replace { collection: "drawings2d".into(), entity: it }], None, 0.0, false).unwrap();
+        assert_ne!(q(&mut d), b);
+        q(&mut d);
+        assert!(d.model3d_rest_hit());
     }
 
     /// [214] Übrige Gruppen mit Laufnummer: Eine Wand-Änderung schickt nur Gruppen, deren Inhalt sich geändert hat

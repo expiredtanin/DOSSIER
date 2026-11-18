@@ -5,8 +5,8 @@
 //! - **Definition** ([`ObjectDef`]): Id (`lib:wc-wand`), Gruppe, Klasse, Einfügepunkt, Parameterliste ([`ParamDef`]:
 //!   Schlüssel, Art, Vorgabe, Min, Max, Schritt) — nur Daten, daraus baut die Objekt-Info ihre Felder.
 //! - **Erzeugung** ([`LibObject::geometry`]): `(Parameter, Detailgrad, Seed) → Vec<Drawing2DGeom>`; ausgegeben werden nur
-//!   allgemeine Primitive (Linie, Rechteck, Polylinie, Kreis, Bogen, Ellipse), nie objektspezifische Typen. Platz für eine
-//!   spätere 3D-Erzeugung: weitere Methode am Trait (`geometry3d`), heute nicht umgesetzt.
+//!   allgemeine Primitive (Linie, Rechteck, Polylinie, Kreis, Bogen, Ellipse), nie objektspezifische Typen.
+//!   Einige Objekte haben zusätzlich ein Low-Poly-Netz ([`LibObject::geometry3d`], `furniture_3d.rs`): Entourage im 3D.
 //! - **Register** ([`find`], [`all`]): die eingebauten Objekte sind die ersten Einträge; eine Benutzerdefinition
 //!   käme als weiterer `LibObject`-Implementierer.
 //! - **Instanz im Modell**: `Drawing2DGeom::Libobj { libId, at, rotation, params, seed }` — Parameter als offene Map
@@ -22,6 +22,7 @@ use std::collections::BTreeMap;
 use std::f64::consts::{FRAC_PI_2, PI, TAU};
 use std::sync::OnceLock;
 
+use crate::furniture_3d::{self as f3, Mesh3, B3};
 use crate::jsnum::{atan2, cos, sin};
 
 /// Küchenraster (Schweizer Küchennorm): Modulbreite in m.
@@ -153,12 +154,37 @@ pub trait LibObject: Send + Sync {
     fn def(&self) -> &ObjectDef;
     /// 2D-Geometrie in lokalen Koordinaten (Einfügepunkt = Ursprung), ohne Spiegelung.
     fn geometry(&self, p: &Params, detail: Detail, seed: u32) -> Vec<G>;
-    // Später (3D nach 1.0): `fn geometry3d(&self, p: &Params) -> Option<Solid3D>`.
+    /// 3D-Netz (Entourage, `furniture_3d.rs`) in denselben lokalen Koordinaten wie `geometry`, z = Höhe über dem Fuss,
+    /// ohne Spiegelung. Leer = das Objekt hat nur das 2D-Symbol.
+    fn geometry3d(&self, _p: &Params, _seed: u32) -> Vec<Mesh3> {
+        Vec::new()
+    }
+    /// Das Objekt hat ein 3D-Netz.
+    fn has_3d(&self) -> bool {
+        false
+    }
 }
+
+/// 3D-Erzeugung eines Objekts: Parameter, Stuhl-Plätze `(x, y, Drehung)` aus dem 2D-Symbol, Sammler.
+type Gen3 = fn(&Params, &[(f64, f64, f64)], &mut B3);
 
 struct Builtin {
     def: ObjectDef,
     gen: fn(&Params, Detail, u32, &mut Sh),
+    gen3: Option<Gen3>,
+}
+
+impl Builtin {
+    fn with3d(mut self, g: Gen3) -> Builtin {
+        self.gen3 = Some(g);
+        self
+    }
+    fn origin(&self, p: &Params) -> (f64, f64) {
+        match self.def.anchor {
+            Anchor::Wall => (-p.w / 2.0, 0.0),
+            Anchor::Center => (-p.w / 2.0, -p.d / 2.0),
+        }
+    }
 }
 
 impl LibObject for Builtin {
@@ -166,13 +192,23 @@ impl LibObject for Builtin {
         &self.def
     }
     fn geometry(&self, p: &Params, detail: Detail, seed: u32) -> Vec<G> {
-        let (ox, oy) = match self.def.anchor {
-            Anchor::Wall => (-p.w / 2.0, 0.0),
-            Anchor::Center => (-p.w / 2.0, -p.d / 2.0),
-        };
-        let mut sh = Sh { out: Vec::new(), ox, oy };
+        let (ox, oy) = self.origin(p);
+        let mut sh = Sh { out: Vec::new(), ox, oy, chairs: Vec::new() };
         (self.gen)(p, detail, seed, &mut sh);
         sh.out
+    }
+    fn has_3d(&self) -> bool {
+        self.gen3.is_some()
+    }
+    fn geometry3d(&self, p: &Params, seed: u32) -> Vec<Mesh3> {
+        let Some(g3) = self.gen3 else { return Vec::new() };
+        // Stuhl-Plätze (mit Unordnung nach Seed) aus dem 2D-Lauf übernehmen: ein Ort für die Anordnung.
+        let (ox, oy) = self.origin(p);
+        let mut sh = Sh { out: Vec::new(), ox, oy, chairs: Vec::new() };
+        (self.gen)(p, Detail::Grob, seed, &mut sh);
+        let mut b = B3::new(ox, oy);
+        g3(p, &sh.chairs, &mut b);
+        b.parts
     }
 }
 
@@ -218,7 +254,7 @@ const MIRROR: &str = "mirror";
 pub fn placeholder(params: &BTreeMap<String, Value>) -> Vec<G> {
     let num = |k: &str| params.get(k).and_then(Value::as_f64).filter(|x| x.is_finite() && *x > 0.0).unwrap_or(0.5).min(50.0);
     let (w, d) = (num("w"), num("d"));
-    let mut sh = Sh { out: Vec::new(), ox: -w / 2.0, oy: -d / 2.0 };
+    let mut sh = Sh { out: Vec::new(), ox: -w / 2.0, oy: -d / 2.0, chairs: Vec::new() };
     sh.rect(0.0, 0.0, w, d);
     sh.line(0.0, 0.0, w, d);
     sh.line(0.0, d, w, 0.0);
@@ -232,6 +268,17 @@ pub fn geometry_for(lib_id: &str, params: &BTreeMap<String, Value>, detail: Deta
     let mut g = o.geometry(&p, detail, seed);
     if params.get(MIRROR).is_some_and(|v| v.as_bool() == Some(true) || v.as_f64().is_some_and(|x| x >= 0.5)) {
         g = g.iter().map(mirror_x).collect();
+    }
+    g
+}
+
+/// 3D-Netz einer Instanz (Parameter, Spiegeln wie im 2D). Leer bei unbekannter Id und bei Objekten ohne Netz.
+pub fn geometry3d_for(lib_id: &str, params: &BTreeMap<String, Value>, seed: u32) -> Vec<Mesh3> {
+    let Some(o) = find(lib_id) else { return Vec::new() };
+    let p = o.def().resolve(params);
+    let g = o.geometry3d(&p, seed);
+    if params.get(MIRROR).is_some_and(|v| v.as_bool() == Some(true) || v.as_f64().is_some_and(|x| x >= 0.5)) {
+        return g.iter().map(Mesh3::mirrored).collect();
     }
     g
 }
@@ -270,7 +317,7 @@ pub fn catalog_json() -> Value {
             params.push(json!({"key": MIRROR, "kind": "flag", "default": 0, "min": 0, "max": 1, "step": 1}));
             json!({
                 "id": d.id, "group": d.group, "category": d.cat.key(), "categoryCode": d.cat.code(), "categoryName": d.cat.name(),
-                "anchor": if d.anchor == Anchor::Wall { "wall" } else { "center" }, "seeded": d.seeded, "params": params,
+                "anchor": if d.anchor == Anchor::Wall { "wall" } else { "center" }, "seeded": d.seeded, "model3d": o.has_3d(), "params": params,
             })
         })
         .collect();
@@ -285,6 +332,8 @@ struct Sh {
     out: Vec<G>,
     ox: f64,
     oy: f64,
+    /// Stuhl-Plätze `(x, y, Drehung)` in Kastenkoordinaten (für das 3D-Netz).
+    chairs: Vec<(f64, f64, f64)>,
 }
 
 impl Sh {
@@ -583,6 +632,7 @@ const CHAIR_GAP: f64 = 0.03;
 
 /// Stuhl, lokal: Rückenlehne bei y = −d/2, Blick +y.
 fn chair_at(sh: &mut Sh, dt: Detail, cx: f64, cy: f64, rot: f64) {
+    sh.chairs.push((cx, cy, rot));
     let (hw, hd) = (CHAIR_W / 2.0, CHAIR_D / 2.0);
     sh.rot_rect(cx, cy, hw, hd, rot);
     if mid(dt) {
@@ -812,6 +862,33 @@ fn car(p: &Params, dt: Detail, sh: &mut Sh) {
     }
 }
 
+fn bench_2d(p: &Params, dt: Detail, sh: &mut Sh) {
+    let (w, d) = (p.w, p.d);
+    sh.rect(0.0, 0.0, w, d);
+    if mid(dt) {
+        sh.line(0.0, d * 0.15, w, d * 0.15);
+    }
+    if fine(dt) {
+        for i in 1..6 {
+            sh.line(w * i as f64 / 6.0, d * 0.15, w * i as f64 / 6.0, d);
+        }
+    }
+}
+
+/// Person von oben: Schultern (Ellipse), Kopf (Kreis) in der Mitte; mittel: Nase/Blickrichtung +y.
+fn person_2d(p: &Params, dt: Detail, sh: &mut Sh) {
+    let (cx, cy) = (p.w / 2.0, p.d / 2.0);
+    sh.ellipse(cx, cy, p.w / 2.0, (p.d / 2.0).min(0.18));
+    sh.circle(cx, cy + 0.01, 0.09);
+    if mid(dt) {
+        sh.line(cx, cy + 0.10, cx, cy + 0.15);
+    }
+    if fine(dt) {
+        sh.line(cx - p.w / 2.0 + 0.02, cy, cx - p.w / 2.0 + 0.02, cy + 0.08);
+        sh.line(cx + p.w / 2.0 - 0.02, cy, cx + p.w / 2.0 - 0.02, cy + 0.08);
+    }
+}
+
 fn parking(p: &Params, _dt: Detail, sh: &mut Sh) {
     sh.rect(0.0, 0.0, p.w, p.d);
 }
@@ -859,7 +936,7 @@ fn wd(w: f64, d: f64) -> Vec<ParamDef> {
 }
 
 fn ent(id: &'static str, group: &'static str, cat: Cat, anchor: Anchor, params: Vec<ParamDef>, gen: fn(&Params, Detail, u32, &mut Sh)) -> Builtin {
-    Builtin { def: ObjectDef { id, group, cat, anchor, params, seeded: false, round: false, modular: false }, gen }
+    Builtin { def: ObjectDef { id, group, cat, anchor, params, seeded: false, round: false, modular: false }, gen, gen3: None }
 }
 
 fn build() -> Vec<Builtin> {
@@ -870,7 +947,8 @@ fn build() -> Vec<Builtin> {
         let mut params = if round { vec![len("w", w, 0.4, 3.0)] } else { wd(w, d) };
         params.push(count("n", n, 0.0, 12.0));
         params.push(frac("mess", 0.0));
-        let mut b = ent(id, "tables", F, Center, params, gen);
+        params.push(len("h", 0.75, 0.4, 1.2));
+        let mut b = ent(id, "tables", F, Center, params, gen).with3d(if round { f3::round_table } else { f3::rect_table });
         b.def.seeded = true;
         b.def.round = round;
         b
@@ -916,7 +994,7 @@ fn build() -> Vec<Builtin> {
     v.extend(tables);
 
     // Sitzen
-    v.push(ent("lib:stuhl", "seating", F, Center, wd(0.45, 0.50), |p, dt, _, sh| chair(p, dt, sh)));
+    v.push(ent("lib:stuhl", "seating", F, Center, wd(0.45, 0.50), |p, dt, _, sh| chair(p, dt, sh)).with3d(f3::single_chair));
     v.push(ent("lib:sofa-2", "seating", F, Wall, wd(1.60, 0.90), |p, dt, _, sh| sofa(p, dt, sh)));
     v.push(ent("lib:sofa-3", "seating", F, Wall, wd(2.10, 0.90), |p, dt, _, sh| sofa(p, dt, sh)));
     v.push(ent("lib:sessel", "seating", F, Wall, wd(0.80, 0.80), |p, dt, _, sh| armchair(p, dt, sh)));
@@ -938,9 +1016,20 @@ fn build() -> Vec<Builtin> {
     // Aussenraum
     let mut car_params = wd(1.80, 4.70);
     car_params.push(flag("field", 1.0));
-    v.push(ent("lib:auto", "outdoor", O, Center, car_params, |p, dt, _, sh| car(p, dt, sh)));
+    car_params.push(len("h", 1.45, 1.0, 2.2));
+    v.push(ent("lib:auto", "outdoor", O, Center, car_params, |p, dt, _, sh| car(p, dt, sh)).with3d(f3::car));
     v.push(ent("lib:parkfeld", "outdoor", O, Center, wd(2.50, 5.00), |p, dt, _, sh| parking(p, dt, sh)));
-    v.push(ent("lib:velo", "outdoor", O, Center, wd(0.60, 1.80), |p, dt, _, sh| bike(p, dt, sh)));
+    let mut bike_params = wd(0.60, 1.80);
+    bike_params.push(len("h", 1.05, 0.7, 1.4));
+    v.push(ent("lib:velo", "outdoor", O, Center, bike_params, |p, dt, _, sh| bike(p, dt, sh)).with3d(f3::bike));
+    let mut bench_params = wd(1.80, 0.50);
+    bench_params.push(len("h", 0.45, 0.3, 0.6));
+    v.push(ent("lib:sitzbank", "outdoor", O, Center, bench_params, |p, dt, _, sh| bench_2d(p, dt, sh)).with3d(f3::bench));
+    for (id, d, walking) in [("lib:person-stehend", 0.35, false), ("lib:person-gehend", 0.70, true)] {
+        let mut params = wd(0.50, d);
+        params.push(len("h", f3::PERSON_H, 0.5, 2.2));
+        v.push(ent(id, "outdoor", O, Center, params, |p, dt, _, sh| person_2d(p, dt, sh)).with3d(if walking { f3::person_walking } else { f3::person_standing }));
+    }
     let mut wc_circle = ent("lib:wendekreis", "outdoor", O, Center, vec![len("w", 1.5, 0.5, 3.0)], |p, dt, _, sh| wheelchair_circle(p, dt, sh));
     wc_circle.def.round = true;
     v.push(wc_circle);
@@ -1023,6 +1112,9 @@ mod tests {
         for o in all() {
             let d = o.def();
             // Objekte ohne Zusatzgeometrie über das Mass hinaus (Stühle, Parkfeld, Spiegel, Scheinwerfer).
+            if d.id.starts_with("lib:person-") {
+                continue; // Symbol = Schultern; die Tiefe `d` ist der Schrittraum fürs 3D
+            }
             if d.id.contains("tisch-") && !d.id.ends_with("-leer") && d.id != "lib:tisch-buero" || d.id == "lib:tisch-buero" {
                 continue;
             }

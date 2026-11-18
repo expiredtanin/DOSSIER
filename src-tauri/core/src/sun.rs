@@ -1168,6 +1168,8 @@ fn collect(p: &Project, k: [f64; 2], cut: Option<f64>, ground: Option<&Ground>) 
         prisms.push((Prism { footprint: g.trunk_ring(8), z_bottom: g.base, z_top: g.trunk_top() }, vec![]));
         clouds.push(g.crown_points());
     }
+    // [253] Entourage (Person, Auto, Bank …): je Teilnetz eine Wolke.
+    clouds.extend(crate::furniture_3d::clouds(p));
     // Nur zur Sonne gewandte Dachflächen (Aussennormale): durch sie verlässt jeder Strahl den Körper.
     roof_faces.retain(|f| f.first().is_some_and(|r| {
         let n = newell(r);

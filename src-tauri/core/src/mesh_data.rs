@@ -506,6 +506,17 @@ pub(crate) fn collect_scene(src: &Project, opt: &MeshOptions) -> Result<SceneDat
         groups.push(g);
     }
     p.trees = trees;
+    // [253] Entourage: je Bibliotheksobjekt mit 3D-Netz eine Gruppe.
+    let drawings = std::mem::take(&mut p.drawings2d);
+    for d in drawings.iter().filter(|d| matches!(d.geom, Drawing2DGeom::Libobj { .. })) {
+        let mut g = Group::new(format!("Entourage_{}", sanitize_name(&d.id)), "entourage", &d.id, level_of(Some(&d.level_id)));
+        p.drawings2d = vec![d.clone()];
+        add_meshes(&mut g, &mut mats, &model3d::emit_entourage(&p), "Entourage");
+        if !g.prims.is_empty() {
+            groups.push(g);
+        }
+    }
+    p.drawings2d = drawings;
     // [279] Geländer: je Geländer eine Gruppe.
     let railings = p.railings.take();
     for r in railings.as_deref().unwrap_or(&[]) {

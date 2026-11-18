@@ -288,6 +288,21 @@ const SITUATION_HIDDEN = ["00", "07", "20", "21", "22", "25", "30", "35", "40", 
 const LEVEL_VIS: Record<string, boolean> = Object.fromEntries(LEVELS.map((l) => [l.id, true]));
 const pxPerMeterAt = (scale: number) => Math.round(((96 / 25.4) * 1000) / scale * 100) / 100;
 
+/** [253] Entourage für die Bilder (3D-Netze der Objektbibliothek, Klasse „24 Fahrzeuge & Freiflächen"): drei Personen, ein Auto am Ostrand, Velo und Bank im Süden. */
+function entourage(): Drawing2D[] {
+  const lib = (id: string, libId: string, at: Vec2, rotation: number, params?: Record<string, number>): Drawing2D => ({
+    id, type: "drawing2d", levelId: "eg", categoryCode: "24", geom: { shape: "libobj", libId, at, rotation, ...(params ? { params } : {}), seed: 1 },
+  });
+  return [
+    lib("ent-person-1", "lib:person-stehend", P(5.2, -3.4), 0.4),
+    lib("ent-person-2", "lib:person-stehend", P(6.1, -3.0), 3.4, { h: 1.62 }),
+    lib("ent-person-3", "lib:person-gehend", P(27.0, 3.4), -Math.PI / 2),
+    lib("ent-auto", "lib:auto", P(25.2, 9.6), 0, { field: 0 }),
+    lib("ent-velo", "lib:velo", P(12.4, -3.2), Math.PI / 2),
+    lib("ent-bank", "lib:sitzbank", P(16, -3.4), 0),
+  ];
+}
+
 /** Wettbewerb — neues Projekt (braucht den geladenen Kern). */
 export function buildWettbewerbSampleProject(): Project {
   stampSeq = 0;
@@ -305,7 +320,7 @@ export function buildWettbewerbSampleProject(): Project {
     doorTypes: DOOR_TYPES,
     stairTypes: STAIR_TYPES,
     drawingLevels: LEVELS,
-    layers: sampleProject.layers,
+    layers: [...sampleProject.layers, { code: "24", name: "Fahrzeuge & Freiflächen", color: "#4a4a4a", lw: 0.13, visible: true, locked: false }],
     scaleLineWeights: true,
     walls,
     openings,
@@ -315,7 +330,7 @@ export function buildWettbewerbSampleProject(): Project {
     railings,
     rooms: [],
     units: units(),
-    drawings2d: cadastre(),
+    drawings2d: [...cadastre(), ...entourage()],
     context: [neighbours()],
     // Raumprogramm des Wettbewerbs (Soll); die Räume im Modell liefern das Ist.
     roomProgram: [

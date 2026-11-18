@@ -192,6 +192,18 @@ pub fn emit_trees(p: &Project) -> Vec<RMesh> {
     out
 }
 
+/// [253] Entourage: Bibliotheksobjekte mit 3D-Netz (Person, Auto, Velo, Bank, Tische mit Stühlen, `furniture_3d.rs`) als
+/// Meshes, je Teilnetz eines; Herkunft = die Zeichnung (Klasse und Ausblenden wie die der Zeichnung, [180]).
+pub fn emit_entourage(p: &Project) -> Vec<RMesh> {
+    let mut out = Vec::new();
+    for (i, parts) in crate::furniture_3d::placed(p) {
+        for m in parts {
+            out.push(RMesh { crease_angle: None, positions: m.positions, indices: m.indices, kind: "extrusion", color: m.color, vertex_colors: None, material_index: None, owner: Owner::Drawing(i) });
+        }
+    }
+    out
+}
+
 /// [149] Bäume als Welt-Dreiecke (Stamm + Krone, wie [`emit_trees`]) für den 3D-Pick.
 pub fn pick_trees(p: &Project) -> Vec<PickTree> {
     let trees = p.trees.as_deref().unwrap_or(&[]);

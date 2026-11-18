@@ -6,7 +6,7 @@
 //! und wandern mit dem Bauteil. Kontext (Gelände, Importe) bleibt stehen. Nur das 3D-Modell, die
 //! Pick-Geometrie und die Hervorhebung verschieben sich — Plan, Schnitt und Ansicht nie.
 
-use crate::model::{DrawingLevelKind, Project};
+use crate::model::{Drawing2DGeom, DrawingLevelKind, Project};
 use crate::model3d::{self, Parts, PickGeometry, RMesh, RRoofLayer, RSlab, RWall};
 use std::collections::HashMap;
 
@@ -185,6 +185,10 @@ pub fn parts_filtered(p: &Project, layered: bool, detail: f64, for_section: bool
         };
         out.column_meshes.extend(shifted(kept(&q, model3d::emit_columns(&q)), dz, shift_mesh));
         out.column_meshes.extend(shifted(kept(&q, model3d::emit_trees(&q)), dz, shift_mesh));
+        // [253] Entourage: die Bibliotheksobjekte des Geschosses (`q.drawings2d` ist sonst leer).
+        q.drawings2d = p.drawings2d.iter().filter(|d| matches!(d.geom, Drawing2DGeom::Libobj { .. }) && pick(&d.level_id)).cloned().collect();
+        out.column_meshes.extend(shifted(kept(&q, model3d::emit_entourage(&q)), dz, shift_mesh));
+        q.drawings2d.clear();
         out.column_meshes.extend(shifted(kept(&q, model3d::emit_railings(&q)), dz, shift_mesh));
         out.stair_meshes.extend(shifted(kept(&q, model3d::emit_stair_meshes(&q)), dz, shift_mesh));
         // Handläufe folgen der Treppe, die Absturzsicherung der Decke mit dem Loch (Geschoss `g`, [155]).
