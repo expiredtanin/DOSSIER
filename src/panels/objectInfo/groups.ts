@@ -21,6 +21,7 @@ export type InfoGroupId =
   | "roomStamp"
   | "extrudedSolid"
   | "column"
+  | "beam"
   | "detailRef"
   | "dimRefs"
   | "dimText"
@@ -45,6 +46,7 @@ export const INFO_GROUP_TITLE: Record<InfoGroupId, TranslationKey> = {
   roomStamp: "roomStamp.title",
   extrudedSolid: "objinfo.extrudedSolid.section",
   column: "objinfo.column.section",
+  beam: "objinfo.beam.section",
   detailRef: "objinfo.detailRef.section",
   dimRefs: "objinfo.dimRefs.section",
   dimText: "objinfo.dimText.section",
@@ -89,6 +91,7 @@ export function infoGroups(c: InfoGroupContext): InfoGroupId[] {
   if (sel.room) out.push("room", "roomStamp");
   if (sel.extrudedSolid) out.push("extrudedSolid");
   if (sel.column) out.push("column");
+  if (sel.beam) out.push("beam");
   if (sel.detailRef) out.push("detailRef");
   if (sel.dimRefs) out.push("dimRefs");
   if (sel.dimTextMoved) out.push("dimText");

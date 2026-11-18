@@ -28,6 +28,97 @@ export type Align = "left" | "center" | "right" | "justify";
 export type AttributeSource = "layer" | "object";
 
 /**
+ * [280] Ein Träger/Unterzug (Beam) — geschossgebundenes Tragwerk-Bauteil (Kategorie „50"): Achse
+ * `start` → `end` im Grundriss, rechteckiger Querschnitt `width` × `height` (Aussenmasse; `profileName`
+ * ist nur ein Text wie „HEB 200", gezeichnet wird das Rechteck). Oberkante = Unterkante der Decke darüber
+ * (höchstens die Geschoss-Oberkante) plus `topOffset`; bündig (0) ⇒ Unterzug. Wird wie eine Stütze
+ * ausgewertet (`Beam::as_column`), liegt aber in `Project.beams`; im Auswahlkanal der Stützen.
+ */
+export type Beam = {
+  id: string;
+  type: "beam";
+  /** Zugehörige Zeichnungsebene (Geschoss). */
+  floorId: string;
+  /** Grafik-Kategorie (Ebene), z. B. "50" für Tragwerk. */
+  categoryCode: string;
+  /**
+   * [201] IFC-GlobalId des Quell-Bauteils (IFC-Import); der IFC-Export schreibt sie zurück, damit
+   * die Rundreise dieselben GUIDs behält. Kopien (Einfügen, Kopieren, Reihe, Wand teilen) tragen sie NICHT.
+   */
+  ifcGlobalId?: string;
+  /** Objekt-Sperre, analog `Wall.locked`. */
+  locked?: boolean;
+  /** Achse: Anfangspunkt im Grundriss (Meter). */
+  start: Vec2;
+  /** Achse: Endpunkt im Grundriss (Meter). */
+  end: Vec2;
+  /** Querschnittsbreite (quer zur Achse, Meter, > 0). */
+  width: number;
+  /** Querschnittshöhe (Meter, > 0), nach unten ab der Oberkante. */
+  height: number;
+  /**
+   * Profilname als Text (z. B. „HEB 200", „BSH 20/40"); ohne Wirkung auf die Geometrie, geht in Liste und IFC.
+   */
+  profileName?: string;
+  /**
+   * Versatz der Oberkante gegenüber der Unterkante der Decke darüber (Meter, + nach oben in die Decke).
+   * Fehlt ⇒ 0: bündig, Unterzug.
+   */
+  topOffset?: number;
+  /** Optionales tragendes Bauteil (Component) für Poché/3D-Farbe/Schraffur. */
+  componentId?: string;
+  /**
+   * Optionale Übersteuerung der Strich-/Umrandungsfarbe; sonst gilt die
+   * Kategorie-Farbe.
+   */
+  color?: string;
+  /** Stift-Kopplung von `color` (s. `Component.colorPenId`-Doku). */
+  colorPenId?: string;
+  /**
+   * Attribut-Override der Muster-/Schraffurfarbe (Vordergrund) DIESER Stütze.
+   * `undefined` = „Nach System" (erben → Component.foreground), analog `Wall.
+   * foreground`.
+   */
+  foreground?: string;
+  /**
+   * Attribut-Override der Füllfarbe (Hintergrund/Poché) DIESER Stütze.
+   * `undefined` = „Nach System" (neutrale SIA-Poché HATCH_INK/HATCH_PAPER je
+   * nach Schraffur-Muster), analog `Wall.background`.
+   */
+  background?: string;
+  /** Stift-Kopplung von `foreground` (s. `Component.foregroundPenId`-Doku). */
+  foregroundPenId?: string;
+  /** Stift-Kopplung von `background`, analog {@link Wall.foregroundPenId}. */
+  backgroundPenId?: string;
+  /**
+   * Attribut-Override der Strichstärke (mm Papier) DIESER Stütze. `undefined`
+   * = „Nach System" (erben → `strokeWeightSource`), analog `Wall.strokeWeight`.
+   */
+  strokeWeight?: number;
+  /**
+   * Attribut-Override der Schnitt-Schraffur (Hatch Manager) DIESER Stütze.
+   * `undefined` = „Nach System" (erben → `hatchSource`), analog `Wall.hatchId`.
+   */
+  hatchId?: string;
+  /**
+   * Quelle des Vordergrunds, wenn kein explizites `foreground` gesetzt ist — analog `Wall.foregroundSource`.
+   */
+  foregroundSource?: AttributeSource;
+  /** Quelle des Hintergrunds, analog {@link Beam.foregroundSource}. */
+  backgroundSource?: AttributeSource;
+  /** Quelle der Strichstärke, analog {@link Beam.foregroundSource}. */
+  strokeWeightSource?: AttributeSource;
+  /** Quelle der Schraffur, analog {@link Beam.foregroundSource}. */
+  hatchSource?: AttributeSource;
+  /** [271] Umbau: Status (Bestand, Abbruch, Neu) und Etappe. Fehlt ⇒ Bestand. */
+  renovation?: Renovation;
+  /**
+   * [272] Variante, zu der das Element gehört (`Project.designOptionSets`). Fehlt ⇒ Hauptmodell (immer sichtbar).
+   */
+  designOption?: DesignOptionRef;
+};
+
+/**
  * Wiederverwendbares 2D-Symbol (Möbelblock, Sanitär-/Normsymbol, Nordpfeil
  * u. Ä.) — s. `Project.blockDefs` + `Drawing2DGeom["block"]`. `geom2d` ist
  * LOKALE Geometrie (Ursprung = Einfügepunkt der Instanz, Winkel 0 = wie
@@ -3247,6 +3338,8 @@ export type Project = {
    * Projekte/Tests ohne `columns` gültig bleiben (Default: leer behandeln).
    */
   columns?: Array<Column>;
+  /** [280] Träger/Unterzüge, siehe {@link Beam}. Optional wie `columns`. */
+  beams?: Array<Beam>;
   /**
    * Bäume ([149]) — eigene Objekte mit Stamm, Krone und Höhe, siehe {@link Tree}. Optional, damit
    * bestehende Projekte ohne `trees` gültig bleiben (Default: leer behandeln).

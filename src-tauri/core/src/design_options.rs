@@ -13,7 +13,7 @@ use serde_json::{json, Map, Value};
 use std::collections::{BTreeMap, HashSet};
 
 /// Listen, deren Elemente eine Variante tragen können (Wurzel-Schlüssel).
-pub const COLLECTIONS: [&str; 9] = ["walls", "openings", "ceilings", "roofs", "stairs", "columns", "extrudedSolids", "rooms", "drawings2d"];
+pub const COLLECTIONS: [&str; 10] = ["walls", "openings", "ceilings", "roofs", "stairs", "columns", "beams", "extrudedSolids", "rooms", "drawings2d"];
 
 /// Höchstens so viele Kombinationen im Vergleich (Kreuzprodukt der Sätze).
 pub const MAX_COMPARE: usize = 24;
@@ -54,6 +54,7 @@ pub fn active(p: &Project) -> bool {
         || p.roofs.iter().flatten().any(|x| known(x.design_option.as_ref()))
         || p.stairs.iter().flatten().any(|x| known(x.design_option.as_ref()))
         || p.columns.iter().flatten().any(|x| known(x.design_option.as_ref()))
+        || p.beams.iter().flatten().any(|x| known(x.design_option.as_ref()))
         || p.extruded_solids.iter().flatten().any(|x| known(x.design_option.as_ref()))
         || p.rooms.iter().flatten().any(|x| known(x.design_option.as_ref()))
         || p.drawings2d.iter().any(|x| known(x.design_option.as_ref()))
@@ -766,6 +767,7 @@ pub fn info(p: &Project) -> Value {
     p.roofs.iter().flatten().for_each(|x| add(x.design_option.as_ref()));
     p.stairs.iter().flatten().for_each(|x| add(x.design_option.as_ref()));
     p.columns.iter().flatten().for_each(|x| add(x.design_option.as_ref()));
+    p.beams.iter().flatten().for_each(|x| add(x.design_option.as_ref()));
     p.extruded_solids.iter().flatten().for_each(|x| add(x.design_option.as_ref()));
     p.rooms.iter().flatten().for_each(|x| add(x.design_option.as_ref()));
     p.drawings2d.iter().for_each(|x| add(x.design_option.as_ref()));

@@ -969,6 +969,36 @@ fn column_ops(v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
     )
 }
 
+/// [280] Träger: Achse `pts[0]` → `pts[1]` auf dem aktiven Geschoss, Klasse „25“ (Stützen) bzw. „50“, Querschnitt `width` × `height`
+/// (Vorgabe 25 × 40 cm), Profilname nur als Text, Oberkante bündig an der Deckenunterkante (`topOffset` 0).
+fn beam_ops(p: &Project, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
+    let pts = pts_of(v, "pts");
+    let [a, b] = pts[..] else { return Vec::new() };
+    if seg_len(a, b) < EPS {
+        return Vec::new();
+    }
+    let num = |k: &str, d: f64| opt_n(v, k).filter(|x| *x > 0.0 && x.is_finite()).unwrap_or(d);
+    let mut f = vec![
+        ("id", s(&ids.next("beam"))),
+        ("type", s("beam")),
+        ("floorId", s(ctx.level)),
+        // Klasse „25“ (Stützen), sonst „50“ (Tragwerk), sonst die aktive (wie beim Erkennen von Stützen).
+        ("categoryCode", if has_category(p, "25") { s("25") } else { category_or(p, "50", ctx) }),
+        ("start", pv(a)),
+        ("end", pv(b)),
+        ("width", js_num(num("width", 0.25))),
+        ("height", js_num(num("height", 0.4))),
+    ];
+    let name = s_of(v, "profileName").trim();
+    if !name.is_empty() {
+        f.push(("profileName", s(name)));
+    }
+    if let Some(o) = opt_n(v, "topOffset").filter(|x| x.is_finite() && x.abs() > 1e-9) {
+        f.push(("topOffset", js_num(o)));
+    }
+    add_op("beams", vec![obj(f)])
+}
+
 /// [149] Baum am Punkt `at`: Ebene „13" (Bäume), falls vorhanden, sonst die aktive; Abmessungen, Form,
 /// Bestand und Laub/Nadel aus den Werkzeug-Vorgaben (fehlende/unsinnige Werte: Vorgaben aus `tree.rs`).
 fn tree_ops(p: &Project, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
@@ -1155,6 +1185,7 @@ pub fn ops(root: &Map<String, Value>, p: &Project, v: &Value) -> Option<Vec<Op>>
         "opening" => opening_ops(root, p, v, &ctx, ids),
         "roof" => roof_ops(p, v, &ctx, ids),
         "column" => column_ops(v, &ctx, ids),
+        "beam" => beam_ops(p, v, &ctx, ids),
         "tree" => tree_ops(p, v, &ctx, ids),
         "circlesToTrees" => circles_to_trees_ops(root, p, v, &ctx, ids),
         "extrude" => extrude_ops(root, v, &ctx, ids),
@@ -1237,6 +1268,18 @@ pub fn preview_req(root: &Map<String, Value>, project: &Project, req: &Req, pts:
         "column" => {
             if let Some(at) = pts.first() {
                 out.poly(&column_footprint(*at, v));
+            }
+        }
+        "beam" => {
+            // [280] Rechteck um die Achse vom ersten Punkt zum Cursor.
+            if let [a, b] = pts[..] {
+                let w = opt_n(v, "width").filter(|x| *x > 0.0 && x.is_finite()).unwrap_or(0.25);
+                let beam = crate::model::Beam { start: crate::model::Vec2 { x: a.0, y: a.1 }, end: crate::model::Vec2 { x: b.0, y: b.1 }, width: w, ..Default::default() };
+                let fp = beam.footprint();
+                if fp.len() == 4 {
+                    out.poly(&fp.iter().map(|q| (q.x, q.y)).collect::<Vec<_>>());
+                    out.line(a, b);
+                }
             }
         }
         "tree" => {

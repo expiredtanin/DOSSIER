@@ -231,6 +231,21 @@ impl Project {
         heights::element(floor_base, self.resolve_anchor(c.bottom.as_ref()), self.resolve_anchor(c.top.as_ref()), c.height)
     }
 
+    /// [280] (UK, OK) eines Trägers (absolutes Z): Referenz ist die Unterkante der tiefsten Decke desselben
+    /// Geschosses, die die Achsmitte überdeckt (nicht in einer Aussparung), sonst die Geschoss-Oberkante;
+    /// dazu `topOffset` (Vorgabe 0 = bündig, Unterzug). UK = OK − Querschnittshöhe.
+    pub fn beam_vertical_extent(&self, b: &Beam) -> (f64, f64) {
+        let floor_top = self.floor(&b.floor_id).map_or(0.0, |f| f.base_elevation.unwrap_or(0.0) + f.floor_height.unwrap_or(0.0));
+        let mid = kernel2d::Vec2::new((b.start.x + b.end.x) / 2.0, (b.start.y + b.end.y) / 2.0);
+        let ring = |r: &[Vec2]| -> Vec<kernel2d::Vec2> { r.iter().map(|q| kernel2d::Vec2::new(q.x, q.y)).collect() };
+        let under = self.ceilings.iter().flatten().filter(|c| c.floor_id == b.floor_id && c.outline.len() >= 3).filter_map(|c| {
+            let (cb, ct) = self.ceiling_vertical_extent(c);
+            let covers = (ct > cb) && kernel2d::point_in_outline(mid, &ring(&c.outline)) && !c.openings.iter().flatten().any(|h| h.len() >= 3 && kernel2d::point_in_outline(mid, &ring(h)));
+            covers.then_some(cb)
+        });
+        heights::beam(floor_top, under, b.top_offset.unwrap_or(0.0), b.height)
+    }
+
     /// Traufhöhe (absolutes Z): `baseElevation`, sonst Oberkante des Geschosses (`roofBaseElevation`).
     pub fn roof_base_elevation(&self, r: &Roof) -> f64 {
         if let Some(b) = r.base_elevation {
@@ -340,6 +355,14 @@ pub mod heights {
         (zb, top.unwrap_or(zb + height))
     }
 
+    /// [280] Träger: Referenz = tiefste Deckenunterkante `under` (der Decken, die die Achsmitte überdecken) unterhalb
+    /// der Geschoss-Oberkante, sonst diese; OK = Referenz + Versatz, UK = OK − Querschnittshöhe.
+    pub fn beam(floor_top: f64, under: impl IntoIterator<Item = f64>, top_offset: f64, height: f64) -> (f64, f64) {
+        let reference = under.into_iter().filter(|z| z.is_finite()).fold(floor_top, f64::min);
+        let top = reference + if top_offset.is_finite() { top_offset } else { 0.0 };
+        (top - height, top)
+    }
+
     /// Decke: OK aus `top`, sonst Geschoss-Oberkante; UK aus `bottom`, sonst OK − Dicke (die Decke wächst
     /// nach unten; die Dicke wird nur dann bestimmt).
     pub fn ceiling(floor_top: f64, bottom: Option<f64>, top: Option<f64>, thickness: impl FnOnce() -> f64) -> (f64, f64) {
@@ -362,6 +385,66 @@ pub mod heights {
             assert_eq!(ceiling(2.6, Some(2.2), None, || panic!("Dicke nicht gebraucht")), (2.2, 2.6));
             assert_eq!(ceiling(2.6, None, Some(3.0), || 0.2), (2.8, 3.0));
             assert_eq!(floor_anchor(2.8, 0.1), 2.8 + 0.1);
+            // Träger: bündig an der tiefsten Deckenunterkante, Versatz nach oben.
+            let near = |a: (f64, f64), b: (f64, f64)| (a.0 - b.0).abs() < 1e-9 && (a.1 - b.1).abs() < 1e-9;
+            assert!(near(beam(2.6, [2.35, 2.5], 0.0, 0.4), (1.95, 2.35)));
+            assert!(near(beam(2.6, [], 0.0, 0.4), (2.2, 2.6)));
+            assert!(near(beam(2.6, [2.35], 0.1, 0.4), (2.05, 2.45)));
+        }
+    }
+}
+
+impl Beam {
+    /// [280] Grundriss-Rechteck des Trägers: Achse ± halbe Breite (leer bei Länge 0).
+    pub fn footprint(&self) -> Vec<Vec2> {
+        let (dx, dy) = (self.end.x - self.start.x, self.end.y - self.start.y);
+        let l = dx.hypot(dy);
+        if !(l > 1e-9) || !l.is_finite() {
+            return Vec::new();
+        }
+        let (nx, ny) = (-dy / l * self.width / 2.0, dx / l * self.width / 2.0);
+        vec![
+            Vec2 { x: self.start.x + nx, y: self.start.y + ny },
+            Vec2 { x: self.end.x + nx, y: self.end.y + ny },
+            Vec2 { x: self.end.x - nx, y: self.end.y - ny },
+            Vec2 { x: self.start.x - nx, y: self.start.y - ny },
+        ]
+    }
+
+    /// [280] Der Träger als gleichwertige Stütze: Rechteck-Profil Länge × Breite um die Achsmitte, gedreht auf die
+    /// Achsrichtung, Höhenlage als feste Anker. Alle Ableitungen (Grundriss, Schnitt, Ansicht, 3D, Griffe …)
+    /// laufen so über den Stützen-Code; die Kennung bleibt die des Trägers.
+    pub fn as_column(&self, p: &Project) -> Column {
+        let (zb, zt) = p.beam_vertical_extent(self);
+        let (dx, dy) = (self.end.x - self.start.x, self.end.y - self.start.y);
+        Column {
+            id: self.id.clone(),
+            r#type: "beam".into(),
+            floor_id: self.floor_id.clone(),
+            category_code: self.category_code.clone(),
+            locked: self.locked,
+            position: Vec2 { x: (self.start.x + self.end.x) / 2.0, y: (self.start.y + self.end.y) / 2.0 },
+            profile: ColumnProfile::Rect { width: dx.hypot(dy), depth: self.width },
+            rotation: crate::jsnum::atan2(dy, dx),
+            height: zt - zb,
+            component_id: self.component_id.clone(),
+            bottom: Some(VerticalAnchor::Custom { z: zb }),
+            top: Some(VerticalAnchor::Custom { z: zt }),
+            color: self.color.clone(),
+            color_pen_id: self.color_pen_id.clone(),
+            foreground: self.foreground.clone(),
+            background: self.background.clone(),
+            foreground_pen_id: self.foreground_pen_id.clone(),
+            background_pen_id: self.background_pen_id.clone(),
+            stroke_weight: self.stroke_weight,
+            hatch_id: self.hatch_id.clone(),
+            foreground_source: self.foreground_source.clone(),
+            background_source: self.background_source.clone(),
+            stroke_weight_source: self.stroke_weight_source.clone(),
+            hatch_source: self.hatch_source.clone(),
+            renovation: self.renovation.clone(),
+            design_option: self.design_option.clone(),
+            ..Default::default()
         }
     }
 }

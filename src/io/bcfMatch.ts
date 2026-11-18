@@ -59,6 +59,7 @@ export function buildGuidIndex(project: Project): Map<string, Target> {
   for (const c of project.ceilings ?? []) add("slab", "ceilingIds", c.id, c.ifcGlobalId);
   for (const r of project.roofs ?? []) add("roof", "roofIds", r.id, r.ifcGlobalId);
   for (const c of project.columns ?? []) add("column", "columnIds", c.id, c.ifcGlobalId);
+  for (const b of project.beams ?? []) add("beam", "columnIds", b.id, b.ifcGlobalId);
   for (const s of project.stairs ?? []) add("stair", "stairIds", s.id, s.ifcGlobalId);
   for (const e of project.extrudedSolids ?? []) add("extrusion", "extrudedSolidIds", e.id, e.ifcGlobalId);
   for (const r of project.rooms ?? []) add("space", "roomIds", r.id, r.ifcGlobalId);
@@ -106,7 +107,9 @@ export function selectionToGuids(project: Project, sel: BcfSelection): string[] 
   g("wall", sel.wallIds, project.walls);
   g("slab", sel.ceilingIds, project.ceilings);
   g("roof", sel.roofIds, project.roofs);
-  g("column", sel.columnIds, project.columns);
+  const isBeam = (id: string) => (project.beams ?? []).some((b) => b.id === id);
+  g("column", sel.columnIds.filter((id) => !isBeam(id)), project.columns);
+  g("beam", sel.columnIds.filter(isBeam), project.beams); // [280]
   g("stair", sel.stairIds, project.stairs);
   g("extrusion", sel.extrudedSolidIds, project.extrudedSolids);
   g("space", sel.roomIds, project.rooms);

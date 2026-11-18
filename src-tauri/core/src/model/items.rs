@@ -36,6 +36,7 @@ impl Project {
             "context" => put_opt(&mut self.context, i, v),
             "extrudedSolids" => put_opt(&mut self.extruded_solids, i, v),
             "columns" => put_opt(&mut self.columns, i, v),
+            "beams" => put_opt(&mut self.beams, i, v),
             "trees" => put_opt(&mut self.trees, i, v),
             "cameras" => put_opt(&mut self.cameras, i, v),
             "groups" => put_opt(&mut self.groups, i, v),

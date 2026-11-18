@@ -602,6 +602,7 @@ pub(crate) fn edge_categories(p: &Project, walls: &[Option<&Wall>], slabs: &[ban
             bands::SlabOwner::Ceiling(c, _) => &c.category_code,
             bands::SlabOwner::Stair(st) => &st.category_code,
             bands::SlabOwner::Column(c) => &c.category_code,
+            bands::SlabOwner::Beam(c) => &c.category_code,
             bands::SlabOwner::None => continue,
         };
         m.insert((Kind::Slab, i), code.clone());
@@ -628,6 +629,7 @@ pub(crate) fn edge_ids(p: &Project, walls: &[Option<&Wall>], slabs: &[bands::Sla
             bands::SlabOwner::Ceiling(c, _) => &c.id,
             bands::SlabOwner::Stair(st) => &st.id,
             bands::SlabOwner::Column(c) => &c.id,
+            bands::SlabOwner::Beam(c) => &c.id,
             bands::SlabOwner::None => continue,
         };
         m.insert((Kind::Slab, i), id.clone());

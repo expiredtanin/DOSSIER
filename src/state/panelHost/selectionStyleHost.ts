@@ -23,7 +23,7 @@ function singleTransformSel(kind: string, id: string): TransformSelection | null
   if (kind === "wall") return { wallIds: [id], drawingId: null };
   if (kind === "drawing2d") return { wallIds: [], drawingId: id };
   if (kind === "extrudedSolid") return { wallIds: [], drawingId: null, extrudedSolidId: id };
-  if (kind === "column") return { wallIds: [], drawingId: null, columnId: id };
+  if (kind === "column" || kind === "beam") return { wallIds: [], drawingId: null, columnId: id };
   if (kind === "ceiling") return { wallIds: [], drawingId: null, ceilingIds: [id] };
   // Dach: Move geht (Umriss verschiebt sich), Rotate no-opt bewusst (s.
   // TransformSelection.roofIds) — der Host-Aufruf degradiert dafür von
@@ -367,6 +367,9 @@ export function buildSelectionStyleHost(c: FlatHostOpts) {
         case "column":
           applyChange((p) => patchItem(p, "columns", id, { categoryCode: code }));
           break;
+        case "beam": // [280]
+          applyChange((p) => patchItem(p, "beams", id, { categoryCode: code }));
+          break;
         // [181] Gelände-/Umgebungs-Elemente (Netzkörper, Gelände, Höhenlinien, Luftbild, Baugrube) wie jedes Element.
         case "contextObject":
           applyChange((p) => patchItem(p, "context", id, { categoryCode: code }));
@@ -393,6 +396,9 @@ export function buildSelectionStyleHost(c: FlatHostOpts) {
           break;
         case "column":
           applyChange((p) => patchItem(p, "columns", id, { floorId: levelId }));
+          break;
+        case "beam": // [280]
+          applyChange((p) => patchItem(p, "beams", id, { floorId: levelId }));
           break;
         default: break; // opening: Ebene kommt aus der Wirts-Wand
       }

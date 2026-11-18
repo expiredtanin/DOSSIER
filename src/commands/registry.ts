@@ -13,6 +13,7 @@ import { ceilingCommand } from "./cmds/ceiling";
 import { openingCommand, fensterCommand, tuerCommand } from "./cmds/opening";
 import { stairCommand } from "./cmds/stair";
 import { columnCommand } from "./cmds/column";
+import { traegerCommand } from "./cmds/traeger";
 import { circlesToTreesCommand, treeCommand } from "./cmds/tree";
 import { roofCommand } from "./cmds/roof";
 import { solidCommand } from "./cmds/solid";
@@ -93,6 +94,7 @@ export const COMMANDS: Record<string, Command> = {
   tuer: tuerCommand,
   stair: stairCommand,
   column: columnCommand,
+  traeger: traegerCommand,
   tree: treeCommand,
   circlestotrees: circlesToTreesCommand,
   roof: roofCommand,
@@ -194,6 +196,9 @@ export const ALIASES: Record<string, string> = {
   treppe: "stair",
   tp: "stair",
   stuetze: "column",
+  träger: "traeger",
+  unterzug: "traeger",
+  beam: "traeger",
   stütze: "column",
   baum: "tree",
   kreiseinbaeume: "circlestotrees",

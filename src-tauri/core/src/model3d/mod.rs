@@ -100,6 +100,8 @@ pub enum SlabSource {
     Stair { index: usize },
     /// [141] Index in `Project::columns` (Stützen-Prisma, je Höhenabschnitt von [`column_pieces`]).
     Column { index: usize },
+    /// [280] Index in `Project::beams` (Träger-Prisma wie eine Stütze).
+    Beam { index: usize },
 }
 
 /// Ein rohes Dreiecks-Mesh (`RMesh`).

@@ -54,7 +54,8 @@ pub fn column_pieces(p: &Project, col: &Column) -> Vec<(Vec<Vec2>, f64, f64)> {
     let fp = column_footprint(col);
     let (zb, zt) = p.column_vertical_extent(col);
     let full = vec![(fp.clone(), zb, zt)];
-    if fp.len() < 3 || !(zt > zb) {
+    // [280] Träger (als Stütze, `type == "beam"`) lassen die Wände ganz.
+    if fp.len() < 3 || !(zt > zb) || col.r#type == "beam" {
         return full;
     }
     let mut clips: Vec<(Vec<Vec2>, f64, f64)> = Vec::new();
@@ -121,19 +122,26 @@ pub(super) fn column_mesh(p: &Project, col: &Column) -> Option<(Vec<f64>, Vec<u3
     (!m.is_empty()).then_some((m.positions, m.indices))
 }
 
-/// [141] Stützen als lotrechte Prismen-Platten (Schnitt, Ansicht): je Höhenabschnitt der Querschnitt aus
-/// [`column_pieces`], Herkunft `SlabSource::Column`.
+/// [280] Träger als Stützen (Rechteck-Prisma über der Achse), mit Index in `Project::beams`.
+fn beam_columns(p: &Project) -> impl Iterator<Item = (usize, Column)> + '_ {
+    p.beams.as_deref().unwrap_or(&[]).iter().enumerate().map(|(i, b)| (i, b.as_column(p)))
+}
+
+/// [141] Stützen und [280] Träger als lotrechte Prismen-Platten (Schnitt, Ansicht): je Höhenabschnitt der
+/// Querschnitt aus [`column_pieces`], Herkunft `SlabSource::Column` bzw. `SlabSource::Beam`.
 pub fn column_slabs(p: &Project) -> Vec<RSlab> {
     let mut out = Vec::new();
-    for (index, c) in p.columns.as_deref().unwrap_or(&[]).iter().enumerate() {
+    let columns = p.columns.as_deref().unwrap_or(&[]).iter().enumerate().map(|(i, c)| (SlabSource::Column { index: i }, std::borrow::Cow::Borrowed(c)));
+    let beams = beam_columns(p).map(|(i, c)| (SlabSource::Beam { index: i }, std::borrow::Cow::Owned(c)));
+    for (source, c) in columns.chain(beams) {
         if !(c.height > 0.0) {
             continue;
         }
         let color = c.component_id.as_deref().and_then(|id| p.component(id)).map_or(COLUMN_RGB, |k| hex_to_rgb(&k.color, COLUMN_RGB));
-        for (foot, z_bottom, z_top) in column_pieces(p, c) {
+        for (foot, z_bottom, z_top) in column_pieces(p, &c) {
             let outline: Vec<RVec2> = foot.iter().map(|q| [q.x, q.y]).collect();
             if z_top - z_bottom > 1e-6 && outline.iter().flatten().all(|v| v.is_finite()) {
-                out.push(RSlab { outline, z_bottom, z_top, color, ceiling_id: c.id.clone(), hatch: None, cut: None, monolith: None, source: SlabSource::Column { index } });
+                out.push(RSlab { outline, z_bottom, z_top, color, ceiling_id: c.id.clone(), hatch: None, cut: None, monolith: None, source });
             }
         }
     }
@@ -156,6 +164,15 @@ pub fn emit_columns(p: &Project) -> Vec<RMesh> {
         // [169] Runde Stütze glatt schattiert (Mantel ohne Facetten), eckige kantig.
         let crease_angle = matches!(col.profile, ColumnProfile::Round { .. }).then_some(COLUMN_CREASE_DEG);
         out.push(RMesh { crease_angle, positions, indices, kind: "extrusion", color, vertex_colors: None, material_index: None, owner: Owner::Column(ci) });
+    }
+    // [280] Träger: Prisma über der Achse, Farbe des Bauteils.
+    for (bi, col) in beam_columns(p) {
+        if col.height <= 0.0 {
+            continue;
+        }
+        let Some((positions, indices)) = column_mesh(p, &col) else { continue };
+        let color = col.component_id.as_deref().and_then(|id| p.component(id)).map_or(COLUMN_RGB, |c| hex_to_rgb(&c.color, COLUMN_RGB));
+        out.push(RMesh { crease_angle: None, positions, indices, kind: "extrusion", color, vertex_colors: None, material_index: None, owner: Owner::Beam(bi) });
     }
     out
 }

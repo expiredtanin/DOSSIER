@@ -1342,6 +1342,42 @@ fn stuetze_mit_hoehenabschnitten() {
     assert!(ifc.contains("IFCCARTESIANPOINT((0.0,0.0,1.5))"), "Versatz des oberen Abschnitts");
 }
 
+/// [280] Träger: IfcBeam mit einer Extrusion über dem Grundriss-Rechteck, Material wie bei Stützen, GlobalId aus `beam/<id>`;
+/// IFC2x3 ohne PredefinedType (wie IfcColumn).
+#[test]
+fn traeger_als_ifc_beam() {
+    let mut b = mini();
+    b.n(&[REC_BEAM, -1.0]);
+    b.str("T1");
+    b.str("Träger 25×40 (HEB 200)");
+    b.pts(&[(0.0, 0.0), (4.0, 0.0), (4.0, 0.25), (0.0, 0.25)]);
+    b.n(&[1.95, 0.4]);
+    b.str("c1");
+    b.str("Beton");
+    b.ref_pset("Pset_BeamCommon", "Träger 25×40 (HEB 200)");
+    b.n(&[REC_END_COLUMNS]);
+    let ifc = build(&b).unwrap();
+    check_structure(&ifc);
+    assert_eq!(count(&ifc, "IFCBEAM"), 1);
+    assert!(first_line(&ifc, "IFCBEAM").contains(".BEAM."), "{}", first_line(&ifc, "IFCBEAM"));
+    assert_eq!(count(&ifc, "IFCEXTRUDEDAREASOLID"), 1);
+    assert!(ifc.contains("IFCCARTESIANPOINT((0.0,0.0,1.95))"), "Unterkante des Trägers");
+    assert_eq!(count(&ifc, "IFCRELASSOCIATESMATERIAL"), 1);
+    // IFC2x3: IfcBeam ohne PredefinedType am Ende (wie IfcColumn).
+    let mut c = mini_in(B::v2());
+    c.n(&[REC_BEAM, -1.0]);
+    c.str("T1");
+    c.str("Träger");
+    c.pts(&[(0.0, 0.0), (4.0, 0.0), (4.0, 0.25), (0.0, 0.25)]);
+    c.n(&[1.95, 0.4]);
+    c.n(&[-1.0, -1.0]);
+    c.no_psets();
+    c.n(&[REC_END_COLUMNS]);
+    let ifc = build(&c).unwrap();
+    assert_eq!(count(&ifc, "IFCBEAM"), 1);
+    assert!(first_line(&ifc, "IFCBEAM").ends_with(",$);"), "{}", first_line(&ifc, "IFCBEAM"));
+}
+
 /// [259] Dreieckssuppe → verbundenes Netz: gleiche Ecken (auf 6 Stellen) einmal, Dreieck mit doppelter Ecke fällt weg.
 #[test]
 fn netz_wird_verschweisst() {

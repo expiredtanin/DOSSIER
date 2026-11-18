@@ -422,7 +422,9 @@ pub fn subtract_voids(prims: Vec<Primitive>, p: &Project, cut_z: f64) -> Vec<Pri
     }
     // Maps wie in TS: bei doppelter id gewinnt der letzte Eintrag.
     let ceilings: HashMap<&str, &Ceiling> = p.ceilings.as_deref().unwrap_or(&[]).iter().map(|c| (c.id.as_str(), c)).collect();
-    let columns: HashMap<&str, &Column> = p.columns.as_deref().unwrap_or(&[]).iter().map(|c| (c.id.as_str(), c)).collect();
+    // [280] Träger als Stützen (virtuell).
+    let beam_cols: Vec<Column> = p.beams.as_deref().unwrap_or(&[]).iter().map(|b| b.as_column(p)).collect();
+    let columns: HashMap<&str, &Column> = p.columns.as_deref().unwrap_or(&[]).iter().chain(beam_cols.iter()).map(|c| (c.id.as_str(), c)).collect();
     let ring_of = |pts: &[Vec2]| -> Vec<[f64; 2]> { pts.iter().map(|q| [q.x, q.y]).collect() };
     // [G1] Abzugskörper beliebiger Form: Grundriss des Körpers im Höhenbereich des Bauteils.
     let cutters_for = |z0: f64, z1: f64| -> Vec<CutPoly> {

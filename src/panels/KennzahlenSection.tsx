@@ -41,7 +41,7 @@ function parseNum(text: string): number | null {
 
 /** [271] Trägt ein Bauteil oder Raum einen Umbau-Status (sonst bleibt die Wahl „Zustand“ verborgen)? */
 function hasRenovation(p: Project): boolean {
-  const lists = [p.walls, p.openings, p.ceilings, p.roofs, p.stairs, p.columns, p.extrudedSolids, p.rooms] as Array<readonly { renovation?: unknown }[] | undefined>;
+  const lists = [p.walls, p.openings, p.ceilings, p.roofs, p.stairs, p.columns, p.beams, p.extrudedSolids, p.rooms] as Array<readonly { renovation?: unknown }[] | undefined>;
   return lists.some((l) => (l ?? []).some((e) => e.renovation !== undefined));
 }
 

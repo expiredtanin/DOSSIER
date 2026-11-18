@@ -155,7 +155,11 @@ pub(super) fn face_overrides(p: &Project, faces: &mut [Face], v: RuleView) {
                 let layers = p.roof_layers(r);
                 surf_ov(p, v, "roof", &r.category_code, None, &layers, Some(0))
             }),
-            Role::Column => p.columns.as_deref().unwrap_or(&[]).iter().find(|c| c.id == id).and_then(|c| surf_ov(p, v, "column", &c.category_code, Some(&super::super::domains::column_label(c)), &[], None)),
+            Role::Column => match p.columns.as_deref().unwrap_or(&[]).iter().find(|c| c.id == id) {
+                Some(c) => surf_ov(p, v, "column", &c.category_code, Some(&super::super::domains::column_label(c)), &[], None),
+                // [280] Träger
+                None => p.beams.as_deref().unwrap_or(&[]).iter().find(|b| b.id == id).and_then(|b| surf_ov(p, v, "beam", &b.category_code, Some(&super::super::domains::column_label(&b.as_column(p))), &[], None)),
+            },
             Role::Mesh => p.context.as_deref().unwrap_or(&[]).iter().find_map(|c| match c {
                 ContextObject::ImportedMesh(m) if m.id == id => Some(m),
                 _ => None,

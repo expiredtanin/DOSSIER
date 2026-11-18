@@ -28,7 +28,7 @@ declare global {
       coreReady: () => Promise<void>;
       coreEpoch: () => number;
       /** Zahl der Elemente je Liste des Projekts (Wände, Öffnungen, Zeichnungsebenen) und das Projekt im Kern als JSON-Länge. */
-      counts: () => { walls: number; openings: number; drawingLevels: number; coreJson: number };
+      counts: () => { walls: number; openings: number; drawingLevels: number; coreJson: number; /** [280] Träger. */ beams: number };
       /** Endpunkte aller 2D-Linien des Projekts ([123] Transformations-Test). */
       lines: () => { a: { x: number; y: number }; b: { x: number; y: number } }[];
       /** [137] Polylinien-Punkte der 2D-Elemente mit Id-Präfix (Präsentations-Massstabsbalken). */
@@ -123,7 +123,7 @@ export function installTestHooks(): void {
     coreEpoch,
     counts: () => {
       const p = getState().project;
-      return { walls: p.walls.length, openings: p.openings?.length ?? 0, drawingLevels: p.drawingLevels.length, coreJson: storeDocument(p).json().length };
+      return { walls: p.walls.length, openings: p.openings?.length ?? 0, drawingLevels: p.drawingLevels.length, beams: p.beams?.length ?? 0, coreJson: storeDocument(p).json().length };
     },
     lines: () =>
       getState().project.drawings2d.flatMap((d) => (d.geom.shape === "line" ? [{ a: d.geom.a, b: d.geom.b }] : [])),

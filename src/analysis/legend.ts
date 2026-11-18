@@ -58,7 +58,7 @@ function keysOfSnapshot(project: Project, snap: ViewSnapshot, out: Set<string>):
     if (r.floorId !== level || !cat(r.categoryCode)) continue;
     comps((project.roofTypes ?? []).find((t) => t.id === r.roofTypeId)?.layers);
   }
-  for (const c of project.columns ?? []) {
+  for (const c of [...(project.columns ?? []), ...(project.beams ?? [])]) {
     if (c.floorId !== level || !cat(c.categoryCode)) continue;
     if (c.hatchId) out.add(`hatch:${c.hatchId}`);
     if (c.componentId) out.add(`component:${c.componentId}`);

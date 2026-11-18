@@ -302,6 +302,23 @@ pub fn column_quantities(footprint: &[Vec2], length: f64) -> Vec<Qty> {
     ]
 }
 
+/// [280] Träger-Basismengen (`Qto_BeamBaseQuantities`): Länge der Achse, Querschnitt, Mantel, Oberfläche, Volumen;
+/// `footprint` = Grundriss-Rechteck, `height` = Querschnittshöhe.
+pub fn beam_quantities(footprint: &[Vec2], length: f64, height: f64) -> Vec<Qty> {
+    let plan = ring_area(footprint);
+    let cross = if length > 1e-9 { plan / length * height } else { 0.0 };
+    let width = if length > 1e-9 { plan / length } else { 0.0 };
+    let outer = 2.0 * (width + height) * length;
+    vec![
+        len("Length", length),
+        area("CrossSectionArea", cross),
+        area("OuterSurfaceArea", outer),
+        area("NetSurfaceArea", outer + 2.0 * cross),
+        vol("GrossVolume", cross * length),
+        vol("NetVolume", cross * length),
+    ]
+}
+
 /// [141] Basismengen einer in Höhenabschnitte geteilten Stütze (`model3d::column_pieces`): Länge = Gesamthöhe,
 /// Volumen und Mantel = Summe der Abschnitte, Querschnitt = grösster Abschnitt, Deckel nur an der Unter- und
 /// Oberkante der Stütze (die Fugen zwischen den Abschnitten sind innen).

@@ -402,6 +402,28 @@ export interface ColumnInfo {
   zTop: number;
 }
 
+/**
+ * [280] Träger-Attribute für die Objekt-Info (nur bei Auswahl genau eines Trägers): Querschnitt, Profilname, Versatz der
+ * Oberkante gegenüber der Deckenunterkante, Länge der Achse und aufgelöste UK/OK.
+ */
+export interface BeamInfo {
+  /** Querschnittsbreite (Meter, editierbar). */
+  width: number;
+  /** Querschnittshöhe (Meter, editierbar). */
+  height: number;
+  /** Profilname als Text (z. B. „HEB 200"), `null` = keiner. */
+  profileName: string | null;
+  /** Versatz der Oberkante gegenüber der Deckenunterkante (Meter, + nach oben, editierbar). */
+  topOffset: number;
+  /** Länge der Achse (Meter). */
+  length: number;
+  floorId: string;
+  floorName: string;
+  /** Aufgelöste absolute UK/OK (Meter). */
+  zBottom: number;
+  zTop: number;
+}
+
 /** Achsparallele Bounding-Box eines Elements in Modell-Metern. */
 export interface SelectionBBox {
   minX: number;
@@ -426,6 +448,7 @@ export interface SelectionInfo {
     | "door"
     | "extrudedSolid"
     | "column"
+    | "beam"
     | "roof"
     | "contextObject";
   id: string;
@@ -549,6 +572,8 @@ export interface SelectionInfo {
   extrudedSolid?: ExtrudedSolidInfo;
   /** Stützen-Attribute (nur bei `kind === "column"`). */
   column?: ColumnInfo;
+  /** [280] Träger-Attribute (nur bei `kind === "beam"`). */
+  beam?: BeamInfo;
   /** Kontext-Objekt-Attribute (nur bei `kind === "contextObject"`). */
   contextObject?: ContextObjectInfo;
   /**

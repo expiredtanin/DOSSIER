@@ -63,6 +63,12 @@ export function buildElementAttributesHost(c: FlatHostOpts) {
     else if (collection === "rooms") updateRoom(id, patch);
     else mapAll(collection, id, (e) => ({ ...(e as object), ...patch }) as typeof e, coalesceKey);
   }
+  /** [280] Patch auf alle gewählten Träger (Träger liegen im Auswahlkanal `columns`); ein Undo-Schritt. */
+  function patchBeams(id: string, patch: Record<string, unknown>): void {
+    const sel = getState().selection.columns;
+    const ids = sel.length > 1 && sel.includes(id) ? sel : [id];
+    applyChange((p) => patchItems(p, "beams", ids, (e) => ({ ...e, ...patch }) as typeof e));
+  }
   return {
     // ── Wand-Attribute (nur bei selektierter Wand) ─────────────────────────
     onSetWallReferenceLine: (ref) => {
@@ -399,6 +405,23 @@ export function buildElementAttributesHost(c: FlatHostOpts) {
     onSetColumnHeight: (height) => {
       if (selection?.kind !== "column" || !(height > 0)) return;
       patchAll("columns", selection.id, { height });
+    },
+    // ── [280] Träger-Attribute (nur bei selektiertem Träger; Auswahlkanal der Stützen) ──────────────
+    onSetBeamWidth: (width) => {
+      if (selection?.kind !== "beam" || !(width > 0)) return;
+      patchBeams(selection.id, { width });
+    },
+    onSetBeamHeight: (height) => {
+      if (selection?.kind !== "beam" || !(height > 0)) return;
+      patchBeams(selection.id, { height });
+    },
+    onSetBeamTopOffset: (offset) => {
+      if (selection?.kind !== "beam" || !Number.isFinite(offset)) return;
+      patchBeams(selection.id, { topOffset: Math.abs(offset) > 1e-9 ? offset : undefined });
+    },
+    onSetBeamProfileName: (name) => {
+      if (selection?.kind !== "beam") return;
+      patchBeams(selection.id, { profileName: name.trim() || undefined });
     },
     onSetColumnRotation: (deg) => {
       if (selection?.kind !== "column" || !Number.isFinite(deg)) return;

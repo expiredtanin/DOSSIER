@@ -450,5 +450,16 @@ fn pick_columns(p: &Project) -> Vec<PickColumn> {
             out.push(PickColumn { tris, column_id: col.id.clone() });
         }
     }
+    // [280] Träger
+    for col in p.beams.iter().flatten().map(|b| b.as_column(p)) {
+        if !(col.height > 0.0) {
+            continue;
+        }
+        let Some((pos, idx)) = column_mesh(p, &col) else { continue };
+        let tris = extrusion_tris(&pos, &idx);
+        if !tris.is_empty() {
+            out.push(PickColumn { tris, column_id: col.id.clone() });
+        }
+    }
     out
 }

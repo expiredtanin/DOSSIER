@@ -1065,6 +1065,13 @@ fn collect(p: &Project, k: [f64; 2], cut: Option<f64>, ground: Option<&Ground>) 
         let footprint = crate::model3d::column_footprint(c).iter().map(|v| [v.x, v.y]).collect();
         prisms.push((Prism { footprint, z_bottom, z_top }, vec![]));
     }
+    // [280] Träger werfen Schatten wie Stützen.
+    for b in p.beams.as_deref().unwrap_or(&[]) {
+        let c = b.as_column(p);
+        let (z_bottom, z_top) = p.column_vertical_extent(&c);
+        let footprint = crate::model3d::column_footprint(&c).iter().map(|v| [v.x, v.y]).collect();
+        prisms.push((Prism { footprint, z_bottom, z_top }, vec![]));
+    }
     // [142] Decken (auch Balkone, Auskragungen) werfen Schatten, decken Tieferes ab und empfangen ihn.
     for ce in p.ceilings.as_deref().unwrap_or(&[]) {
         let (zb, zt) = p.ceiling_vertical_extent(ce);

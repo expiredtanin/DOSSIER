@@ -41,6 +41,7 @@ export function buildSiteHost(c: FlatHostOpts) {
           Extrusion: "solids",
           Dach: "roofs",
           Stütze: "columns",
+          Träger: "columns", // [280] Träger liegen im Auswahlkanal der Stützen
         };
         const k = kindOf[kind];
         setSelection({ ...clearKinds(), ...(k ? { [k]: [id] } : {}) });

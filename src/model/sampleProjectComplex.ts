@@ -504,6 +504,12 @@ const columns: NonNullable<Project["columns"]> = [
   { id: "st-ug-1", type: "column", floorId: "ug", categoryCode: "25", position: P(10.0, 2.6), profile: { kind: "round", radius: 0.15 }, rotation: 0, height: H.ug, componentId: "std-c-stahlbeton" },
 ];
 
+// [280] Unterzug im EG-Wohnraum (Spannweite 6 m, Wand x = 0 bis Wand x = 6): 30 × 45 cm, Oberkante bündig an der
+// Deckenunterkante des EG, Stahlbeton; im Schnitt A-A quer geschnitten, im Grundriss über der Schnitthöhe gestrichelt.
+const beams: NonNullable<Project["beams"]> = [
+  { id: "tg-eg-1", type: "beam", floorId: "eg", categoryCode: "25", start: P(HA, 2.5), end: P(6 - 0.075, 2.5), width: 0.3, height: 0.45, profileName: "Unterzug 30/45", componentId: "std-c-stahlbeton" },
+];
+
 /** [269] Klasse der Umgebungs-Körper (Brunnen, Pflanzgefäss, Sitzrolle): Objektbibliothek-Klasse „Fahrzeuge & Freiflächen". */
 const GARDEN_CLASS = "24";
 
@@ -870,6 +876,7 @@ export function buildComplexSampleProject(): Project {
     stairs,
     rooms: [],
     columns,
+    beams,
     extrudedSolids,
     drawings2d: [...cadastre(), ...annotations()],
     context: [

@@ -206,6 +206,12 @@ pub fn collect_model_at(p: &Project, level: &str, codes: &HashSet<String>, skip:
             ColumnProfile::Round { radius } => circles.push(Circle { cx: col.position.x, cy: col.position.y, r: radius, arc: None }),
         }
     }
+    // [280] Träger: Rechteck um die Achse (Fang an Ecken und Kanten).
+    for b in p.beams.as_deref().unwrap_or(&[]) {
+        if vis_el(&b.id, &b.floor_id, &b.category_code) {
+            closed_poly(&crate::model3d::column_footprint(&b.as_column(p)), &mut segs);
+        }
+    }
     circles.extend(stair_arcs);
     for r in p.rooms.as_deref().unwrap_or(&[]) {
         if vis_el(&r.id, &r.floor_id, &r.category_code) && r.boundary.len() >= 3 {

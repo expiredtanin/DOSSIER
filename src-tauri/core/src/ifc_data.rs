@@ -44,6 +44,7 @@ const REC_END_SPACES: f64 = 8.0;
 const REC_ROOF: f64 = 9.0;
 const REC_COLUMN: f64 = 10.0;
 const REC_END_COLUMNS: f64 = 11.0;
+const REC_BEAM: f64 = 27.0;
 const REC_CLASSIFICATION: f64 = 12.0;
 const REC_ZONE: f64 = 13.0;
 const REC_ATTACH: f64 = 14.0;
@@ -1085,6 +1086,7 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
         p.ceilings.iter().flatten().for_each(|x| push(format!("slab/{}", x.id), &x.ifc_global_id));
         p.roofs.iter().flatten().for_each(|x| push(format!("roof/{}", x.id), &x.ifc_global_id));
         p.columns.iter().flatten().for_each(|x| push(format!("column/{}", x.id), &x.ifc_global_id));
+        p.beams.iter().flatten().for_each(|x| push(format!("beam/{}", x.id), &x.ifc_global_id));
         p.stairs.iter().flatten().for_each(|x| push(format!("stair/{}", x.id), &x.ifc_global_id));
         p.rooms.iter().flatten().for_each(|x| push(format!("space/{}", x.id), &x.ifc_global_id));
         p.extruded_solids.iter().flatten().for_each(|x| push(format!("extrusion/{}", x.id), &x.ifc_global_id));
@@ -1824,6 +1826,38 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
             }
         }
         let comp = col.component_id.as_deref().filter(|s| !s.is_empty());
+        let cid = comp.map_or(-1.0, |c| f.str(c));
+        let cname = comp.map_or(-1.0, |c| {
+            let n = component_name(&p, c);
+            f.str(&n)
+        });
+        f.nums(&[cid, cname]);
+        w_psets(&mut f, &psets);
+    }
+    // ── [280] Träger → IfcBeam (Profil-Extrusion des Grundriss-Rechtecks über die Querschnittshöhe, Material = Bauteil;
+    // Datensatz wie COLUMN, in derselben Materialzuordnung) ──────────────────────────────────────────────────
+    for b in p.beams.as_deref().unwrap_or(&[]) {
+        let footprint = b.footprint();
+        let (zb, zt) = p.beam_vertical_extent(b);
+        if footprint.len() < 4 || !(zt > zb) {
+            continue;
+        }
+        let structure = structure_of(&b.floor_id);
+        classified.push((format!("beam/{}", b.id), Kind::Column, b.category_code.clone()));
+        let label = crate::plan::domains::column_label(&b.as_column(&p));
+        let label = match b.profile_name.as_deref().map(str::trim).filter(|n| !n.is_empty()) {
+            Some(n) => format!("{label} ({n})"),
+            None => label,
+        };
+        let length = (b.end.x - b.start.x).hypot(b.end.y - b.start.y);
+        let mut psets = vec![Pset { name: "Pset_BeamCommon", props: vec![ident("Reference", &label), ident("Span", &format!("{length:.3}"))] }];
+        renovation_props(&p, &mut psets, "Pset_BeamCommon", b.renovation.as_ref());
+        psets.extend(qto("Qto_BeamBaseQuantities", qty::beam_quantities(&footprint, length, zt - zb)));
+        let (id, lab) = (f.str(&b.id), f.str(&label));
+        f.nums(&[REC_BEAM, structure, id, lab]);
+        w_pts(&mut f, &footprint);
+        f.nums(&[zb - base_of(structure), zt - zb]);
+        let comp = b.component_id.as_deref().filter(|s| !s.is_empty());
         let cid = comp.map_or(-1.0, |c| f.str(c));
         let cname = comp.map_or(-1.0, |c| {
             let n = component_name(&p, c);

@@ -31,6 +31,8 @@ pub enum Owner {
     None,
     Roof(usize),
     Column(usize),
+    /// [280] Index in `Project::beams`.
+    Beam(usize),
     Tree(usize),
     Stair(usize),
     Context(usize),
@@ -48,6 +50,7 @@ impl Owner {
             Owner::None => None,
             Owner::Roof(i) => at(&p.roofs, i).map(|e| e.id.as_str()),
             Owner::Column(i) => at(&p.columns, i).map(|e| e.id.as_str()),
+            Owner::Beam(i) => at(&p.beams, i).map(|e| e.id.as_str()),
             Owner::Tree(i) => at(&p.trees, i).map(|e| e.id.as_str()),
             Owner::Stair(i) => at(&p.stairs, i).map(|e| e.id.as_str()),
             Owner::Context(i) => at(&p.context, i).map(|e| e.id()),
@@ -158,6 +161,9 @@ impl ClassFilter {
         for c in p.columns.as_deref().unwrap_or(&[]) {
             add(&c.category_code, &c.id, &c.floor_id);
         }
+        for b in p.beams.as_deref().unwrap_or(&[]) {
+            add(&b.category_code, &b.id, &b.floor_id);
+        }
         for t in p.trees.as_deref().unwrap_or(&[]) {
             add(&t.category_code, &t.id, &t.floor_id);
         }
@@ -190,6 +196,7 @@ impl ClassFilter {
                 .chain(p.roofs.iter().flatten().map(|r| &r.id))
                 .chain(p.stairs.iter().flatten().map(|s| &s.id))
                 .chain(p.columns.iter().flatten().map(|c| &c.id))
+                .chain(p.beams.iter().flatten().map(|c| &c.id))
                 .chain(p.trees.iter().flatten().map(|t| &t.id))
                 .chain(p.extruded_solids.iter().flatten().map(|s| &s.id))
                 .chain(p.drawings2d.iter().map(|d| &d.id))

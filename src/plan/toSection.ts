@@ -46,7 +46,7 @@ function candidateCodes(project: Project): Set<string> {
   const codes = new Set<string>();
   for (const c of flattenCategories(project.layers)) codes.add(c.code);
   // [115] Freie Körper und Stützen tragen ihre Klasse wie jedes Bauteil.
-  for (const list of [project.walls, project.ceilings, project.roofs, project.stairs, project.openings, project.extrudedSolids, project.columns]) {
+  for (const list of [project.walls, project.ceilings, project.roofs, project.stairs, project.openings, project.extrudedSolids, project.columns, project.beams]) {
     for (const e of list ?? []) codes.add(e.categoryCode);
   }
   for (const c of project.context ?? []) if (c.type === "terrainMesh" && c.categoryCode !== undefined) codes.add(c.categoryCode);

@@ -29,7 +29,7 @@ export function isLocked(project: Project, kind: MemberKind, id: string): boolea
     case "stairIds":
       return !!(project.stairs ?? []).find((s) => s.id === id)?.locked;
     case "columnIds":
-      return !!(project.columns ?? []).find((c) => c.id === id)?.locked;
+      return !!((project.columns ?? []).find((c) => c.id === id)?.locked || (project.beams ?? []).find((c) => c.id === id)?.locked);
     case "roofIds":
       return !!(project.roofs ?? []).find((r) => r.id === id)?.locked;
     case "openingIds":
@@ -55,7 +55,7 @@ export function lockOps(project: Project, kind: MemberKind, id: string, locked: 
     case "stairIds":
       return patchItem(project, "stairs", id, { locked });
     case "columnIds":
-      return patchItem(project, "columns", id, { locked });
+      return [...patchItem(project, "columns", id, { locked }), ...patchItem(project, "beams", id, { locked })];
     case "roofIds":
       return patchItem(project, "roofs", id, { locked });
     case "openingIds":

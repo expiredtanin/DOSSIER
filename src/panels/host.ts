@@ -607,6 +607,11 @@ export interface PanelHostValue {
   onSetColumnRadius: (radius: number) => void;
   /** Setzt die Höhe der Stütze (Meter, > 0). */
   onSetColumnHeight: (height: number) => void;
+  /** [280] Träger: Querschnitt, Profilname und Oberkanten-Versatz (nur bei selektiertem Träger). */
+  onSetBeamWidth: (width: number) => void;
+  onSetBeamHeight: (height: number) => void;
+  onSetBeamTopOffset: (offset: number) => void;
+  onSetBeamProfileName: (name: string) => void;
   /** Setzt die Drehung der Stütze (Grad; intern in Radiant gespeichert). */
   onSetColumnRotation: (deg: number) => void;
 

@@ -1,5 +1,5 @@
 //! Export-Scope „nur Auswahl" ([K4] S3, vorher `filterProjectToSelection` in `src/state/exportScope.ts`):
-//! die Listen der acht Elementarten auf die ausgewählten ids kürzen (jede Art ohne Eintrag wird leer);
+//! die Listen der Elementarten auf die ausgewählten ids kürzen (jede Art ohne Eintrag wird leer);
 //! Bibliotheken, Ebenen und Geschosse bleiben, damit id-Verweise weiter auflösen. Liefert die gekürzten
 //! Listen als Patch für `{...project, ...patch}`.
 
@@ -8,13 +8,15 @@ use serde_json::{Map, Value};
 use std::collections::HashSet;
 
 /// Projekt-Liste → (Mitglieds-ids der Art).
-const KINDS: [(&str, &str); 8] = [
+const KINDS: [(&str, &str); 9] = [
     ("walls", "wallIds"),
     ("drawings2d", "drawingIds"),
     ("ceilings", "ceilingIds"),
     ("rooms", "roomIds"),
     ("stairs", "stairIds"),
     ("columns", "columnIds"),
+    // [280] Träger liegen im Auswahlkanal der Stützen.
+    ("beams", "columnIds"),
     ("roofs", "roofIds"),
     ("openings", "openingIds"),
 ];
@@ -53,7 +55,7 @@ mod tests {
         assert_eq!(p["rooms"], json!([]));
         assert_eq!(p["drawings2d"], json!([]));
         assert_eq!(p["roofs"], json!([]));
-        assert_eq!(p.len(), 8);
+        assert_eq!(p.len(), 9);
         assert!(p.get("layers").is_none());
     }
 }

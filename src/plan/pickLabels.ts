@@ -22,7 +22,7 @@ function collection(project: Project, kind: PickKind): readonly WithCategory[] {
     case "stair": return p.stairs ?? [];
     case "room": return p.rooms ?? [];
     case "roof": return p.roofs ?? [];
-    case "column": return p.columns ?? [];
+    case "column": return [...(p.columns ?? []), ...(p.beams ?? [])];
     case "context": return p.context ?? [];
     case "solid": return p.extrudedSolids ?? [];
     case "tree": return p.trees ?? [];

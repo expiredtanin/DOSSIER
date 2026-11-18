@@ -1705,6 +1705,12 @@ pub fn room_stamp_spots(p: &Project, floor: &str, show: &HashSet<String>, scale:
 
 /// `columnLabel` (für `object_name`).
 pub fn column_label(col: &Column) -> String {
+    // [280] Träger (als Stütze ausgewertet): Breite × Höhe des Querschnitts.
+    if col.r#type == "beam" {
+        if let ColumnProfile::Rect { depth, .. } = &col.profile {
+            return format!("Träger {}×{}", to_fixed(depth * 100.0, 0), to_fixed(col.height * 100.0, 0));
+        }
+    }
     match &col.profile {
         ColumnProfile::Round { radius } => format!("Stütze Ø{}", to_fixed(radius * 200.0, 0)),
         ColumnProfile::Rect { width, depth } => format!("Stütze {}×{}", to_fixed(width * 100.0, 0), to_fixed(depth * 100.0, 0)),
@@ -1714,7 +1720,12 @@ pub fn column_label(col: &Column) -> String {
 pub(super) fn columns(c: &Ctx, out: &mut Vec<Primitive>) {
     let p = c.p;
     let range = super::view_range::ViewRange::of(p, &c.a.floor);
-    for col in p.columns.as_deref().unwrap_or(&[]).iter().filter(|k| k.floor_id == c.a.floor && c.vis(&k.category_code, &k.id)) {
+    // [280] Träger laufen als Stützen mit `type == "beam"` durch denselben Code (Rechteck um die Achsmitte).
+    let beams = p.beams.as_deref().unwrap_or(&[]).iter().filter(|k| k.floor_id == c.a.floor && c.vis(&k.category_code, &k.id)).map(|b| std::borrow::Cow::Owned(b.as_column(p)));
+    let cols = p.columns.as_deref().unwrap_or(&[]).iter().filter(|k| k.floor_id == c.a.floor && c.vis(&k.category_code, &k.id)).map(std::borrow::Cow::Borrowed);
+    for col in cols.chain(beams) {
+        let col: &Column = &col;
+        let is_beam = col.r#type == "beam";
         let (zb, zt) = p.column_vertical_extent(col);
         let zone = range.classify(zb, zt);
         if zone == super::view_range::Zone::Hidden {
@@ -1723,7 +1734,7 @@ pub(super) fn columns(c: &Ctx, out: &mut Vec<Primitive>) {
         let out_start = out.len();
         let greyed = Some(c.greyed(&col.category_code));
         let category = c.cat(&col.category_code);
-        let ov = c.overrides(Some("column"), &col.category_code, Some(&column_label(col)));
+        let ov = c.overrides(Some(if is_beam { "beam" } else { "column" }), &col.category_code, Some(&column_label(col)));
         let lw = ov.lineweight.unwrap_or_else(|| resolve_stroke_weight(col.stroke_weight, col.stroke_weight_source, category, category.map_or(WALL_FALLBACK_MM, |k| k.lw)));
         let color = ov.color.as_deref().or(col.color.as_deref());
         let cat_color = category.map(|k| k.color.as_str());
@@ -1767,15 +1778,37 @@ pub(super) fn columns(c: &Ctx, out: &mut Vec<Primitive>) {
             for i in 0..n {
                 out.push(line(fp[i], fp[(i + 1) % n], "column-view", LAYER_JOINT_MM * c.a.detail.layer_factor(), None, stroke, greyed));
             }
-            if let Some(d) = range.restyle_dash(zone) {
+            // [280] Träger über der Schnitthöhe (Unterzug) immer gestrichelt, dazu die Achse als Strichpunktlinie.
+            let dash = if is_beam && zone == super::view_range::Zone::Above { Some(&super::view_range::ABOVE_DASH[..]) } else { range.restyle_dash(zone) };
+            if let Some(d) = dash {
                 super::view_range::restyle(out, out_start, d);
+            }
+            if is_beam {
+                if let ColumnProfile::Rect { width: len, .. } = &col.profile {
+                    let (ux, uy) = (crate::jsnum::cos(col.rotation), crate::jsnum::sin(col.rotation));
+                    out.push(Primitive::Line {
+                        a: Vec2 { x: col.position.x - ux * len / 2.0, y: col.position.y - uy * len / 2.0 },
+                        b: Vec2 { x: col.position.x + ux * len / 2.0, y: col.position.y + uy * len / 2.0 },
+                        cls: "beam-axis".into(),
+                        weight_mm: lw * 0.5,
+                        dash: Some(Some(super::line_pattern::AXIS.to_vec())),
+                        zigzag: None,
+                        motif: None,
+                        color: Some(stroke.to_string().into()),
+                        drawing_id: None,
+                        opening_id: None,
+                        stair_id: None,
+                        greyed,
+                        opacity: None,
+                    });
+                }
             }
             continue;
         }
         // [141] Geschnittene Wände, die in der (geschnittenen) Stütze enden: prioritärere Wand beschneidet
         // die Stütze, gleiches Bauteil verschmilzt (Kontur über diesen Schichten fehlt).
         let (mut clip, mut merge): (Vec<Vec<Vec2>>, Vec<crate::plan::wall_poche::WallFootprint>) = (Vec::new(), Vec::new());
-        if zone == super::view_range::Zone::Cut {
+        if zone == super::view_range::Zone::Cut && !is_beam {
             use super::wall_columns::{band_polys, relation, wall_meets_column, Rel};
             for w in p.walls.iter().filter(|w| w.floor_id == c.a.floor && c.vis(&w.category_code, &w.id)) {
                 let (zb, zt) = p.wall_vertical_extent(w);

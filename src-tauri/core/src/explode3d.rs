@@ -48,6 +48,9 @@ impl<'a> Explode<'a> {
         for c in p.columns.as_deref().unwrap_or(&[]) {
             floor_of.insert(&c.id, &c.floor_id);
         }
+        for b in p.beams.as_deref().unwrap_or(&[]) {
+            floor_of.insert(&b.id, &b.floor_id);
+        }
         for t in p.trees.as_deref().unwrap_or(&[]) {
             floor_of.insert(&t.id, &t.floor_id);
         }
@@ -166,6 +169,7 @@ pub fn parts_filtered(p: &Project, layered: bool, detail: f64, for_section: bool
     for (g, dz) in groups {
         let pick = |fid: &str| ex.in_group(fid, g);
         q.columns = p.columns.as_ref().map(|v| v.iter().filter(|c| pick(&c.floor_id)).cloned().collect());
+        q.beams = p.beams.as_ref().map(|v| v.iter().filter(|c| pick(&c.floor_id)).cloned().collect());
         q.trees = p.trees.as_ref().map(|v| v.iter().filter(|t| pick(&t.floor_id)).cloned().collect());
         q.stairs = p.stairs.as_ref().map(|v| v.iter().filter(|s| pick(&s.floor_id)).cloned().collect());
         q.roofs = p.roofs.as_ref().map(|v| v.iter().filter(|r| pick(&r.floor_id)).cloned().collect());
