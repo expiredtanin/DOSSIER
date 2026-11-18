@@ -5,9 +5,10 @@ import { CommandEngine, type EngineHost } from "../engine";
 import type { CommandContext } from "../types";
 import type { ProjectMutation } from "../../core";
 import { sampleProject } from "../../model/sampleProject";
+import type { Project } from "../../model/types";
 
 // Beispielhaus ohne die vorhandenen Öffnungen (sonst weicht das Fenster ihnen aus).
-const project = { ...sampleProject, openings: [] };
+const project: Project = { ...sampleProject, openings: [] };
 const level = sampleProject.drawingLevels.find((l) => l.kind === "floor")!;
 const ctx: CommandContext = {
   project,
