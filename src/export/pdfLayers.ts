@@ -101,3 +101,37 @@ export function categoryLayerGroups(
   if (rest.size > 0) out.push({ name: otherName, codes: rest });
   return out;
 }
+
+/**
+ * [282] Teilpläne je Ebene in der Stapelung des GANZEN Plans: die Primitive des Gesamtplans werden den Gruppen
+ * zugeordnet (Gleichheit des Primitivs, bei Mehrfachtreffern der Reihe nach) und in Läufen gleicher Gruppe
+ * ausgegeben. Eine Ebene je Gruppe nacheinander zu zeichnen verfälscht die Stapelung, wo Kategorien im Plan
+ * gegenüber dem Kategorie-Baum vertauscht liegen (Decken-Füllung liegt unter den Wänden). Gleichnamige Läufe
+ * gehören im PDF zur selben Ebene. Nicht zuordenbare Primitive bleiben beim vorigen Lauf.
+ */
+export function layerRunsInPlanOrder<P>(
+  full: { primitives: P[] },
+  groups: { name: string; plan: { primitives: P[] } }[],
+): { name: string; primitives: P[] }[] {
+  const owners = new Map<string, number[]>();
+  groups.forEach((g, gi) => {
+    for (const q of g.plan.primitives) {
+      const k = JSON.stringify(q);
+      const list = owners.get(k);
+      if (list) list.push(gi);
+      else owners.set(k, [gi]);
+    }
+  });
+  const runs: { name: string; primitives: P[] }[] = [];
+  let cur = -1;
+  for (const q of full.primitives) {
+    const list = owners.get(JSON.stringify(q));
+    const gi = list && list.length > 0 ? (list.length > 1 ? list.shift()! : list[0]) : cur >= 0 ? cur : 0;
+    if (gi !== cur || runs.length === 0) {
+      runs.push({ name: groups[gi]?.name ?? "", primitives: [] });
+      cur = gi;
+    }
+    runs[runs.length - 1].primitives.push(q);
+  }
+  return runs;
+}

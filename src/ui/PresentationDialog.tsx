@@ -33,8 +33,10 @@ export const PresentationDialogHost = memo(function PresentationDialogHost({
   const confirm = useCallback(() => {
     if (!opts) return;
     const id = createPresentationSheet(opts);
+    // [282] Nicht angelegt (z. B. passt nicht aufs Blatt): Dialog bleibt offen, Massstab/Format anpassbar.
+    if (!id) return;
     setOpts(null);
-    if (id) onCreated(id);
+    onCreated(id);
   }, [opts, onCreated]);
 
   const dialogRef = useModalFocus({});

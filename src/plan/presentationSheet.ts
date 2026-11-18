@@ -334,6 +334,19 @@ function posterTextMetrics(size: { w: number; h: number }): { sizeMm: number; dy
  */
 const showsMarks = (o: PresentationOptions) => !!o.poster && (o.elevationIds.length > 0 || (o.sectionIds ?? []).length > 0);
 
+/**
+ * [282] Passt der Präsentationsplan im gewählten Massstab nicht aufs Blatt: der grösste gemeinsame Massstab (kleinster
+ * Nenner aus {@link PRESENTATION_SCALES}, nur kleiner als der gewählte), bei dem er passt; sonst `null`. Je-Ebene-Massstäbe
+ * (`scales`) bleiben, wie gewählt.
+ */
+export function fittingPresentationScale(project: Project, o: PresentationOptions): number | null {
+  for (const s of PRESENTATION_SCALES) {
+    if (o.scale && s <= o.scale) continue;
+    if (planPresentationSheet(project, { ...o, scale: s }).fits) return s;
+  }
+  return null;
+}
+
 /** Massstab und Rahmen aus dem Kern (ohne das Projekt zu ändern). */
 export function planPresentationSheet(project: Project, o: PresentationOptions): PresentationPlan {
   const { template } = presentationTemplate(project);
