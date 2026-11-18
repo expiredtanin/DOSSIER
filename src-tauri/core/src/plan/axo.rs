@@ -705,7 +705,9 @@ pub fn axo_primitives(p: &Project, a: &AxoArgs, mono: bool) -> Result<Option<(Ve
             }
             let glass = is_glass(*o);
             // Ein Hauch Kontur in der Füllfarbe deckt die Haarfugen zwischen Nachbarflächen.
-            let mut prim = polygon(ring.iter().map(|q| v2(q[0], q[1])).collect(), &fill, &fill, 0.1, no_hatch());
+            // [279] Lochblech: Lochmuster (Punktschraffur) über der Tafel.
+            let hatch = if owner(*o).is_some_and(|r| r.perforated) { super::railings::perforation_hatch(super::style::HATCH_INK) } else { no_hatch() };
+            let mut prim = polygon(ring.iter().map(|q| v2(q[0], q[1])).collect(), &fill, &fill, 0.1, hatch);
             if let Primitive::Polygon { opacity, .. } = &mut prim {
                 if glass {
                     *opacity = Some(super::elevation::GLASS_OPACITY);

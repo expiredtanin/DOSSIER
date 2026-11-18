@@ -180,6 +180,34 @@ fn glas_im_3d_dokument_durchscheinend() {
     assert!(o > 0.0 && o < 1.0, "{o}");
 }
 
+/// Schraffurmuster der Flächen mit Pick-Id `@railing:g`.
+fn rail_hatches(prims: &[Primitive]) -> Vec<crate::model::HatchPattern> {
+    prims.iter().filter_map(|q| match q {
+        Primitive::Polygon { hatch, context_object_id: Some(c), fill, .. } if c == "@railing:g" && fill != "none" => Some(hatch.pattern),
+        _ => None,
+    }).collect()
+}
+
+#[test]
+fn lochblech_mit_lochmuster_in_ansicht_und_3d_dokument() {
+    use crate::model::HatchPattern::{Dots, None as NoHatch};
+    let vis = crate::plan::section::Visibility::default();
+    let el = |p: &Project| crate::plan::elevation::elevation_primitives(p, &level(p, "ans"), false, false, &vis, 50.0).unwrap().unwrap().0;
+    let ax = |p: &Project| {
+        let a = crate::plan::axo::AxoArgs::parse(p, &json!({"view": "southeast", "scale": 100})).unwrap();
+        crate::plan::axo::axo_primitives(p, &a, false).unwrap().expect("Bild").0
+    };
+    let perf = project("perforated", json!({"handrail": false}));
+    for (name, h) in [("Ansicht", rail_hatches(&el(&perf))), ("3D-Dokument", rail_hatches(&ax(&perf)))] {
+        assert!(!h.is_empty() && h.iter().all(|p| *p == Dots), "{name}: Lochmuster fehlt: {h:?}");
+    }
+    // Glas und Brüstung bleiben ohne Muster.
+    for kind in ["glass", "solid"] {
+        let p = project(kind, json!({"handrail": false}));
+        assert!(rail_hatches(&el(&p)).iter().chain(rail_hatches(&ax(&p)).iter()).all(|p| *p == NoHatch), "{kind}");
+    }
+}
+
 #[test]
 fn dokument_3d_axo() {
     let p = project("glass", json!({}));

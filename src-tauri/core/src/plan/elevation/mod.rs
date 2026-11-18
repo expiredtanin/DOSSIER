@@ -433,7 +433,7 @@ pub fn elevation_primitives_ren(p: &Project, level: &LevelSpec, shadows: bool, m
             let rect = |x0: f64, y0: f64, x1: f64, y1: f64| vec![[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
             let band = [rect(b[0] - BAND, b[1] - BAND, b[2] + BAND, b[1]), rect(b[0] - BAND, b[3], b[2] + BAND, b[3] + BAND), rect(b[0] - BAND, b[1], b[0], b[3]), rect(b[2], b[1], b[2] + BAND, b[3])];
             for q in fills.iter().filter(|q| q.len() >= 3).chain(band.iter()) {
-                extra.push(Face { pts: q.clone(), pd: vec![host.depth; q.len()], depth: host.depth, depth_min: host.depth_min, depth_max: host.depth_max, role: Role::Wall, id: host.id.clone(), fill: host.fill, normal: host.normal, ov: host.ov.clone(), two_sided: false, curved_slab: false, see_through: false });
+                extra.push(Face { pts: q.clone(), pd: vec![host.depth; q.len()], depth: host.depth, depth_min: host.depth_min, depth_max: host.depth_max, role: Role::Wall, id: host.id.clone(), fill: host.fill, normal: host.normal, ov: host.ov.clone(), two_sided: false, curved_slab: false, see_through: false, perforated: false });
             }
         }
         if !extra.is_empty() {
@@ -537,7 +537,7 @@ pub fn elevation_primitives_ren(p: &Project, level: &LevelSpec, shadows: bool, m
             let fill = face_fill(f);
             // [152] Importierte Netze ebenso (Dreiecke).
             let seam = (is_roof && assembled.contains(f.id.as_str())) || f.role.is_mesh();
-            let hatch = f.ov.as_ref().and_then(|o| o.hatch.clone()).unwrap_or_else(no_hatch);
+            let hatch = f.ov.as_ref().and_then(|o| o.hatch.clone()).unwrap_or_else(|| if f.perforated { super::railings::perforation_hatch(super::style::HATCH_INK) } else { no_hatch() });
             let mut prim = if seam { polygon(pts, &fill, &fill, 0.15, hatch) } else { polygon(pts, &fill, "none", 0.0, hatch) };
             // [279] Glasgeländer: helle Füllung wie Fensterglas, durchscheinend (Linien dahinter bleiben lesbar).
             if let (true, Primitive::Polygon { opacity, .. }) = (f.see_through, &mut prim) {
@@ -700,7 +700,7 @@ pub fn elevation_primitives_ren(p: &Project, level: &LevelSpec, shadows: bool, m
                         }
                         let pd: Vec<f64> = ring.iter().map(|q| pl[0] + pl[1] * q[0] + pl[2] * q[1]).collect();
                         let (dmin, dmax) = pd.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), d| (a.min(*d), b.max(*d)));
-                        cut.push(Face { pts: ring, pd, depth: f.depth, depth_min: dmin, depth_max: dmax, role: f.role, id: f.id.clone(), fill: f.fill, normal: f.normal, ov: f.ov.clone(), two_sided: f.two_sided, curved_slab: f.curved_slab, see_through: f.see_through });
+                        cut.push(Face { pts: ring, pd, depth: f.depth, depth_min: dmin, depth_max: dmax, role: f.role, id: f.id.clone(), fill: f.fill, normal: f.normal, ov: f.ov.clone(), two_sided: f.two_sided, curved_slab: f.curved_slab, see_through: f.see_through, perforated: f.perforated });
                     }
                 }
             }

@@ -9,10 +9,13 @@
 //! - **Lochblech:** wie Glas, dazu eine gestrichelte Mittellinie.
 //! - **Brüstung (massiv):** geschnittene Fläche mit Bauteil-Schraffur (Poché wie die Stützen), Umriss ohne Gehrungsfugen.
 //!
+//! - **Handlauf über der Schnitthöhe** (Fuss geschnitten, Handlauf darüber): zwei gestrichelte Linien im Abstand der
+//!   Handlaufbreite neben der Achse (`railing-handrail`, wie die Treppen-Handläufe über dem Schnitt).
+//!
 //! Pick: unsichtbare Fläche um die Achse (mindestens 4 mm Papier breit) mit `contextObjectId = "@railing:<id>"`.
 
 use super::domains::Ctx;
-use super::prim::Primitive;
+use super::prim::{HatchRender, Primitive};
 use super::style::*;
 use super::view_range::{ViewRange, Zone};
 use crate::model::*;
@@ -34,6 +37,12 @@ pub fn is_symbol_part(q: &Primitive) -> bool {
         Primitive::Polygon { context_object_id: Some(id), .. } => id.starts_with(PICK_PREFIX),
         _ => false,
     }
+}
+
+/// [279] Lochmuster der Lochblechtafel in Ansicht und 3D-Dokument: Punktschraffur (`HatchPattern::Dots`, die bestehende
+/// Schraffur-Bibliothek, Teilung 5 cm), Punkte in der Tintenfarbe `color`.
+pub fn perforation_hatch(color: &str) -> HatchRender {
+    HatchRender { pattern: HatchPattern::Dots, scale: 1.0, color: color.to_string(), line_weight: 0.18, ..no_hatch() }
 }
 
 /// Linie mit Strichstärke und Farbe.
@@ -136,6 +145,14 @@ pub(super) fn plan_railings(c: &Ctx, out: &mut Vec<Primitive>) {
                 }
             }
         }
+        // Handlauf ganz über der Schnitthöhe (Fuss geschnitten): gestrichelt neben der Achse, Konvention wie bei den Treppen
+        // (Handlauf über dem Schnitt gestrichelt, Strichmuster „verdeckt“, dünne Linie).
+        if zone == Zone::Cut && s.has_rail() && range.classify(s.top() - s.rail_h(), s.top()) == Zone::Above {
+            let (_, l, rt) = railing::strips(&ax, s.rail_w() / 2.0);
+            for side in [&l, &rt] {
+                polyline(out, side, "railing-handrail", lw * 0.6, &stroke, Some(&super::line_pattern::HIDDEN), greyed);
+            }
+        }
         // Ganz über der Schnitthöhe: Strich-Punkt wie die übrigen Bauteile darüber (auch ohne eigenen Ansichtsbereich, wie die
         // Stufen und Handläufe der Treppen); unter der Schnitthöhe gepunktet nur mit eigenem Bereich.
         let dash = if zone == Zone::Above { Some(&super::view_range::ABOVE_DASH[..]) } else { range.restyle_dash(zone) };
@@ -233,6 +250,26 @@ mod tests {
         let prims = plan(&p, 50.0);
         assert!(!prims.iter().any(|q| matches!(q, Primitive::Polygon { fill, context_object_id: None, .. } if fill != "none")));
         assert!(prims.iter().filter_map(|q| match q { Primitive::Line { cls, dash, .. } if cls == "railing-solid" => Some(dash), _ => None }).all(|d| d.as_ref().is_some_and(|d| d.is_some())));
+    }
+
+    #[test]
+    fn handlauf_ueber_schnitthoehe_gestrichelt_neben_der_achse() {
+        // Höhe 1.2 über Schnitt 1.0: Fuss geschnitten, Handlauf (1.16–1.20) darüber -> zwei gestrichelte Linien im Abstand der Handlaufbreite.
+        let p = project(rail("glass", serde_json::json!({"height": 1.2, "handrail": true, "handrailSize": 0.06})));
+        let l = lines(&plan(&p, 50.0), "railing-handrail");
+        assert_eq!(l.len(), 2, "{l:?}");
+        assert!(l.iter().all(|(a, b)| (a.x - b.x).abs() > 3.9 && (a.y - b.y).abs() < 1e-9));
+        assert!(((l[0].0.y - l[1].0.y).abs() - 0.06).abs() < 1e-9);
+        let dashed = |prims: &[Primitive]| prims.iter().filter_map(|q| match q { Primitive::Line { cls, dash, .. } if cls == "railing-handrail" => Some(dash.clone()), _ => None }).all(|d| matches!(d, Some(Some(_))));
+        assert!(dashed(&plan(&p, 50.0)));
+        // Handlauf unter der Schnitthöhe (Höhe 1.0 = Schnitt): ausgezogen wie bisher, keine eigene Linie.
+        let p = project(rail("glass", serde_json::json!({"height": 1.0, "handrail": true})));
+        assert!(lines(&plan(&p, 50.0), "railing-handrail").is_empty());
+        // Ohne Handlauf (Brüstung, keine Angabe) und ganz über dem Schnitt (schon gestrichelt): keine zusätzlichen Linien.
+        let p = project(rail("solid", serde_json::json!({"height": 1.2})));
+        assert!(lines(&plan(&p, 50.0), "railing-handrail").is_empty());
+        let p = project(rail("glass", serde_json::json!({"height": 1.2, "baseOffset": 1.2})));
+        assert!(lines(&plan(&p, 50.0), "railing-handrail").is_empty());
     }
 
     #[test]

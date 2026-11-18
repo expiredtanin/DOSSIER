@@ -81,7 +81,7 @@ pub(super) fn project_faces(frame: &[f64; 9], walls: &[RWall], slabs: &[RSlab], 
             Role::Roof => (roofs[f.src].id.clone(), roofs[f.src].fill),
         };
         let pts = f.pts.iter().map(|q| [q.0, q.1]).collect();
-        out.push(Face { pts, pd: f.pd, depth: f.depth, depth_min: f.depth_min, depth_max: f.depth_max, role, id, fill, normal: f.normal, ov: None, two_sided: false, curved_slab: false, see_through: false });
+        out.push(Face { pts, pd: f.pd, depth: f.depth, depth_min: f.depth_min, depth_max: f.depth_max, role, id, fill, normal: f.normal, ov: None, two_sided: false, curved_slab: false, see_through: false, perforated: false });
     }
     out
 }
@@ -131,8 +131,17 @@ pub(super) fn collect_railing_faces(p: &Project, frame: &[f64; 9]) -> Vec<Face> 
     // Glastafeln (Glasgeländer, Teil Tafel) getrennt: durchscheinend, in der Ansicht wie Fensterglas hell.
     let is_glass = |s: &model3d::RSlab| matches!(s.source, model3d::SlabSource::Railing { index, fill: true } if p.railings.as_deref().and_then(|r| r.get(index)).is_some_and(|r| r.kind == RailingKind::Glass));
     let (glass, rest): (Vec<_>, Vec<_>) = slabs.into_iter().partition(is_glass);
+    // Lochblechtafeln: Lochmuster (Punktschraffur der Schraffur-Bibliothek, `super::super::railings::perforation_hatch`).
+    let is_perf = |s: &model3d::RSlab| matches!(s.source, model3d::SlabSource::Railing { index, fill: true } if p.railings.as_deref().and_then(|r| r.get(index)).is_some_and(|r| r.kind == RailingKind::Perforated));
+    let (perf, rest): (Vec<_>, Vec<_>) = rest.into_iter().partition(is_perf);
     let mut faces = project_faces(frame, &[], &rest, &[]);
     faces.iter_mut().for_each(|f| f.role = Role::Railing);
+    let mut pf = project_faces(frame, &[], &perf, &[]);
+    for f in &mut pf {
+        f.role = Role::Railing;
+        f.perforated = true;
+    }
+    faces.extend(pf);
     let mut g = project_faces(frame, &[], &glass, &[]);
     for f in &mut g {
         f.role = Role::Railing;
@@ -233,7 +242,7 @@ fn mesh_faces(frame: &[f64; 9], pos: &[f64], info: &crate::mesh_view::MeshInfo, 
             groups.push((key, Vec::new()));
             groups.len() - 1
         });
-        groups[k].1.push(Face { pts, pd, depth, depth_min: dmin, depth_max: dmax, role, id: id.to_string(), fill, normal, ov: None, two_sided: !info.closed, curved_slab: false, see_through: false });
+        groups[k].1.push(Face { pts, pd, depth, depth_min: dmin, depth_max: dmax, role, id: id.to_string(), fill, normal, ov: None, two_sided: !info.closed, curved_slab: false, see_through: false, perforated: false });
     }
     for (_, tris) in groups {
         merge_coplanar(tris, out);

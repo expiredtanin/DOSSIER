@@ -46,7 +46,7 @@ pub(super) fn merge_coplanar(tris: Vec<Face>, out: &mut Vec<Face>) {
         let pd: Vec<f64> = pts.iter().map(depth_at).collect();
         let depth = pd.iter().sum::<f64>() / pd.len() as f64;
         let (dmin, dmax) = (pd.iter().copied().fold(f64::INFINITY, f64::min), pd.iter().copied().fold(f64::NEG_INFINITY, f64::max));
-        out.push(Face { pts, pd, depth, depth_min: dmin, depth_max: dmax, role: f0.role, id: f0.id.clone(), fill: f0.fill, normal: f0.normal, ov: None, two_sided: f0.two_sided, curved_slab: false, see_through: false });
+        out.push(Face { pts, pd, depth, depth_min: dmin, depth_max: dmax, role: f0.role, id: f0.id.clone(), fill: f0.fill, normal: f0.normal, ov: None, two_sided: f0.two_sided, curved_slab: false, see_through: false, perforated: false });
     }
 }
 
