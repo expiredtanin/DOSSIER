@@ -133,17 +133,27 @@ pub(crate) fn view_faces(p: &Project, view: &dyn Fn([f64; 3]) -> [f64; 3], view_
         }
         let area: f64 = (0..n).map(|k| o[k][0] * o[(k + 1) % n][1] - o[(k + 1) % n][0] * o[k][1]).sum();
         let sign = if area >= 0.0 { 1.0 } else { -1.0 };
-        let top: Vec<[f64; 3]> = o.iter().map(|q| [q[0], y1, q[1]]).collect();
-        let bottom: Vec<[f64; 3]> = o.iter().rev().map(|q| [q[0], y0, q[1]]).collect();
-        push(&mut faces, &top, [0.0, 1.0, 0.0], owner, 0, false);
-        push(&mut faces, &bottom, [0.0, -1.0, 0.0], owner, 0, false);
+        // [281] Geneigte Platte: jede Höhe um den Versatz der Neigungsebene verschoben (Mantel bleibt lotrecht).
+        let d = |q: &[f64; 2]| s.dz(q[0], q[1]);
+        let up = match s.slope {
+            Some(g) => {
+                let l = (g[2] * g[2] + 1.0 + g[3] * g[3]).sqrt();
+                [-g[2] / l, 1.0 / l, -g[3] / l]
+            }
+            None => [0.0, 1.0, 0.0],
+        };
+        let top: Vec<[f64; 3]> = o.iter().map(|q| [q[0], y1 + d(q), q[1]]).collect();
+        let bottom: Vec<[f64; 3]> = o.iter().rev().map(|q| [q[0], y0 + d(q), q[1]]).collect();
+        push(&mut faces, &top, up, owner, 0, false);
+        push(&mut faces, &bottom, [-up[0], -up[1], -up[2]], owner, 0, false);
         for k in 0..n {
             let (a, b) = (o[k], o[(k + 1) % n]);
             let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
             if dx.abs() + dy.abs() < 1e-12 {
                 continue;
             }
-            let side = [[a[0], y0, a[1]], [b[0], y0, b[1]], [b[0], y1, b[1]], [a[0], y1, a[1]]];
+            let (da, db) = (d(&a), d(&b));
+            let side = [[a[0], y0 + da, a[1]], [b[0], y0 + db, b[1]], [b[0], y1 + db, b[1]], [a[0], y1 + da, a[1]]];
             push(&mut faces, &side, [dy * sign, 0.0, -dx * sign], owner, side_group, false);
         }
     }

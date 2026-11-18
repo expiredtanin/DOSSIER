@@ -3,6 +3,7 @@
 
 import { useStore } from "../../state/appStore";
 import type { CeilingInfo } from "../../state/selectionInfo";
+import type { CeilingSlope } from "../../model/types";
 import { usePanelHost } from "../host";
 import { t } from "../../i18n";
 import { Dropdown } from "../../ui/Dropdown";
@@ -174,6 +175,114 @@ export function CeilingSection({
         <span className="objinfo-flabel">{t("objinfo.ceiling.height")}</span>
         <span className="objinfo-fval">{formatM(ceiling.zTop - ceiling.zBottom)}</span>
       </div>
+      <SlopeRows ceiling={ceiling} host={host} />
+    </>
+  );
+}
+
+const DEG = Math.PI / 180;
+
+/**
+ * [281] Abschnitt „Neigung": aus / Gefälle / Rampe; Gefälle in % und Grad, Höhenunterschied, Richtung (aufwärts) und
+ * Bezugspunkt. Gespeichert wird nur `slope` ({from, to, rise, ramp}); die Felder rechnen daraus um.
+ */
+function SlopeRows({ ceiling, host }: { ceiling: CeilingInfo; host: ReturnType<typeof usePanelHost> }) {
+  const s = ceiling.slope;
+  const mode: "off" | "on" | "ramp" = !s ? "off" : s.ramp ? "ramp" : "on";
+  const len = s ? Math.hypot(s.to.x - s.from.x, s.to.y - s.from.y) : 0;
+  const pct = s && len > 1e-9 ? (s.rise / len) * 100 : 0;
+  // Richtung aufwärts: von `from` nach `to`, bei negativem Höhenunterschied umgekehrt.
+  const dirDeg = s ? (((Math.atan2(s.to.y - s.from.y, s.to.x - s.from.x) / DEG + (s.rise < 0 ? 180 : 0)) % 360) + 360) % 360 : 0;
+  const set = (patch: Partial<CeilingSlope>) => {
+    if (s) host.onSetCeilingSlope?.({ ...s, ...patch });
+  };
+  const setRise = (rise: number) => {
+    if (isFinite(rise) && rise !== 0) set({ rise });
+  };
+  const choose = (m: "off" | "on" | "ramp") => {
+    if (m === mode) return;
+    if (m === "off") host.onSetCeilingSlope?.(null);
+    else host.onSetCeilingSlope?.({ enable: m === "ramp" ? "ramp" : "slope" });
+  };
+  return (
+    <>
+      <div className="objinfo-sep" />
+      <div className="objinfo-section-label" title={t("objinfo.ceiling.slope.hint")}>
+        {t("objinfo.ceiling.slope.section")}
+      </div>
+      <div className="objinfo-field">
+        <div className="objinfo-segment" data-testid="objinfo-ceiling-slope-mode">
+          {(["off", "on", "ramp"] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              data-testid={`objinfo-ceiling-slope-${m}`}
+              className={"objinfo-seg-btn" + (mode === m ? " active" : "")}
+              onClick={() => choose(m)}
+            >
+              {t(`objinfo.ceiling.slope.${m}`)}
+            </button>
+          ))}
+        </div>
+      </div>
+      {s && (
+        <>
+          <div data-testid="objinfo-ceiling-slope-percent">
+            <DimensionField
+              label={t("objinfo.ceiling.slope.percent")}
+              value={Math.abs(pct)}
+              unit="%"
+              digits={1}
+              step={0.5}
+              min={0}
+              onCommit={(v) => setRise(Math.sign(s.rise || 1) * (v / 100) * len)}
+            />
+          </div>
+          <DimensionField
+            label={t("objinfo.ceiling.slope.angle")}
+            value={Math.atan(Math.abs(pct) / 100) / DEG}
+            unit="°"
+            digits={2}
+            step={0.5}
+            min={0}
+            onCommit={(v) => v < 89 && setRise(Math.sign(s.rise || 1) * Math.tan(v * DEG) * len)}
+          />
+          <DimensionField
+            label={t("objinfo.ceiling.slope.rise")}
+            value={Math.abs(s.rise)}
+            min={0}
+            onCommit={(v) => setRise(Math.sign(s.rise || 1) * v)}
+          />
+          <DimensionField
+            label={t("objinfo.ceiling.slope.direction")}
+            value={dirDeg}
+            unit="°"
+            digits={1}
+            min={-360}
+            onCommit={(a) => {
+              // Gefällelinie dreht um den Bezugspunkt; aufwärts = Richtung, der Höhenunterschied wird positiv.
+              const r = a * DEG;
+              set({ to: { x: s.from.x + Math.cos(r) * len, y: s.from.y + Math.sin(r) * len }, rise: Math.abs(s.rise) });
+            }}
+          />
+          <DimensionField
+            label={t("objinfo.ceiling.slope.refX")}
+            value={s.from.x}
+            min={-Infinity}
+            onCommit={(x) => set({ from: { x, y: s.from.y }, to: { x: s.to.x + x - s.from.x, y: s.to.y } })}
+          />
+          <DimensionField
+            label={t("objinfo.ceiling.slope.refY")}
+            value={s.from.y}
+            min={-Infinity}
+            onCommit={(y) => set({ from: { x: s.from.x, y }, to: { x: s.to.x, y: s.to.y + y - s.from.y } })}
+          />
+          <div className="objinfo-field">
+            <span className="objinfo-flabel">{t("objinfo.ceiling.slope.length")}</span>
+            <span className="objinfo-fval">{formatM(len)}</span>
+          </div>
+        </>
+      )}
     </>
   );
 }

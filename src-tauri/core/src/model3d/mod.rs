@@ -83,10 +83,21 @@ pub struct RSlab {
     pub cut: Option<RCutMeta>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub monolith: Option<String>,
+    /// [281] Geneigte Decke/Rampe: Neigungsebene `[ox, oy, gx, gy]` — jede Höhe der Platte (Ober- und
+    /// Unterkante) liegt am Grundrisspunkt (x, y) um `gx·(x−ox) + gy·(y−oy)` höher ([`RSlab::dz`]).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub slope: Option<[f64; 4]>,
     /// Herkunft der Platte (nur im Kern, nicht serialisiert): der Schnitt ordnet seine Bänder darüber
     /// der Decke bzw. Deckenschicht oder der Treppe zu, statt die Platten abzuzählen.
     #[serde(skip)]
     pub source: SlabSource,
+}
+
+impl RSlab {
+    /// [281] Höhenversatz am Grundrisspunkt (x, y) (waagrecht 0).
+    pub fn dz(&self, x: f64, y: f64) -> f64 {
+        self.slope.as_ref().map_or(0.0, |g| crate::model::helpers::slope_dz(g, x, y))
+    }
 }
 
 /// Herkunft einer `RSlab`.

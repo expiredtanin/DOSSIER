@@ -1608,16 +1608,24 @@ pub fn extrude_slab(mesh: &mut Mesh, slab: &SlabInput) {
         return;
     }
     let color = slab.color;
-    // world-Position: model [x, y] -> (x, hoehe, y).
-    let w = |g: Point2, y: f32| -> [f32; 3] { [g[0], y, g[1]] };
+    // world-Position: model [x, y] -> (x, hoehe, y); [281] geneigte Platte: Höhe + Versatz der Neigungsebene.
+    let w = |g: Point2, y: f32| -> [f32; 3] { [g[0], y + slab.dz(g), g[1]] };
+    // Deckel-/Bodennormale: senkrecht auf der (geneigten) Ebene.
+    let up = match slab.slope {
+        Some(s) => {
+            let l = (s[2] * s[2] + 1.0 + s[3] * s[3]).sqrt();
+            [-s[2] / l, 1.0 / l, -s[3] / l]
+        }
+        None => [0.0, 1.0, 0.0],
+    };
 
     // Deckel (+Y) und Boden (−Y) aus den Triangulierungs-Dreiecken.
     for t in tris.chunks_exact(3) {
         let a = pts[t[0] as usize];
         let b = pts[t[1] as usize];
         let c = pts[t[2] as usize];
-        push_tri_oriented(mesh, w(a, y1), w(b, y1), w(c, y1), [0.0, 1.0, 0.0], color);
-        push_tri_oriented(mesh, w(a, y0), w(b, y0), w(c, y0), [0.0, -1.0, 0.0], color);
+        push_tri_oriented(mesh, w(a, y1), w(b, y1), w(c, y1), up, color);
+        push_tri_oriented(mesh, w(a, y0), w(b, y0), w(c, y0), [-up[0], -up[1], -up[2]], color);
     }
 
     // Mantelflaechen: je Kante ein vertikales Quad (unten y0, oben y1), Normale nach aussen (aus dem
@@ -1767,7 +1775,7 @@ mod tests {
             if rev {
                 o.reverse();
             }
-            let slab = SlabInput { monolith: None, outline: o, z_bottom: 0.0, z_top: 0.3, color: [0.8, 0.8, 0.8], hatch: None, cut: None };
+            let slab = SlabInput { monolith: None, slope: None, outline: o, z_bottom: 0.0, z_top: 0.3, color: [0.8, 0.8, 0.8], hatch: None, cut: None };
             let mut m = Mesh::default();
             extrude_slab(&mut m, &slab);
             let mut at_arc = 0;

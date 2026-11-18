@@ -256,6 +256,15 @@ export const CommandIcon = memo(function CommandIcon({ name }: { name: string })
           <line x1="6.2" y1="8" x2="9.8" y2="8" />
         </svg>
       );
+    case "ramp":
+      // [281] Rampe: geneigte Platte mit Lauflinie und Pfeil.
+      return (
+        <svg {...common}>
+          <polygon points="2,12 14,7 14,10 2,14" />
+          <line x1="4" y1="11.4" x2="11.5" y2="8.3" />
+          <polyline points="9.6,7.8 11.5,8.3 10.6,10" />
+        </svg>
+      );
     case "ceilingopening":
       // Deckenloch: Decken-Rechteck mit ausgespartem Innenrechteck.
       return (

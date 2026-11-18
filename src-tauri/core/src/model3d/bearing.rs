@@ -68,7 +68,7 @@ fn axis(w: &Wall) -> Option<([f64; 2], [f64; 2], f64)> {
 
 fn overlaps_z(p: &Project, w: &Wall, c: &Ceiling) -> bool {
     let (wb, wt) = p.wall_vertical_extent(w);
-    let (cb, ct) = p.ceiling_vertical_extent(c);
+    let (cb, ct) = p.ceiling_vertical_span(c);
     wt.min(ct) - wb.max(cb) > Z_EPS
 }
 
@@ -412,7 +412,7 @@ pub(crate) fn bearing_outlines_memo(p: &Project, known: &HashMap<String, WallCut
         if c.outline.len() < 3 {
             continue;
         }
-        let (cb, ct) = p.ceiling_vertical_extent(c);
+        let (cb, ct) = p.ceiling_vertical_span(c);
         let near: Vec<usize> = (0..p.walls.len()).filter(|&i| ext[i].1.min(ct) - ext[i].0.max(cb) > Z_EPS).collect();
         let mut key: Vec<(u64, WallCuts)> = near.iter().map(|&i| (stamps.get(i).copied().unwrap_or(0), cuts_of(&p.walls[i]).clone())).collect();
         // [216] Die Sehnen-Zonen der Bogenwände hängen auch an Öffnungen (anderer Geschosse): mit in den Schlüssel.

@@ -164,3 +164,5 @@ pub mod kosten;
 pub mod woff2;
 #[cfg(test)]
 mod wall_join3d_tests;
+#[cfg(test)]
+mod ceiling_slope_tests;

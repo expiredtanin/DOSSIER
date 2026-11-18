@@ -20,6 +20,7 @@ import { solidBoolCommand } from "./cmds/solidbool";
 import { solidToPartsCommand } from "./cmds/solidToParts";
 import { voidBoxCommand } from "./cmds/voidbox";
 import { ceilingOpeningCommand } from "./cmds/ceilingOpening";
+import { rampCommand } from "./cmds/ramp";
 import { roofWindowCommand } from "./cmds/roofWindow";
 import { dormerCommand } from "./cmds/dormer";
 import { roofHoleCommand } from "./cmds/roofHole";
@@ -101,6 +102,7 @@ export const COMMANDS: Record<string, Command> = {
   solidtoparts: solidToPartsCommand,
   voidbox: voidBoxCommand,
   ceilingopening: ceilingOpeningCommand,
+  ramp: rampCommand,
   roofwindow: roofWindowCommand,
   dormer: dormerCommand,
   roofhole: roofHoleCommand,
@@ -211,6 +213,7 @@ export const ALIASES: Record<string, string> = {
   kugel: "solid",
   body: "solid",
   deckenloch: "ceilingopening",
+  rampe: "ramp",
   aussparung: "ceilingopening",
   dachfenster: "roofwindow",
   oberlicht: "roofwindow",

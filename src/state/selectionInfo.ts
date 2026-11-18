@@ -19,6 +19,7 @@ import { EMPTY_SELECTION, mergeSelection, single } from "./selection";
 import type { Selection } from "./selection";
 import type {
   AttributeSource,
+  CeilingSlope,
   DimRef,
   ColumnProfile,
   ContextImage,
@@ -200,6 +201,8 @@ export interface CeilingInfo {
   /** Aufgelöste absolute UK/OK (Meter). */
   zBottom: number;
   zTop: number;
+  /** [281] Neigung (geneigte Decke/Rampe); fehlt = waagrecht. */
+  slope?: CeilingSlope;
   /** Aussparungen (Treppenauge/Schacht) als BBox-Masse, Reihenfolge = Modell. */
   openings: { width: number; depth: number }[];
 }

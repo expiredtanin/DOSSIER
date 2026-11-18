@@ -59,6 +59,8 @@ declare global {
       fakeRender: () => void;
       /** [173] Linien einer Klasse (z. B. "door-lintel") im Grundriss der aktiven Ebene (alle Kategorien, 1:50, Detailgrad der Anzeige). */
       planLines: (cls: string) => number;
+      /** [281] Neigung je Decke (`id` → {rise, ramp}; waagrecht fehlt). */
+      ceilingSlopes: () => Record<string, { rise: number; ramp: boolean }>;
       /** [173] Modelldarstellung der aktiven Ebene (Feld `modelViewOptionId`). */
       modelView: () => string | undefined;
       /** [173] Schnitt der aktiven Ebene (1:50, Detailgrad der Anzeige): Zahl der Wand-Schnittflächen und ihre Fläche (m²). */
@@ -157,6 +159,8 @@ export function installTestHooks(): void {
     },
     notices: () => getState().notifications.map((n) => n.message),
     fakeRender: () => fakeRender(),
+    ceilingSlopes: () =>
+      Object.fromEntries((getState().project.ceilings ?? []).flatMap((c) => (c.slope ? [[c.id, { rise: c.slope.rise, ramp: !!c.slope.ramp }]] : []))),
     planLines: (cls) => {
       const s = getState();
       const codes = new Set<string>();

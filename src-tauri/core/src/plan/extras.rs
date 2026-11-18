@@ -493,7 +493,7 @@ pub fn subtract_voids(prims: Vec<Primitive>, p: &Project, cut_z: f64) -> Vec<Pri
             Some(wall_cutters.clone())
         } else if let Some(id) = &ceiling_id {
             ceilings.get(id.as_str()).map(|c| {
-                let (zb, zt) = p.ceiling_vertical_extent(c);
+                let (zb, zt) = p.ceiling_vertical_span(c);
                 cutters_for(zb, zt)
             })
         } else if let Some(id) = &column_id {

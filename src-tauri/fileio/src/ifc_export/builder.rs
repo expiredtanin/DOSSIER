@@ -517,7 +517,7 @@ impl Builder {
     /// PredefinedType, in IFC2x3 je Klasse ShapeType/PredefinedType/CompositionType; IfcWall und IfcColumn
     /// haben es dort nicht.
     pub(super) fn emit_building_element(&mut self, ty: &str, guid: String, name: &str, placement: usize, shape: usize, predefined: Option<String>) -> usize {
-        let last = if self.v2() && matches!(ty, "IFCWALL" | "IFCWALLSTANDARDCASE" | "IFCCOLUMN") {
+        let last = if self.v2() && matches!(ty, "IFCWALL" | "IFCWALLSTANDARDCASE" | "IFCCOLUMN" | "IFCRAMPFLIGHT") {
             String::new()
         } else {
             format!(",{}", predefined.as_deref().unwrap_or("$"))

@@ -107,6 +107,15 @@ const SLAB: PickSlab = {
 };
 
 describe("raySlabPrism", () => {
+  it("[281] geneigte Platte: Deckel um den Versatz der Neigungsebene höher", () => {
+    // Steigt 15 % nach +x: bei x = 3 liegt die OK auf 3.0 + 0.45 = 3.45 → senkrecht von y = 10: t = 6.55.
+    const sloped = { ...SLAB, slope: [0, 0, 0.15, 0] as const };
+    expect(raySlabPrism({ origin: [3, 10, 2], dir: [0, -1, 0] }, sloped)!).toBeCloseTo(6.55, 6);
+    // Waagrechter Strahl auf 3.2: an der Seite x = 0 (2.9..3.0) vorbei, trifft die steigende Oberseite bei
+    // 3.0 + 0.15·x = 3.2 → x = 4/3 (Strahl von −5 aus: t = 19/3).
+    expect(raySlabPrism({ origin: [-5, 3.2, 2], dir: [1, 0, 0] }, sloped)!).toBeCloseTo(19 / 3, 6);
+  });
+
   it("Strahl von oben trifft den Deckel (kleinstes t)", () => {
     // eye (2,10,2) senkrecht nach unten: Deckel y=3 bei t=7.
     const t = raySlabPrism({ origin: [2, 10, 2], dir: [0, -1, 0] }, SLAB);

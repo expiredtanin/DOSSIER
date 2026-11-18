@@ -46,7 +46,14 @@ pub(super) fn project_faces(frame: &[f64; 9], walls: &[RWall], slabs: &[RSlab], 
     }
     let mut sl = vec![slabs.len() as f64];
     for x in slabs {
-        sl.extend([x.z_bottom, x.z_top, x.outline.len() as f64]);
+        // [281] Geneigte Platte: Eckenzahl negativ, danach die Neigungsebene (ox, oy, gx, gy).
+        match x.slope {
+            Some(g) => {
+                sl.extend([x.z_bottom, x.z_top, -(x.outline.len() as f64)]);
+                sl.extend(g);
+            }
+            None => sl.extend([x.z_bottom, x.z_top, x.outline.len() as f64]),
+        }
         for q in &x.outline {
             sl.extend(q);
         }

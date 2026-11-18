@@ -83,7 +83,7 @@ pub(crate) fn emit_slabs_from(p: &Project, bearing: &[Option<Vec<crate::flat::Po
         let outline: Vec<RVec2> = d.ring.clone();
         for (layer_idx, z_bottom, z_top) in d.slabs {
             let Some(layers) = layers.filter(|_| layer_idx >= 0) else {
-                out.push(RSlab { outline: outline.clone(), z_bottom, z_top, color: SLAB_RGB, ceiling_id: c.id.clone(), hatch: None, cut: None, monolith: None, source: SlabSource::Ceiling { index: ci, layer: None } });
+                out.push(RSlab { outline: outline.clone(), z_bottom, z_top, color: SLAB_RGB, ceiling_id: c.id.clone(), hatch: None, cut: None, monolith: None, slope: c.slope_plane(), source: SlabSource::Ceiling { index: ci, layer: None } });
                 continue;
             };
             let l = &layers[layer_idx as usize];
@@ -111,6 +111,7 @@ pub(crate) fn emit_slabs_from(p: &Project, bearing: &[Option<Vec<crate::flat::Po
                 hatch: resolve_component_hatch(p, &l.component_id, None),
                 cut,
                 monolith: None,
+                slope: c.slope_plane(),
                 source: SlabSource::Ceiling { index: ci, layer: Some(layer_idx as usize) },
             });
         }

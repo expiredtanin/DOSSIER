@@ -1067,7 +1067,10 @@ fn collect(p: &Project, k: [f64; 2], cut: Option<f64>, ground: Option<&Ground>) 
     }
     // [142] Decken (auch Balkone, Auskragungen) werfen Schatten, decken Tieferes ab und empfangen ihn.
     for ce in p.ceilings.as_deref().unwrap_or(&[]) {
-        let (zb, zt) = p.ceiling_vertical_extent(ce);
+        // [281] Geneigte Decke: Hüllprisma über die ganze Höhenspanne; sie empfängt keinen Schatten (die
+        // Empfangsfläche ist waagrecht gedacht).
+        let sloped = ce.slope_plane().is_some();
+        let (zb, zt) = p.ceiling_vertical_span(ce);
         let ring = |r: &[crate::model::Vec2]| r.iter().map(|v| [v.x, v.y]).collect::<Ring>();
         // [191] Umriss mit Bögen fein geteilt (wie die Aussparungen), sonst schnitte die Sehne den Erker ab.
         let outline = ring(&ce.ring());
@@ -1077,7 +1080,9 @@ fn collect(p: &Project, k: [f64; 2], cut: Option<f64>, ground: Option<&Ground>) 
             continue;
         }
         covers.push(Cover { region: region.clone(), bottom: zb });
-        receive(region, [0.0, 0.0, zt], zt);
+        if !sloped {
+            receive(region, [0.0, 0.0, zt], zt);
+        }
         prisms.push((Prism { footprint: outline, z_bottom: zb, z_top: zt }, holes));
     }
     // [142] Dächer in ihrer echten Form: verschnittene Dächer (Gauben, Anbauten) als Hülle ihres

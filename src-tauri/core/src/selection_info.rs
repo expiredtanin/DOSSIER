@@ -592,6 +592,8 @@ fn ceiling_selection(root: &Map<String, Value>, c: &Value) -> Result<J, String> 
         .raw("bottom", c, "bottom")
         .n("zBottom", zb)
         .n("zTop", zt)
+        // [281] Neigung (fehlt = waagrecht).
+        .raw("slope", c, "slope")
         .v("openings", J::arr(openings))
         .done();
     Ok(O::default()

@@ -35,6 +35,7 @@ import type {
   Stair,
   StairShape,
   Vec2,
+  CeilingSlope,
   VerticalAnchor,
   WallReferenceLine,
   WallType,
@@ -451,6 +452,11 @@ export interface PanelHostValue {
    * haben — additive Erweiterung analog `onSetWallBottom`.
    */
   onSetCeilingBottom?: (anchor: VerticalAnchor | null) => void;
+  /**
+   * [281] Neigung der gewählten Decke(n) setzen (`null` = waagrecht). `"enable"` schaltet sie mit einer Vorgabe ein:
+   * Gefällelinie längs der längeren Seite der Hüllbox, Bezugspunkt in deren Mitte am Anfang, 2 % bzw. als Rampe 6 %.
+   */
+  onSetCeilingSlope?: (slope: CeilingSlope | null | { enable: "slope" | "ramp" }) => void;
 
   // ── Öffnungs-Attribute (Object-Info-Panel; nur die selektierte Öffnung) ─
   /** Wechselt die Art (Fenster/Tür); setzt bei Tür die Tür-Defaults. */

@@ -64,6 +64,7 @@ const LEVELS: DrawingLevel[] = [
 const CEILING_TYPES: CeilingType[] = [
   { id: "wb-ct-decke", name: "Geschossdecke Unterlagsboden, Trittschall, STB 37 cm", layers: [L("std-c-parkett", 0.015), L("std-c-zementestrich", 0.065), L("std-c-trittschall", 0.04), L("std-c-stahlbeton", 0.24), L("std-c-innenputz", 0.01)] },
   { id: "wb-ct-bodenplatte", name: "Bodenplatte STB auf XPS", layers: [L("std-c-zementestrich", 0.08), L("std-c-xps", 0.12), L("std-c-stahlbeton", 0.25), L("std-c-kies", 0.1)] },
+  { id: "wb-ct-rampe", name: "Rampe STB auf Kies", layers: [L("std-c-stahlbeton", 0.22), L("std-c-kies", 0.15)] },
 ];
 const ROOF_TYPES: RoofType[] = [{ id: "wb-rt-flach", name: "Flachdach Umkehrdach bekiest", layers: [L("std-c-kies", 0.06), L("std-c-xps", 0.18), L("std-c-stahlbeton", 0.22)] }];
 const WINDOW_TYPES: WindowType[] = [
@@ -148,6 +149,12 @@ const ceilings: NonNullable<Project["ceilings"]> = [
   { id: "c-bodenplatte", type: "ceiling", floorId: "eg", categoryCode: "30", outline: slab, wallTypeId: "", ceilingTypeId: "wb-ct-bodenplatte", top: { mode: "floor", floorId: "eg", offset: 0 }, loadBearing: true },
   { id: "c-eg", type: "ceiling", floorId: "eg", categoryCode: "30", outline: slab, openings: [HOLE], wallTypeId: "", ceilingTypeId: "wb-ct-decke", loadBearing: true },
   { id: "c-og1", type: "ceiling", floorId: "og1", categoryCode: "30", outline: slab, openings: [HOLE], wallTypeId: "", ceilingTypeId: "wb-ct-decke", loadBearing: true },
+  // [281] Eingangsrampe an der Ostfassade (im Schnitt B-B längs): 6 m mit 6 % vom Gelände (−0.36) bis ±0.00.
+  {
+    id: "c-rampe", type: "ceiling", floorId: "eg", categoryCode: "30", outline: [P(W + HA, 2), P(W + HA + 6, 2), P(W + HA + 6, 5), P(W + HA, 5)],
+    wallTypeId: "", ceilingTypeId: "wb-ct-rampe", top: { mode: "floor", floorId: "eg", offset: 0 }, isExternal: true,
+    slope: { from: P(W + HA, 3.5), to: P(W + HA + 6, 3.5), rise: -0.36, ramp: true },
+  },
 ];
 const stairs: NonNullable<Project["stairs"]> = ["eg", "og1"].map((f) => ({
   id: `tr-${f}`, type: "stair" as const, floorId: f, categoryCode: "40", shape: "straight" as const, typeId: "wb-tr-beton", start: P(10, 1.4), dir: P(0, 1), runLength: 4.3, width: 1.1, totalRise: FH, stepCount: 17,

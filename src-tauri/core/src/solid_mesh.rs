@@ -315,9 +315,20 @@ pub fn spec_solid_q(spec: &Value, depth: usize, min_seg: usize) -> Option<Solid>
             if cr > 1e-6 {
                 outer = round_ring(&outer, cr, min_seg);
             }
-            let body = solid(&tube(&[ring_at(&outer, z0), ring_at(&outer, z0 + h)], false))?;
+            // [281] Geneigte Platte: `slope` = [ox, oy, gx, gy], jede Höhe um gx·(x−ox) + gy·(y−oy) versetzt.
+            let g: Option<[f64; 4]> = match nums(spec.get("slope")) {
+                Some(v) if v.len() == 4 && v.iter().all(|x| x.is_finite()) => Some([v[0], v[1], v[2], v[3]]),
+                _ => None,
+            };
+            let at = |r: &[[f64; 2]], z: f64| -> Vec<P3> {
+                match &g {
+                    Some(g) => r.iter().map(|q| [q[0], q[1], z + crate::model::helpers::slope_dz(g, q[0], q[1])]).collect(),
+                    None => ring_at(r, z),
+                }
+            };
+            let body = solid(&tube(&[at(&outer, z0), at(&outer, z0 + h)], false))?;
             let e = 1e-3;
-            minus_holes(body, &holes_of(spec)?, &|r| tube(&[ring_at(r, z0 - e), ring_at(r, z0 + h + e)], false))
+            minus_holes(body, &holes_of(spec)?, &|r| tube(&[at(r, z0 - e), at(r, z0 + h + e)], false))
         }
         "extrudePlane" => {
             let (o, u, v) = (vec3(spec, "origin")?, vec3(spec, "uAxis")?, vec3(spec, "vAxis")?);

@@ -301,7 +301,14 @@ function rayPrismXZ(
  * oder null — s. {@link rayPrismXZ}.
  */
 export function raySlabPrism(ray: Ray, slab: PickSlab): number | null {
-  return rayPrismXZ(ray, slab.outline, slab.zBottom, slab.zTop);
+  const g = slab.slope;
+  if (!g) return rayPrismXZ(ray, slab.outline, slab.zBottom, slab.zTop);
+  // [281] Geneigte Platte: in den ungescherten Raum abbilden (Höhe − Versatz der Neigungsebene). Die Scherung ist
+  // affin, der Strahlparameter t bleibt also gleich.
+  const [ox, oz] = [ray.origin[0], ray.origin[2]];
+  const origin: Vec3 = [ox, ray.origin[1] - (g[2] * (ox - g[0]) + g[3] * (oz - g[1])), oz];
+  const dir: Vec3 = [ray.dir[0], ray.dir[1] - (g[2] * ray.dir[0] + g[3] * ray.dir[2]), ray.dir[2]];
+  return rayPrismXZ({ ...ray, origin, dir }, slab.outline, slab.zBottom, slab.zTop);
 }
 
 /**

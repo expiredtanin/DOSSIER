@@ -654,7 +654,8 @@ fn ceilings(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) -> Result<()
         .iter()
         .filter(|x| c.vis(&x.category_code, &x.id))
         .filter_map(|x| {
-            let (zb, zt) = p.ceiling_vertical_extent(x);
+            // [281] Geneigte Decke: ganze Höhenspanne über den Umriss.
+            let (zb, zt) = p.ceiling_vertical_span(x);
             let zone = range.classify(zb, zt);
             let keep = zone != super::view_range::Zone::Hidden && (x.floor_id == c.a.floor || range.admits_other_floor(zone));
             keep.then_some((x, zone))
@@ -713,6 +714,8 @@ fn ceilings(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) -> Result<()
         for [a, b] in ceiling_outline_lines(&merged.ring, &merged.bridge_edges, &fps).into_iter().filter(|_| outline) {
             out.push(line(pv(a), pv(b), "ceiling-outline", w, Some(Some(OVERHEAD_DASH.to_vec())), stroke, Some(greyed)));
         }
+        // [281] Geneigte Decke/Rampe: Gefällepfeil bzw. Lauflinie mit Gefälle in % (Klasse der Decke, [180]).
+        slope_symbol(ce, &pts, c.a.scale, w, stroke, greyed, out);
         // Eigene Decke „über Schnitt“ bleibt wie bisher (Umriss ist schon strichpunktiert, die Fläche
         // deckt wie gewohnt); umgezeichnet werden Decken unter dem Schnitt und solche anderer Geschosse.
         if ce.floor_id != c.a.floor || zone != super::view_range::Zone::Above {
@@ -722,6 +725,96 @@ fn ceilings(c: &Ctx, out: &mut Vec<Primitive>, bounds: &mut Bounds) -> Result<()
         }
     }
     Ok(())
+}
+
+/// [281] Gefälle als Text: eine Nachkommastelle, ganze Zahlen ohne („15 %", „1.5 %").
+pub(crate) fn slope_percent_text(pct: f64) -> String {
+    let r = round(pct.abs() * 10.0) / 10.0;
+    if (r - round(r)).abs() < 1e-9 { format!("{} %", r as i64) } else { format!("{r:.1} %") }
+}
+
+/// [281] Symbol einer geneigten Decke im Grundriss: Gefällepfeil (abwärts, kurz, um die Mitte) bzw. bei einer Rampe die
+/// Lauflinie über die ganze Länge (Antrittskreis unten, Pfeil oben, wie bei Treppen) und das Gefälle in % längs des
+/// Pfeils. Linien `ceiling-slope` in der Strichfarbe der Decke; gezeichnet nur, wenn die Deckenklasse sichtbar ist.
+fn slope_symbol(ce: &Ceiling, ring: &[[f64; 2]], scale: f64, w: f64, stroke: &str, greyed: bool, out: &mut Vec<Primitive>) {
+    let (Some(sl), Some(_)) = (ce.slope.as_ref(), ce.slope_plane()) else { return };
+    if ring.len() < 3 || !(scale.is_finite() && scale > 0.0) {
+        return;
+    }
+    let (dx, dy) = (sl.to.x - sl.from.x, sl.to.y - sl.from.y);
+    let len = dx.hypot(dy);
+    let pct = sl.rise / len * 100.0;
+    let ramp = ce.is_ramp();
+    // Aufwärts = Richtung steigender Höhe; die Rampe zeigt aufwärts, der Gefällepfeil abwärts (Wasserlauf).
+    let up = if sl.rise > 0.0 { [dx / len, dy / len] } else { [-dx / len, -dy / len] };
+    let d = if ramp { up } else { [-up[0], -up[1]] };
+    let mm = scale / 1000.0;
+    let m = crate::room_area::label_point(ring);
+    // Sehne durch die Mitte längs der Pfeilrichtung: nächste Umrisskanten vor und hinter der Mitte.
+    let (mut t_lo, mut t_hi) = (f64::NEG_INFINITY, f64::INFINITY);
+    for i in 0..ring.len() {
+        let (a, b) = (ring[i], ring[(i + 1) % ring.len()]);
+        let e = [b[0] - a[0], b[1] - a[1]];
+        let den = d[0] * e[1] - d[1] * e[0];
+        if den.abs() < 1e-12 {
+            continue;
+        }
+        let (qx, qy) = (a[0] - m[0], a[1] - m[1]);
+        let t = (qx * e[1] - qy * e[0]) / den;
+        let u = (qx * d[1] - qy * d[0]) / den;
+        if (-1e-9..=1.0 + 1e-9).contains(&u) {
+            if t <= 0.0 { t_lo = t_lo.max(t) } else { t_hi = t_hi.min(t) }
+        }
+    }
+    if !(t_lo.is_finite() && t_hi.is_finite() && t_hi - t_lo > 1e-3) {
+        return;
+    }
+    let (t0, t1) = if ramp {
+        let inset = (2.0 * mm).min((t_hi - t_lo) * 0.1);
+        (t_lo + inset, t_hi - inset)
+    } else {
+        let half = (12.0 * mm).min(-t_lo * 0.8).min(t_hi * 0.8);
+        (-half, half)
+    };
+    if !(t1 - t0 > 1e-3) {
+        return;
+    }
+    let at = |t: f64| [m[0] + d[0] * t, m[1] + d[1] * t];
+    let (a, b) = (at(t0), at(t1));
+    let cls = "ceiling-slope";
+    out.push(line(pv(a), pv(b), cls, w, None, stroke, Some(greyed)));
+    // Pfeilspitze (offen, ±25°) am Ende; Rampe: Antrittskreis am Anfang.
+    let head = (2.5 * mm).min((t1 - t0) * 0.4);
+    let (c25, s25) = (0.906_307_787_036_649_9, 0.422_618_261_740_699_4);
+    for sg in [1.0, -1.0] {
+        let r = [-(d[0] * c25 - d[1] * s25 * sg), -(d[1] * c25 + d[0] * s25 * sg)];
+        out.push(line(pv(b), pv([b[0] + r[0] * head, b[1] + r[1] * head]), cls, w, None, stroke, Some(greyed)));
+    }
+    if ramp {
+        out.push(Primitive::DrawingCircle { center: pv(a), r: 0.75 * mm, fill: stroke.to_string(), stroke: stroke.to_string(), weight_mm: w, dash: None, drawing_id: None, greyed: Some(greyed), opacity: None });
+    }
+    // Gefälle längs des Pfeils, lesbar (Schrift nie kopfüber), links neben der Linie.
+    let text = slope_percent_text(pct);
+    let h = 2.5 * mm;
+    let tw = crate::text_layout::text_width_em(&text, false) * h;
+    let u = if d[0] < -1e-9 || (d[0].abs() <= 1e-9 && d[1] < 0.0) { [-d[0], -d[1]] } else { d };
+    let n = [-u[1], u[0]];
+    let mid = at((t0 + t1) / 2.0);
+    let gap = 0.8 * mm;
+    let pos = [mid[0] - u[0] * tw / 2.0 + n[0] * gap, mid[1] - u[1] * tw / 2.0 + n[1] * gap];
+    out.push(Primitive::DrawingText {
+        at: pv(pos),
+        text,
+        height_m: h,
+        angle: crate::jsnum::atan2(u[1], u[0]),
+        color: stroke.to_string(),
+        marks: None,
+        wrap_width: None,
+        doc: None,
+        drawing_id: None,
+        greyed: Some(greyed),
+        opacity: None,
+    });
 }
 
 // ── Dächer ──────────────────────────────────────────────────────────────────

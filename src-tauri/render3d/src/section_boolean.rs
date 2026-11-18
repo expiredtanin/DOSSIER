@@ -24,6 +24,16 @@ fn poly_from_rect(src: &CutPolygon, r: Rect) -> CutPolygon {
     }
 }
 
+/// [281] Liegen alle Ecken auf den Kanten der Hüllbox (achsparalleles Rechteck)?
+fn is_axis_rect(pts: &[[f32; 2]]) -> bool {
+    let (mut u0, mut u1, mut v0, mut v1) = (f32::INFINITY, f32::NEG_INFINITY, f32::INFINITY, f32::NEG_INFINITY);
+    for p in pts {
+        (u0, u1, v0, v1) = (u0.min(p[0]), u1.max(p[0]), v0.min(p[1]), v1.max(p[1]));
+    }
+    const E: f32 = 1e-5;
+    pts.iter().all(|p| ((p[0] - u0).abs() < E || (p[0] - u1).abs() < E) && ((p[1] - v0).abs() < E || (p[1] - v1).abs() < E))
+}
+
 /// Globale Schnitt-Dominanz (staerkere `join_priority` schneidet schwaechere weg, gleiche Komponente
 /// und Prioritaet verschmilzt) — siehe `dossier_hatch::section_dominance`.
 pub fn subtract_dominant_bands(bands: Vec<CutPolygon>) -> Vec<CutPolygon> {
@@ -36,11 +46,11 @@ pub fn subtract_dominant_bands(bands: Vec<CutPolygon>) -> Vec<CutPolygon> {
                 let n = ids.len() as u32;
                 *ids.entry(id).or_insert(n)
             });
-            Band {
-                rect: rect_of_points(b.pts.iter().map(|p| (p[0] as f64, p[1] as f64))),
-                prio: meta.and_then(|c| c.join_priority).map(f64::from),
-                comp,
-            }
+            // [281] Schräge Bänder (geneigte Platte) sind kein Rechteck: nehmen an der Dominanz nicht teil
+            // (wie Dach-Schichten), sonst schnitte ihre Hüllbox zu viel weg.
+            let rect = rect_of_points(b.pts.iter().map(|p| (p[0] as f64, p[1] as f64)));
+            let prio = meta.and_then(|c| c.join_priority).map(f64::from).filter(|_| b.component.kind != crate::section::ComponentKind::Slab || is_axis_rect(&b.pts));
+            Band { rect, prio, comp }
         })
         .collect();
     dominant_bands(&inp)

@@ -345,9 +345,19 @@ struct Prism {
     /// Ebene Oberkante unter einer Dachfläche ([G2], `WallInput::top_plane`): Ursprung (Grundriss)
     /// und `[z, dz/dx, dz/dy]`; `z1` ist dann der höchste Eckwert.
     top: Option<(Point2, [f32; 3])>,
+    /// [281] Geneigte Platte (`SlabInput::slope`): alle Höhen um den Versatz der Neigungsebene verschoben.
+    shear: Option<[f32; 4]>,
 }
 
 impl Prism {
+    /// [281] Höhenversatz der geneigten Platte am Grundrisspunkt (sonst 0).
+    fn dz(&self, p: Point2) -> f32 {
+        match self.shear {
+            Some(s) => s[2] * (p[0] - s[0]) + s[3] * (p[1] - s[1]),
+            None => 0.0,
+        }
+    }
+
     /// Oberkante an einem Grundriss-Punkt.
     fn top_at(&self, p: Point2) -> f32 {
         match self.top {
@@ -447,6 +457,7 @@ fn wall_prism(index: usize, wall: &WallInput) -> Option<Prism> {
         cut: wall.cut.clone(),
         monolith: None,
         top: wall.top_plane.map(|c| (wall.start, c)),
+        shear: None,
     })
 }
 
@@ -472,6 +483,7 @@ fn slab_prism(index: usize, slab: &SlabInput) -> Option<Prism> {
         cut: slab.cut.clone(),
         monolith: slab.monolith.clone(),
         top: None,
+        shear: slab.slope,
     })
 }
 
@@ -653,6 +665,11 @@ fn prism_bounds(plane: &SectionPlane, prism: &Prism) -> PrismBounds {
         }
     }
 
+    // [281] Geneigte Platte: Hüllhöhe über den ganzen Umriss (konservativ, wie die achsparallele Näherung).
+    let (dlo, dhi) = match prism.shear {
+        Some(_) => prism.footprint.iter().fold((f32::INFINITY, f32::NEG_INFINITY), |(a, b), &p| (a.min(prism.dz(p)), b.max(prism.dz(p)))),
+        None => (0.0, 0.0),
+    };
     PrismBounds {
         kind: prism.kind,
         index: prism.index,
@@ -661,8 +678,8 @@ fn prism_bounds(plane: &SectionPlane, prism: &Prism) -> PrismBounds {
         depth_min,
         depth_max,
         monolith: prism.monolith.clone(),
-        z0: prism.z0,
-        z1: prism.z1,
+        z0: prism.z0 + dlo,
+        z1: prism.z1 + dhi,
         opening_voids,
     }
 }
@@ -897,19 +914,23 @@ fn prism_wireframe_edges(prism: &Prism) -> Vec<([f32; 3], [f32; 3], HeightBias)>
     let n = prism.footprint.len();
     let mut edges = Vec::with_capacity(3 * n);
     for i in 0..n {
+        let d = prism.dz(prism.footprint[i]);
         edges.push((
-            to_world(prism.footprint[i], prism.z0),
-            to_world(prism.footprint[i], prism.top_at(prism.footprint[i])),
+            to_world(prism.footprint[i], prism.z0 + d),
+            to_world(prism.footprint[i], prism.top_at(prism.footprint[i]) + d),
             HeightBias::Vertical,
         ));
     }
+    // [281] Geneigte Platte: Boden- und Deckelkanten variieren in der Höhe.
+    let sheared = prism.shear.is_some();
     for i in 0..n {
         let a = prism.footprint[i];
         let b = prism.footprint[(i + 1) % n];
-        edges.push((to_world(a, prism.z0), to_world(b, prism.z0), HeightBias::BottomCap));
+        let (da, db) = (prism.dz(a), prism.dz(b));
+        edges.push((to_world(a, prism.z0 + da), to_world(b, prism.z0 + db), if sheared { HeightBias::Vertical } else { HeightBias::BottomCap }));
         // Schräge Deckelkante ([G2]): Höhe variiert, geschlossene Randbehandlung.
-        let bias = if prism.top.is_some() { HeightBias::Vertical } else { HeightBias::TopCap };
-        edges.push((to_world(a, prism.top_at(a)), to_world(b, prism.top_at(b)), bias));
+        let bias = if prism.top.is_some() || sheared { HeightBias::Vertical } else { HeightBias::TopCap };
+        edges.push((to_world(a, prism.top_at(a) + da), to_world(b, prism.top_at(b) + db), bias));
     }
     edges
 }
@@ -1228,6 +1249,15 @@ fn cut_polygons_and_prisms(
                 } else {
                     (rz1, rz1)
                 };
+                // [281] Geneigte Platte: Unter- und Oberkante längs der Schnittlinie um den Versatz verschoben.
+                let (dlo, dhi) = match prism.shear {
+                    Some(_) => {
+                        let (p0, ua) = (plane.plan_point(), plane.plan_u_axis());
+                        let at = |u: f32| prism.dz([p0[0] + u * ua[0], p0[1] + u * ua[1]]);
+                        (at(rlo), at(rhi))
+                    }
+                    None => (0.0, 0.0),
+                };
                 cut_polygons.push(CutPolygon {
                     component: ComponentRef {
                         kind: prism.kind,
@@ -1235,7 +1265,7 @@ fn cut_polygons_and_prisms(
                     },
                     color: prism.color,
                     hatch: prism.hatch,
-                    pts: vec![[rlo, rz0], [rhi, rz0], [rhi, zb], [rlo, za]],
+                    pts: vec![[rlo, rz0 + dlo], [rhi, rz0 + dhi], [rhi, zb + dhi], [rlo, za + dlo]],
                     cut: prism.cut.clone(),
                 });
             }
@@ -1310,6 +1340,7 @@ mod tests {
         ];
         let slabs = vec![SlabInput {
             monolith: None,
+            slope: None,
             outline: vec![[-0.5, -0.5], [3.5, -0.5], [3.5, 3.5], [-0.5, 3.5]],
             z_bottom: -0.2,
             z_top: 0.0,

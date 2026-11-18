@@ -79,6 +79,7 @@ fn stair_slabs(stairs: &[(usize, &Stair)], slabs: Vec<crate::stairs3d::Slab>) ->
                 hatch: None,
                 cut: None,
                 monolith: s.monolith.then(|| stair.id.clone()),
+                slope: None,
                 source: SlabSource::Stair { index: si },
             }
         })
