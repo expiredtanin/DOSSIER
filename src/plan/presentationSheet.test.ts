@@ -167,7 +167,7 @@ describe("[66] Präsentationsplan", () => {
     };
     expect(levelHasContent(onlyParts, "lv-bau")).toBe(true);
     expect(presentationDefaults(onlyParts).floors).toContain("lv-bau");
-  });
+  }, 180_000); // schwer (ganzes Kataster-Projekt): unter Last > 60 s
 
   it("[224] fester Massstab und Massstab je Viewport landen in Ausschnitt und Viewport", () => {
     const floors = project.drawingLevels.filter((l) => l.kind === "floor" && !l.layoutId).slice(0, 2).map((l) => l.id);
