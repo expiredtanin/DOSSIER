@@ -570,7 +570,9 @@ pub fn elevation_primitives_ren(p: &Project, level: &LevelSpec, shadows: bool, m
             }
         })
     };
-    for (depth, tree) in super::trees::view_trees_in_front(p, level, vis, Some(super::trees::view_crown_fill(mono)), None, ren, Some(&in_front)) {
+    // [253] Entourage (Person, Auto …): gefüllte Silhouetten ihrer Teile, ebenfalls in der Maler-Reihenfolge.
+    let entourage = super::entourage::view_entourage(p, level, vis, true, mono);
+    for (depth, tree) in super::trees::view_trees_in_front(p, level, vis, Some(super::trees::view_crown_fill(mono)), None, ren, Some(&in_front)).into_iter().chain(entourage) {
         for prim in tree {
             if let Primitive::Polygon { pts, .. } = &prim {
                 for q in pts {

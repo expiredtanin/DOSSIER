@@ -237,7 +237,8 @@ pub(crate) fn view_faces(p: &Project, view: &dyn Fn([f64; 3]) -> [f64; 3], view_
         }
         owners.push((Kind::Mesh, k));
         let owner = owners.len() as u32 - 1;
-        crate::mesh_view::hlr_faces(m, &|q| view([q[0], q[2], q[1]]), owner, group, clip, &mut faces);
+        // Netz (x, y, Höhe) → Welt (x, Höhe, y); Normalen über die Kofaktor-Abbildung der Ansicht (auch schiefe Projektionen).
+        crate::mesh_view::hlr_faces_n(m, &|q| view([q[0], q[2], q[1]]), Some(&|n| view_normal([n[0], n[2], n[1]])), owner, group, clip, &mut faces);
         group += 1;
     }
     // [180] Bauteile ausgeblendeter Klassen: weder Kanten noch Verdecker.

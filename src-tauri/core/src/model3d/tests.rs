@@ -1187,3 +1187,25 @@ fn entourage_im_3d_klasse_und_filter() {
     let f = ClassFilter::from_text(&p, r#"{"hideIds": ["pers1"]}"#);
     assert_eq!(parts_filtered(&p, true, 1.0, false, &f).unwrap().column_meshes.len(), n0);
 }
+
+/// [253] Entourage im 3D-Pick: die Teilnetze einer Person kommen als Pick-Fläche mit der Id der Zeichnung (wählt das
+/// 2D-Bibliotheksobjekt); Objekte ohne Netz (WC) liefern nichts.
+#[test]
+fn entourage_pick_im_3d() {
+    let mut p = sample();
+    let lv = p.drawing_levels[0].id.clone();
+    let d = |v: serde_json::Value| -> Drawing2D { serde_json::from_value(v).unwrap() };
+    let n0 = pick_geometry(&p).unwrap().drawing_meshes.len();
+    p.drawings2d.push(d(serde_json::json!({"id": "pers1", "type": "drawing2d", "levelId": lv, "categoryCode": "24", "geom": {"shape": "libobj", "libId": "lib:person-stehend", "at": {"x": 4.0, "y": -3.0}, "rotation": 0.5}})));
+    p.drawings2d.push(d(serde_json::json!({"id": "wc1", "type": "drawing2d", "levelId": lv, "categoryCode": "23", "geom": {"shape": "libobj", "libId": "lib:wc-wand", "at": {"x": 1.0, "y": 1.0}, "rotation": 0.0}})));
+    let g = pick_geometry(&p).unwrap();
+    let mine: Vec<_> = g.drawing_meshes.iter().filter(|m| m.drawing_id == "pers1").collect();
+    assert_eq!(mine.len(), 1, "ein Pick-Netz je Objekt");
+    assert!(g.drawing_meshes.iter().all(|m| m.drawing_id != "wc1"));
+    assert_eq!(g.drawing_meshes.len(), n0 + 1);
+    // Welt (x, Höhe, y): Höhe bis Kopf, x/y um den Einfügepunkt.
+    let top = mine[0].tris.iter().flatten().map(|q| q[1]).fold(f64::NEG_INFINITY, f64::max);
+    let base = p.floor(&lv).map_or(0.0, |f| f.base_elevation.unwrap_or(0.0));
+    assert!((top - (base + 1.75)).abs() < 1e-9, "{top}");
+    assert!(mine[0].tris.iter().flatten().all(|q| (q[0] - 4.0).abs() < 1.0 && (q[2] + 3.0).abs() < 1.0));
+}

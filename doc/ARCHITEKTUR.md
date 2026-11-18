@@ -465,9 +465,9 @@ sich mit starrer Geometrie nicht speichern. Aufbau in `src-tauri/core/src/furnit
 (geschlossene Low-Poly-Teilnetze in Kastenkoordinaten, prozedural aus den Parametern; Parameter `h` = Höhe: Person 1.75, Auto Dach,
 Velo Lenker, Bank Sitz, Tisch Platte). Stuhl-Plätze der Tische kommen aus dem 2D-Lauf (`Sh::chairs`), also dieselbe Unordnung nach Seed.
 `furniture_3d::placed(p)` stellt jede `Libobj`-Zeichnung ins Modell (Fuss = Gelände, sonst Geschoss-UK). Verbraucher: `model3d::emit_entourage`
-(3D, Pick-frei, Explosion, Cache-Stand `entourage_stamp`), `mesh_data` (Cycles, Gruppe „entourage"), `plan/axo.rs` (über
-`with_context_meshes`, nur längentreue Projektionen), `sun.rs` (Schattenwolken). Klasse und Ausblenden = die der Zeichnung ([180]).
-Der Grundriss bleibt beim 2D-Symbol. Nicht in Schnitt/Ansicht und nicht im IFC.
+(3D, Explosion, Cache-Stand `entourage_stamp`), `model3d::pick_drawing_meshes` (3D-Pick wählt die Zeichnung), `mesh_data` (Cycles, Gruppe „entourage"), `plan/axo.rs` (über
+`with_context_meshes`; in schiefen Projektionen nur die Entourage, Normalen über `mesh_view::hlr_faces_n`), `plan/entourage.rs` (Schnitt/Ansicht: konvexe Hüllen der Teilnetze), `sun.rs` (Schattenwolken). Klasse und Ausblenden = die der Zeichnung ([180]).
+Der Grundriss bleibt beim 2D-Symbol. Nicht im IFC.
 
 Neues eingebautes Objekt: Eintrag in `furniture_lib.rs::build()` (Definition + Zeichenfunktion), Namen in `de.ts`/`en.ts`.
 Standards laden ergänzt die Klassen „Möbel", „Sanitär" und „Fahrzeuge & Freiflächen" (`standards.rs::merge_plan`).

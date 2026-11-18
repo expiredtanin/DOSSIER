@@ -424,11 +424,20 @@ pub fn occlude_in_section(groups: Vec<(f64, Vec<Primitive>)>, occ: &[super::sect
                 continue;
             }
             match q {
-                Primitive::Polygon { pts, stroke, stroke_width_mm, greyed, context_object_id, .. } => {
-                    out.push(poly(pts, "none", "none", 0.0, context_object_id, greyed));
+                Primitive::Polygon { pts, stroke, stroke_width_mm, greyed, context_object_id, drawing_id, .. } => {
+                    // [253] Entourage trägt die Id ihrer Zeichnung (Pick), der Baum die seine über `context_object_id`.
+                    let mut pick = poly(pts, "none", "none", 0.0, context_object_id, greyed);
+                    if let Primitive::Polygon { drawing_id: d, .. } = &mut pick {
+                        d.clone_from(&drawing_id);
+                    }
+                    out.push(pick);
                     for k in r {
                         for (a, b) in &parts[k] {
-                            out.push(line(*a, *b, "tree-view", stroke_width_mm, &stroke, None, greyed));
+                            let mut l = line(*a, *b, "tree-view", stroke_width_mm, &stroke, None, greyed);
+                            if let Primitive::Line { drawing_id: d, .. } = &mut l {
+                                d.clone_from(&drawing_id);
+                            }
+                            out.push(l);
                         }
                     }
                 }

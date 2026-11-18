@@ -300,8 +300,9 @@ fn prepare(p: &Project, proj: &Projection, vis: &Visibility, context: bool) -> R
                 let q = model_of(n);
                 [dot(cof[0], q), dot(cof[1], q), dot(cof[2], q)]
             };
-            // [253] Entourage (Person, Auto …) als Netze im Kontext der Kopie; nur längentreu (nicht in schiefen Projektionen).
-            let ent = if ortho { crate::furniture_3d::with_context_meshes(p, context) } else { None };
+            // [253] Entourage (Person, Auto …) als Netze im Kontext der Kopie; in schiefen Projektionen nur sie (ohne die
+            // übrigen Kontext-Netze), ihre Normalen laufen über die Kofaktor-Abbildung.
+            let ent = crate::furniture_3d::with_context_meshes(p, context && ortho);
             let (pp, meshes) = match &ent {
                 Some(q) => (q, true),
                 None => (p, context && ortho),

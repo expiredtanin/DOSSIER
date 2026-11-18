@@ -140,3 +140,56 @@ fn ansicht_baeume_vor_und_hinter_dem_haus() {
     assert!(v_.unwrap() > last_wall, "Baum vorn über der Fassade");
     assert!(matches!(&prims[v_.unwrap()], Primitive::Polygon { fill, .. } if fill == "none"), "{:?}", &prims[v_.unwrap()]);
 }
+
+fn person_at(id: &str, x: f64, y: f64) -> Drawing2D {
+    serde_json::from_value(json!({"id": id, "type": "drawing2d", "levelId": "eg", "categoryCode": "24", "geom": {"shape": "libobj", "libId": "lib:person-stehend", "at": {"x": x, "y": y}, "rotation": 0.0}})).unwrap()
+}
+
+/// Polygone der Entourage (Zeichnung `id`) in den Primitiven: (gefüllt?, Ausmass).
+fn entourage_polys(prims: &[Primitive], id: &str) -> Vec<(bool, [f64; 4])> {
+    prims
+        .iter()
+        .filter_map(|q| match q {
+            Primitive::Polygon { pts, fill, drawing_id: Some(d), .. } if d == id && !pts.is_empty() => Some((fill != "none", bounds(&pts.iter().map(|p| (*p, *p)).collect::<Vec<_>>()))),
+            _ => None,
+        })
+        .collect()
+}
+
+/// [253] Ansicht: Person vor der Fassade zeichnet als gefüllte Silhouetten ihrer Teile (Pick = Zeichnung, 1.75 m hoch,
+/// über der Fassade gemalt); eine Person hinter dem Haus wird unter der Fassade gemalt.
+#[test]
+fn entourage_in_der_ansicht() {
+    let mut p = sample();
+    p.drawings2d.push(person_at("vorn", 2.5, -1.0));
+    p.drawings2d.push(person_at("hinten", 2.5, 10.0));
+    let prims = elevation(&p);
+    let vorn = entourage_polys(&prims, "vorn");
+    assert!(vorn.len() >= 5 && vorn.iter().all(|(f, _)| *f), "{vorn:?}");
+    let b = vorn.iter().fold([f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY], |b, (_, q)| [b[0].min(q[0]), b[1].min(q[1]), b[2].max(q[2]), b[3].max(q[3])]);
+    assert!((b[3] - b[1] - 1.75).abs() < 0.02 && b[2] - b[0] < 1.0, "{b:?}");
+    let wall = |q: &Primitive| matches!(q, Primitive::Polygon { wall_id: Some(_), .. });
+    let own = |id: &'static str| move |q: &Primitive| matches!(q, Primitive::Polygon { drawing_id: Some(d), .. } if d == id);
+    assert!(prims.iter().position(own("vorn")).unwrap() > prims.iter().rposition(wall).unwrap(), "vorn über der Fassade");
+    assert!(prims.iter().position(own("hinten")).unwrap() < prims.iter().position(wall).unwrap(), "hinten unter der Fassade");
+}
+
+/// [253] Schnitt: Person hinter der Ebene als Umriss (ungefüllt); vor der Ebene entfällt sie; hinter dem Haus bleibt die
+/// Pick-Fläche; die Klasse schaltet sie ab.
+#[test]
+fn entourage_im_schnitt() {
+    let mut p = sample();
+    p.drawings2d.push(person_at("frei", 20.0, 10.0));
+    p.drawings2d.push(person_at("vorn", 20.0, -5.0));
+    let prims = section(&p);
+    let frei = entourage_polys(&prims, "frei");
+    assert!(frei.len() >= 5 && frei.iter().all(|(f, _)| !*f), "{frei:?}");
+    assert!(entourage_polys(&prims, "vorn").is_empty(), "vor der Ebene fehlt sie");
+    p.drawings2d.push(person_at("haus", 2.5, 3.0));
+    assert!(!entourage_polys(&section(&p), "haus").is_empty(), "Pick-Fläche bleibt");
+    let level = p.drawing_levels.iter().find(|l| l.id == "schnitt-a").unwrap();
+    let v = json!({"level": level, "scale": 100, "detail": "mittel", "hasVis": true, "invisible": ["24"]});
+    let buf = crate::queries::run_bin(&p, "sectionPlan", &[0.0, 1.0, 0.0], &v.to_string()).unwrap();
+    let off = crate::plan::buf::View::parse(&buf).and_then(|v| v.prims()).unwrap_or_default();
+    assert!(entourage_polys(&off, "frei").is_empty(), "Klasse aus");
+}

@@ -343,3 +343,16 @@ fn entourage_im_3d_dokument() {
     assert!(n1 > n0 + 10, "{n0} -> {n1}");
     assert_eq!(lines(&prims_of(&p, serde_json::json!({"view": "southeast", "hasVis": true, "invisible": ["24"]}))).len(), n0, "Klasse aus");
 }
+
+/// [253] Entourage auch in den schiefen Projektionen (`military`, `military30`): Kanten kommen hinzu und die Klasse
+/// schaltet sie ab.
+#[test]
+fn entourage_in_schiefen_projektionen() {
+    let mut p = cubes(&[(0.0, 0.0, 0.0)]);
+    p.drawings2d.push(serde_json::from_value(serde_json::json!({"id": "pers1", "type": "drawing2d", "levelId": "l0", "categoryCode": "24", "geom": {"shape": "libobj", "libId": "lib:auto", "at": {"x": 4.0, "y": -3.0}, "rotation": 0.5}})).unwrap());
+    for kind in ["military", "military30", "iso"] {
+        let n1 = lines(&prims_of(&p, serde_json::json!({"view": "southeast", "projection": kind}))).len();
+        let n0 = lines(&prims_of(&p, serde_json::json!({"view": "southeast", "projection": kind, "hasVis": true, "invisible": ["24"]}))).len();
+        assert!(n1 > n0 + 10, "{kind}: {n0} -> {n1}");
+    }
+}

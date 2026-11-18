@@ -41,6 +41,7 @@ pub mod stamp_place;
 pub mod floor_finish;
 pub mod model_view;
 pub mod trees;
+pub mod entourage;
 pub mod railings;
 pub mod cameras;
 pub mod mesh_plan;

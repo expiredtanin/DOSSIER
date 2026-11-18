@@ -235,6 +235,13 @@ pub fn cut(m: &MeshRef, plane: &[f64]) -> (Vec<Vec<[f64; 2]>>, Vec<Vec<[f64; 2]>
 /// längentreu (auch gespiegelt); `clip`: auf die Seite hinter der Ebene (Tiefe ≥ 0) zuschneiden.
 /// Geschlossene Netze einseitig mit Aussennormale, offene beidseitig.
 pub fn hlr_faces(m: &MeshRef, view: &dyn Fn([f64; 3]) -> [f64; 3], owner: u32, smooth: u32, clip: bool, out: &mut Vec<crate::hlr::Face>) {
+    hlr_faces_n(m, view, None, owner, smooth, clip, out)
+}
+
+/// Wie [`hlr_faces`]; `view_n`: Modellnormale → Ansichtsnormale (Kofaktor-Matrix) für nicht längentreue (schiefe)
+/// Projektionen; `None` = Bild von a + n minus Bild von a.
+#[allow(clippy::too_many_arguments)]
+pub fn hlr_faces_n(m: &MeshRef, view: &dyn Fn([f64; 3]) -> [f64; 3], view_n: Option<&dyn Fn([f64; 3]) -> [f64; 3]>, owner: u32, smooth: u32, clip: bool, out: &mut Vec<crate::hlr::Face>) {
     let pos = &m.mesh.positions;
     let p = |i: u32| {
         let j = 3 * i as usize;
@@ -258,8 +265,13 @@ pub fn hlr_faces(m: &MeshRef, view: &dyn Fn([f64; 3]) -> [f64; 3], owner: u32, s
         }
         let n = [n[0] / l, n[1] / l, n[2] / l];
         // Normale in Ansichtskoordinaten: längentreue Abbildung, also Bild von a + n minus Bild von a.
-        let (va, vn) = (pts[0], view([a[0] + n[0], a[1] + n[1], a[2] + n[2]]));
-        let normal = [vn[0] - va[0], vn[1] - va[1], vn[2] - va[2]];
+        let normal = match view_n {
+            Some(f) => f(n),
+            None => {
+                let (va, vn) = (pts[0], view([a[0] + n[0], a[1] + n[1], a[2] + n[2]]));
+                [vn[0] - va[0], vn[1] - va[1], vn[2] - va[2]]
+            }
+        };
         let (pts, no_edge) = if clip {
             match crate::hlr::clip_front(&pts) {
                 Some(x) => x,

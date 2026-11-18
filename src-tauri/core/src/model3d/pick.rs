@@ -383,6 +383,15 @@ pub(crate) fn pick_drawing_meshes(p: &Project, lift: &HashMap<String, f64>) -> V
             out.push(PickDrawingMesh { tris, drawing_id: d.id.clone() });
         }
     }
+    // [253] Entourage (Person, Auto …): die Teilnetze als Pick-Fläche der Bibliotheks-Zeichnung (wählt das 2D-Objekt).
+    for (i, parts) in crate::furniture_3d::placed(p) {
+        let d = &p.drawings2d[i];
+        let up = lift.get(d.level_id.as_str()).copied().unwrap_or(0.0);
+        let tris: Vec<Tri> = parts.iter().flat_map(|m| extrusion_tris(&m.positions, &m.indices)).map(|t| t.map(|q| [q[0], q[1] + up, q[2]])).collect();
+        if !tris.is_empty() {
+            out.push(PickDrawingMesh { tris, drawing_id: d.id.clone() });
+        }
+    }
     out
 }
 
