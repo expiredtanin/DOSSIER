@@ -147,6 +147,8 @@ struct RoofData {
     /// Neigung je Umrisskante (`None` = Giebel); gilt, wenn `custom` (Form dann Sattel bzw. Walm).
     edge_pitch: Vec<Option<f64>>,
     custom: bool,
+    /// [B4] Eigener Export (Pset `Dossier_Roof`): übrige Dach-Felder (Höfe, Bögen, Überstände, Gauben …) als JSON-Objekt.
+    params: Option<Map<String, Value>>,
 }
 
 struct StairData {
@@ -340,7 +342,8 @@ fn decode_elements(meta: &Value, data: &[f64]) -> Elements {
             }
             "roof" => {
                 if let Some(mut r) = rings(v, 3, 1.0) {
-                    let shape = s_of(e.get("shape")).filter(|x| ["flach", "pult", "sattel", "walm"].contains(&x.as_str()));
+                    let params = e.get("params").and_then(Value::as_str).and_then(|t| serde_json::from_str::<Value>(t).ok()).and_then(|v| if let Value::Object(m) = v { Some(m) } else { None });
+                    let shape = s_of(e.get("shape")).filter(|x| ["flach", "pult", "sattel", "walm", "mansarde", "zelt"].contains(&x.as_str()));
                     let axis = s_of(e.get("ridgeAxis")).filter(|x| x == "x" || x == "y");
                     let outline = r.remove(0);
                     // Neigung je Kante: Zahl ≥ 0 (Traufe) oder null (Giebel), eine je Umrisskante.
@@ -348,7 +351,7 @@ fn decode_elements(meta: &Value, data: &[f64]) -> Elements {
                     let edge_pitch = edge_pitch.filter(|a| a.len() == outline.len()).unwrap_or_default();
                     let custom = e.get("custom").and_then(Value::as_bool).unwrap_or(false) && !edge_pitch.is_empty();
                     if let (Some(shape), Some(ridge_axis)) = (shape, axis) {
-                        out.roofs.push(RoofData { info, outline, shape, ridge_axis, eave_z: v[0], pitch_deg: v[1], thickness: v[2], edge_pitch, custom });
+                        out.roofs.push(RoofData { info, outline, shape, ridge_axis, eave_z: v[0], pitch_deg: v[1], thickness: v[2], edge_pitch, custom, params });
                     }
                 }
             }
@@ -1016,6 +1019,42 @@ fn elements_ops(root: &Map<String, Value>, meta: &Value, products: &[IfcProduct]
             v["shape"] = (if r.edge_pitch.iter().all(Option::is_some) { "walm" } else { "sattel" }).into();
             v["edgePitchDeg"] = r.edge_pitch.iter().map(|p| p.map_or(Value::Null, |x| js_num(round(x, 1e-6)))).collect();
         }
+        // [B4] Eigener Export: die übrigen Felder aus `Dossier_Roof` (Koordinaten wie der Umriss verschoben).
+        if let Some(m) = &r.params {
+            let sh = |q: &Value| -> Value {
+                match (q.get("x").and_then(Value::as_f64), q.get("y").and_then(Value::as_f64)) {
+                    (Some(x), Some(y)) => mv([x, y]),
+                    _ => q.clone(),
+                }
+            };
+            for (k, val) in m {
+                let mut val = val.clone();
+                match k.as_str() {
+                    "holes" => {
+                        if let Some(a) = val.as_array_mut() {
+                            a.iter_mut().for_each(|ring| ring.as_array_mut().into_iter().flatten().for_each(|q| *q = sh(q)));
+                        }
+                    }
+                    "dormers" => {
+                        if let Some(a) = val.as_array_mut() {
+                            for d in a {
+                                if let Some(o) = d.as_object_mut() {
+                                    if let Some(pos) = o.get("position").map(sh) {
+                                        o.insert("position".into(), pos);
+                                    }
+                                    // Typen der Quelldatei gibt es hier nicht.
+                                    o.remove("wallTypeId");
+                                    o.remove("roofTypeId");
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                v[k] = val;
+            }
+            v["shape"] = r.shape.clone().into();
+        }
         // Dachtyp nur mit Material aus der Datei; sonst einschichtig über `thickness`.
         if r.info.layers.iter().any(|l| !l.material.trim().is_empty()) {
             v["roofTypeId"] = type_for(&mut ctx, &mut roof_types, &r.info, r.thickness, "rooftype", "roofTypes").into();
@@ -1231,6 +1270,8 @@ fn rotate_elements(el: &mut Elements, cs: [f64; 2]) {
         ring(&mut sp.boundary);
     }
     for r in &mut el.roofs {
+        // Ein gedrehtes Dach verträgt die Parameter des eigenen Exports (Kanten, Gauben …) nicht.
+        r.params = None;
         ring(&mut r.outline);
         if r.shape != "flach" && r.edge_pitch.len() == r.outline.len() {
             r.custom = true;
@@ -1411,6 +1452,24 @@ mod tests {
         assert_eq!((gid(openings[0]), gid(openings[1])), (Some(ids[1].into()), Some(ids[3].into())));
         assert_eq!(gid(added(&r.ops, "roofs")[0]), None, "ungültige GlobalId wird nicht übernommen");
         assert_eq!(gid(added(&r.ops, "stairs")[0]), Some(ids[5].into()));
+    }
+
+    #[test]
+    fn own_roof_params_overlay_with_map_shift() {
+        let (mut m, data) = meta("Tür");
+        let params = json!({"overhang": 0.4, "overhangGable": 0.2, "holes": [[{"x": 1.0, "y": 1.0}, {"x": 2.0, "y": 1.0}, {"x": 2.0, "y": 2.0}]],
+            "dormers": [{"id": "g", "kind": "sattel", "position": {"x": 3.0, "y": 1.5}, "width": 2.0, "wallTypeId": "weg"}]});
+        let roof = m["elements"]["elements"].as_array_mut().unwrap().iter_mut().find(|e| e["kind"] == "roof").unwrap();
+        roof["shape"] = "mansarde".into();
+        roof["params"] = params.to_string().into();
+        let opts = IfcOptions { file_name: "a.ifc".into(), group: None, elements: true };
+        let r = ifc_import(&root(), &m.to_string(), &[], &[], &data, &opts, 0.0).unwrap();
+        let roofs = added(&r.ops, "roofs");
+        assert_eq!((roofs[0]["shape"].as_str(), roofs[0]["overhang"].as_f64(), roofs[0]["overhangGable"].as_f64()), (Some("mansarde"), Some(0.4), Some(0.2)));
+        // Verschiebung (100, 50) auch auf Höfe und Gaubenpositionen; Typ-Bezüge der Quelldatei entfallen.
+        assert!(at(&roofs[0]["holes"][0][0], 101.0, 51.0), "{}", roofs[0]["holes"]);
+        assert!(at(&roofs[0]["dormers"][0]["position"], 103.0, 51.5));
+        assert!(roofs[0]["dormers"][0].get("wallTypeId").is_none());
     }
 
     #[test]

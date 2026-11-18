@@ -40,13 +40,13 @@ describe("IFC-Import als Bauteile: Rundreise Demo-Haus", () => {
     expect(summary).toMatchObject({ roofs: 1, stairs: 1, roofTypes: 0, doorTypes: 0, windowTypes: 0 });
     expect(p.context ?? []).toEqual([]);
     expect(validateProject(p)).toEqual([]);
-    // Satteldach: Umriss = Traufe samt Überstand (0.4), Überstand 0, Traufhöhe = OK OG (5.2), 30°, First x.
+    // Satteldach ([B4], Pset `Dossier_Roof`): Umriss und Überstand (0.4) wie im Modell, Traufhöhe = OK OG (5.2), 30°, First x.
     const roof = p.roofs![0];
-    expect([roof.shape, roof.ridgeAxis, roof.overhang]).toEqual(["sattel", "x", 0]);
+    expect([roof.shape, roof.ridgeAxis, roof.overhang]).toEqual(["sattel", "x", 0.4]);
     expect(roof.pitchDeg).toBeCloseTo(30, 4);
     expect(roof.baseElevation!).toBeCloseTo(5.2, 6);
     expect(roof.thickness).toBeCloseTo(0.2, 6);
-    for (const q of [{ x: -0.4, y: -0.4 }, { x: 5.4, y: 4.4 }]) expect(roof.outline.some((g) => near(g, q, 1e-6)), JSON.stringify(roof.outline)).toBe(true);
+    for (const q of [{ x: 0, y: 0 }, { x: 5, y: 4 }]) expect(roof.outline.some((g) => near(g, q, 1e-6)), JSON.stringify(roof.outline)).toBe(true);
     // Gerade Treppe: gleicher Antritt, Richtung, Breite, Stufen, Steighöhe und Lauflänge.
     const st0 = sampleProject.stairs![0];
     const st = p.stairs![0];

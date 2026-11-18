@@ -45,6 +45,38 @@ describe("[B4] IFC-Rundreise: Träger, Geländer, Rampen, Dächer", () => {
     expect(new Set(gids).size, "kein Bauteil doppelt als Netz").toBe(gids.length);
   });
 
+  it(":komplex: alle Dächer kommen als Dach zurück (Form, Neigung, Umriss, Gauben)", async () => {
+    const src = buildComplexSampleProject();
+    const { spf, p, summary } = await roundtrip(src);
+    expect(src.roofs!.length).toBe(4);
+    expect((spf.match(/IFCPROPERTYSET\([^;]*Dossier_Roof/g) ?? []).length).toBe(src.roofs!.length);
+    expect(p.roofs?.length).toBe(src.roofs!.length);
+    expect(summary.roofs).toBe(src.roofs!.length);
+    for (const r of src.roofs!) {
+      const got = p.roofs!.find((g) => g.shape === r.shape && g.ridgeAxis === r.ridgeAxis && g.outline.length === r.outline.length && g.outline.every((q, i) => near(q.x, r.outline[i].x) && near(q.y, r.outline[i].y)))!;
+      expect(got, r.id).toBeDefined();
+      expect(near(got.pitchDeg, r.pitchDeg) && near(got.overhang, r.overhang) && near(got.thickness, r.thickness, 1e-4), JSON.stringify(got)).toBe(true);
+      expect(got.overhangGable ?? null).toEqual(r.overhangGable ?? null);
+      expect(got.outlineBulge ?? null).toEqual(r.outlineBulge ?? null);
+      expect(got.parapetHeight ?? null).toEqual(r.parapetHeight ?? null);
+      expect((got.dormers ?? []).map((d) => [d.kind, d.width])).toEqual((r.dormers ?? []).map((d) => [d.kind, d.width]));
+      expect((got.dormers ?? []).every((d, i) => near(d.position.x, r.dormers![i].position.x) && near(d.position.y, r.dormers![i].position.y))).toBe(true);
+      expect(near(got.baseElevation ?? 0, r.baseElevation ?? got.baseElevation ?? 0, 1e-4), `${r.id} ${got.baseElevation} ${r.baseElevation}`).toBe(true);
+    }
+  });
+
+  it(":wettbewerb: Dach kommt als Dach zurück", async () => {
+    const src = buildWettbewerbSampleProject();
+    const { p } = await roundtrip(src);
+    expect(src.roofs!.length).toBeGreaterThan(0);
+    expect(p.roofs?.length).toBe(src.roofs!.length);
+    for (const r of src.roofs!) {
+      const got = p.roofs!.find((g) => g.shape === r.shape && g.outline.length === r.outline.length && near(g.pitchDeg, r.pitchDeg))!;
+      expect(got, r.id).toBeDefined();
+      expect(near(got.thickness, r.thickness, 1e-4)).toBe(true);
+    }
+  });
+
   it(":wettbewerb: Geländer und Rampe kommen als Bauteile zurück", async () => {
     const src = buildWettbewerbSampleProject();
     const { spf, p, summary } = await roundtrip(src);

@@ -171,8 +171,8 @@ describe("anonyme Wettbewerbs-Abgabe in allen Ausgaben", () => {
       expect(o[key], key).toContain("D:20000101000000");
     }
     for (const key of ["IFC4", "IFC2x3"]) {
-      // „Dossier_Qto_…" ist der Name eines Eigenschaftssatzes (Programm-Konvention), keine Angabe zur Herkunft.
-      expect(o[key].replace(/Dossier_Qto_/g, ""), key).not.toMatch(/dossier/i);
+      // „Dossier_Qto_…" und „Dossier_Roof" ([B4]) sind Namen von Eigenschaftssätzen (Programm-Konvention), keine Angabe zur Herkunft.
+      expect(o[key].replace(/Dossier_(Qto_|Roof)/g, ""), key).not.toMatch(/dossier/i);
       expect(o[key], key).not.toContain(`${year}-`);
       expect(o[key], key).toContain(`'${NEUTRAL_ISO}'`);
     }

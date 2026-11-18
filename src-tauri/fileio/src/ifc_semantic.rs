@@ -97,7 +97,7 @@ pub struct Info {
 
 /// Eigenschaften der gemeinsamen Psets, die ins Modell übernommen werden; [158] dazu die Raum-Oberflächen
 /// (`Pset_SpaceCoveringRequirements`, IFC2x3 `Pset_SpaceCommon`) und Nutzung/Bodenaufbau (`Dossier_RoomBook`).
-const COMMON_PROPS: [&str; 17] = [
+const COMMON_PROPS: [&str; 24] = [
     "IsExternal",
     "LoadBearing",
     "FireRating",
@@ -116,11 +116,19 @@ const COMMON_PROPS: [&str; 17] = [
     "Kind",
     "Handrail",
     "Height",
+    // `Dossier_Roof` ([B4]): Gerüst des Dachs und die übrigen Felder als JSON.
+    "RoofShape",
+    "RoofPitch",
+    "RoofRidge",
+    "RoofBase",
+    "RoofThickness",
+    "RoofOutline",
+    "RoofParams",
 ];
 
 /// Psets, deren Eigenschaften aus [`COMMON_PROPS`] gelesen werden: `Pset_*Common` und die Raumbuch-Psets.
 fn reads_common(name: &str) -> bool {
-    (name.starts_with("Pset_") && name.ends_with("Common")) || name == "Pset_SpaceCoveringRequirements" || name == "Dossier_RoomBook" || name == "Dossier_Railing"
+    (name.starts_with("Pset_") && name.ends_with("Common")) || name == "Pset_SpaceCoveringRequirements" || name == "Dossier_RoomBook" || name == "Dossier_Railing" || name == "Dossier_Roof"
 }
 
 #[derive(Clone, Debug, Default)]
@@ -255,6 +263,9 @@ pub struct Roof {
     pub thickness: f64,
     /// Bauteile, aus denen das Dach besteht (IfcRoof + Platten).
     pub parts: Vec<u64>,
+    /// Eigener Export (Pset `Dossier_Roof`): JSON der übrigen Dach-Felder (Höfe, Bögen, Überstände, Gauben …);
+    /// Form, Neigung, Umriss, Traufhöhe und Dicke stehen dann schon in den Feldern oben.
+    pub params: Option<String>,
 }
 
 /// Treppe ([B4]) aus IfcStair/IfcStairFlight: gerade, L (Podest an der Ecke), Wendel, U (Halbpodest
@@ -1444,6 +1455,53 @@ fn is_spatial(f: &crate::ifc_step::StepFile, id: u64) -> bool {
     f.get(id).is_some_and(|e| matches!(e.ty.as_str(), "IFCBUILDINGSTOREY" | "IFCBUILDING" | "IFCSITE" | "IFCSPACE"))
 }
 
+/// [B4] Dach des eigenen Exports aus dem Pset `Dossier_Roof` (Umriss, Form, Neigung, Firstrichtung, Traufhöhe, Dicke).
+/// Nur wenn die Körper der Dachflächen den Umriss im Grundriss enthalten, sonst bleibt es ein Fall für `fit_roof`.
+fn own_roof(cx: &mut Ctx, main: u64, parts: &[u64]) -> Option<Roof> {
+    let common = cx.common.get(&main)?.clone();
+    let num = |k: &str| common.get(k)?.trim().parse::<f64>().ok().filter(|v| v.is_finite());
+    let shape: &'static str = ["flach", "pult", "sattel", "walm", "mansarde", "zelt"].into_iter().find(|s| common.get("RoofShape").is_some_and(|c| c == s))?;
+    let ridge_axis: &'static str = ["x", "y"].into_iter().find(|s| common.get("RoofRidge").is_some_and(|c| c == s))?;
+    let outline: Vec<V2> = common
+        .get("RoofOutline")?
+        .split(';')
+        .map(|p| {
+            let (x, y) = p.split_once(',')?;
+            let q = [x.trim().parse::<f64>().ok()?, y.trim().parse::<f64>().ok()?];
+            (q[0].is_finite() && q[1].is_finite()).then_some(q)
+        })
+        .collect::<Option<_>>()?;
+    let (pitch_deg, eave_z, thickness) = (num("RoofPitch")?, num("RoofBase")?, num("RoofThickness")?);
+    if outline.len() < 3 || !(0.0..90.0).contains(&pitch_deg) || thickness <= 0.0 {
+        return None;
+    }
+    let b = bodies(cx, parts);
+    if b.len() != parts.len() {
+        return None;
+    }
+    let mut bb = [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY];
+    for (_, m, _) in &b {
+        for c in m.positions.chunks_exact(3) {
+            bb = [bb[0].min(c[0]), bb[1].min(c[1]), bb[2].max(c[0]), bb[3].max(c[1])];
+        }
+    }
+    let tol = 0.05;
+    if !outline.iter().all(|p| p[0] >= bb[0] - tol && p[0] <= bb[2] + tol && p[1] >= bb[1] - tol && p[1] <= bb[3] + tol) {
+        return None;
+    }
+    let color = b.iter().find_map(|x| x.2);
+    let mut info = cx.info(main, color);
+    if info.storey.is_none() {
+        info.storey = parts.iter().find_map(|p| cx.info(*p, None).storey);
+    }
+    if info.layers.is_empty() {
+        let l = cx.info(parts[0], None);
+        info.layers = l.layers;
+        info.type_name = info.type_name.or(l.type_name);
+    }
+    Some(Roof { info, outline, edge_pitch: Vec::new(), custom: false, shape, pitch_deg, ridge_axis, eave_z, thickness, parts: parts.to_vec(), params: common.get("RoofParams").cloned() })
+}
+
 /// Dächer ([B4]): IfcRoof (eigener Körper, sonst seine Platten) und frei stehende IfcSlab ROOF (je
 /// Geschoss die sich berührenden zusammen). Liefert für Platten, die kein Dach wurden, den Grund.
 fn roofs(cx: &mut Ctx, out: &mut Semantic, ids: &[u64], children: &HashMap<u64, Vec<u64>>) -> HashMap<u64, &'static str> {
@@ -1507,6 +1565,15 @@ fn roofs(cx: &mut Ctx, out: &mut Semantic, ids: &[u64], children: &HashMap<u64, 
 
     let mut fail = HashMap::new();
     for (main, parts, is_roof) in groups {
+        // [B4] Eigener Export: Dach aus `Dossier_Roof`, wenn die Dachkörper zum Umriss passen (sonst wie fremde IFC).
+        if is_roof {
+            if let Some(r) = own_roof(cx, main, &parts) {
+                out.converted.insert(main);
+                out.converted.extend(parts.iter().copied());
+                out.roofs.push(r);
+                continue;
+            }
+        }
         let try_fit = |cx: &mut Ctx, group: &[u64]| -> Result<(crate::ifc_shapes::RoofFit, Option<[f64; 4]>), &'static str> {
             let main = if is_roof { main } else { group[0] };
             if group.iter().chain([&main]).any(|p| rels.voids.get(p).is_some_and(|v| !v.is_empty())) {
@@ -1582,6 +1649,7 @@ fn roofs(cx: &mut Ctx, out: &mut Semantic, ids: &[u64], children: &HashMap<u64, 
                 eave_z: fit.eave_z,
                 thickness: fit.thickness,
                 parts: group.clone(),
+                params: None,
             });
             cx.roofs.push(fit);
         }
@@ -2172,7 +2240,7 @@ pub(crate) fn encode(s: &Semantic) -> (serde_json::Value, Vec<f64>) {
     for r in &s.roofs {
         let mut nums = vec![r.eave_z, r.pitch_deg, r.thickness];
         ring(&r.outline, &mut nums);
-        push("roof", &r.info, json!({ "shape": r.shape, "ridgeAxis": r.ridge_axis, "edgePitch": r.edge_pitch, "custom": r.custom }), nums, &mut data);
+        push("roof", &r.info, json!({ "shape": r.shape, "ridgeAxis": r.ridge_axis, "edgePitch": r.edge_pitch, "custom": r.custom, "params": r.params }), nums, &mut data);
     }
     for b in &s.beams {
         let mut nums = vec![b.z0, b.z1];
