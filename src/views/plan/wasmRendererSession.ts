@@ -30,6 +30,7 @@
  */
 
 import { GpuRecovery, gpuRecovery, isRendererAbort } from "../../engine/gpuRecovery";
+import { countFrame } from "../../viewport/renderOnDemand";
 
 /** Was die Sitzung vom wasm-bindgen-Objekt `WebPlanRenderer` braucht. */
 export interface WebPlanRendererLike {
@@ -344,6 +345,7 @@ export class WasmPlanRendererSession<S> {
           r.set_dash_scale?.(f.dashScaleN ?? 0);
           r.set_view_box(f.viewBox.x, f.viewBox.y, f.viewBox.w, f.viewBox.h);
           r.render();
+          countFrame("2d"); // [290] Prüf-Hook: gezeichnete Plan-Frames
         }
       }
     } catch (e) {

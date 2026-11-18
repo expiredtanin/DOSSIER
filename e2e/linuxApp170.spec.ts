@@ -557,3 +557,54 @@ test("Strg-Kürzel: Undo/Redo, Speichern, Neu, PDF-Dialog; Meta tut nichts; Tite
   await expect(elementRows(page)).toHaveCount(0);
   await close(r);
 });
+
+// [290] 3D ohne Interaktion zeichnet nach kurzer Zeit nichts mehr (Render-on-demand, Frame-Zähler `__dossierFrames`);
+// Drehen zeichnet wieder, höchstens einmal je Bildschirm-Frame. Adapter steht im Über-Dialog.
+test("3D zeichnet nur bei Änderung, Adapter im Über-Dialog", async () => {
+  const r = await launch();
+  const { page } = r;
+  await page.getByRole("button", { name: /Neues Projekt/ }).first().click();
+  await expect(page.getByRole("group", { name: "Befehlszeile" })).toBeVisible({ timeout: 60_000 });
+  await drawWalls(page, ["0,0", "6,0", "6,4"]);
+  await page.getByRole("button", { name: "Ansicht", exact: true }).click();
+  await page.getByRole("option", { name: "3D-Ansicht", exact: true }).click();
+  const canvas3d = page.locator("canvas[data-engine=render3d]");
+  await expect(canvas3d).toBeVisible({ timeout: 30_000 });
+  const frames = () => page.evaluate(() => (window as unknown as { __dossierFrames?: { "3d": number } }).__dossierFrames?.["3d"] ?? 0);
+  await expect.poll(frames, { timeout: 30_000 }).toBeGreaterThan(0);
+  await page.waitForTimeout(1500); // Modell, Sonne, Schattentextur setzen sich
+  const idle0 = await frames();
+  await page.waitForTimeout(1500);
+  expect(await frames(), "ohne Interaktion keine Frames").toBe(idle0);
+  // Drehen: viele Mausereignisse, aber höchstens ein Frame je rAF.
+  const box = (await canvas3d.boundingBox())!;
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
+  const now = () => page.evaluate(() => performance.now());
+  const t0 = await now();
+  await page.mouse.move(cx, cy);
+  await page.mouse.down();
+  for (let k = 0; k < 40; k++) await page.mouse.move(cx + k * 4, cy + k);
+  await page.mouse.up();
+  await page.waitForTimeout(100);
+  const moved = await frames();
+  const t1 = await now();
+  expect(moved, "Drehen zeichnet").toBeGreaterThan(idle0);
+  // Obergrenze: Bildschirm-Frames in der Zeitspanne (bis 240 Hz, +2 Puffer).
+  expect(moved - idle0).toBeLessThanOrEqual(Math.ceil(((t1 - t0) / 1000) * 240) + 2);
+  await page.waitForTimeout(1200);
+  const idle1 = await frames();
+  await page.waitForTimeout(1200);
+  expect(await frames(), "nach dem Drehen wieder Ruhe").toBe(idle1);
+  // Über-Dialog nennt den Adapter (im Container: SwiftShader = Software).
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await page.getByRole("button", { name: "Hilfe", exact: true }).click();
+  await page.getByRole("option", { name: /Über dossier/ }).click();
+  await expect(page.getByTestId("about-gpu")).toContainText("Grafik (WebGPU):");
+  if (SHOT_DIR) {
+    mkdirSync(SHOT_DIR, { recursive: true });
+    await page.screenshot({ path: join(SHOT_DIR, "about-gpu.png") });
+  }
+  await page.keyboard.press("Escape");
+  await close(r);
+});

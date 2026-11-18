@@ -22,7 +22,7 @@ pub const SITE_PICK_VIEW_SHADOWS: &str = "@viewShadows";
 /// [140] Schatten grau (Tusche-Darstellung), nicht blau.
 pub const SUN_SHADOW_FILL: &str = "#3c3c3c";
 /// [140] Schatten heller (0.28 → 0.16): Bemassung und Stempel darüber bleiben lesbar.
-const SUN_SHADOW_OPACITY: f64 = 0.16;
+pub(crate) const SUN_SHADOW_OPACITY: f64 = 0.16;
 /// Linien-Klassen und Füllfarbe des Baurechts.
 pub const SITE_PARCEL_CLS: &str = "site-parcel";
 pub const SITE_ALLOWED_CLS: &str = "site-allowed";
@@ -53,7 +53,7 @@ pub fn ground_floor_id(p: &Project) -> Option<&str> {
 }
 
 /// Fläche ohne Strich, mit Deckkraft (Schatten, Baurechts-Verstoss).
-fn flat_polygon(pts: Vec<Vec2>, fill: &str, opacity: f64) -> Primitive {
+pub(crate) fn flat_polygon(pts: Vec<Vec2>, fill: &str, opacity: f64) -> Primitive {
     Primitive::Polygon {
         pts,
         fill: fill.into(),

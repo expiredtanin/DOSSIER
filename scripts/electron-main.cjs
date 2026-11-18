@@ -171,6 +171,12 @@ function createWindow() {
     event.preventDefault();
     if (d.external) void shell.openExternal(d.external);
   };
+  // [290] Start-Meldungen der Seite (`[dossier] WebGPU-Adapter: …`) ins Terminal/Log — sonst sieht man unter Linux nicht,
+  // ob das 3D auf der Grafikkarte oder in SwiftShader (CPU) läuft.
+  win.webContents.on("console-message", (e, _level, legacy) => {
+    const msg = String(e.message ?? legacy ?? "");
+    if (msg.startsWith("[dossier]")) console.log(msg);
+  });
   win.webContents.on("will-navigate", guardNav);
   win.webContents.on("will-redirect", guardNav);
   // [116] Schliess-Wächter: ist er gesetzt (Renderer läuft), geht das Fenster erst nach „window:force-close" zu;
@@ -250,6 +256,13 @@ app.whenReady().then(() => {
     });
   }
   createWindow();
+  // [290] Chromiums GPU-Status ins Log: „webgpu: enabled“ = Hardware; „unavailable_software“/„disabled_*“ = CPU/aus.
+  try {
+    const st = app.getGPUFeatureStatus();
+    console.log(`[dossier] GPU-Status: webgpu=${st.webgpu ?? "?"}, gpu_compositing=${st.gpu_compositing}, rasterization=${st.rasterization}`);
+  } catch {
+    /* nur Log */
+  }
 });
 
 app.on("window-all-closed", () => {

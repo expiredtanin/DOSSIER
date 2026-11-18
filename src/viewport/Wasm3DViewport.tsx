@@ -141,6 +141,22 @@ interface Grip {
   pos: Vec3;
 }
 
+/** [290] Gleiche Griff-Bildschirmpositionen (Art, Ziel, Index, Pixel)? Dann bleibt der React-Zustand stehen. */
+function sameGripScreens(a: readonly { grip: Grip; x: number; y: number }[], b: readonly { grip: Grip; x: number; y: number }[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const p = a[i];
+    const q = b[i];
+    const t = p.grip.target;
+    const u = q.grip.target;
+    if (p.x !== q.x || p.y !== q.y || p.grip.kind !== q.grip.kind || p.grip.index !== q.grip.index || p.grip.index2 !== q.grip.index2) return false;
+    if (t.wallId !== u.wallId || t.drawingId !== u.drawingId || t.ceilingId !== u.ceilingId || t.roofId !== u.roofId) return false;
+    const [x, y, z] = p.grip.pos;
+    if (x !== q.grip.pos[0] || y !== q.grip.pos[1] || z !== q.grip.pos[2]) return false;
+  }
+  return true;
+}
+
 /** Gauben-Griffe: erster Index (Kern `grips.rs::DORMER_GRIP_BASE`). */
 const DORMER_GRIP_BASE = 1000;
 
@@ -981,7 +997,8 @@ export function Wasm3DViewport({
             const p = worldToScreen(cam, g.pos, rect.width, rect.height);
             if (p) next.push({ grip: g, x: p.x, y: p.y });
           }
-          setGripScreens(next);
+          // [290] Nur bei Änderung setzen: sonst rendert React den ganzen Viewport in jedem Frame neu, solange Griffe aktiv sind.
+          setGripScreens((prev) => (sameGripScreens(prev, next) ? prev : next));
         }
       }
       raf = requestAnimationFrame(tick);
@@ -1033,7 +1050,7 @@ export function Wasm3DViewport({
           const planeY = drag && "planeY" in drag ? drag.planeY : groundElevationRef.current;
           const world: Vec3 = [hud.at.x, planeY, hud.at.y];
           const p = worldToScreen(cam, world, rect.width, rect.height);
-          setDraftHudScreen(p);
+          setDraftHudScreen((prev) => (prev && p && prev.x === p.x && prev.y === p.y ? prev : p)); // [290] nur bei Änderung
         }
       } else {
         setDraftHudScreen(null);
@@ -1053,7 +1070,8 @@ export function Wasm3DViewport({
             axis === "x" ? [anchor.x + EXTEND, planeY, anchor.y] : [anchor.x, planeY, anchor.y + EXTEND];
           const p1 = worldToScreen(cam, a, rect.width, rect.height);
           const p2 = worldToScreen(cam, b, rect.width, rect.height);
-          setAxisLockGuideScreen(p1 && p2 ? { x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y, axis } : null);
+          const g = p1 && p2 ? { x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y, axis } : null;
+          setAxisLockGuideScreen((prev) => (prev && g && prev.x1 === g.x1 && prev.y1 === g.y1 && prev.x2 === g.x2 && prev.y2 === g.y2 && prev.axis === g.axis ? prev : g));
         }
       } else {
         setAxisLockGuideScreen(null);
