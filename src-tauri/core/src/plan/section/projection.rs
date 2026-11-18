@@ -330,6 +330,8 @@ pub(crate) struct OwnerRef {
     pub railing: bool,
     /// [279] Glastafel eines Glasgeländers: durchscheinend, verdeckt nichts (3D-Dokument).
     pub glass: bool,
+    /// [279] Tafel eines Lochblechgeländers: Lochmuster (3D-Dokument).
+    pub perforated: bool,
 }
 
 /// [266] Alle Flächen des Modells für eine beliebige Ansicht (Vektor-Axonometrie, `plan/axo.rs`): dieselben Körper wie
@@ -373,7 +375,8 @@ pub(crate) fn model_view_faces(p: &Project, vis: &Visibility, view: &dyn Fn([f64
                 Kind::Mesh => (mrefs.get(i).map(|m| m.mesh.id.clone()), false, false, false),
             };
             let glass = railing && matches!(kind, Kind::Slab) && matches!(slabs.get(i), Some(SlabOwner::Railing(r, true)) if r.kind == RailingKind::Glass);
-            OwnerRef { kind, id, stair, column, railing, glass }
+            let perforated = railing && matches!(kind, Kind::Slab) && matches!(slabs.get(i), Some(SlabOwner::Railing(r, true)) if r.kind == RailingKind::Perforated);
+            OwnerRef { kind, id, stair, column, railing, glass, perforated }
         })
         .collect();
     Ok((vf, refs))

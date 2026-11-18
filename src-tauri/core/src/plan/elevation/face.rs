@@ -44,6 +44,8 @@ pub(super) struct Face {
     pub(super) curved_slab: bool,
     /// [279] Glas des Geländers: durchscheinend gefüllt, verdeckt nichts (weder Füllungen noch Kanten dahinter).
     pub(super) see_through: bool,
+    /// [279] Tafel eines Lochblechgeländers: Lochmuster (Punktschraffur) auf der Fläche.
+    pub(super) perforated: bool,
 }
 
 /// [33] Override einer Ansichtsfläche bzw. Öffnung (`overrides::effective_surface`).
