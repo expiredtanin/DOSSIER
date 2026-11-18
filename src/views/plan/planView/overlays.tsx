@@ -6,6 +6,8 @@ import type { Vec2 } from "../../../model/types";
 import type { SnapResult, ToolDraft } from "../../../tools/types";
 import { hudSegments, type HudFieldsState } from "../../../tools/hudFormat";
 import { MODEL_UNITS, type DisplayUnits } from "../../../tools/displayUnits";
+import { t } from "../../../i18n";
+import type { TranslationKey } from "../../../i18n";
 
 /**
  * Zeichnet die Werkzeug-Vorschau: Vorschau-Formen (gestrichelte Akzentlinien /
@@ -85,7 +87,7 @@ export function DraftOverlay({
       )}
       {/* Snap-Marker + optionale Ortho-Hilfslinie. */}
       {draft.snap && (
-        <SnapMarker snap={draft.snap} toScreen={toScreen} size={markSize} color={snapColor} />
+        <SnapMarker snap={draft.snap} toScreen={toScreen} size={markSize} color={snapColor} vbPerPx={vbPerPx} />
       )}
       {/* Maß-/Winkel-HUD am Cursor (VW-Stil `L: … W: …`, oder einfacher Text). */}
       {draft.hud && <DraftHud hud={draft.hud} toScreen={toScreen} vbPerPx={vbPerPx} hudFields={hudFields} units={units} />}
@@ -261,14 +263,18 @@ function AngleGuide({
 }
 
 /** Marker-Glyph je Snap-Art + (bei ortho) eine gestrichelte Hilfslinie. */
+const SNAP_TIP_KINDS = new Set(["endpoint", "midpoint", "intersection", "center", "quadrant", "onEdge", "perpendicular", "tangent", "parallel", "extension", "divide"]);
+
 function SnapMarker({
   snap,
   toScreen,
   size,
   color,
+  vbPerPx,
 }: {
   snap: SnapResult;
   toScreen: (v: Vec2) => Vec2;
+  vbPerPx: number;
   size: number;
   /** Farbe des Snap-Glyphs (einstellbar, Default = Akzent „Sora"). */
   color: string;
@@ -281,8 +287,15 @@ function SnapMarker({
   const glyphStyle = { stroke: color };
   const helperStyle = { stroke: color };
   const fillStyle = { stroke: color, fill: color };
+  // [287] Fangart als Kurztext am Marker (Archicad/VW-Art): sonst bleibt unklar, woran der Zeiger gerade hängt.
+  const tip = SNAP_TIP_KINDS.has(snap.kind) ? t(`snap.tip.${snap.kind}` as TranslationKey) : null;
   return (
     <g className="snap-marker" data-snap-kind={snap.kind}>
+      {tip && (
+        <text className="snap-tip" x={s.x + 9 * vbPerPx} y={s.y - 7 * vbPerPx} fontSize={11 * vbPerPx} strokeWidth={3 * vbPerPx}>
+          {tip}
+        </text>
+      )}
       {(snap.kind === "ortho" || snap.kind === "extension") && snap.refA && (
         <line
           className="snap-helper-line"

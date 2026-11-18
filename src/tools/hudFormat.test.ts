@@ -54,4 +54,19 @@ describe("hudSegments — Cursor-HUD-Formatierung (2D + 3D gemeinsam)", () => {
     );
     expect(segs).toEqual([{ text: "L: 2.5m", active: true, locked: false }]);
   });
+
+  it("[287] beschriftet Felder ohne Länge/Winkel mit ihrer Bezeichnung statt der Feld-ID (Öffnung: Abstand/Brüstung)", () => {
+    const segs = hudSegments(
+      { at: { x: 0, y: 0 }, text: "x" },
+      {
+        fields: [
+          { id: "pos", labelKey: "cmd.field.offset", value: 2.877, locked: false, active: true },
+          { id: "width", labelKey: "cmd.field.width", value: 1.2, locked: false, active: false },
+          { id: "sill", labelKey: "cmd.opening.sillField", value: 0.9, locked: false, active: false },
+        ],
+        typed: "",
+      },
+    );
+    expect(segs.map((x) => x.text)).toEqual(["Abstand: 2.877m", "Breite: 1.200m", "Brüstung: 0.900m"]);
+  });
 });

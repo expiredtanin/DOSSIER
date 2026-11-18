@@ -23,6 +23,8 @@ import type {
   Vec2,
 } from "../types";
 import { createMutation, createPreview, createQuery, xy } from "../createCore";
+import { t } from "../../i18n";
+import type { TranslationKey } from "../../i18n";
 
 /** Default-Maße (Meter). */
 const DEF_WINDOW = { width: 1.2, height: 1.2, sill: 0.9 };
@@ -134,7 +136,7 @@ function posDraftAt(s: OpPos, ctx: CommandContext, pos: number | null, at: Vec2 
   const draft: ToolDraft = { preview: pv.shapes, vertices: [{ x: ax, y: ay }, { x: bx, y: by }] };
   draft.hud = {
     at: s.cursor ?? { x: mx, y: my },
-    text: `${from.toFixed(2)} m · ${s.kind === "door" ? "Tür" : "Fenster"} ${(
+    text: `${from.toFixed(2)} m · ${t(s.kind === "door" ? "cmd.opening.doorLabel" : "cmd.opening.windowLabel")} ${(
       s.width * 100
     ).toFixed(0)}×${(s.height * 100).toFixed(0)}`,
   };
@@ -163,13 +165,14 @@ export const openingCommand: Command = {
       : ["point", "option"],
   options: (s): CmdOption[] => {
     const st = s as OpState;
-    const kind: CmdOption = { ...KIND, value: st.kind };
+    // [287] Werte übersetzt (vorher „Art=window", „Seite=left").
+    const kind: CmdOption = { ...KIND, value: t(st.kind === "door" ? "cmd.opening.doorLabel" : "cmd.opening.windowLabel") };
     if (st.kind === "door") {
       return [
         kind,
-        { ...HINGE, value: st.hinge },
-        { ...SIDE, value: st.side },
-        { ...DIR, value: st.dir },
+        { ...HINGE, value: t(`objinfo.opening.hinge.${st.hinge}` as TranslationKey) },
+        { ...SIDE, value: t(`objinfo.opening.swing.${st.side}` as TranslationKey) },
+        { ...DIR, value: t(`objinfo.opening.dir.${st.dir}` as TranslationKey) },
       ];
     }
     return [kind];

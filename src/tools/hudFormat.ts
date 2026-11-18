@@ -7,6 +7,8 @@
 
 import type { ToolDraft } from "./types";
 import { NON_LENGTH_FIELDS } from "../commands/parseInput";
+import { t } from "../i18n";
+import type { TranslationKey } from "../i18n";
 import { MODEL_UNITS, dyToDisplay, fmtDisplay, lengthToDisplay, type DisplayUnits } from "./displayUnits";
 
 /** Ein Segment des Cursor-HUDs (z. B. "L: 3.000m"), + Tab-Zyklus-Zustand. */
@@ -18,7 +20,7 @@ export interface HudSeg {
 
 /** Tab-Feld-Zyklus-Zustand der Befehlszeile (s. `ui/CommandLine.tsx`). */
 export interface HudFieldsState {
-  fields: { id: string; value: number | null; locked: boolean; active: boolean }[];
+  fields: { id: string; labelKey?: string; value: number | null; locked: boolean; active: boolean }[];
   typed: string;
 }
 
@@ -48,12 +50,24 @@ export function hudSegments(
           : id === "height"
             ? (hud.dy ?? null)
             : null;
-  const labelFor = (id: string): string =>
-    id === "length" ? "L" : id === "angle" ? "W" : id === "width" ? "Δx" : id === "height" ? "Δy" : id;
+  // [287] Länge/Winkel kurz (L/W, VW-Stil), Breite/Höhe nur mit Δx/Δy, wenn der Entwurf dx/dy liefert (Rechteck);
+  // alle übrigen Felder (Abstand, Brüstung, Radius, Dicke …) mit ihrer übersetzten Bezeichnung statt der Feld-ID.
+  const labelFor = (id: string, labelKey?: string): string =>
+    id === "length"
+      ? "L"
+      : id === "angle"
+        ? "W"
+        : (id === "width" || id === "height") && hud.dx != null
+          ? id === "width"
+            ? "Δx"
+            : "Δy"
+          : labelKey
+            ? t(labelKey as TranslationKey)
+            : id;
   const segs: HudSeg[] = [];
   if (hudFields && hudFields.fields.length > 0) {
     for (const f of hudFields.fields) {
-      const label = labelFor(f.id);
+      const label = labelFor(f.id, f.labelKey);
       const isLength = !NON_LENGTH_FIELDS.has(f.id);
       const unit = f.id === "angle" ? "°" : isLength ? u : "";
       const typedHere = f.active && hudFields.typed.trim() !== "";

@@ -29,6 +29,8 @@ import type {
   Vec2,
 } from "../types";
 import { createMutation, createPreview, xy } from "../createCore";
+import { t } from "../../i18n";
+import type { TranslationKey } from "../../i18n";
 
 const EPS = 1e-6;
 const DEG = Math.PI / 180;
@@ -121,7 +123,7 @@ export const roomCommand: Command = {
       : ["point", "option"],
   options: (s): CmdOption[] => {
     const st = s as RoomCmdState;
-    const modeOpt: CmdOption = { ...MODE, value: st.mode };
+    const modeOpt: CmdOption = { ...MODE, value: t(`cmd.room.mode.${st.mode}` as TranslationKey) };
     if (st.phase !== "draw") return [modeOpt];
     return st.points.length >= 3 ? [modeOpt, CLOSE, UNDO] : [modeOpt, UNDO];
   },

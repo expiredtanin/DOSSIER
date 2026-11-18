@@ -64,6 +64,7 @@ export function useCommandLineBinding(opts: {
             ? {
                 fields: engineView.fields.map((f) => ({
                   id: f.id,
+                  labelKey: f.labelKey,
                   value: f.value,
                   locked: f.locked,
                   active: f.active,
