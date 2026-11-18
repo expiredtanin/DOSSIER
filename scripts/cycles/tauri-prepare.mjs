@@ -23,3 +23,23 @@ for (const triple of ["aarch64-apple-darwin", "x86_64-apple-darwin", "universal-
   chmodSync(to, 0o755);
   console.log(`tauri-prepare: ${to}`);
 }
+
+// Tauri kopiert `bundle.resources` Datei für Datei und bricht an symbolischen Links ab („Not a directory“, z. B.
+// lib/libopenjph.dylib → libopenjph.0.x.dylib im macOS-Paket). Links in lib/ durch echte Kopien ersetzen.
+import { lstatSync, readdirSync, readlinkSync, rmSync, statSync } from "node:fs";
+import { dirname } from "node:path";
+function derefLinks(d) {
+  if (!existsSync(d)) return;
+  for (const name of readdirSync(d)) {
+    const p = join(d, name);
+    const st = lstatSync(p);
+    if (st.isSymbolicLink()) {
+      const target = resolve(dirname(p), readlinkSync(p));
+      if (!existsSync(target) || !statSync(target).isFile()) { rmSync(p); console.log(`tauri-prepare: Link entfernt ${p}`); continue; }
+      rmSync(p);
+      copyFileSync(target, p);
+      console.log(`tauri-prepare: Link aufgelöst ${p}`);
+    } else if (st.isDirectory()) derefLinks(p);
+  }
+}
+for (const sub of ["lib", "source", "licenses"]) derefLinks(join(dir, sub));
