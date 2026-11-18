@@ -258,7 +258,7 @@ pub struct Cut {
 }
 
 impl Cut {
-    fn new(kind: Kind, index: usize, pts: Vec<[f64; 2]>) -> Cut {
+    pub(crate) fn new(kind: Kind, index: usize, pts: Vec<[f64; 2]>) -> Cut {
         Cut { kind, index, pts, nse: None, fill: None, hatch: None, join_priority: None, component_id: None, source_id: None, category: None, stair_id: None, railing_id: None, layer_index: None, ov: None }
     }
 }

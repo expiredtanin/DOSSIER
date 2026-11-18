@@ -21,6 +21,7 @@ Herkunft, kein Wegweiser.
 | `stairs.rs`, `stair_symbol.rs` | Treppen: Filter und Stil; Symbol (Tritte, Lauflinie, Pfeil, Bruchlinie) |
 | `drawings.rs` | freie 2D-Zeichnungen (Linie bis Bild, Bemassung, Blöcke), Zeichnungs-Stücke, kompakte Linien-Unterlage |
 | `context.rs` | Kontext (Höhenlinien, Fussabdrücke importierter Gebäude, Gelände) und Schnittführungs-Symbole |
+| `far_context.rs` | [256] Kontext-Netze weit neben dem Haus (> 150 mm Papier) in Schnitt und Ansicht weglassen |
 | `mesh_plan.rs` | importierte Netze und ([G1]) freie Körper über ihr Kern-Netz im Grundriss: geschnitten, darunter, darüber |
 | `situation.rs` | Situationsplan/Schwarzplan ([207]): Modelldarstellung mit `situation` ersetzt die Bauteile durch den gefüllten Umriss des eigenen Gebäudes (Klasse 83), füllt Kontextnetze (Klasse des Netzes) und zeichnet Nordpfeil/Massstabsbalken (Klasse 84) |
 | `ceiling_plan.rs` | Deckenspiegel als eigene Ebenen-Art |

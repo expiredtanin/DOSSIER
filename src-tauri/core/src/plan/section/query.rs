@@ -138,6 +138,8 @@ pub fn section_plan_buf(p: &Project, args: &[f64], text: &str) -> Result<Vec<u8>
             o
         }
     };
+    // [256] Kontext weit neben dem Haus entfällt (Abstand in Papier-mm, nicht im Schnitt-Cache: hängt am Massstab).
+    let out = crate::plan::far_context::prune_section(&out, scale).map_or(out, std::rc::Rc::new);
     let hidden = v.get("hiddenLines").and_then(|b| b.as_bool()).unwrap_or(false);
     let detail = Detail::parse(v.get("detail").and_then(|d| d.as_str()).unwrap_or("mittel"));
     // [173] Modelldarstellung: ausdrücklich angefragt (Blatt-Ausschnitt), sonst die der Ebene; ihre Basis

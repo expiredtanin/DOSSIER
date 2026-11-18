@@ -305,6 +305,26 @@ pub fn elevation_primitives_ren(p: &Project, level: &LevelSpec, shadows: bool, m
     // [180] Klassen-Sichtbarkeit und Darstellungsmodus wirken je für sich (früher nur beide zusammen: ein Blatt-
     // Ausschnitt mit ausgeblendeter Klasse zeigte sie in der Ansicht trotzdem).
     faces.retain(|f| category(f).is_none_or(|c| vis.visible(c) && vis.render(c)));
+    // [256] Kontext-Netze (Umgebungsklassen) weit neben dem Haus entfallen (Abstand in Papier-mm).
+    if let Some(max) = super::far_context::max_gap(scale) {
+        let mut bld: Option<(f64, f64)> = None;
+        let mut ranges: HashMap<&str, (f64, f64)> = HashMap::new();
+        for f in &faces {
+            let is_ctx = f.role == Role::Mesh && category(f).is_some_and(crate::import_context::is_context_class);
+            for q in &f.pts {
+                if is_ctx {
+                    let r = ranges.entry(f.id.as_str()).or_insert((q[0], q[0]));
+                    *r = (r.0.min(q[0]), r.1.max(q[0]));
+                } else {
+                    super::far_context::grow(&mut bld, q[0]);
+                }
+            }
+        }
+        if let Some(b) = bld {
+            let drop: HashSet<String> = ranges.into_iter().filter(|(_, r)| super::far_context::gap(b, *r) > max).map(|(id, _)| id.to_string()).collect();
+            faces.retain(|f| !(f.role == Role::Mesh && drop.contains(&f.id)));
+        }
+    }
     let greyed = |f: &Face| vis.has_display && category(f).is_some_and(|c| vis.greyed(c));
     // [33] Override-Regeln: ausgeblendete Bauteile entfallen wie ausgeblendete Kategorien (verdecken nichts),
     // Wände samt ihren Öffnungen.

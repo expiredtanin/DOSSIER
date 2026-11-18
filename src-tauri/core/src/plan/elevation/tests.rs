@@ -73,6 +73,27 @@ fn importierte_netze_in_der_ansicht() {
     assert!(r.is_none_or(|(prims, _)| !prims.iter().any(|x| matches!(x, Primitive::Polygon { context_object_id: Some(_), .. })) && lines(&prims).is_empty()));
 }
 
+/// [256] Nachbar weit neben dem Haus (> 150 mm Papier, bei 1:100 also 15 m) entfällt in der Ansicht, ein naher bleibt.
+#[test]
+fn nachbar_weit_weg_entfaellt_in_der_ansicht() {
+    use crate::mesh_view::tests::cube;
+    let mesh = |id: &str, x0: f64, x1: f64| {
+        let (positions, indices) = cube(x0, x1, 2.0, 3.0, 0.0, 2.0);
+        ContextObject::ImportedMesh(ImportedMesh { id: id.into(), name: id.into(), category_code: "12".into(), positions, indices, ..Default::default() })
+    };
+    let level = LevelSpec { kind: "elevation".into(), line: Some([Vec2 { x: -5.0, y: -1.0 }, Vec2 { x: 60.0, y: -1.0 }]), direction_sign: Some(1.0), ..Default::default() };
+    let p = Project {
+        context: Some(vec![mesh("nah", 6.0, 8.0), mesh("fern", 40.0, 42.0)]),
+        walls: vec![Wall { id: "w".into(), start: Vec2 { x: 0.0, y: 0.0 }, end: Vec2 { x: 4.0, y: 0.0 }, height: 3.0, ..Default::default() }],
+        ..Default::default()
+    };
+    let has = |prims: &[Primitive], id: &str| prims.iter().any(|q| matches!(q, Primitive::Polygon { context_object_id: Some(i), .. } if i == id));
+    let (prims, _) = elevation_primitives(&p, &level, false, false, &Visibility::default(), 100.0).unwrap().unwrap();
+    assert!(has(&prims, "nah") && !has(&prims, "fern"), "1:100: 15 m");
+    let (prims, _) = elevation_primitives(&p, &level, false, false, &Visibility::default(), 300.0).unwrap().unwrap();
+    assert!(has(&prims, "nah") && has(&prims, "fern"), "1:300: 45 m");
+}
+
 /// [115] Freie Körper in der Ansicht (Netz aus dem Kern): Flächen mit Körper-Id, Kanten sichtbar, die Wand
 /// dahinter verdeckt; Klasse aus ⇒ weg (verdeckt dann auch nichts mehr).
 #[test]
