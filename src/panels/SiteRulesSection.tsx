@@ -96,7 +96,7 @@ export function SiteRulesSection() {
 
   const check = checkSiteRules(project);
   const n = rules.parcel.length;
-  const ok = check !== null && check.violationArea < 0.01 && !check.heightExceeded && !check.profileExceeded;
+  const ok = check !== null && check.maxTop !== null && check.violationArea < 0.01 && !check.heightExceeded && !check.profileExceeded;
 
   return (
     <div className="site-rules">
@@ -121,12 +121,14 @@ export function SiteRulesSection() {
       </div>
 
       {check && (
-        <div className={"site-rules-result" + (ok ? " ok" : " bad")}>
+        <div className={"site-rules-result" + (check.maxTop === null ? "" : ok ? " ok" : " bad")}>
           <div>{t("siteRules.areas", { parcel: fmt(check.parcelArea), allowed: fmt(check.allowedArea) })}</div>
           <div>
             {check.violationArea >= 0.01
               ? t("siteRules.violation", { area: fmt(check.violationArea, 2) })
-              : t("siteRules.inside")}
+              : check.maxTop === null
+                ? t("siteRules.noBuilding")
+                : t("siteRules.inside")}
           </div>
           {rules.maxHeight !== undefined && check.maxTop !== null && (
             <div>

@@ -117,10 +117,13 @@ export const sampleProject: Project = {
   ],
   // Bauteil-Materialien: color = Poché-Füllung im Grundriss UND 3D-Diffusfarbe;
   // joinPriority höher = läuft am Stoß durch (für spätere T-Stöße).
+  // [285] lambda = Bemessungswert der Wärmeleitfähigkeit W/(m·K), SIA-übliche Richtwerte (SIA 279/180, Merkblatt SIA 2001;
+  // dieselben Werte wie die Standard-Bibliothek `core/standards.rs`) — sonst meldet der U-Wert „unvollständig“.
   components: [
     {
       id: "render-ext",
       name: "Aussenputz",
+      lambda: 0.87,
       color: "#d8d2c7",
       hatchId: "none",
       joinPriority: 10,
@@ -128,10 +131,11 @@ export const sampleProject: Project = {
     },
     // Weißer Grund unter den durchgezogenen Dämmungs-Haarlinien (quer zur Wand).
     // Kein passendes Bibliotheks-Asset (Dämmung) → bewusst ohne `material`.
-    { id: "insulation", name: "Wärmedämmung", color: "#ffffff", hatchId: "sia-insulation", joinPriority: 20 },
+    { id: "insulation", name: "Wärmedämmung", color: "#ffffff", hatchId: "sia-insulation", lambda: 0.035, joinPriority: 20 },
     {
       id: "brick",
       name: "Backstein",
+      lambda: 0.44,
       color: "#8c5544",
       hatchId: "sia-brick",
       joinPriority: 50,
@@ -140,6 +144,7 @@ export const sampleProject: Project = {
     {
       id: "render-int",
       name: "Innenputz",
+      lambda: 0.7,
       color: "#efece6",
       hatchId: "none",
       joinPriority: 10,
@@ -153,6 +158,7 @@ export const sampleProject: Project = {
     {
       id: "roof-tiles",
       name: "Dachziegel",
+      lambda: 1.0,
       color: "#b8735c",
       hatchId: "sia-brick",
       joinPriority: 15,
@@ -162,6 +168,7 @@ export const sampleProject: Project = {
     {
       id: "concrete",
       name: "Beton",
+      lambda: 2.0,
       color: "#9aa0a6",
       hatchId: "sia-concrete",
       joinPriority: 100,
@@ -169,7 +176,7 @@ export const sampleProject: Project = {
     },
     // Zementestrich — oberste Schicht des mehrschichtigen Deckenaufbaus (Decken-Stile).
     // Kein passendes Bibliotheks-Asset (Estrich) → bewusst ohne `material`.
-    { id: "screed", name: "Zementestrich", color: "#c9c2b3", hatchId: "diagonal", joinPriority: 30 },
+    { id: "screed", name: "Zementestrich", color: "#c9c2b3", hatchId: "diagonal", lambda: 1.4, joinPriority: 30 },
   ],
   wallTypes: [
     {

@@ -40,8 +40,12 @@ function pickWall(ctx: CommandContext, p: Vec2): { id: string; start: Vec2; end:
   return { id, start: { x: start[0], y: start[1] }, end: { x: end[0], y: end[1] }, t, bulge };
 }
 
-/** Tab-Felder im Positionsschritt: Breite/Höhe/Brüstung (+ Winkel bei Tür). */
+/**
+ * Tab-Felder im Positionsschritt: Abstand entlang der Wand (erstes, aktives Feld — eine getippte Zahl ist der
+ * Abstand, nicht die Breite, [285]), dann Breite/Höhe/Brüstung (+ Winkel bei Tür).
+ */
 const BASE_FIELDS: CommandField[] = [
+  { id: "pos", labelKey: "cmd.field.offset" },
   { id: "width", labelKey: "cmd.field.width" },
   { id: "height", labelKey: "cmd.field.height" },
   { id: "sill", labelKey: "cmd.opening.sillField" },
@@ -73,6 +77,8 @@ interface OpPos extends CommandState {
   bulge?: number;
   cursor: Vec2 | null;
   posAlong: number; // Abstand vom Wandanfang (Meter)
+  /** [285] Getippter Abstand (Feld „Abstand“): hat Vorrang vor Maus und Klick. */
+  posLock?: number;
   kind: "window" | "door";
   hinge: "start" | "end";
   side: "left" | "right";
@@ -230,8 +236,8 @@ export const openingCommand: Command = {
       return [ns, { draft: posDraft(ns, ctx) }];
     }
 
-    // Positionsschritt: Klick projiziert auf die Achse → committen.
-    const ns: OpPos = { ...s, posAlong: posDraftAt(s, ctx, null, pt).pos, cursor: pt };
+    // Positionsschritt: Klick projiziert auf die Achse (ein getippter Abstand gilt vor dem Klick) → committen.
+    const ns: OpPos = { ...s, posAlong: s.posLock ?? posDraftAt(s, ctx, null, pt).pos, cursor: pt };
     return [
       idle(s)[0],
       { draft: null, done: true, commit: appendOpening(ns, ctx) },
@@ -241,7 +247,7 @@ export const openingCommand: Command = {
   onMove: (state, point, _snap, ctx): [CommandState, CommandResult] => {
     const s = state as OpState;
     if (s.phase !== "pos") return [s, { draft: null }];
-    const at = posDraftAt({ ...s, cursor: point }, ctx, null, point);
+    const at = s.posLock !== undefined ? posDraftAt({ ...s, cursor: point }, ctx, s.posLock, null) : posDraftAt({ ...s, cursor: point }, ctx, null, point);
     const ns: OpPos = { ...s, posAlong: at.pos, cursor: point };
     return [ns, { draft: at.draft }];
   },
@@ -249,7 +255,7 @@ export const openingCommand: Command = {
   onConfirm: (state, ctx): [CommandState, CommandResult] => {
     const s = state as OpState;
     if (s.phase === "pos") {
-      const ns = s;
+      const ns: OpPos = s.posLock !== undefined ? { ...s, posAlong: s.posLock } : s;
       return [
         idle(s)[0],
         { draft: null, done: true, commit: appendOpening(ns, ctx) },
@@ -267,6 +273,7 @@ export const openingCommand: Command = {
   // Getippte Tab-Felder sticky in den State übernehmen; kein Koordinatenpunkt.
   pointFromFields: (state, locks) => {
     const s = state as OpState;
+    if (s.phase === "pos") s.posLock = "pos" in locks && Number.isFinite(locks.pos) ? locks.pos : undefined;
     if ("width" in locks && locks.width > 0) s.width = locks.width;
     if ("height" in locks && locks.height > 0) s.height = locks.height;
     if ("sill" in locks && locks.sill >= 0) s.sill = locks.sill;
@@ -276,6 +283,7 @@ export const openingCommand: Command = {
   fieldValues: (state): Record<string, number> => {
     const s = state as OpState;
     const out: Record<string, number> = {
+      ...(s.phase === "pos" ? { pos: s.posLock ?? s.posAlong } : {}),
       width: s.width,
       height: s.height,
       sill: s.sill,

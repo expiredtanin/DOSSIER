@@ -351,6 +351,18 @@ fn wall_type_for_thickness(root: &Map<String, Value>, base: &Value, thickness: f
     (add_op("wallTypes", vec![nt]), s(&id))
 }
 
+/// [285] `IsExternal` aus dem Namen eines Wandtyps: „Aussenwand“/„Außenwand“ ⇒ aussen, „Innenwand“ ⇒ innen, sonst keine Angabe.
+fn external_by_type_name(name: Option<&str>) -> Option<bool> {
+    let n = name?.to_lowercase();
+    if n.contains("aussen") || n.contains("außen") || n.contains("external") || n.contains("exterior") {
+        Some(true)
+    } else if n.contains("innen") || n.contains("internal") || n.contains("interior") {
+        Some(false)
+    } else {
+        None
+    }
+}
+
 /// Wand-Befehl: je Achssegment eine Wand des aktiven Typs (Null-Strecken übersprungen); eine gelockte
 /// Dicke (einschichtig) wählt/erzeugt den passenden Wandtyp.
 fn wall_ops(root: &Map<String, Value>, p: &Project, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
@@ -365,6 +377,11 @@ fn wall_ops(root: &Map<String, Value>, p: &Project, v: &Value, ctx: &Ctx, ids: &
             type_id = id;
         }
     }
+    // [285] Aussenbauteil (IFC `IsExternal`): ausdrücklich gewählt, sonst nach dem Namen des Wandtyps.
+    let external = match v.get("external") {
+        Some(Value::Bool(b)) => Some(*b),
+        _ => external_by_type_name(active_wall_type(root, ctx).and_then(|t| field(t, "name")).and_then(Value::as_str)),
+    };
     // Bogen-Modus ([T2]): `segs` je Segment wie bei der Polylinie (gerade, tangential, Durchgangspunkt).
     let bulges = crate::cmd_draw::poly_bulges(&pts, arr(v.get("segs")));
     let mut walls = Vec::new();
@@ -386,6 +403,9 @@ fn wall_ops(root: &Map<String, Value>, p: &Project, v: &Value, ctx: &Ctx, ids: &
         }
         f.push(("wallTypeId", type_id.clone()));
         f.push(("height", js_num(height)));
+        if let Some(e) = external {
+            f.push(("isExternal", Value::Bool(e)));
+        }
         walls.push(obj(f));
     }
     if walls.is_empty() {
@@ -448,7 +468,13 @@ fn ceiling_ops(p: &Project, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
     if abs_area(&outline) < 1e-4 {
         return Vec::new();
     }
-    add_op("ceilings", vec![ceiling_item(p, ctx.level, &outline, ctx, ids)])
+    let mut item = ceiling_item(p, ctx.level, &outline, ctx, ids);
+    // [285] Lage: `top` = Oberkante in m über dem Boden des Geschosses (0 = Bodenplatte unter dem Geschoss, negativ =
+    // abgesenkt, positiv = Brüstung/Podest); ohne Angabe bleibt die Oberkante am Geschoss.
+    if let Some(z) = opt_n(v, "top").filter(|z| z.is_finite()) {
+        item["top"] = json!({"mode": "floor", "floorId": ctx.level, "offset": js_num(z)});
+    }
+    add_op("ceilings", vec![item])
 }
 
 /// [281] Rampe: Decke aus dem Umriss mit Neigung längs `from` → `to`; `percent` = Gefälle in % (positiv = steigt zum
@@ -1543,6 +1569,48 @@ mod tests {
         let o = ops(&r, &crate::model::lenient::typed_for_test(&r), &req(json!({"cmd": "wall", "pts": [[0, 0], [4, 0]], "thick": 0.3}))).unwrap();
         assert_eq!(items(&o, 0)[0], json!({"id": "WT-s-1", "name": "Beton 30 cm", "layers": [{"componentId": "c", "thickness": 0.3}]}));
         assert_eq!(items(&o, 1)[0]["wallTypeId"], "WT-s-1");
+    }
+
+    /// [285] Aussenbauteil (IFC `IsExternal`): ausdrücklich `external` der Anfrage, sonst aus dem Namen des Wandtyps
+    /// („Aussenwand“ ⇒ aussen, „Innenwand“ ⇒ innen, anderes ⇒ keine Angabe).
+    #[test]
+    fn wand_aussenbauteil_aus_wandtyp_oder_option() {
+        let r = root(json!({"wallTypes": [
+            {"id": "WT1", "name": "Aussenwand 36 cm", "layers": [{"componentId": "c", "thickness": 0.36}]},
+            {"id": "WT2", "name": "Innenwand", "layers": [{"componentId": "c", "thickness": 0.12}]},
+            {"id": "WT3", "name": "Beton", "layers": [{"componentId": "c", "thickness": 0.2}]}
+        ]}));
+        let wall = |wt: &str, extra: Value| {
+            let mut q = json!({"cmd": "wall", "pts": [[0, 0], [4, 0]], "thick": null});
+            q.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+            let mut q = req(q);
+            q["ctx"]["wallType"] = json!(wt);
+            let o = ops(&r, &crate::model::lenient::typed_for_test(&r), &q).unwrap();
+            items(&o, 0)[0].clone()
+        };
+        assert_eq!(wall("WT1", json!({}))["isExternal"], true);
+        assert_eq!(wall("WT2", json!({}))["isExternal"], false);
+        assert!(wall("WT3", json!({})).get("isExternal").is_none());
+        assert_eq!(wall("WT3", json!({"external": true}))["isExternal"], true);
+        assert_eq!(wall("WT1", json!({"external": false}))["isExternal"], false);
+        assert!(wall("WT1", json!({"external": null}))["isExternal"] == true);
+    }
+
+    /// [285] Decke mit Lage: `top` = Oberkante in m über dem Boden des Geschosses (0 = Bodenplatte unter dem Geschoss);
+    /// ohne Angabe bleibt die Oberkante am Geschoss.
+    #[test]
+    fn decke_mit_lage() {
+        let r = root(json!({"wallTypes": [{"id": "WT1", "name": "W", "layers": [{"componentId": "c", "thickness": 0.3}]}]}));
+        let q = |extra: Value| {
+            let mut q = json!({"cmd": "ceiling", "pts": [[0, 0], [4, 0], [4, 3], [0, 3]]});
+            q.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+            let o = ops(&r, &crate::model::lenient::typed_for_test(&r), &req(q)).unwrap();
+            items(&o, 0)[0].clone()
+        };
+        assert!(q(json!({})).get("top").is_none());
+        assert!(q(json!({"top": null})).get("top").is_none());
+        assert_eq!(q(json!({"top": 0}))["top"], json!({"mode": "floor", "floorId": "F1", "offset": 0}));
+        assert_eq!(q(json!({"top": -0.02}))["top"], json!({"mode": "floor", "floorId": "F1", "offset": -0.02}));
     }
 
     /// [149] Baum setzen (Ebene 13, Vorgaben, Unsinn verworfen) und Kreise in Bäume umwandeln.

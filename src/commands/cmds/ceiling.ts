@@ -4,6 +4,12 @@
 //   1) „Erster Umrisspunkt der Decke:" → Punkt
 //   2) „Nächster Punkt ( Schliessen Zurück ):" → Punkt … Der Umriss schließt per
 //      Klick auf den Startpunkt, Option „Schliessen" (C) oder Enter (≥3 Punkte).
+//   3) nur bei Lage „Frei": „Oberkante in m über Geschossboden <0>:" → Zahl, Enter = 0.
+//
+// Option „Lage" ([285], sticky über den Befehl): „Oben" = Oberkante am Geschoss (Geschossdecke, wie bisher) ·
+// „Unter" = Bodenplatte, Oberkante auf dem Geschossboden (UK = OK − Dicke, also unter dem Geschoss) ·
+// „Frei" = Oberkante getippt (z. B. −0.02 für eine abgesenkte Balkonplatte). Vorher ging das nur über OK/UK
+// „Eigene" in der Objekt-Info (6 Schritte).
 //
 // Akzeptiert je Punkt Maus-Picks UND getippte Koordinaten (0,0 · r3,0 · 5<45) —
 // derselbe Eingabepfad wie Polylinie/Wand. Die fertige Decke rendert über die
@@ -27,6 +33,7 @@ import type {
   Vec2,
 } from "../types";
 import { createMutation, xy } from "../createCore";
+import { t } from "../../i18n";
 
 const EPS = 1e-6;
 const DEG = Math.PI / 180;
@@ -55,18 +62,31 @@ function nextFromFields(
   return { x: last.x + Math.cos(ang) * length, y: last.y + Math.sin(ang) * length };
 }
 
+/** Lage der Decke ([285]): am Geschoss oben, unter dem Geschoss (Bodenplatte) oder frei (OK getippt). */
+export type CeilPos = "top" | "below" | "free";
+const POS_NEXT: Record<CeilPos, CeilPos> = { top: "below", below: "free", free: "top" };
+
 interface CeilIdle extends CommandState {
   phase: "start";
+  pos: CeilPos;
 }
 interface CeilDrawing extends CommandState {
   phase: "next";
   points: Vec2[];
   cursor: Vec2 | null;
+  pos: CeilPos;
 }
-type CeilState = CeilIdle | CeilDrawing;
+/** Lage „Frei": Umriss steht, die Oberkante fehlt noch. */
+interface CeilZ extends CommandState {
+  phase: "z";
+  points: Vec2[];
+  pos: CeilPos;
+}
+type CeilState = CeilIdle | CeilDrawing | CeilZ;
 
 const CLOSE: CmdOption = { id: "close", labelKey: "cmd.polyline.close" };
 const UNDO: CmdOption = { id: "undo", labelKey: "cmd.polyline.undo" };
+const posOption = (pos: CeilPos): CmdOption => ({ id: "pos", labelKey: "cmd.ceiling.pos", value: t(`cmd.ceiling.pos.${pos}`), key: "L" });
 
 /** Vorschau: geschlossener Umriss-Ring (ab 3 Punkten) + Gummiband + HUD. */
 function ceilingDraft(points: Vec2[], cursor: Vec2 | null): ToolDraft {
@@ -90,56 +110,81 @@ function ceilingDraft(points: Vec2[], cursor: Vec2 | null): ToolDraft {
  * Commit: Decke aus dem Umriss (normalisiert, CCW; entartet → nichts), Typ = aktiver Aufbau, Ebene
  * „30“ falls vorhanden — im Kern (`cmd_create.rs`).
  */
-const appendCeiling = (pts: Vec2[], ctx: CommandContext) => createMutation(ctx, { cmd: "ceiling", pts: pts.map(xy) });
+const appendCeiling = (pts: Vec2[], ctx: CommandContext, top: number | null = null) =>
+  createMutation(ctx, { cmd: "ceiling", pts: pts.map(xy), top });
 
-const idle = (): [CommandState, CommandResult] => [
-  { phase: "start", lastPoint: null } as CeilIdle,
-  { draft: null, done: true },
-];
+const idleOf = (pos: CeilPos): CeilIdle => ({ phase: "start", lastPoint: null, pos });
+const idle = (pos: CeilPos = "top"): [CommandState, CommandResult] => [idleOf(pos), { draft: null, done: true }];
+
+/** Umriss steht: „Frei" fragt nach der Oberkante, sonst gleich anlegen („Unter" = OK auf dem Geschossboden). */
+function finish(s: CeilDrawing, ctx: CommandContext): [CommandState, CommandResult] {
+  if (s.pos === "free") {
+    const ns: CeilZ = { phase: "z", points: s.points, pos: s.pos, lastPoint: null };
+    return [ns, { draft: ceilingDraft(s.points, null) }];
+  }
+  return [idleOf(s.pos), { draft: null, done: true, commit: appendCeiling(s.points, ctx, s.pos === "below" ? 0 : null) }];
+}
 
 export const ceilingCommand: Command = {
   name: "ceiling",
   labelKey: "cmd.ceiling.label",
   // Decken leben auf Geschossen — wie die Wand nur dort aktiv.
   floorOnly: true,
-  prompt: (s) =>
-    (s as CeilState).phase === "next" ? "cmd.ceiling.next" : "cmd.ceiling.start",
-  accepts: (s) =>
-    (s as CeilState).phase === "next"
-      ? ["point", "number", "option"]
-      : ["point", "number"],
+  prompt: (s) => {
+    const ph = (s as CeilState).phase;
+    return ph === "z" ? "cmd.ceiling.z" : ph === "next" ? "cmd.ceiling.next" : "cmd.ceiling.start";
+  },
+  accepts: (s) => {
+    const ph = (s as CeilState).phase;
+    return ph === "z" ? ["number", "option"] : ph === "next" ? ["point", "number", "option"] : ["point", "number", "option"];
+  },
   options: (s) => {
     const ps = s as CeilState;
-    if (ps.phase !== "next") return [];
-    return ps.points.length >= 3 ? [CLOSE, UNDO] : [UNDO];
+    const pos = posOption(ps.pos);
+    if (ps.phase === "z") return [pos];
+    if (ps.phase !== "next") return [pos];
+    return ps.points.length >= 3 ? [CLOSE, UNDO, pos] : [UNDO, pos];
   },
-  init: (): CeilIdle => ({ phase: "start", lastPoint: null }),
+  init: (): CeilIdle => idleOf("top"),
 
   onInput: (state, input, ctx): [CommandState, CommandResult] => {
     const s = state as CeilState;
+
+    // Lage umschalten (jederzeit); steht der Umriss schon und fehlt nur die Oberkante, entscheidet die neue Lage.
+    if (input.kind === "option" && input.id === "pos") {
+      const pos = POS_NEXT[s.pos];
+      if (s.phase === "z") {
+        if (pos === "free") return [{ ...s, pos } as CeilZ, { draft: ceilingDraft(s.points, null) }];
+        return [idleOf(pos), { draft: null, done: true, commit: appendCeiling(s.points, ctx, pos === "below" ? 0 : null) }];
+      }
+      const ns = { ...s, pos } as CeilState;
+      return [ns, { draft: ns.phase === "next" ? ceilingDraft(ns.points, ns.cursor) : null }];
+    }
+
+    // Oberkante getippt (Lage „Frei"), m über dem Geschossboden; Unsinn bleibt im Schritt.
+    if (s.phase === "z") {
+      if (input.kind === "number" && Number.isFinite(input.value)) {
+        return [idleOf(s.pos), { draft: null, done: true, commit: appendCeiling(s.points, ctx, input.value) }];
+      }
+      return [s, { draft: ceilingDraft(s.points, null) }];
+    }
 
     if (input.kind === "option") {
       if (s.phase !== "next") return [s, { draft: null }];
       if (input.id === "undo") {
         const pts = s.points.slice(0, -1);
-        if (pts.length === 0)
-          return [{ phase: "start", lastPoint: null } as CeilIdle, { draft: null }];
+        if (pts.length === 0) return [idleOf(s.pos), { draft: null }];
         const ns: CeilDrawing = {
           phase: "next",
           points: pts,
           cursor: s.cursor,
           lastPoint: pts[pts.length - 1],
+          pos: s.pos,
         };
         return [ns, { draft: ceilingDraft(pts, s.cursor) }];
       }
-      // Sofort schließen: committet die Decke (unabhängig, ≥3 Punkte).
-      if (input.id === "close" && s.points.length >= 3) {
-        const pts = s.points;
-        return [
-          { phase: "start", lastPoint: null } as CeilIdle,
-          { draft: null, done: true, commit: appendCeiling(pts, ctx) },
-        ];
-      }
+      // Sofort schließen (≥3 Punkte).
+      if (input.id === "close" && s.points.length >= 3) return finish(s, ctx);
       return [s, { draft: ceilingDraft(s.points, s.cursor) }];
     }
 
@@ -151,30 +196,24 @@ export const ceilingCommand: Command = {
     }
     const pt = input.point;
     if (s.phase !== "next") {
-      const ns: CeilDrawing = { phase: "next", points: [pt], cursor: pt, lastPoint: pt };
+      const ns: CeilDrawing = { phase: "next", points: [pt], cursor: pt, lastPoint: pt, pos: s.pos };
       return [ns, { draft: ceilingDraft([pt], pt) }];
     }
     // Klick nahe Startpunkt → schließen (committet die Decke).
-    if (s.points.length >= 3 && segLen(s.points[0], pt) < CLOSE_HIT) {
-      const pts = s.points;
-      return [
-        { phase: "start", lastPoint: null } as CeilIdle,
-        { draft: null, done: true, commit: appendCeiling(pts, ctx) },
-      ];
-    }
+    if (s.points.length >= 3 && segLen(s.points[0], pt) < CLOSE_HIT) return finish(s, ctx);
     // Null-Strecke (Klick auf denselben Punkt) ignorieren.
     const last = s.points[s.points.length - 1];
     if (segLen(last, pt) < EPS) {
       return [s, { draft: ceilingDraft(s.points, s.cursor) }];
     }
     const points = [...s.points, pt];
-    const ns: CeilDrawing = { phase: "next", points, cursor: pt, lastPoint: pt };
+    const ns: CeilDrawing = { phase: "next", points, cursor: pt, lastPoint: pt, pos: s.pos };
     return [ns, { draft: ceilingDraft(points, pt) }];
   },
 
   onMove: (state, point): [CommandState, CommandResult] => {
     const s = state as CeilState;
-    if (s.phase !== "next") return [s, { draft: null }];
+    if (s.phase !== "next") return [s, { draft: s.phase === "z" ? ceilingDraft(s.points, null) : null }];
     const ns: CeilDrawing = { ...s, cursor: point };
     return [ns, { draft: ceilingDraft(s.points, point) }];
   },
@@ -182,16 +221,12 @@ export const ceilingCommand: Command = {
   // Enter/Space/Rechtsklick: Umriss schließen + committen (≥3 Punkte).
   onConfirm: (state, ctx): [CommandState, CommandResult] => {
     const s = state as CeilState;
-    if (s.phase === "next" && s.points.length >= 3) {
-      const pts = s.points;
-      return [
-        { phase: "start", lastPoint: null } as CeilIdle,
-        { draft: null, done: true, commit: appendCeiling(pts, ctx) },
-      ];
-    }
-    return idle();
+    if (s.phase === "next" && s.points.length >= 3) return finish(s, ctx);
+    // Lage „Frei": Enter = Oberkante 0 (Geschossboden).
+    if (s.phase === "z") return [idleOf(s.pos), { draft: null, done: true, commit: appendCeiling(s.points, ctx, 0) }];
+    return idle(s.pos);
   },
-  onCancel: (): [CommandState, CommandResult] => idle(),
+  onCancel: (state): [CommandState, CommandResult] => idle((state as CeilState).pos),
 
   // Tab-Feld-Zyklus nur im „next"-Schritt: Länge + Winkel relativ zum letzten Punkt.
   fields: (state) => ((state as CeilState).phase === "next" ? CEIL_FIELDS : []),
