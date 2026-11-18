@@ -5,7 +5,7 @@ import { generatePlan } from "./generatePlan";
 import { getState } from "../state/appStore";
 import { sheetSizeMm } from "../model/layoutModel";
 import { posterMetrics } from "../model/posterTemplates";
-import { finerPresentationScale, fittingPresentationScale, POSTER_EXTRAS_DEFAULT, PRESENTATION_TEMPLATE_ID, levelHasContent, planPresentationSheet, presentationDefaults, presentationSheetOps } from "./presentationSheet";
+import { finerPresentationScale, fittingPresentationScale, POSTER_EXTRAS_DEFAULT, posterExtrasDefault, PRESENTATION_TEMPLATE_ID, levelHasContent, planPresentationSheet, presentationDefaults, presentationSheetOps } from "./presentationSheet";
 import type { Project } from "../model/types";
 
 const LABELS = {
@@ -17,6 +17,7 @@ const LABELS = {
   situation: "Situation",
   tableAreas: "Kennzahlen (SIA 416)",
   tableSiteProof: "Baurecht-Nachweis",
+  tableUnits: "Wohnungsspiegel",
   imagePlaceholder: "3D-Bild hier einsetzen",
   imageHint: "Hinweis",
 };
@@ -466,5 +467,35 @@ describe("[66] Präsentationsplan", () => {
     // 1:100 ist die feinste Stufe des Vorschlags, und was nicht passt, bekommt keinen.
     expect(finerPresentationScale(p, { ...o, scale: 100 })).toBeNull();
     expect(finerPresentationScale(p, { ...o, paper: "a4" as const, scale: 50 })).toBeNull();
+  }, 60_000);
+
+  // [285] Plakat: Situation um Baufeld statt alle Kataster-Parzellen, Wohnungsspiegel, Vorschlag 1:100.
+  it("[285] Situation: Ausschnitt um die eigene Parzelle mit Rand, nicht um das ganze Ausmass", () => {
+    st().loadProject(buildWettbewerbSampleProject());
+    const p = st().project;
+    const ring = p.siteRules!.parcel;
+    const w = Math.max(...ring.map((q) => q.x)) - Math.min(...ring.map((q) => q.x));
+    const h = Math.max(...ring.map((q) => q.y)) - Math.min(...ring.map((q) => q.y));
+    const o = { ...presentationDefaults(p), scale: 200, poster: "poster-a1-landscape", extras: POSTER_EXTRAS_DEFAULT };
+    const sit = planPresentationSheet(p, o).items.find((i) => i.kind === "situation")!;
+    // Parzelle ± 10 m bei 1:500 (Papier-mm = Meter × 2) plus Rahmenrand 2 × 4 mm; weiter reicht der Ausschnitt nicht.
+    expect(sit.widthMm).toBeLessThanOrEqual((w + 20) * 2 + 8 + 1e-6);
+    expect(sit.heightMm).toBeLessThanOrEqual((h + 20) * 2 + 8 + 1e-6);
+  }, 60_000);
+
+  it("[285] Wohnungsspiegel kommt aufs Plakat, wenn das Projekt Einheiten hat", () => {
+    st().loadProject(buildWettbewerbSampleProject());
+    const p = st().project;
+    expect(p.units!.length).toBeGreaterThan(0);
+    const ex = posterExtrasDefault(p);
+    expect(ex.tables).toEqual(["areas", "siteProof", "unitSchedule"]);
+    const plan = planPresentationSheet(p, { ...presentationDefaults(p), scale: 200, poster: "poster-a1-landscape", extras: ex });
+    expect(plan.tables!.map((t) => t.id)).toEqual(["areas", "siteProof", "unitSchedule"]);
+    const res = presentationSheetOps(p, { ...presentationDefaults(p), scale: 200, poster: "poster-a1-landscape", extras: ex }, LABELS, "u1")!;
+    st().applyChange(res.ops);
+    const sources = st().project.layouts!.filter((l) => res.layoutIds.includes(l.id)).flatMap((l) => (l.tables ?? []).map((t) => t.source));
+    expect(sources).toEqual(["areas", "siteProof", "unitSchedule"]);
+    // Ohne Einheiten keine Tabelle.
+    expect(posterExtrasDefault({ ...p, units: [] }).tables).toEqual(["areas", "siteProof"]);
   }, 60_000);
 });

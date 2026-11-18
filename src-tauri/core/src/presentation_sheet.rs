@@ -318,8 +318,11 @@ pub const PLAN_MARGIN_MM: f64 = 20.0;
 pub const MARKS_MARGIN_MM: f64 = 12.0;
 /// [266] So weit (Papier-mm) darf der Ausschnitt eines Grundrisses wegen der Marken höchstens über die Bauteile hinauswachsen.
 pub const MARKS_REACH_MM: f64 = 40.0;
-/// [208] Rand um das Haus im Situationsplan (Papier-mm; 1:500 ⇒ 40 m Umgebung).
-pub const SITUATION_MARGIN_MM: f64 = 80.0;
+/// [208] Rand um das Haus im Situationsplan (Papier-mm; 1:500 ⇒ 30 m Umgebung), wenn keine Parzelle bekannt ist.
+pub const SITUATION_MARGIN_MM: f64 = 60.0;
+/// [285] Rand um Baufeld (Parzelle samt Haus) im Situationsplan (Papier-mm; 1:500 ⇒ 10 m): der Ausschnitt zeigt die eigene Parzelle
+/// mit einem Streifen Nachbarschaft und Strasse, nicht alle Parzellen des Katasters als Kacheln.
+pub const SITUATION_PARCEL_MARGIN_MM: f64 = 20.0;
 
 /// [208] Ausschnitt eines Inhalts (Modell-Meter): das Ausmass `b`, beschnitten auf die Bauteile `house` ± `margin`;
 /// ohne Bauteile (Schnitt/Ansicht) das ganze Ausmass.
@@ -331,6 +334,17 @@ pub fn crop(b: [f64; 4], house: Option<[f64; 4]>, margin: f64) -> [f64; 4] {
     } else {
         b
     }
+}
+
+/// [285] Baufeld des Situationsplans (Modell-Meter) und sein Rand (Papier-mm): Haus ∪ Parzellenring, mit dem kleineren Rand um
+/// die Parzelle; ohne brauchbare Parzelle das Haus mit dem grösseren Rand.
+fn situation_focus(house: Option<[f64; 4]>, parcel: Option<&[crate::model::Vec2]>) -> (Option<[f64; 4]>, f64) {
+    let pts: Vec<&crate::model::Vec2> = parcel.into_iter().flatten().filter(|q| q.x.is_finite() && q.y.is_finite()).collect();
+    if pts.len() < 3 {
+        return (house, SITUATION_MARGIN_MM);
+    }
+    let bb = pts.iter().fold([f64::MAX, f64::MAX, f64::MIN, f64::MIN], |m, q| [m[0].min(q.x), m[1].min(q.y), m[2].max(q.x), m[3].max(q.y)]);
+    (Some(union(house, bb)), SITUATION_PARCEL_MARGIN_MM)
 }
 
 fn union(a: Option<[f64; 4]>, b: [f64; 4]) -> [f64; 4] {
@@ -446,7 +460,9 @@ fn poster_plan(p: &Project, req: &Request, po: &PosterReq, sheet: &Sheet, kept: 
         if !b.iter().all(|v| v.is_finite()) {
             return None;
         }
-        let mut f = Frame::of(crop(b, house, SITUATION_MARGIN_MM * s.scale / 1000.0), s.scale);
+        // [285] Baufeld = Haus ∪ Parzellenring der Baurecht-Angaben (sonst nur das Haus).
+        let (focus, margin_mm) = situation_focus(house, p.site_rules.as_ref().map(|r| r.parcel.as_slice()));
+        let mut f = Frame::of(crop(b, focus, margin_mm * s.scale / 1000.0), s.scale);
         // Höchstens die halbe Breite und knapp die halbe Höhe des Satzspiegels; beschnitten bleibt das Haus in der Mitte.
         let (max_w, max_h) = (g.span_w(g.cols.div_ceil(2)) - 2.0 * FRAME_PAD_MM, (g.height() - g.band) * 0.45 - 2.0 * FRAME_PAD_MM);
         let hc = house.map(|h| ((h[0] + h[2]) / 2.0, (h[1] + h[3]) / 2.0));
@@ -534,6 +550,23 @@ fn poster_plan(p: &Project, req: &Request, po: &PosterReq, sheet: &Sheet, kept: 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn situation_baufeld_parzelle_mit_kleinem_rand() {
+        let v = |x: f64, y: f64| crate::model::Vec2 { x, y };
+        let house = Some([10.0, 10.0, 28.0, 21.0]);
+        // Ohne Parzelle: Haus mit dem grossen Rand.
+        assert_eq!(situation_focus(house, None), (house, SITUATION_MARGIN_MM));
+        assert_eq!(situation_focus(house, Some(&[v(0.0, 0.0), v(1.0, 0.0)])), (house, SITUATION_MARGIN_MM));
+        // Mit Parzelle: Haus ∪ Parzelle, kleiner Rand.
+        let ring = [v(0.0, 0.0), v(40.0, 0.0), v(40.0, 30.0), v(0.0, 30.0)];
+        let (f, m) = situation_focus(house, Some(&ring));
+        assert_eq!(f, Some([0.0, 0.0, 40.0, 30.0]));
+        assert_eq!(m, SITUATION_PARCEL_MARGIN_MM);
+        // Ausmass (Kataster mit vier Parzellen, 200 m breit) wird auf Parzelle ± 10 m beschnitten.
+        let c = crop([-100.0, -100.0, 100.0, 100.0], f, m * 500.0 / 1000.0);
+        assert_eq!(c, [-10.0, -10.0, 50.0, 40.0]);
+    }
 
     fn inside(r: &Rect, s: &Sheet) -> bool {
         r.x_mm >= MARGIN_MM - 1e-9

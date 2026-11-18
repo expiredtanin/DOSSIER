@@ -61,7 +61,7 @@ export interface PresentationOptions {
 }
 
 /** Kennzahlen (SIA 416) und Baurecht-Nachweis als Blatt-Tabellen. */
-export type PosterTableKind = "areas" | "siteProof";
+export type PosterTableKind = "areas" | "siteProof" | "unitSchedule";
 
 export interface PosterExtras {
   /** Situationsplan 1:500 (Vorlage „Situation WBW“, Nordpfeil und Massstabsbalken aus der Modelldarstellung). */
@@ -73,6 +73,10 @@ export interface PosterExtras {
 
 /** Vorgabe beim Wählen einer Plakat-Vorlage: alles, was zu einer Wettbewerbs-Abgabe gehört. */
 export const POSTER_EXTRAS_DEFAULT: PosterExtras = { situation: true, tables: ["areas", "siteProof"], image: true };
+/** [285] Vorgabe je Projekt: mit Einheiten (Wohnungen) gehört der Wohnungsspiegel zum Plakat. */
+export function posterExtrasDefault(project: Project): PosterExtras {
+  return (project.units ?? []).length > 0 ? { ...POSTER_EXTRAS_DEFAULT, tables: [...POSTER_EXTRAS_DEFAULT.tables, "unitSchedule"] } : { ...POSTER_EXTRAS_DEFAULT };
+}
 /** Massstab der Situation auf dem Plakat. */
 export const POSTER_SITUATION_SCALE = 500;
 /** Id der Standard-Ansichtsvorlage „Situation WBW 1:500“ und ihrer Modelldarstellung (`standards.rs`). */
@@ -146,6 +150,8 @@ export interface PresentationLabels {
   situation?: string;
   tableAreas?: string;
   tableSiteProof?: string;
+  /** [285] Titel des Wohnungsspiegels. */
+  tableUnits?: string;
   imagePlaceholder?: string;
   imageHint?: string;
   /** [266] Name des 3D-Dokuments (Axonometrie) im Bild-Rahmen. */
@@ -673,7 +679,7 @@ export function presentationSheetOps(
   const fontPt = posterTextMetrics(size).tablePt;
   for (const tb of plan.tables ?? []) {
     const lvl = sheetLevels[tb.page].id;
-    const title = tb.id === "areas" ? labels.tableAreas : labels.tableSiteProof;
+    const title = tb.id === "areas" ? labels.tableAreas : tb.id === "unitSchedule" ? labels.tableUnits : labels.tableSiteProof;
     if (title) drawings.push(sheetText(`d-pres-${stamp}-tt-${tb.id}`, lvl, cat, tb.xMm, tb.yMm + labelM.sizeMm * 1.1, title, labelM.sizeMm, true));
     tables[tb.page].push({
       id: `tbl-pres-${stamp}-${tb.id}`,

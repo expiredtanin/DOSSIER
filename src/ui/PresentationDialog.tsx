@@ -3,10 +3,10 @@
 // Layouts-Panel ihn öffnen. Beim Bestätigen entsteht das Blatt in EINEM Undo-Schritt
 // (`state/presentationSheet.ts`); `onCreated` öffnet es. Overlay wie `LayoutCreateDialogs` (kein window.prompt).
 
-import { memo, useCallback, useEffect, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { t } from "../i18n";
 import { enterConfirmsDialog, useModalFocus } from "./modalFocus";
-import { POSTER_EXTRAS_DEFAULT, PRESENTATION_SCALES, levelHasContent, presentationDefaults, type PosterTableKind, type PresentationOptions } from "../core";
+import { finerPresentationScale, posterExtrasDefault, PRESENTATION_SCALES, levelHasContent, presentationDefaults, type PosterTableKind, type PresentationOptions } from "../core";
 import type { LayoutOrientation, LayoutPaperFormat } from "../model/types";
 import { PAPER_FORMAT_GROUPS } from "../model/layoutModel";
 import { POSTER_TEMPLATES, posterTemplateLabel } from "../model/posterTemplates";
@@ -52,6 +52,15 @@ export const PresentationDialogHost = memo(function PresentationDialogHost({
     return () => window.removeEventListener("keydown", onKey);
   }, [opts, close, confirm]);
 
+  // [285] Passt ein feinerer Massstab (≥ 1:100) auch aufs Blatt, wird er angeboten: sonst bleibt das Blatt eines kleinen Hauses halb leer.
+  const finer = useMemo(() => {
+    if (!opts?.scale || (opts.floors.length === 0 && opts.elevationIds.length === 0 && opts.sectionIds.length === 0)) return null;
+    try {
+      return finerPresentationScale(project, opts);
+    } catch {
+      return null;
+    }
+  }, [project, opts]);
   if (!opts) return null;
   const floors = drawingLevels.filter((l) => l.kind === "floor" && !l.layoutId);
   const sections = drawingLevels.filter((l) => l.kind === "section");
@@ -65,7 +74,7 @@ export const PresentationDialogHost = memo(function PresentationDialogHost({
   const toggleSection = (id: string, on: boolean) =>
     set({ sectionIds: sections.map((x) => x.id).filter((x) => (x === id ? on : opts.sectionIds.includes(x))) });
   const toggleTable = (kind: PosterTableKind, on: boolean): PosterTableKind[] =>
-    (["areas", "siteProof"] as const).filter((k) => (k === kind ? on : (opts.extras?.tables ?? []).includes(k)));
+    (["areas", "siteProof", "unitSchedule"] as const).filter((k) => (k === kind ? on : (opts.extras?.tables ?? []).includes(k)));
   const empty = opts.floors.length === 0 && opts.elevationIds.length === 0 && opts.sectionIds.length === 0;
   // [224] Massstab je Viewport: "" = gemeinsamer Massstab.
   const scaleOf = (id: string) => String(opts.scales?.[id] ?? "");
@@ -158,7 +167,7 @@ export const PresentationDialogHost = memo(function PresentationDialogHost({
                 data-testid="presentation-target"
                 aria-label={t("presentation.sheet")}
                 value={opts.poster ?? ""}
-                onChange={(e) => set({ poster: e.target.value || undefined, extras: e.target.value ? (opts.extras ?? POSTER_EXTRAS_DEFAULT) : undefined })}
+                onChange={(e) => set({ poster: e.target.value || undefined, extras: e.target.value ? (opts.extras ?? posterExtrasDefault(project)) : undefined })}
               >
                 <option value="">{t("presentation.target.sheet")}</option>
                 {POSTER_TEMPLATES.map((tpl) => (
@@ -180,6 +189,14 @@ export const PresentationDialogHost = memo(function PresentationDialogHost({
                 ))}
               </select>
             </div>
+            {finer && (
+              <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 6, fontSize: 12 }} data-testid="presentation-finer">
+                <span>{t("presentation.finerSuggest", { scale: opts.scale!, finer })}</span>
+                <button type="button" className="imp-btn" data-testid="presentation-finer-apply" onClick={() => set({ scale: finer })}>
+                  {t("presentation.finerApply", { finer })}
+                </button>
+              </div>
+            )}
             <div style={{ display: "flex", gap: 8, alignItems: "center", opacity: poster ? 0.5 : 1 }}>
               <select
                 className="imp-select"
@@ -218,6 +235,7 @@ export const PresentationDialogHost = memo(function PresentationDialogHost({
                   ["situation", t("presentation.extras.situation"), opts.extras.situation, (on: boolean) => ({ situation: on })],
                   ["areas", t("presentation.extras.areas"), opts.extras.tables.includes("areas"), (on: boolean) => ({ tables: toggleTable("areas", on) })],
                   ["siteProof", t("presentation.extras.siteProof"), opts.extras.tables.includes("siteProof"), (on: boolean) => ({ tables: toggleTable("siteProof", on) })],
+                  ...((project.units ?? []).length > 0 ? ([["unitSchedule", t("presentation.extras.units"), opts.extras.tables.includes("unitSchedule"), (on: boolean) => ({ tables: toggleTable("unitSchedule", on) })]] as const) : []),
                   ["image", t("presentation.extras.image"), opts.extras.image, (on: boolean) => ({ image: on })],
                 ] as const
               ).map(([key, label, on, patch]) => (
