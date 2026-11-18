@@ -624,6 +624,32 @@ fn stair_footprint(st: &Stair) -> Vec<Vec2> {
     vec![Vec2 { x: min_x, y: min_y }, Vec2 { x: max_x, y: min_y }, Vec2 { x: max_x, y: max_y }, Vec2 { x: min_x, y: max_y }]
 }
 
+/// [B4] Pset `Dossier_Roof`: lesbares Gerüst (Form, Neigung, Firstrichtung, Traufhöhe absolut, Dicke, Umriss) und
+/// `RoofParams` (JSON der übrigen Dach-Felder: Höfe, Bögen, Kantenneigungen, Überstände, Gauben, Attika …).
+fn dossier_roof_pset(p: &Project, roof: &Roof) -> Pset {
+    let mut v = serde_json::to_value(roof).unwrap_or_default();
+    let shape = v["shape"].as_str().unwrap_or("flach").to_string();
+    let ridge = v["ridgeAxis"].as_str().unwrap_or("x").to_string();
+    if let Some(o) = v.as_object_mut() {
+        for k in ["id", "type", "floorId", "categoryCode", "ifcGlobalId", "locked", "outline", "shape", "pitchDeg", "ridgeAxis", "baseElevation", "thickness", "roofTypeId", "renovation", "designOption"] {
+            o.remove(k);
+        }
+    }
+    let outline = roof.outline.iter().map(|q| format!("{},{}", fmt_coord(q.x), fmt_coord(q.y))).collect::<Vec<_>>().join(";");
+    Pset {
+        name: "Dossier_Roof",
+        props: vec![
+            ident("RoofShape", &shape),
+            ident("RoofPitch", &fmt_coord(roof.pitch_deg)),
+            ident("RoofRidge", &ridge),
+            ident("RoofBase", &fmt_coord(p.roof_base_elevation(roof))),
+            ident("RoofThickness", &fmt_coord(roof.thickness)),
+            ident("RoofOutline", &outline),
+            ident("RoofParams", &v.to_string()),
+        ],
+    }
+}
+
 /// Name einer Dachfläche (Teil eines IfcRoof): Typname oder „Dachfläche“.
 fn name_of_part(type_name: Option<&str>) -> &str {
     type_name.filter(|n| !n.is_empty()).unwrap_or("Dachfläche")
@@ -1815,6 +1841,8 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
         props.extend(u_value.map(|u| Prop::Thermal("ThermalTransmittance", u)));
         let mut psets = vec![Pset { name: "Pset_RoofCommon", props }];
         renovation_props(&p, &mut psets, "Pset_RoofCommon", roof.renovation.as_ref());
+        // [B4] Dach-Parameter fürs Zurücklesen als Dach (Umriss, Form, Neigungen, Höfe, Gauben …); fremde IFC haben das nicht.
+        psets.push(dossier_roof_pset(&p, roof));
         layer_renovation_props(&p, &mut psets, &roof.id);
         let (roof_q, dormer_q) = roof_base_quantities(&p, roof);
         psets.extend(qto("Qto_RoofBaseQuantities", roof_q));
