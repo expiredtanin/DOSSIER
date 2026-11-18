@@ -47,6 +47,10 @@ Prüfbilder je Aufgabe, neueste zuerst. Entstanden im Linux-Container (CLI-SVG b
 
 ![01-gelaender.png](review-279/01-gelaender.png)
 
+**02-glas.png**
+
+![02-glas.png](review-279/02-glas.png)
+
 
 ## [278] Nutzungseinheiten und Wohnungsspiegel
 
