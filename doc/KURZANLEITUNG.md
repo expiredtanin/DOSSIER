@@ -56,13 +56,13 @@ geprüft.
 
 1. Parzellengrenze im Plan anklicken.
 2. Panel **Gelände** → Abschnitt „Baurecht der Parzelle“ → **Parzelle aus Auswahl**. Es erscheint z. B.
-   „Parzelle 880 m² · zulässig …“.
+   „Parzelle 885.0 m² · zulässig 442.7 m²“ (Beispiel Wettbewerb; die Fläche rechnet Dossier aus dem Polygon, das Kataster-Schild im Plan nennt 880 m²).
 3. **Grenzabstand** setzen, bei Bedarf je Kante, **Baulinie aus Auswahl** für die Strassenseite.
 4. **Gesamthöhe max.** eintragen, optional **Profilwinkel** und **Vorsprünge bis**. Mit „Hülle im 3D“ zeigt Dossier die
    zulässige Hülle durchscheinend; Verstösse sind rot.
 
 Die Prüfung steht darunter („Gebäude innerhalb der zulässigen Fläche“, „Höhe 9.50 m ≤ 12.00 m“). Im Beispiel:
-Abstände 4/4/5/4 m, 12 m Gesamthöhe, Parzelle 880 m².
+Abstände 4/4/5/4 m, 12 m Gesamthöhe, Parzelle 885 m² (zulässig 442.7 m²); das Haus misst 9.50 m über ±0.00 (Oberkante Attika).
 
 ## 4. Volumen: Wände, Decke, Dach
 
@@ -137,14 +137,14 @@ Zeichnung. Nicht möglich: die Körper sind grob (Hüllen statt genauer Silhouet
    Soll/Ist-Tabelle (grün = erfüllt, gelb = Abweichung, „fehlt“ = noch kein Raum).
 3. **Räume generieren** legt aus dem Programm ein Blatt mit Raumrechtecken an, um das Programm zu schieben.
 
-Im Beispiel sind alle 7 Programmzeilen erfüllt (Toleranz 10 %).
+Im Beispiel sind 5 der 7 Programmzeilen erfüllt (Toleranz 10 %); „zu klein“ meldet Dossier bei Zimmer (im Mittel 17.7 statt 20 m²), „zu gross“ bei Diele (9.1 statt 8 m²).
 
 ## 6. Flächen und Kennzahlen SIA 416
 
 Das Panel **Flächenbilanz** zeigt die Kennzahlenleiste: GF, aGF, GV, AZ, ÜZ. Darunter der „Flächen- und
 Kennzahlen-Nachweis“ (HNF, NNF, VF, FF, KF; IVHB-Ziffern) mit **CSV** und **PDF**. Das Menü
 *Bearbeiten → Kennzahlen und Raumprogramm …* gibt dasselbe als Meldung. Beispielwerte aus dem Projekt „Wettbewerb“:
-GF 745 m², GV 2’234 m³, AZ 0.75, ÜZ 0.28. Das GV (SIA 416) ist je Geschoss GF × Geschosshöhe plus der Dachraum unter
+GF 758 m², GV 2’413 m³, AZ 0.75, ÜZ 0.29. Das GV (SIA 416) ist je Geschoss GF × Geschosshöhe plus der Dachraum unter
 Steildach und Gauben bis Oberkante Dach; Dachvorsprünge zählen nicht (das Wettbewerbsprojekt hat ein Flachdach, also keinen Dachraum).
 Unten zählt die Bodenplatte mit: eine Decke unter dem untersten Geschoss reicht von ihrer Unterkante bis zum Fertigboden (Fundamente,
 Kies und Magerbeton nicht). Freie Körper neben dem Haus (Studienkörper, mindestens 9 m² Grundfläche und 2.4 m hoch) zählen, aber nur
