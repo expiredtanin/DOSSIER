@@ -138,7 +138,7 @@ export function DropdownRows({
         </span>
         {row.hint && <span className="tb-dd-hint">{row.hint}</span>}
       </span>
-      {row.shortcut && <kbd className="tb-dd-kbd">{row.shortcut}</kbd>}
+      {row.shortcut && <kbd className="tb-dd-kbd" aria-hidden="true">{row.shortcut}</kbd>}
     </button>
   );
   // [249] Überschrift + folgende Optionen = eine benannte Gruppe (`role="group"`, Name = Überschrift), damit
