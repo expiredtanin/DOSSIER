@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // [215] Tauri (macOS): ausgepacktes Cycles-Paket (build/cycles, scripts/cycles/get.sh) als Sidecar bereitstellen.
 //   node scripts/cycles/tauri-prepare.mjs [Paketordner]      (Standard: build/cycles)
-// `bundle.externalBin: ["binaries/cycles"]` (src-tauri/tauri.cycles.conf.json) verlangt je Ziel `binaries/cycles-<triple>`.
+// `bundle.externalBin: ["binaries/cycles-render"]` (src-tauri/tauri.cycles.conf.json) verlangt je Ziel `binaries/cycles-render-<triple> (nicht `cycles`: der Bau legt Programm und Ressourcenordner `cycles/` nebeneinander, gleicher Name ⇒ „Not a directory“)`.
 // Das Paket ist arm64: für die universale App (arm64 + x64) entstehen auch die Namen x86_64 und universal — Kopien des
 // arm64-Programms, nur damit der Bau durchläuft; auf Intel-Macs meldet `cycles_where` (src-tauri/src/cycles.rs) „nicht verfügbar“.
 // `scripts/tauri-native.mjs` hängt die Konfiguration automatisch an `tauri build`, sobald die Sidecars da sind.
@@ -18,7 +18,7 @@ if (!existsSync(bin)) {
 const out = join(root, "src-tauri", "binaries");
 mkdirSync(out, { recursive: true });
 for (const triple of ["aarch64-apple-darwin", "x86_64-apple-darwin", "universal-apple-darwin"]) {
-  const to = join(out, `cycles-${triple}`);
+  const to = join(out, `cycles-render-${triple}`);
   copyFileSync(bin, to);
   chmodSync(to, 0o755);
   console.log(`tauri-prepare: ${to}`);

@@ -25,7 +25,7 @@ if (args[0] === "build" && !args.some((a) => a.includes("bundleVersion"))) args.
 // (Tauri führt mehrere zusammen). Ohne Cycles bleibt der Bau wie bisher (tauri-build verlangt sonst die Sidecar-Dateien).
 // macOS-Bau ohne bereitliegendes Paket: erst holen (scripts/cycles/get.sh) und als Sidecar bereitstellen, damit kein Bau
 // still ohne Cycles entsteht; gelingt das nicht, laut warnen. Opt-out: DOSSIER_NO_CYCLES=1.
-const sidecar = new URL("../src-tauri/binaries/cycles-aarch64-apple-darwin", import.meta.url);
+const sidecar = new URL("../src-tauri/binaries/cycles-render-aarch64-apple-darwin", import.meta.url);
 if (args[0] === "build" && process.platform === "darwin" && !process.env.DOSSIER_NO_CYCLES && !existsSync(sidecar)) {
   const script = (f) => fileURLToPath(new URL(`./cycles/${f}`, import.meta.url));
   if (!existsSync(new URL("../build/cycles/cycles", import.meta.url))) {

@@ -97,7 +97,7 @@ describe("Workflows", () => {
   });
   it("Tauri-Overlay: Sidecar + Ressourcen für Bibliotheken, Kernel-Quellen, Lizenzen", () => {
     const c = JSON.parse(read("src-tauri/tauri.cycles.conf.json")) as { bundle: { externalBin: string[]; resources: Record<string, string> } };
-    expect(c.bundle.externalBin).toEqual(["binaries/cycles"]);
+    expect(c.bundle.externalBin).toEqual(["binaries/cycles-render"]);
     expect(Object.values(c.bundle.resources).sort()).toEqual(["cycles/lib/", "cycles/licenses/", "cycles/source/"]);
   });
 });

@@ -4,15 +4,19 @@
 // Nur `std`, damit die Logik ohne Tauri-Toolchain testbar ist (`rustc --test src/cycles.rs`). Die Tauri-Befehle
 // (`cycles_where`, `cycles_job_dir`, `cycles_start`, `cycles_cancel`) stehen in `lib.rs`, starten über
 // `blender::start_program` (Job-Verwaltung, Ereignisse `cycles://line` / `cycles://exit`) und rufen NUR das Programm auf, das
-// diese Funktionen liefern: der Sidecar `cycles` neben dem App-Programm (`bundle.externalBin`, macOS: `Contents/MacOS/cycles`).
+// diese Funktionen liefern: der Sidecar `cycles-render` ([`SIDECAR`]) neben dem App-Programm (`bundle.externalBin`, macOS: `Contents/MacOS/cycles-render`).
 // Sicherheit: keine Shell; feste Schalter mit Wertebereich; Dateien nur im Arbeitsordner `<temp>/dossier-render/…`.
 // Cycles ist Apache-2.0; Herkunft und Lizenzen: NOTICE, `Resources/cycles/licenses/`.
 
 use std::path::{Component, Path, PathBuf};
 
+/// Name des Sidecars im App-Paket (`bundle.externalBin: binaries/cycles-render`). Nicht `cycles`: beim Bau liegen Programm
+/// und Ressourcenordner `cycles/` (lib, source, licenses) im selben Ordner, ein gleichnamiges Programm bricht den Bau.
+pub const SIDECAR: &str = "cycles-render";
+
 /// Programmdatei: Entwicklung (`dev_dir`, aus `DOSSIER_CYCLES_DIR`, nur in Debug-Builds) vor dem Sidecar neben dem App-Programm.
 pub fn find_exe(sidecar_dir: &Path, dev_dir: Option<&Path>) -> Option<PathBuf> {
-    let candidates = dev_dir.map(|d| d.join("cycles")).into_iter().chain(std::iter::once(sidecar_dir.join("cycles")));
+    let candidates = dev_dir.map(|d| d.join("cycles")).into_iter().chain(std::iter::once(sidecar_dir.join(SIDECAR)));
     candidates.into_iter().find(|p| p.is_file())
 }
 
@@ -176,8 +180,8 @@ mod tests {
         std::fs::create_dir_all(&side).unwrap();
         std::fs::create_dir_all(&dev).unwrap();
         assert_eq!(find_exe(&side, Some(&dev)), None);
-        std::fs::write(side.join("cycles"), "").unwrap();
-        assert_eq!(find_exe(&side, None), Some(side.join("cycles")));
+        std::fs::write(side.join(SIDECAR), "").unwrap();
+        assert_eq!(find_exe(&side, None), Some(side.join(SIDECAR)));
         std::fs::write(dev.join("cycles"), "").unwrap();
         assert_eq!(find_exe(&side, Some(&dev)), Some(dev.join("cycles")));
         std::fs::create_dir_all(base.join("res/cycles/source")).unwrap();

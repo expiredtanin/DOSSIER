@@ -1,6 +1,6 @@
 {
   "bundle": {
-    "externalBin": ["binaries/cycles"],
+    "externalBin": ["binaries/cycles-render"],
     "resources": {
       "../build/cycles/lib/": "cycles/lib/",
       "../build/cycles/source/": "cycles/source/",
