@@ -77,13 +77,14 @@ export function ExportSaveDialog({
   const [ebkph, setEbkph] = useState(false);
   const [layerCodes, setLayerCodes] = useState(false);
   const [context, setContext] = useState(false);
+  const [entourage, setEntourage] = useState(false);
   // IFC-Schema: IFC4 (Standard) oder IFC2x3 für ältere Fachplaner-Programme.
   const [schema, setSchema] = useState<IfcSchema>("IFC4");
   // [271][272] Die Ansicht der aktiven Ebene gilt für alle 3D-Formate (IFC, OBJ, STL, glTF, STEP); die Bauteilliste (CSV) nicht.
   const viewApplies = format !== "csv";
   const viewActive = hasExportView(view);
   const [useView, setUseView] = useState(true);
-  const onConfirm = () => onSave(format, filename, format === "ifc" ? { schema, ebkph, layerCodes, context } : undefined, viewApplies && viewActive && useView ? view : undefined);
+  const onConfirm = () => onSave(format, filename, format === "ifc" ? { schema, ebkph, layerCodes, context, entourage } : undefined, viewApplies && viewActive && useView ? view : undefined);
 
   return (
     <div className="imp-overlay" onClick={onClose}>
@@ -147,6 +148,11 @@ export function ExportSaveDialog({
                 <span>{t("exportSave.ifc.context")}</span>
               </label>
               <div className="imp-note">{t("exportSave.ifc.contextHint")}</div>
+              <label className="imp-check">
+                <input type="checkbox" checked={entourage} onChange={(e) => setEntourage(e.target.checked)} />
+                <span>{t("exportSave.ifc.entourage")}</span>
+              </label>
+              <div className="imp-note">{t("exportSave.ifc.entourageHint")}</div>
               <div className="imp-note">{t("exportSave.ifc.zonesNote")}</div>
             </section>
           )}

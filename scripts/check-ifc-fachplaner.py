@@ -18,7 +18,7 @@ Ergänzt `scripts/validate-ifc.py` (Schema, Express-Regeln, Geometrie) um inhalt
     IfcPresentationLayerAssignment; Ebenennamen `Code_Bezeichnung` (wie im DXF);
   • Räume: Height = Geometrie ±1 cm, `stats.spaceHeights` (Nummer → Height, FinishCeilingHeight, ClearHeightMin/Mean) für den
     Vergleich mit dem Raumbuch im Test;
-  • keine Objekte der 2D-Objektbibliothek als 3D-Körper (IfcFurniture/IfcSanitaryTerminal …).
+  • keine Sanitärobjekte der 2D-Objektbibliothek als 3D-Körper (IfcSanitaryTerminal …); Möbel mit Netz sind IfcFurniture ([253]).
 
 Aufruf: python3 scripts/check-ifc-fachplaner.py datei.ifc [--geo] [--context] [--json] [--known=GlobalId,…]
   --geo      die Datei MUSS georeferenziert sein
@@ -40,7 +40,7 @@ import ifcopenshell.util.shape as us
 
 TOL = 0.01  # ±1 %
 LOCAL_LIMIT = 5000.0  # m: weiter vom Ursprung = „nicht lokal"
-LIBRARY_CLASSES = ["IfcFurniture", "IfcFurnishingElement", "IfcSanitaryTerminal", "IfcSystemFurnitureElement"]
+LIBRARY_CLASSES = ["IfcSanitaryTerminal", "IfcSystemFurnitureElement"]  # [253] Möbel mit 3D-Netz (IfcFurniture) sind erlaubt
 
 
 def rel_err(a, b):

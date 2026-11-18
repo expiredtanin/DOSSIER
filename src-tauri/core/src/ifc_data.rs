@@ -45,6 +45,8 @@ const REC_ROOF: f64 = 9.0;
 const REC_COLUMN: f64 = 10.0;
 const REC_END_COLUMNS: f64 = 11.0;
 const REC_BEAM: f64 = 28.0;
+/// [253] Bibliotheksobjekt mit 3D-Netz (Möbel) → `IfcFurniture`; Entourage nur mit `IfcOptions::entourage`.
+const REC_FURNITURE: f64 = 29.0;
 const REC_CLASSIFICATION: f64 = 12.0;
 const REC_ZONE: f64 = 13.0;
 const REC_ATTACH: f64 = 14.0;
@@ -80,6 +82,8 @@ pub struct IfcOptions {
     /// [259] Kontext mitgeben: Gelände-Netze (IfcGeographicElement TERRAIN) und Netze auf Umgebungsklassen
     /// (Nachbargebäude → IfcBuildingElementProxy), am IfcSite. Fachplaner wollen oft nur das Gebäude: Vorgabe aus.
     pub context: bool,
+    /// [253] Entourage (Person, Velo, Auto) mitgeben: IfcBuildingElementProxy ObjectType „Entourage". Vorgabe aus (keine Bauteile).
+    pub entourage: bool,
     /// Zeitstempel (Sekunden seit 1970) und dieselbe Zeit als ISO-Text ohne Sekundenbruchteil.
     pub now: f64,
     pub iso: String,
@@ -2069,6 +2073,41 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
         w_mesh(&mut f, &positions, &indices, false);
     }
 
+    // ── [253] Möbel der Bibliothek (3D-Netz) → IfcFurniture (IFC2x3: IfcFurnishingElement); Person/Velo/Auto sind Entourage
+    // und nur mit Option als IfcBuildingElementProxy dabei. Netz Welt rel. Geschoss-UK, Status wie andere Bauteile. ──
+    for (i, parts) in crate::furniture_3d::placed(&p) {
+        let d = &p.drawings2d[i];
+        let Drawing2DGeom::Libobj { lib_id, .. } = &d.geom else { continue };
+        let entourage = crate::furniture_3d::is_entourage(lib_id);
+        if entourage && !opt.entourage {
+            continue;
+        }
+        let structure = structure_of(&d.level_id);
+        let base = base_of(structure);
+        let (mut positions, mut indices) = (Vec::new(), Vec::new());
+        for m in &parts {
+            let at = (positions.len() / 3) as u32;
+            positions.extend_from_slice(&m.positions);
+            indices.extend(m.indices.iter().map(|k| k + at));
+        }
+        if indices.is_empty() {
+            continue;
+        }
+        for z in positions.iter_mut().skip(2).step_by(3) {
+            *z -= base;
+        }
+        let (name, kind) = crate::furniture_3d::ifc_name_and_type(lib_id);
+        let mut psets = vec![Pset { name: "Pset_FurnitureTypeCommon", props: vec![ident("Reference", &name)] }];
+        renovation_props(&p, &mut psets, "Pset_FurnitureTypeCommon", d.renovation.as_ref());
+        psets.push(Pset { name: "Dossier_Furniture", props: vec![ident("LibId", lib_id)] });
+        let (id, nm, ty) = (f.str(&d.id), f.str(&name), f.str(lib_id));
+        let kind = f.str(if entourage { "ENTOURAGE" } else { kind });
+        f.nums(&[REC_FURNITURE, structure, id, nm, ty, kind, if entourage { 1.0 } else { 0.0 }]);
+        w_psets(&mut f, &psets);
+        // Teile einzeln geschlossen, zusammen kein dichtes Netz (IFC2x3: Flächenmodell).
+        w_mesh(&mut f, &positions, &indices, false);
+    }
+
     // ── [279] Geländer → IfcRailing (GUARDRAIL; HANDRAIL, wenn nur der Handlauf bleibt), Netz aus den Prismen ──
     for r in p.railings.as_deref().unwrap_or(&[]) {
         let (Some(s), Some(ax)) = (crate::railing::spec(&p, r), crate::railing::axis(r)) else { continue };
@@ -2389,6 +2428,26 @@ mod tests {
         // Ohne Bäume kein Datensatz.
         p.trees = None;
         assert!(!strings(&ifc_export_data(&p, &IfcOptions::default()).unwrap()).iter().any(|x| x == "Dossier_Qto_Tree"));
+    }
+
+    /// [253] Möbel mit 3D-Netz als eigener Datensatz (Name aus der Katalog-Id, Status wie Bauteile); Person/Velo/Auto nur mit Option.
+    #[test]
+    fn moebel_datensatz_ohne_entourage() {
+        let mut p = sample();
+        let floor = p.drawing_levels.iter().find(|l| l.kind == DrawingLevelKind::Floor).unwrap().id.clone();
+        let lib = |id: &str, lib_id: &str, x: f64| -> Drawing2D {
+            serde_json::from_value(serde_json::json!({"id": id, "type": "drawing2d", "levelId": floor, "categoryCode": "22", "geom": {"shape": "libobj", "libId": lib_id, "at": {"x": x, "y": 2.0}, "rotation": 0.0}})).unwrap()
+        };
+        p.drawings2d.extend([lib("m1", "lib:tisch-rund-120", 1.0), lib("m2", "lib:sitzbank", 3.0), lib("m3", "lib:person-stehend", 5.0), lib("m4", "lib:wc-wand", 7.0)]);
+        let has = |f: &Flat, id: &str| strings(f).iter().any(|x| x == id);
+        let f = ifc_export_data(&p, &IfcOptions::default()).unwrap();
+        let s = strings(&f);
+        assert!(has(&f, "lib:tisch-rund-120") && has(&f, "lib:sitzbank"), "Tisch und Bank");
+        assert!(!has(&f, "lib:person-stehend") && !has(&f, "lib:wc-wand"), "Person (Entourage) und WC (kein Netz) nicht");
+        assert!(s.iter().any(|x| x == "Tisch rund 120") && s.iter().any(|x| x == "TABLE") && s.iter().any(|x| x == "Sitzbank"));
+        let f = ifc_export_data(&p, &IfcOptions { entourage: true, ..Default::default() }).unwrap();
+        assert!(has(&f, "lib:person-stehend") && !has(&f, "lib:wc-wand"));
+        assert!(strings(&f).iter().any(|x| x == "ENTOURAGE"));
     }
 
     /// [G3]/[103] Formöffnung und Dachfenster als Öffnungskörper-Datensatz mit Wirt.

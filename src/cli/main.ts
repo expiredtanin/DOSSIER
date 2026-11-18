@@ -35,7 +35,7 @@
 //                                                  [--scale 200] [--hatch] [--color] [--format svg|json|dxf|dxfbin|dwg] [--out axo.svg]
 //                                                  [266] 3D-Dokument: Vektor-Axonometrie/-Perspektive mit verdeckten Kanten aus dem Kern
 //                                                  (Linienzeichnung, Silhouette kräftig, Flächen nach Lage grau; ohne GPU)
-//   dossier-cli <projekt.obp> ifc [--ebkph] [--ebenen] [--kontext]   (IFC mit eBKP-H-Hauptgruppen bzw. Modell-Ebenen als Klassifikation; --kontext: Gelände/Nachbarn mitgeben)
+//   dossier-cli <projekt.obp> ifc [--ebkph] [--ebenen] [--kontext] [--entourage]   (IFC mit eBKP-H-Hauptgruppen bzw. Modell-Ebenen als Klassifikation; --kontext: Gelände/Nachbarn mitgeben; --entourage: Person/Velo/Auto als Proxy, Möbel gehen immer als IfcFurniture)
 //                                                  --schema 4|2x3: IFC4 (Standard) oder IFC2x3 (Coordination View 2.0)
 //   dossier-cli <projekt.obp> dxf [--binary] [--scale 100] [--dim-unit cm] [--layout]|dwg|ifc|step|obj [--no-mtl]|stl|glb|gltf|schedule [--openings|--elements|--rooms] [--format json|csv|svg|pdf]|kennzahlen [--sia416] [--ivhb] [--nachweis] [--wohnungsspiegel] [--format json|csv|svg|pdf] [--agsf m2] [--gruenflaeche m2] [--agf-basis gf|ngf|nf] [--untergeschosse]|raumprogramm [--import tabelle] [--sheet name|nr] [--mode replace|append] [--tolerance %] [--generate] [--format json|csv|svg|pdf] [--save projekt.obp]|sun [--level EG] [--out datei]
 //                                                  glb/gltf = glTF 2.0 (Y-up, Meter, Geschoss als Eltern; --flat ohne Geschoss-Knoten)
@@ -1334,7 +1334,7 @@ async function execute(project: Project, file: string, command: string, rest: st
     case "ifc":
       await loadFileio();
       // --ebkph: eBKP-H-Hauptgruppen je Bauteilart; --ebenen: Ebene (categoryCode) des Modells als Klassifikation.
-      out(args, exportIfcSpf(project, { ebkph: args.flags.has("ebkph"), layerCodes: args.flags.has("ebenen"), context: args.flags.has("kontext"), schema: ifcSchemaFlag(args), view: exportViewFlags(project, args) }), `${exportProjectName(project) || "projekt"}.ifc`);
+      out(args, exportIfcSpf(project, { ebkph: args.flags.has("ebkph"), layerCodes: args.flags.has("ebenen"), context: args.flags.has("kontext"), entourage: args.flags.has("entourage"), schema: ifcSchemaFlag(args), view: exportViewFlags(project, args) }), `${exportProjectName(project) || "projekt"}.ifc`);
       return 0;
     case "obj":
       await loadFileio();

@@ -109,15 +109,43 @@ describe.skipIf(!hasIfcOpenShell)("[259] IFC für Fachplaner (ifcopenshell)", { 
   });
 });
 
-describe("[259] 2D-Objektbibliothek im IFC", () => {
-  it("bleibt draussen: die Datei ist mit und ohne Objekte zeichengleich", () => {
-    const objs: Drawing2D[] = [
-      { id: "wc", type: "drawing2d", levelId: "eg", categoryCode: "23", geom: { shape: "libobj", libId: "lib:wc-wand", at: { x: 1, y: 1 }, rotation: 0 } },
-      { id: "ti", type: "drawing2d", levelId: "eg", categoryCode: "22", geom: { shape: "libobj", libId: "lib:tisch-80x140", at: { x: 3, y: 2 }, rotation: 0.5, seed: 3 } },
-    ];
+describe("[259][253] 2D-Objektbibliothek im IFC", () => {
+  const libobj = (id: string, libId: string, x: number, y: number): Drawing2D => ({ id, type: "drawing2d", levelId: "eg", categoryCode: "22", geom: { shape: "libobj", libId, at: { x, y }, rotation: 0.5, seed: 3 } });
+
+  it("Objekte ohne 3D-Netz (WC) bleiben draussen: die Datei ist zeichengleich", () => {
     const without = exportAt(sampleProject);
-    const withObjs = exportAt({ ...sampleProject, drawings2d: [...sampleProject.drawings2d, ...objs] });
+    const withObjs = exportAt({ ...sampleProject, drawings2d: [...sampleProject.drawings2d, libobj("wc", "lib:wc-wand", 1, 1)] });
     expect(withObjs).toBe(without);
-    expect(withObjs).not.toMatch(/IFCFURNITURE|IFCSANITARYTERMINAL|IFCFURNISHINGELEMENT/);
+  });
+
+  it("Möbel mit Netz als IfcFurniture (IFC2x3: IfcFurnishingElement), Entourage nur mit Option als Proxy", () => {
+    const p: Project = { ...sampleProject, drawings2d: [...sampleProject.drawings2d, libobj("ti", "lib:tisch-80x140", 3, 2), libobj("pe", "lib:person-stehend", 5, 2), libobj("ve", "lib:velo", 6, 2)] };
+    const ifc = exportAt(p);
+    expect(ifc.match(/=IFCFURNITURE\(/g)).toHaveLength(1);
+    expect(ifc).toMatch(/=IFCFURNITURE\([^\n]*'Tisch 80x140'[^\n]*\.TABLE\.\);/);
+    expect(ifc).not.toMatch(/Person|Velo|Entourage/);
+    const v2 = exportAt(p, { schema: "IFC2X3" });
+    expect(v2.match(/=IFCFURNISHINGELEMENT\(/g)).toHaveLength(1);
+    const ent = exportAt(p, { entourage: true });
+    expect(ent.match(/=IFCFURNITURE\(/g)).toHaveLength(1);
+    expect(ent.match(/=IFCBUILDINGELEMENTPROXY\([^\n]*'Entourage'/g)).toHaveLength(2);
+  });
+});
+
+describe.skipIf(!hasIfcOpenShell)("[253] Möbel im IFC (ifcopenshell)", { timeout: 900_000 }, () => {
+  it("Wettbewerb: Bank als IfcFurniture im Geschoss, keine Personen/Velo/Auto; mit Option als Proxy", () => {
+    const p = buildWettbewerbSampleProject();
+    const libs = p.drawings2d.flatMap((d) => (d.geom.shape === "libobj" ? [d.geom.libId] : []));
+    const entourage = libs.filter((l) => /person|velo|auto/.test(l)).length;
+    expect(libs).toContain("lib:sitzbank");
+    expect(entourage).toBeGreaterThan(0);
+    const c = check("wettbewerb-moebel", exportIfcSpf(p), ["--geo"]);
+    expect(c.stats.counts.IfcFurniture).toBe(libs.filter((l) => /sitzbank|tisch|stuhl/.test(l)).length);
+    expect(c.stats.counts.IfcBuildingElementProxy ?? 0).toBe(0);
+    const e = check("wettbewerb-entourage", exportIfcSpf(p, { entourage: true }), ["--geo"]);
+    expect(e.stats.counts.IfcBuildingElementProxy).toBe(entourage);
+    // IFC2x3: Schema-Prüfung (das inhaltliche Skript kennt nur IFC4-Geometrie).
+    const v = spawnSync("python3", ["scripts/validate-ifc.py", writeIfc("wettbewerb-moebel-2x3", exportIfcSpf(p, { schema: "IFC2X3", entourage: true }))], { encoding: "utf8", timeout: 400_000 });
+    expect(`${v.stdout}\n${v.stderr}`).toContain(" 0 Befunde");
   });
 });
