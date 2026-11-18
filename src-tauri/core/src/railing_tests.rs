@@ -118,6 +118,68 @@ fn ansicht_zeigt_gelaender_anwaehlbar() {
     assert_eq!(picks(&hidden), 0);
 }
 
+/// Fläche (m²) aller Polygone mit Pick-Id `@railing:<id>` (Betrag je Ring, Löcher kommen als Schlüsselloch-Ringe).
+fn pick_area(prims: &[Primitive], id: &str) -> f64 {
+    let want = format!("@railing:{id}");
+    prims
+        .iter()
+        .filter_map(|q| match q {
+            Primitive::Polygon { pts, context_object_id: Some(c), .. } if *c == want => Some((0..pts.len()).map(|i| pts[i].x * pts[(i + 1) % pts.len()].y - pts[(i + 1) % pts.len()].x * pts[i].y).sum::<f64>().abs() / 2.0),
+            _ => None,
+        })
+        .sum()
+}
+
+/// Projekt mit Glas `g` (y = 0) vorne und einer massiven Brüstung `h` (y = 2) dahinter; `glass` = ohne das Glas.
+fn glas_vor_bruestung(glass: bool) -> Project {
+    let mut p = project("glass", json!({"handrail": false}));
+    let mut h = p.railings.as_ref().unwrap()[0].clone();
+    h.id = "h".into();
+    h.kind = RailingKind::Solid;
+    h.handrail = Some(false);
+    h.points = vec![Vec2 { x: 0.0, y: 2.0 }, Vec2 { x: 4.0, y: 2.0 }];
+    p.railings = Some(if glass { vec![p.railings.as_ref().unwrap()[0].clone(), h] } else { vec![h] });
+    p
+}
+
+fn glass_opacity(prims: &[Primitive]) -> Option<f64> {
+    prims.iter().find_map(|q| match q {
+        Primitive::Polygon { opacity, context_object_id: Some(c), .. } if c == "@railing:g" && opacity.is_some() => *opacity,
+        _ => None,
+    })
+}
+
+#[test]
+fn glas_in_der_ansicht_durchscheinend() {
+    let vis = crate::plan::section::Visibility::default();
+    let el = |p: &Project| crate::plan::elevation::elevation_primitives(p, &level(p, "ans"), false, false, &vis, 50.0).unwrap().unwrap().0;
+    let (mit, ohne) = (el(&glas_vor_bruestung(true)), el(&glas_vor_bruestung(false)));
+    // Die Brüstung hinter dem Glas bleibt ganz sichtbar (Glas verdeckt nicht), das Glas selbst ist teiltransparent.
+    assert!((pick_area(&ohne, "h") - 4.0).abs() < 1e-6, "{}", pick_area(&ohne, "h"));
+    assert!((pick_area(&mit, "h") - 4.0).abs() < 1e-6, "Brüstung hinter Glas: {}", pick_area(&mit, "h"));
+    let o = glass_opacity(&mit).expect("Glasfläche mit Deckkraft");
+    assert!(o > 0.0 && o < 1.0, "{o}");
+    assert!(pick_area(&mit, "g") > 3.0, "Glasfläche fehlt");
+    // Stäbe, Lochblech und Brüstung bleiben deckend.
+    for kind in ["bars", "perforated", "solid"] {
+        let p = project(kind, json!({}));
+        assert!(glass_opacity(&el(&p)).is_none(), "{kind}");
+    }
+}
+
+#[test]
+fn glas_im_3d_dokument_durchscheinend() {
+    let ax = |p: &Project| {
+        let a = crate::plan::axo::AxoArgs::parse(p, &json!({"view": "southeast", "scale": 100})).unwrap();
+        crate::plan::axo::axo_primitives(p, &a, false).unwrap().expect("Bild").0
+    };
+    let (mit, ohne) = (ax(&glas_vor_bruestung(true)), ax(&glas_vor_bruestung(false)));
+    assert!(pick_area(&ohne, "h") > 1.0);
+    assert!((pick_area(&mit, "h") - pick_area(&ohne, "h")).abs() < 1e-6, "{} / {}", pick_area(&mit, "h"), pick_area(&ohne, "h"));
+    let o = glass_opacity(&mit).expect("Glasfläche mit Deckkraft");
+    assert!(o > 0.0 && o < 1.0, "{o}");
+}
+
 #[test]
 fn dokument_3d_axo() {
     let p = project("glass", json!({}));

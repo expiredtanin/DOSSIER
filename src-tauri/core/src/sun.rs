@@ -1072,6 +1072,17 @@ fn collect(p: &Project, k: [f64; 2], cut: Option<f64>, ground: Option<&Ground>) 
         let footprint = crate::model3d::column_footprint(&c).iter().map(|v| [v.x, v.y]).collect();
         prisms.push((Prism { footprint, z_bottom, z_top }, vec![]));
     }
+    // [279] Geländer werfen Schatten (Tafel, Handlauf, Stäbe, Pfosten als Prismen wie im 3D). Sehr viele Teile
+    // (lange Stabgeländer) nur als Tafel, Schiene und Handlauf: die Stäbe geben dünne Streifen, die Rechnung wüchse stark.
+    for r in p.railings.as_deref().unwrap_or(&[]) {
+        let pieces = crate::railing::pieces(p, r);
+        let thin_ok = pieces.len() <= RAILING_SHADOW_PIECES;
+        for q in pieces.into_iter().filter(|q| thin_ok || !matches!(q.part, crate::railing::Part::Bar | crate::railing::Part::Post)) {
+            if q.outline.len() >= 3 && q.z1 > q.z0 {
+                prisms.push((Prism { footprint: q.outline, z_bottom: q.z0, z_top: q.z1 }, vec![]));
+            }
+        }
+    }
     // [142] Decken (auch Balkone, Auskragungen) werfen Schatten, decken Tieferes ab und empfangen ihn.
     for ce in p.ceilings.as_deref().unwrap_or(&[]) {
         // [281] Geneigte Decke: Hüllprisma über die ganze Höhenspanne; sie empfängt keinen Schatten (die
@@ -1292,6 +1303,9 @@ fn shadow_key(k: [f64; 2], cut: Option<f64>, min_top: f64, with_ground: bool, te
     }
     h.0
 }
+
+/// Bis zu so vielen Teilen je Geländer wirft jeder Stab und Pfosten eigenen Schatten.
+const RAILING_SHADOW_PIECES: usize = 400;
 
 fn shadow_plan(p: &Project, sun: SunPosition, cut: Option<f64>, min_top: f64, with_ground: bool) -> Vec<Polygon> {
     let Some(k) = shadow_shift(sun) else { return vec![] };
@@ -1925,6 +1939,25 @@ mod terrain_tests {
             "drawings2d": [{"id": "k", "type": "drawing2d", "levelId": "eg", "categoryCode": "20", "geom": {"shape": "circle", "center": {"x": 0, "y": 0}, "r": 2.0}}]
         }));
         assert!(shadow_polygons_project(&p4, sun, None).is_empty());
+    }
+
+    /// [279] Geländer werfen Schatten: Glastafel 4 m × 1 m bei 45° nach Norden bis y ≈ 1; ein sehr langes
+    /// Stabgeländer rechnet nur mit Schiene und Handlauf.
+    #[test]
+    fn gelaender_werfen_schatten() {
+        let sun = SunPosition { azimuth: 180.0, elevation: 45.0 };
+        let rail = |kind: &str, len: f64| {
+            project_json(serde_json::json!({
+                "railings": [{"id": "g", "type": "railing", "floorId": "eg", "categoryCode": "41", "points": [{"x": 0, "y": 0}, {"x": len, "y": 0}], "height": 1.0, "kind": kind}]
+            }))
+        };
+        let b = bbox(&shadow_polygons_project(&rail("glass", 4.0), sun, None));
+        assert!((b[3] - 1.01).abs() < 0.03 && b[0] < 0.05 && (b[2] - 4.0).abs() < 0.05, "{b:?}");
+        // Stabgeländer: Schatten da (Handlauf/Stäbe), kürzer als die Tafel an Fläche.
+        let bars = shadow_polygons_project(&rail("bars", 4.0), sun, None);
+        assert!(!bars.is_empty() && bbox(&bars)[3] > 0.9);
+        // Sehr lang: nur Tafel-Teile, Rechnung bleibt klein.
+        assert!(!shadow_polygons_project(&rail("bars", 300.0), sun, None).is_empty());
     }
 
     /// [149] Baum-Objekt: Schattenlänge nach eigener Höhe und Krone (nicht `sunStudy.treeHeight`), Form zählt.

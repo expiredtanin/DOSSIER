@@ -42,6 +42,8 @@ pub(super) struct Face {
     pub(super) two_sided: bool,
     /// [157] Facette einer gekrümmten Deckenstirn, um `SLAB_BEHIND_WALL` nach hinten gerückt.
     pub(super) curved_slab: bool,
+    /// [279] Glas des Geländers: durchscheinend gefüllt, verdeckt nichts (weder Füllungen noch Kanten dahinter).
+    pub(super) see_through: bool,
 }
 
 /// [33] Override einer Ansichtsfläche bzw. Öffnung (`overrides::effective_surface`).

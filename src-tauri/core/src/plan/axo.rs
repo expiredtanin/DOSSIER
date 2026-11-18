@@ -486,7 +486,9 @@ fn compute(faces: &[hlr::Face], model_n: &[V3], light: V3, o: AxoOpts) -> AxoOut
     let opts = hlr::Opts { tol, depth_eps: tol, hidden: o.hidden, ..hlr::Opts::default() };
     let segs = hlr::hidden_lines(faces, &opts);
     let front: Vec<usize> = (0..faces.len()).filter(|&i| faces[i].two_sided || faces[i].normal[2] < -1e-12).collect();
-    let cover = Cover::new(front.iter().map(|&i| faces[i].pts.iter().map(|q| [q[0], q[1]]).collect()).collect());
+    // Nicht verdeckende Flächen (Glas, [279]) decken weder die Umrisserkennung noch andere Flächen.
+    let solid_front: Vec<usize> = front.iter().copied().filter(|&i| faces[i].occludes).collect();
+    let cover = Cover::new(solid_front.iter().map(|&i| faces[i].pts.iter().map(|q| [q[0], q[1]]).collect()).collect());
     let delta = (ext * 2e-5).max(2e-3);
     for s in segs {
         if s.hidden {
@@ -503,9 +505,23 @@ fn compute(faces: &[hlr::Face], model_n: &[V3], light: V3, o: AxoOpts) -> AxoOut
     if o.fills && front.len() <= FILL_BUDGET {
         // Vorauswahl über ein Tiefenraster (Flächen-Ids je Zelle): nur Flächen, die irgendwo vorne liegen, werden exakt
         // beschnitten — und nur sie können verdecken (was eine verdeckte Fläche deckte, deckt ihr Verdecker ebenso).
-        let seen = item_buffer(faces, &front, lo, hi);
+        let mut seen = item_buffer(faces, &solid_front, lo, hi);
+        for &i in front.iter().filter(|&&i| !faces[i].occludes) {
+            seen[i] = true;
+        }
         let pts: Vec<Vec<V3>> = (0..faces.len()).map(|i| if seen[i] { faces[i].pts.clone() } else { Vec::new() }).collect();
-        let regions = crate::hlr_fill::visible_regions(&pts, tol);
+        // Nicht verdeckende Flächen aus der Verdeckung nehmen; sie selbst gegen alles beschneiden.
+        let regions = if faces.iter().all(|f| f.occludes) {
+            crate::hlr_fill::visible_regions(&pts, tol)
+        } else {
+            let opaque: Vec<Vec<V3>> = pts.iter().zip(faces).map(|(q, f)| if f.occludes { q.clone() } else { Vec::new() }).collect();
+            let mut r = crate::hlr_fill::visible_regions(&opaque, tol);
+            let all = crate::hlr_fill::visible_regions(&pts, tol);
+            for (i, _) in faces.iter().enumerate().filter(|(_, f)| !f.occludes) {
+                r[i] = all[i].clone();
+            }
+            r
+        };
         // Je (Besitzer, Grauwert) vereinigt: keine Haarfugen zwischen den Dreiecken einer Wand.
         let mut groups: BTreeMap<(u32, i64), Vec<crate::flat::Polygon>> = BTreeMap::new();
         for (i, f) in faces.iter().enumerate() {
@@ -569,6 +585,9 @@ fn simplify(ring: &[[f64; 2]]) -> Vec<[f64; 2]> {
         }
     }
 }
+
+/// Füllung des Glasgeländers (hell, mit Deckkraft über den Flächen dahinter).
+const GLASS_FILL: &str = "#cfd6dc";
 
 fn grey_hex(g: f64) -> String {
     let v = (g.clamp(0.0, 1.0) * 255.0).round() as u32;
@@ -646,7 +665,11 @@ pub fn snapshot_text(p: &Project, snap: &ViewSnapshot, invisible: &[String]) -> 
 
 /// Plan-Primitive der Axonometrie und ihr Ausmass; `None` ohne sichtbares Bauteil.
 pub fn axo_primitives(p: &Project, a: &AxoArgs, mono: bool) -> Result<Option<(Vec<Primitive>, [f64; 4])>, String> {
-    let Some((prep, refs)) = prepare(p, &a.proj, &a.vis, a.context)? else { return Ok(None) };
+    let Some((mut prep, refs)) = prepare(p, &a.proj, &a.vis, a.context)? else { return Ok(None) };
+    // [279] Glas der Glasgeländer verdeckt nichts (Linien und Flächen dahinter bleiben sichtbar).
+    for f in &mut prep.faces {
+        f.occludes = !refs.get(f.owner as usize).is_some_and(|r| r.glass);
+    }
     if prep.faces.is_empty() || prep.faces.len() > FACE_BUDGET {
         return Ok(None);
     }
@@ -655,8 +678,11 @@ pub fn axo_primitives(p: &Project, a: &AxoArgs, mono: bool) -> Result<Option<(Ve
     let mut prims = Vec::new();
     let mut acc = super::section::Acc::new();
     let owner = |o: u32| refs.get(o as usize);
-    for (polys, g, o) in &out.fills {
-        let fill = grey_hex(*g);
+    // Glas ([279]) zuletzt und durchscheinend, damit Flächen dahinter durchschimmern.
+    let is_glass = |o: u32| refs.get(o as usize).is_some_and(|r| r.glass);
+    let ordered = out.fills.iter().filter(|f| !is_glass(f.2)).chain(out.fills.iter().filter(|f| is_glass(f.2)));
+    for (polys, g, o) in ordered {
+        let fill = if is_glass(*o) { GLASS_FILL.to_string() } else { grey_hex(*g) };
         for poly in polys {
             let ring = simplify(&if poly.len() > 1 { crate::voids::keyhole(poly).0 } else { poly[0].clone() });
             if ring.len() < 3 {
@@ -665,8 +691,14 @@ pub fn axo_primitives(p: &Project, a: &AxoArgs, mono: bool) -> Result<Option<(Ve
             for q in &ring {
                 acc.add(q[0], q[1]);
             }
+            let glass = is_glass(*o);
             // Ein Hauch Kontur in der Füllfarbe deckt die Haarfugen zwischen Nachbarflächen.
             let mut prim = polygon(ring.iter().map(|q| v2(q[0], q[1])).collect(), &fill, &fill, 0.1, no_hatch());
+            if let Primitive::Polygon { opacity, .. } = &mut prim {
+                if glass {
+                    *opacity = Some(super::elevation::GLASS_OPACITY);
+                }
+            }
             if let (Primitive::Polygon { wall_id, ceiling_id, roof_id, stair_id, column_id, extruded_solid_id, context_object_id, .. }, Some(r)) = (&mut prim, owner(*o)) {
                 let id = r.id.clone();
                 match r.kind {

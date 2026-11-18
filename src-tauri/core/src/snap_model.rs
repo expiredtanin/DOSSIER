@@ -212,6 +212,20 @@ pub fn collect_model_at(p: &Project, level: &str, codes: &HashSet<String>, skip:
             closed_poly(&crate::model3d::column_footprint(&b.as_column(p)), &mut segs);
         }
     }
+    // [279] Geländer: Achszug (Eckpunkte, Mitten, Schnitte) und bei dicken Tafeln (Brüstung) deren Längskanten.
+    for r in p.railings.as_deref().unwrap_or(&[]) {
+        if !vis_el(&r.id, &r.floor_id, &r.category_code) {
+            continue;
+        }
+        let (Some(ax), Some(sp)) = (crate::railing::axis(r), crate::railing::spec(p, r)) else { continue };
+        segs.extend(ax.windows(2).map(|w| [w[0][0], w[0][1], w[1][0], w[1][1]]));
+        if sp.kind != crate::model::RailingKind::Bars && sp.thickness >= 0.1 {
+            let (_, l, rr) = crate::railing::strips(&ax, sp.thickness / 2.0);
+            for edge in [l, rr] {
+                segs.extend(edge.windows(2).map(|w| [w[0][0], w[0][1], w[1][0], w[1][1]]));
+            }
+        }
+    }
     circles.extend(stair_arcs);
     for r in p.rooms.as_deref().unwrap_or(&[]) {
         if vis_el(&r.id, &r.floor_id, &r.category_code) && r.boundary.len() >= 3 {
@@ -487,7 +501,7 @@ struct PartKey {
 }
 
 /// Felder, aus denen der Modell-Teil sammelt (ändert sich eines, wird neu gesammelt).
-const MODEL_FIELDS: [&str; 9] = ["walls", "wallTypes", "rooms", "ceilings", "roofs", "stairs", "columns", "beams", "extrudedSolids"];
+const MODEL_FIELDS: [&str; 10] = ["walls", "wallTypes", "rooms", "ceilings", "roofs", "stairs", "columns", "beams", "extrudedSolids", "railings"];
 const DRAWING_FIELDS: [&str; 1] = ["drawings2d"];
 /// So viele Teile je Art und abgelegte Geschosse bleiben (älteste fallen weg).
 const KEEP: usize = 6;
@@ -785,6 +799,26 @@ mod tests {
         let hidden = cache.hold(1, &mut d, "eg", &[]);
         assert!(cache.get(hidden).unwrap().model.segs.segs.is_empty(), "ausgeblendete Klasse fängt nicht");
         let skipped = cache.hold_except(1, &mut d, "eg", &codes(), &["k".into()]);
+        assert!(cache.get(skipped).unwrap().model.segs.segs.is_empty());
+    }
+
+    /// [279] Geländer fangen mit ihrer Achse (Ecken) und bei Brüstungen mit den Längskanten; Klasse und Ausnahme nehmen sie heraus.
+    #[test]
+    fn gelaender_fangen_achse_und_kanten() {
+        let rail = |id: &str, kind: &str, th: f64| json!({"id": id, "type": "railing", "floorId": "eg", "categoryCode": "20", "points": [{"x": 0, "y": 0}, {"x": 4, "y": 0}, {"x": 4, "y": 2}], "height": 1.0, "kind": kind, "thickness": th});
+        let mut v = base();
+        v["railings"] = json!([rail("g", "glass", 0.02)]);
+        let mut d = doc(v.clone());
+        let mut cache = SnapCache::default();
+        let all = cache.hold(1, &mut d, "eg", &codes());
+        assert_eq!(cache.get(all).unwrap().model.segs.segs.len(), 2, "Achse mit zwei Teilstrecken");
+        v["railings"] = json!([rail("b", "solid", 0.2)]);
+        let mut d = doc(v);
+        let all = cache.hold(2, &mut d, "eg", &codes());
+        assert_eq!(cache.get(all).unwrap().model.segs.segs.len(), 6, "Achse und beide Kanten");
+        let none = cache.hold(2, &mut d, "eg", &[]);
+        assert!(cache.get(none).unwrap().model.segs.segs.is_empty());
+        let skipped = cache.hold_except(2, &mut d, "eg", &codes(), &["b".into()]);
         assert!(cache.get(skipped).unwrap().model.segs.segs.is_empty());
     }
 

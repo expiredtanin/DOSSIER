@@ -147,6 +147,7 @@ pub(super) fn elevation_edges(p: &Project, faces: &[Face], openings: &[ProjOpeni
         let m = f.normal;
         let normal = [m[0] * u[0] + m[1] * u[1] + m[2] * u[2], m[1], m[0] * n[0] + m[1] * n[1] + m[2] * n[2]];
         let mut h = crate::hlr::Face::new(pts, normal, fi as u32 + 1);
+        h.occludes = !f.see_through;
         if !f.id.is_empty() && !f.curved_slab {
             let next = solids.len() as u32 + 1;
             h.solid = *solids.entry((f.role, f.id.as_str())).or_insert(next);
