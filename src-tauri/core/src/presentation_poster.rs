@@ -22,22 +22,13 @@ pub struct Grid {
     pub cols: usize,
     /// Platz unter einem Rahmen für Titel und Massstab.
     pub band: f64,
-    /// [266] Höchstgrösse des 3D-Bild-Rahmens (Breite, Höhe in mm), z. B. der grösste Grundriss: das Bild soll die Pläne nicht erdrücken.
-    pub image_max: Option<(f64, f64)>,
 }
 
 impl Grid {
     pub fn new(w: f64, h: f64, margin: f64, top: f64, cols: usize, gutter: f64, band: f64) -> Grid {
         let cols = cols.clamp(1, 12);
         let col_w = ((w - 2.0 * margin - (cols as f64 - 1.0) * gutter) / cols as f64).max(1.0);
-        Grid { left: margin, top, bottom: h - margin, col_w, gutter, cols, band, image_max: None }
-    }
-    /// [266] Höchstgrösse des Bild-Rahmens setzen (unsinnige Werte bleiben unbeachtet).
-    pub fn with_image_max(mut self, w: f64, h: f64) -> Grid {
-        if w.is_finite() && h.is_finite() && w > 0.0 && h > 0.0 {
-            self.image_max = Some((w, h));
-        }
-        self
+        Grid { left: margin, top, bottom: h - margin, col_w, gutter, cols, band }
     }
     pub fn span_w(&self, k: usize) -> f64 {
         k as f64 * self.col_w + (k as f64 - 1.0) * self.gutter
@@ -165,9 +156,100 @@ impl State<'_> {
 
 /// Inhalte anordnen. `groups` in Lesereihenfolge; `tables`: (bevorzugte Spalten, Höhe der Tabelle ohne Titelband);
 /// `image`: Rahmen fürs 3D-Bild (neben der Situation, sonst die grösste freie Fläche, mindestens 2 Spalten × `min_image_h`).
+///
+/// [285] Zwei Anläufe: das Bild neben der Situation (Standard) und das Bild zuletzt in die grösste freie Fläche (die Tabellen
+/// bekommen dann den Platz neben der Situation); genommen wird, was weniger Blätter braucht, sonst was dem Bild mehr Fläche lässt.
 pub fn layout(g: &Grid, groups: &[Group], tables: &[(usize, f64)], image: bool, min_image_h: f64) -> Result {
+    let a = layout_variant(g, groups, tables, image, min_image_h, true);
+    if !image || !groups.iter().any(|gr| gr.image_beside) {
+        return a;
+    }
+    let b = layout_variant(g, groups, tables, image, min_image_h, false);
+    let forced = |r: &Result| r.items.iter().chain(&r.tables).any(|p| p.forced);
+    let area = |r: &Result| r.image.map_or(0.0, |p| p.rect.width_mm * p.rect.height_mm);
+    // Weniger Blätter zuerst; bei gleichen Blättern das Bild neben der Situation, ausser das Bild wird anderswo deutlich grösser.
+    let better = (b.pages, forced(&b)) < (a.pages, forced(&a)) || ((b.pages, forced(&b)) == (a.pages, forced(&a)) && area(&b) > 1.25 * area(&a));
+    if better { b } else { a }
+}
+
+/// Belegte Rechtecke je Blatt (Papier-mm, Rahmen samt Titelband), für die freie Platzsuche.
+type Busy = Vec<(usize, Rect)>;
+
+fn clash(a: &Rect, b: &Rect, pad: f64) -> bool {
+    a.x_mm - pad < b.x_mm + b.width_mm - 1e-6 && b.x_mm < a.x_mm + a.width_mm + pad - 1e-6 && a.y_mm - pad < b.y_mm + b.height_mm - 1e-6 && b.y_mm < a.y_mm + a.height_mm + pad - 1e-6
+}
+
+/// Oberkanten der Zeilen je Blatt: `(Blatt, y, Zeilennummer)`; ordnet freie Elemente der Zeile zu, in deren Höhe sie beginnen
+/// (so rücken sie beim Verteilen des Weissraums mit, ohne die Reihenfolge zu verändern).
+fn line_at(tops: &[(usize, f64, usize)], page: usize, y: f64) -> usize {
+    tops.iter().filter(|t| t.0 == page && t.1 <= y + 1e-6).map(|t| t.2).max().or_else(|| tops.iter().filter(|t| t.0 == page).map(|t| t.2).min()).unwrap_or(0)
+}
+
+/// Y-Kandidaten eines Blatts: Oberkante des Satzspiegels und unter jedem belegten Rechteck (plus Abstand), aufsteigend.
+fn ys_of(g: &Grid, busy: &Busy, page: usize) -> Vec<f64> {
+    let mut ys: Vec<f64> = std::iter::once(g.top).chain(busy.iter().filter(|b| b.0 == page).map(|b| b.1.y_mm + b.1.height_mm + g.gutter)).filter(|y| *y < g.bottom).collect();
+    ys.sort_by(f64::total_cmp);
+    ys.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
+    ys
+}
+
+/// [285] Freier Platz für eine Tabelle von `h` mm (samt Band): tiefstes Blatt zuletzt, oberste Lage zuerst, rechts vor links;
+/// grössere Spaltenbreite vor kleinerer (mindestens 2 Spalten, höchstens `pref`).
+fn table_slot(g: &Grid, busy: &Busy, pages: usize, pref: usize, h: f64) -> Option<(usize, Rect)> {
+    for span in (2.min(pref)..=pref).rev() {
+        for page in 0..pages {
+            for y in ys_of(g, busy, page) {
+                if y + h > g.bottom + 1e-9 {
+                    continue;
+                }
+                for c in (0..=g.cols - span).rev() {
+                    let r = Rect { x_mm: g.col_x(c), y_mm: y, width_mm: g.span_w(span), height_mm: h };
+                    if !busy.iter().any(|b| b.0 == page && clash(&r, &b.1, g.gutter)) {
+                        return Some((page, r));
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// [285] Grösste freie Fläche (nach dem Zuschnitt des Bildes) mit mindestens 2 Spalten und `min_h` Höhe.
+fn image_slot(g: &Grid, busy: &Busy, pages: usize, min_h: f64) -> Option<(usize, Rect)> {
+    let mut best: Option<(f64, usize, Rect)> = None;
+    for page in 0..pages {
+        for y1 in ys_of(g, busy, page) {
+            for c0 in 0..g.cols {
+                for c1 in c0 + 1..g.cols {
+                    let (x0, x1) = (g.col_x(c0), g.col_x(c1) + g.col_w);
+                    let mut y2 = g.bottom;
+                    for b in busy.iter().filter(|b| b.0 == page && b.1.x_mm < x1 - 1e-6 && x0 < b.1.x_mm + b.1.width_mm - 1e-6) {
+                        if b.1.y_mm + b.1.height_mm + g.gutter > y1 + 1e-6 {
+                            y2 = y2.min(b.1.y_mm - g.gutter);
+                        }
+                    }
+                    if y2 - y1 + 1e-9 < min_h {
+                        continue;
+                    }
+                    let free = Rect { x_mm: x0, y_mm: y1, width_mm: x1 - x0, height_mm: y2 - y1 };
+                    let r = cap_image(free, false);
+                    if best.as_ref().is_none_or(|b| r.width_mm * r.height_mm > b.0 + 1e-6) {
+                        best = Some((r.width_mm * r.height_mm, page, r));
+                    }
+                }
+            }
+        }
+    }
+    best.map(|b| (b.1, b.2))
+}
+
+fn layout_variant(g: &Grid, groups: &[Group], tables: &[(usize, f64)], image: bool, min_image_h: f64, beside: bool) -> Result {
     let mut st = State { g, page: 0, y: g.top, line: 0, side: None };
     let mut out = Result::default();
+    let mut busy: Busy = Vec::new();
+    let mut tops: Vec<(usize, f64, usize)> = Vec::new();
+    // Freie Fläche neben der Situation (für das Wachsen des Bildes, s. unten).
+    let mut beside_free: Option<Rect> = None;
     for grp in groups.iter().filter(|gr| !gr.cells.is_empty()) {
         let lines = split_lines(&grp.cells, g.cols);
         let line_h: Vec<f64> = lines.iter().map(|r| grp.cells[r.clone()].iter().fold(0.0_f64, |m, c| m.max(c.h)) + g.band).collect();
@@ -186,11 +268,16 @@ pub fn layout(g: &Grid, groups: &[Group], tables: &[(usize, f64)], image: bool, 
                 let span = c.span.clamp(1, g.cols);
                 let rect = Rect { x_mm: g.col_x(col), y_mm: st.y, width_mm: c.w.min(g.span_w(span)), height_mm: c.h };
                 out.items.push(Placed { page: st.page, rect, forced, line: st.line });
+                busy.push((st.page, Rect { height_mm: rect.height_mm + g.band, ..rect }));
                 col += span;
             }
-            if grp.image_beside && k == 0 && image && out.image.is_none() && g.cols >= col + 2 {
+            tops.push((st.page, st.y, st.line));
+            if beside && grp.image_beside && k == 0 && image && out.image.is_none() && g.cols >= col + 2 {
                 let free = Rect { x_mm: g.col_x(col), y_mm: st.y, width_mm: g.span_w(g.cols - col), height_mm: lh - g.band };
-                out.image = Some(Placed { page: st.page, rect: cap_image(g, free, min_image_h, true), forced: false, line: st.line });
+                let rect = cap_image(free, true);
+                beside_free = Some(free);
+                busy.push((st.page, rect));
+                out.image = Some(Placed { page: st.page, rect, forced: false, line: st.line });
                 col = g.cols;
             }
             st.side = Some(Side { line: st.line, col, y: st.y });
@@ -198,19 +285,30 @@ pub fn layout(g: &Grid, groups: &[Group], tables: &[(usize, f64)], image: bool, 
             st.line += 1;
         }
     }
-    // Tabellen: rechts neben der letzten Zeile (rechtsbündig, untereinander), sonst in eigenen Zeilen.
+    // Tabellen: rechts neben der letzten Zeile (rechtsbündig, untereinander), sonst in freier Fläche des Blatts, sonst in eigenen Zeilen.
     let mut row: Option<(usize, f64, f64)> = None; // (nächste Spalte, Oberkante, Höhe) der Tabellenzeile
     for &(pref, th) in tables {
         let h = g.band + th;
         let pref = pref.clamp(1, g.cols);
         let mut placed = None;
-        if let Some(sd) = st.side.as_mut() {
+        // Ohne Bild neben der Situation: Tabellen zuerst in die oberste freie Fläche (neben die Situation), das Bild folgt.
+        if !beside && row.is_none() {
+            if let Some((page, rect)) = table_slot(g, &busy, st.page + 1, pref, h) {
+                placed = Some(Placed { page, rect, forced: false, line: line_at(&tops, page, rect.y_mm) });
+            }
+        }
+        if let Some(sd) = st.side.as_mut().filter(|_| placed.is_none()) {
             let span = pref.min(g.cols - sd.col);
             if span >= 2.min(pref) && sd.y + h <= g.bottom + 1e-9 {
                 let rect = Rect { x_mm: g.col_x(g.cols - span), y_mm: sd.y, width_mm: g.span_w(span), height_mm: h };
                 placed = Some(Placed { page: st.page, rect, forced: false, line: sd.line });
                 sd.y += h + g.gutter;
                 st.y = st.y.max(sd.y);
+            }
+        }
+        if placed.is_none() && row.is_none() {
+            if let Some((page, rect)) = table_slot(g, &busy, st.page + 1, pref, h) {
+                placed = Some(Placed { page, rect, forced: false, line: line_at(&tops, page, rect.y_mm) });
             }
         }
         if placed.is_none() {
@@ -231,42 +329,53 @@ pub fn layout(g: &Grid, groups: &[Group], tables: &[(usize, f64)], image: bool, 
             placed = Some(Placed { page: st.page, rect, forced, line: st.line });
             row = Some((col + pref, y, rh.max(h)));
         }
-        out.tables.push(placed.unwrap());
+        let pl = placed.unwrap();
+        busy.push((pl.page, pl.rect));
+        out.tables.push(pl);
     }
     if let Some((col, y, rh)) = row {
         st.y = st.y.max(y + rh + g.gutter);
         st.side = Some(Side { line: st.line, col, y });
+        tops.push((st.page, y, st.line));
         st.line += 1;
     }
     if image && out.image.is_none() && g.cols >= 2 {
-        // Grösste freie Fläche: rechts neben der letzten Zeile (bis zum Fuss) oder die ganze Breite darunter, sonst ein eigenes Blatt.
-        let mut cands: Vec<Placed> = Vec::new();
-        if let Some(sd) = st.side.filter(|sd| g.cols >= sd.col + 2) {
-            let rect = Rect { x_mm: g.col_x(sd.col), y_mm: sd.y, width_mm: g.span_w(g.cols - sd.col), height_mm: g.bottom - sd.y };
-            cands.push(Placed { page: st.page, rect, forced: false, line: sd.line });
+        // Grösste freie Fläche des Blatts (zuletzt, damit der Rest an das Bild geht), sonst ein eigenes Blatt.
+        out.image = Some(match image_slot(g, &busy, st.page + 1, min_image_h) {
+            Some((page, rect)) => Placed { page, rect, forced: false, line: line_at(&tops, page, rect.y_mm) },
+            None => {
+                st.new_page();
+                Placed { page: st.page, rect: Rect { x_mm: g.left, y_mm: g.top, width_mm: g.span_w(g.cols), height_mm: g.height() }, forced: false, line: st.line }
+            }
+        });
+    }
+    // [285] Bleibt am Blatt viel Platz übrig, wächst das Bild neben der Situation in die Höhe (die Zeilen darunter rücken nach);
+    // zwischen den Zeilen bleibt mindestens ein Abstand, der Rest wird unten gleichmässig verteilt.
+    if let (Some(free), Some(img)) = (beside_free, out.image) {
+        let page = img.page;
+        let lines = out.items.iter().chain(&out.tables).filter(|p| p.page == page).map(|p| p.line).chain(std::iter::once(img.line)).collect::<std::collections::BTreeSet<_>>().len() as f64;
+        let bottom = out.items.iter().filter(|p| p.page == page).map(|p| p.rect.y_mm + p.rect.height_mm + g.band).chain(out.tables.iter().filter(|p| p.page == page).map(|p| p.rect.y_mm + p.rect.height_mm)).fold(img.rect.y_mm + img.rect.height_mm, f64::max);
+        let pf = out.items.iter().chain(&out.tables).any(|p| p.page == page && p.forced);
+        let slack = g.bottom - bottom - (lines + 1.0) * g.gutter;
+        let grown = cap_image(Rect { height_mm: free.height_mm + slack.max(0.0), ..free }, true);
+        let delta = (grown.height_mm - free.height_mm).max(0.0);
+        if !pf && grown.height_mm > img.rect.height_mm + 1e-6 {
+            for p in out.items.iter_mut().chain(out.tables.iter_mut()).filter(|p| p.page == page && p.line > img.line) {
+                p.rect.y_mm += delta;
+            }
+            out.image = Some(Placed { rect: grown, ..img });
         }
-        let rect = Rect { x_mm: g.left, y_mm: st.y, width_mm: g.span_w(g.cols), height_mm: g.bottom - st.y };
-        cands.push(Placed { page: st.page, rect, forced: false, line: st.line });
-        // Zuerst nach der freien Fläche wählen, dann auf die Höchstgrösse kürzen: seitlich rechtsbündig, darunter zentriert.
-        let area = |p: &Placed| p.rect.width_mm * p.rect.height_mm;
-        let below = cands.len() - 1;
-        let best = cands.iter().enumerate().filter(|(_, p)| p.rect.height_mm + 1e-9 >= min_image_h).max_by(|a, b| area(a.1).total_cmp(&area(b.1))).map(|(i, p)| Placed { rect: cap_image(g, p.rect, min_image_h, i != below), ..*p });
-        out.image = Some(best.unwrap_or_else(|| {
-            st.new_page();
-            Placed { page: st.page, rect: Rect { x_mm: g.left, y_mm: g.top, width_mm: g.span_w(g.cols), height_mm: g.height() }, forced: false, line: st.line }
-        }));
     }
     out.pages = out.items.iter().chain(&out.tables).chain(&out.image).map(|p| p.page + 1).max().unwrap_or(1);
     spread(g, &mut out);
     out
 }
 
-/// [266] Bild-Rahmen auf die Höchstgrösse des Rasters kürzen (Höhe nie unter `min_h`, Breite mindestens 4:3 zur Höhe, nie über
-/// die freie Fläche); `right`: rechtsbündig an der freien Fläche, sonst waagrecht zentriert.
-fn cap_image(g: &Grid, free: Rect, min_h: f64, right: bool) -> Rect {
-    let Some((mw, mh)) = g.image_max else { return free };
-    let h = mh.max(min_h).min(free.height_mm);
-    let w = mw.max(h * 4.0 / 3.0).min(free.width_mm);
+/// [285] Bild-Rahmen in der freien Fläche: sie darf ganz gefüllt werden, nur das Seitenverhältnis bleibt in 1 : 1.5 … 2 : 1 (sonst
+/// schrumpft die lange Seite); `right`: rechtsbündig, sonst waagrecht zentriert; oben bündig.
+fn cap_image(free: Rect, right: bool) -> Rect {
+    let h = free.height_mm.min(free.width_mm * 1.5);
+    let w = free.width_mm.min(h * 2.0);
     let x = if right { free.x_mm + free.width_mm - w } else { free.x_mm + (free.width_mm - w) / 2.0 };
     Rect { x_mm: x, y_mm: free.y_mm, width_mm: w, height_mm: h }
 }
@@ -352,9 +461,10 @@ mod tests {
         assert_eq!(r.pages, 1);
         check(&g, &r);
         let it = &r.items;
-        // Bild neben der Situation, gleiche Oberkante, Rest der Breite.
+        // Bild neben der Situation, gleiche Oberkante, rechtsbündig im Rest der Breite.
         let img = r.image.expect("Bild");
-        assert_eq!((img.rect.y_mm, img.rect.x_mm), (it[0].rect.y_mm, g.col_x(2)));
+        assert_eq!(img.rect.y_mm, it[0].rect.y_mm);
+        assert!(img.rect.x_mm >= g.col_x(2) - 1e-9 && (img.rect.x_mm + img.rect.width_mm - (g.left + g.span_w(g.cols))).abs() < 1e-9);
         // Grundrisse: eine Zeile, gleiche Oberkante, unter der Situation, an Spaltenkanten, so breit wie der Inhalt.
         assert!(it[1..4].iter().all(|p| p.rect.y_mm == it[1].rect.y_mm && p.rect.width_mm == 150.0));
         assert_eq!(it[1..4].iter().map(|p| p.rect.x_mm).collect::<Vec<_>>(), vec![g.col_x(0), g.col_x(2), g.col_x(4)]);
@@ -432,23 +542,36 @@ mod tests {
         assert_eq!((r.pages, r.items.len(), r.image.is_none()), (1, 0, true));
     }
 
-    /// [266] Das Bild ist nicht grösser als der grösste Plan (Höhe und, bei gleichem Seitenverhältnis, Breite) und steht rechtsbündig
-    /// neben der Situation.
+    /// [285] Das Bild füllt die freie Fläche neben der Situation (nicht mehr auf die Planbreite gedeckelt), nur das Seitenverhältnis
+    /// bleibt höchstens 2 : 1; es steht rechtsbündig.
     #[test]
-    fn bild_hoechstens_so_gross_wie_der_plan() {
-        let g = a1().with_image_max(110.0, 100.0);
+    fn bild_fuellt_die_freie_flaeche() {
+        let g = a1();
         let groups = vec![
             Group { cells: vec![Cell { span: 2, w: 200.0, h: 300.0 }], image_beside: true },
             Group { cells: cells(2, 1, 110.0, 100.0), image_beside: false },
         ];
         let r = layout(&g, &groups, &[], true, 70.0);
         let img = r.image.expect("Bild");
-        assert!(img.rect.height_mm <= 100.0 + 1e-9 && img.rect.width_mm <= 100.0 * 4.0 / 3.0 + 1e-9, "{:?}", img.rect);
+        assert!(img.rect.height_mm > 250.0 && img.rect.width_mm <= img.rect.height_mm * 2.0 + 1e-9 && img.rect.width_mm > 400.0, "{:?}", img.rect);
         assert!((img.rect.x_mm + img.rect.width_mm - (g.left + g.span_w(g.cols))).abs() < 1e-9, "rechtsbündig");
-        // Ohne Höchstgrösse füllt es den Rest der Zeile.
-        let r0 = layout(&a1(), &groups, &[], true, 70.0);
-        assert!(r0.image.unwrap().rect.height_mm > 250.0);
         check(&g, &r);
+    }
+
+    /// [285] Passen die Tabellen nicht neben die letzte Zeile, nehmen sie freien Platz neben der Situation (das Bild folgt danach)
+    /// statt ein zweites Blatt zu füllen.
+    #[test]
+    fn tabellen_in_freier_flaeche_statt_zweites_blatt() {
+        let g = a1();
+        let groups = vec![
+            Group { cells: vec![Cell { span: 2, w: 200.0, h: 150.0 }], image_beside: true },
+            Group { cells: cells(3, 2, 220.0, 150.0), image_beside: false },
+            Group { cells: cells(4, 2, 180.0, 60.0), image_beside: false },
+        ];
+        let r = layout(&g, &groups, &[(3, 40.0), (3, 70.0)], true, 70.0);
+        assert_eq!(r.pages, 1, "{r:?}");
+        check(&g, &r);
+        assert!(r.items.iter().chain(&r.tables).chain(&r.image).all(|p| !p.forced));
     }
 
     /// [266] Freier Platz am Fuss wird gleichmässig auf die Zeilen verteilt (oben, zwischen, unten gleiche Lücke); Elemente
@@ -457,7 +580,7 @@ mod tests {
     fn leerer_fuss_wird_gleichmaessig_verteilt() {
         let g = a1();
         let groups = vec![Group { cells: cells(2, 2, 160.0, 100.0), image_beside: true }, Group { cells: cells(2, 2, 160.0, 80.0), image_beside: false }];
-        let r = layout(&g, &groups, &[(2, 40.0)], true, 70.0);
+        let r = layout(&g, &groups, &[(2, 40.0)], false, 70.0);
         check(&g, &r);
         let lines: Vec<(f64, f64)> = [0usize, 1].iter().map(|l| {
             let top = r.items.iter().filter(|p| p.line == *l).map(|p| p.rect.y_mm).fold(f64::MAX, f64::min);
