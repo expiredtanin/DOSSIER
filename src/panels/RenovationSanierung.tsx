@@ -92,6 +92,29 @@ function PairEditor({ project, typeId, host }: { project: Project; typeId: strin
           <option value="outside">{t(sideKey(host, "outside"))}</option>
         </select>
       </label>
+      {host === "wall" && (
+        // [286] Dominante Schicht an Ecken: läuft durch, Abbruch und Neu enden rechtwinklig an ihr (nur bleibende Schichten).
+        <label className="reno-field" title={t("renovation.panel.sanierung.core.hint")}>
+          <span>{t("renovation.panel.sanierung.core")}</span>
+          <select
+            value={pair.coreSet ?? ""}
+            data-testid="reno-pair-core"
+            onChange={(e) => applyChange((p) => setTypePairOps(p, typeId, { core: e.target.value === "" ? null : Number(e.target.value) }, host))}
+          >
+            <option value="">
+              {t("renovation.fate.auto")}
+              {pair.coreAuto != null && pair.old[pair.coreAuto] ? ` (${pair.old[pair.coreAuto].name})` : ""}
+            </option>
+            {pair.old.map((l, i) =>
+              l.fate === "kept" ? (
+                <option key={i} value={i}>
+                  {`${l.name} ${(l.thickness * 100).toFixed(1)}`}
+                </option>
+              ) : null,
+            )}
+          </select>
+        </label>
+      )}
       <div className="reno-pair-cols">
         <div className="reno-pair-col">
           <div className="reno-head sub">{t("renovation.panel.sanierung.oldLayers")}</div>
@@ -114,7 +137,7 @@ function PairEditor({ project, typeId, host }: { project: Project; typeId: strin
           type="button"
           className="reno-link-btn"
           data-testid="reno-pair-remove"
-          onClick={() => applyChange((p) => setTypePairOps(p, typeId, { target: null, old: null, new: null, side: null }, host))}
+          onClick={() => applyChange((p) => setTypePairOps(p, typeId, { target: null, old: null, new: null, side: null, core: null }, host))}
         >
           {t("renovation.panel.sanierung.remove")}
         </button>

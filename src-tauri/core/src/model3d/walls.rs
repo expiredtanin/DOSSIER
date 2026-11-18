@@ -595,8 +595,9 @@ pub(crate) fn floor_join_input(p: &Project, idx: &[usize]) -> (Vec<JoinWall>, bo
         finite &= [w.start.x, w.start.y, w.end.x, w.end.y].iter().all(|v| v.is_finite())
             && !matches!(reference, Reference::Offset(v) if !v.is_finite())
             && layers.as_ref().is_none_or(|l| l.iter().all(|x| x.thickness.is_finite()));
-        jw.push(JoinWall { start: kv(w.start), end: kv(w.end), reference, layers, bulge: w.bulge });
+        jw.push(JoinWall { start: kv(w.start), end: kv(w.end), reference, layers, bulge: w.bulge, core: None, renewed: false });
     }
+    crate::renovation::build_up::mark_join_walls(p, idx.iter().map(|&i| &p.walls[i]), &mut jw);
     (jw, finite)
 }
 

@@ -60,6 +60,16 @@ test("Sanierung je Schicht: Feld, Typ-Paar, alle sanieren ([274])", async ({ pag
   await blurFocus(page);
   await page.keyboard.press("ControlOrMeta+z");
   await expect(ed.getByTestId("reno-pair-new-layer").nth(2)).toHaveAttribute("data-fate", "kept");
+  // [286] Dominante Schicht an Ecken: Vorgabe automatisch (Beton), wählbar nur unter bleibenden Schichten; Undo.
+  const core = ed.getByTestId("reno-pair-core");
+  await expect(core).toHaveValue("");
+  await expect(core.locator("option")).toHaveCount(2);
+  await expect(core.locator("option").first()).toContainText("Beton");
+  await core.selectOption("2");
+  await expect(core).toHaveValue("2");
+  await blurFocus(page);
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(core).toHaveValue("");
 
   // Umbauplan: Rot im Grundriss (neue Schichten der Südwand und Anbau).
   await panel.getByTestId("reno-filter-umbauplan").click();

@@ -5092,6 +5092,12 @@ export type WallType = {
    * [274] Manuelle Zuordnung je Schicht des Sanierungstyps (Bestand/Neu, fehlt/„auto“ = automatisch).
    */
   renovationNew?: Array<LayerRenovation>;
+  /**
+   * [286] Dominante Schicht dieses Bestandstyps an Ecken sanierter Wände (Index in `layers`, nur eine bleibende Schicht
+   * gilt; fehlt ⇒ die bleibende Schicht mit der höchsten Baustoff-Priorität, dann die dickste): sie läuft an der Ecke durch,
+   * abgebrochene und neue Schichten enden rechtwinklig an ihr statt auf Gehrung.
+   */
+  renovationCore?: number;
 };
 
 /** Rollladen-/Sonnenschutzkasten über der Öffnung (P0-Minimalfassung). */

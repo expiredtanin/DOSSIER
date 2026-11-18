@@ -740,6 +740,12 @@ pub struct WallType {
     #[serde(rename = "renovationNew", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub renovation_new: Option<Vec<LayerRenovation>>,
+    /// [286] Dominante Schicht dieses Bestandstyps an Ecken sanierter Wände (Index in `layers`, nur eine bleibende Schicht
+    /// gilt; fehlt ⇒ die bleibende Schicht mit der höchsten Baustoff-Priorität, dann die dickste): sie läuft an der Ecke durch,
+    /// abgebrochene und neue Schichten enden rechtwinklig an ihr statt auf Gehrung.
+    #[serde(rename = "renovationCore", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub renovation_core: Option<u32>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,

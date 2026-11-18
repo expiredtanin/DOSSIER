@@ -1368,6 +1368,50 @@ pub mod build_up {
         Some((old, new, side, m))
     }
 
+    /// [286] Vorgabe der dominanten Schicht eines Typ-Paars: die bleibende Schicht mit dem höchsten Rang (ausdrücklich
+    /// tragend, Baustoff-Priorität, Dicke; bei Gleichstand die erste); `None` ohne bleibende Schicht.
+    pub fn default_core(p: &Project, old: &WallType, m: &Matched) -> Option<usize> {
+        let rank = |i: usize| {
+            let l = &old.layers[i];
+            (l.function == Some(LayerFunction::Structure), p.component_or_fallback(&l.component_id).join_priority, thick(l))
+        };
+        (0..old.layers.len())
+            .filter(|&i| m.old.get(i) == Some(&Fate::Kept))
+            .max_by(|&a, &b| {
+                let (x, y) = (rank(a), rank(b));
+                x.0.cmp(&y.0).then(x.1.total_cmp(&y.1)).then(x.2.total_cmp(&y.2)).then(b.cmp(&a))
+            })
+    }
+
+    /// [286] Dominante Schicht des Typ-Paars: die gewählte (`renovationCore`, nur eine bleibende Schicht), sonst die Vorgabe.
+    pub fn core_of(p: &Project, old: &WallType, m: &Matched) -> Option<usize> {
+        old.renovation_core.map(|k| k as usize).filter(|&k| m.old.get(k) == Some(&Fate::Kept)).or_else(|| default_core(p, old, m))
+    }
+
+    /// [286] Schichtweise Eckauflösung einer sanierten Wand (`joins::layered_corner`): Index der dominanten Schicht im
+    /// Aufbau, den die Wand in `p` trägt (Bestandstyp oder Ersatzwand des Umbaufilters — gefunden über die Lage von der
+    /// Bezugsseite her). Äusseres `None` = Wand nicht saniert; inneres `None` = Schicht nicht im gezeigten Aufbau.
+    pub fn corner_core(p: &Project, w: &Wall) -> Option<Option<usize>> {
+        let (old, _, side, m) = pair(p, w)?;
+        let Some(k) = core_of(p, old, &m) else { return Some(None) };
+        let want = spans(&old.layers, side)[k];
+        let cur = spans(&p.wall_type_or_fallback(w).layers, side);
+        Some(cur.iter().position(|s| (s.0 - want.0).abs() < TOL && (s.1 - want.1).abs() < TOL))
+    }
+
+    /// [286] Eingabe der Verschneidung je Wand: (dominante Schicht, saniert). Ohne Sanierung im Projekt nichts zu tun.
+    pub fn mark_join_walls<'a>(p: &Project, walls: impl Iterator<Item = &'a Wall>, jw: &mut [crate::joins::JoinWall]) {
+        if !any(p) {
+            return;
+        }
+        for (j, w) in jw.iter_mut().zip(walls) {
+            match corner_core(p, w) {
+                Some(core) => (j.core, j.renewed) = (core, true),
+                None => j.core = crate::plan::model_view::core_layer(p, &p.wall_type_or_fallback(w).layers),
+            }
+        }
+    }
+
     /// Sanierungstyp eines Elements: Ausnahme `newTypeId`, sonst der eingetragene des Bestandstyps.
     fn target_of<'a, T: Layered>(r: &'a Renovation, old: &'a T) -> Option<&'a str> {
         r.new_type_id.as_deref().map(str::trim).filter(|s| !s.is_empty()).or(old.target())
@@ -1735,7 +1779,20 @@ pub mod build_up {
         let v: serde_json::Value = serde_json::from_str(text).unwrap_or_default();
         let host = Host::parse(v.get("kind").and_then(|x| x.as_str()).unwrap_or(""));
         match host {
-            Host::Wall => pair_json_in(p, &p.wall_types, host, &v),
+            Host::Wall => {
+                let mut out = pair_json_in(p, &p.wall_types, host, &v);
+                // [286] Dominante Schicht an Ecken: gewählt (`renovationCore`) bzw. wirksam (Vorgabe ohne Wahl).
+                let old = out.get("type").and_then(|x| x.as_str()).and_then(|id| p.wall_types.iter().find(|t| t.id == id));
+                if let (Some(old), Some(target)) = (old, out.get("target").and_then(|x| x.as_str())) {
+                    if let Some((old, _, _, m)) = type_pair(p, old, target) {
+                        let core = core_of(p, old, &m);
+                        out["core"] = serde_json::json!(core);
+                        out["coreAuto"] = serde_json::json!(default_core(p, old, &m));
+                        out["coreSet"] = serde_json::json!(old.renovation_core.filter(|_| core.is_some() && core.map(|k| k as u32) == old.renovation_core));
+                    }
+                }
+                out
+            }
             Host::Ceiling => pair_json_in(p, p.ceiling_types.as_deref().unwrap_or(&[]), host, &v),
             Host::Roof => pair_json_in(p, p.roof_types.as_deref().unwrap_or(&[]), host, &v),
         }
@@ -1805,3 +1862,7 @@ mod layers_tests;
 #[cfg(test)]
 #[path = "renovation_style_tests.rs"]
 mod style_tests;
+
+#[cfg(test)]
+#[path = "renovation_corner_tests.rs"]
+mod corner_tests;

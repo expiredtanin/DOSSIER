@@ -372,7 +372,7 @@ const HOST = {
 } as const;
 
 /** Mehrschichtiger Typ mit Sanierungs-Angaben (Wand-, Decken- oder Dachtyp). */
-export type LayeredType = Pick<WallType, "id" | "name" | "layers" | "renovationTarget" | "renovationSide" | "renovationOld" | "renovationNew">;
+export type LayeredType = Pick<WallType, "id" | "name" | "layers" | "renovationTarget" | "renovationSide" | "renovationOld" | "renovationNew" | "renovationCore">;
 type HostItem = { id: string; renovation?: Renovation } & Record<string, unknown>;
 
 /** Typen einer Bauteilart (Wandtypen, Deckentypen, Dachtypen). */
@@ -444,7 +444,7 @@ export function createRenovationTypeOps(project: Project, typeId: string, name: 
 export function setTypePairOps(
   project: Project,
   typeId: string,
-  patch: { target?: string | null; side?: RenovationSide | null; old?: LayerRenovation[] | null; new?: LayerRenovation[] | null },
+  patch: { target?: string | null; side?: RenovationSide | null; old?: LayerRenovation[] | null; new?: LayerRenovation[] | null; core?: number | null },
   host: RenovationHost = "wall",
 ): CoreOp[] {
   return patchItem(project, HOST[host].types, typeId, ((t: LayeredType) => {
@@ -458,6 +458,8 @@ export function setTypePairOps(
     put("renovationSide", patch.side === "inside" ? null : patch.side);
     put("renovationOld", patch.old);
     put("renovationNew", patch.new);
+    // [286] Dominante Schicht an Ecken (Index der Bestandsschicht; nur Wandtypen).
+    put("renovationCore", patch.core);
     return next;
   }) as never);
 }
@@ -489,6 +491,10 @@ export interface RenovationPair {
   /** Elemente des Bestandstyps bzw. davon mit diesem Sanierungstyp saniert. */
   elements: number;
   renovated: number;
+  /** [286] Nur Wände: dominante Schicht an Ecken (Index in `old`) — wirksam, Vorgabe, gewählt (`null` = automatisch). */
+  core?: number | null;
+  coreAuto?: number | null;
+  coreSet?: number | null;
 }
 
 /** Typ-Paar Bestandstyp → Sanierungstyp (`target` fehlt = eingetragener); `null` ohne gültiges Paar. */

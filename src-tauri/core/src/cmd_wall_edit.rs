@@ -1743,6 +1743,8 @@ mod tests {
                 reference: Reference::Center,
                 layers: Some(vec![JoinLayer { thickness: 0.2, component: Some(0), priority: 1.0 }]),
                 bulge: None,
+                core: None,
+                renewed: false,
             }
         };
         let cuts = compute_joins(&[jw("a"), jw("b")]).unwrap();
@@ -1816,6 +1818,8 @@ mod tests {
                     reference: Reference::Center,
                     layers: Some(vec![JoinLayer { thickness: 0.2, component: Some(0), priority: 1.0 }]),
                     bulge: w["bulge"].as_f64(),
+                    core: None,
+                    renewed: false,
                 }
             })
             .collect();

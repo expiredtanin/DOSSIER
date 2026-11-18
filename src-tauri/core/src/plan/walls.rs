@@ -73,6 +73,7 @@ fn plan_joins(p: &Project, walls: &[EffWall]) -> Result<Vec<WallCuts>, String> {
     for (j, e) in jw.iter_mut().zip(walls) {
         j.bulge = e.w.bulge;
     }
+    crate::renovation::build_up::mark_join_walls(p, walls.iter().map(|e| e.w), &mut jw);
     Ok(joins::compute_joins(&jw).unwrap_or_else(|_| vec![WallCuts::default(); walls.len()]))
 }
 

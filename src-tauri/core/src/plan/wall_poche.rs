@@ -1064,7 +1064,7 @@ mod tests {
     fn schraeger_t_stoss_grundriss_exakt_15_bis_165_grad() {
         use crate::joins::{compute_joins, JoinLayer, JoinWall, Reference};
         let lay = || vec![JoinLayer { thickness: 0.02, component: Some(0), priority: 10.0 }, JoinLayer { thickness: 0.16, component: Some(1), priority: 20.0 }, JoinLayer { thickness: 0.15, component: Some(2), priority: 50.0 }, JoinLayer { thickness: 0.015, component: Some(3), priority: 10.0 }];
-        let jw = |s: (f64, f64), e: (f64, f64)| JoinWall { start: kernel2d::Vec2::new(s.0, s.1), end: kernel2d::Vec2::new(e.0, e.1), reference: Reference::Center, layers: Some(lay()), bulge: None };
+        let jw = |s: (f64, f64), e: (f64, f64)| JoinWall { start: kernel2d::Vec2::new(s.0, s.1), end: kernel2d::Vec2::new(e.0, e.1), reference: Reference::Center, layers: Some(lay()), bulge: None, core: None, renewed: false };
         let face = 0.345 / 2.0;
         let merge = face - 0.015;
         for deg in (15..=165).step_by(15) {
@@ -1254,7 +1254,7 @@ mod tests {
         let l = |t: f64, c: u32, p: f64| JoinLayer { thickness: t, component: Some(c), priority: p };
         let ext = || Some(vec![l(0.02, 3, 10.0), l(0.18, 2, 22.0), l(0.175, 1, 50.0), l(0.015, 0, 10.0)]);
         let iw = || Some(vec![l(0.01, 0, 10.0), l(0.125, 1, 50.0), l(0.01, 0, 10.0)]);
-        let w = |s: (f64, f64), e: (f64, f64), layers| JoinWall { start: kernel2d::Vec2::new(s.0, s.1), end: kernel2d::Vec2::new(e.0, e.1), reference: Reference::Center, layers, bulge: None };
+        let w = |s: (f64, f64), e: (f64, f64), layers| JoinWall { start: kernel2d::Vec2::new(s.0, s.1), end: kernel2d::Vec2::new(e.0, e.1), reference: Reference::Center, layers, bulge: None, core: None, renewed: false };
         let walls = vec![w((5.0, 10.0), (0.0, 10.0), ext()), w((5.0, 15.0), (5.0, 10.0), ext()), w((10.0, 10.0), (5.0, 10.0), iw())];
         let c = compute_joins(&walls).unwrap();
         assert!(!c[1].span_cutouts.is_empty(), "{:?}", c[1]);

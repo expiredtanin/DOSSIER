@@ -55,6 +55,11 @@ pub struct JoinWall {
     pub layers: Option<Vec<JoinLayer>>,
     /// Bogenwand ([T2], Modell-Bulge); `None` = gerade.
     pub bulge: Option<f64>,
+    /// [286] Dominante Schicht (Index in `layers`) für die schichtweise Eckauflösung; `None` = die stärkste Schicht
+    /// (Priorität, dann Dicke).
+    pub core: Option<usize>,
+    /// [286] Sanierte Wand (Umbau je Schicht): ihre L-Ecken lösen sich schichtweise auf ([`layered_corner`]).
+    pub renewed: bool,
 }
 
 /// Unendliche Gerade (Stützpunkt + Richtung, nicht normiert).
@@ -442,6 +447,7 @@ fn assign_pattern_corner(walls: &[JoinWall], a: WallEnd, b: WallEnd, result: &mu
 /// `walls` ist die bereits gefilterte Wandmenge (z. B. ein Geschoss).
 pub fn compute_joins(walls: &[JoinWall]) -> Result<Vec<WallCuts>, JoinError> {
     let mut result = vec![WallCuts::default(); walls.len()];
+    let mut layered = vec![false; walls.len()];
 
     // Knotenkarte in Einfüge-Reihenfolge: gerundeter Endpunkt → dort endende Wandenden.
     // [141] Enden, die nur fast aufeinander liegen (Fanglücke ≤ JOIN_SNAP), gehören zum selben Knoten.
@@ -474,7 +480,12 @@ pub fn compute_joins(walls: &[JoinWall]) -> Result<Vec<WallCuts>, JoinError> {
             2 => {
                 if let Some(cut) = miter_line(walls, ends[0].wall, ends[0].end, ends[1].wall)? {
                     set_pair(&mut result, ends[0], ends[1], cut);
-                    assign_pattern_corner(walls, ends[0], ends[1], &mut result);
+                    if layered_corner(walls, ends[0], ends[1], &mut result) {
+                        layered[ends[0].wall] = true;
+                        layered[ends[1].wall] = true;
+                    } else {
+                        assign_pattern_corner(walls, ends[0], ends[1], &mut result);
+                    }
                 }
             }
             3.. => apply_node(walls, ends, &mut result)?,
@@ -499,8 +510,132 @@ pub fn compute_joins(walls: &[JoinWall]) -> Result<Vec<WallCuts>, JoinError> {
             }
         }
     }
+    // [286] Schichtweise Ecken: Schichten ohne eigenen Schnitt am anderen Ende folgen dessen Endschnitt (3D liest
+    // `layer_cuts` ohne Rückfall).
+    for (c, _) in result.iter_mut().zip(&layered).filter(|(_, l)| **l) {
+        let (sc, ec) = (c.start_cut, c.end_cut);
+        if let Some(lc) = c.layer_cuts.as_mut() {
+            lc.start.iter_mut().filter(|l| l.is_none()).for_each(|l| *l = sc);
+            lc.end.iter_mut().filter(|l| l.is_none()).for_each(|l| *l = ec);
+        }
+    }
     assign_pattern_flip(&mut result);
     Ok(result)
+}
+
+/// [286] Schichtweise L-Ecke (Archicad-Prinzip Baustoff-Priorität, Umbau): ist eine der beiden Wände saniert
+/// (`renewed`), läuft die dominante Schicht (`core`) durch statt auf Gehrung. Die Ecke zerfällt an den Kernflächen in
+/// drei Zonen: aussen (Schichten aussen vom Kern beider Wände), Kern, innen.
+/// - **Kern:** höhere Priorität läuft bis zur äusseren Kernfläche der anderen Wand durch, die andere endet an ihrer
+///   inneren Kernfläche; gleiche Priorität ⇒ Gehrung zwischen den Kern-Ecken.
+/// - **Aussen/innen:** ist nur eine Wand saniert, laufen die Schichten der anderen (bleibenden) bis zur Fläche der
+///   sanierten durch; die Abbruch- bzw. neuen Schichten der sanierten enden rechtwinklig an der Kernfläche der anderen
+///   (also bündig mit dem Ende ihres Kerns, kein schräger Schnitt durch den Abbruch). Beide saniert ⇒ Gehrung je Zone.
+///
+/// Rechtwinklige Enden bekommen eine Stirnlinie (`*_side`). Nur gerade Wände; `false` ⇒ Gehrung wie bisher.
+fn layered_corner(walls: &[JoinWall], a: WallEnd, b: WallEnd, result: &mut [WallCuts]) -> bool {
+    let (wa, wb) = (&walls[a.wall], &walls[b.wall]);
+    if !(wa.renewed || wb.renewed) || is_arc(wa) || is_arc(wb) {
+        return false;
+    }
+    let (Some(la), Some(lb)) = (wa.layers.as_deref(), wb.layers.as_deref()) else { return false };
+    let strongest = |l: &[JoinLayer]| (0..l.len()).max_by(|&x, &y| l[x].priority.total_cmp(&l[y].priority).then(l[x].thickness.total_cmp(&l[y].thickness)).then(y.cmp(&x)));
+    let core = |w: &JoinWall, l: &[JoinLayer]| w.core.filter(|&k| k < l.len()).or_else(|| strongest(l));
+    let (Some(ka), Some(kb)) = (core(wa, la), core(wb, lb)) else { return false };
+    if la.iter().chain(lb).any(|l| !(l.thickness.is_finite() && l.thickness >= 0.0)) {
+        return false;
+    }
+    let out_dir = |w: &JoinWall, e: End| if e == End::Start { dir_of(w) } else { scale(dir_of(w), -1.0) };
+    let (da, db) = (out_dir(wa, a.end), out_dir(wb, b.end));
+    if kernel2d::cross(da, db).abs() < 1e-6 {
+        return false;
+    }
+    // Je Wand: Rahmen und die vier Flächen (aussen, Kern aussen, Kern innen, innen) als Querversatz.
+    struct Side {
+        o: Vec2,
+        u: Vec2,
+        n: Vec2,
+        faces: [f64; 4],
+        inner_hi: bool,
+    }
+    let side = |w: &JoinWall, l: &[JoinLayer], k: usize, other: Vec2| {
+        let (u, t) = (dir_of(w), l.iter().fold(0.0, |s, x| s + x.thickness));
+        let n = left_normal(u);
+        let lo = reference_offset(w.reference, t) - t / 2.0;
+        let klo = lo + l[..k].iter().fold(0.0, |s, x| s + x.thickness);
+        let khi = klo + l[k].thickness;
+        let inner_hi = dot(n, other) > 0.0;
+        let faces = if inner_hi { [lo, klo, khi, lo + t] } else { [lo + t, khi, klo, lo] };
+        Side { o: w.start, u, n, faces, inner_hi }
+    };
+    let (sa, sb) = (side(wa, la, ka, db), side(wb, lb, kb, da));
+    let mut pts = [Vec2::new(0.0, 0.0); 4];
+    for (i, p) in pts.iter_mut().enumerate() {
+        let Some(x) = line_intersect(add(sa.o, scale(sa.n, sa.faces[i])), sa.u, add(sb.o, scale(sb.n, sb.faces[i])), sb.u) else { return false };
+        if !(x.x.is_finite() && x.y.is_finite()) {
+            return false;
+        }
+        *p = x;
+    }
+    let [p, q, r, s] = pts;
+    #[derive(Clone, Copy, PartialEq)]
+    enum Zone {
+        Miter,
+        Wins,
+        Loses,
+    }
+    let zone = |me: &JoinWall, other: &JoinWall| match (me.renewed, other.renewed) {
+        (false, true) => Zone::Wins,
+        (true, false) => Zone::Loses,
+        _ => Zone::Miter,
+    };
+    let miter = |from: Vec2, to: Vec2, along: Vec2| Line { point: from, dir: if len(sub(to, from)) > 1e-9 { sub(to, from) } else { along } };
+    let mut apply = |we: WallEnd, me: &JoinWall, l: &[JoinLayer], k: usize, sm: &Side, other: &JoinWall, so: &Side, prio_me: f64, prio_other: f64| {
+        let z = zone(me, other);
+        let n = l.len();
+        let mut cuts = vec![None; n];
+        let mut sides = vec![None; n];
+        for i in 0..n {
+            let outer = if sm.inner_hi { i < k } else { i > k };
+            let (cut, butt) = if i == k {
+                if prio_me > prio_other {
+                    (Line { point: q, dir: so.u }, true)
+                } else if prio_me < prio_other {
+                    (Line { point: r, dir: so.u }, true)
+                } else {
+                    (miter(q, r, so.u), false)
+                }
+            } else if outer {
+                match z {
+                    Zone::Miter => (miter(p, q, so.u), false),
+                    Zone::Wins => (Line { point: p, dir: so.u }, true),
+                    Zone::Loses => (Line { point: q, dir: so.u }, true),
+                }
+            } else {
+                match z {
+                    Zone::Miter => (miter(r, s, so.u), false),
+                    Zone::Wins => (Line { point: r, dir: so.u }, true),
+                    Zone::Loses => (Line { point: s, dir: so.u }, true),
+                }
+            };
+            cuts[i] = Some(cut);
+            sides[i] = butt.then_some(cut);
+        }
+        let lc = result[we.wall].layer_cuts.get_or_insert_with(|| LayerCuts { start: vec![None; n], end: vec![None; n], start_side: vec![None; n], end_side: vec![None; n] });
+        if lc.start.len() != n {
+            return;
+        }
+        let (face, side) = match we.end {
+            End::Start => (&mut lc.start, &mut lc.start_side),
+            End::End => (&mut lc.end, &mut lc.end_side),
+        };
+        *face = cuts;
+        *side = sides;
+    };
+    let (pa, pb) = (la[ka].priority, lb[kb].priority);
+    apply(a, wa, la, ka, &sa, wb, &sb, pa, pb);
+    apply(b, wb, lb, kb, &sb, wa, &sa, pb, pa);
+    true
 }
 
 /// [141] Zwei gerade Wände liegen im selben Band: parallele Achsen, gleiche Schichtfolge (gegenläufig
@@ -1297,7 +1432,7 @@ pub fn decode_walls(buf: &[f64]) -> Option<Vec<JoinWall>> {
             let priority = if component.is_some() { p } else { f64::NAN };
             layers.push(JoinLayer { thickness: t, component, priority });
         }
-        out.push(JoinWall { start: Vec2::new(sx, sy), end: Vec2::new(ex, ey), reference, layers: type_ok.then_some(layers), bulge: None });
+        out.push(JoinWall { start: Vec2::new(sx, sy), end: Vec2::new(ex, ey), reference, layers: type_ok.then_some(layers), bulge: None, core: None, renewed: false });
     }
     Some(out)
 }
@@ -1397,7 +1532,7 @@ mod tests {
         JoinLayer { thickness: t, component: Some(c), priority: p }
     }
     fn wall(s: (f64, f64), e: (f64, f64), layers: Vec<JoinLayer>) -> JoinWall {
-        JoinWall { start: Vec2::new(s.0, s.1), end: Vec2::new(e.0, e.1), reference: Reference::Center, layers: Some(layers), bulge: None }
+        JoinWall { start: Vec2::new(s.0, s.1), end: Vec2::new(e.0, e.1), reference: Reference::Center, layers: Some(layers), bulge: None, core: None, renewed: false }
     }
     fn mono(s: (f64, f64), e: (f64, f64), t: f64) -> JoinWall {
         wall(s, e, vec![layer(t, 0, 10.0)])
@@ -1884,3 +2019,7 @@ mod tests {
         assert!(!c[0].covered && !c[1].covered && c[0].collinear == [false; 2] && c[1].collinear == [false; 2]);
     }
 }
+
+#[cfg(test)]
+#[path = "joins_corner_tests.rs"]
+mod corner_tests;

@@ -4919,6 +4919,8 @@ export const en: Record<TranslationKey, string> = {
   "renovation.panel.sanierung.oldLayers": "Existing type (old)",
   "renovation.panel.sanierung.newLayers": "Renovation type (new)",
   "renovation.panel.sanierung.reset": "Map automatically",
+  "renovation.panel.sanierung.core": "Dominant layer (corners)",
+  "renovation.panel.sanierung.core.hint": "Runs through at corners; demolished and new layers end square against it instead of mitred",
   "renovation.panel.sanierung.remove": "Remove renovation type",
   "renovation.panel.sanierung.editLayers": "Layers in the resources …",
   "renovation.panel.sanierung.host.wall": "Walls",

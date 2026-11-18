@@ -81,6 +81,20 @@ describe("[274] Sanierung je Schicht", () => {
     expect(renovationPairs(u).pairs.filter((x) => x.kind === "wall").map((x) => x.type).sort()).toEqual(["aw", "aw-bestand"]);
   });
 
+  it("[286] dominante Schicht an Ecken: Vorgabe Beton, wählbar nur unter bleibenden Schichten", () => {
+    const p = buildUmbauSampleProject();
+    const pr = renovationPair(p, "aw-bestand");
+    expect([pr?.core, pr?.coreAuto, pr?.coreSet]).toEqual([2, 2, null]);
+    const q = applyOps(p, setTypePairOps(p, "aw-bestand", { core: 2 }));
+    expect(q.wallTypes.find((t) => t.id === "aw-bestand")?.renovationCore).toBe(2);
+    expect(renovationPair(q, "aw-bestand")?.coreSet).toBe(2);
+    // Abgebrochene Schicht: wirkt nicht (Vorgabe bleibt); `null` entfernt das Feld.
+    const r = applyOps(q, setTypePairOps(q, "aw-bestand", { core: 1 }));
+    expect([renovationPair(r, "aw-bestand")?.core, renovationPair(r, "aw-bestand")?.coreSet]).toEqual([2, null]);
+    const s = applyOps(r, setTypePairOps(r, "aw-bestand", { core: null }));
+    expect(s.wallTypes.find((t) => t.id === "aw-bestand")).not.toHaveProperty("renovationCore");
+  });
+
   it("Beispiel Umbau: Typ-Paar der Südwand, Zähler, Grundriss und GF je Filter", () => {
     const p = buildUmbauSampleProject();
     const pr = renovationPair(p, "aw-bestand");

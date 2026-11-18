@@ -4933,6 +4933,8 @@ export const de = {
   "renovation.panel.sanierung.oldLayers": "Bestandstyp (alt)",
   "renovation.panel.sanierung.newLayers": "Sanierungstyp (neu)",
   "renovation.panel.sanierung.reset": "Automatisch zuordnen",
+  "renovation.panel.sanierung.core": "Dominante Schicht (Ecken)",
+  "renovation.panel.sanierung.core.hint": "Läuft an Ecken durch; Abbruch- und neue Schichten enden rechtwinklig an ihr statt auf Gehrung",
   "renovation.panel.sanierung.remove": "Sanierungstyp entfernen",
   "renovation.panel.sanierung.editLayers": "Schichten in den Ressourcen …",
   "renovation.panel.sanierung.host.wall": "Wände",
