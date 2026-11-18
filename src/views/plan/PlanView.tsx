@@ -9,7 +9,7 @@ import { forwardRef, useEffect, useMemo, useRef, useState } from "react";
 import type { ComponentProps, CSSProperties } from "react";
 import type { PlanImage, Primitive } from "../../core";
 import { planLineEndsProps } from "../../core";
-import type { EdgeGrip, Vec2 } from "../../model/types";
+import type { Vec2 } from "../../model/types";
 import { t } from "../../i18n";
 import { docFromText } from "../../text/richText";
 import { contentFontBaselineFromTop, TEXT_LINE_HEIGHT_MULT } from "../../text/fontMetrics";
@@ -29,6 +29,7 @@ import {
 } from "./planView/primitives";
 import { DraftOverlay } from "./planView/overlays";
 import { visibleGripIndices } from "./planView/gripCull";
+import { edgeHitAt, edgeSelStep, selectedEdgeOf } from "./planView/edgeSelection";
 import { localViewBoxAttr } from "./planView/overlayOrigin";
 import { PlanRulers } from "./planView/PlanRulers";
 import { PlanGrid } from "./planView/PlanGrid";
@@ -37,7 +38,7 @@ import { planTextEntries } from "../../core";
 import { EMPTY_SELECTION, single } from "../../state/selection";
 import { useCursorValue, type CursorStore } from "../../state/cursorStore";
 import type { HatchedPoly, PlanViewHandle, PlanViewProps } from "./planView/types";
-import { IS_MAC } from "./planView/constants";
+import { IS_MAC, gripSquareHalfPx } from "./planView/constants";
 import { usePlanEngine } from "./planView/usePlanEngine";
 import { usePlanCoords } from "./planView/usePlanCoords";
 import { usePlanPicking } from "./planView/usePlanPicking";
@@ -164,8 +165,31 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   const toolActive = inputActive && !!toolHandlers;
   // Editier-Griffe sind nur im Auswahl-Werkzeug aktiv.
   const gripsActive = !toolActive && !!grips && grips.length > 0 && !!gripHandlers;
-  // Kanten-Griffe nur aktiv, wenn auch die Eckpunkt-Griffe aktiv sind.
-  const edgeGripsActive = gripsActive && !!edgeGrips && edgeGrips.length > 0;
+  // [288] Kantenauswahl: der Anfasser zum Parallelverschieben erscheint nur an der per zweitem Klick gewählten Kante
+  // (Vectorworks-Arbeitsweise, s. planView/edgeSelection.ts). Kanten-Griffe nur, wenn auch die Eckpunkt-Griffe aktiv sind.
+  const [edgeSelKey, setEdgeSelKey] = useState<string | null>(null);
+  const edgeSelKeyRef = useRef(edgeSelKey);
+  edgeSelKeyRef.current = edgeSelKey;
+  const selectedEdge = gripsActive ? selectedEdgeOf(edgeGrips, edgeSelKey) : null;
+  const shownEdgeGrips = useMemo(() => (selectedEdge ? [selectedEdge] : []), [selectedEdge]);
+  const edgeGripsActive = !!selectedEdge;
+  // Andere Auswahl → Kantenauswahl weg (Ring-Kanten von Raum/Decke/Dach tragen keinen Eigentümer im Schlüssel).
+  const selectionSig = JSON.stringify(selection);
+  useEffect(() => setEdgeSelKey(null), [selectionSig]);
+  // Esc hebt zuerst nur die Kantenauswahl auf (preventDefault: die Elementauswahl bleibt, s. useKeyboardShortcuts).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey) return;
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return;
+      const step = edgeSelStep(edgeSelKeyRef.current, { kind: "escape" });
+      if (!step.consumed) return;
+      e.preventDefault();
+      setEdgeSelKey(step.key);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   // Eingepasste Standard-Ansicht aus den AKTUELLEN Bounds, über die fixe
   // toScreen-Abbildung. Reset-/Einpassen-Ziel + Bezug für die Zoom-Grenzen; wird
   // NICHT automatisch angewandt (nur bei resetKey-Wechsel und „Einpassen").
@@ -194,13 +218,11 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
   const [view, setView] = useState<ViewBox>(startView);
   // [193] Sichtbarer Ausschnitt (Modell-Meter) für die Netzpunkt-Griffe grosser Netze (verzögert gemeldet).
   useEffect(() => publishPlanViewport(viewBoxToMeshRect(view, PX_PER_M)), [view]);
-  // [26] Kante unter dem Cursor (Kanten-Anfasser); gezeichnet wird sie nur für Flächen-Elemente
-  // (Dach, Decke, Raum, Baugrube), deren Kanten-Indizes Griff-Indizes sind.
-  const [hoverEdge, setHoverEdge] = useState<EdgeGrip | null>(null);
-  // [121] Aktuellen Wert spiegeln: bei jeder Zeigerbewegung nur setzen, wenn sich die Kante ändert (ein
-  // setState mit gleichem Wert kann je nach React-Interna die ganze Plan-Ansicht ein zweites Mal rendern).
-  const hoverEdgeRef = useRef(hoverEdge);
-  hoverEdgeRef.current = hoverEdge;
+  // [288] Griff unter dem Cursor (Hover-Zustand der Auswahlgriffe). [121] Nur bei Änderung setzen (ein setState mit
+  // gleichem Wert kann je nach React-Interna die ganze Plan-Ansicht ein zweites Mal rendern).
+  const [hoverGrip, setHoverGrip] = useState<number | null>(null);
+  const hoverGripRef = useRef(hoverGrip);
+  hoverGripRef.current = hoverGrip;
   // Ausschnitt NUR bei Plan-/Geschoss-Wechsel (resetKey) auf „eingepasst"
   // zurücksetzen — NICHT bei jeder Bounds-Änderung durch Editieren (sonst
   // „wandert" die Ansicht beim Verschieben/Löschen mit). `defaultView` ist beim
@@ -304,7 +326,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     canvasRef,
     view,
     grips,
-    edgeGrips,
+    edgeGrips: shownEdgeGrips,
     onCursor,
   });
   // [165] Treffer-Abfragen (Bauteile, 2D-Elemente, Lage, Bäume), Hover-Teilpunkte, gegriffener Körper, Marquee-Treffer.
@@ -396,11 +418,10 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     grips,
     edgeGripsActive,
     edgeGripAt,
-    onHoverEdge: (e) => {
-      const h = hoverEdgeRef.current;
-      if (h?.aIndex === e?.aIndex && h?.bIndex === e?.bIndex && h?.owner === e?.owner) return;
-      hoverEdgeRef.current = e;
-      setHoverEdge(e);
+    onHoverGrip: (i) => {
+      if (hoverGripRef.current === i) return;
+      hoverGripRef.current = i;
+      setHoverGrip(i);
     },
     grabbedBody,
     moveDrag,
@@ -499,6 +520,17 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     drag,
     commitPan,
     setDragging,
+    onEdgeClick: (clientX, clientY) => {
+      const hit = gripsActive
+        ? edgeHitAt(edgeGrips, (v) => { const q = toScreen(v); return vbToClient(q.x, q.y); }, { x: clientX, y: clientY })
+        : null;
+      const step = edgeSelStep(edgeSelKeyRef.current, { kind: "click", hit });
+      if (step.key !== edgeSelKeyRef.current) {
+        edgeSelKeyRef.current = step.key;
+        setEdgeSelKey(step.key);
+      }
+      return step.consumed;
+    },
   });
   // [165] Mausrad-Zoom, Doppelklick, Kontextmenü.
   const {
@@ -1038,7 +1070,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
         const c2 = toLocal({ x: groupBBox.maxX, y: groupBBox.minY });
         const c3 = toLocal({ x: groupBBox.maxX, y: groupBBox.maxY });
         const c4 = toLocal({ x: groupBBox.minX, y: groupBBox.maxY });
-        const size = (4 * gripK(meet)) / meet;
+        const half = gripSquareHalfPx(false, false) / meet;
         const corners = [c1, c2, c3, c4];
         return (
           <>
@@ -1048,12 +1080,13 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
               pointerEvents="none"
             />
             {corners.map((s, i) => (
-              <circle
+              <rect
                 key={`gbb-${i}`}
                 className="plan-grip plan-group-bbox-corner"
-                cx={s.x}
-                cy={s.y}
-                r={size}
+                x={s.x - half}
+                y={s.y - half}
+                width={half * 2}
+                height={half * 2}
                 pointerEvents="none"
               />
             ))}
@@ -1136,36 +1169,26 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
             pointerEvents="none"
           />
         ))}
-      {/* Editier-Griffe des selektierten Elements (Wand-Enden / 2D-Vertices):
-          ziehbare Kreise. Bildschirmkonstante Größe über die meet-Skala.
-          Radius bewusst kleiner als der Treffer-Radius (GRIP_HIT_PX) — die
-          Klickfläche bleibt grosszügig, nur die sichtbare Form schrumpft. */}
+      {/* [288] Auswahlgriffe wie in Vectorworks: kleine gefüllte Quadrate mit dünnem hellem Rand, einheitliche
+          Bildschirmgrösse (meet-Skala), Hover = grösser + hohl. Einfüge-Griffe (Mitte eines Schnitt-Segments) als
+          kleinere hohle Quadrate. Sichtbare Form bewusst kleiner als der Treffer-Radius (GRIP_HIT_PX). */}
       {gripsActive && (
         <LiveMeet store={meetStore} base={meetScale(view, canvasRef.current ?? svgRef.current) ?? 1}>
           {(meet) =>
             // Viele Griffe (Kataster): nur die sichtbaren zeichnen (gripCull.ts).
             (visibleGripIndices(grips!, toScreen, view, meet) ?? grips!.map((_, i) => i)).map((i) => {
               const s = toLocal(grips![i]);
-              const size = (4.5 * gripK(meet)) / meet;
-              // Einfüge-Griff (Mitte eines Schnitt-Segments): kleine Raute, eigene Optik gegenüber den Eck-Griffen.
-              if ((grips![i] as { insert?: boolean }).insert) {
-                const d = size * 0.9;
-                return (
-                  <polygon
-                    key={`grip-${i}`}
-                    className="plan-grip plan-grip-insert"
-                    points={`${s.x},${s.y - d} ${s.x + d},${s.y} ${s.x},${s.y + d} ${s.x - d},${s.y}`}
-                    pointerEvents="none"
-                  />
-                );
-              }
+              const insert = !!(grips![i] as { insert?: boolean }).insert;
+              const hover = hoverGrip === i;
+              const half = gripSquareHalfPx(insert, hover) / meet;
               return (
-                <circle
+                <rect
                   key={`grip-${i}`}
-                  className="plan-grip"
-                  cx={s.x}
-                  cy={s.y}
-                  r={size}
+                  className={"plan-grip" + (insert ? " plan-grip-insert" : "") + (hover ? " plan-grip-hover" : "")}
+                  x={s.x - half}
+                  y={s.y - half}
+                  width={half * 2}
+                  height={half * 2}
                   pointerEvents="none"
                 />
               );
@@ -1195,25 +1218,22 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           );
         }}</LiveMeet>
       )}
-      {/* Kanten-/Seiten-Griffe: je Seite ein dreieckiger Anfasser, leicht nach
-          AUSSEN entlang der (bildschirm-transformierten) Normale versetzt, mit
-          der Spitze nach außen. Y wird gespiegelt (toScreen spiegelt Y), damit
-          das Dreieck wirklich nach außen zeigt. Größe bildschirmkonstant. */}
-      {edgeGripsActive && hoverEdge && !hoverEdge.owner?.drawingId && !hoverEdge.owner?.wallId && grips?.[hoverEdge.aIndex] && grips[hoverEdge.bIndex] && (
+      {/* [288] Gewählte Kante (zweiter Klick auf eine Kante des Gewählten): hervorgehoben, nur sie trägt den
+          dreieckigen Anfasser zum Parallelverschieben (Basis auf der Kante, Spitze nach aussen). */}
+      {selectedEdge?.a && selectedEdge.b && (
         <line
-          className="plan-edge-hover"
-          x1={toLocal(grips[hoverEdge.aIndex]).x}
-          y1={toLocal(grips[hoverEdge.aIndex]).y}
-          x2={toLocal(grips[hoverEdge.bIndex]).x}
-          y2={toLocal(grips[hoverEdge.bIndex]).y}
+          className="plan-edge-selected"
+          x1={toLocal(selectedEdge.a).x}
+          y1={toLocal(selectedEdge.a).y}
+          x2={toLocal(selectedEdge.b).x}
+          y2={toLocal(selectedEdge.b).y}
           pointerEvents="none"
         />
       )}
       {edgeGripsActive && (
         <LiveMeet store={meetStore} base={meetScale(view, canvasRef.current ?? svgRef.current) ?? 1}>
           {(s) =>
-        (visibleGripIndices(edgeGrips!.map((g) => g.mid), toScreen, view, s) ?? edgeGrips!.map((_, i) => i)).map((i) => {
-          const eg = edgeGrips![i];
+        shownEdgeGrips.map((eg, i) => {
           const m = toLocal(eg.mid);
           // Normale in den Bildschirmraum (Y spiegeln); auf Bildschirm-px-Größen.
           const sn = screenNormal(eg.normal);

@@ -245,28 +245,24 @@ test("Kataster: geschlossene Bogen-Polylinie hat keine Kanten-Griffe im Innern",
   await clickModel(page, -6 + 3 * 8, -3);
   await expect(page.locator(".plan-grip:not(.plan-grip-insert)")).toHaveCount(44);
   await expect(page.locator(".plan-edge-grip")).toHaveCount(0);
-  // Parzelle mit geraden Kanten: genau 4 Kanten-Griffe, je auf der Kantenmitte.
+  // Parzelle mit geraden Kanten: 4 Ecken; [288] Kanten-Anfasser erst nach Kantenauswahl.
   await clickModel(page, 38, 53);
   await expect(page.locator(".plan-grip:not(.plan-grip-insert)")).toHaveCount(4);
-  await expect(page.locator(".plan-edge-grip")).toHaveCount(4);
-  // Parzelle 0..30 m mit zwei Bogen- und zwei geraden Seiten: 4 Ecken + 2 Bogen-Mitten,
-  // Kanten-Griffe nur an den geraden Seiten (rechts bei x = 30, links bei x = 0).
+  await expect(page.locator(".plan-edge-grip")).toHaveCount(0);
+  // Parzelle 0..30 m mit zwei Bogen- und zwei geraden Seiten: 4 Ecken + 2 Bogen-Mitten. Zweiter Klick auf die
+  // gerade rechte Seite (x = 30) wählt diese Kante: genau ein Anfasser, auf der Kantenmitte.
   await clickModel(page, 30, 15);
   await expect(page.locator(".plan-grip:not(.plan-grip-insert)")).toHaveCount(6);
+  await expect(page.locator(".plan-edge-grip")).toHaveCount(0);
+  await page.waitForTimeout(450); // kein Doppelklick
+  await clickModel(page, 30, 15);
   const edges = page.locator(".plan-edge-grip");
-  await expect(edges).toHaveCount(2);
+  await expect(edges).toHaveCount(1);
+  await expect(page.locator(".plan-grip:not(.plan-grip-insert)")).toHaveCount(6);
   const right = await screenOf(page, 30, 15);
-  const left = await screenOf(page, 0, 15);
-  const centres = await edges.evaluateAll((els) =>
-    els.map((e) => {
-      const r = e.getBoundingClientRect();
-      return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
-    }),
-  );
-  for (const c of centres) {
-    const d = Math.min(Math.hypot(c.x - right.x, c.y - right.y), Math.hypot(c.x - left.x, c.y - left.y));
-    expect(d, "Kanten-Griff auf einer geraden Seite").toBeLessThan(12);
-  }
+  const box = (await edges.boundingBox())!;
+  const d = Math.hypot(box.x + box.width / 2 - right.x, box.y + box.height / 2 - right.y);
+  expect(d, "Kanten-Griff auf der geraden rechten Seite").toBeLessThan(12);
 });
 
 test("Kataster: Vorschau-Kreis eines Grenzpunkts (Liste beim Strg-Klick) sitzt in LV95 am Ort", async ({ page }) => {

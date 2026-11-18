@@ -804,7 +804,7 @@ export function useGripEditing(opts: {
         if (!w) continue;
         const mid: Vec2 = { x: (w.start.x + w.end.x) / 2, y: (w.start.y + w.end.y) / 2 };
         const nrm = normalize(leftNormal(sub(w.end, w.start)));
-        out.push({ mid, normal: nrm, aIndex: 0, bIndex: 1, owner: { wallId: id } });
+        out.push({ mid, normal: nrm, aIndex: 0, bIndex: 1, owner: { wallId: id }, a: w.start, b: w.end });
       }
     }
     return out;

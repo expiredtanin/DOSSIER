@@ -47,7 +47,8 @@ export interface UsePlanPointerArgs {
   edgeGripsActive: boolean;
   edgeGripAt: (clientX: number, clientY: number) => EdgeGrip | null;
   /** [26] Kante unter dem Cursor (Kanten-Anfasser) im Ruhezustand — die Plan-Ansicht hebt sie hervor. */
-  onHoverEdge?: (edge: EdgeGrip | null) => void;
+  /** [288] Griff unter dem Cursor (Hover-Zustand der Auswahlgriffe), null = keiner. */
+  onHoverGrip?: (index: number | null) => void;
   grabbedBody: (clientX: number, clientY: number) => BodyTarget | null;
   moveDrag: React.MutableRefObject<{ pointerId: number; last: Vec2; startX?: number; startY?: number; target: BodyTarget; } | null>;
   marquee: React.MutableRefObject<{ pointerId: number; startClientX: number; startClientY: number; startView: Vec2; moved: boolean; } | null>;
@@ -114,7 +115,7 @@ export function usePlanPointer(inp: UsePlanPointerArgs) {
     grips,
     edgeGripsActive,
     edgeGripAt,
-    onHoverEdge,
+    onHoverGrip,
     grabbedBody,
     moveDrag,
     marquee,
@@ -554,7 +555,7 @@ export function usePlanPointer(inp: UsePlanPointerArgs) {
       // Echter Ruhezustand (kein Drag/Werkzeug/Marquee/Pan) — Hover-
       // Teilpunkte-Erkennung.
       updateHoverDivide(e.clientX, e.clientY);
-      onHoverEdge?.(edgeGripsActive ? edgeGripAt(e.clientX, e.clientY) : null);
+      onHoverGrip?.(gripsActive ? gripAt(e.clientX, e.clientY) : null);
       return;
     }
     const { scale } = measure(d.startView);

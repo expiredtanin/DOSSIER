@@ -30,8 +30,8 @@ test("Dach: Eckgriff im Grundriss ziehen, Rückgängig ([26])", async ({ page })
   await expect(page.getByText("Dachform")).toBeVisible();
 
   await expect.poll(() => page.locator(".plan-grip:not(.plan-grip-insert)").count()).toBe(4);
-  // Kanten-Anfasser je Seite.
-  await expect(page.locator(".plan-edge-grip")).toHaveCount(4);
+  // [288] Kanten-Anfasser erst nach Kantenauswahl (zweiter Klick auf eine Kante), nicht an allen Seiten.
+  await expect(page.locator(".plan-edge-grip")).toHaveCount(0);
   const before = await gripCentres(page);
 
   // Linkeste/oberste Ecke nach links-oben ziehen: Umriss wird schief, die übrigen Ecken bleiben.

@@ -6,8 +6,7 @@ import type { Vec2 } from "../../../model/types";
 import type { SnapResult, ToolDraft } from "../../../tools/types";
 import { hudSegments, type HudFieldsState } from "../../../tools/hudFormat";
 import { MODEL_UNITS, type DisplayUnits } from "../../../tools/displayUnits";
-import { t } from "../../../i18n";
-import type { TranslationKey } from "../../../i18n";
+import { snapGlyph, snapTipText, type SnapGlyph } from "../../../tools/snapGlyph";
 
 /**
  * Zeichnet die Werkzeug-Vorschau: Vorschau-Formen (gestrichelte Akzentlinien /
@@ -36,7 +35,7 @@ export function DraftOverlay({
   units?: DisplayUnits;
 }) {
   const vertSize = 4.5 * vbPerPx; // halbe Kantenlänge eines Stützpunkt-Quadrats (klein + einheitlich)
-  const markSize = 4.75 * vbPerPx; // halbe Kantenlänge des Snap-Markers (klein + fein)
+  const markSize = 6 * vbPerPx; // [288] halbe Grösse des Fangsymbols (gut sichtbar, mit Kontrastrand)
   return (
     <g className="tool-overlay" pointerEvents="none">
       {/* Vorschau-Formen. */}
@@ -87,7 +86,7 @@ export function DraftOverlay({
       )}
       {/* Snap-Marker + optionale Ortho-Hilfslinie. */}
       {draft.snap && (
-        <SnapMarker snap={draft.snap} toScreen={toScreen} size={markSize} color={snapColor} vbPerPx={vbPerPx} />
+        <SnapMarker snap={draft.snap} toScreen={toScreen} size={markSize} color={snapColor} vbPerPx={vbPerPx} units={units} />
       )}
       {/* Maß-/Winkel-HUD am Cursor (VW-Stil `L: … W: …`, oder einfacher Text). */}
       {draft.hud && <DraftHud hud={draft.hud} toScreen={toScreen} vbPerPx={vbPerPx} hudFields={hudFields} units={units} />}
@@ -262,40 +261,86 @@ function AngleGuide({
   );
 }
 
-/** Marker-Glyph je Snap-Art + (bei ortho) eine gestrichelte Hilfslinie. */
-const SNAP_TIP_KINDS = new Set(["endpoint", "midpoint", "intersection", "center", "quadrant", "onEdge", "perpendicular", "tangent", "parallel", "extension", "divide"]);
+/**
+ * [288] SVG-Pfad eines Fangsymbols um (x, y) mit halber Grösse r (viewBox-Einheiten). `filled`: Fläche in der
+ * Fangfarbe füllen (Raster-Punkt, Teilpunkt), sonst nur Kontur.
+ */
+function glyphPath(g: SnapGlyph, x: number, y: number, r: number): { d: string; filled: boolean } {
+  const p = (px: number, py: number) => `${px},${py}`;
+  switch (g) {
+    case "square":
+      return { d: `M${p(x - r, y - r)}H${x + r}V${y + r}H${x - r}Z`, filled: false };
+    case "triangle": {
+      const h = r * 1.15;
+      return { d: `M${p(x, y - h)}L${p(x + h, y + h * 0.75)}L${p(x - h, y + h * 0.75)}Z`, filled: false };
+    }
+    case "cross":
+      return { d: `M${p(x - r, y - r)}L${p(x + r, y + r)}M${p(x - r, y + r)}L${p(x + r, y - r)}`, filled: false };
+    case "perp":
+      // Rechter Winkel ⊾ mit kleinem Winkelquadrat.
+      return {
+        d: `M${p(x - r, y - r)}V${y + r}H${x + r}M${p(x - r, y + r * 0.1)}H${x - r * 0.1}V${y + r}`,
+        filled: false,
+      };
+    case "circle":
+      return { d: `M${p(x - r, y)}A${r},${r} 0 1 0 ${p(x + r, y)}A${r},${r} 0 1 0 ${p(x - r, y)}Z`, filled: false };
+    case "diamond":
+    case "diamondFill":
+      return { d: `M${p(x, y - r)}L${p(x + r, y)}L${p(x, y + r)}L${p(x - r, y)}Z`, filled: g === "diamondFill" };
+    case "tangent": {
+      const c = r * 0.7;
+      return {
+        d: `M${p(x - c, y)}A${c},${c} 0 1 0 ${p(x + c, y)}A${c},${c} 0 1 0 ${p(x - c, y)}ZM${p(x - r * 1.2, y - c)}H${x + r * 1.2}`,
+        filled: false,
+      };
+    }
+    case "parallel":
+      return { d: `M${p(x - r, y + r)}L${p(x - r * 0.2, y - r)}M${p(x + r * 0.2, y + r)}L${p(x + r, y - r)}`, filled: false };
+    case "plus":
+      return { d: `M${p(x - r, y)}H${x + r}M${p(x, y - r)}V${y + r}`, filled: false };
+    case "dot": {
+      const c = r * 0.45;
+      return { d: `M${p(x - c, y)}A${c},${c} 0 1 0 ${p(x + c, y)}A${c},${c} 0 1 0 ${p(x - c, y)}Z`, filled: true };
+    }
+    case "none":
+      return { d: "", filled: false };
+  }
+}
 
+/**
+ * Fangsymbol + Kurzhinweis (+ bei Ortho/Verlängerung eine gestrichelte Hilfslinie). [288] Je Fangart ein eigenes
+ * Symbol (`tools/snapGlyph.ts`), in der Fangfarbe über einem Kontrastrand (hell/dunkel je Thema), daneben ein
+ * Hinweis-Schildchen („Endpunkt", „Mitte" …, bei Hilfslinien mit Abstand/Richtung) — Vectorworks-Smart-Cursor als Leitbild.
+ */
 function SnapMarker({
   snap,
   toScreen,
   size,
   color,
   vbPerPx,
+  units,
 }: {
   snap: SnapResult;
   toScreen: (v: Vec2) => Vec2;
   vbPerPx: number;
   size: number;
-  /** Farbe des Snap-Glyphs (einstellbar, Default = Akzent „Sora"). */
+  /** Farbe des Snap-Glyphs (einstellbar). */
   color: string;
+  units: DisplayUnits;
 }) {
   const s = toScreen(snap.point);
-  const r = size;
-  // Inline `style` überschreibt gezielt die CSS-Klassenfarbe (eine am Element
-  // selbst deklarierte Klassenregel gewinnt sonst gegen eine geerbte Farbe von
-  // einer umschließenden Gruppe — daher pro Glyph statt einmal an der Gruppe).
-  const glyphStyle = { stroke: color };
-  const helperStyle = { stroke: color };
-  const fillStyle = { stroke: color, fill: color };
-  // [287] Fangart als Kurztext am Marker (Archicad/VW-Art): sonst bleibt unklar, woran der Zeiger gerade hängt.
-  const tip = SNAP_TIP_KINDS.has(snap.kind) ? t(`snap.tip.${snap.kind}` as TranslationKey) : null;
+  const glyph = snapGlyph(snap.kind);
+  const { d, filled } = glyphPath(glyph, s.x, s.y, size);
+  const tip = snapTipText(snap, units);
+  const fontSize = 11 * vbPerPx;
+  const padX = 5 * vbPerPx;
+  const padY = 2.5 * vbPerPx;
+  const tipW = tip ? tip.length * fontSize * 0.6 + padX * 2 : 0;
+  const tipH = fontSize + padY * 2;
+  const tipX = s.x + size + 7 * vbPerPx;
+  const tipY = s.y - size - 7 * vbPerPx - tipH;
   return (
-    <g className="snap-marker" data-snap-kind={snap.kind}>
-      {tip && (
-        <text className="snap-tip" x={s.x + 9 * vbPerPx} y={s.y - 7 * vbPerPx} fontSize={11 * vbPerPx} strokeWidth={3 * vbPerPx}>
-          {tip}
-        </text>
-      )}
+    <g className="snap-marker" data-snap-kind={snap.kind} data-snap-glyph={glyph}>
       {(snap.kind === "ortho" || snap.kind === "extension") && snap.refA && (
         <line
           className="snap-helper-line"
@@ -303,102 +348,37 @@ function SnapMarker({
           y1={toScreen(snap.refA).y}
           x2={s.x}
           y2={s.y}
-          style={helperStyle}
+          style={{ stroke: color }}
           vectorEffect="non-scaling-stroke"
         />
       )}
-      {snap.kind === "grid" && (
-        <circle
-          className="snap-glyph snap-fill"
-          cx={s.x}
-          cy={s.y}
-          r={r * 0.5}
-          style={fillStyle}
-          vectorEffect="non-scaling-stroke"
-        />
-      )}
-      {snap.kind === "midpoint" && (
-        <line
-          className="snap-glyph"
-          x1={s.x - r}
-          y1={s.y}
-          x2={s.x + r}
-          y2={s.y}
-          style={glyphStyle}
-          vectorEffect="non-scaling-stroke"
-        />
-      )}
-      {/* Teilpunkt (nur fangbar nach Verweilen, s. computeSnap-Dwell) — kleine
-          gefüllte Raute, bewusst anders als Mittelpunkt (Linie) und Raster
-          (Kreis), damit „warum snappt es hier" nachvollziehbar bleibt. */}
-      {snap.kind === "divide" && (
-        <polygon
-          className="snap-glyph snap-fill"
-          points={`${s.x},${s.y - r} ${s.x + r},${s.y} ${s.x},${s.y + r} ${s.x - r},${s.y}`}
-          style={fillStyle}
-          vectorEffect="non-scaling-stroke"
-        />
-      )}
-      {snap.kind === "intersection" && (
+      {d && (
         <>
-          <line className="snap-glyph" x1={s.x - r} y1={s.y - r} x2={s.x + r} y2={s.y + r} style={glyphStyle} vectorEffect="non-scaling-stroke" />
-          <line className="snap-glyph" x1={s.x - r} y1={s.y + r} x2={s.x + r} y2={s.y - r} style={glyphStyle} vectorEffect="non-scaling-stroke" />
-        </>
-      )}
-      {(snap.kind === "center" || snap.kind === "quadrant") && (
-        <circle className="snap-glyph" cx={s.x} cy={s.y} r={r} style={glyphStyle} vectorEffect="non-scaling-stroke" />
-      )}
-      {snap.kind === "onEdge" && (
-        <polygon
-          className="snap-glyph"
-          points={`${s.x},${s.y - r} ${s.x + r},${s.y} ${s.x},${s.y + r} ${s.x - r},${s.y}`}
-          style={glyphStyle}
-          vectorEffect="non-scaling-stroke"
-        />
-      )}
-      {/* Senkrecht: ein rechter Winkel (⌐), wie das klassische CAD-Perpendicular-
-          Glyph — unterscheidet sich bewusst von „onEdge" (Raute), da die
-          Konstruktion vom letzten Punkt aus geschieht, nicht vom Cursor. */}
-      {snap.kind === "perpendicular" && (
-        <polyline
-          className="snap-glyph"
-          points={`${s.x - r},${s.y} ${s.x - r},${s.y + r} ${s.x},${s.y + r}`}
-          style={glyphStyle}
-          fill="none"
-          vectorEffect="non-scaling-stroke"
-        />
-      )}
-      {/* Tangente: kleiner Kreis (wie „center") plus eine kurze Berührlinie. */}
-      {snap.kind === "tangent" && (
-        <>
-          <circle className="snap-glyph" cx={s.x} cy={s.y} r={r * 0.7} style={glyphStyle} vectorEffect="non-scaling-stroke" />
-          <line
-            className="snap-glyph"
-            x1={s.x - r}
-            y1={s.y + r}
-            x2={s.x + r}
-            y2={s.y - r}
-            style={glyphStyle}
+          <path className="snap-glyph-halo" d={d} vectorEffect="non-scaling-stroke" />
+          <path
+            className={"snap-glyph" + (filled ? " snap-fill" : "")}
+            d={d}
+            style={filled ? { stroke: color, fill: color } : { stroke: color }}
             vectorEffect="non-scaling-stroke"
           />
         </>
       )}
-      {/* Parallel: zwei kurze parallele Striche (∥). */}
-      {snap.kind === "parallel" && (
-        <>
-          <line className="snap-glyph" x1={s.x - r} y1={s.y - r} x2={s.x - r * 0.3} y2={s.y + r} style={glyphStyle} vectorEffect="non-scaling-stroke" />
-          <line className="snap-glyph" x1={s.x + r * 0.3} y1={s.y - r} x2={s.x + r} y2={s.y + r} style={glyphStyle} vectorEffect="non-scaling-stroke" />
-        </>
-      )}
-      {(snap.kind === "endpoint" || snap.kind === "ortho" || snap.kind === "extension") && (
-        <circle
-          className="snap-glyph"
-          cx={s.x}
-          cy={s.y}
-          r={r}
-          style={glyphStyle}
-          vectorEffect="non-scaling-stroke"
-        />
+      {tip && (
+        <g className="snap-tip-box">
+          <rect
+            className="snap-tip-bg"
+            x={tipX}
+            y={tipY}
+            width={tipW}
+            height={tipH}
+            rx={4 * vbPerPx}
+            style={{ stroke: color }}
+            vectorEffect="non-scaling-stroke"
+          />
+          <text className="snap-tip" x={tipX + padX} y={tipY + tipH / 2} fontSize={fontSize} dominantBaseline="middle">
+            {tip}
+          </text>
+        </g>
       )}
     </g>
   );
