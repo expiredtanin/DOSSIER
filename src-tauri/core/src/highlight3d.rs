@@ -272,6 +272,17 @@ pub fn selection_highlight_lines(p: &Project, a: &Args) -> Result<Vec<f32>, Stri
             lift(&mut out, n, &col.id);
         }
     }
+    // [280] Träger liegen im Auswahlkanal der Stützen.
+    for b in p.beams.as_deref().unwrap_or(&[]) {
+        if columns.contains(b.id.as_str()) {
+            let col = b.as_column(p);
+            let (z0, z1) = p.column_vertical_extent(&col);
+            let foot: Vec<[f64; 2]> = crate::model3d::column_footprint(&col).iter().map(|q| [q.x, q.y]).collect();
+            let n = out.v.len();
+            out.prism_edges(&foot, z0, z1);
+            lift(&mut out, n, &b.id);
+        }
+    }
     let trees = set(&a.trees);
     if !trees.is_empty() {
         let list = p.trees.as_deref().unwrap_or(&[]);

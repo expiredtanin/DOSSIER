@@ -1513,6 +1513,10 @@ fn renovation_layers(cx: &mut Ctx, cats: &[&LayerCategory]) -> HashMap<String, S
     for c in p.columns.iter().flatten() {
         items.push((&c.id, &c.category_code, crate::renovation::status_of(c.renovation.as_ref())));
     }
+    // [280] Träger.
+    for c in p.beams.iter().flatten() {
+        items.push((&c.id, &c.category_code, crate::renovation::status_of(c.renovation.as_ref())));
+    }
     // [279] Geländer.
     for c in p.railings.iter().flatten() {
         items.push((&c.id, &c.category_code, crate::renovation::status_of(c.renovation.as_ref())));
@@ -1540,7 +1544,8 @@ fn emit_entries(cx: &mut Ctx, main: &mut Buf, entries: &[Entry], layer_by_code: 
     // 2) Rückverweise Primitiv → Kategorie.
     let code_by_wall: HashMap<&str, &str> = project.walls.iter().map(|w| (w.id.as_str(), w.category_code.as_str())).collect();
     let code_by_drawing: HashMap<&str, &str> = project.drawings2d.iter().map(|d| (d.id.as_str(), d.category_code.as_str())).collect();
-    let code_by_column: HashMap<&str, &str> = project.columns.iter().flatten().map(|c| (c.id.as_str(), c.category_code.as_str())).collect();
+    // [280] Träger tragen im Plan ihre Kennung als `column_id`.
+    let code_by_column: HashMap<&str, &str> = project.columns.iter().flatten().map(|c| (c.id.as_str(), c.category_code.as_str())).chain(project.beams.iter().flatten().map(|c| (c.id.as_str(), c.category_code.as_str()))).collect();
     let code_by_railing: HashMap<&str, &str> = project.railings.iter().flatten().map(|c| (c.id.as_str(), c.category_code.as_str())).collect();
     let code_by_room: HashMap<&str, &str> = project.rooms.iter().flatten().map(|r| (r.id.as_str(), r.category_code.as_str())).collect();
     let layer_of_code = |m: &HashMap<&str, &str>, id: &str| -> Option<String> { layer_by_code.get(m.get(id).copied().unwrap_or("")).cloned() };

@@ -43,7 +43,7 @@ pub fn railing_slabs(p: &Project) -> Vec<RSlab> {
             if q.z1 - q.z0 > 1e-6 && q.outline.len() >= 3 {
                 let color = railing::color(p, r, q.part);
                 let fill = q.part == Part::Fill;
-                out.push(RSlab { outline: q.outline, z_bottom: q.z0, z_top: q.z1, color, ceiling_id: r.id.clone(), hatch: None, cut: None, monolith: None, source: SlabSource::Railing { index, fill } });
+                out.push(RSlab { outline: q.outline, z_bottom: q.z0, z_top: q.z1, color, ceiling_id: r.id.clone(), hatch: None, cut: None, monolith: None, slope: None, source: SlabSource::Railing { index, fill } });
             }
         }
     }

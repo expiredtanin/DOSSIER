@@ -132,6 +132,8 @@ pub mod cmd_massing;
 pub mod cmd_draw;
 #[cfg(test)]
 mod cmd_autodim_tests;
+#[cfg(test)]
+mod beam_tests;
 pub mod cmd_solid;
 pub mod polyline_vertex;
 pub mod import_drawing;

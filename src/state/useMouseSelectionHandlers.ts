@@ -146,7 +146,7 @@ export function useMouseSelectionHandlers(opts: {
       return (project.stairs ?? []).find((s) => s.id === sel.stairId)?.categoryCode;
     if (sel.roomId) return (project.rooms ?? []).find((r) => r.id === sel.roomId)?.categoryCode;
     if (sel.columnId)
-      return (project.columns ?? []).find((c) => c.id === sel.columnId)?.categoryCode;
+      return [...(project.columns ?? []), ...(project.beams ?? [])].find((c) => c.id === sel.columnId)?.categoryCode;
     if (sel.roofId) return (project.roofs ?? []).find((r) => r.id === sel.roofId)?.categoryCode;
     if (sel.drawingId)
       return project.drawings2d.find((d) => d.id === sel.drawingId)?.categoryCode;
@@ -163,7 +163,7 @@ export function useMouseSelectionHandlers(opts: {
     if (sel.ceilingId) return (project.ceilings ?? []).find((c) => c.id === sel.ceilingId)?.floorId;
     if (sel.stairId) return (project.stairs ?? []).find((s) => s.id === sel.stairId)?.floorId;
     if (sel.roomId) return (project.rooms ?? []).find((r) => r.id === sel.roomId)?.floorId;
-    if (sel.columnId) return (project.columns ?? []).find((c) => c.id === sel.columnId)?.floorId;
+    if (sel.columnId) return [...(project.columns ?? []), ...(project.beams ?? [])].find((c) => c.id === sel.columnId)?.floorId;
     if (sel.roofId) return (project.roofs ?? []).find((r) => r.id === sel.roofId)?.floorId;
     if (sel.drawingId) return project.drawings2d.find((d) => d.id === sel.drawingId)?.levelId;
     return undefined;

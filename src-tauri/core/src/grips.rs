@@ -295,6 +295,27 @@ pub fn run(lk: &Lookup, req: &Request) -> Result<GripResult, String> {
             })
             .into()
         }
+        // [280] Träger: Griff 0 = Anfang, 1 = Ende der Achse, 2 = Mitte (verschiebt den ganzen Träger).
+        "beamGrip" => {
+            let (index, (x, y)) = (r.n("index"), r.p("pt"));
+            patch("beams", r.s("id"), &|e| {
+                if truthy(field(e, "locked")) {
+                    return None;
+                }
+                let (s, t) = (xy(field(e, "start")?), xy(field(e, "end")?));
+                if index == 0.0 {
+                    Some(with(e, "start", pt(x, y)))
+                } else if index == 1.0 {
+                    Some(with(e, "end", pt(x, y)))
+                } else if index == 2.0 {
+                    let (dx, dy) = (x - (s.0 + t.0) / 2.0, y - (s.1 + t.1) / 2.0);
+                    Some(with_all(e, vec![("start", pt(s.0 + dx, s.1 + dy)), ("end", pt(t.0 + dx, t.1 + dy))]))
+                } else {
+                    None
+                }
+            })
+            .into()
+        }
         "ceilingGrip" | "roomGrip" => {
             let (coll, field) = if op == "ceilingGrip" { ("ceilings", "outline") } else { ("rooms", "boundary") };
             let (index, (x, y)) = (r.n("index"), r.p("pt"));
@@ -2029,6 +2050,24 @@ mod tests {
             Op::Replace { entity, .. } => entity,
             _ => panic!("replace erwartet"),
         }
+    }
+
+    /// [280] Träger: Griff 0 Anfang, 1 Ende, 2 Mitte verschiebt; gesperrt/unbekannt/Index daneben ändern nichts.
+    #[test]
+    fn traeger_griffe() {
+        let r = root(json!({"beams": [{"id": "b", "start": {"x": 0, "y": 0}, "end": {"x": 4, "y": 0}, "width": 0.2, "height": 0.4}]}));
+        let ent = |req: Value| run(&Lookup::plain(&r), &rq(req)).unwrap();
+        let p = |v: &Value| (v["x"].as_f64().unwrap(), v["y"].as_f64().unwrap());
+        let e = ent(json!({"op": "beamGrip", "id": "b", "index": 0, "pt": [1, 1]}));
+        assert_eq!((p(&entity(&e)["start"]), p(&entity(&e)["end"])), ((1.0, 1.0), (4.0, 0.0)));
+        let e = ent(json!({"op": "beamGrip", "id": "b", "index": 1, "pt": [5, 2]}));
+        assert_eq!(p(&entity(&e)["end"]), (5.0, 2.0));
+        let e = ent(json!({"op": "beamGrip", "id": "b", "index": 2, "pt": [3, 1]}));
+        assert_eq!((p(&entity(&e)["start"]), p(&entity(&e)["end"])), ((1.0, 1.0), (5.0, 1.0)));
+        assert!(ent(json!({"op": "beamGrip", "id": "b", "index": 3, "pt": [3, 1]})).ops.is_empty());
+        assert!(ent(json!({"op": "beamGrip", "id": "x", "index": 0, "pt": [3, 1]})).ops.is_empty());
+        let locked = root(json!({"beams": [{"id": "b", "locked": true, "start": {"x": 0, "y": 0}, "end": {"x": 4, "y": 0}}]}));
+        assert!(run(&Lookup::plain(&locked), &rq(json!({"op": "beamGrip", "id": "b", "index": 0, "pt": [1, 1]}))).unwrap().ops.is_empty());
     }
 
     #[test]

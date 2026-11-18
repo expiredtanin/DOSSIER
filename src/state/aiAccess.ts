@@ -115,6 +115,7 @@ const CHANNELS: [keyof Project, SelectionKind][] = [
   ["rooms", "rooms"],
   ["extrudedSolids", "solids"],
   ["columns", "columns"],
+  ["beams", "columns"], // [280] Träger liegen im Auswahlkanal der Stützen
   ["roofs", "roofs"],
   ["context", "contextObjects"],
 ];

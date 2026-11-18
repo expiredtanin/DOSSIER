@@ -477,7 +477,9 @@ pub(crate) fn collect_scene(src: &Project, opt: &MeshOptions) -> Result<SceneDat
         groups.push(g);
     }
     p.roofs = roofs;
+    // [280] `emit_columns` liefert auch die Träger: je Gruppe nur das eine Element in `p` lassen.
     let columns = p.columns.take();
+    let beams = p.beams.take();
     for col in columns.as_deref().unwrap_or(&[]) {
         let mut g = Group::new(format!("Stuetze_{}", sanitize_name(&col.id)), "column", &col.id, level_of(Some(&col.floor_id)));
         p.columns = Some(vec![col.clone()]);
@@ -485,7 +487,16 @@ pub(crate) fn collect_scene(src: &Project, opt: &MeshOptions) -> Result<SceneDat
         add_meshes(&mut g, &mut mats, &model3d::emit_columns(&p), &name);
         groups.push(g);
     }
+    p.columns = None;
+    for b in beams.as_deref().unwrap_or(&[]) {
+        let mut g = Group::new(format!("Traeger_{}", sanitize_name(&b.id)), "beam", &b.id, level_of(Some(&b.floor_id)));
+        p.beams = Some(vec![b.clone()]);
+        let name = component_name(&p, b.component_id.as_deref(), "Traeger");
+        add_meshes(&mut g, &mut mats, &model3d::emit_columns(&p), &name);
+        groups.push(g);
+    }
     p.columns = columns;
+    p.beams = beams;
     // [149] Bäume: je Baum eine Gruppe (Stamm + Krone).
     let trees = p.trees.take();
     for t in trees.as_deref().unwrap_or(&[]) {

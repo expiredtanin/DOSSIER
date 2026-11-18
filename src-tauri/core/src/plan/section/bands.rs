@@ -128,6 +128,8 @@ pub enum SlabOwner<'a> {
     Column(&'a Column),
     /// [279] Geländer; `true` = Tafel (Glas, Lochblech, Brüstung), sonst Gestänge.
     Railing(&'a Railing, bool),
+    /// [280] Träger.
+    Beam(&'a Beam),
 }
 
 /// Je emittierter Platte (Deckenschicht, Treppentritt, Podest) ihre Herkunft (`RSlab::source`).
@@ -141,6 +143,7 @@ pub fn slab_owners<'a>(p: &'a Project, slabs: &[RSlab]) -> Vec<SlabOwner<'a>> {
             SlabSource::Stair { index } => stairs.get(index).map_or(SlabOwner::None, SlabOwner::Stair),
             SlabSource::Column { index } => p.columns.as_deref().and_then(|c| c.get(index)).map_or(SlabOwner::None, SlabOwner::Column),
             SlabSource::Railing { index, fill } => p.railings.as_deref().and_then(|c| c.get(index)).map_or(SlabOwner::None, |r| SlabOwner::Railing(r, fill)),
+            SlabSource::Beam { index } => p.beams.as_deref().and_then(|c| c.get(index)).map_or(SlabOwner::None, SlabOwner::Beam),
             SlabSource::None => SlabOwner::None,
         })
         .collect()
@@ -688,14 +691,20 @@ pub(super) fn attach_cut_styles(cuts: Vec<Cut>, p: &Project, plane: &Plane, wall
                         cp.category = Some(st.category_code.clone());
                     }
                     // [141] Stütze: Stil und Rang ihres Bauteils (wie im Grundriss); ohne Bauteil dominiert sie.
-                    SlabOwner::Column(c) => {
-                        cp.source_id = Some(c.id.clone());
-                        cp.category = Some(c.category_code.clone());
-                        let comp = c.component_id.as_deref().filter(|s| !s.is_empty()).and_then(|id| p.component(id));
+                    // [280] Träger genauso (eigene Felder, gleiche Auflösung).
+                    o @ (SlabOwner::Column(_) | SlabOwner::Beam(_)) => {
+                        let (id, code, component_id, hatch_id, hatch_source, foreground, foreground_source) = match o {
+                            SlabOwner::Column(c) => (&c.id, &c.category_code, &c.component_id, &c.hatch_id, c.hatch_source, &c.foreground, c.foreground_source),
+                            SlabOwner::Beam(c) => (&c.id, &c.category_code, &c.component_id, &c.hatch_id, c.hatch_source, &c.foreground, c.foreground_source),
+                            _ => unreachable!(),
+                        };
+                        cp.source_id = Some(id.clone());
+                        cp.category = Some(code.clone());
+                        let comp = component_id.as_deref().filter(|s| !s.is_empty()).and_then(|id| p.component(id));
                         if let Some(k) = comp {
-                            let category = p.layer_category(&c.category_code);
-                            let hid = resolve_hatch_id(c.hatch_id.as_deref(), c.hatch_source, category, Some(&k.hatch_id)).unwrap_or(&k.hatch_id);
-                            if let Some(h) = resolve_hatch(p, hid, None, resolve_foreground(k, c.foreground.as_deref(), category, c.foreground_source), None) {
+                            let category = p.layer_category(code);
+                            let hid = resolve_hatch_id(hatch_id.as_deref(), hatch_source, category, Some(&k.hatch_id)).unwrap_or(&k.hatch_id);
+                            if let Some(h) = resolve_hatch(p, hid, None, resolve_foreground(k, foreground.as_deref(), category, foreground_source), None) {
                                 cp.fill = Some(poche_fill(h.pattern).to_string());
                                 cp.hatch = Some(h);
                             }

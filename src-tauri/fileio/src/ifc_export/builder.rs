@@ -514,10 +514,10 @@ impl Builder {
     }
 
     /// IfcBuildingElement-Subtyp mit dem üblichen 9-Attribut-Flatten. Das letzte Attribut ist in IFC4 die
-    /// PredefinedType, in IFC2x3 je Klasse ShapeType/PredefinedType/CompositionType; IfcWall und IfcColumn
-    /// haben es dort nicht.
+    /// PredefinedType, in IFC2x3 je Klasse ShapeType/PredefinedType/CompositionType; IfcWall, IfcColumn
+    /// und IfcBeam haben es dort nicht.
     pub(super) fn emit_building_element(&mut self, ty: &str, guid: String, name: &str, placement: usize, shape: usize, predefined: Option<String>) -> usize {
-        let last = if self.v2() && matches!(ty, "IFCWALL" | "IFCWALLSTANDARDCASE" | "IFCCOLUMN" | "IFCRAMPFLIGHT") {
+        let last = if self.v2() && matches!(ty, "IFCWALL" | "IFCWALLSTANDARDCASE" | "IFCCOLUMN" | "IFCRAMPFLIGHT" | "IFCBEAM") {
             String::new()
         } else {
             format!(",{}", predefined.as_deref().unwrap_or("$"))

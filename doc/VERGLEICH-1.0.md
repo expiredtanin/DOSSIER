@@ -61,7 +61,7 @@ Grösse: S ≤ 1 Tag · M ≤ 1 Woche · L ≤ 1 Monat. IDs aus `TODO.md`; **neu
 | 6 | **Wohnungsspiegel / Nutzungseinheiten**: Räume lassen sich keiner Wohnung zuordnen; kein Spiegel (Zimmerzahl, NWF je Wohnung) — im Mehrfamilienhaus-WBW üblich. **erledigt 17.11. ([278], Rest: Grundriss-Darstellung der Einheiten)** | `unit_schedule.rs`, `UnitsSection` | M |
 | 7 | **Geländer als eigenes Bauteil** (Balkon/Loggia/Absturzsicherung in Plan, Schnitt, Ansicht, 3D). **erledigt 17.11. ([279], Rest: Loggia-Brüstung an Wänden, Fangpunkte, Import IfcRailing)** | `railing.rs`, `plan/railings.rs`, `cmds/railing.ts` | M |
 | 8 | **Geneigte Decke / Rampe** (Tiefgarage, Terrassen mit Gefälle): `Ceiling` hat nur Ober-/Unterkante, keine Neigung; Behelf Pultdach/Körper. **neu** | `Ceiling`, `ceiling_item` (`cmd_create.rs`), `plan/section` | M |
-| 9 | **Träger/Unterzug/Fassadenträger**: kein Element (Behelf Körper/Wand), Deckenspiegel mit Unterzügen fehlt. **neu**, [100] nennt die Lücke | `columns` als Muster | M |
+| 9 | **Träger/Unterzug/Fassadenträger**: kein Element (Behelf Körper/Wand), Deckenspiegel mit Unterzügen fehlt. **teilweise erledigt 17.11. ([280]: Träger/Unterzug als Bauteil in Plan, Schnitt, Ansicht, 3D, IFC; Rest: Gruppen, Deckenspiegel, Profilkatalog)**, [100] nennt die Lücke | `columns` als Muster | M |
 | 10 | **3D-Entourage** (Möbel, Menschen, Autos 3D) für Bilder: Bibliothek nur 2D; Behelf glTF/OBJ-Import | [253] („3D nach 1.0“), `furniture_lib.rs` | L |
 | 11 | **GV: Studienkörper neben Wand-Haus, Bodenplatte unter unterstem Geschoss** | [266] Punkt 1 Rest; `building_volume.rs` | S–M |
 | 12 | **IFC: Dächer als Netz, keine 2D/Layouts/Möbel**; IFC-Import zu Bauteilen unvollständig (Dächer, Träger) | [B4], [B5], [259] | M |

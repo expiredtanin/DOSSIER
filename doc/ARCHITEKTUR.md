@@ -253,7 +253,7 @@ Beispiel: Die Plan-Ansicht zeigt das Erdgeschoss im Massstab 1:100.
    | Dächer | `roofs()` in `domains.rs` | `src-tauri/core/src/roof.rs`, `roof_skeleton.rs` |
    | Wände mit Öffnungen | `plan_walls()` in `plan/walls.rs` | Wandknoten `joins.rs`, Poché `plan/wall_poche.rs`, Symbole `plan/openings.rs` und `opening_geom.rs`, Wand an Stütze `plan/wall_columns.rs` |
    | Treppen | `plan_stairs()` in `plan/stairs.rs` | Symbol `plan/stair_symbol.rs`, Geometrie `stair.rs` und `kernel2d` |
-   | Stützen, Bäume | `columns()`, `plan_trees()` | `plan/trees.rs`, `tree.rs` |
+   | Stützen, Träger ([280]), Bäume | `columns()` (Träger = `Beam::as_column`, über der Schnitthöhe gestrichelt mit Achse `beam-axis`), `plan_trees()` | `plan/trees.rs`, `tree.rs` |
    | Geländer [279] | `plan_railings()` | `plan/railings.rs`, `railing.rs` |
    | Körper (Extrusionen) | `solids()` in `domains.rs` | Kern-Netz (`solid_mesh.rs`) über `plan/mesh_plan.rs::plan_bodies()`: Ebenenschnitt (Poché, Bauteil-Schraffur aus `componentId`), Aufsicht, Überkopf ([G1]) |
    | 2D-Zeichnungen | `plan_drawings()` in `plan/drawings.rs` | Linien, Bögen, Bemassung, Texte, Blöcke |
@@ -810,6 +810,7 @@ schreibt `src-tauri/src/atomic_save.rs` die Datei absturzsicher.
 | **Plan-Puffer** | Binäre Form einer Primitiv-Liste mit Gruppen, Tabellen und Inhalts-Hashes. | `plan/buf.rs`, `src/plan/planBuf.ts` |
 | **Pick-Id** | Kennung an einem Primitiv (`wallId`, `roomId` …), über die ein Klick zum Element findet. | `plan/prim.rs`, `plan/pick.rs` |
 | **Poché** | Gefüllte Schnittfläche eines geschnittenen Bauteils (Wand, Stütze), je Schicht oder als Ganzes. | `plan/wall_poche.rs` |
+| **Träger / Unterzug** ([280]) | Linienbauteil `Project.beams` (Achse, Breite × Höhe, Profilname nur Text, Oberkante bündig an der Deckenunterkante + `topOffset`); Ableitungen laufen über `Beam::as_column` durch den Stützen-Code (Grundriss, Schnitt, Ansicht, 3D, Schatten); Umbau, Variante, Auswahl (Kanal `columns`/`columnIds`), Klasse und Sperre wie bei der Stütze; IFC als `IfcBeam` (Satz `BEAM`). | `model/helpers.rs`, `model3d/columns.rs`, `beam_tests.rs` |
 | **solid_cut** | Regel, wann Schnittflächen als volle schwarze Fläche ohne Schichten und Schraffur gezeichnet werden: bei Detail „grob" immer, sonst ab Massstabszahl 75 (also 1:100 und gröber), ausser bei Detail „fein" oder mit „Schnittflächen schraffiert" (Feld der Ebene bzw. Ansichtsvorlage). | `solid_cut()` in `plan/style.rs` |
 | **Tusche** | Darstellung schwarz-weiss wie ein Tuscheplan; Standard der App. Farbe nur auf Wunsch (CLI `--color`, Ansichtsvorlage mit `mono: false`). | TODO `[140]`, `plan/extras.rs` |
 | **Wandknoten**, **Joins** | Verschneidung von Wänden am Stoss: Gehrung, T-Stoss, Kreuzung, je Schicht nach Priorität. Ergebnis sind Schnittlinien je Wandende. | `compute_joins()` in `joins.rs`, `resolve_join_priority()` |

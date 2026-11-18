@@ -350,6 +350,11 @@ pub fn hidden_elements(p: &Project, v: RuleView) -> HashSet<String> {
             out.insert(c.id.clone());
         }
     }
+    for b in p.beams.iter().flatten() {
+        if test("beam", &b.category_code, Some(&super::domains::column_label(&b.as_column(p)))) {
+            out.insert(b.id.clone());
+        }
+    }
     for r in p.rooms.iter().flatten() {
         if test("room", &r.category_code, Some(&r.name)) {
             out.insert(r.id.clone());

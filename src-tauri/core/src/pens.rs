@@ -233,6 +233,7 @@ pub fn rebake_ops(root: &Map<String, Value>) -> Vec<Value> {
     patch_items(root, "drawings2d", &|d| bake_color_weight(&a, d, "weightMm"), &mut ops);
     patch_items(root, "ceilings", &|c| bake_color_weight(&a, c, "strokeWeight"), &mut ops);
     patch_items(root, "columns", &|c| bake_color_weight(&a, c, "strokeWeight"), &mut ops);
+    patch_items(root, "beams", &|c| bake_color_weight(&a, c, "strokeWeight"), &mut ops);
     for coll in ["roofs", "openings", "stairs", "rooms"] {
         patch_items(root, coll, &|x| bake_color(&a, x), &mut ops);
     }

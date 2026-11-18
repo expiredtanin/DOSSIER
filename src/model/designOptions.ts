@@ -8,7 +8,7 @@ import { patchItem, setField } from "../core/opsBuild";
 import type { DesignOption, DesignOptionCombination, DesignOptionRef, DesignOptionSet, DrawingLevel, Project } from "./types";
 
 /** Listen, deren Elemente einer Variante angehören können (gleich wie `design_options::COLLECTIONS`). */
-export const DESIGN_OPTION_COLLECTIONS = ["walls", "openings", "ceilings", "roofs", "stairs", "columns", "extrudedSolids", "rooms", "drawings2d", "railings"] as const;
+export const DESIGN_OPTION_COLLECTIONS = ["walls", "openings", "ceilings", "roofs", "stairs", "columns", "beams", "extrudedSolids", "rooms", "drawings2d", "railings"] as const;
 export type DesignOptionCollection = (typeof DESIGN_OPTION_COLLECTIONS)[number];
 
 /** Kombination: Satz-Id → Varianten-Id. */
@@ -524,7 +524,10 @@ export function designOptionLocked(project: Project, edit: DesignOptionTarget | 
   if (OUTSIDE_KINDS.has(kind)) return true;
   const coll = KIND_COLLECTION[kind];
   if (!coll) return false;
-  const e = ((project[coll] ?? []) as { id: string; designOption?: DesignOptionRef; hostWallId?: string }[]).find((x) => x.id === id);
+  type El = { id: string; designOption?: DesignOptionRef; hostWallId?: string };
+  // [280] Träger liegen im Auswahlkanal der Stützen.
+  const pool = ((project[coll] ?? []) as El[]).concat(coll === "columns" ? ((project.beams ?? []) as El[]) : []);
+  const e = pool.find((x) => x.id === id);
   if (!e) return false;
   const r = e.designOption ?? (coll === "openings" ? project.walls.find((w) => w.id === e.hostWallId)?.designOption : undefined);
   return !(r && r.set === edit.set && r.option === edit.option);

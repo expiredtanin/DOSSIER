@@ -18,7 +18,8 @@ export type ScheduleKind =
   | "Treppe"
   | "Extrusion"
   | "Dach"
-  | "Stütze";
+  | "Stütze"
+  | "Träger";
 
 /** Eine ausgewertete Zeile der Bauteilliste (je Bauteil-Vorkommen ein Datensatz). */
 export interface ScheduleRow {

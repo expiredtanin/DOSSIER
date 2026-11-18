@@ -292,6 +292,14 @@ fn mv_wall(w: &Value, xf: &Xf) -> Value {
 }
 
 /// Stütze: Einfügepunkt und Profil-Drehung (über einen mit abgebildeten Richtungspunkt).
+/// [280] Träger: Anfangs- und Endpunkt der Achse werden abgebildet (Querschnitt bleibt).
+fn mv_beam(b: &Value, xf: &Xf) -> Value {
+    let (sx, sy) = xy(field(b, "start").unwrap_or(&Value::Null));
+    let (ex, ey) = xy(field(b, "end").unwrap_or(&Value::Null));
+    let (s, e) = (xf.apply(sx, sy), xf.apply(ex, ey));
+    with_all(b, vec![("start", pt(s.0, s.1)), ("end", pt(e.0, e.1))])
+}
+
 fn mv_column(c: &Value, xf: &Xf) -> Value {
     let (bx, by) = xy(field(c, "position").unwrap_or(&Value::Null));
     let rot = num_or(field(c, "rotation"), 0.0);
@@ -783,6 +791,8 @@ enum Kind {
     Drawing,
     Solid,
     Column,
+    /// [280] Träger (Auswahlkanal der Stützen).
+    Beam,
     Ceiling,
     Roof,
     Stair,
@@ -816,6 +826,9 @@ fn gather<'a>(root: &'a Map<String, Value>, sel: &Sel, op: &str, ignore_lock: bo
     if let Some(id) = nonempty(&sel.column_id) {
         if let Some(c) = list(root, "columns").iter().find(|c| id_of(c) == Some(id)).filter(|c| free(c)) {
             out.push((Kind::Column, c));
+        }
+        if let Some(b) = list(root, "beams").iter().find(|c| id_of(c) == Some(id)).filter(|c| free(c)) {
+            out.push((Kind::Beam, b));
         }
     }
     let mut each = |key: &str, set: Ids, kind: Kind| out.extend(list(root, key).iter().filter(|e| set.has(e) && free(e)).map(|e| (kind, e)));
@@ -990,6 +1003,7 @@ pub fn transform_result(root: &Map<String, Value>, p: &Project, req: &TransformR
         }
         if let Some(id) = nonempty(&sel.column_id) {
             patch("columns", &|c| id_of(c) == Some(id) && !locked(c), &|c| mv_column(c, &xf));
+            patch("beams", &|c| id_of(c) == Some(id) && !locked(c), &|c| mv_beam(c, &xf));
         }
         let (ceil, roofs, stairs, rooms) = (Ids::opt(&sel.ceiling_ids), Ids::opt(&sel.roof_ids), Ids::opt(&sel.stair_ids), Ids::opt(&sel.room_ids));
         if !ceil.is_empty() {
@@ -1042,7 +1056,7 @@ pub fn transform_result(root: &Map<String, Value>, p: &Project, req: &TransformR
 
     // Kopien (Kopie/Reihe/Verteilen bzw. gespiegelte Kopie).
     let mut ids = IdGen::new(&req.stamp);
-    let mut new: [Vec<Value>; 12] = Default::default();
+    let mut new: [Vec<Value>; 13] = Default::default();
     let mut new_openings = Vec::new();
     // [213] Namen der vorhandenen Kameras (Kopien heissen „… Kopie“, nummeriert bei Kollision).
     let mut cam_names: std::collections::HashSet<String> = list(root, "cameras").iter().filter_map(|c| field(c, "name").and_then(Value::as_str).map(String::from)).collect();
@@ -1055,6 +1069,7 @@ pub fn transform_result(root: &Map<String, Value>, p: &Project, req: &TransformR
                 Kind::Drawing => "dr2d",
                 Kind::Solid => "extrude",
                 Kind::Column => "column",
+                Kind::Beam => "beam",
                 Kind::Ceiling => "C",
                 Kind::Roof => "RF",
                 Kind::Stair => "ST",
@@ -1083,6 +1098,7 @@ pub fn transform_result(root: &Map<String, Value>, p: &Project, req: &TransformR
                 Kind::Drawing => (1, fix_refs(with_geom(e, geom_at(field(e, "geom").unwrap_or(&Value::Null), &xf, t)), &to_copy)),
                 Kind::Solid => (2, mv_solid(e, &xf, k_at(t))),
                 Kind::Column => (3, mv_column(e, &xf)),
+                Kind::Beam => (12, mv_beam(e, &xf)),
                 Kind::Ceiling => (4, mv_ceiling(e, &xf)),
                 Kind::Roof => (5, mv_roof(e, &xf)),
                 Kind::Stair => (6, mv_stair(e, &xf, k_at(t))),
@@ -1117,7 +1133,7 @@ pub fn transform_result(root: &Map<String, Value>, p: &Project, req: &TransformR
             }
         }
     }
-    let keys = ["walls", "drawings2d", "extrudedSolids", "columns", "ceilings", "roofs", "stairs", "rooms", "trees", "context", "cameras", "railings"];
+    let keys = ["walls", "drawings2d", "extrudedSolids", "columns", "ceilings", "roofs", "stairs", "rooms", "trees", "context", "cameras", "railings", "beams"];
     for (key, items) in keys.iter().zip(new) {
         ops.extend(add(key, items));
     }
@@ -1420,6 +1436,12 @@ fn item_preview(p: &Project, kind: Kind, e: &Value, xf: &Xf, out: &mut Pending) 
             if let Ok(c) = serde_json::from_value::<crate::model::Column>(e.clone()) {
                 let fp: Vec<(f64, f64)> = crate::model3d::column_footprint(&c).iter().map(|q| (q.x, q.y)).collect();
                 s.poly(&mapped(&fp, xf));
+            }
+        }
+        Kind::Beam => {
+            if let Ok(b) = serde_json::from_value::<crate::model::Beam>(mv_beam(e, xf)) {
+                let fp: Vec<(f64, f64)> = b.footprint().iter().map(|q| (q.x, q.y)).collect();
+                s.poly(&fp);
             }
         }
         Kind::Ceiling | Kind::Roof => s.poly(&mapped(&pts_of(field(e, "outline")), xf)),

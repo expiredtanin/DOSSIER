@@ -217,6 +217,14 @@ export const CommandIcon = memo(function CommandIcon({ name }: { name: string })
           <line x1="12" y1="9" x2="12" y2="13" />
         </svg>
       );
+    case "traeger":
+      // [280] Träger: Seitenansicht eines Balkens (Rechteck, Achsstrich).
+      return (
+        <svg {...common}>
+          <rect x="1.5" y="5.5" width="13" height="5" />
+          <line x1="1.5" y1="8" x2="14.5" y2="8" strokeDasharray="3 1.5 0.6 1.5" />
+        </svg>
+      );
     case "column":
       // Stütze: Quadrat-Querschnitt mit vertikalen Kanten (Pfeiler).
       return (

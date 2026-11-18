@@ -101,6 +101,12 @@ pub fn dangling_refs(p: &Project) -> Vec<String> {
         miss(&mut out, "Geländer", &r.id, "Geschoss", &r.floor_id, &levels);
         miss(&mut out, "Geländer", &r.id, "Bauteil", r.component_id.as_deref().unwrap_or(""), &components);
     }
+    // [280] Träger.
+    for c in p.beams.as_deref().unwrap_or(&[]) {
+        miss(&mut out, "Träger", &c.id, "Geschoss", &c.floor_id, &levels);
+        miss(&mut out, "Träger", &c.id, "Bauteil", c.component_id.as_deref().unwrap_or(""), &components);
+        miss(&mut out, "Träger", &c.id, "Schraffur", c.hatch_id.as_deref().unwrap_or(""), &hatches);
+    }
     for r in p.rooms.as_deref().unwrap_or(&[]) {
         miss(&mut out, "Raum", &r.id, "Geschoss", &r.floor_id, &levels);
     }
@@ -177,7 +183,7 @@ pub fn dangling_refs(p: &Project) -> Vec<String> {
         ("Decke", ids(p.ceilings.as_deref().unwrap_or(&[]), |x| x.id.as_str())),
         ("Raum", ids(p.rooms.as_deref().unwrap_or(&[]), |x| x.id.as_str())),
         ("Treppe", ids(p.stairs.as_deref().unwrap_or(&[]), |x| x.id.as_str())),
-        ("Stütze", ids(p.columns.as_deref().unwrap_or(&[]), |x| x.id.as_str())),
+        ("Stütze", ids(p.columns.as_deref().unwrap_or(&[]), |x| x.id.as_str()).into_iter().chain(ids(p.beams.as_deref().unwrap_or(&[]), |x| x.id.as_str())).collect()),
         ("Dach", ids(p.roofs.as_deref().unwrap_or(&[]), |x| x.id.as_str())),
         ("Öffnung", ids(p.openings.as_deref().unwrap_or(&[]), |x| x.id.as_str())),
         ("Baum", ids(p.trees.as_deref().unwrap_or(&[]), |x| x.id.as_str())),

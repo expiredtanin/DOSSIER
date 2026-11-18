@@ -45,7 +45,7 @@ export const AI_TOOLS: AiToolDef[] = [
     name: "run_command",
     description:
       "Führt einen Kern-Befehl mit JSON-Parametern aus (dieselben wie die Befehle der Oberfläche): z. B. " +
-      '{cmd:"wall", pts:[[0,0],[5,0]]}, {cmd:"room"|"ceiling"|"roof", pts:[…]}, {cmd:"column", at:[x,y]}, ' +
+      '{cmd:"wall", pts:[[0,0],[5,0]]}, {cmd:"room"|"ceiling"|"roof", pts:[…]}, {cmd:"column", at:[x,y]}, {cmd:"beam", pts:[[x0,y0],[x1,y1]], width?, height?, profileName?}, ' +
       '{cmd:"opening", wall:<id>, start, end (Wandachse), pos, width, height, sill, kind:"door"|"window"}, {cmd:"rect"|"polyline"|"circle", …}, {cmd:"transform", ids, …}, ' +
       '{cmd:"align"|"distribute", ids, mode|axis}, {cmd:"split", ids}. `level` = Geschoss-id (Standard: aktives bzw. erstes).',
     inputSchema: obj({ cmd: { type: "string" }, params: { type: "object" }, level: { type: "string" } }, ["cmd"]),

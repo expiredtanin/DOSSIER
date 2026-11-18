@@ -48,6 +48,7 @@ export type GripRequest =
   | { op: "sectionBendInsert"; id: string; seg: number; pt: P }
   // [213] Kamera: 0 = Standpunkt, 1 = Ziel, 2 = Bildwinkel bzw. Sichtbreite (Kern `camera::grip_edit`); `cameraBy` verschiebt Standpunkt und Ziel.
   | { op: "cameraGrip"; id: string; index: number; pt: P }
+  | { op: "beamGrip"; id: string; index: number; pt: P }
   | { op: "cameraBy"; id: string; delta: P }
   | { op: "sectionBendDelete"; id: string; index: number }
   | { op: "sectionLineTidy"; id: string; tol?: number }
@@ -109,6 +110,11 @@ export function cameraGripPoints(c: Camera, scaleDenominator: number = DEFAULT_S
   const out: Vec2[] = [];
   for (let i = 0; i + 1 < f.length; i += 2) out.push({ x: f[i], y: f[i + 1] });
   return out;
+}
+
+/** [280] Griffe eines Trägers im Grundriss: Anfang, Ende, Mitte (verschiebt den ganzen Träger). */
+export function beamGripPoints(b: { start: Vec2; end: Vec2 }): Vec2[] {
+  return [b.start, b.end, { x: (b.start.x + b.end.x) / 2, y: (b.start.y + b.end.y) / 2 }];
 }
 
 type Owner = { drawingId?: string; wallId?: string };

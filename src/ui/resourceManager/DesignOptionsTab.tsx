@@ -40,7 +40,7 @@ export interface DesignOptionHandlers {
 /** Zahl der Elemente je Variante (Satz-Id → Varianten-Id → Anzahl). */
 function counts(project: Project): Map<string, number> {
   const out = new Map<string, number>();
-  const lists = [project.walls, project.openings, project.ceilings, project.roofs, project.stairs, project.columns, project.extrudedSolids, project.rooms, project.drawings2d];
+  const lists = [project.walls, project.openings, project.ceilings, project.roofs, project.stairs, project.columns, project.beams, project.extrudedSolids, project.rooms, project.drawings2d];
   for (const list of lists) {
     for (const e of (list ?? []) as { designOption?: { set: string; option: string } }[]) {
       if (!e.designOption) continue;

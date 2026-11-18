@@ -91,7 +91,11 @@
 //                 component_name, PSETS   ([141] Stütze mit Höhenabschnitten, je Abschnitt ein eigenes beschnittenes
 //                 Profil; EIN IfcColumn mit n Extrusionen in einer SweptSolid-Darstellung, Placement auf dem tiefsten
 //                 Abschnitt; Material und Materialzuordnung wie COLUMN; die Mengen stehen fertig in PSETS)
-//   END_COLUMNS = 11  (Materialzuordnung der Stützen)
+//   BEAM        = 27 ([280] Träger), Felder wie COLUMN: structure, id, label, PTS (Grundriss-Rechteck), z_rel, depth (Querschnitts-
+//                 höhe), component_id (−1 = keine), component_name, PSETS; IfcBeam (BEAM, in IFC2x3 ohne PredefinedType),
+//                 Profil-Extrusion senkrecht über dem Rechteck; Schlüssel `beam/<id>`; Material wie bei den Stützen
+//                 (steht VOR END_COLUMNS).
+//   END_COLUMNS = 11  (Materialzuordnung der Stützen und Träger)
 //   LAYERS      = 25, n_refs, (key, layer_name) x n_refs   ([259]) IfcPresentationLayerAssignment je Ebene (Name =
 //                 "Code_Bezeichnung" wie im DXF); alle Darstellungen des Bauteils `key` (wie bei CLASSIFICATION, samt
 //                 aggregierter Teile) liegen auf genau einer Ebene. (IFC4 erlaubt bei IfcPresentationLayerWithStyle nur
@@ -181,6 +185,7 @@ pub const REC_CEILING_ARC: f64 = 21.0;
 pub const REC_SPACE_ARC: f64 = 22.0;
 /// [281] Geneigte Decke als Netz (Flag Rampe ⇒ `IfcRamp` + `IfcRampFlight`).
 pub const REC_CEILING_MESH: f64 = 27.0;
+pub const REC_BEAM: f64 = 28.0;
 
 mod format;
 mod reader;
@@ -217,6 +222,7 @@ fn rec_name(code: f64) -> &'static str {
         c if c == REC_LAYERS => "LAYERS",
         c if c == REC_RAILING => "RAILING",
         c if c == REC_COLUMN_PIECES => "COLUMN_PIECES",
+        c if c == REC_BEAM => "BEAM",
         _ => "?",
     }
 }
@@ -1167,11 +1173,13 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
                 let (placement, shape) = w.emit_triangulated_product(&mesh, w.placement_of(structure));
                 w.finish_typed("IFCROOF", format!("roof/{id}"), &name, &ty, &psets, structure, placement, shape, Some(enum_(&predefined)), false);
             }
-            c if c == REC_COLUMN || c == REC_COLUMN_PIECES => {
+            c if c == REC_COLUMN || c == REC_COLUMN_PIECES || c == REC_BEAM => {
                 let structure = r.structure(n_storeys)?;
                 let id = r.string()?;
                 let label = r.string()?;
-                let pieces: Vec<(Vec<(f64, f64)>, f64, f64)> = if c == REC_COLUMN {
+                // [280] Träger: gleiche Daten, andere Klasse und anderer Schlüssel.
+                let (class, kind, predefined) = if c == REC_BEAM { ("IFCBEAM", "beam", "BEAM") } else { ("IFCCOLUMN", "column", "COLUMN") };
+                let pieces: Vec<(Vec<(f64, f64)>, f64, f64)> = if c == REC_COLUMN || c == REC_BEAM {
                     let pts = r.pts()?;
                     vec![(pts, r.f()?, r.f()?)]
                 } else {
@@ -1194,12 +1202,12 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
                 } else {
                     w.emit_pieces_product(&pieces, w.placement_of(structure))
                 };
-                let g = w.gid(&format!("column/{id}"));
-                let entity = w.emit_building_element("IFCCOLUMN", g, &label, placement, shape, Some(enum_("COLUMN")));
+                let g = w.gid(&format!("{kind}/{id}"));
+                let entity = w.emit_building_element(class, g, &label, placement, shape, Some(enum_(predefined)));
                 w.add_to_containment(structure, entity);
-                w.elements.insert(format!("column/{id}"), entity);
+                w.elements.insert(format!("{kind}/{id}"), entity);
                 for p in &psets {
-                    w.add_pset(p, entity, &format!("column/{id}"));
+                    w.add_pset(p, entity, &format!("{kind}/{id}"));
                 }
                 if let Some(cid) = component {
                     if let Some((_, _, v)) = w.column_materials.iter_mut().find(|(c, _, _)| *c == cid) {

@@ -362,6 +362,7 @@ pub(crate) fn model_view_faces(p: &Project, vis: &Visibility, view: &dyn Fn([f64
                     Some(SlabOwner::Stair(s)) => (Some(s.id.clone()), true, false, false),
                     Some(SlabOwner::Column(c)) => (Some(c.id.clone()), false, true, false),
                     Some(SlabOwner::Railing(r, _)) => (Some(r.id.clone()), false, false, true),
+                    Some(SlabOwner::Beam(c)) => (Some(c.id.clone()), false, true, false),
                     _ => (None, false, false, false),
                 },
                 Kind::Roof => (roofs.get(i).map(|r| r.id.clone()), false, false, false),

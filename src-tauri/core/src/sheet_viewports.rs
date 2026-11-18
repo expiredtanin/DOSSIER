@@ -298,6 +298,7 @@ fn candidate_codes(p: &Project) -> HashSet<String> {
     // [115] Freie Körper und Stützen ebenso.
     codes.extend(p.extruded_solids.iter().flatten().map(|e| e.category_code.clone()));
     codes.extend(p.columns.iter().flatten().map(|e| e.category_code.clone()));
+    codes.extend(p.beams.iter().flatten().map(|e| e.category_code.clone()));
     codes
 }
 

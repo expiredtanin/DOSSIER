@@ -52,7 +52,7 @@ import { growRect, meshGripIndices } from "../core";
 import { patchItem, verticalExtents } from "../core";
 import { treeGripPatch, treeGripPoints } from "./treeGrips";
 import { railingGripPatch, railingGripPoints } from "./railingGrips";
-import { cameraGripPoints } from "../core";
+import { beamGripPoints, cameraGripPoints } from "../core";
 import type { Selection } from "./selection";
 
 export interface GripEditFieldsState {
@@ -219,6 +219,9 @@ export function useGripEditing(opts: {
   const selectedRailing = selectedRailingId ? (project.railings ?? []).find((x) => x.id === selectedRailingId && x.floorId === levelId) : undefined;
   // [213] Kamera: Griffe an Standpunkt, Ziel und Sichtkegel-Rand (Bildwinkel); nur auf dem Geschoss der Kamera.
   const selectedCameraId = single(selection, "cameras");
+  // [280] Träger liegen im Auswahlkanal der Stützen: ein gewählter einzelner Träger zeigt Anfang-, Ende- und Mitte-Griff.
+  const selectedColumnId = single(selection, "columns");
+  const selectedBeam = selectedColumnId ? (project.beams ?? []).find((x) => x.id === selectedColumnId && x.floorId === levelId) : undefined;
   const selectedCamera = selectedCameraId ? (project.cameras ?? []).find((x) => x.id === selectedCameraId && x.floorId === levelId) : undefined;
   // [176] Schnitt-/Ansichtslinie im Grundriss: Griffe an Anfang, Knickpunkten (`bendPoints`) und Ende.
   const selectedSectionLineId = single(selection, "sectionLines");
@@ -518,6 +521,11 @@ export function useGripEditing(opts: {
       if (!st) return [];
       // [151] Podesttreppen: dazu die Parameter-Griffe (Lauf-Enden, Podestrand).
       const pts = [stairMoveHandle(st), ...stairParamPoints(st)];
+      pts.forEach((_, i) => { gripOwners.push({ localIndex: i }); gripOwnerRange.push([0, pts.length - 1]); });
+      return pts;
+    }
+    if (selectedBeam && modelEditable && !selectedBeam.locked) {
+      const pts = beamGripPoints(selectedBeam);
       pts.forEach((_, i) => { gripOwners.push({ localIndex: i }); gripOwnerRange.push([0, pts.length - 1]); });
       return pts;
     }
@@ -1263,6 +1271,11 @@ export function useGripEditing(opts: {
       const st = (project.stairs ?? []).find((s) => s.id === selectedStairId);
       if (st && index > 0) opts.dragStairParam?.(st.id, index - 1, pt);
       else if (st) moveStairBy(st.id, sub(pt, stairMoveHandle(st)));
+      return;
+    }
+    // [280] Träger: Anfang, Ende bzw. Mitte live (Kern `grips.rs`), ein Undo-Schritt je Zug.
+    if (selectedBeam) {
+      if (!selectedBeam.locked) storeState().moveBeamGrip(selectedBeam.id, index, pt);
       return;
     }
     // [213] Kamera: Standpunkt, Ziel bzw. Sichtkegel-Rand live (Kern `camera::grip_edit`), ein Undo-Schritt je Zug.

@@ -21,6 +21,7 @@
 import type {
   Camera,
   Ceiling,
+  Beam,
   Column,
   Drawing2D,
   ExtrudedSolid,
@@ -67,6 +68,8 @@ export interface ElementClipboard {
   rooms: Room[];
   extrudedSolids: ExtrudedSolid[];
   columns: Column[];
+  /** [280] Träger (liegen im Auswahlkanal der Stützen; optional wie Bäume). */
+  beams?: Beam[];
   /** [149] Bäume (optional: Zwischenablagen älterer Fenster haben sie nicht). */
   trees?: Tree[];
   /** [213] Kameras (optional: ältere Zwischenablagen haben sie nicht). */
@@ -99,6 +102,7 @@ export function isClipboardEmpty(c: ElementClipboard): boolean {
     c.rooms.length === 0 &&
     c.extrudedSolids.length === 0 &&
     c.columns.length === 0 &&
+    (c.beams?.length ?? 0) === 0 &&
     (c.trees?.length ?? 0) === 0 &&
     (c.cameras?.length ?? 0) === 0 &&
     (c.railings?.length ?? 0) === 0
@@ -140,6 +144,7 @@ export function collectElementClipboard(
   const extrudedSolids = (project.extrudedSolids ?? []).filter((s) => extrudedSolidIds.has(s.id));
   const columnIds = new Set(sel.columnIds);
   const columns = (project.columns ?? []).filter((c) => columnIds.has(c.id));
+  const beams = (project.beams ?? []).filter((b) => columnIds.has(b.id));
   const treeIds = new Set(sel.treeIds ?? []);
   const trees = (project.trees ?? []).filter((t) => treeIds.has(t.id));
   const railingIds = new Set(sel.railingIds ?? []);
@@ -157,6 +162,7 @@ export function collectElementClipboard(
     rooms: rooms.map((r) => structuredClone(r)),
     extrudedSolids: extrudedSolids.map((s) => structuredClone(s)),
     columns: columns.map((c) => structuredClone(c)),
+    beams: beams.map((b) => structuredClone(b)),
     trees: trees.map((t) => structuredClone(t)),
     cameras: cameras.map((c) => structuredClone(c)),
     railings: railings.map((r) => structuredClone(r)),
@@ -191,6 +197,7 @@ const PASTED_KEY: Record<string, keyof PastedIds> = {
   rooms: "roomIds",
   extrudedSolids: "extrudedSolidIds",
   columns: "columnIds",
+  beams: "columnIds",
   trees: "treeIds",
   cameras: "cameraIds",
   railings: "railingIds",

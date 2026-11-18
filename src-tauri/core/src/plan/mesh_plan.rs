@@ -159,6 +159,15 @@ fn component_occluders(c: &Ctx, range: &ViewRange, out: &mut Vec<crate::hlr::Fac
             out.extend(occluder(&ring, d));
         }
     }
+    // [280] Träger verdecken die Aufsicht importierter Netze wie Stützen.
+    for b in p.beams.as_deref().unwrap_or(&[]).iter().filter(|k| k.floor_id == c.a.floor && c.vis(&k.category_code, &k.id)) {
+        let col = b.as_column(p);
+        let (zb, zt) = p.column_vertical_extent(&col);
+        if let Some(d) = depth(zb, zt) {
+            let ring: Vec<[f64; 2]> = crate::model3d::column_footprint(&col).iter().map(|q| [q.x, q.y]).collect();
+            out.extend(occluder(&ring, d));
+        }
+    }
     for ce in p.ceilings.as_deref().unwrap_or(&[]).iter().filter(|x| c.vis(&x.category_code, &x.id)) {
         let (zb, zt) = p.ceiling_vertical_span(ce);
         let zone = range.classify(zb, zt);

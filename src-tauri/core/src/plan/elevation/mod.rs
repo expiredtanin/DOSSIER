@@ -267,6 +267,9 @@ pub fn elevation_primitives_ren(p: &Project, level: &LevelSpec, shadows: bool, m
     for c in p.columns.as_deref().unwrap_or(&[]) {
         col_cat.entry(c.id.as_str()).or_insert(c.category_code.as_str());
     }
+    for b in p.beams.as_deref().unwrap_or(&[]) {
+        col_cat.entry(b.id.as_str()).or_insert(b.category_code.as_str());
+    }
     let mut mesh_cat: HashMap<&str, &str> = HashMap::new();
     for c in p.context.as_deref().unwrap_or(&[]) {
         match c {

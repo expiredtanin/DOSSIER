@@ -329,7 +329,7 @@ impl<'a> SectionMv<'a> {
                 pos.get(li).copied()
             })
             .collect();
-        let columns = p.columns.as_deref().unwrap_or(&[]).iter().map(|c| c.id.clone()).collect();
+        let columns = p.columns.as_deref().unwrap_or(&[]).iter().map(|c| c.id.clone()).chain(p.beams.iter().flatten().map(|b| b.id.clone())).collect();
         SectionMv { o, layer_pos, columns }
     }
 

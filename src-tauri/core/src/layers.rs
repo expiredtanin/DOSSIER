@@ -383,6 +383,7 @@ pub fn selection_category_codes(p: &Project, sel: &SelectionMembers) -> Vec<Stri
     scan(&sel.room_ids, &mut p.rooms.iter().flatten().map(|o| (o.id.as_str(), o.category_code.as_str())));
     scan(&sel.stair_ids, &mut p.stairs.iter().flatten().map(|o| (o.id.as_str(), o.category_code.as_str())));
     scan(&sel.column_ids, &mut p.columns.iter().flatten().map(|o| (o.id.as_str(), o.category_code.as_str())));
+    scan(&sel.column_ids, &mut p.beams.iter().flatten().map(|o| (o.id.as_str(), o.category_code.as_str())));
     scan(&sel.roof_ids, &mut p.roofs.iter().flatten().map(|o| (o.id.as_str(), o.category_code.as_str())));
     scan(&sel.opening_ids, &mut p.openings.iter().flatten().map(|o| (o.id.as_str(), o.category_code.as_str())));
     out

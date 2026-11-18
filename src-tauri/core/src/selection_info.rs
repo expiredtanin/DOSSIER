@@ -430,7 +430,11 @@ pub fn derive(lk: &Lookup, a: &SelArgs) -> Result<J, String> {
         return Ok(lk.find("extrudedSolids", i).map_or(J::null(), |s| solid_selection(root, s)));
     }
     if let Some(i) = id(&a.column_id) {
-        return lk.find("columns", i).map_or(Ok(J::null()), |c| column_selection(root, c));
+        if let Some(c) = lk.find("columns", i) {
+            return column_selection(root, c);
+        }
+        // [280] Träger liegen im Auswahlkanal der Stützen.
+        return lk.find("beams", i).map_or(Ok(J::null()), |b| beam_selection(root, b));
     }
     if let Some(i) = id(&a.opening_id) {
         if let Some(o) = lk.find("openings", i) {
@@ -1120,6 +1124,72 @@ fn column_selection(root: &Map<String, Value>, c: &Value) -> Result<J, String> {
         .raw("hatchSource", c, "hatchSource")
         .v("bbox", bbox_value(bb))
         .v("column", info)
+        .done())
+}
+
+/// [280] (UK, OK) eines Trägers aus der rohen Wurzel (wie `Project::beam_vertical_extent`).
+fn beam_extent(root: &Map<String, Value>, b: &Value) -> (f64, f64) {
+    let floor_top = level(root, field(b, "floorId")).map_or(0.0, |f| num_or(field(f, "baseElevation"), 0.0) + num_or(field(f, "floorHeight"), 0.0));
+    let (s, e) = (xy(field(b, "start").unwrap_or(&Value::Null)), xy(field(b, "end").unwrap_or(&Value::Null)));
+    let mid = kernel2d::Vec2::new((s.0 + e.0) / 2.0, (s.1 + e.1) / 2.0);
+    let ring = |v: Option<&Value>| -> Vec<kernel2d::Vec2> { pts_of(v).into_iter().map(|(x, y)| kernel2d::Vec2::new(x, y)).collect() };
+    let under = arr(root.get("ceilings")).iter().filter(|c| field(c, "floorId") == field(b, "floorId")).filter_map(|c| {
+        let outline = ring(field(c, "outline"));
+        let (cb, ct) = ceiling_extent(root, c, ceiling_thickness(root, c));
+        let in_hole = arr(field(c, "openings")).iter().any(|h| h.as_array().is_some_and(|a| a.len() >= 3) && kernel2d::point_in_outline(mid, &ring(Some(h))));
+        (outline.len() >= 3 && ct > cb && kernel2d::point_in_outline(mid, &outline) && !in_hole).then_some(cb)
+    });
+    heights::beam(floor_top, under, num_or(field(b, "topOffset"), 0.0), num_of(field(b, "height")))
+}
+
+fn beam_selection(root: &Map<String, Value>, b: &Value) -> Result<J, String> {
+    let floor = level(root, field(b, "floorId"));
+    let cat = category(root, field(b, "categoryCode"));
+    let typed: crate::model::Beam = serde_json::from_value(b.clone()).map_err(|e| format!("Träger passt nicht zum Kern-Modell: {e}"))?;
+    let bb = bbox_of(typed.footprint().into_iter().map(|p| (p.x, p.y)));
+    let (zb, zt) = beam_extent(root, b);
+    let (dx, dy) = (typed.end.x - typed.start.x, typed.end.y - typed.start.y);
+    let info = O::default()
+        .raw("width", b, "width")
+        .raw("height", b, "height")
+        .v("profileName", nn(field(b, "profileName")).cloned().unwrap_or(Value::Null))
+        .n("topOffset", num_or(field(b, "topOffset"), 0.0))
+        .n("length", dx.hypot(dy))
+        .raw("floorId", b, "floorId")
+        .o("floorName", floor_name(floor, field(b, "floorId")))
+        .n("zBottom", zb)
+        .n("zTop", zt)
+        .done();
+    let comp = if truthy(field(b, "componentId")) { find_by(arr(root.get("components")), "id", field(b, "componentId")) } else { None };
+    let (fg, bg, hatch) = effective(b, comp, cat);
+    let weight = match nn(field(b, "strokeWeight")) {
+        Some(w) => w.clone(),
+        None if is_layer(field(b, "strokeWeightSource")) => cat.and_then(|k| nn(field(k, "lw"))).cloned().unwrap_or_else(|| js_num(WALL_FALLBACK_MM)),
+        None => js_num(WALL_FALLBACK_MM),
+    };
+    Ok(O::default()
+        .s("kind", "beam")
+        .raw("id", b, "id")
+        .raw("categoryCode", b, "categoryCode")
+        .raw("floorId", b, "floorId")
+        .v("color", color_of(b, cat, COLUMN_COLOR))
+        .raw("colorPenId", b, "colorPenId")
+        .v("weightMm", weight)
+        .raw("fillHatchId", b, "hatchId")
+        .raw("foreground", b, "foreground")
+        .raw("foregroundPenId", b, "foregroundPenId")
+        .raw("background", b, "background")
+        .raw("backgroundPenId", b, "backgroundPenId")
+        .raw("foregroundSource", b, "foregroundSource")
+        .raw("backgroundSource", b, "backgroundSource")
+        .o("effectiveForeground", fg)
+        .o("effectiveBackground", bg)
+        .o("effectiveHatchId", hatch)
+        .raw("strokeWeightOverride", b, "strokeWeight")
+        .raw("strokeWeightSource", b, "strokeWeightSource")
+        .raw("hatchSource", b, "hatchSource")
+        .v("bbox", bbox_value(bb))
+        .v("beam", info)
         .done())
 }
 

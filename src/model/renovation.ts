@@ -16,7 +16,7 @@ export const RENOVATION_STATUSES: readonly RenovationStatus[] = ["existing", "de
  * Listen mit Umbau-Status (Räume nur Sichtbarkeit/Flächen, keine Farbe). `drawings2d`: Möbel und Symbole der Bibliothek
  * (ohne Angabe = Bestand) sowie 2D-Elemente mit ausdrücklichem Status (Linienwerk, Masse …; Kern `drawing_takes_part`).
  */
-export const RENOVATION_COLLECTIONS = ["walls", "openings", "ceilings", "roofs", "stairs", "columns", "extrudedSolids", "rooms", "drawings2d", "railings"] as const;
+export const RENOVATION_COLLECTIONS = ["walls", "openings", "ceilings", "roofs", "stairs", "columns", "beams", "extrudedSolids", "rooms", "drawings2d", "railings"] as const;
 export type RenovationCollection = (typeof RENOVATION_COLLECTIONS)[number];
 
 /**
@@ -270,6 +270,7 @@ const SELECTION_KEY: Record<RenovationCollection, string> = {
   roofs: "roofs",
   stairs: "stairs",
   columns: "columns",
+  beams: "columns", // [280] Träger liegen im Auswahlkanal der Stützen
   extrudedSolids: "solids",
   rooms: "rooms",
   drawings2d: "drawings",
@@ -300,7 +301,7 @@ export function idsByRenovationStatus(
       if (opts.phase !== undefined && (r?.phase ?? "") !== opts.phase) continue;
       ids.push(e.id);
     }
-    if (ids.length) out[SELECTION_KEY[c]] = ids;
+    if (ids.length) out[SELECTION_KEY[c]] = [...(out[SELECTION_KEY[c]] ?? []), ...ids];
   }
   const trees = (project.trees ?? []).filter((t) => treeRenovationStatus(t) === status && (!opts.floorId || t.floorId === opts.floorId) && (opts.phase === undefined || opts.phase === "")).map((t) => t.id);
   if (trees.length) out.trees = trees;

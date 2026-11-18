@@ -167,6 +167,20 @@ pub fn schedule_rows(p: &Project) -> Vec<ScheduleRow> {
             area: None,
         });
     }
+    // [280] Träger: Typ = Profilname (sonst Rechteck), Länge der Achse, Querschnitt Breite, Höhe.
+    for b in p.beams.as_deref().unwrap_or(&[]) {
+        rows.push(ScheduleRow {
+            kind: "Träger",
+            id: b.id.clone(),
+            type_name: b.profile_name.clone().filter(|n| !n.trim().is_empty()).unwrap_or_else(|| "Rechteck".into()),
+            floor: floor_name(p, &b.floor_id),
+            floor_id: Some(b.floor_id.clone()),
+            length: Some((b.end.x - b.start.x).hypot(b.end.y - b.start.y)),
+            height_m: Some(b.height),
+            thickness: Some(b.width),
+            area: None,
+        });
+    }
     rows
 }
 

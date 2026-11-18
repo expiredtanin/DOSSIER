@@ -115,6 +115,8 @@ pub enum SlabSource {
     Column { index: usize },
     /// [279] Index in `Project::railings` (Prisma je Teil, `railing::pieces`).
     Railing { index: usize, fill: bool },
+    /// [280] Index in `Project::beams` (Träger-Prisma wie eine Stütze).
+    Beam { index: usize },
 }
 
 /// Ein rohes Dreiecks-Mesh (`RMesh`).

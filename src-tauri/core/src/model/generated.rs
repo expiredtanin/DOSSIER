@@ -5503,6 +5503,121 @@ pub struct Column {
     pub extra: Extra,
 }
 
+/// [280] Ein Träger/Unterzug (Beam) — geschossgebundenes Tragwerk-Bauteil (Kategorie „50"): Achse
+/// `start` → `end` im Grundriss, rechteckiger Querschnitt `width` × `height` (Aussenmasse; `profileName`
+/// ist nur ein Text wie „HEB 200", gezeichnet wird das Rechteck). Oberkante = Unterkante der Decke darüber
+/// (höchstens die Geschoss-Oberkante) plus `topOffset`; bündig (0) ⇒ Unterzug. Wird wie eine Stütze
+/// ausgewertet (`Beam::as_column`), liegt aber in `Project.beams`; im Auswahlkanal der Stützen.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct Beam {
+    pub id: String,
+    #[ts(type = "\"beam\"")]
+    pub r#type: String,
+    /// Zugehörige Zeichnungsebene (Geschoss).
+    #[serde(rename = "floorId")]
+    pub floor_id: String,
+    /// Grafik-Kategorie (Ebene), z. B. "50" für Tragwerk.
+    #[serde(rename = "categoryCode")]
+    pub category_code: String,
+    /// [201] IFC-GlobalId des Quell-Bauteils (IFC-Import); der IFC-Export schreibt sie zurück, damit
+    /// die Rundreise dieselben GUIDs behält. Kopien (Einfügen, Kopieren, Reihe, Wand teilen) tragen sie NICHT.
+    #[serde(rename = "ifcGlobalId", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub ifc_global_id: Option<String>,
+    /// Objekt-Sperre, analog `Wall.locked`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub locked: Option<bool>,
+    /// Achse: Anfangspunkt im Grundriss (Meter).
+    pub start: Vec2,
+    /// Achse: Endpunkt im Grundriss (Meter).
+    pub end: Vec2,
+    /// Querschnittsbreite (quer zur Achse, Meter, > 0).
+    pub width: f64,
+    /// Querschnittshöhe (Meter, > 0), nach unten ab der Oberkante.
+    pub height: f64,
+    /// Profilname als Text (z. B. „HEB 200", „BSH 20/40"); ohne Wirkung auf die Geometrie, geht in Liste und IFC.
+    #[serde(rename = "profileName", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub profile_name: Option<String>,
+    /// Versatz der Oberkante gegenüber der Unterkante der Decke darüber (Meter, + nach oben in die Decke).
+    /// Fehlt ⇒ 0: bündig, Unterzug.
+    #[serde(rename = "topOffset", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub top_offset: Option<f64>,
+    /// Optionales tragendes Bauteil (Component) für Poché/3D-Farbe/Schraffur.
+    #[serde(rename = "componentId", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub component_id: Option<String>,
+    /// Optionale Übersteuerung der Strich-/Umrandungsfarbe; sonst gilt die
+    /// Kategorie-Farbe.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub color: Option<String>,
+    /// Stift-Kopplung von `color` (s. `Component.colorPenId`-Doku).
+    #[serde(rename = "colorPenId", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub color_pen_id: Option<String>,
+    /// Attribut-Override der Muster-/Schraffurfarbe (Vordergrund) DIESER Stütze.
+    /// `undefined` = „Nach System" (erben → Component.foreground), analog `Wall.
+    /// foreground`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub foreground: Option<String>,
+    /// Attribut-Override der Füllfarbe (Hintergrund/Poché) DIESER Stütze.
+    /// `undefined` = „Nach System" (neutrale SIA-Poché HATCH_INK/HATCH_PAPER je
+    /// nach Schraffur-Muster), analog `Wall.background`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub background: Option<String>,
+    /// Stift-Kopplung von `foreground` (s. `Component.foregroundPenId`-Doku).
+    #[serde(rename = "foregroundPenId", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub foreground_pen_id: Option<String>,
+    /// Stift-Kopplung von `background`, analog {@link Wall.foregroundPenId}.
+    #[serde(rename = "backgroundPenId", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub background_pen_id: Option<String>,
+    /// Attribut-Override der Strichstärke (mm Papier) DIESER Stütze. `undefined`
+    /// = „Nach System" (erben → `strokeWeightSource`), analog `Wall.strokeWeight`.
+    #[serde(rename = "strokeWeight", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub stroke_weight: Option<f64>,
+    /// Attribut-Override der Schnitt-Schraffur (Hatch Manager) DIESER Stütze.
+    /// `undefined` = „Nach System" (erben → `hatchSource`), analog `Wall.hatchId`.
+    #[serde(rename = "hatchId", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub hatch_id: Option<String>,
+    /// Quelle des Vordergrunds, wenn kein explizites `foreground` gesetzt ist — analog `Wall.foregroundSource`.
+    #[serde(rename = "foregroundSource", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub foreground_source: Option<AttributeSource>,
+    /// Quelle des Hintergrunds, analog {@link Beam.foregroundSource}.
+    #[serde(rename = "backgroundSource", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub background_source: Option<AttributeSource>,
+    /// Quelle der Strichstärke, analog {@link Beam.foregroundSource}.
+    #[serde(rename = "strokeWeightSource", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub stroke_weight_source: Option<AttributeSource>,
+    /// Quelle der Schraffur, analog {@link Beam.foregroundSource}.
+    #[serde(rename = "hatchSource", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub hatch_source: Option<AttributeSource>,
+    /// [271] Umbau: Status (Bestand, Abbruch, Neu) und Etappe. Fehlt ⇒ Bestand.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub renovation: Option<Renovation>,
+    /// [272] Variante, zu der das Element gehört (`Project.designOptionSets`). Fehlt ⇒ Hauptmodell (immer sichtbar).
+    #[serde(rename = "designOption", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub design_option: Option<DesignOptionRef>,
+    #[serde(flatten)]
+    #[ts(skip)]
+    pub extra: Extra,
+}
+
 /// Kronenform eines Baums ([149]): Grundform der Silhouette (Schnitt/Ansicht), des 3D-Körpers und
 /// des Schattenwerfers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
@@ -7161,6 +7276,10 @@ pub struct Project {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub columns: Option<Vec<Column>>,
+    /// [280] Träger/Unterzüge, siehe {@link Beam}. Optional wie `columns`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub beams: Option<Vec<Beam>>,
     /// Bäume ([149]) — eigene Objekte mit Stamm, Krone und Höhe, siehe {@link Tree}. Optional, damit
     /// bestehende Projekte ohne `trees` gültig bleiben (Default: leer behandeln).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -8061,6 +8180,12 @@ impl Project {
             "columns" => {
                 self.columns = match v {
                     Some(v) => <Option<Vec<Column>>>::deserialize(v).map_err(|e| e.to_string())?,
+                    None => Default::default(),
+                };
+            }
+            "beams" => {
+                self.beams = match v {
+                    Some(v) => <Option<Vec<Beam>>>::deserialize(v).map_err(|e| e.to_string())?,
                     None => Default::default(),
                 };
             }
