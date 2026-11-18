@@ -1136,7 +1136,7 @@ function SectionPlanView({
   const marks = useMemo(
     () =>
       rawPlan && levelMarksEnabled(level, project, (c) => visibleCodes.has(c) && categoryDisplay(c).render)
-        ? levelMarkerPrimitives(project, rawPlan.bounds, rawPlan.primitives, scaleDenominator)
+        ? levelMarkerPrimitives(project, rawPlan, scaleDenominator)
         : [],
     [rawPlan, level, project, visibleCodes, categoryDisplay, scaleDenominator],
   );

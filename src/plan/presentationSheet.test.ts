@@ -5,7 +5,7 @@ import { generatePlan } from "./generatePlan";
 import { getState } from "../state/appStore";
 import { sheetSizeMm } from "../model/layoutModel";
 import { posterMetrics } from "../model/posterTemplates";
-import { fittingPresentationScale, POSTER_EXTRAS_DEFAULT, PRESENTATION_TEMPLATE_ID, levelHasContent, planPresentationSheet, presentationDefaults, presentationSheetOps } from "./presentationSheet";
+import { finerPresentationScale, fittingPresentationScale, POSTER_EXTRAS_DEFAULT, PRESENTATION_TEMPLATE_ID, levelHasContent, planPresentationSheet, presentationDefaults, presentationSheetOps } from "./presentationSheet";
 import type { Project } from "../model/types";
 
 const LABELS = {
@@ -450,5 +450,21 @@ describe("[66] Präsentationsplan", () => {
     for (const b of bigger) expect(planPresentationSheet(p, { ...o, scale: b }).fits).toBe(false);
     // Was schon passt, braucht keinen Vorschlag auf Kosten des Massstabs: A1 1:200.
     expect(planPresentationSheet(p, { ...presentationDefaults(p), scale: 200 }).fits).toBe(true);
+  }, 60_000);
+
+  // [208] Kleines Haus im groben Massstab: ein feinerer (>= 1:100) passt auch, dann Vorschlag; sonst keiner.
+  it("[208] Vorschlag eines feineren Massstabs, nur wenn er passt und nicht unter 1:100", () => {
+    st().loadProject(buildWettbewerbSampleProject());
+    const p = st().project;
+    const o = { ...presentationDefaults(p), paper: "a1" as const, orientation: "portrait" as const, scale: 500 };
+    const f = finerPresentationScale(p, o);
+    if (f !== null) {
+      expect(f).toBeGreaterThanOrEqual(100);
+      expect(f).toBeLessThan(500);
+      expect(planPresentationSheet(p, { ...o, scale: f }).fits).toBe(true);
+    }
+    // 1:100 ist die feinste Stufe des Vorschlags, und was nicht passt, bekommt keinen.
+    expect(finerPresentationScale(p, { ...o, scale: 100 })).toBeNull();
+    expect(finerPresentationScale(p, { ...o, paper: "a4" as const, scale: 50 })).toBeNull();
   }, 60_000);
 });

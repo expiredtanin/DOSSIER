@@ -240,7 +240,7 @@ export type QueryName =
   | "drawingUnderlay"
   | "drawingLines"
   | "drawingPrims"
-  | "levelMarkers"
+  | "levelMarkersOf"
   | "tracePlan"
   | "sectionPlan"
   | "elevationPlan"

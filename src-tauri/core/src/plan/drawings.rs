@@ -1744,7 +1744,7 @@ pub fn scale_geom(g: &Drawing2DGeom, f: &dyn Fn(Vec2) -> Vec2, k: f64) -> Drawin
 }
 
 /// Ausmass einer Zeichnung für „Einpassen"/Druck (`computeBounds` in TS).
-fn acc_bounds(g: &Drawing2DGeom, b: &mut Bounds) {
+fn acc_bounds(g: &Drawing2DGeom, b: &mut Bounds, scale: f64) {
     use Drawing2DGeom as G;
     let mut acc = |q: &Vec2| b.acc(q.x, q.y);
     match g {
@@ -1802,7 +1802,25 @@ fn acc_bounds(g: &Drawing2DGeom, b: &mut Bounds) {
                 acc(&v(bb.x + nx, bb.y + ny));
             }
         }
-        G::Kote { at, .. } | G::Detailref { at, .. } | G::Pointmarker { at } | G::Text { at, .. } => acc(at),
+        G::Kote { at, .. } | G::Detailref { at, .. } | G::Pointmarker { at } => acc(at),
+        // [269] Text: samt Ausdehnung (Zeilenbreite, Schrifthöhe, weitere Zeilen), sonst schneidet der Rand ihn an
+        // („Kat.-Nr. 1188" am Rand der Situation). Anker links an der Grundlinie, Drehung wie `DrawingText`.
+        G::Text { at, text, height, angle, width, paper_height, .. } => {
+            acc(at);
+            let h = paper_height.filter(|mm| mm.is_finite() && *mm > 0.0).map_or(*height, |mm| mm_to_model(mm, scale));
+            if h.is_finite() && h > 0.0 && angle.is_finite() {
+                let lines: Vec<&str> = text.lines().collect();
+                let widest = lines.iter().map(|l| crate::text_layout::text_width_em(l, false)).fold(0.0, f64::max) * h;
+                let w = width.filter(|w| *w > 0.0 && w.is_finite()).map_or(widest, |w| w.min(widest.max(h)).max(h));
+                let (ux, uy) = (angle.cos(), angle.sin());
+                let below = (lines.len().max(1) - 1) as f64 * 1.3 * h;
+                for (along, up) in [(w, h), (w, -below)] {
+                    acc(&v(at.x + ux * along - uy * up, at.y + uy * along + ux * up));
+                }
+                acc(&v(at.x - uy * h, at.y + ux * h));
+                acc(&v(at.x + uy * below, at.y - ux * below));
+            }
+        }
         G::Grid { .. } => {
             if let Some(spec) = crate::grid::Spec::of(g) {
                 for ax in spec.axes() {
@@ -2108,12 +2126,12 @@ pub fn plan_drawings(c: &Ctx, sink: &mut Sink, bounds: &mut Bounds) -> Result<()
         }
         if super::situation::drawing_is_filled(c, d) {
             // [207] Die gefüllte Fläche (situation.rs) trägt den Umriss.
-            acc_bounds(&d.geom, bounds);
+            acc_bounds(&d.geom, bounds, c.a.scale);
             continue;
         }
         sink.keep = if c.a.compact && compact_eligible(d) { Keep::NoLines } else { Keep::All };
         emit(c, d, Attrs::with(d, &m.ov, m.cat), &d.geom, m.greyed, c.a.scale, sink, 0)?;
-        acc_bounds(&d.geom, bounds);
+        acc_bounds(&d.geom, bounds, c.a.scale);
     }
     sink.keep = Keep::All;
     Ok(())
@@ -2134,7 +2152,7 @@ pub(super) fn near_drawing_bounds(c: &Ctx) -> Bounds {
         if is_far_class(&d.category_code) || !on_floor(c, d) || !memo.get(c, d).shown {
             continue;
         }
-        acc_bounds(&d.geom, &mut b);
+        acc_bounds(&d.geom, &mut b, c.a.scale);
     }
     b
 }
@@ -2406,7 +2424,7 @@ pub fn plan_drawings_chunked(c: &Ctx, stamps: &[u64], cache: &mut super::cache::
             continue;
         }
         if super::situation::drawing_is_filled(c, d) {
-            acc_bounds(&d.geom, bounds);
+            acc_bounds(&d.geom, bounds, c.a.scale);
             continue;
         }
         let keep = if c.a.compact && compact_eligible(d) { Keep::NoLines } else { Keep::All };
@@ -2527,7 +2545,7 @@ fn build_chunk<'a>(
         emit(c, d, Attrs::with(d, &m.ov, m.cat), &d.geom, flags & 1 != 0, c.a.scale, &mut sink, 0)?;
         *next_ref = sink.next_ref;
         let mut b = Bounds::new();
-        acc_bounds(&d.geom, &mut b);
+        acc_bounds(&d.geom, &mut b, c.a.scale);
         bounds.merge(b.raw());
         w.part_end(stamp, flags, b.raw());
     }
@@ -2585,7 +2603,7 @@ pub fn underlay_lines(c: &Ctx, indices: &[f64], greyed: bool, sink: &mut Sink) -
     Ok(())
 }
 
-/// [171]/[199] Lage der automatischen Koten aus dem Gebauten (wie `levelMarkers.ts`): links neben dem Gebauten
+/// [171]/[199] Lage der automatischen Koten aus dem Gebauten (Abfrage `levelMarkersOf`): links neben dem Gebauten
 /// (Gelände, Höhenlinien, Baugruben zählen nicht), die oberste Kote an der Oberkante des Gebauten — ohne Gelände,
 /// Achsraster (Linien „draw2d", Blasen, Texte) und Bäume, die sonst die Grenzen der Zeichnung `b` bis über den First
 /// ziehen. Ergebnis: Grenzen für [`level_markers`] (unverändert, wo nichts Gebautes liegt).
@@ -2650,7 +2668,7 @@ pub fn level_marker_bounds(p: &Project, prims: &[Primitive], b: [f64; 4]) -> [f6
     [if x < b[2] { x } else { b[0] }, b[1], b[2], if y > b[1] { y } else { b[3] }]
 }
 
-/// Automatische Höhenkoten im Schnitt/in der Ansicht (`levelMarkers.ts`): je Geschoss OK fertig
+/// Automatische Höhenkoten im Schnitt/in der Ansicht (Abfrage `levelMarkersOf`): je Geschoss OK fertig
 /// Boden plus die oberste Kante, links neben der Zeichnung mit kurzer Bezugslinie.
 ///
 /// [208] `scale` = Massstabszahl der Zeichnung: Symbol, Schrift und Abstände in Papiergrösse wie das 2D-Element `kote`
@@ -3460,6 +3478,30 @@ mod tests {
         assert_eq!(level_marker_bounds(&p, &prims, [-12.0, -1.0, 8.0, 9.5]), [0.0, -1.0, 8.0, 6.2]);
         // Nichts Gebautes: die Grenzen bleiben.
         assert_eq!(level_marker_bounds(&p, &prims[2..3], [-12.0, -1.0, 8.0, 9.5]), [-12.0, -1.0, 8.0, 9.5]);
+    }
+
+    /// [269] Das Ausmass eines Texts reicht über den Anker hinaus (Zeilenbreite rechts, Schrifthöhe oben, weitere Zeilen
+    /// unten, gedreht mit): sonst schneidet der Rand „Kat.-Nr. 1188" an.
+    #[test]
+    fn text_im_ausmass_samt_ausdehnung() {
+        let text = |s: &str, angle: f64, paper: Option<f64>| -> Drawing2DGeom {
+            serde_json::from_value(serde_json::json!({"shape": "text", "at": {"x": 10.0, "y": 5.0}, "text": s, "height": 0.5, "angle": angle, "paperHeight": paper})).unwrap()
+        };
+        let ext = |g: &Drawing2DGeom, scale: f64| {
+            let mut b = Bounds::new();
+            acc_bounds(g, &mut b, scale);
+            b.raw()
+        };
+        let a = ext(&text("Kat.-Nr. 1188", 0.0, None), 100.0);
+        assert!(a[0] == 10.0 && a[1] == 5.0 && a[3] > 5.49 && a[2] > 10.0 + 13.0 * 0.5 * 0.35, "{a:?}");
+        // Zweizeilig: reicht auch nach unten.
+        assert!(ext(&text("A\nB", 0.0, None), 100.0)[1] < 5.0 - 0.5);
+        // 90°: die Breite geht nach oben.
+        let r = ext(&text("Kat.-Nr. 1188", std::f64::consts::FRAC_PI_2, None), 100.0);
+        assert!(r[3] > 5.0 + 13.0 * 0.5 * 0.35 && r[0] < 10.0 - 0.4, "{r:?}");
+        // Papiergrösse: 2 mm × 1:200 = 0.4 m Schrifthöhe.
+        let q = ext(&text("Kat.-Nr. 1188", 0.0, Some(2.0)), 200.0);
+        assert!((q[3] - 5.4).abs() < 1e-9, "{q:?}");
     }
 
     /// [256] Nachbargebäude (Kontext-Netz auf einer Umgebungsklasse, z. B. „12 Gebäude") zählen nicht zum Gebauten:

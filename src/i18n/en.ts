@@ -4171,6 +4171,7 @@ export const en: Record<TranslationKey, string> = {
   "presentation.done": "Presentation sheet 1:{scale} with {n} views created",
   "presentation.tooBig": "Presentation sheet not created: does not fit even at 1:{scale} – choose a larger format",
   "presentation.tooBigSuggest": "Presentation sheet not created: does not fit at 1:{scale} – largest scale that fits: 1:{fit}",
+  "presentation.finerHint": "Tip: 1:{finer} also fits on the sheet – the building fills it better than at 1:{scale}",
   "presentation.empty": "Presentation sheet: no view with content chosen",
   "presentation.extras": "Poster content",
   "presentation.extras.situation": "Site plan 1:500",

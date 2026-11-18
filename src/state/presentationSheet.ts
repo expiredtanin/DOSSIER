@@ -1,7 +1,7 @@
 // [66] Präsentationsplan anlegen: Ops aus dem Kern-Fassadenteil (`plan/presentationSheet.ts`), angewendet
 // als EIN Undo-Schritt, Meldung über `notify`. Liefert die Id des neuen Blatts (zum Öffnen) oder `null`.
 
-import { fittingPresentationScale, presentationSheetOps, type PresentationOptions } from "../core";
+import { finerPresentationScale, fittingPresentationScale, presentationSheetOps, type PresentationOptions } from "../core";
 import { t } from "../i18n";
 import { getState } from "./appStore";
 
@@ -25,10 +25,13 @@ export function createPresentationSheet(o: PresentationOptions): string | null {
       st.notify(fit ? t("presentation.tooBigSuggest", { scale: res.plan.scale, fit }) : t("presentation.tooBig", { scale: res.plan.scale }), "warning");
       return null;
     }
+    // [208] Kleines Haus: ein feinerer Massstab füllt das Blatt besser (nur Hinweis, das Blatt entsteht wie gewählt).
+    const finer = finerPresentationScale(st.project, o);
     st.applyChange(res.ops);
     const pages = res.plan.pages ?? 1;
     if (pages > 1) st.notify(t("presentation.donePages", { scale: res.plan.scale, pages }), "info");
     else st.notify(t("presentation.done", { scale: res.plan.scale, n: res.plan.items.length }), "info");
+    if (finer) st.notify(t("presentation.finerHint", { scale: res.plan.scale, finer }), "info");
     return res.layoutId;
   } catch (e) {
     st.notify(`${t("presentation.failed")}: ${e instanceof Error ? e.message : String(e)}`, "error");

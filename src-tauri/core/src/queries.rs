@@ -437,11 +437,25 @@ pub fn run_bin(p: &Project, name: &str, args: &[f64], text: &str) -> Result<Vec<
             let c = domains::Ctx::new(p, &a);
             buf_of(|sink| drawings::emit(&c, &d, drawings::Attrs::of(&c, &d), &d.geom, false, args[0], sink, 0))
         }
-        // Automatische Höhenkoten im Schnitt/in der Ansicht für das Ausmass `[minX, minY, maxX, maxY]`, [208] dazu
-        // die Massstabszahl (fehlt = 1:100).
-        ("levelMarkers", 4 | 5) => {
+        // Automatische Höhenkoten im Schnitt/in der Ansicht ([256] die einzige Fassung, keine TS-Doppelspur): `text` = JSON
+        // der Teil-Abfrage des Roh-Plans (`{name, args, text}` von `sectionPlan`/`elevationPlan`), `args[0]` = Massstabszahl
+        // (fehlt = 1:100). Lage aus dem Gebauten dieses Plans (`level_marker_bounds`).
+        ("levelMarkersOf", 0 | 1) => {
+            let part: crate::plan::trace::Part = serde_json::from_str(text).map_err(|e| format!("levelMarkersOf: {e}"))?;
+            if part.name != "sectionPlan" && part.name != "elevationPlan" {
+                return Err(format!("levelMarkersOf: Abfrage {} nicht erlaubt", part.name));
+            }
+            let bytes = run_bin(p, &part.name, &part.args, &part.text)?;
             let mut w = crate::plan::buf::Writer::new(false);
-            w.group(&drawings::level_markers(p, [args[0], args[1], args[2], args[3]], args.get(4).copied().unwrap_or(100.0)));
+            if !bytes.is_empty() {
+                let v = crate::plan::buf::View::parse(&bytes).ok_or("levelMarkersOf: Plan-Puffer unlesbar")?;
+                if let (Some(b), Some(prims)) = (v.bounds(), v.prims()) {
+                    if b[2] > b[0] && b[3] > b[1] {
+                        let scale = args.first().copied().unwrap_or(100.0);
+                        w.group(&drawings::level_markers(p, drawings::level_marker_bounds(p, &prims, b), scale));
+                    }
+                }
+            }
             Ok(w.finish())
         }
         // Umriss-Linien der 3D-Auswahl (`highlight3d.rs`): `text` = JSON der ids je Art + `rgb`; Antwort f32-LE.

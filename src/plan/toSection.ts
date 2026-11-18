@@ -123,7 +123,7 @@ export function generateSectionPlan(
   if (buf.groups.length === 0) return { primitives: [], bounds: { minX: 0, minY: 0, maxX: 1, maxY: 1 } };
   const b = buf.bounds ?? [0, 0, 1, 1];
   return lazyPlan(
-    { bounds: { minX: b[0], minY: b[1], maxX: b[2], maxY: b[3] }, lineEnds: lineEndsCode(project) },
+    { bounds: { minX: b[0], minY: b[1], maxX: b[2], maxY: b[3] }, lineEnds: lineEndsCode(project), marksSource: { name: "sectionPlan", args, text } },
     buf.groups.map(([from, to]) => ({ buf, from, to })),
   );
 }

@@ -60,6 +60,11 @@ export interface PlanImage {
 
 export interface Plan {
   primitives: Primitive[];
+  /**
+   * [256] Kern-Abfrage, die diesen Roh-Plan eines Schnitts/einer Ansicht erzeugt hat: Grundlage der automatischen
+   * Höhenkoten (`levelMarkers.ts`, Abfrage `levelMarkersOf`). Fehlt bei allen anderen Plänen.
+   */
+  marksSource?: { name: "sectionPlan" | "elevationPlan"; args: ArrayLike<number>; text: string };
   bounds: { minX: number; minY: number; maxX: number; maxY: number };
   /**
    * [204] Ausmass nur der Bauteile (Wände, Decken, Dächer, Räume, Treppen) ohne Kontext/Kataster, Gelände,

@@ -347,6 +347,23 @@ export function fittingPresentationScale(project: Project, o: PresentationOption
   return null;
 }
 
+/**
+ * [208] Gegenstück zu {@link fittingPresentationScale}: Passt der Plan im gewählten Massstab und es passt auch ein
+ * feinerer (nicht unter 1:100, auf einem Blatt wie bisher), bleibt das Blatt bei einem kleinen Haus leer. Gibt den
+ * feinsten solchen Massstab zurück, sonst `null`. Nur ein Vorschlag (Meldung), nichts wird geändert.
+ */
+export function finerPresentationScale(project: Project, o: PresentationOptions): number | null {
+  if (!o.scale) return null;
+  const now = planPresentationSheet(project, o);
+  if (!now.fits) return null;
+  for (const s of PRESENTATION_SCALES) {
+    if (s < 100 || s >= o.scale) continue;
+    const r = planPresentationSheet(project, { ...o, scale: s });
+    if (r.fits && (r.pages ?? 1) <= (now.pages ?? 1)) return s;
+  }
+  return null;
+}
+
 /** Massstab und Rahmen aus dem Kern (ohne das Projekt zu ändern). */
 export function planPresentationSheet(project: Project, o: PresentationOptions): PresentationPlan {
   const { template } = presentationTemplate(project);

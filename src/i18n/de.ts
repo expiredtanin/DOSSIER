@@ -4185,6 +4185,7 @@ export const de = {
   "presentation.done": "Präsentationsplan 1:{scale} mit {n} Ansichten erstellt",
   "presentation.tooBig": "Präsentationsplan nicht angelegt: passt auch 1:{scale} nicht aufs Blatt – grösseres Format wählen",
   "presentation.tooBigSuggest": "Präsentationsplan nicht angelegt: passt in 1:{scale} nicht aufs Blatt – grösster passender Massstab: 1:{fit}",
+  "presentation.finerHint": "Tipp: auch 1:{finer} passt aufs Blatt – das Haus füllt es dann besser als in 1:{scale}",
   "presentation.empty": "Präsentationsplan: keine Ansicht mit Inhalt gewählt",
   "presentation.extras": "Plakat-Inhalt",
   "presentation.extras.situation": "Situation 1:500",
