@@ -604,56 +604,127 @@ pub fn emit_roofs(p: &Project, only_roof: Option<&str>) -> Result<Vec<RMesh>, St
 }
 
 /// Ein Körper des IFC-Exports eines Dachs ([B5]): eine Dachfläche mit allen Schichten (Index in `roof_geometry().planes`)
-/// oder ein Sonderteil ohne Fläche (Attika; verschnittenes Dach mit Gauben/Nachbarn als Ganzes).
+/// oder ein Sonderteil ohne Fläche (Attika, Gaube; verschnittenes Dach mit Gauben/Nachbarn als Ganzes, wenn die Trennung scheitert).
 pub struct RoofPart {
     pub plane: Option<usize>,
+    /// Name eines Sonderteils („Attika“, „Gaube 1“); `None` bei Dachflächen und beim Ganzen.
+    pub name: Option<String>,
     pub positions: Vec<f64>,
     pub indices: Vec<u32>,
 }
 
+/// Körper einer Dachfläche über alle Schichten (Gehrungsebenen an den Graten, Dachfenster-Löcher wie im 3D).
+fn roof_plane_body(layers: &[f64], mitre: &Mitre, holes: &[RoofHoleRect], i: usize) -> (Vec<f64>, Vec<u32>) {
+    let (mut positions, mut indices) = (Vec::new(), Vec::new());
+    let mut offset_above = 0.0;
+    for &t in layers {
+        let top = mitre.at(i, offset_above);
+        let bottom = mitre.at(i, offset_above + t);
+        if holes.is_empty() {
+            push_roof_slab_between(&mut positions, &mut indices, &top, &bottom, &vec![false; top.len()]);
+        } else {
+            push_roof_slab_with_holes(&mut positions, &mut indices, &top, &bottom, &vec![false; top.len()], holes, offset_above, offset_above + t);
+        }
+        offset_above += t;
+    }
+    (positions, indices)
+}
+
+/// Verschnittenes Dach/Gauben ([G5]) je Dachfläche trennen: Dachkörper (Vereinigung der Dachschichten) mit dem Körper jeder
+/// Dachfläche schneiden, je Gaube ein Teil. `None`, wenn ein Schritt scheitert oder das Ergebnis nicht geschlossen ist
+/// bzw. das Volumen nicht aufgeht (dann bleibt es ein Teil).
+fn split_assembled(solids: &crate::roof_assembly::RoofSolids, planes: usize, body: &dyn Fn(usize) -> (Vec<f64>, Vec<u32>)) -> Option<Vec<RoofPart>> {
+    use crate::roof_assembly::Role;
+    use crate::solid_bool::{Mesh, Solid};
+    let meshes: Vec<Mesh> = solids.parts.iter().filter(|x| x.role == Role::RoofLayer).map(|x| x.mesh.clone()).collect();
+    let mut out = Vec::new();
+    let mut total = 0.0;
+    if !meshes.is_empty() {
+        let (roof, bad) = Solid::union_all(&meshes);
+        if bad > 0 || roof.is_empty() {
+            return None;
+        }
+        let roof_vol = roof.volume();
+        for i in 0..planes {
+            let (positions, indices) = body(i);
+            if indices.is_empty() {
+                continue;
+            }
+            let Ok(prism) = Solid::new(&Mesh { positions, indices }) else { return None };
+            let m = roof.intersection(&prism).ok()?.to_mesh();
+            let (positions, indices) = (m.positions.clone(), m.indices.clone());
+            if m.is_empty() {
+                continue;
+            }
+            if !m.is_closed() {
+                return None;
+            }
+            total += m.volume().abs();
+            out.push(RoofPart { plane: Some(i), name: None, positions, indices });
+        }
+        if out.len() < 2 || (total - roof_vol.abs()).abs() > 0.03 * roof_vol.abs() {
+            return None;
+        }
+    }
+    let mut ids: Vec<&str> = Vec::new();
+    for x in &solids.parts {
+        if let Some(d) = x.dormer.as_deref() {
+            if !ids.contains(&d) {
+                ids.push(d);
+            }
+        }
+    }
+    for (n, id) in ids.iter().enumerate() {
+        let ms: Vec<Mesh> = solids.parts.iter().filter(|x| x.dormer.as_deref() == Some(*id)).map(|x| x.mesh.clone()).collect();
+        let (s, bad) = Solid::union_all(&ms);
+        let m = s.to_mesh();
+        if bad > 0 || m.is_empty() || !m.is_closed() {
+            return None;
+        }
+        let (positions, indices) = (m.positions.clone(), m.indices.clone());
+        out.push(RoofPart { plane: None, name: Some(format!("Gaube {}", n + 1)), positions, indices });
+    }
+    (!out.is_empty()).then_some(out)
+}
+
 /// Dach in Teilen für den IFC-Export: je Dachfläche ein Körper (alle Schichten, Dachfenster-Löcher wie im 3D), dazu die
-/// Attika. Verschnittene Dächer und Gauben ([G5]) liefern ihre Körper nicht je Fläche: ein Teil ohne Fläche.
+/// Attika. Verschnittene Dächer und Gauben ([G5]) werden je Dachfläche geschnitten, Gauben als eigene Teile; scheitert das,
+/// bleibt es ein Teil ohne Fläche.
 pub fn emit_roof_parts(p: &Project, roof_id: &str) -> Result<Vec<RoofPart>, String> {
     let nb = crate::roof_assembly::neighbors_rc(p);
     let Some((ri, roof)) = p.roofs.as_deref().unwrap_or(&[]).iter().enumerate().find(|(_, r)| r.id == roof_id) else { return Ok(Vec::new()) };
-    if crate::roof_assembly::roof_solids_with(p, ri, &nb).is_some() {
+    let g = crate::roof::roof_geometry(&roof.params(), p.roof_base_elevation(roof));
+    let mitre = Mitre::new(&g.planes);
+    let holes = roof_holes_by_plane(p, ri, &g.planes);
+    let layers: Vec<f64> = p.roof_layers(roof).iter().map(|l| l.thickness.max(0.0)).filter(|t| *t > EPS).collect();
+    if let Some(solids) = crate::roof_assembly::roof_solids_with(p, ri, &nb) {
+        let planes_ok: Vec<bool> = g.planes.iter().map(|pl| pl.len() >= 3).collect();
+        let body = |i: usize| if planes_ok.get(i).copied().unwrap_or(false) { roof_plane_body(&layers, &mitre, &holes[i], i) } else { (Vec::new(), Vec::new()) };
+        if let Some(parts) = split_assembled(&solids, g.planes.len(), &body) {
+            return Ok(parts);
+        }
         let (mut positions, mut indices) = (Vec::<f64>::new(), Vec::<u32>::new());
         for m in emit_roofs(p, Some(roof_id))? {
             let at = (positions.len() / 3) as u32;
             positions.extend_from_slice(&m.positions);
             indices.extend(m.indices.iter().map(|i| at + i));
         }
-        return Ok(if indices.is_empty() { Vec::new() } else { vec![RoofPart { plane: None, positions, indices }] });
+        return Ok(if indices.is_empty() { Vec::new() } else { vec![RoofPart { plane: None, name: None, positions, indices }] });
     }
-    let g = crate::roof::roof_geometry(&roof.params(), p.roof_base_elevation(roof));
-    let mitre = Mitre::new(&g.planes);
-    let holes = roof_holes_by_plane(p, ri, &g.planes);
-    let layers: Vec<f64> = p.roof_layers(roof).iter().map(|l| l.thickness.max(0.0)).filter(|t| *t > EPS).collect();
     let mut out = Vec::new();
     for (i, plane) in g.planes.iter().enumerate() {
         if plane.len() < 3 {
             continue;
         }
         // Jede Fläche ein eigener, geschlossener Körper: auch entlang der Gratkanten Seitenflächen (Gehrungsebene).
-        let (mut positions, mut indices) = (Vec::new(), Vec::new());
-        let mut offset_above = 0.0;
-        for &t in &layers {
-            let top = mitre.at(i, offset_above);
-            let bottom = mitre.at(i, offset_above + t);
-            if holes[i].is_empty() {
-                push_roof_slab_between(&mut positions, &mut indices, &top, &bottom, &vec![false; top.len()]);
-            } else {
-                push_roof_slab_with_holes(&mut positions, &mut indices, &top, &bottom, &vec![false; top.len()], &holes[i], offset_above, offset_above + t);
-            }
-            offset_above += t;
-        }
+        let (positions, indices) = roof_plane_body(&layers, &mitre, &holes[i], i);
         if !indices.is_empty() {
-            out.push(RoofPart { plane: Some(i), positions, indices });
+            out.push(RoofPart { plane: Some(i), name: None, positions, indices });
         }
     }
     if let Some(pp) = crate::roof_parapet::parapet(roof, &g) {
         let m = crate::roof_parapet::mesh(&pp);
-        out.push(RoofPart { plane: None, positions: m.positions, indices: m.indices });
+        out.push(RoofPart { plane: None, name: Some("Attika".into()), positions: m.positions, indices: m.indices });
     }
     Ok(out)
 }

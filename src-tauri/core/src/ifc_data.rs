@@ -1903,10 +1903,10 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
             slab_q.push(qty::Qty { name: "GrossVolume", kind: qty::QtyKind::Volume, value: volume });
             slab_q.push(qty::Qty { name: "NetVolume", kind: qty::QtyKind::Volume, value: volume });
             slab_psets.extend(qto("Qto_SlabBaseQuantities", slab_q));
-            let part_name = match (plane, parts.len()) {
-                (Some(_), _) => format!("{} {}", name_of_part(roof_type.map(|t| t.name.as_str())), k + 1),
-                (None, 1) => name_of_part(roof_type.map(|t| t.name.as_str())).to_string(),
-                (None, _) => "Attika".to_string(),
+            let part_name = match (plane, &part.name) {
+                (_, Some(n)) => n.clone(),
+                (Some(_), None) => format!("{} {}", name_of_part(roof_type.map(|t| t.name.as_str())), k + 1),
+                (None, None) => name_of_part(roof_type.map(|t| t.name.as_str())).to_string(),
             };
             let (pname, plane_n) = (f.str(&part_name), plane.map_or(-1.0, |i| i as f64));
             f.nums(&[pname, plane_n]);
@@ -2475,6 +2475,21 @@ mod tests {
         let s = strings(&ifc_export_data(&p, &IfcOptions::default()).unwrap());
         assert_eq!(s.iter().filter(|x| *x == "Qto_SlabBaseQuantities").count() >= 2, true);
         assert!(s.iter().any(|x| x == "Pset_SlabCommon") && s.iter().any(|x| x.starts_with("roof/RF1/p")));
+    }
+
+    /// [B5] Verschnittenes Dach mit Gaube: je Dachfläche ein geschlossener Teil, die Gaube als eigener Teil „Gaube 1“.
+    #[test]
+    fn dach_mit_gaube_in_teilen() {
+        let p = crate::dormer::tests::gable_project();
+        let parts = model3d::emit_roof_parts(&p, "R1").unwrap();
+        assert!(parts.iter().filter(|x| x.plane.is_some()).count() >= 2, "{}", parts.len());
+        let g: Vec<_> = parts.iter().filter(|x| x.name.as_deref() == Some("Gaube 1")).collect();
+        assert_eq!(g.len(), 1);
+        for x in &parts {
+            assert!(is_watertight(&x.positions, &x.indices, 1e-6), "{:?} {:?}", x.plane, x.name);
+        }
+        let s = strings(&ifc_export_data(&p, &IfcOptions::default()).unwrap());
+        assert!(s.iter().any(|x| x == "Gaube 1"));
     }
 
     /// [148] Flachdach auf L-Umriss: IFC-Mengen aus dem echten Umriss (60 m², nicht 66 m² Bounding-Box),
