@@ -11,7 +11,7 @@
 // Der Auftrag (Szene aus dem Kern, Prozess, Bild) liegt in beiden Fällen im Hauptfenster: `state/renderJob.ts`.
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { t } from "../i18n";
+import { getLanguage, t } from "../i18n";
 import { useModalFocus } from "./modalFocus";
 import { BLENDER_DOWNLOAD_URL, RENDER_QUALITY_PRESETS, hasExportView, paperPixels, sunPosition } from "../core";
 import { setRenderDialogOpener } from "../state/renderDialogHook";
@@ -51,6 +51,59 @@ const toInputValue = (d: Date): string => {
 };
 
 const MAX_EDGE = 16000;
+
+/** Datum in der Schreibweise der UI-Sprache ([283]: `datetime-local` folgt der Browser-Locale, de-UI zeigte US-Format). */
+const formatDay = (ymd: string): string => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd);
+  if (!m) return ymd;
+  return getLanguage() === "de" ? `${m[3]}.${m[2]}.${m[1]}` : ymd;
+};
+const parseDay = (txt: string): string | null => {
+  const s = txt.trim();
+  const m = getLanguage() === "de" ? /^(\d{1,2})\.(\d{1,2})\.(\d{4})$/.exec(s) : /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(s);
+  if (!m) return null;
+  const [y, mo, d] = getLanguage() === "de" ? [m[3], m[2], m[1]] : [m[1], m[2], m[3]];
+  const iso = `${y}-${mo.padStart(2, "0")}-${d.padStart(2, "0")}`;
+  const dt = new Date(`${iso}T00:00`);
+  return Number.isFinite(dt.getTime()) && dt.getMonth() + 1 === Number(mo) ? iso : null;
+};
+
+/** Datum (TT.MM.JJJJ bzw. JJJJ-MM-TT) und Uhrzeit (24 h) als zwei Felder; `value` ist `JJJJ-MM-TTThh:mm`. */
+function DateTimeField({ value, label, disabled, onChange }: { value: string; label: string; disabled: boolean; onChange: (v: string) => void }) {
+  const [ymd, hm] = value.split("T");
+  const [draft, setDraft] = useState<string | null>(null);
+  const commit = () => {
+    const iso = draft === null ? null : parseDay(draft);
+    if (iso) onChange(`${iso}T${hm ?? "12:00"}`);
+    setDraft(null);
+  };
+  return (
+    <div className="render-time-row" role="group" aria-label={label} data-testid="render-time">
+      <input
+        className="imp-input imp-input-flush"
+        type="text"
+        inputMode="numeric"
+        aria-label={`${label}: ${t("render.time.date")}`}
+        placeholder={getLanguage() === "de" ? "TT.MM.JJJJ" : "YYYY-MM-DD"}
+        data-testid="render-time-date"
+        value={draft ?? formatDay(ymd ?? "")}
+        disabled={disabled}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => e.key === "Enter" && commit()}
+      />
+      <input
+        className="imp-input imp-input-flush"
+        type="time"
+        aria-label={`${label}: ${t("render.time.clock")}`}
+        data-testid="render-time-clock"
+        value={hm ?? ""}
+        disabled={disabled}
+        onChange={(e) => e.target.value && onChange(`${ymd}T${e.target.value}`)}
+      />
+    </div>
+  );
+}
 
 export interface RenderDialogViewProps {
   info: RenderSetupInfo;
@@ -362,7 +415,7 @@ export function RenderDialogView({ info, job, imageSrc, commands, onClose, windo
               </section>
               <section className="imp-section">
                 <div className="imp-section-title">{t("render.time")}</div>
-                <input className="imp-input imp-input-flush" type="datetime-local" aria-label={t("render.time")} data-testid="render-time" value={when} disabled={busy} onChange={(e) => setWhen(e.target.value)} />
+                <DateTimeField value={when} label={t("render.time")} disabled={busy} onChange={setWhen} />
                 {sun && (
                   <div className="imp-note" data-testid="render-sun">
                     {t("render.sun", { az: sun.azimuth.toFixed(0), el: sun.elevation.toFixed(0) })}

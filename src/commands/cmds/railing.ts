@@ -53,6 +53,7 @@ export const railingReq = (pts: Vec2[], closed: boolean) => ({
   pts: pts.map(xy),
 });
 
+const RAILING_DONE = { key: "cmd.railing.done", kind: "info" } as const;
 const appendRailing = (pts: Vec2[], closed: boolean, ctx: CommandContext) => createMutation(ctx, railingReq(pts, closed));
 
 interface RailIdle extends CommandState {
@@ -124,7 +125,7 @@ export const railingCommand: Command = {
       }
       // Schliessen: Treppenauge/Galerie ringsum (≥ 3 Punkte).
       if (input.id === "close" && s.points.length >= 3) {
-        return [{ phase: "start", lastPoint: null } as RailIdle, { draft: null, done: true, commit: appendRailing(s.points, true, ctx) }];
+        return [{ phase: "start", lastPoint: null } as RailIdle, { draft: null, done: true, commit: appendRailing(s.points, true, ctx), notice: RAILING_DONE }];
       }
       return [s, { draft: draft() }];
     }
@@ -137,7 +138,7 @@ export const railingCommand: Command = {
     }
     // Klick nahe Startpunkt → Zug schliessen und committen.
     if (s.points.length >= 3 && segLen(s.points[0], pt) < CLOSE_HIT) {
-      return [{ phase: "start", lastPoint: null } as RailIdle, { draft: null, done: true, commit: appendRailing(s.points, true, ctx) }];
+      return [{ phase: "start", lastPoint: null } as RailIdle, { draft: null, done: true, commit: appendRailing(s.points, true, ctx), notice: RAILING_DONE }];
     }
     // Null-Strecke (Klick auf denselben Punkt) ignorieren.
     if (segLen(s.points[s.points.length - 1], pt) < EPS) return [s, { draft: draft() }];
@@ -157,7 +158,7 @@ export const railingCommand: Command = {
   onConfirm: (state, ctx): [CommandState, CommandResult] => {
     const s = state as RailState;
     if (s.phase === "next" && s.points.length >= 2) {
-      return [{ phase: "start", lastPoint: null } as RailIdle, { draft: null, done: true, commit: appendRailing(s.points, false, ctx) }];
+      return [{ phase: "start", lastPoint: null } as RailIdle, { draft: null, done: true, commit: appendRailing(s.points, false, ctx), notice: RAILING_DONE }];
     }
     return idle();
   },

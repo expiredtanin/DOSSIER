@@ -167,6 +167,7 @@ export function RenovationSanierung({ project }: { project: Project }) {
                       className="reno-link-btn"
                       data-testid="reno-pair-renovate-all"
                       disabled={pr.elements === 0 || pr.renovated === pr.elements}
+                      title={pr.elements === 0 ? t("renovation.panel.sanierung.renovateAll.none") : pr.renovated === pr.elements ? t("renovation.panel.sanierung.renovateAll.done") : undefined}
                       onClick={() => applyChange((p) => renovateAllOfTypeOps(p, pr.type, host))}
                     >
                       {t((host === "wall" ? "renovation.panel.sanierung.renovateAll" : `renovation.panel.sanierung.renovateAll.${host}`) as TranslationKey)}

@@ -87,7 +87,7 @@ export const traegerCommand: Command = {
     }
     const a = s.a as Vec2;
     if (Math.hypot(input.point.x - a.x, input.point.y - a.y) < EPS) return [s, { draft: draftTo(a, a, ctx) }];
-    return [{ phase: "done", lastPoint: null } as BeamState, { draft: null, done: true, commit: createMutation(ctx, request(a, input.point)) }];
+    return [{ phase: "done", lastPoint: null } as BeamState, { draft: null, done: true, commit: createMutation(ctx, request(a, input.point)), notice: { key: "cmd.beam.done", kind: "info" } }];
   },
 
   onMove: (state, point, _snap, ctx): [CommandState, CommandResult] => {

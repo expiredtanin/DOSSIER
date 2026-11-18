@@ -253,7 +253,7 @@ längere Rechenzeit. Es bleibt eine Vorschau; Endbilder gehen über das Renderin
 3D-Ansicht mit dem in Dossier eingebauten Cycles, ohne dass Blender installiert sein muss. Unter „Renderer“ steht „Eingebaut (Cycles)“
 als Vorgabe, wenn die App es mitbringt; sonst bleibt „Blender“ (installiertes Blender ab 3.6). Im Browser ist die Wahl ausgegraut
 („Nur in der Desktop-App“). Gewählt werden „Kamera“ („Aktuelle 3D-Ansicht“ oder eine gespeicherte Kamera, die ihre Sonnenzeit mitbringt),
-„Bildgrösse“ (von „Vorschau, 960 × 540“ bis A2 bei 300 dpi), „Qualität“ („Vorschau (32 Samples)“, „Normal (128 Samples)“,
+„Bildgrösse“ (von „Klein, 960 × 540“ bis A2 bei 300 dpi), „Qualität“ („Entwurf (32 Samples)“, „Normal (128 Samples)“,
 „Hoch (512 Samples)“), „Datum und Uhrzeit der Sonne“ sowie „Gelände und Umgebung (Kontext) zeigen“, „Entrauschen (OIDN)“ und die
 „Belichtung (EV, 0 = automatisch)“. **Rendern** startet; der Balken zeigt „Rendern: Sample n von N“, die verstrichene Zeit und eine
 Schätzung der Restzeit, **Rendering abbrechen** beendet den Lauf. Beim allerersten Start übersetzt Cycles auf dem Mac seine Rechenkerne

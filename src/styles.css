@@ -6214,6 +6214,18 @@ body {
   font-size: 13px;
   color: var(--ink);
 }
+/* [283] Rendering-Dialog: Datum und Uhrzeit nebeneinander */
+.render-time-row {
+  display: flex;
+  gap: 6px;
+}
+.render-time-row .imp-input.imp-input-flush:first-child {
+  flex: 1 1 auto;
+}
+.render-time-row .imp-input.imp-input-flush:last-child {
+  flex: 0 0 116px;
+  width: 116px;
+}
 /* Suchfeld ohne Checkbox-Einrückung (Kürzel-Übersicht). */
 .imp-input.imp-input-flush {
   margin-left: 0;
@@ -10091,8 +10103,16 @@ body {
   flex: 1 1 auto;
   font-weight: 600;
 }
+.rm-design-option {
+  flex-wrap: wrap;
+}
 .rm-option-name {
-  flex: 1 1 auto;
+  flex: 1 1 9em;
+  min-width: 9em;
+}
+.rm-option-name .inline-name-text {
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .rm-design-option-primary {
   flex: 0 0 auto;
@@ -10255,7 +10275,6 @@ body {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding-left: 22px;
 }
 .dop-check input {
   margin: 0 4px 0 0;

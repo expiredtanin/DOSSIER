@@ -46,7 +46,7 @@ const idle = (): RampState => ({ phase: "start", points: [], cursor: null, lastP
 
 function commit(s: RampState, percent: number, ctx: CommandContext): [CommandState, CommandResult] {
   const req = { cmd: "ramp", pts: s.points.map(xy), from: xy(s.from!), to: xy(s.to!), percent };
-  return [idle(), { draft: null, done: true, commit: createMutation(ctx, req) }];
+  return [idle(), { draft: null, done: true, commit: createMutation(ctx, req), notice: { key: "cmd.ramp.done", kind: "info" } }];
 }
 
 const closeOutline = (s: RampState): [CommandState, CommandResult] => {

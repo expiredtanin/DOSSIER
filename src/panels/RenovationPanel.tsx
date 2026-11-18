@@ -178,6 +178,17 @@ export function RenovationPanel() {
             {RENOVATION_STATUSES.map((s) => (
               <ShowChip key={s} st={sw[s]} status={s} show={shows[s]} />
             ))}
+            {/* [283] Etappen mit eigenen Farben: Muster wie im Plan (Abbruch/Neu je Etappe) */}
+            {phases.filter((ph) => rs.phases[ph.id]).map((ph) => (
+              <span className="reno-chip reno-chip-phase" key={ph.id} data-testid={`reno-chip-phase-${ph.id}`}>
+                <Swatch st={rs.phases[ph.id].demolish} show={shows.demolish} />
+                <Swatch st={rs.phases[ph.id].new} show={shows.new} />
+                <span className="reno-chip-text">
+                  <span className="reno-chip-status">{ph.name}</span>
+                  <span className="reno-chip-show">{t("renovation.status.demolish")} · {t("renovation.status.new")}</span>
+                </span>
+              </span>
+            ))}
           </div>
         )}
       </div>
