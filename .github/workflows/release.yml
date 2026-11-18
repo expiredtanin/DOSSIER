@@ -73,6 +73,8 @@ jobs:
           for s in core truck engine3d engine fileio; do
             npm run "build:$s" || npm run "build:$s" -- --no-opt
           done
+      # PDF-/IFC-Prüfungen in vitest brauchen poppler und numpy (wie check.yml unter Linux); sonst schlagen sie absichtlich fehl.
+      - run: brew install poppler && python3 -m pip install --break-system-packages ifcopenshell pytest ezdxf numpy
       - run: npm run check -- --fast
       - run: npm run build
       - name: Änderungsliste seit letztem Tag
