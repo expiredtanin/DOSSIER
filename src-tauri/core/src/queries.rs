@@ -400,13 +400,13 @@ pub fn run_bin(p: &Project, name: &str, args: &[f64], text: &str) -> Result<Vec<
     match (name, args.len()) {
         ("planDomains", 1) => crate::plan::domains::plan_domains_buf(p, &crate::plan::domains::PlanArgs::parse_in(p, args[0], text)?),
         // Export-Sammler ([K4], [B5], [C11]): flacher Puffer für `fileio` (Byte-Hülle `export_flat.rs`).
-        ("ifcExportData", 4 | 5) => {
-            // 5. Argument [259]: Kontext (Gelände, Nachbarn) mitgeben.
+        ("ifcExportData", 4..=6) => {
+            // 5. Argument [259]: Kontext (Gelände, Nachbarn) mitgeben; 6. [253]: Entourage mitgeben.
             // [272] `text` = Zeitstempel (ISO) oder `{"iso", "designOptions", "renovation"}`: Kombination der Ansicht.
             let json_text = text.trim_start().starts_with('{');
             let iso = if json_text { serde_json::from_str::<serde_json::Value>(text).ok().and_then(|v| v.get("iso").and_then(|x| x.as_str()).map(String::from)).unwrap_or_default() } else { text.to_string() };
             let q = options_state(p, text);
-            let opt = crate::ifc_data::IfcOptions { now: args[0], ifc2x3: args[1] != 0.0, ebkph: args[2] != 0.0, layer_codes: args[3] != 0.0, context: args.get(4).is_some_and(|v| *v != 0.0), iso };
+            let opt = crate::ifc_data::IfcOptions { now: args[0], ifc2x3: args[1] != 0.0, ebkph: args[2] != 0.0, layer_codes: args[3] != 0.0, context: args.get(4).is_some_and(|v| *v != 0.0), entourage: args.get(5).is_some_and(|v| *v != 0.0), iso };
             crate::ifc_data::ifc_export_data(&q, &opt).map(|f| f.to_bytes())
         }
         ("meshExportData", 3 | 4) => {

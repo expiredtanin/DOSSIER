@@ -1142,6 +1142,38 @@ fn baum_als_geografisches_element() {
     }
 }
 
+/// [253] Möbel: IFC4 IfcFurniture (PredefinedType), IFC2x3 IfcFurnishingElement, Entourage als Proxy „Entourage"; im Geschoss
+/// enthalten, GlobalId aus `furniture/<id>`.
+#[test]
+fn moebel_als_ifc_furniture() {
+    for v2 in [false, true] {
+        let mut b = mini_in(if v2 { B::v2() } else { B::new() });
+        for (id, name, kind, entourage) in [("M1", "Tisch 80x140", "TABLE", 0.0), ("P1", "Person stehend", "NOTDEFINED", 1.0)] {
+            b.n(&[REC_FURNITURE, -1.0]);
+            b.str(id);
+            b.str(name);
+            b.str(&format!("lib:{id}"));
+            b.str(kind);
+            b.n(&[entourage]);
+            b.qto("Dossier_Qto_Tree", &[("Height", 3.0, 1.0)]);
+            b.n(&[4.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 12.0]);
+            b.n(&[4.0, 0.0, 2.0, 1.0, 0.0, 1.0, 3.0, 1.0, 2.0, 3.0, 0.0, 3.0, 2.0, 0.0]);
+        }
+        let ifc = build(&b).unwrap();
+        check_structure(&ifc);
+        let ty = if v2 { "IFCFURNISHINGELEMENT" } else { "IFCFURNITURE" };
+        assert_eq!(count(&ifc, ty), 1, "{ifc}");
+        assert_eq!(count(&ifc, "IFCBUILDINGELEMENTPROXY"), 1);
+        let line = ifc.lines().find(|l| l.contains(&format!("={ty}("))).unwrap();
+        assert!(line.contains("'Tisch 80x140'") && line.contains("'lib:M1'"), "{line}");
+        assert_eq!(line.ends_with(".TABLE.);"), !v2, "{line}");
+        assert!(line.contains(&ifc_guid("t/furniture/M1")), "{line}");
+        let proxy = ifc.lines().find(|l| l.contains("=IFCBUILDINGELEMENTPROXY(")).unwrap();
+        assert!(proxy.contains("'Entourage'"), "{proxy}");
+        assert_eq!(count(&ifc, "IFCRELCONTAINEDINSPATIALSTRUCTURE"), 1);
+    }
+}
+
 /// [259] Kontext: Gelände als IfcGeographicElement TERRAIN, Nachbar als Proxy „Kontext"; beide am IfcSite (eigene
 /// Eingliederung, nicht im Gebäude/Geschoss), Klasse als Beschreibung. IFC2x3: beide als Proxy.
 #[test]

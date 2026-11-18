@@ -123,6 +123,9 @@
 //   TREE        = 19 ([149] Baum), structure, id, name, PSETS, MESH (Stamm + Krone, Welt rel. Geschoss-UK)
 //                 IFC4: IfcGeographicElement (ObjectType „Baum", PredefinedType USERDEFINED); IFC2x3 (kennt die
 //                 Klasse nicht): IfcBuildingElementProxy mit ObjectType „Baum". GlobalId aus `tree/<id>`.
+//   FURNITURE   = 29 ([253] Bibliotheksobjekt mit 3D-Netz), structure, id, name, object_type (Katalog-Id), predefined (IfcFurnitureTypeEnum,
+//                 nur IFC4), entourage (0/1), PSETS, MESH (Welt rel. Geschoss-UK): IFC4 IfcFurniture, IFC2x3 IfcFurnishingElement;
+//                 entourage = 1 (Person/Velo/Auto, nur mit Option): IfcBuildingElementProxy, ObjectType „Entourage". GlobalId `furniture/<id>`.
 //   RAILING     = 26 ([279] Geländer), structure, id, name, predefined (GUARDRAIL | HANDRAIL | BALUSTRADE), PSETS, MESH (Prismen,
 //                 Welt rel. Geschoss-UK): IfcRailing mit PredefinedType (IFC4 und IFC2x3). GlobalId aus `railing/<id>`.
 //   CONTEXT     = 24 ([259] Kontext, nur mit Option), kind (0 Netz auf Umgebungsklasse, 1 Gelände), id, name, class
@@ -191,6 +194,8 @@ pub const REC_SPACE_ARC: f64 = 22.0;
 /// [281] Geneigte Decke als Netz (Flag Rampe ⇒ `IfcRamp` + `IfcRampFlight`).
 pub const REC_CEILING_MESH: f64 = 27.0;
 pub const REC_BEAM: f64 = 28.0;
+/// [253] Möbel/Entourage der Bibliothek mit 3D-Netz.
+pub const REC_FURNITURE: f64 = 29.0;
 
 mod format;
 mod reader;
@@ -228,6 +233,7 @@ fn rec_name(code: f64) -> &'static str {
         c if c == REC_RAILING => "RAILING",
         c if c == REC_COLUMN_PIECES => "COLUMN_PIECES",
         c if c == REC_BEAM => "BEAM",
+        c if c == REC_FURNITURE => "FURNITURE",
         _ => "?",
     }
 }
@@ -1126,6 +1132,33 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
                     w.add("IFCBUILDINGELEMENTPROXY", format!("{g},#{},{},$,{},#{placement},#{shape},$,$", w.owner_history, ifc_string(&name), ifc_string("Baum")))
                 } else {
                     w.add("IFCGEOGRAPHICELEMENT", format!("{g},#{},{},$,{},#{placement},#{shape},$,{}", w.owner_history, ifc_string(&name), ifc_string("Baum"), enum_("USERDEFINED")))
+                };
+                w.add_to_containment(structure, entity);
+                w.elements.insert(key.clone(), entity);
+                for p in &psets {
+                    w.add_pset(p, entity, &key);
+                }
+            }
+            c if c == REC_FURNITURE => {
+                let structure = r.structure(n_storeys)?;
+                let id = r.string()?;
+                let name = r.string()?;
+                let object_type = r.string()?;
+                let predefined = r.string()?;
+                let entourage = r.idx()? == 1;
+                let psets = r.psets()?;
+                let mesh = r.mesh()?;
+                let (placement, shape) = w.emit_triangulated_product(&mesh, w.placement_of(structure));
+                let key = format!("furniture/{id}");
+                let g = w.gid(&key);
+                let head = format!("{g},#{},{},$,{},#{placement},#{shape},$", w.owner_history, ifc_string(&name), ifc_string(if entourage { "Entourage" } else { &object_type }));
+                let entity = if entourage {
+                    w.add("IFCBUILDINGELEMENTPROXY", format!("{head},$"))
+                } else if w.v2() {
+                    w.add("IFCFURNISHINGELEMENT", head)
+                } else {
+                    let kind = if ["CHAIR", "TABLE", "DESK", "BED", "FILECABINET", "SHELF", "SOFA", "TECHNICALCABINET", "USERDEFINED"].contains(&predefined.as_str()) { predefined } else { "NOTDEFINED".to_string() };
+                    w.add("IFCFURNITURE", format!("{head},{}", enum_(&kind)))
                 };
                 w.add_to_containment(structure, entity);
                 w.elements.insert(key.clone(), entity);

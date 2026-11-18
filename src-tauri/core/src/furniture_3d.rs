@@ -292,6 +292,26 @@ pub fn bike(p: &Params, _chairs: &[(f64, f64, f64)], b: &mut B3) {
     b.cuboid(cx - 0.06, seat[1] - 0.12, 0.84 * h, cx + 0.06, seat[1] + 0.08, 0.84 * h + 0.04, TYRE);
 }
 
+/// [253] IFC: Personen, Velo und Auto sind Entourage, keine Bauteile (nur mit Option „Entourage mitexportieren").
+pub fn is_entourage(lib_id: &str) -> bool {
+    matches!(lib_id, "lib:person-stehend" | "lib:person-gehend" | "lib:velo" | "lib:auto")
+}
+
+/// [253] IFC-Name aus der Katalog-Id (`lib:tisch-rund-120` → „Tisch rund 120") und `IfcFurnitureTypeEnum` (IFC4).
+pub fn ifc_name_and_type(lib_id: &str) -> (String, &'static str) {
+    let raw = lib_id.strip_prefix("lib:").unwrap_or(lib_id).replace('-', " ");
+    let mut cs = raw.chars();
+    let name = cs.next().map_or(String::new(), |c| c.to_uppercase().chain(cs).collect());
+    let kind = if lib_id.starts_with("lib:tisch") {
+        "TABLE"
+    } else if lib_id.starts_with("lib:stuhl") {
+        "CHAIR"
+    } else {
+        "NOTDEFINED"
+    };
+    (name, kind)
+}
+
 /// Alle Platzierungen einer Instanz in Weltkoordinaten (Modell-x/y, z = absolute Höhe).
 fn place(meshes: &[Mesh3], at: [f64; 2], rot: f64, base: f64) -> Vec<Mesh3> {
     let (c, s) = (cos(rot), sin(rot));

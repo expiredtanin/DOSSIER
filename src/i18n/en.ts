@@ -3348,6 +3348,8 @@ export const en: Record<TranslationKey, string> = {
   "exportSave.ifc.layers": "Model layer (category code) as classification",
   "exportSave.ifc.layersHint": "System “Dossier-Ebenen”: code and name of each element's graphic layer (not a cost plan).",
   "exportSave.ifc.context": "Include context (terrain, neighbouring buildings)",
+  "exportSave.ifc.entourage": "Export entourage (people, bicycles, cars)",
+  "exportSave.ifc.entourageHint": "Furniture (tables, chairs, benches) is always exported as IfcFurniture. People, bicycles and cars are not building elements and only come with this option, as IfcBuildingElementProxy “Entourage”.",
   "exportSave.ifc.contextHint": "Terrain as IfcGeographicElement, meshes on context classes (e.g. 12 Buildings) as IfcBuildingElementProxy “Kontext”, placed on the site instead of a storey. Usually leave off for consultants: they only need the building.",
   "exportSave.ifc.zonesNote": "SIA 416 zones (HNF, NNF …) and floor areas are always included when rooms exist.",
   "exportSave.ifc.schema": "IFC schema",

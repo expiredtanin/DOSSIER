@@ -36,6 +36,8 @@ export interface IfcExportOptions {
    * (IfcBuildingElementProxy „Kontext"), am IfcSite. Ohne Angabe nicht: Fachplaner wollen meist nur das Gebäude.
    */
   context?: boolean;
+  /** [253] Entourage (Person, Velo, Auto) als IfcBuildingElementProxy „Entourage" mitgeben; Möbel gehen immer als IfcFurniture. */
+  entourage?: boolean;
   /** [271][272] Ansicht der Ausgabe: Umbaufilter und Variantenkombination (ohne Angabe kein Filter, Hauptvarianten). */
   view?: ExportView;
 }
@@ -82,7 +84,7 @@ export function decodeExportFlat(bytes: Uint8Array): [Float64Array, string] {
 export function exportIfcSpf(project: Project, options: IfcExportOptions = {}): string {
   const now = Date.now();
   const iso = new Date(now).toISOString().replace(/\.\d+Z$/, "");
-  const args = [Math.floor(now / 1000), options.schema === "IFC2X3" ? 1 : 0, options.ebkph ? 1 : 0, options.layerCodes ? 1 : 0, options.context ? 1 : 0];
+  const args = [Math.floor(now / 1000), options.schema === "IFC2X3" ? 1 : 0, options.ebkph ? 1 : 0, options.layerCodes ? 1 : 0, options.context ? 1 : 0, options.entourage ? 1 : 0];
   const [buf, strings] = decodeExportFlat(documentFor(project).queryBin("ifcExportData", args, exportViewText(options.view, { iso })));
   const m = fileio();
   const text = m.export_ifc_flat(buf, strings);

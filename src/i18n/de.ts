@@ -3016,6 +3016,8 @@ export const de = {
   "exportSave.ifc.layers": "Ebene (Kategorie-Code) des Modells als Klassifikation",
   "exportSave.ifc.layersHint": "System «Dossier-Ebenen»: Code und Name der Grafik-Ebene jedes Bauteils (kein Baukostenplan).",
   "exportSave.ifc.context": "Kontext mitgeben (Gelände, Nachbargebäude)",
+  "exportSave.ifc.entourage": "Entourage mitexportieren (Personen, Velos, Autos)",
+  "exportSave.ifc.entourageHint": "Möbel (Tische, Stühle, Bänke) gehen immer als IfcFurniture mit. Personen, Velos und Autos sind keine Bauteile und kommen nur mit dieser Option, als IfcBuildingElementProxy «Entourage».",
   "exportSave.ifc.contextHint": "Gelände als IfcGeographicElement, Netze auf Umgebungsklassen (z. B. 12 Gebäude) als IfcBuildingElementProxy «Kontext», am Grundstück statt im Geschoss. Für Fachplaner meist aus lassen: sie brauchen nur das Gebäude.",
   "exportSave.ifc.zonesNote": "SIA-416-Zonen (HNF, NNF …) und Geschossflächen sind immer enthalten, sobald Räume vorhanden sind.",
   "exportSave.ifc.schema": "IFC-Schema",
