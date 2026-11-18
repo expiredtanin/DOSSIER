@@ -2012,6 +2012,8 @@ fn domains_before(c: &Ctx, out: &mut DomainPrims, bounds: &mut Bounds) -> Result
     super::wall_columns::hide_column_views(&mut out.columns, &filled(&out.walls, false));
     // [149] Bäume (Planzeichen) mit den Stützen in einer Gruppe.
     super::trees::plan_trees(c, &mut out.columns);
+    // [279] Geländer mit den Stützen in einer Gruppe.
+    super::railings::plan_railings(c, &mut out.columns);
     solids(c, &mut out.solids);
     // [271] Umbaufilter: Decken, Dächer, Treppen, Stützen und Körper in ihrer Umbau-Farbe (Wände: `plan_walls`).
     if c.renovation().is_some() {

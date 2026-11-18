@@ -237,6 +237,7 @@ pub fn elevation_primitives_ren(p: &Project, level: &LevelSpec, shadows: bool, m
     cull_under_roofs(p, &frame, &walls, &mut faces, &|c| vis.visible(c) && vis.render(c));
     faces.extend(collect_roof_faces(p, &frame, &walls)?);
     faces.extend(collect_column_faces(p, &frame));
+    faces.extend(collect_railing_faces(p, &frame));
     faces.extend(collect_mesh_faces(p, &frame));
     faces.extend(collect_body_faces(p, &frame));
     faces.extend(collect_shoring_faces(p, &frame));
@@ -261,6 +262,7 @@ pub fn elevation_primitives_ren(p: &Project, level: &LevelSpec, shadows: bool, m
     for r in p.roofs.as_deref().unwrap_or(&[]) {
         roof_cat.entry(r.id.as_str()).or_insert(r.category_code.as_str());
     }
+    let rail_cat: HashMap<&str, &str> = p.railings.as_deref().unwrap_or(&[]).iter().map(|r| (r.id.as_str(), r.category_code.as_str())).collect();
     let mut col_cat: HashMap<&str, &str> = HashMap::new();
     for c in p.columns.as_deref().unwrap_or(&[]) {
         col_cat.entry(c.id.as_str()).or_insert(c.category_code.as_str());
@@ -292,6 +294,7 @@ pub fn elevation_primitives_ren(p: &Project, level: &LevelSpec, shadows: bool, m
             Role::Slab => ceil_cat.get(f.id.as_str()).copied(),
             Role::Roof => roof_cat.get(f.id.as_str()).copied(),
             Role::Column => col_cat.get(f.id.as_str()).copied(),
+            Role::Railing => rail_cat.get(f.id.as_str()).copied(),
             Role::Mesh => mesh_cat.get(f.id.as_str()).copied(),
             Role::Body => body_cat.get(f.id.as_str()).copied(),
         }
@@ -505,6 +508,7 @@ pub fn elevation_primitives_ren(p: &Project, level: &LevelSpec, shadows: bool, m
                         Role::Slab => *ceiling_id = Some(f.id.clone()),
                         Role::Roof => *roof_id = Some(f.id.clone()),
                         Role::Column => *column_id = Some(f.id.clone()),
+                        Role::Railing => *context_object_id = Some(super::railings::pick_id(&f.id)),
                         Role::Mesh => *context_object_id = Some(f.id.clone()),
                         Role::Body => *extruded_solid_id = Some(f.id.clone()),
                     }

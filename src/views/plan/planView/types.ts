@@ -156,6 +156,8 @@ export interface PlanSelection {
    * Öffnung/Wand/Stütze/2D-Element/Körper getroffen wurde; Vorrang vor Decke, Raum, Dach und Gelände.
    */
   treeId?: string | null;
+  /** [279] Getroffenes Geländer (Pick-Fläche um die Achse, Pick-Id `@railing:<id>` im Feld `contextObjectId`); Vorrang wie der Baum. */
+  railingId?: string | null;
   /** [213] Getroffene Kamera (Sichtkegel/Gehäuse, Pick-Id `@camera:<id>` im Feld `contextObjectId`); Vorrang vor allem ausser Öffnung/Wand/Stütze/2D-Element/Körper/Baum. */
   cameraId?: string | null;
   /**
@@ -187,6 +189,8 @@ export interface MarqueeSelection {
   stairIds: string[];
   /** [149] Getroffene Bäume (Kronenfläche, gleiche Konvention). */
   treeIds?: string[];
+  /** [279] Getroffene Geländer (Pick-Flächen um die Achse, gleiche Konvention). */
+  railingIds?: string[];
   /** [213] Getroffene Kameras (Pick-Flächen von Gehäuse und Sichtgrenzen, gleiche Konvention). */
   cameraIds?: string[];
   /**

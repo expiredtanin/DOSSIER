@@ -556,7 +556,11 @@ pub fn section_primitives_mv(out: &Output, mono: bool, hidden_lines: bool, vis: 
             // [152] Importiertes Netz: Pick über die Kontext-Id.
             *context_object_id = if cp.kind == Kind::Mesh { src.clone() } else { None };
             *wall_id = if cp.kind == Kind::Wall { src.clone() } else { None };
-            *ceiling_id = if cp.kind == Kind::Slab && cp.stair_id.is_none() { src.clone() } else { None };
+            *ceiling_id = if cp.kind == Kind::Slab && cp.stair_id.is_none() && cp.railing_id.is_none() { src.clone() } else { None };
+            // [279] Geländer: Pick über die Kontext-Id `@railing:<id>`.
+            if let Some(r) = &cp.railing_id {
+                *context_object_id = Some(crate::plan::railings::pick_id(r));
+            }
             *roof_id = if cp.kind == Kind::Roof { src.clone() } else { None };
             *stair_id = cp.stair_id.clone();
             *extruded_solid_id = if cp.kind == Kind::Body { src } else { None };

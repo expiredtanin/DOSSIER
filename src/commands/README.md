@@ -28,7 +28,7 @@ Ribbon-Befehle sie erreichen: `src/state/useToolInput.ts`.
 
 | Gruppe | Module |
 |---|---|
-| Bauteile | `wall.ts`, `opening.ts`, `ceiling.ts`, `ceilingOpening.ts`, `roof.ts`, `roofHole.ts`, `roofWindow.ts`, `dormer.ts`, `stair.ts`, `column.ts`, `room.ts`, `grid.ts`, `tree.ts`, `terrain.ts`, `excavation.ts` |
+| Bauteile | `wall.ts`, `opening.ts`, `ceiling.ts`, `ceilingOpening.ts`, `roof.ts`, `roofHole.ts`, `roofWindow.ts`, `dormer.ts`, `stair.ts`, `column.ts`, `room.ts`, `grid.ts`, `tree.ts`, `railing.ts`, `terrain.ts`, `excavation.ts` |
 | Körper | `solid.ts`, `solidbool.ts`, `solidToParts.ts` (Körper → Bauteile, [222]), `voidbox.ts`, `extrude.ts`, `revolve.ts`, `loft.ts` |
 | 2D zeichnen | `line.ts`, `xline.ts`, `ray.ts`, `polyline.ts`, `polygon.ts`, `rect.ts`, `circle.ts`, `arc.ts`, `ellipse.ts`, `bezier.ts`, `spline.ts`, `multiline.ts`, `revcloud.ts`, `wipeout.ts`, `block.ts`, `defblock.ts`, `libobj.ts` (Objekt aus der Bibliothek setzen, [253]) |
 | Beschriften | `text.ts`, `textbox.ts`, `textpath.ts`, `leader.ts`, `dimension.ts`, `dimround.ts`, `dimdetach.ts`, `autodim.ts`, `kote.ts`, `detailref.ts`, `pointmarker.ts`, `scalebar.ts`, `sectionline.ts` |

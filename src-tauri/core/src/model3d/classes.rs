@@ -32,6 +32,8 @@ pub enum Owner {
     Roof(usize),
     Column(usize),
     Tree(usize),
+    /// [279] Index in `Project::railings`.
+    Railing(usize),
     Stair(usize),
     Context(usize),
     /// [115] Index in `Project::extruded_solids`.
@@ -49,6 +51,7 @@ impl Owner {
             Owner::Roof(i) => at(&p.roofs, i).map(|e| e.id.as_str()),
             Owner::Column(i) => at(&p.columns, i).map(|e| e.id.as_str()),
             Owner::Tree(i) => at(&p.trees, i).map(|e| e.id.as_str()),
+            Owner::Railing(i) => at(&p.railings, i).map(|e| e.id.as_str()),
             Owner::Stair(i) => at(&p.stairs, i).map(|e| e.id.as_str()),
             Owner::Context(i) => at(&p.context, i).map(|e| e.id()),
             Owner::Solid(i) => at(&p.extruded_solids, i).map(|e| e.id.as_str()),
@@ -157,6 +160,9 @@ impl ClassFilter {
         for t in p.trees.as_deref().unwrap_or(&[]) {
             add(&t.category_code, &t.id, &t.floor_id);
         }
+        for t in p.railings.as_deref().unwrap_or(&[]) {
+            add(&t.category_code, &t.id, &t.floor_id);
+        }
         for s in p.extruded_solids.as_deref().unwrap_or(&[]) {
             add(&s.category_code, &s.id, "");
         }
@@ -187,6 +193,7 @@ impl ClassFilter {
                 .chain(p.stairs.iter().flatten().map(|s| &s.id))
                 .chain(p.columns.iter().flatten().map(|c| &c.id))
                 .chain(p.trees.iter().flatten().map(|t| &t.id))
+                .chain(p.railings.iter().flatten().map(|t| &t.id))
                 .chain(p.extruded_solids.iter().flatten().map(|s| &s.id))
                 .chain(p.drawings2d.iter().map(|d| &d.id))
                 .chain(p.openings.iter().flatten().map(|o| &o.id));
@@ -306,6 +313,7 @@ impl ClassFilter {
         g.stair_meshes.retain(|s| k(&s.stair_id));
         g.drawing_meshes.retain(|d| k(&d.drawing_id));
         g.trees.retain(|t| k(&t.tree_id));
+        g.railings.retain(|t| k(&t.railing_id));
     }
 }
 
@@ -321,6 +329,7 @@ pub fn parts_filtered(p: &Project, layered: bool, detail: f64, for_section: bool
         column_meshes: {
             let mut m = emit_columns(p);
             m.extend(emit_trees(p));
+            m.extend(emit_railings(p));
             m
         },
         opening_meshes: emit_opening_meshes_with(p, detail, &|o| f.keep_opening(o)),

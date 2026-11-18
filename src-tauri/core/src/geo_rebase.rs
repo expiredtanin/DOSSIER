@@ -118,6 +118,9 @@ pub fn translate_project(p: &Project, dx: f64, dy: f64) -> Project {
     for t in out.trees.iter_mut().flatten() {
         t.position = shift(t.position, dx, dy);
     }
+    for r in out.railings.iter_mut().flatten() {
+        shift_all(&mut r.points, dx, dy);
+    }
     for c in out.cameras.iter_mut().flatten() {
         c.position = shift(c.position, dx, dy);
         c.target = shift(c.target, dx, dy);

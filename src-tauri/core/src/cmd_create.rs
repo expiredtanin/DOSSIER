@@ -999,6 +999,48 @@ fn tree_ops(p: &Project, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
     add_op("trees", vec![obj(f)])
 }
 
+/// [279] Geländer über die Punkte `pts` (Polylinie, mindestens zwei verschiedene) auf dem aktiven Geschoss: Ebene „41"
+/// (Geländer), falls vorhanden, sonst die aktive. Art, Höhe (Vorgabe 1.00 m), Fusshöhe, Handlauf, Stababstand, Stabquerschnitt,
+/// Dicke und Bauteil aus den Werkzeug-Vorgaben; fehlende oder unsinnige Werte bleiben weg (Vorgaben aus `railing.rs`).
+/// `closed` mit mindestens drei Punkten schliesst den Zug.
+fn railing_ops(p: &Project, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
+    let mut pts: Vec<V> = pts_of(v, "pts").into_iter().filter(|q| q.0.is_finite() && q.1.is_finite()).collect();
+    pts.dedup_by(|a, b| (a.0 - b.0).abs() < 1e-6 && (a.1 - b.1).abs() < 1e-6);
+    if pts.len() < 2 {
+        return Vec::new();
+    }
+    let pos = |k: &str| opt_n(v, k).filter(|x| *x > 0.0 && x.is_finite());
+    let kind = ["bars", "glass", "solid", "perforated"].into_iter().find(|a| *a == s_of(v, "kind")).unwrap_or("bars");
+    let mut f = vec![
+        ("id", s(&ids.next("railing"))),
+        ("type", s("railing")),
+        ("floorId", s(ctx.level)),
+        ("categoryCode", category_or(p, crate::railing::CATEGORY, ctx)),
+        ("points", pvs(&pts)),
+        ("height", js_num(pos("height").unwrap_or(crate::railing::DEFAULT_HEIGHT))),
+        ("kind", s(kind)),
+    ];
+    if v.get("closed").and_then(Value::as_bool) == Some(true) && pts.len() >= 3 {
+        f.push(("closed", Value::Bool(true)));
+    }
+    if let Some(b) = opt_n(v, "baseOffset").filter(|x| x.is_finite() && *x != 0.0) {
+        f.push(("baseOffset", js_num(b)));
+    }
+    if let Some(h) = v.get("handrail").and_then(Value::as_bool) {
+        f.push(("handrail", Value::Bool(h)));
+    }
+    for k in ["barSpacing", "barSize", "thickness", "handrailSize"] {
+        if let Some(x) = pos(k) {
+            f.push((k, js_num(x)));
+        }
+    }
+    let comp = s_of(v, "componentId");
+    if kind == "solid" && !comp.is_empty() {
+        f.push(("componentId", s(comp)));
+    }
+    add_op("railings", vec![obj(f)])
+}
+
 /// [149] „Kreise in Bäume umwandeln": die gewählten Kreise (`ids`), sonst alle Kreise der Baum-Ebene auf der
 /// aktiven Ebene, werden Baum-Objekte (Kronendurchmesser = Kreisdurchmesser, Höhe = `sunStudy.treeHeight`
 /// bzw. Vorgabe, Ebene und Geschoss des Kreises); die Kreise entfallen. Ein Undo-Schritt.
@@ -1156,6 +1198,7 @@ pub fn ops(root: &Map<String, Value>, p: &Project, v: &Value) -> Option<Vec<Op>>
         "roof" => roof_ops(p, v, &ctx, ids),
         "column" => column_ops(v, &ctx, ids),
         "tree" => tree_ops(p, v, &ctx, ids),
+        "railing" => railing_ops(p, v, &ctx, ids),
         "circlesToTrees" => circles_to_trees_ops(root, p, v, &ctx, ids),
         "extrude" => extrude_ops(root, v, &ctx, ids),
         // [222] Volumenstudie → Bauteile.

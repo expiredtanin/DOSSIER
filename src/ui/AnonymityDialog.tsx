@@ -11,7 +11,7 @@ import { anonymityPlaceParts } from "./anonymityPlace";
 const AREA_KEYS = new Set([
   "rooms", "drawingLevels", "layers", "groups", "blockDefs", "layouts", "masterLayouts", "drawings2d", "walls", "openings",
   "stairs", "columns", "context", "extrudedSolids", "viewSnapshots", "viewSnapshotFolders", "viewTemplates", "layoutFolders",
-  "publishSets", "roomProgram", "export", "cameras", "components", "wallTypes", "textStyles", "ceilings", "roofs", "trees",
+  "publishSets", "roomProgram", "export", "cameras", "components", "wallTypes", "textStyles", "ceilings", "roofs", "trees", "railings",
   "hatches", "lineStyles", "materials",
 ]);
 

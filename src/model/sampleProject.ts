@@ -409,6 +409,8 @@ export const sampleProject: Project = {
     { code: "30", name: "Decken", color: "#1a1a1a", lw: 0.18, visible: true, locked: false },
     { code: "31", name: "Dächer", color: "#1a1a1a", lw: 0.18, visible: true, locked: false },
     { code: "40", name: "Treppen", color: "#1a1a1a", lw: 0.18, visible: true, locked: false },
+    // [279] Geländer (Balkon, Galerie, Treppenauge): eigene Klasse, wie jedes Bauteil abschaltbar.
+    { code: "41", name: "Geländer", color: "#1a1a1a", lw: 0.18, visible: true, locked: false },
     { code: "35", name: "Träger", color: "#0a0a0a", lw: 0.25, visible: true, locked: false },
     { code: "50", name: "Text", color: "#1a1a1a", lw: 0.13, visible: true, locked: false },
     { code: "60", name: "Räume", color: "#4a4a4a", lw: 0.13, visible: true, locked: false },

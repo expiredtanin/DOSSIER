@@ -51,6 +51,7 @@ import { getPlanViewport, subscribePlanViewport } from "./planViewport";
 import { growRect, meshGripIndices } from "../core";
 import { patchItem, verticalExtents } from "../core";
 import { treeGripPatch, treeGripPoints } from "./treeGrips";
+import { railingGripPatch, railingGripPoints } from "./railingGrips";
 import { cameraGripPoints } from "../core";
 import type { Selection } from "./selection";
 
@@ -213,6 +214,9 @@ export function useGripEditing(opts: {
   );
   const selectedTreeId = single(selection, "trees");
   const selectedTree = selectedTreeId ? (project.trees ?? []).find((x) => x.id === selectedTreeId) : undefined;
+  // [279] Geländer: Griffe an allen Achsenpunkten (nur auf dem Geschoss des Geländers).
+  const selectedRailingId = single(selection, "railings");
+  const selectedRailing = selectedRailingId ? (project.railings ?? []).find((x) => x.id === selectedRailingId && x.floorId === levelId) : undefined;
   // [213] Kamera: Griffe an Standpunkt, Ziel und Sichtkegel-Rand (Bildwinkel); nur auf dem Geschoss der Kamera.
   const selectedCameraId = single(selection, "cameras");
   const selectedCamera = selectedCameraId ? (project.cameras ?? []).find((x) => x.id === selectedCameraId && x.floorId === levelId) : undefined;
@@ -278,7 +282,7 @@ export function useGripEditing(opts: {
   // [26] Dach-Griffe: nur bei einzeln gewähltem, nicht gesperrtem Dach und ohne andere Griff-Träger in der Auswahl.
   const roofGripsOn =
     modelEditable && !!selectedRoof && !selectedRoof.locked && !!opts.moveRoofVertex && !selectedCeiling && !selectedRoom &&
-    !selectedExcavation && !selectedTree && !selectedSectionLine && effectiveDrawingIds.length === 0 && selectedWallIds.length === 0;
+    !selectedExcavation && !selectedTree && !selectedRailing && !selectedSectionLine && effectiveDrawingIds.length === 0 && selectedWallIds.length === 0;
   /** Ringe des Dachs in der Reihenfolge des flachen Index (Umriss, dann Höfe) samt Start-Index. */
   const roofRings = (r: Roof): { pts: Vec2[]; off: number; bulge?: number[] }[] => {
     let off = 0;
@@ -519,6 +523,11 @@ export function useGripEditing(opts: {
     }
     if (selectedCamera && modelEditable && !selectedCamera.locked) {
       const pts = cameraGripPoints(selectedCamera, scaleDenominator);
+      pts.forEach((_, i) => { gripOwners.push({ localIndex: i }); gripOwnerRange.push([0, pts.length - 1]); });
+      return pts;
+    }
+    if (selectedRailing && modelEditable && !selectedRailing.locked) {
+      const pts = railingGripPoints(selectedRailing);
       pts.forEach((_, i) => { gripOwners.push({ localIndex: i }); gripOwnerRange.push([0, pts.length - 1]); });
       return pts;
     }
@@ -1259,6 +1268,14 @@ export function useGripEditing(opts: {
     // [213] Kamera: Standpunkt, Ziel bzw. Sichtkegel-Rand live (Kern `camera::grip_edit`), ein Undo-Schritt je Zug.
     if (selectedCamera) {
       if (!selectedCamera.locked) storeState().moveCameraGrip(selectedCamera.id, index, pt);
+      return;
+    }
+    // [279] Geländer: Achsenpunkt live, ein Undo-Schritt je Zug (gleicher coalesceKey).
+    if (selectedRailing) {
+      const rl = selectedRailing;
+      if (rl.locked) return;
+      const patch = railingGripPatch(rl, index, pt);
+      if (patch.points) storeState().applyChange((p) => patchItem(p, "railings", rl.id, patch), `railingGrip:${rl.id}:${index}`);
       return;
     }
     // [149] Baum: Stammmitte, Kronenrand bzw. Beschriftung live, ein Undo-Schritt je Zug (gleicher coalesceKey).

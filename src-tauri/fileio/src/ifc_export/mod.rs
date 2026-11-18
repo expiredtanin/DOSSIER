@@ -114,6 +114,8 @@
 //   TREE        = 19 ([149] Baum), structure, id, name, PSETS, MESH (Stamm + Krone, Welt rel. Geschoss-UK)
 //                 IFC4: IfcGeographicElement (ObjectType „Baum", PredefinedType USERDEFINED); IFC2x3 (kennt die
 //                 Klasse nicht): IfcBuildingElementProxy mit ObjectType „Baum". GlobalId aus `tree/<id>`.
+//   RAILING     = 26 ([279] Geländer), structure, id, name, predefined (GUARDRAIL | HANDRAIL | BALUSTRADE), PSETS, MESH (Prismen,
+//                 Welt rel. Geschoss-UK): IfcRailing mit PredefinedType (IFC4 und IFC2x3). GlobalId aus `railing/<id>`.
 //   CONTEXT     = 24 ([259] Kontext, nur mit Option), kind (0 Netz auf Umgebungsklasse, 1 Gelände), id, name, class
 //                 (Klasse als Text, leer = keine), MESH (Modell-Koordinaten, z absolut). Am IfcSite eingegliedert (nicht
 //                 im Geschoss); Gelände: IfcGeographicElement TERRAIN, sonst IfcBuildingElementProxy (ObjectType „Kontext",
@@ -173,6 +175,7 @@ pub const REC_GUIDS: f64 = 23.0;
 pub const REC_TREE: f64 = 19.0;
 pub const REC_CONTEXT: f64 = 24.0;
 pub const REC_LAYERS: f64 = 25.0;
+pub const REC_RAILING: f64 = 26.0;
 pub const REC_COLUMN_PIECES: f64 = 20.0;
 pub const REC_CEILING_ARC: f64 = 21.0;
 pub const REC_SPACE_ARC: f64 = 22.0;
@@ -209,6 +212,7 @@ fn rec_name(code: f64) -> &'static str {
         c if c == REC_TREE => "TREE",
         c if c == REC_CONTEXT => "CONTEXT",
         c if c == REC_LAYERS => "LAYERS",
+        c if c == REC_RAILING => "RAILING",
         c if c == REC_COLUMN_PIECES => "COLUMN_PIECES",
         _ => "?",
     }
@@ -1065,6 +1069,24 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
                 } else {
                     w.add("IFCGEOGRAPHICELEMENT", format!("{g},#{},{},$,{},#{placement},#{shape},$,{}", w.owner_history, ifc_string(&name), ifc_string("Baum"), enum_("USERDEFINED")))
                 };
+                w.add_to_containment(structure, entity);
+                w.elements.insert(key.clone(), entity);
+                for p in &psets {
+                    w.add_pset(p, entity, &key);
+                }
+            }
+            c if c == REC_RAILING => {
+                let structure = r.structure(n_storeys)?;
+                let id = r.string()?;
+                let name = r.string()?;
+                let predefined = r.string()?;
+                let psets = r.psets()?;
+                let mesh = r.mesh()?;
+                let (placement, shape) = w.emit_triangulated_product(&mesh, w.placement_of(structure));
+                let key = format!("railing/{id}");
+                let g = w.gid(&key);
+                let kind = if ["GUARDRAIL", "HANDRAIL", "BALUSTRADE"].contains(&predefined.as_str()) { predefined } else { "NOTDEFINED".to_string() };
+                let entity = w.add("IFCRAILING", format!("{g},#{},{},$,$,#{placement},#{shape},$,{}", w.owner_history, ifc_string(&name), enum_(&kind)));
                 w.add_to_containment(structure, entity);
                 w.elements.insert(key.clone(), entity);
                 for p in &psets {

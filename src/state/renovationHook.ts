@@ -26,7 +26,7 @@ export function renovationFilterLabel(id: string, own: readonly { id: string; na
 
 /** Ids der Auswahl, die einen Umbau-Status tragen (Wände, Öffnungen, Decken, Dächer, Treppen, Stützen, Körper, Räume, 2D-Elemente, Bäume). */
 export function selectionRenovationIds(sel: Selection): string[] {
-  return [...sel.walls, ...sel.openings, ...sel.ceilings, ...sel.roofs, ...sel.stairs, ...sel.columns, ...sel.solids, ...sel.rooms, ...sel.drawings, ...sel.trees];
+  return [...sel.walls, ...sel.openings, ...sel.ceilings, ...sel.roofs, ...sel.stairs, ...sel.columns, ...sel.solids, ...sel.rooms, ...sel.drawings, ...sel.trees, ...sel.railings];
 }
 
 const NO_PHASES: readonly RenovationPhase[] = [];

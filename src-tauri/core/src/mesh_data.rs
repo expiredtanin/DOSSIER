@@ -488,6 +488,15 @@ pub(crate) fn collect_scene(src: &Project, opt: &MeshOptions) -> Result<SceneDat
         groups.push(g);
     }
     p.trees = trees;
+    // [279] Geländer: je Geländer eine Gruppe.
+    let railings = p.railings.take();
+    for r in railings.as_deref().unwrap_or(&[]) {
+        let mut g = Group::new(format!("Gelaender_{}", sanitize_name(&r.id)), "railing", &r.id, level_of(Some(&r.floor_id)));
+        p.railings = Some(vec![r.clone()]);
+        add_meshes(&mut g, &mut mats, &model3d::emit_railings(&p), "Gelaender");
+        groups.push(g);
+    }
+    p.railings = railings;
     let stairs = p.stairs.take();
     for st in stairs.as_deref().unwrap_or(&[]) {
         let mut g = Group::new(format!("Treppe_{}", sanitize_name(&st.id)), "stair", &st.id, level_of(Some(&st.floor_id)));

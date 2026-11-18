@@ -40,6 +40,7 @@ function selHit(sel: PlanSelection): { kind: MemberKind; id: string } | null {
   if (sel.columnId) return { kind: "columnIds", id: sel.columnId };
   if (sel.roofId) return { kind: "roofIds", id: sel.roofId };
   if (sel.treeId) return { kind: "treeIds", id: sel.treeId };
+  if (sel.railingId) return { kind: "railingIds", id: sel.railingId };
   if (sel.cameraId) return { kind: "cameraIds", id: sel.cameraId };
   return null;
 }
@@ -218,6 +219,7 @@ export function useMouseSelectionHandlers(opts: {
         context: "contextObjects",
         site: "site",
         tree: "trees",
+        railing: "railings",
         camera: "cameras",
       } as const satisfies Record<string, SelectionKind>;
       type Kind = keyof typeof channels;
@@ -239,6 +241,8 @@ export function useMouseSelectionHandlers(opts: {
                       ? { kind: "solid", id: sel.extrudedSolidId }
                       : sel.treeId
                         ? { kind: "tree", id: sel.treeId }
+                        : sel.railingId
+                        ? { kind: "railing", id: sel.railingId }
                         : sel.cameraId
                         ? { kind: "camera", id: sel.cameraId }
                         : sel.columnId
@@ -307,6 +311,8 @@ export function useMouseSelectionHandlers(opts: {
                             ? ["site", sel.siteId]
                             : sel.treeId
                               ? ["trees", sel.treeId]
+                              : sel.railingId
+                              ? ["railings", sel.railingId]
                               : sel.cameraId
                                 ? ["cameras", sel.cameraId]
                                 : null;
@@ -330,6 +336,7 @@ export function useMouseSelectionHandlers(opts: {
       openingIds: [],
       treeIds: sel.treeIds ?? [],
       cameraIds: sel.cameraIds ?? [],
+      railingIds: sel.railingIds ?? [],
     };
     // Gruppen-Isolation: ausserhalb der aktiven Gruppe getroffene Elemente
     // sind gesperrt (werden ignoriert), wie beim Einzelklick.
@@ -347,6 +354,7 @@ export function useMouseSelectionHandlers(opts: {
             openingIds: [],
             treeIds: raw.treeIds.filter((id) => isInsideActiveGroup(project, "treeIds", id, groupPath)),
             cameraIds: raw.cameraIds.filter((id) => isInsideActiveGroup(project, "cameraIds", id, groupPath)),
+            railingIds: raw.railingIds.filter((id) => isInsideActiveGroup(project, "railingIds", id, groupPath)),
           };
     // Gruppen-Erweiterung: jedes getroffene Element, das zu einer sichtbaren
     // Gruppe gehört, zieht deren ganze (transitive) Mitgliedschaft nach.
@@ -363,6 +371,7 @@ export function useMouseSelectionHandlers(opts: {
       stairs: expanded.stairIds,
       rooms: expanded.roomIds,
       trees: expanded.treeIds,
+      railings: expanded.railingIds,
       cameras: expanded.cameraIds,
       groups: groupIds,
     });
@@ -426,6 +435,11 @@ export function useMouseSelectionHandlers(opts: {
     // [149] Baum: Objekt-Info wie im Grundriss.
     if (hit.kind === "tree") {
       setSelection({ ...clearKinds(), trees: [hit.id] });
+      return;
+    }
+    // [279] Geländer: Objekt-Info wie im Grundriss.
+    if (hit.kind === "railing") {
+      setSelection({ ...clearKinds(), railings: [hit.id] });
       return;
     }
     // [137] Freier Körper (Loft, Rotation, Extrusion): Objekt-Info wie im Grundriss.

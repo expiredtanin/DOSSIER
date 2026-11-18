@@ -307,6 +307,11 @@ fn mv_tree(t: &Value, xf: &Xf) -> Value {
     with(t, "position", pt(n.0, n.1))
 }
 
+/// [279] Geländer: alle Punkte der Achse werden abgebildet (Höhe, Dicke und Teilung bleiben).
+fn mv_railing(r: &Value, xf: &Xf) -> Value {
+    with(r, "points", xf.pts(field(r, "points")))
+}
+
 /// [213] Kamera: Standpunkt und Ziel werden abgebildet (Drehen dreht beide um den Drehpunkt, Spiegeln spiegelt
 /// beide); Augenhöhe, Zielhöhe, Bildwinkel und Sichthöhe bleiben (Skalieren: Abstand Standpunkt–Ziel skaliert mit).
 fn mv_camera(c: &Value, xf: &Xf) -> Value {
@@ -722,6 +727,8 @@ pub struct Sel {
     pub opening_ids: Option<Vec<String>>,
     /// [149] Gewählte Bäume.
     pub tree_ids: Option<Vec<String>>,
+    /// [279] Gewählte Geländer (alle Punkte der Achse werden transformiert).
+    pub railing_ids: Option<Vec<String>>,
     /// [213] Gewählte Kameras (Standpunkt und Ziel werden transformiert).
     pub camera_ids: Option<Vec<String>>,
     /// [193] Gewählte Gelände-/Umgebungs-Elemente (`Project.context`).
@@ -781,6 +788,7 @@ enum Kind {
     Stair,
     Room,
     Tree,
+    Railing,
     Camera,
     Context,
 }
@@ -818,6 +826,7 @@ fn gather<'a>(root: &'a Map<String, Value>, sel: &Sel, op: &str, ignore_lock: bo
     each("stairs", Ids::opt(&sel.stair_ids), Kind::Stair);
     each("rooms", Ids::opt(&sel.room_ids), Kind::Room);
     each("trees", Ids::opt(&sel.tree_ids), Kind::Tree);
+    each("railings", Ids::opt(&sel.railing_ids), Kind::Railing);
     each("cameras", Ids::opt(&sel.camera_ids), Kind::Camera);
     each("context", Ids::opt(&sel.context_ids), Kind::Context);
     out
@@ -1005,6 +1014,10 @@ pub fn transform_result(root: &Map<String, Value>, p: &Project, req: &TransformR
         if !trees.is_empty() {
             patch("trees", &|t| trees.has(t) && !locked(t), &|t| mv_tree(t, &xf));
         }
+        let railings = Ids::opt(&sel.railing_ids);
+        if !railings.is_empty() {
+            patch("railings", &|t| railings.has(t) && !locked(t), &|t| mv_railing(t, &xf));
+        }
         let cams = Ids::opt(&sel.camera_ids);
         if !cams.is_empty() {
             patch("cameras", &|c| cams.has(c) && !locked(c), &|c| mv_camera(c, &xf));
@@ -1029,7 +1042,7 @@ pub fn transform_result(root: &Map<String, Value>, p: &Project, req: &TransformR
 
     // Kopien (Kopie/Reihe/Verteilen bzw. gespiegelte Kopie).
     let mut ids = IdGen::new(&req.stamp);
-    let mut new: [Vec<Value>; 11] = Default::default();
+    let mut new: [Vec<Value>; 12] = Default::default();
     let mut new_openings = Vec::new();
     // [213] Namen der vorhandenen Kameras (Kopien heissen „… Kopie“, nummeriert bei Kollision).
     let mut cam_names: std::collections::HashSet<String> = list(root, "cameras").iter().filter_map(|c| field(c, "name").and_then(Value::as_str).map(String::from)).collect();
@@ -1047,6 +1060,7 @@ pub fn transform_result(root: &Map<String, Value>, p: &Project, req: &TransformR
                 Kind::Stair => "ST",
                 Kind::Room => "RM",
                 Kind::Tree => "tree",
+                Kind::Railing => "railing",
                 Kind::Camera => "camera",
                 Kind::Context => "ctx",
             })
@@ -1074,6 +1088,7 @@ pub fn transform_result(root: &Map<String, Value>, p: &Project, req: &TransformR
                 Kind::Stair => (6, mv_stair(e, &xf, k_at(t))),
                 Kind::Room => (7, mv_room(e, &xf)),
                 Kind::Tree => (8, mv_tree(e, &xf)),
+                Kind::Railing => (11, mv_railing(e, &xf)),
                 Kind::Camera => (10, mv_camera(e, &xf)),
                 Kind::Context => (9, mv_context(e, &xf)),
             };
@@ -1102,7 +1117,7 @@ pub fn transform_result(root: &Map<String, Value>, p: &Project, req: &TransformR
             }
         }
     }
-    let keys = ["walls", "drawings2d", "extrudedSolids", "columns", "ceilings", "roofs", "stairs", "rooms", "trees", "context", "cameras"];
+    let keys = ["walls", "drawings2d", "extrudedSolids", "columns", "ceilings", "roofs", "stairs", "rooms", "trees", "context", "cameras", "railings"];
     for (key, items) in keys.iter().zip(new) {
         ops.extend(add(key, items));
     }
@@ -1418,6 +1433,7 @@ fn item_preview(p: &Project, kind: Kind, e: &Value, xf: &Xf, out: &mut Pending) 
             let ring: Vec<(f64, f64)> = crate::tree::circle([c.0, c.1], d / 2.0, 24).into_iter().map(|q| (q[0], q[1])).collect();
             s.poly(&ring);
         }
+        Kind::Railing => s.poly_open(&mapped(&pts_of(field(e, "points")), xf)),
         Kind::Camera => {
             // [213] Gehäuse am neuen Standpunkt und die Blicklinie zum neuen Ziel.
             let (px, py) = pt("position");

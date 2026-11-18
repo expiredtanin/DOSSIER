@@ -31,6 +31,9 @@ pub struct Args {
     pub solids: Vec<String>,
     /// [149] Bäume (Umriss-Prisma Kronendurchmesser × Fuss bis Spitze).
     pub trees: Vec<String>,
+    /// [279] Geländer (Umriss-Prisma über der Achse, Fuss bis Oberkante).
+    #[serde(default)]
+    pub railings: Vec<String>,
     pub rgb: [f64; 3],
     /// Explosionsabstand ([65], `explode3d.rs`; fehlt/0 = aus): Linien folgen dem auseinandergezogenen Modell.
     #[serde(default)]
@@ -271,6 +274,21 @@ pub fn selection_highlight_lines(p: &Project, a: &Args) -> Result<Vec<f32>, Stri
                 let n = out.v.len();
                 out.prism_edges(&crate::tree::circle(g.c, g.crown_r, 12), g.base, g.top);
                 lift(&mut out, n, &list[i].id);
+            }
+        }
+    }
+    let railings = set(&a.railings);
+    if !railings.is_empty() {
+        for r in p.railings.as_deref().unwrap_or(&[]) {
+            let (Some(s), Some(ax)) = (crate::railing::spec(p, r), crate::railing::axis(r)) else { continue };
+            if railings.contains(r.id.as_str()) {
+                let n = out.v.len();
+                // Umriss der Achse mit Handlaufbreite, Fuss bis Oberkante.
+                let (quads, _, _) = crate::railing::strips(&ax, s.rail_w().max(s.thickness) / 2.0);
+                for q in quads {
+                    out.prism_edges(&q, s.z0, s.top());
+                }
+                lift(&mut out, n, &r.id);
             }
         }
     }

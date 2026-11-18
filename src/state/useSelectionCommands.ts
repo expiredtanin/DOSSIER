@@ -151,6 +151,8 @@ export function useSelectionCommands(opts: {
     const ctxids = new Set(selection.contextObjects);
     // [149] Bäume (gesperrte bleiben).
     const treeids = new Set(selection.trees.filter((id) => !(project.trees ?? []).find((t) => t.id === id)?.locked));
+    // [279] Geländer (gesperrte bleiben).
+    const railids = new Set(selection.railings.filter((id) => !(project.railings ?? []).find((r) => r.id === id)?.locked));
     // [213] Kameras (gesperrte bleiben).
     const camids = new Set(selection.cameras.filter((id) => !(project.cameras ?? []).find((c) => c.id === id)?.locked));
     // [193] Abgeleitete Lage-Darstellung (Schatten, Baurecht) ist kein Element: Entf blendet sie aus
@@ -177,6 +179,7 @@ export function useSelectionCommands(opts: {
         ...removeItems(p, "openings", (o) => oids.has(o.id) || wids.has(o.hostWallId) || (!!o.hostRoofId && rfids.has(o.hostRoofId)) || (!!o.hostCeilingId && cids.has(o.hostCeilingId))),
         ...removeItems(p, "context", ctxids),
         ...removeItems(p, "trees", treeids),
+        ...removeItems(p, "railings", railids),
         ...removeItems(p, "cameras", camids),
         // Gelöschte Elemente verlassen ihre Gruppen.
         ...pruneGroupMembers(p, {
@@ -189,6 +192,7 @@ export function useSelectionCommands(opts: {
           columnIds: colids,
           treeIds: treeids,
           cameraIds: camids,
+          railingIds: railids,
         }),
       ]),
     );

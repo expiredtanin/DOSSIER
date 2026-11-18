@@ -19,7 +19,7 @@
 
 import { DRAWING_PICK_TOLERANCE } from "../core";
 import { screenRight } from "./cameraBridge";
-import type { Vec3, PickWall, PickOpening, PickDrawingSeg, PickSlab, PickStair, PickRoof, PickContextMesh, PickColumnMesh, PickSolidMesh, PickOpeningMesh, PickStairMesh, PickDrawingMesh, PickTreeMesh } from "../core";
+import type { Vec3, PickWall, PickOpening, PickDrawingSeg, PickSlab, PickStair, PickRoof, PickContextMesh, PickColumnMesh, PickSolidMesh, PickOpeningMesh, PickStairMesh, PickDrawingMesh, PickTreeMesh, PickRailingMesh } from "../core";
 
 /** Kamera-Parameter für den Pick-Strahl (Teilmenge von Camera3d). */
 export interface RayCamera {
@@ -43,7 +43,7 @@ export interface Ray {
 
 /** Ergebnis eines Picks: getroffenes Bauteil + Distanz entlang des Strahls. */
 export interface PickHit {
-  kind: "wall" | "ceiling" | "opening" | "stair" | "roof" | "contextObject" | "drawing" | "column" | "solid" | "tree";
+  kind: "wall" | "ceiling" | "opening" | "stair" | "roof" | "contextObject" | "drawing" | "column" | "solid" | "tree" | "railing";
   id: string;
   t: number;
   /** Bei `kind:"opening"` dieselbe Id wie `id` (ausdrucksstärkerer Zugriff). */
@@ -364,6 +364,7 @@ export function pickNearest(
   stairMeshes?: readonly PickStairMesh[],
   drawingMeshes?: readonly PickDrawingMesh[],
   trees?: readonly PickTreeMesh[],
+  railings?: readonly PickRailingMesh[],
 ): PickHit | null;
 /**
  * Nächstes getroffenes Bauteil (kleinstes t) über Wände, Decken, Öffnungen und
@@ -389,6 +390,7 @@ export function pickNearest(
   stairMeshes: readonly PickStairMesh[] = [],
   drawingMeshes: readonly PickDrawingMesh[] = [],
   trees: readonly PickTreeMesh[] = [],
+  railings: readonly PickRailingMesh[] = [],
 ): PickHit | null {
   const TIE_EPS = 1e-6;
   let hit: PickHit | null = null;
@@ -448,6 +450,11 @@ export function pickNearest(
   for (const tr of trees) {
     const t = rayContextMeshTris(ray, { tris: tr.tris, contextObjectId: tr.treeId });
     if (t !== null) consider({ kind: "tree", id: tr.treeId, t }, 1);
+  }
+  // [279] Geländer (alle Teile), Rang wie Wand/Decke.
+  for (const r of railings) {
+    const t = rayContextMeshTris(ray, { tris: r.tris, contextObjectId: r.railingId });
+    if (t !== null) consider({ kind: "railing", id: r.railingId, t }, 1);
   }
   // [137] Freie Körper (Kern-Netz, [115]), Rang wie Wand/Decke.
   for (const s of solids) {

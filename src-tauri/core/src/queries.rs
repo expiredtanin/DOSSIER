@@ -158,6 +158,8 @@ pub fn run(p: &Project, name: &str, args: &[f64], text: &str) -> Result<String, 
         ("materialMaps", _) => json(&model3d::wall_material_color_maps(p)),
         ("slabs", _) => json(&model3d::emit_slabs(p)),
         ("columnMeshes", _) => json(&model3d::emit_columns(p)),
+        // [279] Kennzahlen eines Geländers (Objekt-Info): Länge, Fuss- und Oberkante, Stäbe, Pfosten; Text = Id.
+        ("railingInfo", _) => json(&crate::railing::info(p, text.trim())),
         ("walls", 1) => json(&model3d::emit_walls(p, args[0] != 0.0)?),
         ("openingMeshes", 1) => json(&model3d::emit_opening_meshes(p, args[0])),
         ("stairSlabs", 1) => json(&model3d::emit_stairs(p, args[0] != 0.0)),

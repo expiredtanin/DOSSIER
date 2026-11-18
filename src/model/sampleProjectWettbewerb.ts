@@ -149,6 +149,18 @@ const ceilings: NonNullable<Project["ceilings"]> = [
   { id: "c-eg", type: "ceiling", floorId: "eg", categoryCode: "30", outline: slab, openings: [HOLE], wallTypeId: "", ceilingTypeId: "wb-ct-decke", loadBearing: true },
   { id: "c-og1", type: "ceiling", floorId: "og1", categoryCode: "30", outline: slab, openings: [HOLE], wallTypeId: "", ceilingTypeId: "wb-ct-decke", loadBearing: true },
 ];
+// [279] Balkone an der Südfassade (Wohnung West): Betonplatte 1.4 m tief über dem EG bzw. 1. OG, Geländer an den drei freien
+// Seiten — Stäbe im 1. OG, Glas im 2. OG. Fusshöhe auf der Plattenoberkante (Geschoss-UK), Höhe 1.00 m nach SIA 358.
+const BALCONY = [P(0.6, -HA), P(7.4, -HA), P(7.4, -1.6), P(0.6, -1.6)];
+ceilings.push(
+  { id: "c-balkon-og1", type: "ceiling", floorId: "eg", categoryCode: "30", outline: BALCONY, wallTypeId: "", ceilingTypeId: "wb-ct-decke", loadBearing: true },
+  { id: "c-balkon-og2", type: "ceiling", floorId: "og1", categoryCode: "30", outline: BALCONY, wallTypeId: "", ceilingTypeId: "wb-ct-decke", loadBearing: true },
+);
+const BALCONY_RAIL = [P(0.7, -HA), P(0.7, -1.5), P(7.3, -1.5), P(7.3, -HA)];
+const railings: NonNullable<Project["railings"]> = [
+  { id: "gl-balkon-og1", type: "railing", floorId: "og1", categoryCode: "41", points: BALCONY_RAIL, height: 1.0, kind: "bars", handrail: true },
+  { id: "gl-balkon-og2", type: "railing", floorId: "og2", categoryCode: "41", points: BALCONY_RAIL, height: 1.0, kind: "glass", handrail: true },
+];
 const stairs: NonNullable<Project["stairs"]> = ["eg", "og1"].map((f) => ({
   id: `tr-${f}`, type: "stair" as const, floorId: f, categoryCode: "40", shape: "straight" as const, typeId: "wb-tr-beton", start: P(10, 1.4), dir: P(0, 1), runLength: 4.3, width: 1.1, totalRise: FH, stepCount: 17,
 }));
@@ -293,6 +305,7 @@ export function buildWettbewerbSampleProject(): Project {
     ceilings,
     roofs,
     stairs,
+    railings,
     rooms: [],
     units: units(),
     drawings2d: cadastre(),

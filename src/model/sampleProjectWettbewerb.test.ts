@@ -35,7 +35,9 @@ describe("Beispielprojekt Wettbewerb", () => {
       expect(p.walls.filter((w) => w.floorId === f && w.isExternal).length).toBe(4);
       expect(p.rooms!.filter((r) => r.floorId === f).length).toBe(10);
     }
-    expect(p.ceilings!.length).toBe(3);
+    // [279] zwei Balkonplatten mit Geländer (Stäbe 1. OG, Glas 2. OG)
+    expect(p.ceilings!.length).toBe(5);
+    expect(p.railings!.map((r) => r.kind)).toEqual(["bars", "glass"]);
     expect(p.roofs![0].shape).toBe("flach");
     expect(p.stairs!.length).toBe(2);
     expect(p.rooms!.length).toBe(30);

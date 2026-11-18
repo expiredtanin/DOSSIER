@@ -126,6 +126,8 @@ pub enum SlabOwner<'a> {
     Ceiling(&'a Ceiling, Option<usize>),
     Stair(&'a Stair),
     Column(&'a Column),
+    /// [279] Geländer; `true` = Tafel (Glas, Lochblech, Brüstung), sonst Gestänge.
+    Railing(&'a Railing, bool),
 }
 
 /// Je emittierter Platte (Deckenschicht, Treppentritt, Podest) ihre Herkunft (`RSlab::source`).
@@ -138,6 +140,7 @@ pub fn slab_owners<'a>(p: &'a Project, slabs: &[RSlab]) -> Vec<SlabOwner<'a>> {
             SlabSource::Ceiling { index, layer } => ceilings.get(index).map_or(SlabOwner::None, |c| SlabOwner::Ceiling(c, layer)),
             SlabSource::Stair { index } => stairs.get(index).map_or(SlabOwner::None, SlabOwner::Stair),
             SlabSource::Column { index } => p.columns.as_deref().and_then(|c| c.get(index)).map_or(SlabOwner::None, SlabOwner::Column),
+            SlabSource::Railing { index, fill } => p.railings.as_deref().and_then(|c| c.get(index)).map_or(SlabOwner::None, |r| SlabOwner::Railing(r, fill)),
             SlabSource::None => SlabOwner::None,
         })
         .collect()
@@ -699,6 +702,37 @@ pub(super) fn attach_cut_styles(cuts: Vec<Cut>, p: &Project, plane: &Plane, wall
                             cp.component_id = Some(k.id.clone());
                         }
                         cp.join_priority = Some(comp.map_or(f64::MAX, |k| k.join_priority));
+                    }
+                    // [279] Geländer: Tafel nach Art (Brüstung wie eine Stütze mit Bauteil, Glas hell), Gestänge schwarz.
+                    SlabOwner::Railing(r, fill) => {
+                        cp.source_id = Some(r.id.clone());
+                        cp.railing_id = Some(r.id.clone());
+                        cp.category = Some(r.category_code.clone());
+                        match (fill, r.kind) {
+                            (true, RailingKind::Solid) => {
+                                let comp = r.component_id.as_deref().filter(|s| !s.is_empty()).and_then(|id| p.component(id));
+                                if let Some(k) = comp {
+                                    let category = p.layer_category(&r.category_code);
+                                    let hid = resolve_hatch_id(None, None, category, Some(&k.hatch_id)).unwrap_or(&k.hatch_id);
+                                    if let Some(h) = resolve_hatch(p, hid, None, resolve_foreground(k, None, category, None), None) {
+                                        cp.fill = Some(poche_fill(h.pattern).to_string());
+                                        cp.hatch = Some(h);
+                                    }
+                                    cp.component_id = Some(k.id.clone());
+                                } else {
+                                    cp.fill = Some(HATCH_PAPER.to_string());
+                                    cp.hatch = Some(no_hatch());
+                                }
+                            }
+                            (true, RailingKind::Glass) => {
+                                cp.fill = Some("#cfe3ee".to_string());
+                                cp.hatch = Some(no_hatch());
+                            }
+                            _ => {
+                                cp.fill = Some(HATCH_INK.to_string());
+                                cp.hatch = Some(no_hatch());
+                            }
+                        }
                     }
                     SlabOwner::None => {}
                 }

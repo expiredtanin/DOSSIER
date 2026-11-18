@@ -676,6 +676,7 @@ pub fn axo_primitives(p: &Project, a: &AxoArgs, mono: bool) -> Result<Option<(Ve
                     Kind::Mesh => *context_object_id = id,
                     Kind::Slab if r.stair => *stair_id = id,
                     Kind::Slab if r.column => *column_id = id,
+                    Kind::Slab if r.railing => *context_object_id = id.map(|i| crate::plan::railings::pick_id(&i)),
                     Kind::Slab => *ceiling_id = id,
                 }
             }

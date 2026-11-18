@@ -71,7 +71,7 @@ export const GRIP_HIT_PX = 9;
 export const LINE_PICK_PX = 6;
 
 export const PICK_ORDER: readonly PickKind[] = [
-  "section", "opening", "wall", "column", "drawing", "solid", "tree", "camera",
+  "section", "opening", "wall", "column", "drawing", "solid", "tree", "railing", "camera",
   "ceiling", "stair", "room", "roof", "site", "context",
 ];
 
@@ -90,12 +90,15 @@ export const EMPTY_PICK: PickIds = {
   contextObjectId: null,
   siteId: null,
   treeId: null,
+  railingId: null,
   cameraId: null,
 };
 
 /** Mac: Cmd+Klick; sonst Strg+Klick (Alt+Klick ist die Schere, Ctrl+Klick unter macOS das Kontextmenü). */
 /** [149] Präfix der Baum-Pick-Id im Feld `contextObjectId` (Kern `tree::TREE_PICK_PREFIX`). */
 export const TREE_PICK = "@tree:";
+/** [279] Präfix der Geländer-Pick-Id im Feld `contextObjectId` (Kern `railing::PICK_PREFIX`). */
+export const RAILING_PICK = "@railing:";
 /** [213] Präfix der Kamera-Pick-Id im Feld `contextObjectId` (Kern `camera::CAMERA_PICK_PREFIX`). */
 export const CAMERA_PICK = "@camera:";
 

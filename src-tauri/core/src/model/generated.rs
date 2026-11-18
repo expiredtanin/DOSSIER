@@ -5560,6 +5560,107 @@ pub struct Tree {
     pub extra: Extra,
 }
 
+/// Art der Füllung eines Geländers ([279]): Stäbe (Rundstahl/Flachstahl, lotrecht), Glas (Ganzglas-Brüstung),
+/// massive Brüstung (Mauer/Beton) oder Lochblech.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+pub enum RailingKind {
+    /// Stäbe mit Pfosten, Handlauf und Fussschiene.
+    #[default]
+    #[serde(rename = "bars")]
+    Bars,
+    /// Glasscheibe (durchsichtig) mit Handlauf.
+    #[serde(rename = "glass")]
+    Glass,
+    /// Massive Brüstung (Wand-ähnlich, mit Bauteil-Füllung im Schnitt).
+    #[serde(rename = "solid")]
+    Solid,
+    /// Lochblech (Blechtafel).
+    #[serde(rename = "perforated")]
+    Perforated,
+    #[serde(other)]
+    #[ts(skip)]
+    Unknown,
+}
+
+/// Ein Geländer ([279]) — eigenes Bauteil für Balkon, Galerie, Treppenauge und Terrasse (Absturzsicherung,
+/// Vorgabe 1.00 m nach SIA 358): Polylinie `points` auf einem Geschoss, Höhe, Art der Füllung, Handlauf. Grundriss
+/// (Linie bzw. Doppellinie je Art), Schnitt/Ansicht (Stäbe, Glasfläche, Brüstung), 3D, IFC (`IfcRailing`).
+/// Fusshöhe = Geschoss-UK + `baseOffset` (z. B. auf einer Balkonplatte).
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct Railing {
+    pub id: String,
+    #[ts(type = "\"railing\"")]
+    pub r#type: String,
+    /// Zugehörige Zeichnungsebene (Geschoss).
+    #[serde(rename = "floorId")]
+    pub floor_id: String,
+    /// Grafik-Kategorie (Ebene), Vorgabe "55" (Geländer).
+    #[serde(rename = "categoryCode")]
+    pub category_code: String,
+    /// IFC-GlobalId des Quell-Bauteils (IFC-Import/Rundreise).
+    #[serde(rename = "ifcGlobalId", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub ifc_global_id: Option<String>,
+    /// Objekt-Sperre, analog `Wall.locked`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub locked: Option<bool>,
+    /// Achse des Geländers (Polylinie im Grundriss, Meter, mindestens 2 Punkte).
+    pub points: Vec<Vec2>,
+    /// Geschlossener Zug (Treppenauge, Galerie ringsum); fehlt = offen.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub closed: Option<bool>,
+    /// Höhe über dem Fuss bis Oberkante Handlauf bzw. Füllung (m, Vorgabe 1.00 nach SIA 358).
+    pub height: f64,
+    /// Fusshöhe relativ zur Geschoss-UK (m, Vorgabe 0), z. B. 0.18 auf einer Balkonplatte.
+    #[serde(rename = "baseOffset", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub base_offset: Option<f64>,
+    /// Art der Füllung.
+    pub kind: RailingKind,
+    /// Stäbe: Achsabstand der Stäbe (m, Vorgabe 0.12; lichtes Mass bleibt unter 12 cm).
+    #[serde(rename = "barSpacing", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub bar_spacing: Option<f64>,
+    /// Stäbe: Querschnitt (Kantenlänge bzw. Durchmesser, m, Vorgabe 0.014).
+    #[serde(rename = "barSize", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub bar_size: Option<f64>,
+    /// Dicke der Füllung (m): Glas (Vorgabe 0.02), Brüstung (Vorgabe 0.15), Lochblech (Vorgabe 0.004); bei Stäben ohne Wirkung.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub thickness: Option<f64>,
+    /// Handlauf auf der Oberkante; fehlt = bei Stäben und Glas ja, sonst nein.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub handrail: Option<bool>,
+    /// Handlauf: Durchmesser (m, Vorgabe 0.04).
+    #[serde(rename = "handrailSize", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub handrail_size: Option<f64>,
+    /// Optionales Bauteil (Component) für Füllung/Farbe, v. a. der massiven Brüstung.
+    #[serde(rename = "componentId", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub component_id: Option<String>,
+    /// Optionale Übersteuerung der Strichfarbe; sonst gilt die Kategorie-Farbe.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub color: Option<String>,
+    /// [271] Umbau: Status (Bestand, Abbruch, Neu) und Etappe. Fehlt ⇒ Bestand.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub renovation: Option<Renovation>,
+    /// [272] Variante, zu der das Element gehört. Fehlt ⇒ Hauptmodell (immer sichtbar).
+    #[serde(rename = "designOption", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub design_option: Option<DesignOptionRef>,
+    #[serde(flatten)]
+    #[ts(skip)]
+    pub extra: Extra,
+}
+
 /// Projektion einer Kamera ([213]): Perspektive, Axonometrie (Parallelprojektion mit schrägem Blick, z. B.
 /// Isometrie) oder Parallelprojektion (frei ausgerichtet). Axonometrie und Parallel zeichnen im 3D orthografisch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
@@ -5660,6 +5761,10 @@ pub struct Group {
     #[serde(rename = "cameraIds", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub camera_ids: Option<Vec<String>>,
+    /// [279] Geländer (fehlt in älteren Dateien).
+    #[serde(rename = "railingIds", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub railing_ids: Option<Vec<String>>,
     /// Verschachtelte Gruppen (diese Gruppe enthält andere Gruppen als Ganzes).
     #[serde(rename = "groupIds")]
     pub group_ids: Vec<String>,
@@ -7002,6 +7107,10 @@ pub struct Project {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub trees: Option<Vec<Tree>>,
+    /// Geländer ([279]) — eigenes Bauteil (Balkon, Galerie, Treppenauge), siehe {@link Railing}. Optional.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub railings: Option<Vec<Railing>>,
     /// Kameras ([213]) — gespeicherte Standpunkte für 3D-Ansicht und Rendering, siehe {@link Camera}. Optional
     /// (Default: leer behandeln).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -7899,6 +8008,12 @@ impl Project {
             "trees" => {
                 self.trees = match v {
                     Some(v) => <Option<Vec<Tree>>>::deserialize(v).map_err(|e| e.to_string())?,
+                    None => Default::default(),
+                };
+            }
+            "railings" => {
+                self.railings = match v {
+                    Some(v) => <Option<Vec<Railing>>>::deserialize(v).map_err(|e| e.to_string())?,
                     None => Default::default(),
                 };
             }

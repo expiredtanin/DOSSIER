@@ -28,6 +28,7 @@ const KEYS: MemberKind[] = [
   "openingIds",
   "treeIds",
   "cameraIds",
+  "railingIds",
 ];
 
 /** Vereinigung je Art (erste Vorkommen in Reihenfolge) — für Auswahl-Mengen in der Hülle. */
@@ -46,6 +47,7 @@ const PICK3D_KIND: Partial<Record<string, MemberKind>> = {
   roof: "roofIds",
   column: "columnIds",
   tree: "treeIds",
+  railing: "railingIds",
 };
 
 /**
@@ -61,6 +63,7 @@ export function pick3dGroup(project: Project, kind: string, id: string, groupPat
 
 /** [149] Präfix der Baum-Pick-Id im Feld `contextObjectId` (Kern `tree::TREE_PICK_PREFIX`). */
 const TREE_PICK = "@tree:";
+const RAILING_PICK = "@railing:";
 /** [213] Präfix der Kamera-Pick-Id im Feld `contextObjectId` (Kern `plan/cameras.rs`). */
 const CAMERA_PICK = "@camera:";
 
@@ -104,6 +107,7 @@ export function applyGroupDimming(
     openingIds: new Set(mem.openingIds),
     treeIds: new Set(mem.treeIds),
     cameraIds: new Set(mem.cameraIds),
+    railingIds: new Set(mem.railingIds),
   };
   return primitives.map((p) => {
     const rec = p as unknown as Record<string, unknown>;
@@ -120,6 +124,11 @@ export function applyGroupDimming(
     if (typeof ctx === "string" && ctx.startsWith(TREE_PICK)) {
       hasId = true;
       if (sets.treeIds.has(ctx.slice(TREE_PICK.length))) inside = true;
+    }
+    // [279] Geländer: `contextObjectId = "@railing:<id>"`.
+    if (typeof ctx === "string" && ctx.startsWith(RAILING_PICK)) {
+      hasId = true;
+      if (sets.railingIds.has(ctx.slice(RAILING_PICK.length))) inside = true;
     }
     // [213] Kameras: `contextObjectId = "@camera:<id>"`.
     if (typeof ctx === "string" && ctx.startsWith(CAMERA_PICK)) {
@@ -179,6 +188,7 @@ export function groupSelection(
     openingIds: sel.openingIds,
     ...(sel.treeIds.length ? { treeIds: sel.treeIds } : {}),
     ...(sel.cameraIds.length ? { cameraIds: sel.cameraIds } : {}),
+    ...(sel.railingIds.length ? { railingIds: sel.railingIds } : {}),
     groupIds: [...selectedGroupIds],
   };
   return { ops: addItems("groups", [g]), groupId: id };
@@ -210,6 +220,7 @@ export function ungroup(
       openingIds: g.openingIds,
       treeIds: g.treeIds ?? [],
       cameraIds: g.cameraIds ?? [],
+      railingIds: g.railingIds ?? [],
     },
     subGroupIds: g.groupIds,
   };

@@ -23,10 +23,12 @@ pub struct Membership {
     pub tree_ids: Vec<String>,
     /// [213] Kameras.
     pub camera_ids: Vec<String>,
+    /// [279] Geländer.
+    pub railing_ids: Vec<String>,
 }
 
 /// Elementart (`MemberKind` in TS: `"wallIds"` …).
-pub const KINDS: [&str; 10] = ["wallIds", "drawingIds", "ceilingIds", "roomIds", "stairIds", "columnIds", "roofIds", "openingIds", "treeIds", "cameraIds"];
+pub const KINDS: [&str; 11] = ["wallIds", "drawingIds", "ceilingIds", "roomIds", "stairIds", "columnIds", "roofIds", "openingIds", "treeIds", "cameraIds", "railingIds"];
 
 impl Membership {
     pub fn list(&self, kind: &str) -> Option<&Vec<String>> {
@@ -41,6 +43,7 @@ impl Membership {
             "openingIds" => &self.opening_ids,
             "treeIds" => &self.tree_ids,
             "cameraIds" => &self.camera_ids,
+            "railingIds" => &self.railing_ids,
             _ => return None,
         })
     }
@@ -57,6 +60,7 @@ impl Membership {
             "openingIds" => &mut self.opening_ids,
             "treeIds" => &mut self.tree_ids,
             "cameraIds" => &mut self.camera_ids,
+            "railingIds" => &mut self.railing_ids,
             _ => return None,
         })
     }
@@ -73,6 +77,7 @@ impl Membership {
             opening_ids: g.opening_ids.clone(),
             tree_ids: g.tree_ids.clone().unwrap_or_default(),
             camera_ids: g.camera_ids.clone().unwrap_or_default(),
+            railing_ids: g.railing_ids.clone().unwrap_or_default(),
         }
     }
 

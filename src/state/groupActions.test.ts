@@ -36,6 +36,7 @@ const EMPTY_MEM = {
   openingIds: [] as string[],
   treeIds: [] as string[],
   cameraIds: [] as string[],
+  railingIds: [] as string[],
 };
 
 function project(groups: Group[]): Project {

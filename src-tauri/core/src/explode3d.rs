@@ -51,6 +51,9 @@ impl<'a> Explode<'a> {
         for t in p.trees.as_deref().unwrap_or(&[]) {
             floor_of.insert(&t.id, &t.floor_id);
         }
+        for t in p.railings.as_deref().unwrap_or(&[]) {
+            floor_of.insert(&t.id, &t.floor_id);
+        }
         // [137] Freie Körper (Pick, Hervorhebung) folgen ihrem Geschoss.
         for s in p.extruded_solids.as_deref().unwrap_or(&[]) {
             floor_of.insert(&s.id, &s.level_id);
@@ -167,6 +170,7 @@ pub fn parts_filtered(p: &Project, layered: bool, detail: f64, for_section: bool
         let pick = |fid: &str| ex.in_group(fid, g);
         q.columns = p.columns.as_ref().map(|v| v.iter().filter(|c| pick(&c.floor_id)).cloned().collect());
         q.trees = p.trees.as_ref().map(|v| v.iter().filter(|t| pick(&t.floor_id)).cloned().collect());
+        q.railings = p.railings.as_ref().map(|v| v.iter().filter(|t| pick(&t.floor_id)).cloned().collect());
         q.stairs = p.stairs.as_ref().map(|v| v.iter().filter(|s| pick(&s.floor_id)).cloned().collect());
         q.roofs = p.roofs.as_ref().map(|v| v.iter().filter(|r| pick(&r.floor_id)).cloned().collect());
         q.openings = p.openings.as_ref().map(|v| v.iter().filter(|o| filter.keep_opening(o) && pick(ex.floor_of.get(o.id.as_str()).copied().unwrap_or(""))).cloned().collect());
@@ -177,6 +181,7 @@ pub fn parts_filtered(p: &Project, layered: bool, detail: f64, for_section: bool
         };
         out.column_meshes.extend(shifted(kept(&q, model3d::emit_columns(&q)), dz, shift_mesh));
         out.column_meshes.extend(shifted(kept(&q, model3d::emit_trees(&q)), dz, shift_mesh));
+        out.column_meshes.extend(shifted(kept(&q, model3d::emit_railings(&q)), dz, shift_mesh));
         out.stair_meshes.extend(shifted(kept(&q, model3d::emit_stair_meshes(&q)), dz, shift_mesh));
         // Handläufe folgen der Treppe, die Absturzsicherung der Decke mit dem Loch (Geschoss `g`, [155]).
         out.stair_railings.extend(shifted(kept(&q, model3d::emit_stair_handrails(&q)), dz, shift_mesh));
@@ -279,6 +284,12 @@ pub fn pick_geometry(p: &Project, gap: f64) -> Result<PickGeometry, String> {
     }
     for t in &mut g.trees {
         let dz = ex.of(&t.tree_id);
+        for v in t.tris.iter_mut().flatten() {
+            v[1] += dz;
+        }
+    }
+    for t in &mut g.railings {
+        let dz = ex.of(&t.railing_id);
         for v in t.tris.iter_mut().flatten() {
             v[1] += dz;
         }

@@ -30,7 +30,7 @@ Legende Dossier: **ja** vorhanden · **teils** teilweise · **fehlt**.
 | Austausch DXF/IFC | DXF/DWG, IFC (sehr ausgereift), BCF, Teamwork-Hotlinks | DXF/DWG, IFC, BCF (nicht geprüft) | **teils**: DXF/DWG, IFC Import/Export, BCF, STEP/OBJ/glTF; IFC/DXF in keinem Fremdprogramm geöffnet ([259], [C9]); Dächer als Netz im IFC |
 | Wände/Decken/Dächer | alle, Schichtaufbau, Profile | alle | **ja**: mehrschichtig, Bogen, Gehrung/T-Stoss, Dach beliebiger Umriss; **fehlt**: geneigte Decke/Rampe als Element |
 | Treppen | parametrisch, Geländer | parametrisch | **ja**: gerade, L, U, Wendel, Deckenloch automatisch |
-| Geländer, Balken, Vorhangfassade | eigene Werkzeuge | eigene Werkzeuge | **fehlt**: kein eigenständiges Geländer, Träger/Unterzug, Vorhangfassade (Modell hat nur Treppen-Geländer/Absturzsicherung am Deckenloch, Stützen) |
+| Geländer, Balken, Vorhangfassade | eigene Werkzeuge | eigene Werkzeuge | **teils**: Geländer als eigenes Bauteil (Stäbe, Glas, Brüstung, Lochblech; [279]); **fehlt**: Träger/Unterzug, Vorhangfassade |
 | Öffnungen | Fenster/Türen parametrisch | dito | **ja**: Typen, Detailstufen, Formöffnungen, Dachfenster, Gauben |
 | Bemassung/Text/Schraffur | ja | ja | **ja**: assoziativ, Aussenbemassung automatisch, Koten, Textfelder, SIA-Schraffuren |
 | Ebenen/Klassen, Stifte | Ebenen, Stiftsätze, Überschreibungen | Klassen, Layer | **ja**: Klassen, Stiftsätze, Objektstile mit Regeln ([180], [33]) |
@@ -59,7 +59,7 @@ Grösse: S ≤ 1 Tag · M ≤ 1 Woche · L ≤ 1 Monat. IDs aus `TODO.md`; **neu
 | # | Lücke | Wo / ID | Grösse |
 |---|---|---|---|
 | 6 | **Wohnungsspiegel / Nutzungseinheiten**: Räume lassen sich keiner Wohnung zuordnen; kein Spiegel (Zimmerzahl, NWF je Wohnung) — im Mehrfamilienhaus-WBW üblich. **erledigt 17.11. ([278], Rest: Grundriss-Darstellung der Einheiten)** | `unit_schedule.rs`, `UnitsSection` | M |
-| 7 | **Geländer als eigenes Bauteil** (Balkon/Loggia/Absturzsicherung in Plan, Schnitt, Ansicht, 3D); heute nur Wand-/2D-Behelf. **neu** | Modell `Stair.railProfile`/`stairs3d::RailSpec` als Ausgangspunkt, `cmds/` | M |
+| 7 | **Geländer als eigenes Bauteil** (Balkon/Loggia/Absturzsicherung in Plan, Schnitt, Ansicht, 3D). **erledigt 17.11. ([279], Rest: Loggia-Brüstung an Wänden, Fangpunkte, Import IfcRailing)** | `railing.rs`, `plan/railings.rs`, `cmds/railing.ts` | M |
 | 8 | **Geneigte Decke / Rampe** (Tiefgarage, Terrassen mit Gefälle): `Ceiling` hat nur Ober-/Unterkante, keine Neigung; Behelf Pultdach/Körper. **neu** | `Ceiling`, `ceiling_item` (`cmd_create.rs`), `plan/section` | M |
 | 9 | **Träger/Unterzug/Fassadenträger**: kein Element (Behelf Körper/Wand), Deckenspiegel mit Unterzügen fehlt. **neu**, [100] nennt die Lücke | `columns` als Muster | M |
 | 10 | **3D-Entourage** (Möbel, Menschen, Autos 3D) für Bilder: Bibliothek nur 2D; Behelf glTF/OBJ-Import | [253] („3D nach 1.0“), `furniture_lib.rs` | L |

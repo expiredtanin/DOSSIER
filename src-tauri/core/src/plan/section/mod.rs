@@ -247,6 +247,8 @@ pub struct Cut {
     pub source_id: Option<String>,
     pub category: Option<String>,
     pub stair_id: Option<String>,
+    /// [279] Geländer, zu dem das Band gehört (Pick `@railing:<id>`).
+    pub railing_id: Option<String>,
     /// [33] Index der Schicht im Aufbau des Bauteils (Wand-, Decken-, Dachtyp), wo bekannt.
     pub layer_index: Option<usize>,
     /// [33] Override der Schicht (nur beim Zeichnen gesetzt, [`cut_overrides`]).
@@ -255,7 +257,7 @@ pub struct Cut {
 
 impl Cut {
     fn new(kind: Kind, index: usize, pts: Vec<[f64; 2]>) -> Cut {
-        Cut { kind, index, pts, nse: None, fill: None, hatch: None, join_priority: None, component_id: None, source_id: None, category: None, stair_id: None, layer_index: None, ov: None }
+        Cut { kind, index, pts, nse: None, fill: None, hatch: None, join_priority: None, component_id: None, source_id: None, category: None, stair_id: None, railing_id: None, layer_index: None, ov: None }
     }
 }
 
@@ -439,6 +441,10 @@ pub fn without_elements(p: &Project, ids: &HashSet<String>) -> Project {
     if let Some(v) = &mut q.columns {
         v.retain(|x| !ids.contains(&x.id));
     }
+    // [279] Geländer.
+    if let Some(v) = &mut q.railings {
+        v.retain(|x| !ids.contains(&x.id));
+    }
     if let Some(v) = &mut q.rooms {
         v.retain(|x| !ids.contains(&x.id));
     }
@@ -602,6 +608,7 @@ pub(crate) fn edge_categories(p: &Project, walls: &[Option<&Wall>], slabs: &[ban
             bands::SlabOwner::Ceiling(c, _) => &c.category_code,
             bands::SlabOwner::Stair(st) => &st.category_code,
             bands::SlabOwner::Column(c) => &c.category_code,
+            bands::SlabOwner::Railing(c, _) => &c.category_code,
             bands::SlabOwner::None => continue,
         };
         m.insert((Kind::Slab, i), code.clone());
@@ -628,6 +635,7 @@ pub(crate) fn edge_ids(p: &Project, walls: &[Option<&Wall>], slabs: &[bands::Sla
             bands::SlabOwner::Ceiling(c, _) => &c.id,
             bands::SlabOwner::Stair(st) => &st.id,
             bands::SlabOwner::Column(c) => &c.id,
+            bands::SlabOwner::Railing(c, _) => &c.id,
             bands::SlabOwner::None => continue,
         };
         m.insert((Kind::Slab, i), id.clone());
@@ -682,6 +690,8 @@ pub(super) fn compute_plane(p: &Project, level: &LevelSpec, bodies: &[BodyMesh],
     slabs_r.extend(model3d::emit_stairs(p, true));
     // [141] Stützen: geschnitten mit Bauteil-Stil (Rang gegen die Wände wie im Grundriss) und in der Projektion.
     slabs_r.extend(model3d::column_slabs(p));
+    // [279] Geländer: geschnitten und in der Projektion.
+    slabs_r.extend(model3d::railing_slabs(p));
     let wi: Vec<render3d::WallInput> = walls_r.iter().map(wall_input).collect();
     let si: Vec<render3d::SlabInput> = slabs_r.iter().map(slab_input).collect();
     // Die Ebene ging als Zahl-Argument (wasm-bindgen, `Math.fround`) hinein, nicht über JSON.

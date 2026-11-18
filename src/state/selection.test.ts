@@ -86,6 +86,7 @@ describe("Selection", () => {
       roomIds: [],
       openingIds: [],
       treeIds: [],
+      railingIds: [],
       cameraIds: [],
       contextIds: [],
     });

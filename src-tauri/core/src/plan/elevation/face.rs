@@ -10,6 +10,8 @@ pub(super) enum Role {
     Roof,
     /// Stütze ([132]): Prisma aus dem Querschnitt, Flächen wie eine Platte.
     Column,
+    /// [279] Geländer: Prismen (Pfosten, Stäbe, Tafeln, Handlauf), id = Geländer-id.
+    Railing,
     /// [152] Importiertes Netz (`ImportedMesh`): Dreiecke, id = Netz-id.
     Mesh,
     /// [115] Freier Körper (`ExtrudedSolid`, Netz aus `solid_mesh.rs`): wie ein Netz, id = Körper-id.
@@ -156,6 +158,7 @@ pub(super) fn face_overrides(p: &Project, faces: &mut [Face], v: RuleView) {
                 surf_ov(p, v, "roof", &r.category_code, None, &layers, Some(0))
             }),
             Role::Column => p.columns.as_deref().unwrap_or(&[]).iter().find(|c| c.id == id).and_then(|c| surf_ov(p, v, "column", &c.category_code, Some(&super::super::domains::column_label(c)), &[], None)),
+            Role::Railing => p.railings.as_deref().unwrap_or(&[]).iter().find(|r| r.id == id).and_then(|r| surf_ov(p, v, "railing", &r.category_code, Some(&crate::railing::label(r)), &[], None)),
             Role::Mesh => p.context.as_deref().unwrap_or(&[]).iter().find_map(|c| match c {
                 ContextObject::ImportedMesh(m) if m.id == id => Some(m),
                 _ => None,
