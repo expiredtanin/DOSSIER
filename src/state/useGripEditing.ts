@@ -268,6 +268,8 @@ export function useGripEditing(opts: {
     ring?: { kind: RingKind; id: string };
     /** [191] Scheitel-Griff der Bogenkante `arcSeg` (flacher Index wie `insertSeg`). */
     arcSeg?: number;
+    /** [281] Ende der Gefällelinie einer geneigten Decke (0 = Bezugspunkt, 1 = Endpunkt). */
+    slopeEnd?: number;
   }
   const gripOwners: GripOwner[] = [];
   // [ersterFlachIndex, letzterFlachIndex] DESSELBEN Elements — für die Anker-
@@ -622,6 +624,13 @@ export function useGripEditing(opts: {
         const rings = [{ pts: selectedCeiling.outline, off: 0, bulge: selectedCeiling.outlineBulge }];
         pushInsertGrips(pts, rings, { kind: "ceiling", id: selectedCeiling.id });
         pushArcGrips(pts, rings, { kind: "ceiling", id: selectedCeiling.id });
+        // [281] Geneigte Decke: Anfang und Ende der Gefällelinie als zwei weitere Griffe.
+        const sl = selectedCeiling.slope;
+        if (sl) {
+          const start = pts.length;
+          [sl.from, sl.to].forEach((q, i) => { pts.push({ x: q.x, y: q.y }); gripOwners.push({ localIndex: -1, slopeEnd: i, ring: { kind: "ceiling", id: selectedCeiling.id } }); });
+          for (let i = start; i < pts.length; i++) gripOwnerRange.push([start, pts.length - 1]);
+        }
       }
       return pts;
     }
@@ -982,7 +991,7 @@ export function useGripEditing(opts: {
   // Wand/Öffnung/Treppe haben keine Polygon-Nachbarn → null.
   const resolvePolygonRing = (index: number): { pts: Vec2[]; index: number; closed: boolean } | null => {
     const owner = gripOwners[index];
-    if (owner?.insertSeg != null || owner?.arcSeg != null) return null;
+    if (owner?.insertSeg != null || owner?.arcSeg != null || owner?.slopeEnd != null) return null;
     if (roofGripsOn && selectedRoof && !owner?.drawingId && !owner?.wallId) {
       const ring = roofRings(selectedRoof).find((rg) => index >= rg.off && index < rg.off + rg.pts.length);
       return ring ? { pts: ring.pts, index: index - ring.off, closed: true } : null;
@@ -1236,6 +1245,11 @@ export function useGripEditing(opts: {
     // [191] Scheitel-Griff einer Bogenkante: Bulge live, ein Undo-Schritt je Zug.
     if (modelEditable && ins?.arcSeg != null && ins.ring && ins.ring.kind !== "polyline" && ins.ring.kind !== "contours") {
       storeState().setRingArc(ins.ring.kind, ins.ring.id, ins.arcSeg, pt);
+      return;
+    }
+    // [281] Gefällelinie: Ende ziehen, Gefälle in % bleibt (ein Undo-Schritt je Zug über den Schlüssel).
+    if (modelEditable && ins?.slopeEnd != null && ins.ring) {
+      storeState().moveCeilingSlopeGrip(ins.ring.id, ins.slopeEnd, pt);
       return;
     }
     if (modelEditable && ins?.insertSeg != null && ins.ring) {
