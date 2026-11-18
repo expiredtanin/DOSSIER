@@ -116,7 +116,7 @@ type WallCmdState = WallIdle | WallDrawing;
 const UNDO: CmdOption = { id: "undo", labelKey: "cmd.polyline.undo" };
 const arcOption = (on: boolean): CmdOption => ({ id: "arc", labelKey: "cmd.polyline.arcOpt", value: on ? "on" : "off" });
 const tangentOption = (on: boolean): CmdOption => ({ id: "tangent", labelKey: "cmd.polyline.tangentOpt", value: on ? "on" : "off" });
-const typeOption = (s: ArcMode): CmdOption => ({ id: "wtype", labelKey: "cmd.wall.typeOpt", value: s.typeName ?? t("cmd.wall.typeActive"), key: "T" });
+const typeOption = (s: ArcMode): CmdOption => ({ id: "wtype", labelKey: "cmd.wall.typeOpt", value: s.typeName ?? t("cmd.wall.typeActive"), key: "W" });
 const extOption = (s: ArcMode): CmdOption => ({ id: "ext", labelKey: "cmd.wall.extOpt", value: t(`cmd.wall.ext.${s.ext}`), key: "A" });
 
 /**
