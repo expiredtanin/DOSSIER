@@ -12,6 +12,12 @@ Prüfbilder je Aufgabe, neueste zuerst. Entstanden im Linux-Container (CLI-SVG b
 - PDF: [wettbewerb-praesentationsplan-a2-1-200.pdf](review-pdf/wettbewerb-praesentationsplan-a2-1-200.pdf)
 
 
+## [253] 3D-Entourage (Personen, Velo, Auto, Bank)
+
+**entourage.png**
+
+![entourage.png](review-253/entourage.png)
+
 ## [283] UX-Prüfung der neuen Funktionen
 
 **nachtrag.png**
