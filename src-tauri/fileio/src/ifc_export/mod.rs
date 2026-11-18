@@ -85,7 +85,12 @@
 //                 ceiling_height (FinishCeilingHeight, mittlere lichte Höhe), PTS, net_area, gross_area,
 //                 sia_category, PSETS
 //   END_SPACES  = 8   (bündelt die Räume je Geschoss zu IfcRelAggregates)
-//   ROOF        = 9, structure, id, name, predefined (Text), TYPEREF, PSETS, MESH
+//   ROOF        = 9 ([B5] Aggregat), structure, id, name, predefined (Text), TYPEREF, PSETS, n_parts,
+//                 (name, plane (Index der Dachfläche, −1 = Sonderteil), PSETS, MESH) × n_parts
+//                 IfcRoof (PredefinedType nach Dachform; Typ, Pset_RoofCommon, Qto_RoofBaseQuantities) ohne Darstellung, per
+//                 IfcRelAggregates je Teil ein IfcSlab ROOF mit Netz, Pset_SlabCommon, Qto_SlabBaseQuantities und den Schichten
+//                 des Dachtyps als IfcMaterialLayerSetUsage (AXIS3, NEGATIVE). Teile: `roof/<id>/p<plane>` bzw. `roof/<id>/part<k>`;
+//                 OPENING_SOLID mit Wirt `roof/<id>` sitzt im ersten Teil, mit `roof/<id>/p<plane>` in dieser Fläche.
 //   COLUMN      = 10, structure, id, label, PTS, z_rel, depth, component_id (−1 = keine), component_name, PSETS
 //   COLUMN_PIECES = 20, structure, id, label, n, (PTS, z_rel, depth) × n, component_id (−1 = keine),
 //                 component_name, PSETS   ([141] Stütze mit Höhenabschnitten, je Abschnitt ein eigenes beschnittenes
@@ -379,6 +384,7 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
         spaces: Vec::new(),
         column_materials: Vec::new(),
         elements: HashMap::new(),
+        void_alias: HashMap::new(),
         fill_styles: Vec::new(),
     };
     let v2 = schema == Schema::Ifc2x3;
@@ -848,7 +854,13 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
                 }
                 let host_entity = match host.strip_prefix("wall/") {
                     Some(id) => w.walls.get(id).map(|x| x.0),
-                    None => w.elements.get(&host).copied(),
+                    None => w
+                        .elements
+                        .get(&host)
+                        .or_else(|| w.void_alias.get(&host))
+                        // `roof/<id>/p<n>` ohne diese Fläche (verschnittenes Dach): erster Teil des Dachs.
+                        .or_else(|| host.rsplit_once("/p").and_then(|(roof, n)| n.parse::<u32>().ok().and_then(|_| w.void_alias.get(roof))))
+                        .copied(),
                 };
                 let Some(host_entity) = host_entity else { continue };
                 let parent = w.placement_of(structure);
@@ -1169,9 +1181,46 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
                 let predefined = r.string()?;
                 let ty = r.type_ref()?;
                 let psets = r.psets()?;
-                let mesh = r.mesh()?;
-                let (placement, shape) = w.emit_triangulated_product(&mesh, w.placement_of(structure));
-                w.finish_typed("IFCROOF", format!("roof/{id}"), &name, &ty, &psets, structure, placement, shape, Some(enum_(&predefined)), false);
+                let n_parts = r.idx()?;
+                // [B5] IfcRoof als Aggregat ohne eigene Darstellung; je Dachfläche (bzw. Sonderteil) ein IfcSlab ROOF mit
+                // Schichten (IfcMaterialLayerSetUsage), Pset_SlabCommon und Qto_SlabBaseQuantities.
+                let placement = w.emit_placement(0.0, w.placement_of(structure));
+                let roof_key = format!("roof/{id}");
+                let roof_guid = w.gid(&roof_key);
+                let roof_entity = w.finish_aggregate("IFCROOF", roof_key.clone(), &name, &ty, &psets, structure, placement, enum_(&predefined));
+                let set = ty.as_ref().and_then(|t| w.layer_set_of(t));
+                let mut slabs = Vec::new();
+                for _ in 0..n_parts {
+                    let part_name = r.string()?;
+                    let plane = r.raw()?;
+                    let part_psets = r.psets()?;
+                    let mesh = r.mesh()?;
+                    let (part_placement, shape) = w.emit_triangulated_product(&mesh, placement);
+                    let key = if plane >= 0.0 { format!("{roof_key}/p{}", plane as i64) } else { format!("{roof_key}/part{}", slabs.len()) };
+                    // GlobalId aus der des Dachs (stabil auch nach Import → Export, wo die Dach-id eine andere ist).
+                    let guid = ifc_string(&ifc_guid(&format!("{roof_guid}/{}", key.rsplit('/').next().unwrap_or(""))));
+                    let slab = w.emit_building_element("IFCSLAB", guid, &part_name, part_placement, shape, Some(enum_("ROOF")));
+                    for p in &part_psets {
+                        w.add_pset(p, slab, &key);
+                    }
+                    w.elements.insert(key, slab);
+                    slabs.push(slab);
+                }
+                if let Some(&first) = slabs.first() {
+                    // Dachfenster ohne Flächenangabe (verschnittenes Dach) sitzen im ersten Teil.
+                    w.void_alias.insert(roof_key.clone(), first);
+                    let g = w.gid(&format!("aggregates/{roof_key}"));
+                    w.add("IFCRELAGGREGATES", format!("{g},#{},$,$,#{roof_entity},{}", w.owner_history, refs(&slabs)));
+                    if let Some(set) = set {
+                        // Schichten von aussen (oben) nach innen: Dickenrichtung = lokale Z-Achse, abwärts.
+                        let u = w.add(
+                            "IFCMATERIALLAYERSETUSAGE",
+                            format!("#{set},{},{},0.{}", enum_("AXIS3"), enum_("NEGATIVE"), if v2 { "" } else { ",$" }),
+                        );
+                        let g = w.gid(&format!("{roof_key}/material"));
+                        w.add("IFCRELASSOCIATESMATERIAL", format!("{g},#{},$,$,{},#{u}", w.owner_history, refs(&slabs)));
+                    }
+                }
             }
             c if c == REC_COLUMN || c == REC_COLUMN_PIECES || c == REC_BEAM => {
                 let structure = r.structure(n_storeys)?;
@@ -1244,12 +1293,21 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
                         continue; // ohne Code keine Referenz
                     }
                     let Some(&entity) = w.elements.get(&key) else { continue };
-                    if let Some((_, _, v)) = by_code.iter_mut().find(|(c, _, _)| *c == code) {
-                        if !v.contains(&entity) {
-                            v.push(entity);
+                    // [B5] Dach: auch die Dachflächen (Teile des IfcRoof) tragen die Klassifikation (Leser erben nicht).
+                    let mut targets = vec![entity];
+                    if key.starts_with("roof/") {
+                        let mut parts: Vec<(&String, usize)> = w.elements.iter().filter(|(k, _)| k.strip_prefix(&format!("{key}/")).is_some_and(|t| t.starts_with('p'))).map(|(k, v)| (k, *v)).collect();
+                        parts.sort();
+                        targets.extend(parts.into_iter().map(|x| x.1));
+                    }
+                    for entity in targets {
+                        if let Some((_, _, v)) = by_code.iter_mut().find(|(c, _, _)| *c == code) {
+                            if !v.contains(&entity) {
+                                v.push(entity);
+                            }
+                        } else {
+                            by_code.push((code.clone(), ref_name.clone(), vec![entity]));
                         }
-                    } else {
-                        by_code.push((code, ref_name, vec![entity]));
                     }
                 }
                 if !by_code.is_empty() {

@@ -43,7 +43,8 @@ function exportedCounts(ifc: string): Map<string, number> {
   const m = new Map<string, number>();
   for (const cls of ["IFCWALL", "IFCSLAB", "IFCROOF", "IFCDOOR", "IFCWINDOW", "IFCSTAIRFLIGHT", "IFCRAILING", "IFCCOLUMN", "IFCBUILDINGELEMENTPROXY"]) {
     const n = (ifc.match(new RegExp(`^#\\d+=${cls}\\(`, "gm")) ?? []).length;
-    if (n) m.set(cls, n);
+    // [B5] Das Dach ist ein Aggregat ohne Körper (kein Produkt im Mesh-Import); seine IfcSlab ROOF zählen als Platten.
+    if (n && cls !== "IFCROOF") m.set(cls, n);
   }
   return m;
 }
@@ -106,7 +107,8 @@ describe("IFC-Import: Rundreise mit dem eigenen Export", () => {
         return Math.abs(polygonArea(c.outline)) * Math.max(zTop - zBottom, 0.001);
       })
       .sort((a, b) => a - b);
-    const slabsGot = products.filter((p) => p.ifcClass === "IfcSlab").map(vol).sort((a, b) => a - b);
+    const roofSlabs = new Set((sampleProject.roofs ?? []).length ? products.filter((p) => p.ifcClass === "IfcSlab" && /Dach/.test(p.name ?? "")).map((p) => p.globalId) : []);
+    const slabsGot = products.filter((p) => p.ifcClass === "IfcSlab" && !roofSlabs.has(p.globalId)).map(vol).sort((a, b) => a - b);
     expect(slabsGot.length).toBe(slabsExpected.length);
     slabsGot.forEach((v, i) => expect(relClose(v, slabsExpected[i], 1e-6), `${v} ≠ ${slabsExpected[i]}`).toBe(true));
   });

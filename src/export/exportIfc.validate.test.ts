@@ -394,4 +394,32 @@ print(json.dumps({"n": len(c), "solids": len(body.Items), "volume": us.get_volum
     const glassVol = d.items.filter((i) => i.styles[0] === "Glas").reduce((a, i) => a + i.volume, 0);
     expect(glassVol).toBeCloseTo(2 * leafArea * 0.5 * 0.024, 6);
   });
+  it("[B5] Dächer als IfcRoof-Aggregat mit IfcSlab ROOF je Dachfläche (IFC4 und IFC2x3), Schema gültig", () => {
+    const PY = `
+import sys, json, ifcopenshell
+m = ifcopenshell.open(sys.argv[1])
+out = []
+for r in m.by_type("IfcRoof"):
+    kids = [o for rel in r.IsDecomposedBy for o in rel.RelatedObjects]
+    out.append({"pre": getattr(r, "PredefinedType", None) or r.ShapeType, "rep": r.Representation is not None,
+                "kids": [[k.is_a(), k.PredefinedType, k.Representation is not None, any(a.is_a("IfcRelAssociatesMaterial") and a.RelatingMaterial.is_a("IfcMaterialLayerSetUsage") for a in k.HasAssociations)] for k in kids]})
+print(json.dumps(out))
+`;
+    const typed = { ...sampleProject, roofs: sampleProject.roofs!.map((r) => ({ ...r, roofTypeId: "roof-warm" })) } as Project;
+    for (const schema of ["IFC4", "IFC2X3"] as const) {
+      const ifc = exportIfcSpf(typed, { schema });
+      const file = writeIfc(`dach-${schema}`, ifc);
+      const r = spawnSync("python3", ["-c", PY, file], { encoding: "utf8" });
+      const roofs = JSON.parse(r.stdout) as { pre: string; rep: boolean; kids: [string, string, boolean, boolean][] }[];
+      expect(roofs.length).toBe(sampleProject.roofs!.length);
+      for (const roof of roofs) {
+        expect(roof.rep).toBe(false);
+        expect(roof.kids.length).toBeGreaterThan(0);
+        for (const k of roof.kids) expect(k).toEqual(["IfcSlab", "ROOF", true, true]);
+      }
+      const v = validate(`dach-${schema}`, ifc);
+      expect(v.out).toContain("0 Befunde");
+      expect(v.status).toBe(0);
+    }
+  }, 240_000);
 });

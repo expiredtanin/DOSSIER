@@ -27,7 +27,7 @@ Legende Dossier: **ja** vorhanden · **teils** teilweise · **fehlt**.
 | Flächen SIA 416 / IVHB | Raumflächen-Add-on DIN 277/WoFlV belegt; SIA 416 über Listeneinstellungen (Forum, nicht geprüft) | Spaces + Worksheets (SIA 416 nicht geprüft) | **ja**: Flächentabelle nach SIA 416, GV aus Hülle ([266]), IVHB-Ziffern, Kennzahlenleiste, CSV/PDF/IFC |
 | Kostenschätzung | Mengen/Listen; Kostenmodul nicht geprüft | Worksheets (nicht geprüft) | **ja**: Kennwert-Methode eBKP-H B–J, Honorar, Reserve, MwSt ([209]); nur grob |
 | Abgabe-Layouts | Layouts, Publisher | Sheet Layers, Batch Publish | **ja**: Layout-Blätter, Plakate A0/A1, Kennwort/anonym mit Prüfung, PDF mit Ebenen, Publikationssätze ([208] ◐) |
-| Austausch DXF/IFC | DXF/DWG, IFC (sehr ausgereift), BCF, Teamwork-Hotlinks | DXF/DWG, IFC, BCF (nicht geprüft) | **teils**: DXF/DWG, IFC Import/Export, BCF, STEP/OBJ/glTF; IFC/DXF in keinem Fremdprogramm geöffnet ([259], [C9]); Dächer als Netz im IFC |
+| Austausch DXF/IFC | DXF/DWG, IFC (sehr ausgereift), BCF, Teamwork-Hotlinks | DXF/DWG, IFC, BCF (nicht geprüft) | **teils**: DXF/DWG, IFC Import/Export, BCF, STEP/OBJ/glTF; IFC/DXF in keinem Fremdprogramm geöffnet ([259], [C9]); Dächer als IfcRoof-Aggregat mit IfcSlab ROOF je Dachfläche (Netz) ([B5], 18.11.) |
 | Wände/Decken/Dächer | alle, Schichtaufbau, Profile | alle | **ja**: mehrschichtig, Bogen, Gehrung/T-Stoss, Dach beliebiger Umriss; **fehlt**: geneigte Decke/Rampe als Element |
 | Treppen | parametrisch, Geländer | parametrisch | **ja**: gerade, L, U, Wendel, Deckenloch automatisch |
 | Geländer, Balken, Vorhangfassade | eigene Werkzeuge | eigene Werkzeuge | **teils**: Geländer als eigenes Bauteil (Stäbe, Glas, Brüstung, Lochblech; [279]); **fehlt**: Träger/Unterzug, Vorhangfassade |
@@ -64,7 +64,7 @@ Grösse: S ≤ 1 Tag · M ≤ 1 Woche · L ≤ 1 Monat. IDs aus `TODO.md`; **neu
 | 9 | **Träger/Unterzug/Fassadenträger**: kein Element (Behelf Körper/Wand), Deckenspiegel mit Unterzügen fehlt. **teilweise erledigt 17.11. ([280]: Träger/Unterzug als Bauteil in Plan, Schnitt, Ansicht, 3D, IFC; Rest: Gruppen, Deckenspiegel, Profilkatalog)**, [100] nennt die Lücke | `columns` als Muster | M |
 | 10 | **3D-Entourage** (Möbel, Menschen, Autos 3D) für Bilder: Bibliothek nur 2D; Behelf glTF/OBJ-Import | [253] („3D nach 1.0“), `furniture_lib.rs` | L |
 | 11 | **GV: Studienkörper neben Wand-Haus, Bodenplatte unter unterstem Geschoss** | [266] Punkt 1 Rest; `building_volume.rs` | S–M |
-| 12 | **IFC: Dächer als Netz, keine 2D/Layouts/Möbel**; IFC-Import zu Bauteilen unvollständig (Dächer, Träger) | [B4], [B5], [259] | M |
+| 12 | **IFC: Dachflächen nur als Netz (IfcRoof-Aggregat seit 18.11., keine Profil-Extrusion), keine 2D/Layouts/Möbel**; IFC-Import zu Bauteilen unvollständig (Dächer, Träger) | [B4], [B5], [259] | M |
 | 13 | **Gelände weiter bearbeiten** (Modellieren, Schnitt-Gelände geprüft?): Griffe/Profile, Abtrag/Aufschüttung nur über Baugrube | [187], [T6], [68]; Spec-Schritt 1.3 „Gelände nicht im Schnitt“ | M |
 | 14 | **Raumprogramm → Modell**: Räume-generieren/ Abgleich ok; Ausbau auf Variantenvergleich (Kennzahlen je Option) nicht geprüft | [272] | nicht geprüft |
 

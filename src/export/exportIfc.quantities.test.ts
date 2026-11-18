@@ -89,7 +89,7 @@ for el in m.by_type("IfcElement"):
             g = shape.geometry
             v = np.array(g.verts).reshape(-1, 3)
             item["zExtent"] = float(v[:, 2].max() - v[:, 2].min())
-        if el.is_a("IfcSlab"):
+        if el.is_a("IfcSlab") and el.PredefinedType != "ROOF":
             prof = [r for r in el.Representation.Representations if r.RepresentationIdentifier == "Body"][0].Items[0].SweptArea
             holes = []
             if prof.is_a("IfcArbitraryProfileDefWithVoids"):
@@ -215,11 +215,19 @@ describe.skipIf(!hasIfcOpenShell)("Basismengen gegen ifcopenshell", { timeout: 1
   });
 
   it("Dach: Grundrissprojektion und geneigte Fläche = nach oben zeigende Netz-Dreiecke", () => {
+    // [B5] IfcRoof ist Aggregat ohne Darstellung; die Dachflächen (IfcSlab ROOF) tragen die Netze.
     const [roof] = of("IfcRoof");
+    const parts = of("IfcSlab").filter((s) => s.predefined === "ROOF");
+    expect(parts.length).toBeGreaterThan(0);
     const q = qof(roof, "Qto_RoofBaseQuantities");
-    close(q.GrossArea, roof.up![0]);
-    close(q.ProjectedArea, roof.up![1]);
+    close(q.GrossArea, parts.reduce((a, s) => a + s.up![0], 0));
+    close(q.ProjectedArea, parts.reduce((a, s) => a + s.up![1], 0));
     expect(q.GrossArea).toBeGreaterThan(q.ProjectedArea);
+    for (const s of parts) {
+      const qs = qof(s, "Qto_SlabBaseQuantities");
+      close(qs.NetVolume, s.volume!);
+      close(qs.GrossArea, s.up![0]);
+    }
   });
 
   it("Stütze: Volumen, Querschnitt × Länge", () => {

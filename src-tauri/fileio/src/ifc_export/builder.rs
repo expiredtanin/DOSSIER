@@ -68,6 +68,8 @@ pub(super) struct Builder {
     pub(super) column_materials: Vec<(String, String, Vec<usize>)>,
     /// Bauteil-Schlüssel (wie für die GlobalId, z. B. `wall/<id>`) → Entität; Ziel von Klassifikation/Zone/Attach.
     pub(super) elements: HashMap<String, usize>,
+    /// Wirt für IfcRelVoidsElement, wenn der Schlüssel ein Aggregat ist (Dach → erste Dachfläche).
+    pub(super) void_alias: HashMap<String, usize>,
     /// [201] Übernommene GlobalIds (Schlüssel wie für `gid`), Vorrang vor der abgeleiteten.
     pub(super) guid_override: HashMap<String, String>,
     /// IFC2x3: Türen/Fenster je (Tür?, Ausführung) → Bauteile; am Ende je ein IfcDoorStyle/IfcWindowStyle.
@@ -588,6 +590,22 @@ impl Builder {
         let key = format!("type/{}/{}", t.kind.ifc(), t.id);
         let set = self.types[*self.type_index.get(&key)?].layer_set;
         (set != 0).then_some(set)
+    }
+
+    /// Aggregat ohne eigene Darstellung (IfcRoof): Typ, Eingliederung und Psets wie `finish_typed`.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn finish_aggregate(&mut self, ifc: &str, guid_key: String, name: &str, ty: &Option<TypeRef>, psets: &[Pset], structure: i64, placement: usize, predefined: String) -> usize {
+        let guid = self.gid(&guid_key);
+        let entity = self.add(ifc, format!("{guid},#{},{},$,$,#{placement},$,$,{predefined}", self.owner_history, ifc_string(name)));
+        if let Some(i) = ty.as_ref().map(|t| self.type_for(t)) {
+            self.types[i].occurrences.push(entity);
+        }
+        self.add_to_containment(structure, entity);
+        for p in psets {
+            self.add_pset(p, entity, &guid_key);
+        }
+        self.elements.insert(guid_key, entity);
+        entity
     }
 
     /// Gemeinsamer Abschluss der Bauteile mit Typ und Psets: Typ (falls vorhanden) anlegen, Entität
