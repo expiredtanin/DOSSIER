@@ -2098,7 +2098,7 @@ export function Wasm3DViewport({
                   strokeWidth={glyphStrokeWidth}
                   strokeLinejoin="round"
                 />
-              ) : (
+              ) : isVertical ? (
                 <circle
                   cx={8}
                   cy={8}
@@ -2107,6 +2107,9 @@ export function Wasm3DViewport({
                   stroke="var(--accent)"
                   strokeWidth={glyphStrokeWidth}
                 />
+              ) : (
+                // [288] Eckpunkt wie im 2D: kleines gefülltes Quadrat (Vectorworks-Auswahlgriff).
+                <rect x={4.5} y={4.5} width={7} height={7} fill="var(--accent)" stroke="var(--sheet)" strokeWidth={1} />
               )}
               {isVertical && (
                 <text

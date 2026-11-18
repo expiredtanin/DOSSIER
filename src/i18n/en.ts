@@ -319,6 +319,8 @@ export const en: Record<TranslationKey, string> = {
   "snap.tip.parallel": "Parallel",
   "snap.tip.extension": "Extension",
   "snap.tip.divide": "Division point",
+  "snap.tip.grid": "Grid",
+  "snap.tip.ortho": "Ortho",
   "snap.endpoint": "Endpoint",
   "snap.midpoint": "Midpoint",
   "snap.center": "Circle center/quadrants (0/90/180/270°)",

@@ -76,6 +76,8 @@ export interface UsePlanPickCycleArgs {
   drag: React.MutableRefObject<{ pointerId: number; startClientX: number; startClientY: number; startView: ViewBox; } | null>;
   commitPan: () => void;
   setDragging: React.Dispatch<React.SetStateAction<boolean>>;
+  /** [288] Klick ohne Bewegung: Kante des Gewählten wählen. true = Klick verbraucht (kein Wählen/Durchschalten). */
+  onEdgeClick?: (clientX: number, clientY: number) => boolean;
 }
 
 export function usePlanPickCycle(inp: UsePlanPickCycleArgs) {
@@ -130,6 +132,7 @@ export function usePlanPickCycle(inp: UsePlanPickCycleArgs) {
     drag,
     commitPan,
     setDragging,
+    onEdgeClick,
   } = inp;
 
   // ── Übereinanderliegende Objekte durchschalten ────────────────────────────
@@ -497,6 +500,9 @@ export function usePlanPickCycle(inp: UsePlanPickCycleArgs) {
       }
       moveDrag.current = null;
       gripHandlers!.onGripEnd();
+      const still = md.startX !== undefined && md.startY !== undefined && Math.hypot(e.clientX - md.startX, e.clientY - md.startY) < MARQUEE_THRESHOLD_PX;
+      // [288] Klick ohne Bewegung auf eine Kante des Gewählten: Kante wählen (Anfasser zum Parallelverschieben).
+      if (still && !e.shiftKey && onEdgeClick?.(e.clientX, e.clientY)) return;
       // [137] Ohne Bewegung war es ein Klick auf das Gewählte: an derselben Stelle zum nächsten Objekt wechseln.
       if (clickCycles(e, md.startX, md.startY)) plainCycleStep(e.clientX, e.clientY);
       return;
@@ -583,6 +589,8 @@ export function usePlanPickCycle(inp: UsePlanPickCycleArgs) {
       }
       setPickList(null);
       cycleRef.current = null;
+      // [288] Klick auf eine Kante des Gewählten: Kante wählen statt neu zu wählen.
+      if (!e.shiftKey && onEdgeClick?.(e.clientX, e.clientY)) return;
       if (!e.shiftKey && plainCycleStep(e.clientX, e.clientY)) return;
       const dp = defaultPick(e.clientX, e.clientY);
       setSelected(dp.hitIndex);

@@ -67,6 +67,9 @@ export interface EdgeGrip {
    * gehaltene `selectedCeilingId`/`selectedRoomId` aufgelöst werden.
    */
   owner?: { drawingId?: string; wallId?: string };
+  /** [288] Endpunkte der Kante (Modell-Meter) — Treffer beim Anklicken einer Kante (Kantenauswahl). */
+  a?: Vec2;
+  b?: Vec2;
 }
 
 /**

@@ -134,6 +134,11 @@ function edges(verts: readonly Vec2[], closed: boolean, bulge: readonly number[]
   const out: EdgeGrip[] = [];
   for (let i = 0; i + 5 < f.length; i += 6) {
     const e: EdgeGrip = { mid: { x: f[i + 2], y: f[i + 3] }, normal: { x: f[i + 4], y: f[i + 5] }, aIndex: f[i], bIndex: f[i + 1] };
+    // [288] Endpunkte für die Kantenauswahl per Klick (Bogenkanten haben keinen Kanten-Griff, die Sehne ist die Kante).
+    if (verts[e.aIndex] && verts[e.bIndex]) {
+      e.a = verts[e.aIndex];
+      e.b = verts[e.bIndex];
+    }
     if (!closed) e.free = true;
     e.owner = owner;
     out.push(e);

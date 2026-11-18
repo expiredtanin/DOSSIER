@@ -67,6 +67,14 @@ export const MARQUEE_THRESHOLD_PX = 4;
 
 // Trefferradius (Bildschirm-Pixel) für das Greifen eines Editier-Griffs.
 export const GRIP_HIT_PX = 9;
+/**
+ * [288] Halbe Kantenlänge (Bildschirm-px) eines Auswahlgriffs (Vectorworks-Quadrat): fest, unabhängig vom Zoom.
+ * Einfüge-/Mittelgriffe kleiner, Hover grösser.
+ */
+export function gripSquareHalfPx(insert: boolean, hover: boolean): number {
+  const base = insert ? 3 : 4;
+  return hover ? base + 1.5 : base;
+}
 // Toleranz (Bildschirm-Pixel) für die Linien-Auswahl von 2D-Zeichenelementen.
 export const LINE_PICK_PX = 6;
 

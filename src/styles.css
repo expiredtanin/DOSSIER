@@ -2655,27 +2655,27 @@ body {
   stroke-dasharray: 5 4;
 }
 
-/* Editier-Griffe (Grips) des selektierten Elements: papierfarbene Kreise mit
-   Akzent-Ring + weichem Schatten (statt der alten gefüllten Quadrate) — wirkt
-   wie ein modernes Vektor-Tool statt AutoCAD-Grip. Ziehbar (Treffer in
-   PlanView per Bildschirm-Pixel, unabhängig von der gerenderten Form). */
+/* [288] Auswahlgriffe wie in Vectorworks: kleine gefüllte Quadrate in der Akzentfarbe mit dünnem hellem Rand,
+   einheitliche Grösse in Bildschirm-px (PlanView, `gripSquareHalfPx`). Hover: grösser und hohl. Ziehbar (Treffer
+   in PlanView per Bildschirm-Pixel, unabhängig von der gerenderten Form). Kein Filter-Schatten (teuer bei vielen). */
 .plan-svg .plan-grip {
+  fill: var(--accent);
+  stroke: var(--sheet);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+  shape-rendering: crispEdges;
+}
+.plan-svg .plan-grip.plan-grip-hover {
   fill: var(--sheet);
   stroke: var(--accent);
   stroke-width: 2;
-  vector-effect: non-scaling-stroke;
-  /* Knackig statt weichgezeichnet: kein Filter-Schatten (teuer bei vielen Griffen),
-     stattdessen ein heller Halo-Ring ausserhalb der Akzentkontur. */
-  paint-order: stroke fill;
-  shape-rendering: geometricPrecision;
 }
 
-/* Einfüge-Griff (Mitte eines Schnittlinien-Segments, Ziehen fügt einen Knick ein): kleine, gefüllte Raute. */
+/* Einfüge-/Mittelgriff (Mitte eines Schnittlinien-Segments, Ziehen fügt einen Knick ein): kleineres hohles Quadrat. */
 .plan-svg .plan-grip.plan-grip-insert {
-  fill: var(--accent);
-  stroke: var(--sheet);
-  stroke-width: 1.5;
-  stroke-linejoin: round;
+  fill: var(--sheet);
+  stroke: var(--accent);
+  stroke-width: 1.25;
 }
 
 /* Bezier-Hilfslinien (Anker → Kontrollpunkt-Griff): dünn, gestrichelt, deutlich
@@ -2692,12 +2692,12 @@ body {
    nach außen. Gleiche papierfarbene + Akzent-Ring-Sprache wie die Eckpunkt-
    Griffe, nur mit runden statt spitzen Ecken (stroke-linejoin überstimmt die
    globale Miter-Regel für Plan-Polygone via höherer Selektor-Spezifität). */
-/* [26] Kante unter dem Kanten-Anfasser hervorgehoben. */
-.plan-svg .plan-edge-hover {
+/* [288] Gewählte Kante (zweiter Klick auf eine Kante des Gewählten): breit hervorgehoben, trägt den Anfasser. */
+.plan-svg .plan-edge-selected {
   stroke: var(--accent);
-  stroke-width: 3.5;
+  stroke-width: 7;
   stroke-linecap: round;
-  opacity: 0.85;
+  opacity: 0.35;
   vector-effect: non-scaling-stroke;
 }
 
@@ -2751,18 +2751,38 @@ body {
   stroke-width: 1.5;
   filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.3));
 }
+/* [288] Fangsymbol: Fangfarbe (inline, einstellbar) über einem Kontrastrand, damit es auf hellem Papier wie auf
+   dunklen Flächen lesbar bleibt. */
 .plan-svg .snap-glyph {
   fill: none;
   stroke: #ffcc44;
-  stroke-width: 1.5;
+  stroke-width: 2;
+  stroke-linejoin: miter;
+}
+.plan-svg .snap-glyph-halo {
+  fill: none;
+  stroke: #1d1d1b;
+  stroke-width: 4.5;
+  stroke-linejoin: miter;
+  opacity: 0.85;
+}
+.plan-svg .snap-tip-bg {
+  fill: #fbf8f2;
+  fill-opacity: 0.96;
+  stroke-width: 1.25;
+}
+:root[data-theme="dark"] .plan-svg .snap-tip-bg {
+  fill: #2c2c2c;
 }
 .plan-svg .snap-tip {
-  fill: var(--ink);
-  stroke: var(--bg);
-  paint-order: stroke;
-  stroke-linejoin: round;
+  fill: #2a2926;
+  font-family: var(--font-ui, inherit);
+  font-weight: 600;
   pointer-events: none;
   user-select: none;
+}
+:root[data-theme="dark"] .plan-svg .snap-tip {
+  fill: #edeef0;
 }
 .plan-svg .snap-glyph.snap-fill {
   fill: #ffcc44;
