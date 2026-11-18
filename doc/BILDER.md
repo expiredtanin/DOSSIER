@@ -18,6 +18,10 @@ Prüfbilder je Aufgabe, neueste zuerst. Entstanden im Linux-Container (CLI-SVG b
 
 ![r1-plakat-a1-anonym.png](review-285/r1-plakat-a1-anonym.png)
 
+**r5-plakat-gefuellt.png** (nachher)
+
+![r5-plakat-gefuellt.png](review-285/r5-plakat-gefuellt.png)
+
 **r2-wohnungsspiegel.png**
 
 ![r2-wohnungsspiegel.png](review-285/r2-wohnungsspiegel.png)
