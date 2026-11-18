@@ -31,6 +31,7 @@ import { ContextObjectProps } from "./ContextObjectProps";
 import { SunStudySection } from "./SunStudySection";
 import { SiteRulesSection } from "./SiteRulesSection";
 import { TreeSection } from "./objectInfo/TreeSection";
+import { RailingSection } from "./objectInfo/RailingSection";
 import { CameraSection } from "./objectInfo/CameraSection";
 import { ViewShadowsInfo, MeasurementSection } from "./objectInfo/InfoBlocks";
 import { DimensionField, RotateField } from "./objectInfo/fields";
@@ -85,6 +86,7 @@ export function ObjectInfoPanel({ showPlacement = true }: { showPlacement?: bool
   // [137] Lage-Darstellung angeklickt (Schattenfläche / Baurechtslinie): Einstellungen der Quelle.
   const site = useStore((s) => s.selection.site);
   const treeSel = useStore((s) => s.selection.trees);
+  const railingSel = useStore((s) => s.selection.railings);
   const cameraSel = useStore((s) => s.selection.cameras);
   const ctxObj = sel?.kind === "contextObject" ? (storeProject.context ?? []).find((o) => o.id === sel.id) : undefined;
   const quantities = useMemo(
@@ -95,6 +97,8 @@ export function ObjectInfoPanel({ showPlacement = true }: { showPlacement?: bool
   // ── Leerzustand ───────────────────────────────────────────────────────────
   // [149] Baum gewählt: eigene Felder (Lage, Masse, Form, Bestand).
   if (sel === null && treeSel.length > 0) return <TreeSection ids={treeSel} />;
+  // [279] Geländer gewählt: Art, Höhe, Fusshöhe, Handlauf, Stäbe/Dicke.
+  if (sel === null && railingSel.length > 0) return <RailingSection ids={railingSel} />;
   // [213] Kamera gewählt: Standpunkt, Ziel, Bildwinkel, Projektion, Sonne und „Kamera öffnen".
   if (sel === null && cameraSel.length > 0) return <CameraSection ids={cameraSel} />;
   if (sel === null && site[0] === "viewShadows") return <ViewShadowsInfo />;

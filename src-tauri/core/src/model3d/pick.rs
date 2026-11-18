@@ -48,6 +48,14 @@ pub struct PickColumn {
     pub column_id: String,
 }
 
+/// [279] Geländer für den 3D-Pick.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PickRailing {
+    pub tris: Vec<Tri>,
+    pub railing_id: String,
+}
+
 /// [149] Baum für den 3D-Pick.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -115,6 +123,8 @@ pub struct PickGeometry {
     pub drawing_meshes: Vec<PickDrawingMesh>,
     /// [149] Bäume (Stamm + Krone).
     pub trees: Vec<PickTree>,
+    /// [279] Geländer.
+    pub railings: Vec<PickRailing>,
 }
 
 /// Öffnungen als Quader (Laibung zu Laibung, Wanddicke, Brüstung bis Sturz) für Pick und Hervorhebung.
@@ -275,6 +285,7 @@ pub fn pick_geometry(p: &Project) -> Result<PickGeometry, String> {
         stair_meshes: pick_stair_railings(p),
         drawing_meshes: pick_drawing_meshes(p, &HashMap::new()),
         trees: pick_trees(p),
+        railings: pick_railings(p),
     })
 }
 

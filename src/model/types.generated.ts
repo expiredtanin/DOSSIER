@@ -1779,6 +1779,8 @@ export type Group = {
   treeIds?: Array<string>;
   /** [213] Kameras (fehlt in älteren Dateien). */
   cameraIds?: Array<string>;
+  /** [279] Geländer (fehlt in älteren Dateien). */
+  railingIds?: Array<string>;
   /** Verschachtelte Gruppen (diese Gruppe enthält andere Gruppen als Ganzes). */
   groupIds: Array<string>;
 };
@@ -3269,6 +3271,10 @@ export type Project = {
    */
   trees?: Array<Tree>;
   /**
+   * Geländer ([279]) — eigenes Bauteil (Balkon, Galerie, Treppenauge), siehe {@link Railing}. Optional.
+   */
+  railings?: Array<Railing>;
+  /**
    * Kameras ([213]) — gespeicherte Standpunkte für 3D-Ansicht und Rendering, siehe {@link Camera}. Optional
    * (Default: leer behandeln).
    */
@@ -3442,6 +3448,61 @@ export type PublishSet = {
   /** PDF-Ebenen (Optional Content) je Kategorie. */
   pdfLayers?: boolean;
 };
+
+/**
+ * Ein Geländer ([279]) — eigenes Bauteil für Balkon, Galerie, Treppenauge und Terrasse (Absturzsicherung,
+ * Vorgabe 1.00 m nach SIA 358): Polylinie `points` auf einem Geschoss, Höhe, Art der Füllung, Handlauf. Grundriss
+ * (Linie bzw. Doppellinie je Art), Schnitt/Ansicht (Stäbe, Glasfläche, Brüstung), 3D, IFC (`IfcRailing`).
+ * Fusshöhe = Geschoss-UK + `baseOffset` (z. B. auf einer Balkonplatte).
+ */
+export type Railing = {
+  id: string;
+  type: "railing";
+  /** Zugehörige Zeichnungsebene (Geschoss). */
+  floorId: string;
+  /** Grafik-Kategorie (Ebene), Vorgabe "55" (Geländer). */
+  categoryCode: string;
+  /** IFC-GlobalId des Quell-Bauteils (IFC-Import/Rundreise). */
+  ifcGlobalId?: string;
+  /** Objekt-Sperre, analog `Wall.locked`. */
+  locked?: boolean;
+  /** Achse des Geländers (Polylinie im Grundriss, Meter, mindestens 2 Punkte). */
+  points: Array<Vec2>;
+  /** Geschlossener Zug (Treppenauge, Galerie ringsum); fehlt = offen. */
+  closed?: boolean;
+  /** Höhe über dem Fuss bis Oberkante Handlauf bzw. Füllung (m, Vorgabe 1.00 nach SIA 358). */
+  height: number;
+  /** Fusshöhe relativ zur Geschoss-UK (m, Vorgabe 0), z. B. 0.18 auf einer Balkonplatte. */
+  baseOffset?: number;
+  /** Art der Füllung. */
+  kind: RailingKind;
+  /** Stäbe: Achsabstand der Stäbe (m, Vorgabe 0.12; lichtes Mass bleibt unter 12 cm). */
+  barSpacing?: number;
+  /** Stäbe: Querschnitt (Kantenlänge bzw. Durchmesser, m, Vorgabe 0.014). */
+  barSize?: number;
+  /**
+   * Dicke der Füllung (m): Glas (Vorgabe 0.02), Brüstung (Vorgabe 0.15), Lochblech (Vorgabe 0.004); bei Stäben ohne Wirkung.
+   */
+  thickness?: number;
+  /** Handlauf auf der Oberkante; fehlt = bei Stäben und Glas ja, sonst nein. */
+  handrail?: boolean;
+  /** Handlauf: Durchmesser (m, Vorgabe 0.04). */
+  handrailSize?: number;
+  /** Optionales Bauteil (Component) für Füllung/Farbe, v. a. der massiven Brüstung. */
+  componentId?: string;
+  /** Optionale Übersteuerung der Strichfarbe; sonst gilt die Kategorie-Farbe. */
+  color?: string;
+  /** [271] Umbau: Status (Bestand, Abbruch, Neu) und Etappe. Fehlt ⇒ Bestand. */
+  renovation?: Renovation;
+  /** [272] Variante, zu der das Element gehört. Fehlt ⇒ Hauptmodell (immer sichtbar). */
+  designOption?: DesignOptionRef;
+};
+
+/**
+ * Art der Füllung eines Geländers ([279]): Stäbe (Rundstahl/Flachstahl, lotrecht), Glas (Ganzglas-Brüstung),
+ * massive Brüstung (Mauer/Beton) oder Lochblech.
+ */
+export type RailingKind = "bars" | "glass" | "solid" | "perforated";
 
 /**
  * Referenzlinien-Regel: setzt die `referenceLine`-Eigenschaft bei passenden

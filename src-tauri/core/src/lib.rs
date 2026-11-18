@@ -22,6 +22,7 @@ pub mod roof_parapet;
 pub mod flat_read;
 pub mod sun;
 pub mod tree;
+pub mod railing;
 pub mod camera;
 pub mod site_rules;
 pub mod site_proof;

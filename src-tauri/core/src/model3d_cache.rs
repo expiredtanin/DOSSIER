@@ -417,7 +417,7 @@ impl Model3dCache {
                 slabs,
                 context_meshes: model3d::emit_context_meshes(p),
                 solid_meshes: model3d::emit_solids(p),
-                column_meshes: { let mut m = model3d::emit_columns(p); m.extend(model3d::emit_trees(p)); m },
+                column_meshes: { let mut m = model3d::emit_columns(p); m.extend(model3d::emit_trees(p)); m.extend(model3d::emit_railings(p)); m },
                 opening_meshes: Vec::new(),
                 stair_meshes: model3d::emit_stair_meshes(p),
                 stair_railings: model3d::emit_stair_railings(p),

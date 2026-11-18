@@ -21,7 +21,7 @@ export interface View3dFilter {
 export const NO_VIEW3D_FILTER: View3dFilter = Object.freeze({ only: null, hidden: [] }) as View3dFilter;
 
 /** Element-Arten, die im 3D vorkommen (Räume, Schnittlinien, Lage-Darstellung und Gruppen nicht). */
-const KINDS_3D: readonly SelectionKind[] = ["walls", "ceilings", "openings", "stairs", "solids", "columns", "roofs", "contextObjects", "trees", "drawings"];
+const KINDS_3D: readonly SelectionKind[] = ["walls", "ceilings", "openings", "stairs", "solids", "columns", "roofs", "contextObjects", "trees", "railings", "drawings"];
 
 /** Element-ids der Auswahl, die im 3D vorkommen (ohne Doppel, in Wahl-Reihenfolge). */
 export function selectionIds3d(sel: Selection): string[] {

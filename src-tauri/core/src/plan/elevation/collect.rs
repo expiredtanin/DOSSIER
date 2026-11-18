@@ -70,7 +70,7 @@ pub(super) fn project_faces(frame: &[f64; 9], walls: &[RWall], slabs: &[RSlab], 
         };
         let (id, fill) = match role {
             Role::Wall => (walls[f.src].wall_id.clone(), walls[f.src].color),
-            Role::Slab | Role::Column | Role::Mesh | Role::Body => (slabs[f.src].ceiling_id.clone(), slabs[f.src].color),
+            Role::Slab | Role::Column | Role::Railing | Role::Mesh | Role::Body => (slabs[f.src].ceiling_id.clone(), slabs[f.src].color),
             Role::Roof => (roofs[f.src].id.clone(), roofs[f.src].fill),
         };
         let pts = f.pts.iter().map(|q| [q.0, q.1]).collect();
@@ -114,6 +114,16 @@ pub(super) fn collect_column_faces(p: &Project, frame: &[f64; 9]) -> Vec<Face> {
     let mut faces = project_faces(frame, &[], &slabs, &[]);
     for f in &mut faces {
         f.role = Role::Column;
+    }
+    faces
+}
+
+/// [279] Geländer als lotrechte Prismen (Pfosten, Stäbe, Tafel, Handlauf wie im 3D, `model3d::railing_slabs`).
+pub(super) fn collect_railing_faces(p: &Project, frame: &[f64; 9]) -> Vec<Face> {
+    let slabs = model3d::railing_slabs(p);
+    let mut faces = project_faces(frame, &[], &slabs, &[]);
+    for f in &mut faces {
+        f.role = Role::Railing;
     }
     faces
 }

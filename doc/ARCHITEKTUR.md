@@ -254,6 +254,7 @@ Beispiel: Die Plan-Ansicht zeigt das Erdgeschoss im Massstab 1:100.
    | Wände mit Öffnungen | `plan_walls()` in `plan/walls.rs` | Wandknoten `joins.rs`, Poché `plan/wall_poche.rs`, Symbole `plan/openings.rs` und `opening_geom.rs`, Wand an Stütze `plan/wall_columns.rs` |
    | Treppen | `plan_stairs()` in `plan/stairs.rs` | Symbol `plan/stair_symbol.rs`, Geometrie `stair.rs` und `kernel2d` |
    | Stützen, Bäume | `columns()`, `plan_trees()` | `plan/trees.rs`, `tree.rs` |
+   | Geländer [279] | `plan_railings()` | `plan/railings.rs`, `railing.rs` |
    | Körper (Extrusionen) | `solids()` in `domains.rs` | Kern-Netz (`solid_mesh.rs`) über `plan/mesh_plan.rs::plan_bodies()`: Ebenenschnitt (Poché, Bauteil-Schraffur aus `componentId`), Aufsicht, Überkopf ([G1]) |
    | 2D-Zeichnungen | `plan_drawings()` in `plan/drawings.rs` | Linien, Bögen, Bemassung, Texte, Blöcke |
    | Schnittführungen | `plan_section_lines()` in `plan/context.rs` | Symbol aus `plan/misc.rs` |

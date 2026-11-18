@@ -58,6 +58,7 @@ const REC_SPACE_ARC: f64 = 22.0;
 const REC_GUIDS: f64 = 23.0;
 const REC_CONTEXT: f64 = 24.0;
 const REC_LAYERS: f64 = 25.0;
+const REC_RAILING: f64 = 26.0;
 
 /// Toleranz des Kerns (`wall_bands.rs::EPS`) für „Öffnung trifft Band".
 const BAND_EPS: f64 = 1e-4;
@@ -988,6 +989,8 @@ enum Kind {
     Slab,
     Roof,
     Column,
+    /// [279] Geländer.
+    Railing,
     Stair,
     Window,
     Door,
@@ -999,7 +1002,7 @@ enum Kind {
 /// eBKP-H-Hauptgruppe zur Bauteilart, oder `None` (Tür, Raum: nicht eindeutig).
 fn ebkph_group(k: Kind) -> Option<(&'static str, &'static str)> {
     match k {
-        Kind::Wall | Kind::Slab | Kind::Column | Kind::Stair => Some(("C", "Konstruktion Gebäude")),
+        Kind::Wall | Kind::Slab | Kind::Column | Kind::Railing | Kind::Stair => Some(("C", "Konstruktion Gebäude")),
         Kind::Roof => Some(("F", "Bedachung Gebäude")),
         Kind::Window => Some(("E", "Äussere Wandbekleidung Gebäude")),
         Kind::Door | Kind::Space | Kind::Context => None,
@@ -1884,6 +1887,50 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
         f.nums(&[REC_TREE, structure, id, name]);
         w_psets(&mut f, &psets);
         // Zwei getrennte geschlossene Körper: nicht als ein dichtes Netz melden (IFC2x3: Flächenmodell).
+        w_mesh(&mut f, &positions, &indices, false);
+    }
+
+    // ── [279] Geländer → IfcRailing (GUARDRAIL; HANDRAIL, wenn nur der Handlauf bleibt), Netz aus den Prismen ──
+    for r in p.railings.as_deref().unwrap_or(&[]) {
+        let (Some(s), Some(ax)) = (crate::railing::spec(&p, r), crate::railing::axis(r)) else { continue };
+        let pieces = crate::railing::pieces(&p, r);
+        let (mut positions, mut indices) = (Vec::new(), Vec::new());
+        for q in &pieces {
+            let (pp, ii) = crate::columns3d::prism(&q.outline, q.z0, q.z1);
+            let at = (positions.len() / 3) as u32;
+            positions.extend(pp);
+            indices.extend(ii.into_iter().map(|k| k + at));
+        }
+        if indices.is_empty() {
+            continue;
+        }
+        let structure = structure_of(&r.floor_id);
+        let base = base_of(structure);
+        for z in positions.iter_mut().skip(2).step_by(3) {
+            *z -= base;
+        }
+        classified.push((format!("railing/{}", r.id), Kind::Railing, r.category_code.clone()));
+        let kind = match s.kind {
+            RailingKind::Glass => "glass",
+            RailingKind::Solid => "solid",
+            RailingKind::Perforated => "perforated",
+            _ => "bars",
+        };
+        let label = crate::railing::label(r);
+        let mut psets = vec![Pset { name: "Pset_RailingCommon", props: vec![ident("Reference", &label)] }];
+        renovation_props(&p, &mut psets, "Pset_RailingCommon", r.renovation.as_ref());
+        psets.push(Pset { name: "Dossier_Railing", props: vec![ident("Kind", kind), ident("Handrail", if s.handrail { "yes" } else { "no" })] });
+        let len = crate::railing::length(&ax);
+        let q = vec![
+            Qty { name: "Length", kind: QtyKind::Length, value: len },
+            Qty { name: "Height", kind: QtyKind::Length, value: s.height },
+            Qty { name: "NetSideArea", kind: QtyKind::Area, value: len * s.height },
+        ];
+        psets.extend(qto("Dossier_Qto_Railing", q));
+        let (id, name) = (f.str(&r.id), f.str(&label));
+        let predefined = f.str("GUARDRAIL");
+        f.nums(&[REC_RAILING, structure, id, name, predefined]);
+        w_psets(&mut f, &psets);
         w_mesh(&mut f, &positions, &indices, false);
     }
 

@@ -315,6 +315,8 @@ pub(crate) struct OwnerRef {
     /// Treppe (Stufen, Wangen, Geländer) bzw. Stütze statt Decke, wenn `kind` = `Slab`.
     pub stair: bool,
     pub column: bool,
+    /// [279] Geländer (Pick `@railing:<id>`).
+    pub railing: bool,
 }
 
 /// [266] Alle Flächen des Modells für eine beliebige Ansicht (Vektor-Axonometrie, `plan/axo.rs`): dieselben Körper wie
@@ -325,6 +327,7 @@ pub(crate) fn model_view_faces(p: &Project, vis: &Visibility, view: &dyn Fn([f64
     let mut slabs_r = model3d::emit_slabs(p);
     slabs_r.extend(model3d::emit_stairs(p, true));
     slabs_r.extend(model3d::column_slabs(p));
+    slabs_r.extend(model3d::railing_slabs(p));
     let wi: Vec<render3d::WallInput> = walls_r.iter().map(wall_input).collect();
     let walls = wall_owners(p, &walls_r);
     let slabs = slab_owners(p, &slabs_r);
@@ -342,19 +345,20 @@ pub(crate) fn model_view_faces(p: &Project, vis: &Visibility, view: &dyn Fn([f64
         .owners
         .iter()
         .map(|&(kind, i)| {
-            let (id, stair, column) = match kind {
-                Kind::Wall => (walls_r.get(i).map(|w| w.wall_id.clone()), false, false),
+            let (id, stair, column, railing) = match kind {
+                Kind::Wall => (walls_r.get(i).map(|w| w.wall_id.clone()), false, false, false),
                 Kind::Slab => match slabs.get(i) {
-                    Some(SlabOwner::Ceiling(c, _)) => (Some(c.id.clone()), false, false),
-                    Some(SlabOwner::Stair(s)) => (Some(s.id.clone()), true, false),
-                    Some(SlabOwner::Column(c)) => (Some(c.id.clone()), false, true),
-                    _ => (None, false, false),
+                    Some(SlabOwner::Ceiling(c, _)) => (Some(c.id.clone()), false, false, false),
+                    Some(SlabOwner::Stair(s)) => (Some(s.id.clone()), true, false, false),
+                    Some(SlabOwner::Column(c)) => (Some(c.id.clone()), false, true, false),
+                    Some(SlabOwner::Railing(r, _)) => (Some(r.id.clone()), false, false, true),
+                    _ => (None, false, false, false),
                 },
-                Kind::Roof => (roofs.get(i).map(|r| r.id.clone()), false, false),
-                Kind::Body => (solids.get(i).map(|s| s.id.clone()), false, false),
-                Kind::Mesh => (mrefs.get(i).map(|m| m.mesh.id.clone()), false, false),
+                Kind::Roof => (roofs.get(i).map(|r| r.id.clone()), false, false, false),
+                Kind::Body => (solids.get(i).map(|s| s.id.clone()), false, false, false),
+                Kind::Mesh => (mrefs.get(i).map(|m| m.mesh.id.clone()), false, false, false),
             };
-            OwnerRef { kind, id, stair, column }
+            OwnerRef { kind, id, stair, column, railing }
         })
         .collect();
     Ok((vf, refs))

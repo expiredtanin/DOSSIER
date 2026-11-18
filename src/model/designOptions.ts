@@ -8,7 +8,7 @@ import { patchItem, setField } from "../core/opsBuild";
 import type { DesignOption, DesignOptionCombination, DesignOptionRef, DesignOptionSet, DrawingLevel, Project } from "./types";
 
 /** Listen, deren Elemente einer Variante angehören können (gleich wie `design_options::COLLECTIONS`). */
-export const DESIGN_OPTION_COLLECTIONS = ["walls", "openings", "ceilings", "roofs", "stairs", "columns", "extrudedSolids", "rooms", "drawings2d"] as const;
+export const DESIGN_OPTION_COLLECTIONS = ["walls", "openings", "ceilings", "roofs", "stairs", "columns", "extrudedSolids", "rooms", "drawings2d", "railings"] as const;
 export type DesignOptionCollection = (typeof DESIGN_OPTION_COLLECTIONS)[number];
 
 /** Kombination: Satz-Id → Varianten-Id. */
@@ -508,6 +508,7 @@ const KIND_COLLECTION: Record<string, DesignOptionCollection> = {
   solids: "extrudedSolids",
   rooms: "rooms",
   drawings: "drawings2d",
+  railings: "railings",
 };
 
 /** Modell-Arten ohne Variante (immer ausserhalb einer Bearbeitungsvariante). */

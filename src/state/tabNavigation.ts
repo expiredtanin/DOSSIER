@@ -73,5 +73,5 @@ export function hideSelectionIn3d(): void {
   const ids = selectionIds3d(st.selection);
   if (!ids.length) return;
   setView3dFilter(hideSelection3d(getView3dFilter(), ids));
-  st.setSelection(clearKinds("walls", "ceilings", "openings", "stairs", "solids", "columns", "roofs", "contextObjects", "trees", "cameras", "drawings", "groups"));
+  st.setSelection(clearKinds("walls", "ceilings", "openings", "stairs", "solids", "columns", "roofs", "contextObjects", "trees", "railings", "cameras", "drawings", "groups"));
 }

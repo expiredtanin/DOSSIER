@@ -41,6 +41,8 @@ export interface Selection {
   trees: string[];
   /** [213] Kameras (`Project.cameras`). */
   cameras: string[];
+  /** [279] Geländer (`Project.railings`). */
+  railings: string[];
   /**
    * Gewählte Gruppen — rein informativ (Bounding-Box, Doppelklick-Ziel); die
    * Mitglieder stehen zusätzlich in den übrigen Arten (s. `groupActions.ts`).
@@ -66,6 +68,7 @@ export const SELECTION_KINDS: readonly SelectionKind[] = [
   "site",
   "trees",
   "cameras",
+  "railings",
   "groups",
 ];
 
@@ -145,6 +148,7 @@ export function toCommandSelection(sel: Selection): CommandSelection {
     roomIds: sel.rooms,
     openingIds: sel.openings,
     treeIds: sel.trees,
+    railingIds: sel.railings,
     cameraIds: sel.cameras,
     contextIds: sel.contextObjects,
   };
@@ -168,6 +172,7 @@ export function hasTransformable(sel: Selection): boolean {
     sel.rooms.length > 0 ||
     sel.openings.length > 0 ||
     sel.trees.length > 0 ||
+    sel.railings.length > 0 ||
     sel.cameras.length > 0 ||
     sel.contextObjects.length > 0
   );
@@ -191,6 +196,8 @@ export interface SelectionIdLists {
   treeIds?: string[];
   /** [213] Kameras (gruppierbar wie Bäume). */
   cameraIds?: string[];
+  /** [279] Geländer (gruppierbar). */
+  railingIds?: string[];
 }
 
 const ID_LIST_KEYS: [SelectionKind, keyof SelectionIdLists][] = [
@@ -208,6 +215,7 @@ const ID_LIST_KEYS: [SelectionKind, keyof SelectionIdLists][] = [
   ["groups", "groupIds"],
   ["trees", "treeIds"],
   ["cameras", "cameraIds"],
+  ["railings", "railingIds"],
 ];
 
 /** Auswahl → `…Ids`-Listen (passt strukturell auf `GroupMembership` und `BcfSelection`). */
@@ -240,5 +248,6 @@ export function toMembership(sel: Selection): GroupMembership {
     openingIds: sel.openings,
     treeIds: sel.trees,
     cameraIds: sel.cameras,
+    railingIds: sel.railings,
   };
 }

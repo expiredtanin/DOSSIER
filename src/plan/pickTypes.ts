@@ -110,6 +110,12 @@ export interface PickTreeMesh {
   treeId: string;
 }
 
+/** [279] Geländer für den Raycast: WORLD-Dreiecke aller Teile (x, Höhe, y). */
+export interface PickRailingMesh {
+  tris: ReadonlyArray<readonly [Vec3, Vec3, Vec3]>;
+  railingId: string;
+}
+
 /**
  * [137] Freier Körper (`extrudedSolids`, Loft/Rotation/Abzug/B-Rep) für den Raycast: WORLD-Dreiecke
  * (x, Höhe, y) des Kern-Netzes ([115], dasselbe wie im 3D-Bild; ohne Netz das Prisma über dem Umriss).

@@ -161,6 +161,7 @@ export {
   type PickContextMesh,
   type PickColumnMesh,
   type PickTreeMesh,
+  type PickRailingMesh,
   type PickSolidMesh,
   type PickOpeningMesh,
   type PickStairMesh,

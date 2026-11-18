@@ -46,7 +46,7 @@ import { collectVisibleCodes, flattenCategories } from "../model/types";
 import type { DetailLevel } from "../model/viewTypes";
 import { documentFor } from "../core/document";
 import { coreEpoch } from "../engine/coreWasm";
-import type { PickOpening, PickRoof, PickStair, PickContextMesh, PickColumnMesh, PickSolidMesh, PickOpeningMesh, PickDrawingSeg, PickStairMesh, PickDrawingMesh, PickTreeMesh } from "./pickTypes";
+import type { PickOpening, PickRoof, PickStair, PickContextMesh, PickColumnMesh, PickSolidMesh, PickOpeningMesh, PickDrawingSeg, PickStairMesh, PickDrawingMesh, PickTreeMesh, PickRailingMesh } from "./pickTypes";
 import {
   type RMesh,
   type RModel3d,
@@ -508,6 +508,8 @@ export function pickGeometry(
   drawingMeshes: PickDrawingMesh[];
   /** [149] Bäume (Stamm + Krone). */
   trees: PickTreeMesh[];
+  /** [279] Geländer (alle Teile). */
+  railings: PickRailingMesh[];
 } {
   // [137]/[115] Freie Körper als Dreiecke ihres Kern-Netzes (dasselbe wie im Bild, mit der Explosion angehoben).
   return documentFor(project).query("pickGeometry", [explodeGap(explode)], classFilterText(hide)) as ReturnType<typeof pickGeometry>;
@@ -557,8 +559,10 @@ export function selectionHighlightLines(
   solidIds: string[] = [],
   /** [149] Bäume (Kronen-Zylinder vom Fuss bis zur Spitze). */
   treeIds: string[] = [],
+  /** [279] Geländer (Umriss der Achse, Fuss bis Oberkante). */
+  railingIds: string[] = [],
 ): Float32Array {
-  const sel = { walls: wallIds, ceilings: ceilingIds, openings: openingIds, stairs: stairIds, roofs: roofIds, context: contextObjectIds, columns: columnIds, solids: solidIds, trees: treeIds };
+  const sel = { walls: wallIds, ceilings: ceilingIds, openings: openingIds, stairs: stairIds, roofs: roofIds, context: contextObjectIds, columns: columnIds, solids: solidIds, trees: treeIds, railings: railingIds };
   if (Object.values(sel).every((l) => l.length === 0)) return new Float32Array(0);
   // Gerechnet im Kern (`highlight3d.rs`); Antwort f32-LE.
   const b = documentFor(project).queryBin("selectionHighlight", [], JSON.stringify({ ...sel, rgb, explode: explodeGap(explode) }));

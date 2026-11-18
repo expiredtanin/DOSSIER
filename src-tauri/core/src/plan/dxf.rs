@@ -787,6 +787,8 @@ struct Ids {
     opening: Option<String>,
     /// [271] Baum (Kronenumriss, Stamm): Id aus der Pick-Fläche `@tree:<id>`, den übrigen Teilen nachgetragen.
     tree: Option<String>,
+    /// [279] Geländer (Pick-Fläche `@railing:<id>`, die übrigen Teile nachgetragen).
+    railing: Option<String>,
 }
 
 struct Entry {
@@ -820,7 +822,10 @@ fn read_entry(part: &mut Part, i: usize, hatches: &[(i32, Hatch, i32)], text: Op
             6 => ids.room = Some(s),
             7 => ids.solid = Some(s),
             9 => ids.column = Some(s),
-            8 => ids.tree = s.strip_prefix(crate::tree::TREE_PICK_PREFIX).map(str::to_string),
+            8 => {
+                ids.tree = s.strip_prefix(crate::tree::TREE_PICK_PREFIX).map(str::to_string);
+                ids.railing = s.strip_prefix(crate::railing::PICK_PREFIX).map(str::to_string);
+            }
             _ => {}
         }
     }
@@ -1508,6 +1513,10 @@ fn renovation_layers(cx: &mut Ctx, cats: &[&LayerCategory]) -> HashMap<String, S
     for c in p.columns.iter().flatten() {
         items.push((&c.id, &c.category_code, crate::renovation::status_of(c.renovation.as_ref())));
     }
+    // [279] Geländer.
+    for c in p.railings.iter().flatten() {
+        items.push((&c.id, &c.category_code, crate::renovation::status_of(c.renovation.as_ref())));
+    }
     for o in p.openings.iter().flatten() {
         items.push((&o.id, &o.category_code, crate::renovation::status_of(crate::renovation::opening_renovation(p, o))));
     }
@@ -1532,6 +1541,7 @@ fn emit_entries(cx: &mut Ctx, main: &mut Buf, entries: &[Entry], layer_by_code: 
     let code_by_wall: HashMap<&str, &str> = project.walls.iter().map(|w| (w.id.as_str(), w.category_code.as_str())).collect();
     let code_by_drawing: HashMap<&str, &str> = project.drawings2d.iter().map(|d| (d.id.as_str(), d.category_code.as_str())).collect();
     let code_by_column: HashMap<&str, &str> = project.columns.iter().flatten().map(|c| (c.id.as_str(), c.category_code.as_str())).collect();
+    let code_by_railing: HashMap<&str, &str> = project.railings.iter().flatten().map(|c| (c.id.as_str(), c.category_code.as_str())).collect();
     let code_by_room: HashMap<&str, &str> = project.rooms.iter().flatten().map(|r| (r.id.as_str(), r.category_code.as_str())).collect();
     let layer_of_code = |m: &HashMap<&str, &str>, id: &str| -> Option<String> { layer_by_code.get(m.get(id).copied().unwrap_or("")).cloned() };
     let drawing_layer = |id: Option<&String>, fallback: &str| -> String {
@@ -1545,6 +1555,10 @@ fn emit_entries(cx: &mut Ctx, main: &mut Buf, entries: &[Entry], layer_by_code: 
         // [271] Teile eines Baums mit Status Abbruch/Neu: Status-Ebene (Bestand bleibt auf der bisherigen Ebene).
         if let Some(l) = e.ids.tree.as_ref().and_then(|id| ren_layer.get(id)) {
             return l.clone();
+        }
+        // [279] Teile eines Geländers: Status-Ebene bzw. Ebene der Klasse des Geländers.
+        if let Some(r) = &e.ids.railing {
+            return ren_layer.get(r).cloned().or_else(|| layer_of_code(&code_by_railing, r)).unwrap_or_else(|| LAYER_DEFAULT.to_string());
         }
         match e.tag {
             T_POLYGON => {
@@ -1755,6 +1769,25 @@ fn tag_tree_parts(entries: &mut [Entry]) {
     }
 }
 
+/// [279] Geländer-Symbol (`plan/railings.rs`): Pick-Flächen `@railing:<id>` (je Teilstrecke eine), dann gefüllte Flächen
+/// (Brüstung, Pfosten) ohne Id und Linien (`railing-*`) — sie bekommen die Id des Geländers.
+fn tag_railing_parts(entries: &mut [Entry]) {
+    let mut cur: Option<String> = None;
+    for e in entries.iter_mut() {
+        if e.ids.railing.is_some() {
+            cur = e.ids.railing.clone();
+            continue;
+        }
+        let part = matches!(&e.prim, Prim::Line { cls, .. } if cls.starts_with("railing-"));
+        let bare = e.ids.wall.is_none() && e.ids.drawing.is_none() && e.ids.column.is_none() && e.ids.solid.is_none() && e.ids.room.is_none() && e.ids.opening.is_none() && e.ids.tree.is_none();
+        if cur.is_some() && (part || bare && e.tag == T_POLYGON) {
+            e.ids.railing = cur.clone();
+        } else {
+            cur = None;
+        }
+    }
+}
+
 /// Primitive der Abschnitte in Plan-Reihenfolge lesen (Texte gesetzt beim Massstab `scale`).
 fn read_entries(parts: &mut [Part], scale: f64, font: &str) -> Option<Vec<Entry>> {
     let mut entries: Vec<Entry> = Vec::new();
@@ -1766,6 +1799,7 @@ fn read_entries(parts: &mut [Part], scale: f64, font: &str) -> Option<Vec<Entry>
         }
     }
     tag_tree_parts(&mut entries);
+    tag_railing_parts(&mut entries);
     Some(entries)
 }
 

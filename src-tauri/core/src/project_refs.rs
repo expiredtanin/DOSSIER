@@ -96,6 +96,11 @@ pub fn dangling_refs(p: &Project) -> Vec<String> {
         miss(&mut out, "Stütze", &c.id, "Bauteil", c.component_id.as_deref().unwrap_or(""), &components);
         miss(&mut out, "Stütze", &c.id, "Schraffur", c.hatch_id.as_deref().unwrap_or(""), &hatches);
     }
+    // [279] Geländer.
+    for r in p.railings.as_deref().unwrap_or(&[]) {
+        miss(&mut out, "Geländer", &r.id, "Geschoss", &r.floor_id, &levels);
+        miss(&mut out, "Geländer", &r.id, "Bauteil", r.component_id.as_deref().unwrap_or(""), &components);
+    }
     for r in p.rooms.as_deref().unwrap_or(&[]) {
         miss(&mut out, "Raum", &r.id, "Geschoss", &r.floor_id, &levels);
     }
@@ -167,7 +172,7 @@ pub fn dangling_refs(p: &Project) -> Vec<String> {
     // Gruppen: Mitglieder und Zyklen.
     let groups = p.groups.as_deref().unwrap_or(&[]);
     let group_ids = ids(groups, |g| g.id.as_str());
-    let members: [(&str, HashSet<&str>); 9] = [
+    let members: [(&str, HashSet<&str>); 10] = [
         ("Zeichnung", ids(&p.drawings2d, |d| d.id.as_str())),
         ("Decke", ids(p.ceilings.as_deref().unwrap_or(&[]), |x| x.id.as_str())),
         ("Raum", ids(p.rooms.as_deref().unwrap_or(&[]), |x| x.id.as_str())),
@@ -177,13 +182,14 @@ pub fn dangling_refs(p: &Project) -> Vec<String> {
         ("Öffnung", ids(p.openings.as_deref().unwrap_or(&[]), |x| x.id.as_str())),
         ("Baum", ids(p.trees.as_deref().unwrap_or(&[]), |x| x.id.as_str())),
         ("Kamera", ids(p.cameras.as_deref().unwrap_or(&[]), |x| x.id.as_str())),
+        ("Geländer", ids(p.railings.as_deref().unwrap_or(&[]), |x| x.id.as_str())),
     ];
     for g in groups {
         for w in &g.wall_ids {
             miss(&mut out, "Gruppe", &g.id, "Wand", w, &walls);
         }
         let none = Vec::new();
-        let lists = [&g.drawing_ids, &g.ceiling_ids, &g.room_ids, &g.stair_ids, &g.column_ids, &g.roof_ids, &g.opening_ids, g.tree_ids.as_ref().unwrap_or(&none), g.camera_ids.as_ref().unwrap_or(&none)];
+        let lists = [&g.drawing_ids, &g.ceiling_ids, &g.room_ids, &g.stair_ids, &g.column_ids, &g.roof_ids, &g.opening_ids, g.tree_ids.as_ref().unwrap_or(&none), g.camera_ids.as_ref().unwrap_or(&none), g.railing_ids.as_ref().unwrap_or(&none)];
         for (list, (kind, known)) in lists.into_iter().zip(&members) {
             for id in list {
                 miss(&mut out, "Gruppe", &g.id, kind, id, known);

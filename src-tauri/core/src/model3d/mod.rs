@@ -24,6 +24,7 @@ use crate::jsnum::round;
 mod ceilings;
 pub(crate) mod bearing;
 mod columns;
+mod railings;
 mod walls;
 mod wall_body;
 mod openings;
@@ -39,6 +40,7 @@ mod arc_zone_tests;
 
 pub use ceilings::*;
 pub use columns::*;
+pub use railings::*;
 pub use walls::*;
 pub use openings::*;
 pub use stairs::*;
@@ -100,6 +102,8 @@ pub enum SlabSource {
     Stair { index: usize },
     /// [141] Index in `Project::columns` (Stützen-Prisma, je Höhenabschnitt von [`column_pieces`]).
     Column { index: usize },
+    /// [279] Index in `Project::railings` (Prisma je Teil, `railing::pieces`).
+    Railing { index: usize, fill: bool },
 }
 
 /// Ein rohes Dreiecks-Mesh (`RMesh`).

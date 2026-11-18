@@ -496,6 +496,10 @@ impl View {
         for x in p.columns.iter().flatten() {
             put(&x.id, self.treat(x.renovation.as_ref()), out);
         }
+        // [279] Geländer.
+        for x in p.railings.iter().flatten() {
+            put(&x.id, self.treat(x.renovation.as_ref()), out);
+        }
         for x in p.extruded_solids.iter().flatten() {
             put(&x.id, self.treat(x.renovation.as_ref()), out);
         }

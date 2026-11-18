@@ -30,6 +30,7 @@ import type {
   Room,
   Stair,
   Tree,
+  Railing,
   Wall,
 } from "../model/types";
 import { uniqueStamp } from "../tools/types";
@@ -51,6 +52,8 @@ export interface ElementSelectionIds {
   treeIds?: string[];
   /** [213] Kameras. */
   cameraIds?: string[];
+  /** [279] Geländer. */
+  railingIds?: string[];
 }
 
 /** Tiefe Kopie der gewählten Elemente über alle Bauteil-Arten hinweg. */
@@ -68,6 +71,8 @@ export interface ElementClipboard {
   trees?: Tree[];
   /** [213] Kameras (optional: ältere Zwischenablagen haben sie nicht). */
   cameras?: Camera[];
+  /** [279] Geländer (optional). */
+  railings?: Railing[];
 }
 
 const EMPTY_CLIPBOARD: ElementClipboard = {
@@ -95,7 +100,8 @@ export function isClipboardEmpty(c: ElementClipboard): boolean {
     c.extrudedSolids.length === 0 &&
     c.columns.length === 0 &&
     (c.trees?.length ?? 0) === 0 &&
-    (c.cameras?.length ?? 0) === 0
+    (c.cameras?.length ?? 0) === 0 &&
+    (c.railings?.length ?? 0) === 0
   );
 }
 
@@ -136,6 +142,8 @@ export function collectElementClipboard(
   const columns = (project.columns ?? []).filter((c) => columnIds.has(c.id));
   const treeIds = new Set(sel.treeIds ?? []);
   const trees = (project.trees ?? []).filter((t) => treeIds.has(t.id));
+  const railingIds = new Set(sel.railingIds ?? []);
+  const railings = (project.railings ?? []).filter((r) => railingIds.has(r.id));
   const cameraIds = new Set(sel.cameraIds ?? []);
   const cameras = (project.cameras ?? []).filter((c) => cameraIds.has(c.id));
 
@@ -151,6 +159,7 @@ export function collectElementClipboard(
     columns: columns.map((c) => structuredClone(c)),
     trees: trees.map((t) => structuredClone(t)),
     cameras: cameras.map((c) => structuredClone(c)),
+    railings: railings.map((r) => structuredClone(r)),
   };
   return isClipboardEmpty(clip) ? null : clip;
 }
@@ -168,6 +177,7 @@ export interface PastedIds {
   columnIds: string[];
   treeIds: string[];
   cameraIds: string[];
+  railingIds: string[];
 }
 
 /** Projekt-Liste → Feld in {@link PastedIds}. */
@@ -183,6 +193,7 @@ const PASTED_KEY: Record<string, keyof PastedIds> = {
   columns: "columnIds",
   trees: "treeIds",
   cameras: "cameraIds",
+  railings: "railingIds",
 };
 
 /**
@@ -214,6 +225,7 @@ export function addedIds(ops: readonly CoreOp[]): PastedIds {
     columnIds: [],
     treeIds: [],
     cameraIds: [],
+    railingIds: [],
   };
   for (const op of ops) {
     const key = op.kind === "add" ? PASTED_KEY[op.collection] : undefined;

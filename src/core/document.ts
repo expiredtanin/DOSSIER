@@ -206,6 +206,7 @@ export type QueryName =
   | "materialMaps"
   | "slabs"
   | "columnMeshes"
+  | "railingInfo"
   | "walls"
   | "openingMeshes"
   | "stairSlabs"

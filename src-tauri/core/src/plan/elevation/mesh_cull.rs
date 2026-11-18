@@ -124,7 +124,7 @@ pub(super) fn curved_slab_facets(faces: &[Face]) -> Vec<bool> {
 pub(super) fn paint_rank(r: Role) -> f64 {
     match r {
         Role::Slab => 0.0,
-        Role::Wall | Role::Column | Role::Mesh | Role::Body => 1.0,
+        Role::Wall | Role::Column | Role::Railing | Role::Mesh | Role::Body => 1.0,
         Role::Roof => 2.0,
     }
 }

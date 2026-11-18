@@ -26,6 +26,7 @@ Herkunft, kein Wegweiser.
 | `ceiling_plan.rs` | Deckenspiegel als eigene Ebenen-Art |
 | `floor_finish.rs` | Bodenbelag-Muster nach Massstab |
 | `model_view.rs` | Modelldarstellung ([173]): Optionen je Bauteilart über dem Detailgrad, Rangfolge Element > Typ > Stufe > Basis |
+| `railings.rs` | [279] Geländer im Grundriss (Linie/Doppellinie/Fläche je Art, über Schnitt gestrichelt, Pick `@railing:<id>`); Schnitt/Ansicht/Axo über die Platten `model3d::railing_slabs` |
 | `trees.rs` | Bäume in Grundriss, Schnitt und Ansicht; im Schnitt von näheren Bauteilen verdeckt (`occlude_in_section`, Verdecker `section::Output::occluders`), in der Ansicht Krone ohne Füllung vor der Fassade |
 | `cameras.rs` | [213] Kameras im Grundriss: Gehäuse, Sichtkegel, Ziel, Name, Pick-Bänder (Klasse „Kameras“) |
 | `stamp_place.rs` | Hindernisse für die Lage der Raumstempel |

@@ -186,6 +186,19 @@ export const CommandIcon = memo(function CommandIcon({ name }: { name: string })
           <line x1="12.5" y1="9.5" x2="12.5" y2="13.5" />
         </svg>
       );
+    case "gelaender":
+      // [279] Geländer: Handlauf mit Pfosten und Stäben.
+      return (
+        <svg {...common}>
+          <line x1="1.5" y1="4.5" x2="14.5" y2="4.5" />
+          <line x1="1.5" y1="12.5" x2="14.5" y2="12.5" />
+          <line x1="2.5" y1="4.5" x2="2.5" y2="12.5" />
+          <line x1="8" y1="4.5" x2="8" y2="12.5" />
+          <line x1="13.5" y1="4.5" x2="13.5" y2="12.5" />
+          <line x1="5.2" y1="4.5" x2="5.2" y2="12.5" strokeWidth="0.7" />
+          <line x1="10.8" y1="4.5" x2="10.8" y2="12.5" strokeWidth="0.7" />
+        </svg>
+      );
     case "tree":
       // [149] Baum: Krone (Kreis) mit Stamm.
       return (

@@ -88,6 +88,8 @@ export interface CommandSelection {
   openingIds?: string[];
   /** [149] Gewählte Bäume (Verschieben/Kopieren/Spiegeln/Drehen: Stammmitte). */
   treeIds?: string[];
+  /** [279] Gewählte Geländer (Verschieben/Kopieren/Spiegeln/Drehen: alle Punkte der Achse). */
+  railingIds?: string[];
   /** [213] Gewählte Kameras (Verschieben/Kopieren/Drehen/Spiegeln: Standpunkt und Ziel). */
   cameraIds?: string[];
   /** [193] Gewählte Gelände-/Umgebungs-Elemente (`Project.context`: Gelände, Höhenlinien, Baugrube, Netze, Bilder). */

@@ -20,6 +20,8 @@ export interface GroupMembership {
   treeIds: string[];
   /** [213] Kameras. */
   cameraIds: string[];
+  /** [279] Geländer. */
+  railingIds: string[];
 }
 
 export type MemberKind = keyof GroupMembership;
@@ -35,6 +37,7 @@ export const EMPTY_MEMBERSHIP: GroupMembership = {
   openingIds: [],
   treeIds: [],
   cameraIds: [],
+  railingIds: [],
 };
 
 /** Letzte transitive Mitgliedschaft (Projekt + Gruppe): Klick-/Rahmen-Filter fragen je Element. */

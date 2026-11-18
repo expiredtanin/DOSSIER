@@ -6,7 +6,7 @@ import type { Primitive, OwnerField, PickKind } from "../../../core";
 import { useMemo, useEffect } from "react";
 import { planPrimAt } from "../../../core";
 import { textFrameCorners } from "../../../text/textFrame";
-import { CAMERA_PICK, TREE_PICK } from "./constants";
+import { CAMERA_PICK, RAILING_PICK, TREE_PICK } from "./constants";
 import { PlanPickIndex } from "../../../core";
 import type { Plan } from "../../../core";
 import type { UnderlayGroup } from "../../../core";
@@ -36,6 +36,7 @@ export interface UsePlanHighlightsArgs {
   selectedContextObjectIds: string[];
   selectedSite: string[];
   selectedTreeIds: string[];
+  selectedRailingIds?: string[];
   selectedCameraIds?: string[];
   selectedSectionLineIds: string[];
   selectedExtrudedSolidIds: string[];
@@ -65,6 +66,7 @@ export function usePlanHighlights(inp: UsePlanHighlightsArgs) {
     selectedContextObjectIds,
     selectedSite,
     selectedTreeIds,
+    selectedRailingIds,
     selectedCameraIds,
     selectedSectionLineIds,
     selectedExtrudedSolidIds,
@@ -240,11 +242,12 @@ export function usePlanHighlights(inp: UsePlanHighlightsArgs) {
       ...(selectedContextObjectIds ?? []),
       ...(selectedSite ?? []).map((s) => "@" + s),
       ...(selectedTreeIds ?? []).map((s) => TREE_PICK + s),
+      ...(selectedRailingIds ?? []).map((s) => RAILING_PICK + s),
       ...(selectedCameraIds ?? []).map((s) => CAMERA_PICK + s),
     ];
     if (!ids.length) return [];
     return primsOwnedBy("contextObjectId", ids, (p): p is Extract<Primitive, { kind: "polygon" }> => p.kind === "polygon");
-  }, [plan, selectedContextObjectIds, selectedSite, selectedTreeIds, selectedCameraIds]);
+  }, [plan, selectedContextObjectIds, selectedSite, selectedTreeIds, selectedRailingIds, selectedCameraIds]);
 
   // Hervorhebung der selektierten Schnitt-/Ansichtslinie: das (unsichtbare)
   // Pick-Band (Polygon mit sectionLineId) mit Akzentkontur überzeichnen.
@@ -283,8 +286,9 @@ export function usePlanHighlights(inp: UsePlanHighlightsArgs) {
     if (!hoverPick) return [];
     if (hoverPick.kind === "site") return primsOwnedBy("contextObjectId", ["@" + hoverPick.id], (_p): _p is Primitive => true);
     if (hoverPick.kind === "tree") return primsOwnedBy("contextObjectId", [TREE_PICK + hoverPick.id], (_p): _p is Primitive => true);
+    if (hoverPick.kind === "railing") return primsOwnedBy("contextObjectId", [RAILING_PICK + hoverPick.id], (_p): _p is Primitive => true);
     if (hoverPick.kind === "camera") return primsOwnedBy("contextObjectId", [CAMERA_PICK + hoverPick.id], (_p): _p is Primitive => true);
-    const field: Record<Exclude<PickKind, "site" | "tree" | "camera">, OwnerField> = {
+    const field: Record<Exclude<PickKind, "site" | "tree" | "railing" | "camera">, OwnerField> = {
       wall: "wallId", drawing: "drawingId", ceiling: "ceilingId", opening: "openingId",
       stair: "stairId", room: "roomId", roof: "roofId", context: "contextObjectId",
       section: "sectionLineId", solid: "extrudedSolidId", column: "columnId",

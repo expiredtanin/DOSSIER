@@ -53,7 +53,7 @@ pub fn ops(root: &Map<String, Value>, p: &Project, text: &str) -> Result<Vec<Op>
 }
 
 /// Listen, deren neue Elemente den Zeichen-Status bekommen ([271]).
-const RENOVATION_COLLECTIONS: [&str; 8] = ["walls", "openings", "ceilings", "roofs", "stairs", "columns", "extrudedSolids", "rooms"];
+const RENOVATION_COLLECTIONS: [&str; 9] = ["walls", "openings", "ceilings", "roofs", "stairs", "columns", "extrudedSolids", "rooms", "railings"];
 
 /// [271] Neue Bauteile der Ops (`add` in [`RENOVATION_COLLECTIONS`]) erhalten `renovation` (ein Objekt mit gültigem
 /// `status`), sofern sie keines tragen; sonst unverändert.
