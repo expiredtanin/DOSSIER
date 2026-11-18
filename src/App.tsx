@@ -36,7 +36,10 @@ import { DEFAULT_PRESETS } from "./text/richText";
 import { unitsForLevel } from "./tools/displayUnits";
 import type { ToolHandlers } from "./tools/types";
 import { checkForUpdateOnStart } from "./update/checkForUpdate";
-import { useT } from "./i18n";
+import { useT, t } from "./i18n";
+import type { TranslationKey } from "./i18n";
+import { toolInfo } from "./tools/tools";
+import { getCommand } from "./commands/registry";
 
 // Globaler Store (Slices: project/selection/view/layout) und lokaler UI-Zustand.
 import { useStore } from "./state/appStore";
@@ -580,6 +583,14 @@ export default function App() {
 
   // Werkzeug-Hinweis und aktive Ebene der Status-Leiste → state/useStatusBarInfo.ts.
   const { toolHint, activeLayerName } = useStatusBarInfo({ selection, activeCategoryCode });
+  // [287] Links in der Statusleiste steht bei aktivem Werkzeug/Befehl dessen Name (vorher „Auswahl“ auch beim Wandzeichnen).
+  const statusToolKey =
+    activeTool !== "select"
+      ? toolInfo(activeTool).labelKey
+      : commandActive && engineView.commandName
+        ? getCommand(engineView.commandName)?.labelKey
+        : null;
+  const statusToolLabel = statusToolKey ? t(statusToolKey as TranslationKey) : null;
 
   // Solange keine Plan-Ansicht montiert ist, gibt es keinen Live-Massstab.
   // (PlanView meldet beim Montieren/Zoomen sofort wieder einen Wert.)
@@ -1023,7 +1034,7 @@ export default function App() {
       {/* Footer / Status-Leiste (unten). Werte rein aus Modell + View-State.
           Cursor/Zoom nur, wenn eine Plan-Ansicht aktiv ist (sonst „—"). */}
       <StatusBar
-        hint={toolHint}
+        hint={statusToolLabel ?? toolHint}
         showCursor={planActive}
         unit="m"
         units={displayUnits}

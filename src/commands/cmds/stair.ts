@@ -34,6 +34,8 @@ import type {
   Vec2,
 } from "../types";
 import { createMutation, createPreview, xy } from "../createCore";
+import { t } from "../../i18n";
+import type { TranslationKey } from "../../i18n";
 
 /** Default-Laufbreite (Meter). */
 const DEF_WIDTH = 1.0;
@@ -209,10 +211,11 @@ export const stairCommand: Command = {
   options: (s): CmdOption[] => {
     const st = s as StairCmdState;
     return [
-      { ...SHAPE, value: st.shape },
-      { ...UPDOWN, value: st.up ? "up" : "down" },
-      { ...REFERENZ, value: st.referenz },
-      { ...TREAD_MODE, value: st.treadMode },
+      // [287] Werte übersetzt (vorher „Grundform=straight“, „Auf/Ab=up“, „Trittmass=without“).
+      { ...SHAPE, value: t(`objinfo.stair.shape.${st.shape}` as TranslationKey) },
+      { ...UPDOWN, value: t(st.up ? "cmd.stair.updown.up" : "cmd.stair.updown.down") },
+      { ...REFERENZ, value: t(`objinfo.stair.referenz.${st.referenz}` as TranslationKey) },
+      { ...TREAD_MODE, value: t(`cmd.stair.treadMode.${st.treadMode}` as TranslationKey) },
     ];
   },
 

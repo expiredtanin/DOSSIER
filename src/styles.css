@@ -1334,16 +1334,29 @@ body {
    monospace-Texteingabe rechts; das Autocomplete-Dropdown öffnet nach oben. */
 .cmdline {
   position: relative;
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 10px;
+  flex: 0 0 26px;
   height: 26px;
-  padding: 0 12px;
-  border-top: 1px solid var(--line);
-  background: var(--input);
+  z-index: 20;
   font-size: 12px;
   user-select: none;
+}
+/* [287] Die Zeile hängt unten an der festen 26-px-Leiste und wächst bei Bedarf NACH OBEN über die Zeichenfläche
+   (Treppe: 4 Optionen + 3 Felder passen bei 1280 px nicht in eine Zeile; vorher liefen Felder und Eingabe rechts aus
+   dem Bild). Die Zeichenfläche behält ihre Grösse, der Zoom springt nicht. */
+.cmdline-row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  min-height: 26px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px 10px;
+  padding: 2px 12px;
+  border-top: 1px solid var(--line);
+  background: var(--input);
+  box-sizing: border-box;
 }
 .cmdline-prompt {
   flex: 0 0 auto;
@@ -1353,9 +1366,15 @@ body {
 }
 .cmdline-options {
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: 3px 6px;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.cmdline-option {
   flex: 0 0 auto;
+  white-space: nowrap;
 }
 .cmdline-option {
   appearance: none;
@@ -1409,9 +1428,11 @@ body {
    hervorgehoben (Akzent-Rand). Wert „—" = ungelockt (folgt der Maus). */
 .cmdline-fields {
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
-  flex: 0 0 auto;
+  gap: 3px 6px;
+  flex: 0 1 auto;
+  min-width: 0;
 }
 .cmdline-field {
   display: inline-flex;
@@ -2734,6 +2755,14 @@ body {
   fill: none;
   stroke: #ffcc44;
   stroke-width: 1.5;
+}
+.plan-svg .snap-tip {
+  fill: var(--ink);
+  stroke: var(--bg);
+  paint-order: stroke;
+  stroke-linejoin: round;
+  pointer-events: none;
+  user-select: none;
 }
 .plan-svg .snap-glyph.snap-fill {
   fill: #ffcc44;

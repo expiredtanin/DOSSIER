@@ -177,6 +177,7 @@ export const CommandLine = memo(forwardRef<CommandLineHandle, CommandLineProps>(
 
     return (
       <div className="cmdline" role="group" aria-label={t("cmd.aria")} data-steps={steps ?? 0}>
+       <div className="cmdline-row">
         {suggestions.length > 0 && (
           <ul className="cmdline-suggest" role="listbox">
             {suggestions.map((s) => (
@@ -256,6 +257,7 @@ export const CommandLine = memo(forwardRef<CommandLineHandle, CommandLineProps>(
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKeyDown}
         />
+       </div>
       </div>
     );
   },

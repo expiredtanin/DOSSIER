@@ -292,6 +292,14 @@ export const wallCommand: Command = {
       return [ns, { draft: draftOf(ctx, ns) }];
     }
     const seg: Seg = !s.arc ? 0 : (s.pendingThrough ?? 1);
+    // [287] Schliesst der Klick den Zug am Startpunkt (≥ 3 Wände), ist der Ring fertig: sofort anlegen.
+    // Vorher blieb der Befehl offen, und das gewohnte Esc-Esc zum Beenden verwarf alle Wände.
+    if (s.points.length >= 3 && segLen(s.points[0], pt) < EPS) {
+      return [
+        { phase: "start", lastPoint: null, thickOverride: to, single, ...modeOf(s) } as WallIdle,
+        { draft: null, done: true, commit: appendWalls([...s.points, s.points[0]], ctx, to, [...s.segs, seg], s.ext) },
+      ];
+    }
     const ns: WallDrawing = {
       ...s,
       points: [...s.points, pt],
