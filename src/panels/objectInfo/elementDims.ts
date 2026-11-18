@@ -30,5 +30,8 @@ export function elementDimensions(sel: SelectionInfo): ElementDim[] | null {
       { label: "objinfo.opening.sill", value: o.sillHeight },
     ];
   }
+  // [283] Träger: die Bounding-Box (Länge × Querschnittsbreite im Grundriss) hiess „Breite/Höhe“ und widersprach den
+  // Feldern „Breite/Höhe“ des Querschnitts im Abschnitt Träger — hier nur die Länge der Achse.
+  if (sel.kind === "beam" && sel.beam) return [{ label: "objinfo.beam.length", value: sel.beam.length }];
   return null;
 }

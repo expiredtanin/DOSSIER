@@ -19,6 +19,15 @@ describe("elementDimensions [204a]", () => {
     expect(d[0].value).toBe(o.width);
     expect(d[1].value).toBe(o.height);
   });
+  it("Träger: nur die Länge, nicht die Bounding-Box ([283])", () => {
+    const pb = structuredClone(sampleProject);
+    pb.beams = [{ id: "tg", type: "beam", floorId: pb.drawingLevels[0].id, categoryCode: "25", start: { x: 0, y: 0 }, end: { x: 4, y: 0 }, width: 0.3, height: 0.45 }];
+    const sel = deriveSelection(pb, { columns: ["tg"] });
+    expect(sel?.kind).toBe("beam");
+    const d = elementDimensions(sel!)!;
+    expect(d.map((x) => x.label)).toEqual(["objinfo.beam.length"]);
+    expect(d[0].value).toBeCloseTo(4, 6);
+  });
   it("Zeichnung: generisch", () => {
     const sel = deriveSelection(p, { drawings: p.drawings2d.slice(0, 1).map((x) => x.id) });
     if (sel) expect(elementDimensions(sel)).toBeNull();

@@ -1007,7 +1007,7 @@ export const en: Record<TranslationKey, string> = {
   "objinfo.room.ceilingFinish": "Ceiling",
   "objinfo.room.buildUp": "Build-up",
   "objinfo.room.finishes": "Finishes (room book)",
-  "objinfo.room.finishHint": "Choose a material or type free text",
+  "objinfo.room.finishHint": "Material or free text",
   // ── Extruded solid attributes (truck integration, object info panel) ────
   "objinfo.sectionLine.section": "Section line",
   "objinfo.dimText.section": "Dimension text",
@@ -2054,6 +2054,8 @@ export const en: Record<TranslationKey, string> = {
   "cmd.wall.ext.auto": "by type",
   "cmd.wall.ext.yes": "yes",
   "cmd.wall.ext.no": "no",
+  "cmd.opt.on": "on",
+  "cmd.opt.off": "off",
   "cmd.ceiling.label": "Ceiling",
   "cmd.ceiling.start": "First outline point of ceiling:",
   "cmd.ceiling.next": "Next point ( Close ):",

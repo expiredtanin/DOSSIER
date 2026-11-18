@@ -211,7 +211,7 @@ export const CommandLine = memo(forwardRef<CommandLineHandle, CommandLineProps>(
               >
                 {o.key && <span className="cmdline-option-key">{o.key}</span>}
                 {t(o.labelKey as TranslationKey)}
-                {o.value != null && <span className="cmdline-option-val">={o.value}</span>}
+                {o.value != null && <span className="cmdline-option-val">={o.value === "on" ? t("cmd.opt.on") : o.value === "off" ? t("cmd.opt.off") : o.value}</span>}
               </button>
             ))}
           </span>

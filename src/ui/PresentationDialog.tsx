@@ -197,13 +197,14 @@ export const PresentationDialogHost = memo(function PresentationDialogHost({
                 </button>
               </div>
             )}
-            <div style={{ display: "flex", gap: 8, alignItems: "center", opacity: poster ? 0.5 : 1 }}>
+            {/* [283] Mit Plakat-Vorlage gilt deren Format: die ausgegraute Zeile zeigte ein falsches („A1“) und wird ausgeblendet. */}
+            {!poster && (
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
               <select
                 className="imp-select"
                 data-testid="presentation-paper"
                 aria-label={t("export.paper")}
                 value={opts.paper}
-                disabled={poster}
                 onChange={(e) => set({ paper: e.target.value as LayoutPaperFormat })}
               >
                 {PAPER_FORMAT_GROUPS.flatMap((g) => g.formats).map((f) => (
@@ -217,7 +218,6 @@ export const PresentationDialogHost = memo(function PresentationDialogHost({
                   <button
                     key={o}
                     type="button"
-                    disabled={poster}
                     className={`imp-seg-btn${opts.orientation === o ? " active" : ""}`}
                     onClick={() => set({ orientation: o })}
                   >
@@ -226,6 +226,7 @@ export const PresentationDialogHost = memo(function PresentationDialogHost({
                 ))}
               </div>
             </div>
+            )}
           </section>
           {poster && opts.extras && (
             <section className="imp-section" data-testid="presentation-extras">

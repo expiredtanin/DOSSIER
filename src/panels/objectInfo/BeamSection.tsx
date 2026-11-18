@@ -35,10 +35,6 @@ export function BeamSection({ beam, host }: { beam: BeamInfo; host: ReturnType<t
       <DimensionField label={t("objinfo.beam.topOffset")} value={beam.topOffset} onCommit={(v) => host.onSetBeamTopOffset(v)} />
 
       <div className="objinfo-field">
-        <span className="objinfo-flabel">{t("objinfo.beam.length")}</span>
-        <span className="objinfo-fval">{beam.length.toFixed(2)} m</span>
-      </div>
-      <div className="objinfo-field">
         <span className="objinfo-flabel">{t("objinfo.beam.level")}</span>
         <span className="objinfo-fval">
           {beam.zBottom.toFixed(2)} – {beam.zTop.toFixed(2)} m

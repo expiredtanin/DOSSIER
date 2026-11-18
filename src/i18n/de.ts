@@ -1011,7 +1011,7 @@ export const de = {
   "objinfo.room.ceilingFinish": "Decke",
   "objinfo.room.buildUp": "Aufbau",
   "objinfo.room.finishes": "Oberflächen (Raumbuch)",
-  "objinfo.room.finishHint": "Material wählen oder Freitext eingeben",
+  "objinfo.room.finishHint": "Material oder Freitext",
   // ── Extrusions-Attribute (truck-Integration, Object-Info-Panel) ─────────
   "objinfo.sectionLine.section": "Schnittlinie",
   "objinfo.dimText.section": "Masszahl",
@@ -2065,6 +2065,8 @@ export const de = {
   "cmd.wall.ext.auto": "nach Typ",
   "cmd.wall.ext.yes": "ja",
   "cmd.wall.ext.no": "nein",
+  "cmd.opt.on": "ein",
+  "cmd.opt.off": "aus",
   "cmd.ceiling.label": "Decke",
   "cmd.ceiling.start": "Erster Umrisspunkt der Decke:",
   "cmd.ceiling.next": "Nächster Punkt ( Schliessen ):",

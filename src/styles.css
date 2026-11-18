@@ -92,7 +92,8 @@
 
   --ink: #ededed;
   --ink-2: #a8a8a8;
-  --muted: #6e6e6e;
+  /* [283] #909090 statt #6e6e6e: 5.3 : 1 statt 3.3 : 1 auf --panel (WCAG AA für kleinen Text). */
+  --muted: #909090;
   --label: #c8c8c8;
 
   --accent: #4d4d4d;
@@ -1392,9 +1393,17 @@ body {
   font-size: 10px;
   font-weight: 600;
 }
+/* [283] Dunkel ist --accent (#4d4d4d) als Schrift auf --panel-2 kaum lesbar: aktive Option und Wert in --ink-2/--ink. */
+:root[data-theme="dark"] .cmdline-option-val,
+:root[data-theme="dark"] .cmdline-option.active {
+  color: var(--ink);
+}
 .cmdline-option.active .cmdline-option-key {
   background: var(--accent);
   color: var(--bg, #fff);
+}
+:root[data-theme="dark"] .cmdline-option.active .cmdline-option-key {
+  color: var(--ink);
 }
 /* Tab-Feld-Zyklus: kleine beschriftete Boxen (Länge/Winkel/…); aktives Feld
    hervorgehoben (Akzent-Rand). Wert „—" = ungelockt (folgt der Maus). */
@@ -1874,6 +1883,22 @@ body {
   background: rgba(181, 98, 30, 0.14);
   border-color: rgba(181, 98, 30, 0.35);
   color: #b5621e;
+}
+/* [283] Dunkel: die Markenfarben der Hellfassung (2.3–3.3 : 1) und --active (#6a6a6a) als Schrift sind zu schwach — aufgehellt. */
+:root[data-theme="dark"] .badge-floor {
+  color: var(--ink-2);
+}
+:root[data-theme="dark"] .badge-section {
+  color: #b59be0;
+}
+:root[data-theme="dark"] .badge-elevation {
+  color: #5fc4b0;
+}
+:root[data-theme="dark"] .badge-drawing {
+  color: #e8914a;
+}
+:root[data-theme="dark"] .sb-seg-btn.active {
+  color: var(--ink);
 }
 
 /* ── Ebenen-Baum (Kategorien) ────────────────────────────────────────── */
@@ -5645,13 +5670,14 @@ body {
 .objinfo-camera .objinfo-flabel,
 .objinfo-railing .objinfo-flabel,
 .objinfo-tree .objinfo-flabel {
-  flex: 0 0 104px;
-  width: 104px;
-  /* Lange Beschriftungen („Verdeckte Kanten“, „Schnitt-Tiefe (m)“) brechen um statt mit „…“ abzuschneiden ([283]). */
+  flex: 0 0 116px;
+  width: 116px;
+  /* Lange Beschriftungen („Verdeckte Kanten“, „Schnitt-Tiefe (m)“) brechen um statt mit „…“ abzuschneiden ([283]);
+     nur an Wortgrenzen (nicht „Höhenunterschie|d“), erst ein einzelnes zu langes Wort bricht mitten im Wort. */
   white-space: normal;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
   line-height: 1.25;
-  padding-right: 8px;
+  padding-right: 6px;
   color: var(--label);
 }
 /* Werte/Controls füllen die Zelle linksbündig (statt rechtsbündig). */
@@ -6169,6 +6195,13 @@ body {
   background: var(--input);
   color: var(--ink);
   cursor: pointer;
+}
+/* [283] Hoch/Quer im Präsentationsplan-Dialog wurde neben dem breiten Format-Feld abgeschnitten („Qu“). */
+.imp-section .imp-seg {
+  flex: 0 0 auto;
+}
+.imp-section .imp-select {
+  min-width: 0;
 }
 .imp-seg-btn:last-child {
   border-right: none;
@@ -8685,6 +8718,13 @@ body {
 .kz-status.bad {
   color: var(--danger, #c0392b);
 }
+/* [283] Dunkel: Grün/Rot der Status-Wörter (Raumprogramm) auf --panel mindestens 4.5 : 1. */
+:root[data-theme="dark"] .kz-status.ok {
+  color: #4fbf74;
+}
+:root[data-theme="dark"] .kz-status.bad {
+  color: #e07070;
+}
 .kz-add {
   align-self: flex-start;
   padding: 3px 8px;
@@ -10263,6 +10303,10 @@ body {
   color: var(--accent);
   border-color: var(--accent-border);
   background: var(--accent-dim);
+}
+/* [283] Dunkel ist --accent (#4d4d4d) fast so dunkel wie der Grund: der Stift des Bearbeitungsmodus wäre unsichtbar. */
+:root[data-theme="dark"] .dop-pen.is-on {
+  color: var(--ink);
 }
 .rm-design-option.is-editing,
 .dop-main-row.is-editing {
