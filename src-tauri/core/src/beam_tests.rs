@@ -154,3 +154,22 @@ fn umbaufilter_wie_stuetze() {
     assert_eq!(with("abbruch"), 0);
     assert!(with("neubau") > 0);
 }
+
+#[test]
+fn varianten_blenden_traeger_aus() {
+    // [284] Träger in Variante B: in der Hauptkombination (A) ausgeblendet, in B sichtbar.
+    let mut p = project(json!({"designOption": {"set": "s", "option": "b"}}));
+    p.design_option_sets = Some(vec![serde_json::from_value(json!({"id": "s", "name": "Tragwerk", "options": [{"id": "a", "name": "A"}, {"id": "b", "name": "B"}], "primary": "a"})).unwrap()]);
+    let with = |f: Value| {
+        let t = json!({"floor": "eg", "show": ["30", "50"], "grey": [], "scale": 50, "global": true, "mono": true, "designOptions": f}).to_string();
+        plan_domains(&p, &PlanArgs::parse(1.0, &t).unwrap()).unwrap().columns.len()
+    };
+    assert_eq!(with(json!({})), 0, "Hauptkombination ohne Träger der Variante B");
+    assert!(with(json!("Tragwerk=B")) > 0);
+    assert!(crate::design_options::Combination::primary(&p).hidden(&p).contains("T1"));
+    // 3D, Schnitt, Kennzahlen und Exporte rechnen auf dem gefilterten Projekt: dort fehlt der Träger.
+    assert!(crate::renovation::project_for_text(&p, "{}").beams.as_deref().unwrap_or(&[]).is_empty());
+    // Umbau: abgebrochener Träger fehlt im Neubau-Zustand.
+    let q = project(json!({"renovation": {"status": "demolish"}}));
+    assert!(crate::renovation::project_in_state(&q, Some("neubau"), None).beams.as_deref().unwrap_or(&[]).is_empty());
+}

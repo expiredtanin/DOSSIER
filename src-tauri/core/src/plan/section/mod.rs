@@ -453,6 +453,10 @@ pub fn without_elements(p: &Project, ids: &HashSet<String>) -> Project {
     if let Some(v) = &mut q.columns {
         v.retain(|x| !ids.contains(&x.id));
     }
+    // [284] Träger (sonst blieben sie in 3D, Schnitt und Exporten trotz Umbau-/Variantenfilter stehen).
+    if let Some(v) = &mut q.beams {
+        v.retain(|x| !ids.contains(&x.id));
+    }
     // [279] Geländer.
     if let Some(v) = &mut q.railings {
         v.retain(|x| !ids.contains(&x.id));

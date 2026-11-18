@@ -23,6 +23,11 @@ describe("selectAllIds", () => {
     expect(selectAllHasAny(ids)).toBe(true);
   });
 
+  it("[284] nimmt Geländer des Geschosses mit", () => {
+    const q = { ...p, railings: [{ id: "g1", type: "railing", floorId: "eg", categoryCode: "41", points: [{ x: 0, y: 0 }, { x: 2, y: 0 }], height: 1, kind: "bars" }, { id: "g2", type: "railing", floorId: "og", categoryCode: "41", points: [{ x: 0, y: 0 }, { x: 2, y: 0 }], height: 1, kind: "bars" }] } as Project;
+    expect(selectAllIds(q, "eg").railings).toEqual(["g1"]);
+  });
+
   it("wählt die Schattenfläche der Sonnenstudie (Entf blendet sie aus), nur im Geschoss-Grundriss", () => {
     expect(p.sunStudy?.show).toBe(true);
     expect(selectAllIds(p, "eg").site).toEqual(["sunStudy"]);

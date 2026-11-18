@@ -1393,7 +1393,7 @@ pub fn query(root: &Map<String, Value>, p: &Project, v: &Value) -> Option<Result
 // ── Gruppen-Zuordnung ────────────────────────────────────────────────────────
 
 /// Mitglieds-Listen einer Gruppe und ihre Element-Listen (Reihenfolge wie `KEYS` in der Hülle).
-const MEMBER_KEYS: [(&str, &str); 8] = [
+const MEMBER_KEYS: [(&str, &str); 11] = [
     ("wallIds", "walls"),
     ("drawingIds", "drawings2d"),
     ("ceilingIds", "ceilings"),
@@ -1402,6 +1402,10 @@ const MEMBER_KEYS: [(&str, &str); 8] = [
     ("columnIds", "columns"),
     ("roofIds", "roofs"),
     ("openingIds", "openings"),
+    // [284] Träger liegen im Auswahlkanal der Stützen; Geländer und Bäume eigene Listen.
+    ("columnIds", "beams"),
+    ("railingIds", "railings"),
+    ("treeIds", "trees"),
 ];
 
 /// Zeichnet man in einer betretenen Gruppe (`group` = innerste aktive Gruppe), werden die neu
@@ -1443,7 +1447,7 @@ pub fn group_ops(root: &Map<String, Value>, ops: &[Op], group: &str) -> Vec<Op> 
             }
         };
         arr(m.get(key)).iter().for_each(&mut push);
-        if let Some((_, ids)) = added.iter().find(|(k, _)| *k == key) {
+        for (_, ids) in added.iter().filter(|(k, _)| *k == key) {
             ids.iter().for_each(|id| push(&Value::String(id.clone())));
         }
         m.insert(key.into(), Value::Array(list));

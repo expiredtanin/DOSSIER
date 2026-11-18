@@ -415,6 +415,10 @@ fn mv_ceiling(c: &Value, xf: &Xf) -> Value {
         f.push(("openings", Value::Array(arr(field(c, "openings")).iter().map(|h| xf.pts(Some(h))).collect())));
     }
     f.extend(flip_bulges(c, xf, &["outlineBulge"], &["openingsBulge"]));
+    // [284] Gefällelinie der geneigten Decke/Rampe wandert mit (sonst kippt die Ebene beim Verschieben/Drehen).
+    if let Some(s) = field(c, "slope").filter(|s| s.is_object()) {
+        f.push(("slope", with_all(s, vec![("from", xf.pt_of(field(s, "from"))), ("to", xf.pt_of(field(s, "to")))])));
+    }
     with_all(c, f)
 }
 
@@ -1695,6 +1699,24 @@ mod tests {
         assert_eq!(ops[0]["collection"], "trees");
         assert_eq!(ops[0]["items"][0]["id"], "tree-s-1");
         assert_eq!(ops[0]["items"][0]["position"], json!({"x":4,"y":3}));
+    }
+
+    /// [284] Geneigte Decke: die Gefällelinie wandert beim Verschieben und Kopieren mit (sonst kippt die Ebene).
+    #[test]
+    fn gefaellelinie_wandert_mit() {
+        let c = json!({"id":"C","outline":[{"x":0,"y":0},{"x":4,"y":0},{"x":4,"y":2},{"x":0,"y":2}],"slope":{"from":{"x":0,"y":1},"to":{"x":4,"y":1},"rise":0.5,"ramp":true}});
+        let r = root(json!({"ceilings":[c]}));
+        let run = |mode: &str| {
+            let req: TransformReq = serde_json::from_value(json!({"sel":{"wallIds":[],"ceilingIds":["C"]},"op":"move","pts":[[0, 0], [3, 1]],"mode":mode,"count":1,"stamp":"s"})).unwrap();
+            transform_ops(&r, &Project::default(), &req).iter().map(|o| o.to_json()).collect::<Vec<_>>()
+        };
+        let ops = run("move");
+        assert_eq!(ops[0]["entity"]["slope"], json!({"from":{"x":3,"y":2},"to":{"x":7,"y":2},"rise":0.5,"ramp":true}));
+        let ops = run("copy");
+        assert_eq!(ops[0]["items"][0]["slope"]["from"], json!({"x":3,"y":2}));
+        // Verschieben des Projekts (Bezugspunkt, Welt-Koordinaten im Export) ebenso.
+        let p = crate::geo_translate::project_patch(&r, 1.0, 2.0);
+        assert_eq!(p["ceilings"][0]["slope"]["to"], json!({"x":5.0,"y":3.0}));
     }
 
     /// [213] Kameras: Standpunkt und Ziel werden abgebildet, Höhen und Bildwinkel bleiben; Kopien heissen „… Kopie“.

@@ -96,7 +96,7 @@
 //                 component_name, PSETS   ([141] Stütze mit Höhenabschnitten, je Abschnitt ein eigenes beschnittenes
 //                 Profil; EIN IfcColumn mit n Extrusionen in einer SweptSolid-Darstellung, Placement auf dem tiefsten
 //                 Abschnitt; Material und Materialzuordnung wie COLUMN; die Mengen stehen fertig in PSETS)
-//   BEAM        = 27 ([280] Träger), Felder wie COLUMN: structure, id, label, PTS (Grundriss-Rechteck), z_rel, depth (Querschnitts-
+//   BEAM        = 28 ([280] Träger), Felder wie COLUMN: structure, id, label, PTS (Grundriss-Rechteck), z_rel, depth (Querschnitts-
 //                 höhe), component_id (−1 = keine), component_name, PSETS; IfcBeam (BEAM, in IFC2x3 ohne PredefinedType),
 //                 Profil-Extrusion senkrecht über dem Rechteck; Schlüssel `beam/<id>`; Material wie bei den Stützen
 //                 (steht VOR END_COLUMNS).

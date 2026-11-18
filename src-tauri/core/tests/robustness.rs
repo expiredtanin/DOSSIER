@@ -1054,5 +1054,59 @@ fn regression_strichmuster_winzig() {
     });
 }
 
+/// [284] Neue Bauteile ([278] Einheiten, [279] Geländer, [280] Träger, [281] geneigte Decken) mit Randwerten:
+/// leere/entartete Achsen, Länge 0, Masse 0/negativ/1e300, Gefällelinie der Länge 0, Steigung ±1e300.
+#[test]
+fn regression_neue_bauteile_randwerte() {
+    let rail = |id: &str, pts: Value, extra: Value| {
+        let mut r = json!({"id": id, "type": "railing", "floorId": "eg", "categoryCode": "41", "points": pts, "height": 1.0, "kind": "bars"});
+        r.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        r
+    };
+    let p = |x: f64, y: f64| json!({"x": x, "y": y});
+    let railings = vec![
+        rail("r0", json!([]), json!({})),
+        rail("r1", json!([p(1.0, 1.0)]), json!({"closed": true})),
+        rail("r2", json!([p(1.0, 1.0), p(1.0, 1.0)]), json!({"kind": "glass"})),
+        rail("r3", json!([p(1.0, 1.0), p(1e300, 1.0)]), json!({"kind": "solid"})),
+        rail("r4", json!([p(1.0, 1.0), p(3.0, 1.0)]), json!({"height": 0.0, "barSpacing": 0.0, "barSize": 0.0, "kind": "perforated"})),
+        rail("r5", json!([p(1.0, 1.0), p(3.0, 1.0), p(3.0, 3.0)]), json!({"height": 1e300, "baseOffset": -1e300, "thickness": 1e300, "handrailSize": 1e300, "closed": true})),
+        rail("r6", json!([p(1.0, 1.0), p(1e12, 1.0)]), json!({"barSpacing": 1e-300})),
+        rail("r7", json!([p(1.0, 1.0), p(3.0, 1.0)]), json!({"height": -1.0, "thickness": -1.0, "handrail": true})),
+    ];
+    let beam = |id: &str, s: Value, e: Value, extra: Value| {
+        let mut b = json!({"id": id, "type": "beam", "floorId": "eg", "categoryCode": "50", "start": s, "end": e, "width": 0.25, "height": 0.4});
+        b.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        b
+    };
+    let beams = vec![
+        beam("b0", p(1.0, 1.0), p(1.0, 1.0), json!({})),
+        beam("b1", p(1.0, 1.0), p(4.0, 1.0), json!({"width": 0.0, "height": 0.0})),
+        beam("b2", p(1.0, 1.0), p(4.0, 1.0), json!({"width": -1.0, "height": 1e300, "topOffset": -1e300})),
+        beam("b3", p(1.0, 1.0), p(1e300, 1.0), json!({"topOffset": 1e300})),
+        beam("b4", p(1.0, 1.0), p(1.0 + 1e-12, 1.0), json!({"width": 1e300})),
+    ];
+    let slopes = [
+        json!({"from": p(0.0, 0.0), "to": p(0.0, 0.0), "rise": 1.0}),
+        json!({"from": p(0.0, 0.0), "to": p(5.0, 0.0), "rise": 0.0, "ramp": true}),
+        json!({"from": p(0.0, 0.0), "to": p(0.0, 0.0), "rise": 1.0, "ramp": true}),
+        json!({"from": p(0.0, 0.0), "to": p(5.0, 0.0), "rise": 1e300}),
+        json!({"from": p(0.0, 0.0), "to": p(5.0, 0.0), "rise": -1e300, "ramp": true}),
+        json!({"from": p(0.0, 0.0), "to": p(1e-300, 0.0), "rise": 1.0}),
+        json!({"from": p(1e300, 0.0), "to": p(-1e300, 0.0), "rise": 1.0, "ramp": true}),
+    ];
+    for (i, s) in slopes.iter().enumerate() {
+        let (rl, bm) = (railings.clone(), beams.clone());
+        regression(&format!("neue Bauteile, Gefälle {i}"), |m| {
+            m.insert("railings".into(), Value::Array(rl));
+            m.insert("beams".into(), Value::Array(bm));
+            m.insert("units".into(), json!([{"id": "u1", "name": "A"}, {"id": "u1", "name": "doppelt"}]));
+            item(m, "ceilings", 0)["slope"] = s.clone();
+            item(m, "rooms", 0)["unitId"] = json!(if i % 2 == 0 { "u1" } else { "fehlt" });
+            item(m, "rooms", 0)["roomCount"] = json!(if i % 2 == 0 { 1e300 } else { -1.0 });
+        });
+    }
+}
+
 #[path = "robustness/op_fuzz.rs"]
 mod op_fuzz;

@@ -487,7 +487,7 @@ struct PartKey {
 }
 
 /// Felder, aus denen der Modell-Teil sammelt (ändert sich eines, wird neu gesammelt).
-const MODEL_FIELDS: [&str; 8] = ["walls", "wallTypes", "rooms", "ceilings", "roofs", "stairs", "columns", "extrudedSolids"];
+const MODEL_FIELDS: [&str; 9] = ["walls", "wallTypes", "rooms", "ceilings", "roofs", "stairs", "columns", "beams", "extrudedSolids"];
 const DRAWING_FIELDS: [&str; 1] = ["drawings2d"];
 /// So viele Teile je Art und abgelegte Geschosse bleiben (älteste fallen weg).
 const KEEP: usize = 6;

@@ -97,6 +97,10 @@ pub fn translate_project(p: &Project, dx: f64, dy: f64) -> Project {
         for h in c.openings.iter_mut().flatten() {
             shift_all(h, dx, dy);
         }
+        if let Some(s) = &mut c.slope {
+            s.from = shift(s.from, dx, dy);
+            s.to = shift(s.to, dx, dy);
+        }
     }
     for r in out.roofs.iter_mut().flatten() {
         shift_all(&mut r.outline, dx, dy);
@@ -114,6 +118,10 @@ pub fn translate_project(p: &Project, dx: f64, dy: f64) -> Project {
     }
     for c in out.columns.iter_mut().flatten() {
         c.position = shift(c.position, dx, dy);
+    }
+    for b in out.beams.iter_mut().flatten() {
+        b.start = shift(b.start, dx, dy);
+        b.end = shift(b.end, dx, dy);
     }
     for t in out.trees.iter_mut().flatten() {
         t.position = shift(t.position, dx, dy);

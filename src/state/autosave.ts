@@ -126,6 +126,8 @@ export function hasContent(p: Project): boolean {
     (p.rooms?.length ?? 0) > 0 ||
     (p.columns?.length ?? 0) > 0 ||
     (p.beams?.length ?? 0) > 0 ||
+    (p.railings?.length ?? 0) > 0 ||
+    (p.trees?.length ?? 0) > 0 ||
     (p.extrudedSolids?.length ?? 0) > 0 ||
     (p.context?.length ?? 0) > 0
   );

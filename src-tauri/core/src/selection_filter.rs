@@ -8,7 +8,7 @@ use serde_json::{Map, Value};
 use std::collections::HashSet;
 
 /// Projekt-Liste → (Mitglieds-ids der Art).
-const KINDS: [(&str, &str); 9] = [
+const KINDS: [(&str, &str); 11] = [
     ("walls", "wallIds"),
     ("drawings2d", "drawingIds"),
     ("ceilings", "ceilingIds"),
@@ -19,6 +19,9 @@ const KINDS: [(&str, &str); 9] = [
     ("beams", "columnIds"),
     ("roofs", "roofIds"),
     ("openings", "openingIds"),
+    // [284] Geländer und Bäume: sonst gingen beim Export „nur Auswahl“ alle mit.
+    ("railings", "railingIds"),
+    ("trees", "treeIds"),
 ];
 
 /// Gekürzte Listen (alle acht Schlüssel, fehlende Listen = leer); Elemente in Listen-Reihenfolge, auch Doppelte.
@@ -55,7 +58,8 @@ mod tests {
         assert_eq!(p["rooms"], json!([]));
         assert_eq!(p["drawings2d"], json!([]));
         assert_eq!(p["roofs"], json!([]));
-        assert_eq!(p.len(), 9);
+        assert_eq!(p.len(), 11);
+        assert_eq!(p["railings"], json!([]));
         assert!(p.get("layers").is_none());
     }
 }

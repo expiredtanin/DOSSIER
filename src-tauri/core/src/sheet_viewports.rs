@@ -299,6 +299,7 @@ fn candidate_codes(p: &Project) -> HashSet<String> {
     codes.extend(p.extruded_solids.iter().flatten().map(|e| e.category_code.clone()));
     codes.extend(p.columns.iter().flatten().map(|e| e.category_code.clone()));
     codes.extend(p.beams.iter().flatten().map(|e| e.category_code.clone()));
+    codes.extend(p.railings.iter().flatten().map(|e| e.category_code.clone()));
     codes
 }
 

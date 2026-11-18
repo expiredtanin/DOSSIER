@@ -182,7 +182,7 @@ impl Combination {
                 }
             )*};
         }
-        each!(ceilings, roofs, stairs, columns, extruded_solids, rooms, railings);
+        each!(ceilings, roofs, stairs, columns, beams, extruded_solids, rooms, railings);
         for d in &p.drawings2d {
             if !self.shows(d.design_option.as_ref()) {
                 out.insert(d.id.clone());
@@ -276,7 +276,7 @@ impl Edit {
                 }
             )*};
         }
-        each!(ceilings, roofs, stairs, columns, extruded_solids, rooms, railings);
+        each!(ceilings, roofs, stairs, columns, beams, extruded_solids, rooms, railings);
         // 2D-Elemente (Möbel, Linien, Masse, Texte): nur die, die einer anderen Variante angehören — ohne Zugehörigkeit
         // stehen sie im Hauptmodell, wo sie nicht grau werden (sonst wäre jede Beschriftung grau).
         for d in &p.drawings2d {

@@ -842,13 +842,19 @@ export function createProjectSlice(
           p.walls.filter((w) => w.floorId === id).map((w) => w.id),
         );
         const removedCeilingIds = new Set((p.ceilings ?? []).filter((c) => c.floorId === id).map((c) => c.id));
+        const removedRoofIds = new Set((p.roofs ?? []).filter((r) => r.floorId === id).map((r) => r.id));
         return [
           ...fieldOps(p, "drawingLevels", recomputeFloorElevations(p.drawingLevels.filter((z) => z.id !== id))),
           ...removeItems(p, "walls", removedWallIds),
           ...removeItems(p, "ceilings", (c) => c.floorId === id),
           ...removeItems(p, "stairs", (s) => s.floorId === id),
           ...removeItems(p, "rooms", (r) => r.floorId === id),
-          ...removeItems(p, "openings", (o) => removedWallIds.has(o.hostWallId) || (!!o.hostCeilingId && removedCeilingIds.has(o.hostCeilingId))),
+          // [284] Auch die übrigen Bauteile des Geschosses (sonst hingen sie unsichtbar an einem fehlenden Geschoss).
+          ...removeItems(p, "roofs", removedRoofIds),
+          ...removeItems(p, "columns", (c) => c.floorId === id),
+          ...removeItems(p, "beams", (b) => b.floorId === id),
+          ...removeItems(p, "railings", (r) => r.floorId === id),
+          ...removeItems(p, "openings", (o) => removedWallIds.has(o.hostWallId) || (!!o.hostCeilingId && removedCeilingIds.has(o.hostCeilingId)) || (!!o.hostRoofId && removedRoofIds.has(o.hostRoofId))),
         ];
       });
     },

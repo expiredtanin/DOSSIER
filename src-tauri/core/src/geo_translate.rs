@@ -142,6 +142,12 @@ fn shift_element(key: &str, e: &Value, dx: f64, dy: f64) -> (Value, bool) {
                 let n: Vec<Value> = h.iter().map(|h| shift_all(Some(h), dx, dy)).collect();
                 m.insert("openings".into(), Value::Array(n));
             }
+            // [284] Gefällelinie der geneigten Decke/Rampe.
+            if let Some(s) = e.get("slope").filter(|s| s.is_object()) {
+                let mut s = obj(s);
+                shift_pts_fields(&mut s, &["from", "to"], dx, dy, &[]);
+                m.insert("slope".into(), Value::Object(s));
+            }
         }
         "roofs" => {
             shift_pts_fields(&mut m, &[], dx, dy, &["outline"]);
