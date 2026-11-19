@@ -74,6 +74,9 @@ pub struct DimChain {
     /// [81] Teil der Seite: getrennte Gebäude des Geschosses (entlang der Seite nicht überlappend) bekommen je
     /// eigene Ketten; 0 = das breiteste, dann nach Lage.
     pub part: usize,
+    /// [301] Lauf innerhalb der Kette: die Vor-/Rücksprung-Kette lässt Abschnitte weg, die die Öffnungskette schon
+    /// unverändert zeigt, und zerfällt dabei in Läufe (0 = erster; Id-Endung `steps2` …).
+    pub run: usize,
 }
 
 const EPS: f64 = 1e-6;
@@ -406,18 +409,42 @@ fn emit_chains(out: &mut Vec<DimChain>, side: usize, part: usize, n: Vec2, s_lin
     let u = [n[1], -n[0]];
     let min_gap = MIN_SEGMENT_MM / 1000.0 * scale;
     let steps = thin(unique_sorted(corners), min_gap);
-    let mut chains: Vec<(usize, Vec<f64>)> = vec![];
+    let mut chains: Vec<(usize, usize, Vec<f64>)> = vec![];
+    let mut inner: Vec<f64> = vec![];
     if !jambs.is_empty() {
         let mut all = steps.clone();
         all.extend(jambs);
-        chains.push((CHAIN_OPENINGS, thin(unique_sorted(&all), min_gap)));
+        inner = thin(unique_sorted(&all), min_gap);
+        chains.push((CHAIN_OPENINGS, 0, inner.clone()));
     }
     if steps.len() > 2 {
-        chains.push((CHAIN_STEPS, steps));
+        // [301] Ein Abschnitt, den die Öffnungskette unverändert zeigt (keine Leibung dazwischen), steht nicht
+        // zweimal nebeneinander (5.00 | 5.00): die Vor-/Rücksprung-Kette behält nur die verfeinerten Abschnitte.
+        let same = |a: f64, b: f64| inner.windows(2).any(|w| (w[0] - a).abs() <= 1e-3 && (w[1] - b).abs() <= 1e-3);
+        let mut run: Vec<f64> = vec![];
+        let mut runs: Vec<Vec<f64>> = vec![];
+        for w in steps.windows(2) {
+            if same(w[0], w[1]) {
+                if run.len() > 1 {
+                    runs.push(std::mem::take(&mut run));
+                }
+            } else {
+                if run.is_empty() {
+                    run.push(w[0]);
+                }
+                run.push(w[1]);
+            }
+        }
+        if run.len() > 1 {
+            runs.push(run);
+        }
+        for (i, r) in runs.into_iter().enumerate() {
+            chains.push((CHAIN_STEPS, i, r));
+        }
     }
-    chains.push((CHAIN_TOTAL, vec![t_range.0, t_range.1]));
+    chains.push((CHAIN_TOTAL, 0, vec![t_range.0, t_range.1]));
 
-    for (chain, ts) in chains {
+    for (chain, run, ts) in chains {
         if ts.len() < 2 {
             continue;
         }
@@ -428,7 +455,7 @@ fn emit_chains(out: &mut Vec<DimChain>, side: usize, part: usize, n: Vec2, s_lin
             .zip(&pts)
             .map(|(&t, &p)| feats.iter().filter(|f| (f.0 - t).abs() <= 1e-3).max_by(|a, b| a.2.total_cmp(&b.2)).map_or(p, |f| f.1))
             .collect();
-        out.push(DimChain { side, chain, pts, offset: CHAIN_MM[chain] / 1000.0 * scale, src, arc: None, part });
+        out.push(DimChain { side, chain, pts, offset: CHAIN_MM[chain] / 1000.0 * scale, src, arc: None, part, run });
     }
 }
 
@@ -766,7 +793,7 @@ fn arc_chains(walls: &[WallIn], openings: &[OpeningIn], rings: &[Ring], scale: f
             continue;
         }
         let pts: Vec<Vec2> = st.iter().map(|&s| a.point(s, n_out)).map(|q| [q.x, q.y]).collect();
-        out.push(DimChain { side: 0, chain: CHAIN_OPENINGS, src: pts.clone(), pts, offset: ARC_CHAIN_MM / 1000.0 * scale, arc: Some(([a.center.x, a.center.y], wi)), part: 0 });
+        out.push(DimChain { side: 0, chain: CHAIN_OPENINGS, src: pts.clone(), pts, offset: ARC_CHAIN_MM / 1000.0 * scale, arc: Some(([a.center.x, a.center.y], wi)), part: 0, run: 0 });
     }
     out
 }
@@ -828,6 +855,30 @@ mod tests {
         let mut l: Vec<f64> = lengths(&north.pts).iter().map(|v| (v * 1000.0).round() / 1000.0).collect();
         l.sort_by(f64::total_cmp);
         assert_eq!(l, vec![4.3, 6.0]);
+    }
+
+    /// [301] Gleiche Abschnitte stehen nicht in zwei benachbarten Ketten einer Seite (vorher 6.00 | 6.00).
+    #[test]
+    fn keine_doppelten_abschnitte_in_benachbarten_ketten() {
+        // Fenster in der Nordwand des schmalen Flügels (x 1 … 2); der Vorsprung 6.0 hat keine Öffnung.
+        let o = OpeningIn { wall: 4, jamb_start: [2.0, 9.0], jamb_end: [1.0, 9.0] };
+        let dims = auto_exterior_dimensions(&l_walls(), &[o], 100.0);
+        let north: Vec<&DimChain> = dims.iter().filter(|d| d.side == 2 && d.part == 0).collect();
+        let mut seen: Vec<(i64, i64)> = vec![];
+        for d in &north {
+            for w in d.pts.windows(2) {
+                let (a, b) = (w[0][0].min(w[1][0]), w[0][0].max(w[1][0]));
+                let key = ((a * 1000.0).round() as i64, (b * 1000.0).round() as i64);
+                if d.chain != CHAIN_TOTAL {
+                    assert!(!seen.contains(&key), "Abschnitt {key:?} doppelt: {north:?}");
+                    seen.push(key);
+                }
+            }
+        }
+        // Die Vor-/Rücksprung-Kette bleibt für den verfeinerten Abschnitt (4.3) erhalten.
+        let steps: Vec<&&DimChain> = north.iter().filter(|d| d.chain == CHAIN_STEPS).collect();
+        assert_eq!(steps.len(), 1, "{north:?}");
+        assert!((total(steps[0]) - 4.3).abs() < 1e-6, "{steps:?}");
     }
 
     #[test]
