@@ -3,6 +3,19 @@
 Prüfbilder je Aufgabe, neueste zuerst. Entstanden im Linux-Container (CLI-SVG bzw. Browser-Build in Chromium), **nicht** in der Mac-App. Details je ID in `TODO.md`.
 
 
+## [291] Geländer wie Archicad: Pfosten, Füllung je Feld, an Treppe/Deckenkante gebunden
+
+**gelaender.png** (Axo: Stabgeländer an der rechten Treppenwange, Glasgeländer mit Pfosten an drei Deckenkanten, Feld 2 als Brüstung)
+
+![gelaender.png](review-291/gelaender.png)
+
+
+## [292] Wand: OK bis Decke (folgt der geneigten Deckenunterkante)
+
+**wand-an-decke.png** (Schnitt 1:50)
+
+![wand-an-decke.png](review-292/wand-an-decke.png)
+
 ## [282] PDF-Ebenen: Erdgeschoss wieder vollständig · Prüf-PDF Präsentationsplan
 
 **282-eg-mit-ebenen.png**
