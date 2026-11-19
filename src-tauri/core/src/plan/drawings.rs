@@ -2662,6 +2662,8 @@ pub fn level_marker_bounds(p: &Project, prims: &[Primitive], b: [f64; 4]) -> [f6
         match q {
             Primitive::Line { a, b, .. } if in_box(a) && in_box(b) => {}
             Primitive::Polygon { context_object_id: Some(id), .. } if neighbours.contains(&id.as_str()) => {}
+            // [302] Umriss eines Nachbarn hinter der Ebene (dünn, ohne Fläche): kein Gebautes.
+            Primitive::Line { cls, weight_mm, .. } if (cls == "elevation-outline" || cls == "section-visible") && (*weight_mm - crate::plan::elevation::CONTEXT_MM).abs() < 1e-5 => {}
             Primitive::Line { a, b, cls, .. } if !TERRAIN.contains(&cls.as_str()) => {
                 min_x = min_x.min(a.x).min(b.x);
                 if cls != "draw2d" && cls != "tree-crown" && cls != "tree-remove" {
@@ -3557,6 +3559,18 @@ mod tests {
         prims.push(poly(&[(-2.0, 0.0), (14.0, 0.0), (14.0, 12.0), (-2.0, 12.0)], Some("nachbarn")));
         prims.push(line((-2.0, 12.0), (14.0, 12.0), "elevation-outline"));
         assert_eq!(level_marker_bounds(&p, &prims, [-20.0, -0.5, 14.0, 12.0]), [0.0, -0.5, 14.0, 9.4]);
+        // [302] Nachbar hinter der Schnittebene/Ansicht nur als dünner Umriss (ohne Fläche, `CONTEXT_MM`): zählt nicht.
+        let mut thin = line((-30.0, -0.5), (-30.0, 13.0), "elevation-outline");
+        if let Primitive::Line { weight_mm, .. } = &mut thin {
+            *weight_mm = crate::plan::elevation::CONTEXT_MM;
+        }
+        prims.push(thin);
+        let mut thin_s = line((-40.0, -0.5), (-40.0, 13.0), "section-visible");
+        if let Primitive::Line { weight_mm, .. } = &mut thin_s {
+            *weight_mm = crate::plan::elevation::CONTEXT_MM;
+        }
+        prims.push(thin_s);
+        assert_eq!(level_marker_bounds(&p, &prims, [-40.0, -0.5, 14.0, 13.0]), [0.0, -0.5, 14.0, 9.4]);
         // Netz auf eigener Klasse zählt.
         let own = vec![house, poly(&[(-3.0, 0.0), (-1.0, 0.0), (-1.0, 11.0), (-3.0, 11.0)], Some("ifc"))];
         assert_eq!(level_marker_bounds(&p, &own, [-3.0, 0.0, 10.0, 11.0]), [-3.0, 0.0, 10.0, 11.0]);

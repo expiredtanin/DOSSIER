@@ -1573,7 +1573,7 @@ mod tests {
         let mvl = serde_json::json!({ "sectionMarks": { "lineMode": "ends", "marker": "lAngle" } });
         let base = run_lines(&look_project("section", serde_json::json!({}), Some(mvl.clone())), false);
         let (thin, heavy, tri, txt) = count_parts(&base);
-        assert!(thin == 1 && tri == 2 && heavy == 4 && txt == 2, "Basis = Pfeil: {:?}", count_parts(&base));
+        assert!(thin == 0 && tri == 2 && heavy == 4 && txt == 2, "Basis = Pfeil an kräftigen Enden ([302]): {:?}", count_parts(&base));
         let l = run_lines(&look_project("section", serde_json::json!({ "lineMode": "ends", "marker": "lAngle" }), None), false);
         assert_eq!(count_parts(&l), (0, 4, 0, 2), "je Ende zwei Schenkel");
         let via_mv = run_lines(&look_project("section", serde_json::json!({}), Some(mvl.clone())), true);
@@ -1624,8 +1624,8 @@ mod tests {
         let run = |lv: serde_json::Value| run_lines(&look_project("section", lv, None), false);
         assert_eq!(count_parts(&run(serde_json::json!({ "lineMode": "none", "marker": "triangle" }))), (0, 0, 2, 2));
         assert_eq!(count_parts(&run(serde_json::json!({ "lineMode": "none", "marker": "none", "markerLabel": false }))), (0, 0, 0, 0));
-        assert_eq!(count_parts(&run(serde_json::json!({ "markerAt": "start" }))), (1, 3, 1, 1));
-        assert_eq!(count_parts(&run(serde_json::json!({ "markerLabel": false }))), (1, 4, 2, 0));
+        assert_eq!(count_parts(&run(serde_json::json!({ "lineMode": "full", "markerAt": "start" }))), (1, 3, 1, 1));
+        assert_eq!(count_parts(&run(serde_json::json!({ "lineMode": "full", "markerLabel": false }))), (1, 4, 2, 0));
         let leer = run(serde_json::json!({ "lineMode": "none", "marker": "none", "markerLabel": false }));
         assert!(leer.iter().any(|q| matches!(q, Primitive::Polygon { section_line_id: Some(_), .. })), "Pick-Band bleibt");
         // Nur Anfang: die Beschriftung steht am Anfang (links, x < 0), nicht am Ende.

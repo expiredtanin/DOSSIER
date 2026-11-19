@@ -326,3 +326,23 @@ fn ueber_schnitt_hell_auf_schwarzer_wand() {
     // 1:50: Schichten mit heller Füllung, nichts wird weiss.
     assert!(light(&run(&p, 50.0)).is_empty());
 }
+
+/// [302] Schnittspur: Basis nur kräftige Enden mit Marke (keine Strich-Punkt-Linie durch das ganze Geschoss, die Lauflinien
+/// und Stempel kreuzt); die ganze Linie bleibt wählbar (Ebene/Modelldarstellung `lineMode: "full"`).
+#[test]
+fn schnittspur_basis_nur_enden() {
+    use crate::model::SectionLineMode;
+    let level = |lm: Option<&str>| -> DrawingLevel {
+        let mut v = serde_json::json!({"id": "s", "name": "A-A", "kind": "section", "visible": true});
+        if let Some(l) = lm {
+            v["lineMode"] = l.into();
+        }
+        serde_json::from_value(v).unwrap()
+    };
+    let o = resolve(None, crate::plan::style::Detail::Mittel, 100.0);
+    assert_eq!(o.mark_look(&level(None)).line, SectionLineMode::Ends);
+    assert_eq!(o.mark_look(&level(Some("full"))).line, SectionLineMode::Full);
+    let mut ev = level(None);
+    ev.kind = DrawingLevelKind::Elevation;
+    assert_eq!(o.mark_look(&ev).line, SectionLineMode::None);
+}

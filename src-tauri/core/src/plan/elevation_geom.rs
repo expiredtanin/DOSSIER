@@ -152,7 +152,8 @@ fn segment_inside_poly_interval(a: P, b: P, poly: &[P]) -> Option<(f64, f64)> {
         let c0 = sign * (ex * (a.1 - p.1) - ey * (a.0 - p.0));
         let cd = sign * (ex * dy - ey * dx);
         if cd.abs() < 1e-12 {
-            if c0 < 0.0 {
+            // [302] Kante auf dem Rand (Rundungsrauschen) zählt als innen: sonst bleibt ein Strich auf der Naht zweier Verdecker.
+            if c0 < -1e-9 * hypot2(ex, ey) {
                 return None;
             }
         } else {
@@ -227,10 +228,12 @@ fn clip_segment_visible(a: P, b: P, depth: f64, occ: &[Occ], grid: &OccCells) ->
             if (first as usize).max(c0) != ci {
                 continue; // in einer früheren Zelle dieser Abfrage schon geprüft
             }
-            if bb[1] < seg_min.0 || bb[0] > seg_max.0 {
+            // [302] Mit Rand für Rundungsrauschen (Kante auf der Naht zweier Verdecker, s. `segment_inside_poly_interval`).
+            const BB_TOL: f64 = 1e-9;
+            if bb[1] < seg_min.0 - BB_TOL || bb[0] > seg_max.0 + BB_TOL {
                 continue;
             }
-            if bb[3] < seg_min.1 || bb[2] > seg_max.1 {
+            if bb[3] < seg_min.1 - BB_TOL || bb[2] > seg_max.1 + BB_TOL {
                 continue;
             }
             if let Some(iv) = segment_inside_poly_interval(a, b, &occ[oi as usize].poly) {
@@ -1394,6 +1397,19 @@ mod tests {
         // Tiefer als die Linie: kein Effekt.
         let f = clip_segments(&occ, &[1.0, 0.0, 0.0, 3.0, 0.0, -1.0]);
         assert_eq!(f, vec![1.0, 1.0, 0.0, 0.0, 3.0, 0.0]);
+    }
+
+    /// [302] Kante genau auf der Naht zweier Verdecker (Wandfläche EG bis OK Decke, OG ab OK Decke; Rundungsrauschen
+    /// 1e-12): bleibt verdeckt (vorher blieb von einer Innentür hinter der Fassade ein freies Strichstück bei +2.90).
+    #[test]
+    fn kante_auf_der_naht_zweier_verdecker_bleibt_verdeckt() {
+        let e = 1e-12;
+        let occ = [
+            2.0, //
+            0.0, 4.0, 0.0, 0.0, 10.0, 0.0, 10.0, 2.9 - e, 0.0, 2.9 - e, //
+            0.0, 4.0, 0.0, 2.9 + e, 10.0, 2.9 + e, 10.0, 5.0, 0.0, 5.0,
+        ];
+        assert_eq!(clip_segments(&occ, &[1.0, 1.0, 2.9, 3.0, 2.9, 1.0]), vec![1.0, 0.0]);
     }
 
     #[test]

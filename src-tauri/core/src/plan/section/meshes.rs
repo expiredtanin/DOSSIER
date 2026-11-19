@@ -138,6 +138,7 @@ pub(super) fn clip_context_meshes_to_terrain(out: &mut Output) {
         return;
     }
     let is_ctx = |k: Kind, i: usize| k == Kind::Mesh && ctx.get(i).copied().unwrap_or(false);
+    let below = below_ground_polys(&out.profiles, lo, hi);
     out.cuts = std::mem::take(&mut out.cuts)
         .into_iter()
         .filter_map(|mut c| {
@@ -145,12 +146,11 @@ pub(super) fn clip_context_meshes_to_terrain(out: &mut Output) {
                 return Some(c);
             }
             let (pts, nse) = unfold::clip_poly_u(&c.pts, c.nse.as_deref(), lo, hi)?;
-            (pts.len() >= 3).then(|| {
-                c.pts = pts;
-                c.nse = nse;
-                c
-            })
+            c.pts = pts;
+            c.nse = nse;
+            (c.pts.len() >= 3).then_some(c)
         })
+        .flat_map(|c| if is_ctx(c.kind, c.index) { cut_above_ground(c, &below) } else { vec![c] })
         .collect();
     out.mesh_lines = std::mem::take(&mut out.mesh_lines)
         .into_iter()
@@ -175,6 +175,63 @@ pub(super) fn clip_context_meshes_to_terrain(out: &mut Output) {
     };
     out.visible = clip_edges(std::mem::take(&mut out.visible));
     out.hidden = clip_edges(std::mem::take(&mut out.hidden));
+}
+
+/// [302] Fläche unter der Geländelinie (je Linie ohne das gewachsene Terrain), von `lo` bis `hi` nach unten weit über jede
+/// Nachbarhöhe hinaus. Je u gilt die oberste Höhe (senkrechte Ränder des Geländekörpers fallen so weg).
+fn below_ground_polys(profiles: &[Profile], lo: f64, hi: f64) -> Vec<crate::flat::Polygon> {
+    profiles
+        .iter()
+        .filter(|p| !p.natural && p.pts.len() >= 2)
+        .filter_map(|p| {
+            let mut top: Vec<[f64; 2]> = Vec::new();
+            let mut pts = p.pts.clone();
+            pts.sort_by(|a, b| a[0].total_cmp(&b[0]));
+            for q in pts {
+                match top.last_mut() {
+                    Some(l) if (l[0] - q[0]).abs() < 1e-9 => l[1] = l[1].max(q[1]),
+                    _ => top.push(q),
+                }
+            }
+            if top.len() < 2 {
+                return None;
+            }
+            let zb = top.iter().map(|q| q[1]).fold(f64::INFINITY, f64::min) - 1000.0;
+            let mut ring = top;
+            ring.push([hi.max(ring_last_u(&ring)), zb]);
+            ring.push([lo.min(ring[0][0]), zb]);
+            Some(vec![ring])
+        })
+        .collect()
+}
+
+fn ring_last_u(r: &[[f64; 2]]) -> f64 {
+    r.last().map_or(f64::NEG_INFINITY, |q| q[0])
+}
+
+/// [302] Schnittfläche eines Nachbargebäudes nur über dem Gelände: was unter der Geländelinie liegt, entfällt (die Fläche
+/// reichte sonst über die Erdreich-Schraffur). Die neue Unterkante liegt auf der Geländelinie.
+fn cut_above_ground(c: Cut, below: &[crate::flat::Polygon]) -> Vec<Cut> {
+    if below.is_empty() || c.pts.len() < 3 {
+        return vec![c];
+    }
+    let subject = [vec![c.pts.clone()]];
+    if crate::polygon_bool::intersection(&subject, below).is_empty() {
+        return vec![c];
+    }
+    let parts = crate::polygon_bool::difference(&subject, below);
+    parts
+        .into_iter()
+        .filter_map(|poly| poly.into_iter().next())
+        .filter(|r| r.len() >= 3)
+        .map(|ring| {
+            let mut n = c.clone();
+            // Die Indizes der Kanten ohne Strich gelten nach dem Boolean nicht mehr (Nachbar: einfacher Körper).
+            n.nse = None;
+            n.pts = ring;
+            n
+        })
+        .collect()
 }
 
 /// [152] Oberkante eines Rings (u rechts, Höhe oben): Kanten, über denen aussen liegt — gegen den Uhrzeigersinn die

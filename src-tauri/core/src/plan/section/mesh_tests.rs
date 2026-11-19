@@ -220,3 +220,20 @@ fn nachbargebaeude_hellgrau_und_nur_ueber_dem_gelaende() {
     let (prims, _) = section_primitives_at(&o, true, false, &Visibility::default(), 100.0, Detail::Mittel, false, &rules);
     assert!(prims.iter().any(|q| matches!(q, Primitive::Polygon { fill, context_object_id: Some(i), .. } if i == "innen" && fill == HATCH_INK)));
 }
+
+/// [302] Ein Nachbar, dessen Körper unter die Geländelinie reicht (Keller), zeigt im Schnitt nur den Teil über dem Gelände:
+/// die graue Fläche lag sonst über der Erdreich-Schraffur (Komplex, Schnitt B-B).
+#[test]
+fn nachbar_schnittflaeche_endet_am_gelaende() {
+    let (positions, indices) = cube(-4.0, 7.0, -3.0, 3.0, -1.0, 0.0);
+    let terrain = ContextObject::TerrainMesh(TerrainMesh { id: "g".into(), name: "Site".into(), category_code: "02".into(), positions, indices, ..Default::default() });
+    let (np, ni) = cube(0.0, 2.0, -1.0, 2.0, -0.6, 6.0);
+    let nb = ContextObject::ImportedMesh(ImportedMesh { id: "keller".into(), name: "keller".into(), category_code: "12".into(), positions: np, indices: ni, ..Default::default() });
+    let p = with(vec![terrain, nb]);
+    let o = compute_section(&p, &lv(false), &[]).unwrap().unwrap();
+    let cuts = mesh_cuts(&o).into_iter().filter(|c| c.source_id.as_deref() == Some("keller")).collect::<Vec<_>>();
+    assert_eq!(cuts.len(), 1, "{:?}", o.cuts);
+    let b = bbox(&cuts[0].pts);
+    assert!(b[2] > -1e-9 && (b[3] - 6.0).abs() < 1e-9, "unten am Gelände (z = 0), oben unverändert: {b:?}");
+    assert!((ring_area(&cuts[0].pts).abs() - 2.0 * 6.0).abs() < 1e-9);
+}

@@ -43,7 +43,7 @@ const EDGE_MM: f64 = 0.13;
 /// Terrainlinie kräftig ([`GROUND_MM`]). [300] 0.25 statt 0.18: bei 1:100 war der Unterschied zu 0.13 nicht zu sehen.
 const SILHOUETTE_MM: f64 = 0.25;
 /// [300] Kanten von Kontext-Netzen (Nachbarn, Umgebungsklassen) feiner als Details des eigenen Hauses.
-const CONTEXT_MM: f64 = 0.09;
+pub(crate) const CONTEXT_MM: f64 = 0.09;
 /// [140] Abstand (m), bis zu dem eine Kante als Teil der Silhouette gilt.
 const SILHOUETTE_TOL: f64 = 2e-3;
 const FRAME_MM: f64 = 0.13;
@@ -501,6 +501,31 @@ pub fn elevation_primitives_ren(p: &Project, level: &LevelSpec, shadows: bool, m
         crate::plan::elevation_geom::occluded_points(&occ, &b)
     };
 
+    // [302] Öffnungen in Wänden, die nicht als „aussen“ geführt sind (Innentür hinter der Fassade): schon verdeckt, wenn eine Ecke (nach innen gerückt) hinter
+    // der Fassade liegt — die Mitte allein genügte nicht, wo die Tür nur an einem Fenster vorbei (Glas) sichtbar wäre und ihr
+    // Rand als freier Strich auf der Deckenkante stand (Komplex, Ansicht Süd, +2.90).
+    let interior_hidden: Vec<bool> = {
+        let interior: HashSet<&str> = p.walls.iter().filter(|w| w.is_external != Some(true)).map(|w| w.id.as_str()).collect();
+        let host: HashMap<&str, &str> = p.openings.as_deref().unwrap_or(&[]).iter().map(|o| (o.id.as_str(), o.host_wall_id.as_str())).collect();
+        let (mut idx, mut b) = (Vec::new(), vec![0.0]);
+        for (k, op) in openings.iter().enumerate() {
+            if op.pts.len() >= 4 && host.get(op.id.as_str()).is_some_and(|w| interior.contains(w)) {
+                let c = [(op.pts[0][0] + op.pts[1][0] + op.pts[2][0] + op.pts[3][0]) / 4.0, (op.pts[0][1] + op.pts[1][1] + op.pts[2][1] + op.pts[3][1]) / 4.0];
+                for q in &op.pts[..4] {
+                    b.extend([c[0] + (q[0] - c[0]) * 0.6, c[1] + (q[1] - c[1]) * 0.6, op.depth]);
+                }
+                idx.push(k);
+            }
+        }
+        b[0] = idx.len() as f64 * 4.0;
+        let h = if idx.is_empty() { Vec::new() } else { crate::plan::elevation_geom::occluded_points(&occ, &b) };
+        let mut out = vec![false; openings.len()];
+        for (j, &k) in idx.iter().enumerate() {
+            out[k] = (0..4).any(|m| h.get(1 + 4 * j + m) == Some(&1.0));
+        }
+        out
+    };
+
     let mut acc = Acc::new();
     // Jede Fläche trägt ihre Bauteilfarbe (Wand/Decke aus dem 3D-Modell, Dach aus der Eindeckung).
     let fill_for = |fill: [f64; 3]| -> String { if mono { "#ffffff".into() } else { rgb_to_hex(fill) } };
@@ -738,7 +763,7 @@ pub fn elevation_primitives_ren(p: &Project, level: &LevelSpec, shadows: bool, m
 
     let op_rules = super::overrides::has_active(p, rv);
     for (k, op) in openings.iter().enumerate() {
-        if occluded.get(1 + k) == Some(&1.0) {
+        if occluded.get(1 + k) == Some(&1.0) || interior_hidden[k] {
             continue;
         }
         let mut to_vec = |q: &[Pt]| -> Vec<Vec2> {

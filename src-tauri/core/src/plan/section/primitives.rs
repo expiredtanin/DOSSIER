@@ -658,7 +658,10 @@ pub fn section_primitives_mv(out: &Output, mono: bool, hidden_lines: bool, vis: 
     for e in out.visible.iter().filter(|e| mesh_shown(e)) {
         acc.add(e.a[0], e.a[1]);
         acc.add(e.b[0], e.b[1]);
-        let mut l = line(v2(e.a[0], e.a[1]), v2(e.b[0], e.b[1]), "section-visible", SECTION_VISIBLE_MM, SECTION_VISIBLE_INK);
+        // [302] Kanten eines Nachbarn (Umgebungsklasse) dünn wie in der Ansicht ([300] `CONTEXT_MM`): sie sind Umgebung, nicht
+        // das Haus; so lassen sie sich auch von den Höhenkoten (`level_marker_bounds`) unterscheiden.
+        let context = e.kind == Kind::Mesh && out.meshes.get(e.index).and_then(|m| m.category.as_deref()).is_some_and(crate::import_context::is_context_class);
+        let mut l = line(v2(e.a[0], e.a[1]), v2(e.b[0], e.b[1]), "section-visible", if context { super::super::elevation::CONTEXT_MM } else { SECTION_VISIBLE_MM }, SECTION_VISIBLE_INK);
         mesh_style(e, &mut l);
         // [271] Umbau: Projektionslinie in der Linienfarbe des Status, bei Abbruch gestrichelt.
         if let (Some(st), Primitive::Line { color, dash, .. }) = (rules.edge.get(&(e.kind, e.index)), &mut l) {

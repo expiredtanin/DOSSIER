@@ -404,7 +404,7 @@ impl Options {
         let elev = matches!(level.kind, DrawingLevelKind::Elevation);
         let mv = if elev { self.elevation_marks_mv.as_ref() } else { self.section_marks_mv.as_ref() };
         let base = SectionLook::default();
-        let line = level.line_mode.or(mv.and_then(|m| m.line_mode)).filter(|x| *x != SectionLineMode::Unknown).unwrap_or(if elev { SectionLineMode::None } else { base.line });
+        let line = level.line_mode.or(mv.and_then(|m| m.line_mode)).filter(|x| *x != SectionLineMode::Unknown).unwrap_or(if elev { SectionLineMode::None } else { SectionLineMode::Ends });
         let marker = level.marker.or(mv.and_then(|m| m.marker)).filter(|x| *x != SectionMarker::Unknown).unwrap_or(if elev { SectionMarker::Triangle } else { base.marker });
         let at = level.marker_at.or(mv.and_then(|m| m.marker_at)).filter(|x| *x != SectionMarkerAt::Unknown).unwrap_or(base.at);
         let end_mm = level.end_length_mm.or(mv.and_then(|m| m.end_length_mm)).filter(|v| v.is_finite() && *v > 0.0).unwrap_or(base.end_mm);

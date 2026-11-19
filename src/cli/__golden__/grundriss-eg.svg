@@ -36,7 +36,6 @@
 <line x1="3.7" y1="4.2725" x2="3.7" y2="3.09917" stroke="#1a1a1a" stroke-width="0.01"/>
 <line x1="3.7" y1="3.09917" x2="3.7" y2="1.0725" stroke="#1a1a1a" stroke-width="0.01" stroke-dasharray="0.2 0.1" stroke-dashoffset="0.13667"/>
 <polyline points="3.579,1.2925 3.7,1.0725 3.821,1.2925" fill="none" stroke="#1a1a1a" stroke-width="0.01"/>
-<line x1="0.2" y1="2.6725" x2="4.8" y2="2.6725" stroke="#1f242c" stroke-width="0.018" stroke-dasharray="0.6 0.15 0.04 0.15" stroke-dashoffset="0.35"/>
 <polyline points="-1,1.8725 -1,2.6725 0.2,2.6725" fill="none" stroke="#1f242c" stroke-width="0.05"/>
 <polygon points="-1,1.8725 -0.87,2.2225 -1.13,2.2225" fill="#1f242c" stroke="#1f242c" stroke-width="0.012"/>
 <polyline points="4.8,2.6725 6,2.6725 6,1.8725" fill="none" stroke="#1f242c" stroke-width="0.05"/>

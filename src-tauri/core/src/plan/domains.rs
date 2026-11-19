@@ -3127,7 +3127,7 @@ mod tests {
         let mut p = sample();
         p.drawing_levels.retain(|l| !matches!(l.kind, DrawingLevelKind::Section | DrawingLevelKind::Elevation));
         let level: DrawingLevel = serde_json::from_value(serde_json::json!({ "id": "sx", "name": "Schnitt A-A", "kind": "section", "visible": true, "locked": false,
-            "linePoints": [{ "x": 20.0, "y": -5.0 }, { "x": 20.0, "y": 15.0 }] })).unwrap();
+            "lineMode": "full", "linePoints": [{ "x": 20.0, "y": -5.0 }, { "x": 20.0, "y": 15.0 }] })).unwrap();
         p.drawing_levels.push(level);
         let grid: Drawing2D = serde_json::from_value(serde_json::json!({ "id": "g", "type": "drawing2d", "levelId": "eg", "categoryCode": "00",
             "geom": { "shape": "grid", "origin": { "x": 25.0, "y": -5.0 }, "angle": 0.0, "a": [{ "label": "1", "pos": 0.0 }], "b": [{ "label": "A", "pos": 0.0 }, { "label": "B", "pos": 20.0 }] } })).unwrap();
@@ -3199,7 +3199,7 @@ mod tests {
         let (pole, ..) = stamp(&p);
         // Schnitt A-A senkrecht durch den Pol (x = 53.5), über den Raum hinaus.
         let level: DrawingLevel = serde_json::from_value(serde_json::json!({ "id": "sx", "name": "Schnitt A-A", "kind": "section", "visible": true, "locked": false,
-            "linePoints": [{ "x": 53.5, "y": 44.0 }, { "x": 53.5, "y": 61.0 }] })).unwrap();
+            "lineMode": "full", "linePoints": [{ "x": 53.5, "y": 44.0 }, { "x": 53.5, "y": 61.0 }] })).unwrap();
         p.drawing_levels.push(level);
         let (at, doc, extra, pt) = stamp(&p);
         let (w, _) = stamp_size_m(&doc, &extra, pt, 100.0);
