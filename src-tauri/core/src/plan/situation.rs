@@ -40,6 +40,8 @@ const WATER_HATCH_MM: f64 = 1.2;
 const WATER_HATCH_LINE_MM: f64 = 0.05;
 /// Eine Dreiecksfläche unter 1 cm² trägt nichts zur Aufsicht bei (senkrechte Wände, Splitter).
 const MIN_TRI_AREA: f64 = 1e-4;
+/// Ein Kataster-Gebäude, dessen Fläche mehr als 1 m² unter dem eigenen Fussabdruck liegt, gilt als dasselbe Gebäude.
+const MIN_OVERLAP: f64 = 1.0;
 
 /// Aufgelöste Optionen des Situationsplans.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -252,8 +254,11 @@ fn name_has(c: &Ctx, code: &str, words: &[&str]) -> bool {
 pub fn cadastre_prims(c: &Ctx, s: &Opts, out: &mut Vec<Primitive>) {
     let fills = |kind: fn(&Ctx, &str) -> bool| super::drawings::closed_rings_by_class_ids(c, |code| kind(c, code));
     if let Some(f) = colors(s.context) {
+        // Das eigene Gebäude ersetzt das Kataster-Gebäude an seiner Stelle: Flächen unter dem Fussabdruck entfallen.
+        let own = if colors(s.own).is_some() && c.derived_shown(OWN_CATEGORY) { own_polygons(c.p) } else { Vec::new() };
         for (code, rings) in fills(is_building_class) {
-            let (polys, owner) = nest_with_owner(&rings);
+            let (mut polys, owner) = nest_with_owner(&rings);
+            polys.retain(|q| !covered_by(q, &own));
             fill_polygons_of(&polys, f, None, c.greyed(&code), out, owner);
         }
     }
@@ -267,6 +272,16 @@ pub fn cadastre_prims(c: &Ctx, s: &Opts, out: &mut Vec<Primitive>) {
             }
         }
     }
+}
+
+/// Liegt mehr als [`MIN_OVERLAP`] m² der Fläche `poly` unter dem eigenen Fussabdruck `own`?
+fn covered_by(poly: &Polygon, own: &[Polygon]) -> bool {
+    if own.is_empty() {
+        return false;
+    }
+    let ring = |r: &Ring| (0..r.len()).map(|k| r[k][0] * r[(k + 1) % r.len()][1] - r[(k + 1) % r.len()][0] * r[k][1]).sum::<f64>().abs() / 2.0;
+    let area = |p: &Polygon| p.iter().enumerate().map(|(i, r)| if i == 0 { ring(r) } else { -ring(r) }).sum::<f64>();
+    crate::polygon_bool::intersection(std::slice::from_ref(poly), own).iter().map(area).sum::<f64>() > MIN_OVERLAP
 }
 
 /// Verschachtelt die Ringe (gerade/ungerade) und liefert dazu die Zuordnung Polygon → Zeichnung: Der Aussenring eines
@@ -357,17 +372,21 @@ pub fn symbol_prims(c: &Ctx, s: &Opts, out: &mut Vec<Primitive>, bounds: &mut Bo
     if !s.symbols || !c.derived_shown(SYMBOL_CATEGORY) {
         return;
     }
+    // Lage = eigenes Gebäude und Parzelle (wie das Baufeld des Plakats); die Zeichen stehen dicht darunter. Nur ohne beide
+    // zählt der Kontext (sonst läge alles unter dem ganzen Kataster).
     let mut bb = Bounds::new();
     acc_polys(&own_polygons(c.p), &mut bb);
-    for m in imported_meshes(c) {
-        acc_polys(&mesh_polygons(&m.positions, &m.indices), &mut bb);
-    }
-    for (_, rings) in super::drawings::closed_rings_by_class(c, |code| is_building_class(c, code)) {
-        rings.iter().flatten().for_each(|q| bb.acc(q[0], q[1]));
-    }
     if let Some(r) = c.p.site_rules.as_ref().map(|r| &r.parcel) {
         for q in r {
             bb.acc(q.x, q.y);
+        }
+    }
+    if bb.get().is_none() {
+        for m in imported_meshes(c) {
+            acc_polys(&mesh_polygons(&m.positions, &m.indices), &mut bb);
+        }
+        for (_, rings) in super::drawings::closed_rings_by_class(c, |code| is_building_class(c, code)) {
+            rings.iter().flatten().for_each(|q| bb.acc(q[0], q[1]));
         }
     }
     let Some([_, min_y, max_x, _]) = bb.get() else { return };

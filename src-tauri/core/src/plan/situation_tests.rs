@@ -243,3 +243,31 @@ fn kataster_umrisse_nicht_doppelt() {
     let sp = plan(&p, &all, "std-mv-schwarzplan");
     assert!(sp.iter().filter(|q| matches!(q, Primitive::Polygon { fill, .. } if fill == "#000000")).all(|q| matches!(q, Primitive::Polygon { stroke, .. } if stroke == "#000000")));
 }
+
+/// [299] Kataster-Gebäude unter dem eigenen Fussabdruck entfallen (das Projektgebäude ersetzt es), andere bleiben.
+#[test]
+fn kataster_gebaeude_unter_eigenem_haus_entfaellt() {
+    let mut v = serde_json::to_value(cadastre_project()).unwrap();
+    // Kataster-Fläche, die das Haus (x < 6) deckt.
+    v["drawings2d"].as_array_mut().unwrap().push(poly2d("k-eigen", "12", &rect_pts(-1.0, -1.0, 5.0, 5.0)));
+    let p: Project = serde_json::from_value(v).unwrap();
+    let ps = plan(&p, &codes(&p), "std-mv-situation-wbw");
+    let grey: Vec<&Primitive> = fills(&ps, "#b8b8b8").into_iter().filter(|q| matches!(q, Primitive::Polygon { context_object_id: None, .. })).collect();
+    assert_eq!(grey.len(), 2, "eigenes Kataster-Gebäude entfällt, Haus mit Hof und Nachbar bleiben");
+    assert!(grey.iter().all(|q| matches!(q, Primitive::Polygon { drawing_id: Some(id), .. } if id != "k-eigen")));
+    let sp = plan(&p, &codes(&p), "std-mv-schwarzplan");
+    let black = sp.iter().filter(|q| matches!(q, Primitive::Polygon { context_object_id: None, fill, stroke_width_mm, .. } if fill == "#000000" && *stroke_width_mm == 0.1)).count();
+    assert_eq!(black, 3, "Schwarzplan: eigenes Gebäude + zwei Kataster-Flächen");
+}
+
+/// [299] Nordpfeil und Massstabsbalken stehen dicht unter Haus und Parzelle, nicht unter dem fernsten Kontext.
+#[test]
+fn planzeichen_dicht_an_der_lage() {
+    let mut p = cadastre_project();
+    p.site_rules = Some(serde_json::from_value(json!({"parcel": [{"x": -8, "y": -8}, {"x": 16, "y": -8}, {"x": 16, "y": 12}, {"x": -8, "y": 12}], "setbacks": [3, 3, 3, 3], "defaultSetback": 3, "show": true})).unwrap());
+    let ps = plan(&p, &codes(&p), "std-mv-situation-wbw");
+    // Kataster-Haus reicht bis y = -20, Parzelle bis y = -8: die Zeichen liegen knapp unter der Parzelle (12 mm = 6 m Abstand).
+    let ys: Vec<f64> = ps.iter().filter_map(|q| if let Primitive::Polygon { pts, stroke_width_mm, fill, .. } = q { (*stroke_width_mm == 0.18 && (fill == "#000000" || fill == "#ffffff")).then(|| pts.iter().map(|p| p.y).fold(f64::MAX, f64::min)) } else { None }).collect();
+    assert!(!ys.is_empty());
+    assert!(ys.iter().all(|y| *y < -8.0 && *y > -20.0), "unter der Parzelle, über dem fernen Kataster-Haus: {ys:?}");
+}
