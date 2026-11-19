@@ -237,7 +237,8 @@ pub fn autodim_chain(d: &Drawing2D) -> Option<&str> {
     if rest.starts_with("radius-") {
         return Some("radius");
     }
-    rest.rsplit_once('-').map(|(_, c)| c).filter(|c| matches!(*c, "openings" | "steps" | "total"))
+    // [301] weitere Läufe einer Kette tragen eine Ziffer (`steps2`)
+    rest.rsplit_once('-').map(|(_, c)| c.trim_end_matches(|ch: char| ch.is_ascii_digit())).filter(|c| matches!(*c, "openings" | "steps" | "total"))
 }
 
 /// Wände.

@@ -924,6 +924,34 @@ mod tests {
         serde_json::from_str(include_str!("../../tests/fixtures/sample_project.json")).unwrap()
     }
 
+    /// [301] Der Sonnenschatten im Wettbewerbs-Grundriss liegt nur im Freien: kein Raum des Geschosses wird
+    /// verdunkelt (Mittelpunkt und Ecken, leicht nach innen gerückt, liegen in keiner Schattenfläche).
+    #[test]
+    fn schatten_deckt_keine_raeume() {
+        let p: Project = serde_json::from_str(include_str!("../../tests/fixtures/robust/wettbewerb.json")).unwrap();
+        let when = Some(1_805_637_600_000.0); // 2027-03-21T14:00:00Z
+        let mut n_rooms = 0;
+        for l in p.drawing_levels.iter().filter(|l| l.kind == DrawingLevelKind::Floor) {
+            let mut out = Vec::new();
+            sun_shadow(&p, &l.id, when, &mut out);
+            let shadows: Vec<Vec<f64>> = out.iter().filter_map(|q| match q { Primitive::Polygon { pts, .. } => Some(pts.iter().flat_map(|v| [v.x, v.y]).collect()), _ => None }).collect();
+            if l.id == ground_floor_id(&p).unwrap_or_default() {
+                assert!(!shadows.is_empty(), "Test ohne Schatten sagt nichts");
+            }
+            for r in p.rooms.iter().flatten().filter(|r| r.floor_id == l.id) {
+                let n = r.boundary.len() as f64;
+                let (cx, cy) = (r.boundary.iter().map(|v| v.x).sum::<f64>() / n, r.boundary.iter().map(|v| v.y).sum::<f64>() / n);
+                let mut probes = vec![(cx, cy)];
+                probes.extend(r.boundary.iter().map(|v| (v.x + (cx - v.x) * 0.2, v.y + (cy - v.y) * 0.2)));
+                n_rooms += 1;
+                for (x, y) in probes {
+                    assert!(!shadows.iter().any(|f| crate::plan::pick::point_in_polygon(x, y, f)), "Raum {} im Schatten ({x:.2}, {y:.2}) in {}", r.name, l.id);
+                }
+            }
+        }
+        assert!(n_rooms > 10);
+    }
+
     /// [66] Ausgeblendete Kontext-Kategorien (Höhenlinien) bestimmen das Ausmass nicht mit.
     #[test]
     fn ausmass_ohne_ausgeblendeten_kontext() {
