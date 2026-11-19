@@ -33,5 +33,6 @@ test("Wand: Oberkante Auswahl setzt roofAttach/ceilingAttach zusammen, Undo in e
   await page.waitForTimeout(800);
   const box = (await field.boundingBox())!;
   const x = Math.max(0, box.x - 40);
-  await page.screenshot({ path: "doc/review-293/oberkante.png", clip: { x, y: Math.max(0, box.y - 240), width: 420, height: 460 } });
+  // Nicht ins Repo schreiben (sonst ändert jeder e2e-Lauf das Prüfbild): Kopie nach test-results.
+  await page.screenshot({ path: "test-results/review-293-oberkante.png", clip: { x, y: Math.max(0, box.y - 240), width: 420, height: 460 } });
 });
