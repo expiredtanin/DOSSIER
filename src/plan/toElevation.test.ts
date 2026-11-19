@@ -313,9 +313,9 @@ describe("toElevation — Öffnungen: Verdeckung + Reveal-Schatten", () => {
           },
         ],
       }) as unknown as Project;
-    const symCount = (kind: "schiebe" | "fest" | "drehkipp"): number => {
+    const symCount = (kind: "schiebe" | "fest" | "drehkipp", scaleDenominator = 50): number => {
       const p = mkProject(kind);
-      const plan = generateElevationPlan(p, p.drawingLevels[1])!;
+      const plan = generateElevationPlan(p, p.drawingLevels[1], { scaleDenominator })!;
       return plan.primitives.filter(
         (pr) => pr.kind === "line" && (pr as { cls?: string }).cls === "elevation-opening-symbol",
       ).length;
@@ -323,6 +323,7 @@ describe("toElevation — Öffnungen: Verdeckung + Reveal-Schatten", () => {
     expect(symCount("schiebe")).toBe(3); // Pfeil: Schaft + 2 Spitzen
     expect(symCount("fest")).toBe(0); // Festverglasung ohne Symbol
     expect(symCount("drehkipp")).toBe(4); // Dreh (2) + Kipp (2)
+    expect(symCount("drehkipp", 100)).toBe(2); // [303] ab 1:100 nur die Dreh-Linien
   });
 
   it("Kämpfer-Zeilen (mullionRows): teilen das Glasfeld horizontal (Glas + Trennlinien)", () => {

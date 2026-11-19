@@ -392,6 +392,8 @@ pub fn elevation_primitives_ren(p: &Project, level: &LevelSpec, shadows: bool, m
         op.look = mvo.opening_detail(door, o.detail_level);
         if thinned {
             op.symbol.clear();
+        } else if scale >= openings::SYMBOL_PLAIN_FROM {
+            openings::plain_symbols(&mut op.symbol);
         }
         if !door && !win.elevation_division.unwrap_or(op.look != crate::plan::style::Detail::Grob) {
             op.divisions.clear();

@@ -65,3 +65,4 @@ mod arc_output_tests;
 mod derived_class_tests;
 #[cfg(test)]
 mod autodim_text_tests;
+mod arc_dim_tests;

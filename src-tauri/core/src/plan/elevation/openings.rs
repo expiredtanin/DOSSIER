@@ -498,3 +498,64 @@ pub(super) fn surface_openings(p: &Project, frame: &[f64; 9], out: &mut Vec<Proj
         out.push(ProjOpening { pts, depth, glass, door_leaf: Vec::new(), divisions: Vec::new(), sash_rects: Vec::new(), sill: Vec::new(), symbol: Vec::new(), id: o.id.clone(), shape: None, frame: None, look: crate::plan::style::Detail::Fein, shading: None, glass_only: false });
     }
 }
+
+/// [303] Ab diesem Massstab (1:N) zeigt die Ansicht von Dreh-Kipp-Flügeln nur die Dreh-Linien (die Kipp-Andeutung liegt
+/// bei 1:100 mit 12 mm Fensterbreite als Gekritzel über dem Dreieck); darüber (1:200) entfallen die Symbole ganz ([140]).
+pub(super) const SYMBOL_PLAIN_FROM: f64 = 100.0;
+
+/// [303] Dreh-Kipp vereinfachen: das Kipp-Linienpaar (gemeinsame Spitze oben, Fusspunkte unten) eines Flügels entfällt, wenn
+/// derselbe Flügel schon das Dreh-Paar hat (Spitze auf halber Höhe an der Bandseite). Reine Kipp-Flügel bleiben.
+pub(super) fn plain_symbols(symbol: &mut Vec<(Pt, Pt)>) {
+    let eps = 1e-6;
+    let mut out: Vec<(Pt, Pt)> = Vec::with_capacity(symbol.len());
+    // Letztes Dreh-Paar: Spannweite in x.
+    let mut dreh: Option<(f64, f64)> = None;
+    let mut i = 0;
+    while i < symbol.len() {
+        let pair = i + 1 < symbol.len() && symbol[i].1 == symbol[i + 1].1 && symbol.get(i + 2).is_none_or(|l| l.1 != symbol[i].1);
+        if pair {
+            let (a0, a1, apex) = (symbol[i].0, symbol[i + 1].0, symbol[i].1);
+            let (lo, hi) = (a0[1].min(a1[1]), a0[1].max(a1[1]));
+            if apex[1] > hi + eps {
+                // Kipp-Paar.
+                let (x0, x1) = (a0[0].min(a1[0]), a0[0].max(a1[0]));
+                if dreh.is_some_and(|(d0, d1)| x0 >= d0 - eps && x1 <= d1 + eps) {
+                    i += 2;
+                    continue;
+                }
+            } else if apex[1] > lo + eps {
+                dreh = Some((a0[0].min(a1[0]).min(apex[0]), a0[0].max(a1[0]).max(apex[0])));
+            }
+            out.push(symbol[i]);
+            out.push(symbol[i + 1]);
+            i += 2;
+        } else {
+            out.push(symbol[i]);
+            i += 1;
+        }
+    }
+    *symbol = out;
+}
+
+#[cfg(test)]
+mod symbol_tests {
+    use super::*;
+
+    #[test]
+    fn drehkipp_bei_1_zu_100_nur_dreh_linien() {
+        // Fenster 0.6 x 1.2: Dreh (Band links, Spitze links Mitte), Kipp (Spitze oben Mitte).
+        let (dreh_apex, kipp_apex) = ([0.0, 0.6], [0.3, 1.2]);
+        let mut s = vec![([0.6, 0.0], dreh_apex), ([0.6, 1.2], dreh_apex), ([0.0, 0.0], kipp_apex), ([0.6, 0.0], kipp_apex)];
+        plain_symbols(&mut s);
+        assert_eq!(s, vec![([0.6, 0.0], dreh_apex), ([0.6, 1.2], dreh_apex)]);
+        // Reiner Kipp-Flügel und Dreh-Flügel daneben bleiben unverändert.
+        let mut k = vec![([0.0, 0.0], kipp_apex), ([0.6, 0.0], kipp_apex)];
+        let keep = k.clone();
+        plain_symbols(&mut k);
+        assert_eq!(k, keep);
+        let mut z = vec![([0.6, 0.0], dreh_apex), ([0.6, 1.2], dreh_apex), ([0.7, 0.0], [1.0, 1.2]), ([1.3, 0.0], [1.0, 1.2])];
+        let keep = z.clone();
+        plain_symbols(&mut z);
+        assert_eq!(z, keep);
+    }
+}

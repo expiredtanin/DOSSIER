@@ -886,6 +886,11 @@ fn emit_inner(c: &Ctx, d: &Drawing2D, attrs: Attrs, geom: &Drawing2DGeom, greyed
                 dimension_round(&mut em, pts, *offset, *k, &st);
             }
             let auto = if kind.is_none() && arc_center.is_none() { dim_auto_offsets_marks(pts, mm(text_height_mm.unwrap_or(DIM_TEXT_HEIGHT_MM)), &layout.blocked, &layout.marks, *offset) } else { Vec::new() };
+            // [303] Bogenkette: dieselbe Zahlenverteilung wie bei geraden Ketten, auf den Bogenlängen der Masslinie.
+            let arc_auto = match arc_center {
+                Some(ac) if kind.is_none() => arc_chain_auto(*ac, pts, *offset, mm(text_height_mm.unwrap_or(DIM_TEXT_HEIGHT_MM))),
+                _ => Vec::new(),
+            };
             for i in 0..(if kind.is_some() { 0 } else { pts.len().saturating_sub(1) }) {
                 let st = DimStyle {
                     gap: mm(gap_mm.unwrap_or(DIM_GAP_MM)),
@@ -904,7 +909,11 @@ fn emit_inner(c: &Ctx, d: &Drawing2D, attrs: Attrs, geom: &Drawing2DGeom, greyed
                     },
                 };
                 match arc_center {
-                    Some(c) => arc_dimension_segment(&mut em, *c, pts[i], pts[i + 1], *offset, &st),
+                    Some(c) => {
+                        let stored = text_offsets_mm.as_ref().and_then(|l| l.get(i)).is_some_and(|o| o.along != 0.0 || o.perp != 0.0);
+                        let auto_off = if stored { (0.0, 0.0) } else { arc_auto.get(i).copied().unwrap_or((0.0, 0.0)) };
+                        arc_dimension_segment(&mut em, *c, pts[i], pts[i + 1], *offset, &st, auto_off)
+                    }
                     None => dimension_segment(&mut em, pts[i], pts[i + 1], *offset, &st),
                 }
             }
@@ -1568,7 +1577,35 @@ fn dimension_round(em: &mut Em, pts: &[Vec2], offset: f64, kind: DimKind, st: &D
 
 /// [T2] Bogenmass-Segment: Masslinie als Kreisbogen um `c` im Radius |a − c| + `offset`, radiale
 /// Masshilfslinien, 45°-Massstriche zur Tangente, Masszahl = Bogenlänge (kürzerer Bogen) auf |a − c|.
-fn arc_dimension_segment(em: &mut Em, c: Vec2, a: Vec2, b: Vec2, offset: f64, st: &DimStyle) {
+/// [303] Lage der Masszahlen einer Bogenmasskette: je Segment (entlang der Kette, nach aussen von der Masslinie) —
+/// dieselbe Verteilung wie bei geraden Ketten ([`dim_auto_offsets`]) auf der abgewickelten Masslinie (Bogenlängen auf
+/// dem Radius der Masslinie): passt die Zahl zwischen die Begrenzungen, steht sie mittig, sonst daneben bzw. eine Zeile höher.
+fn arc_chain_auto(c: Vec2, pts: &[Vec2], offset: f64, h: f64) -> Vec<(f64, f64)> {
+    let n = pts.len().saturating_sub(1);
+    if n == 0 || !offset.is_finite() || !(h.is_finite() && h > 0.0) {
+        return Vec::new();
+    }
+    let pi = std::f64::consts::PI;
+    let mut x = 0.0;
+    let mut line = vec![v(0.0, 0.0)];
+    for i in 0..n {
+        let r = hypot2(pts[i].x - c.x, pts[i].y - c.y);
+        let mut d = jsnum::atan2(pts[i + 1].y - c.y, pts[i + 1].x - c.x) - jsnum::atan2(pts[i].y - c.y, pts[i].x - c.x);
+        while d > pi {
+            d -= 2.0 * pi;
+        }
+        while d <= -pi {
+            d += 2.0 * pi;
+        }
+        x += d.abs() * (r + offset).abs();
+        line.push(v(x, 0.0));
+    }
+    // Offset +1: „über der Linie" zeigt von den Punkten weg, ein Notfall rückt also eine Zeile hinaus.
+    let blocked: Vec<f64> = line.iter().map(|q| q.x).collect();
+    dim_auto_offsets_avoiding(&line, h, &blocked, 1.0)
+}
+
+fn arc_dimension_segment(em: &mut Em, c: Vec2, a: Vec2, b: Vec2, offset: f64, st: &DimStyle, auto: (f64, f64)) {
     let r = hypot2(a.x - c.x, a.y - c.y);
     if !(r > 1e-6) || !offset.is_finite() {
         return;
@@ -1609,15 +1646,20 @@ fn arc_dimension_segment(em: &mut Em, c: Vec2, a: Vec2, b: Vec2, offset: f64, st
         let (tx, ty) = ((tan.x + rad.x) / std::f64::consts::SQRT_2, (tan.y + rad.y) / std::f64::consts::SQRT_2);
         em.line(v(q.x - tx * half, q.y - ty * half), v(q.x + tx * half, q.y + ty * half), st.tick_weight, None, 0);
     }
-    // Masszahl tangential in der Bogenmitte, aussen an der Masslinie (nie kopfüber).
-    let tm = ta + d / 2.0;
+    // Masszahl tangential an der Masslinie, nie kopfüber, mit Abstand zur Linie. [303] Die Verteilung der Kette (`auto`:
+    // entlang der Kette in m auf der Masslinie, Zeilen nach aussen) wandert auf dem Bogen: Lage und Leserichtung
+    // folgen dem verschobenen Winkel `tm`.
+    let tm = ta + d / 2.0 + d.signum() * auto.0 / rm.abs().max(1e-6);
     let mut angle = tm + pi / 2.0;
     if jsnum::cos(angle) < 0.0 {
         angle += pi;
     }
     let read = v(jsnum::cos(angle), jsnum::sin(angle));
     let up = v(-jsnum::sin(angle), jsnum::cos(angle));
-    let base = at(tm, rm + sign * st.text_height * 0.6);
+    // Zeigt „oben" der Schrift zur Seite `sign` (von der Linie weg), steht die Grundlinie 0.6 h davon, sonst hinter dem Glyphenkörper.
+    let rho = v(jsnum::cos(tm) * sign, jsnum::sin(tm) * sign);
+    let gap = if up.x * rho.x + up.y * rho.y > 0.0 { st.text_height * 0.6 } else { dim_text_row(st.text_height) };
+    let base = at(tm, rm + sign * (gap + auto.1));
     let (along, perp) = st.text_offset;
     let pos = v(base.x + read.x * along + up.x * perp, base.y + read.y * along + up.y * perp);
     let label = to_fixed(r * d.abs(), 2);
