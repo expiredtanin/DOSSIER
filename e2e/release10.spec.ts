@@ -683,6 +683,10 @@ test("[211] Rendering-Dialog im Browser erzeugt das Export-Paket (model.glb + sc
 // [206] 14.11.: Headless verliert SwiftShader das Gerät beim ersten Präsentieren; bis dahin zählte der Pathtracer auf dem
 // toten Gerät weiter (Scheinlauf). Seit der Verlust-Behandlung baut die App nach Backoff neu auf und schaltet WebGPU nach
 // wiederholtem Verlust ab (3D-Hinweis) — dann wird der Test übersprungen statt auf einem toten Gerät zu „zählen“.
+// [295] 19.11.: Der Verlust kann auch NACH dem ersten Sample kommen (Neuaufbau lebt headless oft nur ~3 s, dann „wiederholt
+// ausgefallen, bleibt aus“). Gemessen: rAF läuft weiter, der Zähler stand bei 1, weil das Gerät weg war und der Status nur
+// noch den letzten Stand zeigte — kein Fehler der Zeichenschleife ([290]). Deshalb prüft jede Abfrage den 3D-Hinweis mit;
+// erscheint er, wird übersprungen (gleiche Bedingung wie oben), statt auf den Zähler eines toten Geräts zu warten.
 const pathtraceTest = test;
 pathtraceTest("[212] Pathtracer-Stil: Sample-Zähler zählt hoch", async ({ page }) => {
   test.setTimeout(180_000);
@@ -696,11 +700,22 @@ pathtraceTest("[212] Pathtracer-Stil: Sample-Zähler zählt hoch", async ({ page
   const status = page.getByTestId("pathtrace-status");
   const noGpu = page.locator(".viewport-fallback");
   await expect(status.or(noGpu)).toBeVisible({ timeout: 30_000 });
-  test.skip(await noGpu.isVisible(), "WebGPU nach Geräteverlust abgeschaltet (headless SwiftShader), kein Pathtracer-Lauf möglich");
-  const samples = async () => Number((await status.innerText()).match(/(\d+) Samples/)?.[1] ?? 0);
-  await expect.poll(samples, { timeout: 60_000 }).toBeGreaterThan(0);
+  const lostReason = "WebGPU nach Geräteverlust abgeschaltet (headless SwiftShader), kein Pathtracer-Lauf möglich";
+  test.skip(await noGpu.isVisible(), lostReason);
+  // Gerät weg → Unendlich (beendet die Abfrage sofort), danach überspringen; sonst Samples aus dem Status.
+  const samples = async () => {
+    if (await noGpu.isVisible()) return Infinity;
+    const text = (await status.textContent({ timeout: 1000 }).catch(() => null)) ?? "";
+    return Number(text.match(/(\d+) Samples/)?.[1] ?? 0);
+  };
+  const growsBeyond = async (n: number) => {
+    test.skip(!Number.isFinite(n), lostReason);
+    await expect.poll(samples, { timeout: 60_000 }).toBeGreaterThan(n);
+    test.skip(await noGpu.isVisible(), lostReason);
+  };
+  await growsBeyond(0);
   const first = await samples();
-  await expect.poll(samples, { timeout: 60_000 }).toBeGreaterThan(first);
+  await growsBeyond(first);
   // Etappe 5: Belichtung (Regler, Automatik) und Raumlicht — Bedienelemente da, Rechnung läuft danach weiter.
   const look = page.getByTestId("pathtrace-look");
   await expect(look).toBeVisible();
@@ -708,8 +723,7 @@ pathtraceTest("[212] Pathtracer-Stil: Sample-Zähler zählt hoch", async ({ page
   await look.getByTestId("pathtrace-ev").fill("1");
   await expect(look).toContainText("+1.00");
   await look.getByTestId("pathtrace-room").uncheck();
-  const after = await samples();
-  await expect.poll(samples, { timeout: 60_000 }).toBeGreaterThan(after);
+  await growsBeyond(await samples());
   await expect(status).not.toContainText("zu gross");
 });
 
