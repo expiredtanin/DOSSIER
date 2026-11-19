@@ -153,7 +153,7 @@ describe("[66] Präsentationsplan", () => {
     const o = { ...presentationDefaults(p1), scale: 200, poster: "poster-a1-landscape", extras: POSTER_EXTRAS_DEFAULT };
     const sit = planPresentationSheet(p1, o).items.find((i) => i.kind === "situation")!;
     expect(sit.levelId).toBe("lv-kataster");
-  }, 60_000);
+  }, 180_000); // ganzes Kataster-Projekt: im Gesamttest unter Last > 60 s
 
   it("[266] Geschoss nur mit Bauteilen (Wände/Räume tragen `floorId`, nicht `levelId`) gilt nicht als leer", () => {
     const floor = project.drawingLevels.find((l) => l.kind === "floor" && !l.layoutId)!;

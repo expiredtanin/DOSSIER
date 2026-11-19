@@ -37,11 +37,11 @@
 <polygon points="0.6,1.88564 6.4,1.88564 6.4,2.05885 0.6,2.05885" fill="#b8735c" stroke="none" stroke-width="0"/>
 <polyline points="1.8,7.08564 1.8,4.98564 2.7,4.98564 2.7,7.08564" fill="none" stroke="#2b3039" stroke-width="0.013"/>
 <polygon points="5,6.18564 4,6.18564 4,4.98564 5,4.98564" fill="none" stroke="#2b3039" stroke-width="0.013"/>
-<polyline points="2.7,7.08564 4,7.08564 5,7.08564 6.1725,7.08564 6.1725,4.48564 6.1725,2.05885" fill="none" stroke="#2b3039" stroke-width="0.018"/>
-<polyline points="0.8275,2.05885 0.8275,4.48564 0.8275,7.08564 1.8,7.08564" fill="none" stroke="#2b3039" stroke-width="0.018"/>
+<polyline points="2.7,7.08564 4,7.08564 5,7.08564 6.1725,7.08564 6.1725,4.48564 6.1725,2.05885" fill="none" stroke="#2b3039" stroke-width="0.025"/>
+<polyline points="0.8275,2.05885 0.8275,4.48564 0.8275,7.08564 1.8,7.08564" fill="none" stroke="#2b3039" stroke-width="0.025"/>
 <line x1="0.6" y1="1.88564" x2="6.4" y2="1.88564" stroke="#2b3039" stroke-width="0.013"/>
 <line x1="6.4" y1="2.05885" x2="0.6" y2="2.05885" stroke="#2b3039" stroke-width="0.013"/>
-<polyline points="6.4,2.05885 6.4,1.88564 6.4,0.5 0.6,0.5 0.6,1.88564 0.6,2.05885" fill="none" stroke="#2b3039" stroke-width="0.018"/>
+<polyline points="6.4,2.05885 6.4,1.88564 6.4,0.5 0.6,0.5 0.6,1.88564 0.6,2.05885" fill="none" stroke="#2b3039" stroke-width="0.025"/>
 <line x1="-1.4" y1="7.08564" x2="8.4" y2="7.08564" stroke="#1f242c" stroke-width="0.05"/>
 </g>
 </svg>
