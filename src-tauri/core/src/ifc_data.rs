@@ -2110,11 +2110,11 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
 
     // ── [279] Geländer → IfcRailing (GUARDRAIL; HANDRAIL, wenn nur der Handlauf bleibt), Netz aus den Prismen ──
     for r in p.railings.as_deref().unwrap_or(&[]) {
-        let (Some(s), Some(ax)) = (crate::railing::spec(&p, r), crate::railing::axis(r)) else { continue };
+        let (Some(s), Some(ax)) = (crate::railing::spec(&p, r), crate::railing::axis_of(&p, r)) else { continue };
         let pieces = crate::railing::pieces(&p, r);
         let (mut positions, mut indices) = (Vec::new(), Vec::new());
         for q in &pieces {
-            let (pp, ii) = crate::columns3d::prism(&q.outline, q.z0, q.z1);
+            let (pp, ii) = q.mesh();
             let at = (positions.len() / 3) as u32;
             positions.extend(pp);
             indices.extend(ii.into_iter().map(|k| k + at));
@@ -2138,7 +2138,8 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
         let mut psets = vec![Pset { name: "Pset_RailingCommon", props: vec![ident("Reference", &label)] }];
         renovation_props(&p, &mut psets, "Pset_RailingCommon", r.renovation.as_ref());
         // [B4] Achse (Meter, Modellkoordinaten), Höhe und Schluss: damit liest der Import das Geländer als Bauteil zurück.
-        let axis_text = r.points.iter().map(|q| format!("{},{}", fmt_coord(q.x), fmt_coord(q.y))).collect::<Vec<_>>().join(";");
+        // [291] Gebundene Geländer: die aufgelöste Achse (der Import liest ein freies Geländer zurück).
+        let axis_text = if r.stair_id.is_some() || r.ceiling_id.is_some() { ax.iter().map(|q| format!("{},{}", fmt_coord(q[0]), fmt_coord(q[1]))).collect::<Vec<_>>().join(";") } else { r.points.iter().map(|q| format!("{},{}", fmt_coord(q.x), fmt_coord(q.y))).collect::<Vec<_>>().join(";") };
         psets.push(Pset {
             name: "Dossier_Railing",
             props: vec![

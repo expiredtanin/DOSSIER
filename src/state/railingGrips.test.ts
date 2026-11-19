@@ -23,4 +23,10 @@ describe("[279] Geländer-Griffe", () => {
     expect(railingGripPatch(base, -1, { x: 4, y: 1 })).toEqual({});
     expect(railingGripPatch(base, 0, { x: NaN, y: 1 })).toEqual({});
   });
+
+  it("[291] gebunden an Treppe oder Deckenkante: keine Griffe", () => {
+    expect(railingGripPoints({ ...base, stairId: "t1" })).toEqual([]);
+    expect(railingGripPoints({ ...base, ceilingId: "d1", edgeIndex: 0 })).toEqual([]);
+    expect(railingGripPatch({ ...base, stairId: "t1" }, 1, { x: 4, y: 1 })).toEqual({});
+  });
 });

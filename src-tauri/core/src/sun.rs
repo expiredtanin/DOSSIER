@@ -1078,8 +1078,10 @@ fn collect(p: &Project, k: [f64; 2], cut: Option<f64>, ground: Option<&Ground>) 
         let pieces = crate::railing::pieces(p, r);
         let thin_ok = pieces.len() <= RAILING_SHADOW_PIECES;
         for q in pieces.into_iter().filter(|q| thin_ok || !matches!(q.part, crate::railing::Part::Bar | crate::railing::Part::Post)) {
-            if q.outline.len() >= 3 && q.z1 > q.z0 {
-                prisms.push((Prism { footprint: q.outline, z_bottom: q.z0, z_top: q.z1 }, vec![]));
+            // [291] Auf Treppen geschert: Hüllprisma über die Höhenspanne des Teils.
+            let (z0, z1) = q.z_span();
+            if q.outline.len() >= 3 && z1 > z0 {
+                prisms.push((Prism { footprint: q.outline, z_bottom: z0, z_top: z1 }, vec![]));
             }
         }
     }

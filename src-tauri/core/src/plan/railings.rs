@@ -3,7 +3,8 @@
 //! darunter sichtbar gepunktet.
 //!
 //! Zeichen je Art (Strichstärke der Klasse, Farbe der Klasse bzw. des Geländers):
-//! - **Stäbe:** eine Linie in der Achse (Handlauf über den Stäben) und kleine gefüllte Pfosten (bis 1:200).
+//! - **Stäbe:** eine Linie in der Achse (Handlauf über den Stäben). [291] Pfosten (aller Arten, sofern gesetzt) als kleine
+//!   gefüllte Quadrate ihres Querschnitts (bis 1:200).
 //! - **Glas:** Doppellinie im Abstand der Glasdicke (mindestens 0.7 mm Papier, damit die Linien nicht ineinanderlaufen),
 //!   an offenen Enden geschlossen.
 //! - **Lochblech:** wie Glas, dazu eine gestrichelte Mittellinie.
@@ -11,6 +12,9 @@
 //!
 //! - **Handlauf über der Schnitthöhe** (Fuss geschnitten, Handlauf darüber): zwei gestrichelte Linien im Abstand der
 //!   Handlaufbreite neben der Achse (`railing-handrail`, wie die Treppen-Handläufe über dem Schnitt).
+//!
+//! - **[291] An einer Treppe** (Fuss steigt): die Achse ist an der Schnitthöhe geteilt, der Teil darüber gestrichelt
+//!   (Strich-Punkt) wie Stufen und Handläufe der Treppe darüber.
 //!
 //! Pick: unsichtbare Fläche um die Achse (mindestens 4 mm Papier breit) mit `contextObjectId = "@railing:<id>"`.
 
@@ -57,6 +61,45 @@ fn polyline(out: &mut Vec<Primitive>, pts: &[[f64; 2]], cls: &str, w: f64, color
     }
 }
 
+/// [291] Achse geteilt an der Schnitthöhe (gebunden an eine Treppe steigt der Fuss): Teilzüge mit Bogenlänge (Anfang,
+/// Ende) und Fusshöhe (tiefste, höchste); waagrecht ein Teil.
+fn split_at_cut(path: &railing::Path, cut: f64) -> Vec<(Vec<[f64; 2]>, f64, f64, f64, f64)> {
+    let ax = &path.pts;
+    let total = railing::length(ax);
+    if !path.sloped() {
+        let z = path.foot[0];
+        return vec![(ax.clone(), 0.0, total, z, z)];
+    }
+    let mut out: Vec<(Vec<[f64; 2]>, f64, f64, f64, f64)> = Vec::new();
+    let above = |z: f64| z > cut + 1e-9;
+    let mut cur: Vec<[f64; 2]> = vec![ax[0]];
+    let (mut s0, mut acc, mut lo, mut hi) = (0.0, 0.0, path.foot[0], path.foot[0]);
+    let mut state = above(path.foot[0]);
+    for i in 0..ax.len() - 1 {
+        let (a, b, za, zb) = (ax[i], ax[i + 1], path.foot[i], path.foot[i + 1]);
+        let len = crate::jsmath::hypot2(b[0] - a[0], b[1] - a[1]);
+        if above(zb) != state && (zb - za).abs() > 1e-12 {
+            let t = ((cut - za) / (zb - za)).clamp(0.0, 1.0);
+            let m = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+            cur.push(m);
+            // Der Teil über der Schnitthöhe beginnt knapp darüber (sonst gälte er als geschnitten).
+            let edge = |up: bool| if up { cut + 1e-6 } else { cut };
+            out.push((std::mem::replace(&mut cur, vec![m]), s0, acc + t * len, lo.min(edge(state)), hi.max(edge(state))));
+            s0 = acc + t * len;
+            state = !state;
+            lo = edge(state);
+            hi = edge(state);
+        }
+        cur.push(b);
+        lo = lo.min(zb);
+        hi = hi.max(zb);
+        acc += len;
+    }
+    out.push((cur, s0, acc, lo, hi));
+    out.retain(|q| q.0.len() >= 2 && q.2 - q.1 > 1e-9);
+    out
+}
+
 /// Planzeichen aller Geländer dieses Geschosses (sichtbare Klasse, im Ansichtsbereich).
 pub(super) fn plan_railings(c: &Ctx, out: &mut Vec<Primitive>) {
     let p = c.p;
@@ -66,9 +109,10 @@ pub(super) fn plan_railings(c: &Ctx, out: &mut Vec<Primitive>) {
     }
     let range = ViewRange::of(p, &c.a.floor);
     for r in list.iter().filter(|r| r.floor_id == c.a.floor && c.vis(&r.category_code, &r.id)) {
-        let (Some(s), Some(ax)) = (railing::spec(p, r), railing::axis(r)) else { continue };
-        let zone = range.classify(s.z0, s.top());
-        if zone == Zone::Hidden {
+        let Some(path) = railing::path(p, r) else { continue };
+        let Some(s) = railing::spec(p, r) else { continue };
+        let ax = &path.pts;
+        if range.classify(s.z0, s.top()) == Zone::Hidden {
             continue;
         }
         let from = out.len();
@@ -79,90 +123,107 @@ pub(super) fn plan_railings(c: &Ctx, out: &mut Vec<Primitive>) {
         let color = ov.color.as_deref().or(r.color.as_deref());
         let stroke = color.or(category.map(|k| k.color.as_str())).unwrap_or(MONO_INK).to_string();
         let mm = (c.a.scale / 1000.0).max(1e-6);
-        let closed = crate::stair_rail::is_closed(&ax);
 
         // Pick: unsichtbare Fläche, mindestens 4 mm Papier breit.
         let pick_half = (s.thickness.max(s.rail_w()) / 2.0).max(2.0 * mm);
-        for q in railing::strips(&ax, pick_half).0 {
+        for q in railing::strips(ax, pick_half).0 {
             out.push(super::trees::poly(q.iter().map(|&q| v(q)).collect(), "none", "none", 0.0, Some(pick_id(&r.id)), greyed));
         }
-
-        match s.kind {
-            RailingKind::Solid => {
-                let (quads, l, rt) = railing::strips(&ax, s.thickness / 2.0);
-                let (mut fill, mut hatch) = (color.or(category.map(|k| k.color.as_str())).unwrap_or(HATCH_PAPER).to_string(), no_hatch());
-                if zone != Zone::Cut {
-                    fill = "none".into();
-                } else if let Some(k) = r.component_id.as_deref().filter(|s| !s.is_empty()).and_then(|id| p.component(id)) {
-                    if let Some(h) = resolve_hatch(p, resolve_hatch_id(None, None, category, Some(&k.hatch_id)).unwrap_or(&k.hatch_id), None, resolve_foreground(k, None, category, None), None) {
-                        fill = resolve_background(k, None, category, None).unwrap_or(if h.pattern == HatchPattern::Solid { HATCH_INK } else { HATCH_PAPER }).to_string();
-                        hatch = h;
-                    }
-                } else {
-                    fill = HATCH_PAPER.to_string();
-                }
-                if zone == Zone::Cut && c.solid_cut() && category.is_some() {
-                    fill = HATCH_INK.to_string();
-                    hatch = no_hatch();
-                }
-                for q in quads {
-                    let mut f = super::trees::poly(q.iter().map(|&q| v(q)).collect(), &fill, "none", 0.0, None, greyed);
-                    if let Primitive::Polygon { hatch: h, .. } = &mut f {
-                        **h = hatch.clone();
-                    }
-                    out.push(f);
-                }
-                polyline(out, &l, "railing-solid", lw, &stroke, None, greyed);
-                polyline(out, &rt, "railing-solid", lw, &stroke, None, greyed);
-                if !closed {
-                    out.push(seg(l[0], rt[0], "railing-solid", lw, &stroke, None, greyed));
-                    out.push(seg(l[l.len() - 1], rt[rt.len() - 1], "railing-solid", lw, &stroke, None, greyed));
+        // [291] Pfosten (aller Arten, sofern gesetzt) längs der ganzen Achse.
+        let posts = if s.posts && c.a.scale <= 200.0 { railing::post_stations(&path, &s) } else { Vec::new() };
+        let parts = split_at_cut(&path, range.cut);
+        let whole = parts.len() == 1;
+        for (sub, s_a, s_b, lo, hi) in parts {
+            let zone = range.classify(lo, hi + s.top_rel());
+            if zone == Zone::Hidden {
+                continue;
+            }
+            let from_part = out.len();
+            let closed = whole && crate::stair_rail::is_closed(&sub);
+            draw_axis(c, r, &s, &sub, closed, zone, (lw, color, &stroke, greyed, category, mm), out);
+            let h = s.post_size / 2.0;
+            for st in posts.iter().filter(|st| st.s >= s_a - 1e-9 && st.s <= s_b + 1e-9) {
+                let (pt, d) = (st.at, st.dir);
+                let n = [-d[1], d[0]];
+                let q = |a: f64, b: f64| v([pt[0] + d[0] * a + n[0] * b, pt[1] + d[1] * a + n[1] * b]);
+                out.push(super::trees::poly(vec![q(-h, -h), q(h, -h), q(h, h), q(-h, h)], &stroke, &stroke, 0.0, None, greyed));
+            }
+            // Handlauf ganz über der Schnitthöhe (Fuss geschnitten): gestrichelt neben der Achse, Konvention wie bei den
+            // Treppen (Handlauf über dem Schnitt gestrichelt, Strichmuster „verdeckt“, dünne Linie).
+            if zone == Zone::Cut && s.has_rail() && range.classify(lo + s.rail_top() - s.rail_h(), lo + s.rail_top()) == Zone::Above {
+                let (_, l, rt) = railing::strips(&sub, s.rail_w() / 2.0);
+                for side in [&l, &rt] {
+                    polyline(out, side, "railing-handrail", lw * 0.6, &stroke, Some(&super::line_pattern::HIDDEN), greyed);
                 }
             }
-            RailingKind::Glass | RailingKind::Perforated => {
-                // Mindestabstand der Doppellinie: 0.7 mm Papier.
-                let half = (s.thickness / 2.0).max(0.35 * mm);
-                let (_, l, rt) = railing::strips(&ax, half);
-                polyline(out, &l, "railing-glass", lw, &stroke, None, greyed);
-                polyline(out, &rt, "railing-glass", lw, &stroke, None, greyed);
-                if !closed {
-                    out.push(seg(l[0], rt[0], "railing-glass", lw, &stroke, None, greyed));
-                    out.push(seg(l[l.len() - 1], rt[rt.len() - 1], "railing-glass", lw, &stroke, None, greyed));
-                }
-                if s.kind == RailingKind::Perforated {
-                    polyline(out, &ax, "railing-perforated", lw * 0.6, &stroke, Some(&super::line_pattern::HIDDEN), greyed);
-                }
+            // Ganz über der Schnitthöhe: Strich-Punkt wie die übrigen Bauteile darüber (auch ohne eigenen Ansichtsbereich, wie
+            // die Stufen und Handläufe der Treppen); unter der Schnitthöhe gepunktet nur mit eigenem Bereich.
+            let dash = if zone == Zone::Above { Some(&super::view_range::ABOVE_DASH[..]) } else { range.restyle_dash(zone) };
+            if let Some(d) = dash {
+                super::view_range::restyle(out, from_part, d);
             }
-            _ => {
-                polyline(out, &ax, "railing-bars", lw, &stroke, None, greyed);
-                // Pfosten als kleine gefüllte Quadrate; bei kleinen Massstäben nicht mehr lesbar.
-                if c.a.scale <= 200.0 {
-                    for (pt, d) in railing::stations(&ax, &s).0 {
-                        let (n, h) = ([-d[1], d[0]], 0.015);
-                        let q = |a: f64, b: f64| v([pt[0] + d[0] * a + n[0] * b, pt[1] + d[1] * a + n[1] * b]);
-                        out.push(super::trees::poly(vec![q(-h, -h), q(h, -h), q(h, h), q(-h, h)], &stroke, &stroke, 0.0, None, greyed));
-                    }
-                }
-            }
-        }
-        // Handlauf ganz über der Schnitthöhe (Fuss geschnitten): gestrichelt neben der Achse, Konvention wie bei den Treppen
-        // (Handlauf über dem Schnitt gestrichelt, Strichmuster „verdeckt“, dünne Linie).
-        if zone == Zone::Cut && s.has_rail() && range.classify(s.top() - s.rail_h(), s.top()) == Zone::Above {
-            let (_, l, rt) = railing::strips(&ax, s.rail_w() / 2.0);
-            for side in [&l, &rt] {
-                polyline(out, side, "railing-handrail", lw * 0.6, &stroke, Some(&super::line_pattern::HIDDEN), greyed);
-            }
-        }
-        // Ganz über der Schnitthöhe: Strich-Punkt wie die übrigen Bauteile darüber (auch ohne eigenen Ansichtsbereich, wie die
-        // Stufen und Handläufe der Treppen); unter der Schnitthöhe gepunktet nur mit eigenem Bereich.
-        let dash = if zone == Zone::Above { Some(&super::view_range::ABOVE_DASH[..]) } else { range.restyle_dash(zone) };
-        if let Some(d) = dash {
-            super::view_range::restyle(out, from, d);
         }
         // [271] Umbaufilter: das Geländer in der Farbe seines Status (Bestand grau, Abbruch gelb gestrichelt, Neu rot).
         if let Some(st) = c.renovation().and_then(|rn| rn.styled.get(&r.id)) {
             crate::renovation::restyle_linework(out, from, st, true);
         }
+    }
+}
+
+/// Strichstärke, Farbe (Übersteuerung), Strichfarbe, ausgegraut, Klasse, Meter je mm Papier.
+type Pen<'a> = (f64, Option<&'a str>, &'a str, Option<bool>, Option<&'a crate::model::LayerCategory>, f64);
+
+/// Zeichen eines (Teil-)Zugs je Art (s. Modulkopf).
+fn draw_axis(c: &Ctx, r: &Railing, s: &railing::Spec, ax: &[[f64; 2]], closed: bool, zone: Zone, pen: Pen, out: &mut Vec<Primitive>) {
+    let p = c.p;
+    let (lw, color, stroke, greyed, category, mm) = pen;
+    match s.kind {
+        RailingKind::Solid => {
+            let (quads, l, rt) = railing::strips(ax, s.thickness / 2.0);
+            let (mut fill, mut hatch) = (color.or(category.map(|k| k.color.as_str())).unwrap_or(HATCH_PAPER).to_string(), no_hatch());
+            if zone != Zone::Cut {
+                fill = "none".into();
+            } else if let Some(k) = r.component_id.as_deref().filter(|s| !s.is_empty()).and_then(|id| p.component(id)) {
+                if let Some(h) = resolve_hatch(p, resolve_hatch_id(None, None, category, Some(&k.hatch_id)).unwrap_or(&k.hatch_id), None, resolve_foreground(k, None, category, None), None) {
+                    fill = resolve_background(k, None, category, None).unwrap_or(if h.pattern == HatchPattern::Solid { HATCH_INK } else { HATCH_PAPER }).to_string();
+                    hatch = h;
+                }
+            } else {
+                fill = HATCH_PAPER.to_string();
+            }
+            if zone == Zone::Cut && c.solid_cut() && category.is_some() {
+                fill = HATCH_INK.to_string();
+                hatch = no_hatch();
+            }
+            for q in quads {
+                let mut f = super::trees::poly(q.iter().map(|&q| v(q)).collect(), &fill, "none", 0.0, None, greyed);
+                if let Primitive::Polygon { hatch: h, .. } = &mut f {
+                    **h = hatch.clone();
+                }
+                out.push(f);
+            }
+            polyline(out, &l, "railing-solid", lw, stroke, None, greyed);
+            polyline(out, &rt, "railing-solid", lw, stroke, None, greyed);
+            if !closed {
+                out.push(seg(l[0], rt[0], "railing-solid", lw, stroke, None, greyed));
+                out.push(seg(l[l.len() - 1], rt[rt.len() - 1], "railing-solid", lw, stroke, None, greyed));
+            }
+        }
+        RailingKind::Glass | RailingKind::Perforated => {
+            // Mindestabstand der Doppellinie: 0.7 mm Papier.
+            let half = (s.thickness / 2.0).max(0.35 * mm);
+            let (_, l, rt) = railing::strips(ax, half);
+            polyline(out, &l, "railing-glass", lw, stroke, None, greyed);
+            polyline(out, &rt, "railing-glass", lw, stroke, None, greyed);
+            if !closed {
+                out.push(seg(l[0], rt[0], "railing-glass", lw, stroke, None, greyed));
+                out.push(seg(l[l.len() - 1], rt[rt.len() - 1], "railing-glass", lw, stroke, None, greyed));
+            }
+            if s.kind == RailingKind::Perforated {
+                polyline(out, ax, "railing-perforated", lw * 0.6, stroke, Some(&super::line_pattern::HIDDEN), greyed);
+            }
+        }
+        _ => polyline(out, ax, "railing-bars", lw, stroke, None, greyed),
     }
 }
 

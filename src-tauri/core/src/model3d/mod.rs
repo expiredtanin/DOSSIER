@@ -114,7 +114,8 @@ pub enum SlabSource {
     /// [141] Index in `Project::columns` (Stützen-Prisma, je Höhenabschnitt von [`column_pieces`]).
     Column { index: usize },
     /// [279] Index in `Project::railings` (Prisma je Teil, `railing::pieces`).
-    Railing { index: usize, fill: bool },
+    /// `fill`: Tafel mit dieser Füllung ([291] je Feld), `None` = Gestänge.
+    Railing { index: usize, fill: Option<RailingKind> },
     /// [280] Index in `Project::beams` (Träger-Prisma wie eine Stütze).
     Beam { index: usize },
 }

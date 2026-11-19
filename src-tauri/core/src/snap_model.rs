@@ -217,7 +217,7 @@ pub fn collect_model_at(p: &Project, level: &str, codes: &HashSet<String>, skip:
         if !vis_el(&r.id, &r.floor_id, &r.category_code) {
             continue;
         }
-        let (Some(ax), Some(sp)) = (crate::railing::axis(r), crate::railing::spec(p, r)) else { continue };
+        let (Some(ax), Some(sp)) = (crate::railing::axis_of(p, r), crate::railing::spec(p, r)) else { continue };
         segs.extend(ax.windows(2).map(|w| [w[0][0], w[0][1], w[1][0], w[1][1]]));
         if sp.kind != crate::model::RailingKind::Bars && sp.thickness >= 0.1 {
             let (_, l, rr) = crate::railing::strips(&ax, sp.thickness / 2.0);

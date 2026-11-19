@@ -1076,9 +1076,23 @@ fn tree_ops(p: &Project, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
 /// (Geländer), falls vorhanden, sonst die aktive. Art, Höhe (Vorgabe 1.00 m), Fusshöhe, Handlauf, Stababstand, Stabquerschnitt,
 /// Dicke und Bauteil aus den Werkzeug-Vorgaben; fehlende oder unsinnige Werte bleiben weg (Vorgaben aus `railing.rs`).
 /// `closed` mit mindestens drei Punkten schliesst den Zug.
+/// [291] Mit `bind: true` bindet der erste Punkt das Geländer an die nächste Treppenwange (Treppen dieses Geschosses) bzw.
+/// Deckenkante (alle Decken) innerhalb [`RAILING_BIND_TOL`]; die Achse ist dann eine Ableitung (`railing::path`), `points`
+/// trägt den aufgelösten Zug als Ersatz. Nichts in Reichweite: keine Op.
 fn railing_ops(p: &Project, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
     let mut pts: Vec<V> = pts_of(v, "pts").into_iter().filter(|q| q.0.is_finite() && q.1.is_finite()).collect();
     pts.dedup_by(|a, b| (a.0 - b.0).abs() < 1e-6 && (a.1 - b.1).abs() < 1e-6);
+    let mut bound: Vec<(&str, Value)> = Vec::new();
+    let mut floor = ctx.level.to_string();
+    if v.get("bind").and_then(Value::as_bool) == Some(true) {
+        let Some(&at) = pts.first() else { return Vec::new() };
+        let Some((b, axis, fl)) = railing_bind_target(p, at, ctx.level) else { return Vec::new() };
+        bound = b;
+        pts = axis;
+        if let Some(fl) = fl {
+            floor = fl;
+        }
+    }
     if pts.len() < 2 {
         return Vec::new();
     }
@@ -1087,12 +1101,13 @@ fn railing_ops(p: &Project, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
     let mut f = vec![
         ("id", s(&ids.next("railing"))),
         ("type", s("railing")),
-        ("floorId", s(ctx.level)),
+        ("floorId", s(&floor)),
         ("categoryCode", category_or(p, crate::railing::CATEGORY, ctx)),
         ("points", pvs(&pts)),
         ("height", js_num(pos("height").unwrap_or(crate::railing::DEFAULT_HEIGHT))),
         ("kind", s(kind)),
     ];
+    f.extend(bound);
     if v.get("closed").and_then(Value::as_bool) == Some(true) && pts.len() >= 3 {
         f.push(("closed", Value::Bool(true)));
     }
@@ -1112,6 +1127,42 @@ fn railing_ops(p: &Project, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
         f.push(("componentId", s(comp)));
     }
     add_op("railings", vec![obj(f)])
+}
+
+/// [291] Fangweite (m) für die Option an Treppe/Kante: so nah muss der Klick an einer Treppenwange oder Deckenkante liegen.
+const RAILING_BIND_TOL: f64 = 0.75;
+
+/// [291] Nächste Treppenwange (Treppen auf `level`) oder Deckenkante zum Punkt `at`: Felder der Bindung, Ersatz-Achse
+/// und (bei der Treppe) deren Geschoss.
+type BindTarget = (Vec<(&'static str, Value)>, Vec<V>, Option<String>);
+fn railing_bind_target(p: &Project, at: V, level: &str) -> Option<BindTarget> {
+    let mut best: Option<(f64, BindTarget)> = None;
+    let mut take = |d: f64, t: BindTarget| {
+        if d <= RAILING_BIND_TOL && best.as_ref().is_none_or(|x| d < x.0) {
+            best = Some((d, t));
+        }
+    };
+    let dist = |pts: &[V]| pts.windows(2).map(|w| point_segment_distance(at, w[0], w[1])).fold(f64::INFINITY, f64::min);
+    for st in p.stairs.as_deref().unwrap_or(&[]).iter().filter(|s| s.floor_id == level) {
+        for (side, name) in [(crate::model::RailingSide::Left, "left"), (crate::model::RailingSide::Right, "right")] {
+            let Some(q) = crate::railing::stair_side_path(p, st, Some(side)) else { continue };
+            let axis: Vec<V> = q.iter().map(|v| (v[0], v[1])).collect();
+            take(dist(&axis), (vec![("stairId", s(&st.id)), ("stairSide", s(name))], axis, Some(st.floor_id.clone())));
+        }
+    }
+    for c in p.ceilings.as_deref().unwrap_or(&[]) {
+        let n = c.outline.len();
+        if n < 3 {
+            continue;
+        }
+        for i in 0..n {
+            let (a, b) = (&c.outline[i], &c.outline[(i + 1) % n]);
+            let d = point_segment_distance(at, (a.x, a.y), (b.x, b.y));
+            let Some(axis) = crate::railing::ceiling_edge_path(c, i as u32, 1, crate::railing::EDGE_INSET) else { continue };
+            take(d, (vec![("ceilingId", s(&c.id)), ("edgeIndex", js_num(i as f64))], axis.iter().map(|q| (q[0], q[1])).collect(), None));
+        }
+    }
+    best.map(|(_, t)| t)
 }
 
 /// [149] „Kreise in Bäume umwandeln": die gewählten Kreise (`ids`), sonst alle Kreise der Baum-Ebene auf der

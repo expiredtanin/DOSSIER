@@ -384,7 +384,7 @@ pub fn stair_parts(one: &Project, stair: &Stair, base: f64) -> StairParts {
     let rail_meshes = model3d::emit_stair_handrails(one);
     let rail = (!rail_meshes.is_empty()).then(|| {
         let (positions, indices) = concat(&rail_meshes);
-        let sides = if one.stair_type(stair).and_then(|t| t.railing) == Some(StairTypeRailing::Beide) { 2.0 } else { 1.0 };
+        let sides = if crate::railing::stair_code(one, stair) == 3 { 2.0 } else { 1.0 };
         Rail { mesh: ifc_mesh(positions, &indices, base), quantities: railing_quantities(walk_length(stair, rise) * sides, section_area) }
     });
     let guard_meshes = model3d::stair_guard_meshes(one);

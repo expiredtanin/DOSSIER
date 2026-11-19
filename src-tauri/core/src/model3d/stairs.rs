@@ -41,12 +41,8 @@ pub(super) fn stair_input<'a>(p: &'a Project, wanted: impl Fn(&Stair, Option<&St
         buf.push(st.map_or(0.04, |t| t.tread_thickness));
         buf.push(st.and_then(|t| t.nosing).unwrap_or(0.0));
         buf.push(if st.is_some_and(|t| t.closed_risers) { 1.0 } else { 0.0 });
-        buf.push(match st.and_then(|t| t.railing) {
-            Some(StairTypeRailing::Links) => 1.0,
-            Some(StairTypeRailing::Rechts) => 2.0,
-            Some(StairTypeRailing::Beide) => 3.0,
-            _ => 0.0,
-        });
+        // [291] Seiten mit gebundenem Geländer ohne eigenen Handlauf (das Geländer zeichnet sich selbst).
+        buf.push(crate::railing::stair_code(p, s) as f64);
         buf.push(s.center_column.filter(|r| r.is_finite() && *r > 0.0).unwrap_or(0.0));
         buf.extend(s.rail_params());
     }

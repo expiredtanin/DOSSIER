@@ -3608,6 +3608,46 @@ export type Railing = {
   handrail?: boolean;
   /** Handlauf: Durchmesser (m, Vorgabe 0.04). */
   handrailSize?: number;
+  /** [291] Handlauf: Profil (rechteckig = Vorgabe, rund). */
+  handrailProfile?: RailingProfile;
+  /** [291] Handlauf: Höhe der Oberkante über dem Fuss (m); fehlt = `height` (Handlauf obenauf). */
+  handrailHeight?: number;
+  /**
+   * [291] Pfosten setzen (an Ecken und Enden automatisch, dazwischen höchstens `postSpacing`); fehlt = bei Stäben ja, sonst nein.
+   */
+  posts?: boolean;
+  /**
+   * [291] Pfosten: grösster Achsabstand (m, Vorgabe 1.20); die Felder einer Strecke werden gleich lang.
+   */
+  postSpacing?: number;
+  /** [291] Pfosten: Querschnitt (Kantenlänge, m, Vorgabe 0.03). */
+  postSize?: number;
+  /**
+   * [291] Anzahl Zwischenholme (waagrechte Stäbe zwischen Fuss und Handlauf, gleich verteilt; Vorgabe 0).
+   */
+  midRails?: number;
+  /**
+   * [291] Füllung je Feld (Feld = Abschnitt zwischen zwei Pfosten, längs der Achse ab 0 gezählt); fehlt ein Feld, gilt `kind`.
+   */
+  fields?: Array<RailingField>;
+  /**
+   * [291] Gebunden an eine Treppe: die Achse folgt der Treppenwange `stairSide` und steigt mit dem Lauf (Höhe
+   * lotrecht über der Stufenkante); `points` dient dann nur als Ersatz, falls die Treppe fehlt.
+   */
+  stairId?: string;
+  /** [291] Seite der Treppe in Laufrichtung (Vorgabe links). */
+  stairSide?: RailingSide;
+  /**
+   * [291] Gebunden an eine Deckenkante: die Achse folgt den Kanten `edgeIndex` … `edgeIndex + edgeCount − 1` des
+   * Deckenumrisses, um `edgeInset` nach innen versetzt; der Fuss steht auf der Deckenoberkante (+ `baseOffset`).
+   */
+  ceilingId?: string;
+  /** [291] Erste Kante (Kante i läuft von outline[i] zu outline[i+1]). */
+  edgeIndex?: number;
+  /** [291] Anzahl aufeinanderfolgender Kanten (Vorgabe 1; alle Kanten = geschlossen ringsum). */
+  edgeCount?: number;
+  /** [291] Abstand der Achse von der Deckenkante nach innen (m, Vorgabe 0.05). */
+  edgeInset?: number;
   /** Optionales Bauteil (Component) für Füllung/Farbe, v. a. der massiven Brüstung. */
   componentId?: string;
   /** Optionale Übersteuerung der Strichfarbe; sonst gilt die Kategorie-Farbe. */
@@ -3618,11 +3658,25 @@ export type Railing = {
   designOption?: DesignOptionRef;
 };
 
+/** [291] Füllung eines Feldes (zwischen zwei Pfosten) abweichend von `Railing.kind`. */
+export type RailingField = {
+  /** Feld-Nummer längs der Achse (ab 0). */
+  index: number;
+  /** Füllung dieses Feldes. */
+  kind: RailingKind;
+};
+
 /**
  * Art der Füllung eines Geländers ([279]): Stäbe (Rundstahl/Flachstahl, lotrecht), Glas (Ganzglas-Brüstung),
  * massive Brüstung (Mauer/Beton) oder Lochblech.
  */
 export type RailingKind = "bars" | "glass" | "solid" | "perforated";
+
+/** [291] Profil des Handlaufs. */
+export type RailingProfile = "rect" | "round";
+
+/** [291] Seite einer Treppe in Laufrichtung (gebundenes Geländer). */
+export type RailingSide = "left" | "right";
 
 /**
  * Referenzlinien-Regel: setzt die `referenceLine`-Eigenschaft bei passenden
