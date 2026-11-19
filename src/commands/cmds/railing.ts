@@ -4,7 +4,9 @@
 //   2) „Nächster Punkt ( Schliessen Zurück Art ):" → Punkt … Enter beendet (offen, ≥ 2 Punkte), „Schliessen" (C) oder
 //      ein Klick auf den Startpunkt schliesst den Zug (≥ 3 Punkte, Treppenauge/Galerie ringsum).
 // Eine getippte Zahl setzt die Höhe (Vorgabe 1.00 m, SIA 358); sie bleibt über Aufrufe. Optionen (Klick wechselt): Art
-// Stäbe/Glas/Brüstung/Lochblech. Fusshöhe, Handlauf, Stababstand, Dicke danach in der Objekt-Info.
+// Stäbe/Glas/Brüstung/Lochblech; [291] „an Treppe/Kante“: der nächste Klick auf eine Treppe (nächste Wange) oder eine
+// Deckenkante legt ein gebundenes Geländer an, das seinem Träger folgt (Auflösung im Kern, `railing::path`). Fusshöhe,
+// Handlauf, Pfosten, Zwischenholme, Stababstand, Dicke danach in der Objekt-Info.
 //
 // Die Ops baut der Kern (`cmd_create.rs`, Befehl „railing"): Ebene „41" (Geländer), falls vorhanden, sonst die aktive.
 //
@@ -23,7 +25,7 @@ const CLOSE_HIT = 0.08;
 const KINDS: RailingKind[] = ["bars", "glass", "solid", "perforated"];
 
 /** Vorgaben des Werkzeugs (modulweit, leben über Befehls-Instanzen hinweg). */
-export const railingDefaults: { kind: RailingKind; height: number } = { kind: "bars", height: 1.0 };
+export const railingDefaults: { kind: RailingKind; height: number; bind: boolean } = { kind: "bars", height: 1.0, bind: false };
 
 const next = <T>(list: readonly T[], v: T): T => list[(list.indexOf(v) + 1) % list.length];
 
@@ -52,6 +54,9 @@ export const railingReq = (pts: Vec2[], closed: boolean) => ({
   closed,
   pts: pts.map(xy),
 });
+
+/** [291] Anfrage „an Treppe/Kante“: der Kern sucht die nächste Treppenwange bzw. Deckenkante zum Klick. */
+export const railingBindReq = (pt: Vec2) => ({ cmd: "railing", kind: railingDefaults.kind, height: railingDefaults.height, bind: true, pts: [xy(pt)] });
 
 const RAILING_DONE = { key: "cmd.railing.done", kind: "info" } as const;
 const appendRailing = (pts: Vec2[], closed: boolean, ctx: CommandContext) => createMutation(ctx, railingReq(pts, closed));
@@ -91,12 +96,13 @@ export const railingCommand: Command = {
   labelKey: "cmd.gelaender.label",
   // Geländer stehen auf Geschossen — wie die Wand nur dort aktiv.
   floorOnly: true,
-  prompt: (s) => ((s as RailState).phase === "next" ? "cmd.gelaender.next" : "cmd.gelaender.start"),
+  prompt: (s) => ((s as RailState).phase === "next" ? "cmd.gelaender.next" : railingDefaults.bind ? "cmd.gelaender.pickTarget" : "cmd.gelaender.start"),
   accepts: (s) => ((s as RailState).phase === "next" ? ["point", "number", "option"] : ["point", "number", "option"]),
   options: (s): CmdOption[] => {
     const ps = s as RailState;
     const kind: CmdOption = { id: "kind", labelKey: "cmd.gelaender.kind", value: t(`objinfo.railing.kind.${railingDefaults.kind}` as TranslationKey) };
-    if (ps.phase !== "next") return [kind];
+    const bind: CmdOption = { id: "bind", labelKey: "cmd.gelaender.bind", value: t(railingDefaults.bind ? "cmd.gelaender.bindOn" : "cmd.gelaender.bindOff") };
+    if (ps.phase !== "next") return [kind, bind];
     return ps.points.length >= 3 ? [CLOSE, UNDO, kind] : [UNDO, kind];
   },
   init: (): RailIdle => ({ phase: "start", lastPoint: null }),
@@ -116,6 +122,10 @@ export const railingCommand: Command = {
         railingDefaults.kind = next(KINDS, railingDefaults.kind);
         return [s, { draft: draft() }];
       }
+      if (input.id === "bind" && s.phase !== "next") {
+        railingDefaults.bind = !railingDefaults.bind;
+        return [s, { draft: null }];
+      }
       if (s.phase !== "next") return [s, { draft: null }];
       if (input.id === "undo") {
         const pts = s.points.slice(0, -1);
@@ -132,6 +142,10 @@ export const railingCommand: Command = {
 
     if (input.kind !== "point") return [s, { draft: draft() }];
     const pt = input.point;
+    // [291] An Treppe/Kante: ein Klick genügt, der Kern bindet an die nächste Wange bzw. Deckenkante.
+    if (s.phase !== "next" && railingDefaults.bind) {
+      return [{ phase: "start", lastPoint: null } as RailIdle, { draft: null, done: true, commit: createMutation(ctx, railingBindReq(pt)), notice: RAILING_DONE }];
+    }
     if (s.phase !== "next") {
       const ns: RailDrawing = { phase: "next", points: [pt], cursor: pt, lastPoint: pt };
       return [ns, { draft: railingDraft([pt], pt) }];

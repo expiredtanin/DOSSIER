@@ -374,8 +374,8 @@ pub(crate) fn model_view_faces(p: &Project, vis: &Visibility, view: &dyn Fn([f64
                 Kind::Body => (solids.get(i).map(|s| s.id.clone()), false, false, false),
                 Kind::Mesh => (mrefs.get(i).map(|m| m.mesh.id.clone()), false, false, false),
             };
-            let glass = railing && matches!(kind, Kind::Slab) && matches!(slabs.get(i), Some(SlabOwner::Railing(r, true)) if r.kind == RailingKind::Glass);
-            let perforated = railing && matches!(kind, Kind::Slab) && matches!(slabs.get(i), Some(SlabOwner::Railing(r, true)) if r.kind == RailingKind::Perforated);
+            let glass = railing && matches!(kind, Kind::Slab) && matches!(slabs.get(i), Some(SlabOwner::Railing(_, Some(RailingKind::Glass))));
+            let perforated = railing && matches!(kind, Kind::Slab) && matches!(slabs.get(i), Some(SlabOwner::Railing(_, Some(RailingKind::Perforated))));
             OwnerRef { kind, id, stair, column, railing, glass, perforated }
         })
         .collect();

@@ -129,10 +129,10 @@ pub(super) fn collect_column_faces(p: &Project, frame: &[f64; 9]) -> Vec<Face> {
 pub(super) fn collect_railing_faces(p: &Project, frame: &[f64; 9]) -> Vec<Face> {
     let slabs = model3d::railing_slabs(p);
     // Glastafeln (Glasgeländer, Teil Tafel) getrennt: durchscheinend, in der Ansicht wie Fensterglas hell.
-    let is_glass = |s: &model3d::RSlab| matches!(s.source, model3d::SlabSource::Railing { index, fill: true } if p.railings.as_deref().and_then(|r| r.get(index)).is_some_and(|r| r.kind == RailingKind::Glass));
+    let is_glass = |s: &model3d::RSlab| matches!(s.source, model3d::SlabSource::Railing { fill: Some(RailingKind::Glass), .. });
     let (glass, rest): (Vec<_>, Vec<_>) = slabs.into_iter().partition(is_glass);
     // Lochblechtafeln: Lochmuster (Punktschraffur der Schraffur-Bibliothek, `super::super::railings::perforation_hatch`).
-    let is_perf = |s: &model3d::RSlab| matches!(s.source, model3d::SlabSource::Railing { index, fill: true } if p.railings.as_deref().and_then(|r| r.get(index)).is_some_and(|r| r.kind == RailingKind::Perforated));
+    let is_perf = |s: &model3d::RSlab| matches!(s.source, model3d::SlabSource::Railing { fill: Some(RailingKind::Perforated), .. });
     let (perf, rest): (Vec<_>, Vec<_>) = rest.into_iter().partition(is_perf);
     let mut faces = project_faces(frame, &[], &rest, &[]);
     faces.iter_mut().for_each(|f| f.role = Role::Railing);

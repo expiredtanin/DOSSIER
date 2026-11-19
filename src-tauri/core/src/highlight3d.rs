@@ -297,13 +297,12 @@ pub fn selection_highlight_lines(p: &Project, a: &Args) -> Result<Vec<f32>, Stri
     let railings = set(&a.railings);
     if !railings.is_empty() {
         for r in p.railings.as_deref().unwrap_or(&[]) {
-            let (Some(s), Some(ax)) = (crate::railing::spec(p, r), crate::railing::axis(r)) else { continue };
+            let Some(s) = crate::railing::spec(p, r) else { continue };
             if railings.contains(r.id.as_str()) {
                 let n = out.v.len();
-                // Umriss der Achse mit Handlaufbreite, Fuss bis Oberkante.
-                let (quads, _, _) = crate::railing::strips(&ax, s.rail_w().max(s.thickness) / 2.0);
-                for q in quads {
-                    out.prism_edges(&q, s.z0, s.top());
+                // Umriss der Achse mit Handlaufbreite, Fuss bis Oberkante ([291] auf Treppen geneigt).
+                for (q, z0, z1, slope) in crate::railing::hull(p, r, s.rail_w().max(s.thickness) / 2.0) {
+                    out.prism_edges_sloped(&q, z0, z1, slope.as_ref());
                 }
                 lift(&mut out, n, &r.id);
             }

@@ -5773,6 +5773,47 @@ pub enum RailingKind {
     Unknown,
 }
 
+/// [291] Profil des Handlaufs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+pub enum RailingProfile {
+    /// Rechteckig (Vorgabe; Breite = Höhe = `handrailSize`).
+    #[default]
+    #[serde(rename = "rect")]
+    Rect,
+    /// Rund (Durchmesser `handrailSize`; Körper als Achteck-Stufen angenähert).
+    #[serde(rename = "round")]
+    Round,
+    #[serde(other)]
+    #[ts(skip)]
+    Unknown,
+}
+
+/// [291] Seite einer Treppe in Laufrichtung (gebundenes Geländer).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+pub enum RailingSide {
+    #[default]
+    #[serde(rename = "left")]
+    Left,
+    #[serde(rename = "right")]
+    Right,
+    #[serde(other)]
+    #[ts(skip)]
+    Unknown,
+}
+
+/// [291] Füllung eines Feldes (zwischen zwei Pfosten) abweichend von `Railing.kind`.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct RailingField {
+    /// Feld-Nummer längs der Achse (ab 0).
+    pub index: u32,
+    /// Füllung dieses Feldes.
+    pub kind: RailingKind,
+    #[serde(flatten)]
+    #[ts(skip)]
+    pub extra: Extra,
+}
+
 /// Ein Geländer ([279]) — eigenes Bauteil für Balkon, Galerie, Treppenauge und Terrasse (Absturzsicherung,
 /// Vorgabe 1.00 m nach SIA 358): Polylinie `points` auf einem Geschoss, Höhe, Art der Füllung, Handlauf. Grundriss
 /// (Linie bzw. Doppellinie je Art), Schnitt/Ansicht (Stäbe, Glasfläche, Brüstung), 3D, IFC (`IfcRailing`).
@@ -5831,6 +5872,60 @@ pub struct Railing {
     #[serde(rename = "handrailSize", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub handrail_size: Option<f64>,
+    /// [291] Handlauf: Profil (rechteckig = Vorgabe, rund).
+    #[serde(rename = "handrailProfile", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub handrail_profile: Option<RailingProfile>,
+    /// [291] Handlauf: Höhe der Oberkante über dem Fuss (m); fehlt = `height` (Handlauf obenauf).
+    #[serde(rename = "handrailHeight", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub handrail_height: Option<f64>,
+    /// [291] Pfosten setzen (an Ecken und Enden automatisch, dazwischen höchstens `postSpacing`); fehlt = bei Stäben ja, sonst nein.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub posts: Option<bool>,
+    /// [291] Pfosten: grösster Achsabstand (m, Vorgabe 1.20); die Felder einer Strecke werden gleich lang.
+    #[serde(rename = "postSpacing", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub post_spacing: Option<f64>,
+    /// [291] Pfosten: Querschnitt (Kantenlänge, m, Vorgabe 0.03).
+    #[serde(rename = "postSize", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub post_size: Option<f64>,
+    /// [291] Anzahl Zwischenholme (waagrechte Stäbe zwischen Fuss und Handlauf, gleich verteilt; Vorgabe 0).
+    #[serde(rename = "midRails", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub mid_rails: Option<u32>,
+    /// [291] Füllung je Feld (Feld = Abschnitt zwischen zwei Pfosten, längs der Achse ab 0 gezählt); fehlt ein Feld, gilt `kind`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub fields: Option<Vec<RailingField>>,
+    /// [291] Gebunden an eine Treppe: die Achse folgt der Treppenwange `stairSide` und steigt mit dem Lauf (Höhe
+    /// lotrecht über der Stufenkante); `points` dient dann nur als Ersatz, falls die Treppe fehlt.
+    #[serde(rename = "stairId", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub stair_id: Option<String>,
+    /// [291] Seite der Treppe in Laufrichtung (Vorgabe links).
+    #[serde(rename = "stairSide", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub stair_side: Option<RailingSide>,
+    /// [291] Gebunden an eine Deckenkante: die Achse folgt den Kanten `edgeIndex` … `edgeIndex + edgeCount − 1` des
+    /// Deckenumrisses, um `edgeInset` nach innen versetzt; der Fuss steht auf der Deckenoberkante (+ `baseOffset`).
+    #[serde(rename = "ceilingId", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub ceiling_id: Option<String>,
+    /// [291] Erste Kante (Kante i läuft von outline[i] zu outline[i+1]).
+    #[serde(rename = "edgeIndex", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub edge_index: Option<u32>,
+    /// [291] Anzahl aufeinanderfolgender Kanten (Vorgabe 1; alle Kanten = geschlossen ringsum).
+    #[serde(rename = "edgeCount", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub edge_count: Option<u32>,
+    /// [291] Abstand der Achse von der Deckenkante nach innen (m, Vorgabe 0.05).
+    #[serde(rename = "edgeInset", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub edge_inset: Option<f64>,
     /// Optionales Bauteil (Component) für Füllung/Farbe, v. a. der massiven Brüstung.
     #[serde(rename = "componentId", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]

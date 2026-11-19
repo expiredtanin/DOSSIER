@@ -12,12 +12,17 @@ export interface RailingInfo {
   baseZ: number;
   topZ: number;
   height: number;
-  /** Stäbe und Pfosten (nur Art „Stäbe"). */
+  /** Stäbe und (sichtbare) Pfosten. */
   bars: number;
   posts: number;
   /** Ansichtsfläche Länge × Höhe (m²). */
   area: number;
   closed: boolean;
+  /** [291] Zahl der Felder (zwischen zwei Pfosten) und Bindung der Achse. */
+  fields: number;
+  bound: "stair" | "edge" | null;
+  /** [291] Aufgelöste Achse (gebunden: aus Treppe bzw. Decke abgeleitet). */
+  axis: [number, number][];
 }
 
 /** Kennzahlen eines Geländers; `null` bei unbekannter Id oder unsinnigen Massen. */

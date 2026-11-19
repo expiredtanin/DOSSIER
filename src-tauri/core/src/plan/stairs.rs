@@ -29,14 +29,9 @@ fn v2(x: f64, y: f64) -> Vec2 {
     Vec2 { x, y }
 }
 
-/// Geländer-Code des Treppentyps (0 keins, 1 links, 2 rechts, 3 beide).
+/// Geländer-Code des Treppentyps (0 keins, 1 links, 2 rechts, 3 beide); [291] ohne Seiten mit gebundenem Geländer.
 fn railing_code(p: &Project, s: &Stair) -> u8 {
-    match p.stair_type(s).and_then(|t| t.railing) {
-        Some(StairTypeRailing::Links) => 1,
-        Some(StairTypeRailing::Rechts) => 2,
-        Some(StairTypeRailing::Beide) => 3,
-        _ => 0,
-    }
+    crate::railing::stair_code(p, s)
 }
 
 fn stair_line(a: Vec2, b: Vec2, cls: &str, weight_mm: f64, dash: Option<Option<Vec<f64>>>, stroke: &str, greyed: Option<bool>, id: &str) -> Primitive {
