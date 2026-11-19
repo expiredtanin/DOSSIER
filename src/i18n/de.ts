@@ -646,7 +646,7 @@ export const de = {
   "objinfo.wall.refLine.center": "Mitte",
   "objinfo.wall.refLine.right": "Innen (rechts)",
   "objinfo.wall.refLine.joint": "Fuge",
-  "objinfo.wall.sliceTermination": "An Decke enden",
+  "objinfo.wall.sliceTermination": "Deckenanschluss (Schnitt)",
   "objinfo.isExternal": "Aussenbauteil",
   "objinfo.loadBearing": "Tragend",
   "objinfo.wall.sliceTermination.both": "Aus",
