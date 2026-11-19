@@ -40,8 +40,10 @@ pub(crate) use cull::fascia_quads;
 const EDGE_INK: &str = "#2b3039";
 const EDGE_MM: f64 = 0.13;
 /// [140] Silhouette (Umriss aller Bauteile zusammen) mittelstark: hebt den Baukörper von Details (0.13) ab;
-/// Terrainlinie kräftig ([`GROUND_MM`]).
-const SILHOUETTE_MM: f64 = 0.18;
+/// Terrainlinie kräftig ([`GROUND_MM`]). [300] 0.25 statt 0.18: bei 1:100 war der Unterschied zu 0.13 nicht zu sehen.
+const SILHOUETTE_MM: f64 = 0.25;
+/// [300] Kanten von Kontext-Netzen (Nachbarn, Umgebungsklassen) feiner als Details des eigenen Hauses.
+const CONTEXT_MM: f64 = 0.09;
 /// [140] Abstand (m), bis zu dem eine Kante als Teil der Silhouette gilt.
 const SILHOUETTE_TOL: f64 = 2e-3;
 const FRAME_MM: f64 = 0.13;
@@ -884,7 +886,9 @@ pub fn elevation_primitives_ren(p: &Project, level: &LevelSpec, shadows: bool, m
     });
     let mut prims: Vec<Primitive> = items.into_iter().map(|it| it.prim).collect();
     // Exakt sichtbare Kanten liegen über allen Füllungen (Füllungen: sichtbare Teile, `visible_fills`).
-    let silhouette = Silhouette::of(&faces);
+    // [300] Silhouette nur des eigenen Hauses: ein Nachbar dahinter (Kontext) machte dessen Umriss zur inneren Kante (0.13).
+    let own: Vec<Face> = faces.iter().filter(|f| !(f.role == Role::Mesh && category(f).is_some_and(crate::import_context::is_context_class))).cloned().collect();
+    let silhouette = Silhouette::of(&own);
     for e in &edges {
         acc.add(e.a[0], e.a[1]);
         acc.add(e.b[0], e.b[1]);
@@ -899,6 +903,9 @@ pub fn elevation_primitives_ren(p: &Project, level: &LevelSpec, shadows: bool, m
                 *dash = Some(Some(HIDDEN_DASH.to_vec()));
             }
             prims.push(l);
+        } else if e.owner > 0 && faces.get(e.owner as usize - 1).is_some_and(|f| f.role == Role::Mesh && category(f).is_some_and(crate::import_context::is_context_class)) {
+            let l = line(v2(e.a[0], e.a[1]), v2(e.b[0], e.b[1]), "elevation-outline", CONTEXT_MM, EDGE_INK);
+            prims.push(match ov { Some(o) => o.restyle(l), None => l });
         } else if silhouette.on(e.a, e.b) {
             let l = line(v2(e.a[0], e.a[1]), v2(e.b[0], e.b[1]), "elevation-outline", SILHOUETTE_MM, EDGE_INK);
             prims.push(match ov { Some(o) => o.restyle(l), None => l });

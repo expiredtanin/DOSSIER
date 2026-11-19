@@ -1287,3 +1287,46 @@ fn fenster_in_bogenwand_wie_im_3d() {
         assert!((gap - mid).abs() < 0.01, "{bulge:?}/{reveal}: Flügelteilung bei {gap}, auf dem Bogen/der Sehne {mid}");
     }
 }
+
+/// [300] Linienhierarchie der Ansicht: Silhouette des Hauses deutlich kräftiger als Details (0.13), Nachbarn (Kontext)
+/// feiner als Details — sonst steht das Nachbarhaus gleich stark wie das eigene.
+#[test]
+fn ansicht_haus_kraeftiger_als_nachbar() {
+    use crate::mesh_view::tests::cube;
+    assert!(SILHOUETTE_MM >= EDGE_MM + 0.1, "Silhouette {SILHOUETTE_MM} zu nah an {EDGE_MM}");
+    let (positions, indices) = cube(6.0, 8.0, 2.0, 3.0, 0.0, 2.0);
+    let nb = ContextObject::ImportedMesh(ImportedMesh { id: "nb".into(), name: "nb".into(), category_code: "12".into(), positions, indices, ..Default::default() });
+    // Ein grösserer Nachbar HINTER dem Haus darf dessen Umriss nicht zu einer inneren Kante machen.
+    let (positions, indices) = cube(-1.0, 6.0, 5.0, 6.0, 0.0, 6.0);
+    let bg = ContextObject::ImportedMesh(ImportedMesh { id: "bg".into(), name: "bg".into(), category_code: "12".into(), positions, indices, ..Default::default() });
+    let level = LevelSpec { kind: "elevation".into(), line: Some([Vec2 { x: -5.0, y: -1.0 }, Vec2 { x: 12.0, y: -1.0 }]), direction_sign: Some(1.0), ..Default::default() };
+    let p = Project {
+        context: Some(vec![nb, bg]),
+        walls: vec![Wall { id: "w".into(), start: Vec2 { x: 0.0, y: 0.0 }, end: Vec2 { x: 4.0, y: 0.0 }, height: 3.0, ..Default::default() }],
+        ..Default::default()
+    };
+    let (prims, _) = elevation_primitives(&p, &level, false, false, &Visibility::default(), 100.0).unwrap().unwrap();
+    // u = x + 5: Haus 5…9, Nachbar 11…13.
+    let w_of = |lo: f64, hi: f64| -> Vec<f64> {
+        prims
+            .iter()
+            .filter_map(|q| match q {
+                Primitive::Line { a, b, cls, weight_mm, .. } if cls == "elevation-outline" && a.x.min(b.x) > lo && a.x.max(b.x) < hi => Some(*weight_mm),
+                _ => None,
+            })
+            .collect()
+    };
+    let house = w_of(4.9, 9.1);
+    let neighbour = w_of(10.9, 13.1);
+    assert!(!house.is_empty() && !neighbour.is_empty(), "{house:?} {neighbour:?}");
+    assert!(house.iter().any(|&w| w >= EDGE_MM + 0.1), "Haus: {house:?}");
+    let top: Vec<f64> = prims
+        .iter()
+        .filter_map(|q| match q {
+            Primitive::Line { a, b, cls, weight_mm, .. } if cls == "elevation-outline" && (a.y - 3.0).abs() < 1e-6 && (b.y - 3.0).abs() < 1e-6 && a.x.min(b.x) > 4.9 && a.x.max(b.x) < 9.1 => Some(*weight_mm),
+            _ => None,
+        })
+        .collect();
+    assert!(!top.is_empty() && top.iter().all(|&w| w >= EDGE_MM + 0.1), "Oberkante des Hauses (Nachbar dahinter): {top:?}");
+    assert!(neighbour.iter().all(|&w| w < EDGE_MM), "Nachbar: {neighbour:?}");
+}

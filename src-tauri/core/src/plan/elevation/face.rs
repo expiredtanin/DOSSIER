@@ -25,6 +25,7 @@ impl Role {
     }
 }
 
+#[derive(Clone)]
 pub(super) struct Face {
     pub(super) pts: Vec<Pt>,
     /// Tiefe je Ecke ([G4]).

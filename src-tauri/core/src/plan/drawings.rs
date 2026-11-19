@@ -33,7 +33,8 @@ const DIM_TEXT_HEIGHT_MM: f64 = 2.5;
 // Höhenkote (SIA 400 B.5.4), fixe Modell-Meter.
 const KOTE_TRI_SIZE_M: f64 = 0.15;
 const KOTE_TRI_HALF_W_M: f64 = KOTE_TRI_SIZE_M * 0.6;
-const KOTE_TEXT_HEIGHT_M: f64 = 0.2;
+// [300] 0.25 (2.5 mm bei 1:100) wie Masszahlen und Raumstempel, vorher 0.2 (kleiner als jede andere Beschriftung).
+const KOTE_TEXT_HEIGHT_M: f64 = 0.25;
 const KOTE_TEXT_GAP_M: f64 = 0.08;
 
 // Detail-/Schnitt-Verweis und Punktmarke, fixe Modell-Meter.
@@ -3593,7 +3594,7 @@ mod tests {
             assert!(!hs.is_empty());
             for h in &hs {
                 let paper_mm = h / scale * 1000.0;
-                assert!((paper_mm - 2.0).abs() < 1e-9, "1:{scale}: {paper_mm} mm");
+                assert!((paper_mm - 2.5).abs() < 1e-9, "1:{scale}: {paper_mm} mm");
             }
             let tri = out.iter().find_map(|q| if let Primitive::Polygon { pts, .. } = q { Some(pts[0].x) } else { None });
             assert_eq!(tri, Some(-1.2 * scale / 100.0), "1:{scale}");
